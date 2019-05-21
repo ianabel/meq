@@ -72,6 +72,13 @@ GSInverter(Mesh *meshPtr, unsigned int order, RealFunc fRHS ) :
 
 	Array<int> const & GetOffsets() { return bOffsets; };
 
+	void SetBCs( Coefficient& coeff )
+	{
+		BoundaryConditions.SetSpace( M_space );
+		Array<int> boundary( mesh->bdr_attributes.Max() );
+		boundary = 1; // The entire boundary is dirichlet
+		BoundaryConditions.ProjectBdrCoefficient( coeff );
+	}
 	// Actually solve the problem:
 	// which in this case doesn't depend on the input vector
 	// and store in the Vector y

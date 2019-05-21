@@ -22,6 +22,8 @@ class GSInverter : public mfem::Operator
 
 		RealFunc RHS_ref;
 
+		mfem::GridFunction BoundaryConditions;
+
 		mfem::Array<int> bOffsets;
 		static double Rinv( const mfem::Vector& rz_pt ) { return 1.0/rz_pt( 0 );};
 	public:
