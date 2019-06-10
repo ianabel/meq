@@ -12,6 +12,8 @@
  */
 
 #include "mfem.hpp"
+#include "GSInverter.hpp"
+
 #include <fstream>
 #include <iostream>
 #include <algorithm>
@@ -37,19 +39,19 @@ class Coil {
 			Z_u = z + h/2;
 		};
 
-		bool Contains( mfem::Vector const& pt ) inline const
+		bool inline Contains( mfem::Vector const& pt ) const
 		{
 			return ( ( pt( 0 ) >= R_l ) && ( pt( 0 ) <= R_u ) && ( pt( 1 ) >= Z_l ) && ( pt( 1 ) <= Z_u ) );
 		}
 
 		~Coil() {};
-}
+};
 
 class Jtor {
 	protected:
 		std::vector<Coil> Coils;
 	public:
-		Jtor() {Coils.clear()};
+		Jtor() {Coils.clear();};
 		~Jtor() {};
 		void AddCoil( double R, double z, double h, double w, double J ) { Coils.emplace_back( R, z, h, w, J );};
 
@@ -60,6 +62,7 @@ class Jtor {
 				if ( coil.Contains( pt ) )
 					JtorPt += coil.J;
 			}
+			return JtorPt;
 		};
 };
 
@@ -99,22 +102,53 @@ int main(int argc, char *argv[])
 	}
 	args.PrintOptions(cout);
 
-	// 2. Read the mesh from the given mesh file. Refine it up to the initial_ref_levels.
-	Mesh *mesh = new Mesh(mesh_file, 1, 1);
+	
+	
+	// Do the vacuum problem
+	// One coil at R=1,Z=0, h=w=0.05, J = 400 kA/m^2 => j_tot = 1kA
+	
+	Jtor FieldCoils;
+	FieldCoils.AddCoil( 1., 0., .05, .05, 400. );
+	
+	// Mesh goes from R_min to R_max, and Z_min to Z_max
+	
+	Mesh *mesh = new Mesh(50, 50, Element::Type::TRIANGLE);
+	auto xlate = []( const mfem::Vector& in, mfem::Vector & out ) {
+		double R_min = 0.0;
+		double R_max = 1.5;
+		double Z_min = -1;
+		double Z_max = +1;
+		out( 0 ) = in( 0 )*( R_max - R_min ) + R_min;
+		out( 1 ) = in( 1 )*( Z_max - Z_min ) + Z_min;
+		return;
+	};
+	mesh->Transform( xlate );
+
+	delete mesh;
+	mesh = new Mesh( mesh_file, 1, 1 );
+
 	int dim = mesh->Dimension();
 
 	for (int ii=0; ii<initial_ref_levels; ii++)
 	{
 		mesh->UniformRefinement();
 	}
+
+	// Thus the RHS function is FieldCoils::operator()
 	
-	// Do the vacuum problem
-	// Set up RHS:
+	ConstantCoefficient zero( 0.0 );
+	GSInverter solver( mesh, order, FieldCoils );
+	solver.SetBCs( zero );
 	
-	//
-	GSInverter solver( mesh, order, );
-	
+	mfem::Vector qu_zero_bc;
+
+	solver.Mult( qu_zero_bc, qu_zero_bc );
+
+
 	GridFunction q_solution,u_solution;
+
+	q_solution.MakeRef( solver.GetQSpace(), qu_zero_bc, 0 );
+	u_solution.MakeRef( solver.GetUSpace(), qu_zero_bc, solver.GetQSpace()->GetVSize() );
 
 
 

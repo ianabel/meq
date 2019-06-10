@@ -1,10 +1,11 @@
 #include "mfem.hpp"
+#include "StdFnCoeffs.hpp"
 
 class GSInverter : public mfem::Operator
 {
 
 	public:
-		using RealFunc = double (*)( const mfem::Vector& );
+		using RealFunc = std::function< double( const mfem::Vector & )>;
 	protected:
 		mfem::Mesh *mesh; // Unowned
 		unsigned int Order,Dim;
@@ -17,7 +18,7 @@ class GSInverter : public mfem::Operator
 		mfem::HDGBilinearForm3 *AVarf;
 
 
-		mfem::FunctionCoefficient diffusion; // diffusion constant
+		mfem::Coefficient *diffusion; // diffusion constant
 		const double tau_D;
 
 		RealFunc RHS_ref;
@@ -34,6 +35,7 @@ class GSInverter : public mfem::Operator
 		void QUUpdate( mfem::Vector const& qu_old, mfem::Vector &qu_new ) const;
 
 		mfem::Array<int> const & GetOffsets() { return bOffsets; };
+		void SetBCs( mfem::Coefficient& coeff );
 
 		// Actually solve the problem:
 		// which in this case doesn't depend on the input vector
@@ -42,7 +44,7 @@ class GSInverter : public mfem::Operator
 
 		void Update();
 
-		~GSInverter();
+		~GSInverter()
 		{
 			delete V_space;
 			delete W_space;
@@ -50,6 +52,7 @@ class GSInverter : public mfem::Operator
 			delete AVarf;
 			delete dg_coll;
 			delete face_coll;
+			delete diffusion;
 		};
 		
-}
+};

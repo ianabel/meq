@@ -1,14 +1,13 @@
+#ifndef STDFNCOEFFS_HPP
+#define STDFNCOEFFS_HPP
 
-#include "mfem.hpp"
+#include <functional>
+
 
 namespace mfem
 {
 
 class Mesh;
-
-#ifdef MFEM_USE_MPI
-class ParMesh;
-#endif
 
 /// class for C++ function coefficient
 class StdFunctionCoefficient : public Coefficient
@@ -22,13 +21,13 @@ protected:
 	static double td_fn_dummy( const mfem::Vector &, double ) { return 0.0;};
 
 public:
-	StdFunctionCoefficient( std::function< double( const mfem::Vector& )> &fn )
+	StdFunctionCoefficient( std::function< double( const mfem::Vector& )> const &fn )
 		: fn_ref( fn ), td_fn_ref( td_fn_dummy ), is_td( false )
 	{
 
 	}
 
-	StdFunctionCoefficient( std::function< double( const mfem::Vector&, double )> &fn )
+	StdFunctionCoefficient( std::function< double( const mfem::Vector&, double )> const &fn )
 		: fn_ref( fn_dummy ), td_fn_ref( fn ), is_td( true )
 	{
 
@@ -51,6 +50,8 @@ public:
 			return fn_ref( transip );
 		}
 	}
+
+};
 
 };
 
@@ -90,3 +91,4 @@ public:
 };
 
 */
+#endif // STDFNCOEFFS_HPP
