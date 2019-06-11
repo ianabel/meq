@@ -26,10 +26,9 @@ GSInverter::GSInverter(Mesh *meshPtr, unsigned int order, GSInverter::RealFunc f
 
 	// Define the different forms, and initialise them with the linearised problem
 	AVarf = new HDGBilinearForm3(V_space, W_space, M_space);
-	auto x_mul = []( mfem::Vector const& in ) { return ( 1 + in( 0 ) );};
-	diffusion = new FunctionCoefficient( x_mul );
-	AVarf->AddHDGDomainIntegrator(new HDGDomainIntegratorDiffusion(*diffusion));
-	AVarf->AddHDGBdrIntegrator(new HDGFaceIntegratorDiffusion(tau_D));
+
+	AVarf->AddHDGDomainIntegrator(new HDGDomainIntegratorGS());
+	AVarf->AddHDGBdrIntegrator(new HDGFaceIntegratorGS(tau_D));
 
 
 	bOffsets.SetSize( 3 );

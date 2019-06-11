@@ -1,4 +1,4 @@
-#include "mfem.hpp"
+#include "HDGGSIntegrator.hpp"
 #include "StdFnCoeffs.hpp"
 
 class GSInverter : public mfem::Operator
@@ -18,7 +18,6 @@ class GSInverter : public mfem::Operator
 		mfem::HDGBilinearForm3 *AVarf;
 
 
-		mfem::Coefficient *diffusion; // diffusion constant
 		const double tau_D;
 
 		RealFunc RHS_ref;
@@ -52,7 +51,6 @@ class GSInverter : public mfem::Operator
 			delete AVarf;
 			delete dg_coll;
 			delete face_coll;
-			delete diffusion;
 		};
 		
 };

@@ -124,9 +124,6 @@ int main(int argc, char *argv[])
 	};
 	mesh->Transform( xlate );
 
-	delete mesh;
-	mesh = new Mesh( mesh_file, 1, 1 );
-
 	int dim = mesh->Dimension();
 
 	for (int ii=0; ii<initial_ref_levels; ii++)

@@ -42,36 +42,15 @@ void qFun_ex(const Vector & pt, Vector & q)
    double x(pt(0));
    double y(pt(1));
 
-	q( 0 ) = -( x + 1 )*::exp( 2*x*y )*::cos( pi*y )*(  pi*::cos( pi*x ) + 2*y*::sin( pi*x ) );
-	q( 1 ) = -( x + 1 )*::exp( 2*x*y )*::sin( pi*x )*( -pi*::sin( pi*y ) + 2*x*::cos( pi*y ) );
+	q( 0 ) = -::exp( 2*x*y )*::cos( pi*y )*(  pi*::cos( pi*x ) + 2*y*::sin( pi*x ) ) / x;
+	q( 1 ) = -::exp( 2*x*y )*::sin( pi*x )*( -pi*::sin( pi*y ) + 2*x*::cos( pi*y ) ) / x;
 
 	return;
 }
 
 double bcFun( const Vector& pt )
 {
-   double x(pt(0));
-   double y(pt(1));
-
-	if ( x == 0 )
-	{
-		return 0.0;
-	}
-	else if ( x == 1 )
-	{
-		return 0.0;
-	}
-
-	if ( y == 0 )
-	{
-		return ::sin( pi*x );
-	}
-	else if ( y == 1 )
-	{
-		return -1.0 * ::exp( 2.0 * x ) * ::sin( pi * x );
-	}
-
-	return 0.0;
+	return uFun_ex( pt );
 }
 
 
@@ -79,15 +58,18 @@ double fFun(const Vector & pt)
 {
    double x(pt(0));
    double y(pt(1));
-	// with nu = x + 1
-	double t = ( ( ( - pi*pi*( 1 + x ) + 2*x*x*( 1 + x ) + y + 2.0*( 1 + x )*y*y ) )*::cos( pi*y ) - 2*pi*x*( 1 + x )*::sin( pi*y ) );
-	return -::exp( 2*x*y )*( 2.0 * t*::sin( pi*x ) + pi * ( 1.0 + 4.0 * ( 1 + x ) * y ) * ::cos( pi*x ) * ::cos( pi*y ) );
+	// with nu = 1/x
+	double t = ( pi*pi*x - 2*x*x*x + y - 2*x*y*y )*::cos( pi*y ) + 2*pi*x*x*::sin( pi*y );
+	return ( ::exp( 2*x*y ) / ( x*x ) )*( 
+			  pi*( 1.0 - 4.0 *  x  * y ) * ::cos( pi*x ) * ::cos( pi*y ) + ( 2 * t ) * ::sin( pi*x ) 
+			);
 
 	/*
-	// with nu = 2
-	double t = ( ( pi*pi - 2*( x*x + y*y ) )*::cos( pi*y ) + 2*pi*x*::sin( pi*y ) );
-	return 4.0*::exp( 2*x*y )*( t*::sin( pi*x ) - 2 * pi * y * ::cos( pi*x ) * ::cos( pi*y ) );
+	// with nu = 1
+	double t = ( pi*pi - 2*x*x - 2*y*y )*::cos( pi*y ) + 2*pi*x*::sin( pi*y );
+	return ( 2.0 * ::exp( 2*x*y ) )*( -2.0 * pi * y * ::cos( pi*x ) * ::cos( pi*y ) + t * ::sin( pi*x ) );
 	*/
+
 }
 
 int main(int argc, char *argv[])
@@ -166,7 +148,13 @@ int main(int argc, char *argv[])
 	}
 
 	// Mesh up [0,1] x [0,1]
-	Mesh *mesh = new Mesh(20,20,Element::Type::TRIANGLE, false, 1.0, 1.0, true );
+	Mesh *mesh = new Mesh(10,10,Element::Type::TRIANGLE, false, 1.0, 1.0, true );
+	auto xform = []( const Vector& in, Vector& out ) { 
+		constexpr double R_min = 0.01;
+		out( 1 ) = in( 1 );
+		out( 0 ) = R_min + in( 0 )*( 1 - R_min );
+	};
+	mesh->Transform( xform );
 
 	int dim = mesh->Dimension();
 
