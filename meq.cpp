@@ -112,9 +112,9 @@ int main(int argc, char *argv[])
 	
 	// Mesh goes from R_min to R_max, and Z_min to Z_max
 	
-	Mesh *mesh = new Mesh(50, 50, Element::Type::TRIANGLE);
+	Mesh *mesh = new Mesh(10, 10, Element::Type::TRIANGLE);
 	auto xlate = []( const mfem::Vector& in, mfem::Vector & out ) {
-		double R_min = 0.0;
+		double R_min = 0.05;
 		double R_max = 1.5;
 		double Z_min = -1;
 		double Z_max = +1;
@@ -151,7 +151,7 @@ int main(int argc, char *argv[])
 
 	if (save)
 	{
-		ofstream mesh_ofs("ex_hdg.mesh");
+		ofstream mesh_ofs("refined_vacuum.mesh");
 		mesh_ofs.precision(8);
 		mesh->Print(mesh_ofs);
 

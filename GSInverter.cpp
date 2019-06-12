@@ -169,3 +169,130 @@ void GSInverter::Update() {
 	width = dimV + dimW;
 };
 
+
+class HDGPostProcessing
+{
+private:
+   GridFunction *q, *u;
+
+   FiniteElementSpace *fes;
+
+   Coefficient *diffcoeff;
+
+protected:
+   const IntegrationRule *IntRule;
+
+public:
+   HDGPostProcessing(FiniteElementSpace *f, GridFunction &_q, GridFunction &_u,
+                     Coefficient &_diffcoeff)
+      : q(&_q), u(&_u), fes(f), diffcoeff(&_diffcoeff) {IntRule = NULL; }
+
+   void Postprocessing(GridFunction &u_postprocessed) ;
+};
+
+// Postprocessing
+void HDGPostProcessing::Postprocessing(GridFunction &u_postprocessed)
+{
+	Mesh *mesh = fes->GetMesh();
+	Array<int>  vdofs;
+	Vector      elmat2, shape, RHS, to_RHS, vals, uvals;
+	double      RHS2;
+	DenseMatrix elmat, invdfdx, dshape, dshapedxt, qvals;
+
+	int  ndofs;
+	const FiniteElement *fe_elem;
+	ElementTransformation *Trans;
+
+	for (int i = 0; i < fes->GetNE(); i++)
+	{
+		fes->GetElementVDofs(i, vdofs);
+		ndofs = vdofs.Size();
+		vals.SetSize(ndofs);
+		// elmat is the matrix for the -(nabla w_h, q_h) term
+		elmat.SetSize(ndofs);
+		// elmat 1 is the vector for the (1, u_h^*) term
+		elmat2.SetSize(ndofs);
+		shape.SetSize(ndofs);
+
+		RHS.SetSize(ndofs);
+		to_RHS.SetSize(ndofs);
+
+		elmat = 0.0;
+		elmat2 = 0.0;
+		RHS = 0.0;
+		RHS2 = 0.0;
+
+		fe_elem = fes->GetFE(i);
+		int dim = fe_elem->GetDim();
+		int spaceDim = dim;
+		invdfdx.SetSize(dim, spaceDim);
+		dshape.SetSize(ndofs, spaceDim);
+		dshapedxt.SetSize(ndofs, spaceDim);
+
+		Trans = mesh->GetElementTransformation(i);
+
+		const IntegrationRule *ir = IntRule;
+		if (ir == NULL)
+		{
+			int order = 3*fe_elem->GetOrder() + 3;
+			ir = &IntRules.Get(fe_elem->GetGeomType(), order);
+		}
+
+		// Get the values of u_h and q_h
+		u->GetValues(i, *ir, uvals);
+		q->GetVectorValues(*Trans, *ir, qvals);
+
+		for (int j = 0; j < ir->GetNPoints(); j++)
+		{
+			const IntegrationPoint &ip = ir->IntPoint(j);
+
+			fe_elem->CalcDShape(ip, dshape);
+			fe_elem->CalcShape(ip, shape);
+
+			Trans->SetIntPoint(&ip);
+			// Compute invdfdx = / adj(J),       if J is square
+			//               \ adj(J^t.J).J^t, otherwise
+			CalcAdjugate(Trans->Jacobian(), invdfdx);
+			double w = Trans->Weight();
+			w = ip.weight / w;
+			w *= diffcoeff->Eval(*Trans, ip);
+			Mult(dshape, invdfdx, dshapedxt);
+
+			// compute the (nabla w_h, \nu \nabla u_h^*) term
+			AddMult_a_AAt(w, dshapedxt, elmat);
+
+			dshapedxt *= ip.weight ;
+
+			Vector qval_col;
+			qvals.GetColumn(j, qval_col);
+
+			// compute (nabla w_h, q_h)
+			dshapedxt.Mult(qval_col, to_RHS);
+
+			// subtract it from the rhs
+			RHS -= to_RHS;
+
+			// compute (1, u_h^*)
+			shape *= (Trans->Weight() * ip.weight);
+			elmat2 += shape;
+
+			// compute (1, u_h)
+			double rhs_weight = (Trans->Weight() * ip.weight);
+			RHS2  += (uvals(j)*rhs_weight);
+
+		}
+
+		// changing the last row and the last entry
+		for (int j = 0; j < ndofs; j++)
+		{
+			elmat(ndofs-1,j) = elmat2(j);
+		}
+		RHS(ndofs-1) = RHS2;
+
+		// solve the local problem
+		elmat.Invert();
+		elmat.Mult(RHS, vals);
+		u_postprocessed.SetSubVector(vdofs, vals);
+
+	}
+}
