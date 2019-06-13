@@ -7,23 +7,17 @@
  * N.C. Nguyen, J. Peraire, B. Cockburn, An implicit high-order hybridizable
  * discontinuous Galerkin method for linear convection–diffusion equations,
  * J. Comput. Phys., 2009, 228:9, 3232--3254.
- *
- * Modifications are by I. G. Abel, University of Maryland
+ * Contributed by: T. Horvath, S. Rhebergen, A. Sivas
+ *                University of Waterloo
  */
 
-
-#include "GSInverter.cpp"
+#include "GSInverter.hpp"
+#include "NLRHSIntegrator.hpp"
 
 #include <fstream>
 #include <iostream>
 #include <algorithm>
-#include <functional>
 
-
-using namespace std;
-using namespace mfem;
-
-// Define the analytical solution and forcing terms / boundary conditions
 
 using namespace std;
 using namespace mfem;
@@ -67,119 +61,72 @@ double fFun(const Vector & pt)
    double y(pt(1));
 	// with nu = 1/x
 	double t = ( pi*pi*x - 2*x*x*x + y - 2*x*y*y )*::cos( pi*y ) + 2*pi*x*x*::sin( pi*y );
-	return ( ::exp( 2*x*y ) / ( x*x ) )*( 
-			  pi*( 1.0 - 4.0 *  x  * y ) * ::cos( pi*x ) * ::cos( pi*y ) + ( 2 * t ) * ::sin( pi*x ) 
-			);
-
-	/*
-	// with nu = 1
-	double t = ( pi*pi - 2*x*x - 2*y*y )*::cos( pi*y ) + 2*pi*x*::sin( pi*y );
-	return ( 2.0 * ::exp( 2*x*y ) )*( -2.0 * pi * y * ::cos( pi*x ) * ::cos( pi*y ) + t * ::sin( pi*x ) );
-	*/
+	// Added to cancel the nonlinear term when we're at the right solution
+	return - uFun_ex( pt ) * uFun_ex( pt ) +
+		( ::exp( 2*x*y ) / ( x*x ) )*( pi*( 1.0 - 4.0 *  x  * y ) * ::cos( pi*x ) * ::cos( pi*y ) + ( 2 * t ) * ::sin( pi*x ) );
 
 }
 
-class DummyOperator : public mfem::Operator {
-	public:
-	DummyOperator() {};
-	~DummyOperator() {};
-	virtual void Mult( const Vector &, Vector & ) const {};
-};
-
-class HDGPostProcessing
-{
-private:
-   GridFunction *q, *u;
-
-   FiniteElementSpace *fes;
-
-   Coefficient *diffcoeff;
-
-protected:
-   const IntegrationRule *IntRule;
-
-public:
-   HDGPostProcessing(FiniteElementSpace *f, GridFunction &_q, GridFunction &_u,
-                     Coefficient &_diffcoeff)
-      : q(&_q), u(&_u), fes(f), diffcoeff(&_diffcoeff) {IntRule = NULL; }
-
-   void Postprocessing(GridFunction &u_postprocessed) ;
-};
-
-// Returns (-u^2 + f) as a suitable RHS for the poissson
-// solver class. It also maintains the copy of the PoissonSolver.
-class NLPoissonOperator : public Operator
+class NLGSSolver
 {
 	public:
-		using RealFunc = double (*)( const mfem::Vector& );
+		using RealFunc = std::function< double( const mfem::Vector & )>;
+		using NLFunc = std::function< double( double )>;
 	protected:
-		FiniteElementCollection *dg_2_coll;
-		FiniteElementSpace *W2_space;
-		DummyOperator dummy;
+		GSInverter solver;
+		RealFunc RHS;
+		NLFunc F_NL;
 	public:
-		PoissonSolver pSolver;
-		RealFunc RHS_ref;
-		NLPoissonOperator(Mesh *meshPtr, unsigned int order, RealFunc fRHS ) : 
-			RHS_ref( fRHS ),pSolver( meshPtr, order )
+		NLGSSolver(mfem::Mesh *meshPtr, unsigned int order, RealFunc fRHS, NLFunc F_nl )
+			: solver( meshPtr, order ), RHS( fRHS ), F_NL( F_nl )
 		{
-			// More accurate space for computing the nonlinear RHS before projecting back.
-			dg_2_coll = new DG_FECollection( 2*order, 2 );
-			W2_space = new FiniteElementSpace( meshPtr, dg_2_coll);
-			
-			height = pSolver.NumCols();
-			width = pSolver.NumRows();
+		};
 
-		}
-
-		~NLPoissonOperator()
+		void SetBCs( mfem::Coefficient& coeff ) 
 		{
-			delete W2_space;
-			delete dg_2_coll;
-		}
+			solver.SetBCs( coeff );
+		};
 
-		virtual Operator& GetGradient( const Vector & ) const
+		int NumRows() { return solver.NumRows(); };
+		int NumCols() { return solver.NumRows(); };
+
+
+		void Solve( mfem::Vector& qu_out, mfem::Vector & qu_in )
 		{
-			return dynamic_cast< mfem::Operator& >( const_cast<DummyOperator&>( dummy ) );
-		}
-
-		void Update() {
-			pSolver.Update();
-			W2_space->Update(true);
-			height = pSolver.NumCols();
-			width = pSolver.NumRows();
-		}
-
-
-		virtual void Mult( Vector const& qu_in, Vector & qu_out ) const
-		{
-			GridFunction u_old( pSolver.GetUSpace(), static_cast<double*>( qu_in.GetData() + pSolver.bOffsets[ 1 ] ) );
-
-			GridFunction u_fine( W2_space );
-			u_fine.ProjectGridFunction( u_old );
-
-			GridFunction u2_gf( W2_space );
-			for ( int i=0; i<u2_gf.Size(); i++ )
-				u2_gf[ i ] = u_fine[ i ]*u_fine[ i ];
-
-			GridFunctionCoefficient u2_coeff( &u2_gf ); 
-
+			mfem::Vector rhs_F( solver.NumCols() );
+			qu_out.SetSize( solver.NumRows() );
 			// Assemble the RHS and the Schur complement
-			LinearForm *fform = new LinearForm;
+			mfem::LinearForm *fform = new mfem::LinearForm;
+			mfem::StdFunctionCoefficient fcoeff( RHS );
 
-			qu_out.SetSize( height );
-			qu_out = 0.0;
-			FunctionCoefficient fcoeff( RHS_ref );
-			fform->AddDomainIntegrator( new DomainLFIntegrator( fcoeff ) );
-			fform->AddDomainIntegrator( new DomainLFIntegrator( u2_coeff, 3, 3 ) );
-			fform->Update(pSolver.GetUSpace(), qu_out, pSolver.bOffsets[ 1 ] );
-			fform->Assemble();
-		}
+			mfem::GridFunction u;
+			u.MakeRef( solver.GetUSpace(), qu_in, solver.GetQSpace()->GetVSize() );
 
 			
+			fform->AddDomainIntegrator( new mfem::DomainLFIntegrator( fcoeff ) );
+			fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( u, F_NL, 4, 2 ) );
+			fform->Update(solver.GetUSpace(), rhs_F, 0);
+			fform->Assemble();
+
+			solver.Mult( rhs_F, qu_out );
+			delete fform;
+		};
+
+		void Postprocess( mfem::GridFunction &u_out, mfem::Vector & qu_in )
+		{
+			solver.Postprocess( u_out, qu_in );
+		};
+
+		mfem::FiniteElementSpace* GetQSpace() { return solver.GetQSpace(); };
+		mfem::FiniteElementSpace* GetUSpace() { return solver.GetUSpace(); };
+		mfem::FiniteElementSpace* GetUStarSpace() { return solver.GetUStarSpace(); };
+
+
 };
 
 int main(int argc, char *argv[])
 {
+	StopWatch chrono;
 
 	// 1. Parse command-line options.
 	const char *mesh_file = "grid.mesh";
@@ -188,6 +135,8 @@ int main(int argc, char *argv[])
 	bool visualization = true;
 	bool post = true;
 	bool save = true;
+	double memA = 0.0;
+	double memB = 0.0;
 
 	OptionsParser args(argc, argv);
 	args.AddOption(&mesh_file, "-m", "--mesh",
@@ -205,6 +154,11 @@ int main(int argc, char *argv[])
 			"Enable or disable file saving.");
 	args.AddOption(&initial_ref_levels, "-mr", "--mesh-refinement-levels",
 			"The number of levels of uniform refinement to apply to the grid.");
+	args.AddOption(&memA, "-memA", "--memoryA",
+			"Storage of A.");
+	args.AddOption(&memB, "-memB", "--memoryB",
+			"Storage of B.");
+
 	args.Parse();
 	if (!args.Good())
 	{
@@ -213,75 +167,99 @@ int main(int argc, char *argv[])
 	}
 	args.PrintOptions(cout);
 
-	// 2. Read the mesh from the given mesh file. Refine it up to the initial_ref_levels.
-	Mesh *mesh = new Mesh(mesh_file, 1, 1);
+	// memA, memB \in [0,1], memB <= memA
+	if (memB > memA)
+	{
+		std::cout << "memB cannot be more than memA. Resetting to be equal" << std::endl
+			<< std::flush;
+		memA = memB;
+	}
+	if (memA > 1.0)
+	{
+		std::cout << "memA cannot be more than 1. Resetting to 1" << std::endl <<
+			std::flush;
+		memA = 1.0;
+	}
+	else if (memA < 0.0)
+	{
+		std::cout << "memA cannot be less than 0. Resetting to 0." << std::endl <<
+			std::flush;
+		memA = 0.0;
+	}
+	if (memB > 1.0)
+	{
+		std::cout << "memB cannot be more than 1. Resetting to 1" << std::endl <<
+			std::flush;
+		memB = 1.0;
+	}
+	else if (memB < 0.0)
+	{
+		std::cout << "memB cannot be less than 0. Resetting to 0." << std::endl <<
+			std::flush;
+		memB = 0.0;
+	}
+
+	// Mesh up [0,1] x [0,1]
+	Mesh *mesh = new Mesh(10,10,Element::Type::TRIANGLE, false, 1.0, 1.0, true );
+	auto xform = []( const Vector& in, Vector& out ) { 
+		constexpr double R_min = 0.1;
+		out( 1 ) = in( 1 );
+		out( 0 ) = R_min + in( 0 )*( 1 - R_min );
+	};
+	mesh->Transform( xform );
+
 	int dim = mesh->Dimension();
 
 	for (int ii=0; ii<initial_ref_levels; ii++)
 	{
 		mesh->UniformRefinement();
 	}
-	
-	Vector qu_data;
-	Vector qu_refined;	
 
-	KinSolver *nonlinearPoissonSolver = new KinSolver( KIN_PICARD, false );
-	NLPoissonOperator nlPoissonEq( mesh, order, fFun );
+	auto squared = []( double x ){return x*x;};
+	NLGSSolver solver( mesh, order, fFun, squared );
 
-	qu_data.SetSize( nlPoissonEq.Height() );
-	qu_data = 0.0; // Initial Guess is zero
+	FunctionCoefficient bcFunCoeff( bcFun );
+	solver.SetBCs( bcFunCoeff );
 
-	// Quick check on coarse grid
+	GridFunction q_variable,u_variable;
 
-	nonlinearPoissonSolver->SetMaxIter( 20 );
-	nonlinearPoissonSolver->SetFuncNormTol( 1e-3 );
-	nonlinearPoissonSolver->SetAndersonAcceleration( 3 );
-	nonlinearPoissonSolver->iterative_mode = false;
-	nonlinearPoissonSolver->SetSolver( dynamic_cast<mfem::Solver&>( nlPoissonEq.pSolver ) );
-	nonlinearPoissonSolver->SetOperator( nlPoissonEq );
-	nonlinearPoissonSolver->Mult( qu_data, qu_data );
+	mfem::Vector qu( solver.NumRows() );
+	mfem::Vector z_in( solver.NumCols() );
 
-	/*
-	// Update mesh
-	mesh->UniformRefinement();
-	nlPoissonEq.Update();
-	nlPoissonEq.pSolver.QUUpdate( qu_data, qu_refined );
-	qu_data.SetSize( nlPoissonEq.Height() );
-	qu_data = 0.0;
+	z_in = 0.0;
 
-	std::cout << "Mesh Has been Refined" << std::endl;
+	int iter = 0;
+	double tol = 1e-4;
+	for ( ; iter < 25; iter++ )
+	{
+		solver.Solve( z_in, qu );
+		if ( z_in.DistanceTo( qu ) < z_in.Norml2() * tol )
+		{
+			break;
+		}
+		else
+		{
+			z_in = qu;
+		}
+	}
 
-	delete nonlinearPoissonSolver;
-	nonlinearPoissonSolver = new KinSolver( KIN_FP, false );
-	
-	nonlinearPoissonSolver->SetMaxIter( 50 );
-	nonlinearPoissonSolver->SetFuncNormTol( 1e-5 );
-	nonlinearPoissonSolver->iterative_mode = true;
-	nonlinearPoissonSolver->SetAndersonAcceleration( 3 );
-	nonlinearPoissonSolver->SetOperator( nlPoissonEq );
-	nonlinearPoissonSolver->Mult( qu_refined, qu_data );
-	*/
-	// Turn the vector of nodal values into Grid funcions
-	Array<int> const &offsets = nlPoissonEq.pSolver.GetOffsets();
-	GridFunction q_solution,u_solution;
-	q_solution.MakeRef( nlPoissonEq.pSolver.GetQSpace(), qu_data, offsets[ 0 ] );
-	u_solution.MakeRef( nlPoissonEq.pSolver.GetUSpace(), qu_data, offsets[ 1 ] );
+	std::cout << "Fixed-point iteration stopped after " << iter << " iterations" << std::endl;
 
+	q_variable.MakeRef( solver.GetQSpace(), qu, 0 );
+	u_variable.MakeRef( solver.GetUSpace(), qu, solver.GetQSpace()->GetVSize() );
 
-	// Exact Solutions
-	FunctionCoefficient ucoeff(uFun_ex);
-	VectorFunctionCoefficient qcoeff(dim, qFun_ex);
-
-	// 12. Compute the error compared to the exact solution
-	int order_quad = max(2, 4*order+4);
+	// 12. Compute the discretization error
+	int order_quad = max(2, 2*order+2);
 	const IntegrationRule *irs[Geometry::NumGeom];
 	for (int i=0; i < Geometry::NumGeom; ++i)
 	{
 		irs[i] = &(IntRules.Get(i, order_quad));
 	}
-	double err_u    = u_solution.ComputeL2Error(ucoeff, irs);
-	double err_q    = q_solution.ComputeL2Error(qcoeff, irs);
-	double err_mean  = u_solution.ComputeMeanLpError(2.0, ucoeff, irs);
+   FunctionCoefficient ucoeff(uFun_ex);
+   VectorFunctionCoefficient qcoeff(dim, qFun_ex);
+	double err_u    = u_variable.ComputeL2Error(ucoeff, irs);
+	double err_q    = q_variable.ComputeL2Error(qcoeff, irs);
+	double err_mean  = u_variable.ComputeMeanLpError(2.0, ucoeff, irs);
 
 	std::cout << "|| u_h - u_ex || = " << err_u << "\n";
 	std::cout << "|| q_h - q_ex || = " << err_q << "\n";
@@ -294,13 +272,13 @@ int main(int argc, char *argv[])
 		mesh_ofs.precision(8);
 		mesh->Print(mesh_ofs);
 
-		ofstream q_solution_ofs("sol_q.gf");
-		q_solution_ofs.precision(8);
-		q_solution.Save(q_solution_ofs);
+		ofstream q_variable_ofs("sol_q.gf");
+		q_variable_ofs.precision(8);
+		q_variable.Save(q_variable_ofs);
 
-		ofstream u_solution_ofs("sol_u.gf");
-		u_solution_ofs.precision(8);
-		u_solution.Save(u_solution_ofs);
+		ofstream u_variable_ofs("sol_u.gf");
+		u_variable_ofs.precision(8);
+		u_variable.Save(u_variable_ofs);
 
 	}
 
@@ -311,164 +289,18 @@ int main(int argc, char *argv[])
 		int  visport   = 19916;
 		socketstream u_sock(vishost, visport);
 		u_sock.precision(8);
-		u_sock << "solution\n" << *mesh << u_solution << "window_title 'Solution u'" <<
+		u_sock << "solution\n" << *mesh << u_variable << "window_title 'Solution u'" <<
 			endl;
 
 		socketstream q_sock(vishost, visport);
 		q_sock.precision(8);
-		q_sock << "solution\n" << *mesh << q_solution << "window_title 'Solution q'" <<
+		q_sock << "solution\n" << *mesh << q_variable << "window_title 'Solution q'" <<
 			endl;
 	}
 
-	if (post)
-	{
-		FiniteElementCollection *dg_coll_pstar(new DG_FECollection(order+1, 2));
-		FiniteElementSpace *Vstar_space = new FiniteElementSpace(mesh, dg_coll_pstar);
 
-		GridFunction u_post(Vstar_space);
-
-		ConstantCoefficient diffusion( 1.0 );
-		HDGPostProcessing *hdgpost(new HDGPostProcessing(Vstar_space, q_solution,
-					u_solution, diffusion));
-
-		hdgpost->Postprocessing(u_post);
-
-		order_quad = max(2, 2*order+5);
-		for (int i=0; i < Geometry::NumGeom; ++i)
-		{
-			irs[i] = &(IntRules.Get(i, order_quad));
-		}
-		double err_u_post   = u_post.ComputeL2Error(ucoeff, irs);
-
-		std::cout << "|| u^*_h - u_ex || = " << err_u_post << "\n";
-
-		if (save)
-		{
-			ofstream u_post_ofs("sol_u_star.gf");
-			u_post_ofs.precision(8);
-			u_post.Save(u_post_ofs);
-		}
-
-		if (visualization)
-		{
-			char vishost[] = "localhost";
-			int  visport   = 19916;
-			socketstream u_star_sock(vishost, visport);
-			u_star_sock.precision(8);
-			u_star_sock << "solution\n" << *mesh << u_post <<
-				"window_title 'Solution u_star'" << endl;
-		}
-	}
-	// 18. Free the used memory.
 	delete mesh;
-
 	return 0;
-
 }
 
-// Postprocessing
-void HDGPostProcessing::Postprocessing(GridFunction &u_postprocessed)
-{
-	Mesh *mesh = fes->GetMesh();
-	Array<int>  vdofs;
-	Vector      elmat2, shape, RHS, to_RHS, vals, uvals;
-	double      RHS2;
-	DenseMatrix elmat, invdfdx, dshape, dshapedxt, qvals;
 
-	int  ndofs;
-	const FiniteElement *fe_elem;
-	ElementTransformation *Trans;
-
-	for (int i = 0; i < fes->GetNE(); i++)
-	{
-		fes->GetElementVDofs(i, vdofs);
-		ndofs = vdofs.Size();
-		vals.SetSize(ndofs);
-		// elmat is the matrix for the -(nabla w_h, q_h) term
-		elmat.SetSize(ndofs);
-		// elmat 1 is the vector for the (1, u_h^*) term
-		elmat2.SetSize(ndofs);
-		shape.SetSize(ndofs);
-
-		RHS.SetSize(ndofs);
-		to_RHS.SetSize(ndofs);
-
-		elmat = 0.0;
-		elmat2 = 0.0;
-		RHS = 0.0;
-		RHS2 = 0.0;
-
-		fe_elem = fes->GetFE(i);
-		int dim = fe_elem->GetDim();
-		int spaceDim = dim;
-		invdfdx.SetSize(dim, spaceDim);
-		dshape.SetSize(ndofs, spaceDim);
-		dshapedxt.SetSize(ndofs, spaceDim);
-
-		Trans = mesh->GetElementTransformation(i);
-
-		const IntegrationRule *ir = IntRule;
-		if (ir == NULL)
-		{
-			int order = 3*fe_elem->GetOrder() + 3;
-			ir = &IntRules.Get(fe_elem->GetGeomType(), order);
-		}
-
-		// Get the values of u_h and q_h
-		u->GetValues(i, *ir, uvals);
-		q->GetVectorValues(*Trans, *ir, qvals);
-
-		for (int j = 0; j < ir->GetNPoints(); j++)
-		{
-			const IntegrationPoint &ip = ir->IntPoint(j);
-
-			fe_elem->CalcDShape(ip, dshape);
-			fe_elem->CalcShape(ip, shape);
-
-			Trans->SetIntPoint(&ip);
-			// Compute invdfdx = / adj(J),       if J is square
-			//               \ adj(J^t.J).J^t, otherwise
-			CalcAdjugate(Trans->Jacobian(), invdfdx);
-			double w = Trans->Weight();
-			w = ip.weight / w;
-			w *= diffcoeff->Eval(*Trans, ip);
-			Mult(dshape, invdfdx, dshapedxt);
-
-			// compute the (nabla w_h, \nu \nabla u_h^*) term
-			AddMult_a_AAt(w, dshapedxt, elmat);
-
-			dshapedxt *= ip.weight ;
-
-			Vector qval_col;
-			qvals.GetColumn(j, qval_col);
-
-			// compute (nabla w_h, q_h)
-			dshapedxt.Mult(qval_col, to_RHS);
-
-			// subtract it from the rhs
-			RHS -= to_RHS;
-
-			// compute (1, u_h^*)
-			shape *= (Trans->Weight() * ip.weight);
-			elmat2 += shape;
-
-			// compute (1, u_h)
-			double rhs_weight = (Trans->Weight() * ip.weight);
-			RHS2  += (uvals(j)*rhs_weight);
-
-		}
-
-		// changing the last row and the last entry
-		for (int j = 0; j < ndofs; j++)
-		{
-			elmat(ndofs-1,j) = elmat2(j);
-		}
-		RHS(ndofs-1) = RHS2;
-
-		// solve the local problem
-		elmat.Invert();
-		elmat.Mult(RHS, vals);
-		u_postprocessed.SetSubVector(vdofs, vals);
-
-	}
-}

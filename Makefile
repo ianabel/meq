@@ -23,5 +23,5 @@ meq-debug: meq.cpp $(GSINVERTER_DEP)
 mfemHDGPoisson: mfemHDGPoisson.cpp $(GSINVERTER_DEP)
 	g++ $(CXXFLAGS_RELEASE) mfemHDGPoisson.cpp $(GSINVERTER_SRC) -o mfemHDGPoisson $(MFEM_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
 
-mfemHDGPoisson: mfemHDGPoissonNL.cpp $(GSINVERTER_DEP)
+mfemHDGPoissonNL: mfemHDGPoissonNL.cpp $(GSINVERTER_DEP)
 	g++ $(CXXFLAGS_RELEASE) mfemHDGPoissonNL.cpp $(GSINVERTER_SRC) -o mfemHDGPoissonNL $(MFEM_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)

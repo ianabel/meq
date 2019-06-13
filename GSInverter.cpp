@@ -2,12 +2,11 @@
 
 using namespace mfem;
 
-GSInverter::GSInverter(Mesh *meshPtr, unsigned int order, GSInverter::RealFunc fRHS ) : 
+GSInverter::GSInverter(Mesh *meshPtr, unsigned int order) : 
 	mesh( meshPtr ),
 	Order( order ),
 	Dim( 2 ),
-	tau_D( 5.0 ),
-	RHS_ref( fRHS )
+	tau_D( 5.0 )
 {
 	// Define finite element collections and spaces on the mesh.
 	dg_coll   = new DG_FECollection(Order, Dim);
@@ -30,13 +29,15 @@ GSInverter::GSInverter(Mesh *meshPtr, unsigned int order, GSInverter::RealFunc f
 	AVarf->AddHDGDomainIntegrator(new HDGDomainIntegratorGS());
 	AVarf->AddHDGBdrIntegrator(new HDGFaceIntegratorGS(tau_D));
 
+	postproc_coll = new DG_FECollection( Order + 1, Dim );
+	postproc_space = new FiniteElementSpace( mesh, postproc_coll );
 
 	bOffsets.SetSize( 3 );
 	bOffsets[ 0 ] = 0;
 	bOffsets[ 1 ] = dimV;
 	bOffsets[ 2 ] = dimV + dimW;
 	height = dimV + dimW;
-	width = dimV + dimW;
+	width = dimW;
 };
 
 
@@ -78,11 +79,11 @@ void GSInverter::SetBCs( Coefficient& coeff )
 // Actually solve the problem:
 // which in this case doesn't depend on the input vector
 // and store in the Vector y
-void GSInverter::Mult( const Vector& qu_in , Vector& qu_out ) const
+void GSInverter::Mult( const Vector& rhs_F_in , Vector& qu_out ) const
 {
 	StopWatch chrono;
+	Vector rhs_F( rhs_F_in );
 	Vector rhs_R(dimV);
-	Vector rhs_F(dimW);
 	Vector V_aux(dimV);
 	Vector W_aux(dimW);
 
@@ -94,16 +95,8 @@ void GSInverter::Mult( const Vector& qu_in , Vector& qu_out ) const
 	// defined for the facet unknowns.
 	GridFunction lambda_variable( BoundaryConditions );
 
-
 	Array<int> ess_bdr(mesh->bdr_attributes.Max());
 	ess_bdr = 1;
-
-	// Assemble the RHS and the Schur complement
-	LinearForm *fform = new LinearForm;
-	StdFunctionCoefficient fcoeff( RHS_ref );
-	fform->AddDomainIntegrator( new DomainLFIntegrator( fcoeff ) );
-	fform->Update(W_space, rhs_F, 0);
-	fform->Assemble();
 
 	GridFunction R(V_space, rhs_R);
 	GridFunction F(W_space, rhs_F);
@@ -170,30 +163,14 @@ void GSInverter::Update() {
 };
 
 
-class HDGPostProcessing
-{
-private:
-   GridFunction *q, *u;
-
-   FiniteElementSpace *fes;
-
-   Coefficient *diffcoeff;
-
-protected:
-   const IntegrationRule *IntRule;
-
-public:
-   HDGPostProcessing(FiniteElementSpace *f, GridFunction &_q, GridFunction &_u,
-                     Coefficient &_diffcoeff)
-      : q(&_q), u(&_u), fes(f), diffcoeff(&_diffcoeff) {IntRule = NULL; }
-
-   void Postprocessing(GridFunction &u_postprocessed) ;
-};
-
 // Postprocessing
-void HDGPostProcessing::Postprocessing(GridFunction &u_postprocessed)
+void GSInverter::Postprocess(GridFunction &u_postprocessed, mfem::Vector & qu_in ) const
 {
-	Mesh *mesh = fes->GetMesh();
+	GridFunction q,u;
+
+	q.MakeRef( V_space, qu_in, 0 );
+	u.MakeRef( W_space, qu_in, dimV );
+
 	Array<int>  vdofs;
 	Vector      elmat2, shape, RHS, to_RHS, vals, uvals;
 	double      RHS2;
@@ -203,9 +180,10 @@ void HDGPostProcessing::Postprocessing(GridFunction &u_postprocessed)
 	const FiniteElement *fe_elem;
 	ElementTransformation *Trans;
 
-	for (int i = 0; i < fes->GetNE(); i++)
+
+	for (int i = 0; i < postproc_space->GetNE(); i++)
 	{
-		fes->GetElementVDofs(i, vdofs);
+		postproc_space->GetElementVDofs(i, vdofs);
 		ndofs = vdofs.Size();
 		vals.SetSize(ndofs);
 		// elmat is the matrix for the -(nabla w_h, q_h) term
@@ -222,7 +200,7 @@ void HDGPostProcessing::Postprocessing(GridFunction &u_postprocessed)
 		RHS = 0.0;
 		RHS2 = 0.0;
 
-		fe_elem = fes->GetFE(i);
+		fe_elem = postproc_space->GetFE(i);
 		int dim = fe_elem->GetDim();
 		int spaceDim = dim;
 		invdfdx.SetSize(dim, spaceDim);
@@ -231,16 +209,15 @@ void HDGPostProcessing::Postprocessing(GridFunction &u_postprocessed)
 
 		Trans = mesh->GetElementTransformation(i);
 
-		const IntegrationRule *ir = IntRule;
-		if (ir == NULL)
+		const mfem::IntegrationRule *ir;
 		{
-			int order = 3*fe_elem->GetOrder() + 3;
+			int order = 3*fe_elem->GetOrder() + 4;
 			ir = &IntRules.Get(fe_elem->GetGeomType(), order);
 		}
 
 		// Get the values of u_h and q_h
-		u->GetValues(i, *ir, uvals);
-		q->GetVectorValues(*Trans, *ir, qvals);
+		u.GetValues(i, *ir, uvals);
+		q.GetVectorValues(*Trans, *ir, qvals);
 
 		for (int j = 0; j < ir->GetNPoints(); j++)
 		{
@@ -255,8 +232,8 @@ void HDGPostProcessing::Postprocessing(GridFunction &u_postprocessed)
 			CalcAdjugate(Trans->Jacobian(), invdfdx);
 			double w = Trans->Weight();
 			w = ip.weight / w;
-			w *= diffcoeff->Eval(*Trans, ip);
-			Mult(dshape, invdfdx, dshapedxt);
+
+			mfem::Mult(dshape, invdfdx, dshapedxt);
 
 			// compute the (nabla w_h, \nu \nabla u_h^*) term
 			AddMult_a_AAt(w, dshapedxt, elmat);
@@ -265,6 +242,10 @@ void HDGPostProcessing::Postprocessing(GridFunction &u_postprocessed)
 
 			Vector qval_col;
 			qvals.GetColumn(j, qval_col);
+			// Multiply q_h by inverse diffusion coefficient ( R in our case )
+			Vector pt( 3 );
+			Trans->Transform( ip, pt );
+			qval_col *= pt( 0 );
 
 			// compute (nabla w_h, q_h)
 			dshapedxt.Mult(qval_col, to_RHS);

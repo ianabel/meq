@@ -150,7 +150,7 @@ int main(int argc, char *argv[])
 	// Mesh up [0,1] x [0,1]
 	Mesh *mesh = new Mesh(10,10,Element::Type::TRIANGLE, false, 1.0, 1.0, true );
 	auto xform = []( const Vector& in, Vector& out ) { 
-		constexpr double R_min = 0.01;
+		constexpr double R_min = 0.1;
 		out( 1 ) = in( 1 );
 		out( 0 ) = R_min + in( 0 )*( 1 - R_min );
 	};
@@ -163,22 +163,21 @@ int main(int argc, char *argv[])
 		mesh->UniformRefinement();
 	}
 
-	GSInverter solver( mesh, order, fFun );
+	GSSolver solver( mesh, order, fFun );
 
 	FunctionCoefficient bcFunCoeff( bcFun );
 	solver.SetBCs( bcFunCoeff );
 
 	GridFunction q_variable,u_variable;
 
-	mfem::Vector qu( solver.NumRows() );
-	mfem::Vector z_in( solver.NumCols() );
-	solver.Mult( z_in, qu );
+	mfem::Vector qu;
+	solver.Solve( qu );
 
 	q_variable.MakeRef( solver.GetQSpace(), qu, 0 );
 	u_variable.MakeRef( solver.GetUSpace(), qu, solver.GetQSpace()->GetVSize() );
 
 	// 12. Compute the discretization error
-	int order_quad = max(2, 2*order+2);
+	int order_quad = max(2, 3*order+2);
 	const IntegrationRule *irs[Geometry::NumGeom];
 	for (int i=0; i < Geometry::NumGeom; ++i)
 	{
@@ -193,6 +192,11 @@ int main(int argc, char *argv[])
 	std::cout << "|| u_h - u_ex || = " << err_u << "\n";
 	std::cout << "|| q_h - q_ex || = " << err_q << "\n";
 	std::cout << "|| mean(u_h) - mean(u_ex) || = " << err_mean << "\n";
+
+	GridFunction ustar( solver.GetUStarSpace() );
+	solver.Postprocess( ustar, qu );
+	double err_ustar    = ustar.ComputeL2Error(ucoeff, irs);
+	std::cout << "|| u^*_h - u_ex || = " << err_ustar << std::endl;
 
 	// 13. Save the mesh and the solution.
 	if (save)
