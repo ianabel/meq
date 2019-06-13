@@ -12,6 +12,7 @@
  */
 
 #include "GSInverter.hpp"
+#include "NLRHSIntegrator.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -60,17 +61,73 @@ double fFun(const Vector & pt)
    double y(pt(1));
 	// with nu = 1/x
 	double t = ( pi*pi*x - 2*x*x*x + y - 2*x*y*y )*::cos( pi*y ) + 2*pi*x*x*::sin( pi*y );
-	return ( ::exp( 2*x*y ) / ( x*x ) )*( 
-			  pi*( 1.0 - 4.0 *  x  * y ) * ::cos( pi*x ) * ::cos( pi*y ) + ( 2 * t ) * ::sin( pi*x ) 
-			);
-
-	/*
-	// with nu = 1
-	double t = ( pi*pi - 2*x*x - 2*y*y )*::cos( pi*y ) + 2*pi*x*::sin( pi*y );
-	return ( 2.0 * ::exp( 2*x*y ) )*( -2.0 * pi * y * ::cos( pi*x ) * ::cos( pi*y ) + t * ::sin( pi*x ) );
-	*/
+	// Added to cancel the nonlinear term when we're at the right solution
+	 
+	return  - uFun_ex(pt)*uFun_ex(pt) + 
+		( ::exp( 2*x*y ) / ( x*x ) )*( pi*( 1.0 - 4.0 *  x  * y ) * ::cos( pi*x ) * ::cos( pi*y ) + ( 2 * t ) * ::sin( pi*x ) );
 
 }
+
+class NLGSSolver : public mfem::Operator
+{
+	public:
+		using RealFunc = std::function< double( const mfem::Vector & )>;
+		using NLFunc = std::function< double( double )>;
+	protected:
+		GSInverter solver;
+		RealFunc RHS;
+		NLFunc F_NL;
+		mfem::Vector rhs_F;
+	public:
+		NLGSSolver(mfem::Mesh *meshPtr, unsigned int order, RealFunc fRHS, NLFunc F_nl )
+			: solver( meshPtr, order ), RHS( fRHS ), F_NL( F_nl )
+		{
+			height = solver.NumRows();
+			width = solver.NumRows();
+		};
+
+		void SetBCs( mfem::Coefficient& coeff ) 
+		{
+			solver.SetBCs( coeff );
+		};
+
+
+
+		virtual void Mult( mfem::Vector const& qu_in, mfem::Vector & qu_out ) const
+		{
+			mfem::Vector rhs_F( solver.NumCols() );
+			qu_out.SetSize( solver.NumRows() );
+			// Assemble the RHS and the Schur complement
+			mfem::LinearForm *fform = new mfem::LinearForm;
+			mfem::StdFunctionCoefficient fcoeff( RHS );
+
+			mfem::GridFunction u;
+			u.MakeRef( const_cast<mfem::FiniteElementSpace* >( solver.GetUSpace() ), static_cast<double*>( qu_in.GetData() + solver.GetQSpace()->GetVSize() ) );
+
+			
+			fform->AddDomainIntegrator( new mfem::DomainLFIntegrator( fcoeff ) );
+			fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( u, F_NL, 4, 8 ) );
+			fform->Update(const_cast<mfem::FiniteElementSpace* >( solver.GetUSpace() ), rhs_F, 0);
+			fform->Assemble();
+
+			solver.Mult( rhs_F, qu_out );
+			delete fform;
+		};
+
+		void Postprocess( mfem::GridFunction &u_out, mfem::Vector & qu_in )
+		{
+			solver.Postprocess( u_out, qu_in );
+		};
+
+		mfem::FiniteElementSpace const * GetQSpace() const { return solver.GetQSpace(); };
+		mfem::FiniteElementSpace const * GetUSpace() const { return solver.GetUSpace(); };
+		mfem::FiniteElementSpace const * GetUStarSpace() const { return solver.GetUStarSpace(); };
+		mfem::FiniteElementSpace * GetQSpace() { return solver.GetQSpace(); };
+		mfem::FiniteElementSpace * GetUSpace() { return solver.GetUSpace(); };
+		mfem::FiniteElementSpace * GetUStarSpace() { return solver.GetUStarSpace(); };
+
+
+};
 
 int main(int argc, char *argv[])
 {
@@ -147,8 +204,8 @@ int main(int argc, char *argv[])
 		memB = 0.0;
 	}
 
-	// Mesh up [0,1] x [0,1]
-	Mesh *mesh = new Mesh(8,8,Element::Type::TRIANGLE, false, 1.0, 1.0, true );
+	// Mesh up [0.1,1] x [0.1,1]
+	Mesh *mesh = new Mesh(10,10,Element::Type::TRIANGLE, false, 1.0, 1.0, true );
 	auto xform = []( const Vector& in, Vector& out ) { 
 		constexpr double R_min = 0.1;
 		out( 1 ) = in( 1 );
@@ -163,21 +220,31 @@ int main(int argc, char *argv[])
 		mesh->UniformRefinement();
 	}
 
-	GSSolver solver( mesh, order, fFun );
+	auto squared = []( double x ){return x*x;};
+	NLGSSolver solver( mesh, order, fFun, squared );
 
 	FunctionCoefficient bcFunCoeff( bcFun );
 	solver.SetBCs( bcFunCoeff );
 
 	GridFunction q_variable,u_variable;
 
-	mfem::Vector qu;
-	solver.Solve( qu );
+	mfem::Vector qu( solver.NumRows() );
+
+	qu = 0.0;
+
+	KinSolver *nonlinearPoissonSolver = new KinSolver( KIN_FP, false );
+	nonlinearPoissonSolver->SetMaxIter( 100 );
+	nonlinearPoissonSolver->SetFuncNormTol( 1e-3 );
+	nonlinearPoissonSolver->iterative_mode = false;
+	nonlinearPoissonSolver->SetOperator( solver );
+	nonlinearPoissonSolver->Mult( qu, qu );
+
 
 	q_variable.MakeRef( solver.GetQSpace(), qu, 0 );
 	u_variable.MakeRef( solver.GetUSpace(), qu, solver.GetQSpace()->GetVSize() );
 
 	// 12. Compute the discretization error
-	int order_quad = max(2, 3*order+2);
+	int order_quad = max(2, 2*order+2);
 	const IntegrationRule *irs[Geometry::NumGeom];
 	for (int i=0; i < Geometry::NumGeom; ++i)
 	{
@@ -192,11 +259,6 @@ int main(int argc, char *argv[])
 	std::cout << "|| u_h - u_ex || = " << err_u << "\n";
 	std::cout << "|| q_h - q_ex || = " << err_q << "\n";
 	std::cout << "|| mean(u_h) - mean(u_ex) || = " << err_mean << "\n";
-
-	GridFunction ustar( solver.GetUStarSpace() );
-	solver.Postprocess( ustar, qu );
-	double err_ustar    = ustar.ComputeL2Error(ucoeff, irs);
-	std::cout << "|| u^*_h - u_ex || = " << err_ustar << std::endl;
 
 	// 13. Save the mesh and the solution.
 	if (save)

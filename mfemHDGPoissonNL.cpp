@@ -62,7 +62,8 @@ double fFun(const Vector & pt)
 	// with nu = 1/x
 	double t = ( pi*pi*x - 2*x*x*x + y - 2*x*y*y )*::cos( pi*y ) + 2*pi*x*x*::sin( pi*y );
 	// Added to cancel the nonlinear term when we're at the right solution
-	return - uFun_ex( pt ) * uFun_ex( pt ) +
+	 
+	return  - uFun_ex(pt)*uFun_ex(pt) + 
 		( ::exp( 2*x*y ) / ( x*x ) )*( pi*( 1.0 - 4.0 *  x  * y ) * ::cos( pi*x ) * ::cos( pi*y ) + ( 2 * t ) * ::sin( pi*x ) );
 
 }
@@ -104,7 +105,7 @@ class NLGSSolver
 
 			
 			fform->AddDomainIntegrator( new mfem::DomainLFIntegrator( fcoeff ) );
-			fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( u, F_NL, 4, 2 ) );
+			fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( u, F_NL, 4, 8 ) );
 			fform->Update(solver.GetUSpace(), rhs_F, 0);
 			fform->Assemble();
 
@@ -229,10 +230,10 @@ int main(int argc, char *argv[])
 	z_in = 0.0;
 
 	int iter = 0;
-	double tol = 1e-4;
-	for ( ; iter < 25; iter++ )
+	double tol = 1e-5;
+	for (  ; iter < 100; iter++ )
 	{
-		solver.Solve( z_in, qu );
+		solver.Solve( qu, z_in );
 		if ( z_in.DistanceTo( qu ) < z_in.Norml2() * tol )
 		{
 			break;

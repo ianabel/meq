@@ -25,3 +25,6 @@ mfemHDGPoisson: mfemHDGPoisson.cpp $(GSINVERTER_DEP)
 
 mfemHDGPoissonNL: mfemHDGPoissonNL.cpp $(GSINVERTER_DEP)
 	g++ $(CXXFLAGS_RELEASE) mfemHDGPoissonNL.cpp $(GSINVERTER_SRC) -o mfemHDGPoissonNL $(MFEM_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
+
+mfemHDGPoissonNL-KINSOL: mfemHDGPoissonNL-KINSOL.cpp $(GSINVERTER_DEP)
+	g++ $(CXXFLAGS_RELEASE) mfemHDGPoissonNL-KINSOL.cpp $(GSINVERTER_SRC) -o mfemHDGPoissonNL-KINSOL $(MFEM_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)

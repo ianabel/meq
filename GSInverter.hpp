@@ -27,9 +27,15 @@ class GSInverter : public mfem::Operator
 		mfem::Array<int> bOffsets;
 	public:
 		GSInverter(mfem::Mesh *meshPtr, unsigned int order);
-		mfem::FiniteElementSpace* GetQSpace() { return V_space; };
-		mfem::FiniteElementSpace* GetUSpace() { return W_space; };
-		mfem::FiniteElementSpace* GetUStarSpace() { return postproc_space; };
+		mfem::FiniteElementSpace const* GetQSpace() const { return V_space; };
+		mfem::FiniteElementSpace const* GetUSpace() const { return W_space; };
+		mfem::FiniteElementSpace const* GetUStarSpace() const { return postproc_space; };
+
+
+		mfem::FiniteElementSpace * GetQSpace()  { return V_space; };
+		mfem::FiniteElementSpace * GetUSpace()  { return W_space; };
+		mfem::FiniteElementSpace * GetUStarSpace()  { return postproc_space; };
+
 
 		void QUUpdate( mfem::Vector const& qu_old, mfem::Vector &qu_new ) const;
 
@@ -99,10 +105,13 @@ class GSSolver
 			solver.Postprocess( u_out, qu_in );
 		};
 
-		mfem::FiniteElementSpace* GetQSpace() { return solver.GetQSpace(); };
-		mfem::FiniteElementSpace* GetUSpace() { return solver.GetUSpace(); };
-		mfem::FiniteElementSpace* GetUStarSpace() { return solver.GetUStarSpace(); };
+		mfem::FiniteElementSpace const* GetQSpace() const { return solver.GetQSpace(); };
+		mfem::FiniteElementSpace const* GetUSpace() const { return solver.GetUSpace(); };
+		mfem::FiniteElementSpace const* GetUStarSpace() const { return solver.GetUStarSpace(); };
 
+		mfem::FiniteElementSpace * GetQSpace()  { return solver.GetQSpace(); };
+		mfem::FiniteElementSpace * GetUSpace()  { return solver.GetUSpace(); };
+		mfem::FiniteElementSpace * GetUStarSpace()  { return solver.GetUStarSpace(); };
 
 };
 
