@@ -1,20 +1,44 @@
 
 #include "mfem.hpp"
 
-double ElementDiameter( Element* e )
+double ElementDiameter( Mesh *m, Element* e )
 {
 	unsigned int nVerts = e.GetNVertices();
 	mfem::Array<int> VertIndices( nVerts );
 	e.GetVertices( VertIndices );
+	double *pts[ 3 ];
+	unsigned int N = m->SpaceDimension();
+	double lens[ 3 ];
+
 	switch ( e.GetType() )
 	{
 		case mfem::Element::Type::SEGMENT:
-			Vector a,b;
-			return <<>>;
+			if ( nVerts != 2 )
+				throw new std::logic_error( "Whargl, SEGMENT shu=ould have 2 vertices" );
+			pts[ 0 ] = m->GetVertex( VertIndices( 0 ) );
+			pts[ 1 ] = m->GetVertex( VertIndices( 1 ) );
+			
+			return mfem::Distance( pts[ 0 ], pts[ 1 ], N );
+			break;
+
 		case mfem::Element::Type::Triangle:
-			return <<>>;
+
+			if ( nVerts != 2 )
+				throw new std::logic_error( "Whargl, SEGMENT shu=ould have 2 vertices" );
+
+			pts[ 0 ] = m->GetVertex( VertIndices( 0 ) );
+			pts[ 1 ] = m->GetVertex( VertIndices( 1 ) );
+			pts[ 2 ] = m->GetVertex( VertIndices( 2 ) );
+
+			len[ 0 ] = mfem::Distance( pts[ 0 ], pts[ 1 ], N );
+			len[ 1 ] = mfem::Distance( pts[ 1 ], pts[ 2 ], N );
+			len[ 2 ] = mfem::Distance( pts[ 2 ], pts[ 0 ], N );
+			
+			return std::max( std::max( len[ 0 ], len[ 1 ] ), len[ 2 ] );
+			break;
+
 		default:
-			throw new std::logic_error( "Unsupported." );
+			throw new std::logic_error( "Unsupported geometric element type." );
 	}
 	return -1.0;
 }
@@ -25,49 +49,117 @@ class CockburnZhangEstimator : public mfem::ErrorEstimator
 		mfem::Mesh *mesh;
 		mfem::FiniteElementSpace *q_space;
 		mfem::FiniteElementSpace *u_space;
+		mfem::FiniteElementSpace *m_space;
 
 		mfem::Vector localErrors;
-		GridFunction &q_sol,&u_sol;
+		GridFunction &q_sol,&u_sol,&lambda;
 		Coefficient &kappa;
 		Coefficient &rhs;
 		bool valid;
 	public:
-	CockburnZhangEstimator( GridFunction &q, GridFunction &u, Coefficient &kappa_ref, Coefficient &rhs_ref )
-		: q_sol( q ), u_sol( u ), kappa( kappa_ref ), rhs( rhs_ref ),valid( false )
+	CockburnZhangEstimator( GridFunction &q, GridFunction &u, GridFunction &lambda_ref, Coefficient &kappa_ref, Coefficient &rhs_ref )
+		: q_sol( q ), u_sol( u ), lambda( lambda_ref ), kappa( kappa_ref ), rhs( rhs_ref ),valid( false )
 	{
 		q_space = q.FESpace();
 		u_space = u.FESpace();
+		m_space = lambda.FESpace();
 		mesh = u_space->GetMesh();
 	};
 	
 
 	double ComputeElementError( unsigned int i ) 
 	{
-		mfem::IntegrationRule CellIntegrator;
-		mfem::ElementTransformation trans = mesh->GetElementTransformation( i );
-		mfem::FiniteElement u_fe = u_space->GetFE( i );
-		mfem::FiniteElement q_fe = q_space->GetFE( i );
+		mfem::ElementTransformation *trans = mesh->GetElementTransformation( i );
+		mfem::Element *K = mesh->GetElement( i );
+		mfem::FiniteElement *u_fe = u_space->GetFE( i );
+		mfem::FiniteElement *q_fe = q_space->GetFE( i );
 
 		double eta_1 = 0;
 		double eta_2 = 0;
 
-		double h_K = 
+		unsigned int order = 2 * q_fe.GetOrder() + 3;
+		mfem::IntegrationRule& CellIntegrator = mfem::IntRules.Get( K->GetType(), order );
+		
 
-		for ()
+		double h_K = ElementDiameter( mesh, K );
+
+		// Sum over integration points
+		for (int j=0; j < CellIntegrator.GetNPoints(); j++)
 		{
-			// Integrate over K.
+			const IntegrationPoint &ip = CellIntegrator.IntPoint( j );
+			trans.SetIntPoint( ip );
+
+			double eta_1_tmp;
+			// eta_1 = h_K^2 * || F_RHS + div q ||^2
+			eta_1_tmp = ( rhs.Eval( Trans, ip ) + q_sol.GetDivergence( trans ) );
+			eta_1 += h_K * h_K * eta_1_tmp * eta_1_tmp;
+
+			Vector eta_2_tmp;
+			// eta_2 = || q - kappa*(grad u) ||^2
+			Vector q_val;
+			Vector GradU;
+			q_sol.GetVectorValue( i, ip, q_val );
+			u_sol.GetGradient( trans, GradU );
+			eta_2_tmp = q_val - GradU;	
+			eta_2 += eta_2_tmp * eta_2_tmp;
 		}
 
 		double eta_3 = 0;
 		double eta_4 = 0;
 		double eta_5 = 0;
 
-		for ()
+		mfem::Array<int> faces,orientations;
+		mesh->GetElementFaces( i, faces, orientations );
+
+		// Sum over all faces
+		for (int j=0; j < faces.Size(); j++)
 		{
-			// Sum over all faces
-			for ()
+			mfem::Element *e = GetFace( faces( j ) );
+			double h_e = ElementDiameter( mesh, e );
+
+			mfem::FaceElementTransformations *feTrans = mesh->GetFaceElementTransformations( faces( j ) );
+
+			// Integrate over e
+			mfem::IntegrationRule& EdgeIntegrator = mfem::IntRules.Get( e->GetType(), order );
+			for (int k=0; k < EdgeIntegrator.GetNPoints(); k++)
 			{
-				// Integrate over e
+				const IntegrationPoint& ip = EdgeIntegrator.IntPoint( k );
+				IntegrationPoint eip1,eip2; 
+				feTrans->Loc1.Transform( ip, eip1 );
+				feTrans->Loc2.Transform( ip, eip2 );
+				feTrans->Elem1->SetIntPoint( &eip1 );
+				feTrans->Elem2->SetIntPoint( &eip2 );
+				feTrans->Face->SetIntPoint( &ip );
+
+				// eta_3 = (1/2) * h_e * || (q_plus - q_minus) . n ||^2
+				Vector q_plus,q_minus;
+				q_sol.GetVectorValue( feTrans->ElemNo1, eip1, q_plus );
+				q_sol.GetVectorValue( feTrans->ElemNo2, eip2, q_minus );
+				
+				Vector normal;	
+				mfem::CalcOrtho( feTrans->Face->Jacobian(), normal );
+				normal /= normal.Norml2();
+
+				double q_jump = ( q_plus - q_minus ) * normal;
+				eta_3 += 0.5 * h_e * q_jump * q_jump;
+
+				// eta_4 = .5 * h_e^{-1} || u_plus - u_minus ||^2
+				double u_plus,u_minus;
+
+				u_plus  = u_sol.GetValue( feTrans->ElemNo1, eip1 );
+				u_minus = u_sol.GetValue( feTrans->ElemNo2, eip2 );
+				
+				eta_4 += ( .5 / h_e ) * ( u_plus - u_minus ) * ( u_plus - u_minus );
+
+				// eta_5 = (.5/h_e) * || lambda - u ||^2
+				double lambda_val,u_val;
+				lambda_val = lambda.GetValue( faces( j ), ip );
+				if ( feTrans->ElemNo1 == i )
+					u_val = u_sol.GetValue( feTrans->ElemNo1, eip1 );
+				else if ( feTrans->ElemNo2 == i )
+					u_val = u_sol.GetValue( feTrans->ElemNo2, eip2 );
+				eta_5 += ( .5/h_e )*( lambda_val - u_val )*( lambda_val - u_val );
+
 			}
 		}
 	}

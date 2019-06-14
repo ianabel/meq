@@ -36,7 +36,8 @@ GSInverter::GSInverter(Mesh *meshPtr, unsigned int order) :
 	bOffsets[ 0 ] = 0;
 	bOffsets[ 1 ] = dimV;
 	bOffsets[ 2 ] = dimV + dimW;
-	height = dimV + dimW;
+	bOffsets[ 3 ] = dimV + dimW + dimM;
+	height = dimV + dimW + dimM;
 	width = dimW;
 };
 
@@ -153,13 +154,14 @@ void GSInverter::Update() {
 	dimW = W_space->GetVSize();
 	dimM = M_space->GetVSize();
 
+	postproc_space->Update( true );
 
 	bOffsets.SetSize( 3 );
 	bOffsets[ 0 ] = 0;
 	bOffsets[ 1 ] = dimV;
 	bOffsets[ 2 ] = dimV + dimW;
 	height = dimV + dimW;
-	width = dimV + dimW;
+	width = dimW;
 };
 
 

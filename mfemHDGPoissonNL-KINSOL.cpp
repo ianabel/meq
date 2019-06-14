@@ -77,7 +77,6 @@ class NLGSSolver : public mfem::Operator
 		GSInverter solver;
 		RealFunc RHS;
 		NLFunc F_NL;
-		mfem::Vector rhs_F;
 	public:
 		NLGSSolver(mfem::Mesh *meshPtr, unsigned int order, RealFunc fRHS, NLFunc F_nl )
 			: solver( meshPtr, order ), RHS( fRHS ), F_NL( F_nl )
@@ -86,12 +85,15 @@ class NLGSSolver : public mfem::Operator
 			width = solver.NumRows();
 		};
 
-		void SetBCs( mfem::Coefficient& coeff ) 
-		{
+		void SetBCs( mfem::Coefficient& coeff ) {
 			solver.SetBCs( coeff );
 		};
 
-
+		void Update() { 
+			solver.Update(); 
+			height = solver.NumRows();
+			width = solver.NumRows();
+		};
 
 		virtual void Mult( mfem::Vector const& qu_in, mfem::Vector & qu_out ) const
 		{
@@ -104,7 +106,6 @@ class NLGSSolver : public mfem::Operator
 			mfem::GridFunction u;
 			u.MakeRef( const_cast<mfem::FiniteElementSpace* >( solver.GetUSpace() ), static_cast<double*>( qu_in.GetData() + solver.GetQSpace()->GetVSize() ) );
 
-			
 			fform->AddDomainIntegrator( new mfem::DomainLFIntegrator( fcoeff ) );
 			fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( u, F_NL, 4, 8 ) );
 			fform->Update(const_cast<mfem::FiniteElementSpace* >( solver.GetUSpace() ), rhs_F, 0);
@@ -126,6 +127,10 @@ class NLGSSolver : public mfem::Operator
 		mfem::FiniteElementSpace * GetUSpace() { return solver.GetUSpace(); };
 		mfem::FiniteElementSpace * GetUStarSpace() { return solver.GetUStarSpace(); };
 
+		void Prolong( mfem::Vector const& qu_old, mfem::Vector & qu_new ) const
+		{
+			solver.QUUpdate( qu_old, qu_new );
+		};
 
 };
 
@@ -239,9 +244,28 @@ int main(int argc, char *argv[])
 	nonlinearPoissonSolver->SetOperator( solver );
 	nonlinearPoissonSolver->Mult( qu, qu );
 
+	mfem::Vector qu_refined;
 
-	q_variable.MakeRef( solver.GetQSpace(), qu, 0 );
-	u_variable.MakeRef( solver.GetUSpace(), qu, solver.GetQSpace()->GetVSize() );
+	mesh->UniformRefinement();
+	solver.Update();
+	solver.Prolong( qu, qu_refined );
+	solver.SetBCs( bcFunCoeff );
+
+	qu.SetSize( solver.Height() );
+	qu = 0.0;
+	std::cout << "Mesh has been refined" << std::endl;
+
+	delete nonlinearPoissonSolver;
+
+	nonlinearPoissonSolver = new KinSolver( KIN_FP, false );
+	nonlinearPoissonSolver->SetMaxIter( 100 );
+	nonlinearPoissonSolver->SetFuncNormTol( 1e-5 );
+	nonlinearPoissonSolver->iterative_mode = true;
+	nonlinearPoissonSolver->SetOperator( solver );
+	nonlinearPoissonSolver->Mult( qu_refined, qu_refined );
+	
+	q_variable.MakeRef( solver.GetQSpace(), qu_refined, 0 );
+	u_variable.MakeRef( solver.GetUSpace(), qu_refined, solver.GetQSpace()->GetVSize() );
 
 	// 12. Compute the discretization error
 	int order_quad = max(2, 2*order+2);

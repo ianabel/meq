@@ -36,6 +36,9 @@ class GSInverter : public mfem::Operator
 		mfem::FiniteElementSpace * GetUSpace()  { return W_space; };
 		mfem::FiniteElementSpace * GetUStarSpace()  { return postproc_space; };
 
+		mfem::FiniteElementSpace * GetMSpace() { return M_space;};
+		mfem::FiniteElementSpace const* GetMSpace() const { return M_space;};
+
 
 		void QUUpdate( mfem::Vector const& qu_old, mfem::Vector &qu_new ) const;
 
@@ -113,6 +116,10 @@ class GSSolver
 		mfem::FiniteElementSpace * GetUSpace()  { return solver.GetUSpace(); };
 		mfem::FiniteElementSpace * GetUStarSpace()  { return solver.GetUStarSpace(); };
 
+		mfem::FiniteElementSpace * GetMSpace() { return solver.GetMSpace();};
+		mfem::FiniteElementSpace const* GetMSpace() const { return solver.GetMSpace();};
+
+		mfem::Array<int> const& GetOffsets() { return solver.GetOffsets();};
 };
 
 

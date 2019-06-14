@@ -163,6 +163,9 @@ int main(int argc, char *argv[])
 		mesh->UniformRefinement();
 	}
 
+	
+	ThresholdRefiner refiner( errorEstimator );
+
 	GSSolver solver( mesh, order, fFun );
 
 	FunctionCoefficient bcFunCoeff( bcFun );
