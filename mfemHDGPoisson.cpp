@@ -12,6 +12,7 @@
  */
 
 #include "GSInverter.hpp"
+#include "CockburnEstimator.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -164,20 +165,31 @@ int main(int argc, char *argv[])
 	}
 
 	
-	ThresholdRefiner refiner( errorEstimator );
-
 	GSSolver solver( mesh, order, fFun );
 
 	FunctionCoefficient bcFunCoeff( bcFun );
 	solver.SetBCs( bcFunCoeff );
 
-	GridFunction q_variable,u_variable;
+	
+	GridFunction q_variable,u_variable,u_hat_variable;
 
 	mfem::Vector qu;
 	solver.Solve( qu );
 
 	q_variable.MakeRef( solver.GetQSpace(), qu, 0 );
 	u_variable.MakeRef( solver.GetUSpace(), qu, solver.GetQSpace()->GetVSize() );
+	u_hat_variable.MakeRef( solver.GetMSpace(), qu, solver.GetQSpace()->GetVSize() + solver.GetUSpace()->GetVSize() );
+
+	StdFunctionCoefficient fFunCoeff( fFun );
+	auto kappaF = []( const Vector& pt ) { return 1.0 / pt( 0 ); };
+	StdFunctionCoefficient kappa( kappaF );
+	CockburnZhangEstimator errorEstimator( q_variable, u_variable, u_hat_variable, kappa, fFunCoeff );
+
+	ThresholdRefiner refiner( errorEstimator );
+	refiner.SetTotalErrorFraction( 0.7 );
+	refiner.Apply( *mesh );
+
+
 
 	// 12. Compute the discretization error
 	int order_quad = max(2, 3*order+2);
@@ -196,15 +208,10 @@ int main(int argc, char *argv[])
 	std::cout << "|| q_h - q_ex || = " << err_q << "\n";
 	std::cout << "|| mean(u_h) - mean(u_ex) || = " << err_mean << "\n";
 
-	GridFunction ustar( solver.GetUStarSpace() );
-	solver.Postprocess( ustar, qu );
-	double err_ustar    = ustar.ComputeL2Error(ucoeff, irs);
-	std::cout << "|| u^*_h - u_ex || = " << err_ustar << std::endl;
-
 	// 13. Save the mesh and the solution.
 	if (save)
 	{
-		ofstream mesh_ofs("ex_hdg.mesh");
+		ofstream mesh_ofs("refined.mesh");
 		mesh_ofs.precision(8);
 		mesh->Print(mesh_ofs);
 
@@ -233,6 +240,11 @@ int main(int argc, char *argv[])
 		q_sock << "solution\n" << *mesh << q_variable << "window_title 'Solution q'" <<
 			endl;
 	}
+
+	GridFunction ustar( solver.GetUStarSpace() );
+	solver.Postprocess( ustar, qu );
+	double err_ustar    = ustar.ComputeL2Error(ucoeff, irs);
+	std::cout << "|| u^*_h - u_ex || = " << err_ustar << std::endl;
 
 
 	delete mesh;

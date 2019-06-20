@@ -107,7 +107,7 @@ class NLGSSolver : public mfem::Operator
 			u.MakeRef( const_cast<mfem::FiniteElementSpace* >( solver.GetUSpace() ), static_cast<double*>( qu_in.GetData() + solver.GetQSpace()->GetVSize() ) );
 
 			fform->AddDomainIntegrator( new mfem::DomainLFIntegrator( fcoeff ) );
-			fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( u, F_NL, 4, 8 ) );
+			fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( u, F_NL, 3, 2 ) );
 			fform->Update(const_cast<mfem::FiniteElementSpace* >( solver.GetUSpace() ), rhs_F, 0);
 			fform->Assemble();
 
@@ -129,7 +129,7 @@ class NLGSSolver : public mfem::Operator
 
 		void Prolong( mfem::Vector const& qu_old, mfem::Vector & qu_new ) const
 		{
-			solver.QUUpdate( qu_old, qu_new );
+			solver.Prolong( qu_old, qu_new );
 		};
 
 };
@@ -249,7 +249,7 @@ int main(int argc, char *argv[])
 	mesh->UniformRefinement();
 	solver.Update();
 	solver.Prolong( qu, qu_refined );
-	solver.SetBCs( bcFunCoeff );
+	// solver.SetBCs( bcFunCoeff );
 
 	qu.SetSize( solver.Height() );
 	qu = 0.0;

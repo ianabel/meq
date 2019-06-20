@@ -11,6 +11,8 @@ class GSInverter : public mfem::Operator
 
 		// Owned
 
+		mfem::Coefficient *boundary_conditions;
+
 		mfem::FiniteElementCollection *dg_coll, *face_coll;
 		mfem::FiniteElementSpace *V_space,*W_space,*M_space;
 		mfem::HDGBilinearForm3 *AVarf;
@@ -18,8 +20,6 @@ class GSInverter : public mfem::Operator
 
 		const double tau_D;
 
-
-		mfem::GridFunction BoundaryConditions;
 
 		mfem::FiniteElementCollection *postproc_coll;
 		mfem::FiniteElementSpace *postproc_space;
@@ -40,7 +40,7 @@ class GSInverter : public mfem::Operator
 		mfem::FiniteElementSpace const* GetMSpace() const { return M_space;};
 
 
-		void QUUpdate( mfem::Vector const& qu_old, mfem::Vector &qu_new ) const;
+		void Prolong( mfem::Vector const& soln_old, mfem::Vector &soln_new ) const;
 
 		mfem::Array<int> const & GetOffsets() { return bOffsets; };
 		void SetBCs( mfem::Coefficient& coeff );
@@ -88,10 +88,9 @@ class GSSolver
 			solver.SetBCs( coeff );
 		};
 
-		void Solve( mfem::Vector& qu_out )
+		void Solve( mfem::Vector& soln_out )
 		{
 			mfem::Vector rhs_F( solver.NumCols() );
-			qu_out.SetSize( solver.NumRows() );
 			// Assemble the RHS and the Schur complement
 			mfem::LinearForm *fform = new mfem::LinearForm;
 			mfem::StdFunctionCoefficient fcoeff( RHS );
@@ -99,7 +98,7 @@ class GSSolver
 			fform->Update(solver.GetUSpace(), rhs_F, 0);
 			fform->Assemble();
 
-			solver.Mult( rhs_F, qu_out );
+			solver.Mult( rhs_F, soln_out );
 			delete fform;
 		};
 

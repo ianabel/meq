@@ -6,6 +6,7 @@ GSInverter::GSInverter(Mesh *meshPtr, unsigned int order) :
 	mesh( meshPtr ),
 	Order( order ),
 	Dim( 2 ),
+	boundary_conditions( nullptr ),
 	tau_D( 5.0 )
 {
 	// Define finite element collections and spaces on the mesh.
@@ -32,7 +33,7 @@ GSInverter::GSInverter(Mesh *meshPtr, unsigned int order) :
 	postproc_coll = new DG_FECollection( Order + 1, Dim );
 	postproc_space = new FiniteElementSpace( mesh, postproc_coll );
 
-	bOffsets.SetSize( 3 );
+	bOffsets.SetSize( 4 );
 	bOffsets[ 0 ] = 0;
 	bOffsets[ 1 ] = dimV;
 	bOffsets[ 2 ] = dimV + dimW;
@@ -46,7 +47,7 @@ GSInverter::GSInverter(Mesh *meshPtr, unsigned int order) :
  * Prolongs a vector containing q & u from the old mesh to the 
  * new. This will not handle increasing polynomial order.
  */
-void GSInverter::QUUpdate( Vector const& qu_old, Vector &qu_new ) const
+void GSInverter::Prolong( Vector const& soln_old, Vector &soln_new ) const
 {
 	const Operator* U_update = W_space->GetUpdateOperator();
 	const Operator* Q_update = V_space->GetUpdateOperator();
@@ -54,15 +55,16 @@ void GSInverter::QUUpdate( Vector const& qu_old, Vector &qu_new ) const
 	int U_new_dim = U_update->Height();
 	int Q_old_dim = Q_update->Width();
 	int Q_new_dim = Q_update->Height();
-	if ( U_old_dim + Q_old_dim != qu_old.Size() )
-		throw new std::logic_error( "Stop trying to multiply badgers by goats!" );
-	qu_new.SetSize( U_new_dim + Q_new_dim );
-	qu_new = 0.;
+	soln_new.SetSize( U_new_dim + Q_new_dim + dimM );
 
-	Array<int> oldOffsets; oldOffsets.SetSize( 3 );
+	// So the new Lambda variable is zero.
+	soln_new = 0.;
+
+	Array<int> oldOffsets; oldOffsets.SetSize( 4 );
 	oldOffsets[ 0 ] = 0; oldOffsets[ 1 ] = Q_old_dim; oldOffsets[ 2 ] = U_old_dim + Q_old_dim;
-	BlockVector QU_old_blk( qu_old.GetData(), oldOffsets );
-	BlockVector QU_new_blk( qu_new.GetData(), bOffsets );
+	oldOffsets[ 3 ] = soln_old.Size();
+	BlockVector QU_old_blk( soln_old.GetData(), oldOffsets );
+	BlockVector QU_new_blk( soln_new.GetData(), bOffsets );
 
 	Q_update->Mult( QU_old_blk.GetBlock( 0 ), QU_new_blk.GetBlock( 0 ) );
 	U_update->Mult( QU_old_blk.GetBlock( 1 ), QU_new_blk.GetBlock( 1 ) );
@@ -71,16 +73,13 @@ void GSInverter::QUUpdate( Vector const& qu_old, Vector &qu_new ) const
 
 void GSInverter::SetBCs( Coefficient& coeff )
 {
-	BoundaryConditions.SetSpace( M_space );
-	Array<int> boundary( mesh->bdr_attributes.Max() );
-	boundary = 1; // The entire boundary is dirichlet
-	BoundaryConditions.ProjectBdrCoefficient( coeff, boundary );
+	boundary_conditions = &coeff;
 }
 
 // Actually solve the problem:
 // which in this case doesn't depend on the input vector
 // and store in the Vector y
-void GSInverter::Mult( const Vector& rhs_F_in , Vector& qu_out ) const
+void GSInverter::Mult( const Vector& rhs_F_in , Vector& soln_out ) const
 {
 	StopWatch chrono;
 	Vector rhs_F( rhs_F_in );
@@ -94,10 +93,16 @@ void GSInverter::Mult( const Vector& rhs_F_in , Vector& qu_out ) const
 
 	// To eliminate the boundary conditions we project the BC to a grid function
 	// defined for the facet unknowns.
-	GridFunction lambda_variable( BoundaryConditions );
+	GridFunction lambda_variable;
+
+	soln_out.SetSize( height );
+	lambda_variable.MakeRef( M_space, soln_out, dimV + dimW );
+	lambda_variable = 0.0;
 
 	Array<int> ess_bdr(mesh->bdr_attributes.Max());
 	ess_bdr = 1;
+
+	lambda_variable.ProjectBdrCoefficient( *boundary_conditions, ess_bdr );
 
 	GridFunction R(V_space, rhs_R);
 	GridFunction F(W_space, rhs_F);
@@ -124,6 +129,13 @@ void GSInverter::Mult( const Vector& rhs_F_in , Vector& qu_out ) const
 	chrono.Clear();
 	chrono.Start();
 	solver.Mult(*SC_RHS, lambda_variable);
+
+	// Reconstruct the solution u and q from the facet solution lambda
+	GridFunction q_variable,u_variable;
+	q_variable.MakeRef( V_space, soln_out, 0 );
+	u_variable.MakeRef( W_space, soln_out, dimV );
+	AVarf->Reconstruct(&R, &F, lambda_variable, &q_variable, &u_variable);
+
 	chrono.Stop();
 
 	if (!solver.GetConverged())
@@ -134,13 +146,6 @@ void GSInverter::Mult( const Vector& rhs_F_in , Vector& qu_out ) const
 	{
 		std::cout << "Linear Solve took " << chrono.RealTime() << " seconds." << std::endl;
 	}
-
-	// Reconstruct the solution u and q from the facet solution lambda
-	GridFunction q_variable,u_variable;
-	qu_out.SetSize( dimV + dimW );
-	q_variable.MakeRef( V_space, qu_out, 0 );
-	u_variable.MakeRef( W_space, qu_out, dimV );
-	AVarf->Reconstruct(&R, &F, lambda_variable, &q_variable, &u_variable);
 };
 
 void GSInverter::Update() {
@@ -156,11 +161,12 @@ void GSInverter::Update() {
 
 	postproc_space->Update( true );
 
-	bOffsets.SetSize( 3 );
+	bOffsets.SetSize( 4 );
 	bOffsets[ 0 ] = 0;
 	bOffsets[ 1 ] = dimV;
 	bOffsets[ 2 ] = dimV + dimW;
-	height = dimV + dimW;
+	bOffsets[ 3 ] = dimV + dimW + dimM;
+	height = dimV + dimW + dimM;
 	width = dimW;
 };
 

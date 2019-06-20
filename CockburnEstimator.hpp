@@ -1,34 +1,35 @@
 
 #include "mfem.hpp"
 
-double ElementDiameter( Mesh *m, Element* e )
+namespace mfem {
+double ElementDiameter( Mesh const *m, Element const* e )
 {
-	unsigned int nVerts = e.GetNVertices();
+	unsigned int nVerts = e->GetNVertices();
 	mfem::Array<int> VertIndices( nVerts );
-	e.GetVertices( VertIndices );
-	double *pts[ 3 ];
+	e->GetVertices( VertIndices );
+	double const * pts[ 3 ];
 	unsigned int N = m->SpaceDimension();
-	double lens[ 3 ];
+	double len[ 3 ];
 
-	switch ( e.GetType() )
+	switch ( e->GetType() )
 	{
 		case mfem::Element::Type::SEGMENT:
 			if ( nVerts != 2 )
-				throw new std::logic_error( "Whargl, SEGMENT shu=ould have 2 vertices" );
-			pts[ 0 ] = m->GetVertex( VertIndices( 0 ) );
-			pts[ 1 ] = m->GetVertex( VertIndices( 1 ) );
+				throw new std::logic_error( "Whargl, SEGMENT should have 2 vertices" );
+			pts[ 0 ] = m->GetVertex( VertIndices[ 0 ] );
+			pts[ 1 ] = m->GetVertex( VertIndices[ 1 ] );
 			
 			return mfem::Distance( pts[ 0 ], pts[ 1 ], N );
 			break;
 
-		case mfem::Element::Type::Triangle:
+		case mfem::Element::Type::TRIANGLE:
 
-			if ( nVerts != 2 )
-				throw new std::logic_error( "Whargl, SEGMENT shu=ould have 2 vertices" );
+			if ( nVerts != 3 )
+				throw new std::logic_error( "Whargl, Triangle should have 3 vertices" );
 
-			pts[ 0 ] = m->GetVertex( VertIndices( 0 ) );
-			pts[ 1 ] = m->GetVertex( VertIndices( 1 ) );
-			pts[ 2 ] = m->GetVertex( VertIndices( 2 ) );
+			pts[ 0 ] = m->GetVertex( VertIndices[ 0 ] );
+			pts[ 1 ] = m->GetVertex( VertIndices[ 1 ] );
+			pts[ 2 ] = m->GetVertex( VertIndices[ 2 ] );
 
 			len[ 0 ] = mfem::Distance( pts[ 0 ], pts[ 1 ], N );
 			len[ 1 ] = mfem::Distance( pts[ 1 ], pts[ 2 ], N );
@@ -42,6 +43,7 @@ double ElementDiameter( Mesh *m, Element* e )
 	}
 	return -1.0;
 }
+
 
 class CockburnZhangEstimator : public mfem::ErrorEstimator
 {
@@ -70,15 +72,15 @@ class CockburnZhangEstimator : public mfem::ErrorEstimator
 	double ComputeElementError( unsigned int i ) 
 	{
 		mfem::ElementTransformation *trans = mesh->GetElementTransformation( i );
-		mfem::Element *K = mesh->GetElement( i );
-		mfem::FiniteElement *u_fe = u_space->GetFE( i );
-		mfem::FiniteElement *q_fe = q_space->GetFE( i );
+		mfem::Element const *K = mesh->GetElement( i );
+		mfem::FiniteElement const *u_fe = u_space->GetFE( i );
+		mfem::FiniteElement const *q_fe = q_space->GetFE( i );
 
 		double eta_1 = 0;
 		double eta_2 = 0;
 
-		unsigned int order = 2 * q_fe.GetOrder() + 3;
-		mfem::IntegrationRule& CellIntegrator = mfem::IntRules.Get( K->GetType(), order );
+		unsigned int order = 2 * q_fe->GetOrder() + 3;
+		mfem::IntegrationRule const& CellIntegrator = mfem::IntRules.Get( K->GetType(), order );
 		
 
 		double h_K = ElementDiameter( mesh, K );
@@ -87,11 +89,11 @@ class CockburnZhangEstimator : public mfem::ErrorEstimator
 		for (int j=0; j < CellIntegrator.GetNPoints(); j++)
 		{
 			const IntegrationPoint &ip = CellIntegrator.IntPoint( j );
-			trans.SetIntPoint( ip );
+			trans->SetIntPoint( &ip );
 
 			double eta_1_tmp;
 			// eta_1 = h_K^2 * || F_RHS + div q ||^2
-			eta_1_tmp = ( rhs.Eval( Trans, ip ) + q_sol.GetDivergence( trans ) );
+			eta_1_tmp = ( rhs.Eval( *trans, ip ) + q_sol.GetDivergence( *trans ) );
 			eta_1 += h_K * h_K * eta_1_tmp * eta_1_tmp;
 
 			Vector eta_2_tmp;
@@ -99,7 +101,7 @@ class CockburnZhangEstimator : public mfem::ErrorEstimator
 			Vector q_val;
 			Vector GradU;
 			q_sol.GetVectorValue( i, ip, q_val );
-			u_sol.GetGradient( trans, GradU );
+			u_sol.GetGradient( *trans, GradU );
 			eta_2_tmp = q_val - GradU;	
 			eta_2 += eta_2_tmp * eta_2_tmp;
 		}
@@ -109,18 +111,18 @@ class CockburnZhangEstimator : public mfem::ErrorEstimator
 		double eta_5 = 0;
 
 		mfem::Array<int> faces,orientations;
-		mesh->GetElementFaces( i, faces, orientations );
+		mesh->GetElementEdges( i, faces, orientations );
 
 		// Sum over all faces
 		for (int j=0; j < faces.Size(); j++)
 		{
-			mfem::Element *e = GetFace( faces( j ) );
+			mfem::Element const *e = mesh->GetFace( faces[ j ] );
 			double h_e = ElementDiameter( mesh, e );
 
-			mfem::FaceElementTransformations *feTrans = mesh->GetFaceElementTransformations( faces( j ) );
+			mfem::FaceElementTransformations *feTrans = mesh->GetFaceElementTransformations( faces[ j ] );
 
 			// Integrate over e
-			mfem::IntegrationRule& EdgeIntegrator = mfem::IntRules.Get( e->GetType(), order );
+			mfem::IntegrationRule const& EdgeIntegrator = mfem::IntRules.Get( e->GetType(), order );
 			for (int k=0; k < EdgeIntegrator.GetNPoints(); k++)
 			{
 				const IntegrationPoint& ip = EdgeIntegrator.IntPoint( k );
@@ -133,35 +135,39 @@ class CockburnZhangEstimator : public mfem::ErrorEstimator
 
 				// eta_3 = (1/2) * h_e * || (q_plus - q_minus) . n ||^2
 				Vector q_plus,q_minus;
-				q_sol.GetVectorValue( feTrans->ElemNo1, eip1, q_plus );
-				q_sol.GetVectorValue( feTrans->ElemNo2, eip2, q_minus );
+				q_sol.GetVectorValue( feTrans->Elem1No, eip1, q_plus );
+				q_sol.GetVectorValue( feTrans->Elem2No, eip2, q_minus );
 				
-				Vector normal;	
+				Vector normal( mesh->SpaceDimension() );	
 				mfem::CalcOrtho( feTrans->Face->Jacobian(), normal );
 				normal /= normal.Norml2();
 
-				double q_jump = ( q_plus - q_minus ) * normal;
+				double q_jump = q_plus * normal - q_minus * normal;
 				eta_3 += 0.5 * h_e * q_jump * q_jump;
 
 				// eta_4 = .5 * h_e^{-1} || u_plus - u_minus ||^2
 				double u_plus,u_minus;
 
-				u_plus  = u_sol.GetValue( feTrans->ElemNo1, eip1 );
-				u_minus = u_sol.GetValue( feTrans->ElemNo2, eip2 );
+				u_plus  = u_sol.GetValue( feTrans->Elem1No, eip1 );
+				u_minus = u_sol.GetValue( feTrans->Elem2No, eip2 );
 				
 				eta_4 += ( .5 / h_e ) * ( u_plus - u_minus ) * ( u_plus - u_minus );
 
 				// eta_5 = (.5/h_e) * || lambda - u ||^2
 				double lambda_val,u_val;
-				lambda_val = lambda.GetValue( faces( j ), ip );
-				if ( feTrans->ElemNo1 == i )
-					u_val = u_sol.GetValue( feTrans->ElemNo1, eip1 );
-				else if ( feTrans->ElemNo2 == i )
-					u_val = u_sol.GetValue( feTrans->ElemNo2, eip2 );
+				lambda_val = lambda.GetValue( faces[ j ], ip );
+				if ( feTrans->Elem1No == i )
+					u_val = u_sol.GetValue( feTrans->Elem1No, eip1 );
+				else if ( feTrans->Elem2No == i )
+					u_val = u_sol.GetValue( feTrans->Elem2No, eip2 );
+				else 
+					throw new std::logic_error( "Element is neither of the ones attached to the face. Wat." );
+
 				eta_5 += ( .5/h_e )*( lambda_val - u_val )*( lambda_val - u_val );
 
 			}
 		}
+		return eta_1 + eta_2 + eta_3 + eta_4 + eta_5;
 	}
 
    /// Get a Vector with all element errors.
@@ -184,4 +190,6 @@ class CockburnZhangEstimator : public mfem::ErrorEstimator
 	{
 		valid = false;
 	}
+};
+
 }
