@@ -1,30 +1,21 @@
 #include "mfem.hpp"
+#include "HDGGSIntegrator.hpp"
+#include "FreeBoundary.hpp"
 #include <fstream>
 #include <iostream>
 
 using namespace mfem;
-
-
-double sinX( mfem::Vector const& pt )
-{
-	double pi = 3.14159265358979323844;
-	return ::sin( pi * pt( 0 ) / 2 );
-}
 
 void qFun( mfem::Vector const & in , mfem::Vector & out )
 {
 	double x = in( 0 );
 	double y = in( 1 );
 
-	out( 0 ) = 2.0 * ( x - 0.5 );
+	out( 0 ) = ( x - 0.55 )/.45;
 	out( 1 ) = 2.0 * ( y - 0.5 );
 
 	return;
 }
-
-
-
-
 
 double u_fun( mfem::Vector const& in )
 {
@@ -35,7 +26,15 @@ double u_fun( mfem::Vector const& in )
 int main(int argc, char *argv[])
 {
 	int order = 4;
-   Mesh *mesh = new Mesh(4, 4, mfem::Element::Type::TRIANGLE );
+   Mesh *mesh = new Mesh(8, 8, mfem::Element::Type::TRIANGLE );
+	auto xform = []( const Vector& in, Vector& out ) { 
+		constexpr double R_min = 0.1;
+		out( 1 ) = in( 1 );
+		out( 0 ) = R_min + in( 0 )*( 1 - R_min );
+	};
+	mesh->Transform( xform );
+
+
 	int dim = mesh->Dimension();
 
 	FiniteElementCollection *fec_cells = new DG_FECollection( order, dim );
@@ -60,29 +59,23 @@ int main(int argc, char *argv[])
 	VectorFunctionCoefficient q_c( dim, qFun );
 	q.ProjectCoefficient( q_c );
 	
+	mfem::Vector test_pt( 2 );
+	test_pt( 0 ) = .1;
+	test_pt( 1 ) = .5;
 
-	std::cout << "Mesh is dimension " << dim << std::endl;
-	std::cout << "Number of finite element unknowns in cells for scalar: " << fe_cell_space->GetNDofs() << std::endl;
-	std::cout << "Number of finite element unknowns in cells for vector: " << fe_cell_vector_space->GetNDofs() << std::endl;
-	std::cout << "Number of boundary elements: " << fe_cell_space->GetNBE() << std::endl;
+	std::cout << "BPsi(.1,.5) = " << BoundaryPsi( fe_cell_vector_space, q, test_pt ) << std::endl;
 
-	std::cout << std::endl;
+	test_pt( 0 ) = 1;
+	test_pt( 1 ) = .5;
 
-	std::cout << "Number of scalar elements: " << fe_cell_space->GetNE() << std::endl;
-	std::cout << "Number of vector elements: " << fe_cell_vector_space->GetNE() << std::endl;
-	std::cout << "Number of edge elements: " << fe_edge_space->GetNBE() << std::endl;
+	std::cout << "BPsi(1,.5) = " << BoundaryPsi( fe_cell_vector_space, q, test_pt ) << std::endl;
 
-	LinearForm biForm( fe_cell_space );
-	biForm.AddBdrFaceIntegrator( new HDGBoundaryTraceIntegrator( one ) );
-	biForm.Assemble();
+	test_pt( 0 ) = .5;
+	test_pt( 1 ) = 1;
 
-	std::cout << "Integral of 1 * 1 around the boundary is " << biForm( u ) << std::endl;
+	std::cout << "BPsi(.5,1) = " << BoundaryPsi( fe_cell_vector_space, q, test_pt ) << std::endl;
 
-	LinearForm biVForm( fe_cell_vector_space );
-	biVForm.AddBdrFaceIntegrator( new HDGBoundaryNormalTraceIntegrator( one ) );
-	biVForm.Assemble();	
 
-	std::cout << "Integral of n . q around the boundary is " << biVForm( q ) << std::endl;
 
 	return 0;
 }

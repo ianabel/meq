@@ -38,7 +38,7 @@ double uFun_ex(const Vector & pt)
    double y(pt(1));
 	double a = .5;
 	double b = .5;
-	return ::exp( -4.0 * ( x-a )*( x-a ) - 4.0*( y-b )*( y-b ) );
+	return x*x*::exp( -4.0 * ( x-a )*( x-a ) - 4.0*( y-b )*( y-b ) );
 }
 
 void qFun_ex(const Vector & pt, Vector & q)
@@ -47,10 +47,10 @@ void qFun_ex(const Vector & pt, Vector & q)
    double y(pt(1));
 	double a = .5;
 	double b = .5;
-	double u = uFun_ex( pt );
+	double e = ::exp( -4.0 * ( x-a )*( x-a ) - 4.0*( y-b )*( y-b ) );
 
-	q( 0 ) = 8.0*( x - a )*( u/x );
-	q( 1 ) = 8.0*( y - b )*( u/x );
+	q( 0 ) = -e*( 2. + 8. * a * x - 8. *x *x );
+	q( 1 ) = -8.*e*x*( b - y );
 
 	return;
 }
@@ -68,15 +68,11 @@ double fFun(const Vector & pt)
 
 	double a = .5;
 	double b = .5;
-	double u = uFun_ex( pt );
+	double e = ::exp( -4.0 * ( x-a )*( x-a ) - 4.0*( y-b )*( y-b ) );
 	// with nu = 1/x
 	// f = -div( 1/x grad(u)) 
-	// f_xx = d/dx ( 1/x du/dx)
-	// f_yy = d/dy ( 1/x du/dy)
 	//
-	double f_xx = 8.0*( u/x )*( ( x-a )/x + 8*( x-a )*( x-a ) - 1. );
-	double f_yy = 8.0*( u/x )*( 8*b*b - 16*b*y + 8*y*y - 1 );
-	return  - f_xx - f_yy;
+	return -8.0*e*( 8. *a*a*x + 3.*a - 16*a*x*x + x *( -5. + 8.*b*b + 8.*x*x - 16.*b*y + 8.*y*y ) );
 }
 
 int main(int argc, char *argv[])
@@ -105,7 +101,7 @@ int main(int argc, char *argv[])
 	args.PrintOptions(cout);
 
 	// Mesh up (R,z) in [0.1,1] x [0,1]
-	Mesh *mesh = new Mesh(4, 4, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
+	Mesh *mesh = new Mesh(10, 10, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
 	auto xform = []( const Vector& in, Vector& out ) { 
 		constexpr double R_min = 0.1;
 		out( 1 ) = in( 1 );
@@ -139,7 +135,30 @@ int main(int argc, char *argv[])
 
 	// Perform the Lackner trick to compute the boundary condition
 	mfem::Vector zeroSolution = qu;
-	GreensFunctionBoundaryCoefficient Lackner( mesh, solver.GetQSpace(), qu );
+	GreensFunctionBoundaryCoefficient Lackner( mesh, solver.GetQSpace(), zeroSolution );
+
+	mfem::Vector test_pt( 2 );
+	double b_val;
+	test_pt( 0 ) = 0.1;
+	test_pt( 1 ) = 0.5;
+	b_val = BoundaryPsi( solver.GetQSpace(), zeroSolution, test_pt );
+	std::cout << "Boundary value u(0.1,0.5) is computed to be " << b_val << " but is " << uFun_ex( test_pt ) << std::endl;
+
+	test_pt( 0 ) = 0.1;
+	test_pt( 1 ) = 0.2;
+	b_val = BoundaryPsi( solver.GetQSpace(), zeroSolution, test_pt );
+	std::cout << "Boundary value u(0.1,0.2) is computed to be " << b_val << " but is " << uFun_ex( test_pt ) << std::endl;
+
+	test_pt( 0 ) = 1;
+	test_pt( 1 ) = 0.5;
+	b_val = BoundaryPsi( solver.GetQSpace(), zeroSolution, test_pt );
+	std::cout << "Boundary value u(1,0.5) is computed to be " << b_val << " but is " << uFun_ex( test_pt ) << std::endl;
+
+
+
+
+	return 0;
+
 	solver.SetBCs( Lackner );
 	solver.Solve( qu );
 

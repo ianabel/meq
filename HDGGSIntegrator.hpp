@@ -128,10 +128,11 @@ namespace mfem {
 	{
 		protected:
 			Coefficient &f;
+			unsigned int f_order;
 
 		public:
-			HDGBoundaryNormalTraceIntegrator(Coefficient &f_ref )
-				: f( f_ref ) {};
+			HDGBoundaryNormalTraceIntegrator(Coefficient &f_ref, unsigned int f_order_in = 2 )
+				: f( f_ref ), f_order( f_order_in ) {};
 
 			using LinearFormIntegrator::AssembleRHSElementVect;
 			virtual void AssembleRHSElementVect(const FiniteElement &el,

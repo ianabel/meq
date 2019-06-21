@@ -435,7 +435,7 @@ void HDGFaceIntegratorGS::AssembleFaceMatrixOneElement2and1FES(
 		const IntegrationRule *ir = IntRule;
 		if (ir == NULL)
 		{
-			int order = 2 * bdr_cell.GetOrder() + 2;
+			int order = 2 * bdr_cell.GetOrder() + 2*f_order;
 			if (bdr_cell.GetMapType() == FiniteElement::VALUE)
 			{
 				order += Trans.Face->OrderW();

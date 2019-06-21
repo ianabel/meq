@@ -20,7 +20,7 @@ meq-debug: meq.cpp $(GSINVERTER_DEP)
 	g++ $(CXXFLAGS_DEBUG) meq.cpp $(GSINVERTER_SRC) -o meq $(MFEM_DEBUG_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
 
 
-mfemHDGPoisson: mfemHDGPoisson.cpp $(GSINVERTER_DEP)
+mfemHDGPoisson: mfemHDGPoisson.cpp $(GSINVERTER_DEP) FreeBoundary.hpp 
 	g++ $(CXXFLAGS_DEBUG) mfemHDGPoisson.cpp $(GSINVERTER_SRC) -o mfemHDGPoisson $(MFEM_DEBUG_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
 
 mfemHDGPoissonNL: mfemHDGPoissonNL.cpp $(GSINVERTER_DEP)
@@ -29,7 +29,7 @@ mfemHDGPoissonNL: mfemHDGPoissonNL.cpp $(GSINVERTER_DEP)
 mfemHDGPoissonNL-KINSOL: mfemHDGPoissonNL-KINSOL.cpp $(GSINVERTER_DEP)
 	g++ $(CXXFLAGS_RELEASE) mfemHDGPoissonNL-KINSOL.cpp $(GSINVERTER_SRC) -o mfemHDGPoissonNL-KINSOL $(MFEM_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
 
-mfem-test: mfem-test.cpp
-	g++ $(CXXFLAGS_DEBUG) mfem-test.cpp -o mfem-test $(MFEM_DEBUG_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
+mfem-test: mfem-test.cpp HDGGSIntegrator.cpp HDGGSIntegrator.hpp
+	g++ $(CXXFLAGS_DEBUG) mfem-test.cpp HDGGSIntegrator.cpp -o mfem-test $(MFEM_DEBUG_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
 
 
