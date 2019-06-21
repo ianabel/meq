@@ -13,6 +13,7 @@
 
 #include "GSInverter.hpp"
 #include "CockburnEstimator.hpp"
+#include "FreeBoundary.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -35,16 +36,21 @@ double uFun_ex(const Vector & pt)
 {
    double x(pt(0));
    double y(pt(1));
-	return ::exp( 2*x*y )*::sin( pi*x )*::cos( pi*y );
+	double a = .5;
+	double b = .5;
+	return ::exp( -4.0 * ( x-a )*( x-a ) - 4.0*( y-b )*( y-b ) );
 }
 
 void qFun_ex(const Vector & pt, Vector & q)
 {
    double x(pt(0));
    double y(pt(1));
+	double a = .5;
+	double b = .5;
+	double u = uFun_ex( pt );
 
-	q( 0 ) = -::exp( 2*x*y )*::cos( pi*y )*(  pi*::cos( pi*x ) + 2*y*::sin( pi*x ) ) / x;
-	q( 1 ) = -::exp( 2*x*y )*::sin( pi*x )*( -pi*::sin( pi*y ) + 2*x*::cos( pi*y ) ) / x;
+	q( 0 ) = 8.0*( x - a )*( u/x );
+	q( 1 ) = 8.0*( y - b )*( u/x );
 
 	return;
 }
@@ -59,18 +65,18 @@ double fFun(const Vector & pt)
 {
    double x(pt(0));
    double y(pt(1));
+
+	double a = .5;
+	double b = .5;
+	double u = uFun_ex( pt );
 	// with nu = 1/x
-	double t = ( pi*pi*x - 2*x*x*x + y - 2*x*y*y )*::cos( pi*y ) + 2*pi*x*x*::sin( pi*y );
-	return ( ::exp( 2*x*y ) / ( x*x ) )*( 
-			  pi*( 1.0 - 4.0 *  x  * y ) * ::cos( pi*x ) * ::cos( pi*y ) + ( 2 * t ) * ::sin( pi*x ) 
-			);
-
-	/*
-	// with nu = 1
-	double t = ( pi*pi - 2*x*x - 2*y*y )*::cos( pi*y ) + 2*pi*x*::sin( pi*y );
-	return ( 2.0 * ::exp( 2*x*y ) )*( -2.0 * pi * y * ::cos( pi*x ) * ::cos( pi*y ) + t * ::sin( pi*x ) );
-	*/
-
+	// f = -div( 1/x grad(u)) 
+	// f_xx = d/dx ( 1/x du/dx)
+	// f_yy = d/dy ( 1/x du/dy)
+	//
+	double f_xx = 8.0*( u/x )*( ( x-a )/x + 8*( x-a )*( x-a ) - 1. );
+	double f_yy = 8.0*( u/x )*( 8*b*b - 16*b*y + 8*y*y - 1 );
+	return  - f_xx - f_yy;
 }
 
 int main(int argc, char *argv[])
@@ -82,31 +88,13 @@ int main(int argc, char *argv[])
 	int order = 3;
 	int initial_ref_levels = 0;
 	bool visualization = true;
-	bool post = true;
 	bool save = true;
-	double memA = 0.0;
-	double memB = 0.0;
 
 	OptionsParser args(argc, argv);
-	args.AddOption(&mesh_file, "-m", "--mesh",
-			"Mesh file to use.");
 	args.AddOption(&order, "-o", "--order",
 			"Finite element order (polynomial degree).");
-	args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
-			"--no-visualization",
-			"Enable or disable GLVis visualization.");
-	args.AddOption(&post, "-post", "--postprocessing",
-			"-no-post", "--no-postprocessing",
-			"Enable or disable postprocessing.");
-	args.AddOption(&save, "-save", "--save-files", "-no-save",
-			"--no-save-files",
-			"Enable or disable file saving.");
 	args.AddOption(&initial_ref_levels, "-mr", "--mesh-refinement-levels",
 			"The number of levels of uniform refinement to apply to the grid.");
-	args.AddOption(&memA, "-memA", "--memoryA",
-			"Storage of A.");
-	args.AddOption(&memB, "-memB", "--memoryB",
-			"Storage of B.");
 
 	args.Parse();
 	if (!args.Good())
@@ -116,40 +104,8 @@ int main(int argc, char *argv[])
 	}
 	args.PrintOptions(cout);
 
-	// memA, memB \in [0,1], memB <= memA
-	if (memB > memA)
-	{
-		std::cout << "memB cannot be more than memA. Resetting to be equal" << std::endl
-			<< std::flush;
-		memA = memB;
-	}
-	if (memA > 1.0)
-	{
-		std::cout << "memA cannot be more than 1. Resetting to 1" << std::endl <<
-			std::flush;
-		memA = 1.0;
-	}
-	else if (memA < 0.0)
-	{
-		std::cout << "memA cannot be less than 0. Resetting to 0." << std::endl <<
-			std::flush;
-		memA = 0.0;
-	}
-	if (memB > 1.0)
-	{
-		std::cout << "memB cannot be more than 1. Resetting to 1" << std::endl <<
-			std::flush;
-		memB = 1.0;
-	}
-	else if (memB < 0.0)
-	{
-		std::cout << "memB cannot be less than 0. Resetting to 0." << std::endl <<
-			std::flush;
-		memB = 0.0;
-	}
-
-	// Mesh up [0,1] x [0,1]
-	Mesh *mesh = new Mesh(8,8,Element::Type::TRIANGLE, false, 1.0, 1.0, true );
+	// Mesh up (R,z) in [0.1,1] x [0,1]
+	Mesh *mesh = new Mesh(4, 4, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
 	auto xform = []( const Vector& in, Vector& out ) { 
 		constexpr double R_min = 0.1;
 		out( 1 ) = in( 1 );
@@ -167,8 +123,9 @@ int main(int argc, char *argv[])
 	
 	GSSolver solver( mesh, order, fFun );
 
-	FunctionCoefficient bcFunCoeff( bcFun );
-	solver.SetBCs( bcFunCoeff );
+	ConstantCoefficient zero( 0.0 );
+	FunctionCoefficient bcCoeff( bcFun );
+	solver.SetBCs( zero );
 
 	
 	GridFunction q_variable,u_variable,u_hat_variable;
@@ -180,16 +137,11 @@ int main(int argc, char *argv[])
 	u_variable.MakeRef( solver.GetUSpace(), qu, solver.GetQSpace()->GetVSize() );
 	u_hat_variable.MakeRef( solver.GetMSpace(), qu, solver.GetQSpace()->GetVSize() + solver.GetUSpace()->GetVSize() );
 
-	StdFunctionCoefficient fFunCoeff( fFun );
-	auto kappaF = []( const Vector& pt ) { return 1.0 / pt( 0 ); };
-	StdFunctionCoefficient kappa( kappaF );
-	CockburnZhangEstimator errorEstimator( q_variable, u_variable, u_hat_variable, kappa, fFunCoeff );
-
-	ThresholdRefiner refiner( errorEstimator );
-	refiner.SetTotalErrorFraction( 0.7 );
-	refiner.Apply( *mesh );
-
-
+	// Perform the Lackner trick to compute the boundary condition
+	mfem::Vector zeroSolution = qu;
+	GreensFunctionBoundaryCoefficient Lackner( mesh, solver.GetQSpace(), qu );
+	solver.SetBCs( Lackner );
+	solver.Solve( qu );
 
 	// 12. Compute the discretization error
 	int order_quad = max(2, 3*order+2);
@@ -200,30 +152,51 @@ int main(int argc, char *argv[])
 	}
    FunctionCoefficient ucoeff(uFun_ex);
    VectorFunctionCoefficient qcoeff(dim, qFun_ex);
-	double err_u    = u_variable.ComputeL2Error(ucoeff, irs);
-	double err_q    = q_variable.ComputeL2Error(qcoeff, irs);
-	double err_mean  = u_variable.ComputeMeanLpError(2.0, ucoeff, irs);
-
-	std::cout << "|| u_h - u_ex || = " << err_u << "\n";
-	std::cout << "|| q_h - q_ex || = " << err_q << "\n";
-	std::cout << "|| mean(u_h) - mean(u_ex) || = " << err_mean << "\n";
-
-	// 13. Save the mesh and the solution.
-	if (save)
 	{
-		ofstream mesh_ofs("refined.mesh");
-		mesh_ofs.precision(8);
-		mesh->Print(mesh_ofs);
+		double err_u    = u_variable.ComputeL2Error(ucoeff, irs);
+		double err_q    = q_variable.ComputeL2Error(qcoeff, irs);
+		double err_mean  = u_variable.ComputeMeanLpError(2.0, ucoeff, irs);
 
-		ofstream q_variable_ofs("sol_q.gf");
-		q_variable_ofs.precision(8);
-		q_variable.Save(q_variable_ofs);
-
-		ofstream u_variable_ofs("sol_u.gf");
-		u_variable_ofs.precision(8);
-		u_variable.Save(u_variable_ofs);
-
+		std::cout << "|| u_h - u_ex || = " << err_u << "\n";
+		std::cout << "|| q_h - q_ex || = " << err_q << "\n";
+		std::cout << "|| mean(u_h) - mean(u_ex) || = " << err_mean << "\n";
 	}
+
+	StdFunctionCoefficient fFunCoeff( fFun );
+	auto kappaF = []( const Vector& pt ) { return 1.0 / pt( 0 ); };
+	StdFunctionCoefficient kappa( kappaF );
+	CockburnZhangEstimator errorEstimator( q_variable, u_variable, u_hat_variable, kappa, fFunCoeff );
+
+
+	ThresholdRefiner refiner( errorEstimator );
+	refiner.SetTotalErrorFraction( 0.2 );
+	refiner.Apply( *mesh );
+
+	std::cout << std::endl << " Adaptive Refinement Applied " << std::endl << std::endl;
+
+	solver.Update();
+	qu = 0.0;
+	solver.Solve( qu );
+
+	q_variable.MakeRef( solver.GetQSpace(), qu, 0 );
+	u_variable.MakeRef( solver.GetUSpace(), qu, solver.GetQSpace()->GetVSize() );
+
+
+
+	{
+		double err_u    = u_variable.ComputeL2Error(ucoeff, irs);
+		double err_q    = q_variable.ComputeL2Error(qcoeff, irs);
+		double err_mean  = u_variable.ComputeMeanLpError(2.0, ucoeff, irs);
+
+		std::cout << "|| u_h - u_ex || = " << err_u << "\n";
+		std::cout << "|| q_h - q_ex || = " << err_q << "\n";
+		std::cout << "|| mean(u_h) - mean(u_ex) || = " << err_mean << "\n";
+	}
+
+	GridFunction ustar( solver.GetUStarSpace() );
+	solver.Postprocess( ustar, qu );
+	double err_ustar    = ustar.ComputeL2Error(ucoeff, irs);
+	std::cout << "|| u^*_h - u_ex || = " << err_ustar << std::endl;
 
 	// 14. Send the solution by socket to a GLVis server.
 	if (visualization)
@@ -241,11 +214,21 @@ int main(int argc, char *argv[])
 			endl;
 	}
 
-	GridFunction ustar( solver.GetUStarSpace() );
-	solver.Postprocess( ustar, qu );
-	double err_ustar    = ustar.ComputeL2Error(ucoeff, irs);
-	std::cout << "|| u^*_h - u_ex || = " << err_ustar << std::endl;
+	// 13. Save the mesh and the solution.
+	if (save)
+	{
+		ofstream q_variable_ofs("sol_q.gf");
+		q_variable_ofs.precision(8);
+		q_variable.Save(q_variable_ofs);
 
+		ofstream u_variable_ofs("sol_u.gf");
+		u_variable_ofs.precision(8);
+		u_variable.Save(u_variable_ofs);
+
+		ofstream rmesh_ofs("refined.mesh");
+		rmesh_ofs.precision(8);
+		mesh->Print(rmesh_ofs);
+	}
 
 	delete mesh;
 	return 0;

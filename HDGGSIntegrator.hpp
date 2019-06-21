@@ -100,5 +100,53 @@ public:
 
 }
 
+// Boundary Integrator for free-boundary work
+namespace mfem {
+	class HDGBoundaryTraceIntegrator : public LinearFormIntegrator
+	{
+		protected:
+			Coefficient &f;
+
+		public:
+			HDGBoundaryTraceIntegrator(Coefficient &f_ref )
+				: f( f_ref ) {};
+
+			using LinearFormIntegrator::AssembleRHSElementVect;
+			virtual void AssembleRHSElementVect(const FiniteElement &el,
+					ElementTransformation &Tr,
+					Vector &elvect)
+			{
+				mfem_error("Not implemented -- This is a Boundary Integrator not a Domain Integrator \n");
+			}
+
+			virtual void AssembleRHSElementVect(const FiniteElement &el,
+					FaceElementTransformations &Tr,
+					Vector &elvect);
+	};
+
+	class HDGBoundaryNormalTraceIntegrator : public LinearFormIntegrator
+	{
+		protected:
+			Coefficient &f;
+
+		public:
+			HDGBoundaryNormalTraceIntegrator(Coefficient &f_ref )
+				: f( f_ref ) {};
+
+			using LinearFormIntegrator::AssembleRHSElementVect;
+			virtual void AssembleRHSElementVect(const FiniteElement &el,
+					ElementTransformation &Tr,
+					Vector &elvect)
+			{
+				mfem_error("Not implemented -- This is a Boundary Integrator not a Domain Integrator \n");
+			}
+
+			virtual void AssembleRHSElementVect(const FiniteElement &el,
+					FaceElementTransformations &Tr,
+					Vector &elvect);
+	};
+
+};
+
 #endif // HDGGSINTEGRATOR_HPP
 

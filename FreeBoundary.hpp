@@ -1,4 +1,5 @@
-
+#include <functional>
+#include "StdFnCoeffs.hpp"
 
 double GreensFunction( mfem::Vector const& r, mfem::Vector const& r_star )
 {
@@ -18,19 +19,17 @@ double GreensFunction( mfem::Vector const& r, mfem::Vector const& r_star )
 	return answer;
 }
 
-double BoundaryPsi( FiniteElementSpace *q_space, mfem::Vector & zero_soln, mfem::Vector const& r )
+double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln, mfem::Vector const& r )
 {
+	mfem::LinearForm *lf = new mfem::LinearForm( q_space );
 
-	LinerForm *lf = new LinearForm( q_space );
+	std::function<double( mfem::Vector const& )> bdGF = std::bind( GreensFunction, std::placeholders::_1, r );
+	mfem::StdFunctionCoefficient GreensFunctionCoefficient( bdGF );
+	lf->AddBdrFaceIntegrator( new mfem::HDGBoundaryNormalTraceIntegrator( GreensFunctionCoefficient ) );
 
-	auto bdGF = std::bind( GreensFunction, std::placeholders::_1, r );
-	StdFunctionCoefficient GreensFunctionCoefficient( bdGF );
-	lf.AddBoundaryIntegrator( new VectorBoundaryFluxLFIntegrator( GreensFunctionCoefficient ) );
-
-	GridFunction gradPsi;
+	mfem::GridFunction gradPsi;
 	gradPsi.MakeRef( q_space, zero_soln, 0 );
-	return lf( gradPsi );
-	
+	return ( *lf )( gradPsi );
 }
 
 class GreensFunctionBoundaryCoefficient : public mfem::Coefficient
@@ -40,18 +39,19 @@ class GreensFunctionBoundaryCoefficient : public mfem::Coefficient
 		mfem::FiniteElementSpace *Q_space;
 		mfem::Vector & psi_hat;
 	public:
-		GreensFunctionBoundaryCoefficient( mfem::Mesh const* mesh_r, FiniteElementSpace *q_space, mfem::Vector & zero_soln )
+		GreensFunctionBoundaryCoefficient( mfem::Mesh const* mesh_r, mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln )
 			: mesh( mesh_r ), Q_space( q_space ), psi_hat( zero_soln )
 		{
 		}
 
-		virtual override double Eval( mfem::ElementTransformation &T, const mfem::IntegrationPoint &ip )
+		virtual double Eval( mfem::ElementTransformation &T, const mfem::IntegrationPoint &ip )
 		{
 			if ( T.GetGeometryType() != mfem::Geometry::Type::SEGMENT )
 				throw new std::logic_error( "This only works with Segements!" );
 			mfem::Vector pt( 3 );
 			T.Transform( ip, pt );
-			return BoundaryPsi( Q_space, psi_hat, pt );
+			return -1.0 * BoundaryPsi( Q_space, psi_hat, pt );
 		}
 		
-}
+};
+

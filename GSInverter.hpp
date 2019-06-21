@@ -102,6 +102,10 @@ class GSSolver
 			delete fform;
 		};
 
+		void Update() { 
+			solver.Update(); 
+		};
+
 		void Postprocess( mfem::GridFunction &u_out, mfem::Vector & qu_in )
 		{
 			solver.Postprocess( u_out, qu_in );

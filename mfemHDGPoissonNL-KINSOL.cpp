@@ -13,6 +13,7 @@
 
 #include "GSInverter.hpp"
 #include "NLRHSIntegrator.hpp"
+#include "CockburnEstimator.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -120,9 +121,11 @@ class NLGSSolver : public mfem::Operator
 			solver.Postprocess( u_out, qu_in );
 		};
 
+		mfem::FiniteElementSpace const * GetMSpace() const { return solver.GetMSpace(); };
 		mfem::FiniteElementSpace const * GetQSpace() const { return solver.GetQSpace(); };
 		mfem::FiniteElementSpace const * GetUSpace() const { return solver.GetUSpace(); };
 		mfem::FiniteElementSpace const * GetUStarSpace() const { return solver.GetUStarSpace(); };
+		mfem::FiniteElementSpace * GetMSpace() { return solver.GetMSpace(); };
 		mfem::FiniteElementSpace * GetQSpace() { return solver.GetQSpace(); };
 		mfem::FiniteElementSpace * GetUSpace() { return solver.GetUSpace(); };
 		mfem::FiniteElementSpace * GetUStarSpace() { return solver.GetUStarSpace(); };
@@ -231,7 +234,7 @@ int main(int argc, char *argv[])
 	FunctionCoefficient bcFunCoeff( bcFun );
 	solver.SetBCs( bcFunCoeff );
 
-	GridFunction q_variable,u_variable;
+	GridFunction q_variable,u_variable,u_hat_variable;
 
 	mfem::Vector qu( solver.NumRows() );
 
@@ -244,12 +247,30 @@ int main(int argc, char *argv[])
 	nonlinearPoissonSolver->SetOperator( solver );
 	nonlinearPoissonSolver->Mult( qu, qu );
 
-	mfem::Vector qu_refined;
 
+	StdFunctionCoefficient fFunCoeff( fFun );
+	auto kappaF = []( const Vector& pt ) { return 1.0 / pt( 0 ); };
+	StdFunctionCoefficient kappa( kappaF );
+
+	q_variable.MakeRef( solver.GetQSpace(), qu, 0 );
+	u_variable.MakeRef( solver.GetUSpace(), qu, solver.GetQSpace()->GetVSize() );
+	u_hat_variable.MakeRef( solver.GetMSpace(), qu, solver.GetQSpace()->GetVSize() + solver.GetUSpace()->GetVSize() );
+
+	CockburnZhangEstimator errorEstimator( q_variable, u_variable, u_hat_variable, kappa, fFunCoeff );
+
+	ThresholdRefiner refiner( errorEstimator );
+	refiner.SetTotalErrorFraction( 0.2 );
+	refiner.Apply( *mesh );
+	solver.Update();
+	
+	mfem::Vector qu_refined;
+	solver.Prolong( qu, qu_refined );
+	qu = qu_refined;
+	
 	mesh->UniformRefinement();
+
 	solver.Update();
 	solver.Prolong( qu, qu_refined );
-	// solver.SetBCs( bcFunCoeff );
 
 	qu.SetSize( solver.Height() );
 	qu = 0.0;

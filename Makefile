@@ -1,11 +1,11 @@
 
 all: meq
 
-MFEM_DIR=/home/ian/projects/mfem-hdg-branch
-MFEM_LIB=-lmfem -lrt
+MFEM_DIR=/home/ian/projects/ian-mfem
+MFEM_LIB=-lmfem -lrt -llapack -lblas
 MFEM_DEBUG_LIB=-lmfem-debug -lrt
 SUNDIALS_LIB = -lsundials_arkode -lsundials_cvode -lsundials_nvecserial -lsundials_kinsol
-CXXFLAGS_RELEASE = -std=c++17 -Ofast -Wall -mtune=native
+CXXFLAGS_RELEASE = -std=c++17 -fopenmp -Ofast -Wall -mtune=native
 CXXFLAGS_DEBUG = -std=c++17 -g -Og -Wall
 GSINVERTER_DEP = GSInverter.cpp GSInverter.hpp HDGGSIntegrator.cpp HDGGSIntegrator.hpp CockburnEstimator.hpp
 GSINVERTER_SRC = GSInverter.cpp HDGGSIntegrator.cpp

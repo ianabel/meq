@@ -69,17 +69,15 @@ class CockburnZhangEstimator : public mfem::ErrorEstimator
 	};
 	
 
-	double ComputeElementError( unsigned int i ) 
+	double ComputeElementError( int i ) 
 	{
 		mfem::ElementTransformation *trans = mesh->GetElementTransformation( i );
 		mfem::Element const *K = mesh->GetElement( i );
-		mfem::FiniteElement const *u_fe = u_space->GetFE( i );
-		mfem::FiniteElement const *q_fe = q_space->GetFE( i );
 
 		double eta_1 = 0;
 		double eta_2 = 0;
 
-		unsigned int order = 2 * q_fe->GetOrder() + 3;
+		unsigned int order = 2 * q_space->GetOrder(i) + 3;
 		mfem::IntegrationRule const& CellIntegrator = mfem::IntRules.Get( K->GetType(), order );
 		
 
@@ -94,7 +92,7 @@ class CockburnZhangEstimator : public mfem::ErrorEstimator
 			double eta_1_tmp;
 			// eta_1 = h_K^2 * || F_RHS + div q ||^2
 			eta_1_tmp = ( rhs.Eval( *trans, ip ) + q_sol.GetDivergence( *trans ) );
-			eta_1 += h_K * h_K * eta_1_tmp * eta_1_tmp;
+			eta_1 += h_K * h_K * eta_1_tmp * eta_1_tmp * ip.weight;
 
 			Vector eta_2_tmp;
 			// eta_2 = || q - kappa*(grad u) ||^2
@@ -103,7 +101,7 @@ class CockburnZhangEstimator : public mfem::ErrorEstimator
 			q_sol.GetVectorValue( i, ip, q_val );
 			u_sol.GetGradient( *trans, GradU );
 			eta_2_tmp = q_val - GradU;	
-			eta_2 += eta_2_tmp * eta_2_tmp;
+			eta_2 += ( eta_2_tmp * eta_2_tmp ) * ip.weight;
 		}
 
 		double eta_3 = 0;
@@ -120,6 +118,7 @@ class CockburnZhangEstimator : public mfem::ErrorEstimator
 			double h_e = ElementDiameter( mesh, e );
 
 			mfem::FaceElementTransformations *feTrans = mesh->GetFaceElementTransformations( faces[ j ] );
+			
 
 			// Integrate over e
 			mfem::IntegrationRule const& EdgeIntegrator = mfem::IntRules.Get( e->GetType(), order );
@@ -128,11 +127,29 @@ class CockburnZhangEstimator : public mfem::ErrorEstimator
 				const IntegrationPoint& ip = EdgeIntegrator.IntPoint( k );
 				IntegrationPoint eip1,eip2; 
 				feTrans->Loc1.Transform( ip, eip1 );
-				feTrans->Loc2.Transform( ip, eip2 );
 				feTrans->Elem1->SetIntPoint( &eip1 );
-				feTrans->Elem2->SetIntPoint( &eip2 );
 				feTrans->Face->SetIntPoint( &ip );
 
+				// eta_5 = (.5/h_e) * || lambda - u ||^2
+				double lambda_val,u_val;
+				lambda_val = lambda.GetInterfaceValue( faces[ j ], ip );
+				if ( feTrans->Elem1No == i )
+					u_val = u_sol.GetValue( feTrans->Elem1No, eip1 );
+				else if ( feTrans->Elem2No == i )
+					u_val = u_sol.GetValue( feTrans->Elem2No, eip2 );
+				else 
+					throw new std::logic_error( "Element is neither of the ones attached to the face. Wat." );
+
+				eta_5 += ( .5/h_e ) * ip.weight * ( lambda_val - u_val )*( lambda_val - u_val );
+
+				if ( feTrans->Elem2No == -1 )
+					continue;
+
+				// eta_3 & eta_4 are only calculated for interior edges
+
+				feTrans->Loc2.Transform( ip, eip2 );
+				feTrans->Elem2->SetIntPoint( &eip2 );
+				
 				// eta_3 = (1/2) * h_e * || (q_plus - q_minus) . n ||^2
 				Vector q_plus,q_minus;
 				q_sol.GetVectorValue( feTrans->Elem1No, eip1, q_plus );
@@ -140,7 +157,6 @@ class CockburnZhangEstimator : public mfem::ErrorEstimator
 				
 				Vector normal( mesh->SpaceDimension() );	
 				mfem::CalcOrtho( feTrans->Face->Jacobian(), normal );
-				normal /= normal.Norml2();
 
 				double q_jump = q_plus * normal - q_minus * normal;
 				eta_3 += 0.5 * h_e * q_jump * q_jump;
@@ -151,19 +167,7 @@ class CockburnZhangEstimator : public mfem::ErrorEstimator
 				u_plus  = u_sol.GetValue( feTrans->Elem1No, eip1 );
 				u_minus = u_sol.GetValue( feTrans->Elem2No, eip2 );
 				
-				eta_4 += ( .5 / h_e ) * ( u_plus - u_minus ) * ( u_plus - u_minus );
-
-				// eta_5 = (.5/h_e) * || lambda - u ||^2
-				double lambda_val,u_val;
-				lambda_val = lambda.GetValue( faces[ j ], ip );
-				if ( feTrans->Elem1No == i )
-					u_val = u_sol.GetValue( feTrans->Elem1No, eip1 );
-				else if ( feTrans->Elem2No == i )
-					u_val = u_sol.GetValue( feTrans->Elem2No, eip2 );
-				else 
-					throw new std::logic_error( "Element is neither of the ones attached to the face. Wat." );
-
-				eta_5 += ( .5/h_e )*( lambda_val - u_val )*( lambda_val - u_val );
+				eta_4 += ( .5 / h_e ) * ip.weight * ( u_plus - u_minus ) * ( u_plus - u_minus );
 
 			}
 		}
@@ -178,7 +182,7 @@ class CockburnZhangEstimator : public mfem::ErrorEstimator
 
 		unsigned int nElems = mesh->GetNE();
 		localErrors.SetSize( nElems );
-		for ( unsigned int j=0; j <= nElems; j++ )
+		for ( unsigned int j=0; j < nElems; j++ )
 			localErrors( j ) = ComputeElementError( j );
 
 		valid = true;
