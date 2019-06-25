@@ -1,48 +1,11 @@
+#ifndef COCKBURNESTIMATOR_HPP
+#define COCKBURNESTIMATOR_HPP
 
 #include "mfem.hpp"
 
+
 namespace mfem {
-double ElementDiameter( Mesh const *m, Element const* e )
-{
-	unsigned int nVerts = e->GetNVertices();
-	mfem::Array<int> VertIndices( nVerts );
-	e->GetVertices( VertIndices );
-	double const * pts[ 3 ];
-	unsigned int N = m->SpaceDimension();
-	double len[ 3 ];
 
-	switch ( e->GetType() )
-	{
-		case mfem::Element::Type::SEGMENT:
-			if ( nVerts != 2 )
-				throw new std::logic_error( "Whargl, SEGMENT should have 2 vertices" );
-			pts[ 0 ] = m->GetVertex( VertIndices[ 0 ] );
-			pts[ 1 ] = m->GetVertex( VertIndices[ 1 ] );
-			
-			return mfem::Distance( pts[ 0 ], pts[ 1 ], N );
-			break;
-
-		case mfem::Element::Type::TRIANGLE:
-
-			if ( nVerts != 3 )
-				throw new std::logic_error( "Whargl, Triangle should have 3 vertices" );
-
-			pts[ 0 ] = m->GetVertex( VertIndices[ 0 ] );
-			pts[ 1 ] = m->GetVertex( VertIndices[ 1 ] );
-			pts[ 2 ] = m->GetVertex( VertIndices[ 2 ] );
-
-			len[ 0 ] = mfem::Distance( pts[ 0 ], pts[ 1 ], N );
-			len[ 1 ] = mfem::Distance( pts[ 1 ], pts[ 2 ], N );
-			len[ 2 ] = mfem::Distance( pts[ 2 ], pts[ 0 ], N );
-			
-			return std::max( std::max( len[ 0 ], len[ 1 ] ), len[ 2 ] );
-			break;
-
-		default:
-			throw new std::logic_error( "Unsupported geometric element type." );
-	}
-	return -1.0;
-}
 
 
 class CockburnZhangEstimator : public mfem::ErrorEstimator
@@ -57,7 +20,50 @@ class CockburnZhangEstimator : public mfem::ErrorEstimator
 		GridFunction &q_sol,&u_sol,&lambda;
 		Coefficient &kappa;
 		Coefficient &rhs;
+
 		bool valid;
+	protected:
+		static double ElementDiameter( Mesh const *m, Element const* e )
+		{
+			unsigned int nVerts = e->GetNVertices();
+			mfem::Array<int> VertIndices( nVerts );
+			e->GetVertices( VertIndices );
+			double const * pts[ 3 ];
+			unsigned int N = m->SpaceDimension();
+			double len[ 3 ];
+
+			switch ( e->GetType() )
+			{
+				case mfem::Element::Type::SEGMENT:
+					if ( nVerts != 2 )
+						throw new std::logic_error( "Whargl, SEGMENT should have 2 vertices" );
+					pts[ 0 ] = m->GetVertex( VertIndices[ 0 ] );
+					pts[ 1 ] = m->GetVertex( VertIndices[ 1 ] );
+
+					return mfem::Distance( pts[ 0 ], pts[ 1 ], N );
+					break;
+
+				case mfem::Element::Type::TRIANGLE:
+
+					if ( nVerts != 3 )
+						throw new std::logic_error( "Whargl, Triangle should have 3 vertices" );
+
+					pts[ 0 ] = m->GetVertex( VertIndices[ 0 ] );
+					pts[ 1 ] = m->GetVertex( VertIndices[ 1 ] );
+					pts[ 2 ] = m->GetVertex( VertIndices[ 2 ] );
+
+					len[ 0 ] = mfem::Distance( pts[ 0 ], pts[ 1 ], N );
+					len[ 1 ] = mfem::Distance( pts[ 1 ], pts[ 2 ], N );
+					len[ 2 ] = mfem::Distance( pts[ 2 ], pts[ 0 ], N );
+
+					return std::max( std::max( len[ 0 ], len[ 1 ] ), len[ 2 ] );
+					break;
+
+				default:
+					throw new std::logic_error( "Unsupported geometric element type." );
+			}
+			return -1.0;
+		}
 	public:
 	CockburnZhangEstimator( GridFunction &q, GridFunction &u, GridFunction &lambda_ref, Coefficient &kappa_ref, Coefficient &rhs_ref )
 		: q_sol( q ), u_sol( u ), lambda( lambda_ref ), kappa( kappa_ref ), rhs( rhs_ref ),valid( false )
@@ -197,3 +203,4 @@ class CockburnZhangEstimator : public mfem::ErrorEstimator
 };
 
 }
+#endif // COCKBURNESTIMATOR_HPP

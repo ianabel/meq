@@ -24,7 +24,7 @@ double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln,
 
 	std::function<double( mfem::Vector const& )> bdGF = std::bind( GreensFunction, std::placeholders::_1, r );
 	mfem::StdFunctionCoefficient GreensFunctionCoefficient( bdGF );
-	lf->AddBdrFaceIntegrator( new mfem::HDGBoundaryNormalTraceIntegrator( GreensFunctionCoefficient, 20 ) );
+	lf->AddBdrFaceIntegrator( new mfem::HDGBoundaryNormalTraceIntegrator( GreensFunctionCoefficient, 30 ) );
 	lf->Assemble();
 
 	mfem::GridFunction gradPsi;

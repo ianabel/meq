@@ -13,6 +13,7 @@
 
 #include "mfem.hpp"
 #include "GSInverter.hpp"
+#include "FreeBoundary.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -102,8 +103,6 @@ int main(int argc, char *argv[])
 	}
 	args.PrintOptions(cout);
 
-	
-	
 	// Do the vacuum problem
 	// One coil at R=1,Z=0, h=w=0.05, J = 400 kA/m^2 => j_tot = 1kA
 	
@@ -112,7 +111,7 @@ int main(int argc, char *argv[])
 	
 	// Mesh goes from R_min to R_max, and Z_min to Z_max
 	
-	Mesh *mesh = new Mesh(10, 10, Element::Type::TRIANGLE);
+	Mesh *mesh = new Mesh(8, 8, Element::Type::TRIANGLE);
 	auto xlate = []( const mfem::Vector& in, mfem::Vector & out ) {
 		double R_min = 0.05;
 		double R_max = 1.5;
@@ -127,23 +126,69 @@ int main(int argc, char *argv[])
 	int dim = mesh->Dimension();
 
 	for (int ii=0; ii<initial_ref_levels; ii++)
-	{
 		mesh->UniformRefinement();
-	}
 
-	// Thus the RHS function is FieldCoils::operator()
+	// The RHS function is FieldCoils::operator()
 	
 	ConstantCoefficient zero( 0.0 );
-	GSInverter solver( mesh, order, FieldCoils );
+	GSSolver solver( mesh, order, FieldCoils );
 	solver.SetBCs( zero );
-	
+
 	mfem::Vector qu_zero_bc;
+	solver.Solve( qu_zero_bc );
+	solver.ApplyAdaptiveRefinement( qu_zero_bc );
+	solver.Solve( qu_zero_bc );
+	solver.ApplyAdaptiveRefinement( qu_zero_bc );
+	solver.Solve( qu_zero_bc );
 
-	solver.Mult( qu_zero_bc, qu_zero_bc );
+	// Test Lackner Trick
+	
+	mfem::Vector test_pt( 2 );
+	test_pt( 0 ) = .05;
+	test_pt( 1 ) = 0;
 
+	std::cout << "BPsi(.05,.0) = " << BoundaryPsi( solver.GetQSpace(), qu_zero_bc, test_pt ) << std::endl;
+	std::cout << " Answer is     0.000625782" << std::endl;
+
+	test_pt( 0 ) = .05;
+	test_pt( 1 ) = 0.5;
+
+	std::cout << "BPsi(.05,.5) = " << BoundaryPsi( solver.GetQSpace(), qu_zero_bc, test_pt ) << std::endl;
+	std::cout << " Answer is     0.000447325" << std::endl;
+
+	test_pt( 0 ) = .05;
+	test_pt( 1 ) = -0.5;
+
+	std::cout << "BPsi(.05,-.5) = " << BoundaryPsi( solver.GetQSpace(), qu_zero_bc, test_pt ) << std::endl;
+	std::cout << " Answer is     0.000447325" << std::endl;
+
+	test_pt( 0 ) = 1.5;
+	test_pt( 1 ) = 1;
+
+	std::cout << "BPsi(1.5,1) = " << BoundaryPsi( solver.GetQSpace(), qu_zero_bc, test_pt ) << std::endl;
+	std::cout << " Answer is     0.0871705" << std::endl;
+
+	test_pt( 0 ) = 1.5;
+	test_pt( 1 ) = -1;
+
+	std::cout << "BPsi(1.5,-1) = " << BoundaryPsi( solver.GetQSpace(), qu_zero_bc, test_pt ) << std::endl;
+	std::cout << " Answer is     0.0871705" << std::endl;
+
+
+
+
+
+
+	
+	/*
+	// Perform the Lackner trick to compute the boundary condition
+	GreensFunctionBoundaryCoefficient Lackner( mesh, solver.GetQSpace(), qu_zero_bc );
+
+	solver.SetBCs( Lackner );
+	solver.Solve( qu );
+	*/
 
 	GridFunction q_solution,u_solution;
-
 	q_solution.MakeRef( solver.GetQSpace(), qu_zero_bc, 0 );
 	u_solution.MakeRef( solver.GetUSpace(), qu_zero_bc, solver.GetQSpace()->GetVSize() );
 

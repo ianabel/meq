@@ -7,7 +7,7 @@ MFEM_DEBUG_LIB=-lmfem-debug -lrt
 SUNDIALS_LIB = -lsundials_arkode -lsundials_cvode -lsundials_nvecserial -lsundials_kinsol
 CXXFLAGS_RELEASE = -std=c++17 -fopenmp -Ofast -Wall -mtune=native
 CXXFLAGS_DEBUG = -std=c++17 -g -Og -Wall
-GSINVERTER_DEP = GSInverter.cpp GSInverter.hpp HDGGSIntegrator.cpp HDGGSIntegrator.hpp CockburnEstimator.hpp
+GSINVERTER_DEP = GSInverter.cpp GSInverter.hpp HDGGSIntegrator.cpp HDGGSIntegrator.hpp CockburnEstimator.hpp FreeBoundary.hpp
 GSINVERTER_SRC = GSInverter.cpp HDGGSIntegrator.cpp
 
 

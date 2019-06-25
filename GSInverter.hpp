@@ -1,5 +1,10 @@
+#ifndef GSINVERTER_HPP
+#define GSINVERTER_HPP
+
 #include "HDGGSIntegrator.hpp"
+#include "CockburnEstimator.hpp"
 #include "StdFnCoeffs.hpp"
+
 
 class GSInverter : public mfem::Operator
 {
@@ -39,6 +44,8 @@ class GSInverter : public mfem::Operator
 		mfem::FiniteElementSpace * GetMSpace() { return M_space;};
 		mfem::FiniteElementSpace const* GetMSpace() const { return M_space;};
 
+		mfem::Mesh *GetMesh() {return mesh;};
+		mfem::Mesh const *GetMesh() const {return mesh;};
 
 		void Prolong( mfem::Vector const& soln_old, mfem::Vector &soln_new ) const;
 
@@ -106,6 +113,26 @@ class GSSolver
 			solver.Update(); 
 		};
 
+		void ApplyAdaptiveRefinement(  mfem::Vector & soln_vector )
+		{
+			mfem::StdFunctionCoefficient fFunCoeff( RHS );
+			auto kappaF = []( const mfem::Vector& pt ) { return 1.0 / pt( 0 ); };
+			mfem::StdFunctionCoefficient kappa( kappaF );
+
+			mfem::GridFunction q_variable,u_variable,u_hat_variable;
+			q_variable.MakeRef( solver.GetQSpace(), soln_vector, 0 );
+			u_hat_variable.MakeRef( solver.GetMSpace(), soln_vector, solver.GetQSpace()->GetVSize() + solver.GetUSpace()->GetVSize() );
+
+			mfem::GridFunction u_star( solver.GetUStarSpace() );
+			solver.Postprocess( u_star, soln_vector );
+
+			mfem::CockburnZhangEstimator errorEstimator( q_variable, u_star, u_hat_variable, kappa, fFunCoeff );
+			mfem::ThresholdRefiner refiner( errorEstimator );
+			refiner.SetTotalErrorFraction( 0.1 );
+			refiner.Apply( *solver.GetMesh() );
+			solver.Update();
+		}
+
 		void Postprocess( mfem::GridFunction &u_out, mfem::Vector & qu_in )
 		{
 			solver.Postprocess( u_out, qu_in );
@@ -126,3 +153,4 @@ class GSSolver
 };
 
 
+#endif // GSINVERTER_HPP

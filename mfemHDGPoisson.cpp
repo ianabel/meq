@@ -38,7 +38,7 @@ double uFun_ex(const Vector & pt)
    double y(pt(1));
 	double a = .5;
 	double b = .5;
-	return x*x*::exp( -4.0 * ( x-a )*( x-a ) - 4.0*( y-b )*( y-b ) );
+	return 8*x*x*::exp( -4.0 * ( x-a )*( x-a ) - 4.0*( y-b )*( y-b ) );
 }
 
 void qFun_ex(const Vector & pt, Vector & q)
@@ -49,8 +49,8 @@ void qFun_ex(const Vector & pt, Vector & q)
 	double b = .5;
 	double e = ::exp( -4.0 * ( x-a )*( x-a ) - 4.0*( y-b )*( y-b ) );
 
-	q( 0 ) = -e*( 2. + 8. * a * x - 8. *x *x );
-	q( 1 ) = -8.*e*x*( b - y );
+	q( 0 ) = -8*e*( 2. + 8. * a * x - 8. *x *x );
+	q( 1 ) = -64.*e*x*( b - y );
 
 	return;
 }
@@ -72,7 +72,7 @@ double fFun(const Vector & pt)
 	// with nu = 1/x
 	// f = -div( 1/x grad(u)) 
 	//
-	return -8.0*e*( 8. *a*a*x + 3.*a - 16*a*x*x + x *( -5. + 8.*b*b + 8.*x*x - 16.*b*y + 8.*y*y ) );
+	return -64.0*e*( 8. *a*a*x + 3.*a - 16*a*x*x + x *( -5. + 8.*b*b + 8.*x*x - 16.*b*y + 8.*y*y ) );
 }
 
 int main(int argc, char *argv[])
@@ -101,7 +101,7 @@ int main(int argc, char *argv[])
 	args.PrintOptions(cout);
 
 	// Mesh up (R,z) in [0.1,1] x [0,1]
-	Mesh *mesh = new Mesh(10, 10, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
+	Mesh *mesh = new Mesh(3, 3, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
 	auto xform = []( const Vector& in, Vector& out ) { 
 		constexpr double R_min = 0.1;
 		out( 1 ) = in( 1 );
@@ -111,56 +111,20 @@ int main(int argc, char *argv[])
 
 	int dim = mesh->Dimension();
 
-	for (int ii=0; ii<initial_ref_levels; ii++)
-	{
-		mesh->UniformRefinement();
-	}
-
 	
 	GSSolver solver( mesh, order, fFun );
 
-	ConstantCoefficient zero( 0.0 );
 	FunctionCoefficient bcCoeff( bcFun );
-	solver.SetBCs( zero );
+	solver.SetBCs( bcCoeff );
 
 	
-	GridFunction q_variable,u_variable,u_hat_variable;
 
 	mfem::Vector qu;
 	solver.Solve( qu );
 
+	GridFunction q_variable,u_variable,u_hat_variable;
 	q_variable.MakeRef( solver.GetQSpace(), qu, 0 );
 	u_variable.MakeRef( solver.GetUSpace(), qu, solver.GetQSpace()->GetVSize() );
-	u_hat_variable.MakeRef( solver.GetMSpace(), qu, solver.GetQSpace()->GetVSize() + solver.GetUSpace()->GetVSize() );
-
-	// Perform the Lackner trick to compute the boundary condition
-	mfem::Vector zeroSolution = qu;
-	GreensFunctionBoundaryCoefficient Lackner( mesh, solver.GetQSpace(), zeroSolution );
-
-	mfem::Vector test_pt( 2 );
-	double b_val;
-	test_pt( 0 ) = 0.1;
-	test_pt( 1 ) = 0.5;
-	b_val = BoundaryPsi( solver.GetQSpace(), zeroSolution, test_pt );
-	std::cout << "Boundary value u(0.1,0.5) is computed to be " << b_val << " but is " << uFun_ex( test_pt ) << std::endl;
-
-	test_pt( 0 ) = 0.1;
-	test_pt( 1 ) = 0.2;
-	b_val = BoundaryPsi( solver.GetQSpace(), zeroSolution, test_pt );
-	std::cout << "Boundary value u(0.1,0.2) is computed to be " << b_val << " but is " << uFun_ex( test_pt ) << std::endl;
-
-	test_pt( 0 ) = 1;
-	test_pt( 1 ) = 0.5;
-	b_val = BoundaryPsi( solver.GetQSpace(), zeroSolution, test_pt );
-	std::cout << "Boundary value u(1,0.5) is computed to be " << b_val << " but is " << uFun_ex( test_pt ) << std::endl;
-
-
-
-
-	return 0;
-
-	solver.SetBCs( Lackner );
-	solver.Solve( qu );
 
 	// 12. Compute the discretization error
 	int order_quad = max(2, 3*order+2);
@@ -181,19 +145,13 @@ int main(int argc, char *argv[])
 		std::cout << "|| mean(u_h) - mean(u_ex) || = " << err_mean << "\n";
 	}
 
-	StdFunctionCoefficient fFunCoeff( fFun );
-	auto kappaF = []( const Vector& pt ) { return 1.0 / pt( 0 ); };
-	StdFunctionCoefficient kappa( kappaF );
-	CockburnZhangEstimator errorEstimator( q_variable, u_variable, u_hat_variable, kappa, fFunCoeff );
-
-
-	ThresholdRefiner refiner( errorEstimator );
-	refiner.SetTotalErrorFraction( 0.2 );
-	refiner.Apply( *mesh );
+	solver.ApplyAdaptiveRefinement( qu );
+	qu = 0.0;
+	solver.Solve( qu );
+	solver.ApplyAdaptiveRefinement( qu );
 
 	std::cout << std::endl << " Adaptive Refinement Applied " << std::endl << std::endl;
 
-	solver.Update();
 	qu = 0.0;
 	solver.Solve( qu );
 
