@@ -17,6 +17,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <iomanip>
 #include <algorithm>
 #include <functional>
 
@@ -141,58 +142,49 @@ int main(int argc, char *argv[])
 	solver.ApplyAdaptiveRefinement( qu_zero_bc );
 	solver.Solve( qu_zero_bc );
 
-	// Test Lackner Trick
+	// Perform the Lackner trick to compute the boundary condition
+	GreensFunctionBoundaryCoefficient Lackner( mesh, solver.GetQSpace(), qu_zero_bc );
+
+	mfem::Vector qu;
+	solver.SetBCs( Lackner );
+	solver.Solve( qu );
+
+	GridFunction q_solution,u_solution;
+	q_solution.MakeRef( solver.GetQSpace(), qu, 0 );
+	u_solution.MakeRef( solver.GetUSpace(), qu, solver.GetQSpace()->GetVSize() );
+
+	mfem::DenseMatrix points( 2, 2 );
+	points( 0, 0 ) = .1;
+	points( 1, 0 ) = 0;
+	points( 0, 1 ) = .1;
+	points( 1, 1 ) = 0.5;
+
+	mfem::Array<int> ids;
+	mfem::Array<mfem::IntegrationPoint> ips;
+
+	mesh->FindPoints( points, ids, ips );
 	
 	mfem::Vector test_pt( 2 );
 	test_pt( 0 ) = .05;
 	test_pt( 1 ) = 0;
 
-	std::cout << "BPsi(.05,.0) = " << BoundaryPsi( solver.GetQSpace(), qu_zero_bc, test_pt ) << std::endl;
-	std::cout << " Answer is     0.000625782" << std::endl;
+	std::cout << std::setprecision( 10 );
+	std::cout << "BPsi(.05,.0) =    " << BoundaryPsi( solver.GetQSpace(), qu_zero_bc, test_pt ) << std::endl;
+	std::cout << " Answer is        0.0006257824004" << std::endl;
+	std::cout << " Projected psi is " << u_solution.GetValue( ids[ 0 ], ips[ 0 ] ) << std::endl;
+
+	mfem::Vector q_val( 2 );
+	q_solution.GetVectorValue( ids[ 0 ], ips[ 0 ], q_val );
+	std::cout << "q.n @ (.05,0) = (" << q_val( 0 ) << ", " << q_val( 1 ) << ")" << std::endl;
 
 	test_pt( 0 ) = .05;
 	test_pt( 1 ) = 0.5;
 
-	std::cout << "BPsi(.05,.5) = " << BoundaryPsi( solver.GetQSpace(), qu_zero_bc, test_pt ) << std::endl;
-	std::cout << " Answer is     0.000447325" << std::endl;
-
-	test_pt( 0 ) = .05;
-	test_pt( 1 ) = -0.5;
-
-	std::cout << "BPsi(.05,-.5) = " << BoundaryPsi( solver.GetQSpace(), qu_zero_bc, test_pt ) << std::endl;
-	std::cout << " Answer is     0.000447325" << std::endl;
-
-	test_pt( 0 ) = 1.5;
-	test_pt( 1 ) = 1;
-
-	std::cout << "BPsi(1.5,1) = " << BoundaryPsi( solver.GetQSpace(), qu_zero_bc, test_pt ) << std::endl;
-	std::cout << " Answer is     0.0871705" << std::endl;
-
-	test_pt( 0 ) = 1.5;
-	test_pt( 1 ) = -1;
-
-	std::cout << "BPsi(1.5,-1) = " << BoundaryPsi( solver.GetQSpace(), qu_zero_bc, test_pt ) << std::endl;
-	std::cout << " Answer is     0.0871705" << std::endl;
-
-
-
-
-
-
+	std::cout << "BPsi(.05,.5)  = " << BoundaryPsi( solver.GetQSpace(), qu_zero_bc, test_pt ) << std::endl;
+	std::cout << " Answer is      0.0004473250432" << std::endl;
 	
-	/*
-	// Perform the Lackner trick to compute the boundary condition
-	GreensFunctionBoundaryCoefficient Lackner( mesh, solver.GetQSpace(), qu_zero_bc );
-
-	solver.SetBCs( Lackner );
-	solver.Solve( qu );
-	*/
-
-	GridFunction q_solution,u_solution;
-	q_solution.MakeRef( solver.GetQSpace(), qu_zero_bc, 0 );
-	u_solution.MakeRef( solver.GetUSpace(), qu_zero_bc, solver.GetQSpace()->GetVSize() );
-
-
+	q_solution.GetVectorValue( ids[ 1 ], ips[ 1 ], q_val );
+	std::cout << "q.n @ (.05,.5) = (" << q_val( 0 ) << ", " << q_val( 1 ) << ")" << std::endl;
 
 	if (save)
 	{

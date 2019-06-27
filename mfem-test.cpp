@@ -3,6 +3,8 @@
 #include "FreeBoundary.hpp"
 #include <fstream>
 #include <iostream>
+#include <iomanip>
+#include <boost/format.hpp>
 
 using namespace mfem;
 
@@ -26,7 +28,7 @@ double u_fun( mfem::Vector const& in )
 int main(int argc, char *argv[])
 {
 	int order = 4;
-   Mesh *mesh = new Mesh(8, 8, mfem::Element::Type::TRIANGLE );
+   Mesh *mesh = new Mesh(4, 4, mfem::Element::Type::TRIANGLE );
 	auto xform = []( const Vector& in, Vector& out ) { 
 		constexpr double R_min = 0.1;
 		out( 1 ) = in( 1 );
@@ -60,20 +62,72 @@ int main(int argc, char *argv[])
 	q.ProjectCoefficient( q_c );
 	
 	mfem::Vector test_pt( 2 );
+	double bpsi;
+
+	boost::format output_form(" BPsi[%1%,%2%] = %3$.12d \n" );
+	
 	test_pt( 0 ) = .1;
 	test_pt( 1 ) = .5;
 
-	std::cout << "BPsi(.1,.5) = " << BoundaryPsi( fe_cell_vector_space, q, test_pt ) << std::endl;
+	bpsi = BoundaryPsi( fe_cell_vector_space, q, test_pt );
 
-	test_pt( 0 ) = 1;
-	test_pt( 1 ) = .5;
+	std::cout << output_form % test_pt( 0 ) % test_pt( 1 ) % bpsi;
 
-	std::cout << "BPsi(1,.5) = " << BoundaryPsi( fe_cell_vector_space, q, test_pt ) << std::endl;
+	test_pt( 0 ) = .1;
+	test_pt( 1 ) = 0;
+
+	bpsi = BoundaryPsi( fe_cell_vector_space, q, test_pt );
+
+	std::cout << output_form % test_pt( 0 ) % test_pt( 1 ) % bpsi;
+
+	test_pt( 0 ) = .1;
+	test_pt( 1 ) = 1;
+
+	bpsi = BoundaryPsi( fe_cell_vector_space, q, test_pt );
+
+	std::cout << output_form % test_pt( 0 ) % test_pt( 1 ) % bpsi;
 
 	test_pt( 0 ) = .5;
 	test_pt( 1 ) = 1;
 
-	std::cout << "BPsi(.5,1) = " << BoundaryPsi( fe_cell_vector_space, q, test_pt ) << std::endl;
+	bpsi = BoundaryPsi( fe_cell_vector_space, q, test_pt );
+
+	std::cout << output_form % test_pt( 0 ) % test_pt( 1 ) % bpsi;
+	
+	test_pt( 0 ) = .5;
+	test_pt( 1 ) = 0;
+
+	bpsi = BoundaryPsi( fe_cell_vector_space, q, test_pt );
+
+	std::cout << output_form % test_pt( 0 ) % test_pt( 1 ) % bpsi;
+
+	test_pt( 0 ) = 1;
+	test_pt( 1 ) = .5;
+
+	bpsi = BoundaryPsi( fe_cell_vector_space, q, test_pt );
+
+	std::cout << output_form % test_pt( 0 ) % test_pt( 1 ) % bpsi;
+
+	test_pt( 0 ) = 1;
+	test_pt( 1 ) = 0;
+
+	bpsi = BoundaryPsi( fe_cell_vector_space, q, test_pt );
+
+	std::cout << output_form % test_pt( 0 ) % test_pt( 1 ) % bpsi;
+
+	test_pt( 0 ) = 1;
+	test_pt( 1 ) = 1;
+
+	bpsi = BoundaryPsi( fe_cell_vector_space, q, test_pt );
+
+	std::cout << output_form % test_pt( 0 ) % test_pt( 1 ) % bpsi;
+
+
+
+
+
+
+
 
 
 
