@@ -147,7 +147,7 @@ double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln,
 			if ( b.Norml2() == 0 )
 				throw std::logic_error( "This is not on!!" );
 
-			if ( ( x( 0 )*b( 1 ) == x( 1 )*b( 0 ) ) && ( s >= 0.0 && s <= 1.0 ) )
+			if ( ( x( 0 )*b( 1 ) == x( 1 )*b( 0 ) ) && ( s >= -1e-3 && s <= 1.001 ) )
 			{
 
 				
@@ -186,7 +186,7 @@ double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln,
 					ExpInt = LInt + RInt;
 					Answer += ExpInt;
 				}
-				else if ( s == 0 || s == 1 )
+				else if ( s <= 0 || s >= 1 )
 				{
 					double ExpInt = SinhTanhQuad( 0.0, 1, IntFunc );
 					Answer += ExpInt;
@@ -198,7 +198,7 @@ double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln,
 			else 
 			{
 				const mfem::IntegrationRule *ir = nullptr;
-				int order = 2 * bdr_cell.GetOrder() + 6;
+				int order = 2 * bdr_cell.GetOrder() + 10;
 				if (bdr_cell.GetMapType() == FiniteElement::VALUE)
 				{
 					order += tr->Face->OrderW();
@@ -207,10 +207,10 @@ double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln,
 
 				double tmp_ans = 0.0;
 
+
 				for (int p = 0; p < ir->GetNPoints(); p++)
 				{
 					const mfem::IntegrationPoint &ip = ir->IntPoint(p);
-
 					// eip_L is inside the boundary cell, but is on the edge of it that corresponds
 					// to the Boundary Face that we are integrating over
 					mfem::IntegrationPoint eip_L;

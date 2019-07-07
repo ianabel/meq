@@ -27,7 +27,7 @@ double u_fun( mfem::Vector const& in )
 
 int main(int argc, char *argv[])
 {
-	int order = 4;
+	int order = 6;
    Mesh *mesh = new Mesh(4, 4, mfem::Element::Type::TRIANGLE );
 	auto xform = []( const Vector& in, Vector& out ) { 
 		constexpr double R_min = 0.1;
@@ -108,14 +108,14 @@ int main(int argc, char *argv[])
 
 	std::cout << output_form % test_pt( 0 ) % test_pt( 1 ) % bpsi;
 
-	test_pt( 0 ) = 1;
+	test_pt( 0 ) = .5501;
 	test_pt( 1 ) = 0;
 
 	bpsi = BoundaryPsi( fe_cell_vector_space, q, test_pt );
 
 	std::cout << output_form % test_pt( 0 ) % test_pt( 1 ) % bpsi;
 
-	test_pt( 0 ) = 1;
+	test_pt( 0 ) = .5501;
 	test_pt( 1 ) = 1;
 
 	bpsi = BoundaryPsi( fe_cell_vector_space, q, test_pt );
