@@ -8,129 +8,110 @@
 
 using namespace mfem;
 
-void qFun( mfem::Vector const & in , mfem::Vector & out )
-{
-	double x = in( 0 );
-	double y = in( 1 );
+class Coil {
+	private:
+		double R_l,R_u,Z_l,Z_u;
+	public:
+		double R,z;
+		double J;
+		double h,w;
+		Coil( double R_0, double z_0, double height, double width, double Current )
+			: R( R_0 ), z( z_0 ), h( height ), w( width ), J( Current )
+		{
+			R_l = R - w/2;
+			R_u = R + w/2;
+			Z_l = z - h/2;
+			Z_u = z + h/2;
+		};
 
-	out( 0 ) = ( x - 0.55 )/.45;
-	out( 1 ) = 2.0 * ( y - 0.5 );
+		bool inline Contains( mfem::Vector const& pt ) const
+		{
+			return ( ( pt( 0 ) >= R_l ) && ( pt( 0 ) <= R_u ) && ( pt( 1 ) >= Z_l ) && ( pt( 1 ) <= Z_u ) );
+		}
 
-	return;
-}
+		~Coil() {};
+};
 
-double u_fun( mfem::Vector const& in )
-{
-	double y = in( 1 );
-	return 4.0*( y - 0.5 )*( y - 0.5 );
-}
+class Jtor {
+	protected:
+		std::vector<Coil> Coils;
+	public:
+		Jtor() {Coils.clear();};
+		~Jtor() {};
+		void AddCoil( double R, double z, double h, double w, double J ) { Coils.emplace_back( R, z, h, w, J );};
+
+		// Returns R*j_tor
+		double operator()( mfem::Vector const& pt ) {
+			double JtorPt = 0.0;
+			for ( auto const &coil : Coils )
+			{
+				if ( coil.Contains( pt ) )
+					JtorPt += coil.J;
+			}
+			return JtorPt;
+		};
+};
 
 int main(int argc, char *argv[])
 {
 	int order = 6;
-   Mesh *mesh = new Mesh(4, 4, mfem::Element::Type::TRIANGLE );
-	auto xform = []( const Vector& in, Vector& out ) { 
-		constexpr double R_min = 0.1;
-		out( 1 ) = in( 1 );
-		out( 0 ) = R_min + in( 0 )*( 1 - R_min );
+	Mesh *mesh = new Mesh(58, 120, Element::Type::TRIANGLE);
+	auto xlate = []( const mfem::Vector& in, mfem::Vector & out ) {
+		double R_min = 0.05;
+		double R_max = 1.5;
+		double Z_min = -1.5;
+		double Z_max = +1.5;
+		out( 0 ) = in( 0 )*( R_max - R_min ) + R_min;
+		out( 1 ) = in( 1 )*( Z_max - Z_min ) + Z_min;
+		return;
 	};
-	mesh->Transform( xform );
+	mesh->Transform( xlate );
 
-
-	int dim = mesh->Dimension();
-
-	FiniteElementCollection *fec_cells = new DG_FECollection( order, dim );
-   FiniteElementSpace *fe_cell_space = new FiniteElementSpace( mesh, fec_cells );
-	FiniteElementSpace *fe_cell_vector_space = new FiniteElementSpace( mesh, fec_cells, dim );
+	Jtor FieldCoils;
+	FieldCoils.AddCoil( 1.,  1., .05, .05, 300. );
+	FieldCoils.AddCoil( 1., -1., .05, .05, 300. );
 	
-	FiniteElementCollection *fec_edges = new DG_Interface_FECollection( order, dim );
-	FiniteElementSpace *fe_edge_space = new FiniteElementSpace( mesh, fec_edges );
 
-	GridFunction lambda( fe_edge_space );
-	Array<int> attr( mesh->bdr_attributes.Max() );
-	attr = 1;
-	ConstantCoefficient one( 1.0 );
-	std::cout << attr.Size() << std::endl;
-	lambda.ProjectBdrCoefficient( one, attr );
+	mfem::Array<mfem::Vector> points( 6 );
+	points[ 0 ].SetSize( 2 );
+	points[ 0 ]( 0 ) = 0.5;
+	points[ 0 ]( 1 ) = 0.0;
+	points[ 1 ].SetSize( 2 );
+	points[ 1 ]( 0 ) = 0.5;
+	points[ 1 ]( 1 ) = 0.5;
+	points[ 2 ].SetSize( 2 );
+	points[ 2 ]( 0 ) = 0.5;
+	points[ 2 ]( 1 ) = -0.5;
+	points[ 3 ].SetSize( 2 );
+	points[ 3 ]( 0 ) = 0.75;
+	points[ 3 ]( 1 ) = 0.0;
+	points[ 4 ].SetSize( 2 );
+	points[ 4 ]( 0 ) = 0.75;
+	points[ 4 ]( 1 ) = 0.75;
+	points[ 5 ].SetSize( 2 );
+	points[ 5 ]( 0 ) = 0.75;
+	points[ 5 ]( 1 ) = -0.75;
 
-	GridFunction u( fe_cell_space );
-	FunctionCoefficient u_c( u_fun );
-	u.ProjectCoefficient( u_c );
 
-	GridFunction q( fe_cell_vector_space );
-	VectorFunctionCoefficient q_c( dim, qFun );
-	q.ProjectCoefficient( q_c );
+
+	std::cout << std::setprecision( 12 );
+	/*
+	mfem::Vector r( 2 );
+	r( 0 ) = 1; r( 1 ) = 1;
+	for ( int j=0; j<points.Size(); j++ )
+		std::cout << " G at (" << points[ j ]( 0 ) << ", " << points[ j ]( 1 )  << ",1,1) = " << GreensFunction( points[ j ], r ) << std::endl;
+		*/
+
+	std::cout << std::endl;
+
+	for ( int j=0; j<points.Size(); j++ )
+	{
+		std::cout << " Psi at (" << points[ j ]( 0 ) << ", " << points[ j ]( 1 )  << ") = " << GreensFunctionPsi( mesh, points[ j ], FieldCoils ) << std::endl;
+	}
+
+
+
 	
-	mfem::Vector test_pt( 2 );
-	double bpsi;
-
-	boost::format output_form(" BPsi[%1%,%2%] = %3$.12d \n" );
-	
-	test_pt( 0 ) = .1;
-	test_pt( 1 ) = .5;
-
-	bpsi = BoundaryPsi( fe_cell_vector_space, q, test_pt );
-
-	std::cout << output_form % test_pt( 0 ) % test_pt( 1 ) % bpsi;
-
-	test_pt( 0 ) = .1;
-	test_pt( 1 ) = 0;
-
-	bpsi = BoundaryPsi( fe_cell_vector_space, q, test_pt );
-
-	std::cout << output_form % test_pt( 0 ) % test_pt( 1 ) % bpsi;
-
-	test_pt( 0 ) = .1;
-	test_pt( 1 ) = 1;
-
-	bpsi = BoundaryPsi( fe_cell_vector_space, q, test_pt );
-
-	std::cout << output_form % test_pt( 0 ) % test_pt( 1 ) % bpsi;
-
-	test_pt( 0 ) = .5;
-	test_pt( 1 ) = 1;
-
-	bpsi = BoundaryPsi( fe_cell_vector_space, q, test_pt );
-
-	std::cout << output_form % test_pt( 0 ) % test_pt( 1 ) % bpsi;
-	
-	test_pt( 0 ) = .5;
-	test_pt( 1 ) = 0;
-
-	bpsi = BoundaryPsi( fe_cell_vector_space, q, test_pt );
-
-	std::cout << output_form % test_pt( 0 ) % test_pt( 1 ) % bpsi;
-
-	test_pt( 0 ) = 1;
-	test_pt( 1 ) = .5;
-
-	bpsi = BoundaryPsi( fe_cell_vector_space, q, test_pt );
-
-	std::cout << output_form % test_pt( 0 ) % test_pt( 1 ) % bpsi;
-
-	test_pt( 0 ) = .5501;
-	test_pt( 1 ) = 0;
-
-	bpsi = BoundaryPsi( fe_cell_vector_space, q, test_pt );
-
-	std::cout << output_form % test_pt( 0 ) % test_pt( 1 ) % bpsi;
-
-	test_pt( 0 ) = .5501;
-	test_pt( 1 ) = 1;
-
-	bpsi = BoundaryPsi( fe_cell_vector_space, q, test_pt );
-
-	std::cout << output_form % test_pt( 0 ) % test_pt( 1 ) % bpsi;
-
-
-
-
-
-
-
-
-
-
 	return 0;
 }
 

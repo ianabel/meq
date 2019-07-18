@@ -260,8 +260,57 @@ class GreensFunctionBoundaryCoefficient : public mfem::Coefficient
 				throw new std::logic_error( "This only works with Segements!" );
 			mfem::Vector pt( 3 );
 			T.Transform( ip, pt );
-			return BoundaryPsi( Q_space, psi_hat, pt );
+			return 2*BoundaryPsi( Q_space, psi_hat, pt );
 		}
 		
 };
+
+double GreensFunctionPsi( mfem::Mesh * mesh, mfem::Vector r, std::function<double( const mfem::Vector& )> const& j_coil )
+{
+	double Answer = 0;
+	for (int i = 0; i < mesh->GetNE(); i++)
+	{
+		mfem::ElementTransformation *T = mesh->GetElementTransformation( i );
+		mfem::IntegrationRule const *ir = &IntRules.Get(T->GetGeometryType(), 16);
+		double CellAnswer = 0;
+		for (int p = 0; p < ir->GetNPoints(); p++)
+		{
+			mfem::Vector pt( 3 );
+			const mfem::IntegrationPoint &ip = ir->IntPoint(p);
+			T->Transform( ip, pt );
+			if ( ::fabs( j_coil( pt ) ) < 1e-6 )
+				continue;
+			double tmp = ip.weight  * T->Weight() * GreensFunction( r, pt ) * j_coil( pt );
+			
+			CellAnswer += tmp;
+		}
+
+		Answer += CellAnswer;
+	}
+	return Answer;
+}
+
+class FullGreensFunctionBoundaryCoefficient : public mfem::Coefficient
+{
+	protected:
+		mfem::Mesh *mesh;
+		std::function<double( const mfem::Vector & )> const& j_tor;
+
+	public:
+		FullGreensFunctionBoundaryCoefficient( mfem::Mesh * mesh_r, std::function<double( const mfem::Vector& )> const& j_phi )
+			: mesh( mesh_r ),  j_tor( j_phi )
+		{
+		}
+
+		virtual double Eval( mfem::ElementTransformation &T, const mfem::IntegrationPoint &ip )
+		{
+			if ( T.GetGeometryType() != mfem::Geometry::Type::SEGMENT )
+				throw new std::logic_error( "This only works with Segements!" );
+			mfem::Vector pt( 3 );
+			T.Transform( ip, pt );
+			return GreensFunctionPsi( mesh, pt, j_tor );
+		}
+		
+};
+
 

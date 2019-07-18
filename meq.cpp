@@ -57,6 +57,7 @@ class Jtor {
 		~Jtor() {};
 		void AddCoil( double R, double z, double h, double w, double J ) { Coils.emplace_back( R, z, h, w, J );};
 
+		// Returns R*j_tor
 		double operator()( mfem::Vector const& pt ) {
 			double JtorPt = 0.0;
 			for ( auto const &coil : Coils )
@@ -64,7 +65,7 @@ class Jtor {
 				if ( coil.Contains( pt ) )
 					JtorPt += coil.J;
 			}
-			return JtorPt;
+			return pt( 0 ) * JtorPt;
 		};
 };
 
@@ -85,15 +86,6 @@ int main(int argc, char *argv[])
 			"Mesh file to use.");
 	args.AddOption(&order, "-o", "--order",
 			"Finite element order (polynomial degree).");
-	args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
-			"--no-visualization",
-			"Enable or disable GLVis visualization.");
-	args.AddOption(&post, "-post", "--postprocessing",
-			"-no-post", "--no-postprocessing",
-			"Enable or disable postprocessing.");
-	args.AddOption(&save, "-save", "--save-files", "-no-save",
-			"--no-save-files",
-			"Enable or disable file saving.");
 	args.AddOption(&initial_ref_levels, "-mr", "--mesh-refinement-levels",
 			"The number of levels of uniform refinement to apply to the grid.");
 	args.Parse();
@@ -105,24 +97,31 @@ int main(int argc, char *argv[])
 	args.PrintOptions(cout);
 
 	// Do the vacuum problem
-	// One coil at R=1,Z=0, h=w=0.05, J = 400 kA/m^2 => j_tot = 1kA
+	// One coil at R=1,Z=1, h=w=0.05,  J = 30 MA/m^2 => j_tot = 75 kA 
+	// One coil at R=1,Z=-1, h=w=0.05, J = 30 MA/m^2 => j_tot = 75 kA
 	
 	Jtor FieldCoils;
-	FieldCoils.AddCoil( 1., 0., .05, .05, 400. );
+	FieldCoils.AddCoil( 1.,  1., .05, .05, 300. );
+	FieldCoils.AddCoil( 1., -1., .05, .05, 300. );
 	
 	// Mesh goes from R_min to R_max, and Z_min to Z_max
 	
-	Mesh *mesh = new Mesh(8, 8, Element::Type::TRIANGLE);
+	/*
+	Mesh *mesh = new Mesh(58, 120, Element::Type::TRIANGLE);
 	auto xlate = []( const mfem::Vector& in, mfem::Vector & out ) {
 		double R_min = 0.05;
 		double R_max = 1.5;
-		double Z_min = -1;
-		double Z_max = +1;
+		double Z_min = -1.5;
+		double Z_max = +1.5;
 		out( 0 ) = in( 0 )*( R_max - R_min ) + R_min;
 		out( 1 ) = in( 1 )*( Z_max - Z_min ) + Z_min;
 		return;
 	};
 	mesh->Transform( xlate );
+	*/
+
+	Mesh *mesh = new Mesh("coils.msh");
+	
 
 	int dim = mesh->Dimension();
 
@@ -137,10 +136,17 @@ int main(int argc, char *argv[])
 
 	mfem::Vector qu_zero_bc;
 	solver.Solve( qu_zero_bc );
-	solver.ApplyAdaptiveRefinement( qu_zero_bc );
-	solver.Solve( qu_zero_bc );
-	solver.ApplyAdaptiveRefinement( qu_zero_bc );
-	solver.Solve( qu_zero_bc );
+
+
+	// Boundary Values
+	mfem::Vector r( 2 );
+	r( 0 ) = 0.05; r( 1 ) = 0.0;
+	std::cout << "Psi at (0.05, 0.00) = " << BoundaryPsi( solver.GetQSpace(), qu_zero_bc, r ) << std::endl;
+	r( 0 ) = 0.05; r( 1 ) = 0.75;
+	std::cout << "Psi at (0.05, 0.75) = " << BoundaryPsi( solver.GetQSpace(), qu_zero_bc, r ) << std::endl;
+	r( 0 ) = 0.05; r( 1 ) = -0.75;
+	std::cout << "Psi at (0.05,-0.75) = " << BoundaryPsi( solver.GetQSpace(), qu_zero_bc, r ) << std::endl;
+	std::cout << std::endl;
 
 	// Perform the Lackner trick to compute the boundary condition
 	GreensFunctionBoundaryCoefficient Lackner( mesh, solver.GetQSpace(), qu_zero_bc );
@@ -149,42 +155,35 @@ int main(int argc, char *argv[])
 	solver.SetBCs( Lackner );
 	solver.Solve( qu );
 
+
+
 	GridFunction q_solution,u_solution;
 	q_solution.MakeRef( solver.GetQSpace(), qu, 0 );
 	u_solution.MakeRef( solver.GetUSpace(), qu, solver.GetQSpace()->GetVSize() );
 
-	mfem::DenseMatrix points( 2, 2 );
-	points( 0, 0 ) = .1;
-	points( 1, 0 ) = 0;
-	points( 0, 1 ) = .1;
+	mfem::DenseMatrix points( 2, 6 );
+	points( 0, 0 ) = 0.5;
+	points( 1, 0 ) = 0.0;
+	points( 0, 1 ) = 0.5;
 	points( 1, 1 ) = 0.5;
+	points( 0, 2 ) = 0.5;
+	points( 1, 2 ) = -0.5;
+
+	points( 0, 3 ) = 0.75;
+	points( 1, 3 ) = 0.0;
+	points( 0, 4 ) = 0.75;
+	points( 1, 4 ) = 0.75;
+	points( 0, 5 ) = 0.75;
+	points( 1, 5 ) = -0.75;
 
 	mfem::Array<int> ids;
 	mfem::Array<mfem::IntegrationPoint> ips;
 
 	mesh->FindPoints( points, ids, ips );
 	
-	mfem::Vector test_pt( 2 );
-	test_pt( 0 ) = .05;
-	test_pt( 1 ) = 0;
-
 	std::cout << std::setprecision( 10 );
-	std::cout << "BPsi(.05,.0) =    " << BoundaryPsi( solver.GetQSpace(), qu_zero_bc, test_pt ) << std::endl;
-	std::cout << " Answer is        0.0006257824004" << std::endl;
-	std::cout << " Projected psi is " << u_solution.GetValue( ids[ 0 ], ips[ 0 ] ) << std::endl;
-
-	mfem::Vector q_val( 2 );
-	q_solution.GetVectorValue( ids[ 0 ], ips[ 0 ], q_val );
-	std::cout << "q.n @ (.05,0) = (" << q_val( 0 ) << ", " << q_val( 1 ) << ")" << std::endl;
-
-	test_pt( 0 ) = .05;
-	test_pt( 1 ) = 0.5;
-
-	std::cout << "BPsi(.05,.5)  = " << BoundaryPsi( solver.GetQSpace(), qu_zero_bc, test_pt ) << std::endl;
-	std::cout << " Answer is      0.0004473250432" << std::endl;
-	
-	q_solution.GetVectorValue( ids[ 1 ], ips[ 1 ], q_val );
-	std::cout << "q.n @ (.05,.5) = (" << q_val( 0 ) << ", " << q_val( 1 ) << ")" << std::endl;
+	for ( int j=0; j<ids.Size(); j++ )
+		std::cout << " Psi at (" << points( 0, j ) << ", " << points( 1, j ) << ") = " << u_solution.GetValue( ids[ j ], ips[ j ] ) << std::endl;
 
 	if (save)
 	{
