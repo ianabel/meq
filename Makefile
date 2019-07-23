@@ -32,4 +32,9 @@ mfemHDGPoissonNL-KINSOL: mfemHDGPoissonNL-KINSOL.cpp $(GSINVERTER_DEP)
 mfem-test: mfem-test.cpp $(GSINVERTER_DEP)
 	g++ $(CXXFLAGS_DEBUG) mfem-test.cpp HDGGSIntegrator.cpp -o mfem-test $(MFEM_DEBUG_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
 
+mfemSurfaceTracer: mfemSurfaceTracer.cpp
+	g++ $(CXXFLAGS_DEBUG) mfemSurfaceTracer.cpp -o mfemSurfaceTracer $(MFEM_DEBUG_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
+
+Baxis: Baxis.cpp
+	g++ $(CXXFLAGS_DEBUG) Baxis.cpp -o Baxis $(MFEM_DEBUG_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
 

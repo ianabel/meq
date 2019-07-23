@@ -40,7 +40,7 @@ std::vector<ControlPoint> Trace( double x, double y, mfem::GridFunction const& p
 	nPts = mesh->FindPoints( Coords, elemId, startPointRef );
 	if ( nPts != 1 )
 	{
-		throw new std::logic_error( "Starting point wasn't found" );
+		throw std::logic_error( "Starting point wasn't found" );
 	}
 	mfem::Vector start( current );
 
@@ -143,8 +143,8 @@ int main( int argc, char** argv )
 {
 
 	std::string mesh_file = argv[ 1 ];
-	std::string grid_fn_file = argv[ 2 ];
-	std::string vec_grid_fn_file = argv[ 3 ];
+	// std::string grid_fn_file = argv[ 2 ];
+	// std::string vec_grid_fn_file = argv[ 3 ];
 
 
 	//    Read the mesh from the given mesh file. We can handle triangular,
@@ -175,11 +175,25 @@ int main( int argc, char** argv )
 	Himmelblau.ProjectCoefficient( HimmelblauCf );
 	HimmelblauGrad.ProjectCoefficient( HimmelblauGradCf );
 
-	std::vector<ControlPoint> output = Trace( 0.0, 5.5, Himmelblau, HimmelblauGrad, 50, 0.01 );
+	std::vector< std::vector<ControlPoint> > Curves;
+	double y_0 = 0;
+	double y_1 = 5.5;
+	double h = 0.15;
+
+	for ( double y=y_0; y < y_1; y += h )
+	{
+		Curves.emplace_back( Trace( 0.0, y, Himmelblau, HimmelblauGrad, 50, 0.05 ) );
+	}
 	
 	std::ofstream DataFile( "contours.data" );
-	for ( auto const &p : output )
-		DataFile << p.x << "\t" << p.y << std::endl;
+	for ( auto const &curve : Curves )
+	{
+		for ( auto const &p : curve )
+			DataFile << p.x << "\t" << p.y << std::endl;
+		DataFile << std::endl;
+		DataFile << "# " << std::endl;
+		DataFile << std::endl;
+	}
 
 	DataFile.close();
 	return 0;

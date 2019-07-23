@@ -18,8 +18,21 @@ double GreensFunction( mfem::Vector const& r, mfem::Vector const& r_star )
 	double dR = ( R_star - R )/R;
 	double dZ = ( Z_star - Z )/R;
 
-	if ( dR == 0 && dZ == 0 )
+	if ( ( dR == 0 ) && ( dZ == 0 ) )
+	{
+		double foo = R_star/R - 1;
+		double bar = Z_star/R - Z/R;
+
+		std::cerr << std::setprecision( 24 );
+		std::cerr << std::endl;
+		std::cerr << std::endl;
+		std::cerr << R << '\t' << R_star << '\t' << Z << '\t' << Z_star << std::endl;
+		std::cerr << dR << '\t' << dZ << std::endl;
+		std::cerr << foo << '\t' << bar << std::endl;
+		std::cerr << std::endl;
+
 		throw std::logic_error( "Logarithmic divergence detected. Caution is advised." );
+	}
 
 	if ( ( ::fabs( dR ) > 1e-7 ) || ( ::fabs( dZ ) > 1e-7 ) )
 	{
