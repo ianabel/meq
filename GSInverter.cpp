@@ -81,7 +81,6 @@ void GSInverter::SetBCs( Coefficient& coeff )
 // and store in the Vector y
 void GSInverter::Mult( const Vector& rhs_F_in , Vector& soln_out ) const
 {
-	StopWatch chrono;
 	Vector rhs_F( rhs_F_in );
 	Vector rhs_R(dimV);
 	Vector V_aux(dimV);
@@ -126,8 +125,6 @@ void GSInverter::Mult( const Vector& rhs_F_in , Vector& soln_out ) const
 	solver.SetOperator(*SC);
 	solver.SetPrintLevel(-1);
 	solver.SetPreconditioner(M);
-	chrono.Clear();
-	chrono.Start();
 	solver.Mult(*SC_RHS, lambda_variable);
 
 	// Reconstruct the solution u and q from the facet solution lambda
@@ -136,15 +133,10 @@ void GSInverter::Mult( const Vector& rhs_F_in , Vector& soln_out ) const
 	u_variable.MakeRef( W_space, soln_out, dimV );
 	AVarf->Reconstruct(&R, &F, lambda_variable, &q_variable, &u_variable);
 
-	chrono.Stop();
 
 	if (!solver.GetConverged())
 	{
 		std::cout << "Iterative method failed to converge!" << std::endl;
-	}
-	else
-	{
-		std::cout << "Linear Solve took " << chrono.RealTime() << " seconds." << std::endl;
 	}
 };
 

@@ -22,13 +22,6 @@ class ControlPoint
 		ControlPoint( double a, double b, double da, double db ) : x( a ), y( b ), dx( da ), dy( db ) {};
 };
 
-class BoundingBox
-{
-	public:
-		double x_l,y_l,x_u,y_u;
-		BoundingBox( double a, double b, double c, double d ) : x_l( a ),y_l( b ),x_u( c ),y_u( d ) {};
-};
-
 std::vector<ControlPoint> Trace( double x, double y, mfem::GridFunction const& psi, mfem::GridFunction const& gradPsi, double s_max, double delta_s, double tolerance = 1e-6 )
 {
 	std::vector<ControlPoint> curve;
@@ -61,7 +54,6 @@ std::vector<ControlPoint> Trace( double x, double y, mfem::GridFunction const& p
 	curve.emplace_back( x, y, gradPsiVal( 0 ), gradPsiVal( 1 ) );
 
 	double arcLength = 0;
-	int direction = 1;
 
 	// Step along the curve
 	mfem::Vector delta( 2 );
@@ -79,8 +71,6 @@ std::vector<ControlPoint> Trace( double x, double y, mfem::GridFunction const& p
 		delta( 0 ) = gradPsiVal( 1 );
 		delta( 1 ) = -gradPsiVal( 0 );
 
-		delta *= direction;
-
 		double scaling = delta_s/::sqrt( delta( 0 )*delta( 0 ) + delta( 1 )*delta( 1 ) );
 
 		delta *= scaling;
@@ -92,18 +82,11 @@ std::vector<ControlPoint> Trace( double x, double y, mfem::GridFunction const& p
 		nPts = mesh->FindPoints( Coords, elemId, startPointRef );
 		if ( nPts == 0 || elemId[ 0 ] == -1 )
 		{
-			if ( direction == -1 )
-				return curve;
-			else 
-			{
-				direction = -1;
-				current = start;
-				continue;
-			}
+			std::cerr << "Terminating because curve left domain" << std::endl;
+			return curve;
 		}
 		double psiGuess = psi.GetValue( elemId[ 0 ],startPointRef[ 0 ] );
 
-		bool redo_backwards = false;
 		if ( ::fabs( psiGuess - PsiVal ) > tolerance )
 		{
 			do {
@@ -114,26 +97,15 @@ std::vector<ControlPoint> Trace( double x, double y, mfem::GridFunction const& p
 				gradPsiVal *= t;
 				guess += gradPsiVal;
 				Coords.UseExternalData( guess, 2, 1 );
-
 				nPts = mesh->FindPoints( Coords, elemId, startPointRef );
-
 				if ( ( nPts == 0 ) || ( elemId[ 0 ] == -1 ) )
 				{
-					if ( direction == -1 )
-						return curve;
-					else 
-					{
-						direction = -1;
-						current = start;
-						redo_backwards = true;
-					}
+					std::cerr << "Terminating because curve left domain" << std::endl;
+					return curve;
 				}
 				psiGuess = psi.GetValue( elemId[ 0 ],startPointRef[ 0 ] );
 			} while ( ::fabs( psiGuess - PsiVal ) > tolerance );
 		}
-
-		if ( redo_backwards )
-			continue;
 
 
 		mfem::Vector tmp = guess;
@@ -143,15 +115,14 @@ std::vector<ControlPoint> Trace( double x, double y, mfem::GridFunction const& p
 		gradPsi.GetVectorValue( elemId[ 0 ], startPointRef[ 0 ], gradPsiVal );
 		scaling = ::sqrt( gradPsiVal( 0 )*gradPsiVal( 0 ) + gradPsiVal( 1 )*gradPsiVal( 1 ) );
 
-		if ( direction == 1 )
-			curve.emplace_back( current( 0 ), current( 1 ), 0, 0 );
-		else 
-			curve.emplace( curve.cbegin(), current( 0 ), current( 1 ), 0, 0 );
-
+		curve.emplace_back( current( 0 ), current( 1 ), 0, 0 );
 		tmp = current; 
 		tmp -= start;
-		if ( ( tmp( 0 )*tmp( 0 ) + tmp( 1 )*tmp( 1 ) ) < .1*delta_s*delta_s )
+		if ( ( tmp( 0 )*tmp( 0 ) + tmp( 1 )*tmp( 1 ) ) < .01*delta_s*delta_s )
+		{
+			std::cerr << "Stopping because curve is closed" << std::endl;
 			break;
+		}
 	}
 	return curve;
 }
@@ -206,8 +177,8 @@ int main( int argc, char** argv )
 
 	std::vector< std::vector<ControlPoint> > Curves;
 	double y_0 = 0;
-	double y_1 = 6;
-	double h = 0.25;
+	double y_1 = 5.5;
+	double h = 0.15;
 
 	for ( double y=y_0; y < y_1; y += h )
 	{

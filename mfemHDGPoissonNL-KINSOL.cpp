@@ -32,11 +32,17 @@ double zeroFun( const Vector & )
 	return 0;
 }
 
+double kappaF( const Vector & pt )
+{ 
+	return 1.0 / pt( 0 );
+}
+
+
 double uFun_ex(const Vector & pt)
 {
    double x(pt(0));
    double y(pt(1));
-	return ::exp( 2*x*y )*::sin( pi*x )*::cos( pi*y );
+	return 10*::exp( 2*x*y )*::sin( pi*x )*::cos( pi*y );
 }
 
 void qFun_ex(const Vector & pt, Vector & q)
@@ -44,8 +50,8 @@ void qFun_ex(const Vector & pt, Vector & q)
    double x(pt(0));
    double y(pt(1));
 
-	q( 0 ) = -::exp( 2*x*y )*::cos( pi*y )*(  pi*::cos( pi*x ) + 2*y*::sin( pi*x ) ) / x;
-	q( 1 ) = -::exp( 2*x*y )*::sin( pi*x )*( -pi*::sin( pi*y ) + 2*x*::cos( pi*y ) ) / x;
+	q( 0 ) = -10*::exp( 2*x*y )*::cos( pi*y )*(  pi*::cos( pi*x ) + 2*y*::sin( pi*x ) ) / x;
+	q( 1 ) = -10*::exp( 2*x*y )*::sin( pi*x )*( -pi*::sin( pi*y ) + 2*x*::cos( pi*y ) ) / x;
 
 	return;
 }
@@ -65,14 +71,14 @@ double fFun(const Vector & pt)
 	// Added to cancel the nonlinear term when we're at the right solution
 	 
 	return  - uFun_ex(pt)*uFun_ex(pt) + 
-		( ::exp( 2*x*y ) / ( x*x ) )*( pi*( 1.0 - 4.0 *  x  * y ) * ::cos( pi*x ) * ::cos( pi*y ) + ( 2 * t ) * ::sin( pi*x ) );
+		10*( ::exp( 2*x*y ) / ( x*x ) )*( pi*( 1.0 - 4.0 *  x  * y ) * ::cos( pi*x ) * ::cos( pi*y ) + ( 2 * t ) * ::sin( pi*x ) );
 
 }
 
 class NLGSSolver : public mfem::Operator
 {
 	public:
-		using RealFunc = std::function< double( const mfem::Vector & )>;
+		using RealFunc = double (*)( const mfem::Vector & );
 		using NLFunc = std::function< double( double )>;
 	protected:
 		GSInverter solver;
@@ -102,7 +108,7 @@ class NLGSSolver : public mfem::Operator
 			qu_out.SetSize( solver.NumRows() );
 			// Assemble the RHS and the Schur complement
 			mfem::LinearForm *fform = new mfem::LinearForm;
-			mfem::StdFunctionCoefficient fcoeff( RHS );
+			mfem::FunctionCoefficient fcoeff( RHS );
 
 			mfem::GridFunction u;
 			u.MakeRef( const_cast<mfem::FiniteElementSpace* >( solver.GetUSpace() ), static_cast<double*>( qu_in.GetData() + solver.GetQSpace()->GetVSize() ) );
@@ -135,6 +141,34 @@ class NLGSSolver : public mfem::Operator
 			solver.Prolong( qu_old, qu_new );
 		};
 
+		static double kappaF( const mfem::Vector& pt ) 
+		{ 
+			return 1.0 / pt( 0 ); 
+		};
+
+		void ApplyAdaptiveRefinement(  mfem::Vector & soln_vector )
+		{
+			mfem::FunctionCoefficient kappa( kappaF );
+			mfem::FunctionCoefficient fFunCoeff( fFun );
+			mfem::GridFunction q_variable,u_variable,u_hat_variable;
+
+			q_variable.MakeRef( solver.GetQSpace(), soln_vector, 0 );
+			u_variable.MakeRef( solver.GetUSpace(), soln_vector, solver.GetQSpace()->GetVSize() );
+			u_hat_variable.MakeRef( solver.GetMSpace(), soln_vector, solver.GetQSpace()->GetVSize() + solver.GetUSpace()->GetVSize() );
+
+
+			mfem::GridFunction u_star( solver.GetUStarSpace() );
+			solver.Postprocess( u_star, soln_vector );
+
+			mfem::CockburnZhangEstimator errorEstimator( q_variable, u_star, u_hat_variable, kappa, fFunCoeff );
+			mfem::ThresholdRefiner refiner( errorEstimator );
+
+			refiner.SetTotalErrorFraction( 0.2 );
+			refiner.Apply( *( solver.GetMesh() ) );
+			Update();
+
+		};
+
 };
 
 int main(int argc, char *argv[])
@@ -145,6 +179,7 @@ int main(int argc, char *argv[])
 	const char *mesh_file = "grid.mesh";
 	int order = 3;
 	int initial_ref_levels = 0;
+	int N_AMR=0;
 	bool visualization = true;
 	bool post = true;
 	bool save = true;
@@ -165,8 +200,8 @@ int main(int argc, char *argv[])
 	args.AddOption(&save, "-save", "--save-files", "-no-save",
 			"--no-save-files",
 			"Enable or disable file saving.");
-	args.AddOption(&initial_ref_levels, "-mr", "--mesh-refinement-levels",
-			"The number of levels of uniform refinement to apply to the grid.");
+	args.AddOption(&N_AMR, "-amr", "--mesh-refinement-levels",
+			"The number of loops of AMR to perform" );
 	args.AddOption(&memA, "-memA", "--memoryA",
 			"Storage of A.");
 	args.AddOption(&memB, "-memB", "--memoryB",
@@ -213,7 +248,7 @@ int main(int argc, char *argv[])
 	}
 
 	// Mesh up [0.1,1] x [0.1,1]
-	Mesh *mesh = new Mesh(10,10,Element::Type::TRIANGLE, false, 1.0, 1.0, true );
+	Mesh *mesh = new Mesh(3, 3, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
 	auto xform = []( const Vector& in, Vector& out ) { 
 		constexpr double R_min = 0.1;
 		out( 1 ) = in( 1 );
@@ -223,10 +258,6 @@ int main(int argc, char *argv[])
 
 	int dim = mesh->Dimension();
 
-	for (int ii=0; ii<initial_ref_levels; ii++)
-	{
-		mesh->UniformRefinement();
-	}
 
 	auto squared = []( double x ){return x*x;};
 	NLGSSolver solver( mesh, order, fFun, squared );
@@ -239,71 +270,100 @@ int main(int argc, char *argv[])
 	mfem::Vector qu( solver.NumRows() );
 
 	qu = 0.0;
+	mfem::FunctionCoefficient kappa( kappaF );
+	mfem::FunctionCoefficient fFunCoeff( fFun );
 
-	KinSolver *nonlinearPoissonSolver = new KinSolver( KIN_FP, false );
-	nonlinearPoissonSolver->SetMaxIter( 100 );
-	nonlinearPoissonSolver->SetFuncNormTol( 1e-3 );
-	nonlinearPoissonSolver->iterative_mode = false;
-	nonlinearPoissonSolver->SetOperator( solver );
-	nonlinearPoissonSolver->Mult( qu, qu );
-
-
-	StdFunctionCoefficient fFunCoeff( fFun );
-	auto kappaF = []( const Vector& pt ) { return 1.0 / pt( 0 ); };
-	StdFunctionCoefficient kappa( kappaF );
-
-	q_variable.MakeRef( solver.GetQSpace(), qu, 0 );
-	u_variable.MakeRef( solver.GetUSpace(), qu, solver.GetQSpace()->GetVSize() );
-	u_hat_variable.MakeRef( solver.GetMSpace(), qu, solver.GetQSpace()->GetVSize() + solver.GetUSpace()->GetVSize() );
-
-	CockburnZhangEstimator errorEstimator( q_variable, u_variable, u_hat_variable, kappa, fFunCoeff );
-
-	ThresholdRefiner refiner( errorEstimator );
-	refiner.SetTotalErrorFraction( 0.2 );
-	refiner.Apply( *mesh );
-	solver.Update();
-	
+	int i_amr = 0;
+	KinSolver *nonlinearPoissonSolver = nullptr;
 	mfem::Vector qu_refined;
-	solver.Prolong( qu, qu_refined );
-	qu = qu_refined;
-	
-	mesh->UniformRefinement();
-
-	solver.Update();
-	solver.Prolong( qu, qu_refined );
-
-	qu.SetSize( solver.Height() );
-	qu = 0.0;
-	std::cout << "Mesh has been refined" << std::endl;
-
-	delete nonlinearPoissonSolver;
-
-	nonlinearPoissonSolver = new KinSolver( KIN_FP, false );
-	nonlinearPoissonSolver->SetMaxIter( 100 );
-	nonlinearPoissonSolver->SetFuncNormTol( 1e-5 );
-	nonlinearPoissonSolver->iterative_mode = true;
-	nonlinearPoissonSolver->SetOperator( solver );
-	nonlinearPoissonSolver->Mult( qu_refined, qu_refined );
-	
-	q_variable.MakeRef( solver.GetQSpace(), qu_refined, 0 );
-	u_variable.MakeRef( solver.GetUSpace(), qu_refined, solver.GetQSpace()->GetVSize() );
-
-	// 12. Compute the discretization error
-	int order_quad = max(2, 2*order+2);
-	const IntegrationRule *irs[Geometry::NumGeom];
-	for (int i=0; i < Geometry::NumGeom; ++i)
+	for ( ; i_amr< N_AMR; i_amr++ )
 	{
-		irs[i] = &(IntRules.Get(i, order_quad));
-	}
-   FunctionCoefficient ucoeff(uFun_ex);
-   VectorFunctionCoefficient qcoeff(dim, qFun_ex);
-	double err_u    = u_variable.ComputeL2Error(ucoeff, irs);
-	double err_q    = q_variable.ComputeL2Error(qcoeff, irs);
-	double err_mean  = u_variable.ComputeMeanLpError(2.0, ucoeff, irs);
+		nonlinearPoissonSolver = new KinSolver( KIN_FP, false );
+		nonlinearPoissonSolver->SetMaxIter( 1000 );
+		nonlinearPoissonSolver->SetFuncNormTol( 1e-4 );
+		nonlinearPoissonSolver->iterative_mode = false;
+		nonlinearPoissonSolver->SetOperator( solver );
+		qu.SetSize( solver.Height() );
+		nonlinearPoissonSolver->Mult( qu, qu );
 
-	std::cout << "|| u_h - u_ex || = " << err_u << "\n";
-	std::cout << "|| q_h - q_ex || = " << err_q << "\n";
-	std::cout << "|| mean(u_h) - mean(u_ex) || = " << err_mean << "\n";
+		q_variable.MakeRef( solver.GetQSpace(), qu, 0 );
+		u_variable.MakeRef( solver.GetUSpace(), qu, solver.GetQSpace()->GetVSize() );
+		u_hat_variable.MakeRef( solver.GetMSpace(), qu, solver.GetQSpace()->GetVSize() + solver.GetUSpace()->GetVSize() );
+
+		std::cout << "After " << i_amr << " levels of refinement:" << std::endl;
+
+		int order_quad = max(2, 2*order+2);
+		const IntegrationRule *irs[Geometry::NumGeom];
+		for (int i=0; i < Geometry::NumGeom; ++i)
+		{
+			irs[i] = &(IntRules.Get(i, order_quad));
+		}
+		FunctionCoefficient ucoeff(uFun_ex);
+		VectorFunctionCoefficient qcoeff(dim, qFun_ex);
+		double err_u    = u_variable.ComputeL2Error(ucoeff, irs);
+		double err_q    = q_variable.ComputeL2Error(qcoeff, irs);
+		mfem::GridFunction u_star( solver.GetUStarSpace() );
+		solver.Postprocess( u_star, qu );
+		double err_u_star    = u_star.ComputeL2Error(ucoeff, irs);
+
+
+		std::cout << "\t|| u_h - u_ex || = " << err_u << "\n";
+		std::cout << "\t|| q_h - q_ex || = " << err_q << "\n";
+		std::cout << "\t|| u*_h - u_ex || = " << err_u_star << "\n";
+		std::cout << std::endl;
+
+		solver.ApplyAdaptiveRefinement( qu );
+
+		/*
+		CockburnZhangEstimator errorEstimator( q_variable, u_star, u_hat_variable, kappa, fFunCoeff );
+
+		ThresholdRefiner refiner( errorEstimator );
+		refiner.SetTotalErrorFraction( 0.2 );
+		refiner.Apply( *mesh );
+		solver.Update();
+		*/
+
+		std::cerr << "Refined Mesh" << std::endl;
+
+		delete nonlinearPoissonSolver;
+	}
+
+	{
+		nonlinearPoissonSolver = new KinSolver( KIN_FP, false );
+		nonlinearPoissonSolver->SetMaxIter( 1000 );
+		nonlinearPoissonSolver->SetFuncNormTol( 1e-4 );
+		nonlinearPoissonSolver->iterative_mode = false;
+		nonlinearPoissonSolver->SetOperator( solver );
+		qu.SetSize( solver.Height() );
+		nonlinearPoissonSolver->Mult( qu, qu );
+
+
+		q_variable.MakeRef( solver.GetQSpace(), qu, 0 );
+		u_variable.MakeRef( solver.GetUSpace(), qu, solver.GetQSpace()->GetVSize() );
+		u_hat_variable.MakeRef( solver.GetMSpace(), qu, solver.GetQSpace()->GetVSize() + solver.GetUSpace()->GetVSize() );
+
+		std::cout << "After " << i_amr << " levels of refinement:" << std::endl;
+
+		int order_quad = max(2, 2*order+2);
+		const IntegrationRule *irs[Geometry::NumGeom];
+		for (int i=0; i < Geometry::NumGeom; ++i)
+		{
+			irs[i] = &(IntRules.Get(i, order_quad));
+		}
+		FunctionCoefficient ucoeff(uFun_ex);
+		VectorFunctionCoefficient qcoeff(dim, qFun_ex);
+		double err_u    = u_variable.ComputeL2Error(ucoeff, irs);
+		double err_q    = q_variable.ComputeL2Error(qcoeff, irs);
+		mfem::GridFunction u_star( solver.GetUStarSpace() );
+		solver.Postprocess( u_star, qu );
+		double err_u_star    = u_star.ComputeL2Error(ucoeff, irs);
+
+
+		std::cout << "\t|| u_h - u_ex || = " << err_u << "\n";
+		std::cout << "\t|| q_h - q_ex || = " << err_q << "\n";
+		std::cout << "\t|| u*_h - u_ex || = " << err_u_star << "\n";
+		std::cout << std::endl;
+	}
 
 	// 13. Save the mesh and the solution.
 	if (save)

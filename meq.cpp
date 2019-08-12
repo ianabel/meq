@@ -80,6 +80,10 @@ int main(int argc, char *argv[])
 
 	// TODO -- replace with boost option parser
 	OptionsParser args(argc, argv);
+	const char *config_file = "meq.conf";
+
+   args.AddOption(&config_file, "-c", "--config",
+                  "Config file to use.");
 	args.AddOption(&order, "-o", "--order",
 			"Finite element order (polynomial degree).");
 	args.AddOption(&initial_ref_levels, "-mr", "--mesh-refinement-levels",
@@ -91,7 +95,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-	const auto config = toml::parse( "meq.conf" );
+	const auto config = toml::parse( config_file );
 	const auto coils = toml::find< std::vector< toml::table > >( config, "coils" );
 	const auto options = toml::find< toml::table >( config, "options" );
 

@@ -4,7 +4,7 @@
 
 class NonlinearDomainLFIntegrator : public mfem::LinearFormIntegrator
 {
-	using NLFunc = std::function< double( double ) >;
+	using NLFunc = std::function< double( const mfem::Vector &, double ) >;
 
 	mfem::Coefficient *Q;
 	NLFunc F;
@@ -50,12 +50,18 @@ void NonlinearDomainLFIntegrator::AssembleRHSElementVect(const mfem::FiniteEleme
 
 	u.GetValues( Tr.ElementNo, *ir, u_vals );
 
+	mfem::Vector point( 2 );
+
+
    for (int i = 0; i < ir->GetNPoints(); i++)
    {
       const mfem::IntegrationPoint &ip = ir->IntPoint(i);
 
       Tr.SetIntPoint (&ip);
-      double val = Tr.Weight() * F( u_vals( i ) );
+		Tr.Transform( ip, point );
+
+      double val = Tr.Weight() * F( point, u_vals( i ) );
+
 		if ( Q != nullptr )
 			val *= Q->Eval( Tr, ip );
 

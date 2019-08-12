@@ -1,12 +1,17 @@
 #!/usr/bin/python3
 #
 
+import sys
 import toml
 import gmsh
 gmsh.initialize("-format vtk")
 
+if len(sys.argv) > 1:
+    conf_file = sys.argv[1]
+else:
+    conf_file = "meq.conf"
 
-conf_dict = toml.load("meq.conf")
+conf_dict = toml.load(conf_file)
 
 coil_list = conf_dict['coils']
 

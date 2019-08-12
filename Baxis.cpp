@@ -19,7 +19,12 @@ std::ostream& operator<<( std::ostream& os, Vector const& vec )
 int main(int argc, char *argv[])
 {
 
-	const auto config = toml::parse( "meq.conf" );
+	const char* config_file = "meq.conf";
+
+	if ( argc > 1 )
+		config_file = argv[ 1 ];
+
+	const auto config = toml::parse( config_file );
 	const auto options = toml::find< toml::table >( config, "options" );
 	const auto domain = toml::find< toml::table >( config, "domain" );
 

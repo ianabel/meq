@@ -27,7 +27,7 @@
 \section{The Grad-Shafranov Operator}
 The elliptic operator $\Delta^*$ defined on the half plane $(R,z)$ with $R>0$ is given by:
 \begin{equation}
-\Delta^* \psi = \left(  \right)\psi.
+\Delta^* \psi = \left( \pd{^2}{ R^2} - \frac{1}{R}\pd{ }{R} + \pd{^2}{z^2} \right)\psi.
 \end{equation}
 Then the usual nonlinear G-S equation is
 \begin{equation}
@@ -35,6 +35,21 @@ Then the usual nonlinear G-S equation is
 \end{equation}
 where the right-hand-side is proportional to the toroidal current density.
 
+If we introduce the regularised function $\Lambda = \psi/R^2$ then
+\begin{equation}
+\begin{split}
+\Delta^* \psi &= \left[ \pd{ }{R} \left( R^2\pd{\Lambda}{R} + 2 R \Lambda \right) - \left( R\pd{\Lambda}{R} + 2 \Lambda \right) + R^2 \pd{^2\Lambda}{z^2} \right]\\
+&= \left[ \pd{ }{R} \left( R^2\pd{\Lambda}{R} \right) + R \pd{\Lambda}{R} + R^2 \pd{^2\Lambda}{z^2} \right] \\
+&=  \hat{\bm{\nabla}} \cdot \left( R^2 \hat{\bm{\nabla}} \Lambda + R \bm{e}_{R} \Lambda \right) - \Lambda
+\end{split}
+\end{equation}
+Implement this as a convection-diffusion HDG.
+
+Note that, with $\dv$ and $\grad$ as the three-dimensional operators,
+\begin{equation}
+\dv \left( R^2 \grad \Lambda \right) = \Delta^* \psi.
+\label{<++>}
+\end{equation}<++>
 
 \section{The Half-plane Green's Function}
 We seek the solution to 
@@ -43,9 +58,9 @@ We seek the solution to
 \end{equation}
 subject to the boundary conditions that
 \begin{equation}
-G(
-\label{<++>}
-\end{equation}<++>
+G(r,r^*)
+\end{equation}
+
 
 
 \end{document}

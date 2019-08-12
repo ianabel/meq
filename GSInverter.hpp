@@ -3,7 +3,6 @@
 
 #include "HDGGSIntegrator.hpp"
 #include "CockburnEstimator.hpp"
-#include "StdFnCoeffs.hpp"
 
 
 class GSInverter : public mfem::Operator
@@ -80,7 +79,7 @@ class GSInverter : public mfem::Operator
 class GSSolver
 {
 	public:
-		using RealFunc = std::function< double( const mfem::Vector & )>;
+		using RealFunc = double (*)( const mfem::Vector & );
 	protected:
 		GSInverter solver;
 		RealFunc RHS;
@@ -100,7 +99,7 @@ class GSSolver
 			mfem::Vector rhs_F( solver.NumCols() );
 			// Assemble the RHS and the Schur complement
 			mfem::LinearForm *fform = new mfem::LinearForm;
-			mfem::StdFunctionCoefficient fcoeff( RHS );
+			mfem::FunctionCoefficient fcoeff( RHS );
 			fform->AddDomainIntegrator( new mfem::DomainLFIntegrator( fcoeff ) );
 			fform->Update(solver.GetUSpace(), rhs_F, 0);
 			fform->Assemble();
@@ -113,11 +112,16 @@ class GSSolver
 			solver.Update(); 
 		};
 
+		static double kappaF( const mfem::Vector& pt ) 
+		{ 
+			return 1.0 / pt( 0 ); 
+		};
+
+		/*
 		void ApplyAdaptiveRefinement(  mfem::Vector & soln_vector )
 		{
-			mfem::StdFunctionCoefficient fFunCoeff( RHS );
-			auto kappaF = []( const mfem::Vector& pt ) { return 1.0 / pt( 0 ); };
-			mfem::StdFunctionCoefficient kappa( kappaF );
+			mfem::FunctionCoefficient fFunCoeff( RHS );
+			mfem::FunctionCoefficient kappa( kappaF );
 
 			mfem::GridFunction q_variable,u_variable,u_hat_variable;
 			q_variable.MakeRef( solver.GetQSpace(), soln_vector, 0 );
@@ -132,6 +136,7 @@ class GSSolver
 			refiner.Apply( *solver.GetMesh() );
 			solver.Update();
 		}
+		*/
 
 		void Postprocess( mfem::GridFunction &u_out, mfem::Vector & qu_in )
 		{
