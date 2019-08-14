@@ -154,7 +154,6 @@ int main(int argc, char *argv[])
 		std::cout << "|| q_h - q_ex || = " << err_q << "\n";
 	}
 
-	/*
 	solver.ApplyAdaptiveRefinement( qu );
 	qu = 0.0;
 	solver.Solve( qu );
@@ -177,7 +176,6 @@ int main(int argc, char *argv[])
 		std::cout << "|| u_h - u_ex || = " << err_u << "\n";
 		std::cout << "|| q_h - q_ex || = " << err_q << "\n";
 	}
-	*/
 
 	GridFunction ustar( solver.GetUStarSpace() );
 	solver.Postprocess( ustar, qu );

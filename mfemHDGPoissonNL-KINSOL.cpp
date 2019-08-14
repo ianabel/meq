@@ -37,21 +37,51 @@ double kappaF( const Vector & pt )
 	return 1.0 / pt( 0 );
 }
 
+// Solov'ev from Tonatiuh
+const double A = -0.52;
+const double c1 = -0.001479661575325;
+const double c2 = -0.366568333204813;
+const double c3 =  0.002409406149732;
+const double c4 = -0.023957517168316;
 
+double SolovevRHSF( const mfem::Vector &pt )
+{
+	double R = pt( 0 );
+	return -( R*R*( 1.0 - A ) + A )/R;
+}
+
+// Psi Solov'ev
 double uFun_ex(const Vector & pt)
 {
-   double x(pt(0));
-   double y(pt(1));
-	return 10*::exp( 2*x*y )*::sin( pi*x )*::cos( pi*y );
+   double R(pt(0));
+   double Z(pt(1));
+	double psi_1 = 1.0;
+	double psi_2 = R*R;
+	double psi_3 = Z*Z - R*R*::log( R );
+	double psi_4 = R*R*R*R - 4.0 * Z*Z * R*R;
+
+	double psi_0 = ( 1.0 - A ) * R*R*R*R/8 + A * R * R * ::log( R ) / 2.0;
+
+	return psi_0 + c1 * psi_1 + c2 * psi_2 + c3 * psi_3 + c4 * psi_4;
 }
+
 
 void qFun_ex(const Vector & pt, Vector & q)
 {
-   double x(pt(0));
-   double y(pt(1));
+   double R(pt(0));
+   double Z(pt(1));
 
-	q( 0 ) = -10*::exp( 2*x*y )*::cos( pi*y )*(  pi*::cos( pi*x ) + 2*y*::sin( pi*x ) ) / x;
-	q( 1 ) = -10*::exp( 2*x*y )*::sin( pi*x )*( -pi*::sin( pi*y ) + 2*x*::cos( pi*y ) ) / x;
+	double d_psi_0_dR = ( 1.0 - A ) * R*R*R/2 + A * R * ::log( R ) + A * R / 2.0;
+
+	double d_psi_2_dR = 2.0 * R;
+	double d_psi_3_dR = - 2.0 * R * ::log( R ) - R;
+	double d_psi_4_dR = 4.0 * R*R*R - 8.0 * Z*Z * R;
+
+	double d_psi_3_dZ = 2.0 * Z;
+	double d_psi_4_dZ = - 8.0 * Z * R * R;
+
+	q( 0 ) = ( d_psi_0_dR + c2 * d_psi_2_dR + c3 * d_psi_3_dR + c4 * d_psi_4_dR ) / R;
+	q( 1 ) = ( c3 * d_psi_3_dZ + c4 * d_psi_4_dZ ) / R;
 
 	return;
 }
@@ -60,21 +90,6 @@ double bcFun( const Vector& pt )
 {
 	return uFun_ex( pt );
 }
-
-
-double fFun(const Vector & pt)
-{
-   double x(pt(0));
-   double y(pt(1));
-	// with nu = 1/x
-	double t = ( pi*pi*x - 2*x*x*x + y - 2*x*y*y )*::cos( pi*y ) + 2*pi*x*x*::sin( pi*y );
-	// Added to cancel the nonlinear term when we're at the right solution
-	 
-	return  - uFun_ex(pt)*uFun_ex(pt) + 
-		10*( ::exp( 2*x*y ) / ( x*x ) )*( pi*( 1.0 - 4.0 *  x  * y ) * ::cos( pi*x ) * ::cos( pi*y ) + ( 2 * t ) * ::sin( pi*x ) );
-
-}
-
 class NLGSSolver : public mfem::Operator
 {
 	public:
@@ -114,7 +129,7 @@ class NLGSSolver : public mfem::Operator
 			u.MakeRef( const_cast<mfem::FiniteElementSpace* >( solver.GetUSpace() ), static_cast<double*>( qu_in.GetData() + solver.GetQSpace()->GetVSize() ) );
 
 			fform->AddDomainIntegrator( new mfem::DomainLFIntegrator( fcoeff ) );
-			fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( u, F_NL, 3, 2 ) );
+			// fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( u, F_NL, 3, 2 ) );
 			fform->Update(const_cast<mfem::FiniteElementSpace* >( solver.GetUSpace() ), rhs_F, 0);
 			fform->Assemble();
 
@@ -149,7 +164,7 @@ class NLGSSolver : public mfem::Operator
 		void ApplyAdaptiveRefinement(  mfem::Vector & soln_vector )
 		{
 			mfem::FunctionCoefficient kappa( kappaF );
-			mfem::FunctionCoefficient fFunCoeff( fFun );
+			mfem::FunctionCoefficient fFunCoeff( SolovevRHSF );
 			mfem::GridFunction q_variable,u_variable,u_hat_variable;
 
 			q_variable.MakeRef( solver.GetQSpace(), soln_vector, 0 );
@@ -260,7 +275,7 @@ int main(int argc, char *argv[])
 
 
 	auto squared = []( double x ){return x*x;};
-	NLGSSolver solver( mesh, order, fFun, squared );
+	NLGSSolver solver( mesh, order, SolovevRHSF, squared );
 
 	FunctionCoefficient bcFunCoeff( bcFun );
 	solver.SetBCs( bcFunCoeff );
@@ -271,7 +286,7 @@ int main(int argc, char *argv[])
 
 	qu = 0.0;
 	mfem::FunctionCoefficient kappa( kappaF );
-	mfem::FunctionCoefficient fFunCoeff( fFun );
+	mfem::FunctionCoefficient fFunCoeff( SolovevRHSF );
 
 	int i_amr = 0;
 	KinSolver *nonlinearPoissonSolver = nullptr;
