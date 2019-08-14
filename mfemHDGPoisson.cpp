@@ -27,30 +27,51 @@ using namespace mfem;
 
 static const double pi = 3.14159265358979323844;
 
-double zeroFun( const Vector & )
+// Solov'ev from Tonatiuh
+const double A = -0.52;
+const double c1 = -0.001479661575325;
+const double c2 = -0.366568333204813;
+const double c3 =  0.002409406149732;
+const double c4 = -0.023957517168316;
+
+double SolovevRHSF( const mfem::Vector &pt )
 {
-	return 0;
+	double R = pt( 0 );
+	return -( R*R*( 1.0 - A ) + A )/R;
 }
 
+// Psi Solov'ev
 double uFun_ex(const Vector & pt)
 {
-   double x(pt(0));
-   double y(pt(1));
-	double a = .5;
-	double b = .5;
-	return 8*x*x*::exp( -4.0 * ( x-a )*( x-a ) - 4.0*( y-b )*( y-b ) );
+   double R(pt(0));
+   double Z(pt(1));
+	double psi_1 = 1.0;
+	double psi_2 = R*R;
+	double psi_3 = Z*Z - R*R*::log( R );
+	double psi_4 = R*R*R*R - 4.0 * Z*Z * R*R;
+
+	double psi_0 = ( 1.0 - A ) * R*R*R*R/8 + A * R * R * ::log( R ) / 2.0;
+
+	return psi_0 + c1 * psi_1 + c2 * psi_2 + c3 * psi_3 + c4 * psi_4;
 }
+
 
 void qFun_ex(const Vector & pt, Vector & q)
 {
-   double x(pt(0));
-   double y(pt(1));
-	double a = .5;
-	double b = .5;
-	double e = ::exp( -4.0 * ( x-a )*( x-a ) - 4.0*( y-b )*( y-b ) );
+   double R(pt(0));
+   double Z(pt(1));
 
-	q( 0 ) = -8*e*( 2. + 8. * a * x - 8. *x *x );
-	q( 1 ) = -64.*e*x*( b - y );
+	double d_psi_0_dR = ( 1.0 - A ) * R*R*R/2 + A * R * ::log( R ) + A * R / 2.0;
+
+	double d_psi_2_dR = 2.0 * R;
+	double d_psi_3_dR = - 2.0 * R * ::log( R ) - R;
+	double d_psi_4_dR = 4.0 * R*R*R - 8.0 * Z*Z * R;
+
+	double d_psi_3_dZ = 2.0 * Z;
+	double d_psi_4_dZ = - 8.0 * Z * R * R;
+
+	q( 0 ) = ( d_psi_0_dR + c2 * d_psi_2_dR + c3 * d_psi_3_dR + c4 * d_psi_4_dR ) / R;
+	q( 1 ) = ( c3 * d_psi_3_dZ + c4 * d_psi_4_dZ ) / R;
 
 	return;
 }
@@ -58,21 +79,6 @@ void qFun_ex(const Vector & pt, Vector & q)
 double bcFun( const Vector& pt )
 {
 	return uFun_ex( pt );
-}
-
-
-double fFun(const Vector & pt)
-{
-   double x(pt(0));
-   double y(pt(1));
-
-	double a = .5;
-	double b = .5;
-	double e = ::exp( -4.0 * ( x-a )*( x-a ) - 4.0*( y-b )*( y-b ) );
-	// with nu = 1/x
-	// f = -div( 1/x grad(u)) 
-	//
-	return -64.0*e*( 8. *a*a*x + 3.*a - 16*a*x*x + x *( -5. + 8.*b*b + 8.*x*x - 16.*b*y + 8.*y*y ) );
 }
 
 int main(int argc, char *argv[])
@@ -103,16 +109,21 @@ int main(int argc, char *argv[])
 	// Mesh up (R,z) in [0.1,1] x [0,1]
 	Mesh *mesh = new Mesh(3, 3, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
 	auto xform = []( const Vector& in, Vector& out ) { 
-		constexpr double R_min = 0.1;
-		out( 1 ) = in( 1 );
-		out( 0 ) = R_min + in( 0 )*( 1 - R_min );
+		constexpr double R_min = 0.5;
+		constexpr double R_max = 1.5;
+		constexpr double Z_min = -1;
+		constexpr double Z_max =  1;
+
+		out( 0 ) = R_min + in( 0 )*( R_max - R_min );
+		out( 1 ) = Z_min + in( 1 )*( Z_max - Z_min );
 	};
+
 	mesh->Transform( xform );
 
 	int dim = mesh->Dimension();
 
 	
-	GSSolver solver( mesh, order, fFun );
+	GSSolver solver( mesh, order, SolovevRHSF );
 
 	FunctionCoefficient bcCoeff( bcFun );
 	solver.SetBCs( bcCoeff );
@@ -138,13 +149,12 @@ int main(int argc, char *argv[])
 	{
 		double err_u    = u_variable.ComputeL2Error(ucoeff, irs);
 		double err_q    = q_variable.ComputeL2Error(qcoeff, irs);
-		double err_mean  = u_variable.ComputeMeanLpError(2.0, ucoeff, irs);
 
 		std::cout << "|| u_h - u_ex || = " << err_u << "\n";
 		std::cout << "|| q_h - q_ex || = " << err_q << "\n";
-		std::cout << "|| mean(u_h) - mean(u_ex) || = " << err_mean << "\n";
 	}
 
+	/*
 	solver.ApplyAdaptiveRefinement( qu );
 	qu = 0.0;
 	solver.Solve( qu );
@@ -163,12 +173,11 @@ int main(int argc, char *argv[])
 	{
 		double err_u    = u_variable.ComputeL2Error(ucoeff, irs);
 		double err_q    = q_variable.ComputeL2Error(qcoeff, irs);
-		double err_mean  = u_variable.ComputeMeanLpError(2.0, ucoeff, irs);
 
 		std::cout << "|| u_h - u_ex || = " << err_u << "\n";
 		std::cout << "|| q_h - q_ex || = " << err_q << "\n";
-		std::cout << "|| mean(u_h) - mean(u_ex) || = " << err_mean << "\n";
 	}
+	*/
 
 	GridFunction ustar( solver.GetUStarSpace() );
 	solver.Postprocess( ustar, qu );
@@ -184,27 +193,6 @@ int main(int argc, char *argv[])
 		u_sock.precision(8);
 		u_sock << "solution\n" << *mesh << u_variable << "window_title 'Solution u'" <<
 			endl;
-
-		socketstream q_sock(vishost, visport);
-		q_sock.precision(8);
-		q_sock << "solution\n" << *mesh << q_variable << "window_title 'Solution q'" <<
-			endl;
-	}
-
-	// 13. Save the mesh and the solution.
-	if (save)
-	{
-		ofstream q_variable_ofs("sol_q.gf");
-		q_variable_ofs.precision(8);
-		q_variable.Save(q_variable_ofs);
-
-		ofstream u_variable_ofs("sol_u.gf");
-		u_variable_ofs.precision(8);
-		u_variable.Save(u_variable_ofs);
-
-		ofstream rmesh_ofs("refined.mesh");
-		rmesh_ofs.precision(8);
-		mesh->Print(rmesh_ofs);
 	}
 
 	delete mesh;
