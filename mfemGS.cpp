@@ -32,6 +32,11 @@ double zeroFun( const Vector & )
 	return 0;
 }
 
+double zeroFun2( const Vector &, double )
+{
+	return 0;
+}
+
 double kappaF( const Vector & pt )
 { 
 	return 1.0 / pt( 0 );
@@ -44,10 +49,20 @@ const double c2 = -0.366568333204813;
 const double c3 =  0.002409406149732;
 const double c4 = -0.023957517168316;
 
-double SolovevRHSF( const mfem::Vector &pt )
+double Pprime( double psi )
+{
+	return ( 1.0 - A );
+}
+
+double FFprime( double psi )
+{
+	return A;
+}
+
+double SolovevRHS( const mfem::Vector &pt, double psi )
 {
 	double R = pt( 0 );
-	return -( R*R*( 1.0 - A ) + A )/R;
+	return -( R*R*Pprime( psi ) + FFprime( psi ) )/R;
 }
 
 // Psi Solov'ev
@@ -90,18 +105,17 @@ double bcFun( const Vector& pt )
 {
 	return uFun_ex( pt );
 }
+
 class NLGSSolver : public mfem::Operator
 {
 	public:
-		using RealFunc = double (*)( const mfem::Vector & );
-		using NLFunc = std::function< double( double )>;
+		using NLFunc = double(*)( const mfem::Vector &, double );
 	protected:
 		GSInverter solver;
-		RealFunc RHS;
 		NLFunc F_NL;
 	public:
-		NLGSSolver(mfem::Mesh *meshPtr, unsigned int order, RealFunc fRHS, NLFunc F_nl )
-			: solver( meshPtr, order ), RHS( fRHS ), F_NL( F_nl )
+		NLGSSolver(mfem::Mesh *meshPtr, unsigned int order, NLFunc F_nl )
+			: solver( meshPtr, order ), F_NL( F_nl )
 		{
 			height = solver.NumRows();
 			width = solver.NumRows();
@@ -123,13 +137,11 @@ class NLGSSolver : public mfem::Operator
 			qu_out.SetSize( solver.NumRows() );
 			// Assemble the RHS and the Schur complement
 			mfem::LinearForm *fform = new mfem::LinearForm;
-			mfem::FunctionCoefficient fcoeff( RHS );
 
 			mfem::GridFunction u;
 			u.MakeRef( const_cast<mfem::FiniteElementSpace* >( solver.GetUSpace() ), static_cast<double*>( qu_in.GetData() + solver.GetQSpace()->GetVSize() ) );
 
-			fform->AddDomainIntegrator( new mfem::DomainLFIntegrator( fcoeff ) );
-			// fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( u, F_NL, 3, 2 ) );
+			fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( u, F_NL, 4, 2 ) );
 			fform->Update(const_cast<mfem::FiniteElementSpace* >( solver.GetUSpace() ), rhs_F, 0);
 			fform->Assemble();
 
@@ -156,15 +168,8 @@ class NLGSSolver : public mfem::Operator
 			solver.Prolong( qu_old, qu_new );
 		};
 
-		static double kappaF( const mfem::Vector& pt ) 
-		{ 
-			return 1.0 / pt( 0 ); 
-		};
-
 		void ApplyAdaptiveRefinement(  mfem::Vector & soln_vector )
 		{
-			mfem::FunctionCoefficient kappa( kappaF );
-			mfem::FunctionCoefficient fFunCoeff( SolovevRHSF );
 			mfem::GridFunction q_variable,u_variable,u_hat_variable;
 
 			q_variable.MakeRef( solver.GetQSpace(), soln_vector, 0 );
@@ -175,7 +180,7 @@ class NLGSSolver : public mfem::Operator
 			mfem::GridFunction u_star( solver.GetUStarSpace() );
 			solver.Postprocess( u_star, soln_vector );
 
-			mfem::CockburnZhangEstimator errorEstimator( q_variable, u_star, u_hat_variable, kappa, fFunCoeff );
+			mfem::GradShafranovEstimator errorEstimator( q_variable, u_star, u_hat_variable, F_NL );
 			mfem::ThresholdRefiner refiner( errorEstimator );
 
 			refiner.SetTotalErrorFraction( 0.2 );
@@ -198,8 +203,6 @@ int main(int argc, char *argv[])
 	bool visualization = true;
 	bool post = true;
 	bool save = true;
-	double memA = 0.0;
-	double memB = 0.0;
 
 	OptionsParser args(argc, argv);
 	args.AddOption(&mesh_file, "-m", "--mesh",
@@ -217,12 +220,8 @@ int main(int argc, char *argv[])
 			"Enable or disable file saving.");
 	args.AddOption(&N_AMR, "-amr", "--mesh-refinement-levels",
 			"The number of loops of AMR to perform" );
-	args.AddOption(&memA, "-memA", "--memoryA",
-			"Storage of A.");
-	args.AddOption(&memB, "-memB", "--memoryB",
-			"Storage of B.");
-
 	args.Parse();
+
 	if (!args.Good())
 	{
 		args.PrintUsage(cout);
@@ -230,40 +229,9 @@ int main(int argc, char *argv[])
 	}
 	args.PrintOptions(cout);
 
-	// memA, memB \in [0,1], memB <= memA
-	if (memB > memA)
-	{
-		std::cout << "memB cannot be more than memA. Resetting to be equal" << std::endl
-			<< std::flush;
-		memA = memB;
-	}
-	if (memA > 1.0)
-	{
-		std::cout << "memA cannot be more than 1. Resetting to 1" << std::endl <<
-			std::flush;
-		memA = 1.0;
-	}
-	else if (memA < 0.0)
-	{
-		std::cout << "memA cannot be less than 0. Resetting to 0." << std::endl <<
-			std::flush;
-		memA = 0.0;
-	}
-	if (memB > 1.0)
-	{
-		std::cout << "memB cannot be more than 1. Resetting to 1" << std::endl <<
-			std::flush;
-		memB = 1.0;
-	}
-	else if (memB < 0.0)
-	{
-		std::cout << "memB cannot be less than 0. Resetting to 0." << std::endl <<
-			std::flush;
-		memB = 0.0;
-	}
 
-	// Mesh up [0.1,1] x [0.1,1]
-	Mesh *mesh = new Mesh(3, 3, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
+	// Mesh up [1.5,-1.5] x [4.5,1.5]
+	Mesh *mesh = new Mesh(4, 4, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
 	auto xform = []( const Vector& in, Vector& out ) { 
 		constexpr double R_min = 0.5;
 		constexpr double R_max = 1.5;
@@ -273,13 +241,13 @@ int main(int argc, char *argv[])
 		out( 0 ) = R_min + in( 0 )*( R_max - R_min );
 		out( 1 ) = Z_min + in( 1 )*( Z_max - Z_min );
 	};
+
 	mesh->Transform( xform );
 
 	int dim = mesh->Dimension();
 
 
-	auto squared = []( double x ){return x*x;};
-	NLGSSolver solver( mesh, order, SolovevRHSF, squared );
+	NLGSSolver solver( mesh, order, SolovevRHS );
 
 	FunctionCoefficient bcFunCoeff( bcFun );
 	solver.SetBCs( bcFunCoeff );
@@ -290,7 +258,6 @@ int main(int argc, char *argv[])
 
 	qu = 0.0;
 	mfem::FunctionCoefficient kappa( kappaF );
-	mfem::FunctionCoefficient fFunCoeff( SolovevRHSF );
 
 	int i_amr = 0;
 	KinSolver *nonlinearPoissonSolver = nullptr;
@@ -332,15 +299,6 @@ int main(int argc, char *argv[])
 		std::cout << std::endl;
 
 		solver.ApplyAdaptiveRefinement( qu );
-
-		/*
-		CockburnZhangEstimator errorEstimator( q_variable, u_star, u_hat_variable, kappa, fFunCoeff );
-
-		ThresholdRefiner refiner( errorEstimator );
-		refiner.SetTotalErrorFraction( 0.2 );
-		refiner.Apply( *mesh );
-		solver.Update();
-		*/
 
 		std::cerr << "Refined Mesh" << std::endl;
 
