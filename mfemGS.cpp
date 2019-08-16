@@ -109,13 +109,13 @@ double bcFun( const Vector& pt )
 class NLGSSolver : public mfem::Operator
 {
 	public:
-		using NLFunc = double(*)( const mfem::Vector &, double );
+		using Func = double(*)( double );
 	protected:
 		GSInverter solver;
-		NLFunc F_NL;
+		Func Pprime,FFprime;
 	public:
-		NLGSSolver(mfem::Mesh *meshPtr, unsigned int order, NLFunc F_nl )
-			: solver( meshPtr, order ), F_NL( F_nl )
+		NLGSSolver(mfem::Mesh *meshPtr, unsigned int order, Func Pprime_orig, Func FFprime_orig )
+			: solver( meshPtr, order ), Pprime( Pprime_orig ), FFprime( FFprime_orig )
 		{
 			height = solver.NumRows();
 			width = solver.NumRows();
@@ -131,6 +131,12 @@ class NLGSSolver : public mfem::Operator
 			width = solver.NumRows();
 		};
 
+		PlasmaRHS( const mfem::Vector &pt, double psi )
+		{
+			double R = pt( 0 );
+			return -( R*R*Pprime( psi ) + FFprime( psi ) )/R;
+		};
+
 		virtual void Mult( mfem::Vector const& qu_in, mfem::Vector & qu_out ) const
 		{
 			mfem::Vector rhs_F( solver.NumCols() );
@@ -141,7 +147,7 @@ class NLGSSolver : public mfem::Operator
 			mfem::GridFunction u;
 			u.MakeRef( const_cast<mfem::FiniteElementSpace* >( solver.GetUSpace() ), static_cast<double*>( qu_in.GetData() + solver.GetQSpace()->GetVSize() ) );
 
-			fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( u, F_NL, 4, 2 ) );
+			fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( u, PlasmaRHS, 4, 2 ) );
 			fform->Update(const_cast<mfem::FiniteElementSpace* >( solver.GetUSpace() ), rhs_F, 0);
 			fform->Assemble();
 
@@ -196,30 +202,15 @@ int main(int argc, char *argv[])
 	StopWatch chrono;
 
 	// 1. Parse command-line options.
-	const char *mesh_file = "grid.mesh";
 	int order = 3;
 	int initial_ref_levels = 0;
 	int N_AMR=0;
-	bool visualization = true;
-	bool post = true;
-	bool save = true;
-
+	
 	OptionsParser args(argc, argv);
-	args.AddOption(&mesh_file, "-m", "--mesh",
-			"Mesh file to use.");
 	args.AddOption(&order, "-o", "--order",
-			"Finite element order (polynomial degree).");
-	args.AddOption(&visualization, "-vis", "--visualization", "-no-vis",
-			"--no-visualization",
-			"Enable or disable GLVis visualization.");
-	args.AddOption(&post, "-post", "--postprocessing",
-			"-no-post", "--no-postprocessing",
-			"Enable or disable postprocessing.");
-	args.AddOption(&save, "-save", "--save-files", "-no-save",
-			"--no-save-files",
-			"Enable or disable file saving.");
+		"Finite element order (polynomial degree).");
 	args.AddOption(&N_AMR, "-amr", "--mesh-refinement-levels",
-			"The number of loops of AMR to perform" );
+		"The number of loops of AMR to perform" );
 	args.Parse();
 
 	if (!args.Good())
@@ -231,7 +222,7 @@ int main(int argc, char *argv[])
 
 
 	// Mesh up [1.5,-1.5] x [4.5,1.5]
-	Mesh *mesh = new Mesh(4, 4, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
+	Mesh *mesh = new Mesh(3, 3, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
 	auto xform = []( const Vector& in, Vector& out ) { 
 		constexpr double R_min = 0.5;
 		constexpr double R_max = 1.5;
@@ -343,7 +334,6 @@ int main(int argc, char *argv[])
 	}
 
 	// 13. Save the mesh and the solution.
-	if (save)
 	{
 		ofstream mesh_ofs("ex_hdg.mesh");
 		mesh_ofs.precision(8);
@@ -360,7 +350,6 @@ int main(int argc, char *argv[])
 	}
 
 	// 14. Send the solution by socket to a GLVis server.
-	if (visualization)
 	{
 		char vishost[] = "localhost";
 		int  visport   = 19916;

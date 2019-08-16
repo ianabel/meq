@@ -263,10 +263,10 @@ class GradShafranovEstimator : public mfem::ErrorEstimator
 		}
 	public:
 		// Type for F((R,z),psi)
-		using NLFunc = double(*)( const mfem::Vector &, double );
-		NLFunc F;
+		using NLFunc = std::function<double( const mfem::Vector &, double )>;
+		NLFunc const& F;
 
-		GradShafranovEstimator( GridFunction &q, GridFunction &u, GridFunction &lambda_ref,NLFunc F_ref )
+		GradShafranovEstimator( GridFunction &q, GridFunction &u, GridFunction &lambda_ref,NLFunc const& F_ref )
 			: q_sol( q ), u_sol( u ), lambda( lambda_ref ),valid( false ),F( F_ref )
 		{
 			q_space = q.FESpace();
