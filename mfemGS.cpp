@@ -59,11 +59,6 @@ double FFprime( double psi )
 	return A;
 }
 
-double SolovevRHS( const mfem::Vector &pt, double psi )
-{
-	double R = pt( 0 );
-	return -( R*R*Pprime( psi ) + FFprime( psi ) )/R;
-}
 
 // Psi Solov'ev
 double uFun_ex(const Vector & pt)
@@ -109,7 +104,7 @@ double bcFun( const Vector& pt )
 class NLGSSolver : public mfem::Operator
 {
 	public:
-		using Func = double(*)( double );
+		using Func = std::function< double( double ) >;
 	protected:
 		GSInverter solver;
 		Func Pprime,FFprime;
@@ -131,12 +126,6 @@ class NLGSSolver : public mfem::Operator
 			width = solver.NumRows();
 		};
 
-		PlasmaRHS( const mfem::Vector &pt, double psi )
-		{
-			double R = pt( 0 );
-			return -( R*R*Pprime( psi ) + FFprime( psi ) )/R;
-		};
-
 		virtual void Mult( mfem::Vector const& qu_in, mfem::Vector & qu_out ) const
 		{
 			mfem::Vector rhs_F( solver.NumCols() );
@@ -146,6 +135,11 @@ class NLGSSolver : public mfem::Operator
 
 			mfem::GridFunction u;
 			u.MakeRef( const_cast<mfem::FiniteElementSpace* >( solver.GetUSpace() ), static_cast<double*>( qu_in.GetData() + solver.GetQSpace()->GetVSize() ) );
+
+			auto PlasmaRHS = [ this ]( const mfem::Vector &pt, double psi ){
+				double R = pt( 0 );
+				return -( R*R*Pprime( psi ) + FFprime( psi ) )/R;
+			};
 
 			fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( u, PlasmaRHS, 4, 2 ) );
 			fform->Update(const_cast<mfem::FiniteElementSpace* >( solver.GetUSpace() ), rhs_F, 0);
@@ -186,7 +180,11 @@ class NLGSSolver : public mfem::Operator
 			mfem::GridFunction u_star( solver.GetUStarSpace() );
 			solver.Postprocess( u_star, soln_vector );
 
-			mfem::GradShafranovEstimator errorEstimator( q_variable, u_star, u_hat_variable, F_NL );
+			auto PlasmaRHS = [ this ]( const mfem::Vector &pt, double psi ){
+				double R = pt( 0 );
+				return -( R*R*Pprime( psi ) + FFprime( psi ) )/R;
+			};
+			mfem::GradShafranovEstimator errorEstimator( q_variable, u_star, u_hat_variable, PlasmaRHS );
 			mfem::ThresholdRefiner refiner( errorEstimator );
 
 			refiner.SetTotalErrorFraction( 0.2 );
@@ -203,7 +201,6 @@ int main(int argc, char *argv[])
 
 	// 1. Parse command-line options.
 	int order = 3;
-	int initial_ref_levels = 0;
 	int N_AMR=0;
 	
 	OptionsParser args(argc, argv);
@@ -238,7 +235,7 @@ int main(int argc, char *argv[])
 	int dim = mesh->Dimension();
 
 
-	NLGSSolver solver( mesh, order, SolovevRHS );
+	NLGSSolver solver( mesh, order, Pprime, FFprime );
 
 	FunctionCoefficient bcFunCoeff( bcFun );
 	solver.SetBCs( bcFunCoeff );
