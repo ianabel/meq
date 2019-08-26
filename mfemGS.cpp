@@ -14,6 +14,8 @@
 #include "GSInverter.hpp"
 #include "NLRHSIntegrator.hpp"
 #include "CockburnEstimator.hpp"
+#include "StdFnCoeffs.hpp"
+#include "SolovievEquilibrium.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -27,79 +29,13 @@ using namespace mfem;
 
 static const double pi = 3.14159265358979323844;
 
-double zeroFun( const Vector & )
-{
-	return 0;
-}
-
-double zeroFun2( const Vector &, double )
-{
-	return 0;
-}
-
-double kappaF( const Vector & pt )
-{ 
-	return 1.0 / pt( 0 );
-}
-
 // Solov'ev from Tonatiuh
 const double A = -0.52;
+const double C = 1.52;
 const double c1 = -0.001479661575325;
 const double c2 = -0.366568333204813;
 const double c3 =  0.002409406149732;
 const double c4 = -0.023957517168316;
-
-double Pprime( double psi )
-{
-	return ( 1.0 - A );
-}
-
-double FFprime( double psi )
-{
-	return A;
-}
-
-
-// Psi Solov'ev
-double uFun_ex(const Vector & pt)
-{
-   double R(pt(0));
-   double Z(pt(1));
-	double psi_1 = 1.0;
-	double psi_2 = R*R;
-	double psi_3 = Z*Z - R*R*::log( R );
-	double psi_4 = R*R*R*R - 4.0 * Z*Z * R*R;
-
-	double psi_0 = ( 1.0 - A ) * R*R*R*R/8 + A * R * R * ::log( R ) / 2.0;
-
-	return psi_0 + c1 * psi_1 + c2 * psi_2 + c3 * psi_3 + c4 * psi_4;
-}
-
-
-void qFun_ex(const Vector & pt, Vector & q)
-{
-   double R(pt(0));
-   double Z(pt(1));
-
-	double d_psi_0_dR = ( 1.0 - A ) * R*R*R/2 + A * R * ::log( R ) + A * R / 2.0;
-
-	double d_psi_2_dR = 2.0 * R;
-	double d_psi_3_dR = - 2.0 * R * ::log( R ) - R;
-	double d_psi_4_dR = 4.0 * R*R*R - 8.0 * Z*Z * R;
-
-	double d_psi_3_dZ = 2.0 * Z;
-	double d_psi_4_dZ = - 8.0 * Z * R * R;
-
-	q( 0 ) = -( d_psi_0_dR + c2 * d_psi_2_dR + c3 * d_psi_3_dR + c4 * d_psi_4_dR ) / R;
-	q( 1 ) = -( c3 * d_psi_3_dZ + c4 * d_psi_4_dZ ) / R;
-
-	return;
-}
-
-double bcFun( const Vector& pt )
-{
-	return uFun_ex( pt );
-}
 
 class NLGSSolver : public mfem::Operator
 {
@@ -190,9 +126,7 @@ class NLGSSolver : public mfem::Operator
 			refiner.SetTotalErrorFraction( 0.2 );
 			refiner.Apply( *( solver.GetMesh() ) );
 			Update();
-
 		};
-
 };
 
 int main(int argc, char *argv[])
@@ -218,7 +152,7 @@ int main(int argc, char *argv[])
 	args.PrintOptions(cout);
 
 
-	// Mesh up [1.5,-1.5] x [4.5,1.5]
+	// Mesh generation
 	Mesh *mesh = new Mesh(3, 3, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
 	auto xform = []( const Vector& in, Vector& out ) { 
 		constexpr double R_min = 0.5;
@@ -235,9 +169,16 @@ int main(int argc, char *argv[])
 	int dim = mesh->Dimension();
 
 
+	SolovievEquilibrium TestEq( A, C, c1, c2, c3, c4 );
+
+	std::function<double( double )> Pprime  = std::bind(  &SolovievEquilibrium::Pprime, &TestEq, std::placeholders::_1 );
+	std::function<double( double )> FFprime = std::bind( &SolovievEquilibrium::FFprime, &TestEq, std::placeholders::_1 );
 	NLGSSolver solver( mesh, order, Pprime, FFprime );
 
-	FunctionCoefficient bcFunCoeff( bcFun );
+	std::function<double( const mfem::Vector & )> uFun_ex = std::bind( &SolovievEquilibrium::psi, &TestEq, std::placeholders::_1 );
+	std::function<void( const mfem::Vector &, mfem::Vector & )> qFun_ex = std::bind( &SolovievEquilibrium::q, &TestEq, std::placeholders::_1, std::placeholders::_2 );
+
+	StdFunctionCoefficient bcFunCoeff( uFun_ex );
 	solver.SetBCs( bcFunCoeff );
 
 	GridFunction q_variable,u_variable,u_hat_variable;
@@ -245,7 +186,6 @@ int main(int argc, char *argv[])
 	mfem::Vector qu( solver.NumRows() );
 
 	qu = 0.0;
-	mfem::FunctionCoefficient kappa( kappaF );
 
 	int i_amr = 0;
 	KinSolver *nonlinearPoissonSolver = nullptr;
@@ -272,8 +212,8 @@ int main(int argc, char *argv[])
 		{
 			irs[i] = &(IntRules.Get(i, order_quad));
 		}
-		FunctionCoefficient ucoeff(uFun_ex);
-		VectorFunctionCoefficient qcoeff(dim, qFun_ex);
+		StdFunctionCoefficient ucoeff(uFun_ex);
+		VectorStdFunctionCoefficient qcoeff(dim, qFun_ex);
 		double err_u    = u_variable.ComputeL2Error(ucoeff, irs);
 		double err_q    = q_variable.ComputeL2Error(qcoeff, irs);
 		mfem::GridFunction u_star( solver.GetUStarSpace() );
@@ -315,8 +255,8 @@ int main(int argc, char *argv[])
 		{
 			irs[i] = &(IntRules.Get(i, order_quad));
 		}
-		FunctionCoefficient ucoeff(uFun_ex);
-		VectorFunctionCoefficient qcoeff(dim, qFun_ex);
+		StdFunctionCoefficient ucoeff(uFun_ex);
+		VectorStdFunctionCoefficient qcoeff(dim, qFun_ex);
 		double err_u    = u_variable.ComputeL2Error(ucoeff, irs);
 		double err_q    = q_variable.ComputeL2Error(qcoeff, irs);
 		mfem::GridFunction u_star( solver.GetUStarSpace() );

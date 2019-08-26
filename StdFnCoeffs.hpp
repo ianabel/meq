@@ -7,88 +7,99 @@
 namespace mfem
 {
 
-class Mesh;
+	class Mesh;
 
-/// class for C++ function coefficient
-class StdFunctionCoefficient : public Coefficient
-{
-protected:
-	std::function< double( const mfem::Vector & )> const& fn_ref;
-	std::function< double( const mfem::Vector &, double )> const& td_fn_ref;
-	bool is_td;
-
-	static double fn_dummy( const mfem::Vector & ) { return 0.0;};
-	static double td_fn_dummy( const mfem::Vector &, double ) { return 0.0;};
-
-public:
-	StdFunctionCoefficient( std::function< double( const mfem::Vector& )> const &fn )
-		: fn_ref( fn ), td_fn_ref( td_fn_dummy ), is_td( false )
+	/// class for C++ function coefficient
+	class StdFunctionCoefficient : public Coefficient
 	{
+		protected:
+			using RealFunc = std::function< double( const mfem::Vector & )>;
+			using RealTimeFunc = std::function< double( const mfem::Vector &, double )>;
 
-	}
+			RealFunc fn;
+			RealTimeFunc td_fn;
+			bool is_td;
 
-	StdFunctionCoefficient( std::function< double( const mfem::Vector&, double )> const &fn )
-		: fn_ref( fn_dummy ), td_fn_ref( fn ), is_td( true )
+		public:
+			StdFunctionCoefficient( RealFunc F )
+				: fn( F ), is_td( false )
+			{
+
+			}
+
+			StdFunctionCoefficient( RealTimeFunc F )
+				: td_fn( F ), is_td( true )
+			{
+
+			}
+
+			/// Evaluate coefficient
+			virtual double Eval(ElementTransformation &T, const IntegrationPoint &ip)
+			{
+				double x[3];
+				Vector transip(x, 3);
+
+				T.Transform(ip, transip);
+
+				if (is_td)
+				{
+					return td_fn( transip, GetTime() );
+				}
+				else
+				{
+					return fn( transip );
+				}
+			}
+
+	};
+
+
+	class VectorStdFunctionCoefficient : public VectorCoefficient
 	{
+		private:
+			using VectorFunc = std::function< void( const mfem::Vector &, mfem::Vector & )>;
+			using VectorTimeFunc = std::function< void( const mfem::Vector &, double, mfem::Vector & )>;
 
-	}
+			VectorFunc v_fn;
+			VectorTimeFunc v_td_fn;
+			Coefficient *Q;
+			bool is_td;
 
-   /// Evaluate coefficient
-	virtual double Eval(ElementTransformation &T, const IntegrationPoint &ip)
-	{
-		double x[3];
-		Vector transip(x, 3);
+		public:
+			/// Construct a time-independent vector coefficient from a C-function
+			VectorStdFunctionCoefficient(int dim, VectorFunc VF, Coefficient *q = nullptr)
+				: VectorCoefficient(dim), v_fn( VF ), Q(q), is_td( false )
+			{
+			};
 
-		T.Transform(ip, transip);
+			/// Construct a time-dependent vector coefficient from a C-function
+			VectorStdFunctionCoefficient(int dim, VectorTimeFunc VF, Coefficient *q = nullptr)
+				: VectorCoefficient(dim), v_td_fn( VF ), Q(q), is_td( true )
+			{
+			};
 
-		if (is_td)
-		{
-			return td_fn_ref( transip, GetTime() );
-		}
-		else
-		{
-			return fn_ref( transip );
-		}
-	}
+			using VectorCoefficient::Eval;
+			virtual void Eval(Vector &V, ElementTransformation &T, const IntegrationPoint &ip)
+			{
+				double x[3];
+				Vector transip(x, 3);
+
+				T.Transform(ip, transip);
+
+				if (is_td)
+				{
+					std::cerr << " nope " << std::endl;
+					v_td_fn( transip, GetTime(), V );
+				}
+				else
+				{
+					v_fn( transip, V );
+				}
+			};
+
+			virtual ~VectorStdFunctionCoefficient() { };
+	};
+
 
 };
-
-};
-
-/*
-class VectorFunctionCoefficient : public VectorCoefficient
-{
-private:
-   void (*Function)(const Vector &, Vector &);
-   void (*TDFunction)(const Vector &, double, Vector &);
-   Coefficient *Q;
-
-public:
-   /// Construct a time-independent vector coefficient from a C-function
-   VectorFunctionCoefficient(int dim, void (*F)(const Vector &, Vector &),
-                             Coefficient *q = NULL)
-      : VectorCoefficient(dim), Q(q)
-   {
-      Function = F;
-      TDFunction = NULL;
-   }
-
-   /// Construct a time-dependent vector coefficient from a C-function
-   VectorFunctionCoefficient(int dim,
-                             void (*TDF)(const Vector &, double, Vector &),
-                             Coefficient *q = NULL)
-      : VectorCoefficient(dim), Q(q)
-   {
-      Function = NULL;
-      TDFunction = TDF;
-   }
-
-   using VectorCoefficient::Eval;
-   virtual void Eval(Vector &V, ElementTransformation &T,
-                     const IntegrationPoint &ip);
-
-   virtual ~VectorFunctionCoefficient() { }
-};
-
-*/
 #endif // STDFNCOEFFS_HPP

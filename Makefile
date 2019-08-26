@@ -32,10 +32,10 @@ mfemHDGPoissonNL-KINSOL: mfemHDGPoissonNL-KINSOL.cpp $(GSINVERTER_DEP)
 mfemHDGPoissonNL-KINSOL-DEBUG: mfemHDGPoissonNL-KINSOL.cpp $(GSINVERTER_DEP)
 	g++ $(CXXFLAGS_DEBUG) mfemHDGPoissonNL-KINSOL.cpp $(GSINVERTER_SRC) -o mfemHDGPoissonNL-KINSOL-DEBUG $(MFEM_DEBUG_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
 
-mfemGS: mfemGS.cpp $(GSINVERTER_DEP)
+mfemGS: mfemGS.cpp StdFnCoeffs.hpp SolovievEquilibrium.hpp $(GSINVERTER_DEP)
 	g++ $(CXXFLAGS_RELEASE) mfemGS.cpp $(GSINVERTER_SRC) -o mfemGS $(MFEM_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
 
-mfemGS-DEBUG: mfemGS.cpp $(GSINVERTER_DEP)
+mfemGS-DEBUG: mfemGS.cpp StdFnCoeffs.hpp SolovievEquilibrium.hpp  $(GSINVERTER_DEP)
 	g++ $(CXXFLAGS_DEBUG) mfemGS.cpp $(GSINVERTER_SRC) -o mfemGS-DEBUG $(MFEM_DEBUG_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
 
 
