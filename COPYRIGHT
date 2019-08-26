@@ -1,0 +1,26 @@
+# Copyright (c) 2019 Ian G Abel
+# This file is part of the MEQ software package, for more information and source code availability
+# see http://github.com/ianabel/meq
+
+COPYRIGHT
+
+The following copyright applies to each file in the MFEM distribution, unless
+otherwise stated in the file:
+
+Copyright (c) 2019 Ian G Abel.
+
+LICENCE
+
+MEQ is free software; you can redistribute it and/or modify it under the terms
+of the BSD 3-Clause licence, see the LICENCE file for details.
+
+MEQ is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the IMPLIED WARRANTY OF MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE.  See the LICENCE file for more details.
+
+CONTACT INFORMATION
+
+For licencing and other queries about MEQ, please contact Ian Abel via email at iabel@umd.edu.
+
+Please see http://github.com/ianabel/meq for more information and source code availability.
+
