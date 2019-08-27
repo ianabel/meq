@@ -114,6 +114,7 @@ class HermiteCubicSpline {
 
 class SplineInterpolant {
 	public:
+		enum DataFileType { HermiteSplineData, EQDSK, NetCDF };
 		using RealFunc = std::function<double( double )>;
 		using Spline = HermiteCubicSpline;
 		// SplineInterpolant( RealFunc F, unsigned int N ); // Split [0,1] into N intervals and spline away

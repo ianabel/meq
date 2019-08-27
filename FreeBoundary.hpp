@@ -1,4 +1,6 @@
 #include <functional>
+#include <boost/math/special_functions/ellint_1.hpp>
+#include <boost/math/special_functions/ellint_2.hpp>
 #include "StdFnCoeffs.hpp"
 
 double GreensFunction( mfem::Vector const& r, mfem::Vector const& r_star )
@@ -36,7 +38,7 @@ double GreensFunction( mfem::Vector const& r, mfem::Vector const& r_star )
 
 	if ( ( ::fabs( dR ) > 1e-7 ) || ( ::fabs( dZ ) > 1e-7 ) )
 	{
-		answer *= ::sqrt( ( R + R_star )*( R + R_star ) + ( Z - Z_star )*( Z - Z_star ) ) * ( ( 1.0 - 0.5*k_squared )*std::comp_ellint_1( k ) - std::comp_ellint_2( k ) );
+		answer *= ::sqrt( ( R + R_star )*( R + R_star ) + ( Z - Z_star )*( Z - Z_star ) ) * ( ( 1.0 - 0.5*k_squared )*boost::math::ellint_1( k ) - boost::math::ellint_2( k ) );
 		if ( !std::isfinite( answer ) )
 			throw std::logic_error( "Wat" );
 	}

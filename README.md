@@ -11,64 +11,82 @@ To run
 
 To compile and install MEQ you will need a system with the following
 
- - A C++14 compliant C++ compiler
- - An installation of the SUNDIALS library (version 5.0 or newer)
- - 
+ - A C++17 compliant C++ compiler.
+ - An installation of the SUNDIALS library.
+ - The Boost C++ Template Library and Boost Unit Testing Framework library.
+ - The gmsh library for mesh generation.
 
 Precise compiler compatability is currently under test. However, the code is known to compile and
 work with g++ and Clang.
 
 ### Installing
 
-A step by step series of examples that tell you how to get a development env running
-
-Say what the step will be
-
+To begin, we will clone a copy of the MEQ-patched MFEM library.
 ```
-Give the example
+git clone  <badger badger badger>
 ```
 
-And repeat
-
+Then we compile MEQ itself
 ```
-until finished
+make BODGER
 ```
 
-End with an example of getting some data out of the system or using it for a little demo
+As an example, we compute the vacuum field from a pair of Helmholtz coils
+```
+./meq -c examples/Helmholtz.conf
+```
 
 ## Running the tests
 
-Explain how to run the automated tests for this system
+Various test suites are provided with MEQ.
 
-### Break down into end to end tests
+### Automated Tests
 
-Explain what these tests test and why
-
-```
-Give an example
-```
-
-### And coding style tests
-
-Explain what these tests test and why
+The automated test suite contains both unit tests and functional tests. 
+These test independent subsystems of the MEQ code.
+To run the test suite
 
 ```
-Give an example
+make test
 ```
 
-## Deployment
+If the test suite fails, please file a bug.
 
-Add additional notes about how to deploy this on a live system
+### Example Configurations
+
+These are fully-fledged example runs of MEQ. As such, they may take considerable computational resoruces to run. 
+Each comes with a pre-computed solution against which the output is compared.
+
+To run an example and check its output, for example the 'Helmholtz' example:
+```
+cd examples/
+make Helmholtz
+```
+
+Or you can separately run MEQ for the example
+```
+meq -c examples/Helmholtz.conf
+```
+and check the output later with
+```
+cd examples
+make Helmholtz-check
+```
+
+## Parallelism
+
+Currently none.
 
 ## Built With
 
+* [Boost](http://boost.org) - C++ Template library that radically extends the STL
 * [MFEM](http://github.com/mfem) - The Finite Element Framework on which MEQ is based
 * [Sundials](http://computing.llnl.gov/projects/sundials) - ODE Framework, used for Anderson-accelerated Picard iteration
 * [TOML11](http://github.com/toruniina/toml11) - For parsing configuration files written in [TOML](https://github.com/toml-lang/toml)
 
 ## Contributing
 
-Contributions to this project are welcome. 
+Contributions to this project are welcome. However, as we are currently in active development, please email the authors if you wish to get involved.
 
 ## Versioning
 
@@ -83,9 +101,10 @@ For a summary of contributors, see the [contributors](http://github.com/ianabel/
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE.md](LICENSE.md) file for details
+This project is licensed under the 3-Clause BSD Licence - see the [LICENSE.md](LICENSE.md) file for details
 
-This project links to the MFEM library, which licenced under the GNU Lesser General Public Licence version 2.1. 
+This project links to a patched version of the MFEM library, which licenced under the GNU Lesser General Public Licence version 2.1. 
+The edited library is released under the same terms as MFEM itself.
 
 ## Acknowledgments
 
