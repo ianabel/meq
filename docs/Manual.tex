@@ -1,0 +1,85 @@
+\documentclass[a4paper,twoside,12pt,openright]{memoir}
+
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{setspace}
+\usepackage{color}
+\usepackage{bm}
+\usepackage{indentfirst}
+\usepackage[labelfont={it}]{caption}
+\usepackage[numbers]{natbib}
+\usepackage{graphicx}
+\usepackage{palatino}
+
+
+% Wire up PDF Output
+\pdfminorversion 5
+\usepackage{xr}
+\usepackage{xr-hyper}
+\usepackage[
+	pdftitle={The MEQ Manual},
+	pdfauthor={I. G. Abel},
+	pdfsubject={Comprehensive manual for the Maryland Equilibrium Code},
+	pdfborder=0,
+	bookmarks=true,
+	bookmarksnumbered=true,
+	bookmarksopen=true,
+	bookmarksopenlevel=1,
+	plainpages=false,
+	pdfpagelabels=true,
+	colorlinks=true
+]{hyperref}
+\usepackage{memhfixc}
+
+% Macros
+\providecommand{\chref}[1]{Ch.~\ref{#1}}
+\providecommand{\meq}{\textsc{MEQ}}
+
+\begin{document}
+
+\title{The \meq: Maryland Equilibrium Solver Manual}
+\date{\today}
+\author{I. G. Abel}
+
+
+\maketitle
+\frontmatter
+
+
+\tableofcontents
+
+
+
+\chapter{Preface}
+This software was made possible by the support of the UMD-THEORY-GRANT. Collaborations with 
+A. Cerfon and T. S\'anchez-Vizuet of NYU were also invaluable.
+
+\mainmatter
+\include{intro}
+\include{ch1}
+\include{ch2}
+
+\appendix
+
+\include {ap1}
+
+\backmatter
+
+\clearpage
+{
+}
+{
+\raggedright % justification likes to break URLs
+
+% Hack: point the PDF link at the top of the page, rather than below
+% the title as \bibliography does.  Yeah, this is ridiculously pedantic
+% and will (hopefully) not affect the printed page at all... :-)
+\phantomsection
+\addcontentsline{toc}{chapter}{Bibliography}
+\nobibintoc
+\bibliographystyle{unsrt}
+\bibliography{references}
+}
+
+\end{document}
