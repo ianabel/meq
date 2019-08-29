@@ -21,36 +21,29 @@ CXXTESTFLAGS +=   -DBOOST_TEST_DYN_LINK -lboost_unit_test_framework
 CXXRELEASEFLAGS += -O3
 
 
-all: DispSolver
+all: test
 
-DispSolver: DispSolver.cpp Solver.cpp RootFinder.cpp RootFinder.h Faddeeva.o Faddeeva.hh DispReln.cpp DispReln.h Config.cpp ExpBessel.h Config.h
-	$(CXX) $(CXXFLAGS) $(CXXRELEASEFLAGS) -lboost_program_options -o $@ DispSolver.cpp RootFinder.cpp Solver.cpp Faddeeva.o DispReln.cpp Config.cpp
-
-DispHarness: DispHarness.cpp Solver.cpp RootFinder.cpp RootFinder.h Faddeeva.o Faddeeva.hh DispReln.cpp DispReln.h Config.cpp ExpBessel.h Config.h
-	$(CXX) $(CXXFLAGS) $(CXXDEBUGFLAGS) -lboost_program_options -o $@ DispHarness.cpp RootFinder.cpp Solver.cpp Faddeeva.o DispReln.cpp Config.cpp
-
-DispSolverDebug: DispSolver.cpp Solver.cpp RootFinder.cpp RootFinder.h Faddeeva.o Faddeeva.hh DispReln.cpp DispReln.h Config.cpp ExpBessel.h Config.h
-	$(CXX) $(CXXFLAGS) $(CXXDEBUGFLAGS)  -lboost_program_options -o $@ DispSolver.cpp RootFinder.cpp Solver.cpp Faddeeva.o DispReln.cpp Config.cpp
+test: AnalyticGSTests FreeBoundaryTests ConfigTests HDGTests
+	LD_LIBRARY_PATH=$(BOOSTLIBDIR) ./AnalyticGSTests
+	LD_LIBRARY_PATH=$(BOOSTLIBDIR) ./FreeBoundaryTests
+	LD_LIBRARY_PATH=$(BOOSTLIBDIR) ./ConfigTests
+	LD_LIBRARY_PATH=$(BOOSTLIBDIR) ./HDGTests
 
 
+AnalyticGSTests: AnalyticGSTests.cpp 
+	$(CXX) $(CXXFLAGS) $(CXXDEBUGFLAGS) $(CXXTESTFLAGS) -o $@ AnalyticGSTests.cpp
 
-test: RootFindingTests DispRelnTests
-	LD_LIBRARY_PATH=$(BOOSTLIBDIR) ./RootFindingTests
-	LD_LIBRARY_PATH=$(BOOSTLIBDIR) ./DispRelnTests
+FreeBoundaryTests: FreeBoundaryTests.cpp 
+	$(CXX) $(CXXFLAGS) $(CXXDEBUGFLAGS) $(CXXTESTFLAGS) -o $@ FreeBoundaryTests.cpp
 
-
-RootFindingTests: RootFindingTests.cpp RootFinder.h RootFinder.cpp Solver.cpp
-	$(CXX) $(CXXFLAGS) $(CXXDEBUGFLAGS) $(CXXTESTFLAGS) -o $@ RootFindingTests.cpp RootFinder.cpp Solver.cpp
-
-DispRelnTests: DispRelnTests.cpp RootFinder.h DispReln.cpp DispReln.h RootFinder.cpp Solver.cpp  Faddeeva.o Faddeeva.hh Config.h Config.cpp ExpBessel.h
-	$(CXX) $(CXXFLAGS) $(CXXDEBUGFLAGS) $(CXXTESTFLAGS) -o $@ DispRelnTests.cpp RootFinder.cpp Solver.cpp Faddeeva.o DispReln.cpp Config.cpp
-
-# We never need a debug-enabled version of this.
-Faddeeva.o: Faddeeva.cc Faddeeva.hh
-	$(CXX) $(CXXFLAGS) $(CXXRELEASEFLAGS) -c -o $@ Faddeeva.cc
+ConfigTests: ConfigTests.cpp 
+	$(CXX) $(CXXFLAGS) $(CXXDEBUGFLAGS) $(CXXTESTFLAGS) -o $@ ConfigTests.cpp
+	
+HDGTests: HDGTests.cpp 
+	$(CXX) $(CXXFLAGS) $(CXXDEBUGFLAGS) $(CXXTESTFLAGS) -o $@ HDGTests.cpp
 
 
 clean:
-	rm -f DispSolver DispRelnTests RootFindingTests *.o
+	rm -f AnalyticGSTests FreeBoundaryTests ConfigTests HDGTests
 
 .PHONY: clean test
