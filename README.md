@@ -16,8 +16,7 @@ To compile and install MEQ you will need a system with the following
  - The Boost C++ Template Library and Boost Unit Testing Framework library.
  - The gmsh library for mesh generation.
 
-Precise compiler compatability is currently under test. However, the code is known to compile and
-work with g++ and Clang.
+Precise dependencies have not been exhaustively tested.
 
 ### Installing
 

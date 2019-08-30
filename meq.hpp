@@ -5,6 +5,9 @@
  */
 
 #include "mfem.hpp"
+#include "SplineInterpolant.hpp"
+
+namespace meq {
 
 class Coil {
 	private:
@@ -62,20 +65,32 @@ class Jtor {
 		};
 };
 
+enum BoundaryConditionType { VonHagenow, Prescribed, Zero, Unknown };
+
 class BoundaryCondition {
 	private:
-	BoundaryConditionType BCType;
+		BoundaryConditionType BCType;
 	public:
-	
-}
+		virtual ~BoundaryCondition() {};
+		virtual double operator()( const mfem::Vector &boundary_point ) = 0;
 
-enum BoundaryConditionType { VonHagenow, Prescribed, Zero };
+		bool CheckBCType( BoundaryConditionType Type ) { return BCType == Type;};
+		BoundaryConditionType getBCType() { return BCType; };
+};
+
 
 class Domain {
-	double RMin,RMax,ZMin,ZMax;
-	double psiResolution;
-	BoundaryConditionType BCType;
-	BoundaryCondition* BCs;
+	private:
+		BoundaryConditionType BCType;
+		BoundaryCondition* BCs;
+	public:
+		Domain( double RMin_in, double RMax_in, double ZMin_in, double ZMax_in, double resolution, BoundaryConditionType type ) 
+			: RMin( RMin_in ), RMax( RMax_in ), ZMin( ZMin_in ), ZMax( ZMax_in ),CellSize( resolution ), BCType( type ), BCs( nullptr )
+		{
+
+		};
+		double RMin,RMax,ZMin,ZMax;
+		double CellSize;
 };
 
 
@@ -83,39 +98,45 @@ class Domain {
 // which  has constructors to read from .dat / NetCDF / etc.
 using UserSuppliedFunction = SplineInterpolant;
 
-class ToridalField {
+class ToroidalField {
 	private:
-		UserSuppliedFunction FFprime;
+		UserSuppliedFunction FFPrime;
 	public:
-		ToroidalField();
 		ToroidalField( std::string const & datafile, UserSuppliedFunction::DataFileType type ) 
 			: FFPrime( datafile, type )
 		{
 		};
 		~ToroidalField() {};
-		double operator( double psi ) {
-
+		double operator()( double psi ) {
+			return FFPrime( psi );
 		}
 
-}
+};
+
 class PlasmaModel {
 	private:
 		double PlasmaPsiMin,PlasmaPsiMax;
 		bool ToroidalField;
 		bool Rotation;
 	public:
-		double operator( const mfem::Vector & pt, double psi ) = 0;
+		virtual ~PlasmaModel() {};
+		virtual double operator()( const mfem::Vector & pt, double psi ) = 0;
 };
 
-class StaticMHDPlasma : KineticPlasmaModel {
+class StaticMHDPlasma : PlasmaModel {
 	private:
 		UserSuppliedFunction PPrime;
 	public:
-		double operator( const mfem::Vector& pt, double psi ) {
-				
-		}
+		StaticMHDPlasma( std::string const& datafile, UserSuppliedFunction::DataFileType type )
+			: PPrime( datafile, type )
+		{
+		};
+
+		double operator()( const mfem::Vector& pt, double psi ) {
+			return pt( 0 )*pt( 0 )*PPrime( psi );
+		};
+
+};
 
 }
-
-
 #endif // MEQ_HPP

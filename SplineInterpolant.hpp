@@ -7,6 +7,8 @@
 #include <iostream>
 
 
+namespace meq {
+
 /*
  * Utility class for interpolating functions on [ 0, 1 ] 
  * accurately and efficiently, using cubic splines
@@ -141,6 +143,10 @@ class SplineInterpolant {
 			}
 		};
 
+		SplineInterpolant( std::string const& datafile, DataFileType type ) {
+			return;
+		};
+
 		// Read from stream.
 		SplineInterpolant( std::istream &is )
 		{
@@ -270,4 +276,6 @@ class SplineInterpolant {
 		std::vector<Spline> piecewise_data;
 
 };
+
+}
 #endif // SPLINEINTERPOLANT_HPP

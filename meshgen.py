@@ -1,6 +1,10 @@
 #!/usr/bin/python3
 #
 
+## DEPRECATED
+## Please use the C++ version
+## This is here for reference
+
 import sys
 import toml
 import gmsh
