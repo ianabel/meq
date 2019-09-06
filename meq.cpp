@@ -1,14 +1,6 @@
 
 /*
- * An MFEM-based nonlinear poisson solver, derived from the HDG Example Poisson Solver
- * of T. Horvath, S. Rhebergen, and A. Sivas.
- *
- * The discretization is based on the paper:
- * N.C. Nguyen, J. Peraire, B. Cockburn, An implicit high-order hybridizable
- * discontinuous Galerkin method for linear convection–diffusion equations,
- * J. Comput. Phys., 2009, 228:9, 3232--3254.
- *
- * Modifications are by I. G. Abel, University of Maryland
+ * The Maryland Equilibrium Solver
  */
 
 #include "mfem.hpp"
@@ -25,7 +17,6 @@
 #include <functional>
 
 
-using namespace std;
 using namespace mfem;
 
 int main(int argc, char *argv[])
@@ -48,7 +39,7 @@ int main(int argc, char *argv[])
 	args.Parse();
 	if (!args.Good())
 	{
-		args.PrintUsage(cout);
+		args.PrintUsage(std::cout);
 		return 1;
 	}
 
@@ -60,7 +51,7 @@ int main(int argc, char *argv[])
 
 	MeshFile = options.at( "MeshFile" ).as_string();
 
-	Jtor FieldCoils;
+	meq::Jtor FieldCoils;
 
 	for ( const auto coil : coils )
 	{
@@ -144,15 +135,15 @@ int main(int argc, char *argv[])
 	// Save the output
 	{
 
-		ofstream mesh_ofs( options.at( "OutputMeshFile" ).as_string() );
+		std::ofstream mesh_ofs( options.at( "OutputMeshFile" ).as_string() );
 		mesh_ofs.precision(8);
 		mesh->Print(mesh_ofs);
 
-		ofstream q_solution_ofs( options.at( "GradPsiFile" ).as_string() );
+		std::ofstream q_solution_ofs( options.at( "GradPsiFile" ).as_string() );
 		q_solution_ofs.precision(8);
 		q_solution.Save(q_solution_ofs);
 
-		ofstream u_solution_ofs( options.at( "PsiFile" ).as_string() );
+		std::ofstream u_solution_ofs( options.at( "PsiFile" ).as_string() );
 		u_solution_ofs.precision(8);
 		u_solution.Save(u_solution_ofs);
 

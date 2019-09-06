@@ -3,6 +3,10 @@
 This is a fully-featured Free Boundary Grad-Shafranov solver, based on the 
 Hybridized Discontinuous Galerkin algorithm of Sanchez-Vizuet & Solano described [here](https://arxiv.org/pdf/1712.04148).
 
+MEQ is built upon the MFEM finite element library, produced by Lawrence Livermore National Laboratory. The hybridizeable discontinuous galerkin
+implementation in MFEM is due to T. Horvath, S. Rhebergen, and A. Sivas from the University of Waterloo.
+
+
 ## Getting Started
 
 To run
@@ -14,6 +18,7 @@ To compile and install MEQ you will need a system with the following
  - A C++17 compliant C++ compiler.
  - An installation of the SUNDIALS library.
  - The Boost C++ Template Library and Boost Unit Testing Framework library.
+ - The Eigen library for numerical optimization
  - The gmsh library for mesh generation.
 
 Precise dependencies have not been exhaustively tested.

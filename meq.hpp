@@ -14,8 +14,8 @@ class Coil {
 		double R_l,R_u,Z_l,Z_u;
 	public:
 		double R,z;
-		double J;
 		double h,w;
+		double J;
 		Coil( double R_0, double z_0, double height, double width, double Current )
 			: R( R_0 ), z( z_0 ), h( height ), w( width ), J( Current )
 		{
@@ -85,7 +85,7 @@ class Domain {
 		BoundaryCondition* BCs;
 	public:
 		Domain( double RMin_in, double RMax_in, double ZMin_in, double ZMax_in, double resolution, BoundaryConditionType type ) 
-			: RMin( RMin_in ), RMax( RMax_in ), ZMin( ZMin_in ), ZMax( ZMax_in ),CellSize( resolution ), BCType( type ), BCs( nullptr )
+			: BCType( type ), BCs( nullptr ), RMin( RMin_in ), RMax( RMax_in ), ZMin( ZMin_in ), ZMax( ZMax_in ),CellSize( resolution )
 		{
 
 		};
@@ -137,6 +137,7 @@ class StaticMHDPlasma : PlasmaModel {
 		};
 
 };
+
 
 }
 #endif // MEQ_HPP
