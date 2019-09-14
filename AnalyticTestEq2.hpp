@@ -1,4 +1,7 @@
 
+// Analytic Equilibrium with dissimilar source functions 
+// from <citation>
+
 class AnalyticEquilibrium {
 
 	private:
