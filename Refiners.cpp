@@ -1,5 +1,13 @@
 
+
 #include "Refiners.hpp"
+
+#include <limits>
+#include <algorithm>
+#include <vector>
+#include <numeric>
+#include <iterator>
+
 
 namespace mfem {
 
@@ -19,7 +27,6 @@ namespace mfem {
 
 	int MaximumMarkingRefiner::ApplyImpl(Mesh &mesh)
 	{
-		threshold = 0.0;
 		num_marked_elements = 0;
 		marked_elements.SetSize(0);
 		current_sequence = mesh.GetSequence();
@@ -51,9 +58,8 @@ namespace mfem {
 	/* Implementation from Pfeiler and Praetorius ( arXiv:1907.13078 ) 
 	 * with minor tweak to work with mfem::Vector as the original data structure.
 	 */
-	using Iterator_t = std::vector<double>::iterator;
 
-	const double xStarKernel( Iterator_t subX_begin, Iterator_t subX_end, double goal )
+	const double DoerflerMarkingRefiner::xStarKernel( Iterator_t subX_begin, Iterator_t subX_end, double goal )
 	{
 		// QuickMark , step ( i )-( ii ): partition by median element
 		auto length { std::distance( subX_begin , subX_end )};
@@ -70,14 +76,14 @@ namespace mfem {
 		return xStarKernel(++subX_middle, subX_end, goal - sigma_g - pivot_val );
 	}
 
-	const double compute_threshold ( const mfem::Vector & eta , double theta )
+	const double DoerflerMarkingRefiner::compute_threshold ( const mfem::Vector & eta , double theta )
 	{
 		std::vector<double> x { eta.GetData(), eta.GetData() + eta.Size() };
 		double goal = theta * std ::accumulate( x.cbegin(), x.cend(), ( double )0.0);
 		return xStarKernel( x.begin(), x.end(), goal);
 	} 
 
-	int DoerflerMarking::ApplyImpl(Mesh &mesh)
+	int DoerflerMarkingRefiner::ApplyImpl(Mesh &mesh)
 	{
 		threshold = 0.0;
 		num_marked_elements = 0;
@@ -91,7 +97,7 @@ namespace mfem {
 		const Vector &local_err = estimator.GetLocalErrors();
 		MFEM_ASSERT(local_err.Size() == NE, "invalid size of local_err");
 
-		double threshold = xStarKernel( local_err, gamma );
+		double threshold = compute_threshold( local_err, gamma );
 
 		for (int el = 0; el < NE; el++)
 		{
@@ -102,7 +108,6 @@ namespace mfem {
 		}
 
 		num_marked_elements = mesh.ReduceInt(marked_elements.Size());
-		MFEM_ASSERT( num_marked_elements == n, "Marking algorithm n is not the same as number of actually marked elements" );
 		if (num_marked_elements == 0) { return STOP; }
 
 		mesh.GeneralRefinement(marked_elements, non_conforming, nc_limit);
