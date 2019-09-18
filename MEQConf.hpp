@@ -14,9 +14,9 @@ namespace meq {
 
 class Configuration {
 	private:
-		Domain* ConfiguredDomain;
+		std::shared_ptr<Domain> ConfiguredDomain;
 		std::vector<Coil> CoilSet;
-		PlasmaModel* plasma;
+		std::shared_ptr<PlasmaModel> plasma;
 		std::string MeshFile,FinalMeshFile,PsiFile,GradPsiFile;
 
 
@@ -60,7 +60,7 @@ class Configuration {
 				bcType = Unknown;
 
 
-			ConfiguredDomain = new Domain( 
+			ConfiguredDomain = std::make_shared<Domain>( 
 					domainConfig.at( "RMin" ).as_floating(), 
 					domainConfig.at( "RMax" ).as_floating(), 
 					domainConfig.at( "ZMin" ).as_floating(), 
@@ -86,17 +86,12 @@ class Configuration {
 
 		
 
-		~Configuration() {
-			if ( ConfiguredDomain != nullptr )
-				delete ConfiguredDomain;
-			if ( plasma != nullptr )
-				delete plasma;
-		};
+		~Configuration() { };
 
 
-		Domain const*  GetDomain() const {return ConfiguredDomain;};
+		std::shared_ptr<Domain>  GetDomain() const {return ConfiguredDomain;};
 		std::vector<Coil> const& GetCoils() const {return CoilSet;};
-		PlasmaModel const*  GetPlasmaModel() const {return plasma;};
+		std::shared_ptr<PlasmaModel>  GetPlasmaModel() const {return plasma;};
 		std::string const& GetMeshFile() const { return MeshFile;};
 		std::string const& GetFinalMeshFile() const { return FinalMeshFile;};
 		std::string const& GetPsiFile() const { return PsiFile;};
@@ -104,7 +99,7 @@ class Configuration {
 
 };
 
-extern void GenerateMesh( const Configuration* );
+extern void GenerateMesh( std::shared_ptr<Configuration> );
 
 }
 

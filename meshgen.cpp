@@ -10,7 +10,7 @@
 
 namespace meq {
 
-void GenerateMesh( const meq::Configuration* config )
+void GenerateMesh( std::shared_ptr<meq::Configuration> config )
 {
 	unsigned int CellsPerCoilEdge = 4;
 	meq::Domain const * domain = config->GetDomain();

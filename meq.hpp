@@ -4,8 +4,13 @@
  * Utility classes for MEQ
  */
 
+#include <vector>
+#include <memory>
+
 #include "mfem.hpp"
 #include "SplineInterpolant.hpp"
+
+
 
 namespace meq {
 
@@ -123,6 +128,7 @@ class PlasmaModel {
 		virtual double operator()( const mfem::Vector & pt, double psi ) = 0;
 };
 
+
 class StaticMHDPlasma : PlasmaModel {
 	private:
 		UserSuppliedFunction PPrime;
@@ -135,9 +141,15 @@ class StaticMHDPlasma : PlasmaModel {
 		double operator()( const mfem::Vector& pt, double psi ) {
 			return pt( 0 )*pt( 0 )*PPrime( psi );
 		};
-
 };
 
+class Solution {
+	private:
+		std::shared_ptr< mfem::FiniteElementSpace > psiSpace,gradPsiSpace;
+		mfem::Vector qu;
+		friend class GSSolver;
+	public:
+};
 
 }
 #endif // MEQ_HPP

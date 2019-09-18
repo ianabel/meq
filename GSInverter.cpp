@@ -25,10 +25,10 @@ GSInverter::GSInverter(Mesh *meshPtr, unsigned int order) :
 	dimM = M_space->GetVSize();
 
 	// Define the different forms, and initialise them with the linearised problem
-	AVarf = new HDGBilinearForm3(V_space, W_space, M_space);
+	AVarf = new HDGBilinearForm(V_space, W_space, M_space);
 
 	AVarf->AddHDGDomainIntegrator(new HDGDomainIntegratorGS());
-	AVarf->AddHDGBdrIntegrator(new HDGFaceIntegratorGS(tau_D));
+	AVarf->AddHDGFaceIntegrator(new HDGFaceIntegratorGS(tau_D));
 
 	postproc_coll = new DG_FECollection( Order + 1, Dim );
 	postproc_space = new FiniteElementSpace( mesh, postproc_coll );
@@ -105,7 +105,10 @@ void GSInverter::Mult( const Vector& rhs_F_in , Vector& soln_out ) const
 
 	GridFunction R(V_space, rhs_R);
 	GridFunction F(W_space, rhs_F);
-	AVarf->AssembleSC(R, F, ess_bdr, lambda_variable, 1, 1);
+	mfem::Array<mfem::GridFunction*> F_arr( 2 );
+	F_arr[ 0 ] = &R;
+	F_arr[ 1 ] = &F;
+	AVarf->AssembleSC(F_arr, ess_bdr, lambda_variable, 1, 1.0, 1.0, 1);
 	AVarf->Finalize();
 
 	SparseMatrix* SC = AVarf->SpMatSC();
@@ -131,7 +134,11 @@ void GSInverter::Mult( const Vector& rhs_F_in , Vector& soln_out ) const
 	GridFunction q_variable,u_variable;
 	q_variable.MakeRef( V_space, soln_out, 0 );
 	u_variable.MakeRef( W_space, soln_out, dimV );
-	AVarf->Reconstruct(&R, &F, lambda_variable, &q_variable, &u_variable);
+	mfem::Array<mfem::GridFunction*> soln_arr( 2 );
+	soln_arr[ 0 ] = &u_variable;
+	soln_arr[ 1 ] = &q_variable;
+
+	AVarf->Reconstruct(F_arr, &lambda_variable, soln_arr);
 
 
 	if (!solver.GetConverged())

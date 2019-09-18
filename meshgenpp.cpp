@@ -29,10 +29,10 @@ int main( int argc, char** argv )
 		return 1;
 	}
 
-	meq::Configuration *config = nullptr;
+	std::shared_ptr<meq::Configuration> config = nullptr;
 
 	try {
-		config = new meq::Configuration( configFile );
+		config = std::make_shared<meq::Configuration>( configFile );
 	} catch ( toml::syntax_error &tomlErr ) {
 		std::cerr << "Error in Configuration File" << std::endl;
 		std::cerr << tomlErr.what() << std::endl;
