@@ -21,6 +21,7 @@ protected:
 
    long   max_elements;
 
+	double gamma;
    double threshold;
    long num_marked_elements;
 
@@ -80,8 +81,10 @@ public:
        gamma Sum_{i in M} local_error_i^2 <= Sum_{i in Mesh} local_error_i^2
     \endcode
 	 where gamma is a configurable parameter.
-	 We use the QuickMark algorithm of Pfeiler and Praetorius ( arXiv:1907.13078 )
-	 to compute the set M.
+	 Currently we use the trivial O( N log( N ) ) algorithm to compute the set M 
+	 (N is the number of elements in the mesh ), but initial code for the linear 
+	 complexity QuickMark algorithm of Pfeiler and Praetorius ( arXiv:1907.13078 ) 
+	 is present.
 */
 class DoerflerMarkingRefiner : public MeshOperator
 {
@@ -91,6 +94,7 @@ protected:
    long   max_elements;
 
    double threshold;
+	double gamma;
    long num_marked_elements;
 
    Array<Refinement> marked_elements;

@@ -48,30 +48,34 @@ namespace mfem {
 		return CONTINUE + REFINED;
 	}
 
-	std::pair<int,int> Partition( mfem::Vector const& x, std::vector<int>& pi, int l, int u, int p )
+	/* Implementation from Pfeiler and Praetorius ( arXiv:1907.13078 ) 
+	 * with minor tweak to work with mfem::Vector as the original data structure.
+	 */
+	using Iterator_t = std::vector<double>::iterator;
+
+	const double xStarKernel( Iterator_t subX_begin, Iterator_t subX_end, double goal )
 	{
+		// QuickMark , step ( i )-( ii ): partition by median element
+		auto length { std::distance( subX_begin , subX_end )};
+		auto subX_middle { subX_begin + length /2 };
+		std::nth_element( subX_begin, subX_middle, subX_end, std::greater<double>());
+		auto pivot_val {* subX_middle };
+		// QuickMark , step ( iii )
+		auto sigma_g = std::accumulate( subX_begin, subX_middle, ( double )0.0);
+		// QuickMark , step ( iv ), ( v ) and ( vi )
+		if ( sigma_g >= goal )
+			return xStarKernel( subX_begin, subX_middle, goal );
+		if ( sigma_g + pivot_val >= goal )
+			return pivot_val ;
+		return xStarKernel(++subX_middle, subX_end, goal - sigma_g - pivot_val );
 	}
 
-	int QuickMark( mfem::Vector const& x, std::vector<int> & pi, int l, int u, double v )
+	const double compute_threshold ( const mfem::Vector & eta , double theta )
 	{
-		double x_old_p = x( pi[ p ] ); 
-		// We never need pi_old & pi_new at the same time. 
-		// so we modify in place
-
-		int p = Pivot( x, pi, l, u ); // Leaves pi fixed
-		int g,s;
-		[ g, s ] = Partition( x, pi, l, u, p ); // Updates pi, so we no longer have pi_old
-		double sigma_g = 0;
-		for ( int j = l; j <= g; ++j )
-			sigma_g += x( pi[ j ] );
-		if ( sigma_g >= v )
-			return QuickMark( x, pi, l, g, v );
-		if ( ( sigma_g + ( s - g - 1 )*x_old_p ) >= v )
-			// We've updated pi already, so can just return the index.
-			return g + std::ceil( ( v - sigma_g )/x_old_p );
-
-		return QuickMark( x, pi, s, u, v - sigma_g - ( s - g - 1 )*x_old_p );
-	}
+		std::vector<double> x { eta.GetData(), eta.GetData() + eta.Size() };
+		double goal = theta * std ::accumulate( x.cbegin(), x.cend(), ( double )0.0);
+		return xStarKernel( x.begin(), x.end(), goal);
+	} 
 
 	int DoerflerMarking::ApplyImpl(Mesh &mesh)
 	{
@@ -87,17 +91,18 @@ namespace mfem {
 		const Vector &local_err = estimator.GetLocalErrors();
 		MFEM_ASSERT(local_err.Size() == NE, "invalid size of local_err");
 
-		threshold = gamma * local_err.Max();	
+		double threshold = xStarKernel( local_err, gamma );
 
 		for (int el = 0; el < NE; el++)
 		{
-			if (local_err(el) > threshold)
+			if (local_err(el) >= threshold)
 			{
 				marked_elements.Append(Refinement(el));
 			}
 		}
 
 		num_marked_elements = mesh.ReduceInt(marked_elements.Size());
+		MFEM_ASSERT( num_marked_elements == n, "Marking algorithm n is not the same as number of actually marked elements" );
 		if (num_marked_elements == 0) { return STOP; }
 
 		mesh.GeneralRefinement(marked_elements, non_conforming, nc_limit);
