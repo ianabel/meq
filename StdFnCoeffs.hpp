@@ -43,10 +43,12 @@ namespace mfem
 
 				if (is_td)
 				{
+					MFEM_ASSERT( td_fn, "Flag set for time-dependent coefficient but no function is assigned" );
 					return td_fn( transip, GetTime() );
 				}
 				else
 				{
+					MFEM_ASSERT( fn, "Flag set for time-independent coefficient but no function is assigned" );
 					return fn( transip );
 				}
 			}
