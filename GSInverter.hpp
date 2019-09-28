@@ -1,8 +1,8 @@
 #ifndef GSINVERTER_HPP
 #define GSINVERTER_HPP
 
+#include "mfem.hpp"
 #include "HDGGSIntegrator.hpp"
-#include "StdFnCoeffs.hpp"
 #include "CockburnEstimator.hpp"
 
 

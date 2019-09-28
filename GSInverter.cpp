@@ -108,7 +108,7 @@ void GSInverter::Mult( const Vector& rhs_F_in , Vector& soln_out ) const
 	mfem::Array<mfem::GridFunction*> F_arr( 2 );
 	F_arr[ 0 ] = &R;
 	F_arr[ 1 ] = &F;
-	AVarf->AssembleSC(F_arr, ess_bdr, lambda_variable, 1, 1.0, 1.0, 1);
+	AVarf->AssembleSC(&R, &F, ess_bdr, lambda_variable, 1.0, 1.0, 1);
 	AVarf->Finalize();
 
 	SparseMatrix* SC = AVarf->SpMatSC();
