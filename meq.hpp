@@ -6,6 +6,7 @@
 
 #include <vector>
 #include <memory>
+#include <tuple>
 
 #include "mfem.hpp"
 #include "SplineInterpolant.hpp"
@@ -13,6 +14,9 @@
 
 
 namespace meq {
+
+	using RealScalarField = std::function<double( const mfem::Vector & )>;
+	using RealVectorField = std::function<void( const mfem::Vector &, mfem::Vector & )>;
 
 class Coil {
 	private:
@@ -148,7 +152,27 @@ class Solution {
 		std::shared_ptr< mfem::FiniteElementSpace > psiSpace,gradPsiSpace,interfaceSpace;
 		mfem::Vector qu;
 		friend class GSSolver;
+		static const int dim = 2;
 	public:
+		std::pair<double,double> Check( RealScalarField uFun_ex, RealVectorField qFun_ex, int order ) {
+			mfem::GridFunction q_variable,u_variable;
+			q_variable.MakeRef( gradPsiSpace.get(), qu, 0 );
+			u_variable.MakeRef( psiSpace.get(), qu, gradPsiSpace->GetVSize() );
+			int order_quad = std::max(2, 2*order+2);
+			const mfem::IntegrationRule *irs[mfem::Geometry::NumGeom];
+			for (int i=0; i < mfem::Geometry::NumGeom; ++i)
+			{
+				irs[i] = &(mfem::IntRules.Get(i, order_quad));
+			}
+			mfem::StdFunctionCoefficient ucoeff(uFun_ex);
+			mfem::VectorStdFunctionCoefficient qcoeff(dim, qFun_ex);
+
+			double err_u    = u_variable.ComputeL2Error(ucoeff, irs);
+			double err_q    = q_variable.ComputeL2Error(qcoeff, irs);
+			return std::make_pair( err_u, err_q );
+		};
+
+
 };
 
 }

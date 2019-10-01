@@ -6,6 +6,8 @@
 
 using namespace mfem;
 
+namespace meq {
+
 double GreensFunction( mfem::Vector const& r, mfem::Vector const& r_star )
 {
 	double R = r[ 0 ];
@@ -89,7 +91,7 @@ const double xk[] = {0, 0.1943570033249354, 0.3772097381640342, 0.53914670538796
 const double wk[] = {0.1963495408493621,0.1904104648293382,0.173701844905907,0.1491828782311446,0.1207470724265376,0.09217973104519348,0.06638478442850675,0.04505767730866796,0.02875279931434859,0.01717776346664597,0.009548217946354038,0.004896875686700097,0.00229289587374098,0.0009678251282580301,0.0003628147184876642,0.0001187433505354336,0.00003327506421908961,7.81031990509301e-6,1.49796267039634e-6,2.282915074213832e-7,2.67890056961788e-8,2.335910283592051e-9,1.453895726781973e-10,6.172317347078991e-12,1.697723034317386e-13};
 
 
-double SinhTanhQuad( double a, double b, std::function<double( double )> F, unsigned int N=20 )
+double SinhTanhQuad( double a, double b, std::function<double( double )> F, unsigned int N )
 {
 	double L = ( b - a ) /2.;
 	double quad_ans = 0;
@@ -287,7 +289,7 @@ double GreensFunctionPsi( mfem::Mesh * mesh, mfem::Vector r, std::function<doubl
 	return Answer;
 }
 
-virtual double GreensFunctionBoundaryCoefficient::Eval( mfem::ElementTransformation &T, const mfem::IntegrationPoint &ip )
+double GreensFunctionBoundaryCoefficient::Eval( mfem::ElementTransformation &T, const mfem::IntegrationPoint &ip )
 {
 	if ( T.GetGeometryType() != mfem::Geometry::Type::SEGMENT )
 		throw new std::logic_error( "This only works with Segements!" );
@@ -296,9 +298,11 @@ virtual double GreensFunctionBoundaryCoefficient::Eval( mfem::ElementTransformat
 	return 2*BoundaryPsi( Q_space, psi_hat, pt );
 }
 
-virtual double FullGreensFunctionBoundaryCoefficient::Eval( mfem::ElementTransformation &T, const mfem::IntegrationPoint &ip ) 
+double FullGreensFunctionBoundaryCoefficient::Eval( mfem::ElementTransformation &T, const mfem::IntegrationPoint &ip ) 
 {
 	mfem::Vector pt( 3 );
 	T.Transform( ip, pt );
 	return GreensFunctionPsi( mesh, pt, j_tor );
+}
+
 }

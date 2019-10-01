@@ -10,11 +10,13 @@ namespace meq {
 	{
 		public:
 			using Func = std::function< double( const mfem::Vector&, double ) >;
+			using SharedFES = std::shared_ptr<mfem::FiniteElementSpace>;
+			using SharedFEC = std::shared_ptr<mfem::FiniteElementCollection>;
 		protected:
 			GSInverter solver;
 			Func PlasmaRHS;
 		public:
-			GSSolver(std::shared_ptr<mfem::Mesh>, unsigned int order, Func J_RHS )
+			GSSolver(std::shared_ptr<mfem::Mesh> meshPtr, unsigned int order, Func J_RHS )
 				: solver( meshPtr, order ), PlasmaRHS( J_RHS )
 			{
 				height = solver.NumRows();
@@ -39,12 +41,12 @@ namespace meq {
 				mfem::LinearForm *fform = new mfem::LinearForm;
 
 				mfem::GridFunction u;
-				u.MakeRef( const_cast<mfem::FiniteElementSpace* >( solver.GetUSpace() ), static_cast<double*>( qu_in.GetData() + solver.GetQSpace()->GetVSize() ) );
+				u.MakeRef( const_cast<mfem::FiniteElementSpace* >( solver.USpace().get() ), static_cast<double*>( qu_in.GetData() + solver.QSpace()->GetVSize() ) );
 
 
 
 				fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( u, PlasmaRHS, 4, 2 ) );
-				fform->Update(const_cast<mfem::FiniteElementSpace* >( solver.GetUSpace() ), rhs_F, 0);
+				fform->Update(const_cast<mfem::FiniteElementSpace* >( solver.USpace().get() ), rhs_F, 0);
 				fform->Assemble();
 
 				solver.Mult( rhs_F, qu_out );
@@ -56,15 +58,10 @@ namespace meq {
 				solver.Postprocess( u_out, qu_in );
 			};
 
-			using GSInverter::SharedFES;
-			mfem::FiniteElementSpace const * GetMSpace() const { return solver.GetMSpace(); };
-			mfem::FiniteElementSpace const * GetQSpace() const { return solver.GetQSpace(); };
-			mfem::FiniteElementSpace const * GetUSpace() const { return solver.GetUSpace(); };
-			mfem::FiniteElementSpace const * GetUStarSpace() const { return solver.GetUStarSpace(); };
-			SharedFES GetMSpace() { return solver.GetMSpace(); };
-			SharedFES GetQSpace() { return solver.GetQSpace(); };
-			SharedFES GetUSpace() { return solver.GetUSpace(); };
-			SharedFES GetUStarSpace() { return solver.GetUStarSpace(); };
+			SharedFES MSpace() { return solver.MSpace(); };
+			SharedFES QSpace() { return solver.QSpace(); };
+			SharedFES USpace() { return solver.USpace(); };
+			SharedFES UStarSpace() { return solver.UStarSpace(); };
 
 			void Prolong( mfem::Vector const& qu_old, mfem::Vector & qu_new ) const
 			{
@@ -75,19 +72,19 @@ namespace meq {
 			{
 				mfem::GridFunction q_variable,u_variable,u_hat_variable;
 
-				q_variable.MakeRef( solver.GetQSpace(), soln_vector, 0 );
-				u_variable.MakeRef( solver.GetUSpace(), soln_vector, solver.GetQSpace()->GetVSize() );
-				u_hat_variable.MakeRef( solver.GetMSpace(), soln_vector, solver.GetQSpace()->GetVSize() + solver.GetUSpace()->GetVSize() );
+				q_variable.MakeRef( solver.QSpace().get(), soln_vector, 0 );
+				u_variable.MakeRef( solver.USpace().get(), soln_vector, solver.QSpace()->GetVSize() );
+				u_hat_variable.MakeRef( solver.MSpace().get(), soln_vector, solver.QSpace()->GetVSize() + solver.USpace()->GetVSize() );
 
 
-				mfem::GridFunction u_star( solver.GetUStarSpace() );
+				mfem::GridFunction u_star( solver.UStarSpace().get() );
 				solver.Postprocess( u_star, soln_vector );
 
 				mfem::GradShafranovEstimator errorEstimator( q_variable, u_star, u_hat_variable, PlasmaRHS );
-				mfem::ThresholdRefiner refiner( errorEstimator );
+				mfem::DoerflerMarkingRefiner refiner( errorEstimator );
 
-				refiner.SetTotalErrorFraction( 0.2 );
-				refiner.Apply( *( solver.GetMesh() ) );
+				refiner.SetGamma( 0.5 );
+				refiner.Apply( *( solver.Mesh().get() ) );
 				Update();
 			};
 	};

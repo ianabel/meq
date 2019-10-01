@@ -60,7 +60,7 @@ int main(int argc, char *argv[])
 
 
 	// Mesh generation
-	Mesh *mesh = new Mesh(3, 3, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
+	std::shared_ptr<Mesh> mesh = std::make_shared<Mesh>(3, 3, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
 	auto xform = []( const Vector& in, Vector& out ) { 
 		constexpr double R_min = 0.5;
 		constexpr double R_max = 1.5;
@@ -110,9 +110,9 @@ int main(int argc, char *argv[])
 		qu.SetSize( solver.Height() );
 		nonlinearPoissonSolver->Mult( qu, qu );
 
-		q_variable.MakeRef( solver.GetQSpace(), qu, 0 );
-		u_variable.MakeRef( solver.GetUSpace(), qu, solver.GetQSpace()->GetVSize() );
-		u_hat_variable.MakeRef( solver.GetMSpace(), qu, solver.GetQSpace()->GetVSize() + solver.GetUSpace()->GetVSize() );
+		q_variable.MakeRef( solver.QSpace().get(), qu, 0 );
+		u_variable.MakeRef( solver.USpace().get(), qu, solver.QSpace()->GetVSize() );
+		u_hat_variable.MakeRef( solver.MSpace().get(), qu, solver.QSpace()->GetVSize() + solver.USpace()->GetVSize() );
 
 		std::cout << "After " << i_amr << " levels of refinement:" << std::endl;
 
@@ -126,7 +126,7 @@ int main(int argc, char *argv[])
 		VectorStdFunctionCoefficient qcoeff(dim, qFun_ex);
 		double err_u    = u_variable.ComputeL2Error(ucoeff, irs);
 		double err_q    = q_variable.ComputeL2Error(qcoeff, irs);
-		mfem::GridFunction u_star( solver.GetUStarSpace() );
+		mfem::GridFunction u_star( solver.UStarSpace().get() );
 		solver.Postprocess( u_star, qu );
 		double err_u_star    = u_star.ComputeL2Error(ucoeff, irs);
 
@@ -153,9 +153,9 @@ int main(int argc, char *argv[])
 		nonlinearPoissonSolver->Mult( qu, qu );
 
 
-		q_variable.MakeRef( solver.GetQSpace(), qu, 0 );
-		u_variable.MakeRef( solver.GetUSpace(), qu, solver.GetQSpace()->GetVSize() );
-		u_hat_variable.MakeRef( solver.GetMSpace(), qu, solver.GetQSpace()->GetVSize() + solver.GetUSpace()->GetVSize() );
+		q_variable.MakeRef( solver.QSpace().get(), qu, 0 );
+		u_variable.MakeRef( solver.USpace().get(), qu, solver.QSpace()->GetVSize() );
+		u_hat_variable.MakeRef( solver.MSpace().get(), qu, solver.QSpace()->GetVSize() + solver.USpace()->GetVSize() );
 
 		std::cout << "After " << i_amr << " levels of refinement:" << std::endl;
 
@@ -169,7 +169,7 @@ int main(int argc, char *argv[])
 		VectorStdFunctionCoefficient qcoeff(dim, qFun_ex);
 		double err_u    = u_variable.ComputeL2Error(ucoeff, irs);
 		double err_q    = q_variable.ComputeL2Error(qcoeff, irs);
-		mfem::GridFunction u_star( solver.GetUStarSpace() );
+		mfem::GridFunction u_star( solver.UStarSpace().get() );
 		solver.Postprocess( u_star, qu );
 		double err_u_star    = u_star.ComputeL2Error(ucoeff, irs);
 
@@ -211,8 +211,6 @@ int main(int argc, char *argv[])
 			endl;
 	}
 
-
-	delete mesh;
 	return 0;
 }
 

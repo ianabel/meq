@@ -1,8 +1,12 @@
 #include <functional>
+#include "mfem.hpp"
+
+namespace meq {
 
 double GreensFunction( mfem::Vector const& r, mfem::Vector const& r_star );
 double SinhTanhQuad( double a, double b, std::function<double( double )> F, unsigned int N=20 ) ;
 double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln, mfem::Vector const& r );
+double GreensFunctionPsi( mfem::Mesh * mesh, mfem::Vector r, std::function<double( const mfem::Vector& )> const& j_coil );
 
 
 class GreensFunctionBoundaryCoefficient : public mfem::Coefficient
@@ -21,7 +25,6 @@ class GreensFunctionBoundaryCoefficient : public mfem::Coefficient
 		
 };
 
-double GreensFunctionPsi( mfem::Mesh * mesh, mfem::Vector r, std::function<double( const mfem::Vector& )> const& j_coil );
 
 class FullGreensFunctionBoundaryCoefficient : public mfem::Coefficient
 {
@@ -40,4 +43,4 @@ class FullGreensFunctionBoundaryCoefficient : public mfem::Coefficient
 		
 };
 
-
+}

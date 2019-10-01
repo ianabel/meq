@@ -11,8 +11,8 @@ CXXFLAGS_DEBUG = -std=c++17 -g -Og -Wall
 GSINVERTER_DEP = GSInverter.cpp GSInverter.hpp HDGGSIntegrator.cpp HDGGSIntegrator.hpp CockburnEstimator.hpp FreeBoundary.hpp
 GSINVERTER_SRC = GSInverter.cpp HDGGSIntegrator.cpp
 
-meq: meq.cpp $(GSINVERTER_DEP)
-	$(CXX) $(CXXFLAGS_RELEASE) meq.cpp $(GSINVERTER_SRC) -o meq $(MFEM_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
+meq: meq.cpp FreeBoundary.cpp $(GSINVERTER_DEP)
+	$(CXX) $(CXXFLAGS_RELEASE) meq.cpp FreeBoundary.cpp $(GSINVERTER_SRC) -o meq $(MFEM_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
 
 meq-debug: meq.cpp $(GSINVERTER_DEP)
 	$(CXX) $(CXXFLAGS_DEBUG) meq.cpp $(GSINVERTER_SRC) -o meq-debug $(MFEM_DEBUG_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
@@ -25,7 +25,11 @@ mfemGS-DEBUG: mfemGS.cpp StdFnCoeffs.hpp SolovievEquilibrium.hpp  $(GSINVERTER_D
 
 
 meshgenpp: meshgenpp.cpp meshgen.cpp MEQConf.hpp meq.hpp
-	$(CXX) $(CXXFLAGS_DEBUG) meshgenpp.cpp meshgen.cpp -o meshgenpp -lgmsh $(MFEM_DEBUG_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
+	$(CXX) $(CXXFLAGS_DEBUG) meshgenpp.cpp meshgen.cpp -o meshgenpp -lgmsh $(MFEM_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
+
+mfemProjector: mfemProjector.cpp MEQConf.hpp meq.hpp
+	$(CXX) $(CXXFLAGS_DEBUG) mfemProjector.cpp -o mfemProjector $(MFEM_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
+
 
 clean:
 	rm -f meshgenpp mfemGS mfemGS-DEBUG meq meq-debug

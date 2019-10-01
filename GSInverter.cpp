@@ -2,7 +2,7 @@
 
 using namespace mfem;
 
-GSInverter::GSInverter(std::shared_ptr<Mesh> meshPtr, unsigned int order) : 
+GSInverter::GSInverter(std::shared_ptr<mfem::Mesh> meshPtr, unsigned int order) : 
 	mesh( meshPtr ),
 	Order( order ),
 	Dim( 2 ),
@@ -95,7 +95,7 @@ void GSInverter::Mult( const Vector& rhs_F_in , Vector& soln_out ) const
 	GridFunction lambda_variable;
 
 	soln_out.SetSize( height );
-	lambda_variable.MakeRef( M_space, soln_out, dimV + dimW );
+	lambda_variable.MakeRef( M_space.get(), soln_out, dimV + dimW );
 	lambda_variable = 0.0;
 
 	Array<int> ess_bdr(mesh->bdr_attributes.Max());
@@ -103,8 +103,8 @@ void GSInverter::Mult( const Vector& rhs_F_in , Vector& soln_out ) const
 
 	lambda_variable.ProjectBdrCoefficient( *boundary_conditions, ess_bdr );
 
-	GridFunction R(V_space, rhs_R);
-	GridFunction F(W_space, rhs_F);
+	GridFunction R(V_space.get(), rhs_R);
+	GridFunction F(W_space.get(), rhs_F);
 	mfem::Array<mfem::GridFunction*> F_arr( 2 );
 	F_arr[ 0 ] = &R;
 	F_arr[ 1 ] = &F;
@@ -132,8 +132,8 @@ void GSInverter::Mult( const Vector& rhs_F_in , Vector& soln_out ) const
 
 	// Reconstruct the solution u and q from the facet solution lambda
 	GridFunction q_variable,u_variable;
-	q_variable.MakeRef( V_space, soln_out, 0 );
-	u_variable.MakeRef( W_space, soln_out, dimV );
+	q_variable.MakeRef( V_space.get(), soln_out, 0 );
+	u_variable.MakeRef( W_space.get(), soln_out, dimV );
 	mfem::Array<mfem::GridFunction*> soln_arr( 2 );
 	soln_arr[ 0 ] = &q_variable;
 	soln_arr[ 1 ] = &u_variable;
@@ -175,8 +175,8 @@ void GSInverter::Postprocess(GridFunction &u_postprocessed, mfem::Vector & qu_in
 {
 	GridFunction q,u;
 
-	q.MakeRef( V_space, qu_in, 0 );
-	u.MakeRef( W_space, qu_in, dimV );
+	q.MakeRef( V_space.get(), qu_in, 0 );
+	u.MakeRef( W_space.get(), qu_in, dimV );
 
 	Array<int>  vdofs;
 	Vector      elmat2, shape, RHS, to_RHS, vals, uvals;

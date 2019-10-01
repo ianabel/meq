@@ -10,7 +10,9 @@
 
 class GSInverter : public mfem::Operator
 {
-
+	public:
+		using SharedFES = std::shared_ptr<mfem::FiniteElementSpace>;
+		using SharedFEC = std::shared_ptr<mfem::FiniteElementCollection>;
 	protected:
 		std::shared_ptr<mfem::Mesh> mesh; // Unowned
 		unsigned int Order,Dim;
@@ -20,8 +22,6 @@ class GSInverter : public mfem::Operator
 
 		mfem::Coefficient *boundary_conditions;
 
-		using SharedFES = std::shared_ptr<mfem::FiniteElementSpace>;
-		using SharedFEC = std::shared_ptr<mfem::FiniteElementCollection>;
 
 		SharedFEC dg_coll, face_coll;
 		SharedFES V_space, W_space, M_space;
@@ -36,19 +36,13 @@ class GSInverter : public mfem::Operator
 	public:
 		GSInverter(std::shared_ptr<mfem::Mesh> meshPtr, unsigned int order);
 
-		SharedFES QSpace() { return V_space; };
-		SharedFES USpace() { return W_space; };
-		SharedFES MSpace() { return M_space; };
+		SharedFES QSpace() const { return V_space; };
+		SharedFES USpace() const { return W_space; };
+		SharedFES MSpace() const { return M_space; };
 
-		const SharedFES GetQSpace() { return V_space; } const;
-		const SharedFES GetUSpace() { return W_space; } const;
-		const SharedFES GetMSpace() { return M_space; } const;
+		SharedFES UStarSpace() const { return postproc_space; };
 
-		SharedFES GetUStarSpace()  { return postproc_space; };
-		const SharedFES GetUStarSpace() { return postproc_space; } const;
-
-		std::shared_ptr<mfem::Mesh> GetMesh() {return mesh;};
-		const std::shared_ptr<mfem::Mesh> GetMesh() { return mesh; } const;
+		std::shared_ptr<mfem::Mesh> Mesh() const {return mesh;};
 
 		void Prolong( mfem::Vector const& soln_old, mfem::Vector &soln_new ) const;
 
