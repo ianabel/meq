@@ -1,5 +1,4 @@
 #include <functional>
-#include "StdFnCoeffs.hpp"
 
 double GreensFunction( mfem::Vector const& r, mfem::Vector const& r_star );
 double SinhTanhQuad( double a, double b, std::function<double( double )> F, unsigned int N=20 ) ;

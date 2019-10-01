@@ -14,7 +14,7 @@ namespace meq {
 			GSInverter solver;
 			Func PlasmaRHS;
 		public:
-			GSSolver(mfem::Mesh *meshPtr, unsigned int order, Func J_RHS )
+			GSSolver(std::shared_ptr<mfem::Mesh>, unsigned int order, Func J_RHS )
 				: solver( meshPtr, order ), PlasmaRHS( J_RHS )
 			{
 				height = solver.NumRows();
@@ -56,14 +56,15 @@ namespace meq {
 				solver.Postprocess( u_out, qu_in );
 			};
 
+			using GSInverter::SharedFES;
 			mfem::FiniteElementSpace const * GetMSpace() const { return solver.GetMSpace(); };
 			mfem::FiniteElementSpace const * GetQSpace() const { return solver.GetQSpace(); };
 			mfem::FiniteElementSpace const * GetUSpace() const { return solver.GetUSpace(); };
 			mfem::FiniteElementSpace const * GetUStarSpace() const { return solver.GetUStarSpace(); };
-			mfem::FiniteElementSpace * GetMSpace() { return solver.GetMSpace(); };
-			mfem::FiniteElementSpace * GetQSpace() { return solver.GetQSpace(); };
-			mfem::FiniteElementSpace * GetUSpace() { return solver.GetUSpace(); };
-			mfem::FiniteElementSpace * GetUStarSpace() { return solver.GetUStarSpace(); };
+			SharedFES GetMSpace() { return solver.GetMSpace(); };
+			SharedFES GetQSpace() { return solver.GetQSpace(); };
+			SharedFES GetUSpace() { return solver.GetUSpace(); };
+			SharedFES GetUStarSpace() { return solver.GetUStarSpace(); };
 
 			void Prolong( mfem::Vector const& qu_old, mfem::Vector & qu_new ) const
 			{

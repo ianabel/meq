@@ -2,11 +2,7 @@
 all: meq
 
 MFEM_DIR=/home/ian/projects/mfem-hdg-ian
-<<<<<<< Updated upstream
 MFEM_LIB=-lmfem -lrt 
-=======
-MFEM_LIB=-lmfem -lrt -llapack -lblas
->>>>>>> Stashed changes
 MFEM_DEBUG_LIB=-lmfem-debug -lrt
 SUNDIALS_LIB = -lsundials_arkode -lsundials_cvode -lsundials_nvecserial -lsundials_kinsol
 CXX = g++

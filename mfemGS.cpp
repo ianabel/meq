@@ -11,18 +11,18 @@
  *                University of Waterloo
  */
 
-#include "GSInverter.hpp"
-#include "NLRHSIntegrator.hpp"
-#include "CockburnEstimator.hpp"
+#include "meq.hpp"
+
 #include "SolovievEquilibrium.hpp"
+#include "GSSolver.hpp"
 
 #include <fstream>
 #include <iostream>
 #include <algorithm>
 
-
 using namespace std;
 using namespace mfem;
+using namespace meq;
 
 // Define the analytical solution and forcing terms / boundary conditions
 
@@ -35,98 +35,6 @@ const double c1 = -0.001479661575325;
 const double c2 = -0.366568333204813;
 const double c3 =  0.002409406149732;
 const double c4 = -0.023957517168316;
-
-class NLGSSolver : public mfem::Operator
-{
-	public:
-		using Func = std::function< double( double ) >;
-	protected:
-		GSInverter solver;
-		Func Pprime,FFprime;
-	public:
-		NLGSSolver(mfem::Mesh *meshPtr, unsigned int order, Func Pprime_orig, Func FFprime_orig )
-			: solver( meshPtr, order ), Pprime( Pprime_orig ), FFprime( FFprime_orig )
-		{
-			height = solver.NumRows();
-			width = solver.NumRows();
-		};
-
-		void SetBCs( mfem::Coefficient& coeff ) {
-			solver.SetBCs( coeff );
-		};
-
-		void Update() { 
-			solver.Update(); 
-			height = solver.NumRows();
-			width = solver.NumRows();
-		};
-
-		virtual void Mult( mfem::Vector const& qu_in, mfem::Vector & qu_out ) const
-		{
-			mfem::Vector rhs_F( solver.NumCols() );
-			qu_out.SetSize( solver.NumRows() );
-			// Assemble the RHS and the Schur complement
-			mfem::LinearForm *fform = new mfem::LinearForm;
-
-			mfem::GridFunction u;
-			u.MakeRef( const_cast<mfem::FiniteElementSpace* >( solver.GetUSpace() ), static_cast<double*>( qu_in.GetData() + solver.GetQSpace()->GetVSize() ) );
-
-			auto PlasmaRHS = [ this ]( const mfem::Vector &pt, double psi ){
-				double R = pt( 0 );
-				return -( R*R*Pprime( psi ) + FFprime( psi ) )/R;
-			};
-
-			fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( u, PlasmaRHS, 4, 2 ) );
-			fform->Update(const_cast<mfem::FiniteElementSpace* >( solver.GetUSpace() ), rhs_F, 0);
-			fform->Assemble();
-
-			solver.Mult( rhs_F, qu_out );
-			delete fform;
-		};
-
-		void Postprocess( mfem::GridFunction &u_out, mfem::Vector & qu_in )
-		{
-			solver.Postprocess( u_out, qu_in );
-		};
-
-		mfem::FiniteElementSpace const * GetMSpace() const { return solver.GetMSpace(); };
-		mfem::FiniteElementSpace const * GetQSpace() const { return solver.GetQSpace(); };
-		mfem::FiniteElementSpace const * GetUSpace() const { return solver.GetUSpace(); };
-		mfem::FiniteElementSpace const * GetUStarSpace() const { return solver.GetUStarSpace(); };
-		mfem::FiniteElementSpace * GetMSpace() { return solver.GetMSpace(); };
-		mfem::FiniteElementSpace * GetQSpace() { return solver.GetQSpace(); };
-		mfem::FiniteElementSpace * GetUSpace() { return solver.GetUSpace(); };
-		mfem::FiniteElementSpace * GetUStarSpace() { return solver.GetUStarSpace(); };
-
-		void Prolong( mfem::Vector const& qu_old, mfem::Vector & qu_new ) const
-		{
-			solver.Prolong( qu_old, qu_new );
-		};
-
-		void ApplyAdaptiveRefinement(  mfem::Vector & soln_vector )
-		{
-			mfem::GridFunction q_variable,u_variable,u_hat_variable;
-
-			q_variable.MakeRef( solver.GetQSpace(), soln_vector, 0 );
-			u_variable.MakeRef( solver.GetUSpace(), soln_vector, solver.GetQSpace()->GetVSize() );
-			u_hat_variable.MakeRef( solver.GetMSpace(), soln_vector, solver.GetQSpace()->GetVSize() + solver.GetUSpace()->GetVSize() );
-
-
-			mfem::GridFunction u_star( solver.GetUStarSpace() );
-			solver.Postprocess( u_star, soln_vector );
-
-			auto PlasmaRHS = [ this ]( const mfem::Vector &pt, double psi ){
-				double R = pt( 0 );
-				return -( R*R*Pprime( psi ) + FFprime( psi ) )/R;
-			};
-			mfem::GradShafranovEstimator errorEstimator( q_variable, u_star, u_hat_variable, PlasmaRHS );
-			mfem::ThresholdRefiner refiner( errorEstimator );
-
-			refiner.SetTotalErrorFraction( 0.2 );
-			refiner.Apply( *( solver.GetMesh() ) );
-			Update();
-		};
-};
 
 int main(int argc, char *argv[])
 {
@@ -170,9 +78,12 @@ int main(int argc, char *argv[])
 
 	SolovievEquilibrium TestEq( A, C, c1, c2, c3, c4 );
 
-	std::function<double( double )> Pprime  = std::bind(  &SolovievEquilibrium::Pprime, &TestEq, std::placeholders::_1 );
-	std::function<double( double )> FFprime = std::bind( &SolovievEquilibrium::FFprime, &TestEq, std::placeholders::_1 );
-	NLGSSolver solver( mesh, order, Pprime, FFprime );
+	std::function<double( const mfem::Vector &, double )> J_Plasma = [ &TestEq ]( const mfem::Vector& pt, double psi ) {
+		double R = pt( 0 );
+		return -( R*R*TestEq.Pprime( psi ) + TestEq.FFprime( psi ) )/R;
+	};
+
+	GSSolver solver( mesh, order, J_Plasma );
 
 	std::function<double( const mfem::Vector & )> uFun_ex = std::bind( &SolovievEquilibrium::psi, &TestEq, std::placeholders::_1 );
 	std::function<void( const mfem::Vector &, mfem::Vector & )> qFun_ex = std::bind( &SolovievEquilibrium::q, &TestEq, std::placeholders::_1, std::placeholders::_2 );

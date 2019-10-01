@@ -1,7 +1,7 @@
 
 all: meq
 
-MFEM_DIR=/home/ian/projects/ian-mfem
+MFEM_DIR=/home/ian/projects/mfem-hdg-ian
 MFEM_LIB=-lmfem -lrt -llapack -lblas
 MFEM_DEBUG_LIB=-lmfem-debug -lrt
 SUNDIALS_LIB = -lsundials_arkode -lsundials_cvode -lsundials_nvecserial -lsundials_kinsol

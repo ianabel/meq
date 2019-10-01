@@ -2,7 +2,7 @@
 
 using namespace mfem;
 
-GSInverter::GSInverter(Mesh *meshPtr, unsigned int order) : 
+GSInverter::GSInverter(std::shared_ptr<Mesh> meshPtr, unsigned int order) : 
 	mesh( meshPtr ),
 	Order( order ),
 	Dim( 2 ),
@@ -10,28 +10,28 @@ GSInverter::GSInverter(Mesh *meshPtr, unsigned int order) :
 	tau_D( 5.0 )
 {
 	// Define finite element collections and spaces on the mesh.
-	dg_coll   = new DG_FECollection(Order, Dim);
-	face_coll = new DG_Interface_FECollection(Order, Dim);
+	dg_coll   = std::make_shared<DG_FECollection>(Order, Dim);
+	face_coll = std::make_shared<DG_Interface_FECollection>(Order, Dim);
 
 	// Finite element spaces:
 	// V_space is the scalar DG space on elements for u_h
 	// W_space is the vector valued DG space on elements for q_h
 	// M_space is the DG space on faces for lambda_h
-	V_space = new FiniteElementSpace(mesh, dg_coll, Dim);
-	W_space = new FiniteElementSpace(mesh, dg_coll);
-	M_space = new FiniteElementSpace(mesh, face_coll);
+	V_space = std::make_shared<FiniteElementSpace>(mesh.get(), dg_coll.get(), Dim);
+	W_space = std::make_shared<FiniteElementSpace>(mesh.get(), dg_coll.get());
+	M_space = std::make_shared<FiniteElementSpace>(mesh.get(), face_coll.get());
 	dimV = V_space->GetVSize();
 	dimW = W_space->GetVSize();
 	dimM = M_space->GetVSize();
 
 	// Define the different forms, and initialise them with the linearised problem
-	AVarf = new HDGBilinearForm(V_space, W_space, M_space);
+	AVarf = new HDGBilinearForm(V_space.get(), W_space.get(), M_space.get() );
 
 	AVarf->AddHDGDomainIntegrator(new HDGDomainIntegratorGS());
 	AVarf->AddHDGFaceIntegrator(new HDGFaceIntegratorGS(tau_D));
 
-	postproc_coll = new DG_FECollection( Order + 1, Dim );
-	postproc_space = new FiniteElementSpace( mesh, postproc_coll );
+	postproc_coll = std::make_shared<DG_FECollection>( Order + 1, Dim );
+	postproc_space = std::make_shared<FiniteElementSpace>( mesh.get(), postproc_coll .get());
 
 	bOffsets.SetSize( 4 );
 	bOffsets[ 0 ] = 0;
@@ -108,7 +108,7 @@ void GSInverter::Mult( const Vector& rhs_F_in , Vector& soln_out ) const
 	mfem::Array<mfem::GridFunction*> F_arr( 2 );
 	F_arr[ 0 ] = &R;
 	F_arr[ 1 ] = &F;
-	AVarf->AssembleSC(&R, &F, ess_bdr, lambda_variable, 1.0, 1.0, 1);
+	AVarf->AssembleSC(F_arr, ess_bdr, lambda_variable, 1.0, 1.0, 1);
 	AVarf->Finalize();
 
 	SparseMatrix* SC = AVarf->SpMatSC();
@@ -135,10 +135,10 @@ void GSInverter::Mult( const Vector& rhs_F_in , Vector& soln_out ) const
 	q_variable.MakeRef( V_space, soln_out, 0 );
 	u_variable.MakeRef( W_space, soln_out, dimV );
 	mfem::Array<mfem::GridFunction*> soln_arr( 2 );
-	soln_arr[ 0 ] = &u_variable;
-	soln_arr[ 1 ] = &q_variable;
+	soln_arr[ 0 ] = &q_variable;
+	soln_arr[ 1 ] = &u_variable;
 
-	AVarf->Reconstruct(F_arr, &lambda_variable, soln_arr);
+	AVarf->Reconstruct(F_arr, &lambda_variable, soln_arr );
 
 
 	if (!solver.GetConverged())

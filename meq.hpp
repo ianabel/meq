@@ -145,7 +145,7 @@ class StaticMHDPlasma : PlasmaModel {
 
 class Solution {
 	private:
-		std::shared_ptr< mfem::FiniteElementSpace > psiSpace,gradPsiSpace;
+		std::shared_ptr< mfem::FiniteElementSpace > psiSpace,gradPsiSpace,interfaceSpace;
 		mfem::Vector qu;
 		friend class GSSolver;
 	public:

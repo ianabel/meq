@@ -5,12 +5,14 @@
 #include "HDGGSIntegrator.hpp"
 #include "CockburnEstimator.hpp"
 
+#include <memory>
+
 
 class GSInverter : public mfem::Operator
 {
 
 	protected:
-		mfem::Mesh *mesh; // Unowned
+		std::shared_ptr<mfem::Mesh> mesh; // Unowned
 		unsigned int Order,Dim;
 		int dimV,dimM,dimW;
 
@@ -18,34 +20,35 @@ class GSInverter : public mfem::Operator
 
 		mfem::Coefficient *boundary_conditions;
 
-		mfem::FiniteElementCollection *dg_coll, *face_coll;
-		mfem::FiniteElementSpace *V_space,*W_space,*M_space;
-		mfem::HDGBilinearForm *AVarf;
+		using SharedFES = std::shared_ptr<mfem::FiniteElementSpace>;
+		using SharedFEC = std::shared_ptr<mfem::FiniteElementCollection>;
 
+		SharedFEC dg_coll, face_coll;
+		SharedFES V_space, W_space, M_space;
+		mfem::HDGBilinearForm *AVarf;
 
 		const double tau_D;
 
-
-		mfem::FiniteElementCollection *postproc_coll;
-		mfem::FiniteElementSpace *postproc_space;
+		SharedFEC postproc_coll;
+		SharedFES postproc_space;
 
 		mfem::Array<int> bOffsets;
 	public:
-		GSInverter(mfem::Mesh *meshPtr, unsigned int order);
-		mfem::FiniteElementSpace const* GetQSpace() const { return V_space; };
-		mfem::FiniteElementSpace const* GetUSpace() const { return W_space; };
-		mfem::FiniteElementSpace const* GetUStarSpace() const { return postproc_space; };
+		GSInverter(std::shared_ptr<mfem::Mesh> meshPtr, unsigned int order);
 
+		SharedFES QSpace() { return V_space; };
+		SharedFES USpace() { return W_space; };
+		SharedFES MSpace() { return M_space; };
 
-		mfem::FiniteElementSpace * GetQSpace()  { return V_space; };
-		mfem::FiniteElementSpace * GetUSpace()  { return W_space; };
-		mfem::FiniteElementSpace * GetUStarSpace()  { return postproc_space; };
+		const SharedFES GetQSpace() { return V_space; } const;
+		const SharedFES GetUSpace() { return W_space; } const;
+		const SharedFES GetMSpace() { return M_space; } const;
 
-		mfem::FiniteElementSpace * GetMSpace() { return M_space;};
-		mfem::FiniteElementSpace const* GetMSpace() const { return M_space;};
+		SharedFES GetUStarSpace()  { return postproc_space; };
+		const SharedFES GetUStarSpace() { return postproc_space; } const;
 
-		mfem::Mesh *GetMesh() {return mesh;};
-		mfem::Mesh const *GetMesh() const {return mesh;};
+		std::shared_ptr<mfem::Mesh> GetMesh() {return mesh;};
+		const std::shared_ptr<mfem::Mesh> GetMesh() { return mesh; } const;
 
 		void Prolong( mfem::Vector const& soln_old, mfem::Vector &soln_new ) const;
 
@@ -63,14 +66,7 @@ class GSInverter : public mfem::Operator
 
 		~GSInverter()
 		{
-			delete V_space;
-			delete W_space;
-			delete M_space;
 			delete AVarf;
-			delete dg_coll;
-			delete face_coll;
-			delete postproc_space;
-			delete postproc_coll;
 		};
 		
 };
