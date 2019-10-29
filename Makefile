@@ -30,9 +30,13 @@ meshgenpp: meshgenpp.cpp meshgen.cpp MEQConf.hpp meq.hpp
 mfemProjector: mfemProjector.cpp MEQConf.hpp meq.hpp
 	$(CXX) $(CXXFLAGS_DEBUG) mfemProjector.cpp -o mfemProjector $(MFEM_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
 
+mfemCheck: mfemCheck.cpp
+	$(CXX) $(CXXFLAGS_DEBUG) mfemCheck.cpp -o mfemProjector $(MFEM_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
+
+
 
 clean:
-	rm -f meshgenpp mfemGS mfemGS-DEBUG meq meq-debug
+	rm -f meshgenpp mfemGS mfemGS-DEBUG meq meq-debug mfemCheck mfemProjector
 
 .PHONY: clean
 

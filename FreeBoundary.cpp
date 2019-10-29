@@ -25,27 +25,9 @@ double GreensFunction( mfem::Vector const& r, mfem::Vector const& r_star )
 	double dR = ( R_star - R )/R;
 	double dZ = ( Z_star - Z )/R;
 
-	if ( ( dR == 0 ) && ( dZ == 0 ) )
-	{
-		double foo = R_star/R - 1;
-		double bar = Z_star/R - Z/R;
-
-		std::cerr << std::setprecision( 24 );
-		std::cerr << std::endl;
-		std::cerr << std::endl;
-		std::cerr << R << '\t' << R_star << '\t' << Z << '\t' << Z_star << std::endl;
-		std::cerr << dR << '\t' << dZ << std::endl;
-		std::cerr << foo << '\t' << bar << std::endl;
-		std::cerr << std::endl;
-
-		throw std::logic_error( "Logarithmic divergence detected. Caution is advised." );
-	}
-
 	if ( ( ::fabs( dR ) > 1e-7 ) || ( ::fabs( dZ ) > 1e-7 ) )
 	{
 		answer *= ::sqrt( ( R + R_star )*( R + R_star ) + ( Z - Z_star )*( Z - Z_star ) ) * ( ( 1.0 - 0.5*k_squared )*boost::math::ellint_1( k ) - boost::math::ellint_2( k ) );
-		if ( !std::isfinite( answer ) )
-			throw std::logic_error( "Wat" );
 	}
 	else
 	{
@@ -203,8 +185,8 @@ double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln,
 				if ( s > 0.0 && s < 1.0 )
 				{
 					double ExpInt;
-					double LInt = SinhTanhQuad( 0.0, s, IntFunc, 10 );
-					double RInt = SinhTanhQuad( s, 1.0, IntFunc, 10 );
+					double LInt = SinhTanhQuad( 0.0, s, IntFunc, 20 );
+					double RInt = SinhTanhQuad( s, 1.0, IntFunc, 20 );
 					ExpInt = LInt + RInt;
 					Answer += ExpInt;
 				}
@@ -220,7 +202,7 @@ double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln,
 			else 
 			{
 				const mfem::IntegrationRule *ir = nullptr;
-				int order = 2 * bdr_cell.GetOrder() + 10;
+				int order = 2 * bdr_cell.GetOrder() + 2;
 				if (bdr_cell.GetMapType() == FiniteElement::VALUE)
 				{
 					order += tr->Face->OrderW();
@@ -277,7 +259,7 @@ double GreensFunctionPsi( mfem::Mesh * mesh, mfem::Vector r, std::function<doubl
 			mfem::Vector pt( 3 );
 			const mfem::IntegrationPoint &ip = ir->IntPoint(p);
 			T->Transform( ip, pt );
-			if ( ::fabs( j_coil( pt ) ) < 1e-6 )
+			if ( ::fabs( j_coil( pt ) ) < 1e-9 )
 				continue;
 			double tmp = ip.weight  * T->Weight() * GreensFunction( r, pt ) * j_coil( pt );
 

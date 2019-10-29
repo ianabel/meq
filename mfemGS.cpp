@@ -97,6 +97,9 @@ int main(int argc, char *argv[])
 
 	qu = 0.0;
 
+	StdFunctionCoefficient ucoeff(uFun_ex);
+	VectorStdFunctionCoefficient qcoeff(dim, qFun_ex);
+
 	int i_amr = 0;
 	KinSolver *nonlinearPoissonSolver = nullptr;
 	mfem::Vector qu_refined;
@@ -116,19 +119,11 @@ int main(int argc, char *argv[])
 
 		std::cout << "After " << i_amr << " levels of refinement:" << std::endl;
 
-		int order_quad = max(2, 2*order+2);
-		const IntegrationRule *irs[Geometry::NumGeom];
-		for (int i=0; i < Geometry::NumGeom; ++i)
-		{
-			irs[i] = &(IntRules.Get(i, order_quad));
-		}
-		StdFunctionCoefficient ucoeff(uFun_ex);
-		VectorStdFunctionCoefficient qcoeff(dim, qFun_ex);
-		double err_u    = u_variable.ComputeL2Error(ucoeff, irs);
-		double err_q    = q_variable.ComputeL2Error(qcoeff, irs);
+		double err_u    = u_variable.ComputeL2Error(ucoeff);
+		double err_q    = q_variable.ComputeL2Error(qcoeff);
 		mfem::GridFunction u_star( solver.UStarSpace().get() );
 		solver.Postprocess( u_star, qu );
-		double err_u_star    = u_star.ComputeL2Error(ucoeff, irs);
+		double err_u_star    = u_star.ComputeL2Error(ucoeff);
 
 
 		std::cout << "\t|| u_h - u_ex || = " << err_u << "\n";
@@ -159,19 +154,11 @@ int main(int argc, char *argv[])
 
 		std::cout << "After " << i_amr << " levels of refinement:" << std::endl;
 
-		int order_quad = max(2, 2*order+2);
-		const IntegrationRule *irs[Geometry::NumGeom];
-		for (int i=0; i < Geometry::NumGeom; ++i)
-		{
-			irs[i] = &(IntRules.Get(i, order_quad));
-		}
-		StdFunctionCoefficient ucoeff(uFun_ex);
-		VectorStdFunctionCoefficient qcoeff(dim, qFun_ex);
-		double err_u    = u_variable.ComputeL2Error(ucoeff, irs);
-		double err_q    = q_variable.ComputeL2Error(qcoeff, irs);
+		double err_u    = u_variable.ComputeL2Error(ucoeff);
+		double err_q    = q_variable.ComputeL2Error(qcoeff);
 		mfem::GridFunction u_star( solver.UStarSpace().get() );
 		solver.Postprocess( u_star, qu );
-		double err_u_star    = u_star.ComputeL2Error(ucoeff, irs);
+		double err_u_star    = u_star.ComputeL2Error(ucoeff);
 
 
 		std::cout << "\t|| u_h - u_ex || = " << err_u << "\n";

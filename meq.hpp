@@ -149,16 +149,24 @@ class StaticMHDPlasma : PlasmaModel {
 
 class Solution {
 	private:
-		std::shared_ptr< mfem::FiniteElementSpace > psiSpace,gradPsiSpace,interfaceSpace;
 		mfem::Vector qu;
-		friend class GSSolver;
+		mfem::Vector u_star;
+		const GSSolver &solver;
+		GridFunction q_variable,u_variable,u_hat_variable;
 		static const int dim = 2;
 	public:
-		std::pair<double,double> Check( RealScalarField uFun_ex, RealVectorField qFun_ex, int order ) {
-			mfem::GridFunction q_variable,u_variable;
-			q_variable.MakeRef( gradPsiSpace.get(), qu, 0 );
-			u_variable.MakeRef( psiSpace.get(), qu, gradPsiSpace->GetVSize() );
-			int order_quad = std::max(2, 2*order+2);
+		Solution( const GSSolver & solver_ref )
+			: solver( solver_ref )
+		{
+			qu.SetSize( solver.Height() );
+
+			q_variable.MakeRef( solver.QSpace().get(), qu, 0 );
+			u_variable.MakeRef( solver.USpace().get(), qu, solver.QSpace()->GetVSize() );
+			u_hat_variable.MakeRef( solver.MSpace().get(), qu, solver.QSpace()->GetVSize() + solver.USpace()->GetVSize() );
+
+		}
+		std::pair<double,double> l2_errors( RealScalarField uFun_ex, RealVectorField qFun_ex, int order ) {
+			int order_quad = std::max(2, 2*order+4);
 			const mfem::IntegrationRule *irs[mfem::Geometry::NumGeom];
 			for (int i=0; i < mfem::Geometry::NumGeom; ++i)
 			{
@@ -172,6 +180,20 @@ class Solution {
 			return std::make_pair( err_u, err_q );
 		};
 
+		std::pair<double,double> lInf_errors( RealScalarField uFun_ex, RealVectorField qFun_ex, int order ) {
+			int order_quad = std::max(2, 2*order+2);
+			const mfem::IntegrationRule *irs[mfem::Geometry::NumGeom];
+			for (int i=0; i < mfem::Geometry::NumGeom; ++i)
+			{
+				irs[i] = &(mfem::IntRules.Get(i, order_quad));
+			}
+			mfem::StdFunctionCoefficient ucoeff(uFun_ex);
+			mfem::VectorStdFunctionCoefficient qcoeff(dim, qFun_ex);
+
+			double err_u    = u_variable.ComputeMaxError(ucoeff, irs);
+			double err_q    = q_variable.ComputeMaxError(qcoeff, irs);
+			return std::make_pair( err_u, err_q );
+		};
 
 };
 
