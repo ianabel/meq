@@ -4,7 +4,8 @@ all: meq
 MFEM_DIR=/home/ian/projects/mfem-hdg-ian
 MFEM_LIB=-lmfem -lrt 
 MFEM_DEBUG_LIB=-lmfem-debug -lrt
-SUNDIALS_LIB = -lsundials_arkode -lsundials_cvode -lsundials_nvecserial -lsundials_kinsol
+SUNDIALS_DIR=/home/ian/sundials
+SUNDIALS_LIB = -I$(SUNDIALS_DIR)/include -Wl,-rpath,$(SUNDIALS_DIR)/lib -L$(SUNDIALS_DIR)/lib -lsundials_arkode -lsundials_cvode -lsundials_nvecserial -lsundials_kinsol
 CXX = g++
 CXXFLAGS_RELEASE = -std=c++17 -O3 -Wall -mtune=native
 CXXFLAGS_DEBUG = -std=c++17 -g -Og -Wall

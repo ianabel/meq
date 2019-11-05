@@ -1,7 +1,7 @@
 #ifndef MEQ_HPP
 #define MEQ_HPP
 /*
- * Utility classes for MEQ
+ * Main include file for MEQ
  */
 
 #include <vector>
@@ -10,7 +10,7 @@
 
 #include "mfem.hpp"
 #include "SplineInterpolant.hpp"
-
+#include "GSSolver.hpp"
 
 
 namespace meq {
@@ -151,11 +151,11 @@ class Solution {
 	private:
 		mfem::Vector qu;
 		mfem::Vector u_star;
-		const GSSolver &solver;
-		GridFunction q_variable,u_variable,u_hat_variable;
+		GSSolver &solver;
+		mfem::GridFunction q_variable,u_variable,u_hat_variable;
 		static const int dim = 2;
 	public:
-		Solution( const GSSolver & solver_ref )
+		Solution( GSSolver & solver_ref )
 			: solver( solver_ref )
 		{
 			qu.SetSize( solver.Height() );
@@ -180,6 +180,21 @@ class Solution {
 			return std::make_pair( err_u, err_q );
 		};
 
+		std::pair<double,double> l2_errors( mfem::GridFunction *uFn, mfem::GridFunction *qFn, int order )
+		{
+			mfem::GridFunctionCoefficient ucoeff( uFn ),qcoeff( qFn );
+int order_quad = std::max(2, 2*order+4);
+			const mfem::IntegrationRule *irs[mfem::Geometry::NumGeom];
+			for (int i=0; i < mfem::Geometry::NumGeom; ++i)
+			{
+				irs[i] = &(mfem::IntRules.Get(i, order_quad));
+			}
+
+			double err_u    = u_variable.ComputeL2Error(ucoeff, irs);
+			double err_q    = q_variable.ComputeL2Error(qcoeff, irs);
+			return std::make_pair( err_u, err_q );
+		};
+
 		std::pair<double,double> lInf_errors( RealScalarField uFun_ex, RealVectorField qFun_ex, int order ) {
 			int order_quad = std::max(2, 2*order+2);
 			const mfem::IntegrationRule *irs[mfem::Geometry::NumGeom];
@@ -194,6 +209,22 @@ class Solution {
 			double err_q    = q_variable.ComputeMaxError(qcoeff, irs);
 			return std::make_pair( err_u, err_q );
 		};
+
+		std::pair<double,double> lInf_errors( mfem::GridFunction *uFn, mfem::GridFunction *qFn, int order )
+		{
+			mfem::GridFunctionCoefficient ucoeff( uFn ),qcoeff( qFn );
+int order_quad = std::max(2, 2*order+4);
+			const mfem::IntegrationRule *irs[mfem::Geometry::NumGeom];
+			for (int i=0; i < mfem::Geometry::NumGeom; ++i)
+			{
+				irs[i] = &(mfem::IntRules.Get(i, order_quad));
+			}
+
+			double err_u    = u_variable.ComputeL2Error(ucoeff, irs);
+			double err_q    = q_variable.ComputeL2Error(qcoeff, irs);
+			return std::make_pair( err_u, err_q );
+		};
+
 
 };
 

@@ -7,6 +7,14 @@
 
 #include <memory>
 
+class DGSpace {
+	public:
+		DGSpace( std::shared_ptr<mfem::Mesh> meshPtr, unsigned int order )
+		mfem::FiniteElementSpace 
+	protected:
+		mfem::FiniteElementCollection *dg_coll, *face_coll;
+		mfem::FiniteElementSpace *V_space,*W_space,*M_space;
+	
 
 class GSInverter : public mfem::Operator
 {

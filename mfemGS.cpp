@@ -101,13 +101,13 @@ int main(int argc, char *argv[])
 	VectorStdFunctionCoefficient qcoeff(dim, qFun_ex);
 
 	int i_amr = 0;
-	KinSolver *nonlinearPoissonSolver = nullptr;
+	KINSolver *nonlinearPoissonSolver = nullptr;
 	mfem::Vector qu_refined;
 	for ( ; i_amr< N_AMR; i_amr++ )
 	{
-		nonlinearPoissonSolver = new KinSolver( KIN_FP, false );
+		nonlinearPoissonSolver = new KINSolver( KIN_FP, false );
 		nonlinearPoissonSolver->SetMaxIter( 1000 );
-		nonlinearPoissonSolver->SetFuncNormTol( 1e-4 );
+		nonlinearPoissonSolver->SetAbsTol( 1e-4 );
 		nonlinearPoissonSolver->iterative_mode = false;
 		nonlinearPoissonSolver->SetOperator( solver );
 		qu.SetSize( solver.Height() );
@@ -139,9 +139,9 @@ int main(int argc, char *argv[])
 	}
 
 	{
-		nonlinearPoissonSolver = new KinSolver( KIN_FP, false );
+		nonlinearPoissonSolver = new KINSolver( KIN_FP, false );
 		nonlinearPoissonSolver->SetMaxIter( 1000 );
-		nonlinearPoissonSolver->SetFuncNormTol( 1e-4 );
+		nonlinearPoissonSolver->SetAbsTol( 1e-4 );
 		nonlinearPoissonSolver->iterative_mode = false;
 		nonlinearPoissonSolver->SetOperator( solver );
 		qu.SetSize( solver.Height() );

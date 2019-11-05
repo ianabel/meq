@@ -1,5 +1,6 @@
+#ifndef GSSOLVER_HPP
+#define GSSOLVER_HPP
 
-#include "meq.hpp"
 #include "GSInverter.hpp"
 #include "NLRHSIntegrator.hpp"
 #include "CockburnEstimator.hpp"
@@ -90,3 +91,4 @@ namespace meq {
 	};
 
 }
+#endif // GSSOLVER_HPP
