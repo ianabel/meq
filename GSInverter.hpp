@@ -9,12 +9,69 @@
 
 class DGSpace {
 	public:
-		DGSpace( std::shared_ptr<mfem::Mesh> meshPtr, unsigned int order )
-		mfem::FiniteElementSpace 
+		DGSpace( std::shared_ptr<mfem::Mesh> meshPtr, unsigned int order ) :
+			mesh( meshPtr ),
+			Order( order ),
+			Dim( 2 )
+	{
+
+		dg_coll = new DG_FECollection( Order, Dim );
+		face_coll = new DG_Interface_FECollection( Order, Dim );
+
+		V_space = new FiniteElementSpace( mesh.get(), dg_coll, Dim );
+		W_space = new FiniteElementSpace( mesh.get(), dg_coll );
+		M_space = new FiniteElementSpace( mesh.get(), face_coll );
+
+		postproc_coll = new DG_FECollection( Order + 1, Dim );
+		postproc_space = new FiniteElementSpace( mesh.get(), postproc_coll );
+
+		dimV = V_space->GetVSize();
+		dimW = W_space->GetVSize();
+		dimM = M_space->GetVSize();
+
+		bOffsets.SetSize( 4 );
+		bOffsets[ 0 ] = 0;
+		bOffsets[ 1 ] = dimV;
+		bOffsets[ 2 ] = dimV + dimW;
+		bOffsets[ 3 ] = dimV + dimW + dimM;
+
+
+	}
+
+		~DGSpace() {
+			delete V_space;
+			delete W_space;
+			delete M_space;
+			delete dg_coll;
+			delete face_coll;
+		};
+
+		mfem::FiniteElementSpace const * QSpace() const { return V_space; };
+		mfem::FiniteElementSpace const * USpace() const { return W_space; };
+		mfem::FiniteElementSpace const * MSpace() const { return M_space; };
+		mfem::FiniteElementSpace const * UStarSpace() const { return postproc_space; };
+
+		mfem::FiniteElementSpace * QSpace()  { return V_space; };
+		mfem::FiniteElementSpace * USpace()  { return W_space; };
+		mfem::FiniteElementSpace * MSpace()  { return M_space; };
+		mfem::FiniteElementSpace * UStarSpace() { return postproc_space; };
+
+
+		mfem::Array<int> const & GetOffsets() { return bOffsets; };
 	protected:
+		int Order,Dim;
+		// Owned
 		mfem::FiniteElementCollection *dg_coll, *face_coll;
 		mfem::FiniteElementSpace *V_space,*W_space,*M_space;
+		mfem::FiniteElementCollection *postproc_coll;
+		mfem::FiniteElementSpace *postproc_space;
+
+		// Unowned
+		std::shared_ptr<mfem::Mesh> mesh; 
+		int dimV,dimM,dimW;
+		mfem::Array<int> bOffsets;
 	
+};
 
 class GSInverter : public mfem::Operator
 {
@@ -22,9 +79,7 @@ class GSInverter : public mfem::Operator
 		using SharedFES = std::shared_ptr<mfem::FiniteElementSpace>;
 		using SharedFEC = std::shared_ptr<mfem::FiniteElementCollection>;
 	protected:
-		std::shared_ptr<mfem::Mesh> mesh; // Unowned
-		unsigned int Order,Dim;
-		int dimV,dimM,dimW;
+		DGSpace SolutionSpace;
 
 		// Owned
 
@@ -40,7 +95,6 @@ class GSInverter : public mfem::Operator
 		SharedFEC postproc_coll;
 		SharedFES postproc_space;
 
-		mfem::Array<int> bOffsets;
 	public:
 		GSInverter(std::shared_ptr<mfem::Mesh> meshPtr, unsigned int order);
 

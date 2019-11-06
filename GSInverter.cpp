@@ -3,43 +3,20 @@
 using namespace mfem;
 
 GSInverter::GSInverter(std::shared_ptr<mfem::Mesh> meshPtr, unsigned int order) : 
-	mesh( meshPtr ),
 	Order( order ),
 	Dim( 2 ),
+	SolutionSpace( Order, Dim ),
 	boundary_conditions( nullptr ),
 	tau_D( 5.0 )
 {
-	// Define finite element collections and spaces on the mesh.
-	dg_coll   = std::make_shared<DG_FECollection>(Order, Dim);
-	face_coll = std::make_shared<DG_Interface_FECollection>(Order, Dim);
-
-	// Finite element spaces:
-	// V_space is the scalar DG space on elements for u_h
-	// W_space is the vector valued DG space on elements for q_h
-	// M_space is the DG space on faces for lambda_h
-	V_space = std::make_shared<FiniteElementSpace>(mesh.get(), dg_coll.get(), Dim);
-	W_space = std::make_shared<FiniteElementSpace>(mesh.get(), dg_coll.get());
-	M_space = std::make_shared<FiniteElementSpace>(mesh.get(), face_coll.get());
-	dimV = V_space->GetVSize();
-	dimW = W_space->GetVSize();
-	dimM = M_space->GetVSize();
-
 	// Define the different forms, and initialise them with the linearised problem
 	AVarf = new HDGBilinearForm(V_space.get(), W_space.get(), M_space.get() );
 
 	AVarf->AddHDGDomainIntegrator(new HDGDomainIntegratorGS());
 	AVarf->AddHDGFaceIntegrator(new HDGFaceIntegratorGS(tau_D));
 
-	postproc_coll = std::make_shared<DG_FECollection>( Order + 1, Dim );
-	postproc_space = std::make_shared<FiniteElementSpace>( mesh.get(), postproc_coll .get());
-
-	bOffsets.SetSize( 4 );
-	bOffsets[ 0 ] = 0;
-	bOffsets[ 1 ] = dimV;
-	bOffsets[ 2 ] = dimV + dimW;
-	bOffsets[ 3 ] = dimV + dimW + dimM;
-	height = dimV + dimW + dimM;
-	width = dimW;
+	height = SolutionSpace.GetOffsets()[ 3 ];
+	width = SolutionSpace.USpace()->GetVSize();
 };
 
 
@@ -103,8 +80,8 @@ void GSInverter::Mult( const Vector& rhs_F_in , Vector& soln_out ) const
 
 	lambda_variable.ProjectBdrCoefficient( *boundary_conditions, ess_bdr );
 
-	GridFunction R(V_space.get(), rhs_R);
-	GridFunction F(W_space.get(), rhs_F);
+	GridFunction R(SolutionSpace.QSpace(), rhs_R);
+	GridFunction F(SolutionSpace.USpace(), rhs_F);
 	mfem::Array<mfem::GridFunction*> F_arr( 2 );
 	F_arr[ 0 ] = &R;
 	F_arr[ 1 ] = &F;
