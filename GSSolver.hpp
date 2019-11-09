@@ -39,6 +39,7 @@ namespace meq {
 			void SetBCs( mfem::Coefficient& coeff );
 
 			virtual void Mult( const mfem::Vector& u_in, mfem::Vector& qu_out ) const override;
+			void Solve( Solution &soln );
 
 			void Postprocess( Solution &soln ) const;
 

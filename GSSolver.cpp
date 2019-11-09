@@ -29,6 +29,12 @@ void GSSolver::SetBCs( Coefficient& coeff )
 	boundary_conditions = &coeff;
 }
 
+void GSSolver::Solve( Solution &soln )
+{
+	mfem::Vector qu_old( soln.qu );
+	Mult( qu_old, soln.qu );
+}
+
 void GSSolver::Mult( const Vector& qu_in , Vector& qu_out ) const
 {
 	mfem::Vector rhs_F( SolutionSpace->USpace()->GetVSize() );

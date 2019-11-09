@@ -128,7 +128,6 @@ int main(int argc, char *argv[])
 		nonlinearPoissonSolver->SetOperator( solver );
 		nonlinearPoissonSolver->Mult( soln.qu, soln.qu );
 
-
 		std::cout << "After " << i_amr << " levels of refinement:" << std::endl;
 
 		solver.Postprocess( soln );
@@ -149,13 +148,7 @@ int main(int argc, char *argv[])
 		mesh_ofs.precision(8);
 		mesh->Print(mesh_ofs);
 
-		ofstream q_variable_ofs("sol_q.gf");
-		q_variable_ofs.precision(8);
-		soln.q_variable.Save(q_variable_ofs);
-
-		ofstream u_variable_ofs("sol_u.gf");
-		u_variable_ofs.precision(8);
-		soln.u_variable.Save(u_variable_ofs);
+		soln.WriteOutputMFEM( "sol_q.gf", "sol_u.gf" );
 
 	}
 
