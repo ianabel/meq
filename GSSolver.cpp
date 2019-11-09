@@ -1,91 +1,66 @@
-#include "GSInverter.hpp"
+#include "GSSolver.hpp"
+#include "NLRHSIntegrator.hpp"
 
 using namespace mfem;
 
-GSInverter::GSInverter(std::shared_ptr<mfem::Mesh> meshPtr, unsigned int order) : 
+namespace meq {
+
+GSSolver::GSSolver(std::shared_ptr<mfem::Mesh> meshPtr, unsigned int order, Func JPlasma) : 
 	Order( order ),
 	Dim( 2 ),
-	SolutionSpace( Order, Dim ),
 	boundary_conditions( nullptr ),
-	tau_D( 5.0 )
+	tau_D( 5.0 ),
+	PlasmaRHS( JPlasma )
 {
+	SolutionSpace = std::make_shared<meq::DGSpace>( meshPtr, Order );
+
 	// Define the different forms, and initialise them with the linearised problem
-	AVarf = new HDGBilinearForm(V_space.get(), W_space.get(), M_space.get() );
+	AVarf = new HDGBilinearForm( SolutionSpace->QSpace(), SolutionSpace->USpace(), SolutionSpace->MSpace() );
 
 	AVarf->AddHDGDomainIntegrator(new HDGDomainIntegratorGS());
 	AVarf->AddHDGFaceIntegrator(new HDGFaceIntegratorGS(tau_D));
 
-	height = SolutionSpace.GetOffsets()[ 3 ];
-	width = SolutionSpace.USpace()->GetVSize();
+	height = SolutionSpace->GetOffsets()[ 3 ];
+	width = height;
 };
 
-
-/* 
- * Prolongs a vector containing q & u from the old mesh to the 
- * new. This will not handle increasing polynomial order.
- */
-void GSInverter::Prolong( Vector const& soln_old, Vector &soln_new ) const
-{
-	const Operator* U_update = W_space->GetUpdateOperator();
-	const Operator* Q_update = V_space->GetUpdateOperator();
-	int U_old_dim = U_update->Width();
-	int U_new_dim = U_update->Height();
-	int Q_old_dim = Q_update->Width();
-	int Q_new_dim = Q_update->Height();
-	soln_new.SetSize( U_new_dim + Q_new_dim + dimM );
-
-	// So the new Lambda variable is zero.
-	soln_new = 0.;
-
-	Array<int> oldOffsets; oldOffsets.SetSize( 4 );
-	oldOffsets[ 0 ] = 0; oldOffsets[ 1 ] = Q_old_dim; oldOffsets[ 2 ] = U_old_dim + Q_old_dim;
-	oldOffsets[ 3 ] = soln_old.Size();
-	BlockVector QU_old_blk( soln_old.GetData(), oldOffsets );
-	BlockVector QU_new_blk( soln_new.GetData(), bOffsets );
-
-	Q_update->Mult( QU_old_blk.GetBlock( 0 ), QU_new_blk.GetBlock( 0 ) );
-	U_update->Mult( QU_old_blk.GetBlock( 1 ), QU_new_blk.GetBlock( 1 ) );
-
-}
-
-void GSInverter::SetBCs( Coefficient& coeff )
+void GSSolver::SetBCs( Coefficient& coeff )
 {
 	boundary_conditions = &coeff;
 }
 
-// Actually solve the problem:
-// which in this case doesn't depend on the input vector
-// and store in the Vector y
-void GSInverter::Mult( const Vector& rhs_F_in , Vector& soln_out ) const
+void GSSolver::Mult( const Vector& qu_in , Vector& qu_out ) const
 {
-	Vector rhs_F( rhs_F_in );
-	Vector rhs_R(dimV);
-	Vector V_aux(dimV);
-	Vector W_aux(dimW);
+	mfem::Vector rhs_F( SolutionSpace->USpace()->GetVSize() );
+	qu_out.SetSize( height );
+	Solution old_soln( SolutionSpace, const_cast<double*>( qu_in.GetData() ) );
+	Solution new_soln( SolutionSpace, const_cast<double*>( qu_out.GetData() ) );
 
-	V_aux = 0.0;
-	W_aux = 0.0;
+	// Assemble the RHS and the Schur complement
+	mfem::LinearForm *fform = new mfem::LinearForm;
+
+
+	fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( old_soln.u_variable, PlasmaRHS, 4, 2 ) );
+	fform->Update(const_cast<mfem::FiniteElementSpace* >( SolutionSpace->USpace() ), rhs_F, 0);
+	fform->Assemble();
+
+	Vector rhs_R( SolutionSpace->QSpace()->GetVSize() );
+
 	rhs_R = 0.0;
 
 	// To eliminate the boundary conditions we project the BC to a grid function
 	// defined for the facet unknowns.
-	GridFunction lambda_variable;
-
-	soln_out.SetSize( height );
-	lambda_variable.MakeRef( M_space.get(), soln_out, dimV + dimW );
-	lambda_variable = 0.0;
-
-	Array<int> ess_bdr(mesh->bdr_attributes.Max());
+	Array<int> ess_bdr(SolutionSpace->Mesh()->bdr_attributes.Max());
 	ess_bdr = 1;
 
-	lambda_variable.ProjectBdrCoefficient( *boundary_conditions, ess_bdr );
+	new_soln.u_hat_variable.ProjectBdrCoefficient( *boundary_conditions, ess_bdr );
 
-	GridFunction R(SolutionSpace.QSpace(), rhs_R);
-	GridFunction F(SolutionSpace.USpace(), rhs_F);
+	GridFunction R(SolutionSpace->QSpace(), rhs_R);
+	GridFunction F(SolutionSpace->USpace(), rhs_F);
 	mfem::Array<mfem::GridFunction*> F_arr( 2 );
 	F_arr[ 0 ] = &R;
 	F_arr[ 1 ] = &F;
-	AVarf->AssembleSC(F_arr, ess_bdr, lambda_variable, 1.0, 1.0, 1);
+	AVarf->AssembleSC(F_arr, ess_bdr, new_soln.u_hat_variable, 1.0, 1.0, 1);
 	AVarf->Finalize();
 
 	SparseMatrix* SC = AVarf->SpMatSC();
@@ -105,17 +80,15 @@ void GSInverter::Mult( const Vector& rhs_F_in , Vector& soln_out ) const
 	solver.SetOperator(*SC);
 	solver.SetPrintLevel(-1);
 	solver.SetPreconditioner(M);
-	solver.Mult(*SC_RHS, lambda_variable);
+	solver.Mult(*SC_RHS, new_soln.u_hat_variable);
 
 	// Reconstruct the solution u and q from the facet solution lambda
-	GridFunction q_variable,u_variable;
-	q_variable.MakeRef( V_space.get(), soln_out, 0 );
-	u_variable.MakeRef( W_space.get(), soln_out, dimV );
+	
 	mfem::Array<mfem::GridFunction*> soln_arr( 2 );
-	soln_arr[ 0 ] = &q_variable;
-	soln_arr[ 1 ] = &u_variable;
+	soln_arr[ 0 ] = &new_soln.q_variable;
+	soln_arr[ 1 ] = &new_soln.u_variable;
 
-	AVarf->Reconstruct(F_arr, &lambda_variable, soln_arr );
+	AVarf->Reconstruct(F_arr, &new_soln.u_hat_variable, soln_arr );
 
 
 	if (!solver.GetConverged())
@@ -124,36 +97,22 @@ void GSInverter::Mult( const Vector& rhs_F_in , Vector& soln_out ) const
 	}
 };
 
-void GSInverter::Update() {
-	V_space->Update(true);
-	W_space->Update(true);
-	M_space->Update(false);
-
+void GSSolver::Update() {
+	SolutionSpace->Update();
 	AVarf->Update();
 
-	dimV = V_space->GetVSize();
-	dimW = W_space->GetVSize();
-	dimM = M_space->GetVSize();
-
-	postproc_space->Update( true );
-
-	bOffsets.SetSize( 4 );
-	bOffsets[ 0 ] = 0;
-	bOffsets[ 1 ] = dimV;
-	bOffsets[ 2 ] = dimV + dimW;
-	bOffsets[ 3 ] = dimV + dimW + dimM;
-	height = dimV + dimW + dimM;
-	width = dimW;
+	height = SolutionSpace->GetOffsets()[ 3 ];
+	width = height;
 };
 
 
 // Postprocessing
-void GSInverter::Postprocess(GridFunction &u_postprocessed, mfem::Vector & qu_in ) const
+void GSSolver::Postprocess( Solution &soln ) const
 {
-	GridFunction q,u;
-
-	q.MakeRef( V_space.get(), qu_in, 0 );
-	u.MakeRef( W_space.get(), qu_in, dimV );
+	soln.AllocateUStar();
+	GridFunction &u = soln.u_variable;
+	GridFunction &q = soln.q_variable;
+	GridFunction &u_postprocessed = soln.u_star_variable;
 
 	Array<int>  vdofs;
 	Vector      elmat2, shape, RHS, to_RHS, vals, uvals;
@@ -164,6 +123,7 @@ void GSInverter::Postprocess(GridFunction &u_postprocessed, mfem::Vector & qu_in
 	const FiniteElement *fe_elem;
 	ElementTransformation *Trans;
 
+	FiniteElementSpace *postproc_space = SolutionSpace->UStarSpace();
 
 	for (int i = 0; i < postproc_space->GetNE(); i++)
 	{
@@ -191,7 +151,7 @@ void GSInverter::Postprocess(GridFunction &u_postprocessed, mfem::Vector & qu_in
 		dshape.SetSize(ndofs, spaceDim);
 		dshapedxt.SetSize(ndofs, spaceDim);
 
-		Trans = mesh->GetElementTransformation(i);
+		Trans = SolutionSpace->Mesh()->GetElementTransformation(i);
 
 		const mfem::IntegrationRule *ir;
 		{
@@ -261,3 +221,19 @@ void GSInverter::Postprocess(GridFunction &u_postprocessed, mfem::Vector & qu_in
 
 	}
 }
+
+void GSSolver::ApplyAdaptiveRefinement( Solution & soln )
+{
+
+	soln.AllocateUStar();
+	Postprocess( soln );
+
+	mfem::GradShafranovEstimator errorEstimator( soln.q_variable, soln.u_star_variable, soln.u_hat_variable, PlasmaRHS );
+	mfem::DoerflerMarkingRefiner refiner( errorEstimator );
+
+	refiner.SetGamma( 0.5 );
+	refiner.Apply( *SolutionSpace->Mesh() );
+	Update();
+};
+
+};

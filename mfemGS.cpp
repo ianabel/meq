@@ -73,9 +73,6 @@ int main(int argc, char *argv[])
 
 	mesh->Transform( xform );
 
-	int dim = mesh->Dimension();
-
-
 	SolovievEquilibrium TestEq( A, C, c1, c2, c3, c4 );
 
 	std::function<double( const mfem::Vector &, double )> J_Plasma = [ &TestEq ]( const mfem::Vector& pt, double psi ) {
@@ -91,39 +88,27 @@ int main(int argc, char *argv[])
 	StdFunctionCoefficient bcFunCoeff( uFun_ex );
 	solver.SetBCs( bcFunCoeff );
 
-	GridFunction q_variable,u_variable,u_hat_variable;
-
-	mfem::Vector qu( solver.NumRows() );
-
-	qu = 0.0;
-
-	StdFunctionCoefficient ucoeff(uFun_ex);
-	VectorStdFunctionCoefficient qcoeff(dim, qFun_ex);
+	StdFunctionCoefficient ucoeff( uFun_ex );
 
 	int i_amr = 0;
 	KINSolver *nonlinearPoissonSolver = nullptr;
-	mfem::Vector qu_refined;
+	Solution soln( solver.SolutionSpace );
+
+	nonlinearPoissonSolver = new KINSolver( KIN_FP, false );
+	nonlinearPoissonSolver->SetMaxIter( 1000 );
+	nonlinearPoissonSolver->SetAbsTol( 1e-4 );
+	nonlinearPoissonSolver->iterative_mode = false;
+
 	for ( ; i_amr< N_AMR; i_amr++ )
 	{
-		nonlinearPoissonSolver = new KINSolver( KIN_FP, false );
-		nonlinearPoissonSolver->SetMaxIter( 1000 );
-		nonlinearPoissonSolver->SetAbsTol( 1e-4 );
-		nonlinearPoissonSolver->iterative_mode = false;
 		nonlinearPoissonSolver->SetOperator( solver );
-		qu.SetSize( solver.Height() );
-		nonlinearPoissonSolver->Mult( qu, qu );
-
-		q_variable.MakeRef( solver.QSpace().get(), qu, 0 );
-		u_variable.MakeRef( solver.USpace().get(), qu, solver.QSpace()->GetVSize() );
-		u_hat_variable.MakeRef( solver.MSpace().get(), qu, solver.QSpace()->GetVSize() + solver.USpace()->GetVSize() );
+		nonlinearPoissonSolver->Mult( soln.qu, soln.qu );
 
 		std::cout << "After " << i_amr << " levels of refinement:" << std::endl;
 
-		double err_u    = u_variable.ComputeL2Error(ucoeff);
-		double err_q    = q_variable.ComputeL2Error(qcoeff);
-		mfem::GridFunction u_star( solver.UStarSpace().get() );
-		solver.Postprocess( u_star, qu );
-		double err_u_star    = u_star.ComputeL2Error(ucoeff);
+
+		solver.Postprocess( soln );
+		auto [ err_u, err_q, err_u_star ] = soln.l2_errors( uFun_ex, qFun_ex );
 
 
 		std::cout << "\t|| u_h - u_ex || = " << err_u << "\n";
@@ -131,41 +116,32 @@ int main(int argc, char *argv[])
 		std::cout << "\t|| u*_h - u_ex || = " << err_u_star << "\n";
 		std::cout << std::endl;
 
-		solver.ApplyAdaptiveRefinement( qu );
+		solver.ApplyAdaptiveRefinement( soln );
+		// Soln now has vectors of the wrong size, either call soln.Prolong or soln.Reset
+		soln.Reset();
 
 		std::cerr << "Refined Mesh" << std::endl;
 
-		delete nonlinearPoissonSolver;
 	}
 
 	{
-		nonlinearPoissonSolver = new KINSolver( KIN_FP, false );
-		nonlinearPoissonSolver->SetMaxIter( 1000 );
-		nonlinearPoissonSolver->SetAbsTol( 1e-4 );
-		nonlinearPoissonSolver->iterative_mode = false;
 		nonlinearPoissonSolver->SetOperator( solver );
-		qu.SetSize( solver.Height() );
-		nonlinearPoissonSolver->Mult( qu, qu );
+		nonlinearPoissonSolver->Mult( soln.qu, soln.qu );
 
-
-		q_variable.MakeRef( solver.QSpace().get(), qu, 0 );
-		u_variable.MakeRef( solver.USpace().get(), qu, solver.QSpace()->GetVSize() );
-		u_hat_variable.MakeRef( solver.MSpace().get(), qu, solver.QSpace()->GetVSize() + solver.USpace()->GetVSize() );
 
 		std::cout << "After " << i_amr << " levels of refinement:" << std::endl;
 
-		double err_u    = u_variable.ComputeL2Error(ucoeff);
-		double err_q    = q_variable.ComputeL2Error(qcoeff);
-		mfem::GridFunction u_star( solver.UStarSpace().get() );
-		solver.Postprocess( u_star, qu );
-		double err_u_star    = u_star.ComputeL2Error(ucoeff);
-
+		solver.Postprocess( soln );
+		auto [ err_u, err_q, err_u_star ] = soln.l2_errors( uFun_ex, qFun_ex );
 
 		std::cout << "\t|| u_h - u_ex || = " << err_u << "\n";
 		std::cout << "\t|| q_h - q_ex || = " << err_q << "\n";
 		std::cout << "\t|| u*_h - u_ex || = " << err_u_star << "\n";
 		std::cout << std::endl;
+
 	}
+
+	delete nonlinearPoissonSolver;
 
 	// 13. Save the mesh and the solution.
 	{
@@ -175,11 +151,11 @@ int main(int argc, char *argv[])
 
 		ofstream q_variable_ofs("sol_q.gf");
 		q_variable_ofs.precision(8);
-		q_variable.Save(q_variable_ofs);
+		soln.q_variable.Save(q_variable_ofs);
 
 		ofstream u_variable_ofs("sol_u.gf");
 		u_variable_ofs.precision(8);
-		u_variable.Save(u_variable_ofs);
+		soln.u_variable.Save(u_variable_ofs);
 
 	}
 
@@ -189,12 +165,12 @@ int main(int argc, char *argv[])
 		int  visport   = 19916;
 		socketstream u_sock(vishost, visport);
 		u_sock.precision(8);
-		u_sock << "solution\n" << *mesh << u_variable << "window_title 'Solution u'" <<
+		u_sock << "solution\n" << *mesh << soln.u_variable << "window_title 'Solution u'" <<
 			endl;
 
 		socketstream q_sock(vishost, visport);
 		q_sock.precision(8);
-		q_sock << "solution\n" << *mesh << q_variable << "window_title 'Solution q'" <<
+		q_sock << "solution\n" << *mesh << soln.q_variable << "window_title 'Solution q'" <<
 			endl;
 	}
 

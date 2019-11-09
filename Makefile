@@ -9,8 +9,8 @@ SUNDIALS_LIB = -I$(SUNDIALS_DIR)/include -Wl,-rpath,$(SUNDIALS_DIR)/lib -L$(SUND
 CXX = g++
 CXXFLAGS_RELEASE = -std=c++17 -O3 -Wall -mtune=native
 CXXFLAGS_DEBUG = -std=c++17 -g -Og -Wall
-GSINVERTER_DEP = GSInverter.cpp GSInverter.hpp HDGGSIntegrator.cpp HDGGSIntegrator.hpp CockburnEstimator.hpp FreeBoundary.hpp
-GSINVERTER_SRC = GSInverter.cpp HDGGSIntegrator.cpp
+GSINVERTER_DEP = GSSolver.cpp GSSolver.hpp HDGGSIntegrator.cpp HDGGSIntegrator.hpp CockburnEstimator.hpp FreeBoundary.hpp Solution.hpp
+GSINVERTER_SRC = GSSolver.cpp HDGGSIntegrator.cpp
 
 meq: meq.cpp FreeBoundary.cpp $(GSINVERTER_DEP)
 	$(CXX) $(CXXFLAGS_RELEASE) meq.cpp FreeBoundary.cpp $(GSINVERTER_SRC) -o meq $(MFEM_LIB) $(SUNDIALS_LIB) -I$(MFEM_DIR) -L$(MFEM_DIR)
