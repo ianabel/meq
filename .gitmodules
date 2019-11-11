@@ -8,3 +8,6 @@
 	path = mfem
 	url = https://github.com/ianabel/mfem.git
 	branch = hdg
+[submodule "sundials"]
+	path = sundials
+	url = https://github.com/LLNL/sundials.git

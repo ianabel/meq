@@ -1,13 +1,13 @@
 
 all: meq
 
-MFEM_DIR=./mfem
+MFEM_DIR=mfem
 MFEM_RELEASE_DIR=./mfem-release
 MFEM_DEBUG_DIR=./mfem-debug
 MFEM_LIB= -L$(MFEM_RELEASE_DIR) -lmfem -lrt 
 MFEM_DEBUG_LIB= -L$(MFEM_DEBUG_DIR) -lmfem -lrt
 
-SUNDIALS_DIR=/home/ian/projects/sundials-install
+SUNDIALS_DIR=$(CURDIR)/sundials-install
 SUNDIALS_LIB = -I$(SUNDIALS_DIR)/include -Wl,-rpath,$(SUNDIALS_DIR)/lib -L$(SUNDIALS_DIR)/lib -lsundials_arkode -lsundials_cvode -lsundials_nvecserial -lsundials_kinsol
 
 MFEM_RELEASE_OPT = -I$(MFEM_RELEASE_DIR) $(MFEM_LIB) $(SUNDIALS_LIB)
@@ -45,34 +45,44 @@ mfemProjector: mfemProjector.cpp MEQConf.hpp meq.hpp $(MFEM_RELEASE_DEP)
 mfemCheck: mfemCheck.cpp MEQConf.hpp meq.hpp $(MFEM_RELEASE_DEP)
 	$(CXX) $(CXXFLAGS_DEBUG) -o $@ mfemCheck.cpp $(MFEM_RELEASE_OPT)
 
+sundials/.git: 
+	git submodule update --init sundials
+
+SUNDIALS_BUILD_DIR = $(CURDIR)/sundials-build
+
+SUNDIALS_CMAKE_OPT = -DCMAKE_INSTALL_PREFIX=$(SUNDIALS_DIR) -DEXAMPLES_INSTALL=off
+$(SUNDIALS_BUILD_DIR)/Makefile: sundials/.git
+	cmake $(SUNDIALS_CMAKE_OPT) -B $(SUNDIALS_BUILD_DIR) -S sundials
+
+$(SUNDIALS_DIR)/include: $(SUNDIALS_BUILD_DIR)/Makefile
+	make $(MAKEFLAGS) -C $(SUNDIALS_BUILD_DIR); make -C $(SUNDIALS_BUILD_DIR) install;
+
 toml11/toml.hpp:
-	git submodule init toml11\
-	git submodule update toml11
+	git submodule update --init toml11;
 
 mfem/.git:
-	git submodule init mfem\
-	git submodule update mfem
+	git submodule update --init mfem;
 
 MFEM_RELEASE_CMAKE = -DCMAKE_BUILD_TYPE=Release -DMFEM_USE_SUNDIALS=ON -DSUNDIALS_DIR=$(SUNDIALS_DIR)
 MFEM_DEBUG_CMAKE = -DCMAKE_BUILD_TYPE=Release -DMFEM_USE_SUNDIALS=ON -DSUNDIALS_DIR=$(SUNDIALS_DIR)
 
-$(MFEM_RELEASE_DIR)/Makefile: |mfem/.git
+mfem-release/Makefile: mfem/.git $(SUNDIALS_DIR)/include
 	cmake -B $(MFEM_RELEASE_DIR) -S$(MFEM_DIR) $(MFEM_RELEASE_CMAKE)
 
-mfem-debug/Makefile: |mfem/.git
+mfem-debug/Makefile: mfem/.git $(SUNDIALS_DIR)/include
 	cmake -B $(MFEM_DEBUG_DIR) -S$(MFEM_DIR) $(MFEM_DEBUG_CMAKE)
 
-$(MFEM_RELEASE_DIR)/libmfem.a: $(MFEM_RELEASE_DIR)/Makefile
-	make -C $(MFEM_RELEASE_DIR)
+mfem-release/libmfem.a: mfem-release/Makefile $(SUNDIALS_DIR)/include
+	make $(MAKEFLAGS) -C mfem-release
 
-$(MFEM_DEBUG_DIR)/libmfem.a: $(MFEM_DEBUG_DIR)/Makefile
-	make -C $(MFEM_DEBUG_DIR)
+mfem-debug/libmfem.a: mfem-debug/Makefile $(SUNDIALS_DIR)/include
+	make $(MAKEFLAGS) -C mfem-debug
 
 clean:
 	rm -f meshgenpp mfemGS mfemGS-debug meq meq-debug mfemCheck mfemProjector
 
 distclean: clean
-	rm -f $(MFEM_RELEASE_DIR) $(MFEM_DEBUG_DIR)
+	rm -rf $(MFEM_RELEASE_DIR) $(MFEM_DEBUG_DIR) $(SUNDIALS_BUILD_DIR) $(SUNDIALS_DIR)
 
-.PHONY: clean distclean $(MFEM_RELEASE_DIR)/libmfem.a $(MFEM_DEBUG_DIR)/libmfem.a
+.PHONY: clean distclean mfem-release/libmfem.a mfem-debug/libmfem.a $(SUNDIALS_DIR)/include
 
