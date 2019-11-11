@@ -36,6 +36,45 @@ const double c2 = -0.366568333204813;
 const double c3 =  0.002409406149732;
 const double c4 = -0.023957517168316;
 
+class NonlinearGSSolver {
+	protected:
+		GSSolver solver;
+		mfem::KINSolver *nonlinearSolver;
+	public:
+		std::shared_ptr<DGSpace> getSolutionSpace() { return solver.SolutionSpace; };
+		NonlinearGSSolver( std::shared_ptr<mfem::Mesh> mesh, int Order, GSSolver::Func PlasmaRHS ) 
+			: solver( mesh, Order, PlasmaRHS )
+		{
+			nonlinearSolver = new mfem::KINSolver( KIN_FP, false );
+			nonlinearSolver->SetMaxIter( 1000 );
+			nonlinearSolver->SetAbsTol( 1e-4 );
+			nonlinearSolver->iterative_mode = false;
+			nonlinearSolver->SetOperator( solver );
+		};
+
+		~NonlinearGSSolver() 
+		{
+			delete nonlinearSolver;
+		}
+
+		void ApplyAMR( Solution &soln )
+		{
+			solver.ApplyAdaptiveRefinement( soln );
+			soln.Reset();
+			nonlinearSolver->SetOperator( solver );
+		};
+
+		void SetBCs( mfem::Coefficient& coeff ) {
+			solver.SetBCs( coeff );
+		};
+
+		void Solve( Solution &solution )
+		{
+			nonlinearSolver->Mult( solution.qu, solution.qu );
+			solver.Postprocess( solution );
+		};
+};
+
 int main(int argc, char *argv[])
 {
 	StopWatch chrono;
@@ -80,67 +119,45 @@ int main(int argc, char *argv[])
 		return -( R*R*TestEq.Pprime( psi ) + TestEq.FFprime( psi ) )/R;
 	};
 
-	GSSolver solver( mesh, order, J_Plasma );
+	NonlinearGSSolver Solver( mesh, order, J_Plasma );
 
 	std::function<double( const mfem::Vector & )> uFun_ex = std::bind( &SolovievEquilibrium::psi, &TestEq, std::placeholders::_1 );
 	std::function<void( const mfem::Vector &, mfem::Vector & )> qFun_ex = std::bind( &SolovievEquilibrium::q, &TestEq, std::placeholders::_1, std::placeholders::_2 );
 
 	StdFunctionCoefficient bcFunCoeff( uFun_ex );
-	solver.SetBCs( bcFunCoeff );
+	Solver.SetBCs( bcFunCoeff );
 
-	StdFunctionCoefficient ucoeff( uFun_ex );
+	int i_amr;
+	Solution soln( Solver.getSolutionSpace() );
 
-	int i_amr = 0;
-	KINSolver *nonlinearPoissonSolver = nullptr;
-	Solution soln( solver.SolutionSpace );
-
-	nonlinearPoissonSolver = new KINSolver( KIN_FP, false );
-	nonlinearPoissonSolver->SetMaxIter( 1000 );
-	nonlinearPoissonSolver->SetAbsTol( 1e-4 );
-	nonlinearPoissonSolver->iterative_mode = false;
-
-	for ( ; i_amr< N_AMR; i_amr++ )
+	for (i_amr = 0; i_amr< N_AMR; i_amr++ )
 	{
-		nonlinearPoissonSolver->SetOperator( solver );
-		nonlinearPoissonSolver->Mult( soln.qu, soln.qu );
-
+		Solver.Solve( soln );
 		std::cout << "After " << i_amr << " levels of refinement:" << std::endl;
-
-
-		solver.Postprocess( soln );
 		auto [ err_u, err_q, err_u_star ] = soln.l2_errors( uFun_ex, qFun_ex );
-
 
 		std::cout << "\t|| u_h - u_ex || = " << err_u << "\n";
 		std::cout << "\t|| q_h - q_ex || = " << err_q << "\n";
 		std::cout << "\t|| u*_h - u_ex || = " << err_u_star << "\n";
 		std::cout << std::endl;
 
-		solver.ApplyAdaptiveRefinement( soln );
-		// Soln now has vectors of the wrong size, either call soln.Prolong or soln.Reset
-		soln.Reset();
+		Solver.ApplyAMR( soln );
 
 		std::cerr << "Refined Mesh" << std::endl;
 
 	}
 
 	{
-		nonlinearPoissonSolver->SetOperator( solver );
-		nonlinearPoissonSolver->Mult( soln.qu, soln.qu );
-
+		Solver.Solve( soln );
 		std::cout << "After " << i_amr << " levels of refinement:" << std::endl;
-
-		solver.Postprocess( soln );
 		auto [ err_u, err_q, err_u_star ] = soln.l2_errors( uFun_ex, qFun_ex );
 
 		std::cout << "\t|| u_h - u_ex || = " << err_u << "\n";
 		std::cout << "\t|| q_h - q_ex || = " << err_q << "\n";
 		std::cout << "\t|| u*_h - u_ex || = " << err_u_star << "\n";
 		std::cout << std::endl;
-
 	}
 
-	delete nonlinearPoissonSolver;
 
 	// 13. Save the mesh and the solution.
 	{

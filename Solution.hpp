@@ -96,6 +96,7 @@ namespace meq {
 	class Solution {
 		private:
 			std::shared_ptr<DGSpace> SolutionSpace;
+			bool hasUStar;
 			static const int dim = 2;
 		public:
 			mfem::Vector qu;
@@ -112,6 +113,7 @@ namespace meq {
 				q_variable.MakeRef( SolutionSpace->QSpace(), qu, offsets[ 0 ] );
 				u_variable.MakeRef( SolutionSpace->USpace(), qu, offsets[ 1 ] );
 				u_hat_variable.MakeRef( SolutionSpace->MSpace(), qu, offsets[ 2 ] );
+				hasUStar = false;
 			}
 
 			Solution( std::shared_ptr<DGSpace> SolSpace, double *data )
@@ -123,12 +125,14 @@ namespace meq {
 				q_variable.MakeRef( SolutionSpace->QSpace(), qu, offsets[ 0 ] );
 				u_variable.MakeRef( SolutionSpace->USpace(), qu, offsets[ 1 ] );
 				u_hat_variable.MakeRef( SolutionSpace->MSpace(), qu, offsets[ 2 ] );
+				hasUStar = false;
 			}
 
 			void AllocateUStar() 
 			{
 				u_star.SetSize( SolutionSpace->UStarSpace()->GetVSize() );
 				u_star_variable.MakeRef( SolutionSpace->UStarSpace(), u_star, 0 );
+				hasUStar = true;
 			}
 
 			void Reset()
@@ -140,6 +144,7 @@ namespace meq {
 				u_variable.MakeRef( SolutionSpace->USpace(), qu, offsets[ 1 ] );
 				u_hat_variable.MakeRef( SolutionSpace->MSpace(), qu, offsets[ 2 ] );
 				u_star.Destroy();
+				hasUStar = false;
 			}
 
 
@@ -173,6 +178,7 @@ namespace meq {
 
 				Q_update->Mult( QU_old_blk.GetBlock( 0 ), QU_new_blk.GetBlock( 0 ) );
 				U_update->Mult( QU_old_blk.GetBlock( 1 ), QU_new_blk.GetBlock( 1 ) );
+				// perhaps also prolong u* if we have it?
 			}
 
 			std::tuple<double,double,double> l2_errors( RealScalarField uFun_ex, RealVectorField qFun_ex ) {
@@ -188,12 +194,51 @@ namespace meq {
 
 				double err_u    = u_variable.ComputeL2Error(ucoeff, irs);
 				double err_q    = q_variable.ComputeL2Error(qcoeff, irs);
-				double err_u_star = u_star_variable.ComputeL2Error( ucoeff, irs );
+				double err_u_star;
+
+				if ( hasUStar )
+					err_u_star = u_star_variable.ComputeL2Error( ucoeff, irs );
+				else
+					err_u_star = std::nan("");
+
 				return { err_u, err_q, err_u_star };
 			};
 
-			void WriteOutputMFEM( std::string GradPsiFile, std::string PsiFile )
+			std::tuple<double,double,double> l2_diff( Solution & other ) {
+				int order = std::max( SolutionSpace->Order, other.SolutionSpace->Order );
+				int order_quad = std::max(2, 2*order+4);
+				const mfem::IntegrationRule *irs[mfem::Geometry::NumGeom];
+				for (int i=0; i < mfem::Geometry::NumGeom; ++i)
+				{
+					irs[i] = &(mfem::IntRules.Get(i, order_quad));
+				}
+
+				mfem::GridFunctionCoefficient ucoeff( &other.u_variable );
+				mfem::GridFunctionCoefficient qcoeff( &other.q_variable );
+				// compare with the u* if they have one
+				if ( other.hasUStar )
+					ucoeff.SetGridFunction( &other.u_variable );
+
+				double err_u    = u_variable.ComputeL2Error(ucoeff, irs);
+				double err_q    = q_variable.ComputeL2Error(qcoeff, irs);
+				double err_u_star;
+
+				if ( hasUStar )
+				{
+					err_u_star = u_star_variable.ComputeL2Error( ucoeff, irs );
+				}
+				else
+					err_u_star = std::nan("");
+
+				return { err_u, err_q, err_u_star };
+			};
+
+			void WriteOutputMFEM( std::string prefix )
 			{
+				std::string meshFile( prefix );
+				std::string GradPsiFile( prefix );
+				std::string PsiFile( prefix );
+
 				std::ofstream q_solution_ofs( GradPsiFile );
 				q_solution_ofs.precision(8);
 				q_variable.Save(q_solution_ofs);
