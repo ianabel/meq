@@ -161,12 +161,7 @@ int main(int argc, char *argv[])
 
 	// 13. Save the mesh and the solution.
 	{
-		ofstream mesh_ofs("ex_hdg.mesh");
-		mesh_ofs.precision(8);
-		mesh->Print(mesh_ofs);
-
-		soln.WriteOutputMFEM( "sol_q.gf", "sol_u.gf" );
-
+		soln.WriteOutputMFEM( "soloviev" );
 	}
 
 	// 14. Send the solution by socket to a GLVis server.

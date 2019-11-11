@@ -239,13 +239,23 @@ namespace meq {
 				std::string GradPsiFile( prefix );
 				std::string PsiFile( prefix );
 
+				meshFile += ".mesh";
+				GradPsiFile += "_grad_psi.gf";
+				PsiFile += "_psi.gf";
+
+				std::ofstream mesh_ofs( meshFile );
+				SolutionSpace->Mesh()->Print( mesh_ofs );
+
 				std::ofstream q_solution_ofs( GradPsiFile );
 				q_solution_ofs.precision(8);
 				q_variable.Save(q_solution_ofs);
 
 				std::ofstream u_solution_ofs( PsiFile );
 				u_solution_ofs.precision(8);
-				u_variable.Save(u_solution_ofs);
+				if ( !hasUStar )
+					u_variable.Save(u_solution_ofs);
+				else
+					u_star_variable.Save( u_solution_ofs );
 			}
 
 	};

@@ -11,9 +11,11 @@ int main(int argc, char *argv[])
 {
 	if ( argc != 4 )
 	{
-		std::cerr << "./mfemCheck <mesh> <gridfunction_1> <gridfunction_2>" << std::endl;
+		std::cerr << "./mfemCheck <prefix_1> <prefix_2>" << std::endl;
 		return -2;
 	}
+
+	std::string 
 
 	std::string mesh_file = argv[ 1 ];
 	std::string grid_fn_1_file = argv[ 2 ];
