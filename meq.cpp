@@ -101,7 +101,7 @@ int main(int argc, char *argv[])
 	solver.Mult( qu_zero_bc, qu_zero_bc );
 
 
-	GreensFunctionBoundaryCoefficient Lackner( mesh.get(), solver.QSpace().get(), qu_zero_bc );
+	GreensFunctionBoundaryCoefficient Lackner( mesh.get(), solver.QSpace(), qu_zero_bc );
 
 	mfem::Vector qu;
 	solver.SetBCs( Lackner );
@@ -110,8 +110,8 @@ int main(int argc, char *argv[])
 	solver.Mult( qu, qu );
 
 	GridFunction q_solution,u_solution;
-	q_solution.MakeRef( solver.QSpace().get(), qu, 0 );
-	u_solution.MakeRef( solver.USpace().get(), qu, solver.QSpace()->GetVSize() );
+	q_solution.MakeRef( solver.QSpace(), qu, 0 );
+	u_solution.MakeRef( solver.USpace(), qu, solver.QSpace()->GetVSize() );
 
 	// Save the output
 	{

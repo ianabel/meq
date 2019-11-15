@@ -1,5 +1,5 @@
 #include "mfem.hpp"
-#include "toml11/toml.hpp"
+#include "toml.hpp"
 #include <fstream>
 #include <iostream>
 #include <vector>
@@ -61,6 +61,7 @@ int main(int argc, char *argv[])
 	unsigned int nElems = fes->GetNE();
 	unsigned int vDim = 2;
 
+	std::cout << "# R \t z \t d Psi/dR \t d Psi / d z"<<std::endl;
 	for ( unsigned int iElem = 0; iElem < nElems; iElem++ )
 	{
 		ElementTransformation *Tr = mesh->GetElementTransformation( iElem );

@@ -2,6 +2,7 @@
 #define SOLUTION_HPP
 
 #include "meq.hpp"
+#include "MEQConf.hpp"
 #include <fstream>
 #include <iostream>
 
@@ -258,6 +259,26 @@ namespace meq {
 					u_star_variable.Save( u_solution_ofs );
 			}
 
+			void WriteOutputMFEM( meq::Configuration const& config )
+			{
+				std::string meshFile( config.GetFinalMeshFile() );
+				std::string GradPsiFile( config.GetGradPsiFile() );
+				std::string PsiFile( config.GetPsiFile() );
+
+				std::ofstream mesh_ofs( meshFile );
+				SolutionSpace->Mesh()->Print( mesh_ofs );
+
+				std::ofstream q_solution_ofs( GradPsiFile );
+				q_solution_ofs.precision(8);
+				q_variable.Save(q_solution_ofs);
+
+				std::ofstream u_solution_ofs( PsiFile );
+				u_solution_ofs.precision(8);
+				if ( !hasUStar )
+					u_variable.Save(u_solution_ofs);
+				else
+					u_star_variable.Save( u_solution_ofs );
+			}
 	};
 
 
