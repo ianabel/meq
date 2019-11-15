@@ -14,9 +14,9 @@ namespace meq {
 
 class Configuration {
 	private:
-		std::shared_ptr<Domain> ConfiguredDomain;
-		std::vector<Coil> CoilSet;
-		std::shared_ptr<PlasmaModel> plasma;
+		std::shared_ptr<meq::Domain> ConfiguredDomain;
+		std::vector<meq::Coil> CoilSet;
+		std::shared_ptr<meq::PlasmaModel> plasma;
 		std::string MeshFile,FinalMeshFile,PsiFile,GradPsiFile;
 
 

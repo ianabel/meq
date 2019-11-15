@@ -37,7 +37,7 @@ mfemGS-debug: mfemGS.cpp StdFnCoeffs.hpp SolovievEquilibrium.hpp $(GSINVERTER_DE
 	$(CXX) $(CXXFLAGS_DEBUG) -o $@ mfemGS.cpp $(GSINVERTER_SRC) $(MFEM_DEBUG_OPT)
 
 meshgenpp: meshgenpp.cpp meshgen.cpp MEQConf.hpp meq.hpp $(MFEM_RELEASE_DEP)
-	$(CXX) $(CXXFLAGS_RELEASE) -o $@ meshgenpp.cpp meshgen.cpp -lgmsh $(MFEM_RELEASE_DEP)
+	$(CXX) $(CXXFLAGS_RELEASE) -o $@ meshgenpp.cpp meshgen.cpp -lgmsh $(MFEM_RELEASE_OPT)
 
 mfemProjector: mfemProjector.cpp MEQConf.hpp meq.hpp $(MFEM_RELEASE_DEP)
 	$(CXX) $(CXXFLAGS_DEBUG) -o $@ mfemProjector.cpp  $(MFEM_RELEASE_OPT)
