@@ -2,6 +2,7 @@
 #define GSSOLVER_HPP
 
 #include "mfem.hpp"
+
 #include "Solution.hpp"
 #include "HDGGSIntegrator.hpp"
 #include "CockburnEstimator.hpp"
@@ -50,6 +51,37 @@ namespace meq {
 			{
 				delete AVarf;
 			};
+	};
+
+	class NonlinearDomainLFIntegrator : public mfem::LinearFormIntegrator
+	{
+		using NLFunc = std::function< double( const mfem::Vector &, double ) >;
+
+		mfem::Coefficient *Q;
+		NLFunc F;
+		mfem::GridFunction &u;
+
+		int oa, ob;
+		public:
+
+		/// Constructs a domain integrator with a given Coefficient
+		NonlinearDomainLFIntegrator(mfem::Coefficient &QF, mfem::GridFunction &u_fn, NLFunc f, int a = 2, int b = 0)
+			: Q(&QF), F( f ), u( u_fn ), oa(a), ob(b) 
+		{
+		};
+
+		NonlinearDomainLFIntegrator(mfem::GridFunction &u_fn, NLFunc f, int a = 2, int b = 0)
+			: Q(nullptr), F( f ), u( u_fn ), oa(a), ob(b) 
+		{
+		};
+
+		/** Given a particular Finite Element and a transformation (Tr)
+		  computes the element right hand side element vector, elvect. */
+		virtual void AssembleRHSElementVect(const mfem::FiniteElement &el,
+				mfem::ElementTransformation &Tr,
+				mfem::Vector &elvect);
+
+		using mfem::LinearFormIntegrator::AssembleRHSElementVect;
 	};
 };
 

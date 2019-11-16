@@ -5,11 +5,12 @@
 #include <gmsh.h>
 
 #include "meq.hpp"
-#include "MEQConf.hpp"
-
 
 using namespace meq;
 
+namespace meq {
+	void GenerateMesh( std::shared_ptr<Configuration> );
+};
 
 int main( int argc, char** argv )
 {
@@ -45,5 +46,4 @@ int main( int argc, char** argv )
 	meq::GenerateMesh( config );
 
 	return 0;
-
 }

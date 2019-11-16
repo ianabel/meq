@@ -4,10 +4,7 @@
  */
 
 #include "mfem.hpp"
-#include "GSSolver.hpp"
 
-#include "FreeBoundary.hpp"
-#include "MEQConf.hpp"
 #include "meq.hpp"
 
 #include <vector>
@@ -45,7 +42,7 @@ int main(int argc, char *argv[])
 		return 1;
 	}
 
-		std::shared_ptr<meq::Configuration> config = nullptr;
+	std::shared_ptr<meq::Configuration> config = nullptr;
 
 	try {
 		config = std::make_shared<meq::Configuration>( config_file );

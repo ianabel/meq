@@ -1,5 +1,4 @@
 #include "GSSolver.hpp"
-#include "NLRHSIntegrator.hpp"
 
 using namespace mfem;
 
@@ -241,5 +240,44 @@ void GSSolver::ApplyAdaptiveRefinement( Solution & soln )
 	refiner.Apply( *SolutionSpace->Mesh() );
 	Update();
 };
+
+void NonlinearDomainLFIntegrator::AssembleRHSElementVect(const mfem::FiniteElement &el,
+                                                mfem::ElementTransformation &Tr,
+                                                mfem::Vector &elvect)
+{
+   int dof = el.GetDof();
+	mfem::Vector shape( dof );
+
+   elvect.SetSize(dof);
+   elvect = 0.0;
+
+   const mfem::IntegrationRule *ir;
+   ir = &mfem::IntRules.Get(el.GetGeomType(), oa * el.GetOrder() + ob);
+
+	mfem::Vector u_vals( ir->GetNPoints() );
+
+	u.GetValues( Tr.ElementNo, *ir, u_vals );
+
+	mfem::Vector point( 2 );
+
+
+   for (int i = 0; i < ir->GetNPoints(); i++)
+   {
+      const mfem::IntegrationPoint &ip = ir->IntPoint(i);
+
+      Tr.SetIntPoint (&ip);
+		Tr.Transform( ip, point );
+
+      double val = Tr.Weight() * F( point, u_vals( i ) );
+
+		if ( Q != nullptr )
+			val *= Q->Eval( Tr, ip );
+
+      el.CalcShape(ip, shape);
+		shape *= ( ip.weight * val );
+
+		elvect += shape;
+   }
+}
 
 };

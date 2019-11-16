@@ -7,18 +7,19 @@
 
 #include <vector>
 
-#include "meq.hpp"
 #include "toml11/toml.hpp"
+
+#include "utility.hpp"
+#include "model.hpp"
 
 namespace meq {
 
 class Configuration {
 	private:
-		std::shared_ptr<meq::Domain> ConfiguredDomain;
-		std::vector<meq::Coil> CoilSet;
-		std::shared_ptr<meq::PlasmaModel> plasma;
+		std::shared_ptr<Domain> ConfiguredDomain;
+		std::vector<Coil> CoilSet;
+		std::shared_ptr<PlasmaModel> plasma;
 		std::string MeshFile,FinalMeshFile,PsiFile,GradPsiFile;
-
 
 	public:
 		Configuration( std::string f_name ) {
@@ -30,14 +31,10 @@ class Configuration {
 				FinalMeshFile = options.at( "FinalMeshFile" ).as_string();
 				PsiFile = options.at( "PsiFile" ).as_string();
 				GradPsiFile = options.at( "GradPsiFile" ).as_string();
-
 			} catch ( std::out_of_range &err ) {
-				std::cerr << "Required block [options] not found in " << f_name << std::endl;
+				std::cerr << err.what() << std::endl;
 				throw err;
 			}
-
-			
-
 			
 			const auto domainConfig = toml::find< toml::table >( config, "domain" );
 
@@ -84,10 +81,7 @@ class Configuration {
 			}
 		};
 
-		
-
 		~Configuration() { };
-
 
 		std::shared_ptr<Domain>  GetDomain() const {return ConfiguredDomain;};
 		std::vector<Coil> const& GetCoils() const {return CoilSet;};
@@ -99,8 +93,7 @@ class Configuration {
 
 };
 
-extern void GenerateMesh( std::shared_ptr<Configuration> );
+};
 
-}
 
 #endif // MEQCONF_HPP

@@ -1,13 +1,14 @@
 #ifndef COCKBURNESTIMATOR_HPP
 #define COCKBURNESTIMATOR_HPP
+/*
+ * Error estimator for the Grad-shafranov problem, developed from
+ * Cockburn & Zhang's estimator for semi-linear poisson equations.
+ */
 
 #include "mfem.hpp"
 #include <functional>
 
-
 namespace mfem {
-
-
 
 class CockburnZhangEstimator : public mfem::ErrorEstimator
 {

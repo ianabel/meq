@@ -22,6 +22,8 @@ GSINVERTER_SRC = GSSolver.cpp HDGGSIntegrator.cpp
 MFEM_RELEASE_DEP = $(MFEM_RELEASE_DIR)/libmfem.a
 MFEM_DEBUG_DEP = $(MFEM_DEBUG_DIR)/libmfem.a
 
+HEADER_DEP = meq.hpp config.hpp utility.hpp model.hpp
+
 MAKEFLAGS ?= -j4
 
 meq: meq.cpp FreeBoundary.cpp $(GSINVERTER_DEP) $(MFEM_RELEASE_DEP)
@@ -30,19 +32,19 @@ meq: meq.cpp FreeBoundary.cpp $(GSINVERTER_DEP) $(MFEM_RELEASE_DEP)
 meq-debug: meq.cpp $(GSINVERTER_DEP) $(MFEM_DEBUG_DEP)
 	$(CXX) $(CXXFLAGS_RELEASE) -o $@ meq.cpp FreeBoundary.cpp $(GSINVERTER_SRC) $(MFEM_DEBUG_OPT)
 
-mfemGS: mfemGS.cpp StdFnCoeffs.hpp SolovievEquilibrium.hpp $(GSINVERTER_DEP) $(MFEM_RELEASE_DEP)
+mfemGS: mfemGS.cpp SolovievEquilibrium.hpp $(HEADER_DEP) $(GSINVERTER_DEP) $(MFEM_RELEASE_DEP)
 	$(CXX) $(CXXFLAGS_RELEASE) -o $@ mfemGS.cpp $(GSINVERTER_SRC) $(MFEM_RELEASE_OPT)
 
-mfemGS-debug: mfemGS.cpp StdFnCoeffs.hpp SolovievEquilibrium.hpp $(GSINVERTER_DEP) $(MFEM_DEBUG_DEP)
+mfemGS-debug: mfemGS.cpp SolovievEquilibrium.hpp $(HEADER_DEP) $(GSINVERTER_DEP) $(MFEM_DEBUG_DEP)
 	$(CXX) $(CXXFLAGS_DEBUG) -o $@ mfemGS.cpp $(GSINVERTER_SRC) $(MFEM_DEBUG_OPT)
 
-meshgenpp: meshgenpp.cpp meshgen.cpp MEQConf.hpp meq.hpp $(MFEM_RELEASE_DEP)
+meshgenpp: meshgenpp.cpp meshgen.cpp $(HEADER_DEP) $(MFEM_RELEASE_DEP)
 	$(CXX) $(CXXFLAGS_RELEASE) -o $@ meshgenpp.cpp meshgen.cpp -lgmsh $(MFEM_RELEASE_OPT)
 
-mfemProjector: mfemProjector.cpp MEQConf.hpp meq.hpp $(MFEM_RELEASE_DEP)
+mfemProjector: mfemProjector.cpp $(HEADER_DEP) $(MFEM_RELEASE_DEP)
 	$(CXX) $(CXXFLAGS_DEBUG) -o $@ mfemProjector.cpp  $(MFEM_RELEASE_OPT)
 
-mfemCheck: mfemCheck.cpp MEQConf.hpp meq.hpp $(MFEM_RELEASE_DEP)
+mfemCheck: mfemCheck.cpp $(HEADER_DEP) $(MFEM_RELEASE_DEP)
 	$(CXX) $(CXXFLAGS_DEBUG) -o $@ mfemCheck.cpp $(MFEM_RELEASE_OPT)
 
 sundials/.git: 
@@ -55,7 +57,7 @@ $(SUNDIALS_BUILD_DIR)/Makefile: sundials/.git
 	cmake $(SUNDIALS_CMAKE_OPT) -B $(SUNDIALS_BUILD_DIR) -S sundials
 
 $(SUNDIALS_DIR)/include: $(SUNDIALS_BUILD_DIR)/Makefile
-	make $(MAKEFLAGS) -C $(SUNDIALS_BUILD_DIR); make -C $(SUNDIALS_BUILD_DIR) install;
+	rm -rf $(SUNDIALS_DIR); mkdir $(SUNDIALS_DIR); make $(MAKEFLAGS) -C $(SUNDIALS_BUILD_DIR) install;
 
 toml11/toml.hpp:
 	git submodule update --init toml11;
@@ -78,11 +80,14 @@ mfem-release/libmfem.a: mfem-release/Makefile $(SUNDIALS_DIR)/include
 mfem-debug/libmfem.a: mfem-debug/Makefile $(SUNDIALS_DIR)/include
 	make $(MAKEFLAGS) -C mfem-debug
 
+vacuum-test: VacuumGFSoln.cpp FreeBoundary.cpp $(HEADER_DEP) $(MFEM_DEBUG_DEP)
+	$(CXX) $(CXXFLAGS_DEBUG) -o $@ VacuumGFSoln.cpp FreeBoundary.cpp $(MFEM_DEBUG_OPT)
+
 clean:
 	rm -f meshgenpp mfemGS mfemGS-debug meq meq-debug mfemCheck mfemProjector
 
 distclean: clean
 	rm -rf $(MFEM_RELEASE_DIR) $(MFEM_DEBUG_DIR) $(SUNDIALS_BUILD_DIR) $(SUNDIALS_DIR)
 
-.PHONY: clean distclean mfem-release/libmfem.a mfem-debug/libmfem.a $(SUNDIALS_DIR)/include
+.PHONY: clean distclean mfem-release/libmfem.a mfem-debug/libmfem.a
 

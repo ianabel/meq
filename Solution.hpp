@@ -1,10 +1,14 @@
 #ifndef SOLUTION_HPP
 #define SOLUTION_HPP
 
-#include "meq.hpp"
-#include "MEQConf.hpp"
+/*
+ * Solution class, wrapping a full solution ot the Grad-Shafronv equation
+ */
+
 #include <fstream>
 #include <iostream>
+
+#include "meq.hpp"
 
 namespace meq {
 

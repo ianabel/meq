@@ -5,8 +5,6 @@
 #include <gmsh.h>
 
 #include "meq.hpp"
-#include "MEQConf.hpp"
-
 
 namespace meq {
 

@@ -4,10 +4,12 @@
 
 COPYRIGHT
 
-The following copyright applies to each file in the MFEM distribution, unless
+The following copyright applies to each file in the MEQ distribution, unless
 otherwise stated in the file:
 
 Copyright (c) 2019 Ian G Abel.
+
+The MFEM, SUNDIALS, and toml11 libraries are distributed under their own licences.
 
 LICENCE
 
