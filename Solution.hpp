@@ -8,7 +8,7 @@
 #include <fstream>
 #include <iostream>
 
-#include "meq.hpp"
+#include "config.hpp"
 
 namespace meq {
 

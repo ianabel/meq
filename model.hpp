@@ -5,6 +5,8 @@
  * Classes for different plasma models
  */
 
+#include "SplineInterpolant.hpp"
+
 namespace meq {
 
 // Store as a spline interpolant internally, 

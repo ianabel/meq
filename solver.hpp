@@ -9,6 +9,7 @@
 #include "Solution.hpp"
 #include "GSSolver.hpp"
 #include "FreeBoundary.hpp"
+#include "NonlinearSolver.hpp"
 
 #endif // SOLVER_HPP
 

@@ -36,49 +36,51 @@ const double c2 = -0.366568333204813;
 const double c3 =  0.002409406149732;
 const double c4 = -0.023957517168316;
 
-class NonlinearGSSolver {
-	protected:
-		GSSolver solver;
-		mfem::KINSolver *nonlinearSolver;
-	public:
-		std::shared_ptr<DGSpace> getSolutionSpace() { return solver.SolutionSpace; };
-		NonlinearGSSolver( std::shared_ptr<mfem::Mesh> mesh, int Order, GSSolver::Func PlasmaRHS ) 
-			: solver( mesh, Order, PlasmaRHS )
-		{
-			nonlinearSolver = new mfem::KINSolver( KIN_FP, false );
-			nonlinearSolver->SetMaxIter( 1000 );
-			nonlinearSolver->SetAbsTol( 1e-4 );
-			nonlinearSolver->iterative_mode = false;
-			nonlinearSolver->SetOperator( solver );
-		};
+template<typename TestEqClass> 
+void TestSolution(  TestEqClass const& TestEq, std::shared_ptr<mfem::Mesh> mesh, int order, int N_AMR )
+{
+	NonlinearGSSolver Solver( mesh, order, TestEq );
 
-		~NonlinearGSSolver() 
-		{
-			delete nonlinearSolver;
-		}
+	std::function<double( const mfem::Vector & )> uFun_ex = [ & ]( const mfem::Vector& pt ){ return TestEq.Psi( pt );};
+	std::function<void( const mfem::Vector &, mfem::Vector & )> qFun_ex = [ & ]( const mfem::Vector& pt, mfem::Vector &q_out ) { TestEq.GradPsi( pt, q_out ); q_out *= -1.0/pt( 0 );};
 
-		void ApplyAMR( Solution &soln )
-		{
-			solver.ApplyAdaptiveRefinement( soln );
-			soln.Reset();
-			nonlinearSolver->SetOperator( solver );
-		};
+	StdFunctionCoefficient bcFunCoeff( uFun_ex );
+	Solver.SetBCs( bcFunCoeff );
 
-		void SetBCs( mfem::Coefficient& coeff ) {
-			solver.SetBCs( coeff );
-		};
+	int i_amr;
+	Solution soln( Solver.getSolutionSpace() );
 
-		void Solve( Solution &solution )
-		{
-			nonlinearSolver->Mult( solution.qu, solution.qu );
-			solver.Postprocess( solution );
-		};
-};
+	for (i_amr = 0; i_amr< N_AMR; i_amr++ )
+	{
+		Solver.Solve( soln );
+		std::cout << "After " << i_amr << " levels of refinement:" << std::endl;
+		auto [ err_u, err_q, err_u_star ] = soln.l2_errors( uFun_ex, qFun_ex );
+
+		std::cout << "\t|| u_h - u_ex || = " << err_u << "\n";
+		std::cout << "\t|| q_h - q_ex || = " << err_q << "\n";
+		std::cout << "\t|| u*_h - u_ex || = " << err_u_star << "\n";
+		std::cout << std::endl;
+
+		Solver.ApplyAMR( soln );
+
+		std::cerr << "Refined Mesh" << std::endl;
+
+	}
+
+	{
+		Solver.Solve( soln );
+		std::cout << "After " << i_amr << " levels of refinement:" << std::endl;
+		auto [ err_u, err_q, err_u_star ] = soln.l2_errors( uFun_ex, qFun_ex );
+
+		std::cout << "\t|| u_h - u_ex || = " << err_u << "\n";
+		std::cout << "\t|| q_h - q_ex || = " << err_q << "\n";
+		std::cout << "\t|| u*_h - u_ex || = " << err_u_star << "\n";
+		std::cout << std::endl;
+	}
+}
 
 int main(int argc, char *argv[])
 {
-	StopWatch chrono;
-
 	// 1. Parse command-line options.
 	int order = 3;
 	int N_AMR=0;
@@ -114,70 +116,7 @@ int main(int argc, char *argv[])
 
 	SolovievEquilibrium TestEq( A, C, c1, c2, c3, c4 );
 
-	std::function<double( const mfem::Vector &, double )> J_Plasma = [ &TestEq ]( const mfem::Vector& pt, double psi ) {
-		double R = pt( 0 );
-		return -( R*R*TestEq.Pprime( psi ) + TestEq.FFprime( psi ) )/R;
-	};
-
-	NonlinearGSSolver Solver( mesh, order, J_Plasma );
-
-	std::function<double( const mfem::Vector & )> uFun_ex = std::bind( &SolovievEquilibrium::psi, &TestEq, std::placeholders::_1 );
-	std::function<void( const mfem::Vector &, mfem::Vector & )> qFun_ex = std::bind( &SolovievEquilibrium::q, &TestEq, std::placeholders::_1, std::placeholders::_2 );
-
-	StdFunctionCoefficient bcFunCoeff( uFun_ex );
-	Solver.SetBCs( bcFunCoeff );
-
-	int i_amr;
-	Solution soln( Solver.getSolutionSpace() );
-
-	for (i_amr = 0; i_amr< N_AMR; i_amr++ )
-	{
-		Solver.Solve( soln );
-		std::cout << "After " << i_amr << " levels of refinement:" << std::endl;
-		auto [ err_u, err_q, err_u_star ] = soln.l2_errors( uFun_ex, qFun_ex );
-
-		std::cout << "\t|| u_h - u_ex || = " << err_u << "\n";
-		std::cout << "\t|| q_h - q_ex || = " << err_q << "\n";
-		std::cout << "\t|| u*_h - u_ex || = " << err_u_star << "\n";
-		std::cout << std::endl;
-
-		Solver.ApplyAMR( soln );
-
-		std::cerr << "Refined Mesh" << std::endl;
-
-	}
-
-	{
-		Solver.Solve( soln );
-		std::cout << "After " << i_amr << " levels of refinement:" << std::endl;
-		auto [ err_u, err_q, err_u_star ] = soln.l2_errors( uFun_ex, qFun_ex );
-
-		std::cout << "\t|| u_h - u_ex || = " << err_u << "\n";
-		std::cout << "\t|| q_h - q_ex || = " << err_q << "\n";
-		std::cout << "\t|| u*_h - u_ex || = " << err_u_star << "\n";
-		std::cout << std::endl;
-	}
-
-
-	// 13. Save the mesh and the solution.
-	{
-		soln.WriteOutputMFEM( "soloviev" );
-	}
-
-	// 14. Send the solution by socket to a GLVis server.
-	{
-		char vishost[] = "localhost";
-		int  visport   = 19916;
-		socketstream u_sock(vishost, visport);
-		u_sock.precision(8);
-		u_sock << "solution\n" << *mesh << soln.u_variable << "window_title 'Solution u'" <<
-			endl;
-
-		socketstream q_sock(vishost, visport);
-		q_sock.precision(8);
-		q_sock << "solution\n" << *mesh << soln.q_variable << "window_title 'Solution q'" <<
-			endl;
-	}
+	TestSolution( TestEq, mesh, order, N_AMR );
 
 	return 0;
 }

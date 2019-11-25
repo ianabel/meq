@@ -89,43 +89,23 @@ int main(int argc, char *argv[])
 
 	std::cout << " Total Number of Degrees of Freedom for Psi      " << solver.USpace()->GetNDofs() << std::endl;
 	std::cout << " Total Number of Degrees of Freedom for Grad Psi " << solver.QSpace()->GetNDofs() << std::endl;
+	std::cout << " Total Number of Degrees of Freedom for Psi on boundaries " << solver.QSpace()->GetNDofs() << std::endl;
+
+
+	Solution zero_bc_solution( solver.SolutionSpace );
 
 	solver.SetBCs( zero );
+	solver.Solve( zero_bc_solution );
 
-	mfem::Vector qu_zero_bc;
-	qu_zero_bc.SetSize( solver.Height() );
-	qu_zero_bc = 0.0;
-	solver.Mult( qu_zero_bc, qu_zero_bc );
+	GreensFunctionBoundaryCoefficient Lackner( mesh.get(), solver.QSpace(), zero_bc_solution.qu );
 
-
-	GreensFunctionBoundaryCoefficient Lackner( mesh.get(), solver.QSpace(), qu_zero_bc );
-
-	mfem::Vector qu;
+	Solution vacuum_solution( solver.SolutionSpace );
 	solver.SetBCs( Lackner );
-	qu.SetSize( solver.Height() );
-	qu = 0.0;
-	solver.Mult( qu, qu );
+	solver.Solve( vacuum_solution );
 
-	GridFunction q_solution,u_solution;
-	q_solution.MakeRef( solver.QSpace(), qu, 0 );
-	u_solution.MakeRef( solver.USpace(), qu, solver.QSpace()->GetVSize() );
+	solver.Postprocess( vacuum_solution );
 
-	// Save the output
-	{
-
-		std::ofstream mesh_ofs( config->GetFinalMeshFile() );
-		mesh_ofs.precision(8);
-		mesh->Print(mesh_ofs);
-
-		std::ofstream q_solution_ofs( config->GetGradPsiFile() );
-		q_solution_ofs.precision(8);
-		q_solution.Save(q_solution_ofs);
-
-		std::ofstream u_solution_ofs( config->GetPsiFile() );
-		u_solution_ofs.precision(8);
-		u_solution.Save(u_solution_ofs);
-
-	}
+	vacuum_solution.WriteOutputMFEM( *config );
 
 	return 0;
 }

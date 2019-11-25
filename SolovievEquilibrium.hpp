@@ -59,14 +59,14 @@ class SolovievEquilibrium {
 		}
 		~SolovievEquilibrium() {};
 
-		double psi( const mfem::Vector& pt )
+		double Psi( const mfem::Vector& pt ) const
 		{
 			double R(pt(0));
 			double Z(pt(1));
 			return psi_P( A, C, R, Z ) + c1 * psi_1( R, Z ) + c2 * psi_2( R, Z ) + c3 * psi_3( R, Z ) + c4 * psi_4( R, Z );
 		}
 
-		void q( const mfem::Vector &pt, mfem::Vector &q )
+		void GradPsi( const mfem::Vector &pt, mfem::Vector &q ) const
 		{
 			double R(pt(0));
 			double Z(pt(1));
@@ -93,19 +93,23 @@ class SolovievEquilibrium {
 			grad_psi_4( R, Z, tmp );
 			tmp *= c4;
 			q += tmp;
-
-			q *= -1.0/R;
 		}
 
-		double Pprime( double psi )
+		double Pprime( double psi ) const
 		{
 			return C;
 		}
 
-		double FFprime( double psi )
+		double FFprime( double psi ) const
 		{
 			return A;
 		}
+
+		double operator()( const mfem::Vector &pt, double psi ) const
+		{
+			double R = pt( 0 );
+			return -( R*R*Pprime( psi ) + FFprime( psi ) )/R;
+		};
 };
 
 

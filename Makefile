@@ -83,6 +83,10 @@ mfem-debug/libmfem.a: mfem-debug/Makefile $(SUNDIALS_DIR)/include
 vacuum-test: VacuumGFSoln.cpp FreeBoundary.cpp $(HEADER_DEP) $(MFEM_DEBUG_DEP)
 	$(CXX) $(CXXFLAGS_DEBUG) -o $@ VacuumGFSoln.cpp FreeBoundary.cpp $(MFEM_DEBUG_OPT)
 
+vacuum-mesh-test: VacuumMeshSoln.cpp FreeBoundary.cpp $(HEADER_DEP) $(MFEM_DEBUG_DEP)
+	$(CXX) $(CXXFLAGS_DEBUG) -o $@ VacuumGFSoln.cpp FreeBoundary.cpp $(MFEM_DEBUG_OPT)
+
+
 clean:
 	rm -f meshgenpp mfemGS mfemGS-debug meq meq-debug mfemCheck mfemProjector
 
