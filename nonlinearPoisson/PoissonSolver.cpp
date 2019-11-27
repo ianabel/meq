@@ -1,41 +1,41 @@
 
-#include "GSSolver.hpp"
+#include "PoissonSolver.hpp"
 
 using namespace mfem;
 
-namespace meq {
 
-GSSolver::GSSolver(std::shared_ptr<mfem::Mesh> meshPtr, unsigned int order, Func JPlasma) : 
+PoissonSolver::PoissonSolver(std::shared_ptr<mfem::Mesh> meshPtr, unsigned int order, FunctionCoefficient &fcoeff_in) : 
 	Order( order ),
 	Dim( 2 ),
 	boundary_conditions( nullptr ),
 	tau_D( 5.0 ),
-	PlasmaRHS( JPlasma )
+	diffusion( 1.0 ),
+	fcoeff( fcoeff_in )
 {
 	SolutionSpace = std::make_shared<meq::DGSpace>( meshPtr, Order );
 
 	// Define the different forms, and initialise them with the linearised problem
 	AVarf = new HDGBilinearForm( SolutionSpace->QSpace(), SolutionSpace->USpace(), SolutionSpace->MSpace() );
 
-	AVarf->AddHDGDomainIntegrator(new HDGDomainIntegratorGS());
-	AVarf->AddHDGFaceIntegrator(new HDGFaceIntegratorGS(tau_D));
+	AVarf->AddHDGDomainIntegrator(new HDGDomainIntegratorDiffusion( diffusion ));
+	AVarf->AddHDGFaceIntegrator(new HDGFaceIntegratorDiffusion(tau_D));
 
 	height = SolutionSpace->GetOffsets()[ 3 ];
 	width = height;
 };
 
-void GSSolver::SetBCs( Coefficient& coeff )
+void PoissonSolver::SetBCs( Coefficient& coeff )
 {
 	boundary_conditions = &coeff;
 }
 
-void GSSolver::Solve( Solution &soln )
+void PoissonSolver::Solve( Solution &soln )
 {
 	mfem::Vector qu_old( soln.qu );
 	Mult( qu_old, soln.qu );
 }
 
-void GSSolver::Mult( const Vector& qu_in , Vector& qu_out ) const
+void PoissonSolver::Mult( const Vector& qu_in , Vector& qu_out ) const
 {
 	mfem::Vector rhs_F( SolutionSpace->USpace()->GetVSize() );
 	qu_out.SetSize( height );
@@ -46,7 +46,7 @@ void GSSolver::Mult( const Vector& qu_in , Vector& qu_out ) const
 	mfem::LinearForm *fform = new mfem::LinearForm;
 
 
-	fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( old_soln.u_variable, PlasmaRHS, 4, 2 ) );
+	fform->AddDomainIntegrator( new DomainLFIntegrator( fcoeff ) );
 	fform->Update(const_cast<mfem::FiniteElementSpace* >( SolutionSpace->USpace() ), rhs_F, 0);
 	fform->Assemble();
 
@@ -78,7 +78,7 @@ void GSSolver::Mult( const Vector& qu_in , Vector& qu_out ) const
 	int maxIter(4000);
 	double rtol(1.e-6);
 	double atol(1.e-12);
-	GSSmoother M(*SC);
+	PoissonSmoother M(*SC);
 	BiCGSTABSolver solver;
 	solver.SetAbsTol(atol);
 	solver.SetRelTol(rtol);
@@ -103,7 +103,7 @@ void GSSolver::Mult( const Vector& qu_in , Vector& qu_out ) const
 	}
 };
 
-void GSSolver::Update() {
+void PoissonSolver::Update() {
 	SolutionSpace->Update();
 	AVarf->Update();
 
@@ -113,7 +113,7 @@ void GSSolver::Update() {
 
 
 // Postprocessing
-void GSSolver::Postprocess( Solution &soln ) const
+void PoissonSolver::Postprocess( Solution &soln ) const
 {
 	soln.AllocateUStar();
 	GridFunction &u = soln.u_variable;
@@ -228,7 +228,7 @@ void GSSolver::Postprocess( Solution &soln ) const
 	}
 }
 
-void GSSolver::ApplyAdaptiveRefinement( Solution & soln )
+void PoissonSolver::ApplyAdaptiveRefinement( Solution & soln )
 {
 
 	soln.AllocateUStar();

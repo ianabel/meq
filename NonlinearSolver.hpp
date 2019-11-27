@@ -12,12 +12,14 @@ namespace meq {
 			mfem::KINSolver *nonlinearSolver;
 		public:
 			std::shared_ptr<DGSpace> getSolutionSpace() { return solver.SolutionSpace; };
-			NonlinearGSSolver( std::shared_ptr<mfem::Mesh> mesh, int Order, GSSolver::Func PlasmaRHS ) 
+			NonlinearGSSolver( std::shared_ptr<mfem::Mesh> mesh, int Order, GSSolver::Func PlasmaRHS, double MaxIter = 1000, double AbsTol = 1e-3, int AndersonLevels = 0 ) 
 				: solver( mesh, Order, PlasmaRHS )
 			{
 				nonlinearSolver = new mfem::KINSolver( KIN_FP, false );
-				nonlinearSolver->SetMaxIter( 1000 );
-				nonlinearSolver->SetAbsTol( 1e-4 );
+				nonlinearSolver->SetMaxIter( MaxIter );
+				nonlinearSolver->SetAbsTol( AbsTol );
+				if ( AndersonLevels > 0 )
+					nonlinearSolver->SetMAA( AndersonLevels );
 				nonlinearSolver->iterative_mode = false;
 				nonlinearSolver->SetOperator( solver );
 			};

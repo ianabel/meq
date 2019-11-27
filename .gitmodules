@@ -1,9 +1,6 @@
 [submodule "toml11"]
 	path = toml11
 	url = https://github.com/ToruNiina/toml11.git
-[submodule "LBFGSpp"]
-	path = LBFGSpp
-	url = https://github.com/yixuan/LBFGSpp.git
 [submodule "mfem"]
 	path = mfem
 	url = https://github.com/ianabel/mfem.git
