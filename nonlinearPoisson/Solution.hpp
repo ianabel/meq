@@ -5,9 +5,11 @@
  * Solution class, wrapping a full solution to the poisson problem
  */
 
+#include "mfem.hpp"
+
 #include <fstream>
 #include <iostream>
-
+#include <memory>
 
 using RealScalarField = std::function<double( const mfem::Vector & )>;
 using RealVectorField = std::function<void( const mfem::Vector &, mfem::Vector & )>;
@@ -130,6 +132,13 @@ class Solution {
 			hasUStar = false;
 		}
 
+		void Zero()
+		{
+			qu = 0.0;
+			if ( hasUStar )
+				u_star = 0.0;
+		}
+
 		void AllocateUStar() 
 		{
 			u_star.SetSize( SolutionSpace->UStarSpace()->GetVSize() );
@@ -181,6 +190,10 @@ class Solution {
 			Q_update->Mult( QU_old_blk.GetBlock( 0 ), QU_new_blk.GetBlock( 0 ) );
 			U_update->Mult( QU_old_blk.GetBlock( 1 ), QU_new_blk.GetBlock( 1 ) );
 			// perhaps also prolong u* if we have it?
+			if ( hasUStar )
+			{
+				u_star_variable.Update();
+			}
 		}
 
 		std::tuple<double,double,double> l2_errors( RealScalarField uFun_ex, RealVectorField qFun_ex ) {

@@ -4,8 +4,6 @@
 #include "mfem.hpp"
 
 #include "Solution.hpp"
-#include "HDGPoissonIntegrator.hpp"
-
 
 #include <memory>
 
@@ -16,19 +14,19 @@ class PoissonSolver : public mfem::Operator
 	protected:
 		int Order, Dim;
 	public:
-		std::shared_ptr<DPoissonpace> SolutionSpace;
+		std::shared_ptr<DGSpace> SolutionSpace;
 	protected:
 		// Owned
 		mfem::Coefficient *boundary_conditions;
-		mfem::FunctionCoefficient &fcoeff;
+		mfem::ConstantCoefficient diff_c;
 		mfem::HDGBilinearForm *AVarf;
 
 		const double tau_D;
 		const double diffusion;
 
-		Func PlasmaRHS;
+		Func RHS;
 	public:
-		PoissonSolver(std::shared_ptr<mfem::Mesh> meshPtr, unsigned int order, Func JPlasma);
+		PoissonSolver(std::shared_ptr<mfem::Mesh> meshPtr, unsigned int order, Func RHS );
 
 		mfem::FiniteElementSpace *QSpace() const { return SolutionSpace->QSpace(); };
 		mfem::FiniteElementSpace *USpace() const { return SolutionSpace->USpace(); };

@@ -18,11 +18,15 @@ CXXFLAGS_DEBUG = -std=c++17 -g -Og -Wall
 MFEM_RELEASE_DEP = $(MFEM_RELEASE_DIR)/libmfem.a
 MFEM_DEBUG_DEP = $(MFEM_DEBUG_DIR)/libmfem.a
 
-mfemPoisson: mfemPoisson.cpp 
-	$(CXX) $(CXXFLAGS_RELEASE) -o $@ mfemPoisson.cpp $(MFEM_RELEASE_OPT)
+mfemPoisson: mfemPoisson.cpp PoissonSolver.cpp
+	$(CXX) $(CXXFLAGS_RELEASE) -o $@ mfemPoisson.cpp PoissonSolver.cpp $(MFEM_RELEASE_OPT)
 
-mfemPoisson-debug: mfemPoisson.cpp 
-	$(CXX) $(CXXFLAGS_DEBUG) -o $@ mfemPoisson.cpp $(MFEM_DEBUG_OPT)
+mfemPoisson-prof: mfemPoisson.cpp PoissonSolver.cpp
+	$(CXX) $(CXXFLAGS_RELEASE) -pg -o $@ mfemPoisson.cpp PoissonSolver.cpp $(MFEM_RELEASE_OPT)
+
+
+mfemPoisson-debug: mfemPoisson.cpp PoissonSolver.cpp
+	$(CXX) $(CXXFLAGS_DEBUG) -o $@ mfemPoisson.cpp PoissonSolver.cpp $(MFEM_DEBUG_OPT)
 
 ../mfem-release/libmfem.a:
 	make $(MAKEFLAGS) -C ../ mfem-release/libmfem.a

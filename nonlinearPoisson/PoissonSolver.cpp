@@ -4,21 +4,22 @@
 using namespace mfem;
 
 
-PoissonSolver::PoissonSolver(std::shared_ptr<mfem::Mesh> meshPtr, unsigned int order, FunctionCoefficient &fcoeff_in) : 
+PoissonSolver::PoissonSolver(std::shared_ptr<mfem::Mesh> meshPtr, unsigned int order, Func RHS_f ) : 
 	Order( order ),
 	Dim( 2 ),
 	boundary_conditions( nullptr ),
+	diff_c( 1.0 ),
 	tau_D( 5.0 ),
 	diffusion( 1.0 ),
-	fcoeff( fcoeff_in )
+	RHS( RHS_f )
 {
-	SolutionSpace = std::make_shared<meq::DGSpace>( meshPtr, Order );
+	SolutionSpace = std::make_shared<DGSpace>( meshPtr, Order );
 
 	// Define the different forms, and initialise them with the linearised problem
 	AVarf = new HDGBilinearForm( SolutionSpace->QSpace(), SolutionSpace->USpace(), SolutionSpace->MSpace() );
 
-	AVarf->AddHDGDomainIntegrator(new HDGDomainIntegratorDiffusion( diffusion ));
-	AVarf->AddHDGFaceIntegrator(new HDGFaceIntegratorDiffusion(tau_D));
+	AVarf->AddHDGDomainIntegrator( new HDGDomainIntegratorDiffusion( diff_c ) );
+	AVarf->AddHDGFaceIntegrator( new HDGFaceIntegratorDiffusion(tau_D) );
 
 	height = SolutionSpace->GetOffsets()[ 3 ];
 	width = height;
@@ -45,8 +46,9 @@ void PoissonSolver::Mult( const Vector& qu_in , Vector& qu_out ) const
 	// Assemble the RHS and the Schur complement
 	mfem::LinearForm *fform = new mfem::LinearForm;
 
-
-	fform->AddDomainIntegrator( new DomainLFIntegrator( fcoeff ) );
+	this->Postprocess( old_soln );
+	
+	fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( old_soln.u_star_variable, RHS ) );
 	fform->Update(const_cast<mfem::FiniteElementSpace* >( SolutionSpace->USpace() ), rhs_F, 0);
 	fform->Assemble();
 
@@ -78,7 +80,7 @@ void PoissonSolver::Mult( const Vector& qu_in , Vector& qu_out ) const
 	int maxIter(4000);
 	double rtol(1.e-6);
 	double atol(1.e-12);
-	PoissonSmoother M(*SC);
+	GSSmoother M(*SC);
 	BiCGSTABSolver solver;
 	solver.SetAbsTol(atol);
 	solver.SetRelTol(rtol);
@@ -195,7 +197,7 @@ void PoissonSolver::Postprocess( Solution &soln ) const
 			// Multiply q_h by inverse diffusion coefficient ( R in our case )
 			Vector pt( 3 );
 			Trans->Transform( ip, pt );
-			qval_col *= pt( 0 );
+			qval_col *= 1.0/diffusion;
 
 			// compute (nabla w_h, q_h)
 			dshapedxt.Mult(qval_col, to_RHS);
@@ -227,20 +229,6 @@ void PoissonSolver::Postprocess( Solution &soln ) const
 
 	}
 }
-
-void PoissonSolver::ApplyAdaptiveRefinement( Solution & soln )
-{
-
-	soln.AllocateUStar();
-	Postprocess( soln );
-
-	mfem::GradShafranovEstimator errorEstimator( soln.q_variable, soln.u_star_variable, soln.u_hat_variable, PlasmaRHS );
-	mfem::DoerflerMarkingRefiner refiner( errorEstimator );
-
-	refiner.SetGamma( 0.75 );
-	refiner.Apply( *SolutionSpace->Mesh() );
-	Update();
-};
 
 void NonlinearDomainLFIntegrator::AssembleRHSElementVect(const mfem::FiniteElement &el,
                                                 mfem::ElementTransformation &Tr,
@@ -280,5 +268,3 @@ void NonlinearDomainLFIntegrator::AssembleRHSElementVect(const mfem::FiniteEleme
 		elvect += shape;
    }
 }
-
-};
