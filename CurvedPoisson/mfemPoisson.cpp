@@ -12,7 +12,7 @@
  */
 
 #include "mfem.hpp"
-#include "NonlinearSolver.hpp"
+#include "PoissonSolver.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -31,54 +31,27 @@ double uFun_ex(const Vector & x);
 void qFun_ex(const Vector & x, Vector & q);
 double fFun(const Vector & x);
 
-int N_ANDERSON = 2;
-int N_MAX_ITER = 1500;
 double tol = 1e-4;
 
 void TestSolution( std::shared_ptr<mfem::Mesh> mesh, int order )
 {
 	auto RHS = [ & ]( const mfem::Vector &pt, double u ) {
-		return ( u*u - uFun_ex( pt )*uFun_ex( pt ) ) + fFun( pt );
+		return fFun( pt );
 	};
 
-	NonlinearPoissonSolver Solver( mesh, order, RHS, N_MAX_ITER, tol, N_ANDERSON, 0 );
+	PoissonSolver Solver( mesh, order, RHS );
 
 	FunctionCoefficient bcFunCoeff( uFun_ex );
 
 	Solver.SetBCs( bcFunCoeff );
 
-	Solution soln( Solver.getSolutionSpace() );
+	Solution soln( Solver.SolutionSpace );
 	soln.Zero(); // Initial guess is 0
 
 	{
 		Solver.Solve( soln );
+		Solver.Postprocess( soln );
 		auto [ err_u, err_q, err_u_star ] = soln.l2_errors( uFun_ex, qFun_ex );
-
-		std::cout << "\t|| u_h - u_ex || = " << err_u << "\n";
-		std::cout << "\t|| q_h - q_ex || = " << err_q << "\n";
-		std::cout << "\t|| u*_h - u_ex || = " << err_u_star << "\n";
-		std::cout << std::endl;
-	}
-
-	std::cout << " Refining Grid and Prolonging Solution " << std::endl;
-
-	mesh->UniformRefinement();
-	mesh->Finalize( true, true );
-	Solver.Update();
-	soln.Prolong();
-
-	{
-		double refined_tol = ::pow( tol, 1.5 );
-		if ( refined_tol < 1e-10 )
-			refined_tol = 1e-10;
-
-		NonlinearPoissonSolver refined_solver( mesh, order, RHS, N_MAX_ITER, refined_tol, N_ANDERSON, 0 );
-		Solution refined_soln( refined_solver.getSolutionSpace(), soln.qu );
-
-		refined_solver.SetBCs( bcFunCoeff );
-		refined_solver.Solve( refined_soln );
-
-		auto [ err_u, err_q, err_u_star ] = refined_soln.l2_errors( uFun_ex, qFun_ex );
 
 		std::cout << "\t|| u_h - u_ex || = " << err_u << "\n";
 		std::cout << "\t|| q_h - q_ex || = " << err_q << "\n";
@@ -111,10 +84,6 @@ int main(int argc, char *argv[])
 		"Finite element order (polynomial degree).");
 	args.AddOption(&N_REFINE, "-r", "--refine",
 		"Initial uniform refinements" );
-	args.AddOption(&N_ANDERSON, "-a", "--maa",
-		"Anderson Acceleration Level" );
-	args.AddOption(&tol, "-t", "--tolerance",
-		"Fixed-point Acceleration Tolerance" );
 	args.Parse();
 
 	if (!args.Good())
