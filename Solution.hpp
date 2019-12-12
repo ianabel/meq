@@ -133,6 +133,14 @@ namespace meq {
 				hasUStar = false;
 			}
 
+			void Zero()
+			{
+				qu = 0.0;
+				if ( hasUStar )
+					u_star = 0.0;
+			}
+
+
 			void AllocateUStar() 
 			{
 				u_star.SetSize( SolutionSpace->UStarSpace()->GetVSize() );

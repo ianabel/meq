@@ -40,40 +40,27 @@ const double c2 = -0.366568333204813;
 const double c3 =  0.002409406149732;
 const double c4 = -0.023957517168316;
 
+int N_ANDERSON = 2;
+int N_MAX_ITER = 4500;
+double tol = 1e-4;
+
 template<typename TestEqClass> 
-void TestSolution(  TestEqClass const& TestEq, std::shared_ptr<mfem::Mesh> mesh, int order, int N_AMR )
+void TestSolution(  TestEqClass const& TestEq, std::shared_ptr<mfem::Mesh> mesh, int order )
 {
-	NonlinearGSSolver Solver( mesh, order, TestEq, 1000, 1e-4, 3 );
+	NonlinearGSSolver Solver( mesh, order, TestEq, N_MAX_ITER, tol, N_ANDERSON );
 
 	std::function<double( const mfem::Vector & )> uFun_ex = [ & ]( const mfem::Vector& pt ){ return TestEq.Psi( pt );};
 	std::function<void( const mfem::Vector &, mfem::Vector & )> qFun_ex = [ & ]( const mfem::Vector& pt, mfem::Vector &q_out ) { TestEq.GradPsi( pt, q_out ); q_out *= -1.0/pt( 0 );};
 
 	StdFunctionCoefficient bcFunCoeff( uFun_ex );
+
 	Solver.SetBCs( bcFunCoeff );
 
-	int i_amr;
 	Solution soln( Solver.getSolutionSpace() );
-
-	for (i_amr = 0; i_amr< N_AMR; i_amr++ )
-	{
-		Solver.Solve( soln );
-		std::cout << "After " << i_amr << " levels of refinement:" << std::endl;
-		auto [ err_u, err_q, err_u_star ] = soln.l2_errors( uFun_ex, qFun_ex );
-
-		std::cout << "\t|| u_h - u_ex || = " << err_u << "\n";
-		std::cout << "\t|| q_h - q_ex || = " << err_q << "\n";
-		std::cout << "\t|| u*_h - u_ex || = " << err_u_star << "\n";
-		std::cout << std::endl;
-
-		Solver.ApplyAMR( soln );
-
-		std::cerr << "Refined Mesh" << std::endl;
-
-	}
+	soln.Zero(); // Initial guess is 0
 
 	{
 		Solver.Solve( soln );
-		std::cout << "After " << i_amr << " levels of refinement:" << std::endl;
 		auto [ err_u, err_q, err_u_star ] = soln.l2_errors( uFun_ex, qFun_ex );
 
 		std::cout << "\t|| u_h - u_ex || = " << err_u << "\n";
@@ -81,22 +68,51 @@ void TestSolution(  TestEqClass const& TestEq, std::shared_ptr<mfem::Mesh> mesh,
 		std::cout << "\t|| u*_h - u_ex || = " << err_u_star << "\n";
 		std::cout << std::endl;
 	}
+
+	std::cout << " Refining Grid and Prolonging Solution " << std::endl;
+
+	mesh->UniformRefinement();
+	mesh->Finalize( true, true );
+	Solver.Update();
+	soln.Prolong();
+
+	{
+		double refined_tol = ::pow( tol, 1.5 );
+		if ( refined_tol < 1e-10 )
+			refined_tol = 1e-10;
+
+		NonlinearGSSolver refined_solver( mesh, order, TestEq, N_MAX_ITER, refined_tol, N_ANDERSON, 0 );
+		Solution refined_soln( refined_solver.getSolutionSpace(), soln.qu );
+
+		refined_solver.SetBCs( bcFunCoeff );
+		refined_solver.Solve( refined_soln );
+
+		auto [ err_u, err_q, err_u_star ] = refined_soln.l2_errors( uFun_ex, qFun_ex );
+
+		std::cout << "\t|| u_h - u_ex || = " << err_u << "\n";
+		std::cout << "\t|| q_h - q_ex || = " << err_q << "\n";
+		std::cout << "\t|| u*_h - u_ex || = " << err_u_star << "\n";
+		std::cout << std::endl;
+	}
+
+
 }
 
 int main(int argc, char *argv[])
 {
 	// 1. Parse command-line options.
 	int order = 3;
-	int N_AMR=0;
 	int N_REFINE=0;
 	
 	OptionsParser args(argc, argv);
 	args.AddOption(&order, "-o", "--order",
 		"Finite element order (polynomial degree).");
-	args.AddOption(&N_AMR, "-amr", "--mesh-refinement-levels",
-		"The number of loops of AMR to perform" );
-	args.AddOption(&N_REFINE, "-r", "--refineme",
+	args.AddOption(&N_REFINE, "-r", "--refine",
 		"Initial uniform refinements" );
+	args.AddOption(&N_ANDERSON, "-a", "--maa",
+		"Anderson Acceleration Level" );
+	args.AddOption(&tol, "-t", "--tolerance",
+		"Fixed-point Acceleration Tolerance" );
 	args.Parse();
 
 	if (!args.Good())
@@ -132,7 +148,7 @@ int main(int argc, char *argv[])
 
 	McCarthyEquilibrium MCE( 17.8116, { 0.17795, -0.03291, 1.4934, -0.4818, -1.1759, -0.162, 0.3722, 0.07697, 1.2959, 0.5881, 1.5820, -0.009059, 2.2388, 0.4186, 1.195, -0.4265, 0.8057, -0.004804} );
 
-	TestSolution( MCE, mesh, order, N_AMR );
+	TestSolution( MCE, mesh, order );
 
 	return 0;
 }
