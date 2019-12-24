@@ -33,7 +33,7 @@ meshgenpp: meshgenpp.cpp meshgen.cpp $(HEADER_DEP) $(MFEM_LIB_FILE)
 	$(CXX) $(MEQ_FLAGS) $(MFEM_FLAGS) -o $@ meshgenpp.cpp meshgen.cpp -lgmsh $(MFEM_LIBS)
 
 mfemProjector: mfemProjector.cpp $(HEADER_DEP) $(MFEM_LIB_FILE)
-	$(CXX) $(MEQ_FLAGS) $(MFEM_FLAGS) -o $@ mfemProjector.cpp  $(MFEM_LIBS)
+	$(CXX) $(MEQ_FLAGS) $(MFEM_FLAGS) -o $@ mfemProjector.cpp  $(MFEM_LIBS) -lnetcdf_c++4 -lnetcdf
 
 mfemCheck: mfemCheck.cpp $(HEADER_DEP) $(MFEM_LIB_FILE)
 	$(CXX) $(MEQ_FLAGS) $(MFEM_FLAGS) -o $@ mfemCheck.cpp $(MFEM_LIBS)
@@ -69,7 +69,8 @@ $(MFEM_LIB_FILE): $(MFEM_CONFIG)
 	make $(MAKEFLAGS) -C $(MFEM_DIR)
 
 vacuum-test: VacuumGFSoln.cpp FreeBoundary.cpp $(HEADER_DEP)
-	$(CXX) $(MEQ_FLAGS) $(MFEM_FLAGS) -o $@ VacuumGFSoln.cpp FreeBoundary.cpp $(MFEM_LIBS)
+	$(CXX) $(MEQ_FLAGS) $(MFEM_FLAGS) -o $@ VacuumGFSoln.cpp FreeBoundary.cpp $(MFEM_LIBS) -lnetcdf_c++4 -lnetcdf
+
 
 vacuum-mesh-test: VacuumMeshSoln.cpp FreeBoundary.cpp $(HEADER_DEP)
 	$(CXX) $(MEQ_FLAGS) $(MFEM_FLAGS) -o $@ VacuumGFSoln.cpp FreeBoundary.cpp $(MFEM_LIBS)

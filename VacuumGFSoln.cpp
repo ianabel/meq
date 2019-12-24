@@ -9,6 +9,8 @@
 #include <utility>
 #include <list>
 #include <boost/math/quadrature/gauss_kronrod.hpp>
+#include <boost/multi_array.hpp>
+#include <netcdf>
 
 using namespace mfem;
 
@@ -20,7 +22,7 @@ double GreensFunctionSolution( std::vector<meq::Coil> const & CoilSet, std::pair
 	ptVec( 0 ) = pt.first;
 	ptVec( 1 ) = pt.second;
 
-	using Integrator = boost::math::quadrature::gauss_kronrod<double, 15>;
+	using Integrator = boost::math::quadrature::gauss_kronrod<double, 31>;
 
 	double result = 0;
 	const static double max_h = .05;
@@ -84,9 +86,18 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	std::list< std::pair< double, double> > outputPoints{
-		{0.01,0.75},{0.01,0.0},{0.01,-0.75}, {0.5,0.5},{0.5,0.0},{0.5,-0.5}, {0.75,0.75},{0.75,0.0},{0.75,-0.75}
-	};
+	const int N_R( 51 );
+	const int N_Z( 51 );
+	double R_min = 0.1;
+	double R_max = 0.9;
+	double Z_min = -1.0;
+	double Z_max = 1.0;
+	std::vector<double> R_pts( N_R );
+	std::vector<double> Z_pts( N_Z );
+	for ( unsigned int i=0; i < N_R; i++ )
+		R_pts[ i ] = R_min + i*( R_max - R_min )/( N_R - 1 );
+	for ( unsigned int i=0; i < N_Z; i++ )
+		Z_pts[ i ] = Z_min + i*( Z_max - Z_min )/( N_Z - 1 );
 
 
 	std::shared_ptr<meq::Configuration> config = nullptr;
@@ -105,10 +116,28 @@ int main(int argc, char *argv[])
 
 	std::cout << "Using configuration in " << config_file << std::endl;
 
-	for ( auto const &p : outputPoints )
+using BoostArray2D = boost::multi_array<double, 2>;
+
+	BoostArray2D data( boost::extents[ R_pts.size() ][ Z_pts.size() ], boost::c_storage_order() );
+
+	for ( unsigned int i = 0; i < R_pts.size(); i++ )
+		for ( unsigned int j = 0; j < Z_pts.size(); j++ )
+			data[ i ][ j ] = GreensFunctionSolution( config->GetCoils(), {R_pts[ i ],Z_pts[ j ]} );
+
 	{
-		std::cout << std::setprecision( 11 );
-		std::cout << p.first << "\t" << p.second << "\t" << GreensFunctionSolution( config->GetCoils(), p ) << std::endl;
+		netCDF::NcFile data_file( "exact-vacuum.nc", netCDF::NcFile::FileMode::replace );
+		netCDF::NcDim R_dim = data_file.addDim( "R", R_pts.size() );
+		netCDF::NcDim Z_dim = data_file.addDim( "Z", Z_pts.size() );
+		netCDF::NcVar R_var = data_file.addVar( "R", netCDF::NcDouble(), R_dim );
+		netCDF::NcVar Z_var = data_file.addVar( "Z", netCDF::NcDouble(), Z_dim );
+		R_var.putVar( R_pts.data() );
+		Z_var.putVar( Z_pts.data() );
+
+		std::vector<netCDF::NcDim> psi_dims = { R_dim, Z_dim };
+		netCDF::NcVar psi = data_file.addVar( "psi", netCDF::NcDouble(), psi_dims );
+
+		psi.putVar( data.data() );
+		data_file.close();
 	}
 
 	return 0;

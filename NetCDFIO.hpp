@@ -3,10 +3,17 @@
  * Class for storing psi & grad psi in NetCDF file
  */
 
+#include <boost/multi_array.hpp>
+using BoostArray2D = boost::multi_array<double, 2>;
+
 class MEQNetCDF
 {
 
-	using Point = std::pair<double, double>;
-	// Output is on a cartesian product grid. 
-	std::vector<double> R_grid,Z_grid;
+	public:
+
+		AddField( 
+
+	private:
+		std::vector<double> R_dim,Z_dim;
+
 }

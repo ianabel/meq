@@ -77,18 +77,29 @@ void PoissonSolver::Mult( const Vector& qu_in , Vector& qu_out ) const
 	// Schur complement is  L - C*A^{-1} RF, but L is zero for this case.
 
 	// Solve the Schur complement system
-	int maxIter(4000);
-	double rtol(1.e-6);
-	double atol(1.e-12);
-	GSSmoother M(*SC);
-	BiCGSTABSolver solver;
-	solver.SetAbsTol(atol);
-	solver.SetRelTol(rtol);
-	solver.SetMaxIter(maxIter);
-	solver.SetOperator(*SC);
-	solver.SetPrintLevel(-1);
-	solver.SetPreconditioner(M);
-	solver.Mult(*SC_RHS, new_soln.u_hat_variable);
+	bool use_bicgstab = false;
+	if ( use_bicgstab ) {
+		int maxIter(4000);
+		double rtol(1.e-6);
+		double atol(1.e-12);
+		GSSmoother M(*SC);
+		BiCGSTABSolver solver;
+		solver.SetAbsTol(atol);
+		solver.SetRelTol(rtol);
+		solver.SetMaxIter(maxIter);
+		solver.SetOperator(*SC);
+		solver.SetPrintLevel(-1);
+		solver.SetPreconditioner(M);
+		solver.Mult(*SC_RHS, new_soln.u_hat_variable);
+		if (!solver.GetConverged())
+		{
+			std::cout << "Iterative method failed to converge!" << std::endl;
+		}
+	} else {
+		UMFPackSolver solver;
+		solver.SetOperator( *SC );
+		solver.Mult( *SC_RHS, new_soln.u_hat_variable );
+	}
 
 	// Reconstruct the solution u and q from the facet solution lambda
 	
@@ -99,10 +110,7 @@ void PoissonSolver::Mult( const Vector& qu_in , Vector& qu_out ) const
 	AVarf->Reconstruct(F_arr, &new_soln.u_hat_variable, soln_arr );
 
 
-	if (!solver.GetConverged())
-	{
-		std::cout << "Iterative method failed to converge!" << std::endl;
-	}
+	
 };
 
 void PoissonSolver::Update() {
@@ -223,8 +231,9 @@ void PoissonSolver::Postprocess( Solution &soln ) const
 		RHS(ndofs-1) = RHS2;
 
 		// solve the local problem
-		elmat.Invert();
-		elmat.Mult(RHS, vals);
+		// (save one elmat-size copy by using ::LUFactors directly)
+		mfem::DenseMatrixInverse elmat_inv( elmat );
+		elmat_inv.Mult(RHS, vals);
 		u_postprocessed.SetSubVector(vdofs, vals);
 
 	}

@@ -68,6 +68,58 @@ double GreensFunction( mfem::Vector const& r, mfem::Vector const& r_star )
 	return answer;
 }
 
+/*
+double GreensFunctionNonSingularPart( mfem::Vector const& r, mfem::Vector const& r_star )
+{
+	double R = r[ 0 ];
+	double R_star = r_star[ 0 ];
+	double Z = r[ 1 ];
+	double Z_star = r_star[ 1 ];
+
+	double k_squared = 4 * R * R_star / ( ( R + R_star )*( R + R_star ) + ( Z - Z_star )*( Z - Z_star ) );
+	double k = ::sqrt( k_squared );
+
+	
+
+	// If not near the singular point, the subtraction doesn't cause significant loss of precision
+	// The only singular property comes from K(x)
+	
+	double km1 = 1 - k_squared;
+	double skm1 = ::sqrt( km1 );
+	double K_value = ( boost::math::ellint_1( k ) + std::log( km1 )*boost::math::ellint_1( skm1 )/boost::math::double_constants::pi + std::log( 4 ) );
+	if ( std::fabs( km1 ) < 1e-3 )
+	{
+		const double c1 = ( std::log( 4 ) - 1.0 ) / 4;
+		const double c2 = 3.0 * ( 6.0 * std::log( 4 ) - 7.0 ) / 128;
+		const double c3 = 5.0 * ( 30.0 * std::log( 4 ) - 37.0 ) / 1536;
+		const double c4 = 35.0 * ( 420.0 * std::log( 4 ) - 533.0 ) / 196608;
+		const double c5 = 63.0 * ( 1260.0 * std::log( 4 ) - 1627.0 ) / 1310720;
+
+
+		K_value = km1 * ( c1 + km1 * ( c2 + km1 * ( c3 + km1 * ( c4 + km1 * c5 ) ) ) );
+	}
+
+	return ( 1.0 / boost::math::double_constants::two_pi ) * ::sqrt( ( R + R_star )*( R + R_star ) + ( Z - Z_star )*( Z - Z_star ) ) * ( ( 1.0 - 0.5*k_squared )*K_value - boost::math::ellint_2( k ) );
+}
+
+double GreensFunctionSingularPart( mfem::Vector const& r, mfem::Vector const& r_star )
+{
+	double R = r[ 0 ];
+	double R_star = r_star[ 0 ];
+	double Z = r[ 1 ];
+	double Z_star = r_star[ 1 ];
+
+	double k_squared = 4 * R * R_star / ( ( R + R_star )*( R + R_star ) + ( Z - Z_star )*( Z - Z_star ) );
+	double k = ::sqrt( k_squared );
+	
+	double km1 = 1 - k_squared;
+	double skm1 = ::sqrt( km1 );
+
+	double K_value = std::log( 4 ) + std::log( 1 - k );
+
+}
+*/
+
 const double xk[] = {0, 0.1943570033249354, 0.3772097381640342, 0.5391467053879678, 0.6742714922484358, 0.7806074389832003, 0.8595690586898966, 0.9148792632645746, 0.9513679640727469, 0.9739668681956774, 0.9870405605073769, 0.9940555066314021, 0.9975148564572244, 0.9990651964557858, 0.9996882640283532, 0.9999093846951440, 0.9999774771924616, 0.9999953160412205, 0.9999992047371147, 0.9999998927816124, 0.9999999888756649, 0.9999999991427051, 0.999999999952856, 0.999999999998232, 0.999999999999957};
 
 const double wk[] = {0.1963495408493621,0.1904104648293382,0.173701844905907,0.1491828782311446,0.1207470724265376,0.09217973104519348,0.06638478442850675,0.04505767730866796,0.02875279931434859,0.01717776346664597,0.009548217946354038,0.004896875686700097,0.00229289587374098,0.0009678251282580301,0.0003628147184876642,0.0001187433505354336,0.00003327506421908961,7.81031990509301e-6,1.49796267039634e-6,2.282915074213832e-7,2.67890056961788e-8,2.335910283592051e-9,1.453895726781973e-10,6.172317347078991e-12,1.697723034317386e-13};
@@ -185,14 +237,14 @@ double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln,
 				if ( s > 0.0 && s < 1.0 )
 				{
 					double ExpInt;
-					double LInt = SinhTanhQuad( 0.0, s, IntFunc, 20 );
-					double RInt = SinhTanhQuad( s, 1.0, IntFunc, 20 );
+					double LInt = SinhTanhQuad( 0.0, s, IntFunc, 5 );
+					double RInt = SinhTanhQuad( s, 1.0, IntFunc, 5 );
 					ExpInt = LInt + RInt;
 					Answer += ExpInt;
 				}
 				else if ( s <= 0 || s >= 1 )
 				{
-					double ExpInt = SinhTanhQuad( 0.0, 1, IntFunc );
+					double ExpInt = SinhTanhQuad( 0.0, 1, IntFunc, 5 );
 					Answer += ExpInt;
 				}
 				else {

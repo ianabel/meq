@@ -75,11 +75,8 @@ int main(int argc, char *argv[])
 	// 1. Parse command-line options.
 	int order = 3;
 	int N_REFINE=0;
-   const char *mesh_file = "./square.msh";
 	
 	OptionsParser args(argc, argv);
-   args.AddOption(&mesh_file, "-m", "--mesh",
-                  "Mesh file to use.");
 	args.AddOption(&order, "-o", "--order",
 		"Finite element order (polynomial degree).");
 	args.AddOption(&N_REFINE, "-r", "--refine",
@@ -94,7 +91,7 @@ int main(int argc, char *argv[])
 	args.PrintOptions(cout);
 
 	// Mesh generation
-	std::shared_ptr<Mesh> mesh = std::make_shared<Mesh>( mesh_file, 1.0, 1.0 );
+	std::shared_ptr<Mesh> mesh = std::make_shared<Mesh>(4, 4, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
 
 	for ( int i=0; i<N_REFINE; i++ )
 		mesh->UniformRefinement();
@@ -104,7 +101,7 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
-static const int n = 4;
+static const int n = 2;
 static const double diff = 1.0;
 
 double uFun_ex(const Vector & x)

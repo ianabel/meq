@@ -16,7 +16,7 @@ To run
 To compile and install MEQ you will need a system with the following
 
  - A C++17 compliant C++ compiler.
- - An installation of the SUNDIALS library.
+ - An installation of the SUNDIALS library (version 5.0.0 or later).
  - The Boost C++ Template Library and Boost Unit Testing Framework library.
  - The Eigen library for numerical optimization
  - The gmsh library for mesh generation.
