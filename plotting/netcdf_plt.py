@@ -10,7 +10,7 @@ import sys
 if( len(sys.argv) == 1 ):
     config_file = 'meq.conf'
 elif ( len(sys.argv) == 2 ):
-    config_file = argv[1]
+    config_file = sys.argv[1]
 else:
     print("Incorrect number of arguments")
     sys.exit()
@@ -27,8 +27,13 @@ vacuum_vessel = config['domain']['VacuumVessel']
 vv_poly = Polygon( vacuum_vessel, True, fill=False )
 ax.add_patch( vv_poly )
 
-ax.set_ylim(0,1.1)
-ax.set_xlim(-1.5,1.5)
+y_min = config['domain']['RMin']
+y_max = config['domain']['RMax']
+x_min = config['domain']['ZMin']
+x_max = config['domain']['ZMax']
+
+ax.set_ylim(y_min,y_max)
+ax.set_xlim(x_min,x_max)
 
 
 R_variable = nc_root.variables["R"]
@@ -45,6 +50,7 @@ nPts = R.size * Z.size
 nMasked = 0
 
 vacuum_vessel_polygon = Polygon( vacuum_vessel, True )
+
 for i in range(0,R.size):
     for j in range(0,Z.size):
         if not vacuum_vessel_polygon.contains_point((Z[j],R[i]),1e-6):

@@ -72,12 +72,12 @@ int main(int argc, char *argv[])
 	std::string mesh_file = argv[ 1 ];
 	std::string grid_fn_file = argv[ 2 ];
 
-	const int N_R( 51 );
-	const int N_Z( 51 );
-	double R_min = 0.1;
-	double R_max = 0.9;
-	double Z_min = -1.0;
-	double Z_max = 1.0;
+	const int N_R( 151 );
+	const int N_Z( 151 );
+	double R_min = 0.01;
+	double R_max = 2.5;
+	double Z_min = -7.5;
+	double Z_max = 7.5;
 	std::vector<double> R_pts( N_R );
 	std::vector<double> Z_pts( N_Z );
 	for ( unsigned int i=0; i < N_R; i++ )
