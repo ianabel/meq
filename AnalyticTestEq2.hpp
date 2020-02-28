@@ -58,7 +58,7 @@ class McCarthyEquilibrium {
 			double drYnudr = std::cyl_neumann( 1, nu*r ) + ( nu*r/2.0 )*( std::cyl_neumann( 0, nu*r ) - std::cyl_neumann( 2, nu*r ) );
 
 			// d psi / d r
-			q_vec( 0 ) = 2*c[ 1 ]*r + drJpdr * ( c[ 2 ] + c[ 3 ]*z ) + 2*r*( c[ 6 ]*::cos( p*z ) + c[ 7 ]*::sin( p*z ) ) - ( c[ 8 ] * p * r / s )*::sin( p*s ) + ( c[ 9 ] * p * r / s ) * ::sin( p*s ) 
+			q_vec( 0 ) = 2*c[ 1 ]*r + drJpdr * ( c[ 2 ] + c[ 3 ]*z ) + 2*r*( c[ 6 ]*::cos( p*z ) + c[ 7 ]*::sin( p*z ) ) - ( c[ 8 ] * p * r / s )*::sin( p*s ) + ( c[ 9 ] * p * r / s ) * ::cos( p*s ) 
 				+ drJnudr*( c[ 10 ]*::cos( q*z ) + c[ 11 ]*::sin( q*z ) ) + drJqdr*( c[ 12 ]*::cos( nu*z ) + c[ 13 ]*::sin( nu*z ) )
 				+ drYnudr*( c[ 14 ]*::cos( q*z ) + c[ 15 ]*::sin( q*z ) ) + drYqdr*( c[ 16 ]*::cos( nu*z ) + c[ 17 ]*::sin( nu*z ) );
 

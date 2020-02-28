@@ -7,6 +7,8 @@
 #include <boost/multi_array.hpp>
 #include <netcdf>
 
+#include "config.hpp"
+
 using namespace mfem;
 
 std::ostream& operator<<( std::ostream& os, Vector const& vec )
@@ -63,21 +65,25 @@ int Project( Mesh * mesh, GridFunction const &grid_func, std::vector<double> con
 
 int main(int argc, char *argv[])
 {
-	if ( argc != 3 )
+	if ( argc != 2 )
 	{
-		std::cerr << "./mfemProjector <mesh> <gridfunction>" << std::endl;
+		std::cerr << "./mfemProjector <config-file>" << std::endl;
 		return -2;
 	}
 
-	std::string mesh_file = argv[ 1 ];
-	std::string grid_fn_file = argv[ 2 ];
+	meq::Configuration meq_conf( argv[ 1 ] );
+
+	std::string const & mesh_file = meq_conf.GetFinalMeshFile();
+	std::string const & grid_fn_file = meq_conf.GetPsiFile();
+
+	meq::Domain const & domain = *( meq_conf.GetDomain() );
 
 	const int N_R( 151 );
 	const int N_Z( 151 );
-	double R_min = 0.01;
-	double R_max = 2.5;
-	double Z_min = -7.5;
-	double Z_max = 7.5;
+	double R_min = domain.RMin;
+	double R_max = domain.RMax;
+	double Z_min = domain.ZMin;
+	double Z_max = domain.ZMax;
 	std::vector<double> R_pts( N_R );
 	std::vector<double> Z_pts( N_Z );
 	for ( unsigned int i=0; i < N_R; i++ )
@@ -102,7 +108,7 @@ int main(int argc, char *argv[])
 	std::cout << " Of " << R_pts.size() * Z_pts.size() << " possible points, " << nFound << " were found in the mesh" << std::endl;
 
 	{
-		netCDF::NcFile data_file( "meq.nc", netCDF::NcFile::FileMode::replace );
+		netCDF::NcFile data_file( meq_conf.GetNetCDFFile(), netCDF::NcFile::FileMode::replace );
 		netCDF::NcDim R_dim = data_file.addDim( "R", R_pts.size() );
 		netCDF::NcDim Z_dim = data_file.addDim( "Z", Z_pts.size() );
 		netCDF::NcVar R_var = data_file.addVar( "R", netCDF::NcDouble(), R_dim );

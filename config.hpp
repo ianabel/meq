@@ -19,7 +19,7 @@ class Configuration {
 		std::shared_ptr<Domain> ConfiguredDomain;
 		std::vector<Coil> CoilSet;
 		std::shared_ptr<PlasmaModel> plasma;
-		std::string MeshFile,FinalMeshFile,PsiFile,GradPsiFile;
+		std::string MeshFile,FinalMeshFile,PsiFile,GradPsiFile,NetCDFFile;
 
 	public:
 		Configuration( std::string f_name ) {
@@ -31,6 +31,7 @@ class Configuration {
 				FinalMeshFile = options.at( "FinalMeshFile" ).as_string();
 				PsiFile = options.at( "PsiFile" ).as_string();
 				GradPsiFile = options.at( "GradPsiFile" ).as_string();
+				NetCDFFile = options.at( "NetCDFFile" ).as_string();
 			} catch ( std::out_of_range &err ) {
 				std::cerr << err.what() << std::endl;
 				throw err;
@@ -90,6 +91,7 @@ class Configuration {
 		std::string const& GetFinalMeshFile() const { return FinalMeshFile;};
 		std::string const& GetPsiFile() const { return PsiFile;};
 		std::string const& GetGradPsiFile() const { return GradPsiFile;};
+		std::string const& GetNetCDFFile() const { return NetCDFFile;};
 
 };
 
