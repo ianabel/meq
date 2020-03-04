@@ -39,7 +39,7 @@ mfemCheck: mfemCheck.cpp $(HEADER_DEP) $(MFEM_LIB_FILE)
 	$(CXX) $(MEQ_FLAGS) $(MFEM_FLAGS) -o $@ mfemCheck.cpp $(MFEM_LIBS)
 
 FluxSurfaces: FluxSurfaces.cpp $(HEADER_DEP) $(MFEM_LIB_FILE)
-	$(CXX) $(MEQ_FLAGS) $(MFEM_FLAGS) -o $@ FluxSurfaces.cpp $(MFEM_LIBS)
+	$(CXX) $(MEQ_FLAGS) $(MFEM_FLAGS) -o $@ FluxSurfaces.cpp $(MFEM_LIBS) -lnetcdf_c++4 -lnetcdf
 
 
 sundials/.git: 

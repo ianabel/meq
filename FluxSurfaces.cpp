@@ -5,26 +5,23 @@
  */
 
 
-#include <eigen3/Eigen/Dense>
 #include <functional>
 #include <vector>
 #include <fstream>
 #include <iostream>
+#include <netcdf>
 
 #include "mfem.hpp"
 
 using namespace mfem;
 
-class ControlPoint
-{
-	public:
-		double x,y,dx,dy;
-		ControlPoint( double a, double b, double da, double db ) : x( a ), y( b ), dx( da ), dy( db ) {};
+struct Curve {
+	std::vector<double> x_pts,y_pts,arclen_data;
 };
 
-std::vector<ControlPoint> Trace( double x, double y, mfem::GridFunction const& psi, mfem::GridFunction const& gradPsi, double s_max, double delta_s, double tolerance = 1e-6 )
+Curve Trace( double x, double y, mfem::GridFunction const& psi, mfem::GridFunction const& gradPsi, double s_max, double delta_s, double tolerance = 1e-6 )
 {
-	std::vector<ControlPoint> curve;
+	Curve curve;
 	Mesh* mesh = psi.FESpace()->GetMesh();
 
 	mfem::Array<int> elemId( 1 );
@@ -51,7 +48,9 @@ std::vector<ControlPoint> Trace( double x, double y, mfem::GridFunction const& p
 	double PsiVal = psi.GetValue( currentElement, currentRefPoint );
 	gradPsi.GetVectorValue( currentElement, currentRefPoint, gradPsiVal );
 
-	curve.emplace_back( x, y, gradPsiVal( 0 ), gradPsiVal( 1 ) );
+	curve.x_pts.emplace_back( x );
+	curve.y_pts.emplace_back( y );
+	curve.arclen_data.emplace_back( 0.0 );
 
 	double arcLength = 0;
 
@@ -112,10 +111,10 @@ std::vector<ControlPoint> Trace( double x, double y, mfem::GridFunction const& p
 		tmp -= current;
 		arcLength += ::sqrt( tmp( 0 )*tmp( 0 ) + tmp( 1 )*tmp( 1 ) );
 		current = guess;
-		gradPsi.GetVectorValue( elemId[ 0 ], startPointRef[ 0 ], gradPsiVal );
-		scaling = ::sqrt( gradPsiVal( 0 )*gradPsiVal( 0 ) + gradPsiVal( 1 )*gradPsiVal( 1 ) );
 
-		curve.emplace_back( current( 0 ), current( 1 ), 0, 0 );
+		curve.x_pts.emplace_back( current( 0 ) );
+		curve.y_pts.emplace_back( current( 0 ) );
+		curve.arclen_data.emplace_back( arcLength );
 		tmp = current; 
 		tmp -= start;
 		if ( ( tmp( 0 )*tmp( 0 ) + tmp( 1 )*tmp( 1 ) ) < .01*delta_s*delta_s )
@@ -142,7 +141,6 @@ void HimmelblauGradFn( Vector const &r, Vector& g ) {
 int main( int argc, char** argv )
 {
 
-	std::string mesh_file = argv[ 1 ];
 	// std::string grid_fn_file = argv[ 2 ];
 	// std::string vec_grid_fn_file = argv[ 3 ];
 
@@ -150,7 +148,16 @@ int main( int argc, char** argv )
 	//    Read the mesh from the given mesh file. We can handle triangular,
    //    quadrilateral, tetrahedral, hexahedral, surface and volume meshes with
    //    the same code.
-   Mesh *mesh = new Mesh(5, 5, Element::Type::Triangle, false, 1.0, 1.0, true );
+   Mesh *mesh = new Mesh(5, 5, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
+	auto xform = []( const Vector& in, Vector& out ) { 
+		constexpr double R_min = -6.0;
+		constexpr double R_max = 6.0;
+		constexpr double Z_min = -6.0;
+		constexpr double Z_max = 6.0;
+		out( 0 ) = R_min + in( 0 )*( R_max - R_min );
+		out( 1 ) = Z_min + in( 1 )*( Z_max - Z_min );
+	};
+	mesh->Transform( xform );
 	mesh->Finalize(true, true);
 
 	/*
@@ -163,7 +170,8 @@ int main( int argc, char** argv )
 	vgrid_fs.close();
 	*/
 
-	FiniteElementCollection *dg_coll   = new DG_FECollection(5, 2);
+	int ord = 4;
+	FiniteElementCollection *dg_coll   = new DG_FECollection(ord, 2);
 	FiniteElementSpace *fes = new FiniteElementSpace( mesh, dg_coll );
 	FiniteElementSpace *v_fes = new FiniteElementSpace( mesh, dg_coll, 2 );
 
@@ -176,13 +184,34 @@ int main( int argc, char** argv )
 	Himmelblau.ProjectCoefficient( HimmelblauCf );
 	HimmelblauGrad.ProjectCoefficient( HimmelblauGradCf );
 
-	std::vector< std::vector<ControlPoint> > Curves;
 	double y_0 = 0;
 	double y_1 = 5.5;
 	double h = 0.15;
 
+	std::vector<double> psi_values;
+	for ( double y=y_0; y < y_1; y += h )
+		psi_values.emplace_back( y );
+	
+	netCDF::NcFile data_file( "contours.nc", netCDF::NcFile::FileMode::replace );
+
+	netCDF::NcDim psi_dim = data_file.addDim( "Psi", psi_values.size() );
+	netCDF::NcVar psi_var = data_file.addVar( "Psi", netCDF::ncDouble, psi_dim );
+	psi_var.putVar( psi_values.data() );
+
+	// R(psi_val) , Z(psi_val), s(psi_val) are all VLENs of NC_DOUBLEs,
+	// define that type
+	
+	netCDF::NcVlenType double_vector = data_file.addVlenType( "DoubleVector", netCDF::ncDouble );
+
+	netCDF::NcVar R_var = data_file.addVar( "R", double_vector, psi_dim );
+	netCDF::NcVar Z_var = data_file.addVar( "Z", double_vector, psi_dim );
+	netCDF::NcVar s_var = data_file.addVar( "s", double_vector, psi_dim );
+
+	std::vector< Curve > Curves;
 	for ( double y=y_0; y < y_1; y += h )
 	{
+		//std::vector<ControlPoint> 
+		//nc_vlen_t R_data,Z_data,s_data;
 		Curves.emplace_back( Trace( 0.0, y, Himmelblau, HimmelblauGrad, 50, 0.05 ) );
 	}
 	
