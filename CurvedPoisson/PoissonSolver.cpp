@@ -7,7 +7,7 @@ using namespace mfem;
 PoissonSolver::PoissonSolver(std::shared_ptr<mfem::Mesh> meshPtr, unsigned int order, Func RHS_f ) : 
 	Order( order ),
 	Dim( 2 ),
-	boundary_conditions( nullptr ),
+	dirichlet( nullptr ),neumann( nullptr ),
 	diff_c( 1.0 ),
 	tau_D( 5.0 ),
 	diffusion( 1.0 ),
@@ -19,15 +19,17 @@ PoissonSolver::PoissonSolver(std::shared_ptr<mfem::Mesh> meshPtr, unsigned int o
 	AVarf = new HDGBilinearForm( SolutionSpace->QSpace(), SolutionSpace->USpace(), SolutionSpace->MSpace() );
 
 	AVarf->AddHDGDomainIntegrator( new HDGDomainIntegratorDiffusion( diff_c ) );
-	AVarf->AddHDGFaceIntegrator( new HDGFaceIntegratorDiffusion(tau_D) );
+	AVarf->AddHDGFaceIntegrator( new HDGFaceIntegratorDiffusion( tau_D ) );
 
 	height = SolutionSpace->GetOffsets()[ 3 ];
 	width = height;
 };
 
-void PoissonSolver::SetBCs( Coefficient& coeff )
+void PoissonSolver::SetBCs( mfem::Coefficient* dbc_coeff, int neumann_bc_attr, mfem::Coefficient* nbc_coeff )
 {
-	boundary_conditions = &coeff;
+	dirichlet = dbc_coeff;
+	neumann = nbc_coeff;
+	neumann_attr = neumann_bc_attr;
 }
 
 void PoissonSolver::Solve( Solution &soln )
@@ -47,8 +49,10 @@ void PoissonSolver::Mult( const Vector& qu_in , Vector& qu_out ) const
 	mfem::LinearForm *fform = new mfem::LinearForm;
 
 	this->Postprocess( old_soln );
+
+	StdFunctionCoefficient fcoeff( RHS );
 	
-	fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( old_soln.u_star_variable, RHS ) );
+	fform->AddDomainIntegrator( new DomainLFIntegrator( fcoeff ) );
 	fform->Update(const_cast<mfem::FiniteElementSpace* >( SolutionSpace->USpace() ), rhs_F, 0);
 	fform->Assemble();
 
@@ -60,46 +64,40 @@ void PoissonSolver::Mult( const Vector& qu_in , Vector& qu_out ) const
 	// defined for the facet unknowns.
 	Array<int> ess_bdr(SolutionSpace->Mesh()->bdr_attributes.Max());
 	ess_bdr = 1;
+	// If there are Neumann BCs
+	if ( neumann != nullptr )
+		ess_bdr[ neumann_attr ] = 0;
 
-	new_soln.u_hat_variable.ProjectBdrCoefficient( *boundary_conditions, ess_bdr );
+	// Project the dirichlet values and eliminate
+	new_soln.u_hat_variable.ProjectBdrCoefficient( *dirichlet, ess_bdr );
 
 	GridFunction R(SolutionSpace->QSpace(), rhs_R);
 	GridFunction F(SolutionSpace->USpace(), rhs_F);
 	mfem::Array<mfem::GridFunction*> F_arr( 2 );
 	F_arr[ 0 ] = &R;
 	F_arr[ 1 ] = &F;
-	AVarf->AssembleSC(F_arr, ess_bdr, new_soln.u_hat_variable, 1.0, 1.0, 1);
+	AVarf->AssembleSC(F_arr, ess_bdr, new_soln.u_hat_variable, 1, 0.0, 0.0, 0);
 	AVarf->Finalize();
 
 	SparseMatrix* SC = AVarf->SpMatSC();
 	Vector* SC_RHS = AVarf->VectorSC();
 	// AVarf->VectorSC() provides -C*A^{-1} RF, the RHS for the
 	// Schur complement is  L - C*A^{-1} RF, but L is zero for this case.
+	
+	if ( neumann != nullptr ) {
+		mfem::LinearForm *lform = new mfem::LinearForm();
+		mfem::Vector rhs_L( SolutionSpace->MSpace()->GetVSize() );
+		lform->AddBoundaryIntegrator( new BoundaryLFIntegrator( *neumann, neumann_attr ) );
+		lform->Update(const_cast<mfem::FiniteElementSpace* >( SolutionSpace->MSpace() ), rhs_L, 0 );
+		lform->Assemble();
+
+		*SC_RHS += rhs_L;
+	}
 
 	// Solve the Schur complement system
-	bool use_bicgstab = false;
-	if ( use_bicgstab ) {
-		int maxIter(4000);
-		double rtol(1.e-6);
-		double atol(1.e-12);
-		GSSmoother M(*SC);
-		BiCGSTABSolver solver;
-		solver.SetAbsTol(atol);
-		solver.SetRelTol(rtol);
-		solver.SetMaxIter(maxIter);
-		solver.SetOperator(*SC);
-		solver.SetPrintLevel(-1);
-		solver.SetPreconditioner(M);
-		solver.Mult(*SC_RHS, new_soln.u_hat_variable);
-		if (!solver.GetConverged())
-		{
-			std::cout << "Iterative method failed to converge!" << std::endl;
-		}
-	} else {
-		UMFPackSolver solver;
-		solver.SetOperator( *SC );
-		solver.Mult( *SC_RHS, new_soln.u_hat_variable );
-	}
+	UMFPackSolver solver;
+	solver.SetOperator( *SC );
+	solver.Mult( *SC_RHS, new_soln.u_hat_variable );
 
 	// Reconstruct the solution u and q from the facet solution lambda
 	

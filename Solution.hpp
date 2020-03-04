@@ -101,13 +101,13 @@ namespace meq {
 	class Solution {
 		private:
 			std::shared_ptr<DGSpace> SolutionSpace;
-			bool hasUStar;
 			static const int dim = 2;
 		public:
 			mfem::Vector qu;
 			mfem::Vector u_star;
 			mfem::GridFunction q_variable,u_variable,u_hat_variable;
 			mfem::GridFunction u_star_variable;
+			bool hasUStar;
 
 			Solution( std::shared_ptr<DGSpace> SolSpace )
 				: SolutionSpace( SolSpace )

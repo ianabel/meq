@@ -17,7 +17,8 @@ class PoissonSolver : public mfem::Operator
 		std::shared_ptr<DGSpace> SolutionSpace;
 	protected:
 		// Owned
-		mfem::Coefficient *boundary_conditions;
+		mfem::Coefficient *dirichlet,*neumann;
+		int neumann_attr;
 		mfem::ConstantCoefficient diff_c;
 		mfem::HDGBilinearForm *AVarf;
 
@@ -34,7 +35,7 @@ class PoissonSolver : public mfem::Operator
 
 		mfem::FiniteElementSpace *UStarSpace() const { return SolutionSpace->UStarSpace(); };
 
-		void SetBCs( mfem::Coefficient& coeff );
+		void SetBCs( mfem::Coefficient* dbc_coeff, int neumann_bc_attr, mfem::Coefficient *nbc_coeff );
 
 		virtual void Mult( const mfem::Vector& u_in, mfem::Vector& qu_out ) const override;
 		void Solve( Solution &soln );

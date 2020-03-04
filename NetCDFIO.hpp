@@ -3,17 +3,16 @@
  * Class for storing psi & grad psi in NetCDF file
  */
 
-#include <boost/multi_array.hpp>
-using BoostArray2D = boost::multi_array<double, 2>;
-
-class MEQNetCDF
+class NetCDFConfig
 {
-
 	public:
+		NetCDFConfig( const std::string &file, std::vector<double> const& R_in, std::vector<double> const& Z_in ) :
+			filename( file ),
+			R_dim( R_in ),
+			Z_dim( Z_in )
+		{
+		}
 
-		AddField( 
-
-	private:
+		std::string filename;
 		std::vector<double> R_dim,Z_dim;
-
 }

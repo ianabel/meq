@@ -15,7 +15,8 @@ docs/*.log
 docs/*.pdf
 docs/*.toc
 docs/*.b*
-
+sundials-build/
+sundials-install/
 
 
 

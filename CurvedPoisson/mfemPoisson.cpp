@@ -28,10 +28,35 @@ using namespace mfem;
 static constexpr double pi = boost::math::double_constants::pi;
 
 double uFun_ex(const Vector & x);
+double qNormalFun(const Vector & x);
 void qFun_ex(const Vector & x, Vector & q);
 double fFun(const Vector & x);
 
 double tol = 1e-4;
+
+double qNormalFun( const Vector &pt )
+{
+	double x( pt[ 0 ] );
+	double y( pt[ 1 ] );
+
+	mfem::Vector q( 2 );
+
+	qFun_ex( pt, q );
+	
+
+	if ( x == 0 )
+		return -q[ 0 ];
+	if ( y == 0 )
+		return -q[ 1 ];
+	if ( x == 1 )
+		return q[ 0 ];
+	if ( y == 1 )
+		return q[ 1 ];
+	
+	throw std::logic_error( "FTAGN!" );
+
+	return std::nan( "" );
+}
 
 void TestSolution( std::shared_ptr<mfem::Mesh> mesh, int order )
 {
@@ -42,8 +67,9 @@ void TestSolution( std::shared_ptr<mfem::Mesh> mesh, int order )
 	PoissonSolver Solver( mesh, order, RHS );
 
 	FunctionCoefficient bcFunCoeff( uFun_ex );
+	FunctionCoefficient bcNeumannCoeff( qNormalFun );
 
-	Solver.SetBCs( bcFunCoeff );
+	Solver.SetBCs( &bcFunCoeff, 1, &bcNeumannCoeff );
 
 	Solution soln( Solver.SolutionSpace );
 	soln.Zero(); // Initial guess is 0
@@ -91,7 +117,23 @@ int main(int argc, char *argv[])
 	args.PrintOptions(cout);
 
 	// Mesh generation
-	std::shared_ptr<Mesh> mesh = std::make_shared<Mesh>(4, 4, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
+	std::shared_ptr<Mesh> mesh = std::make_shared<Mesh>(3, 3, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
+	for ( int i=0; i < mesh->GetNBE(); i++ )
+	{
+		Array<int> verts( 2 );
+		mesh->GetBdrElementVertices( i, verts );
+		double *vert1 = mesh->GetVertex( verts[ 0 ] );
+		double *vert2 = mesh->GetVertex( verts[ 1 ] );
+		if ( vert1[ 0 ] == 0 && vert2[ 0 ] == 0 )
+		{
+			mesh->GetBdrElement( i )->SetAttribute( 1 );
+		}
+		else
+		{
+			mesh->GetBdrElement( i )->SetAttribute( 2 );
+		}
+	}
+	mesh->SetAttributes();
 
 	for ( int i=0; i<N_REFINE; i++ )
 		mesh->UniformRefinement();
@@ -109,7 +151,7 @@ double uFun_ex(const Vector & x)
    double xi(x(0));
    double yi(x(1));
 
-	return 1.0 + xi + sin(n*pi*xi)*sin(n*pi*yi);
+	return sin(n*pi*xi)*sin(n*pi*yi);
 }
 
 void qFun_ex(const Vector & x, Vector & q)
@@ -117,8 +159,8 @@ void qFun_ex(const Vector & x, Vector & q)
 	double xi(x(0));
 	double yi(x(1));
 	{
-		q(0) = -diff*1.0 - diff*n*pi*cos(n*pi*xi)*sin(n*pi*yi);
-		q(1) =           - diff*n*pi*sin(n*pi*xi)*cos(n*pi*yi);
+		q(0) = - diff*n*pi*cos(n*pi*xi)*sin(n*pi*yi);
+		q(1) = - diff*n*pi*sin(n*pi*xi)*cos(n*pi*yi);
 	}
 }
 

@@ -78,12 +78,12 @@ int main(int argc, char *argv[])
 
 	meq::Domain const & domain = *( meq_conf.GetDomain() );
 
-	const int N_R( 151 );
-	const int N_Z( 151 );
-	double R_min = domain.RMin;
-	double R_max = domain.RMax;
-	double Z_min = domain.ZMin;
-	double Z_max = domain.ZMax;
+	const int N_R( 51 );
+	const int N_Z( 51 );
+	double R_min = 0.1;
+	double R_max = 0.9;
+	double Z_min = -1.0;
+	double Z_max = 1.0;
 	std::vector<double> R_pts( N_R );
 	std::vector<double> Z_pts( N_Z );
 	for ( unsigned int i=0; i < N_R; i++ )

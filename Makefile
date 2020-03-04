@@ -16,7 +16,7 @@ include $(MFEM_CONFIG)
 SUNDIALS_DIR=$(CURDIR)/sundials-install
 
 CXX = $(MFEM_CXX)
-MEQ_FLAGS = -std=c++17 -Wall
+MEQ_FLAGS = -O3 -std=c++17 -Wall
 
 GSINVERTER_DEP = GSSolver.cpp GSSolver.hpp HDGGSIntegrator.cpp HDGGSIntegrator.hpp CockburnEstimator.hpp FreeBoundary.hpp Solution.hpp
 GSINVERTER_SRC = GSSolver.cpp HDGGSIntegrator.cpp
@@ -38,12 +38,16 @@ mfemProjector: mfemProjector.cpp $(HEADER_DEP) $(MFEM_LIB_FILE)
 mfemCheck: mfemCheck.cpp $(HEADER_DEP) $(MFEM_LIB_FILE)
 	$(CXX) $(MEQ_FLAGS) $(MFEM_FLAGS) -o $@ mfemCheck.cpp $(MFEM_LIBS)
 
+FluxSurfaces: FluxSurfaces.cpp $(HEADER_DEP) $(MFEM_LIB_FILE)
+	$(CXX) $(MEQ_FLAGS) $(MFEM_FLAGS) -o $@ FluxSurfaces.cpp $(MFEM_LIBS)
+
+
 sundials/.git: 
 	git submodule update --init sundials
 
 SUNDIALS_BUILD_DIR = $(CURDIR)/sundials-build
 
-SUNDIALS_CMAKE_OPT = -DCMAKE_INSTALL_PREFIX=$(SUNDIALS_DIR) -DEXAMPLES_INSTALL=off
+SUNDIALS_CMAKE_OPT = -DCMAKE_BUILD_TYPE="Release" -DCMAKE_INSTALL_PREFIX=$(SUNDIALS_DIR) -DEXAMPLES_INSTALL=off
 $(SUNDIALS_BUILD_DIR)/Makefile: sundials/.git
 	cmake $(SUNDIALS_CMAKE_OPT) -B $(SUNDIALS_BUILD_DIR) -S sundials
 
@@ -59,7 +63,7 @@ mfem/.git:
 ifdef DEBUG
 MFEM_CMAKE = -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS_DEBUG="-g -Og" -DMFEM_USE_SUNDIALS=ON -DSUNDIALS_DIR=$(SUNDIALS_DIR)
 else
-MFEM_CMAKE = -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_DEBUG="-O3 -mtune=native -DNDEBUG" -DMFEM_USE_SUNDIALS=ON -DSUNDIALS_DIR=$(SUNDIALS_DIR)
+MFEM_CMAKE = -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS_RELEASE="-O3 -mtune=native -DNDEBUG" -DMFEM_USE_SUNDIALS=ON -DSUNDIALS_DIR=$(SUNDIALS_DIR)
 endif
 
 $(MFEM_CONFIG): mfem/.git $(SUNDIALS_DIR)/include

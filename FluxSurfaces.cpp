@@ -150,7 +150,8 @@ int main( int argc, char** argv )
 	//    Read the mesh from the given mesh file. We can handle triangular,
    //    quadrilateral, tetrahedral, hexahedral, surface and volume meshes with
    //    the same code.
-   Mesh *mesh = new Mesh(mesh_file.c_str(), 1, 1);
+   Mesh *mesh = new Mesh(5, 5, Element::Type::Triangle, false, 1.0, 1.0, true );
+	mesh->Finalize(true, true);
 
 	/*
 	//    Read the grid function

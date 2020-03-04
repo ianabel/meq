@@ -86,20 +86,6 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	const int N_R( 51 );
-	const int N_Z( 51 );
-	double R_min = 0.1;
-	double R_max = 0.9;
-	double Z_min = -1.0;
-	double Z_max = 1.0;
-	std::vector<double> R_pts( N_R );
-	std::vector<double> Z_pts( N_Z );
-	for ( unsigned int i=0; i < N_R; i++ )
-		R_pts[ i ] = R_min + i*( R_max - R_min )/( N_R - 1 );
-	for ( unsigned int i=0; i < N_Z; i++ )
-		Z_pts[ i ] = Z_min + i*( Z_max - Z_min )/( N_Z - 1 );
-
-
 	std::shared_ptr<meq::Configuration> config = nullptr;
 
 	try {
@@ -115,6 +101,22 @@ int main(int argc, char *argv[])
 	}
 
 	std::cout << "Using configuration in " << config_file << std::endl;
+
+	meq::Domain const & domain = *( config->GetDomain() );
+
+	const int N_R( 51 );
+	const int N_Z( 51 );
+	double R_min = 0.1;
+	double R_max = 0.9;
+	double Z_min = -1.0;
+	double Z_max = 1.0;
+	std::vector<double> R_pts( N_R );
+	std::vector<double> Z_pts( N_Z );
+	for ( unsigned int i=0; i < N_R; i++ )
+		R_pts[ i ] = R_min + i*( R_max - R_min )/( N_R - 1 );
+	for ( unsigned int i=0; i < N_Z; i++ )
+		Z_pts[ i ] = Z_min + i*( Z_max - Z_min )/( N_Z - 1 );
+
 
 using BoostArray2D = boost::multi_array<double, 2>;
 

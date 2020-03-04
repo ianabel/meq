@@ -77,8 +77,7 @@ void TestSolution(  TestEqClass const& TestEq, std::shared_ptr<mfem::Mesh> mesh,
 	soln.Prolong();
 
 	{
-		double refined_tol = tol * .01;
-		// refined_tol = tol;
+		double refined_tol = tol;
 
 		NonlinearGSSolver refined_solver( mesh, order, TestEq, N_MAX_ITER, refined_tol, N_ANDERSON, 0 );
 		Solution refined_soln( refined_solver.getSolutionSpace(), soln.qu );
@@ -96,6 +95,8 @@ void TestSolution(  TestEqClass const& TestEq, std::shared_ptr<mfem::Mesh> mesh,
 
 
 }
+
+
 
 int main(int argc, char *argv[])
 {
@@ -122,14 +123,21 @@ int main(int argc, char *argv[])
 	args.PrintOptions(cout);
 
 
-	// Mesh generation
-	std::shared_ptr<Mesh> mesh = std::make_shared<Mesh>(3, 3, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
+	SolovievEquilibrium TestEq( A, C, c1, c2, c3, c4 );
+
+	constexpr double pi = boost::math::double_constants::pi;
+	TSVSoln1 TestEq2( -0.5, 1.15*pi, 1.15 );
+
+	McCarthyEquilibrium MCE( 17.8116, { 0.17795, -0.03291, 1.4934, -0.4818, -1.1759, -0.162, 0.3722, 0.07697, 1.2959, 0.5881, 1.5820, -0.009059, 2.2388, 0.4186, 1.195, -0.4265, 0.8057, -0.004804} );
+
+	
+	std::shared_ptr<Mesh> mesh = std::make_shared<Mesh>(5, 5, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
+
 	auto xform = []( const Vector& in, Vector& out ) { 
 		constexpr double R_min = 0.25;
-		constexpr double R_max = 1.;
+		constexpr double R_max = 1.0;
 		constexpr double Z_min = -1;
-		constexpr double Z_max =  1;
-
+		constexpr double Z_max = +1;
 		out( 0 ) = R_min + in( 0 )*( R_max - R_min );
 		out( 1 ) = Z_min + in( 1 )*( Z_max - Z_min );
 	};
@@ -141,24 +149,37 @@ int main(int argc, char *argv[])
 
 	mesh->Finalize(true, true);
 
-	SolovievEquilibrium TestEq( A, C, c1, c2, c3, c4 );
-
-	constexpr double pi = boost::math::double_constants::pi;
-	TSVSoln1 TestEq2( -0.5, 1.15*pi, 1.15 );
-
-	McCarthyEquilibrium MCE( 17.8116, { 0.17795, -0.03291, 1.4934, -0.4818, -1.1759, -0.162, 0.3722, 0.07697, 1.2959, 0.5881, 1.5820, -0.009059, 2.2388, 0.4186, 1.195, -0.4265, 0.8057, -0.004804} );
-
-	
-
 	std::cout << "----------------------------------------------------------------" << std::endl;
 	std::cout << " Soloviev (No Flow) : " << std::endl;
 	std::cout << "----------------------------------------------------------------" << std::endl;
 	TestSolution( TestEq, mesh, order );
 
+	mesh = nullptr;
+	mesh = std::make_shared<Mesh>(5, 5, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
+	mesh->Transform( xform );
+
+	for ( int i=0; i<N_REFINE; i++ )
+		mesh->UniformRefinement();
+
+	mesh->Finalize(true, true);
+
+
+
+
 	std::cout << "----------------------------------------------------------------" << std::endl;
 	std::cout << " Tonatiuh Manufactured Solution: " << std::endl;
 	std::cout << "----------------------------------------------------------------" << std::endl;
 	TestSolution( TestEq2, mesh, order );
+	
+	mesh = nullptr;
+	mesh = std::make_shared<Mesh>(5, 5, Element::Type::TRIANGLE, false, 1.0, 1.0, true );
+	mesh->Transform( xform );
+
+	for ( int i=0; i<N_REFINE; i++ )
+		mesh->UniformRefinement();
+
+	mesh->Finalize(true, true);
+
 
 	std::cout << "----------------------------------------------------------------" << std::endl;
 	std::cout << " McCarthy Equilibrium: " << std::endl;
