@@ -50,7 +50,7 @@ double GreensFunctionSolution( std::vector<meq::Coil> const & CoilSet, std::pair
 			mfem::Vector ptStarVec( 2 );
 			ptStarVec( 0 ) = R;
 			ptStarVec( 1 ) = z;
-			return meq::GreensFunction( ptVec, ptStarVec )/R;
+			return meq::GreensFunction( ptVec, ptStarVec );
 		};
 
 		auto IntegrateZ = [&]( double R, double Z_min, double Z_max ){
@@ -63,7 +63,7 @@ double GreensFunctionSolution( std::vector<meq::Coil> const & CoilSet, std::pair
 			{
 				// Integrate over rectangle [ R_min + i*delta_R, R_min + (i+1)*delta_R ] x [ Z_min + j*delta_z, Z_min + (j+1)*delta_z ]
 				auto IntegratedInZ = std::bind( IntegrateZ, std::placeholders::_1, Z_min + j*delta_z, Z_min + ( j+1 )*delta_z );
-				partial_integral += Integrator::integrate( IntegratedInZ, R_min + i*delta_R, R_min + ( i+1 )*delta_R );
+				partial_integral += Integrator::integrate( IntegratedInZ, R_min + i*delta_R, R_min + ( i + 1 )*delta_R );
 			}
 
 		result += partial_integral * coil.J;
@@ -101,6 +101,11 @@ int main(int argc, char *argv[])
 	}
 
 	std::cout << "Using configuration in " << config_file << std::endl;
+
+	for ( auto const & coil : config->GetCoils() )
+	{
+		std::cout << "Coil at (" << coil.R << "," << coil.z << ")  dimensions (" << coil.w << "," << coil.h << ") and current " << coil.J << std::endl;
+	}
 
 	meq::Domain const & domain = *( config->GetDomain() );
 
@@ -141,6 +146,8 @@ using BoostArray2D = boost::multi_array<double, 2>;
 		psi.putVar( data.data() );
 		data_file.close();
 	}
+
+	std::cout << GreensFunctionSolution(  config->GetCoils(), {.5,0.0} ) << std::endl;
 
 	return 0;
 }

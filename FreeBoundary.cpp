@@ -185,9 +185,6 @@ double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln,
 			test_point.x = 1; test_point.y = 0; test_point.z = 0; test_point.weight = 0;
 			tr->Face->Transform( test_point, b );
 
-
-
-
 			b -= a;
 
 			mfem::Vector x( 2 );
@@ -205,9 +202,6 @@ double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln,
 
 			if ( ( x( 0 )*b( 1 ) == x( 1 )*b( 0 ) ) && ( s >= -1e-3 && s <= 1.001 ) )
 			{
-
-
-
 				// Takes values in [0,1]
 				auto IntFunc = [&]( double y ) {
 
