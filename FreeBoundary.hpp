@@ -10,6 +10,8 @@ namespace meq {
 	double SinhTanhQuad( double a, double b, std::function<double( double )> F, unsigned int N=20 ) ;
 	double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln, mfem::Vector const& r );
 	double GreensFunctionPsi( mfem::Mesh * mesh, mfem::Vector r, std::function<double( const mfem::Vector& )> const& j_coil );
+	double PsiFromZeroBC( mfem::FiniteElementSpace *q_space, mfem::FiniteElementSpace *u_space, mfem::Vector & zero_soln, mfem::Vector const& r );
+
 
 
 	class GreensFunctionBoundaryCoefficient : public mfem::Coefficient

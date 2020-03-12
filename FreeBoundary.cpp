@@ -68,80 +68,9 @@ double GreensFunction( mfem::Vector const& r, mfem::Vector const& r_star )
 	return answer;
 }
 
-/*
-double GreensFunctionNonSingularPart( mfem::Vector const& r, mfem::Vector const& r_star )
-{
-	double R = r[ 0 ];
-	double R_star = r_star[ 0 ];
-	double Z = r[ 1 ];
-	double Z_star = r_star[ 1 ];
-
-	double k_squared = 4 * R * R_star / ( ( R + R_star )*( R + R_star ) + ( Z - Z_star )*( Z - Z_star ) );
-	double k = ::sqrt( k_squared );
-
-	
-
-	// If not near the singular point, the subtraction doesn't cause significant loss of precision
-	// The only singular property comes from K(x)
-	
-	double km1 = 1 - k_squared;
-	double skm1 = ::sqrt( km1 );
-	double K_value = ( boost::math::ellint_1( k ) + std::log( km1 )*boost::math::ellint_1( skm1 )/boost::math::double_constants::pi + std::log( 4 ) );
-	if ( std::fabs( km1 ) < 1e-3 )
-	{
-		const double c1 = ( std::log( 4 ) - 1.0 ) / 4;
-		const double c2 = 3.0 * ( 6.0 * std::log( 4 ) - 7.0 ) / 128;
-		const double c3 = 5.0 * ( 30.0 * std::log( 4 ) - 37.0 ) / 1536;
-		const double c4 = 35.0 * ( 420.0 * std::log( 4 ) - 533.0 ) / 196608;
-		const double c5 = 63.0 * ( 1260.0 * std::log( 4 ) - 1627.0 ) / 1310720;
-
-
-		K_value = km1 * ( c1 + km1 * ( c2 + km1 * ( c3 + km1 * ( c4 + km1 * c5 ) ) ) );
-	}
-
-	return ( 1.0 / boost::math::double_constants::two_pi ) * ::sqrt( ( R + R_star )*( R + R_star ) + ( Z - Z_star )*( Z - Z_star ) ) * ( ( 1.0 - 0.5*k_squared )*K_value - boost::math::ellint_2( k ) );
-}
-
-double GreensFunctionSingularPart( mfem::Vector const& r, mfem::Vector const& r_star )
-{
-	double R = r[ 0 ];
-	double R_star = r_star[ 0 ];
-	double Z = r[ 1 ];
-	double Z_star = r_star[ 1 ];
-
-	double k_squared = 4 * R * R_star / ( ( R + R_star )*( R + R_star ) + ( Z - Z_star )*( Z - Z_star ) );
-	double k = ::sqrt( k_squared );
-	
-	double km1 = 1 - k_squared;
-	double skm1 = ::sqrt( km1 );
-
-	double K_value = std::log( 4 ) + std::log( 1 - k );
-
-}
-*/
-
 const double xk[] = {0, 0.1943570033249354, 0.3772097381640342, 0.5391467053879678, 0.6742714922484358, 0.7806074389832003, 0.8595690586898966, 0.9148792632645746, 0.9513679640727469, 0.9739668681956774, 0.9870405605073769, 0.9940555066314021, 0.9975148564572244, 0.9990651964557858, 0.9996882640283532, 0.9999093846951440, 0.9999774771924616, 0.9999953160412205, 0.9999992047371147, 0.9999998927816124, 0.9999999888756649, 0.9999999991427051, 0.999999999952856, 0.999999999998232, 0.999999999999957};
 
 const double wk[] = {0.1963495408493621,0.1904104648293382,0.173701844905907,0.1491828782311446,0.1207470724265376,0.09217973104519348,0.06638478442850675,0.04505767730866796,0.02875279931434859,0.01717776346664597,0.009548217946354038,0.004896875686700097,0.00229289587374098,0.0009678251282580301,0.0003628147184876642,0.0001187433505354336,0.00003327506421908961,7.81031990509301e-6,1.49796267039634e-6,2.282915074213832e-7,2.67890056961788e-8,2.335910283592051e-9,1.453895726781973e-10,6.172317347078991e-12,1.697723034317386e-13};
-
-
-double SinhTanhQuad( double a, double b, std::function<double( double )> F, unsigned int N )
-{
-	double L = ( b - a ) /2.;
-	double quad_ans = 0;
-	quad_ans = F( L*( 1. + xk[ 0 ] ) + a )*wk[ 0 ];
-	for ( unsigned int i=1; i < N; i++ )
-	{
-		// If we get so close that the quadrature points are indistinguishable
-		// from the boundaries, stop.
-		if ( L*( 1. + xk[ i ] ) + a == b )
-			break;
-		else if ( L*( 1. - xk[ i ] ) + a == a )
-			break;
-		quad_ans += wk[ i ]*( F( L*( 1. + xk[ i ] ) + a ) + F( L*( 1. - xk[ i ] ) + a ) );
-	}
-	return quad_ans * L;
-};
 
 double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln, mfem::Vector const& r )
 {
@@ -177,6 +106,7 @@ double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln,
 
 			// Boundary face
 			// check if it's the singular one.
+			
 			mfem::Vector a( 2 );
 			mfem::Vector b( 2 );
 			mfem::IntegrationPoint test_point;
@@ -185,68 +115,119 @@ double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln,
 			test_point.x = 1; test_point.y = 0; test_point.z = 0; test_point.weight = 0;
 			tr->Face->Transform( test_point, b );
 
-			b -= a;
+			mfem::Vector n( 2 );
+			n = b;
+			n -= a;
 
 			mfem::Vector x( 2 );
 			x = r;
 			x -= a;
 
 			double s;
-			if ( b( 0 ) == 0 )
-				s = x( 1 ) / b( 1 );
+			if ( n( 0 ) == 0 )
+				s = x( 1 ) / n( 1 );
 			else
-				s = x( 0 ) / b( 0 );
+				s = x( 0 ) / n( 0 );
 
-			if ( b.Norml2() == 0 )
+			if ( n.Norml2() == 0 )
 				throw std::logic_error( "This is not on!!" );
 
-			if ( ( x( 0 )*b( 1 ) == x( 1 )*b( 0 ) ) && ( s >= -1e-3 && s <= 1.001 ) )
+			double SinhTanhEps = 1e-6;
+			if ( ( x( 0 )*n( 1 ) == x( 1 )*n( 0 ) ) && ( s >= -1e-3 && s <= 1.001 ) )
 			{
-				// Takes values in [0,1]
-				auto IntFunc = [&]( double y ) {
-
-					IntegrationPoint ip_x;
-					ip_x.x = y; ip_x.y = 0; ip_x.z = 0;
-					ip_x.weight = 1;
-					tr->Face->SetIntPoint(&ip_x);
-
-					mfem::Vector normal( 2 );
-					mfem::CalcOrtho( tr->Face->Jacobian(), normal );
-
-					mfem::IntegrationPoint eip_L;
-					tr->Loc1.Transform(ip_x, eip_L);
-
-					mfem::Vector r_star( 2 );
-
-					tr->Face->Transform( ip_x, r_star );
-					double GF_val = GreensFunction( r, r_star );
-
-					mfem::Vector q_value( 2 );
-					q_fn.GetVectorValue( tr->Elem1No, eip_L, q_value );
-
-					return GF_val * ( q_value * normal );
-				};
-
-
-				if ( s > 0.0 && s < 1.0 )
+				if ( s >= SinhTanhEps && s <= 1.0 - SinhTanhEps )
 				{
-					double ExpInt;
-					double LInt = SinhTanhQuad( 0.0, s, IntFunc, 5 );
-					double RInt = SinhTanhQuad( s, 1.0, IntFunc, 5 );
-					ExpInt = LInt + RInt;
-					Answer += ExpInt;
+					double LeftInt = 0.0,RightInt = 0.0;
+					int N_sinhtanh = 16;
+					// 'left' integral is on [0,s]
+					// 'right' integral is on [s,1]
+					for ( int i = -N_sinhtanh; i <= N_sinhtanh; i++ )
+					{
+						mfem::IntegrationPoint ipL,ipR;
+						ipL.y = 0; ipL.z = 0;
+						ipR.y = 0; ipR.z = 0;
+						if ( i < 0 )
+						{
+							ipL.x = s*( 1.0 - xk[ abs( i ) ] )/2.0; 
+							ipR.x = ( 1.0 + s - ( 1.0 - s )*xk[ abs( i ) ] )/2.0; 
+						}
+						else
+						{
+							ipL.x = s*( 1.0 + xk[ abs( i ) ] )/2.0; 
+							ipR.x = ( 1.0 + s + ( 1.0 - s )*xk[ abs( i ) ] )/2.0; 
+						}
+						// eip_L is inside the boundary cell, but is on the edge of it that corresponds
+						// to the Boundary Face that we are integrating over
+						mfem::IntegrationPoint eip_L;
+						mfem::IntegrationPoint eip_R;
+						tr->Loc1.Transform(ipL, eip_L);
+						tr->Loc1.Transform(ipR, eip_R);
+						
+						w = wk[ abs( i ) ] / 2.0;
+						mfem::Vector normal( dim );
+						mfem::Vector r_star( dim );
+						mfem::Vector q_value( 2 );
+						// For ipL
+						tr->Face->SetIntPoint(&ipL);
+						mfem::CalcOrtho( tr->Face->Jacobian(), normal );
+						tr->Face->Transform( ipL, r_star );
+
+						f_val = GreensFunction( r, r_star );
+						q_fn.GetVectorValue( tr->Elem1No, eip_L, q_value );
+						LeftInt += ( w * s ) * f_val * ( q_value * normal );
+
+						// For ipR
+						tr->Face->SetIntPoint(&ipR);
+						mfem::CalcOrtho( tr->Face->Jacobian(), normal );
+						tr->Face->Transform( ipR, r_star );
+
+						f_val = GreensFunction( r, r_star );
+						q_fn.GetVectorValue( tr->Elem1No, eip_R, q_value );
+						RightInt += ( w * ( 1.0 - s ) ) * f_val * ( q_value * normal );
+					}
+					Answer += LeftInt + RightInt;
 				}
-				else if ( s <= 0 || s >= 1 )
+				else 
 				{
-					double ExpInt = SinhTanhQuad( 0.0, 1, IntFunc, 5 );
-					Answer += ExpInt;
-				}
-				else {
-					throw std::logic_error( "Kapow" );
+					double tmp_ans = 0;
+					int N_sinhtanh = 16;
+					for ( int i = -N_sinhtanh; i <= N_sinhtanh; i++ )
+					{
+						mfem::IntegrationPoint ip;
+						ip.y = 0; ip.z = 0;
+						if ( i < 0 )
+							ip.x = ( 1.0 - xk[ abs( i ) ] )/2.0; 
+						else
+							ip.x = ( 1.0 + xk[ abs( i ) ] )/2.0;
+						// eip_L is inside the boundary cell, but is on the edge of it that corresponds
+						// to the Boundary Face that we are integrating over
+						mfem::IntegrationPoint eip_L;
+						tr->Loc1.Transform(ip, eip_L);
+						tr->Face->SetIntPoint(&ip);
+						mfem::Vector normal( dim );
+						// Normal contains the factor of det(J) that arises in the change of 
+						// variables in the integration
+						mfem::CalcOrtho( tr->Face->Jacobian(), normal );
+						mfem::Vector r_star( dim );
+						tr->Face->Transform( ip, r_star );
+
+						f_val = GreensFunction( r, r_star );
+
+						w = wk[ abs( i ) ] / 2.0;
+
+						mfem::Vector q_value( 2 );
+						q_fn.GetVectorValue( tr->Elem1No, eip_L, q_value );
+
+						tmp_ans += w * f_val * ( q_value * normal );
+
+					}
+
+					Answer += tmp_ans;
 				}
 			}
-			else 
+			else
 			{
+				// Not singular, just use MFEM's gaussian quadrature.
 				const mfem::IntegrationRule *ir = nullptr;
 				int order = 2 * bdr_cell.GetOrder() + 2;
 				if (bdr_cell.GetMapType() == FiniteElement::VALUE)
@@ -257,14 +238,16 @@ double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln,
 
 				double tmp_ans = 0.0;
 
-
 				for (int p = 0; p < ir->GetNPoints(); p++)
 				{
 					const mfem::IntegrationPoint &ip = ir->IntPoint(p);
+
+
 					// eip_L is inside the boundary cell, but is on the edge of it that corresponds
 					// to the Boundary Face that we are integrating over
 					mfem::IntegrationPoint eip_L;
 					tr->Loc1.Transform(ip, eip_L);
+
 					tr->Face->SetIntPoint(&ip);
 					mfem::Vector normal( dim );
 					// Normal contains the factor of det(J) that arises in the change of 
@@ -317,6 +300,34 @@ double GreensFunctionPsi( mfem::Mesh * mesh, mfem::Vector r, std::function<doubl
 	return Answer;
 }
 
+double PsiFromZeroBC( mfem::FiniteElementSpace *q_space, mfem::FiniteElementSpace *u_space, mfem::Vector & zero_soln, mfem::Vector const& r )
+{
+
+	mfem::Mesh *mesh = q_space->GetMesh();
+	double Answer = 0;
+
+	GridFunction q_fn,u_fn;
+	q_fn.MakeRef( q_space, zero_soln, 0 );
+	u_fn.MakeRef( u_space, zero_soln, q_space->GetVSize() );
+
+	Answer  = BoundaryPsi( q_space, zero_soln, r );
+
+	double psiVal = 0.0;
+
+	{
+		mfem::DenseMatrix ptMat( 2, 1 );
+		ptMat( 0, 0 ) = r( 0 );
+		ptMat( 1, 0 ) = r( 1 );
+		mfem::Array<int> elem_ids( 1 );
+		mfem::Array< mfem::IntegrationPoint > ips( 1 );
+		mesh->FindPoints( ptMat, elem_ids, ips, false );
+
+		psiVal = u_fn.GetValue( elem_ids[ 0 ], ips[ 0 ] );
+	}
+
+	return Answer + psiVal;
+}
+
 double GreensFunctionBoundaryCoefficient::Eval( mfem::ElementTransformation &T, const mfem::IntegrationPoint &ip )
 {
 	if ( T.GetGeometryType() != mfem::Geometry::Type::SEGMENT )
@@ -326,11 +337,5 @@ double GreensFunctionBoundaryCoefficient::Eval( mfem::ElementTransformation &T, 
 	return 2*BoundaryPsi( Q_space, psi_hat, pt );
 }
 
-double FullGreensFunctionBoundaryCoefficient::Eval( mfem::ElementTransformation &T, const mfem::IntegrationPoint &ip ) 
-{
-	mfem::Vector pt( 3 );
-	T.Transform( ip, pt );
-	return GreensFunctionPsi( mesh, pt, j_tor );
-}
 
 }

@@ -1,0 +1,52 @@
+
+%
+% Copyright Ian G. Abel 2018
+% 
+
+\documentclass[prb,aps,amssymb,amsmath,a4paper]{revtex4}
+\usepackage{graphicx}
+\usepackage{bm,ulem,color}
+
+\sloppy
+
+\include{gyrokinetics-macros}
+\providecommand{\coll}[4]{ \ensuremath{C_{#1\,#2}[#3,#4]}}
+\providecommand{\lorentz}[1]{\ensuremath{\mathcal{L}}[#1]}
+\providecommand{\nuD}[2]{\ensuremath{\nu_{D}^{#1\,#2}}}
+\providecommand{\nup}[2]{\ensuremath{\nu_{\parallel}^{#1\,#2}}}
+\providecommand{\nus}[2]{\ensuremath{\nu_{s}^{#1\,#2}}}
+\providecommand{\nu}[2]{\ensuremath{\nu_{#1\,#2}}}
+\providecommand{\injeng}{\varepsilon_*}
+\providecommand{\injvel}{v_*}
+\providecommand{\grad}{\bm{\nabla}}
+\begin{document}
+
+\date{\today}
+
+\title{The MEQ Algorithm}
+
+\maketitle
+
+\section{Conventional Formulation}
+\begin{eqnarray}
+\bm{q} &= \grad \psi / R \\
+-\dv \bm{q}  &= F(R,z,\psi) / R\\
+\psi &= \phi_h 
+\end{eqnarray}
+But we need to turn $\phi_h$ into a linear operator on $\bm{q}$ for implementation purposes.
+
+Really $\phi_h$ is a vector of values at the nodes on the edge element. However, at a given node $\bm{x}$
+\begin{equation}
+\phi_h(\bm{x}) = - \int_0^{l(\bm{x})} R(s) \bm{q}( \bm{x} + \bm{t}(x) s )\cdot\bm{t}(\bm{x}) ds.
+\end{equation}
+
+So, for all points on an edge $\partial K$, we store an $l$ and a $\bm{t}$.
+Using gaussian integration along the line,
+		\begin{equation}
+		\phi_h = - \sum_j w_j R(s_j/l) \bm{q}(\bm{x}_j)\cdot\bm{t} l
+		\label{<++>}
+		\end{equation}
+		where now $s_j$ is on $(0,1)$. 
+
+\end{document}
+

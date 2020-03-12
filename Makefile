@@ -43,7 +43,7 @@ FluxSurfaces: FluxSurfaces.cpp $(HEADER_DEP) $(MFEM_LIB_FILE)
 
 
 sundials/.git: 
-	git submodule update --init sundials
+	git submodule update --remote --init sundials
 
 SUNDIALS_BUILD_DIR = $(CURDIR)/sundials-build
 
@@ -55,10 +55,10 @@ $(SUNDIALS_DIR)/include: $(SUNDIALS_BUILD_DIR)/Makefile
 	rm -rf $(SUNDIALS_DIR); mkdir $(SUNDIALS_DIR); make $(MAKEFLAGS) -C $(SUNDIALS_BUILD_DIR) install;
 
 toml11/toml.hpp:
-	git submodule update --init toml11;
+	git submodule update --remote --init toml11;
 
 mfem/.git:
-	git submodule update --init mfem;
+	git submodule update --remote --init mfem;
 
 ifdef DEBUG
 MFEM_CMAKE = -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS_DEBUG="-g -Og" -DMFEM_USE_SUNDIALS=ON -DSUNDIALS_DIR=$(SUNDIALS_DIR)
@@ -74,7 +74,6 @@ $(MFEM_LIB_FILE): $(MFEM_CONFIG)
 
 vacuum-test: VacuumGFSoln.cpp FreeBoundary.cpp $(HEADER_DEP)
 	$(CXX) $(MEQ_FLAGS) $(MFEM_FLAGS) -o $@ VacuumGFSoln.cpp FreeBoundary.cpp $(MFEM_LIBS) -lnetcdf_c++4 -lnetcdf
-
 
 vacuum-mesh-test: VacuumMeshSoln.cpp FreeBoundary.cpp $(HEADER_DEP)
 	$(CXX) $(MEQ_FLAGS) $(MFEM_FLAGS) -o $@ VacuumGFSoln.cpp FreeBoundary.cpp $(MFEM_LIBS)

@@ -113,7 +113,7 @@ Curve Trace( double x, double y, mfem::GridFunction const& psi, mfem::GridFuncti
 		current = guess;
 
 		curve.x_pts.emplace_back( current( 0 ) );
-		curve.y_pts.emplace_back( current( 0 ) );
+		curve.y_pts.emplace_back( current( 1 ) );
 		curve.arclen_data.emplace_back( arcLength );
 		tmp = current; 
 		tmp -= start;
@@ -207,23 +207,37 @@ int main( int argc, char** argv )
 	netCDF::NcVar Z_var = data_file.addVar( "Z", double_vector, psi_dim );
 	netCDF::NcVar s_var = data_file.addVar( "s", double_vector, psi_dim );
 
-	std::vector< Curve > Curves;
-	for ( double y=y_0; y < y_1; y += h )
+	std::vector< Curve > Curves( psi_values.size() );
+	for ( size_t j = 0; j < psi_values.size(); j++ )
 	{
-		//std::vector<ControlPoint> 
-		//nc_vlen_t R_data,Z_data,s_data;
-		Curves.emplace_back( Trace( 0.0, y, Himmelblau, HimmelblauGrad, 50, 0.05 ) );
+		Curves[ j ] = Trace( 0.0, psi_values[ j ], Himmelblau, HimmelblauGrad, 50, 0.05 );
 	}
 	
 	std::ofstream DataFile( "contours.data" );
-	for ( auto const &curve : Curves )
+	for ( size_t j = 0; j < Curves.size(); j++ )
 	{
-		for ( auto const &p : curve )
-			DataFile << p.x << "\t" << p.y << std::endl;
+		Curve& curve = Curves[ j ];
+
+		size_t n_pts = curve.x_pts.size();
+		if ( curve.y_pts.size() != n_pts )
+			throw std::logic_error( "VLENs should be the same length" );
+		nc_vlen_t r_data{n_pts,curve.x_pts.data()},z_data{n_pts,curve.y_pts.data()},s_data{n_pts,curve.arclen_data.data()};
+		std::vector<size_t> index{j};
+
+		R_var.putVar( index, &r_data );
+		Z_var.putVar( index, &z_data );
+		s_var.putVar( index, &s_data );
+
+		for ( size_t i=0; i < n_pts; i++ )
+		{
+			DataFile << curve.x_pts[ i ] << "\t" << curve.y_pts[ i ] << std::endl;
+		}
 		DataFile << std::endl;
 		DataFile << "# " << std::endl;
 		DataFile << std::endl;
 	}
+
+	data_file.close();
 
 	DataFile.close();
 	return 0;

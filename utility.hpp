@@ -53,7 +53,7 @@ class Jtor {
 			Coils.insert( Coils.end(), il );
 		};
 
-		// Returns R*j_tor
+		// Returns j_tor
 		double operator()( mfem::Vector const& pt ) {
 			double JtorPt = 0.0;
 			for ( auto const &coil : Coils )
@@ -61,7 +61,7 @@ class Jtor {
 				if ( coil.Contains( pt ) )
 					JtorPt += coil.J;
 			}
-			return pt( 0 ) * JtorPt;
+			return JtorPt;
 		};
 };
 
