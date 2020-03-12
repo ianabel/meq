@@ -14,7 +14,6 @@ namespace meq {
 
 int main( int argc, char** argv )
 {
-	unsigned int CellsPerCoilEdge = 4;
 	std::string configFile;
 	if ( argc == 1 )
 	{

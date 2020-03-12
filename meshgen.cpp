@@ -10,7 +10,7 @@ namespace meq {
 
 void GenerateMesh( std::shared_ptr<meq::Configuration> config )
 {
-	unsigned int CellsPerCoilEdge = 4;
+	unsigned int CellsPerCoilEdge = 1;
 	std::shared_ptr<meq::Domain> domain = config->GetDomain();
 
 	char opts[] = "-format vtk";

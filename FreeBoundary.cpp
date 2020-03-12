@@ -68,9 +68,7 @@ double GreensFunction( mfem::Vector const& r, mfem::Vector const& r_star )
 	return answer;
 }
 
-const double xk[] = {0, 0.1943570033249354, 0.3772097381640342, 0.5391467053879678, 0.6742714922484358, 0.7806074389832003, 0.8595690586898966, 0.9148792632645746, 0.9513679640727469, 0.9739668681956774, 0.9870405605073769, 0.9940555066314021, 0.9975148564572244, 0.9990651964557858, 0.9996882640283532, 0.9999093846951440, 0.9999774771924616, 0.9999953160412205, 0.9999992047371147, 0.9999998927816124, 0.9999999888756649, 0.9999999991427051, 0.999999999952856, 0.999999999998232, 0.999999999999957};
-
-const double wk[] = {0.1963495408493621,0.1904104648293382,0.173701844905907,0.1491828782311446,0.1207470724265376,0.09217973104519348,0.06638478442850675,0.04505767730866796,0.02875279931434859,0.01717776346664597,0.009548217946354038,0.004896875686700097,0.00229289587374098,0.0009678251282580301,0.0003628147184876642,0.0001187433505354336,0.00003327506421908961,7.81031990509301e-6,1.49796267039634e-6,2.282915074213832e-7,2.67890056961788e-8,2.335910283592051e-9,1.453895726781973e-10,6.172317347078991e-12,1.697723034317386e-13};
+#include "GaussLog10.hpp"
 
 double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln, mfem::Vector const& r )
 {
@@ -132,38 +130,35 @@ double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln,
 			if ( n.Norml2() == 0 )
 				throw std::logic_error( "This is not on!!" );
 
-			double SinhTanhEps = 1e-6;
-			if ( ( x( 0 )*n( 1 ) == x( 1 )*n( 0 ) ) && ( s >= -1e-3 && s <= 1.001 ) )
+			double EndpointDistance = 1e-5;
+			if ( ( x( 0 )*n( 1 ) == x( 1 )*n( 0 ) ) && ( s >= -EndpointDistance && s <= 1.0 + EndpointDistance ) )
 			{
-				if ( s >= SinhTanhEps && s <= 1.0 - SinhTanhEps )
+				if ( s >= EndpointDistance && s <= 1.0 - EndpointDistance )
 				{
 					double LeftInt = 0.0,RightInt = 0.0;
-					int N_sinhtanh = 16;
+
 					// 'left' integral is on [0,s]
 					// 'right' integral is on [s,1]
-					for ( int i = -N_sinhtanh; i <= N_sinhtanh; i++ )
+					// singularity is at s
+					for ( unsigned int i = 0; i < N_ExtendedGaussLog; i++ )
 					{
 						mfem::IntegrationPoint ipL,ipR;
 						ipL.y = 0; ipL.z = 0;
 						ipR.y = 0; ipR.z = 0;
-						if ( i < 0 )
-						{
-							ipL.x = s*( 1.0 - xk[ abs( i ) ] )/2.0; 
-							ipR.x = ( 1.0 + s - ( 1.0 - s )*xk[ abs( i ) ] )/2.0; 
-						}
-						else
-						{
-							ipL.x = s*( 1.0 + xk[ abs( i ) ] )/2.0; 
-							ipR.x = ( 1.0 + s + ( 1.0 - s )*xk[ abs( i ) ] )/2.0; 
-						}
-						// eip_L is inside the boundary cell, but is on the edge of it that corresponds
+
+						// Extended Gauss-log quadrature designed with 
+						// singularity at 0. So for left integral, we have to use 1-x 
+						// rather than x as our variable
+						ipL.x = s*( 1.0 - ExtendedGaussLog_xk[ i ] );
+						ipR.x = s + ( 1.0 - s )*ExtendedGaussLog_xk[ i ];
+
+						// eip_L and eip_R are inside the boundary cell, but is on the edge of it that corresponds
 						// to the Boundary Face that we are integrating over
 						mfem::IntegrationPoint eip_L;
 						mfem::IntegrationPoint eip_R;
 						tr->Loc1.Transform(ipL, eip_L);
 						tr->Loc1.Transform(ipR, eip_R);
 						
-						w = wk[ abs( i ) ] / 2.0;
 						mfem::Vector normal( dim );
 						mfem::Vector r_star( dim );
 						mfem::Vector q_value( 2 );
@@ -174,7 +169,7 @@ double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln,
 
 						f_val = GreensFunction( r, r_star );
 						q_fn.GetVectorValue( tr->Elem1No, eip_L, q_value );
-						LeftInt += ( w * s ) * f_val * ( q_value * normal );
+						LeftInt += ( ExtendedGaussLog_wk[ i ] * s ) * f_val * ( q_value * normal );
 
 						// For ipR
 						tr->Face->SetIntPoint(&ipR);
@@ -183,22 +178,25 @@ double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln,
 
 						f_val = GreensFunction( r, r_star );
 						q_fn.GetVectorValue( tr->Elem1No, eip_R, q_value );
-						RightInt += ( w * ( 1.0 - s ) ) * f_val * ( q_value * normal );
+						RightInt += ( ExtendedGaussLog_wk[ i ] * ( 1.0 - s ) ) * f_val * ( q_value * normal );
 					}
 					Answer += LeftInt + RightInt;
 				}
 				else 
 				{
 					double tmp_ans = 0;
-					int N_sinhtanh = 16;
-					for ( int i = -N_sinhtanh; i <= N_sinhtanh; i++ )
+					for ( unsigned int i = 0; i < N_ExtendedGaussLog; i++ )
 					{
+
 						mfem::IntegrationPoint ip;
 						ip.y = 0; ip.z = 0;
-						if ( i < 0 )
-							ip.x = ( 1.0 - xk[ abs( i ) ] )/2.0; 
+						if ( s <= EndpointDistance ) // Singularity is at 0
+							ip.x = ExtendedGaussLog_xk[ i ];
+						else if ( s >= 1.0 - EndpointDistance ) // Singularity is at 1
+							ip.x = 1.0 - ExtendedGaussLog_xk[ i ];
 						else
-							ip.x = ( 1.0 + xk[ abs( i ) ] )/2.0;
+							throw std::logic_error( "Cannot Happen" );
+
 						// eip_L is inside the boundary cell, but is on the edge of it that corresponds
 						// to the Boundary Face that we are integrating over
 						mfem::IntegrationPoint eip_L;
@@ -213,13 +211,11 @@ double BoundaryPsi( mfem::FiniteElementSpace *q_space, mfem::Vector & zero_soln,
 
 						f_val = GreensFunction( r, r_star );
 
-						w = wk[ abs( i ) ] / 2.0;
 
 						mfem::Vector q_value( 2 );
 						q_fn.GetVectorValue( tr->Elem1No, eip_L, q_value );
 
-						tmp_ans += w * f_val * ( q_value * normal );
-
+						tmp_ans += ExtendedGaussLog_wk[ i ] * f_val * ( q_value * normal );
 					}
 
 					Answer += tmp_ans;
