@@ -39,8 +39,7 @@ int Project( Mesh * mesh, GridFunction const &grid_func, std::vector<double> con
 	{
 		ElementTransformation *Tr = mesh->GetElementTransformation( iElem );
 
-		Vector TestVec( 3 );
-		TestVec( 2 ) = 0.0; // MFEM is implicitly 3D in places
+		Vector TestVec( 2 );
 		for ( unsigned int i = 0; i < N_X; i++ )
 		{
 			TestVec( 0 ) = X_coords[ i ];

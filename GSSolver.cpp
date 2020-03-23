@@ -46,7 +46,7 @@ void GSSolver::Mult( const Vector& qu_in , Vector& qu_out ) const
 	mfem::LinearForm *fform = new mfem::LinearForm;
 
 
-	fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( old_soln.u_variable, PlasmaRHS, 4, 2 ) );
+	fform->AddDomainIntegrator( new NonlinearDomainLFIntegrator( old_soln.u_variable, PlasmaRHS, 2, 1 ) );
 	fform->Update(const_cast<mfem::FiniteElementSpace* >( SolutionSpace->USpace() ), rhs_F, 0);
 	fform->Assemble();
 
@@ -76,8 +76,8 @@ void GSSolver::Mult( const Vector& qu_in , Vector& qu_out ) const
 
 	// Solve the Schur complement system
 	int maxIter(4000);
-	double rtol(1.e-6);
-	double atol(1.e-12);
+	double rtol(1.e-13);
+	double atol(0.0);
 	GSSmoother M(*SC);
 	BiCGSTABSolver solver;
 	solver.SetAbsTol(atol);

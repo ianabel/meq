@@ -188,15 +188,16 @@ int main( int argc, char** argv )
 	double y_1 = 5.5;
 	double h = 0.15;
 
-	std::vector<double> psi_values;
+	std::vector<double> initial_y_values;
 	for ( double y=y_0; y < y_1; y += h )
-		psi_values.emplace_back( y );
+		initial_y_values.emplace_back( y );
+
+	unsigned int N_surfaces = 
 	
 	netCDF::NcFile data_file( "contours.nc", netCDF::NcFile::FileMode::replace );
 
 	netCDF::NcDim psi_dim = data_file.addDim( "Psi", psi_values.size() );
 	netCDF::NcVar psi_var = data_file.addVar( "Psi", netCDF::ncDouble, psi_dim );
-	psi_var.putVar( psi_values.data() );
 
 	// R(psi_val) , Z(psi_val), s(psi_val) are all VLENs of NC_DOUBLEs,
 	// define that type
@@ -211,6 +212,8 @@ int main( int argc, char** argv )
 	for ( size_t j = 0; j < psi_values.size(); j++ )
 	{
 		Curves[ j ] = Trace( 0.0, psi_values[ j ], Himmelblau, HimmelblauGrad, 50, 0.05 );
+
+		psi_var.putVar( psi_values.data() );
 	}
 	
 	std::ofstream DataFile( "contours.data" );

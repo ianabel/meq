@@ -29,6 +29,9 @@ meq: meq.cpp FreeBoundary.cpp $(GSINVERTER_DEP) $(MFEM_LIB_FILE)
 mfemGS: mfemGS.cpp SolovievEquilibrium.hpp $(HEADER_DEP) $(GSINVERTER_DEP) $(MFEM_LIB_FILE)
 	$(CXX) $(MEQ_FLAGS) $(MFEM_FLAGS) -o $@ mfemGS.cpp $(GSINVERTER_SRC) $(MFEM_LIBS)
 
+mfemLinearConvergence: mfemLinearConvergence.cpp SolovievEquilibrium.hpp $(HEADER_DEP) $(GSINVERTER_DEP) $(MFEM_LIB_FILE)
+	$(CXX) $(MEQ_FLAGS) $(MFEM_FLAGS) -o $@ mfemLinearConvergence.cpp $(GSINVERTER_SRC) $(MFEM_LIBS)
+
 meshgenpp: meshgenpp.cpp meshgen.cpp $(HEADER_DEP) $(MFEM_LIB_FILE)
 	$(CXX) $(MEQ_FLAGS) $(MFEM_FLAGS) -o $@ meshgenpp.cpp meshgen.cpp -lgmsh $(MFEM_LIBS)
 
@@ -37,6 +40,13 @@ mfemProjector: mfemProjector.cpp $(HEADER_DEP) $(MFEM_LIB_FILE)
 
 mfemCheck: mfemCheck.cpp $(HEADER_DEP) $(MFEM_LIB_FILE)
 	$(CXX) $(MEQ_FLAGS) $(MFEM_FLAGS) -o $@ mfemCheck.cpp $(MFEM_LIBS)
+
+mfemPoisson: hdg_poisson.cpp $(MFEM_LIB_FILE)
+	$(CXX) $(MEQ_FLAGS) $(MFEM_FLAGS) -o $@ hdg_poisson.cpp $(MFEM_LIBS)
+
+mfemPoissonGS: hdg_poisson_gs.cpp $(MFEM_LIB_FILE) $(GSINVERTER_DEP)
+	$(CXX) $(MEQ_FLAGS) $(MFEM_FLAGS) -o $@ hdg_poisson_gs.cpp $(GSINVERTER_SRC) $(MFEM_LIBS)
+
 
 FluxSurfaces: FluxSurfaces.cpp $(HEADER_DEP) $(MFEM_LIB_FILE)
 	$(CXX) $(MEQ_FLAGS) $(MFEM_FLAGS) -o $@ FluxSurfaces.cpp $(MFEM_LIBS) -lnetcdf_c++4 -lnetcdf
