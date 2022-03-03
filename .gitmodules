@@ -1,10 +1,1 @@
-[submodule "toml11"]
-	path = toml11
-	url = https://github.com/ToruNiina/toml11.git
-[submodule "mfem"]
-	path = mfem
-	url = https://github.com/ianabel/mfem.git
-	branch = hdg
-[submodule "sundials"]
-	path = sundials
-	url = https://github.com/LLNL/sundials.git
+

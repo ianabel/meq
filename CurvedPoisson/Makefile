@@ -1,7 +1,7 @@
 
 
-MFEM_DIR=../mfem-perf
-MFEM_CONFIG = $(MFEM_DIR)/config/config.mk
+MFEM_DIR=/home/ian/projects/mfem-install
+MFEM_CONFIG = $(MFEM_DIR)/share/mfem/config.mk
 
 include $(MFEM_CONFIG)
 

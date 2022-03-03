@@ -1,0 +1,5 @@
+
+CXX = g++10
+
+SUNDIALS_DIR=/home/ian/projects/MCTrans/sundials
+MFEM_INSTALL_DIR = /home/ian/projects/mfem-install
