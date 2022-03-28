@@ -7,7 +7,7 @@
 
 #include <vector>
 
-#include "toml11/toml.hpp"
+#include "toml.hpp"
 
 #include "utility.hpp"
 #include "model.hpp"

@@ -52,7 +52,7 @@ void TestSolution(  TestEqClass const& TestEq, std::shared_ptr<mfem::Mesh> mesh,
 	std::function<double( const mfem::Vector & )> uFun_ex = [ & ]( const mfem::Vector& pt ){ return TestEq.Psi( pt );};
 	std::function<void( const mfem::Vector &, mfem::Vector & )> qFun_ex = [ & ]( const mfem::Vector& pt, mfem::Vector &q_out ) { TestEq.GradPsi( pt, q_out ); q_out *= -1.0/pt( 0 );};
 
-	StdFunctionCoefficient bcFunCoeff( uFun_ex );
+	FunctionCoefficient bcFunCoeff( uFun_ex );
 
 	Solver.SetBCs( bcFunCoeff );
 

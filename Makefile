@@ -8,7 +8,7 @@ MFEM_CONFIG = $(MFEM_INSTALL_DIR)/share/mfem/config.mk
 include $(MFEM_CONFIG)
 
 CXX = $(MFEM_CXX)
-MEQ_FLAGS = -O3 -std=c++17 -Wall
+MEQ_FLAGS = -O3 -std=c++17 -Wall -I$(TOML11_DIR)
 
 GSINVERTER_DEP = GSSolver.cpp GSSolver.hpp HDGGSIntegrator.cpp HDGGSIntegrator.hpp CockburnEstimator.hpp FreeBoundary.hpp Solution.hpp
 GSINVERTER_SRC = GSSolver.cpp HDGGSIntegrator.cpp
