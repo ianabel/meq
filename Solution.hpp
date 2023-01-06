@@ -202,8 +202,8 @@ namespace meq {
 				{
 					irs[i] = &(mfem::IntRules.Get(i, order_quad));
 				}
-				mfem::StdFunctionCoefficient ucoeff(uFun_ex);
-				mfem::VectorStdFunctionCoefficient qcoeff(dim, qFun_ex);
+				mfem::FunctionCoefficient ucoeff(uFun_ex);
+				mfem::VectorFunctionCoefficient qcoeff(dim, qFun_ex);
 
 				double err_u    = u_variable.ComputeL2Error(ucoeff, irs);
 				double err_q    = q_variable.ComputeL2Error(qcoeff, irs);

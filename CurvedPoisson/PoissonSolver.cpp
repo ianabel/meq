@@ -50,7 +50,7 @@ void PoissonSolver::Mult( const Vector& qu_in , Vector& qu_out ) const
 
 	this->Postprocess( old_soln );
 
-	StdFunctionCoefficient fcoeff( RHS );
+	FunctionCoefficient fcoeff( RHS );
 	
 	fform->AddDomainIntegrator( new DomainLFIntegrator( fcoeff ) );
 	fform->Update(const_cast<mfem::FiniteElementSpace* >( SolutionSpace->USpace() ), rhs_F, 0);
