@@ -140,10 +140,8 @@ void HDGDomainIntegratorGS::AssembleElementMatrix2FES(
 
 
 void HDGFaceIntegratorGS::AssembleFaceMatrixOneElement2and1FES(
-   const FiniteElement &fe_qL,
-   const FiniteElement &fe_qR,
-   const FiniteElement &fe_uL,
-   const FiniteElement &fe_uR,
+   const FiniteElement &fe_q,
+   const FiniteElement &fe_u,
    const FiniteElement &face_fe,
    FaceElementTransformations &Trans,
    const int elem1or2,
@@ -156,23 +154,16 @@ void HDGFaceIntegratorGS::AssembleFaceMatrixOneElement2and1FES(
    // Get DoF from faces and the dimension
    int ndof_face = face_fe.GetDof();
    int ndof_q, ndof_u;
-   int dim = fe_qL.GetDim();
+   int dim = fe_q.GetDim();
    int vdim = dim;
-   int order, order1, order2, order3, order4;
+   int order;
 
    DenseMatrix shape1_n_mtx;
 
    // set the dofs for u and q according to the element
-   if (elem1or2 == 1)
-   {
-      ndof_u = fe_uL.GetDof();
-      ndof_q = fe_qL.GetDof();
-   }
-   else
-   {
-      ndof_u = fe_uR.GetDof();
-      ndof_q = fe_qR.GetDof();
-   }
+	ndof_u = fe_u.GetDof();
+	ndof_q = fe_q.GetDof();
+   
 
    DenseMatrix local1, local2, local3, local4, local5, local6;
 
@@ -220,25 +211,8 @@ void HDGFaceIntegratorGS::AssembleFaceMatrixOneElement2and1FES(
    const IntegrationRule *ir = IntRule;
    if (ir == NULL)
    {
-      if (Trans.Elem2No >= 0)
-      {
-         order1 = std::max(fe_qL.GetOrder(), fe_qR.GetOrder());
-         order2 = 2*fe_qR.GetOrder();
-      }
-      else
-      {
-         order1 = fe_qL.GetOrder();
-         order2 = 2*fe_qL.GetOrder();
-      }
-      order1 += face_fe.GetOrder();
-      order1 += 2;
-      order2 += 2;
-
-      order3 = std::max(order1, order2);
-      order4 = 2*face_fe.GetOrder();
-      order4 += 2;
-
-      order = std::max(order3, order4);
+      order = 2*std::max( std::max( fe_q.GetOrder(), fe_u.GetOrder() ), face_fe.GetOrder() );
+      order += 2;
 
       // IntegrationRule depends on the Geometry of the face (pont, line, triangle, rectangular)
       ir = &IntRules.Get(Trans.FaceGeom, order);
@@ -247,7 +221,7 @@ void HDGFaceIntegratorGS::AssembleFaceMatrixOneElement2and1FES(
    for (int p = 0; p < ir->GetNPoints(); p++)
    {
       const IntegrationPoint &ip = ir->IntPoint(p);
-      IntegrationPoint eip1, eip2; // integration points on the elements
+      IntegrationPoint eip; // integration point on the elements
 
       // Trace finite element shape function
       Trans.Face->SetIntPoint(&ip);
@@ -256,7 +230,7 @@ void HDGFaceIntegratorGS::AssembleFaceMatrixOneElement2and1FES(
       // calculate the normal at the integration point
       if (dim == 1)
       {
-         normal(0) = 2*eip1.x - 1.0;
+         normal(0) = 2*eip.x - 1.0;
       }
       else
       {
@@ -266,20 +240,17 @@ void HDGFaceIntegratorGS::AssembleFaceMatrixOneElement2and1FES(
       if (elem1or2 == 1)
       {
          // Side 1 finite element shape function
-         Trans.Loc1.Transform(ip, eip1);
-         fe_uL.CalcShape(eip1, shapeu);
-         fe_qL.CalcShape(eip1, shapeq);
-         MultVWt(shapeq, normal, shape_dot_n) ;
+         Trans.Loc1.Transform(ip, eip);
       }
       else
       {
-
          // Side 2 finite element shape function
-         Trans.Loc2.Transform(ip, eip2);
-         fe_uR.CalcShape(eip2, shapeu);
-         fe_qR.CalcShape(eip2, shapeq);
-         MultVWt(shapeq, normal, shape_dot_n) ;
+         Trans.Loc2.Transform(ip, eip);
       }
+
+		fe_u.CalcShape(eip, shapeu);
+		fe_q.CalcShape(eip, shapeq);
+		MultVWt(shapeq, normal, shape_dot_n);
 
       // set the coefficients for the different terms
       // if the normal is involved Trans.Face->Weight() is not required
@@ -357,10 +328,10 @@ void HDGFaceIntegratorGS::AssembleFaceMatrixOneElement2and1FES(
    elmat4 = local6;
 }
 
-	void HDGBoundaryTraceIntegrator::AssembleRHSElementVect(
-			const FiniteElement &bdr_cell, FaceElementTransformations &Trans,
-			Vector &favect)
-	{
+void HDGBoundaryTraceIntegrator::AssembleRHSElementVect(
+		const FiniteElement &bdr_cell, FaceElementTransformations &Trans,
+		Vector &favect)
+{
 		double w, f_val;
 
 		if ( Trans.Elem2No >= 0 )

@@ -110,7 +110,7 @@ class CockburnZhangEstimator : public mfem::ErrorEstimator
 				u_sol.GetGradient( *trans, GradU );
 				double kappa_val = kappa.Eval( *trans, ip );
 				GradU *= kappa_val;
-				eta_2_tmp = q_val - GradU;	
+				subtract( q_val, GradU, eta_2_tmp );	
 				eta_2 += ( eta_2_tmp * eta_2_tmp ) * ip.weight;
 			}
 
@@ -142,7 +142,7 @@ class CockburnZhangEstimator : public mfem::ErrorEstimator
 
 					// eta_5 = (.5/h_e) * || lambda - u ||^2
 					double lambda_val,u_val;
-					lambda_val = lambda.GetInterfaceValue( faces[ j ], ip );
+					lambda_val = lambda.GetValueFacet( *feTrans, ip );
 					if ( feTrans->Elem1No == i )
 						u_val = u_sol.GetValue( feTrans->Elem1No, eip1 );
 					else if ( feTrans->Elem2No == i )
@@ -313,7 +313,7 @@ class GradShafranovEstimator : public mfem::ErrorEstimator
 				q_sol.GetVectorValue( i, ip, q_val );
 				u_sol.GetGradient( *trans, GradU );
 				GradU /= R;
-				eta_2_tmp = q_val - GradU;	
+				subtract( q_val, GradU, eta_2_tmp );	
 				eta_2 += ( eta_2_tmp * eta_2_tmp ) * ip.weight;
 			}
 
@@ -345,7 +345,7 @@ class GradShafranovEstimator : public mfem::ErrorEstimator
 
 					// eta_5 = (.5/h_e) * || lambda - u ||^2
 					double lambda_val,u_val;
-					lambda_val = lambda.GetInterfaceValue( faces[ j ], ip );
+					lambda_val = lambda.GetValueFacet( *feTrans, ip );
 					if ( feTrans->Elem1No == i )
 						u_val = u_sol.GetValue( feTrans->Elem1No, eip1 );
 					else if ( feTrans->Elem2No == i )

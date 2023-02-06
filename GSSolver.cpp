@@ -235,9 +235,9 @@ void GSSolver::ApplyAdaptiveRefinement( Solution & soln )
 	Postprocess( soln );
 
 	mfem::GradShafranovEstimator errorEstimator( soln.q_variable, soln.u_star_variable, soln.u_hat_variable, PlasmaRHS );
-	mfem::DoerflerMarkingRefiner refiner( errorEstimator );
+	mfem::ThresholdRefiner refiner( errorEstimator );
 
-	refiner.SetGamma( 0.75 );
+	refiner.SetTotalErrorFraction( 0.75 );
 	refiner.Apply( *SolutionSpace->Mesh() );
 	Update();
 };

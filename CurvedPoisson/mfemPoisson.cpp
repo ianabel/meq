@@ -43,15 +43,18 @@ double qNormalFun( const Vector &pt )
 
 	qFun_ex( pt, q );
 	
+	const double eps_tol = 1e-8;
 
-	if ( x == 0 )
+	if ( ::fabs( x - 0 ) < eps_tol )
 		return -q[ 0 ];
-	if ( y == 0 )
+	if ( ::fabs( y - 0 ) < eps_tol )
 		return -q[ 1 ];
-	if ( x == 1 )
+	if ( ::fabs( x - 1 ) < eps_tol )
 		return q[ 0 ];
-	if ( y == 1 )
+	if ( ::fabs( y - 1 ) < eps_tol )
 		return q[ 1 ];
+
+	std::cerr << "being evaluated at " << x << ", " << y << std::endl;
 	
 	throw std::logic_error( "FTAGN!" );
 

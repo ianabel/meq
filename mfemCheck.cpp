@@ -15,8 +15,6 @@ int main(int argc, char *argv[])
 		return -2;
 	}
 
-	std::string 
-
 	std::string mesh_file = argv[ 1 ];
 	std::string grid_fn_1_file = argv[ 2 ];
 	std::string grid_fn_2_file = argv[ 3 ];

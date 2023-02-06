@@ -69,7 +69,7 @@ class Configuration {
 			plasma = nullptr;
 
 			const auto coils = toml::find< std::vector< toml::table > >( config, "coils" );
-			for ( const auto coil : coils )
+			for ( const auto & coil : coils )
 			{
 				double R = coil.at( "R" ).as_floating();
 				double Z = coil.at( "Z" ).as_floating();

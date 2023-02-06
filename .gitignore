@@ -5,10 +5,12 @@ tmp/
 mfemGS
 mfemProjector
 mfemCheck
+mfemLinearConvergence
 meshgenpp
 meq
 meq-debug
 mfemGS-debug
+FluxSurfaces
 docs/*.aux
 docs/*.out
 docs/*.log

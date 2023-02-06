@@ -77,7 +77,7 @@ int main(int argc, char *argv[])
 	// The RHS function is FieldCoils::operator()
 	meq::Jtor FieldCoils;
 
-	for ( const auto coil : config->GetCoils() )
+	for ( const auto &coil : config->GetCoils() )
 		FieldCoils.AddCoil( coil );
 
 	auto J_plasma = [ &FieldCoils ]( const mfem::Vector& pt, double psi ) {

@@ -69,8 +69,8 @@ void TestSolution( std::shared_ptr<mfem::Mesh> mesh, int order )
 
 	{
 		double refined_tol = ::pow( tol, 1.5 );
-		if ( refined_tol < 1e-10 )
-			refined_tol = 1e-10;
+		if ( refined_tol < 1e-12 )
+			refined_tol = 1e-12;
 
 		NonlinearPoissonSolver refined_solver( mesh, order, RHS, N_MAX_ITER, refined_tol, N_ANDERSON, 0 );
 		Solution refined_soln( refined_solver.getSolutionSpace(), soln.qu );

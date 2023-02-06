@@ -1,5 +1,6 @@
 
 #include "PoissonSolver.hpp"
+#include "HDGNeumann.hpp"
 
 using namespace mfem;
 
@@ -84,10 +85,14 @@ void PoissonSolver::Mult( const Vector& qu_in , Vector& qu_out ) const
 	// AVarf->VectorSC() provides -C*A^{-1} RF, the RHS for the
 	// Schur complement is  L - C*A^{-1} RF, but L is zero for this case.
 	
+	mfem::LinearForm *lform = nullptr;
+	mfem::Vector rhs_L( SolutionSpace->MSpace()->GetVSize() );
+	Array<int> neumann_bdr_array( SolutionSpace->Mesh()->bdr_attributes.Max() );
+	neumann_bdr_array = 0;
+	neumann_bdr_array[ neumann_attr ] = 1;
 	if ( neumann != nullptr ) {
-		mfem::LinearForm *lform = new mfem::LinearForm();
-		mfem::Vector rhs_L( SolutionSpace->MSpace()->GetVSize() );
-		lform->AddBoundaryIntegrator( new BoundaryLFIntegrator( *neumann, neumann_attr ) );
+		lform = new mfem::LinearForm();
+		lform->AddSktBoundaryNeumannIntegrator( new HDGNeumannLFIntegrator( *neumann ), neumann_bdr_array );
 		lform->Update(const_cast<mfem::FiniteElementSpace* >( SolutionSpace->MSpace() ), rhs_L, 0 );
 		lform->Assemble();
 
@@ -107,7 +112,10 @@ void PoissonSolver::Mult( const Vector& qu_in , Vector& qu_out ) const
 
 	AVarf->Reconstruct(F_arr, &new_soln.u_hat_variable, soln_arr );
 
+	if ( lform != nullptr )
+		delete lform;
 
+	delete fform;
 	
 };
 

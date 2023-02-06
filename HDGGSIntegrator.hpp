@@ -82,10 +82,8 @@ public:
       { tauD = a; }
 
    using BilinearFormIntegrator::AssembleFaceMatrixOneElement2and1FES;
-   virtual void AssembleFaceMatrixOneElement2and1FES(const FiniteElement &fe_qL,
-                                                     const FiniteElement &fe_qR,
-                                                     const FiniteElement &fe_uL,
-                                                     const FiniteElement &fe_uR,
+   virtual void AssembleFaceMatrixOneElement2and1FES(const FiniteElement &fe_q,
+                                                     const FiniteElement &fe_u,
                                                      const FiniteElement &face_fe,
                                                      FaceElementTransformations &Trans,
                                                      const int elem1or2,
@@ -93,7 +91,7 @@ public:
                                                      DenseMatrix &elmat1,
                                                      DenseMatrix &elmat2,
                                                      DenseMatrix &elmat3,
-                                                     DenseMatrix &elmat4);
+                                                     DenseMatrix &elmat4) override;
 
 };
 
