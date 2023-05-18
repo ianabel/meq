@@ -13,7 +13,7 @@ void GenerateMesh( std::shared_ptr<meq::Configuration> config )
 	unsigned int CellsPerCoilEdge = 1;
 	std::shared_ptr<meq::Domain> domain = config->GetDomain();
 
-	char opts[] = "-format vtk";
+	char opts[] = "-format vtu";
 	char *gmsh_args[ 1 ];
 	gmsh_args[ 0 ] = opts;
 	gmsh::initialize( 1, gmsh_args );

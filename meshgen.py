@@ -8,7 +8,7 @@
 import sys
 import toml
 import gmsh
-gmsh.initialize("-format vtk")
+gmsh.initialize("-format vtu")
 
 if len(sys.argv) > 1:
     conf_file = sys.argv[1]
