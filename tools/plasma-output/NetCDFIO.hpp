@@ -24,7 +24,7 @@ template< typename ProfileType > class NetCDFPlasma
 
 	private:
 		std::vector<double> psiPoints;
-		size_t N_spec;
+		size_t N_spec, N_psi;
 		std::string filename;
 		netCDF::NcFile data_file;
 		netCDF::NcDim TimeDim,SpeciesDim,PsiDim;

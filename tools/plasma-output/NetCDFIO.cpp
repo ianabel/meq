@@ -17,7 +17,6 @@ template <typename ProfileType> NetCDFPlasma<ProfileType>::NetCDFPlasma( const s
 	TimeVar = data_file.addVar( "t", netCDF::NcDouble(), TimeDim );
 	TimeVar.putAtt( "description", "Time since start of simulation" );
 	TimeVar.putAtt( "units", "s" );
-	TimeVar.putVar( {0}, 0.0 );
 
 	SpeciesNCType = data_file.addCompoundType( "Species", sizeof( NetCDFPlasma<ProfileType>::Species ) );
 	SpeciesNCType.addMember( "Z", netCDF::NcInt(), offsetof( NetCDFPlasma<ProfileType>::Species, Z ) );
@@ -47,19 +46,37 @@ template <typename ProfileType> NetCDFPlasma<ProfileType>::NetCDFPlasma( const s
 		}
 	}
 
-	PsiVar.putAtt( "description", "Flux label, used as a measure of radial position" );
+	PsiVar.putAtt( "description", "Axial magnetic flux inside a flux surface" );
 	PsiVar.putAtt( "units", "Wb" );
 	PsiVar.putVar( psiPoints.data() );
 
 	Density = data_file.addVar( "Density", netCDF::NcDouble(), { SpeciesDim, TimeDim, PsiDim } );
 	Temperature = data_file.addVar( "Temperature", netCDF::NcDouble(), { SpeciesDim, TimeDim, PsiDim } );
 	Omega = data_file.addVar( "Omega", netCDF::NcDouble(), { TimeDim, PsiDim } );
-
 }
 
 template <typename ProfileType> void NetCDFPlasma<ProfileType>::WriteTimeslice( double T, std::vector< ProfileType& > const& Densities, std::vector< ProfileType& > const& Temperatures, ProfileType & omega )
 {
+	size_t next = TimeDim.getSize();
+	TimeVar.putVar( {next}, T );
+	std::vector<double> data( N_psi ), data2( N_psi );
 
+	for ( size_t i=0; i < N_psi; ++i ) {
+		data[ i ] = omega( psiPoints[ i ] );
+	}
+
+	// std::vector<size_t> start = {next, 0}, count = {1, N_psi};
+
+	Omega.putVar( {next, 0}, {1, N_psi}, data.data() );
+
+	for ( size_t s=0; s < N_spec; ++s ) {
+		for ( size_t i=0; i < N_psi; ++i ) {
+			data[ i ]  = Densities[ s ]( psiPoints[ i ] );
+			data2[ i ] = Temperatures[ s ]( psiPoints[ i ] );
+		}
+		Density.putVar( {s, next, 0}, {1, 1, N_psi}, data.data() );
+		Temperature.putVar( {s, next, 0}, {1, 1, N_psi}, data2.data() )
+	}
 }
 
 template <typename ProfileType> void NetCDFPlasma<ProfileType>::Close()
