@@ -9,7 +9,7 @@ class Equilibrium {
 		~Equilibrium();
 		double Psi( double , double );
 	private:
-		std::vector< boost::math::interpolators::makima<std::vector<double>> > psiInterpolantZ;
+		double *pData;
 }
 
 #endif // EQUILIBRIUM_HPP

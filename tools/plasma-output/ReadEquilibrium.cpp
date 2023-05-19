@@ -10,4 +10,7 @@ Equilbrium::Equilibrium( std::string const& netcdf_file )
 	netCDF::NcDim R_dim,Z_dim;
 	R_dim = data_file.getDim( "R" );
 	Z_dim = data_file.getDim( "Z" );
+
+	size_t N_R = R_dim.getSize(), N_Z = Z_dim.getSize();
+	std
 }
