@@ -6,10 +6,14 @@
 class Equilibrium {
 	public:
 		Equilibrium( std::string const& netcdf_file );
-		~Equilibrium();
+		~Equilibrium() {
+			if ( psiData != nullptr )
+				delete psiData;
+		};
 		double Psi( double , double );
 	private:
-		double *pData;
+		std::vector<double> R_data,Z_data;
+		double *psiData = nullptr;
 }
 
 #endif // EQUILIBRIUM_HPP
