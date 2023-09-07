@@ -1,9 +1,10 @@
 
 #include <netcdf>
-#include "Equilbrium.hpp"
+#include <algorithm>
+#include "Equilibrium.hpp"
 
 
-Equilbrium::Equilibrium( std::string const& netcdf_file )
+Equilibrium::Equilibrium( std::string const& netcdf_file )
 {
 	netCDF::NcFile data_file;
 	data_file.open( netcdf_file, netCDF::NcFile::FileMode::read );
@@ -24,17 +25,18 @@ Equilbrium::Equilibrium( std::string const& netcdf_file )
 	R_var.getVar( R_data.data() );
 	Z_var.getVar( Z_data.data() );
 
-	psiData = new double[ N_R ][ N_Z ];
+	psiData = new double[ N_R * N_Z ];
 
-	netCDF::NcVar psi = data_file.getVar( "Psi" );
+	netCDF::NcVar psi = data_file.getVar( "psi" );
 	psi.getVar( psiData );
 }
 
 double Equilibrium::Psi( double R, double Z )
 {
-	if ( R < R_data.front || R > R_data.back ) {
+	size_t N_R = R_data.size();
+	if ( R < R_data.front() || R > R_data.back() ) {
 		throw std::runtime_error( "R not in range" );
-	} else if ( Z < Z_data.front || Z > Z_data.back ) {
+	} else if ( Z < Z_data.front() || Z > Z_data.back() ) {
 		throw std::runtime_error( "Z not in range" );
 	}
 
@@ -50,18 +52,19 @@ double Equilibrium::Psi( double R, double Z )
 	std::vector<double>::iterator R_interval = std::adjacent_find( R_data.begin(), R_data.end(), find_R );
 	std::vector<double>::iterator Z_interval =  std::adjacent_find( Z_data.begin(), Z_data.end(), find_Z );
 
-	ptrdiff_t R_index = std::difference( R_data.begin(), R_interval );
-	ptrdiff_t Z_index = std::difference( Z_data.begin(), Z_interval );
+	ptrdiff_t R_index = ( R_interval - R_data.begin() );
+	ptrdiff_t Z_index = ( Z_interval - Z_data.begin() );
+
 
 	// Target point is in [ *R_interval, *(R_interval + 1) ] x [ *Z_interval, *(Z_interval + 1) ]
 	
 	// Interpolate in R at Z = *Z_interval;
 	double R_u = *( R_interval + 1 );
 	double R_l = *( R_interval );
-	double psiZ_l = ( ( R_u - R )/( R_u - R_l ) ) * psiData[ R_index ][ Z_index ]
-	                 + ( ( R - R_l )/( R_u - R_l ) ) * psiData[ R_index + 1 ][ Z_index ];
-	double psiZ_u = ( ( R_u - R )/( R_u - R_l ) ) * psiData[ R_index ][ Z_index + 1 ]
-	                 + ( ( R - R_l )/( R_u - R_l ) ) * psiData[ R_index + 1 ][ Z_index + 1 ];
+	double psiZ_l = ( ( R_u - R )/( R_u - R_l ) ) * psiData[ R_index*N_R + Z_index ]
+	                 + ( ( R - R_l )/( R_u - R_l ) ) * psiData[ R_index*N_R + Z_index ];
+	double psiZ_u = ( ( R_u - R )/( R_u - R_l ) ) * psiData[ R_index*N_R + Z_index + 1 ]
+	                 + ( ( R - R_l )/( R_u - R_l ) ) * psiData[ ( R_index + 1 )*N_R + Z_index + 1 ];
 
 	double Z_u = *( Z_interval + 1 );
 	double Z_l = *( Z_interval );

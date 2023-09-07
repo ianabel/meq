@@ -10,7 +10,8 @@ class PlasmaModel {
 	private:
 		PlasmaModel();
 		~PlasmaModel();
-		double Psi( double R, double Z );
+		Equilibrium eq;
+		double Psi( double R, double Z ) { return eq.Psi( R, Z ); };
 		double phi0( double R, double Z );
 		double N( Index s, double psi );
 	public:
