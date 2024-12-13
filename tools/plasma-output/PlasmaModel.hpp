@@ -10,8 +10,7 @@ class PlasmaModel {
 	private:
 		PlasmaModel();
 		~PlasmaModel();
-		Equilibrium eq;
-		double Psi( double R, double Z ) { return eq.Psi( R, Z ); };
+		double Psi( double R, double Z );
 		double phi0( double R, double Z );
 		double N( Index s, double psi );
 	public:
@@ -33,8 +32,8 @@ class PlasmaModel {
 				Temperature( other.Temperature ), Density( other.Density ), Z( other.Z ), mass( other.mass ), fprim( other.fprim ) 
 			{
 			};
-
 		};
+
 	private:
 		std::size_t N_spec;
 		std::vector<Species> Content;
