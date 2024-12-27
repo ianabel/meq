@@ -12,11 +12,11 @@ CXX = g++
 CXXFLAGS_RELEASE = -std=c++17 -O3 -Wall -mtune=native
 CXXFLAGS_DEBUG = -std=c++17 -g -Og -Wall
 
-mfemPoisson: mfemPoisson.cpp PoissonSolver.cpp
-	$(CXX) $(CXXFLAGS_RELEASE) -o $@ mfemPoisson.cpp PoissonSolver.cpp $(MFEM_OPT)
+hdgPoisson: hdg_poisson.cpp HDGBilinearForm.cpp hdg_integrators.cpp
+	$(CXX) $(CXXFLAGS_RELEASE) -o $@ hdg_poisson.cpp HDGBilinearForm.cpp hdg_integrators.cpp $(MFEM_OPT)
 
 clean:
-	rm -f mfemPoisson
+	rm -f hdgPoisson
 
 distclean: clean
 	echo "Nothing to do"
