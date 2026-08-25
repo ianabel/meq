@@ -155,11 +155,20 @@ Raised 2026-08-25.
 
   2. phi_0 is implicit. Eq (97) is a transcendental equation for phi_0 at each
      (R, psi) -- a scalar solve nested inside every source evaluation, i.e. at
-     every quadrature point of every element on every Newton iteration. Worth
-     thinking about cost early: it is a one-dimensional root find with a
-     monotone left-hand side in phi_0 (each term is exponential and the Z_s have
-     mixed signs, so check monotonicity rather than assume it), and a good
-     initial guess is available from the previous iterate at the same point.
+     every quadrature point of every element on every Newton iteration.
+
+     The good news is that this root find is as well behaved as it could be.
+     Differentiating the left-hand side of (97),
+
+         d/dphi_0 sum_s Z_s N_s exp[...] = -e sum_s (Z_s^2 / T_s) N_s exp[...],
+
+     which is strictly negative for any positive N_s and T_s, since every term
+     carries Z_s^2. So the left-hand side is strictly decreasing. And with at
+     least one positive and one negative Z_s it runs from +infinity (phi_0 ->
+     -infinity, ion terms dominate) to -infinity (phi_0 -> +infinity, electron
+     terms dominate). Hence a unique root, always, and one that can be
+     bracketed -- so a safeguarded Newton or Brent will not fail. A good initial
+     guess is available from the previous iterate at the same point.
 
   3. NEWTON NEEDS d(phi_0)/d(psi), and it is not optional. dF/dpsi picks up phi_0
      through both the explicit Z_s e phi_0 term and the exponentials in n_s.
@@ -169,15 +178,47 @@ Raised 2026-08-25.
      gives a Jacobian whose accuracy is set by the inner solve's tolerance,
      which is how a Newton iteration silently degrades to linear.
 
-  4. <phi_0>_psi = 0 IS A FLUX-SURFACE AVERAGE, and therefore NON-LOCAL --
-     and the flux surfaces are level sets of the unknown, so the averaging
-     domain moves as psi does. This is the same structural hazard CEDRES++
-     records for its psi_ax and psi_bnd normalisation, where the corresponding
-     terms "lead to non-local entries in the stiffness matrix" (CLAUDE.md, the
-     Newton section), but worse, because there the nonlocality attaches to two
-     scalars and here it attaches to a whole surface. Understand what this does
-     to the sparsity of the hybridized system BEFORE writing any of it. It may
-     be the thing that decides the whole approach.
+  4. <phi_0>_psi = 0 IS A GAUGE CHOICE, NOT A CLOSURE CONDITION, and it can be
+     replaced by anything convenient. WITHDRAWN: an earlier version of this
+     entry called it a non-local constraint over a moving flux surface and named
+     it as possibly deciding the whole approach. That was wrong, and the
+     correction matters because it removes the entry's one apparent blocker.
+
+     The system has an exact gauge freedom. For any flux function delta(psi),
+
+         phi_0 -> phi_0 + delta(psi),      N_s -> N_s exp( Z_s e delta / T_s )
+
+     leaves the physical density n_s of (96) unchanged, and so leaves (97)
+     satisfied. Only the split between "N_s" and "phi_0" moves; nothing
+     observable does. <phi_0>_psi = 0 is the convention RoPP adopts, at its
+     (59), to make N_s well defined -- which is why the paper says "by
+     definition" rather than deriving it.
+
+     AND THE SOURCE IS INVARIANT UNDER IT. Applying the transformation to the
+     psi-derivative bracket of (136), the two changed terms are
+
+         T_s dlnN_s/dpsi     picks up   Z_s e delta' - Z_s e delta T_s'/T_s
+         [Z_s e phi_0 + ...] dlnT_s/dpsi   picks up   Z_s e delta T_s'/T_s
+
+     which sum to Z_s e delta'. Weighted by n_s and summed over species that is
+     e delta'(psi) sum_s Z_s n_s = 0, by quasineutrality -- i.e. by (97) itself.
+     The remaining terms of (136) depend on phi_0 only through n_s, which is
+     invariant by construction. Verified symbolically with sympy for a two
+     species case, and the cancellation is exact rather than approximate.
+
+     CONSEQUENCES, which are all simplifications:
+
+       - Any normalisation gives the same equilibrium. phi_0(z = 0) = 0 on each
+         flux surface is legitimate and is local to a curve rather than an
+         integral over a surface.
+       - Better still, no constraint is needed at solve time at all. Given
+         N_s(psi) as input data, (97) already determines phi_0 uniquely and
+         pointwise by item 2. The gauge choice is a statement about what the
+         supplied N_s MEANS, not an equation the solver has to close.
+       - So this must be documented where the profiles are documented: two sets
+         of input N_s differing by the gauge factor describe the same plasma,
+         and a user comparing profiles between codes needs to know which
+         convention each is in. That is the only place it can still bite.
 
   CONVENTIONS TO PIN DOWN FIRST, because two sign or factor slips have already
   been found in the papers meq does follow
