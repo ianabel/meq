@@ -3,13 +3,13 @@
 # A hybridizable discontinuous Galerkin solver for the fixed-boundary
 # Grad-Shafranov equation, built on MFEM's DarcyForm.
 #
-# This is the stage-1 build of the port onto MFEM 4.9.1. Stage 1 covers the
-# parts that do not touch the discretisation -- configuration, profiles and the
-# source term -- and builds them into meq_core with unit tests. The solver
-# itself (src/meq/GradShafranov.*, src/meq/Estimator.hpp) and the driver
-# (apps/meq.cpp) still speak the old Waterloo HDG API, which no longer exists in
-# 4.9.1, so they are not compiled by anything here yet; see MEQ_BUILD_APP below
-# and attic/free-boundary/README.md for what happened to the rest.
+# This is the stage-2 build of the port onto MFEM 4.9.1. Stages 1 and 2 cover
+# configuration, profiles, the source term and the linear HDG Grad-Shafranov
+# operator, and build them into meq_core with unit tests and a convergence test.
+# The residual estimator (src/meq/Estimator.hpp) and the driver (apps/meq.cpp)
+# still speak the old Waterloo HDG API, which no longer exists in 4.9.1, so they
+# are not compiled by anything here yet; see MEQ_BUILD_APP below and
+# attic/free-boundary/README.md for what happened to the rest.
 
 cmake_minimum_required(VERSION 3.20)
 
@@ -29,10 +29,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(MEQ_BUILD_TESTS "Build the unit tests" ON)
 
-# Off until stage 2. apps/meq.cpp constructs an HDGBilinearForm and drives the
-# old estimator, neither of which exists in MFEM 4.9.1, so switching this on
-# today produces a wall of compiler errors rather than a program. It turns on
-# when GradShafranov is ported to DarcyForm.
+# Still off after stage 2. apps/meq.cpp constructs an HDGBilinearForm and drives
+# the old estimator, neither of which exists in MFEM 4.9.1, so switching this on
+# today produces a wall of compiler errors rather than a program. The solver core
+# is ported; the driver is a separate step.
 option(MEQ_BUILD_APP "Build the meq executable (needs the stage-2 solver port)" OFF)
 
 # A single-configuration generator with no build type gets no optimisation at
@@ -104,12 +104,17 @@ set_target_properties(toml11::toml11 PROPERTIES
 # appears, so a new source silently fails to build until someone re-runs cmake
 # by hand, and a stale file left in the tree silently starts building again.
 #
-# src/meq/GradShafranov.cpp joins this list in stage 2, when it is ported from
-# HDGBilinearForm to DarcyForm. src/meq/Estimator.hpp goes with it -- it calls
+# src/meq/GradShafranov.cpp joined this list in stage 2, ported from
+# HDGBilinearForm to DarcyForm. src/meq/Estimator.hpp has not -- it calls
 # GridFunction::GetValueFacet, which was a patch carried by the old MFEM branch
-# and is not in 4.9.1.
+# and is not in 4.9.1 -- and is stage 6 work in any case.
+#
+# src/meq/Solution.hpp is gone rather than ported: it wrapped hand-rolled block
+# offsets and a second set of finite element spaces around what DarcyForm now
+# owns itself. What was left of its job lives on GradShafranovSolver.
 set(MEQ_CORE_SOURCES
 	src/meq/Config.cpp
+	src/meq/GradShafranov.cpp
 	src/meq/Profiles.cpp
 	src/meq/Source.cpp)
 
@@ -188,5 +193,5 @@ if(MFEM_FEATURES)
 	message(STATUS "            options: ${_meq_mfem_features}")
 endif()
 message(STATUS "  toml11    ${TOML11_INCLUDE_DIR}")
-message(STATUS "  app       ${MEQ_BUILD_APP} (MEQ_BUILD_APP; stage 2)")
+message(STATUS "  app       ${MEQ_BUILD_APP} (MEQ_BUILD_APP; still unported)")
 message(STATUS "  tests     ${MEQ_BUILD_TESTS} (MEQ_BUILD_TESTS)")

@@ -39,7 +39,12 @@ foreach(_test IN LISTS MEQ_UNIT_TESTS)
 			meq_core
 			Boost::unit_test_framework)
 
-		add_test(NAME ${_test} COMMAND ${_test})
+		# WORKING_DIRECTORY is load-bearing, not tidiness: ConfigTests opens
+		# examples/*.toml by a path relative to the source tree, so without
+		# this it passes from build/ and fails from anywhere else. Pinning it
+		# makes an out-of-tree build behave the same as an in-tree one.
+		add_test(NAME ${_test} COMMAND ${_test}
+			WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
 		# MKL_THREADING_LAYER=GNU is not optional on this machine.
 		# /usr/lib/x86_64-linux-gnu/libblas.so.3 is an alternatives
@@ -48,6 +53,62 @@ foreach(_test IN LISTS MEQ_UNIT_TESTS)
 		# MFEM's direct solver uses. Wrong answers, no error, no warning.
 		# The same trap is recorded in the MFEM tree's CLAUDE.md, where
 		# every run of its own test suite needs the same variable.
+		set_tests_properties(${_test} PROPERTIES
+			ENVIRONMENT "MKL_THREADING_LAYER=GNU")
+	endif()
+endforeach()
+
+# ---------------------------------------------------------------------------
+# convergence -- a measured rate, not a tolerance
+# ---------------------------------------------------------------------------
+
+# The acceptance criterion for each stage of the port. These assert an order of
+# accuracy against a closed-form solution, which is what catches the failure the
+# unit tests above cannot see: a sign or weight convention that converges, at the
+# right rate, to the wrong function. See CLAUDE.md, "Testing stance".
+#
+# They are registered the same way as the unit tests -- one executable, one
+# Boost.Test module, one ctest -- and differ only in living under convergence/
+# and in needing tests/ on the include path, since they pull the closed-form
+# solutions out of analytic/.
+set(MEQ_CONVERGENCE_TESTS
+	SolovievConvergence)
+
+foreach(_test IN LISTS MEQ_CONVERGENCE_TESTS)
+	set(_test_source "${CMAKE_CURRENT_SOURCE_DIR}/convergence/${_test}.cpp")
+
+	# Every convergence test drives the solver, so there is nothing to build
+	# until GradShafranov is in meq_core.
+	list(FIND MEQ_CORE_SOURCES_PRESENT "src/meq/GradShafranov.cpp" _solver_index)
+
+	if(NOT EXISTS "${_test_source}")
+		message(STATUS "meq: no ${_test}.cpp yet, test not registered")
+	elseif(NOT TARGET meq_core OR _solver_index EQUAL -1)
+		message(STATUS "meq: ${_test}.cpp exists but src/meq/GradShafranov.cpp does not, test not registered")
+	else()
+		add_executable(${_test} "convergence/${_test}.cpp")
+
+		# For "analytic/Soloviev.hpp". meq_core already carries src/ and
+		# src/meq/, so "meq/GradShafranov.hpp" needs nothing here.
+		target_include_directories(${_test} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+
+		target_link_libraries(${_test} PRIVATE
+			meq_core
+			Boost::unit_test_framework)
+
+		# WORKING_DIRECTORY is load-bearing, not tidiness: ConfigTests opens
+		# examples/*.toml by a path relative to the source tree, so without
+		# this it passes from build/ and fails from anywhere else. Pinning it
+		# makes an out-of-tree build behave the same as an in-tree one.
+		add_test(NAME ${_test} COMMAND ${_test}
+			WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
+		# Not optional, and least optional here of anywhere in the tree: the
+		# hybridized trace system is solved by UMFPACK, whose BLAS-3 calls MKL
+		# silently corrupts under its default threading layer. The symptom is a
+		# convergence table full of plausible numbers that are wrong, which is
+		# exactly what this test exists to detect and exactly what it would then
+		# fail to detect. See the comment on the unit tests above.
 		set_tests_properties(${_test} PROPERTIES
 			ENVIRONMENT "MKL_THREADING_LAYER=GNU")
 	endif()
@@ -76,13 +137,17 @@ else()
 	# clang-tidy reads the flags for each file out of the compile database
 	# that CMAKE_EXPORT_COMPILE_COMMANDS writes into the build tree, which is
 	# also what limits the check to the ported code: the compile database
-	# contains exactly what some target compiles. src/meq/GradShafranov.{hpp,
-	# cpp}, src/meq/Estimator.hpp, src/meq/Solution.hpp and apps/meq.cpp are
-	# in no target because they still speak the old MFEM API, so they are not
-	# in the database and are not checked. That is deliberate and temporary --
-	# they violate the convention wholesale, and they are renamed when they
-	# are ported in stage 2, at which point they join meq_core and are checked
-	# like everything else. attic/ is excluded permanently; see its README.
+	# contains exactly what some target compiles. src/meq/Estimator.hpp and
+	# apps/meq.cpp are in no target because they still speak the old MFEM API,
+	# so they are not in the database and are not checked. That is deliberate
+	# and temporary -- they violate the convention wholesale, and they are
+	# renamed when they are ported, at which point they join meq_core and are
+	# checked like everything else. attic/ is excluded permanently; see its
+	# README.
+	#
+	# HeaderFilterRegex in ../.clang-tidy is what pulls src/meq/*.hpp into the
+	# check: a header is not a translation unit, so GradShafranov.hpp is seen
+	# only because GradShafranov.cpp includes it.
 	set(_naming_sources "")
 	foreach(_source IN LISTS MEQ_CORE_SOURCES_PRESENT)
 		list(APPEND _naming_sources "${CMAKE_SOURCE_DIR}/${_source}")

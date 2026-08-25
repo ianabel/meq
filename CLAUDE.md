@@ -10,27 +10,39 @@ Galerkin (HDG) discretisation built on MFEM.
 from. The two marked ✔ there are not background reading — they *are* the method,
 and `src/meq` is an implementation of them.
 
-## Status: mid-port, and most of it is not written yet
+## Status: the linear operator works, the driver does not
 
-**What works today: nothing numerical.** The tree has been restructured and the
-build system replaced, but the solver core is still the pre-modernisation code
-targeting an MFEM API that no longer exists. Concretely:
+**meq solves a Grad–Shafranov equation**, which before stage 2 it never had.
+The linear `Δ*` is on `DarcyForm` and reproduces an exact Solov'ev equilibrium at
+`k+1` in both `ψ` and `q` for `k = 1,2,3` over four dyadic meshes;
+`tests/convergence/SolovievConvergence.cpp` is the acceptance criterion and
+prints the table. Concretely:
 
-* `src/meq/GradShafranov.{hpp,cpp}` and `src/meq/Estimator.hpp` target the
-  Waterloo `HDGBilinearForm` API from MFEM 4.5.1. **They do not compile.** They
-  are in the tree as the source material for the port, not as working code, and
-  are excluded from every build target.
+* `src/meq/GradShafranov.{hpp,cpp}` is ported — `DarcyForm` with
+  `EnableHybridization` — is in `meq_core`, and is covered by the `naming` check
+  like everything else.
+* `src/meq/Solution.hpp` is **gone**, not ported. It wrapped hand-rolled block
+  offsets and a second set of finite element spaces around what `DarcyForm` now
+  owns, and `GradShafranovSolver` carries what was left of its job. Its
+  `Prolong()` and `Update()` are stage-6 work against a mesh update that does not
+  exist yet, and its `WriteOutputMFEM()` went with it, so **nothing writes files
+  today**. `v0-legacy` has the original.
+* `src/meq/Estimator.hpp` still targets the Waterloo `HDGBilinearForm` API from
+  MFEM 4.5.1 and **does not compile**. It is stage-6 material and it also calls
+  `GridFunction::GetValueFacet`, which does not exist in 4.9.1.
 * `apps/meq.cpp` likewise. Its target is behind `MEQ_BUILD_APP`, default `OFF`.
-* Everything else — `Config`, `Profiles`, `Source` — has been rewritten and does
-  compile and test.
+* `Config`, `Profiles`, `Source` compile and test.
+
+Still missing from the solver: Newton (stage 4), the local post-processing
+`ψ*_h` (stage 3), the curved boundary (stage 5), adaptivity (stage 6).
 
 **And it is worth being clear about what the old code did, because the README
 overstates it considerably.** Before the port, `meq` solved the *vacuum* coil
 field and nothing else: `meq.cpp`'s right-hand side took `psi` and ignored it,
 `Configuration::plasma` was hardcoded `nullptr`, and the profile loader was a
-`{ return; }` stub that silently produced an empty spline. **meq has never solved
-a Grad–Shafranov equation.** Doing so for the first time is what stages 2–4 below
-are for.
+`{ return; }` stub that silently produced an empty spline. **meq had never solved
+a Grad–Shafranov equation** until stage 2, and the semi-linear one still waits on
+stage 4.
 
 The four test files that existed were empty Boost stubs, and one of them —
 asserting `foo == bar` with neither declared — could not compile. There was no
@@ -43,8 +55,8 @@ it is checked; that file has not yet been rewritten.
 |---|---|---|
 | 0 | Git reconciliation, tag `v0-legacy` | **done** |
 | 1 | Tree, CMake, `Config` / `Profiles` / `Source` | **done** |
-| 2 | Linear `Δ*` on `DarcyForm`, fitted polygonal domain | next |
-| 3 | Local post-processing `ψ*_h`; Solov'ev benchmark | |
+| 2 | Linear `Δ*` on `DarcyForm`, fitted polygonal domain | **done** |
+| 3 | Local post-processing `ψ*_h`; Solov'ev benchmark | next |
 | 4 | Newton on the semi-linear source | |
 | 5 | Curved `Γ` by extension from subdomains | |
 | 6 | Adaptivity: the residual estimator and mesh update | |
@@ -113,9 +125,11 @@ Checked, resolved, and worth not rediscovering.
 
 and since both papers define `−Δ*ψ = F`, `F = −((1−A)r² + A)`. The twelve
 homogeneous terms contribute nothing, being `Δ*`-harmonic. This is confirmed
-numerically in `tests/analytic/Soloviev.hpp` — `deltaStarFD()` recomputes `Δ*ψ`
-by central differences and the test suite asserts it against `(1−A)r² + A`, so
-the whole twelve-term transcription is checked rather than trusted.
+numerically: `Soloviev.hpp`'s `deltaStarFD()` recomputes `Δ*ψ` by central
+differences, and `SolovievConvergence.cpp`'s `solovievSourceMatchesTheOperator`
+asserts it against `−f()` over the benchmark rectangle, so the whole twelve-term
+transcription is checked rather than trusted, and checked against the same `f()`
+the solver is actually fed.
 
 Take this as the standing warning about the benchmark: **the published
 coefficients are not self-checking**, and a sign error here would show up as a
@@ -145,9 +159,54 @@ W_h = P_k(K)       potential       L2_FECollection
 M_h = P_k(e)       hybrid trace    DG_Interface_FECollection
 ```
 
+### The assembled flux is −q, and the papers' τ carries the wrong sign
+
+Two conventions settled by measurement rather than argument, both of which cost
+time if rediscovered. `tests/convergence/SolovievConvergence.cpp` records what
+every alternative produces.
+
+**`DarcyForm` holds `−q`, not `q`.** It is built for `u = −k ∇p`, the opposite
+sign to `q = (1/r)∇̄ψ`, and the two integrators that make the hybridization
+consistent — `NormalTraceJumpIntegrator` and the trace rows of
+`HDGDiffusionIntegrator` — have that sign baked in and take no scaling argument,
+so there is no way to flip it in the assembly. `GradShafranovSolver::flux()`
+undoes it once, into a separate GridFunction; the block vector stays in
+`DarcyForm`'s convention, because a stage-4 Newton residual assembled by
+`DarcyForm` will expect it there. Do not change one without the other.
+
+The same convention makes the potential right-hand side `−(F/r, w)`: with the
+default `bsymmetrize = true` the second block row is assembled as
+`−B q − M_p ψ = b_p`. `bsymmetrize = false` is not an escape — it does not work
+here at all, giving an error flat at 3e-1 for every combination of signs.
+
+**And `τ` carries the opposite sign to `refs/HDG-GradShafranov.pdf` eq (8e)**,
+which prints `q̂·n := q·n + τ(ψ − ψ̂)`. With that paper's own `q = (1/r)∇̄ψ` and
+`−∇̄·q = F/r`, testing (8a)–(8d) against `(v,w,μ) = (q_h, ψ_h, ψ̂_h)` gives
+
+```
+(r q, q) − τ‖ψ − ψ̂‖²_∂Th = 0
+```
+
+which is indefinite, and the local solves are not guaranteed invertible. The
+stable sign is `−τ`, which is exactly what assembling in `DarcyForm`'s convention
+with a positive `τ` produces. This is a second sign slip in the same pair of
+papers as the Solov'ev source one above. It is a well-posedness argument, not an
+observed failure: **both** signs converge at `k+1` on this benchmark, with
+`τ > 0` in `DarcyForm`'s convention giving slightly the smaller error at `k = 1`.
+
 **`τ = 1`.** Both papers set it there and note that optimal order needs only
 `τ = O(1)`. The pre-port code used `τ = 5.0` with no recorded reason; do not
 reinstate that without a measurement to justify it.
+
+**And MFEM will not give you a constant `τ` unless you ask.**
+`HDGDiffusionIntegrator`'s built-in stabilisation is `{h⁻¹Q}`-scaled — the LDG
+choice, not the papers'. Measured on the Solov'ev benchmark it costs a full order
+in the flux: `q` converges at `k`, not `k+1`, while `ψ` still converges at `k+1`.
+A study of `ψ` alone would have passed it. `meq::ConstantStabilization` is the
+`HDGStabilization` hook that fixes it, installed with
+`HDGDiffusionIntegrator::SetStabilization()`. Keeping `IsConstant()` true also
+keeps meq out of the `EvalGrad` trap that header warns about, where a missing
+derivative gives "no wrong answer, only slow Newton convergence".
 
 **Getting a constant `τ` takes deliberate work — `HDGDiffusionIntegrator` will
 not give you one by default.** Its documented stabilisation is
@@ -194,7 +253,7 @@ recompile.** `HDGBilinearForm`, `HDGDomainIntegratorGS`, `HDGFaceIntegratorGS`,
 |---|---|---|
 | `(r q_h, v)` | `HDGDomainIntegratorGS` | flux mass: `VectorMassIntegrator` with an `r` coefficient |
 | `(ψ_h, ∇̄·v)`, `(q_h, ∇̄w)` | `HDGDomainIntegratorGS` | flux divergence: `VectorDivergenceIntegrator` |
-| `⟨ψ̂_h, v·n⟩` | `HDGFaceIntegratorGS` | `TransposeIntegrator(DGNormalTraceIntegrator)`, interior and boundary faces |
+| `⟨ψ̂_h, v·n⟩` | `HDGFaceIntegratorGS` | the transpose of `NormalTraceJumpIntegrator` — **not** the face integrators on `B`, see below |
 | `⟨τ(ψ_h − ψ̂_h), w⟩` | `HDGFaceIntegratorGS` | potential mass: `HDGDiffusionIntegrator` |
 | `⟨q̂_h·n, μ⟩ = 0` | `AssembleSC` | `EnableHybridization(trace_space, new NormalTraceJumpIntegrator(), ess_list)` |
 | condense / reconstruct | `AssembleSC` + `Reconstruct` | `FormLinearSystem` / `RecoverFEMSolution` |
@@ -202,8 +261,44 @@ recompile.** `HDGBilinearForm`, `HDGDomainIntegratorGS`, `HDGFaceIntegratorGS`,
 `miniapps/hdg/convdiff.cpp` in that tree is the worked example to copy from;
 lines 445–469 build exactly the three spaces above.
 
+**A correction to that table, measured in stage 2.** An earlier version said the
+`⟨ψ̂_h, v·n⟩` coupling came from `TransposeIntegrator(DGNormalTraceIntegrator)`
+added to `B` on interior and boundary faces. It does not. Under hybridization
+`DarcyForm::Assemble()` builds `B` through `ComputeElementMatrix()`, which sums
+**domain integrators only**, so those face integrators are never assembled —
+changing the boundary one's coefficient from `−2` to `−0.7`, and deleting the
+interior one outright, does not move a single digit of the answer. The coupling
+comes from the transpose of `NormalTraceJumpIntegrator`, supplied to
+`EnableHybridization`.
+
+The boundary-face integrator on `B` still has to be there, but as a **marker**:
+`EnableHybridization()` reads `B`'s boundary-face markers to decide where to
+register the flux constraint. Remove it and the Dirichlet faces get no
+constraint at all — the error goes flat at 1.5e-1. So it is load-bearing for a
+reason unrelated to the integral it appears to compute, which is exactly the kind
+of thing to leave a note about.
+
+**And `DarcyForm::GetOffsets()` returns three entries, not four** — it never
+learns about the trace space. The miniapps get the 4-entry version from
+`DarcyOperator::ConstructOffsets()`, which is not in `libmfem.a`, so
+`GradShafranovSolver` builds its own.
+
 **Also gone: `GridFunction::GetValueFacet`**, which `Estimator.hpp` calls. It was
 a patch to the old branch and does not exist in 4.9.1.
+
+### Before hand-rolling the post-processing (stage 3)
+
+The old `GSSolver::Postprocess()` implemented the local Neumann solve of
+`refs/HDG-GradShafranov.pdf` §3.2 by hand. **Try MFEM's own first.**
+`DarcyForm::Reconstruct()` and `ReconstructFluxAndPot()` in 4.9.1 already perform
+superconvergent reconstruction off the hybridized solution, natively. If that
+gives `k+2` in `ψ*`, there is nothing to port.
+
+Two reasons not to reach straight for the old code: it is `v0-legacy` material
+written against a different flux convention, so its `−(∇w, r q)` sign would have
+to be re-measured against `DarcyForm`'s `−q` anyway; and `HDG-GradShafranov-
+Adaptive.pdf` §2.7 licences the *linear* post-processing even in the semi-linear
+case, so the nonlinear variant in its eq. (19) is not needed either way.
 
 ## Newton, and the obligation it creates
 
@@ -372,8 +467,8 @@ whose `∂F/∂ψ` is analytic.
 ## Layout
 
 ```
-src/meq/     the library. Config, Profiles, Source are ported;
-             GradShafranov and Estimator are not (see Status).
+src/meq/     the library. Config, Profiles, Source, GradShafranov are
+             ported; Estimator is not (see Status).
 apps/        drivers. Only meq.cpp, and it does not build yet.
 tests/       unit/ (Boost.Test), convergence/ (rate assertions),
              analytic/ (closed-form solutions used by both)
