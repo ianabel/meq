@@ -17,7 +17,8 @@ find_package(Boost CONFIG REQUIRED COMPONENTS unit_test_framework)
 set(MEQ_UNIT_TESTS
 	ConfigTests
 	ProfilesTests
-	SourceTests)
+	SourceTests
+	SourceFactoryTests)
 
 foreach(_test IN LISTS MEQ_UNIT_TESTS)
 	set(_test_source "${CMAKE_CURRENT_SOURCE_DIR}/unit/${_test}.cpp")
@@ -38,6 +39,11 @@ foreach(_test IN LISTS MEQ_UNIT_TESTS)
 		target_link_libraries(${_test} PRIVATE
 			meq_core
 			Boost::unit_test_framework)
+
+		# So that a unit test can reach the closed-form solutions in
+		# analytic/. SourceFactoryTests uses one to check that the library's
+		# copy of the Example 5 source has not drifted from the fixture's.
+		target_include_directories(${_test} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 
 		# WORKING_DIRECTORY is load-bearing, not tidiness: ConfigTests opens
 		# examples/*.toml by a path relative to the source tree, so without

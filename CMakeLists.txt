@@ -128,7 +128,8 @@ set(MEQ_CORE_SOURCES
 	src/meq/Config.cpp
 	src/meq/GradShafranov.cpp
 	src/meq/Profiles.cpp
-	src/meq/Source.cpp)
+	src/meq/Source.cpp
+	src/meq/SourceFactory.cpp)
 
 # The port is being done file by file, so a source in the list above may not
 # have been written yet. Configure with what is there and say what is missing,
