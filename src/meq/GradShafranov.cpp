@@ -156,6 +156,8 @@ namespace meq
 		  linearSource( nullptr ),
 		  nonlinearSource( nullptr ),
 		  boundaryData( nullptr ),
+		  transferPath( nullptr ),
+		  extensionLineOrder( -1 ),
 		  newtonRelativeTolerance( 1.0e-12 ),
 		  newtonAbsoluteTolerance( 1.0e-14 ),
 		  newtonMaxIterations( 30 ),
@@ -185,6 +187,11 @@ namespace meq
 
 		dirichletMarker.SetSize( mesh.bdr_attributes.Size() ? mesh.bdr_attributes.Max() : 0 );
 		dirichletMarker = 1;
+
+		gammaHMarker.SetSize( dirichletMarker.Size() );
+		gammaHMarker = 0;
+		fittedMarker.SetSize( dirichletMarker.Size() );
+		fittedMarker = 1;
 
 		blockOffsets.SetSize( 4 );
 		blockOffsets[ 0 ] = 0;
@@ -245,6 +252,34 @@ namespace meq
 		boundaryData = &boundaryIn;
 	}
 
+	void GradShafranovSolver::setExtension( mfem::TransferPath &pathIn,
+	                                        mfem::Array<int> const &gammaHMarkerIn,
+	                                        int lineOrderIn )
+	{
+		if ( built )
+			throw std::logic_error( "meq::GradShafranovSolver::setExtension: the forms are already built; the extension has to be set before the first solve" );
+		if ( gammaHMarkerIn.Size() != dirichletMarker.Size() )
+			throw std::invalid_argument( "meq::GradShafranovSolver::setExtension: the Gamma_h marker must be sized by the largest boundary attribute of the mesh" );
+
+		transferPath = &pathIn;
+		extensionLineOrder = lineOrderIn;
+
+		gammaHMarkerIn.Copy( gammaHMarker );
+		for ( int i = 0; i < fittedMarker.Size(); ++i )
+			fittedMarker[ i ] = gammaHMarker[ i ] ? 0 : 1;
+
+		bool any = false;
+		for ( int i = 0; i < gammaHMarker.Size(); ++i )
+			any = any || gammaHMarker[ i ];
+		if ( !any )
+			throw std::invalid_argument( "meq::GradShafranovSolver::setExtension: the Gamma_h marker selects no boundary attribute" );
+	}
+
+	bool GradShafranovSolver::isExtended() const
+	{
+		return transferPath != nullptr;
+	}
+
 	void GradShafranovSolver::setNewtonControl( double relativeToleranceIn,
 	                                            double absoluteToleranceIn,
 	                                            int maxIterationsIn )
@@ -275,6 +310,31 @@ namespace meq
 		// exact Solov'ev solution flat at 1.9e-2 through four refinements.
 		mfem::BilinearForm *fluxMass = darcy->GetFluxMassForm();
 		fluxMass->AddDomainIntegrator( new mfem::VectorMassIntegrator( radius ) );
+
+		if ( transferPath )
+		{
+			// < L_e( q_h ), v.n > on Gamma_h: the solution-dependent half of the
+			// transferred datum, which is the whole of it for a homogeneous g.
+			// Two arguments here were measured rather than argued.
+			//
+			// The coefficient is radius, the same r the flux mass form carries.
+			// HDGExtensionIntegrator documents C as "the same coefficient the
+			// flux mass form carries", and CLAUDE.md's mapping table says the
+			// same thing from meq's side, but it was checked: with 1/r here the
+			// error is flat under refinement, exactly as it is when the flux mass
+			// form itself is given 1/r.
+			//
+			// The sign is +1, HDGExtensionIntegrator's own default, and it is the
+			// default for the same reason it is right here: DarcyForm's flux block
+			// holds -q, which is precisely the u = -K grad p of the Darcy problem
+			// the extension was written for, so meq's convention and the
+			// integrator's coincide. Measured: with -1 the rates collapse. See
+			// tests/convergence/ExtensionConvergence.cpp for the numbers.
+			fluxMass->AddBdrFaceIntegrator(
+				new mfem::HDGExtensionIntegrator( *transferPath, radius, +1.0,
+				                                  extensionLineOrder ),
+				gammaHMarker );
+		}
 
 		// < tau( psi_h - psihat_h ), w > on every face of every element, interior
 		// and boundary alike. The coefficient handed to HDGDiffusionIntegrator is
@@ -313,13 +373,13 @@ namespace meq
 			mfem::NonlinearForm *potentialMass = darcy->GetPotentialMassNonlinearForm();
 			potentialMass->AddDomainIntegrator( new SourceIntegrator( *nonlinearSource ) );
 			potentialMass->AddInteriorFaceIntegrator( interior );
-			potentialMass->AddBdrFaceIntegrator( boundary, dirichletMarker );
+			potentialMass->AddBdrFaceIntegrator( boundary, fittedMarker );
 		}
 		else
 		{
 			mfem::BilinearForm *potentialMass = darcy->GetPotentialMassForm();
 			potentialMass->AddInteriorFaceIntegrator( interior );
-			potentialMass->AddBdrFaceIntegrator( boundary, dirichletMarker );
+			potentialMass->AddBdrFaceIntegrator( boundary, fittedMarker );
 		}
 
 		// ( div_bar q, w ) and, by transposition, ( psi, div_bar v ).
@@ -342,7 +402,7 @@ namespace meq
 			new mfem::TransposeIntegrator( new mfem::DGNormalTraceIntegrator( -1.0 ) ) );
 		fluxDiv->AddBdrFaceIntegrator(
 			new mfem::TransposeIntegrator( new mfem::DGNormalTraceIntegrator( -2.0 ) ),
-			dirichletMarker );
+			fittedMarker );
 
 		// < qhat_h.n, mu > = 0. This must come after every AddIntegrator above:
 		// EnableHybridization() reaches into the potential mass and flux divergence
@@ -384,7 +444,13 @@ namespace meq
 	{
 		if ( !linearSource && !nonlinearSource )
 			throw std::logic_error( "meq::GradShafranovSolver::prepare: no source has been set" );
-		if ( !boundaryData )
+		// On the extension path a Gamma_h attribute carries no datum of its own --
+		// what is imposed there is phi_h -- so boundary data is needed only if some
+		// attribute is still fitted.
+		bool anyFitted = false;
+		for ( int i = 0; i < fittedMarker.Size(); ++i )
+			anyFitted = anyFitted || fittedMarker[ i ];
+		if ( !boundaryData && anyFitted )
 			throw std::logic_error( "meq::GradShafranovSolver::prepare: no boundary data has been set" );
 
 		buildForms();
@@ -403,7 +469,11 @@ namespace meq
 		// problems and the condition was ignored outright) and no MFEM regression
 		// covers the combination; if a converged answer ever looks wrong near
 		// Gamma, look there before looking here.
-		traceGf.ProjectBdrCoefficient( *boundaryData, dirichletMarker );
+		// fittedMarker, not dirichletMarker: the trace dofs of Gamma_h are pinned
+		// to zero rather than to a datum, since nothing references them. See
+		// setExtension().
+		if ( boundaryData && anyFitted )
+			traceGf.ProjectBdrCoefficient( *boundaryData, fittedMarker );
 
 		if ( linearSource )
 		{

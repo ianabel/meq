@@ -79,7 +79,8 @@ endforeach()
 # solutions out of analytic/.
 set(MEQ_CONVERGENCE_TESTS
 	SolovievConvergence
-	NewtonConvergence)
+	NewtonConvergence
+	ExtensionConvergence)
 
 foreach(_test IN LISTS MEQ_CONVERGENCE_TESTS)
 	set(_test_source "${CMAKE_CURRENT_SOURCE_DIR}/convergence/${_test}.cpp")

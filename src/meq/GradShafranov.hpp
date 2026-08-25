@@ -44,8 +44,29 @@
  * Anderson-accelerated Picard iteration instead; the reasons for departing are
  * in CLAUDE.md, and the price is that every Source must supply dF/dpsi.
  *
- * Scope: the domain is polygonal and fitted, so Gamma_h == Gamma, and there is
- * no local post-processing (stage 3) and no adaptivity (stage 6).
+ * TWO BOUNDARY REGIMES, chosen by whether setExtension() is called.
+ *
+ * Without it the domain is polygonal and fitted, Gamma_h == Gamma, and psi = g_D
+ * is an essential condition on the trace: setBoundaryData() supplies g_D,
+ * DarcyHybridization::SetEssentialBC eliminates those trace dofs, and that is the
+ * whole of it. That is stages 2 and 4, and it stays the simpler configuration.
+ *
+ * With it the true boundary Gamma is a curved level set that the mesh does not
+ * follow, the mesh is a polygonal subdomain D_h of the region Gamma encloses, and
+ * the datum is carried from Gamma to Gamma_h = dD_h along transferring paths, by
+ * the technique of Cockburn and Solano -- refs/HDG-GradShafranov-Adaptive.pdf
+ * sections 2.1-2.2. The transferred datum
+ *
+ *     phi_h( x ) = g( a( x ) ) + int_sigma C E_h( u_h ) . m ds
+ *
+ * -- with C = r, u_h the flux as DarcyForm holds it, which is -q, and m the unit
+ * tangent of the path from x on Gamma_h to a( x ) on Gamma -- depends on the
+ * unknown flux through the second term, so it is not data to be eliminated; it
+ * is a coupling into the operator. See setExtension() for how that
+ * changes the assembly, and note that the change is structural rather than an
+ * extra term.
+ *
+ * There is no local post-processing (stage 3) and no adaptivity (stage 6).
  *
  * WHAT IS AND IS NOT MEQ'S SIGN CONVENTION FOR q -- read before using flux().
  *
@@ -203,6 +224,10 @@ namespace meq
 	 *     solver.solve();
 	 *     solver.newtonResiduals();                  // the convergence history
 	 *
+	 * Usage on a curved Gamma, either of the above plus:
+	 *
+	 *     solver.setExtension( path, gammaHMarker ); // psi = 0 carried from Gamma
+	 *
 	 * The forms are built on the first call to solve() or prepare(), not in the
 	 * constructor, because the two paths need different forms -- a linear
 	 * potential mass and a source on the right hand side, or a non-linear
@@ -213,7 +238,8 @@ namespace meq
 	 *
 	 * Every boundary attribute of the mesh is Dirichlet: the fixed-boundary
 	 * problem is an interior Dirichlet problem by construction, so there is no
-	 * knob for that and no Neumann path to get wrong.
+	 * knob for that and no Neumann path to get wrong. setExtension() chooses HOW
+	 * the condition is imposed on an attribute, never whether.
 	 */
 	class GradShafranovSolver
 	{
@@ -249,6 +275,78 @@ namespace meq
 			/// the normal case: the level set psi = 0 is the plasma boundary, but a
 			/// benchmark on a rectangle cut out of an exact equilibrium is not.
 			void setBoundaryData( mfem::Coefficient &boundaryIn );
+
+			/**
+			 * Carry a homogeneous Dirichlet datum from the curved Gamma to the
+			 * polygonal Gamma_h, by extension from the subdomain.
+			 *
+			 * @param pathIn          the transferring paths. Borrowed; it must
+			 *                        outlive the solver. Any mfem::TransferPath
+			 *                        will do -- LevelSetPath is the family the a
+			 *                        priori analysis is written for, and
+			 *                        VertexConePath is the general one meq's
+			 *                        benchmark uses, because a flux surface has no
+			 *                        closest-point map in closed form.
+			 * @param gammaHMarkerIn  the boundary attributes of Gamma_h, the part
+			 *                        of the mesh boundary that SubMesh had to
+			 *                        generate. Attributes NOT marked here are
+			 *                        treated as fitted and keep the essential
+			 *                        trace condition, so a domain with both kinds
+			 *                        of boundary works.
+			 * @param lineOrderIn     order of the quadrature along a path;
+			 *                        negative takes twice the element order plus
+			 *                        two, which is HDGExtensionIntegrator's own
+			 *                        default.
+			 *
+			 * WHAT THIS CHANGES, which is more than it looks.
+			 *
+			 * On a marked face psihat is no longer an unknown with an essential
+			 * value. It is phi_h, and phi_h depends on the flux, so the datum
+			 * splits: g( a( x ) ) is data and the line integral is an operator.
+			 * For meq g == 0 on Gamma -- the plasma boundary IS the level set
+			 * psi = 0 -- so the data half vanishes identically and only the
+			 * operator half is left, which is
+			 * refs/HDG-GradShafranov-Adaptive.pdf eq (14). That is why this takes
+			 * no datum: a non-homogeneous g would need
+			 * < g o a, v.n > on the flux right hand side as well, which
+			 * mfem::PathTraceCoefficient supplies and nothing here calls for yet.
+			 *
+			 * The operator half goes on the flux mass form as an
+			 * HDGExtensionIntegrator, where it is local to the element owning the
+			 * face and the hybridization never sees it -- which is why the weak
+			 * route costs nothing structural and the essential-trace route would.
+			 *
+			 * Two things come OFF a marked attribute in exchange. The HDG
+			 * stabilisation does, so tau is zero on Gamma_h: it is
+			 * < tau( psi_h - psihat_h ), w >, and psihat_h there is not the datum
+			 * any more. Leave it on and the method loses an order at k = 1 and two
+			 * at k = 2 -- measured, see
+			 * tests/convergence/ExtensionConvergence.cpp. And the flux constraint
+			 * does, so B's boundary face integrator is registered on the fitted
+			 * attributes only: there is no trace unknown on Gamma_h to constrain.
+			 *
+			 * The trace dofs of those faces stay in the essential list all the
+			 * same, at zero, because SetEssentialBC is still given every attribute.
+			 * Measured, that is inert -- the answer does not change in any digit
+			 * without it, and the reduced matrix has no zero row either way -- but
+			 * it is what keeps the one combination that does NOT work from arising:
+			 * with the flux constraint registered on Gamma_h AND nothing pinning
+			 * the dofs it constrains, psihat_h becomes a free unknown answering
+			 * < qhat_h.n, mu > = 0, a natural condition, and the error reaches
+			 * 5e13.
+			 *
+			 * So trace() is NOT psihat on Gamma_h. The datum actually imposed
+			 * there is phi_h, and it is never stored.
+			 *
+			 * miniapps/hdg/extension.cpp in the MFEM tree is the worked driver
+			 * this follows.
+			 */
+			void setExtension( mfem::TransferPath &pathIn,
+			                   mfem::Array<int> const &gammaHMarkerIn,
+			                   int lineOrderIn = -1 );
+
+			/// True once setExtension() has been called.
+			bool isExtended() const;
 
 			/// Newton's stopping rule and iteration cap. Ignored on the linear
 			/// path. The defaults are tight on purpose: a Newton iteration that
@@ -373,14 +471,27 @@ namespace meq
 			mfem::Coefficient *boundaryData;
 			std::unique_ptr<mfem::Coefficient> potentialRhsCoeff;
 
+			/// The transferring paths, or null on the fitted path. Borrowed.
+			mfem::TransferPath *transferPath;
+			int extensionLineOrder;
+
 			double newtonRelativeTolerance;
 			double newtonAbsoluteTolerance;
 			int newtonMaxIterations;
 			int newtonIterationCount;
 			std::vector<double> newtonResidualHistory;
 
-			/// Every boundary attribute, marked. See the class comment.
+			/// Every boundary attribute, marked. See the class comment. This is
+			/// what the essential trace condition is imposed on, on both paths:
+			/// on Gamma_h it pins dofs nothing references, on a fitted attribute
+			/// it imposes g_D.
 			mfem::Array<int> dirichletMarker;
+
+			/// The attributes of Gamma_h, and its complement in dirichletMarker.
+			/// Empty and equal to dirichletMarker respectively until
+			/// setExtension() is called.
+			mfem::Array<int> gammaHMarker;
+			mfem::Array<int> fittedMarker;
 
 			/// Empty, and a member rather than a local so that it outlives the
 			/// DarcyHybridization that was handed a reference to it. A discontinuous

@@ -35,9 +35,8 @@ Concretely:
 * `apps/meq.cpp` likewise. Its target is behind `MEQ_BUILD_APP`, default `OFF`.
 * `Config`, `Profiles`, `Source` compile and test.
 
-Still missing from the solver: the curved boundary (stage 5) and adaptivity
-(stage 6). And the driver — nothing writes files, so meq is reachable only
-through its test suite. The local post-processing that was stage 3 has
+Still missing from the solver: adaptivity (stage 6). And the driver — nothing
+writes files, so meq is reachable only through its test suite. The local post-processing that was stage 3 has
 been dropped — see *There is no separate post-processing stage* below.
 
 **And it is worth being clear about what the old code did, because the README
@@ -62,8 +61,8 @@ it is checked; that file has not yet been rewritten.
 | 2 | Linear `Δ*` on `DarcyForm`, fitted polygonal domain | **done** |
 | 3 | Local post-processing `ψ*_h` | **dropped** — see below |
 | 4 | Newton on the semi-linear source | **done** |
-| 5 | Curved `Γ` by extension from subdomains | next |
-| 6 | Adaptivity: the residual estimator and mesh update | |
+| 5 | Curved `Γ` by extension from subdomains | **done** |
+| 6 | Adaptivity: the residual estimator and mesh update | next |
 
 Each stage ends at a **measured convergence rate**, not at "it runs". See
 *Testing stance* below for why that is the acceptance criterion.
@@ -279,6 +278,7 @@ recompile.** `HDGBilinearForm`, `HDGDomainIntegratorGS`, `HDGFaceIntegratorGS`,
 | `⟨τ(ψ_h − ψ̂_h), w⟩` | `HDGFaceIntegratorGS` | potential mass: `HDGDiffusionIntegrator` |
 | `⟨q̂_h·n, μ⟩ = 0` | `AssembleSC` | `EnableHybridization(trace_space, new NormalTraceJumpIntegrator(), ess_list)` |
 | condense / reconstruct | `AssembleSC` + `Reconstruct` | `FormLinearSystem` / `RecoverFEMSolution` |
+| `φ_h` on `Γ_h` (stage 5) | — | `HDGExtensionIntegrator` on the **flux mass form**, `C = r`, sign `+1` |
 
 `miniapps/hdg/convdiff.cpp` in that tree is the worked example to copy from;
 lines 445–469 build exactly the three spaces above.
@@ -408,6 +408,52 @@ meq's own, measured at `k = 3`, `h = 0.1`, 832 trace dofs:
     3     1.411243e-07     1.257800e-08    1.949
     4     4.142741e-14     3.692303e-15    1.810
 ```
+
+### The Solov'ev coefficients are asserted nowhere, and one of them is wrong
+
+The benchmark that everything else is measured against has an unverified core,
+and it is worth knowing exactly which part.
+
+**`ψ₁ … ψ₁₂` are `Δ*`-harmonic by construction.** So *any* values of `c₁ … c₁₂`
+leave `Δ*ψ = −F` exact and every convergence rate untouched. `deltaStarFD()`
+checks the expansion, `SolovievConvergence` checks the rates, and **neither can
+see a wrong coefficient.** It is the one input to the benchmark that nothing in
+the suite constrains.
+
+**And the printed set is wrong somewhere.** Two independent signs of it:
+
+* `refs/HDG-GradShafranov-Adaptive.pdf` eq. (22c) prints `c₇` and `c₁₀` as the
+  *same* number, `−0.000044132956899`. Solving Cerfon–Freidberg's ten NSTX
+  single-null conditions with the other eleven fixed and `c₁₀` free gives
+  `−2.87e-3` — 65× larger — and drops the residual of those conditions from
+  4.6e-2 to 8.9e-5.
+* A Solov'ev normalisation should put the separatrix at `ψ = 0`. It does not.
+  Measured directly from `Soloviev.hpp`: the magnetic axis is at
+  `(1.3226, 0.0078)` with `ψ = −0.2697`, and the X-point is at
+  `(0.6958, −1.8069)` with **`ψ = −8.718e-3`**. So `{ψ < 0}` runs through the
+  saddle and off to infinity, and the level set `ψ = 0` is not a closed curve at
+  all.
+
+**`c₁` is not among the suspects**, despite a report that it was. Its digits in
+`Soloviev.hpp` (`−0.00147796615575325`) match the rendered page exactly. The
+report came from `pdftotext`, which drops this paper's minus signs entirely and
+should not be trusted on it — read the page.
+
+Consequences, none of which are fixed yet:
+
+* `Soloviev.hpp` is **left as transcribed**, because the existing tests'
+  absolute-error ceilings are calibrated to it. Correcting `c₁₀` means
+  recalibrating them in the same commit.
+* `ExtensionConvergence` therefore cannot use `ψ = 0` as its curved boundary. It
+  uses the closed flux surface `ψ = −0.03` instead, written as the zero set of
+  `ψ + 0.03`. Poloidal flux is defined only up to an additive constant and
+  `ψ₁ = 1` is in the basis, so **this is the same equilibrium** — identical `F`,
+  bit-identical `q`, only the surface called zero has moved. The offset has to
+  clear the saddle at `−8.7e-3`.
+* Even with a corrected `c₁₀` the separatrix would be the wrong geometry for the
+  extension technique: it passes through an X-point, which is a *corner* of `Γ`,
+  where both transfer-path families give out and the Cockburn–Solano analysis
+  does not reach.
 
 ### A wrong Jacobian is invisible to a convergence table
 
@@ -548,6 +594,16 @@ So the test ladder is, in order:
 Expect rates to stop improving beyond `k ≈ 5` or `h/8`: the papers report
 round-off dominating there, so a table that flattens at that point is behaving
 correctly and is not a bug to chase.
+
+**Unfitted convergence needs a two-tier rate assertion.** On a fitted mesh a
+single-pair rate is tight enough to assert at 0.15 of slack. On the extension
+path it is not: `Ω^h` is the union of background elements lying inside `Ω`, and
+*which* elements those are is not a smooth function of `h`. At `k = 3` the error
+is not even monotone in the mesh count — 2.02e-5, 3.03e-5, 3.88e-5 at
+`n = 6, 7, 8` — and `{12,24,48,96}` is a worse sequence than `{8,16,32,64}`.
+That is geometry, not the transfer: all four path families give the same
+numbers. So `ExtensionConvergence` allows 0.30 per pair and asserts 0.15 on the
+rate across the whole sequence.
 
 **Mutation-test a suite you are relying on.** `ProfilesTests` and `SourceTests`
 were checked by deliberately introducing fifteen defects — a dropped `r²`, `p'`
