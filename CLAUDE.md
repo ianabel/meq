@@ -33,8 +33,9 @@ prints the table. Concretely:
 * `apps/meq.cpp` likewise. Its target is behind `MEQ_BUILD_APP`, default `OFF`.
 * `Config`, `Profiles`, `Source` compile and test.
 
-Still missing from the solver: Newton (stage 4), the local post-processing
-`ψ*_h` (stage 3), the curved boundary (stage 5), adaptivity (stage 6).
+Still missing from the solver: Newton (stage 4), the curved boundary
+(stage 5), adaptivity (stage 6). The local post-processing that was stage 3 has
+been dropped — see *There is no separate post-processing stage* below.
 
 **And it is worth being clear about what the old code did, because the README
 overstates it considerably.** Before the port, `meq` solved the *vacuum* coil
@@ -56,8 +57,8 @@ it is checked; that file has not yet been rewritten.
 | 0 | Git reconciliation, tag `v0-legacy` | **done** |
 | 1 | Tree, CMake, `Config` / `Profiles` / `Source` | **done** |
 | 2 | Linear `Δ*` on `DarcyForm`, fitted polygonal domain | **done** |
-| 3 | Local post-processing `ψ*_h`; Solov'ev benchmark | next |
-| 4 | Newton on the semi-linear source | |
+| 3 | Local post-processing `ψ*_h` | **dropped** — see below |
+| 4 | Newton on the semi-linear source | next |
 | 5 | Curved `Γ` by extension from subdomains | |
 | 6 | Adaptivity: the residual estimator and mesh update | |
 
@@ -286,19 +287,36 @@ learns about the trace space. The miniapps get the 4-entry version from
 **Also gone: `GridFunction::GetValueFacet`**, which `Estimator.hpp` calls. It was
 a patch to the old branch and does not exist in 4.9.1.
 
-### Before hand-rolling the post-processing (stage 3)
+### There is no separate post-processing stage, and there should not be
 
-The old `GSSolver::Postprocess()` implemented the local Neumann solve of
-`refs/HDG-GradShafranov.pdf` §3.2 by hand. **Try MFEM's own first.**
-`DarcyForm::Reconstruct()` and `ReconstructFluxAndPot()` in 4.9.1 already perform
-superconvergent reconstruction off the hybridized solution, natively. If that
-gives `k+2` in `ψ*`, there is nothing to port.
+Decided 2026-08-24. `ψ*_h`, the local post-processing that gains an order in the
+scalar, is **not needed for accuracy**, and meq does not implement one.
 
-Two reasons not to reach straight for the old code: it is `v0-legacy` material
-written against a different flux convention, so its `−(∇w, r q)` sign would have
-to be re-measured against `DarcyForm`'s `−q` anyway; and `HDG-GradShafranov-
-Adaptive.pdf` §2.7 licences the *linear* post-processing even in the semi-linear
-case, so the nonlinear variant in its eq. (19) is not needed either way.
+**The papers agree.** `refs/HDG-GradShafranov.pdf` §3.2 describes the
+post-processing and then says they did not implement it: the physical quantity is
+`B ∝ ∇ψ`, which the mixed formulation already delivers as `q` at `k+1`. Adding an
+order to `ψ` buys nothing a magnetic-confinement calculation uses. Stage 2's table
+confirms `q` at `k+1` in practice, so there is nothing to recover.
+
+**And where it *is* needed, the library already has it.**
+`DarcyForm::ReconstructFluxAndPot()` builds its potential space as
+`p_coll->Clone(p_coll->GetOrder() + 1)` — the `P_(k+1)` post-processing space,
+off the hybridized solution, natively. `Reconstruct()` wraps it together with
+`ReconstructTotalFlux()`. It requires a flux mass form that assembles, which meq
+has. So if `ψ*` is ever wanted, call that; do not port the old
+`GSSolver::Postprocess()`, which was written against a different flux convention
+and whose `−(∇w, r q)` sign would need re-measuring against `DarcyForm`'s `−q`.
+
+**The one place it will actually be needed is stage 6.** The residual estimator of
+`refs/HDG-GradShafranov-Adaptive.pdf` eq. (20) uses `ψ*_h`, not `ψ_h`, in `η₁`,
+`η₂` and `η₅` — and that is not decoration. The paper is explicit that `η₂` built
+on the raw `ψ_h` converges at *reduced* order, because it differentiates the
+approximation; substituting `ψ*_h` is what preserves `k+1`. meq's
+pre-modernisation estimator used raw `ψ_h` in both places and was a degraded copy
+of the published one.
+
+So the sequencing is: nothing now, and when adaptivity arrives, **measure whether
+`Reconstruct()` delivers `k+2`** before writing any local solve by hand.
 
 ## Newton, and the obligation it creates
 
