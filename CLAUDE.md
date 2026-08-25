@@ -228,6 +228,14 @@ of `F`. That test is not box-ticking; it is what stands between a typo in a
 derivative and a Newton iteration that quietly fails to converge quadratically
 while still converging.
 
+There is independent support for the choice, from the free-boundary literature
+rather than the HDG one. CEDRES++ (`refs/CEDRES.pdf`) reports that fixed-point
+iterations "usually suffer from very slow convergence or even fail to converge,
+which made researchers move towards Newton-type methods", and names **vertically
+unstable plasmas** as a case where Picard does not converge at all. That is a
+stronger claim than "Newton is faster", and it is the one to cite. It is taken
+from that paper's introduction, which is as far as it has been read here.
+
 ### On SUNDIALS
 
 `mfem::KINSolver` **derives from `mfem::NewtonSolver`** (`linalg/sundials.hpp`).

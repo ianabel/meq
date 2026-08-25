@@ -124,6 +124,12 @@ Anderson is not thereby ruled out — MFEM's `KINSolver` offers it via
 are interchangeable at the call site. Keep these papers to hand for the day a
 pedestal makes Newton's globalisation an issue.
 
+**And there is support for the choice from the free-boundary side**: CEDRES++
+(§ *Free boundary* below) reports that fixed-point iterations converge very
+slowly or fail outright, vertically unstable plasmas being the case that forced
+the field to Newton-type methods. That is a stronger statement than "Newton is
+faster", and it is the one to cite if the choice is ever questioned.
+
 | Reference | URL (doi or arxiv) | Short Description | File Name |
 | --- | --- | --- | --- |
 | SIAM Journal on Numerical Analysis 53 (2015) 805–819 | https://doi.org/10.1137/130919398 | Toth & Kelley, convergence analysis for Anderson acceleration. HDG-GS-1's [45], and the source of its **depth `m = 2`**: they report no gain beyond `m ≥ 3`, and HDG-GS-1's own experiments agreed. The reference for what Anderson does and does not guarantee, which matters if it is ever used as a fallback when Newton stalls. Paywalled | AndersonAcceleration.pdf |
@@ -141,6 +147,40 @@ published coefficients comes before any self-convergence study.
 | --- | --- | --- | --- |
 | Physics of Plasmas 17 (2010) 032502 | https://doi.org/10.1063/1.3328818 | Cerfon & Freidberg, *"One size fits all"* analytic solutions to the Grad–Shafranov equation. **The parametrization behind both GS papers' test cases** — their `(ε, δ, κ)` for aspect ratio, triangularity and elongation, and the procedure that fixes the twelve coefficients `c₁…c₁₂` from geometric constraints. Cited as [47] in HDG-GS-1 and [41] in HDG-GS-2. Needed to generate a Solov'ev benchmark for any geometry other than the one HDG-GS-2 §4.1 tabulates. Paywalled | Soloviev-CerfonFreidberg.pdf |
 | Physics of Plasmas 14 (2007) 112508 | https://doi.org/10.1063/1.2803759 | Guazzotto & Freidberg, a family of analytic equilibria with **dissimilar source functions** — `p = (S/μ₀)ψ` and `g² = Tψ² + 2Uψ + g₀²`, giving `F = Tψ + Sr² + U`, a source **linear in `ψ`** whose solution is the Bessel-function combination of HDG-GS-1 eq. (14). HDG-GS-1's [48] and its ASDEX Example 4. The useful benchmark for a source that depends on `ψ` at all, and the one where the papers' iterate-everything design is most obviously paying a price Newton does not. Paywalled | AnalyticEquilibria-Bessel.pdf |
+
+## Free boundary: the direction after the fixed-boundary target
+
+meq's first target is fixed boundary, and the free-boundary code it used to have
+is unported in `attic/free-boundary/`. These two are the seeds for bringing it
+back properly rather than restoring what was there.
+
+The difficulty is that free boundary is an **exterior** problem: the vacuum field
+extends to infinity, so the domain is unbounded and the plasma boundary is itself
+an unknown, defined by a limiter contact or a separatrix. The standard answer,
+and the one the old attic code implemented by hand, is Lackner's: reduce the
+unbounded domain to a boundary condition through the Green's function, and couple
+that to a finite element solve inside. Doing it as a *coupled BIM/FEM* rather
+than as a hand-rolled Green's-function quadrature is the improvement to aim for.
+
+**These are annotated from their abstracts and introductions only** — enough to
+say why they are here, not enough to be read as summaries. Neither carries a ✔.
+
+**One thing already worth extracting, because it bears on a decision meq has
+already taken.** meq uses Newton where both Grad–Shafranov papers use
+Anderson-accelerated Picard, and §4 above frames that as a trade. CEDRES++'s
+introduction makes the stronger claim from the free-boundary side: *"Simple
+fixed-point iterations usually suffer from very slow convergence or even fail to
+converge, which made researchers move towards Newton-type methods... they can
+converge in cases where fixed-point iterations do not converge — a very important
+example is vertically unstable plasmas."* So Newton is not merely a preference
+here; it is what the free-boundary literature moved to, and the case where Picard
+fails outright is a physically important one. Confirm this against the body of
+the paper before leaning on it.
+
+| Reference | URL (doi or arxiv) | Short Description | File Name |
+| --- | --- | --- | --- |
+| Journal of Plasma Physics 81 (2015) 905810301 | https://doi.org/10.1017/s0022377814001251 | Heumann, Blum, Boulbe, Faugeras, Selig, Ané, Brémond, Grandgirard, Hertout & Nardon, **CEDRES++** — a survey of the computational methods in a production quasi-static *free-boundary* equilibrium code, on ITER and WEST. The nearest thing in the literature to what meq would become. Piecewise-linear FEM for the flux map coupled to a **boundary element method** for the unbounded exterior, and a **Newton method for the discretised nonlinear problem** covering all three nonlinearities at once — the current profile, the free plasma boundary, and the ferromagnetic permeability where there is an iron transformer. Also covers the *inverse* problems (find the coil currents giving a desired plasma shape), for which they say Newton is the main building block. Read for the coupling and the Newton formulation rather than for the discretisation, which is low order where meq's is not. Open access on Cambridge Core | CEDRES.pdf |
+| Journal of Mathematical Analysis and Applications 189 (1995) 442–461 | https://doi.org/10.1006/jmaa.1995.1029 | Gatica & Hsiao, the **uncoupling** of boundary integral and finite element methods for *nonlinear* boundary value problems. The trick: choose the artificial coupling boundary to be a **circle** (or a sphere in 3-D), which lets the boundary integral operators be inverted *exactly*, so the weak formulation retains only one boundary term — the weakly singular single-layer operator. They report the coding and computational work more than halved against standard coupling, and the quadrature made much easier because what survives is only weakly singular. Their model problem is exactly the shape of the free-boundary vacuum region: a nonlinear second-order elliptic equation inside, becoming Laplace in the unbounded exterior. Note the authorship: Gatica is at Universidad de Concepción, the same department as Solano of the two Grad–Shafranov papers. Paywalled | DecouplingBIM-FEM.pdf |
 
 ## The finite element library
 
