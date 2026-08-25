@@ -276,6 +276,16 @@ so the solver was solving a different problem than asked. **It is fixed**
 If stage 4 produces a converged-but-wrong answer near the boundary, look here
 first rather than at meq's assembly.
 
+**toml11's `find_or<double>` silently returns the default when the node is an
+integer.** Paid for once. The original bug was that everything was read through
+`.as_floating()`, so `RMin = 0` threw instead of converting — and the obvious fix
+is worse than the bug. In toml11 4.4.0, `toml::find<double>` on an integer node
+throws just the same, and `toml::find_or<double>(v, "RMin", 1.0)` **returns
+1.0**, because a failed conversion is indistinguishable from a missing key. That
+turns a loud failure into a silent wrong answer in the configuration, which is
+the last place you want one. `Config.cpp` therefore reads numbers through its own
+`asFloat()`, accepting `is_floating()` or `is_integer()` explicitly.
+
 **`cd` persists between Bash tool calls.** A `cd x && ...` that assumes the repo
 root will silently run somewhere else. Use absolute paths.
 
@@ -309,6 +319,14 @@ So the test ladder is, in order:
 Expect rates to stop improving beyond `k ≈ 5` or `h/8`: the papers report
 round-off dominating there, so a table that flattens at that point is behaving
 correctly and is not a bug to chase.
+
+**Mutation-test a suite you are relying on.** `ProfilesTests` and `SourceTests`
+were checked by deliberately introducing fifteen defects — a dropped `r²`, `p'`
+replaced by `p`, `μ₀` on the wrong term, the Solov'ev sign flipped, an
+off-by-one in the interval lookup at a knot, `write()` truncated to six
+significant figures — and confirming each was caught. That is a cheap way to
+find out whether a green suite means anything, and worth repeating for the
+convergence tests, where the risk of a test that passes regardless is higher.
 
 Analytic solutions live in `tests/analytic/`. `ManufacturedNonlinear.hpp` is
 `refs/HDG-GradShafranov.pdf` Example 5, `ψ = sin(k_r(r+r₀))cos(k_z z)` with a
