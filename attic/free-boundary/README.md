@@ -92,3 +92,30 @@ looks correct and terminates the program; if something does catch it as
 `std::logic_error*`, the object leaks unless that handler deletes it. Drop the
 `new`. The two other throws in the same file are already correct, which is what
 makes this one easy to miss.
+
+## If this is revived, do not revive the algorithm
+
+Decided 2026-08-24; the reasoning is in `refs/Refs.md`, section *Free boundary*.
+
+This code implements Lackner's 1976 scheme, and there are two separable things in
+it. The **reduction of the unbounded domain** through the analytic Green's
+function is sound and is what any free-boundary solver does, CEDRES++ included.
+The **outer fixed-point iteration it is embedded in** is what meq is moving away
+from, and it is the reason the code here has the shape it has.
+
+`GreensFunctionBoundaryCoefficient::Eval` calls `BoundaryPsi`, which sweeps every
+boundary face with singular quadrature — once per quadrature point, so `O(N²)` —
+and the whole sweep is repeated at every Picard iteration, because in that
+arrangement the Green's function is an explicit boundary-condition *update*
+computed inside the loop.
+
+meq uses Newton. The corresponding structure is a **coupled BIM/FEM system**, in
+which the boundary integral operators sit inside the operator Newton
+differentiates, rather than in an outer loop around it. Gatica & Hsiao's
+uncoupling makes that cheap by taking the artificial coupling boundary to be a
+circle, so the boundary integral operators invert exactly and a single weakly
+singular term survives.
+
+So the parts of this directory worth carrying forward are the quadratures and the
+Green's function evaluation — the numerics listed under *Worth keeping* — and not
+the control flow around them.

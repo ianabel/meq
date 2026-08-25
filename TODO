@@ -1,0 +1,109 @@
+Work that is understood well enough to write down but has not been done.
+Entries are dated and say what was established, so that picking one up does not
+mean starting the investigation over.
+
+Not a backlog of ideas -- something belongs here once the shape of the problem
+is known and the open questions are named.
+
+
+================================================================================
+Read p'(psi) and FF'(psi) from NetCDF, including MaNTA output
+Raised 2026-08-24.
+================================================================================
+
+  Today `meq::SplineProfile` reads one format: a text table of
+  `psi  f(psi)  f'(psi)` triples, via `fromFile()` / `fromStream()`
+  (src/meq/Profiles.cpp). Configuration reaches it through `[source]` with
+  `SourceType = "mhd"` and the `PPrimeFile` / `GGPrimeFile` keys.
+
+  Wanted: the same two profiles read from a NetCDF file, which may or may not
+  have been produced by MaNTA (../MaNTA). So there are really two readers, or
+  one reader with a configurable name mapping.
+
+  WHAT THE MaNTA FORMAT ACTUALLY IS
+
+  Established by reading ../MaNTA/NetCDFIO.{hpp,cpp} and dumping
+  ../MaNTA/python/Tests/JAXAuxTest.ref.nc. It uses the netCDF C++4 API
+  (`#include <netcdf>`, netCDF::NcFile). Layout:
+
+      dimensions:  t = UNLIMITED          time
+                   x = <n>                space
+      variables:   double t(t)            "Time since start of simulation", s
+                   double x(x)            the spatial coordinate
+                   double nVariables      count, at root
+      group Grid:  CellBoundaries(Index), PolyOrder
+      group VarN:  u(t,x)     "Value"
+                   q(t,x)     "Derivative"
+                   sigma(t,x) "Flux"
+
+  So each variable is a group named `Var0`, `Var1`, ... and each carries BOTH
+  the value and its derivative on the `x` grid. That is promising, because a
+  Hermite cubic wants exactly a value and a derivative per knot -- `meq::Knot`
+  is `{psi, value, derivative}`, which is the same triple.
+
+  THE FOUR QUESTIONS TO SETTLE BEFORE WRITING ANY OF IT
+
+  1. It is a derivative SHIFT, not a match. MaNTA gives (f, df/dx). meq's
+     `MHDSource` wants p' and gg' as profiles OF psi, and calls `prime()` on
+     them for the Newton Jacobian -- so it needs (p', p'') and (gg', gg'').
+     If MaNTA's stored variable is p, then its (u, q) gives (p, dp/dx), which is
+     one derivative short of what meq needs. Options, in rough order of
+     preference:
+       (a) have the MaNTA physics case output p' directly as its own variable,
+           so u = p' and q = p'' and the triple lines up exactly;
+       (b) read (p, dp/dx) and differentiate the spline once more -- loses an
+           order and makes the Jacobian noisier than the residual, which is
+           precisely the failure mode that shows up as Newton converging
+           linearly rather than quadratically;
+       (c) read only values and fit a spline, discarding MaNTA's derivatives.
+     (a) is much the best if the MaNTA side can be arranged. Decide this first;
+     it determines everything else.
+
+  2. What is `x`, and how does it map to psi in [0,1]? meq's profiles are
+     normalised to psi in [0,1] and `SplineProfile` clamps outside that. MaNTA's
+     `x` is a radial coordinate whose meaning is set by the physics case, and
+     nothing in the file says which. Needs an explicit config key naming the
+     convention, plus the normalisation, rather than a guess. If x is not psi
+     the chain rule lands on top of question 1.
+
+  3. Which group is which? The groups are `Var0`, `Var1`, ... -- generic. There
+     is no metadata saying "this one is pressure". So the config must name the
+     group or index for each of p' and gg'. Do not infer it from the
+     `description` attribute, which is free text ("Variable 0").
+
+  4. Which time slice? MaNTA is time dependent and meq wants one equilibrium.
+     Default to the last slice, `t` index size-1, but make it configurable and
+     record the value of `t` that was used in meq's own output -- an equilibrium
+     computed from an unrecorded time slice is not reproducible.
+
+  THE NON-MaNTA CASE
+
+  "May or may not have come from MaNTA" means there must be a flat convention
+  too: 1-D variables over a single dimension, something like `psi`, `pprime`,
+  `ffprime`, with derivatives optional. Detect the MaNTA layout by structure --
+  the `Grid` group, or `nVariables` at root -- and fall back to the flat one.
+  Prefer sniffing over a config flag, but make the choice overridable, and say
+  in the log which was used.
+
+  MECHANICS
+
+  - `libnetcdf_c++4` is installed (/usr/lib/x86_64-linux-gnu/libnetcdf_c++4.so)
+    along with the C library. MaNTA links it, so the CMake pattern is there.
+  - MFEM's own MFEM_USE_NETCDF is NO in ../mfem-hdg-dev, which does not matter:
+    meq would link netcdf directly. The pre-modernisation Makefile did exactly
+    that (`-lnetcdf_c++4 -lnetcdf`).
+  - The old tree had a NetCDFIO.hpp, deleted in the restructure. It is not worth
+    recovering -- it was a class declaration missing its terminating semicolon,
+    so it had never been compiled. `git show v0-legacy:NetCDFIO.hpp` if curious.
+  - Keep the reader out of `Profiles.{hpp,cpp}`. Those two units are
+    deliberately free of every dependency including MFEM, which is what lets
+    them be unit tested on their own. A `ProfilesNetCDF.{hpp,cpp}` returning a
+    `SplineProfile` keeps that property.
+
+  TESTS
+
+  Write a small NetCDF file in the test itself rather than committing a fixture,
+  so the expected values are visible next to the assertions. Cover: the MaNTA
+  layout, the flat layout, a missing group, a missing variable, a time index out
+  of range, and non-monotonic `x`. And check the round trip against the text
+  reader -- the same profile through both paths must agree.

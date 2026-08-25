@@ -163,7 +163,63 @@ that to a finite element solve inside. Doing it as a *coupled BIM/FEM* rather
 than as a hand-rolled Green's-function quadrature is the improvement to aim for.
 
 **These are annotated from their abstracts and introductions only** — enough to
-say why they are here, not enough to be read as summaries. Neither carries a ✔.
+say why they are here, not enough to be read as summaries. None carries a ✔.
+
+### What meq takes from Lackner, and what it does not
+
+Lackner 1976 is the origin of the whole approach and is cited as such by
+CEDRES++ and by the old attic code alike. **It is important to be precise about
+which half of it meq is adopting, because the two halves have opposite verdicts.**
+
+**Adopt: the reduction of the unbounded domain.** Representing the exterior
+solution through the analytic Green's function, so the unbounded vacuum region
+becomes a boundary condition on a finite computational domain, is sound, is
+universal, and is what CEDRES++ means when it cites Lackner. Nothing here
+disputes it.
+
+**Reject: the outer fixed-point iteration it is embedded in.** Lackner's §2.1 is
+a catalogue of iteration schemes for the nonlinearity, and read as a catalogue of
+their failure modes it is damning:
+
+* Plain Picard, his eq. (3) `Δ*ψ^(n+1) = −f(r, ψ^n)`, **"will converge to the
+  physically trivial solution ψ ≡ 0 if admitted by the formulation of the
+  problem."** Not slow — converged, and to the wrong answer.
+* The Marder–Weitzner three-level scheme, eq. (5), fixes that by damping with a
+  parameter `α`, and he is explicit about the cost: *"The price to be paid for
+  this consists in a slow convergence rate, as α weights the correction to ψ^n at
+  every three-step cycle."*
+* The schemes that actually get used in practice keep chosen "conserved
+  quantities" fixed cycle to cycle and pin the magnetic axis by adjusting
+  vertical and radial field coefficients each iteration — an explicit analogue of
+  feedback position control, needed because the physical configuration is
+  vertically unstable.
+
+That last point is the same one CEDRES++ makes when it says fixed-point
+iterations "fail to converge — a very important example is vertically unstable
+plasmas". Lackner is not contradicting it; he is describing the machinery a
+fixed-point scheme needs in order to survive, and meq's answer is to not be a
+fixed-point scheme.
+
+**So the consequence for the boundary treatment is structural, not a preference.**
+In Lackner's arrangement the Green's function enters as an *explicit boundary-
+condition update evaluated inside the outer loop*, so its cost is paid every
+cycle. That is exactly what `attic/free-boundary/` implements —
+`GreensFunctionBoundaryCoefficient::Eval` calls `BoundaryPsi`, which loops over
+every boundary face with singular quadrature, once per quadrature point, and the
+whole `O(N²)` sweep is redone at each Picard iteration.
+
+A coupled BIM/FEM formulation instead puts the boundary integral operators **into
+the system**, where Newton differentiates through them and the interior and
+exterior are solved together. Gatica & Hsiao is what makes that cheap: take the
+artificial coupling boundary to be a circle, invert the boundary integral
+operators exactly, and one weakly singular term survives. So the route is
+Lackner's reduction, expressed as a monolithic coupled system, solved by Newton —
+which is what CEDRES++ does and what meq should do.
+
+**This reasoning is from §§1–2.2 of Lackner and the introduction of CEDRES++.**
+The rest of both papers is unread, and the argument should be re-checked against
+Lackner's §2.2 in particular, which is where the linearised solve in the
+unbounded domain is actually described.
 
 **One thing already worth extracting, because it bears on a decision meq has
 already taken.** meq uses Newton where both Grad–Shafranov papers use
@@ -180,6 +236,7 @@ the paper before leaning on it.
 | Reference | URL (doi or arxiv) | Short Description | File Name |
 | --- | --- | --- | --- |
 | Journal of Plasma Physics 81 (2015) 905810301 | https://doi.org/10.1017/s0022377814001251 | Heumann, Blum, Boulbe, Faugeras, Selig, Ané, Brémond, Grandgirard, Hertout & Nardon, **CEDRES++** — a survey of the computational methods in a production quasi-static *free-boundary* equilibrium code, on ITER and WEST. The nearest thing in the literature to what meq would become. Piecewise-linear FEM for the flux map coupled to a **boundary element method** for the unbounded exterior, and a **Newton method for the discretised nonlinear problem** covering all three nonlinearities at once — the current profile, the free plasma boundary, and the ferromagnetic permeability where there is an iron transformer. Also covers the *inverse* problems (find the coil currents giving a desired plasma shape), for which they say Newton is the main building block. Read for the coupling and the Newton formulation rather than for the discretisation, which is low order where meq's is not. Open access on Cambridge Core | CEDRES.pdf |
+| Computer Physics Communications 12 (1976) 33–44 | https://doi.org/10.1016/0010-4655(76)90008-4 | Lackner, "Computation of ideal MHD equilibria" — **the origin of the Green's-function reduction of the unbounded domain**, and the method the code in `attic/free-boundary/` implements. Read the section above for which half of it meq adopts. Its §2.1 is the reason for the other half: plain Picard "will converge to the physically trivial solution ψ ≡ 0 if admitted by the formulation of the problem", the damped three-level alternative pays for stability with an explicitly slow convergence rate, and the schemes used in practice need conserved quantities and per-cycle magnetic-axis pinning to hold the column in place. Also worth knowing for the inverse problem: he classes formulation III — find the applied currents producing a prescribed plasma surface — as **badly posed in the sense of Hadamard**, which is the caveat to carry into any inverse work later. Paywalled | LacknerFreeBoundary.pdf |
 | Journal of Mathematical Analysis and Applications 189 (1995) 442–461 | https://doi.org/10.1006/jmaa.1995.1029 | Gatica & Hsiao, the **uncoupling** of boundary integral and finite element methods for *nonlinear* boundary value problems. The trick: choose the artificial coupling boundary to be a **circle** (or a sphere in 3-D), which lets the boundary integral operators be inverted *exactly*, so the weak formulation retains only one boundary term — the weakly singular single-layer operator. They report the coding and computational work more than halved against standard coupling, and the quadrature made much easier because what survives is only weakly singular. Their model problem is exactly the shape of the free-boundary vacuum region: a nonlinear second-order elliptic equation inside, becoming Laplace in the unbounded exterior. Note the authorship: Gatica is at Universidad de Concepción, the same department as Solano of the two Grad–Shafranov papers. Paywalled | DecouplingBIM-FEM.pdf |
 
 ## The finite element library
