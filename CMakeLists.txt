@@ -35,6 +35,28 @@ option(MEQ_BUILD_TESTS "Build the unit tests" ON)
 # is ported; the driver is a separate step.
 option(MEQ_BUILD_APP "Build the meq executable (needs the stage-2 solver port)" OFF)
 
+# gcov instrumentation, off by default. When on it is attached to meq_core
+# PUBLIC, so the flags reach the test executables as well -- gcov needs both
+# the compile and the link side on every object it reports, and a test binary
+# that merely links an instrumented library produces no .gcda of its own.
+#
+# Deliberately an option rather than a build type. A coverage build wants -O0,
+# and forcing that through CMAKE_BUILD_TYPE would silently drop NDEBUG for
+# anyone who had set it, changing which MFEM_ASSERTs are live. Stage 4 found a
+# BlockVector size mismatch that only an assert catches, so that difference is
+# real and should be chosen rather than inherited.
+option(MEQ_ENABLE_COVERAGE "Build with gcov instrumentation" OFF)
+
+if(MEQ_ENABLE_COVERAGE)
+	if(NOT CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+		message(FATAL_ERROR "MEQ_ENABLE_COVERAGE needs gcc or clang")
+	endif()
+	add_library(meq_coverage INTERFACE)
+	target_compile_options(meq_coverage INTERFACE --coverage -O0 -g)
+	target_link_options(meq_coverage INTERFACE --coverage)
+	message(STATUS "meq: coverage instrumentation ON (-O0, --coverage)")
+endif()
+
 # A single-configuration generator with no build type gets no optimisation at
 # all, which for a finite element code is the difference between a test suite
 # that runs and one that is waited on.
@@ -52,7 +74,29 @@ endif()
 # MODULE mode explicitly: cmake/FindMFEM.cmake reads the flags out of the make
 # build's config/config.mk, which is the only description an in-source MFEM
 # build leaves behind. See that file for why there is no config package to use.
-find_package(MFEM MODULE REQUIRED)
+# NOT REQUIRED, deliberately.
+#
+# meq's solver needs MFEM, but half the library does not: Config, Profiles,
+# Source and SourceFactory are free of it by design, which is what lets the
+# configuration and profile layers be unit tested without the numerics.
+#
+# That split is what makes continuous integration possible at all here. The
+# MFEM meq builds against is a local branch (gf-hdg-subdomains-dev in
+# ../mfem-hdg-dev) that is not published on any remote, so a hosted CI runner
+# cannot obtain it. Without this, CMake could not configure there and nothing
+# could be tested. With it, CI builds and tests the MFEM-free half and runs
+# the naming check over it.
+#
+# A developer build finds MFEM and gets everything; nothing about the full
+# build changes. If MFEM is missing the configure output says exactly what is
+# being skipped rather than quietly building less than you asked for.
+find_package(MFEM MODULE)
+
+if(NOT MFEM_FOUND)
+	message(STATUS "meq: MFEM not found -- building the MFEM-free subset only.")
+	message(STATUS "meq:   excluded: the solver, the estimator, every convergence test")
+	message(STATUS "meq:   set MFEM_DIR to a built MFEM to get the whole library")
+endif()
 
 # toml11, header only, used by Config. The checkout carries two layouts:
 #
@@ -117,19 +161,28 @@ set_target_properties(toml11::toml11 PROPERTIES
 # by hand, and a stale file left in the tree silently starts building again.
 #
 # src/meq/GradShafranov.cpp joined this list in stage 2, ported from
-# HDGBilinearForm to DarcyForm. src/meq/Estimator.hpp has not -- it calls
-# GridFunction::GetValueFacet, which was a patch carried by the old MFEM branch
-# and is not in 4.9.1 -- and is stage 6 work in any case.
+# HDGBilinearForm to DarcyForm. src/meq/Estimator.{hpp,cpp} joined it in stage 6:
+# the residual estimator of refs/HDG-GradShafranov-Adaptive.pdf eq (20), rewritten
+# rather than ported. The old header called GridFunction::GetValueFacet, which was
+# a patch carried by the old MFEM branch and is not in 4.9.1, and it also used the
+# raw psi_h where the published estimator uses the post-processed psi*.
 #
 # src/meq/Solution.hpp is gone rather than ported: it wrapped hand-rolled block
 # offsets and a second set of finite element spaces around what DarcyForm now
 # owns itself. What was left of its job lives on GradShafranovSolver.
 set(MEQ_CORE_SOURCES
 	src/meq/Config.cpp
+	src/meq/Estimator.cpp
 	src/meq/GradShafranov.cpp
 	src/meq/Profiles.cpp
 	src/meq/Source.cpp
 	src/meq/SourceFactory.cpp)
+
+# Sources that will not compile without MFEM. Filtered out when it is absent;
+# see the find_package note above for why that case exists at all.
+set(MEQ_CORE_SOURCES_NEEDING_MFEM
+	src/meq/Estimator.cpp
+	src/meq/GradShafranov.cpp)
 
 # The port is being done file by file, so a source in the list above may not
 # have been written yet. Configure with what is there and say what is missing,
@@ -137,7 +190,12 @@ set(MEQ_CORE_SOURCES
 set(MEQ_CORE_SOURCES_PRESENT "")
 set(_meq_core_missing "")
 foreach(_source IN LISTS MEQ_CORE_SOURCES)
-	if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_source}")
+	list(FIND MEQ_CORE_SOURCES_NEEDING_MFEM "${_source}" _needs_mfem)
+	if(NOT MFEM_FOUND AND NOT _needs_mfem EQUAL -1)
+		# Not "missing" -- deliberately excluded. Kept out of _meq_core_missing
+		# so the two reasons a source is absent stay tellable apart.
+		list(APPEND _meq_core_no_mfem "${_source}")
+	elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_source}")
 		list(APPEND MEQ_CORE_SOURCES_PRESENT "${_source}")
 	else()
 		list(APPEND _meq_core_missing "${_source}")
@@ -159,11 +217,25 @@ if(MEQ_CORE_SOURCES_PRESENT)
 		"${CMAKE_CURRENT_SOURCE_DIR}/src"
 		"${CMAKE_CURRENT_SOURCE_DIR}/src/meq")
 
+	if(MEQ_ENABLE_COVERAGE)
+		# PUBLIC so the flags reach the test executables as well. gcov needs
+		# both the compile and the link side on every object it reports, and a
+		# test binary that links an instrumented library but is not itself
+		# instrumented produces no .gcda for its own translation unit.
+		target_link_libraries(meq_core PUBLIC meq_coverage)
+	endif()
+
 	# PUBLIC, not PRIVATE: meq's own headers include mfem.hpp and toml.hpp,
 	# so anything that includes them needs both on its compile line.
-	target_link_libraries(meq_core PUBLIC
-		MFEM::MFEM
-		toml11::toml11)
+	target_link_libraries(meq_core PUBLIC toml11::toml11)
+
+	# Guarded, because an unfound package leaves no target and CMake passes the
+	# name through to the linker verbatim -- the failure is
+	# "cannot find -lMFEM::MFEM" from ld, at link time, long after configure
+	# said everything was fine.
+	if(MFEM_FOUND)
+		target_link_libraries(meq_core PUBLIC MFEM::MFEM)
+	endif()
 
 	# Guarded by compiler id rather than assumed: these are the GCC/Clang
 	# spellings, and nothing here is worth breaking a configure over on a

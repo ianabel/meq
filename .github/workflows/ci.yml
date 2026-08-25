@@ -1,0 +1,155 @@
+name: CI
+
+# WHAT THIS CAN AND CANNOT TEST, because the limit is unusual and worth stating
+# once rather than rediscovering.
+#
+# meq's solver is built on a *local* branch of MFEM -- gf-hdg-subdomains-dev in
+# a sibling checkout -- which is not published on any remote. A hosted runner
+# therefore cannot obtain it, and no amount of caching helps: there is nothing
+# to fetch. That is why the jobs below build only the half of the library that
+# is free of MFEM, which is Config, Profiles, Source and SourceFactory.
+#
+# That split is not a workaround invented for CI. It is a deliberate layering --
+# those four units take plain doubles and know nothing about finite elements,
+# which is what lets the configuration and profile layers be tested without the
+# numerics. CI gets a real subset for free as a consequence.
+#
+# NOT covered here, and covered only by a developer's local run:
+#   the HDG assembly, Newton, the extension technique, the error estimator,
+#   and every convergence test -- which is to say every claim about rates.
+# See CLAUDE.md; those are the acceptance criteria for stages 2 to 6 and they
+# stay a local responsibility until the MFEM branch is published.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+  workflow_dispatch:
+
+# A push that lands while an earlier run is still going supersedes it; there is
+# no value in finishing CI for a commit that is already not the tip.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: build and test (no MFEM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # toml11 is a pinned submodule. Without this the configure fails with
+          # a message telling you exactly this, which is the intended behaviour
+          # but a waste of a CI minute.
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake g++ libboost-test-dev clang-tidy
+
+      - name: Configure
+        # MFEM_DIR is pointed at nothing on purpose. The default is a sibling
+        # checkout, which on a runner would either not exist (fine) or, worse,
+        # exist as something unrelated. Being explicit makes the intent legible
+        # in the log.
+        run: cmake -B build -DMFEM_DIR=/nonexistent -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Test
+        # MKL_THREADING_LAYER is set by CMake on every registered test and is
+        # not needed here -- a runner's libblas is not MKL -- but the tests set
+        # it themselves, so nothing to do.
+        run: ctest --test-dir build --output-on-failure
+
+  coverage:
+    name: coverage (no MFEM)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake g++ libboost-test-dev
+          pipx install gcovr
+
+      - name: Configure with instrumentation
+        run: cmake -B build-cov -DMFEM_DIR=/nonexistent -DMEQ_ENABLE_COVERAGE=ON
+
+      - name: Build
+        run: cmake --build build-cov -j"$(nproc)"
+
+      - name: Test
+        run: ctest --test-dir build-cov --output-on-failure
+
+      # The gate is on the units CI actually exercises. A threshold computed
+      # over the whole of src/meq would be meaningless here: GradShafranov.cpp
+      # and Estimator.cpp are not built at all, so they would report 0% and drag
+      # any honest number below any threshold worth having.
+      #
+      # 90% against 94.8% measured at the time of writing -- enough headroom
+      # that adding a branch does not fail the build, tight enough that
+      # deleting a test does.
+      - name: Coverage report and threshold
+        run: |
+          gcovr --root . \
+                --filter 'src/meq/Config' \
+                --filter 'src/meq/Profiles' \
+                --filter 'src/meq/Source' \
+                --exclude-unreachable-branches \
+                --print-summary \
+                --xml-pretty --output coverage.xml \
+                --html-details coverage.html \
+                --fail-under-line 90
+
+      - name: Upload coverage report
+        # Uploaded even on failure: when the gate trips, the line-by-line HTML
+        # is the thing that says which lines stopped being covered, and it is
+        # exactly then that it is wanted.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: |
+            coverage.xml
+            coverage.html
+            coverage*.html
+          if-no-files-found: warn
+
+  # The full build, for a runner that has the MFEM branch. Disabled by default
+  # because no such runner exists yet -- `if: false` rather than deletion, so
+  # that turning it on is a one-line change once the branch is published or a
+  # self-hosted runner is registered.
+  #
+  # This is the job that would test the claims that matter: k+1 convergence for
+  # the HDG assembly, quadratic Newton, the extension technique's optimal order
+  # on a curved boundary, and the error estimator's effectivity.
+  full:
+    name: full build and convergence suite
+    if: false
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure
+        # MFEM_DIR is expected in the runner's environment, pointing at a built
+        # checkout of the HDG branch.
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j4
+
+      - name: Test
+        # The convergence tests take minutes, not seconds, and they are the
+        # point of this job.
+        run: ctest --test-dir build --output-on-failure --timeout 1800

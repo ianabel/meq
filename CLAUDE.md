@@ -79,6 +79,36 @@ cd build && MKL_THREADING_LAYER=GNU ctest --output-on-failure
 `MFEM_DIR` defaults to `../mfem-hdg-dev` and also reads the environment, so the
 `-D` is usually unnecessary.
 
+### Coverage, and what CI can and cannot check
+
+```sh
+cmake -B build-cov -DMEQ_ENABLE_COVERAGE=ON && cmake --build build-cov -j4
+cd build-cov && MKL_THREADING_LAYER=GNU ctest
+gcovr --root .. --filter 'src/meq/' --print-summary        # or --html-details
+```
+
+`MEQ_ENABLE_COVERAGE` is an option, not a build type, on purpose: a coverage
+build wants `-O0`, and routing that through `CMAKE_BUILD_TYPE` would silently
+drop `NDEBUG` for anyone who had set it, changing which `MFEM_ASSERT`s are live.
+Stage 4 found a `BlockVector` size mismatch that *only* an assert catches, so
+that difference is worth choosing rather than inheriting.
+
+**CI cannot build the solver, and this is structural rather than an oversight.**
+The MFEM meq needs is a local branch (`gf-hdg-subdomains-dev`) published on no
+remote, so a hosted runner cannot obtain it and caching does not help — there is
+nothing to fetch. `find_package(MFEM)` is therefore **not `REQUIRED`**: without
+it, `CMakeLists.txt` builds the MFEM-free half — `Config`, `Profiles`, `Source`,
+`SourceFactory` — and `tests/CMakeLists.txt`'s existing "unit not present"
+guard already skips every convergence test without needing to know why.
+
+So `.github/workflows/ci.yml` runs four unit suites, the `naming` check and a
+coverage gate at 90% lines (94.8% measured). **What it does not run is every
+claim about rates** — the HDG assembly, Newton, the extension technique and the
+estimator are all local-only, and the `full` job in that workflow is written but
+`if: false` until either the branch is published or a self-hosted runner exists.
+Treat a green CI badge as evidence about the configuration and profile layers
+and about nothing else.
+
 ### Why toml11 is a submodule and MFEM is not
 
 **toml11 is `extern/toml11`**, pinned to a commit, as MaNTA does it. It is header
