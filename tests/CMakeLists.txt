@@ -72,7 +72,8 @@ endforeach()
 # and in needing tests/ on the include path, since they pull the closed-form
 # solutions out of analytic/.
 set(MEQ_CONVERGENCE_TESTS
-	SolovievConvergence)
+	SolovievConvergence
+	NewtonConvergence)
 
 foreach(_test IN LISTS MEQ_CONVERGENCE_TESTS)
 	set(_test_source "${CMAKE_CURRENT_SOURCE_DIR}/convergence/${_test}.cpp")
@@ -88,8 +89,9 @@ foreach(_test IN LISTS MEQ_CONVERGENCE_TESTS)
 	else()
 		add_executable(${_test} "convergence/${_test}.cpp")
 
-		# For "analytic/Soloviev.hpp". meq_core already carries src/ and
-		# src/meq/, so "meq/GradShafranov.hpp" needs nothing here.
+		# For "analytic/Soloviev.hpp" and
+		# "analytic/ManufacturedNonlinear.hpp". meq_core already carries
+		# src/ and src/meq/, so "meq/GradShafranov.hpp" needs nothing here.
 		target_include_directories(${_test} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
 
 		target_link_libraries(${_test} PRIVATE

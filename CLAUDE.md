@@ -10,13 +10,15 @@ Galerkin (HDG) discretisation built on MFEM.
 from. The two marked ✔ there are not background reading — they *are* the method,
 and `src/meq` is an implementation of them.
 
-## Status: the linear operator works, the driver does not
+## Status: the solver works, the driver does not
 
-**meq solves a Grad–Shafranov equation**, which before stage 2 it never had.
-The linear `Δ*` is on `DarcyForm` and reproduces an exact Solov'ev equilibrium at
-`k+1` in both `ψ` and `q` for `k = 1,2,3` over four dyadic meshes;
-`tests/convergence/SolovievConvergence.cpp` is the acceptance criterion and
-prints the table. Concretely:
+**meq solves the semi-linear Grad–Shafranov equation by Newton**, which before
+stage 2 it had never done at all. `k+1` in both `ψ` and `q` for `k = 1,2,3` over
+four dyadic meshes, against an exact Solov'ev equilibrium on the linear path and
+HDG-GS-1's Example 5 manufactured solution on the nonlinear one, with Newton
+converging quadratically. `tests/convergence/SolovievConvergence.cpp` and
+`NewtonConvergence.cpp` are the acceptance criteria and print the tables.
+Concretely:
 
 * `src/meq/GradShafranov.{hpp,cpp}` is ported — `DarcyForm` with
   `EnableHybridization` — is in `meq_core`, and is covered by the `naming` check
@@ -33,8 +35,9 @@ prints the table. Concretely:
 * `apps/meq.cpp` likewise. Its target is behind `MEQ_BUILD_APP`, default `OFF`.
 * `Config`, `Profiles`, `Source` compile and test.
 
-Still missing from the solver: Newton (stage 4), the curved boundary
-(stage 5), adaptivity (stage 6). The local post-processing that was stage 3 has
+Still missing from the solver: the curved boundary (stage 5) and adaptivity
+(stage 6). And the driver — nothing writes files, so meq is reachable only
+through its test suite. The local post-processing that was stage 3 has
 been dropped — see *There is no separate post-processing stage* below.
 
 **And it is worth being clear about what the old code did, because the README
@@ -58,8 +61,8 @@ it is checked; that file has not yet been rewritten.
 | 1 | Tree, CMake, `Config` / `Profiles` / `Source` | **done** |
 | 2 | Linear `Δ*` on `DarcyForm`, fitted polygonal domain | **done** |
 | 3 | Local post-processing `ψ*_h` | **dropped** — see below |
-| 4 | Newton on the semi-linear source | next |
-| 5 | Curved `Γ` by extension from subdomains | |
+| 4 | Newton on the semi-linear source | **done** |
+| 5 | Curved `Γ` by extension from subdomains | next |
 | 6 | Adaptivity: the residual estimator and mesh update | |
 
 Each stage ends at a **measured convergence rate**, not at "it runs". See
@@ -395,6 +398,37 @@ residual `2.7e0 → 9.2e-2 → 1.8e-3 → 5.3e-6 → 3.9e-12` in five iterations
 the shape stage 4 should produce. A run that grinds down linearly means the
 Jacobian disagrees with the residual.
 
+meq's own, measured at `k = 3`, `h = 0.1`, 832 trace dofs:
+
+```
+   it            ||r||    ||r||/||r_0||    order
+    0     1.121994e+01     1.000000e+00        -
+    1     4.085930e-02     3.641669e-03        -
+    2     5.744224e-04     5.119658e-05    0.759
+    3     1.411243e-07     1.257800e-08    1.949
+    4     4.142741e-14     3.692303e-15    1.810
+```
+
+### A wrong Jacobian is invisible to a convergence table
+
+The single most useful thing measured in stage 4, and the justification for
+asserting on Newton's *order* rather than merely on the rates.
+
+Perturbing `∂F/∂ψ` by **+5%** and re-running the whole Example 5 study leaves
+**every error and every convergence rate unchanged to six significant figures**.
+The discretisation is untouched, because Newton converges to the same discrete
+solution whatever Jacobian carried it there. What changes is only the path:
+observed order drops to exactly `1.000`, and it takes 10 iterations instead of 4.
+At +50% Newton diverges to NaN; drop the Jacobian mass term entirely and McCarthy
+takes 87 iterations instead of 1, at a constant contraction of 0.7711 per step,
+with the errors again unchanged.
+
+So a rate table cannot see a Jacobian error at all. Three things can, and all
+three are in the suite: the finite-difference check on the assembled Jacobian
+(4e-11 relative, at the `O(step²)` floor), the assertion on observed Newton
+order, and the McCarthy rung, whose affine source must finish in exactly one
+step.
+
 ### On SUNDIALS
 
 `mfem::KINSolver` **derives from `mfem::NewtonSolver`** (`linalg/sundials.hpp`).
@@ -430,6 +464,31 @@ makefiles have no `.d` files and no header dependency tracking. That trap has
 produced heap corruption in unrelated functions and "unimplemented" aborts for
 methods that had just been added. meq's own CMake build tracks headers properly;
 this applies only to the MFEM tree.
+
+**`NewtonSolver` needs `iterative_mode = true`, and the failure is silent.** The
+Dirichlet values ride in the iterate, so with `iterative_mode` left false
+`NewtonSolver` zeroes `x` on entry and throws the boundary data away — silently,
+because the residual is masked on exactly those rows, so nothing complains and
+the answer is merely wrong.
+
+**A `BlockVector` size mismatch that Release builds do not catch.** Stage 2
+passed a three-block vector (flux, potential, trace) where `DarcyHybridization`
+expects two: `GetOffsets()` stops at the potential, and `ReduceRHS` does
+`darcy_rhs = b_t`, whose `BlockVector::operator=` calls
+`mfem_error("Number of Blocks don't match")`. It survived because the checks on
+that path are `MFEM_ASSERT`, compiled out with `NDEBUG`. Found in stage 4 and
+fixed by passing views over `darcy->GetOffsets()`, as
+`DarcyOperator::ImplicitSolve` does — **a latent defect in the linear path, not
+something Newton introduced.** Worth a debug build now and then for this reason
+alone.
+
+**A nonlinear potential mass and a linear one do not mix, and how it fails
+depends on where the integrators sit.** With *face* integrators on the linear
+form (they become `c_bfi_p`) MFEM aborts loudly: "Non-linear mass cannot work
+with a linear constraint". With *domain* integrators it is silent —
+`LocalNLOperator::AddMultDE` and `ConstructGrad` simply drop them. So leaving the
+HDG stabilisation on `M_p` beside a nonlinear source aborts, which is the good
+case; the silent one is the reason `buildForms()` documents both.
 
 **meq will be an early user of a thinly-tested MFEM combination.** Fixed-boundary
 Grad–Shafranov is a Dirichlet problem, so the trace carries an essential BC; and
@@ -477,6 +536,9 @@ So the test ladder is, in order:
 
 1. **Unit**, in `tests/unit/` — Boost.Test. Config parsing, spline value *and*
    derivative against closed forms, `dFdPsi` against a finite difference.
+   And, in `NewtonConvergence.cpp`, the *assembled* Jacobian against a central
+   difference of the assembled residual — which is a different and stronger
+   check than the one on `dFdPsi` alone.
 2. **An exact solution**, as an absolute-error regression.
 3. **Convergence rates**, in `tests/convergence/` — asserting a *rate*, not a
    tolerance: `k+1` for `ψ` and `∇ψ`, `k+2` for `ψ*` at `k ≥ 1`, over `k = 1…4`

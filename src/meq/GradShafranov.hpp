@@ -2,8 +2,11 @@
 #define MEQ_GRADSHAFRANOV_HPP
 
 #include <memory>
+#include <vector>
 
 #include "mfem.hpp"
+
+#include "Source.hpp"
 
 /*
  * The HDG discretisation of the Grad-Shafranov operator, on MFEM's DarcyForm.
@@ -31,9 +34,18 @@
  * there is the subject of a long comment in the .cpp, and it is not the one the
  * papers print.
  *
- * Stage 2 scope: the linear operator. F does not depend on psi, the domain is
- * polygonal and fitted so Gamma_h == Gamma, and there is no Newton iteration,
- * no local post-processing and no adaptivity. See CLAUDE.md for the stage plan.
+ * TWO PATHS THROUGH THIS CLASS, chosen by which setSource() is called.
+ *
+ * When F does not depend on psi the problem is linear: F goes to the right hand
+ * side as a coefficient, the trace system is a matrix, and one direct solve
+ * finishes it. When F does depend on psi the problem is semi-linear and is
+ * closed by Newton, with the source moved off the right hand side and into the
+ * operator as a non-linear potential mass term. Both papers use an
+ * Anderson-accelerated Picard iteration instead; the reasons for departing are
+ * in CLAUDE.md, and the price is that every Source must supply dF/dpsi.
+ *
+ * Scope: the domain is polygonal and fitted, so Gamma_h == Gamma, and there is
+ * no local post-processing (stage 3) and no adaptivity (stage 6).
  *
  * WHAT IS AND IS NOT MEQ'S SIGN CONVENTION FOR q -- read before using flux().
  *
@@ -50,9 +62,9 @@
  * that sign baked in and take no scaling argument, so the flux block of the
  * assembled system necessarily holds -q, not q. That negation is undone once,
  * in solve(), and only in the separate GridFunction that flux() returns; the
- * block vector itself stays in DarcyForm's convention throughout, so that a
- * later Newton residual assembled by DarcyForm sees what it expects. Do not
- * "fix" one without the other.
+ * block vector itself stays in DarcyForm's convention throughout, because the
+ * Newton residual is assembled by DarcyForm and expects it there. Do not "fix"
+ * one without the other.
  */
 
 namespace meq
@@ -80,7 +92,8 @@ namespace meq
 	 * EvalGrad for a state-dependent stabilisation gives "no wrong answer, only
 	 * slow Newton convergence -- a failure that survives a passing regression
 	 * suite". A constant tau cannot fall into that hole, which is a further
-	 * reason to prefer it once stage 4 turns the problem nonlinear.
+	 * reason to prefer it now that the problem can be non-linear. Do not make
+	 * tau solution dependent without supplying EvalGrad.
 	 */
 	class ConstantStabilization : public mfem::HDGStabilization
 	{
@@ -103,20 +116,100 @@ namespace meq
 	};
 
 	/**
-	 * The hybridized HDG Grad-Shafranov solver.
+	 * The psi-dependent source, as a domain integrator on the potential space.
+	 *
+	 * This is the whole of what makes the problem semi-linear, and the only
+	 * place dF/dpsi is used. It contributes
+	 *
+	 *     residual: -( F( r, z, psi_h ), w )/r
+	 *     Jacobian: -( ( dF/dpsi )( r, z, psi_h ) w, v )/r
+	 *
+	 * on each element. The minus and the 1/r are the same pair that
+	 * setSource( mfem::Coefficient & ) applies to the linear right hand side,
+	 * and for a Source whose f() does not depend on psi the two paths assemble
+	 * exactly the same numbers -- which is worth knowing, because it makes the
+	 * Solov'ev benchmark usable as a cross-check of the Newton path.
+	 *
+	 * The sign is not a free choice. DarcyForm assembles the potential row as
+	 * -B q - Mp psi = bp, and under hybridization the local solve is handed the
+	 * negated datum, so the local potential residual reads
+	 *
+	 *     B u + D psi + E psihat = -bp.
+	 *
+	 * Moving -( F/r, w ) from bp into D is what puts the source under the
+	 * Newton iteration, and it arrives with the sign it had on the right hand
+	 * side. See the note in the .cpp for the arithmetic.
+	 *
+	 * The Jacobian is the exact derivative of the residual this same class
+	 * assembles, evaluated on the same quadrature rule, so the two cannot drift
+	 * apart through a rule change. What they can drift apart through is a wrong
+	 * Source::dFdPsi, which is what tests/unit/SourceTests.cpp checks against a
+	 * finite difference of f(), and what the finite-difference Jacobian check in
+	 * tests/convergence/NewtonConvergence.cpp checks once more at the level of
+	 * the assembled reduced operator.
+	 */
+	class SourceIntegrator : public mfem::NonlinearFormIntegrator
+	{
+		public:
+			/// @param sourceIn  F and dF/dpsi. Borrowed; it must outlive the
+			///                  integrator, which means outliving the solver.
+			/// @param extraOrderIn  quadrature order added to 2k, to keep the
+			///                  integration of an exponential in psi from being
+			///                  what limits a measured rate.
+			explicit SourceIntegrator( Source const &sourceIn, int extraOrderIn = 4 );
+
+			/// MFEM's spelling, from NonlinearFormIntegrator.
+			void AssembleElementVector( mfem::FiniteElement const &el, // NOLINT(readability-identifier-naming)
+			                            mfem::ElementTransformation &tr,
+			                            mfem::Vector const &elfun,
+			                            mfem::Vector &elvect ) override;
+
+			/// MFEM's spelling, from NonlinearFormIntegrator.
+			void AssembleElementGrad( mfem::FiniteElement const &el, // NOLINT(readability-identifier-naming)
+			                          mfem::ElementTransformation &tr,
+			                          mfem::Vector const &elfun,
+			                          mfem::DenseMatrix &elmat ) override;
+
+		private:
+			mfem::IntegrationRule const &rule( mfem::FiniteElement const &el,
+			                                   mfem::ElementTransformation &tr ) const;
+
+			Source const *source;
+			int extraOrder;
+
+			/// Scratch. Not thread safe, in the manner of every MFEM integrator.
+			mfem::Vector shape;
+	};
+
+	/**
+	 * The hybridized HDG Grad-Shafranov solver, linear or semi-linear.
 	 *
 	 * Owns the three finite element spaces, the DarcyForm built on them and the
 	 * solution block vector. The mesh is borrowed and must outlive the solver;
 	 * so must the source and boundary-data coefficients handed to setSource()
 	 * and setBoundaryData().
 	 *
-	 * Usage:
+	 * Usage, linear:
 	 *
 	 *     meq::GradShafranovSolver solver( mesh, order );
-	 *     solver.setSource( fCoefficient );          // F, not F/r
+	 *     solver.setSource( fCoefficient );          // F( r, z ), not F/r
 	 *     solver.setBoundaryData( psiCoefficient );  // psi on Gamma
 	 *     solver.solve();
 	 *     solver.potential();  solver.flux();
+	 *
+	 * Usage, semi-linear -- the only difference is the argument to setSource():
+	 *
+	 *     solver.setSource( source );                // a meq::Source
+	 *     solver.solve();
+	 *     solver.newtonResiduals();                  // the convergence history
+	 *
+	 * The forms are built on the first call to solve() or prepare(), not in the
+	 * constructor, because the two paths need different forms -- a linear
+	 * potential mass and a source on the right hand side, or a non-linear
+	 * potential mass carrying the source -- and EnableHybridization() takes what
+	 * it finds at the moment it runs. So setSource() must be called before
+	 * anything that assembles, and changing which overload is used afterwards is
+	 * refused rather than silently ignored.
 	 *
 	 * Every boundary attribute of the mesh is Dirichlet: the fixed-boundary
 	 * problem is an interior Dirichlet problem by construction, so there is no
@@ -139,17 +232,49 @@ namespace meq
 			GradShafranovSolver( GradShafranovSolver const & ) = delete;
 			GradShafranovSolver &operator=( GradShafranovSolver const & ) = delete;
 
-			/// The right hand side F( r, z ) of the equation as written above --
-			/// NOT F/r. The 1/r belongs to the weak form and is applied here, which
-			/// keeps meq::Source free of it too (see Source.hpp).
+			/// The right hand side F( r, z ) of a source that does not depend on
+			/// psi -- NOT F/r. The 1/r belongs to the weak form and is applied
+			/// here, which keeps meq::Source free of it too (see Source.hpp).
+			/// The problem is then linear and solve() does one direct solve.
 			void setSource( mfem::Coefficient &fIn );
+
+			/// The source F( r, z, psi ) of a semi-linear problem, with its
+			/// derivative. Borrowed. The problem is closed by Newton, and
+			/// Source::dFdPsi is what the Jacobian is built from -- an error
+			/// there does not move the converged answer, it only wrecks, or
+			/// silently slows, the convergence to it.
+			void setSource( Source const &fIn );
 
 			/// The Dirichlet datum g_D for psi on Gamma. Non-homogeneous data is
 			/// the normal case: the level set psi = 0 is the plasma boundary, but a
 			/// benchmark on a rectangle cut out of an exact equilibrium is not.
 			void setBoundaryData( mfem::Coefficient &boundaryIn );
 
-			/// Assemble and solve. Both coefficients must have been set.
+			/// Newton's stopping rule and iteration cap. Ignored on the linear
+			/// path. The defaults are tight on purpose: a Newton iteration that
+			/// stops early looks exactly like one that converges slowly, and this
+			/// solver is measured on the shape of its residual history.
+			void setNewtonControl( double relativeToleranceIn,
+			                       double absoluteToleranceIn,
+			                       int maxIterationsIn );
+
+			/// True once setSource( Source const & ) has been called.
+			bool isNonlinear() const;
+
+			/// Assemble the forms and reduce to the trace system, without solving
+			/// it. solve() calls this first; it is public so that the Jacobian can
+			/// be checked against a finite difference of the residual it claims to
+			/// differentiate, which is the one check that separates a wrong
+			/// Jacobian from a wrong discretisation.
+			///
+			/// Afterwards reducedOperator() is the residual operator R, where the
+			/// Newton residual is R.Mult( lambda ) - reducedRhs(), and
+			/// R.GetGradient( lambda ) is the Jacobian the solve uses.
+			void prepare();
+
+			/// Assemble and solve. Both a source and boundary data must have been
+			/// set. On the semi-linear path this runs Newton and fills
+			/// newtonResiduals().
 			void solve();
 
 			/// psi_h in W_h. Valid after solve().
@@ -169,6 +294,39 @@ namespace meq
 			mfem::FiniteElementSpace &potentialSpace();
 			mfem::FiniteElementSpace &traceSpace();
 
+			/// The reduced trace system, valid after prepare(). On the linear path
+			/// the operator is the assembled matrix; on the semi-linear path it is
+			/// the non-linear DarcyHybridization operator itself, whose Mult() is
+			/// the residual and whose GetGradient() differentiates that residual
+			/// rather than the continuous equation. CEDRES++ rejected the
+			/// continuous derivative deliberately -- see CLAUDE.md -- and this is
+			/// how meq gets the discrete one for free.
+			mfem::Operator &reducedOperator();
+
+			/// The reduced right hand side and the reduced unknown, valid after
+			/// prepare(). The unknown aliases the trace block of the solution and
+			/// arrives carrying the Dirichlet data on the essential trace dofs.
+			mfem::Vector &reducedRhs();
+			mfem::Vector &reducedSolution();
+
+			/// The trace dofs the Dirichlet condition is imposed on. On the
+			/// semi-linear path the residual is masked to zero on these and the
+			/// Jacobian carries a unit row, so a finite-difference check of the
+			/// Jacobian must perturb only their complement.
+			mfem::Array<int> const &essentialTraceDofs() const;
+
+			/// The l2 norm of the non-linear residual at the start of every Newton
+			/// iteration, plus the final one. Empty on the linear path. This is
+			/// the thing to look at when a semi-linear run misbehaves: a history
+			/// that grinds down linearly means the Jacobian disagrees with the
+			/// residual, which no amount of mesh refinement will fix.
+			std::vector<double> const &newtonResiduals() const;
+
+			/// The number of Newton iterations the last solve took. Zero on the
+			/// linear path. One fewer than newtonResiduals().size(), since that
+			/// counts the residual at the initial guess too.
+			int newtonIterations() const;
+
 			/// L2 errors against a closed form, on a quadrature rule generous
 			/// enough that it does not itself limit the measured rate.
 			double potentialError( mfem::Coefficient &exact ) const;
@@ -183,7 +341,7 @@ namespace meq
 			double tau() const;
 
 		private:
-			void assembleForms();
+			void buildForms();
 
 			mfem::Mesh &mesh;
 			int orderValue;
@@ -205,13 +363,21 @@ namespace meq
 			/// inverse -- verified by experiment, see the .cpp.
 			mfem::FunctionCoefficient radius;
 
-			/// -1/r, the factor the source is multiplied by to form the potential
-			/// right hand side. Both halves of that are load bearing; see the .cpp.
+			/// -1/r, the factor the linear source is multiplied by to form the
+			/// potential right hand side. Both halves of that are load bearing;
+			/// see the .cpp.
 			mfem::FunctionCoefficient negativeInverseRadius;
 
-			mfem::Coefficient *source;
+			mfem::Coefficient *linearSource;
+			Source const *nonlinearSource;
 			mfem::Coefficient *boundaryData;
 			std::unique_ptr<mfem::Coefficient> potentialRhsCoeff;
+
+			double newtonRelativeTolerance;
+			double newtonAbsoluteTolerance;
+			int newtonMaxIterations;
+			int newtonIterationCount;
+			std::vector<double> newtonResidualHistory;
 
 			/// Every boundary attribute, marked. See the class comment.
 			mfem::Array<int> dirichletMarker;
@@ -232,6 +398,18 @@ namespace meq
 			mfem::BlockVector solution;
 			mfem::BlockVector rhs;
 
+			/// Two-block views -- flux and potential only -- over the first two
+			/// blocks of solution and rhs. DarcyForm's own offsets stop at the
+			/// potential, and BlockVector::operator= checks the block count, so
+			/// handing it the three-block vector aborts inside ReduceRHS() on the
+			/// semi-linear path ("Number of Blocks don't match"). The linear path
+			/// survived it only because the corresponding checks there are
+			/// MFEM_ASSERTs, compiled out of a release build. miniapps/hdg's
+			/// DarcyOperator::ImplicitSolve() takes the same view for the same
+			/// reason.
+			mfem::BlockVector darcySolution;
+			mfem::BlockVector darcyRhs;
+
 			/// Aliases into solution. darcyFlux holds -q, see the file comment.
 			mfem::GridFunction darcyFlux;
 			mfem::GridFunction potentialGf;
@@ -240,7 +418,16 @@ namespace meq
 			/// A copy of darcyFlux with the sign corrected, filled by solve().
 			mfem::GridFunction fluxGf;
 
-			bool assembled;
+			/// The reduced trace system. traceX and traceB alias the trace blocks
+			/// of solution and rhs; that aliasing is what makes FormLinearSystem()
+			/// carry the essential trace values into the reduced problem, so it is
+			/// not cosmetic. See the .cpp.
+			mfem::OperatorHandle reduced;
+			mfem::Vector traceX;
+			mfem::Vector traceB;
+
+			bool built;
+			bool prepared;
 	};
 
 }
