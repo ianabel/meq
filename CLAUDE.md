@@ -477,10 +477,25 @@ significant figures — and confirming each was caught. That is a cheap way to
 find out whether a green suite means anything, and worth repeating for the
 convergence tests, where the risk of a test that passes regardless is higher.
 
-Analytic solutions live in `tests/analytic/`. `ManufacturedNonlinear.hpp` is
-`refs/HDG-GradShafranov.pdf` Example 5, `ψ = sin(k_r(r+r₀))cos(k_z z)` with a
-source carrying `ψ²` and `e^{−ψ}` terms — the case that exercises Newton, and
-whose `∂F/∂ψ` is analytic.
+Analytic solutions live in `tests/analytic/`, and they form a deliberate ladder
+in how the source depends on `ψ` — which is to say, in what they demand of a
+Newton Jacobian:
+
+| fixture | source | `∂F/∂ψ` | what it catches |
+|---|---|---|---|
+| `Soloviev.hpp` | constant in `ψ` | `0` | the discretisation alone; Newton must converge in one step |
+| `McCarthy.hpp` | linear in `ψ` | `T`, a nonzero constant | a Jacobian missing its mass term |
+| `ManufacturedNonlinear.hpp` | `ψ²` and `e^(−ψ)` | varies | a Jacobian that is present but wrong |
+
+The middle rung earns its place: with `∂F/∂ψ = 0` a Solov'ev run cannot tell a
+correct Jacobian from an absent one, and in the nonlinear case the algebra is
+messy enough to hide a factor. McCarthy's `∂F/∂ψ` is a single constant, so the
+mass term is either there or it is not.
+
+Each fixture checks its own transcription rather than trusting it: `deltaStarFD()`
+recomputes `Δ*ψ` by central differences and the suite asserts it against `−f()`.
+For McCarthy's eighteen-term Bessel and Neumann expansion that agrees to 3.6e-6,
+and its analytic gradients match finite differences to 5e-9.
 
 ## Layout
 
