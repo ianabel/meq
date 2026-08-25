@@ -66,10 +66,22 @@ Raised 2026-08-24.
      convention, plus the normalisation, rather than a guess. If x is not psi
      the chain rule lands on top of question 1.
 
-  3. Which group is which? The groups are `Var0`, `Var1`, ... -- generic. There
-     is no metadata saying "this one is pressure". So the config must name the
-     group or index for each of p' and gg'. Do not infer it from the
-     `description` attribute, which is free text ("Variable 0").
+  3. Which group is which? CORRECTED 2026-08-25 by MANTA-COUPLING.md, written
+     from the MaNTA side: the premise below was out of date, and the reference
+     file it was established from is one of the three exceptions.
+
+     MaNTA physics cases name their own variables now, and the netCDF group
+     takes that name -- so a modern case writes groups called `n`, `p_i`, `T_e`,
+     each with a `description` attribute and `units` on every variable inside.
+     `Var0`/`Var1` survive only for the three cases whose width comes from
+     config and which therefore have no names to give (MatrixDiffusion,
+     MatrixDiffusionTest, LinearDiffSourceTest) -- and JAXAuxTest.ref.nc, which
+     this entry was written from, is one of them.
+
+     A config key naming the mapping is still needed, since a group called `p_i`
+     still has to be declared to be the pressure meq wants. But the information
+     is there to match against rather than absent, and the `units` attribute is
+     a free consistency check worth asserting on.
 
   4. Which time slice? MaNTA is time dependent and meq wants one equilibrium.
      Default to the last slice, `t` index size-1, but make it configurable and
@@ -293,3 +305,85 @@ Raised 2026-08-25.
   - Whether it composes with rotation. Fitzgerald's title suggests the two are
     treated together, which would make it the reference for both entries; if so
     the two should be planned as one piece of work rather than two.
+
+
+================================================================================
+Couple to MaNTA as a FieldModel
+Raised 2026-08-25. See MANTA-COUPLING.md, which is the specification.
+================================================================================
+
+  A second, much tighter coupling than the NetCDF entry above: meq runs
+  in-process as a plugin MaNTA dlopens, its Grad-Shafranov rows join MaNTA's
+  DAE, and the equilibrium and the transport are solved together by one Newton
+  rather than by an outer Picard loop.
+
+  MANTA-COUPLING.md, written from the MaNTA side, is the contract and is far
+  more detailed than this entry should duplicate. What belongs here is what meq
+  must change, and the two things already established.
+
+  THE ARCHITECTURAL DEMAND, which is not a detail
+
+  MaNTA does not want a converged equilibrium. It wants the residual rows,
+  evaluated at states that are nowhere near an equilibrium, on every residual
+  evaluation, without complaint. meq's Newton is subsumed into MaNTA's.
+
+  So GradShafranovSolver needs a residual-evaluation path beside its solve()
+  path: given psi and a transport state, return R without solving anything.
+  Stage 4 has most of the pieces -- prepare() already assembles and reduces
+  without solving, and reducedOperator()/reducedRhs() already exist because the
+  Jacobian check needed them. What is missing is the framing: a standalone
+  solver needs to converge, a coupled one needs to be differentiable and
+  evaluable OFF the solution manifold.
+
+  The good news is that solveB, the operation MaNTA needs and will not accept a
+  dense matrix for, is exactly meq's existing hybridized solve. That is the
+  natural fit and the reason the trace space is the natural DOF vector.
+
+  The two genuinely hard items, per that note's own checklist, are
+  dGeometry_dpsi INCLUDING the moving-surface term -- a flux-surface average
+  differentiated with respect to a psi that moves the surface -- and making the
+  pointwise Geometry hook fast enough, since MaNTA calls it once per physics
+  node per residual evaluation and hands over the whole psi vector each time.
+
+  THE BUILD FLAGS, checked 2026-08-25, and narrower than the note fears
+
+  MANTA-COUPLING.md warns that a plugin must be compiled with the flags
+  `pkg-config --cflags manta` reports -- MaNTA's MANTA_ABI_FLAGS, currently
+  `-DEIGEN_USE_BLAS -march=<concrete arch>`, znver2 on this machine -- because
+  Eigen aligns to the widest vector unit the compiler knows about and inlines
+  expression templates into both sides of the boundary. It flags reconciling
+  this with meq's CMake and with how MFEM was built as an afternoon's work.
+
+  It is smaller than that here, because NEITHER MFEM NOR meq USES EIGEN AT ALL
+  (grepped, both). Eigen appears only where MaNTA's types cross the interface,
+  which is the FieldModel subclass itself. So:
+
+    - the plugin shim needs MaNTA's ABI flags;
+    - meq_core and MFEM do not, and need not be rebuilt;
+    - the boundary to keep Eigen on one side of is the shim, which is a
+      handful of translation units rather than the whole library.
+
+  The other trap in that section is a real one and costs nothing to respect:
+  the plugin must NOT link -lmanta. MaNTA links its core objects directly, so a
+  plugin pulling in libmanta.so gets a second copy of the registry and
+  registers into a map the solver never reads, silently. Compile against the
+  installed headers alone.
+
+  BLOCKED ON THE MaNTA SIDE, so do not plan around them:
+
+    - nScalars > 0 alongside a field model is refused today. A total-current
+      constraint or a plasma-current control loop would need that unblocked.
+    - DegreeAdaptation with a field model is refused.
+    - An objective reading geometry directly loses its dG/dpsi term in the
+      adjoint.
+
+  AND FOUR QUESTIONS THAT NOTE LEAVES OPEN, two of which are ours to answer:
+
+    - Who owns the p(psi) mapping, the MaNTA physics case or the meq field
+      model? This decides which side owns which half of the A_2 chain rule.
+      Ours to negotiate.
+    - Should Geometry gain a batched form? Ours to ask for; the note suspects
+      the pointwise-only signature is an oversight rather than a decision, and
+      it is the hook that will hurt.
+    - Whether the error test needs to exclude the field block, and whether
+      nScalars needs unblocking first, are MaNTA-side.
