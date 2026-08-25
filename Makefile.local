@@ -1,6 +1,0 @@
-
-CXX = g++10
-
-TOML11_DIR=/home/ian/projects/toml11
-SUNDIALS_DIR=/home/ian/projects/sundials/install
-MFEM_INSTALL_DIR = /home/ian/projects/mfem/install
