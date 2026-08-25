@@ -107,3 +107,148 @@ Raised 2026-08-24.
   layout, the flat layout, a missing group, a missing variable, a time index out
   of range, and non-monotonic `x`. And check the round trip against the text
   reader -- the same profile through both paths must agree.
+
+
+================================================================================
+Sonic toroidal rotation
+Raised 2026-08-25.
+================================================================================
+
+  meq solves the static Grad-Shafranov equation, whose source is
+
+      F(r,z,psi) = mu0 r^2 dp/dpsi + g dg/dpsi.
+
+  With rotation fast enough that the Mach number is order one -- "sonic" -- that
+  is no longer the right equation. The centrifugal force sweeps heavy species to
+  the outboard side, so the density is NOT a flux function, and an electrostatic
+  potential arises to hold quasineutrality against that separation.
+
+  The reference is ~/RoPP-final.pdf, Abel et al, "Multiscale gyrokinetics for
+  rotating tokamak plasmas", Rep. Prog. Phys. 76 (2013) 116201. Its eq (136), on
+  printed page 19, is the generalisation:
+
+      Delta* psi = -4 pi R^2 sum_s n_s { T_s dlnN_s/dpsi
+                        + [ Z_s e phi_0 - (1/2) m_s omega^2(psi) R^2 + T_s ]
+                          dlnT_s/dpsi }
+                   - 4 pi R^2 ( sum_s m_s n_s R^2 ) omega(psi) domega/dpsi
+                   - I(psi) dI/dpsi
+
+  coupled to eq (96) for the density,
+
+      n_s = N_s(psi) exp[ m_s omega^2(psi) R^2 / (2 T_s) - Z_s e phi_0 / T_s ]
+
+  and eq (97), the lowest-order quasineutrality condition that determines phi_0,
+
+      sum_s Z_s N_s(psi) exp[ m_s omega^2(psi) R^2 / (2 T_s)
+                              - Z_s e phi_0 / T_s ] = 0,
+
+  subject to <phi_0>_psi = 0 by definition (their eq (59)).
+
+  WHAT THIS CHANGES, in rough order of difficulty
+
+  1. The profile set. Instead of two flux functions p'(psi) and gg'(psi), the
+     source needs N_s(psi) and T_s(psi) PER SPECIES, plus omega(psi) and I(psi),
+     and it needs dlnN_s/dpsi, dlnT_s/dpsi, domega/dpsi and dI/dpsi. meq::Profile
+     already supplies value and derivative from one spline, so the interface is
+     right; what changes is that Source stops being built from two profiles and
+     becomes a small container of species.
+
+  2. phi_0 is implicit. Eq (97) is a transcendental equation for phi_0 at each
+     (R, psi) -- a scalar solve nested inside every source evaluation, i.e. at
+     every quadrature point of every element on every Newton iteration. Worth
+     thinking about cost early: it is a one-dimensional root find with a
+     monotone left-hand side in phi_0 (each term is exponential and the Z_s have
+     mixed signs, so check monotonicity rather than assume it), and a good
+     initial guess is available from the previous iterate at the same point.
+
+  3. NEWTON NEEDS d(phi_0)/d(psi), and it is not optional. dF/dpsi picks up phi_0
+     through both the explicit Z_s e phi_0 term and the exponentials in n_s.
+     Differentiate (97) implicitly with respect to psi at fixed R; the derivative
+     falls out in closed form because (97) is differentiable in both arguments.
+     Do NOT finite-difference it: an inner root find differenced from outside
+     gives a Jacobian whose accuracy is set by the inner solve's tolerance,
+     which is how a Newton iteration silently degrades to linear.
+
+  4. <phi_0>_psi = 0 IS A FLUX-SURFACE AVERAGE, and therefore NON-LOCAL --
+     and the flux surfaces are level sets of the unknown, so the averaging
+     domain moves as psi does. This is the same structural hazard CEDRES++
+     records for its psi_ax and psi_bnd normalisation, where the corresponding
+     terms "lead to non-local entries in the stiffness matrix" (CLAUDE.md, the
+     Newton section), but worse, because there the nonlocality attaches to two
+     scalars and here it attaches to a whole surface. Understand what this does
+     to the sparsity of the hybridized system BEFORE writing any of it. It may
+     be the thing that decides the whole approach.
+
+  CONVENTIONS TO PIN DOWN FIRST, because two sign or factor slips have already
+  been found in the papers meq does follow
+
+  - UNITS. RoPP is Gaussian -- the 4 pi in (136), the c in (135). meq and the
+    Grad-Shafranov papers are SI with mu0. Convert deliberately and write the
+    conversion down.
+  - THE 2 pi. RoPP (31) has B = I grad(phi) + grad(psi) x grad(phi) with
+    psi = A_phi, whereas HDG-GS-2 states psi = psi_p / 2 pi. The B decomposition
+    agrees structurally -- their I is HDG-GS-2's g -- but the normalisation of
+    psi does not obviously.
+  - THE SIGN OF Delta*. RoPP (135) gives j . grad(phi) = -(c / 4 pi R^2) Delta*
+    psi, so (136) reads Delta* psi = -4 pi R^2 {...}, i.e. -Delta* psi = +4 pi
+    R^2 {...}. meq's convention is -Delta* psi = F. Check that maps to F = +4 pi
+    R^2 {...} rather than assuming it.
+
+  A CHEAP FIRST MILESTONE. The subsonic limit must reduce to what meq already
+  solves: as omega -> 0 the exponentials go to one, n_s becomes a flux function
+  again, and (136) should collapse to the static equation. Implement that limit
+  first and check it against the existing Solov'ev benchmark to zero -- it
+  exercises the whole new profile and phi_0 machinery while having a known
+  answer.
+
+
+================================================================================
+Anisotropic pressure
+Raised 2026-08-25.
+================================================================================
+
+  The other generalisation, and independent of the rotation one above: p_par is
+  not equal to p_perp, so the scalar pressure p(psi) in the source is replaced
+  by a pair, and the Grad-Shafranov equation changes shape rather than just
+  gaining terms.
+
+  NO REFERENCE IS PINNED FOR THIS YET, and one is needed before anything is
+  written -- unlike the rotation case above, where ~/RoPP-final.pdf eq (136) is
+  the equation to implement. The seeds below come from the CEDRES++ paper's own
+  list of what it plans to add (refs/CEDRES.pdf, section 1 and its
+  bibliography), so they are the set a production free-boundary code considered
+  worth citing, not a literature search:
+
+    Grad 1967                Toroidal containment of a plasma, Phys. Fluids 10, 137
+    Maschke & Perrin 1984    An analytic solution of the stationary MHD equations
+                             for a rotating toroidal plasma, Phys. Lett. A 102, 106
+                             -- also relevant to the rotation entry above, and
+                             worth having because an ANALYTIC solution is a
+                             benchmark, which is the scarce thing here
+    Goedbloed & Lifschitz 1997   Stationary symmetric MHD flows, Phys. Plasmas 4, 3544
+    Zwingmann, Eriksson & Stubberfield 2001   Equilibrium analysis of tokamak
+                             discharges with anisotropic pressure, PPCF 43, 1441
+    Guazzotto, Betti, Manickam & Kaye 2004    Numerical study of tokamak
+                             equilibria with arbitrary flow, Phys. Plasmas 11, 604
+    Cooper et al 2009        Three-dimensional anisotropic pressure free boundary
+                             equilibria, Comput. Phys. Commun. 180, 1524
+    Pustovitov 2010          Anisotropic pressure effects on plasma equilibrium in
+                             toroidal systems, PPCF 52, 065001
+    Fitzgerald, Appel & Hole 2013   EFIT tokamak equilibria with toroidal flow and
+                             anisotropic pressure using the two-temperature
+                             guiding-centre plasma, Nucl. Fusion 53, 113408
+
+  Verify each doi against Crossref before adding any of these to refs/Refs.md --
+  they are transcribed from another paper's bibliography, which is exactly the
+  provenance that file's opening rule exists for. This list has NOT been checked.
+
+  Two things to establish when a reference is chosen:
+
+  - Whether the anisotropy enters as a modified source with the same Delta*
+    operator on the left, in which case meq's discretisation is untouched and
+    only Source changes; or whether it changes the operator, in which case the
+    HDG assembly changes too and this is a much larger job. Fitzgerald et al
+    is the likely place to look, being an implementation.
+  - Whether it composes with rotation. Fitzgerald's title suggests the two are
+    treated together, which would make it the reference for both entries; if so
+    the two should be planned as one piece of work rather than two.
