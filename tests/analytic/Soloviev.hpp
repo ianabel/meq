@@ -86,10 +86,39 @@ class SolovievEquilibrium
 		/// section 4.1, eq (22c). This is the configuration whose exact
 		/// solution meq's stage-3 benchmark is measured against.
 		///
-		/// c_10 IS NOT THE PRINTED VALUE. See the note below the coefficient
-		/// list for the derivation; the paper's eq (22c) prints c_10 identical
-		/// to c_7, which is a typesetting duplicate.
+		/// The NSTX-like single-null case of HDG-GradShafranov-Adaptive.pdf
+		/// section 4.1, at A = -0.52.
+		///
+		/// THESE ARE NOT THAT PAPER'S PRINTED COEFFICIENTS. They are solved
+		/// from Cerfon & Freidberg's twelve constraints, because the printed
+		/// set does not satisfy them -- see the note below, and
+		/// nstxAsPublished() if the printed numbers are wanted.
 		static SolovievEquilibrium nstx()
+		{
+			return SolovievEquilibrium( -0.52, {
+				-0.0016207703709346553,
+				-0.3627285631694282,
+				-0.0032978198208932852,
+				-0.025453326073564573,
+				 0.0018935982298685441,
+				-0.0028994822166496844,
+				-9.9473997747192579e-5,
+				 0.0013798134064081668,
+				 0.0079226303825184995,
+				-0.0077012853250729403,
+				-0.0016424391448371881,
+				 0.00018410580253187123
+			} );
+		}
+
+		/// The coefficients exactly as printed in
+		/// HDG-GradShafranov-Adaptive.pdf eq (22c).
+		///
+		/// Kept because it is still a perfectly good exact solution -- every
+		/// psi_i is Delta*-harmonic, so ANY coefficients solve the equation --
+		/// and because it is the only way to reproduce that paper's numbers.
+		/// What it is NOT is the NSTX geometry it is described as: see below.
+		static SolovievEquilibrium nstxAsPublished()
 		{
 			return SolovievEquilibrium( -0.52, {
 				-0.00147796615575325,
@@ -101,57 +130,65 @@ class SolovievEquilibrium
 				-0.000044132956899,
 				 0.000433522611526,
 				 0.008286849573230,
-				-0.0012801846791351433,   // c_10, corrected -- see below
+				-0.000044132956899,
 				-0.001299619729855,
 				 0.000072050578303
 			} );
 		}
 
 		/*
-		 * WHY c_10 IS NOT THE PUBLISHED NUMBER.
+		 * WHY THE PUBLISHED COEFFICIENTS ARE NOT USED.
 		 *
-		 * refs/HDG-GradShafranov-Adaptive.pdf eq (22c) prints
+		 * refs/CerfonFreidberg.pdf section IX gives the twelve constraints that
+		 * determine c_1 ... c_12 for an up-down asymmetric single-null
+		 * configuration -- its eq (28). For the NSTX parameters
+		 * eps = 0.78, kappa = 2, delta = 0.35, with the X-point at
+		 * x_sep = 1 - 1.1 delta eps = 0.6997, y_sep = -1.1 kappa eps = -1.716,
+		 * they are twelve linear conditions on the c_i:
 		 *
-		 *     c_7  = -0.000044132956899
-		 *     c_10 = -0.000044132956899
+		 *     psi = 0             at the outer and inner equatorial points,
+		 *                         the upper high point, and the X-point
+		 *     psi_y = 0           at both equatorial points
+		 *     psi_x = 0           at the high point
+		 *     psi_x = psi_y = 0   at the X-point
+		 *     three curvature conditions with C&F's N_1, N_2, N_3
 		 *
-		 * identically. That is a typesetting duplicate, and using it gives an
-		 * equilibrium that is not normalised: a Solov'ev boundary is the level
-		 * set psi = 0, and for a single-null configuration that surface passes
-		 * through the X-point, so the X-point must have psi = 0. With the
-		 * printed value it does not -- measured, the saddle sits at
-		 * (0.6958, -1.8069) with psi = -8.7e-3, so the zero level set is not
-		 * the separatrix at all.
+		 * Solving that 12x12 system at A = -0.52 gives the set in nstx().
+		 * MEASURED: it satisfies all twelve to ~1e-17, puts the X-point exactly
+		 * at (0.699700, -1.716000) with psi = -2.6e-18, and reproduces
+		 * Delta*(psi) = -F to 9.9e-15.
 		 *
-		 * The value here is the root of psi( X( c_10 ) ) = 0, the X-point being
-		 * continued along as c_10 varies. It is 29.0 times the printed
-		 * magnitude, and it puts the X-point at (0.6795, -1.8443) with
-		 * psi = -3e-17.
+		 * The printed set satisfies none of them. Evaluated at the same four
+		 * points it gives
 		 *
-		 * CORROBORATION, which is the reason to trust this rather than merely
-		 * to prefer it. The configuration is meant to be NSTX at high beta,
-		 * elongation kappa = 2.0. Measuring flux surfaces just inside the
-		 * separatrix gives kappa = 2.09, 2.06, 2.03 at psi = -0.02, -0.01,
-		 * -0.005 -- converging on 2.0 from outside. The printed coefficient
-		 * produces no closed configuration to measure, and a least-squares fit
-		 * over Cerfon-Freidberg's conditions that was also tried gives
-		 * c_10 = -2.87e-3, for which the X-point lands at psi = +1.2e-2 -- i.e.
-		 * OUTSIDE the psi = 0 surface, which contradicts a single null -- and
-		 * kappa = 1.75 with a degenerate eps = 0.98.
+		 *     outer equatorial   psi = -7.54e-3
+		 *     inner equatorial   psi = +3.92e-4
+		 *     upper high point   psi = +2.92e-2     <-- 11% of the axis flux
+		 *     X-point            psi = -9.76e-3
 		 *
-		 * WHAT THIS DOES NOT AFFECT. psi_1 ... psi_12 are Delta*-harmonic, so
-		 * no choice of c_i changes F, changes Delta*(psi), or changes any
-		 * convergence rate. That is exactly why the error was invisible: the
-		 * only thing a wrong coefficient moves is the absolute error against
-		 * the exact solution, and the ceilings in the convergence tests were
-		 * calibrated to the wrong solution. They are recalibrated in the same
-		 * commit as this change.
+		 * where all four should be zero. So the surface psi = 0 for the printed
+		 * coefficients is not the NSTX boundary it is described as, and the
+		 * true saddle sits at (0.6958, -1.8069) with psi = -8.7e-3 rather than
+		 * at the prescribed X-point with psi = 0.
 		 *
-		 * WHAT IS STILL NOT VERIFIED. The other eleven coefficients. Nothing
-		 * here constrains them, and the same argument says nothing in the suite
-		 * can. Reproducing the full set needs Cerfon-Freidberg's twelve
-		 * geometric conditions, and that paper is not in refs/ -- doi
-		 * 10.1063/1.3328818 if it is ever wanted.
+		 * A PREVIOUS ATTEMPT AT THIS, recorded because it was wrong in an
+		 * instructive way. The paper prints c_10 identical to c_7, which looked
+		 * like a lone typesetting duplicate, and c_10 was "corrected" on its
+		 * own by imposing psi = 0 at the X-point -- one of the twelve
+		 * conditions. That gave -1.28e-3 and did make the separatrix the zero
+		 * level set. But with the other eleven coefficients also wrong it was
+		 * fitting one condition of twelve, and the agreement it produced
+		 * (kappa near 2 on interior surfaces) was coincidence. Fixing one
+		 * coefficient cannot repair a set that is wrong throughout.
+		 *
+		 * WHAT THIS DOES NOT CHANGE. Every psi_i is Delta*-harmonic, so no
+		 * choice of c_i changes F, changes Delta*(psi), or changes any
+		 * convergence rate -- both sets are exact solutions and both give k+1.
+		 * The coefficients only decide which domain the benchmark is posed on,
+		 * and how large the absolute error is. Which is exactly why this went
+		 * unnoticed: the only check that can see it is the absolute-error
+		 * ceiling, and before this it had never been compared against anything
+		 * but itself.
 		 */
 
 		/// The poloidal flux function.

@@ -269,19 +269,19 @@ BOOST_AUTO_TEST_CASE( boundaryDataIsNonHomogeneous )
 
 BOOST_AUTO_TEST_CASE( orderOneConvergesAtTwo )
 {
-	// Ceilings at 3x the finest-mesh error measured with the corrected c_10:
-	// psi 3.585e-05, q 5.971e-05 at h = 0.025.
-	checkOrder( 1, 1.1e-4, 1.8e-4 );
+	// Ceilings at 3x the finest-mesh error, measured with the coefficient set
+	// solved from Cerfon & Freidberg: psi 3.595e-05, q 6.078e-05 at h = 0.025.
+	checkOrder( 1, 1.1e-4, 1.9e-4 );
 }
 
 BOOST_AUTO_TEST_CASE( orderTwoConvergesAtThree )
 {
-	// Measured: psi 1.895e-07, q 2.483e-07.
-	checkOrder( 2, 5.7e-7, 7.5e-7 );
+	// Measured: psi 1.913e-07, q 2.504e-07.
+	checkOrder( 2, 5.8e-7, 7.6e-7 );
 }
 
 BOOST_AUTO_TEST_CASE( orderThreeConvergesAtFour )
 {
-	// Measured: psi 5.510e-10, q 8.349e-10.
-	checkOrder( 3, 1.7e-9, 2.6e-9 );
+	// Measured: psi 5.493e-10, q 8.804e-10.
+	checkOrder( 3, 1.7e-9, 2.7e-9 );
 }
