@@ -232,9 +232,37 @@ There is independent support for the choice, from the free-boundary literature
 rather than the HDG one. CEDRES++ (`refs/CEDRES.pdf`) reports that fixed-point
 iterations "usually suffer from very slow convergence or even fail to converge,
 which made researchers move towards Newton-type methods", and names **vertically
-unstable plasmas** as a case where Picard does not converge at all. That is a
-stronger claim than "Newton is faster", and it is the one to cite. It is taken
-from that paper's introduction, which is as far as it has been read here.
+unstable plasmas** as a case where Picard does not converge at all. Lackner's own
+review says the same from the other end: his plain Picard, eq. (3), "will
+converge to the physically trivial solution ψ ≡ 0 if admitted by the formulation
+of the problem".
+
+Three further things from CEDRES++, all of which bite before free boundary does.
+
+**Differentiate the discrete residual, not the continuous one.** A continuous-
+level Newton derivative for the plasma-current term exists (Blum 1989) and
+CEDRES++ deliberately does not use it: *"there is no theoretical evidence that
+this formula holds also for plasma equilibria with boundaries that contain
+X-points. In particular the second term on the right-hand side seems to blow up
+if ψ reaches a critical point."* They differentiate the Galerkin form instead.
+meq gets this right for free, since `DarcyForm::GetGradient` differentiates the
+assembled operator — but know that the shortcut fails exactly where the physics
+is interesting.
+
+**Normalised flux will make the Jacobian non-local.** Their profiles, like
+`meq::Profile`, are functions of `ψ_N = (ψ − ψ_ax)/(ψ_bnd − ψ_ax)` on `[0,1]`.
+`ψ_ax` and `ψ_bnd` are global functionals of the solution, so `∂F/∂ψ` acquires
+terms through them, and those "lead to non-local entries in the stiffness
+matrix". Fixed boundary with `ψ = 0` on a known `Γ` does not need the
+normalisation and so does not have the problem — but the day the profiles are
+driven by normalised flux, `MHDSource::dFdPsi` is incomplete, **and the existing
+finite-difference test will not catch it**, because `f()` and `dFdPsi()` would be
+missing the same terms.
+
+**What working Newton looks like.** CEDRES++ Table 2, on 577k unknowns: relative
+residual `2.7e0 → 9.2e-2 → 1.8e-3 → 5.3e-6 → 3.9e-12` in five iterations. That is
+the shape stage 4 should produce. A run that grinds down linearly means the
+Jacobian disagrees with the residual.
 
 ### On SUNDIALS
 

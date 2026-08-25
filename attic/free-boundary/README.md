@@ -93,29 +93,41 @@ looks correct and terminates the program; if something does catch it as
 `new`. The two other throws in the same file are already correct, which is what
 makes this one easy to miss.
 
-## If this is revived, do not revive the algorithm
+## If this is revived, read this first
 
-Decided 2026-08-24; the reasoning is in `refs/Refs.md`, section *Free boundary*.
+Decided 2026-08-24, and corrected the same day after reading Lackner in full.
+The reasoning is in `refs/Refs.md`, section *Free boundary*.
 
-This code implements Lackner's 1976 scheme, and there are two separable things in
-it. The **reduction of the unbounded domain** through the analytic Green's
-function is sound and is what any free-boundary solver does, CEDRES++ included.
-The **outer fixed-point iteration it is embedded in** is what meq is moving away
-from, and it is the reason the code here has the shape it has.
+**First, a correction to what this file said earlier.** It claimed this code
+implemented the wasteful branch of Lackner's method and that its `O(N^2)` cost
+was intrinsic. Both were wrong. Lackner's §2.2 gives three treatments of the
+unbounded domain and ranks them, and this code implements the one he calls most
+efficient -- **von Hagenow's**, his eqs (14)-(16), costing two fast-solver steps:
+solve once with a fictitious conducting shell, recover the true boundary values
+from a *boundary* integral of the Green's function against the normal derivative,
+solve again. `meq.cpp` performed exactly those three steps, and the old config
+said so all along with `BoundaryCondition = "VonHagenow"`.
 
-`GreensFunctionBoundaryCoefficient::Eval` calls `BoundaryPsi`, which sweeps every
-boundary face with singular quadrature — once per quadrature point, so `O(N²)` —
-and the whole sweep is repeated at every Picard iteration, because in that
-arrangement the Green's function is an explicit boundary-condition *update*
-computed inside the loop.
+**What is genuinely wrong here is narrower.** Lackner's cost estimate assumes the
+Green's function evaluations are tabulated **once per grid** and reused.
+`BoundaryPsi` instead calls `GreensFunction(r, r*)` inside the quadrature loop,
+per quadrature point, per boundary face, per outer iteration. That is an
+implementation defect. Anyone reviving this should fix it rather than conclude
+the method is slow.
 
-meq uses Newton. The corresponding structure is a **coupled BIM/FEM system**, in
-which the boundary integral operators sit inside the operator Newton
-differentiates, rather than in an outer loop around it. Gatica & Hsiao's
-uncoupling makes that cheap by taking the artificial coupling boundary to be a
-circle, so the boundary integral operators invert exactly and a single weakly
-singular term survives.
+**The reason not to build on it is different, and Lackner states it himself.** Of
+the precompute-and-reuse structure he warns it "will probably not be competitive
+with iteration methods if the geometry of R is changed after each calculation".
+meq's stage 6 is adaptive mesh refinement: the geometry changes every cycle, so
+the amortisation this method depends on never happens.
 
-So the parts of this directory worth carrying forward are the quadratures and the
-Green's function evaluation — the numerics listed under *Worth keeping* — and not
-the control flow around them.
+The alternative is a coupled BIM/FEM system, where the boundary integral
+operators sit inside the operator Newton differentiates rather than in an outer
+loop, and there is no precomputation to invalidate. Gatica & Hsiao make that
+affordable by taking the artificial boundary to be a circle. CEDRES++ does
+precisely this, and says so on its p. 13.
+
+So what is worth carrying forward from this directory is the numerics listed
+under *Worth keeping* -- the Green's function with its small-argument asymptotic
+branch, and the singularity-split quadrature -- and not the control flow around
+them.

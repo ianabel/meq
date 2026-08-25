@@ -162,9 +162,6 @@ unbounded domain to a boundary condition through the Green's function, and coupl
 that to a finite element solve inside. Doing it as a *coupled BIM/FEM* rather
 than as a hand-rolled Green's-function quadrature is the improvement to aim for.
 
-**These are annotated from their abstracts and introductions only** — enough to
-say why they are here, not enough to be read as summaries. None carries a ✔.
-
 ### What meq takes from Lackner, and what it does not
 
 Lackner 1976 is the origin of the whole approach and is cited as such by
@@ -200,26 +197,123 @@ plasmas". Lackner is not contradicting it; he is describing the machinery a
 fixed-point scheme needs in order to survive, and meq's answer is to not be a
 fixed-point scheme.
 
-**So the consequence for the boundary treatment is structural, not a preference.**
-In Lackner's arrangement the Green's function enters as an *explicit boundary-
-condition update evaluated inside the outer loop*, so its cost is paid every
-cycle. That is exactly what `attic/free-boundary/` implements —
-`GreensFunctionBoundaryCoefficient::Eval` calls `BoundaryPsi`, which loops over
-every boundary face with singular quadrature, once per quadrature point, and the
-whole `O(N²)` sweep is redone at each Picard iteration.
+**A correction to an earlier version of this section.** It said the attic code
+implemented the wasteful branch of Lackner and that its `O(N²)` sweep was
+intrinsic. That was wrong on both counts, and §2.2 is what settles it. Lackner
+gives *three* ways to handle the unbounded domain, and ranks them:
 
-A coupled BIM/FEM formulation instead puts the boundary integral operators **into
-the system**, where Newton differentiates through them and the interior and
-exterior are solved together. Gatica & Hsiao is what makes that cheap: take the
-artificial coupling boundary to be a circle, invert the boundary integral
-operators exactly, and one weakly singular term survives. So the route is
-Lackner's reduction, expressed as a monolithic coupled system, solved by Newton —
-which is what CEDRES++ does and what meq should do.
+1. Direct integration of the Green's function over the source region, his
+   eq. (11) — `O(N²M²)`, and he calls it "the most straightforward, but also
+   most wasteful".
+2. Expansion of the source in Jacobi polynomials — cheaper, and it continues
+   naturally outside the region so that torques on the coils fall out, but "for
+   large aspect ratios, the expansion into Jacobi polynomials converges badly".
+3. **Von Hagenow's method**, his eqs. (14)–(16), which he calls the most
+   efficient: solve once with a fictitious conducting shell (`Δ*ψ̂ = −g`, `ψ̂ = 0`
+   on `∂R`), recover the true boundary values from a **boundary** integral of the
+   Green's function against `∂ψ̂/∂n`, then solve a second time with those values.
+   Total cost of order **two fast solver steps**.
 
-**This reasoning is from §§1–2.2 of Lackner and the introduction of CEDRES++.**
-The rest of both papers is unread, and the argument should be re-checked against
-Lackner's §2.2 in particular, which is where the linearised solve in the
-unbounded domain is actually described.
+`attic/free-boundary/` implements the third, not the first — which the old
+config file was telling us all along, with `BoundaryCondition = "VonHagenow"`,
+and which `meq.cpp` performed as literally Lackner's three steps: solve with zero
+BC, build `GreensFunctionBoundaryCoefficient` from the resulting flux, solve
+again. So the *algorithm* was the good one.
+
+What the attic code gets wrong is narrower and more ordinary: Lackner's cost
+estimate assumes the `4(N+M)²` Green's function evaluations are done **once per
+grid**, tabulated and reused. `BoundaryPsi` instead calls `GreensFunction(r, r*)`
+inside the quadrature loop every time it is invoked, and it is invoked per
+quadrature point per boundary face, per outer iteration. That is an
+implementation defect, not a defect of the method.
+
+**The real argument is still structural, but it is a different one, and Lackner
+supplies it himself.** Of the capacitance-matrix variant he warns: *"If many
+calculations have to be carried out for a given ∂R (e.g. if it corresponds to the
+copper shell of an actually existing device), this algorithm will therefore be
+quite efficient, but it will probably not be competitive with iteration methods
+if the geometry of R is changed after each calculation."* The whole efficiency
+argument rests on amortising a precomputation over a **fixed** boundary.
+
+**meq's stage 6 is adaptive mesh refinement.** The geometry changes every cycle,
+which is precisely the case Lackner excludes. So the amortisation that makes
+von Hagenow cheap is the thing meq's adaptivity destroys — and that, rather than
+any inefficiency in the method as published, is why meq should not build on it.
+
+A coupled BIM/FEM formulation instead puts the boundary integral operators
+**into the system**, where Newton differentiates through them and interior and
+exterior are solved together, with no precomputation to invalidate. Gatica &
+Hsiao is what makes that affordable.
+
+**And this is confirmed rather than inferred.** CEDRES++ p. 13 says it outright:
+*"The bilinear form c(·,·) follows basically from the so-called uncoupling
+procedure (Gatica and Hsiao 1995) for the usual coupling of boundary integral and
+finite element methods… The Green's function that is used in the derivation of
+the boundary integral method for our problem was used earlier in finite
+difference methods for the Grad–Shafranov–Schlüter equations (Lackner 1976)."*
+Their `Γ` is a **semi-circle** of radius `ρ_Γ` enclosing the iron, coils and
+passive structures — Gatica & Hsiao's circular coupling boundary, exactly. The
+resulting form `c` is added to the operator in their variational formulation
+(3.6), which is what "inside the system" means concretely.
+
+### Four things CEDRES++ teaches about Newton, which apply to meq now
+
+Not later, when free boundary arrives — now, while `Source` and the stage-4
+Newton are being written.
+
+**1. Differentiate the discrete residual, not the continuous one.** This is
+CEDRES++'s stated distinguishing feature and the reasoning is a warning. The
+*continuous* Newton derivative of the plasma-current term exists in the
+literature (their eq. 3.25, from Blum 1989) and rests on shape calculus — and
+they distrust it: *"there is no theoretical evidence that this formula holds also
+for plasma equilibria with boundaries that contain X-points. In particular the
+second term on the right-hand side seems to blow up if ψ reaches a critical
+point."* Their §3.3 concludes such approaches "are not very trustworthy" and they
+differentiate the Galerkin formulation instead. **meq gets this right by
+construction** — `DarcyForm::GetGradient` differentiates the assembled operator —
+but the reason is worth knowing, because it says the shortcut is wrong precisely
+where the physics is interesting.
+
+**2. Normalised flux makes the Jacobian non-local.** Their profiles are functions
+of `ψ_N = (ψ − ψ_ax)/(ψ_bnd − ψ_ax)` on a fixed domain `[0,1]` — the same
+convention as `meq::Profile`. But `ψ_ax` and `ψ_bnd` are *global functionals of
+the solution*, so `∂F/∂ψ` picks up terms through them, and CEDRES++ p. 20 is
+explicit: those terms *"lead to non-local entries in the stiffness matrix"*,
+connecting the axis and boundary coefficients to every coefficient near the
+plasma domain. **meq does not have this yet** — fixed boundary with `ψ = 0` on a
+known `Γ` needs no normalisation — but the moment the profiles are driven by
+normalised flux, `MHDSource::dFdPsi` as it stands is incomplete, and a
+finite-difference check against `f()` alone will not reveal it, because both
+would be missing the same terms.
+
+**3. Higher order costs you quadrature derivatives.** Their §5 lists what stops
+them going beyond `P1`, and one item lands squarely on meq: *"we need to
+implement sufficiently accurate quadrature rules for polygonal domains with
+non-straight boundaries. On top of this, we need to implement for the Newton
+method the derivatives of such quadrature rules."* meq's stage 5 introduces
+exactly such quadrature — the transfer-path integrals over the extension region —
+and stage 4's Newton will have to differentiate through it. Expect that to be the
+hard part.
+
+**4. What "Newton is working" looks like.** Their Table 2, for a 577,415-unknown
+ITER case: relative residual `2.67e0 → 9.16e-2 → 1.78e-3 → 5.25e-6 → 3.94e-12`
+over five iterations. Textbook quadratic. That is the shape to expect from meq's
+stage 4, and a run that grinds down linearly instead means a Jacobian that
+disagrees with the residual — the failure this project's finite-difference test
+on `dFdPsi` exists to catch.
+
+**A footnote on their §5, which reads like a description of meq.** The obstacles
+CEDRES++ lists to going higher order are: needing `hp` refinement because the
+solution is non-regular near material interfaces; needing quadrature over
+polygonal domains with non-straight boundaries; and, as a "promising
+alternative", switching to *"separate meshes and separate polynomial degrees for
+the representation of the flux in the plasma domain and its exterior"* so that
+the magnetic axis and X-point are not confined to mesh vertices. That last is
+close to what the extension-from-subdomains construction gives, and the first two
+are what stages 5 and 6 are for. It is worth knowing that a production code's
+open problems are this project's architecture, in both directions: it is
+encouraging about the choice, and it is a warning about how much of the work is
+in the quadrature.
 
 **One thing already worth extracting, because it bears on a decision meq has
 already taken.** meq uses Newton where both Grad–Shafranov papers use
@@ -235,8 +329,8 @@ the paper before leaning on it.
 
 | Reference | URL (doi or arxiv) | Short Description | File Name |
 | --- | --- | --- | --- |
-| Journal of Plasma Physics 81 (2015) 905810301 | https://doi.org/10.1017/s0022377814001251 | Heumann, Blum, Boulbe, Faugeras, Selig, Ané, Brémond, Grandgirard, Hertout & Nardon, **CEDRES++** — a survey of the computational methods in a production quasi-static *free-boundary* equilibrium code, on ITER and WEST. The nearest thing in the literature to what meq would become. Piecewise-linear FEM for the flux map coupled to a **boundary element method** for the unbounded exterior, and a **Newton method for the discretised nonlinear problem** covering all three nonlinearities at once — the current profile, the free plasma boundary, and the ferromagnetic permeability where there is an iron transformer. Also covers the *inverse* problems (find the coil currents giving a desired plasma shape), for which they say Newton is the main building block. Read for the coupling and the Newton formulation rather than for the discretisation, which is low order where meq's is not. Open access on Cambridge Core | CEDRES.pdf |
-| Computer Physics Communications 12 (1976) 33–44 | https://doi.org/10.1016/0010-4655(76)90008-4 | Lackner, "Computation of ideal MHD equilibria" — **the origin of the Green's-function reduction of the unbounded domain**, and the method the code in `attic/free-boundary/` implements. Read the section above for which half of it meq adopts. Its §2.1 is the reason for the other half: plain Picard "will converge to the physically trivial solution ψ ≡ 0 if admitted by the formulation of the problem", the damped three-level alternative pays for stability with an explicitly slow convergence rate, and the schemes used in practice need conserved quantities and per-cycle magnetic-axis pinning to hold the column in place. Also worth knowing for the inverse problem: he classes formulation III — find the applied currents producing a prescribed plasma surface — as **badly posed in the sense of Hadamard**, which is the caveat to carry into any inverse work later. Paywalled | LacknerFreeBoundary.pdf |
+| ✔ Journal of Plasma Physics 81 (2015) 905810301 | https://doi.org/10.1017/s0022377814001251 | Heumann, Blum, Boulbe, Faugeras, Selig, Ané, Brémond, Grandgirard, Hertout & Nardon, **CEDRES++** — a production quasi-static *free-boundary* code, and the nearest thing in the literature to what meq would become. P1 Lagrangian FEM on the interior coupled to a boundary integral form `c(·,·)` on a **semi-circular** artificial boundary, built by Gatica & Hsiao's uncoupling procedure and using Lackner's Green's function — see the two sections above, which are largely drawn from this paper. **Its distinguishing feature is a Newton method on the *discretised* equations**, chosen because the continuous-level derivative used by its predecessors SCED and Proteus has no theoretical backing at X-points and appears to blow up at critical points of `ψ`. Measured: perfect quadratic convergence, five iterations to 4e-12 on 577k unknowns (Table 2); linear convergence in the number of unknowns, as P1 implies. Also carries the four static/evolution × direct/inverse problem statements, the inverse problems as SQP with Tikhonov regularisation reusing *the same* derivatives as the Newton solve, and the flux-surface-average and geometric-coefficient post-processing in ITM conventions. Two cautions worth carrying: profiles in normalised flux make the Jacobian non-local, and their §5 names quadrature over polygonal domains with curved boundaries — plus **the derivatives of that quadrature** — as the obstacle to higher order. No analytic free-boundary solution exists, so they validate by convergence to a fine-mesh reference. Open access on Cambridge Core | CEDRES.pdf |
+| ✔ Computer Physics Communications 12 (1976) 33–44 | https://doi.org/10.1016/0010-4655(76)90008-4 | Lackner, "Computation of ideal MHD equilibria" — a review, and **the origin of the Green's-function reduction of the unbounded domain**. §2.1 is iteration schemes for the nonlinearity and is the reason meq uses Newton: plain Picard "will converge to the physically trivial solution ψ ≡ 0 if admitted by the formulation of the problem"; the damped Marder–Weitzner three-level alternative buys stability with an explicitly slow convergence rate; and what was used in practice needed conserved quantities plus per-cycle magnetic-axis pinning, which is feedback position control in disguise. §2.2 is the unbounded-domain treatment and ranks three methods — direct Green's-function integration ("most straightforward, but also most wasteful"), a Jacobi-polynomial expansion that "converges badly" at large aspect ratio, and **von Hagenow's**, eqs (14)–(16), costing only two fast-solver steps. `attic/free-boundary/` implements the third. **The load-bearing sentence for meq is his caveat** that the precompute-and-reuse structure "will probably not be competitive with iteration methods if the geometry of R is changed after each calculation" — which is what adaptive refinement does every cycle. §2.3 is the inverse problem, classed as **badly posed in the sense of Hadamard**, with Fourier truncation and Zakharov's Tikhonov regularisation as the practical remedies, and a nice cautionary figure (his figs 3–4) showing that too many Fourier components leave the plasma surface unchanged while making the field near the conductors wild. Paywalled | LacknerFreeBoundary.pdf |
 | Journal of Mathematical Analysis and Applications 189 (1995) 442–461 | https://doi.org/10.1006/jmaa.1995.1029 | Gatica & Hsiao, the **uncoupling** of boundary integral and finite element methods for *nonlinear* boundary value problems. The trick: choose the artificial coupling boundary to be a **circle** (or a sphere in 3-D), which lets the boundary integral operators be inverted *exactly*, so the weak formulation retains only one boundary term — the weakly singular single-layer operator. They report the coding and computational work more than halved against standard coupling, and the quadrature made much easier because what survives is only weakly singular. Their model problem is exactly the shape of the free-boundary vacuum region: a nonlinear second-order elliptic equation inside, becoming Laplace in the unbounded exterior. Note the authorship: Gatica is at Universidad de Concepción, the same department as Solano of the two Grad–Shafranov papers. Paywalled | DecouplingBIM-FEM.pdf |
 
 ## The finite element library
