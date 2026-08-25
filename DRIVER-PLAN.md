@@ -11,11 +11,11 @@ work that turns a measured library into a program.
 **Written against a tree that cannot currently build it.**
 `../mfem-hdg-dev` is on `gf-hdg-dev`, which has no
 `fem/darcy/extension_hdg.{hpp,cpp}`, so `GradShafranov.cpp` does not compile and
-§4 of this plan has nothing to stand on. Everything below assumes the tree is
+§2 of this plan has nothing to stand on. Everything below assumes the tree is
 back on `gf-hdg-subdomains-dev`. That is a scheduling fact, not a design
 constraint.
 
-## The five pieces, and why this order
+## The pieces, and why this order
 
 | | | ends at |
 |---|---|---|
@@ -24,11 +24,12 @@ constraint.
 | 7c | Output: mesh, grid functions, NetCDF | `B` from `q` matching a finite difference of the exact `ψ` |
 | 7d | Warm start | a restart from 7c's file cutting Newton to one or two steps |
 | 7e | The driver | `meq examples/*.toml` writing files, end to end, as a ctest |
+| — | GSLIB, in the SUNDIALS rebuild (§6) | a full-order warm start measurably beating the interpolated one |
 
 7a before 7e because a driver without it is *actively misleading*: handed a
 physical profile it converges in zero iterations and writes a file full of
-zeros, which looks exactly like success. 7c before 7d because the warm-start
-input format **is** the output format — see §5. 7b is independent and could be
+zeros, which looks exactly like success. 7c before 7d because the interchange
+warm-start input format **is** the output format — see §4. 7b is independent and could be
 done at any point; it is placed third because 7e needs it and 7c does not.
 
 Each stage ends at a measurement, per the standing rule in `CLAUDE.md`.
@@ -339,8 +340,8 @@ between a released file and a field that points the wrong way.
 
 A uniform tensor-product `(R, Z)` grid over the bounding box of `Γ`, with points
 outside `Γ` masked. This is the EFIT-shaped thing every downstream tool expects,
-and — decisively for §5 — it is the format a warm start can interpolate from in
-`O(1)` per point.
+and — decisively for §4's interchange route — it is a format a warm start can
+interpolate from in `O(1)` per point with no mesh search at all.
 
 ```
 dimensions:
@@ -378,22 +379,28 @@ physically, and it needs contour tracing — the `FluxSurfaces` driver that went
 
 `mfem::Mesh::FindPoints` is `O(elements × points)` — a brute-force scan over
 element centres, recorded in `CLAUDE.md`. A 129×129 grid against a 20k-element
-mesh is 3.3e8 element tests for a job that should be instant, and MFEM here is
-built with `MFEM_USE_GSLIB = NO`, so `FindPointsGSLIB` is not available as an
-escape.
+mesh is 3.3e8 element tests for a job that should be instant.
 
 **Invert the loop.** For each element, take its bounding box, convert that
 directly to a grid index range — `O(1)`, because the grid is uniform — and test
 only the handful of grid points inside it with
 `ElementTransformation::TransformBack`. Total cost is `O(elements × points per
 element)`, which is linear in both. This is the standard scatter-rather-than-
-gather fix and it should be written once, in the output layer, and reused by the
-warm-start reader.
+gather fix and it should be written once, in the output layer.
+
+**This is the one sampling job that does not want GSLIB** (§6). The grid is
+uniform, so locating a point is index arithmetic and the search — the part
+`FindPointsGSLIB` exists to make fast — is already free. What remains is the
+inverse element map, and MFEM supplies that. Roughly thirty lines, no new
+dependency, and it stays the right answer even after GSLIB is enabled.
 
 A grid point landing exactly on an inter-element face is ambiguous, `ψ_h` being
 discontinuous. Take whichever element claims it first; the jump is `O(h^{k+1})`
-and converges away. Say so in a comment rather than pretending the choice is
-principled.
+and converges away. **GSLIB has a principled answer where this has a shrug** —
+`FindPointsGSLIB::SetL2AvgType`, arithmetic or harmonic averaging over the
+elements meeting at the point, exactly for L2 fields that are multi-valued on
+element boundaries. Both `ψ_h` and `q_h` are L2. If GSLIB is enabled, prefer it
+here and delete the shrug.
 
 ### Acceptance
 
@@ -403,34 +410,51 @@ principled.
   error, on the same benchmark used for the rate tables.
 * Sampling cost linear in the grid size and in the element count — timed, since
   the whole point of the inverted loop is a complexity claim.
-* A written file read back by `ncdump` and by the warm-start reader of §5.
+* A written file read back by `ncdump` and by the warm-start reader of §4.
 
 ---
 
 ## 4. Warm starts
 
-### Two routes, and they are not the same problem
+### Three routes, and they are not the same problem
 
 **Exact restart** — same mesh, same degree. Read the stored trace or potential
 grid function and hand it to `setInitialGuess()`. Bitwise resumable, and the
 right thing for continuing an adaptive run or re-solving after a profile tweak.
 
-**Interpolating restart** — different mesh, different degree, different geometry,
-or another code entirely. Read `psi(R,Z)` from a NetCDF file and evaluate it by
-bilinear interpolation on the structured grid, as an `mfem::Coefficient`.
+**Full-order interpolating restart** — a different mesh or degree, same code.
+Read the stored `ψ_h` and its mesh, and evaluate it at the new space's points
+with `FindPointsGSLIB`. The guess then carries the full `k+1` accuracy of the
+solve it came from. This needs §6.
 
-The second is why §3's file is designed the way it is. A structured grid makes
-interpolation `O(1)` per point with no mesh search at all, which is what makes
-"warm start from elsewhere" cheap enough to be routine. It also means the *only*
-thing an outside code has to produce is `ψ` on a rectangular grid — no MFEM, no
-mesh format, no agreement about element types.
+**Interchange restart** — another code entirely, or a mesh that no longer exists.
+Read `psi(R,Z)` from a NetCDF file and evaluate it by bilinear interpolation on
+the structured grid, as an `mfem::Coefficient`.
+
+**An earlier draft of this plan had only the first and third, and that was a
+compromise dressed up as a design.** The NetCDF route was chosen *because*
+`Mesh::FindPoints` is `O(elements × points)` and there was no other way to
+interpolate from a foreign mesh cheaply. But bilinear interpolation on a 129×129
+grid is **second order**, so restarting a `k = 3` solve through it discards
+almost everything the previous solve computed. It still converges — a guess is
+only a guess — but "warm" is doing less work than it looks. With GSLIB the
+same-code case never leaves the finite element representation and the compromise
+disappears.
+
+So the third route keeps its job and stops pretending to be the general one: it
+is the **interchange** format, and it is genuinely the best thing for that. An
+outside code has to produce `ψ` on a rectangle and nothing else — no MFEM, no
+mesh format, no agreement about element types. That is why §3's file is designed
+the way it is, and it is a virtue for foreign input specifically.
 
 ```toml
 [initialguess]
-Type = "netcdf"            # none | netcdf | gridfunction | ramp
-File = "previous.nc"       # netcdf: reads psi(R,Z) from a meq output file
-Variable = "psi"           # so a file from elsewhere can name its own field
-MeshFile = "previous.mesh" # gridfunction: exact restart, with .gf beside it
+Type = "gridfunction"      # none | gridfunction | netcdf | ramp
+File = "previous_psi.gf"   # gridfunction: full order, needs GSLIB unless the
+MeshFile = "previous.mesh" #   mesh matches exactly, in which case it is direct
+# Type = "netcdf":
+# File = "previous.nc"     # or a file from any other code
+# Variable = "psi"         # so a foreign file can name its own field
 ```
 
 `Type = "ramp"` keeps the interim device the GS-2 benchmarks use today — a
@@ -451,6 +475,11 @@ cold start, and the iteration count will not obviously say so.
 * Solve, write, restart on the same mesh: Newton finishes in one step.
 * Solve, write, restart on a mesh refined once: Newton finishes in fewer steps
   than from cold, with the converged answer unchanged to six figures.
+* **The two interpolating routes compared on the same restart**, at `k = 3`: the
+  GSLIB route should start from a residual smaller than the NetCDF route's by
+  about the ratio of `h^{k+1}` to `h^2`. If it does not, the full-order path is
+  not carrying the order it claims and the extra dependency has bought nothing.
+  This is the measurement that justifies §6 rather than asserting it.
 * A restart whose grid covers nothing reports its miss count and still converges
   from the fallback.
 * The GS-2 sources warm-started from a coarse solve, converging where the
@@ -529,6 +558,90 @@ able to find out that one is in play.
 
 ---
 
+## 6. GSLIB, and whether to take the dependency
+
+**Recommendation: yes, enabled in the same rebuild as SUNDIALS.** Not as its own
+errand, and not blocking anything in §§1–5.
+
+### What it is, and what it costs
+
+`MFEM_USE_GSLIB=YES` brings in `FindPointsGSLIB`: robust evaluation of a grid
+function at an arbitrary cloud of points. Per point it returns the element, the
+MPI rank, the reference coordinates, a code distinguishing *inside* from *on an
+element border* from *not found*, and a distance to the border so that points
+just outside the domain can be rejected honestly rather than clamped. It also
+brings `SetL2AvgType` (§3), surface and edge variants, a device path, and the
+gather-scatter machinery meq has no use for today.
+
+The algorithm is a hash grid over oriented element bounding boxes followed by a
+Newton solve in reference space — `bb_t`, `newt_tol` and `npt_max` are exposed
+directly in the `FindPoints` signature. Expected `O(1)` per point after an
+`O(elements)` setup, against `Mesh::FindPoints`'s `O(elements)` *per point*. It
+is the standard tool for this job in both Nek5000 and MFEM's own `field-interp`.
+
+**It is packaged by no distribution.** Checked: no `gslib` in Debian or Ubuntu,
+and none in Fedora 43–45, EPEL 8–10.4 or Rawhide. It is an HPC-ecosystem library
+obtained from source or through Spack. MFEM vendors device kernels under
+`fem/gslib/`, but they are all inside `#ifdef MFEM_USE_GSLIB` and include
+`gslib.h`, so there is no partial path — the external library or nothing.
+
+The build is nevertheless small. `../mfem-hdg-dev/INSTALL:831`:
+
+```sh
+# as a sibling of the MFEM tree
+tar xf gslib-1.0.9.tar.gz && ln -s gslib-1.0.9 gslib
+cd gslib && make CC=gcc MPI=0
+# then rebuild MFEM with MFEM_USE_GSLIB=YES
+```
+
+Pure C, no dependencies of its own, the same sibling-build pattern MFEM already
+uses for every optional package.
+
+### Why the cost is lower than "not packaged" makes it sound
+
+**The dependency lands on the MFEM tree, not on meq.** meq's `CMakeLists.txt` is
+untouched, `find_package(MFEM)` is unchanged, and the MFEM-free half of the
+library — `Config`, `Profiles`, `Source`, `SourceFactory` — is unaffected. CI
+already cannot build MFEM at all, since the branch is unpublished, so this adds
+nothing to what CI cannot do.
+
+That is a different calculation from adding a dependency to meq itself, and it is
+the same reasoning `CLAUDE.md` records for why toml11 is a submodule and MFEM is
+not: things meq controls are vendored and pinned; things meq consumes out of tree
+are built by hand.
+
+### Where meq would use it
+
+| use | needs GSLIB |
+|---|---|
+| NetCDF sampling on the uniform `(R,Z)` grid (§3) | **No** — the grid is uniform, so the search is index arithmetic |
+| Full-order warm start from a grid function (§4) | **Yes.** This is the case that justifies it |
+| Multi-valued `ψ_h`, `q_h` at element boundaries (§3) | No, but `SetL2AvgType` replaces a shrug with an answer |
+| Off-grid error measures in the convergence suite | Yes — lifts a cap `CLAUDE.md` already records against `FindPoints` |
+| A flux-surface `(ψ_N, θ)` grid; MaNTA coupling | Yes, when either happens |
+
+### The caveat to measure first
+
+**meq meshes are triangles and gslib's findpts is tensor-product.** MFEM handles
+this by splitting simplices into quads internally — `mesh_split`, `ir_split`,
+`split_element_map` in `fem/gslib.hpp`. It works, and it is a code path that a
+quad-based user never exercises. Measure it on a Solov'ev solve before relying on
+it, and compare against the inverted loop of §3 on the same points: two
+independent samplers agreeing is worth more than either one being plausible.
+
+### Sequencing
+
+`../mfem-hdg-dev` needs `make clean && make -j4` anyway when it returns to
+`gf-hdg-subdomains-dev`, and a SUNDIALS rebuild is already on the table for the
+globalisation failures. Doing all three at once makes it one rebuild instead of
+three. **Never a bare `make -j` in that tree** — see `CLAUDE.md`.
+
+Nothing in §§1–5 waits on this. The driver lands either way; the warm start gets
+better when GSLIB arrives, and §4's comparison measurement is how anyone will
+know it did.
+
+---
+
 ## Risks, and the two that are not mine to close
 
 **The MFEM branch.** Nothing in §2, §3's `ψ*`, or §5's adaptivity can be built
@@ -555,3 +668,9 @@ larger piece of work than anything in this plan.
 
 **`FindPoints`.** The inverted loop in §3 is a complexity claim and complexity
 claims rot. Time it in the test rather than asserting it in a comment.
+
+**GSLIB's simplex path.** §6 takes a dependency partly on the strength of a code
+path — findpts on split triangles — that a tensor-product user never runs. If it
+turns out to be slow or fragile on meq's meshes, the fallback is the third route
+of §4 and nothing is lost but the order of the warm start. Measure before
+relying, and keep the inverted loop of §3 as the independent check.
