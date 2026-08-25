@@ -80,7 +80,12 @@ endforeach()
 set(MEQ_CONVERGENCE_TESTS
 	SolovievConvergence
 	NewtonConvergence
-	ExtensionConvergence)
+	ExtensionConvergence
+	EstimatorConvergence
+	AdaptiveRefinement
+	PedestalConvergence
+	MillerConvergence
+	SolovievGeometryConvergence)
 
 foreach(_test IN LISTS MEQ_CONVERGENCE_TESTS)
 	set(_test_source "${CMAKE_CURRENT_SOURCE_DIR}/convergence/${_test}.cpp")
@@ -146,13 +151,13 @@ else()
 	# clang-tidy reads the flags for each file out of the compile database
 	# that CMAKE_EXPORT_COMPILE_COMMANDS writes into the build tree, which is
 	# also what limits the check to the ported code: the compile database
-	# contains exactly what some target compiles. src/meq/Estimator.hpp and
-	# apps/meq.cpp are in no target because they still speak the old MFEM API,
-	# so they are not in the database and are not checked. That is deliberate
-	# and temporary -- they violate the convention wholesale, and they are
-	# renamed when they are ported, at which point they join meq_core and are
-	# checked like everything else. attic/ is excluded permanently; see its
-	# README.
+	# contains exactly what some target compiles. apps/meq.cpp is in no target
+	# because it still speaks the old MFEM API, so it is not in the database and
+	# is not checked. That is deliberate and temporary -- it violates the
+	# convention wholesale, and it is renamed when it is ported, at which point
+	# it joins meq_core and is checked like everything else.
+	# src/meq/Estimator.{hpp,cpp} made that journey in stage 6 and is checked.
+	# attic/ is excluded permanently; see its README.
 	#
 	# HeaderFilterRegex in ../.clang-tidy is what pulls src/meq/*.hpp into the
 	# check: a header is not a translation unit, so GradShafranov.hpp is seen

@@ -163,7 +163,8 @@ namespace meq
 		  newtonMaxIterations( 30 ),
 		  newtonIterationCount( 0 ),
 		  built( false ),
-		  prepared( false )
+		  prepared( false ),
+		  postProcessed( false )
 	{
 		if ( orderValue < 0 )
 			throw std::invalid_argument( "meq::GradShafranovSolver: the polynomial order must not be negative" );
@@ -600,6 +601,75 @@ namespace meq
 		// The one place the sign convention is undone. See the file comment.
 		fluxGf = darcyFlux;
 		fluxGf.Neg();
+
+		// A new solution invalidates the old post-processing rather than being
+		// silently paired with it.
+		postProcessed = false;
+	}
+
+	void GradShafranovSolver::postProcess()
+	{
+		if ( !prepared )
+			throw std::logic_error( "meq::GradShafranovSolver::postProcess: solve() has not been called" );
+
+		// Refused rather than attempted. DarcyForm::ReconstructFluxAndPot() reads
+		// the linear potential mass form only, and on this path there is not one --
+		// the whole potential block has to live on the non-linear form, see
+		// buildForms(). What comes back is not a degraded psi*, it is 1e15, and it
+		// comes back without a word. See the header for the measurement.
+		if ( nonlinearSource )
+			throw std::logic_error( "meq::GradShafranovSolver::postProcess: DarcyForm::Reconstruct() reads the linear potential mass form, which the semi-linear path does not have, and returns ~1e15 rather than failing; post-processing is not available through Newton" );
+
+		// DarcyForm::Reconstruct() builds the spaces on first use, so the second
+		// call reuses them. The block vector handed in is the TWO-block view over
+		// DarcyForm's own offsets, not the three-block solution: the trace arrives
+		// separately as sol_r, and a three-block vector is the size mismatch
+		// CLAUDE.md records against ReduceRHS().
+		darcy->Reconstruct( darcySolution, traceX, totalFluxGf, enrichedFluxGf,
+		                    postProcessedGf, enrichedTraceGf );
+
+		// The same negation solve() applies to fluxGf, for the same reason: what
+		// Reconstruct() writes is DarcyForm's -q. The total flux is deliberately
+		// left alone -- it is defined by the constraint equation, which is written
+		// in DarcyForm's convention throughout.
+		enrichedFluxGf.Neg();
+
+		postProcessed = true;
+	}
+
+	bool GradShafranovSolver::isPostProcessed() const
+	{
+		return postProcessed;
+	}
+
+	mfem::GridFunction &GradShafranovSolver::postProcessedPotential()
+	{
+		return postProcessedGf;
+	}
+
+	mfem::GridFunction const &GradShafranovSolver::postProcessedPotential() const
+	{
+		return postProcessedGf;
+	}
+
+	mfem::GridFunction &GradShafranovSolver::postProcessedFlux()
+	{
+		return enrichedFluxGf;
+	}
+
+	mfem::GridFunction const &GradShafranovSolver::postProcessedFlux() const
+	{
+		return enrichedFluxGf;
+	}
+
+	mfem::GridFunction &GradShafranovSolver::totalFlux()
+	{
+		return totalFluxGf;
+	}
+
+	mfem::GridFunction const &GradShafranovSolver::totalFlux() const
+	{
+		return totalFluxGf;
 	}
 
 	mfem::GridFunction &GradShafranovSolver::potential()
@@ -709,6 +779,18 @@ namespace meq
 		mfem::IntegrationRule const *irs[ mfem::Geometry::NumGeom ];
 		errorRules( orderValue, irs );
 		return fluxGf.ComputeL2Error( exact, irs );
+	}
+
+	double GradShafranovSolver::postProcessedPotentialError( mfem::Coefficient &exact ) const
+	{
+		if ( !postProcessed )
+			throw std::logic_error( "meq::GradShafranovSolver::postProcessedPotentialError: postProcess() has not been called" );
+
+		// orderValue + 1, because psi*_h lives one degree up and a rule chosen for
+		// psi_h would be what limited the k+2 rate this exists to measure.
+		mfem::IntegrationRule const *irs[ mfem::Geometry::NumGeom ];
+		errorRules( orderValue + 1, irs );
+		return postProcessedGf.ComputeL2Error( exact, irs );
 	}
 
 	int GradShafranovSolver::numTraceDofs() const

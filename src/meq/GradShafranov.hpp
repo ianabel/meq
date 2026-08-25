@@ -388,6 +388,89 @@ namespace meq
 			mfem::GridFunction &trace();
 			mfem::GridFunction const &trace() const;
 
+			/**
+			 * Build the post-processed potential psi*_h in P_(k+1), and the
+			 * enriched flux and total flux that come with it.
+			 *
+			 * This is the local post-processing of Stenberg that
+			 * refs/HDG-GradShafranov-Adaptive.pdf section 2.7 uses, and meq does
+			 * not implement it: DarcyForm does. Reconstruct() takes the
+			 * hybridized solution, projects the normally continuous total flux
+			 * onto RT_k through the constraint equation, and then solves one
+			 * small mixed problem per element on spaces one order higher, with
+			 * the element average of psi*_h pinned to that of psi_h. That last
+			 * part is eq (19b), and the average is imposed by
+			 * ReconstructFluxAndPot() replacing one potential equation with it --
+			 * which it does only when the potential mass form carries no domain
+			 * integrator to use as a source instead. It does not on the linear
+			 * path, so the plain Stenberg constraint is what is applied.
+			 *
+			 * WHAT THIS IS FOR. psi_h converges at k+1 and so does q, so an extra
+			 * order in psi buys a magnetic-confinement calculation nothing --
+			 * which is why CLAUDE.md records post-processing as dropped, and why
+			 * neither GS paper implemented it for accuracy. It is needed for the
+			 * residual estimator of eq (20), whose eta_1, eta_2, eta_4 and eta_5
+			 * are all built on psi*_h rather than psi_h -- four of the five, not
+			 * the three CLAUDE.md records; eta_4 is [[ psi*_h ]]. eta_2 differentiates the
+			 * potential, and on psi_h that costs an order; measured in
+			 * tests/convergence/EstimatorConvergence.cpp, which reports both.
+			 *
+			 * MEASURED, on the fitted Solov'ev benchmark: psi*_h converges at k+2
+			 * for k = 1, 2, 3 -- 3.03, 4.03, 5.00 across the sequence -- so the
+			 * library route delivers the superconvergence the paper wants and no
+			 * hand-written local solve is needed. See EstimatorConvergence.cpp.
+			 *
+			 * REFUSED ON THE SEMI-LINEAR PATH, and that refusal is the whole
+			 * reason this comment is long. ReconstructFluxAndPot() reads the LINEAR
+			 * potential mass form and never looks at the non-linear one, so on
+			 * meq's Newton path -- where the whole potential block including the HDG
+			 * stabilisation lives on the non-linear form, of necessity, see
+			 * buildForms() -- the local problem it builds has no potential mass and
+			 * no potential constraint. It does not abort. It returns numbers.
+			 * MEASURED, on the Solov'ev benchmark solved through Newton, whose psi_h
+			 * agrees with the linear path to six figures: psi* comes back at 9.9e14,
+			 * 8.4e15, 3.9e14 on three successive meshes, against 3.8e-6, 2.4e-7,
+			 * 1.5e-8 for the same problem solved linearly. A silent 1e15 feeding an
+			 * error estimator is exactly the failure this project's testing stance
+			 * exists to prevent, so postProcess() throws rather than returning it.
+			 * The fix is MFEM's; it is written up in the stage-6 report.
+			 *
+			 * IT DOES SURVIVE THE EXTENSION PATH, which was not expected.
+			 * ReconstructFluxAndPot() lifts only the DOMAIN integrators of the flux
+			 * mass form onto the enriched space, so the boundary-face
+			 * HDGExtensionIntegrator that carries the transferred datum is dropped
+			 * -- and yet psi* still converges at k+2 on the stage-5 benchmark: 2.62
+			 * and 3.00 at k = 1, 3.46 and 3.90 at k = 2. The local problem is driven
+			 * by the reconstructed total flux and the element average of psi_h, both
+			 * of which already know about the extension, and that is apparently
+			 * enough. Measured rather than assumed, in both directions: an earlier
+			 * version of this comment asserted the opposite.
+			 *
+			 * What does NOT survive the extension path is eta_5, and for an
+			 * unrelated reason -- psihat_h on Gamma_h is pinned rather than being
+			 * the phi_h actually imposed. See
+			 * meq::ResidualEstimator::setTransferredBoundary().
+			 */
+			void postProcess();
+
+			/// True once postProcess() has been called since the last solve().
+			bool isPostProcessed() const;
+
+			/// psi*_h in P_(k+1). Valid after postProcess().
+			mfem::GridFunction &postProcessedPotential();
+			mfem::GridFunction const &postProcessedPotential() const;
+
+			/// q*_h in [P_(k+1)]^2, in meq's sign convention -- the negation
+			/// flux() applies is applied here too. Valid after postProcess().
+			mfem::GridFunction &postProcessedFlux();
+			mfem::GridFunction const &postProcessedFlux() const;
+
+			/// The normally continuous total flux qhat_h in RT_k, in DarcyForm's
+			/// sign convention because that is the one the constraint equation it
+			/// is projected through is written in. Valid after postProcess().
+			mfem::GridFunction &totalFlux();
+			mfem::GridFunction const &totalFlux() const;
+
 			mfem::FiniteElementSpace &fluxSpace();
 			mfem::FiniteElementSpace &potentialSpace();
 			mfem::FiniteElementSpace &traceSpace();
@@ -429,6 +512,10 @@ namespace meq
 			/// enough that it does not itself limit the measured rate.
 			double potentialError( mfem::Coefficient &exact ) const;
 			double fluxError( mfem::VectorCoefficient &exact ) const;
+
+			/// The same for psi*_h, on a rule scaled to its own higher degree.
+			/// Valid after postProcess().
+			double postProcessedPotentialError( mfem::Coefficient &exact ) const;
 
 			/// The number of globally coupled unknowns, that is the size of the
 			/// system actually solved. For an HDG method that is the trace space,
@@ -529,6 +616,16 @@ namespace meq
 			/// A copy of darcyFlux with the sign corrected, filled by solve().
 			mfem::GridFunction fluxGf;
 
+			/// The post-processed quantities, filled by postProcess(). Each owns
+			/// the collection and space DarcyForm::Reconstruct() builds for it on
+			/// first use -- RT_k for the total flux, and the primary collections
+			/// cloned at k+1 for the rest -- which is why they are default
+			/// constructed here and not given a space.
+			mfem::GridFunction totalFluxGf;
+			mfem::GridFunction enrichedFluxGf;
+			mfem::GridFunction postProcessedGf;
+			mfem::GridFunction enrichedTraceGf;
+
 			/// The reduced trace system. traceX and traceB alias the trace blocks
 			/// of solution and rhs; that aliasing is what makes FormLinearSystem()
 			/// carry the essential trace values into the reduced problem, so it is
@@ -539,6 +636,7 @@ namespace meq
 
 			bool built;
 			bool prepared;
+			bool postProcessed;
 	};
 
 }

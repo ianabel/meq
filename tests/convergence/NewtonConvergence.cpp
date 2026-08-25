@@ -15,6 +15,7 @@
 #include "analytic/SimilarityExponential.hpp"
 #include "analytic/McCarthy.hpp"
 #include "analytic/Soloviev.hpp"
+#include "convergence/ConvergenceHarness.hpp"
 
 /*
  * The stage-4 acceptance test: the semi-linear HDG Grad-Shafranov solver,
@@ -127,203 +128,66 @@
  * check.
  */
 
+/*
+ * Everything this file used to define for itself -- the rectangle mesh, the
+ * meq::Source adapter, one measured solve, the rate arithmetic, the tables and
+ * checkOrder() -- now lives in convergence/ConvergenceHarness.hpp, so that the
+ * five benchmarks added since can use the same machinery rather than a second
+ * copy of it. What is left here is the box this study is posed on and thin
+ * wrappers that supply it.
+ */
 namespace
 {
+	using meq::tests::EquilibriumSource;
+	using meq::tests::Measurement;
+	using meq::tests::checkOrder;
+	using meq::tests::newtonOrder;
+	using meq::tests::rate;
 
 	// The box of examples/manufactured.toml, which encloses the ITER-like
 	// double-null boundary the paper poses Example 5 on.
+	//
+	// The domain is that rectangle, not the paper's ITER-like double-null
+	// boundary: the curved boundary is stage 5, and a fitted polygon keeps
+	// Gamma_h == Gamma. r is bounded away from zero because the operator and the
+	// source both carry a 1/r. The manufactured psi does not vanish on that
+	// rectangle, so the Dirichlet data is non-homogeneous, which on the
+	// non-linear path exercises a route through DarcyHybridization that had no
+	// MFEM regression covering it (see CLAUDE.md).
 	double const rMin = 0.6;
 	double const rMax = 1.4;
 	double const zMin = -0.6;
 	double const zMax = 0.6;
 
-	/// meq::Source is the interface the Newton path takes: F and dF/dpsi as
-	/// plain doubles. The analytic solutions in tests/analytic deliberately
-	/// depend on neither MFEM nor src/meq -- Soloviev.hpp is the pattern -- so
-	/// the join between them lives here rather than in either. Every fixture in
-	/// that directory already spells f() and dFdPsi() the way meq::Source does,
-	/// so one template covers all three rungs of the ladder.
-	///
-	/// It is a thin forward and nothing else. In particular it does not apply a
-	/// sign, a 1/r or a normalisation: meq::Source::f() is documented to be F as
-	/// eq (2) writes it, and each fixture is documented to return F as its paper
-	/// writes it, which is the same F. Anything clever here would be a
-	/// convention change hidden in a test helper.
-	template<typename Equilibrium>
-	class EquilibriumSource : public meq::Source
+	meq::tests::Rectangle box()
 	{
-		public:
-			explicit EquilibriumSource( Equilibrium const &eqIn )
-				: eq( eqIn )
-			{
-			}
-
-			double f( double r, double z, double psi ) const override
-			{
-				return eq.f( r, z, psi );
-			}
-
-			double dFdPsi( double r, double z, double psi ) const override
-			{
-				return eq.dFdPsi( r, z, psi );
-			}
-
-		private:
-			Equilibrium eq;
-	};
-
-	/// One point on the convergence curve.
-	struct Measurement
-	{
-		double h;
-		int traceDofs;
-		double errorPsi;
-		double errorFlux;
-		int newtonIterations;
-	};
-
-	/// A triangulated rectangle [rMin,rMax] x [zMin,zMax] with n cells a side.
-	/// Triangles rather than quadrilaterals, as in SolovievConvergence.cpp and
-	/// in both papers.
-	mfem::Mesh makeMesh( int n )
-	{
-		mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D( n, n, mfem::Element::TRIANGLE, false,
-		                                               rMax - rMin, zMax - zMin );
-		mesh.Transform( []( mfem::Vector const &in, mfem::Vector &out )
-		{
-			out( 0 ) = in( 0 ) + rMin;
-			out( 1 ) = in( 1 ) + zMin;
-		} );
-		return mesh;
+		return meq::tests::Rectangle{ rMin, rMax, zMin, zMax };
 	}
 
-	/// Solve once and measure. The Dirichlet datum is the exact psi on all four
-	/// sides; the source is handed over as a meq::Source, which is what selects
-	/// the Newton path.
+	mfem::Mesh makeMesh( int n )
+	{
+		return meq::tests::makeMesh( box(), n );
+	}
+
 	template<typename Equilibrium>
 	Measurement measure( Equilibrium const &eq, int order, int n,
 	                     std::vector<double> *residualHistory = nullptr )
 	{
-		mfem::Mesh mesh = makeMesh( n );
-		EquilibriumSource<Equilibrium> source( eq );
-
-		mfem::FunctionCoefficient psiCoeff( [ &eq ]( mfem::Vector const &x )
-		{
-			return eq.psi( x( 0 ), x( 1 ) );
-		} );
-		mfem::VectorFunctionCoefficient fluxCoeff( 2, [ &eq ]( mfem::Vector const &x,
-		                                                       mfem::Vector &value )
-		{
-			eq.flux( x( 0 ), x( 1 ), value( 0 ), value( 1 ) );
-		} );
-
-		meq::GradShafranovSolver solver( mesh, order );
-		solver.setSource( source );
-		solver.setBoundaryData( psiCoeff );
-		solver.solve();
-
-		if ( residualHistory )
-			*residualHistory = solver.newtonResiduals();
-
-		Measurement point;
-		point.h = ( rMax - rMin )/static_cast<double>( n );
-		point.traceDofs = solver.numTraceDofs();
-		point.errorPsi = solver.potentialError( psiCoeff );
-		point.errorFlux = solver.fluxError( fluxCoeff );
-		point.newtonIterations = solver.newtonIterations();
-		return point;
+		return meq::tests::measure( eq, box(), order, n, residualHistory );
 	}
 
-	double rate( double coarseError, double fineError, double refinementRatio )
+	void printTable( char const *label, int order,
+	                 std::vector<Measurement> const &points )
 	{
-		return std::log( coarseError/fineError )/std::log( refinementRatio );
-	}
-
-	void printTable( char const *label, int order, std::vector<Measurement> const &points )
-	{
-		std::printf( "\n  %s, k = %d, triangles on [%.1f,%.1f]x[%.1f,%.1f]\n",
-		             label, order, rMin, rMax, zMin, zMax );
-		std::printf( "  %8s %9s %14s %7s %14s %7s %7s\n",
-		             "h", "trace", "L2(psi)", "rate", "L2(q)", "rate", "Newton" );
-		for ( std::size_t i = 0; i < points.size(); ++i )
-		{
-			Measurement const &p = points[ i ];
-			if ( i == 0 )
-			{
-				std::printf( "  %8.5f %9d %14.6e %7s %14.6e %7s %7d\n",
-				             p.h, p.traceDofs, p.errorPsi, "-", p.errorFlux, "-",
-				             p.newtonIterations );
-			}
-			else
-			{
-				double const ratio = points[ i - 1 ].h/p.h;
-				std::printf( "  %8.5f %9d %14.6e %7.3f %14.6e %7.3f %7d\n",
-				             p.h, p.traceDofs,
-				             p.errorPsi, rate( points[ i - 1 ].errorPsi, p.errorPsi, ratio ),
-				             p.errorFlux, rate( points[ i - 1 ].errorFlux, p.errorFlux, ratio ),
-				             p.newtonIterations );
-			}
-		}
-		std::fflush( stdout );
+		meq::tests::printTable( label, order, box(), points );
 	}
 
 	/// Four dyadic refinements from 4 cells a side, so three measured rates per
 	/// quantity per order -- the same ladder SolovievConvergence.cpp uses.
-	std::vector<int> const meshSizes = { 4, 8, 16, 32 };
+	std::vector<int> const meshSizes = meq::tests::dyadicMeshes();
 
-	/// k+1, less the slack allowed for a two-mesh rate estimate. Wider than the
-	/// linear benchmark's 0.15 because there are no theoretical estimates for
-	/// the non-linear case -- the paper says so in as many words -- and its own
-	/// Table 5 wanders between 1.86 and 2.03 at k = 1.
-	double const rateSlack = 0.2;
-
-	template<typename Equilibrium>
-	void checkOrder( Equilibrium const &eq, char const *label,
-	                 int order, double psiCeiling, double fluxCeiling )
-	{
-		std::vector<Measurement> points;
-		points.reserve( meshSizes.size() );
-		for ( int n : meshSizes )
-			points.push_back( measure( eq, order, n ) );
-
-		printTable( label, order, points );
-
-		double const expected = order + 1.0 - rateSlack;
-
-		for ( std::size_t i = 1; i < points.size(); ++i )
-		{
-			double const ratio = points[ i - 1 ].h/points[ i ].h;
-			double const ratePsi = rate( points[ i - 1 ].errorPsi, points[ i ].errorPsi, ratio );
-			double const rateFlux = rate( points[ i - 1 ].errorFlux, points[ i ].errorFlux, ratio );
-
-			BOOST_TEST( ratePsi >= expected,
-			            "k = " << order << ", h = " << points[ i ].h
-			            << ": psi converged at " << ratePsi << ", wanted " << expected );
-			BOOST_TEST( rateFlux >= expected,
-			            "k = " << order << ", h = " << points[ i ].h
-			            << ": q converged at " << rateFlux << ", wanted " << expected );
-		}
-
-		// The rate is blind to a solution wrong by a constant factor or a sign,
-		// so the absolute error is checked too. The ceilings sit at roughly three
-		// times the measured values.
-		BOOST_TEST( points.back().errorPsi < psiCeiling,
-		            "k = " << order << ": L2 error in psi is " << points.back().errorPsi
-		            << ", above the ceiling " << psiCeiling );
-		BOOST_TEST( points.back().errorFlux < fluxCeiling,
-		            "k = " << order << ": L2 error in q is " << points.back().errorFlux
-		            << ", above the ceiling " << fluxCeiling );
-	}
-
-	/// The observed order of a Newton sequence between three consecutive
-	/// residuals, log( r2/r1 ) / log( r1/r0 ). Two for a quadratically
-	/// convergent iteration once it is in the asymptotic regime, one for a
-	/// linearly convergent one anywhere.
-	double newtonOrder( double r0, double r1, double r2 )
-	{
-		return std::log( r2/r1 )/std::log( r1/r0 );
-	}
-
+	/// k+1, less the slack allowed for a two-mesh rate estimate.
+	double const rateSlack = meq::tests::rateSlack;
 }
 
 /// The benchmark before the solver, part one: -Delta*( psi ) must equal

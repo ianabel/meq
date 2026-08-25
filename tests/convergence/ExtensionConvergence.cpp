@@ -65,11 +65,18 @@
  *     down from 4.6e-2 to 8.9e-5. c_10 in the paper is very likely a
  *     typesetting duplicate of c_7.
  *   - the paper's minus signs do not survive text extraction from the PDF at
- *     all, so the printed coefficients cannot be checked against it, and no test
- *     in this suite can catch a wrong one: psi_1 ... psi_12 are Delta*-harmonic,
- *     so every c_i leaves Delta*(psi) = -F untouched and every convergence rate
- *     with it. The coefficients are the one part of the benchmark that is
- *     asserted nowhere.
+ *     all, so the printed coefficients cannot be checked against it. NOTHING IN
+ *     A CONVERGENCE TEST CAN CATCH A WRONG ONE: psi_1 ... psi_12 are
+ *     Delta*-harmonic, so every c_i leaves Delta*(psi) = -F untouched and every
+ *     rate with it.
+ *
+ *     That last sentence used to end "the coefficients are the one part of the
+ *     benchmark that is asserted nowhere", and that is no longer true:
+ *     SolovievGeometryConvergence.cpp evaluates all twelve of Cerfon and
+ *     Freidberg's constraints on every set in the fixture, which is the only
+ *     kind of check that can see them. It caught a second error in the
+ *     replacement coefficients after it caught the first in the published
+ *     ones -- see the note at the head of tests/analytic/Soloviev.hpp.
  *
  * And even with the right coefficients the NSTX separatrix would be the wrong
  * geometry for this technique: it passes through an X-point, which is a CORNER
@@ -562,8 +569,8 @@ BOOST_AUTO_TEST_CASE( theGapBetweenGammaHAndGammaIsOrderH )
 
 BOOST_AUTO_TEST_CASE( orderOneConvergesAtTwo )
 {
-	// Measured with the coefficient set solved from Cerfon & Freidberg:
-	// psi 7.409e-05, q 1.149e-04 at h = 0.0266. Kept at ~3x rather than
+	// Measured with the coefficient set re-solved with alpha = arcsin(delta):
+	// psi 7.403e-05, q 1.149e-04 at h = 0.0266. Kept at ~3x rather than
 	// tightened further: which background elements fall inside Omega is not a
 	// smooth function of h, so the finest error moves when the domain does.
 	checkOrder( 1, 2.3e-4, 3.5e-4 );
@@ -571,13 +578,13 @@ BOOST_AUTO_TEST_CASE( orderOneConvergesAtTwo )
 
 BOOST_AUTO_TEST_CASE( orderTwoConvergesAtThree )
 {
-	// Measured: psi 3.594e-07, q 6.239e-07.
+	// Measured: psi 3.589e-07, q 6.219e-07.
 	checkOrder( 2, 1.1e-6, 1.9e-6 );
 }
 
 BOOST_AUTO_TEST_CASE( orderThreeConvergesAtFour )
 {
-	// Measured: psi 2.854e-09, q 1.711e-08. Both ceilings were too tight for
+	// Measured: psi 2.797e-09, q 1.695e-08. Both ceilings were too tight for
 	// the corrected coefficients and are raised here, which is the recalibration
 	// working as intended rather than a tolerance being relaxed to pass.
 	checkOrder( 3, 8.6e-9, 5.2e-8 );

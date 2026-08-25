@@ -29,9 +29,12 @@ Concretely:
   `Prolong()` and `Update()` are stage-6 work against a mesh update that does not
   exist yet, and its `WriteOutputMFEM()` went with it, so **nothing writes files
   today**. `v0-legacy` has the original.
-* `src/meq/Estimator.hpp` still targets the Waterloo `HDGBilinearForm` API from
-  MFEM 4.5.1 and **does not compile**. It is stage-6 material and it also calls
-  `GridFunction::GetValueFacet`, which does not exist in 4.9.1.
+* `src/meq/Estimator.{hpp,cpp}` is written, compiles, is in `meq_core` and is
+  under the `naming` check. `GridFunction::GetValueFacet`, which the old header
+  called and which 4.9.1 does not have, is replaced by
+  `traceFes->GetFaceElement(f)` + `GetFaceVDofs()` + `CalcShape()`, exploiting
+  `DG_Interface_FECollection`'s `VALUE` map type — the same pattern
+  `estimators_hdg.cpp` uses.
 * `apps/meq.cpp` likewise. Its target is behind `MEQ_BUILD_APP`, default `OFF`.
 * `Config`, `Profiles`, `Source` compile and test.
 
@@ -62,7 +65,7 @@ it is checked; that file has not yet been rewritten.
 | 3 | Local post-processing `ψ*_h` | **dropped** — see below |
 | 4 | Newton on the semi-linear source | **done** |
 | 5 | Curved `Γ` by extension from subdomains | **done** |
-| 6 | Adaptivity: the residual estimator and mesh update | next |
+| 6 | Adaptivity: the residual estimator and mesh update | **done** |
 
 Each stage ends at a **measured convergence rate**, not at "it runs". See
 *Testing stance* below for why that is the acceptance criterion.
@@ -185,6 +188,36 @@ the solver is actually fed.
 Take this as the standing warning about the benchmark: **the published
 coefficients are not self-checking**, and a sign error here would show up as a
 solver that converges beautifully to the wrong equilibrium.
+
+### A third erratum: eq. (20)'s `η₅` does not vanish on the exact solution
+
+`ψ̂_h ∈ P_k(e)`, but `ψ*`'s trace has degree `k+1`, which no element of `M_h` can
+represent. Orthogonality splits the term:
+
+```
+‖ψ̂ − ψ*‖²_e = ‖ψ̂ − P_M ψ*‖²_e + ‖(I − P_M) ψ*‖²_e
+```
+
+The second piece survives even when you substitute the *exact* solution and the
+best possible trace, at `O(h^{k+3/2})`, which `h_e^{-1}` and `O(h^{-2})` edges
+turn into an `O(h^k)` floor. Measured, the printed term **is** that floor —
+agreeing with it to between 0.05% and 1.8% at every `k` and every mesh — so it
+converges at `k`, not `k+1`, and drags the total to 1.44/2.32/3.55 instead of
+1.99/2.99/3.97.
+
+Taking the difference *inside* `M_h` restores `k+1` and reproduces the rates
+GS-2's own Table 1 reports. `TraceComparison::Projected` is the default;
+`Literal` is kept so the suite keeps measuring the difference.
+
+**A separate `η₅` problem on the extension path**, and this one was nearly fatal
+to the adaptive loop: on `Γ_h` the term compares `ψ*` against a trace pinned to
+*zero* rather than the `φ_h` actually imposed, so the difference is
+`O(dist(Γ_h, Γ)) = O(h)`. Unmitigated, `η = 4.09e-1` where `η₁ = 2.12e-3`,
+converging at ~0.5 — the loop would have run, produced plausible pictures, and
+refined the wrong elements. `setTransferredBoundary()` excludes those faces and
+`η` then converges at `k+1` on the extension path too. **That is an omission, not
+a repair**: the proper fix is to evaluate `φ_h`, which needs a route out of the
+extension machinery that MFEM does not currently offer.
 
 ## The discretisation
 
@@ -338,36 +371,29 @@ learns about the trace space. The miniapps get the 4-entry version from
 **Also gone: `GridFunction::GetValueFacet`**, which `Estimator.hpp` calls. It was
 a patch to the old branch and does not exist in 4.9.1.
 
-### There is no separate post-processing stage, and there should not be
+### Post-processing is back, and it was free
 
-Decided 2026-08-24. `ψ*_h`, the local post-processing that gains an order in the
-scalar, is **not needed for accuracy**, and meq does not implement one.
+Stage 3 dropped `ψ*` on the grounds that `q` already gives the physical quantity
+at `k+1`, and noted that stage 6's estimator would need it again. It does — eq.
+(20) uses `ψ*` in **four of its five terms** (`η₁`, `η₂`, `η₄`, `η₅`), not three
+as an earlier version of this file said.
 
-**The papers agree.** `refs/HDG-GradShafranov.pdf` §3.2 describes the
-post-processing and then says they did not implement it: the physical quantity is
-`B ∝ ∇ψ`, which the mixed formulation already delivers as `q` at `k+1`. Adding an
-order to `ψ` buys nothing a magnetic-confinement calculation uses. Stage 2's table
-confirms `q` at `k+1` in practice, so there is nothing to recover.
+**`DarcyForm::Reconstruct()` supplies it, measured at `k+2`**: rates 3.03, 4.03,
+5.00 for `k = 1, 2, 3`. No hand-written local solve was needed, and it survives
+the extension path too. The old `GSSolver::Postprocess()` stays deleted.
 
-**And where it *is* needed, the library already has it.**
-`DarcyForm::ReconstructFluxAndPot()` builds its potential space as
-`p_coll->Clone(p_coll->GetOrder() + 1)` — the `P_(k+1)` post-processing space,
-off the hybridized solution, natively. `Reconstruct()` wraps it together with
-`ReconstructTotalFlux()`. It requires a flux mass form that assembles, which meq
-has. So if `ψ*` is ever wanted, call that; do not port the old
-`GSSolver::Postprocess()`, which was written against a different flux convention
-and whose `−(∇w, r q)` sign would need re-measuring against `DarcyForm`'s `−q`.
+**But it is unusable through Newton, and fails silently.**
+`ReconstructFluxAndPot()` reads only the *linear* `M_p`, and meq's Newton path
+puts the whole potential block on `Mnl_p` — so the local problem gets no
+potential mass and no constraint. Measured `ψ*` of **9.9e14, 8.4e15, 3.9e14**
+against 3.8e-6, 2.4e-7, 1.5e-8 for the same problem solved linearly, with `ψ_h`
+agreeing to six figures either way. `postProcess()` throws rather than returning
+it. This is an MFEM-side defect, listed under *Traps*.
 
-**The one place it will actually be needed is stage 6.** The residual estimator of
-`refs/HDG-GradShafranov-Adaptive.pdf` eq. (20) uses `ψ*_h`, not `ψ_h`, in `η₁`,
-`η₂` and `η₅` — and that is not decoration. The paper is explicit that `η₂` built
-on the raw `ψ_h` converges at *reduced* order, because it differentiates the
-approximation; substituting `ψ*_h` is what preserves `k+1`. meq's
-pre-modernisation estimator used raw `ψ_h` in both places and was a degraded copy
-of the published one.
-
-So the sequencing is: nothing now, and when adaptivity arrives, **measure whether
-`Reconstruct()` delivers `k+2`** before writing any local solve by hand.
+The measurement that justifies the `ψ*` requirement, rather than quoting it:
+building `η₂` on raw `ψ_h` loses **exactly one order at every `k`** — 2.002 vs
+0.998, 3.000 vs 2.002, 3.992 vs 2.981 — and is 124× to 407× larger on the finest
+mesh. That is the defect the pre-modernisation estimator had.
 
 ## Newton, and the obligation it creates
 
@@ -439,67 +465,58 @@ meq's own, measured at `k = 3`, `h = 0.1`, 832 trace dofs:
     4     4.142741e-14     3.692303e-15    1.810
 ```
 
-### The published Solov'ev coefficients are wrong, and not just one of them
+### The Solov'ev coefficients were wrong twice, and are now checked
 
 `Soloviev.hpp`'s `nstx()` does **not** use the coefficients printed in
-`refs/HDG-GradShafranov-Adaptive.pdf` eq. (22c). It uses a set solved from
-Cerfon & Freidberg's own constraints. `nstxAsPublished()` keeps the printed
-numbers, because they are still a perfectly good exact solution and are the only
-way to reproduce that paper's error levels.
+`refs/HDG-GradShafranov-Adaptive.pdf` eq. (22c); `nstxAsPublished()` keeps those.
+It also does not use this file's *first* correction of them. Both errors are
+recorded in the fixture's header, and the shape of the second is the more
+instructive.
 
-**`refs/CerfonFreidberg.pdf` §IX settles it.** Its eq. (28) gives the twelve
-linear constraints for an up-down asymmetric single null: `ψ = 0` at the outer
-and inner equatorial points, the upper high point and the X-point; `ψ_y = 0` at
-both equatorial points; `ψ_x = 0` at the high point; `ψ_x = ψ_y = 0` at the
-X-point; and three curvature conditions. For NSTX — `ε = 0.78`, `κ = 2`,
-`δ = 0.35`, X-point at `x_sep = 1 − 1.1δε = 0.6997`, `y_sep = −1.1κε = −1.716` —
-solving that 12×12 system at `A = −0.52` gives `nstx()`. **Measured:** it
-satisfies all twelve to `~1e-17`, puts the X-point exactly at
-`(0.699700, −1.716000)` with `ψ = −2.6e-18`, and reproduces `Δ*ψ = −F` to
-`9.9e-15`.
+**Error one: the published set satisfies none of Cerfon & Freidberg's twelve
+constraints.** `refs/CerfonFreidberg.pdf` §IX eq. (28) gives them for an up-down
+asymmetric single null. At the four points where `ψ` must vanish the printed
+coefficients give `−7.5e-3`, `+3.9e-4`, `+2.9e-2`, `−9.8e-3` — the third being
+11% of the axis flux.
 
-**The printed set satisfies none of them.** At the same four points:
+**Error two: `α` is not `δ`.** The re-solve substituted `sin α = δ` into eq.
+(11)'s `N₁ = −(1+α)²/(εκ²)` and `N₂ = (1−α)²/(εκ²)`. But those mean `α` itself,
+which for `δ = 0.35` is `arcsin(0.35) = 0.3576`. `N₃ = −κ/(ε cos²α)` is immune,
+since `cos²α = 1 − δ²` either way — so the error hit two of three conditions and
+nothing else at all.
 
-| | printed | should be |
-|---|---|---|
-| outer equatorial | `−7.54e-3` | 0 |
-| inner equatorial | `+3.92e-4` | 0 |
-| upper high point | **`+2.92e-2`** | 0 |
-| X-point | `−9.76e-3` | 0 |
+Settled by differentiating C&F's model surface eq. (9) directly at `τ = 0, π,
+π/2`: `N₁ = −0.5907049043`, `N₂ = +0.1322804125`, `N₃ = −2.9220542041`, each
+matching the `α` form exactly and the `δ` form by 1.1% and 2.4% at the two
+equatorial points.
 
-That high-point value is 11% of the axis flux. So the surface `ψ = 0` for the
-printed coefficients is not the NSTX boundary it is described as, and the true
-saddle sits at `(0.6958, −1.8069)` with `ψ = −8.7e-3`.
+**The moral, which is the transferable part: checking a solve against the
+formula it used cannot detect a misread formula.** The first correction verified
+the constraints, and passed, because it verified them against its own wrong `N`.
+Only an independent quantity catches that — here the curvature of the surface the
+coefficients are supposed to reproduce. The corrected set matches it to 2e-11,
+3e-10 and 2e-12.
 
-**A wrong fix, recorded because the way it was wrong is instructive.** The paper
-prints `c₁₀` identical to `c₇`, which looked like a lone typesetting duplicate,
-and `c₁₀` alone was "corrected" by imposing `ψ = 0` at the X-point — one of the
-twelve conditions. That gave `−1.28e-3`, and it did make the separatrix the zero
-level set. It also appeared to be corroborated: interior flux surfaces measured
-`κ ≈ 2.0`. Both were **coincidence**. Fitting one condition of twelve cannot
-repair a set that is wrong throughout, and the corroboration was a single derived
-quantity agreeing by luck. The lesson is that one satisfied constraint plus one
-plausible diagnostic is not evidence — the twelve-condition solve is, because it
-overdetermines nothing and leaves nothing to chance.
+**And they are no longer asserted nowhere.**
+`tests/convergence/SolovievGeometryConvergence.cpp` evaluates all of C&F's
+conditions on every set in the fixture, and `nstxUsesTheCorrectAlpha` checks both
+readings of `α` side by side so a silent revert fails rather than passing both
+ways. Any statement elsewhere in the tree that the coefficients are unchecked is
+out of date.
 
-**Why none of this was visible.** Every `ψ_i` is `Δ*`-harmonic, so **any**
-coefficients leave `F`, `Δ*ψ` and every convergence rate exact. Both sets give
-`k+1`. The coefficients decide only which domain the benchmark is posed on and
-how large the absolute error is — so the **absolute-error ceilings are the sole
-check**, and before this they had never been compared against anything but
-themselves. They are now recorded beside each `checkOrder()` call with the
-measured value they were set from; a change to `Soloviev.hpp` that moves those
-should move the ceilings deliberately.
+The reason this needed a dedicated test at all: every `ψ_i` is `Δ*`-harmonic, so
+**any** coefficients leave `F`, `Δ*ψ` and every convergence rate exact. Nothing
+else in the suite can see a wrong one. The absolute-error ceilings move, which is
+why they are recorded beside each `checkOrder()` call with the value they were
+set from.
 
 `ExtensionConvergence` still takes `Γ` to be the interior surface `ψ = −0.03`
-rather than `ψ = 0`, and now for a sharper reason: with the correct coefficients
-`ψ = 0` genuinely *is* the separatrix, which passes through an X-point — a
-**corner** of `Γ`, where both transfer-path families give out and the
-Cockburn–Solano analysis does not reach.
+rather than `ψ = 0`: with correct coefficients `ψ = 0` *is* the separatrix, which
+passes through an X-point — a **corner** of `Γ`, where both transfer-path
+families give out and the Cockburn–Solano analysis does not reach.
 
-**And a tooling warning that cost time.** `pdftotext` **silently drops this
-paper's minus signs**. A report that `c₁`'s digits disagreed came from it and is
-false. Read the rendered page.
+**A tooling warning that has now cost time twice.** `pdftotext` silently drops
+this paper's minus signs, and an `ε` in another. Read the rendered page.
 
 ### A wrong Jacobian is invisible to a convergence table
 
@@ -537,6 +554,18 @@ That mismatch is precisely why the *old* pinned MFEM 4.5.1 stopped compiling —
 its `sundials.hpp` still used `realtype` and `booleantype`, which SUNDIALS 7
 removed. `miniapps/hdg/darcyop.hpp` already offers `SolverType::KINSol`, so the
 path is exercised in that branch.
+
+**This is now the highest-value outstanding change, not a someday.** Stage 6's
+benchmark work produced three concrete globalisation failures on the GS-2
+sources: the pressure pedestal does not converge at `k = 1` for `h ≥ 0.05`
+(MFEM's element-local nonlinear solves fail outright, `el: N not convered in 100
+iters`), and the current hole (§4.4) does not converge under plain Newton in any
+configuration tried — NaN at `k = 2, n = 16`, and MFEM *aborts the process* on
+`MFEM_VERIFY(IsFinite(norm))` because the tree is built without
+`MFEM_USE_EXCEPTIONS`. Both papers use Anderson-accelerated **Picard**, which
+leaves every local solve linear; meq's Newton puts `∂F/∂ψ = 2c₁r²/σ² = 320r²`
+inside the local solve, and those local problems are indefinite on a coarse
+element. `MFEM_USE_SUNDIALS = NO` is the blocker.
 
 **Confirm with the user before rebuilding `../mfem-hdg-dev`** — it has its own
 active work on `gf-hdg-subdomains-dev`.
@@ -581,6 +610,28 @@ with a linear constraint". With *domain* integrators it is silent —
 `LocalNLOperator::AddMultDE` and `ConstructGrad` simply drop them. So leaving the
 HDG stabilisation on `M_p` beside a nonlinear source aborts, which is the good
 case; the silent one is the reason `buildForms()` documents both.
+
+**Every GS-2 §4.2–4.5 source vanishes at `ψ = 0`, so the paper's own problem has
+a trivial branch — and meq falls into it.** `F(r, 0) = 0` for eqs (24), (25),
+(26) and (27); for (25) because `b = 2` makes the bracket `O(ψ²)`. With
+homogeneous Dirichlet data `ψ ≡ 0` therefore *solves* the problem, and Newton —
+which starts from the Dirichlet data — lands on it and stops in **zero
+iterations** with an identically zero residual. Not a hypothesis: GS-1's
+Algorithm 2 literally opens `ψ⁰ ; // Non-trivial initial guess`.
+
+**`GradShafranovSolver` has no `setInitialGuess()`, and no caller can work around
+it** — `prepare()` resets the iterate and `solve()` calls `prepare()`. Until that
+exists, those four cases are posed with a non-homogeneous ramp that puts `ψ = 0`
+in the interior. This is the most actionable gap in the solver.
+
+**`DarcyForm::Reconstruct()` returns ~1e15 on the nonlinear path, silently.**
+`ReconstructFluxAndPot()` consults only the linear `M_p`, never `Mnl_p` — while
+`ReconstructTotalFlux()` *does* consult `Mnl_p`, so the asymmetry is internal to
+MFEM. `postProcess()` throws rather than pass it on. MFEM-side; see the list at
+the end of this section.
+
+**`mfem::Mesh::FindPoints` is `O(elements × points)`** — a brute-force scan over
+element centres. It caps sample-cloud sizes in any off-grid error measure.
 
 **meq will be an early user of a thinly-tested MFEM combination.** Fixed-boundary
 Grad–Shafranov is a Dirichlet problem, so the trace carries an essential BC; and
@@ -650,6 +701,32 @@ is not even monotone in the mesh count — 2.02e-5, 3.03e-5, 3.88e-5 at
 That is geometry, not the transfer: all four path families give the same
 numbers. So `ExtensionConvergence` allows 0.30 per pair and asserts 0.15 on the
 rate across the whole sequence.
+
+**Newton is not monotone on a stiff source, so assert on the best triple, not on
+every one.** Example 5 gives a clean four-step quadratic run; the GS-2 sources do
+not. A typical history wanders for four to eight steps with observed orders of
+0.02, 0.33, −0.37, −5.9 and *then* enters the quadratic regime and finishes
+1e-9 → 1e-13 in two. §4.5 at `k = 2` even rises mid-run, 1.7e-2 → 5.3e-1 at
+iteration 3, before recovering. Print the whole history; assert on the best
+triple above the round-off floor.
+
+**A self-convergence study on a rectangle cannot demonstrate `k+1`, and the cap
+has nothing to do with the physics.** Measured on a *Solov'ev* source — constant
+in `ψ`, `dF/dψ ≡ 0`, one Newton step — with homogeneous data on the benchmark
+box, the self-difference rate is 2.00/2.86/2.96 in `ψ` and 1.88/2.25/2.18 in `q`:
+flat at about 3 and 2.2 from `k = 2` on, with nothing nonlinear anywhere. That is
+the `r² log r` corner term of a right angle — the solution sits in `H^{3−ε}` and
+its gradient in `H^{2−ε}`, and no polynomial degree recovers it. The
+exact-solution studies are immune because there the datum *is* the trace of a
+smooth solution.
+
+It is worse on a polygon approximating a curved boundary. GS-1 Example 6 on a
+fixed 40-gon gives 2.12 in `ψ` at `k = 3`, against 1.995/3.000/4.000 for a
+Solov'ev control **on exactly the same meshes** — the singular exponent at an
+interior angle of `π − 2π/40` is `40/38 = 1.0526`, and interior pollution goes at
+about twice that. **This is precisely the difficulty GS-2's curved-boundary
+technique exists to remove**, and it is worth knowing before anyone designs
+another fitted-polygon study.
 
 **Mutation-test a suite you are relying on.** `ProfilesTests` and `SourceTests`
 were checked by deliberately introducing fifteen defects — a dropped `r²`, `p'`
