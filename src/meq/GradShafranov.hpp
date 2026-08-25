@@ -433,7 +433,8 @@ namespace meq
 			 * 1.5e-8 for the same problem solved linearly. A silent 1e15 feeding an
 			 * error estimator is exactly the failure this project's testing stance
 			 * exists to prevent, so postProcess() throws rather than returning it.
-			 * The fix is MFEM's; it is written up in the stage-6 report.
+			 * The fix is MFEM's, and is written up as section 1 of
+			 * ../mfem-hdg-dev/doc/HDG-DEFECTS-FROM-MEQ.md.
 			 *
 			 * IT DOES SURVIVE THE EXTENSION PATH, which was not expected.
 			 * ReconstructFluxAndPot() lifts only the DOMAIN integrators of the flux

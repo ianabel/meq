@@ -579,8 +579,14 @@ you get numbers, and they are wrong. CMake sets it on every registered ctest;
 you must set it by hand when running a binary directly. Same trap as
 `../mfem-hdg-dev/CLAUDE.md` records.
 
-**If you rebuild MFEM: `make -j4`, never more** — larger makes exhaust memory on
-this machine — and **`make clean` after editing any MFEM header.** MFEM's
+**Never run a bare `make -j`, anywhere.** With no argument it is unbounded, and
+this machine is WSL2 — the job count goes to the host's core count with a fraction
+of the host's memory behind it, and the whole VM falls over rather than the build
+merely failing. Always give a number: **4 to 8**, and for the MFEM tree
+specifically **`make -j4`, never more**, since its translation units are large
+enough that even 8 exhausts memory here. `cmake --build ... -j4` likewise.
+
+**And `make clean` after editing any MFEM header.** MFEM's
 makefiles have no `.d` files and no header dependency tracking. That trap has
 produced heap corruption in unrelated functions and "unimplemented" aborts for
 methods that had just been added. meq's own CMake build tracks headers properly;
@@ -627,8 +633,8 @@ in the interior. This is the most actionable gap in the solver.
 **`DarcyForm::Reconstruct()` returns ~1e15 on the nonlinear path, silently.**
 `ReconstructFluxAndPot()` consults only the linear `M_p`, never `Mnl_p` — while
 `ReconstructTotalFlux()` *does* consult `Mnl_p`, so the asymmetry is internal to
-MFEM. `postProcess()` throws rather than pass it on. MFEM-side; see the list at
-the end of this section.
+MFEM. `postProcess()` throws rather than pass it on. MFEM-side, and written up
+as §1 of `../mfem-hdg-dev/doc/HDG-DEFECTS-FROM-MEQ.md`.
 
 **`mfem::Mesh::FindPoints` is `O(elements × points)`** — a brute-force scan over
 element centres. It caps sample-cloud sizes in any off-grid error measure.
@@ -660,6 +666,17 @@ root will silently run somewhere else. Use absolute paths.
 
 **`grep -c` exits 1 on zero matches**, so a background check reports failure
 spuriously.
+
+**Four defects found in MFEM are written up, and none is fixed.**
+`../mfem-hdg-dev/doc/HDG-DEFECTS-FROM-MEQ.md` carries them with the line numbers
+and the measurements: the `Reconstruct()` one above; `ComputeHDGFaceEnergy()`
+ignoring an installed `HDGStabilization`, so `HDGErrorEstimator`'s `Energy` mode
+reports a different operator than was solved while its `Residual` mode does not;
+`ReconstructFluxAndPot()` lifting only domain integrators, which drops
+`HDGExtensionIntegrator` and is measured harmless; and `φ_h` being unreachable
+after a solve, which is what forces `setTransferredBoundary()`. Nothing in that
+tree was changed — meq works around all four. Read it before assuming a
+surprise on the reconstruction or extension paths is meq's.
 
 ## Testing stance
 
