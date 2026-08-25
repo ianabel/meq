@@ -1,0 +1,86 @@
+# clang-tidy configuration for meq.
+#
+# One job only: express the identifier naming convention, so that editors flag a
+# departure from it as it is typed and so that the `naming` ctest can enforce it
+# (tests/CMakeLists.txt runs clang-tidy over the compile database with
+# --warnings-as-errors=readability-identifier-naming). Every other check is off:
+# this file is a statement of house style, not a lint policy, and turning on the
+# analyser here would make the test slow and noisy for no gain.
+#
+# The convention, from the sibling projects:
+#
+#     types      -- class, struct, enum, using alias    UpperCamelCase
+#     enum values                                       UpperCamelCase
+#     functions and methods                             lowerCamelCase
+#     variables, parameters, data members               lowerCamelCase
+#
+# clang-tidy spells UpperCamelCase "CamelCase" and lowerCamelCase "camelBack".
+#
+# Not covered here, deliberately:
+#
+#   * TOML key names stay UpperCamelCase. They are string literals, so no naming
+#     check sees them; the convention there is separate and unchanged.
+#   * Names imposed by MFEM -- an override of Coefficient::Eval or of
+#     Operator::Mult has to keep MFEM's spelling. Mark those individually with
+#     // NOLINT(readability-identifier-naming) and a word about which base class
+#     is dictating the name.
+#   * Namespaces, macros, and constants have no rule yet, so they have no option
+#     here rather than a permissive one -- an unset option produces no warning.
+---
+Checks: >
+  -*,
+  readability-identifier-naming
+
+# Header warnings are reported for meq's own headers only. Everything else a
+# translation unit pulls in -- MFEM, toml11, Boost, the standard library, and
+# the unported headers under attic/ -- has its own conventions and is not ours
+# to rename. A test .cpp opened in an editor is still checked; this option
+# governs which *headers* diagnostics are reported from, not which files are
+# analysed.
+HeaderFilterRegex: '.*/src/meq/[^/]*\.hpp$'
+
+# No fixes are applied by the test, so no formatter is needed to apply them.
+FormatStyle: none
+
+CheckOptions:
+  # Types.
+  - key:   readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key:   readability-identifier-naming.StructCase
+    value: CamelCase
+  - key:   readability-identifier-naming.EnumCase
+    value: CamelCase
+  - key:   readability-identifier-naming.UnionCase
+    value: CamelCase
+  - key:   readability-identifier-naming.TypeAliasCase
+    value: CamelCase
+  - key:   readability-identifier-naming.TypedefCase
+    value: CamelCase
+  - key:   readability-identifier-naming.TypeTemplateParameterCase
+    value: CamelCase
+
+  # Enum values.
+  - key:   readability-identifier-naming.EnumConstantCase
+    value: CamelCase
+
+  # Functions and methods.
+  - key:   readability-identifier-naming.FunctionCase
+    value: camelBack
+  - key:   readability-identifier-naming.MethodCase
+    value: camelBack
+
+  # Variables, parameters and data members. VariableCase is the fallback for
+  # locals, globals and statics; the Member options cover data members at every
+  # access level, since MemberCase alone does not reach private ones.
+  - key:   readability-identifier-naming.VariableCase
+    value: camelBack
+  - key:   readability-identifier-naming.ParameterCase
+    value: camelBack
+  - key:   readability-identifier-naming.MemberCase
+    value: camelBack
+  - key:   readability-identifier-naming.PublicMemberCase
+    value: camelBack
+  - key:   readability-identifier-naming.ProtectedMemberCase
+    value: camelBack
+  - key:   readability-identifier-naming.PrivateMemberCase
+    value: camelBack

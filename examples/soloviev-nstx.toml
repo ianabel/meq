@@ -1,0 +1,76 @@
+# Solov'ev equilibrium in an NSTX-like geometry: meq's headline benchmark.
+#
+# Reproduces section 4.1 of refs/HDG-GradShafranov-Adaptive.pdf (Sanchez-Vizuet,
+# Solano & Cerfon, Comput. Phys. Commun. 255 (2020) 107239). The Solov'ev
+# profiles mu0 p' = -C, g g' = -A with the flux normalised so that A + C = 1
+# give the source
+#
+#     F( r, z, psi ) = -( ( 1 - A ) r^2 + A ),        A = -0.52,
+#
+# which does not depend on psi. The equation is therefore linear and Newton
+# converges in one step -- which is exactly why this is the first case to run.
+#
+# An exact solution is known in closed form (eq (22) of that paper: a particular
+# solution plus twelve Delta*-harmonic terms with coefficients given to fifteen
+# digits). It is implemented as SolovievEquilibrium::NSTX() in
+# tests/analytic/Soloviev.hpp, and that is what a run of this file is compared
+# against.
+#
+# UNITS. This family of Solov'ev solutions is posed in units normalised to the
+# major radius, so every length below is in units of R0, not in metres. For NSTX
+# R0 = 0.85 m: multiply by that to recover SI. A is dimensionless in either case.
+#
+#     meq -c examples/soloviev-nstx.toml
+
+[mesh]
+# The plasma region is the NSTX high-beta boundary of Cerfon & Freidberg,
+# Phys. Plasmas 17 (2010) 032502 -- inverse aspect ratio eps = 0.78, elongation
+# kappa = 2.0, triangularity delta = 0.35 -- which occupies
+#
+#     0.22 <= r <= 1.78,    |z| <= 1.56    (units of R0).
+#
+# The box below encloses that with a margin. It is deliberately NOT fitted to
+# the plasma boundary: per section 2.1 of the adaptive paper the computational
+# domain is the union of the background triangles lying entirely inside the
+# plasma region, and the Dirichlet data is transferred out to the true boundary.
+RMin = 0.1              # units of R0 (metres when R0 = 1)
+RMax = 1.9              # units of R0
+ZMin = -1.7             # units of R0
+ZMax = 1.7              # units of R0
+
+# 3 x 4 cells across a 1.8 x 3.4 box gives an initial mesh diameter (the cell
+# diagonal) of h = 1.04, matching the h = 1.03 coarsest grid of section 4.1.
+NR = 3                  # cells in r before refinement
+NZ = 4                  # cells in z before refinement
+
+# Each level halves h, so three levels give h = 0.13. The paper reports uniform
+# refinement to k = 1 ... 4 and h/8; raise this to repeat the convergence study.
+RefinementLevels = 3
+
+[discretisation]
+PolynomialDegree = 3    # k; the papers report k = 1 ... 5
+Tau = 1.0               # HDG stabilisation; O(1) suffices, and 1.0 is the default
+
+[source]
+Type = "soloviev"
+A = -0.52               # dimensionless; fixes plasma against magnetic pressure
+
+[boundary]
+# The Solov'ev flux is normalised so that psi vanishes on the plasma boundary,
+# which is the fixed-boundary problem proper.
+Type = "zero"
+
+[solver]
+# The problem is linear, so Newton is done after one step; these are the
+# defaults, written out here to document them.
+NewtonMaxIterations = 20
+NewtonRelativeTolerance = 1.0e-8
+NewtonAbsoluteTolerance = 1.0e-12
+LinearMaxIterations = 1000
+LinearTolerance = 1.0e-12
+
+[output]
+# Writes ./soloviev-nstx.mesh, ./soloviev-nstx_psi.gf and
+# ./soloviev-nstx_grad_psi.gf.
+Directory = "."
+Prefix = "soloviev-nstx"

@@ -1,0 +1,73 @@
+# The nonlinear manufactured solution: Example 5 of refs/HDG-GradShafranov.pdf
+# (Sanchez-Vizuet & Solano, Comput. Phys. Commun. 235 (2019) 120-132).
+#
+# No analytic equilibrium is available for a source that genuinely depends on
+# psi, so the paper manufactures one: it imposes
+#
+#     psi( r, z ) = sin( kr ( r + r0 ) ) cos( kz z ),
+#     r0 = -0.5,   kr = 1.15 pi,   kz = 1.15,
+#
+# and takes as the source whatever makes that psi solve the equation,
+#
+#     F( r, z, psi ) = ( kr^2 + kz^2 ) psi
+#                      + ( kr / r ) cos( kr ( r + r0 ) ) cos( kz z )
+#                      + r ( sin^2( kr ( r + r0 ) ) cos^2( kz z ) - psi^2
+#                            + exp( -sin( kr ( r + r0 ) ) cos( kz z ) )
+#                            - exp( -psi ) ).
+#
+# The psi-dependence is linear, quadratic AND exponential, so this is the case
+# that exercises the Newton solve and the dF/dpsi that goes with it; the
+# Solov'ev benchmark cannot, being linear. The solution and its source are
+# implemented in tests/analytic/ManufacturedNonlinear.hpp.
+#
+# UNITS. Like the Solov'ev case, the geometry is normalised to the major radius,
+# so lengths below are in units of R0 (6.2 m for ITER) and the wavenumbers are
+# per unit R0. r0 is a shift of the radial coordinate, not the major radius.
+#
+#     meq -c examples/manufactured.toml
+
+[mesh]
+# Example 5 is posed on the up-down symmetric, double-null ITER-like boundary of
+# Cerfon & Freidberg with eps = 0.32, kappa = 1.7, delta = 0.33, occupying
+#
+#     0.68 <= r <= 1.32,    |z| <= 0.544    (units of R0),
+#
+# enclosed with a margin by the background box below.
+RMin = 0.6              # units of R0
+RMax = 1.4              # units of R0
+ZMin = -0.6             # units of R0
+ZMax = 0.6              # units of R0
+
+# 4 x 6 cells over a 0.8 x 1.2 box give h = 0.283, the paper's coarsest level
+# being h = 0.275.
+NR = 4                  # cells in r before refinement
+NZ = 6                  # cells in z before refinement
+RefinementLevels = 2    # h = 0.07 after two halvings
+
+[discretisation]
+PolynomialDegree = 3    # k; Example 5 is reported for k = 1 ... 5
+Tau = 1.0               # HDG stabilisation
+
+[source]
+Type = "manufactured"
+R0 = -0.5               # radial offset r0, units of R0 -- NOT the major radius
+Kr = 3.6128315516282616 # 1.15 pi, radians per unit R0
+Kz = 1.15               # radians per unit R0
+
+[boundary]
+# The manufactured psi does not vanish on the boundary of the domain, so the
+# paper imposes the non-homogeneous Dirichlet data psi|Gamma taken from the
+# exact solution. That is what "exact" selects.
+Type = "exact"
+
+[solver]
+# F depends on psi through an exponential, so Newton does real work here.
+NewtonMaxIterations = 30
+NewtonRelativeTolerance = 1.0e-10
+NewtonAbsoluteTolerance = 1.0e-14
+LinearMaxIterations = 1000
+LinearTolerance = 1.0e-12
+
+[output]
+Directory = "."
+Prefix = "manufactured"

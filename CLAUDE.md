@@ -149,6 +149,31 @@ M_h = P_k(e)       hybrid trace    DG_Interface_FECollection
 `τ = O(1)`. The pre-port code used `τ = 5.0` with no recorded reason; do not
 reinstate that without a measurement to justify it.
 
+**Getting a constant `τ` takes deliberate work — `HDGDiffusionIntegrator` will
+not give you one by default.** Its documented stabilisation is
+
+```
+τ± = ( β ± (α/2)(u·n)/|u·n| ) { h⁻¹ Q }
+```
+
+— scaled by the inverse local mesh size *and* by the diffusion coefficient. That
+is a reasonable default and it is not what the papers use. The designed way out
+is the `HDGStabilization` hook in `fem/darcy/bilininteg_hdg.hpp`: subclass it,
+return the constant from `Eval()`, install it with `SetStabilization()`. Read
+`StabValue()` there — with a hook installed it divides the quadrature weight out
+before calling and multiplies it back after, so returning a bare `τ` yields
+exactly `⟨τψ, w⟩`. The MFEM tree has no ready-made constant implementation; the
+only subclasses are test fixtures in `tests/unit/fem/test_bilininteg_hdg.cpp`
+and `test_darcy_degenerate.cpp`, which are the idiom to copy.
+
+This also matters for Newton. That header warns that omitting `EvalGrad` for a
+*non-constant* stabilisation gives "no wrong answer, only slow Newton
+convergence — a failure that survives a passing regression suite". A constant
+`τ` has `IsConstant() == true`, so `EvalGrad` is never called and the trap does
+not arise. One more reason to keep `τ` constant unless something measured says
+otherwise, which is also the sibling project's standing advice: **do not derive
+`τ` from the local coefficient.**
+
 ### Which MFEM, and why not master
 
 `../mfem-hdg-dev`, MFEM **4.9.1**, branch `gf-hdg-subdomains-dev`. It is an
