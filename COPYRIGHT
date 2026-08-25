@@ -1,4 +1,4 @@
-# Copyright (c) 2019 Ian G Abel
+# Copyright (c) 2019-2026 Ian G Abel
 # This file is part of the MEQ software package, for more information and source code availability
 # see http://github.com/ianabel/meq
 
@@ -7,7 +7,7 @@ COPYRIGHT
 The following copyright applies to each file in the MEQ distribution, unless
 otherwise stated in the file:
 
-Copyright (c) 2019 Ian G Abel.
+Copyright (c) 2019-2026 Ian G Abel.
 
 The MFEM, SUNDIALS, and toml11 libraries are distributed under their own licences.
 
