@@ -638,6 +638,18 @@ Newton Jacobian:
 | `Soloviev.hpp` | constant in `ψ` | `0` | the discretisation alone; Newton must converge in one step |
 | `McCarthy.hpp` | linear in `ψ` | `T`, a nonzero constant | a Jacobian missing its mass term |
 | `ManufacturedNonlinear.hpp` | `ψ²` and `e^(−ψ)` | varies | a Jacobian that is present but wrong |
+| `SimilarityExponential.hpp` | `f₀e^{nψ}(1+εr²)` | `nF` | the same, against an *exact* rather than manufactured solution |
+
+The last two are both nonlinear but are not redundant, and the difference is
+worth keeping straight. **`ManufacturedNonlinear` is manufactured**: a convenient
+`ψ` was chosen and `F` built to fit it, so its `F` is not of a form any physical
+profile produces. **`SimilarityExponential` is exact**: the free function is
+chosen — `f(u) = f₀e^{nu}` — and the solution follows from a similarity
+reduction (Kaltsas & Throumoulopoulos; `refs/Refs.md`). So it tests the solver
+against a nonlinear equation somebody might pose, rather than one reverse
+engineered from an answer. It is also a cleaner shape: the whole `ψ`-dependence
+is one exponential, so `∂F/∂ψ = nF` exactly, and at `n = 3` that exponential
+varies by a factor of 29 across the benchmark rectangle.
 
 The middle rung earns its place: with `∂F/∂ψ = 0` a Solov'ev run cannot tell a
 correct Jacobian from an absent one, and in the nonlinear case the algebra is

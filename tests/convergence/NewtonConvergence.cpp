@@ -12,6 +12,7 @@
 #include "meq/Source.hpp"
 
 #include "analytic/ManufacturedNonlinear.hpp"
+#include "analytic/SimilarityExponential.hpp"
 #include "analytic/McCarthy.hpp"
 #include "analytic/Soloviev.hpp"
 
@@ -276,17 +277,16 @@ namespace
 	/// Table 5 wanders between 1.86 and 2.03 at k = 1.
 	double const rateSlack = 0.2;
 
-	void checkOrder( int order, double psiCeiling, double fluxCeiling )
+	template<typename Equilibrium>
+	void checkOrder( Equilibrium const &eq, char const *label,
+	                 int order, double psiCeiling, double fluxCeiling )
 	{
-		meq::analytic::ManufacturedNonlinear const eq
-			= meq::analytic::ManufacturedNonlinear::example5();
-
 		std::vector<Measurement> points;
 		points.reserve( meshSizes.size() );
 		for ( int n : meshSizes )
 			points.push_back( measure( eq, order, n ) );
 
-		printTable( "Example 5 manufactured", order, points );
+		printTable( label, order, points );
 
 		double const expected = order + 1.0 - rateSlack;
 
@@ -745,15 +745,113 @@ BOOST_AUTO_TEST_CASE( newtonConvergesQuadratically )
 
 BOOST_AUTO_TEST_CASE( orderOneConvergesAtTwo )
 {
-	checkOrder( 1, 1.5e-3, 2.5e-3 );
+	checkOrder( meq::analytic::ManufacturedNonlinear::example5(),
+	            "Example 5 manufactured", 1, 1.5e-3, 2.5e-3 );
 }
 
 BOOST_AUTO_TEST_CASE( orderTwoConvergesAtThree )
 {
-	checkOrder( 2, 1.2e-5, 2.0e-5 );
+	checkOrder( meq::analytic::ManufacturedNonlinear::example5(),
+	            "Example 5 manufactured", 2, 1.2e-5, 2.0e-5 );
 }
 
 BOOST_AUTO_TEST_CASE( orderThreeConvergesAtFour )
 {
-	checkOrder( 3, 7.0e-8, 1.2e-7 );
+	checkOrder( meq::analytic::ManufacturedNonlinear::example5(),
+	            "Example 5 manufactured", 3, 7.0e-8, 1.2e-7 );
+}
+
+
+/*
+ * THE SIMILARITY-REDUCTION BENCHMARK, and why it is worth having beside
+ * Example 5.
+ *
+ * Example 5 is manufactured: a psi was chosen and F built to fit it, so its F
+ * is not of a form any physical profile produces. The solution below is the
+ * other way round -- the free function is chosen, f(u) = f0 exp(n u), and the
+ * solution follows from a similarity reduction of the Grad-Shafranov equation
+ * (Kaltsas & Throumoulopoulos, Phys. Lett. A 380 (2016) 3373, eq (22);
+ * refs/GS-SimilarityReduction.pdf). So this tests the solver against a
+ * nonlinear equation somebody might pose rather than one reverse engineered
+ * from an answer.
+ *
+ * It is also a different shape of nonlinearity. Example 5 mixes psi^2 with
+ * exp(-psi) and a geometric term; here the entire psi-dependence is one
+ * exponential, so dF/dpsi = n F exactly. Over the benchmark rectangle at n = 3
+ * that exponential varies by a factor of 29, which is a real nonlinearity
+ * rather than a perturbation.
+ */
+
+/// The same guard as manufacturedSourceMatchesTheOperator, on the new fixture:
+/// if -Delta*(psi) does not equal F at the exact solution, everything measured
+/// against it is measured against the wrong problem, and no convergence rate
+/// can see it.
+BOOST_AUTO_TEST_CASE( similaritySourceMatchesTheOperator )
+{
+	meq::analytic::SimilarityExponential const eq
+		= meq::analytic::SimilarityExponential::benchmark();
+
+	double worst = 0.0;
+	for ( double r = rMin + 0.05; r < rMax; r += 0.05 )
+	{
+		for ( double z = zMin + 0.05; z < zMax; z += 0.05 )
+		{
+			double const deltaStar = eq.deltaStarFD( r, z );
+			double const minusF = -eq.f( r, z, eq.psi( r, z ) );
+			worst = std::max( worst, std::abs( deltaStar - minusF )/std::abs( minusF ) );
+		}
+	}
+
+	BOOST_TEST_MESSAGE( "  similarity solution: -Delta*(psi) vs F, worst relative "
+	                    "difference " << worst );
+	BOOST_TEST( worst < 1.0e-5,
+	            "the similarity solution does not solve the equation: worst "
+	            "relative difference " << worst );
+}
+
+/// dF/dpsi = n F for an exponential free function. Checked against a difference
+/// of f() rather than assumed, because a Jacobian error is invisible to every
+/// convergence rate -- see the +5% experiment recorded in CLAUDE.md.
+BOOST_AUTO_TEST_CASE( similarityDerivativeMatchesAFiniteDifference )
+{
+	meq::analytic::SimilarityExponential const eq
+		= meq::analytic::SimilarityExponential::benchmark();
+
+	double const step = 1.0e-7;
+	double worst = 0.0;
+	for ( double r = rMin + 0.07; r < rMax; r += 0.07 )
+	{
+		for ( double psi = -0.8; psi < 0.45; psi += 0.15 )
+		{
+			double const difference =
+				( eq.f( r, 0.11, psi + step ) - eq.f( r, 0.11, psi - step ) )/( 2.0*step );
+			worst = std::max( worst,
+				std::abs( eq.dFdPsi( r, 0.11, psi ) - difference )/std::abs( difference ) );
+		}
+	}
+
+	BOOST_TEST_MESSAGE( "  similarity dF/dpsi vs central difference: worst relative "
+	                    "difference " << worst );
+	BOOST_TEST( worst < 1.0e-6 );
+}
+
+BOOST_AUTO_TEST_CASE( similarityOrderOneConvergesAtTwo )
+{
+	// Ceilings at 3x measured: psi 1.1024e-04, q 2.3063e-04 at h = 0.025.
+	checkOrder( meq::analytic::SimilarityExponential::benchmark(),
+	            "Kaltsas-Throumoulopoulos exponential", 1, 3.4e-4, 7.0e-4 );
+}
+
+BOOST_AUTO_TEST_CASE( similarityOrderTwoConvergesAtThree )
+{
+	// Measured: psi 8.6282e-07, q 2.0018e-06.
+	checkOrder( meq::analytic::SimilarityExponential::benchmark(),
+	            "Kaltsas-Throumoulopoulos exponential", 2, 2.6e-6, 6.1e-6 );
+}
+
+BOOST_AUTO_TEST_CASE( similarityOrderThreeConvergesAtFour )
+{
+	// Measured: psi 1.0006e-08, q 2.4542e-08.
+	checkOrder( meq::analytic::SimilarityExponential::benchmark(),
+	            "Kaltsas-Throumoulopoulos exponential", 3, 3.1e-8, 7.4e-8 );
 }
