@@ -1,0 +1,4 @@
+[submodule "extern/toml11"]
+	path = extern/toml11
+	url = https://github.com/toruniina/toml11.git
+	branch = main

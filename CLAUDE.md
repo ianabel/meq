@@ -68,6 +68,7 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 ## Commands
 
 ```sh
+git submodule update --init --recursive     # extern/toml11
 cmake -B build -DMFEM_DIR=/home/ian/projects/mfem-hdg-dev
 cmake --build build -j4
 cd build && MKL_THREADING_LAYER=GNU ctest --output-on-failure
@@ -75,6 +76,23 @@ cd build && MKL_THREADING_LAYER=GNU ctest --output-on-failure
 
 `MFEM_DIR` defaults to `../mfem-hdg-dev` and also reads the environment, so the
 `-D` is usually unnecessary.
+
+### Why toml11 is a submodule and MFEM is not
+
+**toml11 is `extern/toml11`**, pinned to a commit, as MaNTA does it. It is header
+only, small, and its version is something meq should control rather than inherit
+from whatever is installed — the `find_or<double>` behaviour recorded under
+*Traps* is version-dependent, and a silent config bug is exactly what a floating
+dependency buys you. Currently `b32a2ff`, v4.4.0-31, the same commit MaNTA pins.
+
+**MFEM stays out of tree**, hand-built, found through `MFEM_DIR`. Its history is
+enormous, so a submodule would make every clone of meq expensive; it needs an
+out-of-tree configure-and-build of its own anyway; and `../mfem-hdg-dev` is a
+working tree with its own active development on `gf-hdg-subdomains-dev`, which a
+submodule pin would fight rather than help.
+
+If configure fails with toml11 not found, the cause is almost always a clone
+without `--recursive`; the error message says so.
 
 ## The equation being solved
 

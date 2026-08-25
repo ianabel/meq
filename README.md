@@ -26,9 +26,11 @@ order lower.
 
 ## Status
 
-**MEQ is mid-port and does not yet solve anything.** The tree, the build system
-and the supporting code have been rebuilt against MFEM 4.9.1, but the solver core
-still targets an MFEM API that no longer exists and is excluded from the build.
+**MEQ solves the linear Grad–Shafranov equation**, reproducing an exact Solov'ev
+equilibrium at order $k+1$ in both $\psi$ and the flux $\boldsymbol{q}$, for
+$k = 1,2,3$. The semi-linear problem — a source depending on $\psi$, solved by
+Newton — is in progress, and the command-line driver is not yet ported, so there
+is currently no way to run MEQ except through its test suite.
 
 `CLAUDE.md` has the full picture, including a stage-by-stage account of what is
 done and what is next. Read it before believing anything below about behaviour.
@@ -38,10 +40,12 @@ otherwise:
 
 * MEQ is now a **fixed-boundary** solver. The free-boundary work — the von
   Hagenow / Lackner Green's-function scheme — is unported and sits in
-  `attic/free-boundary/`.
-* Whatever earlier versions of this file said, **MEQ has never solved a
-  Grad–Shafranov equation.** The pre-port code computed the vacuum field from
-  coil currents; the plasma model was never actually connected.
+  `attic/free-boundary/`, with a README explaining why it will not simply be
+  revived.
+* **The pre-port code never solved a Grad–Shafranov equation.** It computed the
+  vacuum field from coil currents; the right-hand side took $\psi$ and ignored
+  it, and the plasma model was never connected. Treat any description of MEQ
+  predating this note with suspicion.
 
 ## Building
 
@@ -52,7 +56,7 @@ Requirements:
 | C++17 compiler | g++ 15 is what it is developed against |
 | CMake | ≥ 3.20 |
 | [MFEM](https://mfem.org) | **4.9.1, the HDG branch** — see below |
-| [toml11](https://github.com/ToruNiina/toml11) | header-only, for configuration |
+| [toml11](https://github.com/ToruNiina/toml11) | vendored as a submodule at `extern/toml11` |
 | SuiteSparse | UMFPACK and friends, pulled in through MFEM |
 | Boost | `unit_test_framework`, for the test suite only |
 
@@ -61,13 +65,20 @@ integrators under `fem/darcy/`. `mfem/master` will not work — the older
 `HDGBilinearForm` API that MEQ used to depend on has been replaced.
 
 ```sh
+git submodule update --init --recursive
 cmake -B build -DMFEM_DIR=/path/to/mfem-hdg-dev
 cmake --build build -j4
 ```
 
+toml11 is a pinned submodule, so `--recursive` is not optional. MFEM is not a
+submodule — its history is very large and it needs its own out-of-tree build —
+so point `MFEM_DIR` at a checkout you have built yourself.
+
 `MFEM_DIR` defaults to `../mfem-hdg-dev` and also reads the environment.
 
 ## Running
+
+The driver is not yet ported, so this does not work today:
 
 ```sh
 MKL_THREADING_LAYER=GNU ./build/apps/meq examples/soloviev-nstx.toml
@@ -94,7 +105,7 @@ The suite is in three layers, described in full in `CLAUDE.md`:
 * **exact solution** — absolute error against a published closed-form Solov'ev
   equilibrium.
 * **convergence** — assertions on the observed *rate*, not on a tolerance:
-  $k+1$ for $\psi$ and $\bar\nabla\psi$, $k+2$ for the post-processed $\psi^*$.
+  $k+1$ for both $\psi$ and $\bar\nabla\psi$, over several dyadic refinements.
 
 That last layer is the one that matters, and the ordering is deliberate. A wrong
 sign convention converges at the right rate to the wrong function, so a

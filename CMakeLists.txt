@@ -64,10 +64,13 @@ find_package(MFEM MODULE REQUIRED)
 # #include "toml11/value.hpp" style, whereas single_include/ resolves only the
 # first. Putting both on the path would give two different toml.hpp for the
 # preprocessor to choose between, so only one is added.
+# toml11 is a submodule at extern/toml11, pinned to a commit, as MaNTA does it.
+# MFEM deliberately is not: its history is enormous and it needs an out-of-tree
+# build anyway, so it stays a hand-built library found through MFEM_DIR.
 if(NOT DEFINED TOML11_DIR AND DEFINED ENV{TOML11_DIR})
 	set(_toml11_dir_default "$ENV{TOML11_DIR}")
 else()
-	set(_toml11_dir_default "${CMAKE_CURRENT_SOURCE_DIR}/../toml11")
+	set(_toml11_dir_default "${CMAKE_CURRENT_SOURCE_DIR}/extern/toml11")
 endif()
 
 set(TOML11_DIR "${_toml11_dir_default}" CACHE PATH
@@ -82,10 +85,19 @@ find_path(TOML11_INCLUDE_DIR
 	DOC "Directory containing toml11's toml.hpp")
 
 if(NOT TOML11_INCLUDE_DIR)
-	message(FATAL_ERROR
-		"toml11 not found under TOML11_DIR=${TOML11_DIR}.\n"
-		"Point -DTOML11_DIR=... at a toml11 checkout containing "
-		"include/toml.hpp or single_include/toml.hpp.")
+	if(TOML11_DIR STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}/extern/toml11")
+		# Much the most likely cause: a fresh clone without --recursive.
+		message(FATAL_ERROR
+			"toml11 not found at ${TOML11_DIR}.\n"
+			"It is a git submodule and has not been checked out. Run:\n"
+			"    git submodule update --init --recursive\n"
+			"Or point -DTOML11_DIR=... at a toml11 checkout elsewhere.")
+	else()
+		message(FATAL_ERROR
+			"toml11 not found under TOML11_DIR=${TOML11_DIR}.\n"
+			"Point -DTOML11_DIR=... at a toml11 checkout containing "
+			"include/toml.hpp or single_include/toml.hpp.")
+	endif()
 endif()
 
 mark_as_advanced(TOML11_INCLUDE_DIR)
