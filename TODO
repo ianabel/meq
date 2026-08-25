@@ -387,3 +387,98 @@ Raised 2026-08-25. See MANTA-COUPLING.md, which is the specification.
       it is the hook that will hurt.
     - Whether the error test needs to exclude the field block, and whether
       nScalars needs unblocking first, are MaNTA-side.
+
+
+================================================================================
+More nonlinear test cases
+Raised 2026-08-25. A survey, not yet a decision.
+================================================================================
+
+  meq's benchmark ladder is currently constant / linear / nonlinear in psi:
+  Soloviev, McCarthy, and HDG-GS-1's Example 5. Only the last is nonlinear, and
+  it is a manufactured solution rather than a physical equilibrium. What follows
+  is what a search turned up, in the order it is worth pursuing.
+
+  1. FOUR NONLINEAR SOURCES WE ALREADY OWN, in refs/HDG-GradShafranov-
+     Adaptive.pdf sections 4.2 to 4.5. Fully specified, physically motivated,
+     and stiff -- which is exactly what the Newton path has not yet been tested
+     on. No exact solutions; the paper judges them by the error estimator, so
+     they are stage-6 material for verification but usable as Newton stress
+     tests now.
+
+       4.2 pressure pedestal, eq (23)/(24):
+           p = (c1 + c2 psi^2)(1 - exp(-(psi/sigma)^2))
+           F = 2 r^2 psi ( c2(1 - exp(-(psi/sigma)^2))
+                           + (1/sigma^2)(c1 + c2 psi^2) exp(-(psi/sigma)^2) )
+           c1 = 0.8, c2 = 0.2, sigma^2 = 0.005, and g = const.
+           sigma^2 = 0.005 makes the edge gradient very sharp. THIS is the case
+           where Newton globalisation should start to matter -- see CLAUDE.md on
+           KINSolver(KIN_LINESEARCH), which is exactly why that note exists.
+
+       4.3 internal transport barrier, eq (25):
+           p = [(1 + H erf(s(psi - psi_0)))/(1 + H)] (1 - (1 - psi)^a)^b
+           H = 0.5, s = 40, psi_0 = 0.3, a = 4, b = 2.
+
+       4.4 current hole, eq (26): the pedestal source plus
+           c3 (1 - exp(-(psi/sigma_2)^2)) cos(c4 psi)
+           c1 = 0.4, c2 = 0.1, c3 = -18, c4 = 10 pi,
+           sigma_1^2 = 5e-3, sigma_2^2 = 3e-3.
+
+       4.5 internal layer, eq (27): the pedestal source plus
+           c3 (1 - exp(-(psi/sigma_1)^2)) exp(-(1 - r - psi)^2/sigma_2^2)
+           c1 = 0.8, c2 = 0.2, c3 = 15, sigma_1^2 = 5e-3, sigma_2^2 = 7.5e-4.
+           The paper is explicit that this one is NOT physical -- r appears
+           inside the exponential, so it cannot be written as mu0 r^2 p' + g g'
+           -- but it is a good test for detecting a localised internal layer.
+
+     Note all four give dF/dpsi in closed form by differentiating the
+     expressions above, so the Newton Jacobian stays exact.
+
+  2. GENUINELY NONLINEAR EXACT SOLUTIONS: Kaltsas & Throumoulopoulos,
+     Phys. Lett. A 380 (2016) 3373, doi 10.1016/j.physleta.2016.08.011,
+     arXiv:1605.01538, OPEN ACCESS.
+
+     Similarity reduction of the GS equation, giving closed forms for nonlinear
+     free functions. The two that matter:
+
+       f(u) = f0 + f1 u^2   -> a Weierstrass elliptic function (their eq 21)
+       f(u) = f0 exp(n u)   -> sech^2 (their eq 22), plus a second class (23)
+
+     The exponential/sech^2 case is the most attractive thing in this list: an
+     EXACT solution, in elementary functions, of a genuinely nonlinear GS
+     equation, with dF/dpsi analytic. Nothing else found offers that.
+
+     Two caveats before building a benchmark on it. These are similarity
+     solutions in a combined variable of the form (a r^2 +- 2 b z + const), so
+     the domain is not free -- one has to find a closed level set to pose the
+     problem on, exactly the difficulty the Solov'ev separatrix gave. And the
+     paper says itself that for some of its reductions solutions "which possibly
+     could result in closed magnetic surfaces are ruled out". Check that a
+     usable closed contour exists BEFORE investing in the implementation.
+
+  3. NOT NONLINEAR, despite appearances: Atanasiu, Gunter, Lackner & Miron,
+     Phys. Plasmas 11 (2004) 3510, doi 10.1063/1.1756167. Two families of exact
+     solutions, chosen so that "the GS equation becomes a LINEAR inhomogeneous
+     differential equation" -- so this is McCarthy's rung, not a new one. Worth
+     having anyway for a different reason: it constructs X-points by
+     superposition and is explicitly intended as a benchmark near X-points,
+     which is where stage 5's extension technique gives out. Two free parameters
+     each in the pressure and poloidal current profiles.
+
+  4. FOR CROSS-COMPARISON RATHER THAN AS TEST CASES:
+       Pataki, Cerfon, Freidberg, Greengard & O'Neil, JCP 243 (2013) 28,
+         doi 10.1016/j.jcp.2013.02.045 -- a fast high-order solver.
+       Palha, Koren & Felici, JCP 316 (2016) 63, doi 10.1016/j.jcp.2016.04.002 --
+         mimetic spectral elements; reports convergence for Soloviev, FRC and
+         spheromak, so its tables are directly comparable with ours.
+       VEQ, arXiv:2606.11821 (2026) -- fixed-boundary with flexible source
+         profiles, and reports both a projected residual norm and a pointwise
+         strong-form residual. That pair of diagnostics is worth stealing
+         regardless of whether the solver is.
+
+  All dois above are checked against Crossref. The arXiv ids are not.
+
+  SUGGESTED ORDER. Do (1) first: it costs nothing but a Source subclass each,
+  the parameters are all in a paper on disk, and the pedestal case tests the one
+  thing Newton has not been pushed on. Then (2), if a closed contour exists.
+  (3) and (4) are reading, not work.
