@@ -562,16 +562,22 @@ BOOST_AUTO_TEST_CASE( theGapBetweenGammaHAndGammaIsOrderH )
 
 BOOST_AUTO_TEST_CASE( orderOneConvergesAtTwo )
 {
-	checkOrder( 1, 2.2e-4, 3.5e-4 );
+	// Measured with the corrected c_10: psi 7.384e-05, q 1.140e-04 at
+	// h = 0.0266. Kept at ~3x rather than tightened further: which background
+	// elements fall inside Omega is not a smooth function of h, so the finest
+	// error moves a little when the domain does.
+	checkOrder( 1, 2.3e-4, 3.5e-4 );
 }
 
 BOOST_AUTO_TEST_CASE( orderTwoConvergesAtThree )
 {
+	// Measured: psi 3.531e-07, q 5.895e-07.
 	checkOrder( 2, 1.1e-6, 1.8e-6 );
 }
 
 BOOST_AUTO_TEST_CASE( orderThreeConvergesAtFour )
 {
+	// Measured: psi 2.170e-09, q 1.461e-08.
 	checkOrder( 3, 7.0e-9, 4.5e-8 );
 }
 

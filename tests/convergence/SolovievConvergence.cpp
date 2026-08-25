@@ -203,6 +203,13 @@ namespace
 		// sign, so the absolute error is checked too. The ceilings sit at roughly
 		// three times the measured values, which is loose enough not to be a
 		// running cost and tight enough to catch a changed convention.
+		//
+		// They are also the ONLY thing in the suite that can see a wrong
+		// coefficient c_i, because psi_1 ... psi_12 are Delta*-harmonic: any
+		// c_i leaves F, Delta*(psi) and every convergence rate exact. So the
+		// measured value each ceiling was set from is recorded beside it, and a
+		// change to Soloviev.hpp that moves them should move these too,
+		// deliberately, rather than passing because the ceiling had slack.
 		BOOST_TEST( points.back().errorPsi < psiCeiling,
 		            "k = " << order << ": L2 error in psi is " << points.back().errorPsi
 		            << ", above the ceiling " << psiCeiling );
@@ -262,15 +269,19 @@ BOOST_AUTO_TEST_CASE( boundaryDataIsNonHomogeneous )
 
 BOOST_AUTO_TEST_CASE( orderOneConvergesAtTwo )
 {
-	checkOrder( 1, 1.2e-4, 2.0e-4 );
+	// Ceilings at 3x the finest-mesh error measured with the corrected c_10:
+	// psi 3.585e-05, q 5.971e-05 at h = 0.025.
+	checkOrder( 1, 1.1e-4, 1.8e-4 );
 }
 
 BOOST_AUTO_TEST_CASE( orderTwoConvergesAtThree )
 {
-	checkOrder( 2, 6.0e-7, 8.0e-7 );
+	// Measured: psi 1.895e-07, q 2.483e-07.
+	checkOrder( 2, 5.7e-7, 7.5e-7 );
 }
 
 BOOST_AUTO_TEST_CASE( orderThreeConvergesAtFour )
 {
-	checkOrder( 3, 2.0e-9, 3.0e-9 );
+	// Measured: psi 5.510e-10, q 8.349e-10.
+	checkOrder( 3, 1.7e-9, 2.6e-9 );
 }

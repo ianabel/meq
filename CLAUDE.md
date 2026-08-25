@@ -409,51 +409,55 @@ meq's own, measured at `k = 3`, `h = 0.1`, 832 trace dofs:
     4     4.142741e-14     3.692303e-15    1.810
 ```
 
-### The Solov'ev coefficients are asserted nowhere, and one of them is wrong
+### The Solov'ev coefficients are asserted nowhere, and c₁₀ was wrong
 
-The benchmark that everything else is measured against has an unverified core,
-and it is worth knowing exactly which part.
+**`c₁₀` is corrected in `Soloviev.hpp` and is not the published value.** The
+paper's eq. (22c) prints it identical to `c₇`, `−0.000044132956899`, which is a
+typesetting duplicate. `Soloviev.hpp` uses `−0.0012801846791351433`, 29.0× the
+printed magnitude, with the derivation in the header comment. In short:
 
-**`ψ₁ … ψ₁₂` are `Δ*`-harmonic by construction.** So *any* values of `c₁ … c₁₂`
-leave `Δ*ψ = −F` exact and every convergence rate untouched. `deltaStarFD()`
-checks the expansion, `SolovievConvergence` checks the rates, and **neither can
-see a wrong coefficient.** It is the one input to the benchmark that nothing in
-the suite constrains.
+* A Solov'ev boundary is the level set `ψ = 0`, and for a single null that
+  surface passes through the X-point — so the X-point must have `ψ = 0`. Solving
+  `ψ(X(c₁₀)) = 0`, continuing the X-point along as `c₁₀` varies, gives the value
+  above and puts the X-point at `(0.6795, −1.8443)` with `ψ = −3e-17`.
+* With the printed value the saddle sits at `(0.6958, −1.8069)` with
+  `ψ = −8.7e-3`, so the zero level set is not the separatrix at all.
+* **Corroboration**: the configuration is meant to be NSTX at `κ = 2.0`, and
+  flux surfaces just inside the separatrix now measure `κ` = 2.09, 2.06, 2.03 at
+  `ψ = −0.02, −0.01, −0.005`, converging on 2.0. A least-squares fit over
+  Cerfon–Freidberg's conditions was also tried and gives `−2.87e-3`, for which
+  the X-point lands at `ψ = +1.2e-2` — *outside* the `ψ = 0` surface, which
+  contradicts a single null — with a degenerate `ε = 0.98`.
 
-**And the printed set is wrong somewhere.** Two independent signs of it:
+**Why this went unnoticed, which is the transferable part.** `ψ₁ … ψ₁₂` are
+`Δ*`-harmonic by construction, so **any** values of `c₁ … c₁₂` leave `Δ*ψ = −F`
+exact and every convergence rate untouched. `deltaStarFD()` checks the expansion;
+`SolovievConvergence` checks the rates; neither can see a wrong coefficient. The
+only thing a wrong `c_i` moves is the **absolute error** against the exact
+solution — so the ceilings in the convergence tests are the sole check, and they
+are now recorded beside each `checkOrder()` call with the measured value they
+were set from. A change to `Soloviev.hpp` that moves those numbers should move
+the ceilings too, deliberately, rather than passing on slack.
 
-* `refs/HDG-GradShafranov-Adaptive.pdf` eq. (22c) prints `c₇` and `c₁₀` as the
-  *same* number, `−0.000044132956899`. Solving Cerfon–Freidberg's ten NSTX
-  single-null conditions with the other eleven fixed and `c₁₀` free gives
-  `−2.87e-3` — 65× larger — and drops the residual of those conditions from
-  4.6e-2 to 8.9e-5.
-* A Solov'ev normalisation should put the separatrix at `ψ = 0`. It does not.
-  Measured directly from `Soloviev.hpp`: the magnetic axis is at
-  `(1.3226, 0.0078)` with `ψ = −0.2697`, and the X-point is at
-  `(0.6958, −1.8069)` with **`ψ = −8.718e-3`**. So `{ψ < 0}` runs through the
-  saddle and off to infinity, and the level set `ψ = 0` is not a closed curve at
-  all.
+Two honest limits remain:
 
-**`c₁` is not among the suspects**, despite a report that it was. Its digits in
-`Soloviev.hpp` (`−0.00147796615575325`) match the rendered page exactly. The
-report came from `pdftotext`, which drops this paper's minus signs entirely and
-should not be trusted on it — read the page.
+* **The other eleven coefficients are still unverified**, and by the same
+  argument nothing in the suite can verify them. Reproducing the full set needs
+  Cerfon–Freidberg's twelve geometric conditions, and that paper is not in
+  `refs/` (doi 10.1063/1.3328818).
+* **`ExtensionConvergence` still does not use `ψ = 0` as its `Γ`**, and should
+  not: with `c₁₀` corrected the zero level set *is* the separatrix, which passes
+  through an X-point — a **corner** of `Γ`, where both transfer-path families
+  give out and the Cockburn–Solano analysis does not reach. It uses the closed
+  interior surface `ψ = −0.03`, written as the zero set of `ψ + 0.03`. Poloidal
+  flux is defined only up to an additive constant and `ψ₁ = 1` is in the basis,
+  so that is the same equilibrium: identical `F`, bit-identical `q`, only the
+  surface called zero has moved.
 
-Consequences, none of which are fixed yet:
-
-* `Soloviev.hpp` is **left as transcribed**, because the existing tests'
-  absolute-error ceilings are calibrated to it. Correcting `c₁₀` means
-  recalibrating them in the same commit.
-* `ExtensionConvergence` therefore cannot use `ψ = 0` as its curved boundary. It
-  uses the closed flux surface `ψ = −0.03` instead, written as the zero set of
-  `ψ + 0.03`. Poloidal flux is defined only up to an additive constant and
-  `ψ₁ = 1` is in the basis, so **this is the same equilibrium** — identical `F`,
-  bit-identical `q`, only the surface called zero has moved. The offset has to
-  clear the saddle at `−8.7e-3`.
-* Even with a corrected `c₁₀` the separatrix would be the wrong geometry for the
-  extension technique: it passes through an X-point, which is a *corner* of `Γ`,
-  where both transfer-path families give out and the Cockburn–Solano analysis
-  does not reach.
+**And a bibliographic warning that cost time.** `pdftotext` **silently drops
+this paper's minus signs**. A report that `c₁`'s digits also disagreed came from
+it and is false — the rendered page gives `−0.00147796615575325`, exactly what
+`Soloviev.hpp` has. Read the page, not the extraction.
 
 ### A wrong Jacobian is invisible to a convergence table
 
