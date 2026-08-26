@@ -1,24 +1,35 @@
 # FindMFEM.cmake -- locate MFEM and describe it as the imported target MFEM::MFEM.
 #
-# meq builds against a *source* tree of MFEM (currently the HDG development
-# branch, 4.9.1) rather than against an installed one, and that tree is built
-# with MFEM's GNU makefiles, in source: libmfem.a and mfem.hpp sit together at
-# the top of the tree. So there is no MFEMConfig.cmake to find -- MFEM only
-# installs one when it is itself built with CMake.
+# meq builds against an *installed* MFEM: ../mfem/install, produced by a CMake
+# build in ../mfem/build from sources in ../mfem/mfem-src, which sits on the
+# gf-hdg-subdomains-dev branch. That library is built with everything meq wants
+# -- SUNDIALS for KINSol, GSLIB for FindPoints, SuiteSparse for UMFPACK, LAPACK
+# -- and is meant to stay put while ../mfem-hdg-dev continues to be rebuilt for
+# development. Pointing meq at a tree somebody is actively editing is how you
+# get a suite that fails for reasons that have nothing to do with meq.
 #
-# What the make build does leave behind is config/config.mk, which records every
-# option the library was compiled with and every third-party library it must be
-# linked against. This module parses that file rather than hardcoding the flags,
-# because the same MFEM tree gets rebuilt with different options (SUNDIALS is
-# expected), and each change moves the link line. Anything absent from config.mk
-# is simply left empty; nothing here requires a particular variable to be there.
+# It still works against an in-source make build, and that is deliberate: a
+# hand-built ../mfem-hdg-dev has libmfem.a and mfem.hpp together at the top of
+# the tree, and this module handles both layouts. Set MFEM_DIR to whichever is
+# wanted.
+#
+# What both layouts leave behind is config.mk -- in config/ for a source tree
+# and in share/mfem/ for an install -- which records every option the library
+# was compiled with and every third-party library it must be linked against.
+# This module parses that file rather than hardcoding the flags, because the
+# same MFEM gets rebuilt with different options and each change moves the link
+# line. Anything absent from config.mk is simply left empty; nothing here
+# requires a particular variable to be there. (A CMake install also ships
+# MFEMConfig.cmake, so find_package(MFEM CONFIG) would work -- but only for the
+# install, and supporting one route for both layouts is worth more than using
+# the more idiomatic one for half of them.)
 #
 # Input variables:
 #
 #   MFEM_DIR       Root of the MFEM tree. Cache variable, so -DMFEM_DIR=... on
 #                  the command line wins; otherwise the environment variable
-#                  MFEM_DIR is used if set; otherwise a sibling checkout named
-#                  mfem-hdg-dev next to this project.
+#                  MFEM_DIR is used if set; otherwise ../mfem/install next to
+#                  this project.
 #
 # Result variables:
 #
@@ -44,7 +55,7 @@ include(FindPackageHandleStandardArgs)
 if(NOT DEFINED MFEM_DIR AND DEFINED ENV{MFEM_DIR})
 	set(_mfem_dir_default "$ENV{MFEM_DIR}")
 else()
-	set(_mfem_dir_default "${CMAKE_SOURCE_DIR}/../mfem-hdg-dev")
+	set(_mfem_dir_default "${CMAKE_SOURCE_DIR}/../mfem/install")
 endif()
 
 set(MFEM_DIR "${_mfem_dir_default}" CACHE PATH

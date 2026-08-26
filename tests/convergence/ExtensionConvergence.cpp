@@ -197,6 +197,10 @@ namespace
 		int widened;
 		double errorPsi;
 		double errorFlux;
+		/// psi*_h, the post-processed potential. Negative when postProcess()
+		/// refused -- which it does on the semi-linear path, so every study here
+		/// has it, Solov'ev being constant in psi.
+		double errorPsiStar;
 	};
 
 	/// Whether every marked element is reachable from every other through shared
@@ -369,6 +373,15 @@ namespace
 		point.widened = path.NumWidened();
 		point.errorPsi = solver.potentialError( psiCoeff );
 		point.errorFlux = solver.fluxError( fluxCoeff );
+
+		// Deliberately after the two above, so that whatever postProcess() does
+		// to the solver cannot move a number this file already measured. That is
+		// not hypothetical: DarcyHybridization::ReconstructTotalFlux() used to
+		// corrupt the constraint blocks it walked, which showed up as a second
+		// reconstruction disagreeing with the first.
+		point.errorPsiStar = -1.0;
+		solver.postProcess();
+		point.errorPsiStar = solver.postProcessedPotentialError( psiCoeff );
 		return point;
 	}
 
@@ -597,6 +610,119 @@ BOOST_AUTO_TEST_CASE( orderThreeConvergesAtFour )
 /// The absolute error is then four to seven orders of magnitude larger, and does
 /// not improve with k at all, because it is the O( h ) gap and not the
 /// approximation that limits it.
+/*
+ * PSI-STAR ON THE EXTENSION PATH, WHICH NOTHING USED TO MEASURE.
+ *
+ * The post-processed potential is meant to converge at k+2, and on a FITTED mesh
+ * tests/convergence/EstimatorConvergence.cpp measures exactly that -- 3.03, 4.03
+ * and 5.00 for k = 1, 2, 3. On the extension path nothing measured it at all:
+ * this file never called postProcess(), and EstimatorConvergence.cpp works on a
+ * fitted rectangle. The only test in the tree that put psi* and a curved
+ * boundary together was AdaptiveRefinement.cpp's loop, and only indirectly --
+ * eta_2, eta_4 and eta_5 are built on psi*, so a bad psi* reaches it as a
+ * monotonicity failure in eta with no indication of which term or why.
+ *
+ * That gap is why this test exists, and it was found the expensive way. A change
+ * in MFEM's reconstruction moved psi* on this path without moving the solve --
+ * psi_h and q_h agreed to every digit -- and the only symptom anywhere in the
+ * suite was eta refusing to come down in an adaptive loop four files away.
+ *
+ * WHAT IS ASSERTED, and why it is not k+2. The design order is k+2 and on a
+ * fitted mesh psi* delivers it. On the extension path it never did: the values
+ * recorded in CLAUDE.md from the working configuration are 2.62 and 3.00 at
+ * k = 1 and 3.46 and 3.90 at k = 2 -- short of 3 and 4, and short by enough
+ * that asserting k+2 with this file's rateSlack of 0.15 would have failed on a
+ * library that was behaving. Omega^h is the union of background elements inside
+ * Omega, which elements those are is not a smooth function of h, and psi* is
+ * built by a LOCAL solve on each element -- so the elements the boundary cuts
+ * are both where it matters and where it is least well behaved.
+ *
+ * So the assertion is k+1.5 across the sequence and k+1 per pair: psi* must
+ * buy a substantial part of an order over psi_h and must never be worse than
+ * psi_h's own design rate. Both are comfortably clear of the 2.8 and 3.7 a
+ * working library gives, and both are violated by a wide margin when the
+ * reconstruction is wrong -- the measurement that prompted this test was 1.28
+ * at k = 1 and 1.16 at k = 2, a rate independent of k, which is the signature
+ * of a fixed O(h) geometric error rather than a discretisation one.
+ *
+ * The third assertion is the one that needs no calibration at all: psi* must
+ * be smaller than psi_h. When this test was written it was 1000 times larger
+ * at k = 2. A rate can be argued about; that cannot.
+ */
+BOOST_AUTO_TEST_CASE( thePostProcessedPotentialConvergesAtKPlusTwo )
+{
+	// Not k+2: see the comment above. These are floors chosen to sit clear of
+	// both a working library and a broken one, not estimates of the true order.
+	double const overallFloor = 1.5;   // psi* beats psi_h's design order by half
+	double const pairFloor = 1.0;      // and per pair is never worse than it
+
+	for ( int order : { 1, 2 } )
+	{
+		std::vector<Measurement> points = study( order, true );
+
+		std::printf( "\n  psi* on a curved boundary, k = %d\n", order );
+		std::printf( "  %8s %7s %14s %6s %14s\n",
+		             "h", "elem", "L2(psi*)", "rate", "L2(psi)" );
+		for ( std::size_t i = 0; i < points.size(); ++i )
+		{
+			Measurement const &p = points[ i ];
+			if ( i == 0 )
+			{
+				std::printf( "  %8.5f %7d %14.6e %6s %14.6e\n",
+				             p.h, p.elements, p.errorPsiStar, "-", p.errorPsi );
+			}
+			else
+			{
+				double const ratio = points[ i - 1 ].h/p.h;
+				std::printf( "  %8.5f %7d %14.6e %6.3f %14.6e\n",
+				             p.h, p.elements, p.errorPsiStar,
+				             rate( points[ i - 1 ].errorPsiStar, p.errorPsiStar, ratio ),
+				             p.errorPsi );
+			}
+		}
+
+		double const span = points.front().h/points.back().h;
+		double const overall = rate( points.front().errorPsiStar,
+		                             points.back().errorPsiStar, span );
+		double const expected = order + overallFloor;
+
+		std::printf( "    across the whole sequence: psi* %.3f, wanted %.2f "
+		             "(design order %d)\n", overall, expected, order + 2 );
+		std::fflush( stdout );
+
+		for ( Measurement const &p : points )
+			BOOST_TEST_REQUIRE( p.errorPsiStar > 0.0,
+			                    "k = " << order << ", h = " << p.h
+			                    << ": postProcess() produced nothing to measure" );
+
+		// The headline: psi* must beat psi by a full order. This is the statement
+		// that fails when the reconstruction is wrong, and it fails loudly --
+		// a broken psi* is not merely slow, it stops converging.
+		BOOST_TEST( overall >= expected,
+		            "k = " << order << ": psi* converged at " << overall
+		            << " across the sequence, wanted " << expected );
+
+		double const expectedPair = order + pairFloor;
+		for ( std::size_t i = 1; i < points.size(); ++i )
+		{
+			double const ratio = points[ i - 1 ].h/points[ i ].h;
+			double const r = rate( points[ i - 1 ].errorPsiStar,
+			                       points[ i ].errorPsiStar, ratio );
+			BOOST_TEST( r >= expectedPair,
+			            "k = " << order << ", h = " << points[ i ].h
+			            << ": psi* converged at " << r << ", wanted " << expectedPair );
+		}
+
+		// And it must actually be better than the potential it is built from.
+		// A psi* that merely tracks psi_h has had its extra order lost somewhere,
+		// which a rate alone can miss if both degrade together.
+		BOOST_TEST( points.back().errorPsiStar < points.back().errorPsi,
+		            "k = " << order << ": psi* is " << points.back().errorPsiStar
+		            << " against psi_h's " << points.back().errorPsi
+		            << " -- the post-processing has bought nothing" );
+	}
+}
+
 BOOST_AUTO_TEST_CASE( withoutTheTransferTheRateCollapses )
 {
 	for ( int order = 1; order <= 3; ++order )

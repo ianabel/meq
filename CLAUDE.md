@@ -74,13 +74,14 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 
 ```sh
 git submodule update --init --recursive     # extern/toml11
-cmake -B build -DMFEM_DIR=/home/ian/projects/mfem-hdg-dev
+cmake -B build
 cmake --build build -j4
 cd build && MKL_THREADING_LAYER=GNU ctest --output-on-failure
 ```
 
-`MFEM_DIR` defaults to `../mfem-hdg-dev` and also reads the environment, so the
-`-D` is usually unnecessary.
+`MFEM_DIR` defaults to `../mfem/install` and also reads the environment, so the
+`-D` is usually unnecessary. Never a bare `make -j` or `cmake --build -j`; see
+*Traps*.
 
 ### Coverage, and what CI can and cannot check
 
@@ -319,9 +320,34 @@ otherwise, which is also the sibling project's standing advice: **do not derive
 
 ### Which MFEM, and why not master
 
-`../mfem-hdg-dev`, MFEM **4.9.1**, branch `gf-hdg-subdomains-dev`. It is an
-in-source build: `libmfem.a` sits at the tree root and headers are rooted at the
-same directory.
+**meq builds against `../mfem/install`** — MFEM **4.9.1** on branch
+`gf-hdg-subdomains-dev`, CMake-built in `../mfem/build` from sources in
+`../mfem/mfem-src`, and configured with everything meq wants:
+
+| | |
+|---|---|
+| `MFEM_USE_SUNDIALS` | KINSol, so `KINSolver(KIN_LINESEARCH)` is reachable without another rebuild |
+| `MFEM_USE_GSLIB` | `FindPointsGSLIB`; gslib v1.0.9 built alongside at `../mfem/gslib` |
+| `MFEM_USE_SUITESPARSE` | UMFPACK, the direct solver the convergence suite runs on |
+| `MFEM_USE_LAPACK`, `MFEM_USE_ZLIB` | |
+| `MFEM_USE_MPI = NO` | meq is serial throughout; `../mfem-hdg-dev-par` exists for parallel work |
+
+**`../mfem-hdg-dev` is now the development tree and not what meq links.** That
+split exists because the alternative was demonstrated: mid-session that tree was
+switched to `gf-hdg-dev`, which has no `fem/darcy/extension_hdg.{hpp,cpp}`, and
+meq's `naming` check failed on a tree meq had not touched. A library meq depends
+on should not move under it while somebody is working on it. Point `MFEM_DIR` at
+the dev tree deliberately when testing a fix; otherwise leave it alone.
+
+Rebuilding the install, after fetching whatever is wanted into `../mfem/mfem-src`:
+
+```sh
+cd /home/ian/projects/mfem
+cmake --build build -j4 && cmake --install build
+```
+
+The finder reads `share/mfem/config.mk` from an install and `config/config.mk`
+from an in-source make build, so either layout works and neither needs a flag.
 
 `mfem/master` will not do. meq needs `DarcyForm` and the HDG integrators in
 `fem/darcy/`, and for stage 5 it needs the transfer-path machinery in
@@ -569,6 +595,39 @@ element. `MFEM_USE_SUNDIALS = NO` is the blocker.
 
 **Confirm with the user before rebuilding `../mfem-hdg-dev`** — it has its own
 active work on `gf-hdg-subdomains-dev`.
+
+### The suite is 11/13 against the new library, and both failures are informative
+
+**`ExtensionConvergence::thePostProcessedPotentialConvergesAtKPlusTwo` fails,
+and it is a real regression in MFEM.** `ψ*` on the extension path converges at
+**1.28 at `k = 1` and 1.16 at `k = 2`** — a rate independent of `k`, which is a
+fixed `O(h)` geometric error rather than a discretisation one — where the
+working configuration gave 2.62/3.00 and 3.46/3.90. It is also *larger than
+`ψ_h`*, by 7× at `k = 1` and **1000× at `k = 2`**, so the post-processing now
+costs accuracy rather than buying it.
+
+The solve is untouched: `ψ_h` and `q_h` agree with the old library to every
+digit printed. Only the four `ψ*`-dependent quantities moved. The suspect is
+§3 of `../mfem-hdg-dev/doc/HDG-DEFECTS-FROM-MEQ.md` — meq reported that
+`ReconstructFluxAndPot()` dropped the boundary-face `HDGExtensionIntegrator`
+and *measured that drop harmless*; the fix lifts it into the local flux block,
+and that is exactly the term carrying the `Γ_h` stand-off.
+
+`AdaptiveRefinement`'s curved loop fails for the same reason and was how this
+was found — `η₂`, `η₄` and `η₅` are built on `ψ*`, so it surfaced as `η`
+refusing to come down, four files away from the cause. **That is why the new
+test exists**: nothing put `ψ*` and a curved boundary together, because
+`ExtensionConvergence` never called `postProcess()` and `EstimatorConvergence`
+works on a fitted rectangle.
+
+**`PedestalConvergence::pedestalNewtonFailsOnCoarseMeshesAtOrderOne` fails
+because the failure it asserts has gone away**, which is what that test is for
+— it prints its own instructions. Newton now converges at `k = 1, h = 0.05` in
+42 iterations where MFEM's element-local solves used to give up at
+`el: N not convered in 100 iters`; §4.4, the current hole, no longer produces
+NaN or aborts the process, though it still does not converge in 60. Do not
+delete that test until the cause is settled, since its prose explains the
+failure in terms that would then be wrong.
 
 ## Traps
 

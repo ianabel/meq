@@ -8,12 +8,25 @@ unusable by anyone who is not running `ctest`. `apps/meq.cpp` is still the
 on a class the port deleted. Nothing in `src/` writes a file. This plan is the
 work that turns a measured library into a program.
 
-**Written against a tree that cannot currently build it.**
-`../mfem-hdg-dev` is on `gf-hdg-dev`, which has no
-`fem/darcy/extension_hdg.{hpp,cpp}`, so `GradShafranov.cpp` does not compile and
-§2 of this plan has nothing to stand on. Everything below assumes the tree is
-back on `gf-hdg-subdomains-dev`. That is a scheduling fact, not a design
-constraint.
+**Two restrictions this plan was written around have since been removed.** All
+four defects of `../mfem-hdg-dev/doc/HDG-DEFECTS-FROM-MEQ.md` are fixed on
+`gf-hdg-subdomains-dev`, and one of them was worse than reported from outside:
+the local problem behind `Reconstruct()` had no face constraint either, so the
+matrix was singular and was factored and solved anyway. What follows for this
+plan:
+
+* **`ψ*` works through Newton**, so §3 may write it unconditionally and §5's
+  adaptive loop is no longer linear-only. Both sections are marked below.
+* **`φ_h` is reachable** — `TransferredDatumCoefficient` is the datum itself,
+  with `PathLiftCoefficient` for the solution-dependent half. So meq's
+  `setTransferredBoundary()` can stop excluding those faces and `η₅` can be
+  built as eq. (20) writes it. That is a repair of an omission, not a new
+  feature, and it is stage-6 work rather than stage-7 — but it belongs on the
+  list.
+
+**None of it is verified from meq's side yet**, which is the first thing to do
+once meq builds against the new library. The claims above are the MFEM tree's
+measurements, not this project's.
 
 ## The pieces, and why this order
 
@@ -297,13 +310,15 @@ Three artefacts, two audiences:
 nothing acts on it. The NetCDF file is new and needs a `getNetCDFFile()` beside
 them.
 
-**`ψ*` cannot be written on the nonlinear path**, and the reason is MFEM's, not
-meq's: `ReconstructFluxAndPot()` reads only the linear `M_p`, so through Newton
-it returns ~1e15 and `postProcess()` throws rather than pass it on. This is §1 of
-`../mfem-hdg-dev/doc/HDG-DEFECTS-FROM-MEQ.md`. The driver must therefore *not*
-promise `ψ*` unconditionally — write it when the solve was linear, and say
-plainly in the log why it is absent otherwise. Writing a 1e15 field would be the
-worst available outcome.
+**`ψ*` used not to survive the nonlinear path**, returning ~1e15 silently, and
+`postProcess()` throws rather than pass that on. **That is fixed** — §1 of
+`../mfem-hdg-dev/doc/HDG-DEFECTS-FROM-MEQ.md` — so `ψ*` may be written on both
+paths and the driver need not hedge.
+
+`postProcess()`'s refusal should nevertheless stay until meq has *measured* the
+fix on its own benchmarks, because the failure it guards against is silent and
+the guard costs nothing. Retire it in the same change that adds the measurement,
+not before.
 
 ### `B_poloidal` is a relabelling of `q`, not a differentiation
 
@@ -522,13 +537,19 @@ Theta = 0.6
 TargetError = 1.0e-6
 ```
 
-**It inherits a known omission.** On the extension path `η₅` compares `ψ*`
-against a trace pinned to zero rather than the `φ_h` actually imposed, so
-`setTransferredBoundary()` excludes those faces — §4 of the MFEM defects
-document. The driver should call it automatically whenever an extension is
-configured, and the log should say that it did. A user should not have to know
-about an MFEM limitation to get a correct refinement pattern, but they should be
-able to find out that one is in play.
+**It inherits an omission that is now repairable.** On the extension path `η₅`
+compares `ψ*` against a trace pinned to zero rather than the `φ_h` actually
+imposed, so `setTransferredBoundary()` excludes those faces. That was §4 of the
+MFEM defects document, and **`φ_h` is now reachable**:
+`TransferredDatumCoefficient` is the datum, `PathLiftCoefficient` the
+solution-dependent half.
+
+So the honest sequence is: the driver calls `setTransferredBoundary()`
+automatically whenever an extension is configured and says so in the log, and
+that stays true until `η₅` is rebuilt on `TransferredDatumCoefficient` — which
+is stage-6 work, not stage-7, and wants its own convergence measurement. Until
+then a user should not have to know about the exclusion to get a correct
+refinement pattern, but should be able to find out it is in play.
 
 ### What the driver owes the user
 
@@ -648,11 +669,12 @@ know it did.
 while `../mfem-hdg-dev` is on `gf-hdg-dev`. This is the immediate blocker and it
 resolves by a `git checkout` and a `make clean && make -j4` in that tree.
 
-**`Reconstruct()` on the nonlinear path.** §1 of the defects document. Until it
-is fixed, no nonlinear run can write `ψ*` and no nonlinear run can drive the
-estimator, which means **the adaptive loop is linear-only**. That is a real
-restriction on §5 and it should be stated in the driver's log rather than
-discovered.
+**`Reconstruct()` on the nonlinear path — fixed, and unverified here.** §1 of
+the defects document. The adaptive loop is no longer linear-only in principle.
+In practice meq has measured none of it against the new library, and a fix
+verified only by the tree that made it is exactly the situation this project's
+testing stance exists for. Re-run `EstimatorConvergence` on the Newton path
+before believing it.
 
 **Sign conventions, again.** `B_R = -q_z`, `B_Z = +q_r` is a derivation from
 Miller eq (1), and three of this project's four convention questions were settled
