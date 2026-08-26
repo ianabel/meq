@@ -581,20 +581,35 @@ its `sundials.hpp` still used `realtype` and `booleantype`, which SUNDIALS 7
 removed. `miniapps/hdg/darcyop.hpp` already offers `SolverType::KINSol`, so the
 path is exercised in that branch.
 
-**This is now the highest-value outstanding change, not a someday.** Stage 6's
-benchmark work produced three concrete globalisation failures on the GS-2
-sources: the pressure pedestal does not converge at `k = 1` for `h ≥ 0.05`
-(MFEM's element-local nonlinear solves fail outright, `el: N not convered in 100
-iters`), and the current hole (§4.4) does not converge under plain Newton in any
-configuration tried — NaN at `k = 2, n = 16`, and MFEM *aborts the process* on
-`MFEM_VERIFY(IsFinite(norm))` because the tree is built without
-`MFEM_USE_EXCEPTIONS`. Both papers use Anderson-accelerated **Picard**, which
-leaves every local solve linear; meq's Newton puts `∂F/∂ψ = 2c₁r²/σ² = 320r²`
-inside the local solve, and those local problems are indefinite on a coarse
-element. `MFEM_USE_SUNDIALS = NO` is the blocker.
+**SUNDIALS is now built in** (`../mfem/install`), so `KINSolver` is reachable
+without a rebuild. It is no longer the blocker it was, and one reason is worth
+recording because it was measured rather than guessed.
 
-**Confirm with the user before rebuilding `../mfem-hdg-dev`** — it has its own
-active work on `gf-hdg-subdomains-dev`.
+**`MFEM_USE_LAPACK` fixed one of the three globalisation failures by itself.**
+Stage 6 recorded three: the pressure pedestal not converging at `k = 1` for
+`h ≥ 0.05` (`el: N not convered in 100 iters` from MFEM's element-local
+nonlinear solves), and the current hole (§4.4) going NaN and *aborting the
+process* on `MFEM_VERIFY(IsFinite(norm))`. Against a library built with LAPACK
+the pedestal converges at `k = 1, h = 0.05` in 42 iterations, and §4.4 neither
+NaNs nor aborts — it merely fails to converge in 60.
+
+Isolated by building a second MFEM identical but for `MFEM_USE_LAPACK=NO`
+(`../mfem/install-nolapack`): with it the pedestal fails at 60 iterations again,
+exactly as before. So it is LAPACK and nothing else — not SUNDIALS, which meq
+does not yet call, and not the four defect fixes. The plausible mechanism is
+that MFEM's own dense LU is what the local solves fall back on without LAPACK,
+and LAPACK's pivoting survives an indefinite local problem where that does not;
+the mechanism is a reading, the effect is a measurement.
+
+**So the standing claim that `MFEM_USE_SUNDIALS = NO` was *the* blocker was
+wrong** — a third of it was a dense linear algebra question. What is left for
+globalisation is §4.4, which still does not converge. `KINSolver(KIN_LINESEARCH)`
+is now available to try on it.
+
+**Still not enabled: `MFEM_USE_EXCEPTIONS`.** Worth doing before the driver, and
+`DRIVER-PLAN.md` §5 depends on it — a driver cannot report exit code 2 for a
+failed solve if MFEM aborts the process first. It needs a full rebuild of
+`../mfem/install`, being a `config.hpp` change.
 
 ### The suite is 11/13 against the new library, and both failures are informative
 
@@ -621,8 +636,8 @@ test exists**: nothing put `ψ*` and a curved boundary together, because
 works on a fitted rectangle.
 
 **`PedestalConvergence::pedestalNewtonFailsOnCoarseMeshesAtOrderOne` fails
-because the failure it asserts has gone away**, which is what that test is for
-— it prints its own instructions. Newton now converges at `k = 1, h = 0.05` in
+because the failure it asserts has gone away — `MFEM_USE_LAPACK` did it**, see
+*On SUNDIALS*. That is what the test is for; it prints its own instructions. Newton now converges at `k = 1, h = 0.05` in
 42 iterations where MFEM's element-local solves used to give up at
 `el: N not convered in 100 iters`; §4.4, the current hole, no longer produces
 NaN or aborts the process, though it still does not converge in 60. Do not
