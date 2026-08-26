@@ -833,11 +833,34 @@ size — `0` (minimum degree) and `2` (serial METIS) both fail. On meq's matrix
 even `iparm[1] = 3` gives out above `n ≈ 3000`. The agreement to 1e-15 at small
 `n` is what says the calls are right and the library is wrong.
 
-**If it is ever wanted, the route is Intel oneAPI MKL rather than the Debian
-package**, and the reproducibility question comes with it: PARDISO's advantage
-*is* threading, and threaded reduction order is the same non-determinism that
-decides the pedestal knife edge. A 2× solve that makes convergence
-machine-dependent is not obviously a good trade for this code.
+**Worth revisiting against a real oneMKL build, and this is a standing note
+rather than a closed question.** Everything above is a verdict on Debian's
+`intel-mkl` 2020.4.304 and on nothing else. The wrapper exists, the matrix type
+is right, the phase separation is right, and where the library works PARDISO is
+2.2× faster overall and 6.6× on the factorisation while agreeing with UMFPACK to
+1e-15. That is a real result being withheld by a packaging defect from 2020.
+
+What a proper look would involve, none of it done:
+
+* Install current **Intel oneAPI MKL** — its own installer or the
+  `intel-oneapi-mkl` apt repository, *not* Debian's `intel-mkl`.
+* Rebuild `../mfem/install` with `MFEM_USE_MKL_PARDISO=YES`, which needs
+  `MKL_PARDISO_OPT` and `MKL_PARDISO_LIB`, and check that meq's existing MKL
+  BLAS/LAPACK link line does not end up straddling two MKL versions — that is
+  the first thing likely to go wrong.
+* Re-run the comparison at `n = 12544` and `n = 49664`, the sizes that fail
+  today. If those succeed the defect is confirmed as the packaging and the
+  numbers above become the operative ones.
+* Then use MFEM's own `PardisoSolver` rather than hand-rolled `PARDISO()` calls,
+  and settle the reproducibility question below before adopting it.
+
+**And settle that question first, because it is the real objection.** PARDISO's
+advantage *is* the threading, and threaded reduction order is the same
+non-determinism that decides the pedestal knife edge under *On SUNDIALS*. A 2×
+solve that makes convergence machine-dependent is not obviously a good trade for
+a suite that asserts Newton iteration counts. `iparm[33]` (conditional numerical
+reproducibility) exists for this and should be measured, not assumed — it costs
+some of the speed back, and the question is how much.
 
 **And the honest caveat on all of it**: on a hard case the dominant cost is the
 element-local *nonlinear* iteration, not the global solve. 42 outer Newton steps
