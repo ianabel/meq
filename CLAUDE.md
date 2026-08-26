@@ -585,26 +585,47 @@ path is exercised in that branch.
 without a rebuild. It is no longer the blocker it was, and one reason is worth
 recording because it was measured rather than guessed.
 
-**`MFEM_USE_LAPACK` fixed one of the three globalisation failures by itself.**
-Stage 6 recorded three: the pressure pedestal not converging at `k = 1` for
-`h ≥ 0.05` (`el: N not convered in 100 iters` from MFEM's element-local
-nonlinear solves), and the current hole (§4.4) going NaN and *aborting the
-process* on `MFEM_VERIFY(IsFinite(norm))`. Against a library built with LAPACK
-the pedestal converges at `k = 1, h = 0.05` in 42 iterations, and §4.4 neither
-NaNs nor aborts — it merely fails to converge in 60.
+**`MFEM_USE_LAPACK` appears to fix the pedestal, and it does not. It tips a
+marginal iteration by changing the rounding.** This is worth reading before
+anyone concludes the globalisation problem has gone away, because the surface
+evidence says it has.
 
-Isolated by building a second MFEM identical but for `MFEM_USE_LAPACK=NO`
-(`../mfem/install-nolapack`): with it the pedestal fails at 60 iterations again,
-exactly as before. So it is LAPACK and nothing else — not SUNDIALS, which meq
-does not yet call, and not the four defect fixes. The plausible mechanism is
-that MFEM's own dense LU is what the local solves fall back on without LAPACK,
-and LAPACK's pivoting survives an indefinite local problem where that does not;
-the mechanism is a reading, the effect is a measurement.
+Stage 6 recorded three failures: the pressure pedestal not converging at
+`k = 1` for `h ≥ 0.05` (`el: N not convered in 100 iters` from MFEM's
+element-local nonlinear solves), and the current hole (§4.4) going NaN and
+*aborting the process*. Against a LAPACK build the pedestal converges at
+`k = 1, h = 0.05` in 42 iterations; against `../mfem/install-nolapack`, which
+is identical but for that one flag, it fails at 60 as before.
 
-**So the standing claim that `MFEM_USE_SUNDIALS = NO` was *the* blocker was
-wrong** — a third of it was a dense linear algebra question. What is left for
-globalisation is §4.4, which still does not converge. `KINSolver(KIN_LINESEARCH)`
-is now available to try on it.
+**But the flag is not doing what that suggests.** At `h = 0.03333` — the
+well-posed mesh — both builds converge in **23 iterations, the same number**.
+Only the marginal mesh moves, and 42 iterations is itself grinding against the
+five a healthy Newton takes. Two points on one knife edge, not a robustness
+gain.
+
+There is no mechanism for it to be anything else. meq sets `LPrecType::LU`, so
+the local solve really is the dense LU; both implementations partial-pivot on
+the largest `|a|` in the column, which is the same rule; and the singularity
+test that looks like a difference is not one — `Factor( int m, real_t TOL = 0.0 )`
+compares `abs( pivot ) <= TOL` against a default of **zero**, which is `dgetrf`'s
+condition exactly, and `DenseMatrixInverse::Factor` discards the return value
+either way. What is left is `dgetrf`/`dgetrs`/`dgemm` being blocked BLAS-3
+where MFEM's fallbacks are unblocked scalar loops: identical arithmetic, different
+summation order, `O(1e-16)`.
+
+**And the BLAS here is threaded MKL** — `MFEM_EXT_LIBS` carries
+`-lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core -liomp5`, the same library the
+`MKL_THREADING_LAYER` trap is about. Reduction order in a threaded BLAS depends
+on the thread count, so whether that local Newton converges is not merely
+fragile but machine- and environment-dependent. Do not treat 42 iterations as
+reproducible.
+
+**So the earlier claim in this file that `MFEM_USE_SUNDIALS = NO` was the
+blocker stands, and an intermediate claim that LAPACK had fixed a third of it
+was wrong.** Both §4.2 at `h = 0.05` and §4.4 still need globalisation;
+`KINSolver(KIN_LINESEARCH)` is now available to try on them. What LAPACK
+bought is a marginal case that happens to fall the right side of the line on
+this machine today.
 
 **Still not enabled: `MFEM_USE_EXCEPTIONS`.** Worth doing before the driver, and
 `DRIVER-PLAN.md` §5 depends on it — a driver cannot report exit code 2 for a
@@ -636,8 +657,11 @@ test exists**: nothing put `ψ*` and a curved boundary together, because
 works on a fitted rectangle.
 
 **`PedestalConvergence::pedestalNewtonFailsOnCoarseMeshesAtOrderOne` fails
-because the failure it asserts has gone away — `MFEM_USE_LAPACK` did it**, see
-*On SUNDIALS*. That is what the test is for; it prints its own instructions. Newton now converges at `k = 1, h = 0.05` in
+because the failure it asserts stopped reproducing** — LAPACK's rounding tips
+it, see *On SUNDIALS*. **Do not delete it on that evidence.** The underlying
+problem is untouched, the case is marginal either way, and the threaded-MKL
+rounding that decides it is not reproducible across machines. The test is
+measuring a knife edge; what it needs is a rewrite that says so. Newton now converges at `k = 1, h = 0.05` in
 42 iterations where MFEM's element-local solves used to give up at
 `el: N not convered in 100 iters`; §4.4, the current hole, no longer produces
 NaN or aborts the process, though it still does not converge in 60. Do not
