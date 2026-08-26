@@ -440,7 +440,9 @@ namespace tests
 	                             BoundaryFunction boundary,
 	                             int maxNewtonIterations = 30,
 	                             double relativeTolerance = 1.0e-12,
-	                             mfem::Coefficient *guess = nullptr )
+	                             mfem::Coefficient *guess = nullptr,
+	                             meq::GradShafranovSolver::Globalisation glob =
+	                                 meq::GradShafranovSolver::Globalisation::None )
 	{
 		mfem::Mesh mesh = makeMesh( box, n );
 		EquilibriumSource<Equilibrium> source( eq );
@@ -464,6 +466,7 @@ namespace tests
 		solver.setNewtonControl( relativeTolerance, 1.0e-14, maxNewtonIterations );
 		if ( guess )
 			solver.setInitialGuess( *guess );
+		solver.setGlobalisation( glob );
 
 		SelfMeasurement point;
 		point.h = box.width()/static_cast<double>( n );

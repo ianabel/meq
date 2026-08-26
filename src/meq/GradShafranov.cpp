@@ -157,6 +157,7 @@ namespace meq
 		  nonlinearSource( nullptr ),
 		  boundaryData( nullptr ),
 		  initialGuess( nullptr ),
+		  globalisationChoice( Globalisation::None ),
 		  transferPath( nullptr ),
 		  extensionLineOrder( -1 ),
 		  newtonRelativeTolerance( 1.0e-12 ),
@@ -249,6 +250,52 @@ namespace meq
 		nonlinearSource = &fIn;
 	}
 
+	/*
+	 * R( x ) - b as an Operator, because KINSOL will not take a right hand side.
+	 *
+	 * mfem::KINSolver derives from mfem::NewtonSolver, which reads as though the
+	 * two were interchangeable, and CLAUDE.md said so. They are not, and the
+	 * difference is silent: NewtonSolver::Mult( b, x ) forms r = oper( x ) - b,
+	 * while KINSolver::Mult declares its first argument WITHOUT A NAME and solves
+	 * oper( x ) = 0. Hand KINSOL a problem with a non-zero right hand side and it
+	 * converges -- to the solution of a different problem.
+	 *
+	 * This reproduces NewtonSolver's residual exactly, which is what keeps the
+	 * comparison between the two honest: whatever b holds on the essential trace
+	 * rows, both paths subtract the same thing.
+	 *
+	 * GetGradient forwards untouched. The shift is constant, so it contributes
+	 * nothing to the Jacobian.
+	 */
+	class ShiftedResidual : public mfem::Operator
+	{
+		public:
+			ShiftedResidual( mfem::Operator &operatorIn, mfem::Vector const &rhsIn )
+				: mfem::Operator( operatorIn.Height(), operatorIn.Width() ),
+				  residual( operatorIn ), shift( rhsIn )
+			{
+			}
+
+			/// MFEM's spelling, from mfem::Operator.
+			void Mult( mfem::Vector const &x, // NOLINT(readability-identifier-naming)
+			           mfem::Vector &y ) const override
+			{
+				residual.Mult( x, y );
+				y -= shift;
+			}
+
+			/// MFEM's spelling, from mfem::Operator.
+			mfem::Operator &GetGradient( // NOLINT(readability-identifier-naming)
+				mfem::Vector const &x ) const override
+			{
+				return residual.GetGradient( x );
+			}
+
+		private:
+			mfem::Operator &residual;
+			mfem::Vector const &shift;
+	};
+
 	void GradShafranovSolver::setBoundaryData( mfem::Coefficient &boundaryIn )
 	{
 		boundaryData = &boundaryIn;
@@ -269,6 +316,23 @@ namespace meq
 			const_cast<mfem::GridFunction *>( &psiGuess ) );
 		initialGuess = ownedInitialGuess.get();
 		prepared = false;
+	}
+
+	void GradShafranovSolver::setGlobalisation( Globalisation choice )
+	{
+#ifndef MFEM_USE_SUNDIALS
+		if ( choice != Globalisation::None )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::setGlobalisation: MFEM was built without "
+				"MFEM_USE_SUNDIALS, so no KINSOL strategy is available" );
+#endif
+		globalisationChoice = choice;
+		prepared = false;
+	}
+
+	GradShafranovSolver::Globalisation GradShafranovSolver::globalisation() const
+	{
+		return globalisationChoice;
 	}
 
 	void GradShafranovSolver::clearInitialGuess()
@@ -647,31 +711,78 @@ namespace meq
 			// the discrete residual cannot disagree with the residual by
 			// construction. What it can disagree with is the physics, and only a
 			// convergence study against a closed form catches that.
-			mfem::NewtonSolver newton;
-			newton.SetOperator( *reduced.Ptr() );
-			newton.SetSolver( linear );
-			newton.SetMonitor( recorder );
-			newton.SetRelTol( newtonRelativeTolerance );
-			newton.SetAbsTol( newtonAbsoluteTolerance );
-			newton.SetMaxIter( newtonMaxIterations );
-			newton.SetPrintLevel( -1 );
+			// KINSOL ignores the right hand side handed to Mult(), so the shift
+			// has to be in the operator. Built unconditionally and used only on
+			// the KINSOL paths: it costs one subtraction per residual evaluation
+			// and keeps the two paths reading the same residual, which is what
+			// makes a difference between them attributable to the line search.
+			ShiftedResidual shifted( *reduced.Ptr(), traceB );
+
+			std::unique_ptr<mfem::NewtonSolver> nonlinear;
+			bool kinsol = false;
+
+			switch ( globalisationChoice )
+			{
+				case Globalisation::None:
+					nonlinear = std::make_unique<mfem::NewtonSolver>();
+					break;
+#ifdef MFEM_USE_SUNDIALS
+				case Globalisation::LineSearch:
+					nonlinear = std::make_unique<mfem::KINSolver>( KIN_LINESEARCH, true );
+					kinsol = true;
+					break;
+				case Globalisation::KinsolNoLineSearch:
+					nonlinear = std::make_unique<mfem::KINSolver>( KIN_NONE, true );
+					kinsol = true;
+					break;
+#else
+				case Globalisation::LineSearch:
+				case Globalisation::KinsolNoLineSearch:
+					throw std::logic_error(
+						"meq::GradShafranovSolver::solve: a KINSOL globalisation was "
+						"asked for but MFEM was built without MFEM_USE_SUNDIALS" );
+#endif
+			}
+
+			// The reduced operator is DarcyHybridization itself, whose GetGradient()
+			// differentiates the assembled residual rather than the continuous
+			// equation. That is the point of doing it this way: CEDRES++ rejected
+			// the continuous-level derivative because it "seems to blow up if psi
+			// reaches a critical point", and a Jacobian obtained by differentiating
+			// the discrete residual cannot disagree with the residual by
+			// construction. What it can disagree with is the physics, and only a
+			// convergence study against a closed form catches that.
+			//
+			// SetOperator before SetSolver on both paths, because KINSolver
+			// requires that order -- its SetSolver documents "must be called after
+			// SetOperator()" -- and NewtonSolver does not care.
+			if ( kinsol )
+				nonlinear->SetOperator( shifted );
+			else
+				nonlinear->SetOperator( *reduced.Ptr() );
+			nonlinear->SetSolver( linear );
+			nonlinear->SetMonitor( recorder );
+			nonlinear->SetRelTol( newtonRelativeTolerance );
+			nonlinear->SetAbsTol( newtonAbsoluteTolerance );
+			nonlinear->SetMaxIter( newtonMaxIterations );
+			nonlinear->SetPrintLevel( -1 );
 
 			// The Dirichlet data rides in traceX, so the iteration must start from
 			// it rather than from zero. With iterative_mode false NewtonSolver
 			// zeroes x on entry and the boundary condition disappears without a
 			// word -- the residual is masked on those rows, so nothing complains.
-			newton.iterative_mode = true;
+			// KINSolver::Mult has the same line and the same consequence.
+			nonlinear->iterative_mode = true;
 
-			newton.Mult( traceB, traceX );
-			newtonIterationCount = newton.GetNumIterations();
+			// traceB on the Newton path, where Mult() subtracts it; ignored on the
+			// KINSOL paths, where ShiftedResidual has already done so.
+			nonlinear->Mult( traceB, traceX );
+			newtonIterationCount = nonlinear->GetNumIterations();
 
-			// Loudly, and without a recovered solution. A Newton iteration that
-			// ran out of iterations has produced a vector, not an equilibrium, and
-			// on this problem a failure to converge means something is wrong with
-			// the Jacobian rather than with the initial guess -- there is no
-			// globalisation here to have been the thing that failed.
-			if ( !newton.GetConverged() )
-				throw std::runtime_error( "meq::GradShafranovSolver::solve: the Newton iteration did not converge" );
+			// Loudly, and without a recovered solution: an iteration that ran out
+			// of steps has produced a vector, not an equilibrium.
+			if ( !nonlinear->GetConverged() )
+				throw std::runtime_error( "meq::GradShafranovSolver::solve: the non-linear iteration did not converge" );
 		}
 		else
 		{

@@ -566,11 +566,46 @@ step.
 
 ### On SUNDIALS
 
-`mfem::KINSolver` **derives from `mfem::NewtonSolver`** (`linalg/sundials.hpp`).
-So code written against a `NewtonSolver&` takes either, with no abstraction layer
-and no rewrite. Start on the native solver; switch to
-`KINSolver(KIN_LINESEARCH)` when globalisation is wanted, which a stiff pressure
-pedestal will eventually want. `SetJFNK` and `EnableAndersonAcc` come with it.
+`mfem::KINSolver` **derives from `mfem::NewtonSolver`** (`linalg/sundials.hpp`),
+and is reachable through `setGlobalisation()`. `SetJFNK` and
+`EnableAndersonAcc` come with it.
+
+**But it is not a drop-in, and the difference is silent.** This file used to say
+that code written against a `NewtonSolver&` takes either "with no abstraction
+layer and no rewrite". Not so: `NewtonSolver::Mult( b, x )` forms
+`r = oper(x) − b`, while **`KINSolver::Mult` declares its first argument without
+a name** and solves `oper(x) = 0`. meq's trace right-hand side is not zero, so
+handing it straight to KINSOL converges — to the solution of a different
+problem. `ShiftedResidual` in `GradShafranov.cpp` is the adapter; it reproduces
+`NewtonSolver`'s residual exactly, which is what makes a comparison between the
+two paths mean anything. `kinsolAgreesWithNewtonWhereBothConverge` is what
+watches it, and would catch the adapter being dropped or its sign flipped.
+
+**And the line search does not fix the pedestal.** Measured:
+
+| case | Newton | `KIN_LINESEARCH` | `KIN_NONE` |
+|---|---|---|---|
+| §4.2 `k=1, n=16` (`h = 0.05`) | ok, 42 it | **fails at 18** | fails at 6 |
+| §4.2 `k=1, n=24` (`h = 0.033`) | ok, 23 it | ok, 22 it | fails at 11 |
+| §4.3 homogeneous + a guess | trivial branch | trivial branch | — |
+
+It rescues nothing, and on the one case that motivated it it is *worse* than the
+undamped iteration.
+
+**The reason is structural and worth internalising: globalising the outer
+iteration does not globalise the inner ones.** The failure is
+`el: N not convered in 100 iters` — MFEM's **element-local** nonlinear solve,
+one per element per residual evaluation, eliminating flux and potential for a
+given trace. A line search chooses how far to move the *trace*; it cannot make
+the local problems at that trace well posed, and KINSOL never sees them.
+
+What would: damping the **local** solves, which is MFEM's to offer;
+continuation in the source amplitude, so each solve starts from the previous
+answer rather than a cold trace; or **Picard on the outer loop**, which
+evaluates `F` at the previous iterate and leaves every local problem *linear*.
+That last is what both papers do, and this measurement is the argument for it —
+see *Newton, and the obligation it creates*, which is the other side of the same
+trade.
 
 The MFEM tree currently has `MFEM_USE_SUNDIALS = NO`, so this needs a rebuild of
 *that* tree first. It should be nothing worse than a flag: MFEM 4.9.1's SUNDIALS

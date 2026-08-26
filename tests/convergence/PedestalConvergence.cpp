@@ -570,6 +570,79 @@ BOOST_AUTO_TEST_CASE( anInitialGuessReachesTheIterateButNotTheOtherBranch )
  * essential trace values would change the boundary condition, which a
  * convergence rate would accommodate without complaint.
  */
+/*
+ * KINSOL'S LINE SEARCH DOES NOT FIX THE PEDESTAL, AND THE REASON IS STRUCTURAL.
+ *
+ * CLAUDE.md carried this as the highest-value outstanding change for a while:
+ * meq's Newton fails on section 4.2 at k = 1 for h >= 0.05, the fix is
+ * globalisation, and KINSolver( KIN_LINESEARCH ) is the globalisation. SUNDIALS
+ * is now built in and setGlobalisation() makes it one line. Measured:
+ *
+ *     case                     Newton        KIN_LINESEARCH   KIN_NONE
+ *     4.2 k=1 n=16 (h=0.05)    ok, 42 it     FAIL at 18       FAIL at 6
+ *     4.2 k=1 n=24 (h=0.033)   ok, 23 it     ok, 22 it        FAIL at 11
+ *     4.3 homogeneous + guess  trivial       trivial          --
+ *
+ * It fixes nothing, and on the one case that matters it is WORSE than the
+ * undamped iteration it was meant to rescue.
+ *
+ * WHY. The failure is not in the outer iteration. It is
+ * "el: N not convered in 100 iters" -- MFEM's ELEMENT-LOCAL non-linear solve,
+ * one per element per residual evaluation, eliminating the flux and potential
+ * for a given trace. A line search on the outer step chooses how far to move the
+ * trace; it does not change the fact that the local problems at that trace are
+ * indefinite on a coarse element and their own Newton diverges. KINSOL never
+ * sees them. Globalising the outer iteration does not globalise the inner ones.
+ *
+ * WHAT WOULD. Damping the LOCAL solves, which is MFEM's to offer; or
+ * continuation in the source amplitude, so each solve starts from the previous
+ * one's answer rather than from a cold trace; or Picard on the outer loop, which
+ * evaluates F at the previous iterate and leaves every local problem LINEAR.
+ * That last is what both papers do, and this measurement is the argument for it.
+ *
+ * WHAT IS ASSERTED HERE is only that the KINSOL path works and agrees, on a
+ * problem both solvers converge on. The table above is prose because every
+ * count in it sits on the same rounding knife edge
+ * pedestalNewtonFailsOnCoarseMeshesAtOrderOne documents.
+ */
+BOOST_AUTO_TEST_CASE( kinsolAgreesWithNewtonWhereBothConverge )
+{
+	meq::analytic::PressurePedestal const eq
+		= meq::analytic::PressurePedestal::pedestal();
+
+	using G = meq::GradShafranovSolver::Globalisation;
+
+	// n = 24, h = 0.0333: the well-posed mesh, where both converge.
+	SelfMeasurement const plain = meq::tests::measureSelf(
+		eq, standardBox(), 1, 24, cloud(), pedestalDatum, 60, 1.0e-12,
+		nullptr, G::None );
+	SelfMeasurement const damped = meq::tests::measureSelf(
+		eq, standardBox(), 1, 24, cloud(), pedestalDatum, 60, 1.0e-12,
+		nullptr, G::LineSearch );
+
+	std::printf( "\n  section 4.2 k = 1, h = 0.0333: Newton %d iterations, "
+	             "KIN_LINESEARCH %d\n"
+	             "    psi in [%.6e, %.6e] and [%.6e, %.6e]\n",
+	             plain.newtonIterations, damped.newtonIterations,
+	             plain.psiMin, plain.psiMax, damped.psiMin, damped.psiMax );
+	std::fflush( stdout );
+
+	BOOST_TEST_REQUIRE( plain.converged );
+	BOOST_TEST_REQUIRE( damped.converged,
+	                    "KIN_LINESEARCH did not converge on the well-posed mesh, "
+	                    "which would mean the KINSOL path is wired up wrongly "
+	                    "rather than merely unhelpful" );
+
+	// The same discrete solution by two routes. This is what would catch
+	// ShiftedResidual getting the sign or the shift wrong -- KINSOL ignores the
+	// right hand side handed to Mult(), so without that adapter it would converge
+	// happily to the answer of a different problem.
+	BOOST_TEST( damped.psiMax == plain.psiMax,
+	            boost::test_tools::tolerance( 1.0e-6 ) );
+	BOOST_TEST( damped.psiMin == plain.psiMin,
+	            boost::test_tools::tolerance( 1.0e-6 ) );
+}
+
 BOOST_AUTO_TEST_CASE( anInitialGuessDoesNotMoveTheConvergedAnswer )
 {
 	meq::analytic::TransportBarrier const eq

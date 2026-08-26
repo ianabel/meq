@@ -398,6 +398,45 @@ namespace meq
 			/// True once setExtension() has been called.
 			bool isExtended() const;
 
+			/// Which non-linear solver drives the trace system.
+			enum class Globalisation
+			{
+				/// mfem::NewtonSolver: full steps, no line search. Quadratic when
+				/// it works, and it is what every rate in the suite was measured
+				/// with.
+				None,
+				/// KINSolver( KIN_LINESEARCH ): Newton with SUNDIALS' line search
+				/// backtracking. For the stiff GS-2 sources whose element-local
+				/// solves an undamped step drives out of their basin.
+				LineSearch,
+				/// KINSolver( KIN_NONE ): the same machinery taking full steps, so
+				/// that a difference between None and LineSearch can be attributed
+				/// to the line search rather than to SUNDIALS.
+				KinsolNoLineSearch
+			};
+
+			/**
+			 * Choose the non-linear solver. Globalisation::None is the default and
+			 * is what every convergence rate in the suite was measured with.
+			 *
+			 * KINSOL IS NOT QUITE A DROP-IN, despite mfem::KINSolver deriving from
+			 * mfem::NewtonSolver, and the difference is silent. NewtonSolver::Mult(
+			 * b, x ) solves oper( x ) - b = 0; KINSolver::Mult ignores its first
+			 * argument entirely -- it is unnamed in the signature -- and solves
+			 * oper( x ) = 0. meq's trace right hand side is not zero, so the
+			 * residual has to be shifted before KINSOL sees it. solve() wraps it;
+			 * see ShiftedResidual in the .cpp.
+			 *
+			 * @throws std::logic_error if a KINSOL option is asked for and MFEM was
+			 *         built without MFEM_USE_SUNDIALS, rather than silently falling
+			 *         back to an undamped Newton and reporting rates for a solver
+			 *         nobody asked for.
+			 */
+			void setGlobalisation( Globalisation choice );
+
+			/// Which solver solve() will use.
+			Globalisation globalisation() const;
+
 			/// Newton's stopping rule and iteration cap. Ignored on the linear
 			/// path. The defaults are tight on purpose: a Newton iteration that
 			/// stops early looks exactly like one that converges slowly, and this
@@ -624,6 +663,8 @@ namespace meq
 			/// The transferring paths, or null on the fitted path. Borrowed.
 			mfem::TransferPath *transferPath;
 			int extensionLineOrder;
+
+			Globalisation globalisationChoice;
 
 			double newtonRelativeTolerance;
 			double newtonAbsoluteTolerance;
