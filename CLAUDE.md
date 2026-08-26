@@ -610,6 +610,31 @@ difficulty disappears. Their design is coherent; meq's Newton bought
 `∂F/∂ψ` in the global Jacobian and paid for it with `N_elements` nonlinear
 subproblems, and nothing measured that price until now.
 
+**And the canonical HDG paper says the ordering is wrong.** Nguyen, Peraire &
+Cockburn wrote the method this branch implements, and `refs/HDG-NPC-2.pdf` is
+their treatment of *nonlinear* problems. §2.6:
+
+> Next, we apply the Newton–Raphson method to solve the above system … we then
+> find an increment `(δq_h, δu_h, δû_h)` …
+
+Newton is applied to the **full** `(q, u, û)` system, giving eq (14) — a *linear*
+system in the increments. The hybridization is then applied to **that**,
+eqs (16)–(18), producing `K δΛ = F` for the trace increment alone, and the local
+elimination is a matrix inverse of block-diagonal `A`, `B`, `D`: "the inverse can
+be computed on each element independently … it results from applying the LDG
+method to solve the **linearized** PDE".
+
+**Every local operation is a linear solve. The canonical method has no
+element-local nonlinear iteration at all.** meq has one because it condenses
+first and linearises second, which is the opposite order.
+
+**So the fix has a name: linearise, then condense.** Whether MFEM can be asked to
+do it that way is the open question — `DarcyHybridization` is built around the
+other order (`LocalNLOperator`, `SetLocalNLSolver`, `LSsolveType`), and its
+`GetGradient` differentiates a residual that already required the local
+nonlinear solves to converge. That is an MFEM-side capability question and
+belongs in `../mfem-hdg-dev/doc/`, not here.
+
 **What follows, in order of how targeted it is.**
 
 1. **The local solver was never chosen.** `SetLocalNLSolver` offers `Newton`,
@@ -617,10 +642,12 @@ subproblems, and nothing measured that price until now.
    problems that are failing. First measurement on §4.2 at `k = 1, h = 0.05`:
    Newton 42 outer iterations, LBFGS 36, **LBB 25**. `setLocalSolver()` now
    exposes it. This is the cheapest lever and it was sitting unused.
-2. **Prove the diagnosis with a control**: assemble the same problem *without*
+2. **Prove it with a control**: assemble the same problem *without*
    `EnableHybridization` and Newton the full `(q, ψ, ψ̂)` system, which has no
-   local solves at all. If that converges where the hybridized one fails, this
-   section is established rather than argued. Nothing has run this yet.
+   local solves at all — the same nonlinear structure NPC use, minus the
+   condensation. If that converges where the hybridized one fails, this section
+   is measured rather than argued. Nothing has run this yet, and it is the
+   cheapest decisive experiment available.
 3. **Picard, or Picard–Newton**, keeping the local problems linear. The papers'
    route, and the fallback if 1 and 2 do not close the gap.
 4. **Continuation in the source amplitude**, which also addresses the trivial
