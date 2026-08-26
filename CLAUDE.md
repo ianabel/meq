@@ -797,6 +797,48 @@ taken only on the fitted path. Both are wrong wherever `Γ` is curved.
    factorise in 0.4 s. AMG earns its place in 3D or in parallel, and serial MFEM
    has none anyway — `HypreBoomerAMG` needs MPI.
 
+### PARDISO: faster where it runs, and it does not run here
+
+Checked because MKL is already linked, so it would cost no new dependency.
+**The answer is no, not with this MKL** — and the reason is a library defect
+rather than anything about meq.
+
+MFEM has a serial wrapper, `linalg/pardiso.hpp`, behind `MFEM_USE_MKL_PARDISO`.
+Note that `INSTALL` documents only `MFEM_USE_MKL_CPARDISO`, the *cluster*
+version, so the serial one is easy to miss. It offers `REAL_NONSYMMETRIC` (11)
+and `REAL_STRUCTURE_SYMMETRIC` (1) — and (1) is exactly meq's extension-path
+matrix, whose sparsity is symmetric while its values are not.
+
+Two things make it attractive in principle. Its API is **phase-separated** —
+11 analysis, 22 factorisation, 33 solve — so the symbolic reuse that is meq's
+one unqualified win is a one-line condition rather than the restructure UMFPACK's
+wrapper needs. And it is **threaded**, where UMFPACK is serial apart from BLAS.
+Measured on meq's own trace matrix, at the sizes where it works:
+
+| `n` | UMFPACK | PARDISO | numeric factorisation | agreement |
+|---|---|---|---|---|
+| 832 | 2.8 ms | 1.9 ms | 2.0 → 0.7 ms | 2e-15 |
+| 3,200 | 18.9 ms | **8.6 ms** | 13.9 → **2.1 ms** | 6e-15 |
+| 7,104 | 44.1 ms | **error −3** | — | — |
+| 12,544 | 90.9 ms | **error −3** | — | — |
+
+2.2× overall and 6.6× on the factorisation, agreeing with UMFPACK to 1e-15 — and
+then it stops working just below the sizes meq actually runs.
+
+**The failure is Debian's `intel-mkl` 2020.4.304, not meq and not the calling
+code.** Demonstrated on a plain 5-point Laplacian with no MFEM linked at all:
+`n = 1600` succeeds, `n = 12544` fails with the same `-3`, and of the three
+reorderings only `iparm[1] = 3` (parallel nested dissection) survives at that
+size — `0` (minimum degree) and `2` (serial METIS) both fail. On meq's matrix
+even `iparm[1] = 3` gives out above `n ≈ 3000`. The agreement to 1e-15 at small
+`n` is what says the calls are right and the library is wrong.
+
+**If it is ever wanted, the route is Intel oneAPI MKL rather than the Debian
+package**, and the reproducibility question comes with it: PARDISO's advantage
+*is* threading, and threaded reduction order is the same non-determinism that
+decides the pedestal knife edge. A 2× solve that makes convergence
+machine-dependent is not obviously a good trade for this code.
+
 **And the honest caveat on all of it**: on a hard case the dominant cost is the
 element-local *nonlinear* iteration, not the global solve. 42 outer Newton steps
 each running thousands of local Newtons is where the pedestal's time goes.
