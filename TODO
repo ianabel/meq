@@ -612,6 +612,72 @@ polynomial degree are chosen for accuracy and not for patience.
     parallel meq is a different project with its own tree (../mfem-hdg-dev-par);
     do not conflate "fast" with "parallel" here.
 
+  ON-NODE PARALLELISM OVER THE ELEMENT-LOCAL WORK, which is the biggest
+  structural opportunity and is entirely unexploited.
+
+  Every element's elimination is independent of every other -- that is what
+  static condensation IS -- so the loops are embarrassingly parallel. They are
+  also, today, entirely sequential: fem/darcy/darcyhybridization.cpp has twelve
+  `for ( int el = ... )` loops and ZERO mfem::forall, MFEM_FORALL or #pragma omp
+  between them. On the stiff sources this is where the time goes, since each
+  outer iteration runs one non-linear solve per element (see CLAUDE.md, "Why
+  meq's Newton struggles"), and on the Picard paths one linear solve per element
+  per iteration.
+
+  It is the natural GPU-offload candidate too: thousands of independent dense
+  problems of 9x9 to 30x30, which is a batched-dense workload and exactly what
+  cuBLAS's batched LU is for.
+
+  TWO THINGS BLOCK A NAIVE ATTEMPT, and both are worth knowing before starting:
+
+  * THE INTEGRATORS ARE NOT THREAD SAFE, and say so.
+    fem/darcy/bilininteg_hdg.hpp:215 carries `// these are not thread-safe!`
+    over the scratch Vectors -- tr_shape, shape1, shape2, vu, nor, nh, ni and
+    the rest are members reused across calls. An OpenMP loop over elements would
+    race on them. Fixing that means either per-thread scratch or making the
+    integrators stateless, and it is MFEM's to do.
+  * The local solve reaches DenseMatrix, LUFactors and DenseMatrixInverse, which
+    are host code. mfem::forall would need device-capable equivalents -- MFEM has
+    batched dense kernels, but the darcy local path does not use them.
+
+  So this is an upstream capability, not a flag, and it is probably the largest
+  single win available. Worth writing up for ../mfem-hdg-dev/doc/ the way the
+  symbolic reuse and linearise-then-condense plans were.
+
+  A THREADED OR OFFLOADED SOLVER FOR THE FACE-COUPLED MATRIX.
+
+  UMFPACK is sequential apart from its BLAS calls, and the trace system is the
+  other half of the cost. What MFEM already wraps, and whether it applies here:
+
+  * cuDSS -- linalg/cudss.{hpp,cpp}, MFEM_USE_CUDSS. NVIDIA's direct sparse
+    solver, and the best fit on paper: CuDSSSolver has a SERIAL constructor, so
+    no MPI is dragged in, and it already carries SetReorderingReuse( bool ),
+    "reuse of the symbolic factorization for multiple operators" -- the exact
+    feature UMFPackSolver lacks and that
+    ../mfem-hdg-dev/doc/DIRECT-SOLVER-SYMBOLIC-REUSE.md asks for. There is
+    in-tree precedent for that API, which is worth citing in that plan.
+  * AmgX -- linalg/amgxsolver.{hpp,cpp}, MFEM_USE_AMGX. GPU AMG. Its serial
+    constructor exists but the class is MPI-centric, and AMG wants a symmetric
+    definite operator, which the trace matrix is ONLY on the fitted path -- on
+    the extension path it is unsymmetric with relative asymmetry 0.54, see
+    CLAUDE.md. So AmgX is a fitted-path option at best.
+  * MKL PARDISO -- threaded, 2.2x on meq's matrices, and broken above n ~ 3000
+    on this machine's MKL. Its own TODO entry above.
+  * SuperLU_DIST, MUMPS, STRUMPACK -- MFEM wraps all three, and all three are
+    distributed solvers whose point is MPI. Wrong tool for a serial code.
+
+  THIS MACHINE CAN ACTUALLY TEST IT: an RTX 2070 SUPER, 8 GB, with CUDA 13.3 at
+  /usr/local/cuda. So MFEM_USE_CUDA and MFEM_USE_CUDSS are a rebuild away rather
+  than a hardware purchase.
+
+  BUT MEASURE FP64 BEFORE BELIEVING ANY OF IT. MFEM here is MFEM_USE_DOUBLE, and
+  the 2070 SUPER is a consumer Turing card whose double-precision rate is 1/32
+  of its single -- roughly 0.2 TFLOP/s FP64, which a modern desktop CPU is
+  within a small factor of. A GPU direct solve in double precision on this card
+  may lose to UMFPACK outright. That is a measurement, not a reason not to try,
+  but it means the first cuDSS run should be a timing comparison and not an
+  adoption.
+
   SO THE ORDER IS:
 
   1. Profile a representative solve -- perf, or MFEM_USE_CALIPER which is a
@@ -621,8 +687,12 @@ polynomial degree are chosen for accuracy and not for patience.
   2. Take the symbolic reuse, which is planned and needs no new dependency.
   3. Measure LSsolveType properly across the benchmark suite rather than on one
      case, and set the default from that.
-  4. Only then ask whether PA and a device are worth the discretisation change
-     they would demand.
+  4. Thread the element-local loops, or get them threaded upstream. Independent
+     of everything above, and the largest structural win.
+  5. Try cuDSS on the trace system as a TIMING COMPARISON against UMFPACK, in
+     double precision on the card actually present, before adopting anything.
+  6. Only then ask whether PA and a device for the ASSEMBLY are worth the
+     discretisation change they would demand.
 
   AND A CHEAP CHECK FIRST: confirm the release build is what everyone thinks it
   is. meq builds -O3 -DNDEBUG; MFEM's install carries MFEM_USE_MEMALLOC = YES,
