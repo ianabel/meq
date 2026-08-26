@@ -542,6 +542,86 @@ BOOST_AUTO_TEST_CASE( mccarthyNeedsExactlyOneNewtonStep )
 /// linearly convergent one anywhere. Only triples above the round-off floor are
 /// considered: once the residual reaches machine precision relative to the first
 /// one, the ratios are noise and the order estimated from them is meaningless.
+/*
+ * EVERY NON-LINEAR PATH REACHES THE SAME EXACT SOLUTION.
+ *
+ * meq now has three ways to close the semi-linear problem, and they have
+ * genuinely different nonlinear structure -- Newton puts F on the non-linear
+ * potential mass, where hybridization makes each element's elimination its own
+ * Newton; the two Picard paths freeze F at the previous iterate and put it on
+ * the right hand side, so the potential block is linear and no element-local
+ * non-linear solve exists at all. See CLAUDE.md.
+ *
+ * Agreeing with each other would not be enough -- three routes through the same
+ * wrong sign would agree perfectly. Example 5 has a closed form, so this
+ * measures all three against it: same mesh, same degree, same Dirichlet data,
+ * and the L2 error must come out at the DISCRETISATION error, identically,
+ * because the discretisation is identical and only the path to it differs.
+ *
+ * This is what would catch FrozenSource getting the -1/r or the sign convention
+ * wrong. Those are applied in setSource( Coefficient & ) for the linear path and
+ * re-applied for the frozen one; a mismatch would leave the Picard paths
+ * converging beautifully to the wrong function, which is precisely the failure
+ * mode this project's testing stance exists for.
+ */
+BOOST_AUTO_TEST_CASE( everyNonlinearPathReachesTheSameExactSolution )
+{
+	using G = meq::GradShafranovSolver::Globalisation;
+	meq::analytic::ManufacturedNonlinear const eq
+		= meq::analytic::ManufacturedNonlinear::example5();
+	EquilibriumSource<meq::analytic::ManufacturedNonlinear> const source( eq );
+
+	mfem::FunctionCoefficient exact( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.psi( x( 0 ), x( 1 ) );
+	} );
+
+	struct Run { char const *name; G globalisation; double damping; };
+	Run const runs[] = {
+		{ "Newton          ", G::None,           1.0 },
+		{ "Anderson-Picard ", G::AndersonPicard, 1.0 },
+		{ "Picard, w = 0.5 ", G::PicardOnly,     0.5 },
+	};
+
+	double reference = -1.0;
+	std::printf( "\n  Example 5 at k = 2, n = 16, by three non-linear paths\n" );
+
+	for ( Run const &run : runs )
+	{
+		mfem::Mesh mesh = makeMesh( 16 );
+		meq::GradShafranovSolver solver( mesh, 2 );
+		solver.setSource( source );
+		solver.setBoundaryData( exact );
+		solver.setGlobalisation( run.globalisation );
+		solver.setPicardDamping( run.damping );
+		// Generous: the Picard paths need hundreds where Newton needs four, and
+		// the point here is where they land, not how fast.
+		solver.setNewtonControl( 1.0e-10, 1.0e-14, 500 );
+
+		BOOST_REQUIRE_NO_THROW( solver.solve() );
+
+		double const error = solver.potentialError( exact );
+		std::printf( "    %s %3d iterations, L2 error %.6e\n",
+		             run.name, solver.newtonIterations(), error );
+		std::fflush( stdout );
+
+		if ( reference < 0.0 )
+			reference = error;
+		else
+			BOOST_TEST( std::abs( error - reference ) <= 1.0e-6*reference,
+			            "path " << run.name << " reached L2 error " << error
+			            << " where Newton reached " << reference
+			            << " -- the same discretisation should give the same error "
+			            "whatever iteration found it" );
+	}
+
+	// And it must be the discretisation error, not some larger number all three
+	// happen to share. k = 2 on this mesh: measured 2.63e-5.
+	BOOST_TEST( reference < 1.0e-4,
+	            "the common error is " << reference << ", too large to be the "
+	            "k = 2 discretisation error on this mesh" );
+}
+
 BOOST_AUTO_TEST_CASE( newtonConvergesQuadratically )
 {
 	meq::analytic::ManufacturedNonlinear const eq
