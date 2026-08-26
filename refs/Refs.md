@@ -130,6 +130,22 @@ slowly or fail outright, vertically unstable plasmas being the case that forced
 the field to Newton-type methods. That is a stronger statement than "Newton is
 faster", and it is the one to cite if the choice is ever questioned.
 
+**But the comparison that actually matters is not Newton against Picard — it is
+what the discretisation does to the nonlinear structure.** Serino et al. below
+build a Newton solver *in MFEM* and report it robust where Picard fails, on a
+harder (free-boundary) problem than meq's. The difference is that their `ψ` is a
+single global `H¹` unknown, so `F(ψ)` enters one global residual and Newton
+linearises once. meq's hybridization eliminates flux and potential element by
+element, which turns a nonlinear `F` into a nonlinear solve **per element per
+residual evaluation**. That is where meq's stiff cases fail, and it is why the
+HDG-GS papers' Picard is a coherent choice rather than a conservative one:
+Picard evaluates `F` at the previous iterate and leaves every local solve
+linear. `CLAUDE.md` carries the measurements.
+
+| Reference | URL (doi or arxiv) | Short Description | File Name |
+| --- | --- | --- | --- |
+| ✔ arXiv:2407.03499 (2025) | https://arxiv.org/abs/2407.03499 | Serino, Q. Tang, X.-Z. Tang, Kolev & Lipnikov, **an adaptive Newton-based free-boundary Grad–Shafranov solver, built on MFEM** — Kolev is an MFEM core developer. The reference that reframes meq's nonlinear difficulty. §3: `ψ ∈ H¹(Ω)`, standard shape functions, eq (3.1) one global weak form, eq (3.7) one linearised system per Newton step, with the Jacobian of the domain-dependent plasma term obtained by **shape calculus** rather than by differentiating a discrete residual — the opposite choice from meq's and CEDRES++'s, and worth reading against CEDRES++ §5, which rejects the analytic route because it "seems to blow up if ψ reaches a critical point". Two statements bear directly on meq: Newton succeeds where "conventional Picard-based solvers fail to converge" on a Taylor state, so Picard is not the safe default; and their own earlier fixed-boundary solver is described as "significantly easier" than this one, so meq cannot explain its difficulty by the boundary condition. Also the reference for preconditioning a GS Newton system — block factorisation with AMG on the elliptic sub-blocks | MFEM-GS-Newton.pdf |
+
 | Reference | URL (doi or arxiv) | Short Description | File Name |
 | --- | --- | --- | --- |
 | SIAM Journal on Numerical Analysis 53 (2015) 805–819 | https://doi.org/10.1137/130919398 | Toth & Kelley, convergence analysis for Anderson acceleration. HDG-GS-1's [45], and the source of its **depth `m = 2`**: they report no gain beyond `m ≥ 3`, and HDG-GS-1's own experiments agreed. The reference for what Anderson does and does not guarantee, which matters if it is ever used as a fallback when Newton stalls. Paywalled | AndersonAcceleration.pdf |

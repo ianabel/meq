@@ -158,6 +158,7 @@ namespace meq
 		  boundaryData( nullptr ),
 		  initialGuess( nullptr ),
 		  globalisationChoice( Globalisation::None ),
+		  localSolverChoice( LocalSolver::Newton ),
 		  transferPath( nullptr ),
 		  extensionLineOrder( -1 ),
 		  newtonRelativeTolerance( 1.0e-12 ),
@@ -327,6 +328,13 @@ namespace meq
 				"MFEM_USE_SUNDIALS, so no KINSOL strategy is available" );
 #endif
 		globalisationChoice = choice;
+		prepared = false;
+	}
+
+	void GradShafranovSolver::setLocalSolver( LocalSolver choice )
+	{
+		localSolverChoice = choice;
+		built = false;
 		prepared = false;
 	}
 
@@ -525,8 +533,22 @@ namespace meq
 			// the default GMRES on the local Jacobian, so that neither the inner
 			// rate nor an inner linear tolerance can be what a stalled outer
 			// history is blamed on.
+			mfem::DarcyHybridization::LSsolveType localType =
+				mfem::DarcyHybridization::LSsolveType::Newton;
+			switch ( localSolverChoice )
+			{
+				case LocalSolver::Newton:
+					localType = mfem::DarcyHybridization::LSsolveType::Newton;
+					break;
+				case LocalSolver::Lbfgs:
+					localType = mfem::DarcyHybridization::LSsolveType::LBFGS;
+					break;
+				case LocalSolver::Lbb:
+					localType = mfem::DarcyHybridization::LSsolveType::LBB;
+					break;
+			}
 			darcy->GetHybridization()->SetLocalNLSolver(
-				mfem::DarcyHybridization::LSsolveType::Newton, 100, 1.0e-12, 1.0e-16, -1 );
+				localType, 100, 1.0e-12, 1.0e-16, -1 );
 			darcy->GetHybridization()->SetLocalNLPreconditioner(
 				mfem::DarcyHybridization::LPrecType::LU );
 		}

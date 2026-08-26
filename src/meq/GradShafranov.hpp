@@ -437,6 +437,21 @@ namespace meq
 			/// Which solver solve() will use.
 			Globalisation globalisation() const;
 
+			/// Which solver eliminates the flux and potential on each element.
+			/// This is a DIFFERENT iteration from the one setGlobalisation()
+			/// chooses, and on a stiff source it is the one that fails: see
+			/// CLAUDE.md, "The nonlinearity is inside the local solve".
+			enum class LocalSolver
+			{
+				Newton,   ///< undamped, MFEM's LSsolveType::Newton
+				Lbfgs,    ///< limited-memory BFGS, which line searches
+				Lbb       ///< Barzilai-Borwein
+			};
+
+			/// Choose it. Newton is the default and is what every rate in the
+			/// suite was measured with.
+			void setLocalSolver( LocalSolver choice );
+
 			/// Newton's stopping rule and iteration cap. Ignored on the linear
 			/// path. The defaults are tight on purpose: a Newton iteration that
 			/// stops early looks exactly like one that converges slowly, and this
@@ -665,6 +680,7 @@ namespace meq
 			int extensionLineOrder;
 
 			Globalisation globalisationChoice;
+			LocalSolver localSolverChoice;
 
 			double newtonRelativeTolerance;
 			double newtonAbsoluteTolerance;

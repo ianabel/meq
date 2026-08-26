@@ -564,6 +564,68 @@ three are in the suite: the finite-difference check on the assembled Jacobian
 order, and the McCarthy rung, whose affine source must finish in exactly one
 step.
 
+### Why meq's Newton struggles where other Newton solvers do not
+
+**The answer is hybridization, not Newton and not the boundary condition.** This
+is the most important thing in this file about the nonlinear solve, and it took
+three falsified hypotheses to reach.
+
+Three Grad–Shafranov codes solve this equation by Newton and report it robust:
+
+| | discretisation | nonlinear systems per Newton step |
+|---|---|---|
+| Serino, Tang, Tang, Kolev & Lipnikov (`refs/MFEM-GS-Newton.pdf`) | CG, `ψ ∈ H¹`, MFEM | **1, global** |
+| CEDRES++ (`refs/CEDRES.pdf`) | CG finite elements | **1, global** |
+| FreeGSNKE | 4th-order finite differences, Newton–Krylov | **1, global** |
+| **meq** | **hybridized HDG** | **1 global + one per element** |
+
+**In a CG or finite-difference discretisation `ψ` is one global unknown vector
+and `F(ψ)` enters only the global residual.** Newton linearises once. Serino et
+al. eq (3.1) is `a(ψ, v_i) = l(I, v_i)` and eq (3.7) is one linearised system per
+step — that is the whole nonlinear structure.
+
+**Hybridization changes that structure.** Static condensation expresses `(q, ψ)`
+element by element in terms of `ψ̂`, and when `F` depends on `ψ` that elimination
+is *itself a nonlinear solve, once per element per residual evaluation*. meq runs
+`N_elements` independent Newtons inside every outer residual, none of them
+globalised, and **any one of them failing poisons the whole residual**. That is
+what `el: N not convered in 100 iters` is, and it is why globalising the outer
+iteration does nothing — see *On SUNDIALS*.
+
+**Two comfortable explanations are wrong, and the paper says so directly.**
+Newton is not the problem: Serino et al. built their Newton solver precisely
+because "conventional Picard-based solvers fail to converge" on the Taylor state,
+and report the residual reaching 1e-6 "in a small handful of iterations". And
+free boundary is not the problem either — they note they had already built a
+fixed-boundary adaptive solver and that the fixed problem is "significantly
+easier". **meq is doing the easier problem and finding it harder**, which is the
+red flag that this section exists to explain.
+
+**It also explains the GS papers' choice.** Sánchez-Vizuet and co. use
+Anderson-accelerated Picard and keep `F` as opaque problem data so the solver
+"relies only on the discretization of the toroidal operator `Δ*`". In a
+hybridized method that is not fastidiousness — Picard evaluates `F` at the
+previous iterate, which leaves **every local solve linear** and the whole
+difficulty disappears. Their design is coherent; meq's Newton bought
+`∂F/∂ψ` in the global Jacobian and paid for it with `N_elements` nonlinear
+subproblems, and nothing measured that price until now.
+
+**What follows, in order of how targeted it is.**
+
+1. **The local solver was never chosen.** `SetLocalNLSolver` offers `Newton`,
+   `LBFGS` and `LBB`, and meq hardcoded `Newton` — undamped, on exactly the
+   problems that are failing. First measurement on §4.2 at `k = 1, h = 0.05`:
+   Newton 42 outer iterations, LBFGS 36, **LBB 25**. `setLocalSolver()` now
+   exposes it. This is the cheapest lever and it was sitting unused.
+2. **Prove the diagnosis with a control**: assemble the same problem *without*
+   `EnableHybridization` and Newton the full `(q, ψ, ψ̂)` system, which has no
+   local solves at all. If that converges where the hybridized one fails, this
+   section is established rather than argued. Nothing has run this yet.
+3. **Picard, or Picard–Newton**, keeping the local problems linear. The papers'
+   route, and the fallback if 1 and 2 do not close the gap.
+4. **Continuation in the source amplitude**, which also addresses the trivial
+   branch.
+
 ### On SUNDIALS
 
 `mfem::KINSolver` **derives from `mfem::NewtonSolver`** (`linalg/sundials.hpp`),

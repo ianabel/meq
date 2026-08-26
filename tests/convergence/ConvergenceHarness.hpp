@@ -442,7 +442,9 @@ namespace tests
 	                             double relativeTolerance = 1.0e-12,
 	                             mfem::Coefficient *guess = nullptr,
 	                             meq::GradShafranovSolver::Globalisation glob =
-	                                 meq::GradShafranovSolver::Globalisation::None )
+	                                 meq::GradShafranovSolver::Globalisation::None,
+	                             meq::GradShafranovSolver::LocalSolver local =
+	                                 meq::GradShafranovSolver::LocalSolver::Newton )
 	{
 		mfem::Mesh mesh = makeMesh( box, n );
 		EquilibriumSource<Equilibrium> source( eq );
@@ -467,6 +469,7 @@ namespace tests
 		if ( guess )
 			solver.setInitialGuess( *guess );
 		solver.setGlobalisation( glob );
+		solver.setLocalSolver( local );
 
 		SelfMeasurement point;
 		point.h = box.width()/static_cast<double>( n );
