@@ -156,6 +156,7 @@ namespace meq
 		  linearSource( nullptr ),
 		  nonlinearSource( nullptr ),
 		  boundaryData( nullptr ),
+		  initialGuess( nullptr ),
 		  transferPath( nullptr ),
 		  extensionLineOrder( -1 ),
 		  newtonRelativeTolerance( 1.0e-12 ),
@@ -251,6 +252,35 @@ namespace meq
 	void GradShafranovSolver::setBoundaryData( mfem::Coefficient &boundaryIn )
 	{
 		boundaryData = &boundaryIn;
+	}
+
+	void GradShafranovSolver::setInitialGuess( mfem::Coefficient &psiGuess )
+	{
+		ownedInitialGuess.reset();
+		initialGuess = &psiGuess;
+		prepared = false;
+	}
+
+	void GradShafranovSolver::setInitialGuess( mfem::GridFunction const &psiGuess )
+	{
+		// GridFunctionCoefficient takes a non-const pointer but only reads, which
+		// is why the public interface can promise const.
+		ownedInitialGuess = std::make_unique<mfem::GridFunctionCoefficient>(
+			const_cast<mfem::GridFunction *>( &psiGuess ) );
+		initialGuess = ownedInitialGuess.get();
+		prepared = false;
+	}
+
+	void GradShafranovSolver::clearInitialGuess()
+	{
+		ownedInitialGuess.reset();
+		initialGuess = nullptr;
+		prepared = false;
+	}
+
+	bool GradShafranovSolver::hasInitialGuess() const
+	{
+		return initialGuess != nullptr;
 	}
 
 	void GradShafranovSolver::setExtension( mfem::TransferPath &pathIn,
@@ -441,6 +471,61 @@ namespace meq
 		built = true;
 	}
 
+	/*
+	 * Interpolate a coefficient onto the hybrid trace space.
+	 *
+	 * There is no library call for this. GridFunction::ProjectCoefficient loops
+	 * over fes->GetNE() -- VOLUME elements -- so on a trace space it never
+	 * reaches a face dof; and ProjectBdrCoefficient reaches boundary faces only,
+	 * which is where almost none of the dofs are. Checked in
+	 * mfem/linalg/../fem/gridfunc.cpp; this is the one place in this file where
+	 * the obvious call is the wrong one.
+	 *
+	 * The pattern is the one Estimator.cpp uses to read a trace value back:
+	 * GetFaceElement gives the face's own element, GetFaceVDofs its dofs, and
+	 * the two agree on orientation because every face carries its own dofs. The
+	 * coefficient is evaluated through the VOLUME transformation of the owning
+	 * element rather than the face's own, so that a GridFunctionCoefficient --
+	 * which needs an element to look a value up in -- works as well as a
+	 * FunctionCoefficient does.
+	 *
+	 * This is nodal interpolation, not an L2 projection. For a starting point
+	 * the difference is immaterial, and DG_Interface_FECollection is nodal with
+	 * VALUE map type, so the nodes are where the dofs live.
+	 */
+	void GradShafranovSolver::projectOntoTrace( mfem::Coefficient &coeff,
+	                                            mfem::GridFunction &target ) const
+	{
+		mfem::Mesh &mesh = *traceFes->GetMesh();
+		mfem::Array<int> vdofs;
+		mfem::Vector values;
+
+		for ( int f = 0; f < mesh.GetNumFaces(); ++f )
+		{
+			mfem::FaceElementTransformations *ftr =
+				mesh.GetFaceElementTransformations( f );
+			if ( !ftr )
+				continue;
+
+			mfem::FiniteElement const *faceFe = traceFes->GetFaceElement( f );
+			if ( !faceFe )
+				continue;
+
+			traceFes->GetFaceVDofs( f, vdofs );
+			int const dof = faceFe->GetDof();
+			values.SetSize( dof );
+
+			mfem::IntegrationRule const &nodes = faceFe->GetNodes();
+			for ( int i = 0; i < dof; ++i )
+			{
+				ftr->SetAllIntPoints( &nodes.IntPoint( i ) );
+				values( i ) = coeff.Eval( *ftr->Elem1, ftr->GetElement1IntPoint() );
+			}
+
+			target.SetSubVector( vdofs, values );
+		}
+	}
+
 	void GradShafranovSolver::prepare()
 	{
 		if ( !linearSource && !nonlinearSource )
@@ -458,6 +543,23 @@ namespace meq
 
 		solution = 0.0;
 		rhs = 0.0;
+
+		// The starting point, before the Dirichlet datum and after the zeroing,
+		// so that g_D wins on the essential dofs and the guess supplies the rest.
+		// See setInitialGuess() for why this is needed at all: with a source that
+		// vanishes at psi = 0, starting from the Dirichlet data alone lands Newton
+		// on psi == 0 and it stops there, converged.
+		//
+		// The trace is the half that matters, being Newton's actual unknown. The
+		// potential block is seeded as well, for MFEM's element-local non-linear
+		// solves, which start from whatever the block vector holds -- see the
+		// header. The flux block is left at zero: nothing iterates from it, and a
+		// guess for psi says nothing about q without differentiating it.
+		if ( initialGuess && nonlinearSource )
+		{
+			projectOntoTrace( *initialGuess, traceGf );
+			potentialGf.ProjectCoefficient( *initialGuess );
+		}
 
 		// The Dirichlet datum lives on the trace, and only on the trace: the flux
 		// right hand side stays zero because the essential trace condition, not a

@@ -459,8 +459,11 @@ BOOST_AUTO_TEST_CASE( everySourceVanishesAtZeroFlux )
 ///
 /// This is not a solver defect. It is the reason
 /// refs/HDG-GradShafranov.pdf Algorithm 2 says "psi^0 ; // Non-trivial initial
-/// guess" and the reason GradShafranovSolver wants a setInitialGuess(). It is
-/// asserted here so that the day one appears, this test fails and says so.
+/// guess".
+///
+/// setInitialGuess() now exists, so this measures the DEFAULT rather than a
+/// missing feature: no guess supplied, still the trivial branch. What a guess
+/// does and does not buy is the next test.
 BOOST_AUTO_TEST_CASE( homogeneousDataLandsOnTheTrivialBranch )
 {
 	meq::analytic::PressurePedestal const eq
@@ -486,6 +489,127 @@ BOOST_AUTO_TEST_CASE( homogeneousDataLandsOnTheTrivialBranch )
 	            "homogeneous data" );
 	BOOST_TEST( std::abs( point.psiMax ) < 1.0e-14 );
 	BOOST_TEST( std::abs( point.psiMin ) < 1.0e-14 );
+}
+
+/*
+ * A GUESS REACHES THE ITERATE, AND IT IS NOT ENOUGH. Both halves measured.
+ *
+ * setInitialGuess() puts a starting point into the trace, which is Newton's
+ * actual unknown -- see meq::GradShafranovSolver::projectOntoTrace, and note
+ * that no library call does this. That half works: Newton takes steps where it
+ * previously took none.
+ *
+ * IT DOES NOT ESCAPE THE TRIVIAL BRANCH, which is what it was wanted for. On
+ * section 4.3 with the paper's own homogeneous data, sweeping the amplitude of
+ * a sin-sin bump on the box at k = 2, n = 8:
+ *
+ *     amplitude   outcome
+ *       0.05      converges in  4 iterations, to psi ~ 1e-12
+ *       0.20      converges in  5 iterations, to psi ~ 3e-16
+ *       0.40      element-local solves fail, 60 iterations
+ *       0.60      the same
+ *       1.00      the same
+ *
+ * Small guesses are pulled back to psi == 0; guesses large enough to have a
+ * chance of clearing it hit the globalisation failure instead. No amplitude
+ * works.
+ *
+ * WHY, AND WHY IT IS NOT A DEFECT IN THE GUESS. Newton converges to the root
+ * nearest its iterate, and psi == 0 is a root, so a starting point helps only
+ * if it lands inside the other root's basin. Picard differs in exactly the
+ * relevant way: from a non-zero psi^0 it evaluates F( psi^0 ) != 0 and is
+ * carried away from zero rather than back to it. That is why both papers use
+ * Anderson-accelerated Picard, and why GS-1's Algorithm 2 needs nothing more
+ * than "psi^0 ; // Non-trivial initial guess" for it to work.
+ *
+ * So these four benchmarks need a guess AND globalisation --
+ * KINSolver( KIN_LINESEARCH ), or continuation in the source amplitude. A guess
+ * is necessary infrastructure, not a sufficient fix, and the non-homogeneous
+ * ramp the rest of this file uses stays the workaround until then.
+ */
+BOOST_AUTO_TEST_CASE( anInitialGuessReachesTheIterateButNotTheOtherBranch )
+{
+	meq::analytic::TransportBarrier const eq
+		= meq::analytic::TransportBarrier::barrier();
+	meq::tests::Rectangle const box = standardBox();
+
+	mfem::FunctionCoefficient bump( [ &box ]( mfem::Vector const &x )
+	{
+		double const u = ( x( 0 ) - box.rMin )/box.width();
+		double const v = ( x( 1 ) - box.zMin )/box.height();
+		return 0.2*std::sin( M_PI*u )*std::sin( M_PI*v );
+	} );
+
+	SelfMeasurement const cold = meq::tests::measureSelf(
+		eq, box, 2, 8, cloud(), zeroDatum, 60, 1.0e-10 );
+	SelfMeasurement const warm = meq::tests::measureSelf(
+		eq, box, 2, 8, cloud(), zeroDatum, 60, 1.0e-10, &bump );
+
+	std::printf( "\n  section 4.3, homogeneous data: no guess %d iterations, "
+	             "with a guess %d\n", cold.newtonIterations, warm.newtonIterations );
+	std::fflush( stdout );
+
+	BOOST_TEST( cold.newtonIterations == 0,
+	            "without a guess Newton should stop at once on the trivial branch" );
+	BOOST_TEST( warm.newtonIterations > 0,
+	            "Newton took no steps from a non-zero guess, so the guess never "
+	            "reached the trace -- which is what projectOntoTrace() is for" );
+
+	// The limitation, asserted so it fails the day globalisation lands and the
+	// comment above has to be rewritten.
+	BOOST_TEST( std::abs( warm.psiMax ) < 1.0e-6,
+	            "psi came back at " << warm.psiMax << ", away from the trivial "
+	            "branch. If this now fails, a guess alone is escaping it, and both "
+	            "the comment above and DRIVER-PLAN.md section 1 are out of date" );
+}
+
+/*
+ * AND A GUESS MUST NOT MOVE THE ANSWER, only the path to it. That is what
+ * separates a starting point from data, and it is the check that would catch
+ * projectOntoTrace() writing into the wrong dofs: a guess leaking into the
+ * essential trace values would change the boundary condition, which a
+ * convergence rate would accommodate without complaint.
+ */
+BOOST_AUTO_TEST_CASE( anInitialGuessDoesNotMoveTheConvergedAnswer )
+{
+	meq::analytic::TransportBarrier const eq
+		= meq::analytic::TransportBarrier::barrier();
+	meq::tests::Rectangle const box = standardBox();
+
+	mfem::FunctionCoefficient bump( [ &box ]( mfem::Vector const &x )
+	{
+		double const u = ( x( 0 ) - box.rMin )/box.width();
+		double const v = ( x( 1 ) - box.zMin )/box.height();
+		return 0.05*std::sin( M_PI*u )*std::sin( M_PI*v );
+	} );
+
+	// Small on purpose. A guess is meant to perturb the PATH, and on these stiff
+	// sources a large one destabilises MFEM's element-local solves outright --
+	// 0.35 here takes the same problem from 7 iterations to a failure at 60. That
+	// is the globalisation limit again, not a property of the guess, and this
+	// test is about invariance rather than about robustness.
+
+	// barrierDatum, so there is a non-trivial solution to converge to.
+	SelfMeasurement const cold = meq::tests::measureSelf(
+		eq, box, 2, 16, cloud(), barrierDatum, 60, 1.0e-12 );
+	SelfMeasurement const warm = meq::tests::measureSelf(
+		eq, box, 2, 16, cloud(), barrierDatum, 60, 1.0e-12, &bump );
+
+	std::printf( "  section 4.3 with barrierDatum: cold %d iterations, "
+	             "psi in [%.6e, %.6e]\n"
+	             "                                 warm %d iterations, "
+	             "psi in [%.6e, %.6e]\n",
+	             cold.newtonIterations, cold.psiMin, cold.psiMax,
+	             warm.newtonIterations, warm.psiMin, warm.psiMax );
+	std::fflush( stdout );
+
+	BOOST_TEST_REQUIRE( cold.converged );
+	BOOST_TEST_REQUIRE( warm.converged );
+
+	BOOST_TEST( warm.psiMax == cold.psiMax,
+	            boost::test_tools::tolerance( 1.0e-6 ) );
+	BOOST_TEST( warm.psiMin == cold.psiMin,
+	            boost::test_tools::tolerance( 1.0e-6 ) );
 }
 
 /*

@@ -428,12 +428,19 @@ namespace tests
 	/// result on @a cloud. @a boundary supplies the Dirichlet datum, which for
 	/// these benchmarks is a design choice rather than a restriction of a known
 	/// solution -- see the callers.
+	/// @param guess  optional starting point for Newton, as psi( r, z ). Null
+	///               is the default and means "start from the Dirichlet data",
+	///               which for a source vanishing at psi = 0 lands on the trivial
+	///               branch -- see meq::GradShafranovSolver::setInitialGuess and
+	///               homogeneousDataLandsOnTheTrivialBranch in
+	///               PedestalConvergence.cpp.
 	template<typename Equilibrium, typename BoundaryFunction>
 	SelfMeasurement measureSelf( Equilibrium const &eq, Rectangle const &box,
 	                             int order, int n, SampleCloud const &cloud,
 	                             BoundaryFunction boundary,
 	                             int maxNewtonIterations = 30,
-	                             double relativeTolerance = 1.0e-12 )
+	                             double relativeTolerance = 1.0e-12,
+	                             mfem::Coefficient *guess = nullptr )
 	{
 		mfem::Mesh mesh = makeMesh( box, n );
 		EquilibriumSource<Equilibrium> source( eq );
@@ -455,6 +462,8 @@ namespace tests
 		// carries the measurement: 1.9e-14 absolute against a first residual of
 		// 1.55e-3.
 		solver.setNewtonControl( relativeTolerance, 1.0e-14, maxNewtonIterations );
+		if ( guess )
+			solver.setInitialGuess( *guess );
 
 		SelfMeasurement point;
 		point.h = box.width()/static_cast<double>( n );

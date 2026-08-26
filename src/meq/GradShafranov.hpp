@@ -277,6 +277,56 @@ namespace meq
 			void setBoundaryData( mfem::Coefficient &boundaryIn );
 
 			/**
+			 * Start Newton from @a psiGuess rather than from the Dirichlet data
+			 * alone. Borrowed; it must outlive the next solve().
+			 *
+			 * WHY THIS EXISTS. Every source of
+			 * refs/HDG-GradShafranov-Adaptive.pdf sections 4.2 to 4.5 satisfies
+			 * F( r, 0 ) = 0, so with homogeneous Dirichlet data psi == 0 SOLVES
+			 * the discrete problem. Newton starts from the Dirichlet data, lands
+			 * on that branch, and stops in zero iterations with an identically
+			 * zero residual -- which looks exactly like success. GS-1's
+			 * Algorithm 2 opens `psi^0 ; // Non-trivial initial guess` for this
+			 * reason and no other.
+			 *
+			 * WHERE THE GUESS ACTUALLY GOES, which is not where it looks.
+			 * Newton's unknown is the TRACE: solve() runs it on the condensed
+			 * system and the volume unknowns are recovered afterwards. So a guess
+			 * written as psi( r, z ) has to reach M_h, and it does through an
+			 * L2( e ) projection onto each face -- see projectOntoTrace() in the
+			 * .cpp, and note that GridFunction::ProjectCoefficient does NOT do
+			 * this: it loops over volume elements and never touches a face dof.
+			 *
+			 * The potential block is seeded too. That is not for Newton, which
+			 * never reads it, but for MFEM's ELEMENT-LOCAL non-linear solves,
+			 * which iterate from whatever the block vector holds. Whether it
+			 * helps them is an open question -- see CLAUDE.md on the pressure
+			 * pedestal -- and it is free to try.
+			 *
+			 * ORDER MATTERS. The Dirichlet datum is applied AFTER the guess, so
+			 * the boundary condition always wins on essential dofs. A guess that
+			 * disagrees with g_D there is simply overwritten rather than fought
+			 * over.
+			 *
+			 * Ignored on the linear path, where the solve is direct and a
+			 * starting point means nothing.
+			 */
+			void setInitialGuess( mfem::Coefficient &psiGuess );
+
+			/// The same, from a potential computed elsewhere -- a previous solve
+			/// on this or another mesh. Borrowed; it must outlive the next
+			/// solve(). Evaluated through a GridFunctionCoefficient, so a guess
+			/// on a DIFFERENT mesh needs the caller to have transferred it first.
+			void setInitialGuess( mfem::GridFunction const &psiGuess );
+
+			/// Forget the guess; the next solve() starts from the Dirichlet data
+			/// alone, which is the default.
+			void clearInitialGuess();
+
+			/// True once setInitialGuess() has been called and not cleared.
+			bool hasInitialGuess() const;
+
+			/**
 			 * Carry a homogeneous Dirichlet datum from the curved Gamma to the
 			 * polygonal Gamma_h, by extension from the subdomain.
 			 *
@@ -558,6 +608,18 @@ namespace meq
 			Source const *nonlinearSource;
 			mfem::Coefficient *boundaryData;
 			std::unique_ptr<mfem::Coefficient> potentialRhsCoeff;
+
+			/// The Newton starting point, or null. Borrowed when it came in as a
+			/// Coefficient; owned when setInitialGuess( GridFunction ) had to
+			/// wrap one. Only one of the two is ever live.
+			mfem::Coefficient *initialGuess;
+			std::unique_ptr<mfem::Coefficient> ownedInitialGuess;
+
+			/// Interpolate a coefficient onto the trace space, face by face.
+			/// GridFunction::ProjectCoefficient cannot: it loops volume elements.
+			/// See the .cpp.
+			void projectOntoTrace( mfem::Coefficient &coeff,
+			                       mfem::GridFunction &target ) const;
 
 			/// The transferring paths, or null on the fitted path. Borrowed.
 			mfem::TransferPath *transferPath;

@@ -141,10 +141,18 @@ pedestal at `k = 1, h = 0.05`, which is the case that fails today.
 
 ### Acceptance
 
-* All four GS-2 §4.2–4.5 sources posed with *homogeneous* data — as their own
-  paper poses them — and a non-trivial guess, converging to a solution with
-  `‖ψ‖ > 0`. Today they need a non-homogeneous ramp to avoid the trivial branch;
-  that workaround should become unnecessary and the tests should say so.
+**Done, and one criterion below was wrong.** `setInitialGuess()`,
+`clearInitialGuess()` and `projectOntoTrace()` are in, with three tests in
+`PedestalConvergence.cpp`.
+
+* ~~All four GS-2 §4.2–4.5 sources posed with *homogeneous* data and a
+  non-trivial guess, converging to `‖ψ‖ > 0`.~~ **Not achieved, and not
+  achievable with a guess alone.** Measured on §4.3: a bump of amplitude 0.05
+  or 0.20 converges in 4–5 iterations straight back to `ψ ~ 1e-16`, and 0.40
+  and above fail in the element-local solves. Newton goes to the root nearest
+  its iterate and `ψ ≡ 0` is a root; Picard is carried *away* from zero because
+  it evaluates `F(ψ⁰) ≠ 0`, which is why the papers need only a guess and meq
+  needs a guess **and** globalisation. The ramp stays the workaround.
 * The existing convergence tables unchanged to six significant figures with a
   guess supplied. A starting point must not move the answer — only the path. This
   is the same invariance the `+5%` Jacobian experiment relied on, and it is the
