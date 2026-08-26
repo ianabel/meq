@@ -668,6 +668,145 @@ NaN or aborts the process, though it still does not converge in 60. Do not
 delete that test until the cause is settled, since its prose explains the
 failure in terms that would then be wrong.
 
+## The linear solves, and what they should be
+
+A hybridized HDG scheme needs exactly two linear solvers: one for the global
+face-coupled trace system, one for the small dense per-cell systems. meq has a
+**third**, and it is not an oversight — it is the price of Newton.
+
+| | what meq uses | |
+|---|---|---|
+| global trace | `UMFPackSolver`, `UMFPACK_ORDERING_METIS` | unsymmetric sparse LU |
+| *fallback, no SuiteSparse* | GMRES | **unpreconditioned** on the Newton path, `GSSmoother` on the linear path |
+| per-cell dense | MFEM `LUFactors`, partial-pivot LU | as a 2×2 block: LU on the flux block `A`, local Schur `S`, LU on `S` |
+| **per-cell nonlinear** | element-local `NewtonSolver`, 100 iters, rtol 1e-12, `LPrecType::LU` | one iteration *per element per residual evaluation* |
+
+**The third one exists because meq uses Newton rather than Picard.** Picard
+evaluates `F` at the previous iterate and leaves every local problem linear —
+one dense factorisation and done. Newton puts `∂F/∂ψ` inside the local problem
+and makes it nonlinear. That is the same trade recorded under *Newton, and the
+obligation it creates*, and it is where the pedestal fails: `el: N not convered
+in 100 iters` is this solver, not the outer one.
+
+### The trace matrix is symmetric on the fitted path and is not on the extension path
+
+**And that is not a defect — it is what the extension technique is.** This is the
+single most important thing in this section, and it was nearly missed by
+measuring only the easy configuration.
+
+`GradShafranov.cpp` justifies GMRES over CG with "the hybridized trace system is
+small but not symmetric positive definite in this sign convention". Measured on
+the **fitted** benchmark that is true as written and misleading:
+
+| `k` | `n` | nnz/row | rel `\|A_ij − A_ji\|` | Rayleigh quotients, free subspace |
+|---|---|---|---|---|
+| 1 | 416 | 9.4 | 2.2e-16 | 200/200 negative, largest −1.44 |
+| 2 | 624 | 14.1 | 3.6e-16 | 200/200 negative, largest −1.30 |
+| 3 | 832 | 18.8 | 6.9e-16 | 200/200 negative, largest −1.28 |
+
+**Symmetric to round-off and negative definite** — so on a fitted mesh `−A` is
+SPD and every symmetric method applies. The only positive diagonals are exactly
+the essential trace dofs (64/96/128 of them, all exactly `1.0`), which is
+`DIAG_ONE` putting a unit row in.
+
+The **Newton Jacobian is the same** on that path: free–free block symmetric to
+5e-16, every Rayleigh quotient in `[−1.91, −1.30]`, for `∂F/∂ψ` of either sign.
+Its whole-matrix asymmetry reads 0.52, but that is entirely `GetGradient`
+zeroing the essential rows without eliminating the matching columns — a
+boundary-condition artefact, not a property of the operator. **Measure the
+free–free block, not the assembled matrix**, or this looks like a wildly
+unsymmetric problem.
+
+**On the extension path none of that holds.** Same measurement, same code, a
+curved `Γ`:
+
+| | fitted | extension |
+|---|---|---|
+| free–free rel `\|A_ij − A_ji\|` | 2e-16 | **5.4e-1** |
+| Rayleigh quotients | 200/200 negative | 200/200 negative, largest −0.898 |
+
+The cause is `HDGExtensionIntegrator`, and it is structural rather than a bug.
+Its element matrix is
+
+```
+elmat( dof*di + i, dof*dj + j ) += w * nor(di) * shape(i) * L(j, dj)
+```
+
+— an outer product of the normal trace of basis `i` against the **path lifting**
+of basis `j`, two unrelated vectors. Measured on `Γ_h` faces its relative
+asymmetry is exactly **1.0**, and it is **16.8× larger** than the `(r q, v)`
+domain term it sits beside, which is itself symmetric to the last bit
+(`max|A_ij − A_ji| = 0`). `DarcyForm::AssembleFluxMassBdrFaces()` deposits it
+straight into the hybridization's per-element flux block, so it reaches both the
+local factorisation and, through the Schur complement, the global trace matrix.
+
+**So the transfer technique costs self-adjointness.** The continuous
+Grad–Shafranov operator is self-adjoint; `Δ*` with a transferred Dirichlet datum
+is not, because the datum on a face depends on the flux along a path leaving the
+element. That is a property of Cockburn–Solano transfer, not of this
+implementation, and it means **meq's headline configuration is genuinely
+non-symmetric**. UMFPACK's unsymmetric LU is the right solver for it.
+
+What survives on both paths is that the **symmetric part is negative definite** —
+every Rayleigh quotient measured is negative on either path. So `−A` has positive
+definite symmetric part, which is what gives GMRES a convergence bound and what
+makes a preconditioned Krylov method reasonable at all.
+
+### A quarter of every Newton step is thrown away
+
+`UMFPackSolver::SetOperator` declares `void *Symbolic` as a **local variable**,
+and `NewtonSolver::Mult` calls `prec->SetOperator( *grad )` every iteration
+(`linalg/solvers.cpp:2129`). The sparsity pattern does not change between Newton
+steps, so the symbolic analysis is recomputed and discarded each time — and meq
+asks for METIS ordering, which makes it more expensive than the default.
+
+| `n` | symbolic | numeric | backsolve | symbolic share |
+|---|---|---|---|---|
+| 12,544 | 20.8 ms | 72.1 ms | 10.9 ms | **22%** |
+| 49,664 | 104.2 ms | 325.6 ms | 54.6 ms | **24%** |
+
+### What to do, in order of value
+
+**The asymmetry finding reorders this list, and cancels two items.** An earlier
+version ranked Cholesky second and a per-cell Cholesky fourth, on measurements
+taken only on the fitted path. Both are wrong wherever `Γ` is curved.
+
+1. **Reuse the symbolic factorisation across Newton steps** — about 23% off each
+   step for no numerical change, and it is valid on **both** paths, which is why
+   it is now the only unqualified win. `Symbolic` is not a member of MFEM's
+   wrapper, so this needs either a patch there or meq's own UMFPACK wrapper.
+2. **Precondition the Newton path's GMRES fallback.** It has none, while the
+   linear path's fallback has a `GSSmoother`. That inconsistency is a plain bug
+   and is worth fixing whatever else happens; without SuiteSparse the Newton
+   path is currently running unpreconditioned GMRES on every step.
+3. **Symmetric methods — fitted path only.** CG or MINRES on `−A`, and a CHOLMOD
+   Cholesky, are all correct on a fitted mesh and all invalid on the extension
+   path. CHOLMOD is already linked (`-lcholmod` via SuiteSparse) but MFEM wraps
+   only UMFPACK and KLU. Worth having only if fitted-domain runs become a
+   workload in their own right; the driver's target is curved boundaries, where
+   none of it applies.
+4. **~~Cholesky on the per-cell flux block~~ — do not.** `(r q, v)` is SPD, so
+   this looked like a free 2×. It is wrong on the extension path for exactly the
+   reason above: `AssembleFluxMassBdrFaces()` puts a term with relative
+   asymmetry 1.0, sixteen times larger than the mass term, into the very block
+   `LU_A` factors. A correct version would have to branch on whether an
+   extension is configured, for at best a small gain on 9×9 to 30×30 blocks.
+   Not worth a conditional in that inner loop. **`LUFactors` is the right
+   choice and should stay.**
+5. **Do not reach for AMG.** At 2D serial sizes direct wins: 50k trace dofs
+   factorise in 0.4 s. AMG earns its place in 3D or in parallel, and serial MFEM
+   has none anyway — `HypreBoomerAMG` needs MPI.
+
+**And the honest caveat on all of it**: on a hard case the dominant cost is the
+element-local *nonlinear* iteration, not the global solve. 42 outer Newton steps
+each running thousands of local Newtons is where the pedestal's time goes.
+Globalisation is a bigger lever than anything above.
+
+**The transferable lesson**, which is the same one the Solov'ev coefficients
+taught: a property measured on the easy configuration is not a property of the
+code. Symmetry held to 2e-16 on a fitted rectangle and failed at 5.4e-1 on the
+geometry meq is actually for.
+
 ## Traps
 
 **Every run needs `MKL_THREADING_LAYER=GNU`.**
