@@ -642,12 +642,32 @@ belongs in `../mfem-hdg-dev/doc/`, not here.
    problems that are failing. First measurement on §4.2 at `k = 1, h = 0.05`:
    Newton 42 outer iterations, LBFGS 36, **LBB 25**. `setLocalSolver()` now
    exposes it. This is the cheapest lever and it was sitting unused.
-2. **Prove it with a control**: assemble the same problem *without*
-   `EnableHybridization` and Newton the full `(q, ψ, ψ̂)` system, which has no
-   local solves at all — the same nonlinear structure NPC use, minus the
-   condensation. If that converges where the hybridized one fails, this section
-   is measured rather than argued. Nothing has run this yet, and it is the
-   cheapest decisive experiment available.
+2. **The control has been run, and it confirms this section.** Not by dropping
+   hybridization — that gives a different method, LDG with a weakly imposed
+   datum, so it would confound the discretisation with the solve. The variable
+   is isolated instead by **Picard on meq's own linear path**: identical mesh,
+   spaces, hybridization and `τ`, but `F` evaluated at the previous iterate and
+   handed to `setSource( Coefficient & )`, which puts it on the right-hand side
+   and makes the potential block linear. **Every local elimination is then a
+   linear solve and there are no local Newtons at all.** On §4.2 at
+   `k = 1, h = 0.05`, the case that fails:
+
+   | method | local solves | outcome |
+   |---|---|---|
+   | Newton, meq's | **nonlinear**, one per element per residual | **fails** |
+   | Picard, `ω = 1` | linear | stalls at 3.5e-1 |
+   | **Picard, `ω = 0.5`** | **linear** | **2.8e-8 and falling** |
+
+   So the mesh is fine, the discretisation is fine, and the problem *is* solvable
+   there. What fails is Newton-with-nonlinear-local-solves specifically. Note the
+   `ω = 1` row: undamped Picard stalls, which is the weakness CEDRES++ and
+   Serino et al. both report and the reason the GS papers use **Anderson**-
+   accelerated Picard rather than plain. It is also why this control needed the
+   relaxation to mean anything — plain Picard failing would have proved nothing.
+
+   **This is a diagnosis, not a recommendation.** Relaxed Picard took 200
+   iterations to reach 2.8e-8 where Newton takes 42 on the mesh Newton manages.
+   The point is what it isolates, not that meq should adopt it.
 3. **Picard, or Picard–Newton**, keeping the local problems linear. The papers'
    route, and the fallback if 1 and 2 do not close the gap.
 4. **Continuation in the source amplitude**, which also addresses the trivial
