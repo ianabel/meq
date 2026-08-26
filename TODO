@@ -641,8 +641,20 @@ polynomial degree are chosen for accuracy and not for patience.
     batched dense kernels, but the darcy local path does not use them.
 
   So this is an upstream capability, not a flag, and it is probably the largest
-  single win available. Worth writing up for ../mfem-hdg-dev/doc/ the way the
-  symbolic reuse and linearise-then-condense plans were.
+  single win available. WRITTEN UP:
+  ../mfem-hdg-dev/doc/HDG-ELEMENT-LOCAL-PARALLELISM.md, which maps all twelve
+  loops, separates the two hazards (loop-hoisted scratch, which is easy, from
+  genuine write conflicts on trace dofs shared between adjacent elements, which
+  is not), and notes two pieces MFEM already has: Mesh::GetElementColoring for a
+  conflict-free schedule, and linalg/batched/ -- BatchedLinAlg::LUFactor and
+  LUSolve with native, cuBLAS and MAGMA backends. InvertA() collapses to a single
+  batched call with no data movement at all, DenseTensor's non-owning constructor
+  matching the existing offset layout and the pivot conventions already agreeing.
+
+  That plan also records the interaction with linearise-then-condense: under NPC's
+  ordering the per-element work becomes a LINEAR solve of fixed size instead of a
+  nonlinear one of unpredictable cost, which is a far better batched and device
+  workload. Doing that one first makes this one easier.
 
   A THREADED OR OFFLOADED SOLVER FOR THE FACE-COUPLED MATRIX.
 
