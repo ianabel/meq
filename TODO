@@ -551,3 +551,80 @@ anything about the method.
   today's library, needs no new dependency, and is planned in
   ../mfem-hdg-dev/doc/DIRECT-SOLVER-SYMBOLIC-REUSE.md. Do that first; PARDISO is
   the speculative upside behind it.
+
+
+================================================================================
+Performance: profile first, then decide which of MFEM's backends can apply
+Raised 2026-08-26. The goal is to be fast enough that mesh resolution and
+polynomial degree are chosen for accuracy and not for patience.
+================================================================================
+
+  NOTHING HAS EVER BEEN PROFILED. Every number below is a structural reading of
+  the build or a measurement taken for some other purpose, and the first task is
+  to replace them with a profile of a representative solve. Choosing a backend
+  before knowing where the time goes is how a week disappears into a 3% win.
+
+  WHAT IS ALREADY KNOWN, from measurements taken for other reasons:
+
+  1. The global trace solve. UMFPACK with METIS ordering, measured at 91 ms for
+     n = 12544 and 443 ms for n = 49664 (k = 3). Of every factorisation, 22-24%
+     is the SYMBOLIC phase, which UMFPackSolver::SetOperator recomputes on every
+     Newton step for a sparsity pattern that never changes. Planned in
+     ../mfem-hdg-dev/doc/DIRECT-SOLVER-SYMBOLIC-REUSE.md. Roughly a quarter of
+     the linear cost of a Newton solve, and the single cheapest win identified.
+
+  2. The element-local solves, which dominate the STIFF cases rather than the
+     easy ones. On section 4.2 at k = 1, h = 0.05 the outer iteration count went
+     42 -> 36 -> 25 for LSsolveType Newton -> LBFGS -> LBB, each outer iteration
+     carrying one local solve per element. setLocalSolver() exposes the choice;
+     which is fastest has been measured only on that one case.
+
+  3. PARDISO is 2.2x faster than UMFPACK on meq's own matrices where it runs,
+     and does not run above n ~ 3000 on this machine's MKL. Its own TODO entry
+     above.
+
+  WHAT MFEM'S PERFORMANCE BACKENDS CAN AND CANNOT DO HERE, and the answer is
+  mostly "not yet", which is worth knowing before anyone gets excited:
+
+  * PARTIAL ASSEMBLY IS NOT IMPLEMENTED FOR THE HDG INTEGRATORS. DarcyForm has
+    SetAssemblyLevel() and forwards it to every sub-form, so the interface is
+    there -- but fem/darcy/bilininteg_hdg.cpp and darcyhybridization.cpp contain
+    ZERO AssemblePA or AddMultPA methods. HDGDiffusionIntegrator,
+    NormalTraceJumpIntegrator and the rest are FULL-assembly only. Asking for
+    AssemblyLevel::PARTIAL today gets an unimplemented path, not a fast one.
+    Writing those kernels is real work and belongs upstream, not in meq.
+
+  * PARTIAL ASSEMBLY WANTS TENSOR-PRODUCT ELEMENTS AND meq USES TRIANGLES. The
+    performance case for PA is sum factorisation, which needs quads in 2D. meq
+    meshes are triangles throughout -- Mesh::MakeCartesian2D with
+    Element::TRIANGLE -- because that is what the GS papers use and what the
+    extension technique's transfer paths were measured on. A serious PA effort
+    would have to answer the quad question first, and that is a discretisation
+    decision with its own convergence consequences, not a build flag.
+
+  * THE INSTALL HAS NO DEVICE BACKEND. ../mfem/install is built with
+    MFEM_USE_CUDA, RAJA, OCCA, CEED, OPENMP and SIMD all NO. Enabling them is a
+    rebuild, but see the two points above: without PA kernels for the HDG
+    integrators there is nothing for a device to run, and mfem::Device would
+    accelerate the parts of the assembly that are not the bottleneck.
+
+  * meq IS SERIAL BY DESIGN. MFEM_USE_MPI = NO, and CLAUDE.md records why. A
+    parallel meq is a different project with its own tree (../mfem-hdg-dev-par);
+    do not conflate "fast" with "parallel" here.
+
+  SO THE ORDER IS:
+
+  1. Profile a representative solve -- perf, or MFEM_USE_CALIPER which is a
+     build flag away. Get the split between assembly, the global factorisation,
+     the local solves and the reconstruction. Everything below is provisional
+     until this exists.
+  2. Take the symbolic reuse, which is planned and needs no new dependency.
+  3. Measure LSsolveType properly across the benchmark suite rather than on one
+     case, and set the default from that.
+  4. Only then ask whether PA and a device are worth the discretisation change
+     they would demand.
+
+  AND A CHEAP CHECK FIRST: confirm the release build is what everyone thinks it
+  is. meq builds -O3 -DNDEBUG; MFEM's install carries MFEM_USE_MEMALLOC = YES,
+  whose stack-based allocator is a help or a hindrance depending on the access
+  pattern and has never been measured either way here.
