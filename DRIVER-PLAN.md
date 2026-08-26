@@ -33,7 +33,7 @@ measurements, not this project's.
 | | | ends at |
 |---|---|---|
 | 7a | `setInitialGuess()` | a source that vanishes at `ψ = 0` converging to something that is not zero |
-| 7b | Boundary shapes: Miller and MXH | a configured `Γ` reproducing `MillerDShape.hpp` to round-off |
+| 7b | Boundary shapes: Miller and MXH | **done** — `BoundaryShape`, exact against the fixture's Cerfon–Freidberg form |
 | 7c | Output: mesh, grid functions, NetCDF | `B` from `q` matching a finite difference of the exact `ψ` |
 | 7d | Warm start | a restart from 7c's file cutting Newton to one or two steps |
 | 7e | The driver | `meq examples/*.toml` writing files, end to end, as a ctest |
@@ -291,9 +291,15 @@ produces a wrong domain.
 
 ### Acceptance
 
-* The MXH evaluator reproducing `MillerDShape::boundaryPointCerfonFreidberg()` to
-  round-off at `N = 1`, `s_1 = arcsin( delta )` — a direct check of the reduction
-  MXH eq (4) asserts.
+**Done.** `src/meq/BoundaryShape.{hpp,cpp}` and `[boundary.shape]`, with ten
+tests in `tests/unit/BoundaryShapeTests.cpp` and six in `ConfigTests.cpp` — all
+MFEM-free, so **CI runs them**, which is a first for anything geometric here.
+
+* The MXH evaluator reproduces `MillerDShape::boundaryPointCerfonFreidberg()`
+  **exactly** — worst difference `0` over 720 samples — and differs from Example
+  6's `arcsin( δ sin t )` form by **6.25e-4**, matching the ≤6e-4 that fixture's
+  header quotes. Both bounds are asserted, the second from *below* as well, so a
+  future edit that silently makes the two conventions one fails.
 * A configured Miller boundary and the hand-built one in `MillerConvergence.cpp`
   giving the same `levelSet` to round-off on a sample cloud.
 * A deliberately non-star-shaped MXH set rejected at load, with the `theta` named.

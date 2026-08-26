@@ -171,6 +171,7 @@ set_target_properties(toml11::toml11 PROPERTIES
 # offsets and a second set of finite element spaces around what DarcyForm now
 # owns itself. What was left of its job lives on GradShafranovSolver.
 set(MEQ_CORE_SOURCES
+	src/meq/BoundaryShape.cpp
 	src/meq/Config.cpp
 	src/meq/Estimator.cpp
 	src/meq/GradShafranov.cpp

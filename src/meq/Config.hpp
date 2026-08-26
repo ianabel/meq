@@ -221,9 +221,44 @@ namespace meq
 		        //          (soloviev, manufactured) may ask for this.
 	};
 
+	// [boundary.shape] -- the curve Gamma, when it is not the mesh boundary.
+	enum class ShapeType
+	{
+		None,     // "none":   Gamma is the mesh boundary; the fitted path
+		Miller,   // "miller": the D-shape, in physical parameters
+		Mxh       // "mxh":    the general Miller extended harmonic surface
+	};
+
+	// Parameters as written; meq::BoundaryShape is what validates them, since
+	// star-shapedness is a property of the curve rather than of any one number.
+	// Miller is converted to MXH on construction -- see BoundaryShape.hpp.
+	struct ShapeConfig
+	{
+		ShapeType type = ShapeType::None;
+
+		// R0, Z0, r, kappa: MXH's bounding-box parameters, metres and
+		// dimensionless. Required unless Type is "none".
+		double majorRadius = 0.0;
+		double centreHeight = 0.0;
+		double minorRadius = 0.0;
+		double elongation = 1.0;
+
+		// Type = "miller" only. Triangularity delta, |delta| < 1, entering as
+		// s_1 = arcsin( delta ); squareness zeta, entering as s_2 = -zeta.
+		double triangularity = 0.0;
+		double squareness = 0.0;
+
+		// Type = "mxh" only. CosCoefficients is c_0, c_1, ... c_N and STARTS AT
+		// c_0, the tilt; SinCoefficients is s_1, s_2, ... s_N and starts at s_1,
+		// there being no s_0. That asymmetry is real and is checked on load.
+		std::vector< double > cosCoefficients;
+		std::vector< double > sinCoefficients;
+	};
+
 	struct BoundaryConfig
 	{
 		BoundaryDataType type = BoundaryDataType::Zero;
+		ShapeConfig shape;
 	};
 
 	// [solver] -- Newton on the outside, a linear solve on the inside.

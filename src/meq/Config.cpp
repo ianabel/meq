@@ -133,6 +133,32 @@ namespace meq
 					values = &table;
 				};
 
+				/// A table nested inside another, as [boundary.shape] is inside
+				/// [boundary]. Needed because the constructor above resolves a
+				/// FLAT key -- document.contains( "boundary.shape" ) looks for a
+				/// key spelled with a dot, which TOML does not create; the dotted
+				/// header nests instead. An absent parent gives an absent child,
+				/// which is what lets [boundary.shape] be optional without the
+				/// caller checking twice.
+				Table( Table const & parent, std::string const & childName,
+				       std::string const & configFile, bool required )
+					: values( nullptr ), name( parent.name + "." + childName ),
+					  file( configFile )
+				{
+					if ( !parent.isPresent() || !parent.values->contains( childName ) )
+					{
+						if ( required )
+							throw ConfigError( file, name, "required table [" + name + "] is missing" );
+						return;
+					}
+
+					toml::value const & table = parent.values->at( childName );
+					if ( !table.is_table() )
+						throw ConfigError( file, name, "[" + name + "] must be a table, but is a " + toml::to_string( table.type() ) );
+
+					values = &table;
+				};
+
 				bool isPresent() const { return values != nullptr; };
 
 				bool has( std::string const & key ) const { return find( key ) != nullptr; };
@@ -151,6 +177,28 @@ namespace meq
 				{
 					toml::value const * value = find( key );
 					return ( value == nullptr ) ? fallback : asInteger( key, *value );
+				};
+
+				/// An array of numbers, empty if the key is absent. Every element
+				/// goes through asFloat(), so [ 1, 0.5 ] is accepted and a
+				/// mistyped [ 1, "0.5" ] is refused by element rather than
+				/// silently becoming a default -- the same reasoning as asFloat()
+				/// itself, recorded at the top of this file.
+				std::vector< double > getFloatArrayOr( std::string const & key ) const
+				{
+					toml::value const * value = find( key );
+					if ( value == nullptr )
+						return {};
+					if ( !value->is_array() )
+						fail( key, "must be an array of numbers, but is a " + toml::to_string( value->type() ) );
+
+					std::vector< double > numbers;
+					auto const & elements = value->as_array();
+					numbers.reserve( elements.size() );
+					for ( std::size_t i = 0; i < elements.size(); ++i )
+						numbers.push_back( asFloat( key + "[" + std::to_string( i ) + "]",
+						                            elements[ i ] ) );
+					return numbers;
 				};
 
 				std::string getStringOr( std::string const & key, std::string const & fallback ) const
@@ -286,6 +334,18 @@ namespace meq
 				source.fail( "Type", "'" + spelling + "' is not a known source; accepted values are: \"soloviev\", \"mhd\", \"manufactured\"" );
 
 			return found->second;
+		}
+
+		ShapeType toShapeType( Table const & shape, std::string const & spelling )
+		{
+			if ( spelling == "none" )
+				return ShapeType::None;
+			if ( spelling == "miller" )
+				return ShapeType::Miller;
+			if ( spelling == "mxh" )
+				return ShapeType::Mxh;
+
+			shape.fail( "Type", "'" + spelling + "' is not a known boundary shape; accepted values are: \"none\", \"miller\", \"mxh\"" );
 		}
 
 		BoundaryDataType toBoundaryDataType( Table const & boundary, std::string const & spelling )
@@ -482,12 +542,52 @@ namespace meq
 		// [boundary]
 		{
 			Table boundary( document, "boundary", sourceName, false );
-			boundary.rejectUnknownKeys( { "Type" } );
+			boundary.rejectUnknownKeys( { "Type", "shape" } );
 
 			boundaryOptions.type = toBoundaryDataType( boundary, boundary.getStringOr( "Type", "zero" ) );
 
 			if ( boundaryOptions.type == BoundaryDataType::Exact && sourceOptions.type == SourceType::MHD )
 				boundary.fail( "Type", "\"exact\" needs a source with a known exact solution; the \"mhd\" source has none" );
+
+			// [boundary.shape]
+			{
+				Table shape( boundary, "shape", sourceName, false );
+				shape.rejectUnknownKeys( { "Type", "R0", "Z0", "MinorRadius", "Elongation",
+				                           "Triangularity", "Squareness",
+				                           "CosCoefficients", "SinCoefficients" } );
+
+				ShapeConfig & s = boundaryOptions.shape;
+				s.type = toShapeType( shape, shape.getStringOr( "Type", "none" ) );
+
+				if ( s.type != ShapeType::None )
+				{
+					s.majorRadius = shape.getFloat( "R0" );
+					s.centreHeight = shape.getFloatOr( "Z0", 0.0 );
+					s.minorRadius = shape.getFloat( "MinorRadius" );
+					s.elongation = shape.getFloatOr( "Elongation", 1.0 );
+				}
+
+				// Refuse the keys of the other shape rather than ignore them. A
+				// Triangularity sitting unread under Type = "mxh" is a config that
+				// says one thing and does another, which is exactly the class of
+				// silent wrong answer this file's asFloat() note is about.
+				if ( s.type == ShapeType::Miller )
+				{
+					s.triangularity = shape.getFloatOr( "Triangularity", 0.0 );
+					s.squareness = shape.getFloatOr( "Squareness", 0.0 );
+					if ( shape.has( "CosCoefficients" ) || shape.has( "SinCoefficients" ) )
+						shape.fail( "Type", "\"miller\" takes Triangularity and Squareness, not harmonic coefficients; use \"mxh\" for those" );
+				}
+				else if ( s.type == ShapeType::Mxh )
+				{
+					s.cosCoefficients = shape.getFloatArrayOr( "CosCoefficients" );
+					s.sinCoefficients = shape.getFloatArrayOr( "SinCoefficients" );
+					if ( shape.has( "Triangularity" ) || shape.has( "Squareness" ) )
+						shape.fail( "Type", "\"mxh\" takes CosCoefficients and SinCoefficients, not Triangularity or Squareness; those are \"miller\" spellings" );
+					if ( s.cosCoefficients.empty() && s.sinCoefficients.empty() )
+						shape.fail( "Type", "\"mxh\" was given no harmonics at all, which describes an ellipse; say Type = \"miller\" with Triangularity = 0 if that is what is meant" );
+				}
+			}
 		}
 
 		// [solver]

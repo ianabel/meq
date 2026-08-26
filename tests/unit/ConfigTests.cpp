@@ -723,4 +723,95 @@ BOOST_AUTO_TEST_CASE( a_good_file_on_disk_reads_the_same_as_the_same_text_in_mem
 	BOOST_TEST( fromFile.getSource().getSoloviev().a == fromString.getSource().getSoloviev().a );
 }
 
+/*
+ * [boundary.shape] -- the curved Gamma of stage 5, as configuration.
+ *
+ * Config only reports what the TOML said; meq::BoundaryShape is what decides
+ * whether the curve is usable, because star-shapedness is a property of the
+ * whole curve and not of any one key. So these check the PARSE, and
+ * BoundaryShapeTests.cpp checks the geometry.
+ */
+BOOST_AUTO_TEST_CASE( a_miller_shape_is_read )
+{
+	meq::Configuration const config = parse( minimal() +
+		"\n[boundary]\nType = \"zero\"\n"
+		"[boundary.shape]\nType = \"miller\"\n"
+		"R0 = 1.0\nMinorRadius = 0.32\nElongation = 1.7\nTriangularity = 0.33\n" );
+
+	meq::ShapeConfig const &shape = config.getBoundary().shape;
+	BOOST_TEST( ( shape.type == meq::ShapeType::Miller ) );
+	BOOST_TEST( shape.majorRadius == 1.0, boost::test_tools::tolerance( 1.0e-12 ) );
+	BOOST_TEST( shape.minorRadius == 0.32, boost::test_tools::tolerance( 1.0e-12 ) );
+	BOOST_TEST( shape.elongation == 1.7, boost::test_tools::tolerance( 1.0e-12 ) );
+	BOOST_TEST( shape.triangularity == 0.33, boost::test_tools::tolerance( 1.0e-12 ) );
+	BOOST_TEST( shape.centreHeight == 0.0, boost::test_tools::tolerance( 1.0e-12 ) );
+}
+
+BOOST_AUTO_TEST_CASE( an_mxh_shape_reads_its_harmonics )
+{
+	meq::Configuration const config = parse( minimal() +
+		"\n[boundary.shape]\nType = \"mxh\"\n"
+		"R0 = 1.7\nZ0 = 0.1\nMinorRadius = 0.6\nElongation = 1.8\n"
+		"CosCoefficients = [ -0.1, 0.02 ]\nSinCoefficients = [ 0.35, 0.08 ]\n" );
+
+	meq::ShapeConfig const &shape = config.getBoundary().shape;
+	BOOST_TEST( ( shape.type == meq::ShapeType::Mxh ) );
+	BOOST_TEST( shape.centreHeight == 0.1, boost::test_tools::tolerance( 1.0e-12 ) );
+	BOOST_TEST_REQUIRE( shape.cosCoefficients.size() == 2u );
+	BOOST_TEST_REQUIRE( shape.sinCoefficients.size() == 2u );
+	BOOST_TEST( shape.cosCoefficients[ 0 ] == -0.1, boost::test_tools::tolerance( 1.0e-12 ) );
+	BOOST_TEST( shape.sinCoefficients[ 1 ] == 0.08, boost::test_tools::tolerance( 1.0e-12 ) );
+}
+
+/// Integers are numbers. The same case asFloat() exists for, now reached
+/// through an array: Elongation = 2 and CosCoefficients = [ 0, 1 ] are both
+/// legitimate TOML and both used to be a silent default.
+BOOST_AUTO_TEST_CASE( integer_valued_shape_keys_are_numbers )
+{
+	meq::Configuration const config = parse( minimal() +
+		"\n[boundary.shape]\nType = \"mxh\"\n"
+		"R0 = 2\nMinorRadius = 1\nElongation = 2\n"
+		"SinCoefficients = [ 0, 1 ]\n" );
+
+	meq::ShapeConfig const &shape = config.getBoundary().shape;
+	BOOST_TEST( shape.majorRadius == 2.0, boost::test_tools::tolerance( 1.0e-12 ) );
+	BOOST_TEST( shape.elongation == 2.0, boost::test_tools::tolerance( 1.0e-12 ) );
+	BOOST_TEST_REQUIRE( shape.sinCoefficients.size() == 2u );
+	BOOST_TEST( shape.sinCoefficients[ 1 ] == 1.0, boost::test_tools::tolerance( 1.0e-12 ) );
+}
+
+/// No shape is the default and is not an error: that is the fitted path, which
+/// is what every convergence test in the suite uses.
+BOOST_AUTO_TEST_CASE( no_shape_section_means_the_fitted_path )
+{
+	meq::Configuration const config = parse( minimal() + "\n[boundary]\nType = \"zero\"\n" );
+	BOOST_TEST( ( config.getBoundary().shape.type == meq::ShapeType::None ) );
+}
+
+/// The keys of the other shape are REFUSED rather than ignored. A Triangularity
+/// sitting unread under Type = "mxh" is a file that says one thing and does
+/// another.
+BOOST_AUTO_TEST_CASE( the_wrong_shapes_keys_are_refused )
+{
+	BOOST_CHECK_THROW( parse( minimal() +
+		"\n[boundary.shape]\nType = \"mxh\"\nR0 = 1.0\nMinorRadius = 0.32\n"
+		"Triangularity = 0.33\nSinCoefficients = [ 0.3 ]\n" ), ConfigError );
+
+	BOOST_CHECK_THROW( parse( minimal() +
+		"\n[boundary.shape]\nType = \"miller\"\nR0 = 1.0\nMinorRadius = 0.32\n"
+		"SinCoefficients = [ 0.3 ]\n" ), ConfigError );
+}
+
+BOOST_AUTO_TEST_CASE( a_shape_missing_its_geometry_is_refused )
+{
+	// MinorRadius has no sensible default, so it is required rather than
+	// silently zero -- which would be a degenerate curve the geometry layer
+	// would then reject with a less helpful message.
+	BOOST_CHECK_THROW( parse( minimal() +
+		"\n[boundary.shape]\nType = \"miller\"\nR0 = 1.0\n" ), ConfigError );
+
+	BOOST_CHECK_THROW( parse( minimal() +
+		"\n[boundary.shape]\nType = \"lozenge\"\n" ), ConfigError );
+}
+
 BOOST_AUTO_TEST_SUITE_END()

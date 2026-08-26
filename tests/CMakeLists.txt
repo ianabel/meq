@@ -15,6 +15,7 @@ find_package(Boost CONFIG REQUIRED COMPONENTS unit_test_framework)
 # Each entry is the base name of a file in unit/, and by convention tests the
 # unit of the same name: ConfigTests.cpp tests src/meq/Config.cpp.
 set(MEQ_UNIT_TESTS
+	BoundaryShapeTests
 	ConfigTests
 	ProfilesTests
 	SourceTests
