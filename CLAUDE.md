@@ -1050,6 +1050,17 @@ you get numbers, and they are wrong. CMake sets it on every registered ctest;
 you must set it by hand when running a binary directly. Same trap as
 `../mfem-hdg-dev/CLAUDE.md` records.
 
+**This machine's GPU is for development, not for performance conclusions.**
+There is an RTX 2070 SUPER with CUDA 13.3, which is enough to write and debug a
+device path and to check that it gives the same answers. It is **not** a
+representative part for meq: MFEM is built `MFEM_USE_DOUBLE`, and consumer
+NVIDIA cards run FP64 at 1/32 to 1/64 of their FP32 rate where datacentre parts
+run it at about 1/2. A GPU timing taken here can invert the conclusion a
+production part would give, so treat local device runs as correctness evidence
+and take timings elsewhere. `TODO` carries the detail. This is the same species
+of warning as the threaded-MKL note under *On SUNDIALS* — a measurement on this
+machine that is not a measurement about the code.
+
 **Never run a bare `make -j`, anywhere.** With no argument it is unbounded, and
 this machine is WSL2 — the job count goes to the host's core count with a fraction
 of the host's memory behind it, and the whole VM falls over rather than the build

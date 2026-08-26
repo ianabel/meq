@@ -666,17 +666,36 @@ polynomial degree are chosen for accuracy and not for patience.
   * SuperLU_DIST, MUMPS, STRUMPACK -- MFEM wraps all three, and all three are
     distributed solvers whose point is MPI. Wrong tool for a serial code.
 
-  THIS MACHINE CAN ACTUALLY TEST IT: an RTX 2070 SUPER, 8 GB, with CUDA 13.3 at
-  /usr/local/cuda. So MFEM_USE_CUDA and MFEM_USE_CUDSS are a rebuild away rather
-  than a hardware purchase.
+  THIS MACHINE CAN DEVELOP IT BUT MUST NOT DECIDE IT.
 
-  BUT MEASURE FP64 BEFORE BELIEVING ANY OF IT. MFEM here is MFEM_USE_DOUBLE, and
-  the 2070 SUPER is a consumer Turing card whose double-precision rate is 1/32
-  of its single -- roughly 0.2 TFLOP/s FP64, which a modern desktop CPU is
-  within a small factor of. A GPU direct solve in double precision on this card
-  may lose to UMFPACK outright. That is a measurement, not a reason not to try,
-  but it means the first cuDSS run should be a timing comparison and not an
-  adoption.
+  There is a GPU here -- an RTX 2070 SUPER, 8 GB, with CUDA 13.3 at
+  /usr/local/cuda -- so MFEM_USE_CUDA and MFEM_USE_CUDSS are a rebuild away and
+  the whole path can be written and debugged locally. Use it for that.
+
+  DO NOT USE IT TO DECIDE WHETHER GPU OFFLOAD IS WORTH IT, because it is not a
+  representative part and the way it is unrepresentative is the exact axis that
+  matters here. MFEM is built MFEM_USE_DOUBLE, and consumer NVIDIA cards from
+  Turing onwards deliberately run FP64 at 1/32 or 1/64 of their FP32 rate, where
+  the datacentre parts run it at about 1/2. That is not a small difference in
+  degree: it is roughly two orders of magnitude in the ratio, and it inverts the
+  conclusion. A cuDSS timing on the 2070 SUPER that loses to UMFPACK says
+  nothing whatever about an A100, an H100 or an MI250X, on which the same code
+  would be tens of times faster in double precision.
+
+  (The specific FP64 rates are worth re-checking against vendor tables before
+  quoting them anywhere; the 1/32-versus-1/2 split is the robust part and is
+  what the argument rests on.)
+
+  SO THE LOCAL GPU IS A CORRECTNESS AND DEVELOPMENT PLATFORM. Run it to answer:
+  does the batched local path give the same answers as the host one? does cuDSS
+  agree with UMFPACK to round-off? does the code survive a device build at all?
+  Those are portable answers. Timings are not, and a local timing should never
+  be the reason a GPU path is abandoned.
+
+  It follows that the element-local batched work is the more promising of the
+  two even here, since its arithmetic profile is much better suited to a GPU
+  than a sparse direct factorisation is -- and it is the part with no host-side
+  alternative once the meshes get large.
 
   SO THE ORDER IS:
 
@@ -689,8 +708,10 @@ polynomial degree are chosen for accuracy and not for patience.
      case, and set the default from that.
   4. Thread the element-local loops, or get them threaded upstream. Independent
      of everything above, and the largest structural win.
-  5. Try cuDSS on the trace system as a TIMING COMPARISON against UMFPACK, in
-     double precision on the card actually present, before adopting anything.
+  5. Try cuDSS on the trace system, locally FOR CORRECTNESS -- does it agree
+     with UMFPACK to round-off, does the device build hold together -- and time
+     it on a datacentre part before drawing any conclusion about whether to use
+     it.
   6. Only then ask whether PA and a device for the ASSEMBLY are worth the
      discretisation change they would demand.
 
