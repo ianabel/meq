@@ -656,6 +656,13 @@ polynomial degree are chosen for accuracy and not for patience.
   nonlinear one of unpredictable cost, which is a far better batched and device
   workload. Doing that one first makes this one easier.
 
+  AND THAT IS NOW THE DECIDED ORDER, for a reason beyond convenience. Batching
+  nonlinear solves of unpredictable iteration count is designing this work around
+  a compromise meq intends to remove: Picard is a bridge to Newton, not the
+  algorithm meq should ship on. So linearise-then-condense comes first, and this
+  plan should be written against fixed-size linear local solves when it is
+  built.
+
   A THREADED OR OFFLOADED SOLVER FOR THE FACE-COUPLED MATRIX.
 
   UMFPACK is sequential apart from its BLAS calls, and the trace system is the

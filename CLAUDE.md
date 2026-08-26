@@ -668,7 +668,23 @@ belongs in `../mfem-hdg-dev/doc/`, not here.
    **This is a diagnosis, not a recommendation.** Relaxed Picard took 200
    iterations to reach 2.8e-8 where Newton takes 42 on the mesh Newton manages.
    The point is what it isolates, not that meq should adopt it.
-3. **Picard, keeping the local problems linear — implemented.**
+**THE ORDERING IS THE FIX, AND IT IS BLOCKING RATHER THAN OPTIONAL.** meq chose
+Newton deliberately and pays for it everywhere — see *Newton, and the obligation
+it creates*: every `Source` must supply `dFdPsi`, every `Profile` must supply
+`Prime`, and the assembled Jacobian is checked against a finite difference of
+the residual. That cost is accepted **in order to have** Newton. Under
+condense-then-linearise the cost stands and the benefit does not arrive on the
+stiff problems, which are the ones that motivated it. Measured on Example 5, all
+three paths reaching identical error: Newton 4 iterations, Anderson-Picard 19,
+damped Picard 97. Picard converges linearly and Anderson never makes it
+quadratic, so this is not a choice between solvers.
+
+So `../mfem-hdg-dev/doc/HDG-LINEARISE-THEN-CONDENSE.md` is **the** outstanding
+item on the nonlinear path, and the Picard routes below are a bridge to it and
+not a destination. meq should release with Newton working on the problems it was
+built for, not with the correct algorithm pasted on afterwards.
+
+3. **Picard, keeping the local problems linear — implemented, as a bridge.**
    `Globalisation::AndersonPicard` is `KINSolver(KIN_FP)` over the fixed point
    `ψ^{k+1} = G(ψ^k)`, where `G` freezes `F` at the previous iterate, puts it on
    the right-hand side and does one linear solve. The papers' own method, and it
