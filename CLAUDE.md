@@ -55,6 +55,10 @@ asserting `foo == bar` with neither declared — could not compile. There was no
 `test` target. Treat any claim in `README.md` about testing as aspirational until
 it is checked; that file has not yet been rewritten.
 
+**`ROADMAP.md` is the priority order**, and says which items belong to meq and
+which are requests on `../mfem-hdg-dev`, where another agent is working. This
+file stays the technical record; that one is only about what to do first.
+
 ### The stages, and where we are
 
 | | | |
