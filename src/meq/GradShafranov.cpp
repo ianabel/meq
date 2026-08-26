@@ -159,6 +159,8 @@ namespace meq
 		  initialGuess( nullptr ),
 		  globalisationChoice( Globalisation::None ),
 		  localSolverChoice( LocalSolver::Newton ),
+		  andersonDepth( 1 ),
+		  picardDamping( 1.0 ),
 		  transferPath( nullptr ),
 		  extensionLineOrder( -1 ),
 		  newtonRelativeTolerance( 1.0e-12 ),
@@ -252,6 +254,68 @@ namespace meq
 	}
 
 	/*
+	 * F( r, z, psi^k( r, z ) ): the source frozen at the previous iterate.
+	 *
+	 * This is what makes a Picard path linear. setSource( Source const & ) puts
+	 * the source on the NON-LINEAR potential mass form, where hybridization
+	 * turns each element's elimination into its own Newton. Handing the same
+	 * Source through this coefficient instead puts it on the right hand side,
+	 * the potential block stays linear, and every local elimination is a linear
+	 * solve -- which is the ordering Nguyen, Peraire & Cockburn use and meq's
+	 * Newton path does not. See CLAUDE.md.
+	 */
+	class FrozenSource : public mfem::Coefficient
+	{
+		public:
+			FrozenSource( Source const &sourceIn, mfem::GridFunction const &psiIn )
+				: source( sourceIn ), psi( psiIn )
+			{
+			}
+
+			/// MFEM's spelling, from mfem::Coefficient.
+			double Eval( mfem::ElementTransformation &tr, // NOLINT(readability-identifier-naming)
+			             mfem::IntegrationPoint const &ip ) override
+			{
+				mfem::Vector x;
+				tr.Transform( ip, x );
+				return source.f( x( 0 ), x( 1 ), psi.GetValue( tr, ip ) );
+			}
+
+		private:
+			Source const &source;
+			mfem::GridFunction const &psi;
+	};
+
+	/*
+	 * The Picard map as an Operator, so KINSOL can iterate it.
+	 *
+	 * KINSOL reads Mult() differently by strategy: for KIN_NONE and
+	 * KIN_LINESEARCH it is the residual F( u ) and the target is F = 0; for
+	 * KIN_FP it is the fixed point map G( u ) and the target is u = G( u ). This
+	 * is the latter -- one frozen-source assembly and one linear solve per call.
+	 */
+	class PicardMap : public mfem::Operator
+	{
+		public:
+			using Step = std::function<void( mfem::Vector const &, mfem::Vector & )>;
+
+			PicardMap( int size, Step stepIn )
+				: mfem::Operator( size ), step( std::move( stepIn ) )
+			{
+			}
+
+			/// MFEM's spelling, from mfem::Operator.
+			void Mult( mfem::Vector const &x, // NOLINT(readability-identifier-naming)
+			           mfem::Vector &y ) const override
+			{
+				step( x, y );
+			}
+
+		private:
+			Step step;
+	};
+
+	/*
 	 * R( x ) - b as an Operator, because KINSOL will not take a right hand side.
 	 *
 	 * mfem::KINSolver derives from mfem::NewtonSolver, which reads as though the
@@ -331,6 +395,138 @@ namespace meq
 		prepared = false;
 	}
 
+	void GradShafranovSolver::setPicardDamping( double damping )
+	{
+		if ( !( damping > 0.0 ) || damping > 1.0 )
+			throw std::logic_error( "meq::GradShafranovSolver::setPicardDamping: the damping must be in ( 0, 1 ]" );
+		picardDamping = damping;
+	}
+
+	void GradShafranovSolver::setAndersonDepth( int depth )
+	{
+		if ( depth < 0 )
+			throw std::logic_error( "meq::GradShafranovSolver::setAndersonDepth: the depth cannot be negative" );
+		andersonDepth = depth;
+	}
+
+	/*
+	 * One Picard step: freeze F at @a in, reassemble, solve, hand back the new
+	 * potential. This is the fixed point map, and KINSOL calls it once per
+	 * iteration.
+	 *
+	 * prepare() is re-entered deliberately. buildForms() is guarded by `built`,
+	 * so the bilinear forms are assembled once and only the right hand side and
+	 * the hybridization's reduction are redone -- which they must be, the source
+	 * having changed.
+	 */
+	void GradShafranovSolver::picardStep( mfem::Vector const &in, mfem::Vector &out )
+	{
+		*picardIterate = in;
+
+		prepared = false;
+		prepare();
+
+#ifdef MFEM_USE_SUITESPARSE
+		mfem::UMFPackSolver step;
+		step.Control[ UMFPACK_ORDERING ] = UMFPACK_ORDERING_METIS;
+		step.SetOperator( *reduced.Ptr() );
+		step.Mult( traceB, traceX );
+#else
+		mfem::SparseMatrix &matrix = *reduced.As<mfem::SparseMatrix>();
+		mfem::GSSmoother preconditioner( matrix );
+		mfem::GMRESSolver step;
+		step.SetOperator( matrix );
+		step.SetPreconditioner( preconditioner );
+		step.SetRelTol( 1.0e-12 );
+		step.SetAbsTol( 0.0 );
+		step.SetMaxIter( 5000 );
+		step.SetPrintLevel( -1 );
+		step.Mult( traceB, traceX );
+		if ( !step.GetConverged() )
+			throw std::runtime_error( "meq::GradShafranovSolver::picardStep: the trace solve did not converge" );
+#endif
+
+		darcy->RecoverFEMSolution( traceX, darcyRhs, darcySolution );
+		out = potentialGf;
+	}
+
+	/*
+	 * Anderson-accelerated Picard, which is the GS papers' own method.
+	 *
+	 * KINSOL's KIN_FP reads the operator as the fixed point map G( u ) and drives
+	 * u = G( u ); KINSetMAA turns on Anderson with the given subspace depth.
+	 * MFEM's KINSolver::Mult forwards to oper->Mult() and lets KINSOL interpret
+	 * it, so the same wrapper serves both readings -- which is convenient and is
+	 * also the trap recorded in setGlobalisation().
+	 *
+	 * The unknown is psi_h in W_h, not the trace. That is a different iteration
+	 * from every other path in this file, and it is why this is a separate
+	 * function rather than another case in solve()'s switch.
+	 */
+	void GradShafranovSolver::solveByPicard()
+	{
+#ifndef MFEM_USE_SUNDIALS
+		throw std::logic_error(
+			"meq::GradShafranovSolver::solve: a Picard globalisation was asked for "
+			"but MFEM was built without MFEM_USE_SUNDIALS" );
+#else
+		// One assembly to size everything and to give the fixed point its start:
+		// the Dirichlet data extended inward, which is what Newton starts from too.
+		prepared = false;
+		prepare();
+
+		mfem::Vector iterate( potentialGf.Size() );
+		iterate = potentialGf;
+		if ( initialGuess )
+		{
+			mfem::GridFunction seeded( potentialFes.get() );
+			seeded.ProjectCoefficient( *initialGuess );
+			iterate = seeded;
+		}
+
+		PicardMap map( iterate.Size(),
+			[ this ]( mfem::Vector const &in, mfem::Vector &out )
+			{
+				picardStep( in, out );
+			} );
+
+		mfem::KINSolver fixedPoint( KIN_FP, false );
+		// One damping, not two. KINSetDampingAA damps the Anderson combination and
+		// KINSetDamping the underlying fixed point; setting both compounds them
+		// and is worse than either -- measured, Anderson with both fails at 500
+		// iterations where plain damped Picard converges in 194.
+		if ( globalisationChoice == Globalisation::AndersonPicard )
+			fixedPoint.EnableAndersonAcc( andersonDepth, KIN_ORTH_MGS, 0, picardDamping );
+		else
+			fixedPoint.SetDamping( picardDamping );
+		fixedPoint.SetOperator( map );
+		fixedPoint.SetRelTol( newtonRelativeTolerance );
+		fixedPoint.SetAbsTol( newtonAbsoluteTolerance );
+		fixedPoint.SetMaxIter( newtonMaxIterations );
+		fixedPoint.SetPrintLevel( -1 );
+		fixedPoint.iterative_mode = true;
+
+		mfem::Vector unused( iterate.Size() );
+		unused = 0.0;
+		fixedPoint.Mult( unused, iterate );
+		newtonIterationCount = fixedPoint.GetNumIterations();
+
+		if ( !fixedPoint.GetConverged() )
+			throw std::runtime_error( "meq::GradShafranovSolver::solve: the Picard iteration did not converge" );
+
+		// One last step at the converged iterate, so that the flux, the trace and
+		// the potential all come from the SAME assembly. Without it the flux would
+		// be one iteration stale, which no rate would notice and every field plot
+		// would.
+		mfem::Vector settled( iterate.Size() );
+		picardStep( iterate, settled );
+
+		fluxGf = darcyFlux;
+		fluxGf.Neg();
+		postProcessed = false;
+#endif
+	}
+
 	void GradShafranovSolver::setLocalSolver( LocalSolver choice )
 	{
 		localSolverChoice = choice;
@@ -397,6 +593,14 @@ namespace meq
 		return nonlinearSource != nullptr;
 	}
 
+	bool GradShafranovSolver::usesNonlinearForms() const
+	{
+		if ( !nonlinearSource )
+			return false;
+		return globalisationChoice != Globalisation::AndersonPicard
+		    && globalisationChoice != Globalisation::PicardOnly;
+	}
+
 	void GradShafranovSolver::buildForms()
 	{
 		if ( built )
@@ -449,7 +653,7 @@ namespace meq
 		interior->SetStabilization( stabilization );
 		boundary->SetStabilization( stabilization );
 
-		if ( nonlinearSource )
+		if ( usesNonlinearForms() )
 		{
 			// THE WHOLE POTENTIAL BLOCK GOES ON THE NON-LINEAR FORM, not just the
 			// source. This is not tidiness, it is what DarcyHybridization requires,
@@ -514,7 +718,7 @@ namespace meq
 		                            essentialFluxTdofs );
 		darcy->GetHybridization()->SetEssentialBC( dirichletMarker );
 
-		if ( nonlinearSource )
+		if ( usesNonlinearForms() )
 		{
 			// Hybridization eliminates the flux and the potential element by
 			// element, and when the potential block is non-linear that elimination
@@ -664,7 +868,32 @@ namespace meq
 		if ( boundaryData && anyFitted )
 			traceGf.ProjectBdrCoefficient( *boundaryData, fittedMarker );
 
-		if ( linearSource )
+		// On a Picard path the source is the frozen coefficient, so the linear
+		// right hand side below is what assembles it. Built here rather than in
+		// buildForms() because it reads picardIterate, which changes every step.
+		mfem::Coefficient *rhsSource = linearSource;
+		if ( nonlinearSource && !usesNonlinearForms() )
+		{
+			if ( !picardIterate )
+			{
+				picardIterate = std::make_unique<mfem::GridFunction>( potentialFes.get() );
+				*picardIterate = 0.0;
+			}
+			if ( !frozenSource )
+				frozenSource = std::make_unique<FrozenSource>( *nonlinearSource,
+				                                              *picardIterate );
+			rhsSource = frozenSource.get();
+
+			// The same -1/r that setSource( Coefficient & ) applies, and for the
+			// same two reasons -- the equation's 1/r and DarcyForm's sign. Built
+			// once; ProductCoefficient holds a reference, so the frozen source
+			// re-reads picardIterate on every assembly without rebuilding this.
+			if ( !potentialRhsCoeff )
+				potentialRhsCoeff = std::make_unique<mfem::ProductCoefficient>(
+					negativeInverseRadius, *rhsSource );
+		}
+
+		if ( rhsSource )
 		{
 			// Order 2k+4, not DomainLFIntegrator's default 2k. F/r is not a
 			// polynomial -- for Solov'ev it is a rational function, and for a
@@ -708,6 +937,15 @@ namespace meq
 
 	void GradShafranovSolver::solve()
 	{
+		// The Picard paths iterate a fixed point on the POTENTIAL, not a residual
+		// on the trace, so they do not go through prepare()-then-Newton at all --
+		// picardStep() re-enters prepare() itself, once per iteration.
+		if ( nonlinearSource && !usesNonlinearForms() )
+		{
+			solveByPicard();
+			return;
+		}
+
 		prepare();
 
 		if ( nonlinearSource )

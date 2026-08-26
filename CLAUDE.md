@@ -668,8 +668,33 @@ belongs in `../mfem-hdg-dev/doc/`, not here.
    **This is a diagnosis, not a recommendation.** Relaxed Picard took 200
    iterations to reach 2.8e-8 where Newton takes 42 on the mesh Newton manages.
    The point is what it isolates, not that meq should adopt it.
-3. **Picard, or Picard–Newton**, keeping the local problems linear. The papers'
-   route, and the fallback if 1 and 2 do not close the gap.
+3. **Picard, keeping the local problems linear — implemented.**
+   `Globalisation::AndersonPicard` is `KINSolver(KIN_FP)` over the fixed point
+   `ψ^{k+1} = G(ψ^k)`, where `G` freezes `F` at the previous iterate, puts it on
+   the right-hand side and does one linear solve. The papers' own method, and it
+   works where Newton grinds. On §4.2 at `k = 1, h = 0.05`:
+
+   | method | outcome |
+   |---|---|
+   | Newton | 42 iterations |
+   | Picard, undamped | stalls |
+   | Picard, `ω = 0.5` | 248 iterations |
+   | **Anderson, depth 1, undamped** | **162 iterations** |
+   | Anderson, depth 2 and above | fails |
+
+   **Two surprises, both defaults now set from measurement rather than from the
+   papers.** Plain Picard *needs* damping and Anderson does not — so
+   `setPicardDamping` defaults to 1.0, which is right for one path and wrong for
+   the other. And **HDG-GS-1's `m = 2` fails here** where `m = 1` converges, so
+   `setAndersonDepth` defaults to 1; whether that is this fixed point's
+   conditioning or KINSOL's implementation is not established, and raising it
+   expecting the papers' behaviour will not work.
+
+   It is a **robustness route, not a faster one**: 162 iterations against
+   Newton's 42, each one a full linear solve.
+   `andersonPicardReachesTheSameSolutionAsNewton` pins that both reach the same
+   discrete solution — `ψ` agreeing to seven figures — which is what makes it an
+   alternative rather than a different problem.
 4. **Continuation in the source amplitude**, which also addresses the trivial
    branch.
 

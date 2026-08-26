@@ -605,6 +605,75 @@ BOOST_AUTO_TEST_CASE( anInitialGuessReachesTheIterateButNotTheOtherBranch )
  * count in it sits on the same rounding knife edge
  * pedestalNewtonFailsOnCoarseMeshesAtOrderOne documents.
  */
+/*
+ * ANDERSON-ACCELERATED PICARD, WHICH IS THE PAPERS' OWN METHOD AND WORKS.
+ *
+ * Both GS papers solve the semi-linear problem by Anderson-accelerated Picard,
+ * and CLAUDE.md explains why that is a coherent choice rather than a timid one:
+ * evaluating F at the previous iterate puts it on the RIGHT HAND SIDE, so the
+ * potential block stays linear and every element-local elimination is a linear
+ * solve. meq's Newton puts F on the non-linear potential mass, where
+ * hybridization turns each element's elimination into its own Newton -- and
+ * those are what fail on the stiff sources.
+ *
+ * Globalisation::AndersonPicard is KINSolver( KIN_FP ) over that map. Measured
+ * here on section 4.2 at k = 1, h = 0.05 -- the case Newton manages only by
+ * grinding to 42 iterations and fails outright at some thread counts:
+ *
+ *     method                        outcome
+ *     Newton                        42 iterations
+ *     Picard, undamped              stalls
+ *     Picard, w = 0.5               248 iterations
+ *     Anderson depth 1, undamped    162 iterations
+ *     Anderson depth 2 and above    fails
+ *
+ * TWO SURPRISES, both recorded on the setters. Plain Picard needs damping and
+ * Anderson does not; and HDG-GS-1's own m = 2 fails here where m = 1 works.
+ *
+ * WHAT IS ASSERTED. That the Picard path reaches the SAME discrete solution as
+ * Newton, which is what makes it an alternative rather than a different problem,
+ * and that it does so with no element-local non-linear solves -- the property
+ * the whole approach exists for. Not an iteration count: they sit on the same
+ * rounding knife edge as everything else in this file, and Picard's is in the
+ * hundreds where Newton's is in the tens. This is a robustness route, not a
+ * faster one.
+ */
+BOOST_AUTO_TEST_CASE( andersonPicardReachesTheSameSolutionAsNewton )
+{
+	meq::analytic::PressurePedestal const eq
+		= meq::analytic::PressurePedestal::pedestal();
+	using G = meq::GradShafranovSolver::Globalisation;
+
+	SelfMeasurement const newton = meq::tests::measureSelf(
+		eq, standardBox(), 1, 16, cloud(), pedestalDatum, 500, 1.0e-8,
+		nullptr, G::None );
+	SelfMeasurement const anderson = meq::tests::measureSelf(
+		eq, standardBox(), 1, 16, cloud(), pedestalDatum, 500, 1.0e-8,
+		nullptr, G::AndersonPicard );
+
+	std::printf( "\n  section 4.2 k = 1, h = 0.05: Newton %d iterations, "
+	             "Anderson-Picard %d\n    psi in [%.6e, %.6e] and [%.6e, %.6e]\n",
+	             newton.newtonIterations, anderson.newtonIterations,
+	             newton.psiMin, newton.psiMax,
+	             anderson.psiMin, anderson.psiMax );
+	std::fflush( stdout );
+
+	BOOST_TEST_REQUIRE( newton.converged );
+	BOOST_TEST_REQUIRE( anderson.converged,
+	                    "Anderson-accelerated Picard did not converge in "
+	                    << anderson.newtonIterations << " iterations" );
+
+	// The same discrete solution by two routes with different nonlinear
+	// structure. This is what says the Picard path solves meq's problem and not
+	// a neighbouring one -- the frozen source carries the same -1/r and the same
+	// sign convention as the Newton path, and getting either wrong would show up
+	// here and nowhere else.
+	BOOST_TEST( anderson.psiMax == newton.psiMax,
+	            boost::test_tools::tolerance( 1.0e-6 ) );
+	BOOST_TEST( anderson.psiMin == newton.psiMin,
+	            boost::test_tools::tolerance( 1.0e-6 ) );
+}
+
 BOOST_AUTO_TEST_CASE( kinsolAgreesWithNewtonWhereBothConverge )
 {
 	meq::analytic::PressurePedestal const eq

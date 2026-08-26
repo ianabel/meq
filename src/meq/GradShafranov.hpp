@@ -412,8 +412,23 @@ namespace meq
 				/// KINSolver( KIN_NONE ): the same machinery taking full steps, so
 				/// that a difference between None and LineSearch can be attributed
 				/// to the line search rather than to SUNDIALS.
-				KinsolNoLineSearch
+				KinsolNoLineSearch,
+				/// KINSolver( KIN_FP ) with Anderson acceleration: the papers'
+				/// own method. F is evaluated at the previous iterate, so the
+				/// potential block is LINEAR and every element-local elimination
+				/// is a linear solve -- which is the whole point, see CLAUDE.md
+				/// under "Why meq's Newton struggles". Depth from
+				/// setAndersonDepth().
+				AndersonPicard,
+				/// The same fixed point without acceleration, for the comparison
+				/// that says whether Anderson is doing the work. Measured
+				/// undamped Picard stalls on the pedestal, so expect this to.
+				PicardOnly
 			};
+
+			/// True when the potential block is assembled non-linearly, which is
+			/// the Newton paths and not the Picard ones.
+			bool usesNonlinearForms() const;
 
 			/**
 			 * Choose the non-linear solver. Globalisation::None is the default and
@@ -451,6 +466,39 @@ namespace meq
 			/// Choose it. Newton is the default and is what every rate in the
 			/// suite was measured with.
 			void setLocalSolver( LocalSolver choice );
+
+			/// Damping for the Picard paths, in ( 0, 1 ]. Which knob it reaches
+			/// depends on the path: KINSetDampingAA for AndersonPicard,
+			/// KINSetDamping for PicardOnly. Setting both compounds them and is
+			/// worse than either, so solveByPicard() sets exactly one.
+			///
+			/// **The default of 1.0 -- undamped -- is right for Anderson and wrong
+			/// for plain Picard**, and that asymmetry is measured rather than
+			/// chosen. On the section 4.2 pedestal at k = 1, h = 0.05, 500
+			/// iterations allowed:
+			///
+			///     depth   w = 1.0        w = 0.5
+			///       0     fails          converges, 248
+			///       1     converges, 162 converges, 358
+			///       2+    fails          fails
+			///
+			/// So PicardOnly needs w around 0.5 and will stall undamped; Anderson
+			/// is best left alone. See setAndersonDepth() for the other surprise.
+			void setPicardDamping( double damping );
+
+			/// Anderson subspace depth for Globalisation::AndersonPicard.
+			///
+			/// **The default is 1, and HDG-GS-1's m = 2 does not work here.** That
+			/// paper takes m = 2 on Toth & Kelley's evidence that there is no gain
+			/// beyond m = 3, and this file originally defaulted to 2 for the same
+			/// reason. Measured on the pedestal above, depth 1 converges in 162
+			/// iterations and every depth from 2 to 10 fails at 500, damped or
+			/// not. Whether that is this fixed point's conditioning or something
+			/// about KINSOL's implementation is not established, and until it is,
+			/// do not raise this expecting the papers' behaviour.
+			///
+			/// Ignored by every other Globalisation.
+			void setAndersonDepth( int depth );
 
 			/// Newton's stopping rule and iteration cap. Ignored on the linear
 			/// path. The defaults are tight on purpose: a Newton iteration that
@@ -681,6 +729,24 @@ namespace meq
 
 			Globalisation globalisationChoice;
 			LocalSolver localSolverChoice;
+			int andersonDepth;
+			double picardDamping;
+
+			/// The iterate the frozen source reads, on the Picard paths. Lives in
+			/// the potential space, which is also the fixed point's unknown.
+			std::unique_ptr<mfem::GridFunction> picardIterate;
+
+			/// F( r, z, picardIterate ), as the right hand side coefficient the
+			/// linear path takes. Rebuilt with the spaces.
+			std::unique_ptr<mfem::Coefficient> frozenSource;
+
+			/// One Picard step: freeze F at @a in, assemble, solve, return the new
+			/// potential in @a out. The fixed point map KINSOL iterates.
+			void picardStep( mfem::Vector const &in, mfem::Vector &out );
+
+			/// The Picard paths' whole solve: a KINSOL fixed point on the
+			/// potential, optionally Anderson accelerated.
+			void solveByPicard();
 
 			double newtonRelativeTolerance;
 			double newtonAbsoluteTolerance;
