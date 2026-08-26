@@ -482,3 +482,72 @@ Raised 2026-08-25. A survey, not yet a decision.
   the parameters are all in a paper on disk, and the pedestal case tests the one
   thing Newton has not been pushed on. Then (2), if a closed contour exists.
   (3) and (4) are reading, not work.
+
+
+================================================================================
+Try PARDISO again against a real oneMKL build
+Raised 2026-08-25. Measured, and blocked on a packaging defect rather than on
+anything about the method.
+================================================================================
+
+  meq solves the hybridized trace system with mfem::UMFPackSolver and
+  UMFPACK_ORDERING_METIS (src/meq/GradShafranov.cpp, both the linear and the
+  Newton paths). PARDISO was measured as an alternative and is faster where it
+  runs -- and it stops running just below the sizes meq uses.
+
+  WHAT WAS MEASURED, on meq's own trace matrix at k = 3:
+
+      n        UMFPACK total   PARDISO total   numeric factorisation   agreement
+        832        2.8 ms          1.9 ms        2.0 -> 0.7 ms          2e-15
+      3,200       18.9 ms          8.6 ms       13.9 -> 2.1 ms          6e-15
+      7,104       44.1 ms       error -3            --                    --
+     12,544       90.9 ms       error -3            --                    --
+
+  2.2x overall and 6.6x on the factorisation, agreeing with UMFPACK to 1e-15 --
+  and then error -3 (reordering) above n of about 3000.
+
+  THE FAILURE IS DEBIAN'S intel-mkl 2020.4.304, NOT THE CALLING CODE. Shown on
+  a plain 5-point Laplacian with no MFEM linked at all: n = 1600 succeeds,
+  n = 12544 fails with the same -3, and of the three reorderings only
+  iparm[1] = 3 (parallel nested dissection) survives at that size, while 0
+  (minimum degree) and 2 (serial METIS) both fail. The 1e-15 agreement at small
+  n is what separates "the calls are wrong" from "the library is broken".
+
+  Three other hypotheses were tested and are all dead, so do not re-test them:
+  a METIS symbol collision with MFEM's -lmetis (adding it to a working build
+  changes nothing, and libmkl_core does not export those symbols); an
+  interaction with MFEM's link line (the minimal test runs fine on meq's
+  complete link line); and something particular to meq's matrix (the plain
+  Laplacian fails identically).
+
+  WHAT A PROPER ATTEMPT LOOKS LIKE
+
+  1. Install current Intel oneAPI MKL -- its own installer or the
+     intel-oneapi-mkl apt repository. NOT Debian's intel-mkl.
+  2. Rebuild ../mfem/install with MFEM_USE_MKL_PARDISO=YES, which wants
+     MKL_PARDISO_OPT and MKL_PARDISO_LIB. Watch for meq's existing MKL
+     BLAS/LAPACK link line straddling two MKL versions; that is the first thing
+     likely to go wrong.
+  3. Re-run at n = 12544 and n = 49664, the two sizes that fail today. If they
+     pass, the defect is confirmed as packaging and the table above becomes the
+     operative one.
+  4. Use MFEM's own PardisoSolver (linalg/pardiso.hpp, behind
+     MFEM_USE_MKL_PARDISO) rather than hand-rolled PARDISO() calls. Note INSTALL
+     documents only MFEM_USE_MKL_CPARDISO, the cluster version, so the serial
+     wrapper is easy to miss.
+
+  SETTLE THE REPRODUCIBILITY QUESTION FIRST, because it can kill this even if
+  oneMKL works. PARDISO's advantage IS the threading, and threaded reduction
+  order is the same non-determinism that decides the pedestal knife edge -- see
+  CLAUDE.md under "On SUNDIALS", where MFEM_USE_LAPACK tips a marginal Newton
+  by changing rounding and nothing else. This suite asserts Newton iteration
+  counts. iparm[33], conditional numerical reproducibility, exists for exactly
+  this; it costs some of the speed back and the question is how much. Measure
+  it, do not assume it.
+
+  AND IT IS SECOND IN LINE. The symbolic factorisation is 22-24% of every
+  factorisation and UMFPackSolver::SetOperator throws it away and redoes it on
+  every Newton step, on a sparsity pattern that never changes. That fix works on
+  today's library, needs no new dependency, and is planned in
+  ../mfem-hdg-dev/doc/DIRECT-SOLVER-SYMBOLIC-REUSE.md. Do that first; PARDISO is
+  the speculative upside behind it.
