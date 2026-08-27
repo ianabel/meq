@@ -177,6 +177,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/Field.cpp
 	src/meq/GradShafranov.cpp
 	src/meq/Profiles.cpp
+	src/meq/Sampler.cpp
 	src/meq/Source.cpp
 	src/meq/SourceFactory.cpp)
 
@@ -185,6 +186,7 @@ set(MEQ_CORE_SOURCES
 set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/Estimator.cpp
 	src/meq/Field.cpp
+	src/meq/Sampler.cpp
 	src/meq/Field.cpp
 	src/meq/GradShafranov.cpp)
 
