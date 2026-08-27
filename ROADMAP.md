@@ -70,15 +70,22 @@ falls on meq's side.
 `SetNonlinearOrdering( NLOrdering::LineariseThenCondense )` — **off by default**,
 so meq must opt in. `setNonlinearOrdering()` does, and the default is unchanged.
 
-**Measured, and it does not yet work for meq's case.** Under
-`LineariseThenCondense` with the nonlinearity on the potential mass form —
-`Mnl_p`, which is where a semi-linear source goes — the reduced operator's
-residual is not a function of the trace: `Mult(x)`, `GetGradient(x)`, `Mult(x)`
-returns two different residuals for the same `x`. Reported with a self-contained
-MFEM-only demonstrator in
-`../mfem-hdg-dev/doc/LINEARISE-FIRST-RESIDUAL-BUG.md` and
-`doc/lf-residual-bug.cpp`. The existing unit test drives the *block* nonlinear
-form instead and passes.
+**One bug reported and fixed, a second reported and open.** Both against the
+nonlinearity on the potential mass form — `Mnl_p`, where a semi-linear source
+goes — which the existing unit test does not cover, driving the *block*
+nonlinear form instead.
+
+1. **Fixed** by `c5cac09e2f`: the residual was not a function of the trace.
+   `Mult(x)`, `GetGradient(x)`, `Mult(x)` gave two different answers for the
+   same `x`. Verified — the demonstrator now returns exactly zero.
+2. **Open**: `GetGradient` is not the derivative of `Mult`. The error scales as
+   the square of the nonlinearity — 5e-9, 5e-7, 5e-5 for `c` = 1, 10, 100 on a
+   `c ψ²` source — and is independent of the differencing step, 5.465e-05 at
+   `c = 100` across four orders of `h`, where `CondenseThenLinearise` traces the
+   round-off curve of an exact Jacobian throughout.
+
+Both in `../mfem-hdg-dev/doc/LINEARISE-FIRST-RESIDUAL-BUG.md`, with
+demonstrators beside it.
 
 So this item is not closed and meq keeps the old ordering as its default. The
 acceptance list below is what to work when it is.
