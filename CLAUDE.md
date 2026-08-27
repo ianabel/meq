@@ -343,6 +343,53 @@ meq's `naming` check failed on a tree meq had not touched. A library meq depends
 on should not move under it while somebody is working on it. Point `MFEM_DIR` at
 the dev tree deliberately when testing a fix; otherwise leave it alone.
 
+### `meq-integration`: the branch meq builds from, and why it is local only
+
+meq needs work that lives on **three separate MFEM branches**, none of which
+contains the others:
+
+| branch | what meq needs from it |
+|---|---|
+| `gf-hdg-subdomains-dev` | `fem/darcy/extension_hdg.*` — stage 5's curved `Γ` |
+| `direct-solver-symbolic-reuse` | `UMFPackSolver` keeping its symbolic factorisation across Newton steps |
+| `gf-hdg-linearise-first` | `SetNonlinearOrdering( NLOrdering::LineariseThenCondense )` |
+
+`meq-integration` is their merge, and it exists **only** to be built against. It
+is not a development branch and must not be pushed anywhere: it will be
+re-created from the three whenever any of them moves, so anything committed
+directly to it is lost. Do the work on the branch it belongs to and re-merge.
+
+Refreshing it, from `../mfem-hdg-dev`:
+
+```sh
+git checkout -B meq-integration gf-hdg-subdomains-dev
+git merge direct-solver-symbolic-reuse
+git merge gf-hdg-linearise-first
+```
+
+**The first merge conflicts and the resolution is always the same.** The
+symbolic-reuse branch is based on a much later upstream (767 commits past where
+the subdomains branch left), so `CHANGELOG`, `doc/CodeDocumentation.dox` and
+`fem/nonlininteg.cpp` collide where both sides appended. In every case the two
+sides are **disjoint** — `nonlininteg.cpp` gets `SumNLFIntegrator` and
+`SumBlockNLFIntegrator` from one side and the Navier–Stokes PA kernels
+`ConvectiveVectorConvectionNLFIntegrator` and
+`SkewSymmetricVectorConvectionNLFIntegrator` from the other — so **keep both
+sides** of all three. Check the function names are still disjoint before assuming
+that; it is true today and is a property of the branches rather than a rule.
+
+*A trap when resolving `CHANGELOG` programmatically*: it contains long `======`
+heading underlines, so a script that strips lines *beginning* with `=======`
+destroys the file. Match the conflict marker exactly, alone on its line.
+
+Then in `../mfem/mfem-src`, which is a separate clone that fetches from the dev
+tree:
+
+```sh
+git fetch hdgdev meq-integration && git checkout -B meq-integration hdgdev/meq-integration
+cd .. && cmake --build build -j4 && cmake --install build
+```
+
 Rebuilding the install, after fetching whatever is wanted into `../mfem/mfem-src`:
 
 ```sh

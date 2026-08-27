@@ -51,9 +51,26 @@ side each belongs to and what meq must do when an MFEM item lands.
 
 ---
 
-## 1. Linearise, then condense — MFEM, and blocking
+## 0. Three MFEM branches, one integration branch — standing maintenance
 
-`../mfem-hdg-dev/doc/HDG-LINEARISE-THEN-CONDENSE.md`.
+meq needs work from `gf-hdg-subdomains-dev`, `direct-solver-symbolic-reuse` and
+`gf-hdg-linearise-first`, none of which contains the others.
+**`meq-integration`** is their merge and is what `../mfem/install` is built
+from. It is local only, never pushed, and re-created from the three whenever any
+of them moves — so nothing may be committed directly to it. `CLAUDE.md` carries
+the recipe and the one recurring conflict.
+
+That is now a standing cost of this arrangement rather than a one-off, and it
+falls on meq's side.
+
+## 1. Linearise, then condense — MFEM, **landed, unverified here**
+
+`../mfem-hdg-dev/doc/HDG-LINEARISE-THEN-CONDENSE.md`, implemented on
+`gf-hdg-linearise-first` as
+`SetNonlinearOrdering( NLOrdering::LineariseThenCondense )` — **off by default**,
+so meq must opt in. Nothing below has been measured from meq's side yet; that is
+the immediate next job and the acceptance list at the end of this item is what it
+means.
 
 **Why it is first.** meq chose Newton deliberately and pays for it in every
 source and profile it accepts — `dFdPsi` is mandatory, `Prime` is mandatory, a
