@@ -174,6 +174,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/BoundaryShape.cpp
 	src/meq/Config.cpp
 	src/meq/Estimator.cpp
+	src/meq/Field.cpp
 	src/meq/GradShafranov.cpp
 	src/meq/Profiles.cpp
 	src/meq/Source.cpp
@@ -183,6 +184,8 @@ set(MEQ_CORE_SOURCES
 # see the find_package note above for why that case exists at all.
 set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/Estimator.cpp
+	src/meq/Field.cpp
+	src/meq/Field.cpp
 	src/meq/GradShafranov.cpp)
 
 # The port is being done file by file, so a source in the list above may not
