@@ -359,12 +359,17 @@ is not a development branch and must not be pushed anywhere: it will be
 re-created from the three whenever any of them moves, so anything committed
 directly to it is lost. Do the work on the branch it belongs to and re-merge.
 
-Refreshing it, from `../mfem-hdg-dev`:
+**It lives in `../mfem/mfem-src`, which is meq's own clone — never in
+`../mfem-hdg-dev`.** See the rule below.
+
+Refreshing it, from `../mfem/mfem-src`:
 
 ```sh
-git checkout -B meq-integration gf-hdg-subdomains-dev
-git merge direct-solver-symbolic-reuse
-git merge gf-hdg-linearise-first
+git fetch hdgdev gf-hdg-subdomains-dev direct-solver-symbolic-reuse \
+          gf-hdg-linearise-first
+git checkout -B meq-integration hdgdev/gf-hdg-subdomains-dev
+git merge hdgdev/direct-solver-symbolic-reuse     # conflicts; see below
+git merge hdgdev/gf-hdg-linearise-first           # clean
 ```
 
 **The first merge conflicts and the resolution is always the same.** The
@@ -402,13 +407,33 @@ versions finds it in seconds — both parents balance and a bad merge does not.
 heading underlines, so a script that strips lines *beginning* with `=======`
 destroys the file. Match the conflict marker exactly, alone on its line.
 
-Then in `../mfem/mfem-src`, which is a separate clone that fetches from the dev
-tree:
+Then rebuild:
 
 ```sh
-git fetch hdgdev meq-integration && git checkout -B meq-integration hdgdev/meq-integration
-cd .. && cmake --build build -j4 && cmake --install build
+cd /home/ian/projects/mfem && cmake --build build -j4 && cmake --install build
 ```
+
+### `../mfem-hdg-dev` is receive-only
+
+**Write MFEM development *requests* into `../mfem-hdg-dev/doc/` and nothing
+else.** No branches, no commits, no checkouts, no builds. Another agent works in
+that tree and it is theirs; meq consumes it through `git fetch` from
+`../mfem/mfem-src` and in no other way.
+
+This is written down because it was got wrong: `meq-integration` was first
+created *in* the dev tree, given two merge commits and a fix commit, and that
+tree was left checked out on it — so the next person to touch it would have been
+on someone else's branch. Fetching from the dev tree is reading; everything else
+is not.
+
+`doc/HDG-DEFECTS-FROM-MEQ.md`, `HDG-LINEARISE-THEN-CONDENSE.md`,
+`HDG-ELEMENT-LOCAL-PARALLELISM.md` and `DIRECT-SOLVER-SYMBOLIC-REUSE.md` are what
+meq puts there, and they are requests, not work.
+
+**And do not file findings against unfinished work.** A branch that exists is not
+a branch that is done. Measure it if it is useful to know, keep the numbers in
+meq, and wait to be told it is ready before writing anything into that tree about
+how it behaves.
 
 Rebuilding the install, after fetching whatever is wanted into `../mfem/mfem-src`:
 
