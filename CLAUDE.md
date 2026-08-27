@@ -378,6 +378,26 @@ sides are **disjoint** — `nonlininteg.cpp` gets `SumNLFIntegrator` and
 sides** of all three. Check the function names are still disjoint before assuming
 that; it is true today and is a property of the branches rather than a rule.
 
+**And "keep both sides" is not quite enough for `nonlininteg.cpp`.** Git leaves
+the file's trailing
+
+```
+}
+
+}
+```
+
+as *common* content after the `>>>>>>>` marker — one brace closing
+`SumBlockNLFIntegrator::~SumBlockNLFIntegrator`, one closing `namespace mfem`.
+That is correct for whichever single side you keep, and one brace short when you
+keep both: the first side's destructor is then left open and the second side's
+functions sit at namespace depth 2. **Add the destructor's closing brace at the
+seam.** It fails to compile rather than failing silently, but the error appears
+forty lines later on the *other* side's first function, which is a misleading
+place to start looking. `git show <branch>:fem/nonlininteg.cpp | tail` on both
+parents shows what the ending should be, and counting braces across the three
+versions finds it in seconds — both parents balance and a bad merge does not.
+
 *A trap when resolving `CHANGELOG` programmatically*: it contains long `======`
 heading underlines, so a script that strips lines *beginning* with `=======`
 destroys the file. Match the conflict marker exactly, alone on its line.

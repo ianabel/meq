@@ -159,6 +159,7 @@ namespace meq
 		  initialGuess( nullptr ),
 		  globalisationChoice( Globalisation::None ),
 		  localSolverChoice( LocalSolver::Newton ),
+		  orderingChoice( NonlinearOrdering::CondenseThenLinearise ),
 		  andersonDepth( 1 ),
 		  picardDamping( 1.0 ),
 		  transferPath( nullptr ),
@@ -527,6 +528,19 @@ namespace meq
 #endif
 	}
 
+	void GradShafranovSolver::setNonlinearOrdering( NonlinearOrdering choice )
+	{
+		orderingChoice = choice;
+		built = false;
+		prepared = false;
+	}
+
+	GradShafranovSolver::NonlinearOrdering
+	GradShafranovSolver::nonlinearOrdering() const
+	{
+		return orderingChoice;
+	}
+
 	void GradShafranovSolver::setLocalSolver( LocalSolver choice )
 	{
 		localSolverChoice = choice;
@@ -755,6 +769,14 @@ namespace meq
 				localType, 100, 1.0e-12, 1.0e-16, -1 );
 			darcy->GetHybridization()->SetLocalNLPreconditioner(
 				mfem::DarcyHybridization::LPrecType::LU );
+
+			// And the ordering, which decides whether either of the two above
+			// means anything: under LineariseThenCondense the local problem is a
+			// linear solve and there is no local iteration to configure.
+			darcy->GetHybridization()->SetNonlinearOrdering(
+				orderingChoice == NonlinearOrdering::LineariseThenCondense
+					? mfem::DarcyHybridization::NLOrdering::LineariseThenCondense
+					: mfem::DarcyHybridization::NLOrdering::CondenseThenLinearise );
 		}
 
 		darcy->Assemble();

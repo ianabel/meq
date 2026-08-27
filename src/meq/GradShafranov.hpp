@@ -464,8 +464,37 @@ namespace meq
 			};
 
 			/// Choose it. Newton is the default and is what every rate in the
-			/// suite was measured with.
+			/// suite was measured with. **Inert under
+			/// NonlinearOrdering::LineariseThenCondense**, where there is no local
+			/// non-linear solve to configure.
 			void setLocalSolver( LocalSolver choice );
+
+			/// In which order the hybridization and the linearisation are applied.
+			/// A DIFFERENT axis from setGlobalisation(): that picks the outer
+			/// iteration, this decides what the outer iteration's residual costs.
+			enum class NonlinearOrdering
+			{
+				/// Condense first. Eliminating flux and potential on an element is
+				/// then itself a non-linear solve, one per element per residual
+				/// evaluation -- and on the stiff GS-2 sources those are what
+				/// fail. MFEM's default, and meq's until measured otherwise.
+				CondenseThenLinearise,
+				/// Linearise first: Newton on the full ( q, psi, psihat ) system,
+				/// hybridizing the linear system that results. Every local
+				/// operation is then a linear solve. This is how the method is
+				/// defined -- Nguyen, Peraire & Cockburn, refs/HDG-NPC-2.pdf
+				/// section 2.6, eqs (14)-(18) -- and the ordering meq wants, on
+				/// the argument in CLAUDE.md under "Why meq's Newton struggles".
+				LineariseThenCondense
+			};
+
+			/// Choose it. Needs an MFEM carrying
+			/// DarcyHybridization::SetNonlinearOrdering; see CLAUDE.md on the
+			/// meq-integration branch.
+			void setNonlinearOrdering( NonlinearOrdering choice );
+
+			/// The ordering solve() will use.
+			NonlinearOrdering nonlinearOrdering() const;
 
 			/// Damping for the Picard paths, in ( 0, 1 ]. Which knob it reaches
 			/// depends on the path: KINSetDampingAA for AndersonPicard,
@@ -729,6 +758,7 @@ namespace meq
 
 			Globalisation globalisationChoice;
 			LocalSolver localSolverChoice;
+			NonlinearOrdering orderingChoice;
 			int andersonDepth;
 			double picardDamping;
 

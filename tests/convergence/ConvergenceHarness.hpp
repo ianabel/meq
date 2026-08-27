@@ -444,7 +444,9 @@ namespace tests
 	                             meq::GradShafranovSolver::Globalisation glob =
 	                                 meq::GradShafranovSolver::Globalisation::None,
 	                             meq::GradShafranovSolver::LocalSolver local =
-	                                 meq::GradShafranovSolver::LocalSolver::Newton )
+	                                 meq::GradShafranovSolver::LocalSolver::Newton,
+	                             meq::GradShafranovSolver::NonlinearOrdering ordering =
+	                                 meq::GradShafranovSolver::NonlinearOrdering::CondenseThenLinearise )
 	{
 		mfem::Mesh mesh = makeMesh( box, n );
 		EquilibriumSource<Equilibrium> source( eq );
@@ -470,6 +472,7 @@ namespace tests
 			solver.setInitialGuess( *guess );
 		solver.setGlobalisation( glob );
 		solver.setLocalSolver( local );
+		solver.setNonlinearOrdering( ordering );
 
 		SelfMeasurement point;
 		point.h = box.width()/static_cast<double>( n );
