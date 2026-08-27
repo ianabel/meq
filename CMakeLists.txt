@@ -98,6 +98,24 @@ if(NOT MFEM_FOUND)
 	message(STATUS "meq:   set MFEM_DIR to a built MFEM to get the whole library")
 endif()
 
+# NetCDF, for the driver's output grid. Optional in the same spirit as MFEM: a
+# tree without it still builds and tests everything else, and the writer is the
+# only thing that goes missing. Found through pkg-config because that is how
+# netcdf-cxx4 ships -- it has no CMake config -- and the C++4 API is the one
+# MaNTA writes with, which matters because the two codes are meant to exchange
+# these files.
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+	pkg_check_modules(NETCDFCXX QUIET IMPORTED_TARGET netcdf-cxx4)
+endif()
+
+if(NETCDFCXX_FOUND)
+	message(STATUS "meq: netcdf-cxx4 ${NETCDFCXX_VERSION}")
+else()
+	message(STATUS "meq: netcdf-cxx4 not found -- the NetCDF writer is excluded.")
+	message(STATUS "meq:   install libnetcdf-c++4-dev to get it")
+endif()
+
 # toml11, header only, used by Config. The checkout carries two layouts:
 #
 #   include/toml.hpp        + include/toml11/*.hpp   -- the normal one
@@ -176,6 +194,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/Estimator.cpp
 	src/meq/Field.cpp
 	src/meq/GradShafranov.cpp
+	src/meq/Output.cpp
 	src/meq/Profiles.cpp
 	src/meq/Sampler.cpp
 	src/meq/Source.cpp
@@ -186,9 +205,15 @@ set(MEQ_CORE_SOURCES
 set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/Estimator.cpp
 	src/meq/Field.cpp
-	src/meq/Sampler.cpp
-	src/meq/Field.cpp
-	src/meq/GradShafranov.cpp)
+	src/meq/GradShafranov.cpp
+	src/meq/Output.cpp
+	src/meq/Sampler.cpp)
+
+# And the one that additionally needs netcdf-cxx4. Kept separate because the two
+# dependencies are independent: a tree with MFEM and no NetCDF builds everything
+# but the grid writer.
+set(MEQ_CORE_SOURCES_NEEDING_NETCDF
+	src/meq/Output.cpp)
 
 # The port is being done file by file, so a source in the list above may not
 # have been written yet. Configure with what is there and say what is missing,
@@ -197,10 +222,13 @@ set(MEQ_CORE_SOURCES_PRESENT "")
 set(_meq_core_missing "")
 foreach(_source IN LISTS MEQ_CORE_SOURCES)
 	list(FIND MEQ_CORE_SOURCES_NEEDING_MFEM "${_source}" _needs_mfem)
+	list(FIND MEQ_CORE_SOURCES_NEEDING_NETCDF "${_source}" _needs_netcdf)
 	if(NOT MFEM_FOUND AND NOT _needs_mfem EQUAL -1)
 		# Not "missing" -- deliberately excluded. Kept out of _meq_core_missing
 		# so the two reasons a source is absent stay tellable apart.
 		list(APPEND _meq_core_no_mfem "${_source}")
+	elseif(NOT NETCDFCXX_FOUND AND NOT _needs_netcdf EQUAL -1)
+		list(APPEND _meq_core_no_netcdf "${_source}")
 	elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_source}")
 		list(APPEND MEQ_CORE_SOURCES_PRESENT "${_source}")
 	else()
@@ -211,6 +239,11 @@ endforeach()
 if(_meq_core_missing)
 	string(REPLACE ";" ", " _meq_core_missing_text "${_meq_core_missing}")
 	message(STATUS "meq: not yet present, omitted from meq_core: ${_meq_core_missing_text}")
+endif()
+
+if(_meq_core_no_netcdf)
+	string(REPLACE ";" ", " _meq_core_no_netcdf_text "${_meq_core_no_netcdf}")
+	message(STATUS "meq: no netcdf-cxx4, omitted from meq_core: ${_meq_core_no_netcdf_text}")
 endif()
 
 if(MEQ_CORE_SOURCES_PRESENT)
@@ -241,6 +274,13 @@ if(MEQ_CORE_SOURCES_PRESENT)
 	# said everything was fine.
 	if(MFEM_FOUND)
 		target_link_libraries(meq_core PUBLIC MFEM::MFEM)
+	endif()
+
+	# PRIVATE, unlike MFEM: netcdf appears only inside Output.cpp and in no
+	# header, so nothing that includes meq's headers needs it on its line.
+	if(NETCDFCXX_FOUND)
+		target_link_libraries(meq_core PRIVATE PkgConfig::NETCDFCXX)
+		target_compile_definitions(meq_core PUBLIC MEQ_USE_NETCDF)
 	endif()
 
 	# Guarded by compiler id rather than assumed: these are the GCC/Clang

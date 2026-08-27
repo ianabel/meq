@@ -80,6 +80,7 @@ endforeach()
 # solutions out of analytic/.
 set(MEQ_CONVERGENCE_TESTS
 	FieldConvergence
+	OutputConvergence
 	SamplerConvergence
 	SolovievConvergence
 	NewtonConvergence
