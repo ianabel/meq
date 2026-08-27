@@ -63,14 +63,25 @@ the recipe and the one recurring conflict.
 That is now a standing cost of this arrangement rather than a one-off, and it
 falls on meq's side.
 
-## 1. Linearise, then condense — MFEM, **landed, unverified here**
+## 1. Linearise, then condense — MFEM, **landed, and a bug reported against it**
 
 `../mfem-hdg-dev/doc/HDG-LINEARISE-THEN-CONDENSE.md`, implemented on
 `gf-hdg-linearise-first` as
 `SetNonlinearOrdering( NLOrdering::LineariseThenCondense )` — **off by default**,
-so meq must opt in. Nothing below has been measured from meq's side yet; that is
-the immediate next job and the acceptance list at the end of this item is what it
-means.
+so meq must opt in. `setNonlinearOrdering()` does, and the default is unchanged.
+
+**Measured, and it does not yet work for meq's case.** Under
+`LineariseThenCondense` with the nonlinearity on the potential mass form —
+`Mnl_p`, which is where a semi-linear source goes — the reduced operator's
+residual is not a function of the trace: `Mult(x)`, `GetGradient(x)`, `Mult(x)`
+returns two different residuals for the same `x`. Reported with a self-contained
+MFEM-only demonstrator in
+`../mfem-hdg-dev/doc/LINEARISE-FIRST-RESIDUAL-BUG.md` and
+`doc/lf-residual-bug.cpp`. The existing unit test drives the *block* nonlinear
+form instead and passes.
+
+So this item is not closed and meq keeps the old ordering as its default. The
+acceptance list below is what to work when it is.
 
 **Why it is first.** meq chose Newton deliberately and pays for it in every
 source and profile it accepts — `dFdPsi` is mandatory, `Prime` is mandatory, a
