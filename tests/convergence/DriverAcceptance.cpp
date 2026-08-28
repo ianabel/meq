@@ -3,6 +3,7 @@
 
 #include "mfem.hpp"
 
+#include "meq/BoundaryShape.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/Source.hpp"
 
@@ -171,6 +172,129 @@ BOOST_AUTO_TEST_CASE( theDriverRunsTheNonlinearPath )
 	BOOST_TEST( psi.Normlinf() > 1.0e-3,
 	            "the stored psi is essentially zero, max |psi| = "
 	            << psi.Normlinf() );
+}
+
+/*
+ * THE CURVED BOUNDARY, THROUGH THE DRIVER.
+ *
+ * This is the configuration meq exists to run, and the one the driver refused
+ * until it was wired. Gamma is a level set of the Miller shape; the background
+ * mesh knows nothing about it; D_h is the union of background elements inside
+ * Gamma; and the datum is transferred onto Gamma_h along short paths.
+ *
+ * As with the fitted case, the comparison is against the LIBRARY on the same
+ * configuration, and the subdomain is rebuilt here by hand rather than read
+ * from the driver. That is the point: it checks the driver marks the same
+ * elements, finds the same Gamma_h attribute, builds the same paths and passes
+ * the same marker to setExtension(). Getting any of those wrong gives a
+ * plausible-looking answer -- CLAUDE.md records that a Gamma_h with no
+ * transferred datum silently imposes zero, and that the one configuration which
+ * really fails reaches 5e13 rather than failing loudly.
+ *
+ * The rates for the technique itself are ExtensionConvergence's, against a
+ * closed form. This is a plumbing test.
+ */
+BOOST_AUTO_TEST_CASE( theDriverSolvesOnACurvedBoundary )
+{
+	BOOST_TEST_REQUIRE( run( "examples/miller-curved.toml" ) == 0,
+	                    "the driver did not exit 0 on the curved example" );
+
+	BOOST_TEST_REQUIRE( exists( "miller-curved.mesh" ) );
+	BOOST_TEST_REQUIRE( exists( "miller-curved_psi.gf" ) );
+
+	mfem::Mesh storedMesh( "miller-curved.mesh", 1, 1 );
+	std::ifstream stream( "miller-curved_psi.gf" );
+	BOOST_TEST_REQUIRE( stream.good() );
+	mfem::GridFunction stored( &storedMesh, stream );
+
+	// The same run, by hand. Numbers repeated from the example deliberately.
+	mfem::Mesh background = mfem::Mesh::MakeCartesian2D(
+		8, 10, mfem::Element::TRIANGLE, false, 2.3 - 0.7, 1.9 - ( -1.9 ) );
+	background.Transform( []( mfem::Vector const &in, mfem::Vector &out )
+	{
+		out( 0 ) = in( 0 ) + 0.7;
+		out( 1 ) = in( 1 ) + ( -1.9 );
+	} );
+	for ( int i = 0; i < 2; ++i )
+		background.UniformRefinement();
+
+	meq::BoundaryShape const shape =
+		meq::BoundaryShape::miller( 1.5, 0.0, 0.5, 1.6, 0.35, 0.0 );
+	mfem::PositionFunction const levelSet = [ &shape ]( mfem::Vector const &x )
+	{
+		return shape.levelSet( x( 0 ), x( 1 ) );
+	};
+
+	mfem::Array<int> marker;
+	int const insideCount =
+		mfem::MarkLevelSetSubdomain( background, levelSet, 0.0, marker, 1 );
+	BOOST_TEST_REQUIRE( insideCount > 0 );
+
+	for ( int e = 0; e < background.GetNE(); ++e )
+		background.SetAttribute( e, marker[ e ] ? 1 : 2 );
+	background.SetAttributes();
+
+	mfem::Array<int> domainAttribute( 1 );
+	domainAttribute[ 0 ] = 1;
+	mfem::SubMesh sub = mfem::SubMesh::CreateFromDomain( background, domainAttribute );
+
+	BOOST_TEST_REQUIRE( sub.GetNE() == storedMesh.GetNE(),
+	                    "the driver solved on " << storedMesh.GetNE()
+	                    << " elements where the same shape gives " << sub.GetNE()
+	                    << ": it is not marking the same subdomain" );
+
+	int const gammaH = sub.bdr_attributes.Max();
+	double const h = std::max( ( 2.3 - 0.7 )/( 8*4.0 ), ( 1.9 + 1.9 )/( 10*4.0 ) );
+	mfem::VertexConePath path( sub, gammaH, levelSet, 6.0*h );
+
+	mfem::Array<int> gammaHMarker( gammaH );
+	gammaHMarker = 0;
+	gammaHMarker[ gammaH - 1 ] = 1;
+
+	meq::SolovievSource const source( -0.52 );
+	mfem::ConstantCoefficient zero( 0.0 );
+
+	meq::GradShafranovSolver solver( sub, 2, 1.0 );
+	solver.setSource( source );
+	solver.setBoundaryData( zero );
+	solver.setExtension( path, gammaHMarker );
+	solver.solve();
+
+	BOOST_TEST_REQUIRE( stored.Size() == solver.potential().Size() );
+
+	mfem::Vector difference( stored );
+	difference -= solver.potential();
+	double const scale = std::max( 1.0e-300, solver.potential().Norml2() );
+	double const relative = difference.Norml2()/scale;
+
+	std::printf( "\n  curved driver vs library: %.3e relative over %d dofs, "
+	             "%d of %d elements inside\n",
+	             relative, stored.Size(), sub.GetNE(), background.GetNE() );
+	std::fflush( stdout );
+
+	BOOST_TEST( relative < 1.0e-10,
+	            "the driver's curved solve differs from the library's by "
+	            << relative << " relative" );
+
+	// And it must not be the fitted answer wearing a curved hat. If
+	// setExtension() were never called the solve would impose zero on Gamma_h
+	// and still converge, so this is the assertion that says the transfer
+	// happened at all.
+	meq::GradShafranovSolver fitted( sub, 2, 1.0 );
+	fitted.setSource( source );
+	fitted.setBoundaryData( zero );
+	fitted.solve();
+
+	mfem::Vector fittedDifference( solver.potential() );
+	fittedDifference -= fitted.potential();
+	double const fittedRelative = fittedDifference.Norml2()/scale;
+	std::printf( "  extension vs zero-on-Gamma_h: %.3e relative\n", fittedRelative );
+	std::fflush( stdout );
+
+	BOOST_TEST( fittedRelative > 1.0e-6,
+	            "the curved solve agrees with imposing zero on Gamma_h to "
+	            << fittedRelative << ", so the transferred datum is not being "
+	            "applied and the extension is inert" );
 }
 
 /*

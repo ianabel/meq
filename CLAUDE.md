@@ -48,10 +48,20 @@ configuration — 1.189e-16 relative over 15,360 dofs — rather than comparing
 against a closed form, for the reason recorded beside
 `examples/soloviev-nstx.toml`.
 
-**What the driver does not do yet, and refuses rather than approximates**:
-`[boundary.shape]` (the extension path), `[adaptivity] Enabled = true` (the
-stage-6 loop exists but is not wired), and `[boundary] Type = "exact"` (needs a
-closed form `meq::Source` does not carry). All three exit 1 with an explanation.
+**The curved boundary works through the driver.** `[boundary.shape]` builds the
+shape, marks `D_h` out of the background mesh, locates `Γ_h` and hands a
+`VertexConePath` to `setExtension()` — GS-2's technique, end to end, from a
+config file. `examples/miller-curved.toml` is the worked example. Two checks
+guard it, because the failure mode here is quiet: `Γ_h` carrying no transferred
+datum silently imposes zero and still converges, so
+`theDriverSolvesOnACurvedBoundary` pins the driver against the library (1.6e-16)
+*and* against that zero-datum solve (2.7e-1, i.e. the transfer is doing real
+work).
+
+**What the driver still does not do, and refuses rather than approximates**:
+`[adaptivity] Enabled = true` (the stage-6 loop exists but is not wired) and
+`[boundary] Type = "exact"` (needs a closed form `meq::Source` does not carry).
+Both exit 1 with an explanation.
 The interpolating warm start of `DRIVER-PLAN.md` §4 needs GSLIB and is not
 written; the exact restart — same mesh, same degree — is.
 

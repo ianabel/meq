@@ -75,12 +75,13 @@ parses, solves, prints a residual history and writes `.mesh`, `_psi.gf`,
 
 What is left, in the order it is worth doing:
 
-* **Wire the extension path.** `[boundary.shape]` parses and `BoundaryShape`
-  works; the driver refuses the configuration rather than solving the
-  mesh-boundary problem in its place. This is the one that makes meq useful for
-  a real equilibrium — and, per the note now on `examples/soloviev-nstx.toml`,
-  the one that would let the headline benchmark reproduce its own published
-  answer rather than a rectangle's.
+* ~~**Wire the extension path.**~~ **Done.** `[boundary.shape]` builds a
+  `BoundaryShape`, marks `D_h` out of the background mesh, finds `Γ_h` and
+  hands a `VertexConePath` to `setExtension()`. `examples/miller-curved.toml`
+  runs it: 450 of 2560 background elements inside, 0 paths widened.
+  `theDriverSolvesOnACurvedBoundary` pins it against the library at 1.6e-16 —
+  and separately against imposing *zero* on `Γ_h`, at 2.7e-1, because an
+  extension that was never applied would converge quietly to the wrong answer.
 * **Wire the adaptive loop.** Stage 6 exists and is tested; `[adaptivity]`
   parses; the driver refuses it. It must call `setTransferredBoundary()`
   automatically on the extension path and say so in the log, until `η₅` is

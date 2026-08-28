@@ -1,0 +1,69 @@
+# A curved plasma boundary: the Miller D-shape, imposed by TRANSFER rather than
+# by fitting the mesh to it.
+#
+# This is what refs/HDG-GradShafranov-Adaptive.pdf's technique is for, and it is
+# the configuration meq exists to run. Gamma is the level set of the shape
+# below; the background mesh is a plain rectangle that knows nothing about it;
+# D_h is the union of background elements lying inside Gamma; and the Dirichlet
+# datum is carried from Gamma onto Gamma_h = boundary( D_h ) along short paths.
+#
+# WHY NOT JUST MESH THE SHAPE. Because a polygonal approximation to a curved
+# boundary caps the convergence rate whatever the polynomial degree. Measured on
+# a fixed 40-gon at k = 3, CLAUDE.md records 2.12 against 4.00 for the same
+# discretisation on a fitted domain -- the interior angle's singular exponent
+# does not care how good the elements are. The transfer technique removes that,
+# and tests/convergence/ExtensionConvergence.cpp measures it doing so.
+#
+#     MKL_THREADING_LAYER=GNU meq examples/miller-curved.toml
+#
+# THE BOX MUST CONTAIN THE SHAPE WITH ROOM TO SPARE. If D_h reaches the edge of
+# the mesh box, part of Gamma_h is an inherited mesh boundary carrying no
+# transferred datum, and zero would be imposed there instead. The driver checks
+# this and refuses rather than solving it quietly.
+#
+# UNITS. Metres and dimensionless, as [boundary.shape] documents.
+
+[mesh]
+# Comfortably around the shape below, which spans r in [1.0, 2.0] and
+# z in about [-1.6, 1.6].
+RMin = 0.7
+RMax = 2.3
+ZMin = -1.9
+ZMax = 1.9
+NR = 8
+NZ = 10
+RefinementLevels = 2
+
+[discretisation]
+PolynomialDegree = 2
+Tau = 1.0
+
+[source]
+# Solov'ev, so the source is constant in psi and the solve is one Newton step.
+# What is being demonstrated here is the CURVED BOUNDARY, not the nonlinearity;
+# examples/manufactured-driver.toml is the one that exercises Newton.
+Type = "soloviev"
+A = -0.52
+
+[boundary]
+Type = "zero"
+
+[boundary.shape]
+Type = "miller"
+R0 = 1.5                 # major radius, metres
+Z0 = 0.0                 # centre height, metres
+MinorRadius = 0.5       # a, metres
+Elongation = 1.6        # kappa
+Triangularity = 0.35    # delta; enters as s_1 = arcsin( delta ), NOT as delta
+Squareness = 0.0        # zeta; zero gives the original three-parameter Miller
+
+[solver]
+NewtonMaxIterations = 20
+NewtonRelativeTolerance = 1.0e-10
+NewtonAbsoluteTolerance = 1.0e-14
+
+[output]
+Directory = "."
+Prefix = "miller-curved"
+GridNR = 129
+GridNZ = 129
