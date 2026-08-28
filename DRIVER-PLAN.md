@@ -36,7 +36,7 @@ measurements, not this project's.
 | 7b | Boundary shapes: Miller and MXH | **done** — `BoundaryShape`, exact against the fixture's Cerfon–Freidberg form |
 | 7c | Output: mesh, grid functions, NetCDF | `B` from `q` matching a finite difference of the exact `ψ` |
 | 7d | Warm start | a restart from 7c's file cutting Newton to one or two steps |
-| 7e | The driver | `meq examples/*.toml` writing files, end to end, as a ctest |
+| 7e | The driver | `meq examples/*.toml` writing files, end to end, as a ctest — **done**, and the adaptive loop and the curved boundary with it |
 | — | GSLIB, in the SUNDIALS rebuild (§6) | a full-order warm start measurably beating the interpolated one |
 
 7a before 7e because a driver without it is *actively misleading*: handed a
@@ -539,8 +539,9 @@ write                               -> mesh, gf, NetCDF
 report                              -> iterations, residual history, timings
 ```
 
-The adaptive loop is stage-6 work that already exists and should be exposed
-rather than rebuilt:
+**DONE.** The adaptive loop is stage-6 work that already existed and has been
+exposed rather than rebuilt. What follows is the design as planned; the
+differences that measurement forced are recorded after it.
 
 ```toml
 [adaptivity]
@@ -564,6 +565,26 @@ that stays true until `η₅` is rebuilt on `TransferredDatumCoefficient` — wh
 is stage-6 work, not stage-7, and wants its own convergence measurement. Until
 then a user should not have to know about the exclusion to get a correct
 refinement pattern, but should be able to find out it is in play.
+
+**That is what was built.** Three things this plan did not anticipate:
+
+* **The curved path needed `meq::AdaptiveDomain`, not the driver's existing
+  one-shot `buildSubdomain()`.** Refining `D_h` alone leaves `Γ_h` where it is
+  while `h_loc` halves, so `dist/h_loc` doubles every cycle and the transfer
+  quietly leaves the regime it is analysed in. Both constructions are therefore
+  in the driver, and the comment at the branch says why rather than tidying one
+  away.
+* **`ψ*` was a hard prerequisite, and retiring `postProcess()`'s refusal was
+  listed in `ROADMAP.md` as an independent item.** It is not: four of eq. (20)'s
+  five terms are built on `ψ*`, and the driver's path is *always* semi-linear.
+* **And the refusal could not be retired outright.** Measuring it found the MFEM
+  fix works where `∂F/∂ψ ≠ 0` and returns a different function on **any element**
+  where it vanishes — a singular local matrix, factored anyway, because the
+  mean-value regularisation is skipped by a flag set on the wrong condition. So
+  the loop builds `η` on `Potential::Raw`: one order down, correct, and a
+  standing decision rather than a runtime check. See `CLAUDE.md`,
+  *Post-processing is back*, and
+  `../mfem-hdg-dev/doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md`.
 
 ### What the driver owes the user
 

@@ -9,11 +9,12 @@ what is deliberately not being done yet.
 ## The state in one paragraph
 
 The solver works and every claim about it is a measured convergence rate. Stages
-0 to 6 are done, and **stage 7e landed: meq is a program.** `meq config.toml`
-solves and writes. The suite is **17/18**, the single failure being a tripwire
-whose premise stopped holding. What is left of stage 7 is the warm start's
-interpolating route (§4, needs GSLIB) and wiring the two things the driver
-currently refuses — the extension path and the adaptive loop.
+0 to 6 are done, and **stage 7 is all but finished: meq is a program that solves
+on a curved boundary and refines its own mesh.** `meq config.toml` parses,
+solves, adapts, and writes. The suite is **18/18** — the pedestal tripwire that
+used to fail has been rewritten to assert what it is actually measuring. What is
+left of stage 7 is one item: the warm start's interpolating route (§4, needs
+GSLIB). The only thing the driver still refuses is `[boundary] Type = "exact"`.
 
 ## The nonlinear question is settled
 
@@ -51,8 +52,11 @@ write requests into its `doc/`, never branch, commit, check out or build there.
 Of the plans meq filed, `HDG-LINEARISE-THEN-CONDENSE.md` and
 `DIRECT-SOLVER-SYMBOLIC-REUSE.md` have **landed**, and
 `HDG-DEFECTS-FROM-MEQ.md` was retired by that tree once all four defects were
-fixed and covered. `HDG-ELEMENT-LOCAL-PARALLELISM.md` remains outstanding.
-meq owns `src/`, `tests/` and `apps/`.
+fixed and covered. `HDG-ELEMENT-LOCAL-PARALLELISM.md` remains outstanding, and
+`HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md` is newly filed — a **narrowing**
+of the retired document's §1 rather than a re-opening: the fix landed and works
+wherever `∂F/∂ψ ≠ 0`, and returns a different function, silently, where it does
+not. meq owns `src/`, `tests/` and `apps/`.
 
 ---
 
@@ -82,10 +86,26 @@ What is left, in the order it is worth doing:
   `theDriverSolvesOnACurvedBoundary` pins it against the library at 1.6e-16 —
   and separately against imposing *zero* on `Γ_h`, at 2.7e-1, because an
   extension that was never applied would converge quietly to the wrong answer.
-* **Wire the adaptive loop.** Stage 6 exists and is tested; `[adaptivity]`
-  parses; the driver refuses it. It must call `setTransferredBoundary()`
-  automatically on the extension path and say so in the log, until `η₅` is
-  rebuilt on `TransferredDatumCoefficient`.
+* ~~**Wire the adaptive loop.**~~ **Done.** `[adaptivity] Enabled = true` runs
+  solve → post-process → estimate → mark → refine, stopping at `TargetError` or
+  `MaxIterations` and saying which. On the curved path it uses
+  `meq::AdaptiveDomain`, so the companion mesh keeps `dist(Γ_h, Γ)/h_loc` from
+  doubling every cycle, and it calls `setTransferredBoundary()` automatically and
+  logs that it did. `examples/miller-adaptive.toml`:
+  η 2.75e-3 → 1.44e-3 → 8.15e-4 → 4.77e-4, 97 → 1069 elements, 0 paths widened.
+  `theDriverRunsTheAdaptiveLoop` pins it against the library at 1.653e-16 and
+  asserts separately that it refined, refined *adaptively*, brought η down, and
+  kept assumption P.1.
+
+  **It cost a prerequisite that was filed as an independent item, and that is
+  the transferable part.** The estimator needs `ψ*` — four of eq. (20)'s five
+  terms — and `postProcess()` refused the semi-linear path, which is the *only*
+  path the driver has. So item 3's `postProcess()` bullet was not optional and
+  not separate. See below for what measuring it turned up.
+
+* **The driver's non-linear ladder is in**: Newton, and on *observed* failure
+  `PicardThenNewton`, rebuilding the solver because a caught `ErrorException`
+  leaves one unusable. Reactive, never predictive.
 * **7d, the interpolating warm start** — needs GSLIB, already enabled in
   `../mfem/install`. The exact restart (same mesh, same degree) is written. The
   acceptance measurement is the one `DRIVER-PLAN.md` §4 names: at `k = 3` the
@@ -117,18 +137,64 @@ could notice the reuse lapsing, since a lapse costs speed and nothing else.
 
 ## 3. Hygiene — meq, alongside the driver
 
-* **Rewrite the pedestal tripwire.** `pedestalNewtonFailsOnCoarseMeshesAtOrderOne`
-  asserts a failure that no longer reproduces, and **its stated diagnosis is now
-  known to be wrong twice over** — the prose blames Picard-vs-Newton and names
-  SUNDIALS, and a later note blamed BLAS thread count. It is measuring
-  **under-resolution**: `k = 1` needs `n ≥ 32`, `k ≥ 2` converges everywhere.
-  Assert that instead. Do not delete it.
-* **Re-run `everyNonlinearPathReachesTheSameExactSolution`** with
-  `PicardThenNewton` added to the paths it pins.
-* **Retire `postProcess()`'s refusal — but measure first.**
-  `ReconstructFluxAndPot()` now takes a nonlinear potential lift, so the defect
-  that forced the refusal may be gone. It returned ~1e15 *silently* before, so
-  this is verified by a rate, never by reading the source.
+* ~~**Rewrite the pedestal tripwire.**~~ **Done.**
+  `pedestalConvergenceIsAResolutionThreshold` asserts the two cures — 9
+  iterations at `k = 1, n = 32`, 11 at `k = 2, n = 16`, against 42 at
+  `k = 1, n = 16` — and asserts the threshold as a *ratio*, which holds whichever
+  side the threaded-MKL rounding falls on. The knife-edge point is recorded and
+  deliberately not asserted on.
+* ~~**Re-run `everyNonlinearPathReachesTheSameExactSolution`**~~ **Done.** Four
+  paths now, all reaching L2 2.983495e-05 to every digit printed;
+  `PicardThenNewton` gets there in 2 Newton steps after Picard's walk. It also
+  turned up something worth keeping: that run emits 2164 element-local
+  non-convergence warnings where plain Newton on the same problem emits none, and
+  converges anyway.
+* ~~**Retire `postProcess()`'s refusal — but measure first.**~~ **Done, and
+  measuring first is what stopped it being wrong.** The rate on Example 5 is
+  `k+2` — 3.05, 4.05, 5.03 — so the lift works. But the refusal was *narrower*
+  than a blanket one should have been: with `∂F/∂ψ` identically zero the frozen
+  Jacobian vanishes, the local problem is singular again, and `ψ*` comes back at
+  8.98, 5.07, 6.90e11, 4.77 over four meshes against 3.8e-6 … 9.3e-10 for the
+  same problem solved linearly. **Finite at three meshes in four**, so a code
+  read would have passed it and so would a spot check.
+
+  `postProcess()` now measures its own output — `‖ψ*‖/‖ψ_h‖` in `[0.5, 2.0]`,
+  0.9945–1.000000 measured on every working case against 26 upwards on every
+  broken one — and throws naming the cause. Filed for the MFEM tree as
+  `doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md`.
+
+  **And then the mechanism turned out to be one flag test, which changed the
+  answer twice over.** The local post-processing problem is a *pure Neumann*
+  problem, singular by construction, and MFEM regularises it with a mean-value
+  constraint — correctly. That branch is skipped whenever `nl_src` is set, and
+  `nl_src` is set on the mere *presence* of a non-linear integrator rather than
+  on whether it contributed a non-singular block. Where `∂F/∂ψ` vanishes it
+  contributes nothing, the regularisation is skipped anyway, and a singular
+  matrix is factored. **A 1e-12 floor on `∂F/∂ψ` repairs it completely** —
+  7.565317 to 0.998525 — which is a perturbation incapable of moving a solution
+  and capable only of making a matrix invertible.
+
+  **`nl_src` is per element, so this is not the special case it looked like.** At
+  an eighth of the domain dead — a tabulated profile with a flat segment —
+  individual elements are 20× wrong while the whole-domain norm is 1.87. Two
+  earlier meq-side responses were therefore both wrong and are reverted: a
+  `Source::dependsOnPsi()` flag routing linear sources to the linear path, which
+  dodges one instance and misses this one; and a runtime check inside
+  `postProcess()`, which is a standing defence against a dependency and which a
+  global norm cannot make reliably anyway.
+
+  What is left is: the driver builds `η` on `Potential::Raw`, one order down and
+  correct, as a standing decision rather than a runtime choice; the fix is filed
+  with line numbers as
+  `../mfem-hdg-dev/doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md`; and
+  `theReconstructionIsWrongWhereTheJacobianVanishes` **asserts the defect**, so
+  the suite fails the day it is fixed and says to put the estimator back.
+
+  **The defect does not reach the solve**, measured rather than argued: `ψ_h` and
+  `q_h` agree between the two paths to 1.6e-13 and 2.6e-13 over `k = 1…4` and
+  three meshes, and post-processing leaves both bit-identical. The forward local
+  problem takes its potential block from the HDG stabilisation on the interior
+  faces, which never degenerates.
 * **Rebuild `η₅` on `TransferredDatumCoefficient`** instead of excluding those
   faces. Stage-6 work, unblocked by the MFEM fix; wants its own rate.
 * **Rewrite `README.md`**, which still describes a project that did not exist.

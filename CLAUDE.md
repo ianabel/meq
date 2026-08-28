@@ -36,10 +36,11 @@ Concretely:
   `DG_Interface_FECollection`'s `VALUE` map type — the same pattern
   `estimators_hdg.cpp` uses.
 * `apps/meq.cpp` is the **driver**, and `MEQ_BUILD_APP` now defaults `ON`.
-  `meq config.toml` parses, builds the mesh and source, solves, prints a
-  residual history and writes `.mesh`, `_psi.gf`, `_grad_psi.gf` and a `(R, Z)`
-  NetCDF file. Exit codes 0/1/2/3 as `DRIVER-PLAN.md` §5 specifies, and exit 2
-  is only reachable because `MFEM_USE_EXCEPTIONS` is now on.
+  `meq config.toml` parses, builds the mesh and source, solves — with the
+  adaptive loop if it is asked for — prints a residual history and writes
+  `.mesh`, `_psi.gf`, `_grad_psi.gf` and a `(R, Z)` NetCDF file. Exit codes
+  0/1/2/3 as `DRIVER-PLAN.md` §5 specifies, and exit 2 is only reachable because
+  `MFEM_USE_EXCEPTIONS` is now on.
 * `Config`, `Profiles`, `Source` compile and test.
 
 **meq is runnable.** `tests/convergence/DriverAcceptance.cpp` is the test that
@@ -58,12 +59,38 @@ datum silently imposes zero and still converges, so
 *and* against that zero-datum solve (2.7e-1, i.e. the transfer is doing real
 work).
 
+**The adaptive loop works through the driver, on both paths.**
+`[adaptivity] Enabled = true` runs solve → post-process → estimate → mark →
+refine, stopping at `TargetError` or `MaxIterations` and saying which, and prints
+a per-cycle table. On the curved path it uses `meq::AdaptiveDomain` — the
+companion mesh of GS-2 §3.3, without which `dist(Γ_h, Γ)/h_loc` doubles every
+cycle and the transfer silently leaves the regime it is analysed in — and it
+calls `setTransferredBoundary()` automatically, saying so in the log.
+`examples/miller-adaptive.toml` is the worked example: η monotone
+2.75e-3 → 1.44e-3 → 8.15e-4 → 4.77e-4 over four cycles, 97 → 1069 elements, 0
+transfer paths widened at any cycle. `theDriverRunsTheAdaptiveLoop` pins it
+against the same loop driven through the library at **1.653e-16 over 6414 dofs**,
+and separately asserts that it refined at all, that it refined *adaptively*, that
+η came down, and that assumption P.1 survived the graded `Γ_h`.
+
+**The driver's non-linear path is a reactive ladder**: Newton, and on *observed*
+failure `PicardThenNewton`, rebuilding the solver because a caught
+`ErrorException` leaves one unusable. Never predictive — nothing may be inferred
+from `F` about which solver to run, for the reason recorded under *Why meq's
+Newton struggles*.
+
 **What the driver still does not do, and refuses rather than approximates**:
-`[adaptivity] Enabled = true` (the stage-6 loop exists but is not wired) and
-`[boundary] Type = "exact"` (needs a closed form `meq::Source` does not carry).
-Both exit 1 with an explanation.
+`[boundary] Type = "exact"` (needs a closed form `meq::Source` does not carry),
+which exits 1 with an explanation.
 The interpolating warm start of `DRIVER-PLAN.md` §4 needs GSLIB and is not
-written; the exact restart — same mesh, same degree — is.
+written; the exact restart — same mesh, same degree — is, and it is a
+*first-cycle* guess only, since carrying an answer across a refinement is that
+same missing interpolation.
+
+**The loop builds `η` on the raw potential, and says so in its table.** That is
+one order below the published estimator and it is the correct choice until MFEM's
+reconstruction is fixed — see *Post-processing is back*. `TargetError` is not
+comparable against a run made after that changes.
 
 The local post-processing that was stage 3 has been dropped — see *There is no
 separate post-processing stage* below.
@@ -530,13 +557,79 @@ as an earlier version of this file said.
 5.00 for `k = 1, 2, 3`. No hand-written local solve was needed, and it survives
 the extension path too. The old `GSSolver::Postprocess()` stays deleted.
 
-**But it is unusable through Newton, and fails silently.**
-`ReconstructFluxAndPot()` reads only the *linear* `M_p`, and meq's Newton path
-puts the whole potential block on `Mnl_p` — so the local problem gets no
-potential mass and no constraint. Measured `ψ*` of **9.9e14, 8.4e15, 3.9e14**
-against 3.8e-6, 2.4e-7, 1.5e-8 for the same problem solved linearly, with `ψ_h`
-agreeing to six figures either way. `postProcess()` throws rather than returning
-it. This is an MFEM-side defect, listed under *Traps*.
+**Through Newton it works where `∂F/∂ψ ≠ 0` and is wrong, per element, wherever
+`∂F/∂ψ` vanishes.** That is a narrowing of what this file used to say, arrived at
+through two wrong diagnoses, and the mechanism is worth knowing exactly because
+it is one condition.
+
+`ReconstructFluxAndPot()` used to consult only the linear `M_p`. MFEM now lifts
+the non-linear potential integrators as a Jacobian frozen at the computed
+potential, and **measured on Example 5 that delivers `k+2`**: rates 3.05, 4.05,
+5.03 at `k = 1, 2, 3`, and 47×, 113×, 125× smaller than `ψ_h` on the finest mesh.
+`thePostProcessedPotentialSurvivesNewton` is that measurement.
+
+**But the local post-processing problem is a pure Neumann problem — singular by
+construction, determined only up to a constant — and MFEM's fix for that is
+skipped by a flag set on the wrong condition.** `darcyform.cpp:1464` sets
+`nl_src` on the mere *presence* of a non-convection non-linear integrator, under
+a comment reading *"use non-singular terms as a source"* that states the intended
+test exactly. Where `∂F/∂ψ` vanishes the integrator's Jacobian is the zero
+matrix, so the term **is** singular; `nl_src` claims otherwise; the mean-value
+branch at `:1586` is skipped; and `:1629` factors a singular matrix with
+`Factor( m, TOL = 0.0 )` testing `|pivot| <= 0.0` and the return value discarded.
+
+**It is not "a zero right-hand side it cannot handle".** The singularity is by
+design and the handling is written. It is unreachable.
+
+**And `nl_src` is per element, so the corruption is too.** Measured, with `∂F/∂ψ`
+vanishing where `z < threshold`, comparing `max|ψ*|` against `max|ψ_h|` per
+element:
+
+| dead fraction | global `‖ψ*‖/‖ψ_h‖` | worst **dead** element | worst **live** element |
+|---|---|---|---|
+| 0.125 | 1.87 | **20.3** | 1.0049 |
+| 0.312 | 5.69 | **64.1** | 1.0024 |
+| 0.500 | 7.57 | **61.6** | 1.0021 |
+
+At an eighth of the domain dead — a tabulated profile with a flat segment, which
+is ordinary — elements are 20× wrong while the whole-domain norm is 1.87. **Any
+global check misses it.** And a floor of **1e-12** on `∂F/∂ψ` — twelve orders
+below everything else in the problem, incapable of moving a solution — takes the
+ratio from 7.565317 to 0.998525. That is a singular matrix and nothing else.
+
+**meq carries no runtime check for this**, deliberately. A solver should not
+stand permanently on guard against its own dependency, and the condition is one
+flag test away from never arising. The state of the defect lives in the suite
+instead: `theReconstructionIsWrongWhereTheJacobianVanishes` asserts the
+corruption is still present and **fails the day MFEM fixes it**, with a message
+saying to delete it and put the driver back on the published estimator. The fix
+is written up with line numbers as
+`../mfem-hdg-dev/doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md`.
+
+**So the driver's adaptive loop builds `η` on `Potential::Raw`** — a standing
+decision with a date on it, not a fallback and not a runtime choice. It costs
+exactly one order at every `k` and runs 124× to 407× larger, and it is *correct*,
+where `ψ*` would be quietly wrong on exactly the elements the loop then refines.
+A wrong refinement pattern is the worst available failure because it looks like a
+working run. `postProcess()` is not called at all on that path, which also saves
+its local solves.
+
+**And the defect does not reach the solve — measured, not argued.** A number like
+6.9e11 raises the question of whether `ψ_h` or `q_h` are also corrupted somewhere
+less visible. They are not, and the reason is structural: the forward solve's
+local problem takes its potential block from the HDG stabilisation on `Mnl_p`'s
+**interior faces**, a fixed bilinear form whatever the source does, while
+`Reconstruct()` builds a different local problem whose regularisation is what
+fails. `theReconstructionDefectDoesNotReachTheSolve` compares both paths in `ψ_h`
+**and** `q_h` over `k = 1…4` and three meshes:
+
+| worst over the sweep | `ψ_h` | `q_h` |
+|---|---|---|
+| relative difference between the paths | **1.6e-13** | **2.6e-13** |
+
+against discretisation errors from 2.2e-3 down to 7.3e-11. It also checks that
+post-processing leaves both **bit-identical**, since the driver writes them
+afterwards.
 
 The measurement that justifies the `ψ*` requirement, rather than quoting it:
 building `η₂` on raw `ψ_h` loses **exactly one order at every `k`** — 2.002 vs
@@ -1145,7 +1238,7 @@ failures throw from deeper still. The objects are left as the throw found them.
 meq's paths construct a fresh solver per solve and so do not care, but do not
 assume a `GradShafranovSolver` is reusable after a caught `ErrorException`.
 
-### The suite is 16/17, and the one failure is a tripwire firing as designed
+### The suite is 18/18
 
 Measured against `meq-integration` — `gf-hdg-subdomains-dev` +
 `direct-solver-symbolic-reuse` + the bugfixed `gf-hdg-linearise-first`.
@@ -1160,16 +1253,34 @@ rather than buying it. `AdaptiveRefinement` failed downstream of it, `η₂`, `�
 and `η₅` being built on `ψ*`, which is why it surfaced as `η` refusing to come
 down four files from the cause. Both are green now.
 
-**The one failure is
-`PedestalConvergence::pedestalNewtonFailsOnCoarseMeshesAtOrderOne`, and it fails
-by printing its own designed message**: Newton converges at `k = 1, h = 0.05` in
-**42 iterations** where the test asserts it does not converge at all. That is the
-same 42 recorded under *On SUNDIALS* as the LAPACK-tipped value, so this is the
-knife edge moving, not a capability arriving. **Do not delete it**, whatever the
-assertion message says: the underlying problem is untouched, the case is marginal
-either way, and the threaded-MKL rounding that decides it is not reproducible
-across machines. What it needs is a rewrite that says it is measuring a knife
-edge. §4.4, the current hole, still aborts.
+**The pedestal tripwire is rewritten and now passes.** It used to assert that
+Newton does not converge at `k = 1, h = 0.05`, told its reader to delete it when
+that stopped holding, and blamed Picard-vs-Newton and SUNDIALS in its prose —
+both of which are now known to be wrong. It was never entitled to assert that
+point in either direction: 42 iterations against LAPACK and a failure at 60
+against `install-nolapack` is the same library differing by one flag, decided by
+threaded-MKL reduction order, so an assertion on it is an assertion about this
+machine today.
+
+`pedestalConvergenceIsAResolutionThreshold` asserts the two **cures** instead,
+each with a factor of four in it and neither marginal:
+
+| | | |
+|---|---|---|
+| `k = 1, n = 16` | 42 iterations | the knife edge, recorded and *not* asserted on |
+| `k = 1, n = 32` | 9 iterations | `h`-refinement cures it |
+| `k = 2, n = 16` | 11 iterations | `p`-refinement cures it, mesh untouched |
+
+That two independent refinement paths both cure it is what identifies the cause
+as under-resolution; §4.4 is the control, and it fails at every order and mesh
+tried because its trouble is that the problem is multi-valued. The threshold
+itself is still asserted, as `iterations(n = 16) ≥ 2 × iterations(n = 32)`, which
+holds whichever side the rounding falls on — 42 or a failure at the cap both
+clear it. §4.4, the current hole, still fails, and now reports rather than
+aborting.
+
+**That file is 758 s of the suite's 1109 s**, 68% of it, which is worth knowing
+before adding to it.
 
 ## The linear solves, and what they should be
 
@@ -1477,11 +1588,16 @@ it** — `prepare()` resets the iterate and `solve()` calls `prepare()`. Until t
 exists, those four cases are posed with a non-homogeneous ramp that puts `ψ = 0`
 in the interior. This is the most actionable gap in the solver.
 
-**`DarcyForm::Reconstruct()` returns ~1e15 on the nonlinear path, silently.**
-`ReconstructFluxAndPot()` consults only the linear `M_p`, never `Mnl_p` — while
-`ReconstructTotalFlux()` *does* consult `Mnl_p`, so the asymmetry is internal to
-MFEM. `postProcess()` throws rather than pass it on. MFEM-side, and written up
-as §1 of `../mfem-hdg-dev/doc/HDG-DEFECTS-FROM-MEQ.md`.
+**`DarcyForm::Reconstruct()` returns a different function, silently, on any
+element where `∂F/∂ψ` vanishes** — a singular local matrix, factored anyway,
+because the mean-value branch that exists to regularise it is skipped by a flag
+set on the wrong condition. Per element, so a profile with a flat segment
+corrupts part of the domain and leaves the rest exact, and a whole-domain check
+misses it. meq's driver therefore never uses `ψ*` for the estimator. See
+*Post-processing is back*; MFEM-side, written up with line numbers as
+`../mfem-hdg-dev/doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md`. **The
+earlier, wider version of this trap is fixed** — `ReconstructFluxAndPot()` now
+lifts `Mnl_p` and gives `k+2` wherever `∂F/∂ψ` is non-zero everywhere.
 
 **`mfem::Mesh::FindPoints` is `O(elements × points)`** — a brute-force scan over
 element centres. It caps sample-cloud sizes in any off-grid error measure.
