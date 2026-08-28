@@ -163,7 +163,31 @@ it, `CMakeLists.txt` builds the MFEM-free half — `Config`, `Profiles`, `Source
 guard already skips every convergence test without needing to know why.
 
 So `.github/workflows/ci.yml` runs four unit suites, the `naming` check and a
-coverage gate at 90% lines (94.8% measured). **What it does not run is every
+coverage gate at 90% lines (94.8% measured). **That 94.8% is over four files,
+not over the library**, and reading it as a statement about meq is a mistake this
+file used to invite. Measured locally over the whole of `src/meq/` with
+everything built and the suite run:
+
+| | lines | functions | branches |
+|---|---|---|---|
+| `src/meq/` entire | **80.8%** | 80.3% | 49.4% |
+
+and it is not evenly spread. The MFEM-free half CI can build is 92–100%
+(`Source.cpp` 100%, `Profiles.cpp` 99%, `BoundaryShape.cpp` 98%, `Sampler.cpp`
+97%, `SourceFactory.cpp` 95%, `Config.cpp` 92%). **`GradShafranov.cpp` — the
+solver — is 60%**, `Field.cpp` 61%, `Output.cpp` 73%, `Estimator.cpp` 89%. So the
+best-covered code is the configuration layer and the least-covered is the part
+every physical claim rests on. 165 Boost test cases across 17 suites is not
+thin, but they are concentrated on rates rather than on paths: the globalisation
+ladder, the KINSOL variants, the error branches and most accessors are reached by
+nothing.
+
+**And `gcovr` is not installed on this machine**, so the recipe above fails with
+`command not found`; a venv is the way round it, and it needs
+`--merge-mode-functions=separate` or it aborts on `Config.hpp`'s inline
+accessors appearing at two line numbers across translation units.
+
+**What it does not run is every
 claim about rates** — the HDG assembly, Newton, the extension technique and the
 estimator are all local-only, and the `full` job in that workflow is written but
 `if: false` until either the branch is published or a self-hosted runner exists.

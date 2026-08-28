@@ -198,7 +198,8 @@ set(MEQ_CORE_SOURCES
 	src/meq/Profiles.cpp
 	src/meq/Sampler.cpp
 	src/meq/Source.cpp
-	src/meq/SourceFactory.cpp)
+	src/meq/SourceFactory.cpp
+	src/meq/WarmStart.cpp)
 
 # Sources that will not compile without MFEM. Filtered out when it is absent;
 # see the find_package note above for why that case exists at all.
@@ -207,7 +208,8 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/Field.cpp
 	src/meq/GradShafranov.cpp
 	src/meq/Output.cpp
-	src/meq/Sampler.cpp)
+	src/meq/Sampler.cpp
+	src/meq/WarmStart.cpp)
 
 # And the one that additionally needs netcdf-cxx4. Kept separate because the two
 # dependencies are independent: a tree with MFEM and no NetCDF builds everything
