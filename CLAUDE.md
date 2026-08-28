@@ -10,7 +10,7 @@ Galerkin (HDG) discretisation built on MFEM.
 from. The two marked ✔ there are not background reading — they *are* the method,
 and `src/meq` is an implementation of them.
 
-## Status: the solver works, the driver does not
+## Status: the solver works, and meq is a program
 
 **meq solves the semi-linear Grad–Shafranov equation by Newton**, which before
 stage 2 it had never done at all. `k+1` in both `ψ` and `q` for `k = 1,2,3` over
@@ -27,20 +27,36 @@ Concretely:
   offsets and a second set of finite element spaces around what `DarcyForm` now
   owns, and `GradShafranovSolver` carries what was left of its job. Its
   `Prolong()` and `Update()` are stage-6 work against a mesh update that does not
-  exist yet, and its `WriteOutputMFEM()` went with it, so **nothing writes files
-  today**. `v0-legacy` has the original.
+  exist yet, and its `WriteOutputMFEM()` went with it. `src/meq/Output.{hpp,cpp}`
+  replaced that job in stage 7c. `v0-legacy` has the original.
 * `src/meq/Estimator.{hpp,cpp}` is written, compiles, is in `meq_core` and is
   under the `naming` check. `GridFunction::GetValueFacet`, which the old header
   called and which 4.9.1 does not have, is replaced by
   `traceFes->GetFaceElement(f)` + `GetFaceVDofs()` + `CalcShape()`, exploiting
   `DG_Interface_FECollection`'s `VALUE` map type — the same pattern
   `estimators_hdg.cpp` uses.
-* `apps/meq.cpp` likewise. Its target is behind `MEQ_BUILD_APP`, default `OFF`.
+* `apps/meq.cpp` is the **driver**, and `MEQ_BUILD_APP` now defaults `ON`.
+  `meq config.toml` parses, builds the mesh and source, solves, prints a
+  residual history and writes `.mesh`, `_psi.gf`, `_grad_psi.gf` and a `(R, Z)`
+  NetCDF file. Exit codes 0/1/2/3 as `DRIVER-PLAN.md` §5 specifies, and exit 2
+  is only reachable because `MFEM_USE_EXCEPTIONS` is now on.
 * `Config`, `Profiles`, `Source` compile and test.
 
-Still missing from the solver: adaptivity (stage 6). And the driver — nothing
-writes files, so meq is reachable only through its test suite. The local post-processing that was stage 3 has
-been dropped — see *There is no separate post-processing stage* below.
+**meq is runnable.** `tests/convergence/DriverAcceptance.cpp` is the test that
+says so, and it asserts the driver reproduces the *library* on the same
+configuration — 1.189e-16 relative over 15,360 dofs — rather than comparing
+against a closed form, for the reason recorded beside
+`examples/soloviev-nstx.toml`.
+
+**What the driver does not do yet, and refuses rather than approximates**:
+`[boundary.shape]` (the extension path), `[adaptivity] Enabled = true` (the
+stage-6 loop exists but is not wired), and `[boundary] Type = "exact"` (needs a
+closed form `meq::Source` does not carry). All three exit 1 with an explanation.
+The interpolating warm start of `DRIVER-PLAN.md` §4 needs GSLIB and is not
+written; the exact restart — same mesh, same degree — is.
+
+The local post-processing that was stage 3 has been dropped — see *There is no
+separate post-processing stage* below.
 
 **And it is worth being clear about what the old code did, because the README
 overstates it considerably.** Before the port, `meq` solved the *vacuum* coil

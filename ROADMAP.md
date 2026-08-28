@@ -9,12 +9,11 @@ what is deliberately not being done yet.
 ## The state in one paragraph
 
 The solver works and every claim about it is a measured convergence rate. Stages
-0 to 6 are done; stage 7 is half done — `setInitialGuess()`, `BoundaryShape` and
-the 7c writers landed, the driver did not. The suite is **16/17**, the single
-failure being a tripwire whose premise stopped holding. **meq still cannot be run
-by anyone**: nothing reachable from a command line writes a file, so the solver
-is exercised only through `ctest`. That has been true since stage 1 and is now
-the only thing standing between meq and being useful.
+0 to 6 are done, and **stage 7e landed: meq is a program.** `meq config.toml`
+solves and writes. The suite is **17/18**, the single failure being a tripwire
+whose premise stopped holding. What is left of stage 7 is the warm start's
+interpolating route (§4, needs GSLIB) and wiring the two things the driver
+currently refuses — the extension path and the adaptive loop.
 
 ## The nonlinear question is settled
 
@@ -68,16 +67,30 @@ recurring conflict.
 
 A standing cost of the arrangement, and it falls on meq's side.
 
-## 1. The driver — meq, and nothing is in its way
+## 1. Finish the driver — meq
 
-`DRIVER-PLAN.md` §3–5: **7c output (done)**, 7d warm start, 7e the driver.
+`DRIVER-PLAN.md` §3–5: **7c output done, 7e the driver done.** `meq config.toml`
+parses, solves, prints a residual history and writes `.mesh`, `_psi.gf`,
+`_grad_psi.gf` and the `(R, Z)` NetCDF file, with exit codes 0/1/2/3.
 
-**This is the only item that changes what meq _is_.** Everything else improves a
-thing nobody can execute. It was previously sequenced behind the nonlinear work;
-that work is finished and the dependency is gone.
+What is left, in the order it is worth doing:
 
-* **7d** — warm start, with 7c's NetCDF grid doubling as the interchange format.
-* **7e** — `meq config.toml`, exit codes, residual history, the adaptive loop.
+* **Wire the extension path.** `[boundary.shape]` parses and `BoundaryShape`
+  works; the driver refuses the configuration rather than solving the
+  mesh-boundary problem in its place. This is the one that makes meq useful for
+  a real equilibrium — and, per the note now on `examples/soloviev-nstx.toml`,
+  the one that would let the headline benchmark reproduce its own published
+  answer rather than a rectangle's.
+* **Wire the adaptive loop.** Stage 6 exists and is tested; `[adaptivity]`
+  parses; the driver refuses it. It must call `setTransferredBoundary()`
+  automatically on the extension path and say so in the log, until `η₅` is
+  rebuilt on `TransferredDatumCoefficient`.
+* **7d, the interpolating warm start** — needs GSLIB, already enabled in
+  `../mfem/install`. The exact restart (same mesh, same degree) is written. The
+  acceptance measurement is the one `DRIVER-PLAN.md` §4 names: at `k = 3` the
+  GSLIB route should start from a residual smaller than the NetCDF route's by
+  about `h^{k+1}` against `h^2` — which is what justifies the dependency rather
+  than asserting it.
 
 **The nonlinear path the driver ships:** Newton, falling back to
 `PicardThenNewton` on **observed** failure. A *reactive* ladder — never a
