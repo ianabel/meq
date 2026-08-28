@@ -436,10 +436,20 @@ namespace meq
 		prepare();
 
 #ifdef MFEM_USE_SUITESPARSE
-		mfem::UMFPackSolver step;
-		step.Control[ UMFPACK_ORDERING ] = UMFPACK_ORDERING_METIS;
-		step.SetOperator( *reduced.Ptr() );
-		step.Mult( traceB, traceX );
+		// Held across calls rather than built per iteration, which is the whole
+		// point: Picard runs 122 to 290 of these, each a full factorisation of a
+		// matrix whose sparsity never changes. prepare() rebuilds `reduced` every
+		// iteration, but SetReuseSymbolic() compares the pattern rather than the
+		// object -- it documents accepting "a matrix rebuilt into a fresh object
+		// with the same structure" -- so the analysis survives that.
+		if ( !picardSolver )
+		{
+			picardSolver = std::make_unique<mfem::UMFPackSolver>();
+			picardSolver->Control[ UMFPACK_ORDERING ] = UMFPACK_ORDERING_METIS;
+			picardSolver->SetReuseSymbolic();
+		}
+		picardSolver->SetOperator( *reduced.Ptr() );
+		picardSolver->Mult( traceB, traceX );
 #else
 		mfem::SparseMatrix &matrix = *reduced.As<mfem::SparseMatrix>();
 		mfem::GSSmoother preconditioner( matrix );
@@ -1048,6 +1058,13 @@ namespace meq
 #ifdef MFEM_USE_SUITESPARSE
 			mfem::UMFPackSolver linear;
 			linear.Control[ UMFPACK_ORDERING ] = UMFPACK_ORDERING_METIS;
+			// NewtonSolver::Mult calls prec->SetOperator( *grad ) on THIS object
+			// once per iteration, and the trace system's sparsity does not change
+			// between them -- so without this the METIS analysis is recomputed and
+			// thrown away every step, at a fifth to a quarter of the factorisation.
+			// The pattern is compared entry by entry rather than assumed, so a
+			// pattern that did change is re-analysed and the answer is unaffected.
+			linear.SetReuseSymbolic();
 #else
 			mfem::GMRESSolver linear;
 			linear.SetRelTol( 1.0e-14 );
@@ -1132,6 +1149,13 @@ namespace meq
 			nonlinear->Mult( traceB, traceX );
 			newtonIterationCount = nonlinear->GetNumIterations();
 
+#ifdef MFEM_USE_SUITESPARSE
+			// Recorded so the reuse can be asserted on rather than timed: a Newton
+			// solve refactorises once per iteration and must analyse ONCE.
+			symbolicFactorisationCount = linear.GetNumSymbolicFactorizations();
+			numericFactorisationCount = linear.GetNumNumericFactorizations();
+#endif
+
 			// Loudly, and without a recovered solution: an iteration that ran out
 			// of steps has produced a vector, not an equilibrium.
 			if ( !nonlinear->GetConverged() )
@@ -1140,6 +1164,9 @@ namespace meq
 		else
 		{
 #ifdef MFEM_USE_SUITESPARSE
+			// No SetReuseSymbolic() here, deliberately: the linear path factorises
+			// once and this object is destroyed straight after, so retaining the
+			// analysis would buy nothing and cost a copy of the pattern.
 			mfem::UMFPackSolver solver;
 			solver.Control[ UMFPACK_ORDERING ] = UMFPACK_ORDERING_METIS;
 			solver.SetOperator( *reduced.Ptr() );
@@ -1319,6 +1346,16 @@ namespace meq
 	int GradShafranovSolver::picardIterations() const
 	{
 		return picardIterationCount;
+	}
+
+	long GradShafranovSolver::symbolicFactorisations() const
+	{
+		return symbolicFactorisationCount;
+	}
+
+	long GradShafranovSolver::numericFactorisations() const
+	{
+		return numericFactorisationCount;
 	}
 
 	int GradShafranovSolver::newtonIterations() const

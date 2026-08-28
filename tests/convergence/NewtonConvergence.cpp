@@ -799,3 +799,70 @@ BOOST_AUTO_TEST_CASE( similarityOrderThreeConvergesAtFour )
 	checkOrder( meq::analytic::SimilarityExponential::benchmark(),
 	            "Kaltsas-Throumoulopoulos exponential", 3, 3.1e-8, 7.4e-8 );
 }
+
+/*
+ * THE SYMBOLIC ANALYSIS IS COMPUTED ONCE, NOT ONCE PER NEWTON STEP.
+ *
+ * UMFPACK splits a solve into a symbolic analysis, which depends only on the
+ * sparsity pattern, and a numeric factorisation, which depends on the values.
+ * NewtonSolver::Mult calls prec->SetOperator( *grad ) once per iteration, and
+ * the hybridized trace system's pattern never changes between them -- so
+ * without SetReuseSymbolic() the analysis is recomputed and discarded every
+ * step. Measured before it was enabled, that was 22 to 24% of each step, and
+ * meq asks for METIS ordering, which makes it dearer than the default.
+ *
+ * This asserts the RATIO rather than a time, which is the house rule: a timing
+ * would be a measurement about this machine, where the count is a measurement
+ * about the code. One analysis, and one factorisation per iteration.
+ *
+ * It is also the only thing that would notice the reuse silently lapsing. The
+ * pattern check inside SetReuseSymbolic() is exact and re-analyses whenever it
+ * fails, so a lapse costs performance and NOTHING ELSE -- no wrong answer, no
+ * failed convergence, nothing a rate table or an error norm could see.
+ */
+BOOST_AUTO_TEST_CASE( theSymbolicAnalysisIsReusedAcrossNewtonSteps )
+{
+#ifndef MFEM_USE_SUITESPARSE
+	BOOST_TEST_MESSAGE( "no SuiteSparse, so there is no UMFPACK analysis to reuse" );
+#else
+	meq::analytic::ManufacturedNonlinear const eq
+		= meq::analytic::ManufacturedNonlinear::example5();
+	EquilibriumSource<meq::analytic::ManufacturedNonlinear> source( eq );
+
+	mfem::Mesh mesh = makeMesh( 8 );
+	mfem::FunctionCoefficient psiCoeff( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.psi( x( 0 ), x( 1 ) );
+	} );
+
+	meq::GradShafranovSolver solver( mesh, 2 );
+	solver.setSource( source );
+	solver.setBoundaryData( psiCoeff );
+	solver.setNewtonControl( 1.0e-10, 1.0e-14, 60 );
+	solver.solve();
+
+	std::printf( "\n  Newton took %d iterations: %ld symbolic analyses, "
+	             "%ld numeric factorisations\n",
+	             solver.newtonIterations(), solver.symbolicFactorisations(),
+	             solver.numericFactorisations() );
+	std::fflush( stdout );
+
+	// More than one step, or the test cannot distinguish reuse from there being
+	// nothing to reuse.
+	BOOST_TEST_REQUIRE( solver.newtonIterations() >= 2 );
+
+	BOOST_TEST( solver.symbolicFactorisations() == 1,
+	            "the sparsity was analysed " << solver.symbolicFactorisations()
+	            << " times across " << solver.newtonIterations()
+	            << " Newton iterations, and once is the point of "
+	            "SetReuseSymbolic(). This costs only speed, which is why nothing "
+	            "else in the suite would catch it" );
+
+	// Reuse must not have skipped a refactorisation: the values change every
+	// step even though the pattern does not, so each iteration needs its own.
+	BOOST_TEST( solver.numericFactorisations() > solver.symbolicFactorisations(),
+	            "only " << solver.numericFactorisations() << " numeric "
+	            "factorisations for " << solver.newtonIterations()
+	            << " iterations -- reuse must never skip one of these" );
+#endif
+}

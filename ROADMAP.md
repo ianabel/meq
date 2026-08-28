@@ -87,21 +87,19 @@ pedestal converges at 7 where the hole fails at 26, which is two points and not 
 threshold. **Continuation must not go in**, for the stronger reason that it has
 no black-box form at all — see item 5.
 
-**Prerequisite: `MFEM_USE_EXCEPTIONS`** on the next `../mfem/install` rebuild.
-§5's exit code 2 for a failed solve is unimplementable while MFEM aborts the
-process, and §4.4 is exactly the case that aborts. It is a `config.hpp` change,
-so a full rebuild.
+**Prerequisite `MFEM_USE_EXCEPTIONS`: done.** `../mfem/install` is rebuilt with
+it, and §4.4 — which used to take the process down with SIGABRT — now returns a
+reported failure and an iteration count. Exit code 2 is implementable. No
+meq-side change was needed: `ErrorException` derives from `std::exception`.
 
-## 2. Use the symbolic factorisation reuse that landed — meq, small
+## 2. ~~Symbolic factorisation reuse~~ — **done**
 
-`UMFPackSolver::Symbolic` is now a **member**, with `SetReuseSymbolic()`,
-`GetNumSymbolic()` and `GetNumNumeric()`. meq calls none of them, so it is still
-throwing away **22–24% of every Newton step's linear cost** at all three
-`UMFPackSolver` sites in `GradShafranov.cpp`.
-
-Cheap, no design decisions, and it comes with its own acceptance criterion: assert
-`GetNumSymbolic() == 1` across a multi-step Newton solve, which is a *measured*
-number in the house style rather than a timing.
+`SetReuseSymbolic()` is on for the Newton path and for the Picard path, whose
+solver was hoisted to a member so it had something to reuse across its 122 to 290
+factorisations. Off deliberately on the linear path, which factorises once.
+`theSymbolicAnalysisIsReusedAcrossNewtonSteps` asserts one analysis against one
+factorisation per iteration — a count, not a timing, and the only thing that
+could notice the reuse lapsing, since a lapse costs speed and nothing else.
 
 ## 3. Hygiene — meq, alongside the driver
 
@@ -121,7 +119,7 @@ number in the house style rather than a timing.
   faces. Stage-6 work, unblocked by the MFEM fix; wants its own rate.
 * **Rewrite `README.md`**, which still describes a project that did not exist.
 
-## 4. Element-local parallelism — MFEM, and now unblocked
+## 4. Element-local parallelism — MFEM, **in flight**
 
 `../mfem-hdg-dev/doc/HDG-ELEMENT-LOCAL-PARALLELISM.md`. Probably the largest
 performance win available: twelve sequential element loops in

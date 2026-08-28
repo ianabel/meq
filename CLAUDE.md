@@ -1096,10 +1096,28 @@ was wrong.** Both §4.2 at `h = 0.05` and §4.4 still need globalisation;
 bought is a marginal case that happens to fall the right side of the line on
 this machine today.
 
-**Still not enabled: `MFEM_USE_EXCEPTIONS`.** Worth doing before the driver, and
-`DRIVER-PLAN.md` §5 depends on it — a driver cannot report exit code 2 for a
-failed solve if MFEM aborts the process first. It needs a full rebuild of
-`../mfem/install`, being a `config.hpp` change.
+**`MFEM_USE_EXCEPTIONS` is now enabled**, and it does what `DRIVER-PLAN.md` §5
+needs. With it, `MFEM_ERROR_THROW` is the *default* error action and
+`mfem::ErrorException` derives from `std::exception`, so **no meq-side change was
+required** — an existing `catch ( std::exception const & )` already catches it.
+
+Measured on §4.4 at `k = 1, n = 16`, which used to take the process down with
+SIGABRT:
+
+```
+ --> norm = -nan
+ ... in function: virtual void mfem::NewtonSolver::Mult( ... )
+RESULT|4.4 hole|k=1|n=16|condense-first|none|seeded|FAIL|0|local 214583
+```
+
+Exit 0, a reported failure, a usable iteration count. A driver can now return
+exit code 2 rather than dying.
+
+**A caveat worth keeping in view**: the throw unwinds out of the middle of
+MFEM — that NaN is detected inside `NewtonSolver::Mult`, and the element-local
+failures throw from deeper still. The objects are left as the throw found them.
+meq's paths construct a fresh solver per solve and so do not care, but do not
+assume a `GradShafranovSolver` is reusable after a caught `ErrorException`.
 
 ### The suite is 16/17, and the one failure is a tripwire firing as designed
 
@@ -1211,13 +1229,44 @@ every Rayleigh quotient measured is negative on either path. So `−A` has posit
 definite symmetric part, which is what gives GMRES a convergence bound and what
 makes a preconditioned Krylov method reasonable at all.
 
-### A quarter of every Newton step is thrown away
+### A quarter of every Newton step was thrown away — fixed, and switched on
 
-`UMFPackSolver::SetOperator` declares `void *Symbolic` as a **local variable**,
-and `NewtonSolver::Mult` calls `prec->SetOperator( *grad )` every iteration
-(`linalg/solvers.cpp:2129`). The sparsity pattern does not change between Newton
-steps, so the symbolic analysis is recomputed and discarded each time — and meq
-asks for METIS ordering, which makes it more expensive than the default.
+`UMFPackSolver::SetOperator` used to declare `void *Symbolic` as a **local
+variable**, while `NewtonSolver::Mult` calls `prec->SetOperator( *grad )` every
+iteration. The sparsity pattern does not change between Newton steps, so the
+symbolic analysis was recomputed and discarded each time — and meq asks for
+METIS ordering, which makes it dearer than the default.
+
+**`Symbolic` is now a member and meq calls `SetReuseSymbolic()`.** Verified by
+count rather than by clock — `theSymbolicAnalysisIsReusedAcrossNewtonSteps`
+prints and asserts it:
+
+```
+  Newton took 4 iterations: 1 symbolic analyses, 4 numeric factorisations
+```
+
+One analysis, one factorisation per step. **A count, not a timing, on purpose**:
+a timing here would be a measurement about this machine, and this is a
+measurement about the code. It is also the *only* thing that could notice the
+reuse lapsing — the pattern check is exact and re-analyses whenever it fails, so
+a lapse costs speed and nothing else. No wrong answer, no failed convergence,
+nothing a rate table or an error norm could ever see.
+
+**Where it is switched on, and where deliberately not:**
+
+| site | reuse | why |
+|---|---|---|
+| Newton path | **yes** | `NewtonSolver::Mult` re-`SetOperator`s the same object every iteration |
+| Picard path | **yes**, and the solver is **hoisted to a member** | it was built inside `picardStep()`, so it had nothing to reuse across calls; Picard runs 122 to 290 full factorisations, a larger absolute win than Newton's |
+| linear path | no | one factorisation, object destroyed immediately: retaining the analysis buys nothing and costs a copy of the pattern |
+
+The Picard hoist is safe across `prepare()` rebuilding `reduced` every iteration,
+because `SetReuseSymbolic()` documents comparing the **pattern**, entry by entry,
+rather than the object — it "accepts a matrix reassembled in place and a matrix
+rebuilt into a fresh object with the same structure alike", and re-analyses
+whenever the check fails. Reuse is a request, never an assumption.
+
+The measurement that motivated it:
 
 | `n` | symbolic | numeric | backsolve | symbolic share |
 |---|---|---|---|---|

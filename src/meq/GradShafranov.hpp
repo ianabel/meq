@@ -730,6 +730,14 @@ namespace meq
 			/// report stage 2, which is what an order assertion wants.
 			int picardIterations() const;
 
+			/// UMFPACK symbolic analyses performed during the last Newton solve,
+			/// and numeric factorisations. The point of the pair is the RATIO:
+			/// symbolic reuse is on, so a converged Newton run analyses the
+			/// sparsity ONCE while refactorising once per iteration. Both are zero
+			/// without SuiteSparse and on the linear and Picard paths.
+			long symbolicFactorisations() const;
+			long numericFactorisations() const;
+
 			/// The number of Newton iterations the last solve took. Zero on the
 			/// linear path. One fewer than newtonResiduals().size(), since that
 			/// counts the residual at the initial guess too.
@@ -810,6 +818,12 @@ namespace meq
 			/// The iterate the frozen source reads, on the Picard paths. Lives in
 			/// the potential space, which is also the fixed point's unknown.
 			std::unique_ptr<mfem::GridFunction> picardIterate;
+#ifdef MFEM_USE_SUITESPARSE
+			/// The Picard path's trace solver, held across iterations so that its
+			/// retained symbolic analysis has something to be reused by. Built on
+			/// first use; see picardStep().
+			std::unique_ptr<mfem::UMFPackSolver> picardSolver;
+#endif
 
 			/// F( r, z, picardIterate ), as the right hand side coefficient the
 			/// linear path takes. Rebuilt with the spaces.
@@ -833,6 +847,8 @@ namespace meq
 			int newtonIterationCount;
 			/// Stage 1's count under Globalisation::PicardThenNewton, zero elsewhere.
 			int picardIterationCount = 0;
+			long symbolicFactorisationCount = 0;
+			long numericFactorisationCount = 0;
 			std::vector<double> newtonResidualHistory;
 			/// The Picard iterate that seeds stage 2. It must be a COPY: the
 			/// GridFunction overload of setInitialGuess() keeps a coefficient that
