@@ -641,21 +641,28 @@ namespace meq
 			 * library route delivers the superconvergence the paper wants and no
 			 * hand-written local solve is needed. See EstimatorConvergence.cpp.
 			 *
-			 * REFUSED ON THE SEMI-LINEAR PATH, and that refusal is the whole
-			 * reason this comment is long. ReconstructFluxAndPot() reads the LINEAR
-			 * potential mass form and never looks at the non-linear one, so on
-			 * meq's Newton path -- where the whole potential block including the HDG
-			 * stabilisation lives on the non-linear form, of necessity, see
-			 * buildForms() -- the local problem it builds has no potential mass and
-			 * no potential constraint. It does not abort. It returns numbers.
-			 * MEASURED, on the Solov'ev benchmark solved through Newton, whose psi_h
-			 * agrees with the linear path to six figures: psi* comes back at 9.9e14,
-			 * 8.4e15, 3.9e14 on three successive meshes, against 3.8e-6, 2.4e-7,
-			 * 1.5e-8 for the same problem solved linearly. A silent 1e15 feeding an
-			 * error estimator is exactly the failure this project's testing stance
-			 * exists to prevent, so postProcess() throws rather than returning it.
-			 * The fix is MFEM's, and is written up as section 1 of
-			 * ../mfem-hdg-dev/doc/HDG-DEFECTS-FROM-MEQ.md.
+			 * IT USED TO BE REFUSED ON THE SEMI-LINEAR PATH, and the history is
+			 * kept because the failure was silent and could return the same way.
+			 * ReconstructFluxAndPot() read the LINEAR potential mass form and never
+			 * looked at the non-linear one, so on meq's Newton path -- where the
+			 * whole potential block including the HDG stabilisation lives on the
+			 * non-linear form, of necessity, see buildForms() -- the local problem
+			 * it built had no potential mass and no potential constraint. It did
+			 * not abort. It returned numbers: psi* of 9.9e14, 8.4e15 and 3.9e14 on
+			 * three successive meshes against 3.8e-6, 2.4e-7 and 1.5e-8 for the
+			 * same problem solved linearly, with psi_h agreeing to six figures
+			 * either way.
+			 *
+			 * MFEM fixed it, and MEASURING IT IS WHAT RETIRED THE REFUSAL -- not
+			 * reading the fix, because a silent 1e15 is precisely what a code read
+			 * cannot detect. Example 5 through Newton, L2( psi* ) over four dyadic
+			 * meshes: rates 3.05 at k = 1, 4.05 at k = 2, 5.03 at k = 3, and 47x,
+			 * 113x, 125x smaller than psi_h on the finest. k+2 on the non-linear
+			 * path, in other words, exactly as on the linear one.
+			 * NewtonConvergence.cpp's thePostProcessedPotentialSurvivesNewton
+			 * asserts it, and eq (20) needs it: FOUR of the estimator's five terms
+			 * are built on psi*, so while the refusal stood the adaptive loop was
+			 * linear-only.
 			 *
 			 * IT DOES SURVIVE THE EXTENSION PATH, which was not expected.
 			 * ReconstructFluxAndPot() lifts only the DOMAIN integrators of the flux

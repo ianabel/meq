@@ -1205,13 +1205,32 @@ namespace meq
 		if ( !prepared )
 			throw std::logic_error( "meq::GradShafranovSolver::postProcess: solve() has not been called" );
 
-		// Refused rather than attempted. DarcyForm::ReconstructFluxAndPot() reads
-		// the linear potential mass form only, and on this path there is not one --
-		// the whole potential block has to live on the non-linear form, see
-		// buildForms(). What comes back is not a degraded psi*, it is 1e15, and it
-		// comes back without a word. See the header for the measurement.
-		if ( nonlinearSource )
-			throw std::logic_error( "meq::GradShafranovSolver::postProcess: DarcyForm::Reconstruct() reads the linear potential mass form, which the semi-linear path does not have, and returns ~1e15 rather than failing; post-processing is not available through Newton" );
+		// THIS USED TO REFUSE THE NON-LINEAR PATH, AND NO LONGER DOES.
+		//
+		// DarcyForm::ReconstructFluxAndPot() consulted only the LINEAR potential
+		// mass form M_p, and meq's Newton path puts the whole potential block on
+		// Mnl_p -- see buildForms() -- so the local problem got no potential mass
+		// and no face constraint, was singular, and was factored and solved
+		// anyway. What came back was not a degraded psi* but 1e15, without a word,
+		// with psi_h agreeing to six figures either way.
+		//
+		// MFEM now lifts the non-linear potential integrators as a Jacobian frozen
+		// at the computed potential, checking that the face constraint's gradient
+		// does not depend on the trace -- which meq's constant tau satisfies, and
+		// which is one more reason to keep it constant.
+		//
+		// MEASURED before this line was deleted, because a silent 1e15 is exactly
+		// the failure a code read cannot detect. Example 5 on the Newton path,
+		// L2( psi* ) over four dyadic meshes:
+		//
+		//     k = 1    rates 3.240, 3.101, 3.049      47x smaller than psi_h
+		//     k = 2    rates 4.289, 4.114, 4.049     113x
+		//     k = 3    rates 5.150, 5.062, 5.025     125x
+		//
+		// k+2 at every order, and buying the order it converges at rather than
+		// merely converging. NewtonConvergence.cpp's
+		// thePostProcessedPotentialSurvivesNewton is that measurement as an
+		// assertion, and it is what would notice the defect returning.
 
 		// DarcyForm::Reconstruct() builds the spaces on first use, so the second
 		// call reuses them. The block vector handed in is the TWO-block view over
@@ -1227,6 +1246,19 @@ namespace meq
 		// in DarcyForm's convention throughout.
 		enrichedFluxGf.Neg();
 
+		/*
+		 * AND IT IS NOT CHECKED HERE, WHICH IS A DECISION RATHER THAN AN
+		 * OVERSIGHT.
+		 *
+		 * psi* is wrong on any element where dF/dpsi vanishes -- see the header,
+		 * and NewtonConvergence.cpp's theReconstructionIsWrongWhereTheJacobianVanishes
+		 * for the measurement. A version of this function did detect that, by
+		 * comparing || psi* || against || psi_h ||, and it has been taken out: the
+		 * condition it detects is a defect in a library meq does not own and is one
+		 * flag test away from never arising, and a solver should not carry a
+		 * standing defence against its dependency. The suite establishes the state
+		 * of that defect; this code assumes the library works.
+		 */
 		postProcessed = true;
 	}
 

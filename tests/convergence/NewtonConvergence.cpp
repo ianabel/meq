@@ -450,6 +450,148 @@ BOOST_AUTO_TEST_CASE( theNewtonPathReproducesTheLinearPathOnSoloviev )
 	            "it exactly" );
 }
 
+/*
+ * THE RECONSTRUCTION DEFECT IS CONFINED TO THE RECONSTRUCTION, AND THIS IS THE
+ * MEASUREMENT THAT SAYS SO.
+ *
+ * theReconstructionIsWrongWhereTheJacobianVanishes records that psi* comes back at
+ * 8.98, 5.07, 6.90e11 and 4.77 when dF/dpsi vanishes identically. A number like
+ * 6.9e11 is alarming enough that the first question to ask is whether the SOLVE
+ * is also wrong somewhere less visible -- whether the same degeneracy reaches
+ * the element-local elimination that produces psi_h and q_h, and is merely
+ * better hidden there.
+ *
+ * IT DOES NOT, and the reason is structural before it is measured. The forward
+ * solve's local problem takes its potential block from the HDG stabilisation,
+ * which lives on Mnl_p's INTERIOR FACE integrators and is a fixed bilinear form
+ * whatever the source does. Reconstruct() builds a DIFFERENT local problem, and
+ * for its potential mass it lifts Mnl_p's DOMAIN integrators -- which carry the
+ * reaction term -dF/dpsi/r and nothing else, so they vanish with it. Two
+ * problems, two operators, one of which degenerates. And Reconstruct() writes
+ * only into the post-processing GridFunctions: potentialGf and fluxGf are
+ * already final when postProcess() is entered, and are not arguments to it.
+ *
+ * That is an argument. What follows is the measurement, over four degrees and
+ * three meshes: the SAME source, once as a coefficient on the linear path and
+ * once as a meq::Source on the Newton path, compared in BOTH psi_h and q_h. If
+ * the degeneracy reached the forward solve at all, the two columns would part.
+ *
+ * q_h is in here deliberately and is not decoration. It is the physically
+ * interesting output -- B_poloidal is a relabelling of it -- it is what the
+ * mixed method exists to deliver at k+1, and it comes out of the same local
+ * elimination as psi_h. A defect that moved q while leaving psi alone is exactly
+ * the sort of thing a psi-only check would wave through.
+ *
+ * AND THE THIRD CHECK IS THAT A BROKEN postProcess() LEAVES THE ANSWER ALONE.
+ * The driver post-processes and then writes potential() and flux(); if the
+ * reconstruction had scribbled on either of them, it would be putting a
+ * corrupted equilibrium on disk while reporting success.
+ */
+BOOST_AUTO_TEST_CASE( theReconstructionDefectDoesNotReachTheSolve )
+{
+	meq::analytic::SolovievEquilibrium const eq = meq::analytic::SolovievEquilibrium::nstx();
+	meq::SolovievSource const source( eq.getA() );
+
+	mfem::FunctionCoefficient psiCoeff( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.psi( x( 0 ), x( 1 ) );
+	} );
+	mfem::FunctionCoefficient sourceCoeff( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.f( x( 0 ), x( 1 ), 0.0 );
+	} );
+
+	std::printf( "\n  the same Solov'ev source down both paths, psi_h and q_h\n" );
+	std::printf( "    %2s %4s %14s %14s %14s\n",
+	             "k", "n", "rel psi", "rel q", "L2(psi) error" );
+
+	double worstPsi = 0.0;
+	double worstFlux = 0.0;
+
+	for ( int order = 1; order <= 4; ++order )
+	{
+		for ( int n : { 4, 8, 16 } )
+		{
+			mfem::Mesh linearMesh = makeMesh( n );
+			meq::GradShafranovSolver linear( linearMesh, order );
+			linear.setSource( sourceCoeff );
+			linear.setBoundaryData( psiCoeff );
+			linear.solve();
+
+			mfem::Mesh newtonMesh = makeMesh( n );
+			meq::GradShafranovSolver newton( newtonMesh, order );
+			newton.setSource( source );
+			newton.setBoundaryData( psiCoeff );
+			newton.solve();
+
+			BOOST_TEST_REQUIRE( linear.isNonlinear() == false );
+			BOOST_TEST_REQUIRE( newton.isNonlinear() == true );
+
+			mfem::Vector psiDifference( newton.potential() );
+			psiDifference -= linear.potential();
+			double const relativePsi =
+				psiDifference.Norml2()/std::max( 1.0e-300, linear.potential().Norml2() );
+
+			mfem::Vector fluxDifference( newton.flux() );
+			fluxDifference -= linear.flux();
+			double const relativeFlux =
+				fluxDifference.Norml2()/std::max( 1.0e-300, linear.flux().Norml2() );
+
+			std::printf( "    %2d %4d %14.3e %14.3e %14.4e\n",
+			             order, n, relativePsi, relativeFlux,
+			             linear.potentialError( psiCoeff ) );
+			std::fflush( stdout );
+
+			worstPsi = std::max( worstPsi, relativePsi );
+			worstFlux = std::max( worstFlux, relativeFlux );
+
+			// The Newton path is the one whose reconstruction is degenerate. Its
+			// psi_h and q_h must still be the linear path's, which have been
+			// measured against the closed form at k+1 in SolovievConvergence.cpp.
+			BOOST_TEST( relativePsi < 1.0e-9,
+			            "k = " << order << ", n = " << n << ": psi_h differs by "
+			            << relativePsi << " between the paths" );
+			BOOST_TEST( relativeFlux < 1.0e-9,
+			            "k = " << order << ", n = " << n << ": q_h differs by "
+			            << relativeFlux << " between the paths -- the flux is the "
+			            "physical output and it has moved where psi may not have" );
+		}
+	}
+
+	std::printf( "    worst over the sweep: psi %.3e, q %.3e\n", worstPsi, worstFlux );
+	std::fflush( stdout );
+
+	// AND THE BROKEN RECONSTRUCTION LEAVES BOTH OF THEM WHERE THEY WERE.
+	{
+		mfem::Mesh mesh = makeMesh( 8 );
+		meq::GradShafranovSolver solver( mesh, 2 );
+		solver.setSource( source );
+		solver.setBoundaryData( psiCoeff );
+		solver.solve();
+
+		mfem::Vector const potentialBefore( solver.potential() );
+		mfem::Vector const fluxBefore( solver.flux() );
+
+		// This is the degenerate case -- Solov'ev has dF/dpsi == 0 -- so what
+		// comes back is not a post-processed potential. It must still not have
+		// touched what was already computed.
+		solver.postProcess();
+
+		mfem::Vector potentialAfter( solver.potential() );
+		potentialAfter -= potentialBefore;
+		mfem::Vector fluxAfter( solver.flux() );
+		fluxAfter -= fluxBefore;
+
+		BOOST_TEST( potentialAfter.Normlinf() == 0.0,
+		            "postProcess() moved psi_h by " << potentialAfter.Normlinf()
+		            << ". The driver writes the potential after post-processing "
+		            "has run, so a reconstruction that scribbles on it would put a "
+		            "corrupted equilibrium on disk while reporting success" );
+		BOOST_TEST( fluxAfter.Normlinf() == 0.0,
+		            "postProcess() moved q_h by " << fluxAfter.Normlinf() );
+	}
+}
+
 /// The middle rung of the analytic ladder, and the sharpest single statement
 /// stage 4 can make.
 ///
@@ -545,12 +687,15 @@ BOOST_AUTO_TEST_CASE( mccarthyNeedsExactlyOneNewtonStep )
 /*
  * EVERY NON-LINEAR PATH REACHES THE SAME EXACT SOLUTION.
  *
- * meq now has three ways to close the semi-linear problem, and they have
+ * meq now has four ways to close the semi-linear problem, and they have
  * genuinely different nonlinear structure -- Newton puts F on the non-linear
  * potential mass, where hybridization makes each element's elimination its own
  * Newton; the two Picard paths freeze F at the previous iterate and put it on
  * the right hand side, so the potential block is linear and no element-local
- * non-linear solve exists at all. See CLAUDE.md.
+ * non-linear solve exists at all. PicardThenNewton is BOTH, in sequence, and it
+ * rebuilds the forms in the middle of one solve() to change from one to the
+ * other -- which is the reason it is pinned here rather than trusted to be a
+ * composition of two paths that are pinned separately. See CLAUDE.md.
  *
  * Agreeing with each other would not be enough -- three routes through the same
  * wrong sign would agree perfectly. Example 5 has a closed form, so this
@@ -578,13 +723,19 @@ BOOST_AUTO_TEST_CASE( everyNonlinearPathReachesTheSameExactSolution )
 
 	struct Run { char const *name; G globalisation; double damping; };
 	Run const runs[] = {
-		{ "Newton          ", G::None,           1.0 },
-		{ "Anderson-Picard ", G::AndersonPicard, 1.0 },
-		{ "Picard, w = 0.5 ", G::PicardOnly,     0.5 },
+		{ "Newton          ", G::None,             1.0 },
+		{ "Anderson-Picard ", G::AndersonPicard,   1.0 },
+		{ "Picard, w = 0.5 ", G::PicardOnly,       0.5 },
+		// The path the driver ships on an observed failure, and the one that
+		// switches forms mid-solve: setGlobalisation() reset `prepared` but not
+		// `built` until stage 4 found it, and this is the configuration that
+		// would have caught it -- stage 2 would have reused stage 1's blocks and
+		// converged to something else. Reported iterations are stage 2's.
+		{ "Picard->Newton  ", G::PicardThenNewton, 1.0 },
 	};
 
 	double reference = -1.0;
-	std::printf( "\n  Example 5 at k = 2, n = 16, by three non-linear paths\n" );
+	std::printf( "\n  Example 5 at k = 2, n = 16, by four non-linear paths\n" );
 
 	for ( Run const &run : runs )
 	{
@@ -605,6 +756,18 @@ BOOST_AUTO_TEST_CASE( everyNonlinearPathReachesTheSameExactSolution )
 		             run.name, solver.newtonIterations(), error );
 		std::fflush( stdout );
 
+		// MEASURED, and it is the reason this run is noisy on stdout: stage 2 of
+		// PicardThenNewton emits 2164 "el: N not convered in 100 iters" warnings
+		// from MFEM's element-local non-linear solves, where plain Newton on the
+		// same problem emits NONE. Starting Newton from Picard's iterate drives
+		// the local problems harder than starting it from the Dirichlet datum
+		// does -- the same effect CLAUDE.md measures for every KINSOL strategy
+		// under "Why meq's Newton struggles", where it is fatal. Here it is not:
+		// the outer iteration still finishes in two steps at the same L2 error to
+		// seven figures, which is what the assertion below holds it to. So a
+		// local solve giving up is not by itself a failed solve, and the warnings
+		// are not a reason to reach for a tolerance.
+
 		if ( reference < 0.0 )
 			reference = error;
 		else
@@ -615,11 +778,297 @@ BOOST_AUTO_TEST_CASE( everyNonlinearPathReachesTheSameExactSolution )
 			            "whatever iteration found it" );
 	}
 
-	// And it must be the discretisation error, not some larger number all three
-	// happen to share. k = 2 on this mesh: measured 2.63e-5.
+	// And it must be the discretisation error, not some larger number all four
+	// happen to share. k = 2 on this mesh: measured 2.983495e-5, by all four
+	// paths, to every digit printed.
 	BOOST_TEST( reference < 1.0e-4,
 	            "the common error is " << reference << ", too large to be the "
 	            "k = 2 discretisation error on this mesh" );
+}
+
+/*
+ * PSI* THROUGH NEWTON. An MFEM defect used to make this impossible, and the
+ * measurement is what says it does not any more.
+ *
+ * DarcyForm::ReconstructFluxAndPot() consulted only the LINEAR potential mass
+ * form M_p. meq's Newton path puts the whole potential block on Mnl_p -- see
+ * buildForms() -- so the local reconstruction problem got no potential mass and
+ * no face constraint, was singular, and was factored and solved anyway.
+ * Measured, it returned psi* of 9.9e14, 8.4e15 and 3.9e14 at k = 1, 2, 3 where
+ * the same problem solved linearly gives 3.8e-6, 2.4e-7 and 1.5e-8 -- and it
+ * returned them WITHOUT A WORD, with psi_h agreeing to six figures either way.
+ * postProcess() therefore threw rather than passing that on.
+ *
+ * The fix is on the branch meq builds from: darcyform.cpp now lifts the
+ * non-linear potential integrators as a Jacobian frozen at the computed
+ * potential, and verifies that the face constraint's gradient does not depend on
+ * the trace -- which meq's constant tau satisfies.
+ *
+ * SO THE REFUSAL IS RETIRED, AND THIS IS WHAT RETIRED IT. Not reading the fix:
+ * the failure mode was a silent 1e15, so only a rate can tell the difference
+ * between post-processing and a singular local solve that happened to return
+ * something finite. k+2 is asserted, and separately that psi* actually beats
+ * psi_h -- a plausible-looking psi* that is no better than the potential it came
+ * from would be the quiet version of the same defect.
+ *
+ * IT MATTERS BEYOND TIDINESS: eq (20) builds FOUR of its five terms on psi*, so
+ * with the refusal in place the adaptive loop was linear-only, and the driver
+ * would have had to run the estimator on ResidualEstimator::Potential::Raw --
+ * which CLAUDE.md measures losing exactly one order at every k.
+ */
+BOOST_AUTO_TEST_CASE( thePostProcessedPotentialSurvivesNewton )
+{
+	meq::analytic::ManufacturedNonlinear const eq
+		= meq::analytic::ManufacturedNonlinear::example5();
+	EquilibriumSource<meq::analytic::ManufacturedNonlinear> const source( eq );
+
+	mfem::FunctionCoefficient exact( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.psi( x( 0 ), x( 1 ) );
+	} );
+
+	struct Point { double h; double errorPsi; double errorStar; int iterations; };
+
+	for ( int order = 1; order <= 3; ++order )
+	{
+		std::vector<Point> points;
+		for ( int n : meshSizes )
+		{
+			mfem::Mesh mesh = makeMesh( n );
+			meq::GradShafranovSolver solver( mesh, order );
+			solver.setSource( source );
+			solver.setBoundaryData( exact );
+			solver.solve();
+			// The whole point: this used to throw, and before it threw it
+			// returned 1e15.
+			solver.postProcess();
+
+			points.push_back( Point{ ( rMax - rMin )/n,
+			                         solver.potentialError( exact ),
+			                         solver.postProcessedPotentialError( exact ),
+			                         solver.newtonIterations() } );
+		}
+
+		std::printf( "\n  psi* through Newton, Example 5, k = %d\n", order );
+		std::printf( "    %8s %5s %12s %6s %12s %6s\n",
+		             "h", "it", "L2(psi)", "rate", "L2(psi*)", "rate" );
+		for ( std::size_t i = 0; i < points.size(); ++i )
+		{
+			Point const &p = points[ i ];
+			std::printf( "    %8.5f %5d %12.4e", p.h, p.iterations, p.errorPsi );
+			if ( i == 0 )
+			{
+				std::printf( " %6s %12.4e %6s\n", "-", p.errorStar, "-" );
+			}
+			else
+			{
+				double const ratio = points[ i - 1 ].h/p.h;
+				std::printf( " %6.3f %12.4e %6.3f\n",
+				             rate( points[ i - 1 ].errorPsi, p.errorPsi, ratio ),
+				             p.errorStar,
+				             rate( points[ i - 1 ].errorStar, p.errorStar, ratio ) );
+			}
+		}
+		std::fflush( stdout );
+
+		for ( std::size_t i = 1; i < points.size(); ++i )
+		{
+			double const ratio = points[ i - 1 ].h/points[ i ].h;
+			double const measured = rate( points[ i - 1 ].errorStar,
+			                              points[ i ].errorStar, ratio );
+			BOOST_TEST( measured >= order + 2.0 - rateSlack,
+			            "k = " << order << ", h = " << points[ i ].h
+			            << ": psi* converged at " << measured << " on the NEWTON "
+			            "path, wanting " << order + 2.0 - rateSlack
+			            << ". If this has gone, DarcyForm::Reconstruct() is back to "
+			            "reading only the linear potential mass and postProcess() "
+			            "must refuse the non-linear path again" );
+		}
+
+		// A rate alone would not catch a psi* that converges at k+2 to something
+		// no better than psi_h, and the defect this replaces was silent.
+		BOOST_TEST( points.back().errorStar < 0.1*points.back().errorPsi,
+		            "k = " << order << ": psi* is " << points.back().errorStar
+		            << " against " << points.back().errorPsi << " for psi_h, so the "
+		            "post-processing is not buying the extra order it converges at" );
+	}
+}
+
+/*
+ * AND WHERE dF/dpsi VANISHES, psi* IS STILL WRONG -- WHICH IS WHY THE DRIVER'S
+ * ADAPTIVE LOOP DOES NOT USE IT.
+ *
+ * THIS TEST ASSERTS A DEFECT. It is written to FAIL the day MFEM fixes it, and
+ * the failure message says what to do; do not weaken it to keep it green.
+ *
+ * THE MECHANISM, which was worth locating exactly because the first two guesses
+ * at it were wrong. DarcyForm::ReconstructFluxAndPot() closes the local
+ * post-processing problem with a mean-value constraint -- the branch commented
+ * "adjust the element average of potential" -- because that problem is a pure
+ * NEUMANN problem and is singular by construction, determined only up to a
+ * constant. Correct, and exactly what the method needs. But that branch is
+ * skipped whenever nl_src is set, and nl_src is set on the mere PRESENCE of a
+ * non-convection non-linear integrator:
+ *
+ *     nlfi->AssembleElementGrad( *fe_p, *Tr, p_lift, Mp_k );  // zero if dF/du == 0
+ *     Mp_z += Mp_k;
+ *     if ( !convection-like ) { Mp_k.AddMult( p_lift, rhs_p_nl ); nl_src = true; }
+ *
+ * So where dF/dpsi vanishes, Mp_z and rhs_p_nl are both zero, the regularisation
+ * is skipped anyway, and inv.Factor() factors a singular matrix -- with
+ * DenseMatrixInverse::Factor( m, TOL = 0.0 ) testing abs( pivot ) <= 0.0 and the
+ * return value discarded. It is NOT that a zero right hand side is
+ * unhandleable: the singularity is by design and the handling exists. It is
+ * unreachable.
+ *
+ * IT IS PER ELEMENT, because nl_src is per element. That is the part that makes
+ * this worth a test rather than a footnote: a profile with a flat segment gives
+ * dF/dpsi == 0 on part of the domain and nowhere else, which is ordinary rather
+ * than pathological, and it corrupts psi* on exactly those elements -- which are
+ * then exactly the elements an estimator built on psi* would mark.
+ *
+ * meq carries no runtime check for this. A solver should not stand permanently
+ * on guard against its own dependency, and the condition is one flag test away
+ * from never arising. This test is the record of its state instead. Written up
+ * as ../mfem-hdg-dev/doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md.
+ */
+BOOST_AUTO_TEST_CASE( theReconstructionIsWrongWhereTheJacobianVanishes )
+{
+	// F depends on psi only where z > threshold. Below it dF/dpsi is exactly
+	// zero -- what a pressure profile with a flat segment does. `floor` adds a
+	// constant to dF/dpsi and is the experiment: it changes nothing physical and
+	// everything about whether a matrix is invertible.
+	struct Layered : public meq::Source
+	{
+		Layered( double t, double e ) : threshold( t ), floor( e ) {}
+		double f( double r, double z, double psi ) const override
+		{
+			return std::max( 0.0, z - threshold )*psi*psi + floor*psi + r*r;
+		}
+		double dFdPsi( double, double z, double psi ) const override
+		{
+			return 2.0*std::max( 0.0, z - threshold )*psi + floor;
+		}
+		double threshold;
+		double floor;
+	};
+
+	mfem::FunctionCoefficient datum( []( mfem::Vector const &x )
+	{
+		return 0.2 + 0.1*x( 1 );
+	} );
+
+	/// max | psi* | against max | psi_h | on one element, from the dof values.
+	/// GridFunction::ComputeElementL2Errors would be the natural call and is a
+	/// trap: it MFEM_ASSERTs that the result vector is already sized, so in a
+	/// Release build it writes off the end of an empty one.
+	auto elementRatios = []( meq::GradShafranovSolver &solver, mfem::Mesh &mesh,
+	                         double threshold, double &worstDead, double &worstLive,
+	                         int &dead )
+	{
+		worstDead = 0.0;
+		worstLive = 0.0;
+		dead = 0;
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			mfem::Vector starDofs, rawDofs, centre;
+			solver.postProcessedPotential().GetElementDofValues( e, starDofs );
+			solver.potential().GetElementDofValues( e, rawDofs );
+			mesh.GetElementCenter( e, centre );
+
+			double const ratio = starDofs.Normlinf()
+			                     /std::max( 1.0e-300, rawDofs.Normlinf() );
+			if ( centre( 1 ) < threshold ) { ++dead; worstDead = std::max( worstDead, ratio ); }
+			else                            worstLive = std::max( worstLive, ratio );
+		}
+	};
+
+	// ---- one: the corruption is local to the vanishing region ------------
+	std::printf( "\n  psi* where dF/dpsi vanishes on part of the domain, k = 2, n = 8\n" );
+	std::printf( "    %8s %10s %14s %14s\n",
+	             "z <", "dead frac", "worst K dead", "worst K live" );
+
+	for ( double threshold : { -0.4, -0.2, 0.0 } )
+	{
+		Layered const source( threshold, 0.0 );
+		mfem::Mesh mesh = makeMesh( 8 );
+		meq::GradShafranovSolver solver( mesh, 2 );
+		solver.setSource( source );
+		solver.setBoundaryData( datum );
+		solver.solve();
+		solver.postProcess();
+
+		double worstDead = 0.0, worstLive = 0.0;
+		int dead = 0;
+		elementRatios( solver, mesh, threshold, worstDead, worstLive, dead );
+
+		std::printf( "    %8.2f %10.3f %14.4e %14.4e\n", threshold,
+		             dead/static_cast<double>( mesh.GetNE() ), worstDead, worstLive );
+		std::fflush( stdout );
+
+		// MEASURED: 20.3, 64.1, 61.6 on the dead elements against 1.0049, 1.0024,
+		// 1.0021 on the live ones. Post-processing perturbs the potential by
+		// O( h^(k+1) ), so a live element sits within a per cent of 1 and a dead
+		// one is off by more than an order of magnitude.
+		BOOST_TEST( worstDead > 5.0,
+		            "z < " << threshold << ": the worst element where dF/dpsi "
+		            "vanishes has || psi* || / || psi_h || = " << worstDead
+		            << ", which is no longer the corruption this test records. If "
+		            "MFEM's ReconstructFluxAndPot() now reaches its mean-value "
+		            "branch when the non-linear Jacobian is zero, then DELETE THIS "
+		            "TEST and take setPotential( Potential::Raw ) out of "
+		            "apps/meq.cpp -- the driver can use the published estimator "
+		            "again" );
+		BOOST_TEST( worstLive < 1.1,
+		            "z < " << threshold << ": elements where dF/dpsi does NOT "
+		            "vanish give " << worstLive << ", so the corruption is not "
+		            "confined to the vanishing region and this test's account of "
+		            "the mechanism is wrong" );
+	}
+
+	// ---- two: a floor on dF/dpsi, and nothing else, repairs it ------------
+	//
+	// This is what identifies the cause as a singular matrix rather than anything
+	// about the physics. 1e-12 is twelve orders below every other quantity in the
+	// problem: it cannot move a solution, and it moves this one from 7.57 to
+	// 0.9985.
+	std::printf( "\n  the same source with a floor on dF/dpsi\n" );
+	std::printf( "    %12s %16s\n", "floor", "|psi*| / |psi|" );
+
+	double ratioAtZero = 0.0;
+	for ( double floor : { 0.0, 1.0e-12, 1.0e-8 } )
+	{
+		Layered const source( 0.0, floor );
+		mfem::Mesh mesh = makeMesh( 8 );
+		meq::GradShafranovSolver solver( mesh, 2 );
+		solver.setSource( source );
+		solver.setBoundaryData( datum );
+		solver.solve();
+		solver.postProcess();
+
+		mfem::ConstantCoefficient nought( 0.0 );
+		double const ratio = solver.postProcessedPotential().ComputeL2Error( nought )
+		                     /solver.potential().ComputeL2Error( nought );
+		std::printf( "    %12.0e %16.6f\n", floor, ratio );
+		std::fflush( stdout );
+
+		if ( floor == 0.0 )
+		{
+			ratioAtZero = ratio;
+		}
+		else
+		{
+			BOOST_TEST( std::abs( ratio - 1.0 ) < 0.01,
+			            "a floor of " << floor << " on dF/dpsi gives "
+			            << ratio << ", so an infinitesimal perturbation no longer "
+			            "repairs psi* and the singular-matrix account is wrong" );
+		}
+	}
+
+	BOOST_TEST( ratioAtZero > 2.0,
+	            "with dF/dpsi vanishing over half the domain psi* now gives "
+	            << ratioAtZero << ", which is not the corruption this test "
+	            "records -- see the deletion instructions above" );
 }
 
 BOOST_AUTO_TEST_CASE( newtonConvergesQuadratically )
