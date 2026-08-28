@@ -965,11 +965,74 @@ namespace meq
 		prepared = true;
 	}
 
+	void GradShafranovSolver::solveByPicardThenNewton()
+	{
+#ifndef MFEM_USE_SUNDIALS
+		throw std::logic_error(
+			"meq::GradShafranovSolver::solve: Globalisation::PicardThenNewton needs "
+			"the Picard stage, and MFEM was built without MFEM_USE_SUNDIALS" );
+#else
+		// Restored however this exits, so a throw out of either stage does not
+		// leave the solver reporting a globalisation it is no longer set up for.
+		// built goes with it, for the reason setGlobalisation() records.
+		struct Restore
+		{
+			GradShafranovSolver *solver;
+			Globalisation choice;
+			~Restore()
+			{
+				solver->globalisationChoice = choice;
+				solver->built = false;
+			}
+		} restore { this, globalisationChoice };
+
+		// ---- stage 1: Anderson-accelerated Picard, to reach Newton's basin ----
+		//
+		// Not to solve the problem. GS-2 section 4.5 converges at both orders from
+		// a Picard state that never met its own tolerance, so stage 1 stopping
+		// short is an expected outcome and not an error. What it leaves behind is
+		// the last iterate it evaluated, which is what stage 2 wants.
+		setGlobalisation( Globalisation::AndersonPicard );
+		try
+		{
+			solve();
+		}
+		catch ( std::runtime_error const & )
+		{
+			// Ran out of iterations. Deliberately swallowed; see above.
+		}
+		// Held in a local and published only once stage 2 is done, because stage
+		// 2 re-enters solve(), which zeroes the member on the way in.
+		int const stageOneIterations = newtonIterationCount;
+
+		// A COPY, because setInitialGuess() only references what it is given and
+		// stage 2 writes through potentialGf.
+		picardSeed = std::make_unique<mfem::GridFunction>( potentialGf );
+
+		// ---- stage 2: plain Newton from there ----
+		setGlobalisation( Globalisation::None );
+		setInitialGuess( *picardSeed );
+		solve();
+
+		picardIterationCount = stageOneIterations;
+#endif
+	}
+
 	void GradShafranovSolver::solve()
 	{
 		// The Picard paths iterate a fixed point on the POTENTIAL, not a residual
 		// on the trace, so they do not go through prepare()-then-Newton at all --
 		// picardStep() re-enters prepare() itself, once per iteration.
+		// Stale on a solver reused across globalisations otherwise; the handoff
+		// republishes it after stage 2.
+		picardIterationCount = 0;
+
+		if ( nonlinearSource && globalisationChoice == Globalisation::PicardThenNewton )
+		{
+			solveByPicardThenNewton();
+			return;
+		}
+
 		if ( nonlinearSource && !usesNonlinearForms() )
 		{
 			solveByPicard();
@@ -1251,6 +1314,11 @@ namespace meq
 	std::vector<double> const &GradShafranovSolver::newtonResiduals() const
 	{
 		return newtonResidualHistory;
+	}
+
+	int GradShafranovSolver::picardIterations() const
+	{
+		return picardIterationCount;
 	}
 
 	int GradShafranovSolver::newtonIterations() const

@@ -423,7 +423,47 @@ namespace meq
 				/// The same fixed point without acceleration, for the comparison
 				/// that says whether Anderson is doing the work. Measured
 				/// undamped Picard stalls on the pedestal, so expect this to.
-				PicardOnly
+				PicardOnly,
+				/// Anderson-accelerated Picard to walk the iterate into Newton's
+				/// basin, then plain Newton from there for the quadratic endgame.
+				///
+				/// **This is the route for a COARSE MESH.** On GS-2 section 4.3 at
+				/// k = 1, h = 0.05 Newton from the Dirichlet ramp fails at 60,
+				/// while from the converged Picard state it finishes in FOUR
+				/// iterations at observed order 2.01, agreeing with Picard's own
+				/// answer to 4.7e-10. That agreement is what makes it a handoff
+				/// rather than a change of problem, and
+				/// picardThenNewtonRecoversQuadraticOrder asserts it.
+				///
+				/// **It is not the only route to those cases, and usually not the
+				/// one to prefer.** Sections 4.2, 4.3 and 4.5 are under-resolved
+				/// rather than stiff: raw Newton solves all three in 7 to 17
+				/// iterations once resolved, and both refining h and raising k cure
+				/// them independently. Reach for refinement when it is available.
+				/// What this is for is the initial solve of an adaptive run, which
+				/// must happen before there is an estimator to refine with.
+				///
+				/// It does not rescue section 4.4, the current hole, which fails at
+				/// every order and mesh tried up to k = 3, n = 48. That one's
+				/// problem is the trivial branch, not the iteration.
+				///
+				/// Picard's job here is NOT to solve the problem. Section 4.5
+				/// converges at both orders from a Picard state that never met its
+				/// own tolerance, so this is a globalisation, not a two-solver
+				/// pipeline. Stage 1 failing to converge is therefore not an error
+				/// and does not stop stage 2.
+				///
+				/// It is not a cheap option: stage 1 spent 122 to 290 iterations on
+				/// the cases above, each a full linear solve. Reach for it when
+				/// Globalisation::None fails, not before.
+				///
+				/// **Do not replace the tolerance with an iteration budget.** The
+				/// handoff is not monotone in Picard effort -- on 4.5 at k = 1,
+				/// budgets of 400 and 3 converge while 40 and 10 fail, and on 4.3
+				/// at k = 1 a budget of 3 diverges to 1e4. A budget tuned on one
+				/// mesh will betray you on the next; Picard's own tolerance is the
+				/// trigger that worked wherever it was reached.
+				PicardThenNewton
 			};
 
 			/// True when the potential block is assembled non-linearly, which is
@@ -685,6 +725,11 @@ namespace meq
 			/// residual, which no amount of mesh refinement will fix.
 			std::vector<double> const &newtonResiduals() const;
 
+			/// Iterations spent in stage 1 of Globalisation::PicardThenNewton.
+			/// Zero on every other path. newtonIterations() and newtonResiduals()
+			/// report stage 2, which is what an order assertion wants.
+			int picardIterations() const;
+
 			/// The number of Newton iterations the last solve took. Zero on the
 			/// linear path. One fewer than newtonResiduals().size(), since that
 			/// counts the residual at the initial guess too.
@@ -778,11 +823,21 @@ namespace meq
 			/// potential, optionally Anderson accelerated.
 			void solveByPicard();
 
+			/// Globalisation::PicardThenNewton: stage 1 then stage 2, re-entering
+			/// solve() for each so that neither stage duplicates its body.
+			void solveByPicardThenNewton();
+
 			double newtonRelativeTolerance;
 			double newtonAbsoluteTolerance;
 			int newtonMaxIterations;
 			int newtonIterationCount;
+			/// Stage 1's count under Globalisation::PicardThenNewton, zero elsewhere.
+			int picardIterationCount = 0;
 			std::vector<double> newtonResidualHistory;
+			/// The Picard iterate that seeds stage 2. It must be a COPY: the
+			/// GridFunction overload of setInitialGuess() keeps a coefficient that
+			/// only references its argument, and stage 2 overwrites potentialGf.
+			std::unique_ptr<mfem::GridFunction> picardSeed;
 
 			/// Every boundary attribute, marked. See the class comment. This is
 			/// what the essential trace condition is imposed on, on both paths:

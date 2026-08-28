@@ -1122,3 +1122,94 @@ BOOST_AUTO_TEST_CASE( currentHoleDoesNotConvergeUnderPlainNewton )
 	            "should be replaced by a self-convergence study like the other "
 	            "three. Read the comment above it first" );
 }
+
+/*
+ * PICARD, THEN NEWTON: THE ROUTE FOR VERY STIFF SOURCES.
+ *
+ * Section 4.3 AT k = 1, h = 0.05 is the case that makes the argument, and the
+ * resolution is part of the claim rather than incidental to it: that source is
+ * not intrinsically hard, it is under-resolved here. Raw Newton solves it in
+ * SEVEN iterations at k = 1, n = 32, and in seven or eight at every k >= 2 on
+ * every mesh tried. So this test is about the COARSE MESH, which is the regime
+ * an adaptive run must survive before it has an estimator to refine with.
+ *
+ * At this resolution every other path in the solver fails. Newton from the
+ * Dirichlet ramp
+ * runs out at 60; adding a KINSOL line search fails at 24 having spent 5.4
+ * MILLION element-local non-linear iterations against plain Newton's 2.2
+ * million; and NLOrdering::LineariseThenCondense, which removes the local
+ * non-linear solves entirely, aborts. Anderson-accelerated Picard converges in
+ * 122, and Newton started at THAT state finishes in FOUR at observed order
+ * 2.01:
+ *
+ *     8.3e-01  1.5e-03  1.0e-04  7.4e-07  3.7e-11
+ *
+ * So the handoff recovers the quadratic endgame Picard structurally cannot give
+ * -- it converges linearly and Anderson never makes it quadratic -- on a problem
+ * Newton cannot start. That is the whole case for keeping Picard in the solver,
+ * and it is why Globalisation::PicardThenNewton exists rather than the Picard
+ * paths being kept only as an independent check on Newton.
+ *
+ * WHAT THIS TEST WOULD CATCH, beyond the handoff simply breaking:
+ *
+ * setGlobalisation() failing to invalidate the assembled forms. Which block the
+ * potential lives on depends on the globalisation -- linear for Picard, the
+ * non-linear form for Newton -- and this path switches twice inside one solve().
+ * While setGlobalisation() reset `prepared` but not `built`, stage 2 would have
+ * run Newton on Picard's linear blocks, and CLAUDE.md's note that a non-linear
+ * potential mass beside a linear one fails SILENTLY when the integrators are
+ * domain ones says exactly how loudly that would have announced itself.
+ *
+ * The agreement assertion is the one that matters most. A stage 2 that
+ * "converged" to a different discrete solution would otherwise pass, and the
+ * measured agreement is 4.7e-10.
+ */
+BOOST_AUTO_TEST_CASE( picardThenNewtonRecoversQuadraticOrder )
+{
+	meq::analytic::TransportBarrier const eq
+		= meq::analytic::TransportBarrier::barrier();
+	using G = meq::GradShafranovSolver::Globalisation;
+
+	// The control, and the reason this case was chosen: Newton alone fails here.
+	SelfMeasurement const cold = meq::tests::measureSelf(
+		eq, standardBox(), 1, 16, cloud(), barrierDatum, 60, 1.0e-10,
+		nullptr, G::None );
+
+	SelfMeasurement const handoff = meq::tests::measureSelf(
+		eq, standardBox(), 1, 16, cloud(), barrierDatum, 400, 1.0e-10,
+		nullptr, G::PicardThenNewton );
+
+	std::printf( "\n  section 4.3 k = 1, h = 0.05\n"
+	             "    Newton alone      : %s in %d iterations\n"
+	             "    Picard then Newton: %s, stage 2 took %d\n"
+	             "    psi in [%.6e, %.6e]\n",
+	             cold.converged ? "converged" : "FAILED", cold.newtonIterations,
+	             handoff.converged ? "converged" : "FAILED",
+	             handoff.newtonIterations,
+	             handoff.psiMin, handoff.psiMax );
+	std::fflush( stdout );
+
+	BOOST_TEST_REQUIRE( handoff.converged,
+	                    "Picard-then-Newton did not converge on section 4.3 at "
+	                    "k = 1, h = 0.05, where it was measured to take four "
+	                    "Newton iterations after Picard's 122" );
+
+	// Stage 2 is Newton in its basin, so it must be SHORT. Measured 4; 15 leaves
+	// room for the threaded-MKL rounding this file's other cases sit on, while
+	// still failing if the handoff degrades into a cold start.
+	BOOST_TEST( handoff.newtonIterations <= 15,
+	            "stage 2 took " << handoff.newtonIterations << " Newton "
+	            "iterations, measured at 4. The seed is no longer landing in "
+	            "Newton's basin" );
+
+	// If Newton alone has started converging HERE, at this resolution, the test
+	// has stopped demonstrating anything -- refine no further in search of a
+	// replacement, since refinement is precisely what makes this case easy.
+	// Section 4.5 at k = 1, n = 16 is the nearest equivalent.
+	BOOST_TEST( !cold.converged,
+	            "Newton from the ramp now converges on section 4.3 at k = 1, "
+	            "h = 0.05 in " << cold.newtonIterations << " iterations, where it "
+	            "used to fail at 60. This test still passes, but it no longer "
+	            "demonstrates that the handoff reaches a coarse mesh nothing else "
+	            "does" );
+}
