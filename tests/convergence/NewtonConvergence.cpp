@@ -895,20 +895,23 @@ BOOST_AUTO_TEST_CASE( thePostProcessedPotentialSurvivesNewton )
 }
 
 /*
- * AND WHERE dF/dpsi VANISHES, psi* IS STILL WRONG -- WHICH IS WHY THE DRIVER'S
- * ADAPTIVE LOOP DOES NOT USE IT.
+ * psi* MUST BE A POST-PROCESSING OF psi_h ON EVERY ELEMENT, INCLUDING THE ONES
+ * WHERE dF/dpsi VANISHES.
  *
- * THIS TEST ASSERTS A DEFECT. It is written to FAIL the day MFEM fixes it, and
- * the failure message says what to do; do not weaken it to keep it green.
+ * THIS TEST FAILS TODAY, AND IT IS SUPPOSED TO. It asserts the behaviour meq
+ * needs rather than the behaviour it currently gets, so that a green suite means
+ * there is no defect here -- not that a known one is still present. An earlier
+ * version of this test asserted the corruption and passed, which is the wrong
+ * polarity: it made "all tests pass" compatible with a broken psi*.
  *
- * THE MECHANISM, which was worth locating exactly because the first two guesses
- * at it were wrong. DarcyForm::ReconstructFluxAndPot() closes the local
- * post-processing problem with a mean-value constraint -- the branch commented
- * "adjust the element average of potential" -- because that problem is a pure
- * NEUMANN problem and is singular by construction, determined only up to a
- * constant. Correct, and exactly what the method needs. But that branch is
- * skipped whenever nl_src is set, and nl_src is set on the mere PRESENCE of a
- * non-convection non-linear integrator:
+ * WHAT IS BROKEN, in one condition. DarcyForm::ReconstructFluxAndPot() closes
+ * the local post-processing problem with a mean-value constraint -- the branch
+ * commented "adjust the element average of potential" -- because that problem is
+ * a pure NEUMANN problem, singular by construction, determined only up to a
+ * constant. Correct, and exactly what the method needs. It is skipped whenever
+ * nl_src is set, and nl_src is set on the mere PRESENCE of a non-convection
+ * non-linear integrator, under a comment reading "use non-singular terms as a
+ * source" that states the intended test exactly:
  *
  *     nlfi->AssembleElementGrad( *fe_p, *Tr, p_lift, Mp_k );  // zero if dF/du == 0
  *     Mp_z += Mp_k;
@@ -917,27 +920,24 @@ BOOST_AUTO_TEST_CASE( thePostProcessedPotentialSurvivesNewton )
  * So where dF/dpsi vanishes, Mp_z and rhs_p_nl are both zero, the regularisation
  * is skipped anyway, and inv.Factor() factors a singular matrix -- with
  * DenseMatrixInverse::Factor( m, TOL = 0.0 ) testing abs( pivot ) <= 0.0 and the
- * return value discarded. It is NOT that a zero right hand side is
- * unhandleable: the singularity is by design and the handling exists. It is
- * unreachable.
+ * return value discarded. It is NOT a zero right hand side it cannot handle: the
+ * singularity is by design and the handling is written. It is unreachable.
  *
- * IT IS PER ELEMENT, because nl_src is per element. That is the part that makes
- * this worth a test rather than a footnote: a profile with a flat segment gives
- * dF/dpsi == 0 on part of the domain and nowhere else, which is ordinary rather
- * than pathological, and it corrupts psi* on exactly those elements -- which are
- * then exactly the elements an estimator built on psi* would mark.
+ * nl_src IS PER ELEMENT, so the corruption is too, and that is what makes this
+ * ordinary rather than exotic: any tabulated profile with a flat segment gives
+ * dF/dpsi == 0 on part of the domain. Filed with line numbers as
+ * ../mfem-hdg-dev/doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md.
  *
- * meq carries no runtime check for this. A solver should not stand permanently
- * on guard against its own dependency, and the condition is one flag test away
- * from never arising. This test is the record of its state instead. Written up
- * as ../mfem-hdg-dev/doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md.
+ * WHEN IT GOES GREEN, take setPotential( Potential::Raw ) out of apps/meq.cpp
+ * and out of DriverAcceptance.cpp's hand-rolled loop: the driver can use the
+ * published estimator again, which is a whole order of convergence in eta.
  */
-BOOST_AUTO_TEST_CASE( theReconstructionIsWrongWhereTheJacobianVanishes )
+BOOST_AUTO_TEST_CASE( thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes )
 {
 	// F depends on psi only where z > threshold. Below it dF/dpsi is exactly
 	// zero -- what a pressure profile with a flat segment does. `floor` adds a
-	// constant to dF/dpsi and is the experiment: it changes nothing physical and
-	// everything about whether a matrix is invertible.
+	// constant to dF/dpsi: it changes nothing physical, and everything about
+	// whether a matrix is invertible.
 	struct Layered : public meq::Source
 	{
 		Layered( double t, double e ) : threshold( t ), floor( e ) {}
@@ -962,13 +962,11 @@ BOOST_AUTO_TEST_CASE( theReconstructionIsWrongWhereTheJacobianVanishes )
 	/// GridFunction::ComputeElementL2Errors would be the natural call and is a
 	/// trap: it MFEM_ASSERTs that the result vector is already sized, so in a
 	/// Release build it writes off the end of an empty one.
-	auto elementRatios = []( meq::GradShafranovSolver &solver, mfem::Mesh &mesh,
-	                         double threshold, double &worstDead, double &worstLive,
-	                         int &dead )
+	auto worstRatios = []( meq::GradShafranovSolver &solver, mfem::Mesh &mesh,
+	                       double threshold, double &worstDead, double &worstLive )
 	{
 		worstDead = 0.0;
 		worstLive = 0.0;
-		dead = 0;
 		for ( int e = 0; e < mesh.GetNE(); ++e )
 		{
 			mfem::Vector starDofs, rawDofs, centre;
@@ -978,15 +976,13 @@ BOOST_AUTO_TEST_CASE( theReconstructionIsWrongWhereTheJacobianVanishes )
 
 			double const ratio = starDofs.Normlinf()
 			                     /std::max( 1.0e-300, rawDofs.Normlinf() );
-			if ( centre( 1 ) < threshold ) { ++dead; worstDead = std::max( worstDead, ratio ); }
-			else                            worstLive = std::max( worstLive, ratio );
+			if ( centre( 1 ) < threshold ) worstDead = std::max( worstDead, ratio );
+			else                           worstLive = std::max( worstLive, ratio );
 		}
 	};
 
-	// ---- one: the corruption is local to the vanishing region ------------
 	std::printf( "\n  psi* where dF/dpsi vanishes on part of the domain, k = 2, n = 8\n" );
-	std::printf( "    %8s %10s %14s %14s\n",
-	             "z <", "dead frac", "worst K dead", "worst K live" );
+	std::printf( "    %8s %14s %14s\n", "z <", "worst K dead", "worst K live" );
 
 	for ( double threshold : { -0.4, -0.2, 0.0 } )
 	{
@@ -999,44 +995,41 @@ BOOST_AUTO_TEST_CASE( theReconstructionIsWrongWhereTheJacobianVanishes )
 		solver.postProcess();
 
 		double worstDead = 0.0, worstLive = 0.0;
-		int dead = 0;
-		elementRatios( solver, mesh, threshold, worstDead, worstLive, dead );
-
-		std::printf( "    %8.2f %10.3f %14.4e %14.4e\n", threshold,
-		             dead/static_cast<double>( mesh.GetNE() ), worstDead, worstLive );
+		worstRatios( solver, mesh, threshold, worstDead, worstLive );
+		std::printf( "    %8.2f %14.4e %14.4e\n", threshold, worstDead, worstLive );
 		std::fflush( stdout );
 
-		// MEASURED: 20.3, 64.1, 61.6 on the dead elements against 1.0049, 1.0024,
-		// 1.0021 on the live ones. Post-processing perturbs the potential by
-		// O( h^(k+1) ), so a live element sits within a per cent of 1 and a dead
-		// one is off by more than an order of magnitude.
-		BOOST_TEST( worstDead > 5.0,
-		            "z < " << threshold << ": the worst element where dF/dpsi "
-		            "vanishes has || psi* || / || psi_h || = " << worstDead
-		            << ", which is no longer the corruption this test records. If "
-		            "MFEM's ReconstructFluxAndPot() now reaches its mean-value "
-		            "branch when the non-linear Jacobian is zero, then DELETE THIS "
-		            "TEST and take setPotential( Potential::Raw ) out of "
-		            "apps/meq.cpp -- the driver can use the published estimator "
-		            "again" );
+		// Post-processing perturbs the potential by O( h^(k+1) ), so every
+		// element -- dead or live -- must sit within a few per cent of 1. Live
+		// elements measure 1.0049, 1.0024, 1.0021 and pass. Dead ones measure
+		// 20.3, 64.1 and 61.6, and this is the assertion that says so.
 		BOOST_TEST( worstLive < 1.1,
-		            "z < " << threshold << ": elements where dF/dpsi does NOT "
-		            "vanish give " << worstLive << ", so the corruption is not "
-		            "confined to the vanishing region and this test's account of "
-		            "the mechanism is wrong" );
+		            "z < " << threshold << ": an element where dF/dpsi does NOT "
+		            "vanish gives || psi* || / || psi_h || = " << worstLive
+		            << ". That is a new failure -- the known one is confined to the "
+		            "vanishing region" );
+		BOOST_TEST( worstDead < 1.1,
+		            "z < " << threshold << ": an element where dF/dpsi vanishes "
+		            "gives || psi* || / || psi_h || = " << worstDead
+		            << ", so psi* there is a different function and not a "
+		            "post-processing of psi_h. ReconstructFluxAndPot() is skipping "
+		            "its mean-value regularisation and factoring a singular local "
+		            "matrix; see the comment above and "
+		            "../mfem-hdg-dev/doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md. "
+		            "WHEN THIS PASSES, drop setPotential( Potential::Raw ) from "
+		            "apps/meq.cpp and DriverAcceptance.cpp" );
 	}
 
-	// ---- two: a floor on dF/dpsi, and nothing else, repairs it ------------
-	//
-	// This is what identifies the cause as a singular matrix rather than anything
-	// about the physics. 1e-12 is twelve orders below every other quantity in the
-	// problem: it cannot move a solution, and it moves this one from 7.57 to
-	// 0.9985.
+	// AND THE DIAGNOSTIC THAT IDENTIFIES THE CAUSE AS A SINGULAR MATRIX AND
+	// NOTHING ELSE. A floor of 1e-12 on dF/dpsi is twelve orders below every
+	// other quantity in the problem: it cannot move a solution, and it moves
+	// || psi* || / || psi_h || from 7.565317 to 0.998525. This half asserts
+	// correct behaviour on a problem that has it, so it passes today and keeps
+	// the evidence in the suite rather than only in a commit message.
 	std::printf( "\n  the same source with a floor on dF/dpsi\n" );
 	std::printf( "    %12s %16s\n", "floor", "|psi*| / |psi|" );
 
-	double ratioAtZero = 0.0;
-	for ( double floor : { 0.0, 1.0e-12, 1.0e-8 } )
+	for ( double floor : { 1.0e-12, 1.0e-8 } )
 	{
 		Layered const source( 0.0, floor );
 		mfem::Mesh mesh = makeMesh( 8 );
@@ -1052,23 +1045,11 @@ BOOST_AUTO_TEST_CASE( theReconstructionIsWrongWhereTheJacobianVanishes )
 		std::printf( "    %12.0e %16.6f\n", floor, ratio );
 		std::fflush( stdout );
 
-		if ( floor == 0.0 )
-		{
-			ratioAtZero = ratio;
-		}
-		else
-		{
-			BOOST_TEST( std::abs( ratio - 1.0 ) < 0.01,
-			            "a floor of " << floor << " on dF/dpsi gives "
-			            << ratio << ", so an infinitesimal perturbation no longer "
-			            "repairs psi* and the singular-matrix account is wrong" );
-		}
+		BOOST_TEST( std::abs( ratio - 1.0 ) < 0.01,
+		            "a floor of " << floor << " on dF/dpsi gives " << ratio
+		            << ", so an infinitesimal perturbation no longer repairs psi* "
+		            "and the singular-matrix account of the defect above is wrong" );
 	}
-
-	BOOST_TEST( ratioAtZero > 2.0,
-	            "with dF/dpsi vanishing over half the domain psi* now gives "
-	            << ratioAtZero << ", which is not the corruption this test "
-	            "records -- see the deletion instructions above" );
 }
 
 BOOST_AUTO_TEST_CASE( newtonConvergesQuadratically )

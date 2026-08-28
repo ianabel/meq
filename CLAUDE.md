@@ -1643,6 +1643,25 @@ surprise on the reconstruction or extension paths is meq's.
 
 ## Testing stance
 
+**A test asserts the behaviour that is wanted, and fails until it is there.**
+Never the reverse. A test that asserts a known defect passes while the defect
+stands, and that makes a green suite compatible with a broken solver — which
+destroys the only property the suite is for: **100% green must mean there is no
+lurking defect.** So a defect gets a *failing* test naming it, not a passing test
+recording it.
+
+This was got wrong and corrected.
+`thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes` was first written to
+assert the corruption and passed; it now asserts that `ψ*` is a post-processing
+of `ψ_h` on every element, and **fails**, because MFEM's reconstruction skips its
+mean-value regularisation where `∂F/∂ψ` vanishes. Its message says what to delete
+when it goes green.
+
+Two consequences worth stating. The suite is expected to be **red while a known
+defect stands**, and that is the intended signal rather than a broken build — the
+failing test's message is the record. And a failing test must say what fixes it,
+because a red suite nobody can action is one people learn to ignore.
+
 **A convergence table finds what unit tests do not.** This is the lesson from the
 sibling MFEM branch, where reproducing a published table turned up three library
 defects a passing unit suite had walked past for years — two of them silent.
