@@ -11,7 +11,7 @@ do first, what is waiting on what, and what is deliberately not being done yet.
 
 The solver works and every claim about it is a measured convergence rate. Stages
 0 to 6 are done; stage 7 is half done — `setInitialGuess()` and `BoundaryShape`
-landed, the driver did not. The suite is **12/13**, the single failure being a
+landed, the driver did not. The suite is **17/18**, the single failure being a
 tripwire that fires on BLAS rounding rather than on a defect. **meq still cannot
 be run by anyone**: nothing in `src/` writes a file, so it is reachable only
 through `ctest`. That has been true since stage 1.
@@ -27,19 +27,26 @@ two are wrong:
 * **Not the boundary condition.** The same paper calls its earlier
   *fixed*-boundary solver "significantly easier" than the free one. meq does the
   easier problem and finds it harder.
-* **It is the hybridization ordering.** meq condenses first and linearises
-  second, so eliminating flux and potential on an element is itself a nonlinear
-  solve — one per element per residual evaluation, none globalised, any one of
-  which poisons the residual. Nguyen, Peraire & Cockburn, who defined the
-  method,
-  do it the other way: §2.6 of `refs/HDG-NPC-2.pdf` applies Newton to the full
-  `(q, u, û)` system and hybridizes *that*, so every local operation is a linear
-  solve.
+* **Not the hybridization ordering either — this one was believed, and it is
+  now falsified.** The theory was that condensing first makes every element
+  elimination its own nonlinear solve. `NLOrdering::LineariseThenCondense`
+  removes those entirely (`GetNumLocalNLIterations()` reads 0) and the stiff
+  cases get *worse*, not better. See item 1.
+* **It was mostly under-resolution.** Three of the four sources are not stiff at
+  all. Raw Newton solves §4.2, §4.3 and §4.5 in 7 to 17 iterations once
+  resolved, and refining `h` or raising `k` cures them independently — §4.2 at
+  `k = 3, n = 48` takes **7**, and `k = 2` converges on the same `n = 16` mesh
+  where `k = 1` takes 42. The whole "stiff sources" narrative came from
+  benchmarking at one under-resolved point.
+* **What is left is the coarse mesh, and §4.4.** Newton still needs to begin
+  inside its basin, and on a coarse mesh the Dirichlet datum is not; that is
+  what `PicardThenNewton` is for, and it matters because an adaptive run has to
+  solve *before* it has an estimator. §4.4, the current hole, fails at every
+  order and mesh tried and is a trivial-branch problem, not a resolution or
+  iteration one.
 
-Confirmed by control: Picard on meq's own linear path — same mesh, spaces and
-`τ`, but `F` frozen so the local solves are linear — converges on the case
-Newton
-fails. Details and numbers in `CLAUDE.md`, *Why meq's Newton struggles*.
+Details and numbers in `CLAUDE.md`, *Why meq's Newton struggles* and *Picard,
+then Newton*.
 
 ## Division of labour
 
@@ -63,65 +70,65 @@ the recipe and the one recurring conflict.
 That is now a standing cost of this arrangement rather than a one-off, and it
 falls on meq's side.
 
-## 1. Linearise, then condense — MFEM, **landed, and a bug reported against it**
+## 1. Picard, then Newton — meq, **done**, and the ordering theory is dead
 
-`../mfem-hdg-dev/doc/HDG-LINEARISE-THEN-CONDENSE.md`, implemented on
-`gf-hdg-linearise-first` as
-`SetNonlinearOrdering( NLOrdering::LineariseThenCondense )` — **off by default**,
-so meq must opt in. `setNonlinearOrdering()` does, and the default is unchanged.
+**The prediction this roadmap was built on is falsified.** It said meq's Newton
+fails on the stiff GS-2 sources because meq condenses first and linearises
+second, making every element elimination its own nonlinear solve, and that
+`NLOrdering::LineariseThenCondense` would fix it. That ordering has now landed
+on `gf-hdg-linearise-first`, the two bugs meq reported against it are fixed, and
+`GetNumLocalNLIterations()` returns **0**, which is what says it genuinely takes
+effect. It does not help:
 
-**One bug reported and fixed, a second reported and open.** Both against the
-nonlinearity on the potential mass form — `Mnl_p`, where a semi-linear source
-goes — which the existing unit test does not cover, driving the *block*
-nonlinear form instead.
+| case | condense-first | linearise-first |
+|---|---|---|
+| Example 5, similarity | ok, 3 it | ok, 3 it |
+| §4.2 pedestal `k = 1`, three meshes | ok — 31/7/5 it | **fails at 60, all three** |
+| §4.3 barrier | fails / ok | **aborts** |
 
-1. **Fixed** by `c5cac09e2f`: the residual was not a function of the trace.
-   `Mult(x)`, `GetGradient(x)`, `Mult(x)` gave two different answers for the
-   same `x`. Verified — the demonstrator now returns exactly zero.
-2. **Open**: `GetGradient` is not the derivative of `Mult`. The error scales as
-   the square of the nonlinearity — 5e-9, 5e-7, 5e-5 for `c` = 1, 10, 100 on a
-   `c ψ²` source — and is independent of the differencing step, 5.465e-05 at
-   `c = 100` across four orders of `h`, where `CondenseThenLinearise` traces the
-   round-off curve of an exact Jacobian throughout.
+Identical where it is easy, worse or fatal where it is not. The obvious
+mechanism — `NewtonSolver` testing a residual built one iterate stale — was
+checked too, and forcing relinearisation at the residual's own argument changes
+nothing. **The element-local nonlinear solves were never the cause.** The control
+that pointed at them differed in globalisation as well as in local linearity, and
+KINSOL on the outer loop only drives the local solves harder: on the pedestal a
+line search spends 1.38M local iterations to fail where plain Newton spends 133k
+to succeed.
 
-Both in `../mfem-hdg-dev/doc/LINEARISE-FIRST-RESIDUAL-BUG.md`, with
-demonstrators beside it.
+**`Globalisation::PicardThenNewton` is implemented**, and it is what reaches the
+hard cases *without refining them*: §4.3 at `k = 1, h = 0.05` finishes in **4
+Newton iterations at observed order 2.01** where Newton alone fails at 60,
+agreeing with Picard's own answer to 4.7e-10.
+`picardThenNewtonRecoversQuadraticOrder` is the regression.
 
-So this item is not closed and meq keeps the old ordering as its default. The
-acceptance list below is what to work when it is.
+**But refinement reaches the same three cases**, so this is the coarse-mesh
+route, not the general remedy. Full tables in `CLAUDE.md`, *Why meq's Newton
+struggles* and *Picard, then Newton*.
 
-**Why it is first.** meq chose Newton deliberately and pays for it in every
-source and profile it accepts — `dFdPsi` is mandatory, `Prime` is mandatory, a
-profile that cannot differentiate itself cannot be used, and the assembled
-Jacobian is checked against a finite difference of the residual. That cost is
-paid *in order to have* Newton. Under the present ordering the cost stands and
-the benefit is absent on exactly the problems that motivated it.
+So **meq releases with Newton, and with Picard as its globalisation** — which is
+the answer to "release with the optimal algorithm". Newton is the algorithm; it
+just needs to be started somewhere reachable, exactly as CEDRES++ and Serino et
+al. start theirs. Picard is not pasted on afterwards, it is the globalisation
+Newton was always missing.
 
-The gap is not a preference between solvers. On Example 5, all three paths
-reaching identical discretisation error:
+**Keep `setNonlinearOrdering()` anyway.** It costs nothing, it is the canonical
+NPC ordering, and it is the only way to run this discretisation with no
+element-local nonlinear solves at all. It is no longer blocking anything.
 
-| | iterations |
-|---|---|
-| Newton | 4 |
-| Anderson-accelerated Picard | 19 |
-| damped Picard | 97 |
+**What is left on this path:**
 
-Picard converges linearly; Anderson is superlinear at best and never quadratic.
-
-**meq should release with the correct algorithm, not with it added afterwards.**
-A code earns its use cases by being the right choice from the start.
-
-**What meq does when it lands:**
-
-* Re-run `everyNonlinearPathReachesTheSameExactSolution`, which pins Newton,
-  Anderson-Picard and damped Picard to the same closed-form answer. It is the
-  check that would catch the new ordering solving a subtly different problem.
-* Re-measure the four GS-2 sources, and pose them with the papers' own
-  homogeneous data if a guess now suffices — `setInitialGuess()` alone did not.
-* Re-measure the pedestal and the current hole, and rewrite or retire
-  `pedestalNewtonFailsOnCoarseMeshesAtOrderOne` on the evidence.
-* Keep the Picard paths. Not as a fallback anyone should reach for, but because
-  they are the independent check on Newton.
+* **§4.4, the current hole, is the one genuinely unsolved case.** It fails at
+  every order and every mesh tried — including `k = 3, n = 48`, at 1.8M
+  element-local iterations — and under Picard and the handoff too. Refinement
+  does nothing, which points at the trivial branch (`F(r, 0) = 0`, so `ψ ≡ 0`
+  solves the homogeneous problem) rather than at resolution or globalisation.
+  Continuation in the source amplitude is the untried idea.
+* **`MFEM_USE_EXCEPTIONS`** — needed before the hole can even be *reported* as a
+  failure rather than killing the process, and a prerequisite for the driver's
+  exit code 2. This is now the highest-value MFEM-side item.
+* Re-run `everyNonlinearPathReachesTheSameExactSolution` with the new path added.
+* Rewrite `pedestalNewtonFailsOnCoarseMeshesAtOrderOne` to say it is measuring a
+  knife edge, per `CLAUDE.md`. Do not delete it.
 
 ## 2. The driver — meq, and can start now
 

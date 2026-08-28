@@ -662,9 +662,43 @@ step.
 
 ### Why meq's Newton struggles where other Newton solvers do not
 
-**The answer is hybridization, not Newton and not the boundary condition.** This
-is the most important thing in this file about the nonlinear solve, and it took
-three falsified hypotheses to reach.
+**READ THIS FIRST: THREE OF THE FOUR "STIFF" SOURCES WERE MERELY
+UNDER-RESOLVED.** The rest of this section is kept because its falsified
+hypotheses are worth not repeating, but its premise is largely wrong. Raw
+Newton, undamped, cold start, iterations to converge over `n = 16, 24, 32, 48`:
+
+| | `k = 1` | `k = 2` | `k = 3` |
+|---|---|---|---|
+| §4.2 pedestal | **42**, **22**, 9, 9 | 10, 9, 8, 6 | 11, 9, 7, **7** |
+| §4.3 barrier | fail, fail, **7**, 8 | 10, 7, 7, 8 | —, 8, 8, 7 |
+| §4.5 layer | fail, **17**, 11, 11 | —, 12, 14, 11 | —, 10, 21, 12 |
+| §4.4 current hole | **abort, abort, fail** | abort, fail, fail | —, **fail, fail, fail** |
+
+**§4.2, §4.3 and §4.5 are ordinary problems on a resolved mesh** — 7 to 17
+iterations — and both refinement paths cure them independently: `h`-refinement
+takes §4.2 at `k = 1` from 42 to 9, and `p`-refinement takes `n = 16` from 42 to
+10 without touching the mesh. `k = 3, n = 48` on the pedestal takes **7**. The
+"meq is doing the easier problem and finding it harder" red flag below was
+raised from a benchmark run at a single under-resolved point, `k = 1, h = 0.05`.
+
+**§4.4 is the exception and is genuinely unsolved.** It fails at *every* order
+and every mesh tried, including `k = 3, n = 48`, spending 1.8M element-local
+iterations to do it. Refinement does nothing, and neither does Picard. That is
+consistent with its pathology being **non-uniqueness rather than resolution**:
+`F(r, 0) = 0` for eq. (26), so `ψ ≡ 0` solves the homogeneous problem — see the
+trivial-branch trap under *Traps*. Do not file §4.4 under stiffness.
+
+So the remedy for a production run is **resolution**, which means stage 6's
+adaptive loop rather than a globalisation. What globalisation buys is the
+**coarse start** an adaptive loop necessarily begins from, which is exactly where
+raw Newton fails — see *Picard, then Newton*.
+
+What survives below: hybridization really does put a nonlinear solve inside every
+element elimination, and that is why an under-resolved §4.2 grinds where a CG
+code would not. What does not survive is the conclusion that this makes the
+problems unreachable. It makes an under-resolved discretisation expensive.
+
+**Two hypotheses below are falsified and one is now known to be incomplete.**
 
 Three Grad–Shafranov codes solve this equation by Newton and report it robust:
 
@@ -764,21 +798,44 @@ belongs in `../mfem-hdg-dev/doc/`, not here.
    **This is a diagnosis, not a recommendation.** Relaxed Picard took 200
    iterations to reach 2.8e-8 where Newton takes 42 on the mesh Newton manages.
    The point is what it isolates, not that meq should adopt it.
-**THE ORDERING IS THE FIX, AND IT IS BLOCKING RATHER THAN OPTIONAL.** meq chose
-Newton deliberately and pays for it everywhere — see *Newton, and the obligation
-it creates*: every `Source` must supply `dFdPsi`, every `Profile` must supply
-`Prime`, and the assembled Jacobian is checked against a finite difference of
-the residual. That cost is accepted **in order to have** Newton. Under
-condense-then-linearise the cost stands and the benefit does not arrive on the
-stiff problems, which are the ones that motivated it. Measured on Example 5, all
-three paths reaching identical error: Newton 4 iterations, Anderson-Picard 19,
-damped Picard 97. Picard converges linearly and Anderson never makes it
-quadratic, so this is not a choice between solvers.
+**THE ORDERING WAS NOT THE FIX. IT IS IMPLEMENTED, IT IS CORRECT, AND IT DOES
+NOT HELP.** This section predicted that linearise-then-condense would rescue the
+stiff sources. `gf-hdg-linearise-first` landed, two bugs meq reported against it
+were fixed, and the prediction is **falsified by measurement**. `local 0` from
+`GetNumLocalNLIterations()` confirms the ordering genuinely takes effect:
 
-So `../mfem-hdg-dev/doc/HDG-LINEARISE-THEN-CONDENSE.md` is **the** outstanding
-item on the nonlinear path, and the Picard routes below are a bridge to it and
-not a destination. meq should release with Newton working on the problems it was
-built for, not with the correct algorithm pasted on afterwards.
+| case | condense-first | linearise-first |
+|---|---|---|
+| Example 5, similarity, `k = 2, 3` | ok, 3 it | ok, 3 it |
+| §4.2 pedestal `k = 1`, `n = 16/24/30` | ok — 31/7/5 it | **fails at 60, all three** |
+| §4.2 pedestal `k = 2, n = 16` | ok, 5 it | **fails at 60** |
+| §4.3 barrier `k = 1` / `k = 2` | fails / ok, 10 it | **aborts** |
+| §4.4 hole `k = 1` | aborts | aborts |
+
+Identical on the mild problems, strictly worse on every stiff one. The obvious
+mechanism was tested and is not it either: `NewtonSolver` evaluates the residual
+at the new iterate using the linearisation retained at the *old* one, but
+wrapping the operator so the residual relinearises at its own argument changes
+nothing.
+
+**So the element-local nonlinear solves were never the cause.** The control that
+pointed here — relaxed Picard converging where Newton fails — differed in
+*globalisation* as well as in local linearity, and the globalisation cross says
+which half was doing the work. Every KINSOL strategy that steers the outer trace
+buys it by driving the local Newtons harder and still fails:
+
+| §4.2 pedestal `k = 1, n = 16` | outcome | local nonlinear iterations |
+|---|---|---|
+| condense-first, plain Newton | **ok, 31 it** | 133,168 |
+| condense-first + `KIN_LINESEARCH` | fails at 45 | **1,381,527** |
+| condense-first + `KIN_NONE` | fails at 19 | 105,021 |
+| linearise-first, plain | fails at 60 | 0 |
+| linearise-first + line search | fails at **2** | 0 |
+
+**What does work is Picard, then Newton** — see *Picard, then Newton* below. Keep
+`setNonlinearOrdering()`: it costs nothing, it is the canonical NPC ordering, and
+it is the only way to run this discretisation without element-local nonlinear
+solves at all. Do not expect it to fix a stiff source.
 
 3. **Picard, keeping the local problems linear — implemented, as a bridge.**
    `Globalisation::AndersonPicard` is `KINSolver(KIN_FP)` over the fixed point
@@ -809,6 +866,74 @@ built for, not with the correct algorithm pasted on afterwards.
    alternative rather than a different problem.
 4. **Continuation in the source amplitude**, which also addresses the trivial
    branch.
+
+### Picard, then Newton — the route for a coarse mesh
+
+**This is what reaches the hard cases without refining them, and it is
+`Globalisation::PicardThenNewton`.**
+Anderson-accelerated Picard walks the iterate into Newton's basin; plain Newton
+takes it from there and supplies the quadratic endgame Picard structurally cannot.
+Measured, with `setInitialGuess()` seeding the ramp on every row:
+
+| case | Newton alone | Picard | **Newton from Picard** |
+|---|---|---|---|
+| §4.2 pedestal `k = 1, n = 16` | ok, 31 | ok, 197 | **ok, 4** |
+| §4.2 pedestal `k = 1, n = 24` | ok, 7 | ok, 290 | **ok, 4** — order 2.02 |
+| §4.3 barrier `k = 1, n = 16` | **fails at 60** | ok, 122 | **ok, 4** — order 2.01 |
+| §4.3 barrier `k = 2, n = 16` | ok, 10 | ok, 120 | **ok, 3** — order 1.96 |
+| §4.5 layer `k = 1, n = 16` | **fails at 60** | 400, not converged | **ok, 28** |
+| §4.5 layer `k = 2, n = 16` | **fails at 60** | 400, not converged | **ok, 5** |
+| §4.4 hole `k = 1, n = 16` | aborts | not converged | **aborts** |
+
+Three of the four unreachable cases become reachable. §4.3 at `k = 1, h = 0.05`
+is the one to quote: nothing else in the solver touches it **at that
+resolution** — plain Newton fails at 60, a line search fails at 24 having spent
+5.4M element-local iterations, and linearise-first aborts — and the handoff
+finishes in four Newton steps,
+`8.3e-01 → 1.5e-03 → 1.0e-04 → 7.4e-07 → 3.7e-11`, agreeing with Picard's own
+answer to **4.7e-10**. That agreement is what makes it a handoff rather than a
+change of problem, and `picardThenNewtonRecoversQuadraticOrder` asserts it.
+
+**Be precise about what this is worth, because refinement reaches the same three
+cases.** Raw Newton solves §4.2, §4.3 and §4.5 perfectly well once resolved — see
+the table under *Why meq's Newton struggles* — so the handoff is **not** the only
+route to them, and it is not the route to prefer when refining is available. What
+it is for is the **coarse mesh**: an adaptive run must solve on its initial mesh
+before it has an estimator to refine with, and that first solve is exactly the
+under-resolved regime where raw Newton fails. That is a real job, and it is a
+narrower one than "the route for stiff sources".
+
+**It does not rescue §4.4.** The current hole fails under Picard, under the
+handoff, and at every order and mesh up to `k = 3, n = 48`. Its problem is the
+trivial branch, not the iteration.
+
+**Picard's job is not to solve the problem.** §4.5 converges at both orders from
+a Picard state that never met its own tolerance, so stage 1 stopping short is an
+expected outcome, not an error, and `solveByPicardThenNewton()` swallows that
+throw deliberately. This is a globalisation, not a two-solver pipeline.
+
+**Do not replace the tolerance with an iteration budget.** The handoff is *not
+monotone* in Picard effort — on §4.5 at `k = 1`, budgets of 400 and 3 converge
+while 40 and 10 fail, and on §4.3 at `k = 1` a budget of 3 diverges to `1e4`. A
+budget tuned on one mesh will betray you on the next. Picard's own tolerance is
+the trigger that worked wherever it was reached.
+
+It is not cheap: stage 1 spent 122 to 290 iterations, each a full linear solve.
+Reach for it when `Globalisation::None` fails, not before.
+
+**A caution on reading the printed order.** Taking the best observed order over
+any triple of a short or non-monotone history manufactures values of 3.2, 3.6 and
+9.36 out of runs that are not converging at all. Only a monotone tail supports an
+order claim; the 2.02, 2.01 and 1.96 above are those.
+
+**And it exposed a latent defect, now fixed.** `setGlobalisation()` reset
+`prepared` but not `built`, while `buildForms()` branches on
+`usesNonlinearForms()` — which reads `globalisationChoice` — to decide whether the
+potential block goes on the linear or the nonlinear form. Switching a live solver
+between a Picard path and a Newton one therefore reused the other path's blocks.
+`setNonlinearOrdering()` and `setLocalSolver()` beside it always did reset
+`built`. Latent until now because every caller built a fresh solver per
+globalisation; `PicardThenNewton` switches twice inside one `solve()`.
 
 ### On SUNDIALS
 
@@ -913,41 +1038,31 @@ this machine today.
 failed solve if MFEM aborts the process first. It needs a full rebuild of
 `../mfem/install`, being a `config.hpp` change.
 
-### The suite is 11/13 against the new library, and both failures are informative
+### The suite is 16/17, and the one failure is a tripwire firing as designed
 
-**`ExtensionConvergence::thePostProcessedPotentialConvergesAtKPlusTwo` fails,
-and it is a real regression in MFEM.** `ψ*` on the extension path converges at
-**1.28 at `k = 1` and 1.16 at `k = 2`** — a rate independent of `k`, which is a
-fixed `O(h)` geometric error rather than a discretisation one — where the
-working configuration gave 2.62/3.00 and 3.46/3.90. It is also *larger than
-`ψ_h`*, by 7× at `k = 1` and **1000× at `k = 2`**, so the post-processing now
-costs accuracy rather than buying it.
+Measured against `meq-integration` — `gf-hdg-subdomains-dev` +
+`direct-solver-symbolic-reuse` + the bugfixed `gf-hdg-linearise-first`.
 
-The solve is untouched: `ψ_h` and `q_h` agree with the old library to every
-digit printed. Only the four `ψ*`-dependent quantities moved. The suspect is
-§3 of `../mfem-hdg-dev/doc/HDG-DEFECTS-FROM-MEQ.md` — meq reported that
-`ReconstructFluxAndPot()` dropped the boundary-face `HDGExtensionIntegrator`
-and *measured that drop harmless*; the fix lifts it into the local flux block,
-and that is exactly the term carrying the `Γ_h` stand-off.
+**The `ψ*`-on-a-curved-boundary regression is fixed.**
+`ExtensionConvergence::thePostProcessedPotentialConvergesAtKPlusTwo` and
+`AdaptiveRefinement` both pass. That regression was `ψ*` converging at 1.28 at
+`k = 1` and 1.16 at `k = 2` — a rate independent of `k`, so a fixed `O(h)`
+geometric error rather than a discretisation one — and being *larger* than `ψ_h`,
+by 7× at `k = 1` and 1000× at `k = 2`, so the post-processing cost accuracy
+rather than buying it. `AdaptiveRefinement` failed downstream of it, `η₂`, `η₄`
+and `η₅` being built on `ψ*`, which is why it surfaced as `η` refusing to come
+down four files from the cause. Both are green now.
 
-`AdaptiveRefinement`'s curved loop fails for the same reason and was how this
-was found — `η₂`, `η₄` and `η₅` are built on `ψ*`, so it surfaced as `η`
-refusing to come down, four files away from the cause. **That is why the new
-test exists**: nothing put `ψ*` and a curved boundary together, because
-`ExtensionConvergence` never called `postProcess()` and `EstimatorConvergence`
-works on a fitted rectangle.
-
-**`PedestalConvergence::pedestalNewtonFailsOnCoarseMeshesAtOrderOne` fails
-because the failure it asserts stopped reproducing** — LAPACK's rounding tips
-it, see *On SUNDIALS*. **Do not delete it on that evidence.** The underlying
-problem is untouched, the case is marginal either way, and the threaded-MKL
-rounding that decides it is not reproducible across machines. The test is
-measuring a knife edge; what it needs is a rewrite that says so. Newton now converges at `k = 1, h = 0.05` in
-42 iterations where MFEM's element-local solves used to give up at
-`el: N not convered in 100 iters`; §4.4, the current hole, no longer produces
-NaN or aborts the process, though it still does not converge in 60. Do not
-delete that test until the cause is settled, since its prose explains the
-failure in terms that would then be wrong.
+**The one failure is
+`PedestalConvergence::pedestalNewtonFailsOnCoarseMeshesAtOrderOne`, and it fails
+by printing its own designed message**: Newton converges at `k = 1, h = 0.05` in
+**42 iterations** where the test asserts it does not converge at all. That is the
+same 42 recorded under *On SUNDIALS* as the LAPACK-tipped value, so this is the
+knife edge moving, not a capability arriving. **Do not delete it**, whatever the
+assertion message says: the underlying problem is untouched, the case is marginal
+either way, and the threaded-MKL rounding that decides it is not reproducible
+across machines. What it needs is a rewrite that says it is measuring a knife
+edge. §4.4, the current hole, still aborts.
 
 ## The linear solves, and what they should be
 
