@@ -393,6 +393,14 @@ namespace meq
 				"MFEM_USE_SUNDIALS, so no KINSOL strategy is available" );
 #endif
 		globalisationChoice = choice;
+		// built, not just prepared. usesNonlinearForms() reads globalisationChoice,
+		// and buildForms() branches on it to decide whether the potential block
+		// goes on the LINEAR or the NON-LINEAR form -- so switching a live solver
+		// between a Picard path and a Newton one while built stayed true would
+		// silently reuse the other path's blocks. Found while wiring
+		// PicardThenNewton, which switches twice in one solve(); setNonlinearOrdering
+		// and setLocalSolver beside it always did reset built, and this did not.
+		built = false;
 		prepared = false;
 	}
 
