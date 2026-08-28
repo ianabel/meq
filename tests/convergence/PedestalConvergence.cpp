@@ -141,20 +141,36 @@
  *       problem is solved by psi == 0 and meq's Newton, which starts from the
  *       Dirichlet data, stops there in zero iterations.
  *
- *   pedestalNewtonFailsOnCoarseMeshesAtOrderOne
- *       at k = 1 the pedestal does not converge on meshes coarser than
- *       h = 0.033. The element-local non-linear solves fail first.
+ *   pedestalConvergenceIsAResolutionThreshold
+ *       at k = 1 the pedestal is expensive to the point of marginality on a
+ *       coarse mesh and ordinary on a resolved one -- 42 iterations at n = 16
+ *       against 9 at n = 32 -- and RAISING THE DEGREE cures it at n = 16
+ *       without touching the mesh. It is under-resolution, not stiffness.
  *
  *   currentHoleDoesNotConvergeUnderPlainNewton
  *       section 4.4 does not converge in ANY configuration tried, and on the
- *       coarser ones the iterate reaches NaN and MFEM aborts the process.
+ *       coarser ones the iterate reaches NaN. It used to abort the process;
+ *       with MFEM_USE_EXCEPTIONS it now throws and the count survives.
  *
- * All three point the same way: meq differs from both papers in closing the
- * semi-linear problem by Newton rather than by Anderson-accelerated Picard, and
- * Newton needs an initial guess and a globalisation that the solver does not yet
- * offer. CLAUDE.md already names the intended remedy -- KINSolver with
- * KIN_LINESEARCH -- and it cannot be tried here, because the MFEM tree is built
- * with MFEM_USE_SUNDIALS = NO.
+ * THE SECOND FINDING USED TO SAY SOMETHING ELSE, AND THE CORRECTION IS THE MORE
+ * INSTRUCTIVE HALF. It was recorded as a hard failure at k = 1 for h >= 0.05,
+ * diagnosed as the structural difference between meq's Newton and the papers'
+ * Anderson-accelerated Picard, with KINSolver( KIN_LINESEARCH ) named as the
+ * remedy. All of that was measured and none of it survived:
+ *
+ *   - the line search makes it WORSE, failing at 18 iterations where the
+ *     undamped iteration takes 42, because globalising the outer trace
+ *     iteration does not globalise the element-local ones;
+ *   - NLOrdering::LineariseThenCondense removes the element-local non-linear
+ *     solves entirely -- GetNumLocalNLIterations() reads 0 -- and this case
+ *     gets worse still;
+ *   - refining h OR raising k fixes it independently, which is what an
+ *     under-resolved discretisation does and what a stiff source does not.
+ *
+ * So the first finding below is real and the third is real; the second was a
+ * measurement taken at one point, h = 0.05 and k = 1, mistaken for a property
+ * of the problem. CLAUDE.md's "a difficulty measured at one resolution is not a
+ * property of the problem" is this, and it cost an MFEM work item to learn.
  */
 
 namespace
@@ -603,7 +619,7 @@ BOOST_AUTO_TEST_CASE( anInitialGuessReachesTheIterateButNotTheOtherBranch )
  * WHAT IS ASSERTED HERE is only that the KINSOL path works and agrees, on a
  * problem both solvers converge on. The table above is prose because every
  * count in it sits on the same rounding knife edge
- * pedestalNewtonFailsOnCoarseMeshesAtOrderOne documents.
+ * pedestalConvergenceIsAResolutionThreshold documents.
  */
 /*
  * ANDERSON-ACCELERATED PICARD, WHICH IS THE PAPERS' OWN METHOD AND WORKS.
@@ -860,49 +876,111 @@ namespace
  * -------------------------------------------------------------------------
  */
 
-/// THE SECOND FINDING. At k = 1 the pedestal does not converge at all on meshes
-/// coarser than h = 0.033, and this records it rather than hiding behind a mesh
-/// sequence chosen to avoid it.
-///
-/// What it looks like: MFEM's element-local non-linear solves fail --
-/// "el: N not convered in 100 iters", printed by DarcyHybridization's LSsolve --
-/// and the outer Newton then has an inconsistent residual and never recovers.
-/// That is a structural difference from the papers, not a tuning problem. Both
-/// papers close the semi-linear problem by Anderson-accelerated PICARD, which
-/// evaluates F at the previous iterate and leaves every element-local solve
-/// LINEAR. meq's Newton puts the non-linearity inside the local solve, and with
-/// dF/dpsi = 2 c1 r^2/sigma^2 = 320 r^2 at psi = 0 those local problems are
-/// indefinite on a coarse element.
-///
-/// The fix is globalisation, which is exactly what CLAUDE.md's note on
-/// KINSolver( KIN_LINESEARCH ) anticipates -- and which cannot be tried here,
-/// because the MFEM tree is built with MFEM_USE_SUNDIALS = NO.
-BOOST_AUTO_TEST_CASE( pedestalNewtonFailsOnCoarseMeshesAtOrderOne )
+/*
+ * THE SECOND FINDING, AND IT IS A RESOLUTION THRESHOLD RATHER THAN A FAILURE.
+ *
+ * THIS TEST MUST NOT ASSERT WHETHER k = 1, n = 16 CONVERGES, and the reason is
+ * the whole design of it. That point sits on a knife edge: CLAUDE.md records it
+ * converging in 42 iterations against ../mfem/install and failing at 60 against
+ * install-nolapack, which is the same library differing by one flag. The
+ * mechanism is not the flag -- meq sets LPrecType::LU either way, both
+ * implementations partial-pivot on the same rule, and the singularity test is
+ * identical -- it is dgetrf/dgemm being blocked BLAS-3 where MFEM's fallback is
+ * an unblocked scalar loop, so the arithmetic agrees and the summation order
+ * does not, at O(1e-16). And the BLAS is THREADED MKL, whose reduction order
+ * depends on the thread count. So whether that one local Newton converges is
+ * machine- and environment-dependent, and an assertion on it is an assertion
+ * about this machine today.
+ *
+ * The previous version of this test asserted exactly that, in the direction
+ * that stopped holding, and told its reader to delete it. Do not: the case is
+ * still marginal, and 42 iterations against the 9 a resolved mesh takes is
+ * still a finding. What changed is only which side of the edge it fell on.
+ *
+ * WHAT IS ASSERTED INSTEAD is the pair of cures, each of which has a factor of
+ * four in it and neither of which is marginal:
+ *
+ *     k = 1, n = 16   h = 0.05     42 iterations   <- the knife edge, recorded
+ *     k = 1, n = 32   h = 0.025     9 iterations   <- h-refinement cures it
+ *     k = 2, n = 16   h = 0.05     11 iterations   <- p-refinement cures it too
+ *
+ * CLAUDE.md's own survey table reports 10 for that last row against the 11
+ * measured here, and the discrepancy is NOT explained -- both are undamped
+ * Newton from the Dirichlet datum on the same mesh. One iteration on a count
+ * that CLAUDE.md separately records as rounding-sensitive is not worth chasing,
+ * and the finding is the factor of four rather than the unit. It is noted so
+ * that the next reader does not take the 11 for a regression against the 10.
+ *
+ * That two independent refinement paths both cure it is what identifies the
+ * cause as under-resolution. A stiff source would not care about either: section
+ * 4.4 is the control, and it fails at every order and every mesh tried up to
+ * k = 3, n = 48, because its trouble is that dF/dpsi has swept past some 26
+ * eigenvalues of the operator it is added to and the continuous problem is
+ * multi-valued. There is no discretisation error there to remove.
+ *
+ * NOR IS THE CURE GLOBALISATION, which is what this file used to say. Measured:
+ * KIN_LINESEARCH fails at 18 on the coarse point where the undamped iteration
+ * takes 42, spending 1.4M element-local iterations to do it, and KIN_NONE fails
+ * at 6. Globalising the outer trace iteration cannot make the element-local
+ * problems at that trace well posed, and KINSOL never sees them.
+ */
+BOOST_AUTO_TEST_CASE( pedestalConvergenceIsAResolutionThreshold )
 {
-	SelfMeasurement const coarse = meq::tests::measureSelf(
-		meq::analytic::PressurePedestal::pedestal(), standardBox(), 1, 16,
-		cloud(), pedestalDatum, newtonCap );
-	SelfMeasurement const finer = meq::tests::measureSelf(
-		meq::analytic::PressurePedestal::pedestal(), standardBox(), 1, 24,
-		cloud(), pedestalDatum, newtonCap );
+	meq::analytic::PressurePedestal const eq
+		= meq::analytic::PressurePedestal::pedestal();
 
-	std::printf( "\n  section 4.2 at k = 1: h = %.5f %s in %d iterations, "
-	             "h = %.5f %s in %d\n",
-	             coarse.h, coarse.converged ? "converged" : "FAILED",
-	             coarse.newtonIterations,
-	             finer.h, finer.converged ? "converged" : "FAILED",
-	             finer.newtonIterations );
+	// The knife edge. Recorded, printed, and deliberately not asserted on.
+	SelfMeasurement const marginal = meq::tests::measureSelf(
+		eq, standardBox(), 1, 16, cloud(), pedestalDatum, newtonCap );
+	// h-refinement at the same degree.
+	SelfMeasurement const refined = meq::tests::measureSelf(
+		eq, standardBox(), 1, 32, cloud(), pedestalDatum, newtonCap );
+	// p-refinement on the marginal mesh, which is not touched.
+	SelfMeasurement const raised = meq::tests::measureSelf(
+		eq, standardBox(), 2, 16, cloud(), pedestalDatum, newtonCap );
+
+	auto const report = []( char const *label, SelfMeasurement const &m )
+	{
+		std::printf( "    %-22s h = %.5f  %-9s %3d iterations\n", label, m.h,
+		             m.converged ? "converged" : "FAILED", m.newtonIterations );
+	};
+	std::printf( "\n  section 4.2, the resolution threshold\n" );
+	report( "k = 1, n = 16", marginal );
+	report( "k = 1, n = 32", refined );
+	report( "k = 2, n = 16", raised );
 	std::fflush( stdout );
 
-	BOOST_TEST( !coarse.converged,
-	            "Newton now converges at k = 1, h = 0.05 on the pedestal, in "
-	            << coarse.newtonIterations << " iterations. That is an improvement, "
-	            "not a regression -- something has been globalised, or the local "
-	            "solves have been made more robust. Move the sequences in "
-	            "meshesFor() down and delete this test" );
-	BOOST_TEST( finer.converged,
-	            "Newton no longer converges at k = 1, h = 0.033 either, so the "
+	// The two cures. Ceilings at roughly twice the measured counts of 9 and 10:
+	// these are the points that are supposed to be ordinary, and an ordinary
+	// Newton on this problem takes single figures.
+	BOOST_TEST( refined.converged,
+	            "k = 1, n = 32 no longer converges on the pedestal, so the "
 	            "resolution threshold has moved the wrong way" );
+	BOOST_TEST( refined.newtonIterations <= 20,
+	            "k = 1, n = 32 took " << refined.newtonIterations
+	            << " iterations where 9 is the measured value. The resolved mesh "
+	            "is supposed to be the easy one" );
+	BOOST_TEST( raised.converged,
+	            "k = 2 no longer converges on the n = 16 mesh, so p-refinement "
+	            "has stopped curing the coarse case and the finding this test "
+	            "records -- that it is under-resolution -- is in doubt" );
+	BOOST_TEST( raised.newtonIterations <= 20,
+	            "k = 2, n = 16 took " << raised.newtonIterations
+	            << " iterations where 11 is the measured value" );
+
+	// AND THE THRESHOLD IS STILL THERE. Both readings of the knife edge -- 42
+	// iterations, or a failure at the cap -- clear this by a factor of two or
+	// more, so it holds whichever side the rounding falls on. What would break
+	// it is the coarse point becoming genuinely cheap, and that is a real
+	// finding rather than a flake: it would mean the local solves had been made
+	// robust, and the mesh sequences in meshesFor() could then come down.
+	BOOST_TEST( marginal.newtonIterations >= 2*refined.newtonIterations,
+	            "k = 1, n = 16 took " << marginal.newtonIterations
+	            << " iterations against " << refined.newtonIterations
+	            << " at n = 32, so the coarse mesh is no longer the expensive one "
+	            "and the threshold this test measures has gone. Check whether the "
+	            "element-local solves have been damped or the ordering changed, "
+	            "then bring meshesFor()'s k = 1 sequence down" );
 }
 
 BOOST_AUTO_TEST_CASE( pedestalSelfConverges )
