@@ -683,10 +683,73 @@ raised from a benchmark run at a single under-resolved point, `k = 1, h = 0.05`.
 
 **§4.4 is the exception and is genuinely unsolved.** It fails at *every* order
 and every mesh tried, including `k = 3, n = 48`, spending 1.8M element-local
-iterations to do it. Refinement does nothing, and neither does Picard. That is
-consistent with its pathology being **non-uniqueness rather than resolution**:
-`F(r, 0) = 0` for eq. (26), so `ψ ≡ 0` solves the homogeneous problem — see the
-trivial-branch trap under *Traps*. Do not file §4.4 under stiffness.
+iterations to do it. Refinement does nothing, and neither does Picard.
+
+**And the reason is measured, not guessed: the Jacobian's reaction term has swept
+past ~26 eigenvalues of the operator it is added to.** `∂F/∂ψ` for eq. (26)
+ranges over `[−579.5, +565.7]`, against a first Dirichlet eigenvalue of
+`λ₁ = π²(1/w² + 1/h²) = 22.3` on the benchmark box. The linearised operator
+`−∇̄·((1/r)∇̄·) − (∂F/∂ψ)/r` is therefore strongly indefinite, and the continuous
+problem is **multi-valued**. The driver is the `c₃(1 − e₂)cos(c₄ψ)` term at
+`c₃ = −18`, `c₄ = 10π` — the very feature that empties the core of current —
+whose derivative carries `c₃c₄ ≈ 566`.
+
+That is why refinement is powerless: there is no discretisation error to remove.
+Ratio against `λ₁`, by amplitude:
+
+| `c₃` | 0 | −2 | −4 | −9 | **−18** |
+|---|---|---|---|---|---|
+| `max|∂F/∂ψ| / λ₁` | 7 | 7 | 8 | 13 | **26** |
+
+Note the pedestal itself already sits at 7 and converges, so exceeding `λ₁` is
+not by itself fatal; 26 is. **This supersedes an earlier reading of §4.4 as a
+trivial-branch problem.** `F(r, 0) = 0` is true and the trivial branch is real —
+see *Traps* — but it is not what defeats the iteration here, since the runs above
+carry non-homogeneous ramp data that keeps `ψ` away from zero and fail anyway.
+
+Do not file §4.4 under stiffness.
+
+**§4.4 does have a solution, and continuation reaches it.** Adaptive continuation
+in the added term's amplitude — halve the step on failure, grow it by 1.3 on
+success — walked `c₃` from 0 to −18 at `k = 2, n = 32` in **9 solves with 2
+retreats**, the final one taking 8 Newton iterations:
+
+```
+  c3 =  -1.800 : ok     7        c3 = -18.000 : FAIL  60   (halving)
+  c3 =  -4.140 : ok     6        c3 = -17.887 : FAIL  60   (halving)
+  c3 =  -7.182 : ok    10        c3 = -16.762 : ok    13
+  c3 = -11.137 : ok     9        c3 = -18.000 : ok     8
+  c3 = -15.637 : ok    10
+```
+
+Uniform steps do not do it — ten of them stall at `c₃ = −10.8` — so the step
+control is the point. There is **no limit point on the branch**: the step never
+had to fall below 1e-3, it simply had to shrink over the last sixth.
+
+**THIS MUST NOT GO INTO THE DRIVER, AND THE REASON IS NOT TASTE.** What was
+ramped is `c₃`, a constructor argument of the `CurrentHole` *test fixture*. The
+`Source` interface exposes `f( r, z, ψ )` and `dFdPsi( r, z, ψ )` and nothing
+else — **there is no amplitude parameter in it and no way to recover one from a
+black-box `F`**. This continuation is therefore unavailable to a driver on
+principle, not merely inadvisable.
+
+The black-box analogue is scaling the whole source, `F_λ = λF`, which *is*
+expressible. It is **untested and is a different homotopy**: at `λ = 0` it
+degenerates to the harmonic problem, where the path above starts from the
+converged *pedestal*, already a nontrivial equilibrium. Do not assume it behaves
+the same.
+
+**And it cannot currently be predicted that continuation is needed.** The ratio
+`max|∂F/∂ψ| / λ₁` is computable black-box, `dFdPsi` being mandatory. But the
+pedestal converges at 7 and the hole fails at 26 — two points, no threshold —
+and the ratio needs the range of `ψ`, which is not known before solving. A
+detector calibrated on that would be fitting noise.
+
+So: **the driver gets a reactive ladder, never a predictive one.** Newton, and on
+failure `PicardThenNewton`. Failure is *observed*, and needs nothing from `F`
+beyond the existing interface. Continuation stays a test-only investigation. If
+it is ever wanted generally, the prerequisite is a `Source` that can
+parameterise itself, which is an interface change to argue on its own merits.
 
 So the remedy for a production run is **resolution**, which means stage 6's
 adaptive loop rather than a globalisation. What globalisation buys is the

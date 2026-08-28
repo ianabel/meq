@@ -117,12 +117,24 @@ element-local nonlinear solves at all. It is no longer blocking anything.
 
 **What is left on this path:**
 
-* **§4.4, the current hole, is the one genuinely unsolved case.** It fails at
-  every order and every mesh tried — including `k = 3, n = 48`, at 1.8M
-  element-local iterations — and under Picard and the handoff too. Refinement
-  does nothing, which points at the trivial branch (`F(r, 0) = 0`, so `ψ ≡ 0`
-  solves the homogeneous problem) rather than at resolution or globalisation.
-  Continuation in the source amplitude is the untried idea.
+* **§4.4, the current hole: solvable, but only by a route the driver may not
+  take.** It fails under every solver at every order and mesh tried, including
+  `k = 3, n = 48`. The cause is measured: `∂F/∂ψ` spans `[−580, +566]` against a
+  first Dirichlet eigenvalue of 22.3, so the linearised operator has swept past
+  ~26 eigenvalues and the problem is multi-valued — which is why refinement is
+  powerless. **Adaptive continuation in the added term's amplitude reaches it**,
+  `c₃ = 0 → −18` in 9 solves with 2 retreats, final solve 8 iterations, no limit
+  point on the branch.
+
+  **That route is closed to the driver and is not to be implemented there.** It
+  ramps a parameter of the *test fixture*; the `Source` interface exposes only
+  `f` and `dFdPsi`, so a black-box `F` offers no amplitude to ramp. Nor can the
+  need be predicted: the pedestal converges at a ratio of 7 and the hole fails at
+  26, which is two points and not a threshold. **The driver gets a reactive
+  ladder — Newton, then `PicardThenNewton` on observed failure — and never a
+  predictive one.** Continuation stays a test-only investigation; making it
+  general would require a self-parameterising `Source`, an interface change to
+  argue separately. See `CLAUDE.md`, *Why meq's Newton struggles*.
 * **`MFEM_USE_EXCEPTIONS`** — needed before the hole can even be *reported* as a
   failure rather than killing the process, and a prerequisite for the driver's
   exit code 2. This is now the highest-value MFEM-side item.
