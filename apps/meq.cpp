@@ -26,6 +26,7 @@
 
 #include "meq/BoundaryShape.hpp"
 #include "meq/Config.hpp"
+#include "meq/Estimator.hpp"
 #include "meq/Field.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/Output.hpp"
@@ -159,17 +160,24 @@ namespace
 		return std::max( hR, hZ );
 	}
 
-	Subdomain buildSubdomain( mfem::Mesh &background,
-	                          meq::BoundaryShape const &shape,
-	                          double h )
+	/// Negative inside Omega, which is the sign convention every piece of the
+	/// extension machinery uses. Built once and shared: buildSubdomain() below
+	/// and meq::AdaptiveDomain on the adaptive path must be given the SAME
+	/// function, or D_h differs between a one-shot run and cycle 0 of an adaptive
+	/// one for no reason a user could see.
+	mfem::PositionFunction levelSetOf( meq::BoundaryShape const &shape )
 	{
 		meq::BoundaryShape const *shapePointer = &shape;
-		mfem::PositionFunction const levelSet =
-			[ shapePointer ]( mfem::Vector const &x )
-			{
-				return shapePointer->levelSet( x( 0 ), x( 1 ) );
-			};
+		return [ shapePointer ]( mfem::Vector const &x )
+		{
+			return shapePointer->levelSet( x( 0 ), x( 1 ) );
+		};
+	}
 
+	Subdomain buildSubdomain( mfem::Mesh &background,
+	                          mfem::PositionFunction const &levelSet,
+	                          double h )
+	{
 		// extra_refine = 1: the vertex test alone is exact only where Omega is
 		// convex, and a flux surface with triangularity is not obviously so.
 		mfem::Array<int> marker;
@@ -217,6 +225,33 @@ namespace
 		subdomain.gammaHMarker[ subdomain.gammaH - 1 ] = 1;
 		return subdomain;
 	}
+
+	/// The marking step, GS-2 section 3.2. Doerfler is what the convergence
+	/// analysis of Cockburn, Nochetto and Zhang assumes and is the default;
+	/// maximum is what GS-2's own experiments used, at gamma = 0.3, and its
+	/// analysis for HDG is still open. The two respond to gamma in OPPOSITE
+	/// directions -- see meq::markMaximum -- which is why the configuration names
+	/// the strategy rather than inferring it from the value.
+	void markElements( meq::MarkingStrategy strategy, double theta,
+	                   mfem::Vector const &local, mfem::Array<int> &marked )
+	{
+		if ( strategy == meq::MarkingStrategy::Doerfler )
+			meq::markDoerfler( local, theta, marked );
+		else
+			meq::markMaximum( local, theta, marked );
+	}
+
+	/// One turn of the loop, kept for the report at the end.
+	struct Cycle
+	{
+		int elements;
+		int traceDofs;
+		int marked;
+		int widened;
+		double eta;
+		int iterations;
+		bool globalised;
+	};
 
 	/// The residual history, in the shape CLAUDE.md records. It is the
 	/// diagnostic that separates a wrong Jacobian from a hard problem -- a run
@@ -291,14 +326,6 @@ int main( int argc, char **argv )
 				"     Use Type = \"zero\" for the fixed-boundary problem.\n" );
 			return ConfigurationError;
 		}
-
-		if ( config->getAdaptivity().enabled )
-		{
-			std::fprintf( stderr,
-				"meq: [adaptivity] Enabled = true, and the driver does not yet run\n"
-				"     the loop. Refusing rather than quietly solving once.\n" );
-			return ConfigurationError;
-		}
 	}
 	catch ( std::exception const &error )
 	{
@@ -307,17 +334,48 @@ int main( int argc, char **argv )
 	}
 
 	// ---- set the run up ------------------------------------------------
-	std::unique_ptr<meq::GradShafranovSolver> solver;
 	mfem::Mesh background;
 	std::unique_ptr<meq::BoundaryShape> shape;
-	Subdomain subdomain;
+	mfem::PositionFunction levelSet;
 	mfem::ConstantCoefficient zero( 0.0 );
 	std::unique_ptr<mfem::FunctionCoefficient> ramp;
 	std::unique_ptr<mfem::Mesh> guessMesh;
 	std::unique_ptr<mfem::GridFunction> guess;
+
+	/*
+	 * REBUILT EVERY ADAPTIVE CYCLE, AND THE LAST ONE IS WHAT THE WRITE PHASE
+	 * READS, so these are declared out here and must outlive the loop.
+	 *
+	 * The ordering inside the loop is the part that is easy to get wrong.
+	 * AdaptiveDomain::refine() builds a NEW SubMesh -- element numbering does not
+	 * survive a refinement and nothing there pretends it does -- so the transfer
+	 * path, the solver and every finite element space built on the old one are
+	 * dangling the moment it is called. They are therefore destroyed BEFORE
+	 * refine(), and rebuilt after it.
+	 * tests/convergence/AdaptiveRefinement.cpp scopes them for the same reason.
+	 */
+	std::unique_ptr<meq::GradShafranovSolver> solver;
+	/// Curved AND adaptive. See the branch below for why this is not the only
+	/// construction of D_h.
+	std::unique_ptr<meq::AdaptiveDomain> domain;
+	/// Curved, adaptive or not; rebuilt with the domain.
+	std::unique_ptr<mfem::VertexConePath> path;
+	/// Curved and NOT adaptive: the one-shot construction, kept as it was.
+	Subdomain subdomain;
+	/// Null on the fitted path, which is how everything downstream tells the two
+	/// apart -- including whether the estimator has to exclude Gamma_h.
+	mfem::Array<int> const *gammaHMarker = nullptr;
+	int widened = 0;
 	// The mesh actually solved on: D_h on the curved path, the background mesh
 	// on the fitted one. Everything downstream uses it.
 	mfem::Mesh *solveMesh = nullptr;
+
+	meq::AdaptivityConfig const &adapt = config->getAdaptivity();
+	// MaxIterations counts SOLVES, not refinements: a run with MaxIterations = 1
+	// is a plain single solve with an estimate printed, and MaxIterations = 10
+	// refines at most nine times.
+	int const maxCycles = adapt.enabled ? adapt.maxIterations : 1;
+
 	try
 	{
 		background = buildMesh( config->getMesh() );
@@ -342,26 +400,64 @@ int main( int argc, char **argv )
 					                      shapeConfig.elongation,
 					                      shapeConfig.cosCoefficients,
 					                      shapeConfig.sinCoefficients ) );
+			levelSet = levelSetOf( *shape );
 
-			subdomain = buildSubdomain( background, *shape,
-			                            backgroundCellSize( config->getMesh() ) );
+			/*
+			 * TWO CONSTRUCTIONS OF D_h, AND THE DIFFERENCE IS NOT COSMETIC.
+			 *
+			 * A one-shot curved run wants nothing but T_h, and buildSubdomain()
+			 * gives it, with the two validations worded in terms of the TOML keys
+			 * a user would have to change.
+			 *
+			 * An adaptive one needs the COMPANION mesh of GS-2 section 3.3 as
+			 * well, and that is the whole content of the difference. Refine an
+			 * element of T_h and its children are still inside Omega, so Gamma_h
+			 * does not move: the gap to Gamma stays where it was while h_loc
+			 * halves, and dist/h_loc DOUBLES every cycle -- measured at 0.98,
+			 * 1.97, 3.94, 7.88 with the domain held fixed against 0.98, 1.02,
+			 * 1.39, 1.36 with the companion update in place. The transfer is only
+			 * optimal while that ratio is O(1), so without the companion mesh an
+			 * adaptive curved run silently leaves the regime the method is
+			 * analysed in. meq::AdaptiveDomain is that update.
+			 *
+			 * So the non-adaptive path is left exactly as it was rather than
+			 * routed through AdaptiveDomain for tidiness:
+			 * theDriverSolvesOnACurvedBoundary pins it against the library at
+			 * 1.6e-16, and the two differ in the transfer path's search length --
+			 * six h against twelve times the largest element, which is the right
+			 * number on a graded mesh and a needlessly long one on a uniform.
+			 */
+			if ( adapt.enabled )
+			{
+				try
+				{
+					domain = std::make_unique<meq::AdaptiveDomain>( background, levelSet );
+				}
+				catch ( std::exception const &error )
+				{
+					throw std::runtime_error(
+						std::string( "[boundary.shape] " ) + error.what()
+						+ " -- either the [mesh] box is too coarse for the surface, "
+						"or the surface is not strictly inside it" );
+				}
+			}
+			else
+			{
+				subdomain = buildSubdomain( background, levelSet,
+				                            backgroundCellSize( config->getMesh() ) );
+				solveMesh = subdomain.mesh.get();
+				gammaHMarker = &subdomain.gammaHMarker;
+				path = std::move( subdomain.path );
+				widened = subdomain.widened;
+			}
 		}
 
-		solveMesh = subdomain.mesh ? subdomain.mesh.get() : &background;
-		mfem::Mesh &mesh = *solveMesh;
+		if ( !shape )
+			solveMesh = &background;
 
-		solver = std::make_unique<meq::GradShafranovSolver>(
-			mesh, config->getDiscretisation().polynomialDegree,
-			config->getDiscretisation().tau );
-
-		if ( subdomain.mesh )
-			solver->setExtension( *subdomain.path, subdomain.gammaHMarker );
-		solver->setSource( *source );
-		solver->setBoundaryData( zero );
-		solver->setNewtonControl( config->getSolver().newtonRelativeTolerance,
-		                          config->getSolver().newtonAbsoluteTolerance,
-		                          config->getSolver().newtonMaxIterations );
-
+		// The guess objects are built once. The RAMP is a coefficient and so is
+		// valid on every mesh; the GRID FUNCTION is not, and is applied on the
+		// first cycle only -- see makeSolver below.
 		switch ( config->getInitialGuess().type )
 		{
 			case meq::InitialGuessType::None:
@@ -382,7 +478,6 @@ int main( int argc, char **argv )
 						double const span = 0.5*( zMax - zMin );
 						return span > 0.0 ? amplitude*( x( 1 ) - half )/span : 0.0;
 					} );
-				solver->setInitialGuess( *ramp );
 				break;
 			}
 
@@ -395,19 +490,6 @@ int main( int argc, char **argv )
 					throw std::runtime_error( "cannot read [initialguess] File \""
 					                          + config->getInitialGuess().file + "\"" );
 				guess = std::make_unique<mfem::GridFunction>( guessMesh.get(), stream );
-
-				// The EXACT restart only: same mesh, same degree. The
-				// interpolating restart needs FindPointsGSLIB and is
-				// DRIVER-PLAN.md section 4's second route, not written yet.
-				// Refuse rather than interpolate badly and call it warm.
-				if ( guessMesh->GetNE() != mesh.GetNE() )
-					throw std::runtime_error(
-						"[initialguess] MeshFile has " + std::to_string( guessMesh->GetNE() )
-						+ " elements where the run's mesh has " + std::to_string( mesh.GetNE() )
-						+ ". Only the exact restart -- same mesh, same degree -- is "
-						"implemented; the interpolating one needs GSLIB" );
-
-				solver->setInitialGuess( *guess );
 				break;
 			}
 		}
@@ -418,28 +500,346 @@ int main( int argc, char **argv )
 		return ConfigurationError;
 	}
 
-	// ---- solve ---------------------------------------------------------
-	try
+	/*
+	 * A FRESH SOLVER, FROM SCRATCH, AND BOTH CALLERS NEED IT TO BE.
+	 *
+	 * Every adaptive cycle solves on a different mesh, and GradShafranovSolver
+	 * builds its three spaces in its constructor -- DarcyForm's hybridization
+	 * takes what it finds when EnableHybridization() runs -- so a refined mesh
+	 * needs a new solver rather than an Update(). That is what CLAUDE.md records
+	 * the deleted Solution::Prolong() and Update() as having been for.
+	 *
+	 * And the reactive ladder needs it for a different reason: with
+	 * MFEM_USE_EXCEPTIONS a failed solve throws from the middle of MFEM -- a NaN
+	 * detected inside NewtonSolver::Mult, or deeper still from an element-local
+	 * solve -- and leaves its objects as the throw found them. CLAUDE.md is
+	 * explicit that a GradShafranovSolver must not be assumed reusable
+	 * afterwards, so the retry builds another one.
+	 */
+	auto makeSolver = [ & ]( mfem::Mesh &mesh, bool firstCycle )
+		-> std::unique_ptr<meq::GradShafranovSolver>
 	{
-		solver->solve();
+		auto fresh = std::make_unique<meq::GradShafranovSolver>(
+			mesh, config->getDiscretisation().polynomialDegree,
+			config->getDiscretisation().tau );
+
+		if ( gammaHMarker )
+			fresh->setExtension( *path, *gammaHMarker );
+		fresh->setSource( *source );
+		fresh->setBoundaryData( zero );
+		fresh->setNewtonControl( config->getSolver().newtonRelativeTolerance,
+		                         config->getSolver().newtonAbsoluteTolerance,
+		                         config->getSolver().newtonMaxIterations );
+
+		if ( config->getInitialGuess().type == meq::InitialGuessType::Ramp )
+		{
+			fresh->setInitialGuess( *ramp );
+		}
+		else if ( config->getInitialGuess().type == meq::InitialGuessType::GridFunction
+		          && firstCycle )
+		{
+			// The EXACT restart only: same mesh, same degree. The interpolating
+			// restart needs FindPointsGSLIB and is DRIVER-PLAN.md section 4's
+			// second route, not written yet. Refuse rather than interpolate badly
+			// and call it warm.
+			//
+			// It is a FIRST-CYCLE guess for the same reason: after a refinement
+			// the mesh no longer matches, and carrying the previous cycle's answer
+			// forward is that same missing interpolation. So cycles after the
+			// first start cold -- which costs less than it sounds, since they
+			// start on FINER meshes, where Newton is the more reliable and not the
+			// less. The coarse first solve is the one at risk, and it is the one
+			// the ladder below is for.
+			if ( guessMesh->GetNE() != mesh.GetNE() )
+				throw std::runtime_error(
+					"[initialguess] MeshFile has " + std::to_string( guessMesh->GetNE() )
+					+ " elements where the run's mesh has " + std::to_string( mesh.GetNE() )
+					+ ". Only the exact restart -- same mesh, same degree -- is "
+					"implemented; the interpolating one needs GSLIB" );
+
+			fresh->setInitialGuess( *guess );
+		}
+
+		return fresh;
+	};
+
+	// ---- solve, and refine if that is what was asked for ----------------
+	std::vector<Cycle> history;
+
+	for ( int cycle = 0; cycle < maxCycles; ++cycle )
+	{
+		// The curved adaptive path rebuilds D_h's dependants every cycle. The
+		// other two set these once, in the setup block above.
+		if ( domain )
+		{
+			solveMesh = &domain->computational();
+			// TWELVE times the LARGEST element, not the mesh parameter. On a
+			// graded mesh the coarse part needs the long search and the fine part
+			// is not harmed by being given one; ExtensionConvergence.cpp uses six
+			// h on a uniform mesh, where the two are the same number.
+			path = std::make_unique<mfem::VertexConePath>(
+				domain->computational(), domain->gammaHAttribute(), levelSet,
+				12.0*domain->largestElement() );
+			widened = path->NumWidened();
+			gammaHMarker = &domain->gammaHMarker();
+		}
+
+		/*
+		 * THE NON-LINEAR PATH THE DRIVER SHIPS: Newton, and on OBSERVED failure
+		 * Anderson-Picard into Newton. A REACTIVE ladder, never a predictive one,
+		 * and the distinction is load bearing.
+		 *
+		 * Nothing may be inferred from F about which solver to run, because
+		 * nothing can be. The ratio max|dF/dpsi| / lambda_1 is computable from the
+		 * black-box interface, dFdPsi being mandatory -- but the GS-2 pressure
+		 * pedestal converges at a ratio of 7 where the current hole fails at 26,
+		 * which is two points and not a threshold, and the ratio needs the range
+		 * of psi, which is not known before solving. A detector calibrated on that
+		 * would be fitting noise. Failure is therefore OBSERVED, which needs
+		 * nothing from F beyond the existing interface.
+		 *
+		 * Why this pairing and not a line search: globalising the outer trace
+		 * iteration does not globalise the element-local ones, and measured,
+		 * KIN_LINESEARCH is WORSE than the undamped iteration on the case that
+		 * motivated it -- failing at 18 where plain Newton takes 42, having spent
+		 * 1.4M element-local iterations. Anderson-Picard freezes F at the previous
+		 * iterate, which leaves every local problem LINEAR, and walks the iterate
+		 * into Newton's basin; Newton then supplies the quadratic endgame Picard
+		 * structurally cannot. Measured on three cases that plain Newton cannot
+		 * reach at coarse resolution, it finishes in 3 to 28 Newton steps.
+		 *
+		 * It is not cheap -- stage 1 spends 122 to 290 full linear solves -- which
+		 * is exactly why it is the fallback and not the default.
+		 */
+		bool globalised = false;
+		try
+		{
+			// Built here rather than inside the retry so that a configuration
+			// which cannot produce a solver at all stays exit 1. That has nothing
+			// to do with whether Newton converges.
+			solver = makeSolver( *solveMesh, cycle == 0 );
+		}
+		catch ( std::exception const &error )
+		{
+			std::fprintf( stderr, "meq: %s\n", error.what() );
+			return ConfigurationError;
+		}
+
+		try
+		{
+			solver->solve();
+		}
+		catch ( std::exception const &firstAttempt )
+		{
+			reportResiduals( solver->newtonResiduals() );
+			std::fprintf( stderr,
+				"meq: Newton did not converge: %s\n"
+				"     Retrying with Anderson-Picard to reach Newton's basin, then\n"
+				"     Newton for the endgame. This is the observed-failure fallback,\n"
+				"     and it costs hundreds of linear solves.\n",
+				firstAttempt.what() );
+
+			try
+			{
+				solver = makeSolver( *solveMesh, cycle == 0 );
+				solver->setGlobalisation(
+					meq::GradShafranovSolver::Globalisation::PicardThenNewton );
+				solver->solve();
+				globalised = true;
+			}
+			catch ( std::exception const &secondAttempt )
+			{
+				if ( solver )
+					reportResiduals( solver->newtonResiduals() );
+				std::fprintf( stderr,
+					"meq: Picard-then-Newton did not converge either: %s\n"
+					"     The remedy for a hard source is RESOLUTION -- try a finer\n"
+					"     [mesh], a higher [discretisation] Degree, or [adaptivity].\n",
+					secondAttempt.what() );
+				return SolveFailed;
+			}
+		}
+
+		Cycle record{ solveMesh->GetNE(), solver->numTraceDofs(), 0, widened,
+		              -1.0, solver->newtonIterations(), globalised };
+
+		if ( !adapt.enabled )
+		{
+			history.push_back( record );
+			break;
+		}
+
+		/*
+		 * THE ESTIMATE, ON THE RAW POTENTIAL AND NOT ON psi*. THAT IS A STANDING
+		 * DECISION WITH A DATE ON IT, NOT A FALLBACK.
+		 *
+		 * Eq (20) builds four of its five terms on the post-processed potential,
+		 * and psi* is what this loop ought to use. It cannot yet.
+		 * DarcyForm::ReconstructFluxAndPot() closes the local post-processing
+		 * problem -- a pure Neumann problem, singular by construction -- with a
+		 * mean-value constraint, and skips that constraint whenever a non-linear
+		 * potential integrator is PRESENT rather than whenever it CONTRIBUTED. So
+		 * on any element where dF/dpsi vanishes the regularisation is skipped, a
+		 * singular matrix is factored, and psi* on that element is a different
+		 * function. Measured: 20x to 64x wrong on the dead elements and correct to
+		 * 0.5% on the live ones, and a floor of 1e-12 on dF/dpsi -- physically
+		 * nothing, numerically the difference between singular and not -- restores
+		 * it completely. meq's Newton path puts every source on the non-linear
+		 * form, so this reaches every configuration the driver can be given.
+		 *
+		 * Potential::Raw costs exactly one order at every k and runs 124x to 407x
+		 * larger. It is still a usable INDICATOR -- marking depends on how eta_K is
+		 * distributed rather than on its size -- and it is CORRECT, where psi* here
+		 * would be quietly wrong on exactly the elements the loop then refines.
+		 * A wrong refinement pattern is the worst of the available failures because
+		 * it looks like a working run.
+		 *
+		 * There is deliberately no runtime check that psi* is bad. The condition is
+		 * a defect in a library meq does not own, it is one flag test away from
+		 * never arising, and it is written up as
+		 * ../mfem-hdg-dev/doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md. What
+		 * establishes its state is the suite:
+		 * NewtonConvergence.cpp's theReconstructionIsWrongWhereTheJacobianVanishes
+		 * asserts that psi* IS still wrong, so the day the fix lands that test
+		 * fails and says to come back here and delete this paragraph.
+		 *
+		 * postProcess() is not called at all, which also saves its local solves.
+		 */
+		meq::ResidualEstimator estimator( *solver, *source );
+		estimator.setPotential( meq::ResidualEstimator::Potential::Raw );
+
+		/*
+		 * ON THE EXTENSION PATH eta_5 HAS TO LEAVE Gamma_h OUT, AND THE DRIVER
+		 * SAYS SO RATHER THAN LEAVING THE USER TO FIND OUT.
+		 *
+		 * On such a face psihat_h is not the condition that was imposed: phi_h
+		 * is, and the trace dofs there are pinned to zero because nothing
+		 * references them. So eta_5 compares the potential against zero and the
+		 * difference is O( dist( Gamma_h, Gamma ) ) = O( h ), not O( h^(k+2) ).
+		 * Unmitigated that gives eta = 4.09e-1 where eta_1 = 2.12e-3, converging at
+		 * about 0.5 -- the loop would run, produce plausible pictures and refine
+		 * the WRONG ELEMENTS, which is the quietest possible way for this to fail.
+		 *
+		 * THIS IS AN OMISSION, NOT A REPAIR. The proper fix is to evaluate phi_h,
+		 * which MFEM now makes reachable through TransferredDatumCoefficient; eta_5
+		 * has not yet been rebuilt on it, and that wants its own convergence
+		 * measurement rather than a switch.
+		 */
+		if ( gammaHMarker )
+			estimator.setTransferredBoundary( *gammaHMarker );
+
+		mfem::Vector const &local = estimator.GetLocalErrors();
+		record.eta = estimator.GetTotalError();
+
+		mfem::Array<int> marked;
+		bool const lastCycle = cycle + 1 == maxCycles;
+		bool const reachedTarget = record.eta <= adapt.targetError;
+
+		if ( !lastCycle && !reachedTarget )
+		{
+			markElements( adapt.strategy, adapt.theta, local, marked );
+			record.marked = marked.Size();
+		}
+		history.push_back( record );
+
+		if ( reachedTarget )
+		{
+			std::printf( "meq: eta = %.4e is at or below TargetError = %.4e "
+			             "after %d cycle%s\n", record.eta, adapt.targetError,
+			             cycle + 1, cycle == 0 ? "" : "s" );
+			break;
+		}
+		if ( lastCycle )
+		{
+			std::printf( "meq: reached MaxIterations = %d with eta = %.4e, above "
+			             "TargetError = %.4e. The answer is the finest one "
+			             "computed, not a converged one.\n",
+			             maxCycles, record.eta, adapt.targetError );
+			break;
+		}
+		if ( marked.Size() == 0 )
+		{
+			std::printf( "meq: the marking strategy selected no elements at "
+			             "eta = %.4e, so there is nothing to refine\n", record.eta );
+			break;
+		}
+
+		// EVERYTHING BUILT ON THIS MESH DIES FIRST. See the declarations above.
+		solver.reset();
+		path.reset();
+		gammaHMarker = nullptr;
+
+		try
+		{
+			if ( domain )
+			{
+				domain->refine( marked );
+			}
+			else
+			{
+				// Conforming refinement, so it propagates beyond the marked set.
+				solveMesh->GeneralRefinement( marked );
+			}
+		}
+		catch ( std::exception const &error )
+		{
+			/*
+			 * A refinement that cannot be carried out ends the run rather than the
+			 * loop, and that is a deliberate choice rather than an easy one. The
+			 * cycle just completed had converged and been estimated, so there was
+			 * a correct answer on a coarser mesh than was asked for -- but the
+			 * solver holding it was released above, before the mesh changed,
+			 * because it had to be. Nothing is left to write, so exit 2 is the
+			 * honest report.
+			 */
+			std::fprintf( stderr,
+				"meq: cycle %d could not be refined: %s\n"
+				"     The previous cycle had converged, but its solver was released\n"
+				"     before the mesh changed -- as it must be -- so there is\n"
+				"     nothing left to write. Lower [adaptivity] MaxIterations.\n",
+				cycle, error.what() );
+			return SolveFailed;
+		}
 	}
-	catch ( std::exception const &error )
+
 	{
+		// The background element count is the DOMAIN's after any refinement, not
+		// this scope's copy: AdaptiveDomain owns and refines its own.
+		int const backgroundElements = domain ? domain->numBackground()
+		                                      : background.GetNE();
+		if ( shape )
+			std::printf( "meq: curved Gamma: %d of %d background elements inside, "
+			             "%d transfer paths widened\n",
+			             solveMesh->GetNE(), backgroundElements, widened );
+
+		Cycle const &last = history.back();
+		std::printf( "meq: converged in %d Newton iterations on %d elements, "
+		             "degree %d%s\n",
+		             last.iterations, last.elements,
+		             config->getDiscretisation().polynomialDegree,
+		             last.globalised ? " (via Picard-then-Newton)" : "" );
+
+		if ( adapt.enabled )
+		{
+			std::printf( "\n  the adaptive loop: %s marking at %.2f\n",
+			             adapt.strategy == meq::MarkingStrategy::Doerfler
+			                 ? "Doerfler" : "maximum", adapt.theta );
+			std::printf( "  eta is built on the raw potential, one order below the\n"
+			             "  published estimator -- see the note beside setPotential()\n" );
+			std::printf( "  %6s %8s %8s %8s %6s %12s %5s\n",
+			             "cycle", "elem", "trace", "marked", "wide", "eta", "it" );
+			for ( std::size_t c = 0; c < history.size(); ++c )
+			{
+				Cycle const &e = history[ c ];
+				std::printf( "  %6zu %8d %8d %8d %6d %12.4e %5d%s\n",
+				             c, e.elements, e.traceDofs, e.marked, e.widened,
+				             e.eta, e.iterations, e.globalised ? "  P->N" : "" );
+			}
+			std::fflush( stdout );
+		}
+
 		reportResiduals( solver->newtonResiduals() );
-		std::fprintf( stderr, "meq: the solve did not converge: %s\n", error.what() );
-		return SolveFailed;
 	}
-
-	if ( shape )
-		std::printf( "meq: curved Gamma: %d of %d background elements inside, "
-		             "%d transfer paths widened\n",
-		             solveMesh->GetNE(), background.GetNE(), subdomain.widened );
-
-	std::printf( "meq: converged in %d Newton iterations on %d elements, "
-	             "degree %d\n",
-	             solver->newtonIterations(), solveMesh->GetNE(),
-	             config->getDiscretisation().polynomialDegree );
-	reportResiduals( solver->newtonResiduals() );
 
 	// ---- write ---------------------------------------------------------
 	try
@@ -497,7 +897,7 @@ int main( int argc, char **argv )
 			// So a reader can tell a curved run from a fitted one without
 			// re-deriving Gamma from the configuration.
 			writer.attribute( "boundary", "curved (transferred datum on Gamma_h)" );
-			writer.attribute( "paths_widened", subdomain.widened );
+			writer.attribute( "paths_widened", widened );
 		}
 		else
 		{
@@ -507,6 +907,29 @@ int main( int argc, char **argv )
 		writer.attribute( "final_residual",
 		                  solver->newtonResiduals().empty()
 		                      ? 0.0 : solver->newtonResiduals().back() );
+
+		// AN ADAPTIVE RUN'S FILE MUST SAY THAT IT WAS ONE. "elements" above is
+		// then the count the loop arrived at rather than anything derivable from
+		// [mesh], so a directory of scan output is otherwise unreadable -- and eta
+		// is the number that says whether it was worth stopping there.
+		//
+		// estimator_potential is recorded beside it because the two etas are NOT
+		// comparable: the degraded one is an order lower and 124x to 407x larger,
+		// so a scan that mixes them and plots eta against dofs is plotting two
+		// different quantities.
+		if ( adapt.enabled )
+		{
+			Cycle const &last = history.back();
+			writer.attribute( "adaptive_cycles", static_cast<int>( history.size() ) );
+			writer.attribute( "adaptive_eta", last.eta );
+			writer.attribute( "adaptive_target_error", adapt.targetError );
+			writer.attribute( "marking_strategy",
+			                  adapt.strategy == meq::MarkingStrategy::Doerfler
+			                      ? "doerfler" : "maximum" );
+			writer.attribute( "marking_theta", adapt.theta );
+			writer.attribute( "estimator_potential",
+			                  "raw (one order below the published estimator)" );
+		}
 		writer.field( "psi", psi, "poloidal flux function", "Wb/rad" );
 		writer.field( "B_R", bR, "poloidal field, R component", "T" );
 		writer.field( "B_Z", bZ, "poloidal field, Z component", "T" );

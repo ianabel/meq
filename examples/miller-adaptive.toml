@@ -1,0 +1,86 @@
+# THE CURVED BOUNDARY, SOLVED ADAPTIVELY -- the configuration meq exists to run,
+# with the mesh chosen by the residual estimator rather than by hand.
+#
+#     MKL_THREADING_LAYER=GNU meq examples/miller-adaptive.toml
+#
+# One turn of the loop is: solve, post-process, estimate eta_K on every element,
+# mark, refine, repeat. It stops at TargetError or at MaxIterations, whichever
+# comes first, and says which. The estimator is eq (20) of
+# refs/HDG-GradShafranov-Adaptive.pdf and it needs the POST-PROCESSED potential
+# psi*, which four of its five terms are built on.
+#
+# TWO THINGS ABOUT THE CURVED PATH SPECIFICALLY, both of which are why this is
+# not simply examples/miller-curved.toml with a flag set.
+#
+# THE DOMAIN IS REFINED, NOT JUST THE MESH. Refine an element of D_h and its
+# children are still inside Gamma, so Gamma_h does not move at all: the gap to
+# Gamma stays put while the local element size halves, and dist/h_loc DOUBLES
+# every cycle -- measured 0.98, 1.97, 3.94, 7.88 over three cycles. The transfer
+# of the Dirichlet datum is only optimal while that ratio is O(1). Section 3.3's
+# companion mesh is what fixes it, by refining the band Gamma cuts through so
+# that some children fall inside and D_h grows towards Gamma. The driver uses it
+# automatically here, and the "wide" column of the printed table is the check
+# that assumption P.1 still holds on the graded boundary that results.
+#
+# THE REFINEMENT WILL LOOK AS THOUGH IT IS CROWDING GAMMA, and that is the
+# companion update doing its job rather than the estimator concentrating there.
+# Reading it the other way sends you looking for a bug in the estimator that is
+# not there.
+
+[mesh]
+# Deliberately COARSER than examples/miller-curved.toml -- RefinementLevels = 1
+# against 2. The point of an adaptive run is to start coarse and let the
+# estimator spend the elements, and a run that begins already resolved measures
+# nothing.
+RMin = 0.7
+RMax = 2.3
+ZMin = -1.9
+ZMax = 1.9
+NR = 8
+NZ = 10
+RefinementLevels = 1
+
+[discretisation]
+PolynomialDegree = 2
+Tau = 1.0
+
+[source]
+Type = "soloviev"
+A = -0.52
+
+[boundary]
+Type = "zero"
+
+[boundary.shape]
+Type = "miller"
+R0 = 1.5
+Z0 = 0.0
+MinorRadius = 0.5
+Elongation = 1.6
+Triangularity = 0.35
+Squareness = 0.0
+
+[adaptivity]
+Enabled = true
+# Cycles, not refinements: four solves, so at most three refinements.
+MaxIterations = 4
+# Doerfler is what the convergence analysis assumes. Its parameter runs the
+# OPPOSITE way to maximum marking's: large theta refines more, and maximum
+# marking approaches uniform refinement as its parameter approaches zero.
+Strategy = "doerfler"
+Theta = 0.6
+# Absolute, in the estimator's own norm. Set below what four cycles will reach,
+# so this run ends at MaxIterations and prints its whole table; raise it to stop
+# early on a real problem.
+TargetError = 1.0e-8
+
+[solver]
+NewtonMaxIterations = 20
+NewtonRelativeTolerance = 1.0e-10
+NewtonAbsoluteTolerance = 1.0e-14
+
+[output]
+Directory = "."
+Prefix = "miller-adaptive"
+GridNR = 129
+GridNZ = 129

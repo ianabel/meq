@@ -4,6 +4,7 @@
 #include "mfem.hpp"
 
 #include "meq/BoundaryShape.hpp"
+#include "meq/Estimator.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/Source.hpp"
 
@@ -11,7 +12,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <memory>
 #include <string>
+#include <vector>
 
 /*
  * THE DRIVER, END TO END.
@@ -76,6 +79,7 @@ namespace
 		std::ifstream stream( path );
 		return stream.good();
 	}
+
 }
 
 BOOST_AUTO_TEST_CASE( theDriverSolvesTheSolovievBenchmarkAndWritesIt )
@@ -305,6 +309,194 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesOnACurvedBoundary )
  * takes minutes. That belongs in a slower test than this one if it is ever
  * worth pinning.
  */
+/*
+ * THE ADAPTIVE LOOP, THROUGH THE DRIVER, ON A CURVED BOUNDARY.
+ *
+ * This is the last thing the driver refused to do, and it is the configuration
+ * meq exists to run: Gamma is a level set, the mesh is not fitted to it, and
+ * which elements to refine is decided by the residual estimator rather than by
+ * the person writing the TOML.
+ *
+ * WHAT IS PINNED, AND WHY IT IS THE LIBRARY AGAIN. The same reasoning as
+ * theDriverSolvesOnACurvedBoundary: examples/miller-adaptive.toml poses a
+ * problem with no closed form -- the Solov'ev source on a Miller boundary is not
+ * the Solov'ev equilibrium -- so what can honestly be asserted is that the loop
+ * reaches the same place whether it is driven from a file or from the API. The
+ * discretisation is measured against closed forms elsewhere; the ADAPTIVE
+ * MACHINERY is measured in AdaptiveRefinement.cpp, which asserts that eta and
+ * the true error both come down and that the proximity condition holds.
+ *
+ * THREE THINGS HERE THAT THE LIBRARY TESTS DO NOT COVER, each of which is a way
+ * for a driver to pass everything else while doing the wrong thing:
+ *
+ *   - it must REFINE. A driver that parsed [adaptivity], solved once and wrote
+ *     the answer would produce a correct file and satisfy every assertion about
+ *     agreement, because agreement with one library cycle is agreement. The
+ *     element count is what catches that.
+ *   - it must refine ADAPTIVELY. Marking every element is uniform refinement
+ *     wearing an estimator, and it is what maximum marking degenerates to at
+ *     small gamma -- so the marked count must stay under the element count.
+ *   - it must use the COMPANION mesh on the curved path. Refining D_h alone
+ *     leaves Gamma_h where it is while h_loc halves, and the transfer stops
+ *     being optimal. The hand-rolled loop below uses meq::AdaptiveDomain, so a
+ *     driver that reached for a plain SubMesh would disagree at once.
+ */
+BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
+{
+	BOOST_TEST_REQUIRE( run( "examples/miller-adaptive.toml" ) == 0,
+	                    "the driver did not exit 0 on the adaptive example" );
+
+	BOOST_TEST_REQUIRE( exists( "miller-adaptive.mesh" ) );
+	BOOST_TEST_REQUIRE( exists( "miller-adaptive_psi.gf" ) );
+
+	mfem::Mesh storedMesh( "miller-adaptive.mesh", 1, 1 );
+	std::ifstream stream( "miller-adaptive_psi.gf" );
+	BOOST_TEST_REQUIRE( stream.good() );
+	mfem::GridFunction stored( &storedMesh, stream );
+
+	// The same run, by hand. Numbers repeated from the example deliberately, so
+	// that editing the example without editing this test is a failure and not a
+	// silent divergence.
+	int const order = 2;
+	int const cycles = 4;
+	double const theta = 0.6;
+	double const rMin = 0.7, rMax = 2.3, zMin = -1.9, zMax = 1.9;
+
+	mfem::Mesh background = mfem::Mesh::MakeCartesian2D(
+		8, 10, mfem::Element::TRIANGLE, false, rMax - rMin, zMax - zMin );
+	background.Transform( [ rMin, zMin ]( mfem::Vector const &in, mfem::Vector &out )
+	{
+		out( 0 ) = in( 0 ) + rMin;
+		out( 1 ) = in( 1 ) + zMin;
+	} );
+	background.UniformRefinement();      // RefinementLevels = 1
+
+	meq::BoundaryShape const shape =
+		meq::BoundaryShape::miller( 1.5, 0.0, 0.5, 1.6, 0.35, 0.0 );
+	mfem::PositionFunction const levelSet = [ &shape ]( mfem::Vector const &x )
+	{
+		return shape.levelSet( x( 0 ), x( 1 ) );
+	};
+
+	meq::SolovievSource const source( -0.52 );
+	mfem::ConstantCoefficient zero( 0.0 );
+
+	meq::AdaptiveDomain domain( background, levelSet );
+
+	struct Turn { int elements; int marked; int widened; double eta; };
+	std::vector<Turn> history;
+	std::unique_ptr<meq::GradShafranovSolver> solver;
+	std::unique_ptr<mfem::VertexConePath> path;
+
+	for ( int cycle = 0; cycle < cycles; ++cycle )
+	{
+		mfem::Array<int> marked;
+		Turn turn{ 0, 0, 0, -1.0 };
+
+		// Twelve times the LARGEST element, as the driver uses: on a graded mesh
+		// the coarse part needs the long search.
+		path = std::make_unique<mfem::VertexConePath>(
+			domain.computational(), domain.gammaHAttribute(), levelSet,
+			12.0*domain.largestElement() );
+
+		solver = std::make_unique<meq::GradShafranovSolver>(
+			domain.computational(), order, 1.0 );
+		solver->setSource( source );
+		solver->setBoundaryData( zero );
+		solver->setExtension( *path, domain.gammaHMarker() );
+		solver->solve();
+
+		// THE DRIVER'S OWN CHOICE OF POTENTIAL, reproduced rather than assumed,
+		// and postProcess() deliberately NOT called -- as the driver does not call
+		// it. psi* is wrong on any element where dF/dpsi vanishes, which for a
+		// Solov'ev source is every element, and an estimator built on it would
+		// mark exactly the elements it had corrupted. Raw costs one order and is
+		// correct. See apps/meq.cpp, and
+		// NewtonConvergence.cpp::theReconstructionIsWrongWhereTheJacobianVanishes
+		// for the measurement and for what to change here when MFEM is fixed.
+		meq::ResidualEstimator estimator( *solver, source );
+		estimator.setPotential( meq::ResidualEstimator::Potential::Raw );
+		estimator.setTransferredBoundary( domain.gammaHMarker() );
+
+		mfem::Vector const &local = estimator.GetLocalErrors();
+		turn.elements = domain.numComputational();
+		turn.widened = path->NumWidened();
+		turn.eta = estimator.GetTotalError();
+
+		if ( cycle + 1 < cycles )
+		{
+			meq::markDoerfler( local, theta, marked );
+			turn.marked = marked.Size();
+		}
+		history.push_back( turn );
+
+		if ( cycle + 1 == cycles )
+			break;
+
+		BOOST_TEST_REQUIRE( marked.Size() > 0,
+		                    "nothing was marked at cycle " << cycle );
+		solver.reset();
+		path.reset();
+		domain.refine( marked );
+	}
+
+	std::printf( "\n  the driver's adaptive loop, reproduced by hand\n" );
+	std::printf( "  %6s %8s %8s %6s %12s\n", "cycle", "elem", "marked", "wide", "eta" );
+	for ( std::size_t c = 0; c < history.size(); ++c )
+		std::printf( "  %6zu %8d %8d %6d %12.4e\n", c, history[ c ].elements,
+		             history[ c ].marked, history[ c ].widened, history[ c ].eta );
+	std::fflush( stdout );
+
+	// IT REFINED, AND IT REFINED ADAPTIVELY.
+	BOOST_TEST( history.back().elements > 2*history.front().elements,
+	            "the loop went from " << history.front().elements << " elements to "
+	            << history.back().elements << ", which is not a refinement worth "
+	            "four cycles -- check that the driver is not solving once and "
+	            "calling it a loop" );
+	for ( std::size_t c = 0; c + 1 < history.size(); ++c )
+		BOOST_TEST( history[ c ].marked < history[ c ].elements,
+		            "cycle " << c << " marked all " << history[ c ].elements
+		            << " elements, which is uniform refinement" );
+
+	// ETA CAME DOWN. Monotone here, and it is worth knowing that it is: the loop
+	// would still be a loop without this, and it would be refining on an
+	// indicator that is telling it nothing.
+	for ( std::size_t c = 1; c < history.size(); ++c )
+		BOOST_TEST( history[ c ].eta < history[ c - 1 ].eta,
+		            "eta went from " << history[ c - 1 ].eta << " to "
+		            << history[ c ].eta << " at cycle " << c );
+
+	// ASSUMPTION P.1, on the graded Gamma_h the loop produces. VertexConePath
+	// widens its fan rather than failing when a ray finds no root, and the method
+	// still runs -- but the Cockburn-Solano estimate no longer covers it, so the
+	// count is asserted rather than reported.
+	for ( std::size_t c = 0; c < history.size(); ++c )
+		BOOST_TEST( history[ c ].widened == 0,
+		            "cycle " << c << ": " << history[ c ].widened
+		            << " vertices of Gamma_h needed a widened fan" );
+
+	// AND THE DRIVER LANDED IN THE SAME PLACE.
+	BOOST_TEST_REQUIRE( storedMesh.GetNE() == history.back().elements,
+	                    "the driver wrote " << storedMesh.GetNE()
+	                    << " elements where the same loop by hand ends at "
+	                    << history.back().elements
+	                    << ": the refinement sequences have diverged" );
+	BOOST_TEST_REQUIRE( stored.Size() == solver->potential().Size() );
+
+	mfem::Vector difference( stored );
+	difference -= solver->potential();
+	double const scale = std::max( 1.0e-300, solver->potential().Norml2() );
+	double const relative = difference.Norml2()/scale;
+
+	std::printf( "  adaptive driver vs library: %.3e relative over %d dofs\n",
+	             relative, stored.Size() );
+	std::fflush( stdout );
+
+	BOOST_TEST( relative < 1.0e-10,
+	            "the driver's adaptive solve differs from the library's by "
+	            << relative << " relative" );
+}
+
 BOOST_AUTO_TEST_CASE( theDriverReportsConfigurationErrorsAsExitOne )
 {
 	BOOST_TEST( run( "examples/does-not-exist.toml" ) == 1,
