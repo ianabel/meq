@@ -53,6 +53,8 @@ docs/*.toc
 *.vtk
 *.vtu
 *.pvtu
+# The driver's (R, Z) grid file. Same reasoning: run output, not source.
+*.nc
 visit_dump*/
 ParaView/
 

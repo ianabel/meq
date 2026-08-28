@@ -207,6 +207,12 @@ namespace meq
 					return ( value == nullptr ) ? fallback : asString( key, *value );
 				};
 
+				bool getBooleanOr( std::string const & key, bool fallback ) const
+				{
+					toml::value const * value = find( key );
+					return ( value == nullptr ) ? fallback : asBoolean( key, *value );
+				};
+
 				// Every key present in the table must appear in `accepted`.
 				//
 				// TODO (schema evolution, see Config.hpp): when a key is
@@ -285,6 +291,16 @@ namespace meq
 						fail( key, "must be a string, but is a " + toml::to_string( value.type() ) );
 
 					return value.as_string();
+				};
+
+				// Explicit, for the reason recorded at the top of this file: a
+				// find_or<bool> would turn Enabled = "true" into a silent false.
+				bool asBoolean( std::string const & key, toml::value const & value ) const
+				{
+					if ( !value.is_boolean() )
+						fail( key, "must be true or false, but is a " + toml::to_string( value.type() ) );
+
+					return value.as_boolean();
 				};
 
 				toml::value const * values;
@@ -430,7 +446,7 @@ namespace meq
 		// Catch a misspelt or misplaced table before anything reports a key
 		// missing from a table that is not the one the author meant to write.
 		{
-			std::initializer_list< char const * > const tables = { "mesh", "discretisation", "source", "boundary", "solver", "output" };
+			std::initializer_list< char const * > const tables = { "mesh", "discretisation", "source", "boundary", "solver", "output", "initialguess", "adaptivity" };
 			for ( auto const & entry : document.as_table() )
 			{
 				auto matches = [ &entry ]( char const * candidate ) { return entry.first == candidate; };
@@ -617,13 +633,89 @@ namespace meq
 		// [output]
 		{
 			Table output( document, "output", sourceName, false );
-			output.rejectUnknownKeys( { "Directory", "Prefix" } );
+			output.rejectUnknownKeys( { "Directory", "Prefix", "GridNR", "GridNZ" } );
 
 			outputOptions.directory = output.getStringOr( "Directory", outputOptions.directory );
 			outputOptions.prefix = output.getStringOr( "Prefix", outputOptions.prefix );
+			outputOptions.gridNR = output.getIntegerOr( "GridNR", outputOptions.gridNR );
+			outputOptions.gridNZ = output.getIntegerOr( "GridNZ", outputOptions.gridNZ );
 
 			if ( outputOptions.prefix.empty() )
 				output.fail( "Prefix", "must not be empty; it is the stem of every output file name" );
+			if ( outputOptions.gridNR < 2 )
+				output.fail( "GridNR", "must be at least 2: these are grid NODES, so the "
+				             "spacing is ( RMax - RMin )/( GridNR - 1 )" );
+			if ( outputOptions.gridNZ < 2 )
+				output.fail( "GridNZ", "must be at least 2: these are grid NODES, so the "
+				             "spacing is ( ZMax - ZMin )/( GridNZ - 1 )" );
+		}
+
+		// [initialguess]
+		{
+			Table guess( document, "initialguess", sourceName, false );
+			guess.rejectUnknownKeys( { "Type", "File", "MeshFile", "Amplitude" } );
+
+			std::string const type = guess.getStringOr( "Type", "none" );
+			if ( type == "none" )
+				initialGuessOptions.type = InitialGuessType::None;
+			else if ( type == "ramp" )
+				initialGuessOptions.type = InitialGuessType::Ramp;
+			else if ( type == "gridfunction" )
+				initialGuessOptions.type = InitialGuessType::GridFunction;
+			else
+				guess.fail( "Type", "must be one of none, ramp, gridfunction, but is \"" + type + "\"" );
+
+			initialGuessOptions.file = guess.getStringOr( "File", "" );
+			initialGuessOptions.meshFile = guess.getStringOr( "MeshFile", "" );
+			initialGuessOptions.amplitude =
+				guess.getFloatOr( "Amplitude", initialGuessOptions.amplitude );
+
+			if ( initialGuessOptions.type == InitialGuessType::GridFunction )
+			{
+				if ( initialGuessOptions.file.empty() )
+					guess.fail( "File", "is required when Type = \"gridfunction\"" );
+				if ( initialGuessOptions.meshFile.empty() )
+					guess.fail( "MeshFile", "is required when Type = \"gridfunction\": a "
+					            "GridFunction cannot be read without the mesh it lives on" );
+			}
+
+			if ( initialGuessOptions.type == InitialGuessType::Ramp
+			     && !( initialGuessOptions.amplitude > 0.0 ) )
+				guess.fail( "Amplitude", "must be positive: the point of the ramp is that psi "
+				            "crosses zero in the INTERIOR, and an amplitude of zero puts the "
+				            "iteration straight onto the trivial branch it exists to avoid" );
+		}
+
+		// [adaptivity]
+		{
+			Table adaptivity( document, "adaptivity", sourceName, false );
+			adaptivity.rejectUnknownKeys( { "Enabled", "MaxIterations", "Strategy",
+			                                "Theta", "TargetError" } );
+
+			adaptivityOptions.enabled =
+				adaptivity.getBooleanOr( "Enabled", adaptivityOptions.enabled );
+			adaptivityOptions.maxIterations =
+				adaptivity.getIntegerOr( "MaxIterations", adaptivityOptions.maxIterations );
+			adaptivityOptions.theta =
+				adaptivity.getFloatOr( "Theta", adaptivityOptions.theta );
+			adaptivityOptions.targetError =
+				adaptivity.getFloatOr( "TargetError", adaptivityOptions.targetError );
+
+			std::string const strategy = adaptivity.getStringOr( "Strategy", "doerfler" );
+			if ( strategy == "doerfler" )
+				adaptivityOptions.strategy = MarkingStrategy::Doerfler;
+			else if ( strategy == "maximum" )
+				adaptivityOptions.strategy = MarkingStrategy::Maximum;
+			else
+				adaptivity.fail( "Strategy", "must be doerfler or maximum, but is \"" + strategy + "\"" );
+
+			if ( adaptivityOptions.maxIterations < 1 )
+				adaptivity.fail( "MaxIterations", "must be at least 1" );
+			if ( !( adaptivityOptions.theta > 0.0 ) || adaptivityOptions.theta > 1.0 )
+				adaptivity.fail( "Theta", "must be in ( 0, 1 ]: it is the fraction of the total "
+				                 "estimated error the marked elements must carry" );
+			if ( !( adaptivityOptions.targetError > 0.0 ) )
+				adaptivity.fail( "TargetError", "must be positive" );
 		}
 	}
 

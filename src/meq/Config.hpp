@@ -278,6 +278,60 @@ namespace meq
 		double linearTolerance = 1.0e-12;
 	};
 
+	// [initialguess] -- where Newton starts. See DRIVER-PLAN.md section 4.
+	enum class InitialGuessType
+	{
+		// The Dirichlet datum extended inward, which is what prepare() does
+		// anyway. The default, and a cold start.
+		None,
+		// A ramp putting psi = 0 in the interior rather than on the boundary.
+		// Not a nicety: EVERY GS-2 section 4.2-4.5 source vanishes at psi = 0,
+		// so with homogeneous data psi = 0 SOLVES the problem and Newton stops
+		// on it in zero iterations. See CLAUDE.md under Traps.
+		Ramp,
+		// An MFEM GridFunction and its mesh, from a previous meq run.
+		GridFunction
+	};
+
+	// [initialguess]
+	struct InitialGuessConfig
+	{
+		InitialGuessType type = InitialGuessType::None;
+
+		// GridFunction: the stored potential and the mesh it lives on. The mesh
+		// must match the one being solved on -- this is the EXACT restart of
+		// DRIVER-PLAN.md section 4, not the interpolating one, which needs
+		// GSLIB and is not written yet.
+		std::string file;
+		std::string meshFile;
+
+		// Ramp: psi runs from -Amplitude to +Amplitude across z, so that the
+		// interior crosses zero and the trivial branch is not a fixed point of
+		// the iteration.
+		double amplitude = 0.3;
+	};
+
+	// [adaptivity] -- the stage-6 loop, exposed rather than rebuilt.
+	enum class MarkingStrategy
+	{
+		Doerfler,
+		Maximum
+	};
+
+	// [adaptivity]
+	struct AdaptivityConfig
+	{
+		bool enabled = false;
+		int maxIterations = 10;
+		MarkingStrategy strategy = MarkingStrategy::Doerfler;
+		// The Doerfler fraction: refine the smallest set of elements carrying
+		// this share of the total estimated error. Ignored for Maximum.
+		double theta = 0.6;
+		// Stop once the estimate falls below this. Absolute, in the estimator's
+		// own norm.
+		double targetError = 1.0e-6;
+	};
+
 	// [output] -- one directory and one prefix; the file names follow from
 	// them. (The scheme this replaces named all five output files separately,
 	// and drifted out of step with itself.)
@@ -288,6 +342,14 @@ namespace meq
 		std::string directory = ".";
 		// Prefix: the stem of every output file name.
 		std::string prefix = "meq";
+
+		// GridNR, GridNZ: the ( R, Z ) sampling grid for the NetCDF file, in
+		// NODES. Nothing to do with [mesh] NR/NZ, which are pre-refinement
+		// CELLS of the solve -- deriving the output grid from those would tie
+		// the resolution of the picture to the coarsest description of the
+		// mesh, and give a 4x5 grid for a 1536-element solve.
+		int gridNR = 129;
+		int gridNZ = 129;
 
 		// <Directory>/<Prefix>.mesh, the mesh actually solved on.
 		std::string getMeshFile() const;
@@ -319,6 +381,10 @@ namespace meq
 			BoundaryConfig const & getBoundary() const noexcept { return boundaryOptions; };
 			SolverConfig const & getSolver() const noexcept { return solverOptions; };
 			OutputConfig const & getOutput() const noexcept { return outputOptions; };
+			InitialGuessConfig const & getInitialGuess() const noexcept
+			{ return initialGuessOptions; };
+			AdaptivityConfig const & getAdaptivity() const noexcept
+			{ return adaptivityOptions; };
 
 			// Where this configuration came from: the file name, or the
 			// `source` label given for an in-memory document.
@@ -335,6 +401,8 @@ namespace meq
 			BoundaryConfig boundaryOptions;
 			SolverConfig solverOptions;
 			OutputConfig outputOptions;
+			InitialGuessConfig initialGuessOptions;
+			AdaptivityConfig adaptivityOptions;
 	};
 
 }

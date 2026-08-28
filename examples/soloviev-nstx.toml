@@ -56,8 +56,23 @@ Type = "soloviev"
 A = -0.52               # dimensionless; fixes plasma against magnetic pressure
 
 [boundary]
-# The Solov'ev flux is normalised so that psi vanishes on the plasma boundary,
-# which is the fixed-boundary problem proper.
+# psi = 0 on the boundary of the MESH, which here is the rectangle above.
+#
+# READ THIS BEFORE COMPARING AGAINST THE CLOSED FORM. It is NOT the NSTX
+# Solov'ev equilibrium: for these coefficients psi = 0 is the separatrix, a
+# curved contour through an X-point, and imposing zero on a rectangle that
+# circumscribes it poses a different problem. Measured, the difference is 7.2e-1
+# in L2 -- the same order as psi itself.
+#
+# Reproducing the published equilibrium needs Gamma to BE that contour, which is
+# [boundary.shape] and the extension path. The driver refuses that configuration
+# today rather than silently solving this one instead, and
+# tests/convergence/SolovievConvergence.cpp gets the closed form by imposing the
+# exact trace, which is a convergence-study device rather than a physical
+# boundary condition.
+#
+# So what this example demonstrates is the driver and the discretisation on a
+# well-posed problem, not the NSTX equilibrium.
 Type = "zero"
 
 [solver]

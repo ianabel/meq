@@ -91,6 +91,10 @@ set(MEQ_CONVERGENCE_TESTS
 	MillerConvergence
 	SolovievGeometryConvergence)
 
+# DriverAcceptance is registered separately below: it runs the meq BINARY rather
+# than linking the library, so it needs the app to have been built and needs the
+# path to it, and it must not be registered when MEQ_BUILD_APP is OFF.
+
 foreach(_test IN LISTS MEQ_CONVERGENCE_TESTS)
 	set(_test_source "${CMAKE_CURRENT_SOURCE_DIR}/convergence/${_test}.cpp")
 
@@ -131,6 +135,34 @@ foreach(_test IN LISTS MEQ_CONVERGENCE_TESTS)
 			ENVIRONMENT "MKL_THREADING_LAYER=GNU")
 	endif()
 endforeach()
+
+# ---------------------------------------------------------------------------
+# The driver, end to end. Everything above calls the library directly; this is
+# the only test that goes through a config file and out to files, which is the
+# path a user takes.
+# ---------------------------------------------------------------------------
+
+if(TARGET meq AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/DriverAcceptance.cpp")
+	add_executable(DriverAcceptance "convergence/DriverAcceptance.cpp")
+	target_include_directories(DriverAcceptance PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(DriverAcceptance PRIVATE
+		meq_core
+		Boost::unit_test_framework)
+
+	# Passed rather than guessed. A test that assumed "../meq" would keep
+	# passing while running nothing at all under a different generator.
+	target_compile_definitions(DriverAcceptance PRIVATE
+		MEQ_DRIVER_PATH="$<TARGET_FILE:meq>")
+
+	# The source tree, so examples/*.toml resolve -- and so the driver's output
+	# lands somewhere predictable for the read-back.
+	add_test(NAME DriverAcceptance COMMAND DriverAcceptance
+		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+	set_tests_properties(DriverAcceptance PROPERTIES
+		ENVIRONMENT "MKL_THREADING_LAYER=GNU")
+else()
+	message(STATUS "meq: DriverAcceptance not registered (needs MEQ_BUILD_APP=ON)")
+endif()
 
 # ---------------------------------------------------------------------------
 # naming -- the identifier convention, enforced

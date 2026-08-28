@@ -815,3 +815,86 @@ BOOST_AUTO_TEST_CASE( a_shape_missing_its_geometry_is_refused )
 }
 
 BOOST_AUTO_TEST_SUITE_END()
+
+/*
+ * [initialguess] and [adaptivity], added with the driver.
+ *
+ * The Amplitude check is the one that matters. Every GS-2 section 4.2-4.5
+ * source vanishes at psi = 0, so with homogeneous data psi = 0 SOLVES the
+ * problem and Newton stops on it in zero iterations -- see CLAUDE.md under
+ * Traps. A ramp of amplitude zero IS homogeneous data, so accepting it would
+ * hand the user the exact failure the option exists to avoid, and it would look
+ * like a converged run rather than an error.
+ */
+BOOST_AUTO_TEST_CASE( initialGuessAndAdaptivityParse )
+{
+	auto const write = []( std::string const &body )
+	{
+		std::string const path = "config-test-driver-sections.toml";
+		std::ofstream file( path );
+		file << "[mesh]\nRMin = 0.1\nRMax = 1.9\nZMin = -1.7\nZMax = 1.7\n"
+		     << "NR = 3\nNZ = 4\n\n[discretisation]\nPolynomialDegree = 2\n\n"
+		     << "[source]\nType = \"soloviev\"\nA = -0.52\n\n"
+		     << body;
+		return path;
+	};
+
+	// Defaults: no guess, no adaptivity, and a 129x129 output grid.
+	{
+		meq::Configuration const config( write( "" ) );
+		BOOST_TEST( ( config.getInitialGuess().type == meq::InitialGuessType::None ) );
+		BOOST_TEST( config.getAdaptivity().enabled == false );
+		BOOST_TEST( config.getOutput().gridNR == 129 );
+		BOOST_TEST( config.getOutput().gridNZ == 129 );
+	}
+
+	{
+		meq::Configuration const config( write(
+			"[initialguess]\nType = \"ramp\"\nAmplitude = 0.25\n\n"
+			"[adaptivity]\nEnabled = true\nStrategy = \"maximum\"\n"
+			"MaxIterations = 4\nTheta = 0.3\nTargetError = 1.0e-4\n\n"
+			"[output]\nGridNR = 65\nGridNZ = 33\n" ) );
+
+		BOOST_TEST( ( config.getInitialGuess().type == meq::InitialGuessType::Ramp ) );
+		BOOST_TEST( config.getInitialGuess().amplitude == 0.25 );
+		BOOST_TEST( config.getAdaptivity().enabled == true );
+		BOOST_TEST( ( config.getAdaptivity().strategy == meq::MarkingStrategy::Maximum ) );
+		BOOST_TEST( config.getAdaptivity().maxIterations == 4 );
+		BOOST_TEST( config.getAdaptivity().theta == 0.3 );
+		BOOST_TEST( config.getOutput().gridNR == 65 );
+		BOOST_TEST( config.getOutput().gridNZ == 33 );
+	}
+
+	// A ramp of zero amplitude is homogeneous data by another name.
+	BOOST_CHECK_THROW(
+		meq::Configuration( write( "[initialguess]\nType = \"ramp\"\nAmplitude = 0.0\n" ) ),
+		meq::ConfigError );
+
+	// gridfunction without the mesh it lives on cannot be read at all.
+	BOOST_CHECK_THROW(
+		meq::Configuration( write( "[initialguess]\nType = \"gridfunction\"\nFile = \"a.gf\"\n" ) ),
+		meq::ConfigError );
+
+	BOOST_CHECK_THROW(
+		meq::Configuration( write( "[initialguess]\nType = \"warm\"\n" ) ),
+		meq::ConfigError );
+	BOOST_CHECK_THROW(
+		meq::Configuration( write( "[adaptivity]\nStrategy = \"greedy\"\n" ) ),
+		meq::ConfigError );
+	BOOST_CHECK_THROW(
+		meq::Configuration( write( "[adaptivity]\nTheta = 1.5\n" ) ),
+		meq::ConfigError );
+	BOOST_CHECK_THROW(
+		meq::Configuration( write( "[output]\nGridNR = 1\n" ) ),
+		meq::ConfigError );
+
+	// Enabled is a boolean, and a string that looks like one is not one. This
+	// is the find_or<double> trap in the other direction, recorded at the top
+	// of Config.cpp: a silently defaulted false would disable adaptivity for a
+	// user who asked for it.
+	BOOST_CHECK_THROW(
+		meq::Configuration( write( "[adaptivity]\nEnabled = \"true\"\n" ) ),
+		meq::ConfigError );
+
+	std::remove( "config-test-driver-sections.toml" );
+}

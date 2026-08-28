@@ -1,0 +1,58 @@
+# Example 5 of refs/HDG-GradShafranov.pdf, posed as a problem the DRIVER can
+# run: the same genuinely non-linear source, with psi = 0 on the mesh boundary.
+#
+# WHY THIS EXISTS BESIDE manufactured.toml. That file sets
+# [boundary] Type = "exact", which imposes the trace of the known solution so
+# that a convergence study can measure against the closed form. It is a study
+# device, not a boundary condition: meq::Source carries F and dF/dpsi and no
+# exact solution, so the driver refuses it rather than quietly solving
+# something else. See tests/convergence/NewtonConvergence.cpp for the study.
+#
+# What this one demonstrates is the Newton path end to end. The source depends
+# on psi linearly, quadratically AND exponentially, so unlike the Solov'ev
+# example it takes more than one iteration and exercises dF/dpsi -- which is
+# the whole reason meq departs from the papers' Picard. Expect a short
+# quadratic run: the residual should square each step once it gets going, and a
+# history that grinds down linearly means the Jacobian disagrees with the
+# residual.
+#
+#     MKL_THREADING_LAYER=GNU meq examples/manufactured-driver.toml
+#
+# UNITS. Geometry normalised to the major radius, as in the Solov'ev example:
+# lengths are in units of R0 and the wavenumbers are per unit R0.
+
+[mesh]
+RMin = 0.6
+RMax = 1.4
+ZMin = -0.6
+ZMax = 0.6
+NR = 8
+NZ = 8
+RefinementLevels = 1
+
+[discretisation]
+PolynomialDegree = 3
+Tau = 1.0
+
+[source]
+Type = "manufactured"
+R0 = -0.5               # the radial shift r0, in units of R0 -- NOT a radius
+Kr = 3.61283155         # 1.15 pi, per unit R0
+Kz = 1.15               # per unit R0
+
+[boundary]
+# The mesh boundary, and this time that is the whole of the claim. Unlike the
+# Solov'ev example there is no published equilibrium being approximated here,
+# so a rectangle is as good a domain as any and the problem is well posed on it.
+Type = "zero"
+
+[solver]
+NewtonMaxIterations = 20
+NewtonRelativeTolerance = 1.0e-10
+NewtonAbsoluteTolerance = 1.0e-14
+
+[output]
+Directory = "."
+Prefix = "manufactured-driver"
+GridNR = 129
+GridNZ = 129

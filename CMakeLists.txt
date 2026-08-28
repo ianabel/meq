@@ -29,11 +29,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 option(MEQ_BUILD_TESTS "Build the unit tests" ON)
 
-# Still off after stage 2. apps/meq.cpp constructs an HDGBilinearForm and drives
-# the old estimator, neither of which exists in MFEM 4.9.1, so switching this on
-# today produces a wall of compiler errors rather than a program. The solver core
-# is ported; the driver is a separate step.
-option(MEQ_BUILD_APP "Build the meq executable (needs the stage-2 solver port)" OFF)
+# ON since stage 7e: apps/meq.cpp is the driver now, not the legacy vacuum-field
+# program built on MFEM 4.5.1's HDGBilinearForm. It needs MFEM, so the guard
+# below still applies -- a build without it gets the MFEM-free half and no
+# executable, which is what CI does.
+option(MEQ_BUILD_APP "Build the meq executable" ON)
 
 # gcov instrumentation, off by default. When on it is attached to meq_core
 # PUBLIC, so the flags reach the test executables as well -- gcov needs both
@@ -303,8 +303,27 @@ if(MEQ_BUILD_APP)
 		message(FATAL_ERROR "MEQ_BUILD_APP is ON but meq_core has no sources to build from.")
 	endif()
 
+	# The commit, so a run can be traced back to the tree that produced it. Not
+	# fatal when git is absent or this is an unpacked tarball -- the version
+	# falls back to the project version alone.
+	set(MEQ_GIT_COMMIT "unknown")
+	find_package(Git QUIET)
+	if(GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
+		execute_process(
+			COMMAND "${GIT_EXECUTABLE}" rev-parse --short HEAD
+			WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+			OUTPUT_VARIABLE MEQ_GIT_COMMIT
+			OUTPUT_STRIP_TRAILING_WHITESPACE
+			ERROR_QUIET)
+	endif()
+
 	add_executable(meq apps/meq.cpp)
 	target_link_libraries(meq PRIVATE meq_core)
+	configure_file(
+		"${CMAKE_CURRENT_SOURCE_DIR}/cmake/Version.hpp.in"
+		"${CMAKE_CURRENT_BINARY_DIR}/meq_version.hpp"
+		@ONLY)
+	target_include_directories(meq PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 endif()
 
 if(MEQ_BUILD_TESTS)
@@ -324,5 +343,5 @@ if(MFEM_FEATURES)
 	message(STATUS "            options: ${_meq_mfem_features}")
 endif()
 message(STATUS "  toml11    ${TOML11_INCLUDE_DIR}")
-message(STATUS "  app       ${MEQ_BUILD_APP} (MEQ_BUILD_APP; still unported)")
+message(STATUS "  app       ${MEQ_BUILD_APP} (MEQ_BUILD_APP)")
 message(STATUS "  tests     ${MEQ_BUILD_TESTS} (MEQ_BUILD_TESTS)")
