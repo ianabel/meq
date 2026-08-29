@@ -772,6 +772,52 @@ driven by normalised flux, `MHDSource::dFdPsi` is incomplete, **and the existing
 finite-difference test will not catch it**, because `f()` and `dFdPsi()` would be
 missing the same terms.
 
+**That day has arrived, and `HighBetaConvergence` is the standing red test that
+says so.** It is the only failing test in the suite and it is the last thing
+between meq and free boundary. Read this before deciding it is a small job.
+
+`refs/GourdainContour.pdf` §V eq (39) specifies profiles the way equilibrium
+codes actually do — `p = Σ aᵢ Ψⁱ`, `F² = F²_ax − (F²_ax − F²_bnd) Σ bᵢ Ψⁱ`, with
+`Ψ` the normalised flux — and
+`refs/CowleyHighBeta.pdf` / `refs/HsuCowleyHighBeta.pdf` construct high-`β_p`
+equilibria of that kind asymptotically. `tests/analytic/HighBetaPoloidal.hpp` is
+that source. Three measurements, in the order they were made:
+
+1. **With `ψ_axis` fixed, the profile is inert.** The solution reaches
+   `Ψ = 0.0013`, so a peaked `p ~ Ψ^ν` contributes `Ψ^(ν−1) ~ 1e-9` of itself.
+   Pressure amplitudes of 1 and 512 gave `ψ ∈ [2.570e-07, 1.259e-03]` — identical
+   to every digit. A fixed `ψ_axis` is not a simplification of a normalised
+   profile; unless the value happens to be right it is a **different problem**.
+2. **So "is it a stiff case?" was unanswerable, and the answer looked like no
+   for the wrong reason.** Every configuration converged in 1–2 Newton steps at
+   reaction ratios `max|∂F/∂ψ|/λ₁` from 0.09 to **2523** — the current hole is
+   unsolvable at 26. Nothing was stiff because no non-linearity was switched on.
+   It also showed the ratio was being sampled over `[0, ψ_axis]`, a range the
+   solve never visits: **that diagnostic needs the solution's actual range.**
+3. **Closing the loop outside the solver does not rescue it.** Iterating
+   `ψ_axis ← max ψ` with relaxation converges — to `ψ_axis ~ 1e-12`, a degenerate
+   fixed point where `ψ` and `ψ_axis` shrink together, `Ψ` stays `O(1)`, and the
+   pressure gradient `νA/ψ_axis` runs to 1e12 while the solution it drives sits
+   at 1e-12. Dimensionally it should be `~√(νAL²/8) ≈ 0.5`. The outer iteration
+   falls off the branch.
+
+**Relaxing the outer map harder is not the fix and should not be tried.**
+`ψ_axis` is a functional of the solution and belongs *inside* the residual, where
+the Jacobian can see the terms it contributes. That is the work, and the test
+asserts the physical answer so it fails until it is done.
+
+**And it needs a test that can see those terms**, which is the part most easily
+skipped: `SourceTests`' finite-difference check on `dFdPsi` structurally cannot,
+for the reason above. The check that can is a finite difference of the
+*assembled* residual — `NewtonConvergence.cpp`'s
+`jacobianMatchesAFiniteDifferenceOfTheResidual` already does exactly that for the
+local case, and is the pattern to extend.
+
+**Two things it is NOT.** Not the discretisation: the fixture's `dFdPsi` matches
+a central difference to 2.3e-10. And not the trivial-branch trap — unlike every
+GS-2 §4.2–4.5 source this one does not vanish at `ψ = 0`, the smallest
+`|F(r,z,0)|` over the box being 0.2, so it needs no artificial ramp.
+
 **What working Newton looks like.** CEDRES++ Table 2, on 577k unknowns: relative
 residual `2.7e0 → 9.2e-2 → 1.8e-3 → 5.3e-6 → 3.9e-12` in five iterations. That is
 the shape stage 4 should produce. A run that grinds down linearly means the

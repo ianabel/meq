@@ -6,15 +6,37 @@ is the stage-7 design; `TODO` holds work that is understood but not scheduled.
 **This file is only about order** — what to do first, what waits on what, and
 what is deliberately not being done yet.
 
+## The one thing that is red, and it is the next thing to do
+
+**`HighBetaConvergence` is the only failing test in the suite, and it is the
+blocker before free boundary.** Profiles specified in NORMALISED flux --
+`Ψ = (ψ − ψ_bnd)/(ψ_ax − ψ_bnd)`, which is how `refs/GourdainContour.pdf` §V
+eq (39) poses them and how every equilibrium code does -- need `ψ_ax` inside the
+residual, where the Jacobian can see the non-local terms it contributes. It is
+outside, and there is nowhere to put it.
+
+Measured, and each measurement killed the cheaper option ahead of it: with
+`ψ_ax` **fixed** the profile is inert (amplitudes 1 and 512 give an identical
+solution, because the solve only ever reaches `Ψ = 0.0013`); with `ψ_ax` iterated
+**outside** the solver the fixed point is degenerate (`ψ_ax → 1e-12` where
+dimensional analysis says `≈ 0.5`). Relaxing the outer map harder is not the fix.
+
+It also needs a test that can *see* the missing terms, which `SourceTests`'
+finite-difference check on `dFdPsi` structurally cannot —
+`jacobianMatchesAFiniteDifferenceOfTheResidual` is the pattern.
+
+Free boundary cannot avoid any of this: `ψ_ax` and `ψ_bnd` are both unknowns
+there. Full detail in `CLAUDE.md` under *Newton, and the obligation it creates*.
+
 ## The state in one paragraph
 
 The solver works and every claim about it is a measured convergence rate. Stages
-0 to 6 are done, and **stage 7 is all but finished: meq is a program that solves
-on a curved boundary and refines its own mesh.** `meq config.toml` parses,
-solves, adapts, and writes. The suite is **18/18** — the pedestal tripwire that
-used to fail has been rewritten to assert what it is actually measuring. What is
-left of stage 7 is one item: the warm start's interpolating route (§4, needs
-GSLIB). The only thing the driver still refuses is `[boundary] Type = "exact"`.
+0 to 6 are done, and **stage 7 is finished: meq is a program that solves on a
+curved boundary, refines its own mesh, and restarts from a previous answer in one
+Newton step.** The suite is **21 of 22**, the one failure being
+`HighBetaConvergence` above, which asserts what is wanted and fails until
+normalised flux is done properly. The only thing the driver still refuses is
+`[boundary] Type = "exact"`.
 
 ## The nonlinear question is settled
 
