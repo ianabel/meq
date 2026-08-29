@@ -252,6 +252,8 @@ namespace meq
 			throw std::logic_error( "meq::GradShafranovSolver::setSource: the forms are already built; the source has to be set before the first solve" );
 		if ( nonlinearSource )
 			throw std::logic_error( "meq::GradShafranovSolver::setSource: a psi-dependent source is already set; one solver holds one source" );
+		if ( linearSource )
+			throw std::logic_error( "meq::GradShafranovSolver::setSource: a source is already set; one solver holds one source" );
 
 		linearSource = &fIn;
 
@@ -272,6 +274,13 @@ namespace meq
 			throw std::logic_error( "meq::GradShafranovSolver::setSource: the forms are already built; the source has to be set before the first solve" );
 		if ( linearSource )
 			throw std::logic_error( "meq::GradShafranovSolver::setSource: a psi-independent source is already set; one solver holds one source" );
+		// AND A SECOND SOURCE OF THE SAME KIND, which until SolverContract.cpp went
+		// looking was the one way round "one solver holds one source": the checks
+		// were symmetric ACROSS the two overloads and silent WITHIN each, so
+		// setSource( a ); setSource( b ) replaced a with b without a word and the
+		// solve answered a different question than the caller had asked.
+		if ( nonlinearSource )
+			throw std::logic_error( "meq::GradShafranovSolver::setSource: a source is already set; one solver holds one source" );
 
 		// Nothing else to do here. Unlike the linear case there is no coefficient
 		// to build: the source does not reach a right hand side at all, it becomes
@@ -433,14 +442,14 @@ namespace meq
 	void GradShafranovSolver::setPicardDamping( double damping )
 	{
 		if ( !( damping > 0.0 ) || damping > 1.0 )
-			throw std::logic_error( "meq::GradShafranovSolver::setPicardDamping: the damping must be in ( 0, 1 ]" );
+			throw std::invalid_argument( "meq::GradShafranovSolver::setPicardDamping: the damping must be in ( 0, 1 ]" );
 		picardDamping = damping;
 	}
 
 	void GradShafranovSolver::setAndersonDepth( int depth )
 	{
 		if ( depth < 0 )
-			throw std::logic_error( "meq::GradShafranovSolver::setAndersonDepth: the depth cannot be negative" );
+			throw std::invalid_argument( "meq::GradShafranovSolver::setAndersonDepth: the depth cannot be negative" );
 		andersonDepth = depth;
 	}
 
