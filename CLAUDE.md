@@ -325,6 +325,26 @@ W_h = P_k(K)       potential       L2_FECollection
 M_h = P_k(e)       hybrid trace    DG_Interface_FECollection
 ```
 
+**The volume spaces are on the closed Gauss-Lobatto basis, and that is a
+convention rather than a requirement** — `convdiff.cpp`'s "as it is customary for
+HDG to match trace DOFs", quoted and inherited until it was measured. A nodal
+basis does not change the *space*: Lobatto and Legendre both span `P_k(K)`, so
+the discretisation cannot see the choice, and nothing in the hybridization needs
+volume dofs to sit on faces — every coupling is a face **integral**, computed by
+quadrature against both bases. Measured, with both volume spaces switched to
+`GaussLegendre` and nothing else touched: rates 1.996/3.001/3.998 in `ψ`, the
+curved benchmark's `L2` at 2.742813e-05 down both paths agreeing to 6.6e-15, and
+the `k = 3` Newton history reproducing the one recorded below to seven digits.
+The finest Solov'ev error reads 5.510484e-10 against 5.510486e-10 — the last
+place.
+
+So it is kept for alignment with the miniapp meq was ported from, and for nothing
+else. **What it costs** is that a dof is a point value *on* the element boundary,
+where an L2 field is discontinuous, so reading `W_h` by nodal interpolation at
+another mesh's dof points is ambiguous — measured, 9% to 28% wrong.
+`meq::FieldTransfer` projects rather than interpolates, which is basis-agnostic
+and is what a non-nested transfer needs anyway.
+
 ### The assembled flux is −q, and the papers' τ carries the wrong sign
 
 Two conventions settled by measurement rather than argument, both of which cost

@@ -179,9 +179,35 @@ namespace meq
 
 		int const dim = mesh.Dimension();
 
-		// The closed (Gauss-Lobatto) basis, as miniapps/hdg/convdiff.cpp puts it,
-		// "as it is customary for HDG to match trace DOFs". All three spaces carry
-		// the same degree; hybridization is what makes that legal.
+		/*
+		 * The closed (Gauss-Lobatto) basis, as miniapps/hdg/convdiff.cpp puts it,
+		 * "as it is customary for HDG to match trace DOFs". All three spaces carry
+		 * the same degree; hybridization is what makes that legal.
+		 *
+		 * IT IS A CONVENTION AND NOT A REQUIREMENT, and that was an inherited
+		 * quotation until it was measured. A nodal basis does not change the
+		 * SPACE -- Gauss-Lobatto and Gauss-Legendre both span P_k( K ), and only
+		 * the shape functions differ -- so the discretisation cannot see the
+		 * choice. Measured, with both volume spaces switched to GaussLegendre and
+		 * nothing else touched: SolovievConvergence gives 1.996/3.001/3.998 in psi
+		 * at k = 1, 2, 3, ExtensionConvergence's curved benchmark gives L2
+		 * 2.742813e-05 down both paths agreeing to 6.6e-15, and the k = 3 Newton
+		 * history reads 1.121994e+01, 4.085930e-02, 5.744224e-04, 1.411244e-07 --
+		 * the same digits this file records for Lobatto, differing only in the
+		 * last place. Nothing in the hybridization needs the volume dofs to sit on
+		 * the faces: every coupling is a face INTEGRAL, computed by quadrature
+		 * against both bases, and integrals do not care where dofs live.
+		 *
+		 * So it is kept for alignment with the miniapp meq was ported from, which
+		 * is worth something when debugging against MFEM, and for nothing else.
+		 * WHAT IT COSTS is that a dof is a point value ON the element boundary,
+		 * where an L2 field is discontinuous -- so reading this space by nodal
+		 * interpolation at another mesh's dof points is ambiguous, and measured,
+		 * 9% to 28% wrong. meq::FieldTransfer therefore projects rather than
+		 * interpolates, which is basis-agnostic and is the right thing for
+		 * non-nested meshes anyway. Switching the basis would remove that
+		 * ambiguity and buy nothing else, which is why it was not switched.
+		 */
 		fluxColl = std::make_unique<mfem::L2_FECollection>( orderValue, dim,
 		                                                    mfem::BasisType::GaussLobatto );
 		potentialColl = std::make_unique<mfem::L2_FECollection>( orderValue, dim,
