@@ -1158,8 +1158,76 @@ namespace meq
 				nonlinear->SetOperator( *reduced.Ptr() );
 			nonlinear->SetSolver( linear );
 			nonlinear->SetMonitor( recorder );
-			nonlinear->SetRelTol( newtonRelativeTolerance );
-			nonlinear->SetAbsTol( newtonAbsoluteTolerance );
+
+			/*
+			 * THE CONVERGENCE TARGET MUST NOT DEPEND ON WHERE THE ITERATION
+			 * STARTED, AND MFEM'S DOES.
+			 *
+			 * NewtonSolver stops at || r || <= max( rel_tol * || r_0 ||, abs_tol )
+			 * with || r_0 || measured at the iterate it was handed. A warm start
+			 * makes || r_0 || small, so the target shrinks with it -- and a good
+			 * enough guess drives the target below the round-off floor, where it
+			 * can never be met. THE BETTER THE GUESS, THE MORE CERTAIN THE
+			 * FAILURE, which is the exact opposite of what a restart is for.
+			 *
+			 * MEASURED on Example 5 at k = 3, n = 8, restarting from the converged
+			 * answer. The solve reaches the floor in TWO iterations and is then
+			 * reported as a failure at the thirtieth:
+			 *
+			 *     it 0   1.180694e-03
+			 *     it 1   8.782203e-13
+			 *     it 2   4.151551e-14      <- converged; the floor
+			 *     ...    ~4e-14 for 28 more iterations, then FAIL
+			 *
+			 * because the target was max( 1e-12 * 1.18e-3, 1e-14 ) = 1e-14, under
+			 * the 3.7e-14 this problem can actually reach. The same solve started
+			 * cold has || r_0 || = 11.2, a target of 1.1e-11, and converges.
+			 *
+			 * THE FIX IS A REFERENCE THAT THE GUESS CANNOT MOVE: the residual at
+			 * the COLD iterate -- the Dirichlet datum alone, which is where this
+			 * solve would have started with no guess. rel_tol then keeps exactly
+			 * the meaning it has always had, and a cold solve is bit-identical,
+			 * because there the reference IS || r_0 ||. Only a warm one changes,
+			 * and it changes from failing to converging in one step.
+			 *
+			 * It costs one extra residual evaluation, and only when a guess was
+			 * set. On this path that is a full set of element-local solves, which
+			 * is the price of the criterion meaning something.
+			 */
+			if ( initialGuess )
+			{
+				// The cold iterate, reconstructed rather than re-derived: after
+				// FormLinearSystem, traceX holds the Dirichlet datum on the
+				// essential trace dofs and the guess everywhere else. Zeroing
+				// everywhere else is exactly what prepare() would have left had
+				// no guess been set.
+				mfem::Vector coldTrace( traceX );
+				mfem::Array<int> const &essentialTrace =
+					darcy->GetHybridization()->GetEssentialTrueDofs();
+				std::vector<bool> essential( coldTrace.Size(), false );
+				for ( int i = 0; i < essentialTrace.Size(); ++i )
+					essential[ essentialTrace[ i ] ] = true;
+				for ( int i = 0; i < coldTrace.Size(); ++i )
+					if ( !essential[ i ] )
+						coldTrace( i ) = 0.0;
+
+				mfem::Vector coldResidual( traceX.Size() );
+				reduced.Ptr()->Mult( coldTrace, coldResidual );
+				coldResidual -= traceB;
+				double const reference = coldResidual.Norml2();
+
+				// A pure absolute target at the right scale. SetRelTol( 0 ) rather
+				// than leaving it, because MFEM takes the LARGER of the two and a
+				// live rel_tol would put || r_0 || back into the test.
+				nonlinear->SetRelTol( 0.0 );
+				nonlinear->SetAbsTol( std::max( newtonAbsoluteTolerance,
+				                                newtonRelativeTolerance*reference ) );
+			}
+			else
+			{
+				nonlinear->SetRelTol( newtonRelativeTolerance );
+				nonlinear->SetAbsTol( newtonAbsoluteTolerance );
+			}
 			nonlinear->SetMaxIter( newtonMaxIterations );
 			nonlinear->SetPrintLevel( -1 );
 

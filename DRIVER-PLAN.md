@@ -501,14 +501,30 @@ cold start, and the iteration count will not obviously say so.
 
 ### Acceptance
 
-* Solve, write, restart on the same mesh: Newton finishes in one step.
-* Solve, write, restart on a mesh refined once: Newton finishes in fewer steps
-  than from cold, with the converged answer unchanged to six figures.
-* **The two interpolating routes compared on the same restart**, at `k = 3`: the
-  GSLIB route should start from a residual smaller than the NetCDF route's by
-  about the ratio of `h^{k+1}` to `h^2`. If it does not, the full-order path is
-  not carrying the order it claims and the extra dependency has bought nothing.
-  This is the measurement that justifies §6 rather than asserting it.
+* ~~Solve, write, restart on the same mesh: Newton finishes in one step.~~
+  **Done, and it did not work when first measured** — see `CLAUDE.md`'s trap on a
+  convergence target scaled to `‖r₀‖`. Now **one** Newton iteration.
+* ~~Solve, write, restart on a mesh refined once~~ **Done**: `‖r₀‖` falls from
+  1.569e+01 to 1.803e-03, a factor of **8704**, Newton finishes in **1** step
+  against 4 cold, and the converged `L2` is 3.663930e-07 against 3.663932e-07 —
+  seven figures, not six.
+* ~~**The two interpolating routes compared on the same restart**, at `k = 3`~~ —
+  **done, and the claim needed correcting.** The ratio was stated as `h^{k+1}` to
+  `h^2`, which quietly compares two different `h`'s: the mesh's and the *grid's*.
+  Measured, sampling a `k = 3, n = 8` solve (own error 6.00e-6) onto grids of 65,
+  129 and 257 nodes and reading it back bilinearly gives 1.18e-4, 3.36e-5,
+  1.01e-5 — **second order in the GRID spacing**, rates 1.813 and 1.735, drifting
+  below two only because by 257 nodes the grid error is within a factor of two of
+  the solve's own and the sequence is leaving the asymptotic regime.
+
+  So at 257² the grid route is only **1.7×** worse than full order, not the
+  order-of-magnitude the plan implied. The real statement is about *scaling*, not
+  a ratio: the grid route's accuracy is a property of the **file**, the
+  full-order route's is a property of the **solve**. Refine the mesh or raise the
+  degree and the grid has to be refined quadratically to keep pace; the
+  full-order route never has to be. That is what justifies the dependency, and
+  `fullOrderCarriesMoreThanAStructuredGrid` asserts the scaling rather than the
+  ratio.
 * A restart whose grid covers nothing reports its miss count and still converges
   from the fallback.
 * The GS-2 sources warm-started from a coarse solve, converging where the

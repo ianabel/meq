@@ -1594,6 +1594,35 @@ produced heap corruption in unrelated functions and "unimplemented" aborts for
 methods that had just been added. meq's own CMake build tracks headers properly;
 this applies only to the MFEM tree.
 
+**A convergence target scaled to `‖r₀‖` makes a good initial guess FAIL, and
+the better the guess the more certain the failure.** MFEM's `NewtonSolver` stops
+at `‖r‖ ≤ max(rel_tol·‖r₀‖, abs_tol)` with `‖r₀‖` measured at the iterate it was
+handed. Warm-start from a converged answer and `‖r₀‖` is already small, so the
+target shrinks with it — and past a point it falls below the round-off floor,
+where nothing can meet it. Measured on Example 5 at `k = 3, n = 8`, restarting
+from the exact answer: the residual reaches the floor in **two** iterations and
+is then reported as a failure at the thirtieth.
+
+```
+   it 0   1.180694e-03
+   it 1   8.782203e-13
+   it 2   4.151551e-14      <- converged; the floor
+   ...    ~4e-14 for 28 more iterations, then FAIL
+```
+
+The target was `max(1e-12 × 1.18e-3, 1e-14) = 1e-14`, under the 3.7e-14 this
+problem can reach. Cold, `‖r₀‖ = 11.2` gives a target of 1.1e-11 and it converges
+in four. **This is the failure mode that matters most for how meq will be used** —
+moving to an adjacent equilibrium should cost one or two Newton steps, and it
+instead threw away a converged answer.
+
+`solve()` therefore takes the reference from the **cold** iterate — the Dirichlet
+datum alone, where this solve would have started with no guess — and sets a pure
+absolute target from it. `rel_tol` keeps exactly the meaning it always had, a
+cold solve is bit-identical because there the reference *is* `‖r₀‖`, and only a
+warm one changes: from failing to converging in one step. It costs one extra
+residual evaluation, and only when a guess was set.
+
 **`NewtonSolver` needs `iterative_mode = true`, and the failure is silent.** The
 Dirichlet values ride in the iterate, so with `iterative_mode` left false
 `NewtonSolver` zeroes `x` on entry and throws the boundary data away — silently,
