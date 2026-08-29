@@ -164,28 +164,58 @@ guard already skips every convergence test without needing to know why.
 
 So `.github/workflows/ci.yml` runs four unit suites, the `naming` check and a
 coverage gate at 90% lines (94.8% measured). **That 94.8% is over four files,
-not over the library**, and reading it as a statement about meq is a mistake this
-file used to invite. Measured locally over the whole of `src/meq/` with
-everything built and the suite run:
+not over the library** — reading it as a statement about meq is a mistake this
+file used to invite.
 
-| | lines | functions | branches |
-|---|---|---|---|
-| `src/meq/` entire | **80.8%** | 80.3% | 49.4% |
+**And the whole-library figure depends on which tool you ask, by a lot.** Two
+denominators, on the same run:
 
-and it is not evenly spread. The MFEM-free half CI can build is 92–100%
-(`Source.cpp` 100%, `Profiles.cpp` 99%, `BoundaryShape.cpp` 98%, `Sampler.cpp`
-97%, `SourceFactory.cpp` 95%, `Config.cpp` 92%). **`GradShafranov.cpp` — the
-solver — is 60%**, `Field.cpp` 61%, `Output.cpp` 73%, `Estimator.cpp` 89%. So the
-best-covered code is the configuration layer and the least-covered is the part
-every physical claim rests on. 165 Boost test cases across 17 suites is not
-thin, but they are concentrated on rates rather than on paths: the globalisation
-ladder, the KINSOL variants, the error branches and most accessors are reached by
-nothing.
+| `src/meq/GradShafranov.cpp` | coverable lines | covered |
+|---|---|---|
+| `gcov`, executable lines only | 586 | **92.7%** |
+| `gcovr`, its own line set | 838 | **64%** |
+
+The file is 1554 lines for about 893 of code — this project comments heavily —
+and `gcovr` counts roughly 250 lines that `gcov` does not consider executable at
+all, most of which it then reports as uncovered. **So a line-coverage percentage
+on this codebase is partly a measurement of comment density.** The CI gate uses
+`gcovr`, so that is the operative number for the gate; `gcov`'s is the operative
+number for the question "is this code tested".
+
+On the honest denominator, measured over the whole suite:
+
+| | |
+|---|---|
+| `Source.cpp` 100% · `Profiles.cpp` 99.3% · `BoundaryShape.cpp` 98.1% | |
+| `Sampler.cpp` 97.3% · `SourceFactory.cpp` 95.2% | |
+| **`GradShafranov.cpp` 92.7%** · `Config.cpp` 92.2% · `Estimator.cpp` 89.1% | |
+| `WarmStart.cpp` 88.6% · `Output.cpp` 73.1% · `Field.cpp` 61.3% | |
+
+`gcovr` over everything reads 82.2% of lines, 83.0% of functions and 48.4% of
+branches.
+
+**A claim this file carried briefly, and which was wrong, is worth leaving
+recorded**: that the solver sat at 60% against 92–100% for the configuration
+layer, so "the best-covered code in meq parses TOML and the least-covered is the
+part every physical claim rests on". The 60% was `gcovr`'s number and the
+comparison was against `gcov`-flavoured intuitions. On one denominator the solver
+is 92.7% and `Config.cpp` is 92.2% — they are the same. The two weakest files are
+`Field.cpp` and `Output.cpp`, both small. It is the same trap as the threaded-MKL
+one: **a measurement about the tool, not about the code.**
+
+What is true regardless is that 22 of `GradShafranovSolver`'s 51 methods were
+called by nothing, and `SolverContract.cpp` was written for that rather than for
+a percentage — it found `setSource()` silently accepting a second source of the
+same kind, and value faults throwing `logic_error` where the constructor throws
+`invalid_argument`. Branch coverage at 48% is the figure with real headroom in
+it, and it is the one nobody has looked at.
 
 **And `gcovr` is not installed on this machine**, so the recipe above fails with
 `command not found`; a venv is the way round it, and it needs
 `--merge-mode-functions=separate` or it aborts on `Config.hpp`'s inline
-accessors appearing at two line numbers across translation units.
+accessors appearing at two line numbers across translation units. Run it from the
+repo root: `--root .` after a `cd` into the build directory silently matches
+nothing and reports 0%.
 
 **What it does not run is every
 claim about rates** — the HDG assembly, Newton, the extension technique and the
