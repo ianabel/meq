@@ -670,43 +670,30 @@ int main( int argc, char **argv )
 		}
 
 		/*
-		 * THE ESTIMATE, ON THE RAW POTENTIAL AND NOT ON psi*. THAT IS A STANDING
-		 * DECISION WITH A DATE ON IT, NOT A FALLBACK.
+		 * THE ESTIMATE, ON psi* -- WHICH IT COULD NOT USE UNTIL MFEM WAS FIXED.
 		 *
-		 * Eq (20) builds four of its five terms on the post-processed potential,
-		 * and psi* is what this loop ought to use. It cannot yet.
-		 * DarcyForm::ReconstructFluxAndPot() closes the local post-processing
-		 * problem -- a pure Neumann problem, singular by construction -- with a
-		 * mean-value constraint, and skips that constraint whenever a non-linear
-		 * potential integrator is PRESENT rather than whenever it CONTRIBUTED. So
-		 * on any element where dF/dpsi vanishes the regularisation is skipped, a
-		 * singular matrix is factored, and psi* on that element is a different
-		 * function. Measured: 20x to 64x wrong on the dead elements and correct to
-		 * 0.5% on the live ones, and a floor of 1e-12 on dF/dpsi -- physically
-		 * nothing, numerically the difference between singular and not -- restores
-		 * it completely. meq's Newton path puts every source on the non-linear
-		 * form, so this reaches every configuration the driver can be given.
+		 * Eq (20) builds four of its five terms on the post-processed potential.
+		 * ReconstructFluxAndPot() used to skip its mean-value regularisation
+		 * whenever a non-linear potential integrator was merely PRESENT rather
+		 * than when it had contributed, so on any element where dF/dpsi vanished
+		 * the local problem was singular and was factored anyway -- and psi* there
+		 * was a different function, 20x to 64x out. meq's Newton path puts every
+		 * source on the non-linear form, so that reached every configuration the
+		 * driver could be given, and this loop ran on Potential::Raw instead: one
+		 * order down at every k, correct but blunt.
 		 *
-		 * Potential::Raw costs exactly one order at every k and runs 124x to 407x
-		 * larger. It is still a usable INDICATOR -- marking depends on how eta_K is
-		 * distributed rather than on its size -- and it is CORRECT, where psi* here
-		 * would be quietly wrong on exactly the elements the loop then refines.
-		 * A wrong refinement pattern is the worst of the available failures because
-		 * it looks like a working run.
-		 *
-		 * There is deliberately no runtime check that psi* is bad. The condition is
-		 * a defect in a library meq does not own, it is one flag test away from
-		 * never arising, and it is written up as
-		 * ../mfem-hdg-dev/doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md. What
-		 * establishes its state is the suite:
-		 * NewtonConvergence.cpp's theReconstructionIsWrongWhereTheJacobianVanishes
-		 * asserts that psi* IS still wrong, so the day the fix lands that test
-		 * fails and says to come back here and delete this paragraph.
-		 *
-		 * postProcess() is not called at all, which also saves its local solves.
+		 * The fix landed as "The postprocessing closes on the element average,
+		 * always" -- the close is unconditional now, because the local problem is
+		 * a pure Neumann one by construction and there was never anything to
+		 * decide. Measured from meq's side, the same case that read 20.3, 64.1 and
+		 * 61.6 now reads 1.0069 against 1.0048 for elements where dF/dpsi does not
+		 * vanish at all: psi* is a post-processing everywhere.
+		 * NewtonConvergence.cpp's
+		 * thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes is what says
+		 * so, and it is what would say if it came back.
 		 */
+		solver->postProcess();
 		meq::ResidualEstimator estimator( *solver, *source );
-		estimator.setPotential( meq::ResidualEstimator::Potential::Raw );
 
 		/*
 		 * ON THE EXTENSION PATH eta_5 HAS TO LEAVE Gamma_h OUT, AND THE DRIVER
@@ -824,8 +811,6 @@ int main( int argc, char **argv )
 			std::printf( "\n  the adaptive loop: %s marking at %.2f\n",
 			             adapt.strategy == meq::MarkingStrategy::Doerfler
 			                 ? "Doerfler" : "maximum", adapt.theta );
-			std::printf( "  eta is built on the raw potential, one order below the\n"
-			             "  published estimator -- see the note beside setPotential()\n" );
 			std::printf( "  %6s %8s %8s %8s %6s %12s %5s\n",
 			             "cycle", "elem", "trace", "marked", "wide", "eta", "it" );
 			for ( std::size_t c = 0; c < history.size(); ++c )
@@ -927,8 +912,7 @@ int main( int argc, char **argv )
 			                  adapt.strategy == meq::MarkingStrategy::Doerfler
 			                      ? "doerfler" : "maximum" );
 			writer.attribute( "marking_theta", adapt.theta );
-			writer.attribute( "estimator_potential",
-			                  "raw (one order below the published estimator)" );
+			writer.attribute( "estimator_potential", "post-processed" );
 		}
 		writer.field( "psi", psi, "poloidal flux function", "Wb/rad" );
 		writer.field( "B_R", bR, "poloidal field, R component", "T" );

@@ -406,16 +406,11 @@ BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
 		solver->setExtension( *path, domain.gammaHMarker() );
 		solver->solve();
 
-		// THE DRIVER'S OWN CHOICE OF POTENTIAL, reproduced rather than assumed,
-		// and postProcess() deliberately NOT called -- as the driver does not call
-		// it. psi* is wrong on any element where dF/dpsi vanishes, which for a
-		// Solov'ev source is every element, and an estimator built on it would
-		// mark exactly the elements it had corrupted. Raw costs one order and is
-		// correct. See apps/meq.cpp, and
-		// NewtonConvergence.cpp::theReconstructionIsWrongWhereTheJacobianVanishes
-		// for the measurement and for what to change here when MFEM is fixed.
+		// The driver's own choice of potential, reproduced rather than assumed:
+		// psi*, the published estimator, which it could not use until MFEM's
+		// reconstruction stopped skipping its mean-value close. See apps/meq.cpp.
+		solver->postProcess();
 		meq::ResidualEstimator estimator( *solver, source );
-		estimator.setPotential( meq::ResidualEstimator::Potential::Raw );
 		estimator.setTransferredBoundary( domain.gammaHMarker() );
 
 		mfem::Vector const &local = estimator.GetLocalErrors();

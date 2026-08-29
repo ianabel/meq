@@ -631,8 +631,23 @@ as an earlier version of this file said.
 5.00 for `k = 1, 2, 3`. No hand-written local solve was needed, and it survives
 the extension path too. The old `GSSolver::Postprocess()` stays deleted.
 
-**Through Newton it works where `∂F/∂ψ ≠ 0` and is wrong, per element, wherever
-`∂F/∂ψ` vanishes.** That is a narrowing of what this file used to say, arrived at
+**Through Newton it works, everywhere, since MFEM's reconstruction stopped
+skipping its own close.** What follows is the history, kept because the failure
+was silent and the shape of it is the useful part.
+
+The fix is `gf-hdg-dev`'s *"The postprocessing closes on the element average,
+always"*, merged into `meq-integration`. The local post-processing problem is a
+pure Neumann one by construction — the total flux driving it is in H(div), so the
+element's flux balance is already satisfied and the potential is determined only
+up to a constant — and the element average is what closes it. That is
+unconditional, and the code had been treating it as one of three choices.
+Measured from meq's side on the case that used to read 20.3, 64.1 and 61.6 on
+dead elements: **1.0069, against 1.0048 for elements where `∂F/∂ψ` does not
+vanish at all.** `ψ*` is a post-processing everywhere, and the driver's adaptive
+loop is back on the published estimator — `η` reaching 6.87e-5 on **449**
+elements where the degraded one needed 1069 to reach 4.77e-4.
+
+**What it was, and what it cost to find.** That is a narrowing of what this file used to say, arrived at
 through two wrong diagnoses, and the mechanism is worth knowing exactly because
 it is one condition.
 
@@ -671,22 +686,15 @@ global check misses it.** And a floor of **1e-12** on `∂F/∂ψ` — twelve or
 below everything else in the problem, incapable of moving a solution — takes the
 ratio from 7.565317 to 0.998525. That is a singular matrix and nothing else.
 
-**meq carries no runtime check for this**, deliberately. A solver should not
-stand permanently on guard against its own dependency, and the condition is one
-flag test away from never arising. The state of the defect lives in the suite
-instead: `theReconstructionIsWrongWhereTheJacobianVanishes` asserts the
-corruption is still present and **fails the day MFEM fixes it**, with a message
-saying to delete it and put the driver back on the published estimator. The fix
-is written up with line numbers as
-`../mfem-hdg-dev/doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md`.
-
-**So the driver's adaptive loop builds `η` on `Potential::Raw`** — a standing
-decision with a date on it, not a fallback and not a runtime choice. It costs
-exactly one order at every `k` and runs 124× to 407× larger, and it is *correct*,
-where `ψ*` would be quietly wrong on exactly the elements the loop then refines.
-A wrong refinement pattern is the worst available failure because it looks like a
-working run. `postProcess()` is not called at all on that path, which also saves
-its local solves.
+**meq carried no runtime check for this**, deliberately — a solver should not
+stand permanently on guard against its dependency, and the condition was one flag
+test away from never arising. The state of the defect lived in the suite instead,
+as a test asserting the *correct* behaviour and failing. That is what flipped
+green when the fix landed, and what said to put the driver back on `ψ*`.
+`thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes` still runs, now as
+a regression rather than a tripwire. The report is
+`../mfem-hdg-dev/doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md`, and the fix
+commit credits it.
 
 **And the defect does not reach the solve — measured, not argued.** A number like
 6.9e11 raises the question of whether `ψ_h` or `q_h` are also corrupted somewhere
@@ -1516,72 +1524,78 @@ taken only on the fitted path. Both are wrong wherever `Γ` is curved.
    factorise in 0.4 s. AMG earns its place in 3D or in parallel, and serial MFEM
    has none anyway — `HypreBoomerAMG` needs MPI.
 
-### PARDISO: faster where it runs, and it does not run here
+### PARDISO: faster, and it runs now
 
-Checked because MKL is already linked, so it would cost no new dependency.
-**The answer is no, not with this MKL** — and the reason is a library defect
-rather than anything about meq.
+The open question of the previous section is closed. That section's verdict —
+"2.2× where it works, and it stops working just below the sizes meq actually
+runs" — was a verdict on **Debian's `intel-mkl` 2020.4.304** and on nothing else,
+and it said so. Against **oneAPI MKL 2026.1** at `/opt/intel/oneapi/mkl/latest`,
+with `MFEM_USE_MKL_PARDISO=YES` and MFEM's own `PardisoSolver`:
 
-MFEM has a serial wrapper, `linalg/pardiso.hpp`, behind `MFEM_USE_MKL_PARDISO`.
-Note that `INSTALL` documents only `MFEM_USE_MKL_CPARDISO`, the *cluster*
-version, so the serial one is easy to miss. It offers `REAL_NONSYMMETRIC` (11)
-and `REAL_STRUCTURE_SYMMETRIC` (1) — and (1) is exactly meq's extension-path
-matrix, whose sparsity is symmetric while its values are not.
+| `k` | `n` | trace dofs | UMFPACK setup | solve | PARDISO setup | solve | agreement |
+|---|---|---|---|---|---|---|---|
+| 2 | 16 | 2,400 | 0.0176 | 0.0011 | 0.0233 | 0.0064 | 1.4e-15 |
+| 2 | 32 | 9,408 | 0.0616 | 0.0060 | 0.0216 | 0.0029 | 3.5e-15 |
+| 2 | 48 | 21,024 | 0.1608 | 0.0165 | 0.0453 | 0.0071 | 9.4e-15 |
+| 3 | 16 | 3,200 | 0.0297 | 0.0019 | 0.0077 | 0.0021 | 2.3e-15 |
+| 3 | 32 | 12,544 | 0.0820 | 0.0099 | 0.0216 | 0.0033 | 4.4e-15 |
+| 3 | 48 | 28,032 | 0.2295 | 0.0277 | 0.0611 | 0.0120 | 1.2e-14 |
 
-Two things make it attractive in principle. Its API is **phase-separated** —
-11 analysis, 22 factorisation, 33 solve — so the symbolic reuse that is meq's
-one unqualified win is a one-line condition rather than the restructure UMFPACK's
-wrapper needs. And it is **threaded**, where UMFPACK is serial apart from BLAS.
-Measured on meq's own trace matrix, at the sizes where it works:
+**About 3.8× on the setup and 2–3× on the solve from 9k dofs up**, agreeing with
+UMFPACK to round-off throughout. It is *slower* at 2,400, which is thread startup
+against a problem too small to need it.
 
-| `n` | UMFPACK | PARDISO | numeric factorisation | agreement |
-|---|---|---|---|---|
-| 832 | 2.8 ms | 1.9 ms | 2.0 → 0.7 ms | 2e-15 |
-| 3,200 | 18.9 ms | **8.6 ms** | 13.9 → **2.1 ms** | 6e-15 |
-| 7,104 | 44.1 ms | **error −3** | — | — |
-| 12,544 | 90.9 ms | **error −3** | — | — |
+**And it runs at 12,544 and 28,032**, which is the point: those are the sizes
+where the old MKL returned error `-3`. The defect was the packaging, as that
+section predicted, and the prediction is now confirmed rather than assumed.
+`tests/convergence/TraceSolverComparison.cpp` is the measurement, and it asserts
+only the **agreement** — the timings are printed, because PARDISO is threaded and
+CLAUDE.md's standing rule is that a threaded measurement on this machine is not a
+measurement about the code.
 
-2.2× overall and 6.6× on the factorisation, agreeing with UMFPACK to 1e-15 — and
-then it stops working just below the sizes meq actually runs.
+**Both paths must keep shipping.** oneMKL's licence is not everybody's to accept
+and `MFEM_USE_MKL_PARDISO` is off in most builds, so the comparison compiles and
+passes either way — without it the PARDISO columns are skipped and UMFPACK still
+runs. meq's solver still uses UMFPACK; making PARDISO selectable at run time is a
+small piece of work that has not been done.
 
-**The failure is Debian's `intel-mkl` 2020.4.304, not meq and not the calling
-code.** Demonstrated on a plain 5-point Laplacian with no MFEM linked at all:
-`n = 1600` succeeds, `n = 12544` fails with the same `-3`, and of the three
-reorderings only `iparm[1] = 3` (parallel nested dissection) survives at that
-size — `0` (minimum degree) and `2` (serial METIS) both fail. On meq's matrix
-even `iparm[1] = 3` gives out above `n ≈ 3000`. The agreement to 1e-15 at small
-`n` is what says the calls are right and the library is wrong.
+**`SetReuseSymbolic()` exists on `PardisoSolver` too**, with the same
+pattern-comparison contract as `UMFPackSolver`'s, so the one unqualified win of
+the previous section carries over rather than having to be re-argued.
 
-**Worth revisiting against a real oneMKL build, and this is a standing note
-rather than a closed question.** Everything above is a verdict on Debian's
-`intel-mkl` 2020.4.304 and on nothing else. The wrapper exists, the matrix type
-is right, the phase separation is right, and where the library works PARDISO is
-2.2× faster overall and 6.6× on the factorisation while agreeing with UMFPACK to
-1e-15. That is a real result being withheld by a packaging defect from 2020.
+### The link line straddles two MKL installations, and that is a live hazard
 
-What a proper look would involve, none of it done:
+The previous section warned that the first thing likely to go wrong in a oneMKL
+adoption is "meq's existing MKL BLAS/LAPACK link line ending up straddling two
+MKL versions". It does. `MFEM_EXT_LIBS` reads, in order:
 
-* Install current **Intel oneAPI MKL** — its own installer or the
-  `intel-oneapi-mkl` apt repository, *not* Debian's `intel-mkl`.
-* Rebuild `../mfem/install` with `MFEM_USE_MKL_PARDISO=YES`, which needs
-  `MKL_PARDISO_OPT` and `MKL_PARDISO_LIB`, and check that meq's existing MKL
-  BLAS/LAPACK link line does not end up straddling two MKL versions — that is
-  the first thing likely to go wrong.
-* Re-run the comparison at `n = 12544` and `n = 49664`, the sizes that fail
-  today. If those succeed the defect is confirmed as the packaging and the
-  numbers above become the operative ones.
-* Then use MFEM's own `PardisoSolver` rather than hand-rolled `PARDISO()` calls,
-  and settle the reproducibility question below before adopting it.
+```
+-L/opt/intel/oneapi/mkl/latest/lib -Wl,-rpath,... -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core
+...
+-L/usr/lib/x86_64-linux-gnu -lumfpack ... -lcholmod ... -lmkl_intel_thread -lmkl_sequential
+```
 
-**And settle that question first, because it is the real objection.** PARDISO's
-advantage *is* the threading, and threaded reduction order is the same
-non-determinism that decides the pedestal knife edge under *On SUNDIALS*. A 2×
-solve that makes convergence machine-dependent is not obviously a good trade for
-a suite that asserts Newton iteration counts. `iparm[33]` (conditional numerical
-reproducibility) exists for this and should be measured, not assumed — it costs
-some of the speed back, and the question is how much.
+oneAPI 2026.1 first, from the explicit `BLAS_LIBRARIES`/`LAPACK_LIBRARIES`; then
+Debian's `intel-mkl` 2020.4.304 behind it, pulled in as SuiteSparse's own BLAS
+dependency, bringing **two more threading layers**. Linking more than one MKL
+threading layer is unsupported by MKL, and mixing two MKL *versions* is worse.
 
-**And the honest caveat on all of it**: on a hard case the dominant cost is the
+**It works today** — PARDISO agrees with UMFPACK to 1e-15 and every convergence
+test passes — because oneAPI comes first in the link order and its rpath is
+baked in, so its symbols win at load time. That is an ordering accident, not a
+configuration. Repointing SuiteSparse's BLAS at oneAPI would settle it and has
+not been done.
+
+**One consequence is already measured and is a simplification**: with oneAPI
+linked explicitly as `mkl_gnu_thread` rather than resolved through
+`libmkl_rt`, `SolovievConvergence` passes with `MKL_THREADING_LAYER` **unset**.
+The trap under *Traps* is about the `libmkl_rt` dispatcher needing to be told
+which layer to use; linking a layer directly removes the dispatcher. That is one
+suite passing, not a proof about a failure mode whose signature is silence, so
+the environment variable stays set everywhere until more of the suite has been
+run without it.
+
+**And the honest caveat on all of it****And the honest caveat on all of it**: on a hard case the dominant cost is the
 element-local *nonlinear* iteration, not the global solve. 42 outer Newton steps
 each running thousands of local Newtons is where the pedestal's time goes.
 Globalisation is a bigger lever than anything above.
