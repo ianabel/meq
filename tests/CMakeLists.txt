@@ -85,6 +85,7 @@ set(MEQ_CONVERGENCE_TESTS
 	SolovievConvergence
 	NewtonConvergence
 	WarmStartConvergence
+	HighBetaConvergence
 	ExtensionConvergence
 	EstimatorConvergence
 	AdaptiveRefinement
