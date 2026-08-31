@@ -44,10 +44,12 @@ and `meq::NormalisedSource` is where it goes.
   in normalised flux — is written and unit tested but is **not reachable from a
   TOML file**. Wiring it through `Config` and `SourceFactory` is driver work and
   belongs with item 1.
-* The bordered path is `Globalisation::None` and
-  `NonlinearOrdering::CondenseThenLinearise` only, and refuses the others loudly
-  rather than quietly doing something else. Both refusals have reasons recorded
-  beside them; neither has been needed.
+* The bordered path is `Globalisation::None` only, and refuses the others loudly
+  rather than quietly doing something else — the KINSOL paths drive a residual
+  of their own and the Picard ones build no Jacobian to border. **The ordering
+  guard beside it is gone**: it was written from `darcyhybridization.hpp`'s
+  summary rather than from the code, and both orderings reach the same `ψ_ax` to
+  every digit printed. `GradShafranov.cpp` carries the note where the guard was.
 
 **And it turned up an MFEM finding that is not filed anywhere**, which is item 5
 below: `DarcyHybridization` captures the element-local Newton's initial guess at
@@ -371,16 +373,41 @@ the same `ψ_ax` under both orderings to every digit printed, and the guard has
 been lifted. So of the three things pulling towards this ordering — the batching,
 the borders, and every reference in `refs/` — one is now settled in its favour.
 
-**What still blocks it is diagnosed, and it is not what it first looked like.**
-`LineariseThenCondense` fails at 60 on §4.2 at every resolution tried, including
-ones condense-first solves in five iterations — and the cause is that **its
-reduced residual is not a function of the trace**. The retained local fields are
-hidden state: evaluated at one trace, `R` differs by **149%** at the published
-pedestal width depending on which trace the linearisation was last taken at,
-against exactly zero for condense-first. Newton is handed a function that moves
-under it by more than its own value, which is why the failure survives
-refinement, a line search and Picard alike. It is *not* the Jacobian — at a fixed
-linearisation the gradient is the derivative to 5e−9.
+**WHAT BLOCKED IT IS FIXED, AND THE DIAGNOSIS BELOW WAS WRONG ABOUT THE CAUSE
+WHILE RIGHT ABOUT THE SYMPTOM.** As of MFEM's `ad04da3749` (2026-08-31),
+`LineariseThenCondense` is meq's default and only ordering, and
+`PedestalConvergence` is down from seven failing assertions to **one**. The
+actual cause was neither hidden state nor the Jacobian being wrong in principle:
+the linearisation point took a **fixed two** frozen-Jacobian local corrections,
+and `GetGradient()` is the Schur complement of the Jacobian at whatever fields
+that left — so the correction count *was* the gradient's accuracy. It now
+iterates to `setLocalSolver()`'s tolerance. §4.2 at `k = 2, n = 16` went from
+failing at 60 to **8** iterations, against 11 for condense-first.
+
+**One case survives and is characterised**: §4.5, the internal layer, at
+`k = 2, n = 16` — condense-first 10 iterations, this ordering fails at 60, with
+`k = 1, n = 24` and `k = 2, n = 24` fine under both. One of three out of 144
+upstream, all at widths where the frozen-Jacobian correction cannot converge.
+Closing them needs the local step globalised; nothing has been tried and meq is
+not asking.
+
+**And it costs wall clock.** The correction loop runs 4.2 to 12.1 corrections
+per element per linearisation against the fixed two; `PedestalConvergence` went
+351 s → 572 s. This ordering is not a speed win on a stiff problem — what it
+buys is a local problem that is always a linear solve against one factorisation.
+
+**The paragraph below is the 2026-08-30 diagnosis, kept because its measurement
+stands and its conclusion did not.** The 149% figure is real; what it was
+measuring was the retained fields being two corrections short, not a structural
+impossibility.
+
+`LineariseThenCondense` failed at 60 on §4.2 at every resolution tried, including
+ones condense-first solves in five iterations — and the cause looked like **its
+reduced residual not being a function of the trace**. The retained local fields
+are hidden state: evaluated at one trace, `R` differed by **149%** at the
+published pedestal width depending on which trace the linearisation was last
+taken at, against exactly zero for condense-first. It is *not* the Jacobian — at
+a fixed linearisation the gradient was the derivative to 5e−9.
 
 **And the same measurement found something about the ordering meq ships.** Under
 condense-first the residual is a perfect function of the trace, but the gradient
@@ -393,9 +420,12 @@ tables.
 orderings need different things: linearise-first needs the field increments to
 belong to the outer solver rather than to the operator — which is what NPC's
 simultaneous Newton is, and would let one line search damp the whole step —
-and condense-first needs its local solves to converge. Both are MFEM's. Until
-then the default stays condense-first, and `setNonlinearOrdering()` is a
-per-problem choice rather than a project-wide one.
+and condense-first needs its local solves to converge. Both are MFEM's.
+
+**That ask was answered for linearise-first and the default is now that
+ordering, project-wide.** Condense-first is retained only so
+`PedestalConvergence` can measure the two against each other, which is what
+turns "this fails" into "this fails and the other does not".
 
 ## 5. The element-local solve's frozen seed — MFEM, **found and not filed**
 

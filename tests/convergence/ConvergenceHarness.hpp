@@ -903,16 +903,21 @@ namespace tests
 			            label << ", k = " << order << ", h = " << points[ i ].h
 			            << ": Newton did NOT converge in " << points[ i ].newtonIterations
 			            << " iterations. That is a finding about this benchmark, not a "
-			            "tolerance to be relaxed -- but SINCE meq MOVED TO "
-			            "NLOrdering::LineariseThenCondense, look at the ordering "
-			            "before the benchmark. Several of the GS-2 stiff sources "
-			            "converge under CondenseThenLinearise and do not under the "
-			            "ordering meq now uses. That is a parity gap in MFEM, filed "
-			            "as ../mfem-hdg-dev/doc/HDG-LINEARISE-FIRST-STIFF-SOURCES.md "
-			            "with a self-contained reproducer beside it, and it is what "
-			            "this assertion goes red on. It clears when MFEM reaches "
-			            "parity; do not clear it by lowering the cap or switching "
-			            "the ordering back" );
+			            "tolerance to be relaxed -- but SINCE meq USES "
+			            "NLOrdering::LineariseThenCondense, check the ordering "
+			            "before the benchmark. As of 2026-08-31 exactly ONE case in "
+			            "this suite converges under CondenseThenLinearise and not "
+			            "under this ordering: section 4.5, the internal layer, at "
+			            "k = 2, n = 16, where condense-first takes 10 iterations "
+			            "and this one fails at 60. It is one of three surviving out "
+			            "of 144 upstream, all at widths where the frozen-Jacobian "
+			            "local correction cannot converge and the divergence guard "
+			            "truncates; see "
+			            "../mfem-hdg-dev/doc/HDG-LINEARISE-FIRST-STIFF-SOURCES.md. "
+			            "IF THIS MESSAGE IS ABOUT SOME OTHER CASE, THAT IS NEW -- "
+			            "measure both orderings before assuming it is the same gap. "
+			            "Do not clear it by lowering the cap or switching the "
+			            "ordering back" );
 		}
 
 		// A RATE TAKEN ACROSS A SOLVE THAT DID NOT CONVERGE IS NOT A RATE. Such a

@@ -147,7 +147,7 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 git submodule update --init --recursive     # extern/toml11
 cmake -B build
 cmake --build build -j4
-cd build && ctest --output-on-failure       # ~800 s, 21/22
+cd build && ctest --output-on-failure       # ~870 s, 22/23
 ```
 
 **ctest no longer needs any environment set by hand.** `tests/CMakeLists.txt`
@@ -1771,49 +1771,98 @@ failures throw from deeper still. The objects are left as the throw found them.
 meq's paths construct a fresh solver per solve and so do not care, but do not
 assume a `GradShafranovSolver` is reusable after a caught `ErrorException`.
 
-### The suite is 21/22, and the one red file is red for a named reason
+### The suite is 22/23, and the one red assertion is characterised
 
-Measured 2026-08-30 against `meq-integration` as re-created that day, with
-`MKL_NUM_THREADS=1`. **798 s for the whole suite**, against 2269 s before.
+Measured 2026-08-31 against `meq-integration` carrying MFEM's `ad04da3749`, with
+`MKL_NUM_THREADS=1`. **872 s for the whole suite.**
 
-**`PedestalConvergence` is the only failure**, with **7 assertions** in it, and
-every one of them names the same thing: `NLOrdering::LineariseThenCondense`
-failing to converge on GS-2 stiff sources that `CondenseThenLinearise` solves
-comfortably. That is a parity gap in MFEM, not in meq, and it is filed as
-`../mfem-hdg-dev/doc/HDG-LINEARISE-FIRST-STIFF-SOURCES.md`. Per *Testing
-stance*, a red suite naming an unfixed defect is the intended signal.
+**`PedestalConvergence` is the only failing file and it has ONE assertion in it,
+down from seven.** MFEM fixed the cause of the parity gap: the linearisation
+point took a fixed **two** frozen-Jacobian local corrections, and
+`GetGradient()` is the Schur complement of the Jacobian at whatever fields that
+left — so the correction count *was* the gradient's accuracy, and nothing said
+so. It now iterates to `setLocalSolver()`'s tolerance. What that bought, on
+meq's own cases:
 
-**ONE RUN OUT OF THREE CAME BACK 22/22, AND IT IS NOT REPRODUCIBLE.** A full
-`ctest` immediately after the cuDSS rebuild reported `PedestalConvergence`
-passing in 939 s. Re-run standalone against **the same binary**, it fails with
-the same 7 assertions and the same printed iteration counts as every other run
-— `k = 1, n = 16` at 60, `k = 1, n = 32` in 14, `k = 2, n = 16` at 60. Three
-things were checked and none explains it: the ctest environment really does
-carry `MKL_NUM_THREADS=1` (read back out of `ctest --show-only=json-v1`); the
-test does no file I/O, so ctest's different working directory cannot matter; and
-`SolovievConvergence` is bit-identical over runs and over `OMP_NUM_THREADS`
-1 vs 16, so MFEM's threaded `reduction(+:dot)` in `Vector::operator*` is not
-obviously loose. The run was heavily contended — the whole suite took 1690 s
-against 798 s — which is the only thing known to have differed.
+| GS-2 case | | before | after |
+|---|---|---|---|
+| §4.2 pedestal | `k = 1, n = 16` | fail at 60 | **ok, 28** |
+| §4.2 pedestal | `k = 2, n = 16` | fail at 60 | **ok, 8** (against 11 for condense-first) |
+| §4.2 pedestal | `k = 1, h = 0.0333` | fail at 60 | **ok, 11** |
+| §4.3 barrier | `k = 2, h = 0.05` | fail at **0** | **ok** |
+| §4.5 layer | `k = 1, h = 0.0333` | fail at 60 | **ok** |
+| **§4.5 layer** | **`k = 2, h = 0.05`** | fail at 60 | **still fails at 60** |
 
-**So take 21/22 as the state and treat the pass as noise, not as progress.**
-It is recorded because a marginal test that passes occasionally is worse than
-one that fails consistently: it invites someone to conclude the parity gap
-closed. It has not; see the re-measurement below.
+**And the `0 iterations` mystery resolved itself.** That signature — a throw out
+of MFEM before completing one iteration, rather than wandering for sixty — was
+the one thing nobody could explain and nobody could reproduce outside meq. It is
+gone, as a side effect of the divergence guard added to `MultInvLin()`. Upstream
+flagged that as unverified and asked meq to check; meq checked.
 
-**MFEM's `Mult()` fix did not close it, and the re-measurement is on record.**
-`77967b24ad` ("Mult() linearises at its own argument") landed and reports two of
-three failures cleared on *its* reproducer. meq's cases are **unchanged,
-iteration for iteration**: `k = 1, n = 16` fails at 60, `k = 1, n = 32`
-converges in 14, `k = 2, n = 16` fails at 60. The fix moved the threshold rather
-than removing it, and meq's points sit the wrong side of where it now is. §7 of
-that document is the re-measurement.
+**The survivor is measured against both orderings rather than merely reported**,
+which is what makes it a parity claim:
 
-**What the fix DID clear** is the Jacobian-check ordering: `NewtonConvergence`'s
-central difference against the assembled gradient reads 4e-11 again, the
-`O(step²)` floor. meq keeps the hoisted `GetGradient()` regardless, because
-holding the linearisation fixed across a difference is the right thing to write
-whether or not the library requires it.
+| §4.5 internal layer | condense-first | linearise-first |
+|---|---|---|
+| `k = 1, n = 24` | ok, 23 | ok, 42 |
+| **`k = 2, n = 16`** | **ok, 10** | **fail at 60** |
+| `k = 2, n = 24` | ok, 12 | ok, 11 |
+
+Isolated: refining once cures it and so does dropping an order. It is one of
+three surviving out of 144 configurations upstream, all at widths where the
+frozen-Jacobian local correction cannot converge and the guard truncates.
+Closing them needs the local step globalised or solved exactly, and **nothing
+has been tried** — meq is not asking for it, because the ladder covers the
+production path.
+
+**THE FIX COSTS WALL CLOCK, AND THAT IS THE TRADE RATHER THAN A REGRESSION.**
+The correction loop that bought the correctness runs 4.2 to 12.1 corrections per
+element per linearisation against the fixed two. `PedestalConvergence` went
+351 s → 572 s and the whole suite 682 s → 872 s with no other change. Upstream
+measures linearise-first at 0.9 s against condense-first's 0.7 s on a stiff case
+and says so in its own doxygen: **this ordering is not a wall-clock win on a
+stiff problem.** What it buys is a local problem that is always a linear solve
+against one factorisation, and a reduced operator whose gradient is the
+assembled Schur complement.
+
+**A test that was green went red, and chasing it was worth more than the fix
+to it.** `andersonPicardReachesTheSameSolutionAsNewton` compared Newton against
+Anderson-Picard on one mesh at a tolerance of 1e-6. It now reads 9.1e-05 there.
+Over a sweep:
+
+| n | relative in `max ψ` |
+|---|---|
+| 16 | 9.103e-05 |
+| 24 | **1.160e-13** |
+| 32 | 3.275e-06 |
+| 48 | **4.944e-13** |
+
+**It is not a stopping tolerance**, which was the first guess: tightening rtol
+from 1e-8 to 1e-12 leaves the `n = 16` figures **bit identical**, at 230
+Anderson iterations instead of 162. Both iterations are fully converged and
+their fixed points differ. Round-off agreement on some meshes and 1e-5 on
+others, with no trend in the mesh, says these coarse discretisations carry **more
+than one solution** — which is what this file records elsewhere about the GS-2
+sources — and that two iterations with different non-linear structure sometimes
+land on different ones. The old single-mesh gate was green because the pre-fix
+Newton took 134 iterations on a gradient that did not belong to its residual and
+drifted onto Picard's branch. **A better Jacobian converging faster to a nearer
+solution is the expected consequence of the fix.**
+
+The test now sweeps three meshes and asserts the two things actually entailed:
+the **best** agreement is at round-off, which is what says the Picard path
+solves meq's problem rather than a neighbouring one — a wrong sign or a missing
+`1/r` would show O(1) — and the **worst** is bounded well below a different
+problem. A per-mesh gate at 1e-6 is not reinstatable and the test says why.
+
+**What the earlier `Mult()` fix cleared** is the Jacobian-check ordering:
+`NewtonConvergence`'s central difference against the assembled gradient reads
+4e-11, the `O(step²)` floor. meq keeps the hoisted `GetGradient()` regardless,
+because holding the linearisation fixed across a difference is the right thing
+to write whether or not the library requires it — though note upstream's finding
+that re-taking the gradient *after* a difference silently buys extra corrections
+and can hide exactly this class of defect.
+
 
 **Do not compare these timings against the ones this file used to carry.** The
 old 2269 s baseline was taken with a *different default ordering*
@@ -1823,16 +1872,20 @@ Most of the speedup is `MKL_NUM_THREADS=1` and that is separately and cleanly
 measured under *Traps*; attributing the per-file ratios to any one cause would
 be wrong. The table below is context, not a measurement:
 
-| | old, condense-first | now |
-|---|---|---|
-| `PedestalConvergence` | 1334 s | 409 s |
-| `naming` | 127 s | 150 s |
-| `MillerConvergence` | 194 s | 77 s |
-| `HighBetaConvergence` | 224 s | 25 s |
-| `NewtonConvergence` | 117 s | 36 s |
-| `WarmStartConvergence` | 84 s | 5 s |
-| `ExtensionConvergence` | 75 s | 36 s |
-| **total** | **2269 s** | **798 s** |
+| | old, condense-first | 08-30, MKL=1 | 08-31, MFEM fixed |
+|---|---|---|---|
+| `PedestalConvergence` | 1334 s | 409 s (7 red) | 572 s (1 red) |
+| `naming` | 127 s | 150 s | 128 s |
+| `MillerConvergence` | 194 s | 77 s | 58 s |
+| `HighBetaConvergence` | 224 s | 25 s | 17 s |
+| `NewtonConvergence` | 117 s | 36 s | 30 s |
+| `WarmStartConvergence` | 84 s | 5 s | 5 s |
+| `ExtensionConvergence` | 75 s | 36 s | 28 s |
+| **total** | **2269 s** | **798 s** | **872 s** |
+
+The last column is *slower overall* and *faster in every file but one*: the
+correction loop that fixed the parity gap costs `PedestalConvergence` 163 s, and
+that one file outweighs the gains everywhere else.
 
 `naming` is now the second most expensive item in the suite and is the only one
 that went *up*; it is clang-tidy over `src/meq`, so it tracks the library
@@ -1923,7 +1976,7 @@ for `CondenseThenLinearise` deliberately, which only `PedestalConvergence` does,
 and only to measure the two against each other. The historical reading — `el: N
 not convered in 100 iters` being where the pedestal fails — describes the
 ordering meq no longer uses. What the pedestal fails on now is the parity gap;
-see *The suite is 21/22*.
+see *The suite is 22/23*.
 
 **And there is a fifth thing that is not a solver at all but decides how fast
 the third and fourth run**: `setAssemblyMode()`, which threads the element loop

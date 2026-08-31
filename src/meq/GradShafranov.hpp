@@ -640,9 +640,25 @@ namespace meq
 			};
 
 			/// Choose it. Newton is the default and is what every rate in the
-			/// suite was measured with. **Inert under
-			/// NonlinearOrdering::LineariseThenCondense**, where there is no local
-			/// non-linear solve to configure.
+			/// suite was measured with.
+			///
+			/// **Its SOLVER TYPE and PRECONDITIONER are inert under
+			/// NonlinearOrdering::LineariseThenCondense** -- there is no local
+			/// non-linear solve to pick a method for, and
+			/// `GetNumLocalNLIterations()` stays at zero.
+			///
+			/// **Its ITERATION CAP AND TOLERANCES are not inert, and this file
+			/// used to say otherwise.** Under that ordering they bound the loop
+			/// that establishes the linearisation point, and MFEM's own doxygen
+			/// is blunt about why that matters: `GetGradient()` is the Schur
+			/// complement of the Jacobian at the retained fields, so it is the
+			/// derivative of `Mult()` only as far as those fields solve the local
+			/// problem. A fixed budget of two corrections shipped for a while and
+			/// put the gradient 3e-04 out on a stiff source **that still
+			/// converged** -- which is the shape of every Jacobian defect this
+			/// project has met: no wrong answer, only a wrong path to it. meq
+			/// asks for 100 iterations at rtol 1e-12, so it is bounded by the
+			/// tolerance rather than by the cap.
 			void setLocalSolver( LocalSolver choice );
 
 			/// In which order the hybridization and the linearisation are applied.
@@ -675,21 +691,38 @@ namespace meq
 				/// element-local work a batch of fixed-size LINEAR solves, which
 				/// is the largest performance item meq has identified.
 				///
-				/// **WHAT IT COSTS, AND THE COST IS REAL.** On a stiff potential
-				/// source it converges slowly or not at all where the other
-				/// ordering is comfortable: measured on GS-2 section 4.2 at
-				/// k = 1, refining alone crosses the threshold -- n <= 28 does not
-				/// converge in 60 iterations, n = 30 takes 22 and n = 32 takes 13,
-				/// against 5 for condense-first at all three. The cause is in
-				/// MFEM and is written up as
-				/// ../mfem-hdg-dev/doc/HDG-LINEARISE-FIRST-STIFF-SOURCES.md: the
-				/// reduced residual is not an exact function of the trace across
-				/// an advancing linearisation, and in meq's regime the gap reaches
-				/// 1.5 relative where that tree's own tests pin 1.1e-2.
+				/// **WHAT IT COSTS, AND THE COST IS NOW SMALL BUT NOT ZERO.**
+				/// It used to converge slowly or not at all on several stiff
+				/// sources -- GS-2 section 4.2 at `k = 1` needed `n >= 30`, where
+				/// condense-first took 5 iterations at every resolution. **MFEM
+				/// fixed the cause on 2026-08-31**: the linearisation point took a
+				/// fixed two frozen-Jacobian local corrections, and
+				/// `GetGradient()` is the Schur complement of the Jacobian at
+				/// whatever fields that left, so the correction count *was* the
+				/// gradient's accuracy. It now iterates to
+				/// `setLocalSolver()`'s tolerance. Section 4.2 at `k = 1, n = 16`
+				/// went from failing at 60 to converging in 28, and `k = 2,
+				/// n = 16` from failing at 60 to **8**.
 				///
-				/// So the tests that fail under this ordering fail for a named
-				/// reason and are the record of it, which is this project's
-				/// standing arrangement for a defect that is not meq's to fix.
+				/// **One case in meq's suite still fails and is characterised**:
+				/// GS-2 section 4.5, the internal layer, at `k = 2, n = 16` --
+				/// condense-first takes 10 iterations, this ordering fails at 60,
+				/// and `k = 1, n = 24` and `k = 2, n = 24` are fine under both.
+				/// It is one of three surviving cases out of 144 upstream, all at
+				/// widths where the frozen-Jacobian local correction cannot
+				/// converge and the divergence guard truncates. Closing it needs
+				/// the local step globalised or solved exactly, and nothing has
+				/// been tried. See
+				/// ../mfem-hdg-dev/doc/HDG-LINEARISE-FIRST-STIFF-SOURCES.md.
+				///
+				/// **And it is not a wall-clock win on a stiff problem.** The
+				/// correction loop that bought the correctness costs 4.2 to 12.1
+				/// corrections per element per linearisation against the fixed
+				/// two, which upstream measures as 0.9 s against condense-first's
+				/// 0.7 s. What this ordering buys is a local problem that is
+				/// always a linear solve against one factorisation, and a reduced
+				/// operator whose gradient is the assembled Schur complement --
+				/// not speed.
 				LineariseThenCondense
 			};
 

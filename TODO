@@ -708,9 +708,16 @@ polynomial degree are chosen for accuracy and not for patience.
   GetNumLocalNLIterations() reads zero under it, which is what says the ordering
   really took effect rather than merely being selectable.
 
-  IT FAILED AT THE JOB IT WAS ORIGINALLY PURSUED FOR -- it was expected to rescue
-  the stiff sources and is strictly worse on every one of them -- but that is
-  irrelevant here and does not weaken this item. What it buys THIS work is the
+  IT DID NOT DO THE JOB IT WAS ORIGINALLY PURSUED FOR, AND THAT VERDICT HAS NOW
+  BEEN REVISED TWICE, SO READ IT CAREFULLY. It was expected to rescue the stiff
+  sources; for a while it was strictly WORSE on every one of them; and since
+  MFEM's ad04da3749 (2026-08-31) it solves all but one of them -- section 4.2 at
+  k = 2, n = 16 in 8 iterations against condense-first's 11, with only section
+  4.5 at k = 2, n = 16 still failing. The cause was that the linearisation point
+  took a fixed two frozen-Jacobian corrections, so the correction count WAS the
+  gradient's accuracy. It is not a wall-clock win even so: the correction loop
+  costs 4.2 to 12.1 corrections per element per linearisation and
+  PedestalConvergence went 351 s to 572 s. None of that weakens this item. What it buys THIS work is the
   fixed-size linear local solve, and it still buys it. So the batched plan should
   be written against that, not against nonlinear solves of unpredictable
   iteration count: Picard is a bridge to Newton, not the algorithm meq should
@@ -804,9 +811,18 @@ polynomial degree are chosen for accuracy and not for patience.
      mkl_set_num_threads_local() around the trace solve, or
      LocalFactorMode::Batched for the local factorisations.
   5. Measure LSsolveType properly across the benchmark suite rather than on one
-     case, and set the default from that. **Lower value than it was**: under
-     LineariseThenCondense there is no element-local nonlinear solve to
-     configure, so this only matters for the ordering meq no longer uses.
+     case, and set the default from that. LOWER VALUE THAN IT WAS, but not zero,
+     and the distinction is finer than an earlier version of this item claimed:
+     under LineariseThenCondense the solver TYPE and PRECONDITIONER really are
+     inert -- there is no local nonlinear solve to pick a method for -- but the
+     ITERATION CAP AND TOLERANCES are not. They bound the loop that establishes
+     the linearisation point, and MFEM's doxygen is blunt about what that costs:
+     GetGradient() is the Schur complement of the Jacobian at the retained
+     fields, so it is the derivative of Mult() only as far as those fields solve
+     the local problem. A fixed budget of two corrections shipped upstream for a
+     while and put the gradient 3e-04 out on a stiff source THAT STILL
+     CONVERGED. meq asks for 100 iterations at rtol 1e-12, so it is bounded by
+     the tolerance and not by the cap -- worth re-checking if either moves.
   6. ~~cuDSS on the trace system, locally FOR CORRECTNESS~~ -- DONE, and the
      answer is exactly the split this item predicted. MFEM_USE_CUDSS is on,
      mfem::CuDSSSolver agrees with UMFPACK to 3.5e-14 from 9,408 to 148,224

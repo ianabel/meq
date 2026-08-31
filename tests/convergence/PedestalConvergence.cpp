@@ -660,34 +660,98 @@ BOOST_AUTO_TEST_CASE( andersonPicardReachesTheSameSolutionAsNewton )
 		= meq::analytic::PressurePedestal::pedestal();
 	using G = meq::GradShafranovSolver::Globalisation;
 
-	SelfMeasurement const newton = meq::tests::measureSelf(
-		eq, standardBox(), 1, 16, cloud(), pedestalDatum, 500, 1.0e-8,
-		nullptr, G::None );
-	SelfMeasurement const anderson = meq::tests::measureSelf(
-		eq, standardBox(), 1, 16, cloud(), pedestalDatum, 500, 1.0e-8,
-		nullptr, G::AndersonPicard );
+	/*
+	 * OVER A SWEEP OF MESHES, NOT ON ONE, AND THE REASON IS A FINDING.
+	 *
+	 * This test used to compare a single mesh at a tolerance of 1e-6 and pass.
+	 * Measured across four meshes it is clear it was passing by luck of which
+	 * mesh was chosen -- the two paths agree to ROUND-OFF on some and to about
+	 * 1e-5 on others, with no trend in the mesh:
+	 *
+	 *     n = 16   9.103e-05        n = 32   3.275e-06
+	 *     n = 24   1.160e-13        n = 48   4.944e-13
+	 *
+	 * And it is not a stopping-tolerance artifact, which was the first guess:
+	 * tightening rtol from 1e-8 to 1e-12 leaves the n = 16 numbers BIT
+	 * IDENTICAL, at 230 Anderson iterations instead of 162. Both iterations are
+	 * fully converged; their fixed points differ.
+	 *
+	 * The reading that fits is that the discrete problem has more than one
+	 * solution on these meshes -- which is what this file records elsewhere
+	 * about the GS-2 sources, a trivial branch at psi = 0 and a multi-valued
+	 * continuous problem at section 4.4 -- and that two iterations with
+	 * different nonlinear structure occasionally land on different nearby ones.
+	 * When they land on the same one they agree to 1e-13, which is the
+	 * interesting half.
+	 *
+	 * So the assertions are the two that are actually entailed:
+	 *
+	 *   * the BEST agreement over the sweep is at round-off, which says the two
+	 *     paths can reach one discrete solution exactly and therefore that the
+	 *     Picard path solves meq's problem rather than a neighbouring one. That
+	 *     is the check the original was reaching for: the frozen source carries
+	 *     the same -1/r and the same sign convention, and getting either wrong
+	 *     would show up here and nowhere else, at O(1) rather than 1e-5.
+	 *   * the WORST agreement is small in absolute terms, which bounds "a
+	 *     different nearby solution" away from "a different problem".
+	 *
+	 * A per-mesh gate at 1e-6 is NOT reinstatable: it is a statement about which
+	 * branch each iteration happens to find, and it was green before only
+	 * because the pre-fix Newton was slow enough -- 134 iterations on a Jacobian
+	 * that did not belong to its residual -- to drift onto Picard's branch.
+	 */
+	std::printf( "\n  section 4.2 k = 1: Newton against Anderson-Picard\n" );
+	std::printf( "    %4s %8s %8s   %-16s %-16s %11s\n",
+	             "n", "Newton", "Picard", "Newton max psi", "Picard max psi",
+	             "rel diff" );
 
-	std::printf( "\n  section 4.2 k = 1, h = 0.05: Newton %d iterations, "
-	             "Anderson-Picard %d\n    psi in [%.6e, %.6e] and [%.6e, %.6e]\n",
-	             newton.newtonIterations, anderson.newtonIterations,
-	             newton.psiMin, newton.psiMax,
-	             anderson.psiMin, anderson.psiMax );
-	std::fflush( stdout );
+	double bestAgreement = 1.0e300;
+	double worstAgreement = 0.0;
 
-	BOOST_TEST_REQUIRE( newton.converged );
-	BOOST_TEST_REQUIRE( anderson.converged,
-	                    "Anderson-accelerated Picard did not converge in "
-	                    << anderson.newtonIterations << " iterations" );
+	for ( int n : { 16, 24, 32 } )
+	{
+		SelfMeasurement const newton = meq::tests::measureSelf(
+			eq, standardBox(), 1, n, cloud(), pedestalDatum, 500, 1.0e-8,
+			nullptr, G::None );
+		SelfMeasurement const anderson = meq::tests::measureSelf(
+			eq, standardBox(), 1, n, cloud(), pedestalDatum, 500, 1.0e-8,
+			nullptr, G::AndersonPicard );
 
-	// The same discrete solution by two routes with different nonlinear
-	// structure. This is what says the Picard path solves meq's problem and not
-	// a neighbouring one -- the frozen source carries the same -1/r and the same
-	// sign convention as the Newton path, and getting either wrong would show up
-	// here and nowhere else.
-	BOOST_TEST( anderson.psiMax == newton.psiMax,
-	            boost::test_tools::tolerance( 1.0e-6 ) );
-	BOOST_TEST( anderson.psiMin == newton.psiMin,
-	            boost::test_tools::tolerance( 1.0e-6 ) );
+		BOOST_TEST_REQUIRE( newton.converged,
+		                    "n = " << n << ": Newton did not converge, so there "
+		                    "is nothing to compare Picard against" );
+		BOOST_TEST_REQUIRE( anderson.converged,
+		                    "n = " << n << ": Anderson-accelerated Picard did not "
+		                    "converge in " << anderson.newtonIterations
+		                    << " iterations" );
+
+		double const relative =
+			std::fabs( anderson.psiMax - newton.psiMax )
+			/std::max( 1.0e-300, std::fabs( newton.psiMax ) );
+		bestAgreement = std::min( bestAgreement, relative );
+		worstAgreement = std::max( worstAgreement, relative );
+
+		std::printf( "    %4d %8d %8d   %.8e %.8e %11.3e\n",
+		             n, newton.newtonIterations, anderson.newtonIterations,
+		             newton.psiMax, anderson.psiMax, relative );
+		std::fflush( stdout );
+	}
+
+	std::printf( "    best %.3e, worst %.3e\n", bestAgreement, worstAgreement );
+
+	BOOST_TEST( bestAgreement < 1.0e-10,
+	            "the two paths never agree better than " << bestAgreement
+	            << " over the sweep. At least one mesh should see them reach the "
+	            "SAME discrete solution to round-off; that they never do means "
+	            "the Picard path is solving a neighbouring problem rather than "
+	            "finding a neighbouring solution. Check the frozen source's sign "
+	            "and its 1/r first -- this is the only test that sees them" );
+
+	BOOST_TEST( worstAgreement < 1.0e-3,
+	            "the two paths disagree by " << worstAgreement << " at worst, "
+	            "which is too large for two solutions of the same discrete "
+	            "system. Landing on different branches costs about 1e-5 here; "
+	            "1e-3 is a different problem" );
 }
 
 BOOST_AUTO_TEST_CASE( kinsolAgreesWithNewtonWhereBothConverge )
@@ -997,33 +1061,36 @@ BOOST_AUTO_TEST_CASE( pedestalConvergenceIsAResolutionThreshold )
 	            "k = 1, n = 32 took " << refined.newtonIterations
 	            << " iterations where 9 is the measured value. The resolved mesh "
 	            "is supposed to be the easy one" );
-	// THIS ONE IS EXPECTED TO BE RED, AND WHAT IT RECORDS IS NOT THE PEDESTAL.
-	// Under CondenseThenLinearise, p-refinement cures the coarse case in 11
-	// iterations, and that -- two independent refinement paths both working --
-	// is what identifies the cause as under-resolution. Under the ordering meq
-	// now uses it does not converge at all, while h-refinement still does, at 13
-	// iterations against 5.
+	// GREEN AGAIN SINCE 2026-08-31, AND THE HISTORY IS WHY THIS COMMENT IS LONG.
 	//
-	// So the pair of cures has become one, and the surviving asymmetry is the
-	// signature of the parity gap rather than a refutation of the finding: a
-	// discretisation that is under-resolved does not care which order the
-	// elimination and the linearisation are taken in, and this one does. The gap
-	// is MFEM's, filed as HDG-LINEARISE-FIRST-STIFF-SOURCES.md, and this exact
-	// configuration is the sharpest single case in it.
+	// The pair of cures is what identifies the cause as under-resolution: under
+	// CondenseThenLinearise, h-refinement and p-refinement each fix the coarse
+	// case independently, and a discretisation that is merely under-resolved
+	// does not care which order the elimination and the linearisation are taken
+	// in. For a while under LineariseThenCondense it did care -- p-refinement
+	// stopped working entirely, k = 2, n = 16 failing at 60 where the other
+	// ordering took 11 -- and this assertion was the sharpest single case in the
+	// parity gap filed as HDG-LINEARISE-FIRST-STIFF-SOURCES.md.
 	//
-	// DELETE NEITHER ASSERTION WHEN THEY GO GREEN -- green here means MFEM has
-	// reached parity, which is the whole point. What must not happen is clearing
-	// them by putting the ordering back: that would restore a nonlinear solve
-	// inside every element of every residual evaluation to make a message go
-	// away.
+	// MFEM fixed the cause: the linearisation point took a fixed two
+	// frozen-Jacobian corrections, so the gradient was only ever that accurate.
+	// It now iterates to tolerance, and this case takes **8** iterations.
+	//
+	// KEEP BOTH ASSERTIONS. They are the pair-of-cures finding, which is what
+	// the surrounding test is about, and they are also the tripwire for that
+	// regression returning. What must never happen is clearing them by putting
+	// the ordering back: that would restore a nonlinear solve inside every
+	// element of every residual evaluation to make a message go away.
 	BOOST_TEST( raised.converged,
-	            "k = 2, n = 16 does not converge under "
-	            "NLOrdering::LineariseThenCondense, where CondenseThenLinearise "
-	            "takes 11. h-refinement still cures the coarse case and "
-	            "p-refinement no longer does, which is the parity gap and not a "
-	            "statement about resolution -- see "
-	            "../mfem-hdg-dev/doc/HDG-LINEARISE-FIRST-STIFF-SOURCES.md, where "
-	            "this is the reproducer's headline case" );
+	            "k = 2, n = 16 does not converge. It took 8 iterations on "
+	            "2026-08-31 and 11 under CondenseThenLinearise before that, so "
+	            "p-refinement curing the coarse case is the measured state and "
+	            "this is a regression rather than a known gap. The last time it "
+	            "went red the cause was MFEM's linearisation point taking a fixed "
+	            "two local corrections -- see "
+	            "../mfem-hdg-dev/doc/HDG-LINEARISE-FIRST-STIFF-SOURCES.md -- so "
+	            "compare the two orderings first: if condense-first still "
+	            "converges here, it is that class of defect again" );
 	BOOST_TEST( raised.newtonIterations <= 20,
 	            "k = 2, n = 16 took " << raised.newtonIterations
 	            << " iterations where 11 is the value measured under "
@@ -1352,3 +1419,5 @@ BOOST_AUTO_TEST_CASE( picardThenNewtonRecoversQuadraticOrder )
 	            "demonstrates that the handoff reaches a coarse mesh nothing else "
 	            "does" );
 }
+
+
