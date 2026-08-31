@@ -2749,6 +2749,34 @@ root will silently run somewhere else. Use absolute paths.
 **`grep -c` exits 1 on zero matches**, so a background check reports failure
 spuriously.
 
+**Shell VARIABLES do not persist between Bash tool calls, only the working
+directory does** — which is the trap above read the other way round, and it is
+the more dangerous half. `L=...` in one call is gone by the next, so
+`until grep -q '^EXIT=' "$LOG"` with an unset `LOG` becomes
+`grep -q '^EXIT=' ""`, and **`grep -q` with no file argument reads stdin**. In a
+detached background process stdin never reaches EOF, so the loop blocks rather
+than failing, and it blocks silently for the life of the session.
+
+**And a completion marker appended to a log is not necessarily at the start of a
+line.** `echo "EXIT=$?" >> log` after a Boost test binary lands on the end of
+its final ANSI reset sequence, because Boost's coloured output does not
+terminate with a newline:
+
+```
+^[[0;39;49mEXIT=201
+```
+
+`grep -q '^EXIT='` then never matches, however long you wait. ctest's own output
+*does* end with a newline, so a waiter watching `ctest` works and the same
+waiter watching a bare test binary does not — which is exactly the kind of
+difference that gets diagnosed as "the run is slow". Drop the `^`, or `echo`
+a newline first.
+
+**Both of these cost a session six idle `sleep` loops and no wrong answers**,
+which is the point worth keeping: a polling loop that can never terminate is
+invisible when the thing it polls for is also reported some other way. If a
+waiter is used, check it actually fired.
+
 **The four defects meq reported to MFEM are closed, and
 `HDG-DEFECTS-FROM-MEQ.md` is gone from that tree's `doc/`** — retired by
 *"Retire two bug reports whose findings are all fixed and covered"*. Checked
