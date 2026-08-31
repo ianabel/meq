@@ -34,7 +34,7 @@
  * there is the subject of a long comment in the .cpp, and it is not the one the
  * papers print.
  *
- * TWO PATHS THROUGH THIS CLASS, chosen by which setSource() is called.
+ * THREE PATHS THROUGH THIS CLASS, chosen by which setSource() is called.
  *
  * When F does not depend on psi the problem is linear: F goes to the right hand
  * side as a coefficient, the trace system is a matrix, and one direct solve
@@ -43,6 +43,13 @@
  * operator as a non-linear potential mass term. Both papers use an
  * Anderson-accelerated Picard iteration instead; the reasons for departing are
  * in CLAUDE.md, and the price is that every Source must supply dF/dpsi.
+ *
+ * And when the source's profiles are functions of NORMALISED flux -- which is
+ * how an equilibrium is actually specified -- psi on the magnetic axis is a
+ * functional of the solution rather than data, and becomes an UNKNOWN of the
+ * non-linear system: setSource( NormalisedSource &, double ) closes the trace
+ * and psi_ax together by a bordered Newton. That is a structural change and not
+ * an extra term, for the reason recorded on that overload.
  *
  * TWO BOUNDARY REGIMES, chosen by whether setExtension() is called.
  *
@@ -270,6 +277,135 @@ namespace meq
 			/// there does not move the converged answer, it only wrecks, or
 			/// silently slows, the convergence to it.
 			void setSource( Source const &fIn );
+
+			/**
+			 * A source specified in NORMALISED flux, with psi on the magnetic
+			 * axis carried as an UNKNOWN of the non-linear system rather than as
+			 * data.
+			 *
+			 * @param fIn            the source. Borrowed and MUTATED: the solver
+			 *                       calls setNormalisation() on it before every
+			 *                       residual evaluation, so it must outlive the
+			 *                       solve and must not be shared with anything
+			 *                       that reads it meanwhile.
+			 * @param psiAxisGuessIn the starting value of psi_ax. It is a guess in
+			 *                       the Newton sense -- see below, it matters.
+			 *
+			 * WHAT THIS CHANGES, which is structural rather than an extra term.
+			 * The unknown becomes the pair ( lambda, psi_ax ): the trace, and one
+			 * scalar. The system Newton closes is
+			 *
+			 *     R( lambda, psi_ax ) = 0        the hybridized trace residual
+			 *     psi_ax - max psi_h  = 0        the normalisation, as an equation
+			 *
+			 * and the Jacobian is bordered,
+			 *
+			 *     [  A   c  ]        A = dR/dlambda,  c = dR/dpsi_ax
+			 *     [  b^T d  ]        b = -d( max psi_h )/dlambda,  d = 1 - d( max psi_h )/dpsi_ax
+			 *
+			 * with c and b THE NON-LOCAL TERMS. They are non-local in the precise
+			 * sense CEDRES++ (refs/CEDRES.pdf) means when it says a normalised
+			 * profile "leads to non-local entries in the stiffness matrix": psi_ax
+			 * is a functional of the whole solution, so a perturbation of the
+			 * trace anywhere near the magnetic axis moves the source EVERYWHERE.
+			 *
+			 * WHY IT CANNOT BE A RANK-ONE UPDATE INSIDE THE ELEMENT BLOCKS, which
+			 * is what a CG code would do. In an H^1 discretisation psi_ax is one
+			 * entry of the global unknown and the Jacobian simply acquires a
+			 * rank-one term. Hybridization eliminates flux and potential ELEMENT BY
+			 * ELEMENT, and a term coupling every element to the one element holding
+			 * the axis is exactly what that elimination cannot represent. The
+			 * border is where it goes instead, and the bordered system is solved by
+			 * block elimination -- two backsolves against one factorisation of A,
+			 * so the extra unknown costs a backsolve and not a second matrix.
+			 *
+			 * WHY THE GUESS IS NOT OPTIONAL. With psi_ax held fixed the equation
+			 * has a small solution -- the one Newton finds from zero, where the
+			 * profile is never sampled beyond Psi ~ 1e-2 and is inert -- and a
+			 * large one, which is the equilibrium. Only the large one can satisfy
+			 * max psi_h = psi_ax. Adding the constraint removes the small branch
+			 * from the SOLUTION SET but not from the iteration's reach, so the
+			 * starting point still has to be on the right side of it:
+			 * setInitialGuess() with a bump of about the right height, and a
+			 * psiAxisGuessIn of about the right size. Dimensionally, for a
+			 * pressure p = A Psi^nu on a box whose first Dirichlet eigenvalue is
+			 * lambda_1, psi_ax is around sqrt( nu A / lambda_1 ).
+			 *
+			 * @throws std::logic_error if a source is already set, if the forms
+			 *         are built, or if NonlinearOrdering::LineariseThenCondense is
+			 *         in force -- under that ordering the reduced operator is a
+			 *         LINEARISED residual between GetGradient() calls, and the
+			 *         border is obtained by differencing the residual, so the two
+			 *         would be differentiating different functions.
+			 * @throws std::invalid_argument if psiAxisGuessIn is not finite or is
+			 *         zero.
+			 */
+			void setSource( NormalisedSource &fIn, double psiAxisGuessIn );
+
+			/**
+			 * psi on the magnetic axis implied by @a trace: the potential
+			 * recovered from it at the current normalisation, and the largest
+			 * nodal value of that. This is exactly the functional the
+			 * normalisation constraint is built on.
+			 *
+			 * It is public for the reason prepare() and reducedOperator() are:
+			 * the border of the bordered Jacobian is d( this )/d lambda, and its
+			 * being supported on the trace dofs of a single element is a claim
+			 * about the hybridization that ought to be measured rather than
+			 * argued. See theAxisSensitivityIsLocalToItsElement.
+			 *
+			 * @param element if not null, receives the element that attained it.
+			 *
+			 * Valid after prepare(). Leaves the solution blocks alone.
+			 *
+			 * @throws std::logic_error if psi_ax is not an unknown of this solver,
+			 *         or if nothing has been prepared.
+			 */
+			double axisFlux( mfem::Vector const &trace, int *element = nullptr );
+
+			/// How psi_ax is coupled to the field when it is an unknown.
+			enum class Normalisation
+			{
+				/// The bordered Newton. psi_ax is a genuine unknown and the
+				/// Jacobian carries the two non-local terms. The default, and the
+				/// only one to run a calculation with.
+				Coupled,
+				/// The same iteration with the border DROPPED: c, b and d - 1 all
+				/// taken to be zero. The step in psi_ax then reduces to
+				/// psi_ax <- max psi_h and the trace step never sees the
+				/// normalisation move -- which is psi_ax OUTSIDE the residual,
+				/// done inside the same loop with everything else held fixed.
+				///
+				/// It exists so that what the non-local terms buy can be MEASURED
+				/// rather than asserted, in the manner of
+				/// ResidualEstimator's TraceComparison::Literal. Nothing else
+				/// should use it: see theNonLocalTermsAreWhatMakeItConverge for
+				/// what it does to the convergence.
+				Decoupled
+			};
+
+			/// Choose it. Normalisation::Coupled is the default and is what every
+			/// number in the suite was measured with. Ignored unless psi_ax is an
+			/// unknown.
+			void setNormalisationCoupling( Normalisation choice );
+
+			/// Which coupling solve() will use.
+			Normalisation normalisationCoupling() const;
+
+			/// True once setSource( NormalisedSource &, double ) has been called:
+			/// psi_ax is an unknown and solve() runs the bordered Newton.
+			bool normalisationIsUnknown() const;
+
+			/// psi on the magnetic axis: the guess before solve(), the converged
+			/// value after it. Zero unless normalisationIsUnknown().
+			double psiAxis() const;
+
+			/// The constraint residual psi_ax - max psi_h at the end of the last
+			/// solve. It is the half of the augmented residual that says whether
+			/// the normalisation is self consistent, and it is worth reporting
+			/// separately from the trace residual because the two have different
+			/// units. Zero unless normalisationIsUnknown().
+			double normalisationResidual() const;
 
 			/// The Dirichlet datum g_D for psi on Gamma. Non-homogeneous data is
 			/// the normal case: the level set psi = 0 is the plasma boundary, but a
@@ -516,15 +652,44 @@ namespace meq
 			{
 				/// Condense first. Eliminating flux and potential on an element is
 				/// then itself a non-linear solve, one per element per residual
-				/// evaluation -- and on the stiff GS-2 sources those are what
-				/// fail. MFEM's default, and meq's until measured otherwise.
+				/// evaluation. **MFEM's default, and no longer meq's** -- see
+				/// LineariseThenCondense for the decision and what it costs.
+				///
+				/// It is kept, and is still the right choice for two things: a
+				/// solver that will not ask for a gradient every iterate, and any
+				/// use needing the reduced residual to be an exact function of the
+				/// trace across advancing linearisations, which only this ordering
+				/// gives. PedestalConvergence measures both orderings against each
+				/// other and needs it for that.
 				CondenseThenLinearise,
 				/// Linearise first: Newton on the full ( q, psi, psihat ) system,
 				/// hybridizing the linear system that results. Every local
-				/// operation is then a linear solve. This is how the method is
-				/// defined -- Nguyen, Peraire & Cockburn, refs/HDG-NPC-2.pdf
-				/// section 2.6, eqs (14)-(18) -- and the ordering meq wants, on
-				/// the argument in CLAUDE.md under "Why meq's Newton struggles".
+				/// operation is then a linear solve and
+				/// GetNumLocalNLIterations() stays at zero.
+				///
+				/// **THIS IS meq'S DEFAULT.** It is how the method is defined --
+				/// Nguyen, Peraire & Cockburn, refs/HDG-NPC-2.pdf section 2.6,
+				/// eqs (14)-(18) -- and no paper in refs/ runs the other one:
+				/// GS-1 and GS-2 avoid the question with Anderson-accelerated
+				/// Picard, NPC linearise first. It is also what makes the
+				/// element-local work a batch of fixed-size LINEAR solves, which
+				/// is the largest performance item meq has identified.
+				///
+				/// **WHAT IT COSTS, AND THE COST IS REAL.** On a stiff potential
+				/// source it converges slowly or not at all where the other
+				/// ordering is comfortable: measured on GS-2 section 4.2 at
+				/// k = 1, refining alone crosses the threshold -- n <= 28 does not
+				/// converge in 60 iterations, n = 30 takes 22 and n = 32 takes 13,
+				/// against 5 for condense-first at all three. The cause is in
+				/// MFEM and is written up as
+				/// ../mfem-hdg-dev/doc/HDG-LINEARISE-FIRST-STIFF-SOURCES.md: the
+				/// reduced residual is not an exact function of the trace across
+				/// an advancing linearisation, and in meq's regime the gap reaches
+				/// 1.5 relative where that tree's own tests pin 1.1e-2.
+				///
+				/// So the tests that fail under this ordering fail for a named
+				/// reason and are the record of it, which is this project's
+				/// standing arrangement for a defect that is not meq's to fix.
 				LineariseThenCondense
 			};
 
@@ -535,6 +700,123 @@ namespace meq
 
 			/// The ordering solve() will use.
 			NonlinearOrdering nonlinearOrdering() const;
+
+			/// How the element loop that builds the reduced system runs.
+			/// A THIRD axis, orthogonal to the two above: those decide what is
+			/// computed, this decides who computes it. Purely a performance
+			/// choice -- MFEM guarantees the two modes agree **bit for bit**,
+			/// because the element-local arithmetic is per element and so
+			/// reassociates nothing, and the scatter stays serial and in element
+			/// order.
+			enum class AssemblyMode
+			{
+				/// One thread. MFEM's default and **meq's**, unconditionally --
+				/// see setAssemblyMode() for why an automatic gate was tried and
+				/// removed.
+				Serial,
+				/// Thread the element-local half of ComputeH() -- the factorisation
+				/// of A, the Schur complement and its factorisation, and one local
+				/// back-substitution per trace dof. The scatter into the trace
+				/// matrix is NOT threaded and cannot be: an unfinalized
+				/// mfem::SparseMatrix carries one current_row and one column-pointer
+				/// scratch for the whole matrix, so two threads writing rows that
+				/// are disjoint by construction still collide, and the failure is a
+				/// hang rather than a wrong answer. That serial scatter is the
+				/// Amdahl ceiling on this option.
+				///
+				/// **Requires MFEM_USE_OPENMP and MFEM_THREAD_SAFE, and MFEM
+				/// ABORTS rather than falling back if the build lacks either** --
+				/// deliberately, since a caller asking for this is asking a
+				/// performance question and a silent serial loop is not an answer
+				/// to it. meq therefore checks the build before passing it on.
+				Threaded
+			};
+
+			/// Choose it. **Serial is the default and there is no automatic
+			/// gate**, which was decided by measurement rather than caution.
+			///
+			/// Threaded is worth **1.15x to 1.33x** on a mesh assembled a few
+			/// times, and it is **0.86x** -- a loss -- at one thread, where the
+			/// chunk buffering pays for parallelism nobody asked for. A gate on
+			/// `omp_get_max_threads() > 1` was therefore written, and then
+			/// removed: `HighBetaConvergence`, which assembles a *small* system
+			/// many times inside a bordered Newton, went from 21.5 s to 39 s
+			/// under it. **1.8x slower, reproducibly.**
+			///
+			/// Mesh size does not separate the two cases -- HighBeta's meshes are
+			/// 128 and 512 elements and 512 is where the isolated benchmark still
+			/// showed a win. What separates them is how often assembly is called
+			/// relative to everything else, which the solver cannot know. So the
+			/// choice is the caller's: **take Threaded for a large mesh assembled
+			/// a few times, leave it alone for a small one assembled hundreds of
+			/// times.**
+			///
+			/// Throws std::invalid_argument rather than letting MFEM abort the
+			/// process when the library was built without OpenMP or without
+			/// thread safety.
+			void setAssemblyMode( AssemblyMode choice );
+
+			/// The mode buildForms() will ask for.
+			AssemblyMode assemblyMode() const;
+
+			/// Which direct solver factorises the hybridized trace system.
+			///
+			/// All three reach the same answer -- asserted, not assumed:
+			/// `theTraceSolversAgree` pins them against each other to 1e-10 and
+			/// they measure 1e-14 or better. So this is a **performance** choice
+			/// and a licence choice, never a numerical one.
+			enum class TraceSolver
+			{
+				/// SuiteSparse, `mfem::UMFPackSolver`, METIS ordering. **The
+				/// default**, because it is the one every rate in the suite was
+				/// measured with and the only one present in every build.
+				UMFPack,
+				/// oneMKL, `mfem::PardisoSolver`, `REAL_STRUCTURE_SYMMETRIC` --
+				/// structurally symmetric on both paths, symmetric in value only
+				/// on the fitted one. Needs `MFEM_USE_MKL_PARDISO`.
+				///
+				/// **Faster than UMFPack even single-threaded** -- 1.50x on the
+				/// factorisation and 1.41x on the backsolve at 37,248 trace dofs
+				/// -- and it is NOT the default anyway, because oneMKL's licence
+				/// is not everybody's to accept and most builds do not have it.
+				/// It scales a further 1.9x on MKL threads, which meq cannot
+				/// currently spend: see CLAUDE.md, *Threaded MKL is a
+				/// catastrophe*.
+				Pardiso,
+				/// NVIDIA cuDSS, `mfem::CuDSSSolver`, `NONSYMMETRIC` + `FULL`.
+				/// Needs `MFEM_USE_CUDSS` **and an `mfem::Device` configured for
+				/// CUDA before the solver is built** -- it reads its matrix and
+				/// vectors through the device-aware accessors, which hand back
+				/// host pointers otherwise.
+				///
+				/// **Correct, and not recommended on the strength of any timing
+				/// taken here.** It agrees with UMFPack to 3.5e-14 from 9,408 to
+				/// 148,224 trace dofs; its wall time on this machine varies by a
+				/// factor of THIRTY between runs of the same binary on the same
+				/// problem, so no ranking against the other two is possible
+				/// locally. It is selectable so that correctness can be checked
+				/// and so that somebody with a datacentre part can answer the
+				/// performance question meq cannot.
+				///
+				/// Spelled the way NVIDIA spells it, which is why it breaks the
+				/// UpperCamelCase rule for enum values: an external name keeps its
+				/// author's capitalisation, as UMFPack and Pardiso do above. The
+				/// rule this suppresses is house style, and house style does not
+				/// get to rename other people's products.
+				cuDSS // NOLINT(readability-identifier-naming)
+			};
+
+			/// Choose it. Throws std::invalid_argument when the library was built
+			/// without the backing package, rather than silently falling back to
+			/// a different solver -- a caller naming a solver has a reason.
+			void setTraceSolver( TraceSolver choice );
+
+			/// The trace solver solve() will use.
+			TraceSolver traceSolver() const;
+
+			/// Whether this build can honour a given choice. Lets a caller offer
+			/// only what is there instead of catching to find out.
+			static bool traceSolverAvailable( TraceSolver choice );
 
 			/// Damping for the Picard paths, in ( 0, 1 ]. Which knob it reaches
 			/// depends on the path: KINSetDampingAA for AndersonPicard,
@@ -730,6 +1012,13 @@ namespace meq
 			/// the thing to look at when a semi-linear run misbehaves: a history
 			/// that grinds down linearly means the Jacobian disagrees with the
 			/// residual, which no amount of mesh refinement will fix.
+			///
+			/// **When psi_ax is an unknown this is the AUGMENTED residual**,
+			/// || ( R, gamma G ) ||, where G = psi_ax - max psi_h and gamma is
+			/// || dR/dpsi_ax || frozen at the first iterate -- the factor that
+			/// puts a perturbation of psi_ax into the units R is measured in. It
+			/// is frozen rather than recomputed so that the history compares like
+			/// with like; normalisationResidual() reports G on its own.
 			std::vector<double> const &newtonResiduals() const;
 
 			/// Iterations spent in stage 1 of Globalisation::PicardThenNewton.
@@ -797,6 +1086,14 @@ namespace meq
 
 			mfem::Coefficient *linearSource;
 			Source const *nonlinearSource;
+
+			/// The same object as nonlinearSource when psi_ax is an unknown, and
+			/// null otherwise. Held non-const because the solver writes the
+			/// normalisation into it once per residual evaluation.
+			NormalisedSource *normalisedSource;
+			double psiAxisValue;
+			double normalisationResidualValue;
+			Normalisation normalisationChoice;
 			mfem::Coefficient *boundaryData;
 			std::unique_ptr<mfem::Coefficient> potentialRhsCoeff;
 
@@ -819,6 +1116,8 @@ namespace meq
 			Globalisation globalisationChoice;
 			LocalSolver localSolverChoice;
 			NonlinearOrdering orderingChoice;
+			AssemblyMode assemblyModeChoice;
+			TraceSolver traceSolverChoice;
 			int andersonDepth;
 			double picardDamping;
 
@@ -829,7 +1128,10 @@ namespace meq
 			/// The Picard path's trace solver, held across iterations so that its
 			/// retained symbolic analysis has something to be reused by. Built on
 			/// first use; see picardStep().
-			std::unique_ptr<mfem::UMFPackSolver> picardSolver;
+			/// Hoisted out of picardStep() so the symbolic analysis survives
+			/// between iterations. Typed as the base class since
+			/// setTraceSolver() decides which one it is.
+			std::unique_ptr<mfem::Solver> picardSolver;
 #endif
 
 			/// F( r, z, picardIterate ), as the right hand side coefficient the
@@ -847,6 +1149,36 @@ namespace meq
 			/// Globalisation::PicardThenNewton: stage 1 then stage 2, re-entering
 			/// solve() for each so that neither stage duplicates its body.
 			void solveByPicardThenNewton();
+
+			/// The bordered Newton of setSource( NormalisedSource &, double ):
+			/// the trace and psi_ax solved together. See the .cpp.
+			void solveWithNormalisation();
+
+			/// psi_h recovered from @a trace at normalisation @a psiAxisIn, and
+			/// its largest nodal value -- which is the discrete psi_ax. Writes
+			/// recoveryScratch and leaves the source's normalisation at
+			/// @a psiAxisIn.
+			///
+			/// @param element  if not null, receives the element that attained it.
+			/// @param dof      if not null, receives the potential dof that did.
+			double recoverPeak( mfem::Vector const &trace, double psiAxisIn,
+			                    int *element = nullptr, int *dof = nullptr );
+
+			/// The trace dofs of the faces of @a element: the only trace dofs the
+			/// recovered potential on that element can depend on, and therefore
+			/// the support of d( max psi_h )/dlambda. Measured rather than
+			/// assumed -- see theAxisSensitivityIsLocalToItsElement.
+			void traceDofsOfElement( int element, mfem::Array<int> &dofs ) const;
+
+			/// Scratch for a trial recovery, so that a finite difference does not
+			/// disturb the solution blocks the caller is going to read.
+			mfem::BlockVector recoveryScratch;
+
+			/// Re-form the reduced system from whatever the solution blocks hold,
+			/// which is how the element-local non-linear solves are given a fresh
+			/// starting point: DarcyHybridization captures one at
+			/// FormLinearSystem() time and keeps it. See solveWithNormalisation().
+			void formSystem();
 
 			double newtonRelativeTolerance;
 			double newtonAbsoluteTolerance;

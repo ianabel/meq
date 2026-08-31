@@ -109,10 +109,13 @@ namespace meq
 	 *   * The profiles are evaluated at the psi passed to f(), unaltered. Profiles
 	 *     are tabulated against normalised flux on [ 0, 1 ] (see meq::Profile), so
 	 *     whoever builds the Coefficient that feeds this class is responsible for
-	 *     normalising the solver's psi the same way the table was built. That
-	 *     normalisation is not done here because it moves between Newton iterates
-	 *     -- psi on the magnetic axis is part of the solution -- and a Source is a
-	 *     fixed function of its arguments.
+	 *     normalising the solver's psi the same way the table was built. This
+	 *     class does not, because the normalisation moves between Newton iterates
+	 *     -- psi on the magnetic axis is part of the solution -- and an MHDSource
+	 *     is a fixed function of its arguments. **NormalisedMHDSource below is
+	 *     the one to use when the profiles really are in normalised flux**, and it
+	 *     is a different object rather than a flag on this one because psi_ax
+	 *     becomes an unknown of the non-linear system rather than an input to it.
 	 *
 	 * Ownership: shared_ptr, so one profile can back several sources and a Source
 	 * can outlive the Configuration that parsed it. Neither profile may be null.
@@ -144,6 +147,124 @@ namespace meq
 		private:
 			std::shared_ptr<Profile const> pPrimeProfile;
 			std::shared_ptr<Profile const> ggPrimeProfile;
+			double permeability;
+	};
+
+	/**
+	 * A source whose profiles are functions of NORMALISED flux,
+	 *
+	 *     Psi = ( psi - psi_bnd ) / ( psi_ax - psi_bnd )
+	 *
+	 * which is how refs/GourdainContour.pdf section V eq (39) poses them, how
+	 * meq::Profile is tabulated, and how every equilibrium code specifies an
+	 * equilibrium. meq solves the fixed-boundary problem with psi = 0 on Gamma,
+	 * so psi_bnd is zero and Psi = psi / psi_ax throughout; free boundary makes
+	 * psi_bnd an unknown too, and this interface is where that will go.
+	 *
+	 * WHY THIS IS NOT JUST AN MHDSource WITH A SCALED ARGUMENT, which is the
+	 * whole reason it needs a class of its own. psi_ax is psi on the magnetic
+	 * axis, which is to say max psi over the domain -- a GLOBAL FUNCTIONAL OF THE
+	 * SOLUTION, not data. Three consequences, each of which was measured before
+	 * it was believed:
+	 *
+	 *   * FIXING psi_ax DOES NOT APPROXIMATE THE PROBLEM, IT REPLACES IT. Hand
+	 *     the solver a psi_ax the solution does not reach and the profile is
+	 *     never sampled: with psi_ax = 1 on the standard box a peaked pressure
+	 *     drove solutions that agreed to every digit at amplitudes 1 and 512,
+	 *     because Psi never exceeded 0.0013 and a Psi^(nu-1) gradient is then
+	 *     1e-9 of itself.
+	 *
+	 *   * THE SELF-CONSISTENT PROBLEM IS NOT THE psi_ax-PARAMETERISED ONE. With
+	 *     psi_ax held fixed the equation has a small solution that Newton finds
+	 *     from zero and a large one that is the equilibrium; only the large one
+	 *     satisfies max psi = psi_ax. Closing the loop with an outer iteration on
+	 *     psi_ax does not fix that -- the outer map has a pole beside its own
+	 *     fixed point, and it falls off the branch.
+	 *
+	 *   * SO psi_ax BELONGS INSIDE THE RESIDUAL, as an unknown of the non-linear
+	 *     system, where the Jacobian can see the non-local terms it contributes.
+	 *     GradShafranovSolver::setSource( NormalisedSource &, double ) is what
+	 *     does that, and the solver -- not the caller -- owns the value from then
+	 *     on: it calls setNormalisation() before every residual evaluation.
+	 *
+	 * A source of this kind necessarily has the form F( r, z, psi ) =
+	 * H( r, z, psi/psi_ax )/psi_ax, and the solver relies on nothing beyond
+	 * f() and dFdPsi() answering for whatever normalisation was last set.
+	 */
+	class NormalisedSource : public Source
+	{
+		public:
+			/// Set psi on the magnetic axis. The next calls to f() and dFdPsi()
+			/// must answer for this value. Called by the solver once per residual
+			/// evaluation, so it has to be cheap and must not allocate.
+			///
+			/// @throws std::invalid_argument if @a psiAxis is not finite or is
+			///         zero: Psi = psi/psi_ax is undefined there, and a solver
+			///         that has wandered onto psi_ax = 0 should say so rather than
+			///         return infinities.
+			virtual void setNormalisation( double psiAxis ) = 0;
+
+			/// The value the next f() and dFdPsi() will use.
+			virtual double normalisation() const = 0;
+
+		protected:
+			NormalisedSource() = default;
+			NormalisedSource( NormalisedSource const & ) = default;
+			NormalisedSource( NormalisedSource && ) = default;
+			NormalisedSource & operator=( NormalisedSource const & ) = default;
+			NormalisedSource & operator=( NormalisedSource && ) = default;
+	};
+
+	/**
+	 * The physical MHD source with both profiles tabulated against normalised
+	 * flux, which is the form meq::Profile documents and the form an equilibrium
+	 * file carries:
+	 *
+	 *     F( r, z, psi ) = [ mu0 r^2 ( dp/dPsi )( Psi ) + ( g dg/dPsi )( Psi ) ]
+	 *                      / psi_ax,          Psi = psi / psi_ax
+	 *
+	 * The single factor of 1/psi_ax is the chain rule and it is the whole
+	 * difference between this class and MHDSource: dp/dpsi = ( dp/dPsi )/psi_ax.
+	 * dF/dpsi picks up a second factor for the same reason, which is exactly
+	 * where a normalisation goes missing, and SourceTests checks it against a
+	 * finite difference.
+	 *
+	 * The profiles handed in are the DERIVATIVE quantities with respect to Psi --
+	 * dp/dPsi and ( g dg/dPsi ) -- for the reason MHDSource records: storing the
+	 * products rather than p and g is what keeps the Newton derivative free of a
+	 * chain rule through an interpolant.
+	 */
+	class NormalisedMHDSource : public NormalisedSource
+	{
+		public:
+			/// @param psiAxis  the initial normalisation. It is a starting value
+			///                 and nothing more: the solver overwrites it at every
+			///                 residual evaluation.
+			/// @throws std::invalid_argument if either profile is null, if mu0 is
+			///         not finite, or if psiAxis is not a usable normalisation.
+			NormalisedMHDSource( std::shared_ptr<Profile const> pPrime,
+			                     std::shared_ptr<Profile const> ggPrime,
+			                     double psiAxis,
+			                     double mu0 = vacuumPermeability );
+
+			double f( double r, double z, double psi ) const override;
+			double dFdPsi( double r, double z, double psi ) const override;
+
+			void setNormalisation( double psiAxis ) override;
+			double normalisation() const override;
+
+			/// The dp/dPsi profile.
+			Profile const & pPrime() const;
+
+			/// The g dg/dPsi profile.
+			Profile const & ggPrime() const;
+
+			double mu0() const;
+
+		private:
+			std::shared_ptr<Profile const> pPrimeProfile;
+			std::shared_ptr<Profile const> ggPrimeProfile;
+			double psiAxisValue;
 			double permeability;
 	};
 

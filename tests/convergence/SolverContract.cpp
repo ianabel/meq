@@ -1,8 +1,10 @@
 #define BOOST_TEST_MODULE SolverContract
 #include <boost/test/unit_test.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <memory>
 #include <stdexcept>
 
 #include "mfem.hpp"
@@ -108,9 +110,15 @@ BOOST_AUTO_TEST_CASE( theConfigurationRoundTrips )
 	// compares and a scoped enum has no operator<<.
 	BOOST_TEST( static_cast<int>( solver.globalisation() ) == static_cast<int>( G::None ),
 	            "the default globalisation is not None" );
+	// LineariseThenCondense is the default, and meq uses no other -- it is the
+	// canonical Nguyen-Peraire-Cockburn ordering, it is what the GS papers'
+	// method actually is, and it leaves every element-local elimination a linear
+	// solve. Asserted here because it is a decision rather than a preference:
+	// switching it back would put a nonlinear solve inside every element of
+	// every residual evaluation and change what the whole suite is measuring.
 	BOOST_TEST( static_cast<int>( solver.nonlinearOrdering() )
-	                == static_cast<int>( N::CondenseThenLinearise ),
-	            "the default ordering is not CondenseThenLinearise" );
+	                == static_cast<int>( N::LineariseThenCondense ),
+	            "the default ordering is not LineariseThenCondense" );
 
 	for ( G choice : { G::PicardOnly, G::AndersonPicard, G::PicardThenNewton, G::None } )
 	{
@@ -298,6 +306,103 @@ BOOST_AUTO_TEST_CASE( theSolverRefusesASecondProblem )
 }
 
 /*
+ * THE NORMALISED PATH'S REFUSALS, WHICH ARE FIVE AND ARE ALL LOAD BEARING.
+ *
+ * setSource( NormalisedSource &, double ) turns psi_ax into an unknown and closes
+ * the system by a bordered Newton, and each thing it refuses is refused because
+ * the alternative is a solve that answers a different question without saying so:
+ *
+ *   - a normalisation of zero, which is where the degenerate branch lives;
+ *   - a second source, for the reason above;
+ *   - NonlinearOrdering::LineariseThenCondense, under which the reduced operator
+ *     is a LINEARISED residual between GetGradient() calls -- so the border,
+ *     which is obtained by differencing that residual, would differentiate a
+ *     different function from the one being solved;
+ *   - any Globalisation but None: KINSOL drives a residual of its own and the
+ *     Picard paths build no Jacobian to put a border on. Refused at solve()
+ *     rather than at the setter, because the two can be set in either order;
+ *   - axisFlux() before prepare(), which would recover from a system that does
+ *     not exist.
+ */
+BOOST_AUTO_TEST_CASE( theNormalisedPathRefusesWhatItCannotDo )
+{
+	auto profile = std::make_shared<meq::ConstantProfile>( -0.5 );
+	mfem::ConstantCoefficient zero( 0.0 );
+
+	{
+		mfem::Mesh mesh = makeMesh( 4 );
+		meq::GradShafranovSolver solver( mesh, 1 );
+		meq::NormalisedMHDSource source( profile, profile, 1.0, 1.0 );
+
+		BOOST_CHECK_THROW( solver.setSource( source, 0.0 ), std::invalid_argument );
+		BOOST_CHECK( !solver.normalisationIsUnknown() );
+
+		solver.setSource( source, 0.5 );
+		BOOST_CHECK( solver.normalisationIsUnknown() );
+		BOOST_CHECK_EQUAL( solver.psiAxis(), 0.5 );
+
+		// A second source of any kind, through the same one-solver-one-source
+		// check the other overloads use.
+		BOOST_CHECK_THROW( solver.setSource( source, 0.5 ), std::logic_error );
+		BOOST_CHECK_THROW( solver.setSource( zero ), std::logic_error );
+	}
+
+	/*
+	 * AND IT DOES NOT REFUSE LineariseThenCondense, WHICH IT USED TO.
+	 *
+	 * That refusal was written from darcyhybridization.hpp's summary of the
+	 * ordering rather than from the code under it: the summary prints the local
+	 * substitution with the linearisation's residual RETAINED, which would make
+	 * psi_ax invisible to a difference of the reduced residual. Relinearise()
+	 * says outright that it is not retained, and MultInvLin()'s correction
+	 * evaluates LocalResidual() -- and so the source -- at the current fields.
+	 *
+	 * Measured before this was changed: both orderings reach the same psi_ax to
+	 * every digit printed, in one or two more iterations. So this asserts the
+	 * ordering is ACCEPTED, which is the wanted behaviour; a throw here again
+	 * would mean the refusal came back without the measurement being redone.
+	 */
+	{
+		mfem::Mesh mesh = makeMesh( 4 );
+		meq::GradShafranovSolver solver( mesh, 1 );
+		meq::NormalisedMHDSource source( profile, profile, 1.0, 1.0 );
+
+		solver.setNonlinearOrdering(
+			meq::GradShafranovSolver::NonlinearOrdering::LineariseThenCondense );
+		BOOST_CHECK_NO_THROW( solver.setSource( source, 0.5 ) );
+		BOOST_CHECK( solver.normalisationIsUnknown() );
+	}
+
+	{
+		mfem::Mesh mesh = makeMesh( 4 );
+		meq::GradShafranovSolver solver( mesh, 1 );
+		meq::NormalisedMHDSource source( profile, profile, 1.0, 1.0 );
+
+		solver.setSource( source, 0.5 );
+		solver.setBoundaryData( zero );
+
+		// Before prepare() there is nothing to recover from.
+		mfem::Vector trace( solver.traceSpace().GetVSize() );
+		trace = 0.0;
+		BOOST_CHECK_THROW( solver.axisFlux( trace ), std::logic_error );
+
+		// And the coupling round-trips, since it decides which terms are built.
+		BOOST_CHECK( solver.normalisationCoupling()
+		             == meq::GradShafranovSolver::Normalisation::Coupled );
+		solver.setNormalisationCoupling(
+			meq::GradShafranovSolver::Normalisation::Decoupled );
+		BOOST_CHECK( solver.normalisationCoupling()
+		             == meq::GradShafranovSolver::Normalisation::Decoupled );
+		solver.setNormalisationCoupling(
+			meq::GradShafranovSolver::Normalisation::Coupled );
+
+		solver.setGlobalisation(
+			meq::GradShafranovSolver::Globalisation::PicardThenNewton );
+		BOOST_CHECK_THROW( solver.solve(), std::logic_error );
+	}
+}
+
+/*
  * THE ESSENTIAL TRACE CONDITION REALLY IMPOSES THE DATUM, ON BOTH PATHS.
  *
  * CLAUDE.md flags this as the combination with no regression behind it:
@@ -452,5 +557,274 @@ BOOST_AUTO_TEST_CASE( theReconstructedQuantitiesAreThereAndSigned )
 		            "totalFlux() deliberately does not, so the two must be "
 		            "opposites; if one of those negations has moved, this is where "
 		            "it shows" );
+	}
+}
+
+/*
+ * Threading the element-local assembly must not change the answer.
+ *
+ * MFEM's DarcyHybridization::SetAssemblyMode() parallelises the element half of
+ * ComputeH() and documents that the two modes agree BIT FOR BIT -- not to a
+ * tolerance. That is a strong claim and it rests on something specific: the
+ * element-local arithmetic is per element and so reassociates nothing, and the
+ * scatter into the trace matrix stays serial and in element order. It is worth
+ * meq asserting rather than trusting, for two reasons.
+ *
+ * It is the property that makes the option usable at all. A threaded assembly
+ * that agreed only to round-off would put a run-to-run difference into every
+ * convergence table in this suite, and the tables assert rates to two decimal
+ * places. Bit-for-bit is what lets setAssemblyMode() be a pure performance knob
+ * that no other test has to know about.
+ *
+ * And it is exactly the kind of property that decays quietly. A future
+ * `static` reinstated on some element-local scratch would show up here as a
+ * handful of wrong entries on the smallest mesh -- MFEM's own test found
+ * precisely that, 143 stored entries against 144 -- and would show up nowhere
+ * else in meq until a rate table moved for no visible reason.
+ *
+ * Equality is asserted on the SPARSITY as well as the values, and separately,
+ * because the two failures mean different things: different values is a
+ * reduction-order question, a different structure is not.
+ */
+BOOST_AUTO_TEST_CASE( threadedAssemblyReproducesSerialAssemblyExactly )
+{
+#if !defined( MFEM_USE_OPENMP ) || !defined( MFEM_THREAD_SAFE )
+	std::printf( "\n  threaded assembly: skipped, this MFEM has no OpenMP or no "
+	             "thread safety\n" );
+#else
+	using AM = meq::GradShafranovSolver::AssemblyMode;
+
+	meq::analytic::SolovievEquilibrium const eq =
+		meq::analytic::SolovievEquilibrium::nstx();
+	mfem::FunctionCoefficient source( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.f( x( 0 ), x( 1 ), 0.0 );
+	} );
+	mfem::FunctionCoefficient psi( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.psi( x( 0 ), x( 1 ) );
+	} );
+
+	std::printf( "\n  threaded assembly against serial, entry by entry\n" );
+
+	// Two degrees and two meshes: the smallest case is the one MFEM's own test
+	// found the scratch hazard on, and the largest is where there is enough work
+	// per thread for the scheduler to interleave differently between runs.
+	for ( int order : { 1, 2 } )
+	{
+		for ( int n : { 4, 16 } )
+		{
+			mfem::Mesh mesh = meq::tests::makeMesh( meq::tests::standardBox(), n );
+
+			// Both solvers are kept alive at once, deliberately: each owns its
+			// own reduced operator, so comparing them entry by entry needs both
+			// still standing. A helper returning one matrix would leave a dangling
+			// pointer the moment its solver went out of scope.
+			auto serialSolver = std::make_unique<meq::GradShafranovSolver>( mesh, order );
+			serialSolver->setAssemblyMode( AM::Serial );
+			serialSolver->setSource( source );
+			serialSolver->setBoundaryData( psi );
+			serialSolver->prepare();
+
+			auto threadedSolver = std::make_unique<meq::GradShafranovSolver>( mesh, order );
+			threadedSolver->setAssemblyMode( AM::Threaded );
+			threadedSolver->setSource( source );
+			threadedSolver->setBoundaryData( psi );
+			threadedSolver->prepare();
+
+			auto *a = dynamic_cast<mfem::SparseMatrix *>( &serialSolver->reducedOperator() );
+			auto *b = dynamic_cast<mfem::SparseMatrix *>( &threadedSolver->reducedOperator() );
+
+			BOOST_TEST_REQUIRE( ( a != nullptr && b != nullptr ),
+			                    "the reduced operator is not a SparseMatrix, so the "
+			                    "two assembly modes cannot be compared entry by entry" );
+
+			BOOST_TEST_REQUIRE( a->Height() == b->Height(),
+			                    "k = " << order << ", n = " << n << ": threaded "
+			                    "assembly produced a trace system of a different SIZE" );
+			BOOST_TEST_REQUIRE( a->NumNonZeroElems() == b->NumNonZeroElems(),
+			                    "k = " << order << ", n = " << n << ": threaded "
+			                    "assembly stored " << b->NumNonZeroElems()
+			                    << " entries against serial's " << a->NumNonZeroElems()
+			                    << ". That is the element-local scratch being shared "
+			                    "between threads, not a rounding question -- MFEM's "
+			                    "own test catches the same fault the same way" );
+
+			int const nnz = a->NumNonZeroElems();
+			double worst = 0.0;
+			int columnMismatches = 0;
+			for ( int i = 0; i < nnz; ++i )
+			{
+				if ( a->GetJ()[ i ] != b->GetJ()[ i ] )
+					++columnMismatches;
+				worst = std::max( worst,
+				                  std::fabs( a->GetData()[ i ] - b->GetData()[ i ] ) );
+			}
+
+			std::printf( "    k = %d, n = %2d : %6d entries, worst difference %.3e%s\n",
+			             order, n, nnz, worst,
+			             worst == 0.0 ? "  (exact)" : "  *** NOT EXACT ***" );
+			std::fflush( stdout );
+
+			BOOST_TEST( columnMismatches == 0,
+			            "k = " << order << ", n = " << n << ": " << columnMismatches
+			            << " entries sit in different COLUMNS between the two assembly "
+			            "modes. The structures differ, which is worse than the values "
+			            "differing" );
+
+			// NOT a tolerance. MFEM documents exactness and the mechanism for it is
+			// specific; if this ever needs slack, the mechanism has changed and the
+			// right response is to find out how, not to widen the gate.
+			BOOST_TEST( worst == 0.0,
+			            "k = " << order << ", n = " << n << ": threaded and serial "
+			            "assembly differ by " << worst << " in the worst entry. MFEM "
+			            "documents these as bit for bit, so this is a real change "
+			            "rather than a tolerance to widen -- the element-local "
+			            "arithmetic has started reassociating, or the scatter is no "
+			            "longer in element order" );
+		}
+	}
+#endif
+}
+
+/*
+ * Every trace solver this build has must reach the same equilibrium.
+ *
+ * setTraceSolver() is a PERFORMANCE choice and this is the test that entitles it
+ * to be one. UMFPack, PARDISO and cuDSS are three unrelated sparse LU
+ * implementations with three different orderings and three different pivoting
+ * strategies; nothing but measurement says they agree, and if they ever stop
+ * agreeing the whole idea of a selectable solver is unsound rather than merely
+ * slower.
+ *
+ * **The gate is 1e-10 and the measured difference is around 1e-14**, so there is
+ * four orders of slack. That is deliberate: the two are solving the same matrix
+ * to different roundings, not approximating each other, and a gate at 1e-13
+ * would be a test of the machine's arithmetic rather than of meq. If this ever
+ * fails it will fail by a mile -- a wrong matrix type, a wrong ordering, a
+ * solver handed a matrix it misdescribes -- not by a factor of three.
+ *
+ * cuDSS is NOT exercised here and its absence is not an oversight: it reads its
+ * matrix and vectors through MFEM's device-aware accessors, so it needs an
+ * mfem::Device configured for CUDA, and mfem::Device is global state that must
+ * be set before any other MFEM object exists. Configuring one inside a test case
+ * would change how every other test in this binary allocates. cuDSS's agreement
+ * is checked instead by tests/performance/TraceSolverScaling, which configures
+ * the device at program start and returns non-zero if any solver disagrees --
+ * registered as the ctest `cuDSSTraceSolver`.
+ */
+BOOST_AUTO_TEST_CASE( theTraceSolversAgree )
+{
+	using TS = meq::GradShafranovSolver::TraceSolver;
+
+	meq::analytic::SolovievEquilibrium const eq =
+		meq::analytic::SolovievEquilibrium::nstx();
+	mfem::FunctionCoefficient source( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.f( x( 0 ), x( 1 ), 0.0 );
+	} );
+	mfem::FunctionCoefficient psi( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.psi( x( 0 ), x( 1 ) );
+	} );
+
+	struct Named { TS choice; char const *name; };
+	std::vector<Named> const all = {
+		{ TS::UMFPack, "UMFPack" },
+		{ TS::Pardiso, "Pardiso" },
+		{ TS::cuDSS,   "cuDSS"   } };
+
+	std::printf( "\n  the trace solvers, against each other\n" );
+
+	int const order = 2;
+	int const n = 16;
+	mfem::Mesh mesh = meq::tests::makeMesh( meq::tests::standardBox(), n );
+
+	std::unique_ptr<mfem::GridFunction> reference;
+	char const *referenceName = nullptr;
+	int available = 0;
+
+	for ( Named const &entry : all )
+	{
+		if ( !meq::GradShafranovSolver::traceSolverAvailable( entry.choice ) )
+		{
+			std::printf( "    %-8s : not in this build\n", entry.name );
+			continue;
+		}
+		if ( entry.choice == TS::cuDSS )
+		{
+			// See the note above. Available, deliberately not driven from here.
+			std::printf( "    %-8s : available, checked by the cuDSSTraceSolver "
+			             "ctest instead (it needs an mfem::Device)\n", entry.name );
+			continue;
+		}
+
+		++available;
+		meq::GradShafranovSolver solver( mesh, order );
+		solver.setTraceSolver( entry.choice );
+		BOOST_TEST( static_cast<int>( solver.traceSolver() )
+		                == static_cast<int>( entry.choice ),
+		            "setTraceSolver did not take" );
+		solver.setSource( source );
+		solver.setBoundaryData( psi );
+		solver.solve();
+
+		if ( !reference )
+		{
+			reference = std::make_unique<mfem::GridFunction>( solver.potential() );
+			referenceName = entry.name;
+			std::printf( "    %-8s : reference, %d trace dofs\n",
+			             entry.name, solver.trace().Size() );
+			continue;
+		}
+
+		mfem::GridFunction difference( solver.potential() );
+		difference -= *reference;
+		double const relative =
+			difference.Norml2()/std::max( 1.0e-300, reference->Norml2() );
+
+		std::printf( "    %-8s : agrees with %s to %.3e\n",
+		             entry.name, referenceName, relative );
+		std::fflush( stdout );
+
+		BOOST_TEST( relative < 1.0e-10,
+		            entry.name << " and " << referenceName << " reach solutions "
+		            "differing by " << relative << " relative. Two direct solvers "
+		            "on the same matrix must agree to round-off; check the matrix "
+		            "type each is given before anything else, since meq's trace "
+		            "matrix is structurally symmetric and, on the extension path, "
+		            "not symmetric in its values" );
+	}
+
+	BOOST_TEST( available >= 1,
+	            "no trace solver at all is available in this build, so the "
+	            "convergence suite cannot have run either" );
+}
+
+/*
+ * A solver this build does not have must be refused, not substituted.
+ */
+BOOST_AUTO_TEST_CASE( anUnavailableTraceSolverIsRefused )
+{
+	using TS = meq::GradShafranovSolver::TraceSolver;
+
+	meq::tests::Rectangle const box = meq::tests::standardBox();
+	mfem::Mesh mesh = meq::tests::makeMesh( box, 4 );
+	meq::GradShafranovSolver solver( mesh, 1 );
+
+	for ( TS choice : { TS::UMFPack, TS::Pardiso, TS::cuDSS } )
+	{
+		if ( meq::GradShafranovSolver::traceSolverAvailable( choice ) )
+		{
+			BOOST_CHECK_NO_THROW( solver.setTraceSolver( choice ) );
+		}
+		else
+		{
+			// invalid_argument and not logic_error: it is the ARGUMENT that this
+			// build cannot honour, which is the same distinction the constructor
+			// draws for a bad degree.
+			BOOST_CHECK_THROW( solver.setTraceSolver( choice ),
+			                   std::invalid_argument );
+		}
 	}
 }

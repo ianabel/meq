@@ -297,10 +297,24 @@ BOOST_AUTO_TEST_CASE( jacobianMatchesAFiniteDifferenceOfTheResidual )
 		if ( !isEssential[ i ] )
 			state( i ) += 0.3*std::sin( 1.7*i + 0.4 );
 
-	// Every residual evaluation happens before the gradient is asked for.
-	// GetGradient() writes through the same element-block storage the residual
-	// path reads, and while the configuration here does not read what it writes,
-	// ordering the calls this way means the check does not depend on that.
+	// Establish the linearisation at `state` BEFORE any residual evaluation, and
+	// hold it there for the whole difference. Under LineariseThenCondense the
+	// reduced residual is only a function of the trace at a fixed linearisation
+	// point -- and the FIRST Mult() on a freshly formed system is what sets that
+	// point. Differencing without this, the forward evaluation would establish
+	// the linearisation at `state + step*d`, the backward one would carry that
+	// same linearisation to `state - step*d`, and the gradient would then be
+	// taken at a third place. The result is not a derivative of anything: it
+	// reads 4e-8 relative on Example 5, three orders above the 4e-11 the same
+	// check gives at a fixed linearisation, and none of that is the Jacobian's
+	// fault. The second GetGradient() below is idempotent -- the linearisation
+	// is already at `state`, so it neither advances nor re-solves.
+	//
+	// The ordering also has to keep the gradient's element-block storage out of
+	// the residual path's way; taking the reference after the differences is
+	// what does that, and is why this is two calls rather than one.
+	residual.GetGradient( state );
+
 	double const step = 1.0e-5;
 	int const numDirections = 4;
 

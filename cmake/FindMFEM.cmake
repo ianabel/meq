@@ -190,6 +190,30 @@ if(_mfem_cxxflags MATCHES "(^| )-fopenmp( |$)")
 	list(APPEND MFEM_COMPILE_OPTIONS "-fopenmp")
 endif()
 
+# And a third, which only a device build produces: MFEM_USE_CUDA puts the
+# toolkit's headers on the line as `-isystem <dir>` in MFEM_CXXFLAGS rather than
+# as `-I<dir>` in MFEM_TPLFLAGS, and general/backends.hpp includes
+# <cuda_runtime.h> unconditionally once MFEM_USE_CUDA is defined. So a consumer
+# that takes only TPLFLAGS compiles fine against every serial build and fails on
+# the first #include of mfem.hpp against a CUDA one, which is a confusing place
+# to meet the problem. Both spellings are accepted because the flag takes its
+# argument either way.
+separate_arguments(_mfem_cxx_list UNIX_COMMAND "${_mfem_cxxflags}")
+set(_mfem_want_isystem FALSE)
+foreach(_flag IN LISTS _mfem_cxx_list)
+	if(_mfem_want_isystem)
+		list(APPEND MFEM_INCLUDE_DIRS "${_flag}")
+		set(_mfem_want_isystem FALSE)
+	elseif(_flag STREQUAL "-isystem")
+		set(_mfem_want_isystem TRUE)
+	elseif(_flag MATCHES "^-isystem(.+)$")
+		list(APPEND MFEM_INCLUDE_DIRS "${CMAKE_MATCH_1}")
+	endif()
+endforeach()
+unset(_mfem_cxx_list)
+unset(_mfem_want_isystem)
+list(REMOVE_DUPLICATES MFEM_INCLUDE_DIRS)
+
 # The link line. Items beginning with '-' (the -L and -l of MFEM_EXT_LIBS) are
 # passed to the linker verbatim and in order, which is what a static libmfem.a
 # needs: it comes first, its dependencies after.

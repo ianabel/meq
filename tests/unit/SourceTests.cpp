@@ -428,6 +428,133 @@ BOOST_AUTO_TEST_CASE( shares_ownership_of_its_profiles )
 
 BOOST_AUTO_TEST_SUITE_END()
 
+BOOST_AUTO_TEST_SUITE( normalised_mhd_source_tests )
+
+/*
+ * THE NORMALISATION IS ONE FACTOR IN f() AND TWO IN dFdPsi(), and getting the
+ * second one wrong is the classic error: it leaves the converged answer exactly
+ * where it was and costs only the order of the Newton convergence to it. See
+ * CLAUDE.md, "A wrong Jacobian is invisible to a convergence table".
+ */
+BOOST_AUTO_TEST_CASE( f_carries_one_factor_of_the_normalisation )
+{
+	double const psiAxis = 0.37;
+	meq::NormalisedMHDSource source( analyticPressureProfile(), analyticGGPrimeProfile(),
+	                                 psiAxis, 1.0 );
+
+	for ( double r : testRadii )
+	{
+		for ( int i = 0; i <= 10; ++i )
+		{
+			double const psi = psiAxis*i/10.0;
+			double const psiN = psi/psiAxis;
+			double const expected = ( r*r*pressureDerivative( psiN ) + ggPrimeValue( psiN ) )
+			                        /psiAxis;
+			checkClose( source.f( r, 0.0, psi ), expected, 1e-14, "normalised F", psi );
+		}
+	}
+}
+
+BOOST_AUTO_TEST_CASE( dfdpsi_carries_two )
+{
+	double const psiAxis = 0.37;
+	meq::NormalisedMHDSource source( analyticPressureProfile(), analyticGGPrimeProfile(),
+	                                 psiAxis, 1.0 );
+
+	for ( double r : testRadii )
+	{
+		for ( int i = 0; i <= 10; ++i )
+		{
+			double const psi = psiAxis*i/10.0;
+			double const psiN = psi/psiAxis;
+			double const expected = ( r*r*pressureSecondDerivative( psiN )
+			                          + ggPrimeDerivative( psiN ) )/( psiAxis*psiAxis );
+			checkClose( source.dFdPsi( r, 0.0, psi ), expected, 1e-14,
+			            "normalised dF/dpsi", psi );
+		}
+	}
+}
+
+/*
+ * AND THE FINITE DIFFERENCE, AT SEVERAL NORMALISATIONS -- because this check is
+ * the one that CANNOT see the thing the bordered Newton exists for. f() and
+ * dFdPsi() are both evaluated at whatever normalisation is currently set, so
+ * they agree with each other however wrong that normalisation is. What a
+ * difference of f() in psi cannot detect is a missing dF/dpsi_ax, and nothing in
+ * a unit test can: only a difference of the ASSEMBLED residual can, which is
+ * what tests/convergence/HighBetaConvergence.cpp measures.
+ */
+BOOST_AUTO_TEST_CASE( dfdpsi_agrees_with_a_central_difference_at_every_normalisation )
+{
+	meq::NormalisedMHDSource source( analyticPressureProfile(), analyticGGPrimeProfile(),
+	                                 1.0, 1.0 );
+
+	for ( double psiAxis : { 0.05, 0.5, 1.0, 4.0, 40.0 } )
+	{
+		source.setNormalisation( psiAxis );
+		BOOST_CHECK_EQUAL( source.normalisation(), psiAxis );
+		checkDerivativeAgainstDifferences( source, testRadii, 0.05*psiAxis, 0.95*psiAxis,
+		                                   20, 1e-7*psiAxis, 1e-6,
+		                                   "NormalisedMHDSource" );
+	}
+}
+
+/*
+ * A NORMALISATION OF ZERO IS A THROW AND NOT AN INFINITY. The degenerate fixed
+ * point the outer iteration used to find is psi_ax running to zero with psi
+ * shrinking beside it, so an iterate that reaches it must say so rather than
+ * quietly returning 1/0 -- the bordered Newton's line search catches this throw
+ * and rejects the step that caused it.
+ */
+BOOST_AUTO_TEST_CASE( rejects_a_normalisation_of_zero )
+{
+	BOOST_CHECK_THROW( meq::NormalisedMHDSource( analyticPressureProfile(),
+	                                             analyticGGPrimeProfile(), 0.0, 1.0 ),
+	                   std::invalid_argument );
+
+	meq::NormalisedMHDSource source( analyticPressureProfile(), analyticGGPrimeProfile(),
+	                                 1.0, 1.0 );
+	BOOST_CHECK_THROW( source.setNormalisation( 0.0 ), std::invalid_argument );
+	BOOST_CHECK_THROW( source.setNormalisation( std::numeric_limits<double>::quiet_NaN() ),
+	                   std::invalid_argument );
+
+	// And it is unchanged by a rejected attempt, so a caught throw leaves a
+	// usable source behind.
+	BOOST_CHECK_EQUAL( source.normalisation(), 1.0 );
+}
+
+BOOST_AUTO_TEST_CASE( rejects_null_profiles )
+{
+	BOOST_CHECK_THROW( meq::NormalisedMHDSource( nullptr, analyticGGPrimeProfile(), 1.0, 1.0 ),
+	                   std::invalid_argument );
+	BOOST_CHECK_THROW( meq::NormalisedMHDSource( analyticPressureProfile(), nullptr, 1.0, 1.0 ),
+	                   std::invalid_argument );
+}
+
+/*
+ * THE SAME SOURCE AS MHDSource WHEN THE NORMALISATION IS ONE, which is the
+ * cross-check that no sign or factor drifted between the two classes. At
+ * psi_ax = 1 the chain rule contributes nothing and the two must agree exactly.
+ */
+BOOST_AUTO_TEST_CASE( agrees_with_the_unnormalised_source_at_unit_normalisation )
+{
+	meq::MHDSource plain( analyticPressureProfile(), analyticGGPrimeProfile(), 1.0 );
+	meq::NormalisedMHDSource normalised( analyticPressureProfile(), analyticGGPrimeProfile(),
+	                                     1.0, 1.0 );
+
+	for ( double r : testRadii )
+	{
+		for ( int i = 0; i <= 10; ++i )
+		{
+			double const psi = i/10.0;
+			BOOST_CHECK_EQUAL( normalised.f( r, 0.0, psi ), plain.f( r, 0.0, psi ) );
+			BOOST_CHECK_EQUAL( normalised.dFdPsi( r, 0.0, psi ), plain.dFdPsi( r, 0.0, psi ) );
+		}
+	}
+}
+
+BOOST_AUTO_TEST_SUITE_END()
+
 BOOST_AUTO_TEST_SUITE( source_interface_tests )
 
 BOOST_AUTO_TEST_CASE( implementations_are_usable_polymorphically )
@@ -438,6 +565,8 @@ BOOST_AUTO_TEST_CASE( implementations_are_usable_polymorphically )
 	// compile under private inheritance.
 	static_assert( std::is_base_of_v<meq::Source, meq::MHDSource>, "MHDSource must be a Source" );
 	static_assert( std::is_base_of_v<meq::Source, meq::SolovievSource>, "SolovievSource must be a Source" );
+	static_assert( std::is_base_of_v<meq::Source, meq::NormalisedSource>, "NormalisedSource must be a Source" );
+	static_assert( std::is_base_of_v<meq::NormalisedSource, meq::NormalisedMHDSource>, "NormalisedMHDSource must be a NormalisedSource" );
 	static_assert( std::is_convertible_v<meq::MHDSource *, meq::Source *>, "MHDSource must convert to its base" );
 	static_assert( std::is_convertible_v<meq::SolovievSource *, meq::Source *>, "SolovievSource must convert to its base" );
 	static_assert( std::has_virtual_destructor_v<meq::Source>, "a Source is deleted through a base pointer" );
@@ -445,6 +574,7 @@ BOOST_AUTO_TEST_CASE( implementations_are_usable_polymorphically )
 	std::vector<std::unique_ptr<meq::Source>> sources;
 	sources.push_back( std::make_unique<meq::SolovievSource>( -0.115 ) );
 	sources.push_back( std::make_unique<meq::MHDSource>( analyticPressureProfile(), analyticGGPrimeProfile(), 1.0 ) );
+	sources.push_back( std::make_unique<meq::NormalisedMHDSource>( analyticPressureProfile(), analyticGGPrimeProfile(), 0.8, 1.0 ) );
 
 	for ( auto const & source : sources )
 	{

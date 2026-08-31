@@ -60,8 +60,35 @@ foreach(_test IN LISTS MEQ_UNIT_TESTS)
 		# MFEM's direct solver uses. Wrong answers, no error, no warning.
 		# The same trap is recorded in the MFEM tree's CLAUDE.md, where
 		# every run of its own test suite needs the same variable.
+		#
+		# MKL_NUM_THREADS=1 is not optional either, and for a completely
+		# different reason: not correctness but a factor of 140. UMFPACK
+		# calls BLAS on the small dense frontal matrices of a sparse LU,
+		# thousands of times, and each threaded call costs a fork, a join
+		# and a barrier that dwarf the arithmetic. Measured on this
+		# machine, one process, nothing else running:
+		#
+		#     SolovievConvergence   MKL=1    1.24 s
+		#     SolovievConvergence   MKL=16 177.83 s   at 273% CPU
+		#
+		# 273% of sixteen cores is the shape of the answer -- the threads
+		# are spinning on barriers, not working. Tests that never reach
+		# UMFPACK are untouched (SamplerConvergence: 0.64 s against
+		# 0.63 s), which is what identifies the cause.
+		#
+		# This did not use to bite, and the reason is worth knowing: the
+		# link line used to carry libmkl_sequential behind SuiteSparse,
+		# so MKL resolved to the sequential layer whatever it was asked
+		# for. Pointing MFEM's PARDISO at oneAPI's threaded layer removed
+		# it and revealed the real behaviour. The suite was never
+		# deliberately sequential; it was accidentally so.
+		#
+		# It is set per test rather than expected of whoever runs ctest,
+		# because a benchmark or a suite that takes two hours instead of
+		# one minute is not a failure anybody reads as a threading
+		# problem.
 		set_tests_properties(${_test} PROPERTIES
-			ENVIRONMENT "MKL_THREADING_LAYER=GNU")
+			ENVIRONMENT "MKL_THREADING_LAYER=GNU;MKL_NUM_THREADS=1")
 	endif()
 endforeach()
 
@@ -136,9 +163,53 @@ foreach(_test IN LISTS MEQ_CONVERGENCE_TESTS)
 		# exactly what this test exists to detect and exactly what it would then
 		# fail to detect. See the comment on the unit tests above.
 		set_tests_properties(${_test} PROPERTIES
-			ENVIRONMENT "MKL_THREADING_LAYER=GNU")
+			ENVIRONMENT "MKL_THREADING_LAYER=GNU;MKL_NUM_THREADS=1")
 	endif()
 endforeach()
+
+# ---------------------------------------------------------------------------
+# The performance harness. BUILT BUT NOT REGISTERED AS A TEST, deliberately.
+#
+# Everything it reports is a timing, and this project's standing rule is that a
+# threaded timing on this machine is a measurement about the machine rather than
+# about the code. A ctest that fails when the machine is busy teaches people to
+# ignore the suite. It returns non-zero only for the two CORRECTNESS properties
+# that make its timings meaningful -- threaded assembly reproducing serial
+# assembly bit for bit, and PARDISO reproducing UMFPACK -- so it is still usable
+# in CI as a guard, just not as a benchmark gate.
+#
+# Run it through tests/performance/scan.sh.
+# ---------------------------------------------------------------------------
+
+list(FIND MEQ_CORE_SOURCES_PRESENT "src/meq/GradShafranov.cpp" _solver_index)
+if(TARGET meq_core AND NOT _solver_index EQUAL -1
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/performance/TraceSolverScaling.cpp")
+	add_executable(TraceSolverScaling "performance/TraceSolverScaling.cpp")
+	target_include_directories(TraceSolverScaling PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(TraceSolverScaling PRIVATE meq_core)
+
+	# ONE ctest out of the performance harness, and it is not a benchmark gate.
+	#
+	# cuDSS agreement is the one thing about the device path that CAN be asserted
+	# on this machine: its timings vary by a factor of thirty run to run, but it
+	# either reaches UMFPACK's answer or it does not. SolverContract cannot check
+	# it, because cuDSS reads its data through MFEM's device-aware accessors and
+	# so needs an mfem::Device, which is global state that has to be configured
+	# before any other MFEM object exists -- doing that inside a Boost test case
+	# would change how every other test in that binary allocates.
+	#
+	# So the check runs here instead, on the smallest sizes that exercise the
+	# path, with --repeats 1 because this is a correctness run and the timings it
+	# prints are noise. The binary exits 0 with a "skipped" line when the build
+	# has no CUDA, so this passes on a machine with no GPU rather than failing
+	# for not having one.
+	add_test(NAME cuDSSTraceSolver
+		COMMAND TraceSolverScaling --device cuda --orders 2 --sizes 8,16
+		        --no-assembly-timing --repeats 1
+		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+	set_tests_properties(cuDSSTraceSolver PROPERTIES
+		ENVIRONMENT "MKL_THREADING_LAYER=GNU;MKL_NUM_THREADS=1")
+endif()
 
 # ---------------------------------------------------------------------------
 # The driver, end to end. Everything above calls the library directly; this is
@@ -163,7 +234,7 @@ if(TARGET meq AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/DriverAcceptan
 	add_test(NAME DriverAcceptance COMMAND DriverAcceptance
 		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 	set_tests_properties(DriverAcceptance PROPERTIES
-		ENVIRONMENT "MKL_THREADING_LAYER=GNU")
+		ENVIRONMENT "MKL_THREADING_LAYER=GNU;MKL_NUM_THREADS=1")
 else()
 	message(STATUS "meq: DriverAcceptance not registered (needs MEQ_BUILD_APP=ON)")
 endif()

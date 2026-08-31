@@ -145,6 +145,57 @@ namespace tests
 			Equilibrium eq;
 	};
 
+	/// The same thin forward, for a fixture whose profiles are functions of
+	/// NORMALISED flux and which therefore carries a normalisation the SOLVER
+	/// owns rather than the caller. setNormalisation() forwards to the fixture's
+	/// setPsiAxis() and nothing else differs -- in particular there is still no
+	/// sign, no 1/r and no scaling applied here.
+	///
+	/// The fixture is held by value, so the solver's writes do not reach the
+	/// caller's copy. That is deliberate: the value that matters afterwards is
+	/// GradShafranovSolver::psiAxis(), which is the unknown's converged value,
+	/// and a fixture quietly left holding an intermediate normalisation would be
+	/// a second and disagreeing answer to the same question.
+	template<typename Equilibrium>
+	class NormalisedEquilibriumSource : public meq::NormalisedSource
+	{
+		public:
+			explicit NormalisedEquilibriumSource( Equilibrium const &eqIn )
+				: eq( eqIn )
+			{
+			}
+
+			double f( double r, double z, double psi ) const override
+			{
+				return eq.f( r, z, psi );
+			}
+
+			double dFdPsi( double r, double z, double psi ) const override
+			{
+				return eq.dFdPsi( r, z, psi );
+			}
+
+			void setNormalisation( double psiAxis ) override
+			{
+				eq.setPsiAxis( psiAxis );
+			}
+
+			double normalisation() const override
+			{
+				return eq.psiAxis();
+			}
+
+			/// The fixture as the solver last left it, for a caller that wants to
+			/// evaluate F or dF/dpsi at the converged normalisation.
+			Equilibrium const &equilibrium() const
+			{
+				return eq;
+			}
+
+		private:
+			Equilibrium eq;
+	};
+
 	/// One point on a convergence curve measured against an exact solution.
 	struct Measurement
 	{
@@ -175,6 +226,25 @@ namespace tests
 		std::vector<double> fluxSamples;
 		/// The extreme values of psi_h over the cloud, which is how a run that
 		/// landed on the trivial branch, or wandered off, is recognised.
+		double psiMin, psiMax;
+	};
+
+	/// One solve of a NORMALISED equilibrium, where psi on the magnetic axis is
+	/// an unknown of the non-linear system rather than an input.
+	struct NormalisedMeasurement
+	{
+		double h;
+		int traceDofs;
+		int newtonIterations;
+		bool converged;
+		std::vector<double> residuals;
+		/// The converged normalisation, and the constraint residual
+		/// psi_ax - max psi_h that says whether it is self consistent.
+		double psiAxis;
+		double constraint;
+		/// The extreme nodal values of psi_h. psiMax is what psi_ax is
+		/// constrained to equal, so the pair is the whole self-consistency
+		/// statement.
 		double psiMin, psiMax;
 	};
 
@@ -446,7 +516,7 @@ namespace tests
 	                             meq::GradShafranovSolver::LocalSolver local =
 	                                 meq::GradShafranovSolver::LocalSolver::Newton,
 	                             meq::GradShafranovSolver::NonlinearOrdering ordering =
-	                                 meq::GradShafranovSolver::NonlinearOrdering::CondenseThenLinearise )
+	                                 meq::GradShafranovSolver::NonlinearOrdering::LineariseThenCondense )
 	{
 		mfem::Mesh mesh = makeMesh( box, n );
 		EquilibriumSource<Equilibrium> source( eq );
@@ -505,6 +575,73 @@ namespace tests
 				point.psiMin = std::min( point.psiMin, v );
 				point.psiMax = std::max( point.psiMax, v );
 			}
+		}
+		return point;
+	}
+
+	/**
+	 * One solve of an equilibrium whose profiles are functions of NORMALISED
+	 * flux, with psi on the magnetic axis carried as an unknown.
+	 *
+	 * @param guess          the Newton starting point, as psi( r, z ). NOT
+	 *                       optional, and not an optimisation: at a fixed
+	 *                       normalisation this equation has a small solution and
+	 *                       a large one, only the large one can satisfy
+	 *                       max psi = psi_ax, and an unguided Newton lands on the
+	 *                       small one. See
+	 *                       GradShafranovSolver::setSource( NormalisedSource &, double ).
+	 * @param psiAxisGuess   the starting normalisation, likewise.
+	 *
+	 * A failure is reported and not retried, exactly as in measureSelf(): the
+	 * residual history and the iteration count survive it and are the record
+	 * worth keeping.
+	 */
+	template<typename Equilibrium, typename BoundaryFunction>
+	NormalisedMeasurement measureNormalised( Equilibrium const &eq, Rectangle const &box,
+	                                         int order, int n,
+	                                         BoundaryFunction boundary,
+	                                         double psiAxisGuess,
+	                                         mfem::Coefficient &guess,
+	                                         int maxNewtonIterations = 40,
+	                                         double relativeTolerance = 1.0e-10 )
+	{
+		mfem::Mesh mesh = makeMesh( box, n );
+		NormalisedEquilibriumSource<Equilibrium> source( eq );
+
+		mfem::FunctionCoefficient boundaryCoeff( [ &boundary ]( mfem::Vector const &x )
+		{
+			return boundary( x( 0 ), x( 1 ) );
+		} );
+
+		meq::GradShafranovSolver solver( mesh, order );
+		solver.setSource( source, psiAxisGuess );
+		solver.setBoundaryData( boundaryCoeff );
+		solver.setInitialGuess( guess );
+		solver.setNewtonControl( relativeTolerance, 1.0e-14, maxNewtonIterations );
+
+		NormalisedMeasurement point;
+		point.h = box.width()/static_cast<double>( n );
+		point.converged = true;
+		try
+		{
+			solver.solve();
+		}
+		catch ( std::exception const & )
+		{
+			point.converged = false;
+		}
+
+		point.traceDofs = solver.numTraceDofs();
+		point.newtonIterations = solver.newtonIterations();
+		point.residuals = solver.newtonResiduals();
+		point.psiAxis = solver.psiAxis();
+		point.constraint = solver.normalisationResidual();
+		point.psiMin = 0.0;
+		point.psiMax = 0.0;
+		if ( point.converged )
+		{
+			point.psiMin = solver.potential().Min();
+			point.psiMax = solver.potential().Max();
 		}
 		return point;
 	}
@@ -766,11 +903,40 @@ namespace tests
 			            label << ", k = " << order << ", h = " << points[ i ].h
 			            << ": Newton did NOT converge in " << points[ i ].newtonIterations
 			            << " iterations. That is a finding about this benchmark, not a "
-			            "tolerance to be relaxed" );
+			            "tolerance to be relaxed -- but SINCE meq MOVED TO "
+			            "NLOrdering::LineariseThenCondense, look at the ordering "
+			            "before the benchmark. Several of the GS-2 stiff sources "
+			            "converge under CondenseThenLinearise and do not under the "
+			            "ordering meq now uses. That is a parity gap in MFEM, filed "
+			            "as ../mfem-hdg-dev/doc/HDG-LINEARISE-FIRST-STIFF-SOURCES.md "
+			            "with a self-contained reproducer beside it, and it is what "
+			            "this assertion goes red on. It clears when MFEM reaches "
+			            "parity; do not clear it by lowering the cap or switching "
+			            "the ordering back" );
 		}
 
+		// A RATE TAKEN ACROSS A SOLVE THAT DID NOT CONVERGE IS NOT A RATE. Such a
+		// pair yields NaN, NaN fails every floor, and the three assertions that
+		// follow then bury the one message above that says what actually went
+		// wrong -- measured, a single non-converged point produced three failures
+		// where one was informative. So the pair is skipped and said to be
+		// skipped. This is not a relaxation: the convergence assertion above has
+		// already fired for that point, and the rate is unmeasurable rather than
+		// merely disappointing.
 		for ( std::size_t i = 1; i < diffs.size(); ++i )
 		{
+			bool measurable = true;
+			for ( SelfMeasurement const &point : points )
+				if ( !point.converged )
+					measurable = false;
+
+			if ( !measurable )
+			{
+				std::printf( "    rates not asserted: a solve in this sequence did "
+				             "not converge, so the differences are not errors\n" );
+				break;
+			}
+
 			double const ratio = diffs[ i - 1 ].h/diffs[ i ].h;
 			double const ratePsi = rate( diffs[ i - 1 ].l2Psi, diffs[ i ].l2Psi, ratio );
 			double const rateFlux = rate( diffs[ i - 1 ].l2Flux, diffs[ i ].l2Flux, ratio );

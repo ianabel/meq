@@ -24,6 +24,11 @@
 #     Operator::Mult has to keep MFEM's spelling. Mark those individually with
 #     // NOLINT(readability-identifier-naming) and a word about which base class
 #     is dictating the name.
+#   * Names of external things, whose capitalisation belongs to whoever wrote
+#     them and not to this project. cuDSS is cuDSS because NVIDIA spells it so,
+#     the way UMFPack and Pardiso are spelled as MFEM's wrappers spell them.
+#     House style is for meq's own identifiers; it does not get to rename other
+#     people's products. Same NOLINT and the same obligation to say why.
 #   * Namespaces, macros, and constants have no rule yet, so they have no option
 #     here rather than a permissive one -- an unset option produces no warning.
 ---

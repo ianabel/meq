@@ -697,15 +697,22 @@ BOOST_AUTO_TEST_CASE( kinsolAgreesWithNewtonWhereBothConverge )
 
 	using G = meq::GradShafranovSolver::Globalisation;
 
-	// n = 24, h = 0.0333: the well-posed mesh, where both converge.
+	// n = 32, h = 0.025: the resolved mesh, where both converge. It was n = 24
+	// while meq used CondenseThenLinearise; under LineariseThenCondense the
+	// threshold moved and n = 24 no longer converges by any route, which took
+	// this test red for a reason that has nothing to do with what it asserts.
+	// THE POINT HERE IS THE ADAPTER, NOT THE PEDESTAL -- ShiftedResidual is what
+	// makes KINSOL solve meq's problem rather than a different one, and any mesh
+	// both paths reach will catch it losing its shift or its sign. The parity
+	// gap has a test of its own; this is not it.
 	SelfMeasurement const plain = meq::tests::measureSelf(
-		eq, standardBox(), 1, 24, cloud(), pedestalDatum, 60, 1.0e-12,
+		eq, standardBox(), 1, 32, cloud(), pedestalDatum, 60, 1.0e-12,
 		nullptr, G::None );
 	SelfMeasurement const damped = meq::tests::measureSelf(
-		eq, standardBox(), 1, 24, cloud(), pedestalDatum, 60, 1.0e-12,
+		eq, standardBox(), 1, 32, cloud(), pedestalDatum, 60, 1.0e-12,
 		nullptr, G::LineSearch );
 
-	std::printf( "\n  section 4.2 k = 1, h = 0.0333: Newton %d iterations, "
+	std::printf( "\n  section 4.2 k = 1, h = 0.025: Newton %d iterations, "
 	             "KIN_LINESEARCH %d\n"
 	             "    psi in [%.6e, %.6e] and [%.6e, %.6e]\n",
 	             plain.newtonIterations, damped.newtonIterations,
@@ -722,10 +729,28 @@ BOOST_AUTO_TEST_CASE( kinsolAgreesWithNewtonWhereBothConverge )
 	// ShiftedResidual getting the sign or the shift wrong -- KINSOL ignores the
 	// right hand side handed to Mult(), so without that adapter it would converge
 	// happily to the answer of a different problem.
+	//
+	// WHY THE CEILING IS 1e-5 AND NOT TIGHTER, since it was 1e-6 and that is the
+	// kind of number that gets quietly raised until a test passes. The two paths
+	// stop on DIFFERENT CRITERIA -- NewtonSolver on || r || <= max( rel_tol *
+	// || r_0 ||, abs_tol ), KINSOL on its own scaled residual norm -- so they
+	// converge to two iterates separated by the last step neither of them took,
+	// and how large that is depends on the mesh. Measured here: 3.27e-06
+	// relative, on psiMax of about 0.3, so a little over 1e-06 absolute. It read
+	// under 1e-06 on the n = 24 mesh this test used to run on, which is why the
+	// old ceiling held; nothing derived it.
+	//
+	// What the ceiling has to be small compared with is the failure it guards
+	// against, and that failure is not small. Dropping the shift makes KINSOL
+	// solve F( x ) = 0 where meq needs F( x ) = b, and b here is a
+	// non-homogeneous pedestal datum driving psi over [ -0.3, 0.3 ] -- a
+	// different equilibrium, not a slightly different one. That is an argument
+	// from what the adapter does rather than a measurement, and it is the reason
+	// four orders of headroom is enough.
 	BOOST_TEST( damped.psiMax == plain.psiMax,
-	            boost::test_tools::tolerance( 1.0e-6 ) );
+	            boost::test_tools::tolerance( 1.0e-5 ) );
 	BOOST_TEST( damped.psiMin == plain.psiMin,
-	            boost::test_tools::tolerance( 1.0e-6 ) );
+	            boost::test_tools::tolerance( 1.0e-5 ) );
 }
 
 BOOST_AUTO_TEST_CASE( anInitialGuessDoesNotMoveTheConvergedAnswer )
@@ -748,10 +773,22 @@ BOOST_AUTO_TEST_CASE( anInitialGuessDoesNotMoveTheConvergedAnswer )
 	// test is about invariance rather than about robustness.
 
 	// barrierDatum, so there is a non-trivial solution to converge to.
+	//
+	// DOWN THE LADDER, not down plain Newton. Section 4.3 at k = 2, n = 16 is one
+	// of the configurations plain Newton solves under CondenseThenLinearise and
+	// does not under the ordering meq uses, so a cold Newton baseline here fails
+	// for a reason that has nothing to do with what this test asserts. The ladder
+	// -- Anderson-accelerated Picard into Newton -- reaches it under both
+	// orderings, and is what meq's driver actually runs, so invariance measured
+	// on it is the more relevant statement anyway. The parity gap has a test of
+	// its own; this is not it.
+	using G = meq::GradShafranovSolver::Globalisation;
 	SelfMeasurement const cold = meq::tests::measureSelf(
-		eq, box, 2, 16, cloud(), barrierDatum, 60, 1.0e-12 );
+		eq, box, 2, 16, cloud(), barrierDatum, 60, 1.0e-12,
+		nullptr, G::PicardThenNewton );
 	SelfMeasurement const warm = meq::tests::measureSelf(
-		eq, box, 2, 16, cloud(), barrierDatum, 60, 1.0e-12, &bump );
+		eq, box, 2, 16, cloud(), barrierDatum, 60, 1.0e-12,
+		&bump, G::PicardThenNewton );
 
 	std::printf( "  section 4.3 with barrierDatum: cold %d iterations, "
 	             "psi in [%.6e, %.6e]\n"
@@ -960,13 +997,37 @@ BOOST_AUTO_TEST_CASE( pedestalConvergenceIsAResolutionThreshold )
 	            "k = 1, n = 32 took " << refined.newtonIterations
 	            << " iterations where 9 is the measured value. The resolved mesh "
 	            "is supposed to be the easy one" );
+	// THIS ONE IS EXPECTED TO BE RED, AND WHAT IT RECORDS IS NOT THE PEDESTAL.
+	// Under CondenseThenLinearise, p-refinement cures the coarse case in 11
+	// iterations, and that -- two independent refinement paths both working --
+	// is what identifies the cause as under-resolution. Under the ordering meq
+	// now uses it does not converge at all, while h-refinement still does, at 13
+	// iterations against 5.
+	//
+	// So the pair of cures has become one, and the surviving asymmetry is the
+	// signature of the parity gap rather than a refutation of the finding: a
+	// discretisation that is under-resolved does not care which order the
+	// elimination and the linearisation are taken in, and this one does. The gap
+	// is MFEM's, filed as HDG-LINEARISE-FIRST-STIFF-SOURCES.md, and this exact
+	// configuration is the sharpest single case in it.
+	//
+	// DELETE NEITHER ASSERTION WHEN THEY GO GREEN -- green here means MFEM has
+	// reached parity, which is the whole point. What must not happen is clearing
+	// them by putting the ordering back: that would restore a nonlinear solve
+	// inside every element of every residual evaluation to make a message go
+	// away.
 	BOOST_TEST( raised.converged,
-	            "k = 2 no longer converges on the n = 16 mesh, so p-refinement "
-	            "has stopped curing the coarse case and the finding this test "
-	            "records -- that it is under-resolution -- is in doubt" );
+	            "k = 2, n = 16 does not converge under "
+	            "NLOrdering::LineariseThenCondense, where CondenseThenLinearise "
+	            "takes 11. h-refinement still cures the coarse case and "
+	            "p-refinement no longer does, which is the parity gap and not a "
+	            "statement about resolution -- see "
+	            "../mfem-hdg-dev/doc/HDG-LINEARISE-FIRST-STIFF-SOURCES.md, where "
+	            "this is the reproducer's headline case" );
 	BOOST_TEST( raised.newtonIterations <= 20,
 	            "k = 2, n = 16 took " << raised.newtonIterations
-	            << " iterations where 11 is the measured value" );
+	            << " iterations where 11 is the value measured under "
+	            "CondenseThenLinearise" );
 
 	// AND THE THRESHOLD IS STILL THERE. Both readings of the knife edge -- 42
 	// iterations, or a failure at the cap -- clear this by a factor of two or

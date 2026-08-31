@@ -1,9 +1,172 @@
 #include "GradShafranov.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <memory>
 #include <stdexcept>
+
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+#include <omp.h>
+#endif
+
+// Whether this build has ANY direct trace solver. The fallback paths below are
+// guarded on this rather than on MFEM_USE_SUITESPARSE alone, which was the same
+// question only while UMFPack was the only choice.
+#if defined( MFEM_USE_SUITESPARSE ) || defined( MFEM_USE_MKL_PARDISO ) \
+	|| defined( MFEM_USE_CUDSS )
+#define MEQ_HAVE_DIRECT_TRACE_SOLVER 1
+#endif
 
 namespace meq
 {
+namespace
+{
+	/*
+	 * The assembly mode a fresh solver starts in: SERIAL, ALWAYS.
+	 *
+	 * A gate on omp_get_max_threads() was written, measured and REMOVED, and the
+	 * measurement is why this function still exists rather than being a constant.
+	 *
+	 * In isolation the threaded assembly wins everywhere worth caring about --
+	 * 1.15x to 1.33x from four threads up, and still 1.19x on a 512-element mesh.
+	 * On that evidence defaulting to Threaded whenever more than one thread is
+	 * available looks free. It is not. `HighBetaConvergence`, which assembles a
+	 * small system many times over inside a bordered Newton, goes from 21.5 s to
+	 * 39 s -- **1.8x SLOWER**, reproducibly, on the same binary.
+	 *
+	 * The distinguishing variable is not mesh size, which is what makes this
+	 * undecidable from here: HighBeta's meshes are 128 and 512 elements, and 512
+	 * is exactly where the isolated benchmark still showed a win. What differs is
+	 * how OFTEN assembly is called relative to everything else. MFEM's threaded
+	 * path forks a team and buffers element blocks per call, and a caller that
+	 * assembles repeatedly pays that per call while a caller that assembles once
+	 * amortises it. The solver cannot know which caller it has.
+	 *
+	 * So there is no safe automatic default, and the honest default is MFEM's
+	 * own. setAssemblyMode( Threaded ) is an informed choice: worth taking on a
+	 * large mesh assembled a few times, worth avoiding on a small one assembled
+	 * hundreds of times.
+	 *
+	 * This is the same lesson as the trace matrix's symmetry and the threaded-MKL
+	 * collapse: a property measured on the easy configuration is not a property
+	 * of the code.
+	 */
+	GradShafranovSolver::AssemblyMode defaultAssemblyMode()
+	{
+		return GradShafranovSolver::AssemblyMode::Serial;
+	}
+
+#ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
+	/*
+	 * Build the chosen direct solver, configured as meq wants it.
+	 *
+	 * One place rather than four, which is the point: the four call sites --
+	 * Picard, Newton, the bordered Newton and the linear path -- had four copies
+	 * of the same UMFPack configuration, and the ONLY difference between them
+	 * that ever mattered was whether the symbolic analysis is retained.
+	 *
+	 * `reuseSymbolic` is that difference and it is not cosmetic. Every path that
+	 * re-solves with the same sparsity wants it: NewtonSolver::Mult calls
+	 * SetOperator on this object once per iteration, and Picard runs 122 to 290
+	 * full factorisations. The linear path does not, because it factorises once
+	 * and destroys the object, so retaining the analysis would buy nothing and
+	 * cost a copy of the pattern. All three packages compare the PATTERN rather
+	 * than the object, so a matrix rebuilt into a fresh object with the same
+	 * structure still hits the reuse.
+	 */
+	std::unique_ptr<mfem::Solver>
+	makeTraceSolver( GradShafranovSolver::TraceSolver choice, bool reuseSymbolic )
+	{
+		switch ( choice )
+		{
+			case GradShafranovSolver::TraceSolver::UMFPack:
+			{
+#ifdef MFEM_USE_SUITESPARSE
+				auto solver = std::make_unique<mfem::UMFPackSolver>();
+				solver->Control[ UMFPACK_ORDERING ] = UMFPACK_ORDERING_METIS;
+				if ( reuseSymbolic )
+					solver->SetReuseSymbolic();
+				return solver;
+#else
+				break;
+#endif
+			}
+			case GradShafranovSolver::TraceSolver::Pardiso:
+			{
+#ifdef MFEM_USE_MKL_PARDISO
+				auto solver = std::make_unique<mfem::PardisoSolver>();
+				// STRUCTURE symmetric, not symmetric. The trace matrix is
+				// symmetric to 2e-16 on a fitted mesh and asymmetric at 5.4e-1 on
+				// the extension path, where HDGExtensionIntegrator deposits an
+				// outer product into the flux block; the SPARSITY is symmetric on
+				// both. So this is the type that is right for meq's headline
+				// configuration as well as for the easy one.
+				solver->SetMatrixType( mfem::PardisoSolver::REAL_STRUCTURE_SYMMETRIC );
+				solver->SetPrintLevel( 0 );
+				if ( reuseSymbolic )
+					solver->SetReuseSymbolic();
+				return solver;
+#else
+				break;
+#endif
+			}
+			case GradShafranovSolver::TraceSolver::cuDSS:
+			{
+#ifdef MFEM_USE_CUDSS
+				auto solver = std::make_unique<mfem::CuDSSSolver>();
+				// NONSYMMETRIC + FULL for the reason above, and because cuDSS's
+				// symmetric modes would be wrong on the extension path rather than
+				// merely slower.
+				solver->SetMatrixSymType( mfem::CuDSSSolver::NONSYMMETRIC );
+				solver->SetMatrixViewType( mfem::CuDSSSolver::FULL );
+				// cuDSS spells the same idea differently and requires it BEFORE
+				// the first SetOperator -- it verifies against its own null handle.
+				if ( reuseSymbolic )
+					solver->SetReorderingReuse( true );
+				return solver;
+#else
+				break;
+#endif
+			}
+		}
+
+		// Unreachable through setTraceSolver(), which refuses an unavailable
+		// choice. Reachable only if that check and this switch disagree, which is
+		// worth saying out loud rather than returning null into a dereference.
+		throw std::logic_error(
+			"meq: the requested trace solver is not available in this build, and "
+			"setTraceSolver() should already have refused it" );
+	}
+
+	/// The factorisation counters, where the package keeps any. UMFPack and
+	/// PARDISO both do and cuDSS does not, so a cuDSS solve reports zero rather
+	/// than a wrong number.
+	void readFactorisationCounts( mfem::Solver const &solver,
+	                              long &symbolic, long &numeric )
+	{
+#ifdef MFEM_USE_SUITESPARSE
+		if ( auto const *umf = dynamic_cast<mfem::UMFPackSolver const *>( &solver ) )
+		{
+			symbolic = umf->GetNumSymbolicFactorizations();
+			numeric = umf->GetNumNumericFactorizations();
+			return;
+		}
+#endif
+#ifdef MFEM_USE_MKL_PARDISO
+		if ( auto const *par = dynamic_cast<mfem::PardisoSolver const *>( &solver ) )
+		{
+			symbolic = par->GetNumSymbolicFactorizations();
+			numeric = par->GetNumNumericFactorizations();
+			return;
+		}
+#endif
+		symbolic = 0;
+		numeric = 0;
+	}
+#endif // MEQ_HAVE_DIRECT_TRACE_SOLVER
+}
+
 
 	ConstantStabilization::ConstantStabilization( double tauIn )
 		: tauValue( tauIn )
@@ -155,11 +318,17 @@ namespace meq
 		  negativeInverseRadius( []( mfem::Vector const &x ) { return -1.0/x( 0 ); } ),
 		  linearSource( nullptr ),
 		  nonlinearSource( nullptr ),
+		  normalisedSource( nullptr ),
+		  psiAxisValue( 0.0 ),
+		  normalisationResidualValue( 0.0 ),
+		  normalisationChoice( Normalisation::Coupled ),
 		  boundaryData( nullptr ),
 		  initialGuess( nullptr ),
 		  globalisationChoice( Globalisation::None ),
 		  localSolverChoice( LocalSolver::Newton ),
-		  orderingChoice( NonlinearOrdering::CondenseThenLinearise ),
+		  orderingChoice( NonlinearOrdering::LineariseThenCondense ),
+		  assemblyModeChoice( defaultAssemblyMode() ),
+		  traceSolverChoice( TraceSolver::UMFPack ),
 		  andersonDepth( 1 ),
 		  picardDamping( 1.0 ),
 		  transferPath( nullptr ),
@@ -289,6 +458,84 @@ namespace meq
 		nonlinearSource = &fIn;
 	}
 
+	void GradShafranovSolver::setSource( NormalisedSource &fIn, double psiAxisGuessIn )
+	{
+		if ( !std::isfinite( psiAxisGuessIn ) || psiAxisGuessIn == 0.0 )
+			throw std::invalid_argument( "meq::GradShafranovSolver::setSource: the psi_ax guess must be finite and non-zero" );
+		/*
+		 * THERE USED TO BE A GUARD HERE REFUSING
+		 * NonlinearOrdering::LineariseThenCondense, AND IT WAS WRONG.
+		 *
+		 * Its reasoning was that under that ordering the reduced operator is a
+		 * linearised residual between GetGradient() calls, so psi_ax -- which
+		 * enters only through the source -- would be invisible to a finite
+		 * difference of it and the border would come back zero. That is what
+		 * darcyhybridization.hpp's own summary of the ordering says, printing the
+		 * substitution as ( q, u )_lin + M^-1( -r_lin - [ C; E ]( L - L_lin ) )
+		 * with r_lin retained.
+		 *
+		 * THE CODE DOES NOT DO THAT. Relinearise() states outright that the local
+		 * residual at the linearisation point is deliberately NOT retained -- it
+		 * used to be, and caching it cost the gradient its exactness -- and
+		 * MultInvLin()'s correction calls LocalResidual(), which builds a
+		 * LocalNLOperator and evaluates it at the current fields. The source is
+		 * therefore read afresh on every residual evaluation, and a perturbation
+		 * of psi_ax reaches it.
+		 *
+		 * Measured, k = 2, n = 8, border still differenced, against
+		 * condense-first: psi_ax agreeing to every digit printed on four cases --
+		 * 3.058984e-01, 3.036075e+00, 2.834510e-01, 8.643745e-01 -- self
+		 * consistent to between 2e-16 and 7e-12, in 5, 5, 9 and 13 iterations
+		 * against 4, 4, 8 and 11. So the ordering costs one or two iterations
+		 * here and nothing else.
+		 *
+		 * The moral is the one this tree keeps relearning: that guard was written
+		 * from a header comment rather than from the code under it.
+		 */
+
+		// The ordinary checks first, and through the ordinary overload, so that
+		// "one solver holds one source" is enforced in exactly one place.
+		setSource( static_cast<Source const &>( fIn ) );
+
+		normalisedSource = &fIn;
+		psiAxisValue = psiAxisGuessIn;
+		normalisationResidualValue = 0.0;
+	}
+
+	double GradShafranovSolver::axisFlux( mfem::Vector const &trace, int *element )
+	{
+		if ( !normalisedSource )
+			throw std::logic_error( "meq::GradShafranovSolver::axisFlux: psi_ax is not an unknown of this solver" );
+		if ( !prepared )
+			throw std::logic_error( "meq::GradShafranovSolver::axisFlux: prepare() has not been called" );
+		return recoverPeak( trace, psiAxisValue, element );
+	}
+
+	void GradShafranovSolver::setNormalisationCoupling( Normalisation choice )
+	{
+		normalisationChoice = choice;
+	}
+
+	GradShafranovSolver::Normalisation GradShafranovSolver::normalisationCoupling() const
+	{
+		return normalisationChoice;
+	}
+
+	bool GradShafranovSolver::normalisationIsUnknown() const
+	{
+		return normalisedSource != nullptr;
+	}
+
+	double GradShafranovSolver::psiAxis() const
+	{
+		return psiAxisValue;
+	}
+
+	double GradShafranovSolver::normalisationResidual() const
+	{
+		return normalisationResidualValue;
+	}
+
 	/*
 	 * F( r, z, psi^k( r, z ) ): the source frozen at the previous iterate.
 	 *
@@ -397,6 +644,65 @@ namespace meq
 			mfem::Vector const &shift;
 	};
 
+	/*
+	 * R( x ) WITH THE LINEARISATION FORCED TO x FIRST, for
+	 * NonlinearOrdering::LineariseThenCondense and for nothing else.
+	 *
+	 * WHAT IT REPAIRS. NewtonSolver evaluates the residual at x_k while the
+	 * hybridization still holds the linearisation from x_{k-1}, and only then
+	 * asks for the gradient, which relinearises at x_k. So the r and the J it
+	 * solves with are taken at different local states -- a pairing no Newton is
+	 * entitled to. Under CondenseThenLinearise that does not arise, because the
+	 * local problems are solved to convergence and the residual has no memory:
+	 * measured, evaluating at one trace with the linearisation taken at another
+	 * changes it by EXACTLY zero there, and by 5.6e-4, 1.8e-1 and 1.5e0 under
+	 * linearise-first as the pedestal narrows through sigma^2 = 0.05, 0.01,
+	 * 0.005.
+	 *
+	 * The repair is available because GetGradient() is IDEMPOTENT at a trace the
+	 * linearisation already sits at -- DarcyHybridization checks for exactly
+	 * that and refuses to move the fields -- so relinearising here costs one
+	 * pass on the first evaluation at a new trace and nothing on any later one,
+	 * and NewtonSolver's own GetGradient() call afterwards becomes free.
+	 *
+	 * MEASURED, on section 4.2 at k = 1, n = 30, Newton driven directly:
+	 *
+	 *   sigma^2 = 0.05    final residual 1.914e-12 -> 5.503e-14, which is
+	 *                     condense-first's 5.539e-14 to the last figure
+	 *   sigma^2 = 0.005   final residual 1.664e-01 -> 4.592e-03, still short
+	 *
+	 * So it is a repair and not a cure: the published pedestal still does not
+	 * converge under this ordering. What is left after it is what a request to
+	 * the MFEM tree should be about.
+	 */
+	class Relinearised : public mfem::Operator
+	{
+		public:
+			explicit Relinearised( mfem::Operator &operatorIn )
+				: mfem::Operator( operatorIn.Height(), operatorIn.Width() ),
+				  residual( operatorIn )
+			{
+			}
+
+			/// MFEM's spelling, from mfem::Operator.
+			void Mult( mfem::Vector const &x, // NOLINT(readability-identifier-naming)
+			           mfem::Vector &y ) const override
+			{
+				residual.GetGradient( x );
+				residual.Mult( x, y );
+			}
+
+			/// MFEM's spelling, from mfem::Operator.
+			mfem::Operator &GetGradient( // NOLINT(readability-identifier-naming)
+				mfem::Vector const &x ) const override
+			{
+				return residual.GetGradient( x );
+			}
+
+		private:
+			mfem::Operator &residual;
+	};
+
 	void GradShafranovSolver::setBoundaryData( mfem::Coefficient &boundaryIn )
 	{
 		boundaryData = &boundaryIn;
@@ -470,19 +776,15 @@ namespace meq
 		prepared = false;
 		prepare();
 
-#ifdef MFEM_USE_SUITESPARSE
+#ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
 		// Held across calls rather than built per iteration, which is the whole
 		// point: Picard runs 122 to 290 of these, each a full factorisation of a
 		// matrix whose sparsity never changes. prepare() rebuilds `reduced` every
-		// iteration, but SetReuseSymbolic() compares the pattern rather than the
-		// object -- it documents accepting "a matrix rebuilt into a fresh object
-		// with the same structure" -- so the analysis survives that.
+		// iteration, but the reuse compares the pattern rather than the object --
+		// it documents accepting "a matrix rebuilt into a fresh object with the
+		// same structure" -- so the analysis survives that.
 		if ( !picardSolver )
-		{
-			picardSolver = std::make_unique<mfem::UMFPackSolver>();
-			picardSolver->Control[ UMFPACK_ORDERING ] = UMFPACK_ORDERING_METIS;
-			picardSolver->SetReuseSymbolic();
-		}
+			picardSolver = makeTraceSolver( traceSolverChoice, true );
 		picardSolver->SetOperator( *reduced.Ptr() );
 		picardSolver->Mult( traceB, traceX );
 #else
@@ -592,6 +894,97 @@ namespace meq
 	GradShafranovSolver::nonlinearOrdering() const
 	{
 		return orderingChoice;
+	}
+
+	/*
+	 * Threading the element-local assembly.
+	 *
+	 * MFEM aborts the process if asked for AssemblyMode::Threaded in a build
+	 * without MFEM_USE_OPENMP or without MFEM_THREAD_SAFE, and it is right to --
+	 * a caller asking for threads is asking a performance question, and quietly
+	 * running the serial loop would report a speedup nobody got. But aborting is
+	 * not a library's decision to impose on meq's callers, so the build is
+	 * checked here and the refusal comes back as an exception like every other
+	 * value fault in this class.
+	 */
+	void GradShafranovSolver::setAssemblyMode( AssemblyMode choice )
+	{
+		if ( choice == AssemblyMode::Threaded )
+		{
+#if !defined( MFEM_USE_OPENMP ) || !defined( MFEM_THREAD_SAFE )
+			throw std::invalid_argument(
+				"AssemblyMode::Threaded needs an MFEM built with both "
+				"MFEM_USE_OPENMP and MFEM_THREAD_SAFE; this one has at least one "
+				"of them off, and MFEM would abort the process rather than fall "
+				"back to the serial loop" );
+#endif
+		}
+
+		assemblyModeChoice = choice;
+		built = false;
+		prepared = false;
+	}
+
+	GradShafranovSolver::AssemblyMode
+	GradShafranovSolver::assemblyMode() const
+	{
+		return assemblyModeChoice;
+	}
+
+	/*
+	 * The trace solver, and which of them this build actually has.
+	 *
+	 * Kept as a compile-time question rather than a runtime one because that is
+	 * what it is: MFEM either wraps the package or it does not, and there is no
+	 * state in which asking would give a different answer later.
+	 */
+	bool GradShafranovSolver::traceSolverAvailable( TraceSolver choice )
+	{
+		switch ( choice )
+		{
+			case TraceSolver::UMFPack:
+#ifdef MFEM_USE_SUITESPARSE
+				return true;
+#else
+				return false;
+#endif
+			case TraceSolver::Pardiso:
+#ifdef MFEM_USE_MKL_PARDISO
+				return true;
+#else
+				return false;
+#endif
+			case TraceSolver::cuDSS:
+#ifdef MFEM_USE_CUDSS
+				return true;
+#else
+				return false;
+#endif
+		}
+		return false;
+	}
+
+	void GradShafranovSolver::setTraceSolver( TraceSolver choice )
+	{
+		if ( !traceSolverAvailable( choice ) )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::setTraceSolver: this MFEM was built "
+				"without the package that solver needs -- UMFPack wants "
+				"MFEM_USE_SUITESPARSE, Pardiso wants MFEM_USE_MKL_PARDISO, cuDSS "
+				"wants MFEM_USE_CUDSS. Refused rather than silently substituted, "
+				"because a caller naming a solver has a reason for naming it; "
+				"traceSolverAvailable() answers the question without throwing" );
+
+		traceSolverChoice = choice;
+		// NOT a rebuild. The trace solver is chosen when the reduced system is
+		// solved, not when the forms are assembled, so `built` and `prepared`
+		// both stay valid -- unlike every other setter in this block.
+	}
+
+	GradShafranovSolver::TraceSolver
+	GradShafranovSolver::traceSolver() const
+	{
+		return traceSolverChoice;
 	}
 
 	void GradShafranovSolver::setLocalSolver( LocalSolver choice )
@@ -784,6 +1177,17 @@ namespace meq
 		darcy->EnableHybridization( traceFes.get(), new mfem::NormalTraceJumpIntegrator(),
 		                            essentialFluxTdofs );
 		darcy->GetHybridization()->SetEssentialBC( dirichletMarker );
+
+		// Who runs the element loop. OUTSIDE the branch below, deliberately:
+		// ComputeH() factors A, forms and factors the Schur complement and does
+		// one local back-substitution per trace dof on BOTH paths, so the linear
+		// solve has exactly as much element-local work to thread as the Newton
+		// one. setAssemblyMode() has already refused Threaded if the build cannot
+		// honour it, so this cannot reach MFEM's abort.
+		darcy->GetHybridization()->SetAssemblyMode(
+			assemblyModeChoice == AssemblyMode::Threaded
+				? mfem::DarcyHybridization::AssemblyMode::Threaded
+				: mfem::DarcyHybridization::AssemblyMode::Serial );
 
 		if ( usesNonlinearForms() )
 		{
@@ -992,6 +1396,11 @@ namespace meq
 			potentialRhs.Assemble();
 		}
 
+		formSystem();
+	}
+
+	void GradShafranovSolver::formSystem()
+	{
 		// traceX and traceB alias the trace blocks of the solution and right hand
 		// side. That aliasing is not cosmetic: FormLinearSystem() only calls
 		// EliminateTraceTrueDofsInRHS() -- the step that moves the essential trace
@@ -1063,6 +1472,483 @@ namespace meq
 #endif
 	}
 
+	double GradShafranovSolver::recoverPeak( mfem::Vector const &trace, double psiAxisIn,
+	                                         int *element, int *dof )
+	{
+		normalisedSource->setNormalisation( psiAxisIn );
+
+		// Into scratch, not into the solution blocks: this is called from inside
+		// finite differences, and leaving the caller's psi_h perturbed would be a
+		// silent corruption of exactly the field the answer is read from.
+		//
+		// What the element-local Newtons inside ComputeSolution() start from is
+		// NOT this vector -- DarcyHybridization keeps a copy taken at
+		// FormLinearSystem() time and every local solve begins there. That is why
+		// solveWithNormalisation() re-forms the system once per Newton step; see
+		// the comment on the seed there, which is the single thing that made
+		// these differences mean anything.
+		darcy->RecoverFEMSolution( trace, darcyRhs, recoveryScratch );
+
+		/*
+		 * psi_ax IS THE LARGEST NODAL VALUE, not the largest value of the
+		 * polynomial, and that is a definition rather than an approximation.
+		 *
+		 * The two differ by O( h^(k+1) ) and both converge to max psi, so either
+		 * would do for the physics. The nodal one is chosen because it is what
+		 * makes the constraint DIFFERENTIABLE in a form the border can use: it is
+		 * one entry of the recovered potential, so d psi_ax/d lambda is supported
+		 * on the trace dofs of a single element. The maximum over an element's
+		 * interior would move that support to wherever the interior maximum is,
+		 * and the derivative would acquire the argmax's own sensitivity.
+		 *
+		 * Which element attained it is returned rather than searched for again,
+		 * because the border needs it and a second search over a different
+		 * recovery could find a different element.
+		 */
+		mfem::Vector const &potential = recoveryScratch.GetBlock( 1 );
+		double best = -std::numeric_limits<double>::infinity();
+		int bestElement = -1;
+		int bestDof = -1;
+
+		mfem::Array<int> dofs;
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			potentialFes->GetElementDofs( e, dofs );
+			for ( int i = 0; i < dofs.Size(); ++i )
+			{
+				int const index = dofs[ i ];
+				if ( potential( index ) > best )
+				{
+					best = potential( index );
+					bestElement = e;
+					bestDof = index;
+				}
+			}
+		}
+
+		if ( element )
+			*element = bestElement;
+		if ( dof )
+			*dof = bestDof;
+		return best;
+	}
+
+	void GradShafranovSolver::traceDofsOfElement( int element, mfem::Array<int> &dofs ) const
+	{
+		dofs.SetSize( 0 );
+		if ( element < 0 )
+			return;
+
+		mfem::Array<int> faces, orientations, faceDofs;
+		// Two dimensional throughout -- the constructor refuses anything else --
+		// so an element's faces are its edges.
+		mesh.GetElementEdges( element, faces, orientations );
+
+		for ( int i = 0; i < faces.Size(); ++i )
+		{
+			traceFes->GetFaceVDofs( faces[ i ], faceDofs );
+			for ( int j = 0; j < faceDofs.Size(); ++j )
+			{
+				// A negative index is MFEM's sign-carrying encoding; the trace
+				// space here is scalar, so only the index is wanted.
+				int const d = faceDofs[ j ] >= 0 ? faceDofs[ j ] : -1 - faceDofs[ j ];
+				dofs.Append( d );
+			}
+		}
+
+		dofs.Sort();
+		dofs.Unique();
+	}
+
+	/*
+	 * THE BORDERED NEWTON: the trace and psi_ax solved together.
+	 *
+	 * The system is
+	 *
+	 *     R( lambda, s ) = 0        the hybridized trace residual, with the
+	 *                               source normalised by s
+	 *     G( lambda, s ) = s - max psi_h( lambda, s ) = 0
+	 *
+	 * and the step comes from
+	 *
+	 *     [  A   c  ] [ dlambda ]     [ R ]
+	 *     [  b^T d  ] [   ds    ]  = -[ G ]
+	 *
+	 * solved by block elimination: A y = R, A z = c, then
+	 *
+	 *     ds      = ( b.y - G ) / ( d - b.z )
+	 *     dlambda = -y - z ds.
+	 *
+	 * ONE FACTORISATION AND TWO BACKSOLVES. That is the whole cost of the extra
+	 * unknown on the linear-algebra side, and it is why the border is not
+	 * assembled into an ( n + 1 ) matrix: a dense row and a dense column would
+	 * cost fill in the factorisation for no gain.
+	 *
+	 * WHERE c AND b COME FROM, and why they are differenced rather than
+	 * assembled. Both are derivatives of the CONDENSED residual. Assembling them
+	 * would need the sensitivity of the element-local eliminations -- for c the
+	 * derivative of each local solve with respect to a parameter of its own
+	 * source, for b the derivative of the recovered potential with respect to the
+	 * trace -- and DarcyHybridization exposes neither. So they are obtained by
+	 * differencing the assembled residual, which is the same principle CEDRES++
+	 * states for the local term (refs/CEDRES.pdf): differentiate the DISCRETE
+	 * residual, never the continuous equation, because the continuous formula
+	 * "seems to blow up if psi reaches a critical point" -- which is precisely
+	 * the point psi_ax is defined at.
+	 *
+	 * c IS DENSE AND b IS NOT, and the asymmetry is structural rather than a
+	 * saving. s enters every element's source, so dR/ds has an entry on every
+	 * trace dof: one central difference in a scalar, two residual evaluations,
+	 * done. max psi_h is one nodal value of one element, and under hybridization
+	 * that element's recovered potential depends only on the trace dofs of its
+	 * own faces -- so b has 3( k + 1 ) entries at most and the rest are exactly
+	 * zero. That claim is asserted rather than assumed, in
+	 * HighBetaConvergence.cpp's theAxisSensitivityIsLocalToItsElement.
+	 *
+	 * THE ORDER OF OPERATIONS IS LOAD BEARING. Every finite difference here runs
+	 * ComputeSolution() through recoverPeak(), which refreshes the factored local
+	 * Jacobians DarcyHybridization keeps; GetGradient() must therefore be the
+	 * LAST thing called before the linear solve, or the matrix handed to UMFPACK
+	 * belongs to a trace that has since been perturbed and put back.
+	 *
+	 * THE PRINTED RESIDUAL IS ||( R, gamma G )||, with gamma frozen at ||c|| from
+	 * the first iterate. G is a flux and R is a trace residual, so the two cannot
+	 * simply be concatenated; ||c|| is the factor that converts a perturbation of
+	 * psi_ax into the units R is measured in, which is exactly the conversion
+	 * wanted. Freezing it keeps the history a comparison of like with like -- a
+	 * gamma recomputed each step would put the Jacobian's own variation into the
+	 * convergence history and manufacture orders out of it.
+	 */
+	void GradShafranovSolver::solveWithNormalisation()
+	{
+		if ( globalisationChoice != Globalisation::None )
+			throw std::logic_error( "meq::GradShafranovSolver::solve: psi_ax as an unknown is implemented for Globalisation::None only -- the KINSOL paths drive a residual of their own and the Picard ones do not build a Jacobian at all" );
+		// No ordering guard: see the note in setSource( NormalisedSource &, double ).
+		// LineariseThenCondense works here, measured.
+
+		int const n = traceX.Size();
+
+		recoveryScratch.Update( darcy->GetOffsets() );
+
+		newtonResidualHistory.clear();
+		newtonIterationCount = 0;
+		symbolicFactorisationCount = 0;
+		numericFactorisationCount = 0;
+
+		mfem::Vector residual( n ), column( n ), y( n ), z( n ), scratch( n );
+
+		auto fieldResidual = [ & ]( mfem::Vector const &trace, double normalisation,
+		                            mfem::Vector &out )
+		{
+			normalisedSource->setNormalisation( normalisation );
+			// Refetched rather than held: formSystem() replaces the handle every
+			// time the local seed is refreshed, and a reference taken before the
+			// loop would outlive the operator it names.
+			reduced.Ptr()->Mult( trace, out );
+			out -= traceB;
+		};
+
+		// A central difference is worth the second evaluation here. The residual
+		// carries the element-local solves' own stopping tolerance as noise, so a
+		// forward difference would leave an O( h ) truncation error on top of it
+		// and the border would be the thing that limits Newton's order.
+		auto normalisationStep = []( double value )
+		{
+			return 1.0e-5*std::max( std::abs( value ), 1.0e-10 );
+		};
+
+		auto sourceColumn = [ & ]( mfem::Vector const &trace, double normalisation,
+		                           mfem::Vector &out )
+		{
+			if ( normalisationChoice == Normalisation::Decoupled )
+			{
+				out = 0.0;
+				return;
+			}
+			double const h = normalisationStep( normalisation );
+			fieldResidual( trace, normalisation + h, out );
+			fieldResidual( trace, normalisation - h, scratch );
+			out -= scratch;
+			out /= 2.0*h;
+		};
+
+		mfem::Array<int> const &essentialTrace =
+			darcy->GetHybridization()->GetEssentialTrueDofs();
+		std::vector<bool> essential( n, false );
+		for ( int i = 0; i < essentialTrace.Size(); ++i )
+			essential[ essentialTrace[ i ] ] = true;
+
+		double s = psiAxisValue;
+		int argElement = -1;
+		double peak = recoverPeak( traceX, s, &argElement );
+		double constraint = s - peak;
+		fieldResidual( traceX, s, residual );
+
+		// c at the starting iterate, computed whatever the coupling: it is both
+		// the first step's column and the scale gamma. gamma converts a
+		// perturbation of psi_ax into the units the trace residual is measured
+		// in, and || c || is exactly that conversion. Normalisation::Decoupled
+		// does not use the column but is given the same gamma, or the two
+		// convergence histories would not be comparable -- which is the whole
+		// point of having a control.
+		mfem::Vector initialColumn( n );
+		{
+			double const h = normalisationStep( s );
+			fieldResidual( traceX, s + h, initialColumn );
+			fieldResidual( traceX, s - h, scratch );
+			initialColumn -= scratch;
+			initialColumn /= 2.0*h;
+		}
+
+		double gamma = initialColumn.Norml2();
+		if ( !( gamma > 0.0 ) || !std::isfinite( gamma ) )
+			gamma = 1.0;
+
+		if ( normalisationChoice == Normalisation::Coupled )
+			column = initialColumn;
+		else
+			column = 0.0;
+
+		/*
+		 * The convergence target is taken from the COLD iterate, for the reason
+		 * the plain Newton path takes it from there: MFEM's rule scales the target
+		 * by the residual at the iterate it was handed, so a good guess shrinks
+		 * the target with it and past a point drives it under the round-off floor.
+		 * On this path a guess is not an optimisation but part of the problem
+		 * statement -- see setSource( NormalisedSource &, double ) -- so the
+		 * effect would be systematic rather than occasional.
+		 */
+		double reference = 0.0;
+		{
+			mfem::Vector coldTrace( traceX );
+			for ( int i = 0; i < n; ++i )
+				if ( !essential[ i ] )
+					coldTrace( i ) = 0.0;
+
+			mfem::Vector coldResidual( n );
+			fieldResidual( coldTrace, s, coldResidual );
+			double const coldPeak = recoverPeak( coldTrace, s );
+			reference = std::hypot( coldResidual.Norml2(), gamma*( s - coldPeak ) );
+		}
+		double const target = std::max( newtonAbsoluteTolerance,
+		                                newtonRelativeTolerance*reference );
+
+#ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
+		// The sparsity of the trace system does not change between Newton steps
+		// and this object outlives the loop, so the analysis is done once.
+		std::unique_ptr<mfem::Solver> const linearOwned =
+			makeTraceSolver( traceSolverChoice, true );
+		mfem::Solver &linear = *linearOwned;
+#else
+		mfem::GMRESSolver linear;
+		linear.SetRelTol( 1.0e-14 );
+		linear.SetAbsTol( 0.0 );
+		linear.SetMaxIter( 5000 );
+		linear.SetPrintLevel( -1 );
+#endif
+
+		bool converged = false;
+		for ( int iteration = 0; iteration <= newtonMaxIterations; ++iteration )
+		{
+			double const norm = std::hypot( residual.Norml2(), gamma*constraint );
+			newtonResidualHistory.push_back( norm );
+			newtonIterationCount = iteration;
+
+			if ( norm <= target )
+			{
+				converged = true;
+				break;
+			}
+			if ( !std::isfinite( norm ) || iteration == newtonMaxIterations )
+				break;
+
+			bool const coupled = normalisationChoice == Normalisation::Coupled;
+
+			// d = 1 - d( max psi_h )/d psi_ax, the corner of the border.
+			double corner = 1.0;
+			if ( coupled )
+			{
+				double const h = normalisationStep( s );
+				double const peakUp = recoverPeak( traceX, s + h );
+				double const peakDown = recoverPeak( traceX, s - h );
+				corner = 1.0 - ( peakUp - peakDown )/( 2.0*h );
+			}
+
+			// b = -d( max psi_h )/d lambda, on the trace dofs of the element that
+			// attained the maximum and nowhere else. Essential dofs are left at
+			// zero: the step does not move them, so what they would contribute is
+			// multiplied by an increment that is identically zero.
+			mfem::Array<int> borderDofs;
+			traceDofsOfElement( argElement, borderDofs );
+			mfem::Vector border( borderDofs.Size() );
+			border = 0.0;
+
+			double const traceStep = 1.0e-6*std::max( traceX.Normlinf(), 1.0 );
+			for ( int i = 0; coupled && i < borderDofs.Size(); ++i )
+			{
+				int const dof = borderDofs[ i ];
+				if ( essential[ dof ] )
+					continue;
+
+				double const saved = traceX( dof );
+				traceX( dof ) = saved + traceStep;
+				double const up = recoverPeak( traceX, s );
+				traceX( dof ) = saved - traceStep;
+				double const down = recoverPeak( traceX, s );
+				traceX( dof ) = saved;
+				border( i ) = -( up - down )/( 2.0*traceStep );
+			}
+
+			// LAST, and after the source is put back to s: every difference above
+			// ran a local solve of its own, and GetGradient() is what leaves the
+			// factored local Jacobians the backsolves below are entitled to.
+			normalisedSource->setNormalisation( s );
+			mfem::Operator &gradient = reduced.Ptr()->GetGradient( traceX );
+
+			linear.SetOperator( gradient );
+			linear.Mult( residual, y );
+			linear.Mult( column, z );
+
+			double borderDotY = 0.0;
+			double borderDotZ = 0.0;
+			for ( int i = 0; i < borderDofs.Size(); ++i )
+			{
+				borderDotY += border( i )*y( borderDofs[ i ] );
+				borderDotZ += border( i )*z( borderDofs[ i ] );
+			}
+
+			double const denominator = corner - borderDotZ;
+			if ( denominator == 0.0 || !std::isfinite( denominator ) )
+				throw std::runtime_error( "meq::GradShafranovSolver::solve: the bordered Jacobian is singular in psi_ax -- the normalisation has no influence on the solution it normalises" );
+
+			double const deltaS = ( borderDotY - constraint )/denominator;
+
+			/*
+			 * BACKTRACKING, AND IT IS NOT OPTIONAL HERE.
+			 *
+			 * Measured, at nu = 4 and a pressure amplitude of 10 on the standard
+			 * box: the full step converges for the mild profiles and wanders for
+			 * this one, the augmented residual reading 2.7e-1, 6.6e-2, 2.0e0,
+			 * 7.7e-1, 2.5e2, 6.7e4, 7.7e6, 3.8e8 before psi_ax crosses zero and
+			 * the source refuses the normalisation. That is not the Jacobian
+			 * being wrong -- the same Jacobian finishes the milder cases at
+			 * observed order 2 -- it is the equilibrium being a MOUNTAIN-PASS
+			 * solution of a superlinear problem, where the linearised operator is
+			 * indefinite and an undamped step happily leaves the basin.
+			 *
+			 * Halving on the augmented norm, and the best trial kept if none of
+			 * them improves it, so a bad step costs iterations rather than the
+			 * solve. The trial evaluation is not wasted: whichever step is
+			 * accepted, its residual and constraint are the ones the next
+			 * iteration starts from.
+			 */
+			mfem::Vector const savedTrace( traceX );
+			double const savedS = s;
+
+			double bestNorm = std::numeric_limits<double>::infinity();
+			double bestDamping = 0.0;
+			double damping = 1.0;
+			bool accepted = false;
+
+			for ( int trial = 0; trial < 12 && !accepted; ++trial, damping *= 0.5 )
+			{
+				double trialNorm = std::numeric_limits<double>::infinity();
+				try
+				{
+					traceX = savedTrace;
+					traceX.Add( -damping, y );
+					traceX.Add( -damping*deltaS, z );
+					s = savedS + damping*deltaS;
+
+					peak = recoverPeak( traceX, s, &argElement );
+					constraint = s - peak;
+					fieldResidual( traceX, s, residual );
+					trialNorm = std::hypot( residual.Norml2(), gamma*constraint );
+				}
+				catch ( std::exception const & )
+				{
+					// A normalisation the source will not accept -- psi_ax through
+					// zero, most often -- is a step that left the branch. Reject
+					// it like any other non-improving step rather than letting it
+					// end the solve.
+					trialNorm = std::numeric_limits<double>::infinity();
+				}
+
+				if ( std::isfinite( trialNorm ) && trialNorm < bestNorm )
+				{
+					bestNorm = trialNorm;
+					bestDamping = damping;
+				}
+				// Armijo, with the mildest useful constant: what is wanted is a
+				// step that does not make things worse, not an optimal one.
+				accepted = std::isfinite( trialNorm )
+				           && trialNorm < ( 1.0 - 1.0e-4*damping )*norm;
+			}
+
+			if ( !accepted )
+			{
+				if ( bestDamping == 0.0 )
+					throw std::runtime_error( "meq::GradShafranovSolver::solve: no damping of the bordered Newton step gave a finite residual -- psi_ax through zero, most often, which is the branch leaving the physical one" );
+				traceX = savedTrace;
+				traceX.Add( -bestDamping, y );
+				traceX.Add( -bestDamping*deltaS, z );
+				s = savedS + bestDamping*deltaS;
+				peak = recoverPeak( traceX, s, &argElement );
+				constraint = s - peak;
+				fieldResidual( traceX, s, residual );
+			}
+
+			/*
+			 * THE STEP IS SETTLED, SO THE ELEMENT-LOCAL SOLVES ARE GIVEN A FRESH
+			 * STARTING POINT -- and this is the single thing that makes the
+			 * border a derivative rather than noise.
+			 *
+			 * DarcyHybridization takes its local initial guess from the solution
+			 * blocks at FormLinearSystem() time and keeps it for the life of the
+			 * reduced system. Left alone, every local Newton in every residual
+			 * evaluation restarts from the ORIGINAL guess, however far the trace
+			 * has since travelled. Measured on nu = 4 at amplitude 10, n = 16,
+			 * k = 2: 40,000 to 60,000 element-local iterations per outer step,
+			 * most of them hitting the cap of 100 -- and a local solve that ran
+			 * out of iterations returns whatever it had reached, which is not a
+			 * function of anything. Differencing psi_ax by 9e-6 then moved
+			 * max psi_h from 0.8961 to 2.04 and on the next step to 3.84. The
+			 * corner of the border read 1.6e5 where it should read about 1, the
+			 * step in psi_ax collapsed to 1e-8 against a constraint residual of
+			 * 3e-3, and the iteration stalled -- looking exactly like a singular
+			 * border and being nothing of the kind.
+			 *
+			 * Re-forming the system from the recovered state puts every local
+			 * solve within one or two iterations of its answer, so it converges,
+			 * so it is continuous in psi_ax, so the difference is a derivative.
+			 * It also removes the cost: those tens of thousands of local
+			 * iterations were the run time.
+			 *
+			 * The right hand side is rebuilt from zero exactly as prepare() does,
+			 * and traceB comes back the same -- the essential trace values have
+			 * not moved and the source is on the operator, not the right hand
+			 * side -- so the residual being differenced does not drift.
+			 */
+			darcySolution = recoveryScratch;
+			rhs = 0.0;
+			formSystem();
+
+			sourceColumn( traceX, s, column );
+		}
+
+		psiAxisValue = s;
+		normalisationResidualValue = constraint;
+		normalisedSource->setNormalisation( s );
+
+#ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
+		readFactorisationCounts( linear, symbolicFactorisationCount,
+		                         numericFactorisationCount );
+#endif
+
+		if ( !converged )
+			throw std::runtime_error( "meq::GradShafranovSolver::solve: the non-linear iteration did not converge" );
+	}
+
 	void GradShafranovSolver::solve()
 	{
 		// The Picard paths iterate a fixed point on the POTENTIAL, not a residual
@@ -1071,6 +1957,13 @@ namespace meq
 		// Stale on a solver reused across globalisations otherwise; the handoff
 		// republishes it after stage 2.
 		picardIterationCount = 0;
+
+		// Before the Picard dispatches below, not after: a normalised source with
+		// a Picard globalisation would otherwise be routed into a fixed point on
+		// the potential that has no idea psi_ax is an unknown, and would converge
+		// to the solution of a different problem.
+		if ( normalisedSource && globalisationChoice != Globalisation::None )
+			throw std::logic_error( "meq::GradShafranovSolver::solve: psi_ax as an unknown is implemented for Globalisation::None only -- the KINSOL paths drive a residual of their own and the Picard ones build no Jacobian to border" );
 
 		if ( nonlinearSource && globalisationChoice == Globalisation::PicardThenNewton )
 		{
@@ -1084,22 +1977,55 @@ namespace meq
 			return;
 		}
 
+		// psi_ax has to be in the source before anything assembles, so that
+		// prepare() and the first residual evaluation see the same normalisation.
+		if ( normalisedSource )
+			normalisedSource->setNormalisation( psiAxisValue );
+
 		prepare();
 
-		if ( nonlinearSource )
+		if ( normalisedSource )
 		{
+			solveWithNormalisation();
+		}
+		else if ( nonlinearSource )
+		{
+			/*
+			 * THE COLD REFERENCE IS TAKEN FIRST, AND BY PREPARING WITHOUT THE
+			 * GUESS RATHER THAN BY EDITING THE TRACE. Both halves of that are
+			 * bug fixes; see the note where the tolerance is set for the
+			 * measurement, and note that it has to happen HERE, before anything
+			 * binds a reference to the reduced operator, because the second
+			 * prepare() replaces it.
+			 */
+			double coldReference = -1.0;
+			if ( initialGuess )
+			{
+				mfem::Coefficient *const guess = initialGuess;
+				initialGuess = nullptr;
+				prepare();
+
+				mfem::Vector coldResidual( traceX.Size() );
+				reduced.Ptr()->Mult( traceX, coldResidual );
+				coldResidual -= traceB;
+				coldReference = coldResidual.Norml2();
+
+				initialGuess = guess;
+				prepare();
+			}
+
 			ResidualRecorder recorder( newtonResidualHistory );
 
-#ifdef MFEM_USE_SUITESPARSE
-			mfem::UMFPackSolver linear;
-			linear.Control[ UMFPACK_ORDERING ] = UMFPACK_ORDERING_METIS;
+#ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
 			// NewtonSolver::Mult calls prec->SetOperator( *grad ) on THIS object
 			// once per iteration, and the trace system's sparsity does not change
-			// between them -- so without this the METIS analysis is recomputed and
+			// between them -- so without the reuse the ordering is recomputed and
 			// thrown away every step, at a fifth to a quarter of the factorisation.
 			// The pattern is compared entry by entry rather than assumed, so a
 			// pattern that did change is re-analysed and the answer is unaffected.
-			linear.SetReuseSymbolic();
+			std::unique_ptr<mfem::Solver> const linearOwned =
+				makeTraceSolver( traceSolverChoice, true );
+			mfem::Solver &linear = *linearOwned;
 #else
 			mfem::GMRESSolver linear;
 			linear.SetRelTol( 1.0e-14 );
@@ -1121,7 +2047,18 @@ namespace meq
 			// the KINSOL paths: it costs one subtraction per residual evaluation
 			// and keeps the two paths reading the same residual, which is what
 			// makes a difference between them attributable to the line search.
-			ShiftedResidual shifted( *reduced.Ptr(), traceB );
+			// Under linearise-first the residual and the gradient must be taken
+			// at the same local state; see Relinearised. Built unconditionally so
+			// that the two orderings differ in one flag and not in structure, and
+			// pointed at only where it is wanted.
+			Relinearised relinearised( *reduced.Ptr() );
+			bool const pairing =
+				orderingChoice == NonlinearOrdering::LineariseThenCondense;
+			mfem::Operator &residualOperator =
+				pairing ? static_cast<mfem::Operator &>( relinearised )
+				        : *reduced.Ptr();
+
+			ShiftedResidual shifted( residualOperator, traceB );
 
 			std::unique_ptr<mfem::NewtonSolver> nonlinear;
 			bool kinsol = false;
@@ -1164,7 +2101,7 @@ namespace meq
 			if ( kinsol )
 				nonlinear->SetOperator( shifted );
 			else
-				nonlinear->SetOperator( *reduced.Ptr() );
+				nonlinear->SetOperator( residualOperator );
 			nonlinear->SetSolver( linear );
 			nonlinear->SetMonitor( recorder );
 
@@ -1203,34 +2140,14 @@ namespace meq
 			 * set. On this path that is a full set of element-local solves, which
 			 * is the price of the criterion meaning something.
 			 */
-			if ( initialGuess )
+			if ( coldReference >= 0.0 )
 			{
-				// The cold iterate, reconstructed rather than re-derived: after
-				// FormLinearSystem, traceX holds the Dirichlet datum on the
-				// essential trace dofs and the guess everywhere else. Zeroing
-				// everywhere else is exactly what prepare() would have left had
-				// no guess been set.
-				mfem::Vector coldTrace( traceX );
-				mfem::Array<int> const &essentialTrace =
-					darcy->GetHybridization()->GetEssentialTrueDofs();
-				std::vector<bool> essential( coldTrace.Size(), false );
-				for ( int i = 0; i < essentialTrace.Size(); ++i )
-					essential[ essentialTrace[ i ] ] = true;
-				for ( int i = 0; i < coldTrace.Size(); ++i )
-					if ( !essential[ i ] )
-						coldTrace( i ) = 0.0;
-
-				mfem::Vector coldResidual( traceX.Size() );
-				reduced.Ptr()->Mult( coldTrace, coldResidual );
-				coldResidual -= traceB;
-				double const reference = coldResidual.Norml2();
-
 				// A pure absolute target at the right scale. SetRelTol( 0 ) rather
 				// than leaving it, because MFEM takes the LARGER of the two and a
 				// live rel_tol would put || r_0 || back into the test.
 				nonlinear->SetRelTol( 0.0 );
 				nonlinear->SetAbsTol( std::max( newtonAbsoluteTolerance,
-				                                newtonRelativeTolerance*reference ) );
+				                                newtonRelativeTolerance*coldReference ) );
 			}
 			else
 			{
@@ -1252,11 +2169,11 @@ namespace meq
 			nonlinear->Mult( traceB, traceX );
 			newtonIterationCount = nonlinear->GetNumIterations();
 
-#ifdef MFEM_USE_SUITESPARSE
+#ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
 			// Recorded so the reuse can be asserted on rather than timed: a Newton
 			// solve refactorises once per iteration and must analyse ONCE.
-			symbolicFactorisationCount = linear.GetNumSymbolicFactorizations();
-			numericFactorisationCount = linear.GetNumNumericFactorizations();
+			readFactorisationCounts( linear, symbolicFactorisationCount,
+			                         numericFactorisationCount );
 #endif
 
 			// Loudly, and without a recovered solution: an iteration that ran out
@@ -1266,14 +2183,14 @@ namespace meq
 		}
 		else
 		{
-#ifdef MFEM_USE_SUITESPARSE
-			// No SetReuseSymbolic() here, deliberately: the linear path factorises
-			// once and this object is destroyed straight after, so retaining the
-			// analysis would buy nothing and cost a copy of the pattern.
-			mfem::UMFPackSolver solver;
-			solver.Control[ UMFPACK_ORDERING ] = UMFPACK_ORDERING_METIS;
-			solver.SetOperator( *reduced.Ptr() );
-			solver.Mult( traceB, traceX );
+#ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
+			// No reuse here, deliberately: the linear path factorises once and
+			// this object is destroyed straight after, so retaining the analysis
+			// would buy nothing and cost a copy of the pattern.
+			std::unique_ptr<mfem::Solver> const solver =
+				makeTraceSolver( traceSolverChoice, false );
+			solver->SetOperator( *reduced.Ptr() );
+			solver->Mult( traceB, traceX );
 #else
 			// Only a fallback. The hybridized trace system is small but not symmetric
 			// positive definite in this sign convention, so GMRES rather than CG.

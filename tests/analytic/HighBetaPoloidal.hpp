@@ -33,40 +33,45 @@
  * STIFFNESS IS A HYPOTHESIS UNTIL IT IS MEASURED, and this project has been
  * wrong about it before: sections 4.2, 4.3 and 4.5 were called stiff for months
  * and were under-resolved. HighBetaConvergence.cpp measures
- * max| dF/dpsi | / lambda_1 against the pressure amplitude and the Newton
- * iteration count against BOTH refinement paths, so the question is answered
- * rather than assumed.
+ * max| dF/dpsi | / lambda_1 over the range the CONVERGED SOLUTION occupies --
+ * which is the only range worth sampling, and which needs the normalisation to
+ * be solved for rather than assumed -- so the question is answered rather than
+ * assumed.
  *
- * WHAT IS DELIBERATELY NOT DONE HERE. psi_axis is a CONSTRUCTOR ARGUMENT, fixed,
- * not the maximum of the solution. That makes Psi an ordinary function of psi
- * and dF/dpsi an ordinary derivative, so this fixture needs nothing meq does not
- * already have. The real thing -- psi_axis as a global functional of the
- * solution, which puts non-local terms into the Jacobian and which
- * CLAUDE.md warns the existing finite-difference test cannot catch -- is the
- * next step and is a solver change, not a fixture change. Fixing psi_axis here
- * isolates the profile SHAPE from the normalisation, so that whichever of them
- * causes trouble can be told apart.
+ * psi_axis IS SETTABLE, AND THE SOLVER IS WHAT SETS IT. psi_bnd is zero, because
+ * meq solves the fixed-boundary problem with psi = 0 on Gamma, so
+ * Psi = psi / psi_axis throughout and psi_axis is the whole of the
+ * normalisation. It arrives as a constructor argument and setPsiAxis() moves it,
+ * which is what meq::NormalisedSource requires: psi_axis is an UNKNOWN of the
+ * non-linear system, carried in the bordered Newton of
+ * GradShafranovSolver::setSource( NormalisedSource &, double ), and the solver
+ * writes it here before every residual evaluation.
  *
- * psi_bnd is zero, because meq solves the fixed-boundary problem with psi = 0
- * on Gamma. So Psi = psi / psi_axis throughout.
- *
- * AND A FIXED psi_axis IS ONLY MEANINGFUL IF IT IS THE RIGHT ONE, which is the
- * first thing measuring this turned up. Hand the solver a psi_axis the solution
- * does not reach and the profile is never sampled: with psi_axis = 1 and a
- * peaked pressure, the computed solution peaks at Psi = 0.0013, so Psi^(nu-1) is
- * around 1e-9 and the pressure term contributes NOTHING. Measured, the answers
- * at amplitude 1 and amplitude 512 were identical to every digit -- psi in
+ * WHY IT CANNOT BE FIXED, which is what measuring it turned up and what the
+ * solver work exists for. Hand the solver a psi_axis the solution does not reach
+ * and the profile is never sampled: with psi_axis = 1 and a peaked pressure the
+ * computed solution peaks at Psi = 0.0013, so Psi^(nu-1) is around 1e-9 and the
+ * pressure term contributes NOTHING. Measured, the answers at amplitude 1 and
+ * amplitude 512 were identical to every digit -- psi in
  * [ 2.570e-07, 1.259e-03 ] for both -- because the solve was driven entirely by
  * the constant g g' term and the pressure profile might as well not have been
  * there. Every case converged in one or two Newton steps, at reaction ratios up
  * to 2523, for the same reason: there was no non-linearity switched on.
  *
- * So the normalisation is not a detail of the parametrisation, it is what makes
- * the profile mean anything, and psi_axis has to be consistent with the solution
- * it produces. HighBetaConvergence.cpp closes that loop OUTSIDE the solver, by
- * iterating on psi_axis. Closing it inside -- where psi_axis is a functional of
- * the iterate and the Jacobian acquires non-local terms through it -- is the
- * step this fixture exists to set up.
+ * AND THE SELF-CONSISTENT SOLUTION IS NOT THE ONE NEWTON FINDS FROM ZERO. At a
+ * FIXED psi_axis the equation has two positive solutions: a small one, which is
+ * what an unguided Newton lands on and where the profile is inert, and a large
+ * one with Psi of order 1, which is the equilibrium. Measured at nu = 4,
+ * amplitude 1, psi_axis = 0.42: 3.00e-3 from zero, 6.23e-1 from a bump. Only the
+ * large one can satisfy max psi = psi_axis, so the constraint removes the small
+ * branch from the solution set -- but not from the iteration's reach, which is
+ * why a run of this fixture needs an initial guess of about the right height.
+ *
+ * Closing the loop OUTSIDE the solver does not rescue it either: the map
+ * psi_axis -> max psi has a pole beside its own fixed point (at nu = 2,
+ * amplitude 1 the fixed point is 0.3059 and the pole is at 0.2996), so an outer
+ * iteration falls off the branch. That is the measurement that put psi_axis
+ * inside the residual.
  */
 
 namespace meq
@@ -85,7 +90,9 @@ class HighBetaPoloidal
 		 * @param fAxisSquared  F^2 on the magnetic axis.
 		 * @param fBndSquared   F^2 on the boundary. The vacuum toroidal field is
 		 *                      F = R B_T, so this is the one that is really known.
-		 * @param psiAxisIn     the flux on the axis. FIXED, see the file comment.
+		 * @param psiAxisIn     the flux on the axis, as a starting value:
+		 *                      setPsiAxis() moves it and the solver owns it. See
+		 *                      the file comment.
 		 * @param mu0In         1 for a problem in normalised units.
 		 */
 		HighBetaPoloidal( std::vector<double> pressureIn,
@@ -152,6 +159,16 @@ class HighBetaPoloidal
 			for ( double &value : scaled )
 				value *= factor;
 			return HighBetaPoloidal( scaled, b, fAxisSq, fBndSq, psiAxisValue, mu0Value );
+		}
+
+		/// Move the normalisation. This is what meq::NormalisedSource's
+		/// setNormalisation() forwards to, and the solver calls it once per
+		/// residual evaluation, so it does no work beyond the assignment.
+		void setPsiAxis( double psiAxisIn )
+		{
+			if ( !( psiAxisIn > 0.0 ) )
+				throw std::invalid_argument( "HighBetaPoloidal: psi_axis must be positive" );
+			psiAxisValue = psiAxisIn;
 		}
 
 		/// Normalised flux. psi_bnd = 0, so this is psi / psi_axis.
