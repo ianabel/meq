@@ -290,19 +290,44 @@ BOOST_AUTO_TEST_CASE( anExactRestartFinishesImmediately )
 }
 
 /*
- * AND IT IS WORTH SOMETHING: THE FIRST RESIDUAL, WHICH IS WHERE A WARM START
- * SHOWS UP.
+ * AND IT IS WORTH SOMETHING -- IN ITERATIONS. THE FIRST RESIDUAL IS NO LONGER
+ * THE INSTRUMENT, AND WHY NOT IS A PROPERTY OF NonlinearOrdering::NPC.
  *
- * Newton's iteration count is a coarse instrument -- it moves in whole steps and
- * a good guess often buys less than one. || r_0 || is the quantity a guess
- * actually changes, and it changes it by orders.
+ * This test used to assert || r_0 || fell by 10x, on the reasoning that Newton's
+ * iteration count is coarse -- it moves in whole steps and a good guess often
+ * buys less than one -- while || r_0 || is the quantity a guess actually
+ * changes. That was true while the unknown was the TRACE ALONE: q and psi were
+ * functions of it, so seeding psi and the trace seeded everything there was.
+ *
+ * UNDER NPC q IS AN UNKNOWN OF ITS OWN, AND meq DOES NOT SEED IT. prepare()
+ * projects the guess onto the potential and the trace and leaves the flux block
+ * at zero, deliberately: a guess for psi says nothing about q without
+ * differentiating it, and the guess arrives as a bare mfem::Coefficient, which
+ * cannot be differentiated. So the guessed state is INCONSISTENT in exactly the
+ * row that couples them -- the flux equation q - (1/r) grad psi = 0 reads worst
+ * when psi is the converged answer and q is zero -- and || r_0 || goes UP.
+ * Measured here at k = 3: cold 1.771e-01, warm 2.638e-01, a factor of 1.5 the
+ * wrong way.
+ *
+ * THE GUESS IS STILL DOING ITS JOB, WHICH IS WHY THIS IS A CHANGE OF INSTRUMENT
+ * AND NOT A REGRESSION: the warm solve takes 2 Newton iterations against 4 cold
+ * and lands on the same L2 error to every figure printed. The flux row is LINEAR
+ * in q, so one Newton step recovers the q that belongs to the guessed psi and
+ * the iteration proceeds from a genuinely warm state -- which is also why an
+ * exact restart above still finishes in 1.
+ *
+ * THE FIX, IF THE STRONGER PROPERTY IS EVER WANTED, is to seed the flux:
+ * darcyFlux = -(1/r) grad psi_guess, via GradientGridFunctionCoefficient, for
+ * the setInitialGuess( GridFunction const & ) overload that has a differentiable
+ * guess to work with. That is a small change with its own measurement to make,
+ * and it is not done.
  *
  * The converged answer must not move. That is what separates a starting point
  * from data, and it is the same invariance the +5% Jacobian experiment relied
  * on: a guess that changed the answer would be entering as a boundary condition
  * or a source, not as a guess.
  */
-BOOST_AUTO_TEST_CASE( aWarmStartCutsTheFirstResidualAndNotTheAnswer )
+BOOST_AUTO_TEST_CASE( aWarmStartCutsTheWorkAndNotTheAnswer )
 {
 	int const order = 3;
 	meq::analytic::ManufacturedNonlinear const eq = equilibrium();
@@ -345,19 +370,24 @@ BOOST_AUTO_TEST_CASE( aWarmStartCutsTheFirstResidualAndNotTheAnswer )
 	             coldFirst, cold.newtonIterations(), coldError );
 	std::printf( "    warm: || r_0 || = %.6e, %d iterations, L2 %.6e\n",
 	             warmFirst, warm.newtonIterations(), warmError );
-	std::printf( "    the guess cut the first residual by %.1fx\n",
+	std::printf( "    the guess moved the first residual by %.2fx "
+	             "(NOT the instrument here -- see above)\n",
 	             coldFirst/warmFirst );
 	std::fflush( stdout );
 
-	BOOST_TEST( warmFirst < 0.1*coldFirst,
-	            "the warm start's first residual is " << warmFirst
-	            << " against " << coldFirst << " cold, which is not the head start "
-	            "a full-order guess from a converged solve should give" );
-
-	BOOST_TEST( warm.newtonIterations() <= cold.newtonIterations(),
+	// STRICTLY fewer, not merely no more. Under NPC this is the whole of the
+	// head start a psi-only guess can show, so a warm start that only matched
+	// the cold iteration count would mean the guess was not reaching the solve
+	// at all -- which is the failure this is here to catch, and it is the same
+	// failure the old || r_0 || assertion was catching by another route.
+	BOOST_TEST( warm.newtonIterations() < cold.newtonIterations(),
 	            "the warm start took " << warm.newtonIterations()
 	            << " Newton iterations against " << cold.newtonIterations()
-	            << " cold" );
+	            << " cold, so the guess bought nothing. Under NPC the first "
+	            "residual is not the instrument -- the flux block is unseeded, so "
+	            "|| r_0 || can rise while the solve still starts warm -- and the "
+	            "iteration count is what is left. If THAT has stopped moving, the "
+	            "guess is not reaching the iterate" );
 
 	// Six figures, per DRIVER-PLAN.md section 4's acceptance.
 	BOOST_TEST( std::abs( warmError - coldError ) < 1.0e-6*coldError,

@@ -46,7 +46,9 @@ and `meq::NormalisedSource` is where it goes.
   belongs with item 1.
 * The bordered path is `Globalisation::None` only, and refuses the others loudly
   rather than quietly doing something else — the KINSOL paths drive a residual
-  of their own and the Picard ones build no Jacobian to border. **The ordering
+  of their own and the Picard ones build no Jacobian to border. *(2026-08-31: the
+  ordering named below is deleted; under `NonlinearOrdering::NPC` the border row
+  is exactly `−e_j` and the corner exactly `1`, neither differenced.)* **The ordering
   guard beside it is gone**: it was written from `darcyhybridization.hpp`'s
   summary rather than from the code, and both orderings reach the same `ψ_ax` to
   every digit printed. `GradShafranov.cpp` carries the note where the guard was.
@@ -359,13 +361,20 @@ element loops in `darcyhybridization.cpp` over work independent by construction.
 meq has no visibility into whether it is being worked on and should not guess;
 what meq can say is that nothing it links has changed.
 
-**`LineariseThenCondense` is what makes this tractable, and it now exists.** That
-ordering was pursued as a convergence fix and failed as one — but it does exactly
-what it says, running **zero** element-local nonlinear iterations, so under it the
-batched work is fixed-size *linear* solves rather than nonlinear ones of
-unpredictable iteration count. That is what `linalg/batched/` provides and what a
-device wants. So the ordering is not a dead end; it is the enabler for this item,
-and that is the reason to keep `setNonlinearOrdering()`.
+**SUPERSEDED 2026-08-31: `LineariseThenCondense` IS DELETED AND `NPC` REPLACES
+IT.** MFEM retired that ordering as *"a condensation in disguise"* — a trace-only
+operator keeping the linearisation as hidden state, which the NPC method is not —
+and `SetNonlinearOrdering()` went with it. meq's default is now
+`NonlinearOrdering::NPC`, `mfem::DarcyNPCOperator` over the full `(q, ψ, ψ̂)`
+system, and everything this item wanted from the old ordering it gets from NPC
+**and gets verifiably**: `GetNumLocalNLIterations()` reads exactly **0** under
+NPC against 3644 for the condensation, asserted rather than assumed by
+`SolverContract::theOrderingsAgreeAndOnlyOneIteratesLocally`. So the batched work
+really is fixed-size *linear* solves, which is what `linalg/batched/` provides and
+what a device wants — this item is unblocked and is unblocked more cleanly than
+before. **Everything below in this item that names the old ordering is history.**
+See CLAUDE.md, *The NPC port*, for the port and for the parity gap it brought
+back the other way.
 
 **The borders are no longer an obstacle to it.** meq's `ψ_ax` bordered Newton was
 believed to require condense-first and does not: measured 2026-08-30, it reaches
@@ -374,8 +383,9 @@ been lifted. So of the three things pulling towards this ordering — the batchi
 the borders, and every reference in `refs/` — one is now settled in its favour.
 
 **WHAT BLOCKED IT IS FIXED, AND THE DIAGNOSIS BELOW WAS WRONG ABOUT THE CAUSE
-WHILE RIGHT ABOUT THE SYMPTOM.** As of MFEM's `ad04da3749` (2026-08-31),
-`LineariseThenCondense` is meq's default and only ordering, and
+WHILE RIGHT ABOUT THE SYMPTOM.** *(History: this describes the deleted ordering,
+not NPC.)* As of MFEM's `ad04da3749` (2026-08-31),
+`LineariseThenCondense` was meq's default and only ordering, and
 `PedestalConvergence` is down from seven failing assertions to **one**. The
 actual cause was neither hidden state nor the Jacobian being wrong in principle:
 the linearisation point took a **fixed two** frozen-Jacobian local corrections,

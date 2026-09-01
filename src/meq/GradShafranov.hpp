@@ -331,12 +331,15 @@ namespace meq
 			 * pressure p = A Psi^nu on a box whose first Dirichlet eigenvalue is
 			 * lambda_1, psi_ax is around sqrt( nu A / lambda_1 ).
 			 *
-			 * @throws std::logic_error if a source is already set, if the forms
-			 *         are built, or if NonlinearOrdering::LineariseThenCondense is
-			 *         in force -- under that ordering the reduced operator is a
-			 *         LINEARISED residual between GetGradient() calls, and the
-			 *         border is obtained by differencing the residual, so the two
-			 *         would be differentiating different functions.
+			 * @throws std::logic_error if a source is already set or if the forms
+			 *         are built. **No ordering is refused**, and the guard that
+			 *         used to be here named an ordering MFEM has since deleted.
+			 *         Both surviving orderings carry psi_ax, and they carry it
+			 *         differently rather than one of them badly: under
+			 *         NonlinearOrdering::NPC psi is an unknown, so the border row
+			 *         is a UNIT VECTOR and the corner is exactly one, where under
+			 *         CondenseThenLinearise psi is a function of the trace and
+			 *         both have to be differenced. See solveWithNormalisation().
 			 * @throws std::invalid_argument if psiAxisGuessIn is not finite or is
 			 *         zero.
 			 */
@@ -642,93 +645,108 @@ namespace meq
 			/// Choose it. Newton is the default and is what every rate in the
 			/// suite was measured with.
 			///
-			/// **Its SOLVER TYPE and PRECONDITIONER are inert under
-			/// NonlinearOrdering::LineariseThenCondense** -- there is no local
-			/// non-linear solve to pick a method for, and
-			/// `GetNumLocalNLIterations()` stays at zero.
+			/// **THE WHOLE SETTING IS INERT UNDER NonlinearOrdering::NPC**, which
+			/// is meq's default -- solver type, preconditioner, cap and tolerance
+			/// alike. NPC has no element-local non-linear solve to configure: the
+			/// local work is one linear solve against one factorisation, and
+			/// `GetNumLocalNLIterations()` staying at zero is how you check that.
+			/// It bites only under CondenseThenLinearise.
 			///
-			/// **Its ITERATION CAP AND TOLERANCES are not inert, and this file
-			/// used to say otherwise.** Under that ordering they bound the loop
-			/// that establishes the linearisation point, and MFEM's own doxygen
-			/// is blunt about why that matters: `GetGradient()` is the Schur
-			/// complement of the Jacobian at the retained fields, so it is the
-			/// derivative of `Mult()` only as far as those fields solve the local
-			/// problem. A fixed budget of two corrections shipped for a while and
-			/// put the gradient 3e-04 out on a stiff source **that still
-			/// converged** -- which is the shape of every Jacobian defect this
-			/// project has met: no wrong answer, only a wrong path to it. meq
-			/// asks for 100 iterations at rtol 1e-12, so it is bounded by the
-			/// tolerance rather than by the cap.
+			/// **There it is load bearing, and this file used to say the
+			/// tolerances did not matter.** MFEM's doxygen is blunt about why:
+			/// `GetGradient()` is the Schur complement of the Jacobian at the
+			/// fields the local solve reached, so it is the derivative of
+			/// `Mult()` only as far as those fields solve the local problem. A
+			/// fixed budget of two corrections shipped for a while and put the
+			/// gradient 3e-04 out on a stiff source **that still converged** --
+			/// which is the shape of every Jacobian defect this project has met:
+			/// no wrong answer, only a wrong path to it. meq asks for 100
+			/// iterations at rtol 1e-12, so it is bounded by the tolerance rather
+			/// than by the cap.
 			void setLocalSolver( LocalSolver choice );
 
-			/// In which order the hybridization and the linearisation are applied.
-			/// A DIFFERENT axis from setGlobalisation(): that picks the outer
-			/// iteration, this decides what the outer iteration's residual costs.
+			/// Which non-linear method the hybridization is asked for. A
+			/// DIFFERENT axis from setGlobalisation(): that picks the outer
+			/// iteration, this decides what the outer iteration's unknown IS,
+			/// and what one residual evaluation costs.
+			///
+			/// **A THIRD VALUE USED TO BE HERE AND MFEM DELETED IT.**
+			/// `LineariseThenCondense` was an operator on the trace alone whose
+			/// local blocks were eliminated against a retained linearisation,
+			/// and it claimed to be the NPC method. It was not -- NPC's fields
+			/// are Newton state, and a trace-only operator has nowhere to keep
+			/// them, which is why that mode needed `lin_u`, `lin_p` and
+			/// `lin_trace` as hidden state and why meq needed `Relinearised` to
+			/// pair the residual with the gradient. Upstream measured it slower
+			/// than the plain condensation on stiff problems and failing four
+			/// configurations that one solves, and removed it. meq's
+			/// `Relinearised` went with it. See
+			/// ../mfem-hdg-dev/doc/HDG-ORDERING-API.md.
 			enum class NonlinearOrdering
 			{
-				/// Condense first. Eliminating flux and potential on an element is
-				/// then itself a non-linear solve, one per element per residual
-				/// evaluation. **MFEM's default, and no longer meq's** -- see
-				/// LineariseThenCondense for the decision and what it costs.
+				/// Condense first. Eliminating flux and potential on an element
+				/// is then itself a non-linear solve, one per element per
+				/// residual evaluation, and the outer unknown is the trace
+				/// alone. MFEM's own default, and **meq's backup rather than
+				/// meq's choice**.
 				///
-				/// It is kept, and is still the right choice for two things: a
-				/// solver that will not ask for a gradient every iterate, and any
-				/// use needing the reduced residual to be an exact function of the
-				/// trace across advancing linearisations, which only this ordering
-				/// gives. PedestalConvergence measures both orderings against each
-				/// other and needs it for that.
+				/// It is kept, and is not merely legacy: it is the only route
+				/// that is parallel, the only one that accepts an H(div) flux,
+				/// and the only one whose reduced residual is an exact function
+				/// of the trace -- which is what setLocalSolver()'s tolerance
+				/// buys and what a differenced border needs when the fields are
+				/// not state. PedestalConvergence measures the two against each
+				/// other and needs this one for that.
 				CondenseThenLinearise,
-				/// Linearise first: Newton on the full ( q, psi, psihat ) system,
-				/// hybridizing the linear system that results. Every local
-				/// operation is then a linear solve and
-				/// GetNumLocalNLIterations() stays at zero.
+				/// Newton on the FULL ( q, psi, psihat ) system, with the
+				/// Jacobian solved by hybridized elimination -- Nguyen, Peraire
+				/// & Cockburn, refs/HDG-NPC-2.pdf section 2.6, eqs (14)-(18).
+				/// `mfem::DarcyNPCOperator` and `mfem::DarcyNPCSolver`.
 				///
-				/// **THIS IS meq'S DEFAULT.** It is how the method is defined --
-				/// Nguyen, Peraire & Cockburn, refs/HDG-NPC-2.pdf section 2.6,
-				/// eqs (14)-(18) -- and no paper in refs/ runs the other one:
-				/// GS-1 and GS-2 avoid the question with Anderson-accelerated
-				/// Picard, NPC linearise first. It is also what makes the
-				/// element-local work a batch of fixed-size LINEAR solves, which
-				/// is the largest performance item meq has identified.
+				/// **THIS IS meq'S DEFAULT.** It is how the method is defined,
+				/// and no paper in refs/ runs the other one: GS-1 and GS-2 avoid
+				/// the question with Anderson-accelerated Picard, NPC linearises
+				/// first.
 				///
-				/// **WHAT IT COSTS, AND THE COST IS NOW SMALL BUT NOT ZERO.**
-				/// It used to converge slowly or not at all on several stiff
-				/// sources -- GS-2 section 4.2 at `k = 1` needed `n >= 30`, where
-				/// condense-first took 5 iterations at every resolution. **MFEM
-				/// fixed the cause on 2026-08-31**: the linearisation point took a
-				/// fixed two frozen-Jacobian local corrections, and
-				/// `GetGradient()` is the Schur complement of the Jacobian at
-				/// whatever fields that left, so the correction count *was* the
-				/// gradient's accuracy. It now iterates to
-				/// `setLocalSolver()`'s tolerance. Section 4.2 at `k = 1, n = 16`
-				/// went from failing at 60 to converging in 28, and `k = 2,
-				/// n = 16` from failing at 60 to **8**.
+				/// **What it buys, and none of it is speed.** Every
+				/// element-local operation is ONE linear solve against ONE
+				/// factorisation, so `GetNumLocalNLIterations()` stays at zero
+				/// -- which is the acceptance signal that this really is NPC and
+				/// not a condensation wearing its name. The convergence test is
+				/// on the full residual rather than on the trace alone, and a
+				/// line search scales the fields and the trace together because
+				/// they are one vector. Upstream's own caveat is worth
+				/// repeating: **NPC is not automatically faster.** Its advantage
+				/// is the UNIFORMITY of the local work, which is also what makes
+				/// it the better batched or threaded workload, not fewer
+				/// floating-point operations.
 				///
-				/// **One case in meq's suite still fails and is characterised**:
-				/// GS-2 section 4.5, the internal layer, at `k = 2, n = 16` --
-				/// condense-first takes 10 iterations, this ordering fails at 60,
-				/// and `k = 1, n = 24` and `k = 2, n = 24` are fine under both.
-				/// It is one of three surviving cases out of 144 upstream, all at
-				/// widths where the frozen-Jacobian local correction cannot
-				/// converge and the divergence guard truncates. Closing it needs
-				/// the local step globalised or solved exactly, and nothing has
-				/// been tried. See
-				/// ../mfem-hdg-dev/doc/HDG-LINEARISE-FIRST-STIFF-SOURCES.md.
+				/// **What it costs meq is that the unknown is the whole
+				/// system.** meq pays almost nothing for that, because
+				/// `solution` was already a three-block
+				/// { flux, potential, trace } vector on `blockOffsets` with
+				/// every GridFunction MakeRef'd into it -- so the NPC unknown IS
+				/// meq's solution vector, and `RecoverFEMSolution()` leaves the
+				/// Newton path entirely rather than needing rework. The fields
+				/// are already there when the solve returns.
 				///
-				/// **And it is not a wall-clock win on a stiff problem.** The
-				/// correction loop that bought the correctness costs 4.2 to 12.1
-				/// corrections per element per linearisation against the fixed
-				/// two, which upstream measures as 0.9 s against condense-first's
-				/// 0.7 s. What this ordering buys is a local problem that is
-				/// always a linear solve against one factorisation, and a reduced
-				/// operator whose gradient is the assembled Schur complement --
-				/// not speed.
-				LineariseThenCondense
+				/// **And it removes a trap rather than working around one.**
+				/// `DarcyHybridization` freezes the element-local Newton's
+				/// initial guess at `FormLinearSystem()` time, which cost the
+				/// bordered Newton its correctness until `formSystem()` was
+				/// factored out to re-form once per accepted step. NPC has no
+				/// element-local non-linear solve, so there is no seed to go
+				/// stale and no re-forming to do; see solveWithNormalisation().
+				///
+				/// **Two hard refusals**, both `MFEM_VERIFY` in `NPCCheck()`:
+				/// an H(div) flux space, and `LocalOpType::FluxNL`. meq meets
+				/// neither -- its flux space is L2 and its non-linearity is on
+				/// the potential mass.
+				NPC
 			};
 
-			/// Choose it. Needs an MFEM carrying
-			/// DarcyHybridization::SetNonlinearOrdering; see CLAUDE.md on the
-			/// meq-integration branch.
+			/// Choose it. Needs an MFEM carrying `mfem::DarcyNPCOperator`; see
+			/// CLAUDE.md on the meq-integration branch.
 			void setNonlinearOrdering( NonlinearOrdering choice );
 
 			/// The ordering solve() will use.
@@ -1071,6 +1089,26 @@ namespace meq
 			/// linear path. One fewer than newtonResiduals().size(), since that
 			/// counts the residual at the initial guess too.
 			int newtonIterations() const;
+
+			/// Element-local NON-LINEAR iterations, summed over elements and over
+			/// every residual and gradient evaluation since the forms were built.
+			///
+			/// **THIS IS THE ACCEPTANCE SIGNAL FOR NonlinearOrdering::NPC, and it
+			/// is the only way to tell the two orderings apart from outside.**
+			/// NPC linearises the full ( q, psi, psihat ) system and hybridizes
+			/// the linear system that results, so every element-local operation
+			/// is ONE linear solve against one factorisation and this reads
+			/// EXACTLY ZERO. CondenseThenLinearise eliminates first, which makes
+			/// each element's elimination its own non-linear solve, one per
+			/// element per residual evaluation, and this reads in the thousands.
+			///
+			/// A non-zero count under NPC would mean the solve was not NPC --
+			/// which is precisely the failure MFEM's deleted
+			/// NLOrdering::LineariseThenCondense was, a condensation wearing the
+			/// name. Zero on the linear path, where there is nothing to iterate.
+			///
+			/// @throws std::logic_error if the forms have not been built.
+			long localNonlinearIterations() const;
 
 			/// L2 errors against a closed form, on a quadrature rule generous
 			/// enough that it does not itself limit the measured rate.

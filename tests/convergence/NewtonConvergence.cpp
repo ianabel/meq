@@ -297,18 +297,27 @@ BOOST_AUTO_TEST_CASE( jacobianMatchesAFiniteDifferenceOfTheResidual )
 		if ( !isEssential[ i ] )
 			state( i ) += 0.3*std::sin( 1.7*i + 0.4 );
 
+	// WHAT THIS CHECKS, NOW THAT meq's DEFAULT IS NonlinearOrdering::NPC: the
+	// CONDENSED operator's Jacobian, which is the backup ordering's, and not the
+	// one the default path drives. That is not a gap that can be closed here.
+	// NPC's Jacobian handle is SOLVE-ONLY by construction -- after ComputeH()
+	// the local blocks are factored in place, so J cannot be applied out of them
+	// and its Mult() aborts, which is also why JFNK is unavailable under NPC. A
+	// finite difference needs the action, so there is no differencing this one.
+	// What stands in for it is the assertion on OBSERVED NEWTON ORDER elsewhere
+	// in this file: a Jacobian 5% out leaves every error and every rate
+	// unchanged to six figures and drops the observed order to exactly 1.000,
+	// so order is the instrument that sees it.
+	//
 	// Establish the linearisation at `state` BEFORE any residual evaluation, and
-	// hold it there for the whole difference. Under LineariseThenCondense the
-	// reduced residual is only a function of the trace at a fixed linearisation
-	// point -- and the FIRST Mult() on a freshly formed system is what sets that
-	// point. Differencing without this, the forward evaluation would establish
-	// the linearisation at `state + step*d`, the backward one would carry that
-	// same linearisation to `state - step*d`, and the gradient would then be
-	// taken at a third place. The result is not a derivative of anything: it
-	// reads 4e-8 relative on Example 5, three orders above the 4e-11 the same
-	// check gives at a fixed linearisation, and none of that is the Jacobian's
-	// fault. The second GetGradient() below is idempotent -- the linearisation
-	// is already at `state`, so it neither advances nor re-solves.
+	// hold it there for the whole difference. The FIRST Mult() on a freshly
+	// formed system is what sets the local state the gradient is taken at.
+	// Differencing without this, the forward evaluation would establish it at
+	// `state + step*d`, the backward one would carry that same state to
+	// `state - step*d`, and the gradient would then be taken at a third place.
+	// The result is not a derivative of anything: it reads 4e-8 relative on
+	// Example 5, three orders above the 4e-11 the same check gives at a fixed
+	// linearisation, and none of that is the Jacobian's fault.
 	//
 	// The ordering also has to keep the gradient's element-block storage out of
 	// the residual path's way; taking the reference after the differences is

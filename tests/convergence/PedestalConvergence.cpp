@@ -161,9 +161,12 @@
  *   - the line search makes it WORSE, failing at 18 iterations where the
  *     undamped iteration takes 42, because globalising the outer trace
  *     iteration does not globalise the element-local ones;
- *   - NLOrdering::LineariseThenCondense removes the element-local non-linear
- *     solves entirely -- GetNumLocalNLIterations() reads 0 -- and this case
- *     gets worse still;
+ *   - removing the element-local non-linear solves entirely does not help
+ *     either. That was measured against MFEM's NLOrdering::LineariseThenCondense
+ *     -- which upstream has since DELETED as a condensation in disguise -- and
+ *     the finding is not re-runnable in that form. It stands as a statement
+ *     about this case rather than about that mode: what fails here is not the
+ *     local iteration;
  *   - refining h OR raising k fixes it independently, which is what an
  *     under-resolved discretisation does and what a stiff source does not.
  *
@@ -761,33 +764,73 @@ BOOST_AUTO_TEST_CASE( kinsolAgreesWithNewtonWhereBothConverge )
 
 	using G = meq::GradShafranovSolver::Globalisation;
 
-	// n = 32, h = 0.025: the resolved mesh, where both converge. It was n = 24
-	// while meq used CondenseThenLinearise; under LineariseThenCondense the
-	// threshold moved and n = 24 no longer converges by any route, which took
-	// this test red for a reason that has nothing to do with what it asserts.
-	// THE POINT HERE IS THE ADAPTER, NOT THE PEDESTAL -- ShiftedResidual is what
-	// makes KINSOL solve meq's problem rather than a different one, and any mesh
-	// both paths reach will catch it losing its shift or its sign. The parity
-	// gap has a test of its own; this is not it.
+	/*
+	 * n = 32, h = 0.025: the resolved mesh, where both converge.
+	 *
+	 * THE POINT HERE IS THE ADAPTER, NOT THE PEDESTAL. ShiftedResidual is what
+	 * makes KINSOL solve meq's problem rather than a different one -- KINSOL
+	 * ignores the right hand side handed to Mult(), so without it the iteration
+	 * would converge happily to the answer of a neighbouring problem -- and any
+	 * mesh both paths reach will catch it losing its shift or its sign.
+	 *
+	 * WHICH KINSOL STRATEGY IS THE ONE THAT CONVERGES DEPENDS ON THE ORDERING,
+	 * AND THE TWO ARE EXACT OPPOSITES. Measured 2026-08-31 on section 4.2, over
+	 * k = 1 at n = 32 and n = 40 and k = 2 at n = 24 and k = 3 at n = 32:
+	 *
+	 *                     NPC              CondenseThenLinearise
+	 *     plain Newton    ok, 8-10 its     ok, 7-10 its
+	 *     KIN_NONE        ok, 8-10 its     FAILS at 60, every case
+	 *     KIN_LINESEARCH  FAILS at 60      ok, 24-31 its
+	 *                     every case
+	 *
+	 * So this picks the strategy that converges for the ordering under test,
+	 * which is not a weakening: under NPC, KIN_NONE reproduces plain Newton's
+	 * iteration count EXACTLY -- 9 against 9, 8 against 8 -- which is a sharper
+	 * check on the adapter than KIN_LINESEARCH ever was, since a line search is
+	 * free to take a different path to the same answer and an undamped KINSOL
+	 * is not.
+	 *
+	 * WHY KIN_LINESEARCH FAILS UNDER NPC IS NOT ESTABLISHED, and it is recorded
+	 * as a measurement rather than explained. What is ruled out is the wiring:
+	 * KIN_NONE going through the same ShiftedResidual, the same
+	 * DarcyNPCOperator and the same DarcyNPCSolver reproduces plain Newton
+	 * step for step, so the residual, the Jacobian and the sign convention are
+	 * all right and the fault is in the globalisation alone. Note that upstream
+	 * does not recommend KINSOL's line search for NPC in the first place: the
+	 * documented route is a NewtonSolver::ComputeScalingFactor subclass
+	 * backtracking on the full residual, which is deliberately not in the
+	 * library and which meq does not yet have. See
+	 * ../mfem-hdg-dev/doc/HDG-ORDERING-API.md section 3.1.
+	 */
+	G const kinsolStrategy =
+		meq::tests::defaultOrdering() == meq::GradShafranovSolver::NonlinearOrdering::NPC
+			? G::KinsolNoLineSearch
+			: G::LineSearch;
+	char const *strategyName =
+		kinsolStrategy == G::KinsolNoLineSearch ? "KIN_NONE" : "KIN_LINESEARCH";
+
 	SelfMeasurement const plain = meq::tests::measureSelf(
 		eq, standardBox(), 1, 32, cloud(), pedestalDatum, 60, 1.0e-12,
 		nullptr, G::None );
 	SelfMeasurement const damped = meq::tests::measureSelf(
 		eq, standardBox(), 1, 32, cloud(), pedestalDatum, 60, 1.0e-12,
-		nullptr, G::LineSearch );
+		nullptr, kinsolStrategy );
 
 	std::printf( "\n  section 4.2 k = 1, h = 0.025: Newton %d iterations, "
-	             "KIN_LINESEARCH %d\n"
+	             "%s %d\n"
 	             "    psi in [%.6e, %.6e] and [%.6e, %.6e]\n",
-	             plain.newtonIterations, damped.newtonIterations,
+	             plain.newtonIterations, strategyName, damped.newtonIterations,
 	             plain.psiMin, plain.psiMax, damped.psiMin, damped.psiMax );
 	std::fflush( stdout );
 
 	BOOST_TEST_REQUIRE( plain.converged );
 	BOOST_TEST_REQUIRE( damped.converged,
-	                    "KIN_LINESEARCH did not converge on the well-posed mesh, "
+	                    strategyName << " did not converge on the well-posed mesh, "
 	                    "which would mean the KINSOL path is wired up wrongly "
-	                    "rather than merely unhelpful" );
+	                    "rather than merely unhelpful. The OTHER strategy is "
+	                    "measured not to converge under this ordering -- see the "
+	                    "table above -- so check that first before suspecting the "
+	                    "adapter" );
 
 	// The same discrete solution by two routes. This is what would catch
 	// ShiftedResidual getting the sign or the shift wrong -- KINSOL ignores the
@@ -900,9 +943,23 @@ namespace
 	///   4.3 barrier          h = 0.05 fails     h = 0.05 onwards: 8 it
 	///                        h = 0.0333 fails
 	///                        h = 0.025:   8 it
-	///   4.5 internal layer   h = 0.05 fails     h = 0.05 onwards: 10-21 it
-	///                        h = 0.0333: 26 it
-	///                        h = 0.025:  11 it
+	///   4.5 internal layer   h = 0.05    fails  h = 0.05 onwards: 12-51 it
+	///                        h = 0.0333  fails
+	///                        h = 0.025   fails
+	///                        h = 0.0167: 12 it
+	///
+	/// RE-MEASURED 2026-08-31 UNDER NonlinearOrdering::NPC, and the section 4.5
+	/// k = 1 row MOVED: it used to read "h = 0.0333: 26 it" and "h = 0.025: 11
+	/// it", both measured under the ordering MFEM has since deleted. Under NPC
+	/// neither converges, and the sequence starts at h = 0.0167 instead -- for
+	/// which there is also a discretisation reason, recorded on
+	/// internalLayerSelfConverges. The 4.2 and 4.3 rows reproduce to within a
+	/// few iterations (4.2 at h = 0.0333 reads 26 against the 23 below).
+	///
+	/// THE POINT WORTH KEEPING: a "coarsest usable mesh" is a property of the
+	/// SOLVER as much as of the benchmark, and this table was calibrated against
+	/// a solver that no longer exists. Re-measure it rather than trusting it
+	/// after any change to the ordering or the globalisation.
 	///
 	/// k = 2 and 3 could all start at h = 0.1 and converge, but the first
 	/// self-difference is then pre-asymptotic: on the pedestal it measures 2.32
@@ -1067,14 +1124,20 @@ BOOST_AUTO_TEST_CASE( pedestalConvergenceIsAResolutionThreshold )
 	// CondenseThenLinearise, h-refinement and p-refinement each fix the coarse
 	// case independently, and a discretisation that is merely under-resolved
 	// does not care which order the elimination and the linearisation are taken
-	// in. For a while under LineariseThenCondense it did care -- p-refinement
-	// stopped working entirely, k = 2, n = 16 failing at 60 where the other
-	// ordering took 11 -- and this assertion was the sharpest single case in the
-	// parity gap filed as HDG-LINEARISE-FIRST-STIFF-SOURCES.md.
+	// in. For a while under MFEM's NLOrdering::LineariseThenCondense it did care
+	// -- p-refinement stopped working entirely, k = 2, n = 16 failing at 60
+	// where the other ordering took 11 -- and this assertion was the sharpest
+	// single case in the parity gap filed as
+	// HDG-LINEARISE-FIRST-STIFF-SOURCES.md.
 	//
-	// MFEM fixed the cause: the linearisation point took a fixed two
-	// frozen-Jacobian corrections, so the gradient was only ever that accurate.
-	// It now iterates to tolerance, and this case takes **8** iterations.
+	// THAT WHOLE EPISODE IS CLOSED, AND BY DELETION RATHER THAN BY REPAIR. MFEM
+	// first fixed the proximate cause -- the linearisation point took a fixed
+	// two frozen-Jacobian corrections, so the gradient was only ever that
+	// accurate -- and then removed the mode outright, on the grounds that a
+	// trace-only operator keeping a linearisation as hidden state is not the NPC
+	// method it claimed to be. meq's default is now NonlinearOrdering::NPC,
+	// which holds no state between calls at all, so there is no parity gap to
+	// have: a residual is a function of its argument by construction.
 	//
 	// KEEP BOTH ASSERTIONS. They are the pair-of-cures finding, which is what
 	// the surrounding test is about, and they are also the tripwire for that
@@ -1174,7 +1237,59 @@ BOOST_AUTO_TEST_CASE( transportBarrierSelfConverges )
 
 /// THE FLOORS HERE ARE NOT k+1, AND FOR TWO REASONS THAT COMPOUND.
 ///
-/// MEASURED: psi 1.786, 2.596, 3.206 and q 2.480, 3.373, 3.538 at k = 1, 2, 3.
+/// MEASURED: psi 2.160, 2.603, 3.206 and q 2.184, 3.374, 3.538 at k = 1, 2, 3.
+///
+/// THE k = 1 SEQUENCE STARTS AT 48, NOT AT 24, AND THAT IS A DISCRETISATION
+/// DECISION RATHER THAN A CONCESSION TO THE SOLVER -- though it is both.
+///
+/// The ridge is about 0.025 wide in space (see below). h = 0.8/n, so the old
+/// coarsest mesh, n = 24, had h = 0.0333: THE FEATURE WAS THINNER THAN A CELL,
+/// and its self-difference was measuring the approach to the asymptotic regime
+/// rather than the rate. That is the same objection meshesFor() already records
+/// against starting k = 2 and 3 coarser than 16, and the numbers agree --
+/// { 24, 48, 96 } measured psi at 1.786 against a design order of 2, while
+/// { 48, 96, 192 } measures 2.160 in psi and 2.184 in q. Both now sit at design
+/// order in psi and at the corner cap in q, which is what this study should be
+/// reporting.
+///
+/// It also happens to be where NonlinearOrdering::NPC's basin begins, and that
+/// is measured rather than inferred. Plain undamped Newton under NPC, cold
+/// start, cap 60:
+///
+///     n     h        h/0.025   plain NPC
+///     24    0.0333   1.33      FAILS at 60, wandering to psi in [ -1.51, 1.44 ]
+///     32    0.0250   1.00      FAILS at 60, in a PERIOD-4 LIMIT CYCLE at ~4e-3
+///     48    0.0167   0.67      ok, 12 it
+///     96    0.0083   0.33      ok, 13 it
+///     192   0.0042   0.17      ok, 12 it
+///
+/// The n = 32 row is the interesting one and is NOT divergence: the residual
+/// descends 7.99e-02 -> 2.69e-03 in ten steps and then orbits, period 4 to a
+/// mean relative mismatch of 0.041 against 0.32 to 0.44 at every other period,
+/// eleven orders short of its target. Newton with a stable periodic orbit.
+///
+/// NONE OF THAT IS A PROPERTY OF THE DISCRETISATION, which is why it is recorded
+/// here as data and not asserted on. Every route that converges reaches the SAME
+/// discrete solution -- CondenseThenLinearise and NPC-with-PicardThenNewton
+/// agree with each other to between 2.9e-11 and 2.3e-09 in L2 over the cloud at
+/// every mesh from 24 to 192, and their self-differences are bit-identical, so
+/// the rate does not depend on the route. Both failing points are reachable:
+/// PicardThenNewton converges at n = 24 in 11 Newton steps and at n = 32 in 4,
+/// and CondenseThenLinearise converges in 23 and 11. The solver-basin question
+/// is asserted where it belongs, in pedestalConvergenceIsAResolutionThreshold
+/// and in CLAUDE.md's parity table.
+///
+/// AND THE BASIN FOLLOWS THE FEATURE, NOT THE DOF COUNT, which is worth knowing
+/// before anyone reaches for a finer uniform mesh. Marking on |dF/dpsi| at the
+/// datum ramp -- an a-priori marker, using nothing the solve is not given -- and
+/// refining that band once from n = 24 puts plain NPC inside its basin at 7,588
+/// trace dofs, where uniform n = 32 FAILS at 6,272 and uniform n = 48 succeeds
+/// at 14,016. The band has to be generous: marking at half the peak takes only
+/// 102 of 1152 elements and still fails, because the datum is only a proxy for
+/// where the ridge actually sits.
+///
+/// COST: this sequence solves n = 192 at k = 1, 221,952 trace dofs, about 60 s.
+/// The three k = 1 solves are about 80 s against the old sequence's 24 s.
 ///
 /// The first reason is the domain, and it is the same one the transport barrier
 /// runs into: on this rectangle with a datum that is not the trace of a smooth
@@ -1200,11 +1315,11 @@ BOOST_AUTO_TEST_CASE( transportBarrierSelfConverges )
 /// -- not that they are falling at k+1.
 BOOST_AUTO_TEST_CASE( internalLayerSelfConverges )
 {
-	double const psiFloor[] = { 0.0, 1.65, 2.45, 3.05 };
-	double const fluxFloor[] = { 0.0, 2.30, 3.20, 3.35 };
+	double const psiFloor[] = { 0.0, 2.00, 2.45, 3.05 };
+	double const fluxFloor[] = { 0.0, 2.03, 3.20, 3.35 };
 	for ( int order = 1; order <= 3; ++order )
 		study( meq::analytic::InternalLayer::internalLayer(),
-		       "4.5 internal layer", order, 24, pedestalDatum,
+		       "4.5 internal layer", order, 48, pedestalDatum,
 		       psiFloor[ order ], fluxFloor[ order ] );
 }
 
@@ -1343,8 +1458,10 @@ BOOST_AUTO_TEST_CASE( currentHoleDoesNotConvergeUnderPlainNewton )
  * Dirichlet ramp
  * runs out at 60; adding a KINSOL line search fails at 24 having spent 5.4
  * MILLION element-local non-linear iterations against plain Newton's 2.2
- * million; and NLOrdering::LineariseThenCondense, which removes the local
- * non-linear solves entirely, aborts. Anderson-accelerated Picard converges in
+ * million; and MFEM's NLOrdering::LineariseThenCondense, which removed the
+ * local non-linear solves entirely, aborted -- that mode is now deleted
+ * upstream, so that row is history rather than a check anyone can repeat.
+ * Anderson-accelerated Picard converges in
  * 122, and Newton started at THAT state finishes in FOUR at observed order
  * 2.01:
  *

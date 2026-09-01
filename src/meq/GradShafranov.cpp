@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <limits>
 #include <memory>
 #include <stdexcept>
@@ -326,7 +327,7 @@ namespace
 		  initialGuess( nullptr ),
 		  globalisationChoice( Globalisation::None ),
 		  localSolverChoice( LocalSolver::Newton ),
-		  orderingChoice( NonlinearOrdering::LineariseThenCondense ),
+		  orderingChoice( NonlinearOrdering::NPC ),
 		  assemblyModeChoice( defaultAssemblyMode() ),
 		  traceSolverChoice( TraceSolver::UMFPack ),
 		  andersonDepth( 1 ),
@@ -463,34 +464,29 @@ namespace
 		if ( !std::isfinite( psiAxisGuessIn ) || psiAxisGuessIn == 0.0 )
 			throw std::invalid_argument( "meq::GradShafranovSolver::setSource: the psi_ax guess must be finite and non-zero" );
 		/*
-		 * THERE USED TO BE A GUARD HERE REFUSING
-		 * NonlinearOrdering::LineariseThenCondense, AND IT WAS WRONG.
+		 * NO ORDERING IS REFUSED HERE, AND THAT HAS BEEN SETTLED TWICE.
 		 *
-		 * Its reasoning was that under that ordering the reduced operator is a
-		 * linearised residual between GetGradient() calls, so psi_ax -- which
-		 * enters only through the source -- would be invisible to a finite
-		 * difference of it and the border would come back zero. That is what
-		 * darcyhybridization.hpp's own summary of the ordering says, printing the
-		 * substitution as ( q, u )_lin + M^-1( -r_lin - [ C; E ]( L - L_lin ) )
-		 * with r_lin retained.
+		 * A guard once refused MFEM's NLOrdering::LineariseThenCondense, on the
+		 * reasoning that the reduced operator was a linearised residual between
+		 * GetGradient() calls, so psi_ax -- which enters only through the source
+		 * -- would be invisible to a finite difference of it and the border would
+		 * come back zero. That was read out of a header summary rather than out
+		 * of the code under it, and the code read the source afresh on every
+		 * residual evaluation. Measured, both orderings reached the same psi_ax
+		 * to every digit printed. The guard went, and then the mode did: upstream
+		 * deleted it as a condensation in disguise.
 		 *
-		 * THE CODE DOES NOT DO THAT. Relinearise() states outright that the local
-		 * residual at the linearisation point is deliberately NOT retained -- it
-		 * used to be, and caching it cost the gradient its exactness -- and
-		 * MultInvLin()'s correction calls LocalResidual(), which builds a
-		 * LocalNLOperator and evaluates it at the current fields. The source is
-		 * therefore read afresh on every residual evaluation, and a perturbation
-		 * of psi_ax reaches it.
+		 * WHAT REPLACED IT MAKES THE QUESTION MOOT. Under NonlinearOrdering::NPC
+		 * psi is an unknown of the system rather than a function of the trace, so
+		 * two of the three bordered quantities stop being differences at all --
+		 * the border row is exactly -e_j and the corner is exactly 1. Only
+		 * c = dR/ds is differenced, in a SCALAR, and s reaches every element's
+		 * source under either ordering. There is nothing left for a linearisation
+		 * history to hide.
 		 *
-		 * Measured, k = 2, n = 8, border still differenced, against
-		 * condense-first: psi_ax agreeing to every digit printed on four cases --
-		 * 3.058984e-01, 3.036075e+00, 2.834510e-01, 8.643745e-01 -- self
-		 * consistent to between 2e-16 and 7e-12, in 5, 5, 9 and 13 iterations
-		 * against 4, 4, 8 and 11. So the ordering costs one or two iterations
-		 * here and nothing else.
-		 *
-		 * The moral is the one this tree keeps relearning: that guard was written
-		 * from a header comment rather than from the code under it.
+		 * The moral is the one this tree keeps relearning, and it is why the
+		 * guard is recorded rather than merely deleted: it was written from a
+		 * header comment rather than from the code under it.
 		 */
 
 		// The ordinary checks first, and through the ordinary overload, so that
@@ -644,64 +640,6 @@ namespace
 			mfem::Vector const &shift;
 	};
 
-	/*
-	 * R( x ) WITH THE LINEARISATION FORCED TO x FIRST, for
-	 * NonlinearOrdering::LineariseThenCondense and for nothing else.
-	 *
-	 * WHAT IT REPAIRS. NewtonSolver evaluates the residual at x_k while the
-	 * hybridization still holds the linearisation from x_{k-1}, and only then
-	 * asks for the gradient, which relinearises at x_k. So the r and the J it
-	 * solves with are taken at different local states -- a pairing no Newton is
-	 * entitled to. Under CondenseThenLinearise that does not arise, because the
-	 * local problems are solved to convergence and the residual has no memory:
-	 * measured, evaluating at one trace with the linearisation taken at another
-	 * changes it by EXACTLY zero there, and by 5.6e-4, 1.8e-1 and 1.5e0 under
-	 * linearise-first as the pedestal narrows through sigma^2 = 0.05, 0.01,
-	 * 0.005.
-	 *
-	 * The repair is available because GetGradient() is IDEMPOTENT at a trace the
-	 * linearisation already sits at -- DarcyHybridization checks for exactly
-	 * that and refuses to move the fields -- so relinearising here costs one
-	 * pass on the first evaluation at a new trace and nothing on any later one,
-	 * and NewtonSolver's own GetGradient() call afterwards becomes free.
-	 *
-	 * MEASURED, on section 4.2 at k = 1, n = 30, Newton driven directly:
-	 *
-	 *   sigma^2 = 0.05    final residual 1.914e-12 -> 5.503e-14, which is
-	 *                     condense-first's 5.539e-14 to the last figure
-	 *   sigma^2 = 0.005   final residual 1.664e-01 -> 4.592e-03, still short
-	 *
-	 * So it is a repair and not a cure: the published pedestal still does not
-	 * converge under this ordering. What is left after it is what a request to
-	 * the MFEM tree should be about.
-	 */
-	class Relinearised : public mfem::Operator
-	{
-		public:
-			explicit Relinearised( mfem::Operator &operatorIn )
-				: mfem::Operator( operatorIn.Height(), operatorIn.Width() ),
-				  residual( operatorIn )
-			{
-			}
-
-			/// MFEM's spelling, from mfem::Operator.
-			void Mult( mfem::Vector const &x, // NOLINT(readability-identifier-naming)
-			           mfem::Vector &y ) const override
-			{
-				residual.GetGradient( x );
-				residual.Mult( x, y );
-			}
-
-			/// MFEM's spelling, from mfem::Operator.
-			mfem::Operator &GetGradient( // NOLINT(readability-identifier-naming)
-				mfem::Vector const &x ) const override
-			{
-				return residual.GetGradient( x );
-			}
-
-		private:
-			mfem::Operator &residual;
-	};
 
 	void GradShafranovSolver::setBoundaryData( mfem::Coefficient &boundaryIn )
 	{
@@ -1227,13 +1165,19 @@ namespace
 			darcy->GetHybridization()->SetLocalNLPreconditioner(
 				mfem::DarcyHybridization::LPrecType::LU );
 
-			// And the ordering, which decides whether either of the two above
-			// means anything: under LineariseThenCondense the local problem is a
-			// linear solve and there is no local iteration to configure.
-			darcy->GetHybridization()->SetNonlinearOrdering(
-				orderingChoice == NonlinearOrdering::LineariseThenCondense
-					? mfem::DarcyHybridization::NLOrdering::LineariseThenCondense
-					: mfem::DarcyHybridization::NLOrdering::CondenseThenLinearise );
+			// AND NEITHER OF THE TWO ABOVE MEANS ANYTHING UNDER
+			// NonlinearOrdering::NPC, which is meq's default. They are set
+			// regardless, because they are properties of the hybridization rather
+			// than of the solve, and because CondenseThenLinearise is one
+			// setNonlinearOrdering() call away and must find them configured.
+			//
+			// There is nothing to select here: NPC is NOT A MODE OF THIS OBJECT.
+			// MFEM used to offer SetNonlinearOrdering() with a third value that
+			// claimed to be NPC and was a condensation in disguise; it is deleted,
+			// and NPC is a separate mfem::DarcyNPCOperator over the full
+			// ( q, psi, psihat ) vector, built in solve(). So the ordering choice
+			// changes which OPERATOR the outer iteration drives, not how this one
+			// is configured.
 		}
 
 		darcy->Assemble();
@@ -1623,10 +1567,51 @@ namespace
 	{
 		if ( globalisationChoice != Globalisation::None )
 			throw std::logic_error( "meq::GradShafranovSolver::solve: psi_ax as an unknown is implemented for Globalisation::None only -- the KINSOL paths drive a residual of their own and the Picard ones do not build a Jacobian at all" );
-		// No ordering guard: see the note in setSource( NormalisedSource &, double ).
-		// LineariseThenCondense works here, measured.
+		// No ordering guard: both surviving orderings carry psi_ax. They carry it
+		// DIFFERENTLY, and the difference is the whole content of this function --
+		// see the border and the corner below.
 
-		int const n = traceX.Size();
+		bool const npcOrdering = orderingChoice == NonlinearOrdering::NPC;
+
+		/*
+		 * THE UNKNOWN, AND WHY ITS LENGTH DECIDES EVERYTHING ELSE HERE.
+		 *
+		 * Under NonlinearOrdering::NPC it is the whole ( q, psi, psihat ) vector
+		 * -- `solution` itself -- and psi is therefore an INDEPENDENT unknown.
+		 * Under CondenseThenLinearise it is the trace alone and psi is a function
+		 * of it, recovered by an element-local non-linear solve.
+		 *
+		 * That one difference collapses two of the three differenced quantities
+		 * in this bordered system:
+		 *
+		 *   b = -d( max psi_h )/d( unknown )   NPC: EXACTLY -e_j, a unit vector,
+		 *                                      because max psi_h is literally one
+		 *                                      entry of the unknown. Condensation:
+		 *                                      3( k + 1 ) central differences over
+		 *                                      the trace dofs of one element.
+		 *
+		 *   d = dG/ds                          NPC: EXACTLY 1, because
+		 *                                      G = s - max psi( x ) and s does not
+		 *                                      appear in psi. Condensation: 1
+		 *                                      minus a central difference, because
+		 *                                      s enters every element's source and
+		 *                                      so moves the recovered psi.
+		 *
+		 * Only c = dR/ds is still differenced, and it has to be on both paths: s
+		 * enters every element's source, so dR/ds is dense and there is no
+		 * assembled route to it. Two residual evaluations, one central difference
+		 * in a SCALAR.
+		 *
+		 * AND THE WHOLE FROZEN-SEED APPARATUS GOES AWAY UNDER NPC. The re-forming
+		 * of the system after every accepted step -- the single thing that made
+		 * these differences derivatives rather than noise under the condensation,
+		 * see the note on it below -- exists because DarcyHybridization freezes
+		 * the element-local Newton's initial guess at FormLinearSystem() time.
+		 * NPC has no element-local non-linear solve at all, so there is no seed,
+		 * nothing to go stale, and nothing to re-form.
+		 */
+		mfem::Vector &unknown = npcOrdering ? solution : traceX;
+		int const n = unknown.Size();
 
 		recoveryScratch.Update( darcy->GetOffsets() );
 
@@ -1635,29 +1620,85 @@ namespace
 		symbolicFactorisationCount = 0;
 		numericFactorisationCount = 0;
 
+		std::unique_ptr<mfem::DarcyNPCOperator> npc;
+		if ( npcOrdering )
+			npc = std::make_unique<mfem::DarcyNPCOperator>(
+				*darcy->GetHybridization(), blockOffsets, darcyRhs );
+
 		mfem::Vector residual( n ), column( n ), y( n ), z( n ), scratch( n );
 
-		auto fieldResidual = [ & ]( mfem::Vector const &trace, double normalisation,
+		auto fieldResidual = [ & ]( mfem::Vector const &state, double normalisation,
 		                            mfem::Vector &out )
 		{
 			normalisedSource->setNormalisation( normalisation );
+			if ( npcOrdering )
+			{
+				npc->Mult( state, out );
+				return;
+			}
 			// Refetched rather than held: formSystem() replaces the handle every
 			// time the local seed is refreshed, and a reference taken before the
 			// loop would outlive the operator it names.
-			reduced.Ptr()->Mult( trace, out );
+			reduced.Ptr()->Mult( state, out );
 			out -= traceB;
+		};
+
+		/*
+		 * max psi_h, AND WHERE IT IS ATTAINED.
+		 *
+		 * Under NPC this is a READ rather than a recovery: the potential block of
+		 * the unknown holds every nodal value, so the peak is one scan and the
+		 * index it is attained at is the whole of the border row. Under the
+		 * condensation it is recoverPeak(), which runs ComputeSolution() to
+		 * rebuild psi from the trace and reports which ELEMENT attained it,
+		 * because the border there is supported on that element's trace dofs.
+		 *
+		 * The normalisation is set on both paths even though NPC does not need it
+		 * for the read, so that the two agree on the source's state afterwards --
+		 * and so that a psi_ax the source refuses still throws from here, which is
+		 * what the line search below is catching.
+		 */
+		auto peakAt = [ & ]( mfem::Vector const &state, double normalisation,
+		                     int *element, int *dof )
+		{
+			if ( !npcOrdering )
+				return recoverPeak( state, normalisation, element, dof );
+
+			normalisedSource->setNormalisation( normalisation );
+
+			double best = -std::numeric_limits<double>::infinity();
+			int bestIndex = -1;
+			for ( int i = blockOffsets[ 1 ]; i < blockOffsets[ 2 ]; ++i )
+			{
+				if ( state( i ) > best )
+				{
+					best = state( i );
+					bestIndex = i;
+				}
+			}
+
+			// There is no element to report: the index is into the FULL vector
+			// and is all the border needs.
+			if ( element )
+				*element = -1;
+			if ( dof )
+				*dof = bestIndex;
+			return best;
 		};
 
 		// A central difference is worth the second evaluation here. The residual
 		// carries the element-local solves' own stopping tolerance as noise, so a
 		// forward difference would leave an O( h ) truncation error on top of it
-		// and the border would be the thing that limits Newton's order.
+		// and the border would be the thing that limits Newton's order. Under NPC
+		// there are no element-local solves and so no such noise, and the central
+		// difference is kept anyway: it is the same quantity, measured the same
+		// way, which is what lets the two paths be compared.
 		auto normalisationStep = []( double value )
 		{
 			return 1.0e-5*std::max( std::abs( value ), 1.0e-10 );
 		};
 
-		auto sourceColumn = [ & ]( mfem::Vector const &trace, double normalisation,
+		auto sourceColumn = [ & ]( mfem::Vector const &state, double normalisation,
 		                           mfem::Vector &out )
 		{
 			if ( normalisationChoice == Normalisation::Decoupled )
@@ -1666,23 +1707,26 @@ namespace
 				return;
 			}
 			double const h = normalisationStep( normalisation );
-			fieldResidual( trace, normalisation + h, out );
-			fieldResidual( trace, normalisation - h, scratch );
+			fieldResidual( state, normalisation + h, out );
+			fieldResidual( state, normalisation - h, scratch );
 			out -= scratch;
 			out /= 2.0*h;
 		};
 
+		// Sized by the TRACE on both paths, because that is what it indexes;
+		// under NPC the trace block starts at blockOffsets[ 2 ] of the unknown.
 		mfem::Array<int> const &essentialTrace =
 			darcy->GetHybridization()->GetEssentialTrueDofs();
-		std::vector<bool> essential( n, false );
+		std::vector<bool> essential( traceX.Size(), false );
 		for ( int i = 0; i < essentialTrace.Size(); ++i )
 			essential[ essentialTrace[ i ] ] = true;
 
 		double s = psiAxisValue;
 		int argElement = -1;
-		double peak = recoverPeak( traceX, s, &argElement );
+		int argDof = -1;
+		double peak = peakAt( unknown, s, &argElement, &argDof );
 		double constraint = s - peak;
-		fieldResidual( traceX, s, residual );
+		fieldResidual( unknown, s, residual );
 
 		// c at the starting iterate, computed whatever the coupling: it is both
 		// the first step's column and the scale gamma. gamma converts a
@@ -1694,8 +1738,8 @@ namespace
 		mfem::Vector initialColumn( n );
 		{
 			double const h = normalisationStep( s );
-			fieldResidual( traceX, s + h, initialColumn );
-			fieldResidual( traceX, s - h, scratch );
+			fieldResidual( unknown, s + h, initialColumn );
+			fieldResidual( unknown, s - h, scratch );
 			initialColumn -= scratch;
 			initialColumn /= 2.0*h;
 		}
@@ -1717,17 +1761,23 @@ namespace
 		 * On this path a guess is not an optimisation but part of the problem
 		 * statement -- see setSource( NormalisedSource &, double ) -- so the
 		 * effect would be systematic rather than occasional.
+		 *
+		 * COLD means the Dirichlet datum and nothing else, which under NPC is the
+		 * flux and potential blocks zeroed as well as the free trace dofs.
 		 */
 		double reference = 0.0;
 		{
-			mfem::Vector coldTrace( traceX );
-			for ( int i = 0; i < n; ++i )
-				if ( !essential[ i ] )
-					coldTrace( i ) = 0.0;
+			mfem::Vector coldState( unknown );
+			int const traceBase = npcOrdering ? blockOffsets[ 2 ] : 0;
+			for ( int i = 0; i < traceBase; ++i )
+				coldState( i ) = 0.0;
+			for ( int i = traceBase; i < n; ++i )
+				if ( !essential[ i - traceBase ] )
+					coldState( i ) = 0.0;
 
 			mfem::Vector coldResidual( n );
-			fieldResidual( coldTrace, s, coldResidual );
-			double const coldPeak = recoverPeak( coldTrace, s );
+			fieldResidual( coldState, s, coldResidual );
+			double const coldPeak = peakAt( coldState, s, nullptr, nullptr );
 			reference = std::hypot( coldResidual.Norml2(), gamma*( s - coldPeak ) );
 		}
 		double const target = std::max( newtonAbsoluteTolerance,
@@ -1747,6 +1797,13 @@ namespace
 		linear.SetPrintLevel( -1 );
 #endif
 
+		// Under NPC the border is solved against the FULL Jacobian, and A^-1 is
+		// the hybridized elimination -- reduce to the trace, solve there with
+		// `linear`, recover the local increments. So the two backsolves the
+		// border costs are still two TRACE solves against one factorisation, and
+		// the extra unknown still costs one factorisation and two backsolves.
+		mfem::DarcyNPCSolver npcLinear( linear );
+
 		bool converged = false;
 		for ( int iteration = 0; iteration <= newtonMaxIterations; ++iteration )
 		{
@@ -1765,8 +1822,14 @@ namespace
 			bool const coupled = normalisationChoice == Normalisation::Coupled;
 
 			// d = 1 - d( max psi_h )/d psi_ax, the corner of the border.
+			//
+			// EXACTLY 1 UNDER NPC and not differenced: psi is an unknown of the
+			// system, so moving s moves the RESIDUAL and not psi, and G = s - psi_j
+			// differentiates to 1 in s. Under the condensation psi is a function of
+			// s through every element's source, so the derivative is real and has
+			// to be measured.
 			double corner = 1.0;
-			if ( coupled )
+			if ( coupled && !npcOrdering )
 			{
 				double const h = normalisationStep( s );
 				double const peakUp = recoverPeak( traceX, s + h );
@@ -1774,40 +1837,73 @@ namespace
 				corner = 1.0 - ( peakUp - peakDown )/( 2.0*h );
 			}
 
-			// b = -d( max psi_h )/d lambda, on the trace dofs of the element that
-			// attained the maximum and nowhere else. Essential dofs are left at
-			// zero: the step does not move them, so what they would contribute is
+			// b = -d( max psi_h )/d( unknown ). Essential dofs are left at zero:
+			// the step does not move them, so what they would contribute is
 			// multiplied by an increment that is identically zero.
 			mfem::Array<int> borderDofs;
-			traceDofsOfElement( argElement, borderDofs );
-			mfem::Vector border( borderDofs.Size() );
-			border = 0.0;
+			mfem::Vector border;
 
-			double const traceStep = 1.0e-6*std::max( traceX.Normlinf(), 1.0 );
-			for ( int i = 0; coupled && i < borderDofs.Size(); ++i )
+			if ( npcOrdering )
 			{
-				int const dof = borderDofs[ i ];
-				if ( essential[ dof ] )
-					continue;
+				// ONE ENTRY, EXACT, NOT DIFFERENCED. max psi_h is the argDof'th
+				// entry of the unknown, so d( max psi_h )/d( unknown ) is the unit
+				// vector e_argDof and b is its negation. Nothing is measured, so
+				// nothing here carries a truncation error, and the 3( k + 1 )
+				// recoveries the condensation spends on this are not spent.
+				borderDofs.SetSize( 1 );
+				borderDofs[ 0 ] = argDof;
+				border.SetSize( 1 );
+				border( 0 ) = coupled ? -1.0 : 0.0;
+			}
+			else
+			{
+				// On the trace dofs of the element that attained the maximum and
+				// nowhere else -- under hybridization that element's recovered
+				// potential depends on no others. Asserted rather than assumed, in
+				// HighBetaConvergence.cpp's theAxisSensitivityIsLocalToItsElement.
+				traceDofsOfElement( argElement, borderDofs );
+				border.SetSize( borderDofs.Size() );
+				border = 0.0;
 
-				double const saved = traceX( dof );
-				traceX( dof ) = saved + traceStep;
-				double const up = recoverPeak( traceX, s );
-				traceX( dof ) = saved - traceStep;
-				double const down = recoverPeak( traceX, s );
-				traceX( dof ) = saved;
-				border( i ) = -( up - down )/( 2.0*traceStep );
+				double const traceStep = 1.0e-6*std::max( traceX.Normlinf(), 1.0 );
+				for ( int i = 0; coupled && i < borderDofs.Size(); ++i )
+				{
+					int const dof = borderDofs[ i ];
+					if ( essential[ dof ] )
+						continue;
+
+					double const saved = traceX( dof );
+					traceX( dof ) = saved + traceStep;
+					double const up = recoverPeak( traceX, s );
+					traceX( dof ) = saved - traceStep;
+					double const down = recoverPeak( traceX, s );
+					traceX( dof ) = saved;
+					border( i ) = -( up - down )/( 2.0*traceStep );
+				}
 			}
 
 			// LAST, and after the source is put back to s: every difference above
-			// ran a local solve of its own, and GetGradient() is what leaves the
-			// factored local Jacobians the backsolves below are entitled to.
+			// ran a residual evaluation of its own, and the gradient is what leaves
+			// the factored local blocks the backsolves below are entitled to. That
+			// ordering is load bearing under the condensation, where the
+			// differences run local solves that overwrite exactly those blocks; it
+			// is kept under NPC because it is the right thing to write either way.
 			normalisedSource->setNormalisation( s );
-			mfem::Operator &gradient = reduced.Ptr()->GetGradient( traceX );
 
-			linear.SetOperator( gradient );
-			linear.Mult( residual, y );
-			linear.Mult( column, z );
+			if ( npcOrdering )
+			{
+				mfem::Operator &jacobian = npc->GetGradient( unknown );
+				npcLinear.SetOperator( jacobian );
+				npcLinear.Mult( residual, y );
+				npcLinear.Mult( column, z );
+			}
+			else
+			{
+				mfem::Operator &gradient = reduced.Ptr()->GetGradient( traceX );
+				linear.SetOperator( gradient );
+				linear.Mult( residual, y );
+				linear.Mult( column, z );
+			}
 
 			double borderDotY = 0.0;
 			double borderDotZ = 0.0;
@@ -1841,8 +1937,12 @@ namespace
 			 * solve. The trial evaluation is not wasted: whichever step is
 			 * accepted, its residual and constraint are the ones the next
 			 * iteration starts from.
+			 *
+			 * Under NPC the damping scales the fields and the trace TOGETHER,
+			 * because they are one vector -- which is the half of a line search a
+			 * trace-only operator cannot express.
 			 */
-			mfem::Vector const savedTrace( traceX );
+			mfem::Vector const savedState( unknown );
 			double const savedS = s;
 
 			double bestNorm = std::numeric_limits<double>::infinity();
@@ -1855,14 +1955,14 @@ namespace
 				double trialNorm = std::numeric_limits<double>::infinity();
 				try
 				{
-					traceX = savedTrace;
-					traceX.Add( -damping, y );
-					traceX.Add( -damping*deltaS, z );
+					unknown = savedState;
+					unknown.Add( -damping, y );
+					unknown.Add( -damping*deltaS, z );
 					s = savedS + damping*deltaS;
 
-					peak = recoverPeak( traceX, s, &argElement );
+					peak = peakAt( unknown, s, &argElement, &argDof );
 					constraint = s - peak;
-					fieldResidual( traceX, s, residual );
+					fieldResidual( unknown, s, residual );
 					trialNorm = std::hypot( residual.Norml2(), gamma*constraint );
 				}
 				catch ( std::exception const & )
@@ -1889,19 +1989,19 @@ namespace
 			{
 				if ( bestDamping == 0.0 )
 					throw std::runtime_error( "meq::GradShafranovSolver::solve: no damping of the bordered Newton step gave a finite residual -- psi_ax through zero, most often, which is the branch leaving the physical one" );
-				traceX = savedTrace;
-				traceX.Add( -bestDamping, y );
-				traceX.Add( -bestDamping*deltaS, z );
+				unknown = savedState;
+				unknown.Add( -bestDamping, y );
+				unknown.Add( -bestDamping*deltaS, z );
 				s = savedS + bestDamping*deltaS;
-				peak = recoverPeak( traceX, s, &argElement );
+				peak = peakAt( unknown, s, &argElement, &argDof );
 				constraint = s - peak;
-				fieldResidual( traceX, s, residual );
+				fieldResidual( unknown, s, residual );
 			}
 
 			/*
 			 * THE STEP IS SETTLED, SO THE ELEMENT-LOCAL SOLVES ARE GIVEN A FRESH
-			 * STARTING POINT -- and this is the single thing that makes the
-			 * border a derivative rather than noise.
+			 * STARTING POINT -- and under the condensation this is the single
+			 * thing that makes the border a derivative rather than noise.
 			 *
 			 * DarcyHybridization takes its local initial guess from the solution
 			 * blocks at FormLinearSystem() time and keeps it for the life of the
@@ -1928,12 +2028,21 @@ namespace
 			 * and traceB comes back the same -- the essential trace values have
 			 * not moved and the source is on the operator, not the right hand
 			 * side -- so the residual being differenced does not drift.
+			 *
+			 * NONE OF WHICH APPLIES UNDER NPC, and that is the point rather than
+			 * an omission: there is no element-local non-linear solve, so there is
+			 * no seed to freeze, no local iteration count to blow up, and nothing
+			 * for a stale linearisation to corrupt. q and psi are Newton state and
+			 * are already in `unknown`.
 			 */
-			darcySolution = recoveryScratch;
-			rhs = 0.0;
-			formSystem();
+			if ( !npcOrdering )
+			{
+				darcySolution = recoveryScratch;
+				rhs = 0.0;
+				formSystem();
+			}
 
-			sourceColumn( traceX, s, column );
+			sourceColumn( unknown, s, column );
 		}
 
 		psiAxisValue = s;
@@ -1977,6 +2086,26 @@ namespace
 			return;
 		}
 
+		/*
+		 * WHETHER q AND psi COME BACK IN `solution` OR HAVE TO BE REBUILT.
+		 *
+		 * Under NonlinearOrdering::NPC they are Newton state: the outer unknown
+		 * is the whole ( q, psi, psihat ) vector, which IS `solution`, so they
+		 * are already there when the iteration returns and there is nothing to
+		 * recover. Under the condensation the unknown is the trace alone and the
+		 * fields are a function of it, so RecoverFEMSolution() is what produces
+		 * them; the linear path is the same.
+		 *
+		 * Skipping it under NPC is a correctness decision and not a saving.
+		 * RecoverFEMSolution() runs ComputeSolution(), whose element-local solves
+		 * are NON-LINEAR under this discretisation, and upstream records that
+		 * function as never having been exercised against an NPC solution. Asking
+		 * an unchecked back-substitution to reproduce fields meq already holds
+		 * exactly is a way to lose them, not a way to confirm them.
+		 */
+		bool const fieldsAreState = usesNonlinearForms()
+		                            && orderingChoice == NonlinearOrdering::NPC;
+
 		// psi_ax has to be in the source before anything assembles, so that
 		// prepare() and the first residual evaluation see the same normalisation.
 		if ( normalisedSource )
@@ -1990,6 +2119,8 @@ namespace
 		}
 		else if ( nonlinearSource )
 		{
+			bool const npcOrdering = orderingChoice == NonlinearOrdering::NPC;
+
 			/*
 			 * THE COLD REFERENCE IS TAKEN FIRST, AND BY PREPARING WITHOUT THE
 			 * GUESS RATHER THAN BY EDITING THE TRACE. Both halves of that are
@@ -1997,7 +2128,33 @@ namespace
 			 * measurement, and note that it has to happen HERE, before anything
 			 * binds a reference to the reduced operator, because the second
 			 * prepare() replaces it.
+			 *
+			 * IT IS A NORM OF A DIFFERENT VECTOR UNDER THE TWO ORDERINGS, and
+			 * that is correct rather than something to reconcile. NPC's residual
+			 * is the full ( q, psi, psihat ) system and the condensation's is the
+			 * trace alone, so the two reference values are not comparable -- but
+			 * neither is either one's residual history, and the reference exists
+			 * only to set a target in the same units as the history it gates.
+			 * Comparing the two paths means comparing the SOLUTIONS, which is
+			 * what the suite does.
 			 */
+			auto coldNorm = [ & ]()
+			{
+				if ( npcOrdering )
+				{
+					mfem::DarcyNPCOperator cold( *darcy->GetHybridization(),
+					                             blockOffsets, darcyRhs );
+					mfem::Vector coldResidual( cold.Height() );
+					cold.Mult( solution, coldResidual );
+					return coldResidual.Norml2();
+				}
+
+				mfem::Vector coldResidual( traceX.Size() );
+				reduced.Ptr()->Mult( traceX, coldResidual );
+				coldResidual -= traceB;
+				return coldResidual.Norml2();
+			};
+
 			double coldReference = -1.0;
 			if ( initialGuess )
 			{
@@ -2005,10 +2162,7 @@ namespace
 				initialGuess = nullptr;
 				prepare();
 
-				mfem::Vector coldResidual( traceX.Size() );
-				reduced.Ptr()->Mult( traceX, coldResidual );
-				coldResidual -= traceB;
-				coldReference = coldResidual.Norml2();
+				coldReference = coldNorm();
 
 				initialGuess = guess;
 				prepare();
@@ -2042,23 +2196,68 @@ namespace
 			// the discrete residual cannot disagree with the residual by
 			// construction. What it can disagree with is the physics, and only a
 			// convergence study against a closed form catches that.
+			/*
+			 * NPC: THE UNKNOWN IS THE WHOLE SYSTEM, AND meq ALREADY HAD IT.
+			 *
+			 * mfem::DarcyNPCOperator is an Operator on ( q, psi, psihat )
+			 * together -- Nguyen, Peraire & Cockburn eqs (14)-(18) -- with the
+			 * Jacobian solved by hybridized elimination inside
+			 * mfem::DarcyNPCSolver: reduce to the trace, solve there once, recover
+			 * the local increments. Every element-local operation is ONE linear
+			 * solve against ONE factorisation, and GetNumLocalNLIterations()
+			 * staying at zero is the acceptance signal that it really is NPC.
+			 *
+			 * It costs meq almost nothing to give the fields to Newton, because
+			 * `solution` has always been a three-block vector on `blockOffsets`
+			 * with darcyFlux, potentialGf and traceGf MakeRef'd into it. That IS
+			 * the NPC unknown, block for block. So the fields are already in
+			 * place when Mult() returns and RecoverFEMSolution() drops out of this
+			 * path entirely -- see the guard on it below, which is not an
+			 * optimisation: upstream records ComputeSolution() as never having
+			 * been exercised against an NPC solution, and running the
+			 * condensation's element-local NON-LINEAR back-substitution over an
+			 * answer that already satisfies the full system would be asking a
+			 * question nobody has checked for an answer meq already has.
+			 *
+			 * `darcyRhs` is the ( flux, potential ) load and is held BY REFERENCE
+			 * by the operator, so it must outlive it; it is a member, and
+			 * formSystem() has already pointed it at rhs's first two blocks.
+			 */
+			std::unique_ptr<mfem::DarcyNPCOperator> npc;
+			std::unique_ptr<mfem::DarcyNPCSolver> npcLinear;
+			if ( npcOrdering )
+			{
+				npc = std::make_unique<mfem::DarcyNPCOperator>(
+					*darcy->GetHybridization(), blockOffsets, darcyRhs );
+				npcLinear = std::make_unique<mfem::DarcyNPCSolver>( linear );
+			}
+
+			mfem::Operator &residualOperator =
+				npcOrdering ? static_cast<mfem::Operator &>( *npc )
+				            : static_cast<mfem::Operator &>( *reduced.Ptr() );
+
+			// The unknown, and the right hand side Newton subtracts from the
+			// residual. BOTH RIGHT HAND SIDES ARE ZERO AND THEY ARE ZERO FOR
+			// DIFFERENT REASONS, which is worth not conflating: under the
+			// condensation ReduceRHS() zeroes traceB for a non-linear problem and
+			// puts the load inside the operator, while under NPC the load is the
+			// ( flux, potential ) pair passed to the operator and the trace row
+			// carries none -- meq imposes psi = g_D as an ESSENTIAL condition,
+			// not as a Neumann datum, and a Neumann datum is the one thing that
+			// would have to ride here instead.
+			mfem::Vector &unknown = npcOrdering ? solution : traceX;
+			mfem::Vector newtonRhs( residualOperator.Height() );
+			if ( npcOrdering )
+				newtonRhs = 0.0;
+			else
+				newtonRhs = traceB;
+
 			// KINSOL ignores the right hand side handed to Mult(), so the shift
 			// has to be in the operator. Built unconditionally and used only on
 			// the KINSOL paths: it costs one subtraction per residual evaluation
 			// and keeps the two paths reading the same residual, which is what
 			// makes a difference between them attributable to the line search.
-			// Under linearise-first the residual and the gradient must be taken
-			// at the same local state; see Relinearised. Built unconditionally so
-			// that the two orderings differ in one flag and not in structure, and
-			// pointed at only where it is wanted.
-			Relinearised relinearised( *reduced.Ptr() );
-			bool const pairing =
-				orderingChoice == NonlinearOrdering::LineariseThenCondense;
-			mfem::Operator &residualOperator =
-				pairing ? static_cast<mfem::Operator &>( relinearised )
-				        : *reduced.Ptr();
-
-			ShiftedResidual shifted( residualOperator, traceB );
+			ShiftedResidual shifted( residualOperator, newtonRhs );
 
 			std::unique_ptr<mfem::NewtonSolver> nonlinear;
 			bool kinsol = false;
@@ -2066,6 +2265,22 @@ namespace
 			switch ( globalisationChoice )
 			{
 				case Globalisation::None:
+					// NO LINE SEARCH HERE, AND THAT IS MEASURED RATHER THAN
+					// ASSUMED. Backtracking on the full residual is the
+					// globalisation upstream recommends for NPC; implemented as a
+					// NewtonSolver::ComputeScalingFactor subclass and measured, it
+					// made EVERY case worse, including the five that converge
+					// undamped. The reason is structural and is written up in
+					// CLAUDE.md under *Why a line search on the full residual does
+					// not work here*: the flux and trace rows of the NPC residual
+					// are LINEAR, so a full step annihilates them exactly, and any
+					// damping restores ( 1 - alpha ) of them. An l2 merit function
+					// over the whole residual therefore rewards the very step that
+					// ruins the potential block, alpha collapses to about 1e-2 and
+					// the iteration creeps. KINSOL's line search fails identically,
+					// on the same merit function. What works is
+					// Globalisation::PicardThenNewton, which fixes WHERE the
+					// iterate is rather than how far it steps.
 					nonlinear = std::make_unique<mfem::NewtonSolver>();
 					break;
 #ifdef MFEM_USE_SUNDIALS
@@ -2102,8 +2317,33 @@ namespace
 				nonlinear->SetOperator( shifted );
 			else
 				nonlinear->SetOperator( residualOperator );
-			nonlinear->SetSolver( linear );
+
+			// The Jacobian solve. Under NPC it is the hybridized elimination
+			// rather than a trace solve, and the difference is not optional: the
+			// handle DarcyNPCOperator::GetGradient() returns is SOLVE-ONLY -- the
+			// local blocks are factored in place, so J cannot be applied out of
+			// them and its Mult() aborts. Handing the trace solver straight to
+			// Newton would fail loudly, which is upstream's design and better
+			// than the alternative.
+			if ( npcOrdering )
+				nonlinear->SetSolver( *npcLinear );
+			else
+				nonlinear->SetSolver( linear );
 			nonlinear->SetMonitor( recorder );
+
+#ifdef MFEM_USE_SUNDIALS
+			// KINSOL calls LinSysSetup every tenth step by default, which under
+			// NPC makes this a LAGGED-JACOBIAN Newton: legitimate, and
+			// self-consistent because the reduction and the recovery both
+			// eliminate with whatever factorisation is currently held, but it
+			// costs iterations -- upstream measures 12 against 4 on one case,
+			// both converged to round-off. meq asks for a Jacobian per step so
+			// that a KINSOL run and a plain Newton run differ in the LINE SEARCH
+			// and in nothing else, which is what makes
+			// kinsolAgreesWithNewtonWhereBothConverge worth asserting.
+			if ( kinsol && npcOrdering )
+				static_cast<mfem::KINSolver &>( *nonlinear ).SetMaxSetupCalls( 1 );
+#endif
 
 			/*
 			 * THE CONVERGENCE TARGET MUST NOT DEPEND ON WHERE THE ITERATION
@@ -2164,9 +2404,11 @@ namespace
 			// KINSolver::Mult has the same line and the same consequence.
 			nonlinear->iterative_mode = true;
 
-			// traceB on the Newton path, where Mult() subtracts it; ignored on the
-			// KINSOL paths, where ShiftedResidual has already done so.
-			nonlinear->Mult( traceB, traceX );
+			// newtonRhs on the Newton path, where Mult() subtracts it; ignored on
+			// the KINSOL paths, where ShiftedResidual has already done so. The
+			// unknown is `solution` entire under NPC and the trace alone under
+			// the condensation.
+			nonlinear->Mult( newtonRhs, unknown );
 			newtonIterationCount = nonlinear->GetNumIterations();
 
 #ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
@@ -2209,7 +2451,8 @@ namespace
 #endif
 		}
 
-		darcy->RecoverFEMSolution( traceX, darcyRhs, darcySolution );
+		if ( !fieldsAreState )
+			darcy->RecoverFEMSolution( traceX, darcyRhs, darcySolution );
 
 		// The one place the sign convention is undone. See the file comment.
 		fluxGf = darcyFlux;
@@ -2413,6 +2656,13 @@ namespace
 	int GradShafranovSolver::newtonIterations() const
 	{
 		return newtonIterationCount;
+	}
+
+	long GradShafranovSolver::localNonlinearIterations() const
+	{
+		if ( !built )
+			throw std::logic_error( "meq::GradShafranovSolver::localNonlinearIterations: the forms have not been built" );
+		return darcy->GetHybridization()->GetNumLocalNLIterations();
 	}
 
 	namespace

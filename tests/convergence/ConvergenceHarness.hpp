@@ -494,6 +494,15 @@ namespace tests
 		return point;
 	}
 
+	/// The non-linear ordering every study in this suite runs under, in ONE
+	/// place so that a test which has to branch on it -- because the two
+	/// orderings differ in which KINSOL strategy converges, say -- cannot drift
+	/// from what measureSelf() actually asks for.
+	inline meq::GradShafranovSolver::NonlinearOrdering defaultOrdering()
+	{
+		return meq::GradShafranovSolver::NonlinearOrdering::NPC;
+	}
+
 	/// Solve once with no exact solution to compare against, and sample the
 	/// result on @a cloud. @a boundary supplies the Dirichlet datum, which for
 	/// these benchmarks is a design choice rather than a restriction of a known
@@ -516,7 +525,8 @@ namespace tests
 	                             meq::GradShafranovSolver::LocalSolver local =
 	                                 meq::GradShafranovSolver::LocalSolver::Newton,
 	                             meq::GradShafranovSolver::NonlinearOrdering ordering =
-	                                 meq::GradShafranovSolver::NonlinearOrdering::LineariseThenCondense )
+	                                 meq::GradShafranovSolver::NonlinearOrdering::NPC )
+	                             // Keep in step with defaultOrdering() above.
 	{
 		mfem::Mesh mesh = makeMesh( box, n );
 		EquilibriumSource<Equilibrium> source( eq );
@@ -904,20 +914,20 @@ namespace tests
 			            << ": Newton did NOT converge in " << points[ i ].newtonIterations
 			            << " iterations. That is a finding about this benchmark, not a "
 			            "tolerance to be relaxed -- but SINCE meq USES "
-			            "NLOrdering::LineariseThenCondense, check the ordering "
-			            "before the benchmark. As of 2026-08-31 exactly ONE case in "
-			            "this suite converges under CondenseThenLinearise and not "
-			            "under this ordering: section 4.5, the internal layer, at "
-			            "k = 2, n = 16, where condense-first takes 10 iterations "
-			            "and this one fails at 60. It is one of three surviving out "
-			            "of 144 upstream, all at widths where the frozen-Jacobian "
-			            "local correction cannot converge and the divergence guard "
-			            "truncates; see "
-			            "../mfem-hdg-dev/doc/HDG-LINEARISE-FIRST-STIFF-SOURCES.md. "
-			            "IF THIS MESSAGE IS ABOUT SOME OTHER CASE, THAT IS NEW -- "
-			            "measure both orderings before assuming it is the same gap. "
-			            "Do not clear it by lowering the cap or switching the "
-			            "ordering back" );
+			            "NonlinearOrdering::NPC, MEASURE THE OTHER ORDERING BEFORE "
+			            "BLAMING THE BENCHMARK. setNonlinearOrdering( "
+			            "CondenseThenLinearise ) is one line and is kept as the "
+			            "backup for exactly this. THE PARITY GAP THIS MESSAGE USED "
+			            "TO NAME IS GONE WITH ITS CAUSE: it was a property of "
+			            "MFEM's LineariseThenCondense, a trace-only operator that "
+			            "kept the linearisation as hidden state, and upstream "
+			            "deleted that mode. NPC holds no state between calls at "
+			            "all, so a residual is a function of its argument and "
+			            "there is no frozen-Jacobian local correction to truncate. "
+			            "A failure here is therefore a NEW finding rather than a "
+			            "known one -- record which orderings reach it. Do not "
+			            "clear it by lowering the cap or switching the ordering "
+			            "back" );
 		}
 
 		// A RATE TAKEN ACROSS A SOLVE THAT DID NOT CONVERGE IS NOT A RATE. Such a

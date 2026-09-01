@@ -110,15 +110,24 @@ BOOST_AUTO_TEST_CASE( theConfigurationRoundTrips )
 	// compares and a scoped enum has no operator<<.
 	BOOST_TEST( static_cast<int>( solver.globalisation() ) == static_cast<int>( G::None ),
 	            "the default globalisation is not None" );
-	// LineariseThenCondense is the default, and meq uses no other -- it is the
-	// canonical Nguyen-Peraire-Cockburn ordering, it is what the GS papers'
-	// method actually is, and it leaves every element-local elimination a linear
-	// solve. Asserted here because it is a decision rather than a preference:
-	// switching it back would put a nonlinear solve inside every element of
-	// every residual evaluation and change what the whole suite is measuring.
+	// NPC is the default, and CondenseThenLinearise is kept as the backup rather
+	// than as an equal. NPC is the canonical Nguyen-Peraire-Cockburn method --
+	// Newton on the full ( q, psi, psihat ) system, hybridized elimination for
+	// the Jacobian -- which is what the GS papers' discretisation actually is,
+	// and it leaves every element-local operation a LINEAR solve against one
+	// factorisation. Asserted here because it is a decision rather than a
+	// preference: switching it back would put a non-linear solve inside every
+	// element of every residual evaluation and change what the whole suite is
+	// measuring.
+	//
+	// A THIRD VALUE USED TO BE HERE. MFEM's NLOrdering::LineariseThenCondense
+	// claimed to be this method and was a condensation with the linearisation
+	// kept as hidden state; upstream deleted it, and meq's Relinearised -- the
+	// wrapper that paired the residual with the gradient to work around exactly
+	// that -- went with it.
 	BOOST_TEST( static_cast<int>( solver.nonlinearOrdering() )
-	                == static_cast<int>( N::LineariseThenCondense ),
-	            "the default ordering is not LineariseThenCondense" );
+	                == static_cast<int>( N::NPC ),
+	            "the default ordering is not NPC" );
 
 	for ( G choice : { G::PicardOnly, G::AndersonPicard, G::PicardThenNewton, G::None } )
 	{
@@ -128,7 +137,7 @@ BOOST_AUTO_TEST_CASE( theConfigurationRoundTrips )
 		            << static_cast<int>( choice ) );
 	}
 
-	for ( N choice : { N::LineariseThenCondense, N::CondenseThenLinearise } )
+	for ( N choice : { N::NPC, N::CondenseThenLinearise } )
 	{
 		solver.setNonlinearOrdering( choice );
 		BOOST_TEST( static_cast<int>( solver.nonlinearOrdering() )
@@ -314,10 +323,9 @@ BOOST_AUTO_TEST_CASE( theSolverRefusesASecondProblem )
  *
  *   - a normalisation of zero, which is where the degenerate branch lives;
  *   - a second source, for the reason above;
- *   - NonlinearOrdering::LineariseThenCondense, under which the reduced operator
- *     is a LINEARISED residual between GetGradient() calls -- so the border,
- *     which is obtained by differencing that residual, would differentiate a
- *     different function from the one being solved;
+ *   - NOTHING about the ordering. Both surviving orderings are accepted, and
+ *     they carry psi_ax differently rather than one of them badly -- see the
+ *     block below and solveWithNormalisation();
  *   - any Globalisation but None: KINSOL drives a residual of its own and the
  *     Picard paths build no Jacobian to put a border on. Refused at solve()
  *     rather than at the setter, because the two can be set in either order;
@@ -348,27 +356,32 @@ BOOST_AUTO_TEST_CASE( theNormalisedPathRefusesWhatItCannotDo )
 	}
 
 	/*
-	 * AND IT DOES NOT REFUSE LineariseThenCondense, WHICH IT USED TO.
+	 * AND IT REFUSES NEITHER ORDERING, WHICH IS A CHANGE TWICE OVER.
 	 *
-	 * That refusal was written from darcyhybridization.hpp's summary of the
-	 * ordering rather than from the code under it: the summary prints the local
-	 * substitution with the linearisation's residual RETAINED, which would make
-	 * psi_ax invisible to a difference of the reduced residual. Relinearise()
-	 * says outright that it is not retained, and MultInvLin()'s correction
-	 * evaluates LocalResidual() -- and so the source -- at the current fields.
+	 * A refusal of MFEM's LineariseThenCondense stood here once, written from
+	 * darcyhybridization.hpp's summary rather than from the code under it, and
+	 * was removed when both orderings were measured to the same psi_ax. That
+	 * mode is now deleted upstream and the value is gone; what is left is NPC,
+	 * under which the question does not arise at all.
 	 *
-	 * Measured before this was changed: both orderings reach the same psi_ax to
-	 * every digit printed, in one or two more iterations. So this asserts the
-	 * ordering is ACCEPTED, which is the wanted behaviour; a throw here again
-	 * would mean the refusal came back without the measurement being redone.
+	 * Under NPC psi is an unknown of the system rather than a function of the
+	 * trace, so the border row is EXACTLY the unit vector -e_j and the corner is
+	 * EXACTLY one -- neither is differenced, so there is no residual whose
+	 * linearisation history could make a difference mean something other than a
+	 * derivative. Only c = dR/ds is still differenced, and it is differenced in
+	 * a scalar on both paths.
+	 *
+	 * So this asserts both orderings are ACCEPTED. A throw here would mean a
+	 * refusal came back without the measurement being redone.
 	 */
+	for ( auto ordering : { meq::GradShafranovSolver::NonlinearOrdering::NPC,
+	                        meq::GradShafranovSolver::NonlinearOrdering::CondenseThenLinearise } )
 	{
 		mfem::Mesh mesh = makeMesh( 4 );
 		meq::GradShafranovSolver solver( mesh, 1 );
 		meq::NormalisedMHDSource source( profile, profile, 1.0, 1.0 );
 
-		solver.setNonlinearOrdering(
-			meq::GradShafranovSolver::NonlinearOrdering::LineariseThenCondense );
+		solver.setNonlinearOrdering( ordering );
 		BOOST_CHECK_NO_THROW( solver.setSource( source, 0.5 ) );
 		BOOST_CHECK( solver.normalisationIsUnknown() );
 	}
@@ -799,6 +812,134 @@ BOOST_AUTO_TEST_CASE( theTraceSolversAgree )
 	BOOST_TEST( available >= 1,
 	            "no trace solver at all is available in this build, so the "
 	            "convergence suite cannot have run either" );
+}
+
+/*
+ * THE TWO ORDERINGS REACH THE SAME DISCRETE SOLUTION, AND EXACTLY ONE OF THEM
+ * ITERATES INSIDE AN ELEMENT.
+ *
+ * This is the test that says CondenseThenLinearise is a BACKUP rather than a
+ * different problem, and it is the only thing in the suite that can tell the
+ * two apart from outside. Two claims, and they are different in kind.
+ *
+ * THE SOLUTIONS AGREE. NPC and the condensation are different methods -- Newton
+ * on the full ( q, psi, psihat ) system against Newton on a residual whose
+ * element-local eliminations are themselves non-linear solves -- and they
+ * converge to the same discrete solution because they discretise the same
+ * equations. A wrong sign, a dropped 1/r or a load left out of one of them
+ * would show O( 1 ) here, not round-off. Both are also checked against the
+ * exact solution, so "they agree" cannot be satisfied by both being wrong the
+ * same way.
+ *
+ * ONLY ONE ITERATES LOCALLY, and that is what says the NPC path is NPC rather
+ * than a condensation wearing the name -- which is not a hypothetical failure:
+ * MFEM's NLOrdering::LineariseThenCondense claimed exactly that and was
+ * deleted for not being it. localNonlinearIterations() must read EXACTLY zero
+ * under NPC, because every element-local operation there is one linear solve
+ * against one factorisation, and must read a large number under the
+ * condensation, where it is one non-linear solve per element per residual
+ * evaluation. An equality against zero rather than a tolerance, because the
+ * quantity is a count.
+ */
+BOOST_AUTO_TEST_CASE( theOrderingsAgreeAndOnlyOneIteratesLocally )
+{
+	using N = meq::GradShafranovSolver::NonlinearOrdering;
+
+	meq::analytic::ManufacturedNonlinear const eq
+		= meq::analytic::ManufacturedNonlinear::example5();
+	EquilibriumSource<meq::analytic::ManufacturedNonlinear> const source( eq );
+	mfem::FunctionCoefficient exact( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.psi( x( 0 ), x( 1 ) );
+	} );
+
+	std::printf( "\n  the two non-linear orderings, Example 5, against each other\n" );
+	std::printf( "    %2s %3s %-22s %7s %14s %14s %14s\n",
+	             "k", "n", "ordering", "Newton", "local NL its",
+	             "L2 vs exact", "rel. in psi" );
+
+	for ( int order = 1; order <= 3; ++order )
+	{
+		int const n = 8;
+
+		std::unique_ptr<mfem::GridFunction> reference;
+
+		for ( N ordering : { N::NPC, N::CondenseThenLinearise } )
+		{
+			bool const npc = ordering == N::NPC;
+			char const *name = npc ? "NPC" : "CondenseThenLinearise";
+
+			mfem::Mesh mesh = makeMesh( n );
+			meq::GradShafranovSolver solver( mesh, order );
+			solver.setSource( source );
+			solver.setBoundaryData( exact );
+			solver.setNonlinearOrdering( ordering );
+			solver.solve();
+
+			long const local = solver.localNonlinearIterations();
+			double const error = solver.potentialError( exact );
+
+			double relative = 0.0;
+			bool const isReference = !reference;
+			if ( isReference )
+			{
+				reference = std::make_unique<mfem::GridFunction>( solver.potential() );
+			}
+			else
+			{
+				mfem::GridFunction difference( solver.potential() );
+				difference -= *reference;
+				relative = difference.Norml2()
+				           /std::max( 1.0e-300, reference->Norml2() );
+			}
+
+			std::printf( "    %2d %3d %-22s %7d %14ld %14.6e %14.6e\n",
+			             order, n, name, solver.newtonIterations(), local,
+			             error, relative );
+
+			if ( npc )
+				BOOST_TEST( local == 0L,
+				            "k = " << order << ": NonlinearOrdering::NPC ran "
+				            << local << " element-local NON-LINEAR iterations, and "
+				            "NPC has none by construction. Either the solve did not "
+				            "take the NPC path, or DarcyNPCOperator is reaching a "
+				            "condensation somewhere. This is the acceptance signal "
+				            "for the ordering and it is an equality, not a "
+				            "tolerance" );
+			else
+				BOOST_TEST( local > 0L,
+				            "k = " << order << ": CondenseThenLinearise ran NO "
+				            "element-local non-linear iterations, which it cannot "
+				            "do on a non-linear source -- eliminating flux and "
+				            "potential on an element IS a non-linear solve there. "
+				            "Either the ordering did not take or the source stopped "
+				            "being non-linear" );
+
+			// Loose because it is a floor, not a rate: Example 5 at n = 8 is a
+			// coarse mesh and this is only here so that "the two agree" cannot be
+			// satisfied by both of them being wrong.
+			BOOST_TEST( error < 1.0e-1,
+			            "k = " << order << ", " << name << ": L2 against the exact "
+			            "solution is " << error << ", which is not a solution of "
+			            "Example 5 at all" );
+
+			// THE AGREEMENT ITSELF. Two iterations with different non-linear
+			// structure, converged to their own tolerances, landing on the same
+			// discrete solution. The bound is set from the measurement printed
+			// above rather than chosen: see the table in CLAUDE.md.
+			if ( !isReference )
+				BOOST_TEST( relative < 1.0e-9,
+				            "k = " << order << ": the two orderings differ by "
+				            << relative << " relative in psi, which is far above "
+				            "round-off. They discretise the same equations and must "
+				            "reach the same discrete solution -- a difference this "
+				            "size is one of them solving a different problem, not "
+				            "two iterations stopping at different places. Note that "
+				            "a COARSE discretisation can carry more than one "
+				            "solution and two methods can land on different ones; "
+				            "check the L2 column before assuming an assembly fault" );
+		}
+	}
 }
 
 /*

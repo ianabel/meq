@@ -673,9 +673,61 @@ BOOST_AUTO_TEST_CASE( diagnosticExactSolutionOnThePolygon )
 			solver.setSource( source );
 			solver.setBoundaryData( psiCoeff );
 			solver.solve();
-			BOOST_TEST( solver.newtonIterations() <= 1,
-			            "the Solov'ev source does not depend on psi, so one exact "
-			            "Newton step must finish it" );
+			/*
+			 * ONE EXACT NEWTON STEP, ASSERTED ON THE STEP AND NOT ON THE
+			 * ITERATION COUNT.
+			 *
+			 * The Solov'ev source does not depend on psi, so the whole system is
+			 * affine and the FIRST Newton step must land on the discrete
+			 * solution exactly. That is the property worth checking, and it is
+			 * checked as a residual drop.
+			 *
+			 * IT USED TO BE ASSERTED AS newtonIterations() <= 1, WHICH MEASURED
+			 * THE STOPPING RULE INSTEAD. MFEM stops at
+			 * max( rel_tol * || r_0 ||, abs_tol ), so whether an exact step is
+			 * also the LAST step depends on where || r_1 ||/|| r_0 || falls
+			 * relative to rel_tol -- and || r_1 || is round-off, so that ratio is
+			 * a property of the residual's scale rather than of the solve. Moving
+			 * to NonlinearOrdering::NPC changed the scale: the residual is now
+			 * the full ( q, psi, psihat ) system rather than the trace alone, and
+			 * the ratio went from just under 1e-12 to just over it, so a solve
+			 * that had always taken one round-off step to spare started taking
+			 * it. Measured at k = 2, h = 0.06456:
+			 *
+			 *     1.466e-02  ->  1.567e-14  ->  2.708e-17
+			 *
+			 * Twelve orders in the first step, against a target of
+			 * 1e-12 * 1.466e-02 = 1.466e-14 that 1.567e-14 misses by 7%. The step
+			 * was exact either way and nothing about the answer moved -- the rates
+			 * below read 1.995 / 2.999 / 3.999 throughout.
+			 */
+			std::vector<double> const &history = solver.newtonResiduals();
+			BOOST_TEST_REQUIRE( history.size() >= 2u,
+			                    "no Newton history to check the first step against" );
+			//
+			// THE BOUND IS 1e-8 AND THE FLOOR IT CLEARS IS THREE ORDERS BELOW IT.
+			// Measured over this whole sweep the drop runs 4.8e-13 at k = 1,
+			// level 0 to 3.1e-11 at k = 3, level 2 -- it DEGRADES with refinement,
+			// because || r_1 || sits at round-off while || r_0 || shrinks with the
+			// mesh, so the ratio grows even though the step is exact throughout.
+			// A bound tracking the floor would be a bound on the mesh sequence.
+			// What this has to separate is an exact step from an inexact one, and
+			// an inexact step on an affine system is O( 1 ), not O( 1e-10 ).
+			double const drop = history[ 1 ]/std::max( 1.0e-300, history[ 0 ] );
+			BOOST_TEST( drop < 1.0e-8,
+			            "k = " << order << ", refinement level " << level
+			            << ": the first Newton step cut the residual only by "
+			            << drop << ". The Solov'ev source does not depend on psi, "
+			            "so the system is affine and step one must be EXACT -- a "
+			            "drop this small means the Jacobian is not the derivative "
+			            "of the residual, which on an affine system would show as a "
+			            "drop of O( 1 ). Measured, an exact step gives between "
+			            "4.8e-13 and 3.1e-11 over this sweep" );
+			BOOST_TEST( solver.newtonIterations() <= 2,
+			            "an affine system took " << solver.newtonIterations()
+			            << " Newton steps. One is exact and a second is round-off "
+			            "cleanup when || r_1 ||/|| r_0 || lands just above rel_tol; "
+			            "more than that is not a stopping-rule artefact" );
 			double largest = 0.0;
 			for ( int e = 0; e < mesh.GetNE(); ++e )
 				largest = std::max( largest, mesh.GetElementSize( e, 1 ) );
