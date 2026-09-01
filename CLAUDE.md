@@ -195,22 +195,15 @@ cmake --build build -j4
 cd build && ctest --output-on-failure       # ~490-540 s, 23/23
 ```
 
-**ctest needs no environment set by hand**, and **one variable this file used
-to insist on is gone.** `tests/CMakeLists.txt` puts `MKL_NUM_THREADS=1` on every
-registered test, without which the suite takes well over an hour instead of
-nine. Running a test binary **directly** needs the same one thing:
+**ctest needs no environment set by hand.** `tests/CMakeLists.txt` puts
+`MKL_NUM_THREADS=1` on every registered test, without which the suite takes well
+over an hour instead of nine. It is the only variable meq needs; for the one
+this file used to insist on and no longer does, see *Traps*. Running a test
+binary **directly** needs the same one thing:
 
 ```sh
 MKL_NUM_THREADS=1 ./tests/SolovievConvergence
 ```
-
-**`MKL_THREADING_LAYER=GNU` IS NO LONGER SET ANYWHERE**, and neither should you.
-It guarded the `libmkl_rt` dispatcher, which meq no longer loads; see *PARDISO
-and the MKL link line*. It is dropped rather than kept as a free guard because
-**most machines will not have MKL at all**, and a variable naming a library that
-is not there is a false instruction to the next reader. Choosing a threading
-layer belongs in CMake, which can look at what the build actually links; that is
-where it goes when meq runs on more than one machine.
 
 The performance harness is separate and is not a ctest:
 
@@ -478,46 +471,41 @@ observed failure: **both** signs converge at `k+1` on this benchmark, with
 reinstate that without a measurement to justify it.
 
 **And MFEM will not give you a constant `τ` unless you ask.**
-`HDGDiffusionIntegrator`'s built-in stabilisation is `{h⁻¹Q}`-scaled — the LDG
-choice, not the papers'. Measured on the Solov'ev benchmark it costs a full order
-in the flux: `q` converges at `k`, not `k+1`, while `ψ` still converges at `k+1`.
-A study of `ψ` alone would have passed it. `meq::ConstantStabilization` is the
-`HDGStabilization` hook that fixes it, installed with
-`HDGDiffusionIntegrator::SetStabilization()`. Keeping `IsConstant()` true also
-keeps meq out of the `EvalGrad` trap that header warns about, where a missing
-derivative gives "no wrong answer, only slow Newton convergence".
-
-**Getting a constant `τ` takes deliberate work — `HDGDiffusionIntegrator` will
-not give you one by default.** Its documented stabilisation is
+`HDGDiffusionIntegrator`'s built-in stabilisation is
 
 ```
 τ± = ( β ± (α/2)(u·n)/|u·n| ) { h⁻¹ Q }
 ```
 
-— scaled by the inverse local mesh size *and* by the diffusion coefficient. That
-is a reasonable default and it is not what the papers use. The designed way out
-is the `HDGStabilization` hook in `fem/darcy/bilininteg_hdg.hpp`: subclass it,
-return the constant from `Eval()`, install it with `SetStabilization()`. Read
-`StabValue()` there — with a hook installed it divides the quadrature weight out
-before calling and multiplies it back after, so returning a bare `τ` yields
-exactly `⟨τψ, w⟩`. The MFEM tree has no ready-made constant implementation; the
-only subclasses are test fixtures in `tests/unit/fem/test_bilininteg_hdg.cpp`
-and `test_darcy_degenerate.cpp`, which are the idiom to copy.
+— the LDG choice, scaled by the inverse local mesh size *and* by the diffusion
+coefficient, and not what the papers use. Measured on the Solov'ev benchmark it
+costs a full order in the flux: `q` converges at `k`, not `k+1`, while `ψ` still
+converges at `k+1`, so **a study of `ψ` alone would have passed it**.
 
-This also matters for Newton. That header warns that omitting `EvalGrad` for a
-*non-constant* stabilisation gives "no wrong answer, only slow Newton
-convergence — a failure that survives a passing regression suite". A constant
-`τ` has `IsConstant() == true`, so `EvalGrad` is never called and the trap does
-not arise. One more reason to keep `τ` constant unless something measured says
-otherwise, which is also the sibling project's standing advice: **do not derive
-`τ` from the local coefficient.**
+The designed way out is the `HDGStabilization` hook in
+`fem/darcy/bilininteg_hdg.hpp`: subclass it, return the constant from `Eval()`,
+install it with `SetStabilization()`. `meq::ConstantStabilization` is that
+subclass. Read `StabValue()` there — with a hook installed it divides the
+quadrature weight out before calling and multiplies it back after, so returning
+a bare `τ` yields exactly `⟨τψ, w⟩`. The MFEM tree has no ready-made constant
+implementation; the only subclasses are the test fixtures in
+`tests/unit/fem/test_bilininteg_hdg.cpp` and `test_darcy_degenerate.cpp`, which
+are the idiom to copy.
+
+**Keeping `IsConstant()` true also keeps meq out of an `EvalGrad` trap.** That
+header warns that omitting `EvalGrad` for a *non-constant* stabilisation gives
+"no wrong answer, only slow Newton convergence — a failure that survives a
+passing regression suite". A constant `τ` never calls it. One more reason to
+keep `τ` constant unless something measured says otherwise, which is also the
+sibling project's standing advice: **do not derive `τ` from the local
+coefficient.**
 
 ### Which MFEM, and why not master
 
 **meq builds against `../mfem/install`** — MFEM **4.9.1** on branch
 **`meq-integration`**, CMake-built in `../mfem/build` from sources in
 `../mfem/mfem-src`. The options actually set, read out of
-`share/mfem/config.mk` 2026-08-30 rather than remembered:
+`share/mfem/config.mk` and re-checked 2026-09-01 rather than remembered:
 
 | | |
 |---|---|
@@ -644,6 +632,15 @@ done
 catches a branch having moved out from under the recipe — which is precisely
 what happened to the three-branch version of this section.
 
+**And it has already fired again. Run 2026-09-01 against `meq-integration` at
+`fa65a2f932`: three of the four report contained and `gf-hdg-linearise-first`
+does not**, because that branch has advanced **17 commits** since the merge.
+**Read a "not contained" as *the branch has moved*, not as *the merge failed*** —
+what meq needs from it is in the tree (`DarcyNPCOperator` is in the installed
+`fem/darcy/darcyhybridization.hpp`, and NPC is what meq runs on). It says a
+re-merge is available, not that the build is wrong. Re-create rather than merge
+into the existing branch, per the recipe above.
+
 **The second merge now conflicts too, and it did not used to.** This file used
 to record `gf-hdg-linearise-first` as merging clean; after the 08-30 rebase it
 brings three, and all three are decided rather than fiddly:
@@ -713,34 +710,25 @@ tree was left checked out on it — so the next person to touch it would have be
 on someone else's branch. Fetching from the dev tree is reading; everything else
 is not.
 
-`doc/HDG-DEFECTS-FROM-MEQ.md`, `HDG-LINEARISE-THEN-CONDENSE.md`,
-`HDG-ELEMENT-LOCAL-PARALLELISM.md`, `DIRECT-SOLVER-SYMBOLIC-REUSE.md`,
-`HDG-BEM-COUPLING-FROM-MEQ.md` and **`HDG-NPC-GLOBALISATION-FROM-MEQ.md`** are
-what meq puts there, and they are requests, not work.
+`doc/HDG-ELEMENT-LOCAL-PARALLELISM.md`, `HDG-BEM-COUPLING-FROM-MEQ.md` and
+**`HDG-NPC-GLOBALISATION-FROM-MEQ.md`** are what meq has put there and what is
+still open; they are requests, not work. **Three more have been retired
+upstream** now their findings are fixed and covered — `HDG-DEFECTS-FROM-MEQ.md`
+(`2a50119ba1`), `DIRECT-SOLVER-SYMBOLIC-REUSE.md` (same) and
+`HDG-LINEARISE-THEN-CONDENSE.md` (`d891ac4302`, with the mode itself). Checked
+2026-09-01; a list of files in someone else's tree goes stale without warning.
 
 **`HDG-NPC-GLOBALISATION-FROM-MEQ.md`, 2026-08-31 — FILED, AND ANSWERED THE
-SAME DAY** (`af82d42b14` in that tree). Deliberately **not** a defect report;
-everything in it is a property of the method. It disputed §6 of
-`HDG-ORDERING-API.md`, which recommends a backtracking line search that meq
-implemented from `miniapps/hdg/navierstokes.cpp` and measured making **every**
-case worse, and it asked what configuration produced §6's numbers rather than
-asserting they were wrong. What came back:
-
-* **Two §6 claims withdrawn** on meq's evidence — *"NPC is not automatically
-  faster"* and *"reach for [the reduced trace operator] unless you have a reason
-  not to"* as a general default. §6 now says the choice turns on what the
-  element-local non-linear solve costs on your problem.
-* **meq's hypothesis about the baseline was wrong.** §6's baseline *was* plain
-  undamped `NewtonSolver` on NPC, not the deleted mode, so the disagreement is
-  real. On their Darcy pedestal 3 of 4 configurations fail undamped and converge
-  with backtracking.
-* **The block structure is common to both problems and is NOT what separates
-  them** — see *Why it fails*, where meq's original explanation is corrected.
-* **A defect in the reference implementation that meq inherited by copying it
-  faithfully**: `NSBacktrackingNewton` has no sufficient-decrease constant.
-
-**Two of the claims below were corrected by that exchange rather than by meq**,
-which is the argument for writing these notes at all.
+SAME DAY** (`af82d42b14` in that tree). Deliberately **not** a defect report:
+it disputed §6 of `HDG-ORDERING-API.md`, whose recommended backtracking line
+search meq had implemented from `miniapps/hdg/navierstokes.cpp` and measured
+making every case worse, and it asked what configuration produced §6's numbers
+rather than asserting they were wrong. Upstream withdrew two §6 claims on meq's
+evidence, corrected meq's own account of the mechanism, and found a defect in
+their reference implementation that meq had inherited by copying it faithfully.
+All of it is recorded under *Why it fails, measured*. **That two of meq's claims
+were corrected by the exchange rather than by meq is the argument for writing
+these notes at all.**
 
 **And do not file findings against unfinished work.** A branch that exists is not
 a branch that is done. Measure it if it is useful to know, keep the numbers in
@@ -987,8 +975,8 @@ higher order.
 **The pattern is resolution, not stiffness.** NPC loses where the mesh is too
 coarse for the source and wins where it is not — `k = 2, n = 24` and
 `k = 3, n = 16` go to NPC. And since an NPC step carries **no element-local
-non-linear solve at all**, an equal iteration count is an NPC win on wall
-clock: that is where the suite's 872 s → 499 s came from.
+non-linear solve at all**, an equal iteration count is already an NPC win on
+wall clock.
 
 **The §4.3 rows are new and they matter, because they are the control.** The
 barrier defeats *both* orderings at `k = 1` and `k = 2` on `n = 16`, so this is
@@ -1833,46 +1821,33 @@ Three Grad–Shafranov codes solve this equation by Newton and report it robust:
 | **meq** | **hybridized HDG** | **1 global + one per element** |
 
 **In a CG or finite-difference discretisation `ψ` is one global unknown vector
-and `F(ψ)` enters only the global residual.** Newton linearises once. Serino et
-al. eq (3.1) is `a(ψ, v_i) = l(I, v_i)` and eq (3.7) is one linearised system per
-step — that is the whole nonlinear structure.
-
-**Hybridization changes that structure.** Static condensation expresses `(q, ψ)`
-element by element in terms of `ψ̂`, and when `F` depends on `ψ` that elimination
-is *itself a nonlinear solve, once per element per residual evaluation*. meq runs
-`N_elements` independent Newtons inside every outer residual, none of them
-globalised, and **any one of them failing poisons the whole residual**. That is
-what `el: N not convered in 100 iters` is, and it is why globalising the outer
-iteration does nothing — see *On SUNDIALS*.
+and `F(ψ)` enters only the global residual**, so Newton linearises once — Serino
+et al. eq (3.1) and eq (3.7) are the whole nonlinear structure. **Hybridization
+changes that.** Static condensation expresses `(q, ψ)` element by element in
+terms of `ψ̂`, and when `F` depends on `ψ` that elimination is *itself a
+nonlinear solve, once per element per residual evaluation* — none of them
+globalised, and any one failing poisons the whole residual. That is what
+`el: N not convered in 100 iters` is, and it is why globalising the outer
+iteration does nothing; see *On SUNDIALS*.
 
 **Two comfortable explanations are wrong, and the papers say so directly.**
 Newton is not the problem: Serino et al. built their Newton solver precisely
 because "conventional Picard-based solvers fail to converge" on the Taylor
 state, and report the residual reaching 1e-6 "in a small handful of iterations".
-And free boundary is not the problem either — they note the fixed problem is
-"significantly easier". **meq is doing the easier problem and finding it
-harder**, which is the red flag this section exists to explain.
+Free boundary is not the problem either — they note the fixed problem is
+"significantly easier", so **meq is doing the easier problem and finding it
+harder**. It also explains the GS papers' choice: keeping `F` as opaque problem
+data leaves **every local solve linear**, which in a hybridized method is
+coherence rather than fastidiousness.
 
-**It also explains the GS papers' choice.** Sánchez-Vizuet and co. keep `F` as
-opaque problem data so the solver "relies only on the discretization of `Δ*`".
-In a hybridized method that is not fastidiousness — Picard evaluates `F` at the
-previous iterate, which leaves **every local solve linear**. Their design is
-coherent; meq's Newton bought `∂F/∂ψ` in the global Jacobian and paid for it
-with `N_elements` non-linear subproblems.
-
-**The canonical HDG paper applies Newton to the FULL system, and that is now
-what meq does.** `refs/HDG-NPC-2.pdf` §2.6 applies Newton–Raphson to the whole
-`(q, u, û)` system, giving a *linear* system in the increments (eq. 14) and
-hybridizing **that** (eqs 16–18), so every local operation is a linear solve and
-the canonical method has **no element-local non-linear iteration at all**.
-`NonlinearOrdering::NPC` is exactly that and is meq's default.
-
-**AND IT DID NOT FIX THE STIFF SOURCES**, which this section predicted it
-would. Falsified twice over — once by the ordering MFEM has since deleted, once
-by NPC itself, which loses on precisely the under-resolved cases this section is
-about. What NPC buys is uniform local work and 3.7×–4.3× of wall clock, not
-robustness. **The element-local non-linear solves were never the cause.** See
-*The NPC port*.
+**AND THE STRUCTURAL STORY WAS ITSELF FALSIFIED.** This section predicted that
+applying Newton to the full `(q, ψ, ψ̂)` system — `refs/HDG-NPC-2.pdf` §2.6,
+which is what `NonlinearOrdering::NPC` is and what meq now defaults to — would
+fix the stiff sources. It does not. NPC has **no element-local non-linear
+iteration at all**, confirmed at `GetNumLocalNLIterations() == 0`, and it loses
+on precisely the under-resolved cases this section is about. What it buys is
+uniform local work and 3.7×–4.3× of wall clock, not robustness. **The
+element-local non-linear solves were never the cause.** See *The NPC port*.
 
 **What follows, in order of how targeted it is.**
 
@@ -2614,21 +2589,17 @@ UMFPACK keeps its METIS ordering. Suite: **23/23**, twice — 490 s and 540 s on
 the same code, which is the run-to-run spread on this machine and is worth
 knowing before anyone reads a 10% change in a suite time as a result.
 
-**`MKL_THREADING_LAYER=GNU` IS NOW INERT AND HAS BEEN DROPPED EVERYWHERE.**
-That variable only ever configured the `libmkl_rt` **dispatcher**, and there is
-no dispatcher any more. Measured: `SolovievConvergence`, `NewtonConvergence` and
-`FieldConvergence` produce **bit-identical output** with it set and with it
-unset.
-
-It was briefly kept as a free guard, on the argument that a fresh clone or
-another machine could bring `libmkl_rt` back. **That argument was rejected, and
-the reason generalises**: most machines will not have MKL at all, so the
-variable named a library the majority of users do not have, about a failure they
-cannot suffer. A guard that is usually inapplicable is a false instruction to
-whoever reads it next, and it spends the credibility of the ones that are real.
-The driver's matching runtime warning is deleted for the same reason. **Choosing
-a threading layer is CMake's job** — it can look at what the build actually
-links — and that is where it goes when meq runs on more than one machine.
+**`MKL_THREADING_LAYER=GNU` is inert and has been dropped everywhere.** It only
+ever configured the `libmkl_rt` **dispatcher**, and there is no dispatcher any
+more: `SolovievConvergence`, `NewtonConvergence` and `FieldConvergence` produce
+**bit-identical output** with it set and with it unset. It was briefly kept as a
+free guard, and that argument was rejected for a reason that generalises —
+**most machines will not have MKL at all**, so it named a library the majority
+of readers do not have, about a failure they cannot suffer. A guard that is
+usually inapplicable is a false instruction to whoever reads it next, and it
+spends the credibility of the ones that are real. The driver's matching runtime
+warning went for the same reason. **Choosing a threading layer is CMake's job**,
+which can look at what the build actually links.
 
 **The hazard went off once, and in the opposite direction to the one predicted.**
 The prediction was wrong answers from mixed threading layers. What actually
@@ -2655,16 +2626,14 @@ geometry meq is actually for.
 **Every run needs `MKL_NUM_THREADS=1`**, which every registered ctest sets. It
 is a no-op wherever MKL is absent, so it costs a non-MKL machine nothing.
 
-**`MKL_THREADING_LAYER=GNU` WAS THE OTHER HALF OF THIS TRAP AND IS NOW GONE**,
-from the ctests, the performance harness and the driver alike. It guarded
-`libmkl_rt.so` — the MKL **dispatcher** that
-`/usr/lib/x86_64-linux-gnu/libblas.so.3` resolves to on this machine — whose
-default threading layer silently corrupted UMFPACK's BLAS-3: you got numbers,
-and they were wrong. **meq no longer loads that dispatcher**, because it builds
-against its own SuiteSparse which links a threading layer directly. See *PARDISO
-and the MKL link line* for the measurement and for why the variable was dropped
-rather than kept. The same trap is still live for anyone using Debian's
-SuiteSparse, and `../mfem-hdg-dev/CLAUDE.md` still records it.
+**`MKL_THREADING_LAYER=GNU` was the other half of this trap and is now gone**,
+from the ctests, the performance harness and the driver alike. It guarded the
+`libmkl_rt` **dispatcher** — what `/usr/lib/x86_64-linux-gnu/libblas.so.3`
+resolves to on this machine — whose default threading layer silently corrupted
+UMFPACK's BLAS-3: you got numbers, and they were wrong. meq no longer loads it,
+building against its own SuiteSparse; see *PARDISO and the MKL link line* for
+why the variable was dropped rather than kept. **The trap is still live for
+anyone using Debian's SuiteSparse**, and `../mfem-hdg-dev/CLAUDE.md` records it.
 
 `MKL_NUM_THREADS=1` is the **factor of 140** one. Measured 2026-08-30, one
 process, nothing else running: `SolovievConvergence` **1.24 s** against
@@ -2808,17 +2777,12 @@ flux block at zero**, which is a real difference; see *A warm start no longer
 shows up in `‖r₀‖`*.
 
 **`DarcyHybridization` freezes the element-local Newton's initial guess at
-`FormLinearSystem()` time, and `ComputeSolution()` will not take another.**
-`EliminateVDofsInRHS` copies the flux and potential blocks into `darcy_u` and
-`darcy_p`, and every local solve afterwards — residual, gradient and recovery
-alike — starts there, however far the trace has since travelled. Seeding the
-vector you hand `RecoverFEMSolution()` is inert. On an ordinary Newton path that
-costs iterations; on anything that **differentiates the residual by differencing
-it** it costs correctness, because a local solve that hits its 100-iteration cap
-returns whatever it had reached and is a function of nothing. Measured, it moved
-`max ψ_h` from 0.896 to 3.84 for a perturbation of 9e-6. The fix is to re-form
-the system from the recovered state; `GradShafranovSolver::formSystem()` exists
-for it. Full account under *Newton, and the obligation it creates*.
+`FormLinearSystem()` time, and `ComputeSolution()` will not take another**, so
+seeding the vector you hand `RecoverFEMSolution()` is inert. On an ordinary
+Newton path that costs iterations; on anything that **differentiates the
+residual by differencing it** it costs correctness — measured, it moved
+`max ψ_h` from 0.896 to 3.84 for a perturbation of 9e-6. `formSystem()` is the
+fix. Full account under *The trap that cost the most*.
 
 **~~`DarcyForm::Reconstruct()` returns a different function where `∂F/∂ψ`
 vanishes~~ — FIXED.** Silently, per element, so a profile with a flat segment
@@ -2826,6 +2790,7 @@ corrupted part of the domain and left the rest exact, and a whole-domain check
 missed it. Full account and the transferable lesson under *Post-processing is
 back*; the part that matters here is that **the fix is on `gf-hdg-dev` and on no
 other branch**, so a `meq-integration` rebuilt without it silently loses this.
+
 **`mfem::Mesh::FindPoints` is `O(elements × points)`** — a brute-force scan over
 element centres. It caps sample-cloud sizes in any off-grid error measure.
 
@@ -3034,7 +2999,8 @@ tools/       plotting and visualisation. plot_equilibrium.py reads the
              goes with which reader, and why they are not interchangeable
 examples/    TOML run configurations
 refs/        Refs.md is tracked; the PDFs are gitignored, fetch by doi
-attic/       not ported, not built, kept visible. See its README.
+attic/       free-boundary/ -- not ported, not built, kept visible; its own
+             README says why
 docs/        the LaTeX manual, which predates the port
 ```
 
@@ -3067,7 +3033,7 @@ both places because the naming check is what people meet first.
 ctest named `naming`. It runs over `MEQ_CORE_SOURCES_PRESENT`, which is now
 **every** file in `src/meq` — the exclusions this file used to describe were for
 unported legacy sources and there are none left. `attic/` stays out permanently;
-see its README.
+see `attic/free-boundary/README.md`.
 
 `src/meq` deliberately keeps MFEM out of `Profiles` and `Source` — plain `double`
 arguments, no `mfem::Vector` — so both are unit-testable without the library, and
