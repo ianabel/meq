@@ -103,6 +103,8 @@ summarised away. meq's Newton was thought to fail on the stiff GS-2 sources.
 * **Not the hybridization ordering.** This one was believed and acted on.
   `NLOrdering::LineariseThenCondense` removes every element-local nonlinear
   solve (`GetNumLocalNLIterations()` reads 0) and the stiff cases get *worse*.
+  **Confirmed twice**: that mode is now deleted, and `NPC` — the canonical
+  version of the same idea, and meq's default — reproduces the verdict.
 * **Mostly it was under-resolution.** §4.2, §4.3 and §4.5 are not stiff at all:
   raw Newton solves all three in 7 to 17 iterations once resolved, and refining
   `h` or raising `k` cures them independently. §4.2 at `k = 3, n = 48` takes 7,
@@ -162,7 +164,7 @@ things that do not exist rather than things that misbehave, and it says so.
 |---|---|
 | `gf-hdg-subdomains-dev` | `fem/darcy/extension_hdg.*` — the curved `Γ`, and `TransferredDatumCoefficient` |
 | `direct-solver-symbolic-reuse` | `SetReuseSymbolic()` on the direct solvers |
-| `gf-hdg-linearise-first` | `NLOrdering::LineariseThenCondense` |
+| `gf-hdg-linearise-first` | **`DarcyNPCOperator` / `DarcyNPCSolver`** — meq's ordering. `NLOrdering::LineariseThenCondense` was on this branch and is **deleted** |
 | **`gf-hdg-dev`** | **the reconstruction fix — *"The postprocessing closes on the element average, always"*** |
 
 **`meq-integration`** is their merge in `../mfem/mfem-src` and is what
@@ -560,9 +562,12 @@ to smuggle in.
   `refs/CouplingAtADistance.pdf`'s own reference [5] is Cockburn & Solano, which
   is what `setExtension()` already drives.
 * **The augmented Newton is the bordered one, `N + 2` times over.** `ψ_ax` is one
-  border column today; free boundary adds `ψ_bnd` and the `N` coefficients, and
-  the borders stop being differenced and start being assembled.
-* **The order of work is FB-0 to FB-6**, and FB-1 — vacuum with coils, whose
+  border column today; free boundary adds `ψ_bnd` and the `N` coefficients.
+  **Under NPC two of the three border quantities are exact rather than
+  differenced** — `b = −e_j` and `d = 1`, because `ψ` is an unknown — and the
+  coefficients' column is a raw block, since the NPC residual is unreduced and
+  has no condensation for a rectangular block to survive.
+* **The order of work is FB-A, then FB-0 to FB-6**, and FB-1 — vacuum with coils, whose
   answer is a sum of loop fields known to machine precision — is the stage that
   tests everything structural against an exact answer. The received wisdom that
   free boundary has no analytic solution is true of FB-4 upwards and false below
@@ -575,16 +580,29 @@ free boundary at all, and is worth measuring before FB-1 — and cut-element
 quadrature for the plasma support, which is the one place a published code says
 it hit a wall.
 
-What this needs from the other tree is `HDG-BEM-COUPLING-FROM-MEQ.md`. Its §2 —
-two rectangular integrators beside the extension ones — is blocking. Its §3,
-auxiliary globally-coupled unknowns, is an **improvement on a route that already
-works**, and that is a correction: this file claimed on 2026-08-29 that a
-differenced border returns exactly zero under `LineariseThenCondense` and that §3
-was therefore what made the ordering a free choice. Measured 2026-08-30, it does
-not — the ordering re-evaluates the source on every residual, meq's `ψ_ax` border
-works under it to every digit, and the guard refusing it has been lifted. What §3
-buys is an assembled border instead of a differenced one.
-`NORMALISED-LINEARISE-FIRST.md` is the design for meq's half. Plan §4.1.
+**WHAT THIS NEEDS FROM THE OTHER TREE IS NOW NOTHING, FOR FB-0 THROUGH FB-3, AND
+THIS FILE SAID OTHERWISE.** It claimed §2 of `HDG-BEM-COUPLING-FROM-MEQ.md` — two
+rectangular integrators — was blocking. It is not, and the reason is the NPC
+port: the datum's data half is an **essential trace value**, not a weak form, so
+its block is `ProjectBdrCoefficient` against the `PathTraceCoefficient` that
+already exists; and the transmission block is reachable from `TransferPath::
+Endpoint` and `ElementExtension::TransformBack`, both public, in about forty
+lines of meq. §3, auxiliary globally-coupled unknowns, is an optimisation over
+`N + 2` backsolves against one factorisation — the cost meq's `ψ_ax` border
+already pays. Plan §6.4 is the per-stage table.
+
+**The one real gap is in FB-4 and it is not the one the plan predicted**: MFEM
+*does* have cut-element quadrature — `mfem::MomentFittingIntRules` in
+`fem/intrules_cut.hpp`, `MFEM_USE_LAPACK`-gated and installed — and what it does
+not have is the **sensitivity of a cut rule to the level set**, which is the half
+CEDRES++ actually names. Not blocking either: difference it per cut element, or
+accept an inconsistent Jacobian on cut elements and measure the cost in Newton's
+observed order.
+
+`NORMALISED-LINEARISE-FIRST.md` was the design for meq's half of this under
+`LineariseThenCondense`. **Both the mode and the design are deleted** — the
+mechanism it describes has no code path left to run on, and under NPC the
+problem it solved does not arise. Plan §4.1; git has it if it is ever wanted.
 
 ---
 
