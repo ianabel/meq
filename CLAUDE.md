@@ -445,7 +445,7 @@ otherwise, which is also the sibling project's standing advice: **do not derive
 |---|---|
 | `MFEM_USE_SUNDIALS` | KINSol, so `KINSolver(KIN_LINESEARCH)` is reachable. **Now `../sundials/cuda-install`, not `../sundials/install`** — see the CUDA row |
 | `MFEM_USE_GSLIB` | `FindPointsGSLIB`; gslib v1.0.9 built alongside at `../mfem/gslib` |
-| `MFEM_USE_SUITESPARSE` | UMFPACK, the direct solver meq's own solver runs on |
+| `MFEM_USE_SUITESPARSE` | UMFPACK, the direct solver meq's own solver runs on. **`../suitesparse/install` since 2026-09-01, not Debian's** — v7.12.2, the same version Debian ships, built against oneAPI MKL. Debian's carried a `NEEDED` on `libblas.so.3` -> `libmkl_rt.so`; see *PARDISO and the MKL link line* |
 | `MFEM_USE_MKL_PARDISO` | `PardisoSolver`, oneAPI MKL 2026.1, **on the threaded `mkl_gnu_thread` layer since 2026-08-30**. It used to be resolved to Debian's `mkl_sequential`, which is a bigger deal than it sounds — see *Traps* |
 | `MFEM_USE_EXCEPTIONS` | `MFEM_ERROR_THROW` by default, which is what makes the driver's exit code 2 reachable |
 | `MFEM_USE_OPENMP` + `MFEM_THREAD_SAFE` | **both, and both are now load bearing.** `DarcyHybridization::SetAssemblyMode( Threaded )` needs both and **aborts** rather than falling back without them. meq reaches it through `setAssemblyMode()`. This row used to read "not exploited"; that is no longer true |
@@ -1181,7 +1181,7 @@ case gives three answers:
 | NPC, `PicardThenNewton` | 4 | 3.1514e-01 |
 
 **A spread of 9.4%.** This is the multiple-solution finding recorded under
-*The suite is 22/23* — coarse discretisations of these sources
+*The suite is 23/23* — coarse discretisations of these sources
 carry more than one solution — meeting the solver from a third direction. It
 means changing the default globalisation is **not** a performance decision:
 it changes the equilibrium meq reports on an under-resolved mesh, which is
@@ -2468,33 +2468,90 @@ skipping the PARDISO columns when they are absent. It asserts only the
 pattern-comparison contract as `UMFPackSolver`'s, so *A quarter of every Newton
 step* carries over without re-arguing.
 
-**THE LINK LINE STILL STRADDLES TWO MKL INSTALLATIONS AND TWO THREADING
-LAYERS, AND THIS IS NOT SETTLED.** `MFEM_EXT_LIBS` carries oneAPI's
-`mkl_gnu_thread` twice (BLAS and PARDISO) from the explicit
-`BLAS_LIBRARIES`/`LAPACK_LIBRARIES`, and Debian's `mkl_intel_thread` behind
-SuiteSparse, which pulls it in as its own BLAS dependency. Linking more than one
-MKL threading layer is unsupported by MKL and mixing two MKL *versions* is
-worse. **It works today only because oneAPI comes first in the link order and
-its rpath is baked in** — an ordering accident, not a configuration.
-**Repointing SuiteSparse's BLAS at oneAPI is the fix and is not done.**
+**~~THE LINK LINE STRADDLES TWO MKL INSTALLATIONS AND TWO THREADING LAYERS~~ —
+FIXED 2026-09-01, AND THE LINK LINE WAS ONLY HALF OF IT.** It used to carry
+oneAPI's `mkl_gnu_thread` from the explicit `BLAS_LIBRARIES`, and Debian's
+`mkl_intel_thread` plus `iomp5` behind SuiteSparse — two MKL *versions*, two MKL
+threading layers, and two OpenMP runtimes, working only because oneAPI came
+first in the link order.
 
-**The hazard went off, and in the opposite direction to the one predicted.**
+**THE HALF THAT NO CMAKE VARIABLE COULD FIX**: Debian's `libumfpack.so` and
+`libcholmod.so` carry a hard `NEEDED` on `libblas.so.3`, which on this machine
+is a Debian alternatives symlink to **`libmkl_rt.so`**. So Debian's MKL 2020
+loaded at runtime whatever the link line said. **Editing the link line alone
+would have looked like a fix and left the real one in place.**
+
+**The fix is meq's own SuiteSparse**, at `../suitesparse`, exactly as
+`../sundials/cuda-install` is meq's own SUNDIALS. It is built from **v7.12.2 —
+the same version Debian ships** — so the only variable that changes is the BLAS,
+not the numerics:
+
+```sh
+MKL="-L/opt/intel/oneapi/mkl/latest/lib;-Wl,-rpath,/opt/intel/oneapi/mkl/latest/lib;\
+-lmkl_intel_lp64;-lmkl_gnu_thread;-lmkl_core;-lgomp;-lpthread;-lm;-ldl"
+cmake -S src -B build -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_INSTALL_PREFIX=/home/ian/projects/suitesparse/install \
+  -DSUITESPARSE_ENABLE_PROJECTS="suitesparse_config;amd;btf;camd;ccolamd;colamd;cholmod;klu;umfpack" \
+  -DBLAS_LIBRARIES="$MKL" -DLAPACK_LIBRARIES="$MKL" -DBLA_VENDOR=Intel10_64lp \
+  -DBLAS_INCLUDE_DIRS=/opt/intel/oneapi/mkl/latest/include \
+  -DCMAKE_C_FLAGS=-I/opt/intel/oneapi/mkl/latest/include \
+  -DBUILD_STATIC_LIBS=OFF -DSUITESPARSE_USE_CUDA=OFF -DSUITESPARSE_USE_FORTRAN=OFF
+```
+
+**Three snags, none of them obvious, all cost a configure round trip.**
+
+* SuiteSparse takes `BLAS_LIBRARIES` as-is if you set it — but its threading
+  probe then does `string(REGEX MATCH "^Intel" ... ${BLA_VENDOR})` on a
+  `BLA_VENDOR` that is **empty**, because supplying the libraries skips
+  `find_package(BLAS)`. Set `BLA_VENDOR` anyway; it is informational.
+* That probe's `try_run` passes `LINK_LIBRARIES` but **never
+  `BLAS_INCLUDE_DIRS`**, so it fails on a missing `mkl.h`. The include path has
+  to go in `CMAKE_C_FLAGS` as well.
+* Only the nine projects MFEM needs are built. `SUITESPARSE_ENABLE_PROJECTS`
+  keeps GraphBLAS — which dwarfs everything else — out of the build entirely.
+
+**AND ON THE MFEM SIDE THE STALE CACHE HAD TO GO.** `mfem_find_package` resolves
+SuiteSparse's `BLAS` requirement through **CMake's own `FindBLAS`**, which had
+cached Debian's paths in `BLAS_mkl_*_LIBRARY`. Deleting those
+(`cmake -U "SuiteSparse_*" -U "BLAS_mkl_*" -DSuiteSparse_DIR=...`) is what lets
+MFEM's explicit oneAPI `BLAS_LIBRARIES` win.
+
+**Why `FindBLAS` chose the WRONG threading layer, which is worth knowing because
+it will do it again**: it selects `mkl_gnu_thread` + `gomp` only when a
+**Fortran** compiler is loaded and is GNU; otherwise it takes
+`mkl_intel_thread` + `iomp5`. SuiteSparse and MFEM are C/C++ builds, so the
+default is Intel threading — mismatched with everything else here. That is
+`FindBLAS.cmake:505-513`, and it is why the libraries are handed over
+explicitly rather than discovered.
+
+**VERIFIED THREE WAYS, because "one MKL" is a claim about the loader and not
+about a text file.** The installed `config.mk` carries oneAPI and nothing else;
+`ldd` on a test binary resolves `libmkl_intel_lp64`, `libmkl_gnu_thread` and
+`libmkl_core` to `/opt/intel/oneapi/...` with **no `libmkl_rt`, no `libblas.so.3`,
+no `libiomp5`, and `libgomp` as the only OpenMP runtime**; and `LD_DEBUG=libs`
+shows the only MKL objects *initialised* are oneAPI's. Debian's `libmetis` is
+still on the line and is **not even loaded** — CHOLMOD now bundles its own,
+prefixed `SuiteSparse_*`/`cholmod_*`, so there is no symbol collision and
+UMFPACK keeps its METIS ordering. Suite: **23/23 in 490 s**, and
+`PedestalConvergence` 238 s against 262.
+
+**`MKL_THREADING_LAYER=GNU` IS NOW INERT, AND IS KEPT ANYWAY.** That variable
+only ever configured the `libmkl_rt` **dispatcher**, and there is no dispatcher
+any more. Measured: `SolovievConvergence`, `NewtonConvergence` and
+`FieldConvergence` produce **bit-identical output** with it set and with it
+unset. It stays set on every ctest because the failure mode it guards is silent
+and the guard now costs nothing — a fresh clone, another machine, or a build
+that falls back to Debian's SuiteSparse would bring `libmkl_rt` straight back.
+
+**The hazard went off once, and in the opposite direction to the one predicted.**
 The prediction was wrong answers from mixed threading layers. What actually
-happened is that the stray `libmkl_sequential` was **load bearing**: it made MKL
+happened is that a stray `libmkl_sequential` was **load bearing**: it made MKL
 resolve sequential for everything, which is why every timing in this file before
 2026-08-30 was fast and why nobody noticed threaded MKL is ruinous here.
-Removing it — which was the *correct* thing to do — exposed a 140x regression.
+Removing it — the *correct* thing to do — exposed a 140x regression.
 **The suite was never deliberately sequential; it was accidentally so.** Same
 species of finding as the threaded-BLAS one: a property of the link line
 masquerading as a property of the code.
-
-One consequence is a simplification: with oneAPI linked explicitly as
-`mkl_gnu_thread` rather than resolved through `libmkl_rt`,
-`SolovievConvergence` passes with `MKL_THREADING_LAYER` **unset** — the trap
-under *Traps* is about the `libmkl_rt` dispatcher needing to be told which layer
-to use, and linking a layer directly removes the dispatcher. That is one suite
-passing, not a proof about a failure mode whose signature is silence, so the
-variable stays set everywhere.
 
 **And the honest caveat on all of it**: on a hard case the dominant cost is not
 the global solve. Globalisation is a bigger lever than anything in this
@@ -2511,11 +2568,17 @@ geometry meq is actually for.
 **Every run needs `MKL_THREADING_LAYER=GNU` AND `MKL_NUM_THREADS=1`.** Two
 variables, two entirely unrelated reasons, both set on every registered ctest.
 
-`MKL_THREADING_LAYER=GNU` is the **correctness** one.
+`MKL_THREADING_LAYER=GNU` is the **correctness** one, and **as of 2026-09-01 it
+is INERT for meq and kept as a guard rather than a requirement.**
 `/usr/lib/x86_64-linux-gnu/libblas.so.3` on this machine resolves to
-`libmkl_rt.so`, which silently corrupts UMFPACK's BLAS-3 without it. *Silently*
-— you get numbers, and they are wrong. Same trap as
-`../mfem-hdg-dev/CLAUDE.md` records.
+`libmkl_rt.so`, the MKL **dispatcher**, which silently corrupts UMFPACK's BLAS-3
+without this variable — *silently*, meaning you get numbers and they are wrong.
+meq no longer loads that dispatcher at all: it builds against its own
+SuiteSparse, which links oneAPI's threading layer directly. Measured, three
+value-asserting suites give **bit-identical** output with it set and unset. It
+stays set on every ctest because a fresh clone or another machine would bring
+`libmkl_rt` back and the failure has no signature. See *PARDISO and the MKL link
+line*. Same trap as `../mfem-hdg-dev/CLAUDE.md` records.
 
 `MKL_NUM_THREADS=1` is the **factor of 140** one. Measured 2026-08-30, one
 process, nothing else running: `SolovievConvergence` **1.24 s** against
