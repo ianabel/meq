@@ -119,11 +119,75 @@ namespace meq
 			 *                passes "inside Gamma", without which this would
 			 *                also paint a band OUTSIDE the plasma, where the
 			 *                solve makes no claim at all.
+			 * @param gapToBoundary  optional distance from ( R, Z ) to the true
+			 *                Gamma. Supplying it makes blendWeight() meaningful,
+			 *                which is what lets a caller pull the extrapolation
+			 *                back onto a boundary value it knows -- see there.
 			 * @return how many nodes were newly filled.
 			 */
 			int extendOutward( double reach,
 			                   std::function<bool( double, double )> const &accept
-			                       = std::function<bool( double, double )>() );
+			                       = std::function<bool( double, double )>(),
+			                   std::function<double( double, double )> const
+			                       &gapToBoundary
+			                       = std::function<double( double, double )>() );
+
+			/**
+			 * Continue the potential across the band using the FLUX, which the
+			 * mixed method computes at the SAME order as the potential itself.
+			 *
+			 * THIS IS WHY THE BAND IS WORTH FILLING AT ALL, and it replaces
+			 * extrapolating psi_h's own polynomial outside its element -- which
+			 * is bounded by nothing and was measured crossing a value known
+			 * exactly (see blendWeight). Here nothing is evaluated outside an
+			 * element: extendOutward() records the FOOT of each band node on
+			 * Gamma_h, which lies on its element's own boundary, and both fields
+			 * are read there. The step outward is then a Taylor extension
+			 *
+			 *     psi( p ) = psi( x0 ) + grad psi( x0 ) . ( p - x0 )
+			 *
+			 * with `grad psi = r q` -- meq's flux convention, Field.hpp. Its
+			 * error is O( |p - x0|^2 ) against an extrapolation with no bound,
+			 * and `q` carries no extra error to spend: getting the derivative at
+			 * the potential's own order rather than one down is exactly what
+			 * this discretisation is for.
+			 *
+			 * @param flux  q as GradShafranovSolver::flux() returns it, NOT the
+			 *              raw block and NOT the poloidal field.
+			 */
+			void samplePotentialWithFlux( mfem::GridFunction const &potential,
+			                              mfem::GridFunction const &flux,
+			                              std::vector<double> &values,
+			                              double fill ) const;
+
+			/**
+			 * How far through the Gamma_h-to-Gamma band a node sits: 0 on
+			 * Gamma_h, 1 on Gamma, and 0 for every node that was found inside an
+			 * element rather than extrapolated.
+			 *
+			 * THIS EXISTS BECAUSE THE EXTRAPOLATION IS NOT TRUSTWORTHY ON ITS
+			 * OWN, and that is measured rather than suspected. On
+			 * examples/miller-curved.toml, where the datum makes psi exactly
+			 * zero on Gamma and strictly negative inside, the raw extrapolation
+			 * puts **17 nodes at positive psi**, worst +1.06e-02 against a peak
+			 * of 2.5e-01 -- it crosses a value that is known exactly. A
+			 * polynomial fitted inside an element is not constrained outside it,
+			 * and one element-length out it is already wrong by 4% of the
+			 * solution.
+			 *
+			 * A caller that knows the boundary value g can therefore do far
+			 * better than the extrapolation alone:
+			 *
+			 *     v = ( 1 - t )*extrapolated + t*g
+			 *
+			 * which is exact at both ends -- the solve's own value where the
+			 * band meets Gamma_h, the known datum on Gamma -- and monotone
+			 * between them, so it cannot overshoot. Its error is O( h^2 ) in the
+			 * band's width against an extrapolation bounded by nothing.
+			 *
+			 * Zero unless extendOutward() was given a @a gapToBoundary.
+			 */
+			double blendWeight( int i, int j ) const;
 
 			/// How many of locatedCount() were extrapolated by extendOutward()
 			/// rather than found inside an element. Written to the output file,
@@ -143,6 +207,11 @@ namespace meq
 			/// Per node: the element holding it, or -1, and where in it.
 			std::vector<int> element;
 			std::vector<mfem::IntegrationPoint> point;
+			/// How far through the band, for blendWeight().
+			std::vector<double> blend;
+			/// For a band node, p - x0: the step from its foot on Gamma_h.
+			/// Zero for every node found inside an element.
+			std::vector<double> offsetR, offsetZ;
 	};
 }
 

@@ -33,6 +33,22 @@ like a bug. Open the `.pvd`, which is the index:
 paraview run/run.pvd
 ```
 
+**An adaptive run also writes `<stem>_cycles/`, one frame per cycle**, which
+ParaView reads as a time series and will scrub through — mesh and all, so the
+refinement can be watched rather than inferred from the table of element counts.
+Measured on `examples/miller-adaptive.toml`: 97 → 254 → 342 → 449 elements over
+four frames.
+
+```sh
+paraview miller-adaptive_cycles/miller-adaptive_cycles.pvd
+```
+
+It is a **separate collection from the answer**, and deliberately: `<stem>` is
+the converged state and has its boundary bent onto Γ, which mutates the mesh —
+doing that mid-loop would hand the next refinement a geometry the estimator
+never saw. So the frames are **uncurved**, Γ_h as actually solved on, which is
+the honest thing to animate.
+
 **The `.pvd` is inside the collection directory, not beside it.** That is
 `ParaViewDataCollection`'s layout, not a choice meq made; the `Cycle000000/`
 directory underneath it is an implementation detail and is not meant to be
@@ -75,18 +91,27 @@ which `plot_equilibrium.py` does.
 
 On the curved path Ω_h is the union of background elements lying **inside** Γ,
 so Γ_h is inscribed and there is a band `O(h)` wide that is inside the plasma
-and outside the mesh. Left as NaN it gives a ragged polygonal edge where the
-boundary is smooth, so meq fills it by extrapolating the element across each
-boundary face, out to one face length and only where the node is inside Γ.
+and outside the mesh. **The solve makes no claim there** — the discrete problem
+is posed on Ω_h — so anything drawn in that band is a continuation, and
+`extrapolated_nodes` says how many nodes it covers.
 
-**`extrapolated_nodes` says how many nodes that was**, and those values are a
-continuation of the solution rather than the solution. Measured on
-`examples/miller-curved.toml`: ψ overshoots past zero by **1.1e-02** against a
-peak of 2.5e-01, about 4%. That is the same order as the geometric error the
-extension technique already carries, `dist(Γ_h, Γ) = O(h)` — the band is filled
-about as accurately as the boundary's position is known, and no better.
-**Contours near ψ = 0 wobble there**, and that is the extrapolation showing, not
-the physics.
+**The continuation is carried by the FLUX, and that is the mixed method paying
+off somewhere unexpected.** `q` is computed at the *same* order as ψ, and
+`∇̄ψ = r q`, so for a node `p` outside the mesh meq takes its foot `x₀` on Γ_h —
+a point on the owning element's own boundary — and steps out:
+
+```
+psi(p) = psi(x0) + r0 q(x0) . (p - x0)
+```
+
+**Nothing is ever evaluated outside an element.** The obvious alternative,
+continuing ψ_h's own polynomial past its element, is bounded by nothing:
+measured on `examples/miller-curved.toml`, where `[boundary] Type = "zero"`
+makes ψ exactly zero on Γ and strictly negative inside, it put **17 nodes at
+positive ψ**, worst +1.06e-02 against a peak of 2.5e-01. The flux version puts
+**none**, with a maximum of −5.9e-05. Its band error converges at the flux's own
+rate — measured 3.75 — where an extrapolation does not converge in the band at
+all.
 
 ## `plot_equilibrium.py`
 
@@ -115,6 +140,7 @@ curved, the final residual. A directory of scan output is unreadable otherwise.
 a Python reader for MFEM's format would be a second implementation of a file
 format meq does not own.
 
-**Nothing animates an adaptive run.** `ParaViewDataCollection` supports cycles
-and the loop produces exactly one mesh per cycle, so writing the refinement
-sequence as a time series would be natural. meq writes the final state only.
+**Nothing plots a scan.** A directory of runs at different resolutions or
+profile amplitudes is a common thing to want a figure of, and each `.nc` carries
+the provenance to build one from (`polynomial_degree`, `elements`,
+`adaptive_eta`, ...). Nothing reads across files yet.

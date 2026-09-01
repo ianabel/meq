@@ -554,6 +554,17 @@ int main( int argc, char **argv )
 	// ---- solve, and refine if that is what was asked for ----------------
 	std::vector<Cycle> history;
 
+	// One VTK frame per adaptive cycle, so the refinement can be watched rather
+	// than inferred from the table of element counts at the end. Only for an
+	// adaptive run: without the loop there is one state and "<stem>" already
+	// holds it. See Output.hpp for why this is a separate collection from the
+	// answer, and why its frames are not bent onto Gamma.
+	std::unique_ptr<meq::VtuSeries> series;
+	if ( adapt.enabled )
+		series = std::make_unique<meq::VtuSeries>(
+			config->getOutput().directory + "/" + config->getOutput().prefix,
+			config->getDiscretisation().polynomialDegree );
+
 	for ( int cycle = 0; cycle < maxCycles; ++cycle )
 	{
 		// The curved adaptive path rebuilds D_h's dependants every cycle. The
@@ -717,6 +728,16 @@ int main( int argc, char **argv )
 		}
 		history.push_back( record );
 
+		// This cycle's frame, written while the solver still owns its fields --
+		// a few lines below they are destroyed so the mesh can be refined.
+		if ( series )
+		{
+			mfem::GridFunction cycleField( solver->flux().FESpace() );
+			meq::poloidalField( solver->flux(), cycleField );
+			series->append( *solveMesh, solver->potential(), cycleField,
+			                cycle, static_cast<double>( cycle ) );
+		}
+
 		if ( reachedTarget )
 		{
 			std::printf( "meq: eta = %.4e is at or below TargetError = %.4e "
@@ -864,6 +885,15 @@ int main( int argc, char **argv )
 				[ curve ]( double r, double z )
 				{
 					return curve->levelSet( r, z ) <= 0.0;
+				},
+				[ curve ]( double r, double z )
+				{
+					// levelSet is the RADIAL gap and is negative inside, so its
+					// magnitude is the distance to Gamma along the ray. Not the
+					// perpendicular distance, which is smaller -- but the ratio
+					// below only needs the two gaps measured the same way as
+					// each other, and both are along the ray.
+					return -curve->levelSet( r, z );
 				} );
 		}
 
@@ -872,7 +902,17 @@ int main( int argc, char **argv )
 		// physical claim, and a wrong one.
 		double const outside = std::numeric_limits<double>::quiet_NaN();
 		std::vector<double> psi, bR, bZ;
-		sampler.sample( solver->potential(), psi, outside );
+
+		// THE FLUX CARRIES THE BAND, which is the payoff for the mixed method
+		// showing up somewhere unexpected. q is computed at the SAME order as
+		// psi, so continuing psi across the Gamma_h-to-Gamma band as
+		// psi( x0 ) + r q( x0 ) . ( p - x0 ) evaluates both fields at a point on
+		// the element's own boundary and never outside it. The alternative --
+		// evaluating psi_h's polynomial outside its element -- is bounded by
+		// nothing, and was measured crossing psi = 0, a value this
+		// configuration knows exactly.
+		sampler.samplePotentialWithFlux( solver->potential(), solver->flux(),
+		                                 psi, outside );
 		sampler.sampleComponent( field, 0, bR, outside );
 		sampler.sampleComponent( field, 1, bZ, outside );
 
@@ -1044,6 +1084,9 @@ int main( int argc, char **argv )
 			stem.c_str(), name.c_str(),
 			sampler.locatedCount(), sampler.nodesR()*sampler.nodesZ(),
 			stem.c_str() );
+		if ( series && series->frames() > 0 )
+			std::printf( "  %d refinement frames, scrubbable:  %s_cycles/%s_cycles.pvd\n",
+			             series->frames(), stem.c_str(), name.c_str() );
 	}
 	catch ( std::exception const &error )
 	{

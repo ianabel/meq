@@ -19,6 +19,9 @@ namespace meq
 
 		element.assign( static_cast<std::size_t>( nR )*nZ, -1 );
 		point.resize( static_cast<std::size_t>( nR )*nZ );
+		blend.assign( static_cast<std::size_t>( nR )*nZ, 0.0 );
+		offsetR.assign( static_cast<std::size_t>( nR )*nZ, 0.0 );
+		offsetZ.assign( static_cast<std::size_t>( nR )*nZ, 0.0 );
 
 		double const dR = ( rMax - rMin )/( nR - 1 );
 		double const dZ = ( zMax - zMin )/( nZ - 1 );
@@ -81,8 +84,46 @@ namespace meq
 		}
 	}
 
+	void GridSampler::samplePotentialWithFlux( mfem::GridFunction const &potential,
+	                                           mfem::GridFunction const &flux,
+	                                           std::vector<double> &values,
+	                                           double fill ) const
+	{
+		values.assign( static_cast<std::size_t>( nR )*nZ, fill );
+		mfem::Vector q( 2 );
+		for ( int j = 0; j < nZ; ++j )
+			for ( int i = 0; i < nR; ++i )
+			{
+				std::size_t const at = static_cast<std::size_t>( index( i, j ) );
+				int const e = element[ at ];
+				if ( e < 0 )
+					continue;
+
+				double value = potential.GetValue( e, point[ at ] );
+
+				// Interior nodes have a zero offset, so this costs them a branch
+				// and nothing else.
+				if ( offsetR[ at ] != 0.0 || offsetZ[ at ] != 0.0 )
+				{
+					flux.GetVectorValue( e, point[ at ], q );
+					// grad psi = r q, with r taken at the foot -- the point the
+					// flux was actually read at.
+					double const footR = rAt( i ) - offsetR[ at ];
+					value += footR*( q( 0 )*offsetR[ at ] + q( 1 )*offsetZ[ at ] );
+				}
+				values[ at ] = value;
+			}
+	}
+
+	double GridSampler::blendWeight( int i, int j ) const
+	{
+		return blend[ static_cast<std::size_t>( index( i, j ) ) ];
+	}
+
 	int GridSampler::extendOutward( double reach,
-	                                std::function<bool( double, double )> const &accept )
+	                                std::function<bool( double, double )> const &accept,
+	                                std::function<double( double, double )> const
+	                                    &gapToBoundary )
 	{
 		if ( !( reach > 0.0 ) )
 			return 0;
@@ -125,9 +166,9 @@ namespace meq
 				if ( accept && !accept( r, z ) )
 					continue;
 
-				// Nearest boundary face, by point-to-segment distance.
+				// Nearest boundary face, and the FOOT of the node on it.
 				int best = -1;
-				double bestDistance = 0.0;
+				double bestDistance = 0.0, footR = r, footZ = z;
 				for ( std::size_t f = 0; f < faces.size(); ++f )
 				{
 					Face const &face = faces[ f ];
@@ -137,13 +178,15 @@ namespace meq
 					if ( square > 0.0 )
 						parameter = ( ( r - face.r0 )*dr + ( z - face.z0 )*dz )/square;
 					parameter = std::min( 1.0, std::max( 0.0, parameter ) );
-					double const distance =
-						std::hypot( r - ( face.r0 + parameter*dr ),
-						            z - ( face.z0 + parameter*dz ) );
+					double const onFaceR = face.r0 + parameter*dr;
+					double const onFaceZ = face.z0 + parameter*dz;
+					double const distance = std::hypot( r - onFaceR, z - onFaceZ );
 					if ( best < 0 || distance < bestDistance )
 					{
 						best = static_cast<int>( f );
 						bestDistance = distance;
+						footR = onFaceR;
+						footZ = onFaceZ;
 					}
 				}
 
@@ -153,9 +196,13 @@ namespace meq
 				if ( best < 0 || bestDistance > reach*faces[ best ].length )
 					continue;
 
+				// THE FOOT, NOT THE NODE. x0 lies on the element's own
+				// boundary, so the inverse map converges and every field
+				// evaluation is inside the element that owns it. Inverting at
+				// the node instead is what made this an extrapolation.
 				mfem::Vector physical( 2 );
-				physical( 0 ) = r;
-				physical( 1 ) = z;
+				physical( 0 ) = footR;
+				physical( 1 ) = footZ;
 				mfem::IntegrationPoint reference;
 				mfem::ElementTransformation *transformation =
 					mesh.GetElementTransformation( faces[ best ].element );
@@ -180,6 +227,10 @@ namespace meq
 				// within `slack` of it is at most that far outside in reference
 				// units. One half is generous for a band one face deep.
 				transformation->TransformBack( physical, reference );
+				// The foot is ON the element, so this should always pass; it is
+				// kept because a degenerate face could still defeat the inverse
+				// map, and a silent wild reference point is the failure this
+				// whole function had before.
 				double const slack = 0.5;
 				double const x = reference.x, y = reference.y;
 				if ( x < -slack || y < -slack || x + y > 1.0 + slack )
@@ -187,6 +238,21 @@ namespace meq
 
 				element[ at ] = faces[ best ].element;
 				point[ at ] = reference;
+				offsetR[ at ] = r - footR;
+				offsetZ[ at ] = z - footZ;
+
+				// How far through the band: 0 where it meets Gamma_h, 1 on
+				// Gamma. bestDistance is the distance to Gamma_h and the caller
+				// supplies the distance to Gamma, so the two bracket the node
+				// and their ratio needs no geometry this class does not have.
+				if ( gapToBoundary )
+				{
+					double const toGamma = std::max( 0.0, gapToBoundary( r, z ) );
+					double const total = bestDistance + toGamma;
+					blend[ at ] = total > 0.0
+						? std::min( 1.0, bestDistance/total )
+						: 1.0;
+				}
 				++found;
 				++extended;
 				++filled;

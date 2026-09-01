@@ -61,12 +61,25 @@ NOW DEAL WITH IT — DIFFERENTLY, BECAUSE THEY HAVE TO.** `Ω_h` is the union of
 background elements lying *inside* `Γ`, so `Γ_h` is inscribed and there is a
 band `O(h)` wide that is inside the plasma and outside the mesh.
 
-* **The `.nc` grid extrapolates into it**, from the element across each boundary
-  face, one face length and only inside `Γ`. `extrapolated_nodes` records how
-  many. Measured on `miller-curved`, ψ overshoots past zero by **1.1e-02**
-  against a peak of 2.5e-01 — the same order as `dist(Γ_h, Γ)` itself, so the
-  band is filled about as well as the boundary's position is known. **Contours
-  near ψ = 0 wobble there.**
+* **The `.nc` grid continues into it USING THE FLUX**, which is the mixed
+  method paying off somewhere nobody expected. `q` is computed at the *same*
+  order as ψ and `∇̄ψ = r q`, so a node `p` outside the mesh is reached from its
+  foot `x₀` on `Γ_h` as `ψ(x₀) + r₀ q(x₀)·(p − x₀)` — **nothing is ever
+  evaluated outside an element**.
+
+  **The obvious alternative was implemented first and is bounded by nothing.**
+  Continuing `ψ_h`'s own polynomial past its element put **17 nodes at positive
+  ψ** on `miller-curved`, where `[boundary] Type = "zero"` makes ψ exactly zero
+  on `Γ` and strictly negative inside — worst +1.06e-02 against a peak of
+  2.5e-01, and the ψ = 0 contours in that band were visibly wrong. The flux
+  version puts **none** there, with a maximum of −5.9e-05, and its band error
+  converges at 3.75 where an extrapolation does not converge in the band at all.
+  `theBandIsContinuedByTheFluxAtTheFluxesOwnOrder` asserts the rate.
+
+  **Blending the extrapolation toward the known ψ = 0 on `Γ` does NOT fix it**,
+  which is worth recording because it looks like it should: `(1−t)·v` scales a
+  positive value down and never changes its sign, so all 17 nodes survived it.
+  The error was in *where the field was evaluated*, not in how it was weighted.
 * **The `.vtu` bends the mesh onto `Γ`** — a curvature is installed and each
   boundary face is moved out. Since the VTK is already Lagrange cells this
   needed **nothing further from the format**; the two features composed.
@@ -82,6 +95,21 @@ displacement off **globally** costs every face the worst face's limit: per-node
 backoff takes `miller-curved` from 50% to **96%** of the boundary reaching `Γ`.
 The gap can exceed an element's own size, so some faces genuinely cannot reach,
 and the driver reports the fraction that did.
+
+**AN ADAPTIVE RUN ALSO WRITES `<stem>_cycles/`, ONE VTK FRAME PER CYCLE**, which
+ParaView scrubs through as a time series — 97 → 254 → 342 → 449 elements over
+`miller-adaptive`'s four cycles. It is a separate collection from the answer
+because `<stem>` gets its boundary bent onto `Γ`, and doing that mid-loop would
+hand the next refinement a geometry the estimator never saw.
+
+**One frame per cycle is easy to get ALMOST right, and the near miss is
+invisible.** Rebuilding the collection per frame puts every `Cycle` directory on
+disk with the correct refined mesh, and leaves the `.pvd` index listing only the
+last of them — so ParaView opens the file and shows a single frame, with no
+error and all the data present. `ParaViewDataCollection` appends to its `.pvd`
+and does not scan the directory, so the collection has to survive between frames
+and be rebound with `SetMesh()`. `theAdaptiveSeriesIndexesEveryFrame` asserts on
+the **index**, not the pieces, because the pieces were never what broke.
 
 `tools/README.md` is the guide to which format goes with which reader.
 `DriverAcceptance.cpp` asserts the driver reproduces the *library* on the same

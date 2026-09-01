@@ -91,6 +91,80 @@ namespace meq
 		collection.Save();
 	}
 
+	struct VtuSeries::State
+	{
+		std::string name;
+		std::string directory;
+		int detail;
+		int written;
+		std::unique_ptr<mfem::ParaViewDataCollection> collection;
+	};
+
+	VtuSeries::VtuSeries( std::string const &stem, int levelsOfDetail )
+		: state( new State{ stem, ".", std::max( 1, levelsOfDetail ), 0, nullptr } )
+	{
+		std::size_t const slash = stem.find_last_of( '/' );
+		if ( slash != std::string::npos )
+		{
+			state->directory = stem.substr( 0, slash );
+			state->name = stem.substr( slash + 1 );
+		}
+		state->name += "_cycles";
+	}
+
+	VtuSeries::~VtuSeries() = default;
+
+	int VtuSeries::frames() const { return state->written; }
+
+	void VtuSeries::append( mfem::Mesh &mesh,
+	                        mfem::GridFunction const &potential,
+	                        mfem::GridFunction const &field,
+	                        int cycle, double time )
+	{
+		// ONE COLLECTION, KEPT ALIVE ACROSS THE WHOLE SERIES. Rebuilding it per
+		// frame was tried first and is wrong in a way that looks right: the
+		// Cycle directories all appear, with the correct meshes, and the .pvd
+		// index then lists only the LAST of them -- so ParaView opens the file
+		// and shows one frame. ParaViewDataCollection appends to its .pvd as
+		// cycles are saved and does not scan the directory, so the collection
+		// has to survive between frames.
+		//
+		// SetMesh() is what makes that safe. The adaptive loop hands over a
+		// different mesh each cycle -- refined on the fitted path, a rebuilt
+		// SubMesh on the curved one -- and rebinding at the top of every append
+		// means the collection never holds a mesh the loop has destroyed.
+		if ( !state->collection )
+		{
+			state->collection = std::make_unique<mfem::ParaViewDataCollection>(
+				state->name, &mesh );
+			state->collection->SetPrefixPath( state->directory );
+			state->collection->SetHighOrderOutput( true );
+			state->collection->SetLevelsOfDetail( state->detail );
+			state->collection->SetDataFormat( mfem::VTKFormat::BINARY );
+		}
+		else
+		{
+			state->collection->SetMesh( &mesh );
+		}
+
+		state->collection->RegisterField( "psi",
+			const_cast<mfem::GridFunction *>( &potential ) );
+		state->collection->RegisterField( "B",
+			const_cast<mfem::GridFunction *>( &field ) );
+
+		state->collection->SetCycle( cycle );
+		state->collection->SetTime( time );
+		state->collection->Save();
+
+		// The FIELDS are dropped immediately, so nothing here outlives the
+		// GridFunctions it was handed and the caller may destroy the solver on
+		// the next line. The collection itself stays, holding only the mesh --
+		// which the next append rebinds before touching.
+		state->collection->DeregisterField( "psi" );
+		state->collection->DeregisterField( "B" );
+		++state->written;
+	}
+
 	namespace
 	{
 		/// The elements that have been turned inside out -- a non-positive

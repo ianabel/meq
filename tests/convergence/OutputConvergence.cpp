@@ -111,6 +111,187 @@ BOOST_AUTO_TEST_CASE( theMfemFilesRoundTripExactly )
 	            "precision setting rather than of round-off" );
 }
 
+/// CONTINUING THE POTENTIAL ACROSS THE Gamma_h-TO-Gamma BAND, and the rate
+/// that says it is a Taylor extension rather than an extrapolation.
+///
+/// THE OBVIOUS TEST DOES NOT WORK, AND THE REASON IS WORTH RECORDING. For a
+/// LINEAR psi the extension psi( x0 ) + grad psi( x0 ) . ( p - x0 ) is exactly
+/// psi, so the error ought to be round-off -- except that meq's flux is
+/// q = ( 1/r ) grad psi, and for a linear psi that is ( alpha/r, beta/r ),
+/// which is NOT a polynomial. Projecting it into the flux space costs
+/// O( h^(k+1) ) and the band inherits it: measured 1.2e-06 where the interior
+/// nodes were exact at 2.2e-15. No psi makes both psi and q exactly
+/// representable at once -- q polynomial needs grad psi proportional to r, and
+/// the extension is only exact for psi linear.
+///
+/// So the assertion is on the RATE. The band error must fall at the flux's own
+/// order, which is what distinguishes a Taylor extension carried by an
+/// accurately computed derivative from a polynomial continued outside its
+/// element -- the latter is bounded by nothing and does not converge in the
+/// band at all.
+BOOST_AUTO_TEST_CASE( theBandIsContinuedByTheFluxAtTheFluxesOwnOrder )
+{
+	double const alpha = 0.7, beta = -1.3;
+	int const degree = 2;
+	meq::tests::Rectangle const inner{ 0.8, 1.2, -0.2, 0.2 };
+
+	auto measure = [ & ]( int cells, double &interiorWorst )
+	{
+		mfem::Mesh mesh = meq::tests::makeMesh( inner, cells );
+		mfem::L2_FECollection collection( degree, mesh.Dimension() );
+		mfem::FiniteElementSpace scalar( &mesh, &collection );
+		mfem::FiniteElementSpace vector( &mesh, &collection, 2 );
+
+		mfem::FunctionCoefficient exact( [ = ]( mfem::Vector const &x )
+			{ return alpha*x( 0 ) + beta*x( 1 ); } );
+		mfem::VectorFunctionCoefficient fluxOf( 2,
+			[ = ]( mfem::Vector const &x, mfem::Vector &q )
+			{
+				q( 0 ) = alpha/x( 0 );
+				q( 1 ) = beta/x( 0 );
+			} );
+
+		mfem::GridFunction potential( &scalar );
+		mfem::GridFunction flux( &vector );
+		potential.ProjectCoefficient( exact );
+		flux.ProjectCoefficient( fluxOf );
+
+		meq::GridSampler sampler( mesh, 0.7, 1.3, 41, -0.3, 0.3, 41 );
+		int const filled = sampler.extendOutward( 1.0 );
+		BOOST_TEST_REQUIRE( filled > 0, "no node was continued at " << cells );
+
+		std::vector<double> values;
+		sampler.samplePotentialWithFlux( potential, flux, values,
+			std::numeric_limits<double>::quiet_NaN() );
+
+		double band = 0.0;
+		interiorWorst = 0.0;
+		for ( int j = 0; j < sampler.nodesZ(); ++j )
+			for ( int i = 0; i < sampler.nodesR(); ++i )
+			{
+				if ( !sampler.located( i, j ) )
+					continue;
+				double const r = sampler.rAt( i ), z = sampler.zAt( j );
+				double const got =
+					values[ static_cast<std::size_t>( j )*sampler.nodesR() + i ];
+				double const error = std::abs( got - ( alpha*r + beta*z ) );
+				bool const outside = r < inner.rMin || r > inner.rMax
+				                     || z < inner.zMin || z > inner.zMax;
+				( outside ? band : interiorWorst ) =
+					std::max( outside ? band : interiorWorst, error );
+			}
+		return band;
+	};
+
+	double coarseInterior = 0.0, fineInterior = 0.0;
+	double const coarse = measure( 8, coarseInterior );
+	double const fine = measure( 16, fineInterior );
+	double const rate = std::log2( coarse/std::max( 1.0e-300, fine ) );
+
+	std::printf( "\n  band continuation: %.3e at n = 8, %.3e at n = 16, "
+	             "rate %.2f (flux order is k+1 = %d)\n"
+	             "                     interior nodes exact to %.3e\n",
+	             coarse, fine, rate, degree + 1,
+	             std::max( coarseInterior, fineInterior ) );
+	std::fflush( stdout );
+
+	// Interior nodes involve no continuation at all, so they ARE exact.
+	BOOST_TEST( std::max( coarseInterior, fineInterior ) < 1.0e-12,
+	            "an interior node is out by "
+	            << std::max( coarseInterior, fineInterior )
+	            << " on a linear potential, which needs no continuation" );
+
+	// The floor is 2.0 rather than k+1 = 3 because the band error mixes the
+	// flux's projection error with the O( |p - x0|^2 ) of the extension itself,
+	// and the second term does not care how good q is. What it rules out is the
+	// thing that matters: a continuation that does not converge.
+	BOOST_TEST( rate > 2.0,
+	            "the band error converges at " << rate << ", which is too slow "
+	            "to be a Taylor extension carried by the flux. A polynomial "
+	            "continued outside its own element behaves like this" );
+}
+
+/// THE ADAPTIVE SERIES, AND THE ONE ASSERTION THAT CATCHES THE FAILURE THAT
+/// ACTUALLY HAPPENED.
+///
+/// Writing a frame per cycle is easy to get almost right: rebuild the
+/// collection each time and every Cycle directory appears, holding the correct
+/// refined mesh, while the .pvd index lists only the LAST of them. ParaView
+/// then opens the file and shows a single frame. Nothing errors, the data is
+/// all on disk, and the animation is silently missing.
+///
+/// So the assertion is on the INDEX -- one DataSet entry per append -- rather
+/// than on the pieces, which were never the thing that broke.
+BOOST_AUTO_TEST_CASE( theAdaptiveSeriesIndexesEveryFrame )
+{
+	mfem::Mesh mesh = meq::tests::makeMesh( box(), 4 );
+
+	std::string const stem = "meq_test_series";
+	int const degree = 1;
+	int const frames = 3;
+	{
+		meq::VtuSeries series( stem, degree );
+		for ( int cycle = 0; cycle < frames; ++cycle )
+		{
+			// A different mesh every frame, which is the situation the loop
+			// creates and the reason the collection cannot simply be reused.
+			if ( cycle > 0 )
+				mesh.UniformRefinement();
+
+			mfem::L2_FECollection collection( degree, mesh.Dimension() );
+			mfem::FiniteElementSpace scalar( &mesh, &collection );
+			mfem::FiniteElementSpace vector( &mesh, &collection, 2 );
+			mfem::GridFunction potential( &scalar );
+			mfem::GridFunction field( &vector );
+			potential = static_cast<double>( cycle );
+			field = 0.0;
+
+			series.append( mesh, potential, field, cycle,
+			               static_cast<double>( cycle ) );
+		}
+		BOOST_TEST( series.frames() == frames );
+	}
+
+	std::string const pvd = stem + "_cycles/" + stem + "_cycles.pvd";
+	std::ifstream index( pvd );
+	BOOST_TEST_REQUIRE( index.good(), "no series index at " << pvd );
+	std::string const content( ( std::istreambuf_iterator<char>( index ) ),
+	                             std::istreambuf_iterator<char>() );
+
+	int entries = 0;
+	for ( std::size_t at = content.find( "<DataSet" );
+	      at != std::string::npos;
+	      at = content.find( "<DataSet", at + 1 ) )
+		++entries;
+
+	std::printf( "\n  series index: %d DataSet entries for %d appends\n",
+	             entries, frames );
+	std::fflush( stdout );
+
+	BOOST_TEST( entries == frames,
+	            "the .pvd indexes " << entries << " frames for " << frames
+	            << " appends. Every Cycle directory is probably on disk and "
+	            "correct -- it is the INDEX that is short, and ParaView shows "
+	            "only what the index lists" );
+
+	for ( int cycle = 0; cycle < frames; ++cycle )
+	{
+		char directory[ 64 ];
+		std::snprintf( directory, sizeof directory, "%s_cycles/Cycle%06d",
+		               stem.c_str(), cycle );
+		std::string const piece = std::string( directory ) + "/proc000000.vtu";
+		std::ifstream vtu( piece );
+		BOOST_TEST( vtu.good(), "no piece for frame " << cycle << " at " << piece );
+		vtu.close();
+		std::remove( piece.c_str() );
+		std::remove( ( std::string( directory ) + "/data.pvtu" ).c_str() );
+		std::remove( directory );
+	}
+	index.close();
+	std::remove( pvd.c_str() );
+	std::remove( ( stem + "_cycles" ).c_str() );
+}
+
 /// BENDING Gamma_h OUT ONTO Gamma, which is what makes a curved-path picture
 /// show the boundary that was asked for rather than the polygon inscribed in
 /// it.

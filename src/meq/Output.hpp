@@ -92,6 +92,53 @@ namespace meq
 	               int levelsOfDetail );
 
 	/**
+	 * A VTK TIME SERIES, one frame per adaptive cycle.
+	 *
+	 * The adaptive loop produces a mesh and a solution per cycle and until now
+	 * threw all but the last away. ParaView reads a collection with several
+	 * cycles as a time series and will scrub through it, mesh and all, so the
+	 * refinement can be watched rather than inferred from a table of element
+	 * counts.
+	 *
+	 * WRITTEN TO "<stem>_cycles", A SEPARATE COLLECTION FROM THE ANSWER, and
+	 * deliberately: "<stem>" is the converged state and has its boundary bent
+	 * onto Gamma by curveBoundaryOnto(), which mutates the mesh. Doing that
+	 * mid-loop would hand the next refinement a geometry the estimator never
+	 * saw. **The frames here are therefore uncurved** -- Gamma_h, faceted, as
+	 * solved -- which is also the honest thing to animate, since it is the
+	 * domain each cycle actually used.
+	 *
+	 * Each append() takes its fields by reference and writes immediately; it
+	 * retains nothing, so the caller may destroy the solver on the next line.
+	 */
+	class VtuSeries
+	{
+		public:
+			/// @param stem            "<stem>_cycles" is the collection.
+			/// @param levelsOfDetail  as writeVtu(): the polynomial degree.
+			VtuSeries( std::string const &stem, int levelsOfDetail );
+			~VtuSeries();
+
+			VtuSeries( VtuSeries const & ) = delete;
+			VtuSeries &operator=( VtuSeries const & ) = delete;
+
+			/// One frame. @a field is the poloidal field B, as writeVtu().
+			/// @a time is what ParaView's slider shows; the cycle index is the
+			/// natural choice and there is no physical time here.
+			void append( mfem::Mesh &mesh,
+			             mfem::GridFunction const &potential,
+			             mfem::GridFunction const &field,
+			             int cycle, double time );
+
+			/// How many frames have been written.
+			int frames() const;
+
+		private:
+			struct State;
+			std::unique_ptr<State> state;
+	};
+
+	/**
 	 * The domain boundary of @a mesh, as an ordered closed polyline.
 	 *
 	 * For a FITTED run this is Gamma itself: the plasma boundary is the mesh
