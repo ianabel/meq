@@ -68,32 +68,21 @@ namespace
 	}
 
 	/*
-	 * The one trap in CLAUDE.md a released binary can protect its user from.
+	 * A WARNING ABOUT MKL_THREADING_LAYER STOOD HERE AND IS DELETED.
 	 *
-	 * libblas.so.3 on the development machine resolves to libmkl_rt.so, which
-	 * without MKL_THREADING_LAYER=GNU silently corrupts UMFPACK's BLAS-3 -- you
-	 * get numbers, and they are wrong. CMake sets it on every registered ctest;
-	 * a user running this binary by hand gets no such help.
+	 * It fired on every run where that variable was unset, telling the user
+	 * that UMFPACK's BLAS-3 might be silently wrong. That was true while meq
+	 * resolved BLAS through Debian's libblas.so.3, an alternatives symlink to
+	 * the libmkl_rt dispatcher. meq now builds against its own SuiteSparse,
+	 * which links oneAPI's threading layer directly, so there is no dispatcher
+	 * to misconfigure and the variable is inert.
 	 *
-	 * Refusing outright would be wrong, since most builds do not link MKL at
-	 * all and there is no portable way to ask the loader what libblas resolved
-	 * to. So this warns, loudly, on stderr, and says what to do. A wrong answer
-	 * the user was warned about beats a wrong answer in silence.
+	 * Keeping it would have been worse than useless: most builds link no MKL
+	 * at all, so the warning told the majority of users to set a variable
+	 * naming a library they do not have, about a failure they cannot suffer.
+	 * A warning that is usually wrong is one people learn to ignore, which
+	 * spends the credibility of every other message this driver prints.
 	 */
-	void warnAboutThreadingLayer()
-	{
-		if ( std::getenv( "MKL_THREADING_LAYER" ) != nullptr )
-			return;
-
-		std::fprintf( stderr,
-			"meq: warning: MKL_THREADING_LAYER is not set.\n"
-			"     If this build's BLAS resolves to MKL, UMFPACK's BLAS-3 is\n"
-			"     silently wrong without it -- you get numbers, and they are not\n"
-			"     the answer. Re-run as:\n"
-			"\n"
-			"         MKL_THREADING_LAYER=GNU meq <config.toml>\n"
-			"\n" );
-	}
 
 	/// The background mesh: the box from [mesh], or a file, then refinement.
 	mfem::Mesh buildMesh( meq::MeshConfig const &config )
@@ -307,7 +296,6 @@ int main( int argc, char **argv )
 		return Solved;
 	}
 
-	warnAboutThreadingLayer();
 
 	// ---- configuration -------------------------------------------------
 	std::unique_ptr<meq::Configuration> config;

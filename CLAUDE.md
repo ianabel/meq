@@ -121,18 +121,25 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 git submodule update --init --recursive     # extern/toml11
 cmake -B build
 cmake --build build -j4
-cd build && ctest --output-on-failure       # ~525 s, 23/23
+cd build && ctest --output-on-failure       # ~490-540 s, 23/23
 ```
 
-**ctest no longer needs any environment set by hand.** `tests/CMakeLists.txt`
-puts both `MKL_THREADING_LAYER=GNU` and `MKL_NUM_THREADS=1` on every registered
-test — the first for correctness, the second because without it the suite takes
-well over an hour instead of nine. Running a test binary **directly**
-still needs both:
+**ctest needs no environment set by hand**, and **one variable this file used
+to insist on is gone.** `tests/CMakeLists.txt` puts `MKL_NUM_THREADS=1` on every
+registered test, without which the suite takes well over an hour instead of
+nine. Running a test binary **directly** needs the same one thing:
 
 ```sh
-MKL_THREADING_LAYER=GNU MKL_NUM_THREADS=1 ./tests/SolovievConvergence
+MKL_NUM_THREADS=1 ./tests/SolovievConvergence
 ```
+
+**`MKL_THREADING_LAYER=GNU` IS NO LONGER SET ANYWHERE**, and neither should you.
+It guarded the `libmkl_rt` dispatcher, which meq no longer loads; see *PARDISO
+and the MKL link line*. It is dropped rather than kept as a free guard because
+**most machines will not have MKL at all**, and a variable naming a library that
+is not there is a false instruction to the next reader. Choosing a threading
+layer belongs in CMake, which can look at what the build actually links; that is
+where it goes when meq runs on more than one machine.
 
 The performance harness is separate and is not a ctest:
 
@@ -148,7 +155,7 @@ tests/performance/scan.sh build 3            # both thread axes, ~40 min
 
 ```sh
 cmake -B build-cov -DMEQ_ENABLE_COVERAGE=ON && cmake --build build-cov -j4
-cd build-cov && MKL_THREADING_LAYER=GNU ctest
+cd build-cov && ctest
 gcovr --root .. --filter 'src/meq/' --print-summary        # or --html-details
 ```
 
@@ -947,7 +954,7 @@ bug in serial CUDA builds; that bug is fixed (see *Which MFEM*), so MFEM's own
 `meq-integration` at `974871c456`:
 
 ```
-MKL_THREADING_LAYER=GNU MKL_NUM_THREADS=1 \
+MKL_NUM_THREADS=1 \
   ./tests/unit/unit_tests "[DarcyForm],[NPC],[HDG],[DarcyHybridization],[NonlinearDarcy]"
 ```
 
@@ -2532,16 +2539,25 @@ no `libiomp5`, and `libgomp` as the only OpenMP runtime**; and `LD_DEBUG=libs`
 shows the only MKL objects *initialised* are oneAPI's. Debian's `libmetis` is
 still on the line and is **not even loaded** — CHOLMOD now bundles its own,
 prefixed `SuiteSparse_*`/`cholmod_*`, so there is no symbol collision and
-UMFPACK keeps its METIS ordering. Suite: **23/23 in 490 s**, and
-`PedestalConvergence` 238 s against 262.
+UMFPACK keeps its METIS ordering. Suite: **23/23**, twice — 490 s and 540 s on
+the same code, which is the run-to-run spread on this machine and is worth
+knowing before anyone reads a 10% change in a suite time as a result.
 
-**`MKL_THREADING_LAYER=GNU` IS NOW INERT, AND IS KEPT ANYWAY.** That variable
-only ever configured the `libmkl_rt` **dispatcher**, and there is no dispatcher
-any more. Measured: `SolovievConvergence`, `NewtonConvergence` and
+**`MKL_THREADING_LAYER=GNU` IS NOW INERT AND HAS BEEN DROPPED EVERYWHERE.**
+That variable only ever configured the `libmkl_rt` **dispatcher**, and there is
+no dispatcher any more. Measured: `SolovievConvergence`, `NewtonConvergence` and
 `FieldConvergence` produce **bit-identical output** with it set and with it
-unset. It stays set on every ctest because the failure mode it guards is silent
-and the guard now costs nothing — a fresh clone, another machine, or a build
-that falls back to Debian's SuiteSparse would bring `libmkl_rt` straight back.
+unset.
+
+It was briefly kept as a free guard, on the argument that a fresh clone or
+another machine could bring `libmkl_rt` back. **That argument was rejected, and
+the reason generalises**: most machines will not have MKL at all, so the
+variable named a library the majority of users do not have, about a failure they
+cannot suffer. A guard that is usually inapplicable is a false instruction to
+whoever reads it next, and it spends the credibility of the ones that are real.
+The driver's matching runtime warning is deleted for the same reason. **Choosing
+a threading layer is CMake's job** — it can look at what the build actually
+links — and that is where it goes when meq runs on more than one machine.
 
 **The hazard went off once, and in the opposite direction to the one predicted.**
 The prediction was wrong answers from mixed threading layers. What actually
@@ -2565,20 +2581,19 @@ geometry meq is actually for.
 
 ## Traps
 
-**Every run needs `MKL_THREADING_LAYER=GNU` AND `MKL_NUM_THREADS=1`.** Two
-variables, two entirely unrelated reasons, both set on every registered ctest.
+**Every run needs `MKL_NUM_THREADS=1`**, which every registered ctest sets. It
+is a no-op wherever MKL is absent, so it costs a non-MKL machine nothing.
 
-`MKL_THREADING_LAYER=GNU` is the **correctness** one, and **as of 2026-09-01 it
-is INERT for meq and kept as a guard rather than a requirement.**
-`/usr/lib/x86_64-linux-gnu/libblas.so.3` on this machine resolves to
-`libmkl_rt.so`, the MKL **dispatcher**, which silently corrupts UMFPACK's BLAS-3
-without this variable — *silently*, meaning you get numbers and they are wrong.
-meq no longer loads that dispatcher at all: it builds against its own
-SuiteSparse, which links oneAPI's threading layer directly. Measured, three
-value-asserting suites give **bit-identical** output with it set and unset. It
-stays set on every ctest because a fresh clone or another machine would bring
-`libmkl_rt` back and the failure has no signature. See *PARDISO and the MKL link
-line*. Same trap as `../mfem-hdg-dev/CLAUDE.md` records.
+**`MKL_THREADING_LAYER=GNU` WAS THE OTHER HALF OF THIS TRAP AND IS NOW GONE**,
+from the ctests, the performance harness and the driver alike. It guarded
+`libmkl_rt.so` — the MKL **dispatcher** that
+`/usr/lib/x86_64-linux-gnu/libblas.so.3` resolves to on this machine — whose
+default threading layer silently corrupted UMFPACK's BLAS-3: you got numbers,
+and they were wrong. **meq no longer loads that dispatcher**, because it builds
+against its own SuiteSparse which links a threading layer directly. See *PARDISO
+and the MKL link line* for the measurement and for why the variable was dropped
+rather than kept. The same trap is still live for anyone using Debian's
+SuiteSparse, and `../mfem-hdg-dev/CLAUDE.md` still records it.
 
 `MKL_NUM_THREADS=1` is the **factor of 140** one. Measured 2026-08-30, one
 process, nothing else running: `SolovievConvergence` **1.24 s** against

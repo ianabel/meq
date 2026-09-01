@@ -81,7 +81,7 @@ so point `MFEM_DIR` at a checkout you have built yourself.
 The driver is not yet ported, so this does not work today:
 
 ```sh
-MKL_THREADING_LAYER=GNU ./build/apps/meq examples/soloviev-nstx.toml
+./build/apps/meq examples/soloviev-nstx.toml
 ```
 
 **The environment variable is not optional on a machine whose BLAS resolves to
@@ -95,7 +95,7 @@ Solov'ev benchmark whose exact solution is published.
 ## Testing
 
 ```sh
-cd build && MKL_THREADING_LAYER=GNU ctest --output-on-failure
+cd build && ctest --output-on-failure
 ```
 
 The suite is in three layers, described in full in `CLAUDE.md`:

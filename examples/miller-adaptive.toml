@@ -1,7 +1,7 @@
 # THE CURVED BOUNDARY, SOLVED ADAPTIVELY -- the configuration meq exists to run,
 # with the mesh chosen by the residual estimator rather than by hand.
 #
-#     MKL_THREADING_LAYER=GNU meq examples/miller-adaptive.toml
+#     meq examples/miller-adaptive.toml
 #
 # One turn of the loop is: solve, post-process, estimate eta_K on every element,
 # mark, refine, repeat. It stops at TargetError or at MaxIterations, whichever

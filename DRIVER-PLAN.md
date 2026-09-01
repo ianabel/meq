@@ -610,11 +610,16 @@ refinement pattern, but should be able to find out it is in play.
 * **A residual history on stdout**, in the shape `CLAUDE.md` records — iteration,
   `‖r‖`, `‖r‖/‖r_0‖`, observed order. It is the diagnostic that separates a wrong
   Jacobian from a hard problem, and it costs nothing to print.
-* **`MKL_THREADING_LAYER=GNU`.** CMake sets it on registered ctests; a user
-  running the binary by hand gets no such help, and the failure is silent wrong
-  numbers. The driver should detect MKL and either set it or refuse to start.
-  This is the one trap in `CLAUDE.md` that a released binary can actually
-  protect its user from.
+* ~~**`MKL_THREADING_LAYER=GNU`.**~~ **DROPPED, 2026-09-01.** This asked the
+  driver to detect MKL and set the variable or refuse to start, on the grounds
+  that the failure is silent wrong numbers. It was implemented as a warning and
+  has been deleted. meq builds against its own SuiteSparse now and never loads
+  the `libmkl_rt` dispatcher the variable configured, so it is inert — measured
+  bit-identical across three value-asserting suites — and **most builds link no
+  MKL at all**, so the warning told the majority of users to set a variable
+  naming a library they do not have. Choosing a threading layer is CMake's job,
+  since it can see what the build links. See `CLAUDE.md`, *PARDISO and the MKL
+  link line*.
 
 ### Acceptance
 

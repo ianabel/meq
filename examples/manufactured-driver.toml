@@ -16,7 +16,7 @@
 # history that grinds down linearly means the Jacobian disagrees with the
 # residual.
 #
-#     MKL_THREADING_LAYER=GNU meq examples/manufactured-driver.toml
+#     meq examples/manufactured-driver.toml
 #
 # UNITS. Geometry normalised to the major radius, as in the Solov'ev example:
 # lengths are in units of R0 and the wavenumbers are per unit R0.

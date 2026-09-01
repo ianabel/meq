@@ -61,9 +61,9 @@ jobs:
         run: cmake --build build -j"$(nproc)"
 
       - name: Test
-        # MKL_THREADING_LAYER is set by CMake on every registered test and is
-        # not needed here -- a runner's libblas is not MKL -- but the tests set
-        # it themselves, so nothing to do.
+        # No MKL environment is needed. MKL_NUM_THREADS=1 is set by CMake on
+        # every registered test and is a no-op on a runner, which links no MKL;
+        # MKL_THREADING_LAYER is no longer set anywhere, see tests/CMakeLists.txt.
         run: ctest --test-dir build --output-on-failure
 
   coverage:

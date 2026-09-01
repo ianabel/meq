@@ -66,8 +66,10 @@ namespace
 
 	int run( std::string const &configFile )
 	{
-		// MKL_THREADING_LAYER is inherited from the ctest environment, which
+		// MKL_NUM_THREADS=1 is inherited from the ctest environment, which
 		// CMake sets for exactly the reason the other convergence tests record.
+		// MKL_THREADING_LAYER is deliberately not set anywhere any more; see
+		// tests/CMakeLists.txt.
 		std::string const command = std::string( driver() ) + " " + configFile
 		                            + " > /dev/null 2>&1";
 		int const status = std::system( command.c_str() );

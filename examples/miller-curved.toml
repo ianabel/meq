@@ -14,7 +14,7 @@
 # does not care how good the elements are. The transfer technique removes that,
 # and tests/convergence/ExtensionConvergence.cpp measures it doing so.
 #
-#     MKL_THREADING_LAYER=GNU meq examples/miller-curved.toml
+#     meq examples/miller-curved.toml
 #
 # THE BOX MUST CONTAIN THE SHAPE WITH ROOM TO SPARE. If D_h reaches the edge of
 # the mesh box, part of Gamma_h is an inherited mesh boundary carrying no

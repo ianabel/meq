@@ -53,16 +53,26 @@ foreach(_test IN LISTS MEQ_UNIT_TESTS)
 		add_test(NAME ${_test} COMMAND ${_test}
 			WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 
-		# MKL_THREADING_LAYER=GNU is not optional on this machine.
-		# /usr/lib/x86_64-linux-gnu/libblas.so.3 is an alternatives
-		# symlink pointing at libmkl_rt.so, and MKL's default threading
-		# layer silently returns wrong BLAS-3 results to UMFPACK -- which
-		# MFEM's direct solver uses. Wrong answers, no error, no warning.
-		# The same trap is recorded in the MFEM tree's CLAUDE.md, where
-		# every run of its own test suite needs the same variable.
+		# MKL_THREADING_LAYER=GNU USED TO BE SET HERE AND IS DELIBERATELY
+		# NOT ANY MORE. It guarded a real trap: libblas.so.3 on the
+		# development machine was an alternatives symlink to libmkl_rt.so,
+		# the MKL dispatcher, whose default threading layer silently
+		# returned wrong BLAS-3 results to UMFPACK. meq no longer loads
+		# that dispatcher -- it builds against its own SuiteSparse, which
+		# links oneAPI's threading layer directly -- so the variable became
+		# inert, measured as bit-identical output across three
+		# value-asserting suites with it set and unset.
 		#
-		# MKL_NUM_THREADS=1 is not optional either, and for a completely
-		# different reason: not correctness but a factor of 140. UMFPACK
+		# It is dropped rather than kept as a cheap guard because MOST
+		# MACHINES WILL NOT HAVE MKL AT ALL, and a variable naming a
+		# library that is not there is a false instruction to whoever reads
+		# it next. Choosing a threading layer belongs in CMake, which can
+		# look at what the build actually links, and that is where it goes
+		# when meq runs on more than one machine.
+		#
+		# MKL_NUM_THREADS=1 STAYS, and for a completely different reason:
+		# not correctness but a factor of 140. It is a no-op wherever MKL
+		# is absent, so it costs a non-MKL machine nothing. UMFPACK
 		# calls BLAS on the small dense frontal matrices of a sparse LU,
 		# thousands of times, and each threaded call costs a fork, a join
 		# and a barrier that dwarf the arithmetic. Measured on this
@@ -83,12 +93,16 @@ foreach(_test IN LISTS MEQ_UNIT_TESTS)
 		# it and revealed the real behaviour. The suite was never
 		# deliberately sequential; it was accidentally so.
 		#
+		# The culprit there is MFEM's element-local dense LU rather than
+		# UMFPACK, which degrades by only about 40% across the whole
+		# thread range. See CLAUDE.md under Traps.
+		#
 		# It is set per test rather than expected of whoever runs ctest,
 		# because a benchmark or a suite that takes two hours instead of
 		# one minute is not a failure anybody reads as a threading
 		# problem.
 		set_tests_properties(${_test} PROPERTIES
-			ENVIRONMENT "MKL_THREADING_LAYER=GNU;MKL_NUM_THREADS=1")
+			ENVIRONMENT "MKL_NUM_THREADS=1")
 	endif()
 endforeach()
 
@@ -163,7 +177,7 @@ foreach(_test IN LISTS MEQ_CONVERGENCE_TESTS)
 		# exactly what this test exists to detect and exactly what it would then
 		# fail to detect. See the comment on the unit tests above.
 		set_tests_properties(${_test} PROPERTIES
-			ENVIRONMENT "MKL_THREADING_LAYER=GNU;MKL_NUM_THREADS=1")
+			ENVIRONMENT "MKL_NUM_THREADS=1")
 	endif()
 endforeach()
 
@@ -208,7 +222,7 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 		        --no-assembly-timing --repeats 1
 		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 	set_tests_properties(cuDSSTraceSolver PROPERTIES
-		ENVIRONMENT "MKL_THREADING_LAYER=GNU;MKL_NUM_THREADS=1")
+		ENVIRONMENT "MKL_NUM_THREADS=1")
 endif()
 
 # ---------------------------------------------------------------------------
@@ -234,7 +248,7 @@ if(TARGET meq AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/DriverAcceptan
 	add_test(NAME DriverAcceptance COMMAND DriverAcceptance
 		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
 	set_tests_properties(DriverAcceptance PROPERTIES
-		ENVIRONMENT "MKL_THREADING_LAYER=GNU;MKL_NUM_THREADS=1")
+		ENVIRONMENT "MKL_NUM_THREADS=1")
 else()
 	message(STATUS "meq: DriverAcceptance not registered (needs MEQ_BUILD_APP=ON)")
 endif()

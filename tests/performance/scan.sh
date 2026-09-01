@@ -15,10 +15,13 @@
 # below) by a factor of 140, which swamps every other column in the row and
 # makes the assembly speedup unreadable.
 #
-# MKL_THREADING_LAYER=GNU is set throughout for the reason every ctest sets it:
-# /usr/lib/x86_64-linux-gnu/libblas.so.3 resolves to libmkl_rt, the dispatcher,
-# which silently corrupts UMFPACK's BLAS-3 without it. Silently -- you get
-# numbers, and they are wrong. A benchmark is exactly where that goes unnoticed.
+# MKL_THREADING_LAYER=GNU used to be set throughout, because
+# /usr/lib/x86_64-linux-gnu/libblas.so.3 resolved to libmkl_rt, the dispatcher,
+# which silently corrupted UMFPACK's BLAS-3 without it. meq now builds against
+# its own SuiteSparse and links a threading layer directly, so there is no
+# dispatcher and the variable is inert. It is dropped here for the same reason
+# it is dropped from the ctests: most machines link no MKL at all. See
+# tests/CMakeLists.txt.
 #
 # WHAT THE MKL AXIS IS ACTUALLY MEASURING, so nobody reads the collapse as a
 # mistake: UMFPACK calls BLAS on the small dense frontal matrices of a sparse
@@ -48,7 +51,7 @@ for T in 1 2 4 8 16; do
 	echo
 	echo "======== OMP_NUM_THREADS=$T  MKL_NUM_THREADS=1 ========"
 	OMP_NUM_THREADS="$T" MKL_NUM_THREADS=1 \
-	MKL_THREADING_LAYER=GNU OMP_PROC_BIND=close OMP_PLACES=cores \
+	OMP_PROC_BIND=close OMP_PLACES=cores \
 	"$BIN" --repeats "$REPEATS"
 done
 
@@ -60,6 +63,5 @@ for T in 1 2 4 8 16; do
 	echo
 	echo "======== MKL_NUM_THREADS=$T  OMP_NUM_THREADS=1 ========"
 	OMP_NUM_THREADS=1 MKL_NUM_THREADS="$T" \
-	MKL_THREADING_LAYER=GNU \
 	"$BIN" --repeats "$REPEATS"
 done
