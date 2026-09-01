@@ -1,10 +1,11 @@
 # Where meq is, and what to do next
 
-Written 2026-08-26, substantially revised 2026-08-27 and again 2026-08-29.
+Written 2026-08-26, substantially revised 2026-08-27, 2026-08-29 and 2026-09-01.
 `CLAUDE.md` is the operational record and is authoritative on anything technical;
-`DRIVER-PLAN.md` is the stage-7 design; `TODO` holds work that is understood but
-not scheduled. **This file is only about order** — what to do first, what waits
-on what, and what is deliberately not being done yet.
+`DRIVER-PLAN.md` is the stage-7 design, `FREE-BOUNDARY-PLAN.md` and
+`FLOW-PLAN.md` are the two designs not yet started; `TODO` holds work that is
+understood but not scheduled. **This file is only about order** — what to do
+first, what waits on what, and what is deliberately not being done yet.
 
 ## Nothing is red
 
@@ -63,30 +64,42 @@ it; nobody has been told.
 
 ## So what is next
 
-With nothing red, the order is what it was minus the blocker:
+With nothing red, the order is what it was, plus a second planned physics item:
 
 1. **Finish the driver** — item 1. Two things left in it: wire the normalised
-   source through `Config`, and the GSLIB warm start.
-2. **Then free boundary — and it now has a plan**, `FREE-BOUNDARY-PLAN.md`.
-   HDG on a polygonal subdomain coupled at a distance to an exterior operator on
-   a semicircular artificial boundary, by
-   `refs/CouplingAtADistance.pdf` — whose own reference [5] is meq's stage 5, so
-   the coupling is the extension technique already in the tree with the datum
-   unknown instead of zero. Staged FB-0 to FB-6 with an acceptance measurement
-   each. See item 8.
+   source through `Config`, and the GSLIB warm start. **The first is now a
+   prerequisite for two things rather than one**: the normalised plumbing gets
+   written once and both the high-β source and a rotating one use it.
+2. **Then the two planned extensions, and they are independent of each other.**
+   * **Toroidal flow**, `FLOW-PLAN.md` — item 9. `refs/RotatingGK.pdf` (136),
+     closed by (96) and (97). A change to `F` alone: the operator, the
+     discretisation and the whole curved-boundary and adaptive apparatus are
+     untouched, and `Source`'s signature already carries the `r` it needs.
+     Staged FL-0 to FL-8.
+   * **Free boundary**, `FREE-BOUNDARY-PLAN.md` — item 8. HDG on a polygonal
+     subdomain coupled at a distance to an exterior operator on a semicircular
+     artificial boundary, by `refs/CouplingAtADistance.pdf` — whose own
+     reference [5] is meq's stage 5, so the coupling is the extension technique
+     already in the tree with the datum unknown instead of zero. Staged FB-A and
+     FB-0 to FB-6.
+
+   **Flow is the cheaper of the two** and shares more with what exists: it needs
+   no new geometry, no cut quadrature and nothing from the other tree. Free
+   boundary is the more valuable and the more structural. Neither blocks the
+   other, and both want item 1's normalised plumbing first.
 3. **Hygiene** — item 3 — alongside either. `README.md` is the oldest debt in
    the tree and still describes a project that did not exist.
 
 Items 4 and 5 are the other tree's to act on; item 6 is meq's and is small and
-not urgent; item 7 is a closed investigation kept for its answer; item 8 is free
-boundary, which is step 2 above.
+not urgent; item 7 is a closed investigation kept for its answer; item 10 — the
+fixed-`q(ψ)` solver — is wanted but undesigned and should wait on item 9.
 
 ## The state in one paragraph
 
 The solver works and every claim about it is a measured convergence rate. Stages
 0 to 6 are done, and **stage 7 is finished: meq is a program that solves on a
 curved boundary, refines its own mesh, and restarts from a previous answer in one
-Newton step.** The suite is **22 of 22**, and it is green rather than
+Newton step.** The suite is **23 of 23**, and it is green rather than
 green-with-a-known-red: the last standing failure was `HighBetaConvergence` and
 the work it was asserting is done. The only thing the driver still refuses is
 `[boundary] Type = "exact"`.
@@ -133,8 +146,9 @@ against**, which is the only test of "landed" meq can apply:
 
 | filed | state |
 |---|---|
-| `HDG-LINEARISE-THEN-CONDENSE.md` | landed — `setNonlinearOrdering()` uses it |
-| `DIRECT-SOLVER-SYMBOLIC-REUSE.md` | landed — `SetReuseSymbolic()` is on |
+| `HDG-LINEARISE-THEN-CONDENSE.md` | landed, then **retired upstream** (`d891ac4302`) with the mode itself. `setNonlinearOrdering()` is gone; meq's default is `NPC` |
+| `DIRECT-SOLVER-SYMBOLIC-REUSE.md` | landed — `SetReuseSymbolic()` is on — and **retired upstream** (`2a50119ba1`) |
+| `HDG-NPC-GLOBALISATION-FROM-MEQ.md` | **filed 2026-08-31 and answered the same day** (`af82d42b14`). Not a defect report: two §6 claims withdrawn on meq's evidence, meq's own account of the mechanism corrected, and a defect found in the reference implementation meq had copied |
 | `HDG-DEFECTS-FROM-MEQ.md` | retired by that tree. Three of its four are verifiably closed — one fixed, one fixed, one withdrawn as not a defect; the fourth, `ComputeHDGFaceEnergy()` ignoring an installed stabilisation, meq has not re-measured and does not use. `CLAUDE.md` has the breakdown |
 | `HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md` | **landed and retired** — the fix is *"The postprocessing closes on the element average, always"*, and the document is gone from that tree's `doc/` |
 | `HDG-ELEMENT-LOCAL-PARALLELISM.md` | still there, and meq has seen no change |
@@ -171,20 +185,26 @@ things that do not exist rather than things that misbehave, and it says so.
 `../mfem/install` is built from. Local only, never pushed, re-created whenever any
 of the four moves — so nothing may be committed directly to it.
 
-**Verified 2026-08-29, and it is a foot-gun:** none of the four contains any
-other, and the reconstruction fix (`25b7dae612`) is reachable from `gf-hdg-dev`
-and from **no** other branch. Re-creating `meq-integration` from the three this
-file used to name would silently drop it, `ψ*` would go back to being a different
-function wherever `∂F/∂ψ` vanishes, and the adaptive loop would go back a full
-order — with no error and a green suite until
-`thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes` caught it.
-`gf-hdg-dev` cannot simply replace `gf-hdg-subdomains-dev` either: it still has
-no `fem/darcy/extension_hdg.*` at all, so there is no shorter merge.
+**Four branches, but TWO merges, and this file said three.** As of 2026-08-30
+`gf-hdg-dev` is an **ancestor** of both `gf-hdg-subdomains-dev` and
+`gf-hdg-linearise-first`, so it arrives with the base and needs no merge of its
+own. The earlier record here — that none of the four contains any other — was
+true when written and is not now. **The topology is the other tree's to change,
+so re-verify rather than trusting either statement.**
 
-`CLAUDE.md` carries the recipe, now four-branch, including the one recurring
-conflict on the first merge. **The fourth merge is not characterised** — the
-`meq-integration` in the tree today was built with `gf-hdg-dev` merged last and
-it works, but whether that merge conflicts, and how, is not written down.
+What has not changed is *why* `gf-hdg-dev` is on the list. Dropping it silently
+loses the reconstruction fix, `ψ*` goes back to being a different function
+wherever `∂F/∂ψ` vanishes, and the adaptive loop goes back a full order — with
+no error and a green suite until
+`thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes` catches it. It is
+free today rather than unnecessary.
+
+**Run the containment loop; it has already fired once.** `CLAUDE.md` carries it
+with the recipe. Against `meq-integration` at `fa65a2f932` on 2026-09-01 three of
+the four report contained and `gf-hdg-linearise-first` does not, because that
+branch has advanced 17 commits since the merge. **Read that as "the branch has
+moved", not "the merge failed"** — what meq needs from it is in the tree. It
+says a re-merge is available.
 
 A standing cost of the arrangement, and it falls on meq's side.
 
@@ -363,81 +383,35 @@ element loops in `darcyhybridization.cpp` over work independent by construction.
 meq has no visibility into whether it is being worked on and should not guess;
 what meq can say is that nothing it links has changed.
 
-**SUPERSEDED 2026-08-31: `LineariseThenCondense` IS DELETED AND `NPC` REPLACES
-IT.** MFEM retired that ordering as *"a condensation in disguise"* — a trace-only
-operator keeping the linearisation as hidden state, which the NPC method is not —
-and `SetNonlinearOrdering()` went with it. meq's default is now
-`NonlinearOrdering::NPC`, `mfem::DarcyNPCOperator` over the full `(q, ψ, ψ̂)`
-system, and everything this item wanted from the old ordering it gets from NPC
-**and gets verifiably**: `GetNumLocalNLIterations()` reads exactly **0** under
-NPC against 3644 for the condensation, asserted rather than assumed by
+**AND IT IS UNBLOCKED, MORE CLEANLY THAN WHEN IT WAS FILED.** meq's default is
+now `NonlinearOrdering::NPC` — `mfem::DarcyNPCOperator` over the full
+`(q, ψ, ψ̂)` system — and `GetNumLocalNLIterations()` reads exactly **0** under
+it against 3644 for the condensation, asserted by
 `SolverContract::theOrderingsAgreeAndOnlyOneIteratesLocally`. So the batched work
-really is fixed-size *linear* solves, which is what `linalg/batched/` provides and
-what a device wants — this item is unblocked and is unblocked more cleanly than
-before. **Everything below in this item that names the old ordering is history.**
-See CLAUDE.md, *The NPC port*, for the port and for the parity gap it brought
-back the other way.
+really is fixed-size **linear** solves, which is what `linalg/batched/` provides
+and what a device wants.
 
-**The borders are no longer an obstacle to it.** meq's `ψ_ax` bordered Newton was
-believed to require condense-first and does not: measured 2026-08-30, it reaches
-the same `ψ_ax` under both orderings to every digit printed, and the guard has
-been lifted. So of the three things pulling towards this ordering — the batching,
-the borders, and every reference in `refs/` — one is now settled in its favour.
+**The `ψ_ax` borders are not an obstacle either.** They were believed to require
+condense-first and do not: measured 2026-08-30, both orderings reach the same
+`ψ_ax` to every digit printed, and under NPC the border row is exactly `−e_j` and
+the corner exactly `1`, neither differenced.
 
-**WHAT BLOCKED IT IS FIXED, AND THE DIAGNOSIS BELOW WAS WRONG ABOUT THE CAUSE
-WHILE RIGHT ABOUT THE SYMPTOM.** *(History: this describes the deleted ordering,
-not NPC.)* As of MFEM's `ad04da3749` (2026-08-31),
-`LineariseThenCondense` was meq's default and only ordering, and
-`PedestalConvergence` is down from seven failing assertions to **one**. The
-actual cause was neither hidden state nor the Jacobian being wrong in principle:
-the linearisation point took a **fixed two** frozen-Jacobian local corrections,
-and `GetGradient()` is the Schur complement of the Jacobian at whatever fields
-that left — so the correction count *was* the gradient's accuracy. It now
-iterates to `setLocalSolver()`'s tolerance. §4.2 at `k = 2, n = 16` went from
-failing at 60 to **8** iterations, against 11 for condense-first.
+**A LONG HISTORY STOOD HERE AND IS DELETED.** It was the investigation of
+`NLOrdering::LineariseThenCondense` — a mode MFEM has since retired as *"a
+condensation in disguise"* — including its frozen-correction diagnosis, its 149%
+cross-linearisation measurement and the case-by-case parity table. It describes
+nothing meq runs and is recoverable from git. Three things in it are still live
+and are kept in `CLAUDE.md` rather than here: the **falsified prediction** that
+an ordering would fix a stiff source, which NPC has now falsified a second time;
+the **cross-linearisation technique** for detecting hidden state in a reduced
+operator; and the **live defect in the ordering meq still ships as the backup**,
+where the assembled gradient disagrees with a central difference by 100× once the
+element-local solves hit their iteration cap. See *The NPC port* and *Why meq's
+Newton struggles*.
 
-**One case survives and is characterised**: §4.5, the internal layer, at
-`k = 2, n = 16` — condense-first 10 iterations, this ordering fails at 60, with
-`k = 1, n = 24` and `k = 2, n = 24` fine under both. One of three out of 144
-upstream, all at widths where the frozen-Jacobian correction cannot converge.
-Closing them needs the local step globalised; nothing has been tried and meq is
-not asking.
-
-**And it costs wall clock.** The correction loop runs 4.2 to 12.1 corrections
-per element per linearisation against the fixed two; `PedestalConvergence` went
-351 s → 572 s. This ordering is not a speed win on a stiff problem — what it
-buys is a local problem that is always a linear solve against one factorisation.
-
-**The paragraph below is the 2026-08-30 diagnosis, kept because its measurement
-stands and its conclusion did not.** The 149% figure is real; what it was
-measuring was the retained fields being two corrections short, not a structural
-impossibility.
-
-`LineariseThenCondense` failed at 60 on §4.2 at every resolution tried, including
-ones condense-first solves in five iterations — and the cause looked like **its
-reduced residual not being a function of the trace**. The retained local fields
-are hidden state: evaluated at one trace, `R` differed by **149%** at the
-published pedestal width depending on which trace the linearisation was last
-taken at, against exactly zero for condense-first. It is *not* the Jacobian — at
-a fixed linearisation the gradient was the derivative to 5e−9.
-
-**And the same measurement found something about the ordering meq ships.** Under
-condense-first the residual is a perfect function of the trace, but the gradient
-disagrees with a central difference of it by **100×** once `σ² ≤ 0.01`, because
-the element-local solves are at their iteration cap. That is the measured
-explanation for the pedestal's 39 wandering iterations. `CLAUDE.md` has both
-tables.
-
-**So the way out is a specific ask rather than an investigation**, and the two
-orderings need different things: linearise-first needs the field increments to
-belong to the outer solver rather than to the operator — which is what NPC's
-simultaneous Newton is, and would let one line search damp the whole step —
-and condense-first needs its local solves to converge. Both are MFEM's.
-
-**That ask was answered for linearise-first and the default is now that
-ordering, project-wide.** Condense-first is retained only so
-`PedestalConvergence` can measure the two against each other, which is what
-turns "this fails" into "this fails and the other does not".
+**Condense-first is retained only so the two can be measured against each
+other**, which is what turns "this fails" into "this fails and the other does
+not" — and on stiff under-resolved meshes it is still the one that works.
 
 ## 5. The element-local solve's frozen seed — MFEM, **found and not filed**
 
@@ -482,8 +456,9 @@ What threading MKL actually costs, measured with the columns separated:
   whole thread range, never more.
 * **`ComputeH()`'s element-local dense LU**, through LAPACK, on blocks of order
   10-30. `k = 2` untouched; **`k = 3` forty-fold worse** at two threads.
-* So `MKL_NUM_THREADS=1` is now set on every ctest, and the suite runs in 798 s
-  against 2269 s.
+* So `MKL_NUM_THREADS=1` is now set on every ctest. The suite ran 798 s against
+  2269 s on that fix; it is **490–540 s** today, the rest of which is the NPC
+  port deleting the element-local non-linear solves.
 
 **And that pins PARDISO's own scaling out of reach.** PARDISO beats UMFPACK
 1.50x on setup sequentially and 2.83x at 8-16 threads — but `MKL_NUM_THREADS` is
@@ -518,11 +493,15 @@ measurement about the code. Two things follow, neither urgent:
   the default**, for exactly the reason this bullet gave — oneMKL's licence is
   not everybody's to accept. What changed is that a caller who does have it gets
   1.24x for one line.
-* **`MFEM_EXT_LIBS` links oneAPI 2026.1 and Debian's 2020.4 MKL at once**, the
-  second pulled in behind SuiteSparse, bringing two extra threading layers. It
-  works today only because oneAPI comes first in the link order and its rpath is
-  baked in — an ordering accident, not a configuration. Repointing SuiteSparse's
-  BLAS at oneAPI would settle it. `CLAUDE.md` carries the full line.
+* ~~**`MFEM_EXT_LIBS` links oneAPI 2026.1 and Debian's 2020.4 MKL at once.**~~
+  **FIXED 2026-09-01, and the link line was only half of it.** Debian's
+  `libumfpack.so` carries a hard `NEEDED` on `libblas.so.3`, which on this
+  machine is a symlink to `libmkl_rt.so` — so Debian's MKL loaded at runtime
+  whatever the link line said, and editing the link line alone would have looked
+  like a fix. meq now builds **its own SuiteSparse** at `../suitesparse`, v7.12.2
+  against oneAPI. Verified three ways: `config.mk`, `ldd`, and `LD_DEBUG=libs`.
+  `MKL_THREADING_LAYER=GNU` is inert as a result and has been dropped everywhere.
+  `CLAUDE.md` carries the recipe and the three snags.
 
 ## 7. §4.4, the current hole — a known answer that must stay out of the driver
 
@@ -606,6 +585,92 @@ problem it solved does not arise. Plan §4.1; git has it if it is ever wanted.
 
 ---
 
+## 9. Toroidal flow — meq, planned and not started
+
+`FLOW-PLAN.md` is the design, in the sense `FREE-BOUNDARY-PLAN.md` is: nothing is
+built. The equation is `refs/RotatingGK.pdf` (136), closed by its (96) and (97),
+and it supersedes `TODO`'s *Sonic toroidal rotation* entry. The shape of it:
+
+* **Rotation is a change to `F` alone.** The operator, the discretisation, `τ`,
+  the hybridization, the estimator, the adaptive loop and the curved boundary are
+  all untouched. And **`Source` already has the right signature** — `f(r, z, ψ)`
+  carries `r`, so a density that is not a flux function needs no interface change
+  anywhere in the solver. That is the largest piece of luck in the plan.
+* **(136) collapses to `F = μ₀ r² ∂p/∂ψ|_r + g g′`**, with
+  `p = Σ_s n_s T_s` and `n_s` from (96). The `∂φ₀/∂ψ` terms cancel identically
+  against quasineutrality. Derived rather than read off, and checked twice — it
+  is the paper's own force balance (128), and at `ω → 0` it gives the paper's
+  (243), **which is the equation meq solves today**.
+* **The gauge `⟨φ₀⟩_ψ = 0` is a convention and meq does not take it.** RoPP says
+  so at (59). A local gauge `φ₀(r_ref) = 0` keeps `F` a pointwise function of
+  `(r, z, ψ)`; the paper's gauge would need `⟨r²⟩_ψ`, a flux-surface average of
+  the unknown on **every** surface — machinery meq does not have and this buys
+  nothing physical. Li & Zhu independently make the same choice.
+* **Two species need no root find at all**: (97) is linear in `φ₀` after taking
+  logarithms, and `p = P₀(ψ) exp[ m_i ω² (r² − r_ref²) / 2(T_i + Z_i T_e) ]`.
+  `n` species need a scalar Newton per evaluation point, with a root that is
+  unique and bracketable because the left-hand side of (97) is strictly
+  decreasing in `φ₀`.
+* **Inputs are `T_s(ψ)`, `ω(ψ)`, `n − 1` density flux functions and `I(ψ)`.**
+  The counting is the gauge: fixing it removes exactly one function's worth of
+  freedom from the `N_s`. Exposed as the physical density of each species on
+  `r = r_ref`, subject to charge neutrality there.
+* **Staged FL-0 to FL-8**, each ending at a measured number. **FL-2 is the stage
+  to protect** — the `ω → 0` collapse back onto `MHDSource`, which exercises the
+  species container, the chain rule, `φ₀`, the Gaussian-to-SI conversion and the
+  sign of `Δ*` against an answer meq already has to fifteen digits.
+
+**The literature hazard is named in the plan rather than left to be discovered.**
+Rotating-equilibrium papers solve at least three different closures — isothermal,
+adiabatic, and constant-density-on-a-surface — and they look alike. Li & Zhu's
+§3.1 rotating Solov'ev **is** (136)'s closure and is a usable exact benchmark;
+their §3.2 Maschke–Perrin carries a ratio of specific heats and **is not**; FLOW
+solves arbitrary poloidal-plus-toroidal flow and is a different problem
+altogether. `deltaStarFD()` on any borrowed closed form, before trusting it, is
+the guard — the same one that caught the Solov'ev coefficients.
+
+**And no published rotating solution exercises the Jacobian**: both closed forms
+are linear in `ψ`. A manufactured nonlinear rotating case is therefore not
+optional, for the reason `CLAUDE.md` records — a wrong `∂F/∂ψ` leaves every error
+and every rate unchanged and moves only Newton's observed order.
+
+## 10. The fixed-`q(ψ)` solver — meq, wanted, not designed
+
+**Take `q(ψ)` as input and find `I(ψ)` from it**, rather than taking `I(ψ)`
+directly as items 1 and 9 both do. The terminology is what people call it; the
+requirement is ordinary. It is how a transport code hands an equilibrium code its
+target, and it is what a coupling to MaNTA will want.
+
+RoPP (142) is the relation:
+
+```
+q(ψ) = V′(ψ) I(ψ) ⟨r^{-2}⟩_ψ / 4π²
+```
+
+**Which makes this the item that needs the machinery item 9 was designed to
+avoid.** `V′` and `⟨r^{-2}⟩_ψ` are flux-surface quantities, so a fixed-`q` solver
+needs flux-surface averaging over level sets of `ψ_h` — contour extraction on an
+HDG solution, at the solution's own order if it is not to throw away `k+1` — plus
+an inner iteration for `I(ψ)`, plus that whole non-local dependence inside
+`∂F/∂ψ` if Newton is to stay quadratic.
+
+Three things worth writing down before anyone starts:
+
+* **`FluxSurfaces` was a `v0-legacy` driver and was not ported.** Reach for tag
+  `v0-legacy` before concluding it has to be written from nothing.
+* **The non-local Jacobian has a precedent in the tree.** `ψ_ax` is one border
+  row and column today and `HighBetaConvergence` is the acceptance criterion for
+  it; a `q`-driven `I(ψ)` is the same shape with a continuum of rows rather than
+  one, which is the part that is genuinely new.
+* **It is independent of rotation.** A fixed-`q` static solver is useful on its
+  own and is the smaller problem; doing it first and then composing is likely
+  cheaper than doing it inside item 9.
+
+Not on the critical path for anything, and it should not be started until item 9
+has settled what a rotating source's profile set looks like.
+
+
+
 ## Deliberately not yet
 
 * **GPU and cuDSS.** Correctness-testable here; this card cannot say whether it
@@ -614,12 +679,13 @@ problem it solved does not arise. Plan §4.1; git has it if it is ever wanted.
 * **Partial assembly.** Not implemented for the HDG integrators at all, and its
   case is sum factorisation, which wants tensor-product elements where meq is
   triangles. A discretisation decision, not a flag.
-* **The physics** — sonic rotation, anisotropic pressure, NetCDF profiles, MaNTA
-  coupling. The actual science. This used to read "all downstream of a driver";
-  the driver is now done bar two bullets, so what they are downstream of is free
-  boundary and each other. `TODO` carries each with what has been established.
-  **`TODO`'s "Try PARDISO again against a real oneMKL build" is answered** — see
-  item 6 — and that entry can go.
+* **The rest of the physics** — anisotropic pressure, NetCDF profiles, MaNTA
+  coupling. `TODO` carries each with what has been established, and anisotropic
+  pressure still has **no reference pinned**, which is the first thing it needs.
+  **Sonic rotation has left this list**: it is item 9, and `FLOW-PLAN.md` is the
+  design. **`TODO`'s "Try PARDISO again against a real oneMKL build" is
+  answered** — see item 6 — and that entry can go, as can its *Sonic toroidal
+  rotation* entry, which `FLOW-PLAN.md` supersedes.
 
 ## The standing rule
 

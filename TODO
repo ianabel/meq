@@ -131,8 +131,16 @@ Raised 2026-08-24.
 
 ================================================================================
 Sonic toroidal rotation
-Raised 2026-08-25.
+Raised 2026-08-25. SUPERSEDED 2026-09-01 by FLOW-PLAN.md.
 ================================================================================
+
+  FLOW-PLAN.md is the design and is staged FL-0 to FL-8. It keeps this entry's
+  two findings -- that <phi_0>_psi = 0 is a gauge choice and not a closure, and
+  that (97)'s root is unique and bracketable -- and adds three this entry does
+  not have: that (136) collapses to F = mu0 r^2 dp/dpsi|_r + g g', that the
+  residual therefore needs phi_0 but never dphi_0/dpsi, and that the published
+  rotating benchmarks do not all solve the same equation. What is kept below is
+  the working; the plan is what to do.
 
   meq solves the static Grad-Shafranov equation, whose source is
 
