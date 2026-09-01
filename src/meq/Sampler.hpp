@@ -34,6 +34,7 @@
  * Gamma" are the same question and the locator answers both at once.
  */
 
+#include <functional>
 #include <vector>
 
 #include "mfem.hpp"
@@ -89,6 +90,47 @@ namespace meq
 			                        std::vector<double> &values,
 			                        double fill ) const;
 
+			/**
+			 * Fill nodes just OUTSIDE the mesh by extrapolating the element
+			 * that owns the nearest boundary face.
+			 *
+			 * THIS EXISTS FOR THE CURVED PATH AND THE SLIVER IT LEAVES.
+			 * `Omega_h` is the union of background elements lying inside
+			 * `Gamma`, so `Gamma_h` is INSCRIBED in `Gamma` and there is a band
+			 * `O(h)` wide that is inside the plasma and outside the mesh.
+			 * Rasterised without this, that band is NaN, and a picture of a
+			 * smooth boundary comes out with a ragged polygonal edge -- which
+			 * looks like a meshing bug and is not one.
+			 *
+			 * IT IS EXTRAPOLATION AND THE FILLED VALUES ARE NOT THE SOLUTION.
+			 * A polynomial evaluated outside its own element is only as good as
+			 * its Taylor remainder, so @a reach is a hard limit rather than a
+			 * tuning knob: at `O(h)` the error is the discretisation error, and
+			 * far outside it is nothing at all. That `O(h)` band is exactly the
+			 * regime Cockburn & Solano's transfer analysis covers, which is
+			 * what makes this the same operation the extension technique
+			 * already performs -- not a new approximation invented for a plot.
+			 *
+			 * @param reach   how far to extrapolate, as a multiple of the
+			 *                boundary face's own length. Values above about 1
+			 *                are outside anything anybody has analysed.
+			 * @param accept  optional predicate on ( R, Z ): a node is filled
+			 *                only where this returns true. The curved path
+			 *                passes "inside Gamma", without which this would
+			 *                also paint a band OUTSIDE the plasma, where the
+			 *                solve makes no claim at all.
+			 * @return how many nodes were newly filled.
+			 */
+			int extendOutward( double reach,
+			                   std::function<bool( double, double )> const &accept
+			                       = std::function<bool( double, double )>() );
+
+			/// How many of locatedCount() were extrapolated by extendOutward()
+			/// rather than found inside an element. Written to the output file,
+			/// because a reader is entitled to know which nodes are the
+			/// solution and which are a continuation of it.
+			int extendedCount() const { return extended; }
+
 		private:
 			int index( int i, int j ) const { return j*nR + i; }
 
@@ -96,6 +138,7 @@ namespace meq
 			double rMin, rMax, zMin, zMax;
 			int nR, nZ;
 			int found;
+			int extended = 0;
 
 			/// Per node: the element holding it, or -1, and where in it.
 			std::vector<int> element;

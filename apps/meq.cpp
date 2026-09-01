@@ -845,6 +845,28 @@ int main( int argc, char **argv )
 			gridRMin, gridRMax, output.gridNR,
 			gridZMin, gridZMax, output.gridNZ );
 
+		// THE SLIVER BETWEEN Gamma_h AND Gamma, which only the curved path has.
+		// Omega_h is the union of background elements lying INSIDE Gamma, so
+		// Gamma_h is inscribed and there is a band O(h) wide that is inside the
+		// plasma and outside the mesh. Left alone it rasterises as NaN and the
+		// picture gets a ragged polygonal edge where the boundary is smooth.
+		//
+		// Filled by extrapolating the element across each boundary face, and
+		// ONLY where the node is inside Gamma -- the level set is what stops
+		// this painting a band outside the plasma, where the solve claims
+		// nothing. Reach 1.0: one face length, which is the O(h) regime the
+		// transfer technique is analysed in and no further.
+		int extended = 0;
+		if ( shape )
+		{
+			meq::BoundaryShape const *curve = shape.get();
+			extended = sampler.extendOutward( 1.0,
+				[ curve ]( double r, double z )
+				{
+					return curve->levelSet( r, z ) <= 0.0;
+				} );
+		}
+
 		// NaN outside the domain, which is what the file format documents and
 		// what a plotting library will mask for free. A zero there would be a
 		// physical claim, and a wrong one.
@@ -877,6 +899,9 @@ int main( int argc, char **argv )
 			writer.attribute( "boundary", "fitted (psi = 0 on the mesh boundary)" );
 		}
 		writer.attribute( "newton_iterations", solver->newtonIterations() );
+		// A reader is entitled to know which nodes are the solution and which
+		// are a continuation of it past Gamma_h. Zero on the fitted path.
+		writer.attribute( "extrapolated_nodes", extended );
 		writer.attribute( "final_residual",
 		                  solver->newtonResiduals().empty()
 		                      ? 0.0 : solver->newtonResiduals().back() );
@@ -902,16 +927,123 @@ int main( int argc, char **argv )
 			writer.attribute( "marking_theta", adapt.theta );
 			writer.attribute( "estimator_potential", "post-processed" );
 		}
+		// THE BOUNDARY meq WAS GIVEN, so a plot can draw the answer against
+		// what was asked for rather than against the mesh's own edge. On the
+		// curved path that is the smooth Gamma, sampled from the shape itself;
+		// on the fitted path Gamma IS the mesh boundary, so it is walked out of
+		// the mesh. Either way it is what psi = 0 was imposed on.
+		{
+			std::vector<double> boundaryR, boundaryZ;
+			if ( shape )
+			{
+				// 512 points: enough that a Miller shape with triangularity
+				// draws smoothly at any figure size, and trivial beside the
+				// grid itself.
+				int const samples = 512;
+				boundaryR.resize( samples );
+				boundaryZ.resize( samples );
+				for ( int s = 0; s < samples; ++s )
+					shape->point( 2.0*M_PI*s/samples,
+					              boundaryR[ s ], boundaryZ[ s ] );
+				writer.attribute( "boundary_source", "shape (smooth Gamma)" );
+			}
+			else
+			{
+				int unreached = 0;
+				meq::boundaryPolyline( *solveMesh, boundaryR, boundaryZ, unreached );
+				writer.attribute( "boundary_source", "mesh boundary" );
+				if ( unreached > 0 )
+					std::fprintf( stderr,
+						"meq: warning: the mesh boundary is not a single loop; "
+						"%d boundary vertices are not in boundary_R/Z\n",
+						unreached );
+			}
+			writer.boundary( boundaryR, boundaryZ );
+		}
+
 		writer.field( "psi", psi, "poloidal flux function", "Wb/rad" );
 		writer.field( "B_R", bR, "poloidal field, R component", "T" );
 		writer.field( "B_Z", bZ, "poloidal field, Z component", "T" );
 		writer.close();
 
-		std::printf( "meq: wrote %s.mesh, %s_psi.gf, %s_grad_psi.gf, %s.nc "
-		             "(%d of %d grid nodes inside the domain)\n",
-		             stem.c_str(), stem.c_str(), stem.c_str(), stem.c_str(),
-		             sampler.locatedCount(),
-		             sampler.nodesR()*sampler.nodesZ() );
+		// VTK LAST, AND FOR A REASON. Curving the mesh changes the map from
+		// reference to physical space, so everything that reads geometry --
+		// writeMfem(), the sampler -- has to have finished. Nothing below
+		// touches the mesh again.
+		//
+		// On the curved path the boundary is bent out onto the true Gamma, so
+		// the drawn domain is Omega rather than the inscribed polygon
+		// Omega_h. writeVtu() already emits VTK Lagrange cells, so a
+		// curvilinear mesh needs nothing further from the format.
+		double curved = 0.0;
+		int curvedNodes = 0;
+		if ( shape )
+		{
+			meq::BoundaryShape const *curve = shape.get();
+			curvedNodes = meq::curveBoundaryOnto( *solveMesh,
+				config->getDiscretisation().polynomialDegree,
+				[ curve ]( double r, double z, double &outR, double &outZ )
+				{
+					// Radial projection onto Gamma. levelSet() IS the radial
+					// gap -- |p - centre| minus the curve's radius at the same
+					// polar angle -- so subtracting it along the ray lands
+					// exactly on the curve. Exact for a star shaped boundary,
+					// which BoundaryShape's constructor already requires.
+					double const centreR = curve->majorRadius();
+					double const centreZ = curve->centreHeight();
+					double const vR = r - centreR, vZ = z - centreZ;
+					double const rho = std::hypot( vR, vZ );
+					outR = r;
+					outZ = z;
+					if ( rho <= 0.0 )
+						return;
+					double const gap = curve->levelSet( r, z );
+					outR = r - vR*gap/rho;
+					outZ = z - vZ*gap/rho;
+				}, curved );
+
+			// Not a warning below 100%: a face that cannot reach Gamma without
+			// folding its element is a statement about the mesh being coarse
+			// there, and the rest of the boundary still reaches. It is reported
+			// because the VTK boundary is then not uniformly Gamma, which a
+			// reader comparing it against the .nc boundary_R/Z would notice.
+			if ( curvedNodes > 0 && curved < 1.0 )
+				std::printf( "meq: %.0f%% of the boundary reached Gamma; the "
+				             "rest was held back to keep its elements from "
+				             "folding\n", 100.0*curved );
+			else if ( curvedNodes == 0 )
+				std::fprintf( stderr,
+					"meq: warning: could not bend the boundary onto Gamma "
+					"without tangling an element. The VTK boundary is the "
+					"polygon Gamma_h.\n" );
+		}
+
+		meq::writeVtu( stem, *solveMesh, solver->potential(), field,
+		               config->getDiscretisation().polynomialDegree );
+
+		// The description goes FIRST on each line and the path last, because
+		// the path can be long and absolute and any attempt to align a
+		// trailing comment against it collapses. Named individually rather
+		// than as "<stem>.*" because the three formats are for three different
+		// tools; tools/README.md says which is which.
+		//
+		// The ParaView line names "<stem>/<name>.pvd" and not "<stem>.pvd":
+		// that collection writes a directory with the index inside it. See
+		// Output.hpp.
+		std::string const name =
+			stem.substr( stem.find_last_of( '/' ) + 1 );
+		std::printf(
+			"meq: wrote\n"
+			"  exact, for GLVis and restart:  %s.mesh\n"
+			"                                 %s_psi.gf\n"
+			"                                 %s_grad_psi.gf\n"
+			"  VTK at degree %d, ParaView:     %s/%s.pvd\n"
+			"  (R, Z) grid, %d/%d inside:  %s.nc\n",
+			stem.c_str(), stem.c_str(), stem.c_str(),
+			config->getDiscretisation().polynomialDegree,
+			stem.c_str(), name.c_str(),
+			sampler.locatedCount(), sampler.nodesR()*sampler.nodesZ(),
+			stem.c_str() );
 	}
 	catch ( std::exception const &error )
 	{

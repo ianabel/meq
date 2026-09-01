@@ -53,6 +53,13 @@ docs/*.toc
 *.vtk
 *.vtu
 *.pvtu
+# ParaViewDataCollection writes a DIRECTORY named after the run, holding a .pvd
+# index and Cycle000000/ of pieces. The pieces are covered above; the .pvd was
+# not, and without it git showed the whole directory as untracked -- a directory
+# whose every entry is ignored is itself hidden, so this one line is what keeps
+# a driver test from leaving `?? soloviev-nstx/` behind. The names come from
+# user configs, so there is nothing more specific to match on.
+*.pvd
 # The driver's (R, Z) grid file. Same reasoning: run output, not source.
 *.nc
 visit_dump*/

@@ -25,6 +25,7 @@
  * computed, so the writer records its absence as an attribute.
  */
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -49,6 +50,117 @@ namespace meq
 	void writeMfem( std::string const &stem, mfem::Mesh &mesh,
 	                mfem::GridFunction const &potential,
 	                mfem::GridFunction const &flux );
+
+	/**
+	 * The same discrete solution as VTK, for ParaView and VisIt.
+	 *
+	 * Written through mfem::ParaViewDataCollection, which produces a
+	 * directory rather than a file:
+	 *
+	 *     <stem>/<name>.pvd              <-- THE FILE TO OPEN
+	 *     <stem>/Cycle000000/data.pvtu
+	 *     <stem>/Cycle000000/proc000000.vtu
+	 *
+	 * where <name> is the last path component of @a stem. The .pvd is the
+	 * index; the Cycle directory is an implementation detail of the format and
+	 * is not meant to be opened piece by piece. **The .pvd is INSIDE the
+	 * directory, not beside it** -- which is worth stating because every other
+	 * writer here produces a file at the stem, and a caller printing
+	 * "<stem>.pvd" would be naming something that does not exist.
+	 *
+	 * HIGH-ORDER OUTPUT IS ON, AND THAT IS THE WHOLE POINT OF WRITING IT.
+	 * VTK's native cells are linear, so the default path samples a P_k field
+	 * at the element vertices and throws away exactly the accuracy this
+	 * discretisation exists to buy -- a k = 3 solution would be drawn as if it
+	 * were k = 1, and the picture would be wrong in a way that looks like a
+	 * coarse mesh rather than like a bug. SetHighOrderOutput() writes VTK
+	 * Lagrange cells instead, and @a levelsOfDetail is the subdivision they
+	 * carry. Pass the polynomial degree.
+	 *
+	 * @param stem            path stem, as writeMfem().
+	 * @param potential       psi.
+	 * @param field           the POLOIDAL FIELD B, not the HDG flux q: this
+	 *                        file is for looking at, and B is the physical
+	 *                        quantity. meq::poloidalField() converts. The
+	 *                        exact q is in "<stem>_grad_psi.gf".
+	 * @param levelsOfDetail  subdivision per element; the polynomial degree is
+	 *                        the right value. Clamped to at least 1.
+	 */
+	void writeVtu( std::string const &stem, mfem::Mesh &mesh,
+	               mfem::GridFunction const &potential,
+	               mfem::GridFunction const &field,
+	               int levelsOfDetail );
+
+	/**
+	 * The domain boundary of @a mesh, as an ordered closed polyline.
+	 *
+	 * For a FITTED run this is Gamma itself: the plasma boundary is the mesh
+	 * boundary, and psi = 0 is imposed on it. For a run on an extracted
+	 * subdomain it is Gamma_h, the polygonal approximation the datum is
+	 * actually imposed on -- which is a different curve from the smooth Gamma
+	 * the user specified, and the difference is the whole subject of GS-2.
+	 *
+	 * ORDERED, because the point of it is to be drawn. The boundary elements
+	 * come out of MFEM in no particular order, so a caller plotting them as
+	 * given gets a star of chords rather than an outline; this walks the
+	 * vertex adjacency instead. @a r and @a z are cleared first and the loop is
+	 * NOT repeated at the end -- a reader closing the curve appends the first
+	 * point, which is what tools/plot_equilibrium.py does.
+	 *
+	 * ONLY THE LOOP CONTAINING THE FIRST BOUNDARY ELEMENT IS RETURNED. meq
+	 * solves a simply connected domain, so there is one; a mesh with a hole
+	 * would have two and this would quietly describe the wrong one, so it
+	 * reports how many boundary vertices it did not reach.
+	 *
+	 * @param unreached  set to the number of boundary vertices not on the
+	 *                   returned loop. Non-zero means the domain is not
+	 *                   simply connected and the answer is partial.
+	 */
+	void boundaryPolyline( mfem::Mesh &mesh,
+	                       std::vector<double> &r, std::vector<double> &z,
+	                       int &unreached );
+
+	/**
+	 * Bend the mesh's boundary out onto the true Gamma, for OUTPUT ONLY.
+	 *
+	 * On the curved path the solve happens on Omega_h, whose boundary Gamma_h
+	 * is a polygon inscribed in the smooth Gamma. Every picture drawn from it
+	 * therefore has a faceted edge that is not the boundary anybody asked for.
+	 * This installs a curvature of @a order on the mesh and moves the nodes of
+	 * each boundary face out onto Gamma, so the outer layer of elements gains a
+	 * curved edge and the drawn domain is Omega rather than Omega_h.
+	 *
+	 * IT NEEDS NO ADVANCED VTK, which is the pleasant surprise here: writeVtu()
+	 * already emits VTK Lagrange cells, and a curvilinear MFEM mesh is exactly
+	 * what those represent. The two features were independent and turn out to
+	 * compose.
+	 *
+	 * **THIS CHANGES THE GEOMETRY AND MUST BE THE LAST THING DONE.** The
+	 * GridFunction coefficients are untouched, but the map from reference to
+	 * physical space is not, so anything that samples, integrates or writes the
+	 * mesh afterwards sees a different domain. Call it after writeMfem() and
+	 * after the grid sampling, immediately before writeVtu().
+	 *
+	 * MOVING A BOUNDARY BY O( h ) CAN TURN AN ELEMENT INSIDE OUT, and a tangled
+	 * element renders as a black spike rather than as nothing. So the whole
+	 * displacement is applied, every element's Jacobian determinant is checked,
+	 * and on failure the displacement is halved and the check repeated. If no
+	 * fraction works the mesh is left exactly as it was found.
+	 *
+	 * @param order    curvature to install; the solve's polynomial degree is
+	 *                 the right value, since that is what writeVtu() subdivides
+	 *                 to anyway.
+	 * @param project  ( r, z ) on Gamma_h -> the corresponding point on Gamma.
+	 *                 A radial projection is what the shape supports and what
+	 *                 the driver passes.
+	 * @param applied  set to the fraction of the displacement that survived the
+	 *                 tangling check: 1 normally, 0 if the mesh was left alone.
+	 * @return the number of boundary nodes moved.
+	 */
+	int curveBoundaryOnto( mfem::Mesh &mesh, int order,
+	                       std::function<void( double, double,
+	                                           double &, double & )> const &project,
+	                       double &applied );
 
 	/*
 	 * The ( R, Z ) grid file.

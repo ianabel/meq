@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -108,6 +109,205 @@ BOOST_AUTO_TEST_CASE( theMfemFilesRoundTripExactly )
 	            "the grid function did not survive the round trip: worst "
 	            "coefficient moved by " << worst << ", which is the scale of a "
 	            "precision setting rather than of round-off" );
+}
+
+/// BENDING Gamma_h OUT ONTO Gamma, which is what makes a curved-path picture
+/// show the boundary that was asked for rather than the polygon inscribed in
+/// it.
+///
+/// The property is exact and so is the assertion: after curveBoundaryOnto with
+/// a circle projector, EVERY boundary node must lie on the circle. Not close to
+/// it -- on it, because the projector puts it there and nothing afterwards
+/// moves it. A test at a tolerance would pass while a fraction of the
+/// displacement was quietly being backed off for tangling, which is the failure
+/// this is for.
+BOOST_AUTO_TEST_CASE( theBoundaryBendsOntoTheTrueGamma )
+{
+	// A background box, and the subdomain of it inside a circle -- the same
+	// construction the driver's curved path uses, so Gamma_h here is a real
+	// inscribed polygon and not a contrivance.
+	double const centreR = 1.0, centreZ = 0.0, radius = 0.35;
+	auto const circle = [ = ]( mfem::Vector const &x )
+	{
+		return std::hypot( x( 0 ) - centreR, x( 1 ) - centreZ ) - radius;
+	};
+
+	mfem::Mesh background = meq::tests::makeMesh(
+		meq::tests::Rectangle{ 0.5, 1.5, -0.5, 0.5 }, 16 );
+
+	mfem::Array<int> marker;
+	int const inside = mfem::MarkLevelSetSubdomain( background, circle, 0.0,
+	                                               marker, 1 );
+	BOOST_TEST_REQUIRE( inside > 0 );
+	for ( int e = 0; e < background.GetNE(); ++e )
+		background.SetAttribute( e, marker[ e ] ? 1 : 2 );
+	background.SetAttributes();
+
+	mfem::Array<int> domainAttribute( 1 );
+	domainAttribute[ 0 ] = 1;
+	mfem::SubMesh mesh = mfem::SubMesh::CreateFromDomain( background,
+	                                                      domainAttribute );
+
+	// Gamma_h is inscribed, so before bending every BOUNDARY vertex is strictly
+	// inside the circle. That gap is the thing being fixed, so it is worth
+	// pinning -- and it has to be measured over the boundary vertices alone.
+	// Taken over every vertex it would report the one nearest the centre, which
+	// is the radius itself and says nothing about Gamma_h.
+	double worstBefore = 0.0;
+	for ( int b = 0; b < mesh.GetNBE(); ++b )
+	{
+		mfem::Array<int> vertices;
+		mesh.GetBdrElementVertices( b, vertices );
+		for ( int n = 0; n < vertices.Size(); ++n )
+		{
+			double const *p = mesh.GetVertex( vertices[ n ] );
+			worstBefore = std::max( worstBefore,
+				radius - std::hypot( p[ 0 ] - centreR, p[ 1 ] - centreZ ) );
+		}
+	}
+	BOOST_TEST_REQUIRE( worstBefore > 0.0,
+	                    "the subdomain already reaches the circle, so this "
+	                    "measures nothing" );
+
+	double applied = 0.0;
+	int const moved = meq::curveBoundaryOnto( mesh, 2,
+		[ = ]( double r, double z, double &outR, double &outZ )
+		{
+			double const vR = r - centreR, vZ = z - centreZ;
+			double const rho = std::hypot( vR, vZ );
+			outR = r;
+			outZ = z;
+			if ( rho > 0.0 )
+			{
+				outR = centreR + vR*radius/rho;
+				outZ = centreZ + vZ*radius/rho;
+			}
+		}, applied );
+
+	BOOST_TEST_REQUIRE( moved > 0, "no boundary nodes were moved at all" );
+	BOOST_TEST( applied == 1.0,
+	            "only " << applied << " of the displacement was applied, so an "
+	            "element tangled. The boundary is then somewhere between "
+	            "Gamma_h and Gamma, which is worse than either" );
+
+	// Every node of every boundary face, in the CURVED nodal space -- vertices
+	// and the high-order nodes between them alike. A curvature that moved only
+	// the vertices would leave the edges straight and fail here.
+	mfem::GridFunction *nodes = mesh.GetNodes();
+	BOOST_TEST_REQUIRE( nodes != nullptr );
+	mfem::FiniteElementSpace const *space = nodes->FESpace();
+
+	double worst = 0.0;
+	int checked = 0;
+	for ( int b = 0; b < mesh.GetNBE(); ++b )
+	{
+		mfem::Array<int> vdofs;
+		space->GetBdrElementVDofs( b, vdofs );
+		int const perComponent = vdofs.Size()/2;
+		for ( int n = 0; n < perComponent; ++n )
+		{
+			double const r = ( *nodes )( vdofs[ n ] );
+			double const z = ( *nodes )( vdofs[ perComponent + n ] );
+			worst = std::max( worst,
+				std::abs( std::hypot( r - centreR, z - centreZ ) - radius ) );
+			++checked;
+		}
+	}
+
+	std::printf( "\n  boundary bent onto Gamma: %d nodes over %d faces, "
+	             "was up to %.3e inside, now off the circle by %.3e\n",
+	             checked, mesh.GetNBE(), worstBefore, worst );
+	std::fflush( stdout );
+
+	BOOST_TEST( worst < 1.0e-12,
+	            "a boundary node sits " << worst << " off the circle after "
+	            "projection onto it. Either a node was missed -- the high-order "
+	            "ones between the vertices are the likely ones -- or the "
+	            "displacement was scaled back" );
+}
+
+/// THE VTK FILES, AND THE ONE PROPERTY THAT CAN SILENTLY BE WRONG.
+///
+/// Writing VTK is hard to get catastrophically wrong -- ParaView either opens
+/// the file or it does not, and a human notices. What CAN go wrong silently is
+/// the resolution: VTK's native cells are linear, so the default path samples a
+/// P_k field at the element vertices, and a k = 3 solution is then drawn as if
+/// it were k = 1. The picture still looks like a plausible equilibrium. It
+/// looks like a coarser mesh, which is exactly what nobody investigates.
+///
+/// So the assertion is on the POINT COUNT: high-order output subdivides each
+/// element, so the piece must carry substantially more points than the mesh has
+/// vertices. A regression to linear output would take it to roughly the vertex
+/// count and fail here.
+BOOST_AUTO_TEST_CASE( theVtkFilesCarryTheHighOrderSolution )
+{
+	meq::analytic::SolovievEquilibrium const &eq = equilibrium();
+	mfem::Mesh mesh = meq::tests::makeMesh( box(), 4 );
+
+	mfem::FunctionCoefficient source( [ &eq ]( mfem::Vector const &x )
+		{ return eq.f( x( 0 ), x( 1 ), 0.0 ); } );
+	mfem::FunctionCoefficient exact( [ &eq ]( mfem::Vector const &x )
+		{ return eq.psi( x( 0 ), x( 1 ) ); } );
+
+	int const degree = 3;
+	meq::GradShafranovSolver solver( mesh, degree );
+	solver.setSource( source );
+	solver.setBoundaryData( exact );
+	solver.solve();
+
+	mfem::GridFunction field( solver.flux().FESpace() );
+	meq::poloidalField( solver.flux(), field );
+
+	std::string const stem = "meq_test_vtk";
+	meq::writeVtu( stem, mesh, solver.potential(), field, degree );
+
+	// The .pvd is INSIDE the collection directory, which is the thing about
+	// this format most likely to be got wrong by a caller. Asserting the
+	// documented path is what would catch Output.hpp drifting from MFEM.
+	std::string const pvd = stem + "/" + stem + ".pvd";
+	std::ifstream index( pvd );
+	BOOST_TEST_REQUIRE( index.good(),
+	                    "no .pvd at " << pvd << ". ParaViewDataCollection "
+	                    "writes the index inside the collection directory, not "
+	                    "beside it -- if that changed, Output.hpp and the "
+	                    "driver's message are both now wrong" );
+
+	std::string const piece = stem + "/Cycle000000/proc000000.vtu";
+	std::ifstream vtu( piece, std::ios::binary );
+	BOOST_TEST_REQUIRE( vtu.good(), "no .vtu piece at " << piece );
+	std::string const content( ( std::istreambuf_iterator<char>( vtu ) ),
+	                            std::istreambuf_iterator<char>() );
+
+	// Base64 payload, plain-XML header: the field names are greppable.
+	BOOST_TEST( content.find( "Name=\"psi\"" ) != std::string::npos,
+	            "the .vtu declares no psi array" );
+	BOOST_TEST( content.find( "Name=\"B\"" ) != std::string::npos,
+	            "the .vtu declares no B array -- the poloidal field is what "
+	            "this file is written to look at" );
+
+	std::size_t const points = content.find( "NumberOfPoints=\"" );
+	BOOST_TEST_REQUIRE( points != std::string::npos );
+	long const written = std::strtol(
+		content.c_str() + points + std::string( "NumberOfPoints=\"" ).size(),
+		nullptr, 10 );
+
+	std::printf( "\n  .vtu at k = %d: %ld points against %d mesh vertices\n",
+	             degree, written, mesh.GetNV() );
+	std::fflush( stdout );
+
+	BOOST_TEST( written > 2*mesh.GetNV(),
+	            "the .vtu carries " << written << " points for a mesh of "
+	            << mesh.GetNV() << " vertices at k = " << degree << ". That is "
+	            "linear output: SetHighOrderOutput() is off or "
+	            "SetLevelsOfDetail() is 1, and every picture drawn from this "
+	            "file understates the solution by two polynomial degrees" );
+
+	// Written by MFEM, so removed by hand: Scratch takes one file.
+	std::remove( piece.c_str() );
+	std::remove( ( stem + "/Cycle000000/data.pvtu" ).c_str() );
+	std::remove( pvd.c_str() );
+	std::remove( ( stem + "/Cycle000000" ).c_str() );
+	std::remove( stem.c_str() );
 }
 
 /// The grid file, read back with the NetCDF library and compared against the

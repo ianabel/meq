@@ -39,8 +39,51 @@ converging quadratically. `tests/convergence/SolovievConvergence.cpp` and
 
 **meq is runnable.** `apps/meq.cpp` is the driver, `MEQ_BUILD_APP` defaults
 `ON`, and `meq config.toml` parses, builds the mesh and source, solves — with
-the adaptive loop if asked — and writes `.mesh`, `_psi.gf`, `_grad_psi.gf` and a
-`(R, Z)` NetCDF file, with exit codes 0/1/2/3 as `DRIVER-PLAN.md` §5 specifies.
+the adaptive loop if asked — and writes the same equilibrium **three times**,
+with exit codes 0/1/2/3 as `DRIVER-PLAN.md` §5 specifies:
+
+| | |
+|---|---|
+| `.mesh`, `_psi.gf`, `_grad_psi.gf` | exact — every P_k coefficient. GLVis, and meq's own restart |
+| `<stem>/<stem>.pvd` + `Cycle000000/` | VTK, **at the polynomial degree of the solve**. ParaView, VisIt |
+| `.nc` | ψ and **B** on a uniform `(R, Z)` grid. Lossy, and the interchange format |
+
+**The VTK is written high-order deliberately**, and it is the one thing in that
+row that can be silently wrong: VTK's native cells are linear, so the default
+path draws a `k = 3` solution as though it were `k = 1` — a picture that looks
+like a coarse mesh rather than like a bug.
+`OutputConvergence::theVtkFilesCarryTheHighOrderSolution` asserts the point
+count against the vertex count for exactly that reason, and reads **320 points
+against 25 vertices** at `k = 3`.
+
+**THE CURVED PATH LEAVES A BAND BETWEEN `Γ_h` AND `Γ`, AND BOTH OUTPUT FORMATS
+NOW DEAL WITH IT — DIFFERENTLY, BECAUSE THEY HAVE TO.** `Ω_h` is the union of
+background elements lying *inside* `Γ`, so `Γ_h` is inscribed and there is a
+band `O(h)` wide that is inside the plasma and outside the mesh.
+
+* **The `.nc` grid extrapolates into it**, from the element across each boundary
+  face, one face length and only inside `Γ`. `extrapolated_nodes` records how
+  many. Measured on `miller-curved`, ψ overshoots past zero by **1.1e-02**
+  against a peak of 2.5e-01 — the same order as `dist(Γ_h, Γ)` itself, so the
+  band is filled about as well as the boundary's position is known. **Contours
+  near ψ = 0 wobble there.**
+* **The `.vtu` bends the mesh onto `Γ`** — a curvature is installed and each
+  boundary face is moved out. Since the VTK is already Lagrange cells this
+  needed **nothing further from the format**; the two features composed.
+  `theBoundaryBendsOntoTheTrueGamma` asserts the nodes land on the target to
+  **1.1e-16**.
+
+**Two things about that bending were got wrong on the way and are worth not
+repeating.** Smoothing the displacement into the interior on the *vdof* graph
+couples R to Z — they share one index range — so a radial displacement gets
+averaged against a vertical one; measured, that made tangling **worse**, 25%
+surviving where moving the boundary alone managed 50%. And backing the
+displacement off **globally** costs every face the worst face's limit: per-node
+backoff takes `miller-curved` from 50% to **96%** of the boundary reaching `Γ`.
+The gap can exceed an element's own size, so some faces genuinely cannot reach,
+and the driver reports the fraction that did.
+
+`tools/README.md` is the guide to which format goes with which reader.
 `DriverAcceptance.cpp` asserts the driver reproduces the *library* on the same
 configuration — 1.189e-16 over 15,360 dofs — rather than comparing against a
 closed form, for the reason recorded beside `examples/soloviev-nstx.toml`.
@@ -2958,6 +3001,9 @@ tests/       unit/ (Boost.Test), convergence/ (rate assertions),
              analytic/ (closed-form solutions used by both),
              performance/ (TraceSolverScaling + scan.sh -- built, NOT a ctest,
              because every number in it is a timing)
+tools/       plotting and visualisation. plot_equilibrium.py reads the
+             NetCDF; tools/README.md says which of the three output formats
+             goes with which reader, and why they are not interchangeable
 examples/    TOML run configurations
 refs/        Refs.md is tracked; the PDFs are gitignored, fetch by doi
 attic/       not ported, not built, kept visible. See its README.
