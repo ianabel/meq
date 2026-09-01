@@ -15,112 +15,86 @@ and `src/meq` is an implementation of them.
 **meq solves the semi-linear Grad–Shafranov equation by Newton**, which before
 stage 2 it had never done at all. `k+1` in both `ψ` and `q` for `k = 1,2,3` over
 four dyadic meshes, against an exact Solov'ev equilibrium on the linear path and
-HDG-GS-1's Example 5 manufactured solution on the nonlinear one, with Newton
+HDG-GS-1's Example 5 manufactured solution on the non-linear one, with Newton
 converging quadratically. `tests/convergence/SolovievConvergence.cpp` and
 `NewtonConvergence.cpp` are the acceptance criteria and print the tables.
-Concretely:
 
-* `src/meq/GradShafranov.{hpp,cpp}` is ported — `DarcyForm` with
-  `EnableHybridization` — is in `meq_core`, and is covered by the `naming` check
-  like everything else.
-* `src/meq/Solution.hpp` is **gone**, not ported. It wrapped hand-rolled block
-  offsets and a second set of finite element spaces around what `DarcyForm` now
-  owns, and `GradShafranovSolver` carries what was left of its job. Its
-  `Prolong()` and `Update()` are stage-6 work against a mesh update that does not
-  exist yet, and its `WriteOutputMFEM()` went with it. `src/meq/Output.{hpp,cpp}`
-  replaced that job in stage 7c. `v0-legacy` has the original.
-* `src/meq/Estimator.{hpp,cpp}` is written, compiles, is in `meq_core` and is
-  under the `naming` check. `GridFunction::GetValueFacet`, which the old header
-  called and which 4.9.1 does not have, is replaced by
-  `traceFes->GetFaceElement(f)` + `GetFaceVDofs()` + `CalcShape()`, exploiting
-  `DG_Interface_FECollection`'s `VALUE` map type — the same pattern
-  `estimators_hdg.cpp` uses.
-* `apps/meq.cpp` is the **driver**, and `MEQ_BUILD_APP` now defaults `ON`.
-  `meq config.toml` parses, builds the mesh and source, solves — with the
-  adaptive loop if it is asked for — prints a residual history and writes
-  `.mesh`, `_psi.gf`, `_grad_psi.gf` and a `(R, Z)` NetCDF file. Exit codes
-  0/1/2/3 as `DRIVER-PLAN.md` §5 specifies, and exit 2 is only reachable because
-  `MFEM_USE_EXCEPTIONS` is now on.
-* `Config`, `Profiles`, `Source` compile and test.
+* `src/meq/GradShafranov.{hpp,cpp}` is the solver — `DarcyForm` with
+  `EnableHybridization`. `Config`, `Profiles`, `Source`, `BoundaryShape`,
+  `Estimator`, `Field`, `Sampler`, `WarmStart` and `Output` are all in
+  `meq_core` and all under the `naming` check.
+* `src/meq/Solution.hpp` is **gone**, not ported: it wrapped hand-rolled block
+  offsets and a second set of FE spaces around what `DarcyForm` now owns.
+  `v0-legacy` has the original.
+* `Estimator.hpp` called `GridFunction::GetValueFacet`, which 4.9.1 does not
+  have; it is replaced by `traceFes->GetFaceElement(f)` + `GetFaceVDofs()` +
+  `CalcShape()`, exploiting `DG_Interface_FECollection`'s `VALUE` map type — the
+  same pattern `estimators_hdg.cpp` uses.
 * **`ψ_ax` is an unknown of the non-linear system**, not an input.
-  `meq::NormalisedSource` is the interface for a profile posed in normalised
-  flux and `setSource( NormalisedSource &, double )` closes it by a bordered
-  Newton — the trace and `ψ_ax` together, with the two non-local terms in the
-  border. `HighBetaConvergence` is the acceptance criterion and it is green.
-  `meq::NormalisedMHDSource` is the production source built on two `Profile`s;
-  it is not yet reachable from a TOML file.
+  `meq::NormalisedSource` is the interface and
+  `setSource( NormalisedSource &, double )` closes it by a bordered Newton, with
+  the two non-local terms in the border. `HighBetaConvergence` is the acceptance
+  criterion and it is green. `meq::NormalisedMHDSource` is the production source
+  built on two `Profile`s and **is not yet reachable from a TOML file**.
 
-**meq is runnable.** `tests/convergence/DriverAcceptance.cpp` is the test that
-says so, and it asserts the driver reproduces the *library* on the same
-configuration — 1.189e-16 relative over 15,360 dofs — rather than comparing
-against a closed form, for the reason recorded beside
-`examples/soloviev-nstx.toml`.
+**meq is runnable.** `apps/meq.cpp` is the driver, `MEQ_BUILD_APP` defaults
+`ON`, and `meq config.toml` parses, builds the mesh and source, solves — with
+the adaptive loop if asked — and writes `.mesh`, `_psi.gf`, `_grad_psi.gf` and a
+`(R, Z)` NetCDF file, with exit codes 0/1/2/3 as `DRIVER-PLAN.md` §5 specifies.
+`DriverAcceptance.cpp` asserts the driver reproduces the *library* on the same
+configuration — 1.189e-16 over 15,360 dofs — rather than comparing against a
+closed form, for the reason recorded beside `examples/soloviev-nstx.toml`.
 
 **The curved boundary works through the driver.** `[boundary.shape]` builds the
-shape, marks `D_h` out of the background mesh, locates `Γ_h` and hands a
-`VertexConePath` to `setExtension()` — GS-2's technique, end to end, from a
-config file. `examples/miller-curved.toml` is the worked example. Two checks
-guard it, because the failure mode here is quiet: `Γ_h` carrying no transferred
-datum silently imposes zero and still converges, so
-`theDriverSolvesOnACurvedBoundary` pins the driver against the library (1.6e-16)
-*and* against that zero-datum solve (2.7e-1, i.e. the transfer is doing real
-work).
+shape, marks `D_h`, locates `Γ_h` and hands a `VertexConePath` to
+`setExtension()` — GS-2's technique end to end from a config file;
+`examples/miller-curved.toml` is the worked example. **Two checks guard it,
+because the failure mode is quiet**: `Γ_h` carrying no transferred datum
+silently imposes zero and still converges, so `theDriverSolvesOnACurvedBoundary`
+pins the driver against the library (1.6e-16) *and* against that zero-datum
+solve (2.7e-1, i.e. the transfer is doing real work).
 
-**The adaptive loop works through the driver, on both paths.**
-`[adaptivity] Enabled = true` runs solve → post-process → estimate → mark →
-refine, stopping at `TargetError` or `MaxIterations` and saying which, and prints
-a per-cycle table. On the curved path it uses `meq::AdaptiveDomain` — the
-companion mesh of GS-2 §3.3, without which `dist(Γ_h, Γ)/h_loc` doubles every
-cycle and the transfer silently leaves the regime it is analysed in — and it
-calls `setTransferredBoundary()` automatically, saying so in the log.
-`examples/miller-adaptive.toml` is the worked example: η monotone
-4.73e-4 → 2.47e-4 → 1.07e-4 → 6.87e-5 over four cycles, 97 → 449 elements, 0
-transfer paths widened at any cycle — re-measured 2026-08-29, on `ψ*`. The
-figures this file used to carry, 2.75e-3 → 4.77e-4 over 97 → 1069 elements, were
-the same four cycles with `η` built on the raw potential, which is what the loop
-had to do while MFEM's reconstruction was broken.
-`theDriverRunsTheAdaptiveLoop` pins it
-against the same loop driven through the library at **1.653e-16 over 6414 dofs**,
-and separately asserts that it refined at all, that it refined *adaptively*, that
-η came down, and that assumption P.1 survived the graded `Γ_h`.
+**The adaptive loop works through the driver, on both paths.** solve →
+post-process → estimate → mark → refine, stopping at `TargetError` or
+`MaxIterations` and saying which. On the curved path it uses
+`meq::AdaptiveDomain` — the companion mesh of GS-2 §3.3, without which
+`dist(Γ_h, Γ)/h_loc` doubles every cycle and the transfer silently leaves the
+regime it is analysed in — and calls `setTransferredBoundary()` automatically.
+`examples/miller-adaptive.toml`: η monotone 4.73e-4 → 6.87e-5 over four cycles,
+97 → 449 elements, 0 transfer paths widened. `theDriverRunsTheAdaptiveLoop` pins
+it against the same loop driven through the library at **1.653e-16 over 6414
+dofs**, and separately asserts that it refined, that it refined *adaptively*,
+that η came down, and that assumption P.1 survived the graded `Γ_h`.
+
+**A `TargetError` chosen against a pre-2026-08-29 run is not comparable**: η is
+built on `ψ*` now rather than `Potential::Raw`, which is a different and smaller
+quantity on the same mesh. See *Post-processing is back*.
 
 **The driver's non-linear path is a reactive ladder**: Newton, and on *observed*
 failure `PicardThenNewton`, rebuilding the solver because a caught
-`ErrorException` leaves one unusable. Never predictive — nothing may be inferred
-from `F` about which solver to run, for the reason recorded under *Why meq's
-Newton struggles*.
+`ErrorException` leaves one unusable. **Never predictive** — nothing may be
+inferred from `F` about which solver to run, and two candidate detectors have
+now been measured and killed. See *Why meq's Newton struggles* and *There is no
+cheap discriminator*.
 
-**What the driver still does not do, and refuses rather than approximates**:
-`[boundary] Type = "exact"` (needs a closed form `meq::Source` does not carry),
-which exits 1 with an explanation.
-The interpolating warm start of `DRIVER-PLAN.md` §4 needs GSLIB and is not
-written; the exact restart — same mesh, same degree — is, and it is a
-*first-cycle* guess only, since carrying an answer across a refinement is that
-same missing interpolation.
+**What the driver refuses rather than approximates**: `[boundary] Type =
+"exact"` needs a closed form `meq::Source` does not carry, and exits 1 with an
+explanation. The interpolating warm start of `DRIVER-PLAN.md` §4 needs GSLIB and
+is not written; the exact restart — same mesh, same degree — is, and it is a
+*first-cycle* guess only.
 
-**The loop builds `η` on `ψ*`, which it could not do until MFEM was fixed.** Four
-of eq. (20)'s five terms are built on the post-processed potential, and while
-`ReconstructFluxAndPot()` skipped its mean-value regularisation the driver ran on
-`Potential::Raw` instead — one order down, correct but blunt. The fix landed; see
-*Post-processing is back*. **A `TargetError` chosen against a pre-fix run is not
-comparable**, because η is now a different and smaller quantity on the same mesh.
+**The non-linear ordering is `NonlinearOrdering::NPC`**, since MFEM deleted the
+mode meq's default used to be. `CondenseThenLinearise` is kept as the backup and
+is still the one that converges on stiff under-resolved meshes, at three to four
+times the wall clock everywhere else. See *The NPC port*.
 
-Stage 3's local post-processing was dropped as **meq code** and is not absent
-from the calculation: `DarcyForm::Reconstruct()` supplies `ψ*` at `k+2` and the
-estimator is built on it. See *Post-processing is back, and it was free*.
-
-**And it is worth being clear about what the old code did, because the README
-overstates it considerably.** Before the port, `meq` solved the *vacuum* coil
-field and nothing else: `meq.cpp`'s right-hand side took `psi` and ignored it,
-`Configuration::plasma` was hardcoded `nullptr`, and the profile loader was a
-`{ return; }` stub that silently produced an empty spline. **meq had never solved
-a Grad–Shafranov equation** until stage 2, and the semi-linear one still waits on
-stage 4.
-
-The four test files that existed were empty Boost stubs, and one of them —
-asserting `foo == bar` with neither declared — could not compile. There was no
-`test` target. Treat any claim in `README.md` about testing as aspirational until
-it is checked; that file has not yet been rewritten.
+**`README.md` overstates what the old code did and has not been rewritten.**
+Before the port meq solved the *vacuum* coil field and nothing else:
+`meq.cpp`'s right-hand side took `psi` and ignored it, `Configuration::plasma`
+was hardcoded `nullptr`, and the profile loader was a `{ return; }` stub that
+silently produced an empty spline. The four test files that existed were empty
+Boost stubs, and one — asserting `foo == bar` with neither declared — could not
+compile. **Treat any claim in `README.md` about testing as aspirational.**
 
 **`ROADMAP.md` is the priority order**, and says which items belong to meq and
 which are requests on `../mfem-hdg-dev`, where another agent is working. This
@@ -147,13 +121,13 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 git submodule update --init --recursive     # extern/toml11
 cmake -B build
 cmake --build build -j4
-cd build && ctest --output-on-failure       # ~870 s, 22/23
+cd build && ctest --output-on-failure       # ~525 s, 23/23
 ```
 
 **ctest no longer needs any environment set by hand.** `tests/CMakeLists.txt`
 puts both `MKL_THREADING_LAYER=GNU` and `MKL_NUM_THREADS=1` on every registered
 test — the first for correctness, the second because without it the suite takes
-well over an hour instead of thirteen minutes. Running a test binary **directly**
+well over an hour instead of nine. Running a test binary **directly**
 still needs both:
 
 ```sh
@@ -181,88 +155,56 @@ gcovr --root .. --filter 'src/meq/' --print-summary        # or --html-details
 `MEQ_ENABLE_COVERAGE` is an option, not a build type, on purpose: a coverage
 build wants `-O0`, and routing that through `CMAKE_BUILD_TYPE` would silently
 drop `NDEBUG` for anyone who had set it, changing which `MFEM_ASSERT`s are live.
-Stage 4 found a `BlockVector` size mismatch that *only* an assert catches, so
-that difference is worth choosing rather than inheriting.
+Stage 4 found a `BlockVector` size mismatch that *only* an assert catches.
 
-**CI cannot build the solver, and this is structural rather than an oversight.**
-The MFEM meq needs is `meq-integration`, a local merge of four local branches,
-published on no remote — so a hosted runner cannot obtain it and caching does not
-help, there is nothing to fetch. (`ci.yml`'s own comment still names
-`gf-hdg-subdomains-dev`, which was true when it was one branch.) `find_package(MFEM)` is therefore **not `REQUIRED`**: without
-it, `CMakeLists.txt` builds the MFEM-free half — `Config`, `Profiles`, `Source`,
-`SourceFactory` — and `tests/CMakeLists.txt`'s existing "unit not present"
-guard already skips every convergence test without needing to know why.
+**CI CANNOT BUILD THE SOLVER, AND THIS IS STRUCTURAL.** The MFEM meq needs is
+`meq-integration`, a local merge published on no remote, so a hosted runner
+cannot obtain it and caching does not help — there is nothing to fetch.
+`find_package(MFEM)` is therefore **not `REQUIRED`**: without it `CMakeLists.txt`
+builds the MFEM-free half — `Config`, `Profiles`, `Source`, `SourceFactory` — and
+`tests/CMakeLists.txt`'s existing "unit not present" guard skips every
+convergence test without needing to know why. So `ci.yml` runs four unit suites,
+the `naming` check and a coverage gate at 90% lines. **Treat a green CI badge as
+evidence about the configuration and profile layers and about nothing else** —
+the `full` job is written but `if: false` until the branch is published or a
+self-hosted runner exists.
 
-So `.github/workflows/ci.yml` runs four unit suites, the `naming` check and a
-coverage gate at 90% lines (94.8% measured). **That 94.8% is over four files,
-not over the library** — reading it as a statement about meq is a mistake this
-file used to invite.
+**EVERY COVERAGE FIGURE THIS FILE USED TO CARRY IS DELETED RATHER THAN
+UPDATED.** They predated the bordered Newton and the NPC port —
+`GradShafranov.cpp` has gained about 950 lines and two whole solve paths since —
+and quoting a stale percentage is worse than quoting none. Two things about the
+*measurement* survive, and they are the transferable part.
 
-**And the whole-library figure depends on which tool you ask, by a lot.** Two
-denominators, on the same run:
+**A line-coverage percentage on this codebase is partly a measurement of comment
+density.** On the same run, `GradShafranov.cpp` read **92.7%** to `gcov`
+(executable lines only, 586 of them) and **64%** to `gcovr` (its own line set,
+838). This project comments heavily, and `gcovr` counts roughly 250 lines that
+`gcov` does not consider executable at all — then reports most of them as
+uncovered. The CI gate uses `gcovr`, so that is the operative number for the
+gate; `gcov`'s is the operative number for "is this code tested".
 
-| `src/meq/GradShafranov.cpp` | coverable lines | covered |
-|---|---|---|
-| `gcov`, executable lines only | 586 | **92.7%** |
-| `gcovr`, its own line set | 838 | **64%** |
+**A claim this file carried, and which was wrong, is worth leaving recorded**:
+that the solver sat at 60% against 92–100% for the configuration layer, so "the
+best-covered code in meq parses TOML and the least-covered is the part every
+physical claim rests on". The 60% was `gcovr`'s number compared against
+`gcov`-flavoured intuitions. On one denominator the solver and `Config.cpp` were
+the same. **A measurement about the tool, not about the code** — the same trap
+as the threaded-MKL one.
 
-The file is 1554 lines for about 893 of code — this project comments heavily —
-and `gcovr` counts roughly 250 lines that `gcov` does not consider executable at
-all, most of which it then reports as uncovered. **So a line-coverage percentage
-on this codebase is partly a measurement of comment density.** The CI gate uses
-`gcovr`, so that is the operative number for the gate; `gcov`'s is the operative
-number for the question "is this code tested".
+What is true regardless of the denominator is that **22 of
+`GradShafranovSolver`'s 51 methods were called by nothing**, and
+`SolverContract.cpp` was written for that rather than for a percentage — it
+found `setSource()` silently accepting a second source of the same kind, and
+value faults throwing `logic_error` where the constructor throws
+`invalid_argument`. **Branch coverage, last seen at 48%, is the figure with real
+headroom in it and the one nobody has looked at.**
 
-On the honest denominator, measured over the whole suite:
-
-| | |
-|---|---|
-| `Source.cpp` 100% · `Profiles.cpp` 99.3% · `BoundaryShape.cpp` 98.1% | |
-| `Sampler.cpp` 97.3% · `SourceFactory.cpp` 95.2% | |
-| **`GradShafranov.cpp` 92.7%** · `Config.cpp` 92.2% · `Estimator.cpp` 89.1% | |
-| `WarmStart.cpp` 88.6% · `Output.cpp` 73.1% · `Field.cpp` 61.3% | |
-
-`gcovr` over everything reads 82.2% of lines, 83.0% of functions and 48.4% of
-branches.
-
-**EVERY FIGURE IN THIS SUBSECTION PREDATES THE BORDERED NEWTON AND HAS NOT BEEN
-RE-MEASURED.** `GradShafranov.cpp` gained about 350 lines and a whole solve path
-in it; `Source.cpp` gained `NormalisedMHDSource`, which the CI gate's
-`--filter src/meq/Source` does cover and which has unit tests of its own. So the
-shape of the argument here — two denominators, comment density, branch coverage
-being the figure with headroom — still stands, and the specific percentages
-should be re-run before anyone quotes them. `gcovr` is still not installed on
-this machine; see the recipe below.
-
-**A claim this file carried briefly, and which was wrong, is worth leaving
-recorded**: that the solver sat at 60% against 92–100% for the configuration
-layer, so "the best-covered code in meq parses TOML and the least-covered is the
-part every physical claim rests on". The 60% was `gcovr`'s number and the
-comparison was against `gcov`-flavoured intuitions. On one denominator the solver
-is 92.7% and `Config.cpp` is 92.2% — they are the same. The two weakest files are
-`Field.cpp` and `Output.cpp`, both small. It is the same trap as the threaded-MKL
-one: **a measurement about the tool, not about the code.**
-
-What is true regardless is that 22 of `GradShafranovSolver`'s 51 methods were
-called by nothing, and `SolverContract.cpp` was written for that rather than for
-a percentage — it found `setSource()` silently accepting a second source of the
-same kind, and value faults throwing `logic_error` where the constructor throws
-`invalid_argument`. Branch coverage at 48% is the figure with real headroom in
-it, and it is the one nobody has looked at.
-
-**And `gcovr` is not installed on this machine**, so the recipe above fails with
+**`gcovr` is not installed on this machine**, so the recipe above fails with
 `command not found`; a venv is the way round it, and it needs
 `--merge-mode-functions=separate` or it aborts on `Config.hpp`'s inline
-accessors appearing at two line numbers across translation units. Run it from the
-repo root: `--root .` after a `cd` into the build directory silently matches
+accessors appearing at two line numbers across translation units. Run it from
+the repo root: `--root .` after a `cd` into the build directory silently matches
 nothing and reports 0%.
-
-**What it does not run is every
-claim about rates** — the HDG assembly, Newton, the extension technique and the
-estimator are all local-only, and the `full` job in that workflow is written but
-`if: false` until either the branch is published or a self-hosted runner exists.
-Treat a green CI badge as evidence about the configuration and profile layers
-and about nothing else.
 
 ### Why toml11 is a submodule and MFEM is not
 
@@ -504,13 +446,13 @@ otherwise, which is also the sibling project's standing advice: **do not derive
 | `MFEM_USE_SUNDIALS` | KINSol, so `KINSolver(KIN_LINESEARCH)` is reachable. **Now `../sundials/cuda-install`, not `../sundials/install`** — see the CUDA row |
 | `MFEM_USE_GSLIB` | `FindPointsGSLIB`; gslib v1.0.9 built alongside at `../mfem/gslib` |
 | `MFEM_USE_SUITESPARSE` | UMFPACK, the direct solver meq's own solver runs on |
-| `MFEM_USE_MKL_PARDISO` | `PardisoSolver`, oneAPI MKL 2026.1, **on the threaded `mkl_gnu_thread` layer since 2026-08-30**. It used to be resolved to Debian's `mkl_sequential`, which is a bigger deal than it sounds — see *Threaded MKL is a catastrophe here* |
+| `MFEM_USE_MKL_PARDISO` | `PardisoSolver`, oneAPI MKL 2026.1, **on the threaded `mkl_gnu_thread` layer since 2026-08-30**. It used to be resolved to Debian's `mkl_sequential`, which is a bigger deal than it sounds — see *Traps* |
 | `MFEM_USE_EXCEPTIONS` | `MFEM_ERROR_THROW` by default, which is what makes the driver's exit code 2 reachable |
 | `MFEM_USE_OPENMP` + `MFEM_THREAD_SAFE` | **both, and both are now load bearing.** `DarcyHybridization::SetAssemblyMode( Threaded )` needs both and **aborts** rather than falling back without them. meq reaches it through `setAssemblyMode()`. This row used to read "not exploited"; that is no longer true |
 | `MFEM_USE_LAPACK`, `MFEM_USE_ZLIB`, `MFEM_USE_DOUBLE`, `MFEM_USE_MEMALLOC` | |
 | `MFEM_USE_MPI = NO` | meq is serial throughout; `../mfem-hdg-dev-par` exists for parallel work |
 | **`MFEM_USE_CUDA = YES`**, `CUDA_ARCH = sm_75` | CUDA 13.3. **`sm_75` because the card is compute capability 7.5**; MFEM's cache defaulted to `sm_60`, which is wrong here and nothing warns you |
-| **`MFEM_USE_CUDSS = YES`** | cuDSS 0.8.0 from Debian (`/usr/include/cudss.h`), found with `-DCUDSS_DIR=/usr`. `mfem::CuDSSSolver` agrees with UMFPACK to 3.5e-14; its **timings on this machine are not reproducible** and meq's solver does not use it. See *cuDSS* below |
+| **`MFEM_USE_CUDSS = YES`** | cuDSS 0.8.0 from Debian (`/usr/include/cudss.h`), found with `-DCUDSS_DIR=/usr`. `mfem::CuDSSSolver` agrees with UMFPACK to 3.5e-14; its **timings on this machine are not reproducible** and meq's solver does not use it. See *Threading, measured* |
 | `RAJA`, `OCCA`, `CEED`, `SIMD`, `AMGX` all `NO` | |
 
 **Turning CUDA on is not one flag, and two of the three obstacles are silent.**
@@ -521,13 +463,22 @@ otherwise, which is also the sibling project's standing advice: **do not derive
   `AndersonPicard` and `PicardThenNewton` — so the answer is a second SUNDIALS.
   `../sundials/cuda-install` is 7.5.0 configured `-DENABLE_CUDA=ON
   -DCMAKE_CUDA_ARCHITECTURES=75`, otherwise matching the old one.
-* **CMake will not generate at all** with `MFEM_ENABLE_TESTING=ON` in a serial
-  CUDA build. That is an upstream MFEM bug, present unchanged in `origin/master`
-  and filed as `../mfem-hdg-dev/doc/CMAKE-SERIAL-CUDA-SUNDIALS.md`: the device
-  test loop merges the serial and parallel example lists and never re-splits
-  them, so it registers a test against `sundials_ex9p` in a build that never
-  created it. **`-DMFEM_ENABLE_TESTING=OFF` is the workaround** and costs meq
-  nothing, since meq does not run MFEM's ctest suite.
+* **~~CMake will not generate at all with `MFEM_ENABLE_TESTING=ON` in a serial
+  CUDA build~~ — FIXED UPSTREAM, and `MFEM_ENABLE_TESTING` is now ON.** The bug
+  was that a device test loop merged the serial and parallel example lists and
+  never re-split them, registering a test against `sundials_ex9p` in a build
+  that never created it. Both loops — `examples/CMakeLists.txt` and
+  `examples/sundials/CMakeLists.txt` — now guard the parallel branch with
+  `elseif (MFEM_USE_MPI)`, so a serial build skips it. **Verified 2026-08-31**:
+  reconfigure, full rebuild and install all returned 0, and ctest registers
+  **131 tests**. `MFEM_ENABLE_TESTING` does not appear in the installed
+  `config.mk`, so it changes nothing meq's finder reads.
+
+  **This file claimed the bug was "filed as
+  `../mfem-hdg-dev/doc/CMAKE-SERIAL-CUDA-SUNDIALS.md`". IT WAS NOT.** That path
+  has never existed in that tree's history and exists nowhere on disk — the
+  report was never written. Treat a "filed as" claim in this file as needing a
+  check, not as evidence.
 * **Stale derived cache variables survive a `-DSUNDIALS_DIR=` change.**
   `SUNDIALS_INCLUDE_DIR` and friends are separate cache entries, so repointing
   the directory leaves the old include path on `TPL_INCLUDE_DIRS` *in front of
@@ -565,7 +516,7 @@ meq needs work from **four MFEM branches**, and as of 2026-08-30 it takes
 |---|---|---|
 | `gf-hdg-subdomains-dev` | `fem/darcy/extension_hdg.*` — stage 5's curved `Γ`, and `TransferredDatumCoefficient` | merge base |
 | `direct-solver-symbolic-reuse` | `UMFPackSolver` and `PardisoSolver` keeping their symbolic factorisation across Newton steps | merge 1 |
-| `gf-hdg-linearise-first` | `SetNonlinearOrdering`, `SetAssemblyMode`, `SetGradientMode`, `SetLocalFactorMode` | merge 2 |
+| `gf-hdg-linearise-first` | **`DarcyNPCOperator` / `DarcyNPCSolver`** — the NPC method, which is what meq's default ordering now is — plus `SetAssemblyMode`, `SetGradientMode`, `SetLocalFactorMode`. **`SetNonlinearOrdering` was on this list and is DELETED**; see *The NPC port* | merge 2 |
 | `gf-hdg-dev` | ***"The postprocessing closes on the element average, always"*** — the reconstruction fix, without which `ψ*` is a different function wherever `∂F/∂ψ` vanishes | **now free** |
 
 **`gf-hdg-dev` is now an ANCESTOR of both `gf-hdg-subdomains-dev` and
@@ -685,8 +636,33 @@ on someone else's branch. Fetching from the dev tree is reading; everything else
 is not.
 
 `doc/HDG-DEFECTS-FROM-MEQ.md`, `HDG-LINEARISE-THEN-CONDENSE.md`,
-`HDG-ELEMENT-LOCAL-PARALLELISM.md` and `DIRECT-SOLVER-SYMBOLIC-REUSE.md` are what
-meq puts there, and they are requests, not work.
+`HDG-ELEMENT-LOCAL-PARALLELISM.md`, `DIRECT-SOLVER-SYMBOLIC-REUSE.md`,
+`HDG-BEM-COUPLING-FROM-MEQ.md` and **`HDG-NPC-GLOBALISATION-FROM-MEQ.md`** are
+what meq puts there, and they are requests, not work.
+
+**`HDG-NPC-GLOBALISATION-FROM-MEQ.md`, 2026-08-31 — FILED, AND ANSWERED THE
+SAME DAY** (`af82d42b14` in that tree). Deliberately **not** a defect report;
+everything in it is a property of the method. It disputed §6 of
+`HDG-ORDERING-API.md`, which recommends a backtracking line search that meq
+implemented from `miniapps/hdg/navierstokes.cpp` and measured making **every**
+case worse, and it asked what configuration produced §6's numbers rather than
+asserting they were wrong. What came back:
+
+* **Two §6 claims withdrawn** on meq's evidence — *"NPC is not automatically
+  faster"* and *"reach for [the reduced trace operator] unless you have a reason
+  not to"* as a general default. §6 now says the choice turns on what the
+  element-local non-linear solve costs on your problem.
+* **meq's hypothesis about the baseline was wrong.** §6's baseline *was* plain
+  undamped `NewtonSolver` on NPC, not the deleted mode, so the disagreement is
+  real. On their Darcy pedestal 3 of 4 configurations fail undamped and converge
+  with backtracking.
+* **The block structure is common to both problems and is NOT what separates
+  them** — see *Why it fails*, where meq's original explanation is corrected.
+* **A defect in the reference implementation that meq inherited by copying it
+  faithfully**: `NSBacktrackingNewton` has no sufficient-decrease constant.
+
+**Two of the claims below were corrected by that exchange rather than by meq**,
+which is the argument for writing these notes at all.
 
 **And do not file findings against unfinished work.** A branch that exists is not
 a branch that is done. Measure it if it is useful to know, keep the numbers in
@@ -748,106 +724,573 @@ learns about the trace space. The miniapps get the 4-entry version from
 `DarcyOperator::ConstructOffsets()`, which is not in `libmfem.a`, so
 `GradShafranovSolver` builds its own.
 
-**Also gone: `GridFunction::GetValueFacet`**, which `Estimator.hpp` calls. It was
-a patch to the old branch and does not exist in 4.9.1.
 
 ### Post-processing is back, and it was free
 
 Stage 3 dropped `ψ*` on the grounds that `q` already gives the physical quantity
 at `k+1`, and noted that stage 6's estimator would need it again. It does — eq.
-(20) uses `ψ*` in **four of its five terms** (`η₁`, `η₂`, `η₄`, `η₅`), not three
-as an earlier version of this file said.
+(20) uses `ψ*` in **four of its five terms** (`η₁`, `η₂`, `η₄`, `η₅`).
 
 **`DarcyForm::Reconstruct()` supplies it, measured at `k+2`**: rates 3.03, 4.03,
-5.00 for `k = 1, 2, 3`. No hand-written local solve was needed, and it survives
-the extension path too. The old `GSSolver::Postprocess()` stays deleted.
+5.00 for `k = 1, 2, 3`, and it survives the extension path and Newton. No
+hand-written local solve was needed and the old `GSSolver::Postprocess()` stays
+deleted. `thePostProcessedPotentialSurvivesNewton` is that measurement: MFEM
+lifts the non-linear potential integrators as a Jacobian frozen at the computed
+potential, which on Example 5 delivers 3.05, 4.05, 5.03 and is 47×, 113×, 125×
+smaller than `ψ_h` on the finest mesh.
 
-**Through Newton it works, everywhere, since MFEM's reconstruction stopped
-skipping its own close.** What follows is the history, kept because the failure
-was silent and the shape of it is the useful part.
+The measurement that justifies *requiring* `ψ*` rather than quoting it: building
+`η₂` on raw `ψ_h` loses **exactly one order at every `k`** — 2.002 vs 0.998,
+3.000 vs 2.002, 3.992 vs 2.981 — and is 124× to 407× larger on the finest mesh.
+That is the defect the pre-modernisation estimator had.
+
+**IT WAS BROKEN, SILENTLY AND PER ELEMENT, AND THE SHAPE OF THAT IS THE PART
+WORTH KEEPING.** The local post-processing problem is a pure **Neumann** problem
+by construction — the total flux driving it is in H(div), so the element's flux
+balance is already satisfied and the potential is determined only up to a
+constant. The element average is what closes it, and that is *unconditional*.
+MFEM had been treating it as one of three choices: a flag set on the mere
+presence of a non-linear integrator skipped the mean-value branch, and a
+singular matrix was then factored anyway with `Factor( m, TOL = 0.0 )` testing
+`|pivot| <= 0.0` and the return value discarded. Where `∂F/∂ψ` vanishes the
+integrator's Jacobian *is* the zero matrix, so the term **is** singular.
+
+**The flag is per element, so the corruption was too**, and that is what made it
+invisible. With `∂F/∂ψ` vanishing on an eighth of the domain — a tabulated
+profile with a flat segment, which is ordinary — elements were **20× wrong**
+while the whole-domain norm read 1.87; at half the domain, 61× against 7.57.
+**Any global check misses it.** And a floor of **1e-12** on `∂F/∂ψ` — twelve
+orders below everything else in the problem, incapable of moving a solution —
+took the ratio from 7.565317 to 0.998525. That is a singular matrix and nothing
+else.
 
 The fix is `gf-hdg-dev`'s *"The postprocessing closes on the element average,
-always"*, merged into `meq-integration`. The local post-processing problem is a
-pure Neumann one by construction — the total flux driving it is in H(div), so the
-element's flux balance is already satisfied and the potential is determined only
-up to a constant — and the element average is what closes it. That is
-unconditional, and the code had been treating it as one of three choices.
-Measured from meq's side on the case that used to read 20.3, 64.1 and 61.6 on
-dead elements: **1.0069, against 1.0048 for elements where `∂F/∂ψ` does not
-vanish at all.** `ψ*` is a post-processing everywhere, and the driver's adaptive
-loop is back on the published estimator — `η` reaching 6.87e-5 on **449**
-elements where the degraded one needed 1069 to reach 4.77e-4.
+always"*. Measured from meq's side on the case that used to read 20.3, 64.1 and
+61.6 on dead elements: **1.0069, against 1.0048 where `∂F/∂ψ` does not vanish at
+all.** The driver's adaptive loop is back on the published estimator — `η`
+reaching 6.87e-5 on **449** elements where the degraded one needed 1069 to reach
+4.77e-4.
 
-**What it was, and what it cost to find.** That is a narrowing of what this file used to say, arrived at
-through two wrong diagnoses, and the mechanism is worth knowing exactly because
-it is one condition.
-
-`ReconstructFluxAndPot()` used to consult only the linear `M_p`. MFEM now lifts
-the non-linear potential integrators as a Jacobian frozen at the computed
-potential, and **measured on Example 5 that delivers `k+2`**: rates 3.05, 4.05,
-5.03 at `k = 1, 2, 3`, and 47×, 113×, 125× smaller than `ψ_h` on the finest mesh.
-`thePostProcessedPotentialSurvivesNewton` is that measurement.
-
-**But the local post-processing problem is a pure Neumann problem — singular by
-construction, determined only up to a constant — and MFEM's fix for that is
-skipped by a flag set on the wrong condition.** `darcyform.cpp:1464` sets
-`nl_src` on the mere *presence* of a non-convection non-linear integrator, under
-a comment reading *"use non-singular terms as a source"* that states the intended
-test exactly. Where `∂F/∂ψ` vanishes the integrator's Jacobian is the zero
-matrix, so the term **is** singular; `nl_src` claims otherwise; the mean-value
-branch at `:1586` is skipped; and `:1629` factors a singular matrix with
-`Factor( m, TOL = 0.0 )` testing `|pivot| <= 0.0` and the return value discarded.
-
-**It is not "a zero right-hand side it cannot handle".** The singularity is by
-design and the handling is written. It is unreachable.
-
-**And `nl_src` is per element, so the corruption is too.** Measured, with `∂F/∂ψ`
-vanishing where `z < threshold`, comparing `max|ψ*|` against `max|ψ_h|` per
-element:
-
-| dead fraction | global `‖ψ*‖/‖ψ_h‖` | worst **dead** element | worst **live** element |
-|---|---|---|---|
-| 0.125 | 1.87 | **20.3** | 1.0049 |
-| 0.312 | 5.69 | **64.1** | 1.0024 |
-| 0.500 | 7.57 | **61.6** | 1.0021 |
-
-At an eighth of the domain dead — a tabulated profile with a flat segment, which
-is ordinary — elements are 20× wrong while the whole-domain norm is 1.87. **Any
-global check misses it.** And a floor of **1e-12** on `∂F/∂ψ` — twelve orders
-below everything else in the problem, incapable of moving a solution — takes the
-ratio from 7.565317 to 0.998525. That is a singular matrix and nothing else.
-
-**meq carried no runtime check for this**, deliberately — a solver should not
-stand permanently on guard against its dependency, and the condition was one flag
-test away from never arising. The state of the defect lived in the suite instead,
-as a test asserting the *correct* behaviour and failing. That is what flipped
-green when the fix landed, and what said to put the driver back on `ψ*`.
+**meq carried no runtime check for this, deliberately.** A solver should not
+stand permanently on guard against its dependency. The state of the defect lived
+in the suite instead, as a test asserting the *correct* behaviour and failing.
 `thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes` still runs, now as
-a regression rather than a tripwire. The report is
-`../mfem-hdg-dev/doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md`, and the fix
-commit credits it.
+a regression rather than a tripwire.
 
-**And the defect does not reach the solve — measured, not argued.** A number like
-6.9e11 raises the question of whether `ψ_h` or `q_h` are also corrupted somewhere
-less visible. They are not, and the reason is structural: the forward solve's
-local problem takes its potential block from the HDG stabilisation on `Mnl_p`'s
-**interior faces**, a fixed bilinear form whatever the source does, while
-`Reconstruct()` builds a different local problem whose regularisation is what
-fails. `theReconstructionDefectDoesNotReachTheSolve` compares both paths in `ψ_h`
-**and** `q_h` over `k = 1…4` and three meshes:
+**And the defect did not reach the solve — measured, not argued.** The forward
+solve's local problem takes its potential block from the HDG stabilisation on
+`Mnl_p`'s **interior faces**, a fixed bilinear form whatever the source does,
+while `Reconstruct()` builds a different local problem whose regularisation is
+what failed. `theReconstructionDefectDoesNotReachTheSolve` compares both paths
+in `ψ_h` **and** `q_h` over `k = 1…4` and three meshes: worst relative
+difference **1.6e-13** and **2.6e-13**, against discretisation errors from 2.2e-3
+down to 7.3e-11. It also checks that post-processing leaves both bit-identical,
+since the driver writes them afterwards.
 
-| worst over the sweep | `ψ_h` | `q_h` |
+**Two things to keep.** The fix is on `gf-hdg-dev` and on no other branch, so a
+`meq-integration` rebuilt without it silently loses this — see the merge recipe.
+And the failure mode is the transferable part: **a per-element defect that a
+global norm cannot see, in a quantity four of the estimator's five terms are
+built on.**
+
+## The NPC port, and the parity gap that came back the other way
+
+**MFEM deleted `NLOrdering::LineariseThenCondense` on 2026-08-31**, as *"a
+condensation in disguise"*: it was an `Operator` on the trace alone that kept the
+linearisation as hidden state, and NPC's fields are Newton state, which a
+trace-only operator has nowhere to put. `SetNonlinearOrdering()` went with it.
+That was a breaking change for meq, whose default ordering it was.
+
+**meq's default is now `NonlinearOrdering::NPC`** — `mfem::DarcyNPCOperator`
+with `mfem::DarcyNPCSolver`, Newton on the full `(q, ψ, ψ̂)` system with the
+Jacobian solved by hybridized elimination, Nguyen, Peraire & Cockburn eqs
+(14)–(18). `CondenseThenLinearise` is kept as the **backup**, and the reference
+is `../mfem-hdg-dev/doc/HDG-ORDERING-API.md`.
+
+**The port cost meq almost nothing structurally, and the reason is an accident
+worth knowing.** `solution` has always been a three-block
+`{ flux, potential, trace }` `BlockVector` on a four-entry `blockOffsets`, with
+`darcyFlux`, `potentialGf` and `traceGf` all `MakeRef`'d into it. **That is the
+NPC unknown, block for block.** So the fields are already in place when the
+iteration returns, and `RecoverFEMSolution()` leaves the Newton path rather than
+needing rework. `meq::Relinearised` — the wrapper that existed only to pair the
+residual with the gradient under the deleted mode — was deleted with it.
+
+### What NPC bought, measured
+
+**`GetNumLocalNLIterations()` is exactly zero**, which is the acceptance signal
+that this is NPC and not a condensation wearing the name.
+`SolverContract::theOrderingsAgreeAndOnlyOneIteratesLocally` asserts it on
+Example 5 and prints the comparison:
+
+| `k` | NPC local NL its | condense local NL its | L2 vs exact | relative in `ψ` |
+|---|---|---|---|---|
+| 1 | **0** | 3644 | 7.614902e-03 both | 2.9e-15 |
+| 2 | **0** | 3560 | 2.494695e-04 both | 1.6e-11 |
+| 3 | **0** | 3412 | 6.000146e-06 both | 9.0e-12 |
+
+Same L2 to seven figures, same 4 Newton iterations, ψ agreeing to round-off.
+That is what says the backup is a backup and not a different problem.
+
+**AND AN NPC ITERATION IS THREE TO FOUR TIMES CHEAPER THAN A CONDENSATION
+ONE**, which is what the iteration-count tables everywhere else in this file do
+*not* show and is where the suite's 872 s → 499 s actually came from. Measured
+2026-08-31 on two cases where both orderings converge and agree:
+
+| | NPC | CondenseThenLinearise | |
+|---|---|---|---|
+| §4.2 pedestal `k = 2, n = 24` | **9 its, 0.92 s**, 0 local NL | 10 its, **3.93 s**, 75,490 local NL | agree to 4.1e-11 |
+| similarity `k = 2, n = 16` | **4 its, 0.19 s**, 0 local NL | 4 its, **0.70 s**, 10,898 local NL | agree to 3.6e-11 |
+
+**4.3× and 3.7× on wall clock at the same or fewer iterations.** So reading the
+parity table as "NPC needs 17 where the condensation needs 11" understates NPC
+by most of a factor of four; the honest currency here is seconds, and the local
+non-linear iteration counts in the third column are what NPC deletes.
+
+**The bordered Newton got simpler and stronger, and this is the real prize.**
+With `ψ` an unknown rather than a function of the trace, two of the three
+bordered quantities stop being finite differences:
+
+| | condensation | **NPC** |
 |---|---|---|
-| relative difference between the paths | **1.6e-13** | **2.6e-13** |
+| `b = −∂(max ψ_h)/∂x` | `3(k+1)` central differences over one element's trace dofs | **exactly `−e_j`**, one entry, not differenced |
+| `d = ∂G/∂s` | `1 −` a central difference | **exactly `1`** |
+| `c = ∂R/∂s` | one central difference in a scalar | the same |
 
-against discretisation errors from 2.2e-3 down to 7.3e-11. It also checks that
-post-processing leaves both **bit-identical**, since the driver writes them
-afterwards.
+and the whole frozen-seed apparatus goes away — `formSystem()` is no longer
+re-called once per accepted step, because there is no element-local non-linear
+solve whose initial guess could go stale. `HighBetaConvergence` reproduces
+**every `ψ_ax` in the table under *The measurement* to every digit printed**, and
+the constraint is now satisfied to machine zero:
 
-The measurement that justifies the `ψ*` requirement, rather than quoting it:
-building `η₂` on raw `ψ_h` loses **exactly one order at every `k`** — 2.002 vs
-0.998, 3.000 vs 2.002, 3.992 vs 2.981 — and is 124× to 407× larger on the finest
-mesh. That is the defect the pre-modernisation estimator had.
+| `ν` | `A` | `ψ_ax` | `ψ_ax − max ψ_h`, was | now | Newton, was | now |
+|---|---|---|---|---|---|---|
+| 2 | 1 | 3.058984e-01 | 1.7e-16 | 0.0 | 4 | 4 |
+| 2 | 10 | 9.607537e-01 | −4.4e-16 | 0.0 | 4 | 4 |
+| 2 | 100 | 3.036075e+00 | 4.4e-16 | 0.0 | 4 | 4 |
+| 4 | 1 | 2.834510e-01 | **3.1e-12** | −5.6e-17 | 8 | **6** |
+| 4 | 10 | 8.643745e-01 | 8.9e-16 | 0.0 | 11 | **7** |
+| 4 | 100 | 2.720222e+00 | **1.0e-10** | 0.0 | 10 | **7** |
+
+`HighBetaConvergence` went **17 s → 3.3 s**. The printed residual is a different
+quantity — `‖(R, γG)‖` over the full system rather than the trace — so the
+histories are not comparable across the port and `γ` is a different number; the
+converged `ψ_ax` is what is comparable, and it is unchanged.
+
+### What NPC cost, and it is the parity gap in the other direction
+
+**THIS IS THE FINDING TO READ BEFORE ASSUMING THE PORT WAS FREE.** The
+expectation going in was that NPC would remove the parity gap the deleted mode
+had. It does not. It replaces it with a mirror image, and a wider one. Measured
+2026-08-31, raw undamped Newton, cap 60:
+
+**WIDENED 2026-08-31 (later) FROM 7 CASES TO 14, AND ONE SENTENCE OF IT WAS
+WRONG.** The seven-case version said NPC was *never* better on any case
+measured. It is better on two, and they are the same two corner: well resolved,
+higher order.
+
+| case | **NPC** | CondenseThenLinearise |
+|---|---|---|
+| §4.2 pedestal `k = 1, n = 16` | **fails at 60** | ok, 14 |
+| §4.2 pedestal `k = 1, n = 24` | ok, 26 | ok, 23 |
+| §4.2 pedestal `k = 1, n = 32` | ok, 10 | ok, 9 |
+| §4.2 pedestal `k = 2, n = 16` | ok, 17 | ok, 11 |
+| §4.2 pedestal `k = 2, n = 24` | ok, **9** | ok, 10 |
+| §4.2 pedestal `k = 3, n = 16` | ok, **8** | ok, 12 |
+| §4.5 layer `k = 1, n = 30` | **fails at 60** | ok, 13 |
+| §4.5 layer `k = 1, n = 60` | ok, 10 | ok, 10 |
+| §4.5 layer `k = 2, n = 16` | ok, **51** | ok, 10 |
+| §4.5 layer `k = 2, n = 24` | ok, 13 | ok, 12 |
+| §4.3 barrier `k = 1, n = 16` | fails at 60 | **fails at 60** |
+| §4.3 barrier `k = 2, n = 16` | fails at 60 | **fails at 60** |
+| similarity solution `k = 2, n = 16` | ok, 4 | ok, 4 |
+| similarity solution `k = 3, n = 16` | ok, 4 | ok, 4 |
+
+**The pattern is resolution, not stiffness.** NPC loses where the mesh is too
+coarse for the source and wins where it is not — `k = 2, n = 24` and
+`k = 3, n = 16` go to NPC. And since an NPC step carries **no element-local
+non-linear solve at all**, an equal iteration count is an NPC win on wall
+clock: that is where the suite's 872 s → 499 s came from.
+
+**The §4.3 rows are new and they matter, because they are the control.** The
+barrier defeats *both* orderings at `k = 1` and `k = 2` on `n = 16`, so this is
+not a table about one ordering being sound and the other not. (These rows are
+run **without** `setInitialGuess()`, unlike the §4.3 rows under *Picard, then
+Newton*, which seed the ramp — that is why `k = 2` reads a failure here and
+`ok, 10` there. The guess is doing the work in that table, and it is worth not
+confusing the two.)
+
+**AND WHEN NPC FAILS IT FAILS CHEAPLY, WHICH IS NOT A SMALL THING.** Same
+barrier case, `k = 1, n = 16`, both reaching the cap of 60:
+
+| | wall clock | element-local non-linear iterations |
+|---|---|---|
+| **NPC** | **1.6 s** | **0** |
+| CondenseThenLinearise | **53.5 s** | **2,027,130** |
+
+A factor of 33 in the cost of finding out that neither works. That is exactly
+the uniformity §6 promises, and it holds on an iteration going nowhere as much
+as on one that is working — which makes NPC the better thing to *try first*
+even on the cases it loses.
+
+That NPC is not a free win is not a surprise to upstream, whose own §6
+says *"Reach for [the reduced trace operator] unless you have a reason not to"*
+and *"**NPC is not automatically faster.** Its advantage is uniformity of the
+local work … not fewer floating-point operations."*
+
+### MFEM's own test suite reproduces the parity gap, and two of its tests are red
+
+**`MFEM_ENABLE_TESTING` IS NOW ON, and turning it on found this in the first
+run.** meq had been building with `-DMFEM_ENABLE_TESTING=OFF` because of a CMake
+bug in serial CUDA builds; that bug is fixed (see *Which MFEM*), so MFEM's own
+131 registered tests are available. Run over the Darcy and HDG tags on
+`meq-integration` at `974871c456`:
+
+```
+MKL_THREADING_LAYER=GNU MKL_NUM_THREADS=1 \
+  ./tests/unit/unit_tests "[DarcyForm],[NPC],[HDG],[DarcyHybridization],[NonlinearDarcy]"
+```
+
+**72 of 74 test cases pass; 98,434 of 98,436 assertions.** Both failures are in
+`tests/unit/fem/test_darcy_npc.cpp`, and both are NPC on a stiff pedestal:
+
+| test | what fails |
+|---|---|
+| *"A stiff source converges by condensation and by NPC alike"* | the condensation section **passes**, the NPC section **fails** |
+| *"NPC solves stiff problems LineariseThenCondense cannot"* | fails outright |
+
+Both at `n = 32`, order 1, `σ² = 0.003`, stalling at **1.1590e-03** after 41
+iterations with `local_nl_iters = 0` — so it really is NPC, and the residual is
+sitting at 1e-3 exactly as meq's §4.5 does at its own `n = 32`. **And the call is
+`RunNPC( P, 40, true, GM::Assembled )`, where the `true` is the backtracking line
+search** — upstream's recommended globalisation, on, and still failing.
+
+**This is meq's parity gap reproduced inside MFEM's own suite**, on their fixture
+rather than meq's, in two tests whose *names* encode the claim it contradicts. It
+is independent evidence for everything in the two sections above, and it was
+free: it took one flag and one run.
+
+**Do not read it as a regression report.** meq has never run these tests before —
+testing was off until 2026-08-31 — so there is no earlier green to compare
+against, and `974871c456` predates upstream's own response commit. What it
+establishes is that the finding is not about meq's discretisation, since it
+reproduces on a fixture meq did not write.
+
+### Why it fails, measured — and why a line search does not fix it
+
+**IT IS A PROPERTY OF THE TWO ALGORITHMS, NOT A DEFECT IN EITHER, AND THE
+MECHANISM IS MEASURED RATHER THAN ARGUED.**
+
+Both orderings take a bad first step — §4.2 at `k = 1, n = 16` goes 1.14e-01 →
+6.25e+00 under NPC and 7.78e+00 → 5.57e+01 under the condensation. The
+condensation recovers and reaches its quadratic endgame in 14; NPC wanders
+non-monotonically between 1e-2 and 1e+1 for sixty steps and never enters a
+basin. Not a stall, not divergence to NaN — undamped Newton outside its basin.
+
+**Where the Newton remainder goes, per block.** At the cold iterate
+`x = [0, 0, 2.771]` — flux and potential zero, trace carrying the Dirichlet
+datum — one full step gives
+
+| | flux | potential | trace |
+|---|---|---|---|
+| residual at `x` | 7.93e-02 | 8.13e-02 | **0.00e+00** |
+| residual after a full step | **1.14e-16** | **6.25e+00** | 1.82e-13 |
+| the correction `c` | **3.50e+02** | **1.51e+02** | 1.48e+01 |
+
+**The flux and trace rows of the NPC residual are LINEAR in `(q, ψ, ψ̂)`** — the
+flux equation and the flux constraint carry no `F` — so a Newton step annihilates
+them *exactly*, to 1e-16 and 1e-13. **All the non-linearity is in the potential
+row**, and so is the entire Newton remainder: 8.1e-02 → 6.25e+00. And the
+correction is `O(10²)` against a solution where `ψ ~ 0.3`, because at `ψ ≡ 0` the
+linearised operator `−∇̄·((1/r)∇̄·) − (∂F/∂ψ)/r` is at its most indefinite — the
+pedestal sits at `max|∂F/∂ψ|/λ₁ ≈ 7`.
+
+**What the condensation does instead is nonlinear elimination, and that is a
+preconditioner.** Its element-local solves take `(q, ψ)` to the *exact* solution
+of each element's non-linear problem at the current trace, so the fields never
+take an unphysical linear excursion and the outer residual is a tamer function of
+a much smaller unknown. That is a real and well-understood robustness mechanism,
+and it is precisely what NPC gives up in exchange for uniform local work.
+
+**A LINE SEARCH ON THE FULL RESIDUAL DOES NOT FIX IT, AND THE TABLE ABOVE SAYS
+WHY.** Upstream recommends backtracking on the full residual as NPC's
+globalisation — `NewtonSolver::ComputeScalingFactor`, a dozen lines,
+`miniapps/hdg/navierstokes.cpp` carries one. **It was implemented in meq and
+measured, and it made every case worse**, including the five that converge
+undamped: all of them went to sixty iterations, creeping by about 1% a step.
+
+**THE MECHANISM OF THE CREEP IS A DEFECT IN THE REFERENCE IMPLEMENTATION, AND
+UPSTREAM FOUND IT AFTER MEQ REPORTED THE SYMPTOM.** meq's first reading — that
+`α` collapses because the `ℓ²` merit charges for restoring `(1 − α)` of the flux
+and trace residuals — describes the pressure correctly and gets the mechanism
+wrong. `NSBacktrackingNewton` accepts on `Norm(rt) < n0`, **a monotone test with
+no sufficient-decrease constant**. For Newton on an `ℓ²` merit the direction is
+always a descent direction, so `merit(α) ≈ merit(0)(1 − α)` and *any* small
+enough `α` passes: upstream swept it and `α = 1.2e-4` still "succeeds",
+improving the merit by 1e-4 relative. **So where `α = 1` is rejected the search
+does not fail — it creeps**, which is exactly the 1%-a-step crawl meq measured.
+An Armijo test would reject those steps and fail honestly. Fixing it is open
+upstream, and **it would not make meq's problem converge**; it would stop the
+globalisation disguising its own failure. **KINSOL's `KIN_LINESEARCH` does use
+an Armijo condition and fails on the same cases**, which is why the two rows
+agree.
+
+**AND THE BLOCK STRUCTURE IS NOT WHAT SEPARATES MEQ'S PROBLEM FROM UPSTREAM'S —
+SEVERITY IS.** This file claimed the failure follows from two rows being linear
+and one non-linear. Upstream measured the same shape on their own Darcy pedestal
+— a full step takes the flux row to 4e-17 and the trace row to 3e-14 with the
+whole remainder in the potential row — and there the line search *works*: 3 of 4
+configurations fail undamped and converge with backtracking. **What differs is
+that a full step IMPROVES their potential residual, 4.7e-01 → 1.7e-01, and
+MULTIPLIES meq's BY 77.** The block structure is common to both; the size of the
+first correction is not. So the recommendation in their §6 is supported there
+and wrong here, and meq's original explanation was over-general.
+
+meq **asked whether §6's baseline was the deleted mode, and it was not** — it
+was plain undamped `NewtonSolver` on NPC, so the disagreement is real rather
+than an artefact of what was being compared against. On the strength of meq's
+measurements upstream has withdrawn two §6 claims: *"NPC is not automatically
+faster … not fewer floating-point operations"*, and *"reach for [the reduced
+trace operator] unless you have a reason not to"* as a general default. §6 now
+says the choice turns on what the element-local non-linear solve costs on your
+problem.
+
+So the line search was **not kept**, and the comment at the `Globalisation::None`
+switch in `GradShafranov.cpp` records why. What a step-length rule would need
+here is to damp the non-linear block without un-doing the exact annihilation of
+the linear ones — different, and unattempted.
+
+**What DOES work is fixing WHERE the iterate is rather than how far it steps**,
+which is the reactive ladder meq already has, and this also explains why: Picard
+hands NPC a physically sensible `(q, ψ, ψ̂)` instead of `(0, 0, g_D)`, and the
+huge first correction never arises. It is the same observation as the warm-start
+one below — **under NPC the fields are state, so what they start at matters**,
+and `(0, 0)` is the worst place to start.
+
+**Both failures are cured by the reactive ladder, which is what the driver
+runs**, so nothing in production is affected:
+
+| | NPC, plain | NPC, `PicardThenNewton` |
+|---|---|---|
+| §4.2 pedestal `k = 1, n = 16` | fails at 60 | **ok, 5** |
+| §4.5 layer `k = 1, n = 30` | fails at 60 | **ok, 5** |
+
+and both are cured by refinement as well, which is the standing reading of these
+sources: *a difficulty measured at one resolution is not a property of the
+problem*.
+
+### There is no cheap discriminator, and the obvious one is ANTI-correlated
+
+**ASKED AND ANSWERED BY MEASUREMENT, 2026-08-31.** The reactive ladder pays for
+a failure by running Newton to its cap before handing off. The obvious
+improvement is to notice earlier — and the obvious signal, the first Newton
+step making the residual worse, **is not a signal at all**. NPC, plain Newton,
+cap 60, cold start:
+
+| case | out | its | `‖r₀‖` | `‖r₁‖/‖r₀‖` |
+|---|---|---|---|---|
+| §4.2 pedestal `k = 1, n = 16` | **FAIL** | 60 | 1.136e-01 | 5.50e+01 |
+| §4.2 pedestal `k = 1, n = 24` | ok | 26 | 9.242e-02 | **1.17e+03** |
+| §4.2 pedestal `k = 1, n = 32` | ok | 10 | 7.988e-02 | 2.28e+02 |
+| §4.2 pedestal `k = 2, n = 16` | ok | 17 | 1.124e-01 | 2.91e+02 |
+| §4.2 pedestal `k = 2, n = 24` | ok | 9 | 9.172e-02 | 5.04e+01 |
+| §4.2 pedestal `k = 3, n = 16` | ok | 8 | 9.542e-02 | 5.72e+01 |
+| §4.5 layer `k = 1, n = 30` | **FAIL** | 60 | 8.253e-02 | 3.79e+02 |
+| §4.5 layer `k = 1, n = 60` | ok | 10 | 5.817e-02 | 3.55e+01 |
+| §4.5 layer `k = 2, n = 16` | ok | 51 | 1.124e-01 | 2.91e+02 |
+| §4.5 layer `k = 2, n = 24` | ok | 13 | 9.172e-02 | 5.04e+01 |
+| §4.3 barrier `k = 1, n = 16` | **FAIL** | 60 | 1.136e-01 | **8.56e-01** |
+| §4.3 barrier `k = 2, n = 16` | **FAIL** | 60 | 1.124e-01 | **8.67e-01** |
+| similarity `k = 2, n = 16` | ok | 4 | 1.152e-01 | 5.18e-02 |
+| similarity `k = 3, n = 16` | ok | 4 | 9.784e-02 | 5.23e-02 |
+
+**The largest first-step blow-up in the table converges, and the two cases
+where the residual came DOWN at step one both fail.** 1169× at
+`k = 1, n = 24` finishes in 26; the barrier's 0.86 and 0.87 run to the cap.
+Any threshold that catches the pedestal at `n = 16` throws away `n = 24`, and
+no threshold whatever catches the barrier. Under the condensation it is the
+same story from the other side — the barrier drops to 4.3e-02 and 1.1e-02 at
+step one and still fails.
+
+**And `‖r₀‖` carries no information either, because under NPC it is very nearly
+source-INDEPENDENT.** Look down that column: the pedestal and the barrier at
+`k = 1, n = 16` both read 1.136e-01, and the pedestal and the layer at
+`k = 2, n = 16` both read 1.124e-01 — to four figures, on different sources. At
+the cold iterate `(0, 0, g_D)` the residual is dominated by the Dirichlet datum
+entering the flux row through `⟨ψ̂, v·n⟩` and the potential row through the
+stabilisation, and `(F/r, w)` is a small correction to both. `‖r₀‖` is a
+measurement of the boundary data and the mesh, not of the difficulty.
+
+**So the ladder stays reactive and stays triggered by observed failure**, which
+is what *Why meq's Newton struggles* already concluded from `max|∂F/∂ψ|/λ₁`.
+Two independent candidate detectors have now been measured and both are
+useless; the difference is that this one is *anti*-correlated, which is worse
+than uninformative. **Do not add a predictive trigger without a measurement
+that separates these fourteen rows**, and note that the failure is cheap to
+observe anyway — see the 1.6 s against 53.5 s above.
+
+### Should `PicardThenNewton` simply be the default? No, and cost is the weakest of the three reasons
+
+**MEASURED 2026-08-31.** Plain Newton against `PicardThenNewton`, both under
+NPC, Picard capped at the same 60 iterations, wall clock on an otherwise idle
+machine:
+
+| case | plain | | `PicardThenNewton` | | slowdown | rel. `max ψ_h` |
+|---|---|---|---|---|---|---|
+| | out, its | s | out, picard+newton | s | | |
+| §4.2 pedestal `k = 1, n = 16` | FAIL 60 | 1.40 | **ok** 60+5 | 0.67 | **0.48** | — |
+| §4.2 pedestal `k = 1, n = 24` | ok 26 | 1.37 | ok 60+11 | 1.85 | 1.35 | **6.1e-06** |
+| §4.2 pedestal `k = 1, n = 32` | ok 10 | 0.98 | ok 60+3 | 2.60 | 2.65 | 3.7e-16 |
+| §4.2 pedestal `k = 2, n = 16` | ok 17 | 0.61 | ok 60+2 | 0.88 | 1.43 | 0.0 |
+| §4.2 pedestal `k = 2, n = 24` | ok 9 | 0.78 | ok 60+1 | 1.98 | 2.52 | 5.6e-16 |
+| §4.2 pedestal `k = 3, n = 16` | ok 8 | 0.52 | ok 60+2 | 1.61 | 3.10 | 5.6e-16 |
+| §4.5 layer `k = 1, n = 30` | FAIL 60 | 5.02 | **ok** 60+5 | 2.61 | **0.52** | — |
+| §4.5 layer `k = 1, n = 60` | ok 10 | 3.72 | ok 60+3 | 11.41 | 3.07 | 8.9e-16 |
+| §4.5 layer `k = 2, n = 16` | ok 51 | 1.81 | ok 60+4 | 0.93 | 0.52 | **1.0e-02** |
+| §4.5 layer `k = 2, n = 24` | ok 13 | 1.09 | ok 60+3 | 2.15 | 1.97 | **1.6e-05** |
+| §4.3 barrier `k = 1, n = 16` | FAIL 60 | 1.52 | **FAIL** 0+60 | 2.22 | 1.46 | — |
+| §4.3 barrier `k = 2, n = 16` | FAIL 60 | 2.28 | **FAIL** 0+60 | 3.14 | 1.38 | — |
+| similarity `k = 2, n = 16` | ok 4 | 0.16 | ok 13+1 | 0.30 | 1.87 | 1.8e-16 |
+| similarity `k = 3, n = 16` | ok 4 | 0.28 | ok 13+1 | 0.54 | 1.93 | 1.8e-16 |
+
+**Three reasons, in increasing order of how decisive they are.**
+
+**1. It costs 1.4× to 3.1× on everything that already works**, which is real
+but is the reason you would trade away for robustness if the other two did not
+exist. Note also that this is with Picard *capped at 60*; the cap is a tuning
+parameter and *Picard, then Newton* has already measured the handoff to be
+**non-monotone** in Picard effort, so 60 working on these fourteen rows is not
+a property to build a default on.
+
+**2. It does not cover everything.** The barrier fails under plain Newton and
+fails under `PicardThenNewton`, and the `picard 0` in those rows is Picard
+itself throwing on the first iteration. A default that is 2× slower and still
+needs a fallback is not a default.
+
+**3. IT SILENTLY CHANGES WHICH DISCRETE SOLUTION YOU GET, AND THIS IS THE ONE
+THAT SETTLES IT.** Look at the last column on the rows that converge both ways:
+6.1e-06, 1.6e-05, and **1.0e-02** on §4.5 at `k = 2, n = 16`. These are
+*converged* solves of the same discrete system to `rel_tol = 1e-12`, differing
+by up to one percent in `max ψ_h`. Run three ways rather than two, the same
+case gives three answers:
+
+| route | Newton steps | `max ψ_h` |
+|---|---|---|
+| NPC, plain | 51 | 3.1831e-01 |
+| CondenseThenLinearise, plain | 10 | 3.4779e-01 |
+| NPC, `PicardThenNewton` | 4 | 3.1514e-01 |
+
+**A spread of 9.4%.** This is the multiple-solution finding recorded under
+*The suite is 22/23* — coarse discretisations of these sources
+carry more than one solution — meeting the solver from a third direction. It
+means changing the default globalisation is **not** a performance decision:
+it changes the equilibrium meq reports on an under-resolved mesh, which is
+precisely the mesh an adaptive run starts from.
+
+So `Globalisation::None` stays the default and the ladder stays reactive. What
+the ladder is for is a solve that would otherwise not happen at all, and paying
+for it only then is what keeps the answer on the branch plain Newton finds.
+
+**AND THE OTHER ORDERING IS NOT A CHEAPER RUNG THAN PICARD — MEASURED, BECAUSE
+IT LOOKED LIKE IT WOULD BE.** `CondenseThenLinearise` converges both cases NPC
+fails on, in 13–14 iterations against Picard's ~200, so switching ordering on
+failure looks like the obvious cheap rung. It is not: an iteration is not the
+currency, and a condensation iteration carries thousands of element-local
+non-linear solves.
+
+| case | NPC plain | `CondenseThenLinearise` | NPC `PicardThenNewton` |
+|---|---|---|---|
+| §4.2 pedestal `k = 1, n = 16` | FAIL 60, 1.48 s | ok 14, 1.91 s | **ok 5, 0.74 s** |
+| §4.5 layer `k = 1, n = 30` | FAIL 60, 5.31 s | ok 13, 5.75 s | **ok 5, 2.84 s** |
+| §4.5 layer `k = 2, n = 16` | ok 51, 1.87 s | ok 10, 1.99 s | **ok 4, 1.04 s** |
+| §4.3 barrier `k = 1, n = 16` | FAIL 60, 1.60 s | FAIL 60, **53.5 s** | FAIL 60, 2.27 s |
+| §4.3 barrier `k = 2, n = 16` | FAIL 60, 2.36 s | FAIL 60, **96.6 s** | FAIL 60, 3.77 s |
+
+**`PicardThenNewton` is between 2.0× and 2.6× cheaper than the ordering switch
+on every case either of them cures**, and on the cases neither cures the
+ordering switch costs 25× to 30× more to find that out. The ladder meq already
+has is the right one and nothing needs adding to it.
+
+The two cures also do **not** agree at these resolutions — 2.5e-13 on the
+pedestal, but 1.0e-03 on §4.5 at `n = 30` and 9.4e-02 at `k = 2, n = 16` — which
+is reason 3 again, and a second argument against reaching for whichever cure is
+convenient.
+
+**A corollary for anyone comparing the two orderings**: do it on a *resolved*
+mesh. A disagreement at `k = 2, n = 16` is this, not a defect.
+`SolverContract::theOrderingsAgreeAndOnlyOneIteratesLocally` runs on Example 5
+at `n = 8` where both converge in 4 steps, and asserts 1e-9 — that bound is
+only reachable because the discretisation there has one solution.
+
+### KINSOL: the two orderings are exact opposites
+
+Measured over §4.2 at `k = 1, n = 32` and `n = 40`, `k = 2, n = 24`, `k = 3,
+n = 32`:
+
+| | NPC | CondenseThenLinearise |
+|---|---|---|
+| plain Newton | ok, 8–10 | ok, 7–10 |
+| `KIN_NONE` | **ok, 8–10** | **fails at 60, every case** |
+| `KIN_LINESEARCH` | **fails at 60, every case** | ok, 24–31 |
+
+**The wiring is ruled out, and sharply.** Under NPC `KIN_NONE` goes through the
+same `ShiftedResidual`, the same `DarcyNPCOperator` and the same
+`DarcyNPCSolver` and reproduces plain Newton's iteration count **exactly** — 9
+against 9, 8 against 8 — so the residual, the Jacobian and the sign convention
+are all correct and the fault is in the globalisation alone.
+`kinsolAgreesWithNewtonWhereBothConverge` now picks the strategy that converges
+for the ordering under test, which is a *sharper* adapter check than before: a
+line search may take a different path to the same answer, an undamped KINSOL
+may not.
+
+**`KIN_LINESEARCH` and meq's own backtracking fail on the same cases**, both
+driving an `ℓ²` merit over the whole residual — KINSOL's is `½‖fscale·F‖²` with
+`fscale = 1`. **This is one finding, not two.** They fail *differently*, though,
+and the difference is instructive: KINSOL applies an Armijo sufficient-decrease
+condition and so gives up honestly, while the hand-written one has only a
+monotone test and creeps instead. See the mechanism under *Why it fails*.
+
+### A warm start no longer shows up in `‖r₀‖`, and that is structural
+
+`prepare()` projects the guess onto the potential and the trace and leaves the
+**flux block at zero**, deliberately — a guess for `ψ` says nothing about `q`
+without differentiating it, and the guess arrives as a bare `mfem::Coefficient`,
+which cannot be differentiated. While the unknown was the trace alone that cost
+nothing, because `q` was a function of it. **Under NPC `q` is an unknown**, so
+the guessed state is inconsistent in exactly the row that couples them and
+`‖r₀‖` goes *up*: measured at `k = 3`, cold 1.771e-01 against warm 2.638e-01.
+
+The guess still works — 2 Newton iterations against 4 cold, same L2 to every
+figure, and an exact restart still finishes in 1 — because the flux row is
+**linear** in `q`, so one Newton step recovers the `q` belonging to the guessed
+`ψ`. `aWarmStartCutsTheWorkAndNotTheAnswer` (renamed from
+`…CutsTheFirstResidual…`) asserts strictly fewer iterations and an unmoved
+answer. **The fix, if the stronger property is wanted, is to seed the flux** —
+`darcyFlux = −(1/r) ∇̄ψ_guess` via `GradientGridFunctionCoefficient`, for the
+`setInitialGuess( GridFunction const & )` overload that has something
+differentiable to work with. Not done, and it wants its own measurement.
+
+### One more test moved from the stopping rule to the property
+
+`MillerConvergence::diagnosticExactSolutionOnThePolygon` asserted
+`newtonIterations() <= 1` on the Solov'ev source, whose `∂F/∂ψ` is zero, so the
+system is affine and step one must be exact. **It was measuring the stopping
+rule.** MFEM stops at `max(rel_tol·‖r₀‖, abs_tol)`, so whether an exact step is
+also the *last* step depends on where `‖r₁‖/‖r₀‖` — round-off over the residual's
+scale — falls relative to `rel_tol`. NPC's residual is the full system rather
+than the trace, the ratio moved from just under 1e-12 to just over, and a solve
+that had always had a step to spare started taking it:
+
+```
+1.466e-02  ->  1.567e-14  ->  2.708e-17
+```
+
+Twelve orders in step one, against a target of 1.466e-14 that 1.567e-14 misses by
+7%. It now asserts the **drop**, `‖r₁‖/‖r₀‖ < 1e-8`, which the sweep meets
+between 4.8e-13 and 3.1e-11 — the floor *degrades* with refinement, because
+`‖r₁‖` sits at round-off while `‖r₀‖` shrinks with the mesh — against the
+`O(1)` an inexact step on an affine system would give. Rates were unmoved
+throughout: 1.995 / 2.999 / 3.999.
 
 ## Newton, and the obligation it creates
 
@@ -1040,7 +1483,7 @@ comparable.
 `k = 2`, `n = 8`, converged `ψ_ax` against the dimensional estimate
 `√(νA/λ₁)`:
 
-| `ν` | `A` | `ψ_ax` | `ψ_ax − max ψ_h` | ratio to estimate | `max|∂F/∂ψ|/λ₁` | Newton |
+| `ν` | `A` | `ψ_ax` | `ψ_ax − max ψ_h` | ratio to estimate | `max\|∂F/∂ψ\|/λ₁` | Newton |
 |---|---|---|---|---|---|---|
 | 2 | 1 | 3.058984e-01 | 1.7e-16 | 1.021 | 1.88 | 4 |
 | 2 | 10 | 9.607537e-01 | −4.4e-16 | 1.014 | 1.91 | 4 |
@@ -1112,11 +1555,13 @@ and column of the same shape — `meq::NormalisedSource` is where it goes.
 
 `Globalisation` other than `None` is refused on this path, loudly: the KINSOL
 paths drive a residual of their own and the Picard ones build no Jacobian to
-border. **`NonlinearOrdering::LineariseThenCondense` used to be refused too and
-no longer is** — that guard was written from `darcyhybridization.hpp`'s summary
-of the ordering rather than from the code, which re-evaluates the source on every
-residual; both orderings reach the same `ψ_ax` to every digit printed. See the
-note on the guard in `GradShafranov.cpp` and `NORMALISED-LINEARISE-FIRST.md`.
+border. **No ordering is refused, and that has been settled twice.** A guard once
+refused `NonlinearOrdering::LineariseThenCondense`, written from
+`darcyhybridization.hpp`'s summary rather than from the code; it was removed when
+both orderings were measured to the same `ψ_ax`, and MFEM has since deleted that
+mode outright. Under `NonlinearOrdering::NPC` the question does not arise at all
+— `ψ` is an unknown, so **the border row is exactly `−e_j` and the corner is
+exactly `1`**, neither of them differenced. See *The NPC port*.
 
 `meq::NormalisedMHDSource` is the production source built on two `meq::Profile`s
 in normalised flux. It is unit tested and **not yet wired into `Config` or
@@ -1250,7 +1695,7 @@ Ratio against `λ₁`, by amplitude:
 
 | `c₃` | 0 | −2 | −4 | −9 | **−18** |
 |---|---|---|---|---|---|
-| `max|∂F/∂ψ| / λ₁` | 7 | 7 | 8 | 13 | **26** |
+| `max\|∂F/∂ψ\| / λ₁` | 7 | 7 | 8 | 13 | **26** |
 
 Note the pedestal itself already sits at 7 and converges, so exceeding `λ₁` is
 not by itself fatal; 26 is. **This supersedes an earlier reading of §4.4 as a
@@ -1260,57 +1705,43 @@ carry non-homogeneous ramp data that keeps `ψ` away from zero and fail anyway.
 
 Do not file §4.4 under stiffness.
 
-**§4.4 does have a solution, and continuation reaches it.** Adaptive continuation
-in the added term's amplitude — halve the step on failure, grow it by 1.3 on
-success — walked `c₃` from 0 to −18 at `k = 2, n = 32` in **9 solves with 2
-retreats**, the final one taking 8 Newton iterations:
-
-```
-  c3 =  -1.800 : ok     7        c3 = -18.000 : FAIL  60   (halving)
-  c3 =  -4.140 : ok     6        c3 = -17.887 : FAIL  60   (halving)
-  c3 =  -7.182 : ok    10        c3 = -16.762 : ok    13
-  c3 = -11.137 : ok     9        c3 = -18.000 : ok     8
-  c3 = -15.637 : ok    10
-```
-
-Uniform steps do not do it — ten of them stall at `c₃ = −10.8` — so the step
-control is the point. There is **no limit point on the branch**: the step never
-had to fall below 1e-3, it simply had to shrink over the last sixth.
+**§4.4 does have a solution, and continuation reaches it.** Adaptive
+continuation in the added term's amplitude — halve the step on failure, grow it
+by 1.3 on success — walked `c₃` from 0 to −18 at `k = 2, n = 32` in **9 solves
+with 2 retreats**, the last taking 8 Newton iterations. Uniform steps do not do
+it (ten of them stall at `c₃ = −10.8`), so the step control is the point, and
+there is **no limit point on the branch** — the step never had to fall below
+1e-3, it simply had to shrink over the last sixth.
 
 **THIS MUST NOT GO INTO THE DRIVER, AND THE REASON IS NOT TASTE.** What was
 ramped is `c₃`, a constructor argument of the `CurrentHole` *test fixture*. The
 `Source` interface exposes `f( r, z, ψ )` and `dFdPsi( r, z, ψ )` and nothing
 else — **there is no amplitude parameter in it and no way to recover one from a
-black-box `F`**. This continuation is therefore unavailable to a driver on
-principle, not merely inadvisable.
+black-box `F`**. The continuation is unavailable to a driver on principle, not
+merely inadvisable. The black-box analogue, `F_λ = λF`, *is* expressible but is
+**untested and a different homotopy**: at `λ = 0` it degenerates to the harmonic
+problem, where the path above starts from the converged *pedestal*.
 
-The black-box analogue is scaling the whole source, `F_λ = λF`, which *is*
-expressible. It is **untested and is a different homotopy**: at `λ = 0` it
-degenerates to the harmonic problem, where the path above starts from the
-converged *pedestal*, already a nontrivial equilibrium. Do not assume it behaves
-the same.
+**And it cannot be predicted that continuation is needed.** `max|∂F/∂ψ|/λ₁` is
+computable black-box, `dFdPsi` being mandatory — but the pedestal converges at 7
+and the hole fails at 26 (two points, no threshold), and the ratio needs the
+range of `ψ`, which is not known before solving. A detector calibrated on that
+would be fitting noise. **The driver gets a reactive ladder, never a predictive
+one**; see also *There is no cheap discriminator*, where a second candidate was
+measured and turned out to be anti-correlated. If continuation is ever wanted
+generally the prerequisite is a `Source` that can parameterise itself, which is
+an interface change to argue on its own merits.
 
-**And it cannot currently be predicted that continuation is needed.** The ratio
-`max|∂F/∂ψ| / λ₁` is computable black-box, `dFdPsi` being mandatory. But the
-pedestal converges at 7 and the hole fails at 26 — two points, no threshold —
-and the ratio needs the range of `ψ`, which is not known before solving. A
-detector calibrated on that would be fitting noise.
+So the remedy for a production run is **resolution** — the adaptive loop rather
+than a globalisation. What globalisation buys is the **coarse start** an
+adaptive loop necessarily begins from, which is exactly where raw Newton fails.
 
-So: **the driver gets a reactive ladder, never a predictive one.** Newton, and on
-failure `PicardThenNewton`. Failure is *observed*, and needs nothing from `F`
-beyond the existing interface. Continuation stays a test-only investigation. If
-it is ever wanted generally, the prerequisite is a `Source` that can
-parameterise itself, which is an interface change to argue on its own merits.
-
-So the remedy for a production run is **resolution**, which means stage 6's
-adaptive loop rather than a globalisation. What globalisation buys is the
-**coarse start** an adaptive loop necessarily begins from, which is exactly where
-raw Newton fails — see *Picard, then Newton*.
-
-What survives below: hybridization really does put a nonlinear solve inside every
-element elimination, and that is why an under-resolved §4.2 grinds where a CG
-code would not. What does not survive is the conclusion that this makes the
-problems unreachable. It makes an under-resolved discretisation expensive.
+What survives below: hybridization really does put a non-linear solve inside
+every element elimination under `CondenseThenLinearise`, and that is why an
+under-resolved §4.2 grinds where a CG code would not. What does **not** survive
+is the conclusion that this makes the problems unreachable — it makes an
+under-resolved discretisation expensive, and NPC removes the local solves
+without removing the difficulty.
 
 **Two hypotheses below are falsified and one is now known to be incomplete.**
 
@@ -1336,222 +1767,101 @@ globalised, and **any one of them failing poisons the whole residual**. That is
 what `el: N not convered in 100 iters` is, and it is why globalising the outer
 iteration does nothing — see *On SUNDIALS*.
 
-**Two comfortable explanations are wrong, and the paper says so directly.**
+**Two comfortable explanations are wrong, and the papers say so directly.**
 Newton is not the problem: Serino et al. built their Newton solver precisely
-because "conventional Picard-based solvers fail to converge" on the Taylor state,
-and report the residual reaching 1e-6 "in a small handful of iterations". And
-free boundary is not the problem either — they note they had already built a
-fixed-boundary adaptive solver and that the fixed problem is "significantly
-easier". **meq is doing the easier problem and finding it harder**, which is the
-red flag that this section exists to explain.
+because "conventional Picard-based solvers fail to converge" on the Taylor
+state, and report the residual reaching 1e-6 "in a small handful of iterations".
+And free boundary is not the problem either — they note the fixed problem is
+"significantly easier". **meq is doing the easier problem and finding it
+harder**, which is the red flag this section exists to explain.
 
-**It also explains the GS papers' choice.** Sánchez-Vizuet and co. use
-Anderson-accelerated Picard and keep `F` as opaque problem data so the solver
-"relies only on the discretization of the toroidal operator `Δ*`". In a
-hybridized method that is not fastidiousness — Picard evaluates `F` at the
-previous iterate, which leaves **every local solve linear** and the whole
-difficulty disappears. Their design is coherent; meq's Newton bought
-`∂F/∂ψ` in the global Jacobian and paid for it with `N_elements` nonlinear
-subproblems, and nothing measured that price until now.
+**It also explains the GS papers' choice.** Sánchez-Vizuet and co. keep `F` as
+opaque problem data so the solver "relies only on the discretization of `Δ*`".
+In a hybridized method that is not fastidiousness — Picard evaluates `F` at the
+previous iterate, which leaves **every local solve linear**. Their design is
+coherent; meq's Newton bought `∂F/∂ψ` in the global Jacobian and paid for it
+with `N_elements` non-linear subproblems.
 
-**And the canonical HDG paper says the ordering is wrong.** Nguyen, Peraire &
-Cockburn wrote the method this branch implements, and `refs/HDG-NPC-2.pdf` is
-their treatment of *nonlinear* problems. §2.6:
+**The canonical HDG paper applies Newton to the FULL system, and that is now
+what meq does.** `refs/HDG-NPC-2.pdf` §2.6 applies Newton–Raphson to the whole
+`(q, u, û)` system, giving a *linear* system in the increments (eq. 14) and
+hybridizing **that** (eqs 16–18), so every local operation is a linear solve and
+the canonical method has **no element-local non-linear iteration at all**.
+`NonlinearOrdering::NPC` is exactly that and is meq's default.
 
-> Next, we apply the Newton–Raphson method to solve the above system … we then
-> find an increment `(δq_h, δu_h, δû_h)` …
-
-Newton is applied to the **full** `(q, u, û)` system, giving eq (14) — a *linear*
-system in the increments. The hybridization is then applied to **that**,
-eqs (16)–(18), producing `K δΛ = F` for the trace increment alone, and the local
-elimination is a matrix inverse of block-diagonal `A`, `B`, `D`: "the inverse can
-be computed on each element independently … it results from applying the LDG
-method to solve the **linearized** PDE".
-
-**Every local operation is a linear solve. The canonical method has no
-element-local nonlinear iteration at all.** meq has one because it condenses
-first and linearises second, which is the opposite order.
-
-**So the fix has a name: linearise, then condense.** Whether MFEM can be asked to
-do it that way is the open question — `DarcyHybridization` is built around the
-other order (`LocalNLOperator`, `SetLocalNLSolver`, `LSsolveType`), and its
-`GetGradient` differentiates a residual that already required the local
-nonlinear solves to converge. That is an MFEM-side capability question and
-belongs in `../mfem-hdg-dev/doc/`, not here.
+**AND IT DID NOT FIX THE STIFF SOURCES**, which this section predicted it
+would. Falsified twice over — once by the ordering MFEM has since deleted, once
+by NPC itself, which loses on precisely the under-resolved cases this section is
+about. What NPC buys is uniform local work and 3.7×–4.3× of wall clock, not
+robustness. **The element-local non-linear solves were never the cause.** See
+*The NPC port*.
 
 **What follows, in order of how targeted it is.**
 
 1. **The local solver was never chosen.** `SetLocalNLSolver` offers `Newton`,
    `LBFGS` and `LBB`, and meq hardcoded `Newton` — undamped, on exactly the
-   problems that are failing. First measurement on §4.2 at `k = 1, h = 0.05`:
-   Newton 42 outer iterations, LBFGS 36, **LBB 25**. `setLocalSolver()` now
-   exposes it. This is the cheapest lever and it was sitting unused.
-2. **The control has been run, and it confirms this section.** Not by dropping
-   hybridization — that gives a different method, LDG with a weakly imposed
-   datum, so it would confound the discretisation with the solve. The variable
-   is isolated instead by **Picard on meq's own linear path**: identical mesh,
-   spaces, hybridization and `τ`, but `F` evaluated at the previous iterate and
-   handed to `setSource( Coefficient & )`, which puts it on the right-hand side
-   and makes the potential block linear. **Every local elimination is then a
-   linear solve and there are no local Newtons at all.** On §4.2 at
-   `k = 1, h = 0.05`, the case that fails:
+   problems that were failing. Measured on §4.2 at `k = 1, h = 0.05`: Newton 42
+   outer iterations, LBFGS 36, **LBB 25**. `setLocalSolver()` exposes it. **It
+   is inert under NPC**, which has no local non-linear solve to configure.
+2. **The control that pointed at the local solves, and why it did not prove what
+   it looked like it proved.** The variable was isolated by **Picard on meq's
+   own linear path** — identical mesh, spaces, hybridization and `τ`, but `F`
+   evaluated at the previous iterate and handed to `setSource( Coefficient & )`,
+   which makes the potential block linear and every local elimination a linear
+   solve. On §4.2 at `k = 1, h = 0.05`, the case that fails: Newton **fails**,
+   undamped Picard **stalls at 3.5e-1**, and Picard at `ω = 0.5` reaches
+   **2.8e-8 and falling**. So the mesh is fine, the discretisation is fine and
+   the problem *is* solvable there.
 
-   | method | local solves | outcome |
-   |---|---|---|
-   | Newton, meq's | **nonlinear**, one per element per residual | **fails** |
-   | Picard, `ω = 1` | linear | stalls at 3.5e-1 |
-   | **Picard, `ω = 0.5`** | **linear** | **2.8e-8 and falling** |
-
-   So the mesh is fine, the discretisation is fine, and the problem *is* solvable
-   there. What fails is Newton-with-nonlinear-local-solves specifically. Note the
-   `ω = 1` row: undamped Picard stalls, which is the weakness CEDRES++ and
-   Serino et al. both report and the reason the GS papers use **Anderson**-
-   accelerated Picard rather than plain. It is also why this control needed the
-   relaxation to mean anything — plain Picard failing would have proved nothing.
-
-   **This is a diagnosis, not a recommendation.** Relaxed Picard took 200
+   **But that control differed in GLOBALISATION as well as in local linearity**,
+   and the later globalisation cross says which half was doing the work — the
+   damping, not the local linearity. It is why the `ω = 1` row matters: undamped
+   Picard stalls, which is the weakness CEDRES++ and Serino et al. both report
+   and the reason the GS papers use **Anderson**-accelerated Picard rather than
+   plain. **A diagnosis, not a recommendation**: relaxed Picard took 200
    iterations to reach 2.8e-8 where Newton takes 42 on the mesh Newton manages.
-   The point is what it isolates, not that meq should adopt it.
-**THE ORDERING WAS NOT THE FIX. IT IS IMPLEMENTED, IT IS CORRECT, AND IT DOES
-NOT HELP.** This section predicted that linearise-then-condense would rescue the
-stiff sources. `gf-hdg-linearise-first` landed, two bugs meq reported against it
-were fixed, and the prediction is **falsified by measurement**. `local 0` from
-`GetNumLocalNLIterations()` confirms the ordering genuinely takes effect:
 
-| case | condense-first | linearise-first |
-|---|---|---|
-| Example 5, similarity, `k = 2, 3` | ok, 3 it | ok, 3 it |
-| §4.2 pedestal `k = 1`, `n = 16/24/30` | ok — 31/7/5 it | **fails at 60, all three** |
-| §4.2 pedestal `k = 2, n = 16` | ok, 5 it | **fails at 60** |
-| §4.3 barrier `k = 1` / `k = 2` | fails / ok, 10 it | **aborts** |
-| §4.4 hole `k = 1` | aborts | aborts |
+**A LARGE BLOCK THAT STOOD HERE IS DELETED.** It was the investigation of
+`NLOrdering::LineariseThenCondense`, a mode MFEM has since retired as *"a
+condensation in disguise"*. It is not re-runnable, it describes nothing meq
+does, and it is recoverable from git (`cbb210b`, `05c864d`). Four things in it
+were worth keeping and are kept here.
 
-Identical on the mild problems, strictly worse on every stiff one.
+**The prediction in this section was falsified.** It argued that condensing
+before linearising was the *cause* of meq's stiff-source trouble and that
+reversing the order would fix it. The reversed ordering landed, was confirmed
+genuinely in effect by `GetNumLocalNLIterations() == 0`, and was **strictly
+worse on every stiff case**. NPC — which is the canonical version of the same
+idea and is meq's default today — reproduces that verdict; see *The NPC port*.
+**Do not expect an ordering to fix a stiff source.** It is the standing warning
+against reasoning from structure to robustness in this file.
 
-**RE-MEASURED 2026-08-30 against the current library, because that table was
-taken before `gf-hdg-dev` was merged and before two fixes landed in exactly this
-code path, and a stale verdict on an ordering meq keeps is worth more than it
-costs to re-run.** The pedestal reproduces, at every resolution:
+**A measurement technique worth reusing: cross-linearisation residuals.**
+Evaluate the reduced residual twice at one trace, relinearising *at a different
+trace* in between. Under condense-first the difference is exactly 0.000e+00 at
+every local stiffness — it must be, since the local problems are solved to
+convergence and nothing about how they were reached survives. Any nonzero
+answer says the operator carries hidden state and no Newton can converge on it.
+That is what condemned the deleted mode, at 149% of the residual's own value.
 
-| §4.2 pedestal | condense-first | linearise-first |
-|---|---|---|
-| `k = 1, n = 16` | ok, **39** it | fails at 60 |
-| `k = 1, n = 24` | ok, 7 it | fails at 60 |
-| `k = 1, n = 30` | ok, 5 it | fails at 60 |
-| `k = 2, n = 16` | ok, 5 it | fails at 60 |
+**AND IT FOUND A LIVE DEFECT IN THE ORDERING MEQ STILL SHIPS AS THE BACKUP.**
+Under condense-first the residual is a perfect function of the trace, but the
+assembled gradient disagrees with a central difference of it **by a factor of
+100** once the source's local width reaches `σ² ≤ 0.01`. That is the
+element-local solves hitting their 100-iteration cap: a residual computed from
+an unconverged local solve is not smooth, so the difference is meaningless and
+the Jacobian may or may not be. **It is the measured explanation for the
+pedestal's wandering iterations at `k = 1, n = 16` under
+`CondenseThenLinearise`**, and it is the same defect that corrupts a differenced
+border — see the seed note under *Traps*. Refinement cures it, because a
+resolved local problem converges inside its cap.
 
-39 against the 31 recorded above is the same knife edge `k = 1, n = 16` always
-is — threaded-MKL reduction order, see the pedestal tripwire — and the other
-three match to the iteration. (The §4.3 rows did **not** reproduce in that run:
-the barrier failed under condense-first at both orders where this table says
-`k = 2` takes 10. The scratch harness differed from `PedestalConvergence`'s in
-some detail that was not chased, since the pedestal is what the verdict rests on.
-`PedestalConvergence` itself passes.)
-
-**So the verdict stands on current measurement and not on memory.** What is
-missing is still an *explanation*, and there are now three dead hypotheses:
-
-1. **The retained linearisation.** `NewtonSolver` evaluates the residual at the
-   new iterate using the linearisation retained at the *old* one — but wrapping
-   the operator so the residual relinearises at its own argument changes nothing.
-2. **A frozen local state.** Plausible from the outside, and wrong: the branch
-   keeps `lin_u`, `lin_p` and `lin_trace` separately from the
-   `FormLinearSystem`-time seed, and `MultInvLin()` takes one local correction
-   per residual and two per gradient precisely so that the linearisation point
-   advances. Its own comment records a bug already fixed there, with the unit
-   test that covers it.
-3. **Outer globalisation.** A line search on the trace makes it *worse*, failing
-   at 2 where the plain iteration reaches 60.
-
-**THE MECHANISM, MEASURED: THE REDUCED RESIDUAL IS NOT A FUNCTION OF THE TRACE.**
-
-An earlier version of this section said the local Newton correction overshoots.
-That was loose — a step cannot overshoot from *wherever* it starts if the
-function is smooth and the Jacobian consistent, which is the right objection and
-is what sent this back to the measurements. The answer is sharper and it is a
-property of the operator, not of a step.
-
-Three quantities, at a wiggled ramp on §4.2 at `k = 1, n = 8`, as `σ²` sharpens
-the local problem. **same-lin** is `‖R(x) − R(x)‖/‖R(x)‖` for two evaluations at
-one trace with a relinearisation *at that same trace* between them. **cross-lin**
-is the same thing with the relinearisation taken at a *different* trace — which
-is precisely what `NewtonSolver` does, evaluating `R` at `x_k` while carrying the
-linearisation from `x_{k−1}` and only then relinearising. **J vs central** is the
-assembled gradient against a central difference, both at one linearisation.
-
-| `σ²` | | same-lin | **cross-lin** | J vs central |
-|---|---|---|---|---|
-| 0.05 | condense-first | 0 | **0** | 2.7e−11 |
-| 0.05 | linearise-first | 0 | **5.6e−04** | 2.3e−11 |
-| 0.01 | condense-first | 0 | **0** | 1.02e+02 |
-| 0.01 | linearise-first | 0 | **1.75e−01** | 2.5e−06 |
-| 0.005 | condense-first | 0 | **0** | 1.26e+02 |
-| 0.005 | linearise-first | 0 | **1.49e+00** | 5.0e−09 |
-
-**Under condense-first the residual is exactly independent of the linearisation
-history** — 0.000e+00, at every width. It must be: the local problems are solved
-to convergence, so nothing about how they were reached survives.
-
-**Under linearise-first it is not, and the dependence grows with local
-stiffness** — to 149% at the published `σ² = 0.005`. The retained local fields
-are a **hidden state variable of the operator**. `MultInvLin()` advances them by
-two corrections when relinearising and one when evaluating, from wherever they
-already were, so `R` is really `R( trace; fields )` and the fields carry history.
-Newton is handed a function that changes under it by more than its own value
-between iterations, and *no* Newton converges on that — which is why the failure
-survives refinement, survives a line search, and survives Picard.
-
-**So it is not the Jacobian.** At a fixed linearisation the gradient is the
-derivative of the residual to 2.3e−11, 2.5e−6 and 5.0e−9 — cleaner, at the stiff
-widths, than condense-first manages.
-
-**And the 1.02e+02 in the condense-first column is a second finding, about the
-ordering meq actually ships.** There the residual is a perfect function of the
-trace but the gradient disagrees with a central difference of it by a factor of
-100 once `σ² ≤ 0.01`. That is the element-local solves hitting their 100-iteration
-cap: a residual computed from an unconverged local solve is not smooth, so the
-difference is meaningless and the Jacobian may or may not be. **It is the
-measured explanation for the pedestal's 39 wandering iterations at
-`k = 1, n = 16`**, and it is the same defect that corrupts a differenced border —
-see the seed note under *Traps*. Refinement cures it because a resolved local
-problem converges inside its cap.
-
-**What each ordering therefore needs, and they are different things.**
-Linearise-first needs the fields to stop being hidden state: either the outer
-solver owns the field increments too — which is what NPC's simultaneous Newton
-actually is, and would let one line search damp the whole step — or the local
-correction is iterated until the fields no longer move, which is condense-first
-under another name. Condense-first needs its local solves to converge, which
-`setLocalSolver()` and resolution both reach for and neither guarantees. **Both
-are MFEM-side.**
-
-**And Picard-then-Newton does not rescue it**, which is worth recording because
-it is the obvious thing to try and it is the route that rescues condense-first on
-these same sources. Measured on §4.2 at `k = 1, n = 16`: `PicardThenNewton` under
-condense-first converges in 4 Newton steps from `‖r₀‖ = 1.88e+00`; under
-linearise-first the same handoff starts at `‖r₀‖ = 4.89e+02` — from a state
-Picard has already walked to the answer — and thrashes between 1e−1 and 1e4 for
-60 iterations. Picard fixes where the iterate is; it does nothing about a local
-correction that overshoots from wherever it starts.
-
-**So the element-local nonlinear solves were never the cause.** The control that
-pointed here — relaxed Picard converging where Newton fails — differed in
-*globalisation* as well as in local linearity, and the globalisation cross says
-which half was doing the work. Every KINSOL strategy that steers the outer trace
-buys it by driving the local Newtons harder and still fails:
-
-| §4.2 pedestal `k = 1, n = 16` | outcome | local nonlinear iterations |
-|---|---|---|
-| condense-first, plain Newton | **ok, 31 it** | 133,168 |
-| condense-first + `KIN_LINESEARCH` | fails at 45 | **1,381,527** |
-| condense-first + `KIN_NONE` | fails at 19 | 105,021 |
-| linearise-first, plain | fails at 60 | 0 |
-| linearise-first + line search | fails at **2** | 0 |
-
-**What does work is Picard, then Newton** — see *Picard, then Newton* below. Keep
-`setNonlinearOrdering()`: it costs nothing, it is the canonical NPC ordering, and
-it is the only way to run this discretisation without element-local nonlinear
-solves at all. Do not expect it to fix a stiff source.
+**Globalising the outer iteration makes the local solves worse, not better**,
+which is the other half of *On SUNDIALS*. On §4.2 at `k = 1, n = 16` under
+condense-first: plain Newton converges in 31 with 133,168 element-local
+iterations; `KIN_LINESEARCH` fails at 45 having spent **1,381,527**; `KIN_NONE`
+fails at 19. A line search chooses how far to move the trace and cannot make
+the local problems at that trace well posed.
 
 3. **Picard, keeping the local problems linear — implemented, as a bridge.**
    `Globalisation::AndersonPicard` is `KINSolver(KIN_FP)` over the fixed point
@@ -1653,274 +1963,149 @@ globalisation; `PicardThenNewton` switches twice inside one `solve()`.
 
 ### On SUNDIALS
 
-`mfem::KINSolver` **derives from `mfem::NewtonSolver`** (`linalg/sundials.hpp`),
-and is reachable through `setGlobalisation()`. `SetJFNK` and
-`EnableAndersonAcc` come with it.
+`mfem::KINSolver` **derives from `mfem::NewtonSolver`** (`linalg/sundials.hpp`)
+and is reachable through `setGlobalisation()`; `SetJFNK` and `EnableAndersonAcc`
+come with it. SUNDIALS 7.5.0 is built in at `../sundials/cuda-install`.
 
-**But it is not a drop-in, and the difference is silent.** This file used to say
-that code written against a `NewtonSolver&` takes either "with no abstraction
-layer and no rewrite". Not so: `NewtonSolver::Mult( b, x )` forms
-`r = oper(x) − b`, while **`KINSolver::Mult` declares its first argument without
-a name** and solves `oper(x) = 0`. meq's trace right-hand side is not zero, so
-handing it straight to KINSOL converges — to the solution of a different
-problem. `ShiftedResidual` in `GradShafranov.cpp` is the adapter; it reproduces
-`NewtonSolver`'s residual exactly, which is what makes a comparison between the
-two paths mean anything. `kinsolAgreesWithNewtonWhereBothConverge` is what
-watches it, and would catch the adapter being dropped or its sign flipped.
+**IT IS NOT A DROP-IN, AND THE DIFFERENCE IS SILENT.** `NewtonSolver::Mult(b,x)`
+forms `r = oper(x) − b`, while **`KINSolver::Mult` declares its first argument
+without a name** and solves `oper(x) = 0`. meq's trace right-hand side is not
+zero, so handing it straight to KINSOL converges — to the solution of a
+different problem. `ShiftedResidual` in `GradShafranov.cpp` is the adapter, and
+it reproduces `NewtonSolver`'s residual exactly, which is what makes any
+comparison between the two paths mean anything.
+`kinsolAgreesWithNewtonWhereBothConverge` would catch it being dropped or its
+sign flipped. For the NPC-era behaviour see *KINSOL: the two orderings are exact
+opposites*.
 
-**And the line search does not fix the pedestal.** Measured:
+**Globalising the outer iteration does not globalise the inner ones**, which is
+the structural point and is why a line search rescues nothing under
+`CondenseThenLinearise`. The failure there is
+`el: N not convered in 100 iters` — MFEM's **element-local** non-linear solve,
+one per element per residual evaluation. A line search chooses how far to move
+the *trace*; it cannot make the local problems at that trace well posed, and
+KINSOL never sees them. What would: damping the **local** solves, which is
+MFEM's to offer; continuation, so each solve starts from the previous answer; or
+**Picard on the outer loop**, which leaves every local problem linear. That last
+is what both papers do. **NPC removes the whole question** by having no
+element-local non-linear solve at all.
 
-| case | Newton | `KIN_LINESEARCH` | `KIN_NONE` |
-|---|---|---|---|
-| §4.2 `k=1, n=16` (`h = 0.05`) | ok, 42 it | **fails at 18** | fails at 6 |
-| §4.2 `k=1, n=24` (`h = 0.033`) | ok, 23 it | ok, 22 it | fails at 11 |
-| §4.3 homogeneous + a guess | trivial branch | trivial branch | — |
+**`MFEM_USE_LAPACK` APPEARS TO FIX THE PEDESTAL AND DOES NOT — IT TIPS A
+MARGINAL ITERATION BY CHANGING THE ROUNDING.** Against a LAPACK build §4.2 at
+`k = 1, h = 0.05` converges in 42; against `install-nolapack`, identical but for
+that flag, it fails at 60. **But at `h = 0.0333` both builds converge in 23, the
+same number.** Only the marginal mesh moves. There is no mechanism for it to be
+anything else: meq sets `LPrecType::LU`, both implementations partial-pivot on
+the same rule, and `Factor( m, TOL = 0.0 )` is `dgetrf`'s singularity condition
+exactly. What is left is blocked BLAS-3 against unblocked scalar loops —
+identical arithmetic, different summation order, `O(1e-16)`. **And the BLAS here
+is threaded MKL**, whose reduction order depends on the thread count, so whether
+that local Newton converges is machine- and environment-dependent. Do not treat
+42 iterations as reproducible. An intermediate claim in this file that LAPACK
+had fixed a third of the globalisation problem was wrong.
 
-It rescues nothing, and on the one case that motivated it it is *worse* than the
-undamped iteration.
+**`MFEM_USE_EXCEPTIONS` is enabled** and does what `DRIVER-PLAN.md` §5 needs:
+`MFEM_ERROR_THROW` is the default error action and `mfem::ErrorException`
+derives from `std::exception`, so **no meq-side change was required** — an
+existing `catch ( std::exception const & )` already catches it. §4.4 at
+`k = 1, n = 16` used to take the process down with SIGABRT and now reports a
+failure with a usable iteration count, so a driver can return exit code 2 rather
+than dying.
 
-**The reason is structural and worth internalising: globalising the outer
-iteration does not globalise the inner ones.** The failure is
-`el: N not convered in 100 iters` — MFEM's **element-local** nonlinear solve,
-one per element per residual evaluation, eliminating flux and potential for a
-given trace. A line search chooses how far to move the *trace*; it cannot make
-the local problems at that trace well posed, and KINSOL never sees them.
+**A caveat worth keeping in view**: the throw unwinds out of the middle of MFEM,
+and the objects are left as the throw found them. meq's paths construct a fresh
+solver per solve and so do not care, but **do not assume a
+`GradShafranovSolver` is reusable after a caught `ErrorException`.**
 
-What would: damping the **local** solves, which is MFEM's to offer;
-continuation in the source amplitude, so each solve starts from the previous
-answer rather than a cold trace; or **Picard on the outer loop**, which
-evaluates `F` at the previous iterate and leaves every local problem *linear*.
-That last is what both papers do, and this measurement is the argument for it —
-see *Newton, and the obligation it creates*, which is the other side of the same
-trade.
+### The suite is 23/23, and the last red one was a mesh chosen for a dead solver
 
-This needed `MFEM_USE_SUNDIALS`, which the tree did not have when the section was
-written, and which turned out to be nothing worse than a flag: MFEM 4.9.1's
-SUNDIALS interface is fully modernised (`sunrealtype`, `SUNContext`) and asks
-only for SUNDIALS ≥ 5, and 7.5.0 is installed at
-`/home/ian/projects/sundials/install`. That mismatch is precisely why the *old*
-pinned MFEM 4.5.1 stopped compiling — its `sundials.hpp` still used `realtype`
-and `booleantype`, which SUNDIALS 7 removed.
+**GREEN, 2026-08-31 (later still).** The NPC port dropped the whole suite from
+872 s to 499 s — the element-local non-linear solves that cost `PedestalConvergence`
+its time are gone, 213 s against 572 s, and `HighBetaConvergence` 3.3 s against
+17 s. It left one red assertion, and that is now fixed rather than tolerated.
 
-**SUNDIALS is built in** (`../mfem/install`), so `KINSolver` is reachable
-without a rebuild. It is no longer the blocker it was, and one reason is worth
-recording because it was measured rather than guessed.
+**What was red**: `internalLayerSelfConverges`, GS-2 §4.5 at `k = 1`, on the
+**coarsest** mesh of its self-convergence sweep, `n = 24`.
 
-**`MFEM_USE_LAPACK` appears to fix the pedestal, and it does not. It tips a
-marginal iteration by changing the rounding.** This is worth reading before
-anyone concludes the globalisation problem has gone away, because the surface
-evidence says it has.
+**WHAT IT ACTUALLY WAS: A MESH SEQUENCE CALIBRATED AGAINST AN ORDERING MFEM HAS
+DELETED.** `meshesFor()`'s table recorded `h = 0.0333: 26 it` for that point,
+measured under the old default. The discretisation reason was there all along and
+nobody had connected it: §4.5's ridge is **about 0.025 wide in space**, and
+`n = 24` gives `h = 0.0333` — **the feature was thinner than a cell**. The
+self-difference at that point was measuring the approach to the asymptotic
+regime, not the rate, which is the same objection the file already records
+against starting `k = 2, 3` coarser than 16.
 
-Stage 6 recorded three failures: the pressure pedestal not converging at
-`k = 1` for `h ≥ 0.05` (`el: N not convered in 100 iters` from MFEM's
-element-local nonlinear solves), and the current hole (§4.4) going NaN and
-*aborting the process*. Against a LAPACK build the pedestal converges at
-`k = 1, h = 0.05` in 42 iterations; against `../mfem/install-nolapack`, which
-is identical but for that one flag, it fails at 60 as before.
+Moving the `k = 1` sequence to `{ 48, 96, 192 }` fixes both at once, and the
+rates improve rather than being relaxed to fit:
 
-**But the flag is not doing what that suggests.** At `h = 0.03333` — the
-well-posed mesh — both builds converge in **23 iterations, the same number**.
-Only the marginal mesh moves, and 42 iterations is itself grinding against the
-five a healthy Newton takes. Two points on one knife edge, not a robustness
-gain.
-
-There is no mechanism for it to be anything else. meq sets `LPrecType::LU`, so
-the local solve really is the dense LU; both implementations partial-pivot on
-the largest `|a|` in the column, which is the same rule; and the singularity
-test that looks like a difference is not one — `Factor( int m, real_t TOL = 0.0 )`
-compares `abs( pivot ) <= TOL` against a default of **zero**, which is `dgetrf`'s
-condition exactly, and `DenseMatrixInverse::Factor` discards the return value
-either way. What is left is `dgetrf`/`dgetrs`/`dgemm` being blocked BLAS-3
-where MFEM's fallbacks are unblocked scalar loops: identical arithmetic, different
-summation order, `O(1e-16)`.
-
-**And the BLAS here is threaded MKL** — `MFEM_EXT_LIBS` carries
-`-lmkl_intel_lp64 -lmkl_intel_thread -lmkl_core -liomp5`, the same library the
-`MKL_THREADING_LAYER` trap is about. Reduction order in a threaded BLAS depends
-on the thread count, so whether that local Newton converges is not merely
-fragile but machine- and environment-dependent. Do not treat 42 iterations as
-reproducible.
-
-**So the earlier claim in this file that `MFEM_USE_SUNDIALS = NO` was the
-blocker stands, and an intermediate claim that LAPACK had fixed a third of it
-was wrong.** Both §4.2 at `h = 0.05` and §4.4 still need globalisation;
-`KINSolver(KIN_LINESEARCH)` is now available to try on them. What LAPACK
-bought is a marginal case that happens to fall the right side of the line on
-this machine today.
-
-**`MFEM_USE_EXCEPTIONS` is now enabled**, and it does what `DRIVER-PLAN.md` §5
-needs. With it, `MFEM_ERROR_THROW` is the *default* error action and
-`mfem::ErrorException` derives from `std::exception`, so **no meq-side change was
-required** — an existing `catch ( std::exception const & )` already catches it.
-
-Measured on §4.4 at `k = 1, n = 16`, which used to take the process down with
-SIGABRT:
-
-```
- --> norm = -nan
- ... in function: virtual void mfem::NewtonSolver::Mult( ... )
-RESULT|4.4 hole|k=1|n=16|condense-first|none|seeded|FAIL|0|local 214583
-```
-
-Exit 0, a reported failure, a usable iteration count. A driver can now return
-exit code 2 rather than dying.
-
-**A caveat worth keeping in view**: the throw unwinds out of the middle of
-MFEM — that NaN is detected inside `NewtonSolver::Mult`, and the element-local
-failures throw from deeper still. The objects are left as the throw found them.
-meq's paths construct a fresh solver per solve and so do not care, but do not
-assume a `GradShafranovSolver` is reusable after a caught `ErrorException`.
-
-### The suite is 22/23, and the one red assertion is characterised
-
-Measured 2026-08-31 against `meq-integration` carrying MFEM's `ad04da3749`, with
-`MKL_NUM_THREADS=1`. **872 s for the whole suite.**
-
-**`PedestalConvergence` is the only failing file and it has ONE assertion in it,
-down from seven.** MFEM fixed the cause of the parity gap: the linearisation
-point took a fixed **two** frozen-Jacobian local corrections, and
-`GetGradient()` is the Schur complement of the Jacobian at whatever fields that
-left — so the correction count *was* the gradient's accuracy, and nothing said
-so. It now iterates to `setLocalSolver()`'s tolerance. What that bought, on
-meq's own cases:
-
-| GS-2 case | | before | after |
-|---|---|---|---|
-| §4.2 pedestal | `k = 1, n = 16` | fail at 60 | **ok, 28** |
-| §4.2 pedestal | `k = 2, n = 16` | fail at 60 | **ok, 8** (against 11 for condense-first) |
-| §4.2 pedestal | `k = 1, h = 0.0333` | fail at 60 | **ok, 11** |
-| §4.3 barrier | `k = 2, h = 0.05` | fail at **0** | **ok** |
-| §4.5 layer | `k = 1, h = 0.0333` | fail at 60 | **ok** |
-| **§4.5 layer** | **`k = 2, h = 0.05`** | fail at 60 | **still fails at 60** |
-
-**And the `0 iterations` mystery resolved itself.** That signature — a throw out
-of MFEM before completing one iteration, rather than wandering for sixty — was
-the one thing nobody could explain and nobody could reproduce outside meq. It is
-gone, as a side effect of the divergence guard added to `MultInvLin()`. Upstream
-flagged that as unverified and asked meq to check; meq checked.
-
-**The survivor is measured against both orderings rather than merely reported**,
-which is what makes it a parity claim:
-
-| §4.5 internal layer | condense-first | linearise-first |
+| §4.5, `k = 1` | `ψ` | `q` |
 |---|---|---|
-| `k = 1, n = 24` | ok, 23 | ok, 42 |
-| **`k = 2, n = 16`** | **ok, 10** | **fail at 60** |
-| `k = 2, n = 24` | ok, 12 | ok, 11 |
+| `{ 24, 48, 96 }` | 1.786 | 2.480 |
+| **`{ 48, 96, 192 }`** | **2.160** | **2.184** |
 
-Isolated: refining once cures it and so does dropping an order. It is one of
-three surviving out of 144 configurations upstream, all at widths where the
-frozen-Jacobian local correction cannot converge and the guard truncates.
-Closing them needs the local step globalised or solved exactly, and **nothing
-has been tried** — meq is not asking for it, because the ladder covers the
-production path.
+Design order for `k = 1` is 2, and the corner control caps `q` at about 2.2, so
+the finer sequence sits at design order in `ψ` and at the cap in `q` — which is
+what the study is for. Plain NPC converges at all three points, 12/13/12.
+`PedestalConvergence` went 216 s → 262 s, and the whole suite only 509 s →
+**522 s**: the 60 wasted iterations at `n = 24` paid for most of `n = 192`.
 
-**THE FIX COSTS WALL CLOCK, AND THAT IS THE TRADE RATHER THAN A REGRESSION.**
-The correction loop that bought the correctness runs 4.2 to 12.1 corrections per
-element per linearisation against the fixed two. `PedestalConvergence` went
-351 s → 572 s and the whole suite 682 s → 872 s with no other change. Upstream
-measures linearise-first at 0.9 s against condense-first's 0.7 s on a stiff case
-and says so in its own doxygen: **this ordering is not a wall-clock win on a
-stiff problem.** What it buys is a local problem that is always a linear solve
-against one factorisation, and a reduced operator whose gradient is the
-assembled Schur complement.
+**And the failure had two distinct characters, which is worth keeping**:
 
-**A test that was green went red, and chasing it was worth more than the fix
-to it.** `andersonPicardReachesTheSameSolutionAsNewton` compared Newton against
-Anderson-Picard on one mesh at a tolerance of 1e-6. It now reads 9.1e-05 there.
-Over a sweep:
+| `n` | `h`/0.025 | plain NPC |
+|---|---|---|
+| 24 | 1.33 | fails at 60, **wandering** to `ψ ∈ [−1.51, +1.44]` |
+| 32 | 1.00 | fails at 60, in a **PERIOD-4 LIMIT CYCLE** at ~4e-3 |
+| 48 | 0.67 | ok, 12 |
 
-| n | relative in `max ψ` |
-|---|---|
-| 16 | 9.103e-05 |
-| 24 | **1.160e-13** |
-| 32 | 3.275e-06 |
-| 48 | **4.944e-13** |
+The `n = 32` row is not divergence: the residual descends 7.99e-02 → 2.69e-03 in
+ten steps and then *orbits*, period 4 to a mean relative mismatch of 0.041
+against 0.32–0.44 at every other period, eleven orders short of its target.
+Newton with a stable periodic orbit, which is a different animal from the
+wandering at `n = 24` and from anything else recorded in this file.
 
-**It is not a stopping tolerance**, which was the first guess: tightening rtol
-from 1e-8 to 1e-12 leaves the `n = 16` figures **bit identical**, at 230
-Anderson iterations instead of 162. Both iterations are fully converged and
-their fixed points differ. Round-off agreement on some meshes and 1e-5 on
-others, with no trend in the mesh, says these coarse discretisations carry **more
-than one solution** — which is what this file records elsewhere about the GS-2
-sources — and that two iterations with different non-linear structure sometimes
-land on different ones. The old single-mesh gate was green because the pre-fix
-Newton took 134 iterations on a gradient that did not belong to its residual and
-drifted onto Picard's branch. **A better Jacobian converging faster to a nearer
-solution is the expected consequence of the fix.**
+**NONE OF IT IS THE DISCRETISATION.** Every route that converges reaches the same
+discrete solution — `CondenseThenLinearise` and NPC-with-`PicardThenNewton` agree
+to between 2.9e-11 and 2.3e-09 in L2 at every mesh from 24 to 192, and their
+self-differences are **bit-identical**, so the rate does not depend on the route.
+Both failing points are reachable: `PicardThenNewton` takes 11 Newton steps at
+`n = 24` and **4** at `n = 32`.
 
-The test now sweeps three meshes and asserts the two things actually entailed:
-the **best** agreement is at round-off, which is what says the Picard path
-solves meq's problem rather than a neighbouring one — a wrong sign or a missing
-`1/r` would show O(1) — and the **worst** is bounded well below a different
-problem. A per-mesh gate at 1e-6 is not reinstatable and the test says why.
+**AND THE BASIN FOLLOWS THE FEATURE, NOT THE DOF COUNT.** Marking on `|∂F/∂ψ|`
+at the datum ramp — an a-priori marker using nothing the solve is not given — and
+refining that band once from `n = 24`:
 
-**What the earlier `Mult()` fix cleared** is the Jacobian-check ordering:
-`NewtonConvergence`'s central difference against the assembled gradient reads
-4e-11, the `O(step²)` floor. meq keeps the hoisted `GetGradient()` regardless,
-because holding the linearisation fixed across a difference is the right thing
-to write whether or not the library requires it — though note upstream's finding
-that re-taking the gradient *after* a difference silently buys extra corrections
-and can hide exactly this class of defect.
+| | trace dofs | plain NPC |
+|---|---|---|
+| uniform `n = 32` | 6,272 | **fails at 60** |
+| **band-refined from `n = 24`** | **7,588** | **ok, 22** |
+| uniform `n = 48` | 14,016 | ok, 12 |
 
+Inside the basin on **54%** of uniform `n = 48`'s dofs, and with 21% more than
+the uniform mesh that fails. The band must be generous, though: marking at half
+the peak takes only 102 of 1152 elements and still fails, because the datum is
+only a proxy for where the ridge sits. This does not go into the
+self-convergence study — a rate needs a uniform `h` — but it is the right move
+for anyone who needs a coarse solve on a localised-feature source.
 
-**Do not compare these timings against the ones this file used to carry.** The
-old 2269 s baseline was taken with a *different default ordering*
-(`CondenseThenLinearise`), against a different MFEM, and with test sources that
-have since changed substantially — `HighBetaConvergence.cpp` alone by 703 lines.
-Most of the speedup is `MKL_NUM_THREADS=1` and that is separately and cleanly
-measured under *Traps*; attributing the per-file ratios to any one cause would
-be wrong. The table below is context, not a measurement:
+**THE TRANSFERABLE LESSON, AND IT IS THE ONE THIS FILE KEEPS RELEARNING**: a
+"coarsest usable mesh" is a property of the **solver** as much as of the
+benchmark. That table was calibrated against a solver that no longer exists, and
+the red assertion was the calibration going stale rather than anything about
+meq. Re-measure it after any change to the ordering or the globalisation.
 
-| | old, condense-first | 08-30, MKL=1 | 08-31, MFEM fixed |
-|---|---|---|---|
-| `PedestalConvergence` | 1334 s | 409 s (7 red) | 572 s (1 red) |
-| `naming` | 127 s | 150 s | 128 s |
-| `MillerConvergence` | 194 s | 77 s | 58 s |
-| `HighBetaConvergence` | 224 s | 25 s | 17 s |
-| `NewtonConvergence` | 117 s | 36 s | 30 s |
-| `WarmStartConvergence` | 84 s | 5 s | 5 s |
-| `ExtensionConvergence` | 75 s | 36 s | 28 s |
-| **total** | **2269 s** | **798 s** | **872 s** |
+**A LONG PRE-PORT ACCOUNT STOOD HERE AND IS DELETED.** It was the 872 s run
+against the deleted ordering, its per-file timing tables and the history of a
+parity gap MFEM has since closed by removing the mode. Recoverable from git
+(`cbb210b`, `05c864d`). Three things in it are still live.
 
-The last column is *slower overall* and *faster in every file but one*: the
-correction loop that fixed the parity gap costs `PedestalConvergence` 163 s, and
-that one file outweighs the gains everywhere else.
-
-`naming` is now the second most expensive item in the suite and is the only one
-that went *up*; it is clang-tidy over `src/meq`, so it tracks the library
-growing rather than anything about the solver.
-
-The rest of this section predates that run and is kept for what it records about
-individual regressions.
-
-**`HighBetaConvergence` was the last red one and it is green.** It asserted the
-physical answer for a profile posed in normalised flux and failed while `ψ_ax`
-was outside the residual; `ψ_ax` is now an unknown of the non-linear system and
-the six cases converge to a self-consistent equilibrium in 4 to 11 Newton steps.
-See *Newton, and the obligation it creates*. The file runs in 183 s.
-
-**The `ψ*`-on-a-curved-boundary regression is fixed.**
-`ExtensionConvergence::thePostProcessedPotentialConvergesAtKPlusTwo` and
-`AdaptiveRefinement` both pass. That regression was `ψ*` converging at 1.28 at
-`k = 1` and 1.16 at `k = 2` — a rate independent of `k`, so a fixed `O(h)`
-geometric error rather than a discretisation one — and being *larger* than `ψ_h`,
-by 7× at `k = 1` and 1000× at `k = 2`, so the post-processing cost accuracy
-rather than buying it. `AdaptiveRefinement` failed downstream of it, `η₂`, `η₄`
-and `η₅` being built on `ψ*`, which is why it surfaced as `η` refusing to come
-down four files from the cause. Both are green now.
-
-**The pedestal tripwire is rewritten and now passes.** It used to assert that
-Newton does not converge at `k = 1, h = 0.05`, told its reader to delete it when
-that stopped holding, and blamed Picard-vs-Newton and SUNDIALS in its prose —
-both of which are now known to be wrong. It was never entitled to assert that
-point in either direction: 42 iterations against LAPACK and a failure at 60
-against `install-nolapack` is the same library differing by one flag, decided by
+**`pedestalConvergenceIsAResolutionThreshold` asserts the CURES, not the knife
+edge.** It used to assert that Newton fails at `k = 1, h = 0.05`, which it was
+never entitled to do in either direction: 42 iterations against a LAPACK build
+and a failure at 60 against `install-nolapack` is one flag's difference in
 threaded-MKL reduction order, so an assertion on it is an assertion about this
-machine today.
-
-`pedestalConvergenceIsAResolutionThreshold` asserts the two **cures** instead,
-each with a factor of four in it and neither marginal:
+machine today. It now asserts the two independent refinement cures, each with a
+factor of four in it:
 
 | | | |
 |---|---|---|
@@ -1928,20 +2113,32 @@ each with a factor of four in it and neither marginal:
 | `k = 1, n = 32` | 9 iterations | `h`-refinement cures it |
 | `k = 2, n = 16` | 11 iterations | `p`-refinement cures it, mesh untouched |
 
-That two independent refinement paths both cure it is what identifies the cause
-as under-resolution; §4.4 is the control, and it fails at every order and mesh
-tried because its trouble is that the problem is multi-valued. The threshold
-itself is still asserted, as `iterations(n = 16) ≥ 2 × iterations(n = 32)`, which
-holds whichever side the rounding falls on — 42 or a failure at the cap both
-clear it. §4.4, the current hole, still fails, and now reports rather than
-aborting.
+That two independent paths both cure it is what identifies the cause as
+under-resolution. §4.4 is the control: it fails at every order and mesh tried,
+because its trouble is that the problem is multi-valued. The threshold itself
+is still asserted, as `iterations(n = 16) ≥ 2 × iterations(n = 32)`, which holds
+whichever side the rounding falls on.
 
-**That file is 758 s and is the largest single item in the suite by a wide
-margin**, which is worth knowing before adding to it. The percentage this used to
-quote is gone rather than updated: the denominator moved when
-`HighBetaConvergence` went from 428 s to 183 s, and the only re-measurement
-available was taken on a contended machine, which by this file's own standing
-rule is not a measurement about the code.
+**THESE COARSE DISCRETISATIONS CARRY MORE THAN ONE SOLUTION, and it is measured
+from three directions now.** `andersonPicardReachesTheSameSolutionAsNewton`
+used to gate one mesh at 1e-6; over a sweep it reads 9.1e-05, 1.2e-13, 3.3e-06
+and 4.9e-13 at `n = 16, 24, 32, 48` — round-off on some meshes and 1e-5 on
+others, **with no trend in the mesh**. It is not a stopping tolerance:
+tightening rtol from 1e-8 to 1e-12 leaves the `n = 16` figures *bit identical*.
+Both iterations are fully converged and their fixed points differ. The test now
+sweeps three meshes and asserts the two things actually entailed — the **best**
+agreement is at round-off, which is what says the Picard path solves meq's
+problem rather than a neighbouring one, and the **worst** is bounded well below
+a different problem. A per-mesh gate at 1e-6 is not reinstatable. See
+*Should `PicardThenNewton` simply be the default?* for the same phenomenon at
+9.4% across three solve routes.
+
+**`NewtonConvergence`'s finite-difference Jacobian check reads 4e-11**, the
+`O(step²)` floor, and meq keeps its hoisted `GetGradient()` regardless of
+whether the library requires it: holding the linearisation fixed across a
+difference is the right thing to write, and upstream's own finding is that
+re-taking the gradient *after* a difference silently buys extra corrections and
+can hide exactly this class of defect.
 
 ## The linear solves, and what they should be
 
@@ -1962,21 +2159,20 @@ the trace Jacobian, so it costs one extra backsolve per Newton step and nothing
 else. Assembling the border into an `(n+1)` matrix would put a dense row and a
 dense column into the factorisation for no gain, which is why it is not done.
 
-**The third one existed because meq used Newton rather than Picard, and
-`NonlinearOrdering::LineariseThenCondense` has since removed it.** Picard
-evaluates `F` at the previous iterate and leaves every local problem linear —
-one dense factorisation and done. Condense-first Newton puts `∂F/∂ψ` inside the
-local problem and makes it nonlinear. Linearise-first, which is **meq's default
-and only ordering**, differentiates the full `(q, ψ, ψ̂)` system first and
-hybridizes the linear system that results, so every element-local operation is a
-linear solve and `GetNumLocalNLIterations()` stays at **zero**.
+**The third one exists because meq uses Newton rather than Picard, and
+`NonlinearOrdering::NPC` removes it.** Picard evaluates `F` at the previous
+iterate and leaves every local problem linear — one dense factorisation and done.
+Condense-first Newton puts `∂F/∂ψ` inside the local problem and makes it
+nonlinear. NPC, which is **meq's default**, differentiates the full
+`(q, ψ, ψ̂)` system first and hybridizes the linear system that results, so every
+element-local operation is a linear solve and `GetNumLocalNLIterations()` stays
+at **zero** — asserted, not assumed, by
+`SolverContract::theOrderingsAgreeAndOnlyOneIteratesLocally`, which reads 0
+against the condensation's 3644/3560/3412 at `k = 1, 2, 3`.
 
-So the row above is what meq *has*, not what it runs: reaching it means asking
-for `CondenseThenLinearise` deliberately, which only `PedestalConvergence` does,
-and only to measure the two against each other. The historical reading — `el: N
-not convered in 100 iters` being where the pedestal fails — describes the
-ordering meq no longer uses. What the pedestal fails on now is the parity gap;
-see *The suite is 22/23*.
+So the row above is what meq *has*, and it is one `setNonlinearOrdering()` call
+away rather than unreachable — `CondenseThenLinearise` is the **backup**, and on
+stiff under-resolved meshes it is the one that works. See *The NPC port*.
 
 **And there is a fifth thing that is not a solver at all but decides how fast
 the third and fourth run**: `setAssemblyMode()`, which threads the element loop
@@ -2107,245 +2303,95 @@ The measurement that motivated it:
 
 ### Threading, measured — and the two axes are not the same axis
 
-**`tests/performance/` is the harness, and it is new.** `TraceSolverScaling` is
-built but deliberately **not registered as a ctest**: everything it reports is a
-timing, and this project's standing rule is that a threaded timing on this
-machine is a measurement about the machine. It returns non-zero only for the two
-*correctness* properties that make its timings mean anything — threaded assembly
-reproducing serial assembly bit for bit, and PARDISO reproducing UMFPACK.
-`scan.sh` drives it, one process per point, because MKL fixes its threading at
-first use and an in-process sweep would measure the first setting five times.
+**`tests/performance/` is the harness and is deliberately NOT a ctest**:
+everything it reports is a timing, and this project's standing rule is that a
+threaded timing on this machine is a measurement about the machine.
+`TraceSolverScaling` returns non-zero only for the two *correctness* properties
+that make its timings mean anything — threaded assembly reproducing serial
+assembly bit for bit, and PARDISO reproducing UMFPACK. `scan.sh` drives it one
+process per point, because MKL fixes its threading at first use and an
+in-process sweep would measure the first setting five times.
 
-**Two knobs, swept separately, and sweeping them together is actively
-misleading:**
+**Two knobs, and sweeping them together is actively misleading:**
 
 | | drives |
 |---|---|
 | `OMP_NUM_THREADS` | `DarcyHybridization`'s threaded element assembly |
 | `MKL_NUM_THREADS` | UMFPACK's BLAS, PARDISO's internals, **and MFEM's element-local dense LU** |
 
-The third entry in that second row is the one that surprises, and it is why the
-axes have to be separated: with both swept together, UMFPACK's collapse and the
-`k = 3` assembly blow-up swamp every other column in the table.
+That third entry is the surprise, and it is why the axes must be separated: swept
+together, the `k = 3` assembly blow-up swamps every other column. Full account
+under *Traps*; the short of it is `MKL_NUM_THREADS=1`, non-negotiable, and the
+culprit is `ComputeH()`'s dense LU rather than UMFPACK.
 
-#### Threaded assembly: real, bit-exact, and worth about 1.2x
+**Threaded assembly is bit-exact and worth about 1.2x.**
+`SetAssemblyMode( Threaded )` threads the element-local half of `ComputeH()`;
+`SolverContract::threadedAssemblyReproducesSerialAssemblyExactly` requires
+`0.000e+00` over two degrees and two meshes — not a tolerance, because the
+mechanism is specific (element-local arithmetic reassociates nothing, the
+scatter stays serial and in element order). Measured 1.15x–1.33x from four
+threads up, and **0.86x at one thread**, the buffering costing more than the
+serial loop it imitates. MFEM measures 2.09x for the hybridized assembly
+*alone*; meq times all of `prepare()`, of which only that element loop threads.
+The scatter is the ceiling and cannot be threaded — an unfinalized
+`SparseMatrix` carries one `current_row` for the whole matrix, so two threads
+writing provably disjoint rows still collide, and the failure is a hang.
 
-`DarcyHybridization::SetAssemblyMode( Threaded )` threads the element-local half
-of `ComputeH()`. meq reaches it through `setAssemblyMode()`, which refuses
-rather than letting MFEM abort when the build lacks OpenMP or thread safety.
+**THE ASSEMBLY DEFAULT IS `Serial`, AND A GATE ON `omp_get_max_threads() > 1`
+WAS TRIED AND REMOVED.** This is the place in this campaign where the isolated
+benchmark actively misled. Under that gate `HighBetaConvergence` went from
+**21.5 s to 39 s** — 1.8x slower, reproducibly — because MFEM forks a team and
+buffers *per call*, so a caller that assembles once amortises it and one that
+assembles hundreds of times inside a bordered Newton pays it every time. **Mesh
+size does not separate the two cases**: HighBeta's meshes are 128 and 512
+elements, and 512 is exactly where the isolated benchmark still showed a win.
+The solver cannot know which caller it has. So `Threaded` is an informed
+opt-in: **take it for a large mesh assembled a few times, leave it for a small
+one assembled hundreds of times.**
 
-**It is bit for bit**, which is asserted rather than trusted:
-`SolverContract::threadedAssemblyReproducesSerialAssemblyExactly` compares every
-stored entry and every column index over two degrees and two meshes and requires
-`0.000e+00`. Not a tolerance — MFEM documents exactness, the mechanism is
-specific (element-local arithmetic reassociates nothing, the scatter stays
-serial and in element order), and if it ever needs slack the mechanism has
-changed.
+**PARDISO beats UMFPACK on the trace solve, and beats it even sequentially** —
+1.50x on analyse-plus-factor and 1.41x on the backsolve at 37,248 trace dofs
+with `MKL_NUM_THREADS=1` on both sides, agreeing to 1.0e-14 or better at every
+point. It scales to about 8 threads (1.87x setup, 1.96x solve; 16 buys nothing
+more), which would make the end-to-end gap 2.83x and 3.13x. **meq cannot have
+that**, because `MKL_NUM_THREADS` is process-wide and the setting that makes
+PARDISO fast is the setting that makes `ComputeH()` forty times slower at
+`k = 3`. It stays unreachable until the element-local factorisation stops going
+through threaded MKL — `LocalFactorMode::Batched`, or an
+`mkl_set_num_threads_local()` around the trace solve. Neither is done.
 
-Speedup on meq's own problem, `MKL_NUM_THREADS=1` throughout, best of three:
-
-| OMP threads | `k=2, n=64` | `k=3, n=64` | best over all eight cases |
-|---|---|---|---|
-| 1 | 0.86x | 1.03x | 1.04x |
-| 2 | 1.09x | 1.10x | 1.16x |
-| 4 | 1.17x | — | 1.33x |
-| 8 | 1.15x | 1.22x | 1.26x |
-
-**MFEM measures 2.09x at 8 threads on a comparable mesh and both numbers are
-right.** MFEM times the hybridized assembly *alone*; meq times all of
-`prepare()`, of which only `ComputeH()`'s element loop threads — the integrator
-assembly, the scatter, and the FE space construction are serial. 1.2x is Amdahl
-on the quantity a caller actually waits for. The scatter is the ceiling and MFEM
-says so: it cannot be threaded, because an unfinalized `SparseMatrix` carries
-one `current_row` and one column-pointer scratch for the whole matrix, so two
-threads writing provably disjoint rows still collide, and the failure is a hang.
-
-**So it is worth switching on SOMETIMES, and it is not the win TODO expected.**
-That item called threading the element-local loops "the largest structural win";
-measured, it is 20% on a mesh assembled a few times — and a **1.8x loss** on a
-small system assembled hundreds of times, which is why it is not the default.
-See *The defaults* below before enabling it.
-
-#### Threaded MKL: a catastrophe, and not where it looks
-
-Full account under *Traps*, including the wrong first diagnosis and why no
-whole-test timing could have caught it. The short of it:
-
-* `MKL_NUM_THREADS=16` costs `SolovievConvergence` a factor of **143** and
-  `FieldConvergence` a factor of **180**, at 273% CPU.
-* **It is not UMFPACK.** Separated out, `UMFPackSolver::SetOperator` degrades by
-  about 40% across the whole thread range, never more.
-* **It is `ComputeH()`'s element-local dense LU**, on blocks of order 10-30,
-  through LAPACK. `k = 2` is untouched; `k = 3` degrades **forty-fold**.
-
-#### The trace solve: PARDISO wins, and wins more with threads
-
-`k = 2`, best of three, one process per thread count, assembly timing off so the
-solver columns are not buried by the effect above. Agreement with UMFPACK is
-**1.0e-14 or better** at every point, which is the only thing asserted.
-
-`SetOperator` (analyse + factor), seconds:
-
-| trace dofs | UMF `MKL=1` | UMF `=16` | PAR `MKL=1` | PAR `=4` | PAR `=8` | PAR `=16` |
-|---|---|---|---|---|---|---|
-| 2,400 | 0.0094 | 0.0110 | 0.0069 | 0.0056 | 0.0038 | 0.0058 |
-| 9,408 | 0.0408 | 0.0618 | 0.0298 | 0.0162 | 0.0220 | 0.0163 |
-| 21,024 | 0.1142 | 0.1550 | 0.0661 | 0.0558 | 0.0411 | 0.0456 |
-| 37,248 | **0.2091** | 0.2893 | 0.1395 | 0.0903 | 0.0745 | **0.0738** |
-
-`Mult` (backsolve), seconds:
-
-| trace dofs | UMF `MKL=1` | PAR `MKL=1` | PAR `=8` | PAR `=16` |
-|---|---|---|---|---|
-| 9,408 | 0.0050 | 0.0028 | 0.0019 | 0.0014 |
-| 21,024 | 0.0147 | 0.0103 | 0.0052 | 0.0046 |
-| 37,248 | **0.0266** | 0.0188 | 0.0096 | **0.0085** |
-
-**Three things follow, and the third is the awkward one.**
-
-**PARDISO beats UMFPACK even sequentially** — 1.50x on setup and 1.41x on the
-solve at 37,248 dofs, both at `MKL=1`. That is a fair fight with no threading on
-either side, and it reframes the "3.8x setup, 2-3x solve" this file used to
-carry: those were taken when the stray `libmkl_sequential` made PARDISO
-sequential too, so they were never a threading result and the ratio has since
-come down as the measurement got cleaner.
-
-**PARDISO does scale, to about 8 threads.** 1.87x on setup and 1.96x on the
-solve from 1 to 8, then flat — 16 threads buys 1.89x, i.e. nothing more. Against
-UMFPACK at its own best setting the end-to-end gap is **2.83x on setup and 3.13x
-on the solve**.
-
-**And meq cannot have both at once.** `MKL_NUM_THREADS` is process-wide. The
-setting that makes PARDISO fast is the setting that makes `ComputeH()` forty
-times slower at `k = 3`. In a solve where assembly is 0.47 s and the trace solve
-is 0.21 s, threading MKL to speed up a 0.21 s factorisation while paying 40x on
-the 0.47 s assembly is a catastrophic trade. **So `MKL_NUM_THREADS=1` stands,
-and PARDISO's scaling is unreachable until the element-local factorisation stops
-going through threaded MKL** — which is `LocalFactorMode::Batched`'s territory,
-or an `mkl_set_num_threads_local()` around the trace solve. Neither is done.
-
-
-#### cuDSS: correct here, and not measurable here
-
-`MFEM_USE_CUDSS` with cuDSS 0.8.0, `mfem::CuDSSSolver`, `NONSYMMETRIC` +
-`FULL` — the general setting, chosen for the same reason PARDISO gets
-`REAL_STRUCTURE_SYMMETRIC`: the trace matrix is structurally symmetric on both
-paths and symmetric in value only on the fitted one. Reached with
-`--device cuda`, which constructs an `mfem::Device` before anything else.
-
-**Correctness: established.** cuDSS agrees with UMFPACK to **3.5e-14 or better**
-at every size tried, 9,408 to 148,224 trace dofs, cold and warm. That is the
-question TODO asked to answer locally and it is answered.
-
-**Performance: unanswerable on this machine, and that is a measurement rather
-than a shrug.** Three runs of the *same binary* on the *same* 9,408-dof problem,
-nothing else running:
-
-| cuDSS `SetOperator` | run 1 | run 2 | run 3 |
-|---|---|---|---|
-| `n = 32`, 9,408 dofs | 1.0517 s | 1.1324 s | **2.8125 s** |
-| `n = 96`, 83,520 dofs | 0.1774 s | **5.7505 s** | 2.5190 s |
-
-**A factor of thirty at fixed size.** UMFPACK and PARDISO on the same runs
-reproduce to a few percent. So the spread is the device path, not the machine
-being busy, and no ranking against the CPU solvers can be built on it. For scale
-only, and not to be quoted: cuDSS's *best* observed warm setup at 148,224 dofs
-was 3.08 s against UMFPACK's 0.65 s and PARDISO's 0.32 s, and its solve 0.199 s
-against 0.133 s and 0.079 s. It did not win anything on this hardware.
-
-**Why the machine cannot answer it**, so the next person does not re-run it
-expecting better:
-
-* **WSL2 shares the GPU with the Windows host.** `nvidia-smi` reports 7.5 GB of
-  8 GB used with **no compute processes at all** — that is host-wide accounting,
-  so the memory actually available to cuDSS is small and varies with whatever
-  the desktop is doing. At `n = 128` the runs became openly bimodal (12.05 s and
-  0.36 s on consecutive attempts).
-* **FP64 at 1/32.** The standing caveat under *Traps* — a consumer card runs
-  double precision at 1/32 to 1/64 of single, where a datacentre part runs it at
-  about 1/2. A sparse LU is FP64 throughout.
-
-**So the verdict is exactly the one TODO specified in advance**: correctness
-locally, timing on a datacentre part before any conclusion. Nothing here argues
-against cuDSS; it argues that this machine cannot be asked.
+**cuDSS is correct here and not measurable here.** It agrees with UMFPACK to
+**3.5e-14 or better** from 9,408 to 148,224 trace dofs, which is the question
+that needed answering locally. The timings are irreproducible **by a factor of
+thirty at fixed size** — three runs of the same binary on the same 9,408-dof
+problem gave 1.05 s, 1.13 s and 2.81 s — because WSL2 shares the GPU with the
+Windows host (`nvidia-smi` reports 7.5 of 8 GB used with no compute processes)
+and because a consumer card runs FP64 at 1/32 of FP32 where a datacentre part
+runs it at about 1/2. It won nothing on this hardware. **Do not re-time it
+here**; it needs a different machine, not another afternoon.
 
 **AND ONE TRAP THAT WOULD HAVE POISONED ALL OF IT.** cuDSS queues work on a
 stream and returns. Timed without a device synchronise, the warm setup of a
-**148,224-unknown factorisation reads 2.0e-04 s** — a millisecond answer to a
-second-scale question, off by four orders of magnitude, and *plausible enough to
-publish* because "the reordering was reused, so of course it is fast" is a
-story that fits. `TraceSolverScaling` calls `cudaDeviceSynchronize()` inside the
-timing loop for every solver, CPU ones included, so the sync can never be the
-thing that was forgotten. **Any future device timing in this project must do the
-same.** The CPU solvers are synchronous and pay nothing for it.
+**148,224-unknown factorisation reads 2.0e-04 s** — four orders of magnitude
+out, and *plausible enough to publish*, because "the reordering was reused, so
+of course it is fast" is a story that fits. `TraceSolverScaling` calls
+`cudaDeviceSynchronize()` inside the timing loop for **every** solver, CPU ones
+included, so the sync can never be the thing that was forgotten. **Any future
+device timing in this project must do the same.**
 
-#### The defaults, and what the fastest reachable set actually is
+**What a fresh `GradShafranovSolver` does:** `setTraceSolver()` is `UMFPack`
+(the only backend present in every build, and what every rate in the suite was
+measured with); `setAssemblyMode()` is `Serial`, unconditionally, per the gate
+above; `MKL_NUM_THREADS` is 1, set on every ctest.
 
-**What a fresh `GradShafranovSolver` does, as of 2026-08-31:**
-
-| | default | why |
-|---|---|---|
-| `setTraceSolver()` | `UMFPack` | the only one present in every build, and what every rate in the suite was measured with |
-| `setAssemblyMode()` | **`Serial`, unconditionally** | an automatic gate was tried and removed; see below |
-| `MKL_NUM_THREADS` | **1**, set on every ctest | *Traps*. Not negotiable |
-
-**THE ASSEMBLY DEFAULT IS FLAT, AND A GATE WAS TRIED AND REMOVED.** This is the
-one place in this campaign where the isolated benchmark actively misled, so the
-history is worth keeping.
-
-MFEM's threaded path buffers the element-local blocks and scatters them
-afterwards. Measured in isolation the buffering costs **0.86x** at one thread —
-slower than the serial loop it imitates — and pays **1.15x to 1.33x** from four
-threads up, still 1.19x on a 512-element mesh. On that evidence a gate on
-`omp_get_max_threads() > 1` looks free, so one was written.
-
-It is not free. `HighBetaConvergence` — which assembles a *small* system many
-times over inside a bordered Newton — went from **21.5 s to 39 s** under it.
-1.8x slower, reproducibly, on the same binary:
-
-| `HighBetaConvergence` | run 1 | run 2 | run 3 |
-|---|---|---|---|
-| `OMP_NUM_THREADS=1` → Serial | 20.96 s | 21.22 s | 22.00 s |
-| `OMP_NUM_THREADS=16` → Threaded | 32.37 s | 38.84 s | 39.25 s |
-
-**And mesh size does not separate the two cases**, which is what makes it
-undecidable from inside the solver: HighBeta's meshes are 128 and 512 elements,
-and 512 is exactly where the isolated benchmark still showed a win. What differs
-is how *often* assembly is called relative to everything else — MFEM forks a
-team and buffers per call, so a caller that assembles once amortises it and a
-caller that assembles hundreds of times pays it every time. The solver cannot
-know which caller it has.
-
-So `Serial` stands, and `Threaded` is an informed opt-in: **take it for a large
-mesh assembled a few times, leave it for a small one assembled hundreds of
-times.** Same lesson as the trace matrix's symmetry and the threaded-MKL
-collapse — a property measured on the easy configuration is not a property of
-the code.
-
-**And the fastest set is NOT the default**, because the fastest set needs a
-package most builds do not have. Composed from the scan at `k = 2, n = 64`,
-37,248 trace dofs, one linear solve:
-
-| | assembly | trace setup | solve | total | |
-|---|---|---|---|---|---|
-| UMFPack, serial assembly — the old default | 0.470 | 0.229 | 0.033 | 0.732 | |
-| UMFPack, threaded assembly @8 — opt-in, big meshes only | 0.410 | 0.229 | 0.033 | 0.671 | 1.09x |
-| **PARDISO, threaded assembly @8** | 0.410 | 0.158 | 0.022 | **0.590** | **1.24x** |
-| PARDISO threaded, if item 0 is ever done | 0.410 | 0.075 | 0.010 | 0.494 | 1.48x |
-
-**PARDISO beats UMFPack even single-threaded** — 1.50x on the factorisation,
-1.41x on the backsolve — so row three needs no MKL threads and costs nothing but
-the licence. It is not the default because `MFEM_USE_MKL_PARDISO` is off in most
-builds and oneMKL's terms are not everybody's to accept; `setTraceSolver()` and
-`traceSolverAvailable()` are how a caller who has it takes it.
-
-**Read that table for its size as well as its order.** The whole ladder is
-**1.48x**, and it is dwarfed by the `MKL_NUM_THREADS=1` fix that preceded it —
-3x on ordinary tests, 140x on `k >= 3`. Everything here is a single-digit-percent
-improvement on a problem whose large win has already been taken. It is also
-**one linear solve**, not a Newton solve: a real solve repeats `ComputeH` and the
-factorisation per iteration but the integrator assembly less often, and neither
-post-processing nor the estimator is counted. Indicative, not a profile.
+**The fastest reachable set is PARDISO plus threaded assembly at 8**, and it is
+worth **1.24x** end to end on one linear solve at `k = 2, n = 64` — 0.590 s
+against the default's 0.732 s. It is not the default because
+`MFEM_USE_MKL_PARDISO` is off in most builds and oneMKL's terms are not
+everybody's to accept; `setTraceSolver()` and `traceSolverAvailable()` are how
+a caller who has it takes it. **Read that number for its size**: the whole
+ladder is 1.24x, dwarfed by the `MKL_NUM_THREADS=1` fix that preceded it (3x on
+ordinary tests, 140x at `k ≥ 3`). The large win here has already been taken.
 
 ### What to do, in order of value
 
@@ -2400,109 +2446,60 @@ curved.
    irreproducible on this machine by a factor of thirty, and the reason is the
    machine. It needs a datacentre part, not another afternoon.
 
-### PARDISO: faster, and it runs now
+### PARDISO and the MKL link line: what is still true
 
-**SUPERSEDED BY THE THREADING SECTION ABOVE, WHICH RE-MEASURED ALL OF IT.** The
-verdicts here still hold in direction — PARDISO is faster, and it runs at sizes
-where Debian's MKL returned error `-3` — but **every number below was taken
-while a stray `libmkl_sequential` on the link line made MKL sequential**, so
-they are sequential-PARDISO-against-sequential-UMFPACK timings that were never
-labelled as such. The clean re-measurement is under *The trace solve*: 1.50x on
-setup sequentially, 2.83x at PARDISO's best thread count, and a reason meq
-cannot currently take the latter. Kept for the packaging argument in the second
-half, which is unaffected.
+**Two sections stood here and are deleted**, both superseded by *Threading,
+measured* which re-measured every number in them. They were taken while a stray
+`libmkl_sequential` on the link line made MKL sequential, so they were
+sequential-against-sequential timings that were never labelled as such.
+Recoverable from git (`cbb210b`). Three things survive.
 
-The open question of the previous section is closed. That section's verdict —
-"2.2× where it works, and it stops working just below the sizes meq actually
-runs" — was a verdict on **Debian's `intel-mkl` 2020.4.304** and on nothing else,
-and it said so. Against **oneAPI MKL 2026.1** at `/opt/intel/oneapi/mkl/latest`,
-with `MFEM_USE_MKL_PARDISO=YES` and MFEM's own `PardisoSolver`:
-
-| `k` | `n` | trace dofs | UMFPACK setup | solve | PARDISO setup | solve | agreement |
-|---|---|---|---|---|---|---|---|
-| 2 | 16 | 2,400 | 0.0176 | 0.0011 | 0.0233 | 0.0064 | 1.4e-15 |
-| 2 | 32 | 9,408 | 0.0616 | 0.0060 | 0.0216 | 0.0029 | 3.5e-15 |
-| 2 | 48 | 21,024 | 0.1608 | 0.0165 | 0.0453 | 0.0071 | 9.4e-15 |
-| 3 | 16 | 3,200 | 0.0297 | 0.0019 | 0.0077 | 0.0021 | 2.3e-15 |
-| 3 | 32 | 12,544 | 0.0820 | 0.0099 | 0.0216 | 0.0033 | 4.4e-15 |
-| 3 | 48 | 28,032 | 0.2295 | 0.0277 | 0.0611 | 0.0120 | 1.2e-14 |
-
-**About 3.8× on the setup and 2–3× on the solve from 9k dofs up**, agreeing with
-UMFPACK to round-off throughout. It is *slower* at 2,400, which is thread startup
-against a problem too small to need it.
-
-**And it runs at 12,544 and 28,032**, which is the point: those are the sizes
-where the old MKL returned error `-3`. The defect was the packaging, as that
-section predicted, and the prediction is now confirmed rather than assumed.
-`tests/convergence/TraceSolverComparison.cpp` is the measurement, and it asserts
-only the **agreement** — the timings are printed, because PARDISO is threaded and
-CLAUDE.md's standing rule is that a threaded measurement on this machine is not a
-measurement about the code.
-
-**Both paths must keep shipping.** oneMKL's licence is not everybody's to accept
-and `MFEM_USE_MKL_PARDISO` is off in most builds, so the comparison compiles and
-passes either way — without it the PARDISO columns are skipped and UMFPACK still
-runs. meq's solver still uses UMFPACK; making PARDISO selectable at run time is a
-small piece of work that has not been done.
+**oneAPI MKL 2026.1 fixed a real defect, and it was packaging.** Debian's
+`intel-mkl` 2020.4.304 returned error `-3` from PARDISO at 12,544 and 28,032
+trace dofs — the sizes meq actually runs. Against oneAPI at
+`/opt/intel/oneapi/mkl/latest` it runs at every size and agrees with UMFPACK to
+round-off. **Both paths must keep shipping**: oneMKL's licence is not
+everybody's to accept and `MFEM_USE_MKL_PARDISO` is off in most builds, so
+`tests/convergence/TraceSolverComparison.cpp` compiles and passes either way,
+skipping the PARDISO columns when they are absent. It asserts only the
+**agreement**; the timings are printed, per the standing rule.
 
 **`SetReuseSymbolic()` exists on `PardisoSolver` too**, with the same
-pattern-comparison contract as `UMFPackSolver`'s, so the one unqualified win of
-the previous section carries over rather than having to be re-argued.
+pattern-comparison contract as `UMFPackSolver`'s, so *A quarter of every Newton
+step* carries over without re-arguing.
 
-### The link line straddles two MKL installations, and it cost 140x
+**THE LINK LINE STILL STRADDLES TWO MKL INSTALLATIONS AND TWO THREADING
+LAYERS, AND THIS IS NOT SETTLED.** `MFEM_EXT_LIBS` carries oneAPI's
+`mkl_gnu_thread` twice (BLAS and PARDISO) from the explicit
+`BLAS_LIBRARIES`/`LAPACK_LIBRARIES`, and Debian's `mkl_intel_thread` behind
+SuiteSparse, which pulls it in as its own BLAS dependency. Linking more than one
+MKL threading layer is unsupported by MKL and mixing two MKL *versions* is
+worse. **It works today only because oneAPI comes first in the link order and
+its rpath is baked in** — an ordering accident, not a configuration.
+**Repointing SuiteSparse's BLAS at oneAPI is the fix and is not done.**
 
-**THE HAZARD THIS SECTION WARNED ABOUT WENT OFF, AND IT WENT OFF IN THE
-OPPOSITE DIRECTION TO THE ONE PREDICTED.** The prediction was wrong answers from
-mixed threading layers. What actually happened is that the stray
-`libmkl_sequential` was *load bearing*: it made MKL resolve sequential for
-everything, which is why every timing in this file before 2026-08-30 was fast
-and why nobody noticed MKL threading is ruinous here. Removing it — by pointing
-MFEM's PARDISO at oneAPI's `mkl_gnu_thread` instead of Debian's
-`mkl_sequential`, which was the *correct* thing to do — exposed a 140x
-regression in the test suite. See *Threaded MKL is a catastrophe* under *Traps*.
+**The hazard went off, and in the opposite direction to the one predicted.**
+The prediction was wrong answers from mixed threading layers. What actually
+happened is that the stray `libmkl_sequential` was **load bearing**: it made MKL
+resolve sequential for everything, which is why every timing in this file before
+2026-08-30 was fast and why nobody noticed threaded MKL is ruinous here.
+Removing it — which was the *correct* thing to do — exposed a 140x regression.
+**The suite was never deliberately sequential; it was accidentally so.** Same
+species of finding as the threaded-BLAS one: a property of the link line
+masquerading as a property of the code.
 
-**Current state, `MFEM_EXT_LIBS` 2026-08-30**: one threading layer fewer than
-below. `mkl_sequential` is gone; oneAPI's `mkl_gnu_thread` appears twice (BLAS
-and PARDISO), and Debian's `mkl_intel_thread` still arrives behind SuiteSparse.
-So it is still two versions and two threading layers, and it is still an
-ordering accident that oneAPI wins. **Repointing SuiteSparse's BLAS at oneAPI is
-still the fix and is still not done.** The rest of this section describes the
-state before that change and is kept because the argument is unchanged.
+One consequence is a simplification: with oneAPI linked explicitly as
+`mkl_gnu_thread` rather than resolved through `libmkl_rt`,
+`SolovievConvergence` passes with `MKL_THREADING_LAYER` **unset** — the trap
+under *Traps* is about the `libmkl_rt` dispatcher needing to be told which layer
+to use, and linking a layer directly removes the dispatcher. That is one suite
+passing, not a proof about a failure mode whose signature is silence, so the
+variable stays set everywhere.
 
-The previous section warned that the first thing likely to go wrong in a oneMKL
-adoption is "meq's existing MKL BLAS/LAPACK link line ending up straddling two
-MKL versions". It does. `MFEM_EXT_LIBS` reads, in order:
-
-```
--L/opt/intel/oneapi/mkl/latest/lib -Wl,-rpath,... -lmkl_intel_lp64 -lmkl_gnu_thread -lmkl_core
-...
--L/usr/lib/x86_64-linux-gnu -lumfpack ... -lcholmod ... -lmkl_intel_thread -lmkl_sequential
-```
-
-oneAPI 2026.1 first, from the explicit `BLAS_LIBRARIES`/`LAPACK_LIBRARIES`; then
-Debian's `intel-mkl` 2020.4.304 behind it, pulled in as SuiteSparse's own BLAS
-dependency, bringing **two more threading layers**. Linking more than one MKL
-threading layer is unsupported by MKL, and mixing two MKL *versions* is worse.
-
-**It works today** — PARDISO agrees with UMFPACK to 1e-15 and every convergence
-test passes — because oneAPI comes first in the link order and its rpath is
-baked in, so its symbols win at load time. That is an ordering accident, not a
-configuration. Repointing SuiteSparse's BLAS at oneAPI would settle it and has
-not been done.
-
-**One consequence is already measured and is a simplification**: with oneAPI
-linked explicitly as `mkl_gnu_thread` rather than resolved through
-`libmkl_rt`, `SolovievConvergence` passes with `MKL_THREADING_LAYER` **unset**.
-The trap under *Traps* is about the `libmkl_rt` dispatcher needing to be told
-which layer to use; linking a layer directly removes the dispatcher. That is one
-suite passing, not a proof about a failure mode whose signature is silence, so
-the environment variable stays set everywhere until more of the suite has been
-run without it.
-
-**And the honest caveat on all of it****And the honest caveat on all of it**: on a hard case the dominant cost is the
-element-local *nonlinear* iteration, not the global solve. 42 outer Newton steps
-each running thousands of local Newtons is where the pedestal's time goes.
-Globalisation is a bigger lever than anything above.
+**And the honest caveat on all of it**: on a hard case the dominant cost is not
+the global solve. Globalisation is a bigger lever than anything in this
+section, and under `CondenseThenLinearise` the element-local *non-linear*
+iteration dominates outright.
 
 **The transferable lesson**, which is the same one the Solov'ev coefficients
 taught: a property measured on the easy configuration is not a property of the
@@ -2512,43 +2509,31 @@ geometry meq is actually for.
 ## Traps
 
 **Every run needs `MKL_THREADING_LAYER=GNU` AND `MKL_NUM_THREADS=1`.** Two
-variables, two entirely unrelated reasons, and both are now set on every
-registered ctest.
+variables, two entirely unrelated reasons, both set on every registered ctest.
 
 `MKL_THREADING_LAYER=GNU` is the **correctness** one.
 `/usr/lib/x86_64-linux-gnu/libblas.so.3` on this machine resolves to
-`libmkl_rt.so`, which silently corrupts UMFPACK's BLAS-3 without it. *Silently* —
-you get numbers, and they are wrong. Same trap as `../mfem-hdg-dev/CLAUDE.md`
-records.
+`libmkl_rt.so`, which silently corrupts UMFPACK's BLAS-3 without it. *Silently*
+— you get numbers, and they are wrong. Same trap as
+`../mfem-hdg-dev/CLAUDE.md` records.
 
-`MKL_NUM_THREADS=1` is the **factor of 140** one, and it is not a micro-
-optimisation. Measured 2026-08-30, one process, nothing else running:
-
-| | `MKL_NUM_THREADS=1` | `=16` |
-|---|---|---|
-| `SolovievConvergence` | **1.24 s** | 177.83 s, at 273% CPU |
-| `FieldConvergence` | **1.11 s** | 198.35 s |
-| `SamplerConvergence` (never reaches UMFPACK) | 0.64 s | 0.63 s |
-
-273% of *sixteen* cores is the shape of the answer: the threads are spinning on
-barriers, not working.
+`MKL_NUM_THREADS=1` is the **factor of 140** one. Measured 2026-08-30, one
+process, nothing else running: `SolovievConvergence` **1.24 s** against
+**177.83 s** at `=16`, and `FieldConvergence` 1.11 s against 198.35 s — at 273%
+of *sixteen* cores, which is the shape of the answer: the threads are spinning
+on barriers, not working. `SamplerConvergence`, which never reaches a direct
+solver, does not move.
 
 **THE CULPRIT IS NOT UMFPACK, AND THE FIRST VERSION OF THIS SECTION SAID IT
-WAS.** The plausible story — UMFPACK calling BLAS on the small dense frontal
-matrices of a sparse LU, thousands of times, each threaded call costing a fork
-and a barrier — fits every whole-test fact and is **wrong**. Separated out in
-the scan, UMFPACK barely moves:
-
-| `UMFPackSolver::SetOperator` | `MKL=1` | `MKL=2` | `MKL=16` |
-|---|---|---|---|
-| `k = 3, n = 32` | 0.0503 s | 0.0454 s | — |
-| `k = 2, n = 64` | 0.2091 s | 0.2406 s | 0.2893 s |
-
-Worse with threads, but by 40%, not by 140x.
+WAS.** The plausible story — UMFPACK calling threaded BLAS on the small dense
+frontal matrices of a sparse LU, thousands of times, each call costing a fork
+and a barrier — fits every whole-test fact and is **wrong**. Separated out,
+`UMFPackSolver::SetOperator` degrades by about **40%** across the whole thread
+range, never more.
 
 **It is MFEM's element-local dense LU.** `ComputeH()` factors `A`, forms the
-Schur complement and factors that, on blocks of order 10-30, once per element,
-through `LUFactors` -> LAPACK -> MKL:
+Schur complement and factors that, on blocks of order 10–30, once per element,
+through `LUFactors` → LAPACK → MKL:
 
 | assembly + reduction | `MKL=1` | `MKL=2` |
 |---|---|---|
@@ -2557,40 +2542,27 @@ through `LUFactors` -> LAPACK -> MKL:
 | `k = 3, n = 32` | 0.216 s | **8.973 s** |
 
 **`k = 2` does not move and `k = 3` degrades by a factor of forty**, putting
-MKL's threading threshold between those two block sizes. That is also why the
-whole-test factors are so much larger than anything in the solver columns: the
-suite runs `k` up to 4, and every element of every mesh pays it. A production
-run at `k >= 3` with MKL threading left on would be unusable and would look
-like a solver problem.
+MKL's threading threshold between those two block sizes. The suite runs `k` up
+to 4 and every element of every mesh pays it, which is why the whole-test
+factors dwarf anything in the solver columns. **A production run at `k ≥ 3` with
+MKL threading left on would be unusable and would look like a solver problem.**
 
-**It is MKL and not OpenMP**, which the obvious cross settles:
+**It is MKL and not OpenMP**, which the obvious cross settles: `FieldConvergence`
+at `OMP=16 MKL=1` is **1.19 s at 99% CPU**, and at `OMP=1 MKL=16` is 183.54 s at
+266%.
 
-| `FieldConvergence` | |
-|---|---|
-| `OMP=16 MKL=1` | **1.19 s**, 99% CPU |
-| `OMP=1 MKL=16` | 183.54 s, 266% CPU |
-
-**Keep the wrong answer in view, because of how it was wrong.** It fitted every
+**Keep the wrong answer in view, because of HOW it was wrong.** It fitted every
 fact then available — the collapse tracked exactly the tests that reach a direct
-solver — and no whole-test timing could have refuted it, because in those tests
-UMFPACK and `ComputeH()` always appear together. Only separating the columns
-did. Same lesson as the Solov'ev coefficients: checking a story against the
-evidence that suggested it proves nothing.
+solver — and **no whole-test timing could have refuted it**, because in those
+tests UMFPACK and `ComputeH()` always appear together. Only separating the
+columns did. Same lesson as the Solov'ev coefficients: checking a story against
+the evidence that suggested it proves nothing.
 
-
-**Why this never bit before, which is the part worth internalising.** The link
-line used to carry `libmkl_sequential` behind SuiteSparse, so MKL resolved to
-the sequential layer whatever it was asked for. Pointing MFEM's PARDISO at
-oneAPI's threaded layer removed it and revealed the real behaviour. **The suite
-was never deliberately sequential; it was accidentally so**, and every timing
-recorded in this file before 2026-08-30 was taken under that accident. This is
-the same species of finding as the threaded-BLAS one above: a property of the
-link line masquerading as a property of the code.
-
-**`MKL_NUM_THREADS=1` is right for meq's solver and wrong for PARDISO**, which
-is a genuine tension rather than an oversight — PARDISO is a real parallel
-sparse solver and scales. See *The trace solve* for the numbers and for what
-that implies about ever making PARDISO meq's default.
+**Why it never bit before**: the link line used to carry `libmkl_sequential`
+behind SuiteSparse, so MKL resolved sequential whatever it was asked for. See
+*PARDISO and the MKL link line*. **`MKL_NUM_THREADS=1` is right for meq's
+solver and wrong for PARDISO**, which is a genuine tension rather than an
+oversight and is what item 0 of *What to do* is about.
 
 **This machine's GPU is for development, not for performance conclusions.**
 There is an RTX 2070 SUPER with CUDA 13.3, which is enough to write and debug a
@@ -2678,10 +2650,13 @@ which starts from the Dirichlet data — lands on it and stops in **zero
 iterations** with an identically zero residual. Not a hypothesis: GS-1's
 Algorithm 2 literally opens `ψ⁰ ; // Non-trivial initial guess`.
 
-**`GradShafranovSolver` has no `setInitialGuess()`, and no caller can work around
-it** — `prepare()` resets the iterate and `solve()` calls `prepare()`. Until that
-exists, those four cases are posed with a non-homogeneous ramp that puts `ψ = 0`
-in the interior. This is the most actionable gap in the solver.
+**`setInitialGuess()` exists** — in `Coefficient` and `GridFunction` overloads —
+and it is what those four cases need; without it `prepare()` resets the iterate
+and `solve()` calls `prepare()`, so no caller could work round the trivial
+branch. They are posed with a non-homogeneous ramp that puts `ψ = 0` in the
+interior. **Under NPC the guess seeds the potential and the trace and leaves the
+flux block at zero**, which is a real difference; see *A warm start no longer
+shows up in `‖r₀‖`*.
 
 **`DarcyHybridization` freezes the element-local Newton's initial guess at
 `FormLinearSystem()` time, and `ComputeSolution()` will not take another.**
@@ -2697,27 +2672,11 @@ the system from the recovered state; `GradShafranovSolver::formSystem()` exists
 for it. Full account under *Newton, and the obligation it creates*.
 
 **~~`DarcyForm::Reconstruct()` returns a different function where `∂F/∂ψ`
-vanishes~~ — FIXED, and kept here because of the shape of it.** It returned a
-different function, silently, on any element where `∂F/∂ψ` vanished: a singular
-local matrix, factored anyway, because the mean-value branch that exists to
-regularise it was skipped by a flag set on the wrong condition. Per element, so a
-profile with a flat segment corrupted part of the domain and left the rest exact,
-and a whole-domain check missed it — which is why the driver ran on
-`Potential::Raw`.
-
-The fix is `gf-hdg-dev`'s *"The postprocessing closes on the element average,
-always"*: the close is unconditional, because the local post-processing problem
-is a pure Neumann one by construction and there was never anything to decide.
-`ψ*` is a post-processing on **every** element now and the driver is back on it.
-`thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes` is the regression.
-See *Post-processing is back*.
-
-**Two things to keep from it.** The fix is on `gf-hdg-dev` and on no other
-branch, so a `meq-integration` rebuilt without it silently loses this — see the
-merge recipe. And the failure mode is the transferable part: a per-element defect
-that a global norm cannot see, in a quantity four of the estimator's five terms
-are built on.
-
+vanishes~~ — FIXED.** Silently, per element, so a profile with a flat segment
+corrupted part of the domain and left the rest exact, and a whole-domain check
+missed it. Full account and the transferable lesson under *Post-processing is
+back*; the part that matters here is that **the fix is on `gf-hdg-dev` and on no
+other branch**, so a `meq-integration` rebuilt without it silently loses this.
 **`mfem::Mesh::FindPoints` is `O(elements × points)`** — a brute-force scan over
 element centres. It caps sample-cloud sizes in any off-grid error measure.
 
@@ -2743,53 +2702,44 @@ turns a loud failure into a silent wrong answer in the configuration, which is
 the last place you want one. `Config.cpp` therefore reads numbers through its own
 `asFloat()`, accepting `is_floating()` or `is_integer()` explicitly.
 
-**`cd` persists between Bash tool calls.** A `cd x && ...` that assumes the repo
-root will silently run somewhere else. Use absolute paths.
+**Four tooling traps that cost one session six idle polling loops**, and the
+reason they are worth writing down is that a polling loop which can never
+terminate is *invisible* when the thing it polls for is also reported some other
+way.
 
-**`grep -c` exits 1 on zero matches**, so a background check reports failure
-spuriously.
+* **`cd` persists between Bash tool calls**, so a `cd x && ...` that assumes the
+  repo root silently runs somewhere else. Use absolute paths.
+* **Shell VARIABLES do not persist**, only the working directory does — the same
+  trap read the other way round, and the more dangerous half. `L=...` in one call
+  is gone by the next, so `until grep -q '^EXIT=' "$LOG"` with an unset `LOG`
+  becomes `grep -q '^EXIT=' ""`, and **`grep -q` with no file argument reads
+  stdin**. In a detached background process stdin never reaches EOF, so the loop
+  blocks silently for the life of the session.
+* **A completion marker appended to a log is not necessarily at the start of a
+  line.** `echo "EXIT=$?" >> log` after a Boost test binary lands on the end of
+  its final ANSI reset sequence, because Boost's coloured output does not
+  terminate with a newline — so `grep -q '^EXIT='` never matches. ctest's output
+  *does* end with a newline, so the same waiter works on `ctest` and hangs on a
+  bare test binary, which gets diagnosed as "the run is slow". Drop the `^`.
+* **`grep -c` exits 1 on zero matches**, so a background check reports failure
+  spuriously.
 
-**Shell VARIABLES do not persist between Bash tool calls, only the working
-directory does** — which is the trap above read the other way round, and it is
-the more dangerous half. `L=...` in one call is gone by the next, so
-`until grep -q '^EXIT=' "$LOG"` with an unset `LOG` becomes
-`grep -q '^EXIT=' ""`, and **`grep -q` with no file argument reads stdin**. In a
-detached background process stdin never reaches EOF, so the loop blocks rather
-than failing, and it blocks silently for the life of the session.
+**If a waiter is used, check it actually fired.**
 
-**And a completion marker appended to a log is not necessarily at the start of a
-line.** `echo "EXIT=$?" >> log` after a Boost test binary lands on the end of
-its final ANSI reset sequence, because Boost's coloured output does not
-terminate with a newline:
-
-```
-^[[0;39;49mEXIT=201
-```
-
-`grep -q '^EXIT='` then never matches, however long you wait. ctest's own output
-*does* end with a newline, so a waiter watching `ctest` works and the same
-waiter watching a bare test binary does not — which is exactly the kind of
-difference that gets diagnosed as "the run is slow". Drop the `^`, or `echo`
-a newline first.
-
-**Both of these cost a session six idle `sleep` loops and no wrong answers**,
-which is the point worth keeping: a polling loop that can never terminate is
-invisible when the thing it polls for is also reported some other way. If a
-waiter is used, check it actually fired.
-
-**The four defects meq reported to MFEM are closed, and
-`HDG-DEFECTS-FROM-MEQ.md` is gone from that tree's `doc/`** — retired by
-*"Retire two bug reports whose findings are all fixed and covered"*. Checked
-2026-08-29, one at a time, because "closed" arrived in four different ways:
-
-| | state |
-|---|---|
-| `Reconstruct()` on a singular local matrix | **fixed**, and meq's test flipped from red to green on it |
-| `φ_h` unreachable after a solve | **fixed** — `mfem::TransferredDatumCoefficient` exists in `extension_hdg.hpp`. meq still calls `setTransferredBoundary()`, because rebuilding `η₅` on it is meq's work and is not done |
-| `ReconstructFluxAndPot()` lifting only domain integrators | **withdrawn as not a defect** — *"the lift dropping boundary faces is required"*. meq had measured it harmless, which was the right answer for the wrong reason |
-| `ComputeHDGFaceEnergy()` ignoring an installed `HDGStabilization` | **not re-measured.** A code read today still shows it computing the `{h⁻¹Q}` form with no call into an installed hook. meq does not use `HDGErrorEstimator` at all — `meq::ResidualEstimator` is its own — so this costs meq nothing either way, which is why nobody has looked again |
-
-That last row is a code read and not a measurement, and is recorded as one.
+**The four defects meq reported to MFEM are closed** and
+`HDG-DEFECTS-FROM-MEQ.md` is gone from that tree's `doc/`. Checked 2026-08-29
+one at a time, because "closed" arrived in four different ways: `Reconstruct()`
+on a singular local matrix was **fixed** (meq's test flipped red to green on
+it); `φ_h` unreachable after a solve was **fixed**, as
+`mfem::TransferredDatumCoefficient` in `extension_hdg.hpp` — meq still calls
+`setTransferredBoundary()`, because rebuilding `η₅` on it is meq's work and is
+not done; `ReconstructFluxAndPot()` lifting only domain integrators was
+**withdrawn as not a defect**, and meq had measured it harmless, which was the
+right answer for the wrong reason; and `ComputeHDGFaceEnergy()` ignoring an
+installed `HDGStabilization` is **not re-measured** — a code read today still
+shows it computing the `{h⁻¹Q}` form with no call into an installed hook, but
+meq uses `meq::ResidualEstimator` rather than `HDGErrorEstimator` so it costs
+meq nothing either way. **That last row is a code read and not a measurement.**
 Anyone who needs `Energy` mode should measure before trusting it.
 
 ## Testing stance
@@ -2801,15 +2751,16 @@ destroys the only property the suite is for: **100% green must mean there is no
 lurking defect.** So a defect gets a *failing* test naming it, not a passing test
 recording it.
 
-This was got wrong and corrected.
-`thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes` was first written to
-assert the corruption and passed; it now asserts that `ψ*` is a post-processing
-of `ψ_h` on every element, and **fails**, because MFEM's reconstruction skips its
-mean-value regularisation where `∂F/∂ψ` vanishes. Its message says what to delete
-when it goes green.
+**This was got wrong, corrected, and then vindicated.**
+`thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes` was first written
+to assert the *corruption*, and passed. Rewritten to assert that `ψ*` is a
+post-processing of `ψ_h` on every element, it went **red** — and stayed red
+until MFEM fixed the reconstruction, at which point it flipped green on its own
+and became the regression. **That flip is what said to put the driver back on
+`ψ*`.** A test asserting the defect would have said nothing.
 
-Two consequences worth stating. The suite is expected to be **red while a known
-defect stands**, and that is the intended signal rather than a broken build — the
+Two consequences. The suite is expected to be **red while a known defect
+stands**, and that is the intended signal rather than a broken build — the
 failing test's message is the record. And a failing test must say what fixes it,
 because a red suite nobody can action is one people learn to ignore.
 
