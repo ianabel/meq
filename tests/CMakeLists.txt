@@ -136,8 +136,10 @@ set(MEQ_CONVERGENCE_TESTS
 	PedestalConvergence
 	MillerConvergence
 	SolovievGeometryConvergence
+	RotatingNormalisedConvergence
 	RotatingSolovievConvergence
-	RotatingSourceConvergence)
+	RotatingSourceConvergence
+	RotatingNewtonConvergence)
 
 # DriverAcceptance is registered separately below: it runs the meq BINARY rather
 # than linking the library, so it needs the app to have been built and needs the

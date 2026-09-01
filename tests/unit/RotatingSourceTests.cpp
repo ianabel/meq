@@ -163,6 +163,46 @@ namespace
 		return species;
 	}
 
+	double carbonTemperature( double psi ) { return keV*( 1.9 - 0.7*psi + 0.25*std::sin( 2.5*psi ) ); }
+	double carbonTemperaturePrime( double psi ) { return keV*( -0.7 + 0.625*std::cos( 2.5*psi ) ); }
+	double carbonTemperatureDoublePrime( double psi ) { return keV*( -1.5625*std::sin( 2.5*psi ) ); }
+
+	double carbonDensity( double psi ) { return 1.0e17*( 4.0 - 1.5*psi*psi + 0.5*std::cos( psi ) ); }
+	double carbonDensityPrime( double psi ) { return 1.0e17*( -3.0*psi - 0.5*std::sin( psi ) ); }
+	double carbonDensityDoublePrime( double psi ) { return 1.0e17*( -3.0 - 0.5*std::cos( psi ) ); }
+
+	/// Deuterium, fully stripped carbon and electrons, with the electron density
+	/// closed by neutrality. Three species, so (97) is transcendental and the
+	/// general root find is the only route.
+	std::vector<meq::Species> impuritySpecies()
+	{
+		std::vector<meq::Species> species( 3 );
+
+		species[ 0 ].mass = deuteronMass;
+		species[ 0 ].charge = 1.0;
+		species[ 0 ].temperature = ionTemperatureProfile();
+		species[ 0 ].density = ionDensityProfile();
+
+		species[ 1 ].mass = 6.0*deuteronMass;
+		species[ 1 ].charge = 6.0;
+		species[ 1 ].temperature = analytic( carbonTemperature, carbonTemperaturePrime, carbonTemperatureDoublePrime );
+		species[ 1 ].density = analytic( carbonDensity, carbonDensityPrime, carbonDensityDoublePrime );
+
+		species[ 2 ].mass = electronMass;
+		species[ 2 ].charge = -1.0;
+		species[ 2 ].temperature = electronTemperatureProfile();
+		species[ 2 ].density = meq::neutralisingDensity( species, 2 );
+
+		return species;
+	}
+
+	meq::RotatingSource makeImpuritySource( double omegaScale = 1.0 )
+	{
+		return meq::RotatingSource( impuritySpecies(),
+			omegaScale == 0.0 ? nullptr : rotationProfile( omegaScale ),
+			ggPrimeProfile(), referenceRadius );
+	}
+
 	meq::RotatingSource makeSource( double omegaScale = 1.0 )
 	{
 		return meq::RotatingSource( hydrogenicSpecies(),
@@ -183,9 +223,17 @@ namespace
 
 	// A relative comparison, for quantities whose natural size is nowhere near
 	// one -- a pressure in Pa, a density in m^-3.
-	void checkRelative( double actual, double expected, double tolerance, char const * what, double r, double psi )
+	//
+	// THE FLOOR IS NOT OPTIONAL FOR A QUANTITY THAT VANISHES SOMEWHERE. phi_0 is
+	// identically zero on r = rRef, so at that radius both sides are round-off
+	// and a purely relative comparison asks whether one 1e-33 equals another --
+	// which is always false and never interesting. Callers pass the quantity's
+	// own scale on this problem, so the test reads "agree to `tolerance`
+	// relatively, or to `tolerance` of the scale, whichever is looser".
+	void checkRelative( double actual, double expected, double tolerance, char const * what, double r, double psi,
+		double floor = 0.0 )
 	{
-		double const scale = std::max( std::fabs( expected ), std::fabs( actual ) );
+		double const scale = std::max( std::max( std::fabs( expected ), std::fabs( actual ) ), std::fabs( floor ) );
 		double const allowed = tolerance*std::max( scale, 1.0e-300 );
 		BOOST_CHECK_MESSAGE( std::fabs( actual - expected ) <= allowed,
 			what << " at r = " << r << ", psi = " << psi << ": got " << actual
@@ -378,8 +426,14 @@ BOOST_AUTO_TEST_CASE( thePressureMatchesTheIsothermalClosedForm )
 
 			checkRelative( source.pressure( r, psi ), p0*std::exp( exponent ), 1.0e-14,
 				"the pressure against the isothermal closed form", r, psi );
-			checkRelative( source.densityExponent( r, psi ), exponent, 1.0e-14,
-				"the shared density exponent", r, psi );
+			checkRelative( source.densityExponent( 0, r, psi ), exponent, 1.0e-14,
+				"the ion density exponent", r, psi );
+
+			// AND THE TWO SPECIES SHARE IT. That is the property, not an
+			// implementation detail: it is what makes Sum_s Z_s n_s vanish at
+			// every r once it vanishes at rRef.
+			checkRelative( source.densityExponent( 1, r, psi ), source.densityExponent( 0, r, psi ),
+				1.0e-15, "the electron exponent against the ion one", r, psi );
 		}
 	}
 }
@@ -551,13 +605,249 @@ BOOST_AUTO_TEST_CASE( theMachNumberReachesOrderOneOnTheBenchmarkBox )
 	// the usual sense, so this asks for a real centrifugal effect at the
 	// outboard edge.
 	meq::RotatingSource const source = makeSource();
-	double const exponent = source.densityExponent( 1.4, 0.0 );
+	double const exponent = source.densityExponent( 0, 1.4, 0.0 );
 
 	BOOST_CHECK_MESSAGE( exponent > 0.5,
 		"the density exponent at the outboard edge is only " << exponent
 		<< ", so these profiles are barely rotating and this file is not testing what it claims" );
 	BOOST_CHECK_MESSAGE( source.density( 0, 1.4, 0.0 ) > 1.5*source.density( 0, 0.6, 0.0 ),
 		"the centrifugal density asymmetry is negligible, so these profiles test nothing" );
+}
+
+/*
+ * FL-6: n SPECIES.
+ *
+ * Above two, (97) is transcendental and phi_0 comes from a safeguarded scalar
+ * Newton, with its two psi-derivatives by implicit differentiation. The first
+ * test below is the one that matters: at two species the general path and the
+ * closed form are the same problem solved twice, so they must agree, and if they
+ * do not then one of them is wrong and nothing else here can say which.
+ */
+
+BOOST_AUTO_TEST_CASE( theRootFindReproducesTheClosedFormAtTwoSpecies )
+{
+	for ( double omegaScale : { 0.0, 0.5, 1.0, 2.0 } )
+	{
+		meq::RotatingSource const closed( hydrogenicSpecies(),
+			omegaScale == 0.0 ? nullptr : rotationProfile( omegaScale ),
+			ggPrimeProfile(), referenceRadius, meq::vacuumPermeability,
+			meq::RotatingSource::Closure::ClosedForm );
+		meq::RotatingSource const found( hydrogenicSpecies(),
+			omegaScale == 0.0 ? nullptr : rotationProfile( omegaScale ),
+			ggPrimeProfile(), referenceRadius, meq::vacuumPermeability,
+			meq::RotatingSource::Closure::RootFind );
+
+		// phi_0 vanishes identically at rRef, and identically everywhere when
+		// omega is zero, so the floor has to be the problem's own energy scale
+		// rather than anything read off this configuration. e phi_0 is in Joules,
+		// so a keV is the scale, and 1e-12 of a keV is not a potential.
+
+		for ( double r : testRadii )
+		{
+			for ( double psi : testFluxes )
+			{
+				checkRelative( found.potential( r, psi ), closed.potential( r, psi ), 1.0e-12,
+					"phi_0 by root find against the closed form", r, psi, keV );
+				checkRelative( found.dPotentialDPsi( r, psi ), closed.dPotentialDPsi( r, psi ), 1.0e-11,
+					"dphi_0/dpsi by implicit differentiation against the closed form", r, psi, keV );
+				checkRelative( found.f( r, 0.0, psi ), closed.f( r, 0.0, psi ), 1.0e-11,
+					"F by root find against the closed form", r, psi );
+				checkRelative( found.dFdPsi( r, 0.0, psi ), closed.dFdPsi( r, 0.0, psi ), 1.0e-9,
+					"dF/dpsi by root find against the closed form", r, psi );
+			}
+		}
+	}
+}
+
+BOOST_AUTO_TEST_CASE( quasineutralityHoldsForThreeSpecies )
+{
+	// D, C6+ and electrons. The carbon is what makes this a real test: it is six
+	// times as charged and six times as heavy as the deuterium, so it feels the
+	// centrifugal force hardest and is held back by the field hardest.
+	meq::RotatingSource const source = makeImpuritySource();
+
+	for ( double r : testRadii )
+	{
+		for ( double psi : testFluxes )
+		{
+			double charge = 0.0;
+			double magnitude = 0.0;
+			for ( std::size_t sp = 0; sp < 3; ++sp )
+			{
+				double const n = source.density( sp, r, psi );
+				charge += source.species()[ sp ].charge*n;
+				magnitude += std::fabs( source.species()[ sp ].charge*n );
+			}
+
+			BOOST_CHECK_MESSAGE( std::fabs( charge ) <= 1.0e-12*magnitude,
+				"three-species quasineutrality fails at r = " << r << ", psi = " << psi
+				<< ": sum of Z_s n_s is " << charge << " against " << magnitude );
+		}
+	}
+}
+
+BOOST_AUTO_TEST_CASE( dPotentialDPsiAgreesWithACentralDifference )
+{
+	// The inner analogue of the dFdPsi check, and the thing that catches an
+	// implicit-differentiation slip. Differencing the root find from outside is
+	// what this must NOT be doing, so a disagreement here means the closed-form
+	// derivative and the numerical one have parted company.
+	meq::RotatingSource const source = makeImpuritySource();
+	double const h = 1.0e-7;
+
+	for ( double r : testRadii )
+	{
+		for ( double psi : testFluxes )
+		{
+			double const difference = ( source.potential( r, psi + h ) - source.potential( r, psi - h ) )/( 2.0*h );
+
+			checkRelative( source.dPotentialDPsi( r, psi ), difference, 1.0e-6,
+				"dphi_0/dpsi against a central difference", r, psi, keV );
+		}
+	}
+}
+
+BOOST_AUTO_TEST_CASE( dFdPsiAgreesWithACentralDifferenceForThreeSpecies )
+{
+	// The load-bearing test of the general path: dF/dpsi runs the chain rule
+	// twice through the profiles AND through phi_0's two implicit derivatives.
+	meq::RotatingSource const source = makeImpuritySource();
+
+	for ( double h : { 1.0e-5, 1.0e-4 } )
+	{
+		for ( double r : testRadii )
+		{
+			for ( double psi : testFluxes )
+			{
+				double const difference = ( source.f( r, 0.0, psi + h ) - source.f( r, 0.0, psi - h ) )/( 2.0*h );
+
+				BOOST_CHECK_MESSAGE(
+					std::fabs( source.dFdPsi( r, 0.0, psi ) - difference )
+						<= 1.0e-6*std::max( 1.0, std::fabs( difference ) ),
+					"three species, h = " << h << ": dFdPsi disagrees with a central difference at r = "
+					<< r << ", psi = " << psi << ": analytic " << source.dFdPsi( r, 0.0, psi )
+					<< ", difference " << difference );
+			}
+		}
+	}
+}
+
+BOOST_AUTO_TEST_CASE( theHeavyImpurityIsCentrifugallyEnriched )
+{
+	// The physics the whole exercise is for, and a control on the sign of phi_0:
+	// carbon is twelve times as heavy as deuterium, so it is flung outboard
+	// harder, and its density ratio to the bulk must RISE with radius. If phi_0
+	// carried the wrong sign this would fall instead, and every algebraic test
+	// above would still pass.
+	meq::RotatingSource const source = makeImpuritySource();
+
+	double const inboard = source.density( 1, 0.6, 0.0 )/source.density( 0, 0.6, 0.0 );
+	double const outboard = source.density( 1, 1.4, 0.0 )/source.density( 0, 1.4, 0.0 );
+
+	BOOST_CHECK_MESSAGE( outboard > 1.2*inboard,
+		"the carbon-to-deuterium ratio is " << outboard << " outboard against " << inboard
+		<< " inboard, so the impurity is not being centrifugally enriched" );
+}
+
+BOOST_AUTO_TEST_CASE( theClosedFormIsRefusedWhereItDoesNotApply )
+{
+	std::vector<meq::Species> const three = impuritySpecies();
+
+	BOOST_CHECK_THROW( meq::RotatingSource( three, rotationProfile(), ggPrimeProfile(), referenceRadius,
+		meq::vacuumPermeability, meq::RotatingSource::Closure::ClosedForm ), std::invalid_argument );
+
+	// And Automatic picks the general path for three, the cheap one for two.
+	meq::RotatingSource const auto3( three, rotationProfile(), ggPrimeProfile(), referenceRadius );
+	meq::RotatingSource const auto2 = makeSource();
+	BOOST_CHECK( auto3.closure() == meq::RotatingSource::Closure::RootFind );
+	BOOST_CHECK( auto2.closure() == meq::RotatingSource::Closure::ClosedForm );
+}
+
+/*
+ * FL-7: NORMALISED FLUX.
+ *
+ * The normalised source is a wrapper, so what needs testing is the SCALING and
+ * nothing else -- and the scaling is asymmetric, one factor of 1/psi_ax in f()
+ * and two in dFdPsi(). Getting that wrong gives a source that is perfectly
+ * self-consistent and a Jacobian that is off by psi_ax, which is exactly the
+ * defect a rate table cannot see.
+ */
+
+BOOST_AUTO_TEST_CASE( theNormalisedSourceCarriesOneFactorInFAndTwoInTheJacobian )
+{
+	for ( double psiAxis : { 0.35, 1.0, -0.8, 2.4 } )
+	{
+		meq::NormalisedRotatingSource const normalised( hydrogenicSpecies(), rotationProfile(),
+			ggPrimeProfile(), referenceRadius, psiAxis );
+		meq::RotatingSource const plain = makeSource();
+
+		for ( double r : testRadii )
+		{
+			for ( double psiN : testFluxes )
+			{
+				double const psi = psiN*psiAxis;
+
+				checkRelative( normalised.f( r, 0.0, psi ), plain.f( r, 0.0, psiN )/psiAxis,
+					1.0e-14, "the normalised F against the plain one rescaled", r, psi );
+				checkRelative( normalised.dFdPsi( r, 0.0, psi ),
+					plain.dFdPsi( r, 0.0, psiN )/( psiAxis*psiAxis ),
+					1.0e-14, "the normalised dF/dpsi against the plain one rescaled", r, psi );
+			}
+		}
+	}
+}
+
+BOOST_AUTO_TEST_CASE( theNormalisedJacobianAgreesWithACentralDifferenceInPhysicalFlux )
+{
+	// THE CHECK THAT DOES NOT ASSUME THE ANSWER. The test above compares the
+	// wrapper against the formula it was written from, which cannot see a wrong
+	// number of factors if the same wrong number is in both. This differences
+	// f() in PHYSICAL psi, so it is the derivative the solver actually needs.
+	for ( double psiAxis : { 0.35, 1.0, -0.8 } )
+	{
+		meq::NormalisedRotatingSource const source( hydrogenicSpecies(), rotationProfile(),
+			ggPrimeProfile(), referenceRadius, psiAxis );
+
+		double const h = 1.0e-5*std::fabs( psiAxis );
+
+		for ( double r : testRadii )
+		{
+			for ( double psiN : testFluxes )
+			{
+				double const psi = psiN*psiAxis;
+				double const difference = ( source.f( r, 0.0, psi + h ) - source.f( r, 0.0, psi - h ) )/( 2.0*h );
+
+				BOOST_CHECK_MESSAGE(
+					std::fabs( source.dFdPsi( r, 0.0, psi ) - difference )
+						<= 1.0e-6*std::max( 1.0, std::fabs( difference ) ),
+					"psi_ax = " << psiAxis << ": dFdPsi disagrees with a central difference in physical psi at r = "
+					<< r << ", psi = " << psi << ": analytic " << source.dFdPsi( r, 0.0, psi )
+					<< ", difference " << difference << " -- a wrong number of factors of psi_ax presents "
+					"exactly like this" );
+			}
+		}
+	}
+}
+
+BOOST_AUTO_TEST_CASE( theNormalisationCanBeMovedAndIsRefusedAtZero )
+{
+	meq::NormalisedRotatingSource source( hydrogenicSpecies(), rotationProfile(),
+		ggPrimeProfile(), referenceRadius, 0.5 );
+
+	BOOST_CHECK_EQUAL( source.normalisation(), 0.5 );
+
+	// The solver moves it once per residual evaluation, so it has to answer for
+	// the new value immediately.
+	double const before = source.f( 1.2, 0.0, 0.25 );
+	source.setNormalisation( 0.25 );
+	BOOST_CHECK_EQUAL( source.normalisation(), 0.25 );
+	BOOST_CHECK( source.f( 1.2, 0.0, 0.25 ) != before );
+
+	BOOST_CHECK_THROW( source.setNormalisation( 0.0 ), std::invalid_argument );
+	BOOST_CHECK_THROW( source.setNormalisation( std::nan( "" ) ), std::invalid_argument );
+
+	// A refused value must not have been half-applied.
+	BOOST_CHECK_EQUAL( source.normalisation(), 0.25 );
 }
 
 BOOST_AUTO_TEST_SUITE_END()

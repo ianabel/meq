@@ -73,7 +73,7 @@ fixed-`q(ψ)` solver — is wanted but undesigned and should wait on item 9.
 The solver works and every claim about it is a measured convergence rate. Stages
 0 to 6 are done, and **stage 7 is finished: meq is a program that solves on a
 curved boundary, refines its own mesh, and restarts from a previous answer in one
-Newton step.** The suite is **26 of 26**, and it is green rather than
+Newton step.** The suite is **28 of 28**, and it is green rather than
 green-with-a-known-red: the last standing failure was `HighBetaConvergence` and
 the work it was asserting is done. The only thing the driver still refuses is
 `[boundary] Type = "exact"`.
@@ -446,15 +446,16 @@ problem it solved does not arise. Plan §4.1; git has it if it is ever wanted.
 
 ---
 
-## 9. Toroidal flow — meq, FL-0 to FL-4 done
+## 9. Toroidal flow — meq, FL-0 to FL-7 done; FL-8 is the driver
 
 `FLOW-PLAN.md` is the design. **`src/meq/RotatingSource.{hpp,cpp}` is built and
-FL-0 to FL-4 are green**: the species container and the charge-neutrality solve,
-`φ₀` and the pressure in closed form, the source and its Jacobian, and the
-rotating Solov'ev benchmark at `k+1` in both `ψ` and `q`. `CLAUDE.md`'s *Toroidal
-flow* has the measurements. **What is left is FL-5 to FL-8** — the manufactured
-nonlinear case that tests the Jacobian, `n` species, normalised flux through the
-bordered Newton, and the driver. The shape of it:
+FL-0 to FL-7 are green**: the species container and the charge-neutrality solve,
+`φ₀` and the pressure in closed form, the source and its Jacobian, the rotating
+Solov'ev benchmark at `k+1`, a manufactured nonlinear case that pins Newton's
+order, the general `n`-species root find, and normalised flux through the
+existing bordered Newton. `CLAUDE.md`'s *Toroidal flow* has the measurements.
+**What is left is FL-8** — `Config`, `SourceFactory`, a worked TOML and writing
+`n_s` and `φ₀` out. The shape of it:
 
 * **Rotation is a change to `F` alone.** The operator, the discretisation, `τ`,
   the hybridization, the estimator, the adaptive loop and the curved boundary are

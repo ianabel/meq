@@ -513,9 +513,9 @@ Each stage ends at a measured number.
 | **FL-2** ✔ | `meq::RotatingSource`, and the `ω → 0` collapse. | **DONE, and better than asked.** Pointwise against `MHDSource` at 1e-13 in both `f` and `dFdPsi`, by both routes to no rotation. Through the solver, the Solov'ev study driven from a `RotatingSource` reproduces `SolovievConvergence`'s errors **to every printed digit** — 3.596959e-05, 1.916351e-07, 5.510484e-10 in `ψ` — not merely the rates |
 | **FL-3** ✔ | `dFdPsi`, two species. | **DONE.** Central difference at the `O(h²)` floor over five Mach scales and two steps. **This is the only test in the stage that touches the `C′(ψ)` term** — see §6.3; neither published benchmark can |
 | **FL-4** ✔ | Solve the rotating Solov'ev. | **DONE.** `deltaStarFD` first: 1.6e-08 at `M² = 0`, 2.8e-07 at `M² = 1`. Then 1.995 / 2.995 / 3.995 in `ψ` and 1.980 / 2.985 / 3.984 in `q`, Newton = 1 throughout as an affine system must give. And the source and the fixture — two independent implementations — agree pointwise at `M² = 0, 1, 4` to 1e-12, with the solver driven from the source giving the same errors as driven from the fixture |
-| **FL-5** | The manufactured nonlinear rotating case. | §6.4: Newton observed order 2; assembled Jacobian against a difference of the assembled residual |
-| **FL-6** | `n` species: the safeguarded root find and `∂φ₀/∂ψ`. | §6.5, all four |
-| **FL-7** | Normalised flux: `meq::NormalisedRotatingSource` through the bordered Newton. | `ψ_ax − max ψ_h` at machine zero and Newton order 2, exactly as `HighBetaConvergence` asserts today |
+| **FL-5** ✔ | The manufactured nonlinear rotating case. | **DONE.** `F = rot.f + h(r,z)` with `h` carrying no `ψ`, so the whole Jacobian is the rotating source's. Assembled Jacobian against a difference of the assembled residual at **3.1e-11**; Newton order **1.980**; `k+1` at 2.007 / 2.999 / 4.002 in `ψ`. And **mutation-tested**: `1.05×dFdPsi` leaves every error and every rate unchanged to all seven digits, and moves the order to 1.055 and the Jacobian check to 2.1e-04 |
+| **FL-6** ✔ | `n` species: the safeguarded root find and `∂φ₀/∂ψ`. | **DONE.** At two species the root find reproduces the closed form — `φ₀` to 1e-12, `∂φ₀/∂ψ` to 1e-11, `F` to 1e-11, `∂F/∂ψ` to 1e-9. Three species (D, C⁶⁺, e) hold `Σ_s Z_s n_s = 0` to 1e-12 at every radius, `∂φ₀/∂ψ` matches a central difference, and the carbon is centrifugally enriched outboard |
+| **FL-7** ✔ | Normalised flux: `meq::NormalisedRotatingSource` through the bordered Newton. | **DONE.** `ψ_ax − max ψ_h` at **0.000e+00** on three meshes, `ψ_ax` converging 1.146743e-01 → 1.146034e-01, rotation moving it by 6.0%, and Newton's **tail** order 2.000 |
 | **FL-8** | Through the driver: TOML, and `n_s`, `φ₀` written. | Driver against library on the same configuration, as `DriverAcceptance` does; a worked `examples/rotating-*.toml` |
 
 **FL-2 is the stage to protect.** It exercises the species container, the profile
@@ -527,6 +527,39 @@ rather than as a plausible equilibrium.
 **FL-4 before FL-5 is deliberate.** FL-4 is linear, so a failure there is the
 discretisation or the source and cannot be the Jacobian. FL-5 is the first stage
 where a Jacobian error is possible, and by then everything else is pinned.
+
+**AND FL-5 EARNED ITS PLACE, MEASURED RATHER THAN ARGUED.** Perturbing
+`dFdPsi` by +5% and re-running the whole study leaves **every L2 error and every
+convergence rate unchanged to all seven digits printed**, at every `k` — exactly
+reproducing what `CLAUDE.md` records for the static case. What moves is Newton:
+3 iterations to 6, observed order 1.980 to 1.055, and the assembled-Jacobian
+check from 3.5e-11 to 2.1e-04. So FL-4's rate tables, which are the instrument
+the earlier stages rest on, are **blind** to the defect FL-5 exists to catch.
+
+**AND THREE MORE FROM FL-5 TO FL-7.**
+
+**A control on the reference curve would have been blind to the whole rotation
+chain rule.** FL-5's check that `∂F/∂ψ` genuinely varies with `ψ` was first
+placed at `r = r_ref` and read 0.333 against a wanted 0.5. Not a defect in the
+profiles: the gauge pins `φ₀(r_ref) = 0`, so the exponent `(r² − r_ref²)/2` and
+*both* its `ψ`-derivatives vanish there and `∂²p/∂ψ²` collapses to `P₀″(ψ)` —
+the answer a non-rotating source gives. Moved to `r = r_max` it reads 7.300.
+**The one radius at which the gauge is exact is the one radius at which a
+rotating source is indistinguishable from a static one.**
+
+**The best observed Newton order is not the order.** FL-7's bordered history
+opens 6.24e-02 → 4.01e-02 → 7.44e-03, whose "order" is **3.81** — the iterate
+walking into the basin, not converging in it. Taking the best triple would
+report that and pass, and would go on passing with a Jacobian degraded enough to
+destroy the tail. The assertion is on the last triple above the round-off floor,
+**bounded on both sides**, because 1 is a broken Jacobian and 3.8 is an artefact.
+
+**`meq::Profile`'s clamping meets a real range.** A manufactured `ψ` runs over
+roughly `[−0.11, +1.00]` on the standard box, not `[0, 1]`, and a Newton iterate
+overshoots further. Every temperature profile therefore has to stay strictly
+positive well outside the nominal range or the closure's denominator goes
+singular mid-quadrature — FL-5 asserts the range and the positivity rather than
+hoping.
 
 **THREE THINGS FL-0 TO FL-4 TURNED UP THAT THIS PLAN DID NOT PREDICT.**
 

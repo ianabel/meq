@@ -4,6 +4,7 @@
 #include "Profiles.hpp"
 #include "Source.hpp"
 
+#include <array>
 #include <cstddef>
 #include <memory>
 #include <vector>
@@ -76,6 +77,13 @@
 
 namespace meq
 {
+
+	/// The most species meq::RotatingSource will carry. A cap rather than a
+	/// vector so that the per-quadrature-point work allocates nothing and needs
+	/// no mutable scratch, which a source evaluated from a threaded assembly
+	/// must not have. Eight covers a main ion, a bulk impurity, a seeded
+	/// impurity, an alpha population and electrons with room to spare.
+	inline constexpr std::size_t maxSpecies = 8;
 
 	/**
 	 * One plasma species: its constants, its temperature and its density on the
@@ -157,16 +165,27 @@ namespace meq
 	 * input profile is asked for two derivatives. There is no reparametrisation
 	 * that avoids it; see Profile::doublePrime.
 	 *
-	 * TWO SPECIES ONLY, FOR NOW. With exactly two, (97) is linear in phi_0 after
-	 * taking logarithms and the whole closure is a closed form -- no root find,
-	 * no inner tolerance, no implicit differentiation. Three or more needs a
-	 * safeguarded scalar Newton per evaluation point, which is FL-6 of
-	 * FLOW-PLAN.md and is not written; the constructor refuses rather than
-	 * approximating.
+	 * TWO CLOSURES, AND THE CHOICE IS NOT NUMERICAL. With exactly two species
+	 * (97) is linear in phi_0 after taking logarithms, so the whole closure is a
+	 * closed form: no root find, no inner tolerance, no implicit
+	 * differentiation. Three or more needs a safeguarded scalar Newton per
+	 * evaluation point and phi_0's two psi-derivatives by implicit
+	 * differentiation. Both are implemented and Closure::Automatic picks the
+	 * cheap one when it applies; Closure::RootFind can be forced at two species
+	 * so that a test can drive the same problem down both paths and require the
+	 * same answer, which is what says the general path is right.
 	 */
 	class RotatingSource : public Source
 	{
 		public:
+			/// How (97) is solved for phi_0.
+			enum class Closure
+			{
+				Automatic,  ///< ClosedForm at two species, RootFind above.
+				ClosedForm, ///< Two species only; refused for more.
+				RootFind    ///< Any number, and the cross-check at two.
+			};
+
 			/**
 			 * @param species  exactly two, of opposite charge sign, satisfying
 			 *                 charge neutrality on r = rRef.
@@ -180,9 +199,13 @@ namespace meq
 			 *                 finite and positive.
 			 * @param mu0      so that a run in normalised units can set it to 1.
 			 *
+			 * @param closure  which route through (97); see Closure.
+			 *
 			 * @throws std::invalid_argument for a null profile, a non-finite or
-			 *         non-positive mass, radius or mu0, a zero charge, two charges
-			 *         of the same sign, or a species count other than two.
+			 *         non-positive mass, radius or mu0, a zero charge, fewer than
+			 *         two species or more than maxSpecies, a species set whose
+			 *         charges are all one sign, or Closure::ClosedForm asked for
+			 *         with more than two species.
 			 * @throws std::invalid_argument if charge neutrality on r = rRef is
 			 *         violated. It is checked by sampling n_s0 over [ 0, 1 ], the
 			 *         range meq::Profile documents itself on, because the closed
@@ -194,7 +217,8 @@ namespace meq
 				std::shared_ptr<Profile const> omega,
 				std::shared_ptr<Profile const> ggPrime,
 				double referenceRadius,
-				double mu0 = vacuumPermeability );
+				double mu0 = vacuumPermeability,
+				Closure closure = Closure::Automatic );
 
 			/// F at ( r, z ) for the flux value psi, in the units of
 			/// meq::Source::f: mu0 r^2 dp/dpsi|_r + g g', no 1/r applied.
@@ -217,6 +241,13 @@ namespace meq
 			/// @throws std::out_of_range if @a index is not a species.
 			double density( std::size_t index, double r, double psi ) const;
 
+			/// d( e phi_0 )/dpsi at fixed r, by implicit differentiation of (97)
+			/// rather than by differencing it. Differencing an inner root find
+			/// from outside gives a derivative whose accuracy is the inner
+			/// tolerance, which is how a Newton iteration silently degrades from
+			/// quadratic to linear with no wrong answer anywhere to point at.
+			double dPotentialDPsi( double r, double psi ) const;
+
 			/// The total pressure Sum_s n_s T_s at ( r, psi ), in Pa. This is the
 			/// p whose psi-derivative F is built from.
 			double pressure( double r, double psi ) const;
@@ -225,34 +256,114 @@ namespace meq
 			/// g g'; exposed separately so a test can see which half is wrong.
 			double dPressureDPsi( double r, double psi ) const;
 
-			/// The shared exponent of (96): both species carry the same one, which
-			/// is what makes Sum_s Z_s n_s vanish at every r once it vanishes at
-			/// rRef. Dimensionless, and equal to M^2/2 at the outboard edge in the
-			/// usual Mach-number sense.
-			double densityExponent( double r, double psi ) const;
+			/// The exponent of (96) for one species. AT TWO SPECIES ALL SPECIES
+			/// SHARE IT, which is what makes Sum_s Z_s n_s vanish at every r once
+			/// it vanishes at rRef; above two they differ, and the cancellation
+			/// is the root find's job instead. Dimensionless, and equal to M^2/2
+			/// at the outboard edge in the usual Mach-number sense.
+			/// @throws std::out_of_range if @a index is not a species.
+			double densityExponent( std::size_t index, double r, double psi ) const;
 
 			// ---- accessors ----
 
 			std::vector<Species> const & species() const;
+			Closure closure() const;
 			Profile const * omega() const;
 			Profile const & ggPrime() const;
 			double referenceRadius() const;
 			double mu0() const;
 
 		private:
-			// P0( psi ) = Sum_s n_s0 T_s and its two psi-derivatives: the pressure
-			// on the reference curve, which is what the exponential multiplies.
-			void referencePressure( double psi, double & p0, double & p0Prime, double & p0DoublePrime ) const;
+			// Everything the source needs at one ( r, psi ), in one pass, on the
+			// stack. f() and dFdPsi() are called at every quadrature point of
+			// every element of every residual evaluation, so this allocates
+			// nothing and holds no state between calls.
+			struct State
+			{
+				double potential;             // e phi_0
+				double potentialPrime;        // and its two psi-derivatives
+				double potentialDoublePrime;
+				std::array<double, maxSpecies> exponent;          // A_s of (96)
+				std::array<double, maxSpecies> exponentPrime;     // dA_s/dpsi
+				std::array<double, maxSpecies> exponentDoublePrime;
+			};
 
-			// C( psi ), the coefficient of ( r^2 - rRef^2 )/2 in the exponent, and
-			// its two psi-derivatives.
-			void exponentCoefficient( double psi, double & c, double & cPrime, double & cDoublePrime ) const;
+			State stateAt( double r, double psi ) const;
+			State closedFormState( double r, double psi ) const;
+			State rootFindState( double r, double psi ) const;
+
+			// p, dp/dpsi and d2p/dpsi2 at fixed r, from a State.
+			void pressureFrom( State const & state, double psi,
+				double & p, double & pPrime, double & pDoublePrime ) const;
 
 			std::vector<Species> speciesData;
 			std::shared_ptr<Profile const> omegaProfile;
 			std::shared_ptr<Profile const> ggPrimeProfile;
 			double rRef;
 			double permeability;
+			Closure closureChoice;
+	};
+
+	/**
+	 * The rotating source with its profiles given against NORMALISED flux.
+	 *
+	 * Psi = ( psi - psi_bnd )/( psi_ax - psi_bnd ), and meq is fixed boundary
+	 * with psi = 0 on Gamma, so Psi = psi/psi_ax -- which makes psi_ax a
+	 * functional of the solution and therefore an unknown of the non-linear
+	 * system, not an input. meq::NormalisedSource is the interface the solver
+	 * closes by a bordered Newton; see CLAUDE.md, "Newton, and the obligation it
+	 * creates", before using this.
+	 *
+	 * IT IS A WRAPPER AND NOT A REIMPLEMENTATION, which is the whole design. A
+	 * normalised source has the form F( r, z, psi ) = H( r, z, psi/psi_ax )/psi_ax,
+	 * so with the profiles read at Psi the answer is the unnormalised source's,
+	 * divided by psi_ax once for f() and TWICE for dFdPsi() -- once for the
+	 * profile argument and once for the derivative itself. Every property
+	 * RotatingSourceTests establishes for meq::RotatingSource therefore carries
+	 * over unchanged, and there is no second copy of the closure to keep in step.
+	 *
+	 * The profiles mean what they always meant, read at Psi: n_s0( Psi ) is the
+	 * density on r = rRef, T_s( Psi ) is in Joules, omega( Psi ) is in rad/s, and
+	 * ggPrime is d( g^2/2 )/dPsi -- note dPsi, not dpsi, which is what the second
+	 * factor of 1/psi_ax accounts for.
+	 */
+	class NormalisedRotatingSource : public NormalisedSource
+	{
+		public:
+			/// Arguments as meq::RotatingSource's, plus the starting psi_ax.
+			/// @throws std::invalid_argument for anything RotatingSource refuses,
+			///         or a psi_ax that is not finite or is zero.
+			NormalisedRotatingSource( std::vector<Species> species,
+				std::shared_ptr<Profile const> omega,
+				std::shared_ptr<Profile const> ggPrime,
+				double referenceRadius,
+				double psiAxis,
+				double mu0 = vacuumPermeability,
+				RotatingSource::Closure closure = RotatingSource::Closure::Automatic );
+
+			double f( double r, double z, double psi ) const override;
+			double dFdPsi( double r, double z, double psi ) const override;
+
+			/// @throws std::invalid_argument if psi_ax is not finite or is zero:
+			///         Psi = psi/psi_ax is undefined there, and a solver that has
+			///         wandered onto psi_ax = 0 should say so rather than return
+			///         infinities.
+			void setNormalisation( double psiAxis ) override;
+			double normalisation() const override;
+
+			// Diagnostics, taking PHYSICAL psi and converting internally, so that
+			// a caller never has to remember which of the two it is holding.
+
+			double potential( double r, double psi ) const;
+			double density( std::size_t index, double r, double psi ) const;
+			double pressure( double r, double psi ) const;
+
+			/// The source underneath, whose arguments are Psi rather than psi.
+			RotatingSource const & unnormalised() const;
+
+		private:
+			RotatingSource inner;
+			double psiAxisValue;
 	};
 
 }

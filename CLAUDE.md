@@ -192,7 +192,7 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 git submodule update --init --recursive     # extern/toml11
 cmake -B build
 cmake --build build -j4
-cd build && ctest --output-on-failure       # ~490-620 s, 26/26
+cd build && ctest --output-on-failure       # ~490-680 s, 28/28
 ```
 
 **ctest needs no environment set by hand.** `tests/CMakeLists.txt` puts
@@ -1263,7 +1263,7 @@ case gives three answers:
 | NPC, `PicardThenNewton` | 4 | 3.1514e-01 |
 
 **A spread of 9.4%.** This is the multiple-solution finding recorded under
-*The suite is 26/26* — coarse discretisations of these sources
+*The suite is 28/28* — coarse discretisations of these sources
 carry more than one solution — meeting the solver from a third direction. It
 means changing the default globalisation is **not** a performance decision:
 it changes the equilibrium meq reports on an under-resolved mesh, which is
@@ -2086,7 +2086,7 @@ and the objects are left as the throw found them. meq's paths construct a fresh
 solver per solve and so do not care, but **do not assume a
 `GradShafranovSolver` is reusable after a caught `ErrorException`.**
 
-### The suite is 26/26, and the last red one was a mesh chosen for a dead solver
+### The suite is 28/28, and the last red one was a mesh chosen for a dead solver
 
 **GREEN, 2026-08-31 (later still).** The NPC port dropped the whole suite from
 872 s to 499 s — the element-local non-linear solves that cost `PedestalConvergence`
@@ -2209,12 +2209,17 @@ difference is the right thing to write, and upstream's own finding is that
 re-taking the gradient *after* a difference silently buys extra corrections and
 can hide exactly this class of defect.
 
-## Toroidal flow: FL-0 to FL-4 are done and green
+## Toroidal flow: FL-0 to FL-7 are done and green
 
 **`meq::RotatingSource` solves the generalised Grad-Shafranov equation of
 `refs/RotatingGK.pdf` (136)**, closed by its (96) and (97), for two species in
 the local gauge `φ₀(r_ref) = 0`. `FLOW-PLAN.md` is the design and the staged
-plan; this section is only what a reader of the code needs.
+plan; this section is only what a reader of the code needs. **Three or more
+species is `Closure::RootFind`** — a safeguarded scalar Newton on (97) with
+`φ₀`'s two `ψ`-derivatives by implicit differentiation — and
+`meq::NormalisedRotatingSource` puts the profiles in normalised flux, where
+`ψ_ax` is an unknown and the existing bordered Newton closes it. **What is left
+is FL-8**, the driver and TOML.
 
 **(136) collapses to `F = μ₀ r² ∂p/∂ψ|_r + g g′`** with `p = Σ_s n_s T_s`,
 because the `∂φ₀/∂ψ` terms cancel identically against quasineutrality. So the
@@ -2246,6 +2251,11 @@ rather than pretending otherwise, and nothing has measured what it costs Newton.
 | **`ω = 0` through the solver** | reproduces `SolovievConvergence`'s errors **to every printed digit** |
 | rotating Solov'ev, `k = 1,2,3` | 1.995 / 2.995 / 3.995 in `ψ`, 1.980 / 2.985 / 3.984 in `q`, Newton = 1 |
 | source against fixture, `M² = 0, 1, 4` | asserted at 1e-12 — two independent implementations of the same physics |
+| assembled Jacobian vs a difference of the assembled residual | 3.1e-11 |
+| Newton order on the manufactured nonlinear case | 1.980, and `k+1` at 2.007 / 2.999 / 4.002 |
+| root find vs closed form at two species | `φ₀` 1e-12, `∂φ₀/∂ψ` 1e-11, `F` 1e-11, `∂F/∂ψ` 1e-9 |
+| three species (D, C⁶⁺, e), `Σ_s Z_s n_s = 0` | 1e-12 at every radius |
+| bordered Newton, `ψ_ax − max ψ_h` | **0.000e+00** on three meshes; tail order 2.000 |
 
 **THREE PAPER ERRORS WERE FOUND ON THE WAY AND ALL THREE ARE THE KIND THAT
 CONVERGE BEAUTIFULLY.** Li & Zhu's (12)–(16) write `M₀²` where their prose
@@ -2263,6 +2273,37 @@ exercises the `C′(ψ)` term — Li & Zhu's Solov'ev case has `T` and `Ω` cons
 and Maschke & Perrin's (4.7) *forces* `C` constant — and that is precisely the
 term Li & Zhu got wrong. Only `RotatingSourceTests`' `dFdPsi` sweep, over
 profiles with genuine `ψ`-dependence in `ω` and `T`, touches it.
+
+**THE +5% MUTATION TEST WAS RE-RUN ON THE ROTATING CASE AND REPRODUCES THE
+STATIC RESULT EXACTLY.** Perturbing `RotatingSource::dFdPsi` by 5% leaves every
+L2 error and every convergence rate unchanged **to all seven digits printed**, at
+`k = 1, 2, 3`; Newton goes 3 iterations to 6, observed order 1.980 to 1.055, and
+the assembled-Jacobian check 3.5e-11 to 2.1e-04. So the rate tables FL-4 rests on
+are blind to the defect, and the Jacobian check and the order are what see it.
+
+**THREE TRAPS FROM FL-5 TO FL-7, ALL OF THE SAME SPECIES.**
+
+**A control on the reference curve is blind to the entire rotation chain rule.**
+The gauge pins `φ₀(r_ref) = 0`, so at `r = r_ref` the exponent and *both* its
+`ψ`-derivatives vanish and `∂²p/∂ψ²` collapses to `P₀″(ψ)` — the answer a
+non-rotating source gives. A check that `∂F/∂ψ` varies with `ψ`, placed there,
+read 0.333 against 7.300 at the outboard edge. **The one radius where the gauge
+is exact is the one radius where a rotating source is indistinguishable from a
+static one.**
+
+**The best observed Newton order is not the order.** The bordered history opens
+6.24e-02 → 4.01e-02 → 7.44e-03, whose "order" reads **3.81** — the iterate
+walking into the basin. Asserting on the best triple would pass on that and keep
+passing with a Jacobian degraded enough to destroy the tail. The assertion is on
+the last triple above the round-off floor and is bounded **both** sides: 1 is a
+broken Jacobian, 3.8 is an artefact.
+
+**A comparison against an exact zero has no relative tolerance.** `φ₀` vanishes
+identically on `r = r_ref`, and identically everywhere at `ω = 0`, so the
+root-find-against-closed-form check compared 1e-33 with 0.0 and failed at every
+such point. The fix is a floor at the problem's own energy scale, not a
+case-dependent one read off the configuration — which was the first attempt and
+failed again at `ω = 0`, where the scale is itself zero.
 
 **MASCHKE & PERRIN IS A SECOND EXACT BENCHMARK, AND THIS FILE'S PLAN SAID IT WAS
 NOT.** `FLOW-PLAN.md` rejected it as an adiabatic closure on the strength of a

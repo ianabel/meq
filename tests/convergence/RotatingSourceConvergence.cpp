@@ -422,3 +422,88 @@ BOOST_AUTO_TEST_CASE( theSourceDrivesTheRotatingBenchmarkAtDesignOrder )
 		            "wanted " << 3.0 - rateSlack );
 	}
 }
+
+/*
+ * THE GENERAL CLOSURE, THROUGH A REAL SOLVE.
+ *
+ * RotatingSourceTests exercises Closure::RootFind thoroughly, but only ever at
+ * points a test chose. A solve is different in one way that matters: the root
+ * find runs at every quadrature point of every element on every Newton
+ * iteration, at whatever psi the iterate has wandered to, and it THROWS if it
+ * fails. So a closure that were merely fragile -- rather than wrong -- would
+ * pass every unit test in this stage and take a production run down from inside
+ * a quadrature loop.
+ *
+ * The impurity here is a trace one, 1e-6 of the electron density, so the answer
+ * must be the two-species one to within that. Two things are therefore asserted
+ * at once: that the general path survives the solve, and that it agrees with the
+ * closed form in the limit where they must agree.
+ *
+ * THE NUMBER COMPARED IS A YARDSTICK AND NOT AN ERROR, WHICH IS WORTH SAYING
+ * PLAINLY. The source rotates, so it does not solve the static Solov'ev problem
+ * and its L2 distance from that solution is large and means nothing on its own.
+ * What it is good for is being computed IDENTICALLY for both closures, so that
+ * the difference between the two numbers is a difference between the two
+ * solutions and nothing else. Reading it as an error would be reading 6.6e-03
+ * as a convergence failure; it is the rotation.
+ */
+BOOST_AUTO_TEST_CASE( theGeneralClosureSurvivesASolveAndAgreesInTheTraceLimit )
+{
+	double const impurityFraction = 1.0e-6;
+
+	// Deuterium, a trace of fully stripped carbon, and electrons closed by
+	// neutrality. Same total pressure slope as the two-species case, so the
+	// equilibrium is the same one to O( impurityFraction ).
+	std::vector<meq::Species> three( 3 );
+
+	three[ 0 ].mass = 1.0;
+	three[ 0 ].charge = 1.0;
+	three[ 0 ].temperature = std::make_shared<ConstantMassProfile const>( speciesTemperature );
+	three[ 0 ].density = std::make_shared<AffineProfile const>( densityOffset, pressureSlope );
+
+	three[ 1 ].mass = 12.0;
+	three[ 1 ].charge = 6.0;
+	three[ 1 ].temperature = std::make_shared<ConstantMassProfile const>( speciesTemperature );
+	three[ 1 ].density = std::make_shared<AffineProfile const>( impurityFraction*densityOffset, 0.0 );
+
+	three[ 2 ].mass = 1.0e-4;
+	three[ 2 ].charge = -1.0;
+	three[ 2 ].temperature = std::make_shared<ConstantMassProfile const>( speciesTemperature );
+	three[ 2 ].density = meq::neutralisingDensity( three, 2 );
+
+	meq::RotatingSource const general( three, std::make_shared<ConstantMassProfile const>( 1.0 ),
+		std::make_shared<ConstantMassProfile const>( ggPrimeConstant ), referenceRadius, 1.0 );
+	BOOST_CHECK_MESSAGE( general.closure() == meq::RotatingSource::Closure::RootFind,
+	                     "three species should not have taken the closed-form path" );
+
+	meq::RotatingSource const closed = makeRotatingSource( 1.0 );
+
+	meq::analytic::SolovievEquilibrium const eq = meq::analytic::SolovievEquilibrium::nstx();
+
+	// The solve itself. A root-find failure anywhere in it throws, so reaching
+	// the assertions at all is half of what this test is for.
+	Measurement generalPoint{};
+	BOOST_REQUIRE_NO_THROW( generalPoint = measureThroughSource( general, eq, 2, 16 ) );
+	Measurement const closedPoint = measureThroughSource( closed, eq, 2, 16 );
+
+	std::printf( "\n  three species through the solver, k = 2, n = 16\n" );
+	std::printf( "    (the L2 column is a yardstick against the STATIC Solov'ev solution,\n" );
+	std::printf( "     not an error: these sources rotate. Only the difference is meaningful.)\n" );
+	std::printf( "    root find  L2 %14.6e, Newton %d\n", generalPoint.errorPsi, generalPoint.newtonIterations );
+	std::printf( "    closed     L2 %14.6e, Newton %d\n", closedPoint.errorPsi, closedPoint.newtonIterations );
+	std::fflush( stdout );
+
+	// The impurity is trace, so the two must agree to about its fraction. Not to
+	// round-off: the carbon really is there, and a test asserting it made no
+	// difference at all would be asserting that the third species is ignored.
+	double const relative = std::fabs( generalPoint.errorPsi - closedPoint.errorPsi )
+		/std::max( closedPoint.errorPsi, 1.0e-300 );
+
+	BOOST_TEST( relative < 1.0e-3,
+	            "the trace-impurity solve differs from the two-species one by " << relative
+	            << ", far more than the impurity fraction " << impurityFraction
+	            << ", so the general closure is not reducing to the closed form" );
+	BOOST_TEST( relative > 0.0,
+	            "the trace-impurity solve is bit-identical to the two-species one, so the "
+	            "third species is being ignored rather than solved for" );
+}
