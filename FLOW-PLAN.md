@@ -194,6 +194,18 @@ rather than ask the user to satisfy it, and should reject a set that cannot
 For electrons and one ion species, (97) is linear in `φ₀` after taking
 logarithms. In the local gauge, and writing `T_eff ≡ T_i + Z_i T_e`:
 
+The general two-species form, which is what is implemented and which
+specialises to the ion/electron one below, is
+
+```
+e φ₀ = ω² ( r² − r_ref² )( m₁T₂ − m₂T₁ ) / 2( Z₁T₂ − Z₂T₁ )
+C    = ω² ( Z₁m₂ − Z₂m₁ ) / ( Z₁T₂ − Z₂T₁ )
+```
+
+— the numerator of `φ₀` being a mass-weighted temperature difference, so that
+two species with equal `m/T` leave nothing for the field to separate and `φ₀`
+vanishes identically. In the ion/electron case:
+
 ```
 e φ₀(r,ψ) = ( ω²/2 )( m_i/T_i − m_e/T_e )( r² − r_ref² ) / ( Z_i/T_i + 1/T_e )
 
@@ -266,14 +278,20 @@ cost the most*.
 struct Species
 {
     double mass;                                  // kg
-    double charge;                                // Z_s e, or Z_s; pick one and say so
-    std::shared_ptr<Profile const> temperature;   // T_s(psi), energy units
-    std::shared_ptr<Profile const> density;       // n_s0(psi) on r = r_ref
+    double charge;                                // Z_s, signed and dimensionless
+    std::shared_ptr<Profile const> temperature;   // T_s(psi), JOULES
+    std::shared_ptr<Profile const> density;       // n_s0(psi) on r = r_ref, m^-3
 };
 ```
 
 `src/meq` deliberately keeps MFEM out of `Profiles` and `Source`; this stays on
 the right side of that line and is unit-testable without the library.
+
+**Built 2026-09-01** in `src/meq/RotatingSource.{hpp,cpp}`, with
+`chargeNeutralityResidual()` and `neutralisingDensity()` beside it. The charge is
+`Z_s` rather than `Z_s e`, so the elementary charge appears in exactly one place;
+`potential()` returns `e φ₀` in Joules for the same reason, that being the
+combination every exponent actually contains.
 
 ### 5.2 `meq::RotatingSource`, and why it is not a generalised `MHDSource`
 
@@ -288,13 +306,33 @@ Holds: `std::vector<Species>`, `ω(ψ)`, `g g′(ψ)`, `r_ref`, and a mode for t
 two-species closed form versus the general root find. Evaluates `p`, then
 `∂p/∂ψ`, then `F`.
 
-### 5.3 `dFdPsi` is where the risk is
+### 5.3 `dFdPsi` is where the risk is, and it cost `Profile` a new method
 
 `∂F/∂ψ = μ₀ r² ∂²p/∂ψ² + (g g′)′`, and `∂²p/∂ψ²` runs the chain rule twice
-through everything in §5.1 plus `φ₀`. **`SourceTests`' finite-difference check on
-`dFdPsi` stops being box-ticking and becomes the load-bearing test of this
-plan.** It must be swept over Mach number, not evaluated at one point: the terms
-it is checking are the ones that vanish at `ω = 0`.
+through everything in §5.1 plus `φ₀`. **The finite-difference check on `dFdPsi`
+stops being box-ticking and becomes the load-bearing test of this plan.** It
+must be swept over Mach number, not evaluated at one point: the terms it is
+checking are the ones that vanish at `ω = 0`.
+
+**IMPLEMENTED 2026-09-01, AND IT NEEDED AN INTERFACE CHANGE THIS PLAN DID NOT
+FORESEE.** `meq::Profile` supplied `operator()` and `prime()` and nothing more —
+exactly two levels, which is what `meq::MHDSource` needs, because it stores the
+*products* `p′` and `g g′`, so `F` is one evaluation and `∂F/∂ψ` is one
+`prime()`. A rotating source needs **three**: `p = P₀(ψ) exp(C(ψ)Δ/2)` is built
+from flux functions, `F` is already `∂p/∂ψ` and spends one derivative of each,
+and the Jacobian spends a second. No reparametrisation avoids it — `p` is not a
+flux function, so there is no product to pre-store, and taking `P₀′` as the input
+instead loses `P₀`.
+
+So `Profile` grew **`doublePrime()`**, as a *pure* virtual rather than one with a
+default: there are three subclasses in the tree, and a compile error naming each
+is better than a runtime surprise in one. `ConstantProfile` returns zero and
+`HermiteCubicSpline` the exact second derivative of its own cubic. **That last
+one carries a caveat worth keeping**: a Hermite cubic is `C¹` and no more, so its
+second derivative is piecewise linear and **jumps at every interior knot**.
+Measure zero, so it cannot move a converged answer, but a Newton step landing on
+a knot sees a one-sided Jacobian. Nothing has measured what that costs, and it
+does not arise for the analytic and constant profiles FL-0 to FL-5 use.
 
 ### 5.4 Normalised flux, and the bordered Newton
 
@@ -365,9 +403,11 @@ floating-point expressions. Round-off is the honest ask.
 `Δ*ψ = −p₁ r² exp[ M₀²( r²/R₀² − 1 ) ] − F₀` with `μ₀P₀′ = p₁`, `FF′ = F₀`,
 `T = T₀` and `Ω = Ω₀` all constant. Their (8) **is** the isothermal closure with
 `T = T_i + T_e`, so this coincides with (136) for two species sharing a
-temperature flux function — *verify that reduction before using it*, in
-particular that the per-species `(ln T_s)′` terms cancel as they must when
-`T_i/T_e` is constant.
+temperature flux function. **That reduction is now verified rather than
+assumed**: `RotatingSourceConvergence`'s `theSourceAndTheFixtureAgreeUnderRotation`
+builds a two-species `meq::RotatingSource` with `T_i = T_e = ½` and matches the
+fixture pointwise at `M² = 0, 1, 4`, which is the statement that our
+`C = ω²(Z₁m₂ − Z₂m₁)/(Z₁T₂ − Z₂T₁)` reproduces their single `T = T_i + T_e`.
 
 Their (16) is its `M₀ → 0` limit and is the static Solov'ev particular solution,
 so §6.1 and §6.2 are the same test at two Mach numbers.
@@ -383,11 +423,57 @@ from their published closed form by central differences and assert it against th
 `F` the solver is actually fed. If the closure differs anywhere, that goes red
 immediately instead of converging beautifully to somebody else's equilibrium.
 
-### 6.3 What is *not* a test of (136)
+### 6.3 Maschke–Perrin IS a test of (136), and this section said otherwise
 
-* **Maschke–Perrin** (Li & Zhu §3.2, their (18)–(21)). Their (20) carries `γ`,
-  the ratio of specific heats: an **adiabatic** closure, not (136)'s isothermal
-  one. Do not use it without re-deriving what equation it solves.
+**CHECKED DIRECTLY 2026-09-01 AND THE EARLIER READING HERE WAS WRONG.** This
+section used to reject Maschke–Perrin on the grounds that its `γ` made it an
+adiabatic closure. That is the right instinct applied to the wrong section of
+the paper, and it is worth leaving recorded because it is this section's own
+hazard biting the section that warns about it.
+
+`refs/MaschkePerrin.pdf` is **Maschke & Perrin, *Plasma Physics* 22 (1980)
+579** — not the Phys. Lett. A 102 (1984) 106 that `TODO` and Li & Zhu's [48]
+cite — and it carries **two** solutions in **two** closures:
+
+| | closure | `γ` | ours? |
+|---|---|---|---|
+| **§3** | entropy a surface quantity, polytrope `p = A(S)ρ^γ` | `η = γ/(γ−1)`, **singular at `γ = 1`** | **no** — a power law in `R²` |
+| **§4** | **temperature** a surface quantity, `B·∇T = 0` | appears only inside `γΩ²` | **yes** |
+
+**Li & Zhu's §3.2 is §4**, the isothermal one — their (18)–(21) reproduce M&P
+(4.9), (4.12), (4.17), (4.18) exactly. And in §4 **`γ` is vestigial**: it enters
+once, at (4.7), and only as the product `γΩ²`, whose whole job is to make `Ω` the
+*adiabatic* Mach number. Substituting `C ≡ γΩ²/R₀²` removes `γ` and `Ω` from the
+solution entirely. So it is not that `γ = 1` is a usable special case — **every
+`γ` is usable**, because `γ` is a label. (§3 → §4 as `γ → 1` as one would hope,
+confirmed symbolically, but §3's formula is singular there, so the limit is not
+where a usable expression lives.)
+
+**Verified by substitution rather than by re-derivation**, which is what the
+question actually was: 50-digit finite differences give
+`max|Δ*ψ + F| / max|F| = 8e-26` over a 25×25 grid with `g g′ ≠ 0` exercised, and
+sympy gives **exactly zero**. The only constant needing care is `μ₀`: M&P work
+in `j = ∇×B` units, so `p_SI = p_M&P/μ₀`. No factor of two, no sign flip.
+Their single `T` maps onto our `T_i + T_e`, and our two-species
+`C = ω²(Z₁m₂ − Z₂m₁)/(Z₁T₂ − Z₂T₁)` reproduces their `ω²ρ/p` with difference
+**0.000e+00** — exact, with no `m_e → 0` limit needed.
+
+**TWO CAVEATS BEFORE IT GOES IN `tests/analytic/`, AND THE FIRST IS THE
+IMPORTANT ONE.** M&P's (4.7) *forces* `C` to be a constant, so the
+`P₀(ψ) C′(ψ)(r² − r_ref²)/2` term of `∂p/∂ψ` is identically zero in this
+fixture. **Neither published rotating benchmark can see that term** — Li & Zhu's
+Solov'ev case has `T` and `Ω` constant for the same reason — and it is precisely
+the term whose sign they got wrong. Only the `dFdPsi` sweep of §5.3, over
+profiles with genuine `ψ`-dependence in `ω` and `T`, touches it. And second: `p_T`
+is linear in `ψ` and `g g′` is constant, so `∂F/∂ψ = 0` and this sits **beside
+`Soloviev.hpp` on meq's ladder, not beside `McCarthy.hpp`**. Within M&P's ansatz
+it cannot be made into a Jacobian test.
+
+* **M&P §3, the actual polytrope**, is a different closure and is **not** usable:
+  `p = (P/R₀⁴)(ψ−F₁)[1 + Ω²R²/2R₀²]^η` is a power law in `R²`, not an
+  exponential, and no choice of our `C` represents it. Measured best-fit
+  mismatch over the benchmark box: 4.1e-3 at `γ = 5/3`, falling to 3.9e-5 at
+  `γ = 1.01` and to zero only in the singular limit.
 * **FLOW** (`refs/GuazzottoFLOW.pdf`, Guazzotto *et al*, *Phys. Plasmas* **11**
   (2004) 604). Arbitrary flow, poloidal **and** toroidal. With poloidal flow the
   equation changes type across the poloidal sonic surface; it is a different and
@@ -422,11 +508,11 @@ Each stage ends at a measured number.
 
 | | | acceptance |
 |---|---|---|
-| **FL-0** | `meq::Species`, the profile container, the charge-neutrality solve. No solver, no MFEM. | Every profile's `prime()` against a finite difference; a neutrality set that cannot be solved is rejected with a named error |
-| **FL-1** | `φ₀` and `p(r,ψ)` for two species, closed form. Still no solver. | `Σ_s Z_s n_s = 0` to round-off over a Mach sweep; `φ₀(r_ref) = 0` exactly; `p` against Li & Zhu (8) |
-| **FL-2** | `meq::RotatingSource`, and the `ω → 0` collapse. | §6.1: agreement with `MHDSource` to round-off, Solov'ev rates unchanged to every digit |
-| **FL-3** | `dFdPsi`, two species. | §5.3: central difference at the `O(step²)` floor, **swept over Mach number** |
-| **FL-4** | Solve the rotating Solov'ev. | §6.2: `deltaStarFD()` on their closed form **first**; then `k+1` in `ψ` and `q` over four dyadic meshes, `k = 1,2,3` |
+| **FL-0** ✔ | `meq::Species`, the profile container, the charge-neutrality solve. No solver, no MFEM. | **DONE.** `neutralisingDensity()` closes `Σ_s Z_s n_s0 = 0` to 1e-14 and is exact at all three derivative levels; every refusal — three species, same-sign charges, a violated neutrality set, a null profile, a bad radius — throws a named `invalid_argument` |
+| **FL-1** ✔ | `φ₀` and `p(r,ψ)` for two species, closed form. Still no solver. | **DONE.** `φ₀(r_ref) = 0` **exactly**; `Σ_s Z_s n_s = 0` to 1e-13 over a Mach sweep; `p` against Li & Zhu (8) to 1e-14. And the closed form checked against a **brentq root of (97)** in an independent Python implementation: **1.9e-14** relative, with the two species' exponents agreeing to 3.0e-14 |
+| **FL-2** ✔ | `meq::RotatingSource`, and the `ω → 0` collapse. | **DONE, and better than asked.** Pointwise against `MHDSource` at 1e-13 in both `f` and `dFdPsi`, by both routes to no rotation. Through the solver, the Solov'ev study driven from a `RotatingSource` reproduces `SolovievConvergence`'s errors **to every printed digit** — 3.596959e-05, 1.916351e-07, 5.510484e-10 in `ψ` — not merely the rates |
+| **FL-3** ✔ | `dFdPsi`, two species. | **DONE.** Central difference at the `O(h²)` floor over five Mach scales and two steps. **This is the only test in the stage that touches the `C′(ψ)` term** — see §6.3; neither published benchmark can |
+| **FL-4** ✔ | Solve the rotating Solov'ev. | **DONE.** `deltaStarFD` first: 1.6e-08 at `M² = 0`, 2.8e-07 at `M² = 1`. Then 1.995 / 2.995 / 3.995 in `ψ` and 1.980 / 2.985 / 3.984 in `q`, Newton = 1 throughout as an affine system must give. And the source and the fixture — two independent implementations — agree pointwise at `M² = 0, 1, 4` to 1e-12, with the solver driven from the source giving the same errors as driven from the fixture |
 | **FL-5** | The manufactured nonlinear rotating case. | §6.4: Newton observed order 2; assembled Jacobian against a difference of the assembled residual |
 | **FL-6** | `n` species: the safeguarded root find and `∂φ₀/∂ψ`. | §6.5, all four |
 | **FL-7** | Normalised flux: `meq::NormalisedRotatingSource` through the bordered Newton. | `ψ_ax − max ψ_h` at machine zero and Newton order 2, exactly as `HighBetaConvergence` asserts today |
@@ -441,6 +527,29 @@ rather than as a plausible equilibrium.
 **FL-4 before FL-5 is deliberate.** FL-4 is linear, so a failure there is the
 discretisation or the source and cannot be the Jacobian. FL-5 is the first stage
 where a Jacobian error is possible, and by then everything else is pinned.
+
+**THREE THINGS FL-0 TO FL-4 TURNED UP THAT THIS PLAN DID NOT PREDICT.**
+
+`meq::Profile` needed a third derivative level — §5.3. Foreseeable in hindsight
+and not foreseen here.
+
+**The `M² → 0` cancellation is ALGEBRAIC, not asymptotic**, which this plan got
+wrong when it called for a series expansion in small `M²`. Writing
+`v = r²/R₀² − 1` and `u = M²v`, the particular solution is
+`−(p₁R₀⁴/4) v² G₂(u)` with `G₂(u) = (e^u − u − 1)/u²`: `M²` cancels exactly,
+nothing is ever divided by it, and `M² = 0` needs no branch at all. What does
+need a series is **small `|u|`, which happens near `r = R₀` at every Mach
+number** — a different and more common condition than the one predicted. The
+fixture carries a control that measures the naive form failing where the
+cancellation bites: 380% wrong at `M² = 1e-8`, exactly zero at `1e-10`.
+
+**A benchmark can be too good for its own guard.** `deltaStarFD`'s central
+difference cannot resolve `Δ*ψ` at `M² = 4`: the fourth derivative carries
+`(2M²r/R₀²)⁴e^u`, so the truncation floor at `h = 1e-4` — already the optimum
+against round-off — is 4.8e-05, above the 1e-5 gate. The `fastRotating()`
+factory is kept and used for solves, and is excluded from the scan, because
+loosening the one guard standing between a mistyped term and a beautiful wrong
+answer was not worth an extra Mach number.
 
 ---
 

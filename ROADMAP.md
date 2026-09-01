@@ -73,7 +73,7 @@ fixed-`q(ψ)` solver — is wanted but undesigned and should wait on item 9.
 The solver works and every claim about it is a measured convergence rate. Stages
 0 to 6 are done, and **stage 7 is finished: meq is a program that solves on a
 curved boundary, refines its own mesh, and restarts from a previous answer in one
-Newton step.** The suite is **23 of 23**, and it is green rather than
+Newton step.** The suite is **26 of 26**, and it is green rather than
 green-with-a-known-red: the last standing failure was `HighBetaConvergence` and
 the work it was asserting is done. The only thing the driver still refuses is
 `[boundary] Type = "exact"`.
@@ -446,11 +446,15 @@ problem it solved does not arise. Plan §4.1; git has it if it is ever wanted.
 
 ---
 
-## 9. Toroidal flow — meq, planned and not started
+## 9. Toroidal flow — meq, FL-0 to FL-4 done
 
-`FLOW-PLAN.md` is the design, in the sense `FREE-BOUNDARY-PLAN.md` is: nothing is
-built. The equation is `refs/RotatingGK.pdf` (136), closed by its (96) and (97),
-and it supersedes `TODO`'s *Sonic toroidal rotation* entry. The shape of it:
+`FLOW-PLAN.md` is the design. **`src/meq/RotatingSource.{hpp,cpp}` is built and
+FL-0 to FL-4 are green**: the species container and the charge-neutrality solve,
+`φ₀` and the pressure in closed form, the source and its Jacobian, and the
+rotating Solov'ev benchmark at `k+1` in both `ψ` and `q`. `CLAUDE.md`'s *Toroidal
+flow* has the measurements. **What is left is FL-5 to FL-8** — the manufactured
+nonlinear case that tests the Jacobian, `n` species, normalised flux through the
+bordered Newton, and the driver. The shape of it:
 
 * **Rotation is a change to `F` alone.** The operator, the discretisation, `τ`,
   the hybridization, the estimator, the adaptive loop and the curved boundary are
@@ -476,10 +480,14 @@ and it supersedes `TODO`'s *Sonic toroidal rotation* entry. The shape of it:
   The counting is the gauge: fixing it removes exactly one function's worth of
   freedom from the `N_s`. Exposed as the physical density of each species on
   `r = r_ref`, subject to charge neutrality there.
-* **Staged FL-0 to FL-8**, each ending at a measured number. **FL-2 is the stage
-  to protect** — the `ω → 0` collapse back onto `MHDSource`, which exercises the
-  species container, the chain rule, `φ₀`, the Gaussian-to-SI conversion and the
-  sign of `Δ*` against an answer meq already has to fifteen digits.
+* **FL-2 was the stage to protect and it held.** The `ω → 0` collapse exercises
+  the species container, the chain rule, `φ₀`, the Gaussian-to-SI conversion and
+  the sign of `Δ*` against an answer meq already had — and driving the Solov'ev
+  study from a `RotatingSource` reproduces `SolovievConvergence`'s errors to
+  every printed digit, not merely its rates.
+* **It cost `meq::Profile` a `doublePrime()`**, which the plan did not foresee: a
+  rotating `F` is already one `ψ`-derivative of the input profiles, so the
+  Jacobian spends a second. Pure virtual, so the three subclasses had to answer.
 
 **The literature hazard is named in the plan rather than left to be discovered.**
 Rotating-equilibrium papers solve at least three different closures — isothermal,

@@ -177,12 +177,12 @@ Raised 2026-08-25.
     Grad 1967                Toroidal containment of a plasma, Phys. Fluids 10, 137
     Maschke & Perrin 1984    An analytic solution of the stationary MHD equations
                              for a rotating toroidal plasma, Phys. Lett. A 102, 106
-                             -- reproduced as section 3.2 of
-                             refs/SpectralElementGSRotation.pdf. NOT a benchmark
-                             for the rotation entry: its closure is ADIABATIC,
-                             carrying a ratio of specific heats, where (136) is
-                             isothermal on a flux surface. See FLOW-PLAN.md
-                             section 6.3
+                             -- WRONG CITATION, and the paper in refs/ is the
+                             right one: Plasma Physics 22 (1980) 579, as
+                             MaschkePerrin.pdf. Its section 4 IS a benchmark for
+                             the rotation work, verified by substitution to
+                             8e-26; its section 3, the actual polytrope, is not.
+                             See FLOW-PLAN.md section 6.3
     Goedbloed & Lifschitz 1997   Stationary symmetric MHD flows, Phys. Plasmas 4, 3544
     Zwingmann, Eriksson & Stubberfield 2001   Equilibrium analysis of tokamak
                              discharges with anisotropic pressure, PPCF 43, 1441

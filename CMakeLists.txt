@@ -196,6 +196,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/GradShafranov.cpp
 	src/meq/Output.cpp
 	src/meq/Profiles.cpp
+	src/meq/RotatingSource.cpp
 	src/meq/Sampler.cpp
 	src/meq/Source.cpp
 	src/meq/SourceFactory.cpp

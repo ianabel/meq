@@ -96,6 +96,7 @@ BOOST_AUTO_TEST_CASE( returns_its_value_everywhere_and_a_zero_derivative )
 		// Exactly zero, not merely small: a Solov'ev-like profile must contribute
 		// nothing at all to the Newton Jacobian.
 		BOOST_CHECK_EQUAL( profile.prime( psi ), 0.0 );
+		BOOST_CHECK_EQUAL( profile.doublePrime( psi ), 0.0 );
 	}
 }
 
@@ -279,6 +280,62 @@ BOOST_AUTO_TEST_CASE( prime_agrees_with_a_central_difference )
 	}
 }
 
+BOOST_AUTO_TEST_CASE( double_prime_reproduces_a_cubic_exactly )
+{
+	// A Hermite cubic reproduces cubics exactly, so its second derivative must
+	// reproduce theirs -- 12x - 2 -- and not merely approximate it. This is the
+	// check that doublePrime() is the analytic second derivative of the
+	// interpolant rather than a difference of prime().
+	meq::SplineProfile const profile = makeCubicSpline( 7 );
+
+	for ( int i = 0; i < 7; ++i )
+	{
+		double const psi = ( i + 0.5 )/7.0;
+		checkClose( profile.doublePrime( psi ), 12.0*psi - 2.0, 1e-12, "second derivative of a cubic", psi );
+	}
+}
+
+BOOST_AUTO_TEST_CASE( double_prime_agrees_with_a_central_difference_of_prime )
+{
+	// Sampled away from the knots for the same reason prime() is: the interpolant
+	// is C^1 and no more, so a stencil straddling a knot picks up the jump the
+	// next test asserts.
+	meq::SplineProfile const profile( wiggle, wigglePrime, 40 );
+	double const h = 1e-6;
+
+	for ( int i = 0; i < 40; ++i )
+	{
+		double const psi = ( i + 0.5 )/40.0;
+		double const difference = ( profile.prime( psi + h ) - profile.prime( psi - h ) )/( 2.0*h );
+		checkClose( profile.doublePrime( psi ), difference, 1e-6, "doublePrime against a difference of prime", psi );
+	}
+}
+
+BOOST_AUTO_TEST_CASE( the_second_derivative_jumps_at_an_interior_knot )
+{
+	// ASSERTING THE CAVEAT, not working round it. A piecewise Hermite cubic is
+	// C^1, so doublePrime() is piecewise linear and genuinely discontinuous at
+	// every interior knot. Anything built on it -- meq::RotatingSource's Jacobian
+	// is -- inherits that, and a test that pretended otherwise would be asserting
+	// a property the class does not have.
+	meq::SplineProfile const profile( wiggle, wigglePrime, 10 );
+	double const knot = profile.knots()[ 5 ].psi;
+	double const eps = 1e-9;
+
+	double const below = profile.doublePrime( knot - eps );
+	double const above = profile.doublePrime( knot + eps );
+
+	BOOST_CHECK_MESSAGE( std::fabs( above - below ) > 1e-3,
+		"the second derivative is continuous at the knot " << knot << " (" << below << " against "
+		<< above << "), which a piecewise Hermite cubic has no reason to be -- either the "
+		"interpolant has changed or doublePrime() is not reading the local interval" );
+
+	// The value and the first derivative are continuous there, which is what C^1
+	// means and what separates this jump from a bug.
+	checkClose( profile( knot + eps ), profile( knot - eps ), 1e-7, "the value across a knot", knot );
+	checkClose( profile.prime( knot + eps ), profile.prime( knot - eps ), 1e-7, "prime across a knot", knot );
+}
+
 BOOST_AUTO_TEST_CASE( clamps_outside_the_table_rather_than_throwing )
 {
 	// The documented policy, and it matters: a Newton iterate overshoots [ 0, 1 ]
@@ -290,12 +347,14 @@ BOOST_AUTO_TEST_CASE( clamps_outside_the_table_rather_than_throwing )
 	{
 		BOOST_CHECK_EQUAL( profile( psi ), profile.knots().front().value );
 		BOOST_CHECK_EQUAL( profile.prime( psi ), 0.0 );
+		BOOST_CHECK_EQUAL( profile.doublePrime( psi ), 0.0 );
 	}
 
 	for ( double psi : { 1.0 + 1e-12, 2.0, 17.0 } )
 	{
 		BOOST_CHECK_EQUAL( profile( psi ), profile.knots().back().value );
 		BOOST_CHECK_EQUAL( profile.prime( psi ), 0.0 );
+		BOOST_CHECK_EQUAL( profile.doublePrime( psi ), 0.0 );
 	}
 
 	// At the end knots themselves the tabulated derivative is still returned.

@@ -192,7 +192,7 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 git submodule update --init --recursive     # extern/toml11
 cmake -B build
 cmake --build build -j4
-cd build && ctest --output-on-failure       # ~490-540 s, 23/23
+cd build && ctest --output-on-failure       # ~490-620 s, 26/26
 ```
 
 **ctest needs no environment set by hand.** `tests/CMakeLists.txt` puts
@@ -1263,7 +1263,7 @@ case gives three answers:
 | NPC, `PicardThenNewton` | 4 | 3.1514e-01 |
 
 **A spread of 9.4%.** This is the multiple-solution finding recorded under
-*The suite is 23/23* — coarse discretisations of these sources
+*The suite is 26/26* — coarse discretisations of these sources
 carry more than one solution — meeting the solver from a third direction. It
 means changing the default globalisation is **not** a performance decision:
 it changes the equilibrium meq reports on an under-resolved mesh, which is
@@ -2086,7 +2086,7 @@ and the objects are left as the throw found them. meq's paths construct a fresh
 solver per solve and so do not care, but **do not assume a
 `GradShafranovSolver` is reusable after a caught `ErrorException`.**
 
-### The suite is 23/23, and the last red one was a mesh chosen for a dead solver
+### The suite is 26/26, and the last red one was a mesh chosen for a dead solver
 
 **GREEN, 2026-08-31 (later still).** The NPC port dropped the whole suite from
 872 s to 499 s — the element-local non-linear solves that cost `PedestalConvergence`
@@ -2208,6 +2208,74 @@ whether the library requires it: holding the linearisation fixed across a
 difference is the right thing to write, and upstream's own finding is that
 re-taking the gradient *after* a difference silently buys extra corrections and
 can hide exactly this class of defect.
+
+## Toroidal flow: FL-0 to FL-4 are done and green
+
+**`meq::RotatingSource` solves the generalised Grad-Shafranov equation of
+`refs/RotatingGK.pdf` (136)**, closed by its (96) and (97), for two species in
+the local gauge `φ₀(r_ref) = 0`. `FLOW-PLAN.md` is the design and the staged
+plan; this section is only what a reader of the code needs.
+
+**(136) collapses to `F = μ₀ r² ∂p/∂ψ|_r + g g′`** with `p = Σ_s n_s T_s`,
+because the `∂φ₀/∂ψ` terms cancel identically against quasineutrality. So the
+residual needs `φ₀` and never its derivative; only the Jacobian does. **Two
+species need no root find at all** — (97) is linear in `φ₀` after logs, giving
+`C = ω²(Z₁m₂ − Z₂m₁)/(Z₁T₂ − Z₂T₁)` as the exponent both species share, exact
+with the electron mass kept. Three or more is FL-6 and the constructor refuses.
+
+**IT COST `meq::Profile` A THIRD DERIVATIVE LEVEL, AND THAT IS THE ONE
+STRUCTURAL CHANGE.** `MHDSource` stores the *products* `p′` and `g g′`, so `F`
+is one evaluation and `∂F/∂ψ` is one `prime()` — two levels, which is all
+`Profile` had. A rotating `F` is *already* `∂p/∂ψ` of something built from flux
+functions, so the Jacobian spends a second derivative of every input. No
+reparametrisation avoids it. `doublePrime()` is a **pure** virtual, so every
+subclass had to answer rather than one silently returning zero. **The caveat is
+real**: a Hermite cubic is `C¹`, so its second derivative jumps at every
+interior knot — `the_second_derivative_jumps_at_an_interior_knot` asserts that
+rather than pretending otherwise, and nothing has measured what it costs Newton.
+
+### What is measured
+
+| | |
+|---|---|
+| `φ₀` against a **brentq root of (97)**, independent Python | 1.9e-14 |
+| `Σ_s Z_s n_s = 0` at every radius, over a Mach sweep | 1e-13 |
+| `p` against Li & Zhu (8) | 1e-14 |
+| `dFdPsi` against a central difference, five Mach scales, two steps | the `O(h²)` floor |
+| `ω = 0` against `MHDSource`, pointwise | 1e-13 |
+| **`ω = 0` through the solver** | reproduces `SolovievConvergence`'s errors **to every printed digit** |
+| rotating Solov'ev, `k = 1,2,3` | 1.995 / 2.995 / 3.995 in `ψ`, 1.980 / 2.985 / 3.984 in `q`, Newton = 1 |
+| source against fixture, `M² = 0, 1, 4` | asserted at 1e-12 — two independent implementations of the same physics |
+
+**THREE PAPER ERRORS WERE FOUND ON THE WAY AND ALL THREE ARE THE KIND THAT
+CONVERGE BEAUTIFULLY.** Li & Zhu's (12)–(16) write `M₀²` where their prose
+defines `M₀` as the group without a square root — the group is an energy ratio,
+so it is a Mach number *squared*, and `RotatingSoloviev.hpp` names its member
+`machSquared` and cites the exponent rather than their symbol. Their (9) carries
+**two reversed signs**, on the `dΩ/dψ` and `dT/dψ` corrections, found
+independently three times — by transcription, by an unrelated numerical check,
+and by meq's own derivation agreeing with the corrected form. **Neither of their
+own benchmarks can see it**, because both have `dC/dψ = 0`. And their (6) omits
+the `μ₀` their (9) carries.
+
+**THE GAP THAT LEAVES IS WORTH KNOWING**: no published rotating benchmark
+exercises the `C′(ψ)` term — Li & Zhu's Solov'ev case has `T` and `Ω` constant,
+and Maschke & Perrin's (4.7) *forces* `C` constant — and that is precisely the
+term Li & Zhu got wrong. Only `RotatingSourceTests`' `dFdPsi` sweep, over
+profiles with genuine `ψ`-dependence in `ω` and `T`, touches it.
+
+**MASCHKE & PERRIN IS A SECOND EXACT BENCHMARK, AND THIS FILE'S PLAN SAID IT WAS
+NOT.** `FLOW-PLAN.md` rejected it as an adiabatic closure on the strength of a
+`γ` in the equations. Wrong section of the paper: `refs/MaschkePerrin.pdf` —
+*Plasma Physics* **22** (1980) 579, not the Phys. Lett. A 102 (1984) everyone
+cites — carries two solutions, and its **§4** takes the temperature as a surface
+quantity and is (136)'s isothermal closure. `γ` appears there once, only inside
+`γΩ²`, and cancels out of the solution: **every `γ` works, not just `γ = 1`**.
+Verified by substitution rather than re-derivation — 8e-26 relative at 50 digits,
+exactly zero symbolically, `μ₀` restored by `p_SI = p_M&P/μ₀`. Its §3, the actual
+polytrope, is a power law in `r²` and is **not** ours. The mistake is left
+recorded because it is this project's standing hazard — three closures that look
+alike — biting the plan that warns about it.
 
 ## The linear solves, and what they should be
 
@@ -2601,7 +2669,7 @@ no `libiomp5`, and `libgomp` as the only OpenMP runtime**; and `LD_DEBUG=libs`
 shows the only MKL objects *initialised* are oneAPI's. Debian's `libmetis` is
 still on the line and is **not even loaded** — CHOLMOD now bundles its own,
 prefixed `SuiteSparse_*`/`cholmod_*`, so there is no symbol collision and
-UMFPACK keeps its METIS ordering. Suite: **23/23**, twice — 490 s and 540 s on
+UMFPACK keeps its METIS ordering. Suite green twice — **23/23 as it then was**, 490 s and 540 s on
 the same code, which is the run-to-run spread on this machine and is worth
 knowing before anyone reads a 10% change in a suite time as a result.
 

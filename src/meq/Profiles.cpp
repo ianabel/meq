@@ -58,6 +58,29 @@ namespace
 		return t*( 3.0*t - 2.0 );
 	}
 
+	// ... and the second derivatives, which a source whose F is itself a
+	// psi-derivative needs. Linear in t, hence the jump at a shared knot.
+
+	inline double h00DoublePrime( double t )
+	{
+		return 12.0*t - 6.0;
+	}
+
+	inline double h10DoublePrime( double t )
+	{
+		return 6.0*t - 4.0;
+	}
+
+	inline double h01DoublePrime( double t )
+	{
+		return 6.0 - 12.0*t;
+	}
+
+	inline double h11DoublePrime( double t )
+	{
+		return 6.0*t - 2.0;
+	}
+
 	// Reject the values that would turn into a silently wrong interpolant later.
 	void checkTable( std::vector<meq::Knot> const & data )
 	{
@@ -90,6 +113,11 @@ namespace meq
 	}
 
 	double ConstantProfile::prime( double ) const
+	{
+		return 0.0;
+	}
+
+	double ConstantProfile::doublePrime( double ) const
 	{
 		return 0.0;
 	}
@@ -137,6 +165,20 @@ namespace meq
 		double const t = ( x - xLower )/delta;
 
 		return ( fLower*h00Prime( t ) + fPrimeLower*delta*h10Prime( t ) + fUpper*h01Prime( t ) + fPrimeUpper*delta*h11Prime( t ) )/delta;
+	}
+
+	double HermiteCubicSpline::doublePrime( double x ) const
+	{
+		// Same convention as prime(): the constant extension outside the interval
+		// has a zero second derivative, and the comparisons are strict so that an
+		// endpoint gets this interval's answer rather than the extension's.
+		if ( x < xLower || x > xUpper )
+			return 0.0;
+
+		double const t = ( x - xLower )/delta;
+
+		return ( fLower*h00DoublePrime( t ) + fPrimeLower*delta*h10DoublePrime( t )
+		         + fUpper*h01DoublePrime( t ) + fPrimeUpper*delta*h11DoublePrime( t ) )/( delta*delta );
 	}
 
 	std::pair<double,double> HermiteCubicSpline::interval() const
@@ -263,6 +305,14 @@ namespace meq
 			return 0.0;
 
 		return intervalAt( findInterval( psi ) ).prime( psi );
+	}
+
+	double SplineProfile::doublePrime( double psi ) const
+	{
+		if ( psi < knotData.front().psi || psi > knotData.back().psi )
+			return 0.0;
+
+		return intervalAt( findInterval( psi ) ).doublePrime( psi );
 	}
 
 	void SplineProfile::write( std::ostream & os ) const

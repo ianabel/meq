@@ -66,6 +66,28 @@ namespace meq
 			/// operator(), not a finite difference of it.
 			virtual double prime( double psi ) const = 0;
 
+			/// d2/dpsi2 of the profile at psi. Must be the exact derivative of
+			/// prime(), for the same reason prime() must be the exact derivative
+			/// of operator().
+			///
+			/// WHY THIS EXISTS, because it is not needed by every source and its
+			/// absence was not felt for a long time. meq::MHDSource stores the
+			/// *products* mu0-free p' and g g', so F is one profile evaluation and
+			/// dF/dpsi is one prime() -- two levels, and Profile supplied both. A
+			/// source whose F is itself a psi-derivative of something built from
+			/// profiles needs three: meq::RotatingSource has
+			/// F = mu0 r^2 dp/dpsi with p = P0( psi ) exp( C( psi ) ( r^2 - rRef^2 )/2 ),
+			/// so F already spends one derivative of P0 and C and the Jacobian
+			/// spends a second. There is no reparametrisation that avoids it --
+			/// p is not a flux function, so there is no product to pre-store.
+			///
+			/// CAVEAT FOR TABULATED PROFILES. A piecewise Hermite cubic is C^1 and
+			/// no more, so its second derivative is piecewise linear and jumps at
+			/// every knot. That is a set of measure zero and does not move a
+			/// converged answer, but a Newton step taken exactly at a knot sees a
+			/// Jacobian that is one-sided. Nothing has measured what that costs.
+			virtual double doublePrime( double psi ) const = 0;
+
 		protected:
 			// Copying through a Profile& would slice; derived classes are free to be
 			// copyable, and are.
@@ -95,6 +117,9 @@ namespace meq
 
 			/// Returns 0 exactly, for any psi.
 			double prime( double psi ) const override;
+
+			/// Returns 0 exactly, for any psi.
+			double doublePrime( double psi ) const override;
 
 			/// The constant this profile was built with.
 			double value() const;
@@ -144,6 +169,12 @@ namespace meq
 			/// [ lower, upper ], consistent with the constant extension used by
 			/// operator().
 			double prime( double x ) const;
+
+			/// The second derivative of the interpolant at x; zero outside
+			/// [ lower, upper ], for the same reason prime() is. Piecewise linear
+			/// in x, so adjacent intervals disagree at a shared knot -- see
+			/// Profile::doublePrime.
+			double doublePrime( double x ) const;
 
 			/// ( lower, upper ) -- the interval this cubic is defined on.
 			std::pair<double,double> interval() const;
@@ -225,6 +256,12 @@ namespace meq
 			/// The derivative of the interpolant at psi; zero outside the knot
 			/// range, see the class documentation.
 			double prime( double psi ) const override;
+
+			/// The second derivative of the interpolant at psi; zero outside the
+			/// knot range. Piecewise linear, so it jumps at every interior knot --
+			/// findInterval() decides which side a knot belongs to and the answer
+			/// there is that interval's, not an average. See Profile::doublePrime.
+			double doublePrime( double psi ) const override;
 
 			/// Write the table in the format fromStream() reads, at enough
 			/// precision to round-trip a double exactly, terminated by a blank

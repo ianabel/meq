@@ -45,8 +45,14 @@ namespace
 	class AnalyticProfile : public meq::Profile
 	{
 		public:
-			AnalyticProfile( std::function<double( double )> value, std::function<double( double )> derivative )
-				: valueFunction( std::move( value ) ), derivativeFunction( std::move( derivative ) )
+			// The second derivative is optional because meq::MHDSource never asks
+			// for one -- it stores the pre-multiplied products, so F costs one
+			// evaluation and dF/dpsi one prime(). A caller that does ask and did
+			// not supply it gets a throw rather than a plausible zero.
+			AnalyticProfile( std::function<double( double )> value, std::function<double( double )> derivative,
+				std::function<double( double )> secondDerivative = {} )
+				: valueFunction( std::move( value ) ), derivativeFunction( std::move( derivative ) ),
+				  secondDerivativeFunction( std::move( secondDerivative ) )
 			{
 			}
 
@@ -60,9 +66,18 @@ namespace
 				return derivativeFunction( psi );
 			}
 
+			double doublePrime( double psi ) const override
+			{
+				if ( !secondDerivativeFunction )
+					throw std::logic_error( "AnalyticProfile: this profile was built without a second derivative" );
+
+				return secondDerivativeFunction( psi );
+			}
+
 		private:
 			std::function<double( double )> valueFunction;
 			std::function<double( double )> derivativeFunction;
+			std::function<double( double )> secondDerivativeFunction;
 	};
 
 	// p'( psi ) and p''( psi ): non-polynomial, non-monotonic, and with a

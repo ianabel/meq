@@ -21,6 +21,7 @@
 #include "meq/Config.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/Profiles.hpp"
+#include "meq/RotatingSource.hpp"
 #include "meq/Source.hpp"
 
 #endif // MEQ_HPP

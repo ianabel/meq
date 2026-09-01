@@ -18,6 +18,7 @@ set(MEQ_UNIT_TESTS
 	BoundaryShapeTests
 	ConfigTests
 	ProfilesTests
+	RotatingSourceTests
 	SourceTests
 	SourceFactoryTests)
 
@@ -134,7 +135,9 @@ set(MEQ_CONVERGENCE_TESTS
 	AdaptiveRefinement
 	PedestalConvergence
 	MillerConvergence
-	SolovievGeometryConvergence)
+	SolovievGeometryConvergence
+	RotatingSolovievConvergence
+	RotatingSourceConvergence)
 
 # DriverAcceptance is registered separately below: it runs the meq BINARY rather
 # than linking the library, so it needs the app to have been built and needs the
