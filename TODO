@@ -131,146 +131,31 @@ Raised 2026-08-24.
 
 ================================================================================
 Sonic toroidal rotation
-Raised 2026-08-25. SUPERSEDED 2026-09-01 by FLOW-PLAN.md.
+Raised 2026-08-25. SUPERSEDED 2026-09-01 by FLOW-PLAN.md, which is the design.
 ================================================================================
 
-  FLOW-PLAN.md is the design and is staged FL-0 to FL-8. It keeps this entry's
-  two findings -- that <phi_0>_psi = 0 is a gauge choice and not a closure, and
-  that (97)'s root is unique and bracketable -- and adds three this entry does
-  not have: that (136) collapses to F = mu0 r^2 dp/dpsi|_r + g g', that the
-  residual therefore needs phi_0 but never dphi_0/dpsi, and that the published
-  rotating benchmarks do not all solve the same equation. What is kept below is
-  the working; the plan is what to do.
+  FLOW-PLAN.md carries all of this and more, staged FL-0 to FL-8. The equation
+  is refs/RotatingGK.pdf (136) closed by its (96) and (97); the inputs are
+  T_s(psi), omega(psi), n-1 density flux functions and I(psi).
 
-  meq solves the static Grad-Shafranov equation, whose source is
+  THIS ENTRY'S TWO FINDINGS ARE KEPT THERE. <phi_0>_psi = 0 is a GAUGE CHOICE
+  and not a closure -- RoPP says so itself at (59), "we can add any function of
+  psi to it" -- so it can be replaced by anything convenient, and the plan takes
+  the local phi_0(r_ref) = 0, which keeps F a pointwise function of (r, z, psi).
+  And (97)'s root is unique and bracketable, its derivative carrying Z_s^2 and
+  so being strictly negative, which is what makes a safeguarded scalar Newton
+  unable to fail.
 
-      F(r,z,psi) = mu0 r^2 dp/dpsi + g dg/dpsi.
+  THREE THINGS THE PLAN ADDS that this entry did not have. (136) collapses to
+  F = mu0 r^2 dp/dpsi|_r + g g', because the dphi_0/dpsi terms cancel against
+  quasineutrality -- so the residual needs phi_0 but never its derivative, and
+  only the Jacobian does. Two species need no root find at all, (97) being
+  linear in phi_0 after taking logarithms. And the published rotating benchmarks
+  do not all solve the same equation: Li & Zhu's rotating Solov'ev is (136)'s
+  isothermal closure, Maschke-Perrin's is adiabatic and is not, and FLOW solves
+  poloidal flow as well.
 
-  With rotation fast enough that the Mach number is order one -- "sonic" -- that
-  is no longer the right equation. The centrifugal force sweeps heavy species to
-  the outboard side, so the density is NOT a flux function, and an electrostatic
-  potential arises to hold quasineutrality against that separation.
-
-  The reference is ~/RoPP-final.pdf, Abel et al, "Multiscale gyrokinetics for
-  rotating tokamak plasmas", Rep. Prog. Phys. 76 (2013) 116201. Its eq (136), on
-  printed page 19, is the generalisation:
-
-      Delta* psi = -4 pi R^2 sum_s n_s { T_s dlnN_s/dpsi
-                        + [ Z_s e phi_0 - (1/2) m_s omega^2(psi) R^2 + T_s ]
-                          dlnT_s/dpsi }
-                   - 4 pi R^2 ( sum_s m_s n_s R^2 ) omega(psi) domega/dpsi
-                   - I(psi) dI/dpsi
-
-  coupled to eq (96) for the density,
-
-      n_s = N_s(psi) exp[ m_s omega^2(psi) R^2 / (2 T_s) - Z_s e phi_0 / T_s ]
-
-  and eq (97), the lowest-order quasineutrality condition that determines phi_0,
-
-      sum_s Z_s N_s(psi) exp[ m_s omega^2(psi) R^2 / (2 T_s)
-                              - Z_s e phi_0 / T_s ] = 0,
-
-  subject to <phi_0>_psi = 0 by definition (their eq (59)).
-
-  WHAT THIS CHANGES, in rough order of difficulty
-
-  1. The profile set. Instead of two flux functions p'(psi) and gg'(psi), the
-     source needs N_s(psi) and T_s(psi) PER SPECIES, plus omega(psi) and I(psi),
-     and it needs dlnN_s/dpsi, dlnT_s/dpsi, domega/dpsi and dI/dpsi. meq::Profile
-     already supplies value and derivative from one spline, so the interface is
-     right; what changes is that Source stops being built from two profiles and
-     becomes a small container of species.
-
-  2. phi_0 is implicit. Eq (97) is a transcendental equation for phi_0 at each
-     (R, psi) -- a scalar solve nested inside every source evaluation, i.e. at
-     every quadrature point of every element on every Newton iteration.
-
-     The good news is that this root find is as well behaved as it could be.
-     Differentiating the left-hand side of (97),
-
-         d/dphi_0 sum_s Z_s N_s exp[...] = -e sum_s (Z_s^2 / T_s) N_s exp[...],
-
-     which is strictly negative for any positive N_s and T_s, since every term
-     carries Z_s^2. So the left-hand side is strictly decreasing. And with at
-     least one positive and one negative Z_s it runs from +infinity (phi_0 ->
-     -infinity, ion terms dominate) to -infinity (phi_0 -> +infinity, electron
-     terms dominate). Hence a unique root, always, and one that can be
-     bracketed -- so a safeguarded Newton or Brent will not fail. A good initial
-     guess is available from the previous iterate at the same point.
-
-  3. NEWTON NEEDS d(phi_0)/d(psi), and it is not optional. dF/dpsi picks up phi_0
-     through both the explicit Z_s e phi_0 term and the exponentials in n_s.
-     Differentiate (97) implicitly with respect to psi at fixed R; the derivative
-     falls out in closed form because (97) is differentiable in both arguments.
-     Do NOT finite-difference it: an inner root find differenced from outside
-     gives a Jacobian whose accuracy is set by the inner solve's tolerance,
-     which is how a Newton iteration silently degrades to linear.
-
-  4. <phi_0>_psi = 0 IS A GAUGE CHOICE, NOT A CLOSURE CONDITION, and it can be
-     replaced by anything convenient. WITHDRAWN: an earlier version of this
-     entry called it a non-local constraint over a moving flux surface and named
-     it as possibly deciding the whole approach. That was wrong, and the
-     correction matters because it removes the entry's one apparent blocker.
-
-     The system has an exact gauge freedom. For any flux function delta(psi),
-
-         phi_0 -> phi_0 + delta(psi),      N_s -> N_s exp( Z_s e delta / T_s )
-
-     leaves the physical density n_s of (96) unchanged, and so leaves (97)
-     satisfied. Only the split between "N_s" and "phi_0" moves; nothing
-     observable does. <phi_0>_psi = 0 is the convention RoPP adopts, at its
-     (59), to make N_s well defined -- which is why the paper says "by
-     definition" rather than deriving it.
-
-     AND THE SOURCE IS INVARIANT UNDER IT. Applying the transformation to the
-     psi-derivative bracket of (136), the two changed terms are
-
-         T_s dlnN_s/dpsi     picks up   Z_s e delta' - Z_s e delta T_s'/T_s
-         [Z_s e phi_0 + ...] dlnT_s/dpsi   picks up   Z_s e delta T_s'/T_s
-
-     which sum to Z_s e delta'. Weighted by n_s and summed over species that is
-     e delta'(psi) sum_s Z_s n_s = 0, by quasineutrality -- i.e. by (97) itself.
-     The remaining terms of (136) depend on phi_0 only through n_s, which is
-     invariant by construction. Verified symbolically with sympy for a two
-     species case, and the cancellation is exact rather than approximate.
-
-     CONSEQUENCES, which are all simplifications:
-
-       - Any normalisation gives the same equilibrium. phi_0(z = 0) = 0 on each
-         flux surface is legitimate and is local to a curve rather than an
-         integral over a surface.
-       - Better still, no constraint is needed at solve time at all. Given
-         N_s(psi) as input data, (97) already determines phi_0 uniquely and
-         pointwise by item 2. The gauge choice is a statement about what the
-         supplied N_s MEANS, not an equation the solver has to close.
-       - So this must be documented where the profiles are documented: two sets
-         of input N_s differing by the gauge factor describe the same plasma,
-         and a user comparing profiles between codes needs to know which
-         convention each is in. That is the only place it can still bite.
-
-  CONVENTIONS TO PIN DOWN FIRST, because two sign or factor slips have already
-  been found in the papers meq does follow
-
-  - UNITS. RoPP is Gaussian -- the 4 pi in (136), the c in (135). meq and the
-    Grad-Shafranov papers are SI with mu0. Convert deliberately and write the
-    conversion down.
-  - THE 2 pi. RoPP (31) has B = I grad(phi) + grad(psi) x grad(phi) with
-    psi = A_phi, whereas HDG-GS-2 states psi = psi_p / 2 pi. The B decomposition
-    agrees structurally -- their I is HDG-GS-2's g -- but the normalisation of
-    psi does not obviously.
-  - THE SIGN OF Delta*. RoPP (135) gives j . grad(phi) = -(c / 4 pi R^2) Delta*
-    psi, so (136) reads Delta* psi = -4 pi R^2 {...}, i.e. -Delta* psi = +4 pi
-    R^2 {...}. meq's convention is -Delta* psi = F. Check that maps to F = +4 pi
-    R^2 {...} rather than assuming it.
-
-  A CHEAP FIRST MILESTONE. The subsonic limit must reduce to what meq already
-  solves: as omega -> 0 the exponentials go to one, n_s becomes a flux function
-  again, and (136) should collapse to the static equation. Implement that limit
-  first and check it against the existing Solov'ev benchmark to zero -- it
-  exercises the whole new profile and phi_0 machinery while having a known
-  answer.
-
-
+  Nothing else that stood here is worth keeping; git has the working.
 ================================================================================
 Anisotropic pressure
 Raised 2026-08-25.
@@ -282,8 +167,9 @@ Raised 2026-08-25.
   gaining terms.
 
   NO REFERENCE IS PINNED FOR THIS YET, and one is needed before anything is
-  written -- unlike the rotation case above, where ~/RoPP-final.pdf eq (136) is
-  the equation to implement. The seeds below come from the CEDRES++ paper's own
+  written -- unlike the rotation case above, where refs/RotatingGK.pdf eq (136)
+  is the equation and FLOW-PLAN.md is the design. The seeds below come from the
+  CEDRES++ paper's own
   list of what it plans to add (refs/CEDRES.pdf, section 1 and its
   bibliography), so they are the set a production free-boundary code considered
   worth citing, not a literature search:
@@ -291,14 +177,20 @@ Raised 2026-08-25.
     Grad 1967                Toroidal containment of a plasma, Phys. Fluids 10, 137
     Maschke & Perrin 1984    An analytic solution of the stationary MHD equations
                              for a rotating toroidal plasma, Phys. Lett. A 102, 106
-                             -- also relevant to the rotation entry above, and
-                             worth having because an ANALYTIC solution is a
-                             benchmark, which is the scarce thing here
+                             -- reproduced as section 3.2 of
+                             refs/SpectralElementGSRotation.pdf. NOT a benchmark
+                             for the rotation entry: its closure is ADIABATIC,
+                             carrying a ratio of specific heats, where (136) is
+                             isothermal on a flux surface. See FLOW-PLAN.md
+                             section 6.3
     Goedbloed & Lifschitz 1997   Stationary symmetric MHD flows, Phys. Plasmas 4, 3544
     Zwingmann, Eriksson & Stubberfield 2001   Equilibrium analysis of tokamak
                              discharges with anisotropic pressure, PPCF 43, 1441
     Guazzotto, Betti, Manickam & Kaye 2004    Numerical study of tokamak
                              equilibria with arbitrary flow, Phys. Plasmas 11, 604
+                             -- fetched, and in refs/Refs.md as
+                             GuazzottoFLOW.pdf. Poloidal AND toroidal flow, so a
+                             different and harder problem than (136)
     Cooper et al 2009        Three-dimensional anisotropic pressure free boundary
                              equilibria, Comput. Phys. Commun. 180, 1524
     Pustovitov 2010          Anisotropic pressure effects on plasma equilibrium in
@@ -309,7 +201,8 @@ Raised 2026-08-25.
 
   Verify each doi against Crossref before adding any of these to refs/Refs.md --
   they are transcribed from another paper's bibliography, which is exactly the
-  provenance that file's opening rule exists for. This list has NOT been checked.
+  provenance that file's opening rule exists for. Only the Guazzotto entry has
+  been checked and fetched; the rest have NOT.
 
   Two things to establish when a reference is chosen:
 
@@ -421,45 +314,18 @@ Raised 2026-08-25. A survey, not yet a decision.
   1. ~~FOUR NONLINEAR SOURCES WE ALREADY OWN~~ -- DONE. refs/HDG-GradShafranov-
      Adaptive.pdf sections 4.2 to 4.5 are tests/analytic/PressurePedestal.hpp
      (which carries 4.2, and CurrentHole and InternalLayer for 4.4 and 4.5) and
-     TransportBarrier.hpp for 4.3. PedestalConvergence.cpp drives them.
+     TransportBarrier.hpp for 4.3. PedestalConvergence.cpp drives them, and all
+     four give dF/dpsi in closed form, so the Newton Jacobian stays exact. The
+     transcribed source expressions that stood here are in those fixtures now.
 
-     AND THE PREMISE BELOW -- "stiff" -- TURNED OUT TO BE WRONG FOR THREE OF THE
-     FOUR, which is the single most useful thing this item produced. 4.2, 4.3 and
-     4.5 are ordinary problems on a resolved mesh, 7 to 17 raw Newton iterations,
+     AND THE PREMISE -- "stiff" -- TURNED OUT TO BE WRONG FOR THREE OF THE FOUR,
+     which is the single most useful thing this item produced. 4.2, 4.3 and 4.5
+     are ordinary problems on a resolved mesh, 7 to 17 raw Newton iterations,
      and both h- and p-refinement cure them independently; the "stiff sources"
      story came from benchmarking at one under-resolved point. 4.4 is the
      exception and is genuinely multi-valued -- dF/dpsi spans [-580, +566]
      against a first Dirichlet eigenvalue of 22.3. See CLAUDE.md, "Why meq's
-     Newton struggles", and item 7 of ROADMAP.md. Read the description below as
-     the paper's, not as meq's finding.
-
-       4.2 pressure pedestal, eq (23)/(24):
-           p = (c1 + c2 psi^2)(1 - exp(-(psi/sigma)^2))
-           F = 2 r^2 psi ( c2(1 - exp(-(psi/sigma)^2))
-                           + (1/sigma^2)(c1 + c2 psi^2) exp(-(psi/sigma)^2) )
-           c1 = 0.8, c2 = 0.2, sigma^2 = 0.005, and g = const.
-           sigma^2 = 0.005 makes the edge gradient very sharp. THIS is the case
-           where Newton globalisation should start to matter -- see CLAUDE.md on
-           KINSolver(KIN_LINESEARCH), which is exactly why that note exists.
-
-       4.3 internal transport barrier, eq (25):
-           p = [(1 + H erf(s(psi - psi_0)))/(1 + H)] (1 - (1 - psi)^a)^b
-           H = 0.5, s = 40, psi_0 = 0.3, a = 4, b = 2.
-
-       4.4 current hole, eq (26): the pedestal source plus
-           c3 (1 - exp(-(psi/sigma_2)^2)) cos(c4 psi)
-           c1 = 0.4, c2 = 0.1, c3 = -18, c4 = 10 pi,
-           sigma_1^2 = 5e-3, sigma_2^2 = 3e-3.
-
-       4.5 internal layer, eq (27): the pedestal source plus
-           c3 (1 - exp(-(psi/sigma_1)^2)) exp(-(1 - r - psi)^2/sigma_2^2)
-           c1 = 0.8, c2 = 0.2, c3 = 15, sigma_1^2 = 5e-3, sigma_2^2 = 7.5e-4.
-           The paper is explicit that this one is NOT physical -- r appears
-           inside the exponential, so it cannot be written as mu0 r^2 p' + g g'
-           -- but it is a good test for detecting a localised internal layer.
-
-     Note all four give dF/dpsi in closed form by differentiating the
-     expressions above, so the Newton Jacobian stays exact.
+     Newton struggles", and item 7 of ROADMAP.md.
 
   2. GENUINELY NONLINEAR EXACT SOLUTIONS: Kaltsas & Throumoulopoulos,
      Phys. Lett. A 380 (2016) 3373, doi 10.1016/j.physleta.2016.08.011,
@@ -471,12 +337,9 @@ Raised 2026-08-25. A survey, not yet a decision.
        f(u) = f0 + f1 u^2   -> a Weierstrass elliptic function (their eq 21)
        f(u) = f0 exp(n u)   -> sech^2 (their eq 22), plus a second class (23)
 
-     ~~The exponential/sech^2 case~~ -- DONE, and it was as attractive as this
-     said: an EXACT solution, in elementary functions, of a genuinely nonlinear
-     GS equation, with dF/dpsi = n F analytic. It is
-     tests/analytic/SimilarityExponential.hpp, and it earns its rung by being
-     exact where ManufacturedNonlinear.hpp is reverse-engineered from a chosen
-     answer.
+     ~~The exponential/sech^2 case~~ -- DONE, as
+     tests/analytic/SimilarityExponential.hpp. It earns its rung by being exact
+     where ManufacturedNonlinear.hpp is reverse-engineered from a chosen answer.
 
      THE WEIERSTRASS CASE, f(u) = f0 + f1 u^2 (their eq 21), IS STILL OPEN and is
      what is left of this item. The two caveats that applied to the exponential
@@ -528,325 +391,140 @@ Raised 2026-08-25. A survey, not yet a decision.
 
 
 ================================================================================
-PARDISO: settle reproducibility, then make the trace solver selectable
+PARDISO: settle reproducibility
 Raised 2026-08-25 as "try PARDISO again against a real oneMKL build". THAT PART
-IS DONE -- rewritten 2026-08-29 to what is actually left.
+IS DONE, and so is the run-time switch. Rewritten 2026-09-01 to what is left.
 ================================================================================
 
-  WHAT WAS ASKED AND IS NOW ANSWERED. The old entry recorded PARDISO as 2.2x
-  faster than UMFPACK where it ran and failing with error -3 above n of about
-  3000, and predicted the cause was Debian's intel-mkl 2020.4.304 rather than
-  anything about the method. THE PREDICTION WAS RIGHT. Against oneAPI MKL 2026.1
-  at /opt/intel/oneapi/mkl/latest, with ../mfem/install rebuilt
-  MFEM_USE_MKL_PARDISO=YES and using MFEM's own PardisoSolver:
+  WHAT IS LEFT IS ONE QUESTION. PARDISO's advantage IS the threading, and
+  threaded reduction order is the same non-determinism that decides the pedestal
+  knife edge -- see CLAUDE.md under "On SUNDIALS", where MFEM_USE_LAPACK tips a
+  marginal Newton by changing the rounding and nothing else. This suite asserts
+  Newton iteration counts. iparm[33], conditional numerical reproducibility,
+  exists for exactly this; it costs some of the speed back, and the question is
+  how much. Measure it, do not assume it.
 
-      k    n     trace dofs   UMF setup / solve   PAR setup / solve   agreement
-      2    32         9,408      0.0471 / 0.0048     0.0141 / 0.0020     3.7e-15
-      2    48        21,024      0.1420 / 0.0143     0.0398 / 0.0055     8.1e-15
-      3    32        12,544      0.0674 / 0.0091     0.0158 / 0.0042     4.3e-15
-      3    48        28,032      0.2078 / 0.0254     0.0489 / 0.0088     1.2e-14
+  WHAT IS ANSWERED, and recorded in CLAUDE.md rather than here: PARDISO runs at
+  every size against oneAPI MKL 2026.1 and agrees with UMFPACK to round-off, so
+  the n ~ 3000 ceiling was Debian's intel-mkl 2020.4.304 and nothing about the
+  method; setTraceSolver() picks UMFPack, Pardiso or CuDSS at run time, with
+  UMFPack still the default because oneMKL's licence is not everybody's to
+  accept; SetReuseSymbolic() is on; and the link line no longer straddles two
+  MKL installations, because meq builds its own SuiteSparse.
 
-  About 3.8x on the setup and 2-3x on the solve from 9k dofs up, and it RUNS at
-  12,544 and 28,032 -- the sizes that used to return -3. Slower at 2,400, which
-  is thread startup against a problem too small to need it.
-  tests/convergence/TraceSolverComparison.cpp is the measurement and it asserts
-  only the AGREEMENT; the timings are printed, because PARDISO is threaded and a
-  threaded timing on this machine is not a measurement about the code.
+  DO NOT QUOTE THE TIMINGS THIS ENTRY USED TO CARRY. They were taken before
+  2026-08-30, when a stray libmkl_sequential made MKL resolve sequential for
+  everything, so they were sequential-against-sequential and were never labelled
+  as such. The live numbers are in CLAUDE.md, "Threading, measured".
 
-  Two of the old entry's other prerequisites are also settled: symbolic reuse
-  landed (SetReuseSymbolic() is on for the Newton and Picard paths, and
-  PardisoSolver has the same call with the same pattern-comparison contract), and
-  MFEM's serial PardisoSolver is what is used rather than hand-rolled PARDISO()
-  calls.
-
-  WHAT IS LEFT, and neither is large.
-
-  1. THE REPRODUCIBILITY QUESTION, WHICH IS STILL OPEN AND STILL COMES FIRST.
-     PARDISO's advantage IS the threading, and threaded reduction order is the
-     same non-determinism that decides the pedestal knife edge -- see CLAUDE.md
-     under "On SUNDIALS", where MFEM_USE_LAPACK tips a marginal Newton by
-     changing rounding and nothing else. This suite asserts Newton iteration
-     counts. iparm[33], conditional numerical reproducibility, exists for exactly
-     this; it costs some of the speed back and the question is how much. Measure
-     it, do not assume it. Nothing about this has changed.
-
-  2. ~~MAKE THE TRACE SOLVER SELECTABLE AT RUN TIME~~ -- DONE 2026-08-31.
-     setTraceSolver() picks UMFPack, Pardiso or CuDSS; traceSolverAvailable()
-     reports which the build has; an unavailable choice throws
-     invalid_argument rather than silently substituting. As predicted this was
-     a setter and a #ifdef and NOT a switch of default: UMFPack stays the
-     default because oneMKL's licence is not everybody's to accept.
-     All four construction sites -- Picard, Newton, bordered Newton, linear --
-     now share one factory, so the only thing differing between them is whether
-     the symbolic analysis is retained.
-     theTraceSolversAgree pins them through the whole solver at 5.0e-14;
-     the TraceSolverCuDSS ctest does the same for cuDSS, separately because
-     cuDSS needs an mfem::Device and that is global state a Boost test case
-     should not configure.
-
-  AND THE LINK LINE IS A LIVE HAZARD, which the old entry predicted as "the first
-  thing likely to go wrong" and which duly went wrong. MFEM_EXT_LIBS carries
-  oneAPI 2026.1 first, from the explicit BLAS_LIBRARIES/LAPACK_LIBRARIES, and
-  then Debian's intel-mkl 2020.4.304 behind it as SuiteSparse's own BLAS
-  dependency -- two more threading layers and a second MKL version. It works
-  today only because oneAPI comes first in the link order and its rpath is baked
-  in, which is an ordering accident and not a configuration. Repointing
-  SuiteSparse's BLAS at oneAPI would settle it and has not been done.
-
-  Three hypotheses were tested against the OLD failure and are all dead, so do
+  THREE HYPOTHESES WERE TESTED AGAINST THE OLD FAILURE AND ARE ALL DEAD, so do
   not re-test them if a new one appears: a METIS symbol collision with MFEM's
   -lmetis; an interaction with MFEM's link line; and something particular to
-  meq's matrix (a plain 5-point Laplacian failed identically).
-
-
+  meq's matrix -- a plain 5-point Laplacian failed identically.
 ================================================================================
-Performance: profile first, then decide which of MFEM's backends can apply
-Raised 2026-08-26. The goal is to be fast enough that mesh resolution and
-polynomial degree are chosen for accuracy and not for patience.
+Performance: profile the inside of a solve, then decide which backend applies
+Raised 2026-08-26, rewritten 2026-09-01 against the threading campaign. The goal
+is to be fast enough that mesh resolution and polynomial degree are chosen for
+accuracy and not for patience.
 ================================================================================
 
-  NOTHING HAS EVER BEEN PROFILED. Every number below is a structural reading of
-  the build or a measurement taken for some other purpose, and the first task is
-  to replace them with a profile of a representative solve. Choosing a backend
-  before knowing where the time goes is how a week disappears into a 3% win.
+  MUCH OF THIS ENTRY WAS SUPERSEDED BY THE 2026-08-30 THREADING WORK and has
+  been cut. CLAUDE.md's "Threading, measured" and "What to do, in order of
+  value" carry the numbers. What is kept here is what is still open, and the two
+  arguments that decide the rest.
 
-  WHAT IS ALREADY KNOWN, from measurements taken for other reasons:
+  WHAT IS STILL OPEN, in order of value.
 
-  1. The global trace solve. UMFPACK with METIS ordering, measured at 91 ms for
-     n = 12544 and 443 ms for n = 49664 (k = 3). Of every factorisation, 22-24%
-     was the SYMBOLIC phase, which UMFPackSolver::SetOperator recomputed on every
-     Newton step for a sparsity pattern that never changes.
-     ~~Planned in DIRECT-SOLVER-SYMBOLIC-REUSE.md~~ -- LANDED. SetReuseSymbolic()
-     is on for the Newton and Picard paths and off deliberately on the linear
-     one, and theSymbolicAnalysisIsReusedAcrossNewtonSteps asserts one analysis
-     against one factorisation per iteration -- a count and not a timing, and the
-     only thing that could notice the reuse lapsing. That was the single cheapest
-     win identified and it is spent.
+  1. GET ComputeH()'s ELEMENT-LOCAL DENSE LU OFF THREADED MKL. The largest item
+     by a wide margin, and it was invisible until the link line was fixed. The
+     per-element LUFactors go through LAPACK, so through MKL, on blocks of order
+     10-30; at k = 3 that is FORTY TIMES slower with MKL threading on. meq works
+     around it with MKL_NUM_THREADS=1 everywhere, which in turn puts PARDISO's
+     threaded advantage out of reach, MKL_NUM_THREADS being process-wide. Two
+     routes and neither is done: mkl_set_num_threads_local() around the trace
+     solve, or LocalFactorMode::Batched for the local factorisations.
 
-  2. The element-local solves, which dominate the STIFF cases rather than the
-     easy ones. On section 4.2 at k = 1, h = 0.05 the outer iteration count went
-     42 -> 36 -> 25 for LSsolveType Newton -> LBFGS -> LBB, each outer iteration
-     carrying one local solve per element. setLocalSolver() exposes the choice;
-     which is fastest has been measured only on that one case.
+  2. PROFILE THE INSIDE OF A NEWTON SOLVE. tests/performance/ measures the
+     assembly-versus-trace-solve split across two thread axes and four sizes, so
+     "nothing has ever been profiled" is no longer true at that granularity.
+     What is missing is the breakdown WITHIN a solve -- residual against
+     gradient against recovery -- and the reconstruction. perf, or
+     MFEM_USE_CALIPER.
 
-  3. PARDISO is about 3.8x on the setup and 2-3x on the solve from 9k trace dofs
-     up, and it RUNS now -- the n ~ 3000 ceiling was Debian's intel-mkl and is
-     gone against oneAPI 2026.1. Its own TODO entry above, where what is left is
-     the reproducibility question and a run-time switch.
+  3. ELEMENT-LOCAL PARALLELISM, WHICH IS UPSTREAM'S.
+     ../mfem-hdg-dev/doc/HDG-ELEMENT-LOCAL-PARALLELISM.md maps all twelve
+     sequential element loops in darcyhybridization.cpp, separates the two
+     hazards -- loop-hoisted scratch, which is easy, from write conflicts on
+     trace dofs shared between adjacent elements, which is not -- and names two
+     pieces MFEM already has: Mesh::GetElementColoring for a conflict-free
+     schedule, and linalg/batched/, whose BatchedLinAlg::LUFactor and LUSolve
+     carry native, cuBLAS and MAGMA backends. InvertA() collapses to a single
+     batched call with no data movement, DenseTensor's non-owning constructor
+     matching the existing offset layout.
 
-  WHAT MFEM'S PERFORMANCE BACKENDS CAN AND CANNOT DO HERE, and the answer is
-  mostly "not yet", which is worth knowing before anyone gets excited:
+     NPC IS WHAT MAKES THAT A GOOD BATCHED WORKLOAD, and it is meq's default
+     now: the per-element work is a LINEAR solve of fixed size rather than a
+     nonlinear one of unpredictable iteration count, and
+     GetNumLocalNLIterations() reads exactly zero. Design the batching against
+     that, not against the nonlinear local solves this entry was first written
+     for.
 
-  * PARTIAL ASSEMBLY IS NOT IMPLEMENTED FOR THE HDG INTEGRATORS. DarcyForm has
-    SetAssemblyLevel() and forwards it to every sub-form, so the interface is
-    there -- but fem/darcy/bilininteg_hdg.cpp and darcyhybridization.cpp contain
-    ZERO AssemblePA or AddMultPA methods. HDGDiffusionIntegrator,
-    NormalTraceJumpIntegrator and the rest are FULL-assembly only. Asking for
-    AssemblyLevel::PARTIAL today gets an unimplemented path, not a fast one.
-    Writing those kernels is real work and belongs upstream, not in meq.
+     PART OF IT HAS LANDED, and it is worth about 1.2x sometimes and a 1.8x LOSS
+     otherwise. DarcyHybridization::SetAssemblyMode(Threaded), reached through
+     meq's setAssemblyMode(), threads the element-local half of ComputeH()
+     bit-for-bit against serial. It is NOT the default: HighBetaConvergence,
+     which assembles a small system hundreds of times inside a bordered Newton,
+     goes 21.5 s -> 39 s with it on. Mesh size does not separate the good case
+     from the bad one; how OFTEN assembly is called does, and the solver cannot
+     know which caller it has.
 
-  * PARTIAL ASSEMBLY WANTS TENSOR-PRODUCT ELEMENTS AND meq USES TRIANGLES. The
-    performance case for PA is sum factorisation, which needs quads in 2D. meq
-    meshes are triangles throughout -- Mesh::MakeCartesian2D with
-    Element::TRIANGLE -- because that is what the GS papers use and what the
-    extension technique's transfer paths were measured on. A serious PA effort
-    would have to answer the quad question first, and that is a discretisation
-    decision with its own convergence consequences, not a build flag.
+  4. PARDISO'S REPRODUCIBILITY -- the entry above.
 
-  * THE INSTALL HAS NO DEVICE BACKEND. Re-checked 2026-08-29: ../mfem/install is
-    built with MFEM_USE_CUDA, RAJA, OCCA, CEED and SIMD all NO. OPENMP is now
-    YES, which it was not when this was written -- so the host-threading half of
-    the picture is a flag away rather than a rebuild, though see the thread
-    safety note below before using it. Enabling the device backends is a rebuild,
-    but see the two points above: without PA kernels for the HDG integrators
-    there is nothing for a device to run, and mfem::Device would accelerate the
-    parts of the assembly that are not the bottleneck.
+  5. MEASURE LSsolveType ACROSS THE SUITE rather than on one case. LOWER VALUE
+     THAN IT WAS, and possibly zero: under NPC there is no element-local
+     nonlinear solve at all, so the local solver type, its preconditioner, its
+     iteration cap and its tolerances are all inert. It bears only on
+     CondenseThenLinearise, which is the backup. Measured once, on section 4.2
+     at k = 1, h = 0.05: Newton 42 outer iterations, LBFGS 36, LBB 25.
 
-  * meq IS SERIAL BY DESIGN. MFEM_USE_MPI = NO, and CLAUDE.md records why. A
-    parallel meq is a different project with its own tree (../mfem-hdg-dev-par);
-    do not conflate "fast" with "parallel" here.
+  TWO ARGUMENTS THAT DECIDE THE REST, AND NEITHER HAS CHANGED.
 
-  ON-NODE PARALLELISM OVER THE ELEMENT-LOCAL WORK, which is the biggest
-  structural opportunity and is entirely unexploited.
+  PARTIAL ASSEMBLY WANTS TENSOR-PRODUCT ELEMENTS AND meq USES TRIANGLES. There
+  are no AssemblePA or AddMultPA methods anywhere in fem/darcy/, so asking for
+  AssemblyLevel::PARTIAL gets an unimplemented path rather than a fast one, and
+  writing those kernels is upstream work. But the performance case for PA is sum
+  factorisation, which wants quads in 2D, and meq meshes are triangles
+  throughout because that is what the GS papers use and what the extension
+  technique's transfer paths were measured on. A serious PA effort has to answer
+  the quad question first, and that is a discretisation decision with its own
+  convergence consequences, not a build flag.
 
-  Every element's elimination is independent of every other -- that is what
-  static condensation IS -- so the loops are embarrassingly parallel. They are
-  also, today, entirely sequential: fem/darcy/darcyhybridization.cpp has twelve
-  `for ( int el = ... )` loops and ZERO mfem::forall, MFEM_FORALL or #pragma omp
-  between them. On the stiff sources this is where the time goes, since each
-  outer iteration runs one non-linear solve per element (see CLAUDE.md, "Why
-  meq's Newton struggles"), and on the Picard paths one linear solve per element
-  per iteration.
+  THIS MACHINE CAN DEVELOP A DEVICE PATH AND MUST NOT DECIDE IT. MFEM_USE_CUDA
+  and MFEM_USE_CUDSS are both YES now, so the whole path can be written and
+  debugged locally -- and cuDSS has been: mfem::CuDSSSolver agrees with UMFPACK
+  to 3.5e-14 from 9,408 to 148,224 trace dofs. Its TIMINGS here vary by a factor
+  of THIRTY run to run at fixed size, because WSL2 shares the GPU with the
+  Windows host and a consumer card runs FP64 at 1/32 of FP32 where a datacentre
+  part runs it at about 1/2. That is two orders of magnitude in the ratio and it
+  INVERTS the conclusion: a cuDSS timing that loses to UMFPACK here says nothing
+  about an A100 or an MI250X. Correctness answers taken here are portable;
+  timings are not, and a local timing must never be the reason a device path is
+  abandoned. TIME IT ON A DATACENTRE PART.
 
-  It is the natural GPU-offload candidate too: thousands of independent dense
-  problems of 9x9 to 30x30, which is a batched-dense workload and exactly what
-  cuBLAS's batched LU is for.
+  (Also learned, and now guarded in the harness: a device timing taken without
+  cudaDeviceSynchronize() reads 2.0e-04 s for a 148k-unknown factorisation --
+  four orders out, and plausible enough to publish.)
 
-  TWO THINGS BLOCK A NAIVE ATTEMPT, and both are worth knowing before starting:
+  WHAT MFEM WRAPS FOR THE TRACE SYSTEM, and whether it applies here. cuDSS is
+  the best fit and is already run: serial constructor, so no MPI, and
+  SetReorderingReuse. MKL PARDISO is the only other one meq has run. AmgX wants
+  a symmetric definite operator, which the trace matrix is ONLY on the fitted
+  path -- on the extension path its relative asymmetry is 0.54 -- so it is a
+  fitted-path option at best, and serial MFEM has no AMG anyway. SuperLU_DIST,
+  MUMPS and STRUMPACK are distributed solvers whose point is MPI, and meq is
+  serial by design.
 
-  * THE INTEGRATORS ARE NOT THREAD SAFE, and say so.
-    fem/darcy/bilininteg_hdg.hpp:215 carries `// these are not thread-safe!`
-    over the scratch Vectors -- tr_shape, shape1, shape2, vu, nor, nh, ni and
-    the rest are members reused across calls. An OpenMP loop over elements would
-    race on them. Fixing that means either per-thread scratch or making the
-    integrators stateless, and it is MFEM's to do.
-  * The local solve reaches DenseMatrix, LUFactors and DenseMatrixInverse, which
-    are host code. mfem::forall would need device-capable equivalents -- MFEM has
-    batched dense kernels, but the darcy local path does not use them.
-
-  So this is an upstream capability, not a flag, and it is probably the largest
-  single win available. WRITTEN UP:
-  ../mfem-hdg-dev/doc/HDG-ELEMENT-LOCAL-PARALLELISM.md, which maps all twelve
-  loops, separates the two hazards (loop-hoisted scratch, which is easy, from
-  genuine write conflicts on trace dofs shared between adjacent elements, which
-  is not), and notes two pieces MFEM already has: Mesh::GetElementColoring for a
-  conflict-free schedule, and linalg/batched/ -- BatchedLinAlg::LUFactor and
-  LUSolve with native, cuBLAS and MAGMA backends. InvertA() collapses to a single
-  batched call with no data movement at all, DenseTensor's non-owning constructor
-  matching the existing offset layout and the pivot conventions already agreeing.
-
-  That plan also records the interaction with linearise-then-condense: under NPC's
-  ordering the per-element work becomes a LINEAR solve of fixed size instead of a
-  nonlinear one of unpredictable cost, which is a far better batched and device
-  workload.
-
-  LINEARISE-THEN-CONDENSE HAS SINCE LANDED, so the prerequisite this entry named
-  is met. It is reachable as
-  GradShafranovSolver::setNonlinearOrdering( LineariseThenCondense ) and
-  GetNumLocalNLIterations() reads zero under it, which is what says the ordering
-  really took effect rather than merely being selectable.
-
-  IT DID NOT DO THE JOB IT WAS ORIGINALLY PURSUED FOR, AND THAT VERDICT HAS NOW
-  BEEN REVISED TWICE, SO READ IT CAREFULLY. It was expected to rescue the stiff
-  sources; for a while it was strictly WORSE on every one of them; and since
-  MFEM's ad04da3749 (2026-08-31) it solves all but one of them -- section 4.2 at
-  k = 2, n = 16 in 8 iterations against condense-first's 11, with only section
-  4.5 at k = 2, n = 16 still failing. The cause was that the linearisation point
-  took a fixed two frozen-Jacobian corrections, so the correction count WAS the
-  gradient's accuracy. It is not a wall-clock win even so: the correction loop
-  costs 4.2 to 12.1 corrections per element per linearisation and
-  PedestalConvergence went 351 s to 572 s. None of that weakens this item. What it buys THIS work is the
-  fixed-size linear local solve, and it still buys it. So the batched plan should
-  be written against that, not against nonlinear solves of unpredictable
-  iteration count: Picard is a bridge to Newton, not the algorithm meq should
-  ship on, and designing the batching around it would build in a compromise meq
-  intends to remove.
-
-  A THREADED OR OFFLOADED SOLVER FOR THE FACE-COUPLED MATRIX.
-
-  UMFPACK is sequential apart from its BLAS calls, and the trace system is the
-  other half of the cost. What MFEM already wraps, and whether it applies here:
-
-  * cuDSS -- linalg/cudss.{hpp,cpp}, MFEM_USE_CUDSS. NVIDIA's direct sparse
-    solver, and the best fit on paper: CuDSSSolver has a SERIAL constructor, so
-    no MPI is dragged in, and it already carries SetReorderingReuse( bool ),
-    "reuse of the symbolic factorization for multiple operators" -- the exact
-    feature UMFPackSolver lacks and that
-    ../mfem-hdg-dev/doc/DIRECT-SOLVER-SYMBOLIC-REUSE.md asks for. There is
-    in-tree precedent for that API, which is worth citing in that plan.
-  * AmgX -- linalg/amgxsolver.{hpp,cpp}, MFEM_USE_AMGX. GPU AMG. Its serial
-    constructor exists but the class is MPI-centric, and AMG wants a symmetric
-    definite operator, which the trace matrix is ONLY on the fitted path -- on
-    the extension path it is unsymmetric with relative asymmetry 0.54, see
-    CLAUDE.md. So AmgX is a fitted-path option at best.
-  * MKL PARDISO -- threaded, 2-3x on meq's matrices, and no longer broken at
-    size: MFEM_USE_MKL_PARDISO is YES in the install and PardisoSolver agrees
-    with UMFPACK to 1e-14 at 28,032 trace dofs. Its own TODO entry above. It is
-    the only one of these four that meq has actually run.
-  * SuperLU_DIST, MUMPS, STRUMPACK -- MFEM wraps all three, and all three are
-    distributed solvers whose point is MPI. Wrong tool for a serial code.
-
-  THIS MACHINE CAN DEVELOP IT BUT MUST NOT DECIDE IT.
-
-  There is a GPU here -- an RTX 2070 SUPER, 8 GB, with CUDA 13.3 at
-  /usr/local/cuda -- so MFEM_USE_CUDA and MFEM_USE_CUDSS are a rebuild away and
-  the whole path can be written and debugged locally. Use it for that.
-
-  DO NOT USE IT TO DECIDE WHETHER GPU OFFLOAD IS WORTH IT, because it is not a
-  representative part and the way it is unrepresentative is the exact axis that
-  matters here. MFEM is built MFEM_USE_DOUBLE, and consumer NVIDIA cards from
-  Turing onwards deliberately run FP64 at 1/32 or 1/64 of their FP32 rate, where
-  the datacentre parts run it at about 1/2. That is not a small difference in
-  degree: it is roughly two orders of magnitude in the ratio, and it inverts the
-  conclusion. A cuDSS timing on the 2070 SUPER that loses to UMFPACK says
-  nothing whatever about an A100, an H100 or an MI250X, on which the same code
-  would be tens of times faster in double precision.
-
-  (The specific FP64 rates are worth re-checking against vendor tables before
-  quoting them anywhere; the 1/32-versus-1/2 split is the robust part and is
-  what the argument rests on.)
-
-  SO THE LOCAL GPU IS A CORRECTNESS AND DEVELOPMENT PLATFORM. Run it to answer:
-  does the batched local path give the same answers as the host one? does cuDSS
-  agree with UMFPACK to round-off? does the code survive a device build at all?
-  Those are portable answers. Timings are not, and a local timing should never
-  be the reason a GPU path is abandoned.
-
-  It follows that the element-local batched work is the more promising of the
-  two even here, since its arithmetic profile is much better suited to a GPU
-  than a sparse direct factorisation is -- and it is the part with no host-side
-  alternative once the meshes get large.
-
-  SO THE ORDER IS:
-
-  UPDATED 2026-08-30. tests/performance/ now exists -- TraceSolverScaling and
-  scan.sh -- so "NOTHING HAS EVER BEEN PROFILED" is no longer true of the
-  assembly/trace-solve split, though it is still true of a whole solve.
-
-  1. ~~Profile a representative solve~~ -- PARTLY DONE. The assembly-vs-trace
-     split is measured across two thread axes and four sizes; what is still
-     missing is a breakdown *inside* a Newton solve (residual vs gradient vs
-     recovery) and the reconstruction. perf or MFEM_USE_CALIPER still wanted
-     for that.
-  2. ~~Take the symbolic reuse~~ -- DONE.
-  3. ~~Thread the element-local loops~~ -- LANDED UPSTREAM as
-     DarcyHybridization::SetAssemblyMode(Threaded), reached through meq's
-     setAssemblyMode(). Bit-for-bit against serial, asserted in SolverContract.
-     **It was called "the largest structural win" and it is worth about 1.2x,
-     sometimes, and a 1.8x LOSS otherwise**: MFEM measures 2.09x on the assembly
-     alone, meq sees 1.15-1.33x on all of prepare(), and the serial scatter into
-     the trace matrix is the ceiling and cannot be threaded. It is NOT the
-     default -- HighBetaConvergence, which assembles a small system hundreds of
-     times inside a bordered Newton, goes 21.5 s -> 39 s with it on. Mesh size
-     does not separate the good case from the bad one; how often assembly is
-     called does, and the solver cannot know that. Opt-in.
-  4. **NEW AND FIRST: get the element-local dense LU off threaded MKL.** This is
-     now the largest item by a wide margin and it was invisible until the link
-     line was fixed. ComputeH()'s per-element LUFactors go through LAPACK, so
-     through MKL, on blocks of order 10-30; at k = 3 that is FORTY TIMES slower
-     with MKL threading on. meq works around it with MKL_NUM_THREADS=1
-     everywhere, which in turn makes PARDISO's 2.8x unreachable. Two routes:
-     mkl_set_num_threads_local() around the trace solve, or
-     LocalFactorMode::Batched for the local factorisations.
-  5. Measure LSsolveType properly across the benchmark suite rather than on one
-     case, and set the default from that. LOWER VALUE THAN IT WAS, but not zero,
-     and the distinction is finer than an earlier version of this item claimed:
-     under LineariseThenCondense the solver TYPE and PRECONDITIONER really are
-     inert -- there is no local nonlinear solve to pick a method for -- but the
-     ITERATION CAP AND TOLERANCES are not. They bound the loop that establishes
-     the linearisation point, and MFEM's doxygen is blunt about what that costs:
-     GetGradient() is the Schur complement of the Jacobian at the retained
-     fields, so it is the derivative of Mult() only as far as those fields solve
-     the local problem. A fixed budget of two corrections shipped upstream for a
-     while and put the gradient 3e-04 out on a stiff source THAT STILL
-     CONVERGED. meq asks for 100 iterations at rtol 1e-12, so it is bounded by
-     the tolerance and not by the cap -- worth re-checking if either moves.
-  6. ~~cuDSS on the trace system, locally FOR CORRECTNESS~~ -- DONE, and the
-     answer is exactly the split this item predicted. MFEM_USE_CUDSS is on,
-     mfem::CuDSSSolver agrees with UMFPACK to 3.5e-14 from 9,408 to 148,224
-     trace dofs, cold and with SetReorderingReuse. **Its timings here are not
-     reproducible** -- a factor of THIRTY run to run at fixed size, because
-     WSL2 shares the GPU with the Windows host (nvidia-smi reports 7.5 of 8 GB
-     used with no compute processes) and the card runs FP64 at 1/32. So the
-     remaining half of this item stands unchanged: TIME IT ON A DATACENTRE
-     PART. Nothing measured here argues against cuDSS; it argues that this
-     machine cannot be asked.
-     Also learned, and now guarded in the harness: a device timing without
-     cudaDeviceSynchronize() reads 2.0e-04 s for a 148k-unknown factorisation.
-  7. Only then ask whether PA and a device for the ASSEMBLY are worth the
-     discretisation change they would demand.
-
-  AND A CHEAP CHECK FIRST: confirm the release build is what everyone thinks it
-  is. meq builds -O3 -DNDEBUG; MFEM's install carries MFEM_USE_MEMALLOC = YES,
-  whose stack-based allocator is a help or a hindrance depending on the access
-  pattern and has never been measured either way here.
+  AND A CHEAP CHECK NOBODY HAS DONE: confirm the release build is what everyone
+  thinks it is. meq builds -O3 -DNDEBUG; MFEM's install carries
+  MFEM_USE_MEMALLOC = YES, whose stack-based allocator is a help or a hindrance
+  depending on the access pattern and has never been measured either way here.

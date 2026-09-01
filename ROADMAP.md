@@ -10,58 +10,32 @@ first, what waits on what, and what is deliberately not being done yet.
 ## Nothing is red
 
 **`HighBetaConvergence` was the one failing test and it is green.** Profiles
-specified in NORMALISED flux — `Ψ = (ψ − ψ_bnd)/(ψ_ax − ψ_bnd)`, which is how
-`refs/GourdainContour.pdf` §V eq (39) poses them and how every equilibrium code
-does — need `ψ_ax` inside the residual, where the Jacobian can see the non-local
-terms it contributes. It is now there: `meq::NormalisedSource` is the interface,
-and `GradShafranovSolver::setSource( NormalisedSource &, double )` carries `ψ_ax`
-as an unknown and closes the pair by a **bordered Newton**, one factorisation and
-two backsolves per step.
+specified in NORMALISED flux need `ψ_ax` inside the residual, where the Jacobian
+can see the non-local terms it contributes;
+`meq::NormalisedSource` is the interface and
+`setSource( NormalisedSource &, double )` closes the pair by a **bordered
+Newton**, one factorisation and two backsolves per step. Under NPC two of the
+three border quantities are exact rather than differenced.
 
-Each of the cheaper options was measured and killed on the way, and each
-measurement is worth not repeating. With `ψ_ax` **fixed** the profile is inert
-(amplitudes 1 and 512 give an identical solution, because the solve only ever
-reaches `Ψ = 0.0013`). With `ψ_ax` iterated **outside** the solver the fixed point
-is degenerate, and mapping the outer iteration afterwards says why: it has a
-**pole beside its own fixed point** — at `ν = 2`, `A = 1` the fixed point is
-0.3059 and the pole is at 0.2996. And at a *fixed* `ψ_ax` the equation has a
-small solution as well as the equilibrium, so the run needs a starting guess of
-about the right height; that is part of the problem statement, not an
-optimisation.
-
-The test that can *see* the missing terms is `Normalisation::Decoupled`: the same
-solver with `∂R/∂ψ_ax`, `∂(max ψ_h)/∂λ` and `∂(max ψ_h)/∂ψ_ax` zeroed and
-everything else identical. Coupled reaches 4.4e-15 in four iterations; decoupled
-is still at 8.24e-2 after fifteen, having started at 8.31e-2. Full detail in
-`CLAUDE.md` under *Newton, and the obligation it creates*.
+The account of it is in `CLAUDE.md` under *Newton, and the obligation it
+creates*, including the three cheaper answers that were measured and killed on
+the way — a fixed `ψ_ax` makes the profile inert, an outer iteration on
+`ψ_ax ← max ψ` has a pole beside its own fixed point, and at fixed `ψ_ax` there
+is a second solution that is not the equilibrium. The test that can *see* the
+missing terms is `Normalisation::Decoupled`, which does not converge slowly so
+much as not move at all: 8.31e-2 to 8.24e-2 in fifteen iterations, against
+4.4e-15 in four.
 
 **What this unblocks is free boundary**, where `ψ_ax` and `ψ_bnd` are both
-unknowns: `ψ_bnd` is a second border row and column of exactly the same shape,
-and `meq::NormalisedSource` is where it goes.
+unknowns: `ψ_bnd` is a second border row and column of exactly the same shape.
 
-**What is left over from it**, and neither is on the critical path:
+**What is left over from it**, and neither is on the critical path: the
+production source `meq::NormalisedMHDSource` is **not reachable from a TOML
+file** — item 1 — and the bordered path accepts `Globalisation::None` only,
+refusing the others loudly rather than quietly doing something else.
 
-* `meq::NormalisedMHDSource` — the production source built on two `meq::Profile`s
-  in normalised flux — is written and unit tested but is **not reachable from a
-  TOML file**. Wiring it through `Config` and `SourceFactory` is driver work and
-  belongs with item 1.
-* The bordered path is `Globalisation::None` only, and refuses the others loudly
-  rather than quietly doing something else — the KINSOL paths drive a residual
-  of their own and the Picard ones build no Jacobian to border. *(2026-08-31: the
-  ordering named below is deleted; under `NonlinearOrdering::NPC` the border row
-  is exactly `−e_j` and the corner exactly `1`, neither differenced.)* **The ordering
-  guard beside it is gone**: it was written from `darcyhybridization.hpp`'s
-  summary rather than from the code, and both orderings reach the same `ψ_ax` to
-  every digit printed. `GradShafranov.cpp` carries the note where the guard was.
-
-**And it turned up an MFEM finding that is not filed anywhere**, which is item 5
-below: `DarcyHybridization` captures the element-local Newton's initial guess at
-`FormLinearSystem()` time and never refreshes it, so every local solve in every
-later residual evaluation restarts from it however far the trace has travelled.
-That is a cost on an ordinary Newton path and a *correctness* problem for
-anything that differentiates the residual by differencing it. meq works around
-it; nobody has been told.
-
+**And it turned up an MFEM finding that is still not filed anywhere**, which is
+item 5.
 ## So what is next
 
 With nothing red, the order is what it was, plus a second planned physics item:
@@ -142,17 +116,21 @@ write requests into its `doc/`, never branch, commit, check out or build there.
 meq owns `src/`, `tests/` and `apps/`.
 
 **Every request meq has filed except one is landed in the code meq builds
-against**, which is the only test of "landed" meq can apply:
+against**, which is the only test of "landed" meq can apply. **Ask `git` which
+documents exist, not `ls`**: all three open ones live on `gf-hdg-linearise-first`
+alone, so a listing taken while that tree sits on `gf-hdg-dev` shows an almost
+empty `doc/` and means nothing. `CLAUDE.md` has the branch-by-branch table and
+the mistake that produced it.
 
 | filed | state |
 |---|---|
-| `HDG-LINEARISE-THEN-CONDENSE.md` | landed, then **retired upstream** (`d891ac4302`) with the mode itself. `setNonlinearOrdering()` is gone; meq's default is `NPC` |
-| `DIRECT-SOLVER-SYMBOLIC-REUSE.md` | landed — `SetReuseSymbolic()` is on — and **retired upstream** (`2a50119ba1`) |
+| `HDG-LINEARISE-THEN-CONDENSE.md` | landed, then **retired** with the mode itself — on backup refs only now. `setNonlinearOrdering()` is gone; meq's default is `NPC` |
+| `DIRECT-SOLVER-SYMBOLIC-REUSE.md` | landed — `SetReuseSymbolic()` is on — and **retired**, on no branch at all |
 | `HDG-NPC-GLOBALISATION-FROM-MEQ.md` | **filed 2026-08-31 and answered the same day** (`af82d42b14`). Not a defect report: two §6 claims withdrawn on meq's evidence, meq's own account of the mechanism corrected, and a defect found in the reference implementation meq had copied |
-| `HDG-DEFECTS-FROM-MEQ.md` | retired by that tree. Three of its four are verifiably closed — one fixed, one fixed, one withdrawn as not a defect; the fourth, `ComputeHDGFaceEnergy()` ignoring an installed stabilisation, meq has not re-measured and does not use. `CLAUDE.md` has the breakdown |
-| `HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md` | **landed and retired** — the fix is *"The postprocessing closes on the element average, always"*, and the document is gone from that tree's `doc/` |
-| `HDG-ELEMENT-LOCAL-PARALLELISM.md` | still there, and meq has seen no change |
-| `HDG-BEM-COUPLING-FROM-MEQ.md` | **filed 2026-08-29**, for free boundary — see item 8 |
+| `HDG-DEFECTS-FROM-MEQ.md` | **still on `gf-hdg-dev` and `gf-hdg-subdomains-dev`**, deleted only on the symbolic-reuse line — which is why that merge conflicts modify/delete. Three of its four are verifiably closed — one fixed, one fixed, one withdrawn as not a defect; the fourth, `ComputeHDGFaceEnergy()` ignoring an installed stabilisation, meq has not re-measured and does not use. `CLAUDE.md` has the breakdown |
+| `HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md` | **landed and retired** — the fix is *"The postprocessing closes on the element average, always"*, and the document is on no branch |
+| `HDG-ELEMENT-LOCAL-PARALLELISM.md` | open, on `gf-hdg-linearise-first`, and meq has seen no change |
+| `HDG-BEM-COUPLING-FROM-MEQ.md` | **filed 2026-08-29**, for free boundary — open, on `gf-hdg-linearise-first`. See item 8 |
 
 The reconstruction one is the interesting entry, because it changed what the
 driver does: `ψ*` is a post-processing on **every** element now, so the adaptive
@@ -210,58 +188,25 @@ A standing cost of the arrangement, and it falls on meq's side.
 
 ## 1. Finish the driver — meq
 
-`DRIVER-PLAN.md` §3–5: **7c output done, 7e the driver done.** `meq config.toml`
-parses, solves, prints a residual history and writes `.mesh`, `_psi.gf`,
-`_grad_psi.gf` and the `(R, Z)` NetCDF file, with exit codes 0/1/2/3.
+**`DRIVER-PLAN.md` §3–5 is done bar two bullets.** `meq config.toml` parses,
+solves and writes the equilibrium three times over — `.mesh` plus `.gf`, VTK at
+the polynomial degree of the solve, and `ψ` and **B** on a uniform `(R, Z)` grid
+— with exit codes 0/1/2/3. The curved boundary works through it, the adaptive
+loop works through it on both paths, and the non-linear ladder is in: Newton,
+falling back to `PicardThenNewton` on **observed** failure. Every one of those
+is pinned against the library rather than against a closed form, for the reason
+recorded beside `examples/soloviev-nstx.toml`. `CLAUDE.md` has the numbers.
 
-What is left, in the order it is worth doing:
+**What is left, in the order it is worth doing:**
 
-* ~~**Wire the extension path.**~~ **Done.** `[boundary.shape]` builds a
-  `BoundaryShape`, marks `D_h` out of the background mesh, finds `Γ_h` and
-  hands a `VertexConePath` to `setExtension()`. `examples/miller-curved.toml`
-  runs it: 450 of 2560 background elements inside, 0 paths widened.
-  `theDriverSolvesOnACurvedBoundary` pins it against the library at 1.6e-16 —
-  and separately against imposing *zero* on `Γ_h`, at 2.7e-1, because an
-  extension that was never applied would converge quietly to the wrong answer.
-* ~~**Wire the adaptive loop.**~~ **Done.** `[adaptivity] Enabled = true` runs
-  solve → post-process → estimate → mark → refine, stopping at `TargetError` or
-  `MaxIterations` and saying which. On the curved path it uses
-  `meq::AdaptiveDomain`, so the companion mesh keeps `dist(Γ_h, Γ)/h_loc` from
-  doubling every cycle, and it calls `setTransferredBoundary()` automatically and
-  logs that it did. `theDriverRunsTheAdaptiveLoop` pins it against the library at
-  1.653e-16 and asserts separately that it refined, refined *adaptively*, brought
-  η down, and kept assumption P.1.
-
-  **`examples/miller-adaptive.toml`, re-measured 2026-08-29** now that the loop
-  is on `ψ*` rather than on the raw potential:
-
-  | cycle | elements | trace | marked | wide | η |
-  |---|---|---|---|---|---|
-  | 0 | 97 | 480 | 37 | 0 | 4.7348e-04 |
-  | 1 | 254 | 1194 | 18 | 0 | 2.4729e-04 |
-  | 2 | 342 | 1593 | 18 | 0 | 1.0687e-04 |
-  | 3 | 449 | 2097 | 0 | 0 | 6.8664e-05 |
-
-  The numbers this file used to carry — η 2.75e-3 → 4.77e-4 over 97 → 1069
-  elements — were the **degraded** estimator, built on `ψ_h` because MFEM's
-  reconstruction could not be trusted. Same four cycles now reach 6.87e-5 on 449
-  elements, which is what the extra order buys.
-
-  **It cost a prerequisite that was filed as an independent item, and that is
-  the transferable part.** The estimator needs `ψ*` — four of eq. (20)'s five
-  terms — and `postProcess()` refused the semi-linear path, which is the *only*
-  path the driver has. So item 3's `postProcess()` bullet was not optional and
-  not separate. See below for what measuring it turned up.
-
-* **The driver's non-linear ladder is in**: Newton, and on *observed* failure
-  `PicardThenNewton`, rebuilding the solver because a caught `ErrorException`
-  leaves one unusable. Reactive, never predictive.
 * **Wire `meq::NormalisedMHDSource` through `Config` and `SourceFactory`.** The
   solver takes `ψ_ax` as an unknown and the production source that needs it
   exists and is unit tested, but a TOML file cannot ask for either. That is the
   gap between "meq can compute a profile equilibrium" and "meq can be *told* to",
-  and it is small: a `[profiles] Normalised = true` and the `psi_ax` guess, which
-  is a required input on that path and not an optional one.
+  and it is small: a `[profiles] Normalised = true` and the `ψ_ax` guess, which
+  is a required input on that path and not an optional one. **It is now a
+  prerequisite for two things rather than one** — item 9's rotating source needs
+  the same plumbing, so this gets written once.
 * **7d, the interpolating warm start** — needs GSLIB, already enabled in
   `../mfem/install`. The exact restart (same mesh, same degree) is written. The
   acceptance measurement is the one `DRIVER-PLAN.md` §4 names: at `k = 3` the
@@ -269,112 +214,58 @@ What is left, in the order it is worth doing:
   about `h^{k+1}` against `h^2` — which is what justifies the dependency rather
   than asserting it.
 
-**The nonlinear path the driver ships:** Newton, falling back to
-`PicardThenNewton` on **observed** failure. A *reactive* ladder — never a
-predictive one. Nothing may be inferred from `F` about which solver to run,
-because nothing can be: the ratio `max|∂F/∂ψ|/λ₁` is computable black-box but the
-pedestal converges at 7 where the hole fails at 26, which is two points and not a
-threshold. **Continuation must not go in**, for the stronger reason that it has
-no black-box form at all — see item 7.
+**The nonlinear path the driver ships is reactive and must stay so.** Nothing
+may be inferred from `F` about which solver to run, because nothing can be: the
+ratio `max|∂F/∂ψ|/λ₁` is computable black-box but the pedestal converges at 7
+where the hole fails at 26, which is two points and not a threshold. A second
+candidate detector — the first Newton step making the residual worse — has since
+been measured and is *anti*-correlated. **Continuation must not go in** either,
+for the stronger reason that it has no black-box form at all; see item 7.
 
-**Prerequisite `MFEM_USE_EXCEPTIONS`: done.** `../mfem/install` is rebuilt with
-it, and §4.4 — which used to take the process down with SIGABRT — now returns a
-reported failure and an iteration count. Exit code 2 is implementable. No
-meq-side change was needed: `ErrorException` derives from `std::exception`.
-
+**The only thing the driver still refuses is `[boundary] Type = "exact"`**,
+which needs a closed form `meq::Source` does not carry. It exits 1 with an
+explanation rather than approximating.
 ## 2. ~~Symbolic factorisation reuse~~ — **done**
 
-`SetReuseSymbolic()` is on for the Newton path and for the Picard path, whose
-solver was hoisted to a member so it had something to reuse across its 122 to 290
-factorisations. Off deliberately on the linear path, which factorises once.
+`SetReuseSymbolic()` is on for the Newton and Picard paths and off deliberately
+on the linear one, which factorises once.
 `theSymbolicAnalysisIsReusedAcrossNewtonSteps` asserts one analysis against one
-factorisation per iteration — a count, not a timing, and the only thing that
+factorisation per iteration — a count and not a timing, and the only thing that
 could notice the reuse lapsing, since a lapse costs speed and nothing else.
 
 ## 3. Hygiene — meq, alongside the driver
 
-* ~~**Rewrite the pedestal tripwire.**~~ **Done.**
-  `pedestalConvergenceIsAResolutionThreshold` asserts the two cures — 9
-  iterations at `k = 1, n = 32`, 11 at `k = 2, n = 16`, against 42 at
-  `k = 1, n = 16` — and asserts the threshold as a *ratio*, which holds whichever
-  side the threaded-MKL rounding falls on. The knife-edge point is recorded and
-  deliberately not asserted on.
-* ~~**Re-run `everyNonlinearPathReachesTheSameExactSolution`**~~ **Done.** Four
-  paths now, all reaching L2 2.983495e-05 to every digit printed;
-  `PicardThenNewton` gets there in 2 Newton steps after Picard's walk. It also
-  turned up something worth keeping: that run emits 2164 element-local
-  non-convergence warnings where plain Newton on the same problem emits none, and
-  converges anyway.
-* ~~**Retire `postProcess()`'s refusal — but measure first.**~~ **Done, and
-  measuring first is what stopped it being wrong.** The rate on Example 5 is
-  `k+2` — 3.05, 4.05, 5.03 — so the lift works. But the refusal was *narrower*
-  than a blanket one should have been: with `∂F/∂ψ` identically zero the frozen
-  Jacobian vanishes, the local problem is singular again, and `ψ*` comes back at
-  8.98, 5.07, 6.90e11, 4.77 over four meshes against 3.8e-6 … 9.3e-10 for the
-  same problem solved linearly. **Finite at three meshes in four**, so a code
-  read would have passed it and so would a spot check.
+**Four of the six bullets that stood here are done**, and what they found is in
+`CLAUDE.md` rather than here: the pedestal tripwire now asserts the two
+refinement cures rather than a knife edge that threaded-MKL rounding decides;
+`everyNonlinearPathReachesTheSameExactSolution` runs four paths to the same L2;
+and `postProcess()`'s refusal is retired, which turned out to be the
+prerequisite for the adaptive loop rather than a separate task.
 
-  `postProcess()` now measures its own output — `‖ψ*‖/‖ψ_h‖` in `[0.5, 2.0]`,
-  0.9945–1.000000 measured on every working case against 26 upwards on every
-  broken one — and throws naming the cause. Filed for the MFEM tree as
-  `doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md`.
+**That last one is worth one paragraph, because it changed what the driver
+does.** The estimator needs `ψ*` in four of eq. (20)'s five terms, and MFEM's
+reconstruction was silently wrong **per element** wherever `∂F/∂ψ` vanishes — a
+pure Neumann problem whose mean-value regularisation was being skipped, so a
+singular matrix was factored. A whole-domain norm could not see it: at an
+eighth of the domain dead, individual elements were 20× wrong while the norm
+read 1.87. It is fixed upstream, unconditionally, as *"The postprocessing closes
+on the element average, always"*; the driver's loop is back on `ψ*` and reaches
+η = 6.87e-5 on 449 elements where the degraded estimator needed 1069 to reach
+4.77e-4. The test flipped from asserting the defect to asserting the behaviour
+and went green on its own, which is the testing stance working as intended.
 
-  **And then the mechanism turned out to be one flag test, which changed the
-  answer twice over.** The local post-processing problem is a *pure Neumann*
-  problem, singular by construction, and MFEM regularises it with a mean-value
-  constraint — correctly. That branch is skipped whenever `nl_src` is set, and
-  `nl_src` is set on the mere *presence* of a non-linear integrator rather than
-  on whether it contributed a non-singular block. Where `∂F/∂ψ` vanishes it
-  contributes nothing, the regularisation is skipped anyway, and a singular
-  matrix is factored. **A 1e-12 floor on `∂F/∂ψ` repairs it completely** —
-  7.565317 to 0.998525 — which is a perturbation incapable of moving a solution
-  and capable only of making a matrix invertible.
+**Two bullets are still open.**
 
-  **`nl_src` is per element, so this is not the special case it looked like.** At
-  an eighth of the domain dead — a tabulated profile with a flat segment —
-  individual elements are 20× wrong while the whole-domain norm is 1.87. Two
-  earlier meq-side responses were therefore both wrong and are reverted: a
-  `Source::dependsOnPsi()` flag routing linear sources to the linear path, which
-  dodges one instance and misses this one; and a runtime check inside
-  `postProcess()`, which is a standing defence against a dependency and which a
-  global norm cannot make reliably anyway.
-
-  **And it has since been fixed on the MFEM side, so this bullet closes.** The
-  request went in with line numbers as
-  `HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md`; the fix is *"The postprocessing
-  closes on the element average, always"* — unconditional, because the local
-  post-processing problem is a pure Neumann one by construction and there was
-  never anything to decide. Measured from meq's side, the case that read 20.3,
-  64.1 and 61.6 on dead elements now reads **1.0069**, against 1.0048 for
-  elements where `∂F/∂ψ` does not vanish at all.
-
-  Three consequences, all of them already in the tree:
-
-  * The driver's adaptive loop is **back on `ψ*`** rather than on
-    `Potential::Raw`. `Potential::Raw` stays as a documented option and is no
-    longer what the driver picks.
-  * The test flipped from asserting the defect to asserting the behaviour:
-    `theReconstructionIsWrongWhereTheJacobianVanishes` is gone and
-    `thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes` is what runs,
-    as a regression rather than a tripwire. That is the testing stance working
-    exactly as `CLAUDE.md` says it should — the red test was the record, and it
-    went green on the day the defect went away.
-  * The measurement that the defect never reached the solve stands and is worth
-    keeping: `ψ_h` and `q_h` agreed between the two paths to 1.6e-13 and 2.6e-13
-    over `k = 1…4` and three meshes, and post-processing left both
-    bit-identical. The forward local problem takes its potential block from the
-    HDG stabilisation on the interior faces, which never degenerates.
 * **Rebuild `η₅` on `TransferredDatumCoefficient`** instead of excluding those
   faces. `mfem::TransferredDatumCoefficient` exists now
-  (`fem/darcy/extension_hdg.hpp`), so the thing that blocked this is gone and the
-  work is meq's: on `Γ_h` the term currently compares `ψ*` against a trace pinned
-  to zero rather than the `φ_h` actually imposed, and `setTransferredBoundary()`
-  excludes those faces — **an omission, not a repair**, and the driver says so in
-  its own comment. It wants its own convergence measurement rather than a switch,
-  which is the only reason it is not a five-line change.
+  (`fem/darcy/extension_hdg.hpp`), so the blocker is gone and the work is
+  meq's: on `Γ_h` the term compares `ψ*` against a trace pinned to zero rather
+  than the `φ_h` actually imposed, and `setTransferredBoundary()` excludes those
+  faces — **an omission, not a repair**, and the driver says so in its own
+  comment. It wants its own convergence measurement rather than a switch, which
+  is the only reason it is not a five-line change.
 * **Rewrite `README.md`**, which still describes a project that did not exist.
   The oldest debt in the tree, and the one a new reader hits first.
-
 ## 4. Element-local parallelism — MFEM, outstanding
 
 `../mfem-hdg-dev/doc/HDG-ELEMENT-LOCAL-PARALLELISM.md`, still present in that
@@ -441,68 +332,38 @@ initial guess without re-forming the system — the obvious shape is
 and by this project's own rule it should be written only once somebody is sure
 the behaviour is settled rather than mid-change in that tree.
 
-## 6. PARDISO runs, and removing the link-line straddle cost 140x — meq
+## 6. Threaded MKL costs 140x, and PARDISO's scaling is out of reach — meq
 
-**RE-MEASURED 2026-08-30, AND THE HEADLINE CHANGED.** The straddle described
-below was fixed on the PARDISO side — MFEM's `MKL_PARDISO_LIBRARIES` pointed at
-Debian's `mkl_sequential` and now points at oneAPI's `mkl_gnu_thread` — and that
-correct change **exposed a 140x regression in the test suite**. The stray
-sequential layer had been making all of MKL sequential, which is why every
-timing this project ever recorded was fast.
+**The link-line straddle this item was about is FIXED** (2026-09-01: meq builds
+its own SuiteSparse, so exactly one MKL is loaded), **and fixing it exposed a
+140x regression in the suite.** The stray sequential layer had been making all
+of MKL sequential, which is why every timing this project recorded before
+2026-08-30 was fast.
 
-What threading MKL actually costs, measured with the columns separated:
+What threading MKL actually costs, with the columns separated:
 
 * **Not UMFPACK.** `UMFPackSolver::SetOperator` degrades about 40% across the
   whole thread range, never more.
 * **`ComputeH()`'s element-local dense LU**, through LAPACK, on blocks of order
-  10-30. `k = 2` untouched; **`k = 3` forty-fold worse** at two threads.
-* So `MKL_NUM_THREADS=1` is now set on every ctest. The suite ran 798 s against
-  2269 s on that fix; it is **490–540 s** today, the rest of which is the NPC
-  port deleting the element-local non-linear solves.
+  10–30. `k = 2` untouched; **`k = 3` forty-fold worse** at two threads.
+* So `MKL_NUM_THREADS=1` is on every ctest.
 
 **And that pins PARDISO's own scaling out of reach.** PARDISO beats UMFPACK
-1.50x on setup sequentially and 2.83x at 8-16 threads — but `MKL_NUM_THREADS` is
-process-wide, so buying that means paying 40x on assembly. **Making the trace
-solver selectable is therefore no longer the whole job**: it needs either
+1.50x on setup even sequentially and about 1.9x more at 8 threads — but
+`MKL_NUM_THREADS` is process-wide, so buying that means paying 40x on assembly.
+`setTraceSolver()` landed and is not the whole job: what is left is either
 `mkl_set_num_threads_local()` around the trace solve, or the element-local
-factorisation off threaded MKL (`LocalFactorMode::Batched`). Neither is done.
+factorisation off threaded MKL (`LocalFactorMode::Batched`). Neither is done,
+and it is item 0 of `CLAUDE.md`'s *What to do, in order of value*.
 
-`CLAUDE.md`'s *Threading, measured* has the tables. The rest of this item is the
-2026-08-29 state.
+**Two things settled and no longer worth an item.** PARDISO's `n ≈ 3000`
+ceiling was Debian's `intel-mkl` 2020.4.304 and nothing about the method; and
+the trace solver is a run-time choice, `setTraceSolver()` picking among
+`UMFPack`, `Pardiso` and `CuDSS`, with UMFPack still the default because
+oneMKL's licence is not everybody's to accept. `TODO`'s PARDISO entry carries
+the one question that is left, which is reproducibility under threading.
 
-## 6a. The 2026-08-29 measurement, superseded
-
-**The "does not run above `n ≈ 3000`" this file used to record was a verdict on
-Debian's `intel-mkl` 2020.4.304 and on nothing else.** Against oneAPI MKL 2026.1
-with `MFEM_USE_MKL_PARDISO=YES`, re-measured 2026-08-29, it runs at every size
-tried and agrees with UMFPACK throughout:
-
-| `k` | trace dofs | UMF setup / solve | PARDISO setup / solve | agreement |
-|---|---|---|---|---|
-| 2 | 9,408 | 0.0471 / 0.0048 | 0.0141 / 0.0020 | 3.7e-15 |
-| 3 | 28,032 | 0.2078 / 0.0254 | 0.0489 / 0.0088 | 1.2e-14 |
-
-`TraceSolverComparison` asserts only the **agreement**; the timings are printed,
-because PARDISO is threaded and a threaded timing on this machine is not a
-measurement about the code. Two things follow, neither urgent:
-
-* ~~**meq's solver still uses UMFPACK.**~~ **DONE 2026-08-31.**
-  `setTraceSolver()` chooses `UMFPack`, `Pardiso` or `CuDSS`;
-  `traceSolverAvailable()` reports what the build has; an unavailable choice
-  throws rather than substituting. Both paths keep shipping and **UMFPack stays
-  the default**, for exactly the reason this bullet gave — oneMKL's licence is
-  not everybody's to accept. What changed is that a caller who does have it gets
-  1.24x for one line.
-* ~~**`MFEM_EXT_LIBS` links oneAPI 2026.1 and Debian's 2020.4 MKL at once.**~~
-  **FIXED 2026-09-01, and the link line was only half of it.** Debian's
-  `libumfpack.so` carries a hard `NEEDED` on `libblas.so.3`, which on this
-  machine is a symlink to `libmkl_rt.so` — so Debian's MKL loaded at runtime
-  whatever the link line said, and editing the link line alone would have looked
-  like a fix. meq now builds **its own SuiteSparse** at `../suitesparse`, v7.12.2
-  against oneAPI. Verified three ways: `config.mk`, `ldd`, and `LD_DEBUG=libs`.
-  `MKL_THREADING_LAYER=GNU` is inert as a result and has been dropped everywhere.
-  `CLAUDE.md` carries the recipe and the three snags.
-
+`CLAUDE.md`'s *Threading, measured* has the tables.
 ## 7. §4.4, the current hole — a known answer that must stay out of the driver
 
 Solvable: adaptive continuation in the added term's amplitude walks `c₃` from 0
@@ -683,9 +544,10 @@ has settled what a rotating source's profile set looks like.
   coupling. `TODO` carries each with what has been established, and anisotropic
   pressure still has **no reference pinned**, which is the first thing it needs.
   **Sonic rotation has left this list**: it is item 9, and `FLOW-PLAN.md` is the
-  design. **`TODO`'s "Try PARDISO again against a real oneMKL build" is
-  answered** — see item 6 — and that entry can go, as can its *Sonic toroidal
-  rotation* entry, which `FLOW-PLAN.md` supersedes.
+  design, which is why `TODO`'s *Sonic toroidal rotation* entry is now a stub
+  pointing at it. `TODO` was cut with this file on 2026-09-01 — its PARDISO
+  entry is down to the one open question, reproducibility under threading, and
+  its performance entry to what the threading campaign did not already answer.
 
 ## The standing rule
 

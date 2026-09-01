@@ -710,13 +710,29 @@ tree was left checked out on it — so the next person to touch it would have be
 on someone else's branch. Fetching from the dev tree is reading; everything else
 is not.
 
-`doc/HDG-ELEMENT-LOCAL-PARALLELISM.md`, `HDG-BEM-COUPLING-FROM-MEQ.md` and
-**`HDG-NPC-GLOBALISATION-FROM-MEQ.md`** are what meq has put there and what is
-still open; they are requests, not work. **Three more have been retired
-upstream** now their findings are fixed and covered — `HDG-DEFECTS-FROM-MEQ.md`
-(`2a50119ba1`), `DIRECT-SOLVER-SYMBOLIC-REUSE.md` (same) and
-`HDG-LINEARISE-THEN-CONDENSE.md` (`d891ac4302`, with the mode itself). Checked
-2026-09-01; a list of files in someone else's tree goes stale without warning.
+**WHICH REQUESTS EXIST IS A QUESTION FOR `git`, NOT FOR `ls`, AND THIS FILE GOT
+IT WRONG EARLIER THE SAME DAY.** A listing of `../mfem-hdg-dev/doc/` reports
+whatever branch that tree happens to be checked out on, which is not meq's to
+control and changed twice on 2026-09-01. Asked properly —
+`git cat-file -e <branch>:doc/<file>` across every branch — the answer is:
+
+| document | lives on | |
+|---|---|---|
+| `HDG-ELEMENT-LOCAL-PARALLELISM.md` | `gf-hdg-linearise-first` | **open** |
+| `HDG-BEM-COUPLING-FROM-MEQ.md` | `gf-hdg-linearise-first` | **open** |
+| `HDG-NPC-GLOBALISATION-FROM-MEQ.md` | `gf-hdg-linearise-first` | **open**, and answered in place |
+| `HDG-DEFECTS-FROM-MEQ.md` | **`gf-hdg-dev` and `gf-hdg-subdomains-dev`** | **NOT retired** — deleted only on the symbolic-reuse line, which is exactly why that merge conflicts modify/delete |
+| `HDG-LINEARISE-THEN-CONDENSE.md` | backup refs only | retired with the mode |
+| `DIRECT-SOLVER-SYMBOLIC-REUSE.md` | no branch at all | retired |
+
+All three open ones sit on **one** branch, so with the tree on `gf-hdg-dev` they
+are invisible and `doc/` looks nearly empty. An earlier version of this
+paragraph read that emptiness as three retirements, and said
+`HDG-DEFECTS-FROM-MEQ.md` had been retired in `2a50119ba1` — that commit deletes
+it on one line of history and the file is alive on two of the four branches meq
+merges. **The merge table below already knew this**, and recording the two
+against each other is the point: a claim about someone else's working tree is a
+claim about their checkout.
 
 **`HDG-NPC-GLOBALISATION-FROM-MEQ.md`, 2026-08-31 — FILED, AND ANSWERED THE
 SAME DAY** (`af82d42b14` in that tree). Deliberately **not** a defect report:
@@ -2840,8 +2856,12 @@ way.
 
 **If a waiter is used, check it actually fired.**
 
-**The four defects meq reported to MFEM are closed** and
-`HDG-DEFECTS-FROM-MEQ.md` is gone from that tree's `doc/`. Checked 2026-08-29
+**The four defects meq reported to MFEM are closed**, though
+`HDG-DEFECTS-FROM-MEQ.md` itself is **not** gone — it is alive on `gf-hdg-dev`
+and `gf-hdg-subdomains-dev` and deleted only on the symbolic-reuse line, which
+is the modify/delete conflict in the merge recipe. An earlier version of this
+sentence said it was gone, from a working-tree listing taken while that tree was
+on the branch that deletes it. Checked 2026-08-29
 one at a time, because "closed" arrived in four different ways: `Reconstruct()`
 on a singular local matrix was **fixed** (meq's test flipped red to green on
 it); `φ_h` unreachable after a solve was **fixed**, as
