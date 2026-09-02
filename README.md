@@ -24,16 +24,46 @@ interesting output is the magnetic field, which is built from $\bar\nabla\psi$,
 and a mixed method resolves it to the same order as $\psi$ itself rather than one
 order lower.
 
+## Documentation
+
+Full documentation — installation, the configuration reference, the C++ API, and
+an account of the numerics and why they are the way they are — is at
+**<https://meq.readthedocs.io>**, built from `docs/`.
+
+To build it locally:
+
+```sh
+cmake --build build --target docs        # or: make -C docs html
+```
+
+`CLAUDE.md` is a separate thing and stays: it is the working technical record,
+including measurements, dead ends and the reasoning behind decisions. The
+documentation is what a user needs; `CLAUDE.md` is what a maintainer needs.
+
 ## Status
 
-**MEQ solves the linear Grad–Shafranov equation**, reproducing an exact Solov'ev
-equilibrium at order $k+1$ in both $\psi$ and the flux $\boldsymbol{q}$, for
-$k = 1,2,3$. The semi-linear problem — a source depending on $\psi$, solved by
-Newton — is in progress, and the command-line driver is not yet ported, so there
-is currently no way to run MEQ except through its test suite.
+**MEQ solves the semi-linear Grad–Shafranov equation by Newton**, reproducing an
+exact Solov'ev equilibrium and a manufactured non-linear solution at order
+$k+1$ in both $\psi$ and the flux $\boldsymbol{q}$, with Newton converging
+quadratically. It is a program as well as a library: `meq config.toml` builds
+the mesh and the source, solves, and writes the equilibrium in three formats.
+
+What is present, in addition to the linear solve:
+
+* **Newton on a source depending on $\psi$**, with every source supplying its own
+  $\partial F/\partial\psi$.
+* **Curved plasma boundaries**, by extension from polygonal subdomains, driven
+  from a configuration file.
+* **Adaptive refinement** against a residual error estimator, on both the fitted
+  and the curved path.
+* **Profiles in normalised flux**, in which the flux on the magnetic axis is an
+  unknown of the system rather than an input, closed by a bordered Newton.
+* **Toroidal rotation**, for an arbitrary number of species.
+
+Not present: free boundary, and any parallelism.
 
 `CLAUDE.md` has the full picture, including a stage-by-stage account of what is
-done and what is next. Read it before believing anything below about behaviour.
+done and what is next, and the measurements behind every claim above.
 
 Two things worth knowing up front, because earlier revisions of this file claimed
 otherwise:
@@ -55,10 +85,17 @@ Requirements:
 |---|---|
 | C++17 compiler | g++ 15 is what it is developed against |
 | CMake | ≥ 3.20 |
-| [MFEM](https://mfem.org) | **4.9.1, the HDG branch** — see below |
+| [MFEM](https://mfem.org) | **the HDG branch** — see below. The one hard dependency |
 | [toml11](https://github.com/ToruNiina/toml11) | vendored as a submodule at `extern/toml11` |
-| SuiteSparse | UMFPACK and friends, pulled in through MFEM |
+| netcdf-cxx4 | optional; without it the gridded output format is dropped |
 | Boost | `unit_test_framework`, for the test suite only |
+| clang-tidy | optional; gates the `naming` test only |
+
+Reached *through* MFEM rather than found separately: SuiteSparse (UMFPACK, the
+default direct solver), SUNDIALS (KINSOL, which backs the Picard globalisations),
+GSLIB (point location, for interpolating a warm start between meshes), and
+optionally MKL PARDISO and cuDSS. MEQ reads which of them are present out of
+MFEM's own configuration and adapts.
 
 MEQ needs a specific MFEM: the branch carrying `DarcyForm` and the HDG
 integrators under `fem/darcy/`. `mfem/master` will not work — the older
@@ -66,31 +103,52 @@ integrators under `fem/darcy/`. `mfem/master` will not work — the older
 
 ```sh
 git submodule update --init --recursive
-cmake -B build -DMFEM_DIR=/path/to/mfem-hdg-dev
+cmake -B build -DMFEM_DIR=/path/to/mfem/install
 cmake --build build -j4
 ```
+
+Never a bare `make -j` or `cmake --build -j` with no number: unbounded, the job
+count goes to the host's core count, which on a container or a WSL2 virtual
+machine is not the same thing as the memory behind it.
 
 toml11 is a pinned submodule, so `--recursive` is not optional. MFEM is not a
 submodule — its history is very large and it needs its own out-of-tree build —
 so point `MFEM_DIR` at a checkout you have built yourself.
 
-`MFEM_DIR` defaults to `../mfem-hdg-dev` and also reads the environment.
+`MFEM_DIR` defaults to `../mfem/install` and also reads the environment, so on
+a machine laid out that way the `-D` is unnecessary. The finder accepts either
+layout an MFEM build leaves behind — an installed tree or an in-source make
+build — and reads the enabled features out of MFEM's own `config.mk`.
+
+`find_package(MFEM)` is deliberately **not** `REQUIRED`. Without it CMake builds
+the MFEM-free half of the library — the configuration parser, the profiles, the
+sources, the boundary shapes — and skips every test that needs a solver. That is
+what continuous integration builds, since the MFEM branch MEQ needs is published
+nowhere a hosted runner can fetch it; **read a green CI badge as evidence about
+those layers and nothing else.**
 
 ## Running
 
-The driver is not yet ported, so this does not work today:
-
 ```sh
-./build/apps/meq examples/soloviev-nstx.toml
+./build/meq examples/soloviev-nstx.toml
 ```
 
-**The environment variable is not optional on a machine whose BLAS resolves to
-MKL** — without it, MKL silently returns wrong results from UMFPACK's BLAS-3
-calls. Silently: you get numbers, and they are wrong. The test suite sets it for
-you; a direct invocation does not.
+One positional argument and no other flags, apart from `--help` and `--version`:
+everything about a run is in the configuration file, which is a record of what
+was run in a way a command line is not. Exit codes are 0 solved, 1 configuration,
+2 did not converge, 3 could not write the output.
 
-Run configurations are TOML. See `examples/` for worked cases, including the
-Solov'ev benchmark whose exact solution is published.
+Run configurations are TOML. See `examples/` for worked cases — the Solov'ev
+benchmark, a genuinely non-linear source, a curved boundary, an adaptive run, and
+two rotating equilibria — and the [configuration
+reference](https://meq.readthedocs.io/en/latest/configuration.html) for every key.
+
+**Set `MKL_NUM_THREADS=1` on a machine whose BLAS is MKL.** MEQ's inner loop
+factorises a great many *small* dense matrices, and above a block size that
+depends on your BLAS each of those calls pays for a thread fork and a barrier
+that dwarfs the arithmetic — measured here, the effect was dramatic and grew
+rapidly with polynomial degree. Every registered test sets the variable for
+itself; a direct invocation does not.
 
 ## Testing
 
@@ -98,7 +156,8 @@ Solov'ev benchmark whose exact solution is published.
 cd build && ctest --output-on-failure
 ```
 
-The suite is in three layers, described in full in `CLAUDE.md`:
+The suite is in three layers, described in full in the
+[testing chapter](https://meq.readthedocs.io/en/latest/testing.html):
 
 * **unit** — configuration parsing, spline interpolation and its derivative,
   and the source term's $\partial F/\partial\psi$ against a finite difference.
@@ -110,7 +169,15 @@ The suite is in three layers, described in full in `CLAUDE.md`:
 That last layer is the one that matters, and the ordering is deliberate. A wrong
 sign convention converges at the right rate to the wrong function, so a
 convergence study alone cannot catch it — only comparison against a closed form
-can.
+can. A wrong *Jacobian* is worse: it changes neither the answer nor the rate,
+only the observed order of the Newton iteration, which is why that order is
+asserted and printed.
+
+One consequence of the stance is worth stating here rather than being met by
+surprise: **a test asserts the behaviour that is wanted and fails until it is
+there**, never the reverse, so the suite is expected to be red while a known
+defect stands. That is the intended signal, and the failing test's message is
+the record.
 
 ## Numerical method
 
@@ -118,7 +185,7 @@ The discretisation is the LDG-H formulation of Sánchez-Vizuet & Solano, with
 equal-degree polynomial spaces for the flux, the potential and the hybrid trace,
 and stabilisation $\tau = 1$. Hybridization condenses the element interiors away,
 leaving a global system in the trace unknown alone; the interior solution is then
-recovered element by element, in parallel.
+recovered element by element, independently.
 
 Curved plasma boundaries are handled by **extension from polygonal subdomains**:
 the computational domain is the union of background mesh elements lying inside
@@ -126,6 +193,12 @@ $\Omega$, and boundary data is carried from the true boundary to the mesh
 boundary along transfer paths. Consequently MEQ needs only a uniform,
 shape-regular background mesh of a box — there is no geometry-conforming meshing
 step, and no mesh generator dependency.
+
+Curved boundaries and adaptive refinement interact, and the interaction is the
+subtle part: refining the computational mesh does not move its boundary, so the
+gap to the true boundary must be closed by a companion mesh or the transfer
+silently leaves the regime it is analysed in. The
+[documentation](https://meq.readthedocs.io/en/latest/adaptivity.html) covers it.
 
 `refs/Refs.md` indexes the papers, with a doi for each. The PDFs themselves are
 not in the repository.

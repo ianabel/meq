@@ -1,0 +1,25 @@
+# Read the Docs configuration file.
+# See https://docs.readthedocs.io/en/stable/config-file/v2.html for details.
+
+version: 2
+
+build:
+  os: ubuntu-24.04
+  tools:
+    python: "3.13"
+
+sphinx:
+  configuration: docs/conf.py
+  # Read the Docs turns this into `-W --keep-going`, and docs/Makefile passes
+  # the same flags, so a local `make html` and an RTD build agree about what
+  # counts as a failure. The point is that a broken cross-reference or a stale
+  # :doc: target fails loudly instead of publishing a page with a dead link.
+  fail_on_warning: true
+
+# Required, not optional: docs/requirements.txt is where sphinx-material and
+# sphinxcontrib-bibtex come from. RTD installs Sphinx itself regardless and
+# unpinned, so the `sphinx>=7,<8` line in that file is what holds it at a
+# release the theme can work with.
+python:
+  install:
+    - requirements: docs/requirements.txt

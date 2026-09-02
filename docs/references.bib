@@ -1,0 +1,511 @@
+% The papers behind meq's numerics.
+%
+% This file is written by hand from refs/Refs.md in the source tree, which is
+% the tracked index of the PDFs (themselves gitignored, being publisher
+% material). The two are meant to agree, and every DOI here has been checked
+% against Crossref rather than recalled -- a DOI from memory is as likely to
+% point at an unrelated paper as at the right one, and one in refs/Refs.md did.
+%
+% Keys are AuthorYear. Where a paper is referred to in the prose by a short
+% name -- HDG-GS-1, HDG-GS-2, RoPP -- the comment above the entry says so.
+
+% ---------------------------------------------------------------- the method --
+
+% HDG-GS-1. The discretisation meq implements: the LDG-H formulation, the
+% spaces, the numerical flux and tau = 1.
+@article{SanchezVizuetSolano2019,
+  author  = {S{\'a}nchez-Vizuet, Tonatiuh and Solano, Manuel E.},
+  title   = {A Hybridizable Discontinuous {G}alerkin solver for the
+             {G}rad--{S}hafranov equation},
+  journal = {Computer Physics Communications},
+  volume  = {235},
+  pages   = {120--132},
+  year    = {2019},
+  doi     = {10.1016/j.cpc.2018.09.013},
+  note    = {arXiv:1712.04148}
+}
+
+% HDG-GS-2. The same method plus adaptivity and the curved boundary, and the
+% source of meq's headline NSTX benchmark and of its error estimator.
+@article{SanchezVizuet2020adaptive,
+  author  = {S{\'a}nchez-Vizuet, Tonatiuh and Solano, Manuel E. and
+             Cerfon, Antoine J.},
+  title   = {Adaptive Hybridizable Discontinuous {G}alerkin discretization of
+             the {G}rad--{S}hafranov equation by extension from polygonal
+             subdomains},
+  journal = {Computer Physics Communications},
+  volume  = {255},
+  pages   = {107239},
+  year    = {2020},
+  doi     = {10.1016/j.cpc.2020.107239},
+  note    = {arXiv:1903.01724}
+}
+
+@article{CockburnGopalakrishnanLazarov2009,
+  author  = {Cockburn, Bernardo and Gopalakrishnan, Jayadeep and
+             Lazarov, Raytcho},
+  title   = {Unified Hybridization of Discontinuous {G}alerkin, Mixed, and
+             Continuous {G}alerkin Methods for Second Order Elliptic Problems},
+  journal = {SIAM Journal on Numerical Analysis},
+  volume  = {47},
+  number  = {2},
+  pages   = {1319--1365},
+  year    = {2009},
+  doi     = {10.1137/070706616}
+}
+
+@article{NguyenPeraireCockburn2009linear,
+  author  = {Nguyen, N. C. and Peraire, J. and Cockburn, B.},
+  title   = {An implicit high-order hybridizable discontinuous {G}alerkin
+             method for linear convection--diffusion equations},
+  journal = {Journal of Computational Physics},
+  volume  = {228},
+  number  = {9},
+  pages   = {3232--3254},
+  year    = {2009},
+  doi     = {10.1016/j.jcp.2009.01.030}
+}
+
+% The NPC method: linearise the full system first, hybridize the linear system
+% that results. meq's default nonlinear ordering.
+@article{NguyenPeraireCockburn2009nonlinear,
+  author  = {Nguyen, N. C. and Peraire, J. and Cockburn, B.},
+  title   = {An implicit high-order hybridizable discontinuous {G}alerkin
+             method for nonlinear convection--diffusion equations},
+  journal = {Journal of Computational Physics},
+  volume  = {228},
+  number  = {23},
+  pages   = {8841--8855},
+  year    = {2009},
+  doi     = {10.1016/j.jcp.2009.08.030}
+}
+
+@article{Stenberg1991,
+  author  = {Stenberg, Rolf},
+  title   = {Postprocessing schemes for some mixed finite elements},
+  journal = {ESAIM: Mathematical Modelling and Numerical Analysis},
+  volume  = {25},
+  number  = {1},
+  pages   = {151--167},
+  year    = {1991},
+  doi     = {10.1051/m2an/1991250101511}
+}
+
+% ------------------------------------------------- curved boundaries by extension --
+
+% The transfer-path technique itself.
+@article{CockburnSolano2012,
+  author  = {Cockburn, Bernardo and Solano, Manuel},
+  title   = {Solving {D}irichlet Boundary-value Problems on Curved Domains by
+             Extensions from Subdomains},
+  journal = {SIAM Journal on Scientific Computing},
+  volume  = {34},
+  number  = {1},
+  pages   = {A497--A519},
+  year    = {2012},
+  doi     = {10.1137/100805200}
+}
+
+@article{CockburnQiuSolano2013,
+  author  = {Cockburn, Bernardo and Qiu, Weifeng and Solano, Manuel},
+  title   = {A priori error analysis for {HDG} methods using extensions from
+             subdomains to achieve boundary conformity},
+  journal = {Mathematics of Computation},
+  volume  = {83},
+  number  = {286},
+  pages   = {665--699},
+  year    = {2013},
+  doi     = {10.1090/S0025-5718-2013-02747-0}
+}
+
+@article{CockburnSolano2013,
+  author  = {Cockburn, Bernardo and Solano, Manuel},
+  title   = {Solving Convection-Diffusion Problems on Curved Domains by
+             Extensions from Subdomains},
+  journal = {Journal of Scientific Computing},
+  volume  = {59},
+  number  = {2},
+  pages   = {512--543},
+  year    = {2013},
+  doi     = {10.1007/s10915-013-9776-y}
+}
+
+@article{CockburnSayasSolano2012,
+  author  = {Cockburn, Bernardo and Sayas, Francisco-Javier and
+             Solano, Manuel},
+  title   = {Coupling at a Distance {HDG} and {BEM}},
+  journal = {SIAM Journal on Scientific Computing},
+  volume  = {34},
+  number  = {1},
+  pages   = {A28--A47},
+  year    = {2012},
+  doi     = {10.1137/110823237}
+}
+
+% ------------------------------------------------ adaptivity and the estimator --
+
+% The a posteriori analysis for the semi-linear, unfitted case -- the load
+% bearing reference for anything meq does with the estimator.
+@article{SanchezSanchezVizuetSolano2021,
+  author  = {S{\'a}nchez, Nestor and S{\'a}nchez-Vizuet, Tonatiuh and
+             Solano, Manuel E.},
+  title   = {A priori and a posteriori error analysis of an unfitted {HDG}
+             method for semi-linear elliptic problems},
+  journal = {Numerische Mathematik},
+  volume  = {148},
+  number  = {4},
+  pages   = {919--958},
+  year    = {2021},
+  doi     = {10.1007/s00211-021-01221-8}
+}
+
+@article{SanchezSanchezVizuetSolano2022,
+  author  = {S{\'a}nchez, Nestor and S{\'a}nchez-Vizuet, Tonatiuh and
+             Solano, Manuel},
+  title   = {Error Analysis of an Unfitted {HDG} Method for a Class of
+             Non-linear Elliptic Problems},
+  journal = {Journal of Scientific Computing},
+  volume  = {90},
+  number  = {3},
+  pages   = {92},
+  year    = {2022},
+  doi     = {10.1007/s10915-022-01767-1}
+}
+
+@article{CockburnZhang2013,
+  author  = {Cockburn, Bernardo and Zhang, Wujun},
+  title   = {A Posteriori Error Analysis for Hybridizable Discontinuous
+             {G}alerkin Methods for Second Order Elliptic Problems},
+  journal = {SIAM Journal on Numerical Analysis},
+  volume  = {51},
+  number  = {1},
+  pages   = {676--693},
+  year    = {2013},
+  doi     = {10.1137/120866269}
+}
+
+@article{CockburnNochettoZhang2015,
+  author  = {Cockburn, Bernardo and Nochetto, Ricardo and Zhang, Wujun},
+  title   = {Contraction property of adaptive hybridizable discontinuous
+             {G}alerkin methods},
+  journal = {Mathematics of Computation},
+  volume  = {85},
+  number  = {299},
+  pages   = {1113--1141},
+  year    = {2015},
+  doi     = {10.1090/mcom/3014}
+}
+
+% ------------------------------------------------------------ the nonlinearity --
+
+@article{Serino2024,
+  author  = {Serino, Daniel A. and Tang, Qi and Tang, Xian-Zhu and
+             Kolev, Tzanio V. and Lipnikov, Konstantin},
+  title   = {An adaptive {N}ewton-based free-boundary {G}rad--{S}hafranov
+             solver},
+  journal = {arXiv preprint},
+  year    = {2024},
+  doi     = {10.48550/arXiv.2407.03499},
+  note    = {arXiv:2407.03499}
+}
+
+@article{Heumann2015,
+  author  = {Heumann, H. and Blum, J. and Boulbe, C. and Faugeras, B. and
+             Selig, G. and An{\'e}, J.-M. and Br{\'e}mond, S. and
+             Grandgirard, V. and Hertout, P. and Nardon, E.},
+  title   = {Quasi-static free-boundary equilibrium of toroidal plasma with
+             {CEDRES++}: Computational methods and applications},
+  journal = {Journal of Plasma Physics},
+  volume  = {81},
+  number  = {3},
+  pages   = {905810301},
+  year    = {2015},
+  doi     = {10.1017/S0022377814001251}
+}
+
+@article{Lackner1976,
+  author  = {Lackner, K.},
+  title   = {Computation of ideal {MHD} equilibria},
+  journal = {Computer Physics Communications},
+  volume  = {12},
+  number  = {1},
+  pages   = {33--44},
+  year    = {1976},
+  doi     = {10.1016/0010-4655(76)90008-4}
+}
+
+@article{WalkerNi2011,
+  author  = {Walker, Homer F. and Ni, Peng},
+  title   = {Anderson Acceleration for Fixed-Point Iterations},
+  journal = {SIAM Journal on Numerical Analysis},
+  volume  = {49},
+  number  = {4},
+  pages   = {1715--1735},
+  year    = {2011},
+  doi     = {10.1137/10078356X}
+}
+
+@article{TothKelley2015,
+  author  = {Toth, Alex and Kelley, C. T.},
+  title   = {Convergence Analysis for Anderson Acceleration},
+  journal = {SIAM Journal on Numerical Analysis},
+  volume  = {53},
+  number  = {2},
+  pages   = {805--819},
+  year    = {2015},
+  doi     = {10.1137/130919398}
+}
+
+@article{GaticaHsiao1995,
+  author  = {Gatica, G. N. and Hsiao, G. C.},
+  title   = {The Uncoupling of Boundary Integral and Finite Element Methods
+             for Nonlinear Boundary Value Problems},
+  journal = {Journal of Mathematical Analysis and Applications},
+  volume  = {189},
+  number  = {2},
+  pages   = {442--461},
+  year    = {1995},
+  doi     = {10.1006/jmaa.1995.1029}
+}
+
+% ------------------------------------------------------- analytic benchmarks --
+
+% The twelve-term Solov'ev expansion and its constraints; the source of meq's
+% Miller-shape and Solov'ev geometry fixtures.
+@article{CerfonFreidberg2010,
+  author  = {Cerfon, Antoine J. and Freidberg, Jeffrey P.},
+  title   = {``One size fits all'' analytic solutions to the
+             {G}rad--{S}hafranov equation},
+  journal = {Physics of Plasmas},
+  volume  = {17},
+  number  = {3},
+  pages   = {032502},
+  year    = {2010},
+  doi     = {10.1063/1.3328818}
+}
+
+% The affine rung of meq's test ladder: F linear in psi, so a Jacobian is
+% either present or it is not.
+@article{McCarthy1999,
+  author  = {Mc Carthy, P. J.},
+  title   = {Analytical solutions to the {G}rad--{S}hafranov equation for
+             tokamak equilibrium with dissimilar source functions},
+  journal = {Physics of Plasmas},
+  volume  = {6},
+  number  = {9},
+  pages   = {3554--3560},
+  year    = {1999},
+  doi     = {10.1063/1.873630}
+}
+
+% The one exact solution in elementary functions of a genuinely nonlinear
+% Grad-Shafranov equation.
+@article{KaltsasThroumoulopoulos2016,
+  author  = {Kaltsas, Dimitrios A. and Throumoulopoulos, George N.},
+  title   = {Exact solutions of the {G}rad--{S}hafranov equation via
+             similarity reduction and applications to magnetically confined
+             plasmas},
+  journal = {Physics Letters A},
+  volume  = {380},
+  number  = {41},
+  pages   = {3373--3377},
+  year    = {2016},
+  doi     = {10.1016/j.physleta.2016.08.011},
+  note    = {arXiv:1605.01538}
+}
+
+@article{Atanasiu2004,
+  author  = {Atanasiu, C. V. and G{\"u}nter, S. and Lackner, K. and
+             Miron, I. G.},
+  title   = {Analytical solutions to the {G}rad--{S}hafranov equation},
+  journal = {Physics of Plasmas},
+  volume  = {11},
+  number  = {7},
+  pages   = {3510--3518},
+  year    = {2004},
+  doi     = {10.1063/1.1756167}
+}
+
+@article{GuazzottoFreidberg2007,
+  author  = {Guazzotto, L. and Freidberg, J. P.},
+  title   = {A family of analytic equilibrium solutions for the
+             {G}rad--{S}hafranov equation},
+  journal = {Physics of Plasmas},
+  volume  = {14},
+  number  = {11},
+  pages   = {112508},
+  year    = {2007},
+  doi     = {10.1063/1.2803759}
+}
+
+% ---------------------------------------------------------- profiles and shapes --
+
+% The Miller local equilibrium parametrisation, and the source of the
+% B = grad phi x grad psi + f grad phi convention meq's field relabelling uses.
+@article{Miller1998,
+  author  = {Miller, R. L. and Chu, M. S. and Greene, J. M. and
+             Lin-Liu, Y. R. and Waltz, R. E.},
+  title   = {Noncircular, finite aspect ratio, local equilibrium model},
+  journal = {Physics of Plasmas},
+  volume  = {5},
+  number  = {4},
+  pages   = {973--978},
+  year    = {1998},
+  doi     = {10.1063/1.872666}
+}
+
+% The Miller extended harmonic (MXH) parametrisation.
+@article{ArbonCandyBelli2021,
+  author  = {Arbon, R. and Candy, J. and Belli, E. A.},
+  title   = {Rapidly-convergent flux-surface shape parameterization},
+  journal = {Plasma Physics and Controlled Fusion},
+  volume  = {63},
+  number  = {1},
+  pages   = {012001},
+  year    = {2021},
+  doi     = {10.1088/1361-6587/abc63b}
+}
+
+% Profiles as polynomials in normalised flux, which is how equilibrium codes
+% actually pose them.
+@article{GourdainLeboeuf2004,
+  author  = {Gourdain, P.-A. and Leboeuf, J.-N.},
+  title   = {Contour dynamics method for solving the {G}rad--{S}hafranov
+             equation with applications to high beta equilibria},
+  journal = {Physics of Plasmas},
+  volume  = {11},
+  number  = {9},
+  pages   = {4372--4381},
+  year    = {2004},
+  doi     = {10.1063/1.1776174}
+}
+
+@article{Cowley1991,
+  author  = {Cowley, S. C. and Kaw, P. K. and Kelly, R. S. and
+             Kulsrud, R. M.},
+  title   = {An analytic solution of high-beta equilibrium in a large aspect
+             ratio tokamak},
+  journal = {Physics of Fluids B: Plasma Physics},
+  volume  = {3},
+  number  = {8},
+  pages   = {2066--2077},
+  year    = {1991},
+  doi     = {10.1063/1.859991}
+}
+
+@article{HsuArtunCowley1996,
+  author  = {Hsu, S. C. and Artun, M. and Cowley, S. C.},
+  title   = {Calculation and interpretation of analytic high-beta poloidal
+             equilibria in finite aspect ratio tokamaks},
+  journal = {Physics of Plasmas},
+  volume  = {3},
+  number  = {1},
+  pages   = {266--274},
+  year    = {1996},
+  doi     = {10.1063/1.871852}
+}
+
+% ------------------------------------------------------------ toroidal rotation --
+
+% RoPP. The generalised Grad-Shafranov equation meq solves for a rotating
+% plasma is its eq (136), closed by (96) and (97).
+@article{Abel2013,
+  author  = {Abel, I. G. and Plunk, G. G. and Wang, E. and Barnes, M. and
+             Cowley, S. C. and Dorland, W. and Schekochihin, A. A.},
+  title   = {Multiscale gyrokinetics for rotating tokamak plasmas:
+             fluctuations, transport and energy flows},
+  journal = {Reports on Progress in Physics},
+  volume  = {76},
+  number  = {11},
+  pages   = {116201},
+  year    = {2013},
+  doi     = {10.1088/0034-4885/76/11/116201}
+}
+
+@article{LiZhu2021,
+  author  = {Li, Haolong and Zhu, Ping},
+  title   = {Solving the {G}rad--{S}hafranov equation using spectral elements
+             for tokamak equilibrium with toroidal rotation},
+  journal = {Computer Physics Communications},
+  volume  = {260},
+  pages   = {107264},
+  year    = {2021},
+  doi     = {10.1016/j.cpc.2020.107264}
+}
+
+% NOTE THE DOI. Almost every citation of this result names a 1984 Physics
+% Letters A paper by the same authors; the 1980 Plasma Physics one is what
+% carries the isothermal solution meq uses as a benchmark. Its DOI ends 6/007;
+% 6/009 is a different article in the same issue.
+@article{MaschkePerrin1980,
+  author  = {Maschke, E. K. and Perrin, H.},
+  title   = {Exact solutions of the stationary {MHD} equations for a rotating
+             toroidal plasma},
+  journal = {Plasma Physics},
+  volume  = {22},
+  number  = {6},
+  pages   = {579--594},
+  year    = {1980},
+  doi     = {10.1088/0032-1028/22/6/007}
+}
+
+@article{Guazzotto2004,
+  author  = {Guazzotto, L. and Betti, R. and Manickam, J. and Kaye, S.},
+  title   = {Numerical study of tokamak equilibria with arbitrary flow},
+  journal = {Physics of Plasmas},
+  volume  = {11},
+  number  = {2},
+  pages   = {604--614},
+  year    = {2004},
+  doi     = {10.1063/1.1637918}
+}
+
+% ------------------------------------------------------------------ elsewhere --
+
+@article{TakedaTokuda1991,
+  author  = {Takeda, Tatsuoki and Tokuda, Shinji},
+  title   = {Computation of {MHD} equilibrium of tokamak plasma},
+  journal = {Journal of Computational Physics},
+  volume  = {93},
+  number  = {1},
+  pages   = {1--107},
+  year    = {1991},
+  doi     = {10.1016/0021-9991(91)90074-U}
+}
+
+@article{Pataki2013,
+  author  = {Pataki, Andras and Cerfon, Antoine J. and
+             Freidberg, Jeffrey P. and Greengard, Leslie and O'Neil, Michael},
+  title   = {A fast, high-order solver for the {G}rad--{S}hafranov equation},
+  journal = {Journal of Computational Physics},
+  volume  = {243},
+  pages   = {28--45},
+  year    = {2013},
+  doi     = {10.1016/j.jcp.2013.02.045}
+}
+
+@article{PalhaKorenFelici2016,
+  author  = {Palha, A. and Koren, B. and Felici, F.},
+  title   = {A mimetic spectral element solver for the {G}rad--{S}hafranov
+             equation},
+  journal = {Journal of Computational Physics},
+  volume  = {316},
+  pages   = {63--93},
+  year    = {2016},
+  doi     = {10.1016/j.jcp.2016.04.002}
+}
+
+@article{Anderson2021,
+  author  = {Anderson, Robert and Andrej, Julian and Barker, Andrew and
+             Bramwell, Jamie and Camier, Jean-Sylvain and Cerveny, Jakub and
+             Dobrev, Veselin and Dudouit, Yohann and Fisher, Aaron and
+             Kolev, Tzanio and Pazner, Will and Stowell, Mark and
+             Tomov, Vladimir and Akkerman, Ido and Dahm, Johann and
+             Medina, David and Zampini, Stefano},
+  title   = {{MFEM}: A modular finite element methods library},
+  journal = {Computers \& Mathematics with Applications},
+  volume  = {81},
+  pages   = {42--74},
+  year    = {2021},
+  doi     = {10.1016/j.camwa.2020.06.009}
+}

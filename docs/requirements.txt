@@ -1,0 +1,17 @@
+# Documentation build dependencies. Read the Docs installs these through the
+# python.install block in .readthedocs.yaml -- without that block RTD installs
+# nothing from here and the build fails on `html_theme = "sphinx_material"`.
+#
+# sphinx-material has been unmaintained since 2023 (0.0.36). It is pinned
+# exactly, and Sphinx is capped below 8, because the theme predates Sphinx 8 and
+# is only known to work under 7. This matches the sibling project MaNTA, whose
+# docs are built the same way; if that pin ever moves, move both.
+sphinx>=7,<8
+sphinx-material==0.0.36
+
+# Citations. meq's documentation explains *why* the numerics are the way they
+# are, and almost every one of those reasons is somebody's paper, so the
+# bibliography is a real one rather than a list of links: sphinxcontrib-bibtex
+# renders docs/references.bib and resolves :cite:p: / :cite:t: roles against it.
+# 2.6.x is the series that supports Sphinx 7.
+sphinxcontrib-bibtex>=2.6,<3

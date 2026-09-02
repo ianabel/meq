@@ -335,6 +335,39 @@ if(MEQ_BUILD_TESTS)
 endif()
 
 # ---------------------------------------------------------------------------
+# Documentation
+# ---------------------------------------------------------------------------
+#
+# Sphinx, built with -W to match .readthedocs.yaml's fail_on_warning, so a
+# local build that is green is one that will publish.
+#
+# The dependencies get an environment of their own rather than being installed
+# anywhere shared: docs/requirements.txt holds Sphinx below 8 for
+# sphinx-material, unmaintained since 2023, and there is no reason to hold
+# anything else to a docs constraint. Read the Docs installs the same
+# requirements file, so the pins live in one place.
+#
+# Not part of ALL, and it needs no MFEM -- these pages document the library
+# rather than being generated from it.
+set(MEQ_DOCS_VENV "${PROJECT_SOURCE_DIR}/.venv-docs" CACHE PATH
+    "Virtualenv holding Sphinx and its theme")
+set(MEQ_DOCS_HTML "${PROJECT_SOURCE_DIR}/docs/_build/html" CACHE PATH
+    "Where the `docs` target writes the rendered HTML")
+set(MEQ_VENV_PYTHON "python3" CACHE STRING
+    "Interpreter used to create the documentation virtualenv")
+
+add_custom_target(docs
+	COMMAND ${CMAKE_COMMAND}
+	        -DDOCS_VENV=${MEQ_DOCS_VENV}
+	        -DDOCS_HTML=${MEQ_DOCS_HTML}
+	        -DVENV_PYTHON=${MEQ_VENV_PYTHON}
+	        -DSOURCE_DIR=${PROJECT_SOURCE_DIR}
+	        -P "${PROJECT_SOURCE_DIR}/cmake/MeqDocs.cmake"
+	USES_TERMINAL
+	COMMENT "Building the Sphinx documentation"
+	VERBATIM)
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 

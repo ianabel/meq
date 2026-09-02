@@ -26,22 +26,30 @@ compile_commands.json
 *~
 tags
 
-# LaTeX. docs/ is built by its own Makefile from the .tex sources; everything
-# latex and bibtex leave behind is regenerated, including the PDF.
-docs/*.aux
-docs/*.bbl
-docs/*.blg
-docs/*.fdb_latexmk
-docs/*.fls
-docs/*.idx
-docs/*.ind
-docs/*.log
-docs/*.nav
-docs/*.out
-docs/*.pdf
-docs/*.snm
-docs/*.synctex.gz
-docs/*.toc
+# LaTeX. docs/manual/ is the pre-Sphinx manual, built by its own Makefile from
+# the .tex sources; everything latex and bibtex leave behind is regenerated,
+# including the PDF. These patterns moved from docs/ to docs/manual/ when the
+# Sphinx tree took over docs/ -- a pattern left at docs/*.aux would have matched
+# nothing, and the by-products would have shown up as untracked.
+docs/manual/*.aux
+docs/manual/*.bbl
+docs/manual/*.blg
+docs/manual/*.fdb_latexmk
+docs/manual/*.fls
+docs/manual/*.idx
+docs/manual/*.ind
+docs/manual/*.log
+docs/manual/*.nav
+docs/manual/*.out
+docs/manual/*.pdf
+docs/manual/*.snm
+docs/manual/*.synctex.gz
+docs/manual/*.toc
+
+# Sphinx. docs/ is the Read the Docs source tree; _build/ is entirely generated,
+# and doctrees/ is Sphinx's incremental cache.
+docs/_build/
+docs/doctrees/
 
 # MFEM run output. A solve writes its mesh and its solution as a .mesh/.gf pair,
 # and VisIt/ParaView dumps as .vtk/.vtu. Note that the sample data under
@@ -85,3 +93,8 @@ gmon.out
 
 __pycache__/
 .venv/
+
+# The `docs` target's virtualenv, holding Sphinx and its theme. It is a
+# separate environment because docs/requirements.txt pins Sphinx below 8 for
+# the theme, and nothing else should be held to a docs constraint.
+.venv-docs/

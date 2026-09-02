@@ -1,0 +1,28 @@
+/* A few adjustments to sphinx-material for this project's content.
+ *
+ * meq's tables are mostly two-column "term / what it means" reference tables
+ * and a handful of wide ones (the TOML key reference). The theme lets a wide
+ * table overflow the content column; this makes it scroll inside its own box
+ * instead, so the page body never scrolls sideways.
+ */
+
+.md-typeset table:not([class]) {
+    display: block;
+    overflow-x: auto;
+    max-width: 100%;
+}
+
+/* Definition lists are used heavily in the configuration reference, where the
+ * term is a TOML key and the body is a paragraph. Give them room to breathe.
+ */
+.md-typeset dl dd {
+    margin-bottom: 0.8rem;
+}
+
+/* Displayed equations are frequent and sometimes wide (the LDG-H system, the
+ * bordered Jacobian). Let one scroll rather than clip.
+ */
+.md-typeset .math {
+    overflow-x: auto;
+    overflow-y: hidden;
+}
