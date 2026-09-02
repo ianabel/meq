@@ -158,12 +158,29 @@ Writing files
    Writes the exact restart triple at full precision — not the library default,
    because these are read back. ``flux`` is meq's :math:`+q`.
 
+   .. important::
+
+      Pass :math:`\psi_h` here, **not** :math:`\psi^\star`. This is the restart
+      format and is read back into a degree-\ :math:`k` space. See
+      :ref:`output-which-potential`.
+
+.. cpp:function:: void writePostProcessed( std::string const & stem, mfem::GridFunction const & postProcessed )
+
+   Writes ``<stem>_psistar.gf``. Separate from :cpp:func:`writeMfem` rather than
+   folded into it, because :math:`\psi^\star` exists only after
+   :cpp:func:`GradShafranovSolver::postProcess`, and the mesh and restart pair
+   should not depend on a post-processing they have nothing to do with.
+
 .. cpp:function:: void writeVtu( std::string const & stem, mfem::Mesh & mesh, mfem::GridFunction const & potential, mfem::GridFunction const & field, int levelsOfDetail )
 
    Produces a **directory**, not a file, with the index inside it rather than
    beside it. ``field`` is the poloidal field :math:`\mathbf{B}`, not the flux —
-   use :cpp:func:`poloidalField`. Pass the polynomial degree as
-   ``levelsOfDetail``; see :ref:`output-vtk` for why high-order output is on.
+   use :cpp:func:`poloidalField`.
+
+   ``levelsOfDetail`` is the subdivision of the VTK Lagrange cells and should be
+   **the degree of the field being passed**, not the degree of the solve. The
+   driver draws :math:`\psi^\star` and so passes :math:`k+1`; see
+   :ref:`output-vtk`.
 
 .. cpp:function:: void boundaryPolyline( mfem::Mesh & mesh, std::vector<double> & r, std::vector<double> & z, int & unreached )
 

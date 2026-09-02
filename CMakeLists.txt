@@ -40,11 +40,22 @@ option(MEQ_BUILD_APP "Build the meq executable" ON)
 # the compile and the link side on every object it reports, and a test binary
 # that merely links an instrumented library produces no .gcda of its own.
 #
-# Deliberately an option rather than a build type. A coverage build wants -O0,
-# and forcing that through CMAKE_BUILD_TYPE would silently drop NDEBUG for
-# anyone who had set it, changing which MFEM_ASSERTs are live. Stage 4 found a
-# BlockVector size mismatch that only an assert catches, so that difference is
-# real and should be chosen rather than inherited.
+# Deliberately an option rather than a build type: a coverage build wants -O0
+# and a release build wants -O3, and that difference should be chosen rather
+# than inherited from whatever CMAKE_BUILD_TYPE happens to be set to.
+#
+# THE REASON THAT USED TO BE GIVEN HERE WAS WRONG, and it is worth recording
+# because it sent people to build meq in Debug for nothing. It said forcing -O0
+# through CMAKE_BUILD_TYPE would drop NDEBUG and change which MFEM_ASSERTs are
+# live. It would not. MFEM_ASSERT is gated on MFEM_DEBUG, never on NDEBUG
+# (general/error.hpp), and this install has MFEM_DEBUG = NO -- so every
+# MFEM_ASSERT is already dead in every meq build, and no consumer-side flag can
+# revive one. meq's own sources contain no assert() at all, so -DNDEBUG
+# disables nothing of meq's either: it is inert here.
+#
+# Recovering those assertions needs a SECOND MFEM install configured
+# MFEM_DEBUG=YES, which is a different and much larger undertaking than a
+# CMAKE_BUILD_TYPE. Audited 2026-09-02.
 option(MEQ_ENABLE_COVERAGE "Build with gcov instrumentation" OFF)
 
 if(MEQ_ENABLE_COVERAGE)

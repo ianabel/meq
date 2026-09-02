@@ -66,6 +66,20 @@ directory, and for curved boundaries on the transfer-path machinery in
 where the HDG work for this family of solvers lives, and meq is an early user of
 it.
 
+.. important::
+
+   **What meq needs is a local merge of four MFEM development branches, and it
+   is published on no remote.** This page assumes you already have it. If you do
+   not, ``INSTALL.md`` in the source tree is the account of which branches they
+   are, what each one contributes, what breaks silently if one is missing, and
+   the unresolved question of where that merge ought to live.
+
+   The most easily lost of the four is the one carrying the post-processing
+   fix, because it currently arrives as an *ancestor* of two of the others
+   rather than as a merge of its own. Without it :math:`\psi^\star` is wrong
+   per element wherever :math:`\partial F/\partial\psi` vanishes — see
+   :ref:`postprocessing-singular`.
+
 The MFEM features meq reads out of the configuration, and what each buys:
 
 .. list-table::
@@ -165,11 +179,21 @@ Configure-time options
 
 .. note::
 
-   **A debug build is worth doing occasionally**, and not only for the debugger.
-   Several of the contracts between meq and MFEM's block structures are checked
-   by ``MFEM_ASSERT``, which is compiled out under ``NDEBUG``. At least one real
-   defect in meq — a block vector passed with the wrong number of blocks — was
-   invisible in a release build and caught immediately by an assert.
+   **A meq debug build buys you the debugger and nothing else** — and it is
+   worth saying so, because the opposite was written down here and in the
+   project's own notes for some time.
+
+   MFEM's internal consistency checks are ``MFEM_ASSERT``, which is gated on
+   ``MFEM_DEBUG`` — **not** on ``NDEBUG``, and nothing derives one from the
+   other. A normal MFEM install sets ``MFEM_DEBUG = NO``, so every one of those
+   assertions is already dead in every meq build, release or debug, and no flag
+   passed to meq can revive one. meq's own sources contain no ``assert()``
+   either, so ``-DNDEBUG`` disables nothing of meq's.
+
+   Recovering those checks means building a **second MFEM** configured
+   ``MFEM_DEBUG=YES`` and pointing ``MFEM_DIR`` at it. That is a real option
+   when chasing a suspected contract violation between meq and the library, and
+   it is a much larger undertaking than a build type.
 
 Building without MFEM
 ---------------------

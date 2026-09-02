@@ -219,4 +219,5 @@ The tables
 
    .. cpp:function:: std::string getMeshFile() const
    .. cpp:function:: std::string getPsiFile() const
+   .. cpp:function:: std::string getPsiStarFile() const
    .. cpp:function:: std::string getGradPsiFile() const

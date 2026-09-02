@@ -6,6 +6,22 @@ doi and save it under the file name given.
 against the arXiv API. This is a rule, not a formality: a doi recalled from
 memory is as likely to point at an unrelated paper as at the right one.
 
+**CHECK BY TITLE, NEVER BY VOLUME AND PAGE.** The Maschke & Perrin row below
+carried a wrong doi for months and it had *passed* an earlier check, because the
+volume and the pages agreed — they belong to the right issue, and the doi
+pointed at a different article inside it. Volume and page agreeing is what a
+wrong doi in a correctly transcribed citation looks like.
+
+**AND THIS FILE'S OWN CLAIM ABOUT THE ARXIV IDS WAS FALSE UNTIL 2026-09-02.**
+The sentence above asserted the check as a standing rule while `TODO` recorded,
+correctly, that it had never been done. **Both ids have now been checked against
+the arXiv API and both hold**: arXiv:1605.01538 is Kaltsas & Throumoulopoulos
+with the title and the published doi this file gives it, and arXiv:2606.11821 is
+real, is VEQ, and has no version of record. So the claim was true when it was
+finally tested, which is luck rather than diligence — **a claim that a check was
+performed is not a check**, and that is the same lesson as the volume-and-page
+one directly above.
+
 **Entries marked ✔ have been read against meq's formulation**; their annotations
 say what the paper contributes and what it costs. Unmarked entries are seeds —
 the annotation comes from the abstract or from how the read papers cite them, so
@@ -184,8 +200,64 @@ coefficients are checked.
 | --- | --- | --- | --- |
 | Rep. Prog. Phys. 76 (2013) 116201 | https://doi.org/10.1088/0034-4885/76/11/116201 | Abel, Plunk, Wang, Barnes, Cowley, Dorland & Schekochihin, *Multiscale gyrokinetics for rotating tokamak plasmas*. **The equation meq implements for flow**: eq (136), printed page 19, is the generalized Grad–Shafranov equation for a rigidly rotating plasma, closed by (96) for the poloidal density variation and (97) for the electrostatic potential `φ₀` that holds quasineutrality against it. Each species is a local Maxwellian with `T_s(ψ)`, so the closure is **isothermal on a flux surface** and the density is *not* a flux function. Three things to read beside it: (59), where `⟨φ₀⟩_ψ = 0` is stated to be an arbitrary convention rather than a closure — which is what lets meq use a local gauge instead; (128), the force balance, against which (136) reduces to `Δ*ψ = −4πR² ∂p/∂ψ\|_R − II′`; and §11.3 with (243), the low-Mach limit, which **is the static equation meq already solves** and is therefore a free regression test. Gaussian units, and `ψ` is poloidal flux per radian — the same convention as meq's `g g′`. Open access | RotatingGK.pdf |
 | Comput. Phys. Commun. 260 (2021) 107264 | https://doi.org/10.1016/j.cpc.2020.107264 | Li & Zhu, *Solving the Grad–Shafranov equation using spectral elements for tokamak equilibrium with toroidal rotation* — the extension of NIMEQ, NIMROD's equilibrium solver. **The closest prior art to what meq is doing**: a high-order FEM Grad–Shafranov solver with toroidal rotation, and the source of the exact benchmark. Their (8), `P = P₀(ψ)exp[m_iΩ²R₀²/2T (R²/R₀² − 1)]` with `T = T_i + T_e`, **is** RoPP's isothermal closure with the gauge referenced to the magnetic axis rather than to `⟨R²⟩_ψ` — independent support for the local gauge. §3.1 gives a **new closed-form rotating Solov'ev solution**, (14)–(15), whose `M₀ → 0` limit (16) is the static Solov'ev particular solution; that is meq's acceptance test for FL-4. **Two cautions.** Its source is constant in `ψ`, so `∂F/∂ψ = 0` and it says nothing about the Jacobian. And **its eq (9) carries two sign errors** — the `dΩ/dψ` and `dT/dψ` corrections to `∂P/∂ψ` are both reversed relative to differentiating their own (8), found independently twice and confirmed to 40 digits. Harmless for both of their benchmarks, because each has `dC/dψ = 0`; live for anyone implementing (9) with profiled `T(ψ)` or `Ω(ψ)`. Their (6) also omits the `μ₀` their (9) carries, and their §5 parameters contradict their own Fig. 2 caption by a factor of 1.3e5 — use the text's values Also reports that the optimal range of their Picard relaxation parameter *narrows* with rotation, which is a hint the problem stiffens | SpectralElementGSRotation.pdf |
-| Plasma Physics 22 (1980) 579–594 | https://doi.org/10.1088/0032-1028/22/6/007 | Maschke & Perrin, *Exact solutions of the stationary MHD equations for a rotating toroidal plasma*. **A second exact benchmark for (136), and the citation everyone gives for it is wrong** — Li & Zhu's [48] and `TODO` both name a Phys. Lett. A 102 (1984) 106 paper; the 1980 one is what is actually reproduced. **And this row's own doi was wrong until 2026-09-01**: it read `.../22/6/009`, which Crossref resolves to *Propagation of guided electron plasma waves on a plasma cylinder* — a different article in the same issue. The right one ends `/007`. So the rule in this file's preamble caught a doi that had been checked against the *volume and page*, which agree, rather than against the *title*, which did not. It carries **two** solutions in two closures and only one is ours. **§4** takes the *temperature* as a surface quantity (`B·∇T = 0`) and is (136)'s isothermal closure; **§3** is a genuine polytrope `p = A(S)ρ^γ` and is **not**. The trap is that `γ` appears in §4 too — but only inside `γΩ²`, where its whole job is to make `Ω` the adiabatic Mach number, so it cancels out of the solution and **every `γ` is usable**, not just `γ = 1`. Verified by direct substitution into meq's equation set rather than by re-derivation: 8e-26 relative by 50-digit finite differences, exactly zero by sympy, with `g g′ ≠ 0` exercised. Restore `μ₀` by `p_SI = p_M&P/μ₀`, since they work in `j = ∇×B`. Two caveats: their (4.7) forces `C` constant, so this fixture **cannot see** the `C′(ψ)` term — the very term Li & Zhu got the sign of wrong — and `∂F/∂ψ = 0`, so it sits beside `Soloviev.hpp` rather than `McCarthy.hpp` | MaschkePerrin.pdf |
+| Plasma Physics 22 (1980) 579–594 | https://doi.org/10.1088/0032-1028/22/6/007 | Maschke & Perrin, *Exact solutions of the stationary MHD equations for a rotating toroidal plasma*. **A second exact benchmark for (136), and the citation everyone gives for it is wrong** — Li & Zhu's [48] and `TODO` both name a Phys. Lett. A 102 (1984) 106 paper; the 1980 one is what is actually reproduced. **The 1984 paper is real, and its doi is `10.1016/0375-9601(84)90790-4`** — checked 2026-09-02 and recorded here so that the confusable one is pinned rather than looked up again by whoever meets the trap next. The two differ by a single word of title, *An analytic solution* (1984, Phys. Lett. A 102, 106–108) against *Exact solutions* (1980, Plasma Physics 22, 579–594), and the authors do not differ at all. That is the whole mechanism of the confusion. **And this row's own doi was wrong until 2026-09-01**: it read `.../22/6/009`, which Crossref resolves to *Propagation of guided electron plasma waves on a plasma cylinder* — a different article in the same issue. The right one ends `/007`. So the rule in this file's preamble caught a doi that had been checked against the *volume and page*, which agree, rather than against the *title*, which did not. It carries **two** solutions in two closures and only one is ours. **§4** takes the *temperature* as a surface quantity (`B·∇T = 0`) and is (136)'s isothermal closure; **§3** is a genuine polytrope `p = A(S)ρ^γ` and is **not**. The trap is that `γ` appears in §4 too — but only inside `γΩ²`, where its whole job is to make `Ω` the adiabatic Mach number, so it cancels out of the solution and **every `γ` is usable**, not just `γ = 1`. Verified by direct substitution into meq's equation set rather than by re-derivation: 8e-26 relative by 50-digit finite differences, exactly zero by sympy, with `g g′ ≠ 0` exercised. Restore `μ₀` by `p_SI = p_M&P/μ₀`, since they work in `j = ∇×B`. Two caveats: their (4.7) forces `C` constant, so this fixture **cannot see** the `C′(ψ)` term — the very term Li & Zhu got the sign of wrong — and `∂F/∂ψ = 0`, so it sits beside `Soloviev.hpp` rather than `McCarthy.hpp` | MaschkePerrin.pdf |
 | Phys. Plasmas 11 (2004) 604–614 | https://doi.org/10.1063/1.1637918 | Guazzotto, Betti, Manickam & Kaye, *Numerical study of tokamak equilibria with arbitrary flow* — the FLOW code. **A different and harder problem than meq's**: poloidal *as well as* toroidal flow, where the equation changes type across the poloidal sonic surface and the free functions multiply. Kept as context and as a possible cross-check in a pure-toroidal isothermal limit, **not as a test of (136)**. Its value to meq is the survey of what an equilibrium-with-flow code has to get right, and the reminder that "equilibrium with flow" names a family rather than an equation. Paywalled | GuazzottoFLOW.pdf |
+
+## Anisotropic pressure
+
+`p_∥ ≠ p_⊥`, so the scalar `p(ψ)` in the source is replaced by a pair. **This is
+the other generalisation, and it is independent of the rotation one above.**
+`TODO` names the question that decides how large a job it is, and none of these
+rows answers it yet: whether the anisotropy enters as a **modified source under
+an unchanged `Δ*`**, in which case only `src/meq/Source.{hpp,cpp}` changes and
+the discretisation is untouched — or whether it **changes the operator**, in
+which case the HDG assembly changes too and this is a much larger piece of work.
+
+**Every row here is an unread seed, and the provenance is the reason to be
+careful.** They are transcribed from CEDRES++'s bibliography — the set a
+production free-boundary code thought worth citing as future work, not a
+literature search — which is exactly the provenance this file's opening rule
+exists for. Checked against Crossref on 2026-09-02, that transcription turned
+out to carry **one dead article number** and **one structural surprise**.
+
+**THE LIST IS NOT SEVEN ANISOTROPIC-PRESSURE PAPERS.** It is a *mixed* list of
+flow papers and anisotropy papers, because CEDRES++ names both as planned
+extensions and the transcription copied the list whole. Sorted by what the
+authoritative titles actually say:
+
+| | |
+|---|---|
+| **anisotropy** | Zwingmann 2001, Cooper 2009, Pustovitov 2010 |
+| **anisotropy *and* flow** | Fitzgerald 2013 |
+| **flow only** | Goedbloed & Lifschitz 1997, Maschke & Perrin 1984, Guazzotto 2004 |
+| **neither directly** | Grad 1967 — foundational, and the origin of the guiding-centre plasma Fitzgerald's title invokes |
+
+Three of those seven are therefore about **rotation**, which is
+`FLOW-PLAN.md`'s subject and not this one. `TODO` had already caught two of them
+— it flags Maschke & Perrin as a wrong citation and Guazzotto as a different and
+harder problem — so the pattern was half seen; the check is what shows it covers
+Goedbloed & Lifschitz as well. Maschke & Perrin and Guazzotto stay in *Toroidal
+rotation* above, where they belong, and are not duplicated here.
+
+**So Fitzgerald et al is the one to read first**, on two independent counts: it
+is the only *implementation* in the list, and it is the only entry that treats
+anisotropy and toroidal rotation together — which, if it holds up, makes this
+section and `FLOW-PLAN.md` one piece of work rather than two, exactly as `TODO`
+suspected from the title. Note what the bibliographic check does and does not
+establish: that the paper exists and says so, not that the physics composes.
+
+| Reference | URL (doi or arxiv) | Short Description | File Name |
+| --- | --- | --- | --- |
+| Nuclear Fusion 53 (2013) 113040 | https://doi.org/10.1088/0029-5515/53/11/113040 | Fitzgerald, Appel & Hole, *EFIT tokamak equilibria with toroidal flow and anisotropic pressure using the two-temperature guiding-centre plasma*. **The place to start**, being the only implementation in the list and the only entry carrying both generalisations at once; the reference most likely to answer whether `Δ*` survives the anisotropy. **`TODO` transcribed the article number as 113408, and that doi is a 404** — the correct one is **113040**, a transposition of the last two digits, which is precisely the class of error a page-and-volume check waves through. Free to read at IOP, no open licence. Unread seed | Fitzgerald-AnisotropicEFIT.pdf |
+| Plasma Physics and Controlled Fusion 43 (2001) 1441–1456 | https://doi.org/10.1088/0741-3335/43/11/302 | Zwingmann, Eriksson & Stubberfield, *Equilibrium analysis of tokamak discharges with anisotropic pressure*. The nearest of these to meq's own setting — axisymmetric and tokamak, equilibrium analysis rather than a 3D code — so the one to read beside Fitzgerald for what anisotropy does to an axisymmetric equilibrium. Free to read at IOP, no open licence. Unread seed | Zwingmann-AnisotropicEquilibrium.pdf |
+| Plasma Physics and Controlled Fusion 52 (2010) 065001 | https://doi.org/10.1088/0741-3335/52/6/065001 | Pustovitov, *Anisotropic pressure effects on plasma equilibrium in toroidal systems*. Theory rather than an implementation, and therefore the one to read for what the anisotropy does to the equilibrium relations themselves before reading a code that has already committed to a closure. Free to read at IOP, no open licence. Unread seed | Pustovitov-AnisotropicPressure.pdf |
+| Computer Physics Communications 180 (2009) 1524–1533 | https://doi.org/10.1016/j.cpc.2009.04.006 | Cooper, Hirshman, Merkel, Graves, Kisslinger, Wobig, Narushima, Okamura & Watanabe, *Three-dimensional anisotropic pressure free boundary equilibria*. **Read the first word of the title before planning around this one**: it is 3D and, from the author list, the VMEC/ANIMEC stellarator line — so it is evidence about the anisotropic closure and about what a free-boundary anisotropic solve has to get right, and **not** a template for an axisymmetric HDG discretisation. Hybrid open access at Elsevier. Unread seed | Cooper-Anisotropic3D.pdf |
+| The Physics of Fluids 10 (1967) 137–154 | https://doi.org/10.1063/1.1761965 | Grad, *Toroidal Containment of a Plasma*. The foundational entry, and the one whose relevance is least direct: its abstract is about the nonexistence of flux surfaces, uncontained particle drifts and the nonexistence of self-consistent equilibria at small gyroradius, and does not mention anisotropy. It is here because Grad is the origin of the guiding-centre plasma that Fitzgerald's title invokes, so it is background to the **closure** rather than to the numerics. The journal registers under its pre-1994 name, *The Physics of Fluids*, which is why a search for "Physics of Fluids" can miss it. Paywalled. Unread seed | Grad-ToroidalContainment.pdf |
+| Physics of Plasmas 4 (1997) 3544–3564 | https://doi.org/10.1063/1.872251 | Goedbloed & Lifschitz, *Stationary symmetric magnetohydrodynamic flows*. **A flow paper, not an anisotropy one**, and the title alone will not tell you: its abstract is about translation-symmetric self-similar flow, four velocity regimes separated by limiting-line and Alfvén singularities, and the three MHD shocks that connect them — anisotropic pressure does not appear in it. Kept in this section because that is where the transcription put it, flagged because it is the row most likely to be read as something it is not. Its nearest relative in `refs/` is `GuazzottoFLOW.pdf` and the same caution governs both: *flow* names a family of equations rather than one, and the difference between "close" and "the same" is this project's standing hazard. `TODO` abbreviates the title as "Stationary symmetric MHD flows"; the record spells out *magnetohydrodynamic*. Paywalled. Unread seed | GoedbloedLifschitz-StationaryFlows.pdf |
+
+**Guazzotto, Betti, Manickam & Kaye 2004** is the seventh entry of the
+transcribed list and is **already in this file**, under *Toroidal rotation*, as
+`GuazzottoFLOW.pdf` — fetched and annotated. It is not repeated here.
 
 ## Free boundary: the direction after the fixed-boundary target
 
@@ -373,6 +445,106 @@ the paper before leaning on it.
 | ✔ SIAM Journal on Scientific Computing 34 (2012) A28–A47 | https://doi.org/10.1137/110823237 | Cockburn, Sayas & Solano, **Coupling at a Distance HDG and BEM** — the method meq's free boundary is built on, and the reason free boundary is approachable at all. An exterior Dirichlet problem solved by HDG on a **polyhedral** subdomain `D_h` coupled to a spectral method on a **smooth** artificial boundary `Γ` that the mesh does not fit, the two joined by Dirichlet-to-Neumann operators in the unmeshed region between. **Its reference [5] is Cockburn & Solano, which is meq's stage 5**: the family of paths, the extension `E_h(q_h)` and the lifting `L_h(g) = g∘a + ∫_σ C E_h(q_h)·m` are `mfem::TransferPath`, `ElementExtension` and `TransferredDatumCoefficient` term for term — so the free-boundary coupling is stage 5 with the datum `g` unknown instead of zero. Optimal orders measured with `dist(Γ_h, Γ) = O(h)`, which is assumption P.1 and which `meq::AdaptiveDomain` already maintains. §4.2 is the circular interface, where the boundary integrals are explicit — Gatica & Hsiao's uncoupling. **Two things meq does differently and deliberately**: their §4.3 couples by a Richardson fixed point between interior and exterior, which is outside the residual and is exactly what meq rejects everywhere else; and for the *axisymmetric* operator on a **semicircular** `Γ` the exterior map is diagonal in a Gegenbauer basis, so the BEM collapses to a symbol and there are no integral operators at all — derived and measured in `FREE-BOUNDARY-PLAN.md` §3, not in this paper. Paywalled | CouplingAtADistance.pdf |
 | Journal of Mathematical Analysis and Applications 189 (1995) 442–461 | https://doi.org/10.1006/jmaa.1995.1029 | Gatica & Hsiao, the **uncoupling** of boundary integral and finite element methods for *nonlinear* boundary value problems. The trick: choose the artificial coupling boundary to be a **circle** (or a sphere in 3-D), which lets the boundary integral operators be inverted *exactly*, so the weak formulation retains only one boundary term — the weakly singular single-layer operator. They report the coding and computational work more than halved against standard coupling, and the quadrature made much easier because what survives is only weakly singular. Their model problem is exactly the shape of the free-boundary vacuum region: a nonlinear second-order elliptic equation inside, becoming Laplace in the unbounded exterior. Note the authorship: Gatica is at Universidad de Concepción, the same department as Solano of the two Grad–Shafranov papers. Paywalled | DecouplingBIM-FEM.pdf |
 
+## Solution inversion: psi(R,z) to R(psi,l), z(psi,l)
+
+**This is `ROADMAP.md` item 10's missing machinery**, and the same machinery
+`MANTA-COUPLING.md` needs for both of its "genuinely hard" items --
+flux-surface-averaged geometry and its psi-derivative. The prior art in this
+tree is `v0-legacy:FluxSurfaces.cpp`, a predictor-corrector tracer that
+**has never compiled** (`main()` has an uninitialised declaration and an
+undeclared `psi_values`); the `Trace` function itself is sound and is textbook
+Allgower-Georg.
+
+**EVERY ENTRY BELOW IS A SEED.** The surveys they came from quoted them at
+length, but none has been read against meq's own formulation to the standard
+this file's preamble means by the tick, so none carries one. Replace the
+annotation when you read it.
+
+**Four findings the surveys established, recorded here because they decide the
+design and are spread across several of the papers below.**
+
+* **Subdivide-then-march -- what ParaView, VisIt, VTK and MFEM's exporters all
+  do -- is second order in the SUB-CELL size with NO `k`-dependence at all.**
+  Remacle et al.'s error reduces by `2^{2r}` for `r` levels of subdivision and
+  the polynomial degree never enters. The naive route throws away `k-1` orders,
+  which is the same structural gap `CLAUDE.md` records for `B` in the band,
+  arriving from the other direction.
+* **The "chords give second order" objection is NOT binding.** The
+  representation error is governed by the point spacing `ds`, which is a free
+  parameter decoupled from `h` and `k`. Chords need `ds <~ h^{(k+1)/2}`; cubic
+  Hermite using the tangent from **`q`** needs only `ds <~ h^{(k+1)/4}` --
+  about one point per element at `k = 3` -- and costs nothing, since the tracer
+  already evaluates `q`.
+* **For a CLOSED surface, a periodic parametrisation plus the equispaced
+  trapezoidal rule converges GEOMETRICALLY** (Trefethen & Weideman). **The trap
+  is the metric**: build a spectral rule and then difference neighbouring node
+  positions for `|dx/dtheta|` and the whole scheme silently reverts to second
+  order. `q` gives the arc-length element pointwise at full order. Not seen
+  stated anywhere; this file is the record.
+* **An exact rational contour exists only for `k = 2`.** A level set of a
+  degree-`d` bivariate polynomial is an algebraic curve of degree `d`, and a
+  rational parametrisation needs genus 0 -- a generic smooth plane cubic has
+  genus 1. So Wiley et al.'s exactness is a `k = 2` technique in principle, not
+  for want of effort, and meq runs to `k = 4`. Note also that meq's solve mesh
+  is **straight-sided**, so their rational *quartic* (which comes from allowing
+  curved element geometry) collapses to a conic here.
+
+**AND THE GAP THAT IS MEQ'S TO FILL.** No paper in any of the three surveys
+treats iso-contouring a field whose **gradient is an independently solved
+unknown at the same order**. The nearest is the gradient-augmented level set
+line (Nave, Rosales & Seibold), where the gradient is *advected* rather than
+co-solved. Separately, nobody extracts from a `P_k` finite-element psi at
+`O(h^{k+1})` and demonstrates that `q(psi)` and the flux-surface averages
+converge at that rate. meq is the only code in either survey with `q` in hand.
+
+| Reference | URL (doi or arxiv) | Short Description | File Name |
+| --- | --- | --- | --- |
+| Computer Physics Communications 190 (2015) 72–88 | https://doi.org/10.1016/j.cpc.2015.01.015 | Lee & Cerfon, **ECOM** — **the central reference for this item, and the only paper that treats extraction as a numerical-analysis problem in its own right.** Chebyshev-local Newton along radial rays (bracket the Chebyshev subinterval, build a local expansion, Newton, typically `m <= 5`), derivatives taken from the *same* Chebyshev representation so `dpsi/dr` on the contour is spectral too, then resample to equispaced `theta` and apply the trapezoidal rule — spectral **because** the integrand is periodic. Contours are placed on a **global Chebyshev grid in psi**, which is what protects the magnetic *shear* and not merely `q`. Their §IV Fig. 5 compares `q` and `s-hat` error against CHEASE **at equal run time**: CHEASE wins on `q` at small grids (the conformal map's crowding), shear is comparable, and ECOM wins outright as the grid refines. **Limitation that matters: the conformal map cannot handle an X-point.** | ECOM.pdf |
+| Computer Physics Communications 97 (1996) 219–260 | https://doi.org/10.1016/0010-4655(96)00046-x | Lütjens, Bondeson & Sauter, **CHEASE** — the existing precedent for **order-preserving extraction from a finite-element psi**, which is exactly meq's situation. `ISOFIND` traces surfaces by intersecting them with the equilibrium mesh and **bisecting the element cubic** ("performance tests have shown that numerical evaluation of the roots by a bissection method is much cheaper ... than using the analytical Cardan formulas"), and the flux-surface integrals are done by a method that **"preserves the accuracy of the bicubic finite element solution"**. Also the reference for the star-shaped assumption being built into a *discretisation* rather than into an extractor: the polar mesh is re-centred on the magnetic axis after a coarse solve so that the innermost surfaces are guaranteed to surround the grid centre. §2.1 restricts to a **single magnetic axis**. | CHEASE.pdf |
+| IEEE TVCG 15 (2009) 1227–1234 | https://doi.org/10.1109/tvcg.2009.194 | Etiene, Scheidegger, Nonato, Kirby & Silva — **where the order-of-accuracy numbers come from**, and the methodological match to this project. They apply the **method of manufactured solutions** to six isosurfacing codes and measure observed order against derived formal order: **vertex position `O(h^2)` (measured 1.94), normals `O(h)` (0.93), curvature does not converge at all (measured −3.35)**. Two things to carry: the geometric error carries a constant proportional to `1/\|grad f\|`, so it is **worst exactly at the magnetic axis and the X-point**; and their order study **found real bugs** (a hard-coded iteration cap in a root finder) that no visual inspection or unit test had caught — the same argument `CLAUDE.md` makes for rate tables over unit suites, reached independently. | Verifiable_Visualization_for_Isosurface_Extraction.pdf |
+| Computer Methods in Applied Mechanics and Engineering 313 (2017) 759–784 | https://doi.org/10.1016/j.cma.2016.10.019 | Fries, Omerović, Schöllhammer & Steidl, **higher-order meshing of implicit geometries, part I** — the **rigorous `O(h^{k+1})` reconstruction of a curved zero level set**, from the unfitted-FEM literature rather than the visualization one, and **simplex-friendly** where Saye's hyperrectangle method is not. Reports optimal convergence on the automatically reconstructed surface meshes, and records that **node placement optimised for integration beats equally-spaced nodes** significantly. Part II (`10.1016/j.cma.2017.07.037`) is approximation and integration *on* the extracted manifold and is the half that bears on flux-surface averages. **The local copy is the arXiv preprint (1706.00578v1), not the version of record.** | HigherOrderMeshing.pdf |
+| The Visual Computer 24 (2008) 187–200 | https://doi.org/10.1007/s00371-007-0184-x | Reuter, Mikkelsen, Sherbrooke, Maekawa & Patrikalakis — polynomial system solving in the **barycentric Bernstein basis**, so the subdivision primitive is a **triangle** rather than a bounding box. **meq's mesh is native to it**, with no box-splitting of triangular elements, plus degree elevation to tighten the convex hull. This is the route to finding the magnetic axis and any X-point **exhaustively**: the hull test discards only provably-empty cells, so nothing can be missed. Displaces the box-based literature (Sherbrooke & Patrikalakis' Projected Polyhedron, `10.1016/0167-8396(93)90019-y`; Mourrain & Pavone, `10.1016/j.jsc.2008.04.016`) for this application. **Pair it with a degree test, and note that topological degree gives the SUM of indices, never a count — degree zero does not imply no root, so it is a certification test and never an exclusion test.** | SolvingNonlinearPolynomialsBarycentric.pdf |
+| Joint EUROGRAPHICS–IEEE TCVG Symposium on Visualization (VisSym 2003) 167–176 | https://doi.org/10.2312/VisSym/VisSym03/167-176 | Wiley, Childs, Gregorski, Hamann & Joy, *Contouring Curved Quadratic Elements*. **The exact-contour result, and its ceiling.** "A contour in a bivariate quadratic function defined over a triangle in parameter space is a conic section and can be represented by a rational-quadratic function, while in physical space it is a rational quartic." The quartic arises only from allowing **curved element geometry**; meq's solve mesh is straight-sided (`curveBoundaryOnto` is output-only and runs last), so the physical-space contour of a `k = 2` field is itself an exact conic. **It does not extend past `k = 2`** — see the genus argument above. Predecessor: Worsey & Farin, `10.1016/0167-8396(90)90041-o`. **Not in Crossref** — Eurographics registers its own handles; the doi resolves to `diglib.eg.org` and encodes the page range. | Contouring_Curved_Quadratic_Elements.pdf |
+| Dagstuhl Follow-Ups 2 (2011) 276–291 | https://doi.org/10.4230/DFU.Vol2.SciViz.2011.276 | Pagot, Vollrath, Sadlo, Weiskopf, Ertl & Comba, *Interactive Isocontouring of High-Order Surfaces* — **the best short survey of the direct-extraction field**; its §2 is the map. Also the honest caveat on interval arithmetic for FEM data ("polynomials with hundreds of coefficients and thousands of polynomials ... for each frame") and on point-based methods ("every isovalue change typically takes several minutes"). Its Fig. 1 is a **DG** simulation. **Not in Crossref** — Dagstuhl registers with DataCite; the doi resolves to `drops.dagstuhl.de`. | IsocontouringHOSurfaces.pdf |
+| IEEE TVCG 12 (2006) 114–125 | https://doi.org/10.1109/tvcg.2006.12 | Nelson & Kirby — ray-tracing spectral/hp elements for isosurfaces, the origin of the **ElVis** line. Restrict the field to a ray **within one element**, giving a univariate polynomial, and root-find; the element partitioning is what respects the DG jump, since roots are sought segment by segment and never interpolated across a face. Later members: `10.1109/tvcg.2011.206` (cut surfaces on the GPU), `10.1109/tvcg.2012.218` (ElVis itself), `10.1109/tvcg.2013.96` (volume rendering). Note the 2011 paper's contouring **assumes `C^0` across faces**, which is the assumption meq's field does not satisfy. | ray-tracing-polymorphic-multidomain-spectral-hp-elements.pdf |
+| Computer Graphics Forum 21 (2002) 19–32 | https://doi.org/10.1111/1467-8659.00563 | Theisel, *Exact Isosurfaces for Marching Cubes* — trilinear contours as trimmed rational cubic Bézier patches, i.e. the exact level set of the interpolant marching cubes only approximates. Relevant as the tensor-cell analogue of Wiley et al., and as the demonstration that "exact" is available for low-degree interpolants and not beyond. *Crossref gives pp. 19–32; the PDF's own header says 19–31.* | IsosurfacesForMarchingCubes.pdf |
+| SIAM Journal on Scientific Computing 35 (2013) A212–A230 | https://doi.org/10.1137/120874059 | Mirzaee, King, Ryan & Kirby — **SIAC filtering on unstructured triangular meshes**, which is the principled answer to "the contour does not close up across a face". Convolving a B-spline kernel against a DG field raises inter-element regularity to `C^{k-1}` and **increases** the order of accuracy rather than smearing it, so you contour the filtered field. **The unstructured-triangle case is the one that matters for meq**; the uniform-mesh superconvergence result is the classical one. | SmoothnessIncreasingFilters.pdf |
+| Journal of Scientific Computing 38 (2009) 164–184 | https://doi.org/10.1007/s10915-008-9230-8 | Walfisch, Ryan, Kirby & Haimes — the **one-sided** SIAC variant, which is what makes the filter usable near a domain boundary where the symmetric kernel's support runs off the edge. Directly relevant on the extension path, where `Gamma_h` is where the interesting surfaces are. Companion: Steffen, Curtis, Kirby & Ryan, `10.1109/tvcg.2008.9`, the streamline-integration original. | OneSidedSmoothnessFilters.pdf |
+| Journal of Computational Physics 375 (2018) 1179–1204 | https://doi.org/10.1016/j.jcp.2018.09.017 | Maunoury, Besse, Mouysset, Pernet & Haas — builds a **representation mesh adapted to the `hp` solution** rather than tessellating uniformly, which is the middle road between subdivide-then-march and true high-order extraction. Successor: Feuillet, Maunoury & Loseille, `10.1016/j.jcp.2020.109860`, "pixel-exact" rendering of high-order meshes *and* solutions. | PostProcessingForVis.pdf |
+
+**FOUR OF THESE ARRIVED 2026-09-02 AND ARE NOW ON DISK**; the file name column
+says which. Allgower & Georg is on disk only in part and outside `refs/` — see
+its row.
+
+| Reference | URL (doi or arxiv) | Short Description | File Name |
+| --- | --- | --- | --- |
+| SIAM Classics in Applied Mathematics 45 (2003) | https://doi.org/10.1137/1.9780898719154 | Allgower & Georg, *Introduction to Numerical Continuation Methods* — **the textbook for what `v0-legacy:FluxSurfaces.cpp` already does.** Ch. 3 Newton as corrector (17–27); ch. 5 convergence of Euler-Newton methods (37–43); **ch. 6 steplength adaptation (44–60), seventeen pages, the longest topic in the book**; ch. 8 detection of bifurcation points (75–90), which is what an X-point is in this language; and **ch. 15, "Approximating Implicitly Defined Manifolds" (233–251)**, the under-cited one and the closest to covering a whole family of surfaces rather than one path. The load-bearing fact: **the predictor's order buys step length, not accuracy** — the corrector puts every accepted point on the level set to solver tolerance regardless, which is why Euler-plus-Newton is the norm. Original: Springer SCM 13 (1990), `10.1007/978-3-642-61257-2`. **The free PDF that used to sit on the author's page is now a SOFT 404 — HTTP 200 with an HTML body — so a status-code check passes and hands you a 274-byte "PDF".** **THE WHOLE BOOK IS ON DISK at `~/AllgowerBook/1.9780898719154.ch{1..16}.pdf`**, outside `refs/` because it is per-chapter rather than one document. **Ch. 15 is the one to read before choosing a representation**, and not for the reason its title suggests: with `H(R, z, c) = psi(R,z) − c` the entire family of flux surfaces is ONE implicitly defined 2-manifold, and since `dH/dc = −1` everywhere that manifold has **no critical points at all** — it is smooth over the axis and over an X-point, where the individual level sets are not curves. See `INVERSION-PLAN.md` §3.1. | `~/AllgowerBook/` (ch. 1–16) |
+| SIAM Review 56 (2014) 385–458 | https://doi.org/10.1137/130932132 | Trefethen & Weideman, *The Exponentially Convergent Trapezoidal Rule* — why a closed flux surface should be integrated in a **periodic** parameter, and the justification for the whole Fourier-in-angle approach. Geometric rather than algebraic convergence for a smooth periodic integrand. | TrefethenTrapezoidal.pdf |
+| Computational Geometry 24 (2003) 75–94 | https://doi.org/10.1016/s0925-7721(02)00093-7 | Carr, Snoeyink & Axen, *Computing contour trees in all dimensions* — **the canonical contour-tree construction**: join tree and split tree by one union-find sweep each, then merged. `O(n log n + N alpha(N))`, the `n log n` being a global sort of vertex heights. Stated for simplicial complexes in any dimension, so unstructured triangles are native. **For meq only the JOIN tree is needed** — "nested closed surfaces bounded by the separatrix" is purely a superlevel-set question, which halves the work. The output-sensitive version, Chiang, Lenz, Lu & Rote, `10.1016/j.comgeo.2004.05.002`, sorts only the *critical* vertices at `O(N + t log t)`, which for `t ~ 3` removes the sort entirely. | ComputingContourTrees.pdf |
+| IEEE TVCG 26 (2020) 162–172 | https://doi.org/10.1109/tvcg.2019.2934338 | Jallepalli, Levine & Kirby — **the DG obstruction, measured.** Evaluates the three standard ways of getting a high-order FEM field into a topological analysis (regular-grid sampling, element subdivision, L-SIAC) and finds all lossy, all distorting of feature shape, and — counterintuitively — **sampling and subdivision can perform WORSE as sampling resolution increases**. Read before building anything topological on `psi_h`. **meq has an asset this literature does not assume: HDG carries a single-valued trace `psihat` on every face, which is a ready-made gluing rule — topology consistent by construction rather than by filtering.** That last sentence is this project's inference, not the paper's. | The_Effect_of_Data_Transformations_on_Scalar_Field_Topological_Analysis_of_High-Order_FEM_Solutions.pdf |
+| Computer Graphics Forum 36 (2017) 23–33 | https://doi.org/10.1111/cgf.13165 | Nucha, Bonneau, Hahmann & Natarajan, *Computing Contour Trees for 2D Piecewise Polynomial Functions* — **the only paper on this exact problem**, per-cell monotone path tracing then stitched. A Crossref search for follow-up work by that group returns none. | ComputingContourTrees2D.pdf |
+| Discrete & Computational Geometry 37 (2007) 103–120 | https://doi.org/10.1007/s00454-006-1276-5 | Cohen-Steiner, Edelsbrunner & Harer, *Stability of Persistence Diagrams* — the reason persistence is the right tool for spurious critical points **and** the reason its threshold need not be tuned: the diagram is 1-Lipschitz in the sup norm, so **every spurious feature has persistence at most `2\|\|psi_h - psi\|\|_inf`**, a quantity meq already measures to convergence-rate precision. A threshold derived from the discretisation error rather than guessed. Foundational paper: Edelsbrunner, Letscher & Zomorodian, `10.1007/s00454-002-2885-2`. | — |
+
+**A scoping result that belongs with these, established 2026-09-02 and not from any
+single paper.** For meq's **fixed-boundary** problem the whole open-versus-closed
+and separatrix-crossing apparatus is **not needed**. Poincare-Hopf on a disc gives
+`#max + #min - #saddle = chi = 1`, and the *maximum principle* — not topology —
+supplies `#min = 0`, since single-signed `F` makes `psi` a supersolution of a
+uniformly elliptic operator so its minimum sits on `Gamma`. Hence one axis implies
+**zero interior saddles**. **Free boundary is where this changes, and it changes by
+force**: the vacuum region makes the domain an **annulus**, `chi = 0`, so
+`#max + #min - #saddle = 0` and with one axis a saddle **must** exist. X-points are
+forced by the topology of the domain rather than being incidental. Two carve-outs:
+GS-2 §4.4, whose reversed core current destroys the supersolution property and is
+the one fixed-boundary case where an interior saddle is possible; and rotating
+runs where the object of interest is `p` rather than `psi`, since `p` is not a flux
+function and has its own critical points in its own places.
+
+**And a trap worth one line: the Morse-Smale complex gives the WRONG curves.** Its
+"separatrices" are integral curves of `grad psi`, **orthogonal** to the level sets;
+the plasma separatrix is the level **set** through the X-point. Reaching for an MS
+complex expecting one yields the perpendicular family.
+
 ## Other analytic benchmarks, and what each one actually tests
 
 meq's benchmark ladder is a ladder in how the source depends on `ψ`, because
@@ -404,7 +576,7 @@ the Newton path has not yet been pushed on. `TODO` has the equations transcribed
 | Physics of Plasmas 14 (2007) 112508 | https://doi.org/10.1063/1.2803759 | Guazzotto & Freidberg, a family of analytic equilibrium solutions. Listed for completeness and to keep it distinct from McCarthy: an earlier version of this file wrongly credited HDG-GS-1's eq. (14) to this paper. Paywalled | GuazzottoFreidberg.pdf |
 | Journal of Computational Physics 243 (2013) 28–45 | https://doi.org/10.1016/j.jcp.2013.02.045 | Pataki, Cerfon, Freidberg, Greengard & O'Neil, a fast high-order Grad–Shafranov solver. For cross-comparison of error levels rather than as a test case. Paywalled | GS-FastHighOrder.pdf |
 | Journal of Computational Physics 316 (2016) 63–93 | https://doi.org/10.1016/j.jcp.2016.04.002 | Palha, Koren & Felici, a **mimetic spectral element** solver. The most directly comparable numbers in the literature: it reports convergence for Solov'ev, FRC and spheromak analytic solutions, so its tables can be read against meq's. Paywalled | GS-MimeticSpectral.pdf |
-| arXiv:2606.11821 (2026) | https://arxiv.org/abs/2606.11821 | VEQ, a fast parametric fixed-boundary solver with flexible source profiles. Listed for one idea worth stealing regardless of the solver: it reports **both** a projected residual norm and a *pointwise strong-form* residual, and uses the pair to tell genuine convergence from a projection that has merely stopped moving. Preprint; doi not yet checked | VEQ.pdf |
+| arXiv:2606.11821 (2026) | https://arxiv.org/abs/2606.11821 | Zhang, Xie, Li, Meng, Wang & Wang, *VEQ: a fast parametric Grad–Shafranov solver for fixed-boundary tokamak equilibria with flexible source profiles*. Listed for one idea worth stealing regardless of the solver: it reports **both** a projected residual norm and a *pointwise strong-form* residual, and uses the pair to tell genuine convergence from a projection that has merely stopped moving. Its own abstract is the argument for the pair — enriching the representation improves *interior* force balance while the global RMS and maximum stay "dominated by near-boundary contributions", which is a diagnosis a projected norm alone cannot make. Its unknowns are MXH flux-surface harmonics and shifted-Chebyshev profile coefficients, so the parametrisation is nothing like meq's and the diagnostic is the transferable part. **Checked against the arXiv API 2026-09-02**: the id resolves, the title and the six authors are as given, submitted 2026-06-10 — and there is **no published doi**, the entry carrying neither `journal_ref` nor `doi` where arXiv:1605.01538 carries both, with a Crossref title search finding no version of record either. Preprint only, and **not a future-dated id**: 2606 is June 2026, which is in the past. Unread seed | VEQ.pdf |
 
 ## The finite element library
 

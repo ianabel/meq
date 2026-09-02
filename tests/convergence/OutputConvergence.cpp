@@ -230,6 +230,143 @@ BOOST_AUTO_TEST_CASE( theBandIsContinuedByTheFluxAtTheFluxesOwnOrder )
 	            "continued outside its own element behaves like this" );
 }
 
+/// `B` USED TO BE ZEROTH ORDER IN THE BAND. THIS IS THE TEST THAT SAYS IT IS
+/// NOT ANY MORE, AND IT MEASURES BOTH SIDES SO THE CLAIM IS A COMPARISON.
+///
+/// Until 2026-09-02 the driver sent `B` through sampleComponent(), which reads
+/// the FOOT on Gamma_h -- so about one node in ten of the interchange file
+/// carried a piecewise-constant field, `O( h )`, while `psi` beside it got the
+/// flux's Taylor step and `q` itself resolves at `k+1`. Nothing could see it:
+/// the `inside` mask says 1 in the band, and the only band test in this file
+/// tested `psi`.
+///
+/// THE FIELD IS A QUADRATIC AND P2 HOLDS IT EXACTLY, which is the design of the
+/// test rather than a convenience. With no projection error anywhere, an
+/// interior node must be exact to round-off and the band error is the Taylor
+/// truncation ALONE -- so the rate measures the continuation and nothing else,
+/// unlike the `psi` test above whose 3.75 mixes in the flux's own projection
+/// error.
+///
+/// AND ITS GRADIENT IS DELIBERATELY ASYMMETRIC -- `d u0/dz = 2*gamma*z` against
+/// `d u1/dr = beta*z` -- because MFEM's `grad( i, j )` is component-first and
+/// reading it transposed is otherwise a silent error that a symmetric test
+/// field would pass.
+BOOST_AUTO_TEST_CASE( theBandVectorContinuesAtItsGradientsOrder )
+{
+	double const alpha = 0.7, gamma = 0.5, beta = -1.3;
+	int const degree = 2;
+	meq::tests::Rectangle const inner{ 0.8, 1.2, -0.2, 0.2 };
+
+	auto exactly = [ = ]( int component, double r, double z )
+	{
+		return component == 0 ? alpha*r*r + gamma*z*z : beta*r*z;
+	};
+
+	auto measure = [ & ]( int cells, double &viaFoot, double &interiorWorst )
+	{
+		mfem::Mesh mesh = meq::tests::makeMesh( inner, cells );
+		mfem::L2_FECollection collection( degree, mesh.Dimension() );
+		mfem::FiniteElementSpace vector( &mesh, &collection, 2 );
+
+		mfem::VectorFunctionCoefficient fieldOf( 2,
+			[ = ]( mfem::Vector const &x, mfem::Vector &u )
+			{
+				u( 0 ) = alpha*x( 0 )*x( 0 ) + gamma*x( 1 )*x( 1 );
+				u( 1 ) = beta*x( 0 )*x( 1 );
+			} );
+
+		mfem::GridFunction field( &vector );
+		field.ProjectCoefficient( fieldOf );
+
+		meq::GridSampler sampler( mesh, 0.7, 1.3, 41, -0.3, 0.3, 41 );
+		int const filled = sampler.extendOutward( 1.0 );
+		BOOST_TEST_REQUIRE( filled > 0, "no node was continued at " << cells );
+
+		double const nan = std::numeric_limits<double>::quiet_NaN();
+		std::vector<double> withGradient, atFoot;
+
+		double band = 0.0;
+		viaFoot = 0.0;
+		interiorWorst = 0.0;
+		for ( int component = 0; component < 2; ++component )
+		{
+			sampler.sampleComponentWithGradient( field, component,
+			                                     withGradient, nan );
+			sampler.sampleComponent( field, component, atFoot, nan );
+
+			for ( int j = 0; j < sampler.nodesZ(); ++j )
+				for ( int i = 0; i < sampler.nodesR(); ++i )
+				{
+					if ( !sampler.located( i, j ) )
+						continue;
+
+					std::size_t const at =
+						static_cast<std::size_t>( j )*sampler.nodesR() + i;
+					double const want =
+						exactly( component, sampler.rAt( i ), sampler.zAt( j ) );
+
+					if ( sampler.wasExtended( i, j ) )
+					{
+						band = std::max( band,
+						                 std::abs( withGradient[ at ] - want ) );
+						viaFoot = std::max( viaFoot,
+						                    std::abs( atFoot[ at ] - want ) );
+					}
+					else
+						interiorWorst =
+							std::max( interiorWorst,
+							          std::abs( withGradient[ at ] - want ) );
+				}
+		}
+		return band;
+	};
+
+	double coarseFoot = 0.0, fineFoot = 0.0;
+	double coarseInterior = 0.0, fineInterior = 0.0;
+	double const coarse = measure( 8, coarseFoot, coarseInterior );
+	double const fine = measure( 16, fineFoot, fineInterior );
+
+	double const tiny = 1.0e-300;
+	double const rate = std::log2( coarse/std::max( tiny, fine ) );
+	double const footRate = std::log2( coarseFoot/std::max( tiny, fineFoot ) );
+	double const gain = fineFoot/std::max( tiny, fine );
+
+	std::printf( "\n  band vector continuation, k = %d:\n"
+	             "    with grad u:   %.3e at n = 8, %.3e at n = 16, rate %.2f\n"
+	             "    at the foot:   %.3e at n = 8, %.3e at n = 16, rate %.2f\n"
+	             "    gain at n = 16: %.1fx;  interior nodes exact to %.3e\n",
+	             degree, coarse, fine, rate,
+	             coarseFoot, fineFoot, footRate, gain,
+	             std::max( coarseInterior, fineInterior ) );
+	std::fflush( stdout );
+
+	// The field is in the space, so an interior node has no discretisation error
+	// to show. Anything above round-off here is the sampler, not the extension.
+	BOOST_TEST( std::max( coarseInterior, fineInterior ) < 1.0e-11,
+	            "an interior node is out by "
+	            << std::max( coarseInterior, fineInterior )
+	            << " on a field its own space represents exactly" );
+
+	// O( h^2 ), and 2 is the whole truncation error here rather than a floor
+	// mixed with something else.
+	BOOST_TEST( rate > 1.7,
+	            "the band converges at " << rate << ", not the 2 a first-order "
+	            "Taylor step gives. Is grad u being applied at all?" );
+
+	// THE CONTROL, and it is the assertion that would have caught the original
+	// defect: reading the foot is a zeroth-order continuation and must converge
+	// at about 1. If this ever reads 2 as well, the two paths have silently
+	// become the same path.
+	BOOST_TEST( footRate < 1.4,
+	            "reading the foot converges at " << footRate << ", which is too "
+	            "good for a zeroth-order continuation -- the two sampling paths "
+	            "may have become the same one" );
+
+	BOOST_TEST( gain > 5.0,
+	            "the gradient continuation is only " << gain << " times better "
+	            "than reading the foot, which does not justify its cost" );
+}
+
 /// THE ADAPTIVE SERIES, AND THE ONE ASSERTION THAT CATCHES THE FAILURE THAT
 /// ACTUALLY HAPPENED.
 ///
@@ -435,10 +572,21 @@ BOOST_AUTO_TEST_CASE( theBoundaryBendsOntoTheTrueGamma )
 /// it were k = 1. The picture still looks like a plausible equilibrium. It
 /// looks like a coarser mesh, which is exactly what nobody investigates.
 ///
-/// So the assertion is on the POINT COUNT: high-order output subdivides each
-/// element, so the piece must carry substantially more points than the mesh has
-/// vertices. A regression to linear output would take it to roughly the vertex
-/// count and fail here.
+/// So the assertion is on the POINT COUNT, and it is EXACT rather than an
+/// inequality, because the number is derivable and a derived number catches a
+/// half-regression that a bound does not. A Lagrange triangle of order d carries
+/// ( d + 1 )( d + 2 ) / 2 points, one cell per element, so the piece must hold
+/// exactly numElements * ( d + 1 )( d + 2 ) / 2 of them. A regression to linear
+/// output gives d = 1 and three points per element; a regression to the OLD
+/// subdivision gives d = k, which is a bound away from nothing and is the case
+/// worth catching.
+///
+/// AND THE FIELD IS psi*, WHICH IS WHAT THE DRIVER NOW DRAWS. psi* is P_(k+1),
+/// so the subdivision handed to writeVtu() is k+1 and not k -- drawing a
+/// degree-(k+1) field at degree-k nodes discards exactly the order the
+/// post-processing was done to gain, and it looks like a slightly coarse mesh.
+/// This is the same failure SetHighOrderOutput() exists to prevent, one degree
+/// further along, and it is why the number below moved from 320 to 480.
 BOOST_AUTO_TEST_CASE( theVtkFilesCarryTheHighOrderSolution )
 {
 	meq::analytic::SolovievEquilibrium const &eq = equilibrium();
@@ -455,11 +603,15 @@ BOOST_AUTO_TEST_CASE( theVtkFilesCarryTheHighOrderSolution )
 	solver.setBoundaryData( exact );
 	solver.solve();
 
+	// What the driver writes: psi*, at psi*'s own degree.
+	solver.postProcess();
+	int const drawn = degree + 1;
+
 	mfem::GridFunction field( solver.flux().FESpace() );
 	meq::poloidalField( solver.flux(), field );
 
 	std::string const stem = "meq_test_vtk";
-	meq::writeVtu( stem, mesh, solver.potential(), field, degree );
+	meq::writeVtu( stem, mesh, solver.postProcessedPotential(), field, drawn );
 
 	// The .pvd is INSIDE the collection directory, which is the thing about
 	// this format most likely to be got wrong by a caller. Asserting the
@@ -491,16 +643,34 @@ BOOST_AUTO_TEST_CASE( theVtkFilesCarryTheHighOrderSolution )
 		content.c_str() + points + std::string( "NumberOfPoints=\"" ).size(),
 		nullptr, 10 );
 
-	std::printf( "\n  .vtu at k = %d: %ld points against %d mesh vertices\n",
-	             degree, written, mesh.GetNV() );
+	// The derivation, in code rather than as a literal: one Lagrange cell per
+	// element, ( d + 1 )( d + 2 ) / 2 points on a triangle of order d.
+	// makeMesh() is Cartesian triangles, so 4 x 4 x 2 = 32 elements and 25
+	// vertices; at d = k + 1 = 4 that is 32 x 15 = 480 points, where the old
+	// d = k = 3 gave 32 x 10 = 320.
+	BOOST_TEST_REQUIRE( mesh.GetElement( 0 )->GetGeometryType()
+	                        == mfem::Geometry::TRIANGLE,
+	                    "this derivation is the triangular Lagrange cell's; the "
+	                    "harness mesh is no longer triangles" );
+	long const expected = static_cast<long>( mesh.GetNE() )
+	                      *( drawn + 1 )*( drawn + 2 )/2;
+
+	std::printf( "\n  .vtu at k = %d drawing psi* at degree %d: %ld points "
+	             "against %d mesh vertices, %d elements (expected %ld)\n",
+	             degree, drawn, written, mesh.GetNV(), mesh.GetNE(), expected );
 	std::fflush( stdout );
 
-	BOOST_TEST( written > 2*mesh.GetNV(),
-	            "the .vtu carries " << written << " points for a mesh of "
-	            << mesh.GetNV() << " vertices at k = " << degree << ". That is "
-	            "linear output: SetHighOrderOutput() is off or "
-	            "SetLevelsOfDetail() is 1, and every picture drawn from this "
-	            "file understates the solution by two polynomial degrees" );
+	BOOST_TEST( written == expected,
+	            "the .vtu carries " << written << " points where "
+	            << mesh.GetNE() << " Lagrange triangles of order " << drawn
+	            << " give " << expected << ". At "
+	            << static_cast<long>( mesh.GetNE() )*3 << " it is linear output "
+	            "-- SetHighOrderOutput() off, or SetLevelsOfDetail() at 1. At "
+	            << static_cast<long>( mesh.GetNE() )*( degree + 1 )*( degree + 2 )/2
+	            << " it is subdividing at the SOLVE's degree k = " << degree
+	            << " while drawing psi*, which is P_" << drawn << ": every "
+	            "picture then understates the field by the order the "
+	            "post-processing was done to gain" );
 
 	// Written by MFEM, so removed by hand: Scratch takes one file.
 	std::remove( piece.c_str() );
@@ -576,7 +746,8 @@ BOOST_AUTO_TEST_CASE( theGridFileReadsBackAsTheExactSolution )
 	std::printf( "  ncdump header:\n" );
 	for ( std::string const &needle :
 	      { "R = 33", "Z = 49", "double psi(Z, R)", "double B_R(Z, R)",
-	        "double B_Z(Z, R)", "byte inside(Z, R)" } )
+	        "double B_Z(Z, R)", "byte inside(Z, R)",
+	        "byte extrapolated(Z, R)" } )
 	{
 		bool const present = text.find( needle ) != std::string::npos;
 		std::printf( "    %-24s %s\n", needle.c_str(), present ? "yes" : "MISSING" );

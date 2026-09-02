@@ -1,0 +1,225 @@
+# A TABULATED-PROFILE MHD EQUILIBRIUM on a rectangle: the simplest complete run
+# of meq's general source, and the only example in which Newton has real work to
+# do.
+#
+#     meq examples/mhd-rectangle.toml
+#
+# The equation is the fixed-boundary Grad-Shafranov equation, eqs (1)-(4) of
+# refs/HDG-GradShafranov.pdf:
+#
+#     -grad.( (1/r) grad psi ) = F( r, z, psi )/r    in Omega,   psi = 0 on Gamma
+#
+#     F( r, z, psi ) = mu0 r^2 ( dp/dpsi )( psi ) + ( g dg/dpsi )( psi )
+#
+# with p( psi ) the plasma pressure and g( psi ) = r B_toroidal the toroidal
+# field function. `Type = "mhd"` is the source that takes those two as USER
+# DATA: two tables of numbers, read from text files, with nothing about the
+# plasma hard-coded. Every other source meq ships is a closed form --
+# examples/soloviev-nstx.toml is an analytic benchmark, examples/manufactured.toml
+# is reverse-engineered from a chosen answer, examples/rotating-rectangle.toml
+# builds F out of species and a rotation frequency -- so this is the one that
+# looks like an equilibrium reconstruction, and the one whose input a user of
+# meq would actually write.
+#
+# THE PROFILES ARE THE DERIVATIVE QUANTITIES, which is the single thing most
+# likely to be got wrong. PPrimeFile is dp/dpsi, not p. GGPrimeFile is the
+# PRODUCT g dg/dpsi -- what EQDSK calls FF' -- not g, and not dg/dpsi. meq
+# applies mu0 to the first and nothing at all to the second, and no sign to
+# either. Feed it p and g and it will parse, solve, converge, and report a
+# different equilibrium. examples/mhd-pprime.dat and examples/mhd-ggprime.dat
+# document their own contents and the file format at length.
+#
+# UNITS. SI throughout, and unlike examples/soloviev-nstx.toml nothing here is
+# normalised to a major radius: metres, pascals, teslas, and psi in webers per
+# radian. Mu0 is left at its SI value of 4 pi x 1e-7, so a run in normalised
+# units would have to set it to 1 explicitly -- meq multiplies the r^2 dp/dpsi
+# term by it and leaves g dg/dpsi alone, exactly as the equation above is
+# written, so pre-multiplying a file instead of setting the key gets mu0 onto
+# the wrong term. The tables carry their own units and PPrimeScale converts;
+# see the two .dat headers.
+#
+# THIS ONE IS GENUINELY NON-LINEAR, AND THAT IS WHY IT WAS WRITTEN. dp/dpsi is
+# QUADRATIC in psi, so dF/dpsi depends on psi, so the discrete problem is
+# semi-linear and Newton is not exact in one step. Measured, on the mesh below:
+#
+#        it            ||r||    ||r||/||r_0||    order
+#         0     2.423235e-02     1.000000e+00        -
+#         1     3.224650e-03     1.330721e-01        -
+#         2     2.701132e-04     1.114680e-02    1.230
+#         3     2.635792e-06     1.087716e-04    1.867
+#         4     2.534515e-10     1.045922e-08    1.998
+#         5     6.277438e-17     2.590520e-15        -
+#
+# -- five iterations, observed order 1.998, which is the quadratic endgame
+# CLAUDE.md's *Newton, and the obligation it creates* is about. The Jacobian is
+# carrying mu0 r^2 d2p/dpsi2 through the hybridization and a wrong one would
+# show up here and nowhere else: CLAUDE.md records that perturbing dF/dpsi by 5%
+# leaves every error and every convergence rate in this project unchanged to six
+# figures and only drops the observed order to 1. Both of the other rectangle
+# examples pose an AFFINE problem on purpose -- Solov'ev has dF/dpsi identically
+# zero and the rotating example's density is linear -- so each finishes in one
+# step, and until this file existed nothing in examples/ exercised the Newton
+# path at all.
+#
+# AND IT STAYS OFF THE TRIVIAL BRANCH BECAUSE OF g dg/dpsi, NOT BECAUSE OF THE
+# PRESSURE. dp/dpsi goes as psi^2 and therefore VANISHES at psi = 0, which is
+# the boundary value; on its own that would make F( r, z, 0 ) identically zero,
+# psi = 0 a solution of the homogeneous Dirichlet problem, and Newton -- which
+# starts from the Dirichlet datum -- would stop on it in zero iterations and
+# report success. That is the trap CLAUDE.md records for every source of GS-2
+# sections 4.2 to 4.5, and the reason those need setInitialGuess(). Here
+# g dg/dpsi( 0 ) = 1.35, so F( r, z, 0 ) = 1.35 T^2 m^2 per Wb/rad everywhere,
+# the trivial solution is not a solution, and [guess] is not needed.
+#
+# WHAT COMES OUT, measured on this configuration and quoted so an edit that
+# quietly changes the equilibrium is visible:
+#
+#     max psi                       1.315404e-01 Wb/rad
+#     magnetic axis                 R = 1.742 m, Z = 0 m
+#     Shafranov shift               +4.2 cm outboard of the box centre
+#     p on axis                     9.10e+03 Pa
+#     max |B_poloidal|              0.389 T
+#     plasma current                8.80e+05 A
+#     max|dF/dpsi| / lambda_1       0.56
+#
+# The last row is the reaction ratio CLAUDE.md uses to talk about stiffness --
+# the Jacobian's mass term measured against the first Dirichlet eigenvalue of
+# the box, 14.905. At 0.56 this is a comfortable problem: the pedestal of GS-2
+# section 4.2 sits at 7 and converges, the current hole at 26 and does not.
+#
+# The pressure term is a real part of F rather than a correction on g dg/dpsi,
+# which is what makes the non-linearity worth having. Along the midplane:
+#
+#     r        1.20    1.40    1.61    1.75    2.00    2.20
+#     share      0%     15%     42%     51%     35%      0%     of F
+#
+# It is zero at both ends because dp/dpsi vanishes with psi there, and about
+# half at the axis.
+#
+# THE CONTROL IS ONE KEY AWAY AND IS WORTH RUNNING. Set PPrimeScale = 0.0 and
+# change nothing else: F collapses to the affine g dg/dpsi alone, the equation
+# becomes linear, and Newton finishes in ONE step, 2.423235e-02 -> 7.478e-15.
+# The INITIAL residual is bit-identical to the run above -- 2.423235e-02 either
+# way -- because dp/dpsi vanishes at psi = 0 and Newton starts from the
+# Dirichlet datum, so the two problems are indistinguishable until the first
+# step has been taken. That is as clean a demonstration as this file can give of
+# which of the two profiles supplies the non-linearity.
+#
+# IS IT A PLAUSIBLE TOKAMAK? Roughly, and deliberately so, since a "sensible"
+# example that is physically absurd teaches the wrong reflexes. R0 = 1.7 m with
+# a half-width of 0.5 m and a half-height of 0.7 m is an ASDEX-Upgrade-sized
+# machine at elongation 1.4; 0.88 MA of plasma current and 0.39 T of poloidal
+# field are what such a device runs; and 9.1 kPa on axis is n = 1e19 m^-3 at
+# 2.3 keV with equal ion and electron temperatures. The current is the integral
+# of j_phi = r dp/dpsi + ( g dg/dpsi )/( mu0 r ) over the .nc grid, which is a
+# consequence of the two profiles rather than an input. The one number this file
+# does NOT determine is the toroidal field, because the equation contains g only
+# through g dg/dpsi -- g itself is fixed only up to a constant of integration,
+# which is vacuum data rather than equilibrium data. Assume the 2.5 T such a
+# machine would have and the cylindrical safety factor
+# q* = 2 pi a b B_0/( mu0 R0 I_p ) comes out at 2.9.
+#
+# WHAT THIS FILE DOES NOT EXERCISE, said plainly because it is not obvious from
+# looking at it.
+#
+#   * NORMALISED FLUX. The profiles here are functions of psi in Wb/rad, so
+#     psi_ax is not needed and is not an unknown. Equilibrium codes normally
+#     tabulate against Psi = psi/psi_ax instead, which makes psi_ax a functional
+#     of the solution and the Jacobian non-local; `Normalised = true` and
+#     `PsiAxis` under [source] are how that is asked for, and it is a different
+#     class -- meq::NormalisedMHDSource, closed by a bordered Newton.
+#     examples/rotating-normalised.toml is the worked example of that path, and
+#     examples/rotating-density.dat set against its own -normalised twin is the
+#     worked example of what the change does to a table.
+#
+#   * THE CURVED BOUNDARY. Gamma here is the mesh's own rectangle, so this is
+#     the fitted path and no transfer happens. examples/miller-curved.toml is
+#     the extension technique of GS-2 section 3, which is what meq is for.
+#
+#   * THE ADAPTIVE LOOP. There is no [adaptivity] table below, so this is one
+#     solve. examples/miller-adaptive.toml is the loop.
+#
+#   * ANY COMPARISON AGAINST A CLOSED FORM. A tabulated source has no exact
+#     solution, so `[boundary] Type = "exact"` is refused for an mhd source at
+#     parse time with an explanation rather than silently solving something
+#     else, and what a run of this file demonstrates is the driver, the
+#     discretisation and the Newton path on a well-posed problem -- not a
+#     published equilibrium.
+#
+#   * A NetCDF PROFILE SET. `[source] ProfileFile`, one file holding several
+#     profiles at once, is reserved and refused; today each profile is a
+#     constant or its own text table.
+
+[mesh]
+# A tokamak-shaped box: R0 = 1.7 m, half-width 0.5 m, half-height 0.7 m, so an
+# inverse aspect ratio of 0.29 at an elongation of 1.4. The plasma boundary IS
+# this rectangle -- see [boundary] -- which is why the corners are worth a
+# thought: a right angle puts an r^2 log r term in the solution and caps a
+# self-convergence rate at about 3 whatever the polynomial degree, as CLAUDE.md
+# records under *Testing stance*. It costs this example nothing, since nothing
+# here is measuring a rate.
+RMin = 1.2              # m
+RMax = 2.2              # m
+ZMin = -0.7             # m
+ZMax = 0.7              # m
+
+# Cells of about 0.125 m x 0.117 m, halved once: 768 triangles, 4608 solved
+# dofs in the potential space, and the whole run is under two seconds.
+NR = 8
+NZ = 12
+RefinementLevels = 1
+
+[discretisation]
+PolynomialDegree = 2    # k; psi and q both converge at k+1
+Tau = 1.0               # HDG stabilisation; O(1) suffices, and 1.0 is the default
+
+[source]
+Type = "mhd"
+
+# dp/dpsi, tabulated in MPa per Wb/rad, so PPrimeScale converts to meq's Pa per
+# Wb/rad. The profile is 12.0 psi^2 MPa per Wb/rad, i.e. p = 4.0e6 psi^3 Pa: a
+# pressure peaked on the magnetic axis whose GRADIENT vanishes at the plasma
+# edge, which is both physical and the source of every bit of psi-dependence in
+# dF/dpsi. See the file's own header before editing it.
+PPrimeFile = "examples/mhd-pprime.dat"
+PPrimeScale = 1.0e6
+
+# g dg/dpsi, tabulated in T^2 m^2 per Wb/rad, which is already meq's unit for
+# it -- so GGPrimeScale is omitted and defaults to 1.0. The profile is
+# 4.5( 0.3 - psi ), falling 44% from the edge to the axis, which is the
+# diamagnetic direction. Positive over the whole solution, so F > 0 and psi > 0
+# in the interior by the maximum principle, and nonzero at psi = 0, which is
+# what keeps this run off the trivial branch.
+GGPrimeFile = "examples/mhd-ggprime.dat"
+
+# Mu0 defaults to meq::vacuumPermeability, 4.0e-7 pi = 1.2566370614e-6, and
+# multiplies ONLY the r^2 dp/dpsi term. Set it to 1.0 to work in units where the
+# pressure is already measured in units of magnetic pressure; do not fold it
+# into the table instead, or it lands on the wrong term.
+
+[boundary]
+# psi = 0 on the boundary of the mesh, which here is the rectangle above. A
+# well-posed fixed-boundary problem, and not a published equilibrium; see
+# examples/miller-curved.toml for a Gamma that is a real plasma shape.
+Type = "zero"
+
+[solver]
+# The problem is non-linear, so these matter. NewtonMaxIterations = 20 is ten
+# times what this configuration needs; the tolerances are meq's usual pair, and
+# the absolute one is what a warm start would be measured against -- see
+# CLAUDE.md on why a target scaled to ||r_0|| makes a good guess fail.
+NewtonMaxIterations = 20
+NewtonRelativeTolerance = 1.0e-10
+NewtonAbsoluteTolerance = 1.0e-14
+
+[output]
+# Writes ./mhd-rectangle.mesh, ./mhd-rectangle_psi.gf and
+# ./mhd-rectangle_grad_psi.gf for GLVis and for meq's own restart;
+# ./mhd-rectangle/mhd-rectangle.pvd at degree 2 for ParaView; and
+# ./mhd-rectangle.nc with psi, B_R and B_Z on a 129 x 129 grid, which is the
+# interchange format tools/plot_equilibrium.py reads. tools/README.md says which
+# reader goes with which.
+Directory = "."
+Prefix = "mhd-rectangle"
+GridNR = 129
+GridNZ = 129

@@ -206,18 +206,30 @@ namespace meq
 			 * converging at h^(1/2), and eta is nothing but that. The other four
 			 * terms are unaffected and keep k+1.
 			 *
-			 * Leaving those faces out is an OMISSION, not a fix: the paper's eta_5
-			 * does sum over boundary edges, with b_h = phi_h there. The proper
-			 * repair is to evaluate phi_h -- mfem::PathTraceCoefficient and
-			 * mfem::ExtensionRegionQuadrature are the pieces -- and it is written up
-			 * in the stage-6 report rather than guessed at here. Until then the
-			 * elements along Gamma_h are still covered by eta_1 to eta_4.
+			 * PASS @a datumIn AND THE FACES ARE NO LONGER LEFT OUT, WHICH IS THE
+			 * REPAIR RATHER THAN THE OMISSION. The paper's eta_5 does sum over
+			 * boundary edges, with b_h = phi_h there, and
+			 * GradShafranovSolver::transferredDatum() rebuilds that phi_h --
+			 * mfem::TransferredDatumCoefficient, which did not exist when this
+			 * exclusion was written. eta_5 then compares psi* against the
+			 * condition actually imposed instead of against a zero standing in
+			 * for it, and the term converges with the rest.
+			 *
+			 * BOTH BEHAVIOURS ARE KEPT ON PURPOSE, and the difference is one
+			 * argument, because that is what a convergence study of the change
+			 * needs: theTransferredDatumRestoresEtaFive measures the two side by
+			 * side over the same refinement sequence.
 			 *
 			 * @param markerIn  sized by the largest boundary attribute, 1 where the
 			 *                  datum is transferred. Copied. An empty array, the
 			 *                  default, excludes nothing.
+			 * @param datumIn   phi_h on those faces, or null to leave them out as
+			 *                  before. BORROWED, and must outlive this estimator;
+			 *                  it also reads the solver's flux, so it goes stale
+			 *                  the moment the solver is solved again.
 			 */
-			void setTransferredBoundary( mfem::Array<int> const &markerIn );
+			void setTransferredBoundary( mfem::Array<int> const &markerIn,
+			                             mfem::Coefficient *datumIn = nullptr );
 
 			/// Quadrature order added to twice the degree of the potential in use.
 			/// The default of 4 matches the rule the convergence tests measure the
@@ -261,6 +273,7 @@ namespace meq
 			Potential potentialChoice;
 			TraceComparison comparisonChoice;
 			mfem::Array<int> transferredBoundary;
+			mfem::Coefficient *transferredDatumCoefficient = nullptr;
 			int extraQuadratureOrder;
 
 			/// Mesh::GetSequence() at the last compute, so that a refinement

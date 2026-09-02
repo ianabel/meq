@@ -115,6 +115,51 @@ namespace meq
 			}
 	}
 
+	void GridSampler::sampleComponentWithGradient( mfem::GridFunction const &field,
+	                                               int component,
+	                                               std::vector<double> &values,
+	                                               double fill ) const
+	{
+		values.assign( static_cast<std::size_t>( nR )*nZ, fill );
+		mfem::Vector vector;
+		mfem::DenseMatrix gradient;
+		for ( std::size_t at = 0; at < element.size(); ++at )
+		{
+			int const e = element[ at ];
+			if ( e < 0 )
+				continue;
+
+			field.GetVectorValue( e, point[ at ], vector );
+			double value = vector( component );
+
+			// Interior nodes have a zero offset, so this costs them a branch and
+			// nothing else -- the same shape as samplePotentialWithFlux().
+			if ( offsetR[ at ] != 0.0 || offsetZ[ at ] != 0.0 )
+			{
+				mfem::ElementTransformation *transformation =
+					mesh.GetElementTransformation( e );
+				transformation->SetIntPoint( &point[ at ] );
+				field.GetVectorGradient( *transformation, gradient );
+
+				// grad( i, j ) = d u_i / d x_j: COMPONENT first, DIRECTION
+				// second. Transposing it is wrong at every node whose gradient
+				// is not symmetric and silent everywhere else, so the test field
+				// in theBandVectorContinuesAtItsGradientsOrder is deliberately
+				// one with an asymmetric gradient.
+				value += gradient( component, 0 )*offsetR[ at ]
+				         + gradient( component, 1 )*offsetZ[ at ];
+			}
+			values[ at ] = value;
+		}
+	}
+
+	bool GridSampler::wasExtended( int i, int j ) const
+	{
+		std::size_t const at = static_cast<std::size_t>( index( i, j ) );
+		return element[ at ] >= 0
+		       && ( offsetR[ at ] != 0.0 || offsetZ[ at ] != 0.0 );
+	}
+
 	double GridSampler::blendWeight( int i, int j ) const
 	{
 		return blend[ static_cast<std::size_t>( index( i, j ) ) ];

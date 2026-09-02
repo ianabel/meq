@@ -81,16 +81,35 @@ band `O(h)` wide that is inside the plasma and outside the mesh.
   positive value down and never changes its sign, so all 17 nodes survived it.
   The error was in *where the field was evaluated*, not in how it was weighted.
 
-  **AND `B` DOES NOT GET ANY OF THAT. IT IS ZEROTH ORDER IN THE BAND, BEHIND AN
-  `inside = 1` MASK.** Only `samplePotentialWithFlux()` applies the Taylor step;
-  `sample()`, `sampleComponent()` and `sampleCoefficient()` never read
-  `offsetR`/`offsetZ` at all, so for a band node they return the value **at the
-  foot on `Γ_h`** — and `apps/meq.cpp` sends `ψ` through the first and `B`
-  through `sampleComponent`. Measured on the committed `miller-curved.nc`:
+  **`B` GETS THE BAND TOO, SINCE 2026-09-02, AND IT USED TO BE ZEROTH ORDER
+  THERE BEHIND AN `inside = 1` MASK.** Only `samplePotentialWithFlux()` applied
+  the Taylor step; `sample()`, `sampleComponent()` and `sampleCoefficient()`
+  never read `offsetR`/`offsetZ` at all, so for a band node they return the
+  value **at the foot on `Γ_h`** — and `apps/meq.cpp` sent `ψ` through the first
+  and `B` through `sampleComponent`. Measured on `miller-curved.nc`:
   `extrapolated_nodes = 1667` of 129×129 = 16,641, so about **one node in ten
-  carries a piecewise-constant `B`**, `O(h)`, in a field `q` itself resolves at
+  carried a piecewise-constant `B`**, `O(h)`, in a field `q` itself resolves at
   `k+1` and that `ψ` receives at `O(h²)` in the same band. `B = (−q_z, +q_r)` is
-  a pure relabelling, so there is no `1/r` softening it.
+  a pure relabelling, so nothing softened it.
+
+  **`sampleComponentWithGradient()` is the fix**, and it takes the same Taylor
+  step from the same foot, using the field's own `∇u` — which is read *inside*
+  the element, so the guarantee that nothing is evaluated outside one survives.
+  `theBandVectorContinuesAtItsGradientsOrder` measures both sides on a quadratic
+  its own space represents exactly, so the band error is the truncation alone:
+  **rate 2.20 with the gradient against 0.92 reading the foot, and 124× smaller
+  at `n = 16`**, interior nodes exact to 2.2e-15.
+
+  **IT DOES NOT REACH `ψ`'s ORDER AND THE GAP IS STRUCTURAL, NOT A SHORTCUT.**
+  `ψ` is continued with `q`, a **solved** variable carrying the potential's own
+  order — that is the mixed method paying off. There is no solved variable for
+  `∇q`: differentiating an L2 field of degree `k` leaves `k−1`, so this is
+  `O(h²)` at every `k`. A full order better than what it replaced, and not the
+  same thing. **The route to better is known and was not taken**: `div q = −F/r`
+  is the equation being solved and `∂_r q_z − ∂_z q_r = −q_z/r` follows from
+  `r q = ∇̄ψ`, which pin two of `∇q`'s four entries exactly — but they leave the
+  symmetric traceless part still differentiated, so they buy *structure* rather
+  than an order, at the cost of plumbing the source into `GridSampler`.
 
   **AND THE COST IS MEASURED, NOT ESTIMATED.** Wiring the rotating output gave
   a free controlled experiment: `n_s` is algebraic in `(r, ψ)`, so the same
@@ -103,14 +122,19 @@ band `O(h)` wide that is inside the plasma and outside the mesh.
   `OutputConvergence.cpp`, and it exists because the trap was met and dodged for
   the new fields while `B` was left in it two lines above.
 
-  **Two things make it worse than a missing feature.** `extendOutward()` counts
-  band nodes as found, so `located()` is true and the mask says `inside = 1`
-  there — and `theMaskAgreesWithTheData` asserts mask-matches-non-NaN, which is
-  precisely the property that makes the band look trustworthy. And
-  `extrapolated_nodes` is a **count, not a mask**, so a downstream reader cannot
-  tell which nodes to distrust. `theBandIsContinuedByTheFluxAtTheFluxesOwnOrder`
-  tests `ψ` only; there is no band test for `B` at all. **This is the interchange
-  format, and `B` is what most readers open it for.** ROADMAP item 11.
+  **AND THE FILE NOW SAYS WHICH NODES THOSE ARE**, which was the other half of
+  the defect and is not fixed by making `B` better. `extendOutward()` counts band
+  nodes as found, so `located()` is true and `inside` says 1 there — correctly,
+  since the node is in the plasma and carries real data — and
+  `theMaskAgreesWithTheData` asserts mask-matches-non-NaN, which is precisely the
+  property that made the band look trustworthy. `extrapolated_nodes` was a
+  **count, not a mask**, so nothing downstream could tell *which*. The `.nc`
+  carries a second `byte extrapolated( Z, R )` beside `inside`, from
+  `GridSampler::wasExtended()`; on `miller-curved` it sums to 1667, agreeing with
+  the attribute, and is a strict subset of `inside`. Drop those nodes before
+  computing an error norm or differencing two runs. **This is the interchange
+  format, and `B` is what most readers open it for**, which is why it was an item
+  rather than a footnote.
 * **The `.vtu` bends the mesh onto `Γ`** — a curvature is installed and each
   boundary face is moved out. Since the VTK is already Lagrange cells this
   needed **nothing further from the format**; the two features composed.
@@ -181,9 +205,47 @@ cheap discriminator*.
 
 **What the driver refuses rather than approximates**: `[boundary] Type =
 "exact"` needs a closed form `meq::Source` does not carry, and exits 1 with an
-explanation. The interpolating warm start of `DRIVER-PLAN.md` §4 needs GSLIB and
-is not written; the exact restart — same mesh, same degree — is, and it is a
-*first-cycle* guess only.
+explanation. **That is now the only thing it refuses.**
+
+**THE INTERPOLATING WARM START IS WIRED, 2026-09-02, AND THIS PARAGRAPH USED TO
+SAY IT "NEEDS GSLIB AND IS NOT WRITTEN".** Both halves of that were false and had
+been for months: `MFEM_USE_GSLIB` is `YES`, `meq::FieldTransfer` is
+`FindPointsGSLIB` in `WarmStart.{hpp,cpp}`, and `WarmStartConvergence` was
+already a registered ctest. Only the driver-side wiring was missing, in two
+places, and both are done:
+
+* **A stored guess on a DIFFERENT mesh** used to throw. It now transfers, so
+  restarting from a run at another resolution — the ordinary way to use a stored
+  answer — works. The exact restart is still taken when the meshes match, since
+  it is every coefficient rather than an interpolation.
+* **Adaptive cycles after the first used to start COLD**, throwing away a
+  converged answer at every refinement. They now start from the previous cycle
+  interpolated onto the refined mesh, with the Dirichlet datum as the fallback
+  at nodes the coarse mesh does not cover — and on the curved path there really
+  are such nodes, since the computational domain grows as it refines: measured,
+  48 and 360 of them on `miller-adaptive`.
+
+**WHAT IT BUYS, AND THE MEASUREMENT NEEDED A NONLINEAR SOURCE TO EXIST AT ALL.**
+meq's adaptive examples run a Solov'ev source, whose `∂F/∂ψ` is zero, so Newton
+takes one step whatever it starts from — `miller-adaptive` shows `1` in every
+cycle warm or cold, and the warm start is unmeasurable there by construction. On
+`ManufacturedNonlinear` over three cycles at `k = 2`,
+`carryingTheAnswerAcrossCyclesCutsTheWork` reads:
+
+| | per cycle | total | final L2 |
+|---|---|---|---|
+| cold | 4, 4, 4 | 12 | 3.652757e-06 |
+| **warm** | **4, 2, 2** | **8** | 3.652757e-06 |
+
+**A third of the Newton work, and the same answer to 2.5e-12.** Both halves are
+asserted: strictly fewer iterations, and an L2 that does not move — a warm start
+must change the work and not the answer.
+
+**`theDriverRunsTheAdaptiveLoop` now reads 4.4e-14 rather than 1.7e-16** for
+exactly this reason, and that is a stronger assertion rather than a weaker one:
+the driver warm-starts each cycle and the library loop it is pinned against
+deliberately does not, so the number is now a statement that the warm start left
+the equilibrium alone.
 
 **The non-linear ordering is `NonlinearOrdering::NPC`**, since MFEM deleted the
 mode meq's default used to be. `CondenseThenLinearise` is kept as the backup and
@@ -255,9 +317,27 @@ gcovr --root .. --filter 'src/meq/' --print-summary        # or --html-details
 ```
 
 `MEQ_ENABLE_COVERAGE` is an option, not a build type, on purpose: a coverage
-build wants `-O0`, and routing that through `CMAKE_BUILD_TYPE` would silently
-drop `NDEBUG` for anyone who had set it, changing which `MFEM_ASSERT`s are live.
-Stage 4 found a `BlockVector` size mismatch that *only* an assert catches.
+build wants `-O0` and a release build wants `-O3`, and that difference should be
+chosen rather than inherited from whatever `CMAKE_BUILD_TYPE` happens to hold.
+
+**THE REASON THIS FILE USED TO GIVE WAS WRONG, AND IT IS THE KIND OF WRONG THAT
+COSTS SOMEBODY AN AFTERNOON.** It said routing `-O0` through
+`CMAKE_BUILD_TYPE` would drop `NDEBUG` and change which `MFEM_ASSERT`s are
+live. It would not. Audited 2026-09-02:
+
+* `MFEM_ASSERT` is gated on **`MFEM_DEBUG`**, never on `NDEBUG`
+  (`general/error.hpp`), and nothing anywhere in the installed tree derives one
+  from the other.
+* The installed MFEM has **`MFEM_DEBUG = NO`**, so **every `MFEM_ASSERT` is
+  already dead in every meq build**, release or debug.
+* meq's own sources contain **no `assert()` and no `<cassert>`**, so `-DNDEBUG`
+  disables nothing of meq's either. It is inert here.
+
+So `cmake -DCMAKE_BUILD_TYPE=Debug` on meq buys the debugger and nothing else,
+and the standing advice under *Traps* to take a debug build "for this reason
+alone" **did not work as written** and has been corrected. Recovering those
+assertions needs a *second MFEM install* configured `MFEM_DEBUG=YES` — a
+different and much larger undertaking, and one nobody has done.
 
 **CI CANNOT BUILD THE SOLVER, AND THIS IS STRUCTURAL.** The MFEM meq needs is
 `meq-integration`, a local merge published on no remote, so a hosted runner
@@ -410,13 +490,46 @@ to the adaptive loop: on `Γ_h` the term compares `ψ*` against a trace pinned t
 *zero* rather than the `φ_h` actually imposed, so the difference is
 `O(dist(Γ_h, Γ)) = O(h)`. Unmitigated, `η = 4.09e-1` where `η₁ = 2.12e-3`,
 converging at ~0.5 — the loop would have run, produced plausible pictures, and
-refined the wrong elements. `setTransferredBoundary()` excludes those faces and
-`η` then converges at `k+1` on the extension path too. **That is an omission, not
-a repair**: the proper fix is to evaluate `φ_h`, and **MFEM now offers the route
-— `mfem::TransferredDatumCoefficient` in `fem/darcy/extension_hdg.hpp`.** So the
-blocker is gone and the omission is meq's own; rebuilding `η₅` on it wants its
-own convergence measurement rather than a switch, which is the only reason it has
-not been done. ROADMAP item 3.
+refined the wrong elements.
+
+**THAT WAS AN OMISSION AND IT IS NOW A REPAIR, 2026-09-02.**
+`setTransferredBoundary()` used to *exclude* those faces, which restored `k+1`
+by deleting the term exactly where the geometry error lives. It now takes the
+datum as a second argument — `GradShafranovSolver::transferredDatum()`, built on
+`mfem::TransferredDatumCoefficient` — so `η₅` compares `ψ*` against the `φ_h`
+actually imposed and the faces stay in. Measured on the extension benchmark at
+`k = 2` over `h = 0.213 / 0.106 / 0.053`, all three treatments on one solve:
+
+| | coarsest | finest | rate |
+|---|---|---|---|
+| `η₁`, for scale | 2.1161e-03 | 4.7256e-05 | — |
+| **`η₅` on the datum** | **9.5889e-05** | **2.0281e-06** | **2.78** |
+| `η₅` on the pinned zero | 4.0688e-01 | 2.3226e-01 | 0.40 |
+| `η` with the datum | 2.1746e-03 | 4.8375e-05 | 2.75 |
+| `η` with the faces excluded | 2.1745e-03 | 4.8375e-05 | 2.75 |
+
+So the term is now **two percent of `η₁`** rather than four orders larger than
+it, and it converges at `k+1` rather than at a half.
+`theTransferredDatumRestoresEtaFive` in `ExtensionConvergence.cpp` is that table,
+and it keeps the pinned column as its control: if that ever converges, the
+comparison is empty.
+
+**η BARELY MOVES, AND THAT IS THE POINT RATHER THAN A DISAPPOINTMENT.** The
+excluded and datum columns agree to four figures, because a correctly evaluated
+`η₅` on `Γ_h` is small. What changes is that the boundary elements now *have* an
+`η₅` contribution instead of none, so the marking sees them. The adaptive loop is
+unchanged — 97 → 254 → 342 → 449, `η` 4.7352e-04 → 6.8668e-05 — which is what
+says the repair did not perturb what already worked.
+
+**THE SIGN IS THE THING TO GET RIGHT, AND IT IS TESTED SEPARATELY.**
+`transferredDatum()` must hand `mfem::PathLiftCoefficient` the **raw flux
+block**, which holds `−q`, and not `flux()`, whose sign is undone. Feed it the
+wrong one and `φ_h` comes back as `−ψ` rather than `ψ`, because the `g(a(x))`
+that would otherwise survive is zero on `Γ`. So the failure is the answer with
+its sign reversed, not a small bias.
+`theTransferredDatumReproducesTheImposedCondition` checks `φ_h` against the
+exact `ψ` it transfers — 1.65e-3 → 4.0e-5 relative, converging at 3.25 then 3.63
+— and a sign error reads about 2.
 
 ## The discretisation
 
@@ -2960,12 +3073,20 @@ the answer is merely wrong.
 passed a three-block vector (flux, potential, trace) where `DarcyHybridization`
 expects two: `GetOffsets()` stops at the potential, and `ReduceRHS` does
 `darcy_rhs = b_t`, whose `BlockVector::operator=` calls
-`mfem_error("Number of Blocks don't match")`. It survived because the checks on
-that path are `MFEM_ASSERT`, compiled out with `NDEBUG`. Found in stage 4 and
+`mfem_error("Number of Blocks don't match")`. Found in stage 4 and
 fixed by passing views over `darcy->GetOffsets()`, as
 `DarcyOperator::ImplicitSolve` does — **a latent defect in the linear path, not
-something Newton introduced.** Worth a debug build now and then for this reason
-alone.
+something Newton introduced.**
+
+**THE EXPLANATION THIS ENTRY USED TO CARRY WAS WRONG.** It said the linear path
+survived because its checks are `MFEM_ASSERT`, "compiled out with `NDEBUG`", and
+concluded that a debug build was "worth doing now and then for this reason
+alone". Neither half holds: `MFEM_ASSERT` is gated on `MFEM_DEBUG`, not on
+`NDEBUG`, and the installed MFEM sets `MFEM_DEBUG = NO` — so those checks are
+dead in **every** meq build and **a meq debug build revives none of them**. What
+actually caught the semi-linear path was `mfem_error`, which is unconditional.
+See *Coverage* above for the audit. The failure mode is still real; only the
+advice was.
 
 **A nonlinear potential mass and a linear one do not mix, and how it fails
 depends on where the integrators sit.** With *face* integrators on the linear
@@ -3052,8 +3173,27 @@ way.
   bare test binary, which gets diagnosed as "the run is slow". Drop the `^`.
 * **`grep -c` exits 1 on zero matches**, so a background check reports failure
   spuriously.
+* **`pgrep -f` AND `pkill -f` MATCH THE INVOKING SHELL'S OWN COMMAND LINE.**
+  This is the one that has now fired three times in a day, twice on the same
+  afternoon, and it fails in two different directions. A waiter built on
+  `pgrep -f "cmake --install build"` matches *itself*, so it reports the install
+  running for as long as the session lasts and the thing it waits for is never
+  seen — the install had in fact finished minutes earlier. And `pkill -f ctest`
+  in a shell whose own command line contains `ctest` **kills that shell**, which
+  surfaces as an unexplained exit code 144 (128 + SIGTERM) rather than as
+  anything mentioning the pattern. Use `pgrep -x`/`pkill -x`, which match the
+  process *name*, or check for the artefact — a file's timestamp, an exit
+  marker — rather than for a process at all.
 
 **If a waiter is used, check it actually fired.**
+
+**AND NEVER `cmake --build` WHILE `ctest` IS RUNNING.** Done here on 2026-09-02
+for a comment-only header change, which relinked ten test binaries *including
+the one ctest was starting*. Nothing errored — replacing a running executable's
+file leaves the running process on its old inode — so the run continued and
+would have reported a pass over a mix of old and new binaries. A suite result is
+only an acceptance measurement if every binary in it is the one being committed;
+that run was killed and re-run rather than believed.
 
 **The four defects meq reported to MFEM are closed**, though
 `HDG-DEFECTS-FROM-MEQ.md` itself is **not** gone — it is alive on `gf-hdg-dev`
@@ -3220,7 +3360,23 @@ examples/    TOML run configurations
 refs/        Refs.md is tracked; the PDFs are gitignored, fetch by doi
 attic/       free-boundary/ -- not ported, not built, kept visible; its own
              README says why
-docs/        the LaTeX manual, which predates the port
+docs/        the Sphinx manual, published to Read the Docs. Built by
+             `make -C docs html` or the `docs` CMake target, both under
+             -W to match .readthedocs.yaml's fail_on_warning. Citations
+             are sphinxcontrib-bibtex over docs/references.bib, which is
+             written by hand from refs/Refs.md and is meant to agree with
+             it. docs/manual/ is the pre-Sphinx LaTeX manual, moved intact
+             and keeping its own Makefile.
+
+             THE SPLIT IS DELIBERATE. These pages are what a USER needs;
+             this file is what a maintainer needs. Almost every choice in
+             meq was settled by measurement, so the docs say which way it
+             came out and that it was measured, and then tell the reader
+             to measure it themselves wherever the choice is exposed as an
+             option -- the trace solver, the assembly mode, the ordering,
+             the globalisation, MKL_NUM_THREADS. The NUMBERS stay here,
+             beside the tests that produce them, because a measurement in
+             a manual goes stale silently.
 ```
 
 Code style follows the sibling project MaNTA: **tab indentation**, Allman braces,

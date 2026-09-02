@@ -61,8 +61,10 @@ With nothing red, the order is what it was, plus a second planned physics item:
    no new geometry, no cut quadrature and nothing from the other tree. Free
    boundary is the more valuable and the more structural. Neither blocks the
    other, and both want item 1's normalised plumbing first.
-3. **Hygiene** — item 3 — alongside either. `README.md` is the oldest debt in
-   the tree and still describes a project that did not exist.
+3. ~~**Hygiene** — item 3 — alongside either. `README.md` is the oldest debt in
+   the tree and still describes a project that did not exist.~~ **Item 3 is
+   closed, 2026-09-02**: the README is true, and `docs/` is a Sphinx manual on
+   Read the Docs.
 
 Items 4 and 5 are the other tree's to act on; item 6 is meq's and is small and
 not urgent; item 7 is a closed investigation kept for its answer; item 10 — the
@@ -199,17 +201,22 @@ recorded beside `examples/soloviev-nstx.toml`. `CLAUDE.md` has the numbers.
 
 **What is left, in the order it is worth doing:**
 
-* **Wire `meq::NormalisedMHDSource` through `Config` and `SourceFactory`.** The
-  solver takes `ψ_ax` as an unknown and the production source that needs it
-  exists and is unit tested, but a TOML file cannot ask for either. That is the
-  gap between "meq can compute a profile equilibrium" and "meq can be *told* to",
-  and it is small: a `[profiles] Normalised = true` and the `ψ_ax` guess, which
-  is a required input on that path and not an optional one. **It is now a
-  prerequisite for two things rather than one** — item 9's rotating source needs
-  the same plumbing, so this gets written once.
-* **7d, the interpolating warm start — MUCH SMALLER THAN THIS FILE SAID, and
-  the correction is worth the space.** It was recorded as "needs GSLIB and is
-  not written". The library half **is** written, and has been since `51eb735`:
+* ~~**Wire `meq::NormalisedMHDSource` through `Config` and `SourceFactory`**~~ —
+  **DONE**, by FL-8, and written once for both as this bullet predicted.
+  `Normalised = true` plus a `PsiAxis` guess reaches it, `makeNormalisedSource()`
+  is the door, and `makeSource` **throws** on a normalised config rather than
+  quietly solving a different problem. `examples/rotating-normalised.toml`
+  exercises the path.
+* ~~**7d, the interpolating warm start**~~ — **DONE 2026-09-02**, and it was
+  the wiring this bullet said it was. Cycles after the first now start from the
+  previous one interpolated onto the refined mesh, and a stored guess on a
+  different mesh transfers instead of throwing. Measured on a nonlinear source
+  over three cycles: **4, 2, 2 Newton iterations against 4, 4, 4 cold — a third
+  of the work — with the final L2 unmoved to 2.5e-12**. It is unmeasurable on
+  meq's own adaptive examples, whose Solov'ev source takes one Newton step
+  whatever it starts from, which is why the measurement is
+  `carryingTheAnswerAcrossCyclesCutsTheWork` rather than an example. The record
+  below is kept because the correction it makes is the transferable part:
   `src/meq/WarmStart.{hpp,cpp}` is `meq::FieldTransfer` on
   `mfem::FindPointsGSLIB`, it is in `MEQ_CORE_SOURCES`, `MFEM_USE_GSLIB` is
   `YES` in the install, and `WarmStartConvergence` is a registered ctest whose
@@ -219,8 +226,9 @@ recorded beside `examples/soloviev-nstx.toml`. `CLAUDE.md` has the numbers.
   GSLIB"* on a mesh-count mismatch, and adaptive cycles after the first start
   cold for the same reason. Deleting that throw and carrying the answer across
   cycles is hours, not days, and it is the best value-per-hour item on this
-  list. (`src/meq/Sampler.hpp` and `src/meq/Config.hpp` both still assert that
-  GSLIB is off; they are wrong and should be fixed in passing.)
+  list. (`src/meq/Sampler.hpp` and `src/meq/Config.hpp` both asserted that GSLIB
+  was off, which was false; **corrected 2026-09-02** while item 11 was in that
+  file, so the only thing left here is the driver wiring itself.)
 
 **The nonlinear path the driver ships is reactive and must stay so.** Nothing
 may be inferred from `F` about which solver to run, because nothing can be: the
@@ -262,18 +270,44 @@ on the element average, always"*; the driver's loop is back on `ψ*` and reaches
 4.77e-4. The test flipped from asserting the defect to asserting the behaviour
 and went green on its own, which is the testing stance working as intended.
 
-**Two bullets are still open.**
+~~**One bullet is still open.**~~ **None are, as of 2026-09-02.**
 
-* **Rebuild `η₅` on `TransferredDatumCoefficient`** instead of excluding those
-  faces. `mfem::TransferredDatumCoefficient` exists now
-  (`fem/darcy/extension_hdg.hpp`), so the blocker is gone and the work is
-  meq's: on `Γ_h` the term compares `ψ*` against a trace pinned to zero rather
-  than the `φ_h` actually imposed, and `setTransferredBoundary()` excludes those
-  faces — **an omission, not a repair**, and the driver says so in its own
-  comment. It wants its own convergence measurement rather than a switch, which
-  is the only reason it is not a five-line change.
-* **Rewrite `README.md`**, which still describes a project that did not exist.
-  The oldest debt in the tree, and the one a new reader hits first.
+* ~~**Rebuild `η₅` on `TransferredDatumCoefficient`**~~ — **DONE 2026-09-02.**
+  `setTransferredBoundary()` takes the datum as a second argument and the faces
+  stay in, compared against the `φ_h` actually imposed rather than against the
+  zero standing in for it. `η₅` goes from 4.07e-1 to **9.6e-5** on the coarsest
+  extension mesh and converges at **2.78** against 0.40, so the term is two
+  percent of `η₁` rather than four orders larger. The adaptive loop is unchanged
+  — 97 → 254 → 342 → 449, `η` 4.7352e-04 → 6.8668e-05 — which is the point:
+  boundary elements now have an `η₅` contribution instead of none, and nothing
+  that already worked moved. `theTransferredDatumRestoresEtaFive` keeps the
+  pinned column as its control, and
+  `theTransferredDatumReproducesTheImposedCondition` checks `φ_h` against the
+  exact `ψ` it transfers — which is what catches the one real hazard, that the
+  lift must be given the raw `−q` block and not `flux()`, since the wrong one
+  returns `−ψ` rather than `ψ`.
+* ~~**Rewrite `README.md`**, which still describes a project that did not exist.
+  The oldest debt in the tree, and the one a new reader hits first.~~ —
+  **DONE 2026-09-02**, `57046c7`. Four things were wrong with it and none was a
+  matter of taste: it said the driver was "not yet ported, so there is currently
+  no way to run MEQ except through its test suite"; it gave the binary as
+  `./build/apps/meq`, which is not where it is built; it gave `MFEM_DIR` as
+  defaulting to `../mfem-hdg-dev`, which is the tree meq must **not** build
+  against, rather than `../mfem/install`; and it kept a paragraph insisting that
+  "the environment variable is not optional" **without naming a variable**,
+  because the `MKL_THREADING_LAYER=GNU` it was about had been deleted from the
+  ctests and the driver as inert.
+
+  **That last one is the transferable part.** Removing a variable from the code
+  and from every test left the sentence *about* it behind, pointing at nothing —
+  the same species of residue as a stale measurement, and harder to notice
+  because it reads as a warning rather than as a claim.
+
+  **And `docs/` is a different thing now**: a Sphinx tree published to Read the
+  Docs at <https://meq.readthedocs.io>, with the pre-Sphinx LaTeX manual moved
+  intact to `docs/manual/` and keeping its own Makefile. `CLAUDE.md`'s Layout
+  block still calls `docs/` "the LaTeX manual, which predates the port", which is
+  now the stale line about documentation rather than this one.
 ## 4. Element-local parallelism — MFEM, outstanding
 
 `../mfem-hdg-dev/doc/HDG-ELEMENT-LOCAL-PARALLELISM.md`, on
@@ -484,6 +518,15 @@ the same closed form evaluated both ways differs by a factor of **1.7e5**.
 
 ## 10. The fixed-`q(ψ)` solver — meq, wanted, not designed
 
+**`INVERSION-PLAN.md` IS NOW THE DESIGN FOR THE MACHINERY THIS NEEDS**, written
+2026-09-02 after a literature survey (`refs/Refs.md`, *Solution inversion*). It is
+staged IN-A and IN-0 to IN-6, and item 10 becomes reachable at **IN-2**, where the
+flux-surface averages `⟨r^{-2}⟩_ψ` and `V′(ψ)` are measured against a closed form.
+Two things in it change this item's shape: `v0-legacy`'s `FluxSurfaces` **has never
+compiled**, so there is an algorithm to reuse and no working tool to extend; and the
+global-structure work this item was assumed to need is **deferred**, because a
+fixed-boundary problem with one axis has no interior saddles at all.
+
 **Take `q(ψ)` as input and find `I(ψ)` from it**, rather than taking `I(ψ)`
 directly as items 1 and 9 both do. The terminology is what people call it; the
 requirement is ordinary. It is how a transport code hands an equilibrium code its
@@ -517,46 +560,30 @@ Three things worth writing down before anyone starts:
 Not on the critical path for anything, and it should not be started until item 9
 has settled what a rotating source's profile set looks like.
 
-## 11. `B` in the band is zeroth order, behind a mask that says it is fine — meq
+## 11. `B` in the band — meq, DONE 2026-09-02
 
-**FOUND 2026-09-01 WHILE WIRING THE ROTATING OUTPUT, AND IT IS A DEFECT IN THE
-INTERCHANGE FORMAT.** Only `GridSampler::samplePotentialWithFlux()` applies the
-Taylor step into the band between `Γ_h` and `Γ`; `sample()`, `sampleComponent()`
-and `sampleCoefficient()` never read `offsetR`/`offsetZ` at all, and so return
-the value **at the foot on `Γ_h`**. `apps/meq.cpp` sends `ψ` through the first
-and `B` through `sampleComponent`.
+**FOUND WHILE WIRING THE ROTATING OUTPUT AND FIXED THE SAME WEEK.** Only
+`samplePotentialWithFlux()` applied the Taylor step into the band between `Γ_h`
+and `Γ`, so `B` — which went through `sampleComponent()` — was read at the foot
+on `Γ_h`: about one node in ten of the interchange file piecewise constant,
+`O(h)`, behind a mask saying `inside = 1`.
 
-Measured on the committed `miller-curved.nc`: `extrapolated_nodes = 1667` of
-129×129 = 16,641, so about **one node in ten** carries a piecewise-constant `B`
-— `O(h)` — where `ψ` gets `O(h²)` and `q` itself resolves at `k+1`.
-`B = (−q_z, +q_r)` is a pure relabelling, so nothing softens it.
+**Both halves are done.** `GridSampler::sampleComponentWithGradient()` continues
+a vector field with its own `∇u`, read inside the element so nothing is
+evaluated outside one, and `theBandVectorContinuesAtItsGradientsOrder` measures
+**rate 2.20 against 0.92 for the foot, 124× smaller at `n = 16`**, on a
+quadratic its space represents exactly so the band error is the truncation
+alone. And the `.nc` now carries `byte extrapolated( Z, R )` beside `inside`, so
+a reader can drop continued nodes rather than being told only how many there
+were — 1667 on `miller-curved`, agreeing with the attribute.
 
-**The cost is measured, not estimated.** `n_s` is algebraic in `(r, ψ)`, so
-the rotating output gave a free controlled experiment over the same 356 band
-nodes: against the node's own `r` the closed form is **5.13e-07** wrong, against
-the foot's **8.57e-02** — a factor of **1.7e5**.
-`theRotatingFieldsUseTheNodesOwnRadius` in `OutputConvergence.cpp` is that
-measurement, and it exists because the trap was found and dodged for the new
-fields while `B` was left sitting in it two lines above.
-
-**What makes it worse than a missing feature is that it is invisible to a
-reader.** `extendOutward()` counts band nodes as found, so the mask says
-`inside = 1` there, and `theMaskAgreesWithTheData` asserts mask-matches-non-NaN
-— the very property that makes the band look trustworthy. `extrapolated_nodes`
-is a count, not a mask, so nothing downstream can tell which nodes to distrust.
-And `theBandIsContinuedByTheFluxAtTheFluxesOwnOrder` tests `ψ` only; there is no
-band test for `B` at all.
-
-**Two fixes, and they are not the same size.** The honest one is a first-order
-continuation using `∇q_h` inside the element — the foot is on that element's own
-closure, so nothing is evaluated outside it — giving `O(h²)` to match `ψ`. The
-safe one is to write `_FillValue` in the band for anything that has not earned
-better, and export the band as a mask so a reader can see it. Either wants a
-`theBandFieldConvergesAtItsOwnOrder` beside the existing `ψ` one. Half a day.
-
-**This is the format other codes read, and `B` is what they open it for**, which
-is why this is an item and not a footnote. `CLAUDE.md`'s *Status* section carries
-the detail.
+**What is deliberately NOT done**, recorded so nobody re-derives it: this is
+`O(h²)` at every `k` and does not reach `ψ`'s order, because `ψ` is continued
+with a *solved* variable and `∇q` is a *differentiated* one. `div q = −F/r` and
+`∂_r q_z − ∂_z q_r = −q_z/r` pin two of `∇q`'s four entries exactly, but leave
+the symmetric traceless part differentiated — structure rather than an order,
+and it would need the source plumbed into `GridSampler`. `CLAUDE.md`'s *Status*
+section has the detail.
 
 ## Deliberately not yet
 

@@ -552,7 +552,16 @@ BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
 		// reconstruction stopped skipping its mean-value close. See apps/meq.cpp.
 		solver->postProcess();
 		meq::ResidualEstimator estimator( *solver, source );
-		estimator.setTransferredBoundary( domain.gammaHMarker() );
+
+		// And the driver's treatment of Gamma_h, which is no longer to leave
+		// those faces out: eta_5 compares psi* against the datum actually
+		// imposed. Rebuilt per cycle for the reason apps/meq.cpp gives -- the
+		// datum lifts the SOLVED flux, so last cycle's is the wrong boundary
+		// condition. If this drifts from the driver the two etas part company
+		// and this test says so, which is what it is for.
+		std::unique_ptr<mfem::Coefficient> const datum =
+			solver->transferredDatum();
+		estimator.setTransferredBoundary( domain.gammaHMarker(), datum.get() );
 
 		mfem::Vector const &local = estimator.GetLocalErrors();
 		turn.elements = domain.numComputational();
@@ -628,9 +637,26 @@ BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
 	             relative, stored.Size() );
 	std::fflush( stdout );
 
+	/*
+	 * AND THE TWO NO LONGER START THEIR CYCLES FROM THE SAME ITERATE, WHICH MAKES
+	 * THIS A STRONGER STATEMENT THAN IT WAS RATHER THAN A WEAKER ONE.
+	 *
+	 * Since 2026-09-02 the driver interpolates each cycle's answer onto the
+	 * refined mesh and starts the next one from it; the loop above deliberately
+	 * still starts cold. So this no longer reads 1.7e-16 -- it reads about
+	 * 4e-14 -- and what it now asserts is the property a warm start has to have:
+	 * that it changes the WORK and not the ANSWER. The library's own
+	 * aWarmStartCutsTheWorkAndNotTheAnswer says the same thing one level down.
+	 *
+	 * Mirroring the warm start here would restore bitwise agreement and assert
+	 * less, since a difference in the starting iterate is exactly what this is
+	 * now able to see.
+	 */
 	BOOST_TEST( relative < 1.0e-10,
 	            "the driver's adaptive solve differs from the library's by "
-	            << relative << " relative" );
+	            << relative << " relative. The driver warm-starts each cycle and "
+	            "this loop does not, so a difference here is the warm start "
+	            "changing the answer rather than only the work" );
 }
 
 /*

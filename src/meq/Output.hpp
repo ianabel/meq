@@ -17,12 +17,14 @@
  * back in O( 1 ) per point with no mesh search, so a foreign code needs to
  * produce nothing but psi on a rectangle to warm-start meq.
  *
- * WHAT IS NOT WRITTEN, and why the file says so rather than omitting it
- * silently: psi* when the solve did not produce one. The post-processed
- * potential is only defined after postProcess(), which is refused on paths where
- * MFEM's reconstruction cannot be trusted -- see GradShafranovSolver. A file
- * that quietly lacks a field is worse than one that says the field was not
- * computed, so the writer records its absence as an attribute.
+ * WHICH POTENTIAL IS IN WHICH FILE, because there are now two and they are not
+ * interchangeable. psi_h is the solved potential in P_k; psi* is the
+ * element-local post-processing of it in P_(k+1), which converges one order
+ * faster. The driver reports psi*: the VTK and the NetCDF carry it, and the
+ * NetCDF says so in a `potential` attribute so a reader never has to guess.
+ * "<stem>_psi.gf" keeps psi_h, because that trio is the exact restart format and
+ * is read back into a degree-k space; psi* goes beside it in
+ * "<stem>_psistar.gf". See writePostProcessed().
  */
 
 #include <functional>
@@ -43,13 +45,42 @@ namespace meq
 	/// The mesh and the grid functions, in MFEM's own formats. Exact, and
 	/// readable only by MFEM.
 	///
-	/// @param stem  the path stem: "<stem>.mesh", "<stem>_psi.gf" and
-	///              "<stem>_grad_psi.gf" are written.
-	/// @param flux  q in meq's sign convention -- what
-	///              GradShafranovSolver::flux() returns, not the raw block.
+	/// @param stem       the path stem: "<stem>.mesh", "<stem>_psi.gf" and
+	///                   "<stem>_grad_psi.gf" are written.
+	/// @param potential  psi_h, THE SOLVED POTENTIAL IN P_k -- not psi*. This
+	///                   trio is the exact restart format, read back into a
+	///                   degree-k potential space, and psi* is degree k+1. See
+	///                   writePostProcessed().
+	/// @param flux       q in meq's sign convention -- what
+	///                   GradShafranovSolver::flux() returns, not the raw block.
 	void writeMfem( std::string const &stem, mfem::Mesh &mesh,
 	                mfem::GridFunction const &potential,
 	                mfem::GridFunction const &flux );
+
+	/**
+	 * psi*, the post-processed potential, as "<stem>_psistar.gf".
+	 *
+	 * A SEPARATE FUNCTION RATHER THAN A FOURTH ARTEFACT OF writeMfem(), and
+	 * deliberately. psi* exists only after GradShafranovSolver::postProcess(),
+	 * which is a step of its own; folding it into writeMfem() would make the
+	 * mesh and the exact restart pair depend on a post-processing they have
+	 * nothing to do with, and would oblige every caller -- the tests included --
+	 * to have one. Keeping the two apart also keeps writeMfem()'s three files
+	 * byte for byte what they were.
+	 *
+	 * IT IS NOT A RESTART FILE. The exact restart reads "<stem>_psi.gf" back
+	 * into the degree-k potential space of a solver built from the same
+	 * configuration; this is degree k+1 and does not fit it. What it is for is
+	 * GLVis, and for anyone who wants the reported field at full precision
+	 * rather than sampled onto the (R, Z) grid.
+	 *
+	 * Precision 16, as writeMfem(), for the same reason.
+	 *
+	 * @param postProcessed  GradShafranovSolver::postProcessedPotential(),
+	 *                       valid only after postProcess().
+	 */
+	void writePostProcessed( std::string const &stem,
+	                         mfem::GridFunction const &postProcessed );
 
 	/**
 	 * The same discrete solution as VTK, for ParaView and VisIt.
@@ -75,16 +106,20 @@ namespace meq
 	 * were k = 1, and the picture would be wrong in a way that looks like a
 	 * coarse mesh rather than like a bug. SetHighOrderOutput() writes VTK
 	 * Lagrange cells instead, and @a levelsOfDetail is the subdivision they
-	 * carry. Pass the polynomial degree.
+	 * carry. Pass THE DEGREE OF THE POTENTIAL BEING DRAWN -- which for the
+	 * driver is k+1, not k, because what it draws is psi*.
 	 *
 	 * @param stem            path stem, as writeMfem().
-	 * @param potential       psi.
+	 * @param potential       psi. The driver passes psi*, the post-processed
+	 *                        potential, which is a degree richer and an order
+	 *                        more accurate than psi_h; hence the note on
+	 *                        @a levelsOfDetail.
 	 * @param field           the POLOIDAL FIELD B, not the HDG flux q: this
 	 *                        file is for looking at, and B is the physical
 	 *                        quantity. meq::poloidalField() converts. The
 	 *                        exact q is in "<stem>_grad_psi.gf".
-	 * @param levelsOfDetail  subdivision per element; the polynomial degree is
-	 *                        the right value. Clamped to at least 1.
+	 * @param levelsOfDetail  subdivision per element; the degree of @a potential
+	 *                        is the right value. Clamped to at least 1.
 	 */
 	void writeVtu( std::string const &stem, mfem::Mesh &mesh,
 	               mfem::GridFunction const &potential,
@@ -195,8 +230,11 @@ namespace meq
 	 * fraction works the mesh is left exactly as it was found.
 	 *
 	 * @param order    curvature to install; the solve's polynomial degree is
-	 *                 the right value, since that is what writeVtu() subdivides
-	 *                 to anyway.
+	 *                 the right value -- it is the geometry that is being bent,
+	 *                 and Gamma_h is a facet of the degree-k solve. (writeVtu()
+	 *                 now subdivides one degree finer than this, because it
+	 *                 draws psi*; the two numbers used to coincide and no longer
+	 *                 do.)
 	 * @param project  ( r, z ) on Gamma_h -> the corresponding point on Gamma.
 	 *                 A radial projection is what the shape supports and what
 	 *                 the driver passes.
@@ -221,6 +259,7 @@ namespace meq
 	 *     double  B_R( Z, R )         radial field, T
 	 *     double  B_Z( Z, R )         vertical field, T
 	 *     byte    inside( Z, R )      1 where the node lies in the domain
+	 *     byte    extrapolated( Z, R ) 1 where it was continued, not solved on
 	 *     double  boundary_R( boundary ), boundary_Z( boundary )   optional
 	 *
 	 * ( Z, R ) with R fastest is C row-major, and matches MaNTA's ( t, x ).
@@ -228,6 +267,14 @@ namespace meq
 	 * A NODE OUTSIDE THE DOMAIN gets both a NaN _FillValue and a zero in
 	 * `inside`. Both, deliberately: some tools honour the fill attribute and
 	 * some do not, and `inside` is the one a reader can always rely on.
+	 *
+	 * `inside` AND `extrapolated` ANSWER DIFFERENT QUESTIONS and a reader that
+	 * conflates them will be misled. `inside` is "is there data here"; a band
+	 * node scores 1 and should, since it is inside the plasma and carries a real
+	 * value. `extrapolated` is "was this solved for", and the same node scores 1
+	 * there too -- its value was continued outward from Gamma_h and is an order
+	 * less accurate than its neighbours. Drop those nodes before computing an
+	 * error norm or differencing two runs at different resolutions.
 	 */
 	class NetCDFWriter
 	{

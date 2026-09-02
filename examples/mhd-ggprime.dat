@@ -1,0 +1,71 @@
+# ( g dg/dpsi )( psi ) for examples/mhd-rectangle.toml -- the toroidal-field
+# half of a tabulated-profile MHD equilibrium, against psi in webers per radian.
+#
+# g( psi ) = r B_toroidal is the toroidal field function, and what the
+# Grad-Shafranov source contains is the PRODUCT g dg/dpsi, which is what EQDSK
+# calls FF'. meq takes it exactly as tabulated:
+#
+#     F( r, z, psi ) = mu0 r^2 ( dp/dpsi )( psi ) + ( g dg/dpsi )( psi )
+#
+# -- NO mu0 on this term, and NO sign applied to either. The pressure half is
+# examples/mhd-pprime.dat, and it carries the units note that goes with mu0.
+#
+# THE FORMAT is examples/mhd-pprime.dat's and is documented there and in
+# examples/rotating-density.dat: one knot per line, `psi f( psi ) f'( psi )`,
+# whitespace separated, '#' comments, a BLANK LINE TERMINATING THE TABLE -- so
+# there is no blank line anywhere above the numbers below.
+#
+# UNITS. g dg/dpsi is in T^2 m^2 per Wb/rad, which is meq's own unit for it, so
+# no scale is needed and GGPrimeScale is left at its default of 1.0 in the
+# configuration. That is the contrast with examples/mhd-pprime.dat, which is
+# tabulated in MPa per Wb/rad and does need one: the scale exists so that a
+# table can stay in the units it was produced in, not because meq requires one.
+# psi is in Wb/rad and is never scaled, so the slope column is in T^2 m^2 per
+# ( Wb/rad )^2.
+#
+# THIS PROFILE IS WHAT KEEPS THE RUN OFF THE TRIVIAL BRANCH, and it is the only
+# thing that does. The pressure gradient beside it goes as psi^2 and so vanishes
+# at psi = 0, which is the boundary; if this table vanished there too then
+# F( r, z, 0 ) would be identically zero, psi = 0 would solve the homogeneous
+# Dirichlet problem, and Newton -- which starts from the Dirichlet datum --
+# would land on it and stop in zero iterations having reported success. That is
+# the failure CLAUDE.md records under Traps for every source of GS-2 sections
+# 4.2 to 4.5. Here ( g dg/dpsi )( 0 ) = 1.35, so F( r, z, 0 ) = 1.35 T^2 m^2 per
+# Wb/rad everywhere, the trivial solution is not a solution, and no initial guess
+# is needed.
+#
+# IT IS AFFINE ON PURPOSE, WHICH IS THE OTHER HALF OF THE DIVISION OF LABOUR.
+#
+#     g dg/dpsi = 4.5 ( 0.3 - psi )  T^2 m^2 per Wb/rad
+#
+# is linear, so it contributes a CONSTANT -4.5 to dF/dpsi and none of the
+# Jacobian's psi-dependence: every bit of the nonlinearity this example
+# demonstrates comes from the quadratic dp/dpsi next door. Keeping the two
+# separable is what lets the header of examples/mhd-rectangle.toml say which
+# term does what. The Hermite cubic reproduces a linear function exactly, so the
+# interpolant below IS 4.5( 0.3 - psi ).
+#
+# The slope is negative -- g dg/dpsi falls from 1.35 at the edge to 0.76 on the
+# magnetic axis, about 44% -- which is the diamagnetic direction, the plasma
+# pressure pushing the toroidal field down where the pressure is highest. It
+# reaches zero exactly at the last knot and is positive everywhere the solution
+# actually visits.
+#
+# THE TABLE ENDS WELL ABOVE THE SOLUTION'S RANGE. meq::SplineProfile extends by
+# a CONSTANT outside its knots -- value clamped, DERIVATIVE ZERO -- so past the
+# last knot this term would freeze at 0.0 and stop contributing to F at all,
+# silently. psi runs over [ -1.5e-04, 0.1315 ] on the converged solution here,
+# so [ -0.05, 0.30 ] is more than twice the range at the top and the clamp is
+# never met. The two tables deliberately share one knot set for that reason:
+# they have to cover the same interval, and a reader comparing them line by line
+# should not have to interpolate in his head.
+#
+# psi [Wb/rad]    g dg/dpsi [T^2 m^2 / (Wb/rad)]    d/dpsi [T^2 m^2 / (Wb/rad)^2]
+   -0.05                  1.575                              -4.5
+    0.00                  1.350                              -4.5
+    0.05                  1.125                              -4.5
+    0.10                  0.900                              -4.5
+    0.15                  0.675                              -4.5
+    0.20                  0.450                              -4.5
+    0.25                  0.225                              -4.5
+    0.30                  0.000                              -4.5

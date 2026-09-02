@@ -202,11 +202,19 @@ Coverage
    cd build-cov && ctest
    gcovr --root .. --filter 'src/meq/' --print-summary
 
-``MEQ_ENABLE_COVERAGE`` is an option rather than a build type on purpose. A
-coverage build wants ``-O0``, and routing that through ``CMAKE_BUILD_TYPE``
-would silently drop ``NDEBUG`` for anyone who had set it, changing which
-``MFEM_ASSERT``\ s are live — and at least one real defect in this codebase is
-caught *only* by an assert.
+``MEQ_ENABLE_COVERAGE`` is an option rather than a build type on purpose: a
+coverage build wants ``-O0`` and a release build wants ``-O3``, and that
+difference should be chosen rather than inherited from whatever
+``CMAKE_BUILD_TYPE`` happens to hold.
+
+.. note::
+
+   A previous version of this page gave a different reason — that routing
+   ``-O0`` through ``CMAKE_BUILD_TYPE`` would drop ``NDEBUG`` and change which
+   ``MFEM_ASSERT``\ s are live. **That was wrong**, and is corrected here rather
+   than quietly removed, because it is the sort of claim that sends someone to
+   build in Debug for nothing. ``MFEM_ASSERT`` is gated on ``MFEM_DEBUG``, not
+   on ``NDEBUG``; see the note in :doc:`install`.
 
 .. note::
 

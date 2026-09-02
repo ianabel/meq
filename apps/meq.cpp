@@ -33,6 +33,7 @@
 #include "meq/RotatingSource.hpp"
 #include "meq/Sampler.hpp"
 #include "meq/SourceFactory.hpp"
+#include "meq/WarmStart.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -359,9 +360,11 @@ int main( int argc, char **argv )
 	 * TOML's guess every time would throw away the one thing the previous cycle
 	 * established: psi_ax is a physical quantity, converged on the coarser mesh
 	 * to within that mesh's discretisation error, and it is the best guess
-	 * available for the finer one. It is the interpolating warm start the FIELD
-	 * cannot have -- DRIVER-PLAN section 4 needs GSLIB for that -- arriving free
-	 * for the one unknown that happens to be a scalar.
+	 * available for the finer one. It used to be described here as the warm start
+	 * the FIELD could not have; the field has it now, by meq::FieldTransfer a few
+	 * hundred lines below, so this is the same idea arriving free for the one
+	 * unknown that happens to be a scalar rather than a consolation for its
+	 * absence.
 	 *
 	 * WHAT IT IS MEASURED TO BUY IS NOTHING YET, AND THAT IS WORTH SAYING RATHER
 	 * THAN LEAVING FOR SOMEBODY TO REDISCOVER. On examples/rotating-normalised.toml
@@ -440,6 +443,30 @@ int main( int argc, char **argv )
 	// The mesh actually solved on: D_h on the curved path, the background mesh
 	// on the fitted one. Everything downstream uses it.
 	mfem::Mesh *solveMesh = nullptr;
+
+	/*
+	 * THE PREVIOUS CYCLE'S ANSWER, KEPT ALIVE ACROSS THE TEARDOWN.
+	 *
+	 * An adaptive cycle destroys its solver before refining -- it must, since
+	 * the mesh moves under it -- so the converged potential dies with the space
+	 * it lives on unless it is copied out first. These four are that copy, and
+	 * they are four rather than one because a GridFunction is only meaningful
+	 * beside its space, its collection and its mesh, all of which are about to
+	 * be replaced.
+	 *
+	 * The collection is rebuilt BY NAME from the solver's own, rather than
+	 * assumed: meq's volume spaces are on the closed Gauss-Lobatto basis, and a
+	 * dof-for-dof copy into a Legendre space of the same degree would be a
+	 * different function while looking like a successful copy.
+	 */
+	std::unique_ptr<mfem::Mesh> previousMesh;
+	std::unique_ptr<mfem::FiniteElementCollection> previousCollection;
+	std::unique_ptr<mfem::FiniteElementSpace> previousSpace;
+	std::unique_ptr<mfem::GridFunction> previousPotential;
+
+	/// The guess actually handed to the next solver, on ITS space.
+	/// setInitialGuess() borrows, so this has to outlive the solve.
+	std::unique_ptr<mfem::GridFunction> carried;
 
 	meq::AdaptivityConfig const &adapt = config->getAdaptivity();
 	// MaxIterations counts SOLVES, not refinements: a run with MaxIterations = 1
@@ -610,33 +637,77 @@ int main( int argc, char **argv )
 		                         config->getSolver().newtonAbsoluteTolerance,
 		                         config->getSolver().newtonMaxIterations );
 
-		if ( config->getInitialGuess().type == meq::InitialGuessType::Ramp )
+		if ( !firstCycle && previousPotential )
+		{
+			/*
+			 * THE INTERPOLATING WARM START, AND THE REASON CYCLES AFTER THE FIRST
+			 * NO LONGER BEGIN COLD. DRIVER-PLAN section 4's second route, which
+			 * this file used to refuse on the grounds that it "needs GSLIB" --
+			 * and GSLIB has been on, with meq::FieldTransfer written and pinned
+			 * by WarmStartConvergence, for longer than that comment survived.
+			 *
+			 * The previous cycle converged on a coarser mesh, so its answer is
+			 * the best starting point available for this one: same equilibrium,
+			 * one refinement apart. The fallback is the Dirichlet datum, which is
+			 * what a cold start would have had at a node the old mesh does not
+			 * cover -- on the curved path the computational domain GROWS as it
+			 * refines, so there genuinely are such nodes.
+			 */
+			meq::FieldTransfer transfer( *previousMesh );
+			carried = std::make_unique<mfem::GridFunction>(
+				fresh->potential().FESpace() );
+			int const missed = transfer.transfer( *previousPotential, zero, *carried );
+			fresh->setInitialGuess( *carried );
+
+			std::printf( "meq: warm start from the previous cycle: %d of %d nodes "
+			             "interpolated, %d fell outside it\n",
+			             transfer.queried() - missed, transfer.queried(), missed );
+		}
+		else if ( config->getInitialGuess().type == meq::InitialGuessType::Ramp )
 		{
 			fresh->setInitialGuess( *ramp );
 		}
 		else if ( config->getInitialGuess().type == meq::InitialGuessType::GridFunction
 		          && firstCycle )
 		{
-			// The EXACT restart only: same mesh, same degree. The interpolating
-			// restart needs FindPointsGSLIB and is DRIVER-PLAN.md section 4's
-			// second route, not written yet. Refuse rather than interpolate badly
-			// and call it warm.
+			// TWO ROUTES, AND THE MESH DECIDES WHICH. Same mesh, same degree:
+			// the EXACT restart, every coefficient. A different mesh: the
+			// INTERPOLATING restart of DRIVER-PLAN.md section 4, through
+			// meq::FieldTransfer. This branch used to refuse the second and say
+			// it "needs FindPointsGSLIB and is not written yet", which had been
+			// untrue for months -- see the else below.
 			//
-			// It is a FIRST-CYCLE guess for the same reason: after a refinement
-			// the mesh no longer matches, and carrying the previous cycle's answer
-			// forward is that same missing interpolation. So cycles after the
-			// first start cold -- which costs less than it sounds, since they
-			// start on FINER meshes, where Newton is the more reliable and not the
-			// less. The coarse first solve is the one at risk, and it is the one
-			// the ladder below is for.
-			if ( guessMesh->GetNE() != mesh.GetNE() )
-				throw std::runtime_error(
-					"[initialguess] MeshFile has " + std::to_string( guessMesh->GetNE() )
-					+ " elements where the run's mesh has " + std::to_string( mesh.GetNE() )
-					+ ". Only the exact restart -- same mesh, same degree -- is "
-					"implemented; the interpolating one needs GSLIB" );
+			// It is a FIRST-CYCLE guess because cycles after the first have a
+			// better one available: the previous cycle's converged answer,
+			// interpolated onto the refined mesh, which is the branch at the top
+			// of this lambda. A stored file is what the FIRST solve starts from,
+			// and that coarse first solve is the one at risk -- it is what the
+			// ladder below is for.
+			if ( guessMesh->GetNE() == mesh.GetNE() )
+			{
+				// The EXACT restart: same mesh, same degree, every coefficient.
+				fresh->setInitialGuess( *guess );
+			}
+			else
+			{
+				// AND A DIFFERENT MESH IS NO LONGER REFUSED. This threw until
+				// 2026-09-02, saying the interpolating restart "needs GSLIB" --
+				// which was written before meq::FieldTransfer existed and was
+				// never revisited. Restarting from a run at another resolution is
+				// the ordinary way to use a stored answer, and it works.
+				meq::FieldTransfer transfer( *guessMesh );
+				carried = std::make_unique<mfem::GridFunction>(
+					fresh->potential().FESpace() );
+				int const missed = transfer.transfer( *guess, zero, *carried );
+				fresh->setInitialGuess( *carried );
 
-			fresh->setInitialGuess( *guess );
+				std::printf( "meq: interpolating warm start from %s: %d elements "
+				             "to this run's %d, %d of %d nodes fell outside the "
+				             "stored mesh\n",
+				             config->getInitialGuess().meshFile.c_str(),
+				             guessMesh->GetNE(), mesh.GetNE(), missed,
+				             transfer.queried() );
+			}
 		}
 
 		return fresh;
@@ -650,11 +721,19 @@ int main( int argc, char **argv )
 	// adaptive run: without the loop there is one state and "<stem>" already
 	// holds it. See Output.hpp for why this is a separate collection from the
 	// answer, and why its frames are not bent onto Gamma.
+	//
+	// The frames carry psi* at degree k+1, exactly as "<stem>" does, because
+	// which FIELD is drawn and which GEOMETRY it is drawn on are separate
+	// questions. The geometry stays as solved -- Gamma_h, faceted, unbent --
+	// since bending mid-loop would hand the next refinement a domain the
+	// estimator never saw. The field is the better one either way, and a series
+	// whose last frame disagreed with the answer for no stated reason would be
+	// a small trap of its own.
 	std::unique_ptr<meq::VtuSeries> series;
 	if ( adapt.enabled )
 		series = std::make_unique<meq::VtuSeries>(
 			config->getOutput().directory + "/" + config->getOutput().prefix,
-			config->getDiscretisation().polynomialDegree );
+			config->getDiscretisation().polynomialDegree + 1 );
 
 	for ( int cycle = 0; cycle < maxCycles; ++cycle )
 	{
@@ -831,13 +910,28 @@ int main( int argc, char **argv )
 		 * about 0.5 -- the loop would run, produce plausible pictures and refine
 		 * the WRONG ELEMENTS, which is the quietest possible way for this to fail.
 		 *
-		 * THIS IS AN OMISSION, NOT A REPAIR. The proper fix is to evaluate phi_h,
-		 * which MFEM now makes reachable through TransferredDatumCoefficient; eta_5
-		 * has not yet been rebuilt on it, and that wants its own convergence
-		 * measurement rather than a switch.
+		 * THAT WAS AN OMISSION AND IT IS NOW A REPAIR, so the paragraph above is
+		 * history rather than current behaviour. eta_5 is rebuilt on the datum
+		 * actually imposed -- GradShafranovSolver::transferredDatum(), which is
+		 * mfem::TransferredDatumCoefficient -- so those faces are IN, compared
+		 * against phi_h instead of against a zero standing in for it. Measured on
+		 * the extension benchmark at k = 2, eta_5 drops from 4.07e-1 to 9.6e-5 on
+		 * the coarsest mesh and converges at 2.78 rather than 0.40, and eta keeps
+		 * its rate. theTransferredDatumRestoresEtaFive has the table.
+		 *
+		 * IT IS REBUILT EVERY CYCLE ON PURPOSE. The datum is a lifting of the
+		 * SOLVED FLUX along the transfer paths, so it goes stale the moment the
+		 * solver is solved again -- and in this loop it is, on a new mesh with a
+		 * new path family. Hoisting it out of the loop would compare psi* against
+		 * the previous cycle's boundary condition, which is exactly the class of
+		 * quiet error this whole block is about.
 		 */
+		std::unique_ptr<mfem::Coefficient> datum;
 		if ( gammaHMarker )
-			estimator.setTransferredBoundary( *gammaHMarker );
+		{
+			datum = solver->transferredDatum();
+			estimator.setTransferredBoundary( *gammaHMarker, datum.get() );
+		}
 
 		mfem::Vector const &local = estimator.GetLocalErrors();
 		record.eta = estimator.GetTotalError();
@@ -855,12 +949,14 @@ int main( int argc, char **argv )
 
 		// This cycle's frame, written while the solver still owns its fields --
 		// a few lines below they are destroyed so the mesh can be refined.
+		// postProcess() ran above, for the estimator, so psi* is current here
+		// and costs this nothing.
 		if ( series )
 		{
 			mfem::GridFunction cycleField( solver->flux().FESpace() );
 			meq::poloidalField( solver->flux(), cycleField );
-			series->append( *solveMesh, solver->potential(), cycleField,
-			                cycle, static_cast<double>( cycle ) );
+			series->append( *solveMesh, solver->postProcessedPotential(),
+			                cycleField, cycle, static_cast<double>( cycle ) );
 		}
 
 		if ( reachedTarget )
@@ -884,6 +980,28 @@ int main( int argc, char **argv )
 			             "eta = %.4e, so there is nothing to refine\n", record.eta );
 			break;
 		}
+
+		/*
+		 * THIS CYCLE'S ANSWER IS COPIED OUT BEFORE ANYTHING IS DESTROYED, so the
+		 * next cycle can start from it. On the fitted path solveMesh is refined
+		 * IN PLACE, so the coarse mesh ceases to exist a few lines below and a
+		 * borrowed pointer would dangle rather than merely go stale -- hence a
+		 * deep copy of the mesh and not a reference to it.
+		 *
+		 * Reset in dependency order. previousSpace holds raw pointers to the mesh
+		 * and the collection, so replacing either first would leave it pointing
+		 * at freed memory even though nothing reads it in between.
+		 */
+		previousPotential.reset();
+		previousSpace.reset();
+		previousMesh.reset();
+		previousCollection.reset( mfem::FiniteElementCollection::New(
+			solver->potential().FESpace()->FEColl()->Name() ) );
+		previousMesh = std::make_unique<mfem::Mesh>( *solveMesh );
+		previousSpace = std::make_unique<mfem::FiniteElementSpace>(
+			previousMesh.get(), previousCollection.get() );
+		previousPotential = std::make_unique<mfem::GridFunction>( previousSpace.get() );
+		*previousPotential = solver->potential();
 
 		// EVERYTHING BUILT ON THIS MESH DIES FIRST. See the declarations above.
 		solver.reset();
@@ -983,7 +1101,55 @@ int main( int argc, char **argv )
 		meq::OutputConfig const &output = config->getOutput();
 		std::string const stem = output.directory + "/" + output.prefix;
 
+		/*
+		 * psi* IS WHAT meq REPORTS, SO IT IS POST-PROCESSED ON EVERY RUN AND NOT
+		 * ONLY ON AN ADAPTIVE ONE.
+		 *
+		 * psi_h lives in P_k; psi* is the element-local post-processing of it in
+		 * P_(k+1), and it converges at k+2 rather than k+1 -- measured 47x, 113x
+		 * and 125x smaller than psi_h on the finest mesh at k = 1, 2, 3. It costs
+		 * one small dense solve per element, once, against a Newton iteration
+		 * that has already done far more, so there is no configuration in which
+		 * reporting the worse field is the right trade.
+		 *
+		 * THE GUARD IS NOT DEFENSIVE, IT IS ARITHMETIC. The adaptive loop has
+		 * already called postProcess() on this very solver -- eq (20) builds four
+		 * of its five terms on psi* -- and every exit from that loop is after the
+		 * call, so on that path this would otherwise be the second reconstruction
+		 * of the same state.
+		 *
+		 * AND THE HAZARD, WHICH IS NEW IN KIND RATHER THAN IN DEGREE. psi* comes
+		 * from MFEM's DarcyForm::Reconstruct(). The local problem is a pure
+		 * Neumann one and its mean-value constraint is what regularises it; that
+		 * regularisation was once SKIPPED wherever a non-linear potential
+		 * integrator was merely present, so on any element where dF/dpsi vanishes
+		 * -- which a tabulated profile with a flat segment produces routinely --
+		 * the local matrix was factored singular and psi* there was a different
+		 * function, 20x to 64x out. It is PER ELEMENT, so no whole-domain norm
+		 * can see it. The fix is "The postprocessing closes on the element
+		 * average, always", and it is on the gf-hdg-dev branch and on NO OTHER:
+		 * an MFEM built without it loses this silently. See INSTALL.md for which
+		 * branches meq-integration must contain, and CLAUDE.md's "Post-processing
+		 * is back" for the measurement.
+		 *
+		 * Until today that defect could only reach the error estimator, and a
+		 * blunt estimator refines the wrong elements. It now reaches the .nc and
+		 * the .vtu -- the primary outputs -- so the regression that catches it,
+		 * NewtonConvergence.cpp's
+		 * thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes, is guarding
+		 * the answer meq reports rather than the mesh it refines.
+		 */
+		if ( !solver->isPostProcessed() )
+			solver->postProcess();
+
+		// psi_h AND NOT psi*, AND THAT ASYMMETRY IS DELIBERATE. These three files
+		// are the exact restart format: "<stem>_psi.gf" is read back into the
+		// degree-k potential space of a solver built from the same configuration,
+		// and psi* is degree k+1 -- it does not fit, and a "consistency" edit
+		// putting it here would break restart rather than improve it. psi* is
+		// written beside them, in its own file, on the next line.
 		meq::writeMfem( stem, *solveMesh, solver->potential(), solver->flux() );
+		meq::writePostProcessed( stem, solver->postProcessedPotential() );
 
 		// B_poloidal, a RELABELLING of the solved flux and not a derivative of
 		// psi -- B_R = -q_z, B_Z = +q_r. That is the payoff for the mixed
@@ -1053,10 +1219,32 @@ int main( int argc, char **argv )
 		// evaluating psi_h's polynomial outside its element -- is bounded by
 		// nothing, and was measured crossing psi = 0, a value this
 		// configuration knows exactly.
-		sampler.samplePotentialWithFlux( solver->potential(), solver->flux(),
-		                                 psi, outside );
-		sampler.sampleComponent( field, 0, bR, outside );
-		sampler.sampleComponent( field, 1, bZ, outside );
+		//
+		// THE POTENTIAL SAMPLED HERE IS psi*, NOT psi_h: the file reports the
+		// better field. The FLUX ARGUMENT STAYS solver->flux(), which is q at
+		// degree k, and that pairing is consistent rather than a leftover --
+		// psi*'s defining local problem matches its gradient to r q, so r q IS
+		// grad psi* to the order psi* is claimed at. Substituting the enriched
+		// flux would change nothing the band can resolve and would pair the
+		// Taylor step with a field the reconstruction produced rather than with
+		// the one it was built from.
+		sampler.samplePotentialWithFlux( solver->postProcessedPotential(),
+		                                 solver->flux(), psi, outside );
+
+		// AND B GETS THE BAND TOO, WHICH IT DID NOT UNTIL 2026-09-02. It used to
+		// go through sampleComponent(), which reads the FOOT on Gamma_h and so
+		// left about one node in ten piecewise constant -- O( h ), in the field
+		// most readers open this file for, behind a mask saying inside = 1.
+		// sampleComponentWithGradient() takes the same Taylor step psi gets,
+		// using B's own gradient inside the element.
+		//
+		// IT IS NOT AS GOOD AS psi's AND THE DIFFERENCE IS STRUCTURAL: psi is
+		// continued with a SOLVED variable at full order, B with a
+		// DIFFERENTIATED one at k-1, so this is O( h^2 ) at every k rather than
+		// the flux's own order. A full order better than what it replaces, and
+		// not the same thing. Sampler.hpp says what it would take to beat it.
+		sampler.sampleComponentWithGradient( field, 0, bR, outside );
+		sampler.sampleComponentWithGradient( field, 1, bZ, outside );
 
 		/*
 		 * THE ROTATING FIELDS: n_s( R, Z ) AND e phi_0( R, Z ).
@@ -1142,6 +1330,27 @@ int main( int argc, char **argv )
 		writer.attribute( "source_type", sourceTypeName( config->getSource().type ) );
 		writer.attribute( "polynomial_degree",
 		                  config->getDiscretisation().polynomialDegree );
+		/*
+		 * WHICH POTENTIAL THE `psi` VARIABLE ACTUALLY IS, because there are two
+		 * and a reader cannot tell them apart from the numbers.
+		 *
+		 * psi_h is the solved potential in P_k. psi* is the element-local
+		 * post-processing of it in P_(k+1), converging at k+2 -- a different
+		 * field, agreeing with psi_h only to psi_h's own accuracy. Files written
+		 * before 2026-09-02 carry psi_h and no attribute at all, so the ABSENCE
+		 * of this is itself informative; differencing such a file against a new
+		 * one at the same resolution measures the post-processing and not the
+		 * physics.
+		 *
+		 * polynomial_degree above stays k, the degree of the SOLVE, which is what
+		 * every other attribute here is about. The degree is repeated in this
+		 * value so the two cannot be read as contradicting each other.
+		 */
+		writer.attribute( "potential",
+		                  "post-processed (psi*, degree "
+		                      + std::to_string(
+		                            config->getDiscretisation().polynomialDegree + 1 )
+		                      + ")" );
 		writer.attribute( "refinement_levels", config->getMesh().refinementLevels );
 		writer.attribute( "elements", solveMesh->GetNE() );
 		if ( shape )
@@ -1312,8 +1521,15 @@ int main( int argc, char **argv )
 					"polygon Gamma_h.\n" );
 		}
 
-		meq::writeVtu( stem, *solveMesh, solver->potential(), field,
-		               config->getDiscretisation().polynomialDegree );
+		// psi* AGAIN, AND THE SUBDIVISION GOES UP WITH IT. writeVtu()'s last
+		// argument is the Lagrange-cell subdivision, and it must be the degree of
+		// the field being drawn: psi* is P_(k+1), so passing k would sample a
+		// degree-(k+1) field at degree-k nodes and throw away exactly the order
+		// the post-processing was done to gain. The picture would look like a
+		// slightly coarse mesh, which is the failure mode SetHighOrderOutput()
+		// exists to prevent, one degree further along.
+		meq::writeVtu( stem, *solveMesh, solver->postProcessedPotential(), field,
+		               config->getDiscretisation().polynomialDegree + 1 );
 
 		// The description goes FIRST on each line and the path last, because
 		// the path can be long and absolute and any attempt to align a
@@ -1329,12 +1545,18 @@ int main( int argc, char **argv )
 		std::printf(
 			"meq: wrote\n"
 			"  exact, for GLVis and restart:  %s.mesh\n"
-			"                                 %s_psi.gf\n"
+			"                                 %s_psi.gf        (psi_h, degree %d)\n"
 			"                                 %s_grad_psi.gf\n"
+			"  post-processed, GLVis:         %s_psistar.gf    (psi*, degree %d)\n"
 			"  VTK at degree %d, ParaView:     %s/%s.pvd\n"
-			"  (R, Z) grid, %d/%d inside:  %s.nc\n",
-			stem.c_str(), stem.c_str(), stem.c_str(),
-			config->getDiscretisation().polynomialDegree,
+			"  (R, Z) grid, %d/%d inside:  %s.nc\n"
+			"  psi in the last two is psi*; _psi.gf keeps psi_h, which is what a\n"
+			"  restart reads back.\n",
+			stem.c_str(),
+			stem.c_str(), config->getDiscretisation().polynomialDegree,
+			stem.c_str(),
+			stem.c_str(), config->getDiscretisation().polynomialDegree + 1,
+			config->getDiscretisation().polynomialDegree + 1,
 			stem.c_str(), name.c_str(),
 			sampler.locatedCount(), sampler.nodesR()*sampler.nodesZ(),
 			stem.c_str() );

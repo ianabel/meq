@@ -158,4 +158,5 @@ identically and Newton finishes in one step. The problem is affine.
 That is a perfectly good thing to want — it isolates whatever else is being
 tested from the nonlinear solve — but it means the run says nothing whatever
 about the Jacobian. Two of meq's own shipped examples are like this deliberately,
-and their headers say so.
+and their headers say so; ``examples/mhd-rectangle.toml`` is the counterexample,
+with a pressure gradient quadratic in :math:`\psi`. See :doc:`examples`.

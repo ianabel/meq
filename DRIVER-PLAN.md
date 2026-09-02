@@ -24,9 +24,27 @@ plan:
   feature, and it is stage-6 work rather than stage-7 — but it belongs on the
   list.
 
-**None of it is verified from meq's side yet**, which is the first thing to do
+~~**None of it is verified from meq's side yet**, which is the first thing to do
 once meq builds against the new library. The claims above are the MFEM tree's
-measurements, not this project's.
+measurements, not this project's.~~ **BOTH ARE VERIFIED FROM MEQ'S SIDE NOW**,
+the first in stage 6 and the second on **2026-09-02**.
+
+* `postProcess()`'s refusal is **retired**, and the comment where it stood
+  records what it used to guard. `ψ*` is measured through Newton at `k+2` —
+  3.05, 4.05, 5.03 — by `NewtonConvergence.cpp`'s
+  `thePostProcessedPotentialSurvivesNewton`.
+* `η₅` is **rebuilt on the datum**. `ResidualEstimator::setTransferredBoundary()`
+  takes `φ_h` as a second argument, `GradShafranovSolver::transferredDatum()`
+  builds it over `mfem::TransferredDatumCoefficient`, and the two measurements
+  are `ExtensionConvergence.cpp`'s `theTransferredDatumRestoresEtaFive` and
+  `theTransferredDatumReproducesTheImposedCondition`.
+
+**And insisting on meq-side verification paid, which is why the sentence above
+is struck rather than deleted.** The reconstruction fix reported here as done
+was measured from meq's side and found to be silently wrong on **every element
+where `∂F/∂ψ` vanishes** — a per-element defect no whole-domain norm can see. It
+took a second upstream change, *"The postprocessing closes on the element
+average, always"*, to close. See `CLAUDE.md`, *Post-processing is back*.
 
 ## The pieces, and why this order
 
@@ -527,8 +545,16 @@ cold start, and the iteration count will not obviously say so.
   ratio.
 * A restart whose grid covers nothing reports its miss count and still converges
   from the fallback.
-* The GS-2 sources warm-started from a coarse solve, converging where the
-  homogeneous cold start lands on `ψ ≡ 0`.
+* ~~The GS-2 sources warm-started from a coarse solve, converging where the
+  homogeneous cold start lands on `ψ ≡ 0`.~~ **Struck for the same reason §1's
+  own version of it was struck, and it should never have been written twice.**
+  A warm start is a guess, and a guess alone does not leave the trivial branch:
+  §1 measured a bump of 0.05 or 0.20 on §4.3 converging in 4–5 iterations
+  straight back to `ψ ~ 1e-16`, because **Newton goes to the root nearest its
+  iterate and `ψ ≡ 0` is a root**. A coarse solve of the same homogeneous
+  problem is that root, so warming from it cannot change which root is found.
+  This bullet contradicted §1's acceptance block on the same page. **The ramp
+  stays the workaround** — see §1, and `Type = "ramp"` above.
 
 ---
 
@@ -575,12 +601,32 @@ MFEM defects document, and **`φ_h` is now reachable**:
 `TransferredDatumCoefficient` is the datum, `PathLiftCoefficient` the
 solution-dependent half.
 
-So the honest sequence is: the driver calls `setTransferredBoundary()`
+~~So the honest sequence is: the driver calls `setTransferredBoundary()`
 automatically whenever an extension is configured and says so in the log, and
 that stays true until `η₅` is rebuilt on `TransferredDatumCoefficient` — which
 is stage-6 work, not stage-7, and wants its own convergence measurement. Until
 then a user should not have to know about the exclusion to get a correct
-refinement pattern, but should be able to find out it is in play.
+refinement pattern, but should be able to find out it is in play.~~ **THE
+REBUILD HAPPENED, 2026-09-02**, so the exclusion is history and there is nothing
+left for the log to warn about. `setTransferredBoundary()` takes the datum as a
+second argument — `GradShafranovSolver::transferredDatum()`, which is
+`mfem::TransferredDatumCoefficient` — and those faces stay **in**, compared
+against the `φ_h` actually imposed. `η₅` goes from 4.07e-1 to **9.6e-5** on the
+coarsest extension mesh and converges at **2.78** against 0.40, so the term is
+two percent of `η₁` rather than four orders larger than it.
+`theTransferredDatumRestoresEtaFive` is the convergence measurement this
+paragraph asked for, and it keeps the pinned column as its control.
+
+**The driver rebuilds the datum every cycle, and that is not fussiness.** It
+lifts the *solved* flux along the transfer paths, so it goes stale the moment
+the solver is solved again — which in an adaptive loop is every cycle, on a new
+mesh with a new path family. Hoisting it out would compare `ψ*` against the
+previous cycle's boundary condition.
+
+**And `η` itself barely moves**, which is the point rather than a
+disappointment: 97 → 254 → 342 → 449 and `η` 4.7352e-04 → 6.8668e-05, unchanged.
+What changed is that boundary elements now *have* an `η₅` contribution instead of
+none, so the marking can see them.
 
 **That is what was built.** Three things this plan did not anticipate:
 
@@ -596,11 +642,22 @@ refinement pattern, but should be able to find out it is in play.
 * **And the refusal could not be retired outright.** Measuring it found the MFEM
   fix works where `∂F/∂ψ ≠ 0` and returns a different function on **any element**
   where it vanishes — a singular local matrix, factored anyway, because the
-  mean-value regularisation is skipped by a flag set on the wrong condition. So
-  the loop builds `η` on `Potential::Raw`: one order down, correct, and a
-  standing decision rather than a runtime check. See `CLAUDE.md`,
-  *Post-processing is back*, and
-  `../mfem-hdg-dev/doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md`.
+  mean-value regularisation is skipped by a flag set on the wrong condition.
+  ~~So the loop builds `η` on `Potential::Raw`: one order down, correct, and a
+  standing decision rather than a runtime check.~~ **IT WAS NOT A STANDING
+  DECISION AND THIS BULLET IS THE STALE HALF OF ITS OWN FINDING.** The hole is
+  closed upstream, unconditionally, as *"The postprocessing closes on the
+  element average, always"* — the local problem is a pure Neumann one by
+  construction, so there was never a condition to test. `apps/meq.cpp` calls
+  `postProcess()` and takes the estimator's default `Potential::PostProcessed`;
+  the case that read 20.3, 64.1 and 61.6 on dead elements now reads **1.0069**
+  against 1.0048 where `∂F/∂ψ` does not vanish at all, and the loop reaches
+  `η = 6.87e-5` on **449** elements where the degraded estimator needed 1069 to
+  reach 4.77e-4. `Potential::Raw` survives as the *measurement* of the one order
+  it costs, not as anything the driver runs. See `CLAUDE.md`, *Post-processing is
+  back*; the request itself,
+  `../mfem-hdg-dev/doc/HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md`, is landed
+  and retired and is now on no branch, so that pointer resolves to nothing.
 
 ### What the driver owes the user
 

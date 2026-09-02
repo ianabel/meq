@@ -44,7 +44,9 @@ In order:
    about.
 #. **Solves**, by Newton — possibly inside an adaptive loop, and possibly with
    :math:`\psiax` as an additional unknown. See :doc:`nonlinear`.
-#. **Writes the answer**, three times, in three formats. See :doc:`output`.
+#. **Post-processes**, building :math:`\psi^\star` — which is the potential
+   every output but the restart file carries.
+#. **Writes the answer**, in three formats. See :doc:`output`.
 
 What it prints
 --------------

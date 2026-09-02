@@ -13,6 +13,14 @@ domain *and* a zero in `inside`, deliberately, because some readers honour the
 fill attribute and some do not.  This script trusts `inside`: a NaN that
 arrived some other way -- a solve that diverged, say -- is then still visible
 as a gap rather than being silently indistinguishable from "outside".
+
+THE FILE ALSO CARRIES AN `extrapolated` MASK, which this script does not use
+and which matters for anything quantitative.  A node in the band between
+Gamma_h and the true boundary is inside the plasma and carries a real value --
+so `inside` is 1 there, correctly -- but that value was continued outward from
+the mesh boundary rather than solved on, and is an order less accurate than its
+neighbours.  For a picture that is invisible.  For an error norm, a fitted flux
+surface, or a difference between two resolutions, drop `extrapolated != 0`.
 """
 
 import argparse
@@ -76,6 +84,13 @@ def subtitle(attributes):
             bits.append(f"{label} {attributes[key]}")
     if "boundary" in attributes:
         bits.append(str(attributes["boundary"]).split(" (")[0])
+    # Which potential the psi variable holds. Since 2026-09-02 it is psi*, the
+    # post-processed field, one degree richer than the solve; before that it was
+    # psi_h and there is no attribute. So the ABSENCE of this is what identifies
+    # an older file, and two runs differenced across that change measure the
+    # post-processing rather than the physics -- worth having on the picture.
+    if "potential" in attributes:
+        bits.append(str(attributes["potential"]).split(" (")[0])
     if "final_residual" in attributes:
         bits.append(f"|r| {float(attributes['final_residual']):.1e}")
     return "   ".join(bits)

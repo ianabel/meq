@@ -30,6 +30,14 @@ relative path:
      - The same source with ``[boundary] Type = "exact"`` — a **study**
        configuration the driver refuses. Kept as the definition of what the
        convergence tests measure.
+   * - ``mhd-rectangle.toml``
+     - The general tabulated-profile source: :math:`F` built from two files of
+       numbers with nothing about the plasma hard-coded. **The only example in
+       which Newton has real work to do** — its pressure gradient is quadratic
+       in :math:`\psi`, so the problem is genuinely semi-linear.
+   * - ``mhd-pprime.dat``, ``mhd-ggprime.dat``
+     - Its two profiles, and the second full worked description of the
+       tabulated file format.
    * - ``miller-curved.toml``
      - The curved boundary by transfer, on a background rectangle that knows
        nothing about the shape. :doc:`curved_boundary`.
@@ -88,14 +96,34 @@ illustration of the warning in :doc:`profiles`: a profile linear in flux makes a
 affine problem, and it is an easy way to write a test case that quietly measures
 nothing.
 
+``mhd-rectangle.toml`` is the counterexample, and it is worth reading beside
+them. Its pressure gradient is *quadratic* in :math:`\psi`, so
+:math:`\partial F/\partial\psi` genuinely depends on :math:`\psi` and Newton
+converges quadratically over several steps rather than finishing in one.
+
+.. note::
+
+   That example carries a one-key control worth knowing about as a technique.
+   Setting ``PPrimeScale = 0.0`` and changing nothing else collapses the source
+   to its affine half, and Newton then finishes in a single step — **with a
+   bit-identical initial residual**, because the pressure gradient vanishes at
+   the boundary datum Newton starts from. The two problems are
+   indistinguishable until the first step has been taken, which is as clean a
+   demonstration as a configuration file can give of which profile supplies the
+   nonlinearity.
+
+   It also illustrates :ref:`sources-trivial-branch` from the other side: it is
+   the *toroidal field* profile, not the pressure, that keeps that run off the
+   trivial branch, since the pressure gradient vanishes exactly where the
+   boundary condition puts :math:`\psi`.
+
 Coverage gaps
 -------------
 
 For completeness, since a reader looking for an example of these will not find
-one. No shipped example uses ``[mesh] File``, ``[source] Type = "mhd"``,
-``[boundary.shape] Type = "mxh"``, ``[initialguess]`` in any form,
-``Strategy = "maximum"``, a tabulated ``Omega`` or ``Temperature``, or more than
-two species.
+one. No shipped example uses ``[mesh] File``, ``[boundary.shape] Type = "mxh"``,
+``[initialguess]`` in any form, ``Strategy = "maximum"``, a tabulated ``Omega``
+or ``Temperature``, or more than two species.
 
 Those spellings come from :doc:`configuration` and from
 ``tests/unit/ConfigTests.cpp``, which does exercise all of them and is a good

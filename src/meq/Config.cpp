@@ -609,6 +609,11 @@ namespace meq
 		return directory.empty() ? prefix + "_grad_psi.gf" : directory + "/" + prefix + "_grad_psi.gf";
 	}
 
+	std::string OutputConfig::getPsiStarFile() const
+	{
+		return directory.empty() ? prefix + "_psistar.gf" : directory + "/" + prefix + "_psistar.gf";
+	}
+
 	Configuration::Configuration( std::string const & fileName )
 		: Configuration( parseFile( fileName ), fileName )
 	{

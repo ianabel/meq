@@ -44,6 +44,19 @@ namespace meq
 		{ std::ofstream out = open( "_grad_psi.gf" );   flux.Save( out ); }
 	}
 
+	void writePostProcessed( std::string const &stem,
+	                         mfem::GridFunction const &postProcessed )
+	{
+		// Precision 16, for writeMfem()'s reason: these are coefficients of a
+		// discrete field and eight digits is not what was computed.
+		std::ofstream out( stem + "_psistar.gf" );
+		if ( !out )
+			throw std::runtime_error( "meq::writePostProcessed: cannot write "
+			                          + stem + "_psistar.gf" );
+		out.precision( 16 );
+		postProcessed.Save( out );
+	}
+
 	void writeVtu( std::string const &stem, mfem::Mesh &mesh,
 	               mfem::GridFunction const &potential,
 	               mfem::GridFunction const &field,
@@ -484,6 +497,27 @@ namespace meq
 		maskVar.putAtt( "long_name",
 		                "1 where the node lies inside the computational domain" );
 		maskVar.putVar( mask.data() );
+
+		// AND A SECOND MASK, BECAUSE `inside` CANNOT ANSWER THE QUESTION A
+		// READER ACTUALLY HAS. A node in the band between Gamma_h and Gamma is
+		// located, carries real data and is genuinely inside the plasma, so
+		// `inside` says 1 there and should -- but that node was CONTINUED from
+		// the mesh boundary rather than solved on, and its error is an order
+		// worse than its neighbours'. Until now the file said only how many such
+		// nodes there were, as the `extrapolated_nodes` attribute, which is a
+		// count and tells nobody WHICH. Anyone computing an error norm, fitting
+		// a flux surface or differencing two runs wants to be able to drop them.
+		for ( int j = 0; j < state->nZ; ++j )
+			for ( int i = 0; i < state->nR; ++i )
+				mask[ static_cast<std::size_t>( j )*state->nR + i ] =
+					sampler.wasExtended( i, j ) ? 1 : 0;
+
+		netCDF::NcVar bandVar =
+			state->file.addVar( "extrapolated", netCDF::ncByte, shape );
+		bandVar.putAtt( "long_name",
+		                "1 where the node was continued across the Gamma_h-to-"
+		                "Gamma band rather than solved on" );
+		bandVar.putVar( mask.data() );
 	}
 
 	NetCDFWriter::~NetCDFWriter()

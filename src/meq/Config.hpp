@@ -406,8 +406,17 @@ namespace meq
 
 		// GridFunction: the stored potential and the mesh it lives on. The mesh
 		// must match the one being solved on -- this is the EXACT restart of
-		// DRIVER-PLAN.md section 4, not the interpolating one, which needs
-		// GSLIB and is not written yet.
+		// DRIVER-PLAN.md section 4, not the interpolating one.
+		//
+		// THE INTERPOLATING ONE IS NOT "NOT WRITTEN", WHICH IS WHAT THIS SAID,
+		// AND IT IS NO LONGER UNWIRED EITHER. meq::FieldTransfer in
+		// WarmStart.hpp is built on mfem::FindPointsGSLIB, the install has
+		// MFEM_USE_GSLIB = YES, and WarmStartConvergence is a registered ctest.
+		// Since 2026-09-02 apps/meq.cpp uses it: a mesh-count mismatch
+		// INTERPOLATES rather than being refused, so restarting from a run at
+		// another resolution -- the ordinary way to use a stored answer -- works.
+		// The exact restart is still taken when the meshes match, since it is
+		// every coefficient rather than an interpolation.
 		std::string file;
 		std::string meshFile;
 
@@ -463,6 +472,14 @@ namespace meq
 		std::string getPsiFile() const;
 		// <Directory>/<Prefix>_grad_psi.gf, the HDG flux variable q.
 		std::string getGradPsiFile() const;
+		// <Directory>/<Prefix>_psistar.gf, the POST-PROCESSED potential psi*.
+		//
+		// A SEPARATE FILE FROM _psi.gf AND NOT A REPLACEMENT FOR IT. psi* lives
+		// in P_(k+1) and converges at k+2, so it is the better field to look at
+		// and the better field to sample -- and it does not fit the degree-k
+		// potential space an exact restart reads back into. _psi.gf therefore
+		// keeps psi_h and this carries psi*; see apps/meq.cpp's write block.
+		std::string getPsiStarFile() const;
 	};
 
 	// A parsed, validated configuration. Construction either succeeds and

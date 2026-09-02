@@ -977,6 +977,31 @@ namespace
 		return transferPath != nullptr;
 	}
 
+	std::unique_ptr<mfem::Coefficient>
+		GradShafranovSolver::transferredDatum( mfem::PositionFunction g )
+	{
+		if ( !transferPath )
+			throw std::logic_error(
+				"GradShafranovSolver::transferredDatum: there is no transferred "
+				"datum on the fitted path -- setExtension() was never called, so "
+				"the trace unknown on the boundary IS the condition imposed" );
+
+		// The fixed-boundary problem puts psi = 0 on Gamma, and the extension
+		// benchmark shifts its solution so that its datum is homogeneous too, so
+		// this default is every case in the suite. It is still a parameter,
+		// because g is a property of the problem and not of the technique.
+		if ( !g )
+			g = []( mfem::Vector const & ) { return 0.0; };
+
+		// darcyFlux, NOT flux(): the same convention HDGExtensionIntegrator was
+		// assembled against. radius and extensionLineOrder likewise have to be
+		// the ones buildForms() gave the integrator -- a different rule along the
+		// path is a different lifting, which the MFEM header says in as many
+		// words.
+		return std::make_unique<mfem::TransferredDatumCoefficient>(
+			*transferPath, std::move( g ), darcyFlux, radius, extensionLineOrder );
+	}
+
 	void GradShafranovSolver::setNewtonControl( double relativeToleranceIn,
 	                                            double absoluteToleranceIn,
 	                                            int maxIterationsIn )

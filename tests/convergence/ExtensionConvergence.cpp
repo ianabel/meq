@@ -10,6 +10,7 @@
 
 #include "mfem.hpp"
 
+#include "meq/Estimator.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/Source.hpp"
 
@@ -834,4 +835,252 @@ BOOST_AUTO_TEST_CASE( theNewtonPathReproducesTheLinearPathOnTheCurvedBoundary )
 	BOOST_TEST( newtonSolver.newtonIterations() <= 2,
 	            "Newton took " << newtonSolver.newtonIterations() << " iterations on a "
 	            "problem whose dF/dpsi is identically zero" );
+}
+
+/// PHI_H IS THE CONDITION THE EXTENSION PATH ACTUALLY IMPOSES, AND NOTHING
+/// STORES IT. This checks that meq can rebuild it, against a quantity the
+/// rebuild does not use.
+///
+/// The identity is MFEM's own, and it is why this is a real check rather than a
+/// restatement: phi_h = g( a( x ) ) + L_e( u_h ), and fed the exact flux
+/// L_e is p( x ) - p( a( x ) ). Here a( x ) lies on Gamma, where the datum is
+/// zero, so both g( a( x ) ) and p( a( x ) ) vanish and phi_h collapses to
+/// p( x ) -- the exact solution at the point on Gamma_h. So the transferred
+/// datum can be compared against psiExact directly.
+///
+/// AND THIS IS THE TEST THAT CATCHES THE SIGN. GradShafranovSolver::
+/// transferredDatum() must hand mfem::PathLiftCoefficient the RAW flux block,
+/// which holds -q, and not flux(), which has the sign undone. Feed it the wrong
+/// one and the lifting flips: phi_h becomes -p( x ) rather than p( x ), since
+/// the p( a( x ) ) that would otherwise survive is zero. So the failure is not a
+/// small bias to be lost in a tolerance -- it is the answer with its sign
+/// reversed, and the assertion below is written to say so.
+BOOST_AUTO_TEST_CASE( theTransferredDatumReproducesTheImposedCondition )
+{
+	int const order = 2;
+	meq::analytic::SolovievEquilibrium const &eq = equilibrium();
+
+	std::printf( "\n  phi_h on Gamma_h against the exact psi it transfers:\n"
+	             "      n         h    worst |phi_h - psi|      |psi| there"
+	             "    relative     rate\n" );
+
+	double previous = 0.0;
+	double worstRelative = 0.0;
+	double bestRate = 0.0;
+
+	for ( int n : { 8, 16, 32 } )
+	{
+		int gammaH = 0;
+		double h = 0.0;
+		std::unique_ptr<mfem::SubMesh> sub = makeSubdomain( n, gammaH, h );
+
+		mfem::FunctionCoefficient sourceCoeff( [ &eq ]( mfem::Vector const &x )
+			{ return eq.f( x( 0 ), x( 1 ), 0.0 ); } );
+		mfem::ConstantCoefficient zero( 0.0 );
+		mfem::VertexConePath path( *sub, gammaH, levelSet, 6.0*h );
+
+		mfem::Array<int> gammaHMarker( gammaH );
+		gammaHMarker = 0;
+		gammaHMarker[ gammaH - 1 ] = 1;
+
+		meq::GradShafranovSolver solver( *sub, order );
+		solver.setSource( sourceCoeff );
+		solver.setBoundaryData( zero );
+		solver.setExtension( path, gammaHMarker );
+		solver.solve();
+
+		std::unique_ptr<mfem::Coefficient> datum = solver.transferredDatum();
+
+		double worst = 0.0, scale = 0.0;
+		for ( int b = 0; b < sub->GetNBE(); ++b )
+		{
+			if ( sub->GetBdrAttribute( b ) != gammaH )
+				continue;
+
+			mfem::FaceElementTransformations *ftr =
+				sub->GetBdrFaceTransformations( b );
+			if ( !ftr )
+				continue;
+
+			mfem::IntegrationRule const &ir =
+				mfem::IntRules.Get( ftr->GetGeometryType(), 2*order + 4 );
+			for ( int i = 0; i < ir.GetNPoints(); ++i )
+			{
+				mfem::IntegrationPoint const &ip = ir.IntPoint( i );
+				ftr->SetAllIntPoints( &ip );
+
+				mfem::Vector x;
+				ftr->Transform( ip, x );
+
+				double const want = psiExact( x( 0 ), x( 1 ) );
+				double const got = datum->Eval( *ftr, ip );
+				worst = std::max( worst, std::abs( got - want ) );
+				scale = std::max( scale, std::abs( want ) );
+			}
+		}
+
+		BOOST_TEST_REQUIRE( scale > 0.0,
+		                    "psi is identically zero on Gamma_h at n = " << n
+		                    << ", so this test would pass on any datum at all" );
+
+		double const relative = worst/scale;
+		double const rate = previous > 0.0 ? std::log2( previous/worst ) : 0.0;
+		std::printf( "  %5d  %8.4f       %12.4e    %12.4e  %10.3e   %6s\n",
+		             n, h, worst, scale, relative,
+		             previous > 0.0 ? ( std::to_string( rate ).substr( 0, 5 ) ).c_str()
+		                            : "-" );
+		previous = worst;
+		worstRelative = std::max( worstRelative, relative );
+		bestRate = std::max( bestRate, rate );
+	}
+	std::fflush( stdout );
+
+	// A sign error gives phi_h = -psi, so the difference is 2|psi| and the
+	// relative measure is 2. Anything near or above 1 is that failure, not a
+	// tolerance being tight.
+	BOOST_TEST( worstRelative < 0.25,
+	            "phi_h differs from the psi it is supposed to transfer by "
+	            << worstRelative << " of psi's own size. At about 2 this is the "
+	            "lifting entering with the wrong sign -- transferredDatum() must "
+	            "be given the raw flux block, which holds -q, not flux()" );
+
+	// It is built from q_h, so it must improve with the mesh. A datum that does
+	// not converge is not a datum.
+	BOOST_TEST( bestRate > 1.0,
+	            "the transferred datum converges at " << bestRate
+	            << ", so it is not tracking the flux it is built from" );
+}
+
+/// ETA_5 ON THE TRANSFERRED DATUM, WHICH IS THE REPAIR RATHER THAN THE
+/// OMISSION -- ROADMAP item 3.
+///
+/// The published eta_5 sums over boundary edges with b_h = phi_h there. meq
+/// could not, because phi_h was not reachable, so setTransferredBoundary() left
+/// those faces out instead: correct rates, and a term missing exactly where the
+/// geometry error lives. With those faces IN and psihat_h used as-is, eta_5 is
+/// four orders larger than the rest of the estimator and converges at about a
+/// half -- it compares psi* against a zero that was pinned rather than imposed,
+/// so the difference is O( dist( Gamma_h, Gamma ) ) = O( h ).
+///
+/// mfem::TransferredDatumCoefficient closes that, and this measures all three
+/// side by side on one refinement sequence, because the claim is a comparison
+/// and not a rate on its own.
+BOOST_AUTO_TEST_CASE( theTransferredDatumRestoresEtaFive )
+{
+	int const order = 2;
+	meq::analytic::SolovievEquilibrium const &eq = equilibrium();
+	meq::SolovievSource const source( eq.getA() );
+
+	struct Row { double h, etaDatum, etaExcluded, etaPinned, fiveDatum,
+	                    fivePinned, one; };
+	std::vector<Row> rows;
+
+	for ( int n : { 8, 16, 32 } )
+	{
+		int gammaH = 0;
+		double h = 0.0;
+		std::unique_ptr<mfem::SubMesh> sub = makeSubdomain( n, gammaH, h );
+
+		mfem::FunctionCoefficient sourceCoeff( [ &eq ]( mfem::Vector const &x )
+			{ return eq.f( x( 0 ), x( 1 ), 0.0 ); } );
+		mfem::ConstantCoefficient zero( 0.0 );
+		mfem::VertexConePath path( *sub, gammaH, levelSet, 6.0*h );
+
+		mfem::Array<int> gammaHMarker( gammaH );
+		gammaHMarker = 0;
+		gammaHMarker[ gammaH - 1 ] = 1;
+		mfem::Array<int> const empty;
+
+		meq::GradShafranovSolver solver( *sub, order );
+		solver.setSource( sourceCoeff );
+		solver.setBoundaryData( zero );
+		solver.setExtension( path, gammaHMarker );
+		solver.solve();
+		solver.postProcess();
+
+		std::unique_ptr<mfem::Coefficient> datum = solver.transferredDatum();
+
+		Row row;
+		row.h = h;
+
+		// Three estimators over one solve, so nothing but the treatment of
+		// Gamma_h differs between the columns.
+		{
+			meq::ResidualEstimator estimator( solver, source );
+			estimator.setTransferredBoundary( gammaHMarker, datum.get() );
+			row.etaDatum = estimator.GetTotalError();
+			row.fiveDatum =
+				estimator.component( meq::ResidualEstimator::Term::TraceMismatch );
+			row.one =
+				estimator.component( meq::ResidualEstimator::Term::Divergence );
+		}
+		{
+			meq::ResidualEstimator estimator( solver, source );
+			estimator.setTransferredBoundary( gammaHMarker );
+			row.etaExcluded = estimator.GetTotalError();
+		}
+		{
+			// No marker at all: the faces are in, compared against the pinned
+			// zero. This is what the exclusion was introduced to avoid, and it is
+			// the control that says the problem was real.
+			meq::ResidualEstimator estimator( solver, source );
+			estimator.setTransferredBoundary( empty );
+			row.etaPinned = estimator.GetTotalError();
+			row.fivePinned =
+				estimator.component( meq::ResidualEstimator::Term::TraceMismatch );
+		}
+		rows.push_back( row );
+	}
+
+	auto rate = []( double coarse, double fine )
+		{ return std::log2( coarse/std::max( 1.0e-300, fine ) ); };
+
+	std::printf( "\n  eta_5 on Gamma_h, three treatments, k = %d:\n"
+	             "         h        eta_1     eta(datum)   eta(excluded)"
+	             "    eta(pinned)    eta_5(datum)   eta_5(pinned)\n", order );
+	for ( Row const &r : rows )
+		std::printf( "  %8.4f  %11.4e   %11.4e    %11.4e    %11.4e     %11.4e   %11.4e\n",
+		             r.h, r.one, r.etaDatum, r.etaExcluded, r.etaPinned,
+		             r.fiveDatum, r.fivePinned );
+
+	std::size_t const last = rows.size() - 1;
+	double const rateDatum    = rate( rows[ 0 ].etaDatum,    rows[ last ].etaDatum )
+	                            /static_cast<double>( last );
+	double const rateExcluded = rate( rows[ 0 ].etaExcluded, rows[ last ].etaExcluded )
+	                            /static_cast<double>( last );
+	double const ratePinned   = rate( rows[ 0 ].etaPinned,   rows[ last ].etaPinned )
+	                            /static_cast<double>( last );
+	double const rateFive     = rate( rows[ 0 ].fiveDatum,   rows[ last ].fiveDatum )
+	                            /static_cast<double>( last );
+
+	std::printf( "    rates over the sequence:  eta(datum) %.2f, eta(excluded) %.2f, "
+	             "eta(pinned) %.2f, eta_5(datum) %.2f   (k+1 = %d)\n",
+	             rateDatum, rateExcluded, ratePinned, rateFive, order + 1 );
+	std::fflush( stdout );
+
+	// THE CONTROL FIRST: leaving the faces in against the pinned zero really is
+	// the disaster the exclusion was introduced for. If this ever converges,
+	// the rest of this test is measuring nothing.
+	BOOST_TEST( ratePinned < 1.5,
+	            "eta with the pinned trace on Gamma_h converges at " << ratePinned
+	            << ", which is too good -- this column is supposed to be the "
+	            "broken one and the comparison is empty without it" );
+
+	// The repair: the faces are in, and eta still converges with the rest.
+	BOOST_TEST( rateDatum > 2.0,
+	            "eta with the transferred datum converges at " << rateDatum
+	            << ", so including those faces has cost the estimator its rate" );
+
+	// And eta_5 is no longer what eta is made of. phi_h is built from q_h at
+	// k+1 and integrated along a path of length O( h ), so the term should be
+	// SMALLER than eta_1 rather than four orders larger.
+	BOOST_TEST( rows[ last ].fiveDatum < rows[ last ].one,
+	            "eta_5 on the transferred datum is " << rows[ last ].fiveDatum
+	            << " against eta_1 = " << rows[ last ].one
+	            << ", so the boundary term still dominates the estimator" );
+
+	// Against the pinned version on the same solve, which is the size of the fix.
+	BOOST_TEST( rows[ last ].fiveDatum < 0.01*rows[ last ].fivePinned,
+	            "eta_5 improved only from " << rows[ last ].fivePinned << " to "
+	            << rows[ last ].fiveDatum << " by using the datum" );
 }

@@ -35,6 +35,13 @@ and the constant is the only thing left undetermined.
 Measured, :math:`\psi^\star` converges at :math:`k+2`, and it survives both the
 Newton path and the extension path.
 
+.. important::
+
+   **It is what meq reports.** Every output except the restart file carries
+   :math:`\psi^\star` rather than :math:`\psi_h`, so the driver post-processes
+   on every run and not only on adaptive ones. :ref:`output-which-potential`
+   says which file is which, and why the restart file is the exception.
+
 Why it is needed rather than merely nice
 ----------------------------------------
 

@@ -467,6 +467,7 @@ BOOST_AUTO_TEST_CASE( optional_keys_fall_back_to_their_documented_defaults )
 	BOOST_TEST( config.getOutput().getMeshFile() == "./meq.mesh" );
 	BOOST_TEST( config.getOutput().getPsiFile() == "./meq_psi.gf" );
 	BOOST_TEST( config.getOutput().getGradPsiFile() == "./meq_grad_psi.gf" );
+	BOOST_TEST( config.getOutput().getPsiStarFile() == "./meq_psistar.gf" );
 }
 
 BOOST_AUTO_TEST_CASE( an_empty_optional_table_is_the_same_as_an_absent_one )
@@ -549,6 +550,7 @@ BOOST_AUTO_TEST_CASE( values_round_trip_from_the_file_to_the_accessors )
 	BOOST_TEST( config.getOutput().getMeshFile() == "/tmp/meq-run/case17.mesh" );
 	BOOST_TEST( config.getOutput().getPsiFile() == "/tmp/meq-run/case17_psi.gf" );
 	BOOST_TEST( config.getOutput().getGradPsiFile() == "/tmp/meq-run/case17_grad_psi.gf" );
+	BOOST_TEST( config.getOutput().getPsiStarFile() == "/tmp/meq-run/case17_psistar.gf" );
 }
 
 // ---------------------------------------------------------------------------

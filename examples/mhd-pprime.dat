@@ -1,0 +1,82 @@
+# dp/dpsi( psi ) for examples/mhd-rectangle.toml -- the pressure gradient of a
+# tabulated-profile MHD equilibrium, against psi in webers per radian.
+#
+# THIS IS dp/dpsi AND NOT p. meq::MHDSource stores the DERIVATIVE quantities
+# because that is what the Grad-Shafranov source is built from,
+#
+#     F( r, z, psi ) = mu0 r^2 ( dp/dpsi )( psi ) + ( g dg/dpsi )( psi ),
+#
+# and because a Newton Jacobian then costs one prime() of this table rather
+# than a derivative of a derivative. Handing meq a pressure here instead of a
+# pressure gradient parses, solves and converges -- to a different equilibrium.
+# See examples/mhd-ggprime.dat for the other half of the pair.
+#
+# THE FORMAT. One knot per line,
+#
+#     psi   f( psi )   f'( psi )
+#
+# whitespace separated; a line whose first non-blank character is '#' is a
+# comment; a BLANK LINE TERMINATES THE TABLE, so several profiles can be
+# concatenated in one stream -- which is why there is no blank line anywhere
+# above the numbers below. At least two knots are needed and psi must be
+# strictly increasing. Both columns after psi are required: meq::Profile is a
+# Hermite cubic through value AND slope, so prime() is the analytic derivative
+# of operator() rather than a difference of it, which is what makes the Newton
+# Jacobian consistent with the residual. The same format is documented from the
+# other end in examples/rotating-density.dat.
+#
+# UNITS ARE THE FILE'S OWN AND THE TOML SCALES THEM. The values here are in
+# MPa per Wb/rad and PPrimeScale = 1.0e6 in the configuration carries the
+# conversion to Pa per Wb/rad, which is meq's own unit. That is the intended
+# division of labour: a table stays in whatever units it was produced in --
+# often not meq's -- and the run states the factor, rather than the file being
+# rewritten and thereby becoming a function of which code reads it. psi is in
+# Wb/rad and is NOT scaled; the slope column is therefore in MPa per (Wb/rad)^2.
+# ScaledProfile applies the factor to the value, the slope and the second
+# derivative alike, so the scaled table is still exactly self-consistent.
+#
+# mu0 IS NOT IN HERE. meq multiplies this profile by mu0 r^2 and takes the g g'
+# table as it stands; Mu0 in the configuration is the value it uses, defaulting
+# to the SI 4 pi x 1e-7. Working in units where mu0 = 1 means setting that key,
+# not pre-multiplying this file.
+#
+# THE PROFILE IS GENUINELY CURVED, AND THAT IS WHY THIS EXAMPLE EXISTS.
+#
+#     dp/dpsi = 12.0 psi^2  MPa per Wb/rad,   i.e.  p( psi ) = 4.0e6 psi^3 Pa,
+#
+# so d2p/dpsi2 depends on psi, so dF/dpsi does, so the equation is semi-linear
+# and Newton has real work to do -- 5 iterations at observed order 1.998 on the
+# configuration that reads this file. A table whose f column were AFFINE in psi
+# would make dF/dpsi a constant, the discrete problem linear and Newton exact in
+# one step; examples/soloviev-nstx.toml and examples/rotating-rectangle.toml are
+# both deliberately like that, and nothing else in examples/ shows the mhd
+# source doing anything a linear solve could not. The Hermite cubic reproduces a
+# quadratic exactly, so the interpolant below IS 12.0 psi^2 and not an
+# approximation to it.
+#
+# IT ALSO VANISHES AT psi = 0, WHICH IS THE EDGE, and that is deliberate twice
+# over: it is what a pressure gradient physically does at a plasma boundary, and
+# it means this profile does NOT keep the run off the trivial branch. With
+# F( r, z, 0 ) = 0 the homogeneous problem is solved by psi = 0 and Newton stops
+# there in zero iterations -- the failure CLAUDE.md records under Traps for every
+# GS-2 section 4.2-4.5 source. What saves this run is ( g dg/dpsi )( 0 ) = 1.35,
+# nonzero; see examples/mhd-ggprime.dat.
+#
+# THE TABLE ENDS WELL ABOVE THE SOLUTION'S RANGE, and that end is the one that
+# matters. meq::SplineProfile extends by a CONSTANT outside its knots -- value
+# clamped, DERIVATIVE ZERO -- so a Newton iterate that strays past the last knot
+# meets a source term whose psi-dependence has silently been switched off, and
+# the Jacobian goes with it. psi runs over [ -1.5e-04, 0.1315 ] on the converged
+# solution here, so [ -0.05, 0.30 ] is more than twice the range at the top and
+# comfortably below zero at the bottom, and no quadrature point ever meets the
+# clamp.
+#
+# psi [Wb/rad]     dp/dpsi [MPa per Wb/rad]     d2p/dpsi2 [MPa per (Wb/rad)^2]
+   -0.05                  0.03                          -1.2
+    0.00                  0.00                           0.0
+    0.05                  0.03                           1.2
+    0.10                  0.12                           2.4
+    0.15                  0.27                           3.6
+    0.20                  0.48                           4.8
+    0.25                  0.75                           6.0
+    0.30                  1.08                           7.2

@@ -97,9 +97,16 @@ GSLIB (point location, for interpolating a warm start between meshes), and
 optionally MKL PARDISO and cuDSS. MEQ reads which of them are present out of
 MFEM's own configuration and adapts.
 
-MEQ needs a specific MFEM: the branch carrying `DarcyForm` and the HDG
-integrators under `fem/darcy/`. `mfem/master` will not work — the older
-`HDGBilinearForm` API that MEQ used to depend on has been replaced.
+MEQ needs a specific MFEM: a **local merge of four development branches**
+carrying `DarcyForm`, the HDG integrators under `fem/darcy/`, the
+curved-boundary extension machinery and the NPC nonlinear ordering.
+`mfem/master` will not work — the older `HDGBilinearForm` API that MEQ used to
+depend on has been replaced.
+
+**That branch is published on no remote**, so an outside user cannot currently
+build the solver, only the MFEM-free half. [INSTALL.md](INSTALL.md) is the whole
+story: which branches, why each is needed, what happens without them, and the
+unresolved question of where the merge should live.
 
 ```sh
 git submodule update --init --recursive

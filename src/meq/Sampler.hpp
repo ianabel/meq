@@ -13,8 +13,13 @@
  * THE OBVIOUS ROUTE IS TOO SLOW, and this is recorded in CLAUDE.md as a trap:
  * mfem::Mesh::FindPoints is O( elements x points ), a brute-force scan over
  * element centres. A 129x129 grid against a 20k-element mesh is 3.3e8 element
- * tests for a job that should be instant, and this MFEM is built with
- * MFEM_USE_GSLIB = NO, so FindPointsGSLIB is not available as an escape.
+ * tests for a job that should be instant.
+ *
+ * GSLIB IS NOT THE ANSWER HERE, AND THIS COMMENT USED TO SAY IT WAS
+ * UNAVAILABLE, WHICH IS FALSE -- the install has MFEM_USE_GSLIB = YES and
+ * meq::FieldTransfer already uses mfem::FindPointsGSLIB. It is not used in this
+ * class because the inversion below is already linear and needs no search
+ * structure at all, not because it could not be.
  *
  * SO THE LOOP IS INVERTED. Rather than asking, for each point, which element
  * holds it, this asks for each element which points it might hold: the element's
@@ -80,6 +85,11 @@ namespace meq
 			             double fill ) const;
 
 			/// Sample one component of a vector field, same layout.
+			///
+			/// THIS READS THE FOOT ON Gamma_h FOR A BAND NODE, so it is `O( h )`
+			/// there. For `B`, or anything else written to the interchange file,
+			/// use sampleComponentWithGradient() instead; this one is for a
+			/// caller that wants the value in the element and nothing else.
 			void sampleComponent( mfem::GridFunction const &field, int component,
 			                      std::vector<double> &values,
 			                      double fill ) const;
@@ -159,6 +169,53 @@ namespace meq
 			                              mfem::GridFunction const &flux,
 			                              std::vector<double> &values,
 			                              double fill ) const;
+
+			/**
+			 * Continue one component of a VECTOR field across the band using
+			 * that field's OWN gradient. This is what `B` needs, and it is what
+			 * sampleComponent() does not do.
+			 *
+			 * The step and the guarantee are samplePotentialWithFlux()'s: the
+			 * foot recorded by extendOutward() lies on its element's own
+			 * closure, so `GetVectorGradient` is evaluated inside the element
+			 * and nothing is read outside one.
+			 *
+			 *     u_c( p ) = u_c( x0 ) + grad u_c( x0 ) . ( p - x0 )
+			 *
+			 * IT DOES NOT REACH THE FLUX'S OWN ORDER, AND THAT IS STRUCTURAL
+			 * RATHER THAN A SHORTCUT -- the two band continuations are not
+			 * equally good and it would be wrong to imply they are.
+			 * samplePotentialWithFlux() is as accurate as it is because `q` is a
+			 * SOLVED variable carrying the potential's own order, which is the
+			 * whole point of the mixed method. There is no solved variable for
+			 * `grad q`: differentiating an L2 field of degree `k` leaves degree
+			 * `k-1`, converging one order down, so this step is `O( h^2 )`
+			 * whatever `k` is. That is still a full order better than the
+			 * `O( h )` of reading the foot, which is what it replaces, and
+			 * `theBandVectorContinuesAtItsGradientsOrder` measures both.
+			 *
+			 * IF SOMEONE WANTS BETTER, the route is known and is not this one.
+			 * The divergence and the curl of `q` are both available in closed
+			 * form -- `div q = -F/r` is the equation being solved, and
+			 * `d_r q_z - d_z q_r = -q_z/r` follows from `r q = grad psi`. Those
+			 * pin two of the four entries of `grad q` exactly and leave the
+			 * symmetric traceless part still to be differentiated, so they buy
+			 * STRUCTURE rather than an order, at the cost of plumbing the source
+			 * into this class. Not done, and not obviously worth it.
+			 */
+			void sampleComponentWithGradient( mfem::GridFunction const &field,
+			                                  int component,
+			                                  std::vector<double> &values,
+			                                  double fill ) const;
+
+			/// Whether this node was filled by extendOutward() rather than found
+			/// inside an element -- the per-node form of extendedCount().
+			///
+			/// A READER OF THE OUTPUT FILE IS ENTITLED TO THIS, which is why it
+			/// is public: the `inside` mask says 1 in the band, because the node
+			/// really was located and really does carry data, so nothing else in
+			/// the file distinguishes a solved node from a continued one.
+			bool wasExtended( int i, int j ) const;
 
 			/**
 			 * How far through the Gamma_h-to-Gamma band a node sits: 0 on

@@ -537,6 +537,40 @@ namespace meq
 			/// True once setExtension() has been called.
 			bool isExtended() const;
 
+			/**
+			 * The Dirichlet datum `phi_h` ACTUALLY IMPOSED on `Gamma_h`, as a
+			 * Coefficient to be evaluated on a face of it.
+			 *
+			 * THE TRACE UNKNOWN IS NOT THIS. On `Gamma_h` the trace dofs are
+			 * pinned to zero because nothing references them, and what the solve
+			 * really imposes is `phi_h = g( a( x ) ) + L_e( q_h )` -- a value
+			 * transferred along a path from the true boundary, which is never
+			 * stored anywhere. Anything that wants to compare against the
+			 * imposed condition, rather than against the zero standing in for
+			 * it, has to rebuild it, and this is that. meq::ResidualEstimator's
+			 * eta_5 is the caller that needs it.
+			 *
+			 * IT IS BUILT FROM THE RAW FLUX BLOCK AND NOT FROM flux(), WHICH IS
+			 * THE ONE THING TO GET RIGHT HERE. `mfem::PathLiftCoefficient`
+			 * evaluates the same `HDGExtensionIntegrator` the assembly used, so
+			 * it wants the same convention that integrator was assembled
+			 * against: `DarcyForm`'s block, which holds `-q`. `flux()` is a copy
+			 * with the sign undone and would give a lifting of the wrong sign --
+			 * a silent error, since the result stays smooth and merely converges
+			 * to the wrong datum.
+			 *
+			 * @param g  the datum on the TRUE boundary as a function of position,
+			 *           NOT its negation, and NOT the boundary-data Coefficient:
+			 *           `mfem::PositionFunction` is evaluated at a bare point,
+			 *           which a Coefficient cannot be. Defaults to zero, which is
+			 *           meq's fixed-boundary problem and every case in the suite.
+			 *
+			 * @throws std::logic_error on the fitted path, where there is no path
+			 *         family and no datum to transfer.
+			 */
+			std::unique_ptr<mfem::Coefficient> transferredDatum(
+				mfem::PositionFunction g = mfem::PositionFunction() );
+
 			/// Which non-linear solver drives the trace system.
 			enum class Globalisation
 			{
@@ -1299,7 +1333,10 @@ namespace meq
 			/// handing it the three-block vector aborts inside ReduceRHS() on the
 			/// semi-linear path ("Number of Blocks don't match"). The linear path
 			/// survived it only because the corresponding checks there are
-			/// MFEM_ASSERTs, compiled out of a release build. miniapps/hdg's
+			/// MFEM_ASSERTs, which are dead in this build -- gated on
+			/// MFEM_DEBUG, which the installed MFEM sets to NO, and NOT on
+			/// NDEBUG, so building meq itself in Debug does not revive them.
+			/// miniapps/hdg's
 			/// DarcyOperator::ImplicitSolve() takes the same view for the same
 			/// reason.
 			mfem::BlockVector darcySolution;

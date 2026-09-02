@@ -16,11 +16,15 @@ convenient, and each of the three gives up a different one of those.
      - GLVis; meq itself
      - **Exact.** Every polynomial coefficient of the finite element solution.
        This is the restart format, and the only one from which meq can resume a
-       run.
+       run. It carries :math:`\psi_h`.
+   * - ``<stem>_psistar.gf``
+     - GLVis
+     - The **post-processed** potential :math:`\psi^\star`, in
+       :math:`P_{k+1}`. See :ref:`output-which-potential`.
    * - ``<stem>/<name>.pvd`` and ``<stem>/Cycle000000/``
      - ParaView, VisIt
-     - **The picture.** VTK, written at the polynomial degree of the solve, with
-       the mesh boundary bent onto the true :math:`\Gamma`.
+     - **The picture.** VTK Lagrange cells at degree :math:`k+1`, with the mesh
+       boundary bent onto the true :math:`\Gamma`.
    * - ``<stem>.nc``
      - anything that reads NetCDF
      - **The interchange format.** :math:`\psi` and :math:`\mathbf{B}` sampled on
@@ -30,11 +34,52 @@ convenient, and each of the three gives up a different one of those.
 does **not** create the output directory; if it does not exist the run exits 3
 (see :ref:`running-exit-codes`).
 
+.. _output-which-potential:
+
+Which potential each file carries
+---------------------------------
+
+.. important::
+
+   **Everything meq draws or exports carries** :math:`\psi^\star`, **the
+   post-processed potential** — the ``.vtu``, the ``.nc``, and
+   ``<stem>_psistar.gf``. It converges one order faster than the solved
+   :math:`\psi_h` at essentially no cost, so there is no reason to report the
+   worse field.
+
+   **The one exception is** ``<stem>_psi.gf``, **which keeps** :math:`\psi_h`
+   deliberately. That file is the restart format and is read back into a
+   degree-\ :math:`k` potential space; :math:`\psi^\star` lives in
+   :math:`P_{k+1}` and would not fit. Making the two consistent would break
+   restart, which is why the asymmetry is commented at the write site.
+
+Two consequences for anyone reading meq's output:
+
+* **A** ``.nc`` **differenced against a run from before this change measures the
+  post-processing, not the physics.** The variable has the same name, units,
+  layout and mask; only its meaning moved. The file records which potential it
+  holds in a global attribute ``potential``, and the *absence* of that attribute
+  is what identifies an older file.
+* **VTK point counts rose**, because the Lagrange cells went from degree
+  :math:`k` to :math:`k+1` to match the field they now draw — a factor of 1.5 on
+  triangles at :math:`k = 3`.
+
+.. warning::
+
+   Making :math:`\psi^\star` the reported potential puts every output behind
+   MFEM's local reconstruction, which had a defect that corrupted it **per
+   element** wherever :math:`\partial F/\partial\psi` vanishes — invisible to
+   any whole-domain norm. Until this change that defect could only reach the
+   error estimator; it now reaches the primary outputs. The fix is on one MFEM
+   branch and no other, and ``INSTALL.md`` in the source tree says which. It is
+   regression-tested rather than latent: see :ref:`postprocessing-singular`.
+
 The exact format
 ----------------
 
 MFEM's own mesh and grid-function files, written at full precision. ``_psi.gf``
-is the potential :math:`\psi`; ``_grad_psi.gf`` is the HDG flux
+is the solved potential :math:`\psi_h`; ``_psistar.gf`` is the post-processed
+:math:`\psi^\star`; ``_grad_psi.gf`` is the HDG flux
 :math:`q = \gradbar\psi / r` — the solved unknown, **not** the magnetic field,
 which is a relabelling of it (see :ref:`output-field`).
 
@@ -52,7 +97,8 @@ The VTK format
 --------------
 
 Written through ParaView's data collection format, as **Lagrange cells at the
-polynomial degree of the solve**.
+degree of the field being drawn** — which is :math:`k+1`, since what is drawn is
+:math:`\psi^\star`.
 
 That is a deliberate choice with a quiet failure mode behind it. VTK's native
 cells are linear, so the default path draws a cubic solution as though it were
@@ -91,6 +137,14 @@ never saw.
 
 .. note::
 
+   The frames carry :math:`\psi^\star`, as the answer does — *which field is
+   drawn* and *which geometry it is drawn on* are separate questions. The
+   geometry stays as solved, faceted and unbent; the field is the better one
+   either way, and it costs nothing, since the post-processing has already been
+   done for the estimator by the time each frame is written.
+
+.. note::
+
    One frame per cycle is easy to get *almost* right, and the near miss is
    invisible. Rebuilding the collection object for each frame puts every cycle
    directory on disk with the correct refined mesh, and leaves the ``.pvd``
@@ -109,9 +163,10 @@ whose extent is :math:`\Gamma`'s bounding box when there is a shape and the
 ``[mesh]`` box otherwise. This is the format to give to anything that is not a
 finite element code.
 
-Variables: the grid coordinates; ``psi``; ``B_R`` and ``B_Z``; a byte mask
-``inside``; a byte mask ``extrapolated``; and the boundary curve as a pair of
-coordinate arrays. A rotating run additionally carries a density for each species
+Variables: the grid coordinates; ``psi`` (which is :math:`\psi^\star` — see
+:ref:`output-which-potential`); ``B_R`` and ``B_Z``; a byte mask ``inside``; a
+byte mask ``extrapolated``; and the boundary curve as a pair of coordinate
+arrays. A rotating run additionally carries a density for each species
 and the electrostatic potential. Nodes outside the plasma are ``NaN`` *and*
 carry ``inside = 0``, so a reader that checks either one is safe.
 

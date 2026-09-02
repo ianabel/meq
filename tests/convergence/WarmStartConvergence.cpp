@@ -552,3 +552,128 @@ BOOST_AUTO_TEST_CASE( fullOrderCarriesMoreThanAStructuredGrid )
 	            "adjacent equilibrium is what this is for, and it should cost one "
 	            "or two steps" );
 }
+
+/// THE ADAPTIVE LOOP'S OWN WARM START, WHICH IS WHAT THE DRIVER DOES NOW.
+///
+/// aWarmStartCutsTheWorkAndNotTheAnswer above measures ONE transfer between two
+/// solves. A refinement loop is a chain of them, and until 2026-09-02
+/// apps/meq.cpp threw every link away: each cycle destroyed its solver, refined,
+/// and started the next solve from the Dirichlet datum, on the stated grounds
+/// that the interpolating restart "needs GSLIB". GSLIB has been on, and
+/// meq::FieldTransfer written and tested, for far longer than that comment
+/// survived.
+///
+/// THE STRUCTURE HERE MIRRORS THE DRIVER'S DELIBERATELY, down to resetting the
+/// solver before refining and keeping a DEEP COPY of the mesh: uniform
+/// refinement rewrites the mesh in place, so a borrowed pointer to the previous
+/// one dangles rather than merely going stale. Getting that wrong is a crash if
+/// you are lucky.
+///
+/// It is measured on a NONLINEAR source on purpose. meq's adaptive examples run
+/// a Solov'ev source, whose dF/dpsi is zero, so Newton takes one step whatever
+/// it starts from and a warm start there is unmeasurable by construction.
+BOOST_AUTO_TEST_CASE( carryingTheAnswerAcrossCyclesCutsTheWork )
+{
+	int const order = 2;
+	int const cycles = 3;
+	meq::analytic::ManufacturedNonlinear const eq = equilibrium();
+	EquilibriumSource<meq::analytic::ManufacturedNonlinear> const source( eq );
+	mfem::FunctionCoefficient exact( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.psi( x( 0 ), x( 1 ) );
+	} );
+
+	struct Run { int total = 0; std::vector<int> perCycle; double error = 0.0; };
+
+	auto sweep = [ & ]( bool warm )
+	{
+		Run out;
+		mfem::Mesh mesh = refinedMesh( 4 );
+
+		std::unique_ptr<mfem::Mesh> previousMesh;
+		std::unique_ptr<mfem::FiniteElementCollection> previousCollection;
+		std::unique_ptr<mfem::FiniteElementSpace> previousSpace;
+		std::unique_ptr<mfem::GridFunction> previousPotential;
+		std::unique_ptr<mfem::GridFunction> carried;
+
+		for ( int cycle = 0; cycle < cycles; ++cycle )
+		{
+			auto solver = std::make_unique<meq::GradShafranovSolver>( mesh, order );
+			solver->setSource( source );
+			solver->setBoundaryData( exact );
+
+			if ( warm && previousPotential )
+			{
+				carried = std::make_unique<mfem::GridFunction>(
+					&solver->potentialSpace() );
+				meq::FieldTransfer transfer( *previousMesh );
+				transfer.transfer( *previousPotential, exact, *carried );
+				solver->setInitialGuess( *carried );
+			}
+
+			solver->solve();
+			out.perCycle.push_back( solver->newtonIterations() );
+			out.total += solver->newtonIterations();
+			out.error = solver->potentialError( exact );
+
+			if ( cycle + 1 == cycles )
+				break;
+
+			previousPotential.reset();
+			previousSpace.reset();
+			previousMesh.reset();
+			previousCollection.reset( mfem::FiniteElementCollection::New(
+				solver->potentialSpace().FEColl()->Name() ) );
+			previousMesh = std::make_unique<mfem::Mesh>( mesh );
+			previousSpace = std::make_unique<mfem::FiniteElementSpace>(
+				previousMesh.get(), previousCollection.get() );
+			previousPotential =
+				std::make_unique<mfem::GridFunction>( previousSpace.get() );
+			*previousPotential = solver->potential();
+
+			// The solver borrows the mesh, so it dies before the mesh moves.
+			solver.reset();
+			mesh.UniformRefinement();
+		}
+		return out;
+	};
+
+	Run const cold = sweep( false );
+	Run const warm = sweep( true );
+
+	std::printf( "\n  %d refinement cycles on a nonlinear source, k = %d\n",
+	             cycles, order );
+	auto show = [ ]( char const *label, Run const &run )
+	{
+		std::printf( "    %-6s Newton per cycle:", label );
+		for ( int n : run.perCycle )
+			std::printf( " %3d", n );
+		std::printf( "   total %3d, final L2 %.6e\n", run.total, run.error );
+	};
+	show( "cold", cold );
+	show( "warm", warm );
+	std::printf( "    saved %d Newton iterations of %d, %.0f%%;"
+	             " the two answers differ by %.3e relative\n",
+	             cold.total - warm.total, cold.total,
+	             100.0*( cold.total - warm.total )/cold.total,
+	             std::abs( warm.error - cold.error )
+	                 /std::max( 1.0e-300, cold.error ) );
+	std::fflush( stdout );
+
+	// THE WORK. Every cycle after the first starts from an answer that is already
+	// right to the previous mesh's discretisation error, so it must cost less
+	// than starting from the boundary data.
+	BOOST_TEST( warm.total < cold.total,
+	            "carrying the answer forward took " << warm.total
+	            << " Newton iterations against " << cold.total
+	            << " cold, so the transfer is not reaching the solve" );
+
+	// AND NOT THE ANSWER, which is the half that makes the other half safe. Same
+	// meshes, same source, same tolerance: the converged discrete solution does
+	// not know how the iteration got to it.
+	BOOST_TEST( std::abs( warm.error - cold.error )
+	                < 1.0e-8*std::max( cold.error, warm.error ),
+	            "the warm run converged to L2 " << warm.error
+	            << " where the cold one reached " << cold.error
+	            << " -- a warm start must change the work and not the answer" );
+}

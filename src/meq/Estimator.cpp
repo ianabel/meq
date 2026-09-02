@@ -98,9 +98,11 @@ namespace meq
 		return comparisonChoice;
 	}
 
-	void ResidualEstimator::setTransferredBoundary( mfem::Array<int> const &markerIn )
+	void ResidualEstimator::setTransferredBoundary( mfem::Array<int> const &markerIn,
+	                                                mfem::Coefficient *datumIn )
 	{
 		markerIn.Copy( transferredBoundary );
+		transferredDatumCoefficient = datumIn;
 		Reset();
 	}
 
@@ -277,6 +279,8 @@ namespace meq
 		mfem::Vector fluxTwo;
 		mfem::DenseMatrix faceMass;
 		mfem::Vector faceLoad;
+		mfem::Vector datumLoad;
+		mfem::Vector datumCoefficients;
 		mfem::Array<int> const faceToBdr = mesh.GetFaceToBdrElMap();
 		mfem::Vector projected;
 		mfem::Vector residualCoefficients;
@@ -344,12 +348,20 @@ namespace meq
 			int const sides = interior ? 2 : 1;
 			int const element[ 2 ] = { elementOne, elementTwo };
 
+			// On a transferred face with a datum to hand, psihat_h is NOT the
+			// condition imposed -- it is a zero standing in for one -- so eta_5
+			// reads phi_h instead. Without a datum the face is left out, which is
+			// what this class did unconditionally before.
+			bool const useDatum = transferred && transferredDatumCoefficient;
+
 			for ( int side = 0; side < sides; ++side )
 			{
 				faceMass.SetSize( traceDof );
 				faceMass = 0.0;
 				faceLoad.SetSize( traceDof );
 				faceLoad = 0.0;
+				datumLoad.SetSize( traceDof );
+				datumLoad = 0.0;
 
 				for ( int i = 0; i < ir.GetNPoints(); ++i )
 				{
@@ -368,7 +380,16 @@ namespace meq
 					double const weight = ip.weight*ftr->Weight();
 
 					traceFe->CalcShape( ip, traceShape );
-					double const hatValue = traceShape*traceLocal;
+
+					// Both halves of phi_h want the FACE transformation and the
+					// FACE integration point -- mfem::PathLiftCoefficient
+					// MFEM_VERIFYs the dynamic_cast, since a lifting is defined
+					// along a path issuing from a face and a path family may need
+					// the outward normal. ftr->SetAllIntPoints( &ip ) above is
+					// what makes both usable here.
+					double const hatValue = useDatum
+						? transferredDatumCoefficient->Eval( *ftr, ip )
+						: traceShape*traceLocal;
 
 					mfem::IntegrationPoint const &eip =
 						side ? ftr->GetElement2IntPoint() : ftr->GetElement1IntPoint();
@@ -379,6 +400,8 @@ namespace meq
 
 					mfem::AddMult_a_VVt( weight, traceShape, faceMass );
 					faceLoad.Add( weight*psiValue, traceShape );
+					if ( useDatum )
+						datumLoad.Add( weight*hatValue, traceShape );
 
 					if ( side != 0 )
 						continue;
@@ -423,14 +446,27 @@ namespace meq
 				inverse.Mult( faceLoad, projected );
 
 				residualCoefficients.SetSize( traceDof );
-				residualCoefficients = traceLocal;
+				if ( useDatum )
+				{
+					// phi_h is a general function on the face, not an element of
+					// M_h, so its coefficients have to be found the same way
+					// psi*'s were rather than read off a GridFunction. Where the
+					// datum is NOT in use this stays traceLocal, which is EXACT
+					// -- psihat_h is already in M_h -- so every number this
+					// estimator produced before is reproduced bit for bit.
+					datumCoefficients.SetSize( traceDof );
+					inverse.Mult( datumLoad, datumCoefficients );
+					residualCoefficients = datumCoefficients;
+				}
+				else
+					residualCoefficients = traceLocal;
 				residualCoefficients -= projected;
 				massTimesResidual.SetSize( traceDof );
 				faceMass.Mult( residualCoefficients, massTimesResidual );
 				projectedMismatch[ side ] = residualCoefficients*massTimesResidual;
 			}
 
-			if ( !transferred )
+			if ( !transferred || useDatum )
 			{
 				for ( int side = 0; side < sides; ++side )
 				{
