@@ -1,0 +1,153 @@
+# THE SAME ROTATING PLASMA, WITH ITS PROFILES GIVEN AGAINST NORMALISED FLUX --
+# which is how every equilibrium code poses them, and which makes psi on the
+# magnetic axis an UNKNOWN of the non-linear system rather than an input.
+#
+#     meq examples/rotating-normalised.toml
+#
+# The physics, the species and the gauge are examples/rotating-rectangle.toml's;
+# read that file first. The equation is eq (136) of refs/RotatingGK.pdf -- Abel,
+# Plunk, Wang, Barnes, Cowley, Dorland & Schekochihin, Rep. Prog. Phys. 76 (2013)
+# 116201 -- closed by its (96) and (97). What is different here is the ARGUMENT
+# every profile is read at:
+#
+#     Psi = ( psi - psi_bnd )/( psi_ax - psi_bnd ) = psi/psi_ax
+#
+# since meq is fixed boundary with psi = 0 on Gamma. psi_ax is therefore a
+# functional of the solution, the system acquires the extra equation
+# psi_ax = max psi_h, and the solver closes the pair by a BORDERED Newton -- one
+# extra row and column on the Jacobian, costing one factorisation and two
+# backsolves rather than a second matrix. CLAUDE.md's "Newton, and the obligation
+# it creates" is the account of it; tests/convergence/HighBetaConvergence.cpp is
+# its acceptance criterion and
+# tests/convergence/RotatingNormalisedConvergence.cpp is this source through it.
+#
+# PsiAxis IS A GUESS IN THE NEWTON SENSE AND NOT A SCALE FACTOR. It is where the
+# iteration starts, not what the answer will be: the converged value is written
+# to the .nc as the global attribute psi_axis, and the driver prints it beside
+# the constraint residual psi_ax - max psi_h. Reading the TOML's PsiAxis as the
+# axis flux of the answer is reading the starting point of a Newton iteration.
+#
+# UNITS. SI, as the un-normalised file, with two differences that follow from
+# the change of argument. Each profile below is a function of the dimensionless
+# Psi in [0, 1] rather than of psi in Wb/rad -- so the density table is the
+# density on r = ReferenceRadius at a given NORMALISED flux -- and GGPrime is
+# d( g^2/2 )/dPsi, per unit normalised flux, which is NOT the same number as the
+# GGPrime of the un-normalised file even for the same plasma. PsiAxis itself is
+# in Wb/rad, being an actual flux.
+#
+# THE PLASMA IS examples/rotating-rectangle.toml's, RE-EXPRESSED. Every profile
+# there is a function of psi; every profile here is the same function of
+# Psi = psi/s with s = 0.1 Wb/rad, which multiplies each SLOPE by s and leaves
+# each value alone -- so GGPrime is 0.08 rather than 0.8, and
+# examples/rotating-density-normalised.dat is examples/rotating-density.dat with
+# its first column divided by s and its third multiplied by it. The two files are
+# then literally the same equilibrium if psi_ax converges to s. It converges to
+# 1.0392e-01 instead, because s was chosen round rather than right, so this
+# file's equilibrium is 3.8% smaller than examples/rotating-rectangle.toml's --
+# and that 3.8% IS the difference between assuming an axis flux and solving for
+# one. Set s to the answer and the two files describe the same plasma exactly;
+# nobody knows the answer before solving, which is the point.
+#
+# THE REFERENCE RADIUS IS STILL THE GAUGE, and it is still the first thing two
+# codes must agree on. phi_0 vanishes on r = ReferenceRadius, so the density
+# table below is the PHYSICAL density of deuterium on that curve; two sets of
+# densities differing by the gauge factor exp( Z_s e delta/T_s ) describe exactly
+# the same plasma. AND TEMPERATURES ARE IN JOULES, NOT eV AND NOT keV --
+# TemperatureScale is how a file stays readable, and there is no hidden
+# conversion anywhere in meq.
+#
+# WHAT THIS FILE DOES AND DOES NOT EXERCISE. n_D0 is LINEAR in Psi, so dp/dPsi
+# does not depend on Psi and neither does the trace system's non-linearity:
+# dF/dpsi vanishes. THE BORDER IS NOT LINEAR. F carries a factor of 1/psi_ax, psi
+# scales like 1/psi_ax with it, and the constraint psi_ax = max psi_h is a
+# genuinely non-linear scalar equation whose positive root the bordered Newton
+# has to find -- which it does at observed order 2 in its tail. So what this file
+# exercises is the border and the normalised plumbing, and the psi-dependence of
+# the SOURCE is measured elsewhere:
+# tests/convergence/RotatingNormalisedConvergence.cpp poses profiles with real
+# Psi-dependence and asserts that observed order, which is the only thing that
+# can see a wrong Jacobian.
+
+[mesh]
+RMin = 0.6
+RMax = 1.4
+ZMin = -0.6
+ZMax = 0.6
+NR = 8
+NZ = 12
+RefinementLevels = 1
+
+[discretisation]
+PolynomialDegree = 2
+Tau = 1.0
+
+[source]
+Type = "rotating"
+
+# psi_ax is an unknown, and PsiAxis is where Newton starts looking for it. The
+# answer here is about 0.104 Wb/rad, so 0.08 is a guess of the right size and
+# visibly not the answer.
+Normalised = true
+PsiAxis = 0.08
+
+# THE GAUGE. See the header, and examples/rotating-rectangle.toml.
+ReferenceRadius = 1.0
+
+# omega( Psi ), rad/s. Sonic, M = 1.33: the deuterium exponent of (96) reaches
+# +0.891 at RMax and -0.594 at RMin, a factor of 4.4 in the ion density across
+# the box at fixed flux.
+Omega = 4.0e5
+
+# g dg/dPsi, T^2 m^2 per unit NORMALISED flux. Positive, so F > 0 and psi > 0 in
+# the interior -- which is also what makes the constraint's positive root the one
+# the iteration finds -- and non-zero at Psi = 0, which is what keeps this run
+# off the trivial branch.
+#
+# 0.08 rather than the un-normalised file's 0.8 because it is a d/dPsi, and it is
+# sized the same way: against the pressure term, so that mu0 r^2 dp/dPsi is 47%
+# of F at the gauge radius and 81% at RMax rather than a correction on a vacuum
+# field. Without that, rotation reaches n_s and phi_0 and never reaches psi.
+GGPrime = 0.08
+
+[[source.species]]
+Name = "D"
+Mass = 3.3435837768e-27        # kg
+Charge = 1.0
+Temperature = 1.0              # keV
+TemperatureScale = 1.602176634e-16
+# The density on r = ReferenceRadius as a function of NORMALISED flux. A
+# constant here would make dp/dPsi vanish and rotation would never reach psi.
+DensityFile = "examples/rotating-density-normalised.dat"
+DensityScale = 1.0e20
+
+[[source.species]]
+Name = "e"
+Mass = 9.1093837015e-31        # kg
+Charge = -1.0
+Temperature = 0.8              # keV
+TemperatureScale = 1.602176634e-16
+# Exactly one species carries no Density: the gauge removes one function's worth
+# of freedom from the set, and this is where the missing one comes from.
+Neutralising = true
+
+[boundary]
+Type = "zero"
+
+[solver]
+# THE REACTIVE LADDER IS NOT AVAILABLE ON THIS PATH, and the driver says so
+# rather than trying it: every globalisation meq has drives a residual of its own
+# and none can carry the border. If this does not converge the levers are a
+# better PsiAxis, an [initialguess], and resolution.
+NewtonMaxIterations = 20
+NewtonRelativeTolerance = 1.0e-10
+NewtonAbsoluteTolerance = 1.0e-14
+
+[output]
+Directory = "."
+Prefix = "rotating-normalised"
+# Beside psi, B_R, B_Z, n_D, n_e and e_phi_0, this file carries the global
+# attributes psi_axis and normalisation_residual -- the converged axis flux and
+# the constraint it satisfies. They are attributes and not fields because psi_ax
+# is one number for the whole equilibrium.
+GridNR = 129
+GridNZ = 129

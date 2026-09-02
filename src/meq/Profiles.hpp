@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <memory>
 #include <iosfwd>
 #include <string>
 #include <utility>
@@ -190,6 +191,44 @@ namespace meq
 			double delta;
 			double fLower, fUpper;
 			double fPrimeLower, fPrimeUpper;
+	};
+
+	/**
+	 * Another profile, multiplied by a constant.
+	 *
+	 * WHY THIS EXISTS: a tabulated profile arrives in whatever units its author
+	 * wrote it in, and that is frequently not meq's. A temperature table in keV
+	 * has to become Joules, a density in 10^19 m^-3 has to become m^-3, and a
+	 * profile from another code may be normalised to its own reference values.
+	 * Editing the file is the wrong answer -- it makes the file a function of
+	 * which code reads it -- and folding the factor into the *source* is worse,
+	 * because then every source has to carry a units argument per profile.
+	 *
+	 * The scale multiplies all three derivative levels, which is what makes this
+	 * safe: a scaled profile is exactly the profile of the scaled quantity, and
+	 * prime() and doublePrime() stay the exact derivatives of operator().
+	 */
+	class ScaledProfile : public Profile
+	{
+		public:
+			/// @param inner  the profile to scale. Must not be null.
+			/// @param scale  the factor. May be negative; a sign convention is a
+			///               scale like any other.
+			/// @throws std::invalid_argument if @a inner is null or @a scale is
+			///         not finite.
+			ScaledProfile( std::shared_ptr<Profile const> inner, double scale );
+
+			double operator()( double psi ) const override;
+			double prime( double psi ) const override;
+			double doublePrime( double psi ) const override;
+
+			/// The profile underneath, unscaled.
+			Profile const & unscaled() const;
+			double scale() const;
+
+		private:
+			std::shared_ptr<Profile const> innerProfile;
+			double scaleFactor;
 	};
 
 	/**

@@ -8,6 +8,7 @@
 #include <ostream>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 
 namespace
 {
@@ -125,6 +126,40 @@ namespace meq
 	double ConstantProfile::value() const
 	{
 		return constantValue;
+	}
+
+	ScaledProfile::ScaledProfile( std::shared_ptr<Profile const> inner, double scale )
+		: innerProfile( std::move( inner ) ), scaleFactor( scale )
+	{
+		if ( !innerProfile )
+			throw std::invalid_argument( "meq::ScaledProfile: the profile to scale must not be null" );
+		if ( !std::isfinite( scaleFactor ) )
+			throw std::invalid_argument( "meq::ScaledProfile: the scale must be finite" );
+	}
+
+	double ScaledProfile::operator()( double psi ) const
+	{
+		return scaleFactor*( *innerProfile )( psi );
+	}
+
+	double ScaledProfile::prime( double psi ) const
+	{
+		return scaleFactor*innerProfile->prime( psi );
+	}
+
+	double ScaledProfile::doublePrime( double psi ) const
+	{
+		return scaleFactor*innerProfile->doublePrime( psi );
+	}
+
+	Profile const & ScaledProfile::unscaled() const
+	{
+		return *innerProfile;
+	}
+
+	double ScaledProfile::scale() const
+	{
+		return scaleFactor;
 	}
 
 	HermiteCubicSpline::HermiteCubicSpline( double lower, double upper, double fLower, double fUpper, double fPrimeLower, double fPrimeUpper )

@@ -80,6 +80,37 @@ band `O(h)` wide that is inside the plasma and outside the mesh.
   which is worth recording because it looks like it should: `(1−t)·v` scales a
   positive value down and never changes its sign, so all 17 nodes survived it.
   The error was in *where the field was evaluated*, not in how it was weighted.
+
+  **AND `B` DOES NOT GET ANY OF THAT. IT IS ZEROTH ORDER IN THE BAND, BEHIND AN
+  `inside = 1` MASK.** Only `samplePotentialWithFlux()` applies the Taylor step;
+  `sample()`, `sampleComponent()` and `sampleCoefficient()` never read
+  `offsetR`/`offsetZ` at all, so for a band node they return the value **at the
+  foot on `Γ_h`** — and `apps/meq.cpp` sends `ψ` through the first and `B`
+  through `sampleComponent`. Measured on the committed `miller-curved.nc`:
+  `extrapolated_nodes = 1667` of 129×129 = 16,641, so about **one node in ten
+  carries a piecewise-constant `B`**, `O(h)`, in a field `q` itself resolves at
+  `k+1` and that `ψ` receives at `O(h²)` in the same band. `B = (−q_z, +q_r)` is
+  a pure relabelling, so there is no `1/r` softening it.
+
+  **AND THE COST IS MEASURED, NOT ESTIMATED.** Wiring the rotating output gave
+  a free controlled experiment: `n_s` is algebraic in `(r, ψ)`, so the same
+  closed form can be evaluated both ways over the same 356 band nodes. Against
+  the node's own `r` it is **5.13e-07** wrong; against the foot's `r`, which is
+  what `sampleCoefficient` hands you, it is **8.57e-02** — a factor of
+  **1.7e5**. `n_s` gets the radius wrong twice over, since the exponent of (96)
+  carries `r²`; `B` gets it wrong once, being a relabelling of `q`. The
+  experiment is `theRotatingFieldsUseTheNodesOwnRadius` in
+  `OutputConvergence.cpp`, and it exists because the trap was met and dodged for
+  the new fields while `B` was left in it two lines above.
+
+  **Two things make it worse than a missing feature.** `extendOutward()` counts
+  band nodes as found, so `located()` is true and the mask says `inside = 1`
+  there — and `theMaskAgreesWithTheData` asserts mask-matches-non-NaN, which is
+  precisely the property that makes the band look trustworthy. And
+  `extrapolated_nodes` is a **count, not a mask**, so a downstream reader cannot
+  tell which nodes to distrust. `theBandIsContinuedByTheFluxAtTheFluxesOwnOrder`
+  tests `ψ` only; there is no band test for `B` at all. **This is the interchange
+  format, and `B` is what most readers open it for.** ROADMAP item 11.
 * **The `.vtu` bends the mesh onto `Γ`** — a curvature is installed and each
   boundary face is moved out. Since the VTK is already Lagrange cells this
   needed **nothing further from the format**; the two features composed.
@@ -133,7 +164,7 @@ post-process → estimate → mark → refine, stopping at `TargetError` or
 regime it is analysed in — and calls `setTransferredBoundary()` automatically.
 `examples/miller-adaptive.toml`: η monotone 4.73e-4 → 6.87e-5 over four cycles,
 97 → 449 elements, 0 transfer paths widened. `theDriverRunsTheAdaptiveLoop` pins
-it against the same loop driven through the library at **1.653e-16 over 6414
+it against the same loop driven through the library at **1.666e-16 over 2694
 dofs**, and separately asserts that it refined, that it refined *adaptively*,
 that η came down, and that assumption P.1 survived the graded `Γ_h`.
 
@@ -631,6 +662,30 @@ done
 **Run that last loop.** It is four cheap commands and it is the only thing that
 catches a branch having moved out from under the recipe — which is precisely
 what happened to the three-branch version of this section.
+
+**BUT THE LOOP CHECKS THE BRANCH, NOT THE INSTALL, AND THAT GAP HAS ALREADY
+BITTEN.** Every command in it runs in `../mfem/mfem-src` and says nothing
+whatever about `../mfem/install`, which is what meq actually links. On
+2026-09-01 the loop reported **all four contained** while the installed library
+was `fa65a2f932` and `meq-integration` had moved to `d244329d8c` — **514 changed
+lines in `fem/darcy/` across seven files**, including *"The HDG face quadrature
+never saw the trace element"* and *"DarcyOperator dereferenced a null
+prolongation on a hanging-node-free NC mesh"*, the second in exactly the
+non-conforming meshes the adaptive loop makes. So the one check this project
+trusts passed on a tree whose measurements were all taken against a library a
+day out of date.
+
+**Check the install too, and it is one command:**
+
+```sh
+diff <( git -C ../mfem/mfem-src show meq-integration:fem/darcy/darcyhybridization.hpp ) \
+     ../mfem/install/include/mfem/fem/darcy/darcyhybridization.hpp \
+  && echo "install is current"
+```
+
+A branch that another agent re-creates is a branch that moves without meq doing
+anything, so this belongs beside the containment loop rather than in a rebuild
+checklist nobody reads.
 
 **And it has already fired again. Run 2026-09-01 against `meq-integration` at
 `fa65a2f932`: three of the four report contained and `gf-hdg-linearise-first`
@@ -2209,7 +2264,7 @@ difference is the right thing to write, and upstream's own finding is that
 re-taking the gradient *after* a difference silently buys extra corrections and
 can hide exactly this class of defect.
 
-## Toroidal flow: FL-0 to FL-7 are done and green
+## Toroidal flow: FL-0 to FL-8 are done and green
 
 **`meq::RotatingSource` solves the generalised Grad-Shafranov equation of
 `refs/RotatingGK.pdf` (136)**, closed by its (96) and (97), for two species in
@@ -2218,15 +2273,50 @@ plan; this section is only what a reader of the code needs. **Three or more
 species is `Closure::RootFind`** — a safeguarded scalar Newton on (97) with
 `φ₀`'s two `ψ`-derivatives by implicit differentiation — and
 `meq::NormalisedRotatingSource` puts the profiles in normalised flux, where
-`ψ_ax` is an unknown and the existing bordered Newton closes it. **What is left
-is FL-8**, the driver and TOML.
+`ψ_ax` is an unknown and the existing bordered Newton closes it.
+
+**FL-8 IS DONE: ROTATION IS REACHABLE FROM A TOML FILE.** `[source] Type =
+"rotating"` takes an array of `[[source.species]]` tables — mass, charge and a
+temperature profile each — plus `Omega`, one density profile and `GGPrime`.
+That array is **meq's first array-of-tables in the schema**, read by
+`Table::getTableArrayOr()`, which names its elements `source.species[i]` so a
+fault in the third one says so. `examples/rotating-rectangle.toml` is the
+worked example and `examples/rotating-normalised.toml` the same thing in
+normalised flux, where `ψ_ax` is an unknown and the bordered Newton closes it —
+`makeSource` **throws** on a normalised config and `makeNormalisedSource` is
+the other door, because handing a normalised source to the plain path would
+converge to a different equilibrium rather than fail.
+
+**AND ROTATION REACHES `ψ` ITSELF THERE, WHICH IS A MEASUREMENT RATHER THAN A
+CLAIM.** Against the same configuration with `Omega = 0` and nothing else
+changed, `‖ψ(ω) − ψ(0)‖/‖ψ(0)‖ = 1.2683e-01` in L2 over 4608 dofs, and
+`max ψ` moves 9.755876e-02 → 1.079860e-01, up 10.7%.
+`theDriverSolvesARotatingEquilibrium` re-measures both every run and gates the
+shift at `> 5e-2`, so an edit that shrinks the pressure term fails loudly
+instead of quietly re-vacuating the example. **It is not free**: it needs
+`GGPrime` down from 2.0 to 0.8 so the pressure term is a real part of `F`
+rather than a correction on `g g′` — 15 / 29 / **47** / 66 / 81 % of `F` from
+`RMin` to `RMax` at `Omega = 4.0e5`, which is `M = 1.33` and squarely the sonic
+regime RoPP is about.
+
+**TWO PROFILE TABLES SHIP, AND THE REASON IS A TRAP.** Re-expressing `f(ψ)`
+against `Ψ = ψ/ψ_ax` divides the abscissa by the axis flux and **multiplies the
+derivative column by it**. `examples/rotating-density.dat` and
+`rotating-density-normalised.dat` are the same profile written both ways; hand
+one to the wrong configuration and it parses, solves and converges to a plasma
+whose density gradient is out by a factor of ten. Both headers say so, and they
+are also the only place in `examples/` that documents the `SplineProfile` file
+format at all.
 
 **(136) collapses to `F = μ₀ r² ∂p/∂ψ|_r + g g′`** with `p = Σ_s n_s T_s`,
 because the `∂φ₀/∂ψ` terms cancel identically against quasineutrality. So the
 residual needs `φ₀` and never its derivative; only the Jacobian does. **Two
 species need no root find at all** — (97) is linear in `φ₀` after logs, giving
 `C = ω²(Z₁m₂ − Z₂m₁)/(Z₁T₂ − Z₂T₁)` as the exponent both species share, exact
-with the electron mass kept. Three or more is FL-6 and the constructor refuses.
+with the electron mass kept. **An earlier version of this line ended "three or
+more is FL-6 and the constructor refuses", which FL-6 made untrue** — the root
+find handles them, `Closure::Automatic` picks between the two, and the ceiling
+is `meq::maxSpecies = 8`, enforced at parse rather than at construction.
 
 **IT COST `meq::Profile` A THIRD DERIVATIVE LEVEL, AND THAT IS THE ONE
 STRUCTURAL CHANGE.** `MHDSource` stores the *products* `p′` and `g g′`, so `F`

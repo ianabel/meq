@@ -30,10 +30,12 @@
 #include "meq/Field.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/Output.hpp"
+#include "meq/RotatingSource.hpp"
 #include "meq/Sampler.hpp"
 #include "meq/SourceFactory.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -83,6 +85,39 @@ namespace
 	 * A warning that is usually wrong is one people learn to ignore, which
 	 * spends the credibility of every other message this driver prints.
 	 */
+
+	/// What the file said [source] Type was, for the output's provenance. A
+	/// directory of scan output is unreadable without it: every other attribute
+	/// describes the discretisation, and two runs differing only in the physics
+	/// would otherwise be indistinguishable from their files alone.
+	char const *sourceTypeName( meq::SourceType type )
+	{
+		switch ( type )
+		{
+			case meq::SourceType::Soloviev:     return "soloviev";
+			case meq::SourceType::MHD:          return "mhd";
+			case meq::SourceType::Manufactured: return "manufactured";
+			case meq::SourceType::Rotating:     return "rotating";
+		}
+		return "unknown";
+	}
+
+	/// A species name made safe to use as a NetCDF variable name. Names come
+	/// from the TOML, where nothing stops "C 6+", and netCDF-4 would refuse the
+	/// space -- AFTER the solve, which is an expensive place to learn about a
+	/// typo. Anything that is not alphanumeric or '_' becomes '_', and a name
+	/// that does not start with a letter gains one.
+	std::string variableName( std::string const &name )
+	{
+		std::string safe;
+		safe.reserve( name.size() + 1 );
+		for ( char const c : name )
+			safe += ( std::isalnum( static_cast<unsigned char>( c ) ) || c == '_' )
+				? c : '_';
+		if ( safe.empty() || !std::isalpha( static_cast<unsigned char>( safe[ 0 ] ) ) )
+			safe = "s" + safe;
+		return safe;
+	}
 
 	/// The background mesh: the box from [mesh], or a file, then refinement.
 	mfem::Mesh buildMesh( meq::MeshConfig const &config )
@@ -300,10 +335,58 @@ int main( int argc, char **argv )
 	// ---- configuration -------------------------------------------------
 	std::unique_ptr<meq::Configuration> config;
 	std::shared_ptr<meq::Source const> source;
+	/*
+	 * A SECOND HANDLE ON THE SAME OBJECT, AND BOTH ARE NEEDED.
+	 *
+	 * A source whose profiles are functions of NORMALISED flux
+	 * Psi = psi/psi_ax makes psi_ax a functional of the solution, so it is an
+	 * UNKNOWN of the non-linear system rather than data, and the solver closes
+	 * the pair by a bordered Newton. That path wants a non-const
+	 * meq::NormalisedSource, because setNormalisation() is called on the source
+	 * before every residual evaluation.
+	 *
+	 * Everything else here -- the estimator above all -- wants a
+	 * meq::Source const &, and a normalised source IS one. So `source` aliases
+	 * `normalised` when there is one, and nothing downstream has to know which
+	 * kind it was given.
+	 */
+	std::shared_ptr<meq::NormalisedSource> normalised;
+	/*
+	 * psi_ax, CARRIED FORWARD BETWEEN ADAPTIVE CYCLES.
+	 *
+	 * makeSolver() builds a FRESH solver every cycle -- it must, since the mesh
+	 * changes -- and re-arms the source with this value. Re-arming with the
+	 * TOML's guess every time would throw away the one thing the previous cycle
+	 * established: psi_ax is a physical quantity, converged on the coarser mesh
+	 * to within that mesh's discretisation error, and it is the best guess
+	 * available for the finer one. It is the interpolating warm start the FIELD
+	 * cannot have -- DRIVER-PLAN section 4 needs GSLIB for that -- arriving free
+	 * for the one unknown that happens to be a scalar.
+	 *
+	 * WHAT IT IS MEASURED TO BUY IS NOTHING YET, AND THAT IS WORTH SAYING RATHER
+	 * THAN LEAVING FOR SOMEBODY TO REDISCOVER. On examples/rotating-normalised.toml
+	 * run adaptively, every cycle takes the same 6 Newton steps whether the
+	 * border starts from the file's 0.3 or from the converged 0.354775928 -- and
+	 * a one-shot run handed the exact answer as its PsiAxis takes 6 as well. The
+	 * iteration is dominated by the FIELD, which starts cold on every cycle
+	 * because carrying it forward is the interpolation that is not written. So
+	 * this is the right thing to do rather than a fast one, and it will start
+	 * paying only when the field is warm too.
+	 */
+	double psiAxisGuess = 0.0;
 	try
 	{
 		config = std::make_unique<meq::Configuration>( argument );
-		source = meq::makeSource( config->getSource(), argument );
+		if ( config->getSource().isNormalised() )
+		{
+			normalised = meq::makeNormalisedSource( config->getSource(), argument );
+			psiAxisGuess = config->getSource().psiAxisGuess();
+			source = normalised;
+		}
+		else
+		{
+			source = meq::makeSource( config->getSource(), argument );
+		}
 
 		if ( config->getBoundary().type == meq::BoundaryDataType::Exact )
 		{
@@ -513,7 +596,15 @@ int main( int argc, char **argv )
 
 		if ( gammaHMarker )
 			fresh->setExtension( *path, *gammaHMarker );
-		fresh->setSource( *source );
+
+		// The bordered Newton, or the plain one. psiAxisGuess is the TOML's
+		// value on the first cycle and the previous cycle's answer afterwards;
+		// see its declaration.
+		if ( normalised )
+			fresh->setSource( *normalised, psiAxisGuess );
+		else
+			fresh->setSource( *source );
+
 		fresh->setBoundaryData( zero );
 		fresh->setNewtonControl( config->getSolver().newtonRelativeTolerance,
 		                         config->getSolver().newtonAbsoluteTolerance,
@@ -631,6 +722,33 @@ int main( int argc, char **argv )
 		catch ( std::exception const &firstAttempt )
 		{
 			reportResiduals( solver->newtonResiduals() );
+
+			/*
+			 * THE LADDER HAS NO SECOND RUNG WHEN psi_ax IS AN UNKNOWN, and
+			 * saying so beats letting the retry throw.
+			 *
+			 * Every globalisation meq has drives a residual of its own: the
+			 * KINSOL paths solve oper(x) = 0 through their own adapter, and the
+			 * Picard ones build no Jacobian at all. The border is a row and a
+			 * column ON THE NEWTON JACOBIAN, so neither has anywhere to put it,
+			 * and GradShafranovSolver refuses the combination -- correctly, and
+			 * with a std::logic_error that would surface here as
+			 * "Picard-then-Newton did not converge either", which is a
+			 * diagnosis of the wrong thing entirely.
+			 */
+			if ( normalised )
+			{
+				std::fprintf( stderr,
+					"meq: Newton did not converge: %s\n"
+					"     [source] Normalised = true makes psi_ax an unknown, closed by a\n"
+					"     BORDERED Newton, and no globalisation meq has can carry that\n"
+					"     border -- so there is no fallback to try. The levers are a\n"
+					"     better [source] PsiAxis guess, an [initialguess] that puts psi\n"
+					"     near the right size, and RESOLUTION.\n",
+					firstAttempt.what() );
+				return SolveFailed;
+			}
+
 			std::fprintf( stderr,
 				"meq: Newton did not converge: %s\n"
 				"     Retrying with Anderson-Picard to reach Newton's basin, then\n"
@@ -658,6 +776,13 @@ int main( int argc, char **argv )
 				return SolveFailed;
 			}
 		}
+
+		// THIS CYCLE'S ANSWER IS THE NEXT CYCLE'S GUESS. See psiAxisGuess's
+		// declaration: a fresh solver per cycle would otherwise re-arm the
+		// border with the file's original number and discard what the coarser
+		// mesh had already established.
+		if ( normalised )
+			psiAxisGuess = solver->psiAxis();
 
 		Cycle record{ solveMesh->GetNE(), solver->numTraceDofs(), 0, widened,
 		              -1.0, solver->newtonIterations(), globalised };
@@ -815,6 +940,23 @@ int main( int argc, char **argv )
 		             config->getDiscretisation().polynomialDegree,
 		             last.globalised ? " (via Picard-then-Newton)" : "" );
 
+		/*
+		 * BOTH NUMBERS, BECAUSE THEY HAVE DIFFERENT UNITS AND EITHER CAN BE
+		 * SATISFIED WITHOUT THE OTHER.
+		 *
+		 * The bordered system is R( lambda, s ) = 0 together with
+		 * G( lambda, s ) = s - max psi_h = 0. R is a trace residual and G is a
+		 * flux, so the printed ||r|| above is a weighted combination and not a
+		 * statement about either half on its own: a run can drive R to round-off
+		 * while psi_ax still disagrees with the peak it is supposed to BE, which
+		 * is a solved equation for a plasma nobody asked for. So the constraint
+		 * is reported separately, in its own units.
+		 */
+		if ( normalised )
+			std::printf( "     psi_ax = %.6e Wb/rad, constraint psi_ax - max psi_h "
+			             "= %.3e\n",
+			             solver->psiAxis(), solver->normalisationResidual() );
+
 		if ( adapt.enabled )
 		{
 			std::printf( "\n  the adaptive loop: %s marking at %.2f\n",
@@ -916,6 +1058,77 @@ int main( int argc, char **argv )
 		sampler.sampleComponent( field, 0, bR, outside );
 		sampler.sampleComponent( field, 1, bZ, outside );
 
+		/*
+		 * THE ROTATING FIELDS: n_s( R, Z ) AND e phi_0( R, Z ).
+		 *
+		 * With rotation the density is NOT a flux function -- centrifugal force
+		 * sweeps the heavy species outboard and an electrostatic potential
+		 * arises to stop that separating the charges -- so n_s and phi_0 are
+		 * genuine two-dimensional fields and a rotating equilibrium is not
+		 * interpretable without them. Both are ALGEBRAIC in ( r, psi ), so this
+		 * costs one pass over the grid and no solve. See FLOW-PLAN.md section
+		 * 5.6 and meq::RotatingSource.
+		 *
+		 * SAMPLED BY HAND, AND NOT WITH sampleCoefficient(), WHICH IS THE TRAP
+		 * THIS BLOCK EXISTS TO AVOID. sample(), sampleComponent() and
+		 * sampleCoefficient() all evaluate a field at the node's location IN AN
+		 * ELEMENT, and for a node in the Gamma_h-to-Gamma band that location is
+		 * the node's FOOT on Gamma_h, not the node itself: only
+		 * samplePotentialWithFlux() applies the Taylor step outward. For psi the
+		 * difference is O( h ) and visible; for n_s it is worse, because the
+		 * whole physics of RoPP (96) is the r^2 in the exponent, so being handed
+		 * the foot's radius rather than the node's misplaces the centrifugal
+		 * enrichment by a band width. So the loop below uses the ALREADY
+		 * SAMPLED psi -- which carries the flux continuation -- together with
+		 * sampler.rAt( i ), the node's own R.
+		 *
+		 * The guard keeps the fields consistent with `inside`: a node the
+		 * sampler did not locate, or one whose psi came back NaN, keeps the fill
+		 * value here too. OutputConvergence's theMaskAgreesWithTheData is what
+		 * says that matters.
+		 */
+		std::vector<std::vector<double>> densities;
+		std::vector<double> ePhi;
+		if ( config->getSource().type == meq::SourceType::Rotating )
+		{
+			meq::RotatingParameters const &rotating = config->getSource().getRotating();
+
+			// One of the two is non-null, and both take PHYSICAL psi and convert
+			// internally, so the loop below does not care which path it is on.
+			meq::RotatingSource const *plain =
+				dynamic_cast<meq::RotatingSource const *>( source.get() );
+			meq::NormalisedRotatingSource const *scaled =
+				dynamic_cast<meq::NormalisedRotatingSource const *>( source.get() );
+
+			if ( !plain && !scaled )
+				throw std::runtime_error(
+					"[source] Type = \"rotating\" did not produce a rotating source, so "
+					"the density and potential fields cannot be written" );
+
+			std::size_t const count =
+				static_cast<std::size_t>( sampler.nodesR() )*sampler.nodesZ();
+			densities.assign( rotating.species.size(),
+			                  std::vector<double>( count, outside ) );
+			ePhi.assign( count, outside );
+
+			for ( int j = 0; j < sampler.nodesZ(); ++j )
+				for ( int i = 0; i < sampler.nodesR(); ++i )
+				{
+					std::size_t const at =
+						static_cast<std::size_t>( j )*sampler.nodesR() + i;
+					if ( !sampler.located( i, j ) || !std::isfinite( psi[ at ] ) )
+						continue;
+
+					double const r = sampler.rAt( i );
+					ePhi[ at ] = plain ? plain->potential( r, psi[ at ] )
+					                   : scaled->potential( r, psi[ at ] );
+					for ( std::size_t sp = 0; sp < rotating.species.size(); ++sp )
+						densities[ sp ][ at ] =
+							plain ? plain->density( sp, r, psi[ at ] )
+							      : scaled->density( sp, r, psi[ at ] );
+				}
+		}
+
 		meq::NetCDFWriter writer( stem + ".nc", sampler );
 		writer.attribute( "title", "meq equilibrium" );
 		writer.attribute( "meq_version", MEQ_VERSION );
@@ -923,6 +1136,10 @@ int main( int argc, char **argv )
 		// scan output is unreadable otherwise, and "which commit was this?" is
 		// the first question asked of any result that looks wrong.
 		writer.attribute( "config_file", argument );
+		// WHICH PHYSICS, not just which discretisation. DRIVER-PLAN section 3
+		// lists this and it was not being written: two runs differing only in
+		// [source] Type produced files that were identical in every attribute.
+		writer.attribute( "source_type", sourceTypeName( config->getSource().type ) );
 		writer.attribute( "polynomial_degree",
 		                  config->getDiscretisation().polynomialDegree );
 		writer.attribute( "refinement_levels", config->getMesh().refinementLevels );
@@ -939,6 +1156,19 @@ int main( int argc, char **argv )
 			writer.attribute( "boundary", "fitted (psi = 0 on the mesh boundary)" );
 		}
 		writer.attribute( "newton_iterations", solver->newtonIterations() );
+		// psi_ax IS AN ANSWER HERE, NOT AN INPUT, so the file has to carry it:
+		// a reader given only the [source] PsiAxis guess from the TOML would be
+		// reading the starting point of a Newton iteration and calling it the
+		// axis flux. normalisation_residual is the half of the augmented
+		// residual that says whether it is self consistent -- final_residual
+		// below mixes it with the trace residual, which is a different quantity
+		// in different units.
+		if ( normalised )
+		{
+			writer.attribute( "psi_axis", solver->psiAxis() );
+			writer.attribute( "normalisation_residual",
+			                  solver->normalisationResidual() );
+		}
 		// A reader is entitled to know which nodes are the solution and which
 		// are a continuation of it past Gamma_h. Zero on the fitted path.
 		writer.attribute( "extrapolated_nodes", extended );
@@ -1004,6 +1234,30 @@ int main( int argc, char **argv )
 		writer.field( "psi", psi, "poloidal flux function", "Wb/rad" );
 		writer.field( "B_R", bR, "poloidal field, R component", "T" );
 		writer.field( "B_Z", bZ, "poloidal field, Z component", "T" );
+
+		if ( !ePhi.empty() )
+		{
+			meq::RotatingParameters const &rotating = config->getSource().getRotating();
+			for ( std::size_t sp = 0; sp < densities.size(); ++sp )
+				writer.field( "n_" + variableName( rotating.species[ sp ].name ),
+				              densities[ sp ],
+				              "number density of " + rotating.species[ sp ].name
+				                  + ", RoPP (96); equals its Density profile on "
+				                    "r = ReferenceRadius",
+				              "m^-3" );
+
+			// e phi_0 AND NOT phi_0, in JOULES AND NOT VOLTS. It is the
+			// elementary charge times the potential, which is the combination
+			// every exponent of (96) actually contains, and carrying it that way
+			// is what keeps the elementary charge in exactly one place. Divide by
+			// 1.602176634e-19 for volts.
+			writer.field( "e_phi_0", ePhi,
+			              "elementary charge times the electrostatic potential "
+			              "phi_0 of RoPP (97), in JOULES not volts; zero on "
+			              "r = ReferenceRadius by the gauge",
+			              "J" );
+		}
+
 		writer.close();
 
 		// VTK LAST, AND FOR A REASON. Curving the mesh changes the map from

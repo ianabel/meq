@@ -1,0 +1,47 @@
+# n_D0( psi ) for examples/rotating-rectangle.toml -- the deuterium density on
+# the curve r = ReferenceRadius, which is what the gauge phi_0( rRef, psi ) = 0
+# makes the N_s of RoPP (96) mean.
+#
+# THE FORMAT, which nothing else in examples/ demonstrates. One knot per line,
+#
+#     psi   f( psi )   f'( psi )
+#
+# whitespace separated; a line whose first non-blank character is '#' is a
+# comment; a BLANK LINE TERMINATES THE TABLE, so several profiles can be
+# concatenated in one stream. Both columns after psi are required: meq::Profile
+# is a Hermite cubic through value AND slope, so that prime() is the analytic
+# derivative of operator() rather than a difference of it -- which is what makes
+# the Newton Jacobian consistent with the residual. A table of values alone
+# would have to invent the slopes.
+#
+# UNITS ARE THE FILE'S OWN AND THE TOML SCALES THEM. The values here are in
+# 1e20 m^-3, the unit tokamak densities are usually quoted in, and
+# DensityScale = 1.0e20 in the configuration carries the conversion. That is the
+# intended division of labour: a table stays in whatever units it was produced
+# in -- often not meq's -- and the run states the factor, rather than the file
+# being rewritten and thereby becoming a function of which code reads it. psi is
+# in Wb/rad and is NOT scaled; the slope column is therefore in
+# 1e20 m^-3 per Wb/rad.
+#
+# THE SLOPE IS CONSTANT ON PURPOSE. A linear n_D0 makes dp/dpsi independent of
+# psi, so F is too, dF/dpsi vanishes and Newton finishes in one step -- the same
+# affine problem examples/soloviev-nstx.toml poses. What that costs is nothing
+# this example is for: rotation still reaches psi, through the exp[ ... r^2 ... ]
+# of (96) multiplying dp/dpsi, which is the whole point. A profile with real
+# curvature makes the equation semi-linear and is where the Jacobian starts to
+# matter; that is measured in tests/convergence/RotatingNewtonConvergence.cpp
+# against a manufactured solution, not here.
+#
+# THE TABLE STARTS BELOW ZERO AND ENDS ABOVE THE SOLUTION'S RANGE, and both ends
+# are deliberate. meq::SplineProfile extends by a CONSTANT outside its knots --
+# value clamped, DERIVATIVE ZERO -- which for a density is exactly the term this
+# example depends on being switched off, silently, wherever a Newton iterate
+# strays outside. psi runs over [ 0, 0.108 ] here, so [ -0.02, 0.15 ] is
+# generous at both ends and the run never meets the clamp.
+#
+# psi [Wb/rad]     n_D0 [1e20 m^-3]     dn_D0/dpsi [1e20 m^-3 per Wb/rad]
+  -0.02             0.1                  20.0
+   0.00             0.5                  20.0
+   0.05             1.5                  20.0
+   0.10             2.5                  20.0
+   0.15             3.5                  20.0

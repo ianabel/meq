@@ -1,0 +1,175 @@
+# A PLASMA IN SONIC TOROIDAL ROTATION, on a rectangle: the simplest complete
+# run of meq's rotating source.
+#
+#     meq examples/rotating-rectangle.toml
+#
+# The equation is eq (136) of refs/RotatingGK.pdf -- Abel, Plunk, Wang, Barnes,
+# Cowley, Dorland & Schekochihin, "Multiscale gyrokinetics for rotating tokamak
+# plasmas", Rep. Prog. Phys. 76 (2013) 116201 -- closed by its (96) for the
+# poloidal density variation and (97) for the electrostatic potential phi_0 that
+# holds quasineutrality against it:
+#
+#     F( r, z, psi ) = mu0 r^2 dp/dpsi|_r + g g',      p = Sum_s n_s T_s
+#     n_s( r, psi )  = n_s0( psi ) exp[ m_s omega^2 ( r^2 - rRef^2 )/2 T_s
+#                                       - Z_s e phi_0/T_s ]              (96)
+#     Sum_s Z_s n_s( r, psi ) = 0                                        (97)
+#
+# What rotation changes is ONE thing: the density is no longer a flux function.
+# Centrifugal force sweeps the heavy species to the outboard side and phi_0
+# arises to stop that separating the charges. Everything else about meq -- the
+# operator, the discretisation, tau, the hybridization, the estimator, the
+# adaptive loop -- is untouched. FLOW-PLAN.md is the design.
+#
+# AND ROTATION REACHES psi ITSELF HERE, WHICH IS THE POINT OF THIS FILE AND IS A
+# MEASUREMENT RATHER THAN A CLAIM. Run against the same configuration with
+# Omega = 0 and nothing else changed, the flux differs by
+#
+#     || psi( omega ) - psi( 0 ) || / || psi( 0 ) ||   =   1.27e-01
+#
+# in L2 over the 4608 solved dofs -- 13% -- and max psi moves from 9.7559e-02 to
+# 1.0799e-01 Wb/rad, up 10.7%. tests/convergence/DriverAcceptance.cpp's
+# theDriverSolvesARotatingEquilibrium re-measures both on every run, so this
+# number cannot quietly go stale. It is not free: it needs the pressure term to
+# be a real part of F rather than a correction on g g', which is what the
+# profile below is sized for -- see GGPrime.
+#
+# UNITS. SI throughout, and unlike examples/soloviev-nstx.toml nothing here is
+# normalised to a major radius: metres, kilogrammes, m^-3, rad/s, and psi in
+# webers per radian. Mu0 is left at its SI value, so a run in normalised units
+# would have to set it to 1 explicitly. The one unit that catches people is the
+# temperature, which is the subject of the second trap below.
+#
+# THE REFERENCE RADIUS IS THE GAUGE, AND TWO CODES MUST AGREE ON IT BEFORE
+# THEIR PROFILES CAN BE COMPARED AT ALL. phi_0 is determined by (97) only up to
+# an additive function of psi -- RoPP says so at its (59) and resolves it by
+# <phi_0>_psi = 0, which is a flux-surface average meq deliberately does not
+# have. meq instead pins phi_0( ReferenceRadius, psi ) = 0. The consequence is
+# the useful part: the density profile below is then the PHYSICAL density of
+# deuterium on the curve r = ReferenceRadius, which is a number a user can state
+# and another code can be checked against. The consequence is also the trap: two
+# sets of densities differing by the gauge factor exp( Z_s e delta/T_s ) describe
+# exactly the same plasma, so "our n_D disagrees with yours" is a statement about
+# ReferenceRadius until proved otherwise.
+#
+# AND TEMPERATURES ARE IN JOULES, NOT eV AND NOT keV. There is no hidden
+# conversion anywhere in meq. TemperatureScale is how a file stays readable: the
+# ion below is 1 keV, written as 1.0 with the scale carrying the conversion,
+# rather than as 1.602176634e-16 with a comment. DensityScale does the same job
+# for the table in examples/rotating-density.dat, which is in 1e20 m^-3.
+#
+# WHAT THIS FILE DOES NOT EXERCISE, said plainly because it is not obvious from
+# looking at it. n_D0 is LINEAR in psi, so dp/dpsi does not depend on psi, F does
+# not either, dF/dpsi vanishes identically and Newton finishes in one step --
+# the same affine problem examples/soloviev-nstx.toml poses, and for the same
+# reason nobody minds. The Jacobian, which is the load-bearing risk of
+# FLOW-PLAN.md section 5.3, therefore has nothing to do here and is measured
+# where it can be seen: tests/convergence/RotatingNewtonConvergence.cpp asserts
+# the observed Newton order against a manufactured solution with real
+# psi-dependence in all of n_s0, T_s and omega.
+
+[mesh]
+# The standard benchmark rectangle the rotating tests use, 0.8 m by 1.2 m about
+# r = 1 m. ReferenceRadius sits at its centre, so the exponent of (96) runs over
+# both signs and the enrichment is visible on both sides of the gauge curve.
+RMin = 0.6
+RMax = 1.4
+ZMin = -0.6
+ZMax = 0.6
+
+# Square cells of 0.1 m, halved once: h = 0.05 m over 768 triangles.
+NR = 8
+NZ = 12
+RefinementLevels = 1
+
+[discretisation]
+PolynomialDegree = 2
+Tau = 1.0
+
+[source]
+Type = "rotating"
+
+# THE GAUGE. See the header. Also the radius the Mach number is quoted at.
+ReferenceRadius = 1.0
+
+# omega( psi ), rad/s. The deuterium exponent of (96),
+# m_i omega^2 ( r^2 - rRef^2 )/2( T_i + T_e ), reaches +0.891 at RMax and -0.594
+# at RMin, so at fixed psi the ion density is 2.44 times its gauge value on the
+# outboard side and 0.55 times it on the inboard -- a factor of 4.4 across the
+# box. The exponent is M^2/2 in the usual sense, so this is M = 1.33: genuinely
+# sonic, which is the regime RoPP is about, rather than a perturbation.
+Omega = 4.0e5
+
+# g dg/dpsi, T^2 m^2 per Wb/rad, exactly as the "mhd" source takes it. Positive,
+# so F > 0 and psi > 0 in the interior by the maximum principle.
+#
+# IT IS SIZED AGAINST THE PRESSURE TERM AND NOT PICKED FOR CONVENIENCE, because
+# "rotation changes the answer" is only true while mu0 r^2 dp/dpsi is a real part
+# of F. With the profile below that term is 0.725 T^2 m^2 per Wb/rad at r = rRef,
+# rising to 3.46 at RMax and falling to 0.144 at RMin as r^2 and the exponential
+# of (96) work on it. Against GGPrime = 0.8 that is
+#
+#     r        0.6     0.8     1.0     1.2     1.4
+#     share    15%     29%     47%     66%     81%     of F
+#
+# -- a high-beta configuration, and deliberately so. Raise GGPrime by a factor of
+# ten and this file becomes a vacuum field with a decorative density, which is
+# what it was before the profile below stopped being a constant.
+#
+# IT IS ALSO WHAT KEEPS THIS RUN OFF THE TRIVIAL BRANCH. F( r, z, 0 ) is nowhere
+# zero, so psi = 0 does not solve the homogeneous problem and Newton cannot land
+# on it and stop -- which is the failure every GS-2 section 4.2-4.5 source has
+# and which CLAUDE.md records under Traps.
+GGPrime = 0.8
+
+# Deuterium. Temperature 1 keV, written as 1.0 keV with the conversion in
+# TemperatureScale rather than as a raw 1.602176634e-16.
+[[source.species]]
+Name = "D"
+Mass = 3.3435837768e-27        # kg
+Charge = 1.0                   # Z_s, signed and dimensionless
+Temperature = 1.0              # keV, converted to Joules by the scale below
+TemperatureScale = 1.602176634e-16
+# The density on r = ReferenceRadius, as a table rather than a constant: a
+# constant would make dp/dpsi vanish and the rotation would reach n_s and phi_0
+# but not psi. examples/rotating-density.dat documents the format, which nothing
+# else in examples/ does. Its values are in 1e20 m^-3 and the scale converts.
+DensityFile = "examples/rotating-density.dat"
+DensityScale = 1.0e20
+
+# Electrons, at 0.8 keV. Unequal temperatures deliberately: with T_i = T_e the
+# closed form of (97) collapses to a symmetric special case, and this file is
+# meant to exercise the general two-species one.
+[[source.species]]
+Name = "e"
+Mass = 9.1093837015e-31        # kg
+Charge = -1.0
+Temperature = 0.8              # keV
+TemperatureScale = 1.602176634e-16
+# NO DENSITY, AND THAT IS THE POINT OF Neutralising. Fixing the gauge removes
+# exactly one function's worth of freedom from the set of densities, so for n
+# species there are n - 1 independent ones. Exactly one species must be marked,
+# and its density is then -( 1/Z_s ) Sum of the others -- exact at every
+# derivative level rather than differenced. Asking an author for two profiles
+# that happen to balance is asking for two that do not.
+Neutralising = true
+
+[boundary]
+# psi = 0 on the boundary of the mesh, which here is the rectangle above. This
+# is a well-posed fixed-boundary problem and not a published equilibrium; see
+# examples/miller-curved.toml for a curved Gamma.
+Type = "zero"
+
+[solver]
+NewtonMaxIterations = 20
+NewtonRelativeTolerance = 1.0e-10
+NewtonAbsoluteTolerance = 1.0e-14
+
+[output]
+Directory = "."
+Prefix = "rotating-rectangle"
+# The .nc carries n_D, n_e and e_phi_0 beside psi, B_R and B_Z. n_s is in m^-3;
+# e_phi_0 is the elementary charge TIMES the potential, in Joules rather than
+# volts, because that is the combination every exponent of (96) contains --
+# divide by 1.602176634e-19 for volts.
+GridNR = 129
+GridNZ = 129

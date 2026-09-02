@@ -63,6 +63,7 @@ namespace meq
 			case SourceType::Soloviev:     return os << "soloviev";
 			case SourceType::MHD:          return os << "mhd";
 			case SourceType::Manufactured: return os << "manufactured";
+			case SourceType::Rotating:     return os << "rotating";
 		}
 		return os << "<invalid SourceType>";
 	}
@@ -109,6 +110,54 @@ namespace
 	Configuration parse( std::string const & text )
 	{
 		return Configuration::fromString( text, "test.toml" );
+	}
+
+	// The mesh and discretisation of minimal(), with the [source] table left to
+	// the caller. A rotating source cannot be appended to minimal(), whose
+	// [source] is already a Solov'ev one -- and [[source.species]] has to follow
+	// the [source] scalars it belongs to, so the whole table is built at once.
+	std::string withSource( std::string const & source )
+	{
+		return
+			"[mesh]\n"
+			"RMin = 0.2\n"
+			"RMax = 1.8\n"
+			"ZMin = -1.6\n"
+			"ZMax = 1.6\n"
+			"\n"
+			"[discretisation]\n"
+			"PolynomialDegree = 2\n"
+			"\n" + source;
+	}
+
+	// A well-formed two-species rotating source, so that a refusal test can
+	// perturb exactly the one thing it is about. `head` is appended to the
+	// [source] scalars, `ion` and `electron` to their species tables; a key
+	// given in one of those overrides nothing, so a test that wants a key
+	// *changed* rather than added spells the whole source out itself.
+	std::string rotating( std::string const & head = "",
+	                      std::string const & ion = "",
+	                      std::string const & electron = "" )
+	{
+		return withSource(
+			"[source]\n"
+			"Type = \"rotating\"\n"
+			"GGPrime = 0.5\n"
+			+ head +
+			"\n[[source.species]]\n"
+			"Name = \"deuterium\"\n"
+			"Mass = 3.344e-27\n"
+			"Charge = 1.0\n"
+			"Temperature = 1.6e-16\n"
+			"Density = 5.0e19\n"
+			+ ion +
+			"\n[[source.species]]\n"
+			"Name = \"electrons\"\n"
+			"Mass = 9.109e-31\n"
+			"Charge = -1.0\n"
+			"Temperature = 1.6e-16\n"
+			"Neutralising = true\n"
+			+ electron );
 	}
 
 	// The directory holding the shipped examples. A build system that knows
@@ -551,7 +600,8 @@ BOOST_AUTO_TEST_CASE( an_unknown_source_type_names_the_alternatives )
 	BOOST_CHECK_EXCEPTION( parse( text ), ConfigError,
 		[]( ConfigError const & e )
 		{
-			return e.getKey() == "source.Type" && mentions( e, "soloviev" ) && mentions( e, "manufactured" );
+			return e.getKey() == "source.Type" && mentions( e, "soloviev" )
+			    && mentions( e, "manufactured" ) && mentions( e, "rotating" );
 		} );
 }
 
@@ -812,6 +862,655 @@ BOOST_AUTO_TEST_CASE( a_shape_missing_its_geometry_is_refused )
 
 	BOOST_CHECK_THROW( parse( minimal() +
 		"\n[boundary.shape]\nType = \"lozenge\"\n" ), ConfigError );
+}
+
+
+/*
+ * [source] Type = "rotating" -- the sonic toroidal rotation of FLOW-PLAN.md,
+ * as configuration.
+ *
+ * Two things here are new to meq's schema and are what these cases are mostly
+ * about. [[source.species]] is the first ARRAY OF TABLES the parser reads, so
+ * an element's diagnostics have to stay qualified all the way down to
+ * source.species[2].Mass rather than collapsing to source.species; and a
+ * profile is now given EITHER as a constant in Temperature OR as a path in
+ * TemperatureFile, with TemperatureScale multiplying whichever it was.
+ *
+ * As everywhere else in this file these check the PARSE. Whether the species
+ * set describes a plasma -- charge neutrality on the reference curve, in
+ * particular -- is meq::RotatingSource's to decide, and SourceFactoryTests is
+ * where that is asserted.
+ */
+
+BOOST_AUTO_TEST_CASE( a_rotating_source_carries_its_species )
+{
+	Configuration config = parse( withSource(
+		"[source]\n"
+		"Type = \"rotating\"\n"
+		"Omega = 1.2e5\n"
+		"OmegaScale = 2.0\n"
+		"GGPrimeFile = \"profiles/ggprime.dat\"\n"
+		"GGPrimeScale = 0.5\n"
+		"ReferenceRadius = 1.65\n"
+		"Mu0 = 1.0\n"
+		"\n[[source.species]]\n"
+		"Name = \"deuterium\"\n"
+		"Mass = 3.344e-27\n"
+		"Charge = 1.0\n"
+		"TemperatureFile = \"profiles/ti.dat\"\n"
+		"TemperatureScale = 1.602176634e-16\n"
+		"Density = 5.0e19\n"
+		"DensityScale = 2.0\n"
+		"\n[[source.species]]\n"
+		"Name = \"electrons\"\n"
+		"Mass = 9.1093837015e-31\n"
+		"Charge = -1.0\n"
+		"Temperature = 3.2e-16\n"
+		"Neutralising = true\n" ) );
+
+	BOOST_TEST( config.getSource().type == SourceType::Rotating );
+
+	meq::RotatingParameters const & rotating = config.getSource().getRotating();
+
+	// The [source] scalars. Omega given as a constant, so omegaFile is empty
+	// and omegaGiven says the rotation was asked for at all.
+	BOOST_TEST( rotating.omega == 1.2e5 );
+	BOOST_TEST( rotating.omegaFile == "" );
+	BOOST_TEST( rotating.omegaScale == 2.0 );
+	BOOST_TEST( rotating.omegaGiven == true );
+	// ... and g g' the other way round: a path, and no constant.
+	BOOST_TEST( rotating.ggPrime == 0.0 );
+	BOOST_TEST( rotating.ggPrimeFile == "profiles/ggprime.dat" );
+	BOOST_TEST( rotating.ggPrimeScale == 0.5 );
+	BOOST_TEST( rotating.referenceRadius == 1.65 );
+	BOOST_TEST( rotating.mu0 == 1.0 );
+
+	// The species, in file order.
+	BOOST_TEST_REQUIRE( rotating.species.size() == 2u );
+
+	meq::SpeciesParameters const & ion = rotating.species[ 0 ];
+	BOOST_TEST( ion.name == "deuterium" );
+	BOOST_TEST( ion.mass == 3.344e-27 );
+	BOOST_TEST( ion.charge == 1.0 );
+	BOOST_TEST( ion.temperature == 0.0 );
+	BOOST_TEST( ion.temperatureFile == "profiles/ti.dat" );
+	BOOST_TEST( ion.temperatureScale == 1.602176634e-16 );
+	BOOST_TEST( ion.density == 5.0e19 );
+	BOOST_TEST( ion.densityFile == "" );
+	BOOST_TEST( ion.densityScale == 2.0 );
+	BOOST_TEST( ion.neutralising == false );
+
+	meq::SpeciesParameters const & electrons = rotating.species[ 1 ];
+	BOOST_TEST( electrons.name == "electrons" );
+	BOOST_TEST( electrons.mass == 9.1093837015e-31 );
+	BOOST_TEST( electrons.charge == -1.0 );
+	BOOST_TEST( electrons.temperature == 3.2e-16 );
+	BOOST_TEST( electrons.temperatureFile == "" );
+	BOOST_TEST( electrons.temperatureScale == 1.0 );
+	BOOST_TEST( electrons.neutralising == true );
+	// Neither form of the density, which is what Neutralising means: it is
+	// derived from the others rather than given.
+	BOOST_TEST( electrons.density == 0.0 );
+	BOOST_TEST( electrons.densityFile == "" );
+
+	// Not normalised unless it says so, so psi_ax is not an unknown.
+	BOOST_TEST( config.getSource().isNormalised() == false );
+	BOOST_TEST( config.getSource().psiAxisGuess() == 0.0 );
+
+	BOOST_CHECK_THROW( config.getSource().getMHD(), ConfigError );
+}
+
+/// BOTH OMEGA KEYS ABSENT MEANS NO ROTATION, which is a documented state and
+/// not an omission: the source then reduces to the static equation
+/// meq::MHDSource solves, and being able to ask for that from the same file is
+/// how the omega -> 0 collapse of FLOW-PLAN.md section 6.1 gets run.
+BOOST_AUTO_TEST_CASE( a_rotating_source_without_omega_is_not_rotating )
+{
+	Configuration config = parse( withSource(
+		"[source]\n"
+		"Type = \"rotating\"\n"
+		"GGPrime = 0.25\n"
+		"\n[[source.species]]\n"
+		"Mass = 3.344e-27\n"
+		"Charge = 1.0\n"
+		"Temperature = 1.6e-16\n"
+		"Density = 5.0e19\n"
+		"\n[[source.species]]\n"
+		"Mass = 9.109e-31\n"
+		"Charge = -1.0\n"
+		"Temperature = 1.6e-16\n"
+		"Neutralising = true\n" ) );
+
+	meq::RotatingParameters const & rotating = config.getSource().getRotating();
+
+	BOOST_TEST( rotating.omegaGiven == false );
+	BOOST_TEST( rotating.omega == 0.0 );
+	BOOST_TEST( rotating.omegaFile == "" );
+	BOOST_TEST( rotating.omegaScale == 1.0 );
+
+	// A constant g g' this time, and the defaults for everything optional.
+	BOOST_TEST( rotating.ggPrime == 0.25 );
+	BOOST_TEST( rotating.ggPrimeFile == "" );
+	BOOST_TEST( rotating.ggPrimeScale == 1.0 );
+	BOOST_TEST( rotating.referenceRadius == 1.0 );
+	BOOST_TEST( rotating.mu0 == 4.0e-7*3.14159265358979323846 );
+
+	// An unnamed species is named by its index, so the output variables of a
+	// file that did not bother still differ from one another.
+	BOOST_TEST_REQUIRE( rotating.species.size() == 2u );
+	BOOST_TEST( rotating.species[ 0 ].name == "species0" );
+	BOOST_TEST( rotating.species[ 1 ].name == "species1" );
+	BOOST_TEST( rotating.species[ 0 ].temperatureScale == 1.0 );
+	BOOST_TEST( rotating.species[ 0 ].densityScale == 1.0 );
+}
+
+/*
+ * Normalised flux, on both sources that take it.
+ *
+ * Normalised = true says the profiles are functions of Psi = psi/psi_ax rather
+ * than of psi, which makes psi_ax a functional of the solution and therefore an
+ * UNKNOWN of the non-linear system. isNormalised() is what lets the driver
+ * branch to setSource( NormalisedSource &, double ) without switching over the
+ * source type itself, and psiAxisGuess() is where the bordered Newton starts.
+ */
+BOOST_AUTO_TEST_CASE( normalised_profiles_make_psi_axis_an_unknown )
+{
+	Configuration rotatingConfig = parse( rotating(
+		"Normalised = true\nPsiAxis = 0.115\n" ) );
+
+	BOOST_TEST( rotatingConfig.getSource().getRotating().normalised == true );
+	BOOST_TEST( rotatingConfig.getSource().getRotating().psiAxis == 0.115 );
+	BOOST_TEST( rotatingConfig.getSource().isNormalised() == true );
+	BOOST_TEST( rotatingConfig.getSource().psiAxisGuess() == 0.115 );
+
+	Configuration mhdConfig = parse( withSource(
+		"[source]\n"
+		"Type = \"mhd\"\n"
+		"PPrimeFile = \"profiles/pprime.dat\"\n"
+		"GGPrimeFile = \"profiles/ggprime.dat\"\n"
+		"PPrimeScale = 1.0e6\n"
+		"GGPrimeScale = -2.0\n"
+		"Normalised = true\n"
+		"PsiAxis = -0.42\n" ) );
+
+	meq::MHDParameters const & mhd = mhdConfig.getSource().getMHD();
+	BOOST_TEST( mhd.normalised == true );
+	BOOST_TEST( mhd.psiAxis == -0.42 );
+	BOOST_TEST( mhd.pPrimeScale == 1.0e6 );
+	// A negative scale is a sign convention like any other, and is accepted.
+	BOOST_TEST( mhd.ggPrimeScale == -2.0 );
+	BOOST_TEST( mhdConfig.getSource().isNormalised() == true );
+	BOOST_TEST( mhdConfig.getSource().psiAxisGuess() == -0.42 );
+
+	// A source with no normalisation at all answers both questions rather than
+	// throwing: the driver asks before it knows which type it has.
+	Configuration soloviev = parse( minimal() );
+	BOOST_TEST( soloviev.getSource().isNormalised() == false );
+	BOOST_TEST( soloviev.getSource().psiAxisGuess() == 0.0 );
+}
+
+/// PsiAxis is required exactly when Normalised is true, and refused otherwise.
+/// The refusal is the interesting half: a file carrying a PsiAxis that nothing
+/// reads is a file whose author believed something false about what the run was
+/// doing, and it would produce a plausible answer to a different problem.
+BOOST_AUTO_TEST_CASE( psi_axis_is_required_exactly_when_normalised )
+{
+	BOOST_CHECK_EXCEPTION( parse( rotating( "PsiAxis = 0.1\n" ) ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.PsiAxis" && mentions( e, "Normalised = true" );
+		} );
+
+	BOOST_CHECK_EXCEPTION( parse( rotating( "Normalised = true\n" ) ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.PsiAxis" && mentions( e, "required" );
+		} );
+
+	// Psi = psi/psi_ax is undefined at zero, so the guess cannot be it.
+	BOOST_CHECK_EXCEPTION( parse( rotating( "Normalised = true\nPsiAxis = 0.0\n" ) ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.PsiAxis" && mentions( e, "non-zero" );
+		} );
+
+	// The same three, on the other source that takes them.
+	std::string const mhd =
+		"[source]\n"
+		"Type = \"mhd\"\n"
+		"PPrimeFile = \"p.dat\"\n"
+		"GGPrimeFile = \"gg.dat\"\n";
+
+	BOOST_CHECK_EXCEPTION( parse( withSource( mhd + "PsiAxis = 0.3\n" ) ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.PsiAxis" && mentions( e, "Normalised = true" );
+		} );
+
+	BOOST_CHECK_EXCEPTION( parse( withSource( mhd + "Normalised = true\n" ) ), ConfigError,
+		[]( ConfigError const & e ) { return e.getKey() == "source.PsiAxis"; } );
+}
+
+/// Two species is the floor, and it is quasineutrality's requirement rather
+/// than a convenience: (97) determines phi_0 by Sum_s Z_s n_s = 0, which needs
+/// the sum to be able to change sign.
+BOOST_AUTO_TEST_CASE( a_rotating_source_needs_two_species_of_both_signs )
+{
+	std::string const oneSpecies = withSource(
+		"[source]\n"
+		"Type = \"rotating\"\n"
+		"GGPrime = 0.5\n"
+		"\n[[source.species]]\n"
+		"Mass = 3.344e-27\n"
+		"Charge = 1.0\n"
+		"Temperature = 1.6e-16\n"
+		"Neutralising = true\n" );
+
+	BOOST_CHECK_EXCEPTION( parse( oneSpecies ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.species"
+			    && mentions( e, "at least two species" )
+			    && mentions( e, "[[source.species]]" );
+		} );
+
+	// No species at all reaches the same check rather than a null dereference.
+	std::string const noSpecies = withSource(
+		"[source]\n"
+		"Type = \"rotating\"\n"
+		"GGPrime = 0.5\n" );
+
+	BOOST_CHECK_EXCEPTION( parse( noSpecies ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.species" && mentions( e, "at least two species" );
+		} );
+
+	// Two species, but both positive: nothing for the potential to hold in
+	// balance, and (97) has no root at all.
+	std::string const sameSign = withSource(
+		"[source]\n"
+		"Type = \"rotating\"\n"
+		"GGPrime = 0.5\n"
+		"\n[[source.species]]\n"
+		"Mass = 3.344e-27\n"
+		"Charge = 1.0\n"
+		"Temperature = 1.6e-16\n"
+		"Density = 5.0e19\n"
+		"\n[[source.species]]\n"
+		"Mass = 2.0e-26\n"
+		"Charge = 6.0\n"
+		"Temperature = 1.6e-16\n"
+		"Neutralising = true\n" );
+
+	BOOST_CHECK_EXCEPTION( parse( sameSign ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.species"
+			    && mentions( e, "both signs" )
+			    && mentions( e, "quasineutrality" );
+		} );
+}
+
+/// EXACTLY ONE species is Neutralising, and the message says why it is one
+/// rather than none or all: fixing the gauge removes exactly one function's
+/// worth of freedom from the densities, so n species carry n - 1 independent
+/// density profiles and the missing one has to come from somewhere.
+BOOST_AUTO_TEST_CASE( exactly_one_species_is_neutralising )
+{
+	std::string const none = withSource(
+		"[source]\n"
+		"Type = \"rotating\"\n"
+		"GGPrime = 0.5\n"
+		"\n[[source.species]]\n"
+		"Mass = 3.344e-27\nCharge = 1.0\nTemperature = 1.6e-16\nDensity = 5.0e19\n"
+		"\n[[source.species]]\n"
+		"Mass = 9.109e-31\nCharge = -1.0\nTemperature = 1.6e-16\nDensity = 5.0e19\n" );
+
+	BOOST_CHECK_EXCEPTION( parse( none ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.species"
+			    && mentions( e, "exactly one" )
+			    && mentions( e, "n - 1" );
+		} );
+
+	std::string const both = withSource(
+		"[source]\n"
+		"Type = \"rotating\"\n"
+		"GGPrime = 0.5\n"
+		"\n[[source.species]]\n"
+		"Mass = 3.344e-27\nCharge = 1.0\nTemperature = 1.6e-16\nNeutralising = true\n"
+		"\n[[source.species]]\n"
+		"Mass = 9.109e-31\nCharge = -1.0\nTemperature = 1.6e-16\nNeutralising = true\n" );
+
+	BOOST_CHECK_EXCEPTION( parse( both ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.species"
+			    && mentions( e, "exactly one" )
+			    && mentions( e, "n - 1" );
+		} );
+}
+
+/// The density is given for every species but the Neutralising one, and given
+/// for that one is as much an error as missing from another. A Density that
+/// charge neutrality then overwrites is a number the file states and the run
+/// ignores.
+BOOST_AUTO_TEST_CASE( the_neutralising_species_is_the_one_without_a_density )
+{
+	BOOST_CHECK_EXCEPTION( parse( rotating( "", "", "Density = 5.0e19\n" ) ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.species[1].Density"
+			    && mentions( e, "Neutralising" );
+		} );
+
+	// The same thing said as a file rather than a constant.
+	BOOST_CHECK_EXCEPTION( parse( rotating( "", "", "DensityFile = \"ne.dat\"\n" ) ), ConfigError,
+		[]( ConfigError const & e ) { return e.getKey() == "source.species[1].Density"; } );
+
+	std::string const noDensity = withSource(
+		"[source]\n"
+		"Type = \"rotating\"\n"
+		"GGPrime = 0.5\n"
+		"\n[[source.species]]\n"
+		"Mass = 3.344e-27\nCharge = 1.0\nTemperature = 1.6e-16\n"
+		"\n[[source.species]]\n"
+		"Mass = 9.109e-31\nCharge = -1.0\nTemperature = 1.6e-16\nNeutralising = true\n" );
+
+	BOOST_CHECK_EXCEPTION( parse( noDensity ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.species[0].Density"
+			    && mentions( e, "required" )
+			    && mentions( e, "Neutralising" );
+		} );
+}
+
+/// Constants that cannot describe a species. Charge is Z_s, signed and
+/// dimensionless, so zero is not a plasma species; and a non-positive mass or
+/// reference radius is a number the closure divides by.
+BOOST_AUTO_TEST_CASE( unphysical_species_constants_are_refused )
+{
+	std::string const zeroCharge = withSource(
+		"[source]\n"
+		"Type = \"rotating\"\n"
+		"GGPrime = 0.5\n"
+		"\n[[source.species]]\n"
+		"Mass = 3.344e-27\nCharge = 1.0\nTemperature = 1.6e-16\nDensity = 5.0e19\n"
+		"\n[[source.species]]\n"
+		"Mass = 9.109e-31\nCharge = 0.0\nTemperature = 1.6e-16\nNeutralising = true\n" );
+
+	BOOST_CHECK_EXCEPTION( parse( zeroCharge ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.species[1].Charge" && mentions( e, "Z_s" );
+		} );
+
+	std::string const zeroMass = withSource(
+		"[source]\n"
+		"Type = \"rotating\"\n"
+		"GGPrime = 0.5\n"
+		"\n[[source.species]]\n"
+		"Mass = 3.344e-27\nCharge = 1.0\nTemperature = 1.6e-16\nDensity = 5.0e19\n"
+		"\n[[source.species]]\n"
+		"Mass = 0.0\nCharge = -1.0\nTemperature = 1.6e-16\nNeutralising = true\n" );
+
+	BOOST_CHECK_EXCEPTION( parse( zeroMass ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.species[1].Mass" && mentions( e, "positive" );
+		} );
+
+	std::string const negativeMass = withSource(
+		"[source]\n"
+		"Type = \"rotating\"\n"
+		"GGPrime = 0.5\n"
+		"\n[[source.species]]\n"
+		"Mass = -3.344e-27\nCharge = 1.0\nTemperature = 1.6e-16\nDensity = 5.0e19\n"
+		"\n[[source.species]]\n"
+		"Mass = 9.109e-31\nCharge = -1.0\nTemperature = 1.6e-16\nNeutralising = true\n" );
+
+	BOOST_CHECK_EXCEPTION( parse( negativeMass ), ConfigError,
+		[]( ConfigError const & e ) { return e.getKey() == "source.species[0].Mass"; } );
+
+	// The gauge: phi_0 vanishes on r = ReferenceRadius, so a non-positive one
+	// is not a curve in the domain at all.
+	BOOST_CHECK_EXCEPTION( parse( rotating( "ReferenceRadius = 0.0\n" ) ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.ReferenceRadius" && mentions( e, "phi_0" );
+		} );
+
+	BOOST_CHECK_EXCEPTION( parse( rotating( "ReferenceRadius = -1.65\n" ) ), ConfigError,
+		[]( ConfigError const & e ) { return e.getKey() == "source.ReferenceRadius"; } );
+
+	BOOST_CHECK_EXCEPTION( parse( rotating( "Mu0 = 0.0\n" ) ), ConfigError,
+		[]( ConfigError const & e ) { return e.getKey() == "source.Mu0"; } );
+}
+
+/*
+ * A profile is a constant OR a table, never both and never a scale for
+ * neither.
+ *
+ * Two keys rather than one that dispatches on node type, for the reason
+ * recorded at the top of Config.cpp: TOML distinguishes 1 from 1.0, so a single
+ * key meaning "a number or a filename" would fail by silently defaulting rather
+ * than by refusing. These are what makes that pay.
+ */
+BOOST_AUTO_TEST_CASE( a_profile_is_a_constant_or_a_file_but_not_both )
+{
+	BOOST_CHECK_EXCEPTION(
+		parse( rotating( "", "TemperatureFile = \"ti.dat\"\n" ) ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.species[0].Temperature"
+			    && mentions( e, "TemperatureFile" )
+			    && mentions( e, "must not both be given" );
+		} );
+
+	// A scale with nothing to scale is the misspelling that would otherwise be
+	// silent: the profile is missing and the file says how to convert it.
+	std::string const scaleAlone = withSource(
+		"[source]\n"
+		"Type = \"rotating\"\n"
+		"GGPrime = 0.5\n"
+		"\n[[source.species]]\n"
+		"Mass = 3.344e-27\nCharge = 1.0\nTemperature = 1.6e-16\nDensity = 5.0e19\n"
+		"\n[[source.species]]\n"
+		"Mass = 9.109e-31\nCharge = -1.0\nTemperature = 1.6e-16\n"
+		"DensityScale = 2.0\nNeutralising = true\n" );
+
+	BOOST_CHECK_EXCEPTION( parse( scaleAlone ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.species[1].DensityScale"
+			    && mentions( e, "means nothing without" )
+			    && mentions( e, "DensityFile" );
+		} );
+
+	// Temperature is required of every species, Neutralising or not: only the
+	// density is what neutrality determines.
+	std::string const noTemperature = withSource(
+		"[source]\n"
+		"Type = \"rotating\"\n"
+		"GGPrime = 0.5\n"
+		"\n[[source.species]]\n"
+		"Mass = 3.344e-27\nCharge = 1.0\nDensity = 5.0e19\n"
+		"\n[[source.species]]\n"
+		"Mass = 9.109e-31\nCharge = -1.0\nTemperature = 1.6e-16\nNeutralising = true\n" );
+
+	BOOST_CHECK_EXCEPTION( parse( noTemperature ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.species[0].Temperature"
+			    && mentions( e, "TemperatureFile" );
+		} );
+
+	// The same rule on [source]'s own profiles.
+	BOOST_CHECK_EXCEPTION(
+		parse( rotating( "Omega = 1.0e5\nOmegaFile = \"omega.dat\"\n" ) ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.Omega" && mentions( e, "OmegaFile" );
+		} );
+
+	BOOST_CHECK_EXCEPTION( parse( rotating( "OmegaScale = 2.0\n" ) ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.OmegaScale" && mentions( e, "means nothing without" );
+		} );
+
+	// g g' has no "absent means zero" reading, unlike omega: a source with no
+	// toroidal field function is not a tokamak.
+	std::string const noGGPrime = withSource(
+		"[source]\n"
+		"Type = \"rotating\"\n"
+		"\n[[source.species]]\n"
+		"Mass = 3.344e-27\nCharge = 1.0\nTemperature = 1.6e-16\nDensity = 5.0e19\n"
+		"\n[[source.species]]\n"
+		"Mass = 9.109e-31\nCharge = -1.0\nTemperature = 1.6e-16\nNeutralising = true\n" );
+
+	BOOST_CHECK_EXCEPTION( parse( noGGPrime ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.GGPrime"
+			    && mentions( e, "required" )
+			    && mentions( e, "GGPrimeFile" );
+		} );
+}
+
+/// A MISSPELT KEY INSIDE A SPECIES IS QUALIFIED ALL THE WAY DOWN, index and
+/// all. That is what [[source.species]] cost: an unqualified "Mas is not a key"
+/// on a five-species file sends the reader to read all five.
+BOOST_AUTO_TEST_CASE( a_misspelt_species_key_names_its_element )
+{
+	BOOST_CHECK_EXCEPTION( parse( rotating( "", "Mas = 1.0\n" ) ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.species[0].Mas"
+			    && mentions( e, "did you mean 'Mass'?" )
+			    && mentions( e, "accepted keys" );
+		} );
+
+	// The index is the element's own, not always zero.
+	BOOST_CHECK_EXCEPTION( parse( rotating( "", "", "Charg = -1.0\n" ) ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.species[1].Charg"
+			    && mentions( e, "did you mean 'Charge'?" );
+		} );
+
+	// And the table it names is the species, not [source]: ReferenceRadius is
+	// a real key of the parent and still has no business here.
+	BOOST_CHECK_EXCEPTION( parse( rotating( "", "ReferenceRadius = 1.0\n" ) ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.species[0].ReferenceRadius"
+			    && mentions( e, "[source.species[0]]" );
+		} );
+}
+
+/// species IS AN ARRAY OF TABLES, and the ways of writing something else are
+/// worth naming because [[a.b]] and [a.b] differ by two characters and nest
+/// identically. This is the first array of tables in meq's schema, so the
+/// diagnostic is new code rather than a path anything else exercises.
+BOOST_AUTO_TEST_CASE( species_must_be_an_array_of_tables )
+{
+	// A single [source.species] table -- one bracket, not two.
+	std::string const singleTable = withSource(
+		"[source]\n"
+		"Type = \"rotating\"\n"
+		"GGPrime = 0.5\n"
+		"\n[source.species]\n"
+		"Mass = 3.344e-27\nCharge = 1.0\nTemperature = 1.6e-16\nDensity = 5.0e19\n" );
+
+	BOOST_CHECK_EXCEPTION( parse( singleTable ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.species"
+			    && mentions( e, "[[source.species]]" )
+			    && mentions( e, "table" );
+		} );
+
+	// A scalar.
+	std::string const scalar = withSource(
+		"[source]\n"
+		"Type = \"rotating\"\n"
+		"GGPrime = 0.5\n"
+		"species = 3\n" );
+
+	BOOST_CHECK_EXCEPTION( parse( scalar ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.species" && mentions( e, "array of tables" );
+		} );
+
+	// An array of something that is not a table, which is refused BY ELEMENT
+	// so the index says which one.
+	std::string const arrayOfNumbers = withSource(
+		"[source]\n"
+		"Type = \"rotating\"\n"
+		"GGPrime = 0.5\n"
+		"species = [ 1.0, 2.0 ]\n" );
+
+	BOOST_CHECK_EXCEPTION( parse( arrayOfNumbers ), ConfigError,
+		[]( ConfigError const & e )
+		{
+			return e.getKey() == "source.species[0]" && mentions( e, "must be a table" );
+		} );
+}
+
+/*
+ * MORE SPECIES THAN THE SOURCE CAN CARRY.
+ *
+ * Config.hpp says of RotatingParameters::species: "Between two and
+ * meq::maxSpecies, of both charge signs, exactly one of them Neutralising."
+ * The parser enforces the second and third of those. This asserts the first,
+ * which is what the header claims and is the behaviour that is wanted -- a cap
+ * the file is refused against, rather than one it is built against and thrown
+ * out of a layer down.
+ *
+ * meq::RotatingSource caps the count at maxSpecies = 8 so that the
+ * per-quadrature-point work allocates nothing and holds no mutable scratch,
+ * which a source evaluated from a threaded assembly must not have. It is not a
+ * number a configuration file can talk its way past, so the file is the place
+ * to say so -- with the two keys around it, in one message, rather than after
+ * every profile file named by the nine species has been opened and read.
+ */
+BOOST_AUTO_TEST_CASE( more_species_than_the_source_can_carry_are_refused )
+{
+	std::string source =
+		"[source]\n"
+		"Type = \"rotating\"\n"
+		"GGPrime = 0.5\n";
+
+	// Nine: one electron species to be the Neutralising one, and eight ions,
+	// which is one past meq::maxSpecies.
+	source +=
+		"\n[[source.species]]\n"
+		"Mass = 9.109e-31\nCharge = -1.0\nTemperature = 1.6e-16\nNeutralising = true\n";
+
+	for ( int i = 0; i < 8; ++i )
+		source +=
+			"\n[[source.species]]\n"
+			"Mass = 3.344e-27\nCharge = 1.0\nTemperature = 1.6e-16\nDensity = 5.0e18\n";
+
+	BOOST_TEST_CONTEXT( "RED, AND THE DEFECT IS IN Config.cpp RATHER THAN HERE: the "
+	                    "rotating branch checks species.size() < 2 and not "
+	                    "species.size() > meq::maxSpecies, so nine species parse. The "
+	                    "fix is one check beside the existing one, failing on "
+	                    "source.species with meq::maxSpecies named in the message; "
+	                    "SourceFactoryTests::the_factory_refuses_more_species_than_maxSpecies "
+	                    "pins where it fires today." )
+	{
+		BOOST_CHECK_EXCEPTION( parse( withSource( source ) ), ConfigError,
+			[]( ConfigError const & e )
+			{
+				return e.getKey() == "source.species" && mentions( e, "maxSpecies" );
+			} );
+	}
 }
 
 BOOST_AUTO_TEST_SUITE_END()

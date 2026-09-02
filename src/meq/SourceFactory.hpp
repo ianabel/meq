@@ -34,6 +34,22 @@ namespace meq
 	///                        make a thrown ConfigError name its own source.
 	std::shared_ptr<Source const> makeSource( SourceConfig const &config,
 	                                          std::string const &configFileName = std::string() );
+
+	/// Construct a source whose profiles are functions of NORMALISED flux, so
+	/// that psi_ax is an unknown of the non-linear system rather than data.
+	///
+	/// NON-CONST, AND THAT IS THE POINT. The solver calls setNormalisation() on
+	/// such a source before every residual evaluation, so it cannot be held by
+	/// const reference and cannot come back from makeSource(). Hand the result
+	/// to GradShafranovSolver::setSource( NormalisedSource &, double ) together
+	/// with SourceConfig::psiAxisGuess(); the object must outlive the solve.
+	///
+	/// @throws ConfigError if the configuration is not a normalised one, if a
+	///         profile file cannot be read, or if the source itself refuses its
+	///         arguments -- the last translated so that a failure reads as the
+	///         configuration error it is rather than as a library exception.
+	std::shared_ptr<NormalisedSource> makeNormalisedSource( SourceConfig const &config,
+	                                                        std::string const &configFileName = std::string() );
 }
 
 #endif // MEQ_SOURCEFACTORY_HPP

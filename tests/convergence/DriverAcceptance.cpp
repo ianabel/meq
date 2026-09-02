@@ -6,12 +6,17 @@
 #include "meq/BoundaryShape.hpp"
 #include "meq/Estimator.hpp"
 #include "meq/GradShafranov.hpp"
+#include "meq/Output.hpp"
+#include "meq/Profiles.hpp"
+#include "meq/RotatingSource.hpp"
 #include "meq/Source.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <vector>
@@ -80,6 +85,140 @@ namespace
 	{
 		std::ifstream stream( path );
 		return stream.good();
+	}
+
+	/// A file's whole text, for the ncdump reads below.
+	std::string slurp( std::string const &path )
+	{
+		std::ifstream stream( path );
+		return std::string( ( std::istreambuf_iterator<char>( stream ) ),
+		                      std::istreambuf_iterator<char>() );
+	}
+
+	/// The header of a NetCDF file, through ncdump rather than through meq's own
+	/// writer -- so the check does not share code with the thing it checks.
+	/// Empty if ncdump could not read it.
+	std::string ncdumpHeader( std::string const &path )
+	{
+		std::string const scratch = "driver-acceptance-header.txt";
+		std::string const command = "ncdump -h " + path + " > " + scratch + " 2>&1";
+		if ( std::system( command.c_str() ) != 0 )
+			return std::string();
+
+		std::string const text = slurp( scratch );
+		std::remove( scratch.c_str() );
+		return text;
+	}
+
+	/// One global attribute out of an ncdump header, as a double. NaN if it is
+	/// not there, which every caller asserts against rather than ignores.
+	double headerAttribute( std::string const &header, std::string const &name )
+	{
+		std::string const needle = ":" + name + " = ";
+		std::size_t const at = header.find( needle );
+		if ( at == std::string::npos )
+			return std::nan( "" );
+		return std::strtod( header.c_str() + at + needle.size(), nullptr );
+	}
+
+	/*
+	 * THE ROTATING SPECIES OF examples/rotating-*.toml, BY HAND.
+	 *
+	 * Every number is repeated from the file rather than read from it, for the
+	 * reason the Solov'ev case records: a driver that parsed TemperatureScale
+	 * and then ignored it would agree with a test that also read the file, and
+	 * disagree with this one. The two examples share their species exactly, so
+	 * they share this.
+	 */
+	double const rotatingKeV = 1.602176634e-16;      // J per keV
+	double const rotatingOmega = 4.0e5;              // rad/s
+	double const rotatingGGPrime = 0.8;              // T^2 m^2 per (Wb/rad)
+	double const rotatingNormalisedGGPrime = 0.08;   // per unit Psi
+	double const rotatingDensityScale = 1.0e20;      // m^-3, the table's unit
+	double const rotatingReferenceRadius = 1.0;      // m
+
+	std::shared_ptr<meq::Profile const> constantProfile( double value )
+	{
+		return std::make_shared<meq::ConstantProfile const>( value );
+	}
+
+	/// A constant written as `value` with `scale` beside it, exactly as
+	/// loadEitherProfile() builds it from the TOML: the scale is a wrapper and
+	/// not a multiplication done at parse time, and this reproduces that rather
+	/// than assuming the two are the same.
+	std::shared_ptr<meq::Profile const> scaledConstant( double value, double scale )
+	{
+		return std::make_shared<meq::ScaledProfile const>( constantProfile( value ),
+		                                                   scale );
+	}
+
+	/*
+	 * THE DENSITY IS A TABLE AND SO IT IS READ, WHICH IS NOT THE SAME
+	 * CONCESSION AS READING THE TOML.
+	 *
+	 * The rule this file works to is that the CONFIGURATION's numbers are
+	 * repeated here rather than parsed, so that a driver which mis-plumbs a key
+	 * disagrees with the test. The profile table is not configuration: it is the
+	 * run's data, the driver and this test are both entitled to it, and the
+	 * alternative -- transcribing five knots and their slopes -- would fail for
+	 * a typo rather than for a defect. What stays repeated is everything the
+	 * TOML says ABOUT the table, which is the file name and DensityScale; an
+	 * ignored scale still fails here by a factor of 1e20.
+	 */
+	std::shared_ptr<meq::Profile const> densityTable( std::string const &file )
+	{
+		return std::make_shared<meq::ScaledProfile const>(
+			std::make_shared<meq::SplineProfile const>(
+				meq::SplineProfile::fromFile( file ) ),
+			rotatingDensityScale );
+	}
+
+	/// @param densityFile  the table the matching TOML names. The two examples
+	///                     differ in it and in nothing else about their species:
+	///                     one is a function of psi and the other of Psi, which
+	///                     is the whole difference between the two files.
+	std::vector<meq::Species> rotatingSpecies( std::string const &densityFile )
+	{
+		std::vector<meq::Species> species( 2 );
+
+		species[ 0 ].mass = 3.3435837768e-27;                 // deuterium, kg
+		species[ 0 ].charge = 1.0;
+		species[ 0 ].temperature = scaledConstant( 1.0, rotatingKeV );
+		species[ 0 ].density = densityTable( densityFile );    // m^-3 on rRef
+
+		species[ 1 ].mass = 9.1093837015e-31;                 // electron, kg
+		species[ 1 ].charge = -1.0;
+		species[ 1 ].temperature = scaledConstant( 0.8, rotatingKeV );
+		// Neutralising = true in the file: the density is what charge neutrality
+		// determines, and the driver must derive the same one.
+		species[ 1 ].density = meq::neutralisingDensity( species, 1 );
+
+		return species;
+	}
+
+	/// The mesh both rotating examples ask for: the standard rectangle, 8 x 12
+	/// cells, one uniform refinement.
+	mfem::Mesh rotatingMesh()
+	{
+		double const rMin = 0.6, rMax = 1.4, zMin = -0.6, zMax = 0.6;
+		mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D(
+			8, 12, mfem::Element::TRIANGLE, false, rMax - rMin, zMax - zMin );
+		mesh.Transform( [ rMin, zMin ]( mfem::Vector const &in, mfem::Vector &out )
+		{
+			out( 0 ) = in( 0 ) + rMin;
+			out( 1 ) = in( 1 ) + zMin;
+		} );
+		mesh.UniformRefinement();
+		return mesh;
+	}
+
+	/// ||stored - computed|| / ||computed||, the figure every case here prints.
+	double relativeDifference( mfem::GridFunction const &stored,
+	                           mfem::GridFunction const &computed )
+	{
+		mfem::Vector difference( stored );
+		difference -= computed;
+		return difference.Norml2()/std::max( 1.0e-300, computed.Norml2() );
 	}
 
 }
@@ -492,6 +631,247 @@ BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
 	BOOST_TEST( relative < 1.0e-10,
 	            "the driver's adaptive solve differs from the library's by "
 	            << relative << " relative" );
+}
+
+/*
+ * A ROTATING PLASMA, THROUGH THE DRIVER.
+ *
+ * FL-8 of FLOW-PLAN.md. The rotating source is a bigger piece of configuration
+ * than anything else meq takes -- an array of tables, two profiles per species,
+ * a scale on each, a derived density, a reference radius and a rotation
+ * frequency -- and every one of those is a way for the file to reach the solver
+ * as something other than what it says.
+ *
+ * THREE THINGS ARE PINNED HERE THAT NOTHING ELSE CAN SEE.
+ *
+ * psi ITSELF, against the same problem built by hand. That catches the whole
+ * configuration path: a TemperatureScale or a DensityScale ignored, a
+ * Neutralising species given the wrong sign, ReferenceRadius defaulted, Omega
+ * dropped because toml11's find_or<double> returns the default for an integer
+ * node, the wrong density table read. All of those reach psi, because the
+ * example's n_D0 has a slope in psi and so mu0 r^2 dp/dpsi does not vanish --
+ * which was not true of the first version of this example and is the whole
+ * reason it was changed.
+ *
+ * THAT ROTATION REACHES psi AT ALL, by solving the same problem at omega = 0 and
+ * requiring the two to differ. Every other assertion in this case passes whether
+ * or not it does; see the block below.
+ *
+ * THE OUTPUT FIELDS, which are the new thing FL-8 adds. n_s and phi_0 are the
+ * whole content of (96) and (97), and a rotating equilibrium is not
+ * interpretable without them.
+ */
+BOOST_AUTO_TEST_CASE( theDriverSolvesARotatingEquilibrium )
+{
+	BOOST_TEST_REQUIRE( run( "examples/rotating-rectangle.toml" ) == 0,
+	                    "the driver did not exit 0 on the rotating example" );
+
+	BOOST_TEST_REQUIRE( exists( "rotating-rectangle.mesh" ) );
+	BOOST_TEST_REQUIRE( exists( "rotating-rectangle_psi.gf" ) );
+
+	mfem::Mesh storedMesh( "rotating-rectangle.mesh", 1, 1 );
+	std::ifstream stream( "rotating-rectangle_psi.gf" );
+	BOOST_TEST_REQUIRE( stream.good() );
+	mfem::GridFunction stored( &storedMesh, stream );
+
+	// The same run, by hand, with the numbers repeated from the file.
+	mfem::Mesh mesh = rotatingMesh();
+	meq::RotatingSource const source(
+		rotatingSpecies( "examples/rotating-density.dat" ),
+		constantProfile( rotatingOmega ),
+		constantProfile( rotatingGGPrime ),
+		rotatingReferenceRadius );
+
+	mfem::ConstantCoefficient zero( 0.0 );
+	meq::GradShafranovSolver solver( mesh, 2, 1.0 );
+	solver.setSource( source );
+	solver.setBoundaryData( zero );
+	solver.setNewtonControl( 1.0e-10, 1.0e-14, 20 );
+	solver.solve();
+
+	BOOST_TEST_REQUIRE( stored.Size() == solver.potential().Size(),
+	                    "the driver wrote " << stored.Size() << " potential dofs "
+	                    "where the same configuration gives "
+	                    << solver.potential().Size() );
+
+	double const relative = relativeDifference( stored, solver.potential() );
+	std::printf( "\n  rotating driver vs library: %.3e relative over %d dofs, "
+	             "max psi = %.6e Wb/rad\n",
+	             relative, stored.Size(), solver.potential().Max() );
+	std::fflush( stdout );
+
+	BOOST_TEST( relative < 1.0e-10,
+	            "the driver's rotating solve differs from the library's by "
+	            << relative << " relative" );
+
+	/*
+	 * AND ROTATION REACHED psi, WHICH IS THE ONE THING THE EXAMPLE EXISTS TO
+	 * SHOW AND THE ONE THING EVERY ASSERTION ABOVE WOULD PASS WITHOUT.
+	 *
+	 * The driver-against-library check is a plumbing check and is satisfied by
+	 * any source at all. Nothing in it notices if the equilibrium is the
+	 * NON-ROTATING one -- which is exactly what happens when every profile is a
+	 * constant: p is then a function of r alone, dp/dpsi vanishes, F reduces to
+	 * g g', and psi comes out BIT-IDENTICAL to the plasma at rest while n_s and
+	 * phi_0 still look convincingly centrifugal. The example was written that way
+	 * first. Its header quotes the number below, so the number is measured here
+	 * rather than asserted there, and a later edit that shrinks the pressure term
+	 * -- raising GGPrime, flattening the density -- fails instead of quietly
+	 * making the example vacuous again.
+	 *
+	 * Same species, same mesh, same everything, and no rotation.
+	 */
+	meq::RotatingSource const still(
+		rotatingSpecies( "examples/rotating-density.dat" ),
+		nullptr,                              // omega = 0
+		constantProfile( rotatingGGPrime ),
+		rotatingReferenceRadius );
+
+	meq::GradShafranovSolver rest( mesh, 2, 1.0 );
+	rest.setSource( still );
+	rest.setBoundaryData( zero );
+	rest.setNewtonControl( 1.0e-10, 1.0e-14, 20 );
+	rest.solve();
+
+	double const shift = relativeDifference( solver.potential(), rest.potential() );
+	std::printf( "  rotation moves psi by %.4e relative in L2 over %d dofs; "
+	             "max psi %.6e spinning against %.6e at rest\n",
+	             shift, stored.Size(), solver.potential().Max(),
+	             rest.potential().Max() );
+	std::fflush( stdout );
+
+	BOOST_TEST( shift > 5.0e-2,
+	            "psi differs from the non-rotating answer by only " << shift
+	            << " relative. The example is then documenting its own vacuity: "
+	            "a reader who copies it and edits Omega will see nothing move. "
+	            "The cause is the pressure term being small beside GGPrime -- "
+	            "check that the density profile still has a slope in psi" );
+
+	if ( !meq::hasNetCDF() )
+	{
+		BOOST_TEST_MESSAGE( "  built without netcdf-cxx4, skipping the fields" );
+		return;
+	}
+
+	// THE FIELDS. Declared with the names the species were given, and with
+	// source_type saying which physics produced the file -- without which two
+	// runs differing only in [source] Type have identical headers.
+	std::string const header = ncdumpHeader( "rotating-rectangle.nc" );
+	BOOST_TEST_REQUIRE( !header.empty(),
+	                    "ncdump could not read rotating-rectangle.nc" );
+
+	for ( std::string const &needle :
+	      { std::string( "double n_D(Z, R)" ), std::string( "double n_e(Z, R)" ),
+	        std::string( "double e_phi_0(Z, R)" ),
+	        std::string( "n_D:units = \"m^-3\"" ),
+	        std::string( "e_phi_0:units = \"J\"" ),
+	        std::string( ":source_type = \"rotating\"" ) } )
+		BOOST_TEST( header.find( needle ) != std::string::npos,
+		            "the file does not carry '" << needle << "'" );
+}
+
+/*
+ * NORMALISED FLUX THROUGH THE DRIVER, WHICH IS A DIFFERENT SOLVE AND NOT A
+ * DIFFERENT SET OF NUMBERS.
+ *
+ * Psi = psi/psi_ax makes psi_ax a functional of the solution, so the driver has
+ * to reach setSource( NormalisedSource &, double ) rather than
+ * setSource( Source const & ), and the solver closes the pair by a bordered
+ * Newton. A driver that took the ordinary branch would still converge -- to the
+ * equilibrium at whatever psi_ax the file happened to guess, which is a solved
+ * equation for a plasma nobody asked for.
+ *
+ * SO psi_ax IS PINNED TWICE: against the library's own bordered Newton, and
+ * against the value the driver WROTE to the file. The second is not redundant.
+ * psi_ax is an answer here rather than an input, so a reader has nowhere else to
+ * get it -- and a driver that solved correctly and then wrote the TOML's guess
+ * into the attribute would pass every other assertion in this file.
+ */
+BOOST_AUTO_TEST_CASE( theDriverSolvesForPsiAxisAsAnUnknown )
+{
+	BOOST_TEST_REQUIRE( run( "examples/rotating-normalised.toml" ) == 0,
+	                    "the driver did not exit 0 on the normalised example" );
+
+	BOOST_TEST_REQUIRE( exists( "rotating-normalised.mesh" ) );
+	BOOST_TEST_REQUIRE( exists( "rotating-normalised_psi.gf" ) );
+
+	mfem::Mesh storedMesh( "rotating-normalised.mesh", 1, 1 );
+	std::ifstream stream( "rotating-normalised_psi.gf" );
+	BOOST_TEST_REQUIRE( stream.good() );
+	mfem::GridFunction stored( &storedMesh, stream );
+
+	// The same run, by hand. PsiAxis = 0.3 is the file's GUESS, and the point of
+	// the case is that the answer is not it.
+	double const psiAxisGuess = 0.08;
+	mfem::Mesh mesh = rotatingMesh();
+	meq::NormalisedRotatingSource source(
+		rotatingSpecies( "examples/rotating-density-normalised.dat" ),
+		constantProfile( rotatingOmega ),
+		constantProfile( rotatingNormalisedGGPrime ),
+		rotatingReferenceRadius, psiAxisGuess );
+
+	mfem::ConstantCoefficient zero( 0.0 );
+	meq::GradShafranovSolver solver( mesh, 2, 1.0 );
+	solver.setSource( source, psiAxisGuess );
+	solver.setBoundaryData( zero );
+	solver.setNewtonControl( 1.0e-10, 1.0e-14, 20 );
+	solver.solve();
+
+	BOOST_TEST_REQUIRE( stored.Size() == solver.potential().Size() );
+
+	double const relative = relativeDifference( stored, solver.potential() );
+	std::printf( "\n  normalised driver vs library: %.3e relative over %d dofs\n"
+	             "  psi_ax = %.9e, constraint psi_ax - max psi_h = %.3e, "
+	             "%d Newton steps\n",
+	             relative, stored.Size(), solver.psiAxis(),
+	             solver.normalisationResidual(), solver.newtonIterations() );
+	std::fflush( stdout );
+
+	BOOST_TEST( relative < 1.0e-10,
+	            "the driver's normalised solve differs from the library's by "
+	            << relative << " relative" );
+
+	// It solved FOR psi_ax rather than accepting the guess. Without this the
+	// case above would pass with the border doing nothing at all.
+	BOOST_TEST( std::fabs( solver.psiAxis() - psiAxisGuess ) > 1.0e-2*psiAxisGuess,
+	            "psi_ax came back at the initial guess " << psiAxisGuess
+	            << ", so nothing solved for it" );
+
+	if ( !meq::hasNetCDF() )
+	{
+		BOOST_TEST_MESSAGE( "  built without netcdf-cxx4, skipping the attributes" );
+		return;
+	}
+
+	std::string const header = ncdumpHeader( "rotating-normalised.nc" );
+	BOOST_TEST_REQUIRE( !header.empty(),
+	                    "ncdump could not read rotating-normalised.nc" );
+
+	double const written = headerAttribute( header, "psi_axis" );
+	double const constraint = headerAttribute( header, "normalisation_residual" );
+
+	std::printf( "  the file says psi_axis = %.9e, "
+	             "normalisation_residual = %.3e\n", written, constraint );
+	std::fflush( stdout );
+
+	BOOST_TEST( std::isfinite( written ),
+	            "the file carries no psi_axis attribute, so a reader has no way "
+	            "to know the axis flux of an equilibrium whose psi_ax was an "
+	            "unknown" );
+	BOOST_TEST( std::isfinite( constraint ),
+	            "the file carries no normalisation_residual attribute" );
+
+	// The attribute is written at full precision, so this is the file round trip
+	// and not a tolerance.
+	BOOST_TEST( std::fabs( written - solver.psiAxis() )
+	                <= 1.0e-12*std::fabs( solver.psiAxis() ),
+	            "the file says psi_axis = " << written << " where the same run "
+	            "gives " << solver.psiAxis() );
+	BOOST_TEST( std::fabs( constraint ) <= 1.0e-8*std::fabs( solver.psiAxis() ),
+	            "the driver reports a normalisation residual of " << constraint
+	            << " against psi_ax = " << solver.psiAxis()
+	            << ", so the constraint psi_ax = max psi_h is not satisfied and "
+	            "the border is not closing the system" );
 }
 
 BOOST_AUTO_TEST_CASE( theDriverReportsConfigurationErrorsAsExitOne )

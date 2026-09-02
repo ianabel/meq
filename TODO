@@ -11,6 +11,70 @@ Read p'(psi) and FF'(psi) from NetCDF, including MaNTA output
 Raised 2026-08-24.
 ================================================================================
 
+  DECIDED 2026-09-01, AND THE SCHEMA IS ALREADY RESERVED FOR IT. The
+  configuration layer now recognises `[source] ProfileFile` and the per-profile
+  `<Key>Variable` and `<Key>Fit` keys and refuses them with a message saying
+  they are not implemented, rather than as unknown keys. So adding this is
+  purely additive: change the refusals into reads. Two things were settled at
+  the same time.
+
+  THE MISSING-DERIVATIVE RULE. A NetCDF variable carrying VALUES BUT NO
+  DERIVATIVE is refused unless the configuration opts in per profile, with e.g.
+  `TemperatureFit = "pchip"`. meq::Profile's contract is that prime() is the
+  exact derivative of operator(), and a fitted derivative is a modelling
+  choice: a monotone fit and a natural spline disagree about whether an edge
+  pedestal overshoots into a negative density. That choice belongs to whoever
+  knows what the file means, recorded in the file that records the run -- not
+  to a default buried in a reader.
+
+  AND THE DERIVATIVE SHIFT BELOW DOES NOT ARISE FOR THE ROTATING SOURCE, which
+  changes which source this work should be built against. MaNTA writes one group
+  per variable, each carrying u(t,x) "Value" and q(t,x) "Derivative" over a
+  shared x. That (x, u, q) triple is an (abscissa, value, derivative) triple,
+  which is meq::Knot, so a SplineProfile drops straight out and doublePrime()
+  comes from the cubic. The shift is a property of meq::MHDSource's PRODUCT
+  parameterisation -- it stores p' and gg', so it wants (p', p'') and MaNTA
+  gives (p, p') -- and meq::RotatingSource takes T_s and n_s0 THEMSELVES, so
+  (u, q) is exactly what it needs. Build this against the rotating source first;
+  the MHD one is the awkward case, not the easy one.
+
+  BUT READ THE NEXT THREE PARAGRAPHS BEFORE BELIEVING THAT IS THE WHOLE STORY.
+  An earlier version of this entry said the triple came straight off the file.
+  It comes off a RESAMPLING of the file's real content, and the file is not
+  only profiles.
+
+  MaNTA's PROFILES ARE NODAL FINITE ELEMENTS, AND x IS AN OUTPUT GRID, NOT THE
+  NODES. SystemSolver::initialiseNetCDF builds `gridpoints` as nOut points
+  UNIFORMLY spaced over [lowerBoundary, upperBoundary] and calls
+  NetCDFIO::SetOutputGrid on it; AddVariable then evaluates the DGSoln onto
+  that grid. So u and q are the FE solution and its derivative SAMPLED, and the
+  fidelity of what meq would read is set by nOut -- a run-time output choice --
+  rather than by MaNTA's polynomial order. A Hermite cubic through those samples
+  is an interpolant of an interpolant. That is fine at large nOut and is a
+  measurement somebody should make rather than assume; it also means the Grid
+  group's CellBoundaries and PolyOrder are the things to read if the FE
+  representation itself is ever wanted.
+
+  THE FILE CONTAINS MORE THAN PROFILES. TransportSystem has virtual
+  initialiseDiagnostics / writeDiagnostics / finaliseDiagnostics hooks, and
+  NetCDFIO offers AddGroup, AddVariable, AddScalarVariable and AddTimeSeries, so
+  a physics case writes whatever it likes into the same file alongside the
+  solution. A reader must SELECT BY NAME and must not assume that every group is
+  a profile or that every variable over x is one. That is the direct argument
+  for the schema already reserved here: a per-profile <Key>Variable naming its
+  source, rather than any positional or structural convention.
+
+  AND THE GROUP NAMES ARE PHYSICAL IN A REAL RUN. AddVariable is called with
+  problem->getVariableName(i), so a production file has meaningful group names;
+  the Var0, Var1, ... seen in ../MaNTA/algderiv_*.nc are test cases that do not
+  name their variables. Do not design around Var<i>.
+
+  One thing still open: whether MaNTA's x is psi, normalised Psi, or a radial
+  coordinate needing a chain rule -- q is du/dx, so if x is not psi then the
+  derivative needs the chain rule and the whole (u, q) convenience above is
+  conditional on that. The abscissa variable should be named in the
+  configuration rather than assumed, and its units checked.
+
   Today `meq::SplineProfile` reads one format: a text table of
   `psi  f(psi)  f'(psi)` triples, via `fromFile()` / `fromStream()`
   (src/meq/Profiles.cpp). Configuration reaches it through `[source]` with
@@ -40,6 +104,116 @@ Raised 2026-08-24.
   the value and its derivative on the `x` grid. That is promising, because a
   Hermite cubic wants exactly a value and a derivative per knot -- `meq::Knot`
   is `{psi, value, derivative}`, which is the same triple.
+
+  THE SHAPE TO BUILD, DECIDED 2026-09-01. Four kinds of file, all of which look
+  like a filename to the user, and the design goal is that meq works out which
+  it is rather than making the author declare it.
+
+    (1) full MaNTA output, which also carries the species set, and eventually a
+        direct FE representation rather than the resampled grid.
+        *** DEFERRED until that file shape is specified. *** The FE output does
+        not exist on the MaNTA side yet, and "load the whole species set" needs
+        the layout pinned before it can mean anything. Nothing below depends on
+        it; it slots in as one more branch of step 2.
+    (2) a NetCDF holding a profile f(x), with x either raw psi or normalised.
+    (3) a NetCDF holding f(x, y1, ..., yn) which becomes (2) once the other
+        axes are fixed.
+    (4) either of those, with the derivative supplied as well, on the same
+        abscissa. (Assume the same abscissa; a file that disagrees with itself
+        about that is a file to refuse, not to interpolate.)
+
+  THE UNIFYING IDEA is that all four are "a NetCDF file, plus however much meq
+  can work out for itself", so the reader is a RESOLUTION PIPELINE and not four
+  readers:
+
+    a. A path ending .nc opens as NetCDF, and MAY CARRY THE VARIABLE WITH IT:
+       "prof.nc/T_i" addresses T_i inside prof.nc. Resolution is by LONGEST
+       EXISTING-FILE PREFIX -- stat each candidate split and take the first
+       that is a regular file; the remainder is the in-file path. NOT by
+       splitting at the last slash: NCZarr datasets are DIRECTORIES and this
+       netCDF has NCZarr on, so "data.zarr/T_i" may be a real filesystem path.
+    b. Find the VALUE variable: the in-file part of (a) if the path carried
+       one; else the config's <Key>Variable; else, if the file offers exactly
+       one plausible candidate, take it and say so.
+    c. Find the ABSCISSA: the variable's dimension that carries a coordinate
+       variable, which is the netCDF convention and costs the author nothing.
+    d. Fix any REMAINING AXES -- case (3). A length-1 axis is squeezed. A
+       time-like axis defaults to its LAST index. Anything else the config must
+       pin, and it may do so TWO WAYS: DAP-style brackets inside the address,
+       "prof.nc/T_i[40]", positional exactly as DAP defines them; or an
+       explicit <Key>Slice table keyed BY DIMENSION NAME,
+       { time = 40, species = 0 }. Named beats positional wherever the file
+       names its dimensions, because it survives a reordering that brackets do
+       not -- so Slice is the one to reach for and the brackets are the terse
+       standard-shaped alternative. Naming one axis both ways is a REFUSAL, not
+       a precedence rule. Until an axis is pinned the failure names it and its
+       length rather than guessing.
+    e. Find the DERIVATIVE -- case (4): the config's name, a small set of
+       naming conventions, or an attribute pointing at it. Failing all three,
+       REFUSE unless <Key>Fit opts in, per the rule already settled above.
+
+  WHY "foo.nc/var" AND NOT SOMETHING STANDARD: THERE IS NO STANDARD FOR IT, AND
+  THAT WAS TESTED RATHER THAN ASSUMED. On this machine -- netCDF 4.9.3, with
+  DAP2, DAP4 and NCZarr all built in -- `ncdump file.nc/T_i` fails with "Not a
+  directory" and `ncks file.nc/T_i` with "file not found". No netCDF tool
+  accepts the concatenation. What IS standard is the second half: netCDF-4
+  group paths are slash-separated, and `ncdump -v /profiles/T_e` and
+  `-v profiles/T_e` both work. So "foo.nc/var" invents only the JOIN and
+  inherits the in-file address -- which is why group support costs nothing,
+  "prof.nc/profiles/T_e" splitting into a file plus exactly what ncdump -v
+  takes. The OS refusing to walk into a file is what makes the split
+  unambiguous, and it is why the rule is a stat rather than a string operation.
+
+  The one-string conventions that DO exist were considered and not adopted
+  wholesale. GDAL spells it NETCDF:"file.nc":var -- real, widely used, ugly,
+  and geospatial rather than general. OPeNDAP constraint expressions,
+  dataset?var[0:10], are a genuine published standard that this netCDF already
+  parses inside nc_open, and that is where the BRACKETS come from: meq borrows
+  DAP's slice syntax rather than inventing one, and does not borrow its '?'
+  separator, which would buy nothing over '/'.
+
+  THE SAFETY MECHANISM IS ANNOUNCEMENT, AND IT IS WHAT MAKES INFERENCE
+  ACCEPTABLE AT ALL. Every inference above is a place where a wrong guess gives
+  a converged solution to a different problem, which is this project's standing
+  worst case. So the reader prints ONE LINE PER PROFILE saying what it decided:
+
+    meq: T_i from equilibrium.nc: variable 'T_i', 129 knots on RAW psi in
+         [0, 0.42] Wb/rad, derivative from 'dT_i_dpsi', time index 40 of 41
+
+  A user who reads that sees a wrong inference immediately; one who is never
+  told cannot. This is the difference between "no burden on the author" and "no
+  way to tell what happened", and it is the whole reason inference is allowed
+  here when it is refused elsewhere in this codebase.
+
+  THE ONE GENUINELY DANGEROUS INFERENCE IS RAW psi AGAINST NORMALISED psi,
+  because getting it wrong rescales every profile silently and the solve still
+  converges. Three signals, in order: the abscissa's `units` attribute
+  (Wb/rad and its spellings mean raw; dimensionless or "1" means normalised);
+  failing that, its NAME; failing that, its RANGE, where [0, 1] is strong
+  evidence and anything else is not. Announce the conclusion, always, and let
+  the configuration override it -- and treat "no signal at all" as a refusal
+  rather than a default, because there is no safe default here.
+
+  WHAT "NO EXTRA BURDEN" MEANS CONCRETELY, and it is the acceptance test for
+  this design: a well-formed one-dimensional file needs `TemperatureFile =
+  "x.nc"` and nothing else -- no variable name, no abscissa, no units, no slice.
+  Case (3) costs one key naming the slice. Case (4) costs nothing and works
+  better. If a plain case (2) file needs more than a filename, the inference is
+  not finished.
+
+  A REQUEST ON THE MaNTA SIDE falls out of (1) and is not meq's to write: the
+  ability to output the FE representation -- coefficients, cell boundaries and
+  polynomial order -- rather than only the uniform resampling SetOutputGrid
+  produces. meq would then read MaNTA's actual solution instead of an
+  interpolant of a sampling of it, and case (1) could stop being a resampling
+  at all.
+
+  RAISE IT WITH MaNTA RATHER THAN EDITING MANTA-COUPLING.md, which is a RECEIVED
+  document: its own header says it is "written from MaNTA's side" and that the
+  authoritative copy is FieldModel.hpp, FieldModelSpec.hpp and
+  docs/field_coupling.rst in that tree, so anything meq writes into it is a
+  local edit to somebody else's contract. This is the same rule as
+  ../mfem-hdg-dev being receive-only, for the same reason.
 
   THE FOUR QUESTIONS TO SETTLE BEFORE WRITING ANY OF IT
 

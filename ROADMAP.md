@@ -45,11 +45,11 @@ With nothing red, the order is what it was, plus a second planned physics item:
    prerequisite for two things rather than one**: the normalised plumbing gets
    written once and both the high-β source and a rotating one use it.
 2. **Then the two planned extensions, and they are independent of each other.**
-   * **Toroidal flow**, `FLOW-PLAN.md` — item 9. `refs/RotatingGK.pdf` (136),
-     closed by (96) and (97). A change to `F` alone: the operator, the
-     discretisation and the whole curved-boundary and adaptive apparatus are
-     untouched, and `Source`'s signature already carries the `r` it needs.
-     Staged FL-0 to FL-8.
+   * **Toroidal flow**, `FLOW-PLAN.md` — item 9, and **done**, FL-0 to FL-8.
+     `refs/RotatingGK.pdf` (136), closed by (96) and (97). A change to `F`
+     alone: the operator, the discretisation and the whole curved-boundary and
+     adaptive apparatus were untouched, and `Source`'s signature already
+     carried the `r` it needs.
    * **Free boundary**, `FREE-BOUNDARY-PLAN.md` — item 8. HDG on a polygonal
      subdomain coupled at a distance to an exterior operator on a semicircular
      artificial boundary, by `refs/CouplingAtADistance.pdf` — whose own
@@ -207,12 +207,20 @@ recorded beside `examples/soloviev-nstx.toml`. `CLAUDE.md` has the numbers.
   is a required input on that path and not an optional one. **It is now a
   prerequisite for two things rather than one** — item 9's rotating source needs
   the same plumbing, so this gets written once.
-* **7d, the interpolating warm start** — needs GSLIB, already enabled in
-  `../mfem/install`. The exact restart (same mesh, same degree) is written. The
-  acceptance measurement is the one `DRIVER-PLAN.md` §4 names: at `k = 3` the
-  GSLIB route should start from a residual smaller than the NetCDF route's by
-  about `h^{k+1}` against `h^2` — which is what justifies the dependency rather
-  than asserting it.
+* **7d, the interpolating warm start — MUCH SMALLER THAN THIS FILE SAID, and
+  the correction is worth the space.** It was recorded as "needs GSLIB and is
+  not written". The library half **is** written, and has been since `51eb735`:
+  `src/meq/WarmStart.{hpp,cpp}` is `meq::FieldTransfer` on
+  `mfem::FindPointsGSLIB`, it is in `MEQ_CORE_SOURCES`, `MFEM_USE_GSLIB` is
+  `YES` in the install, and `WarmStartConvergence` is a registered ctest whose
+  `fullOrderCarriesMoreThanAStructuredGrid` **is** the acceptance measurement
+  `DRIVER-PLAN.md` §4 names, run over a 65/129/257 grid sequence. What is left
+  is one wiring job: `apps/meq.cpp` still throws *"the interpolating one needs
+  GSLIB"* on a mesh-count mismatch, and adaptive cycles after the first start
+  cold for the same reason. Deleting that throw and carrying the answer across
+  cycles is hours, not days, and it is the best value-per-hour item on this
+  list. (`src/meq/Sampler.hpp` and `src/meq/Config.hpp` both still assert that
+  GSLIB is off; they are wrong and should be fixed in passing.)
 
 **The nonlinear path the driver ships is reactive and must stay so.** Nothing
 may be inferred from `F` about which solver to run, because nothing can be: the
@@ -268,11 +276,23 @@ and went green on its own, which is the testing stance working as intended.
   The oldest debt in the tree, and the one a new reader hits first.
 ## 4. Element-local parallelism — MFEM, outstanding
 
-`../mfem-hdg-dev/doc/HDG-ELEMENT-LOCAL-PARALLELISM.md`, still present in that
-tree's `doc/`. Probably the largest performance win available: twelve sequential
-element loops in `darcyhybridization.cpp` over work independent by construction.
-meq has no visibility into whether it is being worked on and should not guess;
-what meq can say is that nothing it links has changed.
+`../mfem-hdg-dev/doc/HDG-ELEMENT-LOCAL-PARALLELISM.md`, on
+`gf-hdg-linearise-first`. Twelve sequential element loops in
+`darcyhybridization.cpp` over work independent by construction.
+
+**IT IS NOT "PROBABLY THE LARGEST PERFORMANCE WIN AVAILABLE", WHICH IS WHAT
+THIS FILE SAID, AND UPSTREAM HAS MEASURED IT.** `d7ea90a538`, *"Element-local
+parallelism in NPC: the structural win is worth 6%"*, breaks an NPC step down
+per phase over six steps at four `(n, k)`: integrator-bound loops **59–63%**,
+integrator-free loops **5.4–6.2%**, trace solve **31–35%**. Their conclusion is
+that the loops threadable *today* are under 6% of the step and flat in both mesh
+size and order, so Amdahl caps any gain there until the integrators are made
+thread-safe. meq should stop quoting this as the big win.
+
+**And §1 of it has LANDED and meq is not using it**: `LocalFactorMode`,
+`SetLocalFactorMode` and `CanBatchLocalFactor` are in the *installed*
+`darcyhybridization.hpp`, and `LocalFactorMode` appears nowhere in `src/`,
+`tests/` or `apps/`. See item 6 for what it does and does not buy.
 
 **AND IT IS UNBLOCKED, MORE CLEANLY THAN WHEN IT WAS FILED.** meq's default is
 now `NonlinearOrdering::NPC` — `mfem::DarcyNPCOperator` over the full
@@ -353,7 +373,7 @@ What threading MKL actually costs, with the columns separated:
 `MKL_NUM_THREADS` is process-wide, so buying that means paying 40x on assembly.
 `setTraceSolver()` landed and is not the whole job: what is left is either
 `mkl_set_num_threads_local()` around the trace solve, or the element-local
-factorisation off threaded MKL (`LocalFactorMode::Batched`). Neither is done,
+factorisation off threaded MKL. Neither is done,
 and it is item 0 of `CLAUDE.md`'s *What to do, in order of value*.
 
 **Two things settled and no longer worth an item.** PARDISO's `n ≈ 3000`
@@ -446,63 +466,21 @@ problem it solved does not arise. Plan §4.1; git has it if it is ever wanted.
 
 ---
 
-## 9. Toroidal flow — meq, FL-0 to FL-7 done; FL-8 is the driver
+## 9. Toroidal flow — meq, DONE, FL-0 to FL-8
 
-`FLOW-PLAN.md` is the design. **`src/meq/RotatingSource.{hpp,cpp}` is built and
-FL-0 to FL-7 are green**: the species container and the charge-neutrality solve,
-`φ₀` and the pressure in closed form, the source and its Jacobian, the rotating
-Solov'ev benchmark at `k+1`, a manufactured nonlinear case that pins Newton's
-order, the general `n`-species root find, and normalised flux through the
-existing bordered Newton. `CLAUDE.md`'s *Toroidal flow* has the measurements.
-**What is left is FL-8** — `Config`, `SourceFactory`, a worked TOML and writing
-`n_s` and `φ₀` out. The shape of it:
+**`src/meq/RotatingSource.{hpp,cpp}` solves `refs/RotatingGK.pdf` (136), closed
+by its (96) and (97), and it is reachable from a TOML file.** Two species in
+closed form, `n` species by a safeguarded root find, normalised flux through the
+existing bordered Newton, and `[source] Type = "rotating"` with
+`examples/rotating-rectangle.toml` and `rotating-normalised.toml` as the worked
+examples. `FLOW-PLAN.md` is the design; `CLAUDE.md`'s *Toroidal flow* has every
+measurement, the three errors found in Li & Zhu, and the Maschke–Perrin reading
+**this file previously got wrong** — its §4 is (136)'s isothermal closure at
+every `γ`, and the paragraph that stood here called it an adiabatic one.
 
-* **Rotation is a change to `F` alone.** The operator, the discretisation, `τ`,
-  the hybridization, the estimator, the adaptive loop and the curved boundary are
-  all untouched. And **`Source` already has the right signature** — `f(r, z, ψ)`
-  carries `r`, so a density that is not a flux function needs no interface change
-  anywhere in the solver. That is the largest piece of luck in the plan.
-* **(136) collapses to `F = μ₀ r² ∂p/∂ψ|_r + g g′`**, with
-  `p = Σ_s n_s T_s` and `n_s` from (96). The `∂φ₀/∂ψ` terms cancel identically
-  against quasineutrality. Derived rather than read off, and checked twice — it
-  is the paper's own force balance (128), and at `ω → 0` it gives the paper's
-  (243), **which is the equation meq solves today**.
-* **The gauge `⟨φ₀⟩_ψ = 0` is a convention and meq does not take it.** RoPP says
-  so at (59). A local gauge `φ₀(r_ref) = 0` keeps `F` a pointwise function of
-  `(r, z, ψ)`; the paper's gauge would need `⟨r²⟩_ψ`, a flux-surface average of
-  the unknown on **every** surface — machinery meq does not have and this buys
-  nothing physical. Li & Zhu independently make the same choice.
-* **Two species need no root find at all**: (97) is linear in `φ₀` after taking
-  logarithms, and `p = P₀(ψ) exp[ m_i ω² (r² − r_ref²) / 2(T_i + Z_i T_e) ]`.
-  `n` species need a scalar Newton per evaluation point, with a root that is
-  unique and bracketable because the left-hand side of (97) is strictly
-  decreasing in `φ₀`.
-* **Inputs are `T_s(ψ)`, `ω(ψ)`, `n − 1` density flux functions and `I(ψ)`.**
-  The counting is the gauge: fixing it removes exactly one function's worth of
-  freedom from the `N_s`. Exposed as the physical density of each species on
-  `r = r_ref`, subject to charge neutrality there.
-* **FL-2 was the stage to protect and it held.** The `ω → 0` collapse exercises
-  the species container, the chain rule, `φ₀`, the Gaussian-to-SI conversion and
-  the sign of `Δ*` against an answer meq already had — and driving the Solov'ev
-  study from a `RotatingSource` reproduces `SolovievConvergence`'s errors to
-  every printed digit, not merely its rates.
-* **It cost `meq::Profile` a `doublePrime()`**, which the plan did not foresee: a
-  rotating `F` is already one `ψ`-derivative of the input profiles, so the
-  Jacobian spends a second. Pure virtual, so the three subclasses had to answer.
-
-**The literature hazard is named in the plan rather than left to be discovered.**
-Rotating-equilibrium papers solve at least three different closures — isothermal,
-adiabatic, and constant-density-on-a-surface — and they look alike. Li & Zhu's
-§3.1 rotating Solov'ev **is** (136)'s closure and is a usable exact benchmark;
-their §3.2 Maschke–Perrin carries a ratio of specific heats and **is not**; FLOW
-solves arbitrary poloidal-plus-toroidal flow and is a different problem
-altogether. `deltaStarFD()` on any borrowed closed form, before trusting it, is
-the guard — the same one that caught the Solov'ev coefficients.
-
-**And no published rotating solution exercises the Jacobian**: both closed forms
-are linear in `ψ`. A manufactured nonlinear rotating case is therefore not
-optional, for the reason `CLAUDE.md` records — a wrong `∂F/∂ψ` leaves every error
-and every rate unchanged and moves only Newton's observed order.
+**What is not done here is item 11**, and the rotating output is what measured
+it: `B` in the band between `Γ_h` and `Γ` is evaluated at the foot on `Γ_h`, and
+the same closed form evaluated both ways differs by a factor of **1.7e5**.
 
 ## 10. The fixed-`q(ψ)` solver — meq, wanted, not designed
 
@@ -539,7 +517,46 @@ Three things worth writing down before anyone starts:
 Not on the critical path for anything, and it should not be started until item 9
 has settled what a rotating source's profile set looks like.
 
+## 11. `B` in the band is zeroth order, behind a mask that says it is fine — meq
 
+**FOUND 2026-09-01 WHILE WIRING THE ROTATING OUTPUT, AND IT IS A DEFECT IN THE
+INTERCHANGE FORMAT.** Only `GridSampler::samplePotentialWithFlux()` applies the
+Taylor step into the band between `Γ_h` and `Γ`; `sample()`, `sampleComponent()`
+and `sampleCoefficient()` never read `offsetR`/`offsetZ` at all, and so return
+the value **at the foot on `Γ_h`**. `apps/meq.cpp` sends `ψ` through the first
+and `B` through `sampleComponent`.
+
+Measured on the committed `miller-curved.nc`: `extrapolated_nodes = 1667` of
+129×129 = 16,641, so about **one node in ten** carries a piecewise-constant `B`
+— `O(h)` — where `ψ` gets `O(h²)` and `q` itself resolves at `k+1`.
+`B = (−q_z, +q_r)` is a pure relabelling, so nothing softens it.
+
+**The cost is measured, not estimated.** `n_s` is algebraic in `(r, ψ)`, so
+the rotating output gave a free controlled experiment over the same 356 band
+nodes: against the node's own `r` the closed form is **5.13e-07** wrong, against
+the foot's **8.57e-02** — a factor of **1.7e5**.
+`theRotatingFieldsUseTheNodesOwnRadius` in `OutputConvergence.cpp` is that
+measurement, and it exists because the trap was found and dodged for the new
+fields while `B` was left sitting in it two lines above.
+
+**What makes it worse than a missing feature is that it is invisible to a
+reader.** `extendOutward()` counts band nodes as found, so the mask says
+`inside = 1` there, and `theMaskAgreesWithTheData` asserts mask-matches-non-NaN
+— the very property that makes the band look trustworthy. `extrapolated_nodes`
+is a count, not a mask, so nothing downstream can tell which nodes to distrust.
+And `theBandIsContinuedByTheFluxAtTheFluxesOwnOrder` tests `ψ` only; there is no
+band test for `B` at all.
+
+**Two fixes, and they are not the same size.** The honest one is a first-order
+continuation using `∇q_h` inside the element — the foot is on that element's own
+closure, so nothing is evaluated outside it — giving `O(h²)` to match `ψ`. The
+safe one is to write `_FillValue` in the band for anything that has not earned
+better, and export the band as a mask so a reader can see it. Either wants a
+`theBandFieldConvergesAtItsOwnOrder` beside the existing `ψ` one. Half a day.
+
+**This is the format other codes read, and `B` is what they open it for**, which
+is why this is an item and not a footnote. `CLAUDE.md`'s *Status* section carries
+the detail.
 
 ## Deliberately not yet
 

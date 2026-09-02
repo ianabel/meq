@@ -143,7 +143,8 @@ namespace meq
 	{
 		Soloviev,      // "soloviev"
 		MHD,           // "mhd"
-		Manufactured   // "manufactured"
+		Manufactured,  // "manufactured"
+		Rotating       // "rotating"
 	};
 
 	// F( r, z, psi ) = -( (1 - A) r^2 + A ), independent of psi and hence
@@ -174,10 +175,29 @@ namespace meq
 		// GGPrimeFile: path to the tabulated g dg/dpsi
 		//                                     [T^2 m^2 / (Wb per radian)]
 		std::string ggPrimeFile;
+		// PPrimeScale, GGPrimeScale: constants multiplying the tables as read.
+		// A table arrives in whatever units its author wrote it in, and that is
+		// frequently not meq's; editing the file would make the file a function
+		// of which code reads it. See meq::ScaledProfile.
+		double pPrimeScale = 1.0;
+		double ggPrimeScale = 1.0;
 		// Mu0: the vacuum permeability multiplying the r^2 p' term [H/m]. The
 		// SI value by default; set it to 1 for a problem posed in normalised
 		// units.
 		double mu0 = 4.0e-7*3.14159265358979323846;
+		// Normalised: whether the two tables are functions of NORMALISED flux,
+		// Psi = psi/psi_ax, rather than of psi itself. That makes psi_ax a
+		// functional of the solution and therefore an UNKNOWN of the non-linear
+		// system, which the solver closes by a bordered Newton -- see
+		// meq::NormalisedSource and CLAUDE.md, "Newton, and the obligation it
+		// creates". False by default, because it changes what the tables mean.
+		bool normalised = false;
+		// PsiAxis: the starting value of psi_ax [Wb per radian]. REQUIRED when
+		// Normalised is true and refused otherwise. It is a guess in the Newton
+		// sense and not a scale factor: the iteration has to start inside a
+		// basin, and at a fixed psi_ax the equation generally has a second,
+		// non-physical solution the iteration can reach instead.
+		double psiAxis = 0.0;
 	};
 
 	// The nonlinear manufactured solution of HDG-GradShafranov.pdf Example 5,
@@ -197,7 +217,82 @@ namespace meq
 		double kz = 0.0;
 	};
 
-	using SourceParameters = std::variant< SolovievParameters, MHDParameters, ManufacturedParameters >;
+	// One species of a rotating plasma. Each profile is given EITHER as a
+	// constant, in the scalar key, OR as a path to a table in the *File key --
+	// exactly one of the two. Two keys rather than one that changes meaning by
+	// node type, for the reason recorded at the top of Config.cpp: TOML
+	// distinguishes 1 from 1.0 and a type-dispatched key would inherit that trap.
+	struct SpeciesParameters
+	{
+		// Name: what this species is called in the output file's variable names.
+		// Defaults to "species<i>" if omitted.
+		std::string name;
+		// Mass: particle mass [kg]. Must be positive.
+		double mass = 0.0;
+		// Charge: Z_s, signed and DIMENSIONLESS -- +1 for a proton, -1 for an
+		// electron, +6 for fully stripped carbon. Not a charge in coulombs.
+		double charge = 0.0;
+		// Temperature / TemperatureFile: T_s [JOULES, not eV and not keV].
+		// TemperatureScale multiplies whichever was given -- so a table in keV
+		// becomes Joules with TemperatureScale = 1.602176634e-16 rather than by
+		// rewriting the file.
+		double temperature = 0.0;
+		std::string temperatureFile;
+		double temperatureScale = 1.0;
+		// Density / DensityFile: n_s0 [m^-3], the density of this species ON
+		// THE CURVE r = ReferenceRadius. Both are absent when Neutralising, and
+		// so is DensityScale.
+		double density = 0.0;
+		std::string densityFile;
+		double densityScale = 1.0;
+		// Neutralising: whether this species' density is DERIVED from the
+		// others by charge neutrality rather than given. Exactly one species
+		// must set it. Fixing the gauge removes exactly one function's worth of
+		// freedom from the densities, so for n species there are n - 1
+		// independent ones; this is where that missing one comes from, and
+		// asking for n profiles that happen to balance invites n that do not.
+		bool neutralising = false;
+	};
+
+	// A plasma in sonic toroidal rotation: refs/RotatingGK.pdf eq (136), closed
+	// by its (96) for the poloidal density variation and (97) for the
+	// electrostatic potential phi_0 that holds quasineutrality against it. The
+	// density is NOT a flux function -- centrifugal force sweeps heavy species
+	// outboard -- which is the whole content of this source. See
+	// meq::RotatingSource and FLOW-PLAN.md.
+	struct RotatingParameters
+	{
+		// The species, [[source.species]]. Between two and meq::maxSpecies, of
+		// both charge signs, exactly one of them Neutralising.
+		std::vector<SpeciesParameters> species;
+		// Omega / OmegaFile: the rigid rotation frequency omega(psi) [rad/s].
+		// BOTH ABSENT MEANS NO ROTATION, and the source then reduces to the
+		// static equation meq::MHDSource solves.
+		double omega = 0.0;
+		std::string omegaFile;
+		double omegaScale = 1.0;
+		bool omegaGiven = false;
+		// GGPrime / GGPrimeFile: the single product g dg/dpsi
+		//                                      [T^2 m^2 / (Wb per radian)],
+		// exactly as the "mhd" source takes it.
+		double ggPrime = 0.0;
+		std::string ggPrimeFile;
+		double ggPrimeScale = 1.0;
+		// ReferenceRadius: rRef [m]. THE GAUGE. phi_0 vanishes on this curve,
+		// which is what makes each Density the physical density there, and it
+		// is a CONSTANT -- the geometric axis -- not the magnetic axis and not
+		// a flux-surface average. Two sets of densities differing by the gauge
+		// describe the same plasma, so a comparison against another code has to
+		// agree on this first.
+		double referenceRadius = 1.0;
+		// Mu0, Normalised, PsiAxis: as MHDParameters, and meaning the same.
+		double mu0 = 4.0e-7*3.14159265358979323846;
+		bool normalised = false;
+		double psiAxis = 0.0;
+	};
+
+	using SourceParameters = std::variant< SolovievParameters, MHDParameters,
+	                                       ManufacturedParameters, RotatingParameters >;
 
 	struct SourceConfig
 	{
@@ -210,6 +305,17 @@ namespace meq
 		SolovievParameters const & getSoloviev() const;
 		MHDParameters const & getMHD() const;
 		ManufacturedParameters const & getManufactured() const;
+		RotatingParameters const & getRotating() const;
+
+		/// Whether the profiles are functions of normalised flux, so that
+		/// psi_ax is an unknown and the solver must be handed the source
+		/// through setSource( NormalisedSource &, double ) rather than through
+		/// setSource( Source const & ). Exposed so that a driver can branch
+		/// without duplicating the switch over type.
+		bool isNormalised() const;
+
+		/// The starting psi_ax, meaningful only when isNormalised().
+		double psiAxisGuess() const;
 	};
 
 	// [boundary] -- the Dirichlet data psi_D on Gamma.

@@ -7,6 +7,8 @@
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -15,6 +17,8 @@
 #include "meq/Field.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/Output.hpp"
+#include "meq/Profiles.hpp"
+#include "meq/RotatingSource.hpp"
 #include "meq/Sampler.hpp"
 
 #include "ConvergenceHarness.hpp"
@@ -46,6 +50,21 @@ namespace
 	{
 		return meq::tests::Rectangle{ 0.6, 1.4, -0.6, 0.6 };
 	}
+
+	/// n( psi ) = a + b psi, for the rotating case below. It needs a genuine
+	/// psi-dependence: with a constant density the field depends on r alone, and
+	/// the test would say nothing about pairing the node's R with the node's psi
+	/// -- only about the R.
+	class LinearProfile : public meq::Profile
+	{
+		public:
+			LinearProfile( double aIn, double bIn ) : a( aIn ), b( bIn ) { }
+			double operator()( double psi ) const override { return a + b*psi; }
+			double prime( double ) const override { return b; }
+			double doublePrime( double ) const override { return 0.0; }
+		private:
+			double a, b;
+	};
 
 	/// A file removed when the test leaves scope, however it leaves.
 	class Scratch
@@ -592,6 +611,207 @@ BOOST_AUTO_TEST_CASE( theGridFileReadsBackAsTheExactSolution )
 	BOOST_TEST( compared > 1000 );
 	BOOST_TEST( worstPsi < 6.0e-6 );
 	BOOST_TEST( worstB < 4.0e-6 );
+}
+
+/// THE ROTATING FIELDS -- n_s AND e phi_0 -- AND THE ONE WAY OF WRITING THEM
+/// THAT LOOKS RIGHT AND IS NOT.
+///
+/// With rotation the density is not a flux function: RoPP (96) makes it
+/// n_s( r, psi ), and the whole physics of it is the r^2 in the exponent. So a
+/// node's own R is not incidental to the answer, it IS the answer, and that is
+/// what makes the obvious route wrong.
+///
+/// sample(), sampleComponent() and sampleCoefficient() all evaluate at the
+/// node's location INSIDE AN ELEMENT, and for a node in the Gamma_h-to-Gamma
+/// band that location is its FOOT on Gamma_h rather than the node itself. Only
+/// samplePotentialWithFlux() applies the Taylor step outward. So writing n_s
+/// through an mfem::Coefficient hands the exponent the foot's radius, and the
+/// centrifugal enrichment comes out misplaced by a band width -- silently, in a
+/// picture that still looks like a rotating plasma.
+///
+/// The driver therefore loops the grid itself, pairing the already-sampled psi
+/// with sampler.rAt( i ). This measures both routes against the closed form and
+/// asserts the gap, so the comment above is a measurement rather than a claim.
+BOOST_AUTO_TEST_CASE( theRotatingFieldsUseTheNodesOwnRadius )
+{
+	// A linear psi, which the flux continuation reproduces exactly in the band --
+	// so anything left over is the radius, which is the variable under test.
+	double const alpha = 0.7, beta = -1.3;
+	int const degree = 2;
+	meq::tests::Rectangle const inner{ 0.8, 1.2, -0.2, 0.2 };
+
+	mfem::Mesh mesh = meq::tests::makeMesh( inner, 8 );
+	mfem::L2_FECollection collection( degree, mesh.Dimension() );
+	mfem::FiniteElementSpace scalar( &mesh, &collection );
+	mfem::FiniteElementSpace vector( &mesh, &collection, 2 );
+
+	mfem::FunctionCoefficient exact( [ = ]( mfem::Vector const &x )
+		{ return alpha*x( 0 ) + beta*x( 1 ); } );
+	mfem::VectorFunctionCoefficient fluxOf( 2,
+		[ = ]( mfem::Vector const &x, mfem::Vector &q )
+		{
+			q( 0 ) = alpha/x( 0 );
+			q( 1 ) = beta/x( 0 );
+		} );
+
+	mfem::GridFunction potential( &scalar );
+	mfem::GridFunction flux( &vector );
+	potential.ProjectCoefficient( exact );
+	flux.ProjectCoefficient( fluxOf );
+
+	// Two species in normalised units, unequal temperatures so that phi_0 is not
+	// the symmetric special case, and a density with a real slope in psi -- so
+	// that a node's value depends on BOTH the coordinates the routes disagree
+	// about. The psi-dependence of F is measured in the Rotating*Convergence
+	// files; what is under test here is where the fields are EVALUATED.
+	double const referenceRadius = 1.0;
+	double const ionDensity = 0.1;
+	std::vector<meq::Species> species( 2 );
+	species[ 0 ].mass = 1.0;
+	species[ 0 ].charge = 1.0;
+	species[ 0 ].temperature = std::make_shared<meq::ConstantProfile const>( 0.6 );
+	species[ 0 ].density = std::make_shared<LinearProfile const>( ionDensity,
+	                                                              0.5*ionDensity );
+	species[ 1 ].mass = 1.0e-4;
+	species[ 1 ].charge = -1.0;
+	species[ 1 ].temperature = std::make_shared<meq::ConstantProfile const>( 0.4 );
+	species[ 1 ].density = meq::neutralisingDensity( species, 1 );
+
+	meq::RotatingSource const rotating( species,
+		std::make_shared<meq::ConstantProfile const>( 1.2 ),
+		std::make_shared<meq::ConstantProfile const>( 0.05 ),
+		referenceRadius, 1.0 );
+
+	// A grid wider than the mesh, and a band around it: this is the curved
+	// path's sliver, reproduced without needing a curved boundary.
+	meq::GridSampler sampler( mesh, 0.7, 1.3, 41, -0.3, 0.3, 41 );
+	int const filled = sampler.extendOutward( 1.0 );
+	BOOST_TEST_REQUIRE( filled > 0, "no node was continued, so there is no band "
+	                                "and this test measures nothing" );
+
+	double const outside = std::numeric_limits<double>::quiet_NaN();
+	std::vector<double> psi;
+	sampler.samplePotentialWithFlux( potential, flux, psi, outside );
+
+	// THE ROUTE THE DRIVER TAKES: the node's own R, and the psi that carries the
+	// flux continuation.
+	std::vector<double> density( psi.size(), outside );
+	std::vector<double> ePhi( psi.size(), outside );
+	for ( int j = 0; j < sampler.nodesZ(); ++j )
+		for ( int i = 0; i < sampler.nodesR(); ++i )
+		{
+			std::size_t const at = static_cast<std::size_t>( j )*sampler.nodesR() + i;
+			if ( !sampler.located( i, j ) || !std::isfinite( psi[ at ] ) )
+				continue;
+
+			double const r = sampler.rAt( i );
+			density[ at ] = rotating.density( 0, r, psi[ at ] );
+			ePhi[ at ] = rotating.potential( r, psi[ at ] );
+		}
+
+	// THE ROUTE THAT LOOKS RIGHT: the same closed form as a Coefficient, which
+	// the sampler evaluates at the foot.
+	mfem::FunctionCoefficient densityOf( [ & ]( mfem::Vector const &x )
+		{ return rotating.density( 0, x( 0 ), alpha*x( 0 ) + beta*x( 1 ) ); } );
+	std::vector<double> viaCoefficient;
+	sampler.sampleCoefficient( densityOf, viaCoefficient, outside );
+
+	double worstInterior = 0.0, worstBand = 0.0, worstBandCoefficient = 0.0;
+	int bandNodes = 0;
+	for ( int j = 0; j < sampler.nodesZ(); ++j )
+		for ( int i = 0; i < sampler.nodesR(); ++i )
+		{
+			std::size_t const at = static_cast<std::size_t>( j )*sampler.nodesR() + i;
+			if ( !sampler.located( i, j ) )
+				continue;
+
+			double const r = sampler.rAt( i ), z = sampler.zAt( j );
+			// The closed form at the NODE, which is what both routes are trying
+			// to compute.
+			double const want = rotating.density( 0, r, alpha*r + beta*z );
+			double const mine = std::abs( density[ at ] - want )/want;
+			double const theirs = std::abs( viaCoefficient[ at ] - want )/want;
+
+			bool const band = r < inner.rMin || r > inner.rMax
+			                  || z < inner.zMin || z > inner.zMax;
+			if ( band )
+			{
+				++bandNodes;
+				worstBand = std::max( worstBand, mine );
+				worstBandCoefficient = std::max( worstBandCoefficient, theirs );
+			}
+			else
+			{
+				worstInterior = std::max( worstInterior, mine );
+			}
+		}
+
+	std::printf( "\n  n_s over %d band nodes: node's own R is %.3e wrong, the "
+	             "foot's R is %.3e wrong\n"
+	             "                          interior nodes %.3e\n",
+	             bandNodes, worstBand, worstBandCoefficient, worstInterior );
+	std::fflush( stdout );
+
+	BOOST_TEST( worstInterior < 1.0e-12,
+	            "an interior node's density is out by " << worstInterior
+	            << ", where no continuation happens at all and psi is linear" );
+	BOOST_TEST( worstBand < 1.0e-5,
+	            "a band node's density is out by " << worstBand
+	            << " using the node's own radius, which is more than the flux "
+	            "continuation's own error in psi can account for" );
+	BOOST_TEST( worstBandCoefficient > 1.0e-3,
+	            "sampling n_s through a Coefficient agrees with the closed form "
+	            "at the node to " << worstBandCoefficient << ", so this test is "
+	            "no longer measuring the trap it was written for -- either the "
+	            "band vanished or the sampler now applies the offset" );
+	BOOST_TEST( worstBandCoefficient > 100.0*worstBand,
+	            "the two routes differ by only a factor of "
+	            << worstBandCoefficient/std::max( 1.0e-16, worstBand )
+	            << ", which is not the separation the driver's choice rests on" );
+
+	// AND THEY GO INTO THE FILE, under the names and units a reader is promised.
+	if ( !meq::hasNetCDF() )
+	{
+		BOOST_TEST_MESSAGE( "  built without netcdf-cxx4, skipping the header" );
+		return;
+	}
+
+	Scratch const file( "meq_test_rotating.nc" );
+	{
+		meq::NetCDFWriter writer( file.path(), sampler );
+		writer.attribute( "source_type", "rotating" );
+		writer.attribute( "psi_axis", 0.25 );
+		writer.attribute( "normalisation_residual", 0.0 );
+		writer.field( "psi", psi, "poloidal flux function", "Wb/rad" );
+		writer.field( "n_D", density, "number density of D, RoPP (96)", "m^-3" );
+		writer.field( "e_phi_0", ePhi,
+		              "elementary charge times phi_0 of RoPP (97), in JOULES",
+		              "J" );
+		writer.close();
+	}
+
+	std::string const command =
+		"ncdump -h " + file.path() + " > meq_test_rot_hdr.txt 2>&1";
+	BOOST_TEST_REQUIRE( std::system( command.c_str() ) == 0,
+	                    "ncdump could not read the rotating file" );
+
+	Scratch const header( "meq_test_rot_hdr.txt" );
+	std::ifstream headerIn( header.path() );
+	std::string const text( ( std::istreambuf_iterator<char>( headerIn ) ),
+	                        std::istreambuf_iterator<char>() );
+
+	std::printf( "  ncdump header:\n" );
+	for ( std::string const &needle :
+	      { "double n_D(Z, R)", "n_D:units = \"m^-3\"",
+	        "double e_phi_0(Z, R)", "e_phi_0:units = \"J\"",
+	        ":source_type = \"rotating\"", ":psi_axis = 0.25",
+	        ":normalisation_residual = 0." } )
+	{
+		bool const present = text.find( needle ) != std::string::npos;
+		std::printf( "    %-34s %s\n", needle.c_str(), present ? "yes" : "MISSING" );
+		BOOST_TEST( present, "the file does not declare '" << needle << "'" );
+	}
+	std::fflush( stdout );
 }
 
 /// The mask must agree with the data. A node marked outside carrying a finite

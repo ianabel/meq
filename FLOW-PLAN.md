@@ -346,19 +346,55 @@ project.
 
 `ψ_bnd` stays zero: this is still the fixed-boundary problem.
 
-### 5.5 `Config` and `SourceFactory`
+### 5.5 `Config` and `SourceFactory` — built 2026-09-01
 
-A new `SourceType::Rotating` and `RotatingParameters`, a `[[source.species]]`
-array of tables, `[source] Omega`, `[source] ReferenceRadius`, and the
-charge-neutrality solve of §3.4.
+`SourceType::Rotating`, `RotatingParameters`, `SpeciesParameters`, a
+`[[source.species]]` array of tables, and the charge-neutrality solve of §3.4.
+The normalised plumbing was the prerequisite and is done in the same pass, so
+`meq::NormalisedMHDSource` is reachable from a TOML file too — that was
+`ROADMAP.md` item 1.
 
-**`meq::NormalisedMHDSource` is still not reachable from a TOML file**, and that
-gap is a prerequisite rather than a parallel task: the normalised plumbing gets
-written once and both sources use it. Do that first; it is `ROADMAP.md` item 1.
+**`[[source.species]]` IS THE FIRST ARRAY OF TABLES IN MEQ'S SCHEMA**, and the
+existing nested-table reader would have refused one: an array of tables *is* an
+array, so its `is_table()` check rejects it, even though TOML nests `[[a.b]]`
+under `[a]` exactly as `[a.b]` does. `Table::getTableArrayOr()` is the new
+primitive, and it names each element `source.species[i]` so that
+`rejectUnknownKeys()` and `fail()` qualify a diagnostic all the way to
+`source.species[0].Denisty` for free — measured, that is what it prints.
 
-Read `Config.cpp`'s `asFloat()` before adding keys — toml11's `find_or<double>`
-silently returns the default for an integer node, which is how `Omega = 0` would
-become `Omega = <default>` with no error.
+**Every profile is a constant OR a table, in two keys, with a scale.**
+`Temperature` / `TemperatureFile` / `TemperatureScale`, and the same triple for
+`Density`, `Omega`, `GGPrime`, `PPrime`. Two keys rather than one that dispatches
+on node type, because a type-dispatched key inherits exactly the trap
+`Config.cpp`'s header records: TOML distinguishes `1` from `1.0`, and toml11's
+`find_or<double>` returns the *default* for an integer node rather than
+failing. **The scale is per profile, not global** — "that temperature ×2,
+leave the density alone" is the case it exists for — and it multiplies all three
+derivative levels through `meq::ScaledProfile`, so a scaled profile is exactly
+the profile of the scaled quantity and `prime()` stays exact.
+
+**Two factories, and the second returns a NON-CONST pointer.** The solver calls
+`setNormalisation()` on a normalised source before every residual evaluation, so
+it cannot come back from `makeSource()` as `Source const`. `makeNormalisedSource`
+is the second entry point, and **`makeSource` throws on a normalised
+configuration rather than returning one** — which is the point: a
+`NormalisedRotatingSource` *is-a* `Source`, so returning it would compile and
+solve, with `ψ_ax` frozen at the guess for ever because nothing would move it.
+The answer would be a converged solution to a problem the file did not describe.
+
+**`Neutralising = true` marks the one species whose density is derived.** That
+puts §3.4's `n − 1` counting in the file and makes the parser enforce it, rather
+than asking for `n` profiles that happen to sum to zero. Exactly one species
+must set it; zero or two is refused, with the counting in the message.
+
+**The NetCDF keys are reserved and refused by name.** `[source] ProfileFile` and
+the per-profile `<Key>Variable` / `<Key>Fit` are recognised and rejected with
+"not implemented yet", not as unknown keys — so adding a multi-profile NetCDF
+reader later is purely additive. `TODO`'s NetCDF entry carries the decisions
+already taken, including that a variable with values but no derivative will be
+refused unless the configuration opts in per profile, and that MaNTA's `(u, q)`
+pair *is* `meq::Knot`, which makes the rotating source the easy case to build it
+against rather than the awkward one.
 
 ### 5.6 Output: `n_s` is a field now
 
@@ -516,7 +552,7 @@ Each stage ends at a measured number.
 | **FL-5** ✔ | The manufactured nonlinear rotating case. | **DONE.** `F = rot.f + h(r,z)` with `h` carrying no `ψ`, so the whole Jacobian is the rotating source's. Assembled Jacobian against a difference of the assembled residual at **3.1e-11**; Newton order **1.980**; `k+1` at 2.007 / 2.999 / 4.002 in `ψ`. And **mutation-tested**: `1.05×dFdPsi` leaves every error and every rate unchanged to all seven digits, and moves the order to 1.055 and the Jacobian check to 2.1e-04 |
 | **FL-6** ✔ | `n` species: the safeguarded root find and `∂φ₀/∂ψ`. | **DONE.** At two species the root find reproduces the closed form — `φ₀` to 1e-12, `∂φ₀/∂ψ` to 1e-11, `F` to 1e-11, `∂F/∂ψ` to 1e-9. Three species (D, C⁶⁺, e) hold `Σ_s Z_s n_s = 0` to 1e-12 at every radius, `∂φ₀/∂ψ` matches a central difference, and the carbon is centrifugally enriched outboard |
 | **FL-7** ✔ | Normalised flux: `meq::NormalisedRotatingSource` through the bordered Newton. | **DONE.** `ψ_ax − max ψ_h` at **0.000e+00** on three meshes, `ψ_ax` converging 1.146743e-01 → 1.146034e-01, rotation moving it by 6.0%, and Newton's **tail** order 2.000 |
-| **FL-8** | Through the driver: TOML, and `n_s`, `φ₀` written. | Driver against library on the same configuration, as `DriverAcceptance` does; a worked `examples/rotating-*.toml` |
+| **FL-8** ✔ | Through the driver: TOML, and `n_s`, `φ₀` written. | **DONE.** Driver against library at **1.310e-16** rotating and **1.013e-16** normalised, with `ψ_ax` = 1.039163167e-01 and its constraint at −1.388e-17 in 7 bordered steps. And rotation **reaches `ψ`**, which is the point: against the same configuration at `Omega = 0`, `‖ψ(ω) − ψ(0)‖/‖ψ(0)‖ = 1.2683e-01` over 4608 dofs and `max ψ` moves 9.755876e-02 → 1.079860e-01, gated at `> 5e-2` so it cannot go stale. `examples/rotating-rectangle.toml` and `rotating-normalised.toml` are the worked pair. **It also measured item 11**: `n_s` is algebraic in `(r, ψ)`, so the same closed form evaluated at a band node's own radius reads 5.132e-07 against **8.571e-02** at the foot on `Γ_h` — a factor of 1.7e5, which is what `B` silently takes today |
 
 **FL-2 is the stage to protect.** It exercises the species container, the profile
 chain rule, `φ₀`, the units conversion and the sign of `Δ*` — everything
