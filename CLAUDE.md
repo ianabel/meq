@@ -3045,28 +3045,102 @@ a ratio of 0.43, i.e. as close as the field allows. `AngleParametrisation` also
 keeps the `q` it was computing and discarding, and `sampleAt()` has an overload
 reporting `extended`.
 
+### IN-4: the answer is that the question was the wrong one
+
+**The `ψ`-element decision is closed and no element was built.** `§4.4`'s three
+candidates were three ways to buy a `ρ`-dependent poloidal angle; **solving for
+the angle directly is cheaper than all of them**, and it is what DESC was
+measured doing.
+
+`meq::gaugeFreeFit()` requires each disc node only to **land on the right
+surface** rather than to sit at a prescribed angle — a geometric Gauss–Newton on
+`Ψ_N( x(ρ,θ) ) − Ψ`, warm-started from IN-3's linear fit, with `∇Ψ_N` from the
+**solved flux**, `∇ψ = r q`. No force balance and no second solver: meq already
+has `ψ`. Rows are scaled by `1/|∇Ψ_N|`, so the residual is a **distance in
+metres** and the error measure is itself gauge invariant. `SurfaceFit` stays
+**MFEM-free** — the field arrives as one callable returning value, gradient and
+a refusal.
+
+**On nested ellipses, where the answer is known exactly**, started from the bad
+fit: **1.718e-01 → 8.31e-16** at `L = 2`, and 1.623e-02 → 1.86e-09 at `L = 16`.
+**That is the theoretically right answer and not a lucky one**: for nested
+similar ellipses `x = a u`, `z = b v` in the disc's own Cartesian coordinates, so
+the family **is a degree-1 map** under the correct angle, and the solve finds it
+in four iterations at round-off. The prescribed-angle fit decays at `L^{-1.2}`
+and never converges.
+
+**IN-3's algebraic tail is gone and it holds to `Ψ_N = 0.005`** — linear
+1.67e-02 → 3.78e-04 against gauge-free 1.78e-03 → **4.16e-09** over
+`L = 4 → 16`, the difference concentrated in the last leg (1.69× against 52×).
+**No inner limit tried costs it more than a factor of 1.5.** That is the number
+`MANTA-COUPLING.md` needed, and it removes the constraint that motivated
+elements in the first place.
+
+**Panici's Figure 5 reproduced on a fit, with no penalty at all**: spectral width
+`M(2,2)` falls 1.607 → 1.366 under minimum-norm damping alone, and 1.481 → 1.265
+on the discrete field. A solve slides the angle to what its basis represents
+best without being asked.
+
+**THE EXPLICIT SPECTRAL-WIDTH PENALTY LOSES ON ITS OWN METRIC.** `M(p,q)` is a
+**ratio** of two weighted sums of the same coefficients, so a quadratic penalty
+is not a surrogate for minimising it: twelve decades of `λ` move `M` by 1.6% *in
+the wrong direction* and cost **44×** in surface error. Hirshman & Breslau
+minimise `M` itself, which is not a quadratic problem. Kept as the losing column.
+
+**THE GAUGE IS A SOFT TAIL WITH NO GAP, NOT A NULL SUBSPACE.** Measured, the
+ellipse family has **exactly 3** null directions at every degree from 2 to 16 —
+of 6 to 306 columns — and **`nstx` has none at all**. What both have is a smooth
+tail running to 8e-08 of the largest singular value, with 58 of 306 directions
+below `1e-4 σ_max` on the ellipses and 97 on `nstx`. So there is nothing to
+project out, and **the floor is a threshold that has to be chosen rather than
+read off a gap**. The no-gauge control fires on both fields — first step
+`8.6e+10 ×` the coefficient norm, Jacobian `−2.2e+13`, i.e. **folded** — but the
+mechanism and the magnitude differ by six orders between them, so a control
+measured on one field would have reported whichever it happened to meet.
+
+**AND THE TRUST REGION IS ITSELF A GAUGE, WHICH THE CONTROL HAS TO KNOW.** The
+undamped pseudo-inverse reaches round-off at `L ≤ 12` and **fails at `L = 16` and
+20**; what makes it robust is adaptive Levenberg–Marquardt damping, which is a
+Tikhonov term in disguise. `SurfaceGauge::None` therefore disables the damping as
+well as the floor — **a "no gauge" control that kept the trust region would pass
+while testing nothing.**
+
+**THE MAP IS CHECKED FOR FOLDING.** Minimum Jacobian **+5.2e-02 to +6.3e-02**
+with the gauge on, negative on **every** ungauged run. A surface residual alone
+admits a beautiful number over a folded map, which is exactly the class of quiet
+wrong answer this file exists to catalogue.
+
+**ONCE THE ANGLE IS FREE, ANY ACCEPTANCE WRITTEN AGAINST A PRESCRIBED ANGLE
+MEASURES THE GAUGE RATHER THAN THE FIT.** IN-3's derivative and metric checks
+compare the fit's position *at a given `θ`* against a surface traced at that `θ`
+— precisely the freedom being granted — so they are **not** re-asserted for the
+gauge-free fit. They are replaced by gauge-invariant properties: distance to the
+surface, fitted perimeter against exact (3.5e-07 relative), and the sign of the
+map Jacobian. **This costs the consumer nothing**, and that is the point:
+`MANTA-COUPLING.md` reads flux-surface *averages*, and an average does not know
+how its surface was parametrised. The deliverable was gauge-invariant all along.
+
+The conversion product is unmoved at 1.156 against 1.148, the axis spread stays
+an exact `0.000e+00` at every degree on both fields, and on the discrete field
+the fit sits **5.71e-07** from the exact surfaces — the post-processed pairing's
+own `O(h^{k+2})`, so what remains is the discretisation and not the
+representation.
+
 ### What is next
 
-**IN-4, which is a decision about the `ψ`-varying element and is the user's to
-make.** IN-3 reshaped it and the plan's §4.4 now carries the three candidates.
+**IN-4 IS ANSWERED — see above — so what remains is IN-5, IN-6 and IN-P.**
 
-**IT LOST ONE ARGUMENT AND GAINED A BETTER ONE.** §4.3 used to argue that a
-global expansion's accuracy is set by its worst region, so band-limited surfaces
-would degrade the fit everywhere. **That assumed the extension costs an order,
-and with the transfer lift it does not** — the band converges at `k+2` where the
-interior of the same contour reads `k+1` to `k+2`. That argument is gone.
+**IN-5, open surfaces**, is deferred with free boundary per §6 — and the user's
+note that the canonical in-surface coordinate is **poloidal arc length
+normalised to `2π` from a fixed-`z` reference ray** is what it should be built
+on, since a disc chart has no meaning through a separatrix and an angle about
+the axis has none on an open line.
 
-What replaces it is sharper, because it is about the axis where the trouble
-provably is. **A relabelling of the poloidal angle that does not depend on the
-flux label straightens exactly one order**: §4.1's axis-ellipse repair fixes the
-`ρ¹` harmonics and `ρ²`, `ρ³`, … keep whatever the shaping puts there. Measured,
-with the innermost surface at `Ψ_N = 0.10` the envelope decays geometrically and
-at `Ψ_N = 0.02` **an algebraic tail appears that no degree removes**. So a
-parametrisation smooth to all orders must **vary with the surface** — and there
-is the structural difference: **DESC solves for its `R`, `z` coefficients**, so
-its parametrisation is part of the unknown, while **meq fits after the fact** and
-must buy it. Elements in `ψ` are one way to buy it; MXH's per-surface shape
-expanded in the flux label is a genuinely different one.
+**IN-6, the output**, is `DRIVER-PLAN.md` §3's `(Ψ, θ)` grid plus the per-`ψ`
+cache that `MANTA-COUPLING.md` §5's pointwise call pattern requires.
+
+**IN-P, the performance harness**, is unblocked and unstarted. Nothing in this
+item has been timed.
 
 **IN-P, the performance harness**, is unblocked and unstarted. Nothing in this
 item has been timed — every number above is an accuracy measurement — and

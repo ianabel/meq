@@ -2,6 +2,7 @@
 #define MEQ_SURFACEFIT_HPP
 
 #include <cstddef>
+#include <functional>
 #include <vector>
 
 #include "Zernike.hpp"
@@ -133,7 +134,17 @@
  * envelope decays geometrically, and pulling it in to Psi_N = 0.02 leaves an
  * algebraic tail that no degree removes. That is INVERSION-PLAN.md section
  * 4.4's tension -- axis regularity against everything else -- as a table rather
- * than an argument, and it is IN-4's to resolve.
+ * than an argument.
+ *
+ * AND IT IS RESOLVED, LOWER DOWN THIS FILE, BY TAKING THE ANGLE OUT OF THE
+ * PROBLEM STATEMENT ALTOGETHER. meq::gaugeFreeFit() asks each disc node only to
+ * LAND ON ITS SURFACE and lets the truncated basis choose where along it to sit,
+ * which is what a code that SOLVES for its coefficients gets for free. Measured
+ * on nstx() at degree 16 with the innermost surface at Psi_N = 0.02, the worst
+ * distance from a node to the surface it belongs on falls from 3.78e-04 to
+ * 4.16e-09 -- ninety thousand times -- and the coefficient envelope resumes
+ * geometric decay. See the gauge-free section below; everything above this line
+ * is still the warm start it is built on, and is not superseded by it.
  *
  * THE OTHER COST IS NAMED TOO: a ray angle of any kind assumes the surface is
  * STAR-SHAPED about the axis, which is the hypothesis
@@ -426,6 +437,408 @@ namespace meq
 	std::vector<SurfaceSample> relabelByAxisShape(
 		std::vector<SurfaceSample> const &samples, AxisShape const &shape );
 
+	// -----------------------------------------------------------------------
+	// THE GAUGE-FREE FIT. INVERSION-PLAN.md section 4.4, stage IN-4.
+	// -----------------------------------------------------------------------
+	//
+	// EVERYTHING ABOVE PINS THE ANGLE AS AN INPUT, AND THAT IS THE WHOLE OF
+	// IN-3's SECOND FINDING. A SurfaceSample carries a theta, so the fit is
+	// asked to put a particular point at a particular label; a relabelling that
+	// does not depend on discRadius straightens exactly one order, and below
+	// Psi_N ~ 0.1 an algebraic tail appears that no degree removes.
+	//
+	// DESC does not have that problem, and Panici et al. say why in one
+	// sentence: "DESC, while not explicitly enforcing any poloidal angle
+	// constraints, ends up finding an optimal representation through the course
+	// of the optimization procedure." A SOLVE is free to slide the angle to
+	// whatever its truncated basis represents best. A FIT is not -- unless it is
+	// asked for less.
+	//
+	// So ask for less. Require each disc node only to LAND ON THE RIGHT SURFACE:
+	//
+	//     minimise over the coefficients of R and z
+	//         sum_j [ Psi_N( x( discRadius_j, theta_j ) ) - Psi_j ]^2
+	//
+	// with x the expansion being solved for. Nothing says where along its
+	// surface a node must sit, so the angle is free and the truncated basis may
+	// choose it. It needs no force balance and no second physics solver, because
+	// meq already has psi; and the Jacobian needs grad Psi_N, which is the
+	// SOLVED FLUX -- grad_bar psi = r q, so grad Psi_N = r q / ( psi_bnd -
+	// psi_ax ). That is INVERSION-PLAN.md section 3.2's "the gradient is a
+	// solved unknown" paying off a third time.
+	//
+	// IT IS A GEOMETRIC GAUSS-NEWTON WARM-STARTED FROM THE LINEAR FIT ABOVE, and
+	// the two are not alternatives: the linear fit is what puts the iterate in
+	// the right basin, and the gauge-free step is what lets it leave the
+	// parametrisation it arrived in.
+	//
+	// THE RESIDUAL IS SCALED INTO METRES AND THAT IS NOT COSMETIC. Psi_N is
+	// dimensionless and its gradient varies by orders across the disc, so a
+	// least-squares problem in the flux residual weights the outer surfaces
+	// against the inner ones by whatever | grad Psi_N | happens to be. Dividing
+	// each row by | grad Psi_N | makes the residual the NORMAL DISTANCE from the
+	// node to its surface, in metres, which is the quantity a reader of this
+	// class actually cares about and the one every acceptance below is stated
+	// in.
+	//
+	// ---------------------------------------------------------------------------
+	// THE GAUGE, WHICH IS THE ONE REAL DESIGN DECISION, AND THE SPECTRUM SAYS
+	// THE OBVIOUS PICTURE OF IT IS WRONG.
+	// ---------------------------------------------------------------------------
+	//
+	// The freedom is theta -> theta + Lambda( discRadius, theta ), one function's
+	// worth, and the linearised system cannot see it: a tangential displacement
+	// of a node leaves it on its own surface, so it changes no residual. The
+	// expectation going in was therefore that the Gauss-Newton matrix is RANK
+	// DEFICIENT along the gauge, by about half its columns.
+	//
+	// MEASURED, IT IS NOT, AND THE ANSWER DEPENDS ON THE FIELD. On a family of
+	// SIMILAR nested ellipses the exactly-null directions are a handful -- three,
+	// at every degree from 2 to 16 -- and on the nstx() Solov'ev equilibrium
+	// there are NONE AT ALL. What both have instead is a long SOFT TAIL with no
+	// gap in it: at degree 20 on the ellipse family the singular values run
+	// smoothly from 44 down to 5e-05 and then fall off a cliff to 1e-14, and on
+	// nstx() at degree 16 they reach 8e-08 of the largest with no cliff beneath
+	// them. The reason is that a tangential slide is only exactly null when the
+	// displaced map is still IN the truncated space, and Lambda times
+	// d x / d theta generally is not. So the gauge is not a subspace to be
+	// projected out; it is a direction in which the problem is merely very soft.
+	//
+	// AND THE SOFT TAIL IS ENOUGH ON ITS OWN, which is the part that matters:
+	// removing the gauge on nstx(), where nothing is exactly singular, still
+	// leaves the map FOLDED and the fit five orders worse. A field with no exact
+	// null space is not a field that can do without a gauge.
+	//
+	// THAT MATTERS BECAUSE IT MOVES WHAT THE GAUGE IS. Three treatments, and the
+	// first two are the ones INVERSION-PLAN.md section 4.4 names:
+	//
+	//   MinimumNorm     the pseudo-inverse step: directions below a relative
+	//                   singular-value floor are NOT MOVED. Among the ways to
+	//                   satisfy the surface constraint it prefers the one with
+	//                   the smallest step, which is a spectral-condensation
+	//                   preference arrived at for free and with no weights to
+	//                   choose. THE DEFAULT.
+	//
+	//                   AND IT IS MIN-NORM RELATIVE TO THE WARM START, NOT
+	//                   ABSOLUTELY. Each STEP avoids the null directions, so the
+	//                   answer stays as close as it can to the coefficients the
+	//                   linear fit arrived with. That is a property to like --
+	//                   the linear fit's label is a sensible place to be pinned
+	//                   -- but it is not "the smallest coefficients", and a
+	//                   reader who assumed it was would be wrong.
+	//
+	//   SpectralWidth   an explicit penalty, lambda sum |m|^spectralExponent
+	//                   ( cR^2 + cz^2 ), which is Hirshman & Breslau's idea and
+	//                   the constraint VMEC uses where DESC lets the solve find
+	//                   the angle. It fixes the gauge outright rather than by
+	//                   preference -- and it BIASES the surface residual, by
+	//                   O( lambda / sigma^2 ) in the directions the constraint
+	//                   does determine, so lambda is a real tuning parameter
+	//                   where the floor above is a threshold on a cliff.
+	//
+	//                   IT LOSES ON ITS OWN METRIC AS WELL AS ON ACCURACY, which
+	//                   was not expected. Panici's spectral width M( p, q ) is a
+	//                   RATIO of two weighted sums of the same coefficients, and
+	//                   a quadratic penalty shrinks both -- so driving the
+	//                   coefficients down does not drive the ratio down.
+	//                   Measured on nstx() at degree 12, twelve decades of
+	//                   lambda move the width by 1.6% and in the WRONG
+	//                   direction, and cost 44x in surface error; the
+	//                   minimum-norm step, which asks nothing about the
+	//                   spectrum, already sits below every penalised value.
+	//                   Hirshman & Breslau MINIMISE M itself, which is not a
+	//                   quadratic problem, and a quadratic surrogate for it is
+	//                   not the same thing. Kept because it is the alternative
+	//                   INVERSION-PLAN.md section 4.4 names and because a
+	//                   comparison with no losing column is not a comparison.
+	//
+	//   None            THE CONTROL. Every direction inverted however small its
+	//                   singular value, and no trust region either. See below for
+	//                   why the trust region has to go with it.
+	//
+	// A THIRD TREATMENT EXISTS AND IT IS THE ONE THAT ACTUALLY MADE THIS ROBUST:
+	// A TRUST REGION. The step is damped Levenberg-Marquardt, sigma/( sigma^2 +
+	// mu ), with mu adapted -- lowered on an accepted step, raised until one is.
+	// As mu falls the step tends to the plain pseudo-inverse, so on an easy
+	// problem the damping is inert; where it is not, it is what stops a soft
+	// direction of singular value 5e-05 being inverted into a step of 1e5.
+	// Measured on the ellipse family, the undamped pseudo-inverse reaches
+	// round-off at degree 12 and FAILS at degree 16 and 20 (4.6e-03 and 3.8e-03,
+	// against a linear fit at 1.6e-02); damped, every degree from 2 to 16 lands
+	// between 8e-16 and 2e-09.
+	//
+	// AND THAT IS WHY SurfaceGauge::None DISABLES THE DAMPING TOO. A trust region
+	// IS a Tikhonov gauge -- damping the step is choosing among the directions
+	// the constraint does not determine -- so a "no gauge" control that kept it
+	// would be a control of nothing, and it would quietly pass.
+	//
+	// ---------------------------------------------------------------------------
+	// THE SAFEGUARD, WHICH IS NOT OPTIONAL.
+	// ---------------------------------------------------------------------------
+	//
+	// Minimising a surface residual alone admits degenerate answers that a
+	// residual column cannot see: nodes can bunch, and the disc map can fold. The
+	// residual of a folded map is as good as the residual of a sound one, because
+	// every node is still on its surface -- it is the same species of defect as
+	// the tensor-product control above, which fits the sample cloud eight times
+	// better than Zernike and puts the magnetic axis on a curve. So
+	// SurfaceFit::mapJacobian() is reported over the whole fitted annulus and its
+	// SIGN is asserted. DESC does the equivalent, correcting boundary orientation
+	// to keep the Jacobian positive.
+	//
+	// ---------------------------------------------------------------------------
+	// WHAT IT IS NOT.
+	// ---------------------------------------------------------------------------
+	//
+	// It is not an equilibrium solve. Nothing here enforces force balance; psi is
+	// an input and the only thing being solved for is where the disc coordinates
+	// put their points.
+	//
+	// It does NOT constrain the axis. A node at discRadius = 0 would ask for
+	// Psi_N( x ) = 0, which is true at the magnetic axis and would pin it for
+	// free -- except that grad Psi_N VANISHES there, so the row scaling divides
+	// by zero and the linearisation carries no information about where to move.
+	// That is INVERSION-PLAN.md section 2's error ( a ) and its 1/| grad psi |
+	// met a third time. discNodesFrom() therefore refuses a node at Psi_N = 0,
+	// and the axis stays what section "THE AXIS COMES OUT RIGHT FOR FREE" above
+	// says it is: an extrapolation into the hole, whose accuracy is measured
+	// rather than imposed.
+	//
+	// And it is MFEM-free like everything else here: the field arrives as a
+	// callable, so the caller supplies either a closed form or a lambda over the
+	// tracer, and this file never learns which.
+
+	/**
+	 * Psi_N and its gradient at a point, as ONE callable.
+	 *
+	 * ONE RATHER THAN TWO, WHICH IS A DEPARTURE FROM THE OBVIOUS DESIGN AND IS
+	 * DELIBERATE. A pair of std::function<double( double, double )> -- one for
+	 * the value and one for each gradient component -- reads better and costs
+	 * the consumer THREE POINT LOCATIONS per node per Gauss-Newton iteration.
+	 * On the discrete leg a location is meq::ContourTracer::sampleAt(), and
+	 * CLAUDE.md records mfem::Mesh::FindPoints as O( elements x points ); the
+	 * tracer's own seam hands back psi and q together for exactly this reason.
+	 *
+	 * The bool is the second half of it: a discrete field cannot answer
+	 * everywhere, and a node pushed outside the mesh by a trial step must be a
+	 * REFUSAL rather than a value. A refusal on the starting iterate is an
+	 * error and throws; a refusal on a trial step is a rejected step, which is
+	 * what the trust region is for.
+	 *
+	 * @param normalisedFlux out: Psi_N, zero on the axis and one on the
+	 *                       separatrix, in the same normalisation the nodes
+	 *                       carry.
+	 * @param gradientR      out: d Psi_N / d r. For a solved field this is
+	 *                       r q_r / ( psi_bnd - psi_ax ), which is the flux and
+	 *                       not a differentiated potential.
+	 */
+	struct NormalisedFluxField
+	{
+		std::function<bool( double r, double z, double &normalisedFlux,
+		                    double &gradientR, double &gradientZ )> sample;
+	};
+
+	/**
+	 * One point of the disc the gauge-free fit constrains.
+	 *
+	 * IT CARRIES NO POSITION, AND THAT IS THE ENTIRE DIFFERENCE FROM
+	 * meq::SurfaceSample. A sample says "the surface passes through HERE at
+	 * THIS angle"; a node says only "evaluate the map at these coordinates and
+	 * require the answer to be on this surface". The angle is a parameter value
+	 * rather than a claim, which is what gives the fit its gauge freedom.
+	 */
+	struct DiscNode
+	{
+		double normalisedFlux = 0.0;  ///< the surface this node must land on
+		double theta = 0.0;           ///< where on the disc the map is evaluated
+
+		/// Least-squares weight, in the same sense SurfaceSample::weight has --
+		/// but applied to a residual already scaled into metres.
+		double weight = 1.0;
+	};
+
+	/// The ( Psi_N, theta ) labels of @a samples, with their weights, and their
+	/// positions dropped. The ordinary way to build a node set: the gauge-free
+	/// fit is asked to hold the surfaces the linear fit was given, and nothing
+	/// about where along them its points sat.
+	/// @throws std::invalid_argument if a sample sits at Psi_N = 0, where
+	///         grad Psi_N vanishes and the constraint carries no information.
+	std::vector<DiscNode> discNodesFrom(
+		std::vector<SurfaceSample> const &samples );
+
+	/// How the tangential freedom is fixed. See the header.
+	enum class SurfaceGauge
+	{
+		/// Pseudo-inverse steps under a relative singular-value floor, damped by
+		/// an adaptive trust region. THE ANSWER.
+		MinimumNorm,
+
+		/// Hirshman & Breslau's spectral condensation as an explicit quadratic
+		/// penalty on the coefficients. Fixes the gauge outright and biases the
+		/// residual; the weight is a real tuning parameter.
+		SpectralWidth,
+
+		/// Every direction inverted however small its singular value, and NO
+		/// trust region. THE CONTROL, and it disables the damping as well as the
+		/// floor because a trust region is itself a gauge.
+		None
+	};
+
+	char const *surfaceGaugeName( SurfaceGauge gauge );
+
+	/// What the gauge-free fit was asked for. A plain aggregate; every default
+	/// here is the measured one and the header says which measurement.
+	struct GaugeFreeFitOptions
+	{
+		SurfaceGauge gauge = SurfaceGauge::MinimumNorm;
+
+		/// Gauss-Newton steps. A cap and not a target: the stopping rules below
+		/// normally fire first, at eight to fifteen steps from a linear warm
+		/// start.
+		int maxIterations = 20;
+
+		/// Stop when the worst nodal distance to its surface falls below this,
+		/// IN METRES.
+		///
+		/// 1e-10 METRES IS A TENTH OF A NANOMETRE and is orders below anything a
+		/// tokamak geometry means, below the discretisation error of any solved
+		/// field, and below the tracing error of any traced one. Chasing 1e-13
+		/// instead is available and costs roughly a doubling of the iteration
+		/// count -- measured on the ellipse family, roughly a doubling -- for a
+		/// number nothing downstream can use. It is a default and not a limit;
+		/// the acceptance suite lowers it where it is measuring the ITERATION
+		/// rather than the geometry.
+		double tolerance = 1.0e-10;
+
+		/// A step that improves the worst nodal distance by less than this
+		/// fraction counts as buying nothing. The iteration grinds for tens of
+		/// steps past the point where it is buying anything, so this and the
+		/// count below are what actually terminate it.
+		///
+		/// Ten per cent rather than one: a Gauss-Newton step on this problem
+		/// either buys orders or buys nothing, so the threshold sits in a gap
+		/// and not on a slope.
+		double improvement = 0.10;
+
+		/// How many CONSECUTIVE such steps before giving up. Three rather than
+		/// one, and that is a measurement: the trust region raises its damping on
+		/// a rejected step and lowers it on an accepted one, so a run that has
+		/// just been damped hard takes a step or two to recover its stride --
+		/// stopping at the first poor step left degree 6 of the ellipse family at
+		/// 3.7e-04 where it reaches 1e-13 given three. It is the same shape as
+		/// meq::ContourTracer's corrector, which accepts after four
+		/// non-improving steps rather than after one.
+		int stallLimit = 3;
+
+		/// Singular values below this multiple of the largest are NOT INVERTED.
+		/// 1e-10 is a threshold on a cliff and not a tuning parameter: the
+		/// exactly-null directions sit at 1e-14 of the largest and the softest
+		/// non-null one measured is 8e-08, so anything between them gives the
+		/// same answer. It is the trust region below, not this floor, that
+		/// decides what happens to the soft tail. Ignored by
+		/// SurfaceGauge::None.
+		double singularValueFloor = 1.0e-10;
+
+		/// lambda of the spectral-width penalty, relative to the largest squared
+		/// singular value so that it is scale free. Used by
+		/// SurfaceGauge::SpectralWidth alone.
+		double spectralWeight = 1.0e-6;
+
+		/// p of the penalty weight ( |m| / maxDegree )^p. NORMALISED BY THE
+		/// DEGREE, which Hirshman & Breslau's bare |m|^p is not: at p = 4 and
+		/// L = 16 a bare power spans five orders, so a weight tuned at one
+		/// exponent means something else at another and a sensitivity sweep in p
+		/// would be measuring the normalisation. Four rather than two because
+		/// Panici's
+		/// spectral width M( p, q ) at p = q = 2 has |m|^4 in its numerator, so
+		/// this is the quadratic form the diagnostic is built on rather than a
+		/// second convention. m = 0 modes carry weight zero at any p, which is
+		/// Hirshman & Breslau's structure and not an omission.
+		double spectralExponent = 4.0;
+
+		/// The trust region's initial damping, relative to the largest squared
+		/// singular value. Small enough that the first step is the plain
+		/// pseudo-inverse wherever that works.
+		double damping = 1.0e-12;
+
+		/// How many times the damping may be raised before a step is abandoned.
+		int dampingRetries = 30;
+	};
+
+	/// What the gauge-free fit did. Printed, and asserted on where the header
+	/// says a property rather than a number is at stake.
+	struct GaugeFreeFitReport
+	{
+		int iterations = 0;
+		bool converged = false;
+
+		/// Why it stopped: "tolerance", "no improvement", "iteration cap" or
+		/// "step rejected". A string rather than an enum because it is printed
+		/// and never branched on.
+		char const *stop = "";
+
+		/// The worst distance from a node to the surface it is supposed to be
+		/// on, IN METRES, before and after. This is the quantity the whole
+		/// exercise is about and it is GAUGE INVARIANT -- it says nothing about
+		/// where along its surface a node sits, which is exactly the freedom
+		/// being granted.
+		double initialSurfaceError = 0.0;
+		double surfaceError = 0.0;
+
+		/// The WORST that quantity reached at any accepted iterate, including
+		/// the first. An iteration that converged reads this equal to
+		/// initialSurfaceError; one that WANDERED reads it far above, which is
+		/// the single number the ungauged control exists to produce. A final
+		/// error alone cannot tell the two apart, because an iteration may
+		/// return from an excursion.
+		double worstExcursion = 0.0;
+
+		/// Panici eq. ( 6 ) at p = q = 2, before and after. DESC's own
+		/// diagnostic and the one their Figure 5 is drawn in.
+		double initialSpectralWidth = 0.0;
+		double spectralWidth = 0.0;
+
+		/// Euclidean norm of the coefficient vector, both components together,
+		/// before and after. The blunt instrument that catches a gauge that has
+		/// let the coefficients run away.
+		double initialCoefficientNorm = 0.0;
+		double coefficientNorm = 0.0;
+
+		/// det d( R, z )/d( discRadius, theta ) over the fitted annulus, at the
+		/// end. THE SAFEGUARD: these must share a sign, or the map has folded
+		/// and the residual will not say so.
+		double minimumJacobian = 0.0;
+		double maximumJacobian = 0.0;
+
+		/// The singular spectrum of the FIRST Gauss-Newton matrix, which is what
+		/// says how rank deficient the problem really is. `nullDirections`
+		/// counts singular values below 1e-10 of the largest -- the exact gauge
+		/// -- and `softDirections` those below 1e-04 of it, which is the tail
+		/// with no gap in it.
+		std::size_t columns = 0;
+		std::size_t nullDirections = 0;
+		std::size_t softDirections = 0;
+		double largestSingularValue = 0.0;
+		double smallestSingularValue = 0.0;
+
+		/// Where the trust region ended up, relative to the largest squared
+		/// singular value OF THE FIRST Gauss-Newton matrix -- the same scale
+		/// GaugeFreeFitOptions::damping is given in, so the two are directly
+		/// comparable. A number that stayed at its initial value says the
+		/// damping was inert and the step was the plain pseudo-inverse
+		/// throughout.
+		double damping = 0.0;
+
+		/// Trial steps the trust region rejected, over the whole run.
+		int rejectedSteps = 0;
+
+		/// The Euclidean norm of the FIRST trial step, undamped. Read against
+		/// initialCoefficientNorm: a gauge that inverts a singular value the
+		/// data does not determine produces a correction orders larger than the
+		/// thing being corrected, and this is where that shows.
+		double firstStepNorm = 0.0;
+	};
+
 	/// What the fit was asked for. A plain aggregate so that a caller taking the
 	/// defaults writes nothing.
 	struct SurfaceFitOptions
@@ -557,6 +970,42 @@ namespace meq
 			/// two agreeing is a check on both.
 			double angularSpeed( double normalisedFlux, double theta ) const;
 
+			/// det d( R, z )/d( discRadius, theta ): whether the disc map is a
+			/// map at all.
+			///
+			/// A FIT WITH A BEAUTIFUL RESIDUAL AND A FOLDED MAP IS THE QUIET
+			/// WRONG ANSWER THIS CLASS IS MOST EXPOSED TO, and it is the
+			/// gauge-free fit above that exposes it: requiring only that nodes
+			/// LAND on their surfaces says nothing about their order along one,
+			/// so nodes may bunch, cross, and turn the map over while every
+			/// residual stays perfect. Sample this over the fitted annulus and
+			/// check that it keeps ONE SIGN.
+			///
+			/// WHICH sign is not fixed and must not be assumed: it is positive
+			/// for a theta that runs anticlockwise in ( r, z ) and negative for
+			/// one that runs the other way, and both are legitimate labels. It
+			/// vanishes like discRadius at the centre for the ordinary reason
+			/// that polar coordinates do, so a check that includes
+			/// discRadius = 0 measures that and not a fold.
+			double mapJacobian( double normalisedFlux, double theta ) const;
+
+			/// The spectral width of Panici et al. eq. ( 6 ), which is DESC's
+			/// own diagnostic and the one their Figure 5 is drawn in:
+			///
+			///     M( p, q ) = sum |m|^( p + q ) ( cR^2 + cz^2 )
+			///                 / sum |m|^p ( cR^2 + cz^2 )
+			///
+			/// with p >= 0 and q > 0. It is a weighted mean of |m|^q, so it has
+			/// the units of a mode number and a SMALLER value means a more
+			/// condensed angular spectrum -- which is what Hirshman & Breslau's
+			/// constraint minimises in VMEC and what DESC reaches without being
+			/// asked. Zero when every coefficient sits at m = 0, since both sums
+			/// are then empty; that is a degenerate spectrum rather than an
+			/// infinitely good one.
+			///
+			/// @throws std::invalid_argument if p < 0 or q <= 0.
+			double spectralWidth( double p = 2.0, double q = 2.0 ) const;
+
 			/// The point the fit puts at discRadius = 0, which is where every
 			/// surface collapses.
 			///
@@ -615,6 +1064,25 @@ namespace meq
 				int angular;
 			};
 
+			/// A fit whose coefficients came from somewhere other than a linear
+			/// least-squares solve. PRIVATE, with gaugeFreeFit() as its only
+			/// caller, because the diagnostics of such a fit are not the
+			/// diagnostics of a fit at all -- there is no design matrix, so no
+			/// condition number and no residual against samples -- and a public
+			/// constructor handing back an object with half its report unset
+			/// would be exactly the mislabelling checkExpansionIsPlain() exists
+			/// to refuse.
+			SurfaceFit( int maxDegree, SurfaceFitOptions const &options,
+			            std::vector<FitMode> modes,
+			            std::vector<double> majorRadius,
+			            std::vector<double> height );
+
+			friend SurfaceFit gaugeFreeFit( SurfaceFit const &start,
+			                                NormalisedFluxField const &field,
+			                                std::vector<DiscNode> const &nodes,
+			                                GaugeFreeFitOptions const &options,
+			                                GaugeFreeFitReport &report );
+
 			/// Refuse to expose the coefficients as a bare ZernikeExpansion
 			/// unless they really are one. See the accessors above.
 			void checkExpansionIsPlain( char const *where ) const;
@@ -651,6 +1119,37 @@ namespace meq
 			std::vector<double> coefficientR;
 			std::vector<double> coefficientZ;
 	};
+
+	/**
+	 * Refit @a start so that every node LANDS ON ITS SURFACE, with the poloidal
+	 * angle free. INVERSION-PLAN.md section 4.4; see the gauge-free section of
+	 * this header for the whole argument.
+	 *
+	 * @a start supplies the degree, the options, the mode list and the initial
+	 * coefficients, and is not otherwise consulted -- in particular the samples
+	 * it was built from are gone by then, which is the point: this solve knows
+	 * nothing about where any surface point was, only which surfaces exist and
+	 * what field defines them.
+	 *
+	 * THE WARM START IS NOT AN OPTIMISATION. The surface residual is minimised
+	 * by any map onto the right surfaces, including folded ones and ones that
+	 * traverse a surface twice, so the basin matters; the linear fit is what
+	 * puts the iterate in the right one. Starting from zero coefficients is not
+	 * supported and would not be meaningful.
+	 *
+	 * @throws std::invalid_argument if the node set is empty, if it carries
+	 *         fewer rows than the 2 x modes unknowns, if a node lies outside the
+	 *         disc, or if an option is out of range.
+	 * @throws std::runtime_error if the field refuses a node at the STARTING
+	 *         iterate -- which means the warm start is not close enough for the
+	 *         field to answer, and is a fault in the caller's field or start
+	 *         rather than in the iteration.
+	 */
+	SurfaceFit gaugeFreeFit( SurfaceFit const &start,
+	                         NormalisedFluxField const &field,
+	                         std::vector<DiscNode> const &nodes,
+	                         GaugeFreeFitOptions const &options,
+	                         GaugeFreeFitReport &report );
 
 	/// Every mode of the tensor-product control at degree at most @a maxDegree:
 	/// every ( p, m ) with p >= 0 and p + |m| <= maxDegree, in the same

@@ -917,4 +917,664 @@ namespace meq
 		return diagnostic;
 	}
 
+
+	// =======================================================================
+	// THE GAUGE-FREE FIT. INVERSION-PLAN.md section 4.4, stage IN-4.
+	//
+	// The header carries the argument. What is here is the arithmetic, and two
+	// things about it are worth reading before the code:
+	//
+	//   * THE BASIS MATRIX IS BUILT ONCE. The nodes are fixed -- that is what a
+	//     node IS, a place on the disc where the map is evaluated -- so the
+	//     modes' values there never change, however far the coefficients move.
+	//     Only the direction cosines of grad Psi_N do. Rebuilding it per
+	//     iteration would multiply the cost of the whole solve by the number of
+	//     Gauss-Newton steps, for nothing, and on the Zernike branch every entry
+	//     is a Jacobi polynomial evaluation.
+	//
+	//   * THE TRUST REGION RE-USES ONE FACTORISATION. Raising mu changes only
+	//     the filter applied to the singular values, so a rejected step costs
+	//     two matrix-vector products and not another QR. That is what makes
+	//     thirty retries affordable.
+	// =======================================================================
+
+	char const *surfaceGaugeName( SurfaceGauge gauge )
+	{
+		switch ( gauge )
+		{
+			case SurfaceGauge::MinimumNorm:   return "minimum norm";
+			case SurfaceGauge::SpectralWidth: return "spectral width";
+			case SurfaceGauge::None:          return "none (CONTROL)";
+		}
+
+		return "unknown";
+	}
+
+	std::vector<DiscNode> discNodesFrom( std::vector<SurfaceSample> const &samples )
+	{
+		std::vector<DiscNode> nodes;
+		nodes.reserve( samples.size() );
+
+		for ( SurfaceSample const &sample : samples )
+		{
+			// Psi_N = 0 is the magnetic axis, where grad Psi_N VANISHES. The
+			// gauge-free residual is scaled by 1/| grad Psi_N |, so such a node
+			// would divide by zero -- and the underlying reason is not
+			// arithmetic: the constraint "land on the surface Psi_N = 0" carries
+			// no information about which way to move, because to first order
+			// every direction stays on it. That is INVERSION-PLAN.md section 2's
+			// error ( a ) and its 1/| grad psi | again. Refuse rather than clamp.
+			if ( !( sample.normalisedFlux > 0.0 ) )
+				throw std::invalid_argument(
+					"discNodesFrom: a sample sits at Psi_N = 0, the magnetic axis,"
+					" where grad Psi_N vanishes and the surface constraint carries"
+					" no information about where to move. Drop it: the axis is an"
+					" extrapolation of this fit and not an input to it" );
+
+			DiscNode node;
+			node.normalisedFlux = sample.normalisedFlux;
+			node.theta = sample.theta;
+			node.weight = sample.weight;
+			nodes.push_back( node );
+		}
+
+		return nodes;
+	}
+
+	double SurfaceFit::mapJacobian( double normalisedFlux, double theta ) const
+	{
+		double value = 0.0;
+		double height = 0.0;
+		double dArgumentR = 0.0;
+		double dArgumentZ = 0.0;
+		double dThetaR = 0.0;
+		double dThetaZ = 0.0;
+		evaluateAll( argumentOf( normalisedFlux ), theta, value, height,
+		             dArgumentR, dArgumentZ, dThetaR, dThetaZ );
+
+		// The same chain factor radialDerivative() applies, and for the same
+		// reason: the determinant is stated in d( discRadius ) so that the two
+		// radial coordinates give comparable numbers.
+		double const chain = ( option.coordinate == FitRadialCoordinate::DiscRadius )
+			? 1.0 : 2.0*discRadiusOf( normalisedFlux );
+
+		return ( chain*dArgumentR )*dThetaZ - dThetaR*( chain*dArgumentZ );
+	}
+
+	double SurfaceFit::spectralWidth( double p, double q ) const
+	{
+		if ( !( p >= 0.0 ) || !( q > 0.0 ) || !std::isfinite( p )
+		     || !std::isfinite( q ) )
+			throw std::invalid_argument(
+				"SurfaceFit::spectralWidth: Panici eq. ( 6 ) needs p >= 0 and"
+				" q > 0" );
+
+		double numerator = 0.0;
+		double denominator = 0.0;
+
+		for ( std::size_t j = 0; j < modeList.size(); ++j )
+		{
+			int const order = ( modeList[ j ].angular < 0 )
+				? -modeList[ j ].angular : modeList[ j ].angular;
+			double const power = coefficientR[ j ]*coefficientR[ j ]
+			                     + coefficientZ[ j ]*coefficientZ[ j ];
+			double const scale = std::pow( static_cast<double>( order ), p );
+
+			numerator += scale*std::pow( static_cast<double>( order ), q )*power;
+			denominator += scale*power;
+		}
+
+		// Both sums are empty when every coefficient sits at m = 0 and p > 0,
+		// which is a degenerate spectrum rather than an infinitely condensed one.
+		// Zero says "there is no angular content to measure"; a ratio of two
+		// zeros would say nothing at all.
+		return ( denominator > 0.0 ) ? numerator/denominator : 0.0;
+	}
+
+	SurfaceFit::SurfaceFit( int maxDegree, SurfaceFitOptions const &options,
+	                        std::vector<FitMode> modes,
+	                        std::vector<double> majorRadius,
+	                        std::vector<double> height )
+		: degree( maxDegree ), option( options ), modeList( std::move( modes ) ),
+		  coefficientR( std::move( majorRadius ) ),
+		  coefficientZ( std::move( height ) )
+	{
+		diagnostic.modes = modeList.size();
+
+		// THE DESIGN-MATRIX DIAGNOSTICS ARE NaN AND NOT ZERO, DELIBERATELY.
+		// There is no design matrix here: the coefficients came from a non-linear
+		// solve against a field, so there is no condition number to report and no
+		// residual against samples to compute. A zero in conditionNumber would
+		// read as a PERFECTLY conditioned fit, which is the most flattering
+		// possible misreading of "not measured". The gauge-free solve's own
+		// report is meq::GaugeFreeFitReport.
+		double const unknown = std::numeric_limits<double>::quiet_NaN();
+		diagnostic.largestSingularValue = unknown;
+		diagnostic.smallestSingularValue = unknown;
+		diagnostic.conditionNumber = unknown;
+		diagnostic.residualR = unknown;
+		diagnostic.residualZ = unknown;
+		diagnostic.worstR = unknown;
+		diagnostic.worstZ = unknown;
+	}
+
+	SurfaceFit gaugeFreeFit( SurfaceFit const &start,
+	                         NormalisedFluxField const &field,
+	                         std::vector<DiscNode> const &nodes,
+	                         GaugeFreeFitOptions const &options,
+	                         GaugeFreeFitReport &report )
+	{
+		report = GaugeFreeFitReport();
+
+		if ( !field.sample )
+			throw std::invalid_argument(
+				"gaugeFreeFit: the field has no callable. Psi_N and its gradient"
+				" are what the residual and the Jacobian are made of" );
+
+		if ( nodes.empty() )
+			throw std::invalid_argument( "gaugeFreeFit: the node set is empty" );
+
+		if ( !( options.maxIterations > 0 ) || !( options.dampingRetries > 0 )
+		     || !( options.stallLimit > 0 ) )
+			throw std::invalid_argument(
+				"gaugeFreeFit: maxIterations, dampingRetries and stallLimit must"
+				" be positive" );
+
+		if ( !( options.singularValueFloor >= 0.0 )
+		     || !( options.spectralWeight >= 0.0 )
+		     || !( options.spectralExponent >= 0.0 )
+		     || !( options.damping > 0.0 ) )
+			throw std::invalid_argument(
+				"gaugeFreeFit: the floor, the penalty weight and its exponent must"
+				" be non-negative and the damping positive" );
+
+		std::size_t const modes = start.modeList.size();
+		std::size_t const unknowns = 2*modes;
+		std::size_t const points = nodes.size();
+
+		// THE PENALTY ROWS ARE NOT WHAT MAKES THE SYSTEM DETERMINED, so the node
+		// count is required to cover the unknowns whichever gauge is asked for.
+		// Allowing a short node set under SurfaceGauge::SpectralWidth would make
+		// the penalty load bearing for the SHAPE as well as for the gauge, and
+		// the two would then be impossible to tell apart in a table.
+		if ( points < unknowns )
+			throw std::invalid_argument(
+				"gaugeFreeFit: " + std::to_string( points ) + " nodes cannot"
+				" determine " + std::to_string( unknowns ) + " coefficients. Ask"
+				" for more angles or more surfaces, or drop the degree" );
+
+		// -------------------------------------------------------------------
+		// The basis at the nodes. Built ONCE; see the banner above.
+		// -------------------------------------------------------------------
+		std::vector<double> basis( points*modes, 0.0 );
+		std::vector<double> rootWeight( points, 1.0 );
+
+		for ( std::size_t i = 0; i < points; ++i )
+		{
+			DiscNode const &node = nodes[ i ];
+
+			if ( !std::isfinite( node.normalisedFlux ) || !( node.normalisedFlux > 0.0 ) )
+				throw std::invalid_argument(
+					"gaugeFreeFit: a node carries a normalised flux that is not"
+					" positive and finite. Psi_N = 0 is the axis, where the"
+					" constraint degenerates; see discNodesFrom()" );
+
+			if ( node.normalisedFlux > start.option.discEdge*( 1.0 + 1.0e-12 ) )
+				throw std::invalid_argument(
+					"gaugeFreeFit: a node at Psi_N = "
+					+ std::to_string( node.normalisedFlux ) + " lies outside the"
+					" disc, whose edge is at Psi_N = "
+					+ std::to_string( start.option.discEdge ) );
+
+			if ( !( node.weight > 0.0 ) || !std::isfinite( node.weight ) )
+				throw std::invalid_argument(
+					"gaugeFreeFit: a node carries a weight that is not positive"
+					" and finite" );
+
+			double const argument = start.argumentOf( node.normalisedFlux );
+			rootWeight[ i ] = std::sqrt( node.weight );
+
+			for ( std::size_t j = 0; j < modes; ++j )
+				basis[ i*modes + j ] = start.modeValue( start.modeList[ j ],
+				                                        argument, node.theta );
+		}
+
+		std::vector<double> coefficientR = start.coefficientR;
+		std::vector<double> coefficientZ = start.coefficientZ;
+
+		// The state at a coefficient vector: the position of every node, the
+		// distance from it to the surface it is supposed to be on, and the
+		// direction cosines of grad Psi_N there.
+		std::vector<double> distance( points, 0.0 );
+		std::vector<double> normalR( points, 0.0 );
+		std::vector<double> normalZ( points, 0.0 );
+
+		auto evaluate = [ & ]( std::vector<double> const &cR,
+		                       std::vector<double> const &cZ,
+		                       bool wantNormals, double &worst, double &norm )
+		{
+			worst = 0.0;
+			norm = 0.0;
+
+			for ( std::size_t i = 0; i < points; ++i )
+			{
+				double r = 0.0;
+				double z = 0.0;
+				for ( std::size_t j = 0; j < modes; ++j )
+				{
+					double const value = basis[ i*modes + j ];
+					r += cR[ j ]*value;
+					z += cZ[ j ]*value;
+				}
+
+				double flux = 0.0;
+				double gradientR = 0.0;
+				double gradientZ = 0.0;
+				if ( !field.sample( r, z, flux, gradientR, gradientZ )
+				     || !std::isfinite( flux ) || !std::isfinite( gradientR )
+				     || !std::isfinite( gradientZ ) )
+					return false;
+
+				double const magnitude = std::hypot( gradientR, gradientZ );
+				if ( !( magnitude > 0.0 ) )
+					return false;
+
+				// THE RESIDUAL IS A DISTANCE IN METRES, not a flux: the linear
+				// approximation to how far the node is from its own surface,
+				// along the normal. See the header -- a least-squares problem in
+				// the flux residual would weight the surfaces by whatever
+				// | grad Psi_N | happens to be there.
+				double const gap = ( flux - nodes[ i ].normalisedFlux )/magnitude;
+
+				distance[ i ] = gap;
+				if ( wantNormals )
+				{
+					normalR[ i ] = gradientR/magnitude;
+					normalZ[ i ] = gradientZ/magnitude;
+				}
+
+				double const weighted = rootWeight[ i ]*gap;
+				norm += weighted*weighted;
+				worst = std::max( worst, std::abs( gap ) );
+			}
+
+			norm = std::sqrt( norm );
+			return std::isfinite( norm ) && std::isfinite( worst );
+		};
+
+		double worst = 0.0;
+		double norm = 0.0;
+		if ( !evaluate( coefficientR, coefficientZ, true, worst, norm ) )
+			throw std::runtime_error(
+				"gaugeFreeFit: the field refused a node at the STARTING iterate."
+				" That is a statement about the warm start or about the field's"
+				" extent, not about the iteration: the linear fit already puts"
+				" this node somewhere the field cannot answer" );
+
+		report.initialSurfaceError = worst;
+		report.worstExcursion = worst;
+		report.initialSpectralWidth = start.spectralWidth();
+
+		double startNorm = 0.0;
+		for ( std::size_t j = 0; j < modes; ++j )
+			startNorm += coefficientR[ j ]*coefficientR[ j ]
+			             + coefficientZ[ j ]*coefficientZ[ j ];
+		report.initialCoefficientNorm = std::sqrt( startNorm );
+
+		report.stop = "iteration cap";
+
+		double damping = 0.0;
+		bool dampingSet = false;
+		int stalled = 0;
+
+		std::vector<double> matrix;
+		std::vector<double> rhs;
+		std::vector<double> spare;
+		std::vector<double> work;
+		std::vector<double> rightFactor;
+		std::vector<double> singularValues;
+		std::vector<double> projection( unknowns, 0.0 );
+		std::vector<double> trialR( modes, 0.0 );
+		std::vector<double> trialZ( modes, 0.0 );
+
+		for ( int iteration = 0; iteration < options.maxIterations; ++iteration )
+		{
+			if ( worst < options.tolerance )
+			{
+				report.stop = "tolerance";
+				report.converged = true;
+				break;
+			}
+
+			// ---------------------------------------------------------------
+			// The Gauss-Newton matrix. One row per node, holding the derivative
+			// of that node's normal distance with respect to every coefficient
+			// of R and of z:  d( gap )/d( cR_k ) = n_r Z_k,  and likewise in z.
+			//
+			// | grad Psi_N | is held FIXED across the linearisation, which makes
+			// this exactly Newton on the normal displacement and not on the flux
+			// residual. It is the geometrically meaningful linearisation and it
+			// costs nothing: the second-order term it drops is the curvature of
+			// the surface, which the next iteration sees anyway.
+			// ---------------------------------------------------------------
+			bool const penalised = ( options.gauge == SurfaceGauge::SpectralWidth )
+			                       && ( options.spectralWeight > 0.0 );
+			std::size_t const rows = penalised ? points + unknowns : points;
+
+			matrix.assign( rows*unknowns, 0.0 );
+			rhs.assign( rows, 0.0 );
+			spare.assign( rows, 0.0 );
+
+			for ( std::size_t i = 0; i < points; ++i )
+			{
+				double const scale = rootWeight[ i ];
+				for ( std::size_t j = 0; j < modes; ++j )
+				{
+					double const value = scale*basis[ i*modes + j ];
+					matrix[ i*unknowns + j ] = normalR[ i ]*value;
+					matrix[ i*unknowns + modes + j ] = normalZ[ i ]*value;
+				}
+
+				rhs[ i ] = -scale*distance[ i ];
+			}
+
+			// ---------------------------------------------------------------
+			// The spectral-width penalty, as extra ROWS rather than as a
+			// modified normal matrix: sqrt( lambda w_k ) ( c_k + delta_k ) = 0,
+			// so the step is pulled toward the coefficients the penalty prefers
+			// and the whole thing stays one least-squares problem solved by the
+			// same QR. Hirshman & Breslau's weight is a power of the POLOIDAL
+			// mode number, so m = 0 carries weight zero at any exponent -- the
+			// gauge is a reparametrisation of the ANGLE and cannot touch the
+			// axisymmetric content of the expansion.
+			//
+			// The weight is scaled by the largest squared singular value of the
+			// previous iterate's matrix so that lambda is dimensionless. On the
+			// first iteration there is none, so the penalty rows are built after
+			// a scale is known -- which is why this loop computes the row norm
+			// first.
+			// ---------------------------------------------------------------
+			if ( penalised )
+			{
+				// THE SCALE IS THE SQUARED FROBENIUS NORM OF THE NODE ROWS, so
+				// that lambda is dimensionless and comparable against a squared
+				// singular value -- which is what the penalty is competing with
+				// in the normal matrix. Using the matrix's own row norms rather
+				// than its largest singular value avoids a second factorisation
+				// per iteration and bounds it from above.
+				double scale = 0.0;
+				for ( std::size_t i = 0; i < points; ++i )
+					for ( std::size_t j = 0; j < unknowns; ++j )
+						scale += matrix[ i*unknowns + j ]*matrix[ i*unknowns + j ];
+
+				// AND THE MODE NUMBER IS NORMALISED BY THE DEGREE. Hirshman &
+				// Breslau's weight is a bare power of |m|, which at p = 4 and
+				// L = 16 spans five orders of magnitude -- so a lambda tuned at
+				// one exponent or one degree means something entirely different
+				// at another, and a sensitivity sweep in p would be measuring
+				// the normalisation instead. Dividing by the degree puts every
+				// weight in [ 0, 1 ] and leaves lambda meaning what it says.
+				double const top = std::max( start.degree, 1 );
+
+				for ( std::size_t j = 0; j < unknowns; ++j )
+				{
+					std::size_t const mode = ( j < modes ) ? j : j - modes;
+					int const order = ( start.modeList[ mode ].angular < 0 )
+						? -start.modeList[ mode ].angular
+						: start.modeList[ mode ].angular;
+					double const weight = options.spectralWeight*scale
+						*std::pow( static_cast<double>( order )/top,
+						           options.spectralExponent );
+					double const root = std::sqrt( weight );
+
+					matrix[ ( points + j )*unknowns + j ] = root;
+					rhs[ points + j ] = -root*( ( j < modes )
+						? coefficientR[ mode ] : coefficientZ[ mode ] );
+				}
+			}
+
+			householderQr( matrix, rows, unknowns, rhs, spare );
+
+			work.assign( unknowns*unknowns, 0.0 );
+			for ( std::size_t j = 0; j < unknowns; ++j )
+				for ( std::size_t i = 0; i <= j; ++i )
+					work[ j*unknowns + i ] = matrix[ i*unknowns + j ];
+
+			oneSidedJacobi( work, rightFactor, unknowns, singularValues );
+
+			double largest = 0.0;
+			double smallest = std::numeric_limits<double>::infinity();
+			for ( double value : singularValues )
+			{
+				largest = std::max( largest, value );
+				smallest = std::min( smallest, value );
+			}
+
+			if ( !( largest > 0.0 ) )
+			{
+				report.stop = "step rejected";
+				break;
+			}
+
+			// The spectrum of the FIRST matrix is the measurement of how rank
+			// deficient this problem really is -- see the header, where the
+			// answer turned out not to be the expected one.
+			if ( iteration == 0 )
+			{
+				report.columns = unknowns;
+				report.largestSingularValue = largest;
+				report.smallestSingularValue = smallest;
+				for ( double value : singularValues )
+				{
+					if ( value < 1.0e-10*largest )
+						++report.nullDirections;
+					if ( value < 1.0e-4*largest )
+						++report.softDirections;
+				}
+			}
+
+			// work_j holds U_j sigma_j, so the projection U_j^T y / sigma_j is
+			// ( work_j . y )/sigma_j^2 and the columns never have to be
+			// normalised -- the same identity the linear solve above uses.
+			for ( std::size_t j = 0; j < unknowns; ++j )
+			{
+				double sum = 0.0;
+				for ( std::size_t k = 0; k < unknowns; ++k )
+					sum += work[ j*unknowns + k ]*rhs[ k ];
+				projection[ j ] = sum;
+			}
+
+			if ( !dampingSet )
+			{
+				damping = options.damping*largest*largest;
+				dampingSet = true;
+			}
+
+			bool const trustRegion = ( options.gauge != SurfaceGauge::None );
+			double const floor = ( options.gauge == SurfaceGauge::None )
+				? 0.0 : options.singularValueFloor*largest;
+
+			bool accepted = false;
+			double trialWorst = worst;
+			double trialNorm = norm;
+
+			for ( int retry = 0; retry < options.dampingRetries; ++retry )
+			{
+				// THE FILTER. sigma/( sigma^2 + mu ) applied to U^T y, which in
+				// terms of the unnormalised projection above is 1/( sigma^2 + mu ).
+				// mu = 0 and floor = 0 is the plain pseudo-inverse -- the control.
+				double const shift = trustRegion ? damping : 0.0;
+
+				trialR = coefficientR;
+				trialZ = coefficientZ;
+
+				for ( std::size_t j = 0; j < unknowns; ++j )
+				{
+					// An EXACT zero cannot be inverted by any gauge, so it is
+					// skipped even by the control. That is arithmetic and not a
+					// regularisation: the control's claim is that it inverts every
+					// direction the data determines to any extent at all, and a
+					// singular value of zero is not one of those.
+					if ( !( singularValues[ j ] > floor )
+					     || !( singularValues[ j ] > 0.0 ) )
+						continue;
+
+					double const filtered = projection[ j ]
+						/( singularValues[ j ]*singularValues[ j ] + shift );
+
+					for ( std::size_t k = 0; k < modes; ++k )
+					{
+						trialR[ k ] += rightFactor[ j*unknowns + k ]*filtered;
+						trialZ[ k ] += rightFactor[ j*unknowns + modes + k ]
+						               *filtered;
+					}
+				}
+
+				if ( iteration == 0 && retry == 0 )
+				{
+					// THE SIZE OF THE FIRST STEP IS THE MEASUREMENT OF THE
+					// GAUGE, and it is the number the control exists to
+					// produce: an ungauged step inverts a singular value of
+					// 1e-06 of the largest and comes back with a coefficient
+					// correction orders larger than the coefficients.
+					double sum = 0.0;
+					for ( std::size_t k = 0; k < modes; ++k )
+						sum += ( trialR[ k ] - coefficientR[ k ] )
+						       *( trialR[ k ] - coefficientR[ k ] )
+						       + ( trialZ[ k ] - coefficientZ[ k ] )
+						       *( trialZ[ k ] - coefficientZ[ k ] );
+					report.firstStepNorm = std::sqrt( sum );
+				}
+
+				bool const usable = evaluate( trialR, trialZ, false, trialWorst,
+				                              trialNorm );
+
+				// THE CONTROL TAKES ITS STEP WHATEVER IT DOES, and that is what
+				// makes it a control rather than a cripple. Rejecting a step and
+				// trying a smaller one IS the trust region, so a "no gauge" run
+				// that kept the accept test would be running with a gauge and
+				// merely reporting that it stopped. What is wanted is the
+				// undamped, unfiltered Gauss-Newton iteration itself: let it
+				// take the step the linearised system asks for, and record where
+				// it goes.
+				if ( !trustRegion )
+				{
+					accepted = usable;
+					if ( !usable )
+						++report.rejectedSteps;
+					break;
+				}
+
+				if ( usable && trialNorm < norm )
+				{
+					accepted = true;
+					break;
+				}
+
+				++report.rejectedSteps;
+				damping *= 8.0;
+			}
+
+			if ( !accepted )
+			{
+				report.stop = "step rejected";
+				break;
+			}
+
+			double const gain = ( worst > 0.0 ) ? 1.0 - trialWorst/worst : 0.0;
+			report.worstExcursion = std::max( report.worstExcursion, trialWorst );
+
+			coefficientR = trialR;
+			coefficientZ = trialZ;
+			report.iterations = iteration + 1;
+
+			// The normals at the accepted iterate, for the next linearisation.
+			if ( !evaluate( coefficientR, coefficientZ, true, worst, norm ) )
+			{
+				report.stop = "step rejected";
+				break;
+			}
+
+			if ( trustRegion )
+				damping = std::max( damping/4.0,
+				                    1.0e-30*largest*largest );
+
+			// THE STOPPING RULE THAT ACTUALLY FIRES, and it is here because
+			// CLAUDE.md's finding about a monotone acceptance test applies
+			// directly: a search that only asks for a decrease will creep for
+			// ever, buying a per-cent a step. This asks the iteration to be
+			// buying something, and says so in the report when it stops.
+			stalled = ( gain < options.improvement ) ? stalled + 1 : 0;
+
+			if ( stalled >= options.stallLimit && worst >= options.tolerance )
+			{
+				report.stop = "no improvement";
+				break;
+			}
+		}
+
+		if ( worst < options.tolerance )
+		{
+			report.stop = "tolerance";
+			report.converged = true;
+		}
+
+		SurfaceFit fitted( start.degree, start.option, start.modeList,
+		                   coefficientR, coefficientZ );
+		fitted.diagnostic.samples = points;
+		fitted.diagnostic.smallestSampledRadius = start.diagnostic.smallestSampledRadius;
+		fitted.diagnostic.largestSampledRadius = start.diagnostic.largestSampledRadius;
+
+		report.surfaceError = worst;
+		report.spectralWidth = fitted.spectralWidth();
+		report.damping = ( report.largestSingularValue > 0.0 )
+			? damping/( report.largestSingularValue*report.largestSingularValue )
+			: 0.0;
+
+		double endNorm = 0.0;
+		for ( std::size_t j = 0; j < modes; ++j )
+			endNorm += coefficientR[ j ]*coefficientR[ j ]
+			           + coefficientZ[ j ]*coefficientZ[ j ];
+		report.coefficientNorm = std::sqrt( endNorm );
+
+		// THE SAFEGUARD. A residual column cannot see a folded map, so the
+		// determinant of the disc map is swept over the whole fitted annulus and
+		// its extremes are reported. A caller that does not check the sign has
+		// not checked the fit.
+		double smallestJacobian = std::numeric_limits<double>::infinity();
+		double largestJacobian = -std::numeric_limits<double>::infinity();
+
+		double innerFlux = std::numeric_limits<double>::infinity();
+		double outerFlux = 0.0;
+		for ( DiscNode const &node : nodes )
+		{
+			innerFlux = std::min( innerFlux, node.normalisedFlux );
+			outerFlux = std::max( outerFlux, node.normalisedFlux );
+		}
+
+		int const radialSamples = 33;
+		int const angularSamples = 64;
+		double const twoPi = 6.283185307179586476925286766559;
+
+		for ( int i = 0; i < radialSamples; ++i )
+		{
+			double const fraction = static_cast<double>( i )
+			                        /( radialSamples - 1.0 );
+			double const flux = innerFlux + ( outerFlux - innerFlux )*fraction;
+
+			for ( int j = 0; j < angularSamples; ++j )
+			{
+				double const value = fitted.mapJacobian(
+					flux, twoPi*static_cast<double>( j )/angularSamples );
+				smallestJacobian = std::min( smallestJacobian, value );
+				largestJacobian = std::max( largestJacobian, value );
+			}
+		}
+
+		report.minimumJacobian = smallestJacobian;
+		report.maximumJacobian = largestJacobian;
+
+		return fitted;
+	}
+
 }

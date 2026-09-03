@@ -149,6 +149,64 @@
  *
  * 9. THE TRACER REPAIR IN-3 NEEDED BEFORE IT COULD START, which is not a test
  *    of the fit at all and says so where it stands.
+ *
+ * ---------------------------------------------------------------------------
+ * AND FROM CASE 10 ON, IN-4: THE ANGLE GIVEN BACK ITS FREEDOM.
+ * ---------------------------------------------------------------------------
+ *
+ * Everything above pins the angle as an INPUT -- a SurfaceSample carries a
+ * theta, so the fit is told where to put each point -- and finding 2 above is
+ * that a relabelling which does not depend on the radius straightens exactly one
+ * order, leaving an algebraic tail near the axis that no degree removes.
+ *
+ * INVERSION-PLAN.md section 4.4 put three candidates against that: a global
+ * expansion that accepts the tail, elements in psi, or MXH's per-surface shape.
+ * The DESC papers say the tail is not what any of them is about. Panici et al.,
+ * Figure 5: "DESC, while not explicitly enforcing any poloidal angle
+ * constraints, ends up finding an optimal representation through the course of
+ * the optimization procedure." A SOLVE can slide the angle to whatever its
+ * truncated basis represents best. A FIT cannot -- unless it is asked for less.
+ *
+ * meq::gaugeFreeFit() asks for less: each disc node need only LAND ON ITS
+ * SURFACE. What that costs is a non-linear solve, a gauge for the tangential
+ * freedom, and a safeguard against a folded map; what it buys is measured here.
+ *
+ * 10. THE DECISIVE CASE, AND IT NEEDS NO EQUILIBRIUM. The ellipse family of
+ *     case 1, whose exact answer is a polynomial of degree one under SOME angle
+ *     and is unreachable under the geometric one. Warm-started from that bad
+ *     fit, the gauge-free solve lands 2.1e+14 times closer at degree TWO.
+ *
+ * 11. THE REAL TARGET: IN-3's algebraic tail, on nstx() with the innermost
+ *     surface at Psi_N = 0.02. 3.78e-04 to 4.16e-09 at degree 16.
+ *
+ * 12. HOW FAR IN IT SURVIVES -- an inner-limit sweep, since the tail is a
+ *     property of how close the innermost surface is to the axis.
+ *
+ * 13. THE CONTROL, ON BOTH FIELDS, AND THE TWO FAIL DIFFERENTLY. That is why
+ *     both are here rather than whichever was convenient.
+ *
+ * 14. THE TWO GAUGES AGAINST EACH OTHER. Hirshman & Breslau's spectral
+ *     condensation as an explicit penalty loses on accuracy AND on its own
+ *     metric, the second for a reason nobody expected.
+ *
+ * 15. THE SOLVED FIELD, THROUGH ONE LAMBDA. meq::SurfaceFit is MFEM-free, so
+ *     the seam is meq::NormalisedFluxField, and this case is what says the
+ *     library has not grown a dependence on either kind of field.
+ *
+ * WHAT IS DELIBERATELY *NOT* RE-ASSERTED FROM CASES 4, 5 AND 6, AND THE REASON
+ * IS NOT LAZINESS. Those measure the fit's derivative and metric AT A GIVEN
+ * theta, against surfaces traced at that same theta. Once the angle is free
+ * there is no such comparison to make: the whole content of IN-4 is that the fit
+ * chose where to put its point, so "the fit's position at theta" is not a
+ * quantity any independent instrument can produce. What replaces them are three
+ * GAUGE-INVARIANT properties, asserted in cases 10, 11 and 15 -- the distance
+ * from every node to the surface it belongs on, the PERIMETER of a fitted
+ * surface against the exact one, and the sign of the map's Jacobian. The first
+ * catches a fit that is on the wrong curve, the second a map that covers part of
+ * its curve or covers it twice, and the third a map that has folded. The
+ * properties that ARE parametrisation-free in the earlier cases -- the axis
+ * being exactly one point, and the coefficient envelope -- are re-asserted
+ * unchanged.
  */
 
 namespace
@@ -473,6 +531,117 @@ namespace
 			envelope = std::max( envelope, fit.coefficientEnvelope( degree - 1 ) );
 
 		return envelope;
+	}
+
+	/// Psi_N and its gradient on the CLOSED FORM, in the normalisation
+	/// levelAt() uses: psi = 0 on the separatrix and psi_ax on the axis, so
+	/// Psi_N = 1 - psi/psi_ax and grad Psi_N = -grad psi / psi_ax.
+	///
+	/// A lambda handed to meq::NormalisedFluxField, which is the whole of the
+	/// seam: the library never learns whether the field behind it is a closed
+	/// form or a mesh.
+	meq::NormalisedFluxField exactField( Equilibrium const &eq,
+	                                     ExactAxis const &axis )
+	{
+		meq::NormalisedFluxField field;
+		field.sample = [ &eq, axis ]( double r, double z, double &normalisedFlux,
+		                              double &gradientR, double &gradientZ )
+		{
+			double dR = 0.0;
+			double dZ = 0.0;
+			eq.gradPsi( r, z, dR, dZ );
+
+			normalisedFlux = 1.0 - eq.psi( r, z )/axis.psi;
+			gradientR = -dR/axis.psi;
+			gradientZ = -dZ/axis.psi;
+			return true;
+		};
+
+		return field;
+	}
+
+	/// The perimeter of one fitted surface, by the periodic trapezoid rule on
+	/// | dx/dtheta |.
+	///
+	/// THIS IS THE GAUGE-INVARIANT CHECK AND THAT IS WHY IT IS HERE. Once the
+	/// angle is free, "the fit's point at theta" is not a quantity any exact
+	/// answer can be compared against -- the whole point is that the fit chose
+	/// where to put it. What survives the choice is the CURVE: its length, its
+	/// distance from the true surface, and the sign of the map's Jacobian. A
+	/// map that covered only half its surface, or traversed it twice, would have
+	/// a perfect surface residual and the wrong length.
+	double fittedPerimeter( meq::SurfaceFit const &fit, double normalisedFlux,
+	                        int count = 512 )
+	{
+		double total = 0.0;
+
+		for ( int j = 0; j < count; ++j )
+			total += fit.angularSpeed( normalisedFlux, twoPi*j/count );
+
+		return total*twoPi/count;
+	}
+
+	/// The same curve's length on the exact field, by chords through a great
+	/// many ray points. Chords UNDERSTATE a convex curve's length at
+	/// O( 1/count^2 ), so 4096 of them leave about 1e-8 relative -- below the
+	/// agreement being asserted and measured rather than assumed.
+	double exactPerimeter( Equilibrium const &eq, ExactAxis const &axis,
+	                       double normalisedFlux, int count = 4096 )
+	{
+		double total = 0.0;
+		double previousR = 0.0;
+		double previousZ = 0.0;
+
+		for ( int j = 0; j <= count; ++j )
+		{
+			double r = 0.0;
+			double z = 0.0;
+			rayPoint( eq, axis, normalisedFlux, twoPi*j/count, r, z );
+			if ( j > 0 )
+				total += std::hypot( r - previousR, z - previousZ );
+			previousR = r;
+			previousZ = z;
+		}
+
+		return total;
+	}
+
+	/// How far the point the fit puts at discRadius = 0 moves as the angle is
+	/// swept. Exactly zero for the Zernike basis by construction -- see case 3
+	/// -- and it must stay exactly zero after a gauge-free refit, because the
+	/// refit changes coefficients and not the basis.
+	double axisSpreadOf( meq::SurfaceFit const &fit )
+	{
+		double minR = 1.0e30;
+		double maxR = -1.0e30;
+		double minZ = 1.0e30;
+		double maxZ = -1.0e30;
+
+		for ( int j = 0; j < 64; ++j )
+		{
+			double r = 0.0;
+			double z = 0.0;
+			fit.axisAtAngle( twoPi*j/64, r, z );
+			minR = std::min( minR, r );
+			maxR = std::max( maxR, r );
+			minZ = std::min( minZ, z );
+			maxZ = std::max( maxZ, z );
+		}
+
+		return std::max( maxR - minR, maxZ - minZ );
+	}
+
+	/// envelopeWindow( L )/envelopeWindow( L/2 ): how far the coefficient
+	/// envelope falls across the top half of the spectrum. The WHOLE-TAIL drop
+	/// rather than the worst adjacent ratio, because a gauge-free fit's high
+	/// coefficients sit near their own round-off and a pairwise ratio there
+	/// measures noise -- which is the same reason case 2 asserts on the drop.
+	double envelopeDrop( meq::SurfaceFit const &fit, int degree )
+	{
+		double const top = envelopeWindow( fit, degree );
+		double const middle = envelopeWindow( fit, degree/2 );
+
+		return ( middle > 0.0 ) ? top/middle : 0.0;
 	}
 
 	/// The benchmark box for the discrete leg. NOT standardBox(): nstx()'s
@@ -1746,4 +1915,883 @@ BOOST_AUTO_TEST_CASE( theRayFitAcceptsWhereTheCorrectorWouldRatherThanThrowing )
 	             " jump of %.3e -- a ratio of %.2f\n", worstResidual, worstJump,
 	             worstResidual/worstJump );
 	BOOST_TEST( worstResidual < 5.0*worstJump );
+}
+
+/*
+ * ===========================================================================
+ * 10. THE GAUGE-FREE FIT, ON THE FAMILY WHERE THE ANSWER IS KNOWN EXACTLY.
+ * ===========================================================================
+ *
+ * THE DECISIVE TEST OF INVERSION-PLAN.md SECTION 4.4, AND IT NEEDS NO
+ * EQUILIBRIUM AT ALL. Case 1 above showed that the same ellipse points fit to
+ * 3e-15 under the ellipse's own parameter and are wrong by 1e-2 at degree
+ * twenty under the geometric angle -- because a prescribed angle puts content
+ * where the basis refuses to look, and a FIT cannot move it.
+ *
+ * A SOLVE CAN. Panici et al.'s Figure 5: "DESC, while not explicitly enforcing
+ * any poloidal angle constraints, ends up finding an optimal representation
+ * through the course of the optimization procedure." So ask for less -- require
+ * each node only to LAND ON ITS SURFACE -- and start from the bad fit itself.
+ *
+ * THE ERROR MEASURED HERE IS NOT THE ERROR CASE 1 MEASURES, AND IT COULD NOT
+ * BE. Case 1 asks how far the fit's point at theta is from the sample's point
+ * at theta, which presumes the angle is an input; that number is meaningless
+ * once the angle is free. What replaces it is the DISTANCE FROM THE NODE TO THE
+ * SURFACE IT BELONGS ON, which is gauge invariant, and the linear column is
+ * measured the same way so that the comparison is like with like -- 1.72e-01 at
+ * degree two, against 1.53e-01 for the sample distance, so the two agree about
+ * how bad the linear fit is and disagree about nothing.
+ */
+BOOST_AUTO_TEST_CASE( theGaugeFreeFitRecoversWhatTheAngleLabelDestroyed )
+{
+	int const angles = 64;
+	int const surfaces = 24;
+	double const smallest = 0.02;
+	double const largest = 0.60;
+	double const centre = 1.3;
+	double const shortAxis = 0.5;
+	double const longAxis = 1.0;
+
+	// The same family case 1 builds, at the geometric poloidal angle: the point
+	// of each ellipse that subtends theta.
+	std::vector<meq::SurfaceSample> byGeometricAngle;
+
+	for ( int i = 0; i < surfaces; ++i )
+	{
+		double const normalisedFlux = smallest
+			+ ( largest - smallest )*i/( surfaces - 1.0 );
+		double const radius = std::sqrt( normalisedFlux );
+
+		for ( int j = 0; j < angles; ++j )
+		{
+			double const theta = twoPi*j/angles;
+			double const parameter = std::atan2( shortAxis*std::sin( theta ),
+			                                     longAxis*std::cos( theta ) );
+			byGeometricAngle.push_back( meq::SurfaceSample{
+				normalisedFlux, theta,
+				centre + shortAxis*radius*std::cos( parameter ),
+				longAxis*radius*std::sin( parameter ), 1.0 } );
+		}
+	}
+
+	// Psi_N of the family, in closed form. Every surface is
+	// ( ( r - centre )/shortAxis )^2 + ( z/longAxis )^2 = Psi_N, so the field
+	// the gauge-free fit needs is two lines and there is no equilibrium, no
+	// mesh and no tracer anywhere in this case.
+	meq::NormalisedFluxField field;
+	field.sample = [ & ]( double r, double z, double &normalisedFlux,
+	                      double &gradientR, double &gradientZ )
+	{
+		double const across = ( r - centre )/shortAxis;
+		double const along = z/longAxis;
+		normalisedFlux = across*across + along*along;
+		gradientR = 2.0*across/shortAxis;
+		gradientZ = 2.0*along/longAxis;
+		return true;
+	};
+
+	meq::SurfaceFitOptions options;
+	options.discEdge = largest;
+
+	std::vector<meq::DiscNode> const nodes =
+		meq::discNodesFrom( byGeometricAngle );
+
+	std::printf( "\n=== IN-4 case 10: the gauge-free fit on exact ellipses ==="
+	             "\n    semi-axes ( %.2f, %.2f ), %zu nodes, warm-started from"
+	             " the GEOMETRIC-ANGLE fit of case 1\n\n", shortAxis, longAxis,
+	             nodes.size() );
+	std::printf( "  %-4s  %-13s  %-13s  %-9s  %-5s  %-5s  %-5s  %-11s\n", "L",
+	             "linear (CTRL)", "gauge-free", "gain", "its", "null", "soft",
+	             "min Jacobian" );
+
+	double worstFreed = 0.0;
+	double leastGain = 1.0e30;
+	double gainAtTwo = 0.0;
+	double worstSpread = 0.0;
+	double worstJacobianSign = 1.0e30;
+	std::size_t nullAtFour = 0;
+	std::size_t softAtSixteen = 0;
+
+	for ( int degree : { 2, 4, 8, 12, 16 } )
+	{
+		meq::SurfaceFit const linear( degree, byGeometricAngle, options );
+
+		meq::GaugeFreeFitOptions gauge;
+		meq::GaugeFreeFitReport report;
+		meq::SurfaceFit const freed = meq::gaugeFreeFit( linear, field, nodes,
+		                                                 gauge, report );
+
+		double const gain = report.initialSurfaceError/report.surfaceError;
+
+		std::printf( "  %-4d  %.6e  %.6e  %9.2e  %-5d  %-5zu  %-5zu  %+.4e\n",
+		             degree, report.initialSurfaceError, report.surfaceError,
+		             gain, report.iterations, report.nullDirections,
+		             report.softDirections, report.minimumJacobian );
+
+		worstFreed = std::max( worstFreed, report.surfaceError );
+		leastGain = std::min( leastGain, gain );
+		if ( degree == 2 )
+			gainAtTwo = gain;
+		if ( degree == 4 )
+			nullAtFour = report.nullDirections;
+		if ( degree == 16 )
+			softAtSixteen = report.softDirections;
+		worstSpread = std::max( worstSpread, axisSpreadOf( freed ) );
+		worstJacobianSign = std::min( worstJacobianSign,
+		                              report.minimumJacobian );
+	}
+
+	std::printf( "\n  AT DEGREE TWO the family is a polynomial of degree one in"
+	             " ( x, y ) under SOME angle, and the gauge-free fit finds it:"
+	             "\n  %.2e times closer to the surfaces than the identical"
+	             " points fitted at their geometric angle.\n", gainAtTwo );
+
+	// THE HEADLINE. At degree two the exact answer is in the space -- under the
+	// right angle -- and the gauge-free fit reaches it from a fit that was wrong
+	// by 17 per cent. If this ever fails, the idea is wrong and every claim in
+	// SurfaceFit.hpp's gauge-free section needs re-measuring rather than
+	// re-wording.
+	BOOST_TEST( gainAtTwo > 1.0e12 );
+
+	// And it is not a low-degree accident: every degree tried lands within a
+	// micron of its surfaces where the linear fit is between 1e-2 and 1e-1 away.
+	BOOST_TEST( worstFreed < 1.0e-6 );
+	BOOST_TEST( leastGain > 1.0e5 );
+
+	// THE SAFEGUARD. A folded map has a perfect surface residual, so the sign is
+	// the only thing that catches it.
+	BOOST_TEST( worstJacobianSign > 0.0 );
+
+	// AND THE AXIS IS STILL EXACTLY ONE POINT. The refit moves coefficients and
+	// not the basis, so the parity constraint of case 3 is untouched -- asserted
+	// here rather than assumed, because it is the property IN-3 states as an
+	// exact zero.
+	BOOST_TEST( worstSpread < 1.0e-14 );
+
+	// THE SPECTRUM, WHICH IS THE FINDING THIS CASE DID NOT SET OUT TO MAKE.
+	// The expectation was that the Gauss-Newton matrix is rank deficient along
+	// the gauge, by about half its columns. It is not: on this family the
+	// exactly-null directions number THREE at every degree, and the rest of the
+	// gauge is a soft tail with no gap in it -- 3 soft directions at degree 4
+	// and 59 at degree 16. Asserted so that a change in that structure fails
+	// rather than passing quietly.
+	std::printf( "  the exact null space is %zu directions at degree 4, against"
+	             " %zu SOFT ones at degree 16: the gauge is mostly a soft tail"
+	             " and not a subspace.\n", nullAtFour, softAtSixteen );
+	BOOST_TEST( nullAtFour > 0 );
+	BOOST_TEST( nullAtFour < 8 );
+	BOOST_TEST( softAtSixteen > 4*nullAtFour );
+}
+
+/*
+ * ===========================================================================
+ * 11. THE ALGEBRAIC TAIL NEAR THE AXIS, WHICH IS WHAT IN-4 IS FOR.
+ * ===========================================================================
+ *
+ * IN-3's second finding, in its own words: "with the innermost surface at
+ * Psi_N = 0.10 the coefficient envelope decays geometrically, and pulling it in
+ * to Psi_N = 0.02 leaves an algebraic tail that no degree removes." That is
+ * INVERSION-PLAN.md section 4.4's tension, and it is the reason a psi-varying
+ * element was on the table.
+ *
+ * IT IS NOT AN ELEMENT PROBLEM. It is an ANGLE problem: a relabelling that does
+ * not depend on the radius straightens one order, and the tail is the orders it
+ * cannot reach. Give the angle back its freedom and the tail goes.
+ */
+BOOST_AUTO_TEST_CASE( theGaugeFreeFitRemovesTheAlgebraicTailNearTheAxis )
+{
+	Equilibrium const eq = Equilibrium::nstx();
+	ExactAxis const axis = exactAxis( eq, 1.3, 0.0 );
+	meq::NormalisedFluxField const field = exactField( eq, axis );
+
+	int const angles = 64;
+	int const surfaces = 24;
+	double const smallest = 0.02;
+	double const largest = 0.60;
+
+	std::vector<meq::SurfaceSample> const geometric = exactSamples(
+		eq, axis, levelsFor( Layout::EquispacedFlux, smallest, largest,
+		                     surfaces ), angles );
+	meq::AxisShape const shape = meq::axisShapeFromSamples( geometric, axis.r,
+	                                                        axis.z );
+	std::vector<meq::SurfaceSample> const samples =
+		meq::relabelByAxisShape( geometric, shape );
+
+	meq::SurfaceFitOptions options;
+	options.discEdge = largest;
+	std::vector<meq::DiscNode> const nodes = meq::discNodesFrom( samples );
+
+	std::printf( "\n=== IN-4 case 11: the tail, nstx(), Psi_N in [ %.2f, %.2f ]"
+	             " ===\n    the linear column is IN-3's answer and the"
+	             " gauge-free one is warm-started from it\n\n", smallest,
+	             largest );
+	std::printf( "  %-4s  %-13s  %-13s  %-9s  %-13s  %-13s\n", "L",
+	             "linear (CTRL)", "gauge-free", "gain", "lin envelope",
+	             "free envelope" );
+
+	std::vector<double> linearError;
+	std::vector<double> freedError;
+	double linearDrop = 0.0;
+	double freedDrop = 0.0;
+
+	for ( int degree : { 4, 8, 12, 16 } )
+	{
+		meq::SurfaceFit const linear( degree, samples, options );
+
+		meq::GaugeFreeFitOptions gauge;
+		meq::GaugeFreeFitReport report;
+		meq::SurfaceFit const freed = meq::gaugeFreeFit( linear, field, nodes,
+		                                                 gauge, report );
+
+		std::printf( "  %-4d  %.6e  %.6e  %9.2e  %.6e  %.6e\n", degree,
+		             report.initialSurfaceError, report.surfaceError,
+		             report.initialSurfaceError/report.surfaceError,
+		             envelopeWindow( linear, degree ),
+		             envelopeWindow( freed, degree ) );
+
+		linearError.push_back( report.initialSurfaceError );
+		freedError.push_back( report.surfaceError );
+
+		if ( degree == 16 )
+		{
+			linearDrop = envelopeDrop( linear, degree );
+			freedDrop = envelopeDrop( freed, degree );
+
+			std::printf( "\n  the envelope at L = %d, degree by degree:\n",
+			             degree );
+			std::printf( "  %-4s  %-13s  %-13s  %-9s\n", "l", "linear",
+			             "gauge-free", "ratio" );
+			for ( int l = 0; l <= degree; ++l )
+				std::printf( "  %-4d  %.6e  %.6e  %9.2f\n", l,
+				             envelopeWindow( linear, l ),
+				             envelopeWindow( freed, l ),
+				             envelopeWindow( linear, l )
+				             /envelopeWindow( freed, l ) );
+
+			// THE GEOMETRY, GAUGE INVARIANTLY. Once the angle is free the fit's
+			// point at a given theta is not comparable against anything, so what
+			// is compared is the CURVE: the length of the outermost fitted
+			// surface against the exact one, which catches a map that covers
+			// part of its surface or covers it twice.
+			double const fitted = fittedPerimeter( freed, largest );
+			double const truth = exactPerimeter( eq, axis, largest );
+			double fitAxisR = 0.0;
+			double fitAxisZ = 0.0;
+			freed.axis( fitAxisR, fitAxisZ );
+
+			std::printf( "\n  the outermost surface's perimeter: %.9f fitted"
+			             " against %.9f exact, %.3e relative\n", fitted, truth,
+			             std::abs( fitted - truth )/truth );
+			std::printf( "  the fit's own axis is %.3e from the closed form's,"
+			             " and theta-independent to %.3e\n",
+			             std::hypot( fitAxisR - axis.r, fitAxisZ - axis.z ),
+			             axisSpreadOf( freed ) );
+			std::printf( "  min Jacobian %+.4e, max %+.4e\n",
+			             report.minimumJacobian, report.maximumJacobian );
+
+			BOOST_TEST( std::abs( fitted - truth )/truth < 1.0e-5 );
+			BOOST_TEST( report.minimumJacobian > 0.0 );
+			BOOST_TEST( axisSpreadOf( freed ) < 1.0e-14 );
+		}
+	}
+
+	std::printf( "\n  the surface error over L = 4 to 16: linear falls by %.1f,"
+	             " gauge-free by %.2e\n",
+	             linearError.front()/linearError.back(),
+	             freedError.front()/freedError.back() );
+	std::printf( "  the envelope drop across the top half of the spectrum at"
+	             " L = 16: linear %.4f, gauge-free %.4f\n", linearDrop,
+	             freedDrop );
+
+	std::printf( "  and over the LAST leg, L = 12 to 16: linear falls by %.2f,"
+	             " gauge-free by %.1f -- which is the tail, stated where it"
+	             " lives\n", linearError[ 2 ]/linearError[ 3 ],
+	             freedError[ 2 ]/freedError[ 3 ] );
+
+	// THE TAIL IS A STATEMENT ABOUT THE TOP OF THE SWEEP AND IS ASSERTED THERE.
+	// Over the whole range the linear column still falls by 44, because the
+	// first leg is genuine convergence -- it is the LAST leg that stalls, 1.69
+	// against the gauge-free column's 52. An assertion on the whole-range drop
+	// would be a weaker statement that happens to pass, which is the shape this
+	// tree keeps recording against itself.
+	BOOST_TEST( linearError[ 2 ]/linearError[ 3 ] < 3.0 );
+	BOOST_TEST( freedError[ 2 ]/freedError[ 3 ] > 20.0 );
+
+	// AND ACROSS THE SWEEP THE TWO DECAY RATES DIFFER BY FOUR ORDERS.
+	BOOST_TEST( ( freedError.front()/freedError.back() )
+	            /( linearError.front()/linearError.back() ) > 1.0e3 );
+	BOOST_TEST( freedError.back() < 1.0e-7 );
+
+	// The envelope says the same thing about the coefficients rather than about
+	// the geometry, which is IN-3's own acceptance restated: the top half of the
+	// gauge-free spectrum falls nearly three times further than the linear
+	// one's, and at the top degree itself the gauge-free envelope is twelve
+	// times smaller.
+	BOOST_TEST( freedDrop < 0.5*linearDrop );
+}
+
+/*
+ * ===========================================================================
+ * 12. HOW FAR IN IT SURVIVES.
+ * ===========================================================================
+ *
+ * The tail is a property of how close the innermost surface is to the axis, so
+ * the answer to "does the gauge-free fit remove it" is not a yes but a range.
+ * IN-3 measured the linear fit degrading as the inner limit falls; this is the
+ * same sweep with the angle freed.
+ */
+BOOST_AUTO_TEST_CASE( theGaugeFreeFitHoldsAsTheInnerLimitFalls )
+{
+	Equilibrium const eq = Equilibrium::nstx();
+	ExactAxis const axis = exactAxis( eq, 1.3, 0.0 );
+	meq::NormalisedFluxField const field = exactField( eq, axis );
+
+	int const angles = 64;
+	int const surfaces = 24;
+	double const largest = 0.60;
+	int const degree = 12;
+
+	std::printf( "\n=== IN-4 case 12: how far toward the axis it holds, L = %d"
+	             " ===\n\n", degree );
+	std::printf( "  %-9s  %-13s  %-13s  %-9s  %-11s  %-11s\n", "Psi_min",
+	             "linear (CTRL)", "gauge-free", "gain", "axis error",
+	             "min Jacobian" );
+
+	double leastGain = 1.0e30;
+	double worstFreed = 0.0;
+	double worstJacobian = 1.0e30;
+	std::vector<double> axisError;
+
+	for ( double smallest : { 0.10, 0.02, 0.005 } )
+	{
+		std::vector<meq::SurfaceSample> const geometric = exactSamples(
+			eq, axis, levelsFor( Layout::EquispacedFlux, smallest, largest,
+			                     surfaces ), angles );
+		meq::AxisShape const shape = meq::axisShapeFromSamples( geometric,
+		                                                        axis.r, axis.z );
+		std::vector<meq::SurfaceSample> const samples =
+			meq::relabelByAxisShape( geometric, shape );
+
+		meq::SurfaceFitOptions options;
+		options.discEdge = largest;
+		meq::SurfaceFit const linear( degree, samples, options );
+
+		meq::GaugeFreeFitOptions gauge;
+		meq::GaugeFreeFitReport report;
+		meq::SurfaceFit const freed = meq::gaugeFreeFit(
+			linear, field, meq::discNodesFrom( samples ), gauge, report );
+
+		double fitAxisR = 0.0;
+		double fitAxisZ = 0.0;
+		freed.axis( fitAxisR, fitAxisZ );
+		double const missed = std::hypot( fitAxisR - axis.r,
+		                                  fitAxisZ - axis.z );
+
+		std::printf( "  %-9.3f  %.6e  %.6e  %9.2e  %.5e  %+.4e\n", smallest,
+		             report.initialSurfaceError, report.surfaceError,
+		             report.initialSurfaceError/report.surfaceError, missed,
+		             report.minimumJacobian );
+
+		leastGain = std::min( leastGain,
+		                      report.initialSurfaceError/report.surfaceError );
+		worstFreed = std::max( worstFreed, report.surfaceError );
+		worstJacobian = std::min( worstJacobian, report.minimumJacobian );
+		axisError.push_back( missed );
+	}
+
+	std::printf( "\n  and the axis -- which is an EXTRAPOLATION into the hole"
+	             " and not a fitted quantity -- improves by %.1f as the hole"
+	             " shrinks\n", axisError.front()/axisError.back() );
+
+	// IT HOLDS ALL THE WAY TO Psi_N = 0.005, a disc radius of 0.09 -- the
+	// gauge-free column moves by a factor of 1.5 across a fiftyfold change in
+	// the inner limit while the linear column is flat at its own tail. The
+	// bound is 1e-6 because this case runs at degree 12; case 11 reaches 4e-09
+	// at degree 16 and that is the number to quote for the method.
+	BOOST_TEST( worstFreed < 1.0e-6 );
+	BOOST_TEST( leastGain > 1.0e3 );
+	BOOST_TEST( worstJacobian > 0.0 );
+}
+
+/*
+ * ===========================================================================
+ * 13. THE CONTROL: IS THE GAUGE LOAD BEARING?
+ * ===========================================================================
+ *
+ * SurfaceGauge::None inverts every direction however small its singular value
+ * AND takes the step the linearised system asks for, undamped. Both halves are
+ * removed together and deliberately: a trust region IS a Tikhonov gauge --
+ * rejecting a step and trying a smaller one is choosing among the directions
+ * the constraint does not determine -- so a "no gauge" control that kept it
+ * would be a control of nothing.
+ *
+ * AND THE ANSWER IS DIFFERENT ON THE TWO FIELDS, WHICH IS WHY BOTH ARE HERE.
+ * On the ellipse family, where three directions are exactly null, the ungauged
+ * iteration inverts them and DESTROYS the map -- a first step orders larger
+ * than the coefficients it corrects, an excursion of ten orders, and a
+ * determinant that changes sign. On nstx(), where there is no exactly-null
+ * direction at all, it does not diverge: it WANDERS, and lands three to four
+ * orders short of the gauged answer. A control measured on one field alone
+ * would have reported whichever of those it happened to meet.
+ */
+BOOST_AUTO_TEST_CASE( theGaugeIsLoadBearingAndFailsDifferentlyOnEachField )
+{
+	int const angles = 64;
+	int const surfaces = 24;
+	double const smallest = 0.02;
+	double const largest = 0.60;
+	double const centre = 1.3;
+	double const shortAxis = 0.5;
+	double const longAxis = 1.0;
+	int const degree = 8;
+
+	std::vector<meq::SurfaceSample> ellipses;
+	for ( int i = 0; i < surfaces; ++i )
+	{
+		double const normalisedFlux = smallest
+			+ ( largest - smallest )*i/( surfaces - 1.0 );
+		double const radius = std::sqrt( normalisedFlux );
+
+		for ( int j = 0; j < angles; ++j )
+		{
+			double const theta = twoPi*j/angles;
+			double const parameter = std::atan2( shortAxis*std::sin( theta ),
+			                                     longAxis*std::cos( theta ) );
+			ellipses.push_back( meq::SurfaceSample{
+				normalisedFlux, theta,
+				centre + shortAxis*radius*std::cos( parameter ),
+				longAxis*radius*std::sin( parameter ), 1.0 } );
+		}
+	}
+
+	meq::NormalisedFluxField ellipseField;
+	ellipseField.sample = [ & ]( double r, double z, double &normalisedFlux,
+	                             double &gradientR, double &gradientZ )
+	{
+		double const across = ( r - centre )/shortAxis;
+		double const along = z/longAxis;
+		normalisedFlux = across*across + along*along;
+		gradientR = 2.0*across/shortAxis;
+		gradientZ = 2.0*along/longAxis;
+		return true;
+	};
+
+	Equilibrium const eq = Equilibrium::nstx();
+	ExactAxis const axis = exactAxis( eq, 1.3, 0.0 );
+	meq::NormalisedFluxField const solovievField = exactField( eq, axis );
+
+	std::vector<meq::SurfaceSample> const raw = exactSamples(
+		eq, axis, levelsFor( Layout::EquispacedFlux, smallest, largest,
+		                     surfaces ), angles );
+	std::vector<meq::SurfaceSample> const soloviev = meq::relabelByAxisShape(
+		raw, meq::axisShapeFromSamples( raw, axis.r, axis.z ) );
+
+	meq::SurfaceFitOptions options;
+	options.discEdge = largest;
+
+	std::printf( "\n=== IN-4 case 13: the gauge as a control, L = %d ===\n\n",
+	             degree );
+	std::printf( "  %-10s  %-16s  %-13s  %-13s  %-11s  %-11s  %-11s\n", "field",
+	             "gauge", "surface error", "excursion", "first step",
+	             "|c|", "min Jacobian" );
+
+	struct Outcome
+	{
+		double error;
+		double excursion;
+		double step;
+		double jacobian;
+		double coefficients;
+	};
+
+	Outcome ellipseGauged{};
+	Outcome ellipseFree{};
+	Outcome solovievGauged{};
+	Outcome solovievFree{};
+
+	for ( int which = 0; which < 2; ++which )
+	{
+		bool const isEllipse = ( which == 0 );
+		std::vector<meq::SurfaceSample> const &samples = isEllipse ? ellipses
+		                                                           : soloviev;
+		meq::NormalisedFluxField const &field = isEllipse ? ellipseField
+		                                                  : solovievField;
+		meq::SurfaceFit const linear( degree, samples, options );
+		std::vector<meq::DiscNode> const nodes = meq::discNodesFrom( samples );
+
+		for ( meq::SurfaceGauge choice : { meq::SurfaceGauge::MinimumNorm,
+		                                   meq::SurfaceGauge::None } )
+		{
+			meq::GaugeFreeFitOptions gauge;
+			gauge.gauge = choice;
+
+			// THE CONTROL IS LET RUN. Its steps buy nothing, so the ordinary
+			// stall rule would stop it after three -- and "it stopped" is not
+			// the finding. What is wanted is where an undamped, unfiltered
+			// Gauss-Newton iteration GOES, so it is given the whole iteration
+			// budget and the excursion is what is reported.
+			if ( choice == meq::SurfaceGauge::None )
+				gauge.stallLimit = 1000;
+
+			meq::GaugeFreeFitReport report;
+			meq::SurfaceFit const freed = meq::gaugeFreeFit( linear, field,
+			                                                 nodes, gauge,
+			                                                 report );
+
+			std::printf( "  %-10s  %-16s  %.6e  %.6e  %.5e  %.5e  %+.4e\n",
+			             isEllipse ? "ellipses" : "nstx()",
+			             meq::surfaceGaugeName( choice ), report.surfaceError,
+			             report.worstExcursion, report.firstStepNorm,
+			             report.coefficientNorm, report.minimumJacobian );
+
+			Outcome const outcome{ report.surfaceError, report.worstExcursion,
+			                       report.firstStepNorm, report.minimumJacobian,
+			                       report.initialCoefficientNorm };
+
+			if ( isEllipse )
+			{
+				if ( choice == meq::SurfaceGauge::MinimumNorm )
+					ellipseGauged = outcome;
+				else
+					ellipseFree = outcome;
+			}
+			else
+			{
+				if ( choice == meq::SurfaceGauge::MinimumNorm )
+					solovievGauged = outcome;
+				else
+					solovievFree = outcome;
+			}
+		}
+	}
+
+	std::printf( "\n  ON THE ELLIPSES the ungauged iteration takes a first step"
+	             " %.2e times the size of the coefficients it is correcting,\n"
+	             "  reaches %.2e, and turns the map over -- min Jacobian"
+	             " %+.3e.\n", ellipseFree.step/ellipseFree.coefficients,
+	             ellipseFree.excursion, ellipseFree.jacobian );
+	std::printf( "  ON nstx() there is NO exactly-null direction at this degree"
+	             " and the failure is six orders smaller -- %.2e against %.2e --"
+	             "\n  but it is a failure all the same: %.3e against the gauged"
+	             " answer's %.3e, a factor of %.1e, and the map inverts there"
+	             " too\n  ( min Jacobian %+.3e ). SIZE is what the exact null"
+	             " space changes, not outcome.\n", solovievFree.error,
+	             ellipseFree.error, solovievFree.error, solovievGauged.error,
+	             solovievFree.error/solovievGauged.error,
+	             solovievFree.jacobian );
+
+	// THE ELLIPSES: an exact null space, inverted, is a catastrophe. The first
+	// step alone is ten orders larger than the coefficients it corrects.
+	BOOST_TEST( ellipseFree.step/ellipseFree.coefficients > 1.0e6 );
+	BOOST_TEST( ellipseFree.excursion > 1.0e3*ellipseGauged.excursion );
+	BOOST_TEST( ellipseFree.jacobian < 0.0 );
+	BOOST_TEST( ellipseGauged.jacobian > 0.0 );
+
+	// nstx(): no exact null space, and STILL useless -- which is the finding.
+	// The expectation going in was that "no gauge" fails by rank deficiency, so
+	// a field without an exact null space would be safe. It is not: the soft
+	// tail is enough on its own.
+	BOOST_TEST( solovievFree.excursion > 5.0*solovievGauged.excursion );
+	BOOST_TEST( solovievFree.error > 1.0e3*solovievGauged.error );
+	BOOST_TEST( solovievFree.jacobian < 0.0 );
+	BOOST_TEST( solovievGauged.jacobian > 0.0 );
+
+	// AND THE TWO FAILURES DIFFER BY SIX ORDERS, which is the exact null space
+	// showing up as a magnitude rather than as a yes or no.
+	BOOST_TEST( ellipseFree.error > 1.0e3*solovievFree.error );
+}
+
+/*
+ * ===========================================================================
+ * 14. THE TWO GAUGES AGAINST EACH OTHER.
+ * ===========================================================================
+ *
+ * INVERSION-PLAN.md section 4.4 names two ways to fix the tangential freedom:
+ * a minimum-norm step, and Hirshman & Breslau's spectral condensation as an
+ * explicit penalty -- the constraint VMEC uses where DESC lets the solve find
+ * the angle. Both are implemented and this is the measurement rather than the
+ * assertion.
+ *
+ * THE PENALTY LOSES ON BOTH COUNTS AND THAT WAS NOT THE EXPECTED RESULT.
+ *
+ * On ACCURACY it loses for a reason that was expected: a penalty biases the
+ * answer in the directions the constraint DOES determine as well as in the ones
+ * it does not, so lambda is a real tuning parameter with no value that is right
+ * -- every decade costs about half an order in the surface residual,
+ * monotonically. The minimum-norm step has a THRESHOLD instead, and the singular
+ * spectrum has a cliff in it for the threshold to sit on.
+ *
+ * On CONDENSATION it loses for a reason that was not. Panici's spectral width
+ * M( p, q ) is a RATIO of two weighted sums of the same coefficients, and a
+ * quadratic penalty on |m|^p shrinks both -- so pushing the coefficients down
+ * does not push the ratio down. Measured, twelve decades of lambda move it by
+ * under two per cent and in the WRONG direction, while the minimum-norm step,
+ * which asks for nothing about the spectrum at all, already sits below every
+ * penalised value. Hirshman & Breslau MINIMISE M itself, which is not a
+ * quadratic problem; a quadratic surrogate for it is not the same thing and this
+ * case is what says so.
+ */
+BOOST_AUTO_TEST_CASE( theSpectralWidthPenaltyCostsAccuracyAndBuysNoCondensation )
+{
+	Equilibrium const eq = Equilibrium::nstx();
+	ExactAxis const axis = exactAxis( eq, 1.3, 0.0 );
+	meq::NormalisedFluxField const field = exactField( eq, axis );
+
+	int const angles = 64;
+	int const surfaces = 24;
+	double const smallest = 0.02;
+	double const largest = 0.60;
+	int const degree = 12;
+
+	std::vector<meq::SurfaceSample> const raw = exactSamples(
+		eq, axis, levelsFor( Layout::EquispacedFlux, smallest, largest,
+		                     surfaces ), angles );
+	std::vector<meq::SurfaceSample> const samples = meq::relabelByAxisShape(
+		raw, meq::axisShapeFromSamples( raw, axis.r, axis.z ) );
+
+	meq::SurfaceFitOptions options;
+	options.discEdge = largest;
+	meq::SurfaceFit const linear( degree, samples, options );
+	std::vector<meq::DiscNode> const nodes = meq::discNodesFrom( samples );
+
+	std::printf( "\n=== IN-4 case 14: minimum norm against a spectral-width"
+	             " penalty, L = %d ===\n", degree );
+	std::printf( "    the spectral width is Panici eq. ( 6 ) at p = q = 2,"
+	             " which is DESC's own diagnostic and the one their Figure 5\n"
+	             "    is drawn in. SMALLER IS MORE CONDENSED.\n\n" );
+	std::printf( "  %-16s  %-9s  %-13s  %-11s  %-11s\n", "gauge", "lambda",
+	             "surface error", "spectral", "min Jacobian" );
+
+	meq::GaugeFreeFitReport minimumNorm;
+	meq::SurfaceFit const condensed = meq::gaugeFreeFit(
+		linear, field, nodes, meq::GaugeFreeFitOptions(), minimumNorm );
+
+	std::printf( "  %-16s  %-9s  %.6e  %11.5f  %+.4e\n", "minimum norm", "--",
+	             minimumNorm.surfaceError, minimumNorm.spectralWidth,
+	             minimumNorm.minimumJacobian );
+
+	std::vector<double> penaltyError;
+	std::vector<double> penaltyWidth;
+
+	for ( double weight : { 1.0e-12, 1.0e-8, 1.0e-4 } )
+	{
+		meq::GaugeFreeFitOptions gauge;
+		gauge.gauge = meq::SurfaceGauge::SpectralWidth;
+		gauge.spectralWeight = weight;
+
+		meq::GaugeFreeFitReport report;
+		meq::SurfaceFit const freed = meq::gaugeFreeFit( linear, field, nodes,
+		                                                 gauge, report );
+
+		std::printf( "  %-16s  %-9.0e  %.6e  %11.5f  %+.4e\n",
+		             "spectral width", weight, report.surfaceError,
+		             report.spectralWidth, report.minimumJacobian );
+
+		penaltyError.push_back( report.surfaceError );
+		penaltyWidth.push_back( report.spectralWidth );
+
+		BOOST_TEST( report.minimumJacobian > 0.0 );
+	}
+
+	std::printf( "\n  the linear fit's spectral width is %.5f and the"
+	             " minimum-norm refit reaches %.5f WITHOUT BEING ASKED, which"
+	             " is\n  Panici's Figure 5 reproduced on a fit rather than on a"
+	             " solve: the freedom alone condenses the spectrum.\n",
+	             minimumNorm.initialSpectralWidth, minimumNorm.spectralWidth );
+	std::printf( "  AND THE PENALTY DOES NOT IMPROVE ON THAT. Twelve decades of"
+	             " lambda move the spectral width by %.1f%%, the WRONG way"
+	             " ( %.5f\n  against %.5f ), and cost %.1f times the surface"
+	             " error.\n",
+	             100.0*std::abs( penaltyWidth.back()/penaltyWidth.front()
+	                             - 1.0 ),
+	             penaltyWidth.back(), minimumNorm.spectralWidth,
+	             penaltyError.back()/minimumNorm.surfaceError );
+
+	// THE MINIMUM-NORM STEP CONDENSES THE SPECTRUM WITHOUT A PENALTY. That is
+	// the DESC claim, measured here on a fit.
+	BOOST_TEST( minimumNorm.spectralWidth < minimumNorm.initialSpectralWidth );
+
+	// THE PENALTY'S BIAS IS MONOTONE IN ITS WEIGHT, which is what makes it a
+	// tuning parameter rather than a threshold: there is no value that is right,
+	// and every decade costs about half an order in the surface residual.
+	BOOST_TEST( penaltyError[ 1 ] > penaltyError[ 0 ] );
+	BOOST_TEST( penaltyError[ 2 ] > penaltyError[ 1 ] );
+	BOOST_TEST( penaltyError[ 2 ] > 10.0*minimumNorm.surfaceError );
+
+	// AND IT DOES NOT BUY WHAT IT IS FOR, WHICH IS THE FINDING THIS CASE DID NOT
+	// EXPECT. Panici's M( p, q ) is a RATIO of two weighted sums, and a
+	// quadratic penalty on |m|^p shrinks both of them -- so driving the
+	// coefficients down does not drive the ratio down. Measured, twelve decades
+	// of lambda move it by under two per cent and in the wrong direction, while
+	// the minimum-norm step -- which asks for nothing about the spectrum at all
+	// -- already sits below every penalised value. The penalty is dominated on
+	// its own metric as well as on accuracy.
+	//
+	// If this ever inverts, the penalty has started earning its place and the
+	// paragraph in SurfaceFit.hpp calling minimum norm the default is stale.
+	BOOST_TEST( penaltyWidth[ 2 ] > minimumNorm.spectralWidth );
+	BOOST_TEST( std::abs( penaltyWidth[ 2 ]/penaltyWidth[ 0 ] - 1.0 ) < 0.05 );
+	BOOST_TEST( penaltyError[ 0 ] > 0.9*minimumNorm.surfaceError );
+}
+
+/*
+ * ===========================================================================
+ * 15. THE DISCRETE LEG: THE SAME SOLVE ON A FIELD THAT IS ON A MESH.
+ * ===========================================================================
+ *
+ * THE CALLABLE SEAM IS THE WHOLE POINT OF THIS CASE. meq::SurfaceFit is
+ * MFEM-free, so meq::NormalisedFluxField is how a solved field reaches it: one
+ * lambda over meq::ContourTracer::sampleAt(), turning psi_h and q_h into Psi_N
+ * and grad Psi_N by grad_bar psi = r q. Every case above runs the analytic
+ * field through the same seam, and this one runs a mesh through it, so the
+ * library cannot have grown a dependence on either.
+ *
+ * THE BOUND IS THE DISCRETISATION'S AND NOT THE REPRESENTATION'S, and it is a
+ * different quantity from every case above: what is asserted is agreement with
+ * the SOLVED level set, which is itself O( h^(k+1) ) from the exact one. So the
+ * gauge-free fit reaching 1e-9 against the analytic field says nothing about
+ * what it should reach here.
+ */
+BOOST_AUTO_TEST_CASE( theGaugeFreeFitReachesTheSolvedFieldThroughOneLambda )
+{
+	Equilibrium const eq = Equilibrium::nstx();
+	ExactAxis const exact = exactAxis( eq, 1.3, 0.0 );
+
+	int const order = 2;
+	int const n = 48;
+	int const angles = 48;
+	int const surfaces = 12;
+	double const smallest = 0.15;
+	double const largest = 0.50;
+	int const degree = 10;
+
+	SolvedEquilibrium solved( eq, nstxBox(), order, n );
+	meq::CriticalPoint const axis = solved.axis();
+	meq::ContourTracer tracer( solved.theSolver() );
+
+	std::vector<meq::SurfaceSample> geometric;
+
+	for ( int i = 0; i < surfaces; ++i )
+	{
+		double const normalisedFlux = smallest
+			+ ( largest - smallest )*i/( surfaces - 1.0 );
+		meq::Contour const contour = tracer.traceFromAxis(
+			levelAt( exact, normalisedFlux ), axis );
+		BOOST_TEST_REQUIRE( contour.closed() );
+
+		meq::AngleParametrisation const rays = tracer.fitByAngle(
+			contour, axis, static_cast<std::size_t>( angles ) );
+
+		for ( std::size_t j = 0; j < rays.count(); ++j )
+		{
+			meq::SurfaceSample sample;
+			sample.normalisedFlux = normalisedFlux;
+			sample.theta = twoPi*static_cast<double>( j )/rays.count();
+			sample.r = rays.pointR[ j ];
+			sample.z = rays.pointZ[ j ];
+			geometric.push_back( sample );
+		}
+	}
+
+	meq::AxisShape const shape = meq::axisShapeFromSamples( geometric, axis.r,
+	                                                        axis.z );
+	std::vector<meq::SurfaceSample> const samples =
+		meq::relabelByAxisShape( geometric, shape );
+
+	// THE SEAM. An element hint threaded through the lambda, because
+	// CLAUDE.md records mfem::Mesh::FindPoints as O( elements x points ) and
+	// this callable is invoked once per node per Gauss-Newton residual
+	// evaluation -- which is exactly the call pattern that trap is about.
+	int hint = -1;
+	meq::NormalisedFluxField field;
+	field.sample = [ &tracer, &hint, &exact ]( double r, double z,
+	                                           double &normalisedFlux,
+	                                           double &gradientR,
+	                                           double &gradientZ )
+	{
+		double psi = 0.0;
+		double fluxR = 0.0;
+		double fluxZ = 0.0;
+		if ( !tracer.sampleAt( r, z, psi, fluxR, fluxZ, hint ) )
+			return false;
+
+		// grad_bar psi = r q -- the SOLVED flux, at the potential's own order
+		// rather than one below it, which is INVERSION-PLAN.md section 3.2's
+		// argument arriving in the Jacobian of a geometric Newton.
+		normalisedFlux = 1.0 - psi/exact.psi;
+		gradientR = -r*fluxR/exact.psi;
+		gradientZ = -r*fluxZ/exact.psi;
+		return true;
+	};
+
+	meq::SurfaceFitOptions options;
+	options.discEdge = largest;
+	meq::SurfaceFit const linear( degree, samples, options );
+
+	meq::GaugeFreeFitOptions gauge;
+	meq::GaugeFreeFitReport report;
+	meq::SurfaceFit const freed = meq::gaugeFreeFit(
+		linear, field, meq::discNodesFrom( samples ), gauge, report );
+
+	std::printf( "\n=== IN-4 case 15: the gauge-free fit on a SOLVED field,"
+	             " k = %d, n = %d, L = %d ===\n", order, n, degree );
+	std::printf( "    the field arrives as ONE lambda over"
+	             " ContourTracer::sampleAt(); nothing in src/meq/SurfaceFit.*"
+	             " includes MFEM\n\n" );
+	std::printf( "  surface error %.6e -> %.6e in %d iterations [%s]\n",
+	             report.initialSurfaceError, report.surfaceError,
+	             report.iterations, report.stop );
+	std::printf( "  spectral width %.5f -> %.5f, min Jacobian %+.4e, axis"
+	             " spread %.3e\n", report.initialSpectralWidth,
+	             report.spectralWidth, report.minimumJacobian,
+	             axisSpreadOf( freed ) );
+
+	// How far the fitted curve is from the EXACT surface, which is the
+	// discretisation plus the representation and is bounded by neither alone.
+	double worstAgainstExact = 0.0;
+	for ( int i = 0; i < surfaces; ++i )
+	{
+		double const normalisedFlux = smallest
+			+ ( largest - smallest )*i/( surfaces - 1.0 );
+
+		for ( int j = 0; j < 64; ++j )
+		{
+			double r = 0.0;
+			double z = 0.0;
+			freed.position( normalisedFlux, twoPi*j/64, r, z );
+
+			// The distance from the fitted point to the exact surface, along
+			// the exact ray through it: gauge invariant, which a comparison at
+			// a prescribed angle would not be.
+			double const theta = std::atan2( z - exact.z, r - exact.r );
+			double exactR = 0.0;
+			double exactZ = 0.0;
+			rayPoint( eq, exact, normalisedFlux, theta, exactR, exactZ );
+			worstAgainstExact = std::max( worstAgainstExact,
+			                              std::hypot( r - exactR,
+			                                          z - exactZ ) );
+		}
+	}
+
+	std::printf( "  worst distance from the EXACT surfaces %.6e, which is the"
+	             " post-processed field's own O( h^(k+2) ) and not the fit's\n",
+	             worstAgainstExact );
+
+	// It landed on the SOLVED level sets, to five thousand times closer than the
+	// linear fit it started from and to far better than the mesh knows them.
+	BOOST_TEST( report.surfaceError < 1.0e-6 );
+	BOOST_TEST( report.initialSurfaceError > 100.0*report.surfaceError );
+
+	// And it is still a map, and its axis is still one point.
+	BOOST_TEST( report.minimumJacobian > 0.0 );
+	BOOST_TEST( axisSpreadOf( freed ) < 1.0e-14 );
+
+	// AND THE BOUND HERE IS THE DISCRETISATION'S, NOT THE REPRESENTATION'S. The
+	// tracer's default pairing is psi* and q*, which converge at k+2, so at
+	// k = 2 on n = 48 -- h = 0.027 -- the solved level set is about 5e-07 from
+	// the exact one, and that is what this reads. A fit cannot be closer to the
+	// truth than the field it was fitted to; if this number ever falls below
+	// h^(k+2) something is compensating and should be looked at rather than
+	// celebrated.
+	BOOST_TEST( worstAgainstExact < 1.0e-5 );
 }

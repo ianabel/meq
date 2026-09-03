@@ -1359,7 +1359,7 @@ against a difference.
 A second, cheap check with real teeth: the fit's own `|dx/dθ|` against `q`
 evaluated pointwise. Two independent routes to the same metric.
 
-### IN-4 — the `ψ`-element decision
+### IN-4 — the `ψ`-element decision — **ANSWERED, 2026-09-03: it was the ANGLE**
 
 Measure the three candidates of §4.4 against IN-2's converged averages — **more
 than one of them, not the safety factor alone**, since a basis can be excellent
@@ -1373,9 +1373,94 @@ not see it.
 outermost element must begin depends on which extension is used, and how much a
 global fit loses depends on how bad the band is.
 
-**Acceptance.** A decision, recorded with the measurement that made it. This
-stage is allowed to conclude "global Zernike is sufficient for the flux range we
-care about" — that is a result, not a failure.
+**THE ANSWER IS THAT THE QUESTION WAS THE WRONG ONE, AND THE MEASUREMENT IS
+UNAMBIGUOUS.** `meq::gaugeFreeFit()` requires each disc node only to **land on
+the right surface** rather than to sit at a prescribed angle — a geometric
+Gauss–Newton on `Ψ_N(x(ρ,θ)) − Ψ`, warm-started by IN-3's linear fit, with
+`∇Ψ_N` from the solved flux. **No `ψ`-element is needed, and none is
+implemented.**
+
+**On nested ellipses, where the answer is known exactly**, started from the bad
+fit:
+
+| `L` | linear fit | gauge-free | gain |
+|---|---|---|---|
+| 2 | 1.718e-01 | **8.31e-16** | **2.1e+14** |
+| 8 | 3.214e-02 | 8.95e-11 | 3.6e+08 |
+| 16 | 1.623e-02 | 1.86e-09 | 8.7e+06 |
+
+**And that is the theoretically right answer rather than a lucky one**: for
+nested similar ellipses `x = a u`, `z = b v` in the disc's own Cartesian
+coordinates, so the family **is a degree-1 map** under the correct angle. The
+solve finds it in four iterations at round-off, where the prescribed-angle fit
+decays at `L^{-1.2}` and never converges.
+
+**IN-3's algebraic tail is removed and it holds to `Ψ_N = 0.005`.** On `nstx()`
+over `Ψ_N ∈ [0.02, 0.60]`: linear 1.67e-02 → 3.78e-04 against gauge-free
+1.78e-03 → **4.16e-09** for `L = 4 → 16`, and the tail is in the last leg —
+linear falls 1.69× over `L = 12 → 16` where gauge-free falls **52×**. An
+inner-limit sweep gives gains of 3.5e3 / 2.9e3 / 2.5e3 at `Ψ_min = 0.10 / 0.02 /
+0.005`, so **no inner limit tried costs it more than a factor of 1.5**. That is
+the number `MANTA-COUPLING.md` needed and it removes the constraint that
+motivated elements.
+
+**Panici's Figure 5 reproduced on a fit, with no penalty at all**: spectral
+width `M(2,2)` falls **1.607 → 1.366** under the minimum-norm gauge alone. The
+discrete leg reads 1.481 → 1.265.
+
+> **THE EXPLICIT SPECTRAL-WIDTH PENALTY LOSES ON ITS OWN METRIC, AND THE REASON
+> IS STRUCTURAL.** `M(p,q) = Σ m^{p+q}(R²+Z²) / Σ m^p(R²+Z²)` is a **ratio** of
+> two weighted sums of the same coefficients, so a quadratic penalty is not a
+> surrogate for it: twelve decades of `λ` move `M` by 1.6% **in the wrong
+> direction**, and cost **44×** in surface error. Hirshman & Breslau minimise `M`
+> itself, which is not a quadratic problem. Kept as the losing column.
+
+> **AND THE GAUGE IS A SOFT TAIL WITH NO GAP, NOT A NULL SUBSPACE — THIS FILE
+> SAID OTHERWISE.** Measured: the ellipse family has **exactly 3** null
+> directions at every degree from 2 to 16, of 6 to 306 columns, and **`nstx` has
+> none at all**; what both have is a smooth tail running down to 8e-08 of the
+> largest singular value, 58 of 306 directions below `1e-4 σ_max` on the ellipses
+> and 97 on `nstx`. So there is nothing to project out and **the floor is a
+> threshold that must be chosen rather than read off a gap**. The no-gauge
+> control still fires on both fields — first step `8.6e+10 ×` the coefficient
+> norm on the ellipses, Jacobian `−2.2e+13`, i.e. **folded** — but the mechanism
+> and the magnitude differ by six orders between fields, so a control measured on
+> one field alone would have reported whichever it happened to meet.
+
+> **AND A TRUST REGION IS A THIRD TREATMENT THAT NEITHER CANDIDATE COVERED.**
+> The undamped pseudo-inverse reaches round-off at `L ≤ 12` and **fails at
+> `L = 16` and 20**. What makes it robust is an adaptive Levenberg–Marquardt
+> damping — which is **itself a Tikhonov gauge**, so `SurfaceGauge::None` has to
+> disable the damping as well as the floor. **A "no gauge" control that kept the
+> trust region would pass while testing nothing.**
+
+**THE MAP MUST BE CHECKED FOR FOLDING AND IT IS.** Minimum Jacobian **+5.2e-02
+to +6.3e-02** with the gauge on, against negative on **every** ungauged run. A
+surface residual alone admits a beautiful number over a folded map.
+
+> **AND ONCE THE ANGLE IS FREE, ANY ACCEPTANCE WRITTEN AGAINST A PRESCRIBED
+> ANGLE IS MEASURING THE GAUGE RATHER THAN THE FIT.** IN-3's derivative and
+> metric checks compare the fit's position *at a given `θ`* against a surface
+> traced at that `θ` — exactly the freedom being granted — so they are not
+> re-asserted for the gauge-free fit and are replaced by **gauge-invariant**
+> properties: distance to the surface, fitted perimeter against exact (3.5e-07
+> relative), and the sign of the map Jacobian.
+>
+> **This costs the consumer nothing, which is the point.** `MANTA-COUPLING.md`
+> reads flux-surface *averages*, and an average over a surface does not know how
+> the surface was parametrised. The deliverable was gauge-invariant all along.
+
+**The conversion product is unmoved**: 1.156 against the linear fit's 1.148, and
+the axis spread stays an exact `0.000e+00` at every degree and on the solved
+field. **On the discrete field** (`k = 2`, `n = 48`, through one lambda over
+`ContourTracer::sampleAt`) the fit reaches 8.65e-08 and sits **5.71e-07** from
+the exact surfaces — which is the post-processed pairing's own `O(h^{k+2})`, so
+what is left is *the discretisation and not the representation*.
+
+**Acceptance.** A decision, recorded with the measurement that made it — and the
+decision is that **the `ψ`-element question is closed without one**. §4.4's three
+candidates were three ways to buy a `ρ`-dependent angle; solving for it directly
+is cheaper than all of them and is what DESC was measured doing.
 
 ### IN-5 — open surfaces
 
