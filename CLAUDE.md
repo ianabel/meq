@@ -289,7 +289,7 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 git submodule update --init --recursive     # extern/toml11
 cmake -B build
 cmake --build build -j4
-cd build && ctest --output-on-failure       # ~490-680 s, 32/32
+cd build && ctest --output-on-failure       # ~490-680 s, 33/33
 ```
 
 **ctest needs no environment set by hand.** `tests/CMakeLists.txt` puts
@@ -2943,20 +2943,130 @@ contour's distance to the mesh boundary; its reference value is asserted
 instead. **That is the fixture's elongation, and it is one more reason the
 curved path is where this item actually lives.**
 
+### IN-3: the fit, and the angle is not free
+
+`src/meq/SurfaceFit.{hpp,cpp}` fits `R` and `z` as truncated Zernike expansions
+to a point cloud of traced surfaces. **MFEM-free**, like `Zernike`, `Profiles`
+and `Source` — plain doubles in, coefficients out — so CI can build and test it;
+a caller writes a two-line loop to turn an `AngleParametrisation` into samples,
+and `CMakeLists.txt` records that reason beside the source list.
+
+**THE GEOMETRIC POLOIDAL ANGLE IS INADMISSIBLE, AND EVERYTHING ELSE IN THE STAGE
+IS DOWNSTREAM OF IT.** Labelling surfaces by the geometric angle about the axis
+— the obvious choice, and what `AngleParametrisation` produces — **makes the
+disc map non-smooth at the axis for any non-circular surface**, so no basis that
+is smooth there can converge against it.
+
+The argument is exact, and it takes one line to check. A function smooth at the
+origin has precisely **one** angular harmonic multiplying `ρ¹`. Take nested
+ellipses of semi-axes `a`, `b` labelled by geometric angle; with `u = ρ cos θ`
+and `v = ρ sin θ`,
+
+```
+x( u, v ) = a b · u · √(u² + v²) / √(b² u² + a² v²)
+```
+
+whose trailing factor is **homogeneous of degree zero** — a function of
+direction alone, with no limit at the origin unless `a = b`. The `ρ¹`
+coefficient therefore carries `cos θ, cos 3θ, cos 5θ, …`, and every harmonic
+past the first is one the Zernike index constraint **excludes**, precisely
+because it is not smooth there. The parametrisation puts content exactly where
+the basis refuses to look. Measured on nested ellipses, where the answer is
+known exactly, that column decays like `L^{-1.2}` and **never converges**:
+1.53e-01 at `L = 2`, still 1.07e-02 at `L = 20`, against 1.8e-14 relabelled.
+
+**The repair needs no field.** Near the axis every equilibrium's surfaces are
+ellipses, so a three-parameter fit of a quadratic form to the *innermost traced
+surface* recovers tilt and flattening, and the relabelling is an exact
+reparametrisation of the circle. `meq::relabelByAxisShape`, worth **45× to
+660×**. On `nstx()` it recovers short/long = 0.4943 from samples against 0.4845
+from the Hessian — two independent routes to the same shape.
+
+**`ρ = √Ψ_N` IS NOW MEASURED RATHER THAN ARGUED**, which is what the control was
+for. Worst fit error **3.44e-05 against 7.01e-03** for the same points
+parametrised by `Ψ_N`, a factor of 204; the envelope over `l = 10 → 20` falls by
+32.6 against the control's 4.5. **Conditioning is untouched by the choice**
+(1.87e3 against 1.44e1), so it is not a conditioning artefact — it is the
+square-root branch point at the axis, exactly as `Zernike.hpp` claims.
+
+**The parity control fits the sample cloud eight times better and is useless**:
+condition number **9.15e+16**, axis error 1.23e-04 against 3.56e-07, and an axis
+that moves by 4.8e-03 depending which `θ` you approach along. A better residual
+on the data you fitted and nothing anywhere else.
+
+**The axis comes out `θ`-independent for free and exactly** — spread
+`0.000e+00` at every degree, on analytic and discrete data alike, because every
+mode with `m ≠ 0` carries `ρ^|m|` and above. Asserted as an exact zero, not a
+tolerance. **A caveat for anyone rebuilding that control**: a tensor product
+that keeps `l ≥ |m|` *also* gives an exactly `θ`-independent axis, because those
+modes vanish at `ρ = 0` too. Only admitting modes with **no radial factor**
+breaks it, and a control built the obvious way demonstrates nothing.
+
+**THE LEVER ON CONDITIONING IS THE HOLE, NOT THE SAMPLE LAYOUT.** A sample set
+has a hole in the middle — no surface is traced at `Ψ_N = 0` — and the
+orthogonality argument needs nodes spanning the whole disc. Condition number
+against the inner limit: 7.78 at `Ψ_min = 0.02`, 3.19e+02 at 0.10, **7.30e+04 at
+0.25**. Four orders. The three layouts — equispaced in `Ψ_N`, equispaced in `ρ`,
+Gauss in `Ψ_N` — agree to within **25%** at every hole size, and Gauss is
+sometimes the worst. The test asserts that wrong story dead, at
+`layout spread < 2×`.
+
+**And rescaling the disc edge is a change of BASIS, not of model.** A Zernike
+expansion of degree `L` spans the polynomials of degree `L` in `(x, y)` and that
+space is closed under scaling, so the two extents fit the *same function* —
+measured, identical worst errors to better than 1e-6 relative at every inner
+limit. The choice is purely conditioning and is worth up to **11,500×**. The
+default stays `1.0` so that a change of coordinate is never silent, and
+`majorRadiusExpansion()` refuses unless basis, coordinate and edge are all the
+plain ones.
+
+**The Richardson finding needed a step sweep to appear at all, and that is
+itself the lesson.** At the natural step it is worth **1.6×**, not the 10²–10⁴
+seen elsewhere in this tree, because here the *fit's own* derivative error is the
+binding constraint rather than the instrument. Swept, it separates properly —
+70.5× at a step of 0.16 — and the diagnostic is that **the plain column falls by
+50.8 across an eightfold refinement while the extrapolated one moves 11%**: the
+converging column is the instrument, the flat one is the answer.
+
+**The number a coupling reads.** `∂(geometry)/∂Ψ_N` grows exactly as the
+coordinate demands: the product with `2√Ψ_N` settles at **1.148** as the inner
+limit falls to 0.005, so an innermost node at `Ψ₁` carries a geometry derivative
+of about **0.574 / √Ψ₁**. The assertion is that the product is bounded and
+settling, which is the statement that the growth belongs to the coordinate and
+not to the fit. `MANTA-COUPLING.md`'s consumer can keep its nodes off `Ψ = 0`,
+so this is a conditioning number for a coupling to read rather than a defect.
+
+**`fitByAngle()` now accepts its best iterate** where the tolerance is
+unattainable, with `AngleParametrisation::stalledRays` beside `worstResidual`,
+and keeps the throw for a ray that never brackets. The acceptance asserts against
+the **measured face jump** rather than a chosen tolerance: 11 of 1536 rays
+accepted at their best, worst residual 6.97e-04 against a DG jump of 1.63e-03 —
+a ratio of 0.43, i.e. as close as the field allows. `AngleParametrisation` also
+keeps the `q` it was computing and discarding, and `sampleAt()` has an overload
+reporting `extended`.
+
 ### What is next
 
-**IN-3's fit** in the Zernike basis, and then **IN-4**, which is a decision
-about the `ψ`-varying element and is the user's to make.
+**IN-4, which is a decision about the `ψ`-varying element and is the user's to
+make.** IN-3 reshaped it and the plan's §4.4 now carries the three candidates.
 
-**IN-4 HAS LOST ONE OF ITS THREE ARGUMENTS, WHICH IS WORTH KNOWING BEFORE IT IS
-TAKEN.** `INVERSION-PLAN.md` §4.3 argued that a single global expansion has its
-accuracy set by its worst region, so surfaces known only to the extension's
-order would degrade the fit everywhere — a third, independent reason to prefer
-elements in `ψ`. **That was written assuming the extension costs an order. With
-the transfer lift it does not**: the band converges at `k+2` where the interior
-population of the same contour reads `k+1` to `k+2`, so the band is not the
-worst region. Two of the three arguments survive; that one should not be leaned
-on.
+**IT LOST ONE ARGUMENT AND GAINED A BETTER ONE.** §4.3 used to argue that a
+global expansion's accuracy is set by its worst region, so band-limited surfaces
+would degrade the fit everywhere. **That assumed the extension costs an order,
+and with the transfer lift it does not** — the band converges at `k+2` where the
+interior of the same contour reads `k+1` to `k+2`. That argument is gone.
+
+What replaces it is sharper, because it is about the axis where the trouble
+provably is. **A relabelling of the poloidal angle that does not depend on the
+flux label straightens exactly one order**: §4.1's axis-ellipse repair fixes the
+`ρ¹` harmonics and `ρ²`, `ρ³`, … keep whatever the shaping puts there. Measured,
+with the innermost surface at `Ψ_N = 0.10` the envelope decays geometrically and
+at `Ψ_N = 0.02` **an algebraic tail appears that no degree removes**. So a
+parametrisation smooth to all orders must **vary with the surface** — and there
+is the structural difference: **DESC solves for its `R`, `z` coefficients**, so
+its parametrisation is part of the unknown, while **meq fits after the fact** and
+must buy it. Elements in `ψ` are one way to buy it; MXH's per-surface shape
+expanded in the flux label is a genuinely different one.
 
 **IN-P, the performance harness**, is unblocked and unstarted. Nothing in this
 item has been timed — every number above is an accuracy measurement — and
@@ -3836,9 +3946,9 @@ and its analytic gradients match finite differences to 5e-9.
 src/meq/     the library. Config, Profiles, Source, SourceFactory,
              GradShafranov, BoundaryShape, Estimator, Field, Sampler,
              WarmStart, Output -- all ported and all under the naming check.
-             CriticalPoints, FluxSurfaces, SurfaceAverage and Zernike are
-             the solution-inversion work and were written here rather than
-             ported; see that section.
+             CriticalPoints, FluxSurfaces, SurfaceAverage, SurfaceFit and
+             Zernike are the solution-inversion work and were written here
+             rather than ported; see that section.
 apps/        drivers. Only meq.cpp, and MEQ_BUILD_APP defaults ON.
 tests/       unit/ (Boost.Test), convergence/ (rate assertions),
              analytic/ (closed-form solutions used by both),

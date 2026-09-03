@@ -214,6 +214,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/Source.cpp
 	src/meq/SourceFactory.cpp
 	src/meq/SurfaceAverage.cpp
+	src/meq/SurfaceFit.cpp
 	src/meq/WarmStart.cpp
 	src/meq/Zernike.cpp)
 
@@ -229,6 +230,15 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/Sampler.cpp
 	src/meq/SurfaceAverage.cpp
 	src/meq/WarmStart.cpp)
+
+# src/meq/SurfaceFit.cpp is DELIBERATELY ABSENT from that list. IN-3's fit is a
+# linear least-squares problem against a point cloud -- plain doubles in,
+# coefficients out -- so it is MFEM-free in the same way and for the same two
+# reasons as Profiles, Source and Zernike: it is testable without the finite
+# element library, and CI, which cannot obtain the MFEM branch meq needs, can
+# build and test it. The price is that a caller holding a meq::AngleParametrisation
+# writes a two-line loop to turn it into meq::SurfaceSample rather than passing
+# it straight in; src/meq/SurfaceFit.hpp prints that loop.
 
 # And the one that additionally needs netcdf-cxx4. Kept separate because the two
 # dependencies are independent: a tree with MFEM and no NetCDF builds everything

@@ -810,6 +810,20 @@ namespace meq
 			bool sampleAt( double r, double z, double &psi, double &qR,
 			               double &qZ ) const;
 
+			/// The same, and it also says whether the value came from the band
+			/// extension outside the mesh rather than from an element.
+			///
+			/// A SEPARATE OVERLOAD RATHER THAN AN EXTRA DEFAULTED ARGUMENT,
+			/// because the flag is the thing INVERSION-PLAN.md section 4.3
+			/// insists a consumer must be able to read PER POINT, and a defaulted
+			/// out-parameter is easy to not notice. Without it a caller placing
+			/// its own quadrature points -- which is what
+			/// meq::surfaceAverages( tracer, contour ) does -- cannot tell
+			/// whether a point it sampled is band data, and has to mark whole
+			/// segments conservatively from their endpoints instead.
+			bool sampleAt( double r, double z, double &psi, double &qR,
+			               double &qZ, int &hint, bool &extended ) const;
+
 			/**
 			 * Re-parametrise a closed @a contour by poloidal angle about
 			 * @a axis, at @a count equispaced angles, and build the metric.
@@ -1187,6 +1201,19 @@ namespace meq
 		std::vector<double> pointR;
 		std::vector<double> pointZ;
 
+		/// q at the node, in meq's sign convention -- the very flux the ray
+		/// Newton used for its derivative and the identity below used for rho'.
+		///
+		/// STORED BECAUSE IT WAS COMPUTED AND THROWN AWAY. Every node of a fit
+		/// evaluates q to build rho' and, before 2026-09-03, discarded it, so
+		/// meq::surfaceAverages() re-read the field at every node through
+		/// sampleAt() to get the same numbers back. That is one avoidable
+		/// evaluation per node in the one place CLAUDE.md records
+		/// Mesh::FindPoints as O( elements x points ). Keeping it costs two
+		/// doubles a node.
+		std::vector<double> fluxR;
+		std::vector<double> fluxZ;
+
 		/// rho'( theta_j ), POINTWISE FROM q by the identity in the header.
 		std::vector<double> radiusPrime;
 
@@ -1245,6 +1272,23 @@ namespace meq
 		/// bracket. Zero on a well-behaved surface, and a climbing count is the
 		/// star-shapedness hypothesis fraying before it fails.
 		int bisections = 0;
+
+		/// Rays accepted at the closest point they could reach rather than at
+		/// the tolerance. THE EXACT COUNTERPART OF Contour::stalledCorrections,
+		/// and it is here for the same reason: { psi_h = c } is a union of
+		/// per-element arcs offset by the DG jump, so a ray crossing a face where
+		/// c falls inside the jump has NO point on it with psi_h = c, and no
+		/// tolerance tighter than the jump can be met. worstResidual says how
+		/// close the worst of them got and is to be read against
+		/// setTolerance() times the scale of psi_h.
+		///
+		/// IT IS RARE AND IT GETS COMMONER WITH THE ANGLE COUNT, more rays being
+		/// more chances -- the same shape as stalledCorrections getting commoner
+		/// as Delta_s falls. A LARGE count is a different matter and says the
+		/// tolerance asked for is below the field's own ambiguity everywhere,
+		/// which is a statement about the mesh and the degree rather than about
+		/// this fit.
+		int stalledRays = 0;
 
 		/// Times the element walk fell back on Mesh::FindPoints during the fit.
 		/// The same measurement Contour::fallbackLocations is, for the same

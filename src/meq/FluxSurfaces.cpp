@@ -906,6 +906,23 @@ namespace meq
 		return sampleAt( r, z, psi, qR, qZ, hint );
 	}
 
+	bool ContourTracer::sampleAt( double r, double z, double &psi, double &qR,
+	                              double &qZ, int &hint, bool &extended ) const
+	{
+		FieldSample sample;
+		int fallbacks = 0;
+		extended = false;
+		if ( !sampleField( r, z, hint, sample, fallbacks ) )
+			return false;
+
+		hint = sample.element;
+		psi = sample.psi;
+		qR = sample.qR;
+		qZ = sample.qZ;
+		extended = sample.extended;
+		return true;
+	}
+
 	bool ContourTracer::correct( double level, double target, double maxMove,
 	                             double &r, double &z, int hint,
 	                             FieldSample &sample, int &iterations,
@@ -1643,6 +1660,8 @@ namespace meq
 		fit.radius.assign( count, 0.0 );
 		fit.pointR.assign( count, 0.0 );
 		fit.pointZ.assign( count, 0.0 );
+		fit.fluxR.assign( count, 0.0 );
+		fit.fluxZ.assign( count, 0.0 );
 		fit.radiusPrime.assign( count, 0.0 );
 		fit.speed.assign( count, 0.0 );
 		fit.crossing.assign( count, 0.0 );
@@ -1697,6 +1716,37 @@ namespace meq
 			bool nodeExtended = false;
 			double nodeDepth = 0.0;
 
+			// THE BEST ITERATE, AND WHY THIS RAY NEWTON KEEPS ONE.
+			//
+			// The corrector above already does this and the reason is the same:
+			// { psi_h = c } is a union of per-element arcs offset by the DG jump,
+			// so a RAY crossing a face where c falls inside the jump has NO point
+			// on it with psi_h = c at all, and no tolerance tighter than the jump
+			// is attainable there. Demanding one and throwing is refusing to
+			// answer a question that has an answer to within the field's own
+			// ambiguity -- measured, at k = 1 on the raw pairing it threw on
+			// EVERY mesh from n = 12 to 32, and the probability rises with the
+			// angle count simply because more rays are more chances.
+			//
+			// So the search keeps the closest iterate it has seen anywhere along
+			// the ray and accepts it if neither the Newton nor the bisection
+			// reaches the tolerance, counting it in AngleParametrisation::
+			// stalledRays and leaving worstResidual to say how close it got.
+			//
+			// WHAT IS NOT SOFTENED IS THE BRACKET. A ray that never brackets the
+			// level at all is a different thing entirely -- the surface is not
+			// star-shaped about the axis, or the level is not attained on that
+			// ray -- and it still throws, because there is no best iterate to
+			// speak of and a number returned from it would be fiction.
+			double bestRadius = 0.0;
+			double bestResidual = std::numeric_limits<double>::infinity();
+			double bestPsi = 0.0;
+			double bestQR = 0.0;
+			double bestQZ = 0.0;
+			bool bestExtended = false;
+			double bestDepth = 0.0;
+			bool haveBest = false;
+
 			auto evaluate = [ & ]( double rho, double &psi, double &qR,
 			                       double &qZ ) -> bool
 			{
@@ -1710,6 +1760,20 @@ namespace meq
 				qZ = sample.qZ;
 				nodeExtended = sample.extended;
 				nodeDepth = sample.depth;
+
+				double const distance = std::abs( sample.psi - contour.level );
+				if ( distance < bestResidual )
+				{
+					bestResidual = distance;
+					bestRadius = rho;
+					bestPsi = sample.psi;
+					bestQR = sample.qR;
+					bestQZ = sample.qZ;
+					bestExtended = sample.extended;
+					bestDepth = sample.depth;
+					haveBest = true;
+				}
+
 				return true;
 			};
 
@@ -1792,10 +1856,28 @@ namespace meq
 
 				if ( !converged )
 				{
-					std::ostringstream message;
-					message << "ContourTracer::fitByAngle: the ray at theta = "
-					        << theta << " did not reach psi = " << contour.level;
-					throw std::runtime_error( message.str() );
+					// Neither route met the tolerance. Take the closest point the
+					// ray ever reached and say so; see the note beside the best
+					// iterate above for why that is honest rather than
+					// convenient. haveBest is false only if every evaluation on
+					// this ray left the mesh, which is not a tolerance problem.
+					if ( !haveBest )
+					{
+						std::ostringstream message;
+						message << "ContourTracer::fitByAngle: every evaluation on"
+						        << " the ray at theta = " << theta << " fell"
+						        << " outside the field, so there is no point on it"
+						        << " at all";
+						throw std::runtime_error( message.str() );
+					}
+
+					guess = bestRadius;
+					psi = bestPsi;
+					qR = bestQR;
+					qZ = bestQZ;
+					nodeExtended = bestExtended;
+					nodeDepth = bestDepth;
+					++fit.stalledRays;
 				}
 			}
 
@@ -1816,6 +1898,8 @@ namespace meq
 			fit.radius[ j ] = guess;
 			fit.pointR[ j ] = axis.r + guess*cosine;
 			fit.pointZ[ j ] = axis.z + guess*sine;
+			fit.fluxR[ j ] = qR;
+			fit.fluxZ[ j ] = qZ;
 			fit.crossing[ j ] = std::abs( cross );
 			fit.transversality = std::min( fit.transversality, std::abs( cross ) );
 
