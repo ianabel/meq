@@ -205,6 +205,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/CriticalPoints.cpp
 	src/meq/Estimator.cpp
 	src/meq/Field.cpp
+	src/meq/FluxSurfaces.cpp
 	src/meq/GradShafranov.cpp
 	src/meq/Output.cpp
 	src/meq/Profiles.cpp
@@ -212,6 +213,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/Sampler.cpp
 	src/meq/Source.cpp
 	src/meq/SourceFactory.cpp
+	src/meq/SurfaceAverage.cpp
 	src/meq/WarmStart.cpp
 	src/meq/Zernike.cpp)
 
@@ -221,9 +223,11 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/CriticalPoints.cpp
 	src/meq/Estimator.cpp
 	src/meq/Field.cpp
+	src/meq/FluxSurfaces.cpp
 	src/meq/GradShafranov.cpp
 	src/meq/Output.cpp
 	src/meq/Sampler.cpp
+	src/meq/SurfaceAverage.cpp
 	src/meq/WarmStart.cpp)
 
 # And the one that additionally needs netcdf-cxx4. Kept separate because the two

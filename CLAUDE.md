@@ -289,7 +289,7 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 git submodule update --init --recursive     # extern/toml11
 cmake -B build
 cmake --build build -j4
-cd build && ctest --output-on-failure       # ~490-680 s, 30/30
+cd build && ctest --output-on-failure       # ~490-680 s, 32/32
 ```
 
 **ctest needs no environment set by hand.** `tests/CMakeLists.txt` puts
@@ -2691,16 +2691,306 @@ difference carries its own `O(h²)` truncation, so the comparison sits at
 `(4D(h/2) − D(h))/3`, reaches **1.4e-11**. **That applies wherever this suite
 checks a derivative against a difference**, which is several places.
 
+### IN-0: the tracer, and the pairing that decides whether `q`'s tangent is worth anything
+
+`src/meq/FluxSurfaces.{hpp,cpp}` is the predictor–corrector tracer and the
+poloidal-angle parametrisation; `FluxSurfaceConvergence.cpp` is the acceptance.
+**Fitted path only** — the band between `Γ_h` and `Γ` is deliberately not in it,
+and `sampleField()` is the single seam it will be added at.
+
+**THE DEFAULT IS `Potential::PostProcessed`, AND THE REASON IS NOT THE ONE THAT
+WAS EXPECTED.** meq has two candidate pairs: `ψ_h` with `q_h`, both `k+1`; and
+`ψ*` with `q*` from `DarcyForm::Reconstruct()`, where `ψ*` is `k+2`. Rooting
+`ψ*` puts the traced curve `k+2` from the true one instead of `k+1` — measured
+**60×, 54× and 83×** closer at `k = 1, 2, 3` on the same mesh, at *fewer*
+corrector iterations per point.
+
+**But the finding that matters is about the Hermite, and it was not predicted.**
+The interpolant is built on tangents from the **flux** and measured against the
+level set of the **potential**, and those are the same curve only so far as the
+two fields agree. `∇ψ_h/r` agrees with `q_h` only to `O(h^k)` — differentiating
+an L2 potential of degree `k` loses an order while `q_h` keeps `k+1`. So down a
+`Δs` sweep the `ψ_h`/`q_h` pair is fourth order **until the tangent tilt takes
+over and second order afterwards**: 3.809 → 1.400 → 1.569, tilt 3.5e-5 to
+7.3e-5. The `ψ*`/`q*` pair has a tilt a full order smaller, 3.1e-7 to 5.9e-7,
+and holds 3.960 / 3.996 / 3.812 across the whole sweep.
+
+**So the post-processed pairing is what makes the cubic-Hermite-from-`q` claim
+true at all on this discretisation**, rather than merely making it more
+accurate. The control that identifies the tilt as the cause is a third column
+built on `∇ψ_h`, the *exact* tangent of the curve being measured against, which
+stays fourth order in both pairings — the right tangent for the representation
+error and the wrong one for the field error, which is why all three are printed.
+
+**AND THE USUAL REASON FOR PREFERRING `ψ*` IS WRONG.** It is not that the local
+post-processing is built so `∇ψ*` matches `r q*`. MFEM's own documentation is
+explicit: the constraint equation projects the **total** flux onto the face
+restriction of an `RT_k` space, and *that* field is the source term of
+Stenberg's local problem — so `∇ψ*` and `r q*` are different objects. What is
+true, and measured, is that they agree an order better than the raw pair does.
+**Right answer, wrong mechanism**, and the difference matters because the wrong
+mechanism predicts exactness and would have made the measured tilt look like a
+defect.
+
+**THE FAILURE MODE THAT ENDS A TRACE, AND IT GETS COMMONER AS `Δs` FALLS.**
+`{ψ_h = c}` is a union of per-element arcs offset by the face jump, so a point
+landing within `jump/|∇ψ|` of a face is on **neither**: the Newton step computed
+in element A pushes it into B, B's pushes it back, and the residual alternates
+without ever meeting a tolerance tighter than the jump. The band is about 2e-5
+wide on a contour of length 1.7 — rare, and *more* likely the finer the spacing,
+simply because more points are placed. Left alone it ends the trace, and it
+ended several before it was diagnosed. The corrector keeps its best iterate,
+accepts after four non-improving steps, refuses to travel more than one
+predictor step, and reports `stalledCorrections` against `correctorTarget`.
+**One endpoint accepted at the jump level poisons that segment's interpolation
+error by a factor of a hundred on a coarse mesh**, so the (c) measurement
+excludes those segments as well as the face-crossing ones.
+
+**Closure is not "machine precision", and the correct statement is geometric.**
+Both the returning point and the start sit on the level set to 1e-13, but they
+are separated *along* the curve by the final step's tangential offset `g_t`, and
+an arc departs from its own tangent line by `κ g_t²/2`. Measured **3.573e-10
+against a bound of 7.2e-10** — which is the discriminating assertion, because a
+drifting tracer's normal error would grow with path length and have nothing to
+do with `g_t`. The **residual** is what is flat with path length: 1.559e-13,
+1.632e-13, 1.632e-13 over 1, 5 and 10 circuits. Do not compare the closure error
+at 1 circuit against 10 — the step controller starts cold, so those two numbers
+differ by 36× through their final steps rather than through their lengths.
+
+**The rest, briefly.** `(c)` at fixed `Δs` is flat over a 16× change in dofs —
+5.436e-09, 5.441e-09, 5.332e-09 — which is what says (b) and (c) are separated.
+`(a)` against the exact contour converges at `k+1` on `Potential::Raw`. The
+face-crossing jump converges at `k+2`. And the element walk —
+`TransformBack`, then a breadth-first widening over face neighbours — reads
+**zero** `FindPoints` fallbacks on every trace, which matters because
+`CLAUDE.md` records `FindPoints` as `O(elements × points)` and a corrector calls
+for a location once per iteration.
+
+### IN-1: a spectral rule fed a second-order Jacobian is a second-order scheme
+
+The trap `INVERSION-PLAN.md` §3.2 warns about, made into a measurement. Arc
+length of one contour, three ways, rates in the number of angles:
+
+| | |
+|---|---|
+| **from `q`, pointwise** | **7.03** |
+| the trap: the same trapezoid, `ρ′` by differencing positions | 1.97 |
+| chord sum | 1.99 |
+
+**The rule is identical in the first two rows.** What differs is that `ρ′` comes
+from `q` pointwise in one and from a central difference of neighbouring radii in
+the other — and they converge to the **same limit**, so nothing in the second's
+own output says it is orders worse. `ρ′ = ρ (u·t)/(u′·t)`, derived from
+`ψ(a + ρ(θ)u(θ)) = c` and checked before use.
+
+**Star-shapedness is a hypothesis, is measured, and is refused when it fails** —
+`min|u × t|`, the same denominator, reading 0.844 / 0.823 / 0.805 on the
+benchmarks. This is `IndexAudit::transversality` again, one stage later.
+
+> **"SPECTRAL IN `N`" IS NOT ATTAINABLE ON A DISCRETE CONTOUR AND THAT IS NOT A
+> DEFECT.** `ψ_h` jumps across faces, so `ρ(θ)` is piecewise analytic with jumps
+> and no quadrature is geometric on it. The column plunges — 7.24, then 14.8 —
+> and floors at about 1.2e-9, which is where the DG jump of `ψ*` converts to a
+> distance (6.80e-10). **The control that says the floor is the field and not
+> the rule** is the identical rule on the *analytic* contour, reaching
+> 3.775e-15.
+
+**`tests/analytic/FluxSurfaceReference.hpp` is the same statement from the other
+side**, and it exists because IN-2 needs something to compare against.
+Flux-surface averages on an *exact* equilibrium by rays plus the periodic
+trapezoid: it reaches 3.11e-15 on the analytic contour, agreeing with the
+tracer's own control, and it reproduces the trap at 1.37e-01 → 6.84e-04 for the
+differenced metric while the pointwise one is at round-off by 256 angles.
+
+**There are no closed-form Solov'ev flux-surface averages** — `ψ` is elementary,
+but `V′`, `⟨R^{-2}⟩` and the safety factor are integrals over a *contour* of it,
+and the Cerfon–Freidberg contours have no elementary arc length. What that file
+supplies is a converged **reference value**, and the distinction should be said
+wherever the number is printed.
+
+**And it carries an identity that needs no reference value at all**: the
+flux-surface average of the Grad–Shafranov equation,
+`(1/V′) d/dψ ( V′ ⟨|∇ψ|²/R²⟩ ) = −⟨F/R²⟩`. **Quote it with its step or not at
+all**: the residual is a property of the differencing step as much as of the
+averages, running 9.6e-08 at 5% of `|ψ_ax|` down to 2.3e-11 at 0.6% on the exact
+field, and on a *discrete* field it is not even monotone in the step — 2% reads
+1.5e-08 where 1% reads 3.4e-07, because the difference divides the surfaces' own
+DG-jump noise by the step.
+Write the right-hand side with the `F` the solver is fed and **not** as
+`−μ₀p′ − g g′⟨R^{-2}⟩`: the second is Solov'ev-specific and is re-derived by
+hand, so it is not independent of the hand that derived it. **The `d/dψ` must be
+Richardson-extrapolated** — a plain central difference floors the agreement at
+8.1e-07 where `(4D(h/2) − D(h))/3` reaches 2.7e-13, which is `Zernike`'s
+derivative finding for the third time in this file.
+
+### The band, and the extension that was chosen by measuring both
+
+`ContourTracer::setBandExtension()`. **`BandExtension::None` is the default**, so
+the fitted path is bit-unchanged; the curved path is an explicit opt-in.
+
+**THE DECIDING TEST TRACES `Γ` ITSELF**, which lies entirely in the band at every
+mesh — `ψ_h` is strictly negative inside `Ω_h`, so every point of `{ψ = 0}` is
+answered by the extension, and the exact answer is the curve `D_h` was cut from.
+Worst distance from the exact `Γ` over `n = 16/32/64`:
+
+| `k` | flux Taylor | transfer lift | lift closer at `n = 64` |
+|---|---|---|---|
+| 1 | 1.797 | **2.298** | **40×** |
+| 2 | 2.138 | **3.995** | **1,610×** |
+| 3 | 2.138 | **4.848** | **84,695×** |
+
+**The flux Taylor step is second order at every `k` and that is structural**: its
+remainder is `O(h²)` over a band of width `O(h)` however good `q` is, so it
+cannot improve with the polynomial degree, and it does not — 2.138 at `k = 2`
+and at `k = 3` alike. The transfer lift is the error of `q` **integrated along a
+path of length `O(h)`**, which is `k+2`. `BandExtension::FluxTaylor` is kept as
+the **control**, not as a fallback, and the tests say so in their failure
+messages.
+
+**AND THE PRIMITIVE THE PLAN NAMED CANNOT DO IT.** `mfem::PathLiftCoefficient`
+`dynamic_cast`s its `ElementTransformation` to `FaceElementTransformations` and
+lifts from *that face's own* integration point — it answers "what is `φ_h` on
+`Γ_h`", which is `η₅`'s question and not this one. The usable primitive is one
+level down and public: **`mfem::PathIntegral( Cu, x, xbar, line_ir )` takes
+arbitrary endpoints**, with `mfem::ElementExtension` supplying `E_h(q_h)`.
+MFEM's own comment is the licence — fed the exact flux it must return
+`p(x) − p(a(x))` *"whatever the path"*.
+
+**THREE TRAPS IN THE MEASURING, AND THE FIRST NEARLY PRODUCED A WRONG HEADLINE.**
+
+* **A contour at fixed `Ψ_N` cannot measure the extension's order.** As `h`
+  falls, `Γ_h` climbs toward `Γ`, so a contour a fixed distance inside has its
+  band excursion shrink *faster* than `h` — `deep/h` goes 0.92 → 0.66 → 0.26 and
+  the band population 136 points → 9. Both columns then converge faster than the
+  extension beneath them, the Taylor step reading 3.75 at `k = 3` against its
+  true 2.1. Tracing `Γ` is what fixes it.
+* **The nearest face of `Γ_h` is not the face you are outside of.** A staircase
+  `D_h` cut from a diagonally split Cartesian mesh **pinches** — two triangles
+  meeting at one vertex — so both lobes' faces are equidistant from a point just
+  outside and the tie goes to loop order. Half the time that picks the lobe
+  whose outward normal points the other way and a genuine band point is refused:
+  a trace stopped after 85 points of 320. **The outward test must be a filter
+  applied first**, with the nearest taken among the survivors.
+* **`ψ_h` is not strictly negative inside `Ω_h` to machine precision**, so a
+  handful of `{ψ = 0}` points land back inside — one of 322 at `k = 1, n = 64`.
+  That is the discretisation creeping above its own imposed datum near `Γ_h`,
+  and the acceptance asserts ≥ 98% band rather than 100%.
+
+**The flag is per point and every mask is asserted against `FindPoints`**, in
+both directions, because `CLAUDE.md` records that a *count* rather than a mask
+was the other half of a real defect in the `.nc`. `ContourPoint::extended` and
+`bandDepth`, `Contour::extendedPoints` / `deepestBandPoint` / `bandExtension`,
+and `AngleParametrisation::extended` per node, so a consumer can report
+band-crossing surfaces separately.
+
+### IN-2: the averages, and `ψ*` does NOT buy an order here
+
+`src/meq/SurfaceAverage.{hpp,cpp}`. **One primitive with two builders** — an
+integrand in `(R, z, ψ, q)` over either the angle parametrisation or the traced
+contour with Gauss points — and every named quantity a one-line wrapper. That
+shape is deliberate: `MANTA-COUPLING.md` says the slot list "is negotiated with
+the transport physics case", so a list that is still moving must not be a list
+of functions. Conventions, which are part of the definitions:
+`V′ = ∮2πR dl/|∇ψ|` and `⟨X⟩ = (1/V′)∮2πR X dl/|∇ψ|`. **The safety factor is
+`safetyFactor(g)` and never `q`**, `q` being the flux.
+
+**`ψ*` DOES NOT BUY `k+2` IN AN AVERAGE AND THE REASON IS STRUCTURAL.** Both
+pairings converge at **`k+1`** — `V′` at 2.230 / 3.185 / 4.296 raw against
+1.957 / 2.827 / 4.265 post-processed. The weight is `2πR dl/|∇ψ|` and
+**`|∇ψ| = r|q|`**: the reconstruction buys its extra order in the *potential*,
+and there is no `k+2` flux to divide by. The level set improves, the weight does
+not, and the average inherits the worse. What `ψ*` buys is a **constant** —
+×1.29, ×1.46, ×1.73 in `V′`.
+
+**That is the same shape as the band continuation of `B`**: a quantity limited
+by the one factor with no solved variable behind it. Third time in this item
+that the answer turned on *which field the error divides by* rather than on
+which field was rooted.
+
+**AN AVERAGE DOES NOT ESCAPE THE METRIC TRAP, AND THE PLAUSIBLE ARGUMENT THAT IT
+DOES IS WRONG.** A ratio looks as though it should cancel a bad metric, the same
+weight appearing above and below. It cancels a **constant** — about 40× — and
+**nothing in the order**: from `q` pointwise the sequence rates are 6.77 for `V′`
+and 7.38 for `⟨R^{-2}⟩`; with the metric differenced, 1.92 and 1.80, a separation
+of 1.9e+06 by 128 angles.
+
+**THE IDENTITY'S CONTROL IS FLAT, WHICH IS THE SHARPEST FORM OF THE RICHARDSON
+FINDING YET.** At `k = 2` over a *sixteenfold* refinement the plain central
+difference reads 5.8e-05, 7.9e-06, 8.7e-06, 8.9e-06 — **it stops moving at three
+figures** — while Richardson goes 8.9e-05 → 1.5e-08 at rate 4.185. A column that
+does not converge under mesh refinement is measuring the instrument.
+
+**And the step is not monotone on a discrete field.** At `k = 2, n = 96` a step
+of 2% of `|ψ_ax|` reads 1.5e-08 where **1% reads 3.4e-07** — the smaller step 20×
+worse, because the difference divides the surfaces' own DG-jump noise by the
+step. There is an optimum; find it rather than assuming smaller is better.
+
+**Two extractions agree to about their own error and CANNOT do better.** The
+angle fit and the Hermite contour disagree by an amount converging at the
+field's own order — 2.96/3.09 at `k = 2`, 4.14/4.48 at `k = 3` — because
+`{ψ_h = c}` is a union of per-element arcs offset by the jump and two routes
+placing nodes differently sample different arcs. **So the assertion is on the
+rate**, not on the gap being small. A missing `2πR`, a metric about the wrong
+point, or a gradient on the wrong side of the division would each break the
+rate, and no single-route table could see any of them.
+
+**The fixture needed its own box, and one surface is not measurable at all.**
+`standardBox()` cannot hold these surfaces — `Ψ_N = 0.25` on `nstx()` already
+spans `r ∈ [0.99, 1.57]` against a box ending at 1.4 — so the study runs on
+`[0.60, 1.90] × [-1.10, 1.10]`. `Ψ_N = 0.75` leaves under one cell of margin at
+the coarsest mesh of a dyadic sweep, so an `h`-study there measures the
+contour's distance to the mesh boundary; its reference value is asserted
+instead. **That is the fixture's elongation, and it is one more reason the
+curved path is where this item actually lives.**
+
 ### What is next
 
-**IN-0, the tracer** — predictor–corrector on `ψ_h = c` with the tangent and the
-corrector both from `q`, cubic Hermite between points from `q`, on the fitted
-path first because there is no band there and every rate is therefore
-attributable to the tracer alone. Then the band, as a second acceptance, where
-the flux Taylor step and the transfer-path lift are to be measured **side by
-side on the same contours** — that comparison is the deliverable. Then IN-1's
-metric, IN-2's flux-surface averages, IN-3's fit, and IN-4, which is a decision
+**IN-3's fit** in the Zernike basis, and then **IN-4**, which is a decision
 about the `ψ`-varying element and is the user's to make.
+
+**IN-4 HAS LOST ONE OF ITS THREE ARGUMENTS, WHICH IS WORTH KNOWING BEFORE IT IS
+TAKEN.** `INVERSION-PLAN.md` §4.3 argued that a single global expansion has its
+accuracy set by its worst region, so surfaces known only to the extension's
+order would degrade the fit everywhere — a third, independent reason to prefer
+elements in `ψ`. **That was written assuming the extension costs an order. With
+the transfer lift it does not**: the band converges at `k+2` where the interior
+population of the same contour reads `k+1` to `k+2`, so the band is not the
+worst region. Two of the three arguments survive; that one should not be leaned
+on.
+
+**IN-P, the performance harness**, is unblocked and unstarted. Nothing in this
+item has been timed — every number above is an accuracy measurement — and
+`MANTA-COUPLING.md` §5's pointwise call pattern plus a `dGeometry_dpsi` shaped
+`(nGeometry, nFieldDOF)` is where the cost will actually appear.
+`INVERSION-PLAN.md` §11 is the analysis, including which parts parallelise
+(surfaces, `ψ` DOFs and the rays of a parametrisation do; the tracer's own steps
+do not) and the shared-scratch trap in *Traps* that must be fixed first.
+
+**One open item in the tracer, found by IN-2 using it**: `fitByAngle()` throws
+where the corrector would accept. Its ray Newton demands a tolerance that on a
+discontinuous field is sometimes *unattainable* — a ray crossing a face where
+`c` falls inside the jump has no point on it with `ψ_h = c` at all — while the
+tracer's own corrector already handles exactly that by keeping its best iterate.
+At `k = 1` on the raw pairing it fails on every mesh from `n = 12` to 32, and
+the failure probability rises with the angle count.
+
+**What is deliberately absent from the tracer**, so nobody reads more into it
+than is there: it follows **one connected component** and neither finds nor
+reports a disjoint island at the same level — the same disclaimer
+`CriticalPoints.hpp` makes about seeded Newton. It is **not X-point aware**: the
+level set through a saddle is not a 1-manifold and the tangent is undefined
+there. And §3.3's implicit quadrature — a rule on the level set with no curve
+extracted at all — is the **missing third leg** of IN-2's cross-check and is
+deliberately not built.
+
+**What is deliberately absent from the tracer**, so nobody reads more into it
+than is there: it follows **one connected component** and neither finds nor
+reports a disjoint island at the same level — the same disclaimer
+`CriticalPoints.hpp` makes about seeded Newton, and for the same reason. It is
+**not X-point aware**: the level set through a saddle is not a 1-manifold and
+the tangent is undefined there, so a trace at that level will stall or turn a
+corner arbitrarily. `pointAtArcLength()` parametrises segments linearly in
+*polyline* length rather than true arc length and says so.
 
 ## The linear solves, and what they should be
 
@@ -3308,6 +3598,23 @@ missed it. Full account and the transferable lesson under *Post-processing is
 back*; the part that matters here is that **the fix is on `gf-hdg-dev` and on no
 other branch**, so a `meq-integration` rebuilt without it silently loses this.
 
+**`mfem::Mesh::GetElementTransformation( int )` HANDS OUT SHARED SCRATCH, AND
+THREADING IT IS A SILENT WRONG ANSWER.** MFEM's own comment: *"The returned
+object is owned by the class and is shared, i.e., calling this function resets
+pointers obtained from previous calls."* It is one `IsoparametricTransformation`
+member of the `Mesh`. Two threads evaluating in different elements overwrite
+each other's transformation — no crash, no error, a point transformed by the
+wrong element. The reentrant route is the `( i, IsoparametricTransformation * )`
+overload into a thread-local.
+
+**Three call sites in meq use the shared overload today** — two in
+`src/meq/FluxSurfaces.cpp` and one in `src/meq/CriticalPoints.cpp` — and all
+three are correct, because the solution-inversion code is serial. They are the
+first thing to change if any of it is ever threaded, and they should be changed
+*before* the parallel region rather than during the debugging of one.
+`INVERSION-PLAN.md` §11 is the wider analysis of what in that item parallelises
+and what does not.
+
 **`mfem::Mesh::FindPoints` is `O(elements × points)`** — a brute-force scan over
 element centres. It caps sample-cloud sizes in any off-grid error measure.
 
@@ -3529,8 +3836,9 @@ and its analytic gradients match finite differences to 5e-9.
 src/meq/     the library. Config, Profiles, Source, SourceFactory,
              GradShafranov, BoundaryShape, Estimator, Field, Sampler,
              WarmStart, Output -- all ported and all under the naming check.
-             CriticalPoints and Zernike are the solution-inversion work and
-             were written here rather than ported; see that section.
+             CriticalPoints, FluxSurfaces, SurfaceAverage and Zernike are
+             the solution-inversion work and were written here rather than
+             ported; see that section.
 apps/        drivers. Only meq.cpp, and MEQ_BUILD_APP defaults ON.
 tests/       unit/ (Boost.Test), convergence/ (rate assertions),
              analytic/ (closed-form solutions used by both),

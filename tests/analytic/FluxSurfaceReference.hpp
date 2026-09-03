@@ -273,7 +273,6 @@ namespace meq
 				double lower = 0.0;
 				double lowerValue = along( 0.0 );
 				double upper = -1.0;
-				double upperValue = 0.0;
 
 				for ( int step = 1; step <= marchSteps; ++step )
 				{
@@ -284,7 +283,6 @@ namespace meq
 					if ( lowerValue*value <= 0.0 )
 					{
 						upper = rho;
-						upperValue = value;
 						break;
 					}
 
@@ -324,7 +322,6 @@ namespace meq
 					else
 					{
 						upper = rho;
-						upperValue = value;
 					}
 
 					double next = rho;

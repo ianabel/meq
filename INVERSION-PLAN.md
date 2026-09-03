@@ -166,8 +166,17 @@ Runge–Kutta order derives from.
 > corrector iteration". Continuation software wants to *traverse a path
 > cheaply*, so equidistributing corrector work is right for it. **We want a
 > well-shaped curve, so we want to equidistribute interpolation error**, which
-> means curvature control, `Δs ∝ 1/κ`. Take the geometric variant and say why in
-> the code.
+> means curvature control. Take the geometric variant and say why in the code.
+>
+> **BUT `Δs ∝ 1/κ` IS NOT WHAT EQUIDISTRIBUTES INTERPOLATION ERROR, AND AN
+> EARLIER DRAFT OF THIS BOX SAID IT WAS.** A circular arc of turning angle
+> `θ = κ Δs` departs from its cubic Hermite by `θ⁴/128` per unit radius, so a
+> segment's deviation is `κ³ Δs⁴/128`. Equidistributing **that** wants
+> `Δs ∝ κ^(−3/4)`. What `Δs ∝ 1/κ` equidistributes is the **turning per step**,
+> which makes the deviation proportional to `Δs` and the deviation *relative to
+> the segment's own length* constant. That is the robust geometric variant and
+> is what IN-0 implements — but they are different rules and the difference
+> should be stated rather than blurred.
 
 ### 3.2 The two nearly-free uses of `q`, and the trap between them
 
@@ -182,6 +191,39 @@ spline solve — and costs nothing, since the tracer already evaluates `q` for i
 predictor and its corrector. The spacing requirement drops from
 `Δs ≲ h^{(k+1)/2}` to `Δs ≲ h^{(k+1)/4}`, about one point per element at
 `k = 3`. **This is the highest-value single use of `q` in the whole item.**
+
+> **AND IT ONLY HOLDS FOR ONE OF THE TWO PAIRINGS MEQ HAS. MEASURED IN IN-0,
+> AND IT IS THE FINDING THAT STAGE DID NOT EXPECT.** The interpolant is built on
+> tangents from the **flux** and is measured against the level set of the
+> **potential**. Those are the same curve only to the extent that the two fields
+> agree — and `∇ψ_h/r` agrees with `q_h` only to `O(h^k)`, because
+> differentiating an L2 potential of degree `k` loses an order while `q_h` keeps
+> `k+1`. So paired with `ψ_h`, the Hermite is fourth order in `Δs` **until the
+> tangent tilt takes over and second order afterwards**: rates 3.809 → 1.400 →
+> 1.569 down a `Δs` sweep, against a tilt of 3.5e-5 to 7.3e-5.
+>
+> **The control that identifies the tilt as the cause** is a third column built
+> on `∇ψ_h` instead of `q_h` — the *exact* tangent of the curve being measured
+> against, which therefore stays fourth order in both pairings (3.957, 3.993,
+> 3.995). It is not the column to prefer: `∇ψ_h` is the right tangent for error
+> (c) and the *wrong* one for error (a), where `q` is a full order closer to the
+> true curve. It exists to separate the two.
+>
+> Paired with `ψ*` and `q*` the tilt is a full order smaller — 3.1e-7 to 5.9e-7
+> — and fourth order survives the whole sweep, 3.960 / 3.996 / 3.812. **So the
+> post-processed pairing is not merely more accurate; it is what makes this
+> item's claim about `q` true at all on this discretisation.** IN-0's default is
+> `Potential::PostProcessed` for that reason and not for the order of `ψ*`
+> alone.
+>
+> **The usual reason given for the pairing is wrong, and was checked rather than
+> repeated.** It is not that the local post-processing is built so that
+> `∇ψ*` matches `r q*`: MFEM's reconstruction drives Stenberg's local problem
+> with the reconstructed **total** flux `q̂_h` in `RT_k` — the normally
+> continuous field the constraint equation projects onto — so `∇ψ*` and `r q*`
+> are different objects. What is true, and measured, is that they agree an order
+> better than the raw pair does. Right answer, wrong mechanism, and the
+> distinction matters because the wrong mechanism would predict exactness.
 
 **(ii) For a CLOSED surface, spectral quadrature.** A closed flux surface is
 analytic away from the separatrix. For a smooth **periodic** integrand the
@@ -364,13 +406,46 @@ does — `v0-legacy:FluxSurfaces.cpp` prints *"Terminating because curve left
 domain"* and returns a partial curve, which for an outer surface silently
 returns an arc labelled as a closed contour.
 
-**Which extension is a real question and it should be measured, not argued.**
-Three candidates, and meq already owns machinery for two:
+**~~Which extension is a real question and it should be measured, not argued.~~
+MEASURED, 2026-09-02: `BandExtension::TransferLift`, and it is not close.**
+
+The decisive test traces **`Γ` itself**, which lies entirely in the band at
+every mesh — `ψ_h` is strictly negative inside `Ω_h`, so every point of
+`{ψ = 0}` is answered by the extension, and the exact answer is the curve `D_h`
+was cut from. Worst distance from the exact `Γ`, over `n = 16/32/64`:
+
+| `k` | flux Taylor, rate | transfer lift, rate | lift closer at `n = 64` by |
+|---|---|---|---|
+| 1 | 1.797 | **2.298** | **40×** |
+| 2 | 2.138 | **3.995** | **1,610×** |
+| 3 | 2.138 | **4.848** | **84,695×** |
+
+**The Taylor step is second order at every `k` and the reason is structural**:
+its remainder is `O(h²)` over a band of width `O(h)` however good `q` is, so it
+cannot improve with the polynomial degree and it does not — 2.138 at `k = 2` and
+at `k = 3` alike. The lift is the error of `q` *integrated along a path of
+length `O(h)`*, which is `k+2` at `k = 2, 3`. At `k = 3` the Taylor step is five
+orders of magnitude worse.
+
+**The Taylor step is kept as the control and not as a fallback**, and the tests
+say in their failure messages that if it ever matches the lift the comparison is
+empty.
+
+> **AND §4.3'S THIRD ARGUMENT FOR `ψ`-ELEMENTS IS WEAKENED BY THIS, WHICH
+> MATTERS AT IN-4.** The claim below is that a global fit's accuracy is set by
+> its worst region, so surfaces known only to the extension's order degrade the
+> representation everywhere. **With the lift, the band is not the worst
+> region** — it converges at `k+2` where the interior population of the same
+> contour reads `k+1` to `k+2`. That argument was written when the extension was
+> assumed to cost an order. It does not. **Two of the three arguments for
+> elements survive; this one should not be leaned on.**
+
+Three candidates were considered, and meq already owned machinery for two:
 
 | | | |
 |---|---|---|
 | **the flux Taylor step** | what `GridSampler::samplePotentialWithFlux()` already does: `ψ(p) ≈ ψ(x₀) + r₀ q(x₀)·(p − x₀)` from the foot `x₀` on `Γ_h` | **nothing is ever evaluated outside an element**, which is the property that made it right for the `.nc`. But `∇ψ` in the band is then **frozen at the foot**, so the extended field is affine and **contours in the band are straight lines** — the curvature is gone, whatever `k` is |
-| **the transfer-path lift** | the extension technique's own construction — `mfem::TransferPath`, `PathLiftCoefficient`, `ElementExtension::TransformBack`, already used by `setExtension()` and by `transferredDatum()` | **method-native**: it is how the solver itself relates `ψ` on `Γ` to `ψ` on `Γ_h`, by integrating `r q` along the path. Should be better than a Taylor step and is the principled choice. **Whether it yields a usable `ψ` at an ARBITRARY band point, rather than only on `Γ_h` and on `Γ`, is the thing to check first** |
+| **the transfer-path lift** — **CHOSEN** | the extension technique's own construction. **NOT through `PathLiftCoefficient`, which this file named and which cannot do it**: that class `dynamic_cast`s its `ElementTransformation` to `FaceElementTransformations` and lifts from *that face's own* integration point, answering "what is `φ_h` on `Γ_h`" — η₅'s question, not this one. The usable primitive is one level down and public, **`mfem::PathIntegral( Cu, x, xbar, line_ir )`, which takes arbitrary endpoints**, with `mfem::ElementExtension` supplying `E_h(q_h)`. MFEM's own comment on it — it must return `p(x) − p(a(x))` "whatever the path" — is the licence | **method-native**: it is how the solver itself relates `ψ` on `Γ` to `ψ` on `Γ_h`, by integrating `r q` along the path. So the answer to "is it usable at an arbitrary band point" is **yes, but not through the class named here first** |
 | **the known boundary condition** | `ψ = 0` exactly on `Γ`, and `Γ` is known analytically from `BoundaryShape` | the outermost contour is therefore known **exactly**, for free, with no tracing at all — a fact worth exploiting whatever else is chosen |
 
 > **A WARNING FROM THE TREE, BECAUSE THE OBVIOUS COMBINATION HAS BEEN TRIED AND
@@ -398,6 +473,39 @@ The same is true of a surface: **every flux-surface quantity computed on a
 surface that crosses the band must be flagged as such**, so that a consumer can
 drop it before computing an error norm or differencing two runs. A count is not
 enough — `CLAUDE.md` records that being the other half of the same defect.
+
+> **THREE TRAPS MET IN THE MEASURING, AND THE FIRST NEARLY PRODUCED A WRONG
+> HEADLINE.**
+>
+> **A contour at fixed `Ψ_N` cannot measure the extension's order.** As `h`
+> falls, `Γ_h` climbs towards `Γ`, so a contour sitting a fixed distance inside
+> `Γ` has its band excursion shrink *faster* than `h` — measured, `deep/h` goes
+> 0.92 → 0.66 → 0.26 and the band population goes 136 points → 9. **Both**
+> columns then converge faster than the extension they are built on: the Taylor
+> step reads 3.75 at `k = 3` against its true 2.1. Tracing `Γ` itself is what
+> fixes it, because `Γ` is in the band at every mesh by construction. The
+> fixed-`Ψ_N` test is kept, asserting on the *margin* between the two extensions
+> rather than on a rate.
+>
+> **The nearest face of `Γ_h` is not the face you are outside of.** A staircase
+> `D_h` cut from a diagonally split Cartesian mesh **pinches** — two triangles
+> meeting at a single vertex — so both lobes' faces are equidistant from a point
+> just outside the pinch and the tie goes to loop order. Half the time that
+> picks the lobe whose outward normal points the other way, the outwardness test
+> fails, and a genuine band point is refused: measured at `k = 2, n = 64` the
+> trace stopped after 85 points of 320. Apply the outward test **first, as a
+> filter**, and take the nearest among the survivors.
+>
+> **`ψ_h` is not strictly negative inside `Ω_h` to machine precision**, so a
+> handful of points of `{ψ = 0}` land back inside — one of 322 at `k = 1,
+> n = 64`. That is the discretisation creeping above its own imposed datum near
+> `Γ_h`, not a tracer fault, and the acceptance asserts ≥ 98% band rather than
+> 100%.
+>
+> **And the order in question is in `h`, not in `Δs`.** An earlier draft asked
+> for the band rate against `Δs` and expected it "worse than the `O(Δs⁴)` the
+> fitted path reaches". The band error is §2's error **(a)** — the field — and
+> (a) and (c) are decoupled by §2's own argument. `Δs` does not enter.
 
 **None of this arises on the fitted path**, where `Γ` is the mesh boundary and
 there is no band. So the fitted path is the right place to establish every rate
@@ -676,10 +784,48 @@ because it is what makes the bordered Newton's constraint differentiable. IN-A's
 axis is the critical point. Do not conflate them, and do not "fix" one to match
 the other.
 
-### IN-0 — the tracer
+### IN-0 — the tracer — **DONE, both halves, 2026-09-02**
 
 Predictor–corrector per §3.1, curvature-controlled step, cubic Hermite from `q`
-per §3.2(i). Start from IN-A's axis.
+per §3.2(i). Start from IN-A's axis. `src/meq/FluxSurfaces.{hpp,cpp}`,
+`tests/convergence/FluxSurfaceConvergence.cpp`.
+
+**Measured, and the three errors of §2 came apart cleanly:**
+
+| | |
+|---|---|
+| **(c)** Hermite in `Δs`, `ψ*`/`q*` | **3.960 / 3.996 / 3.812**, against chords at 1.983 / 1.996 / 1.999 |
+| **(c)** at fixed `Δs`, over a 16× change in dofs | **5.436e-09, 5.441e-09, 5.332e-09** — flat, which is the (b)/(c) separation |
+| **(a)** against the exact contour, `Potential::Raw` | `k+1`: 2.26/2.05/2.08, 3.02/2.98/3.02, 4.13/4.40/4.11 at `k = 1, 2, 3` |
+| **(b)** worst `\|ψ − c\|` over 1, 5, 10 circuits | **1.559e-13, 1.632e-13, 1.632e-13** — no accumulation |
+| face-crossing jump, mean | converges at **`k+2`**: 3.32 / 4.29 / 5.24 |
+| `FindPoints` fallbacks in the walk | **0** on every trace |
+
+**THE DEFECT THIS STAGE MET AND THE PLAN DID NOT PREDICT.** `{ψ_h = c}` is a
+union of per-element arcs offset by the jump, so a point landing within
+`jump/|∇ψ|` of a face is on **neither**: the Newton step computed in element A
+pushes it into B, B's pushes it back, and the residual alternates without ever
+meeting a tolerance tighter than the jump. It needs a point to land in a band
+about 2e-5 wide on a contour of length 1.7, it gets **commoner as `Δs` falls**
+simply because more points are placed, and left alone **it ends the trace** —
+it ended several before it was diagnosed. The corrector now keeps its best
+iterate, accepts after four non-improving steps, refuses to travel more than one
+predictor step, and reports `stalledCorrections` against `correctorTarget`. A
+segment with such an endpoint is excluded from the (c) measurement, because one
+endpoint accepted at the jump level poisons a segment's interpolation error by a
+factor of a hundred on a coarse mesh.
+
+**And the plan's "closure error at machine precision" was wrong twice over.**
+It cannot be at the corrector tolerance even normal to the curve: both the
+returning point and the start are on the level set to 1e-13, but they are
+separated *along* the curve by the final step's tangential offset `g_t`, and an
+arc departs from its own tangent line by `κ g_t²/2` — measured 3.573e-10
+against a bound of 7.2e-10, which is the discriminating statement, since a
+drifting tracer's normal error would grow with path length and be unrelated to
+`g_t`. Nor is "1, 5 and 10 circuits, flat" right for the closure: the 1-circuit
+value is 36× smaller because the step controller starts cold and that trace's
+shortened final step lands better. **Comparing 1 against 10 compares two final
+steps, not two path lengths.** The residual is what is flat.
 
 **Acceptance, ON THE FITTED PATH**, where there is no band and every rate is
 therefore attributable to the tracer alone. On an exact Solov'ev contour, the
@@ -691,6 +837,14 @@ length**. At fixed `Δs`, the error is independent of `h`, which is what says (b
 and (c) have been separated.
 
 **Then the band, as a second acceptance and not before the first is green.**
+**DONE, and §4.3 now records the decision: `BandExtension::TransferLift`**, at
+`k+2` against the flux Taylor step's flat second order — 40×, 1,610× and
+84,695× closer at `k = 1, 2, 3`. `BandExtension::None` is the default, so the
+fitted path is bit-unchanged. The per-point flag reaches `ContourPoint`,
+`Contour` and `AngleParametrisation`, and **every mask is asserted point by
+point against `mfem::Mesh::FindPoints`** — which knows nothing of the band
+machinery — in both directions, because `CLAUDE.md` records that a *count*
+rather than a mask was the other half of a real defect in the `.nc`.
 The tracer must complete a closed contour that crosses the band rather than
 stopping at `Γ_h`, must report that it did, and its error there must converge —
 at the extension's own order, which is expected to be worse than `O(Δs⁴)` and is
@@ -698,9 +852,48 @@ the number §4.3's choice is to be made on. Measure the flux Taylor step and the
 transfer-path lift **side by side on the same contours**; that comparison is the
 deliverable of this half of the stage.
 
-### IN-1 — arc length and the metric
+### IN-1 — arc length and the metric — **DONE, 2026-09-02**
 
-The trap of §3.2 made into a measurement.
+The trap of §3.2 made into a measurement, and it measures at five orders.
+
+| arc length of a traced contour, `k = 3` | rate in the number of angles |
+|---|---|
+| **from `q`, pointwise** | **7.03** |
+| the trap: trapezoid fed a differenced `ρ′` | 1.97 |
+| chord sum | 1.99 |
+
+`ρ′ = ρ (u·t)/(u′·t)` pointwise from `q`, derived and checked before use — on a
+circle `u·t = 0` and `ρ′ = 0`; on the line `z = 1` it returns `−cos θ/sin²θ`.
+Transversality `min|u × t|` reads 0.844 / 0.823 / 0.805 and a fit about a point
+outside the surface is **refused**. The metric length against the Hermite arc
+length agrees to 2.5e-08.
+
+> **"SPECTRAL IN `N`" IS NOT ATTAINABLE ON A DISCRETE CONTOUR, AND THAT IS NOT
+> A DEFECT.** `ψ_h` jumps across faces, so `ρ(θ)` is piecewise analytic with
+> jumps and no quadrature is geometric on it. The column plunges — 7.24 then
+> 14.8 — and then **floors at about 1.2e-9**, which is where the DG jump of
+> `ψ*` converts to a distance (6.80e-10). The control that says the floor is
+> the **field** and not the **rule** is the identical rule run on the *analytic*
+> contour, which reaches **3.775e-15** — and independently, on the same fixture,
+> `tests/analytic/FluxSurfaceReference.hpp` reaches 3.11e-15. Two
+> implementations, one conclusion.
+
+> **OPEN, SMALL, AND FOUND BY IN-2 USING IT: `fitByAngle()` THROWS WHERE THE
+> CORRECTOR WOULD ACCEPT.** The ray Newton demands `|ψ_h − c| ≤ tol × scale`,
+> and on a discontinuous field that is sometimes **unattainable** — a ray
+> crossing a face where `c` falls inside the jump has no point on it with
+> `ψ_h = c` at all. This is the same phenomenon the tracer's own corrector
+> already handles by keeping its best iterate and accepting after four
+> non-improving steps; the ray Newton does not, and throws. Measured, at `k = 1`
+> on the raw pairing it fails at 1e-12 on **every** mesh from `n = 12` to 32,
+> and the failure probability rises with the angle count — the same contour that
+> fits at 256 angles can fail at 4096. **Give the ray Newton the corrector's
+> best-iterate acceptance, with a `stalledRays` count beside `worstResidual`**;
+> the tolerance ladder IN-2's test currently carries then goes away. Two smaller
+> ones: `AngleParametrisation` evaluates `q` at every node to build `ρ′` and
+> **discards it**, forcing a consumer to re-sample; and `sampleAt()` should
+> report `extended`, without which a caller flagging a quadrature point has to
+> mark whole segments conservatively.
 
 **Acceptance.** Arc length of a closed contour computed two ways: from `q`
 pointwise, and by differencing node positions. The first converges spectrally in
@@ -709,7 +902,7 @@ converges spectrally the comparison is empty and the test is worthless** — say
 so in the failure message, as `ExtensionConvergence` does for its pinned-zero
 control.
 
-### IN-2 — flux-surface averages
+### IN-2 — flux-surface averages — **DONE on the fitted path, 2026-09-03**
 
 `⟨r^{-2}⟩_ψ`, `V′(ψ)`, and the safety factor, by periodic parametrisation and
 the trapezoidal rule per §3.2(ii).
@@ -825,10 +1018,22 @@ transcription, and for the same reason: an independent quantity is the only
 thing that catches a misread formula, and a right-hand side re-derived by hand
 is not independent of the hand that derived it.
 
-**Three averages then check each other with nothing but the equation.**
-Measured on `nstx()` at 256 angles, the residual reads **1.3e-13, 6.3e-13 and
-4.2e-12** at `Ψ_N = 0.25, 0.50, 0.75` — so the identity is a live assertion on
-the reference itself, before any discrete field is involved.
+**Three averages then check each other with nothing but the equation**, and the
+identity is a live assertion on the reference itself before any discrete field
+is involved.
+
+> **QUOTE IT WITH ITS STEP OR NOT AT ALL.** An earlier draft of this section
+> gave "1.3e-13, 6.3e-13, 4.2e-12" as though those were properties of the
+> routine. They are properties of the **step**: swept on the exact field the
+> residual runs 9.6e-08 at 5% of `|ψ_ax|` down to 2.3e-11 at 0.6%, bottoming
+> near 1e-12 around 0.15%. A residual from a differentiated quantity is a
+> two-parameter number and printing one of them is misleading.
+>
+> **And the step is NOT monotone on a discrete field.** At `k = 2, n = 96` a
+> step of 2% reads 1.5e-08 where 1% reads 3.4e-07 — **the smaller step is 20×
+> worse**, because the difference divides the surfaces' own DG-jump noise by the
+> step. There is an optimum and it must be found rather than assumed; 2% is near
+> it on this fixture.
 
 **The convention is part of the identity.** It is stated for
 `V′ = ∮ 2πR dl/|∇ψ|` and `⟨X⟩ = (1/V′) ∮ 2πR X dl/|∇ψ|`; a per-unit-length `V′`
@@ -856,7 +1061,72 @@ band are limited by the extension and must be **reported separately and flagged
 in the output**, never averaged in with the others. Quoting one rate over both
 populations would hide exactly the thing this stage exists to measure.
 
+**MEASURED, AND TWO EXPECTATIONS DIED.** `src/meq/SurfaceAverage.{hpp,cpp}`,
+`tests/convergence/SurfaceAverageConvergence.cpp`. One primitive with two
+builders — an integrand `f(SurfaceNode)` in `(R, z, ψ, q)`, over either the
+angle parametrisation or the traced contour with Gauss points — and every named
+quantity a one-line wrapper, as argued above.
+
+> **`ψ*` DOES NOT BUY `k+2` IN AN AVERAGE, AND THE REASON IS STRUCTURAL.** Both
+> pairings converge at **`k+1`**: V′ at 2.230 / 3.185 / 4.296 raw against 1.957 /
+> 2.827 / 4.265 post-processed, for `k = 1, 2, 3`. The weight is
+> `2πR dl/|∇ψ|` and **`|∇ψ| = r|q|`** — the reconstruction buys its extra order
+> in the *potential*, and there is no `k+2` flux to divide by. The level set
+> improves and the weight does not, so the average inherits the worse of the
+> two. What `ψ*` buys is a **constant**: ×1.29, ×1.46, ×1.73 in V′.
+>
+> **This is exactly the shape of `CLAUDE.md`'s band-continuation finding for
+> `B`** — a quantity limited by the one factor that has no solved variable
+> behind it — and it is the third time in this item that the answer has turned
+> on *which field the error divides by* rather than on which field is rooted.
+
+> **AN AVERAGE DOES NOT ESCAPE THE METRIC TRAP EITHER, AND THE PLAUSIBLE
+> ARGUMENT THAT IT DOES IS WRONG.** A ratio looks as though it should cancel a
+> bad metric, since the same weight appears above and below. It cancels a
+> **constant** — about 40× on the analytic surface — and **nothing in the
+> order**: from `q` pointwise the sequence rates are 6.77 for V′ and 7.38 for
+> `⟨R^{-2}⟩`, and with the metric differenced they are 1.92 and 1.80, a
+> separation of 1.9e+06 by 128 angles. The differenced column is a live
+> four-column control in the table, not a remark.
+
+**The identity's control is flat, which is the sharpest form of the Richardson
+finding yet.** At `k = 2` over a *sixteenfold* refinement the plain central
+difference reads 5.8e-05, 7.9e-06, 8.7e-06, 8.9e-06 — **it stops moving at three
+figures** — while Richardson goes 8.9e-05 → 1.5e-08 at rate 4.185. A column that
+does not converge under mesh refinement is measuring the instrument and nothing
+else.
+
+**Two extractions agree to about their own error and CANNOT do better.** The
+angle fit and the Hermite contour disagree by an amount converging at 2.96/3.09
+(`k = 2`) and 4.14/4.48 (`k = 3`) — *the field's own order*. `{ψ_h = c}` is a
+union of per-element arcs offset by the DG jump, so two routes placing nodes
+differently sample different arcs. **The assertion is therefore on the rate**,
+plus a margin, and not on the gap being small: a missing `2πR`, a metric about
+the wrong point, or a gradient taken on the wrong side of the division would
+each break the rate, and no single-route table can see any of them.
+
+**A free fourth check**: re-parametrising the *same* contour about a displaced
+ray origin moves `V′` by 3.6e-10 at an offset of 0.05 and 3.9e-11 at 0.15, with
+transversality falling 0.658 → 0.438. The average is a property of the surface
+and not of the chart, and now that is measured.
+
+**The fixture needed its own box.** `standardBox()` cannot hold these surfaces —
+`Ψ_N = 0.25` on `nstx()` already spans `r ∈ [0.99, 1.57]` against a box ending
+at 1.4 — so the study runs on `[0.60, 1.90] × [-1.10, 1.10]`. And `Ψ_N = 0.75`
+is **not measurable on a fitted rectangle at all**: enclosing it leaves under one
+cell of margin at the coarsest mesh of a dyadic sweep, at which point one is
+measuring the contour's distance to the mesh boundary. Its *reference* value is
+asserted, which is free; the `h`-study stops at `Ψ_N = 0.50`. That is the
+fixture's elongation, not a limitation of the method — and it is one more reason
+the curved path is where this item actually lives.
+
 **This is where `ROADMAP.md` item 10 becomes reachable.**
+
+**AND IT IS WHERE COST STOPS BEING HYPOTHETICAL**, because a flux-surface
+average is the first thing here a consumer calls in a loop. §11 is the analysis
+and IN-P is the harness; the shape of the facility above — one routine over a
+callable integrand — is also what makes a per-`ψ` cache and a threaded sweep
+tractable, since there is one thing to cache and one loop to widen.
 
 ### IN-3 — the representation
 
@@ -923,7 +1193,28 @@ Chebyshev per §4.2. **Deferred with free boundary**, per §6.
 ### IN-6 — the output
 
 `DRIVER-PLAN.md` §3's flux-surface `(Ψ, θ)` NetCDF grid, and whatever
-`MANTA-COUPLING.md` settles on.
+`MANTA-COUPLING.md` settles on — **including the per-`ψ` cache**, which §11.1
+argues is a requirement of the pointwise call pattern rather than an
+optimisation, and whose invalidation contract is `MANTA-COUPLING.md` §8.
+
+### IN-P — the performance harness
+
+**Not a stage in the ladder and not gated on one**: it can start as soon as IN-2
+exists, and it should, because every design choice after that point trades
+accuracy against cost and there is currently **no cost number at all** to trade
+against. §11 is the analysis; this is the measurement.
+
+`tests/performance/`, **not a ctest**, `TraceSolverScaling` + `scan.sh` as the
+pattern. Non-zero exit only for the correctness properties — chiefly that a
+threaded extraction reproduces the serial one **bit for bit**, which independent
+surfaces and independent rays make available and which a tolerance would
+undermine.
+
+**Do the three call-site changes of §11.3 first**, before any parallel region is
+written: `Mesh::GetElementTransformation( int )` hands out shared scratch and is
+used at two sites in `FluxSurfaces.cpp` and one in `CriticalPoints.cpp`. They
+are correct while everything is serial and are a silent wrong answer the moment
+it is not.
 
 ---
 
@@ -985,3 +1276,175 @@ independently.
   cannot handle an X-point (2015). Between them is exactly this item.
 
 meq is the only code in either survey with `q` in hand.
+
+---
+
+## 11. Performance, and where the parallelism is
+
+**NOTHING IN THIS ITEM HAS BEEN TIMED, AND THAT IS THE FIRST THING TO SAY.**
+Every number in §7 is an accuracy measurement. The only cost datum in existence
+is that `FluxSurfaceConvergence` runs its whole sweep in 16.6 s, which is a
+*test* and not a workload — it traces a handful of contours at several `Δs` and
+throws them away. Nobody has measured the cost of the thing a consumer will
+actually ask for.
+
+### 11.1 What the cost is made of
+
+| | |
+|---|---|
+| per accepted point | a few corrector iterations, each an element-local evaluation plus a walk step |
+| per surface | `N` points — **and the tracer is sequential along the curve by construction**, since each predictor starts from the last accepted point |
+| per family | `n_ψ` surfaces, currently traced independently and from scratch |
+| per *call* | see below, and this is the one that matters |
+
+**THE CONSUMER'S CALL PATTERN IS THE REAL PROBLEM AND `MANTA-COUPLING.md` §5
+ALREADY SAYS SO.** `Geometry` is **pointwise**: called once per physics node,
+per residual evaluation, handed the whole `ψ` vector each time
+(`SystemSolver::evaluateGeometry` is a plain loop over points). For a
+flux-surface average that means locating the surface through `x` and integrating
+on it, *per node, per residual*. That document's own conclusion — "not
+affordable done naively, so MEQ will need to cache per `ψ`" — is a requirement
+on this item and not an aside. **The cache, and its invalidation contract, is
+part of IN-6 and should be designed with the harness in front of it rather than
+after.**
+
+**AND `dGeometry_dpsi` IS WORSE BY A FACTOR OF `nFieldDOF`.** It is shaped
+`(nGeometry, nFieldDOF)` — a derivative with respect to **every** `ψ` degree of
+freedom. Obtained by differencing, that is `nFieldDOF` complete re-extractions
+of the whole surface family. On any mesh worth solving on this dominates
+everything else in the coupling by orders of magnitude, and it is the number to
+design against.
+
+### 11.2 Where the parallelism is, in decreasing order of value
+
+1. **Surfaces are independent — embarrassingly parallel over the flux label.**
+   Tracing the surface at `Ψ₁` and at `Ψ₂` share nothing but a read-only mesh
+   and read-only fields. This is the obvious win and the one to take first.
+   **But see §11.4: it is in direct tension with continuation.**
+2. **`dGeometry_dpsi` is embarrassingly parallel over `ψ` DOFs**, and it is the
+   dominant cost, so this is where a factor of the core count is actually worth
+   something.
+3. **The rays of the angle parametrisation are independent; the tracer's steps
+   are not.** Each `θ` is a separate 1-D root solve along its own ray, sharing
+   nothing. **That asymmetry is a design fact worth exploiting rather than
+   regretting**: the tracer is the robust route for *establishing* a surface —
+   it assumes no star-shapedness and finds the curve — and the rays are the
+   parallel route for *populating* it once `AngleParametrisation` has confirmed
+   `min|u × t|` is healthy. Do the sequential part once and the parallel part
+   wide.
+4. **Quadrature over a populated surface** is trivially parallel and is *not*
+   where the time is; the cost is locating the points, not summing over them.
+5. **The Zernike least squares** is one dense solve on a small system. Leave it
+   to BLAS — and read §11.3 before doing even that.
+
+### 11.3 The threading constraints are meq's own, and two of them are traps
+
+**`MKL_NUM_THREADS=1` IS NOT NEGOTIABLE AND THIS ITEM DOES NOT GET TO RELAX
+IT.** `CLAUDE.md` records `ComputeH()`'s element-local dense LU degrading by a
+factor of **forty** at `k = 3` on threaded MKL, and the variable is
+process-wide. So parallelism here must be **OpenMP over independent work, never
+threaded BLAS**, and any harness that appears to gain from raising MKL threads
+is measuring the solver getting slower somewhere else.
+
+> **`Mesh::GetElementTransformation( int )` RETURNS A POINTER TO SHARED
+> SCRATCH.** MFEM's own comment: *"The returned object is owned by the class and
+> is shared, i.e., calling this function resets pointers obtained from previous
+> calls."* It is one `IsoparametricTransformation` member of the `Mesh`. Two
+> threads evaluating in different elements will silently corrupt each other's
+> transformation — **no crash, no error, a wrong point**. The thread-safe route
+> is the `( i, IsoparametricTransformation * )` overload into a thread-local.
+>
+> **This is not hypothetical: `src/meq/FluxSurfaces.cpp` uses the shared
+> overload at two sites and `src/meq/CriticalPoints.cpp` at one.** All three are
+> correct today because everything is serial. They are the concrete first item
+> of any threading work, and they should be changed *before* a parallel region
+> is written rather than during the debugging of one.
+
+Three more, none of them exotic:
+
+* **`MFEM_THREAD_SAFE` is ON in meq's build** and is what makes `FiniteElement`
+  evaluation reentrant at all. Without it none of this is safe, and it is not
+  meq's flag to assume elsewhere.
+* **Build every cached table before the parallel region.**
+  `Mesh::ElementToElementTable()` builds and caches on first call; building it
+  inside a parallel region is a data race on the cache.
+* **The `FindPoints` fallback must stay outside**, or be serialised. It is
+  already `O(elements × points)` and the tracer reports zero fallbacks, so this
+  costs nothing to honour.
+
+**THE HARNESS MUST ASSERT BIT-EXACT REPRODUCTION OF THE SERIAL ANSWER**, at
+`0.000e+00` and not at a tolerance — the precedent is
+`threadedAssemblyReproducesSerialAssemblyExactly`, and the reason applies here
+in a stronger form: independent surfaces and independent rays **reassociate
+nothing**, so exactness is available. A tolerance would be an admission that
+something is shared, which is exactly the defect being guarded against.
+
+> **AND DO NOT MAKE IT AUTOMATIC.** `CLAUDE.md` records a gate on
+> `omp_get_max_threads() > 1` being tried for assembly and **removed**: MFEM
+> forks a team per call, so a caller that assembles hundreds of times inside a
+> bordered Newton pays the fork every time, and `HighBetaConvergence` went 21.5 s
+> → 39 s under it. The same shape is here — a parallel region per surface is
+> right for a `(Ψ, θ)` grid built once and **wrong** for a single surface asked
+> for repeatedly, which is precisely MaNTA's pointwise call pattern. Informed
+> opt-in, like `setAssemblyMode()`.
+
+### 11.4 Two ALGORITHMIC levers, both of which beat threading
+
+**1. Continuation in the flux label, which falls straight out of §3.1.**
+Allgower & Georg ch. 15 applied to `H(R, z, c) = ψ_h(R, z) − c` says the whole
+family of surfaces is a single 2-manifold with **no critical points at all**,
+since `∂H/∂c = −1`. So the surface at `Ψ_j` is an excellent predictor for the
+surface at `Ψ_{j+1}`, and a corrector started there should converge in one or
+two iterations where a fresh trace searches from nothing. Tracing every surface
+from scratch throws that structure away.
+
+> **AND IT IS IN DIRECT TENSION WITH §11.2's FIRST ITEM.** Continuation makes
+> the surfaces **sequential**; independence makes them parallel. They cannot
+> both be taken. Which wins depends on the core count, on `n_ψ`, and on how much
+> the continuation actually saves — all three measurable, none of them yet
+> measured. **Do not assume; this is exactly the kind of trade this project has
+> repeatedly got wrong by reasoning from structure.** A hybrid is available and
+> may be the answer: continue along a few chains in parallel, one chain per
+> thread.
+
+**2. The shape derivative instead of differencing, for `dGeometry_dpsi`.** A
+flux-surface average is an integral over a surface whose location is itself
+determined by `ψ`, so its derivative has two parts — the integrand moving and
+the surface moving. Both have closed forms. Differencing costs `nFieldDOF` full
+re-extractions; the closed form costs one extraction plus a quadrature per DOF.
+**This is the single largest lever in the whole coupling**, larger than any
+amount of threading.
+
+> **But the differenced version is the TEST and must not be deleted.**
+> `MANTA-COUPLING.md` §6: MaNTA never assembles its Jacobian, so a missing
+> surface-motion term "does not produce a wrong answer, only slow Newton
+> convergence", and several defects survived a passing suite for months on
+> exactly that. The differenced derivative is what the closed form is checked
+> against, as `dFdPsi` already is here.
+
+### 11.5 What to measure, and where it lives
+
+**In `tests/performance/`, and NOT as a ctest**, per the standing rule: every
+number in it is a timing, and a threaded timing on this machine is a
+measurement about the machine. `TraceSolverScaling` plus `scan.sh` is the
+pattern to copy — one process per point, because MKL fixes its threading at
+first use and an in-process sweep measures the first setting repeatedly; and a
+non-zero exit **only** for the correctness properties that make the timings mean
+anything.
+
+What the harness should report:
+
+* cost per traced point against `k`, and against the corrector tolerance
+* cost per surface against `N`, separating the tracer from the ray population
+* cost per family against `n_ψ`, with and without continuation
+* the distribution of corrector iterations per point, and `stalledCorrections`
+* `fallbackLocations`, which should stay at zero and is a cliff if it does not
+* thread scaling over surfaces and over `ψ` DOFs, against the bit-exactness
+  assertion
+* the cache hit rate under a simulated pointwise call pattern — the MaNTA one,
+  not a batch
+
+**And no device timing without a synchronise.** If any of this ever reaches a
+GPU, `CLAUDE.md` records a 148,224-unknown factorisation reading 2.0e-04 s
+because the work was still queued — four orders out, and *plausible enough to
+publish*.
