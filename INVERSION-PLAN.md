@@ -585,8 +585,46 @@ at once:
 >    smoothness in `ρ` are handled by separate machinery instead of one basis
 >    doing both.
 >
-> **Measure all three against IN-2's averages and their `ψ` derivatives**, and
-> note that option 3 has never been tried at this order by anybody.
+> **Measure all three against IN-2's averages and their `ψ` derivatives.**
+
+> **AND THE DESC PAPERS SETTLE MOST OF THIS — READ 2026-09-03, `refs/DESC-Dudt.pdf`
+> AND `refs/DESC-Panici.pdf`.**
+>
+> **The regularity condition has a name and a proof.** What IN-3 derived
+> independently — `a_m(ρ) = ρ^m (a_{m,0} + a_{m,2}ρ² + …)` — is **Lewis &
+> Bellan**, *J. Math. Phys.* **31**, 2592–2596 (1990), and Dudt §III.B cites it
+> for exactly this purpose: "the Fourier-Zernike basis inherently satisfies the
+> conditions … so no special treatment is needed to represent the location of the
+> magnetic axis". So option 3 does not escape that condition, it **relocates** it
+> onto the shape coefficients' `ρ`-dependence, where it must be imposed by hand.
+> Options 1, 2 and 3 are **not three bases**; with regularity imposed they are the
+> same basis, and the only real variable is the **angle**.
+>
+> **DESC HAS THE SAME AXIS PROBLEM AND SAYS SO.** Dudt's discussion: "DESC is
+> restricted to operating in straight field-line coordinates, which **may appear
+> to be a disadvantage compared to the optimal poloidal angle of the VMEC
+> formulation**" — the citation being Hirshman & Breslau, *Phys. Plasmas* **5**,
+> 2664–2675 (1998), spectral condensation — and, measured: "**more modes are
+> required in the core, resulting in increased error near the magnetic axis for a
+> given resolution**". That is IN-3's finding, in the code this basis was
+> borrowed from.
+>
+> **AND THE LATER PAPER SHOWS THE MECHANISM THAT FIXES IT.** Panici expands in a
+> *general* computational poloidal angle with `λ` carrying the map to
+> straight-field-line, and reports, with a spectral-width figure: "**DESC, while
+> not explicitly enforcing any poloidal angle constraints, ends up finding an
+> optimal representation through the course of the optimization procedure.**"
+> **That is the whole difference between fitting and solving**, measured by them
+> rather than argued by us: a solve is free to slide the angle to whatever its
+> truncated basis represents best, and it does so without being asked.
+>
+> **So IN-4's productive option is the one that gives the angle back its
+> freedom** — a fit in which each disc point is required only to *land on the
+> right surface*, not to sit at a prescribed angle, with the tangential gauge
+> fixed by **spectral width** in Hirshman & Breslau's sense. That needs no force
+> balance, because meq already has `ψ`; it is a geometric Gauss–Newton on
+> `Ψ_N(x(ρ,θ)) − ρ²`, warm-started by IN-3's linear fit, with `∇Ψ_N` supplied by
+> the solved flux `q`.
 
 The three things to satisfy at once:
 

@@ -489,6 +489,36 @@ design and are spread across several of the papers below.**
   is **straight-sided**, so their rational *quartic* (which comes from allowing
   curved element geometry) collapses to a conic here.
 
+**THE DESC PAIR, READ 2026-09-03, AND THEY ANSWER THE `ψ`-ELEMENT QUESTION
+MORE DIRECTLY THAN ANYTHING ELSE IN THIS LIST.**
+
+| | |
+|---|---|
+| `DESC-Dudt.pdf` | Dudt & Kolemen, *DESC: A Stellarator Equilibrium Solver*, 2020. §III.B is the axis treatment; §III.A the Fourier-Zernike basis; (5) and (23) are `λ` and the gauge fixing |
+| `DESC-Panici.pdf` | Panici et al., *The DESC stellarator code suite Part I*. Figure 5 is the spectral-width comparison against VMEC |
+
+**Three things they establish, all of which meq needed.**
+
+* **The axis regularity condition is Lewis & Bellan**, *J. Math. Phys.* **31**,
+  2592-2596 (1990): a Fourier coefficient `a_m( rho )` of an analytic function on
+  a disc must equal `rho^m` times an even series. `src/meq/Zernike.hpp` derived
+  the same constraint independently and did not know the citation. Fourier-Zernike
+  satisfies it inherently, which is the whole argument for the basis.
+* **DESC reports meq's own axis finding**: *"more modes are required in the core,
+  resulting in increased error near the magnetic axis for a given resolution"*,
+  and attributes it to being *"restricted to operating in straight field-line
+  coordinates, which may appear to be a disadvantage compared to the optimal
+  poloidal angle of the VMEC formulation"* -- **Hirshman & Breslau**,
+  *Phys. Plasmas* **5**, 2664-2675 (1998), spectral condensation. Neither title
+  is verified against Crossref; both bibliographic records are taken from DESC's
+  own reference list.
+* **And Panici measures the mechanism that fixes it**: *"DESC, while not
+  explicitly enforcing any poloidal angle constraints, ends up finding an optimal
+  representation through the course of the optimization procedure."* A solve
+  slides the angle to what its basis can represent; a fit cannot. That is the
+  structural difference between meq's IN-3 and DESC, and it is the argument for
+  IN-4's gauge-free fit.
+
 **AND THE GAP THAT IS MEQ'S TO FILL.** No paper in any of the three surveys
 treats iso-contouring a field whose **gradient is an independently solved
 unknown at the same order**. The nearest is the gradient-augmented level set
