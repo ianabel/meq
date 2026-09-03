@@ -252,13 +252,17 @@ mode meq's default used to be. `CondenseThenLinearise` is kept as the backup and
 is still the one that converges on stiff under-resolved meshes, at three to four
 times the wall clock everywhere else. See *The NPC port*.
 
-**`README.md` overstates what the old code did and has not been rewritten.**
-Before the port meq solved the *vacuum* coil field and nothing else:
-`meq.cpp`'s right-hand side took `psi` and ignored it, `Configuration::plasma`
-was hardcoded `nullptr`, and the profile loader was a `{ return; }` stub that
-silently produced an empty spline. The four test files that existed were empty
-Boost stubs, and one — asserting `foo == bar` with neither declared — could not
-compile. **Treat any claim in `README.md` about testing as aspirational.**
+**~~`README.md` overstates what the old code did and has not been rewritten~~ —
+REWRITTEN 2026-09-02, and it now says this itself.** The fact is worth keeping
+because it is the reason to distrust anything written about meq before the port:
+meq then solved the *vacuum* coil field and nothing else — `meq.cpp`'s
+right-hand side took `psi` and ignored it, `Configuration::plasma` was hardcoded
+`nullptr`, and the profile loader was a `{ return; }` stub that silently
+produced an empty spline. The four test files that existed were empty Boost
+stubs, and one — asserting `foo == bar` with neither declared — could not
+compile. **`docs/` is now the user-facing account** and `README.md` points at
+it; this file stays the maintainer's one. See *Layout* for why the numbers live
+here and not there.
 
 **`ROADMAP.md` is the priority order**, and says which items belong to meq and
 which are requests on `../mfem-hdg-dev`, where another agent is working. This
@@ -285,7 +289,7 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 git submodule update --init --recursive     # extern/toml11
 cmake -B build
 cmake --build build -j4
-cd build && ctest --output-on-failure       # ~490-680 s, 28/28
+cd build && ctest --output-on-failure       # ~490-680 s, 30/30
 ```
 
 **ctest needs no environment set by hand.** `tests/CMakeLists.txt` puts
@@ -1431,7 +1435,7 @@ case gives three answers:
 | NPC, `PicardThenNewton` | 4 | 3.1514e-01 |
 
 **A spread of 9.4%.** This is the multiple-solution finding recorded under
-*The suite is 28/28* — coarse discretisations of these sources
+*The suite is green* — coarse discretisations of these sources
 carry more than one solution — meeting the solver from a third direction. It
 means changing the default globalisation is **not** a performance decision:
 it changes the equilibrium meq reports on an under-resolved mesh, which is
@@ -2254,7 +2258,7 @@ and the objects are left as the throw found them. meq's paths construct a fresh
 solver per solve and so do not care, but **do not assume a
 `GradShafranovSolver` is reusable after a caught `ErrorException`.**
 
-### The suite is 28/28, and the last red one was a mesh chosen for a dead solver
+### The suite is green, and the last red one was a mesh chosen for a dead solver
 
 **GREEN, 2026-08-31 (later still).** The NPC port dropped the whole suite from
 872 s to 499 s — the element-local non-linear solves that cost `PedestalConvergence`
@@ -2520,6 +2524,183 @@ exactly zero symbolically, `μ₀` restored by `p_SI = p_M&P/μ₀`. Its §3, th
 polytrope, is a power law in `r²` and is **not** ours. The mistake is left
 recorded because it is this project's standing hazard — three closures that look
 alike — biting the plan that warns about it.
+
+## Solution inversion: IN-A and the disc basis are done, the tracer is next
+
+**`INVERSION-PLAN.md` is the design and the staged plan** — `ψ(R, z)` to
+`R(Ψ, l)`, `z(Ψ, l)`, which is what `MANTA-COUPLING.md` needs, what
+`DRIVER-PLAN.md` §3's `(Ψ, θ)` grid needs, and what `ROADMAP.md` item 10 is.
+This section is only what a reader of the code needs.
+
+**Nothing about the solve changes.** This is post-processing, in the same way
+`FLOW-PLAN.md` was a change to `F` alone: a new consumer of `ψ_h` and `q_h`.
+
+**AND `q` IS THE ASSET AGAIN, FOR THE THIRD TIME.** The band continuation of `ψ`
+uses it, the band continuation of `B` uses it, and now the inversion does: a
+critical point is a root of `q_h = 0`, which is a **solved** field converging at
+the potential's own order, not a derivative of one converging an order down.
+Compare CEDRES++, which records as an open problem that in P1 continuous
+Galerkin the axis and the X-point are confined to mesh vertices, and TokaMaker,
+which notes for Lagrange order ≥ 2 that saddles "can exist anywhere within the
+mesh". meq resolves both sub-element by root finding.
+
+The two pieces that exist are `src/meq/CriticalPoints.{hpp,cpp}` (stage IN-A)
+and `src/meq/Zernike.{hpp,cpp}` (the basis IN-3 will fit in). Both headers carry
+the long-form reasoning; what is below is what a maintainer needs to not
+misread them.
+
+### IN-A: the axis as a root of `q`, and a degree is never a count
+
+**Measured against the analytic Solov'ev axis**, `CriticalPointConvergence.cpp`,
+`k = 1, 2, 3` over `n = 4, 8, 16, 32`:
+
+| | `k = 1` | `k = 2` | `k = 3` |
+|---|---|---|---|
+| position of the axis, rate over the whole sequence | **2.340** | **3.484** | **4.447** |
+
+against design orders of 2, 3 and 4 — clearing `k+1` itself rather than `k+1`
+less slack. **The per-pair rate is not a rate here** and the test says so: the
+error is *pointwise*, so it oscillates as the axis moves within its element —
+4.17 / 1.54 / 1.31 at `k = 1` — and the two-tier assertion pattern
+`ExtensionConvergence` needs for the same reason is what this uses.
+
+**The sharpest assertion in the stage was not in the brief**: the ratio of the
+position error to `|q_h − q|` evaluated at the *exact* axis is **0.77 to 3.37**,
+against **0.77 to 3.27** predicted by linearising `q` about its root. That is a
+direct statement that the root finder adds nothing to the error of the field it
+is rooting — the same shape as *A wrong Jacobian is invisible to a convergence
+table*, from the other side.
+
+**A DEGREE IS A SUM OF INDICES AND NEVER A COUNT, and the suite demonstrates it
+rather than asserting it.** `audit()` walks the mesh boundary and accumulates
+the turning of `q`, which by the Poincaré index theorem is the sum of the
+indices of the interior zeros — `+1` for either extremum, `−1` for a saddle. A
+box drawn round `iterExample2`'s axis *and* its X-point therefore reads
+**winding 0 with two critical points inside**, the saddle located to **4.5e-6**
+of the published X-point. Anything that reads a zero degree as "there is nothing
+here" is wrong, and `theWindingNumberIsASumOfIndicesAndNotACount` is the live
+demonstration.
+
+**The Poincaré–Hopf hypothesis is transversality of `q·n`, NOT that the boundary
+is a level set**, and the two boxes in the suite are the two cases. On the
+standard benchmark rectangle — which is a level set of nothing — `q·n` keeps one
+sign the whole way round at `min |q·n|/|q| = 0.15`, so `winding == χ == 1` **is**
+a theorem there. On a box reaching past the X-point it reads **0.00** with a
+sign change, and the degree is 0 against `χ = 1` with no contradiction whatever.
+`IndexAudit::transverse` records which situation the caller is in, so the
+comparison is not read as a theorem where it is a coincidence.
+
+**AND A DISCONTINUOUS `q_h` CAN CARRY BOUNDARY DEGREE 1 WITH NO ZERO IN ANY
+ELEMENT.** At `h = 0.4, k = 1` the audit reads 1 and an element-by-element
+search finds nothing: each element's polynomial puts its zero just inside a
+neighbour's territory, and with a face jump of `O(h^{k+1})` against an element of
+size `h` there is a window where the zero belongs to neither. **Poincaré–Hopf is
+a theorem about continuous fields**, and this is the DG jump meeting it head on.
+The window closes with refinement, so it is a property of `h` rather than a
+defect — and the test pins it to that one coarse mesh, so a *finer* mesh losing
+the axis fails rather than passing quietly. The practical rule: where the audit
+and the search disagree, **believe the audit**.
+
+**`CriticalPoint::overshoot` is the same phenomenon at the level of one root**,
+and refusing it outright does not work: at `k = 1, n = 4`, where the axis sits
+beside the mesh line `z = 0`, the two candidates are 6.6e-4 and 8.9e-2 outside
+their own elements and **with no allowance at all the axis is not found**.
+`setContainment()` is in *reference*-element units on purpose, so the allowance
+shrinks with the mesh exactly as the ambiguity it covers does. **It is not a
+tuning parameter and that was checked**: swept over 0.001, 0.01, 0.05, 0.10 and
+0.20 across the whole `k × n` benchmark the located axis is identical to every
+digit printed.
+
+### `CriticalPointFinder`'s axis is NOT `GradShafranovSolver::psiAxis()`
+
+**They are different quantities, both correct, and neither should be changed to
+match the other.** `ψ_ax` is *the largest nodal value* — chosen because the
+bordered Newton needs a constraint it can differentiate, which under NPC makes
+the border row exactly `−e_j`. IN-A's axis is *the point where `q_h` vanishes*.
+They differ by `O(h)` in position and `O(h²)` in value, **both independent of
+`k`**, so on a refined high-order mesh the two readings *separate* rather than
+converge: measured on the finest Solov'ev mesh the gap is **202×** `ψ_h`'s own L2
+error at `k = 2` and **4204×** at `k = 3`.
+
+**`findAxis()` seeds from BOTH nodal extremes, and the reason is a sign error
+this file's plan carried.** meq's `ψ` is not sign-normalised across sources:
+the Solov'ev fixtures have `F` single-signed **negative**, so `ψ` is a
+*subsolution*, its maximum is on `Γ`, and **the magnetic axis is an interior
+MINIMUM** (Hessian determinant +0.693, trace +2.121 on `nstx`). With `F` positive
+— the high-beta source — it is a maximum. So "seed from the largest nodal value"
+is right for one sign of `F` and finds **a corner of the benchmark rectangle**
+for the other. `AxisSense` is there for a caller who knows which they want, and
+`findAxis()` refuses rather than guesses when both are present.
+
+**Two rings of face neighbours, not one, and that is a measurement.** Where the
+critical point sits on a mesh line the extreme nodal value is the shared vertex,
+and which element is credited with it is decided by an L2 jump of 1e-8: on
+`iterExample2` at `k = 2, n = 24` the minimum nodal value is in element 694 and
+the root is in element **696**, which is not a face neighbour of it. The seeded
+path is a fast path only — where it does not produce exactly one interior
+extremum the search spends a full `sweep()`, so **the answer is not allowed to
+depend on the seed**.
+
+**Handing it the raw flux block instead of `flux()` is the failure to watch
+for.** The raw block holds `−q`; in even dimension `index(−v) = index(v)`, so
+every winding number is unchanged and **every Maximum silently becomes a
+Minimum**. The audit still passes. `sweep()` is seeded Newton and is **not
+exhaustive** — the certified subdivision of `INVERSION-PLAN.md` §5 is
+deliberately not built, because IN-A's acceptance needs the axis and the audit
+and neither needs exhaustiveness.
+
+### The disc basis, and why `ρ = √Ψ_N` rather than `Ψ_N`
+
+`src/meq/Zernike.{hpp,cpp}` is the basis `IN-3` fits in, landed early because it
+is **MFEM-free** — plain doubles, like `Profiles` and `Source`, so CI can build
+and test it without the MFEM branch it cannot obtain.
+
+**The index constraint is the entire point.** `l − |m|` even and `l ≥ |m|` is
+exactly what excludes `ρ² cos θ` and friends, which are not smooth at the
+origin; what survives is that **every admissible mode is a bivariate polynomial
+in `(x, y)`**, so the centre of the disc — the magnetic axis — is an ordinary
+interior point and needs no special case. That is a better argument for the
+basis than "DESC does it".
+
+**GETTING THE RADIAL COORDINATE WRONG IS SILENT.** `ψ` has a quadratic maximum
+at the axis, so `Ψ_N` behaves like (distance)² there and the geometry is smooth
+in the *distance*: parametrise by `Ψ_N` directly and every basis converges
+algebraically against a square-root branch point, worst near the axis, **with
+nothing in a convergence table to say why**. Same species as *A wrong Jacobian
+is invisible to a convergence table*. `radiusFromNormalisedFlux()` and
+`fluxDerivativeFromRadial()` exist so the `1/(2ρ)` chain factor is not written
+by hand at each call site, because that factor is the thing that gets dropped.
+
+**The radial polynomial is a Jacobi polynomial under a change of variable**, so
+`Zernike.cpp` calls `boost::math::jacobi()` rather than carrying a recurrence,
+and **the explicit factorial sum every reference prints is not used at all**:
+its terms are binomial-sized while its answer is `O(1)` — the largest is about
+1e10 at `l = 30` — so it costs about `log₁₀(largest term)` digits to
+cancellation. Measured at `ρ = 0.83` it disagrees with the Jacobi route by
+**4.5e-8 at `l = 30` and 1.3e-4 at `l = 40`**, and it is kept in the tests as a
+*control* rather than as an implementation. A flux-surface fit wanting twenty or
+thirty modes would be reading noise. `find_package(Boost CONFIG REQUIRED)` and
+`Boost::headers` are new dependencies of `meq_core`; the include is confined to
+the `.cpp`, so a consumer of the basis takes on nothing.
+
+**A DERIVATIVE CHECKED AGAINST A CENTRAL DIFFERENCE IS FLOORED BY THE
+INSTRUMENT, NOT BY THE DERIVATIVE.** An earlier draft of the plan implied the
+tolerance would tighten once the derivative was exact. It does not: a central
+difference carries its own `O(h²)` truncation, so the comparison sits at
+**1.3e-07** however exact the derivative is. Richardson extrapolation,
+`(4D(h/2) − D(h))/3`, reaches **1.4e-11**. **That applies wherever this suite
+checks a derivative against a difference**, which is several places.
+
+### What is next
+
+**IN-0, the tracer** — predictor–corrector on `ψ_h = c` with the tangent and the
+corrector both from `q`, cubic Hermite between points from `q`, on the fitted
+path first because there is no band there and every rate is therefore
+attributable to the tracer alone. Then the band, as a second acceptance, where
+the flux Taylor step and the transfer-path lift are to be measured **side by
+side on the same contours** — that comparison is the deliverable. Then IN-1's
+metric, IN-2's flux-surface averages, IN-3's fit, and IN-4, which is a decision
+about the `ψ`-varying element and is the user's to make.
 
 ## The linear solves, and what they should be
 
@@ -3348,6 +3529,8 @@ and its analytic gradients match finite differences to 5e-9.
 src/meq/     the library. Config, Profiles, Source, SourceFactory,
              GradShafranov, BoundaryShape, Estimator, Field, Sampler,
              WarmStart, Output -- all ported and all under the naming check.
+             CriticalPoints and Zernike are the solution-inversion work and
+             were written here rather than ported; see that section.
 apps/        drivers. Only meq.cpp, and MEQ_BUILD_APP defaults ON.
 tests/       unit/ (Boost.Test), convergence/ (rate assertions),
              analytic/ (closed-form solutions used by both),

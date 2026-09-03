@@ -88,7 +88,7 @@ Requirements:
 | [MFEM](https://mfem.org) | **the HDG branch** — see below. The one hard dependency |
 | [toml11](https://github.com/ToruNiina/toml11) | vendored as a submodule at `extern/toml11` |
 | netcdf-cxx4 | optional; without it the gridded output format is dropped |
-| Boost | `unit_test_framework`, for the test suite only |
+| Boost | header-only Boost.Math for the library; `unit_test_framework` for the tests |
 | clang-tidy | optional; gates the `naming` test only |
 
 Reached *through* MFEM rather than found separately: SuiteSparse (UMFPACK, the

@@ -14,7 +14,10 @@ things that need it:
 
 * **`ROADMAP.md` item 10, the fixed-`q(ψ)` solver.** RoPP (142) is
   `q(ψ) = V′(ψ) I(ψ) ⟨r^{-2}⟩_ψ / 4π²` — a flux-surface average, and the
-  machinery `FLOW-PLAN.md` §3.3 deliberately avoided needing.
+  machinery `FLOW-PLAN.md` §3.3 deliberately avoided needing. **Here and in
+  §3.4, §4.3 and §4.4 that `q` is the safety factor and NOT meq's flux**, which
+  is the same letter for a solved unknown of the discretisation; IN-2 settles
+  what the code is allowed to call each.
 * **`MANTA-COUPLING.md` §5 and §6**, whose own checklist calls
   `dGeometry_dpsi` **with the moving-surface term** and *making `Geometry` fast
   enough for a pointwise call pattern* "the two genuinely hard ones. Everything
@@ -238,24 +241,65 @@ re-tracing at a perturbed `ψ` and differencing supplies badly. So the output of
 this item is a **differentiable parametrised object**, and choosing it is the
 substance of the design.
 
-### 4.1 Closed surfaces: Fourier–Zernike
+### 4.1 Closed surfaces: the Zernike disc basis
+
+**Called "Fourier–Zernike" in the first draft of this file, and that name is
+dropped.** It is DESC's, where the Fourier factor is the *toroidal* one; in 2D
+axisymmetric that factor is gone, and what is left has no separate Fourier part
+at all — the `θ`-dependence **is** Zernike's own angular factor. A reader given
+the compound name goes looking for a second index that does not exist.
+
+**And `l` is overloaded in this document.** The title and §2 use `l` for the
+in-surface coordinate; the literature uses `l` for the Zernike radial degree.
+Below, and in `src/meq/Zernike.hpp`, **`l` is the degree and `θ` is the angle**,
+which is the universal convention. `R(Ψ, l)` in the title means `R(Ψ, θ)`.
 
 Nested closed surfaces filling in to a single maximum are a **disc**,
-topologically, and the map `(Ψ, l) → (R, z)` is a map from a disc. The natural
+topologically, and the map `(Ψ, θ) → (R, z)` is a map from a disc. The natural
 basis is the one DESC uses for the same reason
 (<https://desc-docs.readthedocs.io/en/stable/theory_general.html>):
 
 ```
-R( ρ, θ ) = Σ_{l,m} R_lm Z_l^m( ρ, θ ),      Z_l^m = R_l^m( ρ ) { cos, sin }( m θ )
+R( ρ, θ ) = Σ_{l,m} R_lm Z_l^m( ρ, θ )
+
+Z_l^m = R_l^m( ρ ) cos( m θ )    for m >= 0
+        R_l^m( ρ ) sin( |m| θ )  for m <  0        -- the sign of m selects which,
+                                                      and without saying so a
+                                                      coefficient vector is not
+                                                      well defined
 ```
 
-In 2D axisymmetric the toroidal Fourier factor of DESC's basis drops out and
-what remains is the Zernike disc basis, whose **own** structure is the coupling
-that matters: `R_l^m` contains only `ρ^|m|, ρ^{|m|+2}, … ρ^l`. That
-parity-and-minimum-power constraint is what makes the magnetic axis a regular
-point instead of a coordinate singularity to special-case. A naive tensor
-product of "polynomial in `ρ`" times "Fourier in `θ`" admits modes that are not
-analytic at `ρ = 0`; Zernike excludes them by construction.
+with `l ≥ |m|` and `l − |m|` **even**. `R_l^m` then contains only
+`ρ^|m|, ρ^{|m|+2}, … ρ^l`, and that parity-and-minimum-power constraint is what
+makes the magnetic axis a regular point instead of a coordinate singularity to
+special-case.
+
+**Implementation: `R_l^m` is a Jacobi polynomial under a coordinate change**,
+
+```
+R_l^m( ρ ) = (−1)^{(l−|m|)/2} ρ^|m| P_{(l−|m|)/2}^{(|m|, 0)}( 1 − 2 ρ² )
+```
+
+so `boost::math::jacobi` and `jacobi_prime` give the value and an **exact**
+derivative. **The argument is `1 − 2ρ²` and not `2ρ² − 1`**, and the leading
+sign is not optional: measured over 136 modes to degree 30, the flipped
+argument fails `R_l^m(1) = 1` on **113** of them and the dropped sign on **64** —
+but *both* reproduce every pure power `R_l^l` exactly, which is why `R_3^1 =
+3ρ³ − 2ρ` is the cheapest case that separates them. The explicit factorial sum
+that every reference prints is **not** an acceptable alternative: it disagrees
+with the Jacobi route by 4.5e-08 at `l = 30` and 1.3e-04 at `l = 40`.
+
+> **A NAIVE TENSOR PRODUCT ADMITS MODES THAT ARE C¹ AT THE ORIGIN AND FAIL AT
+> THE SECOND DERIVATIVE — WHICH IS WHY ADMITTING ONE WOULD BE SILENT.** The
+> first draft of this file said such modes are "not analytic at `ρ = 0`". True,
+> but weaker than it sounds and misleading about how it would be caught:
+> `ρ² cos θ = x√(x²+y²)` has a *continuous gradient* at the origin, so a C¹
+> check passes it. The sharp statement is that **every admissible Zernike mode
+> is a polynomial in `(x, y)`** and the inadmissible ones are not. Measured, by
+> a one-sided second difference from each side of the origin: admissible modes
+> give 0 or shrink at `O(h)`; `ρ² cos θ` sits at `4|cos θ|` at every step size.
+> (A *centred* second difference is useless for this — the defect is odd and
+> cancels itself out of the measurement.)
 
 > **THE RADIAL COORDINATE MUST BE `ρ = √Ψ_N`, NOT `Ψ_N`.** DESC's theory page
 > says `ρ` is "the square root of the normalized toroidal flux, which is
@@ -264,6 +308,22 @@ analytic at `ρ = 0`; Zernike excludes them by construction.
 > Parametrise by `Ψ` directly and `R(Ψ, l)` acquires a square-root branch point
 > at the axis; every basis then converges algebraically, worst near the axis,
 > and no convergence table says why. The Zernike degree counts powers of `√Ψ_N`.
+
+> **AND WHAT BUYS GEOMETRIC CONVERGENCE IS SMOOTHNESS IN `(x, y)`, NOT
+> SMOOTHNESS IN `ρ`.** Measured through the same quadrature: a function with a
+> pole just outside the disc decays geometrically, `0.42` per degree, reaching
+> `6.2e-09` truncation error at degree 24. The control is `f = √(x²+y²)`, which
+> **is** `ρ` and is therefore perfectly smooth as a function of `ρ` — and is
+> only C⁰ at the Cartesian centre. It decays **algebraically**, at `l^{-1.92}`,
+> and is seven orders worse at degree 24. So "the surfaces are smooth in the
+> flux label" is *not* the hypothesis this basis needs; smoothness of the map
+> into the plane is.
+
+**Ordering matters and is not cosmetic.** `src/meq/Zernike.hpp` uses ANSI/OSA
+order because it is **prefix stable**: truncating to a lower degree is
+truncating the coefficient vector, with no re-indexing. A convergence study in
+mode number — which is IN-3's acceptance — needs exactly that, and it is not
+free from an arbitrary ordering.
 
 **There is low-order precedent for the whole approach.** MXH (Arbon, Candy &
 Belli, `10.1088/1361-6587/abc63b`, in `refs/`) is a Fourier-in-angle
@@ -282,7 +342,68 @@ the separatrix becomes **stiff near its ends**, because arc length diverges
 logarithmically as it nears the X-point. Chebyshev clusters resolution exactly
 there.
 
-### 4.3 The `ψ`-varying element: THE OPEN DECISION
+### 4.3 The band between `Γ_h` and `Γ`, and why it reaches this item
+
+**On the curved path the outermost flux surfaces are not in the mesh.** `Ω_h` is
+the union of background elements lying *inside* `Γ`, so `Γ_h` is inscribed and
+there is a band `O(h)` wide that is inside the plasma and outside the mesh.
+`CLAUDE.md` records the measurement: on `examples/miller-curved.toml` about one
+grid node in ten is in it.
+
+**This is not a corner case for this item, it is the interesting part.** The
+outermost closed surface is `ψ = 0`, which *is* `Γ`. So the surfaces the band
+affects are exactly those with `Ψ_N → 1` — which is where `q(ψ)` and the
+flux-surface averages are most wanted and least forgiving, and where every
+production code already struggles for unrelated reasons (§8.2).
+
+**The tracer must therefore accept a field defined outside the mesh, and must
+know when it is using one.** That is a requirement on IN-0, not a redesign: the
+corrector calls something for `ψ` and something for `∇ψ`, and in the band those
+calls are answered by an extension. What it must not do is what the prior art
+does — `v0-legacy:FluxSurfaces.cpp` prints *"Terminating because curve left
+domain"* and returns a partial curve, which for an outer surface silently
+returns an arc labelled as a closed contour.
+
+**Which extension is a real question and it should be measured, not argued.**
+Three candidates, and meq already owns machinery for two:
+
+| | | |
+|---|---|---|
+| **the flux Taylor step** | what `GridSampler::samplePotentialWithFlux()` already does: `ψ(p) ≈ ψ(x₀) + r₀ q(x₀)·(p − x₀)` from the foot `x₀` on `Γ_h` | **nothing is ever evaluated outside an element**, which is the property that made it right for the `.nc`. But `∇ψ` in the band is then **frozen at the foot**, so the extended field is affine and **contours in the band are straight lines** — the curvature is gone, whatever `k` is |
+| **the transfer-path lift** | the extension technique's own construction — `mfem::TransferPath`, `PathLiftCoefficient`, `ElementExtension::TransformBack`, already used by `setExtension()` and by `transferredDatum()` | **method-native**: it is how the solver itself relates `ψ` on `Γ` to `ψ` on `Γ_h`, by integrating `r q` along the path. Should be better than a Taylor step and is the principled choice. **Whether it yields a usable `ψ` at an ARBITRARY band point, rather than only on `Γ_h` and on `Γ`, is the thing to check first** |
+| **the known boundary condition** | `ψ = 0` exactly on `Γ`, and `Γ` is known analytically from `BoundaryShape` | the outermost contour is therefore known **exactly**, for free, with no tracing at all — a fact worth exploiting whatever else is chosen |
+
+> **A WARNING FROM THE TREE, BECAUSE THE OBVIOUS COMBINATION HAS BEEN TRIED AND
+> FAILED.** Blending an extrapolated value toward the known `ψ = 0` on `Γ` does
+> **not** rescue a bad extension: `CLAUDE.md` records that `(1−t)·v` scales a
+> positive value down and never changes its sign, so all seventeen offending
+> nodes survived it. *"The error was in **where the field was evaluated**, not in
+> how it was weighted."* The purpose here is different — parametrising a curve
+> rather than sampling a grid — but the lesson transfers: fix the evaluation,
+> and use the exact boundary as an **anchor** rather than as a correction.
+
+**AND IT SHARPENS §4.4, WHICH IS THE PART THAT ACTUALLY BEARS ON THE DESIGN.**
+A single global Zernike expansion in `ρ` is a **global** fit: its accuracy is set
+by its worst region, so surfaces known only to the extension's order degrade the
+representation *everywhere*, not just near `ρ = 1`. Elements in `ψ` localise
+that damage — and they give the outermost element a natural place to begin, at
+the flux label where surfaces start crossing into the band. **That is a third
+argument for elements over one global expansion, independent of the two in
+§4.4, and it is the one that arrived last.**
+
+**Report it, the way the `.nc` already does.** That file carries a `byte
+extrapolated( Z, R )` beside `inside` precisely because a band node holds real
+data and is therefore indistinguishable from a solved one without being told.
+The same is true of a surface: **every flux-surface quantity computed on a
+surface that crosses the band must be flagged as such**, so that a consumer can
+drop it before computing an error norm or differencing two runs. A count is not
+enough — `CLAUDE.md` records that being the other half of the same defect.
+
+**None of this arises on the fitted path**, where `Γ` is the mesh boundary and
+there is no band. So the fitted path is the right place to establish every rate
+in §7 before the curved path is turned on, and IN-0's acceptance says so.
+
+### 4.4 The `ψ`-varying element: THE OPEN DECISION
 
 **This is unresolved and this file does not pretend otherwise.** Nothing in the
 survey addresses it, because nobody else is trying to satisfy all three of these
@@ -297,6 +418,65 @@ at once:
 3. **C¹ in `Ψ` at minimum**, because `MANTA-COUPLING.md` needs
    `dGeometry_dpsi`. This is a floor, not a nicety, and it eliminates some
    element choices outright.
+4. **Localising the band's damage**, §4.3. A global fit is only as good as its
+   worst region, and on the curved path the outer surfaces are known to the
+   extension's order rather than the discretisation's.
+
+> **`∂R/∂Ψ` IS UNBOUNDED AT THE AXIS, AND THIS FILE ORIGINALLY READ AS IF IT
+> WERE NOT.** Found while implementing `Zernike`, 2026-09-02, and it is a fact
+> about the problem rather than about the basis.
+>
+> The chain rule from `ρ = √Ψ_N` carries a factor `1/(2ρ)`, so `∂/∂Ψ_N` at fixed
+> `θ` diverges at `ρ = 0` for any mode whose lowest radial power is `ρ¹` — that
+> is, `|m| = 1`. And `|m| = 1` is not incidental: **for a surface
+> `R = R₀ + a cos θ`, the `m = 1` coefficient of `R` IS the minor radius `a`**,
+> which grows like `√Ψ`. So `∂R/∂Ψ ∝ 1/(2√Ψ_N) → ∞` at the axis in **every**
+> equilibrium, universally, not as a property of any configuration.
+>
+> (The implementing agent attributed this to the Shafranov shift. It is not
+> that — a rigid shift is the `m = 0` coefficient and is well behaved. The
+> divergence is the minor-radius growth itself, which makes it more fundamental
+> rather than less.)
+>
+> **The distinction that saves the downstream consumers.** Flux-surface
+> *averages* are unaffected: `V ∝ Ψ` near the axis, so `V′(Ψ)` tends to a
+> constant and IN-2's quantities are fine. What diverges is the derivative of
+> the surface **position**.
+>
+> **AND THE COUPLING'S SIDE OF IT IS ANSWERED, 2026-09-02, BY THE MANTA
+> AUTHOR.** Two mechanisms, and the first is the real one:
+>
+> * **MaNTA enforces that the fluxes vanish on axis**, which they must — there
+>   is no area for a flux to cross at the axis, so it is a physical boundary
+>   condition rather than a numerical guard. A metric derivative that diverges
+>   like `Ψ^{-1/2}` multiplied by a flux that vanishes gives a finite product.
+>   The singularity is removable **in the coupled system**, which is the level
+>   at which it has to be removable.
+> * **And in the worst case MaNTA can guarantee that none of its nodes lies at
+>   `Ψ = 0` exactly**, so nothing is ever evaluated at the singular point.
+>
+> **What that leaves is a conditioning question, not a correctness one, and it
+> is worth measuring rather than assuming.** `1/(2√Ψ_N)` at the innermost node
+> is finite but grows as that node approaches the axis, so the magnitude of the
+> geometry block of MaNTA's Jacobian scales like `Ψ₁^{-1/2}`. Whether that is
+> comfortable depends on where MaNTA puts its first node, which is a
+> configuration choice rather than a property of either code. **Measure it once
+> the coupling exists; do not design around it now.**
+>
+> **This is not a defect being worked around.** The minor radius really does
+> grow like `√Ψ`, so any code working in `Ψ` near the axis meets it, and the
+> standard remedy across the transport community is exactly the pair above:
+> a radial coordinate that is not the flux, plus the axis boundary condition.
+> Recording it because a reader meeting `1/(2ρ)` in `Zernike.hpp` will
+> reasonably wonder whether it is a mistake.
+>
+> **Not written into `MANTA-COUPLING.md`**, which is a *received* document —
+> `TODO` records the rule, the same one that makes `../mfem-hdg-dev`
+> receive-only. It belongs here.
+>
+> `src/meq/Zernike.hpp` supplies both: `fluxDerivativeFromRadial()` carries the
+> `1/(2ρ)` factor with the divergence documented, and `radialDerivative()` stays
+> finite. Prefer the second wherever a caller can work in `ρ`.
 
 (1) and (2) pull opposite ways. The natural resolution is a **disc element in
 Zernike containing the axis, surrounded by annular elements in something else**
@@ -375,12 +555,28 @@ topological**:
 
 * Poincaré–Hopf on a disc gives `#max + #min − #saddle = χ = 1`. That is an
   *identity*, not an absence — two maxima and one saddle also sums to 1.
-* What excludes an interior minimum is the **maximum principle**. With
-  single-signed `F`, `−∇̄·((1/r)∇̄ψ) = F/r ≥ 0` makes `ψ` a supersolution of a
-  uniformly elliptic divergence-form operator (`1/r` is bounded away from zero
-  and infinity since `r > 0`), so the minimum sits on `Γ`.
-* Hence `#min = 0`, `#saddle = #max − 1`, and one axis gives **zero interior
+* What excludes an interior extremum of ONE sign is the **maximum principle**,
+  and *which* sign depends on the sign of `F`. `1/r` is bounded away from zero
+  and infinity since `r > 0`, so the operator is uniformly elliptic in
+  divergence form either way:
+  * `F ≥ 0` makes `ψ` a **supersolution**, its minimum sits on `Γ`, and
+    `#min = 0`.
+  * `F ≤ 0` makes `ψ` a **subsolution**, its maximum sits on `Γ`, and
+    `#max = 0`.
+* Either way one interior extremum gives `#saddle = 0`: **zero interior
   saddles**.
+
+> **AND MEQ'S SOLOV'EV FIXTURES ARE THE SECOND CASE, WHICH AN EARLIER DRAFT OF
+> THIS SECTION DID NOT SAY.** It wrote only the `F ≥ 0` half. `F = −((1−A)r² + A)`
+> is single-signed **negative**, so `ψ` is a subsolution, its maximum is on `Γ`,
+> and **the magnetic axis is an interior MINIMUM** — Hessian determinant +0.693
+> and trace +2.121 on `nstx`, measured. The conclusion above is untouched,
+> because in 2D a maximum and a minimum both have index +1 and the sign never
+> reaches the count. **But the practical instruction derived from it was wrong**:
+> "seed the axis search from the largest nodal value" finds a **corner of the
+> benchmark rectangle** on these fixtures. `CriticalPointFinder::findAxis()`
+> seeds from both nodal extremes and refuses rather than guesses if both are
+> interior extrema; `AxisSense` is for a caller who knows which they want.
 
 The conclusion is immune to all three of meq's sign conventions: `ψ → −ψ` swaps
 max and min and both have index +1 in 2D; `q = ∇̄ψ / r` has the same zeros and
@@ -430,11 +626,43 @@ Every stage ends at a **measured rate**, not at "it runs". That is this
 project's standing rule and it is what caught the Solov'ev coefficients, the `τ`
 sign and the inert normalisation.
 
-### IN-A — critical points, and nothing else
+### IN-A — critical points, and nothing else — **DONE, 2026-09-02**
 
 **Measurable today, with no contouring at all**, which is why it is first. Find
 the magnetic axis as a root of `q = 0` by barycentric Bernstein subdivision plus
 a certifying degree test; audit with Σ indices = χ.
+`src/meq/CriticalPoints.{hpp,cpp}`,
+`tests/convergence/CriticalPointConvergence.cpp`.
+
+**Measured.** The axis position converges at **2.340 / 3.484 / 4.447** for
+`k = 1, 2, 3` against design orders of 2, 3 and 4 — clearing `k+1` itself. The
+per-pair rate is *not* a rate here and the test says so: the error is pointwise,
+so it oscillates as the axis moves within its element (4.17 / 1.54 / 1.31 at
+`k = 1`), and the two-tier assertion pattern is what applies.
+
+**The sharpest assertion was not in the brief**: the ratio of the position error
+to `|q_h − q|` at the *exact* axis is **0.77 to 3.37** against **0.77 to 3.27**
+predicted by linearising `q` about its root — a direct statement that the root
+finder adds nothing to the error of the field it is rooting.
+
+> **A DEGREE IS A SUM OF INDICES AND THE SUITE DEMONSTRATES IT RATHER THAN
+> ASSERTING IT.** A box round `iterExample2`'s axis *and* its X-point reads
+> **winding 0 with two critical points inside**, the saddle located to 4.5e-6 of
+> the published X-point. And the Poincaré–Hopf hypothesis is **transversality of
+> `q·n`**, not that the boundary is a level set: on the standard rectangle
+> `min |q·n|/|q| = 0.15` with one sign, so `winding == χ == 1` *is* a theorem
+> there; on a box reaching past the X-point it reads 0.00 with a sign change and
+> is not.
+>
+> **AND A DISCONTINUOUS `q_h` CAN CARRY BOUNDARY DEGREE 1 WITH NO ZERO IN ANY
+> ELEMENT.** At `h = 0.4, k = 1` the audit reads 1 and an element-by-element
+> search finds nothing: each element's polynomial puts its zero just inside a
+> neighbour's territory, and with a face jump of `O(h^{k+1})` against an element
+> of size `h` there is a window where the zero belongs to neither.
+> **Poincaré–Hopf is a theorem about continuous fields.** The window closes with
+> refinement and the test pins it to that one coarse mesh, so a *finer* mesh
+> losing the axis fails rather than passing quietly. Where the audit and the
+> search disagree, believe the audit.
 
 **Acceptance.** The axis position converges against the analytic Solov'ev axis
 at the rate `q`'s own order predicts. The audit returns exactly 1 on every
@@ -453,12 +681,22 @@ the other.
 Predictor–corrector per §3.1, curvature-controlled step, cubic Hermite from `q`
 per §3.2(i). Start from IN-A's axis.
 
-**Acceptance.** On an exact Solov'ev contour, the geometric error of the traced
-curve converges at `O(Δs⁴)` with Hermite against `O(Δs²)` with chords, both
-measured, **with the chord version kept as the control**. Closure error over a
-full circuit at machine precision, and — the property that says the corrector is
-doing its job — **independent of path length**. At fixed `Δs`, the error is
-independent of `h`, which is what says (b) and (c) have been separated.
+**Acceptance, ON THE FITTED PATH**, where there is no band and every rate is
+therefore attributable to the tracer alone. On an exact Solov'ev contour, the
+geometric error of the traced curve converges at `O(Δs⁴)` with Hermite against
+`O(Δs²)` with chords, both measured, **with the chord version kept as the
+control**. Closure error over a full circuit at machine precision, and — the
+property that says the corrector is doing its job — **independent of path
+length**. At fixed `Δs`, the error is independent of `h`, which is what says (b)
+and (c) have been separated.
+
+**Then the band, as a second acceptance and not before the first is green.**
+The tracer must complete a closed contour that crosses the band rather than
+stopping at `Γ_h`, must report that it did, and its error there must converge —
+at the extension's own order, which is expected to be worse than `O(Δs⁴)` and is
+the number §4.3's choice is to be made on. Measure the flux Taylor step and the
+transfer-path lift **side by side on the same contours**; that comparison is the
+deliverable of this half of the stage.
 
 ### IN-1 — arc length and the metric
 
@@ -473,35 +711,206 @@ control.
 
 ### IN-2 — flux-surface averages
 
-`⟨r^{-2}⟩_ψ`, `V′(ψ)`, and `q(ψ)`, by periodic parametrisation and the
-trapezoidal rule per §3.2(ii).
+`⟨r^{-2}⟩_ψ`, `V′(ψ)`, and the safety factor, by periodic parametrisation and
+the trapezoidal rule per §3.2(ii).
 
-**Acceptance.** Against the closed-form Solov'ev values: spectral convergence in
-the number of angular points at fixed mesh, and `k+1` in `h` at fixed angular
+> **A NAME COLLISION TO SETTLE BEFORE ANY CODE IS WRITTEN.** In this project
+> `q` is the **flux**, `q = (1/r)∇̄ψ`, a solved unknown of the discretisation and
+> the asset this whole item is built on. The safety factor is also universally
+> written `q`. **In code the safety factor is `safetyFactor` and never `q`**;
+> in this file it is named in words. A reader who meets `q` in `src/meq` is
+> entitled to assume the flux, and one silent conflation would be very hard to
+> see afterwards.
+
+**WHAT THE CONSUMER READS IS FLUX-SURFACE AVERAGES, AND THAT MUCH IS FIRM.**
+`MANTA-COUPLING.md` §5: the geometry slots are "a set of scalar functions of the
+flux label, each differentiable with respect to every `ψ` DOF". **The shape of
+the requirement is what is settled; the concrete list is not.** That document
+says so itself — the list "is negotiated with the transport physics case, not
+fixed by MaNTA" — and its illustrative tokamak set is **known to be not entirely
+correct and is being revised**. Do not build against the enumeration.
+
+**So the representation of §4 is not what the consumer reads.** It is what the
+averages are computed *from*, and what the surface-motion term of
+`dGeometry_dpsi` is differentiated through. That reframes §4.4's open decision:
+the `ψ`-element question is about how well a *family* of surface averages and
+their `ψ` derivatives come out, not about how prettily a surface is drawn.
+
+> **AND IT SETTLES THE SHAPE OF THE CODE, WHICH IS THE USEFUL CONSEQUENCE.** A
+> list that is still moving must not be a list of functions. IN-2 builds ONE
+> facility — given a surface and a callable integrand in `(R, z, ψ, q)`, return
+> `⟨f⟩` and `V′` — with each named quantity a thin wrapper over it. Adding or
+> removing a slot is then a line, the convergence machinery is written once, and
+> the `dGeometry_dpsi` derivative is taken of the facility rather than of eight
+> separate expressions. Measure a representative few — one geometric
+> (`⟨R^{-2}⟩`), one involving `|∇ψ|` (which is where the flux earns its keep),
+> and `V′` — and let the rest inherit the rates.
+
+> **AND THE CONSUMER'S JACOBIAN HAS THIS PROJECT'S OWN FAILURE MODE.**
+> `MANTA-COUPLING.md` §6: MaNTA never assembles its Jacobian, so a missing
+> surface-motion term "does not produce a wrong answer, only slow Newton
+> convergence", and several defects survived a passing suite for months on it.
+> That is *A wrong Jacobian is invisible to a convergence table* arriving from
+> the consumer's side, and the remedy is the one meq already uses on `dFdPsi`:
+> **finite-difference `dGeometry_dpsi` against `Geometry` directly**, as a unit
+> test, and never take convergence of the coupled solve as evidence.
+
+**MEQ'S SOLOV'EV FIXTURES HAVE NO CLOSED-FORM FLUX-SURFACE AVERAGES, AND AN
+EARLIER DRAFT OF THIS SECTION ASKED FOR THEM.** `ψ` is closed form; `⟨R^{-2}⟩`,
+`V′` and the safety factor are integrals over a *contour* of it, and the
+contours of the Cerfon–Freidberg twelve-coefficient family are not curves whose
+arc length is elementary. `tests/analytic/Soloviev.hpp` offers `psi`, `gradPsi`
+and `flux` and nothing of this kind, which is the whole of the evidence needed.
+
+**Be precise about the scope of that**: it is a statement about *these*
+fixtures, not about Solov'ev equilibria in general. A deliberately constructed
+Solov'ev whose surfaces are a family with elementary arc length would give a
+genuine closed form, and is the right move if one is ever wanted — but it would
+be a new fixture with its own transcription to check, and the reference below is
+cheaper and independent in the way that matters.
+
+**What replaces the closed form is a converged reference on the EXACT field, and
+IT IS BUILT: `tests/analytic/FluxSurfaceReference.hpp`.** A safeguarded root
+solve along rays from the axis against analytic `psi` and `gradPsi`, with the
+periodic trapezoidal rule — *spectral* here by §3.2(ii), and it reaches
+round-off. It never touches `ψ_h`, so it separates error (a) from (b) and (c)
+exactly as §2 requires. That is a reference *value*, not a closed form, and the
+distinction should be stated wherever the number is printed.
+
+**It is one facility with a callable integrand**, per the shape argued above,
+and it is the prototype for what IN-2 builds in `src/meq`. On `nstx()`, every
+figure converged to the last printed digit by 256 angles:
+
+| `Ψ_N` | `V′` | `⟨R^{-2}⟩` | arc length |
+|---|---|---|---|
+| 0.25 | 6.71413847786385e+01 | 6.84662650462071e-01 | 2.86563934 |
+| 0.50 | 7.42523454479159e+01 | 8.71200178854720e-01 | 4.25101127 |
+| 0.75 | 8.81259886962482e+01 | 1.29438587807901e+00 | 5.57924227 |
+
+**AND IT ALREADY DEMONSTRATES §3.2's TRAP, WHICH IS WORTH MORE THAN THE
+REFERENCE VALUES.** Successive differences in the arc length at `Ψ_N = 0.25`,
+doubling the angles from 16:
+
+| | | | | | |
+|---|---|---|---|---|---|
+| **from `q`, pointwise** | 1.08e-02 | 4.90e-05 | **2.98e-08** | **3.11e-15** | 1.78e-15 |
+| differenced positions | 1.37e-01 | 4.07e-02 | 1.07e-02 | 2.73e-03 | 6.84e-04 |
+| chord sum | 4.56e-02 | 1.07e-02 | 2.73e-03 | 6.84e-04 | 1.71e-04 |
+
+**The rule is the same trapezoid over the same points in the first two rows.**
+The first is geometric and reaches round-off at 256 angles; the second falls by
+a factor of four per doubling because its *Jacobian* is second order — and the
+two converge to the **same limit**, so nothing in the output of the second says
+it is three orders worse. A spectrally accurate quadrature fed a differenced
+metric is a second-order scheme wearing a spectral name. **This is the control
+IN-1 and IN-2 are to be measured against, and it is now a measurement rather
+than an expectation.**
+
+**AND THERE IS AN EXACT IDENTITY THAT NEEDS NO REFERENCE VALUE AT ALL.** The
+flux-surface average of the Grad–Shafranov equation itself. With
+`⟨∇·Γ⟩ = (1/V′) ∂_ψ( V′ ⟨Γ·∇ψ⟩ )` and `Γ = ∇ψ/R²`, using
+`∇·( ∇ψ/R² ) = Δ*ψ/R²` and `Δ*ψ = −F`:
+
+```
+(1/V′) d/dψ ( V′ ⟨ |∇ψ|² / R² ⟩ )  =  ⟨ Δ*ψ / R² ⟩  =  −⟨ F / R² ⟩
+```
+
+**Write the right-hand side as `−⟨F/R²⟩` and not as `−μ₀p′ − g g′⟨R^{-2}⟩`.**
+The two are equal — for Solov'ev, `F = −((1−A)r² + A)` against
+`F = μ₀ r² p′ + g g′` gives the constants `μ₀p′ = −(1−A)` and `g g′ = −A` — but
+the first form uses **the `F` the solver is actually fed** and so applies to
+every fixture in `tests/analytic/` rather than to Solov'ev alone. That is
+exactly the discipline `deltaStarFD()` follows in checking the twelve-term
+transcription, and for the same reason: an independent quantity is the only
+thing that catches a misread formula, and a right-hand side re-derived by hand
+is not independent of the hand that derived it.
+
+**Three averages then check each other with nothing but the equation.**
+Measured on `nstx()` at 256 angles, the residual reads **1.3e-13, 6.3e-13 and
+4.2e-12** at `Ψ_N = 0.25, 0.50, 0.75` — so the identity is a live assertion on
+the reference itself, before any discrete field is involved.
+
+**The convention is part of the identity.** It is stated for
+`V′ = ∮ 2πR dl/|∇ψ|` and `⟨X⟩ = (1/V′) ∮ 2πR X dl/|∇ψ|`; a per-unit-length `V′`
+changes it. Verified numerically 2026-09-02 on a case where every piece is
+elementary — `ψ = (R−2)² + z²`, whose level sets are circles — where it holds to
+**2.7e-13**.
+
+> **AND THE `d/dψ` MUST BE RICHARDSON-EXTRAPOLATED, WHICH IS THE ZERNIKE FINDING
+> ARRIVING AGAIN.** On that same check a plain central difference floors the
+> agreement at **8.1e-07** while `(4D(h/2) − D(h))/3` reaches 2.7e-13. The floor
+> is the *instrument*, not the identity, and an identity checked at 1e-6 would
+> pass with a real defect underneath it. This is now the third place in the
+> tree where that applies; see the note in IN-3 and `Zernike`'s derivative test.
+
+**Acceptance.** Against that reference and that identity: spectral convergence
+in the number of angular points at fixed mesh, and `k+1` in `h` at fixed angular
 resolution. **Two independent controls**, because this is the number everything
 downstream rests on: ray bisection from the axis (§3.4) as a second extraction,
 and an implicit-quadrature rule (§3.3) as a route that never extracts a curve at
 all. All three agreeing is worth more than any one being plausible.
 
+**And separate the two populations, as the `.nc` already does.** Surfaces lying
+wholly inside `Ω_h` should converge at the rates above; surfaces crossing the
+band are limited by the extension and must be **reported separately and flagged
+in the output**, never averaged in with the others. Quoting one rate over both
+populations would hide exactly the thing this stage exists to measure.
+
 **This is where `ROADMAP.md` item 10 becomes reachable.**
 
 ### IN-3 — the representation
 
-Fit `R(ρ, θ)`, `z(ρ, θ)` in Fourier–Zernike per §4.1, on `ρ = √Ψ_N`.
+Fit `R(ρ, θ)`, `z(ρ, θ)` in the Zernike disc basis per §4.1, on `ρ = √Ψ_N`.
 
 **Acceptance.** The fit converges spectrally in mode number on an analytic
-equilibrium. And the one that matters: **`dGeometry/dΨ` obtained by
-differentiating the fit agrees with a finite difference of independently traced
-surfaces**, to the fit's own accuracy. That is the property `MANTA-COUPLING.md`
-needs and the reason a representation exists at all.
+equilibrium — geometric decay of the coefficient envelope, **with an algebraic
+fit kept as the losing control**, since "spectral" means nothing without one.
+
+And the one that matters: **the derivative obtained by differentiating the fit
+agrees with a finite difference of independently traced surfaces**, to the fit's
+own accuracy. That is the property `MANTA-COUPLING.md` needs and the reason a
+representation exists at all.
+
+> **STATE IT IN `ρ`, OR NAME A FLUX RANGE BOUNDED AWAY FROM THE AXIS.** Per the
+> warning in §4.4, `∂R/∂Ψ` diverges like `1/(2√Ψ_N)`, so an acceptance written
+> against `dGeometry/dΨ` over the whole domain **would be comparing infinities**
+> and would fail for a reason that has nothing to do with the fit. Measure
+> `∂R/∂ρ`, which is finite everywhere, and check the `1/(2ρ)` conversion
+> separately on a range like `Ψ_N ∈ [0.1, 0.9]`.
+>
+> **This is now the confirmed shape rather than a defensive one.** MaNTA
+> enforces vanishing fluxes on axis and can keep its nodes off `Ψ = 0`, so
+> working in `ρ` and bounding the conversion away from the axis is what the
+> consumer wants anyway — see §4.4. The one thing IN-3 should additionally
+> report is **how the conversion factor grows as the inner limit is lowered**,
+> since that is the number that tells a future coupling where it may safely put
+> its innermost node.
+
+**And use a Richardson-extrapolated difference**, `(4D(h/2) − D(h))/3`, not a
+plain central one. A central difference carries its own `O(h²)` truncation, so
+the comparison is floored by the **instrument** rather than by the derivative:
+measured on `Zernike`, the plain column sits at `1.3e-07` however exact the
+derivative is, and the extrapolated one reaches `1.4e-11`. **An earlier draft
+of this file implied the tolerance would tighten once the derivative became
+exact. It does not** — and that applies wherever this suite checks a derivative
+against a difference.
 
 A second, cheap check with real teeth: the fit's own `|dx/dθ|` against `q`
 evaluated pointwise. Two independent routes to the same metric.
 
 ### IN-4 — the `ψ`-element decision
 
-Measure the three candidates of §4.3 against IN-2's converged `q(ψ)`, including
-how each behaves as the outermost surface approaches the separatrix.
+Measure the three candidates of §4.4 against IN-2's converged averages — **more
+than one of them, not the safety factor alone**, since a basis can be excellent
+for one average and poor for another and the consumer's list is still moving.
+Include how each behaves as the outermost surface approaches the separatrix, and
+**include the `ψ` derivative**, because §4.4 is a question about
+differentiability across the element seam and a fit judged on values alone would
+not see it.
+
+**And settle §4.3's extension with it**, since the two interact: how far in the
+outermost element must begin depends on which extension is used, and how much a
+global fit loses depends on how bad the band is.
 
 **Acceptance.** A decision, recorded with the measurement that made it. This
 stage is allowed to conclude "global Zernike is sufficient for the flux range we
@@ -528,18 +937,21 @@ Chebyshev per §4.2. **Deferred with free boundary**, per §6.
    catches. Production codes simply stop: LIUQE cuts at `Ψ_N = 0.95`, FreeGS
    extrapolates outside `[0.01, 0.99]`. **Decide meq's cut deliberately and
    record it**, rather than discovering it as a convergence failure.
-3. **`Δs` chosen once and left.** The whole §2 argument rests on `Δs` being
+3. **The band silently truncating an outer surface.** The prior art returns a
+   partial curve with a message on stderr; a flux-surface average over an arc
+   labelled as a closed contour is wrong by an amount nothing reports. §4.3.
+4. **`Δs` chosen once and left.** The whole §2 argument rests on `Δs` being
    *tuned to `h` and `k`*. A fixed `Δs` reintroduces the cap the method exists
    to avoid — and it will look like the method failing rather than the parameter
    being wrong.
-4. **The axis.** `1/|∇ψ|` diverges there, surfaces shrink to a point, and the
+5. **The axis.** `1/|∇ψ|` diverges there, surfaces shrink to a point, and the
    corrector's `∇ψ(c−ψ)/|∇ψ|²` is 0/0. IN-A first is the mitigation; the
    innermost surfaces may still want the elliptical Hessian approximation LIUQE
    uses.
-5. **A rotating equilibrium's `p`.** §6's second carve-out. If anyone asks for
+6. **A rotating equilibrium's `p`.** §6's second carve-out. If anyone asks for
    pressure contours, none of the scoping in §6 applies and the topology work
    is back.
-6. **Conflating IN-A's axis with `ψ_ax`.** Two different quantities, both
+7. **Conflating IN-A's axis with `ψ_ax`.** Two different quantities, both
    correct, `O(h^{k+1})` apart.
 
 ---

@@ -202,6 +202,7 @@ set_target_properties(toml11::toml11 PROPERTIES
 set(MEQ_CORE_SOURCES
 	src/meq/BoundaryShape.cpp
 	src/meq/Config.cpp
+	src/meq/CriticalPoints.cpp
 	src/meq/Estimator.cpp
 	src/meq/Field.cpp
 	src/meq/GradShafranov.cpp
@@ -211,11 +212,13 @@ set(MEQ_CORE_SOURCES
 	src/meq/Sampler.cpp
 	src/meq/Source.cpp
 	src/meq/SourceFactory.cpp
-	src/meq/WarmStart.cpp)
+	src/meq/WarmStart.cpp
+	src/meq/Zernike.cpp)
 
 # Sources that will not compile without MFEM. Filtered out when it is absent;
 # see the find_package note above for why that case exists at all.
 set(MEQ_CORE_SOURCES_NEEDING_MFEM
+	src/meq/CriticalPoints.cpp
 	src/meq/Estimator.cpp
 	src/meq/Field.cpp
 	src/meq/GradShafranov.cpp
@@ -228,6 +231,25 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 # but the grid writer.
 set(MEQ_CORE_SOURCES_NEEDING_NETCDF
 	src/meq/Output.cpp)
+
+# Boost.Math, header only, for meq_core rather than only for the tests.
+#
+# src/meq/Zernike.cpp needs Jacobi polynomials: the Zernike radial polynomial is
+# a Jacobi polynomial under a coordinate change,
+#
+#     R_n^m( rho ) = (-1)^((n-m)/2) rho^m P_((n-m)/2)^(m,0)( 1 - 2 rho^2 )
+#
+# so `boost::math::jacobi` and `jacobi_prime` supply both the value and an EXACT
+# derivative, where a hand-rolled recurrence would supply one of them and a
+# maintenance burden. Verified against six closed forms and against
+# R_n^m( 1 ) = 1 for every admissible mode to n = 30 before being adopted.
+#
+# HEADER ONLY, so this adds no link dependency and nothing to distribute. It
+# does mean Boost is now required to build the LIBRARY and not merely the tests,
+# which is a real change to the dependency posture -- INSTALL.md and the install
+# chapter of docs/ both say so. CI already installs libboost-test-dev, which
+# brings the headers with it.
+find_package(Boost CONFIG REQUIRED)
 
 # The port is being done file by file, so a source in the list above may not
 # have been written yet. Configure with what is there and say what is missing,
@@ -262,6 +284,7 @@ endif()
 
 if(MEQ_CORE_SOURCES_PRESENT)
 	add_library(meq_core STATIC ${MEQ_CORE_SOURCES_PRESENT})
+	target_link_libraries(meq_core PUBLIC Boost::headers)
 
 	# Both src/ and src/meq/ are on the include path, so a header can be
 	# reached either as "Config.hpp" (which is how the existing sources and

@@ -37,6 +37,13 @@ What you need
      - Found with ``pkg-config``. Without it the ``.nc`` writer is dropped from
        the library and the driver cannot produce its interchange output. Debian
        calls it ``libnetcdf-c++4-dev``.
+   * - Boost
+     - **yes**
+     - **Header-only, and needed for the library rather than only for the
+       tests.** ``Zernike.cpp`` takes its Jacobi polynomials from Boost.Math —
+       the Zernike radial polynomial is a Jacobi polynomial under a coordinate
+       change, so this replaces a hand-rolled recurrence and supplies an exact
+       derivative with it. Nothing is linked.
    * - Boost.Test
      - for the tests
      - ``unit_test_framework``, the shared-library build, which is what supplies

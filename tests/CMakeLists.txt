@@ -20,7 +20,8 @@ set(MEQ_UNIT_TESTS
 	ProfilesTests
 	RotatingSourceTests
 	SourceTests
-	SourceFactoryTests)
+	SourceFactoryTests
+	ZernikeTests)
 
 foreach(_test IN LISTS MEQ_UNIT_TESTS)
 	set(_test_source "${CMAKE_CURRENT_SOURCE_DIR}/unit/${_test}.cpp")
@@ -139,7 +140,8 @@ set(MEQ_CONVERGENCE_TESTS
 	RotatingNormalisedConvergence
 	RotatingSolovievConvergence
 	RotatingSourceConvergence
-	RotatingNewtonConvergence)
+	RotatingNewtonConvergence
+	CriticalPointConvergence)
 
 # DriverAcceptance is registered separately below: it runs the meq BINARY rather
 # than linking the library, so it needs the app to have been built and needs the
