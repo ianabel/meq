@@ -995,13 +995,14 @@ namespace meq
 			 *
 			 * WHAT THIS IS FOR. psi_h converges at k+1 and so does q, so an extra
 			 * order in psi buys a magnetic-confinement calculation nothing --
-			 * which is why CLAUDE.md records post-processing as dropped, and why
-			 * neither GS paper implemented it for accuracy. It is needed for the
-			 * residual estimator of eq (20), whose eta_1, eta_2, eta_4 and eta_5
-			 * are all built on psi*_h rather than psi_h -- four of the five, not
-			 * the three CLAUDE.md records; eta_4 is [[ psi*_h ]]. eta_2 differentiates the
-			 * potential, and on psi_h that costs an order; measured in
-			 * tests/convergence/EstimatorConvergence.cpp, which reports both.
+			 * which is why stage 3 was dropped as MEQ code, and why neither GS
+			 * paper implemented it for accuracy. It is needed for the residual
+			 * estimator of eq (20), whose eta_1, eta_2, eta_4 and eta_5 are all
+			 * built on psi*_h rather than psi_h. That is FOUR of the five, and
+			 * eta_4 is the one people miss: it is [[ psi*_h ]], not [[ psi_h ]].
+			 * eta_2 differentiates the potential, and on psi_h that costs an
+			 * order; measured in tests/convergence/EstimatorConvergence.cpp,
+			 * which reports both.
 			 *
 			 * MEASURED, on the fitted Solov'ev benchmark: psi*_h converges at k+2
 			 * for k = 1, 2, 3 -- 3.03, 4.03, 5.00 across the sequence -- so the

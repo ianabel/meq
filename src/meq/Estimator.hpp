@@ -87,25 +87,60 @@
  * tests/convergence/EstimatorConvergence.cpp can keep measuring the difference.
  * That test carries the numbers and the argument in full.
  *
- * ON THE EXTENSION PATH, CALL setTransferredBoundary(). Four of the five terms
- * are fine there -- psi* still converges at k+2 even though
- * DarcyForm::Reconstruct() drops the boundary-face integrator carrying the
- * transferred datum, which was measured rather than assumed and came out the
- * opposite way round from the guess. eta_5 is not fine, for a different reason:
- * on Gamma_h psihat_h is pinned to zero and the datum actually imposed is phi_h,
- * which is never stored. eta_5 then compares psi* against zero on those faces
- * and the difference is O( dist( Gamma_h, Gamma ) ) = O( h ). Measured at k = 2,
- * eta becomes 4.09e-1 where eta_1 is 2.12e-3 and converges at about a half, so
- * the estimator is nothing but that one term. setTransferredBoundary() leaves
- * those faces out, which restores k+1 for eta and every component, and is an
- * omission rather than a repair -- see that method.
+ * ON THE EXTENSION PATH, CALL setTransferredBoundary(), AND PASS IT THE DATUM.
+ * Four of the five terms are fine there -- psi* still converges at k+2 even
+ * though DarcyForm::Reconstruct() drops the boundary-face integrator carrying
+ * the transferred datum, which was measured rather than assumed and came out
+ * the opposite way round from the guess. eta_5 is not fine, for a different
+ * reason: on Gamma_h psihat_h is pinned to zero and the condition actually
+ * imposed is phi_h, which the trace never stores. eta_5 then compares psi*
+ * against zero on those faces and the difference is
+ * O( dist( Gamma_h, Gamma ) ) = O( h ). Unmitigated at k = 2, eta_5 alone is
+ * 4.07e-1 against eta_1 at 2.12e-3 and eta is 4.09e-1 -- the two agree because
+ * the estimator IS that one term by then -- and it converges at about a half.
+ * An adaptive loop driven by that would have run, produced plausible pictures
+ * and refined the wrong elements.
  *
- * AND NOT AT ALL THROUGH NEWTON. GradShafranovSolver::postProcess() refuses the
- * semi-linear path, because DarcyForm::Reconstruct() silently returns ~1e15
- * there. So this estimator is available on the linear path only, on either
- * boundary regime. The eta_1 constructor still takes a meq::Source, and should:
- * eta_1 is the residual of the semi-linear equation whatever solved it, and the
- * day the reconstruction works through Newton nothing here changes.
+ * THAT WAS AN OMISSION AND IT IS NOW A REPAIR, WHICH IS ONE ARGUMENT. The
+ * one-argument call still leaves those faces out, restoring k+1 by deleting the
+ * term exactly where the geometry error lives. Passing @a datumIn rebuilds
+ * phi_h instead -- GradShafranovSolver::transferredDatum(), built on
+ * mfem::TransferredDatumCoefficient, which did not exist when the exclusion was
+ * written -- so eta_5 compares psi* against the condition actually imposed and
+ * the faces stay in. Measured at k = 2 over h = 0.213 / 0.106 / 0.053, all
+ * three treatments on one solve:
+ *
+ *                                coarsest      finest     rate
+ *     eta_1, for scale          2.1161e-03  4.7256e-05      --
+ *     eta_5 on the datum        9.5889e-05  2.0281e-06    2.78
+ *     eta_5 on the pinned zero  4.0688e-01  2.3226e-01    0.40
+ *
+ * -- two per cent of eta_1 rather than four orders larger than it, at k+1
+ * rather than at a half. eta itself barely moves, 2.1746e-03 to 4.8375e-05
+ * against 2.1745e-03 to 4.8375e-05 with the faces excluded, AND THAT IS THE
+ * POINT rather than a disappointment: a correctly evaluated eta_5 on Gamma_h is
+ * small. What changes is that the boundary elements now have an eta_5
+ * contribution instead of none, so the marking sees them.
+ * ExtensionConvergence.cpp's theTransferredDatumRestoresEtaFive is that table
+ * and keeps the pinned column as its control; setTransferredBoundary() carries
+ * the rest, including the sign trap in building the datum.
+ *
+ * AND IT WORKS THROUGH NEWTON. This paragraph used to say the opposite: that
+ * GradShafranovSolver::postProcess() refuses the semi-linear path because
+ * DarcyForm::Reconstruct() silently returns ~1e15 there, so the estimator was
+ * available on the linear path only. Both halves stopped being true at stage 6.
+ * MFEM fixed the reconstruction; the refusal was retired on a MEASUREMENT
+ * rather than on a code read, since a silent 1e15 is exactly what reading the
+ * fix cannot confirm; and psi* converges at k+2 through Newton -- Example 5
+ * over four dyadic meshes gives 3.05, 4.05 and 5.03 at k = 1, 2, 3, with psi*
+ * 47x, 113x and 125x smaller than psi_h on the finest.
+ * NewtonConvergence.cpp's thePostProcessedPotentialSurvivesNewton asserts it,
+ * and postProcess() carries the history in full.
+ *
+ * So the eta_1 constructor's meq::Source is not there in anticipation of
+ * anything. eta_1 is the residual of the semi-linear equation whatever solved
+ * it, and the adaptive loop the driver runs in production is the non-linear
+ * one.
  */
 
 namespace meq
