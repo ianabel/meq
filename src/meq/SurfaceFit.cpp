@@ -6,6 +6,14 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
+
+// EIGEN AND NOTHING ELSE. It is header only, so this file's promise -- plain
+// doubles in, coefficients out, no MFEM -- survives it: SurfaceFit.hpp does not
+// mention Eigen and a consumer of the fit takes on nothing. See decompose()
+// below for why the library is preferred to the hand-written pair it replaced.
+#include <Eigen/Dense>
+#include <Eigen/SVD>
 
 /*
  * THE LINEAR ALGEBRA IS HAND-WRITTEN AND IT IS ABOUT A HUNDRED AND FIFTY LINES,
@@ -73,143 +81,72 @@ namespace
 	}
 
 	/**
-	 * Householder QR of an m x n matrix stored row-major, m >= n, applying the
-	 * same reflectors to two right-hand sides.
+	 * The thin singular value decomposition of a design matrix, and the two
+	 * things both call sites in this file want out of one: V, the singular
+	 * values, and U^T applied to the right-hand sides.
 	 *
-	 * On return the upper n x n triangle of @a a is R and the first n entries of
-	 * each right-hand side are the corresponding entries of Q^T b. The reflectors
-	 * themselves are not kept: this file never needs Q.
-	 */
-	void householderQr( std::vector<double> &a, std::size_t rows,
-	                    std::size_t columns, std::vector<double> &firstRhs,
-	                    std::vector<double> &secondRhs )
-	{
-		std::vector<double> reflector( rows, 0.0 );
-
-		for ( std::size_t k = 0; k < columns; ++k )
-		{
-			// The reflector that zeroes a( k+1.., k ).
-			double norm = 0.0;
-			for ( std::size_t i = k; i < rows; ++i )
-			{
-				double const value = a[ i*columns + k ];
-				reflector[ i ] = value;
-				norm += value*value;
-			}
-			norm = std::sqrt( norm );
-
-			if ( !( norm > 0.0 ) )
-				continue;
-
-			// Choose the sign that avoids cancellation in the leading entry.
-			double const alpha = ( reflector[ k ] >= 0.0 ) ? -norm : norm;
-			reflector[ k ] -= alpha;
-
-			double reflectorNorm = 0.0;
-			for ( std::size_t i = k; i < rows; ++i )
-				reflectorNorm += reflector[ i ]*reflector[ i ];
-
-			if ( !( reflectorNorm > 0.0 ) )
-				continue;
-
-			auto apply = [ & ]( double *column, std::size_t stride )
-			{
-				double dot = 0.0;
-				for ( std::size_t i = k; i < rows; ++i )
-					dot += reflector[ i ]*column[ i*stride ];
-
-				double const factor = 2.0*dot/reflectorNorm;
-				for ( std::size_t i = k; i < rows; ++i )
-					column[ i*stride ] -= factor*reflector[ i ];
-			};
-
-			for ( std::size_t j = k; j < columns; ++j )
-				apply( a.data() + j, columns );
-
-			apply( firstRhs.data(), 1 );
-			apply( secondRhs.data(), 1 );
-		}
-	}
-
-	/**
-	 * One-sided Jacobi on the columns of an n x n matrix held column-major in
-	 * @a work, accumulating the right factor in @a rightFactor.
+	 * THIS USED TO BE A HAND-ROLLED HOUSEHOLDER QR AND A ONE-SIDED JACOBI SWEEP,
+	 * ABOUT A HUNDRED AND FIFTY LINES OF IT, AND THE REPLACEMENT IS NOT A
+	 * PERFORMANCE DECISION. Measured on this file's own workload -- 576 samples
+	 * by 66 modes -- Eigen and the hand-written pair are within a factor of two
+	 * of each other, and the whole least-squares solve is under half a per cent
+	 * of the extraction chain; tests/performance/InversionScaling.cpp is that
+	 * table. The reason is maintenance: a well-known algorithm with a
+	 * well-maintained implementation should be taken from the library, because
+	 * the chance of having written the perfect Householder reduction AND being
+	 * able to maintain it indefinitely is low. A performance tie is not a reason
+	 * to keep bespoke numerical linear algebra.
 	 *
-	 * On return the columns of @a work are U_j sigma_j and @a rightFactor is V,
-	 * so the input was U Sigma V^T. The singular values come out UNSORTED, which
-	 * costs nothing here: the caller wants their extremes and a floor, not an
-	 * order.
+	 * WHY JacobiSVD AND NOT BDCSVD OR CompleteOrthogonalDecomposition, both of
+	 * which are faster here.
+	 *
+	 *   * The decomposition is not only a solve. gaugeFreeFit() applies a
+	 *     Levenberg-Marquardt filter sigma/( sigma^2 + mu ) to U^T y and needs
+	 *     sigma and V explicitly, and SurfaceFitDiagnostics reports the extreme
+	 *     singular values and the condition number of the DESIGN matrix. A
+	 *     rank-revealing QR gives a rank and a solution and no spectrum, so
+	 *     CompleteOrthogonalDecomposition cannot answer either question.
+	 *   * JacobiSVD is a column-pivoted QR followed by one-sided Jacobi, which
+	 *     is exactly what this file used to do by hand and has the same high
+	 *     RELATIVE accuracy in the small singular values. That matters here and
+	 *     not everywhere: INVERSION-PLAN.md IN-4 measured the gauge to be "a
+	 *     soft tail with no gap" running to 8e-08 of the largest singular value,
+	 *     with the floor a threshold that has to be CHOSEN rather than read off
+	 *     a gap -- so which directions fall either side of it is a real
+	 *     question, and a bidiagonalising SVD resolves the tail to absolute
+	 *     rather than relative accuracy.
+	 *
+	 * Eigen is header only, so meq::SurfaceFit stays MFEM-free and free of
+	 * everything else a consumer would have to link: nothing in SurfaceFit.hpp
+	 * mentions Eigen and the include is confined to this file.
 	 */
-	void oneSidedJacobi( std::vector<double> &work, std::vector<double> &rightFactor,
-	                     std::size_t n, std::vector<double> &singularValues )
+	struct DesignSolve
 	{
-		rightFactor.assign( n*n, 0.0 );
-		for ( std::size_t j = 0; j < n; ++j )
-			rightFactor[ j*n + j ] = 1.0;
+		/// Descending, which the hand-rolled sweep's were not. Nothing here
+		/// depended on the order, but the extremes are now the ends.
+		Eigen::VectorXd singularValues;
 
-		double const tolerance = 1.0e-15;
-		int const maxSweeps = 60;
+		/// V, column j being v_j.
+		Eigen::MatrixXd rightFactor;
 
-		for ( int sweep = 0; sweep < maxSweeps; ++sweep )
-		{
-			std::size_t rotations = 0;
+		/// U^T B, one column per right-hand side.
+		Eigen::MatrixXd projection;
+	};
 
-			for ( std::size_t i = 0; i + 1 < n; ++i )
-			{
-				for ( std::size_t j = i + 1; j < n; ++j )
-				{
-					double alpha = 0.0;
-					double beta = 0.0;
-					double gamma = 0.0;
+	DesignSolve decompose( Eigen::MatrixXd const &design,
+	                       Eigen::MatrixXd const &rhs )
+	{
+		// The default preconditioner is ColPivHouseholderQR, which is what makes
+		// this the R-SVD the hand-written version was: the tall matrix is
+		// reduced once and the Jacobi sweeps run on the square factor.
+		Eigen::JacobiSVD<Eigen::MatrixXd> svd(
+			design, Eigen::ComputeThinU | Eigen::ComputeThinV );
 
-					for ( std::size_t k = 0; k < n; ++k )
-					{
-						double const left = work[ i*n + k ];
-						double const right = work[ j*n + k ];
-						alpha += left*left;
-						beta += right*right;
-						gamma += left*right;
-					}
-
-					if ( !( std::abs( gamma ) > tolerance*std::sqrt( alpha*beta ) ) )
-						continue;
-
-					++rotations;
-
-					double const zeta = ( beta - alpha )/( 2.0*gamma );
-					double const sign = ( zeta >= 0.0 ) ? 1.0 : -1.0;
-					double const t = sign/( std::abs( zeta )
-					                        + std::sqrt( 1.0 + zeta*zeta ) );
-					double const cosine = 1.0/std::sqrt( 1.0 + t*t );
-					double const sine = cosine*t;
-
-					for ( std::size_t k = 0; k < n; ++k )
-					{
-						double const left = work[ i*n + k ];
-						double const right = work[ j*n + k ];
-						work[ i*n + k ] = cosine*left - sine*right;
-						work[ j*n + k ] = sine*left + cosine*right;
-
-						double const vLeft = rightFactor[ i*n + k ];
-						double const vRight = rightFactor[ j*n + k ];
-						rightFactor[ i*n + k ] = cosine*vLeft - sine*vRight;
-						rightFactor[ j*n + k ] = sine*vLeft + cosine*vRight;
-					}
-				}
-			}
-
-			if ( rotations == 0 )
-				break;
-		}
-
-		singularValues.assign( n, 0.0 );
-		for ( std::size_t j = 0; j < n; ++j )
-		{
-			double sum = 0.0;
-			for ( std::size_t k = 0; k < n; ++k )
-				sum += work[ j*n + k ]*work[ j*n + k ];
-			singularValues[ j ] = std::sqrt( sum );
-		}
+		DesignSolve out;
+		out.singularValues = svd.singularValues();
+		out.rightFactor = svd.matrixV();
+		out.projection = svd.matrixU().transpose()*rhs;
+		return out;
 	}
 
 }
@@ -512,12 +449,14 @@ namespace meq
 		diagnostic.smallestSampledRadius = std::numeric_limits<double>::infinity();
 		diagnostic.largestSampledRadius = 0.0;
 
-		// The design matrix, row-major, with the least-squares weights folded in
-		// as their square roots so that the QR below minimises the weighted
-		// residual and nothing downstream has to remember they are there.
-		std::vector<double> matrix( rows*modes, 0.0 );
-		std::vector<double> rhsR( rows, 0.0 );
-		std::vector<double> rhsZ( rows, 0.0 );
+		// The design matrix, with the least-squares weights folded in as their
+		// square roots so that the decomposition below minimises the WEIGHTED
+		// residual and nothing downstream has to remember they are there. The
+		// two right-hand sides ride together as columns, which is what lets one
+		// decomposition serve both.
+		Eigen::MatrixXd matrix( static_cast<Eigen::Index>( rows ),
+		                        static_cast<Eigen::Index>( modes ) );
+		Eigen::MatrixXd rhs( static_cast<Eigen::Index>( rows ), 2 );
 
 		for ( std::size_t i = 0; i < rows; ++i )
 		{
@@ -558,32 +497,19 @@ namespace meq
 			// values alone, and the derivatives cost three further special
 			// function evaluations per entry on the Zernike branch.
 			for ( std::size_t j = 0; j < modes; ++j )
-				matrix[ i*modes + j ] = scale*modeValue( modeList[ j ], argument,
-				                                         sample.theta );
+				matrix( static_cast<Eigen::Index>( i ),
+				        static_cast<Eigen::Index>( j ) )
+					= scale*modeValue( modeList[ j ], argument, sample.theta );
 
-			rhsR[ i ] = scale*sample.r;
-			rhsZ[ i ] = scale*sample.z;
+			rhs( static_cast<Eigen::Index>( i ), 0 ) = scale*sample.r;
+			rhs( static_cast<Eigen::Index>( i ), 1 ) = scale*sample.z;
 		}
 
-		householderQr( matrix, rows, modes, rhsR, rhsZ );
+		DesignSolve const solved = decompose( matrix, rhs );
 
-		// The triangular factor, column-major, for the Jacobi sweep.
-		std::vector<double> work( modes*modes, 0.0 );
-		for ( std::size_t j = 0; j < modes; ++j )
-			for ( std::size_t i = 0; i <= j; ++i )
-				work[ j*modes + i ] = matrix[ i*modes + j ];
-
-		std::vector<double> rightFactor;
-		std::vector<double> singularValues;
-		oneSidedJacobi( work, rightFactor, modes, singularValues );
-
-		double largest = 0.0;
-		double smallest = std::numeric_limits<double>::infinity();
-		for ( double value : singularValues )
-		{
-			largest = std::max( largest, value );
-			smallest = std::min( smallest, value );
-		}
+		double const largest = solved.singularValues( 0 );
+		double const smallest =
+			solved.singularValues( static_cast<Eigen::Index>( modes ) - 1 );
 
 		if ( !( largest > 0.0 ) )
 			throw std::runtime_error(
@@ -595,37 +521,32 @@ namespace meq
 		diagnostic.conditionNumber = ( smallest > 0.0 )
 			? largest/smallest : std::numeric_limits<double>::infinity();
 
-		// c = V Sigma^-1 U^T y, with y the first `modes` entries of Q^T b and
-		// U_j = work_j / sigma_j -- so U_j^T y / sigma_j is work_j^T y / sigma_j^2
-		// and the columns never have to be normalised.
+		// c = V Sigma^-1 U^T y, with the directions the samples do not determine
+		// DISCARDED rather than inverted -- see SurfaceFitOptions on why the
+		// floor is relative and why it is 1e-10 rather than machine epsilon.
 		double const floor = options.singularValueFloor*largest;
 		coefficientR.assign( modes, 0.0 );
 		coefficientZ.assign( modes, 0.0 );
 
 		for ( std::size_t j = 0; j < modes; ++j )
 		{
-			if ( !( singularValues[ j ] > floor ) )
+			Eigen::Index const column = static_cast<Eigen::Index>( j );
+			if ( !( solved.singularValues( column ) > floor ) )
 			{
 				++diagnostic.discardedModes;
 				continue;
 			}
 
-			double projectionR = 0.0;
-			double projectionZ = 0.0;
-			for ( std::size_t k = 0; k < modes; ++k )
-			{
-				projectionR += work[ j*modes + k ]*rhsR[ k ];
-				projectionZ += work[ j*modes + k ]*rhsZ[ k ];
-			}
-
-			double const inverse = 1.0/( singularValues[ j ]*singularValues[ j ] );
-			projectionR *= inverse;
-			projectionZ *= inverse;
+			double const projectionR = solved.projection( column, 0 )
+			                           /solved.singularValues( column );
+			double const projectionZ = solved.projection( column, 1 )
+			                           /solved.singularValues( column );
 
 			for ( std::size_t k = 0; k < modes; ++k )
 			{
-				coefficientR[ k ] += rightFactor[ j*modes + k ]*projectionR;
-				coefficientZ[ k ] += rightFactor[ j*modes + k ]*projectionZ;
+				Eigen::Index const row = static_cast<Eigen::Index>( k );
+				coefficientR[ k ] += solved.rightFactor( row, column )*projectionR;
+				coefficientZ[ k ] += solved.rightFactor( row, column )*projectionZ;
 			}
 		}
 
@@ -1227,12 +1148,8 @@ namespace meq
 		bool dampingSet = false;
 		int stalled = 0;
 
-		std::vector<double> matrix;
-		std::vector<double> rhs;
-		std::vector<double> spare;
-		std::vector<double> work;
-		std::vector<double> rightFactor;
-		std::vector<double> singularValues;
+		Eigen::MatrixXd matrix;
+		Eigen::MatrixXd rhs;
 		std::vector<double> projection( unknowns, 0.0 );
 		std::vector<double> trialR( modes, 0.0 );
 		std::vector<double> trialZ( modes, 0.0 );
@@ -1261,21 +1178,24 @@ namespace meq
 			                       && ( options.spectralWeight > 0.0 );
 			std::size_t const rows = penalised ? points + unknowns : points;
 
-			matrix.assign( rows*unknowns, 0.0 );
-			rhs.assign( rows, 0.0 );
-			spare.assign( rows, 0.0 );
+			matrix.setZero( static_cast<Eigen::Index>( rows ),
+			                static_cast<Eigen::Index>( unknowns ) );
+			rhs.setZero( static_cast<Eigen::Index>( rows ), 1 );
 
 			for ( std::size_t i = 0; i < points; ++i )
 			{
+				Eigen::Index const row = static_cast<Eigen::Index>( i );
 				double const scale = rootWeight[ i ];
 				for ( std::size_t j = 0; j < modes; ++j )
 				{
 					double const value = scale*basis[ i*modes + j ];
-					matrix[ i*unknowns + j ] = normalR[ i ]*value;
-					matrix[ i*unknowns + modes + j ] = normalZ[ i ]*value;
+					matrix( row, static_cast<Eigen::Index>( j ) )
+						= normalR[ i ]*value;
+					matrix( row, static_cast<Eigen::Index>( modes + j ) )
+						= normalZ[ i ]*value;
 				}
 
-				rhs[ i ] = -scale*distance[ i ];
+				rhs( row, 0 ) = -scale*distance[ i ];
 			}
 
 			// ---------------------------------------------------------------
@@ -1302,10 +1222,9 @@ namespace meq
 				// in the normal matrix. Using the matrix's own row norms rather
 				// than its largest singular value avoids a second factorisation
 				// per iteration and bounds it from above.
-				double scale = 0.0;
-				for ( std::size_t i = 0; i < points; ++i )
-					for ( std::size_t j = 0; j < unknowns; ++j )
-						scale += matrix[ i*unknowns + j ]*matrix[ i*unknowns + j ];
+				double const scale =
+					matrix.topRows( static_cast<Eigen::Index>( points ) )
+						.squaredNorm();
 
 				// AND THE MODE NUMBER IS NORMALISED BY THE DEGREE. Hirshman &
 				// Breslau's weight is a bare power of |m|, which at p = 4 and
@@ -1327,28 +1246,22 @@ namespace meq
 						           options.spectralExponent );
 					double const root = std::sqrt( weight );
 
-					matrix[ ( points + j )*unknowns + j ] = root;
-					rhs[ points + j ] = -root*( ( j < modes )
+					Eigen::Index const row =
+						static_cast<Eigen::Index>( points + j );
+					matrix( row, static_cast<Eigen::Index>( j ) ) = root;
+					rhs( row, 0 ) = -root*( ( j < modes )
 						? coefficientR[ mode ] : coefficientZ[ mode ] );
 				}
 			}
 
-			householderQr( matrix, rows, unknowns, rhs, spare );
+			DesignSolve const step = decompose( matrix, rhs );
 
-			work.assign( unknowns*unknowns, 0.0 );
-			for ( std::size_t j = 0; j < unknowns; ++j )
-				for ( std::size_t i = 0; i <= j; ++i )
-					work[ j*unknowns + i ] = matrix[ i*unknowns + j ];
+			Eigen::VectorXd const &singularValues = step.singularValues;
+			Eigen::MatrixXd const &rightFactor = step.rightFactor;
 
-			oneSidedJacobi( work, rightFactor, unknowns, singularValues );
-
-			double largest = 0.0;
-			double smallest = std::numeric_limits<double>::infinity();
-			for ( double value : singularValues )
-			{
-				largest = std::max( largest, value );
-				smallest = std::min( smallest, value );
-			}
+			double const largest = singularValues( 0 );
+			double const smallest =
+				singularValues( static_cast<Eigen::Index>( unknowns ) - 1 );
 
 			if ( !( largest > 0.0 ) )
 			{
@@ -1364,24 +1277,24 @@ namespace meq
 				report.columns = unknowns;
 				report.largestSingularValue = largest;
 				report.smallestSingularValue = smallest;
-				for ( double value : singularValues )
+				for ( Eigen::Index j = 0; j < singularValues.size(); ++j )
 				{
-					if ( value < 1.0e-10*largest )
+					if ( singularValues( j ) < 1.0e-10*largest )
 						++report.nullDirections;
-					if ( value < 1.0e-4*largest )
+					if ( singularValues( j ) < 1.0e-4*largest )
 						++report.softDirections;
 				}
 			}
 
-			// work_j holds U_j sigma_j, so the projection U_j^T y / sigma_j is
-			// ( work_j . y )/sigma_j^2 and the columns never have to be
-			// normalised -- the same identity the linear solve above uses.
+			// sigma_j ( U^T y )_j, kept in that form because the filter below
+			// is sigma/( sigma^2 + mu ) and dividing by ( sigma^2 + mu ) is then
+			// the whole of it. It is what the hand-written sweep used to hand
+			// back directly, its columns being U_j sigma_j.
 			for ( std::size_t j = 0; j < unknowns; ++j )
 			{
-				double sum = 0.0;
-				for ( std::size_t k = 0; k < unknowns; ++k )
-					sum += work[ j*unknowns + k ]*rhs[ k ];
-				projection[ j ] = sum;
+				Eigen::Index const column = static_cast<Eigen::Index>( j );
+				projection[ j ] = singularValues( column )
+				                  *step.projection( column, 0 );
 			}
 
 			if ( !dampingSet )
@@ -1415,18 +1328,24 @@ namespace meq
 					// regularisation: the control's claim is that it inverts every
 					// direction the data determines to any extent at all, and a
 					// singular value of zero is not one of those.
-					if ( !( singularValues[ j ] > floor )
-					     || !( singularValues[ j ] > 0.0 ) )
+					if ( !( singularValues( static_cast<Eigen::Index>( j ) )
+					        > floor )
+					     || !( singularValues( static_cast<Eigen::Index>( j ) )
+					           > 0.0 ) )
 						continue;
 
+					Eigen::Index const column = static_cast<Eigen::Index>( j );
 					double const filtered = projection[ j ]
-						/( singularValues[ j ]*singularValues[ j ] + shift );
+						/( singularValues( column )*singularValues( column )
+						   + shift );
 
 					for ( std::size_t k = 0; k < modes; ++k )
 					{
-						trialR[ k ] += rightFactor[ j*unknowns + k ]*filtered;
-						trialZ[ k ] += rightFactor[ j*unknowns + modes + k ]
-						               *filtered;
+						trialR[ k ] += rightFactor(
+							static_cast<Eigen::Index>( k ), column )*filtered;
+						trialZ[ k ] += rightFactor(
+							static_cast<Eigen::Index>( modes + k ), column )
+							*filtered;
 					}
 				}
 

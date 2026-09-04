@@ -44,6 +44,15 @@ What you need
        the Zernike radial polynomial is a Jacobi polynomial under a coordinate
        change, so this replaces a hand-rolled recurrence and supplies an exact
        derivative with it. Nothing is linked.
+   * - Eigen
+     - **yes**
+     - **Header-only, and needed for the library rather than only for the
+       tests.** ``SurfaceFit.cpp`` takes its least-squares solve from Eigen's
+       ``JacobiSVD``, which is a column-pivoted QR followed by a one-sided
+       Jacobi sweep — the same algorithm that file used to carry by hand. The
+       swap was made for maintenance rather than for speed; the two are within
+       a factor of two of each other on meq's own workload. Nothing is linked
+       and no meq header mentions it. Debian calls it ``libeigen3-dev``.
    * - Boost.Test
      - for the tests
      - ``unit_test_framework``, the shared-library build, which is what supplies

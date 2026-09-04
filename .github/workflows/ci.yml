@@ -48,7 +48,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            cmake g++ libboost-test-dev clang-tidy
+            cmake g++ libboost-test-dev libeigen3-dev clang-tidy
 
       - name: Configure
         # MFEM_DIR is pointed at nothing on purpose. The default is a sibling
@@ -78,7 +78,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            cmake g++ libboost-test-dev
+            cmake g++ libboost-test-dev libeigen3-dev
           pipx install gcovr
 
       - name: Configure with instrumentation

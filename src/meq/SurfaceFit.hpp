@@ -204,14 +204,26 @@
  * levels were asked for, and that is NOT the uniform measure on the disc. The
  * conditioning is therefore a measurement and not an assumption.
  *
- * The design matrix is reduced by Householder QR and its triangular factor is
- * decomposed by a one-sided Jacobi rotation sweep, which gives the singular
- * values of the design matrix itself to high relative accuracy and a solve that
- * squares nothing. Normal equations would square the condition number, so a
- * design matrix at 1e8 -- which an ill-placed sample set reaches easily -- would
- * lose every digit through a route whose only symptom is a fit that is merely
- * poor. Modes whose singular value falls below a relative floor are DISCARDED
- * rather than inverted, and the count is reported.
+ * The design matrix is reduced by a column-pivoted Householder QR and its
+ * triangular factor is decomposed by a one-sided Jacobi rotation sweep, which
+ * gives the singular values of the design matrix itself to high relative
+ * accuracy and a solve that squares nothing. Normal equations would square the
+ * condition number, so a design matrix at 1e8 -- which an ill-placed sample set
+ * reaches easily -- would lose every digit through a route whose only symptom is
+ * a fit that is merely poor. Modes whose singular value falls below a relative
+ * floor are DISCARDED rather than inverted, and the count is reported.
+ *
+ * THAT PAIR IS Eigen::JacobiSVD AND NOT A HAND-ROLLED ONE, since 2026-09-03.
+ * SurfaceFit.cpp used to carry both by hand, about a hundred and fifty lines,
+ * and the replacement was NOT a performance decision -- measured, the two are
+ * within a factor of two on meq's own workload and the whole solve is under half
+ * a per cent of the extraction chain. It is the standing preference for a
+ * maintained library over a hand-rolled algorithm. The reason JacobiSVD rather
+ * than the faster BDCSVD or CompleteOrthogonalDecomposition is in the comment on
+ * decompose() in the .cpp, and it turns on IN-4's finding that the gauge is a
+ * soft tail with no gap -- which needs the small singular values to relative
+ * rather than absolute accuracy. Eigen is header only, so this file's promise of
+ * plain doubles in and coefficients out is unaffected: nothing here mentions it.
  *
  * AND THE PLAUSIBLE ADVICE ABOUT WHERE TO PUT THE SURFACES IS WRONG, WHICH IS
  * WORTH RECORDING BECAUSE IT SURVIVED INTO A DRAFT OF THIS HEADER. The disc

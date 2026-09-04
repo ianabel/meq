@@ -420,11 +420,24 @@ namespace meq
 			if ( !( face.length > 0.0 ) )
 				continue;
 
-			// AFTER the face transformations are finished with. Mesh keeps ONE
-			// ElementTransformation and hands out a pointer to it, so asking for
-			// an element's transformation invalidates the face's Elem1.
-			mfem::ElementTransformation *trans =
-				meshRef.GetElementTransformation( face.element );
+			// INTO OUR OWN SCRATCH, like every other transformation in this
+			// file: Mesh::GetElementTransformation( int ) hands back a pointer
+			// to ONE shared member, so the pointer version would invalidate
+			// the face's Elem1 above -- which is why it used to have to come
+			// last -- and would be a silent wrong answer under threading. The
+			// ( i, IsoparametricTransformation * ) overload writes only into
+			// what it is given, so neither hazard exists here.
+			//
+			// This one is setup rather than a hot path -- it runs once per
+			// setBandExtension() over the boundary faces -- and the shared
+			// mfem::FaceElementTransformations above is still shared. That is
+			// safe because setBandExtension() MUTATES the tracer and so can
+			// never be in a parallel region over a const one; build the band
+			// before the region, as INVERSION-PLAN.md section 11.3 says of
+			// every cached table.
+			mfem::IsoparametricTransformation elementScratch;
+			meshRef.GetElementTransformation( face.element, &elementScratch );
+			mfem::ElementTransformation *trans = &elementScratch;
 			mfem::IntegrationPoint const &centre =
 				mfem::Geometries.GetCenter( trans->GetGeometryType() );
 			trans->Transform( centre, centroid );
@@ -483,7 +496,17 @@ namespace meq
 
 	double ContourTracer::elementSize( int element ) const
 	{
-		mfem::ElementTransformation *trans = meshRef.GetElementTransformation( element );
+		// THREAD LOCAL, NOT THE MESH'S SHARED SCRATCH. See locate() for the
+		// whole argument; the short of it is that
+		// Mesh::GetElementTransformation( int ) returns one member of the Mesh,
+		// so two threads asking about two elements silently overwrite each
+		// other and get a point transformed by the wrong element -- no crash,
+		// no error, a wrong answer. Each function keeps its OWN scratch rather
+		// than sharing one, so a transformation held live across a call into
+		// another of them cannot be reset underneath it.
+		thread_local mfem::IsoparametricTransformation scratch;
+		meshRef.GetElementTransformation( element, &scratch );
+		mfem::ElementTransformation *trans = &scratch;
 		mfem::IntegrationPoint const &centre =
 			mfem::Geometries.GetCenter( trans->GetGeometryType() );
 		trans->SetIntPoint( &centre );
@@ -514,6 +537,30 @@ namespace meq
 
 		int const elements = meshRef.GetNE();
 
+		/*
+		 * THE SCRATCH IS THREAD LOCAL AND THAT IS A CORRECTNESS PROPERTY, NOT
+		 * A TIDINESS ONE.
+		 *
+		 * Mesh::GetElementTransformation( int ) returns a pointer to ONE
+		 * IsoparametricTransformation owned by the Mesh -- MFEM's own comment
+		 * is "the returned object is owned by the class and is shared, i.e.,
+		 * calling this function resets pointers obtained from previous calls".
+		 * Two threads walking two different surfaces would therefore be
+		 * inverting each other's element: no crash, no error, a point
+		 * transformed by the wrong element and a corrector that converges to a
+		 * point on nothing. The ( i, IsoparametricTransformation * ) overload
+		 * writes into what it is handed and touches no mesh state, so it is
+		 * reentrant.
+		 *
+		 * thread_local rather than a member, because ContourTracer is const
+		 * throughout precisely so that one tracer can serve many threads --
+		 * a mutable member would reintroduce exactly the sharing being removed.
+		 * It is a function static rather than a local so that the walk does not
+		 * construct a DenseMatrix per call: locate() is called once per
+		 * corrector iteration and this is the hottest line in the file.
+		 */
+		thread_local mfem::IsoparametricTransformation scratch;
+
 		// The walk. Every candidate is tried by inverting that element's own
 		// transformation, which for a straight-sided element is exact and costs
 		// a 2x2 solve.
@@ -521,9 +568,8 @@ namespace meq
 		{
 			if ( candidate < 0 || candidate >= elements )
 				return false;
-			mfem::ElementTransformation *trans =
-				meshRef.GetElementTransformation( candidate );
-			return trans->TransformBack( point, ip )
+			meshRef.GetElementTransformation( candidate, &scratch );
+			return scratch.TransformBack( point, ip )
 			       == mfem::InverseElementTransformation::Inside;
 		};
 
@@ -717,8 +763,15 @@ namespace meq
 			// outside one. What it costs is that grad psi is then frozen at the
 			// foot, so the extended field is affine and a contour in the band is
 			// a straight line whatever k is.
-			mfem::ElementTransformation *trans =
-				meshRef.GetElementTransformation( face.element );
+			//
+			// Into this function's OWN thread-local scratch, and the lifetime is
+			// the reason it is not shared with locate()'s: the extender below
+			// holds a reference to this transformation for as long as it is
+			// used, so anything that reset it in between would be reading the
+			// wrong element's polynomial.
+			thread_local mfem::IsoparametricTransformation scratch;
+			meshRef.GetElementTransformation( face.element, &scratch );
+			mfem::ElementTransformation *trans = &scratch;
 			mfem::ElementExtension extender;
 			extender.SetElement( *trans );
 
@@ -758,21 +811,41 @@ namespace meq
 		// usable primitive is one level down and public.
 		mfem::Vector xbar( 2 );
 		{
-			mfem::FaceElementTransformations *ftr =
-				meshRef.GetBdrFaceTransformations( face.boundaryElement );
-			if ( !ftr )
+			// The user-allocated variant here too, and for the same reason:
+			// GetBdrFaceTransformations( int ) returns the Mesh's own
+			// FaceElementTransformations member, so two threads in the band at
+			// once would be lifting from each other's face. Its two element
+			// transformations have to be supplied as well, since FElTr's Elem1
+			// and Elem2 point at them.
+			thread_local mfem::FaceElementTransformations faceScratch;
+			thread_local mfem::IsoparametricTransformation faceElem1;
+			thread_local mfem::IsoparametricTransformation faceElem2;
+			meshRef.GetBdrFaceTransformations( face.boundaryElement, faceScratch,
+			                                   faceElem1, faceElem2 );
+			// The caller-allocated variant returns void and reports a face that
+			// is not a boundary face -- interior, shared or non-conforming --
+			// by leaving the geometry INVALID, which is exactly the test the
+			// pointer variant turns into its own nullptr.
+			if ( faceScratch.GetGeometryType() == mfem::Geometry::INVALID )
 				return false;
 
 			mfem::IntegrationPoint at;
 			at.Set1w( parameter, 1.0 );
-			bandPath->Endpoint( *ftr, at, xbar );
+			bandPath->Endpoint( faceScratch, at, xbar );
 		}
 
-		// AFTER Endpoint() AND NEVER BEFORE. It resets the mesh's shared
-		// transformations, which HDGExtensionIntegrator::ComputeLift() says in as
-		// many words -- "the element is handed to the extension only below".
-		mfem::ElementTransformation *trans =
-			meshRef.GetElementTransformation( face.element );
+		// USED TO HAVE TO COME AFTER Endpoint() AND NO LONGER DOES, which is
+		// worth recording rather than silently dropping. The pointer overload of
+		// GetElementTransformation() resets the mesh's shared transformations --
+		// HDGExtensionIntegrator::ComputeLift() says so in as many words, "the
+		// element is handed to the extension only below" -- so taking it early
+		// would have invalidated the face transformation the lift's endpoint is
+		// read from. Both are now the caller-allocated variants and neither
+		// touches the other, so the order is free. It is left as it was because
+		// the code reads in the order the lift is defined in.
+		thread_local mfem::IsoparametricTransformation scratch;
+		meshRef.GetElementTransformation( face.element, &scratch );
+		mfem::ElementTransformation *trans = &scratch;
 		mfem::ElementExtension extender;
 		extender.SetElement( *trans );
 

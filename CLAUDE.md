@@ -409,6 +409,40 @@ submodule pin would fight rather than help.
 If configure fails with toml11 not found, the cause is almost always a clone
 without `--recursive`; the error message says so.
 
+### Prefer a maintained library to a hand-rolled algorithm
+
+**Standing preference, stated 2026-09-03, and it is about maintenance rather
+than speed.** Where a well-known algorithm has a well-maintained
+implementation — a Householder QR, a rank-revealing least squares, a special
+function, a spline — **take the library**, and take it even when a measurement
+says the hand-rolled version is no slower. *"The chance that you found the
+perfect Householder implementation and are able to maintain it indefinitely
+into the future is low."*
+
+A performance tie is therefore **not** an argument for keeping bespoke code. The
+bar for bringing in a header-only, well-known, well-maintained library is that
+it does not break something else — not that it wins a benchmark.
+
+What this does **not** license: a dependency that is heavy, obscure, unmaintained
+or hard to obtain, and it does not override the reasons recorded above for why
+MFEM is out of tree and toml11 is pinned. And it is not a reason to rewrite
+working code on sight — it decides which way to go when the question is live.
+
+Already taken on these grounds: **Boost.Math** for the Zernike radial
+polynomials, where the Jacobi route is both more accurate than the textbook
+factorial sum and somebody else's to maintain — see *The disc basis*. **Eigen**
+(3.4.0, `/usr/include/eigen3`, header only) is the natural home for the dense
+linear algebra in `src/meq/SurfaceFit.cpp`, which currently hand-rolls a
+Householder QR and a one-sided Jacobi SVD in about 150 lines.
+
+**The one thing to hold fixed when swapping in a library**: `SurfaceFit`'s
+truncation threshold and its Levenberg–Marquardt damping together *are* the
+gauge that makes the gauge-free fit well posed, and a different rank-revealing
+decomposition can truncate different directions. The ellipse result, the `nstx`
+tail, the exactly-zero axis spread and the positive minimum Jacobian are the
+numbers that say the swap was clean. If one moves, that is a finding, not a new
+baseline.
+
 ## The equation being solved
 
 Fixed boundary: the plasma boundary `Γ` is known and taken to be the level set
@@ -2525,7 +2559,7 @@ polytrope, is a power law in `r²` and is **not** ours. The mistake is left
 recorded because it is this project's standing hazard — three closures that look
 alike — biting the plan that warns about it.
 
-## Solution inversion: IN-A and the disc basis are done, the tracer is next
+## Solution inversion: IN-A to IN-4 and IN-P are done; IN-5 and IN-6 remain
 
 **`INVERSION-PLAN.md` is the design and the staged plan** — `ψ(R, z)` to
 `R(Ψ, l)`, `z(Ψ, l)`, which is what `MANTA-COUPLING.md` needs, what
@@ -3126,46 +3160,207 @@ the fit sits **5.71e-07** from the exact surfaces — the post-processed pairing
 own `O(h^{k+2})`, so what remains is the discretisation and not the
 representation.
 
+### IN-P: what the inversion actually costs, and the cost model was wrong
+
+`tests/performance/InversionScaling.cpp` and `inversion-scan.sh`. **Not a
+ctest**, per the standing rule that every number in `tests/performance/` is a
+timing and a threaded timing on this machine is a measurement about the machine;
+it exits non-zero only for the correctness properties that make its timings mean
+anything. Note that **`naming` does not cover `tests/performance`** — it runs
+over `MEQ_CORE_SOURCES_PRESENT`, which is `src/meq` alone.
+
+**85% OF THE CHAIN IS `gaugeFreeFit`, AND `INVERSION-PLAN.md` §11 DOES NOT
+MENTION IT** — that section was written before IN-4 existed and puts the weight
+on the tracer's per-point corrector instead. Measured at `k = 2`, `n = 48`, 12
+surfaces × 48 angles, `L = 10`, serial: `trace` 11.2%, `fitByAngle` 1.8%,
+`surfaceAverages` 1.8%, the linear `SurfaceFit` 0.6%, `findAxis` 0.01%, and
+`gaugeFreeFit` **84.6%**. For scale the solve itself is 0.37 s and
+`postProcess()` 0.62 s.
+
+**And inside `gaugeFreeFit`, 82.5% is field evaluation** — 21,888 `sampleAt`
+calls — so **about 70% of the whole chain is `ContourTracer::sampleAt`** and the
+linear algebra is nowhere near the cost. §11 predicted the quadrature would not
+be where the time is, and that much is right: it is 1.8%.
+
+**The corrector is not the problem either.** 97.3% of accepted points take
+**exactly two** iterations, mean 1.994, worst 3, with `stalledCorrections` and
+`fallbackLocations` both zero on every trace.
+
+**Extraction cost is independent of `k`** — 0.140, 0.141, 0.140 s at `k = 1, 2,
+3` — and grows like `1/h`, because the step ceiling is a fraction of the element
+size. **In the angle count it is not monotone: more points can be cheaper**,
+0.048 s at 24 angles against 0.023 s at 192, because closer spacing makes the
+element walk hit instead of missing.
+
+### The largest lever is one integer, and it is free
+
+**`sampleAt` decomposes as 26% walk, 0.9% evaluation, and 73%
+`Mesh::FindPoints`** — the last-resort fallback, taken on 184 of 576 points.
+Four rings of *face* neighbours reach about four triangles in a straight line and
+fewer diagonally, while consecutive ray nodes are one to two cells apart. Swept
+on the real code path, with the answers **bit-identical at every depth**:
+
+| `setWalkDepth()` | seconds | fallbacks |
+|---|---|---|
+| 2 | 0.0895 | 367 |
+| **4, the default** | 0.0531 | 183 |
+| 8 | 0.0482 | 30 |
+| 12 | **0.0262** | **0** |
+| 16 | 0.0255 | 0 |
+
+Worth **2.0× on `fitByAngle`, 2.1× on `surfaceAverages`, 1.8× on
+`gaugeFreeFit`**, and about **1.57× on the whole chain**, for no change to any
+answer. The default is deliberately left at 4 pending a decision, because it is a
+library default and this project protects answers rather than timings — but the
+harness asserts the bit-identity, so the change is provably free.
+
+**And it is not only a speed question.** With no fallbacks there is no call into
+`FindPoints`, which is what makes threading impossible today. Fixing the depth
+and giving `traceFromAxis()` its axis element as a hint — `findAxis()` already
+knows it — would remove the last unconditional `FindPoints` call and unblock the
+shared-tracer construction below.
+
+### Threading: available, and blocked by one non-reentrant function
+
+Given a mesh, a solve and a tracer per thread, the parallelism §11.2 predicted is
+there and is exact:
+
+| threads | over surfaces | over rays |
+|---|---|---|
+| 2 | 1.89× | 1.89× |
+| 4 | 3.16× | 3.36× |
+| 16 | 3.31× | **7.55×** |
+
+**Every count reproduces serial at `0.000e+00`** — contour points, ray radii,
+quadrature weights and `V′` — which is available exactly because independent
+surfaces and independent rays reassociate nothing. Surfaces cap at about 3.3×
+because there are only twelve of them and the outer ones are longer; rays scale
+properly, which is §11.2's asymmetry confirmed: **the tracer's steps are
+sequential and the rays are not.**
+
+**What is not available is sharing one tracer**, for the `FindPoints` reason
+under *Traps*. That is the single blocker, and the walk-depth item above is most
+of its cure.
+
+### Two levers from §11.4, one of which does not exist
+
+**Continuation in the flux label is worth 1.004× — nothing — and corrector
+iterations went UP.** §11.4 framed this as a genuine trade against parallelism
+over surfaces and warned against reasoning from structure. **There is no trade to
+resolve**: the predictor for every point after the first already comes from the
+previous point of the *same* surface, so continuation can only save
+`traceFromAxis`'s bracket and one corrector per surface. Take the parallelism.
+
+**The per-`ψ` cache MaNTA needs is worth `nodes/surfaces` and nothing eats it**:
+60 physics nodes over 3 residual evaluations cost 6.55 s naively and 1.29 s
+served from one family per `ψ`, a factor of **5.1**.
+
+**AND HERE IS THE NUMBER THAT DECIDES THE COUPLING'S DESIGN.**
+`dGeometry_dpsi` by differencing costs one extraction per `ψ` degree of
+freedom: **0.447 s × 46,080 dofs ≈ 5.7 hours for a single Jacobian, serial.**
+That is what §11.4's shape derivative has to beat, and it is the only part of the
+chain where a core count is worth a factor rather than a few percent.
+
+### Eigen, and what the swap did and did not move
+
+`SurfaceFit.cpp`'s hand-rolled Householder QR and one-sided Jacobi SVD are gone,
+replaced by `Eigen::JacobiSVD` at both call sites. `find_package(Eigen3 3.3
+REQUIRED NO_MODULE)`, **REQUIRED rather than optional-with-fallback**, because a
+second numerical path is exactly the maintenance burden the swap exists to
+remove; `PRIVATE` to `meq_core` with the include confined to the `.cpp`, so
+`SurfaceFit` stays MFEM-free *and* Eigen-free to its consumers.
+
+**`JacobiSVD` and not the faster `CompleteOrthogonalDecomposition`**, for two
+reasons: `gaugeFreeFit` applies `σ/(σ² + μ)` and so needs the singular values and
+`V` explicitly, and the diagnostics report the design matrix's spectrum — a
+rank-revealing QR gives a rank and a solve and no spectrum. It is also the same
+algorithm meq had, with the same high *relative* accuracy in the small singular
+values, which IN-4's soft tail needs.
+
+**`EIGEN_DONT_PARALLELIZE` is set, and for a better reason than the one it was
+asked about.** Read from the source, `Parallelizer.h` bails to the sequential
+path when `omp_get_num_threads() > 1`, so Eigen does **not** nest inside an
+OpenMP region and `setNbThreads(1)` is unnecessary for that. It is pinned because
+*outside* a parallel region Eigen would take `omp_get_max_threads()`, and a
+threaded GEMM blocks differently at different thread counts — **meq's answers
+would depend on `OMP_NUM_THREADS`.** `EIGEN_USE_BLAS` and `EIGEN_USE_LAPACKE`
+are not set, per the MKL rule.
+
+**IN-4's numbers survive and two moved, reported rather than re-baselined.** The
+nstx tail reads 4.163719e-09 against 4.163718e-09, the axis spread is still an
+exact `0.000e+00`, and the minimum Jacobian is unmoved to five figures. The
+ellipse `L = 2` figure moved 8.31e-16 → 6.80e-16 — both round-off, the headline
+ratio reading 2.53e+14 instead of 2.07e+14. **The no-gauge control moved by a
+factor of ten** and that is expected: it inverts singular values down to exactly
+zero, so its step is dominated by the smallest resolved `σ` and two SVDs report
+that differently. Its verdict is unchanged — still folded, still diverging.
+
+### Three things in the kernel survey worth not re-doing
+
+| | measured | |
+|---|---|---|
+| Zernike by Kintner recurrence against per-mode evaluation | **6.3×**, agreeing to 4.4e-15 | **not worth it** — 11.5% of a 0.6% stage |
+| a fit at 20,000 points by Vandermonde + GEMM against per-point | **34.7×**, agreeing to 4.4e-16 m | **worth it for IN-6**, which is the many-point case, and not for anything today |
+| batched field evaluation by element | **0.90–1.14×** | **do not** |
+
+**And the reason the third one fails is worth keeping**, because the brief
+asserted the opposite: `GridFunction::GetValues( i, ir, vals )` is **a loop
+calling `CalcShape` per point, not a GEMM**. It amortises the dof gather and the
+temporaries and nothing else. The access pattern is 1.15 points per element in
+any case, so there is nothing to batch.
+
 ### What is next
 
-**IN-4 IS ANSWERED — see above — so what remains is IN-5, IN-6 and IN-P.**
+**IN-A, IN-0 (both halves), IN-1, IN-2, IN-3, IN-4 and IN-P are done.** What
+remains is IN-5 and IN-6, and a short list of things the stages left behind.
 
-**IN-5, open surfaces**, is deferred with free boundary per §6 — and the user's
-note that the canonical in-surface coordinate is **poloidal arc length
-normalised to `2π` from a fixed-`z` reference ray** is what it should be built
-on, since a disc chart has no meaning through a separatrix and an angle about
-the axis has none on an open line.
+**IN-5, open surfaces**, is deferred with free boundary per §6. The canonical
+in-surface coordinate for it is **poloidal arc length normalised to `2π` from a
+fixed-`z` reference ray**: a disc chart has no meaning through a separatrix and
+an angle about the axis has none on an open line. Note that arc length does
+**not** fix axis regularity — for similar surfaces it is a `ρ`-independent
+relabelling and buys the same one order — which is why the two concerns are
+handled by separate machinery there.
 
 **IN-6, the output**, is `DRIVER-PLAN.md` §3's `(Ψ, θ)` grid plus the per-`ψ`
-cache that `MANTA-COUPLING.md` §5's pointwise call pattern requires.
+cache `MANTA-COUPLING.md` §5's pointwise call pattern requires. **Both of its
+numbers are already measured**: the cache is worth `nodes/surfaces`, 5.1× on a
+60-node case, and evaluating a fit at many points by Vandermonde-plus-GEMM is
+worth **34.7×** — a stage that is 0.2% of the chain today and is exactly the
+many-point case IN-6 creates.
 
-**IN-P, the performance harness**, is unblocked and unstarted. Nothing in this
-item has been timed.
+**And the number that decides the coupling's design**: `dGeometry_dpsi` by
+differencing is **about 5.7 hours for one Jacobian, serial**. The shape
+derivative has to beat that, and it is the only part of the chain where a core
+count buys a factor rather than a few percent.
 
-**IN-P, the performance harness**, is unblocked and unstarted. Nothing in this
-item has been timed — every number above is an accuracy measurement — and
-`MANTA-COUPLING.md` §5's pointwise call pattern plus a `dGeometry_dpsi` shaped
-`(nGeometry, nFieldDOF)` is where the cost will actually appear.
-`INVERSION-PLAN.md` §11 is the analysis, including which parts parallelise
-(surfaces, `ψ` DOFs and the rays of a parametrisation do; the tracer's own steps
-do not) and the shared-scratch trap in *Traps* that must be fixed first.
+**Open, small, and each found by the stage after the one that caused it:**
 
-**One open item in the tracer, found by IN-2 using it**: `fitByAngle()` throws
-where the corrector would accept. Its ray Newton demands a tolerance that on a
-discontinuous field is sometimes *unattainable* — a ray crossing a face where
-`c` falls inside the jump has no point on it with `ψ_h = c` at all — while the
-tracer's own corrector already handles exactly that by keeping its best iterate.
-At `k = 1` on the raw pairing it fails on every mesh from `n = 12` to 32, and
-the failure probability rises with the angle count.
-
-**What is deliberately absent from the tracer**, so nobody reads more into it
-than is there: it follows **one connected component** and neither finds nor
-reports a disjoint island at the same level — the same disclaimer
-`CriticalPoints.hpp` makes about seeded Newton. It is **not X-point aware**: the
-level set through a saddle is not a 1-manifold and the tangent is undefined
-there. And §3.3's implicit quadrature — a rule on the level set with no curve
-extracted at all — is the **missing third leg** of IN-2's cross-check and is
-deliberately not built.
+* **`setWalkDepth()`'s default of 4 is costing about 1.57× on the whole chain**,
+  and raising it to 12 is bit-identical and removes every `FindPoints` fallback.
+  Not changed yet, deliberately: it is a library default, and this project
+  protects answers rather than timings. It is also most of the cure for the
+  threading blocker.
+* **`fitByAngle()` throws where the corrector would accept.** Its ray Newton
+  demands a tolerance that on a discontinuous field is sometimes *unattainable*
+  — a ray crossing a face where `c` falls inside the jump has no point on it
+  with `ψ_h = c` at all — while the tracer's own corrector already handles that
+  by keeping its best iterate. At `k = 1` on the raw pairing it fails on every
+  mesh from `n = 12` to 32.
+* **Two headers describe a caller that was never moved.**
+  `FluxSurfaces.hpp` says the seven-argument `sampleAt()` overload exists
+  *because* `surfaceAverages( tracer, contour )` cannot otherwise tell whether a
+  quadrature point is band data — but `SurfaceAverage.cpp` still calls the
+  six-argument form and still marks whole segments, and `SurfaceAverage.hpp`
+  still states as fact that `sampleAt()` cannot report it. The same lag applies
+  to `AngleParametrisation::fluxR`/`fluxZ`, stored so that `surfaceAverages()`
+  need not re-read the field, and still re-read. **One of the two headers is
+  wrong in each pair**, which is worse than either behaviour.
+* **§3.3's implicit quadrature is the missing third leg** of IN-2's
+  cross-check. Its acceptance said "all three agreeing is worth more than any one
+  being plausible" and two were delivered.
+* **Maschke & Perrin is a verified exact rotating benchmark** — 8e-26 by
+  substitution — and is still not in `tests/analytic/`.
 
 **What is deliberately absent from the tracer**, so nobody reads more into it
 than is there: it follows **one connected component** and neither finds nor
@@ -3174,7 +3369,7 @@ reports a disjoint island at the same level — the same disclaimer
 **not X-point aware**: the level set through a saddle is not a 1-manifold and
 the tangent is undefined there, so a trace at that level will stall or turn a
 corner arbitrarily. `pointAtArcLength()` parametrises segments linearly in
-*polyline* length rather than true arc length and says so.
+*polyline* length rather than true arc length, and says so.
 
 ## The linear solves, and what they should be
 
@@ -3791,13 +3986,29 @@ each other's transformation — no crash, no error, a point transformed by the
 wrong element. The reentrant route is the `( i, IsoparametricTransformation * )`
 overload into a thread-local.
 
-**Three call sites in meq use the shared overload today** — two in
-`src/meq/FluxSurfaces.cpp` and one in `src/meq/CriticalPoints.cpp` — and all
-three are correct, because the solution-inversion code is serial. They are the
-first thing to change if any of it is ever threaded, and they should be changed
-*before* the parallel region rather than during the debugging of one.
-`INVERSION-PLAN.md` §11 is the wider analysis of what in that item parallelises
-and what does not.
+**~~Three call sites in meq use the shared overload~~ — SIX, AND THE UNDERCOUNT
+IS THE POINT.** Five in `src/meq/FluxSurfaces.cpp` — `setBandExtension`'s face
+loop, `elementSize()`, `locate()`, and **both** branches of `extendField()` —
+and one in `src/meq/CriticalPoints.cpp`. All six are **fixed**, each into a
+function-local `thread_local` so a transformation held live across a call cannot
+be reset underneath it, and every printed number in the four affected
+convergence tests is **byte-identical** afterwards.
+
+**AND THERE IS A FOURTH KIND OF SHARED SCRATCH THAT NOTHING HAD NAMED.**
+`Mesh::GetBdrFaceTransformations( int )` returns the mesh's own
+`FaceElementTransformations`, with the same hazard. The caller-allocated variant
+signals failure by `GetGeometryType() == Geometry::INVALID` where the pointer
+version returns `nullptr`.
+
+**THE ONE THAT ACTUALLY BLOCKS THREADING IS `Mesh::FindPoints`, AND IT CANNOT BE
+FIXED LOCALLY.** It loops over every element through that same shared
+transformation *and* builds a vertex-to-element table on the way, so it is not
+reentrant — an attempt to share one `ContourTracer` across threads aborts with
+*"the axis is not in the mesh"*. Every entry point can reach it, and
+`traceFromAxis()` takes it **once per surface unconditionally**, because it
+samples the axis with no element hint. So "the tracer reports zero fallbacks" —
+which `INVERSION-PLAN.md` §11.3 offered as the reason honouring this rule is
+free — **is true of `trace()` and false of the entry points**.
 
 **`mfem::Mesh::FindPoints` is `O(elements × points)`** — a brute-force scan over
 element centres. It caps sample-cloud sizes in any off-grid error measure.

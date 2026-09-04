@@ -327,7 +327,20 @@ namespace meq
 			overshoot = std::max( overshoot, 0.0 );
 		}
 
-		mfem::ElementTransformation *trans = meshRef.GetElementTransformation( element );
+		// THREAD LOCAL, NOT THE MESH'S SHARED SCRATCH.
+		// Mesh::GetElementTransformation( int ) returns a pointer to one
+		// IsoparametricTransformation owned by the Mesh -- "calling this
+		// function resets pointers obtained from previous calls" -- so two
+		// threads refining two candidates would silently be reading each
+		// other's element, and the failure is a Jacobian and a position taken
+		// from the wrong map rather than a crash. The
+		// ( i, IsoparametricTransformation * ) overload writes only into what
+		// it is given. A function static rather than a local so that a sweep
+		// over every element does not construct a DenseMatrix per candidate;
+		// see the same pattern in ContourTracer::locate().
+		thread_local mfem::IsoparametricTransformation scratch;
+		meshRef.GetElementTransformation( element, &scratch );
+		mfem::ElementTransformation *trans = &scratch;
 		trans->SetIntPoint( &ip );
 
 		mfem::Vector physical( 2 );

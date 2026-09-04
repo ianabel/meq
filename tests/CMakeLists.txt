@@ -235,6 +235,49 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 		ENVIRONMENT "MKL_NUM_THREADS=1")
 endif()
 
+# InversionScaling -- the same rules, for the solution-inversion chain.
+#
+# NOT a ctest, and unlike TraceSolverScaling it contributes no ctest either:
+# every property it asserts on is already asserted by FluxSurfaceConvergence,
+# CriticalPointConvergence, SurfaceFitConvergence and SurfaceAverageConvergence
+# on the serial path, and the ones that are NOT -- threaded extraction
+# reproducing serial extraction bit for bit, and the candidate kernels
+# reproducing the code they would replace -- are properties of a THREAD COUNT
+# and of a build, which is exactly the kind of thing this project keeps out of
+# the suite. It exits non-zero for them all the same, so it is usable as a
+# guard by whoever runs it.
+#
+# Eigen is OPTIONAL and header only. It is used by section 3 alone, to PRICE
+# the least-squares solve that src/meq/SurfaceFit.cpp hand-rolls -- nothing in
+# src/meq includes it and nothing in meq depends on it, so a build without it
+# prints "Eigen is not available" and measures everything else. If it ever
+# earns its place in the library, INSTALL.md and the install chapter of docs/
+# both enumerate dependencies and would have to say so.
+if(TARGET meq_core AND NOT _solver_index EQUAL -1
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/performance/InversionScaling.cpp")
+	add_executable(InversionScaling "performance/InversionScaling.cpp")
+	target_include_directories(InversionScaling PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(InversionScaling PRIVATE meq_core)
+
+	find_package(Eigen3 3.3 QUIET NO_MODULE)
+	if(TARGET Eigen3::Eigen)
+		target_link_libraries(InversionScaling PRIVATE Eigen3::Eigen)
+		target_compile_definitions(InversionScaling PRIVATE MEQ_HAVE_EIGEN)
+		message(STATUS "meq: Eigen ${Eigen3_VERSION} found, InversionScaling will price the least-squares solve against it")
+	else()
+		message(STATUS "meq: Eigen not found, InversionScaling skips its least-squares comparison")
+	endif()
+
+	# OpenMP for section 4, which is the only place in meq that opens a parallel
+	# region of its own. MFEM's own -fopenmp comes through MFEM_COMPILE_OPTIONS
+	# already -- see cmake/FindMFEM.cmake -- but asking for it here is what makes
+	# the dependency explicit rather than inherited.
+	find_package(OpenMP QUIET COMPONENTS CXX)
+	if(TARGET OpenMP::OpenMP_CXX)
+		target_link_libraries(InversionScaling PRIVATE OpenMP::OpenMP_CXX)
+	endif()
+endif()
+
 # ---------------------------------------------------------------------------
 # The driver, end to end. Everything above calls the library directly; this is
 # the only test that goes through a config file and out to files, which is the

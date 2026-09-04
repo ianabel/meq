@@ -265,6 +265,31 @@ set(MEQ_CORE_SOURCES_NEEDING_NETCDF
 # brings the headers with it.
 find_package(Boost CONFIG REQUIRED)
 
+# Eigen, header only, for meq_core -- REQUIRED rather than optional.
+#
+# src/meq/SurfaceFit.cpp used to carry about a hundred and fifty lines of
+# hand-rolled Householder QR and one-sided Jacobi SVD. Both are well-known
+# algorithms with well-maintained implementations, and the standing preference
+# in CLAUDE.md is to take the library: the chance of having written the perfect
+# Householder reduction AND being able to maintain it indefinitely is low. It is
+# NOT a performance decision and the measurement says so -- Eigen and the
+# hand-written pair are within a factor of two on meq's own workload, and the
+# whole least-squares solve is under half a per cent of the extraction chain.
+# tests/performance/InversionScaling.cpp is that table.
+#
+# REQUIRED, and deliberately not optional-with-a-fallback: keeping the
+# hand-written pair alive as a second code path would preserve exactly the
+# maintenance burden the swap exists to remove, and a numerical path that is
+# only compiled on some machines is a path that is only tested on some machines.
+#
+# HEADER ONLY, so it adds no link dependency and nothing to distribute, and
+# src/meq/SurfaceFit.hpp does not mention it -- the include is confined to the
+# .cpp, so SurfaceFit stays MFEM-free and Eigen-free to its consumers, which is
+# what lets CI build and test it without the MFEM branch it cannot obtain.
+# INSTALL.md and the install chapter of docs/ both enumerate dependencies and
+# say so, and ci.yml installs libeigen3-dev.
+find_package(Eigen3 3.3 REQUIRED NO_MODULE)
+
 # The port is being done file by file, so a source in the list above may not
 # have been written yet. Configure with what is there and say what is missing,
 # rather than failing and blocking everything else in the tree.
@@ -299,6 +324,33 @@ endif()
 if(MEQ_CORE_SOURCES_PRESENT)
 	add_library(meq_core STATIC ${MEQ_CORE_SOURCES_PRESENT})
 	target_link_libraries(meq_core PUBLIC Boost::headers)
+
+	# PRIVATE: only src/meq/SurfaceFit.cpp includes it and no meq header does,
+	# so a consumer of meq_core takes on nothing.
+	target_link_libraries(meq_core PRIVATE Eigen3::Eigen)
+
+	# EIGEN_DONT_PARALLELIZE, and it is a decision rather than caution.
+	#
+	# Eigen parallelises exactly one thing when it is compiled with -fopenmp --
+	# the general matrix-matrix product -- and MFEM puts -fopenmp on meq's line,
+	# so it would be on by default. Two reasons not to have it:
+	#
+	#   * it would make meq's numerics depend on OMP_NUM_THREADS. A threaded
+	#     GEMM blocks differently at different thread counts, so the summation
+	#     order and therefore the last bits of a fit would change with an
+	#     environment variable. CLAUDE.md's standing position is that a threaded
+	#     timing on a machine is a measurement about the machine; a threaded
+	#     ANSWER would be worse.
+	#   * meq's own parallelism is OpenMP over independent work -- surfaces,
+	#     rays, psi DOFs -- and a GEMM inside one of those regions is a second
+	#     team. Eigen would in fact decline to nest (Parallelizer.h bails when
+	#     omp_get_num_threads() > 1, which was read rather than assumed), so
+	#     this is belt and braces there; the first reason is the operative one.
+	#
+	# It is a compile definition on meq_core alone rather than a call to
+	# Eigen::setNbThreads(), which is process-global state a library has no
+	# business setting on its caller's behalf.
+	target_compile_definitions(meq_core PRIVATE EIGEN_DONT_PARALLELIZE)
 
 	# Both src/ and src/meq/ are on the include path, so a header can be
 	# reached either as "Config.hpp" (which is how the existing sources and

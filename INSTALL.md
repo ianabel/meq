@@ -4,8 +4,8 @@
 is the single thing standing between a fresh clone and a working solver, and it
 is why this file exists separately from `README.md`.
 
-Everything else — toml11, Boost, netCDF — is either vendored or a package your
-distribution has.
+Everything else — toml11, Boost, Eigen, netCDF — is either vendored or a package
+your distribution has.
 
 ## The short version
 
@@ -124,6 +124,7 @@ The rest of the dependencies:
 | toml11 | yes | Vendored as `extern/toml11`. **A clone without `--recursive` fails at configure time**, and the error says so — `git submodule update --init --recursive` fixes it. |
 | netcdf-cxx4 | optional | Found with `pkg-config`; Debian calls it `libnetcdf-c++4-dev`. Without it the gridded `.nc` output is dropped from the library and the driver cannot write it. |
 | Boost | **yes** | **Boost.Math is header-only and is needed to build the LIBRARY**, not merely the tests: `src/meq/Zernike.cpp` gets its Jacobi polynomials from it, the Zernike radial polynomial being a Jacobi polynomial under a coordinate change. No link dependency is added. |
+| Eigen | **yes** | **Header-only, and needed to build the LIBRARY.** `src/meq/SurfaceFit.cpp` takes its least-squares solve from Eigen's `JacobiSVD` — a column-pivoted QR followed by a one-sided Jacobi sweep, which is what that file used to carry by hand. Nothing is linked and no meq header mentions it, so a consumer of `meq_core` takes on nothing. Debian calls it `libeigen3-dev`. |
 | Boost.Test | for the tests | `unit_test_framework`, the shared-library build |
 | clang-tidy | optional | Gates the `naming` test only; skipped with a message if absent |
 
