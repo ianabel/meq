@@ -1,53 +1,45 @@
 # Toroidal flow: the generalised Grad–Shafranov equation of RoPP (136)
 
-Written 2026-09-01. `CLAUDE.md` is the operational record and is authoritative on
-anything technical; `ROADMAP.md` is the order of work; this file is the design for
-**sonic toroidal rotation**, from the two-species case to `n` species.
+Written 2026-09-01. **FL-0 to FL-8 are done and green**, so this is no longer a
+plan: it is the derivation `src/meq/RotatingSource.hpp` defers to, plus the
+findings the staging turned up. `CLAUDE.md`'s *Toroidal flow* has the
+measurements; `ROADMAP.md` is the order of work.
 
 The equation is `refs/RotatingGK.pdf` eq (136) — Abel, Plunk, Wang, Barnes,
 Cowley, Dorland & Schekochihin, *Multiscale gyrokinetics for rotating tokamak
 plasmas*, Rep. Prog. Phys. **76** (2013) 116201 — closed by its (96) and (97),
 which determine the poloidal density variation and the electrostatic potential
-`φ₀` that holds quasineutrality against it.
+`φ₀` that holds quasineutrality against it. Inputs are `T_s(ψ)` per species,
+`ω(ψ)`, `n − 1` density flux functions, and `I(ψ)`. Taking `q(ψ)` instead and
+finding `I(ψ)` from it is `ROADMAP.md` item 10 and `INVERSION-PLAN.md`, not this.
 
-**Inputs are `T_s(ψ)` per species, `ω(ψ)`, `n − 1` density flux functions, and
-`I(ψ)`.** `I(ψ)` is an input here, exactly as `g g′` is today. A fixed-`q(ψ)`
-solver — where `q(ψ)` is given and `I(ψ)` is found from it — is a separate
-extension and is §9.
-
-This plan supersedes `TODO`'s *Sonic toroidal rotation* entry, which was right
-about the gauge and about the root find and is folded in below.
+**Section numbers are stable**: `TODO` cites §6.3 and `INVERSION-PLAN.md` cites
+§3.3.
 
 ---
 
-## 1. What changes, and what does not
+## 1. What changed, and what did not
 
-**What does not change is most of meq.** The operator is still `Δ*`, the
+**What did not change is most of meq.** The operator is still `Δ*`, the
 discretisation is still LDG-H on `DarcyForm`, `τ` is still constant, the
-hybridization is untouched, the estimator and the adaptive loop are untouched,
-and the curved-boundary extension is untouched. Rotation is a change to `F`
-alone.
+hybridization, the estimator, the adaptive loop and the curved-boundary
+extension are all untouched. **Rotation is a change to `F` alone**, and that was
+the plan's central bet.
 
-**And `Source` already has the right signature.** `f( r, z, ψ )` and
+**And `Source` already had the right signature.** `f( r, z, ψ )` and
 `dFdPsi( r, z, ψ )` carry `r`, so a source with genuine `r`-dependence at fixed
-`ψ` needs no interface change. `MHDSource` simply happens to use `r` only through
-the `μ₀ r²` prefactor. That is the single largest piece of luck in this whole
-plan and it is worth saying out loud, because the obvious fear — that a
-non-flux-function density forces an interface change through the solver — is
-unfounded.
+`ψ` needed no interface change — `MHDSource` simply happens to use `r` only
+through the `μ₀ r²` prefactor. **That is the single largest piece of luck in the
+whole item**, because the obvious fear was that a non-flux-function density would
+force an interface change through the solver. It did not.
 
-**What changes is four things:**
-
-| | |
-|---|---|
-| the density is not a flux function | `n_s = n_s(r, ψ)`, by (96) |
-| a new unknown appears in the source | `φ₀(r, ψ)`, closed pointwise by (97) |
-| the profile set grows | per-species `T_s`, `n_s0`, plus `ω`; and the source can no longer store pre-multiplied products |
-| `∂F/∂ψ` acquires a chain rule | through `ω`, `T_s`, `n_s0` **and** `φ₀` |
-
-The fourth is the dangerous one, for the reason `CLAUDE.md` records under *A
-wrong Jacobian is invisible to a convergence table*: every error and every rate
-survives a wrong `∂F/∂ψ` unchanged, and only Newton's observed *order* moves.
+What did change is four things: the density is not a flux function, `n_s(r, ψ)`
+by (96); a new unknown `φ₀(r, ψ)` appears, closed pointwise by (97); the profile
+set grows, and the source can no longer store pre-multiplied products; and
+`∂F/∂ψ` acquires a chain rule through `ω`, `T_s`, `n_s0` **and** `φ₀`. The
+fourth is the dangerous one, for the reason `CLAUDE.md` records under *A wrong
+Jacobian is invisible to a convergence table* — and FL-5 measured exactly that,
+below.
 
 ---
 
@@ -270,138 +262,91 @@ cost the most*.
 
 ---
 
-## 5. The new pieces in meq
+## 5. What the implementation cost, beyond what was predicted
 
-### 5.1 `meq::Species` — a value type, no MFEM
+`src/meq/RotatingSource.{hpp,cpp}` is the source, `meq::Species` the value type
+(no MFEM, so it is unit-testable without the library), and `Config` /
+`SourceFactory` the door. The design is in the headers. What belongs here is the
+five things that were **not** foreseen.
 
-```
-struct Species
-{
-    double mass;                                  // kg
-    double charge;                                // Z_s, signed and dimensionless
-    std::shared_ptr<Profile const> temperature;   // T_s(psi), JOULES
-    std::shared_ptr<Profile const> density;       // n_s0(psi) on r = r_ref, m^-3
-};
-```
+### 5.1 `meq::Profile` needed a THIRD derivative level
 
-`src/meq` deliberately keeps MFEM out of `Profiles` and `Source`; this stays on
-the right side of that line and is unit-testable without the library.
-
-**Built 2026-09-01** in `src/meq/RotatingSource.{hpp,cpp}`, with
-`chargeNeutralityResidual()` and `neutralisingDensity()` beside it. The charge is
-`Z_s` rather than `Z_s e`, so the elementary charge appears in exactly one place;
-`potential()` returns `e φ₀` in Joules for the same reason, that being the
-combination every exponent actually contains.
-
-### 5.2 `meq::RotatingSource`, and why it is not a generalised `MHDSource`
-
-A new class, with `MHDSource` kept as the `ω = 0` path. The reason is in
-`Source.hpp`'s own documentation: `MHDSource` stores the **products** `p′` and
-`g g′` precisely so that `dFdPsi` is one `prime()` call per profile and no chain
-rule exists to get wrong. **That trick is unavailable with rotation** — `p`
-depends on `ω`, `T_s` and `n_s0` separately and on `r`, so the chain rule is
-unavoidable. Two classes with different invariants, not one class with a flag.
-
-Holds: `std::vector<Species>`, `ω(ψ)`, `g g′(ψ)`, `r_ref`, and a mode for the
-two-species closed form versus the general root find. Evaluates `p`, then
-`∂p/∂ψ`, then `F`.
-
-### 5.3 `dFdPsi` is where the risk is, and it cost `Profile` a new method
-
-`∂F/∂ψ = μ₀ r² ∂²p/∂ψ² + (g g′)′`, and `∂²p/∂ψ²` runs the chain rule twice
-through everything in §5.1 plus `φ₀`. **The finite-difference check on `dFdPsi`
-stops being box-ticking and becomes the load-bearing test of this plan.** It
-must be swept over Mach number, not evaluated at one point: the terms it is
-checking are the ones that vanish at `ω = 0`.
-
-**IMPLEMENTED 2026-09-01, AND IT NEEDED AN INTERFACE CHANGE THIS PLAN DID NOT
-FORESEE.** `meq::Profile` supplied `operator()` and `prime()` and nothing more —
-exactly two levels, which is what `meq::MHDSource` needs, because it stores the
-*products* `p′` and `g g′`, so `F` is one evaluation and `∂F/∂ψ` is one
-`prime()`. A rotating source needs **three**: `p = P₀(ψ) exp(C(ψ)Δ/2)` is built
-from flux functions, `F` is already `∂p/∂ψ` and spends one derivative of each,
-and the Jacobian spends a second. No reparametrisation avoids it — `p` is not a
-flux function, so there is no product to pre-store, and taking `P₀′` as the input
+`meq::MHDSource` stores the *products* `p′` and `g g′`, so `F` is one evaluation
+and `∂F/∂ψ` is one `prime()` — exactly two levels, which is all `Profile` had. A
+rotating source needs three: `p = P₀(ψ) exp(C(ψ)Δ/2)` is built from flux
+functions, `F` is *already* `∂p/∂ψ` and spends one derivative of each, and the
+Jacobian spends a second. **No reparametrisation avoids it** — `p` is not a flux
+function, so there is no product to pre-store, and taking `P₀′` as the input
 instead loses `P₀`.
 
 So `Profile` grew **`doublePrime()`**, as a *pure* virtual rather than one with a
 default: there are three subclasses in the tree, and a compile error naming each
-is better than a runtime surprise in one. `ConstantProfile` returns zero and
-`HermiteCubicSpline` the exact second derivative of its own cubic. **That last
-one carries a caveat worth keeping**: a Hermite cubic is `C¹` and no more, so its
-second derivative is piecewise linear and **jumps at every interior knot**.
-Measure zero, so it cannot move a converged answer, but a Newton step landing on
-a knot sees a one-sided Jacobian. Nothing has measured what that costs, and it
-does not arise for the analytic and constant profiles FL-0 to FL-5 use.
+is better than a runtime surprise in one.
 
-### 5.4 Normalised flux, and the bordered Newton
+**The caveat is real and is asserted rather than hidden.** A Hermite cubic is
+`C¹`, so its second derivative is piecewise linear and **jumps at every interior
+knot** — `the_second_derivative_jumps_at_an_interior_knot`. Measure zero, so it
+cannot move a converged answer, but a Newton step landing on a knot sees a
+one-sided Jacobian. **Nothing has measured what that costs**, and it does not
+arise for the analytic and constant profiles FL-0 to FL-5 use. Still open.
 
-If `T_s`, `n_s0` and `ω` are given against normalised flux — which is how
-`refs/GourdainContour.pdf` §V poses profiles and how every equilibrium code does
-— then this must be a `meq::NormalisedSource` and `ψ_ax` is an unknown of the
-system. **That machinery already exists and is green** (`HighBetaConvergence`),
-and under NPC two of the three border quantities are exact rather than
-differenced. So `meq::NormalisedRotatingSource` is a subclass away, not a
-project.
+### 5.2 Two classes, not one class with a flag
 
-`ψ_bnd` stays zero: this is still the fixed-boundary problem.
+`MHDSource` is kept as the `ω = 0` path. Its whole trick — storing the products
+so no chain rule exists to get wrong — is **unavailable with rotation**, since
+`p` depends on `ω`, `T_s` and `n_s0` separately and on `r`. Two classes with
+different invariants, not one with a mode.
 
-### 5.5 `Config` and `SourceFactory` — built 2026-09-01
+### 5.3 `[[source.species]]` is meq's first array of tables, and the old reader refused one
 
-`SourceType::Rotating`, `RotatingParameters`, `SpeciesParameters`, a
-`[[source.species]]` array of tables, and the charge-neutrality solve of §3.4.
-The normalised plumbing was the prerequisite and is done in the same pass, so
-`meq::NormalisedMHDSource` is reachable from a TOML file too — that was
-`ROADMAP.md` item 1.
+An array of tables *is* an array, so the existing nested-table reader's
+`is_table()` check rejected it — even though TOML nests `[[a.b]]` under `[a]`
+exactly as `[a.b]` does. `Table::getTableArrayOr()` is the new primitive, and it
+names each element `source.species[i]` so that `rejectUnknownKeys()` and `fail()`
+qualify a diagnostic all the way to `source.species[0].Denisty` for free —
+measured, that is what it prints.
 
-**`[[source.species]]` IS THE FIRST ARRAY OF TABLES IN MEQ'S SCHEMA**, and the
-existing nested-table reader would have refused one: an array of tables *is* an
-array, so its `is_table()` check rejects it, even though TOML nests `[[a.b]]`
-under `[a]` exactly as `[a.b]` does. `Table::getTableArrayOr()` is the new
-primitive, and it names each element `source.species[i]` so that
-`rejectUnknownKeys()` and `fail()` qualify a diagnostic all the way to
-`source.species[0].Denisty` for free — measured, that is what it prints.
+Three schema decisions with reasons, all of which are traps if reversed:
 
-**Every profile is a constant OR a table, in two keys, with a scale.**
-`Temperature` / `TemperatureFile` / `TemperatureScale`, and the same triple for
-`Density`, `Omega`, `GGPrime`, `PPrime`. Two keys rather than one that dispatches
-on node type, because a type-dispatched key inherits exactly the trap
-`Config.cpp`'s header records: TOML distinguishes `1` from `1.0`, and toml11's
-`find_or<double>` returns the *default* for an integer node rather than
-failing. **The scale is per profile, not global** — "that temperature ×2,
-leave the density alone" is the case it exists for — and it multiplies all three
-derivative levels through `meq::ScaledProfile`, so a scaled profile is exactly
-the profile of the scaled quantity and `prime()` stays exact.
+* **Every profile is a constant OR a table, in two keys, with a scale.** Two keys
+  rather than one that dispatches on node type, because a type-dispatched key
+  inherits exactly the trap `Config.cpp`'s header records: TOML distinguishes `1`
+  from `1.0`, and toml11's `find_or<double>` returns the *default* for an integer
+  node rather than failing.
+* **The scale is per profile, not global** — "that temperature ×2, leave the
+  density alone" is the case it exists for — and it multiplies all three
+  derivative levels through `meq::ScaledProfile`, so a scaled profile is exactly
+  the profile of the scaled quantity and `prime()` stays exact.
+* **`Neutralising = true` marks the one species whose density is derived**, which
+  puts §3.4's `n − 1` counting in the file and makes the parser enforce it rather
+  than asking for `n` profiles that happen to sum to zero.
 
-**Two factories, and the second returns a NON-CONST pointer.** The solver calls
-`setNormalisation()` on a normalised source before every residual evaluation, so
-it cannot come back from `makeSource()` as `Source const`. `makeNormalisedSource`
-is the second entry point, and **`makeSource` throws on a normalised
-configuration rather than returning one** — which is the point: a
-`NormalisedRotatingSource` *is-a* `Source`, so returning it would compile and
-solve, with `ψ_ax` frozen at the guess for ever because nothing would move it.
-The answer would be a converged solution to a problem the file did not describe.
+### 5.4 `makeSource` THROWS on a normalised configuration
 
-**`Neutralising = true` marks the one species whose density is derived.** That
-puts §3.4's `n − 1` counting in the file and makes the parser enforce it, rather
-than asking for `n` profiles that happen to sum to zero. Exactly one species
-must set it; zero or two is refused, with the counting in the message.
+Two factories, and the second returns a **non-const** pointer, because the solver
+calls `setNormalisation()` on a normalised source before every residual
+evaluation. `makeNormalisedSource` is the second door, and `makeSource` refuses
+rather than returning one — **which is the point**: a `NormalisedRotatingSource`
+*is-a* `Source`, so returning it would compile and solve, with `ψ_ax` frozen at
+the guess for ever because nothing would move it. The answer would be a converged
+solution to a problem the file did not describe.
 
-**The NetCDF keys are reserved and refused by name.** `[source] ProfileFile` and
-the per-profile `<Key>Variable` / `<Key>Fit` are recognised and rejected with
-"not implemented yet", not as unknown keys — so adding a multi-profile NetCDF
-reader later is purely additive. `TODO`'s NetCDF entry carries the decisions
-already taken, including that a variable with values but no derivative will be
-refused unless the configuration opts in per profile, and that MaNTA's `(u, q)`
-pair *is* `meq::Knot`, which makes the rotating source the easy case to build it
-against rather than the awkward one.
+### 5.5 Output: `n_s` and `φ₀` are fields, and they are named for what they are
 
-### 5.6 Output: `n_s` is a field now
+Both are algebraic in `(r, ψ_h)`, so `Sampler` had everything it needed. The
+driver writes `n_<species>` per species and **`e_phi_0`** — that is `e φ₀` in
+**joules**, not `φ₀` in volts, because the elementary charge appears in exactly
+one place in this source and `e φ₀` is the combination every exponent actually
+contains. Both are written only for `SourceType::Rotating`.
 
-`n_s(r,z)` and `φ₀(r,z)` are genuine two-dimensional fields, not profiles, and a
-rotating equilibrium is not interpretable without them. They belong in the
-NetCDF alongside `ψ` and `B`, and they are cheap — both are algebraic in
-`(r, ψ_h)`, so `Sampler` already has everything it needs.
+**Two profile tables ship because of a trap.** Re-expressing `f(ψ)` against
+`Ψ = ψ/ψ_ax` divides the abscissa by the axis flux and **multiplies the
+derivative column by it**. `examples/rotating-density.dat` and
+`rotating-density-normalised.dat` are the same profile written both ways; hand
+one to the wrong configuration and it parses, solves and converges to a plasma
+whose density gradient is out by a factor of ten. Both headers say so, and they
+are also the only place in `examples/` that documents the `SplineProfile` file
+format at all.
 
 ---
 
@@ -420,44 +365,41 @@ only in the closure that fixes that variation:
 
 So:
 
-### 6.1 The `ω → 0` limit — free, and first
+### 6.1 The `ω → 0` limit — the cheap first milestone, and it was right
 
-`F` must collapse to `μ₀ r² Σ_s (n_s0 T_s)′ + g g′`, which is `MHDSource`. Run
-the whole existing Solov'ev study through `RotatingSource` at `ω ≡ 0` and require
-agreement with `MHDSource` to round-off and the published rates unchanged to
-every digit printed. **This exercises the entire new profile, `φ₀` and chain-rule
-machinery against an answer that is already known**, which is what `TODO` called
-the cheap first milestone and it is right.
+`F` must collapse to `μ₀ r² Σ_s (n_s0 T_s)′ + g g′`, which is `MHDSource`. **This
+exercises the entire new profile, `φ₀` and chain-rule machinery against an answer
+that is already known.** Not bit-for-bit — `Σ_s (n_s0 T_s)′` and a single
+tabulated `p′` are different floating-point expressions, so round-off is the
+honest ask — but through the solver the Solov'ev study driven from a
+`RotatingSource` reproduces `SolovievConvergence`'s errors **to every printed
+digit**, not merely the rates.
 
-Not bit-for-bit: `Σ_s (n_s0 T_s)′` and a single tabulated `p′` are different
-floating-point expressions. Round-off is the honest ask.
+### 6.2 Li & Zhu's rotating Solov'ev — the same equation, and blind to the Jacobian
 
-### 6.2 Li & Zhu's rotating Solov'ev — the same equation, and linear
-
-`refs/SpectralElementGSRotation.pdf` §3.1 (Li & Zhu, *CPC* **260** (2021)
-107264) gives a closed-form solution, their (14)–(15), of
-`Δ*ψ = −p₁ r² exp[ M₀²( r²/R₀² − 1 ) ] − F₀` with `μ₀P₀′ = p₁`, `FF′ = F₀`,
-`T = T₀` and `Ω = Ω₀` all constant. Their (8) **is** the isothermal closure with
+`refs/SpectralElementGSRotation.pdf` §3.1 (Li & Zhu, *CPC* **260** (2021) 107264)
+gives a closed form, their (14)–(15). Their (8) **is** the isothermal closure with
 `T = T_i + T_e`, so this coincides with (136) for two species sharing a
-temperature flux function. **That reduction is now verified rather than
-assumed**: `RotatingSourceConvergence`'s `theSourceAndTheFixtureAgreeUnderRotation`
-builds a two-species `meq::RotatingSource` with `T_i = T_e = ½` and matches the
-fixture pointwise at `M² = 0, 1, 4`, which is the statement that our
-`C = ω²(Z₁m₂ − Z₂m₁)/(Z₁T₂ − Z₂T₁)` reproduces their single `T = T_i + T_e`.
-
-Their (16) is its `M₀ → 0` limit and is the static Solov'ev particular solution,
-so §6.1 and §6.2 are the same test at two Mach numbers.
+temperature flux function — **verified rather than assumed**, by
+`theSourceAndTheFixtureAgreeUnderRotation` building a two-species
+`meq::RotatingSource` with `T_i = T_e = ½` and matching the fixture pointwise at
+`M² = 0, 1, 4`. Their (16) is its `M₀ → 0` limit and is the static Solov'ev
+particular solution, so §6.1 and §6.2 are the same test at two Mach numbers.
 
 **But its source is constant in `ψ`, so `∂F/∂ψ = 0`.** It tests the
-discretisation, the `r`-dependence and the `φ₀` machinery. It says nothing
-whatever about the Jacobian — the same blind spot meq's existing `Soloviev.hpp`
-rung has, and for the same reason.
+discretisation, the `r`-dependence and the `φ₀` machinery and says nothing
+whatever about the Jacobian — the same blind spot `Soloviev.hpp` has, for the
+same reason. `deltaStarFD()` is what guards the transcription, per the house
+pattern.
 
-**Check it with `deltaStarFD()` before trusting it.** That is the house pattern
-and it is exactly the guard against the hazard in this section: recompute `Δ*ψ`
-from their published closed form by central differences and assert it against the
-`F` the solver is actually fed. If the closure differs anywhere, that goes red
-immediately instead of converging beautifully to somebody else's equilibrium.
+**THREE PAPER ERRORS WERE FOUND IN IT AND ALL THREE ARE THE KIND THAT CONVERGE
+BEAUTIFULLY.** Li & Zhu's (12)–(16) write `M₀²` where their prose defines `M₀` as
+the group without a square root — the group is an energy ratio, so it is a Mach
+number *squared*, and `RotatingSoloviev.hpp` names its member `machSquared` and
+cites the exponent rather than their symbol. Their (9) carries **two reversed
+signs**, on the `dΩ/dψ` and `dT/dψ` corrections, found independently three times.
+And their (6) omits the `μ₀` their (9) carries.
+
 
 ### 6.3 Maschke–Perrin IS a test of (136), and this section said otherwise
 
@@ -499,7 +441,7 @@ IMPORTANT ONE.** M&P's (4.7) *forces* `C` to be a constant, so the
 `P₀(ψ) C′(ψ)(r² − r_ref²)/2` term of `∂p/∂ψ` is identically zero in this
 fixture. **Neither published rotating benchmark can see that term** — Li & Zhu's
 Solov'ev case has `T` and `Ω` constant for the same reason — and it is precisely
-the term whose sign they got wrong. Only the `dFdPsi` sweep of §5.3, over
+the term whose sign they got wrong. Only the `dFdPsi` sweep of FL-3, over
 profiles with genuine `ψ`-dependence in `ω` and `T`, touches it. And second: `p_T`
 is linear in `ψ` and `g g′` is constant, so `∂F/∂ψ = 0` and this sits **beside
 `Soloviev.hpp` on meq's ladder, not beside `McCarthy.hpp`**. Within M&P's ansatz
@@ -516,109 +458,79 @@ it cannot be made into a Jacobian test.
   harder problem. At best a cross-check in a pure-toroidal isothermal limit, if
   it has one.
 
-### 6.4 A manufactured nonlinear rotating case — the one that tests the Jacobian
+## 7. What was built, stage by stage
 
-Neither published solution has `∂F/∂ψ ≠ 0`, so one is needed, in the shape of
-`ManufacturedNonlinear.hpp`: choose `ψ`, choose profiles with real `ψ`-dependence
-in all of `n_s0`, `T_s` and `ω`, and build the datum to fit. Acceptance is what
-`NewtonConvergence` already asserts — observed Newton order 2, and **the
-assembled Jacobian against a central difference of the assembled residual**,
-which is a stronger check than the one on `dFdPsi` alone.
+Each stage ended at a measured number, and `CLAUDE.md`'s *Toroidal flow* carries
+them. What is kept here is the shape of the ladder and the three measurements
+that are not recorded there.
 
-### 6.5 The `n`-species checks
-
-* At `n = 2` the root find must reproduce the closed form of §4.1 to round-off.
-  Same source, two code paths, one answer.
-* `Σ_s Z_s n_s = 0` to round-off at every quadrature point, swept over Mach
-  number and over impurity fraction.
-* `∂φ₀/∂ψ` against a central difference of `φ₀` — the *inner* analogue of §5.3,
-  and the thing that catches an implicit-differentiation slip.
-* A three-species case (D, C⁶⁺, e) with the heavy impurity centrifugally
-  enriched on the outboard side, which is the physics the whole exercise is for.
-
----
-
-## 7. The staged plan
-
-Each stage ends at a measured number.
-
-| | | acceptance |
+| | | |
 |---|---|---|
-| **FL-0** ✔ | `meq::Species`, the profile container, the charge-neutrality solve. No solver, no MFEM. | **DONE.** `neutralisingDensity()` closes `Σ_s Z_s n_s0 = 0` to 1e-14 and is exact at all three derivative levels; every refusal — three species, same-sign charges, a violated neutrality set, a null profile, a bad radius — throws a named `invalid_argument` |
-| **FL-1** ✔ | `φ₀` and `p(r,ψ)` for two species, closed form. Still no solver. | **DONE.** `φ₀(r_ref) = 0` **exactly**; `Σ_s Z_s n_s = 0` to 1e-13 over a Mach sweep; `p` against Li & Zhu (8) to 1e-14. And the closed form checked against a **brentq root of (97)** in an independent Python implementation: **1.9e-14** relative, with the two species' exponents agreeing to 3.0e-14 |
-| **FL-2** ✔ | `meq::RotatingSource`, and the `ω → 0` collapse. | **DONE, and better than asked.** Pointwise against `MHDSource` at 1e-13 in both `f` and `dFdPsi`, by both routes to no rotation. Through the solver, the Solov'ev study driven from a `RotatingSource` reproduces `SolovievConvergence`'s errors **to every printed digit** — 3.596959e-05, 1.916351e-07, 5.510484e-10 in `ψ` — not merely the rates |
-| **FL-3** ✔ | `dFdPsi`, two species. | **DONE.** Central difference at the `O(h²)` floor over five Mach scales and two steps. **This is the only test in the stage that touches the `C′(ψ)` term** — see §6.3; neither published benchmark can |
-| **FL-4** ✔ | Solve the rotating Solov'ev. | **DONE.** `deltaStarFD` first: 1.6e-08 at `M² = 0`, 2.8e-07 at `M² = 1`. Then 1.995 / 2.995 / 3.995 in `ψ` and 1.980 / 2.985 / 3.984 in `q`, Newton = 1 throughout as an affine system must give. And the source and the fixture — two independent implementations — agree pointwise at `M² = 0, 1, 4` to 1e-12, with the solver driven from the source giving the same errors as driven from the fixture |
-| **FL-5** ✔ | The manufactured nonlinear rotating case. | **DONE.** `F = rot.f + h(r,z)` with `h` carrying no `ψ`, so the whole Jacobian is the rotating source's. Assembled Jacobian against a difference of the assembled residual at **3.1e-11**; Newton order **1.980**; `k+1` at 2.007 / 2.999 / 4.002 in `ψ`. And **mutation-tested**: `1.05×dFdPsi` leaves every error and every rate unchanged to all seven digits, and moves the order to 1.055 and the Jacobian check to 2.1e-04 |
-| **FL-6** ✔ | `n` species: the safeguarded root find and `∂φ₀/∂ψ`. | **DONE.** At two species the root find reproduces the closed form — `φ₀` to 1e-12, `∂φ₀/∂ψ` to 1e-11, `F` to 1e-11, `∂F/∂ψ` to 1e-9. Three species (D, C⁶⁺, e) hold `Σ_s Z_s n_s = 0` to 1e-12 at every radius, `∂φ₀/∂ψ` matches a central difference, and the carbon is centrifugally enriched outboard |
-| **FL-7** ✔ | Normalised flux: `meq::NormalisedRotatingSource` through the bordered Newton. | **DONE.** `ψ_ax − max ψ_h` at **0.000e+00** on three meshes, `ψ_ax` converging 1.146743e-01 → 1.146034e-01, rotation moving it by 6.0%, and Newton's **tail** order 2.000 |
-| **FL-8** ✔ | Through the driver: TOML, and `n_s`, `φ₀` written. | **DONE.** Driver against library at **1.310e-16** rotating and **1.013e-16** normalised, with `ψ_ax` = 1.039163167e-01 and its constraint at −1.388e-17 in 7 bordered steps. And rotation **reaches `ψ`**, which is the point: against the same configuration at `Omega = 0`, `‖ψ(ω) − ψ(0)‖/‖ψ(0)‖ = 1.2683e-01` over 4608 dofs and `max ψ` moves 9.755876e-02 → 1.079860e-01, gated at `> 5e-2` so it cannot go stale. `examples/rotating-rectangle.toml` and `rotating-normalised.toml` are the worked pair. **It also measured item 11**: `n_s` is algebraic in `(r, ψ)`, so the same closed form evaluated at a band node's own radius reads 5.132e-07 against **8.571e-02** at the foot on `Γ_h` — a factor of 1.7e5, which is what `B` silently takes today |
+| **FL-0** | `meq::Species`, the profile container, the charge-neutrality solve. No MFEM. | `neutralisingDensity()` closes `Σ_s Z_s n_s0 = 0` to 1e-14 and is exact at all three derivative levels; every refusal — three species, same-sign charges, a violated neutrality set, a null profile, a bad radius — throws a named `invalid_argument` |
+| **FL-1** | `φ₀` and `p(r,ψ)` for two species, closed form | against a **brentq root of (97)** in an independent Python implementation |
+| **FL-2** | `meq::RotatingSource`, and the `ω → 0` collapse | §6.1 |
+| **FL-3** | `dFdPsi`, two species | the only stage that touches the `C′(ψ)` term — §6.3 |
+| **FL-4** | Solve the rotating Solov'ev | `deltaStarFD` first: **1.6e-08 at `M² = 0`, 2.8e-07 at `M² = 1`**, then the rates |
+| **FL-5** | The manufactured nonlinear rotating case | the Jacobian, and the mutation test below |
+| **FL-6** | `n` species: the safeguarded root find and `∂φ₀/∂ψ` | |
+| **FL-7** | Normalised flux through the bordered Newton | `ψ_ax` converging **1.146743e-01 → 1.146034e-01**, rotation moving it by **6.0%** |
+| **FL-8** | Through the driver: TOML, and `n_s`, `e φ₀` written | driver against library at **1.310e-16** rotating and **1.013e-16** normalised, `ψ_ax` = 1.039163167e-01 with its constraint at −1.388e-17 in 7 bordered steps |
 
-**FL-2 is the stage to protect.** It exercises the species container, the profile
-chain rule, `φ₀`, the units conversion and the sign of `Δ*` — everything
-structural — against an answer meq already has to fifteen digits. If a `4π`, a
-`2π` or a sign is wrong, FL-2 is where it shows, and it shows as a wrong number
-rather than as a plausible equilibrium.
+**FL-2 was the stage to protect** — it exercises the species container, the
+profile chain rule, `φ₀`, the units conversion and the sign of `Δ*` against an
+answer meq already has to fifteen digits, so a wrong `4π`, `2π` or sign shows as
+a wrong number rather than as a plausible equilibrium. **FL-4 before FL-5 was
+deliberate**: FL-4 is linear, so a failure there cannot be the Jacobian.
 
-**FL-4 before FL-5 is deliberate.** FL-4 is linear, so a failure there is the
-discretisation or the source and cannot be the Jacobian. FL-5 is the first stage
-where a Jacobian error is possible, and by then everything else is pinned.
-
-**AND FL-5 EARNED ITS PLACE, MEASURED RATHER THAN ARGUED.** Perturbing
-`dFdPsi` by +5% and re-running the whole study leaves **every L2 error and every
+**AND FL-5 EARNED ITS PLACE, MEASURED RATHER THAN ARGUED.** Perturbing `dFdPsi`
+by +5% and re-running the whole study leaves **every L2 error and every
 convergence rate unchanged to all seven digits printed**, at every `k` — exactly
 reproducing what `CLAUDE.md` records for the static case. What moves is Newton:
 3 iterations to 6, observed order 1.980 to 1.055, and the assembled-Jacobian
-check from 3.5e-11 to 2.1e-04. So FL-4's rate tables, which are the instrument
-the earlier stages rest on, are **blind** to the defect FL-5 exists to catch.
+check from 3.5e-11 to 2.1e-04. **So FL-4's rate tables, the instrument the
+earlier stages rest on, are blind to the defect FL-5 exists to catch.**
 
-**AND THREE MORE FROM FL-5 TO FL-7.**
+### Five findings the plan did not predict
 
-**A control on the reference curve would have been blind to the whole rotation
-chain rule.** FL-5's check that `∂F/∂ψ` genuinely varies with `ψ` was first
-placed at `r = r_ref` and read 0.333 against a wanted 0.5. Not a defect in the
-profiles: the gauge pins `φ₀(r_ref) = 0`, so the exponent `(r² − r_ref²)/2` and
-*both* its `ψ`-derivatives vanish there and `∂²p/∂ψ²` collapses to `P₀″(ψ)` —
-the answer a non-rotating source gives. Moved to `r = r_max` it reads 7.300.
-**The one radius at which the gauge is exact is the one radius at which a
-rotating source is indistinguishable from a static one.**
+**A control on the reference curve is blind to the entire rotation chain rule.**
+FL-5's check that `∂F/∂ψ` genuinely varies with `ψ` was first placed at
+`r = r_ref` and read 0.333 against a wanted 0.5. Not a defect in the profiles:
+the gauge pins `φ₀(r_ref) = 0`, so the exponent `(r² − r_ref²)/2` and *both* its
+`ψ`-derivatives vanish there and `∂²p/∂ψ²` collapses to `P₀″(ψ)` — the answer a
+non-rotating source gives. Moved to `r = r_max` it reads 7.300. **The one radius
+at which the gauge is exact is the one radius at which a rotating source is
+indistinguishable from a static one.**
 
 **The best observed Newton order is not the order.** FL-7's bordered history
 opens 6.24e-02 → 4.01e-02 → 7.44e-03, whose "order" is **3.81** — the iterate
-walking into the basin, not converging in it. Taking the best triple would
-report that and pass, and would go on passing with a Jacobian degraded enough to
-destroy the tail. The assertion is on the last triple above the round-off floor,
-**bounded on both sides**, because 1 is a broken Jacobian and 3.8 is an artefact.
+walking into the basin, not converging in it. Taking the best triple would report
+that and pass, and would go on passing with a Jacobian degraded enough to destroy
+the tail. The assertion is on the last triple above the round-off floor, **bounded
+on both sides**, because 1 is a broken Jacobian and 3.8 is an artefact.
 
 **`meq::Profile`'s clamping meets a real range.** A manufactured `ψ` runs over
 roughly `[−0.11, +1.00]` on the standard box, not `[0, 1]`, and a Newton iterate
-overshoots further. Every temperature profile therefore has to stay strictly
-positive well outside the nominal range or the closure's denominator goes
-singular mid-quadrature — FL-5 asserts the range and the positivity rather than
-hoping.
-
-**THREE THINGS FL-0 TO FL-4 TURNED UP THAT THIS PLAN DID NOT PREDICT.**
-
-`meq::Profile` needed a third derivative level — §5.3. Foreseeable in hindsight
-and not foreseen here.
+overshoots further. Every temperature profile has to stay strictly positive well
+outside the nominal range or the closure's denominator goes singular
+mid-quadrature; FL-5 asserts the range and the positivity rather than hoping.
 
 **The `M² → 0` cancellation is ALGEBRAIC, not asymptotic**, which this plan got
 wrong when it called for a series expansion in small `M²`. Writing
-`v = r²/R₀² − 1` and `u = M²v`, the particular solution is
-`−(p₁R₀⁴/4) v² G₂(u)` with `G₂(u) = (e^u − u − 1)/u²`: `M²` cancels exactly,
-nothing is ever divided by it, and `M² = 0` needs no branch at all. What does
-need a series is **small `|u|`, which happens near `r = R₀` at every Mach
-number** — a different and more common condition than the one predicted. The
-fixture carries a control that measures the naive form failing where the
-cancellation bites: 380% wrong at `M² = 1e-8`, exactly zero at `1e-10`.
+`v = r²/R₀² − 1` and `u = M²v`, the particular solution is `−(p₁R₀⁴/4) v² G₂(u)`
+with `G₂(u) = (e^u − u − 1)/u²`: **`M²` cancels exactly, nothing is ever divided
+by it, and `M² = 0` needs no branch at all.** What does need a series is small
+`|u|`, **which happens near `r = R₀` at every Mach number** — a different and far
+more common condition than the one predicted. The fixture carries a control that
+measures the naive form failing where the cancellation bites: 380% wrong at
+`M² = 1e-8`, exactly zero at `1e-10`.
 
 **A benchmark can be too good for its own guard.** `deltaStarFD`'s central
 difference cannot resolve `Δ*ψ` at `M² = 4`: the fourth derivative carries
 `(2M²r/R₀²)⁴e^u`, so the truncation floor at `h = 1e-4` — already the optimum
-against round-off — is 4.8e-05, above the 1e-5 gate. The `fastRotating()`
-factory is kept and used for solves, and is excluded from the scan, because
-loosening the one guard standing between a mistyped term and a beautiful wrong
-answer was not worth an extra Mach number.
+against round-off — is 4.8e-05, above the 1e-5 gate. The `fastRotating()` factory
+is kept and used for solves and is **excluded from the scan**, because loosening
+the one guard standing between a mistyped term and a beautiful wrong answer was
+not worth an extra Mach number.
 
 ---
 

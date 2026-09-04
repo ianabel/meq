@@ -50,6 +50,10 @@ What meq does
   system rather than an input. See :doc:`normalised_flux`.
 * **Includes toroidal rotation**, solving the generalised Grad–Shafranov
   equation for a rotating multi-species plasma. See :doc:`rotation`.
+* **Extracts the flux surfaces.** The magnetic axis and any X-point as roots of
+  the solved flux, the surfaces themselves as traced curves, flux-surface
+  averages over them, and the whole family as a smooth map from a disc. See
+  :doc:`flux_surfaces` and :doc:`surface_geometry`.
 * **Writes three output formats**, deliberately, because no one of them is both
   exact and portable. See :doc:`output`.
 
@@ -109,6 +113,8 @@ solver strategy for a problem that is not converging, go to :doc:`nonlinear`.
    postprocessing
    curved_boundary
    adaptivity
+   flux_surfaces
+   surface_geometry
 
 .. toctree::
    :maxdepth: 2

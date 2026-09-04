@@ -6,8 +6,18 @@ two questions this plan is mostly about: what the coupled Jacobian looks like,
 and what has to come from MFEM before any of it can be tried.
 
 `CLAUDE.md` is the operational record and is authoritative on anything already
-measured; `ROADMAP.md` is the order of work; `DRIVER-PLAN.md` is the stage-7
-design this one follows.
+measured; `ROADMAP.md` is the order of work. `DRIVER-PLAN.md` was the stage-7
+design this one follows and is now that stage's record.
+
+**Two things have arrived since this was written and both bear on §5.3.**
+`src/meq/CriticalPoints.{hpp,cpp}` locates the axis and any X-point as roots of
+`q = 0`, sub-element, with a Poincaré–Hopf audit — which is machinery the
+connectivity test below wants, and which did not exist when §5.3 was written.
+And `INVERSION-PLAN.md`'s **IN-5, open surfaces, is deferred to arrive with this
+item**: a disc chart has no meaning through a separatrix and an angle about the
+axis has none on an open field line, so the in-surface coordinate there has to be
+poloidal arc length normalised to `2π` from a fixed-`z` reference ray. Whoever
+starts FB-4 should read `INVERSION-PLAN.md` §4.2 and §6 first.
 
 **What the rewrite changed, in one paragraph.** The August version was written
 against `NLOrdering::LineariseThenCondense`, chose it over the condensation for
@@ -437,7 +447,11 @@ iterate. Four things follow.
 `F( r, z, ψ )` given `ψ_ax` and `ψ_bnd`, so `meq::Source`'s interface survives
 untouched. What is lost is that `{ Ψ > 0 }` can pick up private-flux regions and
 near-coil regions that are not the plasma; CEDRES++ handles that with a
-connectivity test and so must meq.
+connectivity test and so must meq. **`meq::CriticalPointFinder` is the piece that
+makes that test cheap** — the X-point is what separates the private flux from the
+plasma, and it is now locatable sub-element as a root of `q` rather than confined
+to a mesh vertex, which is what CEDRES++ records as an open problem on its own P1
+discretisation.
 
 **The Jacobian acquires a surface term unless the profiles vanish at the
 boundary.** `∂F/∂ψ` picks up `F·δ(Ψ)` at the plasma edge. If `p'(0) = 0` and

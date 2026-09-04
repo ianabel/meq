@@ -233,6 +233,12 @@ Raised 2026-08-24.
      (a) is much the best if the MaNTA side can be arranged. Decide this first;
      it determines everything else.
 
+     PARTLY ANSWERED, 2026-09-01, AT THE TOP OF THIS ENTRY: the shift is a
+     property of meq::MHDSource's PRODUCT parameterisation, and
+     meq::RotatingSource takes T_s and n_s0 THEMSELVES, so MaNTA's (u, q) is
+     exactly what it needs and (a) is unnecessary there. Build this against the
+     rotating source and the question only arises for the MHD one.
+
   2. What is `x`, and how does it map to psi in [0,1]? meq's profiles are
      normalised to psi in [0,1] and `SplineProfile` clamps outside that. MaNTA's
      `x` is a radial coordinate whose meaning is set by the physics case, and
@@ -308,9 +314,12 @@ Sonic toroidal rotation
 Raised 2026-08-25. SUPERSEDED 2026-09-01 by FLOW-PLAN.md, which is the design.
 ================================================================================
 
-  FLOW-PLAN.md carries all of this and more, staged FL-0 to FL-8. The equation
-  is refs/RotatingGK.pdf (136) closed by its (96) and (97); the inputs are
-  T_s(psi), omega(psi), n-1 density flux functions and I(psi).
+  DONE, FL-0 to FL-8, and reachable from a TOML file. src/meq/RotatingSource.*
+  is the source, FLOW-PLAN.md the derivation and the findings, and CLAUDE.md's
+  "Toroidal flow" every measurement. The equation is refs/RotatingGK.pdf (136)
+  closed by its (96) and (97); the inputs are T_s(psi), omega(psi), n-1 density
+  flux functions and I(psi). Taking q(psi) instead and finding I(psi) from it is
+  ROADMAP.md item 10, not this.
 
   THIS ENTRY'S TWO FINDINGS ARE KEPT THERE. <phi_0>_psi = 0 is a GAUGE CHOICE
   and not a closure -- RoPP says so itself at (59), "we can add any function of
@@ -328,6 +337,13 @@ Raised 2026-08-25. SUPERSEDED 2026-09-01 by FLOW-PLAN.md, which is the design.
   do not all solve the same equation: Li & Zhu's rotating Solov'ev is (136)'s
   isothermal closure, Maschke-Perrin's is adiabatic and is not, and FLOW solves
   poloidal flow as well.
+
+  ONE THING IT LEFT OPEN. No published rotating benchmark exercises the C'(psi)
+  term -- Li & Zhu's Solov'ev case holds T and Omega constant and Maschke-Perrin's
+  (4.7) FORCES C constant -- and that is precisely the term Li & Zhu got the sign
+  of wrong. Only RotatingSourceTests' dFdPsi sweep touches it. Putting
+  Maschke-Perrin into tests/analytic/ is the cheap follow-up and is not done; see
+  FLOW-PLAN.md section 6.3, which verified it by substitution to 8e-26.
 
   Nothing else that stood here is worth keeping; git has the working.
 ================================================================================
@@ -355,8 +371,9 @@ Raised 2026-08-25.
                              right one: Plasma Physics 22 (1980) 579, as
                              MaschkePerrin.pdf. Its section 4 IS a benchmark for
                              the rotation work, verified by substitution to
-                             8e-26; its section 3, the actual polytrope, is not.
-                             See FLOW-PLAN.md section 6.3
+                             8e-26, and is NOT yet in tests/analytic/; its
+                             section 3, the actual polytrope, is not a benchmark
+                             for it at all. See FLOW-PLAN.md section 6.3
     Goedbloed & Lifschitz 1997   Stationary symmetric MHD flows, Phys. Plasmas 4, 3544
     Zwingmann, Eriksson & Stubberfield 2001   Equilibrium analysis of tokamak
                              discharges with anisotropic pressure, PPCF 43, 1441
@@ -427,6 +444,26 @@ Raised 2026-08-25. See MANTA-COUPLING.md, which is the specification.
   differentiated with respect to a psi that moves the surface -- and making the
   pointwise Geometry hook fast enough, since MaNTA calls it once per physics
   node per residual evaluation and hands over the whole psi vector each time.
+
+  BOTH NOW HAVE MACHINERY BEHIND THEM, WHICH IS WHAT INVERSION-PLAN.md WAS FOR.
+  IN-2 builds the flux-surface averages as ONE primitive over a callable
+  integrand, so dGeometry_dpsi is differentiated once rather than per slot, and
+  IN-3's fit supplies the surface derivative. What is still missing on meq's side
+  is IN-6's per-psi cache -- INVERSION-PLAN.md section 11.1 argues it is a
+  REQUIREMENT of the pointwise call pattern rather than an optimisation, and its
+  invalidation contract is MANTA-COUPLING.md section 8 -- and IN-P, the cost
+  measurement, which is under way. Do not design the coupling against the
+  illustrative geometry slot list: MANTA-COUPLING.md says itself that the list
+  "is negotiated with the transport physics case, not fixed by MaNTA", and its
+  tokamak set is known to be under revision.
+
+  AND THE CONSUMER'S JACOBIAN HAS THIS PROJECT'S OWN FAILURE MODE. MaNTA never
+  assembles its Jacobian, so a missing surface-motion term "does not produce a
+  wrong answer, only slow Newton convergence". That is CLAUDE.md's "A wrong
+  Jacobian is invisible to a convergence table" arriving from the consumer's
+  side, and the remedy is the one meq already uses on dFdPsi: finite-difference
+  dGeometry_dpsi against Geometry directly, as a unit test, and never take
+  convergence of the coupled solve as evidence.
 
   THE BUILD FLAGS, checked 2026-08-25, and narrower than the note fears
 

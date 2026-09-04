@@ -26,10 +26,16 @@ does is done through the public interface documented here, and
 
    ``meq/meq.hpp`` is an umbrella header covering the configuration, the
    solver, the profiles and the sources. The geometry, estimator, sampler,
-   warm-start and output headers are **not** in it and must be included
-   directly — ``meq/Estimator.hpp``, ``meq/BoundaryShape.hpp``,
+   warm-start, output and flux-surface headers are **not** in it and must be
+   included directly — ``meq/Estimator.hpp``, ``meq/BoundaryShape.hpp``,
    ``meq/Sampler.hpp``, ``meq/WarmStart.hpp``, ``meq/Output.hpp``,
-   ``meq/Field.hpp``, ``meq/SourceFactory.hpp``.
+   ``meq/Field.hpp``, ``meq/SourceFactory.hpp``, ``meq/CriticalPoints.hpp``,
+   ``meq/FluxSurfaces.hpp``, ``meq/SurfaceAverage.hpp``, ``meq/Zernike.hpp``,
+   ``meq/SurfaceFit.hpp``.
+
+   The last five have no hand-written reference page here yet; their headers
+   carry the reasoning, and :doc:`../flux_surfaces` and
+   :doc:`../surface_geometry` are the prose.
 
 Everything is in ``namespace meq``. There are no nested namespaces.
 

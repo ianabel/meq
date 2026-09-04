@@ -1,84 +1,51 @@
 # Where meq is, and what to do next
 
-Written 2026-08-26, substantially revised 2026-08-27, 2026-08-29 and 2026-09-01.
-`CLAUDE.md` is the operational record and is authoritative on anything technical;
-`DRIVER-PLAN.md` is the stage-7 design, `FREE-BOUNDARY-PLAN.md` and
-`FLOW-PLAN.md` are the two designs not yet started; `TODO` holds work that is
-understood but not scheduled. **This file is only about order** — what to do
-first, what waits on what, and what is deliberately not being done yet.
+Written 2026-08-26, substantially revised 2026-08-27, 2026-08-29, 2026-09-01 and
+2026-09-03. `CLAUDE.md` is the operational record and is authoritative on
+anything technical; `TODO` holds work that is understood but not scheduled.
+**This file is only about order** — what to do first, what waits on what, and
+what is deliberately not being done yet. **Item numbers are cited from `TODO`,
+from the plan files and from `CLAUDE.md`, so they do not get renumbered**; a
+closed item becomes a marker rather than being removed.
 
-## Nothing is red
+The four plan files, and none of them is a plan any more except one:
 
-**`HighBetaConvergence` was the one failing test and it is green.** Profiles
-specified in NORMALISED flux need `ψ_ax` inside the residual, where the Jacobian
-can see the non-local terms it contributes;
-`meq::NormalisedSource` is the interface and
-`setSource( NormalisedSource &, double )` closes the pair by a **bordered
-Newton**, one factorisation and two backsolves per step. Under NPC two of the
-three border quantities are exact rather than differenced.
+| | |
+|---|---|
+| `DRIVER-PLAN.md` | stage 7 — **done**; the file is now its findings |
+| `FLOW-PLAN.md` | item 9, FL-0 to FL-8 — **done**; the file is the derivation and its findings |
+| `INVERSION-PLAN.md` | item 10's machinery — IN-A to IN-4 **done**, IN-5 deferred, IN-6 open, IN-P under way |
+| `FREE-BOUNDARY-PLAN.md` | item 8 — **nothing is built**, and it is the one real plan left |
 
-The account of it is in `CLAUDE.md` under *Newton, and the obligation it
-creates*, including the three cheaper answers that were measured and killed on
-the way — a fixed `ψ_ax` makes the profile inert, an outer iteration on
-`ψ_ax ← max ψ` has a pole beside its own fixed point, and at fixed `ψ_ax` there
-is a second solution that is not the equilibrium. The test that can *see* the
-missing terms is `Normalisation::Decoupled`, which does not converge slowly so
-much as not move at all: 8.31e-2 to 8.24e-2 in fifteen iterations, against
-4.4e-15 in four.
-
-**What this unblocks is free boundary**, where `ψ_ax` and `ψ_bnd` are both
-unknowns: `ψ_bnd` is a second border row and column of exactly the same shape.
-
-**What is left over from it**, and neither is on the critical path: the
-production source `meq::NormalisedMHDSource` is **not reachable from a TOML
-file** — item 1 — and the bordered path accepts `Globalisation::None` only,
-refusing the others loudly rather than quietly doing something else.
-
-**And it turned up an MFEM finding that is still not filed anywhere**, which is
-item 5.
 ## So what is next
 
-With nothing red, the order is what it was, plus a second planned physics item:
+Nothing is red and stages 0 to 7 are done, so the order is:
 
-1. **Finish the driver** — item 1. Two things left in it: wire the normalised
-   source through `Config`, and the GSLIB warm start. **The first is now a
-   prerequisite for two things rather than one**: the normalised plumbing gets
-   written once and both the high-β source and a rotating one use it.
-2. **Then the two planned extensions, and they are independent of each other.**
-   * **Toroidal flow**, `FLOW-PLAN.md` — item 9, and **done**, FL-0 to FL-8.
-     `refs/RotatingGK.pdf` (136), closed by (96) and (97). A change to `F`
-     alone: the operator, the discretisation and the whole curved-boundary and
-     adaptive apparatus were untouched, and `Source`'s signature already
-     carried the `r` it needs.
-   * **Free boundary**, `FREE-BOUNDARY-PLAN.md` — item 8. HDG on a polygonal
-     subdomain coupled at a distance to an exterior operator on a semicircular
-     artificial boundary, by `refs/CouplingAtADistance.pdf` — whose own
-     reference [5] is meq's stage 5, so the coupling is the extension technique
-     already in the tree with the datum unknown instead of zero. Staged FB-A and
-     FB-0 to FB-6.
+1. **Free boundary** — item 8, `FREE-BOUNDARY-PLAN.md`, staged FB-A and FB-0 to
+   FB-6. The largest remaining item and the most structural. **FB-A is
+   measurable today**, with no free boundary at all: the axis, where the flux
+   mass `(r q, v)` degenerates and `BoundaryShape` refuses to go. Do that before
+   FB-1.
+2. **Finish the inversion** — item 10. IN-6, the `(Ψ, θ)` output grid and the
+   per-`ψ` cache `MANTA-COUPLING.md` §5's call pattern requires; and IN-P, the
+   performance harness, which is under way. IN-5, open surfaces, is **deferred
+   with free boundary** — a disc chart has no meaning through a separatrix.
+3. **The fixed-`q(ψ)` solver itself** — also item 10, and reachable now that
+   IN-2 measures `⟨r^{-2}⟩_ψ` and `V′(ψ)` against a converged reference.
 
-   **Flow is the cheaper of the two** and shares more with what exists: it needs
-   no new geometry, no cut quadrature and nothing from the other tree. Free
-   boundary is the more valuable and the more structural. Neither blocks the
-   other, and both want item 1's normalised plumbing first.
-3. ~~**Hygiene** — item 3 — alongside either. `README.md` is the oldest debt in
-   the tree and still describes a project that did not exist.~~ **Item 3 is
-   closed, 2026-09-02**: the README is true, and `docs/` is a Sphinx manual on
-   Read the Docs.
-
-Items 4 and 5 are the other tree's to act on; item 6 is meq's and is small and
-not urgent; item 7 is a closed investigation kept for its answer; item 10 — the
-fixed-`q(ψ)` solver — is wanted but undesigned and should wait on item 9.
+Items 4 and 6 are performance and neither is urgent; item 5 is a defect in
+MFEM's local solves that meq works around and has **not filed**; item 7 is a
+closed investigation kept for its answer. Items 1, 2, 3, 9 and 11 are done and
+are markers.
 
 ## The state in one paragraph
 
 The solver works and every claim about it is a measured convergence rate. Stages
-0 to 6 are done, and **stage 7 is finished: meq is a program that solves on a
+0 to 6 are done, **stage 7 is finished** — meq is a program that solves on a
 curved boundary, refines its own mesh, and restarts from a previous answer in one
-Newton step.** The suite is **28 of 28**, and it is green rather than
-green-with-a-known-red: the last standing failure was `HighBetaConvergence` and
-the work it was asserting is done. The only thing the driver still refuses is
-`[boundary] Type = "exact"`.
+Newton step — **toroidal flow is finished**, FL-0 to FL-8, and **solution
+inversion is finished up to its output stage**. The only thing the driver refuses
+is `[boundary] Type = "exact"`.
 
 ## The nonlinear question is settled
 
@@ -109,7 +76,7 @@ summarised away. meq's Newton was thought to fail on the stiff GS-2 sources.
   multi-valued. Refinement cannot touch that.
 
 Numbers in `CLAUDE.md`, *Why meq's Newton struggles* and *Picard, then Newton*.
-**Nothing on this path blocks anything else.** What follows is ordered on value.
+**Nothing on this path blocks anything else.**
 
 ## Division of labour
 
@@ -129,19 +96,15 @@ the mistake that produced it.
 | `HDG-LINEARISE-THEN-CONDENSE.md` | landed, then **retired** with the mode itself — on backup refs only now. `setNonlinearOrdering()` is gone; meq's default is `NPC` |
 | `DIRECT-SOLVER-SYMBOLIC-REUSE.md` | landed — `SetReuseSymbolic()` is on — and **retired**, on no branch at all |
 | `HDG-NPC-GLOBALISATION-FROM-MEQ.md` | **filed 2026-08-31 and answered the same day** (`af82d42b14`). Not a defect report: two §6 claims withdrawn on meq's evidence, meq's own account of the mechanism corrected, and a defect found in the reference implementation meq had copied |
-| `HDG-DEFECTS-FROM-MEQ.md` | **still on `gf-hdg-dev` and `gf-hdg-subdomains-dev`**, deleted only on the symbolic-reuse line — which is why that merge conflicts modify/delete. Three of its four are verifiably closed — one fixed, one fixed, one withdrawn as not a defect; the fourth, `ComputeHDGFaceEnergy()` ignoring an installed stabilisation, meq has not re-measured and does not use. `CLAUDE.md` has the breakdown |
+| `HDG-DEFECTS-FROM-MEQ.md` | **still on `gf-hdg-dev` and `gf-hdg-subdomains-dev`**, deleted only on the symbolic-reuse line — which is why that merge conflicts modify/delete. Three of its four are verifiably closed — one fixed, one fixed, one withdrawn as not a defect; the fourth, `ComputeHDGFaceEnergy()` ignoring an installed stabilisation, meq has not re-measured and does not use |
 | `HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md` | **landed and retired** — the fix is *"The postprocessing closes on the element average, always"*, and the document is on no branch |
 | `HDG-ELEMENT-LOCAL-PARALLELISM.md` | open, on `gf-hdg-linearise-first`, and meq has seen no change |
 | `HDG-BEM-COUPLING-FROM-MEQ.md` | **filed 2026-08-29**, for free boundary — open, on `gf-hdg-linearise-first`. See item 8 |
 
-The reconstruction one is the interesting entry, because it changed what the
-driver does: `ψ*` is a post-processing on **every** element now, so the adaptive
-loop is back on the published estimator rather than one order down. See item 3.
-
 **What is NOT filed is the local-solve seed** — item 5. It was found from meq's
-side this week and nothing has been written into that tree about it, beyond one
-paragraph inside the coupling request using it as the argument for why a caller
-should not have to difference a condensed residual.
+side and nothing has been written into that tree about it, beyond one paragraph
+inside the coupling request using it as the argument for why a caller should not
+have to difference a condensed residual.
 
 **And the coupling request is a request for a capability, not a finding.**
 Nothing in that tree has been measured to be wrong by it; §2 and §3 of it are
@@ -187,60 +150,38 @@ moved", not "the merge failed"** — what meq needs from it is in the tree. It
 says a re-merge is available.
 
 A standing cost of the arrangement, and it falls on meq's side.
+## 1. Finish the driver — **done**
 
-## 1. Finish the driver — meq
+`DRIVER-PLAN.md` is the design and now carries its own findings; `CLAUDE.md` has
+the rates. `meq config.toml` parses, solves and writes the equilibrium three
+times over, with exit codes 0/1/2/3, the curved boundary, the adaptive loop on
+both paths, and the reactive non-linear ladder. The two bullets that stood open
+here are closed: the normalised source is reachable from a TOML file (by FL-8,
+written once for both as this item predicted), and the interpolating warm start
+is wired — adaptive cycles after the first now start from the previous one
+interpolated onto the refined mesh, worth **4, 2, 2 Newton iterations against
+4, 4, 4 cold** on a nonlinear source, with the final L2 unmoved to 2.5e-12.
 
-**`DRIVER-PLAN.md` §3–5 is done bar two bullets.** `meq config.toml` parses,
-solves and writes the equilibrium three times over — `.mesh` plus `.gf`, VTK at
-the polynomial degree of the solve, and `ψ` and **B** on a uniform `(R, Z)` grid
-— with exit codes 0/1/2/3. The curved boundary works through it, the adaptive
-loop works through it on both paths, and the non-linear ladder is in: Newton,
-falling back to `PicardThenNewton` on **observed** failure. Every one of those
-is pinned against the library rather than against a closed form, for the reason
-recorded beside `examples/soloviev-nstx.toml`. `CLAUDE.md` has the numbers.
+**The nonlinear path the driver ships is reactive and must stay so.** Nothing may
+be inferred from `F` about which solver to run, because nothing can be: the ratio
+`max|∂F/∂ψ|/λ₁` is computable black-box but the pedestal converges at 7 where the
+hole fails at 26, which is two points and not a threshold. A second candidate
+detector — the first Newton step making the residual worse — has since been
+measured and is *anti*-correlated. **Continuation must not go in** either, for
+the stronger reason that it has no black-box form at all; see item 7.
 
-**What is left, in the order it is worth doing:**
+**The only thing the driver refuses is `[boundary] Type = "exact"`**, which needs
+a closed form `meq::Source` does not carry. It exits 1 with an explanation rather
+than approximating.
 
-* ~~**Wire `meq::NormalisedMHDSource` through `Config` and `SourceFactory`**~~ —
-  **DONE**, by FL-8, and written once for both as this bullet predicted.
-  `Normalised = true` plus a `PsiAxis` guess reaches it, `makeNormalisedSource()`
-  is the door, and `makeSource` **throws** on a normalised config rather than
-  quietly solving a different problem. `examples/rotating-normalised.toml`
-  exercises the path.
-* ~~**7d, the interpolating warm start**~~ — **DONE 2026-09-02**, and it was
-  the wiring this bullet said it was. Cycles after the first now start from the
-  previous one interpolated onto the refined mesh, and a stored guess on a
-  different mesh transfers instead of throwing. Measured on a nonlinear source
-  over three cycles: **4, 2, 2 Newton iterations against 4, 4, 4 cold — a third
-  of the work — with the final L2 unmoved to 2.5e-12**. It is unmeasurable on
-  meq's own adaptive examples, whose Solov'ev source takes one Newton step
-  whatever it starts from, which is why the measurement is
-  `carryingTheAnswerAcrossCyclesCutsTheWork` rather than an example. The record
-  below is kept because the correction it makes is the transferable part:
-  `src/meq/WarmStart.{hpp,cpp}` is `meq::FieldTransfer` on
-  `mfem::FindPointsGSLIB`, it is in `MEQ_CORE_SOURCES`, `MFEM_USE_GSLIB` is
-  `YES` in the install, and `WarmStartConvergence` is a registered ctest whose
-  `fullOrderCarriesMoreThanAStructuredGrid` **is** the acceptance measurement
-  `DRIVER-PLAN.md` §4 names, run over a 65/129/257 grid sequence. What is left
-  is one wiring job: `apps/meq.cpp` still throws *"the interpolating one needs
-  GSLIB"* on a mesh-count mismatch, and adaptive cycles after the first start
-  cold for the same reason. Deleting that throw and carrying the answer across
-  cycles is hours, not days, and it is the best value-per-hour item on this
-  list. (`src/meq/Sampler.hpp` and `src/meq/Config.hpp` both asserted that GSLIB
-  was off, which was false; **corrected 2026-09-02** while item 11 was in that
-  file, so the only thing left here is the driver wiring itself.)
+**One thing is still open and it is small**: `prepare()` leaves the **flux block
+at zero** when a guess is set, so under NPC a warm start is inconsistent in
+exactly the row that couples `q` to `ψ` and `‖r₀‖` goes *up*. The guess still
+works, the flux row being linear, but the stronger property wants
+`darcyFlux = −(1/r)∇̄ψ_guess` seeded through `GradientGridFunctionCoefficient` for
+the `GridFunction` overload. See `DRIVER-PLAN.md` §1 and `CLAUDE.md`, *A warm
+start no longer shows up in `‖r₀‖`*.
 
-**The nonlinear path the driver ships is reactive and must stay so.** Nothing
-may be inferred from `F` about which solver to run, because nothing can be: the
-ratio `max|∂F/∂ψ|/λ₁` is computable black-box but the pedestal converges at 7
-where the hole fails at 26, which is two points and not a threshold. A second
-candidate detector — the first Newton step making the residual worse — has since
-been measured and is *anti*-correlated. **Continuation must not go in** either,
-for the stronger reason that it has no black-box form at all; see item 7.
-
-**The only thing the driver still refuses is `[boundary] Type = "exact"`**,
-which needs a closed form `meq::Source` does not carry. It exits 1 with an
-explanation rather than approximating.
 ## 2. ~~Symbolic factorisation reuse~~ — **done**
 
 `SetReuseSymbolic()` is on for the Newton and Picard paths and off deliberately
@@ -248,66 +189,34 @@ on the linear one, which factorises once.
 `theSymbolicAnalysisIsReusedAcrossNewtonSteps` asserts one analysis against one
 factorisation per iteration — a count and not a timing, and the only thing that
 could notice the reuse lapsing, since a lapse costs speed and nothing else.
+## 3. Hygiene — **done**
 
-## 3. Hygiene — meq, alongside the driver
-
-**Four of the six bullets that stood here are done**, and what they found is in
-`CLAUDE.md` rather than here: the pedestal tripwire now asserts the two
+All six bullets are closed and what they found is in `CLAUDE.md` and
+`DRIVER-PLAN.md` rather than here: the pedestal tripwire asserts the two
 refinement cures rather than a knife edge that threaded-MKL rounding decides;
 `everyNonlinearPathReachesTheSameExactSolution` runs four paths to the same L2;
-and `postProcess()`'s refusal is retired, which turned out to be the
-prerequisite for the adaptive loop rather than a separate task.
+`postProcess()`'s refusal is retired; `η₅` is rebuilt on
+`TransferredDatumCoefficient`, going 4.07e-1 → **9.6e-5** on the coarsest
+extension mesh and converging at 2.78 against 0.40; `README.md` is true; and
+`docs/` is a Sphinx manual on Read the Docs.
 
-**That last one is worth one paragraph, because it changed what the driver
+**Two of them are worth one line each, because both changed what the driver
 does.** The estimator needs `ψ*` in four of eq. (20)'s five terms, and MFEM's
 reconstruction was silently wrong **per element** wherever `∂F/∂ψ` vanishes — a
 pure Neumann problem whose mean-value regularisation was being skipped, so a
-singular matrix was factored. A whole-domain norm could not see it: at an
-eighth of the domain dead, individual elements were 20× wrong while the norm
-read 1.87. It is fixed upstream, unconditionally, as *"The postprocessing closes
-on the element average, always"*; the driver's loop is back on `ψ*` and reaches
-η = 6.87e-5 on 449 elements where the degraded estimator needed 1069 to reach
-4.77e-4. The test flipped from asserting the defect to asserting the behaviour
-and went green on its own, which is the testing stance working as intended.
+singular matrix was factored. **A whole-domain norm could not see it**: at an
+eighth of the domain dead, individual elements were 20× wrong while the norm read
+1.87. The test flipped from asserting the defect to asserting the behaviour and
+went green on its own, which is the testing stance working as intended.
 
-~~**One bullet is still open.**~~ **None are, as of 2026-09-02.**
+**And the README rewrite left behind the transferable part.** It kept a paragraph
+insisting that "the environment variable is not optional" **without naming a
+variable**, because the `MKL_THREADING_LAYER=GNU` it was about had been deleted
+from the ctests and the driver as inert. Removing a variable from the code and
+from every test left the sentence *about* it behind, pointing at nothing — the
+same species of residue as a stale measurement, and **harder to notice because it
+reads as a warning rather than as a claim.**
 
-* ~~**Rebuild `η₅` on `TransferredDatumCoefficient`**~~ — **DONE 2026-09-02.**
-  `setTransferredBoundary()` takes the datum as a second argument and the faces
-  stay in, compared against the `φ_h` actually imposed rather than against the
-  zero standing in for it. `η₅` goes from 4.07e-1 to **9.6e-5** on the coarsest
-  extension mesh and converges at **2.78** against 0.40, so the term is two
-  percent of `η₁` rather than four orders larger. The adaptive loop is unchanged
-  — 97 → 254 → 342 → 449, `η` 4.7352e-04 → 6.8668e-05 — which is the point:
-  boundary elements now have an `η₅` contribution instead of none, and nothing
-  that already worked moved. `theTransferredDatumRestoresEtaFive` keeps the
-  pinned column as its control, and
-  `theTransferredDatumReproducesTheImposedCondition` checks `φ_h` against the
-  exact `ψ` it transfers — which is what catches the one real hazard, that the
-  lift must be given the raw `−q` block and not `flux()`, since the wrong one
-  returns `−ψ` rather than `ψ`.
-* ~~**Rewrite `README.md`**, which still describes a project that did not exist.
-  The oldest debt in the tree, and the one a new reader hits first.~~ —
-  **DONE 2026-09-02**, `57046c7`. Four things were wrong with it and none was a
-  matter of taste: it said the driver was "not yet ported, so there is currently
-  no way to run MEQ except through its test suite"; it gave the binary as
-  `./build/apps/meq`, which is not where it is built; it gave `MFEM_DIR` as
-  defaulting to `../mfem-hdg-dev`, which is the tree meq must **not** build
-  against, rather than `../mfem/install`; and it kept a paragraph insisting that
-  "the environment variable is not optional" **without naming a variable**,
-  because the `MKL_THREADING_LAYER=GNU` it was about had been deleted from the
-  ctests and the driver as inert.
-
-  **That last one is the transferable part.** Removing a variable from the code
-  and from every test left the sentence *about* it behind, pointing at nothing —
-  the same species of residue as a stale measurement, and harder to notice
-  because it reads as a warning rather than as a claim.
-
-  **And `docs/` is a different thing now**: a Sphinx tree published to Read the
-  Docs at <https://meq.readthedocs.io>, with the pre-Sphinx LaTeX manual moved
-  intact to `docs/manual/` and keeping its own Makefile. `CLAUDE.md`'s Layout
-  block still calls `docs/` "the LaTeX manual, which predates the port", which is
-  now the stale line about documentation rather than this one.
 ## 4. Element-local parallelism — MFEM, outstanding
 
 `../mfem-hdg-dev/doc/HDG-ELEMENT-LOCAL-PARALLELISM.md`, on
@@ -441,8 +350,8 @@ to smuggle in.
 
 ## 8. Free boundary — meq, planned and not started
 
-`FREE-BOUNDARY-PLAN.md` is the design, and it is a plan in the sense
-`DRIVER-PLAN.md` was: nothing is built. The shape of it:
+`FREE-BOUNDARY-PLAN.md` is the design, and **it is the one file in this tree
+that is still a plan rather than a record**: nothing is built. The shape of it:
 
 * **The exterior is exact, not a BEM.** With `Γ` a semicircle centred on the
   axis, the exterior Dirichlet-to-Neumann map for `Δ*` is **diagonal** in the
@@ -499,7 +408,6 @@ mechanism it describes has no code path left to run on, and under NPC the
 problem it solved does not arise. Plan §4.1; git has it if it is ever wanted.
 
 ---
-
 ## 9. Toroidal flow — meq, DONE, FL-0 to FL-8
 
 **`src/meq/RotatingSource.{hpp,cpp}` solves `refs/RotatingGK.pdf` (136), closed
@@ -507,48 +415,42 @@ by its (96) and (97), and it is reachable from a TOML file.** Two species in
 closed form, `n` species by a safeguarded root find, normalised flux through the
 existing bordered Newton, and `[source] Type = "rotating"` with
 `examples/rotating-rectangle.toml` and `rotating-normalised.toml` as the worked
-examples. `FLOW-PLAN.md` is the design; `CLAUDE.md`'s *Toroidal flow* has every
-measurement, the three errors found in Li & Zhu, and the Maschke–Perrin reading
-**this file previously got wrong** — its §4 is (136)'s isothermal closure at
-every `γ`, and the paragraph that stood here called it an adiabatic one.
+examples. `FLOW-PLAN.md` is the derivation and the findings; `CLAUDE.md`'s
+*Toroidal flow* has every measurement, the three errors found in Li & Zhu, and
+the Maschke–Perrin reading **this file previously got wrong** — its §4 is (136)'s
+isothermal closure at every `γ`, and the paragraph that stood here called it an
+adiabatic one.
 
-**What is not done here is item 11**, and the rotating output is what measured
-it: `B` in the band between `Γ_h` and `Γ` is evaluated at the foot on `Γ_h`, and
-the same closed form evaluated both ways differs by a factor of **1.7e5**.
+**One thing it turned up is still open**: no published rotating benchmark
+exercises the `C′(ψ)` term, because Li & Zhu's Solov'ev case holds `T` and `Ω`
+constant and Maschke–Perrin's (4.7) *forces* `C` constant — and that is precisely
+the term Li & Zhu got the sign of wrong. Only `RotatingSourceTests`' `dFdPsi`
+sweep touches it. Putting Maschke–Perrin into `tests/analytic/` is the cheap
+follow-up and has not been done.
 
-## 10. The fixed-`q(ψ)` solver — meq, wanted, not designed
+## 10. The fixed-`q(ψ)` solver — meq, and its machinery now exists
 
-**`INVERSION-PLAN.md` IS NOW THE DESIGN FOR THE MACHINERY THIS NEEDS**, written
-2026-09-02 after a literature survey (`refs/Refs.md`, *Solution inversion*). It is
-staged IN-A and IN-0 to IN-6, and item 10 becomes reachable at **IN-2**, where the
-flux-surface averages `⟨r^{-2}⟩_ψ` and `V′(ψ)` are measured against a closed form.
-Two things in it change this item's shape: `v0-legacy`'s `FluxSurfaces` **has never
-compiled**, so there is an algorithm to reuse and no working tool to extend; and the
-global-structure work this item was assumed to need is **deferred**, because a
-fixed-boundary problem with one axis has no interior saddles at all.
+**`INVERSION-PLAN.md` is the design, and IN-A to IN-4 are done and green.** This
+item became reachable at **IN-2**, where the flux-surface averages `⟨r^{-2}⟩_ψ`
+and `V′(ψ)` are measured against a converged reference on the exact field. What
+is left of the machinery is **IN-6**, the `(Ψ, θ)` output grid and the per-`ψ`
+cache, and **IN-P**, the performance harness; **IN-5**, open surfaces, is
+deferred with free boundary, since a disc chart has no meaning through a
+separatrix.
 
 **Take `q(ψ)` as input and find `I(ψ)` from it**, rather than taking `I(ψ)`
-directly as items 1 and 9 both do. The terminology is what people call it; the
-requirement is ordinary. It is how a transport code hands an equilibrium code its
-target, and it is what a coupling to MaNTA will want.
-
-RoPP (142) is the relation:
+directly as items 1 and 9 both do. It is how a transport code hands an
+equilibrium code its target, and it is what a coupling to MaNTA will want. RoPP
+(142) is the relation:
 
 ```
 q(ψ) = V′(ψ) I(ψ) ⟨r^{-2}⟩_ψ / 4π²
 ```
 
-**Which makes this the item that needs the machinery item 9 was designed to
-avoid.** `V′` and `⟨r^{-2}⟩_ψ` are flux-surface quantities, so a fixed-`q` solver
-needs flux-surface averaging over level sets of `ψ_h` — contour extraction on an
-HDG solution, at the solution's own order if it is not to throw away `k+1` — plus
-an inner iteration for `I(ψ)`, plus that whole non-local dependence inside
-`∂F/∂ψ` if Newton is to stay quadratic.
+**What is left is the solver, not the geometry.** An inner iteration for `I(ψ)`,
+and that whole non-local dependence inside `∂F/∂ψ` if Newton is to stay
+quadratic. Three things worth writing down before anyone starts:
 
-Three things worth writing down before anyone starts:
-
-* **`FluxSurfaces` was a `v0-legacy` driver and was not ported.** Reach for tag
-  `v0-legacy` before concluding it has to be written from nothing.
 * **The non-local Jacobian has a precedent in the tree.** `ψ_ax` is one border
   row and column today and `HighBetaConvergence` is the acceptance criterion for
   it; a `q`-driven `I(ψ)` is the same shape with a continuum of rows rather than
@@ -556,9 +458,11 @@ Three things worth writing down before anyone starts:
 * **It is independent of rotation.** A fixed-`q` static solver is useful on its
   own and is the smaller problem; doing it first and then composing is likely
   cheaper than doing it inside item 9.
-
-Not on the critical path for anything, and it should not be started until item 9
-has settled what a rotating source's profile set looks like.
+* **Two things from `INVERSION-PLAN.md` changed this item's shape.**
+  `v0-legacy`'s `FluxSurfaces` **has never compiled**, so there was an algorithm
+  to reuse and no working tool to extend; and the global-structure work this item
+  was assumed to need is **deferred**, because a fixed-boundary problem with one
+  axis has no interior saddles at all.
 
 ## 11. `B` in the band — meq, DONE 2026-09-02
 
@@ -567,22 +471,17 @@ has settled what a rotating source's profile set looks like.
 and `Γ`, so `B` — which went through `sampleComponent()` — was read at the foot
 on `Γ_h`: about one node in ten of the interchange file piecewise constant,
 `O(h)`, behind a mask saying `inside = 1`.
-
-**Both halves are done.** `GridSampler::sampleComponentWithGradient()` continues
-a vector field with its own `∇u`, read inside the element so nothing is
-evaluated outside one, and `theBandVectorContinuesAtItsGradientsOrder` measures
-**rate 2.20 against 0.92 for the foot, 124× smaller at `n = 16`**, on a
-quadratic its space represents exactly so the band error is the truncation
-alone. And the `.nc` now carries `byte extrapolated( Z, R )` beside `inside`, so
-a reader can drop continued nodes rather than being told only how many there
-were — 1667 on `miller-curved`, agreeing with the attribute.
+`GridSampler::sampleComponentWithGradient()` is the fix, at **rate 2.20 against
+0.92 for the foot**, and the `.nc` now carries `byte extrapolated( Z, R )` beside
+`inside` so a reader can drop continued nodes rather than being told only how
+many there were.
 
 **What is deliberately NOT done**, recorded so nobody re-derives it: this is
 `O(h²)` at every `k` and does not reach `ψ`'s order, because `ψ` is continued
 with a *solved* variable and `∇q` is a *differentiated* one. `div q = −F/r` and
 `∂_r q_z − ∂_z q_r = −q_z/r` pin two of `∇q`'s four entries exactly, but leave
-the symmetric traceless part differentiated — structure rather than an order,
-and it would need the source plumbed into `GridSampler`. `CLAUDE.md`'s *Status*
+the symmetric traceless part differentiated — structure rather than an order, and
+it would need the source plumbed into `GridSampler`. `CLAUDE.md`'s *Status*
 section has the detail.
 
 ## Deliberately not yet
@@ -596,11 +495,11 @@ section has the detail.
 * **The rest of the physics** — anisotropic pressure, NetCDF profiles, MaNTA
   coupling. `TODO` carries each with what has been established, and anisotropic
   pressure still has **no reference pinned**, which is the first thing it needs.
-  **Sonic rotation has left this list**: it is item 9, and `FLOW-PLAN.md` is the
-  design, which is why `TODO`'s *Sonic toroidal rotation* entry is now a stub
-  pointing at it. `TODO` was cut with this file on 2026-09-01 — its PARDISO
-  entry is down to the one open question, reproducibility under threading, and
-  its performance entry to what the threading campaign did not already answer.
+  **Sonic rotation has left this list**: it is item 9 and it is built, which is
+  why `TODO`'s *Sonic toroidal rotation* entry is a stub pointing at
+  `FLOW-PLAN.md`. `TODO`'s PARDISO entry is down to its one open question,
+  reproducibility under threading, and its performance entry to what the
+  threading campaign did not already answer.
 
 ## The standing rule
 

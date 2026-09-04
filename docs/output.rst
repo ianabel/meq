@@ -34,6 +34,16 @@ convenient, and each of the three gives up a different one of those.
 does **not** create the output directory; if it does not exist the run exits 3
 (see :ref:`running-exit-codes`).
 
+.. note::
+
+   **None of the three carries the flux surfaces.** meq can locate the magnetic
+   axis, trace the surfaces, take flux-surface averages over them and fit the
+   whole family as a map from a disc — see :doc:`flux_surfaces` and
+   :doc:`surface_geometry` — but all of that is reached through the C++ library
+   and none of it is written to a file or driven from a configuration key. A
+   consumer that wants :math:`V'`, :math:`\langle R^{-2}\rangle` or a safety
+   factor links against meq rather than reading its output.
+
 .. _output-which-potential:
 
 Which potential each file carries

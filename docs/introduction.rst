@@ -49,8 +49,11 @@ and then differentiates it delivers the field at order :math:`k` — one order
 worse, in the quantity people actually use. meq therefore uses a **mixed**
 method, in which the scaled gradient :math:`q = \gradbar\psi / r` is an
 independent unknown solved for directly, at the same order as :math:`\psi`.
-That is the reason to prefer HDG here, and it turns out to pay off a second
-time in a place nobody designed for — see :ref:`output-band`.
+That is the reason to prefer HDG here, and it keeps paying off in places nobody
+designed for: it is what continues the solution into the band outside a curved
+mesh (:ref:`output-band`), and it is what makes the flux surfaces themselves
+cheap to extract accurately — the magnetic axis is a *root* of it rather than a
+turning point of something differentiated. See :ref:`flux-surfaces-q`.
 
 **The equation is semi-linear**, because :math:`p` and :math:`g` are functions
 of :math:`\psi`. Somebody has to iterate. The published HDG Grad–Shafranov
@@ -133,6 +136,11 @@ The remaining "how it works" chapters can be read on demand:
 estimator is built on, :doc:`curved_boundary` for the transfer technique, and
 :doc:`adaptivity` for the refinement loop. :doc:`nonlinear` is about solving
 the system and is the place to go when a run does not converge.
+
+:doc:`flux_surfaces` and :doc:`surface_geometry` are about what happens *after*
+a solve: turning :math:`\psi(r, z)` into the flux surfaces, the flux-surface
+averages and the geometry a transport code reads. Both are library-only — none
+of it is driven from a configuration file or written to an output file.
 
 For the physics input — what a source term is, what a profile must be able to
 do, and what changes when profiles are given in normalised flux or the plasma

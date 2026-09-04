@@ -60,16 +60,38 @@ The library
    * - ``Output``
      - yes
      - The three output formats.
+   * - ``CriticalPoints``
+     - yes
+     - The magnetic axis and any X-point, as roots of the flux, plus the
+       boundary index audit over them.
+   * - ``FluxSurfaces``
+     - yes
+     - The contour tracer, the band extension, and the poloidal-angle
+       parametrisation.
+   * - ``SurfaceAverage``
+     - yes
+     - Flux-surface averages over a callable integrand.
+   * - ``Zernike``
+     - no
+     - The disc basis, and the conversions between the flux label and the disc
+       radius.
+   * - ``SurfaceFit``
+     - no
+     - The surfaces as a map from a disc: the linear fit, and the gauge-free
+       refit.
 
 .. _organization-mfem-free:
 
 Why half of it does not include MFEM
 ------------------------------------
 
-``Config``, ``Profiles``, ``Source``, ``RotatingSource``, ``SourceFactory`` and
-``BoundaryShape`` take plain ``double`` arguments and know nothing about finite
-elements. The ``mfem::Coefficient`` adapters live with the assembly that needs
-them.
+``Config``, ``Profiles``, ``Source``, ``RotatingSource``, ``SourceFactory``,
+``BoundaryShape``, ``Zernike`` and ``SurfaceFit`` take plain ``double``
+arguments and know nothing about finite elements. The ``mfem::Coefficient``
+adapters live with the assembly that needs them, and the two geometry headers
+take their field as a callable rather than as a grid function — which is why a
+caller writes the short loop that turns a traced surface into samples. See
+:ref:`geometry-disc`.
 
 Two things follow, and the second is what makes it worth the discipline:
 
@@ -103,6 +125,15 @@ The data flow of a run
 
 The ordering at the end is not incidental: ``curveBoundaryOnto`` mutates the
 mesh geometry, so everything that reads the solved geometry must run before it.
+
+.. note::
+
+   The flux-surface machinery is **not** in that flow. ``CriticalPoints``,
+   ``FluxSurfaces``, ``SurfaceAverage``, ``Zernike`` and ``SurfaceFit`` are
+   library-only: nothing in the TOML schema reaches them and nothing they
+   produce is written to an output file. They are a second consumer of a solved
+   ``GradShafranovSolver``, alongside the estimator and the sampler. See
+   :doc:`flux_surfaces` and :doc:`surface_geometry`.
 
 Relationship to MFEM
 --------------------
