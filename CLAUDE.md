@@ -3344,12 +3344,18 @@ count buys a factor rather than a few percent.
   are bit-identical at every depth — the walk decides how a point is *found*,
   not where it is. It is also most of the cure for the threading blocker, since
   a shared tracer aborts the moment any thread reaches `FindPoints`.
-* **`fitByAngle()` throws where the corrector would accept.** Its ray Newton
-  demands a tolerance that on a discontinuous field is sometimes *unattainable*
-  — a ray crossing a face where `c` falls inside the jump has no point on it
-  with `ψ_h = c` at all — while the tracer's own corrector already handles that
-  by keeping its best iterate. At `k = 1` on the raw pairing it fails on every
-  mesh from `n = 12` to 32.
+* ~~**`fitByAngle()` throws where the corrector would accept.**~~ — **IT DOES
+  NOT, AND HAS NOT SINCE IN-3.** This entry was carried forward from
+  `INVERSION-PLAN.md`'s IN-1 section, which predates the fix, and it was
+  repeated here without being checked against the code. `fitByAngle()` keeps its
+  best iterate, accepts it, and counts it in `stalledRays`; the only throw left
+  on that path is a ray on which *every* evaluation left the field, which is a
+  real failure and not a tolerance problem. **What was still live was the
+  workaround**: `SurfaceAverageConvergence` carried a tolerance ladder whose
+  first rung always succeeded, and which caught `std::runtime_error` — so every
+  *other* reason `fitByAngle()` throws was being swallowed, retried at eight
+  loosening tolerances, and reported as the ladder's own guess. Removed
+  2026-09-04; the settled fit stalls on **0 of 2048 rays**.
 * ~~**Two headers describe a caller that was never moved.**~~ — **FIXED,
   2026-09-04, and the fix was a correctness one as well as a tidying.** The
   contour builder now marks **each Gauss node for itself** through the

@@ -257,16 +257,16 @@ namespace
 			meq::GradShafranovSolver solver;
 	};
 
-	/// A traced contour, its angle fit, and the corrector tolerance the fit
-	/// actually needed.
+	/// A traced contour and its angle fit.
+	///
+	/// THERE USED TO BE A THIRD MEMBER HERE, the relative tolerance a ladder had
+	/// settled on, and it is gone because the thing it worked around is fixed.
+	/// AngleParametrisation::stalledRays and worstResidual are the honest
+	/// signals and they are already in the fit.
 	struct Fitted
 	{
 		meq::Contour contour;
 		meq::AngleParametrisation fit;
-
-		/// The RELATIVE tolerance the ladder below settled on. 1e-12 is the
-		/// tracer's own default and means the fit needed no help.
-		double tolerance = 1.0e-12;
 	};
 
 	/*
@@ -294,40 +294,41 @@ namespace
 	 * a table always says what precision the level set was actually located to.
 	 * The right fix is in the tracer and is reported rather than done here.
 	 */
-	Fitted fitAtWorkableTolerance( meq::ContourTracer &tracer,
-	                               meq::CriticalPoint const &axis, double level,
-	                               std::size_t angles )
+	/// Trace one closed surface and fit it by angle, at the tracer's own
+	/// tolerance and with no retry.
+	///
+	/// THIS USED TO BE A TOLERANCE LADDER AND THE LADDER IS GONE. fitByAngle()
+	/// once threw where its ray Newton could not meet a tolerance that, on a
+	/// discontinuous field, is sometimes UNATTAINABLE -- a ray crossing a face
+	/// where c falls inside the jump has no point on it with psi_h = c at all.
+	/// This function worked round that by loosening the tolerance a decade at a
+	/// time until the fit succeeded, and reporting which rung it landed on.
+	///
+	/// The tracer now does what its own contour corrector always did: it keeps
+	/// the best iterate the ray reached, accepts it, and counts it in
+	/// AngleParametrisation::stalledRays with worstResidual saying how close it
+	/// got. So the first rung always succeeds and the ladder is dead.
+	///
+	/// REMOVING IT IS NOT ONLY TIDYING. The ladder caught std::runtime_error,
+	/// which is what fitByAngle throws for every OTHER reason too -- a ray on
+	/// which every evaluation left the field, a vanishing flux, a surface that
+	/// is not star-shaped. Those were being swallowed, retried at eight
+	/// loosening tolerances, and finally reported as the ladder's own guess at
+	/// what went wrong. A specific diagnosis was being converted into a vague
+	/// one. Now they propagate.
+	Fitted fittedSurface( meq::ContourTracer &tracer,
+	                      meq::CriticalPoint const &axis, double level,
+	                      std::size_t angles )
 	{
 		Fitted out;
 		out.contour = tracer.traceFromAxis( level, axis );
 		if ( !out.contour.closed() )
 			throw std::runtime_error(
-				"fitAtWorkableTolerance: the contour did not close, so there is "
-				"no closed surface to average over" );
+				"fittedSurface: the contour did not close, so there is no closed "
+				"surface to average over" );
 
-		for ( double tolerance = 1.0e-12; tolerance < 1.0e-1; tolerance *= 10.0 )
-		{
-			tracer.setTolerance( tolerance );
-			try
-			{
-				out.fit = tracer.fitByAngle( out.contour, axis, angles );
-				out.tolerance = tolerance;
-				tracer.setTolerance( 1.0e-12 );
-				return out;
-			}
-			catch ( std::runtime_error const & )
-			{
-				// The ray Newton could not reach this tolerance anywhere on the
-				// surface. Loosen and try again; see the comment above.
-			}
-		}
-
-		tracer.setTolerance( 1.0e-12 );
-		throw std::runtime_error(
-			"fitAtWorkableTolerance: no tolerance down to 1e-1 let the ray fit "
-			"reach the level. That is not the DG jump any more -- it is the "
-			"surface not being star-shaped about the axis, or the level not "
-			"being attained" );
+		out.fit = tracer.fitByAngle( out.contour, axis, angles );
+		return out;
 	}
 
 	/// Trace one surface and build its quadrature by the equispaced-angle
@@ -335,12 +336,11 @@ namespace
 	meq::SurfaceAverages averagesAt( meq::ContourTracer &tracer,
 	                                 meq::CriticalPoint const &axis,
 	                                 double level, std::size_t angles,
-	                                 double *toleranceUsed = nullptr )
+	                                 double *worstResidualOut = nullptr )
 	{
-		Fitted const fitted = fitAtWorkableTolerance( tracer, axis, level,
-		                                              angles );
-		if ( toleranceUsed != nullptr )
-			*toleranceUsed = fitted.tolerance;
+		Fitted const fitted = fittedSurface( tracer, axis, level, angles );
+		if ( worstResidualOut != nullptr )
+			*worstResidualOut = fitted.fit.worstResidual;
 		return meq::surfaceAverages( tracer, fitted.fit );
 	}
 
@@ -569,11 +569,10 @@ BOOST_AUTO_TEST_CASE( theQuadratureIsOnlyAsGoodAsItsMetric )
 	// the same precision, which is what makes the columns comparable at all: a
 	// tolerance that moved with N would put the ladder into the rate.
 	std::size_t const settled = 2048;
-	Fitted const settledFit = fitAtWorkableTolerance( tracer, axis, level, settled );
+	Fitted const settledFit = fittedSurface( tracer, axis, level, settled );
 	meq::Contour const &contour = settledFit.contour;
 	BOOST_TEST( contour.closed(), "the contour to be averaged did not close" );
 
-	tracer.setTolerance( settledFit.tolerance );
 	meq::SurfaceAverages const converged = meq::surfaceAverages( tracer,
 	                                                             settledFit.fit );
 
@@ -583,9 +582,10 @@ BOOST_AUTO_TEST_CASE( theQuadratureIsOnlyAsGoodAsItsMetric )
 	             static_cast<int>( settled ), converged.vPrime,
 	             converged.inverseRSquared() );
 	std::printf( "  the DG jump on this contour is %.2e in psi; that is where "
-	             "the pointwise columns floor.\n  Every fit located to a "
-	             "relative tolerance of %.0e\n", contour.worstFaceJump,
-	             settledFit.tolerance );
+	             "the pointwise columns floor.\n  The settled fit stalled on %d "
+	             "of %d rays, worst residual %.2e\n", contour.worstFaceJump,
+	             settledFit.fit.stalledRays,
+	             static_cast<int>( settled ), settledFit.fit.worstResidual );
 	std::printf( "  %6s %14s %7s %14s %7s | %14s %7s %14s %7s\n",
 	             "N", "V' from q", "rate", "V' diffed", "rate",
 	             "<R^-2> from q", "rate", "<R^-2> diffed", "rate" );
@@ -798,7 +798,7 @@ BOOST_AUTO_TEST_CASE( theAveragesConvergeInTheMeshAgainstTheExactField )
 		std::printf( "\n  k = %d, expecting k+1 = %.0f in both columns\n",
 		             order, expected );
 		std::printf( "  %6s %-16s %13s %7s %13s %7s %9s\n", "n", "pairing",
-		             "rms V' error", "rate", "rms <R^-2>", "rate", "fit tol" );
+		             "rms V' error", "rate", "rms <R^-2>", "rate", "worst res" );
 
 		for ( std::size_t i = 0; i < sizes.size(); ++i )
 		{
@@ -1199,9 +1199,8 @@ BOOST_AUTO_TEST_CASE( theTwoExtractionsAgree )
 				tracer.setLocalStepCeiling( 0.0 );
 				tracer.setStep( spacing );
 
-				Fitted const fitted = fitAtWorkableTolerance( tracer, axis,
+				Fitted const fitted = fittedSurface( tracer, axis,
 				                                              levels[ j ], 1024 );
-				tracer.setTolerance( fitted.tolerance );
 
 				meq::SurfaceAverages const angle =
 					meq::surfaceAverages( tracer, fitted.fit );
@@ -1309,9 +1308,8 @@ BOOST_AUTO_TEST_CASE( theTwoExtractionsAgree )
 		meq::ContourTracer tracer( solved.theSolver() );
 		tracer.setTargetTurn( 0.05 );
 
-		Fitted const home = fitAtWorkableTolerance(
+		Fitted const home = fittedSurface(
 			tracer, axis, levelAt( exact, 0.25 ), 512 );
-		tracer.setTolerance( home.tolerance );
 		meq::SurfaceAverages const centred = meq::surfaceAverages( tracer,
 		                                                           home.fit );
 
@@ -1390,8 +1388,7 @@ BOOST_AUTO_TEST_CASE( theFacilityCarriesItsFlagsAndItsWrappersAreThin )
 	meq::CriticalPoint const axis = solved.axis();
 	meq::ContourTracer tracer( solved.theSolver() );
 
-	Fitted const fitted = fitAtWorkableTolerance( tracer, axis, level, 256 );
-	tracer.setTolerance( fitted.tolerance );
+	Fitted const fitted = fittedSurface( tracer, axis, level, 256 );
 
 	meq::SurfaceAverages const angle = meq::surfaceAverages( tracer, fitted.fit );
 	meq::SurfaceAverages const hermite = meq::surfaceAverages( tracer,

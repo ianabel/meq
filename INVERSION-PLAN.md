@@ -904,21 +904,32 @@ surface is **refused**.
 > `tests/analytic/FluxSurfaceReference.hpp` reaches 3.11e-15. Two
 > implementations, one conclusion.
 
-> **STILL OPEN, SMALL, AND FOUND BY IN-2 USING IT: `fitByAngle()` THROWS WHERE
-> THE CORRECTOR WOULD ACCEPT.** The ray Newton demands `|ψ_h − c| ≤ tol × scale`,
-> and on a discontinuous field that is sometimes **unattainable** — a ray crossing
-> a face where `c` falls inside the jump has no point on it with `ψ_h = c` at all.
-> This is the same phenomenon the tracer's own corrector already handles by
-> keeping its best iterate; the ray Newton does not, and throws. Measured, at
-> `k = 1` on the raw pairing it fails at 1e-12 on **every** mesh from `n = 12` to
-> 32, and the failure probability rises with the angle count — the same contour
-> that fits at 256 angles can fail at 4096. **Give the ray Newton the corrector's
-> best-iterate acceptance, with a `stalledRays` count beside `worstResidual`**;
-> the tolerance ladder IN-2's test currently carries then goes away. Two smaller
-> ones: `AngleParametrisation` evaluates `q` at every node to build `ρ′` and
-> **discards it**, forcing a consumer to re-sample; and `sampleAt()` should report
-> `extended`, without which a caller flagging a quadrature point has to mark whole
-> segments conservatively.
+> **FOUND BY IN-2 USING IT, FIXED BY IN-3, AND THIS BOX SAID "STILL OPEN" FOR A
+> DAY AFTER IT WAS NOT.** `fitByAngle()`'s ray Newton demanded
+> `|ψ_h − c| ≤ tol × scale`, which on a discontinuous field is sometimes
+> **unattainable** — a ray crossing a face where `c` falls inside the jump has no
+> point on it with `ψ_h = c` at all — and it threw where the tracer's own
+> corrector would have kept its best iterate and carried on. It now does the
+> same, counting those rays in `stalledRays` with `worstResidual` saying how
+> close they got, and the only throw left on that path is a ray on which *every*
+> evaluation left the field, which is a real failure rather than a tolerance
+> problem.
+>
+> **The workaround outlived the defect by a day, and it was the more dangerous
+> of the two.** IN-2's test carried a ladder that loosened the tolerance a decade
+> at a time until the fit succeeded — and it caught `std::runtime_error`, which
+> is what `fitByAngle()` throws for **every other reason too**: a ray on which
+> every evaluation left the field, a vanishing flux, a surface that is not
+> star-shaped. Those were being swallowed, retried at eight loosening tolerances,
+> and finally reported as the ladder's own guess at what had gone wrong. **A
+> specific diagnosis was being converted into a vague one.** Removed 2026-09-04;
+> the settled fit stalls on **0 of 2048 rays**.
+>
+> The two smaller items in this box are done as well: `AngleParametrisation` now
+> keeps the `q` it evaluates to build `ρ′` — and the `ψ` beside it — so
+> `surfaceAverages()` samples nothing at all on that route; and `sampleAt()`'s
+> seven-argument overload is wired to the contour route, which marks each Gauss
+> node for itself instead of marking whole segments from their endpoints.
 
 ### IN-2 — flux-surface averages — **DONE on the fitted path, 2026-09-03**
 
