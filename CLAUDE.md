@@ -3336,26 +3336,34 @@ count buys a factor rather than a few percent.
 
 **Open, small, and each found by the stage after the one that caused it:**
 
-* **`setWalkDepth()`'s default of 4 is costing about 1.57× on the whole chain**,
-  and raising it to 12 is bit-identical and removes every `FindPoints` fallback.
-  Not changed yet, deliberately: it is a library default, and this project
-  protects answers rather than timings. It is also most of the cure for the
-  threading blocker.
+* ~~**`setWalkDepth()`'s default of 4**~~ — **RAISED TO 12, 2026-09-04.** Four
+  rings is enough for `trace()`, which steps a fraction of an element, and not
+  for the *rays* of a parametrisation, which are placed by angle and land one to
+  two cells apart: depth 4 took the `FindPoints` fallback on 183 of 576 rays and
+  depth 12 on none. Worth about **1.57× on a whole extraction**, and the answers
+  are bit-identical at every depth — the walk decides how a point is *found*,
+  not where it is. It is also most of the cure for the threading blocker, since
+  a shared tracer aborts the moment any thread reaches `FindPoints`.
 * **`fitByAngle()` throws where the corrector would accept.** Its ray Newton
   demands a tolerance that on a discontinuous field is sometimes *unattainable*
   — a ray crossing a face where `c` falls inside the jump has no point on it
   with `ψ_h = c` at all — while the tracer's own corrector already handles that
   by keeping its best iterate. At `k = 1` on the raw pairing it fails on every
   mesh from `n = 12` to 32.
-* **Two headers describe a caller that was never moved.**
-  `FluxSurfaces.hpp` says the seven-argument `sampleAt()` overload exists
-  *because* `surfaceAverages( tracer, contour )` cannot otherwise tell whether a
-  quadrature point is band data — but `SurfaceAverage.cpp` still calls the
-  six-argument form and still marks whole segments, and `SurfaceAverage.hpp`
-  still states as fact that `sampleAt()` cannot report it. The same lag applies
-  to `AngleParametrisation::fluxR`/`fluxZ`, stored so that `surfaceAverages()`
-  need not re-read the field, and still re-read. **One of the two headers is
-  wrong in each pair**, which is worse than either behaviour.
+* ~~**Two headers describe a caller that was never moved.**~~ — **FIXED,
+  2026-09-04, and the fix was a correctness one as well as a tidying.** The
+  contour builder now marks **each Gauss node for itself** through the
+  seven-argument `sampleAt()`. Marking a whole segment from its endpoints was
+  conservative in one direction and **wrong in the other**: the band does not
+  respect the segment a node sits in, so a segment can have both endpoints
+  inside `Ω_h` and still cross `Γ_h` in between, which **under-reported** — a
+  band quantity presented as a solved one. And the fit builder now samples
+  **nothing at all**: `AngleParametrisation` keeps the potential, the flux and
+  the band flag its own ray Newton found, so the averages read them instead of
+  re-deriving them. `potential` was added beside `fluxR`/`fluxZ` for this, and
+  it is deliberately *not* the surface's level — on a stalled ray the node sits
+  as close to the level as the field's jump allows and no closer, and this
+  records where it actually is.
 * **§3.3's implicit quadrature is the missing third leg** of IN-2's
   cross-check. Its acceptance said "all three agreeing is worth more than any one
   being plausible" and two were delivered.

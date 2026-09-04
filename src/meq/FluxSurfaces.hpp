@@ -900,8 +900,37 @@ namespace meq
 			void setMeasureFaceJumps( bool measureIn );
 
 			/// How many rings of face neighbours the walk widens over before
-			/// falling back on Mesh::FindPoints. Default 4, which on the
-			/// benchmarks leaves Contour::fallbackLocations at zero.
+			/// falling back on Mesh::FindPoints. Default 12.
+			///
+			/// IT WAS 4, AND 4 IS ENOUGH FOR trace() AND NOT FOR ANYTHING ELSE.
+			/// A trace steps a fraction of an element at a time, so the next
+			/// point is almost always in the element it just left or a face
+			/// neighbour of it, and Contour::fallbackLocations reads zero at
+			/// either depth. The RAYS of an AngleParametrisation do not: they
+			/// are placed by angle rather than by arc length, so consecutive
+			/// nodes sit one to two cells apart, and four rings of FACE
+			/// neighbours reach about four triangles in a straight line and
+			/// fewer diagonally. Measured in tests/performance, depth 4 took the
+			/// FindPoints fallback on 183 of 576 rays and depth 12 on none.
+			///
+			/// AND THE FALLBACK IS 73% OF THE COST OF SAMPLING. CLAUDE.md
+			/// records Mesh::FindPoints as O( elements x points ) -- it is a
+			/// brute-force scan over element centres -- so a miss is enormously
+			/// more expensive than the walk it replaces. Raising the depth is
+			/// worth about 2x on fitByAngle and surfaceAverages and about 1.57x
+			/// on a whole extraction, and the answers are BIT-IDENTICAL at every
+			/// depth, which is what makes the change free rather than a
+			/// trade: the walk decides how a point is FOUND and not where it is.
+			///
+			/// It is also what makes threading possible at all. FindPoints is
+			/// not reentrant -- it loops over every element through the mesh's
+			/// own shared ElementTransformation -- so a shared tracer aborts the
+			/// moment any thread takes the fallback. See CLAUDE.md's Traps.
+			///
+			/// A deeper walk costs more only when it is going to fail anyway,
+			/// and it is bounded by the rings it visits where FindPoints is
+			/// bounded by the whole mesh, so the deeper default is also the
+			/// safer one as the mesh grows.
 			void setWalkDepth( int depthIn );
 
 			/**
@@ -1125,7 +1154,7 @@ namespace meq
 			int maxCorrectorIterations = 30;
 			int maxPoints = 200000;
 			int circuits = 1;
-			int walkDepth = 4;
+			int walkDepth = 12;
 			bool measureFaceJumps = true;
 
 			/// The band. Empty and None on the fitted path, which is the default
@@ -1213,6 +1242,24 @@ namespace meq
 		/// doubles a node.
 		std::vector<double> fluxR;
 		std::vector<double> fluxZ;
+
+		/// psi_h at each node, from the same evaluation that placed it.
+		///
+		/// STORED FOR THE SAME REASON AS fluxR AND fluxZ, AND THE TWO ARE ONLY
+		/// USEFUL TOGETHER. With the potential and the flux both here, a
+		/// consumer integrating over these nodes -- meq::surfaceAverages() is
+		/// the one this exists for -- needs no field evaluation of its own at
+		/// all. Re-sampling would cost one location per node in the one place
+		/// CLAUDE.md records Mesh::FindPoints as O( elements x points ), and it
+		/// would risk landing on the other side of a face from the fit, which
+		/// on a discontinuous field is a different number.
+		///
+		/// NOT THE SURFACE'S LEVEL, AND THE DIFFERENCE IS THE POINT. On a
+		/// stalled ray the accepted node sits as close to the level as the
+		/// field's own jump allows and no closer -- see stalledRays -- so this
+		/// records where the node actually is rather than where it was asked to
+		/// be.
+		std::vector<double> potential;
 
 		/// rho'( theta_j ), POINTWISE FROM q by the identity in the header.
 		std::vector<double> radiusPrime;

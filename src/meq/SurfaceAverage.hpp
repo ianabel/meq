@@ -188,14 +188,21 @@
  * tests/convergence/SurfaceAverageConvergence.cpp asserts the zero rather than
  * assuming it.
  *
- * THE CONTOUR BUILDER MARKS A WHOLE SEGMENT, AND THAT IS DELIBERATELY
- * CONSERVATIVE. Its nodes are Gauss points strictly between two accepted
- * points, and ContourTracer::sampleAt() does not report whether it answered
- * from an element or from an extension, so a Gauss node cannot say for itself.
- * A node is therefore marked extended when EITHER endpoint of its segment is,
- * which over-reports by at most one segment at each end of a band excursion and
- * never under-reports. Under-reporting is the failure that matters: it is a band
- * quantity presented as a solved one.
+ * THE CONTOUR BUILDER MARKS EACH GAUSS NODE FOR ITSELF, THROUGH
+ * ContourTracer::sampleAt()'s seven-argument overload, which exists for this
+ * caller. It used to mark a whole segment whenever either endpoint was
+ * extended, which was conservative in one direction and wrong in the other: the
+ * band does not respect the segment a node sits in, so a segment can have both
+ * endpoints inside Omega_h and still cross Gamma_h in between. That
+ * over-reported at the ends of a band excursion and UNDER-reported in the
+ * middle of one, and under-reporting is the failure that matters -- it is a
+ * band quantity presented as a solved one.
+ *
+ * The fit builder does not sample at all. AngleParametrisation keeps the
+ * potential, the flux and the band flag its own ray Newton found at each node,
+ * so this reads them rather than re-deriving them: cheaper, and in agreement
+ * with the fit by construction rather than by coincidence, which on a
+ * discontinuous field is not the same thing.
  *
  * THE REFERENCE-FREE ACCEPTANCE: THE AVERAGED EQUATION ITSELF.
  *

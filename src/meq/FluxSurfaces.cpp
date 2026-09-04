@@ -1735,6 +1735,7 @@ namespace meq
 		fit.pointZ.assign( count, 0.0 );
 		fit.fluxR.assign( count, 0.0 );
 		fit.fluxZ.assign( count, 0.0 );
+		fit.potential.assign( count, 0.0 );
 		fit.radiusPrime.assign( count, 0.0 );
 		fit.speed.assign( count, 0.0 );
 		fit.crossing.assign( count, 0.0 );
@@ -1973,6 +1974,7 @@ namespace meq
 			fit.pointZ[ j ] = axis.z + guess*sine;
 			fit.fluxR[ j ] = qR;
 			fit.fluxZ[ j ] = qZ;
+			fit.potential[ j ] = psi;
 			fit.crossing[ j ] = std::abs( cross );
 			fit.transversality = std::min( fit.transversality, std::abs( cross ) );
 

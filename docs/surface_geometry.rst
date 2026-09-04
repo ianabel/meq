@@ -261,12 +261,19 @@ than assuming it.
 
 .. note::
 
-   The contour builder marks a whole **segment**, deliberately. Its nodes are
-   Gauss points strictly between two accepted points, so a node cannot say for
-   itself; one is therefore marked extended when *either* endpoint of its segment
-   is. That over-reports by at most one segment at each end of a band excursion
-   and never under-reports. Under-reporting is the failure that matters: it is
-   band data presented as solved data.
+   Both builders mark **each node for itself**. The contour builder's nodes are
+   Gauss points strictly between two accepted points, and it asks the sampler
+   directly whether each one was answered from an element or from the extension.
+   The fit builder does not sample at all: the ray solve that placed each node
+   already knew, and the parametrisation keeps what it found — the potential,
+   the flux and the flag alike.
+
+   Marking a whole *segment* from its endpoints, which the contour builder used
+   to do, is not merely coarser. The band does not respect the segment a node
+   sits in, so a segment can have both endpoints inside :math:`\Omega_h` and
+   still cross :math:`\Gamma_h` between them — which **under-reports**, and
+   under-reporting is the failure that matters: it is band data presented as
+   solved data.
 
 What the averages are not
 ~~~~~~~~~~~~~~~~~~~~~~~~~

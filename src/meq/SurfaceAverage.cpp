@@ -131,12 +131,6 @@ namespace meq
 
 		double const dTheta = twoPi/static_cast<double>( count );
 
-		// The hint is threaded through every node, as it is inside the tracer:
-		// without it each sample falls back on Mesh::FindPoints, which is
-		// O( elements x points ), and the quadrature goes quadratic in the mesh
-		// for no visible reason. The first node pays one location.
-		int hint = -1;
-
 		for ( std::size_t j = 0; j < count; ++j )
 		{
 			SurfaceNode &node = surface.nodes[ j ];
@@ -145,25 +139,19 @@ namespace meq
 			node.z = fit.pointZ[ j ];
 			node.metric = fit.speed[ j ];
 
-			// THE BAND FLAG, PER NODE, READ FROM THE FIT RATHER THAN FROM THIS
-			// LOOP'S OWN SAMPLE. ContourTracer::sampleAt() answers a band point
-			// -- that is what the extension is for -- but does not say that it
-			// did, so a re-sample here cannot tell. The fit knows, because the
-			// ray Newton that placed the node went through the private seam.
-			// Reading it from there rather than re-deriving it is also what
-			// keeps the two in agreement by construction.
+			// EVERYTHING THIS LOOP NEEDS IS ALREADY IN THE FIT, SO IT SAMPLES
+			// NOTHING. The ray Newton that placed each node evaluated the field
+			// there and AngleParametrisation keeps what it found -- the
+			// potential, the flux and the band flag alike. Re-deriving them here
+			// would cost one location per node in the one place CLAUDE.md
+			// records Mesh::FindPoints as O( elements x points ), and on a
+			// discontinuous field it could land on the other side of a face from
+			// the fit and return a different number. Reading them from the fit
+			// is cheaper AND keeps the two in agreement by construction.
+			node.psi = fit.potential[ j ];
+			node.qR = fit.fluxR[ j ];
+			node.qZ = fit.fluxZ[ j ];
 			node.extended = j < fit.extended.size() && fit.extended[ j ] != 0;
-
-			if ( !tracer.sampleAt( node.r, node.z, node.psi, node.qR, node.qZ,
-			                       hint ) )
-			{
-				std::ostringstream message;
-				message << "meq::surfaceAverages: the fit node at theta = "
-				        << node.parameter << ", ( " << node.r << ", " << node.z
-				        << " ), is not in the mesh. The fit that produced it "
-				        << "was, so the field has moved under the surface";
-				throw std::runtime_error( message.str() );
-			}
 
 			node.gradient = node.r*std::sqrt( node.qR*node.qR + node.qZ*node.qZ );
 			if ( !( node.gradient > 0.0 ) )
@@ -257,22 +245,12 @@ namespace meq
 
 		for ( std::size_t i = 0; i < contour.segments(); ++i )
 		{
-			// A GAUSS NODE CANNOT SAY FOR ITSELF WHETHER IT IS IN THE BAND, so
-			// the whole segment is marked when either endpoint is. That
-			// over-reports by at most one segment at each end of a band
-			// excursion and never under-reports, which is the direction that
-			// matters: an under-report is a band quantity presented as a solved
-			// one. See the header.
-			bool const segmentInBand = contour.points[ i ].extended
-			                           || contour.points[ i + 1 ].extended;
-
 			for ( int j = 0; j < rule.GetNPoints(); ++j )
 			{
 				mfem::IntegrationPoint const &ip = rule.IntPoint( j );
 
 				SurfaceNode node;
 				node.parameter = static_cast<double>( i ) + ip.x;
-				node.extended = segmentInBand;
 
 				contour.pointOnSegment( i, ip.x, node.r, node.z );
 
@@ -281,8 +259,20 @@ namespace meq
 				contour.tangentOnSegment( i, ip.x, dr, dz );
 				node.metric = std::sqrt( dr*dr + dz*dz );
 
+				// PER POINT, NOT PER SEGMENT. sampleAt()'s seven-argument
+				// overload exists for exactly this caller: a Gauss node lies
+				// strictly between two accepted points, so the band does not
+				// respect the segment it sits in and either endpoint can be
+				// inside Omega_h while the node is not. Marking the whole
+				// segment from its endpoints -- which this loop used to do --
+				// over-reports at the ends of a band excursion and, worse,
+				// UNDER-reports for a node whose own segment straddles Gamma_h
+				// with both endpoints inside. An under-report is a band
+				// quantity presented as a solved one.
+				bool nodeExtended = false;
+
 				if ( !tracer.sampleAt( node.r, node.z, node.psi, node.qR,
-				                       node.qZ, hint ) )
+				                       node.qZ, hint, nodeExtended ) )
 				{
 					std::ostringstream message;
 					message << "meq::surfaceAverages: the Hermite quadrature "
@@ -293,6 +283,8 @@ namespace meq
 					        << "the contour is not interior";
 					throw std::runtime_error( message.str() );
 				}
+
+				node.extended = nodeExtended;
 
 				node.gradient = node.r*std::sqrt( node.qR*node.qR
 				                                  + node.qZ*node.qZ );
