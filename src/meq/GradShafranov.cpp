@@ -325,6 +325,13 @@ namespace
 		  normalisationChoice( Normalisation::Coupled ),
 		  boundaryData( nullptr ),
 		  initialGuess( nullptr ),
+		  // In DECLARATION order, which is the order these are actually
+		  // constructed in whatever this list says. -Wreorder had transferPath
+		  // and extensionLineOrder written after picardDamping and initialised
+		  // before it, which costs nothing while every entry is a scalar or a
+		  // null pointer and is a trap the moment one of them reads another.
+		  transferPath( nullptr ),
+		  extensionLineOrder( -1 ),
 		  globalisationChoice( Globalisation::None ),
 		  localSolverChoice( LocalSolver::Newton ),
 		  orderingChoice( NonlinearOrdering::NPC ),
@@ -332,8 +339,6 @@ namespace
 		  traceSolverChoice( TraceSolver::UMFPack ),
 		  andersonDepth( 1 ),
 		  picardDamping( 1.0 ),
-		  transferPath( nullptr ),
-		  extensionLineOrder( -1 ),
 		  newtonRelativeTolerance( 1.0e-12 ),
 		  newtonAbsoluteTolerance( 1.0e-14 ),
 		  newtonMaxIterations( 30 ),
@@ -2324,6 +2329,27 @@ namespace
 						"meq::GradShafranovSolver::solve: a KINSOL globalisation was "
 						"asked for but MFEM was built without MFEM_USE_SUNDIALS" );
 #endif
+				// NAMED RATHER THAN LEFT TO A default:, AND THAT IS THE WHOLE
+				// VALUE OF WRITING THEM OUT. These three never arrive here --
+				// solve() sends PicardThenNewton to solveByPicardThenNewton() and
+				// the other two to solveByPicard() before this block is reached --
+				// but the switch had no arm for them and no default either, so
+				// falling through left `nonlinear` null and the SetOperator()
+				// below dereferenced it. The invariant lived in two places that
+				// did not reference each other.
+				//
+				// A default: would silence -Wswitch permanently, which is exactly
+				// what should not happen: naming them keeps the warning live, so
+				// a SEVENTH globalisation added tomorrow fails to compile here
+				// rather than reaching a null pointer.
+				case Globalisation::AndersonPicard:
+				case Globalisation::PicardOnly:
+				case Globalisation::PicardThenNewton:
+					throw std::logic_error(
+						"meq::GradShafranovSolver::solve: a Picard globalisation reached "
+						"the Newton block, which means the dispatch at the top of solve() "
+						"no longer routes it -- these paths iterate a fixed point on the "
+						"potential and build no Newton solver" );
 			}
 
 			// The reduced operator is DarcyHybridization itself, whose GetGradient()
