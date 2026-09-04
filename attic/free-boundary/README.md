@@ -1,6 +1,6 @@
 # Free-boundary machinery (not built)
 
-This directory holds the free-boundary half of the original meq: the von
+This directory holds the free-boundary half of the original MEQ: the von
 Hagenow / Lackner scheme, which computes the boundary data for psi from a
 Green's function integral over the plasma and coil currents, together with the
 coil-current model and the special quadratures that integral needs.
@@ -14,16 +14,16 @@ them.
 
 Two separate reasons, one of scope and one of API.
 
-**Scope.** meq's first target is the *fixed*-boundary Grad-Shafranov problem:
+**Scope.** MEQ's first target is the *fixed*-boundary Grad-Shafranov problem:
 psi = 0 on a prescribed Gamma. That problem needs no boundary integral at all,
 so nothing here is on the path to it. Free boundary is a later question, and
 when it is asked it will be asked of a solver built on `DarcyForm`, not on the
 one this code was written against.
 
-**API.** The code targets the MFEM branch meq was originally developed on, and
+**API.** The code targets the MFEM branch MEQ was originally developed on, and
 that branch is gone:
 
-* `HDGBilinearForm` no longer exists. The Waterloo HDG interface meq was built
+* `HDGBilinearForm` no longer exists. The Waterloo HDG interface MEQ was built
   on was replaced in the 4.9.1 development branch by `DarcyForm`, which
   assembles the same hybridised system through a different set of objects. Every
   file here that assembles anything is written against the old one.
@@ -118,7 +118,7 @@ the method is slow.
 **The reason not to build on it is different, and Lackner states it himself.** Of
 the precompute-and-reuse structure he warns it "will probably not be competitive
 with iteration methods if the geometry of R is changed after each calculation".
-meq's stage 6 is adaptive mesh refinement: the geometry changes every cycle, so
+MEQ's stage 6 is adaptive mesh refinement: the geometry changes every cycle, so
 the amortisation this method depends on never happens.
 
 The alternative is a coupled BIM/FEM system, where the boundary integral

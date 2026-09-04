@@ -58,7 +58,7 @@ The line that matters most on an ordinary run is the convergence report:
 
 .. code-block:: text
 
-   meq: converged in 4 Newton iterations on 512 elements, degree 3
+   MEQ: converged in 4 Newton iterations on 512 elements, degree 3
 
 followed by the residual history, which is printed on **every** run and not only
 on failure:
@@ -162,7 +162,7 @@ it does:
 
 .. code-block:: text
 
-   meq: Newton did not converge: ... Retrying with Anderson-Picard ...
+   MEQ: Newton did not converge: ... Retrying with Anderson-Picard ...
 
 The ladder is deliberately never *predictive*. Nothing is inferred from the
 source about which strategy to use, and two plausible cheap indicators — the

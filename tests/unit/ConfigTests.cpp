@@ -705,6 +705,121 @@ BOOST_AUTO_TEST_CASE( out_of_range_scalars_are_rejected )
 }
 
 // ---------------------------------------------------------------------------
+// The keys reserved for the unwritten NetCDF profile facility
+// ---------------------------------------------------------------------------
+
+/// A RESERVED KEY MUST BE REFUSED ON EVERY PATH THAT ACCEPTS IT, AND THIS IS
+/// THE TEST THAT WAS MISSING WHILE ONE OF THEM WAS NOT.
+///
+/// ProfileFile, and <Profile>Variable / <Profile>Fit beside it, name a facility
+/// that is not implemented: several profiles read out of one NetCDF file. They
+/// are listed as accepted keys so that a reader who tries them is told that,
+/// rather than told the key does not exist -- which means the refusal is the
+/// only thing standing between the key and being silently ignored.
+///
+/// It was not standing on the "mhd" path. That source requires PPrimeFile and
+/// GGPrimeFile and offers no constant form, so it reads them directly instead
+/// of through readEitherProfile, and never reached the refusal the rotating
+/// path got for free. GGPrimeVariable was therefore a hard error under
+/// Type = "rotating" and inert under Type = "mhd" -- the same key name, two
+/// behaviours, decided by a neighbouring key. Nothing tested either path, which
+/// is how it survived.
+///
+/// So the assertions below are paired deliberately: the interesting property is
+/// not that a key is refused but that BOTH source types refuse it, which is
+/// what a single-path test would have passed without establishing.
+BOOST_AUTO_TEST_CASE( the_reserved_profile_keys_are_refused_on_every_source )
+{
+	auto const mhd = []( std::string const & extra )
+	{
+		return withSource(
+			"[source]\n"
+			"Type = \"mhd\"\n"
+			"PPrimeFile = \"profiles/pprime.dat\"\n"
+			"GGPrimeFile = \"profiles/ggprime.dat\"\n" + extra );
+	};
+
+	auto const refuses = []( std::string const & text, std::string const & key )
+	{
+		BOOST_CHECK_EXCEPTION( parse( text ), ConfigError,
+			[&]( ConfigError const & e ) { return e.getKey() == key; } );
+	};
+
+	// The four on the "mhd" path, which is the one that used to ignore them.
+	refuses( mhd( "PPrimeVariable = \"Var0\"\n" ), "source.PPrimeVariable" );
+	refuses( mhd( "PPrimeFit = \"pchip\"\n" ), "source.PPrimeFit" );
+	refuses( mhd( "GGPrimeVariable = \"Var1\"\n" ), "source.GGPrimeVariable" );
+	refuses( mhd( "GGPrimeFit = \"pchip\"\n" ), "source.GGPrimeFit" );
+	refuses( mhd( "ProfileFile = \"equilibrium.nc\"\n" ), "source.ProfileFile" );
+
+	// The same names on the rotating path, plus the two it has of its own.
+	refuses( rotating( "GGPrimeVariable = \"Var1\"\n" ), "source.GGPrimeVariable" );
+	refuses( rotating( "GGPrimeFit = \"pchip\"\n" ), "source.GGPrimeFit" );
+	refuses( rotating( "OmegaVariable = \"Var2\"\n" ), "source.OmegaVariable" );
+	refuses( rotating( "OmegaFit = \"pchip\"\n" ), "source.OmegaFit" );
+	refuses( rotating( "ProfileFile = \"equilibrium.nc\"\n" ), "source.ProfileFile" );
+
+	// And per species, where the same helper is reached through Temperature and
+	// Density rather than through a [source] scalar.
+	refuses( rotating( "", "TemperatureVariable = \"Var3\"\n" ), "source.species[0].TemperatureVariable" );
+	refuses( rotating( "", "DensityFit = \"pchip\"\n" ), "source.species[0].DensityFit" );
+
+	// THE MESSAGE IS THE POINT OF RESERVING THEM, so it is asserted rather than
+	// left to the key name: a reader who meets one has to learn that the
+	// facility is unwritten, not merely that this file will not start.
+	try
+	{
+		parse( mhd( "PPrimeVariable = \"Var0\"\n" ) );
+		BOOST_FAIL( "PPrimeVariable was accepted" );
+	}
+	catch ( ConfigError const & error )
+	{
+		std::string const text = error.what();
+		BOOST_TEST( text.find( "not implemented yet" ) != std::string::npos );
+		// The advice names PPrimeFile and NOT a bare PPrime, because the "mhd"
+		// source has no constant form. The rotating path has both and says so.
+		BOOST_TEST( text.find( "PPrimeFile" ) != std::string::npos );
+		BOOST_TEST( text.find( "give PPrime as a constant" ) == std::string::npos );
+	}
+
+	try
+	{
+		parse( rotating( "GGPrimeVariable = \"Var1\"\n" ) );
+		BOOST_FAIL( "GGPrimeVariable was accepted" );
+	}
+	catch ( ConfigError const & error )
+	{
+		std::string const text = error.what();
+		BOOST_TEST( text.find( "not implemented yet" ) != std::string::npos );
+		BOOST_TEST( text.find( "give GGPrime as a constant" ) != std::string::npos );
+	}
+}
+
+/// THE BANNER IS THE CALLER'S, NOT THE MESSAGE'S. apps/meq.cpp prints every
+/// line it writes as "MEQ: <text>" and catches std::exception, so a banner
+/// inside what() gave "MEQ: MEQ: configuration error in ...". It went unread
+/// while the project spelled itself in lower case and became obvious when it
+/// did not. Asserted here rather than left to a reader's eye, since nothing
+/// else in the suite looks at the whole string.
+BOOST_AUTO_TEST_CASE( a_configuration_error_carries_no_banner_of_its_own )
+{
+	// An unknown key, chosen because its message is the one place in the file
+	// where MEQ does not name itself in the body -- the refusals that explain a
+	// design decision generally do, so they cannot tell a banner from prose.
+	try
+	{
+		parse( minimal() + "\n[output]\nNoSuchKey = 1\n" );
+		BOOST_FAIL( "NoSuchKey was accepted" );
+	}
+	catch ( ConfigError const & error )
+	{
+		std::string const text = error.what();
+		BOOST_TEST( text.rfind( "configuration error", 0 ) == 0u );
+		BOOST_TEST( text.find( "MEQ" ) == std::string::npos );
+	}
+}
+
+// ---------------------------------------------------------------------------
 // A mesh read from a file instead of generated
 // ---------------------------------------------------------------------------
 

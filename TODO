@@ -742,77 +742,95 @@ accuracy and not for patience.
 
 ================================================================================
 Stale comments and inert keys, found by writing the LaTeX manual
-Raised 2026-09-03.
+Raised 2026-09-03. All but one closed 2026-09-04.
 ================================================================================
 
   Found by writing docs/manual/ against the HEADERS rather than against the
   docs. That is a different reading of the same tree, which is why these
   surfaced now and not during the Sphinx pass.
 
-  src/meq/meq.hpp COVERS 5 OF 17 HEADERS AND ITS COMMENT IS FALSE. It still
-  says Estimator.hpp does not compile against MFEM 4.5.1, which stopped being
-  true at stage 6. A consumer who includes the umbrella header gets less than
-  half the library and is told nothing about it. Either complete it or say in
-  it that it is deliberately a subset -- the present state is the worst of the
-  three, because it looks complete.
+  STILL OPEN
+  ----------
 
-  Estimator.hpp's file comment says postProcess() refuses the semi-linear path,
-  so the estimator is linear-path only. That refusal was removed and the
-  adaptive loop runs on the non-linear path in production.
+  Estimator.hpp's file comment is stale in TWO places, and both say the
+  estimator is weaker than it is.
 
-  Config.hpp's header comment says "six tables". There are eight.
+  "AND NOT AT ALL THROUGH NEWTON. GradShafranovSolver::postProcess() refuses
+  the semi-linear path ... So this estimator is available on the linear path
+  only." That refusal was removed at stage 6 and the driver's adaptive loop
+  runs on the non-linear path in production;
+  thePostProcessedPotentialSurvivesNewton measures psi* at k+2 through Newton
+  (3.05 / 4.05 / 5.03 on Example 5).
 
-  LinearMaxIterations and LinearTolerance are parsed, validated, and consumed
-  by NOTHING. Diagnosed 2026-09-04.
+  And the paragraph above it says setTransferredBoundary() "leaves those faces
+  out, which restores k+1 ... and is an omission rather than a repair". It is a
+  repair now: the method takes the datum as a second argument and eta_5
+  compares psi* against the phi_h actually imposed, so the faces stay in --
+  9.5889e-05 falling to 2.0281e-06 at rate 2.78, against a pinned zero's 0.40.
+  theTransferredDatumRestoresEtaFive is that table.
 
-  WHAT THEY WERE FOR. Config.hpp's own comment says it: "the linear solve for
-  each Newton correction", with the tolerance relative to that solve's
-  right-hand side. They are the two knobs of an INEXACT NEWTON method -- solve
-  the correction loosely while the outer iterate is far away, tighten as it
-  converges, and never pay for linear accuracy the non-linear iteration cannot
-  use. The defaults, 1000 and 1e-12, are a conservative version of that.
+  Both are comments only; nothing in the code behaves as they describe. A
+  reader deciding whether the estimator is usable on their problem would get
+  the wrong answer from either.
 
-  WHY THEY DO NOTHING. MEQ's trace solve is DIRECT. It is UMFPACK by default,
-  PARDISO or cuDSS if the build has them, and a sparse LU has no iteration count
-  and no tolerance to be given -- it returns the answer to round-off and the
-  question does not arise. So on the path that actually runs there is nothing
-  for either key to control.
+  CLOSED 2026-09-04
+  -----------------
 
-  The only Krylov solver in the tree is the FALLBACK for a build with no direct
-  solver at all -- three mfem::GMRESSolver sites in GradShafranov.cpp -- and
-  each of those sets its own numbers: SetMaxIter( 5000 ), and SetRelTol at
-  1e-12 or 1e-14 depending on the site. So the keys describe a path that exists,
-  is almost never taken, and ignores them.
+  src/meq/meq.hpp covered 5 of 17 headers and its comment claimed Estimator.hpp
+  does not compile against MFEM 4.5.1. It now carries all seventeen and the
+  claim is gone. (Commit 7cc20d6.)
 
-  AND THE DEFAULTS DISAGREE WITH THE FALLBACK THEY WOULD CONTROL, which is the
-  trap in wiring them naively: 1000 against 5000, and 1e-12 against 1e-14. A
-  patch that simply passed the config values through would silently loosen the
-  fallback's iteration cap by a factor of five and its tolerance by two orders,
-  on the one path nobody exercises. Reconcile the numbers deliberately or not
-  at all.
+  Config.hpp's header comment said "six tables". There are eight, and it says
+  so, plus [boundary.shape] and [[source.species]]. (7cc20d6.)
 
-  WHAT TO DO. The precedent is in this same file: Config.cpp already REFUSES
-  ProfileFile and every <Key>Variable and <Key>Fit key with a message saying
-  they are not implemented, rather than accepting them as unknown keys. Doing
-  the same here is the consistent answer and costs two lines -- but note that
-  examples/soloviev-nstx.toml and examples/manufactured.toml both SET these
-  keys, so refusing them means editing the examples in the same commit.
+  LinearMaxIterations and LinearTolerance were parsed, validated, and consumed
+  by NOTHING. They are the two knobs of an inexact Newton method -- solve each
+  correction loosely while the outer iterate is far away, tighten as it
+  converges -- and MEQ's trace solve is DIRECT, so on the path that actually
+  runs there is nothing for either to control. The only Krylov solver in the
+  tree is the fallback for a build with no direct solver at all, and it sets
+  its own numbers: 5000 iterations against the key's default of 1000, and
+  1e-14 against 1e-12. Passing the config values through would have silently
+  loosened that fallback by a factor of five and two orders on the one path
+  nobody exercises.
 
-  The alternative, wiring them to the fallback, is worth having only alongside
-  ROADMAP item 4's second bullet: that fallback runs UNPRECONDITIONED on the
-  Newton path while the linear path gets a GSSmoother, which CLAUDE.md already
-  calls a plain bug. Tuning the iteration count of an unpreconditioned GMRES is
-  not the first thing that path needs.
+  Both are now REFUSED, with a message naming the direct solvers, and the
+  fields are gone from SolverOptions rather than left unread. The two examples
+  that set them were edited in the same commit. (7cc20d6.)
 
-  KEEP THEM IN MIND FOR LATER. They stop being meaningless the day the trace
-  solve stops being direct, which is what 3D or a parallel build would force.
-  Refusing a key now and reintroducing it then is cheap; a key that validates
-  and does nothing is a standing invitation to believe it works.
+  THEY STOP BEING MEANINGLESS the day the trace solve stops being direct, which
+  is what 3D or a parallel build would force. Refusing a key now and
+  reintroducing it then is cheap; a key that validates and does nothing is a
+  standing invitation to believe it works.
 
-  PPrimeVariable, PPrimeFit, GGPrimeVariable and GGPrimeFit are REFUSED on the
+  PPrimeVariable, PPrimeFit, GGPrimeVariable and GGPrimeFit were REFUSED on the
   rotating path and SILENTLY ACCEPTED AND IGNORED on the mhd path. The same
-  keys, two behaviours, and the quiet one is the wrong one.
+  keys, two behaviours, and the quiet one was the wrong one.
 
-  And the project's own name has never been settled: CLAUDE.md writes it lower
-  case throughout, README.md writes MEQ fifteen times, and docs/manual/
-  renders \meq as \textsc{MEQ}. Cosmetic, and one token in Manual.tex.
+  THE CAUSE WAS A MISSING CALL, NOT A DECISION, and the accepted-key lists say
+  so. readEitherProfile() carried the refusal inline; the "mhd" source requires
+  PPrimeFile and GGPrimeFile and offers no constant form, so it reads them
+  directly and never reached it -- while still listing all four keys as
+  accepted. A key is listed as accepted precisely so it can reach a message of
+  its own instead of the generic unknown-key one, which is why ProfileFile sits
+  in the same list with refuseReservedProfileFile() one line below. The pattern
+  was followed for one key and dropped for the four beside it.
+
+  The loop is now refuseReservedVariableKeys(), a free function called from
+  readEitherProfile() and from the mhd path, and it takes a flag for whether a
+  constant form exists so the advice at the end of the message is true on both.
+  the_reserved_profile_keys_are_refused_on_every_source is the test that was
+  missing -- NOTHING covered the reserved keys on either path, which is how the
+  asymmetry survived. It asserts the pairing rather than the refusal, since a
+  single-path test would have passed throughout.
+
+  ConfigError::what() carried its own "MEQ: " banner while apps/meq.cpp prefixes
+  every line it prints with the same thing and catches std::exception, so every
+  configuration error read "MEQ: MEQ: configuration error in ...". It predates
+  the rename -- it was "meq: meq:" and went unread for months at that size.
+  The banner is now the caller's alone, which also matches every other exception
+  MEQ throws: they identify themselves by a namespace-qualified function name,
+  meq::SplineProfile::fromFile and its kind, not by a banner.
+
+  The project's own name is settled: MEQ in prose, meq in code. See CLAUDE.md's
+  Layout section for the rule and for what it does not extend to. (7cc20d6.)

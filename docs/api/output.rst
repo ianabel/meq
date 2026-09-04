@@ -16,7 +16,7 @@ The magnetic field
 
    .. warning::
 
-      ``q`` **must be** :cpp:func:`GradShafranovSolver::flux`, in meq's sign
+      ``q`` **must be** :cpp:func:`GradShafranovSolver::flux`, in MEQ's sign
       convention — **not** the raw block, which holds :math:`-q`. See
       :ref:`sign-conventions`.
 
@@ -150,13 +150,13 @@ Writing files
 
 .. cpp:function:: bool hasNetCDF()
 
-   Whether meq was built with netcdf-cxx4. Everything in
+   Whether MEQ was built with netcdf-cxx4. Everything in
    :cpp:class:`NetCDFWriter` throws without it.
 
 .. cpp:function:: void writeMfem( std::string const & stem, mfem::Mesh & mesh, mfem::GridFunction const & potential, mfem::GridFunction const & flux )
 
    Writes the exact restart triple at full precision — not the library default,
-   because these are read back. ``flux`` is meq's :math:`+q`.
+   because these are read back. ``flux`` is MEQ's :math:`+q`.
 
    .. important::
 

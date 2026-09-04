@@ -164,11 +164,11 @@ Choosing algorithms
    .. cpp:enumerator:: CondenseThenLinearise
 
       Condense first, so each element's elimination is itself a nonlinear
-      solve. meq's **backup**, and the more robust of the two on a coarse mesh.
+      solve. MEQ's **backup**, and the more robust of the two on a coarse mesh.
 
    .. cpp:enumerator:: NPC
 
-      Linearise the full system, then hybridize. **meq's default.** See
+      Linearise the full system, then hybridize. **MEQ's default.** See
       :ref:`nonlinear-ordering`.
 
 .. cpp:enum-class:: LocalSolver
@@ -272,7 +272,7 @@ Results
 
 .. warning::
 
-   ``flux()`` **and** ``postProcessedFlux()`` **return meq's** :math:`+q`;
+   ``flux()`` **and** ``postProcessedFlux()`` **return MEQ's** :math:`+q`;
    ``totalFlux()`` **is in the library's convention**, which is :math:`-q`.
    See :ref:`sign-conventions`. On the extension path ``trace()`` is *not*
    :math:`\varphi_h` on :math:`\Gamma_h`; use ``transferredDatum()``.

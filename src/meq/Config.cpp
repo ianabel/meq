@@ -45,9 +45,18 @@ namespace meq
 	namespace
 	{
 
+		// THE BANNER BELONGS TO WHOEVER IS PRINTING, NOT TO THE MESSAGE.
+		// apps/meq.cpp prefixes every line it writes with "MEQ: ", and its
+		// catch blocks take std::exception, so a banner here as well produced
+		// "MEQ: MEQ: configuration error in ...". That went unread for as long
+		// as the project spelled itself in lower case, and the rename to MEQ
+		// made it obvious. Every other exception MEQ throws identifies itself
+		// by a namespace-qualified function name -- meq::SplineProfile::fromFile
+		// and its kind -- rather than by a banner, so this one now says what
+		// went wrong and where, and nothing about who it came from.
 		std::string formatMessage( std::string const & file, std::string const & key, std::string const & message )
 		{
-			std::string text = "MEQ: configuration error";
+			std::string text = "configuration error";
 			if ( !file.empty() )
 				text += " in '" + file + "'";
 			if ( !key.empty() )
@@ -384,6 +393,58 @@ namespace meq
 			}
 		}
 
+		/// Refuse `<Profile>Variable` and `<Profile>Fit`, the two keys that
+		/// would select a profile out of a NetCDF file holding several.
+		///
+		/// RESERVED, AND REFUSED WITH THEIR OWN MESSAGE RATHER THAN AS UNKNOWN
+		/// KEYS. A NetCDF file holding several profiles at once -- MaNTA writes
+		/// one, as groups Var<i> carrying u and q -- is wanted and is not
+		/// written. Naming the keys now costs nothing and buys two things: a
+		/// reader who tries it is told it is not implemented rather than told
+		/// the key does not exist, and adding it later is purely additive
+		/// rather than a schema change. That is why they appear in the
+		/// accepted-key lists: rejectUnknownKeys runs first, so a key has to be
+		/// accepted before it can reach a message of its own.
+		///
+		/// When it is written, the rule is settled: a variable carrying VALUES
+		/// BUT NO DERIVATIVE is refused unless the configuration opts in per
+		/// profile, with e.g. TemperatureFit = "pchip". Profile's contract is
+		/// that prime() is the exact derivative of operator(), and a fitted one
+		/// is a modelling choice -- a monotone fit and a natural spline
+		/// disagree about whether an edge pedestal overshoots into a negative
+		/// density. That choice belongs to the person who knows what the file
+		/// means, in the file that records the run.
+		///
+		/// A FREE FUNCTION RATHER THAN PART OF readEitherProfile, BECAUSE ONE
+		/// PATH DOES NOT CALL THAT. The "mhd" source requires PPrimeFile and
+		/// GGPrimeFile and offers no constant form, so it reads them directly
+		/// and never reached the loop this replaces -- while still listing all
+		/// four keys as accepted. The result was that GGPrimeVariable was a
+		/// hard error under Type = "rotating" and silently inert under
+		/// Type = "mhd": the same key name, two behaviours, decided by a
+		/// neighbouring key. Accepted-and-ignored is the failure mode this file
+		/// opens by warning about.
+		///
+		/// `constantAccepted` is what the advice at the end of the message
+		/// turns on, since half the callers have no constant form to offer.
+		void refuseReservedVariableKeys( Table const & table, std::string const & key,
+		                                 bool constantAccepted )
+		{
+			std::string const fileKey = key + "File";
+
+			for ( char const * reserved : { "Variable", "Fit" } )
+			{
+				if ( !table.has( key + reserved ) )
+					continue;
+
+				std::string const advice = constantAccepted
+					? "give " + key + " as a constant or " + fileKey + " as a path to a text table"
+					: "give " + fileKey + " as a path to a text table";
+
+				table.fail( key + reserved, "is reserved for reading profiles out of a NetCDF file holding several, which is not implemented yet; " + advice );
+			}
+		}
+
 		/// Read a profile given EITHER as a constant in `key` OR as a path in
 		/// `key + "File"`. Exactly one, or -- when not required -- neither.
 		///
@@ -400,28 +461,7 @@ namespace meq
 			std::string const fileKey = key + "File";
 			std::string const scaleKey = key + "Scale";
 
-			// RESERVED, AND REFUSED WITH THEIR OWN MESSAGE RATHER THAN AS
-			// UNKNOWN KEYS. A NetCDF file holding several profiles at once --
-			// MaNTA writes one, as groups Var<i> carrying u and q -- is wanted
-			// and is not written. Naming the keys now costs nothing and buys
-			// two things: a reader who tries it is told it is not implemented
-			// rather than told the key does not exist, and adding it later is
-			// purely additive rather than a schema change.
-			//
-			// When it is written, the rule is settled: a variable carrying
-			// VALUES BUT NO DERIVATIVE is refused unless the configuration opts
-			// in per profile, with e.g. TemperatureFit = "pchip". Profile's
-			// contract is that prime() is the exact derivative of operator(),
-			// and a fitted one is a modelling choice -- a monotone fit and a
-			// natural spline disagree about whether an edge pedestal overshoots
-			// into a negative density. That choice belongs to the person who
-			// knows what the file means, in the file that records the run.
-			for ( char const * reserved : { "Variable", "Fit" } )
-			{
-				if ( table.has( key + reserved ) )
-					table.fail( key + reserved, std::string( "is reserved for reading profiles out of a NetCDF file holding several, which is not implemented yet; give " )
-					            + key + " as a constant or " + fileKey + " as a path to a text table" );
-			}
+			refuseReservedVariableKeys( table, key, true );
 
 			bool const hasValue = table.has( key );
 			bool const hasFile = table.has( fileKey );
@@ -457,7 +497,7 @@ namespace meq
 
 		/// [source] ProfileFile names one NetCDF holding several profiles, which
 		/// the per-profile Variable keys would then select from. Reserved, for
-		/// the reason recorded in readEitherProfile.
+		/// the reason recorded on refuseReservedVariableKeys.
 		void refuseReservedProfileFile( Table const & source )
 		{
 			if ( source.has( "ProfileFile" ) )
@@ -752,6 +792,14 @@ namespace meq
 					                            "GGPrimeVariable", "GGPrimeFit",
 					                            "Normalised", "PsiAxis", "ProfileFile" } );
 					refuseReservedProfileFile( source );
+					// The "mhd" source has no constant form for either profile,
+					// so it reads both files directly and does not go through
+					// readEitherProfile. These two calls are what keeps the
+					// reserved keys refused here as well; without them all four
+					// were accepted and ignored, which is the one failure mode
+					// this file exists to prevent.
+					refuseReservedVariableKeys( source, "PPrime", false );
+					refuseReservedVariableKeys( source, "GGPrime", false );
 					MHDParameters parameters;
 					parameters.pPrimeFile = source.getString( "PPrimeFile" );
 					parameters.ggPrimeFile = source.getString( "GGPrimeFile" );

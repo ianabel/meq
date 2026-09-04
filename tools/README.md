@@ -1,4 +1,4 @@
-# Looking at what meq wrote
+# Looking at what MEQ wrote
 
 A run writes the same equilibrium three times, in three formats, for three
 different readers. **They are not interchangeable, and picking the wrong one is
@@ -6,9 +6,9 @@ the usual way to waste an afternoon.**
 
 | file | what it is | read it with |
 |---|---|---|
-| `<stem>.mesh`, `<stem>_psi.gf`, `<stem>_grad_psi.gf` | the discrete solution **exactly** — same spaces, same degree, every coefficient | GLVis; meq itself, for an exact restart |
+| `<stem>.mesh`, `<stem>_psi.gf`, `<stem>_grad_psi.gf` | the discrete solution **exactly** — same spaces, same degree, every coefficient | GLVis; MEQ itself, for an exact restart |
 | `<stem>/<stem>.pvd` | VTK, at the solve's own polynomial degree | ParaView, VisIt |
-| `<stem>.nc` | ψ and **B** on a uniform `(R, Z)` grid, plus the boundary meq was given | `plot_equilibrium.py`; any downstream tool |
+| `<stem>.nc` | ψ and **B** on a uniform `(R, Z)` grid, plus the boundary MEQ was given | `plot_equilibrium.py`; any downstream tool |
 
 ## The three, and when each is the right one
 
@@ -50,13 +50,13 @@ never saw. So the frames are **uncurved**, Γ_h as actually solved on, which is
 the honest thing to animate.
 
 **The `.pvd` is inside the collection directory, not beside it.** That is
-`ParaViewDataCollection`'s layout, not a choice meq made; the `Cycle000000/`
+`ParaViewDataCollection`'s layout, not a choice MEQ made; the `Cycle000000/`
 directory underneath it is an implementation detail and is not meant to be
 opened piece by piece.
 
 **On the curved path the VTK mesh is bent out onto Γ.** The solve happens on
 Ω_h, whose boundary is a polygon inscribed in Γ, so the drawn domain would
-otherwise have a faceted edge that is not the boundary anybody asked for. meq
+otherwise have a faceted edge that is not the boundary anybody asked for. MEQ
 installs a curvature on the mesh and moves each boundary face onto Γ — and
 because the VTK is already written as Lagrange cells, **this needs nothing
 further from the format**; the two features compose.
@@ -71,7 +71,7 @@ difference, and it is the mesh being coarse there rather than an error.
 **The NetCDF file is the interchange format**, and the only lossy one — a `k+1`
 field sampled onto a rectangle. Its grid is `[output] GridNR × GridNZ`, which
 has nothing to do with `[mesh] NR/NZ`. It is the format every downstream tool
-actually wants, and the one `DRIVER-PLAN.md` §4 specifies for warm-starting meq
+actually wants, and the one `DRIVER-PLAN.md` §4 specifies for warm-starting MEQ
 from a foreign code: a structured grid interpolates back in `O(1)` per point
 with no mesh search.
 
@@ -79,7 +79,7 @@ with no mesh search.
 deliberately: some readers honour the fill attribute and some do not, and
 `inside` is the one that can always be relied on.
 
-**`boundary_R` / `boundary_Z` are the boundary meq was actually given**, so a
+**`boundary_R` / `boundary_Z` are the boundary MEQ was actually given**, so a
 plot can show the answer against what was asked for rather than against the
 mesh's own edge. `boundary_source` says which it is: `shape (smooth Gamma)` on
 the curved path, sampled from the shape itself at 512 points; `mesh boundary` on
@@ -97,7 +97,7 @@ is posed on Ω_h — so anything drawn in that band is a continuation, and
 
 **The continuation is carried by the FLUX, and that is the mixed method paying
 off somewhere unexpected.** `q` is computed at the *same* order as ψ, and
-`∇̄ψ = r q`, so for a node `p` outside the mesh meq takes its foot `x₀` on Γ_h —
+`∇̄ψ = r q`, so for a node `p` outside the mesh MEQ takes its foot `x₀` on Γ_h —
 a point on the owning element's own boundary — and steps out:
 
 ```
@@ -138,7 +138,7 @@ curved, the final residual. A directory of scan output is unreadable otherwise.
 
 **Nothing plots the `.gf` files**, and nothing should: GLVis already does, and
 a Python reader for MFEM's format would be a second implementation of a file
-format meq does not own.
+format MEQ does not own.
 
 **Nothing plots a scan.** A directory of runs at different resolutions or
 profile amplitudes is a common thing to want a figure of, and each `.nc` carries

@@ -4049,6 +4049,43 @@ turns a loud failure into a silent wrong answer in the configuration, which is
 the last place you want one. `Config.cpp` therefore reads numbers through its own
 `asFloat()`, accepting `is_floating()` or `is_integer()` explicitly.
 
+**A RESERVED KEY IS ONLY RESERVED ON THE PATHS THAT CALL THE REFUSAL, AND
+LISTING IT AS ACCEPTED IS WHAT MAKES THE GAP SILENT.** `ProfileFile` and every
+`<Profile>Variable` / `<Profile>Fit` name a facility that is not written —
+several profiles read out of one NetCDF, which MaNTA produces. They are listed
+in `rejectUnknownKeys` **on purpose**: `rejectUnknownKeys` runs first, so a key
+has to be accepted before it can reach a message of its own, and "not
+implemented yet" is a better answer than "is not a key of `[source]`".
+
+That listing is also what turns a missing refusal into an accepted-and-ignored
+key. `readEitherProfile()` carried the refusal inline; `Type = "mhd"` requires
+`PPrimeFile` and `GGPrimeFile` and offers **no constant form**, so it reads them
+directly and never reached it. Measured against the built driver, the same key
+name gave two answers:
+
+| | `PPrimeVariable = "Var0"` |
+|---|---|
+| `Type = "rotating"` | refused, naming the unwritten facility |
+| `Type = "mhd"` | **parsed, ignored, ran on to open the text table** |
+
+**Nothing tested the reserved keys on either path**, which is how it survived.
+The refusal is now `refuseReservedVariableKeys()`, a free function both paths
+call, taking a flag for whether a constant form exists so the advice at the end
+of the message is true either way; and
+`the_reserved_profile_keys_are_refused_on_every_source` asserts **the pairing**
+rather than the refusal, since a single-path test would have passed throughout.
+**Recorded because the same shape can recur** wherever one source type reads a
+key directly and another goes through a shared helper.
+
+**And `ConfigError::what()` carried a `MEQ: ` banner while `apps/meq.cpp`
+prefixes every line with the same thing**, so every configuration error read
+`MEQ: MEQ: configuration error in …`. It is not new — it was `meq: meq:` for
+months and nobody read it at that size; the rename to `MEQ` is what made it
+visible. The banner is the caller's now. Every other exception MEQ throws
+identifies itself by a namespace-qualified function name —
+`meq::SplineProfile::fromFile` and its kind — so `ConfigError` was the odd one
+out rather than the model.
+
 **Four tooling traps that cost one session six idle polling loops**, and the
 reason they are worth writing down is that a polling loop which can never
 terminate is *invisible* when the thing it polls for is also reported some other

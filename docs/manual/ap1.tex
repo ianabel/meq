@@ -221,9 +221,11 @@ are files: there is no scalar spelling on this path.
 	NetCDF file and is always refused, with a message saying so.
 
 \item[\texttt{PPrimeVariable}, \texttt{PPrimeFit}, \texttt{GGPrimeVariable},
-	\texttt{GGPrimeFit}] are reserved for the same unwritten facility. They are
-	in this path's accepted-key list and are inert; on the rotating path they
-	are refused outright.
+	\texttt{GGPrimeFit}] are reserved for the same unwritten facility and are
+	likewise refused. They appear in this path's accepted-key list because a key
+	must be accepted before it can be given a message of its own; the generic
+	unknown-key message would say that \texttt{PPrimeVariable} is not a key of
+	\texttt{[source]}, which is the less useful of the two answers.
 
 \end{description}
 
@@ -265,7 +267,7 @@ $p = \sum_s n_s T_s$.
 
 \item[Reserved keys] Five keys are reserved for reading several profiles out
 	of one NetCDF file, which is not implemented, and all five are
-	\emph{refused} rather than ignored on this path:
+	\emph{refused} rather than ignored:
 	\texttt{ProfileFile}, \texttt{OmegaVariable}, \texttt{OmegaFit},
 	\texttt{GGPrimeVariable} and \texttt{GGPrimeFit}.
 

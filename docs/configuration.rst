@@ -44,7 +44,7 @@ How the parser behaves
 
    .. code-block:: text
 
-      meq: configuration error in 'run.toml', key 'mesh.RefinmentLevels':
+      MEQ: configuration error in 'run.toml', key 'mesh.RefinmentLevels':
       is not a key of [mesh]; did you mean 'RefinementLevels'? accepted keys
       are: RMin, RMax, ZMin, ZMax, NR, NZ, RefinementLevels, File
 
@@ -214,6 +214,14 @@ under a Solov'ev source is an unknown key, not an ignored one.
    Profile paths are resolved against the **working directory of the run**, not
    against the directory the configuration file lives in.
 
+.. note::
+
+   ``ProfileFile``, and ``PPrimeVariable``/``PPrimeFit``/``GGPrimeVariable``/
+   ``GGPrimeFit`` beside it, are **reserved** for reading several profiles out
+   of one NetCDF file. That is not implemented, and all five are *refused* with
+   a message saying so rather than accepted and ignored. The same holds of the
+   corresponding keys on every other source type.
+
 ``Type = "manufactured"``
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -309,7 +317,8 @@ under a Solov'ev source is an unknown key, not an ignored one.
 Cross-key rules, each with its own message: a constant and a file for the same
 profile is an error; a ``*Scale`` with nothing to scale is an error; the species
 must carry charges of both signs; and ``*Variable``/``*Fit`` keys are reserved
-for a facility that does not exist yet and are refused rather than ignored.
+for a facility that does not exist yet and are refused rather than ignored, on
+this source type and on every other.
 
 ``[boundary]``
 --------------

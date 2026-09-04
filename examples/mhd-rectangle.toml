@@ -148,7 +148,11 @@
 #
 #   * A NetCDF PROFILE SET. `[source] ProfileFile`, one file holding several
 #     profiles at once, is reserved and refused; today each profile is a
-#     constant or its own text table.
+#     constant or its own text table. So are the four keys that would select
+#     from it -- PPrimeVariable, PPrimeFit, GGPrimeVariable and GGPrimeFit --
+#     and all five carry a message saying the facility is unwritten rather than
+#     that the key is unknown. That is the whole reason they appear in this
+#     source's accepted-key list.
 
 [mesh]
 # A tokamak-shaped box: R0 = 1.7 m, half-width 0.5 m, half-height 0.7 m, so an
