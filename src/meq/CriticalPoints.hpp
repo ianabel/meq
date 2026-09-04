@@ -21,7 +21,7 @@
  * THE RESIDUAL IS A SOLVED FIELD, AND THAT IS THE WHOLE REASON THIS IS CHEAP
  * AND ACCURATE.
  *
- * meq's mixed formulation carries the flux q as an unknown of the same degree
+ * MEQ's mixed formulation carries the flux q as an unknown of the same degree
  * as the potential, with r q = grad_bar(psi). So the equation to solve for a
  * critical point is
  *
@@ -32,7 +32,7 @@
  * down. Compare CEDRES++, which records as an open problem that in P1
  * continuous Galerkin the axis and the X-point are confined to mesh vertices,
  * and TokaMaker, which notes for Lagrange order >= 2 that saddles "can exist
- * anywhere within the mesh". meq resolves them sub-element because q is a
+ * anywhere within the mesh". MEQ resolves them sub-element because q is a
  * polynomial inside each element and its zero set is found by root finding
  * rather than by looking at nodes.
  *
@@ -119,7 +119,7 @@
  * threshold, which does not need tuning: the stability theorem
  * (Cohen-Steiner, Edelsbrunner & Harer, 10.1007/s00454-006-1276-5) bounds
  * every spurious feature's persistence by 2 || psi_h - psi ||_inf, a quantity
- * meq already measures to convergence-rate precision. The index check and
+ * MEQ already measures to convergence-rate precision. The index check and
  * persistence are COMPLEMENTARY, not redundant, and neither subsumes the
  * other. Persistence is not implemented here; this comment is where the reader
  * finds out that the audit alone does not cover it.
@@ -132,7 +132,7 @@
  * it and vanishing nowhere on it. That is a condition on q . n and NOT on the
  * boundary being a level set, which is worth separating because it is easy to
  * assume otherwise. A level set of psi with grad(psi) non-zero on it is one way
- * to get transversality and is what meq's own fixed-boundary Gamma gives; a
+ * to get transversality and is what MEQ's own fixed-boundary Gamma gives; a
  * boundary that merely happens to lie outside every critical point, with the
  * flux pointing consistently outward across it, is another and is just as good.
  *
@@ -171,7 +171,7 @@
  * Minimum. That is the worse of the two failures, because the audit still
  * passes.
  *
- * And meq's psi is not sign-normalised across sources. With F single-signed
+ * And MEQ's psi is not sign-normalised across sources. With F single-signed
  * negative -- which is what the Solov'ev benchmarks have, F = -((1-A) r^2 + A)
  * -- psi is a subsolution, its maximum is on the boundary and the magnetic axis
  * is an interior MINIMUM. With F positive it is an interior maximum, which is
@@ -262,7 +262,7 @@ namespace meq
 	enum class AxisSense
 	{
 		/// Take whichever of the two is found, and throw if both are. The
-		/// default, because meq's psi is not sign-normalised and a caller
+		/// default, because MEQ's psi is not sign-normalised and a caller
 		/// usually does not want to have to know which way round F points.
 		Either,
 		Maximum,
@@ -353,7 +353,7 @@ namespace meq
 			/// interpolated exact q -- which is how a test separates "the root
 			/// finder is wrong" from "the discretisation is coarse".
 			///
-			/// @param fluxIn      q in meq's sign convention, vdim 2. See the
+			/// @param fluxIn      q in MEQ's sign convention, vdim 2. See the
 			///                    header on what handing it -q does.
 			/// @param potentialIn psi_h, on the same mesh.
 			CriticalPointFinder( mfem::GridFunction const &fluxIn,

@@ -6,7 +6,7 @@ Grad–Shafranov equation, because **the density is no longer a flux function**.
 Centrifugal force sweeps the heavy species to the outboard side, and an
 electrostatic potential arises to stop that separating the charges.
 
-meq solves the generalised equation of :cite:t:`Abel2013` (their eq. 136),
+MEQ solves the generalised equation of :cite:t:`Abel2013` (their eq. 136),
 closed by their expressions for the poloidal density variation and for the
 potential, for an arbitrary number of species in a local gauge.
 
@@ -48,7 +48,7 @@ poloidal variation,
                    - \frac{Z_s e \phi_0}{T_s}\right],
 
 with :math:`\phi_0` determined by quasineutrality :math:`\sum_s Z_s n_s = 0`.
-Everything else about meq — the operator, the discretisation, :math:`\tau`, the
+Everything else about MEQ — the operator, the discretisation, :math:`\tau`, the
 hybridization, the estimator, the adaptive loop, the curved boundary — is
 untouched.
 
@@ -61,7 +61,7 @@ untouched.
    derivative; only the **Jacobian** does.
 
 With :math:`\omega = 0` the source reduces to :cpp:class:`meq::MHDSource`'s
-equation exactly, and meq checks that it does — both pointwise against the
+equation exactly, and MEQ checks that it does — both pointwise against the
 static source and end to end through the solver, where it reproduces the static
 benchmark's errors to every printed digit.
 
@@ -70,7 +70,7 @@ The gauge
 
 :math:`\phi_0` is determined by quasineutrality only up to an additive function
 of :math:`\psi`. :cite:t:`Abel2013` resolve this with a flux-surface average,
-which meq deliberately does not have; meq instead pins
+which MEQ deliberately does not have; MEQ instead pins
 
 .. math::
 
@@ -105,7 +105,7 @@ needs charges of both signs.
    carbon.
 
    **Temperature is in JOULES.** Not eV, not keV. There is no hidden conversion
-   anywhere in meq. ``TemperatureScale`` is how a file stays readable — write
+   anywhere in MEQ. ``TemperatureScale`` is how a file stays readable — write
    ``1.0`` keV with the conversion in the scale, rather than a raw number with a
    comment.
 
@@ -147,7 +147,7 @@ usable as a cross-check rather than merely as a fallback.
 The cost in derivatives
 -----------------------
 
-This is the one structural change rotation forced on the rest of meq. A
+This is the one structural change rotation forced on the rest of MEQ. A
 rotating :math:`F` is *already* :math:`\partial p/\partial\psi` of something
 built from flux functions, so the Jacobian spends a **second** derivative of
 every input — where :cpp:class:`meq::MHDSource` stores the products :math:`p'`
@@ -166,7 +166,7 @@ table for the wrong equation.
 **A Mach number that is really its square.** :cite:t:`LiZhu2021` write
 :math:`M_0^2` in their solutions where their prose defines :math:`M_0` as a
 group without a square root. The group is an energy ratio, so it *is* a Mach
-number squared. meq's fixture names its member accordingly and cites the
+number squared. MEQ's fixture names its member accordingly and cites the
 exponent rather than the symbol.
 
 **Two reversed signs in a derivative.** The same paper's expression for
@@ -174,7 +174,7 @@ exponent rather than the symbol.
 :math:`\mathrm{d}\Omega/\mathrm{d}\psi` and the
 :math:`\mathrm{d}T/\mathrm{d}\psi` corrections, relative to differentiating its
 own definition of :math:`p`. Found independently three times — by
-transcription, by an unrelated numerical check, and by meq's own derivation
+transcription, by an unrelated numerical check, and by MEQ's own derivation
 agreeing with the corrected form.
 
 .. important::
@@ -185,14 +185,14 @@ agreeing with the corrected form.
    that does not exercise a term cannot validate it.
 
    The same gap is why **no published rotating benchmark exercises the term
-   meq's Jacobian is most at risk in**. Only meq's own finite-difference sweep
+   MEQ's Jacobian is most at risk in**. Only MEQ's own finite-difference sweep
    over profiles with genuine :math:`\psi`-dependence in temperature and
    rotation touches it.
 
 **A citation that is wrong nearly everywhere.** :cite:t:`MaschkePerrin1980` is
 a second exact rotating benchmark, and almost every citation of the result names
 a different, later paper by the same authors. It is section 4 of the 1980 paper
-— temperature a surface quantity — that is the isothermal closure meq solves;
+— temperature a surface quantity — that is the isothermal closure MEQ solves;
 that paper's section 3 is a genuine polytrope and is a *different* equation.
 
 .. warning::
@@ -200,7 +200,7 @@ that paper's section 3 is a genuine polytrope and is a *different* equation.
    **Rotating-equilibrium papers use at least three different closures that look
    alike on the page**: isothermal on a flux surface, adiabatic/polytropic, and
    variants with the density as a flux function. Check any borrowed closed form
-   against the operator by finite differences before trusting it. meq's fixtures
+   against the operator by finite differences before trusting it. MEQ's fixtures
    all do.
 
 Normalised flux

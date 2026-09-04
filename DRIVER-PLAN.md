@@ -14,8 +14,8 @@ struck, and the two decisions that are still open. Section numbers are stable �
 
 **One thing this plan was written around is worth keeping in view.** It recorded
 the MFEM defect fixes as done on the strength of the other tree's measurements,
-and said meq-side verification was the first job. **Insisting on that paid**: the
-reconstruction fix reported here as complete was found from meq's side to be
+and said MEQ-side verification was the first job. **Insisting on that paid**: the
+reconstruction fix reported here as complete was found from MEQ's side to be
 silently wrong on **every element where `∂F/∂ψ` vanishes** — a per-element defect
 no whole-domain norm can see — and needed a second upstream change to close. See
 `CLAUDE.md`, *Post-processing is back*.
@@ -52,7 +52,7 @@ achievable with a guess alone.** Measured on §4.3: a bump of amplitude 0.05 or
 0.20 converges in 4–5 iterations straight back to `ψ ~ 1e-16`, and 0.40 and above
 fail in the element-local solves. **Newton goes to the root nearest its iterate
 and `ψ ≡ 0` is a root**; Picard is carried *away* from zero because it evaluates
-`F(ψ⁰) ≠ 0`, which is why the papers need only a guess and meq needs a guess
+`F(ψ⁰) ≠ 0`, which is why the papers need only a guess and MEQ needs a guess
 **and** globalisation. The non-homogeneous ramp stays the workaround.
 
 §4's acceptance block wrote the same wrong criterion a second time, and it is
@@ -143,7 +143,7 @@ level set.
 ## 3. Output
 
 **Built**: three artefacts, two audiences — `.mesh` plus `_psi.gf` and
-`_grad_psi.gf` for GLVis and meq's own exact restart; a ParaView collection at
+`_grad_psi.gf` for GLVis and MEQ's own exact restart; a ParaView collection at
 the polynomial degree of the solve; and the `.nc` interchange file.
 `tools/README.md` is the guide to which format goes with which reader, and
 `src/meq/Output.{hpp,cpp}` and `src/meq/Sampler.{hpp,cpp}` are the code.
@@ -156,7 +156,7 @@ From `refs/Miller.pdf` eq (1), `B = ∇φ × ∇ψ + f(ψ)∇φ` with `∇φ = �
 B_R = -( 1/R ) dpsi/dZ          B_Z = +( 1/R ) dpsi/dR
 ```
 
-and meq solves for `q = (1/r) ∇̄ψ` directly, so
+and MEQ solves for `q = (1/r) ∇̄ψ` directly, so
 
 ```
 B_R = -q_z          B_Z = +q_r
@@ -303,7 +303,7 @@ Single binary, `meq config.toml`. No subcommands, and specifically not MFEM's
 * ~~**`MKL_THREADING_LAYER=GNU`.**~~ **DROPPED, 2026-09-01.** This asked the
   driver to detect MKL and set the variable or refuse to start, on the grounds
   that the failure is silent wrong numbers. It was implemented as a warning and
-  then deleted: meq builds against its own SuiteSparse and never loads the
+  then deleted: MEQ builds against its own SuiteSparse and never loads the
   `libmkl_rt` dispatcher the variable configured, so it is inert — measured
   bit-identical across three value-asserting suites — and **most builds link no
   MKL at all**, so the warning told the majority of users to set a variable
@@ -347,11 +347,11 @@ only thing it refuses.**
 alongside at `../mfem/gslib`, and `meq::FieldTransfer` is the consumer.
 
 **The argument for taking it, which generalises.** The dependency lands on the
-**MFEM tree, not on meq**: meq's `CMakeLists.txt` is untouched,
+**MFEM tree, not on MEQ**: MEQ's `CMakeLists.txt` is untouched,
 `find_package(MFEM)` is unchanged, and the MFEM-free half of the library is
 unaffected. CI already cannot build MFEM at all, since the branch is unpublished,
 so this adds nothing to what CI cannot do. That is a different calculation from
-adding a dependency to meq itself, and it is the same reasoning `CLAUDE.md`
+adding a dependency to MEQ itself, and it is the same reasoning `CLAUDE.md`
 records for why toml11 is a submodule and MFEM is not.
 
 It is packaged by no distribution — checked: nothing in Debian, Ubuntu, Fedora
@@ -359,7 +359,7 @@ It is packaged by no distribution — checked: nothing in Debian, Ubuntu, Fedora
 and builds as a sibling of the MFEM tree in three lines.
 
 **The caveat is half-measured, and the missing half is the one open item here.**
-meq meshes are **triangles** and gslib's `findpts` is tensor-product; MFEM
+MEQ meshes are **triangles** and gslib's `findpts` is tensor-product; MFEM
 handles that by splitting simplices into quads internally (`mesh_split`,
 `ir_split`, `split_element_map` in `fem/gslib.hpp`). It works, and it is a code
 path a quad-based user never exercises. `WarmStartConvergence` does run it on

@@ -8,7 +8,7 @@
 /*
  * The right hand side of the Grad-Shafranov equation.
  *
- * meq solves the fixed-boundary problem
+ * MEQ solves the fixed-boundary problem
  *
  *     -div_bar( ( 1/r ) grad_bar( psi ) ) = F( r, z, psi ) / r    in Omega
  *                                    psi  = 0                    on Gamma
@@ -19,7 +19,7 @@
  * is the plasma pressure and g( psi ) the toroidal field function.
  *
  * A Source is exactly that F, and -- unlike the papers, which use an
- * Anderson-accelerated Picard iteration -- meq closes the nonlinearity with
+ * Anderson-accelerated Picard iteration -- MEQ closes the nonlinearity with
  * Newton, so a Source must also supply dF/dpsi. The 1/r on the right hand side
  * belongs to the weak form, not here: F is F as written above.
  *
@@ -157,7 +157,7 @@ namespace meq
 	 *
 	 * which is how refs/GourdainContour.pdf section V eq (39) poses them, how
 	 * meq::Profile is tabulated, and how every equilibrium code specifies an
-	 * equilibrium. meq solves the fixed-boundary problem with psi = 0 on Gamma,
+	 * equilibrium. MEQ solves the fixed-boundary problem with psi = 0 on Gamma,
 	 * so psi_bnd is zero and Psi = psi / psi_ax throughout; free boundary makes
 	 * psi_bnd an unknown too, and this interface is where that will go.
 	 *

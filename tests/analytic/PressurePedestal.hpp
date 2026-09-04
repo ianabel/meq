@@ -18,16 +18,16 @@
  *
  * NONE OF THESE HAS AN EXACT SOLUTION, so there is no psi(), no gradPsi(), no
  * flux() and no deltaStarFD() here: there is nothing for them to return. The
- * paper judges these four by its residual error estimator, which meq does not
+ * paper judges these four by its residual error estimator, which MEQ does not
  * have yet (stage 6). What they are used for instead is a SELF-convergence
  * study -- successive refinements compared against each other, as
  * refs/HDG-GradShafranov.pdf does for its own Example 6 -- and as a stress test
- * of the Newton path, which is the thing meq does differently from both papers.
+ * of the Newton path, which is the thing MEQ does differently from both papers.
  *
  * THE CONVENTION MAP.
  *
  * The paper's eq (1) is -Delta*(psi) = F with F := mu0 r^2 dp/dpsi + g dg/dpsi,
- * which is meq's convention exactly (see CLAUDE.md, "The equation being
+ * which is MEQ's convention exactly (see CLAUDE.md, "The equation being
  * solved"). Sections 4.2 and 4.4 take g = constant, so g dg/dpsi = 0 and
  * F = mu0 r^2 p'(psi) with mu0 = 1 in the paper's normalisation. Checked term by
  * term: differentiating eq (23) gives
@@ -52,7 +52,7 @@
  * refs/HDG-GradShafranov.pdf says as much, in one word: its Algorithm 2 begins
  * "psi^0 ;   // Non-trivial initial guess".
  *
- * meq's Newton iteration starts from the Dirichlet data and nothing else, so
+ * MEQ's Newton iteration starts from the Dirichlet data and nothing else, so
  * with homogeneous data it starts exactly on the trivial branch, where the
  * residual is identically zero, and reports convergence in zero iterations
  * having produced psi == 0. That is asserted in
@@ -259,7 +259,7 @@ class CurrentHole
  * benchmark for detecting a localised internal layer: sigma_2 = 0.027, so the
  * added term is a ridge of that width along the curve r + psi = 1.
  *
- * For meq it is also the one case where dF/dpsi and dF/dr are genuinely
+ * For MEQ it is also the one case where dF/dpsi and dF/dr are genuinely
  * independent, since r enters the nonlinearity rather than multiplying it.
  * Nothing in the solver cares -- only dF/dpsi is ever asked for -- but it means
  * a fixture that got the r-dependence wrong would still pass a dF/dpsi check,

@@ -60,7 +60,7 @@ namespace
 
 #ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
 	/*
-	 * Build the chosen direct solver, configured as meq wants it.
+	 * Build the chosen direct solver, configured as MEQ wants it.
 	 *
 	 * One place rather than four, which is the point: the four call sites --
 	 * Picard, Newton, the bordered Newton and the linear path -- had four copies
@@ -101,7 +101,7 @@ namespace
 				// symmetric to 2e-16 on a fitted mesh and asymmetric at 5.4e-1 on
 				// the extension path, where HDGExtensionIntegrator deposits an
 				// outer product into the flux block; the SPARSITY is symmetric on
-				// both. So this is the type that is right for meq's headline
+				// both. So this is the type that is right for MEQ's headline
 				// configuration as well as for the easy one.
 				solver->SetMatrixType( mfem::PardisoSolver::REAL_STRUCTURE_SYMMETRIC );
 				solver->SetPrintLevel( 0 );
@@ -136,7 +136,7 @@ namespace
 		// choice. Reachable only if that check and this switch disagree, which is
 		// worth saying out loud rather than returning null into a dereference.
 		throw std::logic_error(
-			"meq: the requested trace solver is not available in this build, and "
+			"MEQ: the requested trace solver is not available in this build, and "
 			"setTraceSolver() should already have refused it" );
 	}
 
@@ -368,7 +368,7 @@ namespace
 		 * the faces: every coupling is a face INTEGRAL, computed by quadrature
 		 * against both bases, and integrals do not care where dofs live.
 		 *
-		 * So it is kept for alignment with the miniapp meq was ported from, which
+		 * So it is kept for alignment with the miniapp MEQ was ported from, which
 		 * is worth something when debugging against MFEM, and for nothing else.
 		 * WHAT IT COSTS is that a dof is a point value ON the element boundary,
 		 * where an L2 field is discontinuous -- so reading this space by nodal
@@ -540,7 +540,7 @@ namespace
 	 * turns each element's elimination into its own Newton. Handing the same
 	 * Source through this coefficient instead puts it on the right hand side,
 	 * the potential block stays linear, and every local elimination is a linear
-	 * solve -- which is the ordering Nguyen, Peraire & Cockburn use and meq's
+	 * solve -- which is the ordering Nguyen, Peraire & Cockburn use and MEQ's
 	 * Newton path does not. See CLAUDE.md.
 	 */
 	class FrozenSource : public mfem::Coefficient
@@ -841,7 +841,7 @@ namespace
 	 * without MFEM_USE_OPENMP or without MFEM_THREAD_SAFE, and it is right to --
 	 * a caller asking for threads is asking a performance question, and quietly
 	 * running the serial loop would report a speedup nobody got. But aborting is
-	 * not a library's decision to impose on meq's callers, so the build is
+	 * not a library's decision to impose on MEQ's callers, so the build is
 	 * checked here and the refusal comes back as an exception like every other
 	 * value fault in this class.
 	 */
@@ -1050,14 +1050,14 @@ namespace
 			// The coefficient is radius, the same r the flux mass form carries.
 			// HDGExtensionIntegrator documents C as "the same coefficient the
 			// flux mass form carries", and CLAUDE.md's mapping table says the
-			// same thing from meq's side, but it was checked: with 1/r here the
+			// same thing from MEQ's side, but it was checked: with 1/r here the
 			// error is flat under refinement, exactly as it is when the flux mass
 			// form itself is given 1/r.
 			//
 			// The sign is +1, HDGExtensionIntegrator's own default, and it is the
 			// default for the same reason it is right here: DarcyForm's flux block
 			// holds -q, which is precisely the u = -K grad p of the Darcy problem
-			// the extension was written for, so meq's convention and the
+			// the extension was written for, so MEQ's convention and the
 			// integrator's coincide. Measured: with -1 the rates collapse. See
 			// tests/convergence/ExtensionConvergence.cpp for the numbers.
 			fluxMass->AddBdrFaceIntegrator(
@@ -1191,7 +1191,7 @@ namespace
 				mfem::DarcyHybridization::LPrecType::LU );
 
 			// AND NEITHER OF THE TWO ABOVE MEANS ANYTHING UNDER
-			// NonlinearOrdering::NPC, which is meq's default. They are set
+			// NonlinearOrdering::NPC, which is MEQ's default. They are set
 			// regardless, because they are properties of the hybridization rather
 			// than of the solve, and because CondenseThenLinearise is one
 			// setNonlinearOrdering() call away and must find them configured.
@@ -2125,7 +2125,7 @@ namespace
 		 * RecoverFEMSolution() runs ComputeSolution(), whose element-local solves
 		 * are NON-LINEAR under this discretisation, and upstream records that
 		 * function as never having been exercised against an NPC solution. Asking
-		 * an unchecked back-substitution to reproduce fields meq already holds
+		 * an unchecked back-substitution to reproduce fields MEQ already holds
 		 * exactly is a way to lose them, not a way to confirm them.
 		 */
 		bool const fieldsAreState = usesNonlinearForms()
@@ -2222,7 +2222,7 @@ namespace
 			// construction. What it can disagree with is the physics, and only a
 			// convergence study against a closed form catches that.
 			/*
-			 * NPC: THE UNKNOWN IS THE WHOLE SYSTEM, AND meq ALREADY HAD IT.
+			 * NPC: THE UNKNOWN IS THE WHOLE SYSTEM, AND MEQ ALREADY HAD IT.
 			 *
 			 * mfem::DarcyNPCOperator is an Operator on ( q, psi, psihat )
 			 * together -- Nguyen, Peraire & Cockburn eqs (14)-(18) -- with the
@@ -2232,7 +2232,7 @@ namespace
 			 * solve against ONE factorisation, and GetNumLocalNLIterations()
 			 * staying at zero is the acceptance signal that it really is NPC.
 			 *
-			 * It costs meq almost nothing to give the fields to Newton, because
+			 * It costs MEQ almost nothing to give the fields to Newton, because
 			 * `solution` has always been a three-block vector on `blockOffsets`
 			 * with darcyFlux, potentialGf and traceGf MakeRef'd into it. That IS
 			 * the NPC unknown, block for block. So the fields are already in
@@ -2242,7 +2242,7 @@ namespace
 			 * been exercised against an NPC solution, and running the
 			 * condensation's element-local NON-LINEAR back-substitution over an
 			 * answer that already satisfies the full system would be asking a
-			 * question nobody has checked for an answer meq already has.
+			 * question nobody has checked for an answer MEQ already has.
 			 *
 			 * `darcyRhs` is the ( flux, potential ) load and is held BY REFERENCE
 			 * by the operator, so it must outlive it; it is a member, and
@@ -2267,7 +2267,7 @@ namespace
 			// condensation ReduceRHS() zeroes traceB for a non-linear problem and
 			// puts the load inside the operator, while under NPC the load is the
 			// ( flux, potential ) pair passed to the operator and the trace row
-			// carries none -- meq imposes psi = g_D as an ESSENTIAL condition,
+			// carries none -- MEQ imposes psi = g_D as an ESSENTIAL condition,
 			// not as a Neumann datum, and a Neumann datum is the one thing that
 			// would have to ride here instead.
 			mfem::Vector &unknown = npcOrdering ? solution : traceX;
@@ -2362,7 +2362,7 @@ namespace
 			// self-consistent because the reduction and the recovery both
 			// eliminate with whatever factorisation is currently held, but it
 			// costs iterations -- upstream measures 12 against 4 on one case,
-			// both converged to round-off. meq asks for a Jacobian per step so
+			// both converged to round-off. MEQ asks for a Jacobian per step so
 			// that a KINSOL run and a plain Newton run differ in the LINE SEARCH
 			// and in nothing else, which is what makes
 			// kinsolAgreesWithNewtonWhereBothConverge worth asserting.
@@ -2496,7 +2496,7 @@ namespace
 		// THIS USED TO REFUSE THE NON-LINEAR PATH, AND NO LONGER DOES.
 		//
 		// DarcyForm::ReconstructFluxAndPot() consulted only the LINEAR potential
-		// mass form M_p, and meq's Newton path puts the whole potential block on
+		// mass form M_p, and MEQ's Newton path puts the whole potential block on
 		// Mnl_p -- see buildForms() -- so the local problem got no potential mass
 		// and no face constraint, was singular, and was factored and solved
 		// anyway. What came back was not a degraded psi* but 1e15, without a word,
@@ -2504,7 +2504,7 @@ namespace
 		//
 		// MFEM now lifts the non-linear potential integrators as a Jacobian frozen
 		// at the computed potential, checking that the face constraint's gradient
-		// does not depend on the trace -- which meq's constant tau satisfies, and
+		// does not depend on the trace -- which MEQ's constant tau satisfies, and
 		// which is one more reason to keep it constant.
 		//
 		// MEASURED before this line was deleted, because a silent 1e15 is exactly
@@ -2542,7 +2542,7 @@ namespace
 		 * and NewtonConvergence.cpp's theReconstructionIsWrongWhereTheJacobianVanishes
 		 * for the measurement. A version of this function did detect that, by
 		 * comparing || psi* || against || psi_h ||, and it has been taken out: the
-		 * condition it detects is a defect in a library meq does not own and is one
+		 * condition it detects is a defect in a library MEQ does not own and is one
 		 * flag test away from never arising, and a solver should not carry a
 		 * standing defence against its dependency. The suite establishes the state
 		 * of that defect; this code assumes the library works.

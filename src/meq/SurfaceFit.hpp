@@ -63,7 +63,7 @@
  * why: without it the fit converges algebraically. NOTHING HERE INCLUDES MFEM, for the same two reasons
  * Zernike.hpp, Profiles.hpp and Source.hpp do not: the fit is pure arithmetic
  * on plain doubles, so it is testable without the finite element library, and
- * continuous integration -- which cannot obtain the MFEM branch meq needs --
+ * continuous integration -- which cannot obtain the MFEM branch MEQ needs --
  * can build and test it.
  *
  * ---------------------------------------------------------------------------
@@ -216,7 +216,7 @@
  * THAT PAIR IS Eigen::JacobiSVD AND NOT A HAND-ROLLED ONE, since 2026-09-03.
  * SurfaceFit.cpp used to carry both by hand, about a hundred and fifty lines,
  * and the replacement was NOT a performance decision -- measured, the two are
- * within a factor of two on meq's own workload and the whole solve is under half
+ * within a factor of two on MEQ's own workload and the whole solve is under half
  * a per cent of the extraction chain. It is the standing preference for a
  * maintained library over a hand-rolled algorithm. The reason JacobiSVD rather
  * than the faster BDCSVD or CompleteOrthogonalDecomposition is in the comment on
@@ -474,7 +474,7 @@ namespace meq
 	// with x the expansion being solved for. Nothing says where along its
 	// surface a node must sit, so the angle is free and the truncated basis may
 	// choose it. It needs no force balance and no second physics solver, because
-	// meq already has psi; and the Jacobian needs grad Psi_N, which is the
+	// MEQ already has psi; and the Jacobian needs grad Psi_N, which is the
 	// SOLVED FLUX -- grad_bar psi = r q, so grad Psi_N = r q / ( psi_bnd -
 	// psi_ax ). That is INVERSION-PLAN.md section 3.2's "the gradient is a
 	// solved unknown" paying off a third time.

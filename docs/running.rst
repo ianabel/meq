@@ -1,4 +1,4 @@
-Running meq
+Running MEQ
 ===========
 
 .. code-block:: text
@@ -37,7 +37,7 @@ In order:
 #. **Builds the source term** from the ``[source]`` table — see :doc:`sources`.
 #. **Builds the computational domain.** With no ``[boundary.shape]`` this is the
    mesh itself and :math:`\psi = 0` is imposed on its boundary: the *fitted*
-   path. With a shape, meq marks the background elements lying inside
+   path. With a shape, MEQ marks the background elements lying inside
    :math:`\Gamma`, extracts them as a submesh, and builds the transfer paths that
    carry the boundary condition from :math:`\Gamma_h` out to the true
    :math:`\Gamma`: the *curved* path, which is what :doc:`curved_boundary` is
@@ -102,7 +102,7 @@ Exit codes
      - configuration error
      - Nothing was attempted. The file was unreadable or invalid, a key was
        wrong, the requested geometry could not be built, or the configuration
-       asked for something meq refuses (see below).
+       asked for something MEQ refuses (see below).
    * - ``2``
      - solve failed
      - The configuration was good and the nonlinear iteration did not converge,
@@ -111,7 +111,7 @@ Exit codes
    * - ``3``
      - output failed
      - The equilibrium was computed and something went wrong writing it — most
-       often an output directory that does not exist. meq does **not** create
+       often an output directory that does not exist. MEQ does **not** create
        the output directory.
 
 The split between 1 and 2 is the useful one for a script: a 1 means the input is
@@ -127,7 +127,7 @@ polynomial degree, or supplying an initial guess.
 
 .. _running-refusals:
 
-What meq refuses rather than approximates
+What MEQ refuses rather than approximates
 -----------------------------------------
 
 There is exactly one thing the driver could do approximately and declines to,
@@ -137,7 +137,7 @@ and it exits 1 with an explanation:
    asks for the boundary datum to be the exact solution of the problem. That
    requires a closed form, and the :cpp:class:`meq::Source` interface does not
    carry one — a source is :math:`F` and :math:`\partial F/\partial\psi` and
-   nothing else. Closed-form solutions exist in meq, but they live in the test
+   nothing else. Closed-form solutions exist in MEQ, but they live in the test
    fixtures, where they are the thing being converged *against*.
 
 Everything else the driver rejects is a plain configuration error: a shape that
@@ -184,7 +184,7 @@ help:
    ``[initialguess]`` is what gets you off that branch. See
    :ref:`sources-trivial-branch`.
 #. **Warm start from a nearby answer.** A converged run at another resolution is
-   a much better starting point than the boundary datum, and meq will
+   a much better starting point than the boundary datum, and MEQ will
    interpolate it onto the new mesh for you.
 #. **Change the nonlinear ordering.** The default is not the more robust of the
    two on a coarse mesh. See :ref:`nonlinear-ordering`.
@@ -225,7 +225,7 @@ halves of that: strictly less work, and an :math:`L^2` error that does not move.
    meet it. The symptom is a solve that reaches machine precision in two
    iterations and is then reported as a failure at the thirtieth.
 
-   meq handles this: it takes the reference residual from the **cold** iterate —
+   MEQ handles this: it takes the reference residual from the **cold** iterate —
    where the solve would have started with no guess — and converts it into an
    absolute target. ``RelativeTolerance`` keeps exactly the meaning it always
    had, a cold solve is bit-identical, and only a warm one changes: from failing

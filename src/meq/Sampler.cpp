@@ -33,7 +33,7 @@ namespace meq
 		{
 			// The element's bounding box. GetBoundingBox() is a mesh-wide call,
 			// so the box is taken from the element's own vertices -- exact for
-			// the straight-sided meshes meq builds, and an inner bound for a
+			// the straight-sided meshes MEQ builds, and an inner bound for a
 			// curved one, which is why the containment test below is what
 			// decides rather than the box.
 			mfem::Array<int> vertices;

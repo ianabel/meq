@@ -24,7 +24,7 @@ it says which.
 The estimator
 -------------
 
-meq implements the residual estimator of
+MEQ implements the residual estimator of
 :cite:t:`SanchezVizuet2020adaptive`, whose analysis for the semi-linear
 unfitted case is :cite:t:`SanchezSanchezVizuetSolano2021`. It has five terms,
 exposed individually by :cpp:func:`meq::ResidualEstimator::component`:
@@ -154,7 +154,7 @@ Marking
 
 Dörfler marking is the default and is what the contraction analysis assumes
 :cite:p:`CockburnNochettoZhang2015`. The published Grad–Shafranov experiments
-used *maximum* marking, for which the analysis is open — so meq offers both, and
+used *maximum* marking, for which the analysis is open — so MEQ offers both, and
 means it.
 
 .. note::

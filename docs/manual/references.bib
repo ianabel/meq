@@ -183,12 +183,11 @@
   doi     = {10.1137/130932132}
 }
 
-% ================================================ NOT YET CHECKED -- see above
-
 % The axis regularity condition: a Fourier coefficient a_m( rho ) of an analytic
 % function on a disc must equal rho^m times an even series.  src/meq/Zernike.hpp
-% derived the same constraint independently.  Record taken from DESC's own
-% reference list; volume and pages unverified.
+% derived the same constraint independently.  Verified 2026-09-04 against
+% refs/LewisBellan.pdf: title, journal, volume, pages and DOI all read from the
+% paper.
 @article{LewisBellan1990,
   author  = {Lewis, H. R. and Bellan, P. M.},
   title   = {Physical constraints on the coefficients of {F}ourier expansions in
@@ -196,7 +195,8 @@
   journal = {Journal of Mathematical Physics},
   volume  = {31},
   pages   = {2592--2596},
-  year    = {1990}
+  year    = {1990},
+  doi     = {10.1063/1.529009}
 }
 
 % Spectral condensation, and the origin of the minimum-norm gauge preference.
@@ -209,19 +209,26 @@
   volume  = {5},
   number  = {7},
   pages   = {2664--2675},
-  year    = {1998}
+  year    = {1998},
+  doi     = {10.1063/1.872954}
 }
 
 % The measured statement that a SOLVE slides the poloidal angle to what its
-% basis can represent, where a post-hoc FIT cannot.  Unverified.
-@article{PaniciDESC2023,
-  author  = {Panici, D. and Conlin, R. and Dudt, D. W. and Unalmis, K. and
-             Kolemen, E.},
-  title   = {The {DESC} stellarator code suite. {P}art 1. {Q}uick and accurate
-             equilibria computations},
-  journal = {Journal of Plasma Physics},
-  volume  = {89},
-  number  = {3},
-  pages   = {955890303},
-  year    = {2023}
+% basis can represent, where a post-hoc FIT cannot -- their figure 5, the
+% spectral-width comparison against VMEC.
+%
+% CITED AS THE PREPRINT DELIBERATELY.  refs/DESC-Panici.pdf is arXiv:2203.17173v3
+% and carries no journal DOI, only a Zenodo one for the software.  An earlier
+% version of this entry gave a journal, volume and article number supplied from
+% memory, which is exactly what this project's DOI rule forbids; the arXiv
+% identifier is what the document itself can be checked against.
+@misc{PaniciDESC2023,
+  author       = {Panici, D. and Conlin, R. and Dudt, D. W. and Unalmis, K. and
+                  Kolemen, E.},
+  title        = {The {DESC} Stellarator Code Suite {P}art {I}: {Q}uick and
+                  accurate equilibria computations},
+  year         = {2023},
+  eprint       = {2203.17173},
+  archivePrefix = {arXiv},
+  primaryClass = {physics.plasm-ph}
 }

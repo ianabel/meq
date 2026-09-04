@@ -80,7 +80,7 @@
  * and for the same two reasons as src/meq/Profiles.hpp and src/meq/Source.hpp:
  * the Zernike polynomials are pure mathematics on plain doubles, so they are
  * unit-testable without the finite element library, and continuous integration
- * -- which cannot obtain the MFEM branch meq needs, see INSTALL.md -- can build
+ * -- which cannot obtain the MFEM branch MEQ needs, see INSTALL.md -- can build
  * and test them. Anything that needs a mesh, a GridFunction or a Coefficient
  * belongs in the consumer, not here.
  *

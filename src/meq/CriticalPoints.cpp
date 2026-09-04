@@ -119,7 +119,7 @@ namespace meq
 			throw std::invalid_argument( "CriticalPointFinder: the flux must have vdim 2" );
 
 		if ( meshRef.Dimension() != 2 )
-			throw std::invalid_argument( "CriticalPointFinder: meq is two dimensional" );
+			throw std::invalid_argument( "CriticalPointFinder: MEQ is two dimensional" );
 
 		if ( potentialIn.FESpace()->GetMesh() != &meshRef )
 			throw std::invalid_argument(
@@ -444,7 +444,7 @@ namespace meq
 		// looking; the answer this file returns is the critical point, which is a
 		// different quantity. See the header.
 		//
-		// BOTH ENDS, because meq's psi is not sign-normalised: with F single
+		// BOTH ENDS, because MEQ's psi is not sign-normalised: with F single
 		// signed negative -- which is what every Solov'ev fixture has -- the axis
 		// is an interior MINIMUM and the largest nodal value is a corner of the
 		// mesh.

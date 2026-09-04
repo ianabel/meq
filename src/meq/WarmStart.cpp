@@ -17,7 +17,7 @@ namespace meq
 		// grid function -- "Mesh nodes are required" -- and a mesh from
 		// Mesh::MakeCartesian2D or read from a .mesh file has none until it is
 		// asked for one. EnsureNodes() builds it at the mesh's own order, which
-		// for meq's straight-sided triangles is degree 1 and exact. This is why
+		// for MEQ's straight-sided triangles is degree 1 and exact. This is why
 		// the constructor takes a non-const Mesh &: setting up the search
 		// modifies the mesh, and pretending otherwise would need a copy of it.
 		sourceMesh.EnsureNodes();
@@ -37,7 +37,7 @@ namespace meq
 		 * solution onto a mesh whose space CONTAINS it -- where the exact answer
 		 * exists -- came back 28%, 10% and 12% wrong in L2 at k = 1, 2, 3.
 		 *
-		 * meq does not need the tie-break. The target nodes are Gauss-Legendre
+		 * MEQ does not need the tie-break. The target nodes are Gauss-Legendre
 		 * points, strictly interior to their own element, so on a nested
 		 * refinement each is interior to exactly one source element and the value
 		 * there is unambiguous. Where a node genuinely does land on a border --
@@ -71,7 +71,7 @@ namespace meq
 		 * MEASURED RATHER THAN STYLISTIC.
 		 *
 		 * The obvious transfer reads the source at each target dof point. It is
-		 * wrong here for two compounding reasons. meq's spaces are L2 on a
+		 * wrong here for two compounding reasons. MEQ's spaces are L2 on a
 		 * GAUSS-LOBATTO basis, so the dof points include the element boundary --
 		 * and an L2 field is DISCONTINUOUS across a source element boundary, so a
 		 * target node landing on one has two values and gslib picks a side.
@@ -180,7 +180,7 @@ namespace meq
 				if ( code[ point ] == 2 )
 				{
 					// Nothing there to read. The fallback is the Dirichlet datum
-					// in every caller meq has, which is what a cold start would
+					// in every caller MEQ has, which is what a cold start would
 					// have had at that point anyway.
 					++misses;
 					value = fallback.Eval( *tr, ip );

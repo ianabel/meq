@@ -1,6 +1,6 @@
-# Installing meq
+# Installing MEQ
 
-**meq needs a development branch of MFEM that is not published anywhere.** That
+**MEQ needs a development branch of MFEM that is not published anywhere.** That
 is the single thing standing between a fresh clone and a working solver, and it
 is why this file exists separately from `README.md`.
 
@@ -18,28 +18,28 @@ cd build && ctest --output-on-failure
 ```
 
 If you do not have the right MFEM, that still works — it just builds and tests
-about half of meq. See [Without MFEM](#without-mfem).
+about half of MEQ. See [Without MFEM](#without-mfem).
 
 > **Never run a bare `make -j` or `cmake --build -j` with no number.** Unbounded,
 > the job count goes to the host's core count, which on a container or a WSL2
 > virtual machine is not the same thing as the memory behind it. Use `-j4` for
-> meq, and `-j4` for MFEM, whose translation units are large.
+> MEQ, and `-j4` for MFEM, whose translation units are large.
 
 ## Why a custom MFEM
 
-meq is built on `DarcyForm` and the HDG integrators under `fem/darcy/`, and on
+MEQ is built on `DarcyForm` and the HDG integrators under `fem/darcy/`, and on
 the curved-boundary machinery in `fem/darcy/extension_hdg.*`. **None of this is
 in a released MFEM, and `mfem/master` will not work** — the older
-`HDGBilinearForm` API that meq was originally written against has been removed,
+`HDGBilinearForm` API that MEQ was originally written against has been removed,
 and its replacement is the branch work below.
 
-meq needs pieces from **four** branches:
+MEQ needs pieces from **four** branches:
 
-| branch | what meq needs from it |
+| branch | what MEQ needs from it |
 |---|---|
 | `gf-hdg-subdomains-dev` | `fem/darcy/extension_hdg.*` — the curved boundary by extension from polygonal subdomains, and `TransferredDatumCoefficient`. **The merge base.** |
 | `direct-solver-symbolic-reuse` | `UMFPackSolver` and `PardisoSolver` keeping their symbolic factorisation across Newton steps |
-| `gf-hdg-linearise-first` | `DarcyNPCOperator` / `DarcyNPCSolver` — the NPC method, which is meq's default nonlinear ordering — plus `SetAssemblyMode`, `SetGradientMode`, `SetLocalFactorMode` |
+| `gf-hdg-linearise-first` | `DarcyNPCOperator` / `DarcyNPCSolver` — the NPC method, which is MEQ's default nonlinear ordering — plus `SetAssemblyMode`, `SetGradientMode`, `SetLocalFactorMode` |
 | `gf-hdg-dev` | The post-processing fix: *"the postprocessing closes on the element average, always"* |
 
 **That last one is not optional and is the easiest to lose**, because it is
@@ -61,12 +61,12 @@ any of the four moves, so anything committed directly to it is lost.
 The recipe, the current merge topology, and the three conflict resolutions
 (which are decided rather than fiddly, but include one seam where "keep both
 sides" leaves the file a brace short) are in **`CLAUDE.md`**, under
-*`meq-integration`: the branch meq builds from*. Read that before rebuilding.
+*`meq-integration`: the branch MEQ builds from*. Read that before rebuilding.
 
 Two checks from it are worth repeating here because they have both fired:
 
 * **Verify the branches are actually contained** in your merge, rather than
-  assuming — the topology belongs to the upstream tree and changes without meq
+  assuming — the topology belongs to the upstream tree and changes without MEQ
   doing anything.
 * **Verify the *install*, not just the branch.** They are different questions,
   and a check that passed on the branch while the installed library was a day
@@ -80,26 +80,26 @@ Two checks from it are worth repeating here because they have both fired:
 
 ## Building MFEM
 
-Out of tree, installed to a prefix meq can point at. MFEM is deliberately **not**
+Out of tree, installed to a prefix MEQ can point at. MFEM is deliberately **not**
 a submodule: its history is enormous, it needs its own configure-and-build, and
 the development tree it comes from has its own active work that a submodule pin
 would fight.
 
-The options meq reads, and what each buys:
+The options MEQ reads, and what each buys:
 
-| option | required? | what meq does with it |
+| option | required? | what MEQ does with it |
 |---|---|---|
-| `MFEM_USE_SUITESPARSE` | **effectively yes** | UMFPACK, the default trace solver. Without any direct solver meq falls back to GMRES. |
+| `MFEM_USE_SUITESPARSE` | **effectively yes** | UMFPACK, the default trace solver. Without any direct solver MEQ falls back to GMRES. |
 | `MFEM_USE_EXCEPTIONS` | **yes, for the driver** | Makes an MFEM error a C++ exception rather than an abort. Without it a failed solve is a `SIGABRT` instead of exit code 2. |
 | `MFEM_USE_SUNDIALS` | for globalisation | KINSOL, behind the Anderson–Picard and Picard-then-Newton paths |
 | `MFEM_USE_GSLIB` | for warm starts | `FindPointsGSLIB`, used to interpolate a stored answer onto a different mesh |
 | `MFEM_USE_LAPACK` | recommended | Also gates MFEM's cut-element quadrature |
 | `MFEM_USE_MKL_PARDISO` | optional | A second trace solver, selectable at run time |
-| `MFEM_USE_CUDA`, `MFEM_USE_CUDSS` | optional | A third trace solver. A prerequisite, not a speed-up: `fem/darcy/` has no partial-assembly kernels and meq issues no device kernels of its own. |
-| `MFEM_USE_OPENMP` + `MFEM_THREAD_SAFE` | optional, **both or neither** | Threaded element assembly, which meq exposes as an opt-in. It *aborts* rather than falling back if only one is set. |
-| `MFEM_USE_MPI` | **no** | meq is serial. Detected only so that a parallel MFEM fails intelligibly. |
+| `MFEM_USE_CUDA`, `MFEM_USE_CUDSS` | optional | A third trace solver. A prerequisite, not a speed-up: `fem/darcy/` has no partial-assembly kernels and MEQ issues no device kernels of its own. |
+| `MFEM_USE_OPENMP` + `MFEM_THREAD_SAFE` | optional, **both or neither** | Threaded element assembly, which MEQ exposes as an opt-in. It *aborts* rather than falling back if only one is set. |
+| `MFEM_USE_MPI` | **no** | MEQ is serial. Detected only so that a parallel MFEM fails intelligibly. |
 
-meq reads all of these out of MFEM's own `share/mfem/config.mk` rather than
+MEQ reads all of these out of MFEM's own `share/mfem/config.mk` rather than
 probing, and prints what it found at configure time. It accepts either layout an
 MFEM build leaves behind — an installed tree, or an in-source `make` build with
 `config/config.mk`.
@@ -107,10 +107,10 @@ MFEM build leaves behind — an installed tree, or an in-source `make` build wit
 > **`make clean` after editing any MFEM header.** MFEM's makefiles have no
 > header dependency tracking, and a stale object has produced heap corruption in
 > unrelated functions and "unimplemented" aborts for methods that had just been
-> added. meq's own CMake build tracks headers properly; this applies only to the
+> added. MEQ's own CMake build tracks headers properly; this applies only to the
 > MFEM tree.
 
-## Building meq
+## Building MEQ
 
 `MFEM_DIR` is a cache variable, also reads the environment, and defaults to
 `../mfem/install` relative to the source tree — so on a machine laid out that
@@ -124,7 +124,7 @@ The rest of the dependencies:
 | toml11 | yes | Vendored as `extern/toml11`. **A clone without `--recursive` fails at configure time**, and the error says so — `git submodule update --init --recursive` fixes it. |
 | netcdf-cxx4 | optional | Found with `pkg-config`; Debian calls it `libnetcdf-c++4-dev`. Without it the gridded `.nc` output is dropped from the library and the driver cannot write it. |
 | Boost | **yes** | **Boost.Math is header-only and is needed to build the LIBRARY**, not merely the tests: `src/meq/Zernike.cpp` gets its Jacobi polynomials from it, the Zernike radial polynomial being a Jacobi polynomial under a coordinate change. No link dependency is added. |
-| Eigen | **yes** | **Header-only, and needed to build the LIBRARY.** `src/meq/SurfaceFit.cpp` takes its least-squares solve from Eigen's `JacobiSVD` — a column-pivoted QR followed by a one-sided Jacobi sweep, which is what that file used to carry by hand. Nothing is linked and no meq header mentions it, so a consumer of `meq_core` takes on nothing. Debian calls it `libeigen3-dev`. |
+| Eigen | **yes** | **Header-only, and needed to build the LIBRARY.** `src/meq/SurfaceFit.cpp` takes its least-squares solve from Eigen's `JacobiSVD` — a column-pivoted QR followed by a one-sided Jacobi sweep, which is what that file used to carry by hand. Nothing is linked and no MEQ header mentions it, so a consumer of `meq_core` takes on nothing. Debian calls it `libeigen3-dev`. |
 | Boost.Test | for the tests | `unit_test_framework`, the shared-library build |
 | clang-tidy | optional | Gates the `naming` test only; skipped with a message if absent |
 
@@ -145,14 +145,14 @@ that same one variable:
 MKL_NUM_THREADS=1 ./tests/SolovievConvergence
 ```
 
-> **That variable is not cosmetic.** meq's inner loop factorises a great many
+> **That variable is not cosmetic.** MEQ's inner loop factorises a great many
 > *small* dense matrices, and on a threaded MKL each call pays for a thread fork
 > and a barrier that dwarfs the arithmetic. Measured on the development machine
 > the effect was dramatic and grew rapidly with polynomial degree. Where the
 > threshold sits is a property of your BLAS, so measure it on yours; the safe
 > setting is 1.
 
-Expect the suite to be **red while a known defect stands** — meq's tests assert
+Expect the suite to be **red while a known defect stands** — MEQ's tests assert
 the behaviour that is wanted and fail until it is there, never the reverse. A
 failing test's message is the record of what is outstanding.
 
@@ -176,7 +176,7 @@ and every convergence claim are exercised only by a local build.
 
 ## Where the MFEM branch should live — unresolved
 
-**Today, an outside user cannot build meq's solver at all.** `meq-integration`
+**Today, an outside user cannot build MEQ's solver at all.** `meq-integration`
 is a local merge of four branches from a working tree on one machine. There is
 nothing to clone, so caching does not help and neither does a submodule: there
 is nothing to point one at.
@@ -185,14 +185,14 @@ That is a real limitation rather than an oversight waiting to be tidied, and it
 is the reason `find_package(MFEM)` is optional and the reason CI covers what it
 covers. The options, none of which has been chosen:
 
-* **Publish the merge**, as a tag or branch on a fork of MFEM, and pin meq to
+* **Publish the merge**, as a tag or branch on a fork of MFEM, and pin MEQ to
   the commit. Cheapest to consume; the cost is that it must be re-published
   whenever any of the four moves, and a stale pin is worse than none.
-* **Upstream the four branches**, which is the real fix and is not meq's to do.
+* **Upstream the four branches**, which is the real fix and is not MEQ's to do.
 * **Ship a build script** that fetches the four and performs the merge, with the
   conflict resolutions encoded. Honest about the situation, but it bakes in a
   topology that belongs to somebody else's tree and has already changed once.
-* **A container or binary MFEM install** published alongside meq.
+* **A container or binary MFEM install** published alongside MEQ.
 
 Until one is chosen, the practical answer for a new machine is to follow
 `CLAUDE.md`'s recipe by hand and check the install afterwards.

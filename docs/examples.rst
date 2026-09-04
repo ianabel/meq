@@ -74,7 +74,7 @@ demonstrates is the driver and the discretisation on a well-posed problem.
 
 .. note::
 
-   This is also why meq's driver acceptance test pins the driver against the
+   This is also why MEQ's driver acceptance test pins the driver against the
    **library** on the same configuration rather than against a closed form: the
    question it answers is "does the driver reproduce what the library does",
    and a comparison against an analytic solution would answer a different

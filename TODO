@@ -48,7 +48,7 @@ Raised 2026-08-24.
   UNIFORMLY spaced over [lowerBoundary, upperBoundary] and calls
   NetCDFIO::SetOutputGrid on it; AddVariable then evaluates the DGSoln onto
   that grid. So u and q are the FE solution and its derivative SAMPLED, and the
-  fidelity of what meq would read is set by nOut -- a run-time output choice --
+  fidelity of what MEQ would read is set by nOut -- a run-time output choice --
   rather than by MaNTA's polynomial order. A Hermite cubic through those samples
   is an interpolant of an interpolant. That is fine at large nOut and is a
   measurement somebody should make rather than assume; it also means the Grid
@@ -106,7 +106,7 @@ Raised 2026-08-24.
   is `{psi, value, derivative}`, which is the same triple.
 
   THE SHAPE TO BUILD, DECIDED 2026-09-01. Four kinds of file, all of which look
-  like a filename to the user, and the design goal is that meq works out which
+  like a filename to the user, and the design goal is that MEQ works out which
   it is rather than making the author declare it.
 
     (1) full MaNTA output, which also carries the species set, and eventually a
@@ -122,7 +122,7 @@ Raised 2026-08-24.
         abscissa. (Assume the same abscissa; a file that disagrees with itself
         about that is a file to refuse, not to interpolate.)
 
-  THE UNIFYING IDEA is that all four are "a NetCDF file, plus however much meq
+  THE UNIFYING IDEA is that all four are "a NetCDF file, plus however much MEQ
   can work out for itself", so the reader is a RESOLUTION PIPELINE and not four
   readers:
 
@@ -168,7 +168,7 @@ Raised 2026-08-24.
   wholesale. GDAL spells it NETCDF:"file.nc":var -- real, widely used, ugly,
   and geospatial rather than general. OPeNDAP constraint expressions,
   dataset?var[0:10], are a genuine published standard that this netCDF already
-  parses inside nc_open, and that is where the BRACKETS come from: meq borrows
+  parses inside nc_open, and that is where the BRACKETS come from: MEQ borrows
   DAP's slice syntax rather than inventing one, and does not borrow its '?'
   separator, which would buy nothing over '/'.
 
@@ -177,7 +177,7 @@ Raised 2026-08-24.
   a converged solution to a different problem, which is this project's standing
   worst case. So the reader prints ONE LINE PER PROFILE saying what it decided:
 
-    meq: T_i from equilibrium.nc: variable 'T_i', 129 knots on RAW psi in
+    MEQ: T_i from equilibrium.nc: variable 'T_i', 129 knots on RAW psi in
          [0, 0.42] Wb/rad, derivative from 'dT_i_dpsi', time index 40 of 41
 
   A user who reads that sees a wrong inference immediately; one who is never
@@ -201,27 +201,27 @@ Raised 2026-08-24.
   better. If a plain case (2) file needs more than a filename, the inference is
   not finished.
 
-  A REQUEST ON THE MaNTA SIDE falls out of (1) and is not meq's to write: the
+  A REQUEST ON THE MaNTA SIDE falls out of (1) and is not MEQ's to write: the
   ability to output the FE representation -- coefficients, cell boundaries and
   polynomial order -- rather than only the uniform resampling SetOutputGrid
-  produces. meq would then read MaNTA's actual solution instead of an
+  produces. MEQ would then read MaNTA's actual solution instead of an
   interpolant of a sampling of it, and case (1) could stop being a resampling
   at all.
 
   RAISE IT WITH MaNTA RATHER THAN EDITING MANTA-COUPLING.md, which is a RECEIVED
   document: its own header says it is "written from MaNTA's side" and that the
   authoritative copy is FieldModel.hpp, FieldModelSpec.hpp and
-  docs/field_coupling.rst in that tree, so anything meq writes into it is a
+  docs/field_coupling.rst in that tree, so anything MEQ writes into it is a
   local edit to somebody else's contract. This is the same rule as
   ../mfem-hdg-dev being receive-only, for the same reason.
 
   THE FOUR QUESTIONS TO SETTLE BEFORE WRITING ANY OF IT
 
-  1. It is a derivative SHIFT, not a match. MaNTA gives (f, df/dx). meq's
+  1. It is a derivative SHIFT, not a match. MaNTA gives (f, df/dx). MEQ's
      `MHDSource` wants p' and gg' as profiles OF psi, and calls `prime()` on
      them for the Newton Jacobian -- so it needs (p', p'') and (gg', gg'').
      If MaNTA's stored variable is p, then its (u, q) gives (p, dp/dx), which is
-     one derivative short of what meq needs. Options, in rough order of
+     one derivative short of what MEQ needs. Options, in rough order of
      preference:
        (a) have the MaNTA physics case output p' directly as its own variable,
            so u = p' and q = p'' and the triple lines up exactly;
@@ -239,7 +239,7 @@ Raised 2026-08-24.
      exactly what it needs and (a) is unnecessary there. Build this against the
      rotating source and the question only arises for the MHD one.
 
-  2. What is `x`, and how does it map to psi in [0,1]? meq's profiles are
+  2. What is `x`, and how does it map to psi in [0,1]? MEQ's profiles are
      normalised to psi in [0,1] and `SplineProfile` clamps outside that. MaNTA's
      `x` is a radial coordinate whose meaning is set by the physics case, and
      nothing in the file says which. Needs an explicit config key naming the
@@ -267,13 +267,13 @@ Raised 2026-08-24.
      this entry was written from, is one of them.
 
      A config key naming the mapping is still needed, since a group called `p_i`
-     still has to be declared to be the pressure meq wants. But the information
+     still has to be declared to be the pressure MEQ wants. But the information
      is there to match against rather than absent, and the `units` attribute is
      a free consistency check worth asserting on.
 
-  4. Which time slice? MaNTA is time dependent and meq wants one equilibrium.
+  4. Which time slice? MaNTA is time dependent and MEQ wants one equilibrium.
      Default to the last slice, `t` index size-1, but make it configurable and
-     record the value of `t` that was used in meq's own output -- an equilibrium
+     record the value of `t` that was used in MEQ's own output -- an equilibrium
      computed from an unrecorded time slice is not reproducible.
 
   THE NON-MaNTA CASE
@@ -290,7 +290,7 @@ Raised 2026-08-24.
   - `libnetcdf_c++4` is installed (/usr/lib/x86_64-linux-gnu/libnetcdf_c++4.so)
     along with the C library. MaNTA links it, so the CMake pattern is there.
   - MFEM's own MFEM_USE_NETCDF is NO in ../mfem-hdg-dev, which does not matter:
-    meq would link netcdf directly. The pre-modernisation Makefile did exactly
+    MEQ would link netcdf directly. The pre-modernisation Makefile did exactly
     that (`-lnetcdf_c++4 -lnetcdf`).
   - The old tree had a NetCDFIO.hpp, deleted in the restructure. It is not worth
     recovering -- it was a class declaration missing its terminating semicolon,
@@ -398,7 +398,7 @@ Raised 2026-08-25.
   Two things to establish when a reference is chosen:
 
   - Whether the anisotropy enters as a modified source with the same Delta*
-    operator on the left, in which case meq's discretisation is untouched and
+    operator on the left, in which case MEQ's discretisation is untouched and
     only Source changes; or whether it changes the operator, in which case the
     HDG assembly changes too and this is a much larger job. Fitzgerald et al
     is the likely place to look, being an implementation.
@@ -412,20 +412,20 @@ Couple to MaNTA as a FieldModel
 Raised 2026-08-25. See MANTA-COUPLING.md, which is the specification.
 ================================================================================
 
-  A second, much tighter coupling than the NetCDF entry above: meq runs
+  A second, much tighter coupling than the NetCDF entry above: MEQ runs
   in-process as a plugin MaNTA dlopens, its Grad-Shafranov rows join MaNTA's
   DAE, and the equilibrium and the transport are solved together by one Newton
   rather than by an outer Picard loop.
 
   MANTA-COUPLING.md, written from the MaNTA side, is the contract and is far
-  more detailed than this entry should duplicate. What belongs here is what meq
+  more detailed than this entry should duplicate. What belongs here is what MEQ
   must change, and the two things already established.
 
   THE ARCHITECTURAL DEMAND, which is not a detail
 
   MaNTA does not want a converged equilibrium. It wants the residual rows,
   evaluated at states that are nowhere near an equilibrium, on every residual
-  evaluation, without complaint. meq's Newton is subsumed into MaNTA's.
+  evaluation, without complaint. MEQ's Newton is subsumed into MaNTA's.
 
   So GradShafranovSolver needs a residual-evaluation path beside its solve()
   path: given psi and a transport state, return R without solving anything.
@@ -436,7 +436,7 @@ Raised 2026-08-25. See MANTA-COUPLING.md, which is the specification.
   evaluable OFF the solution manifold.
 
   The good news is that solveB, the operation MaNTA needs and will not accept a
-  dense matrix for, is exactly meq's existing hybridized solve. That is the
+  dense matrix for, is exactly MEQ's existing hybridized solve. That is the
   natural fit and the reason the trace space is the natural DOF vector.
 
   The two genuinely hard items, per that note's own checklist, are
@@ -448,7 +448,7 @@ Raised 2026-08-25. See MANTA-COUPLING.md, which is the specification.
   BOTH NOW HAVE MACHINERY BEHIND THEM, WHICH IS WHAT INVERSION-PLAN.md WAS FOR.
   IN-2 builds the flux-surface averages as ONE primitive over a callable
   integrand, so dGeometry_dpsi is differentiated once rather than per slot, and
-  IN-3's fit supplies the surface derivative. What is still missing on meq's side
+  IN-3's fit supplies the surface derivative. What is still missing on MEQ's side
   is IN-6's per-psi cache -- INVERSION-PLAN.md section 11.1 argues it is a
   REQUIREMENT of the pointwise call pattern rather than an optimisation, and its
   invalidation contract is MANTA-COUPLING.md section 8 -- and IN-P, the cost
@@ -461,7 +461,7 @@ Raised 2026-08-25. See MANTA-COUPLING.md, which is the specification.
   assembles its Jacobian, so a missing surface-motion term "does not produce a
   wrong answer, only slow Newton convergence". That is CLAUDE.md's "A wrong
   Jacobian is invisible to a convergence table" arriving from the consumer's
-  side, and the remedy is the one meq already uses on dFdPsi: finite-difference
+  side, and the remedy is the one MEQ already uses on dFdPsi: finite-difference
   dGeometry_dpsi against Geometry directly, as a unit test, and never take
   convergence of the coupled solve as evidence.
 
@@ -472,9 +472,9 @@ Raised 2026-08-25. See MANTA-COUPLING.md, which is the specification.
   `-DEIGEN_USE_BLAS -march=<concrete arch>`, znver2 on this machine -- because
   Eigen aligns to the widest vector unit the compiler knows about and inlines
   expression templates into both sides of the boundary. It flags reconciling
-  this with meq's CMake and with how MFEM was built as an afternoon's work.
+  this with MEQ's CMake and with how MFEM was built as an afternoon's work.
 
-  It is smaller than that here, because NEITHER MFEM NOR meq USES EIGEN AT ALL
+  It is smaller than that here, because NEITHER MFEM NOR MEQ USES EIGEN AT ALL
   (grepped, both). Eigen appears only where MaNTA's types cross the interface,
   which is the FieldModel subclass itself. So:
 
@@ -499,7 +499,7 @@ Raised 2026-08-25. See MANTA-COUPLING.md, which is the specification.
 
   AND FOUR QUESTIONS THAT NOTE LEAVES OPEN, two of which are ours to answer:
 
-    - Who owns the p(psi) mapping, the MaNTA physics case or the meq field
+    - Who owns the p(psi) mapping, the MaNTA physics case or the MEQ field
       model? This decides which side owns which half of the A_2 chain rule.
       Ours to negotiate.
     - Should Geometry gain a batched form? Ours to ask for; the note suspects
@@ -535,7 +535,7 @@ Raised 2026-08-25. A survey, not yet a decision.
      and both h- and p-refinement cure them independently; the "stiff sources"
      story came from benchmarking at one under-resolved point. 4.4 is the
      exception and is genuinely multi-valued -- dF/dpsi spans [-580, +566]
-     against a first Dirichlet eigenvalue of 22.3. See CLAUDE.md, "Why meq's
+     against a first Dirichlet eigenvalue of 22.3. See CLAUDE.md, "Why MEQ's
      Newton struggles", and item 7 of ROADMAP.md.
 
   2. GENUINELY NONLINEAR EXACT SOLUTIONS: Kaltsas & Throumoulopoulos,
@@ -621,7 +621,7 @@ IS DONE, and so is the run-time switch. Rewritten 2026-09-01 to what is left.
   method; setTraceSolver() picks UMFPack, Pardiso or CuDSS at run time, with
   UMFPack still the default because oneMKL's licence is not everybody's to
   accept; SetReuseSymbolic() is on; and the link line no longer straddles two
-  MKL installations, because meq builds its own SuiteSparse.
+  MKL installations, because MEQ builds its own SuiteSparse.
 
   DO NOT QUOTE THE TIMINGS THIS ENTRY USED TO CARRY. They were taken before
   2026-08-30, when a stray libmkl_sequential made MKL resolve sequential for
@@ -631,7 +631,7 @@ IS DONE, and so is the run-time switch. Rewritten 2026-09-01 to what is left.
   THREE HYPOTHESES WERE TESTED AGAINST THE OLD FAILURE AND ARE ALL DEAD, so do
   not re-test them if a new one appears: a METIS symbol collision with MFEM's
   -lmetis; an interaction with MFEM's link line; and something particular to
-  meq's matrix -- a plain 5-point Laplacian failed identically.
+  MEQ's matrix -- a plain 5-point Laplacian failed identically.
 ================================================================================
 Performance: profile the inside of a solve, then decide which backend applies
 Raised 2026-08-26, rewritten 2026-09-01 against the threading campaign. The goal
@@ -649,7 +649,7 @@ accuracy and not for patience.
   1. GET ComputeH()'s ELEMENT-LOCAL DENSE LU OFF THREADED MKL. The largest item
      by a wide margin, and it was invisible until the link line was fixed. The
      per-element LUFactors go through LAPACK, so through MKL, on blocks of order
-     10-30; at k = 3 that is FORTY TIMES slower with MKL threading on. meq works
+     10-30; at k = 3 that is FORTY TIMES slower with MKL threading on. MEQ works
      around it with MKL_NUM_THREADS=1 everywhere, which in turn puts PARDISO's
      threaded advantage out of reach, MKL_NUM_THREADS being process-wide. Two
      routes and neither is done: mkl_set_num_threads_local() around the trace
@@ -673,7 +673,7 @@ accuracy and not for patience.
      batched call with no data movement, DenseTensor's non-owning constructor
      matching the existing offset layout.
 
-     NPC IS WHAT MAKES THAT A GOOD BATCHED WORKLOAD, and it is meq's default
+     NPC IS WHAT MAKES THAT A GOOD BATCHED WORKLOAD, and it is MEQ's default
      now: the per-element work is a LINEAR solve of fixed size rather than a
      nonlinear one of unpredictable iteration count, and
      GetNumLocalNLIterations() reads exactly zero. Design the batching against
@@ -682,7 +682,7 @@ accuracy and not for patience.
 
      PART OF IT HAS LANDED, and it is worth about 1.2x sometimes and a 1.8x LOSS
      otherwise. DarcyHybridization::SetAssemblyMode(Threaded), reached through
-     meq's setAssemblyMode(), threads the element-local half of ComputeH()
+     MEQ's setAssemblyMode(), threads the element-local half of ComputeH()
      bit-for-bit against serial. It is NOT the default: HighBetaConvergence,
      which assembles a small system hundreds of times inside a bordered Newton,
      goes 21.5 s -> 39 s with it on. Mesh size does not separate the good case
@@ -700,11 +700,11 @@ accuracy and not for patience.
 
   TWO ARGUMENTS THAT DECIDE THE REST, AND NEITHER HAS CHANGED.
 
-  PARTIAL ASSEMBLY WANTS TENSOR-PRODUCT ELEMENTS AND meq USES TRIANGLES. There
+  PARTIAL ASSEMBLY WANTS TENSOR-PRODUCT ELEMENTS AND MEQ USES TRIANGLES. There
   are no AssemblePA or AddMultPA methods anywhere in fem/darcy/, so asking for
   AssemblyLevel::PARTIAL gets an unimplemented path rather than a fast one, and
   writing those kernels is upstream work. But the performance case for PA is sum
-  factorisation, which wants quads in 2D, and meq meshes are triangles
+  factorisation, which wants quads in 2D, and MEQ meshes are triangles
   throughout because that is what the GS papers use and what the extension
   technique's transfer paths were measured on. A serious PA effort has to answer
   the quad question first, and that is a discretisation decision with its own
@@ -728,15 +728,15 @@ accuracy and not for patience.
 
   WHAT MFEM WRAPS FOR THE TRACE SYSTEM, and whether it applies here. cuDSS is
   the best fit and is already run: serial constructor, so no MPI, and
-  SetReorderingReuse. MKL PARDISO is the only other one meq has run. AmgX wants
+  SetReorderingReuse. MKL PARDISO is the only other one MEQ has run. AmgX wants
   a symmetric definite operator, which the trace matrix is ONLY on the fitted
   path -- on the extension path its relative asymmetry is 0.54 -- so it is a
   fitted-path option at best, and serial MFEM has no AMG anyway. SuperLU_DIST,
-  MUMPS and STRUMPACK are distributed solvers whose point is MPI, and meq is
+  MUMPS and STRUMPACK are distributed solvers whose point is MPI, and MEQ is
   serial by design.
 
   AND A CHEAP CHECK NOBODY HAS DONE: confirm the release build is what everyone
-  thinks it is. meq builds -O3 -DNDEBUG; MFEM's install carries
+  thinks it is. MEQ builds -O3 -DNDEBUG; MFEM's install carries
   MFEM_USE_MEMALLOC = YES, whose stack-based allocator is a help or a hindrance
   depending on the access pattern and has never been measured either way here.
 
@@ -763,8 +763,51 @@ Raised 2026-09-03.
   Config.hpp's header comment says "six tables". There are eight.
 
   LinearMaxIterations and LinearTolerance are parsed, validated, and consumed
-  by NOTHING. Either wire them to the fallback Krylov path or refuse them; a
-  key that validates and does nothing is worse than one that is rejected.
+  by NOTHING. Diagnosed 2026-09-04.
+
+  WHAT THEY WERE FOR. Config.hpp's own comment says it: "the linear solve for
+  each Newton correction", with the tolerance relative to that solve's
+  right-hand side. They are the two knobs of an INEXACT NEWTON method -- solve
+  the correction loosely while the outer iterate is far away, tighten as it
+  converges, and never pay for linear accuracy the non-linear iteration cannot
+  use. The defaults, 1000 and 1e-12, are a conservative version of that.
+
+  WHY THEY DO NOTHING. MEQ's trace solve is DIRECT. It is UMFPACK by default,
+  PARDISO or cuDSS if the build has them, and a sparse LU has no iteration count
+  and no tolerance to be given -- it returns the answer to round-off and the
+  question does not arise. So on the path that actually runs there is nothing
+  for either key to control.
+
+  The only Krylov solver in the tree is the FALLBACK for a build with no direct
+  solver at all -- three mfem::GMRESSolver sites in GradShafranov.cpp -- and
+  each of those sets its own numbers: SetMaxIter( 5000 ), and SetRelTol at
+  1e-12 or 1e-14 depending on the site. So the keys describe a path that exists,
+  is almost never taken, and ignores them.
+
+  AND THE DEFAULTS DISAGREE WITH THE FALLBACK THEY WOULD CONTROL, which is the
+  trap in wiring them naively: 1000 against 5000, and 1e-12 against 1e-14. A
+  patch that simply passed the config values through would silently loosen the
+  fallback's iteration cap by a factor of five and its tolerance by two orders,
+  on the one path nobody exercises. Reconcile the numbers deliberately or not
+  at all.
+
+  WHAT TO DO. The precedent is in this same file: Config.cpp already REFUSES
+  ProfileFile and every <Key>Variable and <Key>Fit key with a message saying
+  they are not implemented, rather than accepting them as unknown keys. Doing
+  the same here is the consistent answer and costs two lines -- but note that
+  examples/soloviev-nstx.toml and examples/manufactured.toml both SET these
+  keys, so refusing them means editing the examples in the same commit.
+
+  The alternative, wiring them to the fallback, is worth having only alongside
+  ROADMAP item 4's second bullet: that fallback runs UNPRECONDITIONED on the
+  Newton path while the linear path gets a GSSmoother, which CLAUDE.md already
+  calls a plain bug. Tuning the iteration count of an unpreconditioned GMRES is
+  not the first thing that path needs.
+
+  KEEP THEM IN MIND FOR LATER. They stop being meaningless the day the trace
+  solve stops being direct, which is what 3D or a parallel build would force.
+  Refusing a key now and reintroducing it then is cheap; a key that validates
+  and does nothing is a standing invitation to believe it works.
 
   PPrimeVariable, PPrimeFit, GGPrimeVariable and GGPrimeFit are REFUSED on the
   rotating path and SILENTLY ACCEPTED AND IGNORED on the mhd path. The same

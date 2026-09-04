@@ -11,7 +11,7 @@
 /*
  * The HDG discretisation of the Grad-Shafranov operator, on MFEM's DarcyForm.
  *
- * meq solves the fixed-boundary problem
+ * MEQ solves the fixed-boundary problem
  *
  *     -div_bar( ( 1/r ) grad_bar( psi ) ) = F( r, z, psi ) / r    in Omega
  *                                     psi = g_D                   on Gamma
@@ -473,7 +473,7 @@ namespace meq
 			 *                        outlive the solver. Any mfem::TransferPath
 			 *                        will do -- LevelSetPath is the family the a
 			 *                        priori analysis is written for, and
-			 *                        VertexConePath is the general one meq's
+			 *                        VertexConePath is the general one MEQ's
 			 *                        benchmark uses, because a flux surface has no
 			 *                        closest-point map in closed form.
 			 * @param gammaHMarkerIn  the boundary attributes of Gamma_h, the part
@@ -492,7 +492,7 @@ namespace meq
 			 * On a marked face psihat is no longer an unknown with an essential
 			 * value. It is phi_h, and phi_h depends on the flux, so the datum
 			 * splits: g( a( x ) ) is data and the line integral is an operator.
-			 * For meq g == 0 on Gamma -- the plasma boundary IS the level set
+			 * For MEQ g == 0 on Gamma -- the plasma boundary IS the level set
 			 * psi = 0 -- so the data half vanishes identically and only the
 			 * operator half is left, which is
 			 * refs/HDG-GradShafranov-Adaptive.pdf eq (14). That is why this takes
@@ -563,7 +563,7 @@ namespace meq
 			 *           NOT its negation, and NOT the boundary-data Coefficient:
 			 *           `mfem::PositionFunction` is evaluated at a bare point,
 			 *           which a Coefficient cannot be. Defaults to zero, which is
-			 *           meq's fixed-boundary problem and every case in the suite.
+			 *           MEQ's fixed-boundary problem and every case in the suite.
 			 *
 			 * @throws std::logic_error on the fitted path, where there is no path
 			 *         family and no datum to transfer.
@@ -590,7 +590,7 @@ namespace meq
 				/// own method. F is evaluated at the previous iterate, so the
 				/// potential block is LINEAR and every element-local elimination
 				/// is a linear solve -- which is the whole point, see CLAUDE.md
-				/// under "Why meq's Newton struggles". Depth from
+				/// under "Why MEQ's Newton struggles". Depth from
 				/// setAndersonDepth().
 				AndersonPicard,
 				/// The same fixed point without acceleration, for the comparison
@@ -651,7 +651,7 @@ namespace meq
 			 * mfem::NewtonSolver, and the difference is silent. NewtonSolver::Mult(
 			 * b, x ) solves oper( x ) - b = 0; KINSolver::Mult ignores its first
 			 * argument entirely -- it is unnamed in the signature -- and solves
-			 * oper( x ) = 0. meq's trace right hand side is not zero, so the
+			 * oper( x ) = 0. MEQ's trace right hand side is not zero, so the
 			 * residual has to be shifted before KINSOL sees it. solve() wraps it;
 			 * see ShiftedResidual in the .cpp.
 			 *
@@ -680,7 +680,7 @@ namespace meq
 			/// suite was measured with.
 			///
 			/// **THE WHOLE SETTING IS INERT UNDER NonlinearOrdering::NPC**, which
-			/// is meq's default -- solver type, preconditioner, cap and tolerance
+			/// is MEQ's default -- solver type, preconditioner, cap and tolerance
 			/// alike. NPC has no element-local non-linear solve to configure: the
 			/// local work is one linear solve against one factorisation, and
 			/// `GetNumLocalNLIterations()` staying at zero is how you check that.
@@ -694,7 +694,7 @@ namespace meq
 			/// fixed budget of two corrections shipped for a while and put the
 			/// gradient 3e-04 out on a stiff source **that still converged** --
 			/// which is the shape of every Jacobian defect this project has met:
-			/// no wrong answer, only a wrong path to it. meq asks for 100
+			/// no wrong answer, only a wrong path to it. MEQ asks for 100
 			/// iterations at rtol 1e-12, so it is bounded by the tolerance rather
 			/// than by the cap.
 			void setLocalSolver( LocalSolver choice );
@@ -710,10 +710,10 @@ namespace meq
 			/// and it claimed to be the NPC method. It was not -- NPC's fields
 			/// are Newton state, and a trace-only operator has nowhere to keep
 			/// them, which is why that mode needed `lin_u`, `lin_p` and
-			/// `lin_trace` as hidden state and why meq needed `Relinearised` to
+			/// `lin_trace` as hidden state and why MEQ needed `Relinearised` to
 			/// pair the residual with the gradient. Upstream measured it slower
 			/// than the plain condensation on stiff problems and failing four
-			/// configurations that one solves, and removed it. meq's
+			/// configurations that one solves, and removed it. MEQ's
 			/// `Relinearised` went with it. See
 			/// ../mfem-hdg-dev/doc/HDG-ORDERING-API.md.
 			enum class NonlinearOrdering
@@ -721,8 +721,8 @@ namespace meq
 				/// Condense first. Eliminating flux and potential on an element
 				/// is then itself a non-linear solve, one per element per
 				/// residual evaluation, and the outer unknown is the trace
-				/// alone. MFEM's own default, and **meq's backup rather than
-				/// meq's choice**.
+				/// alone. MFEM's own default, and **MEQ's backup rather than
+				/// MEQ's choice**.
 				///
 				/// It is kept, and is not merely legacy: it is the only route
 				/// that is parallel, the only one that accepts an H(div) flux,
@@ -737,7 +737,7 @@ namespace meq
 				/// & Cockburn, refs/HDG-NPC-2.pdf section 2.6, eqs (14)-(18).
 				/// `mfem::DarcyNPCOperator` and `mfem::DarcyNPCSolver`.
 				///
-				/// **THIS IS meq'S DEFAULT.** It is how the method is defined,
+				/// **THIS IS MEQ'S DEFAULT.** It is how the method is defined,
 				/// and no paper in refs/ runs the other one: GS-1 and GS-2 avoid
 				/// the question with Anderson-accelerated Picard, NPC linearises
 				/// first.
@@ -755,12 +755,12 @@ namespace meq
 				/// it the better batched or threaded workload, not fewer
 				/// floating-point operations.
 				///
-				/// **What it costs meq is that the unknown is the whole
-				/// system.** meq pays almost nothing for that, because
+				/// **What it costs MEQ is that the unknown is the whole
+				/// system.** MEQ pays almost nothing for that, because
 				/// `solution` was already a three-block
 				/// { flux, potential, trace } vector on `blockOffsets` with
 				/// every GridFunction MakeRef'd into it -- so the NPC unknown IS
-				/// meq's solution vector, and `RecoverFEMSolution()` leaves the
+				/// MEQ's solution vector, and `RecoverFEMSolution()` leaves the
 				/// Newton path entirely rather than needing rework. The fields
 				/// are already there when the solve returns.
 				///
@@ -773,14 +773,14 @@ namespace meq
 				/// stale and no re-forming to do; see solveWithNormalisation().
 				///
 				/// **Two hard refusals**, both `MFEM_VERIFY` in `NPCCheck()`:
-				/// an H(div) flux space, and `LocalOpType::FluxNL`. meq meets
+				/// an H(div) flux space, and `LocalOpType::FluxNL`. MEQ meets
 				/// neither -- its flux space is L2 and its non-linearity is on
 				/// the potential mass.
 				NPC
 			};
 
 			/// Choose it. Needs an MFEM carrying `mfem::DarcyNPCOperator`; see
-			/// CLAUDE.md on the meq-integration branch.
+			/// CLAUDE.md on the MEQ-integration branch.
 			void setNonlinearOrdering( NonlinearOrdering choice );
 
 			/// The ordering solve() will use.
@@ -795,7 +795,7 @@ namespace meq
 			/// order.
 			enum class AssemblyMode
 			{
-				/// One thread. MFEM's default and **meq's**, unconditionally --
+				/// One thread. MFEM's default and **MEQ's**, unconditionally --
 				/// see setAssemblyMode() for why an automatic gate was tried and
 				/// removed.
 				Serial,
@@ -813,7 +813,7 @@ namespace meq
 				/// ABORTS rather than falling back if the build lacks either** --
 				/// deliberately, since a caller asking for this is asking a
 				/// performance question and a silent serial loop is not an answer
-				/// to it. meq therefore checks the build before passing it on.
+				/// to it. MEQ therefore checks the build before passing it on.
 				Threaded
 			};
 
@@ -864,7 +864,7 @@ namespace meq
 				/// factorisation and 1.41x on the backsolve at 37,248 trace dofs
 				/// -- and it is NOT the default anyway, because oneMKL's licence
 				/// is not everybody's to accept and most builds do not have it.
-				/// It scales a further 1.9x on MKL threads, which meq cannot
+				/// It scales a further 1.9x on MKL threads, which MEQ cannot
 				/// currently spend: see CLAUDE.md, *Threaded MKL is a
 				/// catastrophe*.
 				Pardiso,
@@ -881,7 +881,7 @@ namespace meq
 				/// problem, so no ranking against the other two is possible
 				/// locally. It is selectable so that correctness can be checked
 				/// and so that somebody with a datacentre part can answer the
-				/// performance question meq cannot.
+				/// performance question MEQ cannot.
 				///
 				/// Spelled the way NVIDIA spells it, which is why it breaks the
 				/// UpperCamelCase rule for enum values: an external name keeps its
@@ -967,7 +967,7 @@ namespace meq
 			mfem::GridFunction &potential();
 			mfem::GridFunction const &potential() const;
 
-			/// q_h = ( 1/r ) grad_bar( psi ) in V_h, in meq's sign convention.
+			/// q_h = ( 1/r ) grad_bar( psi ) in V_h, in MEQ's sign convention.
 			/// Valid after solve(); see the sign note at the top of this file.
 			mfem::GridFunction &flux();
 			mfem::GridFunction const &flux() const;
@@ -981,7 +981,7 @@ namespace meq
 			 * enriched flux and total flux that come with it.
 			 *
 			 * This is the local post-processing of Stenberg that
-			 * refs/HDG-GradShafranov-Adaptive.pdf section 2.7 uses, and meq does
+			 * refs/HDG-GradShafranov-Adaptive.pdf section 2.7 uses, and MEQ does
 			 * not implement it: DarcyForm does. Reconstruct() takes the
 			 * hybridized solution, projects the normally continuous total flux
 			 * onto RT_k through the constraint equation, and then solves one
@@ -1011,7 +1011,7 @@ namespace meq
 			 * IT USED TO BE REFUSED ON THE SEMI-LINEAR PATH, and the history is
 			 * kept because the failure was silent and could return the same way.
 			 * ReconstructFluxAndPot() read the LINEAR potential mass form and never
-			 * looked at the non-linear one, so on meq's Newton path -- where the
+			 * looked at the non-linear one, so on MEQ's Newton path -- where the
 			 * whole potential block including the HDG stabilisation lives on the
 			 * non-linear form, of necessity, see buildForms() -- the local problem
 			 * it built had no potential mass and no potential constraint. It did
@@ -1056,7 +1056,7 @@ namespace meq
 			mfem::GridFunction &postProcessedPotential();
 			mfem::GridFunction const &postProcessedPotential() const;
 
-			/// q*_h in [P_(k+1)]^2, in meq's sign convention -- the negation
+			/// q*_h in [P_(k+1)]^2, in MEQ's sign convention -- the negation
 			/// flux() applies is applied here too. Valid after postProcess().
 			mfem::GridFunction &postProcessedFlux();
 			mfem::GridFunction const &postProcessedFlux() const;
@@ -1077,7 +1077,7 @@ namespace meq
 			/// the residual and whose GetGradient() differentiates that residual
 			/// rather than the continuous equation. CEDRES++ rejected the
 			/// continuous derivative deliberately -- see CLAUDE.md -- and this is
-			/// how meq gets the discrete one for free.
+			/// how MEQ gets the discrete one for free.
 			mfem::Operator &reducedOperator();
 
 			/// The reduced right hand side and the reduced unknown, valid after
@@ -1335,7 +1335,7 @@ namespace meq
 			/// survived it only because the corresponding checks there are
 			/// MFEM_ASSERTs, which are dead in this build -- gated on
 			/// MFEM_DEBUG, which the installed MFEM sets to NO, and NOT on
-			/// NDEBUG, so building meq itself in Debug does not revive them.
+			/// NDEBUG, so building MEQ itself in Debug does not revive them.
 			/// miniapps/hdg's
 			/// DarcyOperator::ImplicitSolve() takes the same view for the same
 			/// reason.

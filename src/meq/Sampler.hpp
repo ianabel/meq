@@ -156,7 +156,7 @@ namespace meq
 			 *
 			 *     psi( p ) = psi( x0 ) + grad psi( x0 ) . ( p - x0 )
 			 *
-			 * with `grad psi = r q` -- meq's flux convention, Field.hpp. Its
+			 * with `grad psi = r q` -- MEQ's flux convention, Field.hpp. Its
 			 * error is O( |p - x0|^2 ) against an extrapolation with no bound,
 			 * and `q` carries no extra error to spend: getting the derivative at
 			 * the potential's own order rather than one down is exactly what

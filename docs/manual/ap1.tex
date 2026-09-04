@@ -403,14 +403,17 @@ and carries no datum.
 	distinction exists and what it prevents.
 \item[\texttt{NewtonAbsoluteTolerance}] \emph{float, default $10^{-12}$,
 	positive.}
-\item[\texttt{LinearMaxIterations}] \emph{integer, default 1000, at least 1.}
-\item[\texttt{LinearTolerance}] \emph{float, default $10^{-12}$, positive.}
 \end{description}
 
 \begin{quote}
-	\textbf{The last two are parsed and validated but consumed by nothing.} The
-	program drives a sparse direct solver. They are documented here because they
-	are accepted; do not read a change in them as having had an effect.
+	\textbf{\texttt{LinearMaxIterations} and \texttt{LinearTolerance} are
+	refused,} with a message saying why. They configure an \emph{iterative}
+	inner solve, and {\meq} solves the hybridized trace system with a
+	\emph{direct} one --- UMFPACK, PARDISO or cuDSS --- which has neither an
+	iteration count nor a tolerance to set. They were once parsed and validated
+	and read by nothing, which is worse than either accepting or rejecting them:
+	a key that validates is a key its author believes is doing something. Delete
+	the line from any file that carries it.
 \end{quote}
 
 \section{\texttt{[output]}}

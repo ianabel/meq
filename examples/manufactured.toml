@@ -65,8 +65,6 @@ Type = "exact"
 NewtonMaxIterations = 30
 NewtonRelativeTolerance = 1.0e-10
 NewtonAbsoluteTolerance = 1.0e-14
-LinearMaxIterations = 1000
-LinearTolerance = 1.0e-12
 
 [output]
 Directory = "."

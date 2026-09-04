@@ -3,13 +3,13 @@ The discretisation
 
 This page describes what the solver actually does: the equation it forms, the
 spaces it forms it in, and the conventions those spaces carry. The parts you
-cannot skip if you are extending meq are :ref:`the two sign conventions
+cannot skip if you are extending MEQ are :ref:`the two sign conventions
 <sign-conventions>`.
 
 The equation
 ------------
 
-meq solves the fixed-boundary Grad–Shafranov problem
+MEQ solves the fixed-boundary Grad–Shafranov problem
 :cite:p:`SanchezVizuetSolano2019`,
 
 .. math::
@@ -37,7 +37,7 @@ with
 
 :math:`p(\psi)` is the plasma pressure and :math:`g(\psi)/r` the toroidal field
 function; both are user input, and it is their :math:`\psi`-dependence that
-makes the problem semi-linear. Everything meq knows about the physics arrives
+makes the problem semi-linear. Everything MEQ knows about the physics arrives
 through :math:`F` and :math:`\partial F/\partial\psi` — see :doc:`sources`.
 
 The first-order system
@@ -133,7 +133,7 @@ gives :math:`k+1` convergence in both :math:`\psi` and :math:`q`.
    *integral*, computed by quadrature against both bases. This was measured
    both ways and the answers agree to the last place.
 
-   It is kept for alignment with the MFEM miniapp meq was ported from. **What
+   It is kept for alignment with the MFEM miniapp MEQ was ported from. **What
    it costs** is that a degree of freedom is a point value *on* the element
    boundary, where a discontinuous field is ambiguous — so reading
    :math:`W_h` by nodal interpolation at another mesh's node points is not
@@ -150,7 +150,7 @@ expressed in terms of the trace on its own faces, leaving one globally coupled
 system in :math:`\hat\psi_h` alone, whose size is the number of face degrees of
 freedom — independent of how many volume unknowns each element carries.
 
-That elimination is a small dense solve per element, and it is where meq's
+That elimination is a small dense solve per element, and it is where MEQ's
 Newton iteration meets its most interesting structural question, because when
 :math:`F` depends on :math:`\psi` the elimination can itself be nonlinear. That
 is the subject of :ref:`nonlinear-ordering`, and it is the single largest
@@ -210,7 +210,7 @@ because a Newton residual assembled by the library expects it there.
 The consequences, all of which have bitten:
 
 * :cpp:func:`meq::GradShafranovSolver::flux` and
-  :cpp:func:`meq::GradShafranovSolver::postProcessedFlux` return meq's
+  :cpp:func:`meq::GradShafranovSolver::postProcessedFlux` return MEQ's
   :math:`+q`. :cpp:func:`meq::GradShafranovSolver::totalFlux` is in the
   library's convention, deliberately, because the constraint equation it is
   projected through is written that way.
@@ -271,7 +271,7 @@ and since both papers define :math:`-\dstar\psi = F`, the source is
 :math:`F = -((1-A)r^2 + A)`. The twelve homogeneous terms contribute nothing,
 being :math:`\dstar`-harmonic.
 
-meq does not take this on trust. The Solov'ev fixture recomputes
+MEQ does not take this on trust. The Solov'ev fixture recomputes
 :math:`\dstar\psi` by central differences and the test suite asserts it against
 the very :math:`F` the solver is fed, so the whole twelve-term transcription is
 checked rather than believed.
@@ -333,7 +333,7 @@ factorisation and, through the Schur complement, the global trace matrix.
    Dirichlet datum is not, because the datum on a face depends on the flux
    along a path leaving the element. That is a property of the method
    :cite:p:`CockburnSolano2012`, not of this implementation — and it means
-   meq's headline configuration is genuinely non-symmetric, which is why an
+   MEQ's headline configuration is genuinely non-symmetric, which is why an
    unsymmetric sparse LU is the right solver for it. See
    :doc:`linear_solvers`.
 
@@ -351,4 +351,4 @@ preconditioning meaningful.
 
    More generally: this is the place where measuring only the easy
    configuration was most misleading. Symmetry held to round-off on a fitted
-   rectangle and failed outright on the geometry meq is actually for.
+   rectangle and failed outright on the geometry MEQ is actually for.

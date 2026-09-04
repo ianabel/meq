@@ -41,7 +41,7 @@
  * post-processed solution in P_(k+1) -- GradShafranovSolver::postProcess(). The
  * paper is explicit about eta_2: built on the raw psi_h it converges at REDUCED
  * order, because it differentiates the approximation, and substituting psi*
- * is what preserves k+1. meq's pre-modernisation estimator used raw psi_h
+ * is what preserves k+1. MEQ's pre-modernisation estimator used raw psi_h
  * throughout and was a degraded copy of the published one.
  *
  * That is a claim, and this class is arranged so that it is a measurement:
@@ -61,7 +61,7 @@
  *
  * ETA_5 AS PRINTED DOES NOT VANISH ON THE EXACT SOLUTION.
  *
- * This is the one place meq departs from eq (20) as written, and the reason is
+ * This is the one place MEQ departs from eq (20) as written, and the reason is
  * provable rather than a matter of taste. psihat_h lives in M_h = P_k( e );
  * psi*'s trace on e is a polynomial of degree k+1, which no element of M_h can
  * represent. Writing P_M for the L2( e ) projection onto M_h, orthogonality

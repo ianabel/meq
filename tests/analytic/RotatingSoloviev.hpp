@@ -43,23 +43,23 @@ namespace analytic
 /*
  * SIGN AND WEIGHT CONVENTION -- read this before using the class.
  *
- * Li & Zhu's eq (7) and meq agree on the operator:
+ * Li & Zhu's eq (7) and MEQ agree on the operator:
  *
  *     Delta*( psi ) := d_rr psi - ( 1/r ) d_r psi + d_zz psi,
  *
- * which is the same thing as meq's r d_r( ( 1/r ) d_r psi ) + d_zz psi. Their
+ * which is the same thing as MEQ's r d_r( ( 1/r ) d_r psi ) + d_zz psi. Their
  * eq (12) is
  *
  *     Delta*( psi ) = -p1 r^2 exp[ M2 ( r^2/R0^2 - 1 ) ] - F0,
  *
- * and meq writes the equation as -Delta*( psi ) = F, so
+ * and MEQ writes the equation as -Delta*( psi ) = F, so
  *
  *     F( r, z, psi ) = p1 r^2 exp[ M2 ( r^2/R0^2 - 1 ) ] + F0.            (*)
  *
  * POSITIVE, and F is the full right hand side numerator with no 1/r applied,
  * as everywhere else in this directory.
  *
- * (*) is also literally meq's own F = mu0 r^2 dp/dpsi + g dg/dpsi, read with
+ * (*) is also literally MEQ's own F = mu0 r^2 dp/dpsi + g dg/dpsi, read with
  *
  *     mu0 dp/dpsi|_r = p1 exp[ M2 ( r^2/R0^2 - 1 ) ],     g dg/dpsi = F0,
  *
@@ -70,7 +70,7 @@ namespace analytic
  * deltaStarFD() below recomputes Delta*( psi ) by central differences and
  * RotatingSolovievConvergence.cpp asserts it against -f() over the benchmark
  * box, so the transcription of the twelve-odd terms below is checked rather
- * than trusted -- and so a closure that differs from meq's goes red at once
+ * than trusted -- and so a closure that differs from MEQ's goes red at once
  * rather than converging beautifully to somebody else's equilibrium.
  */
 
@@ -177,7 +177,7 @@ class RotatingSolovievEquilibrium
 		 * Li & Zhu print no c1 ... c4: their section 3.1 gives the closed form
 		 * and leaves the geometry to the reader, exactly as HDG-GradShafranov.pdf
 		 * does for its Examples 1-3. So each set below was SOLVED, from four
-		 * conditions chosen to put a closed psi = 0 contour well inside meq's
+		 * conditions chosen to put a closed psi = 0 contour well inside MEQ's
 		 * standard benchmark box [0.6,1.4] x [-0.6,0.6]:
 		 *
 		 *     psi( 1.3, 0    ) = 0        the outer equatorial point
@@ -334,7 +334,7 @@ class RotatingSolovievEquilibrium
 		}
 
 		/// The Grad-Shafranov source,
-		/// F = p1 r^2 exp[ M2 ( r^2/R0^2 - 1 ) ] + F0, from eq (12) and meq's
+		/// F = p1 r^2 exp[ M2 ( r^2/R0^2 - 1 ) ] + F0, from eq (12) and MEQ's
 		/// -Delta*( psi ) = F. Returns F, not F/r.
 		///
 		/// Independent of psi, which is what makes this equilibrium linear --

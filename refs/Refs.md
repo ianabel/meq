@@ -509,9 +509,24 @@ MORE DIRECTLY THAN ANYTHING ELSE IN THIS LIST.**
   and attributes it to being *"restricted to operating in straight field-line
   coordinates, which may appear to be a disadvantage compared to the optimal
   poloidal angle of the VMEC formulation"* -- **Hirshman & Breslau**,
-  *Phys. Plasmas* **5**, 2664-2675 (1998), spectral condensation. Neither title
-  is verified against Crossref; both bibliographic records are taken from DESC's
-  own reference list.
+  spectral condensation.
+
+  **BOTH ARE NOW IN `refs/` AND BOTH RECORDS ARE VERIFIED FROM THE PDFs,
+  2026-09-04**, which is what this file's preamble means by checking a citation
+  rather than inheriting one:
+
+  | | |
+  |---|---|
+  | `LewisBellan.pdf` | *Physical constraints on the coefficients of Fourier expansions in cylindrical coordinates*, H. R. Lewis & P. M. Bellan, *J. Math. Phys.* **31**, 2592-2596 (1990), `10.1063/1.529009` |
+  | `HirshmanBreslau.pdf` | *Explicit spectrally optimized Fourier series for nested magnetic surfaces*, S. P. Hirshman & J. Breslau, *Phys. Plasmas* **5**, 2664-2675 (1998), `10.1063/1.872954` |
+  | `HirshmanVMEC.pdf` | *Steepest-descent moment method for three-dimensional magnetohydrodynamic equilibria*, S. P. Hirshman & J. C. Whitson, *Phys. Fluids* **26**, 3553-3568 (1983), `10.1063/1.864116` -- VMEC itself, and the origin of the optimal poloidal angle DESC compares itself against |
+
+  Both titles taken from DESC's reference list survived the check unchanged, and
+  so did the volumes and the pages. **What could NOT be verified is Panici**:
+  `refs/DESC-Panici.pdf` is `arXiv:2203.17173v3` and carries no journal DOI at
+  all, only a Zenodo one for the software. Its journal, volume and article
+  number had been supplied from memory, so the bibliography now cites the
+  preprint, which is what the document itself can be checked against.
 * **And Panici measures the mechanism that fixes it**: *"DESC, while not
   explicitly enforcing any poloidal angle constraints, ends up finding an optimal
   representation through the course of the optimization procedure."* A solve

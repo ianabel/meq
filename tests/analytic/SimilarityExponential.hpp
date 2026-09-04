@@ -31,7 +31,7 @@
  *     Delta* u = r d_r( (1/r) d_r u ) + d_zz u
  *              = d_rr u - (1/r) d_r u + d_zz u.
  *
- * So their equation is -Delta*(u) = f(u) + g(u) r^2, which is meq's
+ * So their equation is -Delta*(u) = f(u) + g(u) r^2, which is MEQ's
  * -Delta*(psi) = F with
  *
  *     F( r, z, psi ) = f(psi) ( 1 + epsilon r^2 ),     epsilon := a^2 / b^2.

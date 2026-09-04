@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Plot a meq equilibrium from its NetCDF output.
+"""Plot a MEQ equilibrium from its NetCDF output.
 
-Reads the ( R, Z ) grid file meq writes -- psi, B_R, B_Z and the `inside`
+Reads the ( R, Z ) grid file MEQ writes -- psi, B_R, B_Z and the `inside`
 mask -- and draws flux surfaces, field magnitude, or both.
 
     tools/plot_equilibrium.py run.nc
     tools/plot_equilibrium.py run.nc --what surfaces --levels 30 -o psi.png
     tools/plot_equilibrium.py run.nc --what both --show
 
-WHY THE MASK IS USED RATHER THAN THE FILL VALUE.  meq writes NaN outside the
+WHY THE MASK IS USED RATHER THAN THE FILL VALUE.  MEQ writes NaN outside the
 domain *and* a zero in `inside`, deliberately, because some readers honour the
 fill attribute and some do not.  This script trusts `inside`: a NaN that
 arrived some other way -- a solve that diverged, say -- is then still visible
@@ -30,7 +30,7 @@ import numpy as np
 
 
 def read(path):
-    """Pull the fields out of a meq NetCDF file, masked to the domain."""
+    """Pull the fields out of a MEQ NetCDF file, masked to the domain."""
     try:
         from netCDF4 import Dataset
     except ImportError:
@@ -41,7 +41,7 @@ def read(path):
                    if n not in ds.variables]
         if missing:
             sys.exit(f"plot_equilibrium: {path} has no {', '.join(missing)} -- "
-                     "is it a meq output file?")
+                     "is it a MEQ output file?")
 
         data = {
             "R": np.asarray(ds.variables["R"][:], dtype=float),
@@ -51,7 +51,7 @@ def read(path):
             "B_Z": np.asarray(ds.variables["B_Z"][:], dtype=float),
         }
         # `inside` is optional only so that a file written by something other
-        # than meq still plots; meq always writes it.
+        # than MEQ still plots; MEQ always writes it.
         if "inside" in ds.variables:
             data["inside"] = np.asarray(ds.variables["inside"][:]) != 0
         else:
@@ -147,8 +147,8 @@ def draw(ax, data, what, levels):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Plot a meq equilibrium from its NetCDF output.")
-    parser.add_argument("file", help="the .nc file meq wrote")
+        description="Plot a MEQ equilibrium from its NetCDF output.")
+    parser.add_argument("file", help="the .nc file MEQ wrote")
     parser.add_argument("--what", default="both",
                         choices=("surfaces", "field", "both"),
                         help="flux surfaces, |B_pol|, or both (default: both)")
@@ -174,7 +174,7 @@ def main(argv=None):
     figure, ax = plt.subplots(figsize=(5.5, 7.0))
     draw(ax, data, args.what, args.levels)
 
-    title = data["attributes"].get("title", "meq equilibrium")
+    title = data["attributes"].get("title", "MEQ equilibrium")
     line = subtitle(data["attributes"])
     ax.set_title(f"{title}\n{line}" if line else title, fontsize="medium")
     figure.tight_layout()

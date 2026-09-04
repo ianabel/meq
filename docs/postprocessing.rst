@@ -3,7 +3,7 @@ Post-processing: :math:`\psi^\star`
 
 HDG methods admit an element-local post-processing that produces a potential
 one polynomial degree richer than the one the solver carries, and which
-converges one order faster :cite:p:`Stenberg1991`. meq computes it on request,
+converges one order faster :cite:p:`Stenberg1991`. MEQ computes it on request,
 and its error estimator is built on it.
 
 .. code-block:: cpp
@@ -37,7 +37,7 @@ Newton path and the extension path.
 
 .. important::
 
-   **It is what meq reports.** Every output except the restart file carries
+   **It is what MEQ reports.** Every output except the restart file carries
    :math:`\psi^\star` rather than :math:`\psi_h`, so the driver post-processes
    on every run and not only on adaptive ones. :ref:`output-which-potential`
    says which file is which, and why the restart file is the exception.
@@ -51,7 +51,7 @@ raw :math:`\psi_h` instead loses exactly one order at every :math:`k` — which
 was measured, and is the defect the pre-modernisation estimator in this project
 had. :doc:`adaptivity` says what that costs an adaptive run.
 
-meq keeps the degraded version reachable, as
+MEQ keeps the degraded version reachable, as
 :cpp:enumerator:`meq::ResidualEstimator::Potential::Raw`, precisely so that the
 difference stays measured rather than argued about.
 
@@ -60,7 +60,7 @@ difference stays measured rather than argued about.
    The published method post-processes *nonlinearly*, carrying the source terms
    into the local problem. :cite:t:`SanchezVizuet2020adaptive` records that
    dropping them and using plain linear post-processing is also effective in
-   the semi-linear case, and that is what meq does — the underlying library
+   the semi-linear case, and that is what MEQ does — the underlying library
    lifts the nonlinear potential integrators as a Jacobian frozen at the
    computed potential, and the result converges at :math:`k+2` regardless.
 
@@ -95,7 +95,7 @@ correct answer. That is a singular matrix and nothing else.
 
 .. important::
 
-   meq deliberately carries **no runtime check** for this. A solver should not
+   MEQ deliberately carries **no runtime check** for this. A solver should not
    stand permanently on guard against its dependency. The state of the defect
    lived in the test suite instead, as a test asserting the *correct* behaviour
    and failing until the library was fixed — at which point it flipped green on
@@ -118,7 +118,7 @@ The other outputs
 ``postProcess()`` also produces two flux quantities:
 
 :cpp:func:`meq::GradShafranovSolver::postProcessedFlux`
-   the enriched flux, in meq's sign convention.
+   the enriched flux, in MEQ's sign convention.
 
 :cpp:func:`meq::GradShafranovSolver::totalFlux`
    the total flux including the stabilisation contribution, in **the library's**

@@ -22,7 +22,7 @@
  *
  *     B_R = -( 1/r ) d_z psi,      B_Z = +( 1/r ) d_r psi.
  *
- * AND meq ALREADY SOLVES FOR THAT. The HDG flux variable is
+ * AND MEQ ALREADY SOLVES FOR THAT. The HDG flux variable is
  * q = ( 1/r ) grad_bar( psi ) = ( q_r, q_z ), so
  *
  *     B_R = -q_z,      B_Z = +q_r
@@ -58,7 +58,7 @@ namespace meq
 {
 	/// B_pol from the HDG flux q, as a vdim-2 GridFunction on q's own space:
 	/// B_R = -q_z, B_Z = +q_r. @a q must be what
-	/// GradShafranovSolver::flux() returns, in meq's sign convention.
+	/// GradShafranovSolver::flux() returns, in MEQ's sign convention.
 	///
 	/// @a field is resized and given q's space if it does not have one. The
 	/// spaces must match if it does.

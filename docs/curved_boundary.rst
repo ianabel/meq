@@ -1,7 +1,7 @@
 Curved boundaries
 =================
 
-The plasma boundary :math:`\Gamma` is a smooth curve. A mesh is not. meq does
+The plasma boundary :math:`\Gamma` is a smooth curve. A mesh is not. MEQ does
 not attempt to reconcile the two by fitting the mesh: it solves on a polygonal
 subdomain lying strictly inside the plasma and **transfers** the boundary
 condition outward, which is the technique of :cite:t:`CockburnSolano2012`
@@ -25,7 +25,7 @@ rate whatever the polynomial degree**, and the cap is severe.
 At an interior angle :math:`\pi - 2\pi/N` of an :math:`N`-gon, the solution
 acquires a corner singularity whose exponent approaches 1 as :math:`N` grows,
 and interior pollution spreads it. Measured on a fixed 40-gon at :math:`k = 3`,
-meq converged at close to *second* order where a Solov'ev control on the very
+MEQ converged at close to *second* order where a Solov'ev control on the very
 same meshes converged at fourth. No amount of accuracy inside the elements
 recovers that, because there is nothing wrong with the elements — the *domain*
 is wrong.
@@ -43,7 +43,7 @@ Given a level set for :math:`\Gamma`:
    :math:`\Gamma_h` — inscribed in the plasma, since every element of
    :math:`\Omega_h` is entirely inside.
 #. **Build transfer paths.** From each point on :math:`\Gamma_h`, a short path
-   runs out to :math:`\Gamma`. meq uses a vertex-cone family, which is one of
+   runs out to :math:`\Gamma`. MEQ uses a vertex-cone family, which is one of
    several the underlying library provides.
 #. **Impose the transferred datum.** The value on :math:`\Gamma_h` is not the
    boundary condition itself; it is the boundary condition on :math:`\Gamma`
@@ -78,7 +78,7 @@ end of :doc:`formulation`.
    **The box must contain the shape with room to spare.** If :math:`\Omega_h`
    reaches the edge of the background mesh, part of :math:`\Gamma_h` is an
    inherited mesh boundary carrying no transferred datum, and zero would be
-   imposed there instead — quietly, and the run would converge. meq checks for
+   imposed there instead — quietly, and the run would converge. MEQ checks for
    this and refuses rather than solving it, and it also refuses a shape that
    encloses no background element at all.
 

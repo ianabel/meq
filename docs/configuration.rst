@@ -61,7 +61,7 @@ Counts do **not** — ``NR = 4.0`` is refused rather than truncated.
    remedy in the TOML library used here **returns the default** when a
    conversion fails, because a failed conversion is indistinguishable from a
    missing key. That turns a loud failure into a silent wrong answer in the
-   configuration, which is the last place anybody wants one. meq therefore
+   configuration, which is the last place anybody wants one. MEQ therefore
    checks the node's type explicitly.
 
 Every error is a :cpp:class:`meq::ConfigError`, carrying the file name and the
@@ -72,7 +72,7 @@ accessor meaningful, or throws**; there is no partially valid configuration.
 ``[mesh]``
 ----------
 
-The background mesh: either a box that meq triangulates, or a file.
+The background mesh: either a box that MEQ triangulates, or a file.
 
 .. list-table::
    :header-rows: 1
@@ -402,19 +402,19 @@ since that is an ellipse.
    * - ``NewtonAbsoluteTolerance``
      - ``1.0e-12``
      - 
-   * - ``LinearMaxIterations``
-     - ``1000``
-     - 
-   * - ``LinearTolerance``
-     - ``1.0e-12``
-     - 
 
 .. note::
 
-   ``LinearMaxIterations`` and ``LinearTolerance`` are parsed and validated but
-   **not currently consumed** by the driver, which drives a direct solver. They
-   are documented here because they are accepted; do not read a change in them
-   as having had an effect.
+   ``LinearMaxIterations`` and ``LinearTolerance`` were once accepted here and
+   are now **refused**, with a message saying why. They configure an *iterative*
+   inner solve, and MEQ solves the hybridized trace system with a **direct**
+   solver — UMFPACK, PARDISO or cuDSS — which has no iteration count and no
+   tolerance to set.
+
+   They were parsed and validated and read by nothing, which is worse than
+   either accepting or rejecting them: a key that validates is a key its author
+   believes is doing something. If you have a configuration file carrying
+   either, delete the line.
 
 ``[output]``
 ------------
@@ -428,7 +428,7 @@ since that is an ellipse.
      - Meaning
    * - ``Directory``
      - ``"."``
-     - **Not created by meq.** A missing directory is exit code 3.
+     - **Not created by MEQ.** A missing directory is exit code 3.
    * - ``Prefix``
      - ``"meq"``
      - The stem of every output name; must not be empty.

@@ -4,7 +4,7 @@
 /*
  * The plasma boundary as a parametrised closed curve, and as a level set.
  *
- * meq's fixed-boundary problem takes Gamma to be a known curve. On the fitted
+ * MEQ's fixed-boundary problem takes Gamma to be a known curve. On the fitted
  * path that curve is the mesh boundary; on the extension path of stage 5 it is
  * a level set, and everything downstream -- MarkLevelSetSubdomain, the SubMesh,
  * VertexConePath -- reaches the geometry only through a function that is
@@ -13,7 +13,7 @@
  *
  * NO MFEM HERE, deliberately, as in Profiles.hpp and Source.hpp. Plain doubles,
  * so the geometry is unit-testable without the finite element library and CI --
- * which cannot obtain meq's MFEM branch -- can test it. The mfem::Coefficient
+ * which cannot obtain MEQ's MFEM branch -- can test it. The mfem::Coefficient
  * adapter lives with the assembly that needs it.
  *
  * ONE PARAMETRISATION, NOT TWO. Miller and MXH are the same formula:

@@ -2,7 +2,7 @@ Linear solvers and threading
 ============================
 
 A hybridized HDG scheme needs exactly two linear solvers: one for the global
-face-coupled trace system, one for the small dense per-element systems. meq has
+face-coupled trace system, one for the small dense per-element systems. MEQ has
 a **third**, and it is not an oversight — it is the price of using Newton.
 
 .. list-table::
@@ -10,7 +10,7 @@ a **third**, and it is not an oversight — it is the price of using Newton.
    :widths: 26 30 44
 
    * - System
-     - What meq uses
+     - What MEQ uses
      - Notes
    * - Global trace
      - A sparse direct solver, selectable at run time
@@ -20,7 +20,7 @@ a **third**, and it is not an oversight — it is the price of using Newton.
      - LU on the flux block, a local Schur complement, LU on that.
    * - Per-element **nonlinear**
      - An element-local Newton
-     - **Only under** ``CondenseThenLinearise``. meq's default ordering removes
+     - **Only under** ``CondenseThenLinearise``. MEQ's default ordering removes
        it entirely; see :ref:`nonlinear-ordering`.
 
 And a fourth thing that is not a fourth solver: when :math:`\psiax` is an
@@ -74,12 +74,12 @@ of thousands of trace degrees of freedom factorises in a fraction of a second.
 Algebraic multigrid earns its place in three dimensions or in parallel, and
 serial MFEM has none in any case.
 
-The trace system is also **not symmetric** on meq's headline configuration —
+The trace system is also **not symmetric** on MEQ's headline configuration —
 see :ref:`formulation-symmetry` — so an unsymmetric LU is the right kind of
 factorisation. On a *fitted* mesh the matrix is symmetric and negative definite,
 so a Cholesky factorisation or a symmetric Krylov method on :math:`-A` would
 apply there; it would be wrong wherever :math:`\Gamma` is curved, which is what
-meq is for.
+MEQ is for.
 
 .. note::
 
@@ -89,7 +89,7 @@ meq is for.
    switched on for the Newton and Picard paths and deliberately off for the
    linear path, where the object is factorised once and destroyed.
 
-   meq verifies this **by count rather than by clock** —
+   MEQ verifies this **by count rather than by clock** —
    :cpp:func:`meq::GradShafranovSolver::symbolicFactorisations` against
    :cpp:func:`meq::GradShafranovSolver::numericFactorisations` — on purpose: a
    timing would be a measurement about the machine, and this is a measurement
@@ -120,7 +120,7 @@ That third entry is the surprise, and it is why the axes must be separated.
 
 .. warning::
 
-   **Set** ``MKL_NUM_THREADS=1``. meq's inner loop factorises a great many
+   **Set** ``MKL_NUM_THREADS=1``. MEQ's inner loop factorises a great many
    *small* dense matrices — one or two per element, per residual evaluation —
    and above a block size that depends on your BLAS, each of those calls pays for
    a thread fork and a barrier that dwarfs the arithmetic. Measured on the
@@ -129,7 +129,7 @@ That third entry is the surprise, and it is why the axes must be separated.
    unusable and would have looked like a solver problem rather than a threading
    one.
 
-   Where the threshold sits is a property of your BLAS, not of meq, so **measure
+   Where the threshold sits is a property of your BLAS, not of MEQ, so **measure
    it on your machine**. Every registered test sets the variable for itself, and
    it is a no-op on a machine without MKL.
 
@@ -137,7 +137,7 @@ That third entry is the surprise, and it is why the axes must be separated.
 
    **This is in genuine tension with the threaded trace solvers**, which want
    MKL threads and are measurably faster with them. ``MKL_NUM_THREADS`` is
-   process-wide, so meq cannot have both, and the setting that makes the trace
+   process-wide, so MEQ cannot have both, and the setting that makes the trace
    solve fast is the setting that makes the element-local factorisations slow.
    Resolving it needs the element-local factorisation to stop going through
    threaded MKL — either a thread-count scope around the trace solve, or a
@@ -150,9 +150,9 @@ Threaded assembly
 :cpp:func:`meq::GradShafranovSolver::setAssemblyMode` threads the element-local
 half of the hybridization's assembly. It requires MFEM built with both OpenMP
 and thread safety, and it *aborts* rather than falling back without them — so
-meq refuses it at the setter with a clear message instead.
+MEQ refuses it at the setter with a clear message instead.
 
-The two modes agree **bit for bit**, which meq asserts as an exact equality
+The two modes agree **bit for bit**, which MEQ asserts as an exact equality
 rather than a tolerance: the mechanism is specific, in that element-local
 arithmetic reassociates nothing and the scatter stays serial and in element
 order. The scatter is also the ceiling, and it cannot be threaded — an
@@ -193,13 +193,13 @@ and a threaded timing on one machine is a measurement about that machine.
    **A GPU device timing must synchronise inside the timing loop.** A device
    solver queues work on a stream and returns; timed without a synchronise, a
    large factorisation reads several orders of magnitude too fast — and
-   *plausibly* so. meq's harness synchronises for **every** solver, CPU ones
+   *plausibly* so. MEQ's harness synchronises for **every** solver, CPU ones
    included, so that the synchronise can never be the thing that was forgotten.
 
 .. note::
 
    **Local GPU results here are correctness evidence, not performance
-   evidence.** meq is built for double precision, and consumer graphics cards
+   evidence.** MEQ is built for double precision, and consumer graphics cards
    run double precision at a small fraction of their single-precision rate where
    datacentre parts run it at about half — so a device timing on a workstation
    can invert the conclusion a production part would give.

@@ -81,7 +81,7 @@ namespace meq
 			 *                  sampled, so it must already be sized.
 			 * @return          how many nodes fell outside the source mesh.
 			 *
-			 * The nodal reading is exact for the Gauss-Legendre L2 spaces meq
+			 * The nodal reading is exact for the Gauss-Legendre L2 spaces MEQ
 			 * uses, where a dof IS a point value. It is an interpolation rather
 			 * than a projection for anything else, which for a starting guess is
 			 * the right trade -- one pass, no mass matrix.

@@ -1,7 +1,7 @@
-meq
+MEQ
 ===
 
-**meq** — the Maryland Equilibrium Solver — computes axisymmetric plasma
+**MEQ** — the Maryland Equilibrium Solver — computes axisymmetric plasma
 equilibria by solving the **Grad–Shafranov** equation with a hybridizable
 discontinuous Galerkin (HDG) discretisation built on `MFEM
 <https://mfem.org>`_.
@@ -25,11 +25,11 @@ where :math:`\gradbar := (\partial_r, \partial_z)` and the source
 
 is built from the plasma pressure :math:`p(\psi)` and the toroidal field
 function :math:`g(\psi)`. Because those are functions of :math:`\psi`, the
-problem is semi-linear, and meq solves it by **Newton** rather than by the
+problem is semi-linear, and MEQ solves it by **Newton** rather than by the
 Picard iteration the source papers use — a choice with consequences that reach
 into every part of the code, and which :doc:`nonlinear` explains.
 
-What meq does
+What MEQ does
 -------------
 
 * **Solves the fixed-boundary problem to optimal order.** Both the flux
@@ -57,13 +57,13 @@ What meq does
 * **Writes three output formats**, deliberately, because no one of them is both
   exact and portable. See :doc:`output`.
 
-meq is usable two ways: as the ``meq`` program, driven by a TOML configuration
+MEQ is usable two ways: as the ``meq`` program, driven by a TOML configuration
 file, and as a C++ library whose central class is
 :cpp:class:`meq::GradShafranovSolver`.
 
 .. note::
 
-   meq is **serial** throughout, and 2D. There is no MPI in it. The problem
+   MEQ is **serial** throughout, and 2D. There is no MPI in it. The problem
    sizes it is built for — a few tens of thousands of trace degrees of freedom
    — are ones a sparse direct solver handles comfortably on one core, and
    :doc:`linear_solvers` explains why that is the right trade at this size
@@ -76,13 +76,13 @@ Building it and running something is :doc:`install` then :doc:`running`.
 :doc:`configuration` is the reference for every key in a configuration file.
 
 If you want to understand what the solver is doing — and in particular the two
-sign conventions, which are the most common way to get an extension of meq
+sign conventions, which are the most common way to get an extension of MEQ
 subtly wrong — read :doc:`formulation` first. If you are choosing a nonlinear
 solver strategy for a problem that is not converging, go to :doc:`nonlinear`.
 
 .. admonition:: A note on numbers in these pages
 
-   Many of meq's design choices could only be settled by measurement, and this
+   Many of MEQ's design choices could only be settled by measurement, and this
    documentation says so where that is the case. It does **not** reproduce the
    measurements. Where a choice is exposed as a configurable option — the trace
    solver, the assembly mode, the nonlinear ordering, the globalisation — the
@@ -97,7 +97,7 @@ solver strategy for a problem that is not converging, go to :doc:`nonlinear`.
 
 .. toctree::
    :maxdepth: 2
-   :caption: Using meq
+   :caption: Using MEQ
 
    install
    running

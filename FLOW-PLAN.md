@@ -20,7 +20,7 @@ finding `I(ψ)` from it is `ROADMAP.md` item 10 and `INVERSION-PLAN.md`, not thi
 
 ## 1. What changed, and what did not
 
-**What did not change is most of meq.** The operator is still `Δ*`, the
+**What did not change is most of MEQ.** The operator is still `Δ*`, the
 discretisation is still LDG-H on `DarcyForm`, `τ` is still constant, the
 hybridization, the estimator, the adaptive loop and the curved-boundary
 extension are all untouched. **Rotation is a change to `F` alone**, and that was
@@ -43,11 +43,11 @@ below.
 
 ---
 
-## 2. The equation, in meq's convention
+## 2. The equation, in MEQ's convention
 
 ### 2.1 The three equations
 
-meq solves `−∇̄·( (1/r) ∇̄ψ ) = F/r`, i.e. `−Δ*ψ = F`. RoPP is Gaussian; in SI,
+MEQ solves `−∇̄·( (1/r) ∇̄ψ ) = F/r`, i.e. `−Δ*ψ = F`. RoPP is Gaussian; in SI,
 with `g ≡ r B_φ` for its `I` and `μ₀` for its `4π`:
 
 ```
@@ -89,7 +89,7 @@ which is `MHDSource`'s shape with an `r`-dependent `p`. Three consequences:
 the paper writes out, so it wants re-checking before anything rests on it.** It
 is the paper's own force balance (128), `(1/c) j×B = ∇p − ρ (ω²/2) ∇(r²)`,
 projected on `∇ψ`. And at `ω → 0` it gives `F → μ₀ r² Σ_s p_s′ + g g′`, which is
-the paper's low-Mach result (243) and **is meq's current equation**.
+the paper's low-Mach result (243) and **is MEQ's current equation**.
 
 ### 2.3 Conventions, pinned before any code
 
@@ -98,18 +98,18 @@ is a genuine hazard.
 
 | | |
 |---|---|
-| **units** | RoPP is Gaussian (`4π` in (136), `c` in (135)). meq is SI. `4π → μ₀`, `I → g` |
+| **units** | RoPP is Gaussian (`4π` in (136), `c` in (135)). MEQ is SI. `4π → μ₀`, `I → g` |
 | **the sign of `Δ*`** | RoPP (135) is `j·∇φ = −(c/4πr²) Δ*ψ`, so (136) reads `Δ*ψ = −4πr²{…}`, so `F = −Δ*ψ = +μ₀r²{…}`. **Positive**, and matching `MHDSource`'s `F = μ₀ r² p′ + g g′` |
-| **the `2π` in `ψ`** | **checked and consistent.** RoPP (31) is `B = I∇φ + ∇ψ×∇φ`, so `B_φ = I/r` and `I = r B_φ = g`; `ψ` is poloidal flux **per radian**, which is what meq's `g g′` in `T²m²` per Wb/rad already assumes, and what EQDSK tabulates as `FF′` |
-| **`Δ*` itself** | RoPP (125), Li & Zhu (7) and meq all agree: `∂²/∂r² − (1/r)∂/∂r + ∂²/∂z²` |
+| **the `2π` in `ψ`** | **checked and consistent.** RoPP (31) is `B = I∇φ + ∇ψ×∇φ`, so `B_φ = I/r` and `I = r B_φ = g`; `ψ` is poloidal flux **per radian**, which is what MEQ's `g g′` in `T²m²` per Wb/rad already assumes, and what EQDSK tabulates as `FF′` |
+| **`Δ*` itself** | RoPP (125), Li & Zhu (7) and MEQ all agree: `∂²/∂r² − (1/r)∂/∂r + ∂²/∂z²` |
 
 **Write the conversion down in the header of the new source and assert it in a
-unit test.** Two sign errors have already been found in the papers meq *does*
+unit test.** Two sign errors have already been found in the papers MEQ *does*
 follow, and neither was visible in a convergence rate.
 
 ---
 
-## 3. The gauge is free, and meq takes the local one
+## 3. The gauge is free, and MEQ takes the local one
 
 ### 3.1 The freedom is exact
 
@@ -128,7 +128,7 @@ which leaves `n_s` of (96) unchanged, hence leaves (97) satisfied, hence leaves
 sympy for two species; §2.2 is the same statement, since both reduce to
 `Σ_s Z_s n_s = 0`.)
 
-### 3.2 meq takes `φ₀(r_ref, ψ) = 0`
+### 3.2 MEQ takes `φ₀(r_ref, ψ) = 0`
 
 **`r_ref` is a constant** — the geometric axis `R₀`, given in the configuration —
 **not the magnetic axis and not a flux-surface average.** The consequences:
@@ -145,7 +145,7 @@ sympy for two species; §2.2 is the same statement, since both reduce to
 
 `⟨φ₀⟩_ψ = 0` makes `φ₀ ∝ r² − ⟨r²⟩_ψ` (RoPP footnote 33 says so directly), and
 `⟨r²⟩_ψ` is a flux-surface average of the unknown. That is a non-local closure on
-**every** surface, not one scalar like `ψ_ax`, and meq has no flux-surface-average
+**every** surface, not one scalar like `ψ_ax`, and MEQ has no flux-surface-average
 machinery at all — `FluxSurfaces` was a `v0-legacy` driver and was not ported.
 It would be a larger piece of work than the rest of this plan put together, and
 it buys nothing physical.
@@ -297,7 +297,7 @@ so no chain rule exists to get wrong — is **unavailable with rotation**, since
 `p` depends on `ω`, `T_s` and `n_s0` separately and on `r`. Two classes with
 different invariants, not one with a mode.
 
-### 5.3 `[[source.species]]` is meq's first array of tables, and the old reader refused one
+### 5.3 `[[source.species]]` is MEQ's first array of tables, and the old reader refused one
 
 An array of tables *is* an array, so the existing nested-table reader's
 `is_table()` check rejected it — even though TOML nests `[[a.b]]` under `[a]`
@@ -444,7 +444,7 @@ Solov'ev case has `T` and `Ω` constant for the same reason — and it is precis
 the term whose sign they got wrong. Only the `dFdPsi` sweep of FL-3, over
 profiles with genuine `ψ`-dependence in `ω` and `T`, touches it. And second: `p_T`
 is linear in `ψ` and `g g′` is constant, so `∂F/∂ψ = 0` and this sits **beside
-`Soloviev.hpp` on meq's ladder, not beside `McCarthy.hpp`**. Within M&P's ansatz
+`Soloviev.hpp` on MEQ's ladder, not beside `McCarthy.hpp`**. Within M&P's ansatz
 it cannot be made into a Jacobian test.
 
 * **M&P §3, the actual polytrope**, is a different closure and is **not** usable:
@@ -478,7 +478,7 @@ that are not recorded there.
 
 **FL-2 was the stage to protect** — it exercises the species container, the
 profile chain rule, `φ₀`, the units conversion and the sign of `Δ*` against an
-answer meq already has to fifteen digits, so a wrong `4π`, `2π` or sign shows as
+answer MEQ already has to fifteen digits, so a wrong `4π`, `2π` or sign shows as
 a wrong number rather than as a plausible equilibrium. **FL-4 before FL-5 was
 deliberate**: FL-4 is linear, so a failure there cannot be the Jacobian.
 
@@ -536,7 +536,7 @@ not worth an extra Mach number.
 
 ## 8. Risks, in the order they are likely to bite
 
-**The source is exponential in `M²`, and meq has no experience of that.**
+**The source is exponential in `M²`, and MEQ has no experience of that.**
 `p ∝ exp[ m_i ω² r² / 2T_eff ]` varies by `e^{M²/2}` across a surface — a factor
 of 7 at `M = 2`. `CLAUDE.md`'s reaction-ratio diagnostic `max|∂F/∂ψ|/λ₁` is the
 thing to measure, over the solution's *actual* range and not over a nominal one,
@@ -544,7 +544,7 @@ which is a mistake this project has already made once. Measure it at FL-3, befor
 any solve depends on it.
 
 **Rotation is reported to make the iteration harder.** Li & Zhu note that the
-optimal range of their Picard relaxation parameter *narrows* with rotation. meq
+optimal range of their Picard relaxation parameter *narrows* with rotation. MEQ
 uses Newton, which should help, but the honest position is that this is unmeasured
 and the reactive ladder should be exercised on the rotating cases rather than
 assumed adequate.
@@ -580,7 +580,7 @@ the kind this project has found hardest to notice.
 * **Anisotropic pressure.** Independent of rotation and with no reference pinned;
   `TODO` carries the seeds.
 * **The transport-timescale evolution.** RoPP §8 and (252)–(254) evolve `n_s`,
-  `T_s` and `ω`. meq computes an instantaneous equilibrium; the evolution is
+  `T_s` and `ω`. MEQ computes an instantaneous equilibrium; the evolution is
   MaNTA's, and `MANTA-COUPLING.md` is where that conversation lives.
 * **`F₁s`, neoclassical and the gyrokinetic equation.** RoPP's §7.1 and §7.4 are
-  the rest of the paper and are nothing to do with meq.
+  the rest of the paper and are nothing to do with MEQ.

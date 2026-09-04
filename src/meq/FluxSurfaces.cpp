@@ -259,7 +259,7 @@ namespace meq
 			throw std::invalid_argument( "ContourTracer: the flux must have vdim 2" );
 
 		if ( meshRef.Dimension() != 2 )
-			throw std::invalid_argument( "ContourTracer: meq is two dimensional" );
+			throw std::invalid_argument( "ContourTracer: MEQ is two dimensional" );
 
 		if ( potentialIn.FESpace()->GetMesh() != &meshRef )
 			throw std::invalid_argument(
@@ -513,7 +513,7 @@ namespace meq
 
 		// The square root of the transformation's own volume measure. For a
 		// straight triangle with legs a and b that is sqrt( a b ), which is the
-		// leg length on the meshes meq runs; the point is that it is a LENGTH,
+		// leg length on the meshes MEQ runs; the point is that it is a LENGTH,
 		// local, and costs one Jacobian.
 		double const weight = trans->Weight();
 		return weight > 0.0 ? std::sqrt( weight ) : 0.0;

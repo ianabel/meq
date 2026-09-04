@@ -332,9 +332,9 @@
  * CHANGED WHAT THE TANGENT FROM q IS WORTH.
  *
  * The corrector roots a scalar field and takes its direction from a flux, and
- * meq has two candidate pairs: psi_h with q_h, which converge at k+1, and
+ * MEQ has two candidate pairs: psi_h with q_h, which converge at k+1, and
  * psi*_h with q*_h from DarcyForm::Reconstruct(), where psi* converges at k+2
- * and is what meq reports everywhere else. Three things were measured and all
+ * and is what MEQ reports everywhere else. Three things were measured and all
  * three point the same way; tests/convergence/FluxSurfaceConvergence.cpp
  * carries the tables, and the numbers are not repeated here because a
  * measurement in a header goes stale silently.
@@ -758,7 +758,7 @@ namespace meq
 			/// "the tracer is wrong" from "the discretisation is coarse".
 			///
 			/// @param potentialIn the scalar field to root.
-			/// @param fluxIn      q in meq's sign convention, vdim 2, on the same
+			/// @param fluxIn      q in MEQ's sign convention, vdim 2, on the same
 			///                    mesh. The tangent and the corrector direction
 			///                    both come from it; handing it -q traces the
 			///                    same curve backwards, which is harmless, and
@@ -955,7 +955,7 @@ namespace meq
 			 *                       THIS mesh, since it indexes its own faces.
 			 * @param g              the datum on the TRUE boundary, as a
 			 *                       function of position. Defaults to zero, which
-			 *                       is meq's fixed-boundary problem -- Gamma IS
+			 *                       is MEQ's fixed-boundary problem -- Gamma IS
 			 *                       the level set psi = 0.
 			 * @param reach          how far outside Gamma_h a point may sit and
 			 *                       still be answered, as a multiple of its
@@ -1230,7 +1230,7 @@ namespace meq
 		std::vector<double> pointR;
 		std::vector<double> pointZ;
 
-		/// q at the node, in meq's sign convention -- the very flux the ray
+		/// q at the node, in MEQ's sign convention -- the very flux the ray
 		/// Newton used for its derivative and the identity below used for rho'.
 		///
 		/// STORED BECAUSE IT WAS COMPUTED AND THROWN AWAY. Every node of a fit

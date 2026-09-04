@@ -15,7 +15,7 @@
  * and it is the format every downstream tool actually wants. It is also the
  * INTERCHANGE format of DRIVER-PLAN section 4: a structured grid interpolates
  * back in O( 1 ) per point with no mesh search, so a foreign code needs to
- * produce nothing but psi on a rectangle to warm-start meq.
+ * produce nothing but psi on a rectangle to warm-start MEQ.
  *
  * WHICH POTENTIAL IS IN WHICH FILE, because there are now two and they are not
  * interchangeable. psi_h is the solved potential in P_k; psi* is the
@@ -38,7 +38,7 @@
 
 namespace meq
 {
-	/// True when meq was built with netcdf-cxx4. Everything in
+	/// True when MEQ was built with netcdf-cxx4. Everything in
 	/// NetCDFWriter throws without it.
 	bool hasNetCDF();
 
@@ -51,7 +51,7 @@ namespace meq
 	///                   trio is the exact restart format, read back into a
 	///                   degree-k potential space, and psi* is degree k+1. See
 	///                   writePostProcessed().
-	/// @param flux       q in meq's sign convention -- what
+	/// @param flux       q in MEQ's sign convention -- what
 	///                   GradShafranovSolver::flux() returns, not the raw block.
 	void writeMfem( std::string const &stem, mfem::Mesh &mesh,
 	                mfem::GridFunction const &potential,
@@ -189,7 +189,7 @@ namespace meq
 	 * NOT repeated at the end -- a reader closing the curve appends the first
 	 * point, which is what tools/plot_equilibrium.py does.
 	 *
-	 * ONLY THE LOOP CONTAINING THE FIRST BOUNDARY ELEMENT IS RETURNED. meq
+	 * ONLY THE LOOP CONTAINING THE FIRST BOUNDARY ELEMENT IS RETURNED. MEQ
 	 * solves a simply connected domain, so there is one; a mesh with a hole
 	 * would have two and this would quietly describe the wrong one, so it
 	 * reports how many boundary vertices it did not reach.
@@ -279,7 +279,7 @@ namespace meq
 	class NetCDFWriter
 	{
 		public:
-			/// @throws std::runtime_error if meq was built without netcdf-cxx4,
+			/// @throws std::runtime_error if MEQ was built without netcdf-cxx4,
 			///         or if @a path cannot be created.
 			NetCDFWriter( std::string const &path, GridSampler const &sampler );
 			~NetCDFWriter();

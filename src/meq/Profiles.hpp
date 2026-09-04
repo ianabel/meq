@@ -10,9 +10,9 @@
 #include <vector>
 
 /*
- * Profile functions for meq.
+ * Profile functions for MEQ.
  *
- * meq solves the fixed-boundary Grad-Shafranov equation
+ * MEQ solves the fixed-boundary Grad-Shafranov equation
  *
  *     -div_bar( ( 1/r ) grad_bar( psi ) ) = F( r, z, psi ) / r    in Omega
  *                                    psi  = 0                    on Gamma
@@ -33,7 +33,7 @@ namespace meq
 	/**
 	 * A scalar function of the poloidal flux psi, together with its derivative.
 	 *
-	 * The Grad-Shafranov solve is nonlinear in psi and meq closes it with Newton,
+	 * The Grad-Shafranov solve is nonlinear in psi and MEQ closes it with Newton,
 	 * so every profile has to be able to report its own derivative: prime() is not
 	 * an optional extra, it is half the interface.
 	 *
@@ -197,7 +197,7 @@ namespace meq
 	 * Another profile, multiplied by a constant.
 	 *
 	 * WHY THIS EXISTS: a tabulated profile arrives in whatever units its author
-	 * wrote it in, and that is frequently not meq's. A temperature table in keV
+	 * wrote it in, and that is frequently not MEQ's. A temperature table in keV
 	 * has to become Joules, a density in 10^19 m^-3 has to become m^-3, and a
 	 * profile from another code may be normalised to its own reference values.
 	 * Editing the file is the wrong answer -- it makes the file a function of

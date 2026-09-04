@@ -24,7 +24,7 @@ against `NLOrdering::LineariseThenCondense`, chose it over the condensation for
 the coupling, and concluded that the coupled system could not reach the reduced
 solve without a new capability in `DarcyHybridization` — §6's "structural ask".
 That ordering **has since been deleted from MFEM** as a condensation in
-disguise, and meq's default is now `NonlinearOrdering::NPC`: Newton on the full
+disguise, and MEQ's default is now `NonlinearOrdering::NPC`: Newton on the full
 `(q, ψ, ψ̂)` system, with the Jacobian solved by hybridized elimination. Under
 NPC **the residual is unreduced**, so the derivative of the residual with
 respect to an auxiliary unknown is a *raw* block and there is no elimination for
@@ -34,7 +34,7 @@ there**. §6 is the section that changed most, and §6.4 is the per-stage note.
 
 ## 1. What free boundary is, and what changes
 
-Fixed boundary, which meq solves today: `Γ` is given, `ψ = 0` on it, and the
+Fixed boundary, which MEQ solves today: `Γ` is given, `ψ = 0` on it, and the
 domain is what `Γ` encloses. Free boundary: **the plasma boundary is an unknown**,
 the field extends to infinity through a vacuum region containing the coils, and
 what is given instead is the coil currents and the machine geometry.
@@ -65,20 +65,20 @@ F( r, z, ψ ) = [ μ₀ r² p'(Ψ) + (g g')(Ψ) ] · χ_{Ω_p(ψ)},
 | **The plasma support `χ_{Ω_p}`.** | §5.3. The genuinely hard part, and the one CEDRES++ names as its own obstacle to higher order. |
 | **The coils.** | §5.4. Ordinary. |
 
-The nonlinearity meq already has — `ψ_ax` inside the residual, closed by a
+The nonlinearity MEQ already has — `ψ_ax` inside the residual, closed by a
 bordered Newton — is the *pattern* for two of these four, which is the single
 biggest reason this is now approachable.
 
 ## 2. The method, and why this one
 
 **HDG on a polygonal subdomain, an exact exterior operator on a smooth
-artificial boundary, coupled at a distance by the extension technique meq
+artificial boundary, coupled at a distance by the extension technique MEQ
 already has.**
 
 `refs/CouplingAtADistance.pdf` — Cockburn, Sayas & Solano, *Coupling at a
 Distance HDG and BEM*, SIAM J. Sci. Comput. 34 (2012) A28–A47 — is the method,
 and the choice of it is not arbitrary. **Its reference [5] is Cockburn & Solano,
-which is meq's stage 5**: the family of paths `Σ_h`, the extension `E_h(q_h)`,
+which is MEQ's stage 5**: the family of paths `Σ_h`, the extension `E_h(q_h)`,
 and the lifting
 
 ```
@@ -102,19 +102,19 @@ E_h(q_h)·ν + λ = 0     on Γ,        λ := the exterior normal derivative.
 optimal orders with `dist(Γ_h, Γ) = O(h)`, which is assumption P.1, which
 `meq::AdaptiveDomain` already maintains through refinement.
 
-**Why not the alternatives**, all of which meq has already looked at and
+**Why not the alternatives**, all of which MEQ has already looked at and
 `refs/Refs.md` records at length:
 
 * **Lackner / von Hagenow** — the classical route, and what `attic/free-boundary/`
   implemented. Rejected for one reason, in Lackner's own words: the
   precompute-and-reuse structure "will probably not be competitive with iteration
-  methods if the geometry of R is changed after each calculation". meq's stage 6
+  methods if the geometry of R is changed after each calculation". MEQ's stage 6
   changes it every cycle.
 * **A directly coupled BEM with a kernel** — CEDRES++'s `c(·,·)`, eq (3.5), a
   double surface integral over `Γ` with a complete-elliptic-integral kernel. It
-  is the right operator; §3 says why meq should not assemble it that way.
+  is the right operator; §3 says why MEQ should not assemble it that way.
 * **An outer fixed point** between interior and exterior — the paper's own §4.3,
-  a Richardson iteration. Rejected for the reason meq rejects every outer fixed
+  a Richardson iteration. Rejected for the reason MEQ rejects every outer fixed
   point: it is outside the residual, so the Jacobian cannot see it. The
   measurement that settled that argument is in `HighBetaConvergence` and it was
   not close — coupled 8.3e-02 → 4.4e-15 in four steps against decoupled
@@ -168,7 +168,7 @@ Three consequences, and each of them removes something:
 ∂ψ/∂ρ |_Γ  =  Σ_n a_n · (1 − n)/ρ_Γ · C_n(μ).
 ```
 
-### 3.2 And the weight is meq's own
+### 3.2 And the weight is MEQ's own
 
 The Gegenbauer functions of order `−1/2` are orthogonal in the weight
 `(1 − μ²)^{−1}`. On a semicircle centred on the axis,
@@ -220,13 +220,13 @@ description alone:
 The spectrum is the other half of that table. `|a_n|` falls geometrically, at a
 rate set by `ρ_plasma / ρ_Γ`, so **`N` is small and `ρ_Γ` trades mesh against
 modes**: a bigger `ρ_Γ` needs fewer modes and more elements. The paper's §5 runs
-that same trade-off for its own case and it should be re-run for meq's.
+that same trade-off for its own case and it should be re-run for MEQ's.
 
 ### 3.4 What this claim is not
 
 It is not a claim that CEDRES++ is doing anything wrong. Their `c(·,·)` is the
 same operator in position space; they use P1 nodal elements on `Γ`, in which
-basis it is dense and needs the kernel. meq is free to use a spectral trace on
+basis it is dense and needs the kernel. MEQ is free to use a spectral trace on
 `Γ` — which is what the coupling paper does, with trigonometric polynomials —
 and in *that* basis the operator diagonalises. **The two must agree, and that
 agreement is a test to write**: assemble CEDRES++ eq (3.5) against the
@@ -236,7 +236,7 @@ does not, this section is wrong and the rest of the plan needs the kernel.
 ## 4. The coupled system under NPC
 
 **REWRITTEN 2026-09-01. The August version of this section described a border on
-the condensed trace residual, and that is no longer the system meq solves.**
+the condensed trace residual, and that is no longer the system MEQ solves.**
 
 ### 4.1 The ordering question is settled, and it settles itself
 
@@ -246,7 +246,7 @@ deleted `LineariseThenCondense` on 2026-08-31** as *"a condensation in
 disguise"*, and `SetNonlinearOrdering()` went with it. What remains is
 `CondenseThenLinearise` and **`NPC`** — `mfem::DarcyNPCOperator` with
 `mfem::DarcyNPCSolver`, Nguyen, Peraire & Cockburn eqs (14)–(18) — which is
-meq's default.
+MEQ's default.
 
 The design that section pointed at — `NORMALISED-LINEARISE-FIRST.md`, a
 mechanism for carrying `ψ_ax` under the deleted ordering — **is deleted with
@@ -284,7 +284,7 @@ G_bnd                 = 0      ψ_bnd − (limiter / X-point functional)
 ### 4.3 Where `a` enters, and why its column is constant
 
 **`g` enters as an essential trace value on `Γ_h`, and nowhere else.** That is
-how meq already imposes the fixed-boundary datum: `SetEssentialBC` covers every
+how MEQ already imposes the fixed-boundary datum: `SetEssentialBC` covers every
 boundary attribute, and `prepare()` projects the datum onto the trace. Today
 `Γ_h`'s trace dofs are pinned to **zero** — `ProjectBdrCoefficient` is called
 with `fittedMarker` rather than `dirichletMarker`, because with `g ≡ 0` the
@@ -314,7 +314,7 @@ rather than a nonlinearity. It is exactly the shape of claim this file's own
 history says to check — see the block-structure claim that upstream corrected in
 `CLAUDE.md`'s *Why it fails*.
 
-### 4.4 The bordered solve, which meq already runs at `N = 1`
+### 4.4 The bordered solve, which MEQ already runs at `N = 1`
 
 ```
 [ J    R  ] [ dx ]     J = the NPC Jacobian, factored by NPCGradient()
@@ -342,11 +342,11 @@ for ( n : columns ) lin.Mult( R_n, Z_n );   // backsolves 2 .. N+3
 run — which is `A quarter of every Newton step was thrown away` in `CLAUDE.md`,
 paying off in a place it was not written for.
 
-**meq already does exactly this at `N = 1`.** `solveWithNormalisation()` builds
+**MEQ already does exactly this at `N = 1`.** `solveWithNormalisation()` builds
 a `DarcyNPCOperator`, solves `J y = R` and `J z = c` through a
 `DarcyNPCSolver`, and closes the border with `δs = (b·y − G)/(d − b·z)`. Free
 boundary is the same function with the scalar corner replaced by a dense
-`(N+2)×(N+2)` one. **The generalisation is mechanical and it is meq's own
+`(N+2)×(N+2)` one. **The generalisation is mechanical and it is MEQ's own
 code.**
 
 ### 4.5 Two of the three borders are exact under NPC, and that is new
@@ -365,13 +365,13 @@ they are not:
 differenced border is a difference of a residual whose element-local Newtons are
 seeded from a vector captured at `FormLinearSystem()` time and never refreshed;
 on a hard problem those hit their cap and return something that is not a
-function of anything, and meq measured a `9e−6` perturbation moving the
+function of anything, and MEQ measured a `9e−6` perturbation moving the
 recovered peak from `0.896` to `3.84`. `formSystem()` exists to work round it.
 **NPC has no element-local nonlinear solve, so there is no seed, nothing to go
 stale and nothing to re-form** — which removes the single sharpest edge the
 August plan had to plan around.
 
-## 5. The four new pieces, in meq
+## 5. The four new pieces, in MEQ
 
 ### 5.1 The exterior operator — small, exact, and testable alone
 
@@ -428,7 +428,7 @@ is the flux at a limiter contact point it is a nodal value of `ψ`, which is an
 unknown, so its border row is `−e_j` exactly, as `ψ_ax`'s is. If it is the flux
 at a saddle it is `ψ` evaluated where `∇̄ψ = 0`, and the saddle's location is an
 implicit function of the state — a differentiable functional in principle,
-through the implicit function theorem, and one whose derivative meq has no
+through the implicit function theorem, and one whose derivative MEQ has no
 assembled route to. Expect that one to stay differenced.
 
 **`ψ_bnd` is a max of two things and that is not smooth.** It is the larger of
@@ -447,7 +447,7 @@ iterate. Four things follow.
 `F( r, z, ψ )` given `ψ_ax` and `ψ_bnd`, so `meq::Source`'s interface survives
 untouched. What is lost is that `{ Ψ > 0 }` can pick up private-flux regions and
 near-coil regions that are not the plasma; CEDRES++ handles that with a
-connectivity test and so must meq. **`meq::CriticalPointFinder` is the piece that
+connectivity test and so must MEQ. **`meq::CriticalPointFinder` is the piece that
 makes that test cheap** — the X-point is what separates the private flux from the
 plasma, and it is now locatable sub-element as a root of `q` rather than confined
 to a mesh vertex, which is what CEDRES++ records as an open problem on its own P1
@@ -465,11 +465,11 @@ error and every rate unchanged to six figures and only drops Newton's observed
 order to 1.000.
 
 **MFEM HAS CUT-ELEMENT QUADRATURE AND THIS PLAN SAID IT DID NOT.** The August
-version's "meq has none" was a statement about meq and was allowed to stand as a
+version's "MEQ has none" was a statement about MEQ and was allowed to stand as a
 statement about the stack. `fem/intrules_cut.hpp` carries
 `mfem::CutIntegrationRules` and `mfem::MomentFittingIntRules`, giving both the
 cut-volume and the cut-surface rule for the zero level set of a `Coefficient`, in
-2D and 3D. It is gated on `MFEM_USE_LAPACK`, which meq's build has, and the
+2D and 3D. It is gated on `MFEM_USE_LAPACK`, which MEQ's build has, and the
 header **is installed** in `../mfem/install`. Algoim is a second backend and is
 not needed. So the rule itself is available today and should be tried before
 anything is written.
@@ -488,7 +488,7 @@ honest options, and the choice is a measurement rather than an argument:
 * **Difference it**, per cut element, which is `O(cut elements)` extra rule
   constructions per Jacobian and is affordable because the cut set is `O(h⁻¹)`.
 
-**meq is a `k+1` code and this is where that is at risk.** Treat "what order
+**MEQ is a `k+1` code and this is where that is at risk.** Treat "what order
 survives the cut" as a measurement to make early rather than a hope — it is
 FB-4's acceptance criterion for that reason.
 
@@ -504,7 +504,7 @@ the acceptance test for everything in §3 and §4.
 **REWRITTEN 2026-09-01, AND THE ANSWER IS MUCH SMALLER THAN IT WAS.** The full
 request is `../mfem-hdg-dev/doc/HDG-BEM-COUPLING-FROM-MEQ.md`, filed 2026-08-29.
 That document asks for two things: §2, two rectangular integrators, and §3, a
-structural capability for auxiliary globally-coupled unknowns. **Under NPC meq
+structural capability for auxiliary globally-coupled unknowns. **Under NPC MEQ
 needs neither of them to start**, and the reasons are §4.3 and §4.4. It is worth
 being precise about why, because the request as filed overstates what is
 blocking.
@@ -512,7 +512,7 @@ blocking.
 ### 6.1 Why §2.1 is not needed — the block `B`
 
 The request asks for `⟨φ_n ∘ a, v·n⟩_e`, "the datum's data half as a rectangular
-form against a basis". **meq does not need that block, because the datum's data
+form against a basis". **MEQ does not need that block, because the datum's data
 half is not a form — it is an essential trace value.** §4.3: `ψ̂|_{Γ_h} = P a`,
 and `P`'s columns are `ProjectBdrCoefficient` against `PathTraceCoefficient`,
 which exists and takes an arbitrary `PositionFunction`. The rectangular
@@ -534,7 +534,7 @@ one piece with nothing directly behind it. But every primitive is public:
   polynomial at a point outside it — the pattern `meq::Sampler::extendOutward`
   already uses for the `.nc` band.
 
-So `T` is about forty lines of meq code. **Write it in meq first and ask for it
+So `T` is about forty lines of MEQ code. **Write it in MEQ first and ask for it
 upstream afterwards, with the tiling check attached** — summing the boundary
 weights over the faces must give `|Γ|`, exactly as summing the volume weights
 must give `|Ω| − |D_h|`, and that check is what says the path family covers `Γ`
@@ -548,7 +548,7 @@ globally-coupled unknowns through the static condensation, so that
 `GetGradient()` returns the bordered matrix. **That is a requirement of a
 condensation and not of NPC.** Under NPC the residual is unreduced, the border
 column is raw, and the elimination happens once inside a block solve the caller
-drives — `N + 2` backsolves against one factorisation, which is what meq's
+drives — `N + 2` backsolves against one factorisation, which is what MEQ's
 `ψ_ax` border already costs and pays.
 
 **It is still worth having**, and the request's own §3.1 makes the general case
@@ -560,7 +560,7 @@ modest fraction of a Newton step, and it is **not** worth blocking on.
 
 **The request should be revised to say so.** As filed it calls §3 "structural",
 which was true of the ordering it was written against and is not true of the one
-meq runs. Leaving it standing would have another team build the larger thing
+MEQ runs. Leaving it standing would have another team build the larger thing
 first.
 
 ### 6.4 So: what is needed from MFEM, per stage
@@ -570,16 +570,16 @@ the plan predicted.**
 
 | stage | needs from MFEM | status |
 |---|---|---|
-| **FB-0** `ExteriorDtN` | **nothing** — meq-side, MFEM-free by design | clear |
-| **FB-1** vacuum + coils + the whole coupling | **nothing.** `P` from `PathTraceCoefficient` (§6.1); `T` from `Endpoint` + `TransformBack` (§6.2); the bordered solve from `DarcyNPCOperator` / `DarcyNPCSolver`, which meq already drives at `N = 1` | clear |
+| **FB-0** `ExteriorDtN` | **nothing** — MEQ-side, MFEM-free by design | clear |
+| **FB-1** vacuum + coils + the whole coupling | **nothing.** `P` from `PathTraceCoefficient` (§6.1); `T` from `Endpoint` + `TransformBack` (§6.2); the bordered solve from `DarcyNPCOperator` / `DarcyNPCSolver`, which MEQ already drives at `N = 1` | clear |
 | **FB-2** prescribed plasma current | **nothing** new beyond FB-1 | clear |
-| **FB-3** `ψ_bnd` unknown | **nothing** — the `ψ_ax` border is the pattern and it is meq's own code | clear |
+| **FB-3** `ψ_bnd` unknown | **nothing** — the `ψ_ax` border is the pattern and it is MEQ's own code | clear |
 | **FB-4** moving support + cut quadrature | the **sensitivity of a cut rule** to the level set. `MomentFittingIntRules` gives the rule (§5.3) and no derivative. Not blocking — difference it per cut element, or accept an inconsistent Jacobian and measure the cost in Newton's order | **the one real gap** |
 | **FB-5** one bordered solve | §3 of the request: auxiliary unknowns carried through the elimination. An optimisation over `N + 2` backsolves | wanted, not blocking |
 
 **Two things to ask for anyway, on their own merits and not as blockers**:
-§2.2's boundary quadrature on `Γ` with its tiling check, once meq has written
-one and used it; and §3's auxiliary unknowns, which meq's `ψ_ax` border wants
+§2.2's boundary quadrature on `Γ` with its tiling check, once MEQ has written
+one and used it; and §3's auxiliary unknowns, which MEQ's `ψ_ax` border wants
 today and which every global constraint on a hybridized system wants.
 
 **And one thing to keep watching rather than ask for.** `DarcyNPCOperator`'s
@@ -590,10 +590,10 @@ and it is fatal to any scheme that wants a matrix-vector product with the full
 coupled operator, a Jacobian-free Krylov method over the border included. If
 free boundary ever wants one, that is the constraint to design around.
 
-**meq-side, and everything else.** The exterior operator (§5.1), the semicircular
+**MEQ-side, and everything else.** The exterior operator (§5.1), the semicircular
 domain and its level set, `ψ_bnd` (§5.2), the plasma support and cut quadrature
 (§5.3), coils (§5.4), the augmented Newton, the configuration, and the whole
-verification ladder. **The physics is meq's and the discretisation machinery is
+verification ladder. **The physics is MEQ's and the discretisation machinery is
 MFEM's**, which is the same line the tree already draws.
 
 ## 7. The staged plan
@@ -624,7 +624,7 @@ as a wrong number rather than as a plausible picture.
 
 **And the sign convention will be wrong at least once.** `DarcyForm` holds `−q`,
 the papers' `τ` carries the opposite sign to what is stable, the trace matrix is
-negative definite in meq's convention, and `HDGExtensionIntegrator`'s `+1` was
+negative definite in MEQ's convention, and `HDGExtensionIntegrator`'s `+1` was
 itself settled by measurement rather than by argument. The exterior DtN enters
 that system with a sign nobody will get right by reasoning, and the thing that
 settles it is FB-1. Budget a day and write down what wins.
@@ -666,10 +666,10 @@ it hit a wall, and the one row of §6.4 with a real gap in it.
 **Vertical instability.** CEDRES++ names vertically unstable plasmas as the case
 where fixed-point iteration fails outright, and `refs/LacknerFreeBoundary.pdf`
 describes the axis-pinning feedback that a fixed-point scheme needs to survive
-it. meq's answer is that it is not a fixed-point scheme — but a Newton on an
+it. MEQ's answer is that it is not a fixed-point scheme — but a Newton on an
 indefinite problem is not automatically safe either, and the line search that the
 bordered Newton needed is the shape of the answer. Note also that a line search
-on the full NPC residual has been measured making **every** meq case worse; see
+on the full NPC residual has been measured making **every** MEQ case worse; see
 `CLAUDE.md`'s *Why it fails*. Whatever globalisation this needs, it is not that
 one.
 

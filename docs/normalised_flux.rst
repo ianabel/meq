@@ -8,7 +8,7 @@ Equilibrium codes pose profiles against the **normalised** flux
    \Psi = \frac{\psi - \psibnd}{\psiax - \psibnd},
 
 which runs over :math:`[0, 1]` from the magnetic axis to the boundary
-:cite:p:`GourdainLeboeuf2004`. meq solves the fixed-boundary problem with
+:cite:p:`GourdainLeboeuf2004`. MEQ solves the fixed-boundary problem with
 :math:`\psi = 0` on :math:`\Gamma`, so :math:`\psibnd = 0` and
 :math:`\Psi = \psi/\psiax`.
 
@@ -38,7 +38,7 @@ shaped over. Measured on a peaked pressure profile, the computed
 hundred in pressure amplitude — the profile was contributing essentially
 nothing. A fixed :math:`\psiax` is not a simplification of a normalised
 profile; unless the value happens to be right it is a **different problem**, and
-meq keeps a test asserting exactly that as the control.
+MEQ keeps a test asserting exactly that as the control.
 
 **A consequence: "is this case stiff?" becomes unanswerable.** Every
 configuration converged in one or two Newton steps across an enormous range of
@@ -151,7 +151,7 @@ A dimensional estimate is enough to pick a starting value of the right size: for
 Globalisation is refused on this path
 -------------------------------------
 
-Loudly, and at the driver level too. Every globalisation meq has either drives a
+Loudly, and at the driver level too. Every globalisation MEQ has either drives a
 residual of its own (the KINSOL ones) or builds no Jacobian to border (the
 Picard ones), so there is nothing for the border to attach to. If a normalised
 run does not converge, the levers are:
@@ -162,7 +162,7 @@ run does not converge, the levers are:
 
 .. warning::
 
-   **A backtracking line search on the border itself is not optional**, and meq
+   **A backtracking line search on the border itself is not optional**, and MEQ
    applies one internally. The full step converges for mild profiles and wanders
    for peaked ones, with the augmented residual climbing through several orders
    of magnitude before :math:`\psiax` crosses zero and the source refuses the
@@ -212,6 +212,6 @@ is there to be measured failing.
 What is not done
 ----------------
 
-:math:`\psibnd` is zero, because meq solves the fixed-boundary problem. Free
+:math:`\psibnd` is zero, because MEQ solves the fixed-boundary problem. Free
 boundary makes it an unknown as well, which is a **second border row and column
 of the same shape** — :cpp:class:`meq::NormalisedSource` is where it would go.

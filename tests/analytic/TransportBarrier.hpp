@@ -25,7 +25,7 @@
  *
  *     F( r, psi ) = mu0 r^2 dp/dpsi,     mu0 = 1,
  *
- * which is meq's F exactly. Unlike section 4.2, no closed form for F is printed:
+ * which is MEQ's F exactly. Unlike section 4.2, no closed form for F is printed:
  * only p is given, and the source has to be obtained by differentiating it. The
  * check that it was done right is Figure 10's centre panel, which plots f( psi )
  * -- the source without its r^2 -- peaking a little above 10 just below
@@ -33,7 +33,7 @@
  *
  * DIFFERENTIATED, NOT FINITE-DIFFERENCED. erf appears, and its derivative
  * ( 2/sqrt( pi ) ) exp( -x^2 ) is elementary, so there is no excuse for a
- * difference quotient: meq closes the semi-linear problem by Newton, and
+ * difference quotient: MEQ closes the semi-linear problem by Newton, and
  * CLAUDE.md records that a Jacobian wrong by 5 per cent leaves every error and
  * every convergence rate unchanged to six significant figures while quietly
  * dropping Newton to linear convergence. The test suite compares both

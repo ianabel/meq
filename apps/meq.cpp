@@ -1,7 +1,7 @@
 /*
- * meq -- the Maryland Equilibrium Solver.
+ * MEQ -- the Maryland Equilibrium Solver.
  *
- *     meq config.toml
+ *     MEQ config.toml
  *
  * One binary, no subcommands, and deliberately NOT mfem::OptionsParser, which
  * the program this replaces used and which wants to own argument parsing for
@@ -60,11 +60,11 @@ namespace
 	void usage()
 	{
 		std::printf(
-			"meq -- the Maryland Equilibrium Solver\n"
+			"MEQ -- the Maryland Equilibrium Solver\n"
 			"\n"
-			"  meq <config.toml>    solve the equilibrium the file describes\n"
-			"  meq --help           this\n"
-			"  meq --version        the build this is\n"
+			"  MEQ <config.toml>    solve the equilibrium the file describes\n"
+			"  MEQ --help           this\n"
+			"  MEQ --version        the build this is\n"
 			"\n"
 			"Exit codes: 0 solved, 1 configuration, 2 solve did not converge,\n"
 			"3 output could not be written.\n" );
@@ -74,9 +74,9 @@ namespace
 	 * A WARNING ABOUT MKL_THREADING_LAYER STOOD HERE AND IS DELETED.
 	 *
 	 * It fired on every run where that variable was unset, telling the user
-	 * that UMFPACK's BLAS-3 might be silently wrong. That was true while meq
+	 * that UMFPACK's BLAS-3 might be silently wrong. That was true while MEQ
 	 * resolved BLAS through Debian's libblas.so.3, an alternatives symlink to
-	 * the libmkl_rt dispatcher. meq now builds against its own SuiteSparse,
+	 * the libmkl_rt dispatcher. MEQ now builds against its own SuiteSparse,
 	 * which links oneAPI's threading layer directly, so there is no dispatcher
 	 * to misconfigure and the variable is inert.
 	 *
@@ -328,7 +328,7 @@ int main( int argc, char **argv )
 
 	if ( argument == "--version" )
 	{
-		std::printf( "meq %s (MFEM %s)\n", MEQ_VERSION, MFEM_VERSION_STRING );
+		std::printf( "MEQ %s (MFEM %s)\n", MEQ_VERSION, MFEM_VERSION_STRING );
 		return Solved;
 	}
 
@@ -394,7 +394,7 @@ int main( int argc, char **argv )
 		if ( config->getBoundary().type == meq::BoundaryDataType::Exact )
 		{
 			std::fprintf( stderr,
-				"meq: [boundary] Type = \"exact\" needs the source's closed-form\n"
+				"MEQ: [boundary] Type = \"exact\" needs the source's closed-form\n"
 				"     solution, which meq::Source does not carry -- it is a\n"
 				"     convergence-study device and lives in the test fixtures.\n"
 				"     Use Type = \"zero\" for the fixed-boundary problem.\n" );
@@ -403,7 +403,7 @@ int main( int argc, char **argv )
 	}
 	catch ( std::exception const &error )
 	{
-		std::fprintf( stderr, "meq: %s\n", error.what() );
+		std::fprintf( stderr, "MEQ: %s\n", error.what() );
 		return ConfigurationError;
 	}
 
@@ -455,7 +455,7 @@ int main( int argc, char **argv )
 	 * be replaced.
 	 *
 	 * The collection is rebuilt BY NAME from the solver's own, rather than
-	 * assumed: meq's volume spaces are on the closed Gauss-Lobatto basis, and a
+	 * assumed: MEQ's volume spaces are on the closed Gauss-Lobatto basis, and a
 	 * dof-for-dof copy into a Legendre space of the same degree would be a
 	 * different function while looking like a successful copy.
 	 */
@@ -594,7 +594,7 @@ int main( int argc, char **argv )
 	}
 	catch ( std::exception const &error )
 	{
-		std::fprintf( stderr, "meq: %s\n", error.what() );
+		std::fprintf( stderr, "MEQ: %s\n", error.what() );
 		return ConfigurationError;
 	}
 
@@ -659,7 +659,7 @@ int main( int argc, char **argv )
 			int const missed = transfer.transfer( *previousPotential, zero, *carried );
 			fresh->setInitialGuess( *carried );
 
-			std::printf( "meq: warm start from the previous cycle: %d of %d nodes "
+			std::printf( "MEQ: warm start from the previous cycle: %d of %d nodes "
 			             "interpolated, %d fell outside it\n",
 			             transfer.queried() - missed, transfer.queried(), missed );
 		}
@@ -701,7 +701,7 @@ int main( int argc, char **argv )
 				int const missed = transfer.transfer( *guess, zero, *carried );
 				fresh->setInitialGuess( *carried );
 
-				std::printf( "meq: interpolating warm start from %s: %d elements "
+				std::printf( "MEQ: interpolating warm start from %s: %d elements "
 				             "to this run's %d, %d of %d nodes fell outside the "
 				             "stored mesh\n",
 				             config->getInitialGuess().meshFile.c_str(),
@@ -790,7 +790,7 @@ int main( int argc, char **argv )
 		}
 		catch ( std::exception const &error )
 		{
-			std::fprintf( stderr, "meq: %s\n", error.what() );
+			std::fprintf( stderr, "MEQ: %s\n", error.what() );
 			return ConfigurationError;
 		}
 
@@ -806,7 +806,7 @@ int main( int argc, char **argv )
 			 * THE LADDER HAS NO SECOND RUNG WHEN psi_ax IS AN UNKNOWN, and
 			 * saying so beats letting the retry throw.
 			 *
-			 * Every globalisation meq has drives a residual of its own: the
+			 * Every globalisation MEQ has drives a residual of its own: the
 			 * KINSOL paths solve oper(x) = 0 through their own adapter, and the
 			 * Picard ones build no Jacobian at all. The border is a row and a
 			 * column ON THE NEWTON JACOBIAN, so neither has anywhere to put it,
@@ -818,9 +818,9 @@ int main( int argc, char **argv )
 			if ( normalised )
 			{
 				std::fprintf( stderr,
-					"meq: Newton did not converge: %s\n"
+					"MEQ: Newton did not converge: %s\n"
 					"     [source] Normalised = true makes psi_ax an unknown, closed by a\n"
-					"     BORDERED Newton, and no globalisation meq has can carry that\n"
+					"     BORDERED Newton, and no globalisation MEQ has can carry that\n"
 					"     border -- so there is no fallback to try. The levers are a\n"
 					"     better [source] PsiAxis guess, an [initialguess] that puts psi\n"
 					"     near the right size, and RESOLUTION.\n",
@@ -829,7 +829,7 @@ int main( int argc, char **argv )
 			}
 
 			std::fprintf( stderr,
-				"meq: Newton did not converge: %s\n"
+				"MEQ: Newton did not converge: %s\n"
 				"     Retrying with Anderson-Picard to reach Newton's basin, then\n"
 				"     Newton for the endgame. This is the observed-failure fallback,\n"
 				"     and it costs hundreds of linear solves.\n",
@@ -848,7 +848,7 @@ int main( int argc, char **argv )
 				if ( solver )
 					reportResiduals( solver->newtonResiduals() );
 				std::fprintf( stderr,
-					"meq: Picard-then-Newton did not converge either: %s\n"
+					"MEQ: Picard-then-Newton did not converge either: %s\n"
 					"     The remedy for a hard source is RESOLUTION -- try a finer\n"
 					"     [mesh], a higher [discretisation] Degree, or [adaptivity].\n",
 					secondAttempt.what() );
@@ -880,7 +880,7 @@ int main( int argc, char **argv )
 		 * whenever a non-linear potential integrator was merely PRESENT rather
 		 * than when it had contributed, so on any element where dF/dpsi vanished
 		 * the local problem was singular and was factored anyway -- and psi* there
-		 * was a different function, 20x to 64x out. meq's Newton path puts every
+		 * was a different function, 20x to 64x out. MEQ's Newton path puts every
 		 * source on the non-linear form, so that reached every configuration the
 		 * driver could be given, and this loop ran on Potential::Raw instead: one
 		 * order down at every k, correct but blunt.
@@ -888,7 +888,7 @@ int main( int argc, char **argv )
 		 * The fix landed as "The postprocessing closes on the element average,
 		 * always" -- the close is unconditional now, because the local problem is
 		 * a pure Neumann one by construction and there was never anything to
-		 * decide. Measured from meq's side, the same case that read 20.3, 64.1 and
+		 * decide. Measured from MEQ's side, the same case that read 20.3, 64.1 and
 		 * 61.6 now reads 1.0069 against 1.0048 for elements where dF/dpsi does not
 		 * vanish at all: psi* is a post-processing everywhere.
 		 * NewtonConvergence.cpp's
@@ -961,14 +961,14 @@ int main( int argc, char **argv )
 
 		if ( reachedTarget )
 		{
-			std::printf( "meq: eta = %.4e is at or below TargetError = %.4e "
+			std::printf( "MEQ: eta = %.4e is at or below TargetError = %.4e "
 			             "after %d cycle%s\n", record.eta, adapt.targetError,
 			             cycle + 1, cycle == 0 ? "" : "s" );
 			break;
 		}
 		if ( lastCycle )
 		{
-			std::printf( "meq: reached MaxIterations = %d with eta = %.4e, above "
+			std::printf( "MEQ: reached MaxIterations = %d with eta = %.4e, above "
 			             "TargetError = %.4e. The answer is the finest one "
 			             "computed, not a converged one.\n",
 			             maxCycles, record.eta, adapt.targetError );
@@ -976,7 +976,7 @@ int main( int argc, char **argv )
 		}
 		if ( marked.Size() == 0 )
 		{
-			std::printf( "meq: the marking strategy selected no elements at "
+			std::printf( "MEQ: the marking strategy selected no elements at "
 			             "eta = %.4e, so there is nothing to refine\n", record.eta );
 			break;
 		}
@@ -1032,7 +1032,7 @@ int main( int argc, char **argv )
 			 * honest report.
 			 */
 			std::fprintf( stderr,
-				"meq: cycle %d could not be refined: %s\n"
+				"MEQ: cycle %d could not be refined: %s\n"
 				"     The previous cycle had converged, but its solver was released\n"
 				"     before the mesh changed -- as it must be -- so there is\n"
 				"     nothing left to write. Lower [adaptivity] MaxIterations.\n",
@@ -1047,12 +1047,12 @@ int main( int argc, char **argv )
 		int const backgroundElements = domain ? domain->numBackground()
 		                                      : background.GetNE();
 		if ( shape )
-			std::printf( "meq: curved Gamma: %d of %d background elements inside, "
+			std::printf( "MEQ: curved Gamma: %d of %d background elements inside, "
 			             "%d transfer paths widened\n",
 			             solveMesh->GetNE(), backgroundElements, widened );
 
 		Cycle const &last = history.back();
-		std::printf( "meq: converged in %d Newton iterations on %d elements, "
+		std::printf( "MEQ: converged in %d Newton iterations on %d elements, "
 		             "degree %d%s\n",
 		             last.iterations, last.elements,
 		             config->getDiscretisation().polynomialDegree,
@@ -1102,7 +1102,7 @@ int main( int argc, char **argv )
 		std::string const stem = output.directory + "/" + output.prefix;
 
 		/*
-		 * psi* IS WHAT meq REPORTS, SO IT IS POST-PROCESSED ON EVERY RUN AND NOT
+		 * psi* IS WHAT MEQ REPORTS, SO IT IS POST-PROCESSED ON EVERY RUN AND NOT
 		 * ONLY ON AN ADAPTIVE ONE.
 		 *
 		 * psi_h lives in P_k; psi* is the element-local post-processing of it in
@@ -1129,7 +1129,7 @@ int main( int argc, char **argv )
 		 * can see it. The fix is "The postprocessing closes on the element
 		 * average, always", and it is on the gf-hdg-dev branch and on NO OTHER:
 		 * an MFEM built without it loses this silently. See INSTALL.md for which
-		 * branches meq-integration must contain, and CLAUDE.md's "Post-processing
+		 * branches MEQ-integration must contain, and CLAUDE.md's "Post-processing
 		 * is back" for the measurement.
 		 *
 		 * Until today that defect could only reach the error estimator, and a
@@ -1137,7 +1137,7 @@ int main( int argc, char **argv )
 		 * the .vtu -- the primary outputs -- so the regression that catches it,
 		 * NewtonConvergence.cpp's
 		 * thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes, is guarding
-		 * the answer meq reports rather than the mesh it refines.
+		 * the answer MEQ reports rather than the mesh it refines.
 		 */
 		if ( !solver->isPostProcessed() )
 			solver->postProcess();
@@ -1318,7 +1318,7 @@ int main( int argc, char **argv )
 		}
 
 		meq::NetCDFWriter writer( stem + ".nc", sampler );
-		writer.attribute( "title", "meq equilibrium" );
+		writer.attribute( "title", "MEQ equilibrium" );
 		writer.attribute( "meq_version", MEQ_VERSION );
 		// The file says which input produced it and how well. A directory of
 		// scan output is unreadable otherwise, and "which commit was this?" is
@@ -1406,7 +1406,7 @@ int main( int argc, char **argv )
 			writer.attribute( "marking_theta", adapt.theta );
 			writer.attribute( "estimator_potential", "post-processed" );
 		}
-		// THE BOUNDARY meq WAS GIVEN, so a plot can draw the answer against
+		// THE BOUNDARY MEQ WAS GIVEN, so a plot can draw the answer against
 		// what was asked for rather than against the mesh's own edge. On the
 		// curved path that is the smooth Gamma, sampled from the shape itself;
 		// on the fitted path Gamma IS the mesh boundary, so it is walked out of
@@ -1433,7 +1433,7 @@ int main( int argc, char **argv )
 				writer.attribute( "boundary_source", "mesh boundary" );
 				if ( unreached > 0 )
 					std::fprintf( stderr,
-						"meq: warning: the mesh boundary is not a single loop; "
+						"MEQ: warning: the mesh boundary is not a single loop; "
 						"%d boundary vertices are not in boundary_R/Z\n",
 						unreached );
 			}
@@ -1511,12 +1511,12 @@ int main( int argc, char **argv )
 			// because the VTK boundary is then not uniformly Gamma, which a
 			// reader comparing it against the .nc boundary_R/Z would notice.
 			if ( curvedNodes > 0 && curved < 1.0 )
-				std::printf( "meq: %.0f%% of the boundary reached Gamma; the "
+				std::printf( "MEQ: %.0f%% of the boundary reached Gamma; the "
 				             "rest was held back to keep its elements from "
 				             "folding\n", 100.0*curved );
 			else if ( curvedNodes == 0 )
 				std::fprintf( stderr,
-					"meq: warning: could not bend the boundary onto Gamma "
+					"MEQ: warning: could not bend the boundary onto Gamma "
 					"without tangling an element. The VTK boundary is the "
 					"polygon Gamma_h.\n" );
 		}
@@ -1543,7 +1543,7 @@ int main( int argc, char **argv )
 		std::string const name =
 			stem.substr( stem.find_last_of( '/' ) + 1 );
 		std::printf(
-			"meq: wrote\n"
+			"MEQ: wrote\n"
 			"  exact, for GLVis and restart:  %s.mesh\n"
 			"                                 %s_psi.gf        (psi_h, degree %d)\n"
 			"                                 %s_grad_psi.gf\n"
@@ -1566,7 +1566,7 @@ int main( int argc, char **argv )
 	}
 	catch ( std::exception const &error )
 	{
-		std::fprintf( stderr, "meq: could not write output: %s\n", error.what() );
+		std::fprintf( stderr, "MEQ: could not write output: %s\n", error.what() );
 		return OutputFailed;
 	}
 

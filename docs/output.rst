@@ -13,9 +13,9 @@ convenient, and each of the three gives up a different one of those.
      - Read by
      - What it is
    * - ``<stem>.mesh``, ``<stem>_psi.gf``, ``<stem>_grad_psi.gf``
-     - GLVis; meq itself
+     - GLVis; MEQ itself
      - **Exact.** Every polynomial coefficient of the finite element solution.
-       This is the restart format, and the only one from which meq can resume a
+       This is the restart format, and the only one from which MEQ can resume a
        run. It carries :math:`\psi_h`.
    * - ``<stem>_psistar.gf``
      - GLVis
@@ -30,19 +30,19 @@ convenient, and each of the three gives up a different one of those.
      - **The interchange format.** :math:`\psi` and :math:`\mathbf{B}` sampled on
        a uniform :math:`(R, Z)` grid. Lossy, and portable.
 
-``<stem>`` is the output directory and prefix from the ``[output]`` table. meq
+``<stem>`` is the output directory and prefix from the ``[output]`` table. MEQ
 does **not** create the output directory; if it does not exist the run exits 3
 (see :ref:`running-exit-codes`).
 
 .. note::
 
-   **None of the three carries the flux surfaces.** meq can locate the magnetic
+   **None of the three carries the flux surfaces.** MEQ can locate the magnetic
    axis, trace the surfaces, take flux-surface averages over them and fit the
    whole family as a map from a disc — see :doc:`flux_surfaces` and
    :doc:`surface_geometry` — but all of that is reached through the C++ library
    and none of it is written to a file or driven from a configuration key. A
    consumer that wants :math:`V'`, :math:`\langle R^{-2}\rangle` or a safety
-   factor links against meq rather than reading its output.
+   factor links against MEQ rather than reading its output.
 
 .. _output-which-potential:
 
@@ -51,7 +51,7 @@ Which potential each file carries
 
 .. important::
 
-   **Everything meq draws or exports carries** :math:`\psi^\star`, **the
+   **Everything MEQ draws or exports carries** :math:`\psi^\star`, **the
    post-processed potential** — the ``.vtu``, the ``.nc``, and
    ``<stem>_psistar.gf``. It converges one order faster than the solved
    :math:`\psi_h` at essentially no cost, so there is no reason to report the
@@ -63,7 +63,7 @@ Which potential each file carries
    :math:`P_{k+1}` and would not fit. Making the two consistent would break
    restart, which is why the asymmetry is commented at the write site.
 
-Two consequences for anyone reading meq's output:
+Two consequences for anyone reading MEQ's output:
 
 * **A** ``.nc`` **differenced against a run from before this change measures the
   post-processing, not the physics.** The variable has the same name, units,
@@ -120,7 +120,7 @@ asserted against the vertex count in the test suite for exactly this reason.
 **The mesh boundary is bent onto** :math:`\Gamma`. On the curved path the
 computational domain :math:`\Omega_h` is inscribed in the plasma, so its
 boundary :math:`\Gamma_h` is a chord of the true boundary and there is a band
-between them (see :ref:`output-band`). For the picture, meq installs a curvature
+between them (see :ref:`output-band`). For the picture, MEQ installs a curvature
 on the mesh and moves each boundary face out onto :math:`\Gamma`. Since the VTK
 was already high-order cells, this needed nothing further from the format; the
 two features compose.
@@ -181,7 +181,7 @@ and the electrostatic potential. Nodes outside the plasma are ``NaN`` *and*
 carry ``inside = 0``, so a reader that checks either one is safe.
 
 The global attributes carry the run's provenance — the configuration file name,
-the meq and MFEM versions, the polynomial degree, the element count, the Newton
+the MEQ and MFEM versions, the polynomial degree, the element count, the Newton
 iteration count and final residual, the boundary treatment, and for adaptive
 runs the cycle count, the final estimator and the marking strategy. This is what
 makes a ``.nc`` file self-describing enough to plot six months later.

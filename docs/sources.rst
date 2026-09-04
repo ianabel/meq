@@ -1,7 +1,7 @@
 Source terms
 ============
 
-Everything meq knows about the physics arrives through one small interface:
+Everything MEQ knows about the physics arrives through one small interface:
 
 .. code-block:: cpp
 
@@ -29,7 +29,7 @@ Every source must differentiate itself
    cannot be used.**
 
 This is the price of using Newton where the source papers use Picard, and it is
-not negotiable. :cite:t:`SanchezVizuetSolano2019` state the design meq is
+not negotiable. :cite:t:`SanchezVizuetSolano2019` state the design MEQ is
 reversing: they keep :math:`F` as opaque problem data so that the solver
 "relies only on the discretization of the toroidal operator :math:`\dstar`", and
 pay for it by iterating on *every* source — even one linear in :math:`\psi` that
@@ -52,7 +52,7 @@ potential block. :doc:`nonlinear` argues the case.
 
 .. note::
 
-   **Differentiate the discrete residual, not the continuous equation.** meq
+   **Differentiate the discrete residual, not the continuous equation.** MEQ
    gets this for free — the library differentiates the assembled operator — but
    it is worth knowing that it is a deliberate property. A continuous-level
    Newton derivative for the plasma-current term exists, and
@@ -106,7 +106,7 @@ which **the finite-difference check on** ``dFdPsi`` **cannot see either**,
 because ``f`` and ``dFdPsi`` are both evaluated at whatever normalisation
 happens to be set and agree with each other however wrong it is.
 
-:doc:`normalised_flux` is the account of what meq does instead. The practical
+:doc:`normalised_flux` is the account of what MEQ does instead. The practical
 consequence here is that the two construction routes are separate and each
 refuses the other's case:
 
@@ -134,7 +134,7 @@ The trivial branch
 
 This is not a hypothesis about the benchmarks; the published algorithm for them
 literally opens by demanding a non-trivial initial guess. ``[initialguess] Type
-= "ramp"`` is what meq offers: a linear ramp in :math:`z` from
+= "ramp"`` is what MEQ offers: a linear ramp in :math:`z` from
 :math:`-\texttt{Amplitude}` to :math:`+\texttt{Amplitude}`, so that
 :math:`\psi = 0` falls in the *interior* rather than being the whole answer.
 The amplitude must be positive, and the error message says why.

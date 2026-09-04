@@ -97,7 +97,7 @@ Two things follow, and the second is what makes it worth the discipline:
 
 * Both layers are **unit-testable without the library**, and they are tested
   that way, exhaustively.
-* **Continuous integration can build them.** The MFEM branch meq needs is
+* **Continuous integration can build them.** The MFEM branch MEQ needs is
   published nowhere a hosted runner can fetch it, so ``find_package`` is
   deliberately not ``REQUIRED`` and CI builds this half. See :doc:`testing` for
   what that does and does not establish.
@@ -138,14 +138,14 @@ mesh geometry, so everything that reads the solved geometry must run before it.
 Relationship to MFEM
 --------------------
 
-meq is a thin layer over ``DarcyForm`` with hybridization enabled. What meq
+MEQ is a thin layer over ``DarcyForm`` with hybridization enabled. What MEQ
 supplies on top:
 
 .. list-table::
    :header-rows: 1
    :widths: 30 70
 
-   * - meq
+   * - MEQ
      - Because
    * - :cpp:class:`meq::ConstantStabilization`
      - The library's default stabilisation is the LDG choice, which costs an
@@ -154,7 +154,7 @@ supplies on top:
      - :math:`F` and :math:`\partial F/\partial\psi` in the weak form's
        :math:`1/r` weighting.
    * - The offsets for a three-block vector
-     - The library's own offsets stop at the potential; the trace is meq's to
+     - The library's own offsets stop at the potential; the trace is MEQ's to
        track.
    * - The bordered Newton
      - :math:`\psiax` as an unknown is not something a hybridized solver can
@@ -165,11 +165,11 @@ supplies on top:
 
 .. note::
 
-   **The old HDG interface in MFEM is gone**, which is why meq's relationship to
+   **The old HDG interface in MFEM is gone**, which is why MEQ's relationship to
    it is a port rather than a recompile. The hand-written bilinear form, its
    domain and face integrators, and its explicit condense-and-reconstruct calls
    have no counterparts; the replacement is ``DarcyForm`` with hybridization,
-   which owns the block structure and the spaces meq used to wrap itself.
+   which owns the block structure and the spaces MEQ used to wrap itself.
 
 .. warning::
 
@@ -217,7 +217,7 @@ The style is tab indentation, Allman braces, C++17.
    **External names keep their author's capitalisation**, whatever the table
    says. ``TraceSolver::cuDSS`` is spelled the way its vendor spells it and
    carries a suppression comment saying so; the other backends happen to need
-   none. The house rule governs meq's own identifiers and does not extend to
+   none. The house rule governs MEQ's own identifiers and does not extend to
    renaming other people's products — the same exemption the linter
    configuration already records for interface methods MFEM imposes.
 

@@ -77,7 +77,7 @@ So the ladder is, in order of what it can catch:
    the post-processed :math:`\psi^\star`, over a range of degrees and several
    dyadic refinements.
 
-Each stage of meq's development ended at a measured convergence rate, not at "it
+Each stage of MEQ's development ended at a measured convergence rate, not at "it
 runs".
 
 .. _testing-fixtures:
@@ -178,7 +178,7 @@ an artefact.
 Mutation testing
 ----------------
 
-**Mutation-test a suite you are relying on.** meq's profile and source tests
+**Mutation-test a suite you are relying on.** MEQ's profile and source tests
 were checked by deliberately introducing defects — a dropped :math:`r^2`,
 :math:`p'` replaced by :math:`p`, :math:`\mu_0` on the wrong term, a flipped
 sign, an off-by-one in an interval lookup at a knot, a truncated file
@@ -232,7 +232,7 @@ What CI can and cannot check
 ----------------------------
 
 **Continuous integration cannot build the solver, and this is structural.** The
-MFEM branch meq needs is not published on any remote, so a hosted runner cannot
+MFEM branch MEQ needs is not published on any remote, so a hosted runner cannot
 obtain it and caching does not help — there is nothing to fetch. ``find_package``
 is therefore not ``REQUIRED``, and CI builds the MFEM-free half: the
 configuration parser, the profiles, the sources, the boundary shapes, plus the
@@ -266,7 +266,7 @@ solvers reproduce the default one. Those are in the ordinary suite too.
    queues work on a stream and returns, so a factorisation timed without a
    device synchronise reads several orders of magnitude too fast — and
    *plausibly* so, because "the reordering was reused, of course it is fast" is
-   a story that fits. meq's harness synchronises for **every** solver, CPU ones
+   a story that fits. MEQ's harness synchronises for **every** solver, CPU ones
    included, so that the sync can never be the thing that was forgotten.
 
 The naming check

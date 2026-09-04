@@ -459,8 +459,6 @@ BOOST_AUTO_TEST_CASE( optional_keys_fall_back_to_their_documented_defaults )
 	BOOST_TEST( config.getSolver().newtonMaxIterations == 20 );
 	BOOST_TEST( config.getSolver().newtonRelativeTolerance == 1.0e-8 );
 	BOOST_TEST( config.getSolver().newtonAbsoluteTolerance == 1.0e-12 );
-	BOOST_TEST( config.getSolver().linearMaxIterations == 1000 );
-	BOOST_TEST( config.getSolver().linearTolerance == 1.0e-12 );
 
 	BOOST_TEST( config.getOutput().directory == "." );
 	BOOST_TEST( config.getOutput().prefix == "meq" );
@@ -512,8 +510,6 @@ BOOST_AUTO_TEST_CASE( values_round_trip_from_the_file_to_the_accessors )
 		"NewtonMaxIterations = 37\n"
 		"NewtonRelativeTolerance = 1.0e-9\n"
 		"NewtonAbsoluteTolerance = 2.5e-13\n"
-		"LinearMaxIterations = 512\n"
-		"LinearTolerance = 3.0e-11\n"
 		"\n"
 		"[output]\n"
 		"Directory = \"/tmp/meq-run\"\n"
@@ -542,8 +538,6 @@ BOOST_AUTO_TEST_CASE( values_round_trip_from_the_file_to_the_accessors )
 	BOOST_TEST( config.getSolver().newtonMaxIterations == 37 );
 	BOOST_TEST( config.getSolver().newtonRelativeTolerance == 1.0e-9 );
 	BOOST_TEST( config.getSolver().newtonAbsoluteTolerance == 2.5e-13 );
-	BOOST_TEST( config.getSolver().linearMaxIterations == 512 );
-	BOOST_TEST( config.getSolver().linearTolerance == 3.0e-11 );
 
 	BOOST_TEST( config.getOutput().directory == "/tmp/meq-run" );
 	BOOST_TEST( config.getOutput().prefix == "case17" );
@@ -695,7 +689,15 @@ BOOST_AUTO_TEST_CASE( out_of_range_scalars_are_rejected )
 	BOOST_CHECK_EXCEPTION( parse( minimal() + "\n[solver]\nNewtonMaxIterations = 0\n" ), ConfigError,
 		[]( ConfigError const & e ) { return e.getKey() == "solver.NewtonMaxIterations"; } );
 
-	BOOST_CHECK_EXCEPTION( parse( minimal() + "\n[solver]\nLinearTolerance = -1.0e-8\n" ), ConfigError,
+	// REFUSED, NOT VALIDATED, AND THE DIFFERENCE IS THE POINT. These once
+	// parsed, validated and were read by nothing -- so a file could set them,
+	// pass every check, and change no behaviour whatever. They describe an
+	// iterative inner solve and MEQ's trace solve is direct. A VALID value is
+	// therefore refused just as an invalid one is, which is what these two
+	// assert: 512 is a perfectly reasonable iteration cap and is still an error.
+	BOOST_CHECK_EXCEPTION( parse( minimal() + "\n[solver]\nLinearMaxIterations = 512\n" ), ConfigError,
+		[]( ConfigError const & e ) { return e.getKey() == "solver.LinearMaxIterations"; } );
+	BOOST_CHECK_EXCEPTION( parse( minimal() + "\n[solver]\nLinearTolerance = 3.0e-11\n" ), ConfigError,
 		[]( ConfigError const & e ) { return e.getKey() == "solver.LinearTolerance"; } );
 
 	BOOST_CHECK_EXCEPTION( parse( minimal() + "\n[output]\nPrefix = \"\"\n" ), ConfigError,

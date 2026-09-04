@@ -602,7 +602,7 @@ namespace meq
 	{
 		[[noreturn]] void unavailable()
 		{
-			throw std::runtime_error( "meq::NetCDFWriter: meq was built without netcdf-cxx4" );
+			throw std::runtime_error( "meq::NetCDFWriter: MEQ was built without netcdf-cxx4" );
 		}
 	}
 

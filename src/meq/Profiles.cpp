@@ -355,7 +355,7 @@ namespace meq
 		// max_digits10 so that write() followed by fromStream() is the identity.
 		std::streamsize const oldPrecision = os.precision( std::numeric_limits<double>::max_digits10 );
 
-		os << "# meq spline profile: " << knotData.size() << " knots\n";
+		os << "# MEQ spline profile: " << knotData.size() << " knots\n";
 		os << "# psi\tf(psi)\tf'(psi)\n";
 
 		for ( auto const & knot : knotData )

@@ -43,7 +43,7 @@ namespace analytic
  *
  *     p(psi)   = (S/mu0) psi,        g(psi)^2 = T psi^2 + 2 U psi + g0^2,
  *
- * so that, with F := mu0 r^2 dp/dpsi + g dg/dpsi as everywhere else in meq,
+ * so that, with F := mu0 r^2 dp/dpsi + g dg/dpsi as everywhere else in MEQ,
  *
  *     mu0 r^2 dp/dpsi = S r^2,
  *     g dg/dpsi       = (1/2) d(g^2)/dpsi = T psi + U,

@@ -379,7 +379,7 @@ namespace meq
 
 		// Delta* psi = -F, so < Delta* psi / R^2 > = -< F / R^2 >. F is
 		// evaluated at the level, which is what psi is on this surface -- the
-		// caller's F is free to depend on psi and several of meq's do.
+		// caller's F is free to depend on psi and several of MEQ's do.
 		out.rightHandSide = surface.average( [ & ]( SurfaceNode const &node )
 		{
 			return -f( node.r, node.z, level )/( node.r*node.r );

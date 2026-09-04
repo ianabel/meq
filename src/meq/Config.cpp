@@ -11,7 +11,7 @@
 #include <vector>
 
 /*
- * Parsing and validation of a meq configuration file. See Config.hpp for the
+ * Parsing and validation of a MEQ configuration file. See Config.hpp for the
  * shape of the schema; this file is the only place that knows the spelling of a
  * key or the value of a default.
  *
@@ -47,7 +47,7 @@ namespace meq
 
 		std::string formatMessage( std::string const & file, std::string const & key, std::string const & message )
 		{
-			std::string text = "meq: configuration error";
+			std::string text = "MEQ: configuration error";
 			if ( !file.empty() )
 				text += " in '" + file + "'";
 			if ( !key.empty() )
@@ -215,7 +215,7 @@ namespace meq
 				/// The nested-table constructor above cannot do this: an array of
 				/// tables *is* an array, so its is_table() check refuses one --
 				/// even though TOML nests [[a.b]] under [a] exactly as [a.b]
-				/// does. This is the first array of tables in meq's schema.
+				/// does. This is the first array of tables in MEQ's schema.
 				///
 				/// Each element is named "parent.key[i]", so fail() and
 				/// rejectUnknownKeys() on a returned Table qualify a diagnostic
@@ -464,6 +464,32 @@ namespace meq
 				source.fail( "ProfileFile", "is reserved for a NetCDF file holding several profiles at once, which is not implemented yet; give each profile as a constant or name a text table with its own <Profile>File key" );
 		}
 
+		/// [solver] LinearMaxIterations and LinearTolerance describe an
+		/// ITERATIVE inner solve, and MEQ's trace solve is DIRECT -- UMFPACK,
+		/// PARDISO or cuDSS -- so neither has anything to control.
+		///
+		/// THEY USED TO BE PARSED AND VALIDATED AND READ BY NOTHING, which is
+		/// worse than either accepting or rejecting them: a key that validates
+		/// is a key its author believes is doing something. The only Krylov
+		/// solver in the tree is the fallback for a build with no direct solver
+		/// at all, and its three sites in GradShafranov.cpp set their own
+		/// numbers -- which do not even agree with the defaults these keys had,
+		/// 5000 against 1000 and 1e-14 against 1e-12, so passing them through
+		/// would have quietly changed that path rather than configured it.
+		///
+		/// Refused rather than ignored, on the same principle as
+		/// refuseReservedProfileFile below and the PsiAxis case after it. They
+		/// become meaningful the day the trace solve stops being direct, which
+		/// 3D or a parallel build would force; reintroducing a key then is
+		/// cheap, and a dead key in the meantime is a standing invitation to
+		/// believe it works.
+		void refuseIterativeSolverKeys( Table const & solver )
+		{
+			for ( char const * key : { "LinearMaxIterations", "LinearTolerance" } )
+				if ( solver.has( key ) )
+					solver.fail( key, "configures an iterative linear solve, and MEQ solves the hybridized trace system with a DIRECT solver -- UMFPACK, PARDISO or cuDSS -- which has no iteration count and no tolerance to set. Remove the key" );
+		}
+
 		/// The psi_ax guess, which is required exactly when the profiles are in
 		/// normalised flux and meaningless otherwise. Refusing it in the
 		/// un-normalised case is deliberate: a file carrying a PsiAxis that
@@ -645,7 +671,7 @@ namespace meq
 				if ( std::any_of( tables.begin(), tables.end(), matches ) )
 					continue;
 
-				std::string message = "is not part of the meq schema";
+				std::string message = "is not part of the MEQ schema";
 				std::string const suggestion = nearestKey( entry.first, tables );
 				if ( !suggestion.empty() )
 					message += "; did you mean [" + suggestion + "]?";
@@ -925,8 +951,7 @@ namespace meq
 			solverOptions.newtonMaxIterations = solver.getIntegerOr( "NewtonMaxIterations", solverOptions.newtonMaxIterations );
 			solverOptions.newtonRelativeTolerance = solver.getFloatOr( "NewtonRelativeTolerance", solverOptions.newtonRelativeTolerance );
 			solverOptions.newtonAbsoluteTolerance = solver.getFloatOr( "NewtonAbsoluteTolerance", solverOptions.newtonAbsoluteTolerance );
-			solverOptions.linearMaxIterations = solver.getIntegerOr( "LinearMaxIterations", solverOptions.linearMaxIterations );
-			solverOptions.linearTolerance = solver.getFloatOr( "LinearTolerance", solverOptions.linearTolerance );
+			refuseIterativeSolverKeys( solver );
 
 			if ( solverOptions.newtonMaxIterations < 1 )
 				solver.fail( "NewtonMaxIterations", "must be at least 1" );
@@ -934,10 +959,6 @@ namespace meq
 				solver.fail( "NewtonRelativeTolerance", "must be positive" );
 			if ( !( solverOptions.newtonAbsoluteTolerance > 0.0 ) )
 				solver.fail( "NewtonAbsoluteTolerance", "must be positive" );
-			if ( solverOptions.linearMaxIterations < 1 )
-				solver.fail( "LinearMaxIterations", "must be at least 1" );
-			if ( !( solverOptions.linearTolerance > 0.0 ) )
-				solver.fail( "LinearTolerance", "must be positive" );
 		}
 
 		// [output]

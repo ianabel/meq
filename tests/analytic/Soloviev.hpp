@@ -5,7 +5,7 @@
  * Solov'ev equilibria: exact solutions of the Grad-Shafranov equation for a
  * source that is constant in psi.
  *
- * This is meq's primary correctness benchmark. It is used ahead of any
+ * This is MEQ's primary correctness benchmark. It is used ahead of any
  * convergence study, because a wrong sign or weight convention converges at
  * the right rate to the wrong function -- an order-of-accuracy study cannot
  * detect that, and only a comparison against a closed form can.
@@ -84,7 +84,7 @@ class SolovievEquilibrium
 
 		/// The NSTX-like high-beta case of HDG-GradShafranov-Adaptive.pdf
 		/// section 4.1, eq (22c). This is the configuration whose exact
-		/// solution meq's stage-3 benchmark is measured against.
+		/// solution MEQ's stage-3 benchmark is measured against.
 		///
 		/// The NSTX-like single-null case of HDG-GradShafranov-Adaptive.pdf
 		/// section 4.1, at A = -0.52.

@@ -1,7 +1,7 @@
-Building meq
+Building MEQ
 ============
 
-meq is a C++17 library and a single executable. It is built with CMake and
+MEQ is a C++17 library and a single executable. It is built with CMake and
 depends on a development branch of MFEM; everything else is either vendored, or
 optional, or a package your distribution already has.
 
@@ -51,8 +51,8 @@ What you need
        ``JacobiSVD``, which is a column-pivoted QR followed by a one-sided
        Jacobi sweep — the same algorithm that file used to carry by hand. The
        swap was made for maintenance rather than for speed; the two are within
-       a factor of two of each other on meq's own workload. Nothing is linked
-       and no meq header mentions it. Debian calls it ``libeigen3-dev``.
+       a factor of two of each other on MEQ's own workload. Nothing is linked
+       and no MEQ header mentions it. Debian calls it ``libeigen3-dev``.
    * - Boost.Test
      - for the tests
      - ``unit_test_framework``, the shared-library build, which is what supplies
@@ -67,8 +67,8 @@ What you need
        check for them.
 
 SuiteSparse, SUNDIALS, GSLIB, LAPACK, MKL and CUDA are all reached *through*
-MFEM rather than found separately — meq reads which of them are present out of
-MFEM's own configuration and adapts. :ref:`install-mfem` says which of them meq
+MFEM rather than found separately — MEQ reads which of them are present out of
+MFEM's own configuration and adapts. :ref:`install-mfem` says which of them MEQ
 actually uses and for what.
 
 .. _install-mfem:
@@ -76,15 +76,15 @@ actually uses and for what.
 MFEM, and why not ``master``
 ----------------------------
 
-meq is built on ``DarcyForm`` and the HDG integrators in MFEM's ``fem/darcy/``
+MEQ is built on ``DarcyForm`` and the HDG integrators in MFEM's ``fem/darcy/``
 directory, and for curved boundaries on the transfer-path machinery in
 ``fem/darcy/extension_hdg.*``. Neither is in a released MFEM. The branch is
-where the HDG work for this family of solvers lives, and meq is an early user of
+where the HDG work for this family of solvers lives, and MEQ is an early user of
 it.
 
 .. important::
 
-   **What meq needs is a local merge of four MFEM development branches, and it
+   **What MEQ needs is a local merge of four MFEM development branches, and it
    is published on no remote.** This page assumes you already have it. If you do
    not, ``INSTALL.md`` in the source tree is the account of which branches they
    are, what each one contributes, what breaks silently if one is missing, and
@@ -96,17 +96,17 @@ it.
    per element wherever :math:`\partial F/\partial\psi` vanishes — see
    :ref:`postprocessing-singular`.
 
-The MFEM features meq reads out of the configuration, and what each buys:
+The MFEM features MEQ reads out of the configuration, and what each buys:
 
 .. list-table::
    :header-rows: 1
    :widths: 30 70
 
    * - MFEM option
-     - What meq does with it
+     - What MEQ does with it
    * - ``MFEM_USE_SUITESPARSE``
      - UMFPACK, the default direct solver for the global trace system. Without
-       any direct solver meq falls back to GMRES; see :doc:`linear_solvers`.
+       any direct solver MEQ falls back to GMRES; see :doc:`linear_solvers`.
    * - ``MFEM_USE_SUNDIALS``
      - KINSOL, which backs the Anderson–Picard and Picard-then-Newton
        globalisations. See :doc:`nonlinear`.
@@ -121,14 +121,14 @@ The MFEM features meq reads out of the configuration, and what each buys:
      - An alternative trace solver, selectable at run time.
    * - ``MFEM_USE_CUDA``, ``MFEM_USE_CUDSS``
      - A third trace solver, ``cuDSS``. A prerequisite rather than a speed-up:
-       ``fem/darcy/`` has no partial-assembly kernels and meq issues no device
+       ``fem/darcy/`` has no partial-assembly kernels and MEQ issues no device
        kernels of its own.
    * - ``MFEM_USE_OPENMP`` + ``MFEM_THREAD_SAFE``
-     - Both together enable threaded element assembly, which meq exposes as an
+     - Both together enable threaded element assembly, which MEQ exposes as an
        opt-in. Threaded assembly *aborts* rather than falling back if only one
        of the two is set.
    * - ``MFEM_USE_MPI``
-     - meq is serial and does not use it. It is detected only so that a
+     - MEQ is serial and does not use it. It is detected only so that a
        parallel MFEM fails intelligibly rather than at link time.
 
 Building
@@ -159,7 +159,7 @@ configure summary reports exactly what MFEM was built with.
    **Never run a bare** ``make -j`` **or** ``cmake --build -j`` **with no
    number.** With no argument the job count is unbounded and goes to the host's
    core count, which on a container or a WSL2 virtual machine is not the same
-   thing as the memory available to it. Give a number: 4 to 8 for meq, and 4 for
+   thing as the memory available to it. Give a number: 4 to 8 for MEQ, and 4 for
    the MFEM tree, whose translation units are large.
 
 Configure-time options
@@ -195,20 +195,20 @@ Configure-time options
 
 .. note::
 
-   **A meq debug build buys you the debugger and nothing else** — and it is
+   **A MEQ debug build buys you the debugger and nothing else** — and it is
    worth saying so, because the opposite was written down here and in the
    project's own notes for some time.
 
    MFEM's internal consistency checks are ``MFEM_ASSERT``, which is gated on
    ``MFEM_DEBUG`` — **not** on ``NDEBUG``, and nothing derives one from the
    other. A normal MFEM install sets ``MFEM_DEBUG = NO``, so every one of those
-   assertions is already dead in every meq build, release or debug, and no flag
-   passed to meq can revive one. meq's own sources contain no ``assert()``
-   either, so ``-DNDEBUG`` disables nothing of meq's.
+   assertions is already dead in every MEQ build, release or debug, and no flag
+   passed to MEQ can revive one. MEQ's own sources contain no ``assert()``
+   either, so ``-DNDEBUG`` disables nothing of MEQ's.
 
    Recovering those checks means building a **second MFEM** configured
    ``MFEM_DEBUG=YES`` and pointing ``MFEM_DIR`` at it. That is a real option
-   when chasing a suspected contract violation between meq and the library, and
+   when chasing a suspected contract violation between MEQ and the library, and
    it is a much larger undertaking than a build type.
 
 Building without MFEM
@@ -221,7 +221,7 @@ profiles, the source terms, the boundary shapes — skips every file that includ
 for each thing it left out.
 
 This is not a convenience. It is what makes continuous integration possible at
-all: the MFEM branch meq needs is not published anywhere a hosted runner can
+all: the MFEM branch MEQ needs is not published anywhere a hosted runner can
 fetch it, so CI builds and tests only that half.
 
 .. important::
@@ -240,7 +240,7 @@ Checking the build
 
 The full suite takes several minutes. Nothing needs to be set in the
 environment: the test registration puts ``MKL_NUM_THREADS=1`` on every test
-itself, which is the one variable meq needs and a no-op on a machine without
+itself, which is the one variable MEQ needs and a no-op on a machine without
 MKL. Running a test binary by hand needs the same one thing:
 
 .. code-block:: sh
@@ -249,7 +249,7 @@ MKL. Running a test binary by hand needs the same one thing:
 
 .. warning::
 
-   That variable is not cosmetic. meq's hot inner loop factorises a great many
+   That variable is not cosmetic. MEQ's hot inner loop factorises a great many
    *small* dense matrices — one or two per element, per residual evaluation —
    and on a threaded MKL each of those calls pays for a fork and a barrier that
    dwarfs the arithmetic. The effect was measured on the development machine and

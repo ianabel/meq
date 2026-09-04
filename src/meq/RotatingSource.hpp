@@ -27,7 +27,7 @@
  *     Sum_s Z_s n_s( r, psi ) = 0                                   (97)
  *
  * and (97) is what determines phi_0 at each ( r, psi ). Everything else about
- * meq is untouched: the operator, the discretisation, tau, the hybridization,
+ * MEQ is untouched: the operator, the discretisation, tau, the hybridization,
  * the estimator, the adaptive loop and the curved boundary all stay as they are.
  * meq::Source's signature already carries r, which is the whole reason a
  * non-flux-function density needs no interface change anywhere in the solver.
@@ -36,7 +36,7 @@
  * <phi_0>_psi = 0 and says at its (59) that this is a convention rather than a
  * closure -- "we can add any function of psi to it". That choice would make
  * phi_0 proportional to r^2 - <R^2>_psi, a flux-surface average of the unknown
- * on every surface, which meq has no machinery for and which buys nothing
+ * on every surface, which MEQ has no machinery for and which buys nothing
  * physical. This class instead pins
  *
  *     phi_0( rRef, psi ) = 0
@@ -63,16 +63,16 @@
  * which is meq::MHDSource's shape with an r-dependent p. The residual therefore
  * needs phi_0 but never its psi-derivative; only the Jacobian does. Checked two
  * ways: it is RoPP's own force balance (128), and at omega -> 0 it gives RoPP
- * (243), which is the static equation meq already solves.
+ * (243), which is the static equation MEQ already solves.
  *
  * UNITS AND SIGN, pinned deliberately because two sign errors have already been
- * found in the papers meq does follow. RoPP is Gaussian, with the 4 pi of (136)
- * and the c of (135); meq is SI, so 4 pi -> mu0 and RoPP's I is meq's g = r B_phi.
+ * found in the papers MEQ does follow. RoPP is Gaussian, with the 4 pi of (136)
+ * and the c of (135); MEQ is SI, so 4 pi -> mu0 and RoPP's I is MEQ's g = r B_phi.
  * RoPP (135) is j.grad(phi) = -( c/4 pi r^2 ) Delta* psi, so (136) reads
  * Delta* psi = -4 pi r^2 { ... }, so F = -Delta* psi = +mu0 r^2 { ... } -- the
  * same positive convention meq::MHDSource uses. RoPP's psi is poloidal flux per
  * radian, from its (31) B = I grad(phi) + grad(psi) x grad(phi), which is what
- * meq's g g' in T^2 m^2 per Wb/rad already assumes and what EQDSK tabulates.
+ * MEQ's g g' in T^2 m^2 per Wb/rad already assumes and what EQDSK tabulates.
  */
 
 namespace meq
@@ -307,7 +307,7 @@ namespace meq
 	/**
 	 * The rotating source with its profiles given against NORMALISED flux.
 	 *
-	 * Psi = ( psi - psi_bnd )/( psi_ax - psi_bnd ), and meq is fixed boundary
+	 * Psi = ( psi - psi_bnd )/( psi_ax - psi_bnd ), and MEQ is fixed boundary
 	 * with psi = 0 on Gamma, so Psi = psi/psi_ax -- which makes psi_ax a
 	 * functional of the solution and therefore an unknown of the non-linear
 	 * system, not an input. meq::NormalisedSource is the interface the solver

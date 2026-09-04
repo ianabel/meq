@@ -39,7 +39,7 @@
  * assumed.
  *
  * psi_axis IS SETTABLE, AND THE SOLVER IS WHAT SETS IT. psi_bnd is zero, because
- * meq solves the fixed-boundary problem with psi = 0 on Gamma, so
+ * MEQ solves the fixed-boundary problem with psi = 0 on Gamma, so
  * Psi = psi / psi_axis throughout and psi_axis is the whole of the
  * normalisation. It arrives as a constructor argument and setPsiAxis() moves it,
  * which is what meq::NormalisedSource requires: psi_axis is an UNKNOWN of the
@@ -236,7 +236,7 @@ class HighBetaPoloidal
 		}
 
 		/// g dg/dpsi, which is half of d( F^2 )/dpsi. That identity is the reason
-		/// eq (2)'s second term is usually written as F F' and meq writes it as
+		/// eq (2)'s second term is usually written as F F' and MEQ writes it as
 		/// g g': they are the same quantity and this fixture never has to form g
 		/// itself, which would need a square root and a sign convention.
 		double ggPrime( double psi ) const

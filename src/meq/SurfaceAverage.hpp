@@ -20,7 +20,7 @@
  * The 2 pi R is IN. A per-unit-length V' differs by exactly that factor, and
  * the flux-surface-averaged Grad-Shafranov identity below -- which is this
  * file's reference-free acceptance -- is stated for this one and not for the
- * other. Anything reading a V' out of meq is reading the volume derivative,
+ * other. Anything reading a V' out of MEQ is reading the volume derivative,
  * dV/dpsi with V the volume enclosed by the surface.
  *
  * ONE FACILITY, NOT A LIST OF QUANTITIES, AND THAT IS A RESPONSE TO THE
@@ -146,7 +146,7 @@
  * worth more than either being plausible. There is a THIRD leg and IT IS NOT
  * BUILT: section 3.3's implicit quadrature, a rule constructed on the level set
  * with no curve extracted at all. It is deferred deliberately rather than
- * forgotten -- Saye's construction is for hyperrectangles and meq is on
+ * forgotten -- Saye's construction is for hyperrectangles and MEQ is on
  * triangles, so it would be Fries-Omerovic or moment fitting, which is a piece
  * of work rather than an afternoon. Read the two-route agreement below as two
  * legs of three.
@@ -255,7 +255,7 @@
  * It is not an X-point-aware facility. Approaching the separatrix 1/| grad psi |
  * diverges, the surface develops a corner and every quantity here diverges
  * logarithmically with it. That is the physics, it is INVERSION-PLAN.md section
- * 8's second risk, and where meq cuts is a decision to be recorded rather than
+ * 8's second risk, and where MEQ cuts is a decision to be recorded rather than
  * discovered.
  *
  * And safetyFactor() carries no evidence of its own. It is
@@ -292,7 +292,7 @@ namespace meq
 		double psi = 0.0;
 		double residual = 0.0;
 
-		/// q at the node, in meq's sign convention, and | grad psi | = r | q |
+		/// q at the node, in MEQ's sign convention, and | grad psi | = r | q |
 		/// with it. POINTWISE FROM THE SOLVED FLUX: see the header.
 		double qR = 0.0;
 		double qZ = 0.0;

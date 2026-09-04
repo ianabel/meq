@@ -14,7 +14,7 @@ is what each stage found. **Section numbers are load bearing**: `src/meq` and
 §4.4 cites §4.3, §4.3 cites §8.2, and `CLAUDE.md` cites §5 and §11. Do not
 renumber without a `grep -rn`.
 
-**The problem.** meq solves for `ψ` on a mesh. Almost everything downstream
+**The problem.** MEQ solves for `ψ` on a mesh. Almost everything downstream
 wants the inverse: the flux surfaces themselves, as curves parametrised by a
 flux label and an in-surface coordinate, and the integrals taken over them.
 
@@ -24,7 +24,7 @@ things that need it:
 * **`ROADMAP.md` item 10, the fixed-`q(ψ)` solver.** RoPP (142) is
   `q(ψ) = V′(ψ) I(ψ) ⟨r^{-2}⟩_ψ / 4π²` — a flux-surface average, and the
   machinery `FLOW-PLAN.md` §3.3 deliberately avoided needing. **Here and in
-  §3.4, §4.3 and §4.4 that `q` is the safety factor and NOT meq's flux**, which
+  §3.4, §4.3 and §4.4 that `q` is the safety factor and NOT MEQ's flux**, which
   is the same letter for a solved unknown of the discretisation; IN-2 settles
   what the code is allowed to call each.
 * **`MANTA-COUPLING.md` §5 and §6**, whose own checklist calls
@@ -189,7 +189,7 @@ Runge–Kutta order derives from.
 
 ### 3.2 The two nearly-free uses of `q`, and the trap between them
 
-This is where meq has something no other code in the survey has: **the gradient
+This is where MEQ has something no other code in the survey has: **the gradient
 is a solved unknown at the same order as the potential**, not a differentiated
 one.
 
@@ -259,7 +259,7 @@ Implicit quadrature builds a rule on the level set directly. Saye
 strictly positive weights**, needing only 1-D root finding and 1-D Gauss
 quadrature — the root finding being a corrector in disguise.
 
-**The caveat is decisive for meq: Saye 2015 is for hyperrectangles and meq is
+**The caveat is decisive for MEQ: Saye 2015 is for hyperrectangles and MEQ is
 on unstructured triangles.** The simplex-friendly line is Fries & Omerović
 (`10.1016/j.cma.2016.10.019`) and Fries & Schöllhammer part II
 (`10.1016/j.cma.2017.07.037`), the latter specifically on integration *on* the
@@ -277,7 +277,7 @@ primary route. Worth building as a control precisely because it is independent.
 |---|---|
 | **Marching squares / marching triangles** | Caps at `O(h_cell²)` regardless of `k` — Etiene et al. measured vertex position 1.94, normals 0.93, curvature *divergent* (`10.1109/tvcg.2009.194`). On a simplicial mesh it is at least unambiguous, the affine interpolant's level set being convex hence connected; but the order is the point and it throws away `k−1` of them. |
 | **Subdivide, then march** — what ParaView, VisIt, VTK and MFEM's own exporters do | **Second order in the SUB-CELL size with no `k`-dependence at all**; Remacle et al.'s error falls as `2^{2r}` and the degree never enters. Fine for a picture, which is what it is for. Not fine for `q(ψ)`. |
-| **Exact rational contours** | Wiley et al. give the contour of a bivariate quadratic over a triangle as an exact conic. **It caps at `k = 2` in principle**: a level set of a degree-`d` polynomial is an algebraic curve of degree `d`, and rational parametrisation needs genus 0 — a generic smooth plane cubic has genus 1. meq runs to `k = 4`. (Their *quartic* comes from curved element geometry; meq's solve mesh is straight-sided, so it would be a conic here.) |
+| **Exact rational contours** | Wiley et al. give the contour of a bivariate quadratic over a triangle as an exact conic. **It caps at `k = 2` in principle**: a level set of a degree-`d` polynomial is an algebraic curve of degree `d`, and rational parametrisation needs genus 0 — a generic smooth plane cubic has genus 1. MEQ runs to `k = 4`. (Their *quartic* comes from curved element geometry; MEQ's solve mesh is straight-sided, so it would be a conic here.) |
 | **Plain ODE tracing without projection** | Error accumulates monotonically; the curve drifts onto a neighbouring contour and does not close. With projection it *is* §3.1. |
 | **Ray bisection from the axis** | Point accuracy is as good as a corrector's and it parallelises trivially — worth keeping as an **independent cross-check** and as the initialiser for a periodic parametrisation, since it produces points already indexed by angle. **Not the primary route**: it assumes star-shapedness, which fails on indented cross-sections, at and beyond the separatrix, and near the axis where the bracket degenerates. |
 | **The Morse–Smale complex** | **It gives the wrong curves.** Its "separatrices" are integral curves of `∇ψ`, *orthogonal* to the level sets; the plasma separatrix is the level **set** through the X-point. Recorded because it is the natural thing to reach for by name. |
@@ -483,7 +483,7 @@ empty.
 > assumed to cost an order. It does not. **Two of the three arguments for
 > elements survive; this one should not be leaned on.**
 
-Three candidates were considered, and meq already owned machinery for two:
+Three candidates were considered, and MEQ already owned machinery for two:
 
 | | | |
 |---|---|---|
@@ -571,9 +571,9 @@ whatever harmonics the shaping puts there. Measured: with the innermost surface
 at `Ψ_N = 0.10` the envelope decays geometrically, and pulled in to `Ψ_N = 0.02`
 **an algebraic tail appears that no degree removes.** A parametrisation smooth to
 all orders must therefore vary with the surface — and that is a structural
-difference between meq and the code this basis was borrowed from. **DESC *solves*
+difference between MEQ and the code this basis was borrowed from. **DESC *solves*
 for its `R`, `z` coefficients**, so its parametrisation is part of the unknown and
-it gets this for free. **meq fits after the fact**, so it has to be bought.
+it gets this for free. **MEQ fits after the fact**, so it has to be bought.
 
 **The three ways to buy it were all the same basis, and the DESC papers say so.**
 Read 2026-09-03, `refs/DESC-Dudt.pdf` and `refs/DESC-Panici.pdf`:
@@ -696,7 +696,7 @@ reach for if IN-4 finds the chart is the binding constraint.
 **`q` gives the residual directly.** `∇̄ψ = r q`, so `q = 0` is a 2×2 system in
 which the residual is a *solved field* and only the Hessian needs differencing.
 Compare CEDRES++, which records as an open problem that in P1 continuous
-Galerkin the axis and X-point are confined to mesh vertices; meq's high-order
+Galerkin the axis and X-point are confined to mesh vertices; MEQ's high-order
 representation resolves them sub-element, which is what makes polynomial root
 finding worth doing at all. TokaMaker (`10.1016/j.cpc.2024.109111`) notes the
 same for Lagrange order ≥ 2: saddles "can exist anywhere within the mesh".
@@ -704,7 +704,7 @@ same for Lagrange order ≥ 2: saddles "can exist anywhere within the mesh".
 **Exhaustiveness comes from subdivision with the Bernstein convex-hull test**,
 and the triangle-native version is the one to use: Reuter et al.
 (`10.1007/s00371-007-0184-x`, in `refs/`) work in the **barycentric** Bernstein
-basis, so the subdivision primitive is a triangle and meq's mesh is native to
+basis, so the subdivision primitive is a triangle and MEQ's mesh is native to
 it. If all Bernstein coefficients of a component share a sign on a sub-cell, no
 zero lies there — discard; recurse otherwise. Only provably-empty regions are
 ever discarded, so nothing can be missed.
@@ -723,7 +723,7 @@ spurious saddle (−1) sums to zero — and numerical noise creates them strictl
 pairs. Pair it with a persistence threshold, which need not be tuned: the
 stability theorem (Cohen-Steiner, Edelsbrunner & Harer,
 `10.1007/s00454-006-1276-5`) bounds every spurious feature's persistence by
-`2‖ψ_h − ψ‖_∞`, a quantity meq already measures to convergence-rate precision.
+`2‖ψ_h − ψ‖_∞`, a quantity MEQ already measures to convergence-rate precision.
 **The index check and persistence are complementary, not redundant.**
 
 ---
@@ -731,7 +731,7 @@ stability theorem (Cohen-Steiner, Edelsbrunner & Harer,
 ## 6. Scoping: the global-structure work is deferred, and the reason is sharp
 
 The original framing of this item asked for open-versus-closed classification
-and saddle crossing. **For the fixed-boundary problem meq solves today, there
+and saddle crossing. **For the fixed-boundary problem MEQ solves today, there
 are no interior saddles at all**, so none of that apparatus is exercised.
 
 The argument, and note that **the load-bearing step is analytic, not
@@ -762,7 +762,7 @@ topological**:
 > seeds from both nodal extremes and refuses rather than guesses if both are
 > interior extrema; `AxisSense` is for a caller who knows which they want.
 
-The conclusion is immune to all three of meq's sign conventions: `ψ → −ψ` swaps
+The conclusion is immune to all three of MEQ's sign conventions: `ψ → −ψ` swaps
 max and min and both have index +1 in 2D; `q = ∇̄ψ / r` has the same zeros and
 indices since `r > 0`; and `DarcyForm` holding `−q` changes nothing because in
 even dimension `index(−v) = index(v)`.
@@ -778,7 +778,7 @@ one yet".
 
 * **GS-2 §4.4, the current hole.** Reversed core current destroys the
   supersolution property, so the "no interior minimum" step fails and an
-  interior saddle becomes possible. It is already meq's unsolved benchmark for
+  interior saddle becomes possible. It is already MEQ's unsolved benchmark for
   unrelated reasons (`max|∂F/∂ψ|/λ₁ ≈ 26`, multi-valued).
 * **Rotating runs where the object of interest is `p` rather than `ψ`.** In a
   rotating equilibrium `p` is **not** a flux function — that is the entire
@@ -790,7 +790,7 @@ one yet".
 **One thing that lands in the current tree regardless.** `refs/Refs.md` records
 that with HDG-GS-2's **published** coefficients the X-point sits at
 `ψ = −8.7e-3`, so the zero level set is **not a closed curve**. "Is this contour
-closed?" already has a wrong answer in one of meq's own fixtures.
+closed?" already has a wrong answer in one of MEQ's own fixtures.
 
 **When the topology work does come**, at free boundary, the shape is settled:
 the **join tree only** (a superlevel-set question — the split tree and the merge
@@ -952,7 +952,7 @@ case, not fixed by MaNTA" and its illustrative set is known to be under revision
 > surface-motion term "does not produce a wrong answer, only slow Newton
 > convergence", and several defects survived a passing suite for months on it.
 > That is *A wrong Jacobian is invisible to a convergence table* arriving from the
-> consumer's side, and the remedy is the one meq already uses on `dFdPsi`:
+> consumer's side, and the remedy is the one MEQ already uses on `dFdPsi`:
 > **finite-difference `dGeometry_dpsi` against `Geometry` directly**, as a unit
 > test, and never take convergence of the coupled solve as evidence.
 
@@ -1190,7 +1190,7 @@ it is not.
 2. **The separatrix.** Everything degrades approaching it — `1/|∇ψ|` in the
    integrand, the corner in the surface, the logarithm no polynomial basis
    catches. Production codes simply stop: LIUQE cuts at `Ψ_N = 0.95`, FreeGS
-   extrapolates outside `[0.01, 0.99]`. **Decide meq's cut deliberately and
+   extrapolates outside `[0.01, 0.99]`. **Decide MEQ's cut deliberately and
    record it**, rather than discovering it as a convergence failure.
 3. ~~**The band silently truncating an outer surface.**~~ **Closed**, and the
    prior art is what it was closed against: `v0-legacy:FluxSurfaces.cpp` returns a
@@ -1219,14 +1219,14 @@ it is not.
 | | |
 |---|---|
 | **Topological classification** — contour trees, open/closed, saddle crossing | §6. It belongs with free boundary, where `χ(annulus) = 0` forces X-points to exist. |
-| **3D / stellarator geometry** | meq is axisymmetric. DESC's basis is borrowed; its toroidal Fourier factor is not. |
+| **3D / stellarator geometry** | MEQ is axisymmetric. DESC's basis is borrowed; its toroidal Fourier factor is not. |
 | **Straight-field-line, PEST, Boozer or Hamada angles** | Stability and gyrokinetic codes want these; flux-surface *averages* do not. Build them on top of IN-3 if a consumer appears. Note the practical warning that a straight-field-line angle resolves the low-field-side midplane poorly, which is where ballooning modes live. |
 | **Contouring `p` in a rotating equilibrium** | A different curve family (§6). Not hard, but not this. |
 | **The inverse-equilibrium formulation** | VMEC, DESC and CHEASE make the surfaces unknowns of the *solve*. That is a different code, not a post-processing step, and it hard-codes star-shapedness into the discretisation. |
 
 ---
 
-## 10. Two holes in the literature that meq is positioned to fill
+## 10. Two holes in the literature that MEQ is positioned to fill
 
 Recorded because they are unusual, and because both surveys reached them
 independently.
@@ -1235,14 +1235,14 @@ independently.
   solved unknown at the same order.** The nearest is the gradient-augmented
   level set line (Nave, Rosales & Seibold, `10.1016/j.jcp.2010.01.029`), where
   the gradient is *advected* rather than co-solved. §3.2's Hermite-with-`q` is
-  well-founded by analogy and is **not** something meq can cite as done.
+  well-founded by analogy and is **not** something MEQ can cite as done.
 * **Nobody extracts flux surfaces from a `P_k` finite-element `ψ` at
   `O(h^{k+1})` and demonstrates that `q(ψ)` and the flux-surface averages
   converge at that rate.** CHEASE bisects its element cubic and preserves FE
   order in the quadrature (1996); ECOM does the fully spectral version but
   cannot handle an X-point (2015). Between them is exactly this item.
 
-meq is the only code in either survey with `q` in hand.
+MEQ is the only code in either survey with `q` in hand.
 
 ---
 
@@ -1304,7 +1304,7 @@ design against.
 5. **The Zernike least squares** is one dense solve on a small system. Leave it
    to BLAS — and read §11.3 before doing even that.
 
-### 11.3 The threading constraints are meq's own, and two of them are traps
+### 11.3 The threading constraints are MEQ's own, and two of them are traps
 
 **`MKL_NUM_THREADS=1` IS NOT NEGOTIABLE AND THIS ITEM DOES NOT GET TO RELAX
 IT.** `CLAUDE.md` records `ComputeH()`'s element-local dense LU degrading by a
@@ -1329,9 +1329,9 @@ is measuring the solver getting slower somewhere else.
 
 Three more, none of them exotic:
 
-* **`MFEM_THREAD_SAFE` is ON in meq's build** and is what makes `FiniteElement`
+* **`MFEM_THREAD_SAFE` is ON in MEQ's build** and is what makes `FiniteElement`
   evaluation reentrant at all. Without it none of this is safe, and it is not
-  meq's flag to assume elsewhere.
+  MEQ's flag to assume elsewhere.
 * **Build every cached table before the parallel region.**
   `Mesh::ElementToElementTable()` builds and caches on first call; building it
   inside a parallel region is a data race on the cache.

@@ -2,7 +2,7 @@ Flux-surface geometry
 =====================
 
 Once the surfaces exist as curves (:doc:`flux_surfaces`), two things are wanted
-from them, and meq supplies both.
+from them, and MEQ supplies both.
 
 **Flux-surface averages** are what a transport code reads: the volume
 derivative :math:`V'`, the geometric coefficients that appear in the averaged
@@ -46,7 +46,7 @@ The convention is part of the definition
        = \frac{1}{V'} \oint \frac{2\pi R \, X \, \mathrm{d}l}{|\nabla\psi|}.
 
 **The** :math:`2\pi R` **is in.** A per-unit-length :math:`V'` differs by
-exactly that factor, so anything reading a :math:`V'` out of meq is reading the
+exactly that factor, so anything reading a :math:`V'` out of MEQ is reading the
 volume derivative, :math:`\mathrm{d}V/\mathrm{d}\psi` with :math:`V` the volume
 the surface encloses. The averaged Grad–Shafranov identity below — which is this
 facility's reference-free acceptance — is stated for this convention and not for
@@ -55,7 +55,7 @@ the other.
 .. warning::
 
    **The safety factor is** ``safetyFactor()`` **and is never called** ``q``.
-   In meq, :math:`q` is the **flux**, :math:`q = \gradbar\psi / r`, a solved
+   In MEQ, :math:`q` is the **flux**, :math:`q = \gradbar\psi / r`, a solved
    unknown of the discretisation. The safety factor is also universally written
    :math:`q`. A reader who meets ``q`` anywhere in ``src/meq`` is entitled to
    assume the flux, and one silent conflation would be very hard to find
@@ -336,7 +336,7 @@ the whole thing converge near the axis. Both are explained below.
    ``SurfaceFit`` and ``Zernike`` are **MFEM-free**: plain doubles in,
    coefficients out. That is what makes them unit-testable without the finite
    element library and buildable in continuous integration, which cannot obtain
-   the MFEM branch meq needs (see :ref:`organization-mfem-free`). The price is
+   the MFEM branch MEQ needs (see :ref:`organization-mfem-free`). The price is
    that a caller writes the two-line loop that turns an ``AngleParametrisation``
    into samples, rather than the fit taking a dependency on the tracer for it.
 
@@ -645,7 +645,7 @@ sit, so the angle is free and the truncated basis may choose
 it. ``meq::DiscNode`` is the input, and it deliberately **carries no position** —
 that is the entire difference from a ``SurfaceSample``.
 
-It needs no force balance and no second physics solver, because meq already has
+It needs no force balance and no second physics solver, because MEQ already has
 :math:`\psi`; and the Jacobian needs :math:`\nabla\Psi_{\mathrm N}`, which is the
 **solved flux** once more. Measured on nested ellipses, where the answer is known
 exactly, the gauge-free solve reaches round-off at low degree where the

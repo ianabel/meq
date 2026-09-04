@@ -4,7 +4,7 @@ Flux surfaces
 A Grad–Shafranov solve produces :math:`\psi(r, z)` on a mesh. Almost everything
 downstream — a transport code, a gyrokinetic code, a plot of the safety factor
 — wants the *inverse* of that: the flux surfaces themselves, as curves, indexed
-by the flux label rather than by position. meq extracts them, and this chapter
+by the flux label rather than by position. MEQ extracts them, and this chapter
 is how.
 
 Three things are built on top of one another, and each is usable on its own:
@@ -54,7 +54,7 @@ Why the flux is the asset
 -------------------------
 
 Every step below is cheaper and more accurate than it would otherwise be for
-one reason, and it is the same reason meq is a mixed method at all: **the
+one reason, and it is the same reason MEQ is a mixed method at all: **the
 gradient of** :math:`\psi` **is a solved unknown, not a derivative of one**.
 
 Writing :math:`\gradbar\psi = r q`:
@@ -73,7 +73,7 @@ Writing :math:`\gradbar\psi = r q`:
 Contrast the continuous Galerkin codes. :cite:t:`Heumann2015` records as an
 open problem that in a P1 discretisation the axis and the X-point are confined
 to mesh vertices, because that is where the discrete gradient can be said to
-vanish. meq resolves both **sub-element**, by root finding inside an element's
+vanish. MEQ resolves both **sub-element**, by root finding inside an element's
 own polynomial.
 
 Critical points
@@ -130,7 +130,7 @@ Which extremum is the axis
 
 .. warning::
 
-   **meq's** :math:`\psi` **is not sign-normalised across sources, so the
+   **MEQ's** :math:`\psi` **is not sign-normalised across sources, so the
    magnetic axis is not always a maximum.** With :math:`F` single-signed
    *negative* — which is what the Solov'ev benchmarks have — :math:`\psi` is a
    subsolution, its maximum is on :math:`\Gamma`, and the axis is an interior
@@ -285,7 +285,7 @@ spacing is a free parameter rather than something tied to the mesh.
 Which potential to root
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-meq has two candidate pairs: :math:`\psi_h` with :math:`q_h`, both converging at
+MEQ has two candidate pairs: :math:`\psi_h` with :math:`q_h`, both converging at
 :math:`k+1`; and the post-processed :math:`\psi^\star` with the enriched
 :math:`q^\star`, where :math:`\psi^\star` converges at :math:`k+2` (see
 :doc:`postprocessing`). ``Potential::PostProcessed`` is **the default**, and the

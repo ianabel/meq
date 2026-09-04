@@ -39,7 +39,7 @@ implementation had to answer, rather than one silently returning the wrong thing
 .. warning::
 
    **A tabulated profile is** :math:`C^1` **and no more, so its second
-   derivative jumps at every interior knot.** meq's spline is a piecewise
+   derivative jumps at every interior knot.** MEQ's spline is a piecewise
    Hermite cubic, which matches value and slope across a knot but not curvature.
    The test suite asserts that jump rather than pretending otherwise. Nothing
    has measured what it costs a Newton iteration; if you are chasing an
@@ -140,7 +140,7 @@ directory of the run**, not against the directory the configuration file is in.
    values are unchanged and the slopes are not.
 
    Hand a table to the wrong configuration and it parses, solves and converges —
-   to a plasma whose gradient is wrong by a factor of :math:`\psiax`. meq ships
+   to a plasma whose gradient is wrong by a factor of :math:`\psiax`. MEQ ships
    the same profile written both ways, in ``examples/rotating-density.dat`` and
    ``examples/rotating-density-normalised.dat``, and both headers say which is
    which. There is no way for the code to detect the mistake; the units are in
@@ -157,6 +157,6 @@ identically and Newton finishes in one step. The problem is affine.
 
 That is a perfectly good thing to want — it isolates whatever else is being
 tested from the nonlinear solve — but it means the run says nothing whatever
-about the Jacobian. Two of meq's own shipped examples are like this deliberately,
+about the Jacobian. Two of MEQ's own shipped examples are like this deliberately,
 and their headers say so; ``examples/mhd-rectangle.toml`` is the counterexample,
 with a pressure gradient quadratic in :math:`\psi`. See :doc:`examples`.

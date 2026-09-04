@@ -81,8 +81,6 @@ Type = "zero"
 NewtonMaxIterations = 20
 NewtonRelativeTolerance = 1.0e-8
 NewtonAbsoluteTolerance = 1.0e-12
-LinearMaxIterations = 1000
-LinearTolerance = 1.0e-12
 
 [output]
 # Writes ./soloviev-nstx.mesh, ./soloviev-nstx_psi.gf and

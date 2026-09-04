@@ -1,4 +1,4 @@
-# Where meq is, and what to do next
+# Where MEQ is, and what to do next
 
 Written 2026-08-26, substantially revised 2026-08-27, 2026-08-29, 2026-09-01 and
 2026-09-03. `CLAUDE.md` is the operational record and is authoritative on
@@ -34,14 +34,14 @@ Nothing is red and stages 0 to 7 are done, so the order is:
    IN-2 measures `⟨r^{-2}⟩_ψ` and `V′(ψ)` against a converged reference.
 
 Items 4 and 6 are performance and neither is urgent; item 5 is a defect in
-MFEM's local solves that meq works around and has **not filed**; item 7 is a
+MFEM's local solves that MEQ works around and has **not filed**; item 7 is a
 closed investigation kept for its answer. Items 1, 2, 3, 9 and 11 are done and
 are markers.
 
 ## The state in one paragraph
 
 The solver works and every claim about it is a measured convergence rate. Stages
-0 to 6 are done, **stage 7 is finished** — meq is a program that solves on a
+0 to 6 are done, **stage 7 is finished** — MEQ is a program that solves on a
 curved boundary, refines its own mesh, and restarts from a previous answer in one
 Newton step — **toroidal flow is finished**, FL-0 to FL-8, and **solution
 inversion is finished up to its output stage**. The only thing the driver refuses
@@ -50,7 +50,7 @@ is `[boundary] Type = "exact"`.
 ## The nonlinear question is settled
 
 It ran through four wrong answers, which is why it is written down rather than
-summarised away. meq's Newton was thought to fail on the stiff GS-2 sources.
+summarised away. MEQ's Newton was thought to fail on the stiff GS-2 sources.
 
 * **Not Newton, and not the boundary condition.** `refs/MFEM-GS-Newton.pdf`
   reports Newton robust where "conventional Picard-based solvers fail to
@@ -60,7 +60,7 @@ summarised away. meq's Newton was thought to fail on the stiff GS-2 sources.
   `NLOrdering::LineariseThenCondense` removes every element-local nonlinear
   solve (`GetNumLocalNLIterations()` reads 0) and the stiff cases get *worse*.
   **Confirmed twice**: that mode is now deleted, and `NPC` — the canonical
-  version of the same idea, and meq's default — reproduces the verdict.
+  version of the same idea, and MEQ's default — reproduces the verdict.
 * **Mostly it was under-resolution.** §4.2, §4.3 and §4.5 are not stiff at all:
   raw Newton solves all three in 7 to 17 iterations once resolved, and refining
   `h` or raising `k` cures them independently. §4.2 at `k = 3, n = 48` takes 7,
@@ -75,17 +75,17 @@ summarised away. meq's Newton was thought to fail on the stiff GS-2 sources.
   the linearised operator has swept past ~26 eigenvalues and the problem is
   multi-valued. Refinement cannot touch that.
 
-Numbers in `CLAUDE.md`, *Why meq's Newton struggles* and *Picard, then Newton*.
+Numbers in `CLAUDE.md`, *Why MEQ's Newton struggles* and *Picard, then Newton*.
 **Nothing on this path blocks anything else.**
 
 ## Division of labour
 
 **The MFEM tree is worked by another agent** and is receive-only: fetch from it,
 write requests into its `doc/`, never branch, commit, check out or build there.
-meq owns `src/`, `tests/` and `apps/`.
+MEQ owns `src/`, `tests/` and `apps/`.
 
-**Every request meq has filed except one is landed in the code meq builds
-against**, which is the only test of "landed" meq can apply. **Ask `git` which
+**Every request MEQ has filed except one is landed in the code MEQ builds
+against**, which is the only test of "landed" MEQ can apply. **Ask `git` which
 documents exist, not `ls`**: all three open ones live on `gf-hdg-linearise-first`
 alone, so a listing taken while that tree sits on `gf-hdg-dev` shows an almost
 empty `doc/` and means nothing. `CLAUDE.md` has the branch-by-branch table and
@@ -93,15 +93,15 @@ the mistake that produced it.
 
 | filed | state |
 |---|---|
-| `HDG-LINEARISE-THEN-CONDENSE.md` | landed, then **retired** with the mode itself — on backup refs only now. `setNonlinearOrdering()` is gone; meq's default is `NPC` |
+| `HDG-LINEARISE-THEN-CONDENSE.md` | landed, then **retired** with the mode itself — on backup refs only now. `setNonlinearOrdering()` is gone; MEQ's default is `NPC` |
 | `DIRECT-SOLVER-SYMBOLIC-REUSE.md` | landed — `SetReuseSymbolic()` is on — and **retired**, on no branch at all |
-| `HDG-NPC-GLOBALISATION-FROM-MEQ.md` | **filed 2026-08-31 and answered the same day** (`af82d42b14`). Not a defect report: two §6 claims withdrawn on meq's evidence, meq's own account of the mechanism corrected, and a defect found in the reference implementation meq had copied |
-| `HDG-DEFECTS-FROM-MEQ.md` | **still on `gf-hdg-dev` and `gf-hdg-subdomains-dev`**, deleted only on the symbolic-reuse line — which is why that merge conflicts modify/delete. Three of its four are verifiably closed — one fixed, one fixed, one withdrawn as not a defect; the fourth, `ComputeHDGFaceEnergy()` ignoring an installed stabilisation, meq has not re-measured and does not use |
+| `HDG-NPC-GLOBALISATION-FROM-MEQ.md` | **filed 2026-08-31 and answered the same day** (`af82d42b14`). Not a defect report: two §6 claims withdrawn on MEQ's evidence, MEQ's own account of the mechanism corrected, and a defect found in the reference implementation MEQ had copied |
+| `HDG-DEFECTS-FROM-MEQ.md` | **still on `gf-hdg-dev` and `gf-hdg-subdomains-dev`**, deleted only on the symbolic-reuse line — which is why that merge conflicts modify/delete. Three of its four are verifiably closed — one fixed, one fixed, one withdrawn as not a defect; the fourth, `ComputeHDGFaceEnergy()` ignoring an installed stabilisation, MEQ has not re-measured and does not use |
 | `HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md` | **landed and retired** — the fix is *"The postprocessing closes on the element average, always"*, and the document is on no branch |
-| `HDG-ELEMENT-LOCAL-PARALLELISM.md` | open, on `gf-hdg-linearise-first`, and meq has seen no change |
+| `HDG-ELEMENT-LOCAL-PARALLELISM.md` | open, on `gf-hdg-linearise-first`, and MEQ has seen no change |
 | `HDG-BEM-COUPLING-FROM-MEQ.md` | **filed 2026-08-29**, for free boundary — open, on `gf-hdg-linearise-first`. See item 8 |
 
-**What is NOT filed is the local-solve seed** — item 5. It was found from meq's
+**What is NOT filed is the local-solve seed** — item 5. It was found from MEQ's
 side and nothing has been written into that tree about it, beyond one paragraph
 inside the coupling request using it as the argument for why a caller should not
 have to difference a condensed residual.
@@ -115,13 +115,13 @@ things that do not exist rather than things that misbehave, and it says so.
 ## 0. FOUR MFEM branches, one integration branch — standing maintenance
 
 **It is four now, not three, and this is the entry to read before rebuilding
-`../mfem/install`.** meq needs work from
+`../mfem/install`.** MEQ needs work from
 
-| branch | what meq needs from it |
+| branch | what MEQ needs from it |
 |---|---|
 | `gf-hdg-subdomains-dev` | `fem/darcy/extension_hdg.*` — the curved `Γ`, and `TransferredDatumCoefficient` |
 | `direct-solver-symbolic-reuse` | `SetReuseSymbolic()` on the direct solvers |
-| `gf-hdg-linearise-first` | **`DarcyNPCOperator` / `DarcyNPCSolver`** — meq's ordering. `NLOrdering::LineariseThenCondense` was on this branch and is **deleted** |
+| `gf-hdg-linearise-first` | **`DarcyNPCOperator` / `DarcyNPCSolver`** — MEQ's ordering. `NLOrdering::LineariseThenCondense` was on this branch and is **deleted** |
 | **`gf-hdg-dev`** | **the reconstruction fix — *"The postprocessing closes on the element average, always"*** |
 
 **`meq-integration`** is their merge in `../mfem/mfem-src` and is what
@@ -146,10 +146,10 @@ free today rather than unnecessary.
 with the recipe. Against `meq-integration` at `fa65a2f932` on 2026-09-01 three of
 the four report contained and `gf-hdg-linearise-first` does not, because that
 branch has advanced 17 commits since the merge. **Read that as "the branch has
-moved", not "the merge failed"** — what meq needs from it is in the tree. It
+moved", not "the merge failed"** — what MEQ needs from it is in the tree. It
 says a re-merge is available.
 
-A standing cost of the arrangement, and it falls on meq's side.
+A standing cost of the arrangement, and it falls on MEQ's side.
 ## 1. Finish the driver — **done**
 
 `DRIVER-PLAN.md` is the design and now carries its own findings; `CLAUDE.md` has
@@ -230,14 +230,14 @@ per phase over six steps at four `(n, k)`: integrator-bound loops **59–63%**,
 integrator-free loops **5.4–6.2%**, trace solve **31–35%**. Their conclusion is
 that the loops threadable *today* are under 6% of the step and flat in both mesh
 size and order, so Amdahl caps any gain there until the integrators are made
-thread-safe. meq should stop quoting this as the big win.
+thread-safe. MEQ should stop quoting this as the big win.
 
-**And §1 of it has LANDED and meq is not using it**: `LocalFactorMode`,
+**And §1 of it has LANDED and MEQ is not using it**: `LocalFactorMode`,
 `SetLocalFactorMode` and `CanBatchLocalFactor` are in the *installed*
 `darcyhybridization.hpp`, and `LocalFactorMode` appears nowhere in `src/`,
 `tests/` or `apps/`. See item 6 for what it does and does not buy.
 
-**AND IT IS UNBLOCKED, MORE CLEANLY THAN WHEN IT WAS FILED.** meq's default is
+**AND IT IS UNBLOCKED, MORE CLEANLY THAN WHEN IT WAS FILED.** MEQ's default is
 now `NonlinearOrdering::NPC` — `mfem::DarcyNPCOperator` over the full
 `(q, ψ, ψ̂)` system — and `GetNumLocalNLIterations()` reads exactly **0** under
 it against 3644 for the condensation, asserted by
@@ -254,13 +254,13 @@ the corner exactly `1`, neither differenced.
 `NLOrdering::LineariseThenCondense` — a mode MFEM has since retired as *"a
 condensation in disguise"* — including its frozen-correction diagnosis, its 149%
 cross-linearisation measurement and the case-by-case parity table. It describes
-nothing meq runs and is recoverable from git. Three things in it are still live
+nothing MEQ runs and is recoverable from git. Three things in it are still live
 and are kept in `CLAUDE.md` rather than here: the **falsified prediction** that
 an ordering would fix a stiff source, which NPC has now falsified a second time;
 the **cross-linearisation technique** for detecting hidden state in a reduced
-operator; and the **live defect in the ordering meq still ships as the backup**,
+operator; and the **live defect in the ordering MEQ still ships as the backup**,
 where the assembled gradient disagrees with a central difference by 100× once the
-element-local solves hit their iteration cap. See *The NPC port* and *Why meq's
+element-local solves hit their iteration cap. See *The NPC port* and *Why MEQ's
 Newton struggles*.
 
 **Condense-first is retained only so the two can be measured against each
@@ -284,10 +284,10 @@ correctness, because a local solve that ran out of iterations returns whatever i
 had reached, which is not a function of anything: differencing `ψ_ax` by 9e-6
 moved `max ψ_h` from 0.896 to 2.04 and then to 3.84.
 
-meq works around it in `GradShafranovSolver::formSystem()`, re-forming the
+MEQ works around it in `GradShafranovSolver::formSystem()`, re-forming the
 reduced system from the recovered state once per Newton step, which puts every
 local solve within an iteration or two of its answer. **That workaround is
-cheap and meq is not blocked**, which is why this is item 5 and not item 0.
+cheap and MEQ is not blocked**, which is why this is item 5 and not item 0.
 
 What a request would ask for is small and specific: a way to refresh the local
 initial guess without re-forming the system — the obvious shape is
@@ -295,9 +295,9 @@ initial guess without re-forming the system — the obvious shape is
 and by this project's own rule it should be written only once somebody is sure
 the behaviour is settled rather than mid-change in that tree.
 
-## 6. Threaded MKL costs 140x, and PARDISO's scaling is out of reach — meq
+## 6. Threaded MKL costs 140x, and PARDISO's scaling is out of reach — MEQ
 
-**The link-line straddle this item was about is FIXED** (2026-09-01: meq builds
+**The link-line straddle this item was about is FIXED** (2026-09-01: MEQ builds
 its own SuiteSparse, so exactly one MKL is loaded), **and fixing it exposed a
 140x regression in the suite.** The stray sequential layer had been making all
 of MKL sequential, which is why every timing this project recorded before
@@ -342,13 +342,13 @@ degenerate at `λ = 0`, where this path starts from the converged pedestal — a
 is untested.
 
 So this stays a **test-only investigation**, and its value is that §4.4 is now
-known to have a solution meq can reach. Making it general needs a
+known to have a solution MEQ can reach. Making it general needs a
 self-parameterising `Source`: an interface change to argue on its own merits, not
 to smuggle in.
 
 ---
 
-## 8. Free boundary — meq, planned and not started
+## 8. Free boundary — MEQ, planned and not started
 
 `FREE-BOUNDARY-PLAN.md` is the design, and **it is the one file in this tree
 that is still a plan rather than a record**: nothing is built. The shape of it:
@@ -390,8 +390,8 @@ port: the datum's data half is an **essential trace value**, not a weak form, so
 its block is `ProjectBdrCoefficient` against the `PathTraceCoefficient` that
 already exists; and the transmission block is reachable from `TransferPath::
 Endpoint` and `ElementExtension::TransformBack`, both public, in about forty
-lines of meq. §3, auxiliary globally-coupled unknowns, is an optimisation over
-`N + 2` backsolves against one factorisation — the cost meq's `ψ_ax` border
+lines of MEQ. §3, auxiliary globally-coupled unknowns, is an optimisation over
+`N + 2` backsolves against one factorisation — the cost MEQ's `ψ_ax` border
 already pays. Plan §6.4 is the per-stage table.
 
 **The one real gap is in FB-4 and it is not the one the plan predicted**: MFEM
@@ -402,13 +402,13 @@ CEDRES++ actually names. Not blocking either: difference it per cut element, or
 accept an inconsistent Jacobian on cut elements and measure the cost in Newton's
 observed order.
 
-`NORMALISED-LINEARISE-FIRST.md` was the design for meq's half of this under
+`NORMALISED-LINEARISE-FIRST.md` was the design for MEQ's half of this under
 `LineariseThenCondense`. **Both the mode and the design are deleted** — the
 mechanism it describes has no code path left to run on, and under NPC the
 problem it solved does not arise. Plan §4.1; git has it if it is ever wanted.
 
 ---
-## 9. Toroidal flow — meq, DONE, FL-0 to FL-8
+## 9. Toroidal flow — MEQ, DONE, FL-0 to FL-8
 
 **`src/meq/RotatingSource.{hpp,cpp}` solves `refs/RotatingGK.pdf` (136), closed
 by its (96) and (97), and it is reachable from a TOML file.** Two species in
@@ -428,7 +428,7 @@ the term Li & Zhu got the sign of wrong. Only `RotatingSourceTests`' `dFdPsi`
 sweep touches it. Putting Maschke–Perrin into `tests/analytic/` is the cheap
 follow-up and has not been done.
 
-## 10. The fixed-`q(ψ)` solver — meq, and its machinery now exists
+## 10. The fixed-`q(ψ)` solver — MEQ, and its machinery now exists
 
 **`INVERSION-PLAN.md` is the design, and IN-A to IN-4 are done and green.** This
 item became reachable at **IN-2**, where the flux-surface averages `⟨r^{-2}⟩_ψ`
@@ -464,7 +464,7 @@ quadratic. Three things worth writing down before anyone starts:
   was assumed to need is **deferred**, because a fixed-boundary problem with one
   axis has no interior saddles at all.
 
-## 11. `B` in the band — meq, DONE 2026-09-02
+## 11. `B` in the band — MEQ, DONE 2026-09-02
 
 **FOUND WHILE WIRING THE ROTATING OUTPUT AND FIXED THE SAME WEEK.** Only
 `samplePotentialWithFlux()` applied the Taylor step into the band between `Γ_h`
@@ -490,7 +490,7 @@ section has the detail.
   is worth it. Consumer FP64 is 1/32 of FP32 where datacentre parts are 1/2, so a
   local timing can invert the production conclusion.
 * **Partial assembly.** Not implemented for the HDG integrators at all, and its
-  case is sum factorisation, which wants tensor-product elements where meq is
+  case is sum factorisation, which wants tensor-product elements where MEQ is
   triangles. A discretisation decision, not a flag.
 * **The rest of the physics** — anisotropic pressure, NetCDF profiles, MaNTA
   coupling. `TODO` carries each with what has been established, and anisotropic
@@ -511,7 +511,7 @@ for:
 
 * **A property measured on the easy configuration is not a property of the
   code.** Symmetry held to 2e-16 on a fitted rectangle and failed at 5.4e-1 on
-  the geometry meq exists for.
+  the geometry MEQ exists for.
 * **A difficulty measured at one resolution is not a property of the problem.**
   Three sources were called stiff for months on the strength of `k = 1,
   h = 0.05`, and a whole MFEM work item was requested to fix them. They were

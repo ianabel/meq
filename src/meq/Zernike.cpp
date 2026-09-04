@@ -104,7 +104,7 @@ namespace
 		// message is the only place they will be told so.
 		if ( ( l - absM ) % 2 != 0 )
 			throw std::invalid_argument( std::string( where ) + ": a Zernike mode needs l - |m| even, got l = " + std::to_string( l ) + ", m = " + std::to_string( m )
-				+ " -- an odd difference is a mode that is not smooth at the disc centre, which for meq is the magnetic axis" );
+				+ " -- an odd difference is a mode that is not smooth at the disc centre, which for MEQ is the magnetic axis" );
 	}
 
 	void checkDegree( int maxDegree, char const * where )

@@ -2,7 +2,7 @@ Solving the nonlinear system
 ============================
 
 The Grad–Shafranov equation is semi-linear, so something has to iterate. This
-page is about what meq does, what the options are, and — since this is where
+page is about what MEQ does, what the options are, and — since this is where
 runs actually fail — how to get a difficult one to converge.
 
 .. _nonlinear-newton:
@@ -10,11 +10,11 @@ runs actually fail — how to get a difficult one to converge.
 Newton, and the obligation it creates
 -------------------------------------
 
-**meq uses Newton. The papers it implements use Anderson-accelerated Picard.**
+**MEQ uses Newton. The papers it implements use Anderson-accelerated Picard.**
 This is a deliberate departure with a cost that must be respected everywhere a
 source is written.
 
-:cite:t:`SanchezVizuetSolano2019` state the design meq is reversing: they keep
+:cite:t:`SanchezVizuetSolano2019` state the design MEQ is reversing: they keep
 :math:`F` as opaque problem data so that the solver "relies only on the
 discretization of the toroidal operator", and pay for it by iterating on *every*
 source — even one linear in :math:`\psi`. Newton makes the opposite trade,
@@ -70,7 +70,7 @@ and elimination can be done**, and they are genuinely different algorithms:
      - Linearise the full :math:`(q, \psi, \hat\psi)` system first, then
        hybridize the linear system that results
        :cite:p:`NguyenPeraireCockburn2009nonlinear`. **Every element-local
-       operation is one linear solve. This is meq's default.**
+       operation is one linear solve. This is MEQ's default.**
 
 The acceptance signal for NPC is that
 :cpp:func:`meq::GradShafranovSolver::localNonlinearIterations` reads **exactly
@@ -118,7 +118,7 @@ What NPC costs
 
    MFEM's own test suite reproduces this gap on its own fixtures, which is
    independent evidence that it is a property of the two algorithms rather than
-   of meq's discretisation.
+   of MEQ's discretisation.
 
 ``CondenseThenLinearise`` is therefore kept as a **backup**, and it is the one
 to reach for on a stiff, under-resolved mesh. It is also the only ordering that
@@ -129,7 +129,7 @@ space.
 
    **Compare the two orderings on a resolved mesh, or not at all.** A
    disagreement between them at coarse resolution is :ref:`nonlinear-multiple`,
-   not a defect. meq's own contract test runs them against each other only where
+   not a defect. MEQ's own contract test runs them against each other only where
    both converge in a handful of steps and the discretisation has one solution.
 
 .. _nonlinear-why-hard:
@@ -261,15 +261,15 @@ of the same discrete equations.
 Three consequences:
 
 * **Choosing a globalisation is not a performance decision** on a coarse mesh.
-  It changes the equilibrium meq reports — and a coarse mesh is precisely what
+  It changes the equilibrium MEQ reports — and a coarse mesh is precisely what
   an adaptive run starts from. That is why the default stays plain Newton and
   the ladder stays *reactive*: what the ladder is for is a solve that would
   otherwise not happen at all, and paying for it only then keeps the answer on
   the branch plain Newton finds.
 * **Do not gate a cross-solver agreement test at a fixed tolerance on one mesh.**
-  meq's own test asserts the two things actually entailed: that the *best*
+  MEQ's own test asserts the two things actually entailed: that the *best*
   agreement across a sweep is at round-off, which says the alternative path
-  solves meq's problem rather than a neighbouring one, and that the *worst* is
+  solves MEQ's problem rather than a neighbouring one, and that the *worst* is
   bounded well below a different problem.
 * **Refine before concluding anything from a disagreement.** At adequate
   resolution the routes agree to round-off.
@@ -281,7 +281,7 @@ There is no cheap discriminator, and the obvious one is anti-correlated
 
 The reactive ladder pays for a failure by running Newton to its cap first. The
 obvious improvement is to notice earlier. **Two candidate indicators have been
-measured and both are useless**, which is why meq has no predictive trigger.
+measured and both are useless**, which is why MEQ has no predictive trigger.
 
 **The size of the reaction term** relative to the operator's first eigenvalue is
 computable from a black-box source, since ``dFdPsi`` is mandatory. But cases
@@ -321,7 +321,7 @@ Under NPC the flux and trace rows of the residual are **linear** in
 :math:`(q, \psi, \hat\psi)` — those equations carry no :math:`F` — so a Newton
 step annihilates them exactly, and *all* of the Newton remainder lives in the
 potential row. That structure is common to any problem of this form. What
-differs between problems where the line search works and meq's is not the
+differs between problems where the line search works and MEQ's is not the
 structure but the **size of the first correction**: where a full step improves
 the potential residual, backtracking helps; where it multiplies it by a large
 factor, no step length recovers.
@@ -336,7 +336,7 @@ Two further findings from that exercise are worth having:
   rejects those steps and fails honestly. KINSOL's line search uses one, and
   fails on the same cases, which is how the two were reconciled.
 * **What works is fixing where the iterate is, not how far it steps** — which is
-  the ladder meq already has. Picard hands NPC a physically sensible state
+  the ladder MEQ already has. Picard hands NPC a physically sensible state
   instead of a cold one, and the huge first correction never arises.
 
 .. note::
@@ -352,7 +352,7 @@ The stopping rule
 
 MFEM's Newton solver stops at :math:`\|r\| \le \max(\texttt{rel\_tol}\cdot
 \|r_0\|, \texttt{abs\_tol})`, with :math:`\|r_0\|` measured at the iterate it
-was handed. That interacts badly with warm starts, and meq works around it — see
+was handed. That interacts badly with warm starts, and MEQ works around it — see
 the warning in :ref:`running-warm-start`.
 
 .. note::
@@ -374,5 +374,5 @@ the warning in :ref:`running-warm-start`.
 
    Relatedly: a ``GradShafranovSolver`` should be considered **unusable after a
    caught exception from the library**. The throw unwinds out of the middle of
-   MFEM and leaves objects as the throw found them. meq's own paths construct a
+   MFEM and leaves objects as the throw found them. MEQ's own paths construct a
    fresh solver per solve, and the driver rebuilds before retrying.

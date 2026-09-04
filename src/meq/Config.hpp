@@ -4,20 +4,29 @@
 /*
  * Configuration for the fixed-boundary Grad-Shafranov solver.
  *
- * meq solves
+ * MEQ solves
  *
  *     -div_bar( (1/r) grad_bar( psi ) ) = F( r, z, psi ) / r    in Omega,
  *                                   psi = psi_D                 on Gamma,
  *
  * by HDG, with the nonlinearity in F handled by Newton. A run is described by a
- * TOML file with six tables:
+ * TOML file with eight tables. THIS COMMENT SAID SIX FOR A LONG TIME, and the
+ * two it omitted are the two that arrived last:
  *
- *     [mesh]           the background box and its subdivision
- *     [discretisation] polynomial degree and the HDG stabilisation tau
- *     [source]         which F, and its parameters
- *     [boundary]       the Dirichlet data psi_D
- *     [solver]         Newton and inner linear solver controls
- *     [output]         where the mesh and grid functions are written
+ *     [mesh]            the background box and its subdivision
+ *     [discretisation]  polynomial degree and the HDG stabilisation tau
+ *     [source]          which F, and its parameters
+ *     [boundary]        the Dirichlet data psi_D
+ *     [solver]          Newton controls
+ *     [output]          where the mesh and grid functions are written
+ *     [initialguess]    where Newton starts
+ *     [adaptivity]      the refinement loop, when there is one
+ *
+ * and two nested forms beneath those:
+ *
+ *     [boundary.shape]  the analytic curve Gamma, on the extension path
+ *     [[source.species]] an ARRAY of tables, one per species, on the rotating
+ *                       path -- the only array of tables in the schema
  *
  * [mesh], [discretisation] and [source] are required; the rest are optional and
  * every key in them has a documented default. See examples/soloviev-nstx.toml
@@ -177,7 +186,7 @@ namespace meq
 		std::string ggPrimeFile;
 		// PPrimeScale, GGPrimeScale: constants multiplying the tables as read.
 		// A table arrives in whatever units its author wrote it in, and that is
-		// frequently not meq's; editing the file would make the file a function
+		// frequently not MEQ's; editing the file would make the file a function
 		// of which code reads it. See meq::ScaledProfile.
 		double pPrimeScale = 1.0;
 		double ggPrimeScale = 1.0;
@@ -378,10 +387,12 @@ namespace meq
 		double newtonRelativeTolerance = 1.0e-8;
 		double newtonAbsoluteTolerance = 1.0e-12;
 
-		// The linear solve for each Newton correction. LinearTolerance is
-		// relative to the right-hand side of that solve (dimensionless).
-		int linearMaxIterations = 1000;
-		double linearTolerance = 1.0e-12;
+		// THERE ARE NO INNER-LINEAR-SOLVE CONTROLS HERE, AND THAT IS THE POINT.
+		// LinearMaxIterations and LinearTolerance used to sit in this struct,
+		// parsed and validated and read by nothing. MEQ's trace solve is
+		// DIRECT, so an iteration count and a tolerance have nothing to
+		// control; the keys are now refused at parse time with a message that
+		// says so. See refuseIterativeSolverKeys in Config.cpp.
 	};
 
 	// [initialguess] -- where Newton starts. See DRIVER-PLAN.md section 4.
@@ -395,7 +406,7 @@ namespace meq
 		// so with homogeneous data psi = 0 SOLVES the problem and Newton stops
 		// on it in zero iterations. See CLAUDE.md under Traps.
 		Ramp,
-		// An MFEM GridFunction and its mesh, from a previous meq run.
+		// An MFEM GridFunction and its mesh, from a previous MEQ run.
 		GridFunction
 	};
 
