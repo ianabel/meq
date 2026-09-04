@@ -1,1 +1,572 @@
 \chapter{Syntax of {\meq} Configuration Files}
+\label{ap:config}
+
+A run of the {\meq} program is described entirely by one TOML file, and this
+appendix is the complete reference for it. \Chref{ch:using} is the narrative
+version.
+
+\section{Shape of the file}
+
+The file is a table of tables. Exactly eight top-level tables are part of the
+schema:
+
+\begin{center}
+\begin{tabular}{l l}
+	\hline
+	Table & \\
+	\hline
+	\texttt{[mesh]} & \textbf{required} \\
+	\texttt{[discretisation]} & \textbf{required} \\
+	\texttt{[source]} & \textbf{required} \\
+	\texttt{[boundary]} & optional; contains \texttt{[boundary.shape]} \\
+	\texttt{[solver]} & optional \\
+	\texttt{[output]} & optional \\
+	\texttt{[initialguess]} & optional \\
+	\texttt{[adaptivity]} & optional \\
+	\hline
+\end{tabular}
+\end{center}
+
+An absent optional table behaves exactly like a present but empty one: every key
+falls back to its default. Note the spellings \texttt{[initialguess]} and
+\texttt{[adaptivity]} --- neither carries a separator, and the second is not
+\texttt{[adaptive]}.
+
+\begin{quote}
+	\textbf{Table names are lower case and keys are \texttt{UpperCamelCase}.}
+	This is a deliberate mismatch with the C++ naming convention used
+	everywhere else in the tree, inherited from a sibling project, and it is
+	not an oversight to be reconciled. The two nested table \emph{keys},
+	\texttt{shape} and \texttt{species}, follow the table rule rather than the
+	key rule: they are written \texttt{[boundary.shape]} and
+	\texttt{[[source.species]]}.
+\end{quote}
+
+\section{How the parser behaves}
+
+\subsection{Everything is validated before anything is done}
+
+Construction of the configuration either succeeds and leaves every accessor
+meaningful, or throws. There is no partially valid configuration, and no work of
+any kind --- no mesh, no source, no solve --- begins until the whole file has
+been accepted.
+
+\subsection{Unknown keys and tables are errors}
+
+Not warnings, and not ignored. The message names the nearest accepted spelling
+when there is one within a small edit distance, and lists the keys the table
+does accept.
+
+This is the entire point of having a schema. A key that is silently ignored is a
+run that quietly did something other than what the file says, and no amount of
+care in reading the output recovers from that.
+
+\subsection{Types}
+
+\begin{description}
+
+\item[Numbers] accept either TOML spelling: \texttt{RMin = 0} and
+	\texttt{RMin = 0.0} are both read as the float zero.
+
+\item[Counts] do not. \texttt{NR = 4.0} is refused rather than truncated.
+
+\item[Booleans] must be real booleans. \texttt{Enabled = "true"} is an error,
+	not a silent false.
+
+\item[Arrays] are validated element by element, and the diagnostic names the
+	element.
+
+\end{description}
+
+That first distinction is worth more than it appears, and it cost a real bug
+once. Reading every number as a float rejects \texttt{RMin = 0}; but the natural
+remedy in the TOML library used here returns the \emph{default} when a
+conversion fails, because a failed conversion is indistinguishable from a missing
+key. That turns a loud failure into a silent wrong answer in the configuration.
+{\meq} therefore checks each node's type explicitly.
+
+\subsection{Diagnostics}
+
+Every fault is a \texttt{meq::ConfigError} carrying the file name and the fully
+qualified key, including array elements --- so a fault in the third species
+block is reported against \texttt{source.species[2].Mass} and not merely against
+\texttt{source}.
+
+\subsection{Paths}
+
+Profile and mesh paths are resolved against the \emph{working directory of the
+run}, not against the directory the configuration file lives in.
+
+\section{\texttt{[mesh]} --- required}
+
+The background mesh: either a box that {\meq} triangulates, or a file.
+
+\begin{description}
+
+\item[\texttt{File}] \emph{string, default \texttt{""}.} A mesh in any format
+	MFEM reads. A non-empty value selects file mode, in which the box keys are
+	accepted but not used.
+
+\item[\texttt{RMin}] \emph{float, required unless \texttt{File} is set.} Lower
+	radial bound, in metres. Must not be negative: $r$ is a cylindrical radius,
+	and a box reaching $r = 0$ contains the operator's singularity.
+
+\item[\texttt{RMax}] \emph{float, required unless \texttt{File} is set.} Must
+	exceed \texttt{RMin}.
+
+\item[\texttt{ZMin}, \texttt{ZMax}] \emph{float, required unless \texttt{File}
+	is set.} Vertical bounds; \texttt{ZMax} must exceed \texttt{ZMin}.
+
+\item[\texttt{NR}, \texttt{NZ}] \emph{integer, default 1.} Cells across each
+	direction \emph{before} refinement; each must be at least~1. Cells are split
+	into triangles, so the initial element diameter is the cell diagonal.
+
+\item[\texttt{RefinementLevels}] \emph{integer, default 0.} Levels of uniform
+	refinement, each halving $h$. Applies whether the mesh came from a box or a
+	file. Must not be negative.
+
+\end{description}
+
+\begin{quote}
+	\textbf{\texttt{File} is effectively supported on the fitted path only.} The
+	box bounds are what the gridded output samples over and what sets the search
+	length for the curved boundary's transfer paths. With a mesh file and no
+	\texttt{[boundary.shape]} to supply a bounding box, both are degenerate.
+\end{quote}
+
+\section{\texttt{[discretisation]} --- required}
+
+\begin{description}
+
+\item[\texttt{PolynomialDegree}] \emph{integer, required.} The degree $k$ of all
+	three HDG spaces. Must not be negative. The source papers report $k = 1$
+	to~5; beyond about~5, or eight refinements, round-off dominates.
+
+\item[\texttt{Tau}] \emph{float, default 1.0.} The HDG stabilisation,
+	dimensionless and positive. Optimal order needs only $\tau = O(1)$. Read
+	\chref{ch:using} before changing it.
+
+\end{description}
+
+\section{\texttt{[source]} --- required}
+
+\texttt{Type} is required and discriminates. The accepted values are exactly
+\texttt{"soloviev"}, \texttt{"mhd"}, \texttt{"manufactured"} and
+\texttt{"rotating"}.
+
+\begin{quote}
+	\textbf{The accepted key set depends on \texttt{Type}.} A key belonging to
+	another source is rejected as unknown, not ignored --- so
+	\texttt{Normalised} under a Solov'ev source is an error.
+\end{quote}
+
+\subsection{\texttt{Type = "soloviev"}}
+
+$F = -\left((1-A)r^{2} + A\right)$, independent of $\psi$. The problem is linear
+and Newton converges in one step.
+
+\begin{description}
+\item[\texttt{A}] \emph{float, required.} Dimensionless, with the flux
+	normalised so that $A + C = 1$. The NSTX benchmark uses \texttt{-0.52}.
+\end{description}
+
+\subsection{\texttt{Type = "manufactured"}}
+
+The nonlinear manufactured solution $\psi = \sin(K_r(r + R_0))\cos(K_z z)$ of
+S\'anchez-Vizuet and Solano \cite{SanchezVizuetSolano2019}, whose
+$\psi$-dependence is linear, quadratic and exponential at once.
+
+\begin{description}
+\item[\texttt{R0}] \emph{float, required.} The radial \emph{offset} inside the
+	sine. \textbf{Not a major radius.}
+\item[\texttt{Kr}, \texttt{Kz}] \emph{float, required.} Radial and vertical
+	wavenumbers.
+\end{description}
+
+\subsection{\texttt{Type = "mhd"}}
+
+$F = \mu_{0}\,r^{2}p'(\psi) + (gg')(\psi)$, from two tabulated profiles. Both
+are files: there is no scalar spelling on this path.
+
+\begin{description}
+
+\item[\texttt{PPrimeFile}] \emph{string, required, non-empty.} Path to a
+	tabulated $\mathrm{d}p/\mathrm{d}\psi$. The file format is
+	\S\ref{sec:profileformat}.
+
+\item[\texttt{GGPrimeFile}] \emph{string, required, non-empty.} Path to a
+	tabulated $g\,\mathrm{d}g/\mathrm{d}\psi$ --- what EQDSK calls
+	\texttt{FF'}.
+
+\item[\texttt{PPrimeScale}, \texttt{GGPrimeScale}] \emph{float, default 1.0,
+	finite.} A constant multiplying the table as read --- value, slope and
+	second derivative alike, so a scaled table stays self-consistent. This is
+	the units mechanism: a file stays readable in its own units and the
+	conversion goes in the scale. The abscissa is never scaled.
+
+\item[\texttt{Mu0}] \emph{float, default the SI $\mu_0$, positive.} The vacuum
+	permeability multiplying \emph{only} the $r^{2}p'$ term. Set it to 1.0 for a
+	run in normalised units.
+
+\item[\texttt{Normalised}] \emph{boolean, default false.} The tables are
+	functions of $\Psi = \psi/\psiax$ rather than of $\psi$. This makes $\psiax$
+	an unknown of the nonlinear system, closed by a bordered Newton.
+
+\item[\texttt{PsiAxis}] \emph{float, required when \texttt{Normalised} is true
+	and refused otherwise.} A starting \emph{guess} for the Newton iteration,
+	not a scale factor. Must be finite and non-zero, since $\Psi = \psi/\psiax$
+	is undefined at zero.
+
+\item[\texttt{ProfileFile}] is reserved for reading several profiles out of one
+	NetCDF file and is always refused, with a message saying so.
+
+\item[\texttt{PPrimeVariable}, \texttt{PPrimeFit}, \texttt{GGPrimeVariable},
+	\texttt{GGPrimeFit}] are reserved for the same unwritten facility. They are
+	in this path's accepted-key list and are inert; on the rotating path they
+	are refused outright.
+
+\end{description}
+
+\subsection{\texttt{Type = "rotating"}}
+
+A rotating multi-species plasma: the generalised Grad--Shafranov equation of
+Abel and co-workers \cite{Abel2013}, closed by quasineutrality, with
+$p = \sum_s n_s T_s$.
+
+\begin{description}
+
+\item[\texttt{species}] \emph{array of tables, required.} Written
+	\texttt{[[source.species]]}; see \S\ref{sec:species}. Between two and eight
+	of them --- fewer than two and quasineutrality has nothing to solve; the
+	upper bound exists so that the per-quadrature-point work allocates nothing.
+
+\item[\texttt{Omega} \emph{or} \texttt{OmegaFile}] \emph{float or string,
+	default: neither.} The rigid rotation frequency $\omega(\psi)$, in radians
+	per second, as a constant or as a table. At most one of the two.
+	\textbf{Giving neither means no rotation}, and the source reduces to the
+	static equation.
+
+\item[\texttt{GGPrime} \emph{or} \texttt{GGPrimeFile}] \emph{float or string;
+	exactly one is required.} $g\,\mathrm{d}g/\mathrm{d}\psi$, as a constant or
+	as a table.
+
+\item[\texttt{OmegaScale}, \texttt{GGPrimeScale}] \emph{float, default 1.0,
+	finite.} A scale on whichever form was given. A scale with nothing to scale
+	is an error.
+
+\item[\texttt{ReferenceRadius}] \emph{float, default 1.0, positive.}
+	\textbf{The gauge.} The radius at which the electrostatic potential
+	vanishes, and therefore the radius at which each species' \texttt{Density}
+	is the physical density. It is a constant radius --- not the magnetic axis,
+	and not a flux-surface average.
+
+\item[\texttt{Mu0}, \texttt{Normalised}, \texttt{PsiAxis}] as for
+	\texttt{"mhd"}, with the same conditions and the same messages.
+
+\item[Reserved keys] Five keys are reserved for reading several profiles out
+	of one NetCDF file, which is not implemented, and all five are
+	\emph{refused} rather than ignored on this path:
+	\texttt{ProfileFile}, \texttt{OmegaVariable}, \texttt{OmegaFit},
+	\texttt{GGPrimeVariable} and \texttt{GGPrimeFit}.
+
+\end{description}
+
+\subsection{\texttt{[[source.species]]}}
+\label{sec:species}
+
+One block per species, under \texttt{[source]}, for the rotating source only.
+
+\begin{description}
+
+\item[\texttt{Name}] \emph{string, default \texttt{"species}$i$\texttt{"} with
+	$i$ counted from zero.} Used in output variable names, sanitised to
+	something a NetCDF name may be.
+
+\item[\texttt{Mass}] \emph{float, required, positive.} Particle mass in
+	kilogrammes.
+
+\item[\texttt{Charge}] \emph{float, required, non-zero.} $Z_s$: \textbf{signed
+	and dimensionless}, so $+1$ for a proton and $-1$ for an electron. Not
+	coulombs.
+
+\item[\texttt{Temperature} \emph{or} \texttt{TemperatureFile}] \emph{float or
+	string; exactly one is required.} $T_s$ \textbf{in joules}, as a constant or
+	as a table.
+
+\item[\texttt{TemperatureScale}] \emph{float, default 1.0, finite.} How a file
+	written in electronvolts or kiloelectronvolts stays readable.
+
+\item[\texttt{Density} \emph{or} \texttt{DensityFile}] \emph{float or string;
+	exactly one is required unless this species is \texttt{Neutralising}, in
+	which case both are refused.} $n_{s0}$ in inverse cubic metres, \emph{on the
+	curve} $r = \texttt{ReferenceRadius}$.
+
+\item[\texttt{DensityScale}] \emph{float, default 1.0, finite.} Refused when
+	there is no density to scale --- including on the neutralising species.
+
+\item[\texttt{Neutralising}] \emph{boolean, default false.} This species'
+	density is \emph{derived} from the others by charge neutrality.
+	\textbf{Exactly one species must set it}, because fixing the gauge removes
+	one function's worth of freedom from the densities.
+
+\item[Reserved keys] Four more are reserved for the same unwritten facility
+	and are likewise refused: \texttt{TemperatureVariable},
+	\texttt{TemperatureFit}, \texttt{DensityVariable} and
+	\texttt{DensityFit}.
+
+\end{description}
+
+Two further cross-species rules, each with its own message: exactly one species
+must be neutralising, and the species must between them carry charges of both
+signs or quasineutrality has no solution.
+
+\section{\texttt{[boundary]}}
+
+\begin{description}
+
+\item[\texttt{Type}] \emph{string, default \texttt{"zero"}.} Either
+	\texttt{"zero"}, which imposes $\psi = 0$ --- the fixed-boundary problem
+	proper --- or \texttt{"exact"}, which imposes the source's known closed-form
+	solution and is a convergence-study device.
+
+\end{description}
+
+\begin{quote}
+	\textbf{\texttt{Type = "exact"} is refused by the program}, with an
+	explanation and exit code~1. A \texttt{meq::Source} carries $F$ and
+	$\partial F/\partial\psi$ and no closed form; the closed forms live in the
+	test fixtures, where they are the thing being converged against. It remains
+	usable from the library, which is why the key exists.
+\end{quote}
+
+\subsection{\texttt{[boundary.shape]}}
+
+Present with a real shape, this selects the \emph{curved} path of
+\chref{ch:using}.
+
+\begin{description}
+
+\item[\texttt{Type}] \emph{string, default \texttt{"none"}.} One of
+	\texttt{"none"}, \texttt{"miller"} or \texttt{"mxh"}. With \texttt{"none"}
+	every other key here is accepted and ignored.
+
+\item[\texttt{R0}] \emph{float, required unless \texttt{"none"}.} Major radius
+	of the shape's centre, in metres.
+
+\item[\texttt{Z0}] \emph{float, default 0.0.} Centre height.
+
+\item[\texttt{MinorRadius}] \emph{float, required unless \texttt{"none"}.}
+
+\item[\texttt{Elongation}] \emph{float, default 1.0.} $\kappa$.
+
+\item[\texttt{Triangularity}] \emph{float, default 0.0; \texttt{"miller"} only.}
+	$\delta$, which \textbf{enters as $\arcsin\delta$} and must therefore
+	satisfy $|\delta| < 1$.
+
+\item[\texttt{Squareness}] \emph{float, default 0.0; \texttt{"miller"} only.}
+	Zero gives the original three-parameter Miller shape \cite{Miller1998}.
+
+\item[\texttt{CosCoefficients}] \emph{array of floats, default empty;
+	\texttt{"mxh"} only.} $c_0, c_1, \ldots$ --- \textbf{starting at $c_0$},
+	which is the tilt.
+
+\item[\texttt{SinCoefficients}] \emph{array of floats, default empty;
+	\texttt{"mxh"} only.} $s_1, s_2, \ldots$ --- \textbf{starting at $s_1$};
+	there is no $s_0$.
+
+\end{description}
+
+Each shape refuses the other's keys rather than ignoring them, and
+\texttt{"mxh"} with no harmonics at all is refused with a message suggesting
+\texttt{"miller"}, since that is an ellipse.
+
+Four further conditions are checked when the shape is built rather than when the
+file is parsed, and each exits~1 with a message naming it: the minor radius, the
+major radius and the elongation must be positive; the surface must not reach or
+cross the axis, where the operator's $1/r$ is not integrable; and the surface
+must be star-shaped about its own centre, since the level set is built by radial
+bisection and cannot be built otherwise.
+
+Two more come from the interaction with the mesh. The shape must enclose at
+least one background element --- otherwise the mesh is too coarse for it, or it
+lies outside the box --- and it must not touch the edge of the box, since then
+part of $\Gamma_h$ is inherited from the box, is fitted rather than transferred,
+and carries no datum.
+
+\section{\texttt{[solver]}}
+
+\begin{description}
+\item[\texttt{NewtonMaxIterations}] \emph{integer, default 20, at least 1.}
+\item[\texttt{NewtonRelativeTolerance}] \emph{float, default $10^{-8}$,
+	positive.} Relative to the residual at the \emph{cold} iterate rather than
+	at the iterate handed in --- see \chref{ch:embedding} for why that
+	distinction exists and what it prevents.
+\item[\texttt{NewtonAbsoluteTolerance}] \emph{float, default $10^{-12}$,
+	positive.}
+\item[\texttt{LinearMaxIterations}] \emph{integer, default 1000, at least 1.}
+\item[\texttt{LinearTolerance}] \emph{float, default $10^{-12}$, positive.}
+\end{description}
+
+\begin{quote}
+	\textbf{The last two are parsed and validated but consumed by nothing.} The
+	program drives a sparse direct solver. They are documented here because they
+	are accepted; do not read a change in them as having had an effect.
+\end{quote}
+
+\section{\texttt{[output]}}
+
+\begin{description}
+
+\item[\texttt{Directory}] \emph{string, default \texttt{"."}.} \textbf{Not
+	created by {\meq}.} A missing directory is exit code~3, after the
+	equilibrium has been computed.
+
+\item[\texttt{Prefix}] \emph{string, default \texttt{"meq"}, non-empty.} The
+	stem of every output file name.
+
+\item[\texttt{GridNR}, \texttt{GridNZ}] \emph{integer, default 129, at least 2.}
+	Sampling \emph{nodes} for the gridded output, so the spacing is
+	$(R_{\max} - R_{\min})/(\texttt{GridNR} - 1)$. Nothing whatever to do with
+	\texttt{[mesh] NR}.
+
+\end{description}
+
+\section{\texttt{[initialguess]}}
+
+\begin{description}
+
+\item[\texttt{Type}] \emph{string, default \texttt{"none"}.} One of
+	\texttt{"none"}, which starts from the Dirichlet datum; \texttt{"ramp"},
+	which makes $\psi$ run from $-\texttt{Amplitude}$ to $+\texttt{Amplitude}$
+	across $z$; or \texttt{"gridfunction"}, which reads a stored answer.
+
+\item[\texttt{Amplitude}] \emph{float, default 0.3, positive; \texttt{"ramp"}
+	only.} The point of the ramp is that $\psi$ crosses zero in the
+	\emph{interior}, so an amplitude of zero puts the iteration straight onto
+	the trivial branch the ramp exists to avoid.
+
+\item[\texttt{File}, \texttt{MeshFile}] \emph{string, both required for
+	\texttt{"gridfunction"}.} The stored grid function and the mesh it lives on
+	--- a grid function cannot be read without its mesh.
+
+\end{description}
+
+The ramp is not a nicety: several standard sources vanish at $\psi = 0$, so with
+homogeneous data the trivial solution is a genuine solution and Newton lands on
+it. A stored guess on the \emph{same} mesh is an exact restart, every
+coefficient; on a different one it is interpolated. It is applied on the first
+cycle only --- later adaptive cycles warm-start from the previous cycle.
+
+\section{\texttt{[adaptivity]}}
+
+\begin{description}
+
+\item[\texttt{Enabled}] \emph{boolean, default false.}
+
+\item[\texttt{MaxIterations}] \emph{integer, default 10, at least 1.} Counts
+	\textbf{solves}, not refinements: 4 means at most three refinements, and 1
+	is a single solve with an estimate printed.
+
+\item[\texttt{Strategy}] \emph{string, default \texttt{"doerfler"}.} Either
+	\texttt{"doerfler"} or \texttt{"maximum"}, both lower case.
+
+\item[\texttt{Theta}] \emph{float, default 0.6, in $(0, 1]$.} For D\"orfler
+	marking, the fraction of the total estimated error the marked elements must
+	carry. \textbf{The two strategies read it oppositely}, which is why the
+	strategy is named rather than inferred.
+
+\item[\texttt{TargetError}] \emph{float, default $10^{-6}$, positive.} Absolute,
+	in the estimator's own norm.
+
+\end{description}
+
+\section{Profile files}
+\label{sec:profileformat}
+
+Every \texttt{*File} key names a text table read into a piecewise Hermite cubic.
+One knot per line, three whitespace-separated numbers:
+
+\begin{verbatim}
+    # a comment
+    psi     f(psi)     f'(psi)
+\end{verbatim}
+
+\textbf{All three columns are required.} The interpolant passes through the
+value \emph{and} the slope, which is what lets the profile supply its own
+derivative --- and \chref{ch:intro} explains why a profile that cannot do that
+cannot be used at all.
+
+\begin{description}
+
+\item[Comments] A line whose first non-blank character is \texttt{\#}.
+
+\item[Termination] A \emph{blank line ends the table}, so several profiles may
+	be concatenated in one stream. The corollary is that there must be no blank
+	line between the header comments and the numbers.
+
+\item[Constraints] At least two knots; $\psi$ strictly increasing; every value
+	finite.
+
+\item[Outside the table] The profile is extended by a \emph{constant}: the value
+	is clamped to the nearest end knot and the first and second derivatives are
+	exactly zero. Nothing throws, because a Newton iterate routinely overshoots
+	the physical range. The extension is continuous but not smooth.
+
+\item[Second derivatives] A Hermite cubic is only continuously differentiable
+	once, so the second derivative is piecewise linear and \emph{jumps at every
+	interior knot}. It is used --- a rotating source's Jacobian needs it --- and
+	nothing has measured what the jumps cost the Newton iteration.
+
+\end{description}
+
+\begin{quote}
+	\textbf{A table written against $\psi$ and a table written against
+	$\Psi = \psi/\psiax$ are different files, and neither will complain.}
+	Re-expressing $f$ against the normalised flux divides the first column by
+	the axis flux \emph{and multiplies the derivative column by it}. Hand one to
+	the wrong configuration and it parses, solves and converges --- to a plasma
+	whose gradient is out by that factor. Say in the file's header which one it
+	is; the shipped examples do.
+\end{quote}
+
+\section{The shipped examples}
+
+\texttt{examples/} in the source tree holds a worked instance of each path.
+
+\begin{description}
+
+\item[\texttt{soloviev-nstx.toml}] The headline analytic benchmark: a Solov'ev
+	source on a fitted rectangle at high degree, linear in $\psi$ so that Newton
+	is one step. It is deliberately \emph{not} the published NSTX equilibrium,
+	since $\Gamma$ here is the box rather than the separatrix.
+
+\item[\texttt{manufactured.toml}] The manufactured nonlinear solution with an
+	exact boundary condition --- a convergence-study file the program refuses,
+	kept because the library path uses it.
+
+\item[\texttt{manufactured-driver.toml}] The same source with a zero boundary
+	condition: the Newton path end to end, and runnable.
+
+\item[\texttt{mhd-rectangle.toml}] The tabulated-profile source, genuinely
+	semi-linear. The one example whose input a user would actually write.
+
+\item[\texttt{miller-curved.toml}] The curved boundary by transfer, on a
+	background rectangle. The configuration {\meq} exists to run.
+
+\item[\texttt{miller-adaptive.toml}] The same shape solved adaptively, with the
+	companion-mesh domain update.
+
+\item[\texttt{rotating-rectangle.toml}] Sonic toroidal rotation: two species,
+	one of them neutralising, with the reference radius as the gauge.
+
+\item[\texttt{rotating-normalised.toml}] The same plasma with its profiles in
+	normalised flux, so that the axis flux is an unknown closed by the bordered
+	Newton.
+
+\item[\texttt{*.dat}] The profile tables the two source types above read.
+	Between them they carry the fullest statement of the file format anywhere in
+	the tree, and the two density files are the same profile written against
+	$\psi$ and against $\Psi$ --- the trap of \S\ref{sec:profileformat}, shown
+	rather than described.
+
+\end{description}

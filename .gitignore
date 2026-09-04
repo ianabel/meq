@@ -98,3 +98,4 @@ __pycache__/
 # separate environment because docs/requirements.txt pins Sphinx below 8 for
 # the theme, and nothing else should be held to a docs constraint.
 .venv-docs/
+docs/manual/*.rubbercache

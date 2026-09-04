@@ -45,7 +45,7 @@ with exit codes 0/1/2/3 as `DRIVER-PLAN.md` §5 specifies:
 | | |
 |---|---|
 | `.mesh`, `_psi.gf`, `_grad_psi.gf` | exact — every P_k coefficient. GLVis, and meq's own restart |
-| `<stem>/<stem>.pvd` + `Cycle000000/` | VTK, **at the polynomial degree of the solve**. ParaView, VisIt |
+| `<stem>/<stem>.pvd` + `Cycle000000/` | VTK, **at the degree of the field it draws**, which is `k+1` since `ψ*` became that field — `apps/meq.cpp` passes `polynomialDegree + 1` at four sites. This row used to say "at the polynomial degree of the solve" and was one commit stale. ParaView, VisIt |
 | `.nc` | ψ and **B** on a uniform `(R, Z)` grid. Lossy, and the interchange format |
 
 **The VTK is written high-order deliberately**, and it is the one thing in that

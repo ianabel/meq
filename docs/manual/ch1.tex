@@ -1,1 +1,615 @@
 \chapter{Using \meq}
+\label{ch:using}
+
+{\meq} is a library first and a program second. This chapter is about the
+program: what it needs in order to build, how a run is described, what it
+writes, and what to do when a solve does not converge. Calling the library
+directly is \chref{ch:embedding}.
+
+\section{Building}
+
+\subsection{The one hard dependency}
+
+{\meq} is C++17 and CMake, and it has a single dependency that is not
+straightforward: MFEM \cite{Anderson2021}, the finite element library the
+discretisation is built on.
+
+\begin{quote}
+	\textbf{A release of MFEM will not do, and neither will \texttt{master}.}
+\end{quote}
+
+{\meq} needs the mixed \texttt{DarcyForm} and the hybridizable discontinuous
+Galerkin integrators that go with it, and for the curved boundary of
+\S\ref{sec:curved} it needs the transfer-path machinery that implements
+Cockburn--Solano extension \cite{CockburnSolano2012}. That work lives on
+development branches, and \texttt{INSTALL.md} in the source tree names them and
+gives the merge recipe. This is the one place where building {\meq} is more
+than a package manager away, and there is no way round it: the method is the
+branch.
+
+Everything else is ordinary. A recent compiler; CMake; the header-only TOML
+parser toml11, vendored as a git submodule so that its version is {\meq}'s to
+control rather than the machine's; Boost and Eigen, both header-only and both
+needed by the library rather than only by the tests --- Boost.Math supplies the
+Jacobi polynomials the Zernike basis of \chref{ch:embedding} is evaluated
+through, and Eigen supplies the singular value decomposition its fits are solved
+with. NetCDF's C++ bindings are optional; without them the library is built
+without its gridded writer and the program cannot produce its interchange
+output. Boost.Test is needed only to build the tests, and \texttt{clang-tidy}
+only to run the naming check.
+
+Several libraries that a reader might expect to configure --- SuiteSparse,
+SUNDIALS, GSLIB, LAPACK, MKL, CUDA --- are reached \emph{through} MFEM rather
+than found separately. {\meq} reads which of them are present out of MFEM's own
+configuration file and adapts, so the configure summary reports what MFEM was
+built with rather than what {\meq} guessed.
+
+\subsection{Configure and build}
+
+\begin{verbatim}
+    git submodule update --init --recursive
+    cmake -B build
+    cmake --build build -j4
+    cd build && ctest --output-on-failure
+\end{verbatim}
+
+\texttt{MFEM\_DIR} is how the library is found. It is a cache variable, it also
+reads the environment, and it has a default, so on a machine laid out the
+obvious way no \texttt{-D} is needed at all. The finder accepts either layout an
+MFEM build leaves behind --- an installed tree, or an in-source \texttt{make}
+build --- and needs no flag to tell them apart.
+
+\begin{quote}
+	\textbf{Never run a bare \texttt{make -j} or \texttt{cmake -{}-build -j}
+	with no number.} With no argument the job count is unbounded and goes to
+	the host's core count, which on a container or a virtual machine is not the
+	same thing as the memory behind it. Give a number.
+\end{quote}
+
+Three configure-time options are worth knowing. \texttt{MEQ\_BUILD\_APP}, on by
+default, builds the program; \texttt{MEQ\_BUILD\_TESTS}, likewise, builds the
+test binaries and registers them; and \texttt{MEQ\_ENABLE\_COVERAGE}
+instruments the build. That last is an option rather than a build type on
+purpose: a coverage build wants no optimisation and a release build wants all of
+it, and the difference should be chosen rather than inherited from whatever
+\texttt{CMAKE\_BUILD\_TYPE} happens to hold.
+
+A debug build of {\meq} buys the debugger and nothing else. It is worth saying
+so, because the opposite is a natural assumption. MFEM's internal consistency
+checks are gated on its own debug flag rather than on \texttt{NDEBUG}, and a
+normal MFEM install has that flag off --- so those assertions are already dead
+in every {\meq} build, and no flag passed to {\meq} revives one. Recovering them
+means building a second MFEM configured for debugging and pointing at it, which
+is a real option when chasing a suspected contract violation with the library
+and a much larger undertaking than a build type.
+
+\subsection{Building without MFEM}
+
+MFEM is deliberately not a required package. Without it, CMake builds the
+MFEM-free half of the library --- the configuration parser, the profiles, the
+source terms, the boundary shapes --- skips every file that includes the
+library, and skips every test that needs a solver, saying so for each. That is
+not a convenience: it is what makes continuous integration possible at all,
+since the branch {\meq} needs is not published anywhere a hosted runner can
+fetch it. The corollary is that a green badge is evidence about the
+configuration and profile layers and about nothing else.
+
+\section{Running}
+
+\begin{verbatim}
+    meq config.toml     solve the equilibrium
+    meq --help          usage
+    meq --version       the build this is
+\end{verbatim}
+
+There are no other flags and no subcommands, and that is a decision rather than
+an unfinished corner. \emph{A configuration file is a record of what was run; a
+command line is not.} When somebody asks six months later which equilibrium a
+plot came from, the answer should be a file that can be re-run --- and every
+output {\meq} writes carries the name of the file that produced it.
+
+\subsection{What a run does}
+
+In order:
+
+\begin{enumerate}
+
+\item \textbf{Reads the configuration}, and validates all of it before doing any
+	work. An unknown key is an error, not something ignored, and so is an
+	unknown table; the message names the nearest accepted spelling. A key that
+	is silently ignored is a run that quietly did something other than what the
+	file says, which is the failure this behaviour exists to prevent.
+
+\item \textbf{Builds the mesh}, either by triangulating the box given in the
+	configuration or by reading a mesh file, and applies the requested uniform
+	refinements.
+
+\item \textbf{Builds the source term} $F$, and with it $\partial F/\partial\psi$.
+
+\item \textbf{Builds the computational domain.} With no shape given, this is the
+	mesh itself and $\psi = 0$ is imposed on its boundary: the \emph{fitted}
+	path. With a shape, {\meq} marks the background elements lying inside
+	$\Gamma$, extracts them as a submesh, and builds the transfer paths that
+	carry the boundary condition outward: the \emph{curved} path of
+	\S\ref{sec:curved}.
+
+\item \textbf{Solves}, by Newton --- possibly inside an adaptive loop, and
+	possibly with the flux on axis as an additional unknown.
+
+\item \textbf{Post-processes}, building the enriched potential $\psi^{\star}$.
+
+\item \textbf{Writes the answer}, three times.
+
+\end{enumerate}
+
+\subsection{What it prints, and what to read}
+
+Progress goes to standard output and diagnostics to standard error, every line
+prefixed so that a log can be filtered. The line that matters most on an
+ordinary run says how many Newton iterations it took, on how many elements, at
+what degree.
+
+Under it is the residual history, printed on \emph{every} run and not only on
+failure, with a column giving the observed order of convergence. That column is
+there for one reason, and it is the reason given in \chref{ch:intro}: a Jacobian
+with an error in it still converges to the right answer at the right rate in
+$h$, and the only thing that changes is the path. The observed order falling
+from two to one is the single diagnostic that sees it. If you have written your
+own source term --- \chref{ch:embedding} --- this column is what tells you
+whether its derivative is right.
+
+An adaptive run additionally prints one row per cycle, and says which stopping
+condition ended it. A run with the axis flux as an unknown prints the converged
+value and the residual of the constraint that defines it.
+
+\subsection{Exit codes}
+
+\begin{center}
+\begin{tabular}{c l p{0.55\textwidth}}
+	\hline
+	Code & Name & Meaning \\
+	\hline
+	0 & solved & The equilibrium was computed and everything asked for was
+		written. \\
+	1 & configuration error & Nothing was attempted. The file was unreadable or
+		invalid, a key was wrong, the geometry could not be built, or the file
+		asked for something {\meq} refuses. \\
+	2 & solve failed & The configuration was good and the nonlinear iteration
+		did not converge, including after the fallback. The residual history is
+		printed, so the failure is diagnosable rather than merely reported. \\
+	3 & output failed & The equilibrium was computed and something went wrong
+		writing it --- most often an output directory that does not exist.
+		{\meq} does not create the output directory. \\
+	\hline
+\end{tabular}
+\end{center}
+
+The split between~1 and~2 is the useful one for a script. A~1 means the input is
+wrong and re-running will not help; a~2 means the input is well formed and the
+solver could not do it, which is a case for refining the mesh, raising the
+degree or supplying an initial guess.
+
+There is exactly one thing {\meq} refuses rather than approximating: a boundary
+condition given as the source's exact solution. That is a convergence-study
+device, and a \texttt{Source} carries $F$ and $\partial F/\partial\psi$ and no
+closed form --- the closed forms live in the test fixtures, where they are the
+thing being converged against. The program says so and exits~1; the library
+still offers it.
+
+\section{The configuration file}
+
+A run is described entirely by a TOML file. Three tables are required and the
+rest are optional, and an absent optional table behaves exactly like a present
+but empty one. Appendix~\ref{ap:config} documents every table and every key.
+
+\begin{verbatim}
+    [mesh]
+    RMin = 0.6
+    RMax = 1.4
+    ZMin = -0.6
+    ZMax = 0.6
+    NR = 8
+    NZ = 8
+
+    [discretisation]
+    PolynomialDegree = 3
+
+    [source]
+    Type = "soloviev"
+    A = -0.52
+\end{verbatim}
+
+Two conventions are worth stating here because they surprise people. Table names
+are lower case and \emph{keys are \texttt{UpperCamelCase}}, which is a
+deliberate mismatch with the C++ naming rule used everywhere else in the tree
+and is not an oversight to be reconciled. And numbers accept either TOML
+spelling --- \texttt{RMin = 0} and \texttt{RMin = 0.0} both work --- while
+counts do not, so \texttt{NR = 4.0} is refused rather than truncated. That last
+distinction is worth more than it looks: the natural way to accept both
+spellings in the TOML library used here returns the \emph{default} when a
+conversion fails, because a failed conversion is indistinguishable from a
+missing key, which turns a loud failure into a silent wrong answer in the
+configuration --- the last place anybody wants one.
+
+\section{Choosing the discretisation}
+
+Two numbers set the accuracy: the polynomial degree $k$ and the mesh spacing
+$h$. Both $\psi$ and the flux $q$ converge at $k+1$, and the enriched potential
+$\psi^{\star}$ at $k+2$.
+
+Raising $k$ is usually the better buy, for the reason \chref{ch:intro} gives:
+hybridization leaves one globally coupled system on the mesh \emph{faces}, so
+the cost of the global solve grows with the face count rather than with the
+volume unknowns, and the extra volume unknowns a higher degree brings are
+eliminated element by element. Refining the mesh and raising the degree are also
+independent cures for a solve that will not converge, and \S\ref{sec:notconverge}
+returns to that.
+
+There are two ceilings. Beyond about $k = 5$, or eight refinements, round-off
+dominates and a convergence table that flattens there is behaving correctly
+rather than revealing a bug. And a study on a domain with a re-entrant or merely
+non-smooth boundary is capped by the geometry rather than by the elements: on a
+polygon approximating a smooth curve, the corner singularity at each vertex caps
+the achievable order well below the design order whatever $k$ is, which is
+exactly the difficulty \S\ref{sec:curved} exists to remove.
+
+The stabilisation $\tau$ is the third parameter and its default is~1. Both
+source papers set it there and note that optimal order needs only
+$\tau = O(1)$.
+
+\begin{quote}
+	\textbf{Keep $\tau$ constant.} A solution-dependent stabilisation must also
+	supply its own derivative for the Newton Jacobian, and omitting that gives
+	no wrong answer --- only slow Newton convergence, which is a failure that
+	survives a passing regression suite. A constant $\tau$ never reaches that
+	code path. Deriving $\tau$ from the local diffusion coefficient is
+	specifically not advised.
+\end{quote}
+
+\section{The plasma boundary}
+\label{sec:curved}
+
+The plasma boundary $\Gamma$ is a smooth curve. A mesh is not. {\meq} offers
+two ways of reconciling them, and only one of them is any good.
+
+The \emph{fitted} path takes $\Gamma$ to be the mesh boundary and imposes
+$\psi = 0$ on it. It is the right thing for a rectangular benchmark domain and
+for convergence studies against a closed form. It is the \emph{wrong} thing for
+a real plasma shape, because a polygonal approximation to a curved boundary caps
+the convergence rate whatever the polynomial degree: each vertex carries a
+corner singularity, interior pollution spreads it, and the measured order on a
+fine polygon at high degree comes out at roughly half the design order. No
+accuracy inside the elements recovers that, because there is nothing wrong with
+the elements --- the \emph{domain} is wrong.
+
+The \emph{curved} path does not mesh the boundary at all. Give the run a shape
+and {\meq} marks the background elements lying entirely inside $\Gamma$,
+extracts them as a computational domain $\Omega_h$ whose boundary $\Gamma_h$ is
+therefore inscribed, builds a short path from each point of $\Gamma_h$ out to
+$\Gamma$, and imposes on $\Gamma_h$ not the boundary condition itself but the
+boundary condition carried back along the path. The line integral that carries
+it uses the computed flux $q$, so it is available at the flux's own order: the
+mixed method paying off again. The property that makes this more than a
+heuristic is that optimal order survives a gap of only $O(h)$
+\cite{CockburnSolano2012}.
+
+Two shape families are built in: the Miller parametrisation
+\cite{Miller1998}, in which a plasma cross-section is described by a major
+radius, a minor radius, an elongation, a triangularity and a squareness; and its
+extended Miller harmonic generalisation \cite{ArbonCandyBelli2021}, which
+replaces the two shaping parameters by Fourier coefficients and can represent
+shapes Miller cannot.
+
+\begin{quote}
+	\textbf{The curved path leaves a band between $\Gamma_h$ and $\Gamma$ that
+	is inside the plasma and outside the mesh}, $O(h)$ wide. It is real and it
+	is visible in the output; \S\ref{sec:output} says what each format does
+	about it.
+\end{quote}
+
+There is one further consequence, which matters only if you go looking. On the
+fitted path the trace matrix is symmetric to round-off and negative definite. On
+the curved path it is \emph{not symmetric}, and that is not a defect --- it is
+what the transfer technique is. The continuous Grad--Shafranov operator is
+self-adjoint; the same operator with a \emph{transferred} Dirichlet datum is
+not, because the datum on a face depends on the flux along a path leaving the
+element. So {\meq}'s headline configuration is genuinely non-symmetric and an
+unsymmetric sparse LU is the right solver for it.
+
+\section{Adaptive refinement}
+
+Given a shape or not, {\meq} will run the usual loop --- solve, post-process,
+estimate, mark, refine --- against the residual error estimator of
+S\'anchez-Vizuet, Solano and Cerfon \cite{SanchezVizuet2020adaptive}, stopping at
+a target error or an iteration limit and saying which. Two marking strategies
+are offered, D\"orfler's bulk-chasing rule and a simple fraction-of-maximum rule.
+They read their one parameter \emph{oppositely}, which is the most common way to
+mis-set an adaptive run: raising it makes D\"orfler marking more aggressive and
+fraction-of-maximum marking less so.
+
+On the curved path there is more to it than refining. Refining $\Omega_h$
+without doing anything else makes the gap to $\Gamma$ shrink more slowly than
+the local element size, so the ratio the transfer analysis is stated in
+\emph{grows} with every cycle and the method silently leaves the regime it is
+analysed in. {\meq} therefore maintains a companion mesh, re-marks which
+background elements are inside $\Gamma$ after each refinement, and rebuilds the
+transfer paths --- so the domain grows as it refines, and the run reports how
+many paths had to be widened.
+
+Each cycle after the first warm-starts from the previous one, interpolated onto
+the refined mesh. That costs nothing and saves a substantial fraction of the
+Newton work over a run, and it is measurably neutral on the answer.
+
+\begin{quote}
+	\textbf{An error target chosen against one version of the estimator is not
+	comparable against another.} The estimator is built on the enriched
+	potential $\psi^{\star}$, which is a different and smaller quantity than the
+	raw potential on the same mesh. If you inherit a target from somewhere,
+	re-establish it before trusting it.
+\end{quote}
+
+\section{Output}
+\label{sec:output}
+
+Every run writes the same equilibrium \textbf{three times}. That is not
+redundancy: no single format is simultaneously exact, portable and convenient,
+and each of the three gives up a different one of those.
+
+\begin{description}
+
+\item[The exact format.] Three files whose names begin with the output
+	stem, read by GLVis and by {\meq} itself:
+	\texttt{.mesh}, \texttt{\_psi.gf} and \texttt{\_grad\_psi.gf}. They
+	hold every polynomial coefficient of the finite element solution, at full
+	precision. This is the restart format and the only one {\meq} can resume a
+	run from. Beside them, \texttt{\_psistar.gf} carries the post-processed
+	potential, which lives one degree up.
+
+\item[The picture.] A directory named for the stem, holding a
+	\texttt{.pvd} index and one subdirectory of VTK files, read by ParaView
+	and VisIt.
+	Lagrange cells at the degree of the field, with the mesh boundary bent onto
+	the true $\Gamma$.
+
+\item[The interchange format.] A \texttt{.nc} file, read by anything that
+	reads NetCDF. The potential and the magnetic field sampled on a uniform $(R, Z)$
+	grid. Lossy, and portable.
+
+\end{description}
+
+\subsection{Which potential each file carries}
+
+Everything {\meq} draws or exports carries $\psi^{\star}$, the post-processed
+potential, which converges a full order faster than the solved $\psi_h$ at
+essentially no cost --- there is no reason to report the worse field. The one
+exception is the restart file, which keeps $\psi_h$ deliberately, because it is
+read back into a space of degree $k$ and $\psi^{\star}$ would not fit. Making
+the two consistent would break restart.
+
+The consequence for anyone with old output is that a gridded file differenced
+against one written before this changed measures the post-processing rather than
+the physics: same name, same units, same layout, different meaning. The file
+records which potential it holds, and the \emph{absence} of that record is what
+identifies an older one.
+
+\subsection{The high-order picture}
+
+The VTK output is written at the polynomial degree of the field, and this is the
+one thing in the table that can be silently wrong. VTK's native cells are
+linear, so the default path draws a cubic solution as though it were linear ---
+which produces a picture that looks like a coarse mesh rather than like a bug,
+and which nobody queries. {\meq} writes Lagrange cells instead, and its test
+suite asserts the point count against the vertex count for exactly that reason.
+
+On the curved path the same file also has its boundary bent onto the true
+$\Gamma$: a curvature is installed on the mesh and each boundary face is moved
+outward. Because the cells were already high order this needed nothing further
+from the format; the two features composed. The gap can exceed an element's own
+size, so some faces genuinely cannot reach, and the run reports the fraction
+that did.
+
+An adaptive run writes a second collection with one frame per cycle, which
+ParaView scrubs through as a time series. It is separate from the answer because
+the answer has its boundary bent onto $\Gamma$, and doing that mid-loop would
+hand the next refinement a geometry the estimator never saw.
+
+\subsection{The band, in the gridded file}
+\label{sec:band}
+
+The gridded file samples a uniform $(R,Z)$ grid, which on the curved path
+includes nodes lying in the band --- inside the plasma, outside the mesh. Those
+nodes carry real data and the file marks them.
+
+The obvious way to fill them is to continue each field's own polynomial past its
+element, and it is bounded by nothing: on a shaped test case that put a
+noticeable number of nodes at \emph{positive} $\psi$, where the boundary
+condition makes $\psi$ exactly zero on $\Gamma$ and strictly negative inside,
+and the $\psi = 0$ contours in the band were visibly wrong. It is worth
+recording that blending the extrapolation towards the known zero on $\Gamma$
+does \emph{not} fix it, because it looks as though it should: scaling a positive
+value down never changes its sign. The error was in \emph{where} the field was
+evaluated, not in how it was weighted.
+
+What {\meq} does instead is take a Taylor step from the node's foot on
+$\Gamma_h$ using the solved flux, $\psi(p) \approx \psi(x_0) + r_0\, q(x_0)
+\cdot (p - x_0)$ --- so nothing is ever evaluated outside an element, and the
+step is taken in a quantity solved for at the potential's own order. The
+magnetic field gets the same treatment using its own gradient. That is a full
+order better than reading the value at the foot, which is what the field used to
+get, and it is still not the potential's order: there is no solved variable for
+the gradient of the flux, so this is second order at every degree. The gap is
+structural rather than a shortcut.
+
+\begin{quote}
+	\textbf{The file says which nodes those are, and a consumer should use it.}
+	Beside the mask saying which nodes are inside the plasma there is a second
+	mask saying which were reached by extension. Drop those nodes before
+	computing an error norm or differencing two runs: they are limited by the
+	extension's order rather than by the discretisation.
+\end{quote}
+
+\subsection{What is not in any of them}
+
+None of the three carries the flux surfaces. {\meq} can locate the magnetic
+axis, trace the surfaces, take flux-surface averages over them and fit the whole
+family as a smooth map from a disc --- but all of that is reached through the
+C++ library, and none of it is written to a file or driven from a configuration
+key. A consumer that wants $V'$, $\langle R^{-2}\rangle$ or a safety factor
+links against {\meq}. That is \chref{ch:embedding}.
+
+\section{When the solve does not converge}
+\label{sec:notconverge}
+
+This section is the one to reach for on an exit code~2.
+
+\subsection{Read the residual history first}
+
+It is printed on every run. Three shapes, and they mean different things.
+
+\emph{A history that grinds down linearly}, at a roughly constant contraction
+per step, means the Jacobian disagrees with the residual. If the source is one
+of {\meq}'s own, that is a bug to report; if it is yours, the derivative is
+wrong. Working Newton squares the residual roughly every step once it gets
+going, reaching machine precision from a cold start in a handful of iterations.
+
+\emph{A history that wanders} --- non-monotone, moving between a few orders of
+magnitude and not settling --- is undamped Newton outside its basin. It is not
+divergence and it is not a stall, and it is what an under-resolved mesh
+produces. It is curable, and \S\ref{sec:ladder} says how.
+
+\emph{A history that stops at zero iterations} with an identically zero residual
+means the trivial branch. Several standard benchmark sources vanish at
+$\psi = 0$, so with homogeneous Dirichlet data $\psi \equiv 0$ genuinely solves
+the problem and Newton, which starts from the Dirichlet data, lands on it and
+stops. The cure is an initial guess that puts $\psi$ away from zero in the
+interior; the published algorithms for this equation open by demanding a
+non-trivial initial guess for exactly this reason.
+
+\subsection{Refine before reaching for a solver}
+\label{sec:ladder}
+
+The single most useful thing measured about {\meq}'s hard cases is that most of
+them were not hard. Of four standard benchmark sources chosen for stiffness,
+three converge in a handful of undamped Newton steps on a mesh that resolves
+their features, and \emph{both} refinement paths cure them independently ---
+halving $h$ works, and so does raising $k$ on the same mesh. A difficulty
+measured at one resolution is not a property of the problem.
+
+So the order to try things in is: resolve the feature, raise the degree, then
+change the solver. Note also that the mesh has to resolve the source's own
+structure and not merely look fine: a source with a ridge narrower than a cell
+is a source the discretisation cannot see, and marking a generous band around
+the feature and refining it once reaches a solvable configuration on fewer
+degrees of freedom than uniform refinement needs.
+
+\subsection{The globalisation ladder}
+
+If refinement is not available --- and on the first solve of an adaptive run it
+is not, because there is no estimator yet --- there is a ladder.
+
+The default is plain undamped Newton, and every convergence rate {\meq} claims
+was measured with it. The fallback the program uses on \emph{observed} failure
+is a handoff: Anderson-accelerated Picard walks the iterate into Newton's basin
+and plain Newton takes it from there and supplies the quadratic endgame Picard
+structurally cannot. It reaches cases nothing else in the solver touches at that
+resolution, and it agrees with Picard's own answer, which is what makes it a
+handoff rather than a change of problem. Plain and accelerated Picard are
+available on their own, as is the SUNDIALS nonlinear solver with and without its
+line search.
+
+Three things about the ladder are worth knowing before adjusting it.
+
+\emph{Picard's job is not to solve the problem.} Stage one stopping short of its
+own tolerance is an expected outcome and the handoff swallows it deliberately.
+This is a globalisation, not a two-solver pipeline.
+
+\emph{Do not replace Picard's tolerance with an iteration budget.} The handoff
+is not monotone in Picard effort --- budgets both smaller and larger than an
+intermediate one converge where the intermediate one fails --- so a budget tuned
+on one mesh will betray you on the next. Picard's own tolerance is the trigger
+that works wherever it is reached.
+
+\emph{The fallback is reactive, never predictive.} Two candidate cheap
+predictors of failure have been measured and both killed, and the more obvious
+of the two --- the first Newton step making the residual worse --- turned out to
+be \emph{anti}-correlated: the largest first-step blow-up measured converges,
+and the cases where the residual came down at step one both fail. Nothing may be
+inferred from the source about which solver to run.
+
+\subsection{Why not make the fallback the default}
+
+Because it silently changes which discrete solution you get, and that settles it
+on its own. Coarse discretisations of these sources carry \emph{more than one}
+solution: the same case solved to a tight tolerance by three different routes
+gives three converged answers differing by a noticeable fraction in the peak
+flux. These are not tolerance artefacts --- tightening the tolerance leaves them
+bit-identical. So changing the default globalisation is not a performance
+decision; it changes the equilibrium {\meq} reports on an under-resolved mesh,
+which is precisely the mesh an adaptive run starts from.
+
+The corollary for anyone comparing two solve routes is: do it on a mesh that
+resolves the problem. A disagreement on a coarse one is this, not a defect.
+
+\section{Options settled by measurement}
+
+Several choices in {\meq} are exposed because the right answer depends on the
+problem and the machine. In each case the default was chosen by measurement
+here, and in each case the standing advice is the same: \emph{measure it on your
+own problem before departing from it.}
+
+\begin{description}
+
+\item[The trace solver.] The globally coupled trace system is solved by a sparse
+	direct method, and there are up to three available depending on what MFEM
+	was built with. They agree with one another to round-off through the whole
+	solver, so choosing between them is never a numerical decision --- it is a
+	licensing and a performance one. The default is the one present in every
+	build.
+
+\item[Threaded assembly.] The element-local half of the assembly can be
+	threaded, and it reproduces the serial result bit for bit, which is
+	assertable rather than merely tolerable because element-local arithmetic
+	reassociates nothing. It is nevertheless \emph{off} by default, and the
+	reason is instructive: the library forks a thread team per call, so a caller
+	that assembles once amortises it and a caller that assembles hundreds of
+	times inside an inner iteration pays it every time. Mesh size does not
+	separate the two cases and the solver cannot know which caller it has. Take
+	it for a large mesh assembled a few times; leave it for a small one
+	assembled often.
+
+\item[The nonlinear ordering.] Whether the system is linearised before it is
+	hybridized or after. The default linearises first, in which case every
+	element-local operation is a linear solve; the alternative condenses first
+	and puts a small nonlinear solve inside every element for every residual
+	evaluation. The first is several times cheaper per iteration and its
+	per-element work is uniform, which makes it cheap even when it is failing.
+	The second is more robust on stiff, under-resolved meshes, and is kept as
+	the backup for exactly that. \emph{Do not expect an ordering to fix a stiff
+	source} --- that prediction was made here, tested and falsified.
+
+\item[Threads in the numerical library.] If MFEM is linked against a threaded
+	BLAS, the number of threads it is allowed matters enormously and not in the
+	direction one expects. The element-local dense factorisations are small, and
+	handing a small dense factorisation to a threaded library costs a fork and a
+	barrier per call for no work; at high polynomial degree, where each such
+	block crosses the library's own threading threshold, the cost is
+	catastrophic and it looks exactly like a solver problem. {\meq}'s own tests
+	all pin the thread count to one. \textbf{A production run at high degree
+	with threading left on would be unusable.}
+
+\end{description}
+
+Two remarks that apply to all of them. The largest performance lever in {\meq}
+is none of these --- it is resolution, and after that the globalisation, and on
+a hard case the nonlinear iteration dominates everything in this list. And a
+timing taken on one machine is a measurement about that machine: this is
+especially true of anything involving a graphics processor, where a consumer
+card runs double precision at a small fraction of a datacentre part's rate and
+can invert the conclusion outright.
+
+\section{Tools}
+
+The source tree carries a small plotting script that reads the gridded output,
+and a short guide saying which of the three formats goes with which reader and
+why they are not interchangeable. Neither is part of the solver, and the guide
+is the thing to read first if a picture looks wrong.

@@ -1,3 +1,301 @@
 \chapter{Introduction}
+\label{ch:intro}
 
+{\meq}, the Maryland Equilibrium Solver, computes axisymmetric plasma
+equilibria. It takes a plasma boundary and the profiles that drive the plasma,
+and returns the poloidal flux function whose level sets are the flux surfaces
+--- together with the field built from its gradient, the surfaces themselves as
+curves, and the flux-surface averages a transport code reads off them.
 
+This manual is meant to be read through. It sets out what the code is doing and
+why that is correct: the operator and the weights that distinguish it from a
+Laplacian, the first-order system and the reason the flux is solved for rather
+than differentiated, what hybridization buys and what it costs, the obligation
+Newton places on every source term, the transfer technique that lets a straight
+mesh carry a curved plasma boundary, and the machinery that turns a
+two-dimensional flux function into one-dimensional geometry. The online
+documentation is the companion reference: it is organised for searching, and it
+is where the key-by-key description of a configuration file, the recipes and the
+API listing live. Where a topic belongs in both, this manual carries the physics
+and the argument, and points onward for the catalogue.
+
+\section{The problem}
+
+An axisymmetric magnetohydrodynamic equilibrium in cylindrical coordinates
+$(r, \varphi, z)$ is described entirely by one scalar: the poloidal flux per
+radian, $\psi(r,z)$. Force balance --- the statement that the Lorentz force
+balances the pressure gradient --- reduces to a single semi-linear elliptic
+equation for it, the Grad--Shafranov equation,
+%
+\begin{equation}
+	-\gradbar \cdot \left( \frac{1}{r}\, \gradbar \psi \right)
+		= \frac{F(r,z,\psi)}{r}
+	\qquad \text{in } \Omega \subset \mathbb{R}^{2},
+	\label{eq:gs}
+\end{equation}
+%
+in which the source
+%
+\begin{equation}
+	F(r,z,\psi) := \mu_{0}\, r^{2}\, \frac{\mathrm{d}p}{\mathrm{d}\psi}
+		+ g\, \frac{\mathrm{d}g}{\mathrm{d}\psi}
+	\label{eq:source}
+\end{equation}
+%
+is built from the plasma pressure $p(\psi)$ and the toroidal field function
+$g(\psi)/r$. Both are user input, and it is their dependence on $\psi$ that
+makes the problem semi-linear rather than linear.
+
+\subsection{Notation, and the weights}
+
+Two pieces of notation carry the whole content of \eqref{eq:gs} and are worth
+stating before anything else.
+
+The symbol $\gradbar := (\partial_{r}, \partial_{z})$ acts formally like a
+vector of partial derivatives. \emph{It is not the cylindrical gradient}, and
+the operator in \eqref{eq:gs} is not a cylindrical divergence of a cylindrical
+gradient: writing it that way gives a different equation. The distinction is
+exactly what the $1/r$ inside and the $r$ implied by the right-hand side are
+for. Expanded,
+%
+\begin{equation}
+	\dstar \psi
+		:= r \, \gradbar \cdot \left( \frac{1}{r} \gradbar \psi \right)
+		 = \frac{\partial^{2}\psi}{\partial r^{2}}
+		 - \frac{1}{r} \frac{\partial \psi}{\partial r}
+		 + \frac{\partial^{2}\psi}{\partial z^{2}},
+	\label{eq:deltastar}
+\end{equation}
+%
+which is the Grad--Shafranov operator, and \eqref{eq:gs} reads
+$\dstar \psi = -F$. Note the \emph{minus} on the first-derivative term: an
+axisymmetric Laplacian carries a plus there. Every sign convention in
+{\meq} descends from \eqref{eq:gs} as written.
+
+\emph{Fixed boundary} means the plasma boundary $\Gamma$ is given rather than
+found. Taking it to be the level set $\psi = 0$ makes \eqref{eq:gs} an interior
+Dirichlet problem,
+%
+\begin{equation}
+	\psi = 0 \qquad \text{on } \Gamma = \partial\Omega .
+\end{equation}
+%
+That is the problem {\meq} solves.
+
+\section{Three commitments}
+
+Almost everything in this manual is a consequence of three decisions, and none
+of the rest makes much sense without them.
+
+\subsection{The flux is a solved unknown}
+
+What experiments and downstream codes want out of an equilibrium code is not
+$\psi$ but the magnetic field, and the field is built from $\gradbar\psi$. A
+method that computes $\psi$ to order $k+1$ and then differentiates it delivers
+the field at order $k$ --- one order worse, in precisely the quantity people
+use.
+
+{\meq} therefore treats the scaled gradient as an unknown in its own right.
+Introduce the \emph{flux}
+%
+\begin{equation}
+	q := \frac{1}{r}\, \gradbar\psi ,
+	\label{eq:flux}
+\end{equation}
+%
+and \eqref{eq:gs} becomes the first-order system
+%
+\begin{equation}
+	q - \frac{1}{r}\gradbar\psi = 0,
+	\qquad
+	-\gradbar\cdot q = \frac{F}{r},
+	\qquad
+	\psi = 0 \ \text{ on } \Gamma .
+	\label{eq:first-order}
+\end{equation}
+%
+Discretising $q$ directly gives the derivative at the \emph{same} order as the
+potential. That is the whole reason to prefer a mixed method for this equation,
+and it is not a numerical convenience: it is the deliverable.
+
+It goes on paying off in places nobody designed for, and the pattern recurs
+throughout this manual. A critical point of $\psi$ --- the magnetic axis, or an
+X-point --- is a \emph{root} of $q$ rather than a turning point of something
+differentiated, so it is found to the flux's own order and located inside an
+element rather than at a mesh vertex. The weight in every flux-surface average
+is $1/|\gradbar\psi| = 1/(r|q|)$, available pointwise and again at the flux's own
+order. The boundary condition on a curved plasma boundary is carried inward
+along a path by integrating $q$ along it. And where the computational domain
+stops short of the plasma boundary, the solution is continued across the gap by
+a Taylor step in $q$ rather than by extrapolating a polynomial. In every one of
+those, a code that differentiated its potential would be a full order worse.
+
+\subsection{Newton, not Picard}
+
+Somebody has to iterate, because \eqref{eq:gs} is semi-linear. The published
+hybridizable discontinuous Galerkin solvers for this equation use
+Anderson-accelerated Picard iteration, keeping $F$ as opaque problem data so
+that the solver relies only on the discretisation of the operator
+\cite{SanchezVizuetSolano2019}. They pay for that by iterating on \emph{every}
+source, including one linear in $\psi$ that could have been folded into the
+bilinear form.
+
+{\meq} makes the opposite trade and uses Newton, which puts
+$\partial F/\partial\psi$ into the operator as a mass term on the potential
+block. The support for that choice comes from outside the discontinuous
+Galerkin literature. CEDRES++ reports that fixed-point iterations `usually
+suffer from very slow convergence or even fail to converge, which made
+researchers move towards Newton-type methods', and names vertically unstable
+plasmas as a case where Picard does not converge at all \cite{Heumann2015}.
+Lackner \cite{Lackner1976} says the same from the other end: plain Picard `will
+converge to the physically trivial solution $\psi \equiv 0$ if admitted by the
+formulation of the problem'. Serino and co-workers \cite{Serino2024} built a
+Newton solver for this equation in the same finite element library precisely
+because conventional Picard-based solvers failed to converge on the cases they
+cared about.
+
+The obligation this creates reaches every corner of the code and is stated here
+because it constrains what a user may write:
+
+\begin{quote}
+	\textbf{Every source must be able to differentiate itself with respect to
+	$\psi$, and every profile must be differentiable twice.} A profile that
+	cannot supply its own derivative cannot be used.
+\end{quote}
+
+The second derivative is not decorative. A rotating plasma's source is already
+a $\psi$-derivative of something built from flux functions, so its Jacobian
+spends a second derivative of every input; no reparametrisation avoids it.
+
+The reason the obligation must be taken seriously, rather than merely noted, is
+that a wrong Jacobian is nearly invisible. Newton converges to the same
+discrete solution whatever Jacobian carried it there, so an error in
+$\partial F/\partial\psi$ leaves every error norm and every convergence rate
+untouched. What changes is only the path: the observed order of the Newton
+iteration drops from two to one, and the iteration count rises. \emph{A
+convergence table cannot see a Jacobian error at all.} That is why {\meq}
+prints the observed order of every Newton run, why its test suite differences
+the assembled Jacobian against the assembled residual, and why
+\chref{ch:embedding} returns to the point when a consumer's own Jacobian is at
+stake.
+
+\subsection{Hybridization}
+
+The third commitment is the discretisation. {\meq} implements the LDG-H
+hybridizable discontinuous Galerkin method of S\'anchez-Vizuet and Solano
+\cite{SanchezVizuetSolano2019}, with the adaptivity, error estimator and
+curved-boundary treatment of S\'anchez-Vizuet, Solano and Cerfon
+\cite{SanchezVizuet2020adaptive}. Those two papers are not background reading:
+they are the method, and \texttt{src/meq} is an implementation of them.
+
+Three finite element spaces carry the three unknowns of \eqref{eq:first-order},
+all of the \emph{same} polynomial degree $k$: a discontinuous vector space for
+the flux, a discontinuous scalar space for the potential, and a scalar space
+living on the faces of the mesh for a new unknown, the \emph{trace}
+$\hat\psi_h$, which is the potential's value on a face. Equal order is
+admissible because hybridization removes the inf-sup compatibility condition a
+classical mixed method would impose between flux and potential
+\cite{CockburnGopalakrishnanLazarov2009}, and both $\psi$ and $q$ then converge
+at $k+1$.
+
+What hybridization buys is that the flux and the potential can be eliminated
+\emph{element by element}, each element's contribution expressed in terms of the
+trace on its own faces. What is left is one globally coupled system in the trace
+alone, whose size is the number of face degrees of freedom and is independent of
+how many volume unknowns each element carries. That is why a high-degree run
+costs far less than its unknown count suggests, and it is why the choice of
+linear solver in \chref{ch:using} is a choice about one sparse matrix rather
+than about the whole discretisation.
+
+What it costs is the subject of \chref{ch:using}'s section on nonlinear solvers,
+and it is a real cost: when $F$ depends on $\psi$, the element-local elimination
+can itself be nonlinear, and then there is a small nonlinear solve inside every
+element for every evaluation of the global residual. Neither of the other two
+commitments interacts with the third as sharply as this, and it is the single
+largest robustness lever in the code.
+
+\section{Scope}
+
+It is worth being plain about what {\meq} does not do, since each omission is a
+deliberate boundary rather than an unfinished corner.
+
+\begin{description}
+
+\item[No free boundary.] The plasma boundary is an input. The complementary
+	problem --- in which external coils are given and the plasma finds its own
+	shape, with the boundary determined as part of the solution --- is harder,
+	and {\meq} does not solve it. Serino and co-workers \cite{Serino2024} note
+	that the fixed problem is `significantly easier', which is worth keeping in
+	mind when comparing against a free-boundary code. The design anticipates the
+	extension in one specific place: when profiles are given in normalised flux
+	the flux on axis is already an unknown of the nonlinear system, closed by a
+	bordered Newton, and the boundary flux would enter as a second border row
+	and column of exactly the same shape.
+
+\item[No parallelism.] {\meq} is serial throughout, and there is no MPI in it.
+	This is a judgement about problem size rather than an omission: a
+	two-dimensional trace system of a few tens of thousands of unknowns
+	factorises comfortably on one core with a sparse direct solver, and at that
+	size a direct solve beats anything iterative. The judgement would not
+	survive three dimensions.
+
+\item[Two dimensions, and axisymmetry.] The reduction to \eqref{eq:gs} assumes
+	it.
+
+\item[No open surfaces.] Everything downstream of the solve --- the tracer, the
+	flux-surface averages, the disc representation --- assumes closed surfaces
+	that return to their starting point. A surface terminating on the domain
+	boundary has endpoints and wants different rules, and that is deferred with
+	free boundary.
+
+\item[Nothing near the separatrix.] Approaching an X-point, $1/|\gradbar\psi|$
+	diverges, the surface develops a corner and every flux-surface average
+	diverges logarithmically with it. That is physics rather than a defect, but
+	it means a consumer must decide where to cut, and record the decision.
+
+\end{description}
+
+\section{What it is built on}
+
+The finite element machinery is MFEM \cite{Anderson2021}, and specifically its
+mixed \texttt{DarcyForm} and the hybridizable discontinuous Galerkin integrators
+that go with it. {\meq} is an early user of that work and requires a development
+branch of the library rather than a release; \chref{ch:using} says which, and
+why the requirement cannot be relaxed.
+
+The curved-boundary treatment is the transfer technique of Cockburn and Solano
+\cite{CockburnSolano2012}, in which the discrete problem is posed on a polygonal
+subdomain lying strictly inside the true domain and the boundary condition is
+transferred outward along short paths. Its essential property --- and the reason
+it is more than a heuristic --- is that optimal order survives even when the gap
+between the computational boundary and the true one is only $O(h)$. Earlier
+methods of this kind needed the gap to shrink like $h^{k+1}$, which in practice
+means fitting the mesh after all.
+
+The distinctive combination is \emph{a mixed high-order method, on a mesh that
+does not conform to the plasma boundary, driven by Newton}. Each of those three
+is well established on its own. Taking all three at once is what produces most
+of the interesting behaviour documented here, and most of the traps.
+
+\section{How to read this manual}
+
+\Chref{ch:using} is for somebody who wants to run {\meq}: building it, the one
+hard dependency, the configuration file, the three output formats and why there
+are three of them, and the options the code exposes together with the standing
+advice about each. \Chref{ch:embedding} is for somebody who wants to call
+{\meq} from a larger code --- a transport solver, an optimiser, a design loop
+--- and it is the chapter with the most in it that appears nowhere else: the
+solver object and its lifecycle, sources and profiles as the physics input, warm
+starting between nearby equilibria, and the flux-surface machinery that turns a
+solved equilibrium into one-dimensional geometry. Appendix~\ref{ap:config} is
+the complete syntax of a configuration file.
+
+A note on numbers, which applies throughout. Many of {\meq}'s design choices
+could only be settled by measurement, and this manual says so where that is the
+case. It does not reproduce the measurements. A number in a manual goes stale
+silently; the numbers therefore live in the source tree beside the tests that
+produce them. Where a choice is exposed as an option --- the polynomial degree,
+the trace solver, the assembly mode, the nonlinear ordering, the globalisation,
+the number of threads --- the right setting depends on the problem, the mesh and
+the machine, and the only way to find it is to measure it there. Treat every
+recommendation here as the default it is.

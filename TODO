@@ -739,3 +739,37 @@ accuracy and not for patience.
   thinks it is. meq builds -O3 -DNDEBUG; MFEM's install carries
   MFEM_USE_MEMALLOC = YES, whose stack-based allocator is a help or a hindrance
   depending on the access pattern and has never been measured either way here.
+
+================================================================================
+Stale comments and inert keys, found by writing the LaTeX manual
+Raised 2026-09-03.
+================================================================================
+
+  Found by writing docs/manual/ against the HEADERS rather than against the
+  docs. That is a different reading of the same tree, which is why these
+  surfaced now and not during the Sphinx pass.
+
+  src/meq/meq.hpp COVERS 5 OF 17 HEADERS AND ITS COMMENT IS FALSE. It still
+  says Estimator.hpp does not compile against MFEM 4.5.1, which stopped being
+  true at stage 6. A consumer who includes the umbrella header gets less than
+  half the library and is told nothing about it. Either complete it or say in
+  it that it is deliberately a subset -- the present state is the worst of the
+  three, because it looks complete.
+
+  Estimator.hpp's file comment says postProcess() refuses the semi-linear path,
+  so the estimator is linear-path only. That refusal was removed and the
+  adaptive loop runs on the non-linear path in production.
+
+  Config.hpp's header comment says "six tables". There are eight.
+
+  LinearMaxIterations and LinearTolerance are parsed, validated, and consumed
+  by NOTHING. Either wire them to the fallback Krylov path or refuse them; a
+  key that validates and does nothing is worse than one that is rejected.
+
+  PPrimeVariable, PPrimeFit, GGPrimeVariable and GGPrimeFit are REFUSED on the
+  rotating path and SILENTLY ACCEPTED AND IGNORED on the mhd path. The same
+  keys, two behaviours, and the quiet one is the wrong one.
+
+  And the project's own name has never been settled: CLAUDE.md writes it lower
+  case throughout, README.md writes MEQ fifteen times, and docs/manual/
+  renders \meq as \textsc{MEQ}. Cosmetic, and one token in Manual.tex.

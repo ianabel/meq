@@ -21,7 +21,7 @@
 	pdftitle={The MEQ Manual},
 	pdfauthor={I. G. Abel},
 	pdfsubject={Comprehensive manual for the Maryland Equilibrium Code},
-	pdfborder=0,
+	pdfborder={0 0 0},
 	bookmarks=true,
 	bookmarksnumbered=true,
 	bookmarksopen=true,
@@ -34,7 +34,22 @@
 
 % Macros
 \providecommand{\chref}[1]{Ch.~\ref{#1}}
+\providecommand{\Chref}[1]{Chapter~\ref{#1}}
 \providecommand{\meq}{\textsc{MEQ}}
+
+% Notation used throughout the manual.  \gradbar acts formally like a vector of
+% partial derivatives and is NOT the cylindrical gradient; see Ch. 1.
+\providecommand{\gradbar}{\bar{\nabla}}
+\providecommand{\dstar}{\Delta^{*}}
+\providecommand{\psiax}{\psi_{\mathrm{ax}}}
+\providecommand{\Th}{\mathcal{T}_{h}}
+\providecommand{\dTh}{\partial\mathcal{T}_{h}}
+\providecommand{\PsiN}{\Psi_{\mathrm{N}}}
+
+% Let TeX stretch a paragraph as a last resort rather than run into the margin.
+% Only applies where a line cannot otherwise be broken; ordinary paragraphs are
+% unaffected.
+\emergencystretch=2.5em
 
 \begin{document}
 

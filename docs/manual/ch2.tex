@@ -1,1 +1,1005 @@
 \chapter{Integrating {\meq} into a modelling framework}
+\label{ch:embedding}
+
+{\meq} is a library first and a program second. Everything the program does is
+done by calling the library, and the library does a great deal the program never
+touches: the flux surfaces, the flux-surface averages and the smooth
+representation of the whole family of surfaces are reachable only this way, and
+none of them appears in any output file.
+
+This chapter is for somebody writing a code that calls {\meq} --- a transport
+solver that needs geometry, an optimiser that needs many nearby equilibria, a
+design loop, a coupled simulation. It is organised as the sequence such a code
+follows: set up a solver, give it the physics, solve it, warm-start the next one
+from it, and read the geometry off the answer.
+
+\section{Getting at the library}
+
+\subsection{Include the headers you use}
+
+There is an umbrella header, and \emph{it does not cover the library}. It brings
+in the configuration parser, the solver and the source and profile interfaces,
+and it omits the error estimator, the boundary shapes, the field and sampling
+helpers, the output writers, the warm-start machinery and every one of the five
+headers that make up the flux-surface stack. A consumer who includes it and
+stops gets less than half of {\meq} with nothing to say so.
+
+Include what you use, by name. The headers are the primary documentation of this
+library and are unusually complete; where this chapter and a header comment
+disagree, the header is right and this chapter is stale.
+
+\subsection{Everything borrows}
+
+\begin{quote}
+	\textbf{Everything handed to a solver is borrowed and must outlive it}
+	--- the mesh, the source, every profile and coefficient, and any transfer
+	path. Nothing here takes ownership, and
+	the flux-surface objects go further: the critical-point finder and the
+	contour tracer hold the solver's own fields by reference, and the solver must
+	have been solved before either is used.
+\end{quote}
+
+There is one exception that matters, and it goes the other way. A source given
+in normalised flux is \emph{mutated} by the solver, once per residual
+evaluation, because the flux on axis is an unknown the solver is driving. Such a
+source must not be shared with anything that reads it in the meantime.
+
+\section{The solver}
+
+\subsection{Construction, and the one hard ordering rule}
+
+A solver is constructed on a mesh, a polynomial degree and a stabilisation. The
+three finite element spaces are built there and then --- which is why a refined
+mesh needs a \emph{new} solver rather than an update, and why an adaptive loop
+built on this library constructs one per cycle.
+
+The forms, by contrast, are built on the first solve rather than in the
+constructor, because the linear and semi-linear paths need structurally
+different ones and hybridization takes what it finds at the moment it is
+enabled. That gives the single ordering rule a caller must respect:
+
+\begin{quote}
+	\textbf{The source and the boundary extension must be set before anything
+	assembles.} Both refuse a late call --- they throw rather than being
+	silently ignored --- and setting a second source of any kind is refused
+	outright, because one solver holds one source.
+\end{quote}
+
+Every other setter is safe at any time, and they differ only in how much they
+throw away. Changing the globalisation, the nonlinear ordering, the assembly
+mode or the element-local solver discards the assembled forms; setting or
+clearing an initial guess discards only the reduction to the trace system;
+setting the boundary data, the Newton controls or the Picard parameters discards
+nothing. Choosing the trace solver discards nothing either, deliberately and
+unlike every other setter in that group, because the trace solver is chosen when
+the reduced system is solved rather than when the forms are assembled.
+
+That distinction is not pedantry. It was once got wrong in exactly the place it
+mattered: changing the globalisation used to discard the reduction and not the
+forms, while the decision about whether the potential block goes on the linear
+or the nonlinear form reads the globalisation --- so a solver switched between a
+Picard path and a Newton one quietly reused the other path's blocks. It was
+latent for as long as every caller built a fresh solver per globalisation, and it
+surfaced the moment one globalisation switched twice inside a single solve.
+
+\subsection{Solving, and what comes back}
+
+\texttt{solve()} prepares the system, dispatches to whichever nonlinear path is
+configured and fills a residual history. Afterwards the potential, the flux and
+the trace are available as grid functions; a further call post-processes, giving
+the enriched potential $\psi^{\star}$ in the space one degree up, an enriched
+flux, and the total flux in a divergence-conforming space. Diagnostics ---
+iteration counts of every kind, the number of trace unknowns, the factorisation
+counts --- are accessors, and error norms against a supplied coefficient are
+there for the benefit of convergence studies.
+
+\texttt{prepare()} is public on its own, and for one reason: it stops after
+assembling and reducing, leaving the reduced operator, its right-hand side and
+its gradient exposed. That is what lets a caller difference the assembled
+residual against the assembled Jacobian, which is the one check that separates a
+wrong Jacobian from a wrong discretisation. If you write a source, do this.
+
+\subsection{Failure}
+
+\begin{quote}
+	\textbf{A solver is not reusable after a failed solve.} With exceptions
+	enabled in the underlying library, a failure throws from the middle of it and
+	leaves its objects as the throw found them. Build a fresh solver for the
+	retry; the program's own fallback ladder does exactly that.
+\end{quote}
+
+Nor is a solver reusable across meshes, for the reason given above.
+
+\subsection{Two conventions that will bite}
+
+\begin{description}
+
+\item[The assembled flux block holds $-q$.] The underlying mixed form is built
+	for a constitutive law of the opposite sign, and the integrators that make
+	the hybridization consistent have that sign baked in. The negation is undone
+	once, into the grid function the flux accessor returns. So the accessor gives
+	{\meq}'s $+q$ and is what the field helpers, the sampler and the contour
+	tracer want; the raw block is what the transferred-datum reconstruction
+	wants, and feeding it the accessor returns the datum with its sign reversed
+	rather than a small bias. The total flux is deliberately left in the
+	library's convention, because the constraint equation it is projected
+	through is written that way.
+
+	The failure modes of a sign error here are worth knowing because they are so
+	unequal. The contour tracer survives one visibly --- it traces the same curve
+	backwards. The flux-surface averages \emph{cannot see it at all}, since only
+	$|q|$ enters, which is exactly why those numbers must never be quoted as
+	evidence about a sign. And the critical-point finder silently swaps every
+	maximum for a minimum while its own topological audit still passes.
+
+\item[The trace is not the transferred datum.] On the curved
+	path the trace degrees of freedom on $\Gamma_h$ remain in the essential list
+	at zero, and the datum actually imposed is never stored anywhere. A
+	dedicated accessor rebuilds it on request, which is what the error estimator
+	needs and what anybody inspecting the boundary condition should use.
+
+\end{description}
+
+\section{The physics input}
+
+\subsection{The source interface is two functions}
+
+\begin{verbatim}
+    class Source
+    {
+    public:
+      virtual double f( double r, double z,
+                        double psi ) const = 0;
+
+      virtual double dFdPsi( double r, double z,
+                             double psi ) const = 0;
+    };
+\end{verbatim}
+
+That is the whole of it. Plain doubles, no finite element types --- which is what
+makes a source unit-testable without the library --- and no $1/r$, because the
+weight belongs to the weak form rather than to the physics. The vertical
+coordinate is in the signature because a manufactured solution may use it; a
+physical magnetohydrodynamic source does not.
+
+\begin{quote}
+	\textbf{\texttt{dFdPsi} must be the exact derivative of \texttt{f}.} An error
+	there does not change the converged answer. It wrecks --- or, worse, merely
+	slows --- the convergence to it, and \chref{ch:intro} explains why no
+	convergence table can see that. Difference it against \texttt{f} in a unit
+	test, and watch the observed order the solver prints.
+\end{quote}
+
+\subsection{Profiles have three derivative levels, and the third is not optional}
+
+A profile supplies its value, its first derivative and its second. The third is
+a pure virtual rather than something defaulting to zero, so that every
+implementation has to answer rather than one silently returning nothing.
+
+It is there because a rotating plasma's source is \emph{already} a
+$\psi$-derivative of quantities built from flux functions, so its Jacobian spends
+a second derivative of every input, and no reparametrisation avoids that: the
+pressure of a rotating plasma is not a flux function, so there is no product to
+pre-store. The static magnetohydrodynamic source dodges it by storing the
+\emph{products} $p'$ and $gg'$ rather than $p$ and $g$ --- precisely so that no
+chain rule exists to get wrong --- and a normalised version of the same source
+differs from it by exactly one factor of $1/\psiax$, which is the chain rule and
+is the whole difference.
+
+\begin{quote}
+	\textbf{A profile must not throw outside its range.} A Newton iterate
+	routinely overshoots the physical interval, and an exception out of a
+	quadrature loop would kill a solve that was about to converge. Clamp
+	instead. The tabulated profile clamps to its end knots with both derivatives
+	set to zero.
+\end{quote}
+
+One caveat on the tabulated profile, recorded because it is unmeasured rather
+than because it is known to matter: a Hermite cubic is only once continuously
+differentiable, so its second derivative is piecewise linear and jumps at every
+interior knot. That is a set of measure zero and does not move a converged
+answer, but a Newton step taken exactly at a knot sees a one-sided Jacobian, and
+nothing has measured what that costs.
+
+\subsection{Normalised flux makes the axis an unknown}
+\label{sec:normalised}
+
+If the profiles are functions of $\Psi = \psi/\psiax$ rather than of $\psi$, then
+$\psiax$ is a functional of the solution and the source must be a
+\texttt{NormalisedSource}: a \texttt{Source} that can additionally be told its
+normalisation. The solver calls that setter once per residual evaluation, so it
+has to be cheap and must not allocate.
+
+The reason this is a different class rather than a flag is that three cheaper
+alternatives were tried and each failed in an instructive way.
+
+\emph{Fixing $\psiax$ does not approximate the problem, it replaces it.} With the
+normalisation frozen at a value that is not the answer, a peaked profile
+contributes essentially nothing: pressure amplitudes differing by more than two
+orders of magnitude gave solutions agreeing to every digit printed, because the
+normalised flux never got far from zero.
+
+\emph{The self-consistent problem is not the parametrised one.} At a fixed
+$\psiax$ this equation has both a small positive solution and a large one. Only
+the large one can satisfy the constraint that closes the normalisation --- but
+the small one is well within the iteration's reach, and Newton from the Dirichlet
+datum walks straight onto it. This path therefore needs an initial guess of about
+the right height, and that is part of the problem statement rather than a
+tuning nicety.
+
+\emph{Closing the loop outside the solver does not work, and the obstruction is a
+pole.} Iterating the normalisation against the peak flux, with relaxation,
+converges --- to a degenerate fixed point where both shrink together and the
+pressure gradient runs away. Mapped afterwards, the cause is plain: the outer map
+has a pole a fraction of a per cent away from its own fixed point. Relaxing
+harder is not a fix for a pole.
+
+What works is putting $\psiax$ inside the residual, as a bordered Newton: the
+hybridized trace residual and the constraint that the normalisation equals the
+peak flux, solved together with the Jacobian bordered by one dense column and one
+sparse row. Those two borders are the non-local terms that a normalised profile
+is known to introduce, and the reason they must live in a border rather than in
+the matrix is structural --- hybridization eliminates flux and potential
+\emph{element by element}, and a term coupling every element to the one element
+holding the axis is precisely what that elimination cannot represent. It costs
+one extra backsolve per Newton step and no second matrix.
+
+\section{Warm starting between nearby equilibria}
+
+An optimiser or a coupled solve moves between equilibria that are close to one
+another. Doing that well is what makes {\meq} affordable in such a loop, and
+there are three distinct routes with different costs.
+
+\begin{description}
+
+\item[Exact restart.] Same mesh, same degree. Read the stored grid function and
+	hand it to the solver as an initial guess; nothing else is needed and the
+	restart is bitwise.
+
+\item[Full-order transfer.] Different mesh or different degree, same code. This
+	is what \texttt{meq::FieldTransfer} is for.
+
+\item[Interchange.] Another code entirely, through the gridded output.
+	\textbf{This one throws most of the previous solve away}: bilinear
+	interpolation on a structured grid is second order however fine the grid is,
+	so restarting a cubic solve through it discards nearly everything the
+	previous solve computed. It still converges, because a guess is only a guess
+	--- but `warm' is then doing less work than it looks.
+
+\end{description}
+
+\subsection{The transfer object}
+
+\texttt{FieldTransfer} is constructed on a source mesh and transfers one grid
+function at a time onto a target, taking a fallback coefficient to evaluate at
+any node the source mesh does not cover, and returning the number of misses.
+
+It is batched by design and is deliberately not a coefficient: the underlying
+point search amortises a hash and an exchange over the whole query, so asking for
+one point at a time pays all of that per point. Setup is once per source mesh and
+is the expensive part --- keep one object and move the potential and both flux
+components through it.
+
+Two diagnostics are worth reading rather than ignoring. The \emph{miss count},
+because a restart that silently found no data over most of the domain has quietly
+become a cold start, and the iteration count will not obviously say so. And the
+\emph{worst distance}, which is subtler: large values mean the two meshes
+disagree about where the domain is, which a miss count of zero will not tell you.
+On the curved path there genuinely are uncovered nodes, because the computational
+domain \emph{grows} as it refines.
+
+\subsection{The trap that makes a good guess fail}
+
+\begin{quote}
+	\textbf{A convergence target scaled to the initial residual makes a good
+	initial guess fail, and the better the guess the more certain the failure.}
+\end{quote}
+
+The usual Newton stopping rule is a tolerance relative to the residual at the
+iterate the solver was handed. Warm-start from a converged answer and that
+residual is already small, so the target shrinks with it --- and past a point it
+falls below the round-off floor, where nothing can meet it. Measured on a
+benchmark restarted from its own exact answer, the residual reached the floor in
+two iterations and was then reported as a failure at the thirtieth.
+
+{\meq} therefore takes its reference from the \emph{cold} iterate --- the
+Dirichlet datum alone, where the solve would have started with no guess --- and
+sets a pure absolute target from it. The relative tolerance keeps exactly the
+meaning it always had, a cold solve is bit-identical, and only a warm one
+changes: from failing to converging in a step or two. It costs one extra residual
+evaluation, and only when a guess was set.
+
+This is the failure mode that matters most for how {\meq} will be used, which is
+why it is described at length rather than listed.
+
+\subsection{What a guess does and does not seed}
+
+A guess arrives as a coefficient, which cannot be differentiated, so the
+potential and the trace are seeded and \emph{the flux block is left at zero}. On
+the default nonlinear path the flux is an unknown, so the seeded state is
+inconsistent in exactly the row that couples them, and the initial residual goes
+\emph{up} rather than down. The guess still works --- that row is linear in the
+flux, so one Newton step recovers the flux belonging to the guessed potential ---
+and the measured benefit is fewer iterations and an unmoved answer, which is what
+a warm start must deliver. But do not read the initial residual as evidence that
+a guess took.
+
+\section{Flux surfaces}
+
+Almost everything downstream of an equilibrium wants the \emph{inverse} of what
+the solver computes: not $\psi$ at a position, but the surfaces themselves,
+indexed by flux label. {\meq} extracts them in three layers, each usable on its
+own.
+
+\subsection{Why this is cheap here}
+
+Every step is more accurate than it would otherwise be for one reason, and it is
+\chref{ch:intro}'s first commitment: $\gradbar\psi = rq$ with $q$ solved for.
+
+A critical point is where $q$ vanishes --- a residual converging at the
+potential's own order, rather than a differentiated potential converging an order
+down. The tangent to a contour is a rotation of $q$, available at every point the
+tracer has visited at no cost, since it evaluated $q$ for the predictor anyway.
+The weight in every flux-surface average is $1/(r|q|)$, pointwise. And the fit of
+\S\ref{sec:disc} needs the gradient of the normalised flux, which is the same
+field once again.
+
+The contrast is sharp. A continuous Galerkin code at lowest order confines the
+magnetic axis and the X-point to mesh vertices, because that is where a discrete
+gradient can be said to vanish, and CEDRES++ records this as an open problem
+\cite{Heumann2015}. {\meq} resolves both inside an element, by root finding in
+the element's own polynomial.
+
+\subsection{Critical points}
+
+The finder locates the magnetic axis and any saddle by Newton inside one element
+at a time. Classification is free and needs no second derivative of $\psi$:
+differentiating $rq = \gradbar\psi$ gives a Hessian whose first term vanishes
+identically wherever $q$ does, so the Hessian there is $r$ times the Jacobian of
+$q$ --- and $r > 0$ throughout an axisymmetric domain, so the signs that decide
+maximum, minimum or saddle read straight off that Jacobian.
+
+That Jacobian is taken by central differences, and it looks like a shortcut and
+is not one. The located root is where $q_h$ vanishes, which is a property of
+$q_h$ alone; the Jacobian steers the iteration and appears nowhere in its fixed
+point. A wrong Jacobian costs Newton steps and buys no error --- the same
+observation \chref{ch:intro} makes about the Grad--Shafranov Newton, seen from
+the other side.
+
+Three warnings.
+
+\begin{quote}
+	\textbf{{\meq}'s $\psi$ is not sign-normalised across sources, so the axis is
+	not always a maximum.} With a single-signed negative source --- which is what
+	the standard analytic benchmarks have --- $\psi$ is a subsolution, its
+	maximum is on the boundary, and the axis is an interior \emph{minimum}. The
+	finder therefore seeds from both nodal extremes and refuses rather than
+	guessing if both yield a genuine interior extremum.
+\end{quote}
+
+\begin{quote}
+	\textbf{This is not the solver's own axis flux, and the two must not be
+	reconciled.} The solver's $\psiax$ is the largest \emph{nodal} value of the
+	discrete potential, chosen deliberately so that the bordered Newton of
+	\S\ref{sec:normalised} has a constraint it can differentiate. The finder's is \emph{the place
+	where the flux vanishes}. They differ in position at first order in the mesh
+	size and in value at second, and \emph{both orders are independent of the
+	polynomial degree} --- so on a refined high-order mesh the two readings
+	separate rather than converge. Neither is a defective version of the other.
+	Use the solver's for the normalisation and the finder's for the geometry.
+\end{quote}
+
+\begin{quote}
+	\textbf{The topological audit is a certification and never an exclusion.} The
+	sum of the indices of the located points can be compared against the domain's
+	Euler characteristic, and agreement is real evidence; disagreement is real
+	evidence too. But a degree of zero does not imply that nothing was missed ---
+	spurious critical points appear in \emph{pairs} whose indices cancel, and the
+	complementary check against a persistence threshold is not implemented. Nor
+	is the sweep exhaustive: it is seeded Newton, so do not read its result as
+	`these are all of them'.
+\end{quote}
+
+\subsection{The tracer}
+
+A surface is traced by prediction along the tangent and correction back onto the
+level set --- the standard predictor--corrector walk \cite{AllgowerGeorg2003},
+with three things chosen for this problem.
+
+\emph{The predictor is first order and that is not a defect.} The corrector is a
+root find, so every accepted point sits on the discrete level set to tolerance
+whatever the predictor did; there is nothing for a higher-order predictor to buy
+in accuracy. What it would buy is step length. And what the corrector buys is
+that error off the contour does not accumulate along it.
+
+\emph{The step controller equidistributes turning, not effort.} Continuation
+software keys its step length on how hard the corrector worked, which is right
+when the object is to get to the end of a path. Here the object is a well-shaped
+\emph{curve}, so the step is chosen to equidistribute interpolation error, which
+means turning through a fixed angle per step.
+
+\emph{The interpolant between points is a cubic Hermite whose tangents come from
+$q$}, which is fourth order in the step where a chord is second. The chordal
+version is kept as a live control.
+
+The resulting error has three independent parts and {\meq} reports them as three
+numbers, because conflating them is how this problem gets done badly: the
+\emph{field} error, from the level set of $\psi_h$ differing from that of $\psi$;
+the \emph{point location} error, which is the corrector's own and does not
+accumulate; and the \emph{representation} error of the interpolant between
+points, which is decoupled from the mesh and the degree entirely.
+
+\begin{quote}
+	\textbf{Root the post-processed potential, which is the default.} Pairing the
+	tracer with $\psi^{\star}$ rather than $\psi_h$ preserves the interpolant's
+	fourth order, where the raw pairing loses it. The reason is not the obvious
+	one: the local post-processing is driven by the \emph{reconstructed total
+	flux} \cite{Stenberg1991}, so the gradient of $\psi^{\star}$ and $rq^{\star}$
+	are not the same object --- they agree one order better than $\gradbar\psi_h$
+	and $rq_h$ do, and it is that agreement the cubic Hermite needs, because the
+	tangent it is given is not the tangent of the curve it is interpolating. The
+	tracer refuses a solver that has not been post-processed, because the
+	accessor would otherwise hand it an empty field without complaining.
+\end{quote}
+
+Some further behaviour a consumer should know about. A trace that leaves the
+mesh returns a status saying so, and \emph{returns that status rather than a
+shorter curve} --- the earlier code in this tree printed a message and returned a
+partial arc labelled as a closed contour, and a flux-surface average over such an
+arc is wrong by an amount nothing reports. A corrector that stalls is being
+honest rather than failing: the level set of a discontinuous field is a union of
+per-element arcs offset by the jump at each face, so a point landing within that
+jump of a face may be on neither, and no point can be closer to `the' level set
+than the field's own ambiguity there. The extraction is \emph{not} exhaustive ---
+a disjoint island at the same level is not found, not reported and not looked
+for. And it is \emph{not} X-point aware: the level set through a saddle is not a
+curve and has no tangent there.
+
+On the curved path the outermost closed surface \emph{is} the plasma boundary,
+which lies in the band outside the mesh --- so the band is the interesting part
+rather than a corner case, and it is where the averages are most wanted and least
+forgiving. The tracer will continue into it, by either of two constructions: a
+Taylor step in the flux, which is second order whatever the degree; or the
+transfer technique's own path lifting, which is in principle better than the
+potential's own order and so does not limit the contour at all. Both are kept, the
+weaker one as the control --- if the control ever converges as fast as the answer,
+the comparison is empty and the measurement is worthless. Refusing to leave the
+mesh at all is the default.
+
+\subsection{The angle parametrisation, and a trap made into a measurement}
+\label{sec:angleparam}
+
+The third layer re-expresses a traced contour as a radius against poloidal angle
+about the axis. That gives a quadrature rule, and the rule needs the derivative
+of the radius with respect to the angle.
+
+\begin{quote}
+	\textbf{That derivative is available pointwise from $q$, and differencing it
+	instead costs an order.} Writing $x(\theta) = a + \rho(\theta)u(\theta)$ with
+	$u$ the unit ray and $t$ the unit tangent, the level-set condition gives
+	$\rho' = \rho\,(u\cdot t)/(u'\cdot t)$ directly, with nothing differenced and
+	nothing differentiated.
+\end{quote}
+
+The class computes the wrong answer as well as the right one, deliberately: it
+reports the length from the pointwise metric, the length from a second-order
+differenced metric, and the naive chordal length. The second of those is the trap
+--- the same spectrally accurate quadrature rule fed a second-order Jacobian,
+with nothing in its own output to say so --- and it is a first-class member
+rather than test scaffolding for exactly that reason.
+
+Star-shapedness about the axis is a \emph{hypothesis}, not an assumption. It is
+reported --- as the minimum transversality of ray against tangent, which is the
+denominator above --- and it is checked a second, independent way, against the
+traced curve's own polar angle, so that the check does not depend on the fit
+having succeeded.
+
+\section{Flux-surface averages}
+
+This is what a transport code actually reads.
+
+\subsection{The convention is part of the definition}
+\begin{equation}
+	V'(\psi) = \oint \frac{2\pi R\,\mathrm{d}l}{|\gradbar\psi|},
+	\qquad
+	\langle X \rangle_\psi = \frac{1}{V'}
+		\oint \frac{2\pi R\, X\,\mathrm{d}l}{|\gradbar\psi|}.
+	\label{eq:fsa}
+\end{equation}
+
+\begin{quote}
+	\textbf{The $2\pi R$ is in.} A per-unit-length $V'$ differs by exactly that
+	factor, so anything reading a $V'$ out of {\meq} is reading the volume
+	derivative $\mathrm{d}V/\mathrm{d}\psi$. The identity of
+	\S\ref{sec:identity}, which is this facility's acceptance criterion, is
+	stated for this convention and not for the other.
+\end{quote}
+
+A second convention is worth stating because it prevents a very expensive
+confusion. \emph{The safety factor is called \texttt{safetyFactor} and is never
+called \texttt{q}.} In {\meq}, $q$ is the flux, a solved unknown. The safety
+factor is also universally written $q$. A reader who meets \texttt{q} anywhere in
+this library is entitled to assume the flux, and one silent conflation would be
+very hard to find afterwards.
+
+\subsection{One facility, not a list of quantities}
+
+The primitive is: given a surface, take a callable integrand in position, flux
+label and flux, and return its average and $V'$. Everything named --- the inverse
+square radius, the squared gradient over squared radius, the arc length, the
+safety factor --- is a one-line wrapper on it.
+
+That shape is a response to the consumer rather than a preference. The list of
+geometry slots a coupled transport code wants is negotiated with the physics case
+rather than fixed, so a list that is still moving must not be baked in as a list
+of functions. Adding or removing one is a line, the convergence machinery is
+written once, and --- most importantly --- the derivative of
+\S\ref{sec:jacobian} is taken of the facility rather than of eight separate
+expressions.
+
+\subsection{The order is the flux's, not the potential's}
+
+\begin{quote}
+	This was the surprise of the stage that built it, and it is worth stating
+	before anybody plans around the opposite.
+\end{quote}
+
+The tracer roots $\psi^{\star}$, which converges a full order faster than
+$\psi_h$, so the natural expectation is that the averages inherit the better
+order. \emph{They do not.} The level set improves and the \emph{weight} does not:
+the weight divides by $|\gradbar\psi| = r|q|$, and the enriched flux converges at
+the same order as the raw one. The local post-processing buys its extra order in
+the \emph{potential}, and there is no better flux to be had; an average built on
+both inherits the worse.
+
+So every quantity here converges at the flux's order with either pairing, and
+what $\psi^{\star}$ buys is a \emph{constant} --- a factor of a few. A constant
+is not an order, and the two must not be confused. This is the same shape as the
+band continuation of the magnetic field in \chref{ch:using}: a quantity limited
+by the one factor with no solved variable behind it.
+
+\subsection{The metric trap does not go away because a quantity is an average}
+
+An average is a \emph{ratio} of two integrals over the same metric, so a bad
+metric looks as though it ought to cancel. It cancels a constant and nothing in
+the order: with the metric differenced rather than taken pointwise, the averages
+revert to second order in the node count exactly as an arc length does, and the
+two columns separate by orders once the node count is large. The ratio buys a
+smaller constant and no rate.
+
+The differenced control is therefore a first-class member of the result. It is
+filled only by the builder whose parametrisation the trap lives in, and asking
+for it when it is absent \emph{throws} rather than quietly returning the
+pointwise answer --- which would make the control agree with the answer for the
+worst possible reason.
+
+\subsection{Two extractions, and why both are kept}
+
+There are two builders, and they share the field and the level and nothing else.
+One lays out nodes equispaced in poloidal angle, each found by a
+one-dimensional ray Newton, with the pointwise metric above and the periodic
+trapezoidal rule \cite{TrefethenWeideman2014} --- which on a smooth periodic
+integrand converges faster than any algebraic order. The other puts
+Gauss--Legendre nodes on the traced curve's own cubic segments, wherever the step
+controller happened to place them, with the interpolant's own metric, and assumes
+no star-shapedness at all.
+
+\emph{They agree or one of them is wrong}, and agreement is worth more than
+either being plausible on its own. A missing factor of $2\pi R$, a metric taken
+about the wrong point or a gradient on the wrong side of the division would each
+break it, and no single-route table could see any of them.
+
+Two honest qualifications. The two agree only to about their own error and cannot
+do better, since the level set of a discontinuous field is a union of arcs and
+two routes placing nodes differently sample different arcs --- so the property to
+assert is the \emph{rate} at which the gap closes, not that the gap is small. And
+a third leg exists in principle --- a quadrature rule built on the level set with
+no curve extracted at all --- and is \emph{not} built. Read the agreement as two
+legs of three.
+
+There is also a free check that is \emph{not} a third extraction, and it is the
+first appearance in this chapter of the gauge argument that dominates
+\S\ref{sec:disc}. The angle builder lays its nodes out about a ray \emph{origin},
+and the integral cannot depend on it: a reparametrisation of the same curve
+integrates to the same number. Fitting the same contour about a deliberately
+displaced origin and getting the same $V'$ is a real check on the metric, and it
+costs one more fit.
+
+\subsection{The reference-free acceptance}
+\label{sec:identity}
+
+There are no closed-form Solov'ev flux-surface averages. $\psi$ is elementary,
+but $V'$ and the averages are integrals over a \emph{contour} of it, and those
+contours have no elementary arc length. What a test fixture can supply is a
+converged \emph{reference value}, and that distinction should be made wherever
+the number is quoted.
+
+So the sharpest check is one needing no reference at all. Taking the averaged
+divergence identity with the vector $\gradbar\psi/R^{2}$ and using
+$\dstar\psi = -F$,
+\begin{equation}
+	\frac{1}{V'} \frac{\mathrm{d}}{\mathrm{d}\psi}
+		\left( V' \left\langle \frac{|\gradbar\psi|^{2}}{R^{2}} \right\rangle \right)
+	= - \left\langle \frac{F}{R^{2}} \right\rangle .
+	\label{eq:averaged-gs}
+\end{equation}
+Three averages checking each other with nothing but the equation.
+
+Two things about \emph{measuring} with it, both of which caught a real problem.
+
+\begin{quote}
+	\textbf{The flux derivative must be Richardson-extrapolated.} A plain central
+	difference carries its own second-order truncation, so the comparison is then
+	floored by the \emph{instrument} rather than by the identity. Measured on a
+	discrete field over a sixteenfold refinement, the plain column \emph{stops
+	moving at all} while the extrapolated one keeps falling. A column that does
+	not converge under mesh refinement is measuring the instrument, and an
+	identity checked with that instrument would pass with a real defect
+	underneath it.
+\end{quote}
+
+\begin{quote}
+	\textbf{The step is a real choice and it is not monotone in either
+	direction.} Too large and the extrapolation's own truncation dominates; too
+	small and the difference of two nearly equal integrals divides the surfaces'
+	own face-jump noise by the step and amplifies it. Measured, halving the step
+	from near the optimum made the residual \emph{worse}. There is an optimum;
+	find it on your own problem rather than assuming smaller is better.
+\end{quote}
+
+The right-hand side of \eqref{eq:averaged-gs} must be written with the $F$ the
+solver is actually fed, and never re-expanded in terms of $p'$ and $gg'$: the
+expanded form is source-specific and is re-derived by hand, so it is not
+independent of the hand that derived it.
+
+\subsection{Surfaces that cross the band}
+
+Every node carries a flag saying whether it was reached by extension, and the
+result carries the aggregate. \emph{Drop those surfaces before computing an error
+norm or differencing two runs}: a surface with any band node is limited by the
+extension's order rather than by the discretisation, and quoting one rate over
+both populations hides precisely what the band flags exist to measure.
+
+The contour builder marks a whole \emph{segment} rather than a node,
+deliberately, because its nodes lie strictly between two accepted points and
+cannot say for themselves. That over-reports by at most one segment at each end
+of a band excursion and never under-reports --- and under-reporting is the
+failure that matters, since it is band data presented as solved data.
+
+\subsection{What the averages are not}
+
+Not valid on an open surface: every rule here is periodic or closed. Not X-point
+aware, for the reason \chref{ch:intro} gives. The safety factor \emph{carries no
+evidence of its own} --- it is an algebraic combination of two quantities that
+are measured, times a $g(\psi)$ the caller supplies, so it inherits their rates
+and nothing more; what is worth pinning about it is its algebra and its constant,
+which are exactly as easy to get wrong as anywhere and which no rate table would
+see. And the arc length is \emph{not} an independent measurement of the metric,
+since every weight already contains the arc-length element, so it recovers it
+algebraically; what it checks is that the weights are built the way
+\eqref{eq:fsa} says.
+
+\section{The surfaces as a map from a disc}
+\label{sec:disc}
+
+The second deliverable is $R$ and $z$ as smooth functions of a flux label and an
+in-surface angle: a map from a disc whose centre is the magnetic axis and whose
+edge is the outermost surface, differentiable with respect to the label. That is
+a fit over all the surfaces at once, and it is what a code needing the geometry as
+a \emph{function} reads.
+
+\subsection{The radial coordinate is the square root of the normalised flux}
+
+\begin{quote}
+	\textbf{Getting this wrong is silent.}
+\end{quote}
+
+$\psi$ has a \emph{quadratic} extremum at the magnetic axis --- a smooth function
+with a non-degenerate critical point --- so the normalised flux behaves like the
+square of the distance from the axis. The geometry is smooth in the distance,
+therefore in the square root of the normalised flux, and it carries a square-root
+branch point in the normalised flux itself.
+
+Parametrise by the normalised flux directly and \emph{every} basis converges
+algebraically against that branch point, worst near the axis, with nothing in a
+convergence table to say why. The rate simply comes out below the design order
+and looks like a discretisation problem. It is the same species of defect as a
+wrong Jacobian: the answer converges, to the wrong rate, for a reason no
+assertion is looking at.
+
+The conversions between the two, and the chain factor between derivatives with
+respect to each, are named functions rather than something a call site writes
+out. The factor is one over twice the disc radius --- neither one nor twice the
+radius, and both of those mistakes produce a quantity with the right units, the
+right sign and the right qualitative shape.
+
+That factor is unbounded at the axis, \emph{and that is the coordinate rather
+than a defect}. Even for a representation perfectly smooth in Cartesian
+coordinates, the derivative at fixed angle diverges at the axis whenever there is
+any content in the first angular harmonic --- and those modes are the rigid shift
+of a surface, so shifting the axis sideways at that rate as the surfaces shrink
+onto a point is exactly what a Shafranov shift does. A consumer wanting something
+finite there wants the derivative in the disc radius instead. Its growth as the
+innermost surface approaches the axis is a conditioning number to read, not a
+defect to fix.
+
+\subsection{Why Zernike}
+
+The Zernike polynomials on the unit disc pair a radial polynomial with an angular
+harmonic, admissible exactly when the radial degree is at least the harmonic
+order and the two differ by an even number. \emph{The index constraint is the
+entire point of choosing the basis.}
+
+A naive tensor product --- any polynomial in the radius times any Fourier mode in
+the angle --- admits terms such as the square of the radius times the cosine of
+the angle, which in Cartesian coordinates is $x\sqrt{x^{2}+y^{2}}$, whose second
+derivative has no limit at the origin: it reads a different number down every
+ray. Such a basis makes the centre of the disc a coordinate singularity that
+every consumer has to special-case, and the special case is where the bugs live.
+
+The constraint excludes exactly those terms, and what survives is the statement
+worth having:
+
+\begin{quote}
+	\textbf{Every admissible Zernike mode is a bivariate polynomial in $(x,y)$.}
+	So a Zernike expansion is a polynomial in Cartesian coordinates, the magnetic
+	axis is an ordinary interior point of it, and derivatives there are whatever
+	the polynomial says they are. No limit to take, no ray to choose, no branch
+	--- at precisely the place where the surfaces shrink to a point, the weight
+	in \eqref{eq:fsa} diverges, and the in-surface angle is undefined.
+\end{quote}
+
+The regularity condition this expresses is Lewis and Bellan's
+\cite{LewisBellan1990}; the Fourier--Zernike basis satisfies it inherently, which
+is the whole argument for it, and it is a better argument than that other codes
+use it.
+
+A consequence comes free and exactly: every mode with a non-zero harmonic carries
+a positive power of the radius, so all of them vanish at the centre and what is
+left there is one number with no angle in it. A Zernike fit therefore puts every
+surface's collapse point at the same place \emph{by construction}, whatever the
+coefficients are and however badly the fit was conditioned. What is not free is
+whether that point is the magnetic axis: a sample set has a hole in the middle,
+since nobody traces the surface at zero radius, so the fitted axis is an
+extrapolation into that hole and is measured against the critical-point finder
+rather than assumed.
+
+\subsection{The angle is a label, and the obvious choice is the wrong one}
+
+\begin{quote}
+	\textbf{The geometric poloidal angle is inadmissible, and everything else in
+	this section is downstream of that.}
+\end{quote}
+
+Labelling points on each surface by their geometric angle about the axis is the
+obvious choice: it is what the angle parametrisation of
+\S\ref{sec:angleparam} produces, it is
+consistent across surfaces because the axis is one point, and it needs no extra
+information. It is also, for any surface that is not a \emph{circle}, a
+parametrisation in which the disc map is not smooth at the axis --- so no basis
+that is smooth there can converge against it.
+
+The argument is exact and takes one line. A function smooth at the origin has an
+expansion whose coefficient of the first power of the radius carries exactly
+\emph{one} angular harmonic. Take nested similar ellipses labelled by geometric
+angle, and that coefficient carries the first, third, fifth and every subsequent
+odd harmonic for ever --- every one of them beyond the first being a mode the
+index constraint excludes, precisely because it is not smooth there. The
+parametrisation puts content exactly where the basis refuses to look. Measured on
+the ellipses themselves, where the answer is known exactly, the family is a
+degree-one map under the ellipse's own parameter and is reproduced to round-off
+at degree two, while the \emph{identical points} relabelled by geometric angle
+are wrong at degree two and still wrong at degree twenty. Same points, same
+basis, same solver; only the label differs.
+
+\emph{The repair needs no field.} Near the axis every equilibrium's surfaces are
+ellipses, since $\psi$ has a non-degenerate critical point there and the level
+sets of a quadratic form are ellipses. Two numbers describe such an ellipse up to
+scale --- how it is turned and how flat it is --- and both are recoverable from
+the innermost traced surface alone. Relabelling by that ellipse turns geometric
+angles into a label under which the leading term is smooth, and it is worth
+orders of magnitude in the worst fit error at no cost in conditioning. It is an
+\emph{exact reparametrisation} rather than an approximation: the map from
+geometric angle to label is a fixed bijection of the circle, so a caller asking
+where a surface is at a given geometric angle converts and gets the right point.
+What is approximate is only the claim that the label makes the map smooth, and
+that claim is exact at leading order and no better.
+
+And that is a structural limit rather than a tuning problem. A relabelling that
+does not depend on the radius has exactly one function's worth of freedom, so it
+can fix exactly \emph{one order}: it makes the leading coefficient a single
+harmonic and leaves everything above it carrying whatever the shaping puts there.
+Pull the innermost traced surface in towards the axis and an algebraic tail
+appears that no degree removes.
+
+\subsection{The gauge-free fit}
+
+Everything above pins the angle as an \emph{input}: each sample carries an angle,
+so the fit is asked to put a particular point at a particular label. A code that
+\emph{solves} for its coefficients is free to slide the angle to whatever its
+basis can represent, and the DESC authors report exactly that of their own solver
+--- it enforces no poloidal angle constraint and ends up finding a good
+representation over the course of the optimisation \cite{PaniciDESC2023}. A
+post-hoc fit cannot do that.
+
+\emph{So ask for less.} Require each disc node only to \emph{land on the right
+surface}: minimise, over the coefficients, the squared mismatch between the
+normalised flux at the fitted position and the normalised flux the node belongs
+on. Nothing says where \emph{along} its surface a node must sit, so the angle is
+free and the truncated basis may choose it. The input to this is therefore a node
+that \emph{carries no position} --- that is the entire difference from a sample.
+
+It needs no force balance and no second physics solver, because {\meq} already
+has $\psi$; and the Jacobian it needs is the gradient of the normalised flux,
+which is the solved flux once more. Measured on nested ellipses, where the answer
+is known exactly, it reaches round-off at low degree where the prescribed-angle
+fit never converges at all --- and that is the theoretically right answer rather
+than a lucky one, since for similar nested ellipses the family genuinely is a
+degree-one map under the correct angle. On a discrete field it removes the
+algebraic tail and the coefficient envelope resumes geometric decay.
+
+Three things about it a consumer should know.
+
+\emph{The residual is scaled into metres, and that is not cosmetic.} The
+normalised flux is dimensionless and its gradient varies by orders across the
+disc, so a least-squares problem in the raw flux residual weights outer surfaces
+against inner ones by whatever that gradient happens to be. Dividing each row by
+it makes the residual the normal distance from the node to its surface --- which
+is the quantity a reader cares about, and is itself gauge invariant.
+
+\emph{The warm start is not an optimisation.} The surface residual is minimised
+by \emph{any} map onto the right surfaces, including folded ones and ones that
+traverse a surface twice, so the basin matters. The prescribed-angle fit is what
+puts the iterate in the right one; starting from zero coefficients is not
+supported and would not be meaningful.
+
+\emph{The freedom must be constrained, and the expectation about how was wrong.}
+A tangential slide is invisible to the linearised system --- moving a node along
+its own surface changes no residual --- so the Gauss--Newton matrix was expected
+to be rank deficient by about half its columns. Measured, it is not, and the
+answer depends on the field: on nested ellipses the exactly-null directions are a
+handful, and on a realistic equilibrium there are \emph{none at all}. What both
+have instead is a long soft tail with no gap in it. The reason is that a
+tangential slide is exactly null only when the displaced map is still \emph{in}
+the truncated space, and generally it is not --- so the gauge is not a subspace
+to be projected out; it is a direction in which the problem is merely very soft,
+and the floor deciding which directions to move has to be chosen rather than read
+off a gap. And the soft tail is enough on its own: removing the gauge on a field
+with no exact null space still leaves the map folded and the fit orders worse.
+The default prefers the smallest step among those satisfying the surface
+constraint, which is a spectral condensation preference \cite{HirshmanBreslau1998}
+arrived at for free and with no weights to choose.
+
+\begin{quote}
+	\textbf{A fit with a beautiful residual and a folded map is the quiet wrong
+	answer this machinery is most exposed to.} Nodes may bunch, cross and turn
+	the map over while every residual stays perfect. The safeguard is the sign of
+	the map's Jacobian, sampled over the disc --- and which sign is correct is not
+	fixed and must not be assumed, since it depends on which way the angle runs.
+\end{quote}
+
+\subsection{A free angle changes what can be asserted}
+
+Any check comparing the fit's position \emph{at a given angle} against a surface
+traced at that angle is measuring precisely the freedom being granted. So a
+gauge-free fit is accepted on \emph{gauge-invariant} properties instead: the
+distance from each node to its surface, the fitted perimeter against the exact
+one, and the sign of the map's Jacobian.
+
+\begin{quote}
+	\textbf{This costs the consumer nothing, and that is the point.} A coupled
+	transport code reads flux-surface \emph{averages}, and an average does not
+	know how its surface was parametrised --- \eqref{eq:fsa} is an integral over
+	a curve. The deliverable was gauge invariant all along, which is what makes
+	it legitimate to let the fit choose the angle.
+\end{quote}
+
+\subsection{What the representation is not}
+
+Not a fit of open surfaces: every mode is periodic in the angle and regular at
+the centre. Not an equilibrium solve --- nothing here enforces force balance,
+$\psi$ is an input, and the only thing solved for is where the disc coordinates
+put their points. It does not constrain the axis, because a node at zero radius
+would ask for the flux to vanish, which is true there and would pin it for free
+--- except that the gradient vanishes there too, so the row scaling divides by
+zero and the linearisation carries no information about where to move. And
+\emph{it does not know where its samples came from}, so it cannot flag a surface
+as band-limited: mixing surfaces that crossed the band with surfaces that did not
+fits two different accuracies into one expansion, which is a decision to be taken
+deliberately rather than by default.
+
+\section{Coupling: the geometry Jacobian}
+\label{sec:jacobian}
+
+A coupled transport code solves its own nonlinear system, in which {\meq}'s
+geometry appears as coefficients. If it uses Newton --- and it should, for all
+the reasons \chref{ch:intro} gives --- it needs the derivative of every geometry
+slot with respect to every degree of freedom of $\psi$. This section is the
+warning that goes with that requirement, and it is the most important thing in
+this chapter.
+
+\subsection{The term that is easy to forget}
+
+A geometry slot is a flux-surface average, and a flux-surface average is an
+integral over a surface \emph{whose location is itself determined by $\psi$}.
+So
+\begin{equation}
+	\frac{\partial}{\partial \psi_m} \langle f \rangle
+		= \underbrace{\left\langle \frac{\partial f}{\partial \psi_m}
+			\right\rangle}_{\text{the integrand moves}}
+		\; + \; \underbrace{\bigl(\text{terms from the surface moving}
+			\bigr)}_{\text{easy to forget}} .
+	\label{eq:jacobian}
+\end{equation}
+
+\begin{quote}
+	\textbf{Both terms are needed.} Dropping the second gives a Jacobian that is
+	wrong but \emph{plausible} --- right sign, right order of magnitude, right
+	qualitative behaviour.
+\end{quote}
+
+\subsection{Why the failure is invisible}
+
+Here is the part that makes this worth a section rather than a footnote.
+
+\begin{quote}
+	\textbf{An error in a forward Jacobian does not produce a wrong answer, only
+	slow Newton convergence.} A consumer that never assembles its Jacobian ---
+	which is to say, a matrix-free or Jacobian-free code, which most modern
+	transport solvers are --- sees a missing block as a solver taking more
+	iterations, and never as a bad number. Defects of exactly this kind have
+	survived passing regression suites for months in the codes {\meq} is designed
+	to couple to.
+\end{quote}
+
+The corollary is a rule rather than a suggestion: \emph{the geometry derivative
+must be finite-difference tested directly against the geometry itself, as a unit
+test.} Convergence of the coupled solve is not evidence that it is right. This
+is the same discipline {\meq} applies to its own source terms, where the
+derivative with respect to $\psi$ is differenced against the source in the unit
+layer and the assembled Jacobian is differenced against the assembled residual in
+the convergence layer --- the right instinct, applied to the right quantity.
+
+An adjoint raises the stakes further. There a missing block does \emph{not} merely
+slow anything down: it produces a silently wrong gradient beside a perfectly good
+objective, and an optimiser will follow it.
+
+\subsection{What is supplied, and what is not}
+
+\begin{quote}
+	\textbf{{\meq} does not currently supply the geometry Jacobian.} What it
+	supplies is everything the derivative is taken \emph{of}, arranged so that
+	taking it is one piece of work rather than eight.
+\end{quote}
+
+That arrangement is deliberate and is worth recognising when the derivative is
+written. The averages are one facility rather than a list of named functions,
+precisely so that the derivative is taken of the facility. The chain factor
+between the two radial coordinates of \S\ref{sec:disc} is a named function rather
+than something written out at each call site, because it is the factor that gets
+dropped and because a factor lost in this derivative shows up as a coupled run
+converging to the wrong equilibrium rather than as anything failing. And the disc
+representation supplies both radial derivatives --- the one that diverges at the
+axis and the one that does not --- so that whichever the consumer needs is the
+one it gets.
+
+Two routes to \eqref{eq:jacobian} exist and neither is implemented. Differencing
+the whole extraction costs one surface extraction per degree of freedom of $\psi$,
+which is expensive but is straightforward and is testable against nothing but
+itself. A shape derivative --- differentiating the integral analytically, with the
+surface velocity obtained from the level-set condition --- has a closed form for
+both terms and is far cheaper, and it is the route to prefer if the cost of the
+first proves unacceptable. Whichever is taken, the finite-difference test above
+is what stands between it and a coupled run that is subtly and silently wrong.
+
+\subsection{Calling convention}
+
+One practical note about the shape of a coupling, learned the hard way on the
+other side. A geometry hook is often \emph{pointwise}: called once per physics
+node, per residual evaluation, handed the whole flux vector each time. For a
+flux-surface average that means locating the surface through the point and
+integrating on it, per node, per residual --- which is not affordable done
+naively. A consumer taking this route must cache per $\psi$: extract the surface
+geometry once when the flux changes, and serve individual points from that. If
+the pointwise signature is the wrong shape, and it may well be, that is worth
+raising rather than working around.
