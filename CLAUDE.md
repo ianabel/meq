@@ -1176,6 +1176,7 @@ control and changed twice on 2026-09-01. Asked properly —
 
 | document | lives on | |
 |---|---|---|
+| **`HDG-CONE-TILING-FROM-MEQ.md`** | **`gf-hdg-subdomains-dev`, untracked in `doc/`** | **FILED 2026-09-05, open.** `VertexConePath`'s cone costs the boundary sweep's tiling of `Γ` — 4.85e-10 to 1.01e-04, proved by a one-variable control. Carries the control, the diagnostics, and an explicit statement that MEQ has *not* worked out the mechanism |
 | `HDG-ELEMENT-LOCAL-PARALLELISM.md` | `gf-hdg-linearise-first` | **open** |
 | `HDG-BEM-COUPLING-FROM-MEQ.md` | `gf-hdg-linearise-first` | **open, and PARTLY DELIVERED** — it said MEQ would write the quadrature over `Γ` and come back with it; MEQ did, and `mfem::ExtensionBoundaryQuadrature` was merged into `gf-hdg-subdomains-dev` 2026-09-05 |
 | `HDG-NPC-GLOBALISATION-FROM-MEQ.md` | `gf-hdg-linearise-first` | **open**, and answered in place |
@@ -1183,8 +1184,12 @@ control and changed twice on 2026-09-01. Asked properly —
 | `HDG-LINEARISE-THEN-CONDENSE.md` | backup refs only | retired with the mode |
 | `DIRECT-SOLVER-SYMBOLIC-REUSE.md` | no branch at all | retired |
 
-All three open ones sit on **one** branch, so with the tree on `gf-hdg-dev` they
-are invisible and `doc/` looks nearly empty. An earlier version of this
+The three **older** open ones sit on `gf-hdg-linearise-first` alone, so with the
+tree on `gf-hdg-dev` they are invisible and `doc/` looks nearly empty. **The cone
+report is the exception**: it is on `gf-hdg-subdomains-dev`, which is where the
+extension machinery and the defect both live, and it is **untracked** — that tree
+is receive-only, so MEQ writes the file and never commits it. A `git status` there
+is how to see it, not `git cat-file`. An earlier version of this
 paragraph read that emptiness as three retirements, and said
 `HDG-DEFECTS-FROM-MEQ.md` had been retired in `2a50119ba1` — that commit deletes
 it on one line of history and the file is alive on two of the four branches MEQ
