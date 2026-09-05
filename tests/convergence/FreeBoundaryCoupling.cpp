@@ -67,7 +67,9 @@
 #include "meq/ExteriorDtN.hpp"
 #include "meq/GradShafranov.hpp"
 
+#include "analytic/ExteriorMatched.hpp"
 #include "analytic/Soloviev.hpp"
+#include "convergence/ConvergenceHarness.hpp"
 
 namespace
 {
@@ -1222,4 +1224,269 @@ BOOST_AUTO_TEST_CASE( theConeIsWhatCostsTheTiling )
 	            "property of MEQ's circle or of the routine -- either way the red "
 	            "gate beside this is measuring the wrong thing and the recorded "
 	            "1e-10 expectation never applied here" );
+}
+
+/*
+ * ===========================================================================
+ * FB-1a: A SOLVE ON THE HALF-DISC, WITH THE EXTERIOR DATUM KNOWN
+ * ===========================================================================
+ *
+ * FB-1 makes the exterior coefficients `a` unknowns closed by a bordered
+ * solve. THIS case is the half of it that needs no border: hand the solver the
+ * exact datum on Gamma and check it reproduces the manufactured solution at
+ * k+1. Everything FB-1 needs geometrically is exercised, and nothing that
+ * depends on the border is.
+ *
+ * WHY IT IS WORTH A STAGE OF ITS OWN. Section 7.5's closing paragraph records a
+ * DOMAIN CONSTRAINT that arrived late: the exterior expansion is only valid on a
+ * SEMICIRCLE CENTRED ON THE AXIS, so FB-1's Gamma must be one, so the domain
+ * reaches r = 0 and everything FB-A measured about the axis applies to it. Every
+ * other extension study in this tree -- ExtensionConvergence, and the P columns
+ * above -- deliberately uses a Soloviev surface away from the axis, because a
+ * projection needs no semicircle. Nothing that SOLVES can take that shortcut,
+ * and nothing had solved here yet.
+ *
+ * SO THIS IS ALSO SECTION 8'S SECOND RISK, MEASURED. "The corner where Gamma
+ * meets the axis. Two right-angle junctions, and CLAUDE.md records that corners
+ * are where the transfer-path analysis gives out ... the lifting's weight C = r
+ * VANISHES there, so the transferred datum degenerates to g( a( x ) ) -> 0 --
+ * probably benign, definitely not established." A rate here is what establishes
+ * it, and a rate short of k+1 is where it would show.
+ *
+ * THE DATUM IS NOT ZERO, WHICH IS THE POINT. ExtensionConvergence transfers a
+ * constant zero, so a transfer that silently did nothing would still converge
+ * there -- CLAUDE.md records that exact hazard for the driver and pins it with a
+ * zero-datum control. Here the datum is the exterior mode itself, varying along
+ * Gamma, so a transfer that dropped it converges to a different function.
+ *
+ * THE SOURCE IS COMPACTLY SUPPORTED STRICTLY INSIDE Gamma, by construction of
+ * tests/analytic/ExteriorMatched.hpp, so outside rho_0 the field IS the exterior
+ * expansion and the datum on Gamma is exactly the modes put in.
+ */
+namespace
+{
+	/// rho_0 = 1 for both fixture constructors, so Gamma at 1.5 encloses the
+	/// source with half a radius to spare and the box encloses Gamma.
+	double const halfDiscGamma = 1.5;
+	double const halfDiscBox = 1.7;
+
+	meq::analytic::ExteriorMatched const &halfDiscField()
+	{
+		static meq::analytic::ExteriorMatched const field =
+			meq::analytic::ExteriorMatched::multiMode();
+		return field;
+	}
+
+	/// Negative inside. The semicircle about the axis, which is what makes the
+	/// exterior expansion legal at all.
+	double halfDiscLevelSet( mfem::Vector const &x )
+	{
+		return std::hypot( x( 0 ), x( 1 ) ) - halfDiscGamma;
+	}
+}
+
+BOOST_AUTO_TEST_CASE( theSolverReachesTheExteriorDatumOnTheHalfDisc )
+{
+	std::printf( "\n  FB-1a: THE HALF-DISC, WITH THE EXTERIOR DATUM TRANSFERRED\n" );
+	std::printf( "    Gamma is the semicircle rho = %.2f about the axis; the source\n"
+	             "    vanishes outside rho_0 = 1, so the datum IS the exterior modes\n\n",
+	             halfDiscGamma );
+	std::printf( "    %-5s %5s %8s %14s %14s %8s %8s\n",
+	             "k", "n", "h", "L2 psi", "L2 q", "rate psi", "rate q" );
+
+	for ( int order = 1; order <= 3; ++order )
+	{
+		std::vector<double> psiErrors;
+		std::vector<double> fluxErrors;
+		std::vector<double> spacing;
+
+		for ( int n : { 12, 24, 48 } )
+		{
+			// The background reaches the axis EXACTLY: rMin is 0, as FB-A's box
+			// is, so the elements touching r = 0 are the ones whose flux mass
+			// ( r q, v ) degenerates.
+			mfem::Mesh background = mfem::Mesh::MakeCartesian2D(
+				n, 2*n, mfem::Element::TRIANGLE, false, halfDiscBox,
+				2.0*halfDiscBox );
+			background.Transform( []( mfem::Vector const &in, mfem::Vector &out )
+			{
+				out( 0 ) = in( 0 );
+				out( 1 ) = in( 1 ) - halfDiscBox;
+			} );
+			double const h = halfDiscBox/static_cast<double>( n );
+
+			mfem::Array<int> marker;
+			BOOST_TEST_REQUIRE( mfem::MarkLevelSetSubdomain(
+				background, halfDiscLevelSet, 0.0, marker, 1 ) > 0,
+				"the half-disc is empty at n = " << n );
+			for ( int e = 0; e < background.GetNE(); ++e )
+				background.SetAttribute( e, marker[ e ] ? 1 : 2 );
+			background.SetAttributes();
+
+			mfem::Array<int> domainAttr( 1 );
+			domainAttr[ 0 ] = 1;
+			// Held alive for the SubMesh's whole life: it keeps a pointer to its
+			// parent, and mfem::VertexConePath reads the parent's edges.
+			auto sub = std::make_unique<mfem::SubMesh>(
+				mfem::SubMesh::CreateFromDomain( background, domainAttr ) );
+
+			/*
+			 * TWO BOUNDARY ATTRIBUTES HERE, NOT ONE, AND THAT IS THE HALF-DISC.
+			 * The arc is generated by SubMesh and takes the new attribute; the
+			 * flat side is INHERITED from the background box's r = 0 edge and
+			 * keeps the attribute it had. So Gamma_h is the arc alone and the
+			 * axis is ordinary fitted boundary -- which is right, since the axis
+			 * is not an approximation of anything and needs no transfer.
+			 */
+			int const gammaH = sub->bdr_attributes.Max();
+			BOOST_TEST_REQUIRE( sub->bdr_attributes.Size() >= 2,
+				"D_h has only one boundary attribute at n = " << n
+				<< ", so the axis was not inherited and Gamma_h has swallowed it" );
+
+			mfem::Array<int> gammaHMarker( gammaH );
+			gammaHMarker = 0;
+			gammaHMarker[ gammaH - 1 ] = 1;
+
+			mfem::VertexConePath path( *sub, gammaH, halfDiscLevelSet, 6.0*h );
+
+			mfem::FunctionCoefficient source( []( mfem::Vector const &x )
+			{
+				return halfDiscField().f( x( 0 ), x( 1 ), 0.0 );
+			} );
+			// THE DATUM, and it varies along Gamma. Zero on the axis for free,
+			// because every admissible mode carries ( 1 - mu )( 1 + mu ).
+			mfem::FunctionCoefficient datum( []( mfem::Vector const &x )
+			{
+				return halfDiscField().psi( x( 0 ), x( 1 ) );
+			} );
+
+			meq::GradShafranovSolver solver( *sub, order );
+			solver.setSource( source );
+			// The AXIS only. setBoundaryData is projected against fittedMarker,
+			// and on the half-disc that is the flat side, where the fixture's psi
+			// is identically zero anyway -- so this is the honest statement of
+			// the condition there rather than a convenience.
+			solver.setBoundaryData( datum );
+			solver.setExtension( path, gammaHMarker );
+
+			/*
+			 * AND THE ARC, THROUGH P, WHICH IS WHAT THIS CASE IS FOR.
+			 *
+			 * The exterior expansion is exact outside rho_0 and the fixture knows
+			 * its own coefficients, so `a` is GIVEN here rather than solved. That
+			 * is the only thing separating this from FB-1: exteriorTraceColumns()
+			 * builds P, the fixture supplies a, and the datum on Gamma is P a.
+			 * FB-1 replaces "the fixture supplies a" with a border row.
+			 *
+			 * So a failure here is the GEOMETRY or the TRANSFER, never the
+			 * coupling -- which is the point of doing it in this order.
+			 */
+			meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 4 );
+			std::vector<double> const a =
+				halfDiscField().exteriorCoefficients( dtn );
+			BOOST_TEST_REQUIRE( static_cast<int>( a.size() ) == dtn.modeCount() );
+
+			// g on Gamma: the exterior expansion with the fixture's own
+			// coefficients. MEQ wraps it in a PathTraceCoefficient, so it is
+			// evaluated at the FOOT -- the same thing P projects, expressed as a
+			// function rather than as a vector.
+			solver.setExteriorDatum( [ &dtn, a ]( mfem::Vector const &x )
+			{
+				double total = 0.0;
+				for ( int m = 0; m < dtn.modeCount(); ++m )
+					total += a[ static_cast<std::size_t>( m ) ]
+					         *dtn.basis( meq::ExteriorDtN::firstMode() + m,
+					                     x( 0 ), x( 1 ) );
+				return total;
+			} );
+
+			solver.solve();
+
+
+			mfem::FunctionCoefficient exactPsi( []( mfem::Vector const &x )
+			{
+				return halfDiscField().psi( x( 0 ), x( 1 ) );
+			} );
+			mfem::VectorFunctionCoefficient exactFlux( 2,
+				[]( mfem::Vector const &x, mfem::Vector &v )
+			{
+				halfDiscField().flux( x( 0 ), x( 1 ), v( 0 ), v( 1 ) );
+			} );
+
+			psiErrors.push_back( solver.potential().ComputeL2Error( exactPsi ) );
+			fluxErrors.push_back( solver.flux().ComputeL2Error( exactFlux ) );
+			spacing.push_back( h );
+
+			std::size_t const i = psiErrors.size() - 1;
+			double const rPsi = i == 0 ? 0.0
+				: meq::tests::rate( psiErrors[ i - 1 ], psiErrors[ i ],
+				                    spacing[ i - 1 ]/spacing[ i ] );
+			double const rFlux = i == 0 ? 0.0
+				: meq::tests::rate( fluxErrors[ i - 1 ], fluxErrors[ i ],
+				                    spacing[ i - 1 ]/spacing[ i ] );
+			std::printf( "    %-5d %5d %8.4f %14.6e %14.6e %8.3f %8.3f\n",
+			             order, n, h, psiErrors[ i ], fluxErrors[ i ],
+			             rPsi, rFlux );
+			std::fflush( stdout );
+		}
+
+		double const overall = meq::tests::rate( psiErrors.front(), psiErrors.back(),
+		                                         spacing.front()/spacing.back() );
+		/*
+		 * TWO-TIER, as every unfitted study in this tree is: D_h is the union of
+		 * background elements inside Gamma and WHICH elements those are is not a
+		 * smooth function of h, so a single pair is not tight enough to assert
+		 * on. ExtensionConvergence's header gives the measurement.
+		 *
+		 * AND THE FLOOR IS ON psi RATHER THAN ON q DELIBERATELY. FB-A measured q
+		 * losing about half an order on a mesh reaching the axis while psi keeps
+		 * k+1, and that is the axis's weight rather than anything here; asserting
+		 * k+1 on q would be asserting FB-A's finding away.
+		 */
+		/*
+		 * RED, AND THE DIAGNOSIS SO FAR IS THAT IT IS NOT THE CORNER.
+		 *
+		 * Measured 2026-09-05: L2 psi is about 0.20 and DOES NOT CONVERGE -- it
+		 * grows slightly with refinement -- and it is identical at k = 1, 2 and 3
+		 * to six figures. An error flat in BOTH h and k is not a discretisation
+		 * error at all; the solve is converging to a different function, and the
+		 * corner where Gamma meets the axis would show as a degraded RATE rather
+		 * than as this.
+		 *
+		 * WHAT IS ESTABLISHED. The datum reaches the trace: setExteriorDatum()
+		 * fires, the sizes match, and | sum_m a_m P_m | is 1.65 against a
+		 * | psi_h | of 8.36. Gamma_h's trace dofs ARE essential --
+		 * dirichletMarker is 1 on every attribute and SetEssentialBC gets it --
+		 * so FormLinearSystem should eliminate them at that value. And yet the
+		 * errors are BYTE-IDENTICAL to a run with no exterior datum at all. The
+		 * datum is imposed on nothing.
+		 *
+		 * WHERE TO LOOK NEXT, IN ORDER. CLAUDE.md already names the first:
+		 * DarcyHybridization's EliminateTraceTrueDofsInRHS "was broken until
+		 * recently ... and no MFEM regression covers the combination; if a
+		 * converged answer ever looks wrong near Gamma, look there before looking
+		 * here". Then whether HDGExtensionIntegrator's lifting OVERRIDES the
+		 * eliminated trace value rather than adding to it, which would make a
+		 * non-zero g unreachable by construction and is a design question rather
+		 * than a bug.
+		 *
+		 * AND THE HEADER OF THIS FILE OVERSTATES ITS COVER.
+		 * theEssentialTraceConditionImposesTheDatum, which it cites as pinning
+		 * this, runs on a FITTED mesh with no extension -- so it pins the fitted
+		 * path and says nothing about Gamma_h. Nothing covers the combination,
+		 * which is why this was not known.
+		 *
+		 * Left failing deliberately. The assertion is the behaviour wanted and it
+		 * names what is missing; a green suite here would mean MEQ could impose
+		 * psi = 0 on a curved Gamma and nothing else, which is precisely what
+		 * FB-1 has to change.
+		 */
+		BOOST_TEST( overall > order + 1.0 - 0.30,
+		            "psi converges at " << overall << " on the half-disc at k = "
+		            << order << ", against k+1. The error is ~0.2, FLAT in h and "
+		            "identical at k = 1, 2, 3 -- so this is not a rate loss at the "
+		            "axis corner but a different problem being solved: the "
+		            "exterior datum on Gamma_h is imposed on nothing. See the "
+		            "comment above for what is established and where to look" );
+	}
 }

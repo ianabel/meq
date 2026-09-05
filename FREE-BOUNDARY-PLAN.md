@@ -1455,7 +1455,15 @@ conditioning as `h → 0`.** Under NPC there is no element-local nonlinear solve
 watch, so the diagnostic changes: watch the trace solve and the local
 factorisation rather than a local iteration count. Do it before FB-1.
 
-**The corner where `Γ` meets the axis.** Two right-angle junctions, and
+**~~The corner where `Γ` meets the axis.~~ — SETTLED 2026-09-05, AND IT IS
+BENIGN.** `theSolverReachesTheExteriorDatumOnTheHalfDisc` solves on the
+half-disc with the exterior datum given and reads **1.99 / 2.99 / 3.99** in `ψ`
+at `k = 1, 2, 3` — full `k+1` across the corner. `q` reads 1.94 / 2.67 / 3.93,
+and the `k = 2` shortfall is FB-A's half-order axis loss rather than the corner.
+The reasoning that made it a risk is kept below because it was sound and only the
+conclusion was unknown.
+
+Two right-angle junctions, and
 `CLAUDE.md` records that corners are where the transfer-path analysis gives out
 — which is why `ExtensionConvergence` takes `Γ` to be `ψ = −0.03` rather than the
 separatrix through the X-point. Here the corner is between the arc and a fitted

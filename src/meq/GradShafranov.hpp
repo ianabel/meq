@@ -1047,6 +1047,34 @@ namespace meq
 			std::vector<mfem::Vector>
 			exteriorTraceColumns( ExteriorDtN const &exterior ) const;
 
+			/// Impose a NON-ZERO datum on `Gamma_h`'s trace dofs, which is what
+			/// `psihat|_Gamma_h = P a` of FREE-BOUNDARY-PLAN.md section 4.3
+			/// means concretely.
+			///
+			/// **WITHOUT THIS THERE IS NO WAY TO PUT A DATUM ON `Gamma`, AND THE
+			/// PLAN ASSUMED THERE WAS.** `setBoundaryData()` is projected against
+			/// `fittedMarker` alone -- see `prepare()` -- because until free
+			/// boundary nothing referenced `Gamma_h`'s trace values, so they were
+			/// pinned to zero. `HDGExtensionIntegrator` supplies only the
+			/// SOLUTION-dependent half of the transferred datum, the path integral
+			/// of the flux, which is the whole of it exactly when `g` is
+			/// homogeneous. So a fixed-boundary solve on a curved `Gamma` could
+			/// only ever impose `psi = 0` there, and every extension study in this
+			/// tree happens to want that.
+			///
+			/// Hand it `sum_m a_m P_m`, built from exteriorTraceColumns(). The
+			/// vector is trace length and is ADDED into the trace, which is safe
+			/// because a column is zero off `Gamma_h` by construction -- so this
+			/// cannot disturb a fitted datum sitting on the same boundary, and on
+			/// the half-disc the axis is exactly such a boundary.
+			///
+			/// The imposed condition is then `g( a( x ) )` plus the flux lifting,
+			/// which is Cockburn-Solano's form with `g` no longer zero.
+			///
+			/// Passing an empty vector clears it. Throws std::invalid_argument on
+			/// a length that is neither.
+			void setExteriorDatum( mfem::PositionFunction g );
+
 			/// The rows of `T`: the transmission condition of
 			/// FREE-BOUNDARY-PLAN.md section 4.2, tested against each exterior
 			/// mode. The Neumann half of the coupling, and the other half of
@@ -1465,6 +1493,13 @@ namespace meq
 			/// The transferring paths, or null on the fitted path. Borrowed.
 			mfem::TransferPath *transferPath;
 			int extensionLineOrder;
+
+			/// `g` on Gamma, or empty. Wrapped in a PathTraceCoefficient and
+			/// added to the FLUX right hand side in prepare(), which is where a
+			/// non-homogeneous datum belongs; see the long note there.
+			mfem::PositionFunction exteriorDatumFunction;
+			std::unique_ptr<mfem::PathTraceCoefficient> exteriorDatumCoefficient;
+			mfem::LinearForm fluxRhs;
 
 			/// Face rule order for exteriorTransmissionRows(). SEPARATE from
 			/// extensionLineOrder, which is a rule ALONG a path and has to match

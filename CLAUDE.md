@@ -464,6 +464,44 @@ property wanted is `margin ≥ 0`; the strict inequality was a guess at how to s
 it and is false for every staircase. The control — a centre outside the disc,
 reading `−1` — is what keeps the `≥` from being vacuous.
 
+**FB-1a IS DONE AND IT SETTLES §8's CORNER RISK.**
+`theSolverReachesTheExteriorDatumOnTheHalfDisc` is the first thing in the tree
+that **solves** on a semicircle centred on the axis, with the exterior datum
+*given* rather than solved — FB-1 minus the border. Rates in `ψ`: **1.99, 2.99,
+3.99** at `k = 1, 2, 3`; in `q`: 1.94, 2.67, 3.93. So the corner where `Γ` meets
+the axis, where the lifting weight `C = r` vanishes and the plan called the
+behaviour *"probably benign, definitely not established"*, is **benign and now
+established**. `q` at `k = 2` sitting short is FB-A's half-order axis loss
+appearing in a real curved-boundary solve.
+
+**AND IT FOUND THAT MEQ COULD NOT IMPOSE A NON-ZERO DATUM ON `Γ` AT ALL.**
+`setBoundaryData()` is projected against `fittedMarker`; `HDGExtensionIntegrator`
+supplies only the *solution-dependent* half of the transferred datum, which is
+the whole of it exactly when `g` is homogeneous. Every extension study in this
+tree happens to want `ψ = 0` on `Γ`, so nothing had ever asked for more.
+
+**THE FIRST FIX WAS WRONG AND WAS INERT, AND WHY IT WAS INERT IS THE USEFUL
+PART.** Setting `Γ_h`'s trace dofs and letting `FormLinearSystem` eliminate them
+— which *is* how the fitted datum is imposed — changed **not one digit**. The
+flux divergence form's boundary face integrator carries `fittedMarker`, and
+`EnableHybridization` registers a boundary flux constraint on exactly the
+attributes it finds marked there. **`Γ_h` is not among them**, so its trace dofs
+are essential in name while nothing couples to them.
+
+**`miniapps/hdg/extension.cpp` IS THE WORKED EXAMPLE AND MEQ HAD NOT READ IT
+CLOSELY ENOUGH.** It imposes the datum as a **load term on the flux equation** —
+`fform->AddBdrFaceIntegrator( new VectorBoundaryFluxLFIntegrator( datum ),
+bdr_gamma_h )` with `datum` a `PathTraceCoefficient` — which is `⟨ψ̂, v·n⟩` of
+(8a) where a non-homogeneous `g` belongs. `setExteriorDatum()` does that now, and
+**negates**, as the miniapp does (`pNatural = -pExact`, *"the datum as the flux
+equation takes it"*): MEQ's flux block holds `−q` for the same reason Darcy's
+does, so the conventions coincide.
+
+**SO THERE WAS NO MFEM DEFECT TO FILE**, which is worth recording because a
+report was nearly written. The capability exists and is demonstrated upstream;
+MEQ had simply never built the half it did not need. The miniapp *does* exercise
+a non-zero datum — checked, `pExact` is non-trivial on all three of its problems.
+
 **And the coupled domain must reach `r = 0`**, because the exterior expansion is
 only valid on a semicircle centred on the axis. So FB-A is FB-1's prerequisite
 rather than its warm-up, and the `O(1/h)` conditioning below is what FB-1
@@ -529,8 +567,31 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 git submodule update --init --recursive     # extern/toml11
 cmake -B build
 cmake --build build -j4
-cd build && ctest --output-on-failure       # ~600-800 s, 37/37
+cd build && OMP_NUM_THREADS=4 ctest -j4      # ~225 s, 37/37 -- see below
 ```
+
+**RUN IT `-j4` WITH `OMP_NUM_THREADS=4`, WHICH IS 3.2x FASTER AND MEASURED.**
+Since `AssemblyMode::Threaded` became the default, each solver test already takes
+every core through OpenMP, so a naive `ctest -j` oversubscribes. Holding the
+product at the core count is what pays:
+
+| | wall | CPU |
+|---|---|---|
+| `-j1`, `OMP=16` — the old default | **710.5 s** | — |
+| `-j16`, `OMP=1` | 265.2 s | 350% |
+| **`-j4`, `OMP=4`** | **223.2 s** | 514% |
+
+37/37 in every configuration, which is the correctness half: nothing in the suite
+depends on a thread count. **`OMP_NUM_THREADS` is deliberately NOT pinned in
+`tests/CMakeLists.txt`** — a plain `ctest` must still exercise threaded assembly
+as it ships, and pinning it would quietly change what the bit-exactness cases
+test.
+
+**AND THE FLOOR IS `naming`, NOT A SOLVER.** It is the slowest test in the suite
+at **199.7 s** — one `clang-tidy` invocation over every file in `src/meq`,
+single-threaded — against `PedestalConvergence`'s 178 s. So 223 s is very nearly
+"the suite costs one lint run", and going below it means parallelising
+clang-tidy (`run-clang-tidy`) rather than anything about the solver.
 
 **ctest needs no environment set by hand.** `tests/CMakeLists.txt` puts
 `MKL_NUM_THREADS=1` on every registered test, without which the suite takes well

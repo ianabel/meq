@@ -1328,6 +1328,23 @@ namespace
 		return columns;
 	}
 
+	void GradShafranovSolver::setExteriorDatum( mfem::PositionFunction g )
+	{
+		if ( !transferPath )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::setExteriorDatum: there is no Gamma_h "
+				"on the fitted path -- setBoundaryData() is the datum there, and "
+				"it reaches the boundary through essential trace dofs rather than "
+				"through a load term" );
+
+		exteriorDatumFunction = std::move( g );
+
+		// prepare() is where it reaches the right hand side, and solve()
+		// re-prepares, so a datum set after a solve would otherwise be ignored
+		// until something else invalidated the state.
+		prepared = false;
+	}
+
 	void GradShafranovSolver::setTransmissionQuadratureOrder( int order )
 	{
 		if ( order < 0 )
@@ -1843,6 +1860,54 @@ namespace
 		// setExtension().
 		if ( boundaryData && anyFitted )
 			traceGf.ProjectBdrCoefficient( *boundaryData, fittedMarker );
+
+		/*
+		 * THE DATUM ON Gamma_h, AND IT IS A LOAD TERM RATHER THAN AN ESSENTIAL
+		 * VALUE. THE FIRST ATTEMPT SET THE TRACE AND DID NOTHING AT ALL.
+		 *
+		 * Setting Gamma_h's trace dofs and letting FormLinearSystem eliminate
+		 * them is how the FITTED datum is imposed, four lines above, and it is
+		 * inert on Gamma_h. The reason is on the flux divergence form: its
+		 * boundary face integrator carries `fittedMarker`, and
+		 * EnableHybridization registers a boundary flux constraint on exactly
+		 * the attributes it finds marked there. Gamma_h is NOT among them, so
+		 * its trace dofs are essential in name while nothing couples to them --
+		 * eliminating them at any value whatever changes not one digit, which is
+		 * what was measured before this was understood.
+		 *
+		 * MFEM'S OWN miniapps/hdg/extension.cpp IS THE WORKED EXAMPLE and it does
+		 * it the other way, which is the way the weak form asks for:
+		 *
+		 *     fform->AddBdrFaceIntegrator(
+		 *        new VectorBoundaryFluxLFIntegrator( datum ), bdr_gamma_h );
+		 *
+		 * with `datum` a PathTraceCoefficient. That is < psihat, v.n > of (8a) as
+		 * a LOAD on the flux equation, and it is where a non-homogeneous g
+		 * belongs. HDGExtensionIntegrator supplies the other half, the path
+		 * integral of the flux, which is the whole of it only when g vanishes.
+		 *
+		 * THE SIGN IS THE MINIAPP'S, AND IT NEGATES: pNatural = -pExact, "the
+		 * datum as the flux equation takes it". MEQ's flux block holds -q for the
+		 * same reason the Darcy problem's does, so the two conventions coincide
+		 * and the negation carries over. It is asserted by a rate rather than by
+		 * this paragraph -- see FreeBoundaryCoupling's half-disc case, where the
+		 * opposite sign converges to a different function.
+		 */
+		if ( exteriorDatumFunction && transferPath )
+		{
+			mfem::PositionFunction g = exteriorDatumFunction;
+			exteriorDatumCoefficient =
+				std::make_unique<mfem::PathTraceCoefficient>(
+					*transferPath,
+					[ g ]( mfem::Vector const &x ) { return -g( x ); } );
+
+			fluxRhs.Update( fluxFes.get(), rhs.GetBlock( 0 ), 0 );
+			fluxRhs.AddBdrFaceIntegrator(
+				new mfem::VectorBoundaryFluxLFIntegrator(
+					*exteriorDatumCoefficient ),
+				gammaHMarker );
+			fluxRhs.Assemble();
+		}
 
 		// On a Picard path the source is the frozen coefficient, so the linear
 		// right hand side below is what assembles it. Built here rather than in
