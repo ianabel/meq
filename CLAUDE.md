@@ -832,17 +832,22 @@ MEQ needs work from **four MFEM branches**, and as of 2026-08-30 it takes
 
 | branch | what MEQ needs from it | |
 |---|---|---|
-| `gf-hdg-subdomains-dev` | `fem/darcy/extension_hdg.*` — stage 5's curved `Γ`, and `TransferredDatumCoefficient` | merge base |
+| `gf-hdg-subdomains-dev` | `fem/darcy/extension_hdg.*` — stage 5's curved `Γ`, and `TransferredDatumCoefficient`. **AND IT IS THE TARGET FOR ANYTHING MEQ SENDS BACK ABOUT THE EXTENSION MACHINERY**, free boundary's transmission quadrature included: it carries `TransferPath`, `ElementExtension`, `PathTraceCoefficient` and `ExtensionRegionQuadrature`, and carries **no NPC at all** — verified 2026-09-05 — so a patch against it provably does not depend on the ordering | merge base |
 | `direct-solver-symbolic-reuse` | `UMFPackSolver` and `PardisoSolver` keeping their symbolic factorisation across Newton steps | merge 1 |
 | `gf-hdg-linearise-first` | **`DarcyNPCOperator` / `DarcyNPCSolver`** — the NPC method, which is what MEQ's default ordering now is — plus `SetAssemblyMode`, `SetGradientMode`, `SetLocalFactorMode`. **`SetNonlinearOrdering` was on this list and is DELETED**; see *The NPC port* | merge 2 |
-| `gf-hdg-dev` | ***"The postprocessing closes on the element average, always"*** — the reconstruction fix, without which `ψ*` is a different function wherever `∂F/∂ψ` vanishes | **now free** |
+| `gf-hdg-dev` | ***"The postprocessing closes on the element average, always"*** — the reconstruction fix, without which `ψ*` is a different function wherever `∂F/∂ψ` vanishes | **merge 3, again** |
 
-**`gf-hdg-dev` is now an ANCESTOR of both `gf-hdg-subdomains-dev` and
-`gf-hdg-linearise-first`** — verified pairwise 2026-08-30 — so it arrives with
-the base and needs no merge of its own. **This file previously said the four
-branches were pairwise independent and that is no longer true.** Re-verify
-before trusting either statement: both were true when written, and the topology
-is the other tree's to change.
+**THE TOPOLOGY HAS NOW CHANGED THREE TIMES AND THIS ROW HAS BEEN WRONG TWICE.**
+It has read "pairwise independent", then "an ANCESTOR of both, so it needs no
+merge of its own" — verified 2026-08-30 and true then — and as of **2026-09-05
+`gf-hdg-dev` is once more ahead of the merge and needs a merge of its own**, by
+a single commit (*"Four Darcy test files the trunk's CMake build never ran"*),
+which conflicts in `tests/unit/CMakeLists.txt` alone. **The standing instruction
+is therefore to run the containment loop and believe it over this table**, which
+is a claim about someone else's branch and goes stale without MEQ doing
+anything. The reconstruction fix itself has been contained throughout; a "not
+contained" here has always meant *the branch has moved*, never *the fix is
+missing*.
 
 What has not changed is *why* `gf-hdg-dev` is in the list. Dropping it gives a
 silently degraded `ψ*` on any element where the Jacobian's reaction term
@@ -873,10 +878,12 @@ git tag -f meq-integration-before-$(date +%F) meq-integration
 git checkout -B meq-integration hdgdev/gf-hdg-subdomains-dev
 git merge hdgdev/direct-solver-symbolic-reuse     # 3 conflicts; see below
 git merge hdgdev/gf-hdg-linearise-first           # 3 conflicts; see below
-# gf-hdg-dev needs no merge -- verify with:
+git merge hdgdev/gf-hdg-dev                       # 1 conflict as of 2026-09-05
+# ALWAYS finish with this, and believe it over the table above:
 for b in gf-hdg-subdomains-dev direct-solver-symbolic-reuse \
          gf-hdg-linearise-first gf-hdg-dev; do
-  git merge-base --is-ancestor hdgdev/$b HEAD && echo "$b contained"
+  git merge-base --is-ancestor hdgdev/$b HEAD && echo "$b contained" \
+                                              || echo "$b NOT CONTAINED"
 done
 ```
 
@@ -917,20 +924,28 @@ what MEQ needs from it is in the tree (`DarcyNPCOperator` is in the installed
 re-merge is available, not that the build is wrong. Re-create rather than merge
 into the existing branch, per the recipe above.
 
-**The second merge now conflicts too, and it did not used to.** This file used
-to record `gf-hdg-linearise-first` as merging clean; after the 08-30 rebase it
-brings three, and all three are decided rather than fiddly:
+**The second merge conflicts, and WHICH THREE FILES IT IS HAS ALREADY CHANGED
+ONCE.** This file recorded `gf-hdg-linearise-first` as merging clean, then as
+bringing `HDG-DEFECTS-FROM-MEQ.md`, `HDG-ROADMAP.md` and the makefile. As of
+**2026-09-05 the defects report no longer conflicts** — it is gone from both
+sides — and `tests/unit/CMakeLists.txt` has taken its place:
 
 | file | resolution |
 |---|---|
-| `doc/HDG-DEFECTS-FROM-MEQ.md` | modify/delete. **Take the delete** — it is MEQ's own retired bug report, retired deliberately by *"Retire two bug reports whose findings are all fixed and covered"* |
-| `doc/HDG-ROADMAP.md` | two regions, large and disjoint. Keep both sides |
-| `miniapps/hdg/makefile` | a union: `extension` from one side, `navierstokes` from the other. Merge the `SEQ_MINIAPPS` line into one and keep both test targets |
+| `doc/HDG-ROADMAP.md` | **NOT the disjoint pair this file used to describe.** Four regions now, two of them large *divergent rewrites of the same prose*, so keeping both sides duplicates whole sections and produces a worse file than either. Take `--ours`, the subdomains side: it is the merge base, it is the newer of the two, and each dev branch keeps its own copy of that roadmap anyway. MEQ neither builds nor reads it |
+| `miniapps/hdg/makefile` | a union: `extension` from one side, `navierstokes` from the other. Merge the `SEQ_MINIAPPS` and `PAR_MINIAPPS` lines into one, keep the `ifeq (MFEM_USE_SUNDIALS,NO)` filter, and keep both test targets |
+| `tests/unit/CMakeLists.txt` | a union of a sorted source list — `test_darcy_extension.cpp` from subdomains, `test_darcy_npc.cpp` from linearise-first. **`test_darcy_system.cpp` appears INSIDE one hunk and again in the common region below it**, so a mechanical keep-both duplicates it and CMake then compiles it twice. Take the union and assert no entry repeats |
+| ~~`doc/HDG-DEFECTS-FROM-MEQ.md`~~ | no longer conflicts; it used to be modify/delete, resolved by taking the delete |
 
-Only the makefile affects a build, and only of the miniapps. **`HDG-ROADMAP.md`
-has exactly two lines that are `=======` and exactly two conflict starts**, so
-the marker is unambiguous there — but check that before scripting it, for the
-`CHANGELOG` reason below.
+Only the makefile and the CMakeLists affect a build. **The `HDG-ROADMAP.md`
+marker count this file used to give — "exactly two `=======` lines" — is stale
+and was never safe to script on**; count them each time, for the `CHANGELOG`
+reason below.
+
+**AND THE SAME UNION TRAP APPEARS AGAIN IN MERGE 3.** `gf-hdg-dev` conflicts in
+`tests/unit/CMakeLists.txt` alone and by then the merged file already carries
+the union, so `--ours` is right there — but verify it rather than assuming, by
+checking every darcy entry from all four parents is present exactly once.
 
 **The first merge conflicts and the resolution is always the same.** The
 symbolic-reuse branch is based on a much later upstream (767 commits past where
@@ -995,9 +1010,9 @@ control and changed twice on 2026-09-01. Asked properly —
 | document | lives on | |
 |---|---|---|
 | `HDG-ELEMENT-LOCAL-PARALLELISM.md` | `gf-hdg-linearise-first` | **open** |
-| `HDG-BEM-COUPLING-FROM-MEQ.md` | `gf-hdg-linearise-first` | **open** |
+| `HDG-BEM-COUPLING-FROM-MEQ.md` | `gf-hdg-linearise-first` | **open, and PARTLY DELIVERED** — it said MEQ would write the quadrature over `Γ` and come back with it; MEQ did, and `mfem::ExtensionBoundaryQuadrature` was merged into `gf-hdg-subdomains-dev` 2026-09-05 |
 | `HDG-NPC-GLOBALISATION-FROM-MEQ.md` | `gf-hdg-linearise-first` | **open**, and answered in place |
-| `HDG-DEFECTS-FROM-MEQ.md` | **`gf-hdg-dev` and `gf-hdg-subdomains-dev`** | **NOT retired** — deleted only on the symbolic-reuse line, which is exactly why that merge conflicts modify/delete |
+| `HDG-DEFECTS-FROM-MEQ.md` | **`gf-hdg-dev` only, as of 2026-09-05** — it was on `gf-hdg-subdomains-dev` too | **NOT retired.** It has left the subdomains line, which is why the second merge no longer conflicts modify/delete on it. Re-check with `git cat-file -e` rather than trusting this row |
 | `HDG-LINEARISE-THEN-CONDENSE.md` | backup refs only | retired with the mode |
 | `DIRECT-SOLVER-SYMBOLIC-REUSE.md` | no branch at all | retired |
 
@@ -4227,6 +4242,33 @@ convergence tests is **byte-identical** afterwards.
 `FaceElementTransformations`, with the same hazard. The caller-allocated variant
 signals failure by `GetGeometryType() == Geometry::INVALID` where the pointer
 version returns `nullptr`.
+
+**A `SubMesh` KEEPS A POINTER TO ITS PARENT, AND THREE FIXTURES LET THE PARENT
+DIE. LATENT FOR MONTHS, THEN A SEGFAULT IN SOMEBODY ELSE'S CONSTRUCTOR.**
+`mfem::SubMesh::CreateFromDomain( background, ... )` stores `&background`.
+`ExtensionConvergence`, `FluxSurfaceConvergence` and `FreeBoundaryCoupling` each
+built the background as a **local** and returned the `SubMesh` out of the
+function, so the parent was dangling the moment they returned. That is undefined
+behaviour from the first day and cost nothing for as long as nothing asked a
+`SubMesh` where it came from.
+
+`mfem::VertexConePath` now does. Its cone `C(x)` reads the **parent's** edges at
+each vertex of `Γ_h` — `HasCone()` is documented as *"whether the mesh handed to
+the constructor was a SubMesh with a parent to read edges from"* — so the
+constructor walks freed memory and dies in `Mesh::GetVertexToVertexTable`. **It
+presents as an MFEM regression and is MEQ's own bug**, which is the reason to
+write it down: the backtrace names three MFEM frames and no MEQ frame at all.
+
+The production code was never exposed — `Estimator` holds its background as a
+member and `apps/meq.cpp` takes it by reference — so this is a fixture defect,
+and the fix is a `static` pool that lives as long as the process. **Anything
+that returns a `SubMesh` must return, or otherwise outlive, its parent.**
+
+**AND IT IS THE SECOND TIME AN MFEM UPDATE HAS TURNED A LATENT MEQ DEFECT INTO A
+CRASH IN MFEM'S OWN CODE.** The first was `SourceIntegrator`'s shared scratch
+meeting the threaded element loop. Both were dormant contracts — *the parent
+outlives the child*, *an integrator on a threaded loop is reentrant* — that MEQ
+had never had to honour. Expect the next library update to find a third.
 
 **THE ONE THAT ACTUALLY BLOCKS THREADING IS `Mesh::FindPoints`, AND IT CANNOT BE
 FIXED LOCALLY.** It loops over every element through that same shared

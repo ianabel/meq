@@ -252,8 +252,32 @@ namespace
 	/// lie entirely inside Omega.
 	std::unique_ptr<mfem::SubMesh> makeSubdomain( int n, int &gammaH, double &h )
 	{
-		mfem::Mesh background = mfem::Mesh::MakeCartesian2D(
-			n, 2*n, mfem::Element::TRIANGLE, false, rMax - rMin, zMax - zMin );
+		/*
+		 * THE BACKGROUND MUST OUTLIVE THE SubMesh CUT FROM IT, AND IT USED NOT TO.
+		 *
+		 * mfem::SubMesh keeps a POINTER to its parent. This function returns the
+		 * SubMesh and the background was a local, so the parent was dangling the
+		 * moment it returned -- undefined behaviour that cost nothing for as long
+		 * as nothing dereferenced it, which is to say for as long as nobody asked
+		 * the SubMesh about the mesh it came from.
+		 *
+		 * mfem::VertexConePath now does. Its cone C( x ) reads the PARENT's edges
+		 * at each vertex of Gamma_h -- HasCone() is documented as "whether the mesh
+		 * handed to the constructor was a SubMesh with a parent to read edges
+		 * from" -- so the constructor walks freed memory and segfaults in
+		 * Mesh::GetVertexToVertexTable. It presented as an MFEM regression and was
+		 * this fixture all along.
+		 *
+		 * The pool is the whole fix: a background lives until the process ends,
+		 * which in a test binary is the simplest lifetime that is certainly long
+		 * enough. Returning the pair instead would be tidier and would touch every
+		 * caller; this is the change that is obviously correct.
+		 */
+		static std::vector<std::unique_ptr<mfem::Mesh>> backgrounds;
+		backgrounds.push_back( std::make_unique<mfem::Mesh>(
+			mfem::Mesh::MakeCartesian2D(
+				n, 2*n, mfem::Element::TRIANGLE, false, rMax - rMin, zMax - zMin ) ) );
+		mfem::Mesh &background = *backgrounds.back();
 		background.Transform( []( mfem::Vector const &in, mfem::Vector &out )
 		{
 			out( 0 ) = in( 0 ) + rMin;

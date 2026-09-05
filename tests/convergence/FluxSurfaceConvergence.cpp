@@ -536,8 +536,19 @@ namespace
 	{
 		Rectangle const box = curvedBox();
 
-		mfem::Mesh background = mfem::Mesh::MakeCartesian2D(
-			n, 2*n, mfem::Element::TRIANGLE, false, box.width(), box.height() );
+		/*
+		 * THE BACKGROUND MUST OUTLIVE THE SubMesh CUT FROM IT. mfem::SubMesh keeps
+		 * a POINTER to its parent and this function returns the SubMesh, so a local
+		 * background left it dangling -- harmless only for as long as nothing asked
+		 * the SubMesh where it came from. mfem::VertexConePath's cone now does, and
+		 * walks freed memory. See ExtensionConvergence::makeSubdomain, which
+		 * carried the same defect and where the reasoning is written out.
+		 */
+		static std::vector<std::unique_ptr<mfem::Mesh>> backgrounds;
+		backgrounds.push_back( std::make_unique<mfem::Mesh>(
+			mfem::Mesh::MakeCartesian2D(
+				n, 2*n, mfem::Element::TRIANGLE, false, box.width(), box.height() ) ) );
+		mfem::Mesh &background = *backgrounds.back();
 		background.Transform( [ box ]( mfem::Vector const &in, mfem::Vector &out )
 		{
 			out( 0 ) = in( 0 ) + box.rMin;
