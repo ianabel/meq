@@ -509,8 +509,12 @@ BOOST_AUTO_TEST_CASE( theBoundarySweepTilesGammaAndTheRegionSweepTilesTheGap )
 		// A rule generous enough that the quadrature is not what is being
 		// measured. The map is not polynomial, so no order is exact; the
 		// convergence below is what says the rule is adequate.
+		// ORDER 80, NOT 12, AND THAT IS THE WHOLE CORRECTION. The property
+		// under test is COVERAGE -- that the faces' images tile Gamma -- and at
+		// order 12 this case was measuring its own rule instead. See the long
+		// comment at the assertion.
 		mfem::IntegrationRule const &faceRule =
-			mfem::IntRules.Get( mfem::Geometry::SEGMENT, 12 );
+			mfem::IntRules.Get( mfem::Geometry::SEGMENT, 80 );
 		mfem::IntegrationRule const &lineRule =
 			mfem::IntRules.Get( mfem::Geometry::SEGMENT, 12 );
 
@@ -601,46 +605,37 @@ BOOST_AUTO_TEST_CASE( theBoundarySweepTilesGammaAndTheRegionSweepTilesTheGap )
 	 * O( h ) wrong, which is what this one was before the weight was signed.
 	 */
 	/*
-	 * THIS IS RED AND IT IS A REAL FINDING, NOT A TOLERANCE TO RELAX.
+	 * THIS WAS RED, AND MEQ'S DIAGNOSIS OF IT WAS WRONG. 2026-09-05.
 	 *
-	 * The expectation asserted here -- exact at every mesh, at the central
-	 * difference's own floor of about 1e-10, mesh-INDEPENDENT -- was measured
-	 * while ExtensionBoundaryQuadrature was being written, against the
-	 * VertexConePath of that day. Against the path family now on
-	 * gf-hdg-subdomains-dev the same geometry reads 1.01e-04, 2.24e-05 and
-	 * 4.59e-06 at n = 12, 24, 48, which is not a floor at all: it converges at
-	 * about O( h^2 ). A quadrature residual that CONVERGES is measuring a
-	 * geometric error rather than an instrument, so the images of the faces no
-	 * longer tile Gamma exactly -- they overlap or gap by O( h^2 ) somewhere.
+	 * At a 12th-order face rule this case read 1.01e-04, 2.24e-05, 4.59e-06 at
+	 * n = 12, 24, 48 -- converging at about O( h^2 ) where the expectation is a
+	 * mesh-independent floor near 1e-10. MEQ filed that upstream as lost
+	 * coverage, on the argument that "a quadrature residual that CONVERGES is
+	 * measuring a geometry rather than an instrument".
 	 *
-	 * IT IS THE CONE, AND THAT IS MEASURED RATHER THAN SUSPECTED.
-	 * theConeIsWhatCostsTheTiling below runs the identical geometry with the
-	 * cone off -- a path built on a parentless copy of the same D_h, which is
-	 * the documented way HasCone() goes false -- and reads 4.85e-10, 4.64e-10
-	 * and 6.38e-11 against this case's 1.01e-04, 2.24e-05 and 4.59e-06. One
-	 * variable, a factor of 2e5, and the cone-off column REPRODUCES the numbers
-	 * recorded above, which also settles that they were measured here rather
-	 * than inherited from another geometry.
+	 * THAT ARGUMENT HAS A HOLE AND UPSTREAM FOUND IT: two things converge. The
+	 * other is a curve the RULE under-resolves, which straightens as h falls.
+	 * Refining the rule at fixed h separates them, because no quadrature
+	 * recovers coverage that is not there -- and theConeIsWhatCostsTheTiling
+	 * below now runs that sweep. At n = 12 the cone-on sum goes
 	 *
-	 * Why it costs anything is not established. Tiling rests on adjacent faces
-	 * AGREEING at a shared vertex, which interpolating vertex directions gives
-	 * by construction and a per-vertex restriction ought to preserve; the cone
-	 * diagnostics printed above say it fired at every vertex at every mesh and
-	 * was strictly tighter than the half space at about 40% of them.
+	 *     q8 2.61e-04   q12 1.01e-04   q20 1.34e-05   q40 6.68e-08   q80 5.40e-10
 	 *
-	 * NOTE THAT UPSTREAM'S OWN COMMIT SAYS THE CONE "changes nothing". This
-	 * contradicts that directly, on their own branch's routine, and is the
-	 * reason to report it with the control attached rather than as an opinion.
+	 * and 5.40e-10 IS the cone-off floor. Coverage is exact with the cone and
+	 * without it. What the cone costs is the SMOOTHNESS of xi -> a( x( xi ) )
+	 * along a face: it drives the two interpolated vertex directions apart, the
+	 * foot map roughens, and a fixed-order Gauss rule under-resolves it.
 	 *
-	 * MFEM'S OWN SUITE CANNOT SEE THIS. test_darcy_extension.cpp exercises
-	 * ExtensionRegionQuadrature and mentions the boundary sweep only in a
-	 * comment, so this is the only check of the property anywhere -- which is a
-	 * reason to report it upstream, and not a reason to weaken it here.
+	 * SO THE RULE IS RAISED TO 80 AND THE GATE STANDS AT ITS ORIGINAL VALUE.
+	 * Relaxing the gate would have been the wrong repair for the right symptom;
+	 * the gate was never too tight, the rule was too coarse for the family.
 	 *
-	 * Left failing deliberately, per CLAUDE.md's testing stance: a defect gets
-	 * a test that asserts the behaviour WANTED and fails until it is there.
-	 * Relaxing this gate to 1e-3 would make the suite green and would throw
-	 * away the only measurement of this property that exists.
+	 * The transferable part is the shape of the mistake. "It converges, so it is
+	 * geometry" ignores that an under-resolved quadrature of an h-dependent
+	 * integrand converges too. The discriminator is to refine the INSTRUMENT at
+	 * fixed geometry, which is the same move CLAUDE.md records for Richardson
+	 * extrapolation -- a column that keeps moving under mesh refinement while
+	 * the extrapolated one does not is measuring the instrument.
 	 */
 	for ( std::size_t i = 0; i < boundaryError.size(); ++i )
 		BOOST_TEST( boundaryError[ i ] < 1.0e-8,
@@ -894,6 +889,17 @@ BOOST_AUTO_TEST_CASE( gammaHIsStarShapedAboutTheCentreAndStaysSoUnderRefinement 
  * q = ( 1, 1 ) a transposed index gives the same answer, and the test passes
  * while the field is rotated.
  *
+ * AND HERE IS WHAT THIS CASE STRUCTURALLY CANNOT SEE, WHICH IS WORTH SAYING
+ * BECAUSE IT READS 1e-16 AND THAT LOOKS LIKE IT SEES EVERYTHING. The reference
+ * below is built by sweeping Gamma with the SAME rule the row uses, so the
+ * quadrature error is common to both sides and cancels EXACTLY. That is
+ * deliberate -- it is what isolates the contraction, the vdof ordering, the
+ * sign and the measure, which are what this case is for -- but it means the
+ * agreement says nothing whatever about whether the rule RESOLVES the foot map.
+ * It did not: the default was 12 and 12 is short by O( h^2 ) against a coned
+ * path family. That was caught by the tiling case above and by upstream, not
+ * here. Same species as checking a solve against the formula it used.
+ *
  * ORTHOGONALITY IS NOT USED AND CANNOT BE HERE. The exterior identity
  * T_m = 0 needs INT C_n C_m dGamma/r = delta_nm h_n, which holds only on a
  * semicircle reaching the axis at both ends. This file's Gamma is a Soloviev
@@ -907,6 +913,25 @@ BOOST_AUTO_TEST_CASE( theTransmissionRowIsTheBoundaryIntegralItClaims )
 	int const n = 16;
 
 	Case c = build( order, n );
+
+	/*
+	 * PIN BOTH RULES TO THE SAME HIGH ORDER, AND BOTH HALVES OF THAT MATTER.
+	 *
+	 * SAME, because matching the row's rule to the reference's is what makes
+	 * the quadrature error common to both sides and cancel -- which is what
+	 * isolates the contraction, the vdof ordering, the sign and the measure,
+	 * and is the whole point of this case. Leaving them to differ measures the
+	 * gap between two rules instead: when the solver's default moved from 12 to
+	 * 40 and this reference stayed at 12, the case failed at 5.9e-07, and that
+	 * number was the under-resolution rather than a defect in the row.
+	 *
+	 * HIGH, because the default has to be adequate for a path family whose foot
+	 * map the cone roughens, and a case pinned at a coarse order would keep
+	 * passing while the shipped default silently was not. Resolution is the
+	 * tiling case's job; this one only has to avoid hiding it.
+	 */
+	int const quadratureOrder = 80;
+	c.solver->setTransmissionQuadratureOrder( quadratureOrder );
 
 	// The file's own helper: centred on the axis, with a radius large enough
 	// that exterior() would be legal. Only the direction matters to basis().
@@ -953,7 +978,7 @@ BOOST_AUTO_TEST_CASE( theTransmissionRowIsTheBoundaryIntegralItClaims )
 				continue;
 
 			mfem::IntegrationRule const &faceRule =
-				mfem::IntRules.Get( ftr->GetGeometryType(), 12 );
+				mfem::IntRules.Get( ftr->GetGeometryType(), quadratureOrder );
 
 			mfem::ExtensionBoundaryQuadrature( *ftr, *c.path, faceRule,
 				[ & ]( mfem::ExtensionBoundaryPoint const &pt )
@@ -1083,6 +1108,7 @@ BOOST_AUTO_TEST_CASE( theConeIsWhatCostsTheTiling )
 
 	std::vector<double> withCone;
 	std::vector<double> withoutCone;
+	std::vector<double> coneOnFinestRule;
 
 	for ( int n : { 12, 24, 48 } )
 	{
@@ -1114,7 +1140,15 @@ BOOST_AUTO_TEST_CASE( theConeIsWhatCostsTheTiling )
 		// drops the parent pointer, which is exactly the difference wanted.
 		mfem::Mesh plain( sub );
 
-		double sums[ 2 ] = { 0.0, 0.0 };
+		// A sweep in the RULE ORDER at fixed h, which is what separates lost
+		// coverage from a rule that under-resolves a rough foot map: no
+		// quadrature recovers coverage that is not there, so a column that
+		// comes back to the floor as the rule refines was never a coverage
+		// failure. This is upstream's argument and it is checked here rather
+		// than taken on trust.
+		int const orders[] = { 8, 12, 20, 40, 80 };
+		int const nOrders = 5;
+		double sums[ 2 ][ 5 ] = { { 0.0 }, { 0.0 } };
 		bool cone[ 2 ] = { false, false };
 
 		for ( int which = 0; which < 2; ++which )
@@ -1125,33 +1159,49 @@ BOOST_AUTO_TEST_CASE( theConeIsWhatCostsTheTiling )
 			mfem::VertexConePath path( meshRef, gammaH, circle, 6.0*h );
 			cone[ which ] = path.HasCone();
 
-			for ( int be = 0; be < meshRef.GetNBE(); ++be )
+			for ( int oi = 0; oi < nOrders; ++oi )
 			{
-				if ( meshRef.GetBdrAttribute( be ) != gammaH )
-					continue;
-
-				mfem::FaceElementTransformations *ftr =
-					meshRef.GetBdrFaceTransformations( be );
-				if ( !ftr )
-					continue;
-
-				mfem::IntegrationRule const &faceRule =
-					mfem::IntRules.Get( ftr->GetGeometryType(), 12 );
-
-				mfem::ExtensionBoundaryQuadrature( *ftr, path, faceRule,
-					[ & ]( mfem::ExtensionBoundaryPoint const &pt )
+				for ( int be = 0; be < meshRef.GetNBE(); ++be )
 				{
-					sums[ which ] += pt.weight;
-				} );
+					if ( meshRef.GetBdrAttribute( be ) != gammaH )
+						continue;
+
+					mfem::FaceElementTransformations *ftr =
+						meshRef.GetBdrFaceTransformations( be );
+					if ( !ftr )
+						continue;
+
+					mfem::IntegrationRule const &faceRule =
+						mfem::IntRules.Get( ftr->GetGeometryType(), orders[ oi ] );
+
+					mfem::ExtensionBoundaryQuadrature( *ftr, path, faceRule,
+						[ & ]( mfem::ExtensionBoundaryPoint const &pt )
+					{
+						sums[ which ][ oi ] += pt.weight;
+					} );
+				}
 			}
 		}
 
-		double const relOn = std::abs( sums[ 0 ] - exactPerimeter )/exactPerimeter;
-		double const relOff = std::abs( sums[ 1 ] - exactPerimeter )/exactPerimeter;
+		double const relOn =
+			std::abs( sums[ 0 ][ 1 ] - exactPerimeter )/exactPerimeter;
+		double const relOff =
+			std::abs( sums[ 1 ][ 1 ] - exactPerimeter )/exactPerimeter;
 
 		std::printf( "    %5d %8.4f %16.10f %11.2e %16.10f %11.2e\n",
-		             n, h, sums[ 0 ], relOn, sums[ 1 ], relOff );
+		             n, h, sums[ 0 ][ 1 ], relOn, sums[ 1 ][ 1 ], relOff );
+		std::printf( "          rule order:" );
+		for ( int oi = 0; oi < nOrders; ++oi )
+			std::printf( "  q%d %8.2e", orders[ oi ],
+			             std::abs( sums[ 0 ][ oi ] - exactPerimeter )
+			                 /exactPerimeter );
+		std::printf( "   (cone on)\n" );
 		std::fflush( stdout );
+
+		// The discriminator: with the cone on, does refining the RULE alone at
+		// fixed h bring the sum back to the coverage floor?
+		coneOnFinestRule.push_back(
+			std::abs( sums[ 0 ][ nOrders - 1 ] - exactPerimeter )/exactPerimeter );
 
 		BOOST_TEST_REQUIRE( cone[ 0 ], "the SubMesh path has no cone at n = " << n
 		                    << ", so the two columns are the same experiment" );

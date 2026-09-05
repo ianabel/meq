@@ -76,15 +76,21 @@ Nothing is red and stages 0 to 7 are done, so the order is:
    path. After it, the bordered solve at `N + 2` is mechanical: §4.4 is right
    that `solveWithNormalisation()` already does it at `N = 1`.
 
-   **AND THERE IS AN INDEPENDENT FREE-BOUNDARY CODE ON THIS MACHINE — BUT IT
-   IS NOT THE CHECK FB-6 WANTS.** `../geq` wraps `../freegs4e`: free boundary by
-   von Hagenow Green's functions and finite differences, Picard rather than
-   Newton, which is a genuinely different algorithm. It is however a magnetic
-   **mirror** code with `g ≡ 0` and no toroidal field, and FB-6 is a tokamak
-   machine case, so it cannot stand in for one; there is no shared analytic
-   benchmark either. **Its real value is to `FLOW-PLAN.md`** — both codes
-   implement Abel (136), and `CLAUDE.md` records that no published rotating
-   benchmark exercises the `C′(ψ)` term. See §7 of the plan.
+   **AND FB-6'S BENCHMARK EXISTS ON THIS MACHINE AND RUNS**: `../freegs4e`, a
+   free-boundary **tokamak** Grad-Shafranov solver by a different algorithm —
+   von Hagenow Green's functions, finite differences, Picard — solving the same
+   equation with the same `F` and the same `ψ` units. Drive its
+   `GeneralPprimeFFprime` with tabulated `p′`, `ff′`. That is a better FB-6
+   acceptance than the fine-mesh self-comparison it was written against, and
+   there is an interim version available **before FB-1 lands**: take freegs4e's
+   converged LCFS, fit it to MXH, and check MEQ's fixed-boundary solve against
+   it. §7 of the plan has the environment recipe, which is not trivial, and the
+   two conversion traps.
+
+   **Not to be confused with `../geq`**, which wraps freegs4e for rotating
+   **mirrors** with `g ≡ 0` and cannot stand in for a machine case. Its value is
+   to `FLOW-PLAN.md` — an independent implementation of Abel (136), and the
+   first outside check of the `C′(ψ)` term.
 2. **Finish the inversion** — item 10. IN-6, the `(Ψ, θ)` output grid and the
    per-`ψ` cache `MANTA-COUPLING.md` §5's call pattern requires; and IN-P, the
    performance harness, which is under way. IN-5, open surfaces, is **deferred

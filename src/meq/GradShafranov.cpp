@@ -396,10 +396,28 @@ namespace
 		  // null pointer and is a trap the moment one of them reads another.
 		  transferPath( nullptr ),
 		  extensionLineOrder( -1 ),
-		  // Generous on purpose: a rule that limits the transmission row would be
-		  // indistinguishable from an extension that does not converge, and this
-		  // is a setup cost paid once per mesh rather than once per Newton step.
-		  transmissionQuadratureOrder( 12 ),
+		  /*
+		   * 40, NOT 12, AND THE DIFFERENCE WAS MEASURED RATHER THAN CHOSEN.
+		   *
+		   * This is a rule ACROSS a face of Gamma_h, integrating a foot map
+		   * xi -> a( x( xi ) ) whose smoothness is the path family's business
+		   * and not MEQ's. mfem::VertexConePath's cone drives the two
+		   * interpolated vertex directions apart and roughens that map, and at
+		   * order 12 a quadrature of it is short by O( h^2 ):
+		   * FreeBoundaryCoupling's tiling sweep reads 1.01e-04 at order 12 and
+		   * 6.68e-08 at 40 on the same geometry, against a coverage floor near
+		   * 1e-10.
+		   *
+		   * A caller cannot know whether the path handed in cones -- HasCone()
+		   * is on the concrete class, not on mfem::TransferPath -- so the
+		   * default has to be adequate for one that does. 40 is; 12 is not.
+		   * Raise it with setTransmissionQuadratureOrder() and check the answer
+		   * stops moving, which is the only way to know it is enough.
+		   *
+		   * Still a setup cost paid once per mesh rather than once per Newton
+		   * step, so the order is cheap.
+		   */
+		  transmissionQuadratureOrder( 40 ),
 		  globalisationChoice( Globalisation::None ),
 		  localSolverChoice( LocalSolver::Newton ),
 		  orderingChoice( NonlinearOrdering::NPC ),

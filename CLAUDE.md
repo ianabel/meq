@@ -395,43 +395,61 @@ point whether or not `TransformBack` found the right reference coordinates, so a
 clamped inverse map — the failure `ElementExtension` exists to prevent — is
 invisible to it.
 
-**AND THE TILING CHECK IS RED, DELIBERATELY.** `ExtensionBoundaryQuadrature`'s
-acceptance is that the boundary weights sum to `|Γ|`. It was **exact at the
-central difference's floor and mesh-independent** when the routine was written —
-4.85e-10, 4.64e-10, 6.38e-11. Against the `VertexConePath` now on
-`gf-hdg-subdomains-dev` the same circle reads **1.01e-04, 2.24e-05, 4.59e-06**
-at `n = 12, 24, 48`, which is not a floor: it converges at about `O(h²)`. **A
-quadrature residual that converges is measuring a geometry rather than an
-instrument**, so the faces' images no longer tile `Γ` exactly.
+**AND THE TILING CHECK WAS RED, ON A DIAGNOSIS THAT WAS WRONG. IT IS GREEN, AND
+THE MISTAKE IS THE PART WORTH KEEPING.** `ExtensionBoundaryQuadrature`'s
+acceptance is that the boundary weights sum to `|Γ|`. At a 12th-order face rule
+MEQ read 1.01e-04, 2.24e-05, 4.59e-06 at `n = 12, 24, 48` — converging at about
+`O(h²)` where the expectation is a mesh-independent floor near 1e-10 — and filed
+it upstream as lost coverage, on the argument that **"a quadrature residual that
+converges is measuring a geometry rather than an instrument"**.
 
-**IT IS THE CONE, AND IT IS PROVED BY A ONE-VARIABLE CONTROL.**
-`VertexConePath`'s cone is only available when the mesh it is given is a
-`SubMesh` *with a parent* — `HasCone()` says so — so a path built on a
-parentless copy of the same `D_h` is the same family without it.
-`theConeIsWhatCostsTheTiling` runs both on identical geometry:
+**THAT ARGUMENT HAS A HOLE: TWO THINGS CONVERGE.** The other is a curve the
+*rule* under-resolves, which straightens as `h` falls. Refining the **rule** at
+fixed `h` separates them, because no quadrature recovers coverage that is not
+there. Upstream made that point and MEQ reproduced it on its own circle — at
+`n = 12`, cone on:
 
-| `n` | cone on | cone off |
-|---|---|---|
-| 12 | 1.01e-04 | **4.85e-10** |
-| 24 | 2.24e-05 | **4.64e-10** |
-| 48 | 4.59e-06 | **6.38e-11** |
+| q8 | q12 | q20 | q40 | q80 |
+|---|---|---|---|---|
+| 2.61e-04 | 1.01e-04 | 1.34e-05 | 6.68e-08 | **5.40e-10** |
 
-A factor of **2e5**, and the cone-off column *reproduces the historical numbers
-exactly* — which also settles that they were measured on MEQ's own circle rather
-than inherited from another geometry. The diagnostics say the cone fired at every
-vertex at every mesh and was strictly tighter than the half space at about 40% of
-them.
+and **5.40e-10 is the cone-off floor**. So **coverage is exact with the cone and
+without it**. What the cone costs is the *smoothness* of `ξ ↦ a(x(ξ))`: it drives
+the two interpolated vertex directions apart, the foot map roughens, and a
+fixed-order Gauss rule under-resolves it. The rule is now 80 in that case, the
+gate stands at its original value, and it is green.
 
-**Why it costs anything is NOT established.** Tiling rests on adjacent faces
-agreeing at a shared vertex, which interpolating vertex directions gives by
-construction and a per-vertex restriction ought to preserve.
+**THE REPAIR THAT WOULD HAVE BEEN WRONG IS RELAXING THE GATE.** It was never too
+tight; the rule was too coarse for the path family. Same shape as the Richardson
+findings recorded throughout this file — a column that keeps moving is measuring
+the instrument, and the way to tell is to refine the instrument at fixed
+geometry.
 
-**AND UPSTREAM'S OWN COMMIT SAYS THE CONE *"changes nothing"***, in the message
-that signed the region sweep's weight. This contradicts that directly, on their
-own branch's routine. **MFEM's suite cannot see it** — `test_darcy_extension.cpp`
-exercises the *region* sweep and names the boundary one only in a comment — so
-MEQ's check is the only one anywhere, which is the reason to report it with the
-control attached rather than to weaken it.
+**AND IT MOVED A DEFAULT IN MEQ'S OWN NEW CODE.**
+`transmissionQuadratureOrder` was 12, which is the same rule over the same foot
+map, so the transmission row was short by `O(h²)` against a coned family. It is
+**40** now. `theTransmissionRowIsTheBoundaryIntegralItClaims` could not have
+caught that and now says so: it builds its reference with the *same* rule the row
+uses, so the quadrature error is common to both sides and cancels **exactly** —
+which is what isolates the ordering, the sign and the measure, and is why it
+reads 1e-16 while being blind to resolution. Checking a solve against the formula
+it used, one level up.
+
+**AND THE BLIND SPOT DEMONSTRATED ITSELF ON THE WAY, WHICH IS BETTER THAN THE
+COMMENT SAYING SO.** Raising the default from 12 to 40 while that case's
+reference stayed at 12 un-matched the two rules, and it failed at **5.9e-07** —
+the gap between an order-40 and an order-12 sweep of the same integral, which is
+exactly the under-resolution being fixed, surfacing as an apparent defect in the
+row. Both are pinned to 80 now, and the case records that **same** and **high**
+are separate requirements: same is what isolates the contraction, high is what
+stops a coarse pin hiding an inadequate shipped default.
+
+**Upstream also turned the cone off by default** (a `use_cone` constructor flag),
+having measured that it does not do what it was added for — the aerofoil's flux
+order it was meant to fix turns out to be **pre-asymptotic** and recovers on its
+own. And they connected it to MEQ's earlier signed-weight finding: **the cone is
+what makes the foot map backtrack**, so MEQ's `O(h)` unsigned overcount and this
+`O(h²)` residual are two readings of one thing.
 
 **One assertion beside it was wrong and is corrected rather than relaxed.**
 `gammaHIsStarShapedAboutTheCentreAndStaysSoUnderRefinement` asserted
@@ -511,14 +529,8 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 git submodule update --init --recursive     # extern/toml11
 cmake -B build
 cmake --build build -j4
-cd build && ctest --output-on-failure       # ~600-800 s, 36/37 -- see below
+cd build && ctest --output-on-failure       # ~600-800 s, 37/37
 ```
-
-**ONE TEST IS RED ON PURPOSE AND IT IS `FreeBoundaryCoupling`.** Its tiling
-assertion names a defect in `mfem::VertexConePath`'s cone, proved by a
-one-variable control in the same file, and CLAUDE.md's testing stance is that a
-defect gets a *failing* test rather than a relaxed one. See *Free boundary*.
-Every other test passes; a second failure is a real failure.
 
 **ctest needs no environment set by hand.** `tests/CMakeLists.txt` puts
 `MKL_NUM_THREADS=1` on every registered test, without which the suite takes well
@@ -1176,7 +1188,7 @@ control and changed twice on 2026-09-01. Asked properly —
 
 | document | lives on | |
 |---|---|---|
-| **`HDG-CONE-TILING-FROM-MEQ.md`** | **`gf-hdg-subdomains-dev`, untracked in `doc/`** | **FILED 2026-09-05, open.** `VertexConePath`'s cone costs the boundary sweep's tiling of `Γ` — 4.85e-10 to 1.01e-04, proved by a one-variable control. Carries the control, the diagnostics, and an explicit statement that MEQ has *not* worked out the mechanism |
+| **`HDG-CONE-TILING-FROM-MEQ.md`** | **`gf-hdg-subdomains-dev`, untracked in `doc/`** | **FILED AND ANSWERED THE SAME DAY, 2026-09-05, and MEQ's diagnosis was the part that was wrong.** Coverage is exact; the cone roughens the foot map and a 12th-order rule under-resolves it. Upstream reproduced it, turned the cone off by default, added the boundary-sweep case MEQ asked for, and corrected their own commit's *"changes nothing"*. MEQ raised its rule to 80 and its `transmissionQuadratureOrder` to 40 |
 | `HDG-ELEMENT-LOCAL-PARALLELISM.md` | `gf-hdg-linearise-first` | **open** |
 | `HDG-BEM-COUPLING-FROM-MEQ.md` | `gf-hdg-linearise-first` | **open, and PARTLY DELIVERED** — it said MEQ would write the quadrature over `Γ` and come back with it; MEQ did, and `mfem::ExtensionBoundaryQuadrature` was merged into `gf-hdg-subdomains-dev` 2026-09-05 |
 | `HDG-NPC-GLOBALISATION-FROM-MEQ.md` | `gf-hdg-linearise-first` | **open**, and answered in place |

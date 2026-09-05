@@ -798,39 +798,79 @@ validation is against a fine mesh. **That is true of the finished problem and
 false of every stage below FB-4**, and the exact answers available early are what
 should be spent first.
 
-**`../geq` IS AN INDEPENDENT FREE-BOUNDARY CODE ON THIS MACHINE, AND IT IS NOT
-THE CHECK FB-6 WANTS.** Recorded 2026-09-05, and corrected the same day: the
-first version of this paragraph called it a better final check than a fine mesh,
-which is wrong for a reason worth keeping.
+**`../freegs4e` IS THE BENCHMARK FOR FB-6, AND IT RUNS ON THIS MACHINE.**
+Recorded 2026-09-05. It self-describes as a *"free boundary tokamak plasma
+equilibrium Grad–Shafranov solver"*, and it is FreeGS-derived: `TestTokamak`,
+`DIIID`, `MAST`, `MASTU`, `TCV`, coils, Green's-function free boundary by von
+Hagenow, 2nd/4th-order finite differences on a uniform `(R,Z)` grid, Picard with
+adaptive blending and an optional Newton–Krylov polish. **That is a genuinely
+different algorithm from HDG-plus-Newton**, which is the whole point of it.
 
-`geq` is a thin wrapper; **`../freegs4e` is the solver** — free boundary by von
-Hagenow Green's functions, 2nd/4th-order finite differences on a uniform `(R,Z)`
-grid, Picard with adaptive blending and an optional Newton–Krylov polish. That is
-genuinely a different algorithm from HDG, which is what would make it worth
-something. **But it is a magnetic MIRROR code**: every path sets
-`ffprime = fpol = fvac = 0`, so `g ≡ 0`, there is no toroidal field, and its
-safety factor is identically zero. FB-6 is *"a machine case"* — a tokamak
-equilibrium with a real `gg′` — and a `g ≡ 0` mirror cannot stand in for one.
-**There is also no shared analytic benchmark**: no Solov'ev, no
-Cerfon–Freidberg, no manufactured solution anywhere in either tree, so
-`soloviev-nstx` has nothing to meet.
+**So FB-6's acceptance should be against `freegs4e`, not against a fine mesh.** A
+fine-mesh self-comparison shares every convention, every sign and every misread
+paper with the code being checked, and this file records what that costs three
+times over. `freegs4e` shares none of them, and it solves **the same equation**:
+`Δ*ψ = −μ₀RJ_φ` with `μ₀RJ_φ = μ₀R²p′ + gg′`, `ψ` in Wb/rad — MEQ's `F`, MEQ's
+sign, MEQ's units.
 
-**WHAT IT IS GENUINELY A CHECK ON IS `FLOW-PLAN.md`, NOT THIS FILE.** Both codes
-implement **Abel (136)** closed by its (96) and (97) — the same paper
-`examples/rotating-rectangle.toml` cites — so `freegs4e`'s
-`ProfilesCentrifugalMirror` and `meq::RotatingSource` are two independent
-implementations of one equation. `CLAUDE.md` records that **no published rotating
-benchmark exercises the `C′(ψ)` term**, which is precisely the term Li & Zhu got
-two signs wrong in; this would be the first outside check of it. The smallest
-comparison is source-against-source, pointwise on a prescribed `ψ`, with no solve
-on either side.
+**`GeneralPprimeFFprime` is the class to drive**, because it takes tabulated
+`p′` and `ff′` directly rather than solving for a normalisation to hit a target
+`p_axis` and `I_p`. That makes `F` a known function of the flux on both sides,
+which is what turns a comparison into a measurement.
 
-**Before any of that**: `freegs4e` is not importable here and geq's own paths
-point at another machine, so nothing on that side runs today. And the `φ₀`
-**gauge** differs — MEQ pins `φ₀(ReferenceRadius, ψ) = 0` per flux surface, geq
-pins one point globally at `ψ_n = 0.5` on the midplane — so the two codes'
-tabulated `N_s(ψ)` mean different things until it is reconciled. Compare `n_s`
-and `F`, never `N_s`.
+**BEWARE `../geq`, WHICH IS A DIFFERENT THING.** It is a thin wrapper on
+`freegs4e` for rotating **magnetic mirrors**: it sets `ffprime = fpol = fvac = 0`,
+so `g ≡ 0`, there is no toroidal field, and its safety factor is identically
+zero. A mirror cannot stand in for FB-6's machine case. Its value is to
+`FLOW-PLAN.md` instead — see *Toroidal flow* in `CLAUDE.md`, where its
+independent implementation of Abel (136) is the first outside check of the
+`C′(ψ)` term.
+
+**THE INTERIM COMPARISON, AVAILABLE BEFORE FB-1 LANDS.** MEQ cannot solve a free
+boundary yet, but the benchmark does not have to wait for it: run `freegs4e`
+free-boundary, take its converged LCFS, `ψ_ax`, `ψ_bnd` and profiles, fit the
+LCFS to MXH — MEQ has the shape and no fitter, and the fit is a dozen lines of
+numpy — and solve the **fixed**-boundary problem on it with the same `F`. That
+checks MEQ's elliptic solve against a free-boundary answer without needing MEQ's
+free boundary to work, and it is the natural rehearsal for FB-6.
+
+**Three things to reconcile, all measured rather than guessed.**
+
+* **`freegs4e`'s profiles are `dp/dψ_n` and `fdf/dψ_n`** — derivatives with
+  respect to **normalised** flux. MEQ's `MHDSource` takes `dp/dψ`. The
+  conversion divides the derivative column by `(ψ_bnd − ψ_ax)` while the
+  abscissa maps `ψ_n → ψ`. That is exactly the trap `examples/rotating-density.dat`
+  and its normalised twin exist to document, met from the other side: hand over
+  the wrong one and it parses, solves and converges to a plasma whose gradient
+  is out by a constant factor.
+* **MEQ's ψ is zero on `Γ`**, so `ψ_MEQ = ψ_fgs − ψ_bnd`, and `ψ_n` is affine in
+  it. Fixing `ψ_ax` to the converged value makes MEQ's tabulated `p′(ψ)` a fixed
+  function of `ψ`, which is a well-posed semi-linear problem and the right thing
+  to compare — the normalisation closure is a separate question.
+* **The grids are transposed**: MEQ writes `psi(Z,R)` at 129², `freegs4e` works
+  in `(R,Z)`. One transpose and one interpolation, and drop MEQ's
+  `extrapolated` nodes first.
+
+**THE ENVIRONMENT IS THE HARD-WON PART, SO IT IS WRITTEN DOWN.** `freegs4e`
+does not run out of the box here and `geq` does not run at all. What works:
+
+```sh
+python3 -m venv venv && venv/bin/pip install numpy scipy matplotlib h5py shapely numba
+PYTHONPATH=/home/ian/projects/freegs4e venv/bin/python your_driver.py
+```
+
+Deliberately **not** `pip install -e /home/ian/projects/freegs4e`, which enforces
+`requirements.txt` — `numpy<2.0`, `numba~=0.60`, `Shapely~=2.0.6` — and **none of
+those has a wheel for this machine's Python 3.14**. Shapely then tries to build
+from source and fails on a missing `geos_c.h`, which is not installed. Relaxed,
+`numpy 2.5.2`, `shapely 2.1.2` and **`numba 0.67`** all resolve and `freegs4e`
+imports and builds a `TestTokamak`.
+
+**`numba` is not optional in practice, though it looks it.** `critical.py` wraps
+its import in `try/except ImportError` and the fallback calls `warnings.warn`
+**without importing `warnings`**, so the no-numba path raises `NameError` and has
+evidently never been exercised. Install `numba` or patch a copy; do not expect
+the fallback to work.
 
 | | | acceptance |
 |---|---|---|
@@ -841,7 +881,7 @@ and `F`, never `N_s`.
 | **FB-3** | `ψ_bnd` as an unknown, plasma support still fixed. | Self-consistency of `ψ_bnd` to round-off, Newton order 2, exactly as `HighBetaConvergence` asserts for `ψ_ax` |
 | **FB-4** | The moving plasma support and cut quadrature. | The order that survives the cut, measured, against `k+1` — **and the cost of an inconsistent cut Jacobian measured in Newton's observed order**, which decides §5.3's two options |
 | **FB-5** | The augmented Newton as one bordered solve, and adaptivity through it. | `η` monotone through refinement with `Γ` fixed; assumption P.1 preserved |
-| **FB-6** | A machine case, against a fine-mesh reference. | Convergence to the reference; agreement with CEDRES++ where a published case exists |
+| **FB-6** | A machine case, against **`../freegs4e`**. | Agreement with an independent free-boundary tokamak code by a **different algorithm** — von Hagenow Green's functions, finite differences, Picard — on the same coils and the same tabulated `p′`, `ff′` through its `GeneralPprimeFFprime`. A fine-mesh self-comparison is the fallback, not the target: it shares every convention with the code it checks. See §7 |
 
 **FB-1 is the stage to protect.** It exercises `ExteriorDtN`, the transferred
 datum with a non-zero `g`, the transmission condition, the augmented solve and
@@ -1352,61 +1392,54 @@ FB-1 inherits. `FreeBoundaryCoupling.cpp` deliberately uses
 `ExtensionConvergence`'s Solov'ev surface instead, because `P` is a projection
 and needs no semicircle — but nothing that SOLVES can take that shortcut.
 
-### 7.7 The tiling of `Gamma` is red, and MEQ's is the only check of it
+### 7.7 The tiling was red, MEQ's diagnosis was wrong, and the mistake is the lesson
 
-**Measured 2026-09-05, on the circle `FreeBoundaryCoupling.cpp` cuts for the
-purpose.** `ExtensionBoundaryQuadrature`'s stated acceptance is that summing the
-boundary weights over the faces of `Γ_h` gives `|Γ|`, exactly as the region
-weights give `|Ω| − |D_h|`. That is a property of the **path family** rather than
-of the routine: adjacent faces must agree on the path through a shared vertex, or
-their images overlap or gap.
+**Filed and answered the same day, 2026-09-05.** At a 12th-order face rule the
+boundary weights summed to `|Γ|` only to 1.01e-04, 2.24e-05, 4.59e-06 at
+`n = 12, 24, 48`, converging at about `O(h²)` where the expectation is a
+mesh-independent floor near 1e-10. A one-variable control — the same `D_h` with
+`VertexConePath`'s cone off — put it back at the floor, so the cone was
+unambiguously the cause. MEQ filed that as **lost coverage**, arguing that *"a
+quadrature residual that converges is measuring a geometry rather than an
+instrument"*.
 
-| `n` | `h` | sum vs `|Γ|` | cone |
-|---|---|---|---|
-| 12 | 0.100 | **1.01e-04** | have 1, vertices 25, restricted 25, tighter 10, widened 0 |
-| 24 | 0.050 | **2.24e-05** | 53, 53, 24, 0 |
-| 48 | 0.025 | **4.59e-06** | 107, 107, 50, 0 |
+**THE ARGUMENT WAS WRONG AND THE HOLE IN IT IS WORTH REMEMBERING: TWO THINGS
+CONVERGE.** The second is a curve the *rule* under-resolves, which straightens as
+`h` falls. Refining the **rule** at fixed `h` separates them, because no
+quadrature recovers coverage that is not there. Measured on MEQ's own circle at
+`n = 12`, cone on:
 
-**It converges at about `O(h²)`, and that is the whole finding.** When the
-routine was written the same check read 4.85e-10, 4.64e-10, 6.38e-11 —
-mesh-independent, at the central difference's own floor on `∂a/∂ξ`. A residual
-that *converges* is measuring a geometric error rather than an instrument, so the
-images no longer tile `Γ`.
+| q8 | q12 | q20 | q40 | q80 |
+|---|---|---|---|---|
+| 2.61e-04 | 1.01e-04 | 1.34e-05 | 6.68e-08 | **5.40e-10** |
 
-**IT IS THE CONE, AND IT IS NOW MEASURED RATHER THAN SUSPECTED.** The cone is
-only available on a `SubMesh` with a parent, so a path built on a parentless copy
-of the same `D_h` is the identical family without it —
-`theConeIsWhatCostsTheTiling` is that control:
-
-| `n` | cone on | cone off |
-|---|---|---|
-| 12 | 1.01e-04 | **4.85e-10** |
-| 24 | 2.24e-05 | **4.64e-10** |
-| 48 | 4.59e-06 | **6.38e-11** |
-
-A factor of **2e5** on one variable, and the cone-off column reproduces the
-expectation recorded when the routine was written — which also settles that those
-numbers were measured on this geometry.
-
-**Why it costs anything is still not established**, and that is the part to work
-out before filing: tiling rests on adjacent faces agreeing at a shared vertex,
-which interpolating vertex directions gives by construction and a per-vertex
-restriction ought to preserve. The diagnostics say the cone fired at every vertex
-at every mesh and was strictly tighter than the half space at about 40% of them.
-**Upstream's own commit says the cone "changes nothing"**, which this contradicts
-directly.
-
-**MFEM'S OWN SUITE CANNOT SEE IT.** `test_darcy_extension.cpp` exercises
-`ExtensionRegionQuadrature` and names the boundary sweep only in a comment, so
-this check is the only one of the property anywhere. That is the argument for
-filing it, and the argument against relaxing the gate to make a suite green: it
-would throw away the only measurement that exists.
-
-**It does not block the transmission row**, which is measured against a closed
-form at 7.8e-16 and does not depend on the tiling being exact — a row is a
-contraction against whatever `Γ` the sweep visits. It does bound how well FB-1's
-transmission condition can hold, and so it is on FB-1's path rather than beside
+`5.40e-10` is the cone-off floor. **Coverage is exact either way.** What the cone
+costs is the smoothness of `ξ ↦ a(x(ξ))` — it drives the two interpolated vertex
+directions apart, the foot map roughens, and a fixed-order rule under-resolves
 it.
+
+**So the repair was the rule, not the gate.** The gate was never too tight. That
+distinction is the whole finding: relaxing it would have made the suite green and
+hidden a genuine under-resolution in MEQ's own transmission row, whose
+`transmissionQuadratureOrder` was the same 12 and is now 40.
+
+**And the acceptance beside it could not have caught it**, which is worth stating
+because it reads 7.8e-16.
+`theTransmissionRowIsTheBoundaryIntegralItClaims` builds its reference by
+sweeping `Γ` with the **same rule the row uses**, so the quadrature error is
+common to both sides and cancels exactly. That is deliberate — it is what
+isolates the contraction, the vdof ordering, the sign and the measure — but it
+makes the case blind to whether the rule resolves the foot map at all.
+
+**What upstream did with it**, all of it useful: reproduced it on their own disc,
+made the cone a `use_cone` constructor flag and turned it **off by default**,
+added the boundary-sweep tiling case MEQ asked for, and corrected their own
+commit message's *"changes nothing"*. They also measured that the cone does not
+do what it was added for — the aerofoil flux order it targeted is
+**pre-asymptotic** and recovers on its own — and connected it to MEQ's earlier
+signed-weight finding: **the cone is what makes the foot map backtrack**, so the
+`O(h)` unsigned overcount and this `O(h²)` residual are two readings of one
+thing.
 
 ## 8. Risks, in the order they are likely to bite
 
