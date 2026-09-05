@@ -205,7 +205,68 @@ cheap discriminator*.
 
 **What the driver refuses rather than approximates**: `[boundary] Type =
 "exact"` needs a closed form `meq::Source` does not carry, and exits 1 with an
-explanation. **That is now the only thing it refuses.**
+explanation. Since 2026-09-04 there are two more, and they are refusals about
+the **build** rather than about the file — `[solver] AssemblyMode = "threaded"`
+on an MFEM without OpenMP or thread safety, and `[solver] TraceSolver` naming a
+package this build lacks. Both are checked once at startup, before a mesh
+exists, so a run that cannot be honoured costs milliseconds.
+
+**THE TWO PERFORMANCE KEYS ARE THE ONLY SOLVER KNOBS EXPOSED TO TOML, AND THE
+LINE IS DRAWN WHERE IT IS FOR A REASON.** `AssemblyMode` and `TraceSolver`
+cannot change the answer — the assembly modes are asserted bit for bit and the
+trace solvers agree to 1e-14 — so a file may choose them freely.
+`Globalisation` and `NonlinearOrdering` are **not** exposed and must not be:
+*Should `PicardThenNewton` simply be the default?* measures three solve routes
+reaching discrete solutions **9.4% apart** on an under-resolved mesh, which is
+exactly the mesh an adaptive run starts from. A key that silently changes which
+equilibrium is reported is not a performance key.
+
+Two asymmetries in how the pair is handled, both deliberate. A wrong
+**spelling** fails at parse (`Config` is MFEM-free and can only check the
+string); an unavailable **choice** fails at startup (only the linked library
+knows). And an `AssemblyMode` the file *asked for* is refused, while one merely
+**inherited** from the default is downgraded to `Serial` — without that, the new
+`Threaded` default would make every example in the tree fail on a stock MFEM,
+which is most of them and is what CI builds.
+
+**AND THE DRIVER REFUSES `TraceSolver = "cudss"` EVEN WHERE THE BUILD HAS IT.
+IT IS WITHHELD, NOT UNIMPLEMENTED, AND THE REASON IS NOT THE MISSING
+`mfem::Device`.**
+
+A device solver is only worth having if the data **stays** on the device.
+`../mfem-hdg-dev`'s `doc/HDG-DEVICE-OFFLOAD.md` — on the branch MEQ builds from,
+and explicitly under construction — divides the element-local work into four
+groups and measures their shares of an NPC step: local dense linear algebra
+7–10%, **the integrators 46–53%**, the scatter 12–17%, and **the trace solve
+26–31%**, which is what cuDSS is. It then gates the whole thing on the
+integrators, in its own words: *"Two of the four groups are nearly free and
+doing only those is worse than doing nothing. Groups 1 and 4 leave the
+integrators on the host, so every iteration would copy the local blocks
+host↔device around host-side integrator work — plausibly slower than staying on
+the host throughout."*
+
+Group 2 needs a partial-assembly rewrite and is not built. **So a config-file
+cuDSS today is exactly the group-4-alone case that plan says not to do**: a
+Device would be configured, every Vector in the process would allocate through
+it, 58–70% of an NPC step would still run on the host, and each Newton
+iteration would pay a round trip for the one part that moved. The key opens when
+the offload work lands, not before.
+
+**There is an immediate failure as well, and it is what made the refusal urgent
+rather than only principled.** Found by exercising the key rather than reasoning
+about it: without a Device, `CuDSSSolver` does not fall back — it reads host
+pointers through the device-aware accessors and aborts with a raw
+`CUDA error … cudaMemcpyDeviceToDevice … invalid argument`, a message with
+nothing in it about the key that caused it. The **library** still offers cuDSS
+and must: `TraceSolverScaling` constructs the Device first and the
+`cuDSSTraceSolver` ctest is how its agreement with UMFPACK is checked at all.
+Only the config-file route is closed, and
+`theDriverRefusesASolverItCannotHonour` keeps it closed.
+
+**The transferable part**: exposing a knob makes reachable, by somebody who has
+not read the library's documentation, every precondition that documentation
+records. The Device requirement had been written down in `GradShafranov.hpp`
+all along.
 
 **THE INTERPOLATING WARM START IS WIRED, 2026-09-02, AND THIS PARAGRAPH USED TO
 SAY IT "NEEDS GSLIB AND IS NOT WRITTEN".** Both halves of that were false and had
@@ -306,7 +367,16 @@ The performance harness is separate and is not a ctest:
 
 ```sh
 tests/performance/scan.sh build 3            # both thread axes, ~40 min
+tests/performance/npc-scan.sh build 3        # the NONLINEAR one
 ```
+
+**`npc-scan.sh` sweeps the two thread axes TOGETHER, which is the opposite of
+what `scan.sh` does, and the inversion is the point.** `scan.sh` holds one axis
+at 1 while sweeping the other because sweeping both was measured to be
+misleading — and that rule is correct for *serial* assembly. Under threaded
+assembly the element-local work is nested inside an OpenMP region, where MKL
+suppresses its own threading, so `OMP = MKL = N` is the configuration that
+matters. See *Threading, measured*.
 
 `MFEM_DIR` defaults to `../mfem/install` and also reads the environment, so the
 `-D` is usually unnecessary. Never a bare `make -j` or `cmake --build -j`; see
@@ -3569,41 +3639,167 @@ together, the `k = 3` assembly blow-up swamps every other column. Full account
 under *Traps*; the short of it is `MKL_NUM_THREADS=1`, non-negotiable, and the
 culprit is `ComputeH()`'s dense LU rather than UMFPACK.
 
-**Threaded assembly is bit-exact and worth about 1.2x.**
-`SetAssemblyMode( Threaded )` threads the element-local half of `ComputeH()`;
-`SolverContract::threadedAssemblyReproducesSerialAssemblyExactly` requires
-`0.000e+00` over two degrees and two meshes — not a tolerance, because the
-mechanism is specific (element-local arithmetic reassociates nothing, the
-scatter stays serial and in element order). Measured 1.15x–1.33x from four
-threads up, and **0.86x at one thread**, the buffering costing more than the
-serial loop it imitates. MFEM measures 2.09x for the hybridized assembly
-*alone*; MEQ times all of `prepare()`, of which only that element loop threads.
-The scatter is the ceiling and cannot be threaded — an unfinalized
-`SparseMatrix` carries one `current_row` for the whole matrix, so two threads
-writing provably disjoint rows still collide, and the failure is a hang.
+**THREADED ASSEMBLY IS NOW EVERY ELEMENT-LOCAL LOOP, NOT JUST `ComputeH()`,
+AND THAT INVERTED THE DEFAULT ON 2026-09-04.** `SetAssemblyMode( Threaded )`
+used to thread the assembly alone. MFEM has since threaded `MultNL()` — the
+residual and the Jacobian assembly, and so `NPCResidual()` and `NPCGradient()`,
+which is **every NPC step** — plus `ReduceRHS()`, `ComputeSolution()` and the
+two RHS eliminations. The two kinds of loop are threaded differently and the
+difference is the scatter *target*: `ComputeH()` writes an unfinalized
+`SparseMatrix`, which carries one `current_row` and one RowNode allocator for
+the whole matrix, so its scatter stays serial and in element order; `MultNL()`
+writes a `Vector`, where disjoint indices really are independent, so it is
+walked in element **colour** order. Both are bit for bit — a colouring only
+changes the order in which a face's two elements accumulate, and `a + b = b + a`.
+MFEM notes this would *not* survive an `H1_Trace` (EDG) trace space, where a dof
+takes more than two contributions; MEQ's is `DG_Interface_FECollection`, so it
+holds.
 
-**THE ASSEMBLY DEFAULT IS `Serial`, AND A GATE ON `omp_get_max_threads() > 1`
-WAS TRIED AND REMOVED.** This is the place in this campaign where the isolated
-benchmark actively misled. Under that gate `HighBetaConvergence` went from
-**21.5 s to 39 s** — 1.8x slower, reproducibly — because MFEM forks a team and
-buffers *per call*, so a caller that assembles once amortises it and one that
-assembles hundreds of times inside a bordered Newton pays it every time. **Mesh
-size does not separate the two cases**: HighBeta's meshes are 128 and 512
-elements, and 512 is exactly where the isolated benchmark still showed a win.
-The solver cannot know which caller it has. So `Threaded` is an informed
-opt-in: **take it for a large mesh assembled a few times, leave it for a small
-one assembled hundreds of times.**
+**MEQ'S DEFAULT IS THEREFORE `Threaded` NOW, AND WAS `Serial`.** The measurement
+that settled it before was taken against the option as it then was, and the
+inversion is the whole justification:
+
+| | Serial | **Threaded** | |
+|---|---|---|---|
+| `HighBetaConvergence` | 3.22, 3.19 s | **1.34, 1.33 s** | **2.4x faster**, where the gate once made it **1.8x slower** |
+| `PedestalConvergence` | 233.3 s | **138.3 s** | 1.69x, the heaviest test in the suite |
+| example5 `k = 2, n = 24`, whole solve, 8 threads | 0.3690 s | **0.1313 s** | 2.81x |
+| example5 `k = 3, n = 16`, whole solve, 8 threads | 0.2797 s | **0.0927 s** | 3.02x |
+| the same at **one** thread | 0.3686 s | 0.3664 s | **1.01x — a wash** |
+
+**The case that used to argue against the flag is now the case that most argues
+for it**, and the reason is structural rather than lucky: a bordered Newton is
+dominated by residual evaluations rather than by assembly, and residuals are
+what `MultNL()` threading covers. The old note recording **0.86x at one thread**
+no longer holds either, which is what makes this safe as a default rather than
+merely faster on average.
+
+`defaultAssemblyMode()` is **build-conditional**, and it has to be:
+`buildForms()` passes the mode straight to MFEM, whose abort-rather-than-fall-back
+is only guarded by `setAssemblyMode()`, and the constructor bypasses the setter.
+A build without `MFEM_USE_OPENMP` or `MFEM_THREAD_SAFE` therefore defaults to
+`Serial`. `Config`'s default is a plain `Threaded` because that header is
+MFEM-free; `apps/meq.cpp` downgrades it when the build cannot honour it, and
+**refuses** only when the file said `"threaded"` explicitly.
+
+**THE BIT-EXACTNESS HOLDS AT `MKL_NUM_THREADS=1` AND NOT ABOVE IT**, which is
+new and is not a defect. `threadedAssemblyReproducesSerialAssemblyExactly` and
+its nonlinear sibling both require `0.000e+00`, and both get it under ctest,
+which sets that variable. At `MKL_NUM_THREADS=8` the two modes differ by
+**1.3e-15 in `ψ` and 1.3e-13 in the flux** — because the serial path hands MKL
+eight threads and the threaded path hands it one, so a blocked BLAS-3 sums in a
+different order from an unblocked loop. Arithmetic reassociation inside MKL,
+not a race in MFEM or in MEQ. It is also independent confirmation of the nesting
+result below: the only way the two modes can round differently is if MKL is
+doing something different in each.
+
+**AND THE NONLINEAR CASE HAD TO BE ADDED, BECAUSE THE EXISTING ONE STRUCTURALLY
+COULD NOT SEE THE LOOP THAT MATTERS.**
+`threadedAssemblyReproducesSerialAssemblyExactly` builds its source as an
+`mfem::FunctionCoefficient`, which takes MEQ's **linear** path:
+`usesNonlinearForms()` is false, `meq::SourceIntegrator` is never installed and
+`MultNL()` is never called. So it exercises `ComputeH()` and nothing else — which
+was the whole option when it was written.
+`threadedAssemblyReproducesSerialAssemblyOnANonlinearSource` is the missing case
+and it asserts three things: `ψ`, the flux, **and the Newton iteration count**.
+The count is the one with teeth — a racing *residual* moves the answer and the
+first two catch it, while a racing *gradient* reaches the same discrete solution
+by a longer path, which is exactly the failure *A wrong Jacobian is invisible to
+a convergence table* says no error norm and no rate can see.
+
+**IT FOUND A REAL RACE, IN THE ONE INTEGRATOR MEQ INSTALLS ON THAT LOOP.**
+MFEM states the obligation plainly and says it cannot check it: *"Any integrator
+the caller installs … sits on this loop and must be thread-safe too. An
+integrator holding per-point scratch as a plain member will race, silently."*
+`meq::SourceIntegrator` held exactly that — `mfem::Vector shape`, resized and
+refilled per quadrature point, shared across every element of a colour — and
+`SourceIntegrator` **is** the whole semi-linear term. It is now guarded on
+`MFEM_THREAD_SAFE`, the way MFEM guards its own (`HDGDiffusionIntegrator`'s
+dozen members are guarded the same way, and MEQ's build has
+`MFEM_THREAD_SAFE = YES`, so they do not exist here).
+`meq::PoloidalFieldCoefficient` carried the same defect, latent because nothing
+constructs it, and is guarded rather than deleted.
+
+**The test was checked to DISCRIMINATE, not merely to pass.** With the guard
+deliberately removed and the race reinstated, it fails 3 runs out of 3 — and it
+fails *loudly*, `NewtonSolver` aborting on a NaN residual rather than returning
+a quietly wrong answer, because a concurrent `Vector::SetSize` is a reallocation
+and so is memory corruption rather than merely a stale read. **Do not read that
+as a guarantee the failure would always be loud**: the same race on a different
+mesh or thread count can just as easily return finite nonsense.
+
+**One obligation is recorded and NOT closed**: `meq::RotatingSource` throws from
+`f()` and `dFdPsi()` when a species temperature goes non-positive or the
+quasineutrality root find fails, and an exception escaping an OpenMP structured
+block is undefined behaviour. It is left recorded because the loop is MFEM's —
+MFEM has the same exposure through its own `MFEM_VERIFY` under
+`MFEM_USE_EXCEPTIONS` — and inventing an error path the library does not support
+would replace a crash with a silent NaN. Prefer `Serial` for a rotating source
+until the iterate is known good.
 
 **PARDISO beats UMFPACK on the trace solve, and beats it even sequentially** —
 1.50x on analyse-plus-factor and 1.41x on the backsolve at 37,248 trace dofs
 with `MKL_NUM_THREADS=1` on both sides, agreeing to 1.0e-14 or better at every
 point. It scales to about 8 threads (1.87x setup, 1.96x solve; 16 buys nothing
-more), which would make the end-to-end gap 2.83x and 3.13x. **MEQ cannot have
-that**, because `MKL_NUM_THREADS` is process-wide and the setting that makes
-PARDISO fast is the setting that makes `ComputeH()` forty times slower at
-`k = 3`. It stays unreachable until the element-local factorisation stops going
-through threaded MKL — `LocalFactorMode::Batched`, or an
-`mkl_set_num_threads_local()` around the trace solve. Neither is done.
+more).
+
+**AND THOSE THREADS ARE NOW SPENDABLE, WHICH THIS FILE SAID THEY WERE NOT.
+THREADED ASSEMBLY IS WHAT UNLOCKS THEM, AND IT NEEDED NO NEW CODE.** The
+paragraph that stood here said `MEQ cannot have that`, because `MKL_NUM_THREADS`
+is process-wide and the setting that makes PARDISO fast is the setting that
+makes `ComputeH()` forty times slower at `k = 3`; and that item 0 of *What to
+do* — `mkl_set_num_threads_local()` around the trace solve, or
+`LocalFactorMode::Batched` — was the way out. **Neither is needed.**
+
+**MKL SUPPRESSES ITS OWN THREADING INSIDE AN ACTIVE OpenMP REGION.** Once the
+element loop is itself such a region, the element-local dense work is *nested*,
+MKL runs it sequentially, and `MKL_NUM_THREADS` costs it nothing — while the
+trace solve, which runs on the master thread **outside** any parallel region,
+still takes all of them. Measured on a whole nonlinear solve, `k = 3, n = 16`,
+`OMP_NUM_THREADS=8`:
+
+| | `MKL=1` | `MKL=8` | |
+|---|---|---|---|
+| **Serial** assembly | 0.2797 s | **107.19 s** | 383x, and this is the trap this file records |
+| **Threaded** assembly | 0.0927 s | **0.0834 s** | immune |
+
+**1285x between the two modes at `MKL=8`.** The recipe is therefore
+`AssemblyMode::Threaded` + `TraceSolver::Pardiso` + `OMP_NUM_THREADS` and
+`MKL_NUM_THREADS` set to the **same** value above one. What PARDISO's threads
+themselves add on top is modest — 0.1313 s to 0.1163 s at `k = 2, n = 24`, about
+**1.13x** — so the threading win is overwhelmingly the assembly and PARDISO is
+the part that makes it *safe* to ask for MKL threads at all.
+
+**TWO CONFIGURATIONS TO REFUSE OR WARN ABOUT, AND BOTH WERE MET WHILE
+MEASURING.**
+
+* **UMFPACK can never take MKL threads, whatever the assembly mode.** Its BLAS
+  calls are in the trace solve, on the master thread, outside any parallel
+  region — so they are *not* nested and get the full count. Measured in situ: a
+  `NpcThreadScaling` sweep at `MKL=8` that included UMFPack rows sat at **266%
+  CPU making no progress**, which is precisely the barrier-spinning signature
+  this file records for `SolovievConvergence` at 1.24 s against 177.83 s. If
+  `MKL_NUM_THREADS > 1`, use PARDISO.
+* **Threaded assembly at `OMP_NUM_THREADS=1` with MKL threads on is
+  catastrophic**, and it is a configuration a user can reach by accident. A team
+  of one thread does not get the nested-region suppression. Measured on the
+  isolated element-local kernels: **12.4 s against 0.069 s serial** at `k = 3`.
+  `apps/meq.cpp` warns about exactly this combination at startup, and only when
+  it is actually present.
+
+**AND THE `ComputeH()` STORY THIS FILE TOLD WAS WRONG IN ONE DETAIL WORTH
+CORRECTING.** Item 0 names "`ComputeH()`'s element-local dense **LU**". Measured
+on the kernels at MEQ's own block sizes, `dgetrf` **does not degrade at all** —
+0.0137 s at `MKL=1` against 0.0138 s at `MKL=8` at `k = 3`, and 0.0256 against
+0.0262 at `k = 4`. MKL does not thread a `dgetrf` that small. What degrades is
+the **back-substitution** (`dgetrs` with `nrhs` = the element's trace dofs) and
+the **Schur-complement `dgemm`**: at `k = 3`, 0.0070 to 0.0331 and 0.0020 to
+0.0294. The `k = 2` / `k = 3` threshold this file records is confirmed — `k = 2`
+does not move at any thread count — but the **40x magnitude is not reproduced**
+on the clean single-MKL link line, which post-dates that measurement; the
+kernels give 3.3x. The 383x above is in situ and on the whole nonlinear solve,
+where `MultNL()`'s element-local work is hit on every residual and every
+Jacobian rather than once per assembly.
 
 **cuDSS is correct here and not measurable here.** It agrees with UMFPACK to
 **3.5e-14 or better** from 9,408 to 148,224 trace dofs, which is the question
@@ -3626,30 +3822,48 @@ device timing in this project must do the same.**
 
 **What a fresh `GradShafranovSolver` does:** `setTraceSolver()` is `UMFPack`
 (the only backend present in every build, and what every rate in the suite was
-measured with); `setAssemblyMode()` is `Serial`, unconditionally, per the gate
-above; `MKL_NUM_THREADS` is 1, set on every ctest.
+measured with); `setAssemblyMode()` is **`Threaded` wherever the build can
+honour it** and `Serial` otherwise — build-conditional since 2026-09-04, see
+above for why the default moved; `MKL_NUM_THREADS` is 1, set on every ctest.
 
-**The fastest reachable set is PARDISO plus threaded assembly at 8**, and it is
-worth **1.24x** end to end on one linear solve at `k = 2, n = 64` — 0.590 s
-against the default's 0.732 s. It is not the default because
+**The fastest reachable set is PARDISO plus threaded assembly at 8**, and the
+1.24x this paragraph used to quote was measured on one **linear** solve, where
+the flag threaded assembly and nothing else. On a **nonlinear** solve — which is
+what MEQ does — the same set is worth **2.8x to 3.0x**, because the flag now
+threads the residual and the Jacobian too. PARDISO's own contribution within
+that is about **1.13x**; the rest is the assembly mode.
+
+Threaded assembly **is** the default now. PARDISO is not, because
 `MFEM_USE_MKL_PARDISO` is off in most builds and oneMKL's terms are not
-everybody's to accept; `setTraceSolver()` and `traceSolverAvailable()` are how
-a caller who has it takes it. **Read that number for its size**: the whole
-ladder is 1.24x, dwarfed by the `MKL_NUM_THREADS=1` fix that preceded it (3x on
-ordinary tests, 140x at `k ≥ 3`). The large win here has already been taken.
+everybody's to accept; `setTraceSolver()`, `traceSolverAvailable()` and
+`[solver] TraceSolver` are how a caller who has it takes it. **The reason to
+take it is not its 1.13x** — it is that PARDISO is the only trace solver that
+tolerates `MKL_NUM_THREADS > 1` at all, and UMFPACK collapses there whatever the
+assembly mode.
 
 ### What to do, in order of value
 
 **Reordered 2026-08-30 by the threading measurements, which put a new item at
 the top and demoted the one that used to be there.**
 
-0. **Get `ComputeH()`'s element-local dense LU off threaded MKL.** The largest
-   single item, and it was invisible until the link line was fixed. Forty times
-   at `k = 3`, and it is *also* what makes PARDISO's 2.8x unreachable, since
-   `MKL_NUM_THREADS` is process-wide and MEQ must keep it at 1. Two routes and
-   neither is done: `mkl_set_num_threads_local()` around the trace solve, or
-   `LocalFactorMode::Batched` for the local factorisations. Anything else on
-   this list is smaller.
+0. ~~**Get `ComputeH()`'s element-local dense LU off threaded MKL.**~~ —
+   **CLOSED 2026-09-04, AND NEITHER PROPOSED ROUTE WAS TAKEN.** It named
+   `mkl_set_num_threads_local()` around the trace solve or
+   `LocalFactorMode::Batched`, and the answer turned out to be
+   `AssemblyMode::Threaded`, which MFEM had already written for a different
+   reason: MKL suppresses its own threading inside an active OpenMP region, so
+   the element-local work is nested and free. 1285x between the two modes at
+   `MKL=8`, `k = 3`. Full account under *Threading, measured*.
+
+   **Two things in the item's own wording were wrong and are worth correcting.**
+   It is not the dense **LU** — `dgetrf` does not degrade at these block sizes at
+   all — but the back-substitutions and the Schur-complement `dgemm`. And
+   `LocalFactorMode::Batched` would not have fixed it: MFEM's own documentation
+   says that setting batches `InvertA()`/`InvertD()`, which run once from
+   `Finalize()`, while the factorisation that runs once per *linearisation* is
+   inside `ComputeElementH()` — the **cold** path, measured by MFEM to stay
+   inside run-to-run scatter in situ. It also aborts on an exact zero pivot where
+   the serial loop carries on, so it is not a free swap. **Do not take it.**
 
 **And the older list below, which the asymmetry finding had already reordered.**
 An earlier version ranked Cholesky second and a per-cell Cholesky fourth, on
@@ -4288,8 +4502,12 @@ src/meq/     the library. Config, Profiles, Source, SourceFactory,
 apps/        drivers. Only meq.cpp, and MEQ_BUILD_APP defaults ON.
 tests/       unit/ (Boost.Test), convergence/ (rate assertions),
              analytic/ (closed-form solutions used by both),
-             performance/ (TraceSolverScaling + scan.sh -- built, NOT a ctest,
-             because every number in it is a timing)
+             performance/ (TraceSolverScaling + scan.sh for the LINEAR path,
+             NpcThreadScaling + npc-scan.sh for the NONLINEAR one, and
+             InversionScaling -- all built, NONE a ctest, because every
+             number in them is a timing. The NPC one exists separately
+             because a linear solve never calls MultNL(), so it cannot see
+             the loop AssemblyMode::Threaded now spends most of its time in)
 tools/       plotting and visualisation. plot_equilibrium.py reads the
              NetCDF; tools/README.md says which of the three output formats
              goes with which reader, and why they are not interchangeable

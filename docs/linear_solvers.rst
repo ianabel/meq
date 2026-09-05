@@ -28,6 +28,8 @@ unknown, the bordered system is solved by block elimination against the *same*
 factorisation of the trace Jacobian, costing one extra backsolve per Newton step
 and nothing else. See :doc:`normalised_flux`.
 
+.. _linear-trace-solver:
+
 Choosing a trace solver
 -----------------------
 
@@ -120,14 +122,13 @@ That third entry is the surprise, and it is why the axes must be separated.
 
 .. warning::
 
-   **Set** ``MKL_NUM_THREADS=1``. MEQ's inner loop factorises a great many
-   *small* dense matrices — one or two per element, per residual evaluation —
-   and above a block size that depends on your BLAS, each of those calls pays for
-   a thread fork and a barrier that dwarfs the arithmetic. Measured on the
-   development machine the effect was dramatic and grew rapidly with polynomial
-   degree, to the point where a production run at high degree would have been
-   unusable and would have looked like a solver problem rather than a threading
-   one.
+   **With serial assembly, set** ``MKL_NUM_THREADS=1``. MEQ's inner loop
+   factorises a great many *small* dense matrices — one or two per element, per
+   residual evaluation — and above a block size that depends on your BLAS each of
+   those calls pays for a thread fork and a barrier that dwarfs the arithmetic.
+   Measured on the development machine, a whole nonlinear solve at :math:`k = 3`
+   went from 0.28 s to **107 s** when MKL threads were turned on under serial
+   assembly.
 
    Where the threshold sits is a property of your BLAS, not of MEQ, so **measure
    it on your machine**. Every registered test sets the variable for itself, and
@@ -135,48 +136,106 @@ That third entry is the surprise, and it is why the axes must be separated.
 
 .. important::
 
-   **This is in genuine tension with the threaded trace solvers**, which want
-   MKL threads and are measurably faster with them. ``MKL_NUM_THREADS`` is
-   process-wide, so MEQ cannot have both, and the setting that makes the trace
-   solve fast is the setting that makes the element-local factorisations slow.
-   Resolving it needs the element-local factorisation to stop going through
-   threaded MKL — either a thread-count scope around the trace solve, or a
-   batched local factorisation. Neither is done, and it is the largest single
-   performance item outstanding.
+   **Threaded assembly removes this constraint, and that is the main reason to
+   take it.** MKL suppresses its own threading inside an *active* OpenMP parallel
+   region. Once the element loop is itself such a region, the element-local dense
+   work is nested, MKL runs it sequentially, and ``MKL_NUM_THREADS`` costs it
+   nothing — while the trace solve, which runs on the master thread outside any
+   parallel region, still gets all of them.
+
+   Measured on a whole nonlinear solve at :math:`k = 3`, ``OMP_NUM_THREADS=8``:
+
+   .. list-table::
+      :header-rows: 1
+      :widths: 34 33 33
+
+      * -
+        - ``MKL_NUM_THREADS=1``
+        - ``MKL_NUM_THREADS=8``
+      * - Serial assembly
+        - 0.2797 s
+        - **107.19 s**
+      * - Threaded assembly
+        - 0.0927 s
+        - **0.0834 s**
+
+   A factor of **1285** between the two modes with MKL threads on, and threaded
+   assembly is simply immune. This is what makes PARDISO's MKL threads spendable
+   at all: earlier versions of this page said MEQ "cannot have both" and that
+   resolving it needed either a thread-count scope around the trace solve or a
+   batched local factorisation. Neither turned out to be necessary.
+
+   **The recipe, if you want threaded PARDISO**: ``AssemblyMode = "threaded"``,
+   ``TraceSolver = "pardiso"``, and ``OMP_NUM_THREADS`` and ``MKL_NUM_THREADS``
+   set to the *same* value greater than one.
+
+.. warning::
+
+   **UMFPACK can never take MKL threads**, whatever the assembly mode. Its BLAS
+   calls happen in the trace solve, on the master thread, outside any parallel
+   region — so they are not nested and get the full thread count, which is
+   exactly the fork-and-barrier collapse described above. If
+   ``MKL_NUM_THREADS`` is greater than one, use PARDISO.
+
+   And **do not** combine threaded assembly with ``OMP_NUM_THREADS=1`` and MKL
+   threads. A one-thread team does not get the nested-region suppression, and the
+   element-local work then pays full MKL threading on every call. MEQ warns about
+   this combination at startup.
 
 Threaded assembly
 ~~~~~~~~~~~~~~~~~
 
-:cpp:func:`meq::GradShafranovSolver::setAssemblyMode` threads the element-local
-half of the hybridization's assembly. It requires MFEM built with both OpenMP
-and thread safety, and it *aborts* rather than falling back without them — so
-MEQ refuses it at the setter with a clear message instead.
+:cpp:func:`meq::GradShafranovSolver::setAssemblyMode` threads **every**
+element-local loop in the hybridization: the assembly, and — since MFEM threaded
+its ``MultNL`` — the residual and the Jacobian, which is to say every step of
+the nonlinear solve. It requires MFEM built with both OpenMP and thread safety,
+and it *aborts* rather than falling back without them, so MEQ refuses it at the
+setter with a clear message instead and falls back to serial when the mode was
+merely inherited rather than asked for.
 
-The two modes agree **bit for bit**, which MEQ asserts as an exact equality
-rather than a tolerance: the mechanism is specific, in that element-local
-arithmetic reassociates nothing and the scatter stays serial and in element
-order. The scatter is also the ceiling, and it cannot be threaded — an
-unfinalized sparse matrix carries one insertion cursor for the whole matrix, so
-two threads writing provably disjoint rows still collide, and the failure is a
-hang rather than a wrong answer.
+The two modes agree **bit for bit at** ``MKL_NUM_THREADS=1``, which MEQ asserts
+as an exact equality rather than a tolerance, on a linear source *and* on a
+nonlinear one. The mechanism is specific: element-local arithmetic reassociates
+nothing, the scatter into the trace matrix stays serial and in element order, and
+where a colouring is used instead it only changes the order in which a face's two
+elements accumulate — and :math:`a + b = b + a` exactly.
 
-.. warning::
+.. note::
 
-   **The default is** ``Serial``, **unconditionally, and an automatic gate on
-   thread availability was written and removed.** This is where an isolated
-   benchmark most misled: the library forks a team and buffers *per call*, so a
-   caller that assembles once amortises that and a caller that assembles
-   hundreds of times inside a bordered Newton pays it every time. Under the
-   gate, a test that assembles repeatedly on small meshes got substantially
-   *slower*.
+   Above ``MKL_NUM_THREADS=1`` the two modes differ at round-off — about
+   1e-15 in :math:`\psi` — because the serial path hands MKL many threads and
+   the threaded path hands it one, and a blocked BLAS-3 sums in a different order
+   from an unblocked loop. That is arithmetic reassociation inside MKL, not a
+   race, and it is why the exactness assertions run at one MKL thread.
 
-   **Mesh size does not separate the two cases** — the meshes in question were
-   in the range where the isolated benchmark still showed a win. The solver
-   cannot know which kind of caller it has.
+.. note::
 
-   So ``Threaded`` is an informed opt-in: **take it for a large mesh assembled a
-   few times; leave it for a small one assembled hundreds of times.** Measure it
-   on your own workload.
+   **The default is** ``Threaded`` **on a build that supports it, and it was**
+   ``Serial`` **until 2026-09-04.** The change is a change of measurement rather
+   than of opinion, and the earlier reasoning is worth knowing because it was
+   correct at the time.
+
+   An automatic gate on thread availability had been written and removed: a test
+   that assembles a small system hundreds of times inside a bordered Newton got
+   **1.8× slower** under it, because the library forks a team and buffers *per
+   call*, so a caller that assembles once amortises that and a caller that
+   assembles repeatedly pays it every time. Mesh size did not separate the two
+   cases, so the solver could not know which caller it had.
+
+   **That argument was about the assembly loop, which was then the only loop the
+   flag touched.** Now that the residual and the Jacobian are threaded too, a
+   bordered Newton is dominated by work the flag *does* parallelise. The same
+   test, same machine, re-measured: **3.2 s serial against 1.33 s threaded** —
+   2.4× faster where it was 1.8× slower. The heaviest test in the suite went from
+   233 s to 138 s.
+
+   At one thread the flag is a wash (1.01), which is what makes it safe as a
+   default; the older note recording 0.86× there no longer holds.
+
+There is still a ceiling, and it is the scatter into the trace matrix. That
+cannot be threaded — an unfinalized sparse matrix carries one insertion cursor
+for the whole matrix, so two threads writing provably disjoint rows still
+collide, and the failure is a hang rather than a wrong answer.
 
 Measuring performance
 ---------------------

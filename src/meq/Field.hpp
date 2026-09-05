@@ -78,7 +78,27 @@ namespace meq
 		private:
 			mfem::GridFunction const &q;
 			int component;
+
+			/// Per-evaluation scratch, and a MEMBER only in a build that cannot
+			/// thread -- MFEM's own convention, and the same guard
+			/// meq::SourceIntegrator carries. A Coefficient is Eval()ed from
+			/// inside an integrator, so anything installed on
+			/// DarcyHybridization::MultNL()'s threaded element loop would share
+			/// this vector across elements.
+			///
+			/// Nothing constructs this class today, which is why the defect was
+			/// latent rather than live: only the free meq::poloidalField() is
+			/// used. It is guarded rather than deleted because a coefficient is
+			/// the natural thing to hand to an output integrator later, and a
+			/// loaded gun in documented public API is worse than either.
+			///
+			/// GetVectorValue( tr, ip, ... ) is already the REENTRANT overload
+			/// -- it takes the transformation rather than an element index, so
+			/// it never touches Mesh's shared transformation cache. The member
+			/// was the whole of the problem.
+#ifndef MFEM_THREAD_SAFE
 			mfem::Vector value;
+#endif
 	};
 }
 

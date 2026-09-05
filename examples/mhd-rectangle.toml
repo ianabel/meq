@@ -216,6 +216,33 @@ NewtonMaxIterations = 20
 NewtonRelativeTolerance = 1.0e-10
 NewtonAbsoluteTolerance = 1.0e-14
 
+# AND TWO PERFORMANCE KEYS, LEFT AT THEIR DEFAULTS AND WRITTEN OUT SO THAT THEY
+# ARE DISCOVERABLE. AssemblyMode's default became "threaded" on 2026-09-04, and
+# on a build without MFEM_USE_OPENMP and MFEM_THREAD_SAFE it silently becomes
+# "serial" -- writing it here makes it a REQUEST instead, which such a build
+# refuses. Delete the line if you want the run to work everywhere. Neither may change the answer -- the two assembly modes are
+# asserted bit for bit against each other and the three trace solvers agree to
+# about 1e-14 -- so this configuration with either value changed must produce the
+# same equilibrium, and if it does not that is a defect and not a tuning result.
+#
+# AssemblyMode = "threaded" threads every element-local loop in the
+# hybridization: the assembly, and since MFEM threaded MultNL(), the residual
+# and the Jacobian of every Newton step. It needs an MFEM built with
+# MFEM_USE_OPENMP and MFEM_THREAD_SAFE, and MEQ refuses it at startup with a
+# message naming those options rather than letting MFEM abort.
+#
+# TraceSolver = "pardiso" needs MFEM_USE_MKL_PARDISO, which most builds do not
+# have -- oneMKL's licence is not everybody's to accept. It is faster than
+# UMFPACK even single-threaded, and unlike UMFPACK it can spend MKL threads.
+#
+# If you set AssemblyMode = "threaded", set OMP_NUM_THREADS and MKL_NUM_THREADS
+# to the SAME value greater than one. See docs/linear_solvers.rst: the one
+# combination to avoid is threaded assembly at OMP_NUM_THREADS=1 with MKL
+# threads on, which MEQ warns about because it is pathological rather than
+# merely slow.
+AssemblyMode = "threaded"
+TraceSolver = "umfpack"
+
 [output]
 # Writes ./mhd-rectangle.mesh, ./mhd-rectangle_psi.gf and
 # ./mhd-rectangle_grad_psi.gf for GLVis and for meq's own restart;

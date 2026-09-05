@@ -411,6 +411,61 @@ since that is an ellipse.
    * - ``NewtonAbsoluteTolerance``
      - ``1.0e-12``
      - 
+   * - ``AssemblyMode``
+     - ``"threaded"``
+     - ``"serial"`` or ``"threaded"``. Who computes the element-local work.
+       See :ref:`linear-threading`.
+   * - ``TraceSolver``
+     - ``"umfpack"``
+     - ``"umfpack"`` or ``"pardiso"``. Which direct solver factorises the
+       hybridized trace system. See :ref:`linear-trace-solver`. ``"cudss"``
+       parses but the driver refuses it — see the note below.
+
+.. note::
+
+   **Neither of the last two may change the answer, and that is what makes them
+   safe to expose.** The two assembly modes are asserted **bit for bit** against
+   each other, on a linear source and on a nonlinear one; the three trace
+   solvers agree to about 1e-14. So the same configuration file with a different
+   value for either must produce the same equilibrium, and if it does not, that
+   is a defect rather than a tuning outcome.
+
+   They are also the only keys in the file whose validity depends on how MFEM
+   was **built**. A misspelling is refused when the file is parsed; a value
+   naming a solver or a threading mode this binary does not have is refused at
+   startup, before any mesh is built, with a message naming the CMake option.
+   Two different faults, two different messages — MEQ never substitutes a
+   solver you did not ask for, precisely because all three reach the same answer
+   and the substitution would be invisible.
+
+.. note::
+
+   ``TraceSolver = "cudss"`` is a valid spelling and the **library** supports it,
+   but the **driver refuses it** even on a build that has cuDSS — and it is
+   withheld rather than merely unimplemented.
+
+   A device solver is only worth having if the data **stays** on the device.
+   MEQ's element-local integrators and its scatter into the trace matrix — most
+   of a Newton step between them — have no device kernels yet, so a device trace
+   solve would copy the system across the bus once per iteration in order to
+   accelerate one part of it. MFEM's own HDG device-offload plan reaches the same
+   conclusion about doing this group on its own: *"doing only those is worse than
+   doing nothing … plausibly slower than staying on the host throughout"*. That
+   work is under construction upstream, and this key will open when it lands.
+
+   There is an immediate failure too, which is what made the refusal urgent
+   rather than only principled: without an ``mfem::Device`` configured, cuDSS
+   does not fall back. It reads host pointers as device pointers and aborts
+   inside CUDA, with a message that says nothing about the key that caused it.
+
+.. warning::
+
+   ``AssemblyMode = "threaded"`` with ``OMP_NUM_THREADS=1`` and
+   ``MKL_NUM_THREADS`` greater than one is a **pathological** combination and
+   MEQ warns about it at startup. A one-thread OpenMP team does not get MKL's
+   nested-region suppression, so the element-local dense work pays full MKL
+   threading on every call: measured 12.4 s against 0.069 s at :math:`k = 3`.
+   Either raise ``OMP_NUM_THREADS`` or set ``MKL_NUM_THREADS=1``.
 
 .. note::
 

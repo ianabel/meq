@@ -407,6 +407,178 @@ int main( int argc, char **argv )
 		return ConfigurationError;
 	}
 
+	/*
+	 * ---- the two performance keys, resolved before any work is done ----
+	 *
+	 * [solver] AssemblyMode and TraceSolver are the only keys in the file whose
+	 * validity depends on how MFEM was BUILT rather than on what the file says.
+	 * Config parses the spelling and stops there, deliberately: it is one of the
+	 * four translation units CI compiles without MFEM at all, so it cannot ask
+	 * whether this build has OpenMP, or PARDISO, or cuDSS.
+	 *
+	 * So the question is asked here, and asked ONCE, before a mesh is built or a
+	 * source is assembled -- a run that is going to be refused for its build
+	 * should be refused in milliseconds and not after the first cycle. That also
+	 * means setAssemblyMode() and setTraceSolver() inside makeSolver() cannot
+	 * throw, which matters because makeSolver() runs once per adaptive cycle and
+	 * an exception there would be indistinguishable from a failed solve.
+	 *
+	 * Exit code 1, because an unavailable solver is a configuration fault: the
+	 * file asks for something this binary cannot do. The message names the CMake
+	 * option rather than the symptom, since the fix is a rebuild.
+	 */
+	using AM = meq::GradShafranovSolver::AssemblyMode;
+	using TS = meq::GradShafranovSolver::TraceSolver;
+
+	AM assemblyMode =
+		( config->getSolver().assemblyMode == meq::AssemblyModeType::Threaded )
+		? AM::Threaded : AM::Serial;
+
+	TS traceSolver = TS::UMFPack;
+	switch ( config->getSolver().traceSolver )
+	{
+		case meq::TraceSolverType::UMFPack: traceSolver = TS::UMFPack; break;
+		case meq::TraceSolverType::Pardiso: traceSolver = TS::Pardiso; break;
+		case meq::TraceSolverType::cuDSS:   traceSolver = TS::cuDSS;   break;
+	}
+
+	if ( !meq::GradShafranovSolver::assemblyModeAvailable( assemblyMode ) )
+	{
+		/*
+		 * ASKED FOR IS REFUSED; INHERITED IS DOWNGRADED. The default is
+		 * "threaded" and most builds of MFEM have neither MFEM_USE_OPENMP nor
+		 * MFEM_THREAD_SAFE, so refusing unconditionally would make every
+		 * example in this repository fail on a stock build -- including the one
+		 * CI compiles. A file that says nothing has expressed no preference and
+		 * gets the mode that works.
+		 *
+		 * A file that SAYS "threaded" is a different matter and is refused, for
+		 * the reason the trace solver is refused two paragraphs down: a caller
+		 * naming a mode has a reason, and silently doing something else would
+		 * be invisible in the answer, both modes reaching the same equilibrium.
+		 */
+		if ( config->getSolver().assemblyModeWasGiven )
+		{
+			std::fprintf( stderr,
+				"MEQ: [solver] AssemblyMode = \"threaded\" needs an MFEM built with\n"
+				"     both MFEM_USE_OPENMP and MFEM_THREAD_SAFE, and this one has at\n"
+				"     least one of them off. MFEM aborts rather than falling back to\n"
+				"     the serial loop, so this is refused here instead.\n"
+				"     Use AssemblyMode = \"serial\", or rebuild MFEM.\n" );
+			return ConfigurationError;
+		}
+		assemblyMode = AM::Serial;
+	}
+
+	/*
+	 * cuDSS IS REFUSED BY THE DRIVER EVEN WHERE THE BUILD HAS IT, AND THE REASON
+	 * IS NOT THAT THE DRIVER CONFIGURES NO mfem::Device. IT IS THAT CONFIGURING
+	 * ONE WOULD BE THE WRONG TRADE UNTIL THE REST OF THE SOLVE GOES WITH IT.
+	 *
+	 * A device solver is only worth having if the data STAYS on the device.
+	 * MFEM's own plan for this -- doc/HDG-DEVICE-OFFLOAD.md on the branch MEQ
+	 * builds from, which is explicitly under construction -- divides the
+	 * element-local work into four groups and measures their shares:
+	 *
+	 *     group 1  local dense linear algebra     7-10% of an NPC step
+	 *     group 2  the integrators               46-53%
+	 *     group 3  the scatter into the matrix   12-17%
+	 *     group 4  THE TRACE SOLVE               26-31%   <- this is cuDSS
+	 *
+	 * and it gates the whole thing on group 2, in its own words: "Two of the
+	 * four groups are nearly free and doing only those is worse than doing
+	 * nothing. Groups 1 and 4 leave the integrators on the host, so every
+	 * iteration would copy the local blocks host-device around host-side
+	 * integrator work -- plausibly slower than staying on the host throughout."
+	 *
+	 * Group 2 needs a partial-assembly rewrite and is not built. So exposing
+	 * cuDSS from a config file today is precisely the group-4-alone case: MEQ
+	 * would configure a Device, every Vector in the process would allocate
+	 * through it, the integrators and the scatter -- 58% to 70% of an NPC step
+	 * -- would still run on the host, and each Newton iteration would pay a
+	 * round trip for the one part that moved.
+	 *
+	 * THERE IS ALSO AN IMMEDIATE FAILURE, and it is what made the refusal
+	 * urgent rather than merely principled. Without a Device, CuDSSSolver does
+	 * not fall back: it reads its matrix through SparseMatrix::ReadI/ReadJ/
+	 * ReadData and its vectors through Read()/Write(), which hand back HOST
+	 * pointers, and it aborts inside CUDA with
+	 * `cudaMemcpyDeviceToDevice ... invalid argument` -- a message with nothing
+	 * in it about the key that caused it.
+	 *
+	 * The LIBRARY still offers cuDSS and should: it is how correctness on the
+	 * device path is checked at all. tests/performance/TraceSolverScaling.cpp
+	 * constructs the Device first, and the `cuDSSTraceSolver` ctest pins cuDSS
+	 * against UMFPACK. What is refused here is only the config-file route, and
+	 * only until the field data has a reason to be on the device.
+	 */
+	if ( traceSolver == TS::cuDSS )
+	{
+		std::fprintf( stderr,
+			"MEQ: [solver] TraceSolver = \"cudss\" is not available through this\n"
+			"     driver, and it is withheld rather than merely unimplemented.\n"
+			"\n"
+			"     A device solver is only worth having if the data stays on the\n"
+			"     device. MEQ's element-local integrators and its scatter into\n"
+			"     the trace matrix -- together most of a Newton step -- have no\n"
+			"     device kernels yet, so a device trace solve would copy the\n"
+			"     system across the bus once per iteration to accelerate one\n"
+			"     part of it. That is slower than staying on the host, which is\n"
+			"     what MFEM's own HDG device-offload plan concludes about doing\n"
+			"     exactly this group on its own.\n"
+			"\n"
+			"     Use \"umfpack\" or \"pardiso\". cuDSS stays reachable from the\n"
+			"     library, which is how its agreement with UMFPACK is checked.\n" );
+		return ConfigurationError;
+	}
+
+	if ( !meq::GradShafranovSolver::traceSolverAvailable( traceSolver ) )
+	{
+		char const *needs =
+			( traceSolver == TS::Pardiso ) ? "MFEM_USE_MKL_PARDISO"
+			: ( traceSolver == TS::cuDSS ) ? "MFEM_USE_CUDSS" : "MFEM_USE_SUITESPARSE";
+		std::fprintf( stderr,
+			"MEQ: [solver] TraceSolver names a solver this build does not have;\n"
+			"     it needs %s. It is refused rather than\n"
+			"     silently replaced, because a caller naming a solver has a\n"
+			"     reason -- and all three reach the same equilibrium, so the\n"
+			"     substitution would be invisible in the answer.\n", needs );
+		return ConfigurationError;
+	}
+
+	/*
+	 * AND A WARNING ABOUT THE THREAD COUNTS, WHICH IS THE ONE COMBINATION A USER
+	 * CAN REACH BY ACCIDENT AND WHICH IS CATASTROPHIC RATHER THAN MERELY SLOW.
+	 *
+	 * MKL suppresses its own threading inside an active OpenMP parallel region,
+	 * so under AssemblyMode::Threaded the element-local dgetrs and dgemm cost
+	 * the same whatever MKL_NUM_THREADS says -- which is what makes PARDISO's
+	 * threads spendable at all. But a team of ONE thread does not get that
+	 * suppression: measured on the isolated kernels, OMP_NUM_THREADS=1 with
+	 * MKL_NUM_THREADS=8 cost 12.4 s against 0.069 s serial at k = 3.
+	 *
+	 * This is a warning and not a refusal, because it is a run-time environment
+	 * question rather than a fault in the file, and because a user who has
+	 * genuinely set both deliberately should not be stopped. It is printed only
+	 * when the combination is actually present, which is the standing rule this
+	 * file learned from the MKL_THREADING_LAYER warning it used to carry.
+	 */
+	if ( assemblyMode == AM::Threaded )
+	{
+		char const *ompEnv = std::getenv( "OMP_NUM_THREADS" );
+		char const *mklEnv = std::getenv( "MKL_NUM_THREADS" );
+		int const ompCount = ompEnv ? std::atoi( ompEnv ) : 0;
+		int const mklCount = mklEnv ? std::atoi( mklEnv ) : 0;
+		if ( ompCount == 1 && mklCount > 1 )
+			std::fprintf( stderr,
+				"MEQ: warning -- AssemblyMode = \"threaded\" with OMP_NUM_THREADS=1\n"
+				"     and MKL_NUM_THREADS=%d. A one-thread OpenMP team does not get\n"
+				"     MKL's nested-region suppression, and the element-local dense\n"
+				"     work then pays full MKL threading per call: measured 12.4 s\n"
+				"     against 0.069 s at k = 3. Either raise OMP_NUM_THREADS or set\n"
+				"     MKL_NUM_THREADS=1.\n", mklCount );
+	}
+
 	// ---- set the run up ------------------------------------------------
 	mfem::Mesh background;
 	std::unique_ptr<meq::BoundaryShape> shape;
@@ -636,6 +808,13 @@ int main( int argc, char **argv )
 		fresh->setNewtonControl( config->getSolver().newtonRelativeTolerance,
 		                         config->getSolver().newtonAbsoluteTolerance,
 		                         config->getSolver().newtonMaxIterations );
+
+		// The two performance keys. Availability was checked once at startup,
+		// before any mesh was built -- see checkSolverCapabilities() -- so
+		// these cannot throw here, and a run that is going to be refused for
+		// its build is refused before it does any work.
+		fresh->setAssemblyMode( assemblyMode );
+		fresh->setTraceSolver( traceSolver );
 
 		if ( !firstCycle && previousPotential )
 		{

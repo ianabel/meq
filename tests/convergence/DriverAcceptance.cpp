@@ -935,6 +935,75 @@ BOOST_AUTO_TEST_CASE( theDriverReportsConfigurationErrorsAsExitOne )
 }
 
 /*
+ * THE TWO PERFORMANCE KEYS, AND WHAT THE DRIVER REFUSES RATHER THAN
+ * APPROXIMATES.
+ *
+ * `[solver] AssemblyMode` and `TraceSolver` are the only solver knobs exposed to
+ * TOML, and they are exposed because neither can change the answer -- the two
+ * assembly modes are asserted bit for bit and the three trace solvers agree to
+ * 1e-14. That is also exactly why an unavailable one must be REFUSED rather than
+ * substituted: a silent fallback would be invisible in the result.
+ *
+ * THIS CASE EXISTS BECAUSE EXERCISING THE KEYS FOUND A REAL BUG THAT REASONING
+ * ABOUT THEM DID NOT. `TraceSolver = "cudss"` passed every check -- the spelling
+ * is valid and this build genuinely has cuDSS -- and then aborted inside CUDA
+ * with `cudaMemcpyDeviceToDevice ... invalid argument`, because cuDSS reads its
+ * data through MFEM's device-aware accessors and the driver configures no
+ * mfem::Device. The library had documented that requirement all along; putting
+ * the choice in a config file is what made it reachable by somebody who had not
+ * read it. The driver now refuses it with a message naming the reason, and this
+ * is what stops that regressing.
+ */
+BOOST_AUTO_TEST_CASE( theDriverRefusesASolverItCannotHonour )
+{
+	auto write = []( char const *path, char const *solverBody )
+	{
+		std::ofstream file( path );
+		file << "[mesh]\nRMin = 0.1\nRMax = 1.9\nZMin = -1.7\nZMax = 1.7\n"
+		     << "NR = 4\nNZ = 4\n\n[discretisation]\nPolynomialDegree = 1\n"
+		     << "\n[source]\nType = \"soloviev\"\nA = -0.52\n"
+		     << "\n[solver]\n" << solverBody
+		     << "\n[output]\nPrefix = \"driver-acceptance-solver\"\n";
+	};
+
+	// A misspelling, refused at parse -- Config can check the string and does.
+	write( "driver-acceptance-mode.toml", "AssemblyMode = \"parallel\"\n" );
+	BOOST_TEST( run( "driver-acceptance-mode.toml" ) == 1,
+	            "an unknown AssemblyMode spelling must exit 1" );
+
+	// The capitalised spelling, which is the plausible mistake: TOML KEYS in
+	// meq are UpperCamelCase, so a reader may expect the VALUES to be too.
+	// There is no case folding anywhere in Config, deliberately.
+	write( "driver-acceptance-case.toml", "AssemblyMode = \"Threaded\"\n" );
+	BOOST_TEST( run( "driver-acceptance-case.toml" ) == 1,
+	            "AssemblyMode values are lower case and are compared literally, "
+	            "so \"Threaded\" must be refused rather than quietly accepted" );
+
+	// cuDSS: a valid spelling, possibly present in the build, and refused by the
+	// DRIVER because it needs an mfem::Device that the driver does not create.
+	// Asserted unconditionally, because the refusal does not depend on whether
+	// this build has cuDSS -- that is the point of it.
+	write( "driver-acceptance-cudss.toml", "TraceSolver = \"cudss\"\n" );
+	BOOST_TEST( run( "driver-acceptance-cudss.toml" ) == 1,
+	            "TraceSolver = \"cudss\" must exit 1 from the driver. If this "
+	            "passes, the driver has started accepting it -- and without an "
+	            "mfem::Device that is not a solve, it is a raw CUDA abort with "
+	            "nothing in the message about the key that caused it" );
+
+	// And the defaults, plus an explicit umfpack, must still SOLVE. A test that
+	// only checked refusals would pass with every value refused.
+	write( "driver-acceptance-ok.toml", "TraceSolver = \"umfpack\"\n" );
+	BOOST_TEST( run( "driver-acceptance-ok.toml" ) == 0,
+	            "an explicit TraceSolver = \"umfpack\" must solve, or the "
+	            "refusals above are testing nothing" );
+
+	std::remove( "driver-acceptance-mode.toml" );
+	std::remove( "driver-acceptance-case.toml" );
+	std::remove( "driver-acceptance-cudss.toml" );
+	std::remove( "driver-acceptance-ok.toml" );
+}
+
+/*
  * --help and --version are the two things a user tries first, and a binary that
  * exits non-zero on --help is a binary that looks broken.
  */

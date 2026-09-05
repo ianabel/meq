@@ -205,8 +205,35 @@ namespace meq
 			Source const *source;
 			int extraOrder;
 
-			/// Scratch. Not thread safe, in the manner of every MFEM integrator.
+			/// Per-point scratch, and a MEMBER only in a build that cannot
+			/// thread. This used to read "not thread safe, in the manner of
+			/// every MFEM integrator", which was true when it was written and
+			/// is now false: MFEM converted its own -- HDGDiffusionIntegrator's
+			/// dozen scratch members are guarded exactly like this
+			/// (fem/darcy/bilininteg_hdg.hpp), and the installed library has
+			/// MFEM_THREAD_SAFE = YES, so in MEQ's build they do not exist.
+			///
+			/// **AND THIS INTEGRATOR IS ON THE LOOP MFEM HAS JUST THREADED.**
+			/// DarcyHybridization::MultNL() -- the residual and the Jacobian
+			/// assembly, and so NPCResidual() and NPCGradient() -- now walks its
+			/// elements in colour order under OpenMP when
+			/// AssemblyMode::Threaded is asked for, and calls
+			/// AssembleElementVector() and AssembleElementGrad() from inside it.
+			/// Two elements of one colour share no face, but they shared THIS
+			/// OBJECT: `shape` is resized and refilled per quadrature point, so
+			/// a thread would compute `shape*elfun` against another element's
+			/// basis. No crash, no error -- a wrong residual and a wrong
+			/// Jacobian.
+			///
+			/// The Jacobian half is the worse one, and it is invisible to the
+			/// obvious test: SourceIntegrator IS the whole semi-linear term, and
+			/// CLAUDE.md's *A wrong Jacobian is invisible to a convergence
+			/// table* records that a degraded dFdPsi leaves every error and
+			/// every rate unchanged to six figures while costing Newton its
+			/// order. A rate table cannot see this.
+#ifndef MFEM_THREAD_SAFE
 			mfem::Vector shape;
+#endif
 	};
 
 	/**
@@ -799,21 +826,46 @@ namespace meq
 				/// see setAssemblyMode() for why an automatic gate was tried and
 				/// removed.
 				Serial,
-				/// Thread the element-local half of ComputeH() -- the factorisation
-				/// of A, the Schur complement and its factorisation, and one local
-				/// back-substitution per trace dof. The scatter into the trace
-				/// matrix is NOT threaded and cannot be: an unfinalized
-				/// mfem::SparseMatrix carries one current_row and one column-pointer
-				/// scratch for the whole matrix, so two threads writing rows that
-				/// are disjoint by construction still collide, and the failure is a
-				/// hang rather than a wrong answer. That serial scatter is the
-				/// Amdahl ceiling on this option.
+				/// Thread EVERY element-local loop in DarcyHybridization, which is
+				/// more than this option used to mean and is the reason to re-read it.
 				///
-				/// **Requires MFEM_USE_OPENMP and MFEM_THREAD_SAFE, and MFEM
-				/// ABORTS rather than falling back if the build lacks either** --
-				/// deliberately, since a caller asking for this is asking a
-				/// performance question and a silent serial loop is not an answer
-				/// to it. MEQ therefore checks the build before passing it on.
+				/// It once covered ComputeH() alone -- the factorisation of A, the
+				/// Schur complement and its factorisation, and one local
+				/// back-substitution per trace dof -- so it touched assembly and
+				/// nothing else. MFEM has since threaded MultNL() as well: the
+				/// residual and the Jacobian assembly, and therefore NPCResidual() and
+				/// NPCGradient(), which is to say **every NPC step**. Plus ReduceRHS(),
+				/// ComputeSolution() and the two RHS eliminations.
+				///
+				/// The two kinds of loop are threaded differently, and the difference
+				/// is the scatter TARGET rather than the loop. ComputeH() scatters into
+				/// an unfinalized mfem::SparseMatrix, which carries one current_row,
+				/// one column-pointer scratch and one RowNode allocator for the whole
+				/// matrix -- so two threads writing rows that are disjoint by
+				/// construction still collide, and the failure is a hang rather than a
+				/// wrong answer. That scatter stays serial and in element order, and it
+				/// is 40-47% of NPCGradient(). MultNL() scatters into a Vector, where
+				/// disjoint indices really are independent, so it is walked in element
+				/// COLOUR order instead -- two elements of a colour share no face, so
+				/// no trace dof takes two writes at once.
+				///
+				/// **Still bit for bit on both**, and on the colouring for a reason
+				/// worth knowing: it changes the ORDER in which a face's two elements
+				/// accumulate, and a + b == b + a exactly. MFEM notes this would NOT
+				/// survive a trace space whose dofs are shared between faces -- an
+				/// H1_Trace (EDG) one -- where a dof takes more than two contributions
+				/// and associativity would start to matter. MEQ's is
+				/// DG_Interface_FECollection, so it holds.
+				///
+				/// MFEM measures NPCResidual at 5.6-6.1x, NPCGradient at 2.6-3.3x and a
+				/// whole NPC step at **1.9-2.1x** on eight threads. MEQ's own numbers,
+				/// and what they mean for the default, are under setAssemblyMode().
+				///
+				/// **Requires MFEM_USE_OPENMP and MFEM_THREAD_SAFE, and MFEM ABORTS
+				/// rather than falling back without either** -- deliberately, since a
+				/// caller asking for this is asking a performance question and a silent
+				/// serial loop is not an answer to it. MEQ therefore checks the build
+				/// before passing it on.
 				Threaded
 			};
 
@@ -836,6 +888,38 @@ namespace meq
 			/// a few times, leave it alone for a small one assembled hundreds of
 			/// times.**
 			///
+			/// **A CALLER OBLIGATION COMES WITH IT, AND MFEM CANNOT CHECK IT.**
+			/// Its own words: "Any integrator the caller installs -- a source term
+			/// in the potential mass, a constraint integrator -- sits on this loop
+			/// and must be thread-safe too. An integrator holding per-point scratch
+			/// as a plain member will race, silently."
+			///
+			/// MEQ's side of that is discharged and asserted.
+			/// meq::SourceIntegrator and meq::PoloidalFieldCoefficient guard their
+			/// scratch on MFEM_THREAD_SAFE, exactly as MFEM's own HDG integrators
+			/// now do; meq::ConstantStabilization holds one double and reads it;
+			/// and every meq::Source and meq::Profile behind them is immutable
+			/// during evaluation -- no interval memo in SplineProfile, no cached
+			/// previous root in RotatingSource, which is why meq::maxSpecies is a
+			/// compile-time cap.
+			/// `threadedAssemblyReproducesSerialAssemblyOnANonlinearSource` is what
+			/// says so, and it is the NONLINEAR case for a reason: the linear one
+			/// takes meq's linear path, never installs meq::SourceIntegrator and so
+			/// never reaches MultNL at all.
+			///
+			/// **The one hazard NOT closed is an exception leaving the loop.**
+			/// meq::RotatingSource throws from f() and dFdPsi() when a species
+			/// temperature goes non-positive or the quasineutrality root find fails
+			/// -- reachable from a Newton iterate that overshoots. An exception
+			/// escaping an OpenMP structured block is undefined behaviour, so on a
+			/// rotating source that diagnostic is a clean throw under Serial and a
+			/// terminate under Threaded. It is recorded rather than repaired
+			/// because the loop is MFEM's: MFEM has the same exposure through its
+			/// own MFEM_VERIFY under MFEM_USE_EXCEPTIONS, and inventing an error
+			/// path the library does not support would replace a crash with a
+			/// silent NaN. **Prefer Serial for a rotating source until the iterate
+			/// is known good.**
+			///
 			/// Throws std::invalid_argument rather than letting MFEM abort the
 			/// process when the library was built without OpenMP or without
 			/// thread safety.
@@ -843,6 +927,19 @@ namespace meq
 
 			/// The mode buildForms() will ask for.
 			AssemblyMode assemblyMode() const;
+
+			/// Whether this build can honour a given mode, so a caller can offer
+			/// only what is there instead of catching to find out. The symmetric
+			/// companion of traceSolverAvailable(), and it exists for the same
+			/// reason: a driver reading a mode out of a configuration file wants to
+			/// refuse it with a message about the build, not to relay an exception.
+			///
+			/// Serial is always available. Threaded needs MFEM_USE_OPENMP and
+			/// MFEM_THREAD_SAFE, and this reports the BUILD rather than the thread
+			/// count -- a build that can thread but is running at
+			/// OMP_NUM_THREADS=1 answers true, because that is a run-time
+			/// configuration and not a capability.
+			static bool assemblyModeAvailable( AssemblyMode choice );
 
 			/// Which direct solver factorises the hybridized trace system.
 			///
@@ -873,6 +970,20 @@ namespace meq
 				/// CUDA before the solver is built** -- it reads its matrix and
 				/// vectors through the device-aware accessors, which hand back
 				/// host pointers otherwise.
+				///
+				/// **AND IT IS NOT WORTH TAKING ON ITS OWN, WHICH IS A STRONGER
+				/// STATEMENT THAN THE TIMING ONE BELOW.** A device solver pays
+				/// only if the data STAYS on the device, and MEQ's integrators
+				/// and its scatter have no device kernels -- 58% to 70% of an NPC
+				/// step by MFEM's own measurement. Its
+				/// `doc/HDG-DEVICE-OFFLOAD.md`, under construction, gates the
+				/// whole device path on the integrators for exactly this reason:
+				/// doing the trace solve alone means copying the system across
+				/// the bus once per iteration to accelerate a quarter of it,
+				/// which is "plausibly slower than staying on the host
+				/// throughout". `apps/meq.cpp` therefore refuses this choice
+				/// from a config file; the library keeps it so that correctness
+				/// on the device path can be checked at all.
 				///
 				/// **Correct, and not recommended on the strength of any timing
 				/// taken here.** It agrees with UMFPack to 3.5e-14 from 9,408 to

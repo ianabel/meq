@@ -41,7 +41,10 @@ namespace meq
 
 	PoloidalFieldCoefficient::PoloidalFieldCoefficient( mfem::GridFunction const &qIn,
 	                                                    int componentIn )
-		: q( qIn ), component( componentIn ), value( 2 )
+		: q( qIn ), component( componentIn )
+#ifndef MFEM_THREAD_SAFE
+		, value( 2 )
+#endif
 	{
 		if ( componentIn != 0 && componentIn != 1 )
 			throw std::logic_error( "meq::PoloidalFieldCoefficient: the component must be 0 for B_R or 1 for B_Z" );
@@ -50,6 +53,9 @@ namespace meq
 	double PoloidalFieldCoefficient::Eval( mfem::ElementTransformation &tr,
 	                                       mfem::IntegrationPoint const &ip )
 	{
+#ifdef MFEM_THREAD_SAFE
+		mfem::Vector value( 2 );
+#endif
 		q.GetVectorValue( tr, ip, value );
 		// value( 0 ) is q_r and value( 1 ) is q_z.
 		return ( component == 0 ) ? -value( 1 ) : value( 0 );

@@ -994,12 +994,55 @@ namespace meq
 		{
 			Table solver( document, "solver", sourceName, false );
 			solver.rejectUnknownKeys( { "NewtonMaxIterations", "NewtonRelativeTolerance", "NewtonAbsoluteTolerance",
+			                            "AssemblyMode", "TraceSolver",
 			                            "LinearMaxIterations", "LinearTolerance" } );
 
 			solverOptions.newtonMaxIterations = solver.getIntegerOr( "NewtonMaxIterations", solverOptions.newtonMaxIterations );
 			solverOptions.newtonRelativeTolerance = solver.getFloatOr( "NewtonRelativeTolerance", solverOptions.newtonRelativeTolerance );
 			solverOptions.newtonAbsoluteTolerance = solver.getFloatOr( "NewtonAbsoluteTolerance", solverOptions.newtonAbsoluteTolerance );
 			refuseIterativeSolverKeys( solver );
+
+			// AssemblyMode and TraceSolver. Both are performance keys and
+			// neither may change the answer, which is why they can be exposed at
+			// all: the two assembly modes are bit-identical and the three trace
+			// solvers agree to 1e-14.
+			//
+			// The spellings are lower case, as every other Type key in this file
+			// is, and the values are compared literally -- there is no
+			// case-folding anywhere in Config, so "Threaded" is a fault and says
+			// so rather than being quietly accepted.
+			//
+			// AVAILABILITY IS NOT CHECKED HERE, and that is the MFEM-free rule
+			// rather than an omission: whether this build has OpenMP, or
+			// PARDISO, or cuDSS is a question about the linked library, and this
+			// translation unit is one CI compiles without it. apps/meq.cpp asks
+			// GradShafranovSolver::assemblyModeAvailable() and
+			// traceSolverAvailable() and refuses there, with a message naming
+			// the build option. So a wrong SPELLING fails at parse and an
+			// unavailable CHOICE fails at startup -- two different faults with
+			// two different messages.
+			{
+				solverOptions.assemblyModeWasGiven = solver.has( "AssemblyMode" );
+				std::string const mode = solver.getStringOr( "AssemblyMode", "threaded" );
+				if ( mode == "serial" )
+					solverOptions.assemblyMode = AssemblyModeType::Serial;
+				else if ( mode == "threaded" )
+					solverOptions.assemblyMode = AssemblyModeType::Threaded;
+				else
+					solver.fail( "AssemblyMode", "must be one of serial, threaded, but is \""
+					             + mode + "\"" );
+
+				std::string const trace = solver.getStringOr( "TraceSolver", "umfpack" );
+				if ( trace == "umfpack" )
+					solverOptions.traceSolver = TraceSolverType::UMFPack;
+				else if ( trace == "pardiso" )
+					solverOptions.traceSolver = TraceSolverType::Pardiso;
+				else if ( trace == "cudss" )
+					solverOptions.traceSolver = TraceSolverType::cuDSS;
+				else
+					solver.fail( "TraceSolver", "must be one of umfpack, pardiso, cudss, but is \""
+					             + trace + "\"" );
+			}
 
 			if ( solverOptions.newtonMaxIterations < 1 )
 				solver.fail( "NewtonMaxIterations", "must be at least 1" );

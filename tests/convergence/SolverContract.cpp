@@ -9,6 +9,12 @@
 
 #include "mfem.hpp"
 
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+	// For omp_get_max_threads() alone, so that the nonlinear threaded-assembly
+	// case can say whether the run it is reporting could have exhibited a race.
+	#include <omp.h>
+#endif
+
 #include "meq/GradShafranov.hpp"
 #include "meq/Source.hpp"
 
@@ -695,6 +701,155 @@ BOOST_AUTO_TEST_CASE( threadedAssemblyReproducesSerialAssemblyExactly )
 			            "rather than a tolerance to widen -- the element-local "
 			            "arithmetic has started reassociating, or the scatter is no "
 			            "longer in element order" );
+		}
+	}
+#endif
+}
+
+/*
+ * AND THE SAME PROPERTY ON A NONLINEAR SOURCE, WHICH IS A DIFFERENT LOOP.
+ *
+ * The case above cannot see the defect this one is for, and the reason is
+ * structural rather than a matter of coverage. It builds its source as an
+ * mfem::FunctionCoefficient, which takes meq's LINEAR path:
+ * usesNonlinearForms() is false, meq::SourceIntegrator is never installed, and
+ * DarcyHybridization::MultNL() is never called. So it exercises ComputeH()'s
+ * element loop and nothing else -- which was the only threaded loop in the
+ * class when it was written.
+ *
+ * It is not any more. MFEM now threads MultNL() as well -- the residual and the
+ * Jacobian assembly, and so NPCResidual() and NPCGradient(), which is to say
+ * every NPC step -- walking the elements in colour order under OpenMP. That
+ * loop calls the caller's own integrators, and MFEM says plainly that it cannot
+ * check them: "Any integrator the caller installs ... sits on this loop and
+ * must be thread-safe too. An integrator holding per-point scratch as a plain
+ * member will race, silently."
+ *
+ * meq::SourceIntegrator held exactly that -- an mfem::Vector shape member,
+ * resized and refilled per quadrature point -- and it is now guarded the way
+ * MFEM guards its own. THIS TEST IS WHAT SAYS SO. Nothing else in the suite
+ * can: the source integrator IS the whole semi-linear term, and CLAUDE.md's
+ * *A wrong Jacobian is invisible to a convergence table* records that a
+ * degraded dFdPsi leaves every error and every rate unchanged to six
+ * significant figures while costing Newton its order. So a corrupted Jacobian
+ * here would show up as neither a wrong answer nor a wrong rate.
+ *
+ * THREE PROPERTIES, AND THE THIRD IS THE ONE WITH TEETH.
+ *
+ *   - the recovered psi, bit for bit. Colouring changes the ORDER in which a
+ *     face's two elements accumulate into the trace row, and a + b == b + a
+ *     exactly, so MFEM's exactness claim covers this loop too.
+ *   - the flux, likewise, since it is recovered from the same local solves.
+ *   - THE NEWTON ITERATION COUNT. This is the assertion that reaches the
+ *     Jacobian. A racing residual would move the answer and be caught by the
+ *     first two; a racing GRADIENT converges to the same discrete solution by a
+ *     different path, so it moves the count and nothing else. That is precisely
+ *     the failure a rate table cannot see, and it is why the count is asserted
+ *     rather than printed.
+ */
+BOOST_AUTO_TEST_CASE( threadedAssemblyReproducesSerialAssemblyOnANonlinearSource )
+{
+#if !defined( MFEM_USE_OPENMP ) || !defined( MFEM_THREAD_SAFE )
+	std::printf( "\n  threaded assembly, nonlinear: skipped, this MFEM has no "
+	             "OpenMP or no thread safety\n" );
+#else
+	using AM = meq::GradShafranovSolver::AssemblyMode;
+
+	meq::analytic::ManufacturedNonlinear const eq
+		= meq::analytic::ManufacturedNonlinear::example5();
+	EquilibriumSource<meq::analytic::ManufacturedNonlinear> const source( eq );
+	mfem::FunctionCoefficient psi( [ &eq ]( mfem::Vector const &x )
+	{
+		return eq.psi( x( 0 ), x( 1 ) );
+	} );
+
+	std::printf( "\n  threaded assembly against serial, on a nonlinear source\n" );
+	std::printf( "    this is the case that reaches MultNL, and so the case that\n"
+	             "    reaches meq::SourceIntegrator\n" );
+
+	// omp_get_max_threads() is printed rather than asserted: a one-thread run
+	// cannot demonstrate the absence of a race, and saying so is better than a
+	// green tick that means nothing. The gate stays exactness either way.
+	std::printf( "    omp_get_max_threads() = %d%s\n", omp_get_max_threads(),
+	             omp_get_max_threads() > 1 ? ""
+	             : "  <- ONE THREAD: this run cannot exhibit a race" );
+
+	for ( int order : { 1, 2 } )
+	{
+		for ( int n : { 4, 16 } )
+		{
+			mfem::Mesh mesh = meq::tests::makeMesh( meq::tests::standardBox(), n );
+
+			auto serialSolver = std::make_unique<meq::GradShafranovSolver>( mesh, order );
+			serialSolver->setAssemblyMode( AM::Serial );
+			serialSolver->setSource( source );
+			serialSolver->setBoundaryData( psi );
+			serialSolver->solve();
+
+			auto threadedSolver = std::make_unique<meq::GradShafranovSolver>( mesh, order );
+			threadedSolver->setAssemblyMode( AM::Threaded );
+			threadedSolver->setSource( source );
+			threadedSolver->setBoundaryData( psi );
+			threadedSolver->solve();
+
+			mfem::GridFunction const &a = serialSolver->potential();
+			mfem::GridFunction const &b = threadedSolver->potential();
+			mfem::GridFunction const &qa = serialSolver->flux();
+			mfem::GridFunction const &qb = threadedSolver->flux();
+
+			BOOST_TEST_REQUIRE( a.Size() == b.Size(),
+			                    "k = " << order << ", n = " << n << ": the two "
+			                    "assembly modes produced potentials of different size" );
+			BOOST_TEST_REQUIRE( qa.Size() == qb.Size(),
+			                    "k = " << order << ", n = " << n << ": the two "
+			                    "assembly modes produced fluxes of different size" );
+
+			double worstPsi = 0.0;
+			for ( int i = 0; i < a.Size(); ++i )
+				worstPsi = std::max( worstPsi, std::fabs( a( i ) - b( i ) ) );
+
+			double worstFlux = 0.0;
+			for ( int i = 0; i < qa.Size(); ++i )
+				worstFlux = std::max( worstFlux, std::fabs( qa( i ) - qb( i ) ) );
+
+			int const itsSerial = serialSolver->newtonIterations();
+			int const itsThreaded = threadedSolver->newtonIterations();
+
+			std::printf( "    k = %d, n = %2d : psi %.3e, q %.3e, Newton %d against %d%s\n",
+			             order, n, worstPsi, worstFlux, itsThreaded, itsSerial,
+			             ( worstPsi == 0.0 && worstFlux == 0.0
+			               && itsSerial == itsThreaded ) ? "  (exact)"
+			             : "  *** DIFFERS ***" );
+			std::fflush( stdout );
+
+			BOOST_TEST( worstPsi == 0.0,
+			            "k = " << order << ", n = " << n << ": the threaded and "
+			            "serial assembly modes recovered potentials differing by "
+			            << worstPsi << ". On a nonlinear source this is MultNL's "
+			            "loop, so the first thing to check is whether an integrator "
+			            "meq installs holds per-point scratch as a member -- "
+			            "meq::SourceIntegrator's `shape` is guarded on "
+			            "MFEM_THREAD_SAFE for exactly this reason" );
+
+			BOOST_TEST( worstFlux == 0.0,
+			            "k = " << order << ", n = " << n << ": the recovered FLUXES "
+			            "differ by " << worstFlux << ". The flux comes out of the "
+			            "same element-local solves as the potential, so this and the "
+			            "potential should fail together; one without the other is "
+			            "the more interesting finding" );
+
+			// The Jacobian assertion. A racing gradient reaches the same discrete
+			// solution -- Newton converges to the root whatever carried it there --
+			// so it shows up here and in no error norm and no rate.
+			BOOST_TEST( itsSerial == itsThreaded,
+			            "k = " << order << ", n = " << n << ": threaded assembly "
+			            "took " << itsThreaded << " Newton iterations against "
+			            "serial's " << itsSerial << ", having reached the same "
+			            "answer. That is the signature of a corrupted JACOBIAN "
+			            "rather than a corrupted residual: Newton converges to the "
+			            "same root by a longer path, so no error norm and no "
+			            "convergence rate can see it. AssembleElementGrad is where "
+			            "to look" );
 		}
 	}
 #endif

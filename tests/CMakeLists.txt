@@ -278,6 +278,36 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	endif()
 endif()
 
+# NpcThreadScaling -- what AssemblyMode::Threaded is worth on a NONLINEAR solve,
+# and whether PARDISO's MKL threads are reachable at the same time.
+#
+# NOT a ctest, and it contributes none, for the standing reason: every number in
+# it is a timing. It exits non-zero only for the correctness properties that make
+# those timings mean anything, so it is usable as a guard by whoever runs it.
+#
+# It exists BESIDE TraceSolverScaling rather than inside it because that harness
+# times a LINEAR solve, and MFEM has since threaded MultNL() -- the residual and
+# the Jacobian assembly, and so every NPC step. A linear problem never calls
+# MultNL at all, so the option's value has moved to a loop the older harness
+# structurally cannot reach. The bit-identity check here is likewise the
+# nonlinear counterpart of SolverContract's, and it is the one that sees
+# meq::SourceIntegrator.
+if(TARGET meq_core AND NOT _solver_index EQUAL -1
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/performance/NpcThreadScaling.cpp")
+	add_executable(NpcThreadScaling "performance/NpcThreadScaling.cpp")
+	target_include_directories(NpcThreadScaling PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(NpcThreadScaling PRIVATE meq_core)
+
+	# omp_get_max_threads() only, to report the thread count it is running at --
+	# a threaded timing that does not say how many threads it used is not a
+	# measurement. MFEM's own -fopenmp arrives through MFEM_COMPILE_OPTIONS
+	# already; asking here makes the dependency explicit rather than inherited.
+	find_package(OpenMP QUIET COMPONENTS CXX)
+	if(TARGET OpenMP::OpenMP_CXX)
+		target_link_libraries(NpcThreadScaling PRIVATE OpenMP::OpenMP_CXX)
+	endif()
+endif()
+
 # ---------------------------------------------------------------------------
 # The driver, end to end. Everything above calls the library directly; this is
 # the only test that goes through a config file and out to files, which is the

@@ -376,9 +376,78 @@ namespace meq
 		ShapeConfig shape;
 	};
 
+	// [solver] AssemblyMode -- who computes the element-local work.
+	//
+	// A PERFORMANCE choice and never a numerical one: MFEM guarantees the two
+	// modes agree BIT FOR BIT, and MEQ asserts it on both a linear and a
+	// nonlinear source. So this key can be changed between two runs of the same
+	// configuration and the answers must not move.
+	//
+	// It is spelled as MEQ's own enum rather than as
+	// GradShafranovSolver::AssemblyMode because this header is deliberately
+	// MFEM-free -- Config, Profiles, Source and SourceFactory are what CI can
+	// build without the MFEM branch it cannot obtain. The driver maps it and
+	// asks GradShafranovSolver::assemblyModeAvailable() whether the build can
+	// honour it, which is a question only the linked library can answer.
+	enum class AssemblyModeType
+	{
+		// One thread.
+		Serial,
+		// Thread every element-local loop in the hybridization -- assembly, and
+		// since MFEM threaded MultNL(), the residual and the Jacobian of every
+		// NPC step too. **THE DEFAULT since 2026-09-04**, matching the library's
+		// own: worth 2.4x on HighBetaConvergence, which is the case that used to
+		// argue against it, and a wash at one thread.
+		//
+		// Needs an MFEM built with MFEM_USE_OPENMP and MFEM_THREAD_SAFE. A build
+		// without them defaults to Serial, and a file that ASKS for "threaded"
+		// there is refused by the driver with a message about the build rather
+		// than relaying an exception.
+		Threaded
+	};
+
+	// [solver] TraceSolver -- which direct solver factorises the trace system.
+	//
+	// Also a performance choice, and a LICENCE choice. All three reach the same
+	// equilibrium; `theTraceSolversAgree` pins them to 1e-10 and they measure
+	// 1e-14 or better.
+	enum class TraceSolverType
+	{
+		// SuiteSparse UMFPACK, METIS ordering. The default, and the only one
+		// present in every build -- every rate in the suite was measured with it.
+		UMFPack,
+		// oneMKL PARDISO. Faster than UMFPack even single-threaded, and it takes
+		// MKL threads where UMFPack cannot. Needs MFEM_USE_MKL_PARDISO.
+		Pardiso,
+		// NVIDIA cuDSS. Correct, and not recommended on the strength of any
+		// timing taken on this machine. Needs MFEM_USE_CUDSS and an mfem::Device.
+		cuDSS // NOLINT(readability-identifier-naming)
+	};
+
 	// [solver] -- Newton on the outside, a linear solve on the inside.
 	struct SolverConfig
 	{
+		// Who computes the element-local work, and which direct solver
+		// factorises the trace system. Neither changes the answer.
+		//
+		// THIS DEFAULT IS A PLAIN Threaded RATHER THAN A BUILD-CONDITIONAL ONE,
+		// deliberately, and it is the one place the two defaults differ. This
+		// header is MFEM-free -- it is one of the four translation units CI
+		// compiles without the library -- so it cannot ask whether this build
+		// has OpenMP. apps/meq.cpp asks assemblyModeAvailable() and falls back
+		// to Serial when the answer is no, which is what keeps a file that says
+		// nothing working on every build.
+		AssemblyModeType assemblyMode = AssemblyModeType::Threaded;
+		TraceSolverType traceSolver = TraceSolverType::UMFPack;
+
+		// Whether the file SAID "threaded" or merely inherited it, and the two
+		// must behave differently on a build that cannot thread. A file that
+		// asks for it is refused, because a caller naming a mode has a reason;
+		// a file that says nothing falls back to Serial and runs. Without this
+		// flag the default would make MEQ unusable on any build without
+		// OpenMP -- which is most of them, and is exactly what CI builds.
+		bool assemblyModeWasGiven = false;
+
 		// Newton stops when either ||R|| <= NewtonAbsoluteTolerance or
 		// ||R|| <= NewtonRelativeTolerance * ||R_0||, and fails after
 		// NewtonMaxIterations. Both tolerances are in the units of the residual

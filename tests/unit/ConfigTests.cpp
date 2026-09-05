@@ -78,12 +78,37 @@ namespace meq
 		return os << "<invalid BoundaryDataType>";
 	}
 
+	// The two performance keys. Spelled as the TOML spells them, so a failing
+	// assertion prints the value a reader would put in the file.
+	std::ostream & operator<<( std::ostream & os, AssemblyModeType mode )
+	{
+		switch ( mode )
+		{
+			case AssemblyModeType::Serial:   return os << "serial";
+			case AssemblyModeType::Threaded: return os << "threaded";
+		}
+		return os << "<invalid AssemblyModeType>";
+	}
+
+	std::ostream & operator<<( std::ostream & os, TraceSolverType solver )
+	{
+		switch ( solver )
+		{
+			case TraceSolverType::UMFPack: return os << "umfpack";
+			case TraceSolverType::Pardiso: return os << "pardiso";
+			case TraceSolverType::cuDSS:   return os << "cudss";
+		}
+		return os << "<invalid TraceSolverType>";
+	}
+
 }
 
+using meq::AssemblyModeType;
 using meq::BoundaryDataType;
 using meq::ConfigError;
 using meq::Configuration;
 using meq::SourceType;
+using meq::TraceSolverType;
 
 namespace
 {
@@ -702,6 +727,74 @@ BOOST_AUTO_TEST_CASE( out_of_range_scalars_are_rejected )
 
 	BOOST_CHECK_EXCEPTION( parse( minimal() + "\n[output]\nPrefix = \"\"\n" ), ConfigError,
 		[]( ConfigError const & e ) { return e.getKey() == "output.Prefix"; } );
+
+	// The two performance keys. A wrong SPELLING is a parse fault; an
+	// unavailable CHOICE is not, and is refused by apps/meq.cpp instead -- this
+	// header is one of the four CI compiles without MFEM, so it cannot know
+	// whether this build has OpenMP or PARDISO. Two faults, two messages.
+	//
+	// The capitalised spelling is the one worth asserting: there is no
+	// case-folding anywhere in Config, so "Threaded" must fail rather than be
+	// quietly accepted, and a reader who assumes TOML VALUES follow the
+	// UpperCamelCase rule that TOML KEYS follow would write exactly that.
+	BOOST_CHECK_EXCEPTION( parse( minimal() + "\n[solver]\nAssemblyMode = \"parallel\"\n" ), ConfigError,
+		[]( ConfigError const & e ) { return e.getKey() == "solver.AssemblyMode"; } );
+	BOOST_CHECK_EXCEPTION( parse( minimal() + "\n[solver]\nAssemblyMode = \"Threaded\"\n" ), ConfigError,
+		[]( ConfigError const & e ) { return e.getKey() == "solver.AssemblyMode"; } );
+	BOOST_CHECK_EXCEPTION( parse( minimal() + "\n[solver]\nTraceSolver = \"mumps\"\n" ), ConfigError,
+		[]( ConfigError const & e ) { return e.getKey() == "solver.TraceSolver"; } );
+	BOOST_CHECK_EXCEPTION( parse( minimal() + "\n[solver]\nTraceSolver = \"cuDSS\"\n" ), ConfigError,
+		[]( ConfigError const & e ) { return e.getKey() == "solver.TraceSolver"; } );
+}
+
+/*
+ * The two performance keys parse, and their defaults are the measured ones.
+ *
+ * Threaded and UMFPack are not arbitrary defaults and the test says so, because
+ * the temptation to "improve" them in a config file is exactly what this pair of
+ * keys creates. UMFPack is the only trace solver present in every build and the
+ * one every rate in the suite was measured with. Threaded became the default on
+ * 2026-09-04, having been Serial: MFEM extended the flag to cover the residual
+ * and the Jacobian as well as the assembly, and the test that had most argued
+ * against it -- HighBetaConvergence, 1.8x SLOWER under an automatic gate -- came
+ * back 2.4x faster. See setAssemblyMode()'s own documentation for the table.
+ *
+ * Neither key may change the ANSWER, which is what makes exposing them safe at
+ * all: the two assembly modes are bit-identical at MKL_NUM_THREADS=1 and the
+ * three trace solvers agree to 1e-14. That property is asserted in
+ * tests/convergence/, on both a linear and a nonlinear source; here it is only
+ * the parsing.
+ */
+BOOST_AUTO_TEST_CASE( the_two_performance_keys_parse_and_default_to_the_measured_choice )
+{
+	Configuration const bare = parse( minimal() );
+	BOOST_TEST( bare.getSolver().assemblyMode == AssemblyModeType::Threaded );
+	BOOST_TEST( bare.getSolver().traceSolver == TraceSolverType::UMFPack );
+
+	// AND IT WAS NOT ASKED FOR, which the driver has to know: an inherited
+	// "threaded" is downgraded to Serial on a build without OpenMP, while one
+	// the file states is refused. Without that distinction the default would
+	// make every example in this tree fail on a stock MFEM.
+	BOOST_TEST( bare.getSolver().assemblyModeWasGiven == false );
+
+	Configuration const serial = parse( minimal()
+		+ "\n[solver]\nAssemblyMode = \"serial\"\nTraceSolver = \"pardiso\"\n" );
+	BOOST_TEST( serial.getSolver().assemblyMode == AssemblyModeType::Serial );
+	BOOST_TEST( serial.getSolver().traceSolver == TraceSolverType::Pardiso );
+	BOOST_TEST( serial.getSolver().assemblyModeWasGiven == true );
+
+	Configuration const device = parse( minimal()
+		+ "\n[solver]\nTraceSolver = \"cudss\"\n" );
+	BOOST_TEST( device.getSolver().traceSolver == TraceSolverType::cuDSS );
+
+	// And the explicit spellings of the defaults, so that writing them down
+	// cannot mean something different from leaving them out -- except in
+	// assemblyModeWasGiven, which is the whole point of that flag.
+	Configuration const explicitDefaults = parse( minimal()
+		+ "\n[solver]\nAssemblyMode = \"threaded\"\nTraceSolver = \"umfpack\"\n" );
+	BOOST_TEST( explicitDefaults.getSolver().assemblyMode == AssemblyModeType::Threaded );
+	BOOST_TEST( explicitDefaults.getSolver().traceSolver == TraceSolverType::UMFPack );
+	BOOST_TEST( explicitDefaults.getSolver().assemblyModeWasGiven == true );
 }
 
 // ---------------------------------------------------------------------------

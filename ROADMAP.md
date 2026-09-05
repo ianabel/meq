@@ -489,6 +489,22 @@ section has the detail.
 * **GPU and cuDSS.** Correctness-testable here; this card cannot say whether it
   is worth it. Consumer FP64 is 1/32 of FP32 where datacentre parts are 1/2, so a
   local timing can invert the production conclusion.
+
+  **AND THERE IS A SECOND REASON, WHICH IS THE BINDING ONE AND IS NOT ABOUT THIS
+  MACHINE.** A device trace solve is only worth having if the data STAYS on the
+  device. `../mfem-hdg-dev/doc/HDG-DEVICE-OFFLOAD.md` — under construction —
+  measures the shares of an NPC step and gates the whole device path on the
+  **integrators** (46–53%), because the trace solve (26–31%) and the local dense
+  algebra (7–10%) can be moved almost for free and moving only those is *"worse
+  than doing nothing … plausibly slower than staying on the host throughout"*.
+  MEQ's integrators and scatter have no device kernels.
+
+  So `[solver] TraceSolver = "cudss"` is **refused by the driver** — withheld
+  rather than unimplemented — and the library keeps cuDSS only so that
+  correctness on the device path is checkable. **The key opens when MFEM's group
+  2 lands**, and that is a request on `../mfem-hdg-dev` rather than MEQ work.
+  Note the entry below: partial assembly for the HDG integrators is exactly what
+  group 2 is, so these two items are one item seen from two sides.
 * **Partial assembly.** Not implemented for the HDG integrators at all, and its
   case is sum factorisation, which wants tensor-product elements where MEQ is
   triangles. A discretisation decision, not a flag.

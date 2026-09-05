@@ -24,38 +24,92 @@ namespace meq
 namespace
 {
 	/*
-	 * The assembly mode a fresh solver starts in: SERIAL, ALWAYS.
+	 * THE ASSEMBLY MODE A FRESH SOLVER STARTS IN, AND IT CHANGED ON 2026-09-04
+	 * FROM Serial TO Threaded. THE MEASUREMENT THAT SETTLED IT BEFORE WAS TAKEN
+	 * AGAINST A DIFFERENT OPTION.
 	 *
-	 * A gate on omp_get_max_threads() was written, measured and REMOVED, and the
-	 * measurement is why this function still exists rather than being a constant.
+	 * What this used to say, and it was right at the time: a gate on
+	 * omp_get_max_threads() was written and REMOVED because
+	 * `HighBetaConvergence` went 21.5 s to 39 s under it -- 1.8x SLOWER,
+	 * reproducibly -- since MFEM forks a team and buffers element blocks PER
+	 * CALL, so a caller that assembles hundreds of times inside a bordered
+	 * Newton pays that every time while one that assembles once amortises it.
+	 * Mesh size did not separate the two cases -- HighBeta's meshes are 128 and
+	 * 512 elements and 512 is where the isolated benchmark still showed a win --
+	 * so the solver could not know which caller it had, and the honest default
+	 * was MFEM's own.
 	 *
-	 * In isolation the threaded assembly wins everywhere worth caring about --
-	 * 1.15x to 1.33x from four threads up, and still 1.19x on a 512-element mesh.
-	 * On that evidence defaulting to Threaded whenever more than one thread is
-	 * available looks free. It is not. `HighBetaConvergence`, which assembles a
-	 * small system many times over inside a bordered Newton, goes from 21.5 s to
-	 * 39 s -- **1.8x SLOWER**, reproducibly, on the same binary.
+	 * THAT ARGUMENT WAS ABOUT ComputeH() AND ONLY ComputeH(), because in August
+	 * that was the only loop AssemblyMode touched. MFEM has since threaded
+	 * MultNL() as well -- the residual and the Jacobian assembly, and so
+	 * NPCResidual() and NPCGradient(), which is every NPC step. A bordered
+	 * Newton is dominated by residual evaluations rather than by assembly, so
+	 * the case that most OPPOSED the flag is now the case that most favours it.
 	 *
-	 * The distinguishing variable is not mesh size, which is what makes this
-	 * undecidable from here: HighBeta's meshes are 128 and 512 elements, and 512
-	 * is exactly where the isolated benchmark still showed a win. What differs is
-	 * how OFTEN assembly is called relative to everything else. MFEM's threaded
-	 * path forks a team and buffers element blocks per call, and a caller that
-	 * assembles repeatedly pays that per call while a caller that assembles once
-	 * amortises it. The solver cannot know which caller it has.
+	 * RE-MEASURED, SAME TEST, SAME MACHINE, MKL_NUM_THREADS=1:
 	 *
-	 * So there is no safe automatic default, and the honest default is MFEM's
-	 * own. setAssemblyMode( Threaded ) is an informed choice: worth taking on a
-	 * large mesh assembled a few times, worth avoiding on a small one assembled
-	 * hundreds of times.
+	 *     HighBetaConvergence    Serial 3.22, 3.19 s     Threaded 1.34, 1.33 s
 	 *
-	 * This is the same lesson as the trace matrix's symmetry and the threaded-MKL
-	 * collapse: a property measured on the easy configuration is not a property
-	 * of the code.
+	 * 2.4x FASTER where it was 1.8x slower. That inversion is the whole
+	 * justification, and it makes this a change of measurement rather than a
+	 * change of mind.
+	 *
+	 * On a whole nonlinear solve the flag is worth 2.8x-3.0x at eight threads:
+	 * example5 at k = 2, n = 24 goes 0.369 s to 0.131 s, and at k = 3, n = 16
+	 * 0.280 s to 0.093 s.
+	 *
+	 * AND AT ONE THREAD IT IS A WASH, WHICH IS WHAT MAKES IT SAFE AS A DEFAULT.
+	 * The old note recorded 0.86x at one thread, the chunk buffering costing
+	 * more than the serial loop it imitates. Measured now: 0.3664 s threaded
+	 * against 0.3686 s serial, a ratio of 1.01. A build with OpenMP that happens
+	 * to run at OMP_NUM_THREADS=1 loses nothing.
+	 *
+	 * THE LARGER REASON IS NOT A SPEEDUP AT ALL. Threaded assembly is what makes
+	 * MKL_NUM_THREADS > 1 survivable. MKL suppresses its own threading inside an
+	 * ACTIVE OpenMP region, so the element-local dense work is nested and pays
+	 * nothing for MKL threads; the same work in a SERIAL element loop pays for
+	 * them on every call. Measured on a whole nonlinear solve, k = 3, n = 16,
+	 * OMP_NUM_THREADS=8:
+	 *
+	 *                       MKL=1         MKL=8
+	 *      Serial          0.2797 s     107.19 s     <- 383x
+	 *      Threaded        0.0927 s       0.0834 s   <- immune
+	 *
+	 * 1285x between the two modes at MKL=8. That is the answer to CLAUDE.md's
+	 * *What to do* item 0 -- "get ComputeH()'s element-local dense LU off
+	 * threaded MKL" -- reached without writing any of the code that item
+	 * proposes, and it is what makes PARDISO's MKL threads spendable: the trace
+	 * solve runs on the master thread OUTSIDE any parallel region and takes all
+	 * of them.
+	 *
+	 * WHAT IS GIVEN UP, AND IT IS REAL. The two modes agree BIT FOR BIT only at
+	 * MKL_NUM_THREADS=1. Above that they differ at round-off -- measured 1.3e-15
+	 * in psi and 1.3e-13 in the flux -- because the serial path hands MKL eight
+	 * threads and the threaded path hands it one, and a blocked BLAS-3 sums in a
+	 * different order from an unblocked loop. That is arithmetic reassociation
+	 * inside MKL, not a race in MFEM or in MEQ, and the suite pins exactness at
+	 * MKL_NUM_THREADS=1 which every registered test sets.
 	 */
 	GradShafranovSolver::AssemblyMode defaultAssemblyMode()
 	{
+		/*
+		 * BUILD-CONDITIONAL, AND IT HAS TO BE. buildForms() hands this straight
+		 * to DarcyHybridization::SetAssemblyMode(), and the comment there says
+		 * setAssemblyMode() has already refused Threaded if the build cannot
+		 * honour it -- a guarantee that holds for the SETTER only. The
+		 * constructor assigns this value directly, so a Threaded default on a
+		 * build without OpenMP or without thread safety would reach MFEM
+		 * unchecked and ABORT THE PROCESS rather than throw.
+		 *
+		 * So the capability question is asked here too. It is the same question
+		 * assemblyModeAvailable() answers, asked at the one place that bypasses
+		 * the setter.
+		 */
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+		return GradShafranovSolver::AssemblyMode::Threaded;
+#else
 		return GradShafranovSolver::AssemblyMode::Serial;
+#endif
 	}
 
 #ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
@@ -215,7 +269,13 @@ namespace
 	                                              mfem::Vector &elvect )
 	{
 		int const dof = el.GetDof();
+#ifdef MFEM_THREAD_SAFE
+		// Local, because this runs on DarcyHybridization::MultNL()'s threaded
+		// element loop. See the declaration in the header.
+		mfem::Vector shape( dof );
+#else
 		shape.SetSize( dof );
+#endif
 		elvect.SetSize( dof );
 		elvect = 0.0;
 
@@ -244,7 +304,11 @@ namespace
 	                                            mfem::DenseMatrix &elmat )
 	{
 		int const dof = el.GetDof();
+#ifdef MFEM_THREAD_SAFE
+		mfem::Vector shape( dof );
+#else
 		shape.SetSize( dof );
+#endif
 		elmat.SetSize( dof );
 		elmat = 0.0;
 
@@ -866,6 +930,18 @@ namespace
 		assemblyModeChoice = choice;
 		built = false;
 		prepared = false;
+	}
+
+	bool GradShafranovSolver::assemblyModeAvailable( AssemblyMode choice )
+	{
+		if ( choice == AssemblyMode::Serial )
+			return true;
+
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+		return true;
+#else
+		return false;
+#endif
 	}
 
 	GradShafranovSolver::AssemblyMode
