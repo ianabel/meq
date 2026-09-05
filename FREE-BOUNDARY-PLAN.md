@@ -798,6 +798,31 @@ validation is against a fine mesh. **That is true of the finished problem and
 false of every stage below FB-4**, and the exact answers available early are what
 should be spent first.
 
+**AND FOR THE FINISHED PROBLEM THERE IS A BETTER OPTION THAN A FINE MESH:
+`../geq`.** It is a free-boundary Grad–Shafranov solver in Python **using a
+different algorithm**, and an independent implementation by a different method is
+a stronger check than a code agreeing with a refinement of itself — which shares
+every convention, every sign and every misreading of a paper that this file
+records the cost of. It is also stronger than FB-6's written acceptance,
+*"agreement with CEDRES++ where a published case exists"*, which depends on
+somebody having published a case in enough detail to reproduce.
+
+**Nothing in this repository mentioned it before 2026-09-05**, so it is worth
+saying here rather than assuming the next reader knows.
+
+**What a comparison needs first, and none of it is free.** MEQ solves **fixed
+boundary only** today, so until FB-1 solves there is no like-for-like run and the
+comparison has to be on a boundary prescribed to both codes. MEQ's boundary
+shapes are `none`, `miller` and `mxh` — there is no points-from-a-file shape, so
+an arbitrary last closed flux surface has to be fitted to MXH coefficients first.
+MEQ has **no geqdsk reader or writer**; its interchange format is the `.nc`, and
+`extrapolated` nodes must be dropped before differencing, being band-continued
+rather than solved. And **ψ's sign is not a convention MEQ fixes**: the Solov'ev
+fixtures have `F` single-signed negative, so the magnetic axis is an interior
+*minimum* there and a maximum with `F` positive — `CriticalPointFinder` refuses
+rather than guessing when both are present, and a comparison that assumes the
+axis is the maximum will compare the wrong extremum without saying so.
+
 | | | acceptance |
 |---|---|---|
 | **FB-A** | **The axis.** A vacuum solve on a mesh touching `r = 0`. No free boundary, no coupling. | **DONE, 2026-09-04 — see §7.2.** `ψ` at `k+1` on a mesh reaching the axis; `q` short by half an order; the conditioning penalty `O(1/h)` and not `O(1/h²)`. `tests/convergence/AxisConvergence.cpp` |
