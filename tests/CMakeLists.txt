@@ -16,7 +16,9 @@ find_package(Boost CONFIG REQUIRED COMPONENTS unit_test_framework)
 # unit of the same name: ConfigTests.cpp tests src/meq/Config.cpp.
 set(MEQ_UNIT_TESTS
 	BoundaryShapeTests
+	CoilsTests
 	ConfigTests
+	ExteriorDtNTests
 	ProfilesTests
 	RotatingSourceTests
 	SourceTests
@@ -144,7 +146,19 @@ set(MEQ_CONVERGENCE_TESTS
 	CriticalPointConvergence
 	FluxSurfaceConvergence
 	SurfaceAverageConvergence
-	SurfaceFitConvergence)
+	SurfaceFitConvergence
+	# FB-A, the first stage of FREE-BOUNDARY-PLAN.md and the only one that needs
+	# no free boundary: a vacuum solve on a mesh whose inner edge IS the axis,
+	# where the flux mass ( r q, v ) degenerates and the operator's 1/r is not
+	# integrable. It is an ordinary convergence test because it has an ordinary
+	# exact solution -- see tests/analytic/VacuumHarmonic.hpp for why one exists
+	# at all, which the plan did not know.
+	AxisConvergence
+	# FB-1's coupling matrix P: the trace projection of the exterior modes onto
+	# Gamma_h. It needs a curved boundary and so needs MFEM, which is why it is
+	# a convergence test rather than a unit one -- ExteriorDtN's own tests, which
+	# CI can run, stop at the operator.
+	FreeBoundaryCoupling)
 
 # DriverAcceptance is registered separately below: it runs the meq BINARY rather
 # than linking the library, so it needs the app to have been built and needs the

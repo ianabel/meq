@@ -6,6 +6,7 @@
 
 #include "mfem.hpp"
 
+#include "ExteriorDtN.hpp"
 #include "Source.hpp"
 
 /*
@@ -1014,6 +1015,128 @@ namespace meq
 			/// only what is there instead of catching to find out.
 			static bool traceSolverAvailable( TraceSolver choice );
 
+			/// The columns of `P`: the trace projection of each exterior mode onto
+			/// `Gamma_h`, for the free-boundary coupling of
+			/// FREE-BOUNDARY-PLAN.md section 4.3.
+			///
+			/// **WHAT THIS IS FOR.** Free boundary replaces the fixed-boundary datum
+			/// on `Gamma_h` with `psihat|_Gamma_h = P a`, where `a` is the vector of
+			/// Gegenbauer coefficients of the exterior expansion. `P` is
+			/// `n_trace x N` and column `n` is one projection of
+			/// `mfem::PathTraceCoefficient( path, C_n )` -- the mode evaluated at the
+			/// FOOT of the transfer path, which is where `Gamma` actually is. Each
+			/// returned vector is full trace length and is zero off `Gamma_h`.
+			///
+			/// **AND THE COLUMN IS CONSTANT IN THE ITERATE**, which is the claim
+			/// section 4.3 makes and calls "an argument and not a measurement".
+			/// `psihat` enters the flux row as `<psihat, v.n>`, the potential row as
+			/// `<tau psihat, w>` and the trace row as `<tau psihat, mu>` -- linearly
+			/// in all three -- while every non-linearity is `F( r, z, psi )`, which
+			/// depends on `psi` and not on `psihat`. So `dF/da = ( dF/dpsihat ) P`
+			/// cannot move, and `P` is built once per mesh rather than once per
+			/// Newton step. This method takes no iterate for exactly that reason:
+			/// **if it ever needs one, the claim has failed** and the caller should
+			/// find out why rather than passing one in.
+			///
+			/// **THE MODES ARE INDEXED BY DEGREE FROM 2**, so column `i` carries
+			/// degree `ExteriorDtN::firstMode() + i`. That is an off-by-TWO waiting
+			/// to happen; see meq::ExteriorDtN.
+			///
+			/// Throws std::logic_error on the fitted path, where there is no
+			/// `Gamma_h` and no transfer path to evaluate a mode at the foot of.
+			std::vector<mfem::Vector>
+			exteriorTraceColumns( ExteriorDtN const &exterior ) const;
+
+			/// The rows of `T`: the transmission condition of
+			/// FREE-BOUNDARY-PLAN.md section 4.2, tested against each exterior
+			/// mode. The Neumann half of the coupling, and the other half of
+			/// exteriorTraceColumns().
+			///
+			/// **WHAT THIS IS FOR.** `P` says what the exterior expansion imposes
+			/// on `Gamma_h`; on its own that leaves `a` undetermined, since
+			/// nothing yet says the two fields agree in their normal derivative.
+			/// Row `m` is that statement:
+			///
+			///     T_m( q, a ) = INT_Gamma E_h( q_h ).nu C_m dGamma
+			///                 + a_m * exterior.blockEntry( m )
+			///
+			/// and the returned vector is the first term's derivative with respect
+			/// to the flux unknowns -- which, the term being LINEAR in `q_h`, is
+			/// also the term itself contracted with the iterate. Each vector is
+			/// full SOLUTION length, not trace length, and is non-zero only on the
+			/// flux dofs of the elements owning a `Gamma_h` face.
+			///
+			/// **THE INTEGRAL CARRIES NO 1/r AND THAT IS NOT AN OMISSION.** The
+			/// exterior block is diagonal in the weight `dGamma/r`, which is what
+			/// makes section 3.2 work at all, so the interior term has to be
+			/// tested in that same weight or the two do not meet. It is: the
+			/// transmission condition equates `(1/r) dpsi/dnu` across `Gamma`, and
+			/// MEQ's `q` IS `(1/r) grad_bar( psi )` -- so testing `q.nu` against
+			/// `C_m` in the PLAIN measure `dGamma` already carries the `1/r` the
+			/// exterior side carries in its weight. Writing `dGamma/r` here would
+			/// divide by the radius twice. The flux is the asset again, for the
+			/// fourth time in this tree.
+			///
+			/// **AND THE RADIUS THAT WOULD BE WRONG IS THE FOOT'S, NOT THE NODE'S**
+			/// -- see meq::GridSampler, where reading a band quantity at the foot
+			/// rather than at the point cost a factor of 1.7e5. Here the question
+			/// does not arise, because no radius is read.
+			///
+			/// **CONSTANT IN THE ITERATE, LIKE `P`, AND FOR A DIFFERENT REASON.**
+			/// `P` is constant because `psihat` enters every row linearly; this row
+			/// is constant because the extension `E_h` is a linear operator on the
+			/// flux and `nu`, `C_m` and the measure are geometry. So it is built
+			/// once per mesh, and this method takes no iterate. If it ever needs
+			/// one, the same claim has failed.
+			///
+			/// **THE SIGN IS CHOSEN HERE RATHER THAN INHERITED.** The assembled
+			/// flux block holds `-q` (see the file comment), so the extension of it
+			/// is negated on the way out. Compare transferredDatum(), which must
+			/// hand mfem::PathLiftCoefficient the RAW block precisely because that
+			/// class re-runs the integrator the assembly used; nothing is re-run
+			/// here, so the convention is written out.
+			///
+			/// **THE MODES ARE INDEXED BY DEGREE FROM 2**, as in
+			/// exteriorTraceColumns(), and the same off-by-TWO is waiting.
+			///
+			/// Throws std::logic_error on the fitted path, for the same reason
+			/// exteriorTraceColumns() does.
+			std::vector<mfem::Vector>
+			exteriorTransmissionRows( ExteriorDtN const &exterior ) const;
+
+			/// The quadrature rule order used along each `Gamma_h` face by
+			/// exteriorTransmissionRows(). Defaults to a rule generous enough that
+			/// it is not what limits the row; raise it to check that.
+			void setTransmissionQuadratureOrder( int order );
+
+			/// **THIS IS THE HYPOTHESIS RADIAL TRANSFER PATHS REST ON, AND IT IS
+			/// MEASURED RATHER THAN ASSUMED.** Free boundary puts `Gamma` on a
+			/// semicircle centred on the axis, so the natural path family is rays
+			/// from that centre -- `mfem::ClosestPointPath::Sphere`, whose foot map
+			/// is exact, monotone and needs no search. What it needs in return is
+			/// that every ray from the centre meets `Gamma_h` exactly once. If
+			/// `Gamma_h` is star-shaped about the centre it does; if it is not, a ray
+			/// meets it twice, two faces claim the same piece of `Gamma`, and the
+			/// transfer is double valued there.
+			///
+			/// The condition is local and linear on a polygon: every boundary face
+			/// must satisfy `( x - c ) . n > 0` for the outward normal `n`, which is
+			/// visibility of that face from the centre. This returns the minimum of
+			/// `( x - c ) . n / |x - c|` over the faces of `Gamma_h` -- a cosine, so
+			/// it is dimensionless and comparable between meshes, exactly as
+			/// `meq::AngleParametrisation`'s `min |u x t|` is for the contour tracer.
+			///
+			/// **AND IT MUST BE RE-CHECKED AFTER EVERY REFINEMENT.** A domain that
+			/// starts star-shaped need not stay so: `meq::AdaptiveDomain` re-cuts
+			/// `D_h` from the background mesh each cycle, and the elements it admits
+			/// change. This is cheap -- one dot product per boundary face -- so the
+			/// adaptive loop can afford to assert it every cycle, and should.
+			///
+			/// Returns the margin over `Gamma_h` alone on the extension path. On the
+			/// fitted path there is no `Gamma_h`, so it measures the whole boundary
+			/// and answers the same question about it.
+			double starShapedMargin( double centreR, double centreZ ) const;
+
 			/// Damping for the Picard paths, in ( 0, 1 ]. Which knob it reaches
 			/// depends on the path: KINSetDampingAA for AndersonPicard,
 			/// KINSetDamping for PicardOnly. Setting both compounds them and is
@@ -1323,12 +1446,31 @@ namespace meq
 			/// Interpolate a coefficient onto the trace space, face by face.
 			/// GridFunction::ProjectCoefficient cannot: it loops volume elements.
 			/// See the .cpp.
+			/// How nearly `Gamma_h` fails to be star-shaped about a centre, as a
+			/// cosine in [ -1, 1 ]. Positive means it IS star-shaped; the value is
+			/// the margin.
+			///
+			/// Project a PATH coefficient onto Gamma_h's trace dofs.
+			///
+			/// Separate from projectOntoTrace() because a path coefficient
+			/// must be evaluated on the FACE transformation rather than the
+			/// element one, and MFEM aborts rather than coping. See the
+			/// definition.
+			void projectPathTraceOntoGammaH( mfem::Coefficient &coeff,
+			                                 mfem::Vector &target ) const;
+
 			void projectOntoTrace( mfem::Coefficient &coeff,
 			                       mfem::GridFunction &target ) const;
 
 			/// The transferring paths, or null on the fitted path. Borrowed.
 			mfem::TransferPath *transferPath;
 			int extensionLineOrder;
+
+			/// Face rule order for exteriorTransmissionRows(). SEPARATE from
+			/// extensionLineOrder, which is a rule ALONG a path and has to match
+			/// what buildForms() gave HDGExtensionIntegrator; this one is a rule
+			/// ACROSS the face and is nobody else's business.
+			int transmissionQuadratureOrder;
 
 			Globalisation globalisationChoice;
 			LocalSolver localSolverChoice;

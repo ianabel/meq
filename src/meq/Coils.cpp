@@ -1,0 +1,620 @@
+#include "Coils.hpp"
+
+#include <boost/math/policies/policy.hpp>
+#include <boost/math/special_functions/ellint_rd.hpp>
+#include <boost/math/special_functions/ellint_rf.hpp>
+#include <boost/math/special_functions/legendre.hpp>
+
+#include <algorithm>
+#include <cmath>
+#include <map>
+#include <sstream>
+#include <stdexcept>
+#include <string>
+
+/*
+ * WHAT IS DECIDED IN THIS FILE, AND WHY EACH WAY
+ *
+ * Coils.hpp carries the physics -- the derivation of F = mu0 r j_phi, the
+ * cross-section integral, and what the quadrature achieves. This comment is
+ * about the three numerical choices underneath it, each of which was measured
+ * before it was believed.
+ *
+ *
+ * 1. THE KERNEL IS CARLSON'S, IN THE COMPLEMENTARY MODULUS
+ *
+ * The textbook filament flux is
+ *
+ *     psi = ( mu0 I / 2 pi ) d [ ( 1 - k^2/2 ) K( k ) - E( k ) ],
+ *     d^2 = ( a + r )^2 + ( z - z0 )^2,    k^2 = 4 a r / d^2,
+ *
+ * and it is unusable here for one reason: the quadrature has to evaluate it at
+ * points arbitrarily close to the source, where k -> 1. Formed as
+ * 2 sqrt( a r )/d, k rounds to exactly 1.0 once the field point is within about
+ * 1e-8 of a source filament -- at which std::comp_ellint_1( 1.0 ) is NaN and
+ * std::comp_ellint_2( 1.0 ) is a perfectly ordinary 1.0, so the failure is a
+ * NaN propagating out of an otherwise plausible calculation.
+ *
+ * The complementary modulus has NO cancellation at all:
+ *
+ *     k'^2 = 1 - k^2 = [ ( a + r )^2 + dz^2 - 4 a r ] / d^2
+ *                    = [ ( a - r )^2 + dz^2 ] / d^2,
+ *
+ * which is the squared distance from the field point to the source, over d^2 --
+ * nothing is subtracted from one anywhere. Carlson's symmetric forms take
+ * exactly that argument (DLMF 19.25.1):
+ *
+ *     K = R_F( 0, k'^2, 1 ),      E = K - ( k^2/3 ) R_D( 0, k'^2, 1 ),
+ *
+ * and the bracket collapses to k^2 [ R_D/3 - R_F/2 ], which is what
+ * geometricKernel() below evaluates.
+ *
+ * MEASURED. Against std::comp_ellint at k = 1e-8, 1e-3, 0.1, 0.5, 0.9, 0.99,
+ * 0.999999 and 1 - 1e-12, the two routes agree to a worst 7.0e-13 in K and
+ * 4.3e-13 in E, both at the k -> 1 end where the standard library is itself
+ * losing digits. Beyond it Carlson simply keeps going: at k'^2 = 1e-16, 1e-24,
+ * 1e-40 and 1e-300 it returns 19.807, 29.017, 47.438 and 346.774, agreeing with
+ * ln( 4/k' ) to every digit printed, while the textbook form has been NaN since
+ * 1e-16. Boost is the implementation for the reason CLAUDE.md gives under
+ * *Prefer a maintained library to a hand-rolled algorithm*.
+ *
+ * PROMOTION IS TURNED OFF, and that is a measurement rather than a habit. Boost
+ * evaluates a double-precision special function in long double by default. Over
+ * k'^2 from 1e-30 to 1, promoted and unpromoted R_F and R_D agree to a worst
+ * 4.9e-16 -- round-off -- and the unpromoted pair costs 40.9 ns against 88.7,
+ * so promotion is buying nothing here and charging 2.2x for it. Since the
+ * kernel is evaluated 4 n^2 times per point that factor is the whole cost of
+ * this class.
+ *
+ *
+ * 2. THE GAUSS NODES ARE COMPUTED, NOT TABULATED, AND THE REASON IS THE API
+ *
+ * Boost's boost::math::quadrature::gauss<Real, N> takes N as a TEMPLATE
+ * parameter, so a runtime-selectable order cannot use it without a switch over
+ * a handful of instantiations -- which is what ExteriorDtN.cpp does, and it
+ * can, because its order is fixed at 30 by an argument about polynomial degree.
+ * Here the order is the knob a caller turns to trade accuracy against time, and
+ * the measured table in Coils.hpp is a sweep over it, so it has to be a
+ * run-time value.
+ *
+ * So the nodes come from Newton on Boost's own legendre_p and legendre_p_prime
+ * -- the special function is still the library's, and only the root finding is
+ * local, which is the same division of labour ExteriorDtN.cpp makes when it
+ * uses legendre_p_prime rather than a recurrence. Checked against Boost's
+ * tabulated gauss<double, 30>: abscissae and weights agree to a worst 1.5e-16
+ * in ABSOLUTE value, and the rule integrates x^m over [ -1, 1 ] to a worst
+ * absolute error of 4.4e-16 for every m up to 2n - 1 = 59, which is exactness
+ * at the round-off floor.
+ *
+ *
+ * 3. PANELS AND GRADING
+ *
+ * See Coils.hpp for what these buy. The mechanics:
+ *
+ *   * The rectangle is cut at the field point's coordinates CLAMPED to it, so a
+ *     point inside gives four panels, a point outside in one coordinate gives
+ *     two, and a point outside in both gives one. The clamp is what makes the
+ *     three cases one piece of code.
+ *   * Each panel is graded toward the corner nearest the field point --
+ *     t = corner +- L u^3 -- which for an interior point is the singularity and
+ *     for an exterior one is the nearest approach.
+ *
+ * The grading exponent is a compile-time constant here, not a parameter.
+ * Coils.hpp records why: at exponent 4 the innermost node's offset underflows
+ * against the coordinate it is added to, the node lands on the field point, and
+ * the kernel is infinite. Cubic keeps a margin at every accepted order, and the
+ * order is capped so that it keeps it.
+ *
+ * THE UNDERFLOW GUARD IS KEPT ANYWAY. A node whose distance to the field point
+ * rounds to exactly zero is DROPPED rather than evaluated -- Boost would
+ * otherwise throw a domain error from inside a quadrature loop, which is a
+ * confusing place to meet a geometry problem. It cannot happen at the shipped
+ * exponent and accepted orders; it is there so that if it ever does, the answer
+ * is slightly wrong rather than absent. What is dropped is one node whose
+ * quadrature weight carries a factor L u^2 of order 1e-15, so the omission is
+ * far below round-off in the integral.
+ */
+
+namespace meq
+{
+	namespace
+	{
+		/// pi, to the precision the rest of this tree uses.
+		constexpr double pi = 3.14159265358979323846;
+
+		/// The grading exponent: t = corner + L u^gradingExponent. Fixed at 3
+		/// for the floating-point reason in Coils.hpp, not because 3 is
+		/// mathematically special -- the observed convergence rate is about
+		/// 4 * gradingExponent and 4 would be better if it worked.
+		constexpr int gradingExponent = 3;
+
+		/// Boost's elliptic integrals without long-double promotion. Measured
+		/// at 4.9e-16 agreement and 2.2x the speed; see the file comment.
+		using EllipticPolicy = boost::math::policies::policy<
+			boost::math::policies::promote_double<false> >;
+
+		/// A Gauss-Legendre rule on [ -1, 1 ].
+		struct GaussRule
+		{
+			std::vector<double> abscissa;
+			std::vector<double> weight;
+		};
+
+		/// The rule of a given order, computed once per order per thread.
+		///
+		/// thread_local rather than static, because meq threads over surfaces
+		/// and rays elsewhere in this tree and a shared mutable cache is
+		/// exactly the kind of thing CLAUDE.md records going wrong quietly. A
+		/// rule is a few hundred bytes and there will be one or two orders in
+		/// play.
+		GaussRule const &gaussRule( int order )
+		{
+			static thread_local std::map<int, GaussRule> cache;
+
+			auto const found = cache.find( order );
+			if ( found != cache.end() )
+				return found->second;
+
+			GaussRule rule;
+			rule.abscissa.assign( static_cast<std::size_t>( order ), 0.0 );
+			rule.weight.assign( static_cast<std::size_t>( order ), 0.0 );
+
+			for ( int i = 0; i < order; ++i )
+			{
+				// The standard Chebyshev-like starting guess; Newton on
+				// P_n( t ) then converges in a handful of steps for every
+				// order this class accepts.
+				double t = std::cos( pi*( i + 0.75 )/( order + 0.5 ) );
+				for ( int step = 0; step < 100; ++step )
+				{
+					double const value = boost::math::legendre_p( order, t );
+					double const slope =
+						boost::math::legendre_p_prime( order, t );
+					double const correction = -value/slope;
+					t += correction;
+					if ( std::abs( correction ) <= 1.0e-16 )
+						break;
+				}
+
+				double const slope = boost::math::legendre_p_prime( order, t );
+				rule.abscissa[ static_cast<std::size_t>( i ) ] = t;
+				rule.weight[ static_cast<std::size_t>( i ) ] =
+					2.0/( ( 1.0 - t*t )*slope*slope );
+			}
+
+			return cache.emplace( order, std::move( rule ) ).first->second;
+		}
+
+		/// The three geometric quantities the filament kernel is built from:
+		/// d, k^2 and the COMPLEMENTARY k'^2, the last computed as the squared
+		/// distance to the source over d^2 so that nothing cancels.
+		void loopGeometry( double r, double z, double loopRadius,
+		                   double loopHeight, double &d, double &kSquared,
+		                   double &complementary )
+		{
+			double const dz = z - loopHeight;
+			double const sum = loopRadius + r;
+			double const difference = loopRadius - r;
+			double const dSquared = sum*sum + dz*dz;
+
+			d = std::sqrt( dSquared );
+			kSquared = 4.0*loopRadius*r/dSquared;
+			complementary = ( difference*difference + dz*dz )/dSquared;
+		}
+
+		/// psi of a filament, per unit current and per unit mu0:
+		///
+		///     G = ( 1/2 pi ) d k^2 [ R_D( 0, k'^2, 1 )/3 - R_F( 0, k'^2, 1 )/2 ]
+		///
+		/// which is identically ( 1/2 pi ) d [ ( 1 - k^2/2 ) K - E ]. The
+		/// caller supplies the geometry, because it also needs k'^2 to decide
+		/// whether the point is on the loop at all.
+		double geometricKernel( double d, double kSquared, double complementary )
+		{
+			double const rf =
+				boost::math::ellint_rf( 0.0, complementary, 1.0,
+				                        EllipticPolicy() );
+			double const rd =
+				boost::math::ellint_rd( 0.0, complementary, 1.0,
+				                        EllipticPolicy() );
+			return d*kSquared*( rd/3.0 - rf/2.0 )/( 2.0*pi );
+		}
+
+		void requireFinite( double value, char const *what, char const *where )
+		{
+			if ( !std::isfinite( value ) )
+			{
+				std::ostringstream message;
+				message << where << ": " << what << " must be finite, but is "
+				        << value;
+				throw std::invalid_argument( message.str() );
+			}
+		}
+
+		void requireOrder( int order, char const *where )
+		{
+			if ( order < 2 || order > maximumCoilQuadratureOrder )
+			{
+				std::ostringstream message;
+				message << where << ": the quadrature order must be between 2 "
+				           "and " << maximumCoilQuadratureOrder << ", but is "
+				        << order
+				        << ". The upper bound is a floating-point limit and not "
+				           "a taste: the cubically graded nodes cluster as "
+				           "n^-6 on the field point, and past it the innermost "
+				           "one lands exactly on it. The rule reaches round-off "
+				           "at about 48, so nothing useful is refused";
+				throw std::invalid_argument( message.str() );
+			}
+		}
+
+		/// The cross-section integral of the unit kernel over one coil, panelled
+		/// and graded as the file comment describes. Multiply by mu0 and by the
+		/// current density to get psi.
+		double crossSectionIntegral( Coil const &coil, double r, double z,
+		                             int order )
+		{
+			GaussRule const &rule = gaussRule( order );
+
+			double const rLow = coil.rMin();
+			double const rHigh = coil.rMax();
+			double const zLow = coil.zMin();
+			double const zHigh = coil.zMax();
+
+			// The field point clamped into the rectangle. This one line is what
+			// makes the interior, edge-on and exterior cases one piece of code:
+			// it is the singularity when the point is inside and the nearest
+			// point of the coil when it is not.
+			double const rSplit = std::min( std::max( r, rLow ), rHigh );
+			double const zSplit = std::min( std::max( z, zLow ), zHigh );
+
+			double rEdge[ 3 ] = { rLow, rHigh, rHigh };
+			int rPanels = 1;
+			if ( rSplit > rLow && rSplit < rHigh )
+			{
+				rEdge[ 1 ] = rSplit;
+				rEdge[ 2 ] = rHigh;
+				rPanels = 2;
+			}
+
+			double zEdge[ 3 ] = { zLow, zHigh, zHigh };
+			int zPanels = 1;
+			if ( zSplit > zLow && zSplit < zHigh )
+			{
+				zEdge[ 1 ] = zSplit;
+				zEdge[ 2 ] = zHigh;
+				zPanels = 2;
+			}
+
+			double total = 0.0;
+			for ( int pr = 0; pr < rPanels; ++pr )
+			{
+				double const rA = rEdge[ pr ];
+				double const rB = rEdge[ pr + 1 ];
+				double const rLength = rB - rA;
+				// Grade toward whichever end of this panel is nearer the field
+				// point. For a split panel that is the shared corner; for an
+				// unsplit one it is the nearer edge of the coil.
+				bool const rFromLow =
+					( std::abs( rA - rSplit ) <= std::abs( rB - rSplit ) );
+
+				for ( int pz = 0; pz < zPanels; ++pz )
+				{
+					double const zA = zEdge[ pz ];
+					double const zB = zEdge[ pz + 1 ];
+					double const zLength = zB - zA;
+					bool const zFromLow =
+						( std::abs( zA - zSplit ) <= std::abs( zB - zSplit ) );
+
+					double panel = 0.0;
+					for ( int i = 0; i < order; ++i )
+					{
+						std::size_t const iu = static_cast<std::size_t>( i );
+						double const u = 0.5*( rule.abscissa[ iu ] + 1.0 );
+						double const uCubed = u*u*u;
+						double const uJacobian = 3.0*u*u;
+
+						double const source = rFromLow
+							? rA + rLength*uCubed
+							: rB - rLength*uCubed;
+						double const rWeight =
+							0.5*rule.weight[ iu ]*rLength*uJacobian;
+
+						for ( int j = 0; j < order; ++j )
+						{
+							std::size_t const jv =
+								static_cast<std::size_t>( j );
+							double const v =
+								0.5*( rule.abscissa[ jv ] + 1.0 );
+							double const vCubed = v*v*v;
+							double const vJacobian = 3.0*v*v;
+
+							double const height = zFromLow
+								? zA + zLength*vCubed
+								: zB - zLength*vCubed;
+							double const zWeight =
+								0.5*rule.weight[ jv ]*zLength*vJacobian;
+
+							double d = 0.0;
+							double kSquared = 0.0;
+							double complementary = 0.0;
+							loopGeometry( r, z, source, height, d, kSquared,
+							              complementary );
+
+							// The node has rounded onto the field point. See
+							// the file comment: dropped, not evaluated, and
+							// unreachable at the shipped grading exponent.
+							if ( !( complementary > 0.0 ) )
+								continue;
+
+							panel += rWeight*zWeight
+							         *geometricKernel( d, kSquared,
+							                           complementary );
+						}
+					}
+					total += panel;
+				}
+			}
+
+			return total;
+		}
+	}
+
+	Coil::Coil( double centreRIn, double centreZIn, double halfWidthIn,
+	            double halfHeightIn, double currentIn )
+		: centreRValue( centreRIn ),
+		  centreZValue( centreZIn ),
+		  halfWidthValue( halfWidthIn ),
+		  halfHeightValue( halfHeightIn ),
+		  currentValue( currentIn )
+	{
+		requireFinite( centreRIn, "the centre radius", "meq::Coil" );
+		requireFinite( centreZIn, "the centre height", "meq::Coil" );
+		requireFinite( halfWidthIn, "the half-width", "meq::Coil" );
+		requireFinite( halfHeightIn, "the half-height", "meq::Coil" );
+		requireFinite( currentIn, "the current", "meq::Coil" );
+
+		if ( !( halfWidthIn > 0.0 ) )
+			throw std::invalid_argument(
+				"meq::Coil: the half-width must be positive. A coil of zero "
+				"radial extent is a filament, which has an infinite current "
+				"density and no cross-section integral; filamentPsi() is the "
+				"function for that case" );
+		if ( !( halfHeightIn > 0.0 ) )
+			throw std::invalid_argument(
+				"meq::Coil: the half-height must be positive, for the reason "
+				"the half-width must be" );
+
+		// The same refusal meq::BoundaryShape makes, and for the same reason:
+		// the Grad-Shafranov operator carries a 1/r which is not integrable
+		// through the axis, so a coil reaching it is not merely unusual, it is
+		// unsolvable. The filament kernel would give out there too -- psi is
+		// exactly zero on the axis, so a coil straddling it would be
+		// integrating through its own zero.
+		if ( !( centreRIn - halfWidthIn > 0.0 ) )
+		{
+			std::ostringstream message;
+			message << "meq::Coil: the coil reaches r = "
+			        << centreRIn - halfWidthIn
+			        << ", which is on or beyond the axis; the Grad-Shafranov "
+			           "operator's 1/r is not integrable there";
+			throw std::invalid_argument( message.str() );
+		}
+	}
+
+	double Coil::centreR() const
+	{
+		return centreRValue;
+	}
+
+	double Coil::centreZ() const
+	{
+		return centreZValue;
+	}
+
+	double Coil::halfWidth() const
+	{
+		return halfWidthValue;
+	}
+
+	double Coil::halfHeight() const
+	{
+		return halfHeightValue;
+	}
+
+	double Coil::current() const
+	{
+		return currentValue;
+	}
+
+	double Coil::rMin() const
+	{
+		return centreRValue - halfWidthValue;
+	}
+
+	double Coil::rMax() const
+	{
+		return centreRValue + halfWidthValue;
+	}
+
+	double Coil::zMin() const
+	{
+		return centreZValue - halfHeightValue;
+	}
+
+	double Coil::zMax() const
+	{
+		return centreZValue + halfHeightValue;
+	}
+
+	double Coil::area() const
+	{
+		return 4.0*halfWidthValue*halfHeightValue;
+	}
+
+	double Coil::currentDensity() const
+	{
+		return currentValue/area();
+	}
+
+	bool Coil::contains( double r, double z ) const
+	{
+		// Closed, edges included; see the header for why that is stated rather
+		// than merely chosen.
+		return r >= rMin() && r <= rMax() && z >= zMin() && z <= zMax();
+	}
+
+	double filamentPsi( double r, double z, double loopRadius,
+	                    double loopHeight, double current, double mu0 )
+	{
+		requireFinite( r, "the field point radius", "meq::filamentPsi" );
+		requireFinite( z, "the field point height", "meq::filamentPsi" );
+		requireFinite( loopRadius, "the loop radius", "meq::filamentPsi" );
+		requireFinite( loopHeight, "the loop height", "meq::filamentPsi" );
+		requireFinite( current, "the current", "meq::filamentPsi" );
+		requireFinite( mu0, "mu0", "meq::filamentPsi" );
+
+		if ( !( loopRadius > 0.0 ) )
+			throw std::invalid_argument(
+				"meq::filamentPsi: the loop radius must be positive" );
+		if ( r < 0.0 )
+			throw std::invalid_argument(
+				"meq::filamentPsi: the field point radius must not be "
+				"negative; r = 0 is allowed and gives exactly zero" );
+
+		double d = 0.0;
+		double kSquared = 0.0;
+		double complementary = 0.0;
+		loopGeometry( r, z, loopRadius, loopHeight, d, kSquared, complementary );
+
+		if ( !( complementary > 0.0 ) )
+			throw std::invalid_argument(
+				"meq::filamentPsi: the field point is ON the loop, where psi "
+				"is genuinely infinite -- this is a line current and the flux "
+				"diverges logarithmically at it. A caller who has reached here "
+				"has a geometry error rather than a large number" );
+
+		// k^2 is an EXACT factor, so this is bit-exactly 0.0 on the axis, which
+		// is the boundary condition the free-boundary problem imposes there.
+		return mu0*current*geometricKernel( d, kSquared, complementary );
+	}
+
+	double coilPsi( Coil const &coil, double r, double z, int order,
+	                double mu0 )
+	{
+		requireFinite( r, "the field point radius", "meq::coilPsi" );
+		requireFinite( z, "the field point height", "meq::coilPsi" );
+		requireFinite( mu0, "mu0", "meq::coilPsi" );
+		requireOrder( order, "meq::coilPsi" );
+
+		if ( r < 0.0 )
+			throw std::invalid_argument(
+				"meq::coilPsi: the field point radius must not be negative" );
+
+		return mu0*coil.currentDensity()
+		       *crossSectionIntegral( coil, r, z, order );
+	}
+
+	CoilSet::CoilSet( double mu0In )
+		: permeability( mu0In ),
+		  quadratureOrderValue( defaultCoilQuadratureOrder )
+	{
+		requireFinite( mu0In, "mu0", "meq::CoilSet" );
+		if ( !( mu0In > 0.0 ) )
+			throw std::invalid_argument(
+				"meq::CoilSet: mu0 must be positive. Zero would leave every "
+				"coil silently inert -- f() would be identically zero and the "
+				"solve would converge beautifully to a vacuum -- which is a "
+				"worse outcome than an error. Normalised units want 1" );
+	}
+
+	void CoilSet::add( Coil const &coil )
+	{
+		coilList.push_back( coil );
+	}
+
+	std::size_t CoilSet::size() const
+	{
+		return coilList.size();
+	}
+
+	bool CoilSet::empty() const
+	{
+		return coilList.empty();
+	}
+
+	Coil const &CoilSet::coil( std::size_t index ) const
+	{
+		if ( index >= coilList.size() )
+			throw std::out_of_range(
+				"meq::CoilSet::coil: index " + std::to_string( index )
+				+ " is outside a set of " + std::to_string( coilList.size() )
+				+ " coils" );
+		return coilList[ index ];
+	}
+
+	std::vector<Coil> const &CoilSet::coils() const
+	{
+		return coilList;
+	}
+
+	double CoilSet::f( double r, double z ) const
+	{
+		// F = mu0 r j_phi, derived in the header. Summed rather than
+		// short-circuited on the first hit, because overlapping coils really do
+		// add their current densities.
+		double density = 0.0;
+		for ( Coil const &c : coilList )
+			if ( c.contains( r, z ) )
+				density += c.currentDensity();
+
+		return permeability*r*density;
+	}
+
+	double CoilSet::totalCurrent() const
+	{
+		double sum = 0.0;
+		for ( Coil const &c : coilList )
+			sum += c.current();
+		return sum;
+	}
+
+	int CoilSet::indexContaining( double r, double z ) const
+	{
+		for ( std::size_t i = 0; i < coilList.size(); ++i )
+			if ( coilList[ i ].contains( r, z ) )
+				return static_cast<int>( i );
+		return -1;
+	}
+
+	double CoilSet::psi( double r, double z ) const
+	{
+		double sum = 0.0;
+		for ( Coil const &c : coilList )
+			sum += coilPsi( c, r, z, quadratureOrderValue, permeability );
+		return sum;
+	}
+
+	double CoilSet::psiOf( std::size_t index, double r, double z ) const
+	{
+		return coilPsi( coil( index ), r, z, quadratureOrderValue,
+		                permeability );
+	}
+
+	void CoilSet::setQuadratureOrder( int order )
+	{
+		requireOrder( order, "meq::CoilSet::setQuadratureOrder" );
+		quadratureOrderValue = order;
+	}
+
+	int CoilSet::quadratureOrder() const
+	{
+		return quadratureOrderValue;
+	}
+
+	double CoilSet::mu0() const
+	{
+		return permeability;
+	}
+
+}

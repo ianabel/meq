@@ -15,17 +15,66 @@ The four plan files, and none of them is a plan any more except one:
 | `DRIVER-PLAN.md` | stage 7 — **done**; the file is now its findings |
 | `FLOW-PLAN.md` | item 9, FL-0 to FL-8 — **done**; the file is the derivation and its findings |
 | `INVERSION-PLAN.md` | item 10's machinery — IN-A to IN-4 **done**, IN-5 deferred, IN-6 open, IN-P under way |
-| `FREE-BOUNDARY-PLAN.md` | item 8 — **nothing is built**, and it is the one real plan left |
+| `FREE-BOUNDARY-PLAN.md` | item 8 — FB-A and FB-0 **done**, FB-1 and FB-2 part built, FB-3 to FB-6 open. Still the one real plan left |
 
 ## So what is next
 
 Nothing is red and stages 0 to 7 are done, so the order is:
 
 1. **Free boundary** — item 8, `FREE-BOUNDARY-PLAN.md`, staged FB-A and FB-0 to
-   FB-6. The largest remaining item and the most structural. **FB-A is
-   measurable today**, with no free boundary at all: the axis, where the flux
-   mass `(r q, v)` degenerates and `BoundaryShape` refuses to go. Do that before
-   FB-1.
+   FB-6. The largest remaining item and the most structural. **FB-A IS DONE**,
+   2026-09-04, and it was the one stage needing no free boundary at all:
+   `tests/convergence/AxisConvergence.cpp` solves a vacuum field on a mesh whose
+   inner edge is `r = 0`, where the flux mass `(r q, v)` degenerates. The answer
+   is that **`ψ` keeps `k+1` there, `q` loses about half an order, and the
+   conditioning penalty is `O(1/h)` rather than `O(1/h²)`** — survivable, and
+   not a reason to stop. §7.2 of the plan has the tables and the mechanism.
+   **FB-0 IS ALSO DONE**, same day: `src/meq/ExteriorDtN.{hpp,cpp}` is the
+   Gegenbauer basis, the symbol and the mass, MFEM-free and unit tested so CI
+   can gate it. Its acceptance — a current loop's field, built from elliptic
+   integrals and sharing no code with the basis — reads **1.4e−15** in the trace
+   and **6.9e−14** in the DtN, against the plan's own 4.4e−14 and 6.8e−09; the
+   DtN column moved five orders because the plan's figure was limited by its
+   finite-difference reference, exactly as it said. §7.3 has the tables.
+   **What remains of FB-0** is §3.4's cross-check against CEDRES++'s own
+   boundary form, now specified in §3.5 but not built — and it is not trivial,
+   because their kernel is hypersingular and only their double-difference form
+   regularises it.
+
+   **FB-1 AND FB-2 ARE PART BUILT**, same day, and each turned up a correction
+   to the plan.
+
+   *FB-1*: the coupling matrix `P` is built and measured (§7.4). Its sharpest
+   number is that projecting a mode at the **foot** on `Γ` rather than at the
+   point on `Γ_h` differs by **18% at the coarsest mesh, falling at O(h)** —
+   both choices look like a coupling and one throws away the accuracy the
+   transfer technique exists to buy. Two corrections: §4.3's "one call to
+   `ProjectBdrCoefficient`" does not work, because a path coefficient must be
+   evaluated on the FACE transformation; and §4.3's requested measurement —
+   differencing the column at two iterates — **is not needed under NPC**, where
+   the border is exactly `−P` because `Γ_h`'s trace dofs are essential.
+   `tests/analytic/ExteriorMatched.hpp` is FB-1's exact answer (§7.4a), and
+   writing it found that the plan's proposed answer, filament loop fields,
+   **cannot support an order study at all**.
+
+   *FB-2*: `meq::CoilSet` and the acceptance identity are built (§7.6). The
+   outward flux matches `−μ₀I` to **3.3e−11** on the exact field, so when FB-2
+   applies it to a solve any discrepancy is the solve.
+
+   **What blocks both is one piece**: the transmission row
+   `∫_Γ E_h(q_h)·ν C_m dΓ`, the Neumann half of the coupling. **Its MFEM half is
+   now done and is upstream's**, 2026-09-05 — `mfem::ExtensionBoundaryQuadrature`
+   was written here, filed as `doc/HDG-BEM-COUPLING-FROM-MEQ.md` said MEQ would,
+   and merged into `gf-hdg-subdomains-dev` as *"Merge meq's
+   ExtensionBoundaryQuadrature: quadrature over Gamma"*. Upstream then found the
+   same unsigned-weight defect in the sibling `ExtensionRegionQuadrature` and
+   fixed it, which is the return on filing rather than keeping it local. What is
+   still MEQ's is the row itself: sweep `Γ`, evaluate the extension of the flux
+   there, and contract against `C_m`. The pieces exist —
+   `ElementExtension::TransformBack`, `TransferPath`, and an analytic normal on
+   a semicircle — so it is assembly rather than research, but it is the critical
+   path. After it, the bordered solve at `N + 2` is mechanical: §4.4 is right
+   that `solveWithNormalisation()` already does it at `N = 1`.
 2. **Finish the inversion** — item 10. IN-6, the `(Ψ, θ)` output grid and the
    per-`ψ` cache `MANTA-COUPLING.md` §5's call pattern requires; and IN-P, the
    performance harness, which is under way. IN-5, open surfaces, is **deferred

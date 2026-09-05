@@ -396,6 +396,10 @@ namespace
 		  // null pointer and is a trap the moment one of them reads another.
 		  transferPath( nullptr ),
 		  extensionLineOrder( -1 ),
+		  // Generous on purpose: a rule that limits the transmission row would be
+		  // indistinguishable from an extension that does not converge, and this
+		  // is a setup cost paid once per mesh rather than once per Newton step.
+		  transmissionQuadratureOrder( 12 ),
 		  globalisationChoice( Globalisation::None ),
 		  localSolverChoice( LocalSolver::Newton ),
 		  orderingChoice( NonlinearOrdering::NPC ),
@@ -1081,6 +1085,431 @@ namespace
 		// words.
 		return std::make_unique<mfem::TransferredDatumCoefficient>(
 			*transferPath, std::move( g ), darcyFlux, radius, extensionLineOrder );
+	}
+
+	double GradShafranovSolver::starShapedMargin( double centreR,
+	                                              double centreZ ) const
+	{
+		mfem::Mesh &mesh = *traceFes->GetMesh();
+		bool const extended = ( transferPath != nullptr );
+
+		double margin = 1.0;
+		bool sawAny = false;
+
+		mfem::Vector x( 2 );
+		mfem::Vector normal( 2 );
+
+		for ( int be = 0; be < mesh.GetNBE(); ++be )
+		{
+			if ( extended )
+			{
+				int const attribute = mesh.GetBdrAttribute( be );
+				if ( attribute < 1 || attribute > gammaHMarker.Size()
+				     || !gammaHMarker[ attribute - 1 ] )
+					continue;
+			}
+
+			mfem::FaceElementTransformations *ftr =
+				mesh.GetBdrFaceTransformations( be );
+			if ( !ftr )
+				continue;
+
+			/*
+			 * Both ENDS of the face, and that is enough on a straight one: the
+			 * quantity ( x - c ).n is affine in x along the face because n is
+			 * constant there, so its minimum is at an endpoint. A curved face
+			 * would need the interior too, and MEQ's Gamma_h is straight --
+			 * it is the union of background element faces.
+			 */
+			for ( double xi : { 0.0, 1.0 } )
+			{
+				mfem::IntegrationPoint ip;
+				ip.Set1w( xi, 1.0 );
+				ftr->SetAllIntPoints( &ip );
+				ftr->Transform( ip, x );
+
+				mfem::CalcOrtho( ftr->Jacobian(), normal );
+				double const length = normal.Norml2();
+				if ( !( length > 0.0 ) )
+					continue;
+				normal /= length;
+
+				double const dr = x( 0 ) - centreR;
+				double const dz = x( 1 ) - centreZ;
+				double const distance = std::hypot( dr, dz );
+				if ( !( distance > 0.0 ) )
+					continue;
+
+				/*
+				 * CalcOrtho's sign follows the face's own parametrisation and
+				 * says nothing about which side the domain is on, so it is
+				 * oriented here the same way ExtensionBoundaryQuadrature
+				 * orients its own: outward means agreeing with the direction
+				 * away from the interior. For a boundary face, Elem1 is the
+				 * interior element, so pointing away from its centre is the
+				 * test -- and using the CENTRE rather than the candidate star
+				 * centre is deliberate, since the latter is what is under test.
+				 */
+				mfem::Vector elementCentre( 2 );
+				mesh.GetElementCenter( ftr->Elem1No, elementCentre );
+				double const outward = normal( 0 )*( x( 0 ) - elementCentre( 0 ) )
+				                     + normal( 1 )*( x( 1 ) - elementCentre( 1 ) );
+				double const sign = ( outward < 0.0 ) ? -1.0 : 1.0;
+
+				double const cosine =
+					sign*( normal( 0 )*dr + normal( 1 )*dz )/distance;
+
+				margin = std::min( margin, cosine );
+				sawAny = true;
+			}
+		}
+
+		if ( !sawAny )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::starShapedMargin: no boundary faces "
+				"were examined; on the extension path that means the Gamma_h "
+				"marker selects nothing" );
+
+		return margin;
+	}
+
+	/*
+	 * PROJECTING A PATH COEFFICIENT ONTO Gamma_h'S TRACE DOFS, AND WHY
+	 * GridFunction::ProjectBdrCoefficient CANNOT DO IT.
+	 *
+	 * FREE-BOUNDARY-PLAN.md section 4.3 says each column of P is "one call to
+	 * ProjectBdrCoefficient against mfem::PathTraceCoefficient". IT IS NOT, and
+	 * the attempt aborts rather than misbehaving quietly:
+	 *
+	 *     PathTraceCoefficient must be evaluated on a face: the path family may
+	 *     need the outward normal of Gamma_h
+	 *
+	 * ProjectBdrCoefficient evaluates through the ELEMENT transformation, and a
+	 * path coefficient needs the FACE one -- mfem::TransferredDatumCoefficient's
+	 * own header says the same thing about itself, and this is the same
+	 * requirement arriving one class over. So the projection is written out
+	 * here.
+	 *
+	 * IT IS projectOntoTrace() WITH TWO CHANGES, and both are the point. The
+	 * coefficient is evaluated on `*ftr` rather than on `*ftr->Elem1`, which is
+	 * what supplies the face and its normal; and the loop is over BOUNDARY
+	 * ELEMENTS carrying a Gamma_h attribute rather than over every face, since
+	 * a mode has nothing to say anywhere else. Everything else -- nodal
+	 * interpolation at the face element's own nodes, DG_Interface being nodal
+	 * with VALUE map type so the nodes are where the dofs live -- is that
+	 * function's reasoning and is not repeated.
+	 *
+	 * Serial, and it uses Mesh's shared face transformation deliberately: this
+	 * runs once per mode at setup, never inside an element loop, so the
+	 * reentrancy hazard CLAUDE.md records for GetBdrFaceTransformations does not
+	 * arise. If it is ever threaded, the caller-allocated overload is the fix.
+	 */
+	void GradShafranovSolver::projectPathTraceOntoGammaH(
+		mfem::Coefficient &coeff, mfem::Vector &target ) const
+	{
+		mfem::Mesh &mesh = *traceFes->GetMesh();
+		mfem::Array<int> vdofs;
+		mfem::Vector values;
+
+		for ( int be = 0; be < mesh.GetNBE(); ++be )
+		{
+			int const attribute = mesh.GetBdrAttribute( be );
+			if ( attribute < 1 || attribute > gammaHMarker.Size()
+			     || !gammaHMarker[ attribute - 1 ] )
+				continue;
+
+			mfem::FaceElementTransformations *ftr =
+				mesh.GetBdrFaceTransformations( be );
+			if ( !ftr )
+				continue;
+
+			int const face = mesh.GetBdrElementFaceIndex( be );
+			mfem::FiniteElement const *faceFe = traceFes->GetFaceElement( face );
+			if ( !faceFe )
+				continue;
+
+			traceFes->GetFaceVDofs( face, vdofs );
+			int const dof = faceFe->GetDof();
+			values.SetSize( dof );
+
+			mfem::IntegrationRule const &nodes = faceFe->GetNodes();
+			for ( int i = 0; i < dof; ++i )
+			{
+				ftr->SetAllIntPoints( &nodes.IntPoint( i ) );
+				// ON THE FACE, not on Elem1. That is the whole difference.
+				values( i ) = coeff.Eval( *ftr, nodes.IntPoint( i ) );
+			}
+
+			target.SetSubVector( vdofs, values );
+		}
+	}
+
+	/*
+	 * THE COLUMNS OF P, AND WHY EACH ONE IS A PROJECTION AT THE FOOT OF A PATH
+	 * RATHER THAN A PROJECTION ON Gamma_h.
+	 *
+	 * The exterior expansion lives on Gamma, the TRUE boundary. Gamma_h is the
+	 * inscribed polygon the mesh actually has, and the whole of stage 5 is the
+	 * machinery for carrying a datum between them: for a point x on Gamma_h,
+	 * a( x ) is its foot on Gamma, and mfem::PathTraceCoefficient( path, g )
+	 * evaluates g there. So column n is the projection onto Gamma_h's trace dofs
+	 * of C_n evaluated ON Gamma -- not of C_n evaluated on Gamma_h, which would
+	 * be a different function by O( dist( Gamma_h, Gamma ) ) and would throw the
+	 * whole transfer technique's accuracy away at the one place it is needed.
+	 *
+	 * This is the same call the fixed-boundary datum already makes, with g = 0
+	 * replaced by a mode. That is section 4.3's point: the coupling is stage 5
+	 * with the datum unknown instead of zero, so the machinery is already here.
+	 *
+	 * ONE PROJECTION PER MODE, AND THE MARKER IS gammaHMarker. Note the contrast
+	 * with prepare(), which projects the fixed-boundary datum against
+	 * fittedMarker precisely because Gamma_h's dofs are pinned to zero there.
+	 * Free boundary un-pins exactly those, and leaves the fitted ones alone.
+	 */
+	std::vector<mfem::Vector>
+		GradShafranovSolver::exteriorTraceColumns( ExteriorDtN const &exterior ) const
+	{
+		if ( !transferPath )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::exteriorTraceColumns: there is no "
+				"Gamma_h on the fitted path -- setExtension() was never called, "
+				"so the trace unknown on the boundary IS the condition imposed "
+				"and there is nothing for an exterior expansion to drive" );
+
+		std::vector<mfem::Vector> columns;
+		columns.reserve( static_cast<std::size_t>( exterior.modeCount() ) );
+
+		for ( int i = 0; i < exterior.modeCount(); ++i )
+		{
+			int const n = ExteriorDtN::firstMode() + i;
+
+			/*
+			 * The mode as a PositionFunction. Captured by value except for the
+			 * ExteriorDtN, which the caller owns and which must outlive the
+			 * projection -- it does, since the projection happens inside this
+			 * loop and nothing escapes.
+			 *
+			 * basis() takes ( r, z ) and depends on the DIRECTION alone, so it
+			 * is well defined at any point of the plane and in particular at a
+			 * foot on Gamma, which is where PathTraceCoefficient evaluates it.
+			 */
+			mfem::PositionFunction mode =
+				[ &exterior, n ]( mfem::Vector const &x )
+			{
+				return exterior.basis( n, x( 0 ), x( 1 ) );
+			};
+
+			mfem::PathTraceCoefficient traceOfMode( *transferPath, mode );
+
+			mfem::Vector column( traceFes->GetVSize() );
+			column = 0.0;
+			projectPathTraceOntoGammaH( traceOfMode, column );
+			columns.push_back( std::move( column ) );
+		}
+
+		return columns;
+	}
+
+	void GradShafranovSolver::setTransmissionQuadratureOrder( int order )
+	{
+		if ( order < 0 )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::setTransmissionQuadratureOrder: the "
+				"rule order must not be negative" );
+
+		transmissionQuadratureOrder = order;
+	}
+
+	/*
+	 * THE ROWS OF T: THE TRANSMISSION CONDITION, TESTED AGAINST EACH MODE.
+	 *
+	 * This is the Neumann half of the coupling and the piece FREE-BOUNDARY-PLAN.md
+	 * section 7.5 called "genuinely new code". Its MFEM half is not: the sweep of
+	 * Gamma is mfem::ExtensionBoundaryQuadrature(), which was written for this and
+	 * merged upstream. What is here is the contraction.
+	 *
+	 * WHAT THE QUADRATURE HANDS BACK, AND THE TWO THINGS IN IT THAT ARE EASY TO
+	 * GET WRONG.
+	 *
+	 *   pt.y       the point ON GAMMA -- the foot a( x ), not the face point x.
+	 *   pt.nu      the OUTWARD unit normal of Gamma, oriented by the PATHS rather
+	 *              than by the face. Those differ wherever Gamma and Gamma_h are
+	 *              not parallel, which is everywhere that matters.
+	 *   pt.weight  SIGNED, and the sign is the point. A staircase Gamma_h has
+	 *              faces whose foot map reverses along Gamma; summing the weights
+	 *              integrates over Gamma, while summing their absolute values
+	 *              integrates the length the map traverses, which is larger and is
+	 *              a different quantity. Writing std::abs here would silently
+	 *              reintroduce exactly the defect the signed weight exists to fix.
+	 *
+	 * A degenerate face -- one whose image on Gamma is a single point -- is skipped
+	 * by the routine rather than refused, so visit() is simply not called there.
+	 * That is correct: it covers none of Gamma and its neighbours cover Gamma
+	 * between them.
+	 *
+	 * THE MEASURE IS PLAIN dGamma AND THE 1/r IS ALREADY IN q. The exterior block
+	 * is diagonal in the weight dGamma/r -- that is section 3.2, and it is what
+	 * makes the whole method cheap -- so the interior term must be tested in the
+	 * same weight. It is, without dividing by anything: the condition matches
+	 * ( 1/r ) dpsi/dnu across Gamma, and MEQ's q IS ( 1/r ) grad_bar( psi ), so
+	 * q.nu tested in the plain measure already carries the radius the exterior side
+	 * carries in its weight. Dividing by pt.y( 0 ) here would do it twice. The
+	 * header says this at more length; it is repeated because the wrong version
+	 * converges.
+	 *
+	 * AND IT IS LINEAR IN q, WHICH IS WHY A ROW EXISTS AT ALL. E_h is a linear
+	 * operator on the flux dofs and nu, C_m and the measure are geometry, so the
+	 * integral is a fixed covector applied to the flux block. It is built by
+	 * pushing each flux basis function through the extension in turn, which is
+	 * what the inner loop over element dofs is.
+	 */
+	std::vector<mfem::Vector>
+		GradShafranovSolver::exteriorTransmissionRows( ExteriorDtN const &exterior ) const
+	{
+		if ( !transferPath )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::exteriorTransmissionRows: there is no "
+				"Gamma_h on the fitted path -- there is no band between Gamma_h "
+				"and Gamma for the extension to cross, and so no transmission "
+				"condition to impose" );
+
+		int const modes = exterior.modeCount();
+		int const fluxSize = fluxFes->GetVSize();
+
+		std::vector<mfem::Vector> rows;
+		rows.reserve( static_cast<std::size_t>( modes ) );
+		for ( int i = 0; i < modes; ++i )
+		{
+			rows.emplace_back( solution.Size() );
+			rows.back() = 0.0;
+		}
+
+		mfem::Mesh &mesh = *traceFes->GetMesh();
+		mfem::Array<int> vdofs;
+
+		for ( int be = 0; be < mesh.GetNBE(); ++be )
+		{
+			int const attribute = mesh.GetBdrAttribute( be );
+			if ( attribute < 1 || attribute > gammaHMarker.Size()
+			     || !gammaHMarker[ attribute - 1 ] )
+				continue;
+
+			/*
+			 * The caller-allocated variants throughout, per CLAUDE.md: both
+			 * GetBdrFaceTransformations( int ) and GetElementTransformation( int )
+			 * hand out the Mesh's own shared scratch, and this loop is exactly the
+			 * shape that would be threaded one day. The face transformation has to
+			 * outlive the sweep, since ExtensionBoundaryQuadrature reads it at
+			 * every quadrature point.
+			 */
+			thread_local mfem::FaceElementTransformations faceScratch;
+			thread_local mfem::IsoparametricTransformation faceElem1;
+			thread_local mfem::IsoparametricTransformation faceElem2;
+			mesh.GetBdrFaceTransformations( be, faceScratch, faceElem1, faceElem2 );
+			if ( faceScratch.GetGeometryType() == mfem::Geometry::INVALID )
+				continue;
+
+			int const element = faceScratch.Elem1No;
+			mfem::FiniteElement const *fluxFe = fluxFes->GetFE( element );
+			if ( !fluxFe )
+				continue;
+
+			fluxFes->GetElementVDofs( element, vdofs );
+			int const dof = fluxFe->GetDof();
+			int const dim = mesh.Dimension();
+
+			/*
+			 * A SECOND element transformation, and it must not be the mesh's:
+			 * ElementExtension::TransformBack runs a Newton solve that moves the
+			 * transformation's own integration point, and faceScratch.Elem1 is
+			 * being used by the sweep at the same time. Two separate objects is
+			 * the whole fix.
+			 */
+			thread_local mfem::IsoparametricTransformation elementScratch;
+			mesh.GetElementTransformation( element, &elementScratch );
+			mfem::ElementExtension extender;
+			extender.SetElement( elementScratch );
+
+			mfem::IntegrationRule const &faceRule =
+				mfem::IntRules.Get( faceScratch.GetGeometryType(),
+				                    transmissionQuadratureOrder );
+
+			/*
+			 * A SCALAR shape vector, not a DenseMatrix, because the flux space is
+			 * an L2_FECollection with vdim 2 rather than a vector FE: GetFE()
+			 * returns the scalar element and CalcVShape() would refuse it. The
+			 * ordering is byNODES, so component d of basis function j is vdof
+			 * dof*d + j -- and getting THAT wrong swaps the radial and vertical
+			 * components of the normal trace, which is a rotation of the field
+			 * and converges to a plausible wrong answer.
+			 */
+			mfem::Vector shape( dof );
+			bool reached = true;
+
+			mfem::ExtensionBoundaryQuadrature( faceScratch, *transferPath, faceRule,
+				[ & ]( mfem::ExtensionBoundaryPoint const &pt )
+			{
+				if ( !reached )
+					return;
+
+				// E_h evaluated at the foot: the element's own polynomial, read
+				// outside it. mfem::ElementExtension is what does not clamp the
+				// reference point back into the element -- an ordinary
+				// TransformBack does, and a clamped point turns the extension
+				// into a constant without saying so.
+				mfem::IntegrationPoint eip;
+				if ( !extender.TransformBack( pt.y, eip ) )
+				{
+					reached = false;
+					return;
+				}
+
+				fluxFe->CalcShape( eip, shape );
+
+				for ( int m = 0; m < modes; ++m )
+				{
+					int const n = ExteriorDtN::firstMode() + m;
+					double const mode =
+						exterior.basis( n, pt.y( 0 ), pt.y( 1 ) );
+
+					// pt.weight is SIGNED and is used as it stands. The minus
+					// undoes DarcyForm's convention: the flux block holds -q, so
+					// the row that multiplies it must carry the sign that turns
+					// it back into q. See the file comment.
+					double const factor = -pt.weight*mode;
+					mfem::Vector &row = rows[ static_cast<std::size_t>( m ) ];
+
+					for ( int d = 0; d < dim; ++d )
+					{
+						double const weighted = factor*pt.nu( d );
+						for ( int j = 0; j < dof; ++j )
+							row( vdofs[ dof*d + j ] ) += weighted*shape( j );
+					}
+				}
+			} );
+
+			if ( !reached )
+				throw std::runtime_error(
+					"meq::GradShafranovSolver::exteriorTransmissionRows: the "
+					"extension of an element of Gamma_h did not reach its foot on "
+					"Gamma -- the inverse element map failed to converge. That is "
+					"assumption P.1 giving way: dist( Gamma_h, Gamma ) has grown "
+					"large against the local mesh size. meq::AdaptiveDomain is "
+					"what keeps it bounded through refinement" );
+		}
+
+		// Sanity: a row must live on the flux block alone. Anything outside it is
+		// an indexing error, and a silent one -- the bordered solve would simply
+		// couple the exterior to a potential or trace dof and converge to
+		// something.
+		for ( auto const &row : rows )
+			for ( int i = fluxSize; i < row.Size(); ++i )
+				if ( row( i ) != 0.0 )
+					throw std::logic_error(
+						"meq::GradShafranovSolver::exteriorTransmissionRows: a "
+						"transmission row has an entry outside the flux block" );
+
+		return rows;
 	}
 
 	void GradShafranovSolver::setNewtonControl( double relativeToleranceIn,

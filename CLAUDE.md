@@ -341,6 +341,167 @@ file stays the technical record; that one is only about what to do first.
 | 5 | Curved `Γ` by extension from subdomains | **done** |
 | 6 | Adaptivity: the residual estimator and mesh update | **done** |
 
+Beyond the port, three campaigns have their own plans and their own staging:
+`FLOW-PLAN.md` (toroidal flow, FL-0 to FL-8, **done**), `INVERSION-PLAN.md`
+(solution inversion, IN-A to IN-P **done**, IN-5 and IN-6 open) and
+`FREE-BOUNDARY-PLAN.md` (FB-A and FB-0 **done 2026-09-04**, FB-1 and FB-2 part
+built, FB-3 to FB-6 open). Each has a section below; the free-boundary one is
+new and short.
+
+### Free boundary: the axis is measured, the exterior operator is built, and one row is missing
+
+**`ROADMAP.md` item 1, and the largest remaining item in the tree.** The plan is
+`FREE-BOUNDARY-PLAN.md`. **Nothing SOLVES yet** — there is no coupled solve on
+any mesh — but four things around it are built and measured, and the sentence
+this paragraph used to carry, *"nothing of the method is built"*, is no longer
+one of them.
+
+| | |
+|---|---|
+| **FB-A** | the axis, below. `tests/convergence/AxisConvergence.cpp` |
+| **FB-0** | `src/meq/ExteriorDtN.{hpp,cpp}` — the Gegenbauer basis, the DtN symbol and the mass, **MFEM-free** so CI gates it. Checked against a current loop built from elliptic integrals sharing no code with it: **1.4e−15** in the trace, **6.9e−14** in the DtN. What is left of FB-0 is §3.4's cross-check against CEDRES++'s own boundary form, whose kernel is hypersingular so only their double-difference form regularises it |
+| **FB-1** | the coupling matrix `P` (`exteriorTraceColumns()`) and `tests/analytic/ExteriorMatched.hpp`, the manufactured exact answer. **The plan's proposed answer — filament loop fields — cannot support an order study at all**, `ψ ∉ H¹` at a point source |
+| **FB-2** | `src/meq/Coils.{hpp,cpp}`, MFEM-free, and the acceptance identity `∮(1/r)∂ψ/∂n dl = −μ₀I` at **3.3e−11** on the exact field, so a discrepancy on a solve is the solve |
+
+**THE MISSING PIECE IS ONE ROW**, and it blocks FB-1 and FB-2 alike: the
+transmission row `∫_Γ E_h(q_h)·ν C_m dΓ`, the Neumann half of the coupling.
+**Its MFEM half was written here and is now upstream's** —
+`mfem::ExtensionBoundaryQuadrature`, merged into `gf-hdg-subdomains-dev`
+2026-09-05. Writing its tiling check (the boundary weights must sum to `|Γ|`)
+found that an **unsigned** weight integrates a folded sweep with multiplicity;
+upstream then found the same defect in the sibling `ExtensionRegionQuadrature`
+and signed it, worth fifty-fold on their aerofoil. **MEQ's own disc does not
+fold and MEQ's numbers are untouched** — the return on filing went to somebody
+else's test case, which is the argument for filing a thing that has been *used*
+rather than merely asked for.
+
+**THE TRANSMISSION ROW IS WRITTEN AND IS MEASURED AGAINST A CLOSED FORM.**
+`exteriorTransmissionRows()` sweeps `Γ` with that routine, evaluates `E_h(q_h)`
+at each foot through `mfem::ElementExtension`, and contracts against each mode.
+**The integral carries no `1/r` and that is not an omission**: the exterior block
+is diagonal in the weight `dΓ/r`, and MEQ's `q` *is* `(1/r)∇̄ψ`, so `q·ν` tested
+in the plain measure already carries the radius the exterior side carries in its
+weight. Writing `dΓ/r` would divide by it twice. The flux is the asset again, for
+the fourth time in this tree.
+
+`theTransmissionRowIsTheBoundaryIntegralItClaims` feeds it fields the space
+represents exactly — constants `(1,0)` and `(0,1)`, then the linear `(z,r)` —
+so the integral collapses to a quadrature of pure geometry and the check is
+against a closed form rather than a re-implementation. **7.8e-16 to 1.4e-13**
+over three modes. The constants pin the vdof ordering, the sign against
+`DarcyForm`'s `−q` and the measure; **the linear rung is the one that exercises
+the extension**, because a constant is what an element's polynomial gives at any
+point whether or not `TransformBack` found the right reference coordinates, so a
+clamped inverse map — the failure `ElementExtension` exists to prevent — is
+invisible to it.
+
+**AND THE TILING CHECK IS RED, DELIBERATELY.** `ExtensionBoundaryQuadrature`'s
+acceptance is that the boundary weights sum to `|Γ|`. It was **exact at the
+central difference's floor and mesh-independent** when the routine was written —
+4.85e-10, 4.64e-10, 6.38e-11. Against the `VertexConePath` now on
+`gf-hdg-subdomains-dev` the same circle reads **1.01e-04, 2.24e-05, 4.59e-06**
+at `n = 12, 24, 48`, which is not a floor: it converges at about `O(h²)`. **A
+quadrature residual that converges is measuring a geometry rather than an
+instrument**, so the faces' images no longer tile `Γ` exactly.
+
+**IT IS THE CONE, AND IT IS PROVED BY A ONE-VARIABLE CONTROL.**
+`VertexConePath`'s cone is only available when the mesh it is given is a
+`SubMesh` *with a parent* — `HasCone()` says so — so a path built on a
+parentless copy of the same `D_h` is the same family without it.
+`theConeIsWhatCostsTheTiling` runs both on identical geometry:
+
+| `n` | cone on | cone off |
+|---|---|---|
+| 12 | 1.01e-04 | **4.85e-10** |
+| 24 | 2.24e-05 | **4.64e-10** |
+| 48 | 4.59e-06 | **6.38e-11** |
+
+A factor of **2e5**, and the cone-off column *reproduces the historical numbers
+exactly* — which also settles that they were measured on MEQ's own circle rather
+than inherited from another geometry. The diagnostics say the cone fired at every
+vertex at every mesh and was strictly tighter than the half space at about 40% of
+them.
+
+**Why it costs anything is NOT established.** Tiling rests on adjacent faces
+agreeing at a shared vertex, which interpolating vertex directions gives by
+construction and a per-vertex restriction ought to preserve.
+
+**AND UPSTREAM'S OWN COMMIT SAYS THE CONE *"changes nothing"***, in the message
+that signed the region sweep's weight. This contradicts that directly, on their
+own branch's routine. **MFEM's suite cannot see it** — `test_darcy_extension.cpp`
+exercises the *region* sweep and names the boundary one only in a comment — so
+MEQ's check is the only one anywhere, which is the reason to report it with the
+control attached rather than to weaken it.
+
+**One assertion beside it was wrong and is corrected rather than relaxed.**
+`gammaHIsStarShapedAboutTheCentreAndStaysSoUnderRefinement` asserted
+`margin > 0` and reads **exactly `0.000000000e+00`** at every mesh. An exact zero
+repeated across three meshes is not geometry. `Γ_h` is a union of background
+element faces, so it carries axis-aligned ones, and a **horizontal** face with an
+endpoint on `z = centreZ` has `(x − c)` purely radial against a purely vertical
+`n` — exactly zero, and `MakeCartesian2D`'s diagonal split is not symmetric about
+that line, so such a face survives at every mesh. A ray through that corner is
+**tangent**, not a ray meeting `Γ_h` twice, and the margin is never negative. The
+property wanted is `margin ≥ 0`; the strict inequality was a guess at how to say
+it and is false for every staircase. The control — a centre outside the disc,
+reading `−1` — is what keeps the `≥` from being vacuous.
+
+**And the coupled domain must reach `r = 0`**, because the exterior expansion is
+only valid on a semicircle centred on the axis. So FB-A is FB-1's prerequisite
+rather than its warm-up, and the `O(1/h)` conditioning below is what FB-1
+inherits.
+
+FB-A is the one stage that needs no free boundary at all: a vacuum solve on a
+mesh whose inner edge is `r = 0`, where the flux mass `(r q, v)` degenerates and
+the operator's `1/r` is not integrable.
+
+**IT CAN BE MEASURED AGAINST A CLOSED FORM, WHICH THE PLAN DID NOT KNOW.** Its
+acceptance was written as "the trace condition number bounded under refinement",
+which is weaker than anything else in this tree and half stale besides — the
+other half asked for element-local iteration counts, which are identically zero
+under NPC. But there are polynomial `Δ*`-harmonic functions vanishing on the
+axis: `r²`, `r² z` and `r⁴ − 4r²z²`, in `tests/analytic/VacuumHarmonic.hpp`.
+**A fourth was guessed and was wrong** — `r²(r² − 4z²)z` has `Δ* = −16r²z` — which
+is why the fixture recomputes `Δ*` by central differences rather than trusting
+the algebra, and why `r⁴/8 → r²` is kept as the control that says the operator
+being differentiated is MEQ's.
+
+| `k` | `ψ`, axis / control | `q`, axis / control | conditioning ratio grows by |
+|---|---|---|---|
+| 1 | **2.000 / 2.000** | 1.79 / 2.00 | 7.169 |
+| 2 | **3.000 / 3.000** | 2.51 / 3.00 | 7.536 |
+| 3 | **4.000 / 4.000** | 3.999 / 3.00 | 7.631 |
+
+**`ψ` is unharmed by the axis and `q` is short by about half an order**, and the
+conditioning penalty is **`O(1/h)`** — the on-axis column doubles with every
+halving of `h` while the control settles. Over an eightfold refinement that is
+7.2 to 7.6 against the 8 a clean `1/h` gives and the 64 a `1/h²` would.
+
+**One mechanism, and it is the weight rather than the singularity.** `(r q, v)`
+gives the element touching the axis a weight of order `h`: its diagonal is the
+smallest in the system, which is the `1/h`; and it is the element the method
+controls least while an unweighted `L2` counts it in full, which is the half
+order. The plan's three non-measurements were that `q` is *bounded* and the mass
+matrix *positive definite* — both true, both now measured — and neither is what
+gives way.
+
+**It does not block FB-1.** MEQ's trace solve is direct, and a direct solver is
+nearly insensitive to conditioning at 2D serial sizes; `ψ`, which is what §4's
+coupling transmits, keeps full order. `1/h²` would have stopped it.
+
+**`k = 3` escaping is a property of the fixture, not of the method** — its `q`
+is a quadratic, so `P_3` has room to spare. A higher-degree flux should show the
+deficit there too, and measuring that is the obvious next step.
+
+**Two traps met while writing it, both already in this file.** The conditioning
+had to be measured on the **linear** path, because under NPC `reducedOperator()`
+is a `DarcyNPCOperator` with no entries — `theTwoPathsAgreeOnTheVacuumField`
+pins the two paths at 1e-16 so the conditioning is a statement about the system
+the rates were measured on. And the affine-source check had to assert the
+**residual drop** rather than `newtonIterations() <= 1`, which failed at the
+finest mesh: *One more test moved from the stopping rule to the property*, met
+again from scratch.
+
 Each stage ends at a **measured convergence rate**, not at "it runs". See
 *Testing stance* below for why that is the acceptance criterion.
 
@@ -350,8 +511,14 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 git submodule update --init --recursive     # extern/toml11
 cmake -B build
 cmake --build build -j4
-cd build && ctest --output-on-failure       # ~490-680 s, 33/33
+cd build && ctest --output-on-failure       # ~600-800 s, 36/37 -- see below
 ```
+
+**ONE TEST IS RED ON PURPOSE AND IT IS `FreeBoundaryCoupling`.** Its tiling
+assertion names a defect in `mfem::VertexConePath`'s cone, proved by a
+one-variable control in the same file, and CLAUDE.md's testing stance is that a
+defect gets a *failing* test rather than a relaxed one. See *Free boundary*.
+Every other test passes; a second failure is a real failure.
 
 **ctest needs no environment set by hand.** `tests/CMakeLists.txt` puts
 `MKL_NUM_THREADS=1` on every registered test, without which the suite takes well
@@ -2006,8 +2173,30 @@ rather than `ψ = 0`: with correct coefficients `ψ = 0` *is* the separatrix, wh
 passes through an X-point — a **corner** of `Γ`, where both transfer-path
 families give out and the Cockburn–Solano analysis does not reach.
 
-**A tooling warning that has now cost time twice.** `pdftotext` silently drops
-this paper's minus signs, and an `ε` in another. Read the rendered page.
+**A tooling warning that has now cost time three times, and the third is the
+worst.** `pdftotext` silently drops this paper's minus signs, and an `ε` in
+another. **Read the rendered page.**
+
+**AND ON `refs/CEDRES.pdf` IT DOES SOMETHING DIFFERENT AND MORE DANGEROUS: IT
+DROPS RADICALS AND DISPLACES EXPONENTS.** Checked against the page rendered at
+900 dpi, 2026-09-04, on the kernel of their boundary form (3.5):
+
+| quantity | the page | `pdftotext -layout` |
+|---|---|---|
+| `M`'s denominator | `2π(r₁r₂)^{3/2}` | `2π(r1 r2 ) 2`, with the `3` on the **next line** |
+| `k` | `k = √( 4r_j r_k / ((r_j+r_k)² + (z_j−z_k)²) )` | **the `√` is absent entirely** |
+| `δ_±` | `√( r₁² + (ρ_Γ ± z₁)² )` | `r12 + (ρΓ ± z1 )2` — **no `√`** |
+| (3.1)'s weights | `∫ψ²r`, `∫(∇ψ)² r^{−1}` | exponents displaced to the line above |
+
+The minus signs came through correctly this time, which is the point: **the
+failure mode is the tool's and it is not the same failure twice.** Two of those
+four are silently fatal. Losing the radical on `k` turns the **modulus** into
+the **parameter** — `E(k)` against `E(k²)`, which is the classic elliptic-integral
+error and converges to a wrong answer rather than failing; and `(r₁r₂)^{3/2}`
+read as `(r₁r₂)²` or `(r₁r₂)^{1/2}` changes the weight the whole of
+`FREE-BOUNDARY-PLAN.md` §3.2 turns on. **Render the page for any equation
+carrying a radical, a fractional exponent or a weight**, which in this subject
+is most of them.
 
 ### A wrong Jacobian is invisible to a convergence table
 

@@ -222,11 +222,169 @@ rate set by `ρ_plasma / ρ_Γ`, so **`N` is small and `ρ_Γ` trades mesh again
 modes**: a bigger `ρ_Γ` needs fewer modes and more elements. The paper's §5 runs
 that same trade-off for its own case and it should be re-run for MEQ's.
 
+### 3.5 CEDRES++'s form read off the rendered page, 2026-09-04
+
+The falsifying test of §3.4 needs their operator stated exactly. It has now been
+transcribed from `refs/CEDRES.pdf` at 900 dpi — **not from `pdftotext`, which
+mangles this particular page in two silently fatal ways; see `CLAUDE.md`'s
+tooling warning, which this extends.** What follows is what the page says.
+
+**The equation number and the notation in §3.4 above are RIGHT.** It is (3.5) on
+printed page 13, it is called `c(·,·)`, and it is introduced as *"a bilinear
+form `c : V × V → ℝ`, accounting for the boundary conditions at infinity"*.
+
+```
+c( psi, xi ) := (1/mu0) ∫_Γ psi(P1) N(P1) xi(P1) dS1
+              + (1/(2 mu0)) ∫_Γ ∫_Γ ( psi(P1) − psi(P2) ) M(P1,P2) ( xi(P1) − xi(P2) ) dS1 dS2
+
+M(P1,P2) = k / ( 2π (r1 r2)^{3/2} ) · ( (2 − k²)/(2 − 2k²) E(k) − K(k) )
+N(P1)    = (1/r1) ( 1/δ₊ + 1/δ₋ − 1/ρ_Γ )
+δ_±      = √( r1² + ( ρ_Γ ± z1 )² )
+k        = √( 4 r_j r_k / ( (r_j + r_k)² + (z_j − z_k)² ) )
+```
+
+`k` is the **modulus**, not the parameter — the paper writes the radical
+explicitly, which is exactly the character `pdftotext` deletes.
+
+**THE `dΓ/r` WEIGHT IS THERE, AND IT IS WHY THE EXPONENT IS `3/2`.** They never
+write `c` in weighted form, but splitting `(r₁r₂)^{3/2} = r₁ r₂ · (r₁r₂)^{1/2}`
+gives
+
+```
+M dS1 dS2 = [ k / ( 2π √(r1 r2) ) ( (2−k²)/(2−2k²) E − K ) ] · ( dS1/r1 )( dS2/r2 )
+```
+
+and `N` carries a leading `1/r₁` of its own. **So `c` is naturally an integral
+against `dΓ/r` in each slot** — precisely the measure §3.2 needs, with the `3/2`
+being one power per slot for the measure plus a half shared by the kernel. That
+is real support for §3.2 from an independent source, and it is also the reason
+the exponent matters: read as `2` or as `1/2` the weight becomes `dΓ/r²` or
+`dΓ`, and the §3.4 test would fail for a transcription reason.
+
+**THREE THINGS TO CARRY INTO THE §3.4 TEST.**
+
+* **`M` is HYPERSINGULAR, `M ~ 1/(π r d²)`** as the two points approach —
+  measured over `d = 1e−1 … 1e−5`, agreeing to seven digits. The double-difference
+  form *is* the regularisation: each factor is `O(d)` and the product cancels the
+  `1/d²` exactly. So the test **cannot** assemble `∫∫ C_m M C_n` directly; it must
+  keep the difference structure or take a Hadamard finite part. If diagonality
+  comes out wrong, suspect this before the algebra.
+* **`N` carries a `−1/ρ_Γ`** with no counterpart in a pure DtN mode sum. It is
+  the only place `ρ_Γ` appears besides `δ_±`, so it is presumably what makes the
+  truncated form exact at finite radius. Do not drop it when comparing against
+  `(n−1) h_n / ρ_Γ`.
+* **They do not print Lackner's Green's function**, only the resulting `M` and
+  `N`, and delegate the derivation to Grandgirard 1999 Ch. 2.4, which is not in
+  `refs/`.
+
+**TWO NEGATIVE FINDINGS, both clean rather than a failure to look.**
+
+* **On choosing `ρ_Γ`: nothing.** The symbol occurs three times in the whole
+  paper — once defining the semicircle, twice inside `N`. No guidance, no
+  sensitivity study, no numerical value for any of their ITER or WEST cases, and
+  no statement that the answer is independent of it. §8's *"measure the spectrum
+  on a real coil set before choosing `ρ_Γ`"* has no prior art to lean on.
+* **On the axis: nothing either, and they go there.** Their domain includes
+  `r = 0` — `∂Ω = Γ ∪ Γ_{r=0}` — with `ψ = 0` imposed both in (2.5) and in the
+  space (3.1), whose norms are weighted `r` and `r^{−1}`. Their triangulation
+  reaches the axis. **They report no conditioning difficulty, no loss of order
+  and no special treatment**, and the axis is absent from §5's own list of known
+  accuracy limitations. So CEDRES++ neither corroborates nor contradicts §7.2's
+  measured `O(1/h)` — they are P1 throughout and never took the measurement that
+  would show it.
+
+**And one correction to §3.4's wording.** It says their operator is dense
+*"because they use P1 nodal elements on `Γ`"*. The paper never discusses density
+at all, and the causation is slightly off: density follows from a **non-local
+kernel against a basis with local support**, and P1 is merely one such basis —
+P4 would be dense too. What a spectral trace changes is not the density but
+whether the basis **diagonalises** the operator. The conclusion §3.4 draws is
+unaffected; the reason should be stated the other way.
+
+### 3.6 §3 verified independently, 2026-09-04. All six claims stand.
+
+Re-derived from scratch in sympy and mpmath, deliberately without reading
+`src/meq/ExteriorDtN.cpp`, so the reference values are independent of the
+implementation they check. **Five of the six are exact** — symbolic or exact
+rational, not to a tolerance.
+
+| | claim | |
+|---|---|---|
+| 3.1 | `Δ*` separates with no `∂_ρ` term | **exact**, residual identically 0 |
+| 3.1 | the Gegenbauer equation and `α ∈ {n, 1−n}` | **exact** |
+| — | `C_n^{−1/2}` from Legendre = library `gegenbauer(n,−1/2,μ)` | **exact, normalisation factor 1** |
+| 3.1 | `Δ*(ρ^α C_n) = 0`, both branches, **in (r,z)** | **exact**, n = 2…8, 16 cases |
+| 3.1 | `C_n(±1) = 0` | **exact**, n = 2…12 |
+| 3.2 | orthogonality and `h_n` | **exact rational**; 72 off-diagonals identically 0 |
+| 3.2 | `dΓ/r = dμ/(1−μ²)`, `ρ_Γ` cancels | confirmed |
+| 3.3 | the DtN symbol, including its sign | confirmed |
+
+Stronger than §3.3's own run in two places: the off-diagonals are **identically
+zero** rather than 1e−17, and `h_n` agrees to **all 60 digits** rather than six.
+
+**FOUR ADDITIONS WORTH ACTING ON, NONE OF THEM A CORRECTION TO THE MATHEMATICS.**
+
+**1. Two exact identities §3 does not record, and the implementation wants both.**
+
+```
+C_n( μ )   = ( 1 − μ² ) P'_{n−1}( μ ) / ( n( n − 1 ) )     exact, n = 2..12
+dC_n/dμ    = − P_{n−1}( μ )                                exact, n = 2..12
+```
+
+The first is the accuracy fix recorded in §7.3. The second means the derivative
+needs one Legendre evaluation and no difference at all — which is what
+`ExteriorDtN.cpp` now does.
+
+**2. The zero at the axis is SIMPLE, and the weight is over-cancelled.**
+`C_n/(1−μ²)` is exactly `1/2` at `μ = +1` and exactly `(−1)^n/2` at `μ = −1`, for
+every `n`. So `C_n ~ (1−μ²)/2` there, and the integrand `C_m C_n/(1−μ²)`
+*vanishes* linearly at the endpoints rather than merely staying finite. The
+singular weight is not just cancelled, it is beaten — which is why a plain
+Gauss-Legendre rule is exact rather than adequate.
+
+**3. THE `n = 0, 1` ARGUMENT IS STRONGER THAN §3 CLAIMS, AND THE COUNT IS WRONG.**
+The degenerate sector is **four** functions, not two — `1`, `z/ρ`, `ρ` and `z`,
+all `Δ*`-harmonic — and **not one of them vanishes on the axis**. Two of them
+(`1` and `z/ρ`) also decay, so both would otherwise be admissible exterior modes
+and both are killed by the axis condition. Better still: they have **infinite
+norm** in `L²(dΓ/r)`, so there is nothing for a compatibility condition to be
+imposed *on* — a cleaner statement than "no constant mode is compatible". And
+nothing admissible is lost by starting at 2: `{C_n}_{n≥2}` is **complete** in
+`L²(dμ/(1−μ²))`.
+
+Also: **the printed formula is valid for `n ≥ 2` only, and fails silently below
+it** — `(P_{n−2} − P_n)/(2n−1)` returns `1 − μ` for both `n = 0` and `n = 1`,
+where the true functions are `1` and `−μ`. It does not merely divide by zero; it
+returns the wrong function. Recorded in the header so nobody extends the loop
+downward to see.
+
+**4. `(n−1) h_n / ρ_Γ = 2/( n( 2n − 1 ) ρ_Γ )`**, exactly, and one factor
+shorter.
+
+**AND A METHOD WARNING FOR ANYONE RE-RUNNING CLAIM 1.** Substituting
+`θ = atan2(r,z)` leaves sympy unable to reduce `atan(tan θ)` and it reports a
+**nonzero** residual — an artefact, not a refutation. The control settles it: the
+axisymmetric Laplacian, whose spherical form is known, shows the identical
+artefact. The clean route is the forward chain rule, which never forms an
+`atan`.
+
+**ONE DOCUMENTATION GAP, AND IT IS THIS PLAN'S.** §3.3's `|a_n|` spectrum table
+cannot be reproduced. The decay *rate* is confirmed and is internally consistent
+— both rows imply a source radius of 1.149 and 1.132, i.e. geometric decay at
+exactly `ρ_source/ρ_Γ` — but the magnitudes need the loop radius and current
+normalisation, which the table does not record. Against a unit loop they differ
+by an `n`-dependent factor rising to about 9, identically in both rows. **Record
+the source parameters beside that table** or it cannot be re-derived; the rate,
+which is the part the cost argument uses, is sound.
+
 ### 3.4 What this claim is not
 
 It is not a claim that CEDRES++ is doing anything wrong. Their `c(·,·)` is the
-same operator in position space; they use P1 nodal elements on `Γ`, in which
-basis it is dense and needs the kernel. MEQ is free to use a spectral trace on
+same operator in position space; they use a basis with LOCAL SUPPORT on `Γ` — P1
+nodal elements — and against a non-local kernel any such basis gives a dense
+block and needs the kernel. (**Corrected 2026-09-04**: this used to say "dense
+because P1", which puts the causation on the degree rather than on the support.
+P4 would be dense too. See §3.5.) MEQ is free to use a spectral trace on
 `Γ` — which is what the coupling paper does, with trigonometric polynomials —
 and in *that* basis the operator diagonalises. **The two must agree, and that
 agreement is a test to write**: assemble CEDRES++ eq (3.5) against the
@@ -295,10 +453,28 @@ mass block. Free boundary un-pins them:
 ψ̂|_{Γ_h}  =  P a,        P_{in} = the trace projection of ( C_n ∘ a )|_{Γ_h}
 ```
 
-`P` is `n_{Γ_h trace} × N`, and each of its columns is one call to
-`ProjectBdrCoefficient` against `mfem::PathTraceCoefficient( path, C_n )` —
-which is the class that already exists, taking an arbitrary `PositionFunction`.
+`P` is `n_{Γ_h trace} × N`, and each of its columns is one projection of
+`mfem::PathTraceCoefficient( path, C_n )` — which is the class that already
+exists, taking an arbitrary `PositionFunction`.
 **The paths do not move during a solve, so `P` is assembled once.**
+
+**CORRECTION, 2026-09-04: it is NOT `ProjectBdrCoefficient`, and that sentence
+used to say it was.** `GridFunction::ProjectBdrCoefficient` evaluates through
+the **element** transformation, and a path coefficient needs the **face** one —
+the path family may want the outward normal of `Γ_h`. MFEM aborts rather than
+coping, which is the good case:
+
+```
+PathTraceCoefficient must be evaluated on a face: the path family may need
+the outward normal of Gamma_h
+```
+
+`mfem::TransferredDatumCoefficient`'s own header says the same about itself, so
+the requirement was documented one class over. The projection is written out in
+`GradShafranovSolver::projectPathTraceOntoGammaH()` — which is
+`projectOntoTrace()` with the coefficient evaluated on `*ftr` rather than on
+`*ftr->Elem1`, and the loop restricted to boundary elements carrying a `Γ_h`
+attribute.
 
 **And the border column is constant in the iterate, which is worth more than it
 looks.** `ψ̂` enters the flux row as `⟨ψ̂, v·n⟩`, the potential row as `⟨τψ̂, w⟩`
@@ -509,6 +685,11 @@ needs neither of them to start**, and the reasons are §4.3 and §4.4. It is wor
 being precise about why, because the request as filed overstates what is
 blocking.
 
+**§6.1 IS NOW CONFIRMED BY BUILDING IT RATHER THAN ARGUED**, 2026-09-04: `P`
+exists, its columns are essential trace values, and §7.4 measures them. The
+rectangular integrator the request asks for would be right if the datum entered
+weakly, and it does not.
+
 ### 6.1 Why §2.1 is not needed — the block `B`
 
 The request asks for `⟨φ_n ∘ a, v·n⟩_e`, "the datum's data half as a rectangular
@@ -520,9 +701,15 @@ integrator would be the right thing if the datum entered weakly; it does not.
 
 ### 6.2 Why §2.2 is reachable, though it is the one worth asking for — the block `T`
 
+**AND IT WAS ASKED FOR, AND GRANTED — 2026-09-05. `mfem::ExtensionBoundaryQuadrature`
+is in the library**, merged into `gf-hdg-subdomains-dev` from MEQ. What follows
+is the argument as it stood before that, kept because it is why the request was
+small enough to be worth making and because the primitives it names are still
+what the row is built on. §7.5 records what the filing bought.
+
 The transmission rows need `E_h(q_h)·ν` on `Γ` — the far end of the paths —
 against the basis and the induced measure there. `ExtensionRegionQuadrature`
-sweeps the *region* `K^ext_e` and there is no boundary variant, so this is the
+sweeps the *region* `K^ext_e` and there was no boundary variant, so this was the
 one piece with nothing directly behind it. But every primitive is public:
 
 * `TransferPath::Endpoint( FTr, ip, xbar )` gives `a(x)` at a face quadrature
@@ -540,6 +727,12 @@ weights over the faces must give `|Γ|`, exactly as summing the volume weights
 must give `|Ω| − |D_h|`, and that check is what says the path family covers `Γ`
 once. A version that has been used is a better request than a version that has
 not.
+
+**That is exactly what happened, and the tiling check is what earned the
+merge.** It found that an unsigned weight counts a folded sweep twice, which
+upstream then fixed in the *region* sweep as well — a defect on their aerofoil,
+not on MEQ's disc, that a request without a used implementation behind it would
+never have surfaced.
 
 ### 6.3 Why §3 is an optimisation and not a prerequisite
 
@@ -571,7 +764,7 @@ the plan predicted.**
 | stage | needs from MFEM | status |
 |---|---|---|
 | **FB-0** `ExteriorDtN` | **nothing** — MEQ-side, MFEM-free by design | clear |
-| **FB-1** vacuum + coils + the whole coupling | **nothing.** `P` from `PathTraceCoefficient` (§6.1); `T` from `Endpoint` + `TransformBack` (§6.2); the bordered solve from `DarcyNPCOperator` / `DarcyNPCSolver`, which MEQ already drives at `N = 1` | clear |
+| **FB-1** vacuum + coils + the whole coupling | **nothing.** `P` from `PathTraceCoefficient` (§6.1); `T` from `ExtensionBoundaryQuadrature`, which MEQ wrote and upstream merged 2026-09-05 (§6.2, §7.5); the bordered solve from `DarcyNPCOperator` / `DarcyNPCSolver`, which MEQ already drives at `N = 1` | clear |
 | **FB-2** prescribed plasma current | **nothing** new beyond FB-1 | clear |
 | **FB-3** `ψ_bnd` unknown | **nothing** — the `ψ_ax` border is the pattern and it is MEQ's own code | clear |
 | **FB-4** moving support + cut quadrature | the **sensitivity of a cut rule** to the level set. `MomentFittingIntRules` gives the rule (§5.3) and no derivative. Not blocking — difference it per cut element, or accept an inconsistent Jacobian and measure the cost in Newton's order | **the one real gap** |
@@ -607,10 +800,10 @@ should be spent first.
 
 | | | acceptance |
 |---|---|---|
-| **FB-A** | **The axis.** A vacuum solve on a half-disc mesh touching `r = 0`. No free boundary, no coupling. | Element-local iteration counts and the trace condition number bounded under refinement. See §8 — this is the first thing to measure and it can be measured today |
-| **FB-0** | `meq::ExteriorDtN`: the basis, the symbol, the mass. No solver. | The current-loop test of §3.3 to 1e−9, and agreement with CEDRES++ eq (3.5) |
+| **FB-A** | **The axis.** A vacuum solve on a mesh touching `r = 0`. No free boundary, no coupling. | **DONE, 2026-09-04 — see §7.2.** `ψ` at `k+1` on a mesh reaching the axis; `q` short by half an order; the conditioning penalty `O(1/h)` and not `O(1/h²)`. `tests/convergence/AxisConvergence.cpp` |
+| **FB-0** | `meq::ExteriorDtN`: the basis, the symbol, the mass. No solver. | **DONE, 2026-09-04 — see §7.3**, except §3.4's CEDRES++ agreement, which is now specified but not built. The current-loop test reads **1.4e−15** in the trace and **6.9e−14** in the DtN |
 | **FB-1** | **Vacuum only.** Coils, no plasma. The whole coupling, on a linear problem with an exact answer — the sum of the coils' loop fields. | `ψ_h` against that closed form at `k+1`; the coupling sign pinned by it; **and `∂F/∂a` constant between two well-separated iterates**, which is §4.3's unmeasured claim |
-| **FB-2** | A **prescribed** plasma current, still linear: put a known `j_φ` inside and check the exterior. | Same rate; and `ComputeOutwardFlux` against the total current, which is the sharpest whole-assembly test available |
+| **FB-2** | A **prescribed** plasma current, still linear: put a known `j_φ` inside and check the exterior. | Same rate; and `ComputeOutwardFlux` against the total current, which is the sharpest whole-assembly test available. **The current and the identity are built — §7.6**; what is missing is the solve to apply them to |
 | **FB-3** | `ψ_bnd` as an unknown, plasma support still fixed. | Self-consistency of `ψ_bnd` to round-off, Newton order 2, exactly as `HighBetaConvergence` asserts for `ψ_ax` |
 | **FB-4** | The moving plasma support and cut quadrature. | The order that survives the cut, measured, against `k+1` — **and the cost of an inconsistent cut Jacobian measured in Newton's observed order**, which decides §5.3's two options |
 | **FB-5** | The augmented Newton as one bordered solve, and adaptivity through it. | `η` monotone through refinement with `Γ` fixed; assumption P.1 preserved |
@@ -637,6 +830,549 @@ the three routes reach discrete solutions differing by up to **9.4%**. Free
 boundary starts every adaptive run on exactly such a mesh. **Do not let a
 free-boundary failure be answered by quietly changing the globalisation**; it
 changes which equilibrium is reported.
+
+### 7.1 FB-A can be measured against a closed form, which this plan did not know
+
+**Two corrections to FB-A's acceptance as written above, made 2026-09-04.**
+
+**The stale half.** It asked for "element-local iteration counts ... bounded
+under refinement". Under `NonlinearOrdering::NPC`, which is MEQ's default, there
+is no element-local non-linear solve at all — `GetNumLocalNLIterations()` is
+identically zero and `SolverContract` asserts it. §8 already notes this and says
+to watch the trace solve and the local factorisation instead; the table did not.
+It does now. (A vacuum solve is linear anyway, so the count would have been zero
+for a second, unrelated reason.)
+
+**The weak half, and this is the useful part.** "Bounded under refinement" is a
+much poorer statement than this tree accepts anywhere else, and it is not
+necessary. A vacuum solve needs `Δ*ψ = 0`, and there are polynomial
+`Δ*`-harmonic functions that vanish **identically on the axis**:
+
+```
+ψ = r²            ψ = r² z            ψ = r⁴ − 4 r² z²
+```
+
+Verified symbolically rather than asserted, with three controls — one of them a
+candidate that **failed**, which is why the check was run:
+
+| candidate | `Δ*` | `ψ(r=0)` | |
+|---|---|---|---|
+| `r²` | 0 | 0 | |
+| `r² z` | 0 | 0 | |
+| `r⁴ − 4 r² z²` | 0 | 0 | |
+| `r² (r² − 4z²) z` | **−16 r² z** | 0 | a guess, and it was wrong |
+| `r² ln r − z²` | 0 | **−z²** | harmonic, and NOT zero on the axis |
+| `r⁴/8` | **r²** | 0 | `CLAUDE.md`'s own check, so the operator is MEQ's |
+
+The last row is the control that matters: `Δ*(r⁴/8) = r²` is the value
+`CLAUDE.md` prints under *The two papers disagree about the sign of the Solov'ev
+source*, so the operator differentiated here is the one MEQ solves.
+
+**So FB-A gets a rate against an exact answer, like every other stage in this
+tree, instead of a boundedness claim.** `k+1` in `ψ` and `q` on a mesh reaching
+`r = 0` is a far sharper statement than "the condition number did not blow up",
+and it costs nothing to make.
+
+**`r² ln r − z²` is the interesting control.** It is `Δ*`-harmonic, bounded at
+the axis, and **not zero there** — one of Cerfon & Freidberg's twelve terms. A
+solve that handles `r²` and fails on this one has found something about the axis
+rather than about the mesh, which is exactly the discrimination §8's three
+non-measurements are missing.
+
+**And FB-A needs no new code to pose.** `MeshConfig` already permits `RMin = 0`
+and says so explicitly (`src/meq/Config.hpp`: *"a box reaching r = 0 contains the
+coordinate singularity. **That is allowed**, but is rarely what is wanted"*). It
+is `meq::BoundaryShape` that refuses the axis, in its constructor, and FB-A does
+not use one: it is the fitted path with a box whose inner edge is the axis. So
+"it can be measured today" is literally true — the configuration is expressible
+now.
+
+**The one thing FB-A must also run is the control at `RMin > 0`**, on the same
+sequence and degrees. Without it a condition-number column says nothing: some
+growth with refinement is what any `h`-refinement does, and the question is
+what the *axis* adds. This is the same requirement `theTransferredDatumRestoresEtaFive`
+imposes on itself by keeping the pinned-zero column.
+
+### 7.2 FB-A IS DONE, AND IT ANSWERED THE UNKNOWN. Measured 2026-09-04.
+
+`tests/convergence/AxisConvergence.cpp` and `tests/analytic/VacuumHarmonic.hpp`,
+registered as a ctest. Four dyadic meshes, `k = 1, 2, 3`, on a box whose inner
+edge is exactly `r = 0`, against the identical study standing 0.25 clear of it.
+
+**THE POTENTIAL IS UNHARMED AND THE FLUX IS NOT QUITE.**
+
+| `k` | `ψ`, axis / control | `q`, axis / control |
+|---|---|---|
+| 1 | **2.000 / 2.000** | 1.79 / 2.00 |
+| 2 | **3.000 / 3.000** | 2.51 / 3.00 |
+| 3 | **4.000 / 4.000** | 3.999 / 3.00 |
+
+`ψ` converges at `k+1` on a mesh reaching the axis, at every degree, to three
+decimal places and identically with the control. `q` is short by about half an
+order at `k = 2` and by a fifth and worsening at `k = 1`. `k = 3` is clean, and
+that is a property of this fixture rather than of the method: its `q` is a
+quadratic, so `P_3` has room to spare. **A fixture with a higher-degree flux
+should be expected to show the deficit at `k = 3` too, and measuring that is the
+obvious next step.**
+
+**AND THE CONDITIONING QUESTION — §8's stated unknown — HAS AN ANSWER: `O(1/h)`.**
+
+| `k` | on axis, over the sweep | the control | the ratio grows by |
+|---|---|---|---|
+| 1 | 5.48e1 → 4.61e2 | 7.28 → 8.54 | **7.169** |
+| 2 | 1.24e2 → 1.05e3 | 1.00e1 → 1.13e1 | **7.536** |
+| 3 | 1.83e2 → 1.53e3 | 1.07e1 → 1.17e1 | **7.631** |
+
+The on-axis column **doubles with every halving of `h`**; the control **settles**.
+So the axis costs exactly one power of `h`, at every degree, and the far field
+costs nothing. Over an eightfold refinement that is 7.2 to 7.6 against the 8 a
+clean `1/h` would give.
+
+**Both findings have one mechanism, and it is the weight rather than the
+singularity.** The flux mass form is `(r q, v)`, so the element touching the
+axis carries a weight of order `h`: its diagonal is the smallest in the system,
+which is the `1/h`; and it is the element the method controls least while an
+unweighted `L2` error norm counts it in full, which is the half order. §8's
+three non-measurements were about `q` being *bounded* and the mass matrix being
+*positive definite* — both true, and both measured here — but neither was the
+thing that gives way.
+
+**WHAT THIS MEANS FOR THE REST OF THE PLAN, and the answer is that it does not
+block FB-1.** `1/h` is survivable: MEQ solves the trace system with a **direct**
+solver, whose cost and accuracy are nearly insensitive to conditioning at 2D
+serial sizes, and `ψ` — which is what the coupling in §4 transmits, through
+`ψ̂|_{Γ_h} = P a` — keeps full order. What would have stopped FB-1 is `1/h²`, and
+it is not that. **It would matter to an iterative trace solve**, which MEQ does
+not use and which `CLAUDE.md`'s *Do not reach for AMG* argues against at these
+sizes anyway.
+
+**Three smaller things FB-A settled on the way.**
+
+* **`q` is bounded at the axis**, §8's first non-measurement, now a number:
+  `q_r → 2.120000` as `r → 10⁻¹, 10⁻³, 10⁻⁶, 10⁻⁹, 0`, exactly, and finite *at*
+  `r = 0` rather than a NaN. `VacuumHarmonic` carries the `1/r` cancellation
+  already done for that reason — writing `gradPsi()/r` as every other fixture
+  does would be `0/0` there.
+* **A vacuum solve is affine and step one is exact**, `‖r₁‖/‖r₀‖` between 1e-13
+  and 5e-12. Asserted as the **drop** and not as an iteration count, because
+  written the obvious way it failed at the finest mesh with two iterations —
+  `CLAUDE.md`'s *One more test moved from the stopping rule to the property*,
+  met again from scratch.
+* **`MeshConfig` already allows `RMin = 0`** and `meq::BoundaryShape` refuses
+  the axis, so FB-A runs on the fitted path with no shape and needed no new
+  library code at all. Only a fixture and a test.
+
+### 7.3 FB-0 IS DONE. Measured 2026-09-04.
+
+`src/meq/ExteriorDtN.{hpp,cpp}`, in `meq_core`, **MFEM-free** as §5.1 requires
+and under the `naming` check; `tests/unit/ExteriorDtNTests.cpp` is the
+acceptance and is a **unit** test, so CI — which cannot obtain the MFEM branch —
+can gate this stage. `tests/analytic/CurrentLoop.hpp` is the independent
+reference field.
+
+**THE ACCEPTANCE, WHICH IS §3.3's CHECK 3 AND THE ONLY ONE THAT COULD CATCH A
+SELF-CONSISTENT MISREADING.** The loop's flux is built from complete elliptic
+integrals and shares no line of code with the Gegenbauer basis:
+
+| `ρ_Γ` | modes | trace error | DtN, relative |
+|---|---|---|---|
+| 2.5 | 12 | 5.60e−07 | 1.95e−05 |
+| 2.5 | 24 | 5.14e−12 | 3.41e−10 |
+| 4.0 | 12 | 1.15e−09 | 7.12e−08 |
+| **4.0** | **24** | **1.44e−15** | **6.89e−14** |
+
+against §3.3's own 1.7e−11 / 2.3e−09 and 4.4e−14 / **6.8e−09**.
+
+**THE DtN COLUMN IS FIVE ORDERS BETTER AND §3.3 PREDICTED WHY.** It says of its
+own figure that it is *"limited by the finite-difference reference, not by the
+method"*. It was right. This test compares against the loop's **analytic**
+gradient, and the floor moves from 6.8e−09 to 6.9e−14. The old number was
+measuring its instrument; this one measures the expansion. `CurrentLoop`'s
+derivatives are themselves pinned against a Richardson-extrapolated difference
+at 4e−11, which is what entitles them to be the reference.
+
+**The other four checks, all green**: every mode vanishes on the axis at
+**exactly 0.000e+00**; `h_n` matches the closed form to round-off at `n = 2..9`;
+the projection is orthogonal to 1.2e−15; each exterior mode is `Δ*`-harmonic to
+4.2e−08…6.5e−07 relative, **recomputed by central differences in `(r,z)`** so
+that an error in the spherical separation could not hide; the symbol agrees with
+`∂ψ/∂ρ` of its own field to 2.6e−08; and the modes decay as `2^{1−n}` exactly.
+
+**THE SPECTRUM CONFIRMS THE COST ARGUMENT**, which is the other half of §3.3 and
+is what makes `N` small. `|a_12|/|a_2|` for a unit loop:
+
+| `ρ_Γ` | 2.0 | 2.5 | 4.0 | 8.0 |
+|---|---|---|---|---|
+| `\|a_12\|/\|a_2\|` | 2.6e−03 | 2.8e−04 | 2.6e−06 | **2.5e−09** |
+
+Monotone, and geometric. §8's `ρ_Γ`-against-mesh trade is real and this is the
+curve it is traded along — still unrun for a tokamak geometry, and §3.5 records
+that CEDRES++ offers no prior art for choosing `ρ_Γ` at all.
+
+**ONE IMPLEMENTATION DECISION THAT DEPARTS FROM THIS PLAN, DELIBERATELY.** §3.1
+writes `C_n = ( P_{n−2} − P_n )/(2n−1)`, which is correct and is a bad way to
+compute it: both Legendre values tend to 1 as `μ → ±1`, so it is a cancelling
+difference exactly at the axis. Measured at `n = 8`, the ratio of the larger
+operand to the result is 2.4 at `μ = 0.9`, 66 at 0.999 and **6666 at 0.99999**,
+growing without bound. `ExteriorDtN.cpp` uses the identically equal
+
+```
+C_n( μ ) = ( 1 − μ² ) P'_{n−1}( μ ) / ( n( n − 1 ) )
+```
+
+— agreeing with the printed form to **1.4e−42** in 40-digit arithmetic — which
+carries `(1 − μ²)` as an explicit factor. Two consequences, and both are load
+bearing rather than cosmetic:
+
+* **The axis is exactly zero rather than round-off.** Given §7.2 has just
+  measured the axis to cost a power of `h` in the trace conditioning, a basis
+  that quietly loses four digits there is not what to build on.
+* **The singular weight never appears anywhere.** `C_n/(1 − μ²)` is a
+  **polynomial**, so `dΓ/r = dμ/(1 − μ²)` cancels in closed form and a plain
+  Gauss-Legendre rule integrates the mass integrals **exactly** — which the
+  1.2e−15 orthogonality is the evidence for. The printed form would need `0/0`
+  at the endpoints and a near-cancellation beside them.
+
+`h_n = 2/(n(n−1)(2n−1))` then falls out of the standard `∫(1−μ²)[P'_m]²` integral
+rather than being transcribed, so **the closed form agreeing with this plan is a
+check rather than a restatement**.
+
+**WHAT IS NOT DONE: §3.4's CEDRES++ agreement.** §3.5 now states their operator
+exactly, read off the rendered page, and names three things that test must
+respect — chiefly that `M` is **hypersingular, `~1/(π r d²)`**, so the
+double-difference form *is* the regularisation and `∫∫ C_m M C_n` cannot be
+assembled directly. That is the remaining piece of FB-0 and it is specified
+rather than started.
+
+### 7.4 FB-1's coupling matrix is built and measured. 2026-09-04.
+
+`GradShafranovSolver::exteriorTraceColumns( ExteriorDtN const & )` returns the
+columns of `P`; `tests/convergence/FreeBoundaryCoupling.cpp` is the acceptance.
+This is **part** of FB-1 — the Dirichlet half of the coupling — and §7.5 below
+says what remains.
+
+**THE FOOT IS THE POINT, AND IT IS WORTH 18% ON A COARSE MESH.** `Γ_h` is the
+inscribed polygon and `Γ` is the true boundary; a column must carry `C_n`
+evaluated at the **foot** `a(x)` on `Γ`, not at `x` on `Γ_h`. Both choices give
+a `P` that is supported in the right place, has independent columns, and couples
+an exterior expansion to the solve — the wrong one is simply a different
+function by `O(dist(Γ_h, Γ))`, which is `O(h)`, which is exactly the error the
+transfer technique exists to remove. Measured, worst relative difference between
+the two:
+
+| `h` | 0.2125 | 0.1062 | 0.0531 |
+|---|---|---|---|
+| foot against `Γ_h` | **0.179** | **0.098** | **0.057** |
+
+Falling at about `O(h)` — ratios 1.83 and 1.72 — exactly as `dist(Γ_h, Γ)` does.
+`theColumnsAreTheModeAtTheFootAndNotOnGammaH` asserts both that they differ at
+all (identical columns would mean the path is not being used) and that the
+difference shrinks (a fixed difference would be a defect rather than the
+geometry). **It is the test to read first if anything in FB-1 fails.**
+
+`P` is also measured to live only on `Γ_h` — 135 of 1044 trace dofs at
+`k = 2, n = 12` — and to have independent columns, Gram determinant 2.24e-01
+with diagonals falling 1.51e+01 → 1.08e-01 across six modes, which is the modes'
+own mass ordering. Dependent columns would give a singular corner block and a
+Newton that cannot take a step.
+
+**§4.3's REQUESTED MEASUREMENT IS NOT NEEDED UNDER NPC, AND THAT IS A RESULT
+RATHER THAN A DODGE.** It asks for the column to be built at two well-separated
+iterates and differenced, to test that `∂F/∂a` is constant. Under NPC it is
+constant *by construction*, twice over:
+
+* **`P` is a function of the geometry alone.** `exteriorTraceColumns()` takes no
+  iterate and cannot — it reads the mesh, the path and the mode, and nothing
+  else exists for it to read. The signature is the assertion; if it ever needs
+  an iterate, the claim has failed.
+* **`Γ_h`'s trace dofs are essential**, so the reduced operator masks its
+  residual to zero there and puts a unit row in the Jacobian — which
+  `theEssentialTraceConditionImposesTheDatum` already pins. The border column is
+  therefore **exactly `−P`**, not a difference of one.
+
+That is §4.5's *"two of the three borders are exact under NPC"* applying to this
+border for the same reason it applies to `ψ_ax`'s. The differencing §4.3 asks
+for is the right measurement for a **condensed** formulation, and MEQ is not one
+any more.
+
+### 7.4a FB-1's exact answer, and why the plan's proposal could not be one
+
+`tests/analytic/ExteriorMatched.hpp`. FB-1's acceptance needs a problem whose
+answer is known, and §7's *"the sum of the coils' loop fields"* **cannot be
+one for an order study.** An exact loop field comes from a **filament**, which
+in the `(r, z)` half-plane is a point source; its `ψ` has a logarithmic
+singularity, so `ψ ∉ H¹` there, the finite element solution converges at a
+reduced rate, and `k+1` is unreachable. A finite cross-section restores the
+regularity but its exact field is a 2-D integral of loop fields, semi-analytic
+and weakly singular inside the coil.
+
+**So FB-1 gets a manufactured solution instead**: an exact exterior mode outside
+a radius `ρ_0`, matched `C^1` to something regular inside, so the source is
+compactly supported strictly inside `Γ` and the exterior expansion on any
+`Γ` with `ρ_Γ > ρ_0` is **exactly the modes put in, with known coefficients**.
+
+**AND THE OBVIOUS CONSTRUCTION HAS THE SAME DEFECT AS THE COIL, ARRIVED AT FROM
+THE OTHER SIDE.** Matching value and slope with `A ρ^n + B ρ^{n+2}` works, and
+leaves the SOURCE discontinuous at `ρ_0` — so `ψ ∈ H^{5/2−ε}` and the rate caps
+near **2.5 whatever `k` is**. A `k = 3` study built on it would be measuring the
+matching radius rather than the coupling. The fixture therefore carries a
+**contact order `p`**, the order to which the source vanishes at `ρ_0`:
+
+```
+Δ*ψ = κ ρ^n ( ρ_0² − ρ² )^p C_n(μ)   inside,   0 outside
+```
+
+with `κ`, `A` and the `c_i` in closed form and `D = ∫_0^1 x^{2n}(1−x²)^p dx > 0`
+so `κ` always exists. **Default `p = 4`** — `ψ ∈ C^5`, enough for `k = 1…4`.
+
+**`p = 0` SHIPS AS THE CONTROL AND IT MEASURES THE DEFECT.** In the band around
+`ρ_0` the `Δ*` residual at `p = 0` **sits at 4.81 at every `h` and does not
+converge at all**, while the interior and exterior columns are untouched. That
+is the discontinuity, isolated.
+
+**Measured**, and the coefficient check is the one FB-1 will lean on:
+
+| | |
+|---|---|
+| independent sympy rebuild, `Δ*ψ + f` | **exactly zero, symbolically** |
+| `Δ*ψ = −f` by differences, `p = 4` | `O(h²)` to 1.7e−06 at `h = 1e−4`, the floor |
+| source outside `ρ_0`, 861 points | **0 nonzero** |
+| analytic gradients vs Richardson | 2.8e−11 |
+| **exterior coefficients, single mode** | **0.000e+00 — bit exact**; 11 zero entries at 3.3e−15 |
+| exterior coefficients, three modes | 2.0e−16 and 6.8e−15 at two radii |
+| **the DtN symbol against the analytic `∂ψ/∂ρ`** | **6.3e−16** |
+| `ψ(0, z)` on the axis | **literally 0.0**, and `∇ψ = (0,0)` |
+
+Two design details worth keeping. `multiMode()` uses degrees **2, 3 and 5** —
+skipping 4 deliberately, so a zero coefficient sits *between* two live ones and
+an off-by-one in the mode indexing cannot hide. And both radii `1.5 ρ_0` and
+`3 ρ_0` are checked, because the scaling is `a_n = α_n ρ_Γ^{1−n}` and **one
+radius cannot see it**.
+
+The axis result is a free confirmation of §7.3's evaluation choice: `ψ` and
+`∇ψ` are *literally* zero on the axis because `C_n` carries `(1−μ)(1+μ)` as an
+explicit factor, and that propagates through the fixture without being asked
+for.
+
+### 7.6 FB-2's current and its acceptance identity are built. 2026-09-04.
+
+`src/meq/Coils.{hpp,cpp}` — `meq::Coil` and `meq::CoilSet`, **MFEM-free** so CI
+can test them; `tests/unit/CoilsTests.cpp` is the acceptance. What is *not* here
+is the solve to apply them to, which waits on FB-1's transmission row.
+
+**THE SOURCE FACTOR IS DERIVED, NOT TRANSCRIBED.** From
+`(curl B)_φ = −(1/r)Δ*ψ` in MEQ's own field convention `B = (−q_z, +q_r)`:
+
+```
+μ₀ j_φ = (curl B)_φ   ⟹   Δ*ψ = −μ₀ r j_φ   ⟹   F = μ₀ r j_φ
+```
+
+which is §5.4's `μ₀ r I/|Ω_c|` exactly, and agrees with `MHDSource`'s
+`μ₀ r j_φ = μ₀r²p′ + gg′` — so the coil and plasma terms are in the same units
+and simply add.
+
+**AND IT IS CHECKED AGAINST ITS OWN FIELD, WITH THE NEIGHBOURING CONVENTIONS
+REJECTED.** `f()` and `psi()` are independent statements of the same physics, so
+recomputing `Δ*` of the field and comparing against `−f` is the one check that
+can see a missing or extra `r` — which converges at full rate to the wrong
+function. Measured at the coil centre: `Δ*_FD ψ = −2.094605e+01` against
+`−F = −2.094395e+01`, **1.0e−04** at the difference floor, while the plausible
+wrong answers `F/r = 1.047e+01` and `F·r = 4.189e+01` sit a **factor of two**
+away. The test asserts the rejection as well as the agreement, which is what
+turns "these two agree" into "these two agree and their neighbours do not".
+
+**FB-2'S OWN ACCEPTANCE IDENTITY, ON THE EXACT FIELD:**
+
+```
+∮ (1/r) ∂ψ/∂n dl  =  −μ₀ · totalCurrent()
+```
+
+Measured **3.3e−11** relative, Richardson-extrapolated from a midpoint rule.
+There is no discretisation in that identity, so establishing it here means that
+when FB-2 checks it on a **solve**, any discrepancy is the solve.
+
+**THE SIGN IS NEGATIVE AND IS ASSERTED SEPARATELY.** §7 predicts the coupling
+sign will be got wrong at least once, and this is the cheapest place to pin it.
+The same identity written as a counterclockwise circulation of `B` in `(r, z)`
+comes out **positive**, because `φ̂ = ẑ × r̂` — so both signs are defensible
+sentences about different quantities, which is exactly how a sign error survives
+review.
+
+**Two more measurements.** A shrinking coil approaches its filament at clean
+second order — ratios 4.025, 4.006, 4.002, 4.001 over five halvings — which says
+the finite cross-section is a *smoothing* of the filament rather than a
+different object. And `f` is proportional to `r` inside the coil, not constant:
+it is the current *density* that is uniform, and stating that correctly is the
+difference between `μ₀ r j` and `μ₀ j`.
+
+**ONE IMPLEMENTATION FINDING WORTH KEEPING.** The cross-section integral is
+logarithmically singular when the field point is inside the coil, and the
+obvious route fails there: `k = 2√(ar)/d` rounds to exactly 1.0 within ~1e−8 of
+a filament, where `std::comp_ellint_1(1.0)` is **NaN** — and the quadrature must
+evaluate there. Carlson's forms take `k′² = ((a−r)² + dz²)/d²`, which is the
+squared source distance over `d²` and is formed with **no cancellation**, and
+still work at `k′² = 1e−300`. With a panel split at the field point and cubic
+grading the interior converges at about `4p` in the rule order, giving
+**machine precision outside and ~3e−12 inside** at the default order 32. So the
+model is *not* exterior-only, which it would have had to be otherwise.
+
+**And it is sharper near the conductor than `tests/analytic/CurrentLoop.hpp`**,
+which is worth recording because that fixture is FB-1's reference: the two agree
+to **1.4e−12** over 4813 points, and walking in to the conductor `CurrentLoop`
+returns NaN from `ε = 1e−9` while `Coils` tracks the line-current logarithm
+exactly. Neither is wrong — `CurrentLoop` documents its own domain — but a
+caller evaluating near a coil should use `Coils`.
+
+**Deliberately not built**: no `meq::Source` adapter (`Source::f` takes `ψ` and
+a coil current does not; `dFdPsi` would be identically zero, and the adapter
+belongs with the assembly), and no `[coils]` TOML parsing. Both are driver work
+and belong with FB-1's solve.
+
+### 7.5 What FB-1 still needs, now that the quadrature over `Γ` has landed
+
+**Done**: `meq::ExteriorDtN` (§7.3), the coupling matrix `P` (§7.4), — from
+the two fixtures beside them — a verified current-loop field and a
+manufactured exterior-matched solution to measure against, and, since
+2026-09-05, `mfem::ExtensionBoundaryQuadrature`, which was the one piece that
+was genuinely new code and is now upstream's.
+
+**Not done, in the order they block each other:**
+
+1. **The transmission row `T_m = ∫_Γ E_h(q_h)·ν C_m dΓ − a_m (1−n) h_m/ρ_Γ`.**
+   This is the Neumann half of the coupling and without it `a` is undetermined.
+   It is an integral over the **true `Γ`** of the element extension of the flux.
+
+   **ITS MFEM HALF IS DONE, IS UPSTREAM'S, AND THE FILING PAID FOR ITSELF —
+   2026-09-05.** This section used to be an instruction; it is now a record.
+   `mfem::ExtensionBoundaryQuadrature` was written in MEQ against
+   `gf-hdg-subdomains-dev`, used, given the tiling check below, and filed — and
+   upstream merged it as *"Merge meq's ExtensionBoundaryQuadrature: quadrature
+   over Gamma"*. It is a free function taking a visitor, the shape §6.2 argued
+   for rather than an `Integrator` subclass, and it is in MEQ's install:
+
+   ```
+   void ExtensionBoundaryQuadrature(
+      FaceElementTransformations &FTr, const TransferPath &path,
+      const IntegrationRule &face_ir,
+      const std::function<void( const ExtensionBoundaryPoint & )> &visit,
+      real_t fd_step = 1e-6 );
+   ```
+
+   **AND THE TILING CHECK IS WHAT PAID.** The acceptance was that the boundary
+   weights sum to `|Γ|`, as the volume weights sum to `|Ω| − |D_h|`, and writing
+   it found that an **unsigned** weight integrates a swept image *with
+   multiplicity*: where a boundary feature is thinner than a mesh width the foot
+   map folds, and the fold adds where it should cancel. Upstream then found the
+   sibling `ExtensionRegionQuadrature` had the same defect — `|det J|` — and
+   signed it, taking the worst relative error on their aerofoil from `+1.13e-02`
+   to `−2.29e-04`, fifty-fold. **MEQ's own geometry is a disc and does not fold,
+   so MEQ's numbers are untouched**; the return on filing was to somebody else's
+   test case, which is the argument for filing a thing that has been used.
+
+   **What is still MEQ's** is the row itself: sweep `Γ` with that routine,
+   evaluate `E_h(q_h)` at each point on it, contract against `C_m`, and subtract
+   the diagonal exterior term. `ElementExtension::SetElement` + `TransformBack`
+   evaluate the owning element's polynomial outside it — the pattern
+   `meq::Sampler::extendOutward` already uses — and on a **semicircular** `Γ`
+   the normal is `ρ̂` analytically, which removes the fiddliest part. It is
+   assembly rather than research.
+
+   **THE PREREQUISITE ARGUMENT STILL STANDS AND IS WHY THE TARGET WAS RIGHT.**
+   The patch went to `gf-hdg-subdomains-dev` because that is where the extension
+   machinery lives, and — verified rather than assumed, 2026-09-05 — that branch
+   carries **no `DarcyNPCOperator` at all**. So the routine provably does not
+   depend on the ordering, which is what made subdomains both the right target
+   and a *sufficient* one.
+
+   **Never commit to `meq-integration`.** `CLAUDE.md` is explicit that it exists
+   only to be built against, is re-created whenever any of its four parents
+   moves, and that anything committed to it is lost. The work belongs on a
+   branch off subdomains — `hdg-extension-boundary-quadrature` is the one this
+   went on — and reaches MEQ by fetch, never by editing the install's sources.
+   **THE ROW ITSELF IS NOW WRITTEN TOO, 2026-09-05.**
+   `GradShafranovSolver::exteriorTransmissionRows()` is the contraction, and
+   `theTransmissionRowIsTheBoundaryIntegralItClaims` measures it against a
+   closed form at **7.8e-16 to 1.4e-13**. The measure question this section left
+   open — whether `T_m` wants `dΓ` or `dΓ/r` — is settled and it is `dΓ`: the
+   exterior block is diagonal in `dΓ/r`, and `q` *is* `(1/r)∇̄ψ`, so testing
+   `q·ν` in the plain measure already carries the radius. `dΓ/r` would divide by
+   it twice.
+
+   **What is NOT settled is the tiling.** The boundary sweep's own acceptance —
+   weights summing to `|Γ|` — was exact and mesh-independent when the routine
+   was written and now converges at `O(h²)` against the cone-carrying
+   `VertexConePath`. That test is left red; §7.7 has the numbers.
+2. **The bordered solve at `N + 2`.** §4.4 is right that this is mechanical:
+   `solveWithNormalisation()` already does it at `N = 1` through a
+   `DarcyNPCSolver`, and the generalisation replaces a scalar corner with a
+   dense `(N+2)×(N+2)` one. `N + 2` extra backsolves, no extra factorisation.
+3. **The acceptance itself** — `ψ_h` against the manufactured solution at
+   `k+1`, and the coupling sign, which §7 says will be got wrong at least once.
+
+**A DOMAIN CONSTRAINT THAT ONLY BECAME OBVIOUS ON BUILDING THIS.** The exterior
+expansion is only valid on a **semicircle centred on the axis**, so FB-1's `Γ`
+must be one — which means the domain reaches `r = 0` and everything §7.2
+measured about the axis applies to it. FB-A was not merely a warm-up for FB-1;
+it is its prerequisite, and the `O(1/h)` conditioning it found is the number
+FB-1 inherits. `FreeBoundaryCoupling.cpp` deliberately uses
+`ExtensionConvergence`'s Solov'ev surface instead, because `P` is a projection
+and needs no semicircle — but nothing that SOLVES can take that shortcut.
+
+### 7.7 The tiling of `Gamma` is red, and MEQ's is the only check of it
+
+**Measured 2026-09-05, on the circle `FreeBoundaryCoupling.cpp` cuts for the
+purpose.** `ExtensionBoundaryQuadrature`'s stated acceptance is that summing the
+boundary weights over the faces of `Γ_h` gives `|Γ|`, exactly as the region
+weights give `|Ω| − |D_h|`. That is a property of the **path family** rather than
+of the routine: adjacent faces must agree on the path through a shared vertex, or
+their images overlap or gap.
+
+| `n` | `h` | sum vs `|Γ|` | cone |
+|---|---|---|---|
+| 12 | 0.100 | **1.01e-04** | have 1, vertices 25, restricted 25, tighter 10, widened 0 |
+| 24 | 0.050 | **2.24e-05** | 53, 53, 24, 0 |
+| 48 | 0.025 | **4.59e-06** | 107, 107, 50, 0 |
+
+**It converges at about `O(h²)`, and that is the whole finding.** When the
+routine was written the same check read 4.85e-10, 4.64e-10, 6.38e-11 —
+mesh-independent, at the central difference's own floor on `∂a/∂ξ`. A residual
+that *converges* is measuring a geometric error rather than an instrument, so the
+images no longer tile `Γ`.
+
+**IT IS THE CONE, AND IT IS NOW MEASURED RATHER THAN SUSPECTED.** The cone is
+only available on a `SubMesh` with a parent, so a path built on a parentless copy
+of the same `D_h` is the identical family without it —
+`theConeIsWhatCostsTheTiling` is that control:
+
+| `n` | cone on | cone off |
+|---|---|---|
+| 12 | 1.01e-04 | **4.85e-10** |
+| 24 | 2.24e-05 | **4.64e-10** |
+| 48 | 4.59e-06 | **6.38e-11** |
+
+A factor of **2e5** on one variable, and the cone-off column reproduces the
+expectation recorded when the routine was written — which also settles that those
+numbers were measured on this geometry.
+
+**Why it costs anything is still not established**, and that is the part to work
+out before filing: tiling rests on adjacent faces agreeing at a shared vertex,
+which interpolating vertex directions gives by construction and a per-vertex
+restriction ought to preserve. The diagnostics say the cone fired at every vertex
+at every mesh and was strictly tighter than the half space at about 40% of them.
+**Upstream's own commit says the cone "changes nothing"**, which this contradicts
+directly.
+
+**MFEM'S OWN SUITE CANNOT SEE IT.** `test_darcy_extension.cpp` exercises
+`ExtensionRegionQuadrature` and names the boundary sweep only in a comment, so
+this check is the only one of the property anywhere. That is the argument for
+filing it, and the argument against relaxing the gate to make a suite green: it
+would throw away the only measurement that exists.
+
+**It does not block the transmission row**, which is measured against a closed
+form at 7.8e-16 and does not depend on the tiling being exact — a row is a
+contraction against whatever `Γ` the sweep visits. It does bound how well FB-1's
+transmission condition can hold, and so it is on FB-1's path rather than beside
+it.
 
 ## 8. Risks, in the order they are likely to bite
 

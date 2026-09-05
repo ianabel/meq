@@ -201,9 +201,11 @@ set_target_properties(toml11::toml11 PROPERTIES
 # owns itself. What was left of its job lives on GradShafranovSolver.
 set(MEQ_CORE_SOURCES
 	src/meq/BoundaryShape.cpp
+	src/meq/Coils.cpp
 	src/meq/Config.cpp
 	src/meq/CriticalPoints.cpp
 	src/meq/Estimator.cpp
+	src/meq/ExteriorDtN.cpp
 	src/meq/Field.cpp
 	src/meq/FluxSurfaces.cpp
 	src/meq/GradShafranov.cpp
@@ -230,6 +232,18 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/Sampler.cpp
 	src/meq/SurfaceAverage.cpp
 	src/meq/WarmStart.cpp)
+
+# src/meq/Coils.cpp is ABSENT from it too, and for the same reasons: a coil is
+# a rectangle, a current and an elliptic-integral kernel -- geometry and special
+# functions, plain doubles in and out. FB-2 needs it and CI can test it.
+
+# src/meq/ExteriorDtN.cpp is ABSENT from that list for the same reasons, and it
+# is the newest member of the MFEM-free half: it is the exterior
+# Dirichlet-to-Neumann map of a semicircle, which is special functions and
+# geometry -- Legendre polynomials and a Gauss-Legendre rule from Boost, plain
+# doubles in and out. FREE-BOUNDARY-PLAN.md section 5.1 asks for exactly that,
+# so that FB-0's acceptance is a UNIT test CI can run rather than a convergence
+# study it cannot build.
 
 # src/meq/SurfaceFit.cpp is DELIBERATELY ABSENT from that list. IN-3's fit is a
 # linear least-squares problem against a point cloud -- plain doubles in,
