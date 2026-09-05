@@ -76,17 +76,15 @@ Nothing is red and stages 0 to 7 are done, so the order is:
    path. After it, the bordered solve at `N + 2` is mechanical: §4.4 is right
    that `solveWithNormalisation()` already does it at `N = 1`.
 
-   **AND THERE IS AN INDEPENDENT COMPARISON FOR IT ON THIS MACHINE**, which
-   nothing in this repository mentioned before 2026-09-05: `../geq`, a
-   free-boundary Grad-Shafranov solver **in Python, by a different algorithm**.
-   That is a better final check than FB-6's written acceptance — a fine-mesh
-   self-comparison shares every convention and every misread paper with itself,
-   and "agreement with CEDRES++ where a published case exists" depends on
-   somebody having published a case in reproducible detail. It is not free:
-   MEQ solves fixed boundary only until FB-1 lands, its boundary shapes are
-   `none`/`miller`/`mxh` with no points-from-a-file, it has no geqdsk either
-   way, and ψ's sign is not a convention MEQ fixes. The plan's §7 lists what has
-   to be reconciled first.
+   **AND THERE IS AN INDEPENDENT FREE-BOUNDARY CODE ON THIS MACHINE — BUT IT
+   IS NOT THE CHECK FB-6 WANTS.** `../geq` wraps `../freegs4e`: free boundary by
+   von Hagenow Green's functions and finite differences, Picard rather than
+   Newton, which is a genuinely different algorithm. It is however a magnetic
+   **mirror** code with `g ≡ 0` and no toroidal field, and FB-6 is a tokamak
+   machine case, so it cannot stand in for one; there is no shared analytic
+   benchmark either. **Its real value is to `FLOW-PLAN.md`** — both codes
+   implement Abel (136), and `CLAUDE.md` records that no published rotating
+   benchmark exercises the `C′(ψ)` term. See §7 of the plan.
 2. **Finish the inversion** — item 10. IN-6, the `(Ψ, θ)` output grid and the
    per-`ψ` cache `MANTA-COUPLING.md` §5's call pattern requires; and IN-P, the
    performance harness, which is under way. IN-5, open surfaces, is **deferred

@@ -798,30 +798,39 @@ validation is against a fine mesh. **That is true of the finished problem and
 false of every stage below FB-4**, and the exact answers available early are what
 should be spent first.
 
-**AND FOR THE FINISHED PROBLEM THERE IS A BETTER OPTION THAN A FINE MESH:
-`../geq`.** It is a free-boundary Grad–Shafranov solver in Python **using a
-different algorithm**, and an independent implementation by a different method is
-a stronger check than a code agreeing with a refinement of itself — which shares
-every convention, every sign and every misreading of a paper that this file
-records the cost of. It is also stronger than FB-6's written acceptance,
-*"agreement with CEDRES++ where a published case exists"*, which depends on
-somebody having published a case in enough detail to reproduce.
+**`../geq` IS AN INDEPENDENT FREE-BOUNDARY CODE ON THIS MACHINE, AND IT IS NOT
+THE CHECK FB-6 WANTS.** Recorded 2026-09-05, and corrected the same day: the
+first version of this paragraph called it a better final check than a fine mesh,
+which is wrong for a reason worth keeping.
 
-**Nothing in this repository mentioned it before 2026-09-05**, so it is worth
-saying here rather than assuming the next reader knows.
+`geq` is a thin wrapper; **`../freegs4e` is the solver** — free boundary by von
+Hagenow Green's functions, 2nd/4th-order finite differences on a uniform `(R,Z)`
+grid, Picard with adaptive blending and an optional Newton–Krylov polish. That is
+genuinely a different algorithm from HDG, which is what would make it worth
+something. **But it is a magnetic MIRROR code**: every path sets
+`ffprime = fpol = fvac = 0`, so `g ≡ 0`, there is no toroidal field, and its
+safety factor is identically zero. FB-6 is *"a machine case"* — a tokamak
+equilibrium with a real `gg′` — and a `g ≡ 0` mirror cannot stand in for one.
+**There is also no shared analytic benchmark**: no Solov'ev, no
+Cerfon–Freidberg, no manufactured solution anywhere in either tree, so
+`soloviev-nstx` has nothing to meet.
 
-**What a comparison needs first, and none of it is free.** MEQ solves **fixed
-boundary only** today, so until FB-1 solves there is no like-for-like run and the
-comparison has to be on a boundary prescribed to both codes. MEQ's boundary
-shapes are `none`, `miller` and `mxh` — there is no points-from-a-file shape, so
-an arbitrary last closed flux surface has to be fitted to MXH coefficients first.
-MEQ has **no geqdsk reader or writer**; its interchange format is the `.nc`, and
-`extrapolated` nodes must be dropped before differencing, being band-continued
-rather than solved. And **ψ's sign is not a convention MEQ fixes**: the Solov'ev
-fixtures have `F` single-signed negative, so the magnetic axis is an interior
-*minimum* there and a maximum with `F` positive — `CriticalPointFinder` refuses
-rather than guessing when both are present, and a comparison that assumes the
-axis is the maximum will compare the wrong extremum without saying so.
+**WHAT IT IS GENUINELY A CHECK ON IS `FLOW-PLAN.md`, NOT THIS FILE.** Both codes
+implement **Abel (136)** closed by its (96) and (97) — the same paper
+`examples/rotating-rectangle.toml` cites — so `freegs4e`'s
+`ProfilesCentrifugalMirror` and `meq::RotatingSource` are two independent
+implementations of one equation. `CLAUDE.md` records that **no published rotating
+benchmark exercises the `C′(ψ)` term**, which is precisely the term Li & Zhu got
+two signs wrong in; this would be the first outside check of it. The smallest
+comparison is source-against-source, pointwise on a prescribed `ψ`, with no solve
+on either side.
+
+**Before any of that**: `freegs4e` is not importable here and geq's own paths
+point at another machine, so nothing on that side runs today. And the `φ₀`
+**gauge** differs — MEQ pins `φ₀(ReferenceRadius, ψ) = 0` per flux surface, geq
+pins one point globally at `ψ_n = 0.5` on the midplane — so the two codes'
+tabulated `N_s(ψ)` mean different things until it is reconciled. Compare `n_s`
+and `F`, never `N_s`.
 
 | | | acceptance |
 |---|---|---|

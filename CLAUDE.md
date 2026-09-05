@@ -2788,6 +2788,34 @@ and by MEQ's own derivation agreeing with the corrected form. **Neither of their
 own benchmarks can see it**, because both have `dC/dψ = 0`. And their (6) omits
 the `μ₀` their (9) carries.
 
+**AND THERE IS AN INDEPENDENT IMPLEMENTATION OF (136) ON THIS MACHINE, WHICH
+WOULD BE THE FIRST OUTSIDE CHECK OF THAT GAP.** `../freegs4e`'s
+`ProfilesCentrifugalMirror` — driven by `../geq`, a rotating-mirror wrapper —
+implements Abel (136) closed by its (96) and (97), the same paper from the same
+equations, in Python, by finite differences and Picard. So it and
+`meq::RotatingSource` are two independent implementations of one equation, which
+is a rarer thing than it sounds and is exactly what the `C′(ψ)` gap wants.
+
+**The smallest comparison is source against source and needs no solve**: geq's
+`Jtor × μ₀R` against MEQ's `F`, pointwise on a prescribed `ψ` and prescribed
+species profiles. `geq/tests/test_jtor_abel.py` already does this against a
+hand-written reference, so MEQ's would substitute for that reference.
+
+**RECONCILE THE `φ₀` GAUGE FIRST — IT IS NOT A DETAIL.** MEQ pins
+`φ₀(ReferenceRadius, ψ) = 0`, one condition per flux surface. geq pins **one
+point globally**, at `ψ_n = 0.5` on the midplane. `N_s(ψ)` absorbs the difference
+through `exp(Z_s e δ/T_s)`, so **the two codes' tabulated densities mean
+different things** until it is fixed. Compare `n_s(r,z)` and `F`; never `N_s(ψ)`.
+Smaller traps beside it: geq wants `T` in **eV** and MEQ in **Joules**; geq
+derives `ω` from a Mach number or a voltage and re-derives it every Picard step,
+so its `omega_profile` callable is the only way to hand both codes the same
+`ω(ψ)`; and geq sets `gg′ ≡ 0` unconditionally, which on MEQ's side means
+`GGPrime = 0` and the trivial-branch warning in
+`examples/rotating-rectangle.toml`.
+
+**Nothing on that side runs here yet** — `freegs4e` is not importable and geq's
+paths point at another machine.
+
 **THE GAP THAT LEAVES IS WORTH KNOWING**: no published rotating benchmark
 exercises the `C′(ψ)` term — Li & Zhu's Solov'ev case has `T` and `Ω` constant,
 and Maschke & Perrin's (4.7) *forces* `C` constant — and that is precisely the
