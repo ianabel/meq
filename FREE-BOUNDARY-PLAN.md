@@ -876,7 +876,7 @@ the fallback to work.
 |---|---|---|
 | **FB-A** | **The axis.** A vacuum solve on a mesh touching `r = 0`. No free boundary, no coupling. | **DONE, 2026-09-04 — see §7.2.** `ψ` at `k+1` on a mesh reaching the axis; `q` short by half an order; the conditioning penalty `O(1/h)` and not `O(1/h²)`. `tests/convergence/AxisConvergence.cpp` |
 | **FB-0** | `meq::ExteriorDtN`: the basis, the symbol, the mass. No solver. | **DONE, 2026-09-04 — see §7.3**, except §3.4's CEDRES++ agreement, which is now specified but not built. The current-loop test reads **1.4e−15** in the trace and **6.9e−14** in the DtN |
-| **FB-1** | **Vacuum only.** Coils, no plasma. The whole coupling, on a linear problem with an exact answer — the sum of the coils' loop fields. | `ψ_h` against that closed form at `k+1`; the coupling sign pinned by it; **and `∂F/∂a` constant between two well-separated iterates**, which is §4.3's unmeasured claim |
+| **FB-1** | **Vacuum only.** The whole coupling, on a linear problem with an exact answer. | **DONE 2026-09-05 — see §7.8.** `ψ` at **1.99 / 2.99 / 3.99** on the half-disc with the datum given (FB-1a), and the transmission condition recovers the exterior coefficients to **1.9e-04, converging at 3.30** (FB-1b). `∂F/∂a` needs no measurement under NPC — §7.4 |
 | **FB-2** | A **prescribed** plasma current, still linear: put a known `j_φ` inside and check the exterior. | Same rate; and `ComputeOutwardFlux` against the total current, which is the sharpest whole-assembly test available. **The current and the identity are built — §7.6**; what is missing is the solve to apply them to |
 | **FB-3** | `ψ_bnd` as an unknown, plasma support still fixed. | Self-consistency of `ψ_bnd` to round-off, Newton order 2, exactly as `HighBetaConvergence` asserts for `ψ_ax` |
 | **FB-4** | The moving plasma support and cut quadrature. | The order that survives the cut, measured, against `k+1` — **and the cost of an inconsistent cut Jacobian measured in Newton's observed order**, which decides §5.3's two options |
@@ -1440,6 +1440,65 @@ do what it was added for — the aerofoil flux order it targeted is
 signed-weight finding: **the cone is what makes the foot map backtrack**, so the
 `O(h)` unsigned overcount and this `O(h²)` residual are two readings of one
 thing.
+
+### 7.8 FB-1 is done, and the datum on `Γ` was the missing half
+
+**FB-1a: the half-disc, datum given.** The first solve in this tree on a
+semicircle centred on the axis — §7.5's domain constraint, which every other
+extension study dodges by taking a Solov'ev surface away from the axis because a
+projection needs no semicircle. Rates in `ψ` **1.971, 1.992 / 2.967, 2.991 /
+3.961, 3.989** at `k = 1, 2, 3`; in `q` 1.94 / 2.67 / 3.93. So §8's corner is
+benign, and `q`'s shortfall at `k = 2` is FB-A's half-order axis loss rather than
+the corner.
+
+**AND IT FOUND THAT MEQ COULD NOT IMPOSE A NON-ZERO DATUM ON `Γ` AT ALL**, which
+is the one thing FB-1 could not do without. `setBoundaryData()` is projected
+against `fittedMarker`; `HDGExtensionIntegrator` supplies only the
+solution-dependent half of the transferred datum, which is the whole of it
+exactly when `g` is homogeneous — and every extension study here wants `ψ = 0`.
+
+**The first repair was inert, and why is the transferable part.** Setting
+`Γ_h`'s trace dofs and letting `FormLinearSystem` eliminate them — which *is* how
+the fitted datum is imposed — changed not one digit. The flux divergence form's
+boundary face integrator carries `fittedMarker`, and `EnableHybridization`
+registers a boundary flux constraint on exactly the attributes marked there;
+`Γ_h` is not among them, so its trace dofs are essential in name with nothing
+coupled to them.
+
+**`miniapps/hdg/extension.cpp` is the worked example**, and it imposes the datum
+as a **load on the flux equation** — `VectorBoundaryFluxLFIntegrator` with a
+`PathTraceCoefficient`, which is `⟨ψ̂, v·n⟩` of (8a). It **negates**
+(`pNatural = -pExact`). `setExteriorDatum()` does that now. **There was no MFEM
+defect**, and a report was nearly filed: the capability exists and is exercised
+upstream on all three of the miniapp's problems.
+
+**FB-1b: `a` becomes an unknown**, recovered from the transmission condition
+alone at `k = 2`:
+
+| degree | solved | exact | relative |
+|---|---|---|---|
+| 2 | 6.667965e-01 | 6.666667e-01 | 1.95e-04 |
+| 3 | −2.666651e-01 | −2.666667e-01 | 2.40e-06 |
+| **4** | **−2.31e-05** | **0** | 3.46e-05 |
+| 5 | 6.902000e-02 | 6.913580e-02 | 1.74e-04 |
+
+**converging at 3.30** over `n = 12 → 24`. Degree 4 is the mode `multiMode()`
+deliberately skips so a zero sits *between* two live ones; it comes back zero, so
+the indexing is right and the off-by-TWO `ExteriorDtN` warns about is not there.
+
+**THE RATE IS WHAT MAKES IT A RESULT.** A coupling wrong by a *constant* — a
+sign, a stray `r`, a misindexed mode — sits at a fixed distance and looks like a
+plausible discretisation error at any single mesh. Only refinement separates
+them, which is why one mesh was not enough.
+
+**What is deliberately NOT here.** The solve is closed by **superposition** in
+the test rather than by a bordered solve in `GradShafranovSolver`. For a vacuum
+problem that is exact rather than approximate — everything is affine in `a`, so
+`x(a) = x_0 + Σ a_n x_n` and block elimination *is* one factorisation and `N+1`
+back-substitutions. What the test throws away is the *reuse* of the
+factorisation, which is a cost and not an answer. A plasma makes the interior
+non-linear and then the border has to live inside Newton, which is **FB-5**, and
+§4.4 is right that `solveWithNormalisation()` already does it at `N = 1`.
 
 ## 8. Risks, in the order they are likely to bite
 

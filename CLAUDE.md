@@ -348,7 +348,7 @@ Beyond the port, three campaigns have their own plans and their own staging:
 built, FB-3 to FB-6 open). Each has a section below; the free-boundary one is
 new and short.
 
-### Free boundary: the axis is measured, the exterior operator is built, and one row is missing
+### Free boundary: FB-A, FB-0 and FB-1 are done; the plasma is what remains
 
 **`ROADMAP.md` item 1, and the largest remaining item in the tree.** The plan is
 `FREE-BOUNDARY-PLAN.md`. **Nothing SOLVES yet** — there is no coupled solve on
@@ -360,11 +360,17 @@ one of them.
 |---|---|
 | **FB-A** | the axis, below. `tests/convergence/AxisConvergence.cpp` |
 | **FB-0** | `src/meq/ExteriorDtN.{hpp,cpp}` — the Gegenbauer basis, the DtN symbol and the mass, **MFEM-free** so CI gates it. Checked against a current loop built from elliptic integrals sharing no code with it: **1.4e−15** in the trace, **6.9e−14** in the DtN. What is left of FB-0 is §3.4's cross-check against CEDRES++'s own boundary form, whose kernel is hypersingular so only their double-difference form regularises it |
-| **FB-1** | the coupling matrix `P` (`exteriorTraceColumns()`) and `tests/analytic/ExteriorMatched.hpp`, the manufactured exact answer. **The plan's proposed answer — filament loop fields — cannot support an order study at all**, `ψ ∉ H¹` at a point source |
+| **FB-1** | **DONE.** `P`, the transmission row, `setExteriorDatum()`, and both halves measured: `ψ` at 1.99/2.99/3.99 on the half-disc with the datum given, and the exterior coefficients recovered from the transmission condition to 1.9e-04, converging at 3.30. `tests/analytic/ExteriorMatched.hpp` is the exact answer — **the plan's proposed one, filament loop fields, cannot support an order study at all**, `ψ ∉ H¹` at a point source |
 | **FB-2** | `src/meq/Coils.{hpp,cpp}`, MFEM-free, and the acceptance identity `∮(1/r)∂ψ/∂n dl = −μ₀I` at **3.3e−11** on the exact field, so a discrepancy on a solve is the solve |
 
-**THE MISSING PIECE IS ONE ROW**, and it blocks FB-1 and FB-2 alike: the
-transmission row `∫_Γ E_h(q_h)·ν C_m dΓ`, the Neumann half of the coupling.
+**FB-1 IS COMPLETE AS OF 2026-09-05** — see the entries below for the two halves
+and for what building it found. What remains of free boundary is the **plasma**:
+FB-2's prescribed current on a solve, FB-3's `ψ_bnd`, FB-4's moving support and
+cut quadrature, and FB-5's bordered Newton, which is where the superposition
+FB-1b uses stops being exact.
+
+**The transmission row** `∫_Γ E_h(q_h)·ν C_m dΓ` is the Neumann half of the
+coupling.
 **Its MFEM half was written here and is now upstream's** —
 `mfem::ExtensionBoundaryQuadrature`, merged into `gf-hdg-subdomains-dev`
 2026-09-05. Writing its tiling check (the boundary weights must sum to `|Γ|`)

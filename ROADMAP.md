@@ -15,7 +15,7 @@ The four plan files, and none of them is a plan any more except one:
 | `DRIVER-PLAN.md` | stage 7 — **done**; the file is now its findings |
 | `FLOW-PLAN.md` | item 9, FL-0 to FL-8 — **done**; the file is the derivation and its findings |
 | `INVERSION-PLAN.md` | item 10's machinery — IN-A to IN-4 **done**, IN-5 deferred, IN-6 open, IN-P under way |
-| `FREE-BOUNDARY-PLAN.md` | item 8 — FB-A and FB-0 **done**, FB-1 and FB-2 part built, FB-3 to FB-6 open. Still the one real plan left |
+| `FREE-BOUNDARY-PLAN.md` | item 8 — FB-A, FB-0 and **FB-1 done**; FB-2 part built, FB-3 to FB-6 open. Still the one real plan left |
 
 ## So what is next
 
