@@ -8,17 +8,22 @@ blending. MEQ is HDG with Newton. They share the equation and essentially no
 code.
 
 **Result, seven configurations** — TestTokamak (three profile shapes), MAST,
-MAST-U, TCV, DIII-D:
+MAST-U, TCV, DIII-D — each seeded from its own reference:
 
-| case | rel L2 in ψ | axis value |
+| case | rel L2 in ψ | rel L∞ |
 |---|---|---|
-| B TestTokamak, ff′-dominated | **7.1e-04** | +0.06% |
-| G MAST-U | **6.4e-04** | +0.04% |
-| F DIII-D | 2.9e-03 | +0.46% |
-| D TCV | 4.7e-03 | +0.75% |
-| E TestTokamak, diamagnetic | 6.4e-03 | +1.09% |
-| C MAST | 8.2e-03 | +1.36% |
-| **A TestTokamak, classic** | 9.4e-02 | **+15.39%** |
+| A TestTokamak, classic | **1.5e-04** | 5.4e-04 |
+| G MAST-U | 6.4e-04 | 1.6e-03 |
+| B TestTokamak, ff′-dominated | 7.1e-04 | 1.5e-03 |
+| E TestTokamak, diamagnetic | 2.7e-03 | 5.8e-03 |
+| F DIII-D | 2.9e-03 | 5.2e-03 |
+| D TCV | 4.4e-03 | 7.9e-03 |
+| C MAST | 6.8e-03 | 1.3e-02 |
+
+**Two independent codes over ~11,000 nodes, worst case 0.7%.** The residual is
+almost certainly geometric rather than either solver's: the MXH fit of the
+boundary is 2–4e-04 m on a minor radius of 0.24–0.61 m, which is 5e-04 to 1e-03
+relative, and the contour it fits is itself extracted from freegs4e's 129² grid.
 
 ## What it does
 
@@ -79,23 +84,43 @@ two roots — 1.93e-03 and 5.23e-02 — and lands on the weak one for any amplit
 below about 2× the axis height. `[initialguess] Type = "ramp"` at **6×** the
 expected axis value clears it on all seven.
 
-## Case A, and why it is left disagreeing
+## Root selection is the whole difficulty, and case A proves it
 
-A is on a **different root**, and that is measured rather than supposed: its
-+15.39% is flat at +15.39 → +15.41% across refinement levels 2→4 and polynomial
-degrees 2→3, converged to six digits. Discretisation error would fall; this does
+**These problems have at least three solutions and only one is the equilibrium.**
+Case A, measured:
+
+| start | ψ max | vs reference |
+|---|---|---|
+| ramp, amplitude ≤ 0.1 | 1.931300e-02 → 1.9313e-03 | −95.7% |
+| **seeded from the reference** | **4.525154e-02** | **−0.067%** |
+| ramp, amplitude ≥ 0.2 | 5.225179e-02 | +15.4% |
+| freegs4e | 4.528205e-02 | — |
+
+The physical root sits **between** the two a ramp can reach, which is the
+signature of the unstable middle branch of an S-curve: Newton slides off it from
+either side. No ramp amplitude finds it — the sweep goes straight from the lower
+root to the upper one between 0.1 and 0.2.
+
+**Seeded, MEQ converges to it in TWO Newton iterations** — residual
+4.5e-03 → 2.7e-09 → 7.1e-15 — and then agrees best of all seven cases. So the
+reference is a genuine root of MEQ's discrete problem, MEQ finds it immediately
+from a nearby start, and the earlier 15% was never a disagreement about the
+equation.
+
+**That the upper root was FLAT under refinement is what proved it was a root and
+not an error**: +15.39% → +15.41% across refinement levels 2→4 and degrees 2→3,
+converged to six digits. Discretisation error falls; a different solution does
 not.
 
-The reference sits at 4.53e-02, **between** the two roots MEQ finds (1.93e-03
-and 5.23e-02), which is the signature of a third, middle root — the unstable
-branch of an S-curve, which Newton passes over from either side. Reaching it
-needs a start close to the answer rather than a ramp, i.e. MEQ's
-`[initialguess] Type = "gridfunction"` restart seeded with the reference. That is
-the obvious next step and is not done.
+`mkguess.py` writes the reference as an MFEM mesh plus `H1_2D_P1` GridFunction —
+MEQ's `[initialguess] Type = "gridfunction"` interpolates it through
+`meq::FieldTransfer`, so the guess needs neither MEQ's mesh nor its degree.
+**pyMFEM would be the better tool here** and is worth reaching for next time:
+it would replace this file's hand-rolled ASCII writer, and would let `compare.py`
+read MEQ's `.gf`/`.mesh` directly instead of going through the lossy `.nc` grid.
 
-**The source conversion is not the cause and that is checked directly**:
-evaluating MEQ's tables on the reference's own ψ reproduces freegs4e's `μ₀ R
-J_φ` to **2.3e-05**, so both codes are solving the same equation and disagree
-only about which of its solutions to report. `CLAUDE.md` records the same
-phenomenon from inside MEQ — three solve routes reaching discrete solutions
-9.4% apart on an under-resolved mesh.
+**The source conversion was ruled out before any of this**, directly rather than
+by argument: evaluating MEQ's tables on the reference's own ψ reproduces
+freegs4e's `μ₀ R J_φ` to **2.3e-05**. `CLAUDE.md` records the same multiplicity
+from inside MEQ — three solve routes reaching discrete solutions 9.4% apart on
+an under-resolved mesh.
