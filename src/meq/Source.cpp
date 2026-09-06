@@ -92,6 +92,14 @@ namespace meq
 		// Psi = ( psi - psi_bnd )/span, and the profiles are differentiated with
 		// respect to Psi, so F carries one factor of 1/span. With psi_bnd = 0
 		// the span IS psi_ax and this is the expression it always was.
+		// OUTSIDE THE PLASMA THERE IS NO SOURCE, and that is the whole of the
+		// moving support: nothing here knows where the boundary is, and the
+		// boundary is not an input -- it is wherever psi currently puts it. Off
+		// unless setPlasmaSupport() asked for it, and then this is one
+		// comparison. See NormalisedSource::setPlasmaSupport.
+		if ( !insidePlasma( psi ) )
+			return 0.0;
+
 		double const span = psiAxisValue - psiBoundaryValue;
 		double const psiN = ( psi - psiBoundaryValue )/span;
 		return ( permeability*r*r*( *pPrimeProfile )( psiN ) + ( *ggPrimeProfile )( psiN ) )
@@ -104,6 +112,15 @@ namespace meq
 		// respect to Psi and the argument carries a further 1/span. Dropping the
 		// second is the classic error here, and it does not move the converged
 		// answer -- only the convergence to it.
+		// The derivative of a source that is identically zero out here is zero.
+		// NOT the one-sided limit from inside: at the edge itself dF/dpsi picks
+		// up a surface term F delta( Psi ), which this interface structurally
+		// cannot carry -- and which VANISHES exactly when the profiles vanish
+		// at the edge, which setPlasmaSupport() documents as its precondition
+		// and CLAUDE.md measures the cost of violating.
+		if ( !insidePlasma( psi ) )
+			return 0.0;
+
 		double const span = psiAxisValue - psiBoundaryValue;
 		double const psiN = ( psi - psiBoundaryValue )/span;
 		return ( permeability*r*r*pPrimeProfile->prime( psiN ) + ggPrimeProfile->prime( psiN ) )

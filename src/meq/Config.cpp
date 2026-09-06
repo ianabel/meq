@@ -231,6 +231,16 @@ namespace meq
 				/// all the way down to source.species[2].Mass without the caller
 				/// doing anything. That is the same convention getFloatArrayOr()
 				/// uses for an element of a scalar array.
+				/// The document itself, so that a TOP-LEVEL array of tables
+				/// can be read the same way a nested one is. [[coils]] is the
+				/// first of those; [[source.species]] is nested inside [source]
+				/// and needed no such thing.
+				static Table root( toml::value const & document,
+				                   std::string const & configFile )
+				{
+					return Table( &document, "", configFile );
+				};
+
 				std::vector< Table > getTableArrayOr( std::string const & key ) const
 				{
 					std::vector< Table > tables;
@@ -302,7 +312,10 @@ namespace meq
 				{
 				};
 
-				std::string qualify( std::string const & key ) const { return name + "." + key; };
+				/// An empty name is the ROOT document, whose keys qualify to
+				/// themselves -- [[coils]] rather than [[.coils]].
+				std::string qualify( std::string const & key ) const
+				{ return name.empty() ? key : name + "." + key; };
 
 				toml::value const * find( std::string const & key ) const
 				{
@@ -704,7 +717,7 @@ namespace meq
 		// Catch a misspelt or misplaced table before anything reports a key
 		// missing from a table that is not the one the author meant to write.
 		{
-			std::initializer_list< char const * > const tables = { "mesh", "discretisation", "source", "boundary", "solver", "output", "initialguess", "adaptivity" };
+			std::initializer_list< char const * > const tables = { "mesh", "discretisation", "source", "boundary", "solver", "output", "initialguess", "adaptivity", "coils" };
 			for ( auto const & entry : document.as_table() )
 			{
 				auto matches = [ &entry ]( char const * candidate ) { return entry.first == candidate; };
@@ -718,6 +731,78 @@ namespace meq
 				message += " the configuration consists of the tables [" + listOf( tables ) + "]";
 
 				throw ConfigError( sourceName, entry.first, message );
+			}
+		}
+
+		// [[coils]]
+		//
+		// An ARRAY OF TABLES, MEQ's second after [[source.species]], and read
+		// the same way: getTableArrayOr() names its elements "coils[i]" so a
+		// fault in the third one says so rather than reporting a key missing
+		// from a table the author never wrote.
+		//
+		// EMPTY IS LEGAL AND IS THE COMMON CASE. Every fixed-boundary
+		// configuration in examples/ has no coils, so absence is not an error;
+		// what is an error is a coil that cannot be built.
+		{
+			Table const rootTable = Table::root( document, sourceName );
+			std::vector< Table > const blocks = rootTable.getTableArrayOr( "coils" );
+			for ( std::size_t i = 0; i < blocks.size(); ++i )
+			{
+				Table const & one = blocks[ i ];
+				one.rejectUnknownKeys( { "Name", "CentreR", "CentreZ", "HalfWidth",
+				                         "HalfHeight", "Current", "CurrentDensity" } );
+
+				CoilParameters coil;
+				coil.name = one.getStringOr( "Name", "coil" + std::to_string( i ) );
+				coil.centreR = one.getFloat( "CentreR" );
+				coil.centreZ = one.getFloat( "CentreZ" );
+				coil.halfWidth = one.getFloat( "HalfWidth" );
+				coil.halfHeight = one.getFloat( "HalfHeight" );
+
+				if ( !( coil.halfWidth > 0.0 ) )
+					one.fail( "HalfWidth", "must be strictly positive: a coil of zero width has no cross-section to carry a current density over" );
+				if ( !( coil.halfHeight > 0.0 ) )
+					one.fail( "HalfHeight", "must be strictly positive: a coil of zero height has no cross-section to carry a current density over" );
+
+				// THE SAME REFUSAL meq::Coil AND meq::BoundaryShape MAKE, and
+				// for the same reason: the Grad-Shafranov operator carries a
+				// 1/r that is not integrable through r = 0, so a conductor
+				// reaching the axis is not a modelling choice this code can
+				// honour. Caught here as well as there so that the diagnostic
+				// names the coil and the key rather than arriving from a
+				// constructor three layers down.
+				if ( !( coil.centreR - coil.halfWidth > 0.0 ) )
+					one.fail( "CentreR", "the coil reaches or crosses the axis: CentreR - HalfWidth = "
+					          + std::to_string( coil.centreR - coil.halfWidth )
+					          + " and must be strictly positive, because the operator's 1/r is not integrable through r = 0" );
+
+				bool const hasCurrent = one.has( "Current" );
+				bool const hasDensity = one.has( "CurrentDensity" );
+
+				// EXACTLY ONE. Both is refused rather than resolved by
+				// precedence -- an author who writes both has two numbers in
+				// mind, and silently honouring one is how a coil set ends up
+				// carrying a current nobody chose.
+				if ( hasCurrent && hasDensity )
+					one.fail( "Current", "names both Current and CurrentDensity; give exactly one. They are related by the area 4 * HalfWidth * HalfHeight = "
+					          + std::to_string( 4.0*coil.halfWidth*coil.halfHeight )
+					          + " m^2, so writing both says the same thing twice or contradicts itself, and this cannot tell which" );
+				if ( !hasCurrent && !hasDensity )
+					one.fail( "Current", "a coil needs a current: give either Current, the TOTAL through the cross-section in amperes, or CurrentDensity, the uniform j_phi in A/m^2" );
+
+				double const area = 4.0*coil.halfWidth*coil.halfHeight;
+				if ( hasDensity )
+				{
+					coil.densityGiven = true;
+					coil.current = one.getFloat( "CurrentDensity" )*area;
+				}
+				else
+				{
+					coil.current = one.getFloat( "Current" );
+				}
+
+				coilOptions.coils.push_back( coil );
 			}
 		}
 

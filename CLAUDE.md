@@ -5045,6 +5045,48 @@ instrument-not-answer finding in this file — in the one place where it produce
 a false claim about somebody else's code. **All four defects are now closed and
 the report is deletable**; see `CLOSED-REPORTS-FROM-MEQ.md`.
 
+### Meshing beyond `MakeCartesian2D`: gmsh, and it is already here
+
+**FB-6 needs a geometry `mfem::Mesh::MakeCartesian2D` cannot make** — a
+semicircle centred on the axis, because §3's exterior expansion is valid only
+there; reaching `r = 0` exactly, because FB-A says so; with the coil rectangles
+as their own subdomains. Everything MEQ has meshed until now was a rectangle of
+triangles with curved geometry reached by the extension on top.
+
+**The answer is gmsh and it needed no procurement**: MFEM reads its format
+natively (`Mesh::ReadGmshMesh`, no converter), and **gmsh 4.14 is already
+installed on this machine** with its Python API. `tools/mesh/halfdisc.py` is the
+generator, and the round trip is verified rather than assumed:
+
+```
+  elements 781  vertices 424        domain attributes: 1 10 11
+  attr 10:   12 elements   r [0.9000, 1.1500]  z [-0.8600, -0.7400]
+  attr 11:   12 elements   r [0.9000, 1.1500]  z [ 0.7400,  0.8600]
+  boundary attributes: 1 (arc) 2 (axis)
+  minimum r over the mesh: 0.000e+00
+```
+
+**Its physical groups arrive as MFEM attributes**, which is the whole reason it
+is the right tool: one attribute per coil so a source can be restricted to it,
+and *separate* boundary attributes for the arc and the axis — which are not
+interchangeable, `Γ` carrying the transferred exterior datum and the axis a
+plain `ψ = 0`. They are told apart by geometry rather than by tag order, which
+OCC does not promise.
+
+**AND THE COILS ARE MESHED TO RATHER THAN CUT**, which is §7.9's finding applied
+rather than a convenience: a conductor's geometry is **prescribed input** and
+does not move with the solution, so it can always be aligned to — and aligning
+it took the measured rates from 1.33/1.27/1.09 to **1.99/2.88/3.01**. Only the
+plasma support genuinely moves, and FB-4 measures what that costs.
+`occ.fragment` is what makes the coil edges mesh edges.
+
+**What was NOT chosen, and why the survey was short.** Triangle is 2D-only and
+has no subdomain tagging worth the name; CGAL's `Mesh_2` is a large dependency
+for a 2D job; MMG is a re-mesher rather than a generator and would sit *after*
+this rather than instead of it — worth revisiting if FB-5's adaptivity ever
+wants to move the geometry between cycles. Gmsh reads a `.geo` script, drives
+from Python or C++, and is what MFEM's own examples assume.
+
 ### FB-6's test problem: no reproducible ITER case, and the profile that is
 
 **Searched 2026-09-06; the record is `FREE-BOUNDARY-PLAN.md` §7.11.**
@@ -5435,7 +5477,11 @@ tests/       unit/ (Boost.Test), convergence/ (rate assertions),
              the loop AssemblyMode::Threaded now spends most of its time in)
 tools/       plotting and visualisation. plot_equilibrium.py reads the
              NetCDF; tools/README.md says which of the three output formats
-             goes with which reader, and why they are not interchangeable
+             goes with which reader, and why they are not interchangeable.
+             freegs4e-benchmark/ is the independent-code comparison.
+             mesh/halfdisc.py is FB-6's geometry: a semicircle reaching the
+             axis with rectangular coils MESHED TO, written against gmsh's
+             python API. See *Meshing beyond MakeCartesian2D*
 examples/    TOML run configurations
 refs/        Refs.md is tracked; the PDFs are gitignored, fetch by doi
 attic/       free-boundary/ -- not ported, not built, kept visible; its own

@@ -436,8 +436,18 @@ BOOST_AUTO_TEST_CASE( unknown_key_is_rejected )
 	BOOST_CHECK_EXCEPTION( parse( minimal() + "\n[output]\nPsiResolution = 0.01\n" ), ConfigError,
 		[]( ConfigError const & e ) { return e.getKey() == "output.PsiResolution" && mentions( e, "accepted keys" ); } );
 
+	// A TABLE THAT IS NOT PART OF THE SCHEMA. This used to be spelled
+	// [coils], and [[coils]] is part of the schema as of FB-6 -- so the test
+	// started failing the day it was added, which is the suite doing its job.
+	// The example is now a name nothing is likely to claim.
+	BOOST_CHECK_EXCEPTION( parse( minimal() + "\n[windings]\nR = 1.0\n" ), ConfigError,
+		[]( ConfigError const & e ) { return e.getKey() == "windings" && mentions( e, "schema" ); } );
+
+	// And [coils] written as a plain table rather than an array of tables is
+	// caught too -- it IS in the schema now, so it reaches the array check
+	// rather than the table-name one.
 	BOOST_CHECK_EXCEPTION( parse( minimal() + "\n[coils]\nR = 1.0\n" ), ConfigError,
-		[]( ConfigError const & e ) { return e.getKey() == "coils" && mentions( e, "schema" ); } );
+		[]( ConfigError const & e ) { return e.getKey() == "coils"; } );
 
 	// A key belonging to a different source than the one selected.
 	BOOST_CHECK_EXCEPTION( parse( minimal() + "Kr = 3.6\n" ), ConfigError,
@@ -1808,4 +1818,151 @@ BOOST_AUTO_TEST_CASE( initialGuessAndAdaptivityParse )
 		meq::ConfigError );
 
 	std::remove( "config-test-driver-sections.toml" );
+}
+
+/*
+ * ============================================================================
+ * [[coils]] -- FB-6's configuration half
+ * ============================================================================
+ *
+ * FREE-BOUNDARY-PLAN.md section 5.4 calls the coils "ordinary": coil currents
+ * are data, and the source adds F_coil = mu0 r I_k / |Omega_ck| on each coil
+ * subdomain. meq::Coil has been the library half since FB-2 and is measured;
+ * this is the file half.
+ *
+ * MEQ's SECOND array of tables, after [[source.species]], and the first at the
+ * TOP LEVEL -- which is why Table gained a root() factory. Its elements are
+ * named "coils[i]", so a fault in the third block says so.
+ */
+BOOST_AUTO_TEST_CASE( coils_are_given_a_total_current_or_a_uniform_density )
+{
+	auto const withCoil = []( std::string const & body )
+	{
+		return withSource( "[source]\nType = \"soloviev\"\nA = 0.5\n\n"
+		                   "[boundary]\nType = \"zero\"\n\n"
+		                   "[[coils]]\n" + body );
+	};
+
+	// The TOTAL current, in amperes.
+	{
+		Configuration const c = parse( withCoil( "Name = \"PF1\"\n"
+		                                  "CentreR = 1.6\nCentreZ = 0.8\n"
+		                                  "HalfWidth = 0.1\nHalfHeight = 0.05\n"
+		                                  "Current = 1.25e6\n" ) );
+		BOOST_TEST_REQUIRE( c.getCoils().coils.size() == 1u );
+		meq::CoilParameters const & coil = c.getCoils().coils.front();
+		BOOST_TEST( coil.name == "PF1" );
+		BOOST_TEST( coil.centreR == 1.6 );
+		BOOST_TEST( coil.current == 1.25e6 );
+		BOOST_TEST( coil.densityGiven == false );
+	}
+
+	// THE DENSITY, RESOLVED THROUGH THE AREA. 4 * 0.1 * 0.05 = 0.02 m^2, so
+	// 5e7 A/m^2 is 1e6 A.
+	//
+	// TO A TIGHT RELATIVE TOLERANCE AND NOT EXACTLY, and the first version of
+	// this asserted equality on the grounds that "it is one multiplication".
+	// It is not: floating-point multiplication does not associate, and the
+	// parse computes area = 4*hw*hh and then density*area where the assertion
+	// wrote density*4*hw*hh left to right. Those differ in the last bit --
+	// 1000000.0000000002 against 1000000 -- so an exact test would have been a
+	// test of the code's ASSOCIATION ORDER, which is not the property wanted.
+	// The property wanted is the area, and a wrong area is wrong by a factor,
+	// not by an ulp.
+	{
+		Configuration const c = parse( withCoil( "CentreR = 1.6\nCentreZ = 0.8\n"
+		                                  "HalfWidth = 0.1\nHalfHeight = 0.05\n"
+		                                  "CurrentDensity = 5.0e7\n" ) );
+		meq::CoilParameters const & coil = c.getCoils().coils.front();
+		double const expected = 5.0e7*4.0*0.1*0.05;
+		BOOST_TEST( std::fabs( coil.current - expected )
+		            < 1.0e-14*std::fabs( expected ) );
+		BOOST_TEST( coil.densityGiven == true );
+		// Unnamed blocks get a positional name, so a diagnostic can still say
+		// which one.
+		BOOST_TEST( coil.name == "coil0" );
+	}
+
+	// NEITHER, and BOTH, are refused. Both is the interesting one: an author
+	// who writes both has two numbers in mind, and honouring one by precedence
+	// is how a coil set ends up carrying a current nobody chose.
+	auto const refuses = []( std::string const & text, std::string const & key )
+	{
+		BOOST_CHECK_EXCEPTION( parse( text ), ConfigError,
+			[&]( ConfigError const & e ) { return e.getKey() == key; } );
+	};
+
+	refuses( withCoil( "CentreR = 1.6\nCentreZ = 0.8\n"
+	                   "HalfWidth = 0.1\nHalfHeight = 0.05\n" ), "coils[0].Current" );
+	refuses( withCoil( "CentreR = 1.6\nCentreZ = 0.8\n"
+	                   "HalfWidth = 0.1\nHalfHeight = 0.05\n"
+	                   "Current = 1.0e6\nCurrentDensity = 5.0e7\n" ), "coils[0].Current" );
+}
+
+/// A coil that reaches the axis is refused HERE as well as in meq::Coil, and
+/// the reason is the operator rather than the class: Grad-Shafranov carries a
+/// 1/r that is not integrable through r = 0. meq::BoundaryShape makes the same
+/// refusal. Catching it at the parse means the diagnostic names the coil and
+/// the key instead of arriving from a constructor three layers down.
+BOOST_AUTO_TEST_CASE( a_coil_may_not_reach_the_axis_or_be_degenerate )
+{
+	auto const withCoil = []( std::string const & body )
+	{
+		return withSource( "[source]\nType = \"soloviev\"\nA = 0.5\n\n"
+		                   "[boundary]\nType = \"zero\"\n\n"
+		                   "[[coils]]\n" + body + "Current = 1.0e6\n" );
+	};
+	auto const refuses = []( std::string const & text, std::string const & key )
+	{
+		BOOST_CHECK_EXCEPTION( parse( text ), ConfigError,
+			[&]( ConfigError const & e ) { return e.getKey() == key; } );
+	};
+
+	// Straddling the axis, and touching it exactly.
+	refuses( withCoil( "CentreR = 0.05\nCentreZ = 0.0\n"
+	                   "HalfWidth = 0.1\nHalfHeight = 0.05\n" ), "coils[0].CentreR" );
+	refuses( withCoil( "CentreR = 0.1\nCentreZ = 0.0\n"
+	                   "HalfWidth = 0.1\nHalfHeight = 0.05\n" ), "coils[0].CentreR" );
+
+	// A cross-section with no area cannot carry a current density.
+	refuses( withCoil( "CentreR = 1.6\nCentreZ = 0.0\n"
+	                   "HalfWidth = 0.0\nHalfHeight = 0.05\n" ), "coils[0].HalfWidth" );
+	refuses( withCoil( "CentreR = 1.6\nCentreZ = 0.0\n"
+	                   "HalfWidth = 0.1\nHalfHeight = -0.05\n" ), "coils[0].HalfHeight" );
+
+	// A misspelt key names its own block, which is the whole reason the
+	// elements are named rather than numbered in the message.
+	refuses( withCoil( "CentreR = 1.6\nCentreZ = 0.0\n"
+	                   "HalfWidth = 0.1\nHalfHeight = 0.05\nCurrentDensty = 1.0\n" ),
+	         "coils[0].CurrentDensty" );
+}
+
+/// NO COILS IS THE COMMON CASE AND IS NOT AN ERROR. Every fixed-boundary
+/// configuration in examples/ has none, so absence has to parse; what must not
+/// is a coil that cannot be built.
+BOOST_AUTO_TEST_CASE( a_configuration_without_coils_has_an_empty_coil_set )
+{
+	Configuration const c = parse( withSource( "[source]\nType = \"soloviev\"\nA = 0.5\n\n"
+	                                    "[boundary]\nType = \"zero\"\n" ) );
+	BOOST_TEST( c.getCoils().coils.empty() );
+}
+
+/// Several blocks, in file order, which is what a machine is.
+BOOST_AUTO_TEST_CASE( the_coil_set_keeps_the_order_the_file_gives )
+{
+	Configuration const c = parse( withSource(
+		"[source]\nType = \"soloviev\"\nA = 0.5\n\n"
+		"[boundary]\nType = \"zero\"\n\n"
+		"[[coils]]\nName = \"upper\"\nCentreR = 1.6\nCentreZ = 0.8\n"
+		"HalfWidth = 0.1\nHalfHeight = 0.05\nCurrent = 1.0e6\n\n"
+		"[[coils]]\nName = \"lower\"\nCentreR = 1.6\nCentreZ = -0.8\n"
+		"HalfWidth = 0.1\nHalfHeight = 0.05\nCurrent = -1.0e6\n" ) );
+
+	BOOST_TEST_REQUIRE( c.getCoils().coils.size() == 2u );
+	BOOST_TEST( c.getCoils().coils[ 0 ].name == "upper" );
+	BOOST_TEST( c.getCoils().coils[ 1 ].name == "lower" );
+	BOOST_TEST( c.getCoils().coils[ 1 ].centreZ == -0.8 );
+	// Signed, and zero is allowed: a coil set with a coil switched off is a
+	// perfectly ordinary machine state.
+	BOOST_TEST( c.getCoils().coils[ 1 ].current == -1.0e6 );
 }

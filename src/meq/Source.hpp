@@ -232,8 +232,82 @@ namespace meq
 			/// The axis value the next f() and dFdPsi() will use.
 			virtual double normalisation() const = 0;
 
+			/**
+			 * CONFINE THE SOURCE TO THE PLASMA, which is what makes the support
+			 * MOVE with the solution and is the whole of FB-4's
+			 * `chi_{Omega_p( psi )}`.
+			 *
+			 * The plasma is where the normalised flux is positive,
+			 * `Psi = ( psi - psi_bnd )/( psi_ax - psi_bnd ) > 0`, and outside it
+			 * `F` and `dF/dpsi` are ZERO. That is all the moving support needs
+			 * from a source: nothing here knows where the boundary is, and the
+			 * boundary is not an input -- it is wherever `psi` currently puts
+			 * it, so it moves as Newton moves and converges as `psi` converges.
+			 *
+			 * **OFF BY DEFAULT**, so every fixed-boundary caller is untouched.
+			 * There the domain IS the plasma, `Psi > 0` throughout by
+			 * construction, and switching this on would change nothing except
+			 * to put a branch in the inner loop.
+			 *
+			 * **AND IT IS THE POINTWISE TEST, NOT A CONNECTIVITY ONE.**
+			 * `{ Psi > 0 }` can pick up private-flux regions beyond an X-point
+			 * and pockets near the coils, which are not the plasma;
+			 * FREE-BOUNDARY-PLAN.md section 5.3 records that CEDRES++ needs a
+			 * connectivity test for exactly this and that
+			 * meq::CriticalPointFinder is what would make one cheap. Until that
+			 * exists this is a limiter plasma's support, and a diverted one's
+			 * only while the search region excludes the private flux.
+			 *
+			 * **A PRECONDITION, MEASURED RATHER THAN ASSUMED.** The profiles
+			 * must vanish at the plasma edge -- `p'( 0 ) = 0` -- or Newton does
+			 * not converge at all. With `p'( 0 ) != 0` the source JUMPS across
+			 * the edge, so the assembled residual is discontinuous in the
+			 * unknowns and there is no Jacobian to iterate with: measured, it
+			 * fails at every degree and every mesh, from the exact solution, and
+			 * under PicardThenNewton. See CLAUDE.md's *At j = 0 the question
+			 * does not arise*.
+			 */
+			void setPlasmaSupport( bool confined )
+			{
+				confinedToPlasma = confined;
+			}
+
+			/// Whether setPlasmaSupport() is on.
+			bool plasmaSupport() const
+			{
+				return confinedToPlasma;
+			}
+
+			/**
+			 * True where the plasma is: `Psi > 0`, with `Psi` built from the
+			 * normalisation the source currently carries.
+			 *
+			 * Always true when setPlasmaSupport() is off, so a subclass may call
+			 * it unconditionally and a fixed-boundary solve pays one comparison.
+			 *
+			 * THE SIGN OF THE SPAN IS NOT ASSUMED. `psi_ax - psi_bnd` is
+			 * negative wherever `F` is single-signed negative -- every Solov'ev
+			 * fixture in this tree has its magnetic axis at an interior MINIMUM,
+			 * which CriticalPoints.hpp records as the reason findAxis() seeds
+			 * from both nodal extremes. So the test is on the PRODUCT rather
+			 * than on the difference, and it is the same test either way round.
+			 */
+			bool insidePlasma( double psi ) const
+			{
+				if ( !confinedToPlasma )
+					return true;
+				double const span = normalisation() - boundaryNormalisation();
+				return ( psi - boundaryNormalisation() )*span > 0.0;
+			}
+
 			/// And the boundary value; zero unless it has been set.
 			virtual double boundaryNormalisation() const = 0;
+
+		private:
+			/// setPlasmaSupport(). Off by default; see it for why.
+			bool confinedToPlasma = false;
+
+		public:
 
 		protected:
 			NormalisedSource() = default;

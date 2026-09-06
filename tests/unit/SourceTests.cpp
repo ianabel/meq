@@ -682,3 +682,90 @@ BOOST_AUTO_TEST_CASE( the_boundary_flux_enters_only_through_the_span )
 	                   std::invalid_argument );
 	BOOST_CHECK_NO_THROW( shifted.setNormalisation( 0.0, -0.3 ) );
 }
+
+/*
+ * ============================================================================
+ * THE MOVING PLASMA SUPPORT
+ * ============================================================================
+ *
+ * FB-4. Free boundary multiplies the source by chi_{Omega_p( psi )}, and the
+ * whole of what a SOURCE has to do about that is return zero outside the range
+ * of psi the plasma occupies. Nothing here knows where the boundary is; the
+ * boundary is wherever psi currently puts it, so the support moves as Newton
+ * moves and converges as psi converges.
+ */
+BOOST_AUTO_TEST_CASE( the_plasma_support_switches_the_source_off_outside_it )
+{
+	// A CONSTANT profile, deliberately: it does NOT vanish at the edge, so
+	// every zero below is the support switching the source off and not the
+	// profile happening to be small there. A vanishing profile would make the
+	// test pass whether the guard worked or not.
+	double const psiAx = 0.8, psiBnd = 0.1;
+	meq::NormalisedMHDSource source( std::make_shared<meq::ConstantProfile>( 3.0 ),
+	                                 std::make_shared<meq::ConstantProfile>( -1.0 ),
+	                                 psiAx );
+	source.setNormalisation( psiAx, psiBnd );
+
+	double const r = 1.2, z = 0.0;
+
+	// OFF BY DEFAULT: every fixed-boundary caller is untouched, and the source
+	// is whatever the profiles say at any psi at all.
+	BOOST_TEST( source.plasmaSupport() == false );
+	double const outsideBefore = source.f( r, z, psiBnd - 0.3 );
+	BOOST_TEST( outsideBefore != 0.0 );
+
+	source.setPlasmaSupport( true );
+	BOOST_TEST( source.plasmaSupport() == true );
+
+	// INSIDE, nothing changed -- bit for bit, because the guard is a branch and
+	// not a factor. A tolerance here would let a stray multiplication through.
+	for ( double psi : { 0.15, 0.4, 0.8, 1.2 } )
+	{
+		source.setPlasmaSupport( false );
+		double const bare = source.f( r, z, psi );
+		double const bareD = source.dFdPsi( r, z, psi );
+		source.setPlasmaSupport( true );
+		BOOST_TEST( source.f( r, z, psi ) == bare );
+		BOOST_TEST( source.dFdPsi( r, z, psi ) == bareD );
+	}
+
+	// OUTSIDE, exactly zero -- both the source and its derivative.
+	for ( double psi : { psiBnd - 1.0e-12, psiBnd - 0.3, -5.0 } )
+	{
+		BOOST_TEST( source.f( r, z, psi ) == 0.0 );
+		BOOST_TEST( source.dFdPsi( r, z, psi ) == 0.0 );
+	}
+
+	// AND ON THE EDGE ITSELF the source is off, which is the right side of the
+	// half-open interval to take: Psi = 0 IS the boundary and the plasma is
+	// Psi > 0. It shows here only because this profile is constant; with the
+	// vanishing profile setPlasmaSupport() requires, both sides give zero and
+	// the choice of side stops mattering.
+	BOOST_TEST( source.f( r, z, psiBnd ) == 0.0 );
+}
+
+/// THE SIGN OF THE SPAN IS NOT ASSUMED, and it must not be: every Solov'ev
+/// fixture in this tree has F single-signed NEGATIVE, so psi is a subsolution
+/// and the magnetic axis is an interior MINIMUM -- psi_ax < psi_bnd.
+/// CriticalPoints.hpp records the same thing as the reason findAxis() seeds
+/// from both nodal extremes. A support written as psi > psi_bnd would be
+/// exactly inverted there, switching the source off inside the plasma and on
+/// outside it.
+BOOST_AUTO_TEST_CASE( the_plasma_support_does_not_assume_which_way_psi_runs )
+{
+	meq::NormalisedMHDSource source( std::make_shared<meq::ConstantProfile>( 3.0 ),
+	                                 std::make_shared<meq::ConstantProfile>( -1.0 ), 0.8 );
+	source.setPlasmaSupport( true );
+
+	double const r = 1.2, z = 0.0;
+
+	// Axis ABOVE the boundary, the ordinary orientation.
+	source.setNormalisation( 0.8, 0.1 );
+	BOOST_TEST( source.f( r, z, 0.4 ) != 0.0 );    // between them: plasma
+	BOOST_TEST( source.f( r, z, -0.2 ) == 0.0 );   // beyond the boundary: not
+
+	// Axis BELOW the boundary, which is what a negative F gives.
+	source.setNormalisation( -0.8, -0.1 );
+	BOOST_TEST( source.f( r, z, -0.4 ) != 0.0 );   // between them: plasma
+	BOOST_TEST( source.f( r, z, 0.2 ) == 0.0 );    // beyond the boundary: not
+}

@@ -347,6 +347,59 @@ namespace meq
 	// Parameters as written; meq::BoundaryShape is what validates them, since
 	// star-shapedness is a property of the curve rather than of any one number.
 	// Miller is converted to MXH on construction -- see BoundaryShape.hpp.
+	/**
+	 * ONE RECTANGULAR-CROSS-SECTION COIL CARRYING A UNIFORM CURRENT DENSITY.
+	 *
+	 * FB-6, and section 5.4 of FREE-BOUNDARY-PLAN.md calls the coils "ordinary"
+	 * -- coil currents are data, and the source adds
+	 * `F_coil = mu0 r I_k / |Omega_ck|` on each coil subdomain. This is the
+	 * configuration half of that; `meq::Coil` is the library half and has been
+	 * measured since FB-2.
+	 *
+	 * **THE CURRENT MAY BE GIVEN EITHER WAY AND EXACTLY ONE MUST BE.** `Current`
+	 * is the TOTAL through the cross-section in amperes; `CurrentDensity` is the
+	 * uniform `j_phi` in A/m^2, and the two are related by the area
+	 * `4 * HalfWidth * HalfHeight`. Naming both is refused rather than resolved
+	 * by precedence: an author who writes both has two numbers in mind and
+	 * silently honouring one of them is how a coil set ends up carrying a
+	 * current nobody chose. Naming neither is refused for the same reason.
+	 *
+	 * The parse resolves whichever was given to a total current, because that is
+	 * what meq::Coil takes; `densityGiven` records which the author wrote, so a
+	 * diagnostic can quote it back in the units it arrived in.
+	 */
+	struct CoilParameters
+	{
+		/// For diagnostics. Defaults to "coil<i>" if the file does not name it.
+		std::string name;
+
+		/// The centre, in metres.
+		double centreR = 0.0;
+		double centreZ = 0.0;
+
+		/// Half-extents, in metres. Strictly positive, and
+		/// `centreR - halfWidth` must be strictly positive too: a coil reaching
+		/// the axis is refused, because the operator's 1/r is not integrable
+		/// through r = 0. Same refusal meq::Coil and meq::BoundaryShape make.
+		double halfWidth = 0.0;
+		double halfHeight = 0.0;
+
+		/// The TOTAL current through the cross-section, in amperes. Signed.
+		/// Resolved at parse time from whichever of Current / CurrentDensity
+		/// the file gave.
+		double current = 0.0;
+
+		/// True if the file wrote CurrentDensity rather than Current.
+		bool densityGiven = false;
+	};
+
+	/// The coil set, as a sequence of `[[coils]]` blocks. Empty is legal and is
+	/// what every fixed-boundary configuration has.
+	struct CoilConfig
+	{
+		std::vector< CoilParameters > coils;
+	};
+
 	struct ShapeConfig
 	{
 		ShapeType type = ShapeType::None;
@@ -579,6 +632,10 @@ namespace meq
 			static Configuration fromString( std::string const & text, std::string const & source = "<string>" );
 
 			MeshConfig const & getMesh() const noexcept { return meshOptions; };
+
+			/// The `[[coils]]` blocks, in file order. Empty unless the file has
+			/// any, which every fixed-boundary configuration does not.
+			CoilConfig const & getCoils() const noexcept { return coilOptions; };
 			DiscretisationConfig const & getDiscretisation() const noexcept { return discretisationOptions; };
 			SourceConfig const & getSource() const noexcept { return sourceOptions; };
 			BoundaryConfig const & getBoundary() const noexcept { return boundaryOptions; };
@@ -599,6 +656,7 @@ namespace meq
 			std::string sourceName;
 
 			MeshConfig meshOptions;
+			CoilConfig coilOptions;
 			DiscretisationConfig discretisationOptions;
 			SourceConfig sourceOptions;
 			BoundaryConfig boundaryOptions;
