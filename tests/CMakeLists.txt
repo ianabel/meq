@@ -158,7 +158,13 @@ set(MEQ_CONVERGENCE_TESTS
 	# Gamma_h. It needs a curved boundary and so needs MFEM, which is why it is
 	# a convergence test rather than a unit one -- ExteriorDtN's own tests, which
 	# CI can run, stop at the operator.
-	FreeBoundaryCoupling)
+	FreeBoundaryCoupling
+	# FB-4: what the plasma edge costs the order. The source stops dead on a
+	# curve no mesh line follows and that moves while Newton runs, and the
+	# answer is that the PROFILE decides the rate rather than the quadrature --
+	# psi* keeps k+2 exactly when p' vanishes at the edge to order j >= k. It
+	# also carries the measurement that says why no cut quadrature was built.
+	PlasmaEdgeConvergence)
 
 # DriverAcceptance is registered separately below: it runs the meq BINARY rather
 # than linking the library, so it needs the app to have been built and needs the
