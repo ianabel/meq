@@ -194,3 +194,94 @@ by argument: evaluating MEQ's tables on the reference's own ψ reproduces
 freegs4e's `μ₀ R J_φ` to **2.3e-05**. `CLAUDE.md` records the same multiplicity
 from inside MEQ — three solve routes reaching discrete solutions 9.4% apart on
 an under-resolved mesh.
+
+## Refining the reference, 2026-09-06 — and what actually limits it
+
+This file has said since it was written that **MEQ saturates this benchmark**:
+its error stops falling at about 1.4e-04 because that is the *reference's* own
+accuracy, and that the next work here is to refine the reference rather than
+MEQ. That is now measured, and it is right — with numbers, and with three
+findings about `freegs4e` that were not expected.
+
+`fgsref.py` grew three flags for it: `--nx=N` (every case on an `N x N` grid,
+rounded up to `2^k + 1` so the ladder nests point for point), `--hagenow` and
+`--vcycle=L`. `ladder.sh` drives the sweep and records wall clock, peak resident
+memory and the Picard count at each level.
+
+### Refining the reference works, and it works through the boundary fit
+
+Case A, the reference's grid refined and MEQ rerun against it unchanged:
+
+| reference grid | MXH shape fit | MEQ rel `L2` | MEQ rel `Linf` |
+|---|---|---|---|
+| 129² | 2.060e-04 m | **1.519e-04** | 5.403e-04 |
+| 257² | 1.063e-04 m | **6.751e-05** | 3.140e-04 |
+| | **1.94x** | **2.25x** | 1.72x |
+
+**MEQ's error tracks the shape fit**, 2.25x against 1.94x. So the saturation was
+never MEQ's: the LCFS handed to MEQ is a fit to a contour extracted from the
+reference's grid, the contour improves like `h`, and the fit and the answer
+improve with it. Extrapolated, 513² is about 3e-05 and 2049² about 8e-06 —
+**an order of magnitude, not round-off.** Grid refinement alone cannot reach
+round-off here because the fit improves only linearly and is in the budget at
+all *because this is the fixed-boundary rehearsal*. **FB-6 proper removes it**:
+a free-boundary MEQ takes the same coils and profiles and never sees an LCFS.
+
+### `freegs4e`'s cost is its boundary condition, not its solve
+
+| grid | default boundary | von Hagenow | peak RSS (Hagenow) |
+|---|---|---|---|
+| 129² | ~85 s | **29 s** | 293 MB |
+| 257² | **656 s** | **71 s** | 503 MB |
+| 513² | (hours) | **230 s** | 1564 MB |
+
+`Equilibrium.__init__` takes `boundary=freeBoundary`, whose own docstring calls
+it *"an integral over the area of the domain for each point"*: it loops the `4n`
+boundary points and evaluates `Greens` over the whole `n²` grid for each. That
+is **`O(n³)` per Picard step**, and it is the 7.7x for a fourfold rise in
+unknowns. `boundary.freeBoundaryHagenow` is in the same file, is the method this
+benchmark's own description credits `freegs4e` with, is **`O(n²)`**, and is not
+the default.
+
+**The linear solve is not the cost, and the multigrid is switched off anyway.**
+`Equilibrium.__init__` calls `multigrid.createVcycle( ..., nlevels=1, ... )`,
+and at one level a V-cycle is a direct sparse solve on the full grid. Two traps
+beside it: `setSolverVcycle()` hard-codes `GSsparse`, the **second**-order
+generator, and ignores `Equilibrium.order` — so calling it on a 4th-order
+equilibrium silently solves a different problem; and a V-cycle built correctly
+on the 4th-order generator **does not converge at all**, failing with
+`ValueError: No opoints found!`. The multigrid path is second order only.
+
+### AND THE TWO BOUNDARY CONDITIONS DISAGREE, FLAT UNDER REFINEMENT
+
+This is the finding that matters, and it is why the fast one was not simply
+adopted. Case A, the same equilibrium computed both ways:
+
+| grid | rel. difference in `ψ_ax` | rel. difference in the field |
+|---|---|---|
+| 129² | 6.460e-04 | 3.201e-03 |
+| 257² | 6.404e-04 | 3.147e-03 |
+
+**It does not shrink.** A discretisation difference falls by 4x or 16x per
+level; this falls by 1.7 per cent. Self-convergence says which one is right:
+
+| | 129² → 257² | 257² → 513² |
+|---|---|---|
+| default boundary | **2.78e-05** | — |
+| von Hagenow | 3.64e-04 | 1.22e-04 |
+
+The default is **converged at 129²** — `ψ_ax` stable to six figures — while von
+Hagenow creeps at about `O(h^1.6)` toward a different value. So **the default is
+the reference to use**, `freegs4e` does not agree with itself to better than
+3.2e-03 across its own two boundary conditions, and MEQ's agreement with it is
+already twenty times inside that spread.
+
+### 2048² is not reachable on this machine, and why
+
+Memory. The von Hagenow ladder runs 293, 503, 1564 MB at 129², 257², 513²;
+1025² reached **6.0 GB** with 4 GB free and was stopped rather than risk an OOM
+on a shared machine. 2049² needs roughly 24 GB against 15 GB total. With the
+*faithful* boundary condition it would additionally be about ninety hours.
+
+**So the honest ceiling here is 513², and the route to round-off is FB-6 rather
+than a finer grid.**

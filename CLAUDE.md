@@ -5193,6 +5193,55 @@ the accuracy-per-dof result below must not be read as a statement about `k+1`.
 are different measurements on purpose. Comparing `ψ_h` would need the `.gf`
 route, which is a second reason to want pyMFEM.
 
+**THE SATURATION WAS THE REFERENCE'S AND IT IS THE BOUNDARY FIT, MEASURED
+2026-09-06.** This file has said since it was written that MEQ saturates the
+benchmark and that the next work is to refine the reference. Now measured, on
+case A, by refining the reference grid and rerunning MEQ unchanged:
+
+| reference | MXH shape fit | MEQ rel `L2` | rel `L∞` |
+|---|---|---|---|
+| 129² | 2.060e-04 m | **1.519e-04** | 5.403e-04 |
+| 257² | 1.063e-04 m | **6.751e-05** | 3.140e-04 |
+| | 1.94× | **2.25×** | 1.72× |
+
+**MEQ's error tracks the shape fit.** The LCFS handed to MEQ is a fit to a
+contour extracted from the reference's grid; the contour improves like `h`, and
+the answer improves with it. Extrapolated, 2049² would reach about **8e-06** —
+an order of magnitude, **not round-off**. Grid refinement alone cannot get
+there, because the fit is linear in `h` and is in the budget at all *only
+because this is the fixed-boundary rehearsal*. **FB-6 removes it entirely**: a
+free-boundary MEQ takes the same coils and profiles and never sees an LCFS.
+
+**AND 2048² IS NOT REACHABLE ON THIS MACHINE.** The reference at 1025² reached
+**6.0 GB** with 4 GB free and was stopped rather than risk an OOM on a machine
+another agent is building on; 2049² needs roughly 24 GB against 15 GB total.
+The honest ceiling is 513².
+
+**FOUR THINGS ABOUT `freegs4e` CAME OUT OF THE ATTEMPT.**
+
+* **Its cost is the boundary condition, not the solve.**
+  `Equilibrium.__init__` takes `boundary=freeBoundary`, whose own docstring
+  calls it *"an integral over the area of the domain for each point"* — it loops
+  the `4n` boundary points and evaluates `Greens` over the whole `n²` grid for
+  each, so it is **`O(n³)` per Picard step**. Measured 85 s at 129² against
+  **656 s** at 257², which is `2³` and not `2²`.
+  `boundary.freeBoundaryHagenow` is in the same file, is `O(n²)`, runs 29 / 71 /
+  230 s at 129² / 257² / 513², and is not the default.
+* **The multigrid is built and switched off.** `createVcycle( …, nlevels=1, … )`
+  — at one level a V-cycle is a direct sparse solve on the full grid.
+* **`setSolverVcycle()` hard-codes the SECOND-order generator** and ignores
+  `Equilibrium.order`, so calling it on a 4th-order equilibrium silently solves a
+  different problem. A V-cycle built correctly on the 4th-order generator does
+  not converge at all — `ValueError: No opoints found!`.
+* **ITS TWO BOUNDARY CONDITIONS DISAGREE BY 3.2e-03 AND THE GAP IS FLAT.**
+  6.460e-04 relative in `ψ_ax` at 129², 6.404e-04 at 257². A discretisation
+  difference falls 4× or 16× a level; this falls 1.7%. Self-convergence says
+  which is right: the default is **converged at 129²** (self-difference
+  2.78e-05, `ψ_ax` stable to six figures) while von Hagenow creeps at about
+  `O(h^1.6)` toward a different value. **So the default is the reference to use,
+  `freegs4e` does not agree with itself to better than 3.2e-03 across its own
+  two boundary conditions, and MEQ sits twenty times inside that spread.**
+
 **COST, AND THE ONLY COLUMN THAT MEANS ANYTHING IS ACCURACY PER UNKNOWN.** A
 wall-clock ratio is not a statement about either code: freegs4e converges a
 FREE-boundary equilibrium — coil Green's functions, X-point finding, a control

@@ -35,6 +35,50 @@ from freegs4e import machine, jtor, equilibrium, control, critical
 from freegs4e.gradshafranov import GSElliptic, GSsparse4thOrder, mu0
 
 OUTDIR = os.path.dirname(os.path.abspath(__file__))
+
+# Multigrid levels for the linear solve, or None for freegs4e's own default.
+#
+# ITS DEFAULT IS nlevels = 1, WHICH IS NOT MULTIGRID AT ALL.
+# Equilibrium.__init__ calls multigrid.createVcycle( ..., nlevels=1, ncycle=1,
+# niter=2, direct=True ), and at one level a V-cycle is a direct sparse solve on
+# the full grid.  The whole hierarchy is built and switched off.  Measured on
+# case A: 85 s at 129^2 against 656 s at 257^2, a factor of 7.7 for a fourfold
+# rise in unknowns -- which is the n^3 of a 2D sparse LU and not the n^2 of a
+# V-cycle.  Extrapolated, 2049^2 is days and tens of gigabytes.
+#
+# AND setSolverVcycle() IS NOT THE WAY TO TURN IT ON, which is a trap rather
+# than an inconvenience: it hard-codes GSsparse -- the SECOND-order operator --
+# and ignores Equilibrium.order, so calling it on a 4th-order equilibrium
+# silently solves a different problem.  This builds the V-cycle directly on the
+# generator the case actually asked for.
+VCYCLE_LEVELS = None
+
+# Use freegs4e's von Hagenow free-boundary condition instead of its default.
+#
+# ITS DEFAULT IS THE NAIVE ONE AND THAT IS WHAT COSTS THE REFINEMENT.
+# Equilibrium.__init__ takes boundary=freeBoundary, whose own docstring calls it
+# "an integral over the area of the domain for each point": it loops over the
+# 4n boundary points and, for each, evaluates Greens over the whole n^2 grid.
+# That is O( n^3 ) PER PICARD STEP, in numpy, and it is what makes the reference
+# cost 7.7x for a fourfold rise in unknowns -- not the linear solve, which is a
+# sparse LU factorised once.
+#
+# boundary.freeBoundaryHagenow is in the same file, is the method the paper this
+# benchmark cites is built on, and is O( n^2 ) -- boundary work only.  It is not
+# the default and nothing points at it.
+HAGENOW = False
+
+
+def install_vcycle(eq, order, levels):
+    """A V-cycle on the generator matching @a order, which is what
+    Equilibrium.setSolverVcycle does not do."""
+    from freegs4e import multigrid
+    from freegs4e.gradshafranov import GSsparse, GSsparse4thOrder
+    gen = (GSsparse4thOrder if order == 4 else GSsparse)(
+        eq.Rmin, eq.Rmax, eq.Zmin, eq.Zmax)
+    eq._solver = multigrid.createVcycle(
+        eq.nx, eq.ny, gen, nlevels=levels, ncycle=2, niter=20, direct=True)
+    return gen
 NPSI = 256
 RTOL = 1.0e-9      # Picard: relative change in psi
 MAXITS = 400
@@ -539,6 +583,14 @@ def run_case(case):
 
     tok = case["make"]()
     eq = build_eq(case, tok)
+    if HAGENOW:
+        from freegs4e import boundary as _bnd
+        eq._applyBoundary = _bnd.freeBoundaryHagenow
+        print("   von Hagenow boundary condition installed", flush=True)
+    if VCYCLE_LEVELS:
+        install_vcycle(eq, int(case["order"]), VCYCLE_LEVELS)
+        print("   V-cycle installed: %d levels on the order-%d generator"
+              % (VCYCLE_LEVELS, int(case["order"])), flush=True)
     ctrl = SyncConstrain(xpoints=case["xpoints"], isoflux=case["isoflux"],
                          gamma=1e-12)
 
@@ -862,7 +914,56 @@ def run_case(case):
 
 
 def main():
-    only = [a for a in sys.argv[1:]]
+    argv = list(sys.argv[1:])
+
+    # RESOLUTION OVERRIDE, so the reference can be refined without editing the
+    # case table.  --nx=N sets every case's grid to N x N.
+    #
+    # WHY THIS EXISTS. tools/README.md and docs/validation.rst both record that
+    # MEQ SATURATES this benchmark -- its error stops falling at about 1.4e-04
+    # because that is the REFERENCE's accuracy, set by the boundary fit and by
+    # the contour extracted from a 129^2 grid.  "Refine the reference, not MEQ"
+    # has been the standing next step since; this is the knob for it.
+    #
+    # freegs4e's grids are conventionally 2^n + 1, which is what its multigrid
+    # solver wants; the direct 4th-order sparse solver does not care, but the
+    # convention is kept so that a run at "2048" means 2049 and nests with 1025,
+    # 513, 257 and 129 point for point on the coarse grid.  That nesting is the
+    # whole reason to keep it: a reference refinement study wants the coarse
+    # grid to be a subset of the fine one.
+    nx = None
+    vcycle = None
+    rest = []
+    for a in argv:
+        if a.startswith("--nx="):
+            nx = int(a.split("=", 1)[1])
+        elif a.startswith("--vcycle="):
+            vcycle = int(a.split("=", 1)[1])
+        elif a == "--hagenow":
+            global HAGENOW
+            HAGENOW = True
+        else:
+            rest.append(a)
+    global VCYCLE_LEVELS
+    VCYCLE_LEVELS = vcycle
+    if nx is not None:
+        n = nx if nx % 2 == 1 else nx + 1
+        for case in CASES:
+            case["grid"]["nx"] = n
+            case["grid"]["ny"] = n
+        global OUTDIR
+        # A refined reference is large -- a 2049^2 case carries several
+        # hundred megabytes of psi and B -- so it goes wherever FGSREF_OUT
+        # says and not into the repository beside the 129^2 ones.
+        base = os.environ.get("FGSREF_OUT")
+        OUTDIR = (os.path.join(base, "n%d" % n) if base
+                  else os.path.join(os.path.dirname(OUTDIR) or ".",
+                                    os.path.basename(OUTDIR) + "-n%d" % n))
+        os.makedirs(OUTDIR, exist_ok=True)
+        print("resolution override: %d x %d, writing to %s" % (n, n, OUTDIR),
+              flush=True)
+
+    only = rest
     results = []
     for case in CASES:
         if only and not any(case["name"].startswith(o) for o in only):
