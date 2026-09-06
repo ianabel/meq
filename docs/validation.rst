@@ -194,6 +194,19 @@ assumed: evaluating MEQ's profile tables on the reference's own :math:`\psi`
 reproduces the reference's own current density to about 2e-05. Both codes are
 solving the same equation.
 
+Which field is compared
+-----------------------
+
+The NetCDF output carries the **post-processed** potential :math:`\psi^*`, not
+the raw :math:`\psi_h` — see :doc:`postprocessing` and :doc:`output`. The
+comparison reads that file, so every number on this page is :math:`\psi^*`.
+
+That is the field a consumer of MEQ actually receives, which is why it is the
+one compared. It is worth stating because :math:`\psi^*` converges at
+:math:`k+2` rather than :math:`k+1`, so the cost table below should not be read
+as a statement about the raw discretisation. The convergence studies in the test
+suite measure :math:`\psi_h` instead, and those are the :math:`k+1` rates.
+
 Cost
 ----
 

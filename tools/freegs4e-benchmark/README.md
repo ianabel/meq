@@ -84,6 +84,29 @@ two roots — 1.93e-03 and 5.23e-02 — and lands on the weak one for any amplit
 below about 2× the axis height. `[initialguess] Type = "ramp"` at **6×** the
 expected axis value clears it on all seven.
 
+## It is psi-star that is compared, not psi_h
+
+**The `.nc` carries the POST-PROCESSED potential.** `apps/meq.cpp` samples
+`solver->postProcessedPotential()`, and says so in its own comment: *"THE
+POTENTIAL SAMPLED HERE IS psi*, NOT psi_h"*. `_psi.gf` keeps `psi_h`, which is
+what a restart reads back — but `compare.py` reads the `.nc`, so every number on
+this page is `psi*`.
+
+**That is the right field to compare and it changes how the table reads.**
+`psi*` comes from `DarcyForm::Reconstruct()` and converges at **k+2**, not k+1,
+so `k = 3` on 397 elements is delivering a degree-4 field converging at 5. It is
+also what a consumer of MEQ actually gets — the `.nc` is the interchange format
+— so comparing it is honest rather than flattering. But attributing the
+accuracy-per-dof result to `k+1` convergence would be wrong.
+
+**The convergence tests in `tests/convergence/FreeBoundaryCoupling.cpp` use
+`solver.potential()`, which is `psi_h`**, and their `k+1` rates are that field's.
+The two are deliberately different measurements: those ask what the
+discretisation does, this asks what a user receives.
+
+If a comparison against `psi_h` is ever wanted, it needs the `.gf` route rather
+than the `.nc` — which is a second reason to reach for pyMFEM.
+
 ## Performance, and the only column that means anything
 
 `perf.py`. **The two codes do not solve the same problem**, so a wall-clock

@@ -4844,6 +4844,16 @@ RESULT** — the cone tiling, the MXH distance, the transmission row's shared
 quadrature rule, and the FB-1b single-mesh check. The tell is always the same: a
 number that does not move when something that should move it changes.
 
+**AND IT IS `ψ*` THAT IS COMPARED, NOT `ψ_h`.** `apps/meq.cpp` samples
+`postProcessedPotential()` into the `.nc` — its own comment says *"THE POTENTIAL
+SAMPLED HERE IS psi*, NOT psi_h"* — and `compare.py` reads the `.nc`, so every
+benchmark number is the post-processed field. That is the right thing to compare,
+since the `.nc` is what a consumer receives, but `ψ*` converges at **k+2**, so
+the accuracy-per-dof result below must not be read as a statement about `k+1`.
+`FreeBoundaryCoupling`'s rates use `solver.potential()` and ARE `ψ_h`'s; the two
+are different measurements on purpose. Comparing `ψ_h` would need the `.gf`
+route, which is a second reason to want pyMFEM.
+
 **COST, AND THE ONLY COLUMN THAT MEANS ANYTHING IS ACCURACY PER UNKNOWN.** A
 wall-clock ratio is not a statement about either code: freegs4e converges a
 FREE-boundary equilibrium — coil Green's functions, X-point finding, a control
