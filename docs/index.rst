@@ -145,3 +145,4 @@ solver strategy for a problem that is not converging, go to :doc:`nonlinear`.
    :caption: Development
 
    testing
+   validation

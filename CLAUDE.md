@@ -4706,6 +4706,123 @@ MEQ uses `meq::ResidualEstimator` rather than `HDGErrorEstimator` so it costs
 MEQ nothing either way. **That last row is a code read and not a measurement.**
 Anyone who needs `Energy` mode should measure before trusting it.
 
+## MEQ against freegs4e, and root selection is the whole difficulty
+
+**`tools/freegs4e-benchmark/`, 2026-09-05.** The first check of MEQ against a
+code that shares the equation and essentially no code — `../freegs4e`, a FreeGS
+derivative: free boundary by von Hagenow Green's functions, 2nd/4th-order finite
+differences on a uniform `(R,Z)` grid, Picard with adaptive blending, in Python.
+`docs/validation.rst` is the user-facing account; this is the record.
+
+**WHY IT IS WORTH MORE THAN A FINER MESH.** Everything else in this file checks
+MEQ against closed forms, manufactured solutions or its own refinement, and all
+of those share MEQ's conventions. This file records three separate occasions
+where a convention was misread and the fixture checking it was misread the same
+way — the Solov'ev coefficients, `τ` in eq (8e), `DarcyForm`'s `−q`. A
+self-consistent tree cannot find that class of error at all.
+
+**Seven configurations, each seeded from its own reference:**
+
+| case | machine | rel `L2` | rel `L∞` |
+|---|---|---|---|
+| A | test tokamak, classic | **1.5e-04** | 5.4e-04 |
+| G | MAST-U | 6.4e-04 | 1.6e-03 |
+| B | test tokamak, `ff'`-dominated | 7.1e-04 | 1.5e-03 |
+| E | test tokamak, diamagnetic | 2.7e-03 | 5.8e-03 |
+| F | DIII-D | 2.9e-03 | 5.2e-03 |
+| D | TCV | 4.4e-03 | 7.9e-03 |
+| C | MAST | 6.8e-03 | 1.3e-02 |
+
+over ~11,000 nodes per case, aspect ratios 1.4–3.4, elongations 1.3–2.1, one
+case with `gg' < 0` throughout.
+
+**THE COMPARISON IS ONE-DIRECTIONAL AND HAS TO BE.** MEQ solves fixed boundary
+and freegs4e solves free, so MEQ is handed freegs4e's own **interior flux
+surface** as a boundary and its own **profiles** as a source, and has to
+reproduce the field inside.
+
+**ROOT SELECTION IS THE FINDING, NOT THE AGREEMENT.** The fixed-boundary problem
+with `p'` and `gg'` given as functions of `ψ` has **more than one solution**. On
+case A, three:
+
+| start | `max ψ` | vs reference |
+|---|---|---|
+| ramp, amplitude ≤ 0.1 | 1.9313e-03 | −95.7% |
+| **seeded from the reference** | **4.525154e-02** | **−0.067%** |
+| ramp, amplitude ≥ 0.2 | 5.225179e-02 | +15.4% |
+| freegs4e | 4.528205e-02 | — |
+
+The physical one lies **between** the two a ramp reaches, and no amplitude finds
+it — the sweep steps from the lower root to the upper between 0.1 and 0.2. That
+is the unstable middle branch of an S-curve, which Newton slides off from either
+side. Seeded, MEQ takes **two Newton iterations** — 4.5e-03 → 2.7e-09 →
+7.1e-15 — and then agrees best of all seven.
+
+**AND WHAT DISTINGUISHED A SECOND SOLUTION FROM AN ERROR WAS ONE SWEEP:
+REFINE.** The upper root read **+15.39% → +15.41% across refinement levels 2→4
+and degrees 2→3**, converged to six digits. A discretisation error falls; a
+different solution does not. Before that measurement this looked like a 15%
+disagreement about the equation. It is the mirror of the cone-tiling mistake
+recorded above — there a *converging* column was wrongly read as geometry; here
+a *flat* one correctly identified a root.
+
+This is the same multiplicity recorded under *Should `PicardThenNewton` simply
+be the default?*, where three solve routes reach discrete solutions 9.4% apart,
+met from outside the codebase.
+
+**FOUR CONVERSIONS, EACH OF WHICH CONVERGES TO A WRONG ANSWER.**
+
+* **freegs4e's `pprime` is `dp/dψ`, and its own docstring says `dp/dψ_n`.** The
+  docstring is **wrong** — established four ways, decisively by rebuilding
+  `Jtor` from the saved arrays and matching the solver's own to **4e-16**.
+  Dividing by `ψ_bnd − ψ_ax` on its word costs a factor that for a tokamak is
+  `O(1)` and does not look wrong. This tree records the identical trap from the
+  other side in `examples/rotating-density.dat`.
+* **Not the separatrix.** Every case is diverted, so the LCFS has an X-point
+  **corner** and MXH is a truncated Fourier series that cannot turn one: 2.6e-03
+  to 1.3e-02 m where the fitter does **1.9e-05** on a smooth shape.
+  `ExtensionConvergence` avoids the separatrix for exactly this reason. An
+  interior surface fits to 2–4e-04 m and **stops improving past 10 harmonics**,
+  which is what identifies that floor as the extracted contour's rather than the
+  fitter's.
+* **`ψ = 0` must land on the surface actually handed over.** Mapping with
+  `ψ = 0` at `ψ_n = 1` while giving MEQ the `ψ_n = 0.9` surface puts the
+  boundary where the source has died — `p'` of 2.7 instead of 3.1e5 — and the
+  solve converges in three Newton steps to a field **23× too small**.
+* **The guess picks the branch**, above.
+
+**THE SOURCE CONVERSION IS RULED OUT DIRECTLY RATHER THAN ARGUED**: MEQ's tables
+evaluated on the reference's own `ψ` reproduce freegs4e's `μ₀ R J_φ` to
+**2.3e-05**. Both codes solve the same equation.
+
+**WHAT LIMITS THE REMAINING 0.06–0.7%** is most likely geometric: the MXH fit is
+2–4e-04 m against minor radii of 0.24–0.61 m, and the contour it fits comes from
+freegs4e's own 129² grid. Refining that grid is the test and is **not done**.
+
+**TWO SELF-TESTS IN THE HARNESS, AND BOTH FOUND REAL BUGS IN THEMSELVES.**
+`mxh.py` recovers a known shape to 1.9e-05 m; writing it found that the `tR`
+branch switches at the **R extrema** rather than at the midplane — true only for
+an up-down symmetric surface — worth 25×, and that its distance measure was
+reading its own 2048-point sampling, **pinned at 1.6e-03 while the fit improved
+25-fold**. `convert.py` checks its derivative column against a closed form at
+1.7e-07 and carries a control that drops the chain rule and reads 0.52.
+
+**THAT MAKES FOUR TIMES IN ONE SESSION AN INSTRUMENT WAS MISTAKEN FOR A
+RESULT** — the cone tiling, the MXH distance, the transmission row's shared
+quadrature rule, and the FB-1b single-mesh check. The tell is always the same: a
+number that does not move when something that should move it changes.
+
+**Deliberately not established**: nothing about free boundary, since MEQ does
+not solve it; nothing about the flux-surface machinery, since only `ψ` on a grid
+is differenced and freegs4e computes no averages; and nothing about a real
+reconstruction, since both codes are given analytic profile shapes.
+
+**pyMFEM would improve this and is not used.** `mkguess.py` hand-writes MFEM's
+ASCII mesh and GridFunction format to seed the restart, and `compare.py` reads
+the **lossy** `.nc` rather than `_psi.gf`. Reading the exact `P_k` coefficients
+would take the grid sampling, the band mask and the interpolation out of the
+error budget — which matters now that the residual is at 1e-04.
+
 ## Testing stance
 
 **A test asserts the behaviour that is wanted, and fails until it is there.**
