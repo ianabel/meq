@@ -84,6 +84,53 @@ two roots — 1.93e-03 and 5.23e-02 — and lands on the weak one for any amplit
 below about 2× the axis height. `[initialguess] Type = "ramp"` at **6×** the
 expected axis value clears it on all seven.
 
+## Performance, and the only column that means anything
+
+`perf.py`. **The two codes do not solve the same problem**, so a wall-clock
+ratio is not a statement about either: freegs4e converges a *free*-boundary
+equilibrium — coil Green's functions, X-point finding, a control system, 23 to
+103 Picard steps — while MEQ solves the *fixed*-boundary problem inside a
+surface it is handed. MEQ is doing strictly less work, in C++ against Python.
+
+**So the column that means something is accuracy per unknown**, which is
+language-neutral and is the real question: does high-order hybridized DG reach a
+given accuracy with fewer degrees of freedom than a 2nd/4th-order finite
+difference grid? Case A, `MKL_NUM_THREADS=1`, `OMP_NUM_THREADS=1`:
+
+| `k` | refine | elements | dofs | dofs / ref pt | wall | rel L2 |
+|---|---|---|---|---|---|---|
+| 1 | 2 | 1735 | 15,615 | 0.94 | 5.25 s | 3.15e-04 |
+| 1 | 3 | 7185 | 64,665 | 3.89 | 13.58 s | 1.46e-04 |
+| 2 | 1 | 397 | 7,146 | 0.43 | 2.69 s | 1.01e-03 |
+| 2 | 2 | 1735 | 31,230 | 1.88 | 6.01 s | 1.52e-04 |
+| **3** | **1** | **397** | **11,910** | **0.72** | **3.00 s** | **1.72e-04** |
+| 3 | 2 | 1735 | 52,050 | 3.13 | 6.45 s | 1.44e-04 |
+
+freegs4e's own reference: **84.7 s at 129² = 16,641 grid points**.
+
+**High order is worth about 5× in unknowns.** `k = 3` on 397 elements reaches
+1.7e-04 with 11,910 dofs and 3.0 s; `k = 1` needs 7,185 elements, 64,665 dofs
+and 13.6 s for the same accuracy — 5.4× the unknowns and 4.5× the time.
+
+**MEQ SATURATES THIS BENCHMARK, WHICH IS THE MOST USEFUL THING IN THE TABLE.**
+The errors stop improving at 1.44e-04 for case A — and at 5e-03 and 2.4e-03 for
+MAST and DIII-D — because that is the *reference's* own accuracy, set by the MXH
+fit and the contour extracted from its 129² grid. Refining MEQ past the second
+row buys nothing. Any future work on this benchmark should refine the
+**reference**, not MEQ.
+
+Timings include the whole driver — mesh generation, solve, post-processing and
+all three output formats. The `.nc` sampling is ≤0.5 s of it, measured by
+rerunning at a 17² output grid, so the wall clock is solve-dominated. Read it as
+an order of magnitude: a timing here is a measurement about this machine.
+
+**One failure worth knowing.** `k = 2, refine = 1` does not converge on MAST or
+DIII-D — Newton fails, the reactive ladder's `PicardThenNewton` fails too, and
+the driver says to raise the degree. `k = 3` on the *same mesh* then converges in
+8 Newton steps. That is `p`-refinement curing what neither `h` nor a
+globalisation reaches, which is the pedestal finding in `CLAUDE.md` met from a
+new direction.
+
 ## Root selection is the whole difficulty, and case A proves it
 
 **These problems have at least three solutions and only one is the equilibrium.**

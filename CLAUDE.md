@@ -4812,6 +4812,41 @@ RESULT** — the cone tiling, the MXH distance, the transmission row's shared
 quadrature rule, and the FB-1b single-mesh check. The tell is always the same: a
 number that does not move when something that should move it changes.
 
+**COST, AND THE ONLY COLUMN THAT MEANS ANYTHING IS ACCURACY PER UNKNOWN.** A
+wall-clock ratio is not a statement about either code: freegs4e converges a
+FREE-boundary equilibrium — coil Green's functions, X-point finding, a control
+system, 23–103 Picard steps — while MEQ solves the FIXED-boundary problem inside
+a surface it is handed, in C++ against Python. Case A, `MKL=1`, `OMP=1`:
+
+| `k` | refine | elements | dofs | dofs/ref pt | wall | rel L2 |
+|---|---|---|---|---|---|---|
+| 1 | 2 | 1735 | 15,615 | 0.94 | 5.25 s | 3.15e-04 |
+| 1 | 3 | 7185 | 64,665 | 3.89 | 13.58 s | 1.46e-04 |
+| 2 | 1 | 397 | 7,146 | 0.43 | 2.69 s | 1.01e-03 |
+| 2 | 2 | 1735 | 31,230 | 1.88 | 6.01 s | 1.52e-04 |
+| **3** | **1** | **397** | **11,910** | **0.72** | **3.00 s** | **1.72e-04** |
+| 3 | 2 | 1735 | 52,050 | 3.13 | 6.45 s | 1.44e-04 |
+
+against freegs4e's own 84.7 s at 129² = 16,641 grid points.
+
+**High order is worth about 5x in unknowns**: `k = 3` on 397 elements reaches
+1.7e-04 with 11,910 dofs in 3.0 s, where `k = 1` needs 7,185 elements, 64,665
+dofs and 13.6 s for the same thing.
+
+**AND MEQ SATURATES THE BENCHMARK, WHICH IS THE MOST USEFUL LINE IN THE TABLE.**
+Errors stop at 1.44e-04 on case A, and at 5e-03 / 2.4e-03 on MAST and DIII-D,
+because that is the REFERENCE's accuracy — the MXH fit and the contour off its
+129² grid. Refining MEQ past the second row buys nothing. **Future work on this
+benchmark should refine the reference, not MEQ.**
+
+Timings are the whole driver; the `.nc` sampling is ≤0.5 s of it, measured by
+rerunning at a 17² output grid. Read them as an order of magnitude.
+
+**`k = 2, refine = 1` DOES NOT CONVERGE on MAST or DIII-D while `k = 3` does on
+the same mesh** — Newton fails, `PicardThenNewton` fails, and the driver's advice
+to raise the degree is what works. That is `p`-refinement reaching a case neither
+`h` nor a globalisation does, which is the pedestal finding from a new direction.
+
 **Deliberately not established**: nothing about free boundary, since MEQ does
 not solve it; nothing about the flux-surface machinery, since only `ψ` on a grid
 is differenced and freegs4e computes no averages; and nothing about a real

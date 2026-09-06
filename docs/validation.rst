@@ -194,6 +194,43 @@ assumed: evaluating MEQ's profile tables on the reference's own :math:`\psi`
 reproduces the reference's own current density to about 2e-05. Both codes are
 solving the same equation.
 
+Cost
+----
+
+The two codes do not solve the same problem, so a wall-clock ratio is not a
+statement about either: ``freegs4e`` converges a *free*-boundary equilibrium
+with coils, an X-point and a control system, while MEQ solves the
+*fixed*-boundary problem inside a surface it is handed. The comparison that is
+language-neutral, and that actually asks something about the discretisation, is
+**accuracy per unknown**.
+
+Measured on one case, MEQ reaches the benchmark's accuracy floor with about
+**five times fewer degrees of freedom at** :math:`k = 3` **than at**
+:math:`k = 1`, and in about a fifth of the time — roughly 400 elements against
+7,000. That is the high-order argument made concrete, and it is the reason
+:doc:`formulation` puts the flux in the discretisation rather than
+differentiating the potential.
+
+.. note::
+
+   **MEQ saturates this benchmark**, which is the most useful thing the cost
+   table says. The error stops improving once it reaches the *reference's* own
+   accuracy — set by the boundary fit and by the contour extracted from
+   ``freegs4e``'s finite-difference grid — so refining MEQ further buys nothing.
+   Future work here should refine the reference, not MEQ.
+
+Read the timings as an order of magnitude only. This project's standing rule is
+that a timing is a measurement about the machine it was taken on; the
+reproducible column is the dof count.
+
+**One convergence failure is worth knowing**, because it is a useful piece of
+advice rather than a defect: at :math:`k = 2` on the coarsest mesh two of the
+cases do not converge at all — Newton fails, the reactive ladder's
+Picard-then-Newton fails too, and the driver says to raise the degree.
+:math:`k = 3` on the *same mesh* then converges. See :doc:`nonlinear`;
+`p`-refinement reaches cases that neither refinement in `h` nor a globalisation
+does.
+
 What it does not establish
 --------------------------
 
