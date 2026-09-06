@@ -285,3 +285,51 @@ on a shared machine. 2049² needs roughly 24 GB against 15 GB total. With the
 
 **So the honest ceiling here is 513², and the route to round-off is FB-6 rather
 than a finer grid.**
+
+
+## The floors, peeled one at a time — 2026-09-06
+
+The refinement above answered "does refining the reference help" with *yes, 2.25x
+from 129² to 257²*. Carrying it to 513² and then chasing what was left turned
+into a sequence of floors, each one only visible once the previous was removed.
+**The end of it is a factor of 17.**
+
+| what was changed | MXH fit | MEQ rel `L2` | what was limiting |
+|---|---|---|---|
+| reference 129², 10 harmonics, `k=2 r=2` | 2.060e-04 m | 1.519e-04 | the contour |
+| reference 257² | 1.063e-04 m | 6.751e-05 | the contour |
+| reference 513² | **1.032e-04 m** | 5.726e-05 | **the FITTER — 3 % for 4x the grid** |
+| 16 harmonics | **2.206e-05 m** | 5.825e-05 | **MEQ — `L2` did not move at all** |
+| MEQ `k=3` | 2.206e-05 m | **8.802e-06** | ? |
+| MEQ `k=3 r=3` | | 8.744e-06 | not MEQ |
+| output grid 257², 513² | | 8.797e-06, 8.800e-06 | **not the sampling either** |
+
+**Each row is the previous row's diagnosis being wrong.** The fit stopped
+improving at 513², so the floor was the fitter and not the contour — this file
+previously said the opposite, and it was right *at 129²*, where ten harmonics
+happen to be enough to reach the contour's own limit. Raising the harmonics then
+bought a 4.7x better boundary and **`L2` did not move**, which is what identified
+MEQ's own discretisation as the binding constraint — the first time in this
+benchmark's history that has been true. Refining MEQ bought 6.7x. And the last
+two rows are the controls: `k=3 r=3` moves the answer by 0.7 %, and a sixteenfold
+denser comparison grid moves it by 0.03 %, so neither MEQ nor the sampling is
+what is left.
+
+**`Linf` behaves differently and says the same thing.** It *did* follow the
+boundary fit — 2.900e-04 to 1.347e-04 when the harmonics went up, a factor of
+2.15, while `L2` sat still. A boundary that is wrong by a shape error shows up
+worst near the boundary, which is what a maximum norm sees and an `L2` over the
+whole core does not.
+
+**So the remaining 8.8e-06 is the boundary fit**, at 2.2e-05 m against a minor
+radius of 0.42 m, and more harmonics do not help — the fit plateaus at 16, so it
+is contour-limited again and the contour wants a finer reference than this
+machine can hold.
+
+**WHICH IS THE ANSWER TO "DO THE CODES AGREE TO ROUND-OFF".** They agree to
+**8.8e-06** and cannot be made to agree better *through this comparison*,
+because the comparison contains a boundary fit and the fit is now what limits
+it. Round-off is not reachable here by construction, and no amount of grid is
+going to change that. **FB-6 removes the fit** — a free-boundary MEQ takes the
+same coils and the same profiles and never sees an LCFS — and that is the only
+route to the question the refinement was asked to answer.

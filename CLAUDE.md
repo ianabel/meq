@@ -5235,6 +5235,40 @@ the accuracy-per-dof result below must not be read as a statement about `k+1`.
 are different measurements on purpose. Comparing `ψ_h` would need the `.gf`
 route, which is a second reason to want pyMFEM.
 
+**AND THE FLOORS CAME OFF ONE AT A TIME, ENDING AT A FACTOR OF 17.** Carrying
+the refinement to 513² and then chasing what was left is a sequence in which
+**each step's diagnosis was the previous step's mistake**:
+
+| changed | MXH fit | MEQ rel `L2` | limited by |
+|---|---|---|---|
+| 129², 10 harmonics, `k=2 r=2` | 2.060e-04 | 1.519e-04 | the contour |
+| 257² | 1.063e-04 | 6.751e-05 | the contour |
+| 513² | **1.032e-04** | 5.726e-05 | **the FITTER** — 3% for 4× the grid |
+| 16 harmonics | **2.206e-05** | 5.825e-05 | **MEQ** — `L2` did not move |
+| MEQ `k=3` | | **8.802e-06** | ? |
+| `k=3 r=3` | | 8.744e-06 | not MEQ |
+| output grid 257², 513² | | 8.797e-06, 8.800e-06 | not the sampling |
+
+The fit stopping at 513² identified **the fitter** rather than the contour — the
+opposite of what this file and `tools/README.md` said, and they were right *at
+129²*, where ten harmonics happen to reach the contour's own limit. Raising the
+harmonics then bought a 4.7× better boundary and **`L2` did not move at all**,
+which is what identified **MEQ's own discretisation** as the binding constraint
+— the first time in this benchmark's history that has been true. The last two
+rows are controls: `k=3 r=3` moves it 0.7%, and a sixteenfold denser comparison
+grid moves it 0.03%.
+
+**`L∞` behaves differently and confirms it**: it DID follow the boundary fit,
+2.900e-04 → 1.347e-04 for the harmonics, while `L2` sat still. A shape error
+shows up worst near the boundary, which a maximum norm sees and an `L2` over the
+core does not.
+
+**SO THE ANSWER TO "DO THEY AGREE TO ROUND-OFF" IS NO, AND CANNOT BE YES HERE.**
+They agree to **8.8e-06**, and what is left is the boundary fit at 2.2e-05 m
+against a minor radius of 0.42 m. Round-off is unreachable *through this
+comparison* by construction, because the comparison contains a fit. **FB-6
+removes it.**
+
 **THE SATURATION WAS THE REFERENCE'S AND IT IS THE BOUNDARY FIT, MEASURED
 2026-09-06.** This file has said since it was written that MEQ saturates the
 benchmark and that the next work is to refine the reference. Now measured, on
