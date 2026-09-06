@@ -64,6 +64,7 @@
 
 #include "mfem.hpp"
 
+#include "meq/Coils.hpp"
 #include "meq/ExteriorDtN.hpp"
 #include "meq/GradShafranov.hpp"
 
@@ -1759,4 +1760,529 @@ BOOST_AUTO_TEST_CASE( theTransmissionConditionSolvesForTheExteriorCoefficients )
 	            "Suspect the sign of the datum's negation in setExteriorDatum, the "
 	            "sign of blockEntry against the row, or the mode indexing -- "
 	            "degrees start at 2 and an off-by-two permutes this table" );
+}
+
+/*
+ * ===========================================================================
+ * FB-2: A PRESCRIBED CURRENT, AND AMPERE'S LAW ON THE SOLVE
+ * ===========================================================================
+ *
+ * FB-1 drove the coupling with a manufactured source built backwards from a
+ * chosen answer. FB-2 drives it with a CURRENT -- a coil of finite
+ * cross-section, whose field is what a magnet actually produces -- and adds the
+ * check FREE-BOUNDARY-PLAN.md calls "the sharpest whole-assembly test
+ * available".
+ *
+ * WHY A CURRENT IS A DIFFERENT TEST FROM A MANUFACTURED SOURCE. Outside the
+ * conductor `Delta* psi = 0` identically, so the field there IS an exterior
+ * expansion rather than being arranged to look like one, and the coefficients
+ * the transmission condition recovers are the ones a real coil generates. The
+ * source is also POSITIVE and compactly supported, which is a different shape
+ * of forcing from ExteriorMatched's sign-alternating modes.
+ *
+ * AMPERE'S LAW IS THE POINT, AND IT HAS NO DISCRETISATION IN IT. Integrating
+ * the equation over the enclosed region gives
+ *
+ *     oint_Gamma ( 1/r ) dpsi/dn dl = -mu0 I_enclosed
+ *
+ * exactly. Since q = ( 1/r ) grad_bar( psi ) that is oint q.nu dGamma, which is
+ * outwardFlux(). One number, known in advance from the coil currents alone, and
+ * it ties together the assembled operator, the source, the boundary condition,
+ * the transfer and the extension. tests/unit/CoilsTests.cpp already pins the
+ * identity on the EXACT field at 3.3e-11, so a discrepancy here is the solve
+ * and nothing else -- which is exactly why that was measured first.
+ *
+ * THE COILS SIT INSIDE rho_0 SO THE EXPANSION IS LEGAL. Gamma is a semicircle
+ * about the axis at rho_Gamma; the conductors are well inside it, so between
+ * them and Gamma the field is Delta*-harmonic and the Gegenbauer modes span it.
+ */
+namespace
+{
+	/// Two coils, deliberately NOT up-down symmetric: a symmetric pair kills
+	/// every odd mode, and the odd ones are where a sign error in the transfer
+	/// or the mode indexing would show. Both are well inside rho_0 = 1 and
+	/// clear of the axis, which meq::Coil refuses to approach.
+	meq::CoilSet const &benchmarkCoils()
+	{
+		static meq::CoilSet const coils = []
+		{
+			meq::CoilSet set;
+			// BIG ENOUGH TO BE RESOLVED, which the first version was not: at
+			// half-width 0.075 the conductor was ONE CELL across at n = 12 and
+			// two at n = 24, so the mesh could not see the discontinuity at its
+			// edge at all. psi then converged at 1.4 whatever k was and the
+			// flux identity sat at 94% wrong and FLAT. Same trap CLAUDE.md
+			// records for GS-2 section 4.5, where the ridge was thinner than a
+			// cell -- a coarsest usable mesh is a property of the SOURCE.
+			set.add( meq::Coil( 0.6375, 0.0, 0.2125, 0.2125, 3.1e5 ) );
+			set.add( meq::Coil( 0.371875, 0.425, 0.159375, 0.2125, 1.4e5 ) );
+			return set;
+		}();
+		return coils;
+	}
+}
+
+BOOST_AUTO_TEST_CASE( aPrescribedCurrentSatisfiesAmperesLawThroughTheSolve )
+{
+	meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 4 );
+	int const modes = dtn.modeCount();
+	double const expected = -benchmarkCoils().mu0()*benchmarkCoils().totalCurrent();
+
+	std::printf( "\n  FB-2: A PRESCRIBED CURRENT, AND AMPERE'S LAW\n" );
+	std::printf( "    two coils, total current %.6e A\n",
+	             benchmarkCoils().totalCurrent() );
+	std::printf( "    oint q.nu dGamma must be -mu0 I = %.10e\n\n", expected );
+	std::printf( "    %-5s %5s %8s %16s %12s %14s\n",
+	             "k", "n", "h", "outward flux", "rel", "L2 vs exact" );
+
+	for ( int order : { 1, 2, 3 } )
+	{
+		std::vector<double> errors;
+		std::vector<double> spacing;
+		std::vector<double> fluxRel;
+		std::vector<double> meshBoundaryRel;
+
+		for ( int n : { 16, 32, 64 } )
+		{
+			HalfDisc d = makeHalfDisc( n );
+
+			// F = mu0 r j_phi, section 7.6's derivation. A plain Coefficient,
+			// so this is MEQ's LINEAR path: a coil current does not depend on
+			// psi and dF/dpsi is identically zero.
+			mfem::FunctionCoefficient source( []( mfem::Vector const &x )
+			{
+				return benchmarkCoils().f( x( 0 ), x( 1 ) );
+			} );
+			mfem::ConstantCoefficient zero( 0.0 );
+
+			// The exact field, and psi = 0 on Gamma is imposed by SUBTRACTING
+			// its own boundary value rather than by hoping it vanishes there --
+			// a coil field does not, and MEQ's psi must.
+			auto exactAt = []( double r, double z )
+			{
+				return benchmarkCoils().psi( r, z );
+			};
+			double const gaugeShift = exactAt( 0.0, halfDiscGamma );
+
+			meq::GradShafranovSolver solver( *d.sub, order );
+			solver.setSource( source );
+			solver.setBoundaryData( zero );
+			solver.setExtension( *d.path, d.gammaHMarker );
+
+			// The exterior datum, from the exact field on Gamma. FB-1b showed
+			// the transmission condition can SOLVE for these; here they are
+			// given, because what FB-2 is testing is the current and Ampere's
+			// law rather than the coupling a second time.
+			solver.setExteriorDatum( [ & ]( mfem::Vector const &x )
+			{
+				return exactAt( x( 0 ), x( 1 ) ) - gaugeShift;
+			} );
+			solver.setTransmissionQuadratureOrder( 40 );
+			solver.solve();
+
+			mfem::FunctionCoefficient exact(
+				[ & ]( mfem::Vector const &x )
+			{
+				return exactAt( x( 0 ), x( 1 ) ) - gaugeShift;
+			} );
+
+			double const l2 = solver.potential().ComputeL2Error( exact );
+			double const flux = solver.outwardFlux();
+			double const rel = std::abs( flux - expected )/std::abs( expected );
+
+			// The same integral over the MESH boundary -- Gamma_h plus the axis
+			// -- with no extension anywhere. D_h contains the conductor, so the
+			// divergence theorem on D_h gives -mu0 I too, and this version never
+			// leaves the mesh.
+			double polygon = 0.0;
+			{
+				mfem::GridFunction const &qh = solver.flux();
+				mfem::Vector nu( 2 ), val( 2 ), centre( 2 ), here( 2 );
+				for ( int be = 0; be < d.sub->GetNBE(); ++be )
+				{
+					mfem::FaceElementTransformations *ftr =
+						d.sub->GetBdrFaceTransformations( be );
+					if ( !ftr )
+						continue;
+					mfem::IntegrationRule const &fr =
+						mfem::IntRules.Get( ftr->GetGeometryType(), 2*order + 6 );
+					for ( int i = 0; i < fr.GetNPoints(); ++i )
+					{
+						mfem::IntegrationPoint const &ip = fr.IntPoint( i );
+						ftr->SetAllIntPoints( &ip );
+						mfem::CalcOrtho( ftr->Jacobian(), nu );
+						double const measure = nu.Norml2();
+						if ( !( measure > 0.0 ) ) { continue; }
+						nu /= measure;
+						d.sub->GetElementCenter( ftr->Elem1No, centre );
+						ftr->Transform( ip, here );
+						double outward = 0.0;
+						for ( int dd = 0; dd < 2; ++dd )
+							outward += nu( dd )*( here( dd ) - centre( dd ) );
+						if ( outward < 0.0 ) { nu.Neg(); }
+						qh.GetVectorValue( ftr->Elem1No,
+						                   ftr->GetElement1IntPoint(), val );
+						polygon += ip.weight*measure*( val( 0 )*nu( 0 )
+						                               + val( 1 )*nu( 1 ) );
+					}
+				}
+			}
+			double const polyRel =
+				std::abs( polygon - expected )/std::abs( expected );
+
+			errors.push_back( l2 );
+			spacing.push_back( d.h );
+			fluxRel.push_back( rel );
+			meshBoundaryRel.push_back( polyRel );
+
+			std::printf( "    %-5d %5d %8.4f %16.8e %12.3e %14.6e  mesh bdr %10.2e\n",
+			             order, n, d.h, flux, rel, l2, polyRel );
+			std::fflush( stdout );
+		}
+
+		double const rate = meq::tests::rate( errors.front(), errors.back(),
+		                                      spacing.front()/spacing.back() );
+		std::printf( "          psi converges at %.3f\n", rate );
+		std::fflush( stdout );
+
+		/*
+		 * THE CONDUCTOR IS MESH-ALIGNED, AND IT ALWAYS SHOULD BE.
+		 *
+		 * meq::Coil has UNIFORM current density, so F = mu0 r j is
+		 * DISCONTINUOUS at the conductor edge. Where that edge cuts a cell the
+		 * element quadrature integrates a discontinuous integrand with a rule
+		 * that assumes smoothness, and the error is O( h ) whatever the degree.
+		 * Measured, the same coils moved off the mesh lines:
+		 *
+		 *     k        cut cells      aligned
+		 *     1          1.330         1.991
+		 *     2          1.265         2.876
+		 *     3          1.086         3.013
+		 *
+		 * and at k = 3, n = 64 the L2 error falls from 1.08e-04 to 1.97e-08.
+		 * The rate FALLING with k is the signature: a genuine regularity limit
+		 * is flat in k, and only a quadrature error gets relatively worse as
+		 * the rest of the scheme gets better.
+		 *
+		 * SO ALIGNING IS NOT A CONVENIENCE HERE, IT IS THE RIGHT THING TO DO,
+		 * AND THE DRIVER SHOULD DO IT. A conductor's geometry is PRESCRIBED
+		 * INPUT -- it is in the configuration file before anything is solved --
+		 * so there is no reason ever to let a coil edge fall inside a cell. Put
+		 * mesh lines on the coil edges and the whole O( h ) disappears for free.
+		 *
+		 * THAT IS ALSO A SCOPE REDUCTION FOR FB-4, WHICH IS WORTH SAYING
+		 * BECAUSE THE TWO LOOK LIKE ONE PROBLEM. FB-4's cut quadrature is
+		 * unavoidable: chi_{Omega_p} is bounded by the plasma boundary, which
+		 * MOVES WITH THE SOLUTION and cannot be meshed in advance at all. A
+		 * coil cannot move. So cut quadrature is needed for the plasma support
+		 * and NOT for the conductors, and the machinery FB-4 wants does not
+		 * have to serve both.
+		 *
+		 * AND THE ALIGNED RATE CAPS AT 3, WHICH IS THE CONDUCTOR'S CORNERS. A
+		 * rectangular source region has four of them, and a corner in the
+		 * FORCING gives the same r^2 log r behaviour a corner in the DOMAIN
+		 * does -- which CLAUDE.md records as capping a rectangle's own
+		 * self-convergence near 3 with nothing non-linear anywhere. So k = 3
+		 * reads 3.01 rather than 4, and that is the source's geometry rather
+		 * than the solver. Alignment cannot fix a corner; only rounding the
+		 * conductor would.
+		 */
+		double const cap = std::min( order + 1.0, 3.0 );
+		BOOST_TEST( rate > cap - 0.25,
+		            "psi converges at " << rate << " against a coil field at k = "
+		            << order << ", short of the " << cap << " this source allows. "
+		            "A rate that FALLS with k is cut-cell quadrature: check the "
+		            "conductor edges still land on mesh lines" );
+
+		/*
+		 * AMPERE'S LAW HOLDS EXACTLY ON THE MESH, AND THE RESIDUAL IS ALL BAND.
+		 *
+		 * Two integrals of the same identity, differing only in WHERE they are
+		 * taken. Over the MESH boundary -- Gamma_h plus the axis, no extension
+		 * anywhere -- it converges at about k+1 and reaches 5.6e-12:
+		 *
+		 *     k        n = 16     n = 32     n = 64
+		 *     1       6.18e-04   1.55e-04   3.87e-05
+		 *     2       1.89e-07   2.01e-08   2.29e-09
+		 *     3       2.69e-09   1.17e-10   5.61e-12
+		 *
+		 * Over the TRUE Gamma, through outwardFlux()'s extension, it floors at
+		 * about 1.08e-03 flat in both h and k. And on a contour that never
+		 * approaches the axis the extended version CONVERGES instead -- see
+		 * amperesLawIsExactOnAContourThatAvoidsTheAxis, where the same integral
+		 * over Gamma_h is round-off, 1e-14, at every degree and mesh.
+		 *
+		 * SO THE SOLVE IS EXACTLY CONSERVATIVE AND THE BAND IS NOT. The
+		 * assembly, the source, the boundary condition and the trace solve
+		 * reproduce the enclosed current to round-off; what does not is
+		 * E_h( q_h ) evaluated OUTSIDE the mesh, which is an extrapolation and
+		 * satisfies div q = 0 only to its own order.
+		 *
+		 * AND NEAR THE AXIS IT DOES NOT EVEN CONVERGE, which is section 8's
+		 * corner arriving in a quantity that can see it. FB-1a showed the corner
+		 * costs psi nothing -- k+1 across it -- and this shows it does cost a
+		 * band-extended INTEGRAL, which psi's L2 norm cannot see because the
+		 * band is a set of measure O( h ).
+		 *
+		 * THE MECHANISM IS THE GAP BETWEEN Gamma_h AND Gamma AT THE AXIS, AND
+		 * CLOSING IT IS WORTH 17x. Measured at k = 2, n = 32, changing nothing
+		 * but rho_Gamma so that D_h's topmost axis row is INCLUDED rather than
+		 * excluded:
+		 *
+		 *     rho_Gamma   axis gap    band      mesh boundary    psi L2
+		 *       1.5000     0.0125    1.07e-03      2.01e-08     1.6355e-06
+		 *       1.5416     0.0010    6.41e-05      1.74e-08     1.6361e-06
+		 *
+		 * The mesh-boundary residual and psi barely move, which is what says the
+		 * SOLVE is untouched and the band is the whole of it. D_h is the union
+		 * of elements ENTIRELY inside Gamma, so the staircase stops at the last
+		 * mesh line whose outer corner still fits; putting rho_Gamma just ABOVE
+		 * a mesh line rather than just below includes that row and Gamma_h then
+		 * very nearly meets Gamma at r = 0.
+		 *
+		 * SO THIS IS A MESHING RULE AND NOT A LIMITATION, and it is the same
+		 * rule as aligning the conductor: where geometry is KNOWN IN ADVANCE,
+		 * put mesh lines on it. Making the gap fall as O( h^2 ) needs an offset
+		 * chosen per mesh -- about h^2/( 2 rho_Gamma ) -- which is left undone
+		 * here because it makes Gamma mesh-dependent and this case is a
+		 * convergence study. It is the right thing for a driver to do.
+		 *
+		 * IT ALSO BOUNDS FB-1'S TRANSMISSION ROW, which is the reason to care:
+		 * that row is INT_Gamma E_h( q ).nu C_m dGamma over this same contour,
+		 * so a coupling needing better than 1e-03 near the axis wants the gap
+		 * closed rather than the mesh refined.
+		 *
+		 * THE CONSEQUENCE FOR FREE BOUNDARY IS THE POINT OF MEASURING IT. FB-1's
+		 * transmission row is INT_Gamma E_h( q ).nu C_m dGamma -- the same
+		 * band-extended normal flux over the same contour. Its accuracy is
+		 * bounded by exactly this, so a coupling that needs better than 1e-03
+		 * near the axis needs the band handled better, not a finer mesh.
+		 *
+		 * The mesh-boundary form is therefore what is ASSERTED, because it is
+		 * the one that tests the solver. The extended form is asserted only as
+		 * a bound, and its floor is recorded rather than hidden.
+		 */
+		double const meshRate =
+			meq::tests::rate( meshBoundaryRel.front(), meshBoundaryRel.back(),
+			                  spacing.front()/spacing.back() );
+		std::printf( "          Ampere on the mesh boundary converges at %.3f\n",
+		             meshRate );
+		std::fflush( stdout );
+
+		BOOST_TEST( meshRate > std::min( order + 1.0, 3.0 ) - 0.4,
+		            "Ampere's law on the MESH boundary converges at " << meshRate
+		            << " at k = " << order << ". This integral has no extension "
+		            "in it and no discretisation in the identity, so it is a "
+		            "direct statement about the assembly, the source and the "
+		            "trace solve" );
+
+		for ( std::size_t i = 0; i < fluxRel.size(); ++i )
+			BOOST_TEST( fluxRel[ i ] < 5.0e-3,
+			            "Ampere's law through the BAND is off by " << fluxRel[ i ]
+			            << " at k = " << order << ", mesh " << i << ". A floor "
+			            "near 1e-03 is expected here and is the extension near "
+			            "the axis; a departure well above it is not, and the "
+			            "mesh-boundary column above says whether the solve or "
+			            "the band is at fault" );
+	}
+}
+
+/*
+ * ===========================================================================
+ * THE CONTROL THAT SAYS WHERE AMPERE'S RESIDUAL COMES FROM
+ * ===========================================================================
+ *
+ * The half-disc case above satisfies Ampere's law to about 1.1e-03 and then
+ * FLOORS -- flat in h and in k alike, which is not a discretisation error.
+ * Two candidates: the AXIS segment, where FB-A measured q losing about half an
+ * order while psi keeps k+1, or something systematic in the arc sweep itself.
+ *
+ * THIS SEPARATES THEM BY REMOVING THE AXIS. Same solver, same extension, same
+ * outwardFlux(), same aligned conductor -- but Gamma is a circle WELL AWAY
+ * from r = 0, so D_h's whole boundary is Gamma_h and the contour closes without
+ * ever going near the degenerate weight. If the residual collapses here, the
+ * axis is the cause and the half-disc's floor is FB-A's half order showing up
+ * in an integral. If it stays at 1e-03, the axis is innocent and the arc sweep
+ * is what to look at.
+ *
+ * One variable, and it is the one in question.
+ */
+BOOST_AUTO_TEST_CASE( amperesLawIsExactOnAContourThatAvoidsTheAxis )
+{
+	double const centreR = 1.10;
+	double const centreZ = 0.0;
+	double const radius = 0.40;
+
+	auto circle = [ = ]( mfem::Vector const &x )
+	{
+		double const dr = x( 0 ) - centreR;
+		double const dz = x( 1 ) - centreZ;
+		return std::sqrt( dr*dr + dz*dz ) - radius;
+	};
+
+	// One coil, inside the circle and clear of the axis, with its edges on the
+	// mesh lines of every mesh below: the box is [0.5,1.7]x[-0.6,0.6] with n
+	// cells across, so h = 1.2/n and the coil spans 5h to 7h in both directions.
+	meq::CoilSet coils;
+	coils.add( meq::Coil( 1.10, 0.0, 0.10, 0.10, 2.4e5 ) );
+	double const expected = -coils.mu0()*coils.totalCurrent();
+
+	std::printf( "\n  AMPERE'S LAW WITH NO AXIS IN THE CONTOUR\n" );
+	std::printf( "    Gamma is a circle at r = %.2f, radius %.2f; one coil "
+	             "inside\n", centreR, radius );
+	std::printf( "    oint q.nu dGamma must be -mu0 I = %.10e\n\n", expected );
+	std::printf( "    %-5s %5s %8s %16s %12s\n", "k", "n", "h", "outward flux",
+	             "relative" );
+
+	std::vector<double> worst;
+	std::vector<double> meshWorst;
+
+	for ( int order : { 1, 2, 3 } )
+	{
+		double caseWorst = 0.0;
+		std::vector<double> band;
+		for ( int n : { 12, 24, 48 } )
+		{
+			mfem::Mesh background = mfem::Mesh::MakeCartesian2D(
+				n, n, mfem::Element::TRIANGLE, false, 1.2, 1.2 );
+			background.Transform( []( mfem::Vector const &in, mfem::Vector &out )
+			{
+				out( 0 ) = in( 0 ) + 0.5;
+				out( 1 ) = in( 1 ) - 0.6;
+			} );
+			double const h = 1.2/static_cast<double>( n );
+
+			mfem::Array<int> marker;
+			BOOST_TEST_REQUIRE( mfem::MarkLevelSetSubdomain(
+				background, circle, 0.0, marker, 1 ) > 0 );
+			for ( int e = 0; e < background.GetNE(); ++e )
+				background.SetAttribute( e, marker[ e ] ? 1 : 2 );
+			background.SetAttributes();
+
+			mfem::Array<int> domainAttr( 1 );
+			domainAttr[ 0 ] = 1;
+			auto sub = std::make_unique<mfem::SubMesh>(
+				mfem::SubMesh::CreateFromDomain( background, domainAttr ) );
+
+			int const gammaH = sub->bdr_attributes.Max();
+			BOOST_TEST_REQUIRE( sub->bdr_attributes.Size() == 1,
+				"D_h has inherited boundary at n = " << n << ", so part of the "
+				"contour is fitted and this is no longer an axis-free control" );
+
+			mfem::Array<int> gammaHMarker( gammaH );
+			gammaHMarker = 0;
+			gammaHMarker[ gammaH - 1 ] = 1;
+			mfem::VertexConePath path( *sub, gammaH, circle, 6.0*h );
+
+			mfem::FunctionCoefficient source(
+				[ & ]( mfem::Vector const &x )
+			{
+				return coils.f( x( 0 ), x( 1 ) );
+			} );
+			mfem::ConstantCoefficient zero( 0.0 );
+
+			meq::GradShafranovSolver solver( *sub, order );
+			solver.setSource( source );
+			solver.setBoundaryData( zero );
+			solver.setExtension( path, gammaHMarker );
+			solver.setExteriorDatum( [ & ]( mfem::Vector const &x )
+			{
+				return coils.psi( x( 0 ), x( 1 ) );
+			} );
+			solver.setTransmissionQuadratureOrder( 40 );
+			solver.solve();
+
+			double const flux = solver.outwardFlux();
+			double const rel = std::abs( flux - expected )/std::abs( expected );
+			caseWorst = std::max( caseWorst, rel );
+			band.push_back( rel );
+
+			// THE SAME INTEGRAL OVER Gamma_h, WITH NO EXTENSION ANYWHERE.
+			// D_h contains the whole conductor, so the divergence theorem on
+			// D_h alone gives exactly -mu0 I too -- and this version never
+			// leaves the mesh. If it is exact where the Gamma version is not,
+			// the band is the difference.
+			double polygon = 0.0;
+			{
+				mfem::GridFunction const &q = solver.flux();
+				mfem::Vector nu( 2 ), val( 2 );
+				for ( int be = 0; be < sub->GetNBE(); ++be )
+				{
+					if ( sub->GetBdrAttribute( be ) != gammaH )
+						continue;
+					mfem::FaceElementTransformations *ftr =
+						sub->GetBdrFaceTransformations( be );
+					if ( !ftr )
+						continue;
+					mfem::IntegrationRule const &fr =
+						mfem::IntRules.Get( ftr->GetGeometryType(), 2*order + 6 );
+					for ( int i = 0; i < fr.GetNPoints(); ++i )
+					{
+						mfem::IntegrationPoint const &ip = fr.IntPoint( i );
+						ftr->SetAllIntPoints( &ip );
+						mfem::CalcOrtho( ftr->Jacobian(), nu );
+						double const measure = nu.Norml2();
+						if ( !( measure > 0.0 ) ) { continue; }
+						nu /= measure;
+						mfem::Vector centre( 2 ), here( 2 );
+						sub->GetElementCenter( ftr->Elem1No, centre );
+						ftr->Transform( ip, here );
+						double outward = 0.0;
+						for ( int d = 0; d < 2; ++d )
+							outward += nu( d )*( here( d ) - centre( d ) );
+						if ( outward < 0.0 ) { nu.Neg(); }
+						q.GetVectorValue( ftr->Elem1No,
+						                  ftr->GetElement1IntPoint(), val );
+						polygon += ip.weight*measure*( val( 0 )*nu( 0 )
+						                               + val( 1 )*nu( 1 ) );
+					}
+				}
+			}
+			double const polyRel =
+				std::abs( polygon - expected )/std::abs( expected );
+			meshWorst.push_back( polyRel );
+
+			std::printf( "    %-5d %5d %8.4f %16.8e %12.3e   Gamma_h %12.3e\n",
+			             order, n, h, flux, rel, polyRel );
+			std::fflush( stdout );
+		}
+		worst.push_back( caseWorst );
+
+		// The band version must CONVERGE here, which is the whole contrast with
+		// the half-disc, where it floors.
+		BOOST_TEST( band.back() < 0.25*band.front(),
+		            "with no axis in the contour the band residual still does "
+		            "not converge at k = " << order << ": " << band.front()
+		            << " then " << band.back() << ". Then the axis is not what "
+		            "floors the half-disc and the arc sweep is what to look at" );
+	}
+
+	double const overall = *std::max_element( worst.begin(), worst.end() );
+	double const meshOverall = *std::max_element( meshWorst.begin(), meshWorst.end() );
+	std::printf( "\n    worst band residual, no axis:      %.3e  ( converges )\n",
+	             overall );
+	std::printf( "    worst over Gamma_h, no extension:  %.3e  ( round-off )\n",
+	             meshOverall );
+	std::printf( "    the half-disc, with the axis:      ~1.1e-03 ( FLAT )\n\n" );
+	std::fflush( stdout );
+
+	/*
+	 * THE SHARP CLAIM IS THE Gamma_h COLUMN: MEQ CONSERVES CURRENT EXACTLY.
+	 *
+	 * Integrated over the mesh boundary, with no extension anywhere, Ampere's
+	 * law holds to ROUND-OFF at every degree and every mesh -- 1e-14 to 6e-13.
+	 * The identity carries no discretisation, so this says the assembled
+	 * operator, the source, the boundary condition and the trace solve
+	 * reproduce the enclosed current exactly. It is the sharpest whole-assembly
+	 * statement in this file.
+	 *
+	 * Everything the band version loses is therefore the BAND, and comparing
+	 * the two columns is what localises it.
+	 */
+	BOOST_TEST( meshOverall < 1.0e-10,
+	            "Ampere's law over Gamma_h, with no extension anywhere, is off "
+	            "by " << meshOverall << ". That integral has no band and no "
+	            "discretisation in the identity, so it should be round-off: a "
+	            "departure is the assembly, the source or the trace solve, not "
+	            "the transfer" );
 }

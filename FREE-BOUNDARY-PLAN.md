@@ -877,7 +877,7 @@ the fallback to work.
 | **FB-A** | **The axis.** A vacuum solve on a mesh touching `r = 0`. No free boundary, no coupling. | **DONE, 2026-09-04 — see §7.2.** `ψ` at `k+1` on a mesh reaching the axis; `q` short by half an order; the conditioning penalty `O(1/h)` and not `O(1/h²)`. `tests/convergence/AxisConvergence.cpp` |
 | **FB-0** | `meq::ExteriorDtN`: the basis, the symbol, the mass. No solver. | **DONE, 2026-09-04 — see §7.3**, except §3.4's CEDRES++ agreement, which is now specified but not built. The current-loop test reads **1.4e−15** in the trace and **6.9e−14** in the DtN |
 | **FB-1** | **Vacuum only.** The whole coupling, on a linear problem with an exact answer. | **DONE 2026-09-05 — see §7.8.** `ψ` at **1.99 / 2.99 / 3.99** on the half-disc with the datum given (FB-1a), and the transmission condition recovers the exterior coefficients to **1.9e-04, converging at 3.30** (FB-1b). `∂F/∂a` needs no measurement under NPC — §7.4 |
-| **FB-2** | A **prescribed** plasma current, still linear: put a known `j_φ` inside and check the exterior. | Same rate; and `ComputeOutwardFlux` against the total current, which is the sharpest whole-assembly test available. **The current and the identity are built — §7.6**; what is missing is the solve to apply them to |
+| **FB-2** | A **prescribed** plasma current, still linear. | **DONE 2026-09-05 — see §7.9.** `ψ` at 1.99 / 2.88 / 3.01, and Ampère's law through the solve: **round-off over `Γ_h`** and `k+1`-convergent on the half-disc. Two meshing findings came out of it, both about aligning the mesh to geometry that is known in advance |
 | **FB-3** | `ψ_bnd` as an unknown, plasma support still fixed. | Self-consistency of `ψ_bnd` to round-off, Newton order 2, exactly as `HighBetaConvergence` asserts for `ψ_ax` |
 | **FB-4** | The moving plasma support and cut quadrature. | The order that survives the cut, measured, against `k+1` — **and the cost of an inconsistent cut Jacobian measured in Newton's observed order**, which decides §5.3's two options |
 | **FB-5** | The augmented Newton as one bordered solve, and adaptivity through it. | `η` monotone through refinement with `Γ` fixed; assumption P.1 preserved |
@@ -1499,6 +1499,67 @@ back-substitutions. What the test throws away is the *reuse* of the
 factorisation, which is a cost and not an answer. A plasma makes the interior
 non-linear and then the border has to live inside Newton, which is **FB-5**, and
 §4.4 is right that `solveWithNormalisation()` already does it at `N = 1`.
+
+### 7.9 FB-2, and two things the mesh should be aligned to
+
+**`outwardFlux()` is Ampère's law on the solve**, `∮_Γ q·ν dΓ = −μ₀ I`, with no
+discretisation anywhere in the identity. `CoilsTests` already pinned it on the
+exact field at 3.3e-11, so a discrepancy is the solve.
+
+**MEQ CONSERVES CURRENT EXACTLY.** Integrated over the **mesh** boundary with no
+extension, it is **round-off — 1e-14 to 6e-13** — at every degree and mesh on a
+contour clear of the axis, and `k+1`-convergent to 5.6e-12 on the half-disc. So
+the assembled operator, the source, the boundary condition and the trace solve
+reproduce the enclosed current exactly.
+
+**EVERYTHING LOST IS THE BAND.** Over the *true* `Γ`, through `E_h(q_h)`, the
+residual is 1e-3 on the half-disc and floors flat in `h` and `k`. Away from the
+axis it converges instead. The extension is an extrapolation and satisfies
+`div q = 0` only to its own order.
+
+**AND THE FLOOR IS THE GAP BETWEEN `Γ_h` AND `Γ` AT THE AXIS. CLOSING IT IS
+WORTH 17×**, changing nothing but `ρ_Γ` so `D_h`'s topmost axis row is included
+rather than excluded:
+
+| `ρ_Γ` | axis gap | band | mesh boundary | `ψ` L2 |
+|---|---|---|---|---|
+| 1.5000 | 0.0125 | 1.07e-03 | 2.01e-08 | 1.6355e-06 |
+| 1.5416 | 0.0010 | **6.41e-05** | 1.74e-08 | 1.6361e-06 |
+
+The mesh-boundary residual and `ψ` barely move, which is what says the solve is
+untouched. `D_h` is the union of elements *entirely* inside `Γ`, so the staircase
+stops at the last mesh line whose outer corner still fits — putting `ρ_Γ` just
+**above** a mesh line rather than just below includes that row. Making the gap
+fall as `O(h²)` wants an offset of about `h²/(2ρ_Γ)` chosen per mesh.
+
+**THIS BOUNDS FB-1'S TRANSMISSION ROW**, which is the reason to care: that row is
+`∫_Γ E_h(q)·ν C_m dΓ` over this same contour, so a coupling needing better than
+1e-3 near the axis wants the gap closed rather than the mesh refined.
+
+**THE CONDUCTOR SHOULD BE MESH-ALIGNED TOO, AND THAT IS WORTH A WHOLE ORDER.**
+`F = μ₀ r j` is discontinuous at a uniform-density conductor's edge, and where
+that edge cuts a cell the element quadrature integrates a discontinuous
+integrand with a rule assuming smoothness:
+
+| `k` | cut cells | aligned |
+|---|---|---|
+| 1 | 1.330 | **1.991** |
+| 2 | 1.265 | **2.876** |
+| 3 | 1.086 | **3.013** |
+
+with the `k = 3` L2 falling from 1.08e-04 to **1.97e-08**. A rate that *falls*
+with `k` is the signature — a genuine regularity limit is flat in `k`, and only
+a quadrature error worsens as the rest of the scheme improves.
+
+**AND THAT IS A SCOPE REDUCTION FOR FB-4.** The two look like one problem and are
+not: a conductor's geometry is **prescribed input** and can always be meshed to,
+while `χ_{Ω_p}` is bounded by a boundary that **moves with the solution** and
+cannot be. Cut quadrature is needed for the plasma support and **not** for the
+conductors, so §6.4's one real gap is narrower than it looked.
+
+The aligned rate caps at 3 because a rectangular conductor has **corners**, and a
+corner in the forcing gives the same `r² log r` behaviour a corner in the domain
+does. Alignment cannot fix that; rounding the conductor would.
 
 ## 8. Risks, in the order they are likely to bite
 

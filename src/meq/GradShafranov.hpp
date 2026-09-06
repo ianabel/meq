@@ -1132,6 +1132,33 @@ namespace meq
 			std::vector<mfem::Vector>
 			exteriorTransmissionRows( ExteriorDtN const &exterior ) const;
 
+			/// The outward flux of `q` through the true boundary `Gamma`:
+			/// `oint_Gamma q.nu dGamma`.
+			///
+			/// **THIS IS AMPERE'S LAW AND IT IS THE SHARPEST WHOLE-ASSEMBLY
+			/// CHECK MEQ HAS.** Since `q = ( 1/r ) grad_bar( psi )`, the
+			/// integrand is `( 1/r ) dpsi/dn`, and integrating the equation over
+			/// the enclosed region gives
+			///
+			///     oint_Gamma ( 1/r ) dpsi/dn dl = -mu0 * I_enclosed
+			///
+			/// exactly, with no discretisation anywhere in the statement. So it
+			/// ties the assembled operator, the source, the boundary condition
+			/// and the transfer to ONE number that is known in advance --
+			/// `meq::CoilSet::totalCurrent()` for a prescribed current, and
+			/// `tests/unit/CoilsTests.cpp` already pins the identity itself on
+			/// the exact field to 3.3e-11, so a discrepancy here is the SOLVE.
+			///
+			/// Swept over `Gamma` with `mfem::ExtensionBoundaryQuadrature`, the
+			/// same routine and the same signed weight the transmission rows
+			/// use, with the mode dropped. So it inherits their caveats: the
+			/// weight is signed on purpose, and the rule must resolve the foot
+			/// map -- see setTransmissionQuadratureOrder().
+			///
+			/// Valid after solve(). Throws std::logic_error on the fitted path,
+			/// where there is no band and `Gamma` is `Gamma_h`.
+			double outwardFlux() const;
+
 			/// The quadrature rule order used along each `Gamma_h` face by
 			/// exteriorTransmissionRows(). Defaults to a rule generous enough that
 			/// it is not what limits the row; raise it to check that.

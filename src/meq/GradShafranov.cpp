@@ -1345,6 +1345,141 @@ namespace
 		prepared = false;
 	}
 
+	double GradShafranovSolver::outwardFlux() const
+	{
+		mfem::Mesh &mesh = *traceFes->GetMesh();
+		mfem::Array<int> vdofs;
+		double total = 0.0;
+
+		for ( int be = 0; be < mesh.GetNBE(); ++be )
+		{
+			int const attribute = mesh.GetBdrAttribute( be );
+			if ( attribute < 1 || attribute > gammaHMarker.Size() )
+				continue;
+			bool const transferred = transferPath
+			                         && gammaHMarker[ attribute - 1 ];
+
+			thread_local mfem::FaceElementTransformations faceScratch;
+			thread_local mfem::IsoparametricTransformation faceElem1;
+			thread_local mfem::IsoparametricTransformation faceElem2;
+			mesh.GetBdrFaceTransformations( be, faceScratch, faceElem1, faceElem2 );
+			if ( faceScratch.GetGeometryType() == mfem::Geometry::INVALID )
+				continue;
+
+			int const element = faceScratch.Elem1No;
+			mfem::FiniteElement const *fluxFe = fluxFes->GetFE( element );
+			if ( !fluxFe )
+				continue;
+
+			fluxFes->GetElementVDofs( element, vdofs );
+			int const dof = fluxFe->GetDof();
+			int const dim = mesh.Dimension();
+
+			thread_local mfem::IsoparametricTransformation elementScratch;
+			mesh.GetElementTransformation( element, &elementScratch );
+			mfem::ElementExtension extender;
+			extender.SetElement( elementScratch );
+
+			mfem::IntegrationRule const &faceRule =
+				mfem::IntRules.Get( faceScratch.GetGeometryType(),
+				                    transmissionQuadratureOrder );
+
+			mfem::Vector shape( dof );
+			bool reached = true;
+
+			// q.nu from the element's flux dofs at a reference point. The minus
+			// undoes DarcyForm's convention, exactly as the transmission rows
+			// do: the block holds -q and the identity is written for q.
+			auto normalFlux = [ & ]( mfem::IntegrationPoint const &eip,
+			                         mfem::Vector const &nu )
+			{
+				fluxFe->CalcShape( eip, shape );
+				double normalComponent = 0.0;
+				for ( int d = 0; d < dim; ++d )
+				{
+					double component = 0.0;
+					for ( int j = 0; j < dof; ++j )
+						component += shape( j )*solution( vdofs[ dof*d + j ] );
+					normalComponent += component*nu( d );
+				}
+				return -normalComponent;
+			};
+
+			if ( transferred )
+			{
+				mfem::ExtensionBoundaryQuadrature( faceScratch, *transferPath,
+					faceRule,
+					[ & ]( mfem::ExtensionBoundaryPoint const &pt )
+				{
+					if ( !reached )
+						return;
+
+					mfem::IntegrationPoint eip;
+					if ( !extender.TransformBack( pt.y, eip ) )
+					{
+						reached = false;
+						return;
+					}
+					// pt.weight is SIGNED and is used as it stands.
+					total += pt.weight*normalFlux( eip, pt.nu );
+				} );
+			}
+			else
+			{
+				/*
+				 * A FITTED FACE, AND ON THE HALF-DISC THOSE ARE THE AXIS.
+				 *
+				 * LEAVING THEM OUT IS WHAT MADE THIS 93% WRONG AND FLAT.
+				 * Gamma is a SEMICIRCLE, so the boundary enclosing the current
+				 * is the arc PLUS the axis segment, and the divergence theorem
+				 * wants all of it. The axis does not contribute zero: psi ~
+				 * c( z ) r^2 there, so q_r = 2c is finite and generally
+				 * non-zero even though psi itself vanishes.
+				 *
+				 * The symptom was diagnostic once seen -- an error that does
+				 * not move under either h or k is not a discretisation error,
+				 * and this one sat at 93% across three meshes and three
+				 * degrees. It was a missing PIECE OF THE CONTOUR.
+				 *
+				 * No extension here: a fitted face is on Gamma already.
+				 */
+				mfem::Vector nu( dim );
+				for ( int i = 0; i < faceRule.GetNPoints(); ++i )
+				{
+					mfem::IntegrationPoint const &ip = faceRule.IntPoint( i );
+					faceScratch.SetAllIntPoints( &ip );
+					mfem::CalcOrtho( faceScratch.Jacobian(), nu );
+					double const measure = nu.Norml2();
+					if ( !( measure > 0.0 ) )
+						continue;
+					nu /= measure;
+
+					// CalcOrtho follows the face's parametrisation, so orient
+					// it away from the interior element, as
+					// ExtensionBoundaryQuadrature orients its own.
+					mfem::Vector centre( dim ), here( dim );
+					mesh.GetElementCenter( faceScratch.Elem1No, centre );
+					faceScratch.Transform( ip, here );
+					double outward = 0.0;
+					for ( int d = 0; d < dim; ++d )
+						outward += nu( d )*( here( d ) - centre( d ) );
+					if ( outward < 0.0 )
+						nu.Neg();
+
+					total += ip.weight*measure
+					         *normalFlux( faceScratch.GetElement1IntPoint(), nu );
+				}
+			}
+
+			if ( !reached )
+				throw std::runtime_error(
+					"meq::GradShafranovSolver::outwardFlux: the extension of an "
+					"element of Gamma_h did not reach its foot on Gamma" );
+		}
+
+		return total;
+	}
+
 	void GradShafranovSolver::setTransmissionQuadratureOrder( int order )
 	{
 		if ( order < 0 )
