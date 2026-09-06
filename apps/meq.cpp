@@ -1464,6 +1464,30 @@ int main( int argc, char **argv )
 		double gridZMin = config->getMesh().zMin, gridZMax = config->getMesh().zMax;
 		if ( shape )
 			shape->boundingBox( gridRMin, gridRMax, gridZMin, gridZMax );
+		else if ( config->getMesh().fromFile() )
+		{
+			/*
+			 * A MESH FROM A FILE CARRIES NO RMin..ZMax, SO THE GRID TAKES THE
+			 * MESH'S OWN BOUNDING BOX.
+			 *
+			 * Those four keys describe the box `[mesh]` would have BUILT, and a
+			 * file supplies none of them -- they default to zero, the extent
+			 * comes out empty, and meq::GridSampler refuses with "the grid
+			 * extent must be positive in both directions". The run had already
+			 * solved by then, so the whole answer was lost to the output stage.
+			 *
+			 * This is the ordinary case for free boundary rather than a corner:
+			 * the half-disc reaching the axis is not a box and cannot come from
+			 * `MakeCartesian2D`, so a free-boundary run ALWAYS reads its mesh
+			 * from a file -- see tools/mesh/README.md. The mesh's own extent is
+			 * also the right answer, being exactly the region the solve claims
+			 * anything about.
+			 */
+			mfem::Vector low, high;
+			solveMesh->GetBoundingBox( low, high );
+			gridRMin = low( 0 ); gridRMax = high( 0 );
+			gridZMin = low( 1 ); gridZMax = high( 1 );
+		}
 
 		meq::GridSampler sampler( *solveMesh,
 			gridRMin, gridRMax, output.gridNR,

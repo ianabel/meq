@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <utility>
 #include <memory>
 #include <string>
 #include <vector>
@@ -210,6 +211,40 @@ namespace
 		} );
 		mesh.UniformRefinement();
 		return mesh;
+	}
+
+	/// The first and last values of a NetCDF coordinate variable, through
+	/// ncdump. The `.nc` carries the grid extent in `R` and `Z` themselves
+	/// rather than as attributes, so this is where a caller reads it from --
+	/// and going through ncdump keeps the check off MEQ's own writer.
+	std::pair<double, double> coordinateRange( std::string const &path,
+	                                           std::string const &name )
+	{
+		std::string const scratch = "driver-acceptance-coord.txt";
+		std::string const command = "ncdump -v " + name + " " + path
+		                            + " > " + scratch + " 2>&1";
+		if ( std::system( command.c_str() ) != 0 )
+			return { std::nan( "" ), std::nan( "" ) };
+
+		std::string text = slurp( scratch );
+		std::remove( scratch.c_str() );
+
+		// The data section, which is where the values are -- the header above
+		// it also contains the variable's name.
+		std::size_t at = text.find( "data:" );
+		if ( at == std::string::npos ) { return { std::nan( "" ), std::nan( "" ) }; }
+		at = text.find( "\n " + name + " = ", at );
+		if ( at == std::string::npos ) { return { std::nan( "" ), std::nan( "" ) }; }
+		at += name.size() + 5;
+		std::size_t const end = text.find( ';', at );
+		if ( end == std::string::npos ) { return { std::nan( "" ), std::nan( "" ) }; }
+
+		std::string const values = text.substr( at, end - at );
+		double const first = std::strtod( values.c_str(), nullptr );
+		std::size_t const last = values.find_last_of( ',' );
+		double const back = last == std::string::npos
+			? first : std::strtod( values.c_str() + last + 1, nullptr );
+		return { first, back };
 	}
 
 	/// A stored GridFunction, on a mesh the caller keeps alive.
@@ -1027,6 +1062,79 @@ BOOST_AUTO_TEST_CASE( theDriverAddsTheCoilsToF )
 
 	for ( char const *path : { "driver-acceptance-zerocoil.toml",
 	                           "driver-acceptance-nocoil.toml" } )
+		std::remove( path );
+}
+
+/*
+ * A MESH FROM A FILE, AND THE GRID EXTENT THAT USED TO BE LOST WITH IT.
+ *
+ * `[mesh] File` supplies no `RMin`..`ZMax`, and those four keys are what the
+ * gridded output samples over -- so the extent came out empty, `meq::GridSampler`
+ * refused, and a run that had ALREADY SOLVED was lost at the output stage. The
+ * driver takes the mesh's own bounding box instead.
+ *
+ * NOT A CORNER CASE. The half-disc reaching the axis that free boundary needs
+ * cannot come from `MakeCartesian2D` at all -- it is a semicircle centred on
+ * r = 0, and the exterior expansion is a statement about exactly that geometry
+ * -- so a free-boundary run ALWAYS reads its mesh from a file. See
+ * tools/mesh/README.md and tools/mesh/halfdisc.py, which generates it.
+ *
+ * The mesh here is written by MFEM rather than by gmsh, deliberately: what is
+ * being tested is the driver's handling of a mesh whose extent it did not
+ * choose, and generating one needs gmsh, which the test suite does not require.
+ * The gmsh path is exercised by `halfdisc.py --check`, which re-reads its own
+ * output.
+ */
+BOOST_AUTO_TEST_CASE( theDriverTakesItsGridFromAMeshItDidNotBuild )
+{
+	// A box that is NOT at the origin and is NOT square, so a driver that fell
+	// back to a default extent, or transposed the two directions, disagrees.
+	double const rMin = 1.3, rMax = 2.1, zMin = -0.55, zMax = 0.75;
+	{
+		mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D(
+			6, 8, mfem::Element::TRIANGLE, false, rMax - rMin, zMax - zMin );
+		mesh.Transform( [ & ]( mfem::Vector const &in, mfem::Vector &out )
+		{
+			out = in;
+			out( 0 ) += rMin;
+			out( 1 ) += zMin;
+		} );
+		std::ofstream file( "driver-acceptance-frommesh.mesh" );
+		mesh.Print( file );
+	}
+
+	{
+		std::ofstream file( "driver-acceptance-frommesh.toml" );
+		file << "[mesh]\n"
+		        "File = \"driver-acceptance-frommesh.mesh\"\n"
+		        "\n[discretisation]\nPolynomialDegree = 2\n"
+		        "\n[source]\nType = \"soloviev\"\nA = -0.52\n"
+		        "\n[boundary]\nType = \"zero\"\n"
+		        "\n[output]\nDirectory = \".\"\nPrefix = \"frommesh\"\n"
+		        "GridNR = 33\nGridNZ = 33\n";
+	}
+
+	BOOST_TEST_REQUIRE( run( "driver-acceptance-frommesh.toml" ) == 0,
+	                    "the driver did not exit 0 on a mesh read from a file" );
+	BOOST_TEST_REQUIRE( exists( "frommesh.nc" ),
+	                    "the gridded output was not written, which is the "
+	                    "failure this case exists for -- the solve succeeded "
+	                    "and the answer was lost at the output stage" );
+
+	// The extent is the MESH's, read back through ncdump rather than through
+	// MEQ's own writer.
+	std::pair<double, double> const r = coordinateRange( "frommesh.nc", "R" );
+	std::pair<double, double> const z = coordinateRange( "frommesh.nc", "Z" );
+	BOOST_TEST( r.first == rMin, boost::test_tools::tolerance( 1.0e-12 ) );
+	BOOST_TEST( r.second == rMax, boost::test_tools::tolerance( 1.0e-12 ) );
+	BOOST_TEST( z.first == zMin, boost::test_tools::tolerance( 1.0e-12 ) );
+	BOOST_TEST( z.second == zMax, boost::test_tools::tolerance( 1.0e-12 ) );
+	std::printf( "\n  a mesh MEQ did not build\n"
+	             "    grid R [%.4f, %.4f]  Z [%.4f, %.4f]  from the mesh itself\n",
+	             r.first, r.second, z.first, z.second );
+
+	for ( char const *path : { "driver-acceptance-frommesh.toml",
+	                           "driver-acceptance-frommesh.mesh" } )
 		std::remove( path );
 }
 

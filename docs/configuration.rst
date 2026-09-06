@@ -106,12 +106,24 @@ The background mesh: either a box that MEQ triangulates, or a file.
      - Any mesh format MFEM reads. Non-empty selects file mode, in which the box
        keys and ``NR``/``NZ`` are not used.
 
+.. note::
+
+   **The gridded output takes its extent from the mesh itself when the mesh
+   comes from a file**, since ``RMin``…``ZMax`` describe a box that was not
+   built. That is also the right answer: the mesh's extent is exactly the
+   region the solve claims anything about.
+
+   It used to be degenerate, and a run that had already solved was then lost at
+   the output stage — which is not a corner case for free boundary, where the
+   half-disc reaching the axis cannot come from ``MakeCartesian2D`` and the mesh
+   is *always* a file. See ``tools/mesh/README.md``.
+
 .. warning::
 
-   ``File`` **is effectively supported on the fitted path only.** The box bounds
-   are what the gridded output samples over and what sets the search length for
-   the curved boundary's transfer paths; with a mesh file and no
-   ``[boundary.shape]`` to supply a bounding box, both are degenerate.
+   ``File`` **still gives up something on the curved path.** The box bounds are
+   what set the search length for the transfer paths of ``[boundary.shape]``,
+   and a mesh file supplies none — so a file plus a shape is not a configuration
+   to reach for. A file with no shape, which is the free-boundary case, is fine.
 
 ``[discretisation]``
 --------------------

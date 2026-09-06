@@ -144,3 +144,24 @@ format MEQ does not own.
 profile amplitudes is a common thing to want a figure of, and each `.nc` carries
 the provenance to build one from (`polynomial_degree`, `elements`,
 `adaptive_eta`, ...). Nothing reads across files yet.
+
+## Making a mesh
+
+`mesh/halfdisc.py` generates the half-disc-with-conductors that free boundary
+needs and MFEM's built-in mesher cannot make: a semicircle **reaching r = 0
+exactly**, with the coil rectangles meshed to as their own subdomains, coarse
+over the vacuum and refined where the plasma is. `mesh/README.md` says why each
+of those is a requirement rather than a preference — the exterior expansion is
+a statement about that exact geometry — and how to read the attributes it
+writes.
+
+```sh
+python3 tools/mesh/halfdisc.py --rho 1.5 --size 0.15 \
+    --coil 0.90 -0.86 0.25 0.12 --plasma 0.30 -0.55 0.70 1.10 \
+    --plasma-size 0.035 --check -o machine.msh
+```
+
+Pass `--check` whenever the geometry changes: it re-reads the written file and
+asserts the properties MEQ depends on. It exists because the first version of
+the tool tagged twelve interior conductor edges as Γ, which nothing downstream
+would have reported.

@@ -4150,6 +4150,76 @@ the tangent is undefined there, so a trace at that level will stall or turn a
 corner arbitrarily. `pointAtArcLength()` parametrises segments linearly in
 *polyline* length rather than true arc length, and says so.
 
+### Meshing the half-disc, and the boundary tag nothing would have reported
+
+**`tools/mesh/halfdisc.py` is the generator free boundary needs**, and MFEM's
+built-in mesher cannot make what it makes: a **semicircle centred on the axis,
+reaching `r = 0` exactly**, with the coil rectangles fragmented in as their own
+subdomains, coarse over the vacuum and refined where the plasma is. gmsh 4.14 is
+Debian-packaged here and MFEM reads its format natively, so the coupling is a
+**file** and nothing else.
+
+**`r = 0` IS THE REQUIREMENT AND IT IS EXACT.** Measured through `mfem::Mesh`
+rather than through gmsh — `r ∈ [0, 1.5]`, **21 vertices at exactly `r == 0.0`**,
+20 boundary faces on the axis at `|r| = 0.000e+00`, and Γ's vertices on the true
+circle to **4.441e-16**. At geometric order 2 the mid-edge nodes land on the arc
+to the same 4.441e-16 and the axis nodes stay at exactly `0.0`, which is why the
+geometry is a **disc minus a half-plane** rather than an arc plus two lines: OCC
+owns the curvature, so gmsh has the real circle to place them on. `--check`
+asserts `r == 0.0` **without a tolerance**, because a domain stopping at
+`r = 0.05` is not a slightly worse semicircle — the Gegenbauer basis of
+`FREE-BOUNDARY-PLAN.md` §3 does not span its exterior, and nothing downstream
+would say so.
+
+**AND THE FIRST VERSION TAGGED TWELVE INTERIOR EDGES AS Γ.** Γ and the axis were
+selected by asking each 1-D entity where its centre of mass sat; after
+`occ.fragment` the model also holds **each conductor's own outline**, every one
+of which is "not on the axis", so they joined Γ. A 1-D physical group is written
+to the `.msh`, and **MFEM's reader turns 1-D elements into BOUNDARY elements
+whether or not they are topologically on the boundary**. Measured: 64 boundary
+faces, of which 32 on the arc, 20 on the axis and **12 on the coil rectangles**.
+Attribute 1 carries the transferred exterior datum, so the run would have
+imposed Γ's Dirichlet condition on twelve edges buried inside the conductors —
+converging at full order to the wrong equilibrium.
+`getBoundary( surfaces, combined = True )` is the fix and is the right question:
+combined over every surface, shared edges cancel and the outer boundary
+survives. 32 + 20 + **0 stray** now.
+
+**THE INSTRUMENT WAS WRONG TOO, WHICH MAKES IT FIVE TIMES IN THIS TREE.**
+`gmsh.model.mesh.getNodes()` returns coordinates ordered to match its **tag
+list**, not sorted by tag — the tags come out grouped by owning entity and are
+neither sorted nor contiguous. Indexing `coords[3*(tag-1)]` therefore reads a
+*different node*, and the first `--check` did: it reported the axis group at
+`r = 1.4928` and a coil spanning most of the disc, which looks like catastrophic
+meshing and was the checker. Same shape as the cone tiling, the MXH distance,
+the transmission row's shared rule and the FB-1b single-mesh check.
+
+**COARSE DISC, REFINED PLASMA, AND THE SAVING GROWS WITH `ρ`.** Γ must sit far
+enough out for the exterior expansion to converge and the plasma occupies little
+of what that encloses, so a uniform mesh at the plasma's resolution spends most
+of its elements on sourceless vacuum. Against a uniform mesh at `h = 0.035`:
+`ρ = 1.5` reads 2,965 against 7,672 (**2.6×**) and `ρ = 3.0` reads 3,368 against
+30,392 (**9.0×**) — moving Γ out costs the graded mesh 14% more elements and the
+uniform one four times as many. That is the direction the coupling pushes.
+
+**`[mesh] File` USED TO LOSE THE GRIDDED OUTPUT, AFTER SOLVING.** `RMin`…`ZMax`
+describe a box that was not built, so the extent came out empty and
+`meq::GridSampler` refused — the answer was lost at the output stage. **Not a
+corner case**: the half-disc cannot come from `MakeCartesian2D`, so a
+free-boundary run *always* reads its mesh from a file. The driver takes the
+mesh's own bounding box now, which is also the right answer.
+`theDriverTakesItsGridFromAMeshItDidNotBuild` pins it.
+
+**WHY PYTHON, AND WHY GMSH IS NOT LINKED INTO `meq_core`.** gmsh ships a C++ API
+and a Python module, and **the Python module is `ctypes` over the same
+`libgmsh.so`**, generated from the same `api/gen.py`: identical function set,
+identical meshes, the same code doing the work. Linking would buy no capability
+— MFEM reads the `.msh` natively, so the file is the whole interface — and would
+cost `libgmsh-dev` as a build dependency of a tree whose CI cannot build the
+solver at all. The one thing that would change the answer is re-meshing *during*
+a solve; MEQ's adaptive loop **refines** through `meq::AdaptiveDomain` instead,
+so that is not on the plan, and the script transliterates if it arrives.
+
 ## The linear solves, and what they should be
 
 A hybridized HDG scheme needs exactly two linear solvers: one for the global
