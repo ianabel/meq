@@ -1674,6 +1674,92 @@ not vanish at the edge should be **refused at parse**, the way
 `[boundary] Type = "exact"` is, rather than run to a non-convergence the user
 has to diagnose. That is driver work and belongs with FB-5.
 
+### 7.11 FB-6's test problem: there is no reproducible ITER case, and there is a better answer
+
+**Searched 2026-09-06.** The question was whether `refs/` carries an ITER
+free-boundary benchmark, ideally CEDRES++'s. It does not — but the search
+turned up something more useful, and it turns on a symbol clash between two
+papers.
+
+**CEDRES++ §4.1 IS AN ITER CASE AND IS NOT REPRODUCIBLE.** It specifies
+`I_p = 15.10 MA`, `r₀ = 6.2 m` and the profile parameters, and then:
+
+* **no coil currents.** Its Problem 2 takes them as *given* and §4.1 never gives
+  them. Without them there is no free-boundary problem to pose.
+* **no wall, limiter or vessel geometry.** "ITER geometry" is all that is said.
+* **no reference field.** Their `ψ_ref` is *their own* fine-mesh answer on
+  1,153,174 triangles, shown as a figure (their Fig. 3). §4.1 is a
+  self-convergence study, which is precisely the fallback FB-6 rejects: it
+  shares every convention with the code it checks.
+
+`refs/MFEM-GS-Newton.pdf` (Serino, Tang, Tang, Kolev & Lipnikov) has a **15 MA
+ITER baseline** and is MFEM-based, so it looked promising — but it solves the
+INVERSE problem, seeded from a proprietary ITER discharge carrying the reference
+number **ABT4ZL**. The coil currents are an output of a run nobody outside can
+reproduce. Nothing else on disk carries a free-boundary case with data.
+
+**WHAT THE SEARCH DID FIND: CEDRES++'s PROFILE MODEL AND `freegs4e`'s ARE THE
+SAME FAMILY, TERM FOR TERM.** CEDRES++ (2.11), off the rendered page:
+
+```
+S_p'( Ψ ) = ( β/r₀ )( 1 − Ψ^α )^γ ,     S_ff'( Ψ ) = ( 1 − β ) μ₀ r₀ ( 1 − Ψ^α )^γ
+```
+
+and `freegs4e`'s `ConstrainBetapIp`:
+
+```
+J_φ = L [ β₀ R/R_axis + ( 1 − β₀ ) R_axis/R ] ( 1 − Ψ^{alpha_m} )^{alpha_n}
+```
+
+Since `μ₀ R J_φ = μ₀ R² p' + ff'`, these are the same two-parameter family with
+
+| CEDRES++ | `freegs4e` | ITER value |
+|---|---|---|
+| `α`, the peakage exponent | `alpha_m` | **2** |
+| `γ` | `alpha_n` | **1.395** |
+| `β` | `beta0` | **0.5978** |
+| `r₀` | `Raxis` | **6.2 m** |
+| `λ`, fixed by `I_p` | `L`, fixed by `Ip` | `I_p = 15.10 MA` |
+
+**So the published ITER PROFILE is exactly runnable in `freegs4e`**, and FB-6 can
+use it on a machine `freegs4e` defines — which gives a published, ITER-relevant
+current profile *and* an independent reference, where CEDRES++ offers the first
+without the second.
+
+**AND `α = 2` RATHER THAN THE `0.5978` CEDRES++ PRINTS.** The paper's §4.1 says
+`α = 0.5978, β = 0.5978, γ = 1.395` — the same number twice. Serino et al., using
+*"the same coefficients used in [11] for the ITER configuration"*, write their
+(2.5) with a different symbol assignment — their `α` is the scaling constant
+CEDRES++ calls `λ`, and their `δ` is CEDRES++'s peakage `α` — and set **`δ = 2`**,
+`β = 0.5978`, `γ = 1.395`, `r₀ = 6.2`. **CEDRES++'s printed `α` is a repetition of
+`β`.** Both readings were taken off rendered pages, not from `pdftotext`, per the
+standing rule for this pair of papers. `α = 2` also gives the standard
+`( 1 − Ψ² )^γ` shape and is `freegs4e`'s own convention.
+
+**AND FB-4's PRECONDITION BITES ON THE PUBLISHED ITER PROFILE.** The vanishing
+order at the plasma edge is `j = γ` exactly, since `( 1 − Ψ^α )^γ ~ ( α( 1 − Ψ ) )^γ`
+there. With ITER's `γ = 1.395`:
+
+* `ψ*` keeps `k+2` only where `k + 2 ≤ j + 2.5 = 3.895`, i.e. **`k = 1` and no
+  higher**;
+* and `γ < 2`, so `∂F/∂ψ ~ ( 1 − Ψ )^{γ−2}` is **unbounded at the edge** — worse
+  than §7.10's `j = 1` fixture, where it merely jumps.
+
+**So the ITER profile as published is a `k = 1` case with a singular Jacobian at
+the plasma boundary.** That makes it a good late stress test and a bad first
+one. **FB-6 should open at `γ = 2` or 3**, which is one number in the same
+family, and bring `γ = 1.395` in afterwards as the published case — with the
+expectation, from §7.10, that `k ≥ 2` will not hold `k+2` on it and that this is
+the profile's property rather than MEQ's.
+
+**The machine.** `freegs4e` defines `TestTokamak`, `DIIID`, `MAST`, `MAST_sym`,
+`TCV`, `MASTU_simple` and `MASTU` — **and no ITER**. Any of them serves, and
+`tools/freegs4e-benchmark/` already drives seven configurations across them for
+the fixed-boundary rehearsal. Building an ITER coil set from public design data
+is possible and would not be *the* CEDRES++ case anyway, its currents being
+unpublished; it is worth doing only if an ITER-scale aspect ratio is wanted for
+its own sake.
+
 ## 8. Risks, in the order they are likely to bite
 
 **The axis, and it is FB-A because it can be measured now.** The half-disc

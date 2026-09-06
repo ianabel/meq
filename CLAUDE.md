@@ -5045,6 +5045,38 @@ instrument-not-answer finding in this file — in the one place where it produce
 a false claim about somebody else's code. **All four defects are now closed and
 the report is deletable**; see `CLOSED-REPORTS-FROM-MEQ.md`.
 
+### FB-6's test problem: no reproducible ITER case, and the profile that is
+
+**Searched 2026-09-06; the record is `FREE-BOUNDARY-PLAN.md` §7.11.**
+
+**CEDRES++'s ITER case cannot be reproduced**: no coil currents, no wall, and a
+reference that is their own fine mesh printed as a figure. Serino et al.'s 15 MA
+ITER baseline is an *inverse* solve seeded from a proprietary discharge
+(ABT4ZL). Nothing else in `refs/` carries a free-boundary case with data.
+
+**But CEDRES++'s profile model (2.11) and `freegs4e`'s `ConstrainBetapIp` are
+the same family term for term** — `α`↔`alpha_m`, `γ`↔`alpha_n`, `β`↔`beta0`,
+`r₀`↔`Raxis`, `λ`↔`L` — so the published ITER profile is runnable against an
+independent code. ITER: `α = 2`, `γ = 1.395`, `β = 0.5978`, `r₀ = 6.2 m`,
+`I_p = 15.10 MA`.
+
+**`α = 2` AND NOT THE `0.5978` CEDRES++ PRINTS.** Their §4.1 prints `β`'s value
+twice; Serino et al., citing the same ITER coefficients, give the peakage
+exponent as 2 under the name `δ` — their `α` being CEDRES++'s scaling `λ`, a
+symbol clash rather than a disagreement. Both readings taken off **rendered
+pages**, which is the standing rule for this pair.
+
+**AND THE PUBLISHED ITER PROFILE IS A `k = 1` CASE.** The vanishing order at the
+plasma edge is `j = γ` exactly, so `γ = 1.395` caps `ψ*` at `j + 2.5 = 3.895` and
+`k+2` survives only at `k = 1`. Worse, `γ < 2` makes `∂F/∂ψ ~ (1−Ψ)^{γ−2}`
+**unbounded** at the edge, where §7.10's fixture merely jumps. **Open FB-6 at
+`γ = 2` or 3** — one number in the same family — and bring `γ = 1.395` in
+afterwards as the published case, expecting `k ≥ 2` not to hold `k+2` on it.
+
+**`freegs4e` has no ITER**: `TestTokamak`, `DIIID`, `MAST`, `MAST_sym`, `TCV`,
+`MASTU_simple`, `MASTU`. Any serves, and the fixed-boundary rehearsal already
+drives seven configurations across them.
+
 ## MEQ against freegs4e, and root selection is the whole difficulty
 
 **`tools/freegs4e-benchmark/`, 2026-09-05.** The first check of MEQ against a
