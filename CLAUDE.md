@@ -359,15 +359,282 @@ one of them.
 | | |
 |---|---|
 | **FB-A** | the axis, below. `tests/convergence/AxisConvergence.cpp` |
-| **FB-0** | `src/meq/ExteriorDtN.{hpp,cpp}` — the Gegenbauer basis, the DtN symbol and the mass, **MFEM-free** so CI gates it. Checked against a current loop built from elliptic integrals sharing no code with it: **1.4e−15** in the trace, **6.9e−14** in the DtN. What is left of FB-0 is §3.4's cross-check against CEDRES++'s own boundary form, whose kernel is hypersingular so only their double-difference form regularises it |
+| **FB-0** | **DONE, and §3.4 closed it 2026-09-06.** `src/meq/ExteriorDtN.{hpp,cpp}` — the Gegenbauer basis, the DtN symbol and the mass, **MFEM-free** so CI gates it. Checked against a current loop built from elliptic integrals sharing no code with it: **1.4e−15** in the trace, **6.9e−14** in the DtN. And now against **CEDRES++'s own boundary form** — eq (3.5), a hypersingular double-layer kept in its double-difference form plus a single layer, elliptic-integral kernels throughout — which comes out **diagonal to 1.15e-10** against a scale of 2.56e-01, its diagonal matching `blockEntry( n )` to **3.20e-09**. A boundary integral against a separation of variables, sharing the equation and nothing else. §3.4 named this as the test that would falsify all of §3; it does not |
 | **FB-1** | **DONE.** `P`, the transmission row, `setExteriorDatum()`, and both halves measured: `ψ` at 1.99/2.99/3.99 on the half-disc with the datum given, and the exterior coefficients recovered from the transmission condition to 1.9e-04, converging at 3.30. `tests/analytic/ExteriorMatched.hpp` is the exact answer — **the plan's proposed one, filament loop fields, cannot support an order study at all**, `ψ ∉ H¹` at a point source |
 | **FB-2** | `src/meq/Coils.{hpp,cpp}`, MFEM-free, and the acceptance identity `∮(1/r)∂ψ/∂n dl = −μ₀I` at **3.3e−11** on the exact field, so a discrepancy on a solve is the solve |
+
+### FB-5: the exterior coupling is an unknown of the same Newton
+
+**Built and measured 2026-09-06.** `setExteriorCoupling( ExteriorDtN const & )`,
+and `solveWithNormalisation()` generalised from a `2x2` border to `(N + 2)`.
+
+FB-1b already solves for the exterior coefficients, by **superposition**: one
+full solve per mode, one more for the source, and a dense `N x N` assembled out
+of the answers. That is exact and it is available only because the problem is
+linear. **A plasma source is not**, and superposition stops meaning anything the
+moment `F` depends on `psi`. The border is the same system solved as one Newton:
+
+```
+T_m( x, a ) = ( transmission integral of x )_m + blockEntry( m ) a_m = 0
+```
+
+with `psi_ax` and `psi_bnd` beside it. Measured on FB-1b's half-disc at `k = 2`:
+
+| `n` | `\|a − exact\|` | `\|a − superposition\|` | Newton |
+|---|---|---|---|
+| 12 | 1.32e-03 | **2.34e-15** | **1** |
+| 24 | 1.32e-04 | **1.67e-15** | **1** |
+
+converging at **3.32** against FB-1b's 3.30. **Two entirely different routes to
+the same coefficients** — `N + 1` factorisations and a dense assembly against one
+factorisation and `N + 2` backsolves — agreeing at round-off. And **one Newton
+step**, which is what says the columns really are constant: the residual is
+affine in `( x, a )` and an exact Jacobian must finish it in one.
+
+**`HighBetaConvergence` IS BIT-IDENTICAL**, every digit of the table under *The
+measurement* including the `0.00e+00` and the `−5.55e-17`. The generalisation
+keeps the **scalar** division when there is one border rather than routing it
+through the dense solve, precisely so that it can be: the dense route computes
+the same quotient by a different sequence of roundings, and a refactor that moves
+the last bit of a published number is a refactor that has to be argued about.
+
+**THREE DEFECTS ON THE WAY, AND THE THIRD IS THE ONE WORTH KEEPING.**
+
+* **`prepare()` was not re-entrant with an exterior datum, and never had been.**
+  Each call re-added a `VectorBoundaryFluxLFIntegrator` to `fluxRhs` while
+  destroying the `PathTraceCoefficient` the previous one referenced, so the
+  second `Assemble()` read through a dangling pointer. Latent for as long as
+  nobody prepared twice. `fluxRhs` is a `unique_ptr` now and is rebuilt whole.
+* **`DarcyNPCOperator` caches what it finds in the hybridization**, so a
+  `prepare()` inside the solve leaves it stale and the process dies inside
+  `solveWithNormalisation()` with no MEQ frame in the trace. It is rebuilt after
+  every re-preparation.
+* **THE DATUM IS A LOAD, AND A LOAD IS ASSEMBLED IN `prepare()`.** A Newton step
+  that moved `a` and did not re-assemble evaluated its next residual against the
+  PREVIOUS step's datum. It does not diverge, and that is what makes it worth
+  recording: the transmission constraints sat at **1e-17** — the border was
+  perfect — while `‖R‖` fell by a factor of **2/3 per iteration** on a problem
+  that is affine. `a` and `x` chasing each other looks exactly like a
+  well-conditioned solve converging slowly. **A linear rate on an affine problem
+  is a Jacobian statement**, and this file already says so under *A wrong
+  Jacobian is invisible to a convergence table*; the new part is that a
+  perfectly satisfied constraint is not evidence the coupling is right.
+
+**WHAT IT COSTS**, and it is more than §4.4 predicted: `N + 2` backsolves against
+one factorisation, **plus one full re-assembly per accepted step**, because the
+datum reaches the system through the right-hand side. That is the same price the
+condensation path already pays for its own reasons. Assembling the load directly
+would remove it and would have to be checked against the differenced column
+first, since `FormLinearSystem` transforms the right-hand side the residual is
+measured against.
+
+**AND THE ROW SIGN WENT WRONG ONCE, AS PREDICTED.** `exteriorTransmissionRows()`
+is built to be contracted against `flux()`, which undoes `DarcyForm`'s `−q`;
+the unknown carries the raw block. So contracting the row against the unknown
+directly is right and negating it again is not. The wrong sign does not
+diverge — it fails to converge, which is the same disguise as the stale load.
 
 **FB-1 IS COMPLETE AS OF 2026-09-05** — see the entries below for the two halves
 and for what building it found. What remains of free boundary is the **plasma**:
 FB-2's prescribed current on a solve, FB-3's `ψ_bnd`, FB-4's moving support and
 cut quadrature, and FB-5's bordered Newton, which is where the superposition
 FB-1b uses stops being exact.
+
+### The plasma edge caps the order, and it is the PROFILE that sets the cap
+
+**FB-4's question, answered 2026-09-05, and the answer moved the work rather
+than doing it.** `tests/convergence/PlasmaEdgeConvergence.cpp` and
+`tests/analytic/PlasmaEdge.hpp`.
+
+The question was *can `ψ*` keep `k+2` across a plasma edge that cuts through
+elements and moves while Newton runs*. `FREE-BOUNDARY-PLAN.md` §5.3 framed it as
+a quadrature problem, named `MomentFittingIntRules` as the tool and the
+**derivative** of a cut rule as FB-4's one real gap, and quoted CEDRES++ saying
+this is where they stopped going above first order.
+
+**IT IS NOT A QUADRATURE PROBLEM.** Let `j` be the order to which the profiles
+vanish at the edge — `p' ~ Ψ^j`, which is a **modelling** choice a user makes
+and not a numerical one; FreeGS's `(1 − Ψ_n^α)^β` gives `j = β` and defaults to
+`β = 1`. Then the exact `ψ` carries `|d|^{j+2}` across the edge, and:
+
+| | best approximation, ANY method | MEQ, plain Gauss rule |
+|---|---|---|
+| `ψ_h` | `min( k+1, j+2.5 )` | `min( k+1, **j+1.5** )` |
+| `q_h` | `min( k+1, j+1.5 )` | `min( k+1, j+1.5 )` — **already at its own bound** |
+| `ψ*` | `min( k+2, j+2.5 )` | `min( k+2, j+2 )` at the shipped rule, **`j+2.5`** once it is raised |
+
+**So `ψ*` keeps `k+2` exactly when `k ≤ j`**, and that threshold is the same for
+an exact cut rule as for a blind one, because `k+2 ≤ j+2.5` and `k+2 ≤ j+2`
+differ only off the integers. Measured on four rungs, with MEQ's ordinary
+quadrature and no cut rule anywhere:
+
+| `j` | `k = 1` | `k = 2` | `k = 3` | `k = 4` |
+|---|---|---|---|---|
+| 0 | 1.89 | 1.95 | 1.70 | — |
+| 1 | **3.00** | 2.87 | 2.68 | — |
+| 2 | **3.00** | **3.99** | 3.88 | — |
+| 3 | **3.00** | **4.00** | **4.99** | ~5, lost |
+
+The bold entries are `k+2` reached; every one of them has `k ≤ j` and no entry
+with `k > j` reaches it. **`j = 3, k = 3` reads 4.989 against a target of 5**,
+which is the sharpest single statement here: `k+2` survives a plasma edge
+outright, at third order, with nothing built.
+
+**THE UPPER BOUND IS MEASURED WITHOUT A SOLVER, WHICH IS WHY IT IS DECISIVE.**
+`theCutCapsTheOrderBeforeAnyMethodIsChosen` takes the L2 **best approximation**
+of the exact solution by `P_k` and `P_{k+1}` — the two spaces `ψ_h` and `ψ*`
+live in — with a composite rule on the cut elements so that what is measured is
+the approximation and not the quadrature. A discrete solution cannot beat its
+own space, so `min(k+2, j+2.5)` bounds **any** method however the cut is
+integrated. The mechanism is that the best polynomial approximation of `|d|^m`
+on an element of size `h` is `O(h^m)` at every degree — the *constant* falls
+with `k`, the order does not — over `O(1/h)` elements of area `O(h²)`.
+
+**AND AWAY FROM THE BAND `k+2` IS ALWAYS THERE**: the uncut elements read 2.96,
+3.95, 4.99 at `j = 0`, where the total is 1.9. The loss is a set of measure
+`O(h)` and nothing else, which is worth knowing for a consumer who cares about
+the core.
+
+**THE DISCRIMINATOR THAT SAYS THE QUADRATURE IS BLIND AND NOT COARSE**: sweep
+the rule at fixed geometry. Over `extra = 4, 8, 12, 16, 20` at `j = 1, k = 2`,
+`ψ_h`'s rate reads **2.582, 2.577, 2.578, 2.577, 2.576** and `q_h`'s 2.400,
+2.404, 2.405, 2.404, 2.404 — pinned to three figures. A Gauss rule cannot see a
+kink between its points however many it has. `ψ*` **does** move, 2.87 → 3.57
+against its bound of 3.5, so the half order the shipped default costs is
+recoverable with the rule MEQ already has. `setSourceQuadratureOrder()` is that
+knob and it exists for this measurement.
+
+**SO NO CUT QUADRATURE WAS BUILT *FOR THE ORDER*, AND THAT IS A DECISION
+RATHER THAN AN OMISSION.** An exact cut rule would move `ψ_h` from `j+1.5` to
+`j+2.5` and `ψ*` by nothing that a higher Gauss order does not already buy; it
+would buy `q_h` **nothing at all**, `q` being at its own regularity bound
+already; and it would not move the `k ≤ j` threshold. **What it WOULD buy is
+`j = 0` at all — see the next section, and note that an earlier version of this
+paragraph said a cut rule buys nothing, full stop, which is wrong.** `refs/CutElementQuadratureSurvey.pdf` (Loibl et
+al., arXiv:2602.18130) is the survey of the ten open-source implementations and
+it adds two practical reasons: every one of its benchmarks is Cartesian, and
+**MFEM's two cut backends are quadrilateral and hexahedral only** — the Algoim
+path aborts with *"supports only quads and hexes"* and `MomentFittingIntRules`
+builds four-vertex local meshes — where MEQ's meshes are triangles. Turning
+`MFEM_USE_ALGOIM` on would therefore cost a mesh-type change as well, for a
+threshold that does not move.
+
+**`MomentFittingIntRules` WAS TRIED AND IT WORKS, WITH A CAVEAT WORTH KEEPING.**
+On quadrilaterals it is exact on a straight cut (9e-16) and reached 3.3e-06 on a
+disc — but on one mesh in three it produced weights of **−30 and −63 on elements
+of area 1e-4**, and the area came out 1.3e-02 wrong by cancellation. That is the
+known conditioning fragility of moment fitting on a nearly degenerate cut, and
+it is why the survey's other family — dimension reduction, which is Algoim — is
+the one that reaches its design order.
+
+**AND THE FIRST ATTEMPT AT IT READ ZERO FROM EVERY CUT ELEMENT**, because it
+held `mesh.GetElementTransformation( int )` across the call and MFEM's own cut
+code resets that shared scratch underneath it. Third time this trap has been
+recorded in this file; the fix is a local `IsoparametricTransformation`, which
+is what `ex38.cpp` does.
+
+**MFEM'S TRIANGLE RULES GO BAD ABOVE ORDER 25 AND NOTHING WARNS YOU.** Measured
+while sweeping `setSourceQuadratureOrder()`: exact and positive-weighted to
+order 25, and from **26** a construction with a least weight of **−3.6e+01**,
+reaching **−1.9e+07** by order 64, with the integral of a monomial degrading
+from 1e-16 to 2.7e-05. A solve at `2k + 30` returns errors of order **1e+3**.
+So that knob is only meaningful while `2k + extra ≤ 25`, which at `k = 3` is
+`extra ≤ 19`. `theLossIsTheRulesBlindnessAndNotItsResolution` pins the boundary
+so the next caller meets it as an assertion.
+
+### At `j = 0` the question does not arise: Newton cannot solve it at all
+
+**THE SHARPEST FB-4 FINDING, AND IT IS ABOUT THE JACOBIAN RATHER THAN THE
+ORDER.** With the support read off the solution — `Ω_p = { ψ_h > 0 }`, nothing
+telling the solver where the edge is — a source with `p'(0) ≠ 0` **does not
+converge**: not at `k = 1, 2, 3`, not at `n = 8, 16, 32, 64`, **not started from
+the exact solution**, and **not under `PicardThenNewton`**, which cures every
+other hard case in this tree.
+
+Starting from the exact solution and failing is what rules out the comfortable
+explanation. This is not a basin.
+
+**AND THE MECHANISM IS MEASURED, NOT ARGUED, BECAUSE THE OBVIOUS STORY IS TOO
+WEAK.** The obvious story is that the residual is Lipschitz but not
+differentiable. **It is worse than that: with a FIXED rule the residual is
+DISCONTINUOUS in the unknowns.** A quadrature point sits at a fixed reference
+position; as the coefficients move, `ψ_h` at that point crosses `ψ_bnd` and `F`
+there jumps from zero to its edge value, so the element integral jumps by
+`w_q·|jump|`. Measured on one cut element, sliding the level set across it and
+sampling the integral at ever finer intervals — the largest step between
+neighbouring samples, as the interval is quartered:
+
+| | 401 samples | 801 | 1601 |
+|---|---|---|---|
+| `j = 0`, plain rule | 2.871e-04 | 2.909e-04 | **2.928e-04** |
+| `j = 0`, composite | 1.798e-05 | 1.225e-05 | **8.794e-06** |
+| `j = 1`, plain | — | 2.18e-07 | — |
+| `j = 2`, plain | — | 8.26e-09 | — |
+
+**The plain rule's step does not shrink**, which is what distinguishes a jump
+from a steep slope; the composite's does. At 3.4% of the integral's own scale
+that is not a small perturbation, and Newton is chasing a root of a
+discontinuous function — which is why an exact starting point and
+`PicardThenNewton` are equally useless. At `j = 1` and `j = 2` the two rules
+agree to the last figure, because `F → 0` continuously as a point crosses.
+
+**SO A CUT RULE *WOULD* FIX `j = 0`, AND NOT BY IMPROVING THE ORDER.** With the
+integration domain following the level set, the integral is a continuous — and
+differentiable — function of the coefficients, and its derivative carries
+exactly the surface term `∮ F φ/|∇ψ|` that §5.3 predicted, which the cut
+*surface* rule supplies alongside the volume one. **That is the one thing worth
+building a cut rule for**, and the prize is solvability at about second order
+rather than `k+2`, since the approximation cap of `j + 2.5 = 2.5` stands
+regardless. Set against `j ≥ 1` being one line in a profile, it is not worth
+it — but the reason is the cost-benefit and not that a cut rule is useless.
+
+**AND THE ROUTE TO `k+2` AT `j = 0` IS DESIGNED AND NOT BUILT.**
+`PLASMA-EDGE-PLAN.md` is the plasma edge as an interior interface coupled at a
+distance — two HDG subdomains meeting across an `O(h)` band, with the interface
+trace as a modal border, which is FB-1's structure with the exterior DtN
+replaced by a second interior solve. It reuses stage 5, `TransferPath`,
+`ElementExtension`, `ExtensionBoundaryQuadrature` and the bordered Newton, and
+its PE-0 is a day's work against a fixture that already exists. **It is not to
+be started until `j ≥ 1` is finished**, and it covers limiter plasmas only —
+the transfer families give out at an X-point.
+
+`∂F/∂ψ` also acquires the surface term `F·δ(Ψ)` that `meq::Source` structurally
+cannot carry. §5.3 predicted the term and said to *"decide this deliberately and
+write it down"*; the decision is that `j ≥ 1` is a **precondition** of MEQ's
+free-boundary path rather than a convention, and it is now measured rather than
+assumed.
+
+At `j ≥ 1` the residual is `C¹` and Newton is ordinary — 3 to 4 iterations at
+every mesh and degree, `2.71e-01 → 9.22e-04 → 8.88e-07 → 4.20e-12` at `j = 1`,
+and `2.71e-01 → 3.20e-06 → 5.20e-13` at `j = 3`. The observed order is
+**superlinear rather than quadratic** at `j = 1`, about 1.7–1.8, which is what a
+`C¹`-but-not-`C²` residual gives: `∂F/∂ψ` itself jumps at the edge, so the
+Jacobian is not Lipschitz.
+
+**AND MEQ HAS NO CUT-RULE DERIVATIVE GAP, BECAUSE IT USES NO CUT RULE.** §5.3
+and §6.4 both name the sensitivity of a cut rule to the level set as FB-4's one
+real gap. With a fixed Gauss rule the quadrature points do not move, so the
+assembled Jacobian is the **exact** derivative of the assembled residual
+whatever the edge is doing. Adopting a cut rule is what would create the gap it
+was meant to close.
+
+**THE MOVING EDGE COSTS THE RATE NOTHING.** `MovingPlasmaEdge` against
+`PlasmaEdge` at the same `j` and `k`, on the same meshes: 2.000/1.995/3.012
+against 2.000/1.998/3.010 at `j = 1, k = 1`, and 2.435/2.461 against
+2.431/2.455 at `k = 3`. The order is a property of where the edge **converges
+to**, not of its having moved to get there. So the two fixtures are a matched
+pair and the fixed one is where a rate study belongs.
+
+**THE FIXTURE PAIR, AND WHY THERE ARE TWO.** `PlasmaEdge` puts a
+`Δ*`-harmonic vacuum field outside a prescribed circular edge, so `F` is
+supported in the plasma **and nowhere else** — the free-boundary structure — at
+the price of a cut that does not move. `MovingPlasmaEdge` makes the plasma
+exactly `{ψ > 0}` of its own solution, at the price of a smooth background
+source outside it. **The price is not laziness and cannot be avoided**: `Δ*`
+has no zeroth-order term, so it obeys a maximum principle and `{w > w₀}` can
+never be compactly contained for a `Δ*`-harmonic `w` — a real equilibrium
+confines its plasma with **coils**, and a manufactured fixed-boundary problem
+has to put something there instead.
 
 **The transmission row** `∫_Γ E_h(q_h)·ν C_m dΓ` is the Neumann half of the
 coupling.
@@ -449,6 +716,18 @@ exactly the under-resolution being fixed, surfacing as an apparent defect in the
 row. Both are pinned to 80 now, and the case records that **same** and **high**
 are separate requirements: same is what isolates the contraction, high is what
 stops a coarse pin hiding an inadequate shipped default.
+
+**AND THAT DEFAULT REACHED MEQ ON 2026-09-05 AND TURNED TWO CASES RED.**
+`VertexConePath`'s four-argument constructor now builds **no cone at all**, so
+`theConeIsWhatCostsTheTiling` compared a cone-off column against a cone-off
+column — its own message said so, *"the two columns are the same experiment"* —
+and `theBoundarySweepTilesGammaAndTheRegionSweepTilesTheGap` found the signed
+sweep no better than the unsigned one, because signing matters only where the
+foot map backtracks and it is the cone that makes it backtrack. **Both cases
+were right and the calls were stale**: they now pass `use_cone = true`
+explicitly, and the table below reproduces to every digit, which is what says
+the repair is the right one rather than merely a green one. A default that
+changes under a test whose subject IS that default is the shape to expect again.
 
 **Upstream also turned the cone off by default** (a `use_cone` constructor flag),
 having measured that it does not do what it was added for — the aerofoil's flux
@@ -1000,7 +1279,7 @@ coefficient.**
 
 ### Which MFEM, and why not master
 
-**MEQ builds against `../mfem/install`** — MFEM **4.9.1** on branch
+**MEQ builds against `../mfem/install`** — MFEM **4.10.1** on branch
 **`meq-integration`**, CMake-built in `../mfem/build` from sources in
 `../mfem/mfem-src`. The options actually set, read out of
 `share/mfem/config.mk` and re-checked 2026-09-01 rather than remembered:
@@ -1048,6 +1327,20 @@ coefficient.**
   the directory leaves the old include path on `TPL_INCLUDE_DIRS` *in front of
   or behind* the new one, and which wins is an ordering accident. Delete every
   `SUNDIALS_*` entry but `SUNDIALS_DIR` and reconfigure.
+* **AND THE SAME CACHE SURVIVES A NEW SUNDIALS *COMPONENT*, WHICH IS WORSE
+  BECAUSE THE SYMPTOM NAMES NOTHING.** Fired 2026-09-05: `meq-integration` was
+  re-created with a `sundials-ida-integration` branch merged in, which adds
+  `mfem::IDASolver` and adds `IDAS` to `SUNDIALS_COMPONENTS` in MFEM's
+  `CMakeLists.txt`. `SUNDIALS_LIBRARIES` is a cached STRING, so
+  `find_package(SUNDIALS)` short-circuited on the old list and
+  `-lsundials_idas` never reached the link line — while `libmfem.a` now carries
+  `sundials.cpp.o` referencing `IDASVtolerances`, `IDAPrintAllStats` and eight
+  more. **Every MEQ test binary failed to link**, with an error naming IDA and
+  nothing naming a cache. MFEM's source was correct throughout. Same cure:
+  delete every `SUNDIALS_*` entry but `SUNDIALS_DIR`, reconfigure, reinstall.
+  **Not filed upstream**, per the standing rule about findings against work that
+  has just landed — and there was nothing to file, since the defect was entirely
+  in MEQ's own build directory.
 
 **And a CUDA build broke MEQ's own `FindMFEM.cmake`, which is worth knowing
 because every serial build hides it.** MFEM puts the toolkit headers on the line
@@ -1256,6 +1549,8 @@ control and changed twice on 2026-09-01. Asked properly —
 | document | lives on | |
 |---|---|---|
 | **`HDG-CONE-TILING-FROM-MEQ.md`** | **`gf-hdg-subdomains-dev`, untracked in `doc/`** | **FILED AND ANSWERED THE SAME DAY, 2026-09-05, and MEQ's diagnosis was the part that was wrong.** Coverage is exact; the cone roughens the foot map and a 12th-order rule under-resolves it. Upstream reproduced it, turned the cone off by default, added the boundary-sweep case MEQ asked for, and corrected their own commit's *"changes nothing"*. MEQ raised its rule to 80 and its `transmissionQuadratureOrder` to 40 |
+| **`QUADRATURE-HIGH-ORDER-TRIANGLES-FROM-MEQ.md`** | **`gf-hdg-linearise-first`, untracked in `doc/`** | **FILED 2026-09-06, open.** `IntegrationRules::Get( TRIANGLE, order )` is tabulated to 25 and falls back to Grundmann–Möller above it, whose negative weights reach **−1.9e+07** by order 64 and take a monomial from 1e-16 to **2.7e-05** — silently. MEQ met it by sweeping `setSourceQuadratureOrder()`. Carries a second, separate MEASUREMENT rather than a defect claim: `MomentFittingIntRules`' conditioning on a nearly degenerate cut, and the fact that both cut backends are quadrilateral-only |
+| **`CMAKE-TPL-COMPONENT-CACHE-FROM-MEQ.md`** | **`gf-hdg-linearise-first`, untracked in `doc/`** | **FILED 2026-09-06, open.** `mfem_find_package` quick-returns on a cached `${Prefix}_FOUND` **without consulting the requested component list** (`MfemCmakeUtilities.cmake:234`), so adding `IDAS` to `SUNDIALS_COMPONENTS` is silently ignored in an existing build directory and `libmfem.a` ends up referencing ten `IDA*` symbols the link line does not carry. **Explicitly NOT a report against the IDA work**, which is correct; the helper predates it |
 | `HDG-ELEMENT-LOCAL-PARALLELISM.md` | `gf-hdg-linearise-first` | **open** |
 | `HDG-BEM-COUPLING-FROM-MEQ.md` | `gf-hdg-linearise-first` | **open, and PARTLY DELIVERED** — it said MEQ would write the quadrature over `Γ` and come back with it; MEQ did, and `mfem::ExtensionBoundaryQuadrature` was merged into `gf-hdg-subdomains-dev` 2026-09-05 |
 | `HDG-NPC-GLOBALISATION-FROM-MEQ.md` | `gf-hdg-linearise-first` | **open**, and answered in place |
@@ -5060,7 +5355,30 @@ docs/        the Sphinx manual, published to Read the Docs. Built by
              it. docs/manual/ is the pre-Sphinx LaTeX manual, moved intact
              and keeping its own Makefile.
 
-             THE SPLIT IS DELIBERATE. These pages are what a USER needs;
+             THE SPLIT IS DELIBERATE, AND SINCE 2026-09-05 IT IS ALSO A
+             STANDING RULE ABOUT WHAT MAY GO IN docs/:
+
+               **Documentation reflects the state of the CODE, not a
+               historical record. On release, docs/ must not carry the
+               path not travelled or the mistaken ideas had along the
+               way.**
+
+             So a docs/ page says what MEQ does and, where a choice is
+             exposed as an option, which way it came out and that it was
+             measured. It does NOT say what an earlier version got wrong,
+             which hypothesis was falsified, or what was tried and
+             dropped. THIS FILE AND THE *-PLAN.md FILES ARE THE OPPOSITE
+             AND DELIBERATELY SO -- a falsified hypothesis recorded here
+             is what stops it being re-derived, and most of the value in
+             this file is exactly that. They are working records and do
+             not ship.
+
+             The one thing that looks like history and is not: a live
+             trap. "freegs4e's docstring says normalised flux and is
+             wrong" belongs in docs/ because a reader will meet it today;
+             "MEQ divided by the span for a week" does not.
+
+             These pages are what a USER needs;
              this file is what a maintainer needs. Almost every choice in
              meq was settled by measurement, so the docs say which way it
              came out and that it was measured, and then tell the reader

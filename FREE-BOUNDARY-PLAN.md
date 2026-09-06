@@ -386,10 +386,31 @@ block and needs the kernel. (**Corrected 2026-09-04**: this used to say "dense
 because P1", which puts the causation on the degree rather than on the support.
 P4 would be dense too. See §3.5.) MEQ is free to use a spectral trace on
 `Γ` — which is what the coupling paper does, with trigonometric polynomials —
-and in *that* basis the operator diagonalises. **The two must agree, and that
-agreement is a test to write**: assemble CEDRES++ eq (3.5) against the
-Gegenbauer basis and check it comes out diagonal with the symbol above. If it
-does not, this section is wrong and the rest of the plan needs the kernel.
+and in *that* basis the operator diagonalises.
+
+**THE TEST IS WRITTEN AND SECTION 3 SURVIVES IT, 2026-09-06.**
+`cedres_boundary_form_is_diagonal_in_this_basis` in
+`tests/unit/ExteriorDtNTests.cpp` assembles eq (3.5) — the single-layer `N`
+term and the hypersingular double-layer `M` term, kept in its double-difference
+form — against the Gegenbauer basis at `ρ_Γ = 1.3`:
+
+| | |
+|---|---|
+| worst off-diagonal | **1.15e-10** against a diagonal scale of 2.56e-01 |
+| worst diagonal, relative to `blockEntry( n )` | **3.20e-09** |
+
+so `μ₀ c( C_m, C_n ) = δ_mn (n−1) h_n / ρ_Γ` to about ten significant figures.
+**This is the most independent check in the tree**: a boundary integral with
+elliptic-integral kernels against a separation of variables, sharing the
+equation and nothing else — no basis, no measure written the same way, no
+quadrature. It is MFEM-free and runs in 30 ms, so CI gates it.
+
+**Two things made it computable and both are recorded in the test**: the two
+distances close on the semicircle, `δ_± = 2ρ_Γ cos(t/2)` and `2ρ_Γ sin(t/2)`,
+so `N` is elementary and its `1/t²` at the poles is cancelled by every `C_n`
+vanishing like `t²/2`; and the inner integral must be **split at the diagonal**,
+where what survives the double-difference regularisation is `Δ² log Δ` — a
+tensor rule straddling it does not converge.
 
 ## 4. The coupled system under NPC
 
@@ -668,6 +689,55 @@ honest options, and the choice is a measurement rather than an argument:
 survives the cut" as a measurement to make early rather than a hope — it is
 FB-4's acceptance criterion for that reason.
 
+> **MEASURED 2026-09-05, AND MOST OF THIS SECTION IS SUPERSEDED BY IT.**
+> `tests/convergence/PlasmaEdgeConvergence.cpp`. The two options above were
+> "ignore the cut-rule derivative" and "difference it", and **neither arises**,
+> because no cut rule is worth adopting.
+>
+> * **The cap is the profile's, not the quadrature's.** With `p' ~ Ψ^j` at the
+>   edge the exact `ψ` carries `|d|^{j+2}`, so the L2 BEST APPROXIMATION — no
+>   solver, no quadrature question — caps `ψ*` at `min(k+2, j+2.5)`. `k+2`
+>   therefore needs `k ≤ j`, for an exact cut rule and a blind Gauss rule alike.
+>   Measured across `j = 0…3` and `k = 1…4`, MEQ's plain rule crosses at exactly
+>   that threshold, with `j = 3, k = 3` reading **4.989** against 5.
+> * **For the ORDER, a cut rule would buy `ψ_h` alone**, `j+1.5 → j+2.5`. It
+>   would buy `q_h` nothing — `q` is at its own regularity bound already — and
+>   `ψ*` nothing that raising the plain Gauss order does not already buy,
+>   measured 2.87 → 3.57 against a bound of 3.5.
+> * **BUT IT WOULD MAKE `j = 0` SOLVABLE, WHICH IS THE REAL CASE FOR ONE.**
+>   With a fixed rule the assembled residual is *discontinuous* in the unknowns
+>   at `j = 0` — a quadrature point crossing the edge makes `F` jump there, and
+>   the measured step does not shrink as the sampling interval is quartered
+>   (2.871e-04, 2.909e-04, 2.928e-04, against an integral of 8.6e-03). A rule
+>   that follows the level set makes it continuous and differentiable, with the
+>   derivative carrying §5.3's own `∮ F φ/|∇ψ|`. The prize is a second-order
+>   solve where there is currently none, not `k+2`.
+> * **There is no missing derivative *while there is no cut rule*.** With a
+>   fixed rule the quadrature points do not move, so the assembled Jacobian is
+>   the exact derivative of the assembled residual — of a discontinuous function
+>   at `j = 0`, which is the catch. §6.4's "one real gap" is created by adopting
+>   a cut rule rather than closed by it, and the same is true of every route to
+>   high order at the edge: fitting the mesh, enriching the space and
+>   transferring across an interface all put the geometry into the
+>   discretisation, and all three then owe the Jacobian its derivative.
+> * **The surface term is real at `j = 0` and it is fatal rather than
+>   expensive.** With the support read off `ψ_h`, a source with `p'(0) ≠ 0` does
+>   not converge at any degree or mesh, **not from the exact solution**, and not
+>   under `PicardThenNewton`. `j ≥ 1` is a precondition of MEQ's free-boundary
+>   path, not a convention.
+> * **MFEM's cut backends are quadrilateral-only** and MEQ's meshes are
+>   triangles; the Algoim path aborts with *"supports only quads and hexes"*.
+>   See `refs/CutElementQuadratureSurvey.pdf`, whose own conclusion is that
+>   boundary-tessellating methods are capped at second order and only
+>   higher-order boundary representations escape it.
+>
+> **AND THE ROUTE OUT OF THE CAP, IF ONE IS EVER WANTED, IS
+> `PLASMA-EDGE-PLAN.md`** — the plasma edge as an interior interface coupled at
+> a distance, which is `refs/CouplingAtADistance.pdf` applied to `Γ_p` instead
+> of to the exterior operator, and which reuses stage 5 and FB-1 almost
+> entirely. It is a design and explicitly not to be built until `j ≥ 1` is
+> finished and measured.
+
 ### 5.4 The coils — ordinary, and useful early
 
 Coil currents are data: `F_coil = μ₀ r I_k / |Ω_ck|` on each coil subdomain, or a
@@ -767,8 +837,8 @@ the plan predicted.**
 | **FB-1** vacuum + coils + the whole coupling | **nothing.** `P` from `PathTraceCoefficient` (§6.1); `T` from `ExtensionBoundaryQuadrature`, which MEQ wrote and upstream merged 2026-09-05 (§6.2, §7.5); the bordered solve from `DarcyNPCOperator` / `DarcyNPCSolver`, which MEQ already drives at `N = 1` | clear |
 | **FB-2** prescribed plasma current | **nothing** new beyond FB-1 | clear |
 | **FB-3** `ψ_bnd` unknown | **nothing** — the `ψ_ax` border is the pattern and it is MEQ's own code | clear |
-| **FB-4** moving support + cut quadrature | the **sensitivity of a cut rule** to the level set. `MomentFittingIntRules` gives the rule (§5.3) and no derivative. Not blocking — difference it per cut element, or accept an inconsistent Jacobian and measure the cost in Newton's order | **the one real gap** |
-| **FB-5** one bordered solve | §3 of the request: auxiliary unknowns carried through the elimination. An optimisation over `N + 2` backsolves | wanted, not blocking |
+| **FB-4** moving support + cut quadrature | **NOTHING, and the gap this row named is closed by not opening it.** MEQ adopts no cut rule, so there is no rule-sensitivity to supply: with fixed quadrature points the assembled Jacobian is already the exact derivative of the assembled residual. See §5.3's measurement | **clear** |
+| **FB-5** one bordered solve | §3 of the request: auxiliary unknowns carried through the elimination. **Still an optimisation and still not taken** — MEQ's border costs `N + 2` backsolves against one factorisation, which is affordable, plus ONE RE-ASSEMBLY per accepted step because the datum is a load term and `prepare()` is where a load is built | wanted, not blocking |
 
 **Two things to ask for anyway, on their own merits and not as blockers**:
 §2.2's boundary quadrature on `Γ` with its tiling check, once MEQ has written
@@ -875,12 +945,12 @@ the fallback to work.
 | | | acceptance |
 |---|---|---|
 | **FB-A** | **The axis.** A vacuum solve on a mesh touching `r = 0`. No free boundary, no coupling. | **DONE, 2026-09-04 — see §7.2.** `ψ` at `k+1` on a mesh reaching the axis; `q` short by half an order; the conditioning penalty `O(1/h)` and not `O(1/h²)`. `tests/convergence/AxisConvergence.cpp` |
-| **FB-0** | `meq::ExteriorDtN`: the basis, the symbol, the mass. No solver. | **DONE, 2026-09-04 — see §7.3**, except §3.4's CEDRES++ agreement, which is now specified but not built. The current-loop test reads **1.4e−15** in the trace and **6.9e−14** in the DtN |
+| **FB-0** | `meq::ExteriorDtN`: the basis, the symbol, the mass. No solver. | **DONE, 2026-09-04, AND COMPLETED 2026-09-06 — see §7.3 and §3.4.** The current-loop test reads **1.4e−15** in the trace and **6.9e−14** in the DtN. §3.4's CEDRES++ agreement — the falsifying test of the whole of §3 — is now written and green: their boundary form comes out diagonal to **1.15e-10** against a scale of 2.56e-01, with the diagonal matching `blockEntry( n )` to **3.20e-09** relative |
 | **FB-1** | **Vacuum only.** The whole coupling, on a linear problem with an exact answer. | **DONE 2026-09-05 — see §7.8.** `ψ` at **1.99 / 2.99 / 3.99** on the half-disc with the datum given (FB-1a), and the transmission condition recovers the exterior coefficients to **1.9e-04, converging at 3.30** (FB-1b). `∂F/∂a` needs no measurement under NPC — §7.4 |
 | **FB-2** | A **prescribed** plasma current, still linear. | **DONE 2026-09-05 — see §7.9.** `ψ` at 1.99 / 2.88 / 3.01, and Ampère's law through the solve: **round-off over `Γ_h`** and `k+1`-convergent on the half-disc. Two meshing findings came out of it, both about aligning the mesh to geometry that is known in advance |
-| **FB-3** | `ψ_bnd` as an unknown, plasma support still fixed. | **PART BUILT 2026-09-05**: `setNormalisation( ψ_ax, ψ_bnd )` exists, the profiles take `(ψ − ψ_bnd)/(ψ_ax − ψ_bnd)`, the validation is on the SPAN, and `HighBetaConvergence` is unchanged to every digit. What remains is the second BORDER — under NPC it is the cheaper of the two, since `ψ_bnd` is `ψ` at one prescribed point and its row is exactly `±e_j` |
-| **FB-4** | The moving plasma support and cut quadrature. | The order that survives the cut, measured, against `k+1` — **and the cost of an inconsistent cut Jacobian measured in Newton's observed order**, which decides §5.3's two options |
-| **FB-5** | The augmented Newton as one bordered solve, and adaptivity through it. | `η` monotone through refinement with `Γ` fixed; assumption P.1 preserved |
+| **FB-3** | `ψ_bnd` as an unknown, plasma support still fixed. | **DONE 2026-09-05.** `setNormalisation( ψ_ax, ψ_bnd )` exists, the profiles take `(ψ − ψ_bnd)/(ψ_ax − ψ_bnd)`, the validation is on the SPAN, and the second BORDER is closed: `solveWithNormalisation()` does 2×2, with `ψ_ax`'s residual at **1.88e-16** and **0.00e+00** on two meshes. It is the cheaper of the two borders — `ψ_bnd`'s dof is fixed at setup where `ψ_ax`'s needs an argmax — and `HighBetaConvergence` is bit-identical, which is what says the generalisation reduces |
+| **FB-4** | The moving plasma support and cut quadrature. | **ANSWERED 2026-09-05, AND THE ANSWER MOVED THE WORK RATHER THAN DOING IT — see §7.10.** The order is capped by the PROFILE and not by the quadrature: with `p' ~ Ψ^j` at the edge, `ψ*` keeps `k+2` exactly when **`k ≤ j`**, and that threshold is the same for an exact cut rule as for MEQ's plain one. `j = 3, k = 3` reads **4.989** against a target of 5. **No cut quadrature was built**, and there is no inconsistent-cut-Jacobian cost to measure because there is no cut rule — the quadrature points do not move, so the assembled Jacobian is exact. What IS measured is that `j = 0` does not converge at all |
+| **FB-5** | The augmented Newton as one bordered solve, and adaptivity through it. | **THE BORDERED SOLVE IS BUILT AND MEASURED, 2026-09-06; adaptivity through it is not.** `setExteriorCoupling()` carries the N Gegenbauer coefficients as unknowns of the same Newton as `psi_ax` and `psi_bnd`, and `solveWithNormalisation()` now does a general `( N + 2 )` elimination against ONE factorisation. On FB-1b's half-disc it agrees with the superposition route to **2.3e-15**, takes **one** Newton step because the residual is affine in `( x, a )`, and converges to the exact coefficients at **3.32** against FB-1b's 3.30. `HighBetaConvergence` is bit-identical. What remains is the adaptive loop through the coupling: eta monotone with `Gamma` fixed, and P.1 preserved |
 | **FB-6** | A machine case, against **`../freegs4e`**. | Agreement with an independent free-boundary tokamak code by a **different algorithm** — von Hagenow Green's functions, finite differences, Picard — on the same coils and the same tabulated `p′`, `ff′` through its `GeneralPprimeFFprime`. A fine-mesh self-comparison is the fallback, not the target: it shares every convention with the code it checks. See §7 |
 
 **FB-1 is the stage to protect.** It exercises `ExteriorDtN`, the transferred
@@ -1561,6 +1631,49 @@ The aligned rate caps at 3 because a rectangular conductor has **corners**, and 
 corner in the forcing gives the same `r² log r` behaviour a corner in the domain
 does. Alignment cannot fix that; rounding the conductor would.
 
+### 7.10 FB-4: the plasma edge caps the order, and the profile sets the cap
+
+**Measured 2026-09-05. `tests/analytic/PlasmaEdge.hpp`,
+`tests/convergence/PlasmaEdgeConvergence.cpp`.** The full account is in
+`CLAUDE.md`; this is what changes about the plan.
+
+**The fixture pair.** `PlasmaEdge` is a `Δ*`-harmonic vacuum field plus
+`c(φ_+)^m` on a prescribed circle, so `F` is supported in the plasma and nowhere
+else and the cut is fixed. `MovingPlasmaEdge` makes the plasma exactly `{ψ > 0}`
+of its own solution, at the price of a smooth background source outside it —
+unavoidable, because `Δ*` obeys a maximum principle and a compactly contained
+`{w > w₀}` cannot exist for harmonic `w`. `m = j + 2` where `j` is the order to
+which the profiles vanish at the edge.
+
+**Three measurements, and the first needs no solver.**
+
+1. **The L2 best approximation** by `P_k` and `P_{k+1}` caps `ψ*` at
+   `min(k+2, j+2.5)` for *any* method, with the composite rule on cut elements
+   so that approximation and quadrature are separated. The uncut elements read
+   `k+2` throughout — 2.96, 3.95, 4.99 — so the loss is a set of measure `O(h)`.
+2. **The solve**, over `j = 0…3` and `k = 1…4`, crosses `k+2` exactly at
+   `k ≤ j`. `j = 3, k = 3` reads **4.989**.
+3. **The rule swept at fixed geometry**: `ψ_h`'s rate is pinned to three
+   figures across `extra = 4…20`, which is what says the loss is blindness to a
+   kink rather than too few points.
+
+**What this does to §5.3, §6.4 and §9.** §5.3's two options — ignore the
+cut-rule derivative or difference it — do not arise. §6.4's "one real gap" is
+created by adopting a cut rule rather than closed by it. And **FB-4 is not the
+obstacle to `k+2` that §8 lists it as**; what is, is `j`.
+
+**The one thing that does bite, and it is worse than an order.** At `j = 0` the
+moving support does not converge at all — not from the exact solution, not under
+`PicardThenNewton`. `∂F/∂ψ` carries `F·δ(Ψ)` there and `meq::Source` cannot.
+**`j ≥ 1` is a precondition of the free-boundary path**, and FB-6's freegs4e
+cases must be checked against it: FreeGS's `(1 − Ψ_n^α)^β` gives `j = β`, and
+`β = 1` is its default, which is enough for `k = 1` and not for more.
+
+**A consequence for FB-5 and for the driver.** A configuration whose profiles do
+not vanish at the edge should be **refused at parse**, the way
+`[boundary] Type = "exact"` is, rather than run to a non-convergence the user
+has to diagnose. That is driver work and belongs with FB-5.
+
 ## 8. Risks, in the order they are likely to bite
 
 **The axis, and it is FB-A because it can be measured now.** The half-disc
@@ -1604,11 +1717,24 @@ on the full NPC residual has been measured making **every** MEQ case worse; see
 `CLAUDE.md`'s *Why it fails*. Whatever globalisation this needs, it is not that
 one.
 
-**`N`, `ρ_Γ` and the mesh.** §3.3 shows the trade-off exists and is geometric.
-It has not been run for a tokamak geometry, where the plasma is elongated and the
-paper's own caveat applies: "the introduction of a circular interface may require
-a large computational domain in situations where the support of source terms is
-very elongated". Measure the spectrum on a real coil set before choosing `ρ_Γ`.
+**`N`, `ρ_Γ` and the mesh — AND THE CAVEAT IS ANSWERED, 2026-09-06.** §3.3 shows
+the trade-off exists and is geometric, and the coupling paper's own worry is that
+*"the introduction of a circular interface may require a large computational
+domain in situations where the support of source terms is very elongated"*.
+
+**That is a worry about DEGREES OF FREEDOM and not about geometry, and MEQ
+already has the answer to it.** A large `ρ_Γ` costs nothing if the mesh out
+there is coarse: take a **coarse background covering the semicircle and every
+coil**, and let the adaptive loop refine aggressively where the plasma is. The
+vacuum between the plasma and `Γ` is source-free and `Δ*`-harmonic — the
+smoothest thing in the problem — so it is exactly where a coarse mesh is
+cheapest, and `meq::AdaptiveDomain` and the residual estimator are what put the
+elements where they earn their place.
+
+So the choice of `ρ_Γ` is decoupled from the cost of an elongated plasma, and
+what is left to measure is the **spectrum**: how `N` must grow with `ρ_Γ` and
+with the coil set, which §3.3 measures on a disc and nobody has measured on a
+machine. That is FB-6's, and it is a sweep rather than a design question.
 
 **The border cost, if `∂F/∂a` turns out not to be constant.** §4.3 argues it is,
 from the weak form. If FB-1 says otherwise, the column is rebuilt every Newton
