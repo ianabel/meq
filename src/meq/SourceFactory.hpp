@@ -14,6 +14,7 @@
 #include <memory>
 #include <string>
 
+#include "Coils.hpp"
 #include "Config.hpp"
 #include "Source.hpp"
 
@@ -50,6 +51,29 @@ namespace meq
 	///         configuration error it is rather than as a library exception.
 	std::shared_ptr<NormalisedSource> makeNormalisedSource( SourceConfig const &config,
 	                                                        std::string const &configFileName = std::string() );
+
+	/// Construct the coil set the `[[coils]]` blocks describe, or a null
+	/// pointer if there are none.
+	///
+	/// **A NULL RETURN IS THE ORDINARY CASE AND IS NOT AN ERROR.** Every
+	/// fixed-boundary configuration in `examples/` has no coils at all, and a
+	/// caller distinguishes "no coils" from "an empty CoilSet" only by which
+	/// of the two it gets -- so the caller can skip the augmentation entirely
+	/// rather than wrapping its source around a set that adds zero.
+	///
+	/// The parse has already resolved `Current` / `CurrentDensity` to a total
+	/// current and refused a coil that names both or neither. What is left for
+	/// meq::Coil to refuse is the geometry: a non-positive half-extent, and a
+	/// coil reaching the axis. Those refusals are translated here so that they
+	/// read as the configuration errors they are and NAME THE COIL, which the
+	/// library exception cannot do -- `meq::Coil` does not know it came from a
+	/// file or which block it was.
+	///
+	/// @throws ConfigError naming the offending `[[coils]]` block by the name
+	///         it was given, or by `coils[i]` if it was not named.
+	std::shared_ptr<CoilSet const> makeCoilSet( CoilConfig const &config,
+	                                            double mu0 = vacuumPermeability,
+	                                            std::string const &configFileName = std::string() );
 }
 
 #endif // MEQ_SOURCEFACTORY_HPP

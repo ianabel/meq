@@ -212,6 +212,25 @@ namespace
 		return mesh;
 	}
 
+	/// A stored GridFunction, on a mesh the caller keeps alive.
+	mfem::GridFunction readGridFunction( std::string const &path, mfem::Mesh &mesh )
+	{
+		std::ifstream stream( path );
+		BOOST_TEST_REQUIRE( stream.good(), "cannot open " << path );
+		return mfem::GridFunction( &mesh, stream );
+	}
+
+	/// Every occurrence, because a coil pair has two of each key and replacing
+	/// one of them would leave a configuration nobody wrote.
+	std::string replaceAll( std::string text, std::string const &from,
+	                        std::string const &to )
+	{
+		for ( std::size_t at = text.find( from ); at != std::string::npos;
+		      at = text.find( from, at + to.size() ) )
+			text.replace( at, from.size(), to );
+		return text;
+	}
+
 	/// ||stored - computed|| / ||computed||, the figure every case here prints.
 	double relativeDifference( mfem::GridFunction const &stored,
 	                           mfem::GridFunction const &computed )
@@ -898,6 +917,117 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesForPsiAxisAsAnUnknown )
 	            << " against psi_ax = " << solver.psiAxis()
 	            << ", so the constraint psi_ax = max psi_h is not satisfied and "
 	            "the border is not closing the system" );
+}
+
+/*
+ * THE COILS, THROUGH THE DRIVER.
+ *
+ * `[[coils]]` puts a current that is DATA into F. Nothing else in this suite
+ * goes through that path from a file, and the two things it can get wrong are
+ * both quiet:
+ *
+ *   * THE COIL TERM NEVER REACHING THE ASSEMBLY. F is built by quadrature over
+ *     the elements, so a coil set parsed and then dropped changes nothing at
+ *     all -- the run converges, writes its files, and reports `coil_current` in
+ *     the `.nc` whether or not that current did any work. The first half below
+ *     is the check that it did.
+ *   * THE WRAPPER PERTURBING SOMETHING ELSE. Carrying the coils means the
+ *     driver hands the solver a meq::CoilAugmentedSource around the plasma
+ *     source rather than the plasma source itself, and that is a change to
+ *     EVERY run with a coil block in it. The second half pins zero-current
+ *     coils against no coils at all and requires BIT IDENTITY -- 0.000e+00 and
+ *     not "agrees to round-off", because an empty contribution is exactly
+ *     empty and anything else is the wrapper doing arithmetic it should not.
+ *
+ * The equilibrium itself is not compared against anything: examples/
+ * coils-rectangle.toml is a fixed-boundary rectangle with the conductors inside
+ * the plasma, so there is no closed form to hold it to. What the coils are
+ * worth on a SOLVE is measured in FreeBoundaryCoupling.cpp, against Ampere's
+ * law, on the half-disc geometry the technique is for.
+ */
+BOOST_AUTO_TEST_CASE( theDriverAddsTheCoilsToF )
+{
+	BOOST_TEST_REQUIRE( run( "examples/coils-rectangle.toml" ) == 0,
+	                    "the driver did not exit 0 on its own shipped coil example" );
+
+	// The provenance, so a reader differencing two files can tell a run with
+	// conductors from one without.
+	std::string const header = ncdumpHeader( "coils-rectangle.nc" );
+	BOOST_TEST_REQUIRE( !header.empty(), "ncdump could not read coils-rectangle.nc" );
+	BOOST_TEST( headerAttribute( header, "coils" ) == 2.0 );
+	// 1.5e5 given as Current plus 1.5e7 A/m^2 over 0.01 m^2 as CurrentDensity,
+	// so this also says the two spellings resolve to the same number.
+	BOOST_TEST( headerAttribute( header, "coil_current" ) == 3.0e5,
+	            boost::test_tools::tolerance( 1.0e-12 ) );
+
+	mfem::Mesh mesh( "coils-rectangle.mesh", 1, 1 );
+	mfem::GridFunction driven = readGridFunction( "coils-rectangle_psi.gf", mesh );
+
+	/*
+	 * The same file with the two currents zeroed, and the same file with the
+	 * coil blocks deleted outright. Written out here rather than shipped,
+	 * because they are controls rather than examples -- and edited by text
+	 * substitution on the shipped file so that they cannot drift away from it.
+	 */
+	std::string const shipped = slurp( "examples/coils-rectangle.toml" );
+	BOOST_TEST_REQUIRE( !shipped.empty() );
+
+	auto write = []( std::string const &path, std::string text,
+	                 std::string const &prefix )
+	{
+		text = replaceAll( text, "Prefix = \"coils-rectangle\"",
+		                   "Prefix = \"" + prefix + "\"" );
+		std::ofstream file( path );
+		file << text;
+		return file.good();
+	};
+
+	std::string zeroed = replaceAll( shipped, "\nCurrent = 1.5e5", "\nCurrent = 0.0" );
+	zeroed = replaceAll( zeroed, "\nCurrentDensity = 1.5e7", "\nCurrentDensity = 0.0" );
+	BOOST_TEST_REQUIRE( zeroed != shipped, "the current substitution matched nothing" );
+
+	// LINE-ANCHORED, because the file's own prose mentions [[coils]] and
+	// [boundary] several times before either table appears -- the first
+	// version of this cut the file at a COMMENT and produced a configuration
+	// nobody wrote, which the driver then refused with exit 1.
+	std::string stripped = shipped.substr( 0, shipped.find( "\n[[coils]]\n" ) + 1 )
+	                       + shipped.substr( shipped.find( "\n[boundary]\n" ) + 1 );
+	BOOST_TEST_REQUIRE( stripped.find( "\n[[coils]]\n" ) == std::string::npos );
+	BOOST_TEST_REQUIRE( stripped.find( "\n[boundary]\n" ) != std::string::npos );
+
+	BOOST_TEST_REQUIRE( write( "driver-acceptance-zerocoil.toml", zeroed, "zerocoil" ) );
+	BOOST_TEST_REQUIRE( write( "driver-acceptance-nocoil.toml", stripped, "nocoil" ) );
+
+	BOOST_TEST_REQUIRE( run( "driver-acceptance-zerocoil.toml" ) == 0 );
+	BOOST_TEST_REQUIRE( run( "driver-acceptance-nocoil.toml" ) == 0 );
+
+	mfem::Mesh zeroMesh( "zerocoil.mesh", 1, 1 );
+	mfem::Mesh noMesh( "nocoil.mesh", 1, 1 );
+	mfem::GridFunction zeroPsi = readGridFunction( "zerocoil_psi.gf", zeroMesh );
+	mfem::GridFunction noPsi = readGridFunction( "nocoil_psi.gf", noMesh );
+
+	// AN EMPTY CONTRIBUTION IS EXACTLY EMPTY.
+	mfem::Vector control( zeroPsi );
+	control -= noPsi;
+	BOOST_TEST( control.Normlinf() == 0.0,
+	            "coils carrying no current changed the answer by "
+	            << control.Normlinf() << ", so the wrapper is not inert" );
+
+	// AND A REAL CURRENT DOES REAL WORK. 3.0e5 A moves psi by 22% in L2
+	// on this configuration; the gate is well below that and well above the
+	// round-off the control sits at.
+	double const moved = relativeDifference( driven, noPsi );
+	BOOST_TEST( moved > 1.0e-2,
+	            "300 kA of coil current moved psi by only " << moved
+	            << " relative, so the coil term is not reaching F" );
+	std::printf( "\n  the coils through the driver\n"
+	             "    zero current vs no coils   %.3e   (must be exactly zero)\n"
+	             "    300 kA vs no coils         %.3e   relative in L2\n",
+	             control.Normlinf(), moved );
+
+	for ( char const *path : { "driver-acceptance-zerocoil.toml",
+	                           "driver-acceptance-nocoil.toml" } )
+		std::remove( path );
 }
 
 BOOST_AUTO_TEST_CASE( theDriverReportsConfigurationErrorsAsExitOne )

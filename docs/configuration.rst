@@ -25,7 +25,8 @@ every key; :doc:`examples` walks through the shipped configurations.
 Three tables are **required**: ``[mesh]``, ``[discretisation]``, ``[source]``.
 The rest — ``[boundary]``, ``[solver]``, ``[output]``, ``[initialguess]``,
 ``[adaptivity]`` — are optional, and an absent table behaves exactly like a
-present but empty one.
+present but empty one. ``[[coils]]`` is an *array* of tables rather than a
+table, so "absent" there means no conductors at all.
 
 .. note::
 
@@ -208,11 +209,34 @@ under a Solov'ev source is an unknown key, not an ignored one.
      - **Required when** ``Normalised = true``, **refused otherwise.** A
        starting guess for the Newton iteration, not a scale factor. Must be
        finite and non-zero.
+   * - ``ConfineToPlasma``
+     - ``false``
+     - :math:`F` and :math:`\partial F/\partial\psi` are **zero wherever**
+       :math:`\Psi \le 0`, so the plasma's *support* moves with the solution
+       instead of being the whole domain. **Refused unless**
+       ``Normalised = true``, since the test is on :math:`\Psi`. See the
+       warning below before setting it.
 
 .. note::
 
    Profile paths are resolved against the **working directory of the run**, not
    against the directory the configuration file lives in.
+
+.. warning::
+
+   ``ConfineToPlasma = true`` **requires a profile that vanishes at the plasma
+   edge**, :math:`p'(0) = 0`, and nothing can check that for you — the profile
+   is a table.
+
+   With :math:`p'(0) \ne 0` the source *jumps* across the plasma boundary, so
+   the assembled residual is discontinuous in the unknowns and there is no
+   Jacobian to iterate with. Measured, it does not converge at any degree, on
+   any mesh, from the exact solution, or under ``PicardThenNewton``.
+
+   Note also that :math:`\psi_{\mathrm{bnd}}` is **fixed at zero** today, so
+   the edge is pinned at :math:`\psi = 0` rather than found. Making it an
+   unknown is a second border row of the same shape as :math:`\psiax`'s and is
+   not written.
 
 .. note::
 
@@ -271,7 +295,7 @@ under a Solov'ev source is an unknown key, not an ignored one.
        and therefore at which each ``Density`` is the physical density. A
        constant radius — not the magnetic axis, not a flux-surface average. See
        :doc:`rotation`.
-   * - ``Mu0``, ``Normalised``, ``PsiAxis``
+   * - ``Mu0``, ``Normalised``, ``PsiAxis``, ``ConfineToPlasma``
      - as ``"mhd"``
      - 
 
@@ -479,6 +503,103 @@ since that is an ellipse.
    either accepting or rejecting them: a key that validates is a key its author
    believes is doing something. If you have a configuration file carrying
    either, delete the line.
+
+``[[coils]]``
+-------------
+
+Poloidal field coils of rectangular cross-section, each carrying a **uniform**
+current density. Written as an *array of tables* — one ``[[coils]]`` block per
+conductor, in any order — and the set may be empty, which is what every
+fixed-boundary configuration has.
+
+A coil adds to the Grad–Shafranov source
+
+.. math::
+
+   F_{\mathrm{coil}}(r, z) = \mu_0\, r\, \frac{I_k}{|\Omega_{c_k}|}
+
+inside coil :math:`k` and exactly zero outside it, summed over the coils
+containing the point. The coil current is **data**: it does not depend on
+:math:`\psi`, it contributes nothing to the Jacobian, and a solve driven by
+coils alone is affine and finishes in one Newton step.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 16 60
+
+   * - Key
+     - Default
+     - Meaning
+   * - ``Name``
+     - ``"coil<i>"``
+     - Diagnostics only. It is what a refusal or a mesh-coverage warning quotes
+       back, so it is worth writing.
+   * - ``CentreR``, ``CentreZ``
+     - *required*
+     - The centre, in metres.
+   * - ``HalfWidth``, ``HalfHeight``
+     - *required*
+     - Half-extents in :math:`r` and :math:`z`, metres. Strictly positive, and
+       ``CentreR - HalfWidth`` must be strictly positive too — a coil reaching
+       the axis is refused, because the operator's :math:`1/r` is not integrable
+       through :math:`r = 0`.
+   * - ``Current``
+     - *one of the two*
+     - The **total** current through the cross-section, amperes. Signed, and
+       zero is allowed. A real winding's turns are not modelled, so this is
+       turns × amps per turn.
+   * - ``CurrentDensity``
+     - *one of the two*
+     - The uniform :math:`j_\phi` in A/m², multiplied by the area
+       :math:`4\,\texttt{HalfWidth}\,\texttt{HalfHeight}`.
+
+.. important::
+
+   **Give exactly one of** ``Current`` **and** ``CurrentDensity``. Naming both is
+   refused rather than resolved by precedence: an author who writes both has two
+   numbers in mind, and silently honouring one of them is how a coil set ends up
+   carrying a current nobody chose. Naming neither is refused for the same
+   reason.
+
+.. note::
+
+   **There is no** ``Mu0`` **key on a coil block, deliberately.** The coil term
+   and the plasma term are *added*, so they must share a permeability, and the
+   coils take ``[source] Mu0``. A run in normalised units setting
+   ``[source] Mu0 = 1`` while the coils kept the SI value would be summing two
+   terms scaled a million-fold apart — and would converge, at full order, to a
+   machine nobody described. Two keys that must agree are a way of writing down
+   a disagreement.
+
+.. warning::
+
+   **A coil the mesh does not reach contributes nothing, silently.** :math:`F`
+   is assembled by quadrature over the elements, so a coil outside the ``[mesh]``
+   box is never sampled: the run converges, writes its files, and describes a
+   machine with that conductor switched off. MEQ prints a warning naming the
+   coil and both boxes, because nothing in the output could otherwise show it —
+   the current appears in the ``.nc`` file's ``coil_current`` attribute whether
+   or not it did any work.
+
+The source is **discontinuous at every coil edge**, which is physics rather than
+a modelling shortcut: a conductor has a boundary. It costs the convergence
+*rate* wherever an element straddles that edge, exactly as a re-entrant corner
+does, and the remedy is the same — put element edges on the coil edges, or
+accept the rate. A study measuring an order should align the mesh; nothing else
+needs to.
+
+``examples/coils-rectangle.toml`` is the worked example, and it writes its two
+currents one each way so that both spellings are exercised.
+
+.. note::
+
+   **This is not free boundary.** With ``[boundary] Type = "zero"`` on a mesh
+   that is the plasma, the conductors sit *inside* the plasma and the boundary
+   is where the file says it is rather than where the coil currents put it. A
+   machine case additionally needs a domain with a vacuum region, the plasma
+   boundary flux as an unknown, and the exterior coupling that makes :math:`\psi`
+   on the outer boundary the field the currents produce. None of those is
+   reachable from a configuration file yet.
 
 ``[output]``
 ------------

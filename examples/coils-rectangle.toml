@@ -1,0 +1,209 @@
+# POLOIDAL FIELD COILS: the same plasma as examples/mhd-rectangle.toml with a
+# pair of external conductors added, and the only example in which a current
+# that is DATA rather than a function of psi enters F.
+#
+#     meq examples/coils-rectangle.toml
+#
+# Stage FB-2 of FREE-BOUNDARY-PLAN.md. The equation is unchanged --
+#
+#     -grad.( (1/r) grad psi ) = F( r, z, psi )/r    in Omega,   psi = 0 on Gamma
+#
+# -- and so is every term of F that the plasma contributes. What the [[coils]]
+# blocks add is
+#
+#     F_coil( r, z ) = mu0 r I_k / |Omega_ck|   inside coil k,   0 outside it,
+#
+# summed over the coils containing the point. src/meq/Coils.hpp derives that
+# factor from Ampere's law rather than quoting it, and records the measurement
+# that pins the r: dropping it or doubling it changes the answer by a factor of
+# order the major radius and leaves every convergence rate untouched.
+#
+# READ examples/mhd-rectangle.toml FIRST. Everything below except the [[coils]]
+# blocks is that file, unchanged and undocumented here, so that the two can be
+# differenced. The plasma is a tabulated dp/dpsi and g dg/dpsi on an
+# ASDEX-Upgrade-sized rectangle; the units, the trivial-branch argument and the
+# meaning of the two .dat files are all in its header.
+#
+#
+# WHAT THE COILS DO HERE, MEASURED
+# --------------------------------
+#
+# The pair sits OUTBOARD at R = 2.10 m, Z = +-0.60 m, which is a vertical-field
+# configuration: a positive current pushes the plasma outward and a negative one
+# pulls it in. Sweeping the pair's total current with nothing else changed:
+#
+#     total current     max psi [Wb/rad]     magnetic axis R [m]     Newton
+#     -6.0e5 A            1.165695e-01              1.7234              5
+#     -3.0e5 A            1.235894e-01              1.7313              5
+#          0 A            1.315417e-01              1.7391              5
+#     +3.0e5 A (below)    1.411099e-01              1.7547              5
+#
+# -- a monotone Shafranov shift of about 3 cm over that range, and the axis is
+# read off the 129 x 129 output grid, whose spacing is 7.8 mm, so the last
+# column is quantised. THE CURRENT IS SIGNED and reversing it is one edit.
+#
+# DO NOT PUSH IT MUCH PAST +3e5 A ON THIS MESH. At +6e5 A the coils' own local
+# maximum of psi overtakes the plasma's and `max psi` starts reporting the
+# conductor rather than the magnetic axis -- 2.094595e-01 at R = 2.0906, which
+# is the coil. That is not a numerical failure and the solve converges in five
+# iterations either way; it is the fixed-boundary problem being asked a question
+# it cannot answer, because Omega here IS the plasma and there is no vacuum
+# region for a coil to live in. See the last section.
+#
+# THE CONTROL IS EXACT AND IS WORTH RUNNING. Set both currents to 0.0 and the
+# answer is BIT IDENTICAL to examples/mhd-rectangle.toml -- max|difference| over
+# all 16,641 output nodes is 0.000e+00, not "agrees to round-off". That is what
+# says the coil term is added where it belongs and that wrapping the plasma
+# source to carry it perturbs nothing else: an empty contribution really is
+# empty. theDriverAddsTheCoilsToF in tests/convergence/DriverAcceptance.cpp
+# asserts exactly that, in both directions.
+#
+# NEWTON IS UNMOVED, AND IT HAS TO BE. Five iterations at observed order 1.993,
+# against the coil-free run's 1.998 on the same mesh: dF_coil/dpsi is identically
+# zero, so the coils change the residual and not the Jacobian, and a solve driven
+# by coils ALONE is affine and finishes in one step -- which
+# theCoilsDriveAnAffineSolveAndAmpereSaysSo measures directly, together with the
+# flux identity that says the current reached the equation. If a change to this
+# file ever costs the quadratic endgame, the coil term has got into dF/dpsi and
+# that is a defect.
+#
+#
+# WHAT TO GET RIGHT WHEN WRITING A COIL
+# -------------------------------------
+#
+#   * THE CURRENT IS GIVEN ONE WAY OR THE OTHER AND EXACTLY ONE MUST APPEAR.
+#     `Current` is the TOTAL through the cross-section in amperes; a real coil's
+#     turns are not modelled, so this is turns x amps per turn. `CurrentDensity`
+#     is the uniform j_phi in A/m^2 and is multiplied by the area
+#     4 * HalfWidth * HalfHeight. The two blocks below are written one each way,
+#     to the same 1.5e5 A, so this file exercises both spellings. Writing both
+#     keys in one block is REFUSED rather than resolved by precedence, and so is
+#     writing neither.
+#
+#   * THE GEOMETRY IS CENTRE AND HALF-EXTENTS, not corners. A coil reaching the
+#     axis -- CentreR - HalfWidth <= 0 -- is refused, because the operator's 1/r
+#     is not integrable through r = 0.
+#
+#   * A COIL THE MESH DOES NOT REACH CONTRIBUTES NOTHING, AND MEQ SAYS SO. F is
+#     assembled by quadrature over the elements, so a coil outside the [mesh]
+#     box is never sampled and the run describes a machine with that coil
+#     switched off. MEQ prints a warning naming the coil and both boxes;
+#     nothing in the output files could otherwise show it, since the current
+#     appears in `coil_current` whether or not it did any work.
+#
+#   * THE SOURCE IS DISCONTINUOUS AT EVERY COIL EDGE, and that is physics rather
+#     than a modelling shortcut -- a conductor has a boundary. It costs the
+#     convergence RATE wherever an element straddles that edge, which here they
+#     do: the coils are 0.10 m square against cells of 0.0625 x 0.0583 m, so
+#     about three cells per coil are cut. Nothing in this file measures a rate,
+#     so it costs this example nothing; a study that does measure one should put
+#     element edges on the coil edges instead. src/meq/Coils.hpp is the account
+#     of why, and it is the same statement CLAUDE.md makes about the re-entrant
+#     corner of a rectangle.
+#
+#   * MU0 IS THE SOURCE'S, NOT THE COILS'. There is deliberately no Mu0 key on
+#     [[coils]]: the coil term and the plasma term are ADDED, so they must share
+#     a permeability, and a run in normalised units that set [source] Mu0 = 1
+#     while the coils kept the SI value would be summing two terms scaled a
+#     million-fold apart -- and would converge, at full order, to a machine
+#     nobody described. Two keys that must agree are a way of writing down a
+#     disagreement.
+#
+#
+# WHAT THIS FILE IS NOT
+# ---------------------
+#
+# IT IS NOT A FREE-BOUNDARY RUN, and the difference is the whole of what remains
+# of FREE-BOUNDARY-PLAN.md. Here Gamma is the mesh's own rectangle and psi = 0
+# is imposed on it, so Omega is the plasma, the coils sit INSIDE the plasma, and
+# the plasma boundary is where the file says it is rather than where the coil
+# currents put it. A real machine has the coils in a vacuum region outside the
+# plasma, and finding the boundary is the problem. What that needs, and does not
+# yet have a key for:
+#
+#   * A DOMAIN WITH A VACUUM REGION -- the half-disc reaching the axis, meshed
+#     around the conductors, rather than a box that is the plasma.
+#   * psi_bnd AS AN UNKNOWN. `[source] ConfineToPlasma = true` already switches
+#     F off wherever the normalised flux is non-positive, which is what makes
+#     the plasma's SUPPORT move with the solution; but psi_bnd is fixed at zero
+#     today, so the edge is pinned at psi = 0 rather than found. FB-3 is the
+#     second border row that makes it an unknown, and this file does not set the
+#     key because the profiles here do not vanish at the edge -- g dg/dpsi( 0 )
+#     is 1.35, so switching the source off across psi = 0 would make the
+#     assembled residual discontinuous in the unknowns and there would be no
+#     Jacobian to iterate with.
+#   * THE EXTERIOR COUPLING, so that psi on the outer boundary is the field the
+#     currents produce rather than zero. src/meq/ExteriorDtN.hpp is that
+#     operator and GradShafranovSolver::setExteriorCoupling is how it is
+#     attached; it is not reachable from a configuration file yet.
+
+[mesh]
+# The tokamak-shaped box of examples/mhd-rectangle.toml, unchanged: R0 = 1.7 m,
+# half-width 0.5 m, half-height 0.7 m, 768 triangles after one refinement.
+RMin = 1.2              # m
+RMax = 2.2              # m
+ZMin = -0.7             # m
+ZMax = 0.7              # m
+NR = 8
+NZ = 12
+RefinementLevels = 1
+
+[discretisation]
+PolynomialDegree = 2
+Tau = 1.0
+
+[source]
+# The plasma half, identical to examples/mhd-rectangle.toml. Its header
+# documents both tables and both scales; nothing here changes them.
+Type = "mhd"
+PPrimeFile = "examples/mhd-pprime.dat"
+PPrimeScale = 1.0e6
+GGPrimeFile = "examples/mhd-ggprime.dat"
+
+# A VERTICAL-FIELD PAIR, OUTBOARD, up-down symmetric. Written as two blocks
+# because that is what a machine description is: one [[coils]] block per
+# conductor, in any order, and the set may be empty -- which is what every other
+# example in this directory has.
+[[coils]]
+# Name is for diagnostics only. It is what a refusal or a mesh-coverage warning
+# quotes back, so it is worth writing even though MEQ defaults it to "coil0".
+Name = "PF-upper"
+CentreR = 2.10          # m
+CentreZ = 0.60          # m
+HalfWidth = 0.05        # m, so the coil spans r in [2.05, 2.15]
+HalfHeight = 0.05       # m, so it spans z in [0.55, 0.65]
+# The TOTAL through the cross-section, amperes, signed.
+Current = 1.5e5
+
+[[coils]]
+# THE SAME COIL MIRRORED, AND ITS CURRENT WRITTEN THE OTHER WAY, so this file
+# exercises both spellings. 1.5e7 A/m^2 over an area of 4 * 0.05 * 0.05 = 0.01
+# m^2 is 1.5e5 A, the same as the block above -- MEQ resolves CurrentDensity to
+# a total at parse time and reports the total.
+Name = "PF-lower"
+CentreR = 2.10
+CentreZ = -0.60
+HalfWidth = 0.05
+HalfHeight = 0.05
+CurrentDensity = 1.5e7  # A/m^2
+
+[boundary]
+Type = "zero"
+
+[solver]
+NewtonMaxIterations = 20
+NewtonRelativeTolerance = 1.0e-10
+NewtonAbsoluteTolerance = 1.0e-14
+AssemblyMode = "threaded"
+TraceSolver = "umfpack"
+
+[output]
+# Writes ./coils-rectangle.mesh and the two .gf files for GLVis and restart,
+# ./coils-rectangle/coils-rectangle.pvd at degree 3 for ParaView, and
+# ./coils-rectangle.nc on a 129 x 129 grid. The .nc additionally carries
+# `coils` and `coil_current`, so a reader differencing two files can tell a run
+# with conductors from one without.
+Directory = "."
+Prefix = "coils-rectangle"
+GridNR = 129
+GridNZ = 129

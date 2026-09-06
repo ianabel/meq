@@ -207,6 +207,24 @@ namespace meq
 		// basin, and at a fixed psi_ax the equation generally has a second,
 		// non-physical solution the iteration can reach instead.
 		double psiAxis = 0.0;
+		// ConfineToPlasma: whether F and dF/dpsi are ZERO wherever the
+		// normalised flux is non-positive, so that the plasma's SUPPORT moves
+		// with the solution instead of being the whole domain. That is what a
+		// free-boundary run needs and what a fixed-boundary run must not have:
+		// there the domain IS the plasma, Psi > 0 throughout by construction,
+		// and switching this on would only put a branch in the inner loop.
+		//
+		// REQUIRES Normalised = true, because the test is on Psi and psi_bnd
+		// and psi_ax are what define it. Refused otherwise rather than ignored.
+		//
+		// AND IT REQUIRES A PROFILE THAT VANISHES AT THE EDGE, p'( 0 ) = 0.
+		// With p'( 0 ) != 0 the source JUMPS across the plasma boundary, the
+		// assembled residual is discontinuous in the unknowns, and there is no
+		// Jacobian to iterate with -- measured, Newton fails at every degree
+		// and every mesh, from the exact solution, and under PicardThenNewton.
+		// Nothing here can check that, the profile being a table; see
+		// meq::NormalisedSource::setPlasmaSupport.
+		bool confineToPlasma = false;
 	};
 
 	// The nonlinear manufactured solution of HDG-GradShafranov.pdf Example 5,
@@ -294,10 +312,12 @@ namespace meq
 		// describe the same plasma, so a comparison against another code has to
 		// agree on this first.
 		double referenceRadius = 1.0;
-		// Mu0, Normalised, PsiAxis: as MHDParameters, and meaning the same.
+		// Mu0, Normalised, PsiAxis, ConfineToPlasma: as MHDParameters, and
+		// meaning the same.
 		double mu0 = 4.0e-7*3.14159265358979323846;
 		bool normalised = false;
 		double psiAxis = 0.0;
+		bool confineToPlasma = false;
 	};
 
 	using SourceParameters = std::variant< SolovievParameters, MHDParameters,
@@ -325,6 +345,27 @@ namespace meq
 
 		/// The starting psi_ax, meaningful only when isNormalised().
 		double psiAxisGuess() const;
+
+		/// Whether the source is confined to `{ Psi > 0 }`, so that the
+		/// plasma's support moves with the solution. False for every source
+		/// that is not normalised, since the test is on Psi.
+		bool confinesToPlasma() const;
+
+		/// The permeability this source multiplies its pressure term by.
+		///
+		/// **EXPOSED SO THE COILS CAN SHARE IT, AND THAT IS THE WHOLE REASON.**
+		/// A coil's contribution is `mu0 r I/|Omega_c|` and the plasma's is
+		/// `mu0 r^2 p' + g g'`; they are ADDED, so a run in normalised units
+		/// that sets `[source] Mu0 = 1` and leaves the coils at the SI value
+		/// would be summing two terms scaled a million-fold apart -- and it
+		/// would converge, at full order, to a machine nobody described. There
+		/// is deliberately no `Mu0` key on `[[coils]]` for that reason: two
+		/// keys that must agree are a way of writing down a disagreement.
+		///
+		/// The benchmark sources (soloviev, manufactured) carry no mu0 of
+		/// their own -- it is folded into their coefficients -- and answer with
+		/// meq::vacuumPermeability, which is what SI coil currents want.
+		double permeability() const;
 	};
 
 	// [boundary] -- the Dirichlet data psi_D on Gamma.

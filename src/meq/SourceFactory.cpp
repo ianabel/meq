@@ -325,4 +325,37 @@ namespace meq
 		throw ConfigError( configFileName, "source.Type",
 		                   "this source type has no normalised form" );
 	}
+
+	std::shared_ptr<CoilSet const> makeCoilSet( CoilConfig const &config,
+	                                           double mu0,
+	                                           std::string const &configFileName )
+	{
+		if ( config.coils.empty() )
+			return nullptr;
+
+		auto set = std::make_shared<CoilSet>( mu0 );
+
+		for ( std::size_t i = 0; i < config.coils.size(); ++i )
+		{
+			CoilParameters const &parameters = config.coils[ i ];
+
+			// The block's own name if it has one, so a refusal points at the
+			// line the author wrote rather than at an ordinal they have to
+			// count out. Config gives every unnamed block "coil<i>" already,
+			// so the fallback here is belt and braces.
+			std::string key = "coils[" + std::to_string( i ) + "]";
+			if ( !parameters.name.empty() )
+				key += " (" + parameters.name + ")";
+
+			guarded( [ & ]() -> int
+			{
+				set->add( Coil( parameters.centreR, parameters.centreZ,
+				                parameters.halfWidth, parameters.halfHeight,
+				                parameters.current ) );
+				return 0;
+			}, configFileName, key.c_str() );
+		}
+
+		return set;
+	}
 }

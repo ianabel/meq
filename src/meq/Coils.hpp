@@ -2,6 +2,7 @@
 #define MEQ_COILS_HPP
 
 #include <cstddef>
+#include <memory>
 #include <vector>
 
 #include "Source.hpp"
@@ -532,6 +533,107 @@ namespace meq
 			std::vector<Coil> coilList;
 			double permeability;
 			int quadratureOrderValue;
+	};
+
+
+	/**
+	 * A meq::Source that is a plasma source PLUS a coil set.
+	 *
+	 * This is the adapter Coil's own comment says belongs with the assembly
+	 * rather than with the geometry, and it is here rather than in Source.hpp
+	 * because it is the coils that need adapting: `Source::f()` takes psi and a
+	 * coil current does not depend on it.
+	 *
+	 * `F = F_plasma( r, z, psi ) + F_coil( r, z )`, and
+	 * `dF/dpsi = dF_plasma/dpsi` exactly -- the coils contribute nothing to the
+	 * Jacobian, so a solve driven by coils ALONE is affine and Newton finishes
+	 * in one step. That is the property `theCoilsMakeAVacuumSolveAffine`
+	 * asserts, and it is the cheapest available statement that the coil term
+	 * really is data.
+	 *
+	 * **SHARED OWNERSHIP OF BOTH, BECAUSE THE DRIVER NEEDS IT.** `apps/meq.cpp`
+	 * builds a fresh solver every adaptive cycle and hands it the same source;
+	 * the source must outlive every one of them, and the coil set is separately
+	 * useful to whatever computes the exterior field. Neither may be null.
+	 */
+	class CoilAugmentedSource : public Source
+	{
+		public:
+			/// @throws std::invalid_argument if either argument is null.
+			CoilAugmentedSource( std::shared_ptr<Source const> plasmaIn,
+			                     std::shared_ptr<CoilSet const> coilsIn );
+
+			/// F_plasma( r, z, psi ) + F_coil( r, z ).
+			double f( double r, double z, double psi ) const override;
+
+			/// dF_plasma/dpsi. The coils contribute exactly zero.
+			double dFdPsi( double r, double z, double psi ) const override;
+
+			Source const & plasma() const;
+			CoilSet const & coils() const;
+
+		private:
+			std::shared_ptr<Source const> plasmaSource;
+			std::shared_ptr<CoilSet const> coilSet;
+	};
+
+	/**
+	 * The same sum, when the plasma source's profiles are functions of
+	 * NORMALISED flux and psi_ax is therefore an unknown of the non-linear
+	 * system.
+	 *
+	 * It is a separate class rather than a flag for the reason
+	 * meq::NormalisedSource is a separate class from meq::MHDSource: the solver
+	 * takes a `NormalisedSource &` on one path and a `Source const &` on the
+	 * other, and which one it is decides whether there is a border row at all.
+	 *
+	 * **EVERY NORMALISATION CALL IS FORWARDED TO THE PLASMA SOURCE AND NONE IS
+	 * ANSWERED HERE.** The normalisation belongs to the profiles, the profiles
+	 * belong to the wrapped source, and duplicating the pair of doubles here
+	 * would create two answers to `normalisation()` that could disagree. The
+	 * coils are not normalised by anything -- their current is amperes.
+	 *
+	 * **AND setPlasmaSupport() IS FORWARDED TOO, WHICH IS WHY THE BASE MADE IT
+	 * VIRTUAL.** `insidePlasma()` is consulted by whichever object evaluates
+	 * the profiles, and that is the wrapped one. See
+	 * NormalisedSource::setPlasmaSupport.
+	 *
+	 * **THE COIL TERM IS OUTSIDE THE PLASMA SUPPORT, DELIBERATELY.** With the
+	 * support on, `F_plasma` vanishes wherever `Psi <= 0` and `F_coil` does
+	 * not: a coil sits in the vacuum region by construction, so confining it to
+	 * the plasma would switch off every coil in the machine. The sum is
+	 * therefore taken after the plasma term has been confined and never before.
+	 */
+	class CoilAugmentedNormalisedSource : public NormalisedSource
+	{
+		public:
+			/// @throws std::invalid_argument if either argument is null.
+			///
+			/// The plasma source is NON-const, as meq::makeNormalisedSource
+			/// returns it and for the same reason: the solver calls
+			/// setNormalisation() on it before every residual evaluation.
+			CoilAugmentedNormalisedSource(
+				std::shared_ptr<NormalisedSource> plasmaIn,
+				std::shared_ptr<CoilSet const> coilsIn );
+
+			double f( double r, double z, double psi ) const override;
+			double dFdPsi( double r, double z, double psi ) const override;
+
+			void setNormalisation( double psiAxis,
+			                       double psiBoundary ) override;
+			using NormalisedSource::setNormalisation;
+
+			double normalisation() const override;
+			double boundaryNormalisation() const override;
+
+			void setPlasmaSupport( bool confined ) override;
+
+			NormalisedSource & plasma() const;
+			CoilSet const & coils() const;
+
+		private:
+			std::shared_ptr<NormalisedSource> plasmaSource;
+			std::shared_ptr<CoilSet const> coilSet;
 	};
 
 }

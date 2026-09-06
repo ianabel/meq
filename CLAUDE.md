@@ -361,7 +361,7 @@ one of them.
 | **FB-A** | the axis, below. `tests/convergence/AxisConvergence.cpp` |
 | **FB-0** | **DONE, and §3.4 closed it 2026-09-06.** `src/meq/ExteriorDtN.{hpp,cpp}` — the Gegenbauer basis, the DtN symbol and the mass, **MFEM-free** so CI gates it. Checked against a current loop built from elliptic integrals sharing no code with it: **1.4e−15** in the trace, **6.9e−14** in the DtN. And now against **CEDRES++'s own boundary form** — eq (3.5), a hypersingular double-layer kept in its double-difference form plus a single layer, elliptic-integral kernels throughout — which comes out **diagonal to 1.15e-10** against a scale of 2.56e-01, its diagonal matching `blockEntry( n )` to **3.20e-09**. A boundary integral against a separation of variables, sharing the equation and nothing else. §3.4 named this as the test that would falsify all of §3; it does not |
 | **FB-1** | **DONE.** `P`, the transmission row, `setExteriorDatum()`, and both halves measured: `ψ` at 1.99/2.99/3.99 on the half-disc with the datum given, and the exterior coefficients recovered from the transmission condition to 1.9e-04, converging at 3.30. `tests/analytic/ExteriorMatched.hpp` is the exact answer — **the plan's proposed one, filament loop fields, cannot support an order study at all**, `ψ ∉ H¹` at a point source |
-| **FB-2** | `src/meq/Coils.{hpp,cpp}`, MFEM-free, and the acceptance identity `∮(1/r)∂ψ/∂n dl = −μ₀I` at **3.3e−11** on the exact field, so a discrepancy on a solve is the solve |
+| **FB-2** | `src/meq/Coils.{hpp,cpp}`, MFEM-free, and the acceptance identity `∮(1/r)∂ψ/∂n dl = −μ₀I` at **3.3e−11** on the exact field, so a discrepancy on a solve is the solve. **And the coils are reachable from a TOML file since 2026-09-06** — see below |
 
 ### FB-5: the exterior coupling is an unknown of the same Newton
 
@@ -433,6 +433,57 @@ is built to be contracted against `flux()`, which undoes `DarcyForm`'s `−q`;
 the unknown carries the raw block. So contracting the row against the unknown
 directly is right and negating it again is not. The wrong sign does not
 diverge — it fails to converge, which is the same disguise as the stale load.
+
+**THE COILS ARE WIRED, 2026-09-06, AND `[[coils]]` REACHES THE SOLVE.**
+`meq::makeCoilSet` is the one door from the schema to a `CoilSet`, and
+`meq::CoilAugmentedSource` / `CoilAugmentedNormalisedSource` are the adapters
+that put `F_coil( r, z )` beside `F_plasma( r, z, ψ )` — both MFEM-free, both in
+`Coils.hpp`, because it is the coils that need adapting: `Source::f()` takes ψ
+and a coil current does not depend on it. `examples/coils-rectangle.toml` is the
+worked example.
+
+**THE CONTROL IS BIT IDENTITY AND IT IS WHAT MAKES THE WRAPPER SAFE.** Carrying
+coils means every run with a `[[coils]]` block gets a *different object* handed
+to `setSource()`, so the question is not only whether the coil term arrives but
+whether wrapping perturbs anything else. `theDriverAddsTheCoilsToF` runs the
+shipped example three ways and reads **`0.000e+00`** between zero-current coils
+and no coils at all — not "agrees to round-off" — against **2.232e-01** relative
+in L2 for 300 kA. An empty contribution is exactly empty.
+
+**TWO THINGS THE WIRING CHANGED THAT ARE NOT ABOUT COILS.**
+`NormalisedSource::setPlasmaSupport` is **virtual** now. It is consulted by
+whichever object evaluates the profiles, and under a wrapper that is the *held*
+source — so non-virtual, a caller holding a `NormalisedSource &` (which is what
+the driver holds) would set the wrapper's flag, the wrapper's `f()` would
+delegate to a plasma source still unconfined, and the moving support would
+silently do nothing.
+`the_plasma_support_reaches_the_source_that_evaluates_the_profiles` makes that
+call **through a base reference** for exactly that reason. And
+`SourceConfig::permeability()` exists so the coils can share the source's `μ₀`:
+there is deliberately **no `Mu0` key on a coil block**, because a normalised-unit
+run setting `[source] Mu0 = 1` while the coils kept the SI value would sum two
+terms scaled a million-fold apart and converge, at full order, to a machine
+nobody described.
+
+**AND THE MOVING SUPPORT IS REACHABLE TOO, AS `[source] ConfineToPlasma`** —
+`F = 0` wherever `Ψ ≤ 0`, refused unless `Normalised = true` because the test is
+on `Ψ`. **The coil term is OUTSIDE that support and the order the sum is taken
+in is what puts it there**: a coil sits in the vacuum region by construction, so
+confining it to the plasma would switch off every coil in the machine. **No
+shipped example sets it**, and the reason is the precondition rather than the
+plumbing: `p′( 0 ) = 0` is required or the assembled residual is discontinuous
+in the unknowns, and `examples/mhd-ggprime.dat` is 1.35 at `ψ = 0`. With
+`ψ_bnd` still fixed at zero (FB-3) the edge is pinned at `ψ = 0` rather than
+found, so this is half of a moving boundary and the half that is built.
+
+**A COIL THE MESH DOES NOT REACH CONTRIBUTES NOTHING, AND THE DRIVER SAYS SO.**
+`F` is assembled by quadrature over the elements, so a coil outside the `[mesh]`
+box is never sampled — the run converges, writes its files, and describes a
+machine with that conductor switched off, while `coil_current` in the `.nc`
+reports the current whether or not it did any work. A **warning** rather than a
+refusal, because `FREE-BOUNDARY-PLAN.md` §5.4 offers exactly that configuration
+— coils outside `Ω`, entering through the exterior coupling — and that route is
+not wired.
 
 **FB-1 IS COMPLETE AS OF 2026-09-05** — see the entries below for the two halves
 and for what building it found. What remains of free boundary is the **plasma**:

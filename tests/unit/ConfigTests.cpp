@@ -1966,3 +1966,90 @@ BOOST_AUTO_TEST_CASE( the_coil_set_keeps_the_order_the_file_gives )
 	// perfectly ordinary machine state.
 	BOOST_TEST( c.getCoils().coils[ 1 ].current == -1.0e6 );
 }
+
+/*
+ * ConfineToPlasma -- the moving support, and it is normalised-only.
+ *
+ * The plasma is where the NORMALISED flux is positive, so the key means nothing
+ * without a normalisation and is refused rather than ignored there, on exactly
+ * the principle PsiAxis is: a file that asks for a moving plasma boundary and
+ * silently gets a fixed one is a file whose author believed something false
+ * about what the run was doing.
+ *
+ * IT IS OFF BY DEFAULT AND MUST STAY SO. Every fixed-boundary configuration in
+ * examples/ has Omega = the plasma, Psi > 0 throughout by construction, and
+ * switching this on would put a branch in the inner loop for nothing --
+ * whereas switching it on by ACCIDENT would switch the source off wherever psi
+ * changed sign, which on a curved boundary it does.
+ */
+BOOST_AUTO_TEST_CASE( the_moving_plasma_support_is_normalised_only )
+{
+	Configuration on = parse( rotating(
+		"Normalised = true\nPsiAxis = 0.115\nConfineToPlasma = true\n" ) );
+	BOOST_TEST( on.getSource().getRotating().confineToPlasma == true );
+	BOOST_TEST( on.getSource().confinesToPlasma() == true );
+
+	Configuration off = parse( rotating( "Normalised = true\nPsiAxis = 0.115\n" ) );
+	BOOST_TEST( off.getSource().getRotating().confineToPlasma == false );
+	BOOST_TEST( off.getSource().confinesToPlasma() == false );
+
+	std::string const mhdBody =
+		"[source]\n"
+		"Type = \"mhd\"\n"
+		"PPrimeFile = \"profiles/pprime.dat\"\n"
+		"GGPrimeFile = \"profiles/ggprime.dat\"\n";
+
+	Configuration mhdOn = parse( withSource(
+		mhdBody + "Normalised = true\nPsiAxis = 0.3\nConfineToPlasma = true\n" ) );
+	BOOST_TEST( mhdOn.getSource().getMHD().confineToPlasma == true );
+	BOOST_TEST( mhdOn.getSource().confinesToPlasma() == true );
+
+	// Refused without a normalisation, on both sources that take it.
+	for ( std::string const &text : { rotating( "ConfineToPlasma = true\n" ),
+	                                  withSource( mhdBody + "ConfineToPlasma = true\n" ) } )
+		BOOST_CHECK_EXCEPTION( parse( text ), ConfigError,
+			[]( ConfigError const & e )
+			{
+				return e.getKey() == "source.ConfineToPlasma"
+				       && mentions( e, "Normalised = true" );
+			} );
+
+	// And a source that has no normalised form at all answers the question
+	// rather than throwing, because the driver asks before it knows the type.
+	BOOST_TEST( parse( minimal() ).getSource().confinesToPlasma() == false );
+}
+
+/*
+ * mu0 IS THE SOURCE'S AND THE COILS SHARE IT, which is why [[coils]] has no
+ * Mu0 key of its own -- two keys that must agree are a way of writing down a
+ * disagreement. A run in normalised units setting [source] Mu0 = 1 while the
+ * coils kept the SI value would be summing two terms scaled a million-fold
+ * apart, and would converge, at full order, to a machine nobody described.
+ */
+BOOST_AUTO_TEST_CASE( the_coils_take_the_sources_permeability )
+{
+	std::string const body =
+		"[source]\n"
+		"Type = \"mhd\"\n"
+		"PPrimeFile = \"profiles/pprime.dat\"\n"
+		"GGPrimeFile = \"profiles/ggprime.dat\"\n";
+
+	BOOST_TEST( parse( withSource( body ) ).getSource().permeability()
+	            == 4.0e-7*3.14159265358979323846 );
+	BOOST_TEST( parse( withSource( body + "Mu0 = 1.0\n" ) ).getSource().permeability()
+	            == 1.0 );
+
+	// A benchmark source folds mu0 into its own coefficients and has no key
+	// for it; SI is the only answer that makes an SI coil current mean
+	// anything, and that is what it gives.
+	BOOST_TEST( parse( minimal() ).getSource().permeability()
+	            == 4.0e-7*3.14159265358979323846 );
+
+	// There is deliberately no Mu0 on a coil block.
+	BOOST_CHECK_EXCEPTION(
+		parse( withSource( body + "\n[[coils]]\nCentreR = 1.6\nCentreZ = 0.0\n"
+		                   "HalfWidth = 0.1\nHalfHeight = 0.05\nCurrent = 1.0e6\n"
+		                   "Mu0 = 1.0\n" ) ),
+		ConfigError,
+		[]( ConfigError const & e ) { return e.getKey() == "coils[0].Mu0"; } );
+}

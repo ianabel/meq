@@ -586,4 +586,81 @@ BOOST_AUTO_TEST_CASE( the_factory_refuses_more_species_than_maxSpecies )
 		} );
 }
 
+/*
+ * makeCoilSet -- the one door from a [[coils]] block to a meq::CoilSet.
+ *
+ * NULL WHEN THERE ARE NO COILS, AND THAT IS THE ORDINARY CASE. A caller can
+ * then skip the augmentation entirely rather than wrapping its source around a
+ * set that adds zero, which is what keeps every existing example bit-identical
+ * -- an empty wrapper is cheap but it is not free of the risk of being wrong.
+ */
+BOOST_AUTO_TEST_CASE( the_coil_factory_builds_what_the_blocks_describe )
+{
+	std::string const plasma =
+		"[source]\nType = \"soloviev\"\nA = 0.5\n\n[boundary]\nType = \"zero\"\n";
+
+	// No blocks at all.
+	BOOST_TEST( meq::makeCoilSet( configure( plasma ).getCoils() ) == nullptr );
+
+	meq::Configuration const config = configure(
+		plasma +
+		"\n[[coils]]\nName = \"PF1\"\n"
+		"CentreR = 1.6\nCentreZ = 0.8\nHalfWidth = 0.1\nHalfHeight = 0.05\n"
+		"Current = 1.25e6\n"
+		"\n[[coils]]\nName = \"PF2\"\n"
+		"CentreR = 1.6\nCentreZ = -0.8\nHalfWidth = 0.1\nHalfHeight = 0.05\n"
+		"CurrentDensity = -6.25e7\n" );
+
+	auto coils = meq::makeCoilSet( config.getCoils() );
+	BOOST_TEST_REQUIRE( coils != nullptr );
+	BOOST_TEST_REQUIRE( coils->size() == 2u );
+
+	BOOST_TEST( coils->coil( 0 ).centreR() == 1.6 );
+	BOOST_TEST( coils->coil( 0 ).centreZ() == 0.8 );
+	BOOST_TEST( coils->coil( 0 ).current() == 1.25e6 );
+
+	// CurrentDensity resolved through the area 4 * 0.1 * 0.05 = 0.02 m^2, so
+	// -6.25e7 A/m^2 is -1.25e6 A. NOT an exact comparison: the parse forms the
+	// product and floating-point multiplication does not associate, so 1.25e6
+	// written directly and 6.25e7 * 0.02 need not be the same double.
+	BOOST_TEST( coils->coil( 1 ).current() == -1.25e6,
+	            boost::test_tools::tolerance( 1.0e-12 ) );
+
+	// The two together, which is what the driver prints and what Ampere's law
+	// over the whole domain is checked against.
+	BOOST_TEST( coils->totalCurrent() == 0.0,
+	            boost::test_tools::tolerance( 1.0e-9 ) );
+
+	// mu0 is the argument's, not a default buried in CoilSet: a normalised-unit
+	// run hands it 1 and every coil term scales with it.
+	BOOST_TEST( meq::makeCoilSet( config.getCoils(), 1.0 )->mu0() == 1.0 );
+	BOOST_TEST( coils->mu0() == meq::vacuumPermeability );
+}
+
+/// A geometry meq::Coil refuses is refused here too, and the message NAMES THE
+/// BLOCK -- which the library exception cannot do, since meq::Coil does not
+/// know it came from a file. Config catches this one first today; the factory
+/// carries the translation because Config's checks and Coil's are separate
+/// lists and the day they diverge the diagnostic should still read as a
+/// configuration error rather than as a library exception from three layers
+/// down.
+BOOST_AUTO_TEST_CASE( the_coil_factory_names_the_block_it_refuses )
+{
+	meq::CoilConfig bad;
+	meq::CoilParameters one;
+	one.name = "PF-inboard";
+	one.centreR = 0.05;          // reaches the axis
+	one.halfWidth = 0.10;
+	one.halfHeight = 0.05;
+	one.current = 1.0e6;
+	bad.coils.push_back( one );
+
+	BOOST_CHECK_EXCEPTION( meq::makeCoilSet( bad, meq::vacuumPermeability, "<test>" ),
+		meq::ConfigError,
+		[]( meq::ConfigError const &error )
+		{
+			return error.getKey() == "coils[0] (PF-inboard)";
+		} );
+}
+
 BOOST_AUTO_TEST_SUITE_END()

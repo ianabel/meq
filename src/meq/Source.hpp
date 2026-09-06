@@ -267,7 +267,16 @@ namespace meq
 			 * under PicardThenNewton. See CLAUDE.md's *At j = 0 the question
 			 * does not arise*.
 			 */
-			void setPlasmaSupport( bool confined )
+			/// **VIRTUAL, AND THAT IS NOT DECORATION.** A source that WRAPS
+			/// another -- meq::CoilAugmentedNormalisedSource is the one in
+			/// this tree -- evaluates the plasma term through the source it
+			/// holds, so it is the HELD source's flag that insidePlasma()
+			/// consults. Non-virtual, a caller holding a NormalisedSource &
+			/// would set the wrapper's flag, the wrapper's f() would delegate
+			/// to a plasma source still unconfined, and the moving support
+			/// would silently do nothing. An override forwards; this base is
+			/// what an override calls to keep plasmaSupport() honest.
+			virtual void setPlasmaSupport( bool confined )
 			{
 				confinedToPlasma = confined;
 			}

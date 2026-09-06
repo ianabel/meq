@@ -562,6 +562,24 @@ namespace meq
 				source.fail( "PsiAxis", "must be finite and non-zero: Psi = psi/psi_ax is undefined at zero" );
 		}
 
+		/// The moving plasma support, which is normalised-only for the same
+		/// reason PsiAxis is: the test is Psi > 0, and without a normalisation
+		/// there is no Psi. Refused rather than ignored in the un-normalised
+		/// case, on the same principle -- a file that asks for a moving plasma
+		/// boundary and silently gets a fixed one is a file whose author
+		/// believed something false about what the run was doing.
+		void readPlasmaSupport( Table const & source, bool normalised, bool & confine )
+		{
+			if ( !normalised )
+			{
+				if ( source.has( "ConfineToPlasma" ) )
+					source.fail( "ConfineToPlasma", "means nothing unless Normalised = true: the plasma is where the NORMALISED flux Psi = ( psi - psi_bnd )/( psi_ax - psi_bnd ) is positive, and without a normalisation there is no Psi to test" );
+				return;
+			}
+
+			confine = source.getBooleanOr( "ConfineToPlasma", false );
+		}
+
 		SourceType toSourceType( Table const & source, std::string const & spelling )
 		{
 			static std::map< std::string, SourceType > const types =
@@ -655,6 +673,38 @@ namespace meq
 		}
 
 		return false;
+	}
+
+	bool SourceConfig::confinesToPlasma() const
+	{
+		switch ( type )
+		{
+			case SourceType::MHD:
+				return std::get< MHDParameters >( parameters ).confineToPlasma;
+			case SourceType::Rotating:
+				return std::get< RotatingParameters >( parameters ).confineToPlasma;
+			case SourceType::Soloviev:
+			case SourceType::Manufactured:
+				return false;
+		}
+
+		return false;
+	}
+
+	double SourceConfig::permeability() const
+	{
+		switch ( type )
+		{
+			case SourceType::MHD:
+				return std::get< MHDParameters >( parameters ).mu0;
+			case SourceType::Rotating:
+				return std::get< RotatingParameters >( parameters ).mu0;
+			case SourceType::Soloviev:
+			case SourceType::Manufactured:
+				break;
+		}
+
+		return 4.0e-7*3.14159265358979323846;
 	}
 
 	double SourceConfig::psiAxisGuess() const
@@ -875,7 +925,8 @@ namespace meq
 					                            "PPrimeScale", "GGPrimeScale",
 					                            "PPrimeVariable", "PPrimeFit",
 					                            "GGPrimeVariable", "GGPrimeFit",
-					                            "Normalised", "PsiAxis", "ProfileFile" } );
+					                            "Normalised", "PsiAxis", "ConfineToPlasma",
+					                            "ProfileFile" } );
 					refuseReservedProfileFile( source );
 					// The "mhd" source has no constant form for either profile,
 					// so it reads both files directly and does not go through
@@ -903,6 +954,7 @@ namespace meq
 					if ( !( parameters.mu0 > 0.0 ) )
 						source.fail( "Mu0", "must be positive" );
 					readNormalisation( source, parameters.normalised, parameters.psiAxis );
+					readPlasmaSupport( source, parameters.normalised, parameters.confineToPlasma );
 					sourceOptions.parameters = parameters;
 					break;
 				}
@@ -913,7 +965,7 @@ namespace meq
 					                            "GGPrime", "GGPrimeFile", "GGPrimeScale",
 					                            "GGPrimeVariable", "GGPrimeFit",
 					                            "ReferenceRadius", "Mu0", "Normalised", "PsiAxis",
-					                            "ProfileFile" } );
+					                            "ConfineToPlasma", "ProfileFile" } );
 					refuseReservedProfileFile( source );
 					RotatingParameters parameters;
 
@@ -936,6 +988,7 @@ namespace meq
 					                   parameters.ggPrimeScale, ggGiven, true );
 
 					readNormalisation( source, parameters.normalised, parameters.psiAxis );
+					readPlasmaSupport( source, parameters.normalised, parameters.confineToPlasma );
 
 					std::vector< Table > const species = source.getTableArrayOr( "species" );
 					if ( species.size() < 2 )

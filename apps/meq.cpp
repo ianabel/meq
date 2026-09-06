@@ -25,6 +25,7 @@
 #include "meq_version.hpp"
 
 #include "meq/BoundaryShape.hpp"
+#include "meq/Coils.hpp"
 #include "meq/Config.hpp"
 #include "meq/Estimator.hpp"
 #include "meq/Field.hpp"
@@ -353,6 +354,23 @@ int main( int argc, char **argv )
 	 */
 	std::shared_ptr<meq::NormalisedSource> normalised;
 	/*
+	 * THE PLASMA SOURCE BEFORE THE COILS WERE ADDED TO IT, KEPT SEPARATELY.
+	 *
+	 * With `[[coils]]` blocks present, `source` above is a
+	 * meq::CoilAugmentedSource wrapping this one, because the coil current is
+	 * part of F and everything that reads F -- the solve and the residual
+	 * ESTIMATOR above all -- must see the sum. But the rotating output fields
+	 * are recovered by dynamic_cast, and a cast to meq::RotatingSource through
+	 * a wrapper fails: without this handle a rotating run with coils would
+	 * report "did not produce a rotating source" and write no densities.
+	 *
+	 * It is null when there are no coils, in which case `source` IS the plasma
+	 * source and the cast sites below fall back to it.
+	 */
+	std::shared_ptr<meq::Source const> plasmaSource;
+	/// The coils of `[[coils]]`, or null if the file described none.
+	std::shared_ptr<meq::CoilSet const> coils;
+	/*
 	 * psi_ax, CARRIED FORWARD BETWEEN ADAPTIVE CYCLES.
 	 *
 	 * makeSolver() builds a FRESH solver every cycle -- it must, since the mesh
@@ -380,15 +398,55 @@ int main( int argc, char **argv )
 	try
 	{
 		config = std::make_unique<meq::Configuration>( argument );
+		coils = meq::makeCoilSet( config->getCoils(),
+		                          config->getSource().permeability(), argument );
+
 		if ( config->getSource().isNormalised() )
 		{
-			normalised = meq::makeNormalisedSource( config->getSource(), argument );
+			auto plasma = meq::makeNormalisedSource( config->getSource(), argument );
 			psiAxisGuess = config->getSource().psiAxisGuess();
+
+			/*
+			 * THE MOVING SUPPORT IS SET ON THE PLASMA SOURCE AND NOT ON THE
+			 * WRAPPER, WHICH IS WHY THE WRAPPER OVERRIDES IT. The coils are
+			 * OUTSIDE the plasma by construction -- confining them to it would
+			 * switch off every coil in the machine -- so the confinement
+			 * applies to the plasma term alone and the sum is taken after it.
+			 * meq::CoilAugmentedNormalisedSource::setPlasmaSupport forwards,
+			 * and meq::NormalisedSource::setPlasmaSupport is virtual so that
+			 * this call reaches the forwarding one whichever handle it goes
+			 * through.
+			 */
+			if ( config->getSource().confinesToPlasma() )
+				plasma->setPlasmaSupport( true );
+
+			if ( coils )
+			{
+				plasmaSource = plasma;
+				normalised = std::make_shared<meq::CoilAugmentedNormalisedSource>(
+					std::move( plasma ), coils );
+			}
+			else
+			{
+				normalised = std::move( plasma );
+			}
+
 			source = normalised;
 		}
 		else
 		{
-			source = meq::makeSource( config->getSource(), argument );
+			auto plasma = meq::makeSource( config->getSource(), argument );
+
+			if ( coils )
+			{
+				plasmaSource = plasma;
+				source = std::make_shared<meq::CoilAugmentedSource const>(
+					std::move( plasma ), coils );
+			}
+			else
+			{
+				source = std::move( plasma );
+			}
 		}
 
 		if ( config->getBoundary().type == meq::BoundaryDataType::Exact )
@@ -649,6 +707,46 @@ int main( int argc, char **argv )
 	try
 	{
 		background = buildMesh( config->getMesh() );
+
+		/*
+		 * A COIL OUTSIDE THE MESH CONTRIBUTES EXACTLY NOTHING, SILENTLY.
+		 *
+		 * F is assembled by quadrature over the elements, so a coil the mesh
+		 * does not reach is never sampled: the run converges, writes its files,
+		 * and describes a machine with that coil switched off. Nothing else in
+		 * the output can show it -- the current appears in `coil_current`
+		 * whether or not it did any work.
+		 *
+		 * A WARNING AND NOT A REFUSAL, because the configuration is not wrong
+		 * in principle: FREE-BOUNDARY-PLAN.md section 5.4 offers exactly this
+		 * -- coils outside Omega, entering through the exterior coupling rather
+		 * than through F. That route is not wired yet, so today the coil is
+		 * inert, and saying so is the honest thing. The test is against the
+		 * BACKGROUND box, which is the coarsest true statement on every path:
+		 * on the curved path D_h is smaller still, so a coil this check passes
+		 * may yet be only partly covered.
+		 */
+		if ( coils )
+		{
+			mfem::Vector low, high;
+			background.GetBoundingBox( low, high );
+
+			for ( std::size_t i = 0; i < coils->size(); ++i )
+			{
+				meq::Coil const &one = coils->coil( i );
+				bool const overlaps = one.rMax() > low( 0 ) && one.rMin() < high( 0 )
+				                   && one.zMax() > low( 1 ) && one.zMin() < high( 1 );
+				if ( !overlaps )
+					std::fprintf( stderr,
+						"MEQ: warning: coil %d spans r [%g, %g], z [%g, %g], which is\n"
+						"     entirely outside the mesh box r [%g, %g], z [%g, %g]. Its\n"
+						"     current enters F nowhere, so it contributes NOTHING to this\n"
+						"     solve.\n",
+						static_cast<int>( i ), one.rMin(), one.rMax(),
+						one.zMin(), one.zMax(),
+						low( 0 ), high( 0 ), low( 1 ), high( 1 ) );
+			}
+		}
 
 		// The curved path solves on D_h, a SUBSET of the background mesh; the
 		// fitted path solves on the background mesh itself. Everything
@@ -1230,6 +1328,24 @@ int main( int argc, char **argv )
 			             "%d transfer paths widened\n",
 			             solveMesh->GetNE(), backgroundElements, widened );
 
+		/*
+		 * THE TOTAL CURRENT IS PRINTED BECAUSE IT IS THE ONE COIL NUMBER A
+		 * READER CAN CHECK. FB-2's acceptance identity is
+		 * `oint ( 1/r ) dpsi/dn dl = -mu0 I`, a property of the trace alone --
+		 * so a sign error in a `[[coils]]` block, which is the mistake
+		 * FREE-BOUNDARY-PLAN.md section 7 predicts will be made at least once,
+		 * shows up here before anything is plotted.
+		 */
+		if ( coils )
+			std::printf( "MEQ: %d coil%s, total current %+.6e A\n",
+			             static_cast<int>( coils->size() ),
+			             coils->size() == 1 ? "" : "s",
+			             coils->totalCurrent() );
+
+		if ( config->getSource().confinesToPlasma() )
+			std::printf( "MEQ: the plasma support MOVES: F = 0 wherever the "
+			             "normalised flux is non-positive\n" );
+
 		Cycle const &last = history.back();
 		std::printf( "MEQ: converged in %d Newton iterations on %d elements, "
 		             "degree %d%s\n",
@@ -1462,10 +1578,15 @@ int main( int argc, char **argv )
 
 			// One of the two is non-null, and both take PHYSICAL psi and convert
 			// internally, so the loop below does not care which path it is on.
+			// Through the plasma handle when the coils wrapped the source; see
+			// where plasmaSource is declared for why the cast cannot go
+			// through `source` in that case.
+			meq::Source const *rotatingHandle =
+				plasmaSource ? plasmaSource.get() : source.get();
 			meq::RotatingSource const *plain =
-				dynamic_cast<meq::RotatingSource const *>( source.get() );
+				dynamic_cast<meq::RotatingSource const *>( rotatingHandle );
 			meq::NormalisedRotatingSource const *scaled =
-				dynamic_cast<meq::NormalisedRotatingSource const *>( source.get() );
+				dynamic_cast<meq::NormalisedRotatingSource const *>( rotatingHandle );
 
 			if ( !plain && !scaled )
 				throw std::runtime_error(
@@ -1557,6 +1678,24 @@ int main( int argc, char **argv )
 			writer.attribute( "normalisation_residual",
 			                  solver->normalisationResidual() );
 		}
+		/*
+		 * THE COILS ARE PART OF F, SO THE FILE HAS TO SAY SO.
+		 *
+		 * Without this a reader differencing two `.nc` files -- which is what
+		 * the freegs4e benchmark does -- has no way to tell a run with coils
+		 * from one without, and the difference between them is the whole of a
+		 * free-boundary comparison. `coil_current` is the signed total, which
+		 * is the number Ampere's law over the domain checks the outward flux
+		 * against; see meq::CoilSet::totalCurrent.
+		 */
+		if ( coils )
+		{
+			writer.attribute( "coils", static_cast<int>( coils->size() ) );
+			writer.attribute( "coil_current", coils->totalCurrent() );
+		}
+		if ( config->getSource().confinesToPlasma() )
+			writer.attribute( "plasma_support", "moving (F = 0 where Psi <= 0)" );
+
 		// A reader is entitled to know which nodes are the solution and which
 		// are a continuation of it past Gamma_h. Zero on the fitted path.
 		writer.attribute( "extrapolated_nodes", extended );

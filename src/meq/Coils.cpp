@@ -617,4 +617,81 @@ namespace meq
 		return permeability;
 	}
 
+
+	CoilAugmentedSource::CoilAugmentedSource( std::shared_ptr<Source const> plasmaIn,
+	                                          std::shared_ptr<CoilSet const> coilsIn )
+		: plasmaSource( std::move( plasmaIn ) ), coilSet( std::move( coilsIn ) )
+	{
+		if ( !plasmaSource )
+			throw std::invalid_argument( "meq::CoilAugmentedSource: the plasma source is null" );
+		if ( !coilSet )
+			throw std::invalid_argument( "meq::CoilAugmentedSource: the coil set is null" );
+	}
+
+	double CoilAugmentedSource::f( double r, double z, double psi ) const
+	{
+		return plasmaSource->f( r, z, psi ) + coilSet->f( r, z );
+	}
+
+	double CoilAugmentedSource::dFdPsi( double r, double z, double psi ) const
+	{
+		// The coils contribute nothing: their current is data, not a function
+		// of psi. Adding a zero here would be harmless and is left out so that
+		// the asymmetry with f() is visible rather than buried.
+		return plasmaSource->dFdPsi( r, z, psi );
+	}
+
+	Source const & CoilAugmentedSource::plasma() const { return *plasmaSource; }
+	CoilSet const & CoilAugmentedSource::coils() const { return *coilSet; }
+
+	CoilAugmentedNormalisedSource::CoilAugmentedNormalisedSource(
+		std::shared_ptr<NormalisedSource> plasmaIn,
+		std::shared_ptr<CoilSet const> coilsIn )
+		: plasmaSource( std::move( plasmaIn ) ), coilSet( std::move( coilsIn ) )
+	{
+		if ( !plasmaSource )
+			throw std::invalid_argument( "meq::CoilAugmentedNormalisedSource: the plasma source is null" );
+		if ( !coilSet )
+			throw std::invalid_argument( "meq::CoilAugmentedNormalisedSource: the coil set is null" );
+	}
+
+	double CoilAugmentedNormalisedSource::f( double r, double z, double psi ) const
+	{
+		return plasmaSource->f( r, z, psi ) + coilSet->f( r, z );
+	}
+
+	double CoilAugmentedNormalisedSource::dFdPsi( double r, double z, double psi ) const
+	{
+		return plasmaSource->dFdPsi( r, z, psi );
+	}
+
+	void CoilAugmentedNormalisedSource::setNormalisation( double psiAxis, double psiBoundary )
+	{
+		plasmaSource->setNormalisation( psiAxis, psiBoundary );
+	}
+
+	double CoilAugmentedNormalisedSource::normalisation() const
+	{
+		return plasmaSource->normalisation();
+	}
+
+	double CoilAugmentedNormalisedSource::boundaryNormalisation() const
+	{
+		return plasmaSource->boundaryNormalisation();
+	}
+
+	void CoilAugmentedNormalisedSource::setPlasmaSupport( bool confined )
+	{
+		// ON THE WRAPPED SOURCE, not on this one. NormalisedSource::insidePlasma
+		// reads whichever object's flag, and the plasma term is evaluated
+		// through plasmaSource -- so setting it here would leave the source that
+		// actually computes F unconfined, and the support would silently do
+		// nothing.
+		plasmaSource->setPlasmaSupport( confined );
+		NormalisedSource::setPlasmaSupport( confined );
+	}
+
+	NormalisedSource & CoilAugmentedNormalisedSource::plasma() const { return *plasmaSource; }
+	CoilSet const & CoilAugmentedNormalisedSource::coils() const { return *coilSet; }
+
 }

@@ -24,7 +24,9 @@
 
 #include <cmath>
 #include <cstdio>
+#include <memory>
 #include <stdexcept>
+#include <utility>
 
 #include "meq/Coils.hpp"
 
@@ -345,4 +347,180 @@ BOOST_AUTO_TEST_CASE( the_refusals_are_the_contract )
 	set.add( standardCoil() );
 	BOOST_CHECK_THROW( set.psiOf( 5, 2.0, 0.0 ), std::out_of_range );
 	BOOST_CHECK_THROW( set.setQuadratureOrder( 0 ), std::invalid_argument );
+}
+
+/*
+ * THE ADAPTERS, AND THE ONE THING ABOUT THEM THAT CAN BE SILENTLY WRONG.
+ *
+ * meq::CoilAugmentedSource and its normalised sibling exist so that a coil set
+ * can be handed to the solver as a meq::Source, which is what the driver does.
+ * The sum and the derivative pass-through are easy to get right and are checked
+ * below for completeness. What is NOT easy is the plasma support: it is
+ * consulted by whichever object evaluates the profiles, and that is the WRAPPED
+ * source -- so a setPlasmaSupport() that set only the wrapper's flag would
+ * compile, run, converge, and leave the plasma unconfined. The three cases at
+ * the end are about that, and the second of them goes through a base reference
+ * on purpose, because that is the call a non-virtual method would get wrong.
+ */
+namespace
+{
+	/// A plasma source that is a plain function of psi, so the sum below has a
+	/// closed form and the coil half is what is being isolated.
+	class LinearPlasma : public meq::NormalisedSource
+	{
+		public:
+			double f( double r, double, double psi ) const override
+			{
+				if ( !insidePlasma( psi ) )
+					return 0.0;
+				return r*( psi - boundaryValue )/( axisValue - boundaryValue );
+			}
+
+			double dFdPsi( double r, double, double psi ) const override
+			{
+				if ( !insidePlasma( psi ) )
+					return 0.0;
+				return r/( axisValue - boundaryValue );
+			}
+
+			void setNormalisation( double psiAxis, double psiBoundary ) override
+			{
+				axisValue = psiAxis;
+				boundaryValue = psiBoundary;
+			}
+
+			double normalisation() const override { return axisValue; }
+			double boundaryNormalisation() const override { return boundaryValue; }
+
+		private:
+			double axisValue = 1.0;
+			double boundaryValue = 0.0;
+	};
+}
+
+BOOST_AUTO_TEST_CASE( the_augmented_source_is_the_sum_and_the_coils_are_not_in_the_jacobian )
+{
+	auto coils = std::make_shared<CoilSet>();
+	coils->add( standardCoil() );
+
+	auto plasma = std::make_shared<LinearPlasma>();
+	plasma->setNormalisation( 2.0, 0.0 );
+
+	meq::CoilAugmentedNormalisedSource sum( plasma, coils );
+
+	// Inside the coil, where both terms are non-zero, and outside it, where
+	// only the plasma is. The coil's own contribution is checked against
+	// CoilSet::f rather than recomputed, since Coils.hpp's derivation is what
+	// the earlier cases in this file pin.
+	for ( auto point : { std::make_pair( 2.0, 0.0 ), std::make_pair( 1.0, 0.5 ) } )
+	{
+		double const r = point.first, z = point.second;
+		for ( double psi : { -0.7, 0.0, 0.4, 1.9 } )
+		{
+			BOOST_TEST( sum.f( r, z, psi )
+			            == plasma->f( r, z, psi ) + coils->f( r, z ),
+			            boost::test_tools::tolerance( 1.0e-15 ) );
+
+			// EXACT EQUALITY, not a tolerance: the coils contribute nothing at
+			// all to the Jacobian, so this is the same double travelling
+			// through one more function call. A tolerance here would accept a
+			// coil term that had leaked into dF/dpsi and happened to be small.
+			BOOST_TEST( sum.dFdPsi( r, z, psi ) == plasma->dFdPsi( r, z, psi ) );
+		}
+	}
+
+	// The coil term really is doing something at the first point, or the check
+	// above is satisfied by two zeros.
+	BOOST_TEST( coils->f( 2.0, 0.0 ) != 0.0 );
+	BOOST_TEST( coils->f( 1.0, 0.5 ) == 0.0 );
+
+	// The plain adapter agrees with the normalised one on the same pair, which
+	// is what says neither of them applies the normalisation twice.
+	meq::CoilAugmentedSource plain( plasma, coils );
+	BOOST_TEST( plain.f( 2.0, 0.0, 0.4 ) == sum.f( 2.0, 0.0, 0.4 ) );
+}
+
+BOOST_AUTO_TEST_CASE( the_normalisation_is_the_wrapped_sources_and_there_is_only_one_of_it )
+{
+	auto coils = std::make_shared<CoilSet>();
+	coils->add( standardCoil() );
+	auto plasma = std::make_shared<LinearPlasma>();
+
+	meq::CoilAugmentedNormalisedSource sum( plasma, coils );
+
+	// Set through the WRAPPER and read back through the plasma, then the other
+	// way round. Two stored copies of the pair would pass one direction and
+	// fail the other.
+	sum.setNormalisation( 3.0, -0.5 );
+	BOOST_TEST( plasma->normalisation() == 3.0 );
+	BOOST_TEST( plasma->boundaryNormalisation() == -0.5 );
+	BOOST_TEST( sum.normalisation() == 3.0 );
+	BOOST_TEST( sum.boundaryNormalisation() == -0.5 );
+
+	// The one-argument convenience of the base class must still be reachable
+	// through the override; a plain `override` without the using-declaration
+	// hides it and the fixed-boundary call stops compiling.
+	sum.setNormalisation( 4.0 );
+	BOOST_TEST( plasma->normalisation() == 4.0 );
+	BOOST_TEST( plasma->boundaryNormalisation() == 0.0 );
+
+	plasma->setNormalisation( 5.0, 1.0 );
+	BOOST_TEST( sum.normalisation() == 5.0 );
+	BOOST_TEST( sum.boundaryNormalisation() == 1.0 );
+}
+
+BOOST_AUTO_TEST_CASE( the_plasma_support_reaches_the_source_that_evaluates_the_profiles )
+{
+	auto coils = std::make_shared<CoilSet>();
+	coils->add( standardCoil() );
+	auto plasma = std::make_shared<LinearPlasma>();
+	plasma->setNormalisation( 2.0, 0.0 );
+
+	auto sum = std::make_shared<meq::CoilAugmentedNormalisedSource>( plasma, coils );
+
+	// Off by default, and then on -- through a BASE REFERENCE, which is the
+	// handle the driver holds and the call a non-virtual setPlasmaSupport()
+	// would send to the wrong object.
+	BOOST_TEST( sum->plasmaSupport() == false );
+	meq::NormalisedSource &asBase = *sum;
+	asBase.setPlasmaSupport( true );
+
+	BOOST_TEST( sum->plasmaSupport() == true );
+	BOOST_TEST( plasma->plasmaSupport() == true,
+	            "setPlasmaSupport() did not reach the wrapped source, so the "
+	            "moving plasma support would silently do nothing" );
+
+	// AND THE COILS ARE OUTSIDE THE SUPPORT, WHICH IS THE POINT OF THE ORDER
+	// THE SUM IS TAKEN IN. At psi below the boundary value the plasma term is
+	// switched off and the coil term is not -- a coil sits in the vacuum
+	// region by construction, so confining it to the plasma would switch off
+	// every coil in the machine.
+	double const outside = -1.0;
+	BOOST_TEST( plasma->f( 2.0, 0.0, outside ) == 0.0 );
+	BOOST_TEST( sum->f( 2.0, 0.0, outside ) == coils->f( 2.0, 0.0 ) );
+	BOOST_TEST( sum->f( 2.0, 0.0, outside ) != 0.0 );
+
+	// Inside, both terms are live.
+	BOOST_TEST( sum->f( 2.0, 0.0, 1.0 )
+	            == plasma->f( 2.0, 0.0, 1.0 ) + coils->f( 2.0, 0.0 ),
+	            boost::test_tools::tolerance( 1.0e-15 ) );
+
+	asBase.setPlasmaSupport( false );
+	BOOST_TEST( plasma->plasmaSupport() == false );
+	BOOST_TEST( sum->f( 2.0, 0.0, outside ) != coils->f( 2.0, 0.0 ) );
+}
+
+BOOST_AUTO_TEST_CASE( the_adapters_refuse_a_null_half )
+{
+	auto coils = std::make_shared<CoilSet>();
+	auto plasma = std::make_shared<LinearPlasma>();
+
+	BOOST_CHECK_THROW( meq::CoilAugmentedSource( nullptr, coils ),
+	                   std::invalid_argument );
+	BOOST_CHECK_THROW( meq::CoilAugmentedSource( plasma, nullptr ),
+	                   std::invalid_argument );
+	BOOST_CHECK_THROW( meq::CoilAugmentedNormalisedSource( nullptr, coils ),
+	                   std::invalid_argument );
+	BOOST_CHECK_THROW( meq::CoilAugmentedNormalisedSource( plasma, nullptr ),
+	                   std::invalid_argument );
 }
