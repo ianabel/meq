@@ -333,3 +333,81 @@ it. Round-off is not reachable here by construction, and no amount of grid is
 going to change that. **FB-6 removes the fit** — a free-boundary MEQ takes the
 same coils and the same profiles and never sees an LCFS — and that is the only
 route to the question the refinement was asked to answer.
+
+
+## Cost, measured on a quiet machine — 2026-09-06
+
+Everything below is **single-threaded on both sides**, `MKL_NUM_THREADS=1
+OMP_NUM_THREADS=1`, taken with nothing else running and re-taken after an
+earlier set was polluted by another build on the same box. The load factor was
+small for this workload -- `freegs4e` is single-threaded numpy, and its 129²
+run went 85 s busy against 81.8 s quiet -- but the numbers here are the quiet
+ones.
+
+### The raw comparison, which is the unfair one
+
+| | wall | reaches |
+|---|---|---|
+| MEQ, `k=3`, refine 2 | **7.72 s** | 8.80e-06 |
+| `freegs4e` 129² | **81.8 s** | — |
+| `freegs4e` 257² | **567 s** | — |
+| `freegs4e` 513² | **~5300 s** | the reference |
+
+**A ratio here is not a statement about either code and should not be quoted as
+one.** `freegs4e` converges a FREE-boundary equilibrium -- coil Green's
+functions, X-point finding, a control system, and the `O(n³)`-per-Picard-step
+boundary condition documented above -- while MEQ solves the FIXED-boundary
+problem inside a surface `freegs4e` had to find for it. MEQ is doing strictly
+less work, in C++ against Python. The 690x against the 513² run is mostly a
+statement about `freeBoundary` being an area integral per boundary point.
+
+### At comparable accuracy, which is the one worth having
+
+`freegs4e`'s own error curve comes from its self-convergence against its 513²
+answer on the nested grid:
+
+| | wall | rel `L2` vs its own 513² |
+|---|---|---|
+| `freegs4e` 129² | 81.8 s | 2.699e-05 |
+| `freegs4e` 257² | 567 s | 2.642e-05 |
+
+**IT IS FLAT**, which is the third time a number in this study has failed to
+move when it should have. Sixteen times the unknowns buys two per cent, so
+`freegs4e`'s answer stops converging in the grid at about **2.6e-05** relative
+and the rest is something else -- the Picard tolerance, the LCFS determination,
+or the boundary condition it does not agree with itself about. Note this is a
+whole-grid RMS while MEQ's column drops the band, so the two are not the same
+norm and should not be differenced; they are comparable as orders of magnitude.
+
+Against MEQ's ladder at the same accuracy:
+
+| target | MEQ | `freegs4e` |
+|---|---|---|
+| ~2.7e-05 | `k=1` refine 3, **17.1 s** | 129², **81.8 s** |
+| ~2.7e-05 | `k=3` refine 2, **7.72 s**, and it overshoots to 8.8e-06 | |
+
+so **roughly 5x to 11x at matched accuracy, single-threaded**, and the honest
+reading of that is *not* "MEQ is 11x faster": it is that a high-order hybridized
+DG reaches this accuracy on 11,302 comparison nodes where a 2nd/4th-order finite
+difference grid needs 129² and a boundary condition that costs `O(n³)`. The
+discretisation is doing the work; the language and the problem statement are
+doing some of the rest.
+
+### MEQ's own ladder
+
+| degree | refine | wall | rel `L2` | rel `L∞` |
+|---|---|---|---|---|
+| 1 | 2 | 5.93 s | 2.7341e-04 | 5.447e-04 |
+| 1 | 3 | 17.14 s | 2.2805e-05 | 7.183e-05 |
+| 2 | 1 | 3.22 s | 1.0300e-03 | 1.954e-03 |
+| 2 | 2 | 7.73 s | 5.8247e-05 | 1.347e-04 |
+| 2 | 3 | 17.03 s | 9.4131e-06 | 3.532e-05 |
+| 3 | 1 | 3.32 s | 1.0644e-04 | 2.182e-04 |
+| **3** | **2** | **7.72 s** | **8.8020e-06** | 3.221e-05 |
+| 3 | 3 | 19.55 s | 8.7442e-06 | 3.427e-05 |
+| 4 | 2 | 12.03 s | 8.6725e-06 | 3.460e-05 |
+
+**`k=3` refine 2 is the point to quote**: same wall clock as `k=2` refine 2 to
+within one per cent, and 6.6x the accuracy. Going further buys nothing --
+`k=3` refine 3 costs 2.5x the time for 0.7 %, and `k=4` costs 1.6x for 1.5 % --
+because 8.7e-06 is the boundary fit and not MEQ.
