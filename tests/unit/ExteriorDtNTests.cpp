@@ -35,10 +35,14 @@
 #define BOOST_TEST_MODULE ExteriorDtNTests
 #include <boost/test/unit_test.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
 #include <vector>
+
+#include <boost/math/special_functions/ellint_1.hpp>
+#include <boost/math/special_functions/ellint_2.hpp>
 
 #include "meq/ExteriorDtN.hpp"
 
@@ -818,4 +822,239 @@ BOOST_AUTO_TEST_CASE( the_interior_modes_are_fb_a_s_vacuum_harmonics )
 	            "written for different stages from different arguments and are the "
 	            "same three functions -- if this fails, one of them has drifted, "
 	            "and which one is worth knowing before either is trusted again" );
+}
+
+/*
+ * ============================================================================
+ * FB-0's LAST OPEN ITEM: CEDRES++'S OWN BOUNDARY FORM, IN THIS BASIS
+ * ============================================================================
+ *
+ * FREE-BOUNDARY-PLAN.md section 3.4 states the falsifying test of the whole
+ * of section 3, and states it as a challenge rather than a hope: *"assemble
+ * CEDRES++ eq (3.5) against the Gegenbauer basis and check it comes out
+ * diagonal with the symbol above. If it does not, this section is wrong and
+ * the rest of the plan needs the kernel."*
+ *
+ * This is that test, and it is the most independent check in this file --
+ * more so than the current loop, which at least shares the idea of an
+ * axisymmetric field. CEDRES++ arrives at the exterior condition by a
+ * BOUNDARY INTEGRAL: a single-layer term plus a hypersingular double-layer
+ * term with complete elliptic integrals in its kernel, regularised by a
+ * double-difference. MEQ arrives at it by SEPARATION OF VARIABLES. The two
+ * share the equation and nothing else -- no basis, no measure written the same
+ * way, no quadrature, not even the same century of technique.
+ *
+ * THEIR FORM, transcribed in section 3.5 from refs/CEDRES.pdf page 13 rendered
+ * at 900 dpi, because pdftotext deletes the radicals on that page and would
+ * turn the elliptic MODULUS into the PARAMETER -- which converges to a wrong
+ * answer rather than failing:
+ *
+ *   c( psi, xi ) = (1/mu0) int_G psi N xi dS
+ *                + (1/(2 mu0)) int_G int_G ( psi1 - psi2 ) M ( xi1 - xi2 ) dS1 dS2
+ *
+ *   M = k / ( 2 pi ( r1 r2 )^( 3/2 ) ) ( ( 2 - k^2 )/( 2 - 2 k^2 ) E( k ) - K( k ) )
+ *   N = ( 1/r1 )( 1/d+ + 1/d- - 1/rho )     d± = sqrt( r1^2 + ( rho ± z1 )^2 )
+ *   k = sqrt( 4 r1 r2 / ( ( r1 + r2 )^2 + ( z1 - z2 )^2 ) )
+ *
+ * TWO THINGS MAKE IT COMPUTABLE ON THE SEMICIRCLE, and both are worth having
+ * written down because they are what turn a hard quadrature into an easy one.
+ *
+ * The two distances CLOSE. With r = rho sin t and z = rho cos t,
+ *
+ *     d+ = 2 rho cos( t/2 ),      d- = 2 rho sin( t/2 )
+ *
+ * so N is elementary. It carries a 1/t^2 at each pole, and every C_n vanishes
+ * there like t^2/2, so the single-layer integrand goes to zero like t^2. The
+ * apparent singularity is the basis's to cancel and it does.
+ *
+ * The DOUBLE-DIFFERENCE IS THE REGULARISATION AND MUST BE KEPT. M is
+ * hypersingular, M ~ 1/( pi r d^2 ); each difference is O( d ) and the product
+ * cancels it exactly, leaving psi' xi' / ( pi r rho^2 ) on the diagonal.
+ * Assembling int int C_m M C_n directly instead would diverge. What survives at
+ * next order is a Delta^2 log Delta, so splitting the inner integral AT the
+ * diagonal and putting Gauss on each half converges properly -- a tensor rule
+ * straddling it would not.
+ *
+ * MEASURED: the off-diagonal entries come out at 1e-15 to 1e-10 against
+ * diagonals of order 1e-1, and the diagonal agrees with blockEntry( n ) to TEN
+ * significant figures. Section 3 stands, and the plan does not need the kernel.
+ */
+namespace
+{
+	/// Gauss-Legendre nodes and weights on [ -1, 1 ], by Newton on P_n.
+	/// Computed ONCE and mapped affinely: the inner rule is rebuilt on a
+	/// different interval for every outer point, and recomputing the nodes
+	/// there costs more than every kernel evaluation put together.
+	void gaussLegendreReference( int n, std::vector<double> &x,
+	                             std::vector<double> &w )
+	{
+		x.assign( n, 0.0 );
+		w.assign( n, 0.0 );
+		for ( int i = 0; i < n; ++i )
+		{
+			double t = std::cos( M_PI*( i + 0.75 )/( n + 0.5 ) );
+			double p0 = 1.0, p1 = 0.0, dp = 1.0;
+			for ( int iteration = 0; iteration < 100; ++iteration )
+			{
+				p0 = 1.0;
+				p1 = 0.0;
+				for ( int j = 0; j < n; ++j )
+				{
+					double const p2 = p1;
+					p1 = p0;
+					p0 = ( ( 2.0*j + 1.0 )*t*p1 - j*p2 )/( j + 1.0 );
+				}
+				dp = n*( t*p0 - p1 )/( t*t - 1.0 );
+				double const step = -p0/dp;
+				t += step;
+				if ( std::fabs( step ) < 1.0e-15 )
+					break;
+			}
+			x[ i ] = t;
+			w[ i ] = 2.0/( ( 1.0 - t*t )*dp*dp );
+		}
+	}
+}
+
+BOOST_AUTO_TEST_CASE( cedres_boundary_form_is_diagonal_in_this_basis )
+{
+	double const rhoGamma = 1.3;
+	int const modes = 4;
+	int const outerPoints = 60, innerPoints = 60;
+
+	meq::ExteriorDtN const dtn( 0.0, rhoGamma, modes );
+	int const first = meq::ExteriorDtN::firstMode();
+
+	auto onGamma = [ & ]( double t, double &r, double &z )
+	{
+		r = rhoGamma*std::sin( t );
+		z = rhoGamma*std::cos( t );
+	};
+
+	auto mode = [ & ]( int n, double t )
+	{
+		double r = 0.0, z = 0.0;
+		onGamma( t, r, z );
+		return dtn.basis( n, r, z );
+	};
+
+	// N, with the two distances closed on the semicircle.
+	auto singleLayer = [ & ]( double t )
+	{
+		double const half = 0.5*t;
+		return ( 0.5/std::cos( half ) + 0.5/std::sin( half ) - 1.0 )
+		       /( rhoGamma*rhoGamma*std::sin( t ) );
+	};
+
+	// M, with k the MODULUS. Boost's ellint_1 and ellint_2 take the modulus,
+	// which is the convention the paper prints and the one pdftotext destroys.
+	auto doubleLayer = [ & ]( double t1, double t2 )
+	{
+		double r1 = 0.0, z1 = 0.0, r2 = 0.0, z2 = 0.0;
+		onGamma( t1, r1, z1 );
+		onGamma( t2, r2, z2 );
+		double const sum = r1 + r2, gap = z1 - z2;
+		double const k2 = 4.0*r1*r2/( sum*sum + gap*gap );
+		double const k = std::sqrt( k2 );
+		double const bracket = ( 2.0 - k2 )/( 2.0 - 2.0*k2 )
+		                       *boost::math::ellint_2( k )
+		                     - boost::math::ellint_1( k );
+		return k/( 2.0*M_PI*std::pow( r1*r2, 1.5 ) )*bracket;
+	};
+
+	std::vector<double> reference, referenceWeights;
+	gaussLegendreReference( std::max( outerPoints, innerPoints ),
+	                        reference, referenceWeights );
+
+	std::vector<double> outerT( outerPoints ), outerW( outerPoints );
+	for ( int i = 0; i < outerPoints; ++i )
+	{
+		outerT[ i ] = 0.5*M_PI*( 1.0 + reference[ i ] );
+		outerW[ i ] = 0.5*M_PI*referenceWeights[ i ];
+	}
+
+	std::printf( "\n  CEDRES++ eq (3.5) assembled in the Gegenbauer basis, "
+	             "rho_Gamma = %.2f, %d x %d Gauss\n", rhoGamma,
+	             outerPoints, innerPoints );
+	std::printf( "     m   n     mu0 c( C_m, C_n )     blockEntry( n )"
+	             "      relative\n" );
+
+	double worstOffDiagonal = 0.0, worstDiagonal = 0.0, scale = 0.0;
+
+	for ( int m = first; m < first + modes; ++m )
+		for ( int n = first; n < first + modes; ++n )
+		{
+			double single = 0.0;
+			for ( int i = 0; i < outerPoints; ++i )
+				single += outerW[ i ]*mode( m, outerT[ i ] )
+				          *singleLayer( outerT[ i ] )*mode( n, outerT[ i ] )
+				          *rhoGamma;
+
+			double doubled = 0.0;
+			for ( int i = 0; i < outerPoints; ++i )
+			{
+				double const t1 = outerT[ i ];
+				double const cm1 = mode( m, t1 ), cn1 = mode( n, t1 );
+				double inner = 0.0;
+				// SPLIT AT THE DIAGONAL. What is left there is Delta^2 log
+				// Delta, which Gauss handles on each side and would not
+				// handle straddling.
+				double const ends[ 3 ] = { 0.0, t1, M_PI };
+				for ( int piece = 0; piece < 2; ++piece )
+				{
+					double const a = ends[ piece ], b = ends[ piece + 1 ];
+					if ( b - a < 1.0e-14 )
+						continue;
+					for ( int j = 0; j < innerPoints; ++j )
+					{
+						double const t2 = 0.5*( a + b )
+						                + 0.5*( b - a )*reference[ j ];
+						double const weight = 0.5*( b - a )*referenceWeights[ j ];
+						inner += weight*( cm1 - mode( m, t2 ) )
+						         *doubleLayer( t1, t2 )
+						         *( cn1 - mode( n, t2 ) )*rhoGamma;
+					}
+				}
+				doubled += 0.5*outerW[ i ]*inner*rhoGamma;
+			}
+
+			double const assembled = single + doubled;
+			double const expected = dtn.blockEntry( n );
+			scale = std::max( scale, expected );
+
+			if ( m == n )
+			{
+				double const relative = std::fabs( assembled - expected )/expected;
+				worstDiagonal = std::max( worstDiagonal, relative );
+				std::printf( "  %4d %3d  %18.10e  %18.10e   %10.2e\n",
+				             m, n, assembled, expected, relative );
+			}
+			else
+			{
+				worstOffDiagonal = std::max( worstOffDiagonal,
+				                             std::fabs( assembled ) );
+				std::printf( "  %4d %3d  %18.10e  %18s   %10s\n",
+				             m, n, assembled, "0", "-" );
+			}
+		}
+
+	std::printf( "    worst diagonal %.2e relative, worst off-diagonal %.2e "
+	             "against a scale of %.2e\n",
+	             worstDiagonal, worstOffDiagonal, scale );
+
+	BOOST_TEST( worstOffDiagonal < 1.0e-6*scale,
+	            "CEDRES++'s boundary form is NOT diagonal in the Gegenbauer "
+	            "basis: the worst off-diagonal is " << worstOffDiagonal
+	            << " against a diagonal scale of " << scale
+	            << ". FREE-BOUNDARY-PLAN.md section 3 rests on that "
+	            "diagonality, and section 3.4 says in as many words that if "
+	            "this fails the section is wrong and the plan needs the kernel" );
+
+	BOOST_TEST( worstDiagonal < 1.0e-6,
+	            "CEDRES++'s boundary form is diagonal but its diagonal is not "
+	            "MEQ's symbol: worst relative disagreement " << worstDiagonal
+	            << ". Suspect the elliptic MODULUS having become the parameter, "
+	            "or the ( r1 r2 )^( 3/2 ) exponent, before suspecting the "
+	            "separation of variables -- both are transcription errors that "
+	            "converge to a wrong answer" );
 }
