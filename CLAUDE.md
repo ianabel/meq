@@ -1548,13 +1548,13 @@ control and changed twice on 2026-09-01. Asked properly —
 
 | document | lives on | |
 |---|---|---|
-| **`HDG-CONE-TILING-FROM-MEQ.md`** | **`gf-hdg-subdomains-dev`, untracked in `doc/`** | **FILED AND ANSWERED THE SAME DAY, 2026-09-05, and MEQ's diagnosis was the part that was wrong.** Coverage is exact; the cone roughens the foot map and a 12th-order rule under-resolves it. Upstream reproduced it, turned the cone off by default, added the boundary-sweep case MEQ asked for, and corrected their own commit's *"changes nothing"*. MEQ raised its rule to 80 and its `transmissionQuadratureOrder` to 40 |
+| **`HDG-CONE-TILING-FROM-MEQ.md`** | **`gf-hdg-subdomains-dev`, and TRACKED — upstream committed it, where this row used to say untracked** | **CLOSED 2026-09-06 and MEQ is happy for it to be deleted; see `CLOSED-REPORTS-FROM-MEQ.md`.** All three of its §5 asks are met, the boundary-sweep tiling case exists as `TEST_CASE("Extension from subdomains: quadrature over Gamma")`, and the rule sweep reproduces to every digit. **FILED AND ANSWERED THE SAME DAY, 2026-09-05, and MEQ's diagnosis was the part that was wrong.** Coverage is exact; the cone roughens the foot map and a 12th-order rule under-resolves it. Upstream reproduced it, turned the cone off by default, added the boundary-sweep case MEQ asked for, and corrected their own commit's *"changes nothing"*. MEQ raised its rule to 80 and its `transmissionQuadratureOrder` to 40 |
 | **`QUADRATURE-HIGH-ORDER-TRIANGLES-FROM-MEQ.md`** | **`gf-hdg-linearise-first`, untracked in `doc/`** | **FILED 2026-09-06, open.** `IntegrationRules::Get( TRIANGLE, order )` is tabulated to 25 and falls back to Grundmann–Möller above it, whose negative weights reach **−1.9e+07** by order 64 and take a monomial from 1e-16 to **2.7e-05** — silently. MEQ met it by sweeping `setSourceQuadratureOrder()`. Carries a second, separate MEASUREMENT rather than a defect claim: `MomentFittingIntRules`' conditioning on a nearly degenerate cut, and the fact that both cut backends are quadrilateral-only |
 | **`CMAKE-TPL-COMPONENT-CACHE-FROM-MEQ.md`** | **`gf-hdg-linearise-first`, untracked in `doc/`** | **FILED 2026-09-06, open.** `mfem_find_package` quick-returns on a cached `${Prefix}_FOUND` **without consulting the requested component list** (`MfemCmakeUtilities.cmake:234`), so adding `IDAS` to `SUNDIALS_COMPONENTS` is silently ignored in an existing build directory and `libmfem.a` ends up referencing ten `IDA*` symbols the link line does not carry. **Explicitly NOT a report against the IDA work**, which is correct; the helper predates it |
-| `HDG-ELEMENT-LOCAL-PARALLELISM.md` | `gf-hdg-linearise-first` | **open** |
-| `HDG-BEM-COUPLING-FROM-MEQ.md` | `gf-hdg-linearise-first` | **open, and PARTLY DELIVERED** — it said MEQ would write the quadrature over `Γ` and come back with it; MEQ did, and `mfem::ExtensionBoundaryQuadrature` was merged into `gf-hdg-subdomains-dev` 2026-09-05 |
-| `HDG-NPC-GLOBALISATION-FROM-MEQ.md` | `gf-hdg-linearise-first` | **open**, and answered in place |
-| `HDG-DEFECTS-FROM-MEQ.md` | **`gf-hdg-dev` only, as of 2026-09-05** — it was on `gf-hdg-subdomains-dev` too | **NOT retired.** It has left the subdomains line, which is why the second merge no longer conflicts modify/delete on it. Re-check with `git cat-file -e` rather than trusting this row |
+| `HDG-ELEMENT-LOCAL-PARALLELISM.md` | `gf-hdg-linearise-first` | **NOT A MEQ REQUEST, and this row said it was.** It is upstream's own working scratch, written in the first person about their own to-do list, and it records that every element-local loop in the class is now threaded. Nothing here is MEQ's to close |
+| `HDG-BEM-COUPLING-FROM-MEQ.md` | `gf-hdg-linearise-first` | **§1 DELIVERED, §2 IS THE ONE ASK LEFT.** §1 said MEQ would write the quadrature over `Γ` and come back with it; MEQ did, and `mfem::ExtensionBoundaryQuadrature` was merged into `gf-hdg-subdomains-dev` 2026-09-05. §2 — auxiliary globally-coupled unknowns — is still worth doing and still not blocking, and **FB-5 now says what it would buy**: MEQ's border costs `N + 2` backsolves, which is affordable, plus **one full re-assembly per accepted step**, because the auxiliary unknown reaches the residual through a load term. Kept |
+| `HDG-NPC-GLOBALISATION-FROM-MEQ.md` | `gf-hdg-linearise-first` | **answered in full and pruned by upstream to what is open, which is now MEQ's own**: the §4.3 transport-barrier regression case MEQ offered and has not extracted from `PedestalConvergence.cpp`. The implementation defect it turned up IS fixed — `navierstokes.cpp` takes its globalisation from KINSOL and the hand-rolled backtracking is gone. Kept until MEQ delivers the case |
+| `HDG-DEFECTS-FROM-MEQ.md` | **`gf-hdg-dev` only** | **CLOSED 2026-09-06 and MEQ is happy for it to be deleted; see `CLOSED-REPORTS-FROM-MEQ.md`.** §1 and §2 fixed, §3 withdrawn as not a defect, §4 fixed as `TransferredDatumCoefficient`, and the fifth upstream added to it fixed. Every one checked against the code today rather than against the report |
 | `HDG-LINEARISE-THEN-CONDENSE.md` | backup refs only | retired with the mode |
 | `DIRECT-SOLVER-SYMBOLIC-REUSE.md` | no branch at all | retired |
 
@@ -5023,15 +5023,26 @@ one at a time, because "closed" arrived in four different ways: `Reconstruct()`
 on a singular local matrix was **fixed** (MEQ's test flipped red to green on
 it); `φ_h` unreachable after a solve was **fixed**, as
 `mfem::TransferredDatumCoefficient` in `extension_hdg.hpp` — MEQ still calls
-`setTransferredBoundary()`, because rebuilding `η₅` on it is MEQ's work and is
-not done; `ReconstructFluxAndPot()` lifting only domain integrators was
+`setTransferredBoundary()` — and rebuilding `η₅` on it, which this sentence used
+to say was "MEQ's work and is not done", **is done**: see *A separate `η₅`
+problem on the extension path*, where it converges at 2.78 against the pinned
+version's 0.40; `ReconstructFluxAndPot()` lifting only domain integrators was
 **withdrawn as not a defect**, and MEQ had measured it harmless, which was the
 right answer for the wrong reason; and `ComputeHDGFaceEnergy()` ignoring an
-installed `HDGStabilization` is **not re-measured** — a code read today still
-shows it computing the `{h⁻¹Q}` form with no call into an installed hook, but
-MEQ uses `meq::ResidualEstimator` rather than `HDGErrorEstimator` so it costs
-MEQ nothing either way. **That last row is a code read and not a measurement.**
-Anyone who needs `Energy` mode should measure before trusting it.
+installed `HDGStabilization` is **FIXED — `StabValue()` is called in the
+function body**, with a comment saying what it returns when no hook is
+installed.
+
+**THAT LAST ROW SAID THE OPPOSITE UNTIL 2026-09-06 AND THE REASON IS WORTH
+KEEPING.** It read *"a code read today still shows it computing the `{h⁻¹Q}`
+form with no call into an installed hook"*, and that code read used a **fixed
+line range** which stopped short of the call — the function is 194 lines and the
+call is at 153. Re-read by extracting the function body,
+`awk '/ComputeHDGFaceEnergy/,/^}/'`, it is there. A line range is an instrument
+and the function is the answer, which is the same species as every other
+instrument-not-answer finding in this file — in the one place where it produced
+a false claim about somebody else's code. **All four defects are now closed and
+the report is deletable**; see `CLOSED-REPORTS-FROM-MEQ.md`.
 
 ## MEQ against freegs4e, and root selection is the whole difficulty
 
