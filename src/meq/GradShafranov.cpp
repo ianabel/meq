@@ -1480,6 +1480,83 @@ namespace
 		return total;
 	}
 
+	void GradShafranovSolver::setBoundaryFluxPoint( double r, double z )
+	{
+		if ( !std::isfinite( r ) || !std::isfinite( z ) )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::setBoundaryFluxPoint: the limiter "
+				"contact must be finite" );
+		if ( orderingChoice != NonlinearOrdering::NPC )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::setBoundaryFluxPoint: psi_bnd as an "
+				"unknown is implemented for NonlinearOrdering::NPC only -- under "
+				"the condensation psi is a function of the trace through every "
+				"element's source, so both the border row and its corner would "
+				"have to be differenced rather than being exact" );
+
+		boundaryFluxIsUnknown = true;
+		boundaryFluxR = r;
+		boundaryFluxZ = z;
+		prepared = false;
+	}
+
+	double GradShafranovSolver::psiBoundary() const
+	{
+		return psiBoundaryValue;
+	}
+
+	/*
+	 * THE POTENTIAL DOF NEAREST A POINT.
+	 *
+	 * psi_bnd is pinned to ONE nodal value, exactly as psi_ax is pinned to the
+	 * largest one, because that is what makes the constraint differentiable in a
+	 * form the border can use: the row is then a unit vector and nothing about it
+	 * is measured. Choosing the nearest dof rather than interpolating is the same
+	 * trade CLAUDE.md records for psi_ax -- it differs from psi at the point by
+	 * O( h^{k+1} ) and both converge to it.
+	 *
+	 * Walked once at setup over every element's nodes, which is why it is not
+	 * worth an octree.
+	 */
+	int GradShafranovSolver::nearestPotentialDof( double r, double z ) const
+	{
+		mfem::Mesh &mesh = *potentialFes->GetMesh();
+		mfem::Array<int> dofs;
+		mfem::Vector point( 2 );
+
+		double best = std::numeric_limits<double>::infinity();
+		int bestDof = -1;
+
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			mfem::FiniteElement const *fe = potentialFes->GetFE( e );
+			if ( !fe )
+				continue;
+			potentialFes->GetElementDofs( e, dofs );
+
+			thread_local mfem::IsoparametricTransformation scratch;
+			mesh.GetElementTransformation( e, &scratch );
+
+			mfem::IntegrationRule const &nodes = fe->GetNodes();
+			for ( int i = 0; i < fe->GetDof(); ++i )
+			{
+				scratch.Transform( nodes.IntPoint( i ), point );
+				double const d = std::hypot( point( 0 ) - r, point( 1 ) - z );
+				if ( d < best )
+				{
+					best = d;
+					bestDof = dofs[ i ];
+				}
+			}
+		}
+
+		if ( bestDof < 0 )
+			throw std::runtime_error(
+				"meq::GradShafranovSolver::nearestPotentialDof: the mesh has no "
+				"potential dofs" );
+		return bestDof;
+	}
+
 	void GradShafranovSolver::setTransmissionQuadratureOrder( int order )
 	{
 		if ( order < 0 )
@@ -2380,10 +2457,27 @@ namespace
 
 		mfem::Vector residual( n ), column( n ), y( n ), z( n ), scratch( n );
 
+		double sB = 0.0;
+		int boundaryDof = -1;
+		if ( boundaryFluxIsUnknown )
+		{
+			// INTO THE FULL VECTOR, not into the potential space. peakAt() scans
+			// [ blockOffsets[1], blockOffsets[2] ) and reports an index into the
+			// unknown, so the second border has to be shifted the same way or it
+			// reads the FLUX block instead. Measured before it was: psi_bnd came
+			// back 7.6e-02 from the field at the limiter and FLAT under
+			// refinement, which is the signature -- an O( h^{k+1} ) nodal
+			// difference would have fallen by a factor of eight.
+			boundaryDof = blockOffsets[ 1 ]
+			              + nearestPotentialDof( boundaryFluxR, boundaryFluxZ );
+			sB = psiBoundaryValue;
+		}
+		int const nBorders = boundaryFluxIsUnknown ? 2 : 1;
+
 		auto fieldResidual = [ & ]( mfem::Vector const &state, double normalisation,
 		                            mfem::Vector &out )
 		{
-			normalisedSource->setNormalisation( normalisation );
+			normalisedSource->setNormalisation( normalisation, sB );
 			if ( npcOrdering )
 			{
 				npc->Mult( state, out );
@@ -2417,7 +2511,7 @@ namespace
 			if ( !npcOrdering )
 				return recoverPeak( state, normalisation, element, dof );
 
-			normalisedSource->setNormalisation( normalisation );
+			normalisedSource->setNormalisation( normalisation, sB );
 
 			double best = -std::numeric_limits<double>::infinity();
 			int bestIndex = -1;
@@ -2479,6 +2573,8 @@ namespace
 		int argDof = -1;
 		double peak = peakAt( unknown, s, &argElement, &argDof );
 		double constraint = s - peak;
+		double constraintB = boundaryFluxIsUnknown
+		                     ? sB - unknown( boundaryDof ) : 0.0;
 		fieldResidual( unknown, s, residual );
 
 		// c at the starting iterate, computed whatever the coupling: it is both
@@ -2488,6 +2584,8 @@ namespace
 		// does not use the column but is given the same gamma, or the two
 		// convergence histories would not be comparable -- which is the whole
 		// point of having a control.
+		mfem::Vector columnB( n );
+		mfem::Vector zB( n );
 		mfem::Vector initialColumn( n );
 		{
 			double const h = normalisationStep( s );
@@ -2560,7 +2658,9 @@ namespace
 		bool converged = false;
 		for ( int iteration = 0; iteration <= newtonMaxIterations; ++iteration )
 		{
-			double const norm = std::hypot( residual.Norml2(), gamma*constraint );
+			double const norm =
+				std::hypot( residual.Norml2(),
+				            gamma*std::hypot( constraint, constraintB ) );
 			newtonResidualHistory.push_back( norm );
 			newtonIterationCount = iteration;
 
@@ -2670,7 +2770,61 @@ namespace
 			if ( denominator == 0.0 || !std::isfinite( denominator ) )
 				throw std::runtime_error( "meq::GradShafranovSolver::solve: the bordered Jacobian is singular in psi_ax -- the normalisation has no influence on the solution it normalises" );
 
-			double const deltaS = ( borderDotY - constraint )/denominator;
+			/*
+			 * THE SECOND BORDER, AND IT IS THE CHEAPER OF THE TWO.
+			 *
+			 * psi_bnd is psi_h at ONE prescribed dof, so under NPC -- where psi
+			 * is an unknown of the system -- its row is exactly -e_boundaryDof
+			 * and its corner exactly 1, neither of them differenced. psi_ax's
+			 * row is the same shape but needed an argmax to find its dof; this
+			 * one is fixed at setup. Only the COLUMN dR/d psi_bnd is measured,
+			 * and that is one central difference in a scalar, exactly as
+			 * dR/d psi_ax is.
+			 *
+			 * The elimination is then 2x2 dense against the SAME factorisation:
+			 * one more backsolve for the second column and nothing else. With no
+			 * boundary point set nBorders is 1 and the arithmetic below is the
+			 * scalar one above, term for term -- which is what keeps
+			 * HighBetaConvergence bit-identical.
+			 */
+			double deltaS = ( borderDotY - constraint )/denominator;
+			double deltaB = 0.0;
+
+			if ( nBorders == 2 )
+			{
+				// dR/d psi_bnd, the second column, by the same central difference
+				// the first one uses.
+				double const hB = normalisationStep( sB );
+				double const columnBase = sB;
+				sB = columnBase + hB;
+				fieldResidual( unknown, s, columnB );
+				sB = columnBase - hB;
+				fieldResidual( unknown, s, scratch );
+				sB = columnBase;
+				columnB -= scratch;
+				columnB /= 2.0*hB;
+
+				npcLinear.Mult( columnB, zB );
+
+				// M = corner - B Z, with corner the identity and B's rows the
+				// negated unit vectors, so B v is just -v at the pinned dof.
+				double m[ 2 ][ 2 ];
+				m[ 0 ][ 0 ] = corner - borderDotZ;
+				m[ 0 ][ 1 ] = -( coupled ? -zB( argDof ) : 0.0 );
+				m[ 1 ][ 0 ] = -( coupled ? -z( boundaryDof ) : 0.0 );
+				m[ 1 ][ 1 ] = 1.0 - ( coupled ? -zB( boundaryDof ) : 0.0 );
+
+				double const rhs0 = borderDotY - constraint;
+				double const rhs1 = ( coupled ? -y( boundaryDof ) : 0.0 )
+				                    - constraintB;
+
+				double const det = m[ 0 ][ 0 ]*m[ 1 ][ 1 ] - m[ 0 ][ 1 ]*m[ 1 ][ 0 ];
+				if ( det == 0.0 || !std::isfinite( det ) )
+					throw std::runtime_error( "meq::GradShafranovSolver::solve: the bordered Jacobian is singular in ( psi_ax, psi_bnd ) -- one of the two normalisations has no influence on the solution it normalises" );
+
+				deltaS = ( rhs0*m[ 1 ][ 1 ] - m[ 0 ][ 1 ]*rhs1 )/det;
+				deltaB = ( m[ 0 ][ 0 ]*rhs1 - rhs0*m[ 1 ][ 0 ] )/det;
+			}
 
 			/*
 			 * BACKTRACKING, AND IT IS NOT OPTIONAL HERE.
@@ -2697,6 +2851,7 @@ namespace
 			 */
 			mfem::Vector const savedState( unknown );
 			double const savedS = s;
+			double const savedB = sB;
 
 			double bestNorm = std::numeric_limits<double>::infinity();
 			double bestDamping = 0.0;
@@ -2712,11 +2867,22 @@ namespace
 					unknown.Add( -damping, y );
 					unknown.Add( -damping*deltaS, z );
 					s = savedS + damping*deltaS;
+					if ( nBorders == 2 )
+					{
+						unknown.Add( -damping*deltaB, zB );
+						sB = savedB + damping*deltaB;
+					}
 
 					peak = peakAt( unknown, s, &argElement, &argDof );
 					constraint = s - peak;
+					constraintB = nBorders == 2 ? sB - unknown( boundaryDof ) : 0.0;
 					fieldResidual( unknown, s, residual );
-					trialNorm = std::hypot( residual.Norml2(), gamma*constraint );
+					// BOTH constraints, or the line search is blind to the one it
+					// is not told about and will happily accept a step that has
+					// wrecked psi_bnd to improve psi_ax.
+					trialNorm = std::hypot( residual.Norml2(),
+					                        gamma*std::hypot( constraint,
+					                                          constraintB ) );
 				}
 				catch ( std::exception const & )
 				{
@@ -2799,6 +2965,7 @@ namespace
 		}
 
 		psiAxisValue = s;
+		psiBoundaryValue = sB;
 		normalisationResidualValue = constraint;
 		normalisedSource->setNormalisation( s );
 

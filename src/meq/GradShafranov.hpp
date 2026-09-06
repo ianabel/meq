@@ -1132,6 +1132,37 @@ namespace meq
 			std::vector<mfem::Vector>
 			exteriorTransmissionRows( ExteriorDtN const &exterior ) const;
 
+			/// Make `psi_bnd` an unknown too, pinned by `psi` at a prescribed
+			/// point — FREE-BOUNDARY-PLAN.md's FB-3.
+			///
+			/// **THE PLASMA EDGE IS WHERE THE PROFILES STOP, AND IN A FREE
+			/// BOUNDARY IT IS NOT KNOWN IN ADVANCE.** The profiles are functions
+			/// of `Psi = ( psi - psi_bnd )/( psi_ax - psi_bnd )`, and `psi_bnd`
+			/// is the flux at the limiter contact or the X-point — a functional
+			/// of the solution, exactly as `psi_ax` is. So it gets a border row
+			/// of its own and the bordered Newton becomes 2x2.
+			///
+			/// `( r, z )` is the limiter contact. The constraint is `psi_bnd =
+			/// psi_h` at the NEAREST POTENTIAL DOF to it, which is a definition
+			/// rather than an approximation and is the same choice `psi_ax` makes
+			/// in taking the largest nodal value: it is what makes the constraint
+			/// differentiable in a form the border can use, and under NPC the row
+			/// is then exactly `-e_j` and the corner exactly 1.
+			///
+			/// **NPC ONLY**, and refused otherwise. Under the condensation `psi`
+			/// is a function of the trace through every element's source, so both
+			/// the row and the corner would have to be differenced — which is
+			/// possible and is not built, because §4.5 records that two of the
+			/// three borders are exact under NPC and this is one of them.
+			///
+			/// Call with no point set — the default — and `psi_bnd` stays zero
+			/// and the solve is the 1x1 it always was, arithmetically unchanged.
+			void setBoundaryFluxPoint( double r, double z );
+
+			/// The converged `psi_bnd`. Zero unless setBoundaryFluxPoint() was
+			/// called. Valid after solve().
+			double psiBoundary() const;
+
 			/// The outward flux of `q` through the true boundary `Gamma`:
 			/// `oint_Gamma q.nu dGamma`.
 			///
@@ -1511,6 +1542,10 @@ namespace meq
 			/// must be evaluated on the FACE transformation rather than the
 			/// element one, and MFEM aborts rather than coping. See the
 			/// definition.
+			/// The potential dof nearest a point; FB-3's border pins psi_bnd
+			/// to one nodal value, as psi_ax is pinned to the largest.
+			int nearestPotentialDof( double r, double z ) const;
+
 			void projectPathTraceOntoGammaH( mfem::Coefficient &coeff,
 			                                 mfem::Vector &target ) const;
 
@@ -1533,6 +1568,12 @@ namespace meq
 			/// what buildForms() gave HDGExtensionIntegrator; this one is a rule
 			/// ACROSS the face and is nobody else's business.
 			int transmissionQuadratureOrder;
+
+			/// FB-3's limiter contact, and whether one was given.
+			bool boundaryFluxIsUnknown = false;
+			double boundaryFluxR = 0.0;
+			double boundaryFluxZ = 0.0;
+			double psiBoundaryValue = 0.0;
 
 			Globalisation globalisationChoice;
 			LocalSolver localSolverChoice;

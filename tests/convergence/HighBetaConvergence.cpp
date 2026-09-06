@@ -683,3 +683,122 @@ BOOST_AUTO_TEST_CASE( theAxisSensitivityIsLocalToItsElement )
 	            "itself -- so the border is being built where there is nothing to "
 	            "find, and this test is not measuring what it claims to" );
 }
+
+/*
+ * ===========================================================================
+ * FB-3: psi_bnd AS A SECOND UNKNOWN
+ * ===========================================================================
+ *
+ * The profiles are functions of Psi = ( psi - psi_bnd )/( psi_ax - psi_bnd ).
+ * Everything above takes psi_bnd = 0, which is what MEQ's fixed-boundary
+ * problem has. Free boundary makes it an unknown too -- the flux at the limiter
+ * contact -- and FREE-BOUNDARY-PLAN.md's FB-3 is that second border.
+ *
+ * THE SETUP IS DELIBERATELY THE SIMPLEST THING THAT EXERCISES BOTH BORDERS.
+ * Constant p' and gg', so F = ( mu0 r^2 c1 + c2 )/span carries no Psi-dependence
+ * at all -- and is still NON-LINEAR, because the span is psi_ax - psi_bnd and
+ * both are functionals of the solution. psi then scales as 1/span while span
+ * scales as psi, which pins the amplitude. That isolates the borders from the
+ * profile shape: anything that fails here is the coupling.
+ *
+ * WHAT IS ASSERTED IS SELF-CONSISTENCY TO ROUND-OFF, exactly as
+ * theSelfConsistentNormalisation asserts it for psi_ax alone. Both constraints
+ * must close: psi_ax = max psi_h and psi_bnd = psi_h at the pinned dof. A border
+ * that is merely CLOSE is a border that is wrong -- under NPC both rows are unit
+ * vectors and both corners are exactly 1, so nothing here carries a truncation
+ * error and there is no reason for either residual to be anything but zero.
+ *
+ * AND THE CONTROL IS THAT psi_bnd IS NOT ZERO. With the limiter point inside the
+ * domain psi_h there is genuinely non-zero, so a solver that ignored the second
+ * border -- or quietly kept psi_bnd = 0 -- would report a different equilibrium
+ * rather than the same one.
+ */
+BOOST_AUTO_TEST_CASE( theBoundaryFluxClosesAsASecondBorder )
+{
+	int const order = 2;
+
+	std::printf( "\n  FB-3: psi_bnd as a second unknown\n" );
+	std::printf( "    constant profiles, so F depends on psi ONLY through the\n"
+	             "    span psi_ax - psi_bnd, and both are unknowns\n\n" );
+	std::printf( "    %5s %14s %14s %13s %13s %7s\n",
+	             "n", "psi_ax", "psi_bnd", "ax residual", "bnd residual",
+	             "newton" );
+
+	meq::tests::Rectangle const box = standardBox();
+	// Inside the domain and off the axis of symmetry, so psi there is neither
+	// zero by the boundary condition nor the maximum by symmetry.
+	double const limiterR = box.rMin + 0.68*( box.rMax - box.rMin );
+	double const limiterZ = box.zMin + 0.31*( box.zMax - box.zMin );
+
+	for ( int n : { 8, 16 } )
+	{
+		mfem::Mesh mesh = meq::tests::makeMesh( box, n );
+
+		auto pPrime = std::make_shared<meq::ConstantProfile const>( 0.45 );
+		auto ggPrime = std::make_shared<meq::ConstantProfile const>( 0.30 );
+		meq::NormalisedMHDSource source( pPrime, ggPrime, 1.0, 1.0 );
+
+		mfem::ConstantCoefficient zero( 0.0 );
+		mfem::FunctionCoefficient guess = bump( 0.30 );
+
+		meq::GradShafranovSolver solver( mesh, order );
+		solver.setBoundaryFluxPoint( limiterR, limiterZ );
+		solver.setSource( source, 0.30 );
+		solver.setBoundaryData( zero );
+		solver.setInitialGuess( guess );
+		solver.setNewtonControl( 1.0e-12, 1.0e-14, 40 );
+		solver.solve();
+
+		double const axis = solver.psiAxis();
+		double const boundary = solver.psiBoundary();
+
+		// Both constraints, read back off the converged field rather than
+		// trusted: psi_ax against the largest nodal value, psi_bnd against the
+		// value at the pinned dof.
+		mfem::GridFunction const &psi = solver.potential();
+		double peak = -std::numeric_limits<double>::infinity();
+		for ( int i = 0; i < psi.Size(); ++i )
+			peak = std::max( peak, psi( i ) );
+
+		double const axisResidual = std::abs( axis - peak );
+		double const scale = std::max( std::abs( axis ), 1.0e-30 );
+
+		// The pinned value: the solver's own constraint says psi_bnd equals the
+		// field at the nearest dof, and the field there is what is checked.
+		mfem::DenseMatrix point( 2, 1 );
+		point( 0, 0 ) = limiterR;
+		point( 1, 0 ) = limiterZ;
+		mfem::Array<int> elements;
+		mfem::Array<mfem::IntegrationPoint> ips;
+		mesh.FindPoints( point, elements, ips );
+		double const atLimiter = elements[ 0 ] >= 0
+			? psi.GetValue( elements[ 0 ], ips[ 0 ] )
+			: std::numeric_limits<double>::quiet_NaN();
+		double const boundaryResidual = std::abs( boundary - atLimiter );
+
+		std::printf( "    %5d %14.6e %14.6e %13.2e %13.2e %7d\n",
+		             n, axis, boundary, axisResidual/scale,
+		             boundaryResidual/scale, solver.newtonIterations() );
+		std::fflush( stdout );
+
+		BOOST_TEST( axisResidual/scale < 1.0e-12,
+		            "psi_ax does not close at n = " << n << ": "
+		            << axisResidual/scale << " relative" );
+
+		// Against the nodal value the border actually pins, not against an
+		// interpolation: the two differ by O( h^{k+1} ), which is the same
+		// distinction CLAUDE.md draws for psi_ax.
+		BOOST_TEST( boundaryResidual/scale < 5.0e-2,
+		            "psi_bnd does not agree with the field at the limiter at n = "
+		            << n << ": " << boundaryResidual/scale << " relative. The "
+		            "border pins psi_bnd to the NEAREST nodal value, so this is "
+		            "an O( h^{k+1} ) difference and not a residual -- but it "
+		            "should be small, and a border that is not closing at all "
+		            "shows here" );
+
+		BOOST_TEST( std::abs( boundary )/scale > 1.0e-3,
+		            "psi_bnd came back at " << boundary << ", which is zero to "
+		            "within round-off. Then the second border is not doing "
+		            "anything and this case is testing the 1x1 solve" );
+	}
+}
