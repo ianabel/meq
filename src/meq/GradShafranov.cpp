@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <limits>
 #include <memory>
@@ -420,6 +421,8 @@ namespace
 		  transmissionQuadratureOrder( 40 ),
 		  globalisationChoice( Globalisation::None ),
 		  localSolverChoice( LocalSolver::Newton ),
+		  sourceQuadratureExtra( 4 ),
+		  exteriorCoupling( nullptr ),
 		  orderingChoice( NonlinearOrdering::NPC ),
 		  assemblyModeChoice( defaultAssemblyMode() ),
 		  traceSolverChoice( TraceSolver::UMFPack ),
@@ -1035,6 +1038,22 @@ namespace
 		prepared = false;
 	}
 
+	void GradShafranovSolver::setSourceQuadratureOrder( int extraOrder )
+	{
+		if ( extraOrder < 0 )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::setSourceQuadratureOrder: the extra "
+				"order is added to 2k and cannot be negative" );
+		sourceQuadratureExtra = extraOrder;
+		built = false;
+		prepared = false;
+	}
+
+	int GradShafranovSolver::sourceQuadratureOrder() const
+	{
+		return sourceQuadratureExtra;
+	}
+
 	GradShafranovSolver::Globalisation GradShafranovSolver::globalisation() const
 	{
 		return globalisationChoice;
@@ -1343,6 +1362,43 @@ namespace
 		// re-prepares, so a datum set after a solve would otherwise be ignored
 		// until something else invalidated the state.
 		prepared = false;
+	}
+
+	void GradShafranovSolver::setExteriorCoupling( ExteriorDtN const &exterior )
+	{
+		if ( !transferPath )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::setExteriorCoupling: there is no "
+				"Gamma_h to transfer the exterior datum from -- setExtension() "
+				"comes first, and the fitted path cannot carry this coupling at "
+				"all because its datum reaches the boundary through essential "
+				"trace dofs rather than through a load term" );
+
+		exteriorCoupling = &exterior;
+		exteriorCoefficientValues.assign(
+			static_cast<std::size_t>( exterior.modeCount() ), 0.0 );
+
+		// THE DATUM READS THE COEFFICIENT VECTOR RATHER THAN A COPY OF IT, so
+		// that a Newton step which moves `a` moves the transferred boundary
+		// condition with it. The vector is a member and outlives every solve;
+		// capturing it by reference is what makes the coupling live rather than
+		// a snapshot taken at setup.
+		ExteriorDtN const *dtn = &exterior;
+		std::vector<double> const *coefficients = &exteriorCoefficientValues;
+		setExteriorDatum( [ dtn, coefficients ]( mfem::Vector const &x )
+		{
+			double total = 0.0;
+			int const first = ExteriorDtN::firstMode();
+			for ( std::size_t i = 0; i < coefficients->size(); ++i )
+				total += ( *coefficients )[ i ]
+				         *dtn->basis( first + static_cast<int>( i ), x( 0 ), x( 1 ) );
+			return total;
+		} );
+	}
+
+	std::vector<double> const &GradShafranovSolver::exteriorCoefficients() const
+	{
+		return exteriorCoefficientValues;
 	}
 
 	double GradShafranovSolver::outwardFlux() const
@@ -1858,7 +1914,8 @@ namespace
 			// face stabilisation, convection -- on whichever of the two forms is in
 			// use, and so does this.
 			mfem::NonlinearForm *potentialMass = darcy->GetPotentialMassNonlinearForm();
-			potentialMass->AddDomainIntegrator( new SourceIntegrator( *nonlinearSource ) );
+			potentialMass->AddDomainIntegrator(
+				new SourceIntegrator( *nonlinearSource, sourceQuadratureExtra ) );
 			potentialMass->AddInteriorFaceIntegrator( interior );
 			potentialMass->AddBdrFaceIntegrator( boundary, fittedMarker );
 		}
@@ -2113,12 +2170,14 @@ namespace
 					*transferPath,
 					[ g ]( mfem::Vector const &x ) { return -g( x ); } );
 
-			fluxRhs.Update( fluxFes.get(), rhs.GetBlock( 0 ), 0 );
-			fluxRhs.AddBdrFaceIntegrator(
+			// Whole, every time. See the declaration.
+			fluxRhs = std::make_unique<mfem::LinearForm>();
+			fluxRhs->Update( fluxFes.get(), rhs.GetBlock( 0 ), 0 );
+			fluxRhs->AddBdrFaceIntegrator(
 				new mfem::VectorBoundaryFluxLFIntegrator(
 					*exteriorDatumCoefficient ),
 				gammaHMarker );
-			fluxRhs.Assemble();
+			fluxRhs->Assemble();
 		}
 
 		// On a Picard path the source is the frozen coefficient, so the linear
@@ -2404,6 +2463,45 @@ namespace
 		bool const npcOrdering = orderingChoice == NonlinearOrdering::NPC;
 
 		/*
+		 * FB-5. THIS FUNCTION NOW CARRIES THREE KINDS OF BORDER AND NOT ONE,
+		 * and the arithmetic below is the general bordered elimination rather
+		 * than the scalar it used to be:
+		 *
+		 *   psi_ax    one row, when a NormalisedSource is set
+		 *   psi_bnd   one more, when setBoundaryFluxPoint() named a point
+		 *   a_n       N more, when setExteriorCoupling() coupled the exterior
+		 *
+		 * They are not alike, and the differences are the whole content of the
+		 * code: psi_ax's row needs an argmax and its column is DIFFERENCED;
+		 * psi_bnd's dof is fixed at setup and its column is differenced too;
+		 * the exterior rows are the transmission integrals, their corner block
+		 * is DIAGONAL, and their columns are CONSTANT in the iterate because
+		 * `a` reaches the residual only through a load term.
+		 *
+		 * With no normalised source the psi_ax and psi_bnd rows are absent and
+		 * this is a pure exterior-coupled Newton, which is what FB-1's vacuum
+		 * problem wants.
+		 */
+		bool const hasNormalisation = normalisedSource != nullptr;
+		int const nModes = exteriorCoupling ? exteriorCoupling->modeCount() : 0;
+
+		if ( nModes > 0 && !npcOrdering )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::solve: the exterior coupling needs "
+				"NonlinearOrdering::NPC. Its rows are the transmission "
+				"integrals, which are a covector on the FLUX, and only under NPC "
+				"is the flux an unknown of the system -- under the condensation "
+				"it is recovered from the trace and the row would need the "
+				"recovery's derivative, which DarcyHybridization does not expose" );
+		if ( nModes > 0 && !usesNonlinearForms() )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::solve: the exterior coupling needs a "
+				"meq::Source rather than a coefficient, because NPC needs a "
+				"non-linear form to build its operator on. A source whose f() "
+				"ignores psi and whose dFdPsi() is zero is the vacuum case and "
+				"costs one Newton step" );
+
+		/*
 		 * THE UNKNOWN, AND WHY ITS LENGTH DECIDES EVERYTHING ELSE HERE.
 		 *
 		 * Under NonlinearOrdering::NPC it is the whole ( q, psi, psihat ) vector
@@ -2455,6 +2553,35 @@ namespace
 			npc = std::make_unique<mfem::DarcyNPCOperator>(
 				*darcy->GetHybridization(), blockOffsets, darcyRhs );
 
+		/*
+		 * RE-ASSEMBLE THE RIGHT HAND SIDE AND REBUILD THE NPC OPERATOR.
+		 *
+		 * The transferred exterior datum reaches the system as a LOAD on the
+		 * flux equation, and a load is assembled in prepare(). So a Newton step
+		 * that moves `a` and does not come back here evaluates its next residual
+		 * against the datum of the PREVIOUS step -- measured, and it does not
+		 * diverge: the transmission constraints sit at 1e-17 while || R || falls
+		 * by a factor of 2/3 per iteration, which is `a` and `x` chasing each
+		 * other rather than a Newton converging. On an AFFINE problem.
+		 *
+		 * prepare() re-runs FormLinearSystem(), which re-finalises the
+		 * hybridization, and mfem::DarcyNPCOperator caches what it found there
+		 * when it was built -- so the operator is rebuilt with it. Without that
+		 * the second residual evaluation reads through a stale handle and the
+		 * process dies inside this function with nothing in the trace to say so.
+		 *
+		 * prepare() also zeroes the iterate, so every caller puts it back.
+		 */
+		auto reprepare = [ & ]()
+		{
+			prepare();
+			if ( npcOrdering )
+			{
+				npc = std::make_unique<mfem::DarcyNPCOperator>(
+					*darcy->GetHybridization(), blockOffsets, darcyRhs );
+			}
+		};
+
 		mfem::Vector residual( n ), column( n ), y( n ), z( n ), scratch( n );
 
 		double sB = 0.0;
@@ -2477,7 +2604,8 @@ namespace
 		auto fieldResidual = [ & ]( mfem::Vector const &state, double normalisation,
 		                            mfem::Vector &out )
 		{
-			normalisedSource->setNormalisation( normalisation, sB );
+			if ( normalisedSource )
+				normalisedSource->setNormalisation( normalisation, sB );
 			if ( npcOrdering )
 			{
 				npc->Mult( state, out );
@@ -2511,7 +2639,8 @@ namespace
 			if ( !npcOrdering )
 				return recoverPeak( state, normalisation, element, dof );
 
-			normalisedSource->setNormalisation( normalisation, sB );
+			if ( normalisedSource )
+				normalisedSource->setNormalisation( normalisation, sB );
 
 			double best = -std::numeric_limits<double>::infinity();
 			int bestIndex = -1;
@@ -2548,7 +2677,7 @@ namespace
 		auto sourceColumn = [ & ]( mfem::Vector const &state, double normalisation,
 		                           mfem::Vector &out )
 		{
-			if ( normalisationChoice == Normalisation::Decoupled )
+			if ( normalisationChoice == Normalisation::Decoupled || !normalisedSource )
 			{
 				out = 0.0;
 				return;
@@ -2571,11 +2700,111 @@ namespace
 		double s = psiAxisValue;
 		int argElement = -1;
 		int argDof = -1;
-		double peak = peakAt( unknown, s, &argElement, &argDof );
-		double constraint = s - peak;
+		double peak = hasNormalisation ? peakAt( unknown, s, &argElement, &argDof )
+		                               : 0.0;
+		double constraint = hasNormalisation ? s - peak : 0.0;
 		double constraintB = boundaryFluxIsUnknown
 		                     ? sB - unknown( boundaryDof ) : 0.0;
 		fieldResidual( unknown, s, residual );
+
+		/*
+		 * THE EXTERIOR BORDERS, ASSEMBLED ONCE.
+		 *
+		 * The rows are the transmission integrals, which depend on the geometry
+		 * and the mode alone -- exteriorTransmissionRows() sweeps Gamma with
+		 * mfem::ExtensionBoundaryQuadrature and contracts the extended flux
+		 * against each mode. They are a covector on the FLUX BLOCK of the
+		 * unknown. DarcyForm's flux block holds -q and the rows are built for
+		 * flux(), which undoes that sign, so contracting the row against the
+		 * unknown directly is the right thing and no negation belongs here.
+		 *
+		 * THE COLUMNS ARE CONSTANT AND THAT IS WHY THEY ARE OUT HERE. `a`
+		 * reaches the residual only through the transferred datum, which
+		 * arrives as a LOAD TERM on the flux equation and is linear in `a`; the
+		 * operator never sees it. So one difference per mode is EXACT and it is
+		 * taken once per mesh rather than once per Newton step, which is what
+		 * makes the border cost N backsolves and nothing else.
+		 *
+		 * THEY ARE MEASURED RATHER THAN ASSEMBLED BY HAND, and the reason is
+		 * the elimination. prepare() runs FormLinearSystem(), which moves the
+		 * essential trace values into the right hand side, so the load vector as
+		 * VectorBoundaryFluxLFIntegrator deposits it is NOT the vector the
+		 * residual is measured against. Differencing the residual asks the
+		 * question the residual answers. It costs one prepare() per mode, at
+		 * setup; prepare() zeroes the iterate, so it is saved and put back.
+		 */
+		std::vector<mfem::Vector> exteriorRows, exteriorColumns, exteriorZ;
+		if ( nModes > 0 )
+		{
+			std::vector<mfem::Vector> const rows =
+				exteriorTransmissionRows( *exteriorCoupling );
+
+			for ( int mode = 0; mode < nModes; ++mode )
+			{
+				// NO NEGATION, AND THE FIRST VERSION HAD ONE. The rows are built
+				// to be contracted against flux(), which is the SIGN-CORRECTED
+				// field; the unknown carries DarcyForm's raw block, which is -q.
+				// So contracting the row against the unknown directly is already
+				// what FB-1b writes as rows[ m ] . ( -flux() ), and negating
+				// again gives a border that is right in magnitude and wrong in
+				// sign -- which does not diverge, it just fails to converge.
+				mfem::Vector row( n );
+				row = 0.0;
+				for ( int i = 0; i < rows[ static_cast<std::size_t>( mode ) ].Size(); ++i )
+					row( i ) = rows[ static_cast<std::size_t>( mode ) ]( i );
+				exteriorRows.push_back( row );
+				exteriorZ.emplace_back( n );
+			}
+
+			mfem::Vector const savedIterate( unknown );
+			std::vector<double> const savedCoefficients = exteriorCoefficientValues;
+
+			// The baseline, a = 0, and one unit response per mode.
+			auto residualAt = [ & ]( mfem::Vector &out )
+			{
+				reprepare();
+				unknown = savedIterate;
+				fieldResidual( unknown, s, out );
+			};
+
+			std::fill( exteriorCoefficientValues.begin(),
+			           exteriorCoefficientValues.end(), 0.0 );
+			mfem::Vector baseline( n );
+			residualAt( baseline );
+
+			for ( int mode = 0; mode < nModes; ++mode )
+			{
+				std::fill( exteriorCoefficientValues.begin(),
+				           exteriorCoefficientValues.end(), 0.0 );
+				exteriorCoefficientValues[ static_cast<std::size_t>( mode ) ] = 1.0;
+				mfem::Vector response( n );
+				residualAt( response );
+				response -= baseline;
+				exteriorColumns.push_back( response );
+			}
+
+			exteriorCoefficientValues = savedCoefficients;
+			reprepare();
+			unknown = savedIterate;
+			fieldResidual( unknown, s, residual );
+		}
+
+		/// T_m = ( transmission integral of x )_m + blockEntry( m ) a_m.
+		auto transmissionConstraint = [ & ]( mfem::Vector const &state, int mode )
+		{
+			double total = 0.0;
+			mfem::Vector const &row = exteriorRows[ static_cast<std::size_t>( mode ) ];
+			for ( int i = 0; i < n; ++i )
+				total += row( i )*state( i );
+			return total
+			       + exteriorCoupling->blockEntry( ExteriorDtN::firstMode() + mode )
+			         *exteriorCoefficientValues[ static_cast<std::size_t>( mode ) ];
+		};
+
+		std::vector<double> transmission( static_cast<std::size_t>( nModes ), 0.0 );
+		for ( int mode = 0; mode < nModes; ++mode )
+			transmission[ static_cast<std::size_t>( mode ) ] =
+				transmissionConstraint( unknown, mode );
 
 		// c at the starting iterate, computed whatever the coupling: it is both
 		// the first step's column and the scale gamma. gamma converts a
@@ -2598,6 +2827,27 @@ namespace
 		double gamma = initialColumn.Norml2();
 		if ( !( gamma > 0.0 ) || !std::isfinite( gamma ) )
 			gamma = 1.0;
+
+		/*
+		 * THE AUGMENTED NORM, over every constraint there is.
+		 *
+		 * gamma converts a perturbation of a BORDER unknown into the units the
+		 * field residual is measured in, and it is frozen at the first iterate
+		 * so that the printed history compares like with like -- a gamma
+		 * recomputed each step would put the Jacobian's own variation into the
+		 * convergence order and manufacture one. The exterior constraints get
+		 * the same scale: T_m is a flux integral like the rest of the border and
+		 * there is no second natural scale to give it.
+		 */
+		auto augmentedNorm = [ & ]( double fieldNorm, double cAx, double cBnd,
+		                            std::vector<double> const &cModes )
+		{
+			double total = fieldNorm*fieldNorm
+			             + gamma*gamma*( cAx*cAx + cBnd*cBnd );
+			for ( double v : cModes )
+				total += gamma*gamma*v*v;
+			return std::sqrt( total );
+		};
 
 		if ( normalisationChoice == Normalisation::Coupled )
 			column = initialColumn;
@@ -2628,8 +2878,17 @@ namespace
 
 			mfem::Vector coldResidual( n );
 			fieldResidual( coldState, s, coldResidual );
-			double const coldPeak = peakAt( coldState, s, nullptr, nullptr );
-			reference = std::hypot( coldResidual.Norml2(), gamma*( s - coldPeak ) );
+			double const coldPeak = hasNormalisation
+			                        ? peakAt( coldState, s, nullptr, nullptr ) : 0.0;
+			std::vector<double> coldModes( static_cast<std::size_t>( nModes ), 0.0 );
+			for ( int mode = 0; mode < nModes; ++mode )
+				coldModes[ static_cast<std::size_t>( mode ) ] =
+					transmissionConstraint( coldState, mode );
+			reference = augmentedNorm( coldResidual.Norml2(),
+			                           hasNormalisation ? s - coldPeak : 0.0,
+			                           boundaryFluxIsUnknown
+			                             ? sB - coldState( boundaryDof ) : 0.0,
+			                           coldModes );
 		}
 		double const target = std::max( newtonAbsoluteTolerance,
 		                                newtonRelativeTolerance*reference );
@@ -2658,9 +2917,8 @@ namespace
 		bool converged = false;
 		for ( int iteration = 0; iteration <= newtonMaxIterations; ++iteration )
 		{
-			double const norm =
-				std::hypot( residual.Norml2(),
-				            gamma*std::hypot( constraint, constraintB ) );
+			double const norm = augmentedNorm( residual.Norml2(), constraint,
+			                                   constraintB, transmission );
 			newtonResidualHistory.push_back( norm );
 			newtonIterationCount = iteration;
 
@@ -2672,7 +2930,8 @@ namespace
 			if ( !std::isfinite( norm ) || iteration == newtonMaxIterations )
 				break;
 
-			bool const coupled = normalisationChoice == Normalisation::Coupled;
+			bool const coupled = hasNormalisation
+			                     && normalisationChoice == Normalisation::Coupled;
 
 			// d = 1 - d( max psi_h )/d psi_ax, the corner of the border.
 			//
@@ -2741,7 +3000,8 @@ namespace
 			// ordering is load bearing under the condensation, where the
 			// differences run local solves that overwrite exactly those blocks; it
 			// is kept under NPC because it is the right thing to write either way.
-			normalisedSource->setNormalisation( s );
+			if ( normalisedSource )
+				normalisedSource->setNormalisation( s );
 
 			if ( npcOrdering )
 			{
@@ -2758,37 +3018,88 @@ namespace
 				linear.Mult( column, z );
 			}
 
-			double borderDotY = 0.0;
-			double borderDotZ = 0.0;
-			for ( int i = 0; i < borderDofs.Size(); ++i )
-			{
-				borderDotY += border( i )*y( borderDofs[ i ] );
-				borderDotZ += border( i )*z( borderDofs[ i ] );
-			}
-
-			double const denominator = corner - borderDotZ;
-			if ( denominator == 0.0 || !std::isfinite( denominator ) )
-				throw std::runtime_error( "meq::GradShafranovSolver::solve: the bordered Jacobian is singular in psi_ax -- the normalisation has no influence on the solution it normalises" );
+			for ( int mode = 0; mode < nModes; ++mode )
+				npcLinear.Mult( exteriorColumns[ static_cast<std::size_t>( mode ) ],
+				                exteriorZ[ static_cast<std::size_t>( mode ) ] );
 
 			/*
-			 * THE SECOND BORDER, AND IT IS THE CHEAPER OF THE TWO.
+			 * THE BORDERED ELIMINATION, IN ITS GENERAL FORM.
 			 *
-			 * psi_bnd is psi_h at ONE prescribed dof, so under NPC -- where psi
-			 * is an unknown of the system -- its row is exactly -e_boundaryDof
-			 * and its corner exactly 1, neither of them differenced. psi_ax's
-			 * row is the same shape but needed an argmax to find its dof; this
-			 * one is fixed at setup. Only the COLUMN dR/d psi_bnd is measured,
-			 * and that is one central difference in a scalar, exactly as
-			 * dR/d psi_ax is.
+			 * The system Newton solves is
 			 *
-			 * The elimination is then 2x2 dense against the SAME factorisation:
-			 * one more backsolve for the second column and nothing else. With no
-			 * boundary point set nBorders is 1 and the arithmetic below is the
-			 * scalar one above, term for term -- which is what keeps
-			 * HighBetaConvergence bit-identical.
+			 *     [ J   C ] [ dx ]     [ -R ]
+			 *     [ B   D ] [ dp ]  =  [ -G ]
+			 *
+			 * with p the border unknowns -- psi_ax, psi_bnd and the N exterior
+			 * coefficients -- C their columns, B their rows and D the corner.
+			 * Eliminating dx = -( y + sum_j dp_j z_j ) with y = J^-1 R and
+			 * z_j = J^-1 c_j leaves a dense system of the border's own size:
+			 *
+			 *     M dp = f,    M_ij = D_ij - b_i . z_j,   f_i = b_i . y - G_i
+			 *
+			 * ONE FACTORISATION AND ONE BACKSOLVE PER BORDER, which is the whole
+			 * argument for putting the coupling here rather than solving N + 1
+			 * separate problems and adding them: superposition is exact only
+			 * while the problem is linear, and a plasma source is not.
+			 *
+			 * THE SCALAR CASE IS KEPT SEPARATE AND THAT IS DELIBERATE. With one
+			 * border the dense route would compute the same quotient by a
+			 * different sequence of roundings, and HighBetaConvergence asserts
+			 * psi_ax to every digit it printed before this generalisation
+			 * existed. A refactor that moves the last bit of a published number
+			 * is a refactor that has to be argued about; keeping the division is
+			 * cheaper than the argument.
 			 */
-			double deltaS = ( borderDotY - constraint )/denominator;
-			double deltaB = 0.0;
+			int const nBorderTotal = nBorders + nModes;
+			std::vector<double> step( static_cast<std::size_t>( nBorderTotal ), 0.0 );
+
+			// b_i . v, for each border row.
+			auto rowDot = [ & ]( int i, mfem::Vector const &v )
+			{
+				if ( i == 0 )
+				{
+					double total = 0.0;
+					for ( int j = 0; j < borderDofs.Size(); ++j )
+						total += border( j )*v( borderDofs[ j ] );
+					return total;
+				}
+				if ( i == 1 && nBorders == 2 )
+					return coupled ? -v( boundaryDof ) : 0.0;
+
+				mfem::Vector const &row =
+					exteriorRows[ static_cast<std::size_t>( i - nBorders ) ];
+				double total = 0.0;
+				for ( int j = 0; j < n; ++j )
+					total += row( j )*v( j );
+				return total;
+			};
+
+			// The corner block, row by row.
+			auto cornerEntry = [ & ]( int i, int j )
+			{
+				if ( i < nBorders || j < nBorders )
+					return i == j ? ( i == 0 ? corner : 1.0 ) : 0.0;
+				return i == j
+				       ? exteriorCoupling->blockEntry(
+				             ExteriorDtN::firstMode() + i - nBorders )
+				       : 0.0;
+			};
+
+			// The constraint residual, row by row.
+			auto constraintAt = [ & ]( int i )
+			{
+				if ( i == 0 ) return constraint;
+				if ( i == 1 && nBorders == 2 ) return constraintB;
+				return transmission[ static_cast<std::size_t>( i - nBorders ) ];
+			};
+
+			// z_j, the backsolved column.
+			auto columnZ = [ & ]( int j ) -> mfem::Vector const &
+			{
+				if ( j == 0 ) return z;
+				if ( j == 1 && nBorders == 2 ) return zB;
+				return exteriorZ[ static_cast<std::size_t>( j - nBorders ) ];
+			};
 
 			if ( nBorders == 2 )
 			{
@@ -2803,28 +3114,41 @@ namespace
 				sB = columnBase;
 				columnB -= scratch;
 				columnB /= 2.0*hB;
-
 				npcLinear.Mult( columnB, zB );
-
-				// M = corner - B Z, with corner the identity and B's rows the
-				// negated unit vectors, so B v is just -v at the pinned dof.
-				double m[ 2 ][ 2 ];
-				m[ 0 ][ 0 ] = corner - borderDotZ;
-				m[ 0 ][ 1 ] = -( coupled ? -zB( argDof ) : 0.0 );
-				m[ 1 ][ 0 ] = -( coupled ? -z( boundaryDof ) : 0.0 );
-				m[ 1 ][ 1 ] = 1.0 - ( coupled ? -zB( boundaryDof ) : 0.0 );
-
-				double const rhs0 = borderDotY - constraint;
-				double const rhs1 = ( coupled ? -y( boundaryDof ) : 0.0 )
-				                    - constraintB;
-
-				double const det = m[ 0 ][ 0 ]*m[ 1 ][ 1 ] - m[ 0 ][ 1 ]*m[ 1 ][ 0 ];
-				if ( det == 0.0 || !std::isfinite( det ) )
-					throw std::runtime_error( "meq::GradShafranovSolver::solve: the bordered Jacobian is singular in ( psi_ax, psi_bnd ) -- one of the two normalisations has no influence on the solution it normalises" );
-
-				deltaS = ( rhs0*m[ 1 ][ 1 ] - m[ 0 ][ 1 ]*rhs1 )/det;
-				deltaB = ( m[ 0 ][ 0 ]*rhs1 - rhs0*m[ 1 ][ 0 ] )/det;
 			}
+
+			if ( nBorderTotal == 1 )
+			{
+				double const borderDotY = rowDot( 0, y );
+				double const borderDotZ = rowDot( 0, z );
+				double const denominator = corner - borderDotZ;
+				if ( denominator == 0.0 || !std::isfinite( denominator ) )
+					throw std::runtime_error( "meq::GradShafranovSolver::solve: the bordered Jacobian is singular in psi_ax" );
+				step[ 0 ] = ( borderDotY - constraint )/denominator;
+			}
+			else
+			{
+				mfem::DenseMatrix dense( nBorderTotal );
+				mfem::Vector right( nBorderTotal ), solved( nBorderTotal );
+				for ( int i = 0; i < nBorderTotal; ++i )
+				{
+					right( i ) = rowDot( i, y ) - constraintAt( i );
+					for ( int j = 0; j < nBorderTotal; ++j )
+						dense( i, j ) = cornerEntry( i, j ) - rowDot( i, columnZ( j ) );
+				}
+
+				mfem::DenseMatrixInverse inverse( dense );
+				inverse.Mult( right, solved );
+				for ( int i = 0; i < nBorderTotal; ++i )
+				{
+					if ( !std::isfinite( solved( i ) ) )
+						throw std::runtime_error( "meq::GradShafranovSolver::solve: the bordered Jacobian is singular in ( psi_ax, psi_bnd, a )" );
+					step[ static_cast<std::size_t>( i ) ] = solved( i );
+				}
+			}
+
+			double const deltaS = step[ 0 ];
+			double const deltaB = nBorders == 2 ? step[ 1 ] : 0.0;
 
 			/*
 			 * BACKTRACKING, AND IT IS NOT OPTIONAL HERE.
@@ -2852,6 +3176,7 @@ namespace
 			mfem::Vector const savedState( unknown );
 			double const savedS = s;
 			double const savedB = sB;
+			std::vector<double> const savedCoefficients = exteriorCoefficientValues;
 
 			double bestNorm = std::numeric_limits<double>::infinity();
 			double bestDamping = 0.0;
@@ -2863,6 +3188,16 @@ namespace
 				double trialNorm = std::numeric_limits<double>::infinity();
 				try
 				{
+					// `a` FIRST, then the right hand side it changes, and only
+					// then the state -- prepare() zeroes the iterate, so the
+					// order is not a preference.
+					for ( int mode = 0; mode < nModes; ++mode )
+						exteriorCoefficientValues[ static_cast<std::size_t>( mode ) ] =
+							savedCoefficients[ static_cast<std::size_t>( mode ) ]
+							+ damping*step[ static_cast<std::size_t>( nBorders + mode ) ];
+					if ( nModes > 0 )
+						reprepare();
+
 					unknown = savedState;
 					unknown.Add( -damping, y );
 					unknown.Add( -damping*deltaS, z );
@@ -2872,17 +3207,23 @@ namespace
 						unknown.Add( -damping*deltaB, zB );
 						sB = savedB + damping*deltaB;
 					}
+					for ( int mode = 0; mode < nModes; ++mode )
+						unknown.Add( -damping*step[ static_cast<std::size_t>( nBorders + mode ) ],
+						             exteriorZ[ static_cast<std::size_t>( mode ) ] );
 
-					peak = peakAt( unknown, s, &argElement, &argDof );
-					constraint = s - peak;
+					peak = hasNormalisation
+					       ? peakAt( unknown, s, &argElement, &argDof ) : 0.0;
+					constraint = hasNormalisation ? s - peak : 0.0;
 					constraintB = nBorders == 2 ? sB - unknown( boundaryDof ) : 0.0;
 					fieldResidual( unknown, s, residual );
+					for ( int mode = 0; mode < nModes; ++mode )
+						transmission[ static_cast<std::size_t>( mode ) ] =
+							transmissionConstraint( unknown, mode );
 					// BOTH constraints, or the line search is blind to the one it
 					// is not told about and will happily accept a step that has
 					// wrecked psi_bnd to improve psi_ax.
-					trialNorm = std::hypot( residual.Norml2(),
-					                        gamma*std::hypot( constraint,
-					                                          constraintB ) );
+					trialNorm = augmentedNorm( residual.Norml2(), constraint,
+					                           constraintB, transmission );
 				}
 				catch ( std::exception const & )
 				{
@@ -2908,13 +3249,36 @@ namespace
 			{
 				if ( bestDamping == 0.0 )
 					throw std::runtime_error( "meq::GradShafranovSolver::solve: no damping of the bordered Newton step gave a finite residual -- psi_ax through zero, most often, which is the branch leaving the physical one" );
+				// EVERY border, or the fallback step puts the fields back on a
+				// damping the exterior coefficients and psi_bnd never received,
+				// which is a state no equation in this system describes.
+				for ( int mode = 0; mode < nModes; ++mode )
+					exteriorCoefficientValues[ static_cast<std::size_t>( mode ) ] =
+						savedCoefficients[ static_cast<std::size_t>( mode ) ]
+						+ bestDamping*step[ static_cast<std::size_t>( nBorders + mode ) ];
+				if ( nModes > 0 )
+					reprepare();
+
 				unknown = savedState;
 				unknown.Add( -bestDamping, y );
 				unknown.Add( -bestDamping*deltaS, z );
 				s = savedS + bestDamping*deltaS;
-				peak = peakAt( unknown, s, &argElement, &argDof );
-				constraint = s - peak;
+				if ( nBorders == 2 )
+				{
+					unknown.Add( -bestDamping*deltaB, zB );
+					sB = savedB + bestDamping*deltaB;
+				}
+				for ( int mode = 0; mode < nModes; ++mode )
+					unknown.Add( -bestDamping*step[ static_cast<std::size_t>( nBorders + mode ) ],
+					             exteriorZ[ static_cast<std::size_t>( mode ) ] );
+				peak = hasNormalisation
+				       ? peakAt( unknown, s, &argElement, &argDof ) : 0.0;
+				constraint = hasNormalisation ? s - peak : 0.0;
+				constraintB = nBorders == 2 ? sB - unknown( boundaryDof ) : 0.0;
 				fieldResidual( unknown, s, residual );
+				for ( int mode = 0; mode < nModes; ++mode )
+					transmission[ static_cast<std::size_t>( mode ) ] =
+						transmissionConstraint( unknown, mode );
 			}
 
 			/*
@@ -2967,7 +3331,8 @@ namespace
 		psiAxisValue = s;
 		psiBoundaryValue = sB;
 		normalisationResidualValue = constraint;
-		normalisedSource->setNormalisation( s );
+		if ( normalisedSource )
+			normalisedSource->setNormalisation( s );
 
 #ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
 		readFactorisationCounts( linear, symbolicFactorisationCount,
@@ -3033,7 +3398,7 @@ namespace
 
 		prepare();
 
-		if ( normalisedSource )
+		if ( normalisedSource || exteriorCoupling )
 		{
 			solveWithNormalisation();
 		}

@@ -501,7 +501,14 @@ BOOST_AUTO_TEST_CASE( theBoundarySweepTilesGammaAndTheRegionSweepTilesTheGap )
 		BOOST_TEST_REQUIRE( sub.bdr_attributes.Size() == 1,
 		                    "D_h reaches the background box at n = " << n );
 
-		mfem::VertexConePath path( sub, gammaH, circle, 6.0*h );
+		// THE CONE IS ASKED FOR EXPLICITLY, and this case is meaningless without
+		// it: signing the boundary weight matters only where the foot map
+		// backtracks, and it is the cone that makes it backtrack. Upstream
+		// measured that the cone does not do what it was added for and turned it
+		// OFF by default, so the four-argument constructor now builds no cone
+		// and the signed and unsigned sweeps agree trivially.
+		mfem::VertexConePath path( sub, gammaH, circle, 6.0*h,
+		                           16, 3, 32, 1.0e-13, 100, /*use_cone=*/true );
 
 		// The area of D_h, so the region sweep has something to be compared
 		// against: it must give |Omega| - |D_h|.
@@ -1159,7 +1166,12 @@ BOOST_AUTO_TEST_CASE( theConeIsWhatCostsTheTiling )
 			mfem::Mesh &meshRef = ( which == 0 )
 				? static_cast<mfem::Mesh &>( sub ) : plain;
 
-			mfem::VertexConePath path( meshRef, gammaH, circle, 6.0*h );
+			// EXPLICITLY, since upstream's default is now off. The SubMesh
+			// column must HAVE a cone and the plain-mesh column must not --
+			// that difference IS the experiment, and the assertion below
+			// checks both halves rather than assuming either.
+			mfem::VertexConePath path( meshRef, gammaH, circle, 6.0*h,
+			                           16, 3, 32, 1.0e-13, 100, /*use_cone=*/true );
 			cone[ which ] = path.HasCone();
 
 			for ( int oi = 0; oi < nOrders; ++oi )
@@ -2285,4 +2297,183 @@ BOOST_AUTO_TEST_CASE( amperesLawIsExactOnAContourThatAvoidsTheAxis )
 	            "discretisation in the identity, so it should be round-off: a "
 	            "departure is the assembly, the source or the trace solve, not "
 	            "the transfer" );
+}
+
+/*
+ * ============================================================================
+ * FB-5: THE WHOLE COUPLING AS ONE BORDERED NEWTON
+ * ============================================================================
+ *
+ * theTransmissionConditionSolvesForTheExteriorCoefficients above recovers `a`
+ * by SUPERPOSITION: one full solve per mode, one more for the source, and a
+ * dense N x N assembled out of the answers. That is exact, and it is available
+ * only because the problem is linear. The moment `F` depends on `psi` --
+ * which is every plasma there has ever been -- superposition stops meaning
+ * anything at all.
+ *
+ * setExteriorCoupling() is the same system solved as ONE Newton with N
+ * borders, and this case is where the two are put side by side. They must
+ * agree, because on THIS problem superposition is exact and the bordered
+ * Newton is solving the same equations; and the bordered one must reach it in
+ * a single step, because the residual is affine in ( x, a ).
+ *
+ * WHAT THE COMPARISON IS WORTH. It is not that the answers are close -- FB-1b
+ * already pinned those against the fixture's own coefficients. It is that two
+ * completely different ROUTES to them agree: N + 1 factorisations and a dense
+ * assembly against one factorisation and N + 2 backsolves. A sign error in the
+ * border, a row placed in the wrong block, a corner off by the mass, or a
+ * column that is not actually constant would all move this and none of them
+ * would move FB-1b.
+ *
+ * AND THE COST IS THE POINT OF THE STAGE. Superposition needs N + 1 SOLVES,
+ * each with its own factorisation. The border needs one factorisation and
+ * N + 2 backsolves, which is what FREE-BOUNDARY-PLAN.md section 4.4 says it
+ * should be and what makes the coupling affordable on a plasma, where a
+ * factorisation is per Newton step rather than per problem.
+ */
+BOOST_AUTO_TEST_CASE( theExteriorCouplingClosesInOneBorderedNewton )
+{
+	int const order = 2;
+
+	std::printf( "\n  FB-5: THE COUPLING AS ONE BORDERED NEWTON  ( k = %d )\n",
+	             order );
+	std::printf( "     n   modes    worst |a - exact|   worst |a - superposition|"
+	             "   newton\n" );
+
+	std::vector<double> worstByMesh;
+	std::vector<double> spacing;
+
+	for ( int n : { 12, 24 } )
+	{
+		HalfDisc d = makeHalfDisc( n );
+		meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 4 );
+		int const modes = dtn.modeCount();
+
+		std::vector<double> const exact = halfDiscField().exteriorCoefficients( dtn );
+
+		// The source as a meq::Source: F does not depend on psi at all, so the
+		// problem is affine and Newton takes one step. That overload is what the
+		// coupling needs -- NPC has to have a non-linear form to build on, and
+		// the transmission rows are a covector on the FLUX, which is an unknown
+		// only under NPC.
+		struct VacuumSource : public meq::Source
+		{
+			double f( double r, double z, double /*psi*/ ) const override
+			{
+				return halfDiscField().f( r, z, 0.0 );
+			}
+			double dFdPsi( double, double, double ) const override
+			{
+				return 0.0;
+			}
+		};
+		VacuumSource source;
+
+		mfem::ConstantCoefficient zero( 0.0 );
+
+		meq::GradShafranovSolver solver( *d.sub, order );
+		solver.setSource( source );
+		solver.setBoundaryData( zero );
+		solver.setExtension( *d.path, d.gammaHMarker );
+		solver.setExteriorCoupling( dtn );
+		solver.solve();
+
+		std::vector<double> const bordered = solver.exteriorCoefficients();
+		BOOST_TEST_REQUIRE( static_cast<int>( bordered.size() ) == modes );
+
+		// The same coefficients by superposition, which is FB-1b's route.
+		mfem::FunctionCoefficient plasmaSource( []( mfem::Vector const &x )
+		{
+			return halfDiscField().f( x( 0 ), x( 1 ), 0.0 );
+		} );
+		mfem::ConstantCoefficient noSource( 0.0 );
+
+		auto transmission = [ & ]( mfem::Coefficient &s,
+		                           mfem::PositionFunction const &g )
+		{
+			meq::GradShafranovSolver one( *d.sub, order );
+			one.setSource( s );
+			one.setBoundaryData( zero );
+			one.setExtension( *d.path, d.gammaHMarker );
+			if ( g )
+				one.setExteriorDatum( g );
+			one.solve();
+
+			std::vector<mfem::Vector> const rows = one.exteriorTransmissionRows( dtn );
+			mfem::GridFunction const &q = one.flux();
+			std::vector<double> out( static_cast<std::size_t>( modes ), 0.0 );
+			for ( int m = 0; m < modes; ++m )
+			{
+				double total = 0.0;
+				for ( int i = 0; i < q.Size(); ++i )
+					total += rows[ static_cast<std::size_t>( m ) ]( i )*( -q( i ) );
+				out[ static_cast<std::size_t>( m ) ] = total;
+			}
+			return out;
+		};
+
+		std::vector<double> const t0 = transmission( plasmaSource, {} );
+		std::vector<std::vector<double>> columns;
+		for ( int mode = 0; mode < modes; ++mode )
+			columns.push_back( transmission(
+				noSource,
+				singleModeDatum( dtn, meq::ExteriorDtN::firstMode() + mode ) ) );
+
+		mfem::DenseMatrix system( modes, modes );
+		mfem::Vector right( modes ), superposed( modes );
+		for ( int m = 0; m < modes; ++m )
+		{
+			for ( int mode = 0; mode < modes; ++mode )
+				system( m, mode ) =
+					columns[ static_cast<std::size_t>( mode ) ][ static_cast<std::size_t>( m ) ]
+					+ ( m == mode
+					    ? dtn.blockEntry( meq::ExteriorDtN::firstMode() + m ) : 0.0 );
+			right( m ) = -t0[ static_cast<std::size_t>( m ) ];
+		}
+		mfem::DenseMatrixInverse inverse( system );
+		inverse.Mult( right, superposed );
+
+		double worstExact = 0.0, worstRoute = 0.0;
+		for ( int m = 0; m < modes; ++m )
+		{
+			worstExact = std::max( worstExact,
+				std::fabs( bordered[ static_cast<std::size_t>( m ) ]
+				           - exact[ static_cast<std::size_t>( m ) ] ) );
+			worstRoute = std::max( worstRoute,
+				std::fabs( bordered[ static_cast<std::size_t>( m ) ]
+				           - superposed( m ) ) );
+		}
+
+		std::printf( "  %4d  %5d      %12.4e            %12.4e       %5d\n",
+		             n, modes, worstExact, worstRoute, solver.newtonIterations() );
+
+		worstByMesh.push_back( worstExact );
+		spacing.push_back( 2.0*halfDiscGamma/static_cast<double>( n ) );
+
+		// THE TWO ROUTES, and this is the assertion with teeth. Superposition is
+		// exact on this problem, so any disagreement beyond round-off is the
+		// border and not the discretisation.
+		BOOST_TEST( worstRoute < 1.0e-9,
+		            "the bordered Newton and superposition disagree by "
+		            << worstRoute << " at n = " << n << ". On a LINEAR problem "
+		            "they solve the same equations, so this is a defect in the "
+		            "border -- a row in the wrong block, a corner off by the "
+		            "mass, or a column that is not constant after all -- and "
+		            "not a discretisation difference" );
+
+		// AFFINE IN ( x, a ), SO ONE STEP. If this ever needs two, the column
+		// is not constant, which is the claim section 4.3 rests on.
+		BOOST_TEST( solver.newtonIterations() <= 2,
+		            "the bordered Newton took " << solver.newtonIterations()
+		            << " iterations on a problem whose residual is AFFINE in "
+		            "both the state and the coefficients" );
+	}
+
+	// And it converges to the exact coefficients, as FB-1b does.
+	double const rate = std::log( worstByMesh.front()/worstByMesh.back() )
+	                    /std::log( spacing.front()/spacing.back() );
+	std::printf( "    coefficient error converges at %.2f\n", rate );
+	BOOST_TEST( rate > 1.5,
+	            "the bordered coupling's coefficients converge at " << rate
+	            << ", where FB-1b's superposition route reaches 3.30" );
 }

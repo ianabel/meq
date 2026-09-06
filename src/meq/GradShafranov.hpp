@@ -727,6 +727,43 @@ namespace meq
 			/// than by the cap.
 			void setLocalSolver( LocalSolver choice );
 
+			/**
+			 * Quadrature order ADDED TO 2k for the semi-linear source term, on
+			 * the meq::Source path. The default is 4 and every rate in this
+			 * suite was measured with it.
+			 *
+			 * IT IS AN INSTRUMENT KNOB AND NOT A MODELLING ONE. Raising it
+			 * cannot change the continuous problem, so a rate that MOVES when it
+			 * moves is a rate limited by the rule rather than by the
+			 * discretisation -- which is how this project tells the two apart
+			 * everywhere else, by refining the instrument at fixed geometry.
+			 *
+			 * The one place it is not decoration is a source that STOPS inside
+			 * an element. Free boundary's chi_{Omega_p} does exactly that, and a
+			 * Gauss rule cannot see a discontinuity between its points however
+			 * many of them there are: PlasmaEdgeConvergence measures psi_h's
+			 * rate pinned to THREE FIGURES across a sweep of 4 to 20, which is
+			 * what says the loss is the rule's BLINDNESS and not its resolution.
+			 * What the sweep does move is psi*, 2.87 to 3.57 against its own
+			 * bound of 3.5 -- so raising this is the cheap half of what a cut
+			 * quadrature would have bought, and MEQ builds no cut quadrature for
+			 * that reason.
+			 *
+			 * THERE IS A CEILING ON TRIANGLES AND NOTHING WARNS YOU. MFEM's
+			 * symmetric triangle rules are exact and positive-weighted up to
+			 * order 25 and switch at 26 to a construction whose least weight is
+			 * -3.6e+01, reaching -1.9e+07 by order 64; a solve at 2k + 30
+			 * returns errors of order 1e+3. Keep 2k + extraOrder <= 25, which at
+			 * k = 3 means extraOrder <= 19. It is documented rather than
+			 * enforced because a quadrilateral mesh has different rules, and
+			 * theLossIsTheRulesBlindnessAndNotItsResolution pins the boundary so
+			 * a change upstream fails loudly.
+			 */
+			void setSourceQuadratureOrder( int extraOrder );
+
+			/// The value setSourceQuadratureOrder() last set.
+			int sourceQuadratureOrder() const;
+
 			/// Which non-linear method the hybridization is asked for. A
 			/// DIFFERENT axis from setGlobalisation(): that picks the outer
 			/// iteration, this decides what the outer iteration's unknown IS,
@@ -1159,6 +1196,49 @@ namespace meq
 			/// and the solve is the 1x1 it always was, arithmetically unchanged.
 			void setBoundaryFluxPoint( double r, double z );
 
+			/**
+			 * COUPLE THE EXTERIOR TO THE SOLVE, so that the Gegenbauer
+			 * coefficients on `Gamma` become unknowns of the same Newton rather
+			 * than being recovered afterwards by superposition.
+			 *
+			 * FB-5. FB-1b already solves for them, and does it by running one
+			 * full solve per mode and adding the answers -- which is exact and
+			 * is available only because that problem is LINEAR. A plasma source
+			 * is not, and superposition stops meaning anything the moment
+			 * `F` depends on `psi`. This is the same system solved as one
+			 * bordered Newton instead:
+			 *
+			 *     T_m( x, a ) = ( transmission integral of x )_m
+			 *                   + blockEntry( m ) a_m = 0
+			 *
+			 * with the `psi_ax` and `psi_bnd` rows beside it, N + 2 borders
+			 * against ONE factorisation.
+			 *
+			 * WHAT IT COSTS IS N + 2 EXTRA BACKSOLVES AND NO EXTRA
+			 * FACTORISATION, which is the whole reason the border is the right
+			 * structure: `DarcyNPCSolver::Mult()` is reduce, backsolve, recover,
+			 * and `SetReuseSymbolic()` keeps the symbolic analysis across the
+			 * Newton run.
+			 *
+			 * AND EVERY EXTERIOR COLUMN IS CONSTANT, which is worth more than it
+			 * looks. `a` reaches the residual only through the transferred
+			 * datum, which `setExteriorDatum()` deposits as a LOAD TERM on the
+			 * flux equation -- linear in `a`, and independent of the iterate.
+			 * So the N columns are assembled once per mesh, not once per Newton
+			 * step, and what the border costs per step is the backsolves alone.
+			 *
+			 * @param exterior  the DtN. Borrowed; it must outlive the solve.
+			 *
+			 * Requires setExtension(): there is no `Gamma_h` to transfer from
+			 * without it, and the fitted path imposes its datum through
+			 * essential trace dofs where this needs a load term.
+			 */
+			void setExteriorCoupling( ExteriorDtN const &exterior );
+
+			/// The converged Gegenbauer coefficients, in degree order from
+			/// n = 2. Empty unless setExteriorCoupling() was called.
+			std::vector<double> const &exteriorCoefficients() const;
+
 			/// The converged `psi_bnd`. Zero unless setBoundaryFluxPoint() was
 			/// called. Valid after solve().
 			double psiBoundary() const;
@@ -1561,7 +1641,16 @@ namespace meq
 			/// non-homogeneous datum belongs; see the long note there.
 			mfem::PositionFunction exteriorDatumFunction;
 			std::unique_ptr<mfem::PathTraceCoefficient> exteriorDatumCoefficient;
-			mfem::LinearForm fluxRhs;
+			/// The flux equation's load, which carries the transferred exterior
+			/// datum. A POINTER, and not a value, because prepare() is re-entrant
+			/// on the coupled path: setExteriorCoupling() moves `a` and asks for
+			/// the right hand side again, and mfem::LinearForm owns its
+			/// integrators with no way to drop them. Re-adding one per prepare()
+			/// while destroying the coefficient it references is a dangling read
+			/// on the second Assemble() -- measured, as a segfault inside
+			/// VectorBoundaryFluxLFIntegrator with nothing in the trace naming
+			/// this file. Rebuilt whole instead.
+			std::unique_ptr<mfem::LinearForm> fluxRhs;
 
 			/// Face rule order for exteriorTransmissionRows(). SEPARATE from
 			/// extensionLineOrder, which is a rule ALONG a path and has to match
@@ -1577,6 +1666,16 @@ namespace meq
 
 			Globalisation globalisationChoice;
 			LocalSolver localSolverChoice;
+
+			/// The exterior coupling of setExteriorCoupling(), borrowed, and the
+			/// coefficients it solves for. The datum function reads the vector,
+			/// so the transferred boundary condition follows the iterate.
+			ExteriorDtN const *exteriorCoupling;
+			std::vector<double> exteriorCoefficientValues;
+
+			/// Extra quadrature order for meq::SourceIntegrator; see
+			/// setSourceQuadratureOrder().
+			int sourceQuadratureExtra;
 			NonlinearOrdering orderingChoice;
 			AssemblyMode assemblyModeChoice;
 			TraceSolver traceSolverChoice;
