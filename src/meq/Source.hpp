@@ -202,10 +202,38 @@ namespace meq
 			///         zero: Psi = psi/psi_ax is undefined there, and a solver
 			///         that has wandered onto psi_ax = 0 should say so rather than
 			///         return infinities.
-			virtual void setNormalisation( double psiAxis ) = 0;
+			/// **THE BOUNDARY FLUX IS A SECOND NORMALISATION AND IT USED TO BE
+			/// ASSUMED ZERO.** The profiles are functions of
+			///
+			///     Psi = ( psi - psi_bnd )/( psi_ax - psi_bnd )
+			///
+			/// and MEQ's fixed-boundary problem has psi = 0 on Gamma, so
+			/// psi_bnd vanished and this class was written as Psi = psi/psi_ax.
+			/// Free boundary makes it an unknown as well -- the flux at the
+			/// limiter contact or the X-point -- and FREE-BOUNDARY-PLAN.md's
+			/// FB-3 is a SECOND border row of the same shape as psi_ax's.
+			///
+			/// The one-argument form below keeps psi_bnd = 0 and is what every
+			/// fixed-boundary caller wants.
+			///
+			/// @throws std::invalid_argument if either is not finite, or if the
+			///         SPAN psi_ax - psi_bnd is zero: Psi is undefined there,
+			///         and a solver that has wandered onto it should say so
+			///         rather than return infinities.
+			virtual void setNormalisation( double psiAxis,
+			                               double psiBoundary ) = 0;
 
-			/// The value the next f() and dFdPsi() will use.
+			/// psi_bnd = 0, the fixed-boundary case.
+			void setNormalisation( double psiAxis )
+			{
+				setNormalisation( psiAxis, 0.0 );
+			}
+
+			/// The axis value the next f() and dFdPsi() will use.
 			virtual double normalisation() const = 0;
+
+			/// And the boundary value; zero unless it has been set.
+			virtual double boundaryNormalisation() const = 0;
 
 		protected:
 			NormalisedSource() = default;
@@ -250,8 +278,10 @@ namespace meq
 			double f( double r, double z, double psi ) const override;
 			double dFdPsi( double r, double z, double psi ) const override;
 
-			void setNormalisation( double psiAxis ) override;
+			void setNormalisation( double psiAxis, double psiBoundary ) override;
+			using NormalisedSource::setNormalisation;
 			double normalisation() const override;
+			double boundaryNormalisation() const override;
 
 			/// The dp/dPsi profile.
 			Profile const & pPrime() const;
@@ -265,6 +295,7 @@ namespace meq
 			std::shared_ptr<Profile const> pPrimeProfile;
 			std::shared_ptr<Profile const> ggPrimeProfile;
 			double psiAxisValue;
+			double psiBoundaryValue = 0.0;
 			double permeability;
 	};
 

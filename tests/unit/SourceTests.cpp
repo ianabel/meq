@@ -603,3 +603,82 @@ BOOST_AUTO_TEST_CASE( implementations_are_usable_polymorphically )
 }
 
 BOOST_AUTO_TEST_SUITE_END()
+
+/*
+ * THE BOUNDARY FLUX, WHICH USED TO BE ASSUMED ZERO.
+ *
+ * meq::NormalisedSource's profiles are functions of
+ * Psi = ( psi - psi_bnd )/( psi_ax - psi_bnd ). MEQ's fixed-boundary problem has
+ * psi = 0 on Gamma, so psi_bnd vanished and the class was written as
+ * Psi = psi/psi_ax. FREE-BOUNDARY-PLAN.md's FB-3 makes it an unknown -- the flux
+ * at the limiter contact or the X-point -- so it has to be settable first.
+ *
+ * THE PROPERTY IS A TRANSLATION, AND IT IS EXACT RATHER THAN APPROXIMATE.
+ * Psi depends on psi and psi_bnd only through their difference, so
+ *
+ *     F( psi ; psi_ax, psi_bnd )  ==  F( psi - psi_bnd ; psi_ax - psi_bnd, 0 )
+ *
+ * identically -- the SAME arithmetic, not merely the same value -- and asserting
+ * it bit for bit is what catches a span written as psi_ax where it should be
+ * psi_ax - psi_bnd. A tolerance would let that through wherever psi_bnd happens
+ * to be small.
+ */
+BOOST_AUTO_TEST_CASE( the_boundary_flux_enters_only_through_the_span )
+{
+	double const psiAxis = 0.37;
+	double const psiBoundary = -0.11;      // deliberately of the other sign
+
+	meq::NormalisedMHDSource shifted( analyticPressureProfile(),
+	                                  analyticGGPrimeProfile(), psiAxis, 1.0 );
+	shifted.setNormalisation( psiAxis, psiBoundary );
+
+	meq::NormalisedMHDSource translated( analyticPressureProfile(),
+	                                     analyticGGPrimeProfile(), psiAxis, 1.0 );
+	translated.setNormalisation( psiAxis - psiBoundary, 0.0 );
+
+	BOOST_TEST( shifted.boundaryNormalisation() == psiBoundary );
+	BOOST_TEST( translated.boundaryNormalisation() == 0.0 );
+
+	double worstF = 0.0;
+	double worstD = 0.0;
+	for ( double r : testRadii )
+	{
+		for ( int i = -3; i <= 13; ++i )
+		{
+			double const psi = psiBoundary + ( psiAxis - psiBoundary )*i/10.0;
+			worstF = std::max( worstF, std::abs(
+				shifted.f( r, 0.0, psi )
+				- translated.f( r, 0.0, psi - psiBoundary ) ) );
+			worstD = std::max( worstD, std::abs(
+				shifted.dFdPsi( r, 0.0, psi )
+				- translated.dFdPsi( r, 0.0, psi - psiBoundary ) ) );
+		}
+	}
+	BOOST_TEST( worstF == 0.0,
+	            "F does not depend on psi and psi_bnd through their difference "
+	            "alone: worst " << worstF << ". The span is psi_ax - psi_bnd, "
+	            "and a psi_ax left somewhere in its place shows up here" );
+	BOOST_TEST( worstD == 0.0,
+	            "dF/dpsi does not translate: worst " << worstD << ". It carries "
+	            "TWO factors of the span, so a missed one shows here and not in "
+	            "F -- and it would cost only the convergence, not the answer" );
+
+	// THE CONTROL. If a non-zero psi_bnd made no difference at all, the check
+	// above would pass on a class that ignored it outright.
+	meq::NormalisedMHDSource ignored( analyticPressureProfile(),
+	                                  analyticGGPrimeProfile(), psiAxis, 1.0 );
+	ignored.setNormalisation( psiAxis, 0.0 );
+	double separation = 0.0;
+	for ( double r : testRadii )
+		separation = std::max( separation, std::abs(
+			shifted.f( r, 0.0, 0.5*psiAxis ) - ignored.f( r, 0.0, 0.5*psiAxis ) ) );
+	BOOST_TEST( separation > 1.0e-6,
+	            "setting psi_bnd changes nothing, so the translation check above "
+	            "is vacuous" );
+
+	// AND THE SPAN IS WHAT MUST NOT VANISH, NOT psi_ax. With a boundary flux in
+	// hand, psi_ax = 0 is perfectly admissible; psi_ax = psi_bnd is not.
+	BOOST_CHECK_THROW( shifted.setNormalisation( 0.25, 0.25 ),
+	                   std::invalid_argument );
+	BOOST_CHECK_NO_THROW( shifted.setNormalisation( 0.0, -0.3 ) );
+}

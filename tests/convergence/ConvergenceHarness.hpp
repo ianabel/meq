@@ -175,14 +175,32 @@ namespace tests
 				return eq.dFdPsi( r, z, psi );
 			}
 
-			void setNormalisation( double psiAxis ) override
+			/// THE FIXTURES CARRY NO psi_bnd, SO THIS REFUSES A NON-ZERO ONE
+			/// RATHER THAN IGNORING IT. Every analytic equilibrium behind this
+			/// harness is written for Psi = psi/psi_ax, i.e. psi_bnd = 0, which
+			/// is what MEQ's fixed-boundary problem has. Silently dropping a
+			/// boundary flux would give a solve that converges beautifully to
+			/// the wrong equilibrium -- the failure this whole file exists to
+			/// make impossible.
+			void setNormalisation( double psiAxis, double psiBoundary ) override
 			{
+				if ( psiBoundary != 0.0 )
+					throw std::invalid_argument(
+						"meq::tests::NormalisedEquilibriumSource::setNormalisation: "
+						"the analytic fixtures are written for psi_bnd = 0 and "
+						"cannot represent a non-zero boundary flux" );
 				eq.setPsiAxis( psiAxis );
 			}
+			using meq::NormalisedSource::setNormalisation;
 
 			double normalisation() const override
 			{
 				return eq.psiAxis();
+			}
+
+			double boundaryNormalisation() const override
+			{
+				return 0.0;
 			}
 
 			/// The fixture as the solver last left it, for a caller that wants to

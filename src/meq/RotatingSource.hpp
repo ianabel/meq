@@ -348,8 +348,10 @@ namespace meq
 			///         Psi = psi/psi_ax is undefined there, and a solver that has
 			///         wandered onto psi_ax = 0 should say so rather than return
 			///         infinities.
-			void setNormalisation( double psiAxis ) override;
+			void setNormalisation( double psiAxis, double psiBoundary ) override;
+			using NormalisedSource::setNormalisation;
 			double normalisation() const override;
+			double boundaryNormalisation() const override;
 
 			// Diagnostics, taking PHYSICAL psi and converting internally, so that
 			// a caller never has to remember which of the two it is holding.
@@ -364,6 +366,7 @@ namespace meq
 		private:
 			RotatingSource inner;
 			double psiAxisValue;
+			double psiBoundaryValue = 0.0;
 	};
 
 }

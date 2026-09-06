@@ -2173,9 +2173,41 @@ more residual evaluation".
 
 ### What is not done
 
-`ψ_bnd` is zero, because MEQ solves the fixed-boundary problem with `ψ = 0` on
-`Γ`. Free boundary makes it an unknown as well, which is a **second** border row
-and column of the same shape — `meq::NormalisedSource` is where it goes.
+`ψ_bnd` **is now settable, and is still not an unknown.** 2026-09-05:
+`setNormalisation( ψ_ax, ψ_bnd )` is the interface and the profiles take
+`Ψ = (ψ − ψ_bnd)/(ψ_ax − ψ_bnd)`, where they used to take `ψ/ψ_ax` — MEQ's
+fixed-boundary problem has `ψ = 0` on `Γ`, so `ψ_bnd` vanished and the
+assumption was baked into the class.
+
+**The validation moved from `ψ_ax` to the SPAN, and that is the whole
+generalisation.** With a boundary flux in hand `ψ_ax = 0` is perfectly
+admissible; `ψ_ax = ψ_bnd` is not. The one-argument form is kept as a non-virtual
+convenience passing zero, so every fixed-boundary caller is untouched.
+
+**Asserted bit for bit rather than to a tolerance.** `Ψ` depends on `ψ` and
+`ψ_bnd` only through their difference, so `F( ψ ; ψ_ax, ψ_bnd )` and
+`F( ψ − ψ_bnd ; ψ_ax − ψ_bnd, 0 )` are the *same arithmetic* —
+`the_boundary_flux_enters_only_through_the_span` requires `0.0`, which is what
+catches a `ψ_ax` left where the span belongs. A tolerance would let that through
+wherever `ψ_bnd` happened to be small. It carries a control, since a class
+ignoring `ψ_bnd` outright would pass the translation check, and `dFdPsi` is
+checked separately because it carries **two** factors of the span and a missed
+one costs only the convergence, not the answer.
+
+**And `HighBetaConvergence` is unchanged to every digit** — `ψ_ax` at
+3.058984e-01 and 2.834510e-01, `ψ_ax − max ψ_h` at 0.00e+00 and −5.55e-17, 4 and
+6 Newton iterations — which is what says the generalisation reduces exactly.
+
+**The analytic fixtures REFUSE a non-zero `ψ_bnd` rather than ignoring it.**
+Every equilibrium behind `ConvergenceHarness` is written for `Ψ = ψ/ψ_ax`, and
+silently dropping a boundary flux would converge beautifully to the wrong
+equilibrium.
+
+**What remains for FB-3 is the second border**: `ψ_bnd` as an *unknown*, closed
+like `ψ_ax` is. Under NPC it should be the cheaper of the two — `ψ_bnd` is `ψ` at
+one prescribed limiter point, so its border row is exactly `±e_j` and its corner
+exactly 1, where `ψ_ax`'s needed an argmax. `solveWithNormalisation()` does 1×1
+today; this makes it 2×2.
 
 `Globalisation` other than `None` is refused on this path, loudly: the KINSOL
 paths drive a residual of their own and the Picard ones build no Jacobian to

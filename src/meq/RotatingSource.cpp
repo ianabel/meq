@@ -631,12 +631,22 @@ namespace meq
 		setNormalisation( psiAxis );
 	}
 
-	void NormalisedRotatingSource::setNormalisation( double psiAxis )
+	void NormalisedRotatingSource::setNormalisation( double psiAxis,
+	                                                 double psiBoundary )
 	{
-		if ( !std::isfinite( psiAxis ) || psiAxis == 0.0 )
-			throw std::invalid_argument( "meq::NormalisedRotatingSource::setNormalisation: psi_ax must be finite and non-zero" );
+		// The SPAN is what must not vanish, not psi_ax; see
+		// meq::NormalisedSource for why that generalisation is FB-3's.
+		if ( !std::isfinite( psiAxis ) || !std::isfinite( psiBoundary )
+		     || psiAxis == psiBoundary )
+			throw std::invalid_argument( "meq::NormalisedRotatingSource::setNormalisation: psi_ax and psi_bnd must be finite and must differ" );
 
 		psiAxisValue = psiAxis;
+		psiBoundaryValue = psiBoundary;
+	}
+
+	double NormalisedRotatingSource::boundaryNormalisation() const
+	{
+		return psiBoundaryValue;
 	}
 
 	double NormalisedRotatingSource::normalisation() const
@@ -648,7 +658,8 @@ namespace meq
 	{
 		// One factor of 1/psi_ax, because the profiles are functions of Psi and
 		// F is a psi-derivative of what they build.
-		return inner.f( r, z, psi/psiAxisValue )/psiAxisValue;
+		double const span = psiAxisValue - psiBoundaryValue;
+		return inner.f( r, z, ( psi - psiBoundaryValue )/span )/span;
 	}
 
 	double NormalisedRotatingSource::dFdPsi( double r, double z, double psi ) const
@@ -656,22 +667,24 @@ namespace meq
 		// TWO factors, not one: the chain rule supplies a second whenever another
 		// psi-derivative is taken. meq::NormalisedMHDSource carries the same
 		// asymmetry, and RotatingSourceTests checks it against a difference.
-		return inner.dFdPsi( r, z, psi/psiAxisValue )/( psiAxisValue*psiAxisValue );
+		double const span = psiAxisValue - psiBoundaryValue;
+		return inner.dFdPsi( r, z, ( psi - psiBoundaryValue )/span )/( span*span );
 	}
 
 	double NormalisedRotatingSource::potential( double r, double psi ) const
 	{
-		return inner.potential( r, psi/psiAxisValue );
+		return inner.potential( r, ( psi - psiBoundaryValue )/( psiAxisValue - psiBoundaryValue ) );
 	}
 
 	double NormalisedRotatingSource::density( std::size_t index, double r, double psi ) const
 	{
-		return inner.density( index, r, psi/psiAxisValue );
+		return inner.density( index, r,
+		                      ( psi - psiBoundaryValue )/( psiAxisValue - psiBoundaryValue ) );
 	}
 
 	double NormalisedRotatingSource::pressure( double r, double psi ) const
 	{
-		return inner.pressure( r, psi/psiAxisValue );
+		return inner.pressure( r, ( psi - psiBoundaryValue )/( psiAxisValue - psiBoundaryValue ) );
 	}
 
 	RotatingSource const & NormalisedRotatingSource::unnormalised() const

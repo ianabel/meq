@@ -58,15 +58,28 @@ namespace meq
 		setNormalisation( psiAxis );
 	}
 
-	void NormalisedMHDSource::setNormalisation( double psiAxis )
+	void NormalisedMHDSource::setNormalisation( double psiAxis, double psiBoundary )
 	{
 		// Loudly rather than by returning infinities. A solver whose iterate has
-		// reached psi_ax = 0 has left the branch, and the degenerate fixed point
-		// where psi and psi_ax shrink together is exactly the failure this class
-		// exists to make impossible -- so it has to be a throw and not a floor.
-		if ( !std::isfinite( psiAxis ) || psiAxis == 0.0 )
-			throw std::invalid_argument( "meq::NormalisedMHDSource::setNormalisation: psi_ax must be finite and non-zero" );
+		// collapsed the SPAN has left the branch, and the degenerate fixed point
+		// where psi and the span shrink together is exactly the failure this
+		// class exists to make impossible -- so it has to be a throw and not a
+		// floor.
+		//
+		// THE TEST IS ON THE SPAN AND NOT ON psi_ax, which is the generalisation
+		// FB-3 needs: with psi_bnd = 0 the two coincide, and with psi_bnd set
+		// they do not. psi_ax = 0 is perfectly admissible once the boundary flux
+		// is non-zero -- it is psi_ax = psi_bnd that is not.
+		if ( !std::isfinite( psiAxis ) || !std::isfinite( psiBoundary )
+		     || psiAxis == psiBoundary )
+			throw std::invalid_argument( "meq::NormalisedMHDSource::setNormalisation: psi_ax and psi_bnd must be finite and must differ" );
 		psiAxisValue = psiAxis;
+		psiBoundaryValue = psiBoundary;
+	}
+
+	double NormalisedMHDSource::boundaryNormalisation() const
+	{
+		return psiBoundaryValue;
 	}
 
 	double NormalisedMHDSource::normalisation() const
@@ -76,20 +89,25 @@ namespace meq
 
 	double NormalisedMHDSource::f( double r, double, double psi ) const
 	{
-		double const psiN = psi/psiAxisValue;
+		// Psi = ( psi - psi_bnd )/span, and the profiles are differentiated with
+		// respect to Psi, so F carries one factor of 1/span. With psi_bnd = 0
+		// the span IS psi_ax and this is the expression it always was.
+		double const span = psiAxisValue - psiBoundaryValue;
+		double const psiN = ( psi - psiBoundaryValue )/span;
 		return ( permeability*r*r*( *pPrimeProfile )( psiN ) + ( *ggPrimeProfile )( psiN ) )
-		       /psiAxisValue;
+		       /span;
 	}
 
 	double NormalisedMHDSource::dFdPsi( double r, double, double psi ) const
 	{
-		// Two factors of 1/psi_ax, not one: the profiles are differentiated with
-		// respect to Psi and the argument carries a further 1/psi_ax. Dropping the
+		// Two factors of 1/span, not one: the profiles are differentiated with
+		// respect to Psi and the argument carries a further 1/span. Dropping the
 		// second is the classic error here, and it does not move the converged
 		// answer -- only the convergence to it.
-		double const psiN = psi/psiAxisValue;
+		double const span = psiAxisValue - psiBoundaryValue;
+		double const psiN = ( psi - psiBoundaryValue )/span;
 		return ( permeability*r*r*pPrimeProfile->prime( psiN ) + ggPrimeProfile->prime( psiN ) )
-		       /( psiAxisValue*psiAxisValue );
+		       /( span*span );
 	}
 
 	Profile const & NormalisedMHDSource::pPrime() const
