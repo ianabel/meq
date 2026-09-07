@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -1057,4 +1058,343 @@ BOOST_AUTO_TEST_CASE( cedres_boundary_form_is_diagonal_in_this_basis )
 	            "or the ( r1 r2 )^( 3/2 ) exponent, before suspecting the "
 	            "separation of variables -- both are transcription errors that "
 	            "converge to a wrong answer" );
+}
+
+/*
+ * THE DECAY DIAGNOSTIC, AND THE MISREADING IT EXISTS TO PREVENT.
+ *
+ * FREE-BOUNDARY-PLAN.md section 11.6 asks for a readable spectrum, on the
+ * grounds that the raw coefficients are not one: the modes are orthogonal in
+ * dGamma/r but NOT normalised in it, so mode n contributes
+ * | a_n | sqrt( mass( n ) ) to the trace's norm rather than | a_n |, and
+ * mass( n ) ~ 1/n^3 makes that conversion factor ~ n^( -3/2 ).
+ *
+ * SO THIS TEST IS NOT ABOUT ARITHMETIC. Checking | a_n | sqrt( mass( n ) )
+ * against | a_n | sqrt( mass( n ) ) would pass with the diagnostic doing
+ * nothing useful. What has to be demonstrated is the DIVERGENCE OF THE TWO
+ * VIEWS -- that raw and energy spectra disagree about which way the tail is
+ * going -- and that is what the two constructed vectors below do:
+ *
+ *   1. raw coefficients all EQUAL. This is the picture that looks like a
+ *      truncation going nowhere. In energy it is already falling like
+ *      n^( -3/2 ), and truncationRatio() must report it as small.
+ *   2. energy amplitudes all EQUAL. This is the genuinely unconverged case --
+ *      the last mode carrying as much as the first -- and its raw coefficients
+ *      GROW like n^( +3/2 ), which no reader would mistake for convergence but
+ *      which a reader of raw numbers would also not recognise as the FLAT
+ *      spectrum it is.
+ *
+ * The raw view is therefore wrong in both directions, and it is reassuring in
+ * the one that matters. That is the finding, and the assertions below are its
+ * statement.
+ *
+ * A NOTE ON A DIRECTION THAT IS EASY TO GET BACKWARDS. sqrt( mass( n ) )
+ * DECREASES with n, so it maps flat-raw onto decaying-energy and NOT the other
+ * way round. Getting this the wrong way about would invert the advice the
+ * diagnostic gives, so case (2) is carried specifically to pin the sign of the
+ * effect from the other end.
+ */
+BOOST_AUTO_TEST_CASE( the_energy_spectrum_and_the_raw_one_disagree_about_the_tail )
+{
+	int const spectrumModes = 10;
+	ExteriorDtN const dtn( 0.0, rhoGamma, spectrumModes );
+
+	// ---- (1) FLAT RAW: every coefficient the same ------------------------
+	std::vector<double> const flatRaw(
+		static_cast<std::size_t>( spectrumModes ), 1.0 );
+	std::vector<double> const flatRawEnergy = dtn.modeAmplitudes( flatRaw );
+
+	std::printf( "\n  a FLAT RAW spectrum, read both ways\n" );
+	std::printf( "    %4s %14s %16s %14s\n", "n", "raw |a_n|",
+	             "energy amplitude", "n^( -3/2 )" );
+	for ( int i = 0; i < spectrumModes; ++i )
+	{
+		int const n = ExteriorDtN::firstMode() + i;
+		std::size_t const k = static_cast<std::size_t>( i );
+		std::printf( "    %4d %14.6e %16.6e %14.6e\n",
+		             n, flatRaw[ k ], flatRawEnergy[ k ],
+		             std::pow( static_cast<double>( n ), -1.5 ) );
+	}
+	std::fflush( stdout );
+
+	// The energy spectrum falls MONOTONELY while the raw one does not move at
+	// all. This is the whole claim.
+	for ( int i = 1; i < spectrumModes; ++i )
+		BOOST_TEST( flatRawEnergy[ static_cast<std::size_t>( i ) ]
+		            < flatRawEnergy[ static_cast<std::size_t>( i - 1 ) ],
+		            "the energy amplitude did not fall from mode "
+		            << ExteriorDtN::firstMode() + i - 1 << " to "
+		            << ExteriorDtN::firstMode() + i
+		            << " on a FLAT raw spectrum. sqrt( mass( n ) ) decreases "
+		            "with n, so it must -- if this fails the conversion factor "
+		            "has the wrong sign of exponent and the diagnostic's advice "
+		            "is inverted" );
+
+	// AND IT IS THE n^( -3/2 ) OF THE PLAN, not merely some decay. mass( n )
+	// is exactly 2/( n( n-1 )( 2n-1 ) ), which is asymptotically 1/n^3, so the
+	// ratio of the amplitude to n^( -3/2 ) must SETTLE rather than drift.
+	double const tailRatioFirst =
+		flatRawEnergy[ 0 ]
+		/std::pow( static_cast<double>( ExteriorDtN::firstMode() ), -1.5 );
+	double const tailRatioLast =
+		flatRawEnergy[ static_cast<std::size_t>( spectrumModes - 1 ) ]
+		/std::pow( static_cast<double>( dtn.lastMode() ), -1.5 );
+	std::printf( "    amplitude / n^( -3/2 ): %.6f at n = %d, %.6f at n = %d\n",
+	             tailRatioFirst, ExteriorDtN::firstMode(),
+	             tailRatioLast, dtn.lastMode() );
+	// Asserted as an APPROACH as well as a bound: the ratio tends to 1 like
+	// 1 + O( 1/n ), so a fixed tolerance is a statement about the mode count
+	// while the monotone approach is a statement about the mass.
+	BOOST_TEST( tailRatioLast < tailRatioFirst,
+	            "the ratio of the energy amplitude to n^( -3/2 ) did not move "
+	            "toward 1: " << tailRatioLast << " at n = " << dtn.lastMode()
+	            << " against " << tailRatioFirst << " at n = "
+	            << ExteriorDtN::firstMode() );
+	BOOST_TEST( std::fabs( tailRatioLast - 1.0 ) < 0.1,
+	            "the energy amplitude of a flat raw spectrum is not asymptotic "
+	            "to n^( -3/2 ): the ratio reads " << tailRatioLast
+	            << " at n = " << dtn.lastMode()
+	            << " where it should approach 1. mass( n ) ~ 1/n^3 is what makes "
+	            "sqrt( mass( n ) ) ~ n^( -3/2 ), so a departure here is a "
+	            "departure in the mass. The approach is O( 1/n ), so raise the "
+	            "mode count before loosening this" );
+
+	// The truncation looks CONVERGED in energy, which a reader of the raw
+	// numbers -- all exactly 1.0 -- would have concluded the opposite of.
+	double const flatRawTruncation = dtn.truncationRatio( flatRaw );
+	std::printf( "    truncation ratio: %.4e  ( raw coefficients are all 1.0 )\n",
+	             flatRawTruncation );
+	BOOST_TEST( flatRawTruncation < 0.2,
+	            "a flat RAW spectrum reports a truncation ratio of "
+	            << flatRawTruncation << ", which is not the small number its "
+	            "energy content deserves. This is the misreading section 11.6 "
+	            "exists to remove: flat raw IS decaying energy" );
+
+	// ---- (2) FLAT ENERGY: the genuinely unconverged case -----------------
+	//
+	// Built by INVERTING the diagnostic -- a_n = 1/sqrt( mass( n ) ) -- so that
+	// the energy amplitudes come out identically 1 and the raw coefficients are
+	// whatever that costs.
+	std::vector<double> flatEnergy(
+		static_cast<std::size_t>( spectrumModes ), 0.0 );
+	for ( int i = 0; i < spectrumModes; ++i )
+		flatEnergy[ static_cast<std::size_t>( i ) ] =
+			1.0/std::sqrt( dtn.mass( ExteriorDtN::firstMode() + i ) );
+
+	std::vector<double> const flatEnergyAmplitudes =
+		dtn.modeAmplitudes( flatEnergy );
+
+	std::printf( "\n  a FLAT ENERGY spectrum, read both ways\n" );
+	std::printf( "    %4s %14s %16s\n", "n", "raw |a_n|", "energy amplitude" );
+	for ( int i = 0; i < spectrumModes; ++i )
+		std::printf( "    %4d %14.6e %16.6e\n",
+		             ExteriorDtN::firstMode() + i,
+		             flatEnergy[ static_cast<std::size_t>( i ) ],
+		             flatEnergyAmplitudes[ static_cast<std::size_t>( i ) ] );
+	std::fflush( stdout );
+
+	for ( int i = 0; i < spectrumModes; ++i )
+		BOOST_TEST( std::fabs( flatEnergyAmplitudes[ static_cast<std::size_t>( i ) ]
+		                       - 1.0 ) < 1.0e-14,
+		            "inverting the diagnostic did not reproduce a flat energy "
+		            "spectrum at mode " << ExteriorDtN::firstMode() + i << ": "
+		            << flatEnergyAmplitudes[ static_cast<std::size_t>( i ) ]
+		            << " against 1" );
+
+	// AND ITS RAW COEFFICIENTS GROW, which is the other end of the same fact.
+	for ( int i = 1; i < spectrumModes; ++i )
+		BOOST_TEST( flatEnergy[ static_cast<std::size_t>( i ) ]
+		            > flatEnergy[ static_cast<std::size_t>( i - 1 ) ],
+		            "a flat ENERGY spectrum did not have growing raw "
+		            "coefficients at mode " << ExteriorDtN::firstMode() + i );
+
+	// The truncation is NOT converged here, and says so -- the last mode
+	// carries exactly as much as the first.
+	double const flatEnergyTruncation = dtn.truncationRatio( flatEnergy );
+	std::printf( "    truncation ratio: %.4f  ( energy amplitudes are all 1.0 )\n",
+	             flatEnergyTruncation );
+	BOOST_TEST( std::fabs( flatEnergyTruncation - 1.0 ) < 1.0e-14,
+	            "a spectrum carrying equal energy in every mode reported a "
+	            "truncation ratio of " << flatEnergyTruncation
+	            << " rather than 1. That is the unconverged case and the "
+	            "diagnostic has to name it" );
+
+	// ---- AND THE TWO VIEWS ARE FAR APART, WHICH IS THE POINT -------------
+	//
+	// If they agreed to within a modest factor the diagnostic would be a
+	// refinement rather than a correction, and this test would not be worth
+	// its cost.
+	double const rawSpread = flatEnergy.back()/flatEnergy.front();
+	std::printf( "\n    over %d modes the two views differ by a factor of %.1f\n",
+	             spectrumModes, rawSpread );
+	BOOST_TEST( rawSpread > 10.0,
+	            "raw and energy readings of the same spectrum differ by only "
+	            << rawSpread << " over " << spectrumModes << " modes, so the "
+	            "diagnostic is not correcting anything worth correcting" );
+}
+
+/*
+ * THE NORM, AND THE TWO DEGENERATE ANSWERS THAT MUST NOT BE NaN.
+ *
+ * traceNorm() is asserted against the orthogonality relation computed
+ * INDEPENDENTLY here -- sqrt( sum a_n^2 mass( n ) ) written out by hand -- and
+ * against the plain Euclidean norm of `a`, which is what a caller who ignores
+ * the weight would reach for. The second is the control: if the two agreed,
+ * the method would be doing nothing.
+ *
+ * The degenerate cases are the ones a driver actually meets. A coupled Newton
+ * STARTS with every exterior coefficient at zero, so a diagnostic that printed
+ * NaN there would print NaN on the first line of every free-boundary run.
+ */
+BOOST_AUTO_TEST_CASE( the_trace_norm_carries_the_weight_and_degrades_gracefully )
+{
+	ExteriorDtN const dtn = standard();
+
+	std::vector<double> a( static_cast<std::size_t>( modes ), 0.0 );
+	for ( int i = 0; i < modes; ++i )
+		a[ static_cast<std::size_t>( i ) ] = 1.0/static_cast<double>( i + 1 );
+
+	// The orthogonality relation, written out here rather than called.
+	double expected = 0.0;
+	for ( int i = 0; i < modes; ++i )
+	{
+		double const value = a[ static_cast<std::size_t>( i ) ];
+		expected += value*value*dtn.mass( ExteriorDtN::firstMode() + i );
+	}
+	expected = std::sqrt( expected );
+
+	double euclidean = 0.0;
+	for ( double value : a )
+		euclidean += value*value;
+	euclidean = std::sqrt( euclidean );
+
+	std::printf( "\n  the trace norm in dGamma/r: %.10e\n", dtn.traceNorm( a ) );
+	std::printf( "    against the orthogonality relation: %.10e\n", expected );
+	std::printf( "    against a plain Euclidean norm:     %.10e  ( the control )\n",
+	             euclidean );
+	std::fflush( stdout );
+
+	BOOST_TEST( std::fabs( dtn.traceNorm( a ) - expected )
+	            < 1.0e-14*std::fabs( expected ),
+	            "traceNorm() is not sqrt( sum a_n^2 mass( n ) )" );
+
+	BOOST_TEST( std::fabs( dtn.traceNorm( a ) - euclidean ) > 0.1*euclidean,
+	            "the weighted norm agrees with the unweighted one to within "
+	            "10%, so the weight is not being applied and every amplitude "
+	            "above is a plain coefficient wearing a different name" );
+
+	// ---- degenerate: all zero -------------------------------------------
+	std::vector<double> const zero( static_cast<std::size_t>( modes ), 0.0 );
+	BOOST_TEST( dtn.traceNorm( zero ) == 0.0 );
+	BOOST_TEST( dtn.truncationRatio( zero ) == 0.0,
+	            "an all-zero coefficient vector -- the state a coupled Newton "
+	            "starts from -- did not report a truncation ratio of 0. It must "
+	            "be printable rather than NaN" );
+
+	// ---- degenerate: one mode -------------------------------------------
+	ExteriorDtN const single( 0.0, rhoGamma, 1 );
+	std::vector<double> const one( 1, 3.0 );
+	BOOST_TEST( single.truncationRatio( one ) == 1.0,
+	            "with a single mode the last IS the largest, so the honest "
+	            "answer is 1 -- there is no evidence of decay to report" );
+
+	// ---- and the size contract ------------------------------------------
+	std::vector<double> const tooFew( static_cast<std::size_t>( modes - 1 ), 1.0 );
+	BOOST_CHECK_THROW( dtn.modeAmplitudes( tooFew ), std::invalid_argument );
+	BOOST_CHECK_THROW( dtn.traceNorm( tooFew ), std::invalid_argument );
+	BOOST_CHECK_THROW( dtn.truncationRatio( tooFew ), std::invalid_argument );
+}
+
+/*
+ * THE DIAGNOSTIC ON A REAL SPECTRUM, WHICH IS WHERE IT HAS TO EARN ITS PLACE.
+ *
+ * the_spectrum_falls_geometrically_and_faster_from_further_out already
+ * establishes that a current loop's RAW coefficients fall as Gamma moves out.
+ * This asks the question a caller actually has: at a given rho_Gamma, is N
+ * enough? The truncation ratio must fall as Gamma moves outward, because the
+ * spectrum does -- and it must do so read in energy, which is the only reading
+ * that means anything.
+ */
+BOOST_AUTO_TEST_CASE( the_truncation_ratio_falls_as_gamma_moves_outward )
+{
+	using meq::analytic::CurrentLoop;
+	CurrentLoop const loop = CurrentLoop::unitFlux();
+
+	// THE ODD MODES ARE IDENTICALLY ZERO HERE AND THAT IS THE HAZARD THIS
+	// CASE EXPOSED. The loop is centred on z = zCentre, so its trace is even in
+	// mu, and C_n( -mu ) = ( -1 )^n C_n( mu ) makes every odd coefficient
+	// vanish by SYMMETRY rather than by convergence. Twelve modes are degrees
+	// 2..13, so the last is the odd 13 -- and a truncation summary reading the
+	// last mode alone reported 0.000e+00 at every radius below while the raw
+	// spectrum moved six orders. That is asserted first, because it is the
+	// property the summary has to survive.
+	std::printf( "\n  a unit loop is EVEN in mu: the odd modes vanish by parity\n" );
+	{
+		ExteriorDtN const dtn( 0.0, 2.5, 12 );
+		auto trace = [ &loop ]( double r, double z ) { return loop.psi( r, z ); };
+		std::vector<double> const a = dtn.coefficients( trace );
+		std::vector<double> const amplitudes = dtn.modeAmplitudes( a );
+
+		double worstOdd = 0.0;
+		double smallestEven = std::numeric_limits<double>::max();
+		for ( int i = 0; i < dtn.modeCount(); ++i )
+		{
+			double const value = amplitudes[ static_cast<std::size_t>( i ) ];
+			if ( ( ExteriorDtN::firstMode() + i ) % 2 == 0 )
+				smallestEven = std::min( smallestEven, value );
+			else
+				worstOdd = std::max( worstOdd, value );
+		}
+		std::printf( "    largest ODD amplitude %.3e, smallest EVEN %.3e\n",
+		             worstOdd, smallestEven );
+		std::fflush( stdout );
+
+		BOOST_TEST( worstOdd < 1.0e-12*smallestEven,
+		            "the odd modes of an up-down symmetric trace are not zero: "
+		            "largest is " << worstOdd << " against a smallest even mode "
+		            "of " << smallestEven << ". If this fails, the parity "
+		            "C_n( -mu ) = ( -1 )^n C_n( mu ) is broken and the basis is "
+		            "wrong, not the diagnostic" );
+
+		BOOST_TEST( dtn.truncationRatio( a ) > 0.0,
+		            "truncationRatio() returned exactly zero on an up-down "
+		            "symmetric trace whose LAST retained degree is odd and so "
+		            "identically absent. Zero reads as perfectly converged, and "
+		            "half of all mode counts land on the absent parity -- which "
+		            "is why the summary takes the larger of the last TWO "
+		            "amplitudes rather than the last" );
+	}
+
+	std::printf( "\n  a unit loop: is N = 12 enough, by distance of Gamma?\n" );
+	std::printf( "    %8s %14s %14s %16s\n", "rhoGamma", "raw |a_12/a_2|",
+	             "trace norm", "truncation ratio" );
+
+	std::vector<double> ratios;
+	for ( double radius : { 2.0, 2.5, 4.0, 8.0 } )
+	{
+		ExteriorDtN const dtn( 0.0, radius, 12 );
+		auto trace = [ &loop ]( double r, double z ) { return loop.psi( r, z ); };
+		std::vector<double> const a = dtn.coefficients( trace );
+
+		double const rawRatio = std::fabs( a[ 10 ] )/std::fabs( a[ 0 ] );
+		double const ratio = dtn.truncationRatio( a );
+		ratios.push_back( ratio );
+
+		std::printf( "    %8.1f %14.3e %14.3e %16.3e\n",
+		             radius, rawRatio, dtn.traceNorm( a ), ratio );
+	}
+	std::fflush( stdout );
+
+	for ( std::size_t i = 1; i < ratios.size(); ++i )
+		BOOST_TEST( ratios[ i ] < ratios[ i - 1 ],
+		            "the truncation ratio did not fall when Gamma moved outward "
+		            "at step " << i << ": " << ratios[ i ] << " against "
+		            << ratios[ i - 1 ] << ". That is the trade a caller makes "
+		            "between rho_Gamma and N, and this is the number they read "
+		            "it off" );
+
+	BOOST_TEST( ratios.back() < 1.0e-6,
+	            "twelve modes seen from eight loop radii leave "
+	            << ratios.back() << " of the spectrum at the truncation, which "
+	            "is not converged" );
 }

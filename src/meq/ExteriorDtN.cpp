@@ -3,6 +3,7 @@
 #include <boost/math/quadrature/gauss.hpp>
 #include <boost/math/special_functions/legendre.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <stdexcept>
 #include <string>
@@ -264,14 +265,21 @@ namespace meq
 		return -symbol( n )*mass( n );
 	}
 
-	double ExteriorDtN::exterior( double r, double z,
-	                              std::vector<double> const &a ) const
+	void ExteriorDtN::requireCoefficients( std::vector<double> const &a,
+	                                       char const *method ) const
 	{
 		if ( static_cast<int>( a.size() ) != modeCountValue )
 			throw std::invalid_argument(
-				"meq::ExteriorDtN::exterior: expected " + std::to_string( modeCountValue )
+				std::string( "meq::ExteriorDtN::" ) + method + ": expected "
+				+ std::to_string( modeCountValue )
 				+ " coefficients, one per mode, but was given "
 				+ std::to_string( a.size() ) );
+	}
+
+	double ExteriorDtN::exterior( double r, double z,
+	                              std::vector<double> const &a ) const
+	{
+		requireCoefficients( a, "exterior" );
 
 		double mu = 0.0;
 		double rho = 0.0;
@@ -345,6 +353,108 @@ namespace meq
 				GaussRule::integrate( integrand, -1.0, 1.0 )/mass( n );
 		}
 		return out;
+	}
+
+	/*
+	 * THE DECAY DIAGNOSTIC, AND WHY A RAW COEFFICIENT IS THE WRONG THING TO
+	 * PRINT.
+	 *
+	 * The modes are orthogonal in dGamma/r but not orthoNORMAL: mode n has norm
+	 * sqrt( mass( n ) ) rather than 1, so the trace decomposes as
+	 *
+	 *     || sum a_n C_n ||^2 = sum a_n^2 mass( n )
+	 *
+	 * and what mode n actually contributes is | a_n | sqrt( mass( n ) ). With
+	 * mass( n ) = 2/( n( n - 1 )( 2n - 1 ) ) ~ 1/n^3, that conversion factor is
+	 * ~ n^( -3/2 ) -- a strong decay in its own right, and one a reader of the
+	 * raw numbers has no way to see.
+	 *
+	 * SO THE RAW VIEW IS WRONG IN BOTH DIRECTIONS, AND IT IS REASSURING IN THE
+	 * ONE THAT MATTERS. Raw coefficients that look FLAT -- the picture of a
+	 * truncation going nowhere -- are an energy spectrum already falling like
+	 * n^( -3/2 ); raw coefficients that look like they are GROWING at n^( 3/2 )
+	 * are the flat-in-energy case, which is the genuinely unconverged one. A
+	 * caller reading raw a_n therefore worries about the healthy case and is
+	 * comforted by the sick one.
+	 *
+	 * The measured stake, from FREE-BOUNDARY-PLAN.md section 11.6: on section
+	 * 7.16's machine case N = 6 costs 0.3% in psi_ax and N = 10 is converged.
+	 * That is a small enough margin that it has to be read off an honest
+	 * quantity rather than eyeballed.
+	 */
+	std::vector<double> ExteriorDtN::modeAmplitudes(
+		std::vector<double> const &a ) const
+	{
+		requireCoefficients( a, "modeAmplitudes" );
+
+		std::vector<double> out( static_cast<std::size_t>( modeCountValue ), 0.0 );
+		for ( int i = 0; i < modeCountValue; ++i )
+		{
+			std::size_t const k = static_cast<std::size_t>( i );
+			out[ k ] = std::fabs( a[ k ] )*std::sqrt( mass( firstMode() + i ) );
+		}
+		return out;
+	}
+
+	double ExteriorDtN::traceNorm( std::vector<double> const &a ) const
+	{
+		requireCoefficients( a, "traceNorm" );
+
+		// The root-sum-square of the amplitudes, which by the orthogonality
+		// above IS the L2( dGamma/r ) norm of the trace. Accumulated from the
+		// amplitudes rather than from a_n^2 mass( n ) directly so that the two
+		// cannot drift apart: this is the same arithmetic modeAmplitudes()
+		// does, and it should stay that way.
+		std::vector<double> const amplitudes = modeAmplitudes( a );
+
+		double sum = 0.0;
+		for ( double value : amplitudes )
+			sum += value*value;
+		return std::sqrt( sum );
+	}
+
+	/*
+	 * THE TAIL IS THE LAST TWO MODES AND NOT THE LAST ONE, AND THAT IS A
+	 * PARITY FACT RATHER THAN A HEDGE.
+	 *
+	 * C_n( -mu ) = ( -1 )^n C_n( mu ), so an UP-DOWN SYMMETRIC trace -- which
+	 * is the ordinary tokamak case, and every current loop centred on
+	 * z = zCentre -- has identically zero coefficients in every odd mode. Half
+	 * the spectrum is exactly 0 by symmetry rather than by convergence.
+	 *
+	 * A summary reading amplitudes.back() alone therefore returns EXACTLY ZERO
+	 * whenever the last retained degree happens to be the absent parity, which
+	 * is half of all mode counts -- and zero reads as "perfectly converged".
+	 * Measured on a unit loop at four radii with twelve modes (degrees 2..13,
+	 * so the last is the odd 13): 0.000e+00 at every one of them, while the raw
+	 * ratio | a_12/a_2 | moved over six orders. The diagnostic would have been
+	 * silently useless on exactly the configurations MEQ is for.
+	 *
+	 * Two consecutive degrees always span both parities, so the largest of the
+	 * last two is the smallest robust answer and needs no symmetry argument
+	 * from the caller.
+	 */
+	double ExteriorDtN::truncationRatio( std::vector<double> const &a ) const
+	{
+		requireCoefficients( a, "truncationRatio" );
+
+		std::vector<double> const amplitudes = modeAmplitudes( a );
+
+		double largest = 0.0;
+		for ( double value : amplitudes )
+			largest = std::max( largest, value );
+
+		// A zero trace has no unresolved tail, and it is the state a coupled
+		// Newton starts from -- so this must be a number a driver can print
+		// rather than a NaN. See the header.
+		if ( !( largest > 0.0 ) )
+			return 0.0;
+
+		double tail = amplitudes.back();
+		if ( amplitudes.size() > 1 )
+			tail = std::max( tail, amplitudes[ amplitudes.size() - 2 ] );
+
+		return tail/largest;
 	}
 
 }

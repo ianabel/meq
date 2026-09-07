@@ -83,7 +83,7 @@ GGPrimeFile = "examples/fb-ggprime.dat"
 # spellings converge to something and only one of them is this file:
 #
 #   table over [ 0, 1 ]                    does NOT converge -- creeps at 0.99
-#   table over [ -0.6, 1.4 ], as here      7 Newton steps, psi_ax = 9.76e-02
+#   table over [ -0.6, 1.4 ], as here      7 Newton steps, psi_ax = 1.01e-01
 #   the same plus ConfineToPlasma = true   92 steps, psi_ax = 4.08e-01
 #
 # The third is a DIFFERENT BRANCH and not a better answer -- four times the
@@ -104,11 +104,25 @@ Type = "zero"
 #
 # MODES IS A TRUNCATION AND NOT A DISCRETISATION. The map is exact mode by mode,
 # so this is the only approximation in the whole exterior, and its error falls
-# spectrally in the smoothness of the trace on Gamma. Four is generous for a
-# plasma this centred; a strongly shaped one wants more.
+# spectrally in the smoothness of the trace on Gamma.
+#
+# THIS SAID "FOUR IS GENEROUS FOR A PLASMA THIS CENTRED" AND FOUR WAS NOT
+# ENOUGH. Measured 2026-09-07, sweeping Modes on this very file, psi_ax against
+# the most resolved run:
+#
+#   Modes      4        10       12       14       16       20       24
+#   psi_ax   9.759e-02 1.013e-01 1.004e-01 1.006e-01 1.0064e-01 1.0064e-01 1.0064e-01
+#   tail     6.8e-01  4.9e-01  1.0e-01  3.4e-02  7.4e-03  5.0e-04  9.3e-04
+#
+# so four was 3.1 PER CENT out and sixteen is converged to 8e-06. The run prints
+# `tail` -- the energy-normalised amplitude of the retained spectrum's last
+# modes over its largest -- and advises above 1e-1, which is about a per cent in
+# psi_ax. READ THAT LINE RATHER THAN THE RAW COEFFICIENTS: the exterior block is
+# diagonal in dGamma/r with a mass 2/( n( n-1 )( 2n-1 ) ), so a_n carries n^1.5
+# of its own and a spectrum that is DECAYING reads flat.
 Radius = 1.5
 CentreZ = 0.0
-Modes = 4
+Modes = 16
 
 # THE LIMITER IS ABSENT BECAUSE AN EXAMPLE SHOULD DEMONSTRATE ONE THING, AND
 # THIS COMMENT USED TO SAY SOMETHING STRONGER THAT IS NO LONGER TRUE.

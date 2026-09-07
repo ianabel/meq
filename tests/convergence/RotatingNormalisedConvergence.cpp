@@ -105,8 +105,18 @@ namespace
 	{
 		bool converged;
 		double psiAxis;
+		/// The largest NODAL value of psi_h. Since 2026-09-07 that is NOT what
+		/// psi_ax is constrained to equal -- see theNormalisationIsSelfConsistent
+		/// -- so this is kept as a measurement of the gap between the two
+		/// definitions rather than as the self-consistency statement.
 		double psiMax;
+		/// The solver's OWN constraint residual, which is what says the border
+		/// closed whichever definition is in force.
 		double constraint;
+		/// Whether psi_ax was constrained at a located O-point or fell back to
+		/// the nodal maximum. A silent fallback would make the gap below read
+		/// zero for a reason that has nothing to do with the field.
+		bool axisLocated;
 		int newtonIterations;
 		std::vector<double> residuals;
 		int traceDofs;
@@ -141,6 +151,7 @@ namespace
 		out.residuals = solver.newtonResiduals();
 		out.traceDofs = solver.numTraceDofs();
 		out.psiMax = out.converged ? solver.potential().Max() : 0.0;
+		out.axisLocated = solver.axisWasLocated();
 		return out;
 	}
 
@@ -163,30 +174,69 @@ BOOST_AUTO_TEST_CASE( theSourceDoesNotVanishOnTheTrivialBranch )
 	            "land on the trivial branch rather than on an equilibrium" );
 }
 
-/// The property the border exists to enforce. psi_ax is not an input here: it is
-/// an unknown, and the constraint psi_ax = max psi_h is the extra equation the
-/// bordered row supplies. If the border were doing nothing this would come back
-/// at the initial guess instead.
+/*
+ * The property the border exists to enforce. psi_ax is not an input here: it is
+ * an unknown, and the normalisation constraint is the extra equation the
+ * bordered row supplies. If the border were doing nothing this would come back
+ * at the initial guess instead.
+ *
+ * WHAT THAT CONSTRAINT IS CHANGED ON 2026-09-07 AND THIS CASE MOVED WITH IT. It
+ * used to be `psi_ax = max psi_h`, the largest NODAL value; it is now
+ * `psi_ax = psi_h( x* )` at the located magnetic axis, a zero of q_h --
+ * GradShafranovSolver::AxisConstraint, default LocatedAxis. So asserting
+ * psi_ax == max psi_h would now be comparing TWO DEFINITIONS rather than
+ * checking that the border closed, and what is asserted instead is
+ * normalisationResidual(): the solver's own G, which must be at round-off
+ * whichever point it is taken at.
+ *
+ * The gap between the two is still PRINTED, because it is worth seeing and
+ * because it is not what a reader expects: it is a few parts in 1e4 here, and
+ * it is NOT ONE-SIGNED -- psi_ax comes out below the nodal maximum at n = 8 and
+ * above it at n = 16 and 24. The two are not two readings of one field. psi_ax
+ * normalises the profiles, so the two constraints solve slightly different
+ * equations and their fields differ; neither is bracketed by the other.
+ * HighBetaConvergence's header measures the same thing at eight per cent on a
+ * stiff source.
+ */
 BOOST_AUTO_TEST_CASE( theNormalisationIsSelfConsistent )
 {
 	std::printf( "\n  Rotating source in normalised flux, k = 2\n" );
-	std::printf( "  %8s %9s %14s %14s %12s %7s\n",
-	             "h", "trace", "psi_ax", "max psi_h", "constraint", "Newton" );
+	std::printf( "  psi_ax is the flux at the LOCATED axis; the gap against the\n"
+	             "  largest nodal value is a measurement, not an identity\n" );
+	std::printf( "  %8s %9s %14s %14s %11s %12s %6s %7s\n",
+	             "h", "trace", "psi_ax", "max psi_h", "gap rel", "constraint",
+	             "axis", "Newton" );
 
 	for ( int n : { 8, 16, 24 } )
 	{
 		Solved const s = solve( rotationRate, 2, n );
 
-		std::printf( "  %8.5f %9d %14.6e %14.6e %12.3e %7d\n",
+		std::printf( "  %8.5f %9d %14.6e %14.6e %11.2e %12.3e %6s %7d\n",
 		             standardBox().width()/n, s.traceDofs, s.psiAxis, s.psiMax,
-		             s.psiAxis - s.psiMax, s.newtonIterations );
+		             std::fabs( s.psiAxis - s.psiMax )
+		                 /std::max( std::fabs( s.psiAxis ), 1.0e-300 ),
+		             s.constraint, s.axisLocated ? "found" : "NODAL",
+		             s.newtonIterations );
 		std::fflush( stdout );
 
 		BOOST_TEST( s.converged, "n = " << n << ": the bordered Newton did not converge" );
-		BOOST_TEST( std::fabs( s.psiAxis - s.psiMax ) < 1.0e-8*std::fabs( s.psiAxis ),
-		            "n = " << n << ": psi_ax = " << s.psiAxis << " but max psi_h = " << s.psiMax
-		            << ", so the normalisation constraint is not satisfied and the border "
-		            "is not closing the system" );
+
+		// The border's own equation. 1e-9 relative rather than round-off: under
+		// LocatedAxis the constraint point comes from a root search, so G bottoms
+		// out at that search's accuracy. A border that is not closing gives
+		// O( 1 ), so the headroom costs the assertion nothing.
+		BOOST_TEST( std::fabs( s.constraint ) < 1.0e-9*std::fabs( s.psiAxis ),
+		            "n = " << n << ": the normalisation constraint reads "
+		            << s.constraint << " against psi_ax = " << s.psiAxis
+		            << ", so the border is not closing the system" );
+
+		// AND IT WAS CONSTRAINED WHERE IT CLAIMS TO BE. Without this the
+		// assertion above would pass just as well on a silent fallback to the
+		// nodal maximum, which is a different equation.
+		BOOST_TEST( s.axisLocated,
+		            "n = " << n << ": psi_ax fell back to the largest nodal value "
+		            "because no O-point of q_h was reachable. This source is a "
+		            "single hump on a box, so there is one to find" );
 		BOOST_TEST( s.psiAxis > 0.0,
 		            "n = " << n << ": psi_ax = " << s.psiAxis << ", but F > 0 with a zero "
 		            "datum must give a positive psi by the maximum principle" );

@@ -100,9 +100,11 @@ Exit codes
        ``--help`` and ``--version`` also exit 0.
    * - ``1``
      - configuration error
-     - Nothing was attempted. The file was unreadable or invalid, a key was
-       wrong, the requested geometry could not be built, or the configuration
-       asked for something MEQ refuses (see below).
+     - The file was unreadable or invalid, a key was wrong, the requested
+       geometry could not be built, or the configuration asked for something
+       MEQ refuses (see below). Usually nothing was attempted; two of the
+       refusals can only be recognised *after* a solve, and those say so and
+       write nothing.
    * - ``2``
      - solve failed
      - The configuration was good and the nonlinear iteration did not converge,
@@ -130,8 +132,8 @@ polynomial degree, or supplying an initial guess.
 What MEQ refuses rather than approximates
 -----------------------------------------
 
-There is exactly one thing the driver could do approximately and declines to,
-and it exits 1 with an explanation:
+Four things the driver could do approximately and declines to. Each exits 1
+with an explanation.
 
 ``[boundary] Type = "exact"``
    asks for the boundary datum to be the exact solution of the problem. That
@@ -139,6 +141,51 @@ and it exits 1 with an explanation:
    carry one — a source is :math:`F` and :math:`\partial F/\partial\psi` and
    nothing else. Closed-form solutions exist in MEQ, but they live in the test
    fixtures, where they are the thing being converged *against*.
+
+a :math:`\psi_{\mathrm{ax}}` that is not the flux at a magnetic axis
+   :math:`\psi_{\mathrm{ax}}` is the largest *nodal* value of
+   :math:`\psi_h`, and nothing in that definition makes it an axis. Because it
+   is what the profiles are normalised by, a wrong one is not a bad number in
+   one field — it is a different equilibrium, with the current, the geometry and
+   every profile-derived quantity downstream of it. After a converged
+   normalised solve the driver locates the axis as a zero of :math:`q_h` and
+   checks the normalised flux there, which must be 1. Only a *positive*
+   detection refuses: the search is seeded rather than exhaustive and misses
+   rather than false-alarms, so finding no interior extremum at all is a
+   warning, not a refusal.
+
+a plasma that contains the symmetry axis
+   :math:`\psi(0, z) = 0` exactly, so the normalised flux on the axis is
+   :math:`-\psi_{\mathrm{bnd}}/(\psi_{\mathrm{ax}} - \psi_{\mathrm{bnd}})`,
+   and the plasma is wherever that is positive. A **tokamak** is a torus about
+   :math:`R_0 > 0` and its symmetry axis is in the vacuum, so a support
+   containing :math:`r = 0` is toroidal current threading the machine's own
+   centre line — not a large error but the wrong topology, and no refinement
+   turns it into the equilibrium ``[source]`` asks for.
+
+   **A levitated dipole or a magnetic mirror genuinely reaches the axis, and
+   this does not refuse those.** Neither has a toroidal field, so :math:`g`
+   vanishes identically in both — which is the same fact twice, since
+   :math:`B_\phi = g/r` must be finite on the axis and a plasma reaching
+   :math:`r = 0` therefore cannot carry a toroidal field there. So the test is
+   :math:`g g' \equiv 0`, checked across a spread of :math:`\Psi` rather than at
+   one value, and not a device name. If a dipole or a mirror is what you meant,
+   set ``GGPrime`` to zero and the run proceeds.
+
+a source that does not vanish on the symmetry axis
+   :math:`F/r` is :math:`\mu_0 j_\phi`, so a domain reaching :math:`r = 0`
+   needs :math:`F(0, z) = 0` or the toroidal current density is infinite there.
+   :math:`F = \mu_0 r^2 p' + g g'` leaves only :math:`g g'`, and
+   :math:`\psi(0, z) = 0` exactly, so the profiles are evaluated at
+   :math:`\Psi = -\psi_{\mathrm{bnd}}/(\psi_{\mathrm{ax}} -
+   \psi_{\mathrm{bnd}})`. With a fixed boundary that is zero and every profile
+   vanishes there; with ``[boundary.limiter]`` it is *negative* — in the vacuum,
+   where :math:`g` is constant and :math:`g g'` must be zero, and where an
+   unconfined profile extrapolates instead. Set
+   ``[source] ConfineToPlasma = true``, which is what says the vacuum carries no
+   current, or give a ``GGPrime`` that vanishes for :math:`\Psi \le 0`. This
+   one cannot be checked before the solve, because
+   :math:`\psi_{\mathrm{bnd}}` is an unknown of it.
 
 Everything else the driver rejects is a plain configuration error: a shape that
 encloses no element, a shape that touches the edge of the mesh box, an

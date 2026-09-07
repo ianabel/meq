@@ -56,6 +56,30 @@
  *
  * Both rungs are run healthy first, which is the half that says the guard does
  * not simply refuse everything.
+ *
+ * AND SINCE 2026-09-07 THE SOLVED RUNG IS PINNED TO THE OLD DEFINITION OF
+ * psi_ax, WHICH IS WHAT KEEPS IT A TEST OF THE GUARD.
+ *
+ * GradShafranovSolver::AxisConstraint now defaults to LocatedAxis: psi_ax is
+ * constrained AT a zero of q_h. Under that default Psi at the located axis is 1
+ * BY CONSTRUCTION, so a guard case run on it would be checking a solve against
+ * the formula it used -- and would pass while testing nothing. So
+ * theSolversOwnAxisFluxIsCheckedAgainstAZeroOfTheFlux asks for
+ * AxisConstraint::NodalMaximum explicitly, which is the configuration in which
+ * psi_ax CAN be wrong and in which the spiked-dof half means anything.
+ *
+ * theLocatedAxisConstraintPutsPsiAxisOnTheAxis is the separate case for the new
+ * default, and it asserts the things the construction does NOT give away: that
+ * the constraint really was applied at a located axis rather than falling back
+ * to the nodal maximum, and that the two definitions actually differ on this
+ * field -- without which everything else about it would be vacuous.
+ *
+ * WHICH IS NOT TO SAY THE GUARD IS EMPTY UNDER THE NEW DEFAULT. It re-locates
+ * the axis INDEPENDENTLY, by a full sweep taking the largest Psi, where the
+ * solver's constraint follows one root from a warm start -- and the two land on
+ * different elements' versions of it, an O( h^{k+1} ) apart. Measured here, the
+ * solver constrains at ( 1.0918, 0.0003 ) and the guard reports ( 1.0913,
+ * -0.0003 ), so Psi comes back at 0.99949 rather than at exactly 1.
  */
 
 namespace
@@ -330,6 +354,22 @@ BOOST_AUTO_TEST_CASE( aFieldWithNoInteriorExtremumHasNoAxisToAgreeWith )
  * quantity here rather than an argument, and CriticalPointFinder( solver ) takes
  * flux() and potential() itself, which is where handing it the raw block instead
  * would turn the maximum into a minimum.
+ *
+ * AND IT IS DRIVEN AT AxisConstraint::NodalMaximum DELIBERATELY, WHICH IS NOT
+ * THE SOLVER'S DEFAULT SINCE 2026-09-07.
+ *
+ * The default is now AxisConstraint::LocatedAxis: psi_ax is constrained AT a
+ * zero of q_h. Under it, Psi at the located axis is 1 by construction, so
+ * checkAxis().agrees is very nearly true whatever the field does -- the guard
+ * would be checking a solve against the formula it used, which is this tree's
+ * own recorded trap. A case that passed for that reason while looking like a
+ * test of the guard would be worse than no case.
+ *
+ * So this one pins the OLD definition, where psi_ax CAN be something that is not
+ * an axis, and it is the configuration the guard exists for: the spiked-dof half
+ * below depends on psi_ax being the largest nodal value, since that is exactly
+ * what the defect delivers. theLocatedAxisConstraintPutsPsiAxisOnTheAxis is the
+ * separate case for the new default, and it asserts a different thing.
  */
 BOOST_AUTO_TEST_CASE( theSolversOwnAxisFluxIsCheckedAgainstAZeroOfTheFlux )
 {
@@ -366,6 +406,11 @@ BOOST_AUTO_TEST_CASE( theSolversOwnAxisFluxIsCheckedAgainstAZeroOfTheFlux )
 		} );
 
 	meq::GradShafranovSolver solver( mesh, order );
+	// THE OLD DEFINITION, ON PURPOSE. See the header: under the default the
+	// guard's verdict is nearly self-referential, and the spike below needs
+	// psi_ax to BE the largest nodal value.
+	solver.setAxisConstraint(
+		meq::GradShafranovSolver::AxisConstraint::NodalMaximum );
 	solver.setSource( source, estimate );
 	solver.setBoundaryData( zero );
 	solver.setInitialGuess( guess );
@@ -438,4 +483,131 @@ BOOST_AUTO_TEST_CASE( theSolversOwnAxisFluxIsCheckedAgainstAZeroOfTheFlux )
 		"the located O-point's psi moved from " << healthy.axis.psi << " to "
 		<< bad.axis.psi << " when the POTENTIAL was spiked, which it can only do "
 		"if the spiked element is the axis element." );
+}
+
+/*
+ * THE NEW DEFAULT: psi_ax IS THE FLUX AT THE LOCATED AXIS, SO Psi THERE IS 1.
+ *
+ * AxisConstraint::LocatedAxis constrains psi_ax at a zero of q_h rather than at
+ * the largest nodal value of psi_h -- FREE-BOUNDARY-PLAN.md section 11.5,
+ * option 3. What that buys is that psi_ax MEANS the flux at a magnetic axis
+ * rather than merely being the largest number in the potential vector.
+ *
+ * WHAT THIS CASE CAN AND CANNOT ASSERT, SAID PLAINLY BECAUSE THE DISTINCTION IS
+ * THE WHOLE POINT OF SPLITTING IT FROM THE ONE ABOVE. Psi = 1 at the located
+ * axis is very nearly TRUE BY CONSTRUCTION here, so it is NOT evidence that the
+ * guard works -- theSolversOwnAxisFluxIsCheckedAgainstAZeroOfTheFlux is where
+ * that is measured, at the old definition, where psi_ax can be wrong. What this
+ * case is for is the two things the construction does NOT give for free:
+ *
+ *   * that the constraint was actually applied at a located axis rather than
+ *     falling back to the nodal maximum, which axisWasLocated() reports and
+ *     which a silent fallback would hide;
+ *   * that the two definitions DISAGREE on this field, which is what says the
+ *     choice is not cosmetic. If they agreed to round-off the constraint would
+ *     be doing nothing and Psi = 1 would prove nothing.
+ *
+ * The gap is small here because nu = 2 is a mild source on a resolved mesh;
+ * HighBetaConvergence's header measures the same gap at eight per cent on a
+ * stiff one, and records that the two constraints then converge to genuinely
+ * different equilibria.
+ */
+BOOST_AUTO_TEST_CASE( theLocatedAxisConstraintPutsPsiAxisOnTheAxis )
+{
+	int const order = 2;
+	int const n = 8;
+	int const nu = 2;
+	double const amplitude = 1.0;
+
+	meq::tests::Rectangle const box = standardBox();
+	double const width = box.rMax - box.rMin;
+	double const height = box.zMax - box.zMin;
+	double const lambda = M_PI*M_PI*( 1.0/( width*width ) + 1.0/( height*height ) );
+	double const estimate = std::sqrt( nu*amplitude/lambda );
+
+	mfem::Mesh mesh = meq::tests::makeMesh( box, n );
+	HighBetaPoloidal equilibrium =
+		HighBetaPoloidal::peaked( nu, amplitude, estimate );
+	NormalisedEquilibriumSource<HighBetaPoloidal> source( equilibrium );
+
+	mfem::ConstantCoefficient zero( 0.0 );
+	double const rMin = box.rMin;
+	double const zMin = box.zMin;
+	mfem::FunctionCoefficient guess(
+		[ estimate, rMin, zMin, width, height ]( mfem::Vector const &x )
+		{
+			return estimate*std::sin( M_PI*( x( 0 ) - rMin )/width )
+			       *std::sin( M_PI*( x( 1 ) - zMin )/height );
+		} );
+
+	meq::GradShafranovSolver solver( mesh, order );
+	// Explicit rather than relied upon: this case is ABOUT the choice, so a
+	// change of default must not silently turn it into a copy of the one above.
+	solver.setAxisConstraint(
+		meq::GradShafranovSolver::AxisConstraint::LocatedAxis );
+	solver.setSource( source, estimate );
+	solver.setBoundaryData( zero );
+	solver.setInitialGuess( guess );
+	solver.setNewtonControl( 1.0e-10, 1.0e-14, 40 );
+	solver.solve();
+
+	BOOST_REQUIRE( !solver.newtonResiduals().empty() );
+	BOOST_REQUIRE( solver.newtonResiduals().back() < 1.0e-8 );
+
+	double nodal = 0.0;
+	largestNodalDof( solver.potential(), nodal );
+
+	meq::CriticalPointFinder finder( solver );
+	meq::AxisAgreement const found =
+		finder.checkAxis( solver.psiAxis(), solver.psiBoundary() );
+
+	std::printf( "\n  the located-axis constraint, k = %d, n = %d, nu = %d, "
+	             "A = %.1f\n", order, n, nu, amplitude );
+	std::printf( "    psi_ax %13.6e at ( %.4f, %.4f ), largest nodal value "
+	             "%13.6e, gap %.2e relative\n",
+	             solver.psiAxis(), solver.axisR(), solver.axisZ(), nodal,
+	             std::abs( solver.psiAxis() - nodal )
+	                 /std::max( std::abs( solver.psiAxis() ), 1.0e-300 ) );
+	report( "solved", found );
+
+	// IT WAS CONSTRAINED WHERE IT SAYS. Without this every assertion below would
+	// pass just as well on a silent fallback to the nodal maximum.
+	BOOST_TEST( solver.axisWasLocated(),
+		"psi_ax fell back to the largest nodal value: no O-point of q_h was "
+		"reachable on a single-hump source over a box, where there is one." );
+
+	// The border still closes, at the new point. 1e-9 rather than round-off
+	// because the constraint point comes from a root search.
+	BOOST_TEST( std::abs( solver.normalisationResidual() )
+	            < 1.0e-9*std::abs( solver.psiAxis() ),
+		"the normalisation constraint reads " << solver.normalisationResidual()
+		<< " against psi_ax = " << solver.psiAxis() );
+
+	BOOST_TEST( found.located,
+		"no O-point of q_h was found by checkAxis() on a field the solver just "
+		"constrained AT one." );
+
+	// Psi = 1 at the axis. Nearly true by construction -- see the header -- so
+	// this is a consistency check between the constraint and the guard, not
+	// evidence that the guard works.
+	BOOST_TEST( found.agrees,
+		"the guard refuses a solve whose psi_ax was constrained AT a zero of "
+		"q_h, reading Psi = " << found.normalisedFlux << " where 1 is expected. "
+		"The two disagree about WHICH O-point, or about the field." );
+
+	// AND THE CHOICE IS NOT COSMETIC. If the located axis and the nodal maximum
+	// agreed to round-off, the constraint would be doing nothing and everything
+	// above would be vacuous. The gap is O( h^2 ) and small on this mild source;
+	// what is ruled out is that it is zero.
+	double const gap = std::abs( solver.psiAxis() - nodal )
+	                   /std::max( std::abs( solver.psiAxis() ), 1.0e-300 );
+	BOOST_TEST( gap > 1.0e-6,
+		"psi_ax and the largest nodal value agree to " << gap << " relative, so "
+		"this case cannot distinguish the two constraints and proves nothing "
+		"about either." );
+	BOOST_TEST( gap < 1.0e-2,
+		"psi_ax and the largest nodal value differ by " << gap << " relative on "
+		"a MILD source at nu = 2, where the gap should be the O( h^2 ) distance "
+		"between two definitions. A gap this large means the located search is "
+		"following something that is not the peak." );
 }

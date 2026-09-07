@@ -47,6 +47,44 @@
  * GradShafranovSolver::setSource( NormalisedSource &, double ) -- a bordered
  * Newton whose extra row and column ARE the non-local terms. That is what these
  * tests measure.
+ *
+ * AND WHAT psi_ax IS CONSTRAINED TO BE CHANGED ON 2026-09-07, WHICH MOVED THE
+ * TABLE BELOW BY UP TO EIGHT PER CENT. It used to be the largest NODAL value of
+ * psi_h; it is now the flux at the LOCATED magnetic axis, a zero of q_h --
+ * GradShafranovSolver::AxisConstraint, default LocatedAxis, with NodalMaximum
+ * kept as the control. FREE-BOUNDARY-PLAN.md section 11.5 is the account.
+ *
+ * THE CONSEQUENCE FOR THESE TESTS IS NOT COSMETIC AND IT IS WHY SEVERAL
+ * ASSERTIONS HERE MOVED. `psi_ax == max psi_h` used to be the self-consistency
+ * statement; under the new definition it is a comparison between TWO DEFINITIONS
+ * and it is NOT an identity. Worse, the two do not merely read one field
+ * differently -- psi_ax NORMALISES the profiles, so changing it changes the
+ * equation and the two constraints converge to DIFFERENT EQUILIBRIA. Measured
+ * here at k = 2, n = 8:
+ *
+ *   nu = 2   the two agree to about 1e-3 relative, on every amplitude
+ *   nu = 4   they differ by 7.6e-02 relative
+ *
+ * and the gap converges under refinement -- 7.63e-02, 1.94e-03, 7.63e-04 at
+ * n = 8, 16, 32 for nu = 4, A = 1 -- so it is an UNDER-RESOLUTION effect
+ * amplified by a stiff source ( |dF/dpsi|/lambda_1 is 13 to 14 at nu = 4 ) and
+ * not a disagreement about the equation.
+ *
+ * WHY THE NODAL MAXIMUM IS THE WRONG ONE, MEASURED RATHER THAN ASSERTED. At
+ * nu = 4, n = 8 the field has EXACTLY ONE maximum -- sweep() finds a single
+ * O-point at ( 1.1112, -0.0083 ) with | q | = 2.8e-14, carrying
+ * psi = 3.068708e-01 -- while the largest NODAL value is 3.348506e-01 at
+ * ( 1.1500, 0.0000 ). The nodal maximum is nine per cent ABOVE the field's only
+ * magnetic axis, because psi_h is discontinuous and that node sits on an element
+ * boundary where one element's polynomial overshoots. Pinning psi_ax there is
+ * exactly the defect option 3 exists to remove.
+ *
+ * WHAT IS *NOT* CLAIMED, because the data does not support it: that the located
+ * value is closer to the resolved answer on a coarse mesh. At nu = 4 the n = 32
+ * answer is about 2.841e-01, and at n = 8 the located reading ( 3.069e-01 ) is
+ * FURTHER from it than the nodal one ( 2.835e-01 ) happens to be -- the nodal
+ * overshoot compensated. The argument for the new definition is that psi_ax
+ * means the flux at the magnetic axis, not that it is more accurate here.
  */
 
 namespace
@@ -341,9 +379,16 @@ BOOST_AUTO_TEST_CASE( theFixedNormalisationIsADifferentProblem )
  * different reason:
  *
  *   converged            the bordered Newton reached its tolerance at all
- *   self consistent      psi_ax IS max psi_h, to round-off -- which is the
- *                        equation that was missing, so this is the one that
- *                        distinguishes a solved normalisation from a guessed one
+ *   self consistent      the solver's OWN constraint residual is at round-off,
+ *                        which is the equation that was missing and is what
+ *                        distinguishes a solved normalisation from a guessed
+ *                        one. It used to read `psi_ax IS max psi_h`; that was
+ *                        the same statement only while the nodal maximum WAS
+ *                        the definition, and asserting it now would be
+ *                        measuring the gap between two definitions instead of
+ *                        whether the border closed. normalisationResidual() is
+ *                        the stronger assertion because it does not depend on
+ *                        which definition is in force
  *   physical             psi_ax is within a factor of three of the dimensional
  *                        estimate. The degenerate fixed point the outer
  *                        iteration used to find misses this by ten orders
@@ -368,9 +413,12 @@ BOOST_AUTO_TEST_CASE( theSelfConsistentNormalisation )
 {
 	double const lambda = firstEigenvalue();
 	std::printf( "\n  psi_ax as an unknown, k = 2, n = 8, lambda_1 = %.3f\n", lambda );
-	std::printf( "    %4s %10s %13s %13s %11s %9s %9s %7s %6s %s\n",
-	             "nu", "amplitude", "psi_ax", "max psi_h", "psi_ax-max", "estimate",
-	             "ratio", "|dF|/l1", "Newton", "order" );
+	std::printf( "    psi_ax is the flux at the LOCATED axis; `max psi_h` is the\n"
+	             "    largest nodal value, kept as a MEASUREMENT of the gap\n"
+	             "    between the two definitions and no longer an identity\n" );
+	std::printf( "    %4s %10s %13s %13s %11s %11s %9s %9s %7s %6s %s\n",
+	             "nu", "amplitude", "psi_ax", "max psi_h", "gap rel", "constraint",
+	             "estimate", "ratio", "|dF|/l1", "Newton", "order" );
 
 	struct Converged
 	{
@@ -402,9 +450,12 @@ BOOST_AUTO_TEST_CASE( theSelfConsistentNormalisation )
 		// member sitting on round-off.
 		double const order = bestOrder( point.residuals, 1.0e-10 );
 
-		std::printf( "    %4d %10.1f %13.6e %13.6e %11.2e %9.4f %9.4f %7.2f %6d %6.3f%s\n",
+		std::printf( "    %4d %10.1f %13.6e %13.6e %11.2e %11.2e %9.4f %9.4f %7.2f "
+		             "%6d %6.3f%s\n",
 		             one.nu, one.amplitude, point.psiAxis, point.psiMax,
-		             point.psiAxis - point.psiMax, estimate,
+		             std::abs( point.psiAxis - point.psiMax )
+		                 /std::max( std::abs( point.psiAxis ), 1.0e-300 ),
+		             point.constraint, estimate,
 		             point.psiAxis/estimate, reaction/lambda,
 		             point.newtonIterations, order,
 		             point.converged ? "" : "   FAILED" );
@@ -418,10 +469,26 @@ BOOST_AUTO_TEST_CASE( theSelfConsistentNormalisation )
 		if ( !point.converged )
 			continue;
 
-		BOOST_TEST( std::abs( point.psiAxis - point.psiMax ) < 1.0e-8*point.psiAxis,
+		/*
+		 * THE SOLVER'S OWN CONSTRAINT, WHICH IS DEFINITION-INDEPENDENT.
+		 *
+		 * G = psi_ax - psi_h( wherever it is constrained ), and it must be at
+		 * round-off whichever point that is. This used to compare psi_ax against
+		 * the largest NODAL value, which was the same statement only while the
+		 * nodal maximum was the definition; see the file header for the eight
+		 * per cent that comparison now reads at nu = 4.
+		 *
+		 * 1e-9 relative and not 1e-12: under AxisConstraint::LocatedAxis the
+		 * constraint point is found by a root search, so the residual bottoms out
+		 * at that search's own accuracy rather than at machine zero -- measured,
+		 * 4.5e-12 to 1.1e-10 absolute across these six, which is 4e-12 to 4e-11
+		 * relative. A border that is NOT closing gives O( 1 ), so nine orders of
+		 * headroom costs the assertion nothing.
+		 */
+		BOOST_TEST( std::abs( point.constraint ) < 1.0e-9*point.psiAxis,
 		            "nu = " << one.nu << ", amplitude = " << one.amplitude
-		            << ": psi_ax = " << point.psiAxis << " but max psi_h = "
-		            << point.psiMax << ". The normalisation constraint is the extra "
+		            << ": the normalisation constraint reads " << point.constraint
+		            << " against psi_ax = " << point.psiAxis << ". It is the extra "
 		            "equation the bordered Newton exists to satisfy, so this is what "
 		            "says psi_ax was solved for rather than assumed" );
 
@@ -752,15 +819,18 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxClosesAsASecondBorder )
 		double const axis = solver.psiAxis();
 		double const boundary = solver.psiBoundary();
 
-		// Both constraints, read back off the converged field rather than
-		// trusted: psi_ax against the largest nodal value, psi_bnd against the
-		// value at the pinned dof.
+		// psi_bnd is read back off the converged field rather than trusted; psi_ax
+		// is taken from the solver's own constraint residual.
+		//
+		// THIS USED TO RECOMPUTE THE LARGEST NODAL VALUE AND COMPARE psi_ax
+		// AGAINST IT. That was the self-consistency statement only while the
+		// nodal maximum WAS the definition of psi_ax. Under
+		// AxisConstraint::LocatedAxis the constraint point is a zero of q_h, so
+		// the comparison became a measurement of the gap between two definitions
+		// -- see the file header -- and it is normalisationResidual() that says
+		// whether the FIRST border closed, whichever definition is in force.
 		mfem::GridFunction const &psi = solver.potential();
-		double peak = -std::numeric_limits<double>::infinity();
-		for ( int i = 0; i < psi.Size(); ++i )
-			peak = std::max( peak, psi( i ) );
-
-		double const axisResidual = std::abs( axis - peak );
+		double const axisResidual = std::abs( solver.normalisationResidual() );
 		double const scale = std::max( std::abs( axis ), 1.0e-30 );
 
 		// The pinned value: the solver's own constraint says psi_bnd equals the
@@ -781,7 +851,11 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxClosesAsASecondBorder )
 		             boundaryResidual/scale, solver.newtonIterations() );
 		std::fflush( stdout );
 
-		BOOST_TEST( axisResidual/scale < 1.0e-12,
+		// 1e-9 rather than 1e-12: under LocatedAxis the constraint point comes
+		// from a root search and the residual bottoms out at that search's
+		// accuracy, not at machine zero. A border that is not closing gives
+		// O( 1 ), so the headroom costs nothing. See theSelfConsistentNormalisation.
+		BOOST_TEST( axisResidual/scale < 1.0e-9,
 		            "psi_ax does not close at n = " << n << ": "
 		            << axisResidual/scale << " relative" );
 
@@ -929,3 +1003,4 @@ BOOST_AUTO_TEST_CASE( theAnalyticColumnAgreesWithTheDifferencedOne )
 		            "as low as its own approximation" );
 	}
 }
+

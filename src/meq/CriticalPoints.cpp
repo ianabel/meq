@@ -162,6 +162,15 @@ namespace meq
 		separation = separationIn;
 	}
 
+	void CriticalPointFinder::setSeedRings( int ringsIn )
+	{
+		if ( ringsIn < 0 )
+			throw std::invalid_argument(
+				"CriticalPointFinder::setSeedRings: the number of rings cannot be "
+				"negative" );
+		seedRings = ringsIn;
+	}
+
 	void CriticalPointFinder::setContainment( double containmentIn )
 	{
 		if ( containmentIn < 0.0 || containmentIn > 0.5 )
@@ -381,6 +390,12 @@ namespace meq
 		found.determinant = det;
 		found.trace = tr;
 		found.overshoot = overshoot;
+
+		// The Newton iterate itself, in reference coordinates. See
+		// CriticalPoint::referenceX for why this is reported rather than left to
+		// be recovered by inverting the element map.
+		found.referenceX = ip.x;
+		found.referenceY = ip.y;
 
 		if ( std::abs( det ) <= degenerate )
 			found.type = CriticalPointType::Degenerate;
@@ -621,6 +636,156 @@ namespace meq
 			return false;
 
 		found = extrema.front();
+		return true;
+	}
+
+	int CriticalPointFinder::nearestElementCentre( double r, double z ) const
+	{
+		int best = -1;
+		double bestDistance = std::numeric_limits<double>::infinity();
+
+		mfem::Vector centre;
+		for ( int element = 0; element < meshRef.GetNE(); ++element )
+		{
+			meshRef.GetElementCenter( element, centre );
+			double const dr = centre( 0 ) - r;
+			double const dz = centre( 1 ) - z;
+			double const distance = dr*dr + dz*dz;
+			if ( distance < bestDistance )
+			{
+				bestDistance = distance;
+				best = element;
+			}
+		}
+		return best;
+	}
+
+	bool CriticalPointFinder::tryFindAxisFrom( double r, double z,
+	                                          AxisSense sense,
+	                                          CriticalPoint &found ) const
+	{
+		int const seed = nearestElementCentre( r, z );
+		if ( seed < 0 )
+			return false;
+
+		/*
+		 * RING BY RING, STOPPING AS SOON AS SOMETHING IS FOUND, WHICH IS WHAT
+		 * MAKES A GENEROUS CAP AFFORDABLE.
+		 *
+		 * The cost of this entry point is then set by how far the axis actually
+		 * moved rather than by seedRings: a warm start whose axis is still in
+		 * the seed element roots ONE element and stops, and only a seed that has
+		 * fallen behind pays for the outer rings. A fixed count would charge the
+		 * worst case every time, and the worst case is the rare one.
+		 *
+		 * AND THE CAP HAS TO BE GENEROUS BECAUSE A RING IS NOT A DISTANCE.
+		 * Face-neighbour hops on a diagonally split Cartesian mesh advance about
+		 * a quarter of an element each: measured on the Solov'ev benchmark at
+		 * k = 1, n = 16, a seed HALF an element away diagonally needs THREE
+		 * rings, and two -- axisSeeds()' own choice -- returns nothing at all.
+		 * That is not a defect in the seed; axisSeeds() grows its two rings from
+		 * the element holding the extreme NODAL value, which is already within a
+		 * node of the answer, and a general seed is not.
+		 */
+		mfem::Table const &neighbours = meshRef.ElementToElementTable();
+		std::vector<bool> chosen( static_cast<std::size_t>( meshRef.GetNE() ),
+		                          false );
+		chosen[ static_cast<std::size_t>( seed ) ] = true;
+
+		std::vector<int> frontier( 1, seed );
+		std::vector<CriticalPoint> extrema;
+
+		for ( int ring = 0; ring <= seedRings && !frontier.empty(); ++ring )
+		{
+			std::vector<CriticalPoint> const reached =
+				extremaFrom( frontier, sense );
+			extrema.insert( extrema.end(), reached.begin(), reached.end() );
+
+			/*
+			 * AN OUT-OF-ELEMENT ROOT IS NOT GOOD ENOUGH TO STOP AT, AND THAT IS
+			 * MEASURED RATHER THAN CAUTIOUS. tryFindAxis() records the same rule
+			 * for its own seeded path; this is the same hazard one entry point
+			 * along, and the test for it caught this stopping on the first ring
+			 * that yielded anything.
+			 *
+			 * q_h jumps across a face, so a root lying within that jump belongs
+			 * to NEITHER neighbour strictly: each side's polynomial puts its own
+			 * version of it a little way into the other's territory, and
+			 * setContainment() lets both through so that an axis landing on a
+			 * mesh line is found at all. The two versions are O( h^(k+1) )
+			 * apart. Measured on the Solov'ev benchmark at n = 8, seeded half an
+			 * element away: element 62 offers the root 3.1e-03 / 1.0e-04 /
+			 * 2.6e-07 away at k = 1 / 2 / 3 with a non-zero overshoot, and
+			 * element 79 -- one ring further out -- holds it properly.
+			 *
+			 * FOR A POSITION THAT GAP IS HARMLESS. For a caller building a
+			 * BORDERED JACOBIAN ROW out of this element's shape functions it is
+			 * not: the row would sit on the wrong element's dofs. So a root that
+			 * is strictly inside its element stops the search and one that is
+			 * merely admissible does not.
+			 */
+			bool clean = false;
+			for ( std::size_t i = 0; i < extrema.size(); ++i )
+				clean = clean || ( extrema[ i ].overshoot <= 0.0 );
+			if ( clean )
+				break;
+
+			// GROWN FROM THE FRONTIER RATHER THAN BY RE-SCANNING THE MESH.
+			// axisSeeds() re-walks every element per ring, which it can afford
+			// because it is already paying a pass over every nodal value; here
+			// that would make the growth the dominant cost and there would be no
+			// point to the entry point at all.
+			std::vector<int> next;
+			for ( std::size_t f = 0; f < frontier.size(); ++f )
+			{
+				int const element = frontier[ f ];
+				int const *row = neighbours.GetRow( element );
+				for ( int i = 0; i < neighbours.RowSize( element ); ++i )
+				{
+					int const other = row[ i ];
+					if ( other < 0 || chosen[ static_cast<std::size_t>( other ) ] )
+						continue;
+					chosen[ static_cast<std::size_t>( other ) ] = true;
+					next.push_back( other );
+				}
+			}
+			frontier.swap( next );
+		}
+
+		if ( extrema.empty() )
+			return false;
+
+		// STRICTLY INSIDE ITS ELEMENT FIRST, THEN NEAREST THE SEED.
+		//
+		// The first key is the one above: a root its own element actually holds
+		// is worth more than a nearer one seen from across a face, because what
+		// the caller does with `element` is evaluate its shape functions.
+		//
+		// The second is the tie-break, and it is where this entry point differs
+		// from tryFindAxis(). A caller with a prior is FOLLOWING one critical
+		// point, so among equally admissible roots the continuation of the one
+		// being followed is the nearest to where it was last seen. tryFindAxis()
+		// has no prior and refuses the ambiguity instead.
+		std::size_t best = 0;
+		double bestDistance = std::numeric_limits<double>::infinity();
+		bool bestClean = false;
+		for ( std::size_t i = 0; i < extrema.size(); ++i )
+		{
+			double const dr = extrema[ i ].r - r;
+			double const dz = extrema[ i ].z - z;
+			double const distance = dr*dr + dz*dz;
+			bool const isClean = ( extrema[ i ].overshoot <= 0.0 );
+
+			if ( i == 0 || ( isClean && !bestClean )
+			     || ( isClean == bestClean && distance < bestDistance ) )
+			{
+				bestDistance = distance;
+				bestClean = isClean;
+				best = i;
+			}
+		}
+
+		found = extrema[ best ];
 		return true;
 	}
 

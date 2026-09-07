@@ -256,6 +256,40 @@ namespace meq
 		/// tests/convergence/CriticalPointConvergence.cpp's k = 1, 2, 3 by
 		/// n = 4, 8, 16, 32 sweep that needs one. See setContainment().
 		double overshoot = 0.0;
+
+		/// WHERE THE ROOT SITS IN @a element's REFERENCE COORDINATES, which is
+		/// what a caller needs to evaluate that element's shape functions there.
+		///
+		/// IT IS PLUMBED OUT RATHER THAN RECOVERABLE, AND THAT IS THE POINT. The
+		/// Newton runs in reference space, so this is the iterate it converged
+		/// to and costs nothing to report. The alternative -- handing back only
+		/// ( r, z ) and letting the caller invert the element map with
+		/// TransformBack -- re-solves a problem that was already solved, and
+		/// CLAUDE.md records the failure that invites: a CLAMPED inverse map
+		/// returns a point on the element boundary instead of failing, and a
+		/// field that is constant over the element cannot tell the difference.
+		/// The one consumer that would notice is exactly the one this exists
+		/// for, FREE-BOUNDARY-PLAN.md section 11.5's option 3, where the shape
+		/// functions at this point ARE a row of the bordered Jacobian.
+		///
+		/// TWO DOUBLES RATHER THAN AN mfem::IntegrationPoint, because that class
+		/// has no default member initialiser -- a defaulted CriticalPoint would
+		/// carry an uninitialised one, and the rest of this struct is
+		/// zero-initialised. referencePoint() builds the IntegrationPoint a
+		/// caller wants, so the convenience is kept without the hazard.
+		double referenceX = 0.0;
+		double referenceY = 0.0;
+
+		/// ( referenceX, referenceY ) as MFEM wants it, for CalcShape(),
+		/// GetValue() and the transformations. The weight is meaningless here
+		/// and is left at whatever Set2() leaves it: this is a POSITION, not a
+		/// quadrature point.
+		mfem::IntegrationPoint referencePoint() const
+		{
+			mfem::IntegrationPoint point;
+			point.Set2( referenceX, referenceY );
+			return point;
+		}
 	};
 
 	/// Which extremum findAxis() should accept.
@@ -486,6 +520,101 @@ namespace meq
 			                  AxisSense sense = AxisSense::Either ) const;
 
 			/**
+			 * The axis NEAR a point already believed to be close to it: Newton on
+			 * `q_h = 0` seeded from the element nearest @a r, @a z and a couple of
+			 * rings of face neighbours around it, and nothing else.
+			 *
+			 * THIS IS THE WARM-START ENTRY POINT AND ITS WHOLE PURPOSE IS COST.
+			 * findAxis() and tryFindAxis() are written for a caller with no prior:
+			 * they seed from the extreme NODAL values -- the quantity
+			 * FREE-BOUNDARY-PLAN.md section 11 is about -- and they fall back to a
+			 * full sweep() whenever the seeded path is not unambiguous, which is
+			 * the right trade when the answer is wanted once after a solve. It is
+			 * the wrong trade INSIDE a Newton loop, where the axis is wanted once
+			 * per Jacobian and the previous iterate's axis is a seed that is
+			 * already correct to the size of the last step. This pays a search
+			 * over a handful of elements instead of two Newtons over every one.
+			 *
+			 * WHAT IT COSTS, MEASURED IN ELEMENTS ROOTED RATHER THAN IN SECONDS
+			 * -- a timing on one machine is a measurement about that machine, and
+			 * this is a property of the algorithm. Solov'ev at k = 2, seeded a
+			 * given fraction of an element from the answer:
+			 *
+			 *     offset      n = 16, of 512      n = 32, of 2048
+			 *     0            1   ( 0.20% )       1   ( 0.05% )
+			 *     0.5 h       14   ( 2.73% )      19   ( 0.93% )
+			 *     1.0 h       14   ( 2.73% )      19   ( 0.93% )
+			 *     2.0 h       37   ( 7.23% )      48   ( 2.34% )
+			 *
+			 * against sweep(), which roots every element. So a seed that is still
+			 * on the answer costs ONE element, and the ratio IMPROVES with
+			 * refinement -- the search is bounded by rings, which is an absolute
+			 * element count, while a sweep is the whole mesh. That is the property
+			 * a Newton loop needs: the per-Jacobian cost does not grow with the
+			 * problem.
+			 *
+			 * THERE IS NO SWEEP FALLBACK, DELIBERATELY. Adding one would restore
+			 * exactly the cost this exists to avoid, and would do it on the
+			 * iterations where the seed is worst -- which in a continuation are
+			 * the ones where the answer matters least, because a later iterate
+			 * will correct it. A caller who needs the guaranteed answer should
+			 * call findAxis(), and the natural pattern is findAxis() once to start
+			 * and this thereafter.
+			 *
+			 * AND IT BREAKS TIES BY DISTANCE, WHERE tryFindAxis() REFUSES THEM.
+			 * That is the other difference and it follows from the same premise:
+			 * a caller with a prior is FOLLOWING one critical point, so when the
+			 * seed region offers more than one extremum of the requested sense the
+			 * nearest to ( @a r, @a z ) is the continuation of the one being
+			 * followed. tryFindAxis() has no prior and so cannot prefer one, and
+			 * refuses instead. Do not use this to DISCOVER an axis: seeded far
+			 * from one it will return whatever extremum happens to lie in reach,
+			 * which is a different question from "where is the axis".
+			 *
+			 * @param r,z   where to start looking. Need not be inside the mesh and
+			 *              need not be near an element boundary; the nearest
+			 *              element CENTRE is what is used, which costs one pass
+			 *              over the elements with no field evaluation in it.
+			 * @param sense which extremum is wanted. The same caution applies as
+			 *              everywhere else in this class: pass +q, never the raw
+			 *              flux block, or every Maximum silently becomes a
+			 *              Minimum. See the file header.
+			 * @param found written only on success.
+			 *
+			 * @return false, rather than throwing, when no extremum of that sense
+			 *         is reachable from the seed region. There is nothing
+			 *         exceptional about that -- an iterate whose axis has left the
+			 *         search radius is an ordinary event in a continuation -- and
+			 *         the caller is expected to have a fallback.
+			 */
+			bool tryFindAxisFrom( double r, double z, AxisSense sense,
+			                      CriticalPoint &found ) const;
+
+			/// The MOST rings of face neighbours tryFindAxisFrom() will grow
+			/// around its seed element before giving up. Default 6.
+			///
+			/// IT IS A CAP AND NOT A COST, because the search stops at the first
+			/// ring that yields an extremum of the requested sense. A warm start
+			/// whose axis is still in the seed element roots ONE element; only a
+			/// seed that has fallen behind pays for the outer rings. That is why
+			/// the default can be generous.
+			///
+			/// AND SIX RATHER THAN axisSeeds()' TWO, WHICH IS MEASURED. A ring is
+			/// a hop across a face, not a distance: on a diagonally split
+			/// Cartesian mesh each hop advances about a quarter of an element, so
+			/// two rings reach barely half of one. Measured on the Solov'ev
+			/// benchmark at k = 1, n = 16, a seed half an element away diagonally
+			/// needs THREE rings and two finds nothing. axisSeeds() gets away with
+			/// two because it grows them from the element holding the extreme
+			/// NODAL value, which is already within a node of the answer; a
+			/// general seed is not.
+			///
+			/// It is a RADIUS rather than a tolerance: raising it lets the search
+			/// follow an axis that has moved further between calls, and cannot
+			/// change the answer where the axis has not moved.
+			void setSeedRings( int ringsIn );
+
+			/**
 			 * Newton from every element, deduplicated: every zero of q_h that a
 			 * seeded search happens to reach.
 			 *
@@ -636,6 +765,20 @@ namespace meq
 			void elementSeeds( int element,
 			                   std::vector<mfem::IntegrationPoint> &seeds ) const;
 
+			/// The element whose CENTRE is nearest ( r, z ), or -1 on an empty
+			/// mesh.
+			///
+			/// NEAREST CENTRE AND NOT THE CONTAINING ELEMENT, WHICH IS A COST
+			/// DECISION AND NOT AN APPROXIMATION THAT COULD BE WRONG. Locating
+			/// the containing element properly means inverting element maps --
+			/// Mesh::FindPoints, which CLAUDE.md records as O( elements x points )
+			/// and whose shared scratch makes it non-reentrant besides. This is
+			/// one distance per element and no field evaluation at all, which is
+			/// about a per cent of what a sweep costs, and it feeds a search that
+			/// grows by face neighbours anyway: a seed one element out is
+			/// absorbed by the first ring.
+			int nearestElementCentre( double r, double z ) const;
+
 			mfem::GridFunction const &fluxField;
 			mfem::GridFunction const &potentialField;
 			mfem::Mesh &meshRef;
@@ -646,6 +789,7 @@ namespace meq
 			int boundarySamples = 16;
 			double separation = 1.0e-8;
 			double containment = 0.10;
+			int seedRings = 6;
 	};
 
 }

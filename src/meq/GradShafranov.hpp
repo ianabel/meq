@@ -462,6 +462,102 @@ namespace meq
 			/// unknown.
 			void setNormalisationCoupling( Normalisation choice );
 
+			/**
+			 * WHAT `psi_ax` IS CONSTRAINED TO BE.
+			 *
+			 * `psi_ax` is what the profiles are NORMALISED by, so what it is
+			 * defined as decides which equilibrium is reported. The two answers
+			 * differ by `O( h )` in position and `O( h^2 )` in value, both
+			 * independent of `k`, so on a refined high-order mesh they SEPARATE
+			 * rather than converge -- measured on the finest Solov'ev mesh, the
+			 * gap is 202x `psi_h`'s own L2 error at `k = 2` and 4204x at `k = 3`.
+			 */
+			enum class AxisConstraint
+			{
+				/**
+				 * `psi_ax = max_j psi_h( x_j )` over the potential NODES.
+				 *
+				 * Cheapest by a wide margin: under NPC `psi` is part of the
+				 * unknown, so the largest nodal value is literally one entry of
+				 * it and the border row is exactly `-e_j` -- one entry, nothing
+				 * assembled and nothing differenced.
+				 *
+				 * **AND NOTHING IN IT SAYS THE LARGEST NODAL VALUE IS A MAGNETIC
+				 * AXIS**, which is the whole of FREE-BOUNDARY-PLAN.md section 11:
+				 * `G = psi_ax - max psi_h = 0` is satisfied at machine zero by a
+				 * spurious nodal spike exactly as it is by an axis, and three
+				 * separate configurations were found reporting one.
+				 */
+				NodalMaximum,
+
+				/**
+				 * `psi_ax = psi_h( x* )` at the located magnetic axis, `x*` being
+				 * a zero of `q_h`. The DEFAULT since 2026-09-07, and the
+				 * principled one: it is what `psi_ax` MEANS.
+				 *
+				 * **IT COSTS NOTHING IN THE JACOBIAN, WHICH IS NOT OBVIOUS AND IS
+				 * THE ENVELOPE THEOREM.** `x*` moves with the solution, so the
+				 * chain rule gives
+				 *
+				 *     dG/dlambda = -[ dpsi_h/dlambda |_x*
+				 *                     + grad( psi_h )( x* ) . dx* / dlambda ]
+				 *
+				 * and `grad_bar( psi ) = r q`, so `grad( psi_h )( x* ) = 0` at a
+				 * zero of `q_h` **identically**. The position term vanishes, no
+				 * sensitivity of the root find is needed, and the row is the
+				 * potential shape functions of `x*`'s element evaluated at `x*` --
+				 * `( k+1 )( k+2 )/2` entries, exact, one element. `-e_j` is the
+				 * special case where `x*` lands on a node.
+				 *
+				 * **WHAT IT DOES COST** is a seeded root find per Jacobian, warm
+				 * started from the previous iterate's axis, and the possibility
+				 * that WHICH O-point is followed changes between iterations. The
+				 * warm start is what keeps both small: it follows one axis rather
+				 * than re-competing a field of them every step.
+				 *
+				 * **AND IT WEAKENS ONE DIAGNOSTIC, DELIBERATELY AND WITH A
+				 * REPLACEMENT.** `CriticalPointFinder::checkAxis()` compares the
+				 * normalised flux at a located O-point against 1, which under this
+				 * choice is very nearly true by construction. It is not vacuous --
+				 * it still catches a run with NO O-point, and one where the
+				 * largest-`Psi` O-point is not the one the constraint followed --
+				 * but the guard that carries the weight is now
+				 * checkAxisSource(), which asks whether the toroidal current
+				 * density is bounded on the symmetry axis and is untouched by
+				 * this.
+				 *
+				 * **NPC ONLY.** Under the condensation `psi` is a function of the
+				 * trace through every element's source, so the row would have to
+				 * be differenced against `3( k+1 )` trace dofs with a root find
+				 * inside each difference. It is REFUSED there rather than
+				 * silently downgraded.
+				 */
+				LocatedAxis
+			};
+
+			/// Choose it. AxisConstraint::LocatedAxis is the default.
+			///
+			/// AxisConstraint::NodalMaximum is kept as the CONTROL rather than as
+			/// a fallback -- every number in this tree published before
+			/// 2026-09-07 was measured with it, so a table that moves is a
+			/// statement about the definition rather than about the solver, and
+			/// there has to be a way to take both readings on one problem.
+			void setAxisConstraint( AxisConstraint choice );
+
+			/// The value setAxisConstraint() last set.
+			AxisConstraint axisConstraint() const;
+
+			/// Where `psi_ax` was attained on the last solve, and whether it was
+			/// a located axis or the fallback. Valid after solve().
+			///
+			/// `locatedAxis` is FALSE when AxisConstraint::NodalMaximum was asked
+			/// for, and also when LocatedAxis was asked for and no O-point could
+			/// be reached -- the annulus branch, where there is no closed surface
+			/// to be an axis of. The two are distinguished by axisConstraint().
+			bool axisWasLocated() const;
+			double axisR() const;
+			double axisZ() const;
+
 			/// How the bordered Newton obtains its column `dR/ds`.
 			enum class BorderColumn
 			{
@@ -1520,6 +1616,142 @@ namespace meq
 			/// called. Valid after solve().
 			double psiBoundary() const;
 
+			/**
+			 * IS THE TOROIDAL CURRENT DENSITY BOUNDED ON THE SYMMETRY AXIS?
+			 *
+			 * `meq::SourceIntegrator` assembles the load `-( F/r, w )`, and
+			 * **`F/r` IS `mu_0 j_phi`**:
+			 *
+			 *     j_phi  =  r p'( Psi )  +  g g'( Psi ) / ( mu_0 r )
+			 *
+			 * so a finite current density on the axis REQUIRES `F( 0, z ) = 0`.
+			 * `F = mu_0 r^2 p' + g g'` leaves only `g g'` there: `p'` is
+			 * protected by its own `r^2` and `g g'` is not.
+			 *
+			 * **AND THE DISCRETE HALF IS WHY THIS NEEDS A CHECK RATHER THAN A
+			 * COMMENT.** The CONTINUOUS problem is well posed whatever `F` does:
+			 * the energy `int ( 1/r )|grad_bar psi|^2` forces its members to
+			 * vanish faster than `r` at the axis -- the physical `psi ~ r^2` --
+			 * and against such test functions `int ( F/r ) w` converges. The
+			 * DISCRETE space is `L2` polynomials, free to be nonzero at `r = 0`,
+			 * and against those the load functional is **unbounded**. The
+			 * quadrature is the only thing making it finite, so the answer
+			 * depends on the RULE and not on the mesh -- measured, sweeping
+			 * setSourceQuadratureOrder() at fixed `h` moves `psi_h` on the axis
+			 * while `h`-refinement does not fix it, and `psi_h` develops an
+			 * `O( 1 )` layer along the WHOLE axis at a value that can exceed the
+			 * true peak.
+			 *
+			 * **WHICH `Psi` THE AXIS SITS AT IS THE WHOLE OF IT, AND IT IS FB-3
+			 * THAT OPENS THE TRAP.** `psi( 0, z ) = 0` exactly -- `psi` is the
+			 * poloidal flux through a circle of radius `r`, which vanishes with
+			 * the area -- so `Psi_axis = -psi_bnd/span`. On a FIXED boundary
+			 * `psi_bnd = 0`, the axis sits at `Psi = 0`, and every profile in
+			 * this tree vanishes there; that is why nothing met this before.
+			 * setBoundaryFluxPoint() makes `psi_bnd` an unknown, it comes out
+			 * POSITIVE, and the axis is then at NEGATIVE `Psi` -- in the VACUUM,
+			 * where the physics is `g = const` so `g g' = 0`, and where an
+			 * unconfined profile EXTRAPOLATES and returns a current instead.
+			 *
+			 * **THE REPAIR IS `NormalisedSource::setPlasmaSupport()`**, which
+			 * sets `F = 0` wherever `Psi <= 0` -- the statement that the vacuum
+			 * carries no current. For a domain reaching `r = 0` with `psi_bnd`
+			 * free it is a PRECONDITION rather than an option, in the same sense
+			 * as `j >= 1` at the plasma edge.
+			 *
+			 * A mesh that does not reach the axis is unaffected and reports
+			 * `reachesAxis == false`: there is no `1/r` to be unbounded.
+			 */
+			struct AxisSourceCheck
+			{
+				/// Whether any potential node sits at `r = 0`. FALSE is not a
+				/// failure -- it is the ordinary case for a fitted rectangle,
+				/// and every other field is then meaningless.
+				bool reachesAxis = false;
+
+				/// The largest `| F |` over the nodes AT `r = 0`, evaluated at
+				/// `psi = 0` -- which `psi( 0, z )` is EXACTLY, for any
+				/// axisymmetric field with bounded `B`. See the implementation
+				/// for why the iterate's own `psi_h` is the wrong thing to ask:
+				/// it measures the layer rather than its cause, and cannot
+				/// separate a healthy run from a failing one.
+				double worstOnAxis = 0.0;
+				double worstR = 0.0;
+				double worstZ = 0.0;
+
+				/// The largest `| F |` anywhere, as the scale the one above is
+				/// judged against. A bare tolerance on `F` would be a statement
+				/// about the units the source is written in.
+				double sourceScale = 0.0;
+
+				/// worstOnAxis/sourceScale, and whether it is within tolerance.
+				double relative = 0.0;
+				bool bounded = true;
+
+				/**
+				 * `Psi` ON THE SYMMETRY AXIS, AND WHETHER THE PLASMA CONTAINS IT.
+				 *
+				 * `psi( 0, z ) = 0` exactly, so
+				 * `Psi_axis = -psi_bnd/( psi_ax - psi_bnd )`, and
+				 * `insidePlasma()`'s own test makes the axis part of the plasma
+				 * when that is POSITIVE -- which needs `psi_bnd` and the span to
+				 * carry opposite signs, i.e. a NEGATIVE `psi_bnd` on an ordinary
+				 * positive span.
+				 *
+				 * **FOR A TOKAMAK THAT IS NOT A LARGE ERROR, IT IS THE WRONG
+				 * TOPOLOGY.** A tokamak plasma is a torus about `R_0 > 0` and its
+				 * symmetry axis is in the vacuum, so a support containing `r = 0`
+				 * describes current threading the machine's own centre line, and
+				 * no refinement makes it into the equilibrium that was asked for.
+				 * It is a separate and worse statement than `bounded` above: that
+				 * one says the load carries a `1/r` the quadrature is papering
+				 * over, this one says the answer is not an equilibrium of the
+				 * intended kind at all.
+				 *
+				 * **BUT IT IS NOT WRONG FOR EVERY DEVICE, AND THAT IS WHY THE
+				 * ESCAPE CLAUSE IS PHYSICS RATHER THAN A HEDGE.** A **levitated
+				 * dipole** has plasma right up to the axis, and so does a
+				 * **magnetic mirror** -- and NEITHER HAS A TOROIDAL FIELD, so
+				 * `g` vanishes identically in both. That is not a coincidence:
+				 * it is the same fact twice. `B_phi = g/r` has to be finite on
+				 * the axis, so a device whose plasma reaches `r = 0` cannot carry
+				 * a toroidal field there, and `g == 0` is what makes the
+				 * configuration admissible in the first place.
+				 *
+				 * **SO THE TEST IS `g g' == 0` AND NOT "IS THIS A TOKAMAK".**
+				 * `F( 0, z, . )` is `g g'` and nothing else -- `p'` is killed by
+				 * its own `r^2` -- so a source with `g g' == 0` identically puts
+				 * no current on the axis whatever `Psi` reads there, and
+				 * `j_phi = r p'` vanishes with `r` regardless. A dipole or a
+				 * mirror passes; a tokamak whose `psi_bnd` has gone negative does
+				 * not. `../geq`, the rotating-mirror wrapper this tree already
+				 * compares against, sets `g g' == 0` unconditionally for exactly
+				 * this reason.
+				 *
+				 * `sourceVanishesOnAxis` is taken over a SPREAD of `psi` rather
+				 * than at one value: asking only at `psi = 0` cannot tell
+				 * `g g' == 0` from `g g'( Psi_axis ) == 0` by luck, and under a
+				 * moving support it would read zero for any profile at all.
+				 */
+				double normalisedFluxOnAxis = 0.0;
+				bool axisInsidePlasma = false;
+				bool sourceVanishesOnAxis = false;
+			};
+
+			/**
+			 * Evaluate the above at the current iterate. Valid after solve(),
+			 * and cheap: one pass over the potential dofs.
+			 *
+			 * @param tolerance how large `| F |` on the axis may be relative to
+			 *        `| F |`'s own scale. Default 1e-6, which is not tuned: a
+			 *        source that vanishes on the axis does so to ROUND-OFF -- the
+			 *        clean case measures 1e-15 relative -- and one that does not
+			 *        measures 1.5e-01. There is nothing in between to calibrate
+			 *        against, so the default sits six orders below the failure
+			 *        and nine above the floor.
+			 */
+			AxisSourceCheck checkAxisSource( double tolerance = 1.0e-6 ) const;
+
 			/// The outward flux of `q` through the true boundary `Gamma`:
 			/// `oint_Gamma q.nu dGamma`.
 			///
@@ -1954,6 +2186,12 @@ namespace meq
 			double boundaryFluxR = 0.0;
 			double boundaryFluxZ = 0.0;
 			double psiBoundaryValue = 0.0;
+
+			/// setAxisConstraint(), and where the last solve put the axis.
+			AxisConstraint axisConstraintChoice = AxisConstraint::LocatedAxis;
+			bool axisLocatedValue = false;
+			double axisRValue = 0.0;
+			double axisZValue = 0.0;
 
 			Globalisation globalisationChoice;
 			LocalSolver localSolverChoice;

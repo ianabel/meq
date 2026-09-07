@@ -1043,3 +1043,303 @@ BOOST_AUTO_TEST_CASE( theCriticalPointIsNotTheExtremeNodalValue )
 		}
 	}
 }
+
+/*
+ * THE REFERENCE COORDINATES ARE THE ONES THE ROOT WAS FOUND AT, AND THE TEST
+ * THAT SAYS SO PUSHES THEM BACK THROUGH THE ELEMENT MAP.
+ *
+ * CriticalPoint carries ( referenceX, referenceY ) so that a caller can call
+ * CalcShape() on the axis element at the axis -- FREE-BOUNDARY-PLAN.md section
+ * 11.5's option 3, where those shape functions ARE a row of a bordered
+ * Jacobian. The alternative is to hand back ( r, z ) alone and let the caller
+ * invert the map with TransformBack, and CLAUDE.md records why that is a trap:
+ * a CLAMPED inverse returns a point on the element boundary rather than
+ * failing, and a field that is constant over the element cannot tell the
+ * difference.
+ *
+ * SO WHAT IS ASSERTED IS THE ROUND TRIP, which is the only thing that can catch
+ * the plumbing being wrong: transform( referencePoint() ) must be ( r, z ). It
+ * is required at round-off rather than at a tolerance, because both sides are
+ * the SAME transformation applied to the SAME point -- rootInElement() sets
+ * found.r from exactly this call. A tolerance here would pass on a stale or a
+ * defaulted reference point whenever the element happened to be small.
+ *
+ * AND psi AT THAT POINT IS CHECKED TOO, because a caller of option 3 evaluates
+ * BOTH: the shape functions give the Jacobian row and their contraction with
+ * the element's dofs gives the residual. If those two disagreed the border
+ * would be differentiating a different quantity from the one it constrains.
+ */
+BOOST_AUTO_TEST_CASE( theReferenceCoordinatesReproduceTheLocatedPoint )
+{
+	Equilibrium const eq = Equilibrium::nstx();
+	Rectangle const box = meq::tests::standardBox();
+
+	std::printf( "\n  THE REFERENCE POINT, PUSHED BACK THROUGH THE ELEMENT MAP\n" );
+	std::printf( "    %5s %5s %8s %11s %11s %13s %13s\n",
+	             "k", "n", "element", "xi", "eta", "round trip", "psi round trip" );
+
+	for ( int order = 1; order <= 3; ++order )
+	{
+		for ( std::size_t m = 0; m < axisMeshes.size(); ++m )
+		{
+			SolvedEquilibrium run( eq, box, order, axisMeshes[ m ] );
+
+			meq::CriticalPointFinder finder( run.theSolver() );
+			meq::CriticalPoint const axis = finder.findAxis();
+
+			BOOST_TEST_REQUIRE( axis.element >= 0,
+				"the axis was located but carries no element, so there is nothing "
+				"to evaluate a shape function on" );
+
+			mfem::IntegrationPoint const ip = axis.referencePoint();
+
+			// A LOCAL transformation, never Mesh::GetElementTransformation( int ):
+			// that hands out shared scratch and "calling this function resets
+			// pointers obtained from previous calls". CriticalPoints.cpp uses a
+			// thread_local for the same reason and CLAUDE.md records six call
+			// sites that had to be repaired for it.
+			mfem::IsoparametricTransformation transformation;
+			run.theMesh().GetElementTransformation( axis.element, &transformation );
+
+			mfem::Vector physical( 2 );
+			transformation.Transform( ip, physical );
+
+			double const dr = physical( 0 ) - axis.r;
+			double const dz = physical( 1 ) - axis.z;
+			double const roundTrip = std::sqrt( dr*dr + dz*dz );
+
+			// psi from the reference point, against the psi the finder reported.
+			double const psiThere =
+				run.theSolver().potential().GetValue( axis.element, ip );
+			double const psiGap = std::abs( psiThere - axis.psi );
+
+			std::printf( "    %5d %5d %8d %11.4e %11.4e %13.3e %13.3e\n",
+			             order, axisMeshes[ m ], axis.element,
+			             axis.referenceX, axis.referenceY, roundTrip, psiGap );
+			std::fflush( stdout );
+
+			// ROUND-OFF, NOT A TOLERANCE. Both sides are the same map applied to
+			// the same reference point, so anything above the last few bits of
+			// the coordinates means the reference point is not the one the root
+			// was found at. Scaled by the position so that this reads the same on
+			// a domain of any size.
+			double const scale = std::max( 1.0, std::abs( axis.r )
+			                                    + std::abs( axis.z ) );
+			BOOST_TEST( roundTrip <= 1.0e-13*scale,
+				"the reference point ( " << axis.referenceX << ", "
+				<< axis.referenceY << " ) of element " << axis.element
+				<< " transforms to ( " << physical( 0 ) << ", " << physical( 1 )
+				<< " ) where the located axis is ( " << axis.r << ", " << axis.z
+				<< " ). These are the same map applied to the same point, so a gap "
+				"means the reference coordinates are stale, defaulted, or from "
+				"another element." );
+
+			BOOST_TEST( psiGap <= 1.0e-12*std::max( 1.0, std::abs( axis.psi ) ),
+				"psi_h at the reference point is " << psiThere
+				<< " where the finder reported " << axis.psi
+				<< ". A caller of option 3 evaluates both the shape functions and "
+				"their contraction with the element dofs at this point, so these "
+				"disagreeing means the border would differentiate one quantity and "
+				"constrain another." );
+		}
+	}
+}
+
+/*
+ * THE WARM-START ENTRY POINT: SAME ANSWER, A FRACTION OF THE WORK.
+ *
+ * tryFindAxisFrom() exists so that a bordered Newton can re-locate the axis
+ * once per Jacobian without paying for a sweep of every element. That is only
+ * worth having if it gives the SAME point, so the first assertion is agreement
+ * with findAxis() to round-off -- not to a tolerance, because both routes root
+ * the same element's polynomial with the same Newton and the same stopping
+ * rule, so where they agree at all they agree to the last bits. A tolerance
+ * would hide the case where the seeded search finds a NEIGHBOURING element's
+ * version of the same root, which is a real thing q_h's discontinuity permits
+ * and is exactly what the containment machinery exists to arbitrate.
+ *
+ * SEEDED FROM A DISTANCE, because that is the case it is for. In a continuation
+ * the seed is the previous iterate's axis, which is a step away rather than on
+ * top of the answer, so seeding exactly at the answer would test nothing about
+ * the widening. Half an element is a step much larger than a converging Newton
+ * takes near the end.
+ *
+ * AND THE COST IS MEASURED IN FIELD EVALUATIONS RATHER THAN IN SECONDS. This
+ * project's standing rule is that a timing on this machine is a measurement
+ * about the machine; the honest cost here is how many ELEMENTS are searched,
+ * which is a property of the algorithm and reproduces anywhere. sweep() roots
+ * every element; this roots the seed and two rings.
+ */
+BOOST_AUTO_TEST_CASE( theSeededSearchFindsTheSameAxisForLessWork )
+{
+	Equilibrium const eq = Equilibrium::nstx();
+	Rectangle const box = meq::tests::standardBox();
+
+	std::printf( "\n  THE SEEDED SEARCH AGAINST findAxis()\n" );
+	std::printf( "    %5s %5s %9s %13s %13s %11s\n",
+	             "k", "n", "elements", "seeded from", "gap to sweep", "reached" );
+
+	for ( int order = 1; order <= 3; ++order )
+	{
+		for ( std::size_t m = 1; m < axisMeshes.size(); ++m )
+		{
+			SolvedEquilibrium run( eq, box, order, axisMeshes[ m ] );
+
+			meq::CriticalPointFinder finder( run.theSolver() );
+			meq::CriticalPoint const reference = finder.findAxis();
+
+			// The sense the fixture actually has, rather than a guess. Every
+			// Solov'ev fixture here has F single-signed NEGATIVE, so psi is a
+			// subsolution and the axis is an interior MINIMUM -- the file comment
+			// above measures that. Passing the wrong one would make this case
+			// return false everywhere and look like a defect in the search.
+			meq::AxisSense const sense =
+				reference.type == meq::CriticalPointType::Maximum
+					? meq::AxisSense::Maximum : meq::AxisSense::Minimum;
+
+			// HALF AN ELEMENT AWAY, DIAGONALLY, so that the seed is neither the
+			// answer nor aligned with the mesh.
+			double const h = run.meshSize();
+			double const seedR = reference.r + 0.5*h;
+			double const seedZ = reference.z - 0.5*h;
+
+			meq::CriticalPoint seeded;
+			bool const found =
+				finder.tryFindAxisFrom( seedR, seedZ, sense, seeded );
+
+			double const dr = seeded.r - reference.r;
+			double const dz = seeded.z - reference.z;
+			double const gap = found ? std::sqrt( dr*dr + dz*dz )
+			                         : std::numeric_limits<double>::infinity();
+
+			std::printf( "    %5d %5d %9d %13.3e %13.3e %11s\n",
+			             order, axisMeshes[ m ], run.theMesh().GetNE(),
+			             0.5*h*std::sqrt( 2.0 ), gap,
+			             found ? "yes" : "NO" );
+			std::fflush( stdout );
+
+			BOOST_TEST_REQUIRE( found,
+				"the seeded search found no " << ( sense == meq::AxisSense::Maximum
+				                                   ? "maximum" : "minimum" )
+				<< " half an element from the axis at k = " << order << ", n = "
+				<< axisMeshes[ m ] << ", where findAxis() found one at ( "
+				<< reference.r << ", " << reference.z << " )." );
+
+			// ROUND-OFF. Both routes root the same polynomial with the same
+			// Newton; they either reach the same root or they reach a different
+			// element's version of it, and the second is what this is here to
+			// catch.
+			BOOST_TEST( gap <= 1.0e-12*std::max( 1.0, std::abs( reference.r ) ),
+				"the seeded search returned ( " << seeded.r << ", " << seeded.z
+				<< " ) where findAxis() returns ( " << reference.r << ", "
+				<< reference.z << " ) -- " << gap << " apart. Seeded from half an "
+				"element away, these should be the same root to the last bits; a "
+				"gap of order h^(k+1) means it found a NEIGHBOURING element's "
+				"version of it, which setContainment() is what arbitrates." );
+
+			BOOST_TEST( seeded.element == reference.element,
+				"the seeded search credits the axis to element " << seeded.element
+				<< " where findAxis() credits it to " << reference.element
+				<< ". The position agreed, so this is the containment tie-break "
+				"landing differently -- harmless for a position and NOT harmless "
+				"for a caller building a Jacobian row on that element's dofs." );
+		}
+	}
+}
+
+/*
+ * IT RETURNS false RATHER THAN LYING, WHICH IS THE HALF THAT MAKES THE OTHER
+ * HALF USABLE.
+ *
+ * tryFindAxisFrom() takes the extremum NEAREST its seed where the seed region
+ * offers several, which is right for a caller following one critical point and
+ * would be badly wrong as a way to DISCOVER one. So the contract that matters
+ * is what it does when there is nothing to find: it must decline, not return
+ * whatever the widening happened to reach.
+ *
+ * TWO WAYS OF HAVING NOTHING TO FIND, and they are different failures:
+ *
+ *   * seeded in a CORNER of the domain, far from the axis, where the Solov'ev
+ *     psi is monotone and q does not vanish at all within reach;
+ *   * seeded ON the axis but asking for the WRONG SENSE. Every fixture here has
+ *     an interior MINIMUM, so asking for a Maximum must fail even though a
+ *     critical point is sitting under the seed. That is the sense trap of the
+ *     file header made into an assertion: it is also what a caller who handed
+ *     the raw flux block -- which holds -q, turning every Minimum into a
+ *     Maximum -- would see, so a search that answered anyway would make that
+ *     mistake invisible.
+ *
+ * The corner case is deliberately NOT asserted to fail for a specific reason:
+ * with seedRings widened far enough it would eventually reach the axis, and the
+ * assertion is about the DEFAULT radius. Raising the rings is a documented way
+ * to search further, so the case pins the shipped default rather than a
+ * property of the algorithm.
+ */
+BOOST_AUTO_TEST_CASE( theSeededSearchDeclinesRatherThanGuessing )
+{
+	Equilibrium const eq = Equilibrium::nstx();
+	Rectangle const box = meq::tests::standardBox();
+	int const order = 2;
+	int const n = 16;
+
+	SolvedEquilibrium run( eq, box, order, n );
+	meq::CriticalPointFinder finder( run.theSolver() );
+	meq::CriticalPoint const reference = finder.findAxis();
+
+	meq::AxisSense const right = reference.type == meq::CriticalPointType::Maximum
+		? meq::AxisSense::Maximum : meq::AxisSense::Minimum;
+	meq::AxisSense const wrong = right == meq::AxisSense::Maximum
+		? meq::AxisSense::Minimum : meq::AxisSense::Maximum;
+
+	std::printf( "\n  WHEN THERE IS NOTHING TO FIND ( k = %d, n = %d )\n",
+	             order, n );
+	std::printf( "    the axis is a %s at ( %.4f, %.4f )\n",
+	             meq::criticalPointName( reference.type ),
+	             reference.r, reference.z );
+
+	// (1) FAR AWAY. The bottom-left corner of the box, which on standardBox()
+	// against nstx() is most of the domain away from the axis.
+	meq::CriticalPoint far;
+	bool const foundFar = finder.tryFindAxisFrom( box.rMin, box.zMin, right, far );
+	std::printf( "    seeded at the ( %.2f, %.2f ) corner, right sense: %s\n",
+	             box.rMin, box.zMin, foundFar ? "FOUND SOMETHING" : "declined" );
+
+	BOOST_TEST( !foundFar,
+		"seeded in the corner at ( " << box.rMin << ", " << box.zMin
+		<< " ) the search returned a " << meq::criticalPointName( far.type )
+		<< " at ( " << far.r << ", " << far.z << " ), " << far.element
+		<< ". Two rings of face neighbours do not reach the axis from there, so "
+		"whatever this is it is not the axis -- and a caller following a branch "
+		"would have been handed it silently. If the search radius has been "
+		"widened deliberately, this case pins the SHIPPED default and is what "
+		"has to move." );
+
+	// (2) ON the axis, wrong sense. There IS a critical point under the seed.
+	meq::CriticalPoint mistyped;
+	bool const foundWrong =
+		finder.tryFindAxisFrom( reference.r, reference.z, wrong, mistyped );
+	std::printf( "    seeded ON the axis, asking for a %s: %s\n",
+	             wrong == meq::AxisSense::Maximum ? "maximum" : "minimum",
+	             foundWrong ? "FOUND SOMETHING" : "declined" );
+	std::fflush( stdout );
+
+	BOOST_TEST( !foundWrong,
+		"seeded exactly on a " << meq::criticalPointName( reference.type )
+		<< " and asked for the opposite sense, the search returned a "
+		<< meq::criticalPointName( mistyped.type ) << " at ( " << mistyped.r
+		<< ", " << mistyped.z << " ). The sense filter is what stands between a "
+		"caller and the raw flux block, which holds -q and turns every Minimum "
+		"into a Maximum with every winding number unchanged." );
+
+	// AND THE CONTROL: the same seed with the RIGHT sense must succeed, or the
+	// two refusals above are not evidence about the sense filter at all -- they
+	// would be evidence that the search never finds anything.
+	meq::CriticalPoint proper;
+	bool const foundRight =
+		finder.tryFindAxisFrom( reference.r, reference.z, right, proper );
+	BOOST_TEST( foundRight,
+		"the control failed: seeded on the axis with the CORRECT sense the "
+		"search found nothing, so the two refusals above say nothing about the "
+		"sense filter." );
+}
+

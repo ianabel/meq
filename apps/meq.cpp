@@ -1641,6 +1641,11 @@ int main( int argc, char **argv )
 	 */
 	meq::AxisAgreement axisCheck;
 	bool axisChecked = false;
+	// Deferred rather than acted on where it is found, so that the SOURCE
+	// check below can speak first: a psi_ax that is not an axis is the
+	// CONSEQUENCE of an unbounded axis current and its advice -- look at the
+	// guess, look at the mesh -- is wrong when that is the cause.
+	bool axisRefused = false;
 
 	{
 		// The background element count is the DOMAIN's after any refinement, not
@@ -1734,6 +1739,46 @@ int main( int argc, char **argv )
 			for ( std::size_t m = 0; m < a.size(); ++m )
 				std::printf( " a%d=%.4e", static_cast<int>( m ) + 2, a[ m ] );
 			std::printf( "\n" );
+
+			/*
+			 * IS `Modes` ENOUGH? THE RAW COEFFICIENTS CANNOT SAY, AND THAT IS
+			 * WHY THIS IS PRINTED RATHER THAN LEFT TO THE READER.
+			 *
+			 * The exterior block is diagonal in the weight `dGamma/r` with a
+			 * mass `2/( n( n-1 )( 2n-1 ) )`, so `a_n` carries `n^{3/2}` of its
+			 * own before any physics: a spectrum that is genuinely DECAYING
+			 * reads FLAT in the printed row above, and one that is flat is
+			 * growing. The energy-normalised amplitude `|a_n| sqrt( mass( n ) )`
+			 * is what decays, and the ratio of the tail to the largest is the
+			 * one number that says whether the truncation is converged. Measured
+			 * over ten modes the two views differ by a factor of 19.6.
+			 *
+			 * meq::ExteriorDtN::truncationRatio() takes the larger of the LAST
+			 * TWO amplitudes, for a parity reason recorded there: an up-down
+			 * symmetric trace has identically zero odd modes, so reading the
+			 * last one alone returns an exact zero -- perfect convergence -- for
+			 * half of all mode counts.
+			 */
+			/*
+			 * THE THRESHOLD IS CALIBRATED AND NOT CHOSEN. Swept over
+			 * `Modes` on both shipped couplings, against the relative move in
+			 * `psi_ax` from the most-resolved run of each:
+			 *
+			 *   tail     6.8e-01  3.7e-01  1.6e-01  1.0e-01  1.5e-02  1.1e-02
+			 *   psi_ax   3.1e-02  9.5e-03  2.7e-03  2.0e-03  4.2e-05  2.9e-04
+			 *
+			 * so a tail of 1e-1 is about a per cent in `psi_ax` and 1e-2 is
+			 * a few parts in ten thousand. A first cut advised above 1e-2 and
+			 * fired on examples/limited-tokamak.toml at ten modes -- which
+			 * FREE-BOUNDARY-PLAN.md section 11.6 records as CONVERGED, and
+			 * which the sweep confirms at 2.9e-04. Advice that fires on the
+			 * converged production case is noise.
+			 */
+			double const tail = exterior->truncationRatio( a );
+			std::printf( "     the retained spectrum's tail is %.3e of its "
+			             "largest mode%s\n", tail,
+			             tail > 1.0e-1
+			                 ? "; raise [boundary.exterior] Modes" : "" );
 			if ( config->getBoundary().limiter.given )
 				std::printf( "     psi_bnd = %.6e Wb/rad at the limiter ( %g, %g )\n",
 				             solver->psiBoundary(),
@@ -1793,6 +1838,18 @@ int main( int argc, char **argv )
 			}
 		}
 
+		// WHICH DEFINITION psi_ax WAS CONSTRAINED BY, because the two differ by
+		// O( h ) in position and O( h^2 ) in value and a reader comparing runs
+		// needs to know which they have. The fallback is not an error -- it is
+		// the annulus branch, where there is no closed surface to be an axis of.
+		if ( normalised && solver
+		     && solver->axisConstraint()
+		        == meq::GradShafranovSolver::AxisConstraint::LocatedAxis )
+			std::printf( "     psi_ax is constrained at %s\n",
+			             solver->axisWasLocated()
+			                 ? "the located magnetic axis, a zero of q_h"
+			                 : "the largest NODAL value: NO O-point was reachable" );
+
 		if ( axisChecked && axisCheck.located )
 		{
 			std::printf( "     the axis, as a zero of q_h: psi = %.6e at "
@@ -1800,15 +1857,85 @@ int main( int argc, char **argv )
 			             axisCheck.axis.psi, axisCheck.axis.r, axisCheck.axis.z,
 			             axisCheck.normalisedFlux );
 
-			if ( !axisCheck.agrees )
+			/*
+			 * ABOVE 1 IS INFORMATIVE UNDER OPTION 3, WHICH IT IS NOT UNDER THE
+			 * NODAL MAXIMUM, AND THAT IS WHY THIS IS HERE RATHER THAN IN THE
+			 * LIBRARY GUARD.
+			 *
+			 * checkAxis() is one sided BY DESIGN: psi_ax is the largest NODAL
+			 * value under AxisConstraint::NodalMaximum, and the peak of a
+			 * polynomial over a closed element is at least that, so a healthy
+			 * field approaches 1 FROM ABOVE and only the low side can indicate a
+			 * defect.
+			 *
+			 * Under AxisConstraint::LocatedAxis psi_ax IS the polynomial value at
+			 * an O-point, so a healthy reading is 1.0000 and a HIGH one says
+			 * something specific: checkAxis() found a DIFFERENT, higher O-point
+			 * than the one the constraint followed. That is the branch-selection
+			 * risk this constraint carries -- the search is warm started from the
+			 * previous iterate's axis, so it follows one extremum rather than
+			 * re-picking the largest each step, and on a field with several it
+			 * can settle on one that is not the core. Measured on a half-disc
+			 * with a limiter: the constraint held psi_ax = 1.176e-01 while an
+			 * O-point at 1.351e-01 sat elsewhere, reading Psi = 1.2043.
+			 *
+			 * A WARNING AND NOT A REFUSAL. Which O-point is the core is not
+			 * something MEQ can settle -- an equilibrium with several is a real
+			 * thing, and the initial guess is what chooses the branch. What can
+			 * be said is that the choice was not the obvious one, and said with
+			 * the number that shows it.
+			 */
+			if ( axisCheck.agrees && solver
+			     && solver->axisConstraint()
+			        == meq::GradShafranovSolver::AxisConstraint::LocatedAxis
+			     && solver->axisWasLocated()
+			     && axisCheck.normalisedFlux > 1.10 )
 			{
-				// stdout carries the run's report and stderr the warning, so
-				// without this the two arrive interleaved wherever the pair is
-				// piped to one file -- and the warning is about the line printed
-				// immediately above it.
 				std::fflush( stdout );
 				std::fprintf( stderr,
-					"MEQ: warning: psi_ax = %.6e is the largest NODAL value of psi_h,\n"
+					"MEQ: warning: psi_ax was constrained at the magnetic axis, so the\n"
+					"     normalised flux there should read 1 -- and it reads %.4f. A\n"
+					"     DIFFERENT O-point of q_h, at ( %.4f, %.4f ), carries psi =\n"
+					"     %.6e, which is above the one the solve followed. The axis\n"
+					"     search is warm started from the previous iterate, so it\n"
+					"     follows one extremum rather than re-picking the largest each\n"
+					"     step: on a flux with several, the branch is chosen by the\n"
+					"     initial guess. If the core is meant to be the other one, that\n"
+					"     is what to change.\n",
+					axisCheck.normalisedFlux, axisCheck.axis.r, axisCheck.axis.z,
+					axisCheck.axis.psi );
+			}
+
+			if ( !axisCheck.agrees )
+			{
+				/*
+				 * A REFUSAL AND NOT A WARNING, AND THIS WAS ARGUED RATHER THAN
+				 * INHERITED -- FREE-BOUNDARY-PLAN.md section 11.4.
+				 *
+				 * It used to warn, on the coil-outside-the-mesh precedent. That
+				 * precedent is about a configuration which is NOT WRONG IN
+				 * PRINCIPLE -- section 5.4 of that plan offers exactly it -- and
+				 * this is not that. psi_ax is what the profiles are NORMALISED
+				 * by, so a psi_ax that is not the flux at a magnetic axis is not
+				 * a bad number in one field: it is a different equilibrium, with
+				 * the current, the geometry and every profile-derived quantity
+				 * downstream of it. Writing three files describing a machine
+				 * nobody asked for is worse than writing none.
+				 *
+				 * AND IT IS ONLY THE POSITIVE DETECTION THAT REFUSES, which is
+				 * what the guard's own one-sidedness entitles us to. checkAxis()
+				 * is largest-Psi-wins and its sweep is seeded rather than
+				 * exhaustive, so it MISSES rather than false-alarms: reaching
+				 * here means an O-point was located AND its normalised flux is
+				 * far from 1, which is evidence and not an absence of it. The
+				 * `located == false` branch below stays a warning for the
+				 * mirror-image reason -- a wall-hugging annulus is a real
+				 * equilibrium somebody may want to look at, and "no extremum was
+				 * FOUND" is not "no extremum EXISTS".
+				 */
+				std::fflush( stdout );
+				std::fprintf( stderr,
+					"MEQ: psi_ax = %.6e is the largest NODAL value of psi_h,\n"
 					"     at ( %.4f, %.4f ), and that point is NOT a magnetic axis. The\n"
 					"     nearest zero of q_h carries psi = %.6e, which is a normalised\n"
 					"     flux of %.4f where the axis must read 1, and it sits %.3e away\n"
@@ -1816,10 +1943,11 @@ int main( int argc, char **argv )
 					"     evaluated over a normalised flux the plasma never reaches, so\n"
 					"     this equilibrium is NOT the one [source] describes. Look first\n"
 					"     at the initial guess, which chooses the branch, and at whether\n"
-					"     [mesh] resolves the plasma.\n",
+					"     [mesh] resolves the plasma. Nothing has been written.\n",
 					axisCheck.psiAxis, axisCheck.nodeR, axisCheck.nodeZ,
 					axisCheck.axis.psi, axisCheck.normalisedFlux,
 					axisCheck.separation, axisCheck.separationInElements );
+				axisRefused = true;
 			}
 		}
 		else if ( axisChecked )
@@ -1836,6 +1964,137 @@ int main( int argc, char **argv )
 				"     a plasma nobody asked for.\n",
 				axisCheck.psiAxis );
 		}
+
+		/*
+		 * AND IS THE TOROIDAL CURRENT DENSITY BOUNDED ON THE SYMMETRY AXIS?
+		 *
+		 * The load MEQ assembles is -( F/r, w ), and F/r IS mu_0 j_phi:
+		 *
+		 *     j_phi  =  r p'( Psi )  +  g g'( Psi ) / ( mu_0 r )
+		 *
+		 * so a finite current density on the axis requires F( 0, z ) = 0, and
+		 * F = mu_0 r^2 p' + g g' leaves only g g' there. Which Psi the axis sits
+		 * at decides whether that vanishes: psi( 0, z ) = 0 exactly, so
+		 * Psi_axis = -psi_bnd/span, and a run with [boundary.limiter] has
+		 * psi_bnd > 0 and therefore evaluates the profiles at NEGATIVE Psi -- in
+		 * the vacuum, where the physics is g = const and g g' = 0, and where an
+		 * unconfined profile extrapolates and returns a current instead.
+		 *
+		 * A REFUSAL, for the same reason as the one above and one more: the
+		 * DISCRETE load functional is then unbounded -- L2 polynomials are free
+		 * to be nonzero at r = 0 where the energy space's members are not -- so
+		 * the quadrature is the only thing making the assembly finite and the
+		 * answer depends on the RULE rather than on the mesh. It is not a bad
+		 * number in one place either: measured, psi_h develops an O( 1 ) layer
+		 * along the WHOLE axis, at a value that can exceed the true peak.
+		 *
+		 * IT CANNOT BE CHECKED AT STARTUP, which is why this costs a solve.
+		 * psi_bnd is an UNKNOWN of the bordered Newton, so the Psi the axis sits
+		 * at is not known until the solve has closed. A startup heuristic on the
+		 * keys -- limiter present, mesh reaching r = 0, ConfineToPlasma absent --
+		 * would refuse a profile that vanishes below Psi = 0 by construction,
+		 * which is a legitimate configuration. This asks F itself, so it cannot
+		 * false-refuse.
+		 */
+		if ( normalised && solver )
+		{
+			meq::GradShafranovSolver::AxisSourceCheck const axisSource =
+				solver->checkAxisSource();
+
+			/*
+			 * THE PLASMA CONTAINS THE SYMMETRY AXIS, WHICH IS NOT A LARGE ERROR
+			 * BUT THE WRONG TOPOLOGY -- AND IT IS REPORTED FIRST BECAUSE IT IS
+			 * THE WORSE OF THE TWO.
+			 *
+			 * psi( 0, z ) = 0 exactly, so Psi on the axis is -psi_bnd/span, and
+			 * a POSITIVE reading needs psi_bnd and the span to carry opposite
+			 * signs -- an ordinary positive span with a NEGATIVE psi_bnd. The
+			 * plasma then contains r = 0: current threading the machine's own
+			 * centre line. A tokamak's axis is in the vacuum by construction, so
+			 * no refinement turns this into the equilibrium that was asked for,
+			 * and reporting it as a converged answer would be reporting a
+			 * different device.
+			 *
+			 * THE ONE ESCAPE IS A g THAT VANISHES EXACTLY. F( 0, z, . ) is g g'
+			 * and nothing else, p' being killed by its own r^2, so g g' == 0
+			 * identically leaves j_phi = r p' vanishing with r whatever Psi
+			 * reads on the axis. That is the only configuration in which this is
+			 * a curiosity rather than a defect, and it is tested over a spread
+			 * of Psi rather than at one value.
+			 */
+			if ( axisSource.reachesAxis && axisSource.axisInsidePlasma
+			     && !axisSource.sourceVanishesOnAxis )
+			{
+				std::fflush( stdout );
+				std::fprintf( stderr,
+					"MEQ: THE PLASMA CONTAINS THE SYMMETRY AXIS. This is not a\n"
+					"     large error, it is the wrong topology, and the run is\n"
+					"     refused rather than reported.\n"
+					"\n"
+					"     psi = 0 on r = 0 exactly -- it is the poloidal flux through a\n"
+					"     circle of vanishing area -- so the normalised flux there is\n"
+					"     -psi_bnd/( psi_ax - psi_bnd ) = %+.4e, and the plasma is\n"
+					"     wherever that is POSITIVE. It is. psi_bnd came out %+.6e\n"
+					"     against a span of %+.6e: the two carry opposite signs, which\n"
+					"     is what puts r = 0 inside the plasma.\n"
+					"\n"
+					"     A TOKAMAK is a torus about R_0 > 0 and its symmetry axis is\n"
+					"     in the vacuum, so what this describes is toroidal current\n"
+					"     threading the machine's own centre line: | F | reads %.6e\n"
+					"     there, and F/r is mu_0 j_phi.\n"
+					"\n"
+					"     A LEVITATED DIPOLE OR A MAGNETIC MIRROR GENUINELY REACHES THE\n"
+					"     AXIS, and this is not a refusal of those -- but neither has a\n"
+					"     toroidal field, so g vanishes identically in both. That is the\n"
+					"     same fact twice: B_phi = g/r must be finite on the axis, so a\n"
+					"     plasma that reaches r = 0 cannot carry a toroidal field there.\n"
+					"     F( 0, z, . ) is g g' and nothing else, so g g' == 0 leaves\n"
+					"     j_phi = r p' going to zero with r whatever Psi reads. THIS\n"
+					"     source's does not: checked across Psi = -0.5 .. 1.5, F on the\n"
+					"     axis is non-zero. If a dipole or a mirror is what you meant,\n"
+					"     set GGPrime to zero and this passes.\n"
+					"\n"
+					"     WHAT TO LOOK AT, in order: psi_bnd is what went negative, so\n"
+					"     [boundary.limiter] and the initial guess, which together\n"
+					"     choose the branch; then whether [source] confines to the\n"
+					"     plasma at all. Nothing has been written.\n",
+					axisSource.normalisedFluxOnAxis, solver->psiBoundary(),
+					solver->psiAxis() - solver->psiBoundary(),
+					axisSource.worstOnAxis );
+				return ConfigurationError;
+			}
+
+			if ( axisSource.reachesAxis && !axisSource.bounded )
+			{
+				std::fflush( stdout );
+				std::fprintf( stderr,
+					"MEQ: the source does not vanish on the symmetry axis: | F | is\n"
+					"     %.6e at ( %.4f, %.4f ), which is %.3e of | F |'s own scale\n"
+					"     over the mesh. F/r is mu_0 j_phi, so this is an UNBOUNDED\n"
+					"     toroidal current density on r = 0, and the load ( F/r, w ) is\n"
+					"     not integrable against a discrete w that does not vanish there\n"
+					"     -- psi_h picks up a layer along the whole axis whose size is\n"
+					"     set by the quadrature rule rather than by the mesh.\n"
+					"     WHAT PUTS IT THERE: psi = 0 on the axis exactly, so the\n"
+					"     profiles are being evaluated at Psi = %.4e -- OUTSIDE the\n"
+					"     plasma, where the vacuum carries g = const and g g' must be\n"
+					"     zero. Set [source] ConfineToPlasma = true, which is what says\n"
+					"     the vacuum carries no current, or give a GGPrime that vanishes\n"
+					"     for Psi <= 0. Nothing has been written.\n",
+					axisSource.worstOnAxis, axisSource.worstR, axisSource.worstZ,
+					axisSource.relative,
+					solver->psiAxis() > solver->psiBoundary()
+					|| solver->psiAxis() < solver->psiBoundary()
+						? -solver->psiBoundary()
+						  /( solver->psiAxis() - solver->psiBoundary() )
+						: 0.0 );
+				return ConfigurationError;
+			}
+		}
+
+		// The deferred one, now that the cause has had its chance.
+		if ( axisRefused )
+			return ConfigurationError;
 
 		if ( adapt.enabled )
 		{

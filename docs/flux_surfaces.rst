@@ -108,22 +108,21 @@ minimum or saddle can be read straight off :math:`\partial q/\partial x`.
 
 .. important::
 
-   **This is not** :cpp:func:`meq::GradShafranovSolver::psiAxis`, **and the two
-   must not be reconciled.**
+   **Under the default constraint these ARE the same point**, and that is what
+   ``AxisConstraint::LocatedAxis`` means: the bordered Newton of
+   :doc:`normalised_flux` pins :math:`\psiax` at a zero of :math:`q_h`, which is
+   what this class finds. A solve and a search may still land on the two sides of
+   a face and differ by the :math:`O(h^{k+1})` jump in :math:`q_h` across it, so
+   expect agreement at the field's own order rather than to the last bit.
 
-   The solver's :math:`\psiax` is *the largest nodal value* of
-   :math:`\psi_h`. It is deliberately that rather than the maximum of the
-   polynomial, because the bordered Newton of :doc:`normalised_flux` needs a
-   constraint it can differentiate, and one nodal value is one entry of the
-   discrete unknown. The critical point is *the place where* :math:`q_h`
-   *vanishes*.
-
-   They differ by :math:`O(h)` in position and :math:`O(h^2)` in value, and
-   **both orders are independent of** :math:`k` — where :math:`\psi_h`'s own
-   error is :math:`k+1`. So on a refined high-order mesh the two readings
-   **separate** rather than converge. Neither is a defective version of the
-   other. Use the solver's for the normalisation and the finder's for the
-   geometry.
+   **Under** ``AxisConstraint::NodalMaximum`` — the control — they are different
+   quantities and must not be reconciled. The solver's :math:`\psiax` is then
+   *the largest nodal value* of :math:`\psi_h`, one entry of the discrete
+   unknown; the critical point is *the place where* :math:`q_h` *vanishes*. They
+   differ by :math:`O(h)` in position and :math:`O(h^2)` in value, and **both
+   orders are independent of** :math:`k` — where :math:`\psi_h`'s own error is
+   :math:`k+1`. So on a refined high-order mesh the two readings **separate**
+   rather than converge, and neither is a defective version of the other.
 
 Which extremum is the axis
 ~~~~~~~~~~~~~~~~~~~~~~~~~~

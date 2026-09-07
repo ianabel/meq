@@ -199,6 +199,73 @@ namespace meq
 			std::vector<double> coefficients(
 				std::function<double( double, double )> const &trace ) const;
 
+			/// The ENERGY-NORMALISED amplitude of each mode,
+			/// | a_n | sqrt( mass( n ) ), in degree order from firstMode().
+			///
+			/// THIS IS THE QUANTITY TO READ A SPECTRUM BY, AND THE RAW
+			/// COEFFICIENTS ARE NOT. The modes are orthogonal in the weight
+			/// dGamma/r but they are NOT normalised in it, so
+			///
+			///     || sum a_n C_n ||^2 = sum a_n^2 mass( n )
+			///
+			/// and mode n contributes | a_n | sqrt( mass( n ) ) to the trace's
+			/// norm -- not | a_n |. Since mass( n ) ~ 1/n^3, the conversion
+			/// factor sqrt( mass( n ) ) ~ n^( -3/2 ) is itself strongly
+			/// decaying, and reading the raw a_n therefore MISREPRESENTS the
+			/// spectrum by that factor.
+			///
+			/// The direction of the misreading is the reason this exists. A
+			/// FLAT raw spectrum -- every a_n about the same, which looks like a
+			/// truncation that is not converging -- is in energy a spectrum
+			/// already decaying like n^( -3/2 ). Conversely a spectrum that is
+			/// flat in ENERGY, which is the one that really is unconverged, has
+			/// raw coefficients GROWING like n^( +3/2 ). So the raw view is
+			/// wrong in both directions and reassuring in the one that matters.
+			///
+			/// @param a  one coefficient per mode, in degree order from n = 2,
+			///           exactly as coefficients() returns them. Its size must
+			///           be modeCount().
+			std::vector<double> modeAmplitudes(
+				std::vector<double> const &a ) const;
+
+			/// The trace's own norm in the weight dGamma/r,
+			/// sqrt( sum a_n^2 mass( n ) ) -- the root-sum-square of
+			/// modeAmplitudes(), and the scale those amplitudes are fractions
+			/// of.
+			///
+			/// Supplied rather than left to the caller for the same reason
+			/// blockEntry() is: the weight is the non-obvious part, and a
+			/// caller who reaches for a plain Euclidean norm of `a` gets a
+			/// number that is not the norm of anything.
+			double traceNorm( std::vector<double> const &a ) const;
+
+			/// How much of the spectrum is sitting at the truncation: the
+			/// larger of the LAST TWO energy amplitudes, over the largest.
+			///
+			/// This is the scalar that says whether N is enough. Small means
+			/// the retained spectrum has decayed and the modes past it would
+			/// contribute little; order one means the expansion is still
+			/// carrying weight where it was cut off, and N should rise.
+			///
+			/// THE LAST TWO AND NOT THE LAST, BECAUSE OF PARITY, AND THAT WAS
+			/// MEASURED RATHER THAN ANTICIPATED. C_n( -mu ) = ( -1 )^n C_n( mu ),
+			/// so an up-down symmetric trace -- the ordinary tokamak case --
+			/// has identically zero coefficients in every odd mode. Reading the
+			/// last mode alone then returns EXACTLY ZERO whenever the last
+			/// degree is the absent parity, which is half of all mode counts,
+			/// and zero reads as perfectly converged. A unit loop at twelve
+			/// modes reported 0.000e+00 at four radii while its raw spectrum
+			/// moved six orders. Two consecutive degrees always span both
+			/// parities, so this needs no symmetry argument from the caller.
+			///
+			/// TWO DEGENERATE ANSWERS, BOTH DELIBERATE AND NEITHER AN ERROR.
+			/// An all-zero coefficient vector returns 0.0 rather than NaN --
+			/// it is the state a coupled Newton STARTS from, so it must be
+			/// printable, and a zero trace has no unresolved tail. A single
+			/// mode returns 1.0, which is honest: with one mode there is no
+			/// evidence of decay to report.
+			double truncationRatio( std::vector<double> const &a ) const;
+
 			/// How many modes: degrees 2 .. modeCount() + 1.
 			int modeCount() const;
 			/// The lowest admissible degree, which is 2. A named constant
@@ -218,6 +285,12 @@ namespace meq
 		private:
 			/// Throws unless firstMode() <= n <= lastMode(), naming the range.
 			void requireMode( int n ) const;
+
+			/// Throws unless @a a holds exactly one coefficient per mode,
+			/// naming @a method in the message so the report points at the
+			/// call the caller made rather than at this helper.
+			void requireCoefficients( std::vector<double> const &a,
+			                          char const *method ) const;
 
 			/// mu = cos( theta ) = ( z - zCentre )/rho at ( r, z ), and rho.
 			/// One place, because the sign of ( z - zCentre ) and the choice of

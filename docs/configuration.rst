@@ -687,9 +687,10 @@ The profiles are functions of
 so :math:`\psi_{\mathrm{bnd}}` is a functional of the solution exactly as
 :math:`\psi_{\mathrm{ax}}` is. The constraint is that it equals :math:`\psi_h`
 at the **nearest potential degree of freedom** to the point given — a definition
-rather than an approximation, and the same choice :math:`\psi_{\mathrm{ax}}`
-makes in taking the largest nodal value. It is what makes the constraint
-differentiable in a form the border can use.
+rather than an approximation. It is what makes the constraint differentiable in a
+form the border can use. :math:`\psi_{\mathrm{ax}}` is pinned differently, at
+the *located magnetic axis*: the limiter contact is prescribed input and does not
+move with the solution, so a nodal value serves, while an axis is found.
 
 .. warning::
 

@@ -1027,11 +1027,30 @@ BOOST_AUTO_TEST_CASE( theLimiterCaseAlreadyHasMoreThanOneLobe )
 	            << offAxisPeak << " off it. If those have come together the "
 	            "corner degeneracy is gone, the off-axis seed rule is buying "
 	            "nothing here, and the comment above it should say so" );
-	BOOST_TEST( onAxisPeak == psiAxis,
-	            "psi_ax is " << psiAxis << " and the largest nodal value on the "
-	            "symmetry axis is " << onAxisPeak << ". They are the same "
-	            "quantity by definition, so a difference means this case is "
-	            "reading a different field from the one the border constrained" );
+	/*
+	 * AND psi_ax IS NO LONGER THAT PEAK, WHICH IS THE POINT OF OPTION 3.
+	 *
+	 * This asserted `onAxisPeak == psiAxis` -- "the same quantity by definition"
+	 * -- and under AxisConstraint::NodalMaximum it was. It is not any more:
+	 * psi_ax is the flux at the LOCATED magnetic axis, a zero of q_h, so on this
+	 * fixture it reads 1.26e-01 at the plasma while the r = 0 layer sits at
+	 * 3.08e-01. The border no longer follows the layer, which is precisely the
+	 * defect FREE-BOUNDARY-PLAN.md section 11 opens with.
+	 *
+	 * So what is asserted is the SEPARATION, and it is the stronger statement:
+	 * the layer is still there -- this fixture carries the 1/r pole of section
+	 * 11.3 and nothing here repairs the FIELD -- and psi_ax has stopped
+	 * reporting it. Both halves matter, and a test that only checked the second
+	 * would pass on a fixture whose layer had quietly gone away.
+	 */
+	BOOST_TEST( onAxisPeak > 1.5*psiAxis,
+	            "the symmetry-axis layer reads " << onAxisPeak << " and psi_ax "
+	            "reads " << psiAxis << ". This case exists because those are far "
+	            "apart: if they have come together either the layer is gone -- "
+	            "check whether the fixture's gg' still fails to vanish at r = 0, "
+	            "which is what puts it there -- or psi_ax is following the layer "
+	            "again, which would mean the axis constraint has reverted to "
+	            "AxisConstraint::NodalMaximum" );
 }
 
 
@@ -1310,8 +1329,27 @@ BOOST_AUTO_TEST_CASE( theFillDoesNotMoveASingleLobeAnswer )
 {
 	int const order = 2;
 
+	/*
+	 * gg' = 0 HERE, WHERE EVERY OTHER CASE IN THIS FILE USES 0.05, AND IT IS A
+	 * PHYSICS CHANGE RATHER THAN A TUNING ONE.
+	 *
+	 * This domain reaches r = 0, and F( 0, z, . ) is gg' and nothing else --
+	 * p' is killed by its own r^2. So a non-zero gg' is a toroidal current
+	 * density diverging like 1/r on the symmetry axis, which
+	 * GradShafranovSolver::checkAxisSource() is the guard for and
+	 * FREE-BOUNDARY-PLAN.md section 11.3 is the account of. With gg' = 0 the
+	 * axis carries no current, which is what a plasma reaching r = 0 must
+	 * satisfy -- a levitated dipole and a magnetic mirror both do, and both
+	 * have no toroidal field for exactly this reason.
+	 *
+	 * THIS CASE IS A CONTROL ABOUT THE FILL AND NOT ABOUT FREE BOUNDARY, so it
+	 * needs a solve whose support is connected and nothing more; it does not
+	 * need to be a machine. The cases above keep gg' = 0.05 deliberately,
+	 * because what they measure is connectivity on the fixture as it was
+	 * published.
+	 */
 	auto pPrime = std::make_shared<PowerProfile const>( 0.6, 1 );
-	auto ggPrime = std::make_shared<PowerProfile const>( 0.05, 1 );
+	auto ggPrime = std::make_shared<PowerProfile const>( 0.0, 1 );
 	mfem::ConstantCoefficient zero( 0.0 );
 
 	struct Result

@@ -57,6 +57,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <functional>
 #include <memory>
@@ -65,6 +66,7 @@
 #include "mfem.hpp"
 
 #include "meq/Coils.hpp"
+#include "meq/CriticalPoints.hpp"
 #include "meq/Estimator.hpp"
 #include "meq/ExteriorDtN.hpp"
 #include "meq/GradShafranov.hpp"
@@ -3298,4 +3300,656 @@ BOOST_AUTO_TEST_CASE( theTwoBordersConvergeTogether )
 	            "both borders live. Section 7.13 recorded this combination as "
 	            "failing, and that measurement predates the psi_bnd repair -- if "
 	            "it is failing again, the repair is what to look at" );
+}
+
+
+/*
+ * SECTION 11.1: RUN THE GUARD ON SECTION 7.12b's CASE. IT HAD NEVER BEEN RUN,
+ * AND THE HANDOFF FLAGGED THE GAP AS POSSIBLY FATAL TO THE GUARD.
+ *
+ * The worry was specific and it was the right one to have.
+ * meq::CriticalPointFinder::checkAxis() is one sided and largest-Psi-wins by
+ * design, so a spurious extremum costs it a MISSED detection rather than a false
+ * alarm -- and if the thing psi_ax is attained on is ITSELF an O-point of q_h,
+ * then Psi reads about 1 there and the guard AGREES with a number that is not a
+ * magnetic axis. Until it was run on the sighting that motivated half of it, the
+ * guard was not known to catch that sighting.
+ *
+ * IT CATCHES IT. Psi at the located O-point reads 0.35 to 0.56 against a
+ * threshold of 0.90, at every one of theTwoBordersConvergeTogether's four
+ * limiter radii, and REFUSES is the verdict at n = 24, 32 and 48 and at k = 2
+ * and 3 alike. The flagged gap does not materialise here.
+ *
+ * AND THE REASON IS STRUCTURAL RATHER THAN LUCK, WHICH IS WHAT MAKES IT WORTH
+ * MORE THAN ONE MEASUREMENT. What psi_ax is attained on sits at r = 0 EXACTLY --
+ * on the flat side of the half-disc, which is the domain boundary -- and an
+ * interior extremum cannot be there. Every maximum sweep() finds is at
+ * r >= 0.76. So the competition the guard runs never sees it.
+ *
+ * IT IS NOT A SPIKE AND IT IS NOT AT THE CORNER, AND SECTION 7.12b's OWN
+ * LANGUAGE IS WHAT THIS CORRECTS. The twelve largest nodal values of psi_h are
+ * all at r = 0.00000 and all read 1.0913e-01 to within 4e-05 of each other,
+ * spread over the whole axis from z = -1.42 to z = +1.06. It is a LAYER of
+ * unconstrained dofs running the entire symmetry axis, not one bad dof in the
+ * corner where Gamma meets it; the corner is merely where the argmax happens to
+ * land, and it wins by 2e-05. At k = 3 it lands on the OTHER corner. The layer
+ * does not fall with h -- 1.0916e-01, 1.0982e-01, 1.0953e-01 at n = 24, 32, 48 --
+ * against a datum of zero imposed on that very boundary and a true peak of
+ * 4.447e-02, so it is not a discretisation error converging away either. Where
+ * it comes from is section 11.3's question and this case does not answer it;
+ * what this case establishes is that psi_ax reports the layer.
+ *
+ * AND THE MECHANISM IS MEASURED, 2026-09-07. IT IS A 1/r POLE IN THE LOAD, AND
+ * WHAT PUTS IT THERE IS THE LIMITER BORDER MEETING AN UNCONFINED PROFILE.
+ *
+ * The load meq::SourceIntegrator assembles is -( F/r, w ), and F/r IS mu_0 j_phi
+ * -- the toroidal current density, j_phi = r p'( Psi ) + gg'( Psi )/( mu_0 r ).
+ * A finite current on the symmetry axis therefore REQUIRES F( 0, z ) = 0, and
+ * F = mu_0 r^2 p' + gg' leaves only gg' there: p' is protected by its own r^2
+ * and gg' is not.
+ *
+ * WHICH Psi THE AXIS SITS AT IS THE WHOLE OF IT. psi( 0, z ) = 0 exactly -- psi
+ * is the poloidal flux through a circle of radius r, which vanishes with the
+ * area -- so Psi_axis = -psi_bnd/span. On a FIXED boundary psi_bnd = 0, the axis
+ * sits at Psi = 0, and every profile in this tree vanishes there. FB-3's limiter
+ * border makes psi_bnd an unknown, it comes out POSITIVE, and the axis is then
+ * at NEGATIVE Psi -- in the vacuum, where physics says gg' = 0 because the
+ * vacuum carries g = const, and where an unconfined profile EXTRAPOLATES instead
+ * and hands back 0.05 * Psi_axis.
+ *
+ * A 2x2 factorial, this fixture's own configuration, one variable at a time:
+ *
+ *   limiter  gg'    psi_bnd     Psi_axis    F( 0, z )   psi on axis   verdict
+ *   no       0.05   0           0           0.0e+00     1.25e-04      AGREES
+ *   YES      0.05   9.21e-03    -9.22e-02   -4.61e-02   1.09e-01      REFUSES
+ *   no       0      0           0           0.0e+00     1.28e-05      AGREES
+ *   YES      0      2.13e-02    -2.21e-01   -1.4e-16    1.03e-05      AGREES
+ *
+ * The FOURTH row is the control that rules out the limiter itself: psi_bnd is
+ * 2.1e-02 and the axis sits at Psi = -0.22, deeply into the vacuum, and there is
+ * no layer -- because F( 0, z ) is machine zero. It is neither the limiter alone
+ * nor gg' alone; it is F( 0, z ) != 0.
+ *
+ * AND THE DISCRETE HALF IS WHY IT IS NOT MERELY UGLY. The CONTINUOUS problem is
+ * well posed: the energy int ( 1/r )|grad psi|^2 forces its members to vanish
+ * faster than r at the axis -- which is the physical psi ~ r^2 -- and against
+ * such test functions int ( gg'/r ) w converges. The DISCRETE space is L2
+ * polynomials, free to be nonzero at r = 0, and against those the load
+ * functional is UNBOUNDED. The quadrature is the only thing making it finite.
+ * Measured, sweeping setSourceQuadratureOrder() at fixed h: with gg' = 0 the
+ * answer is BIT-IDENTICAL at extra = 4, 8, 16 and 20 -- 1.034602461e-05 on the
+ * axis and 1.175887576e-01 off it, ten digits -- because F/r is then a
+ * polynomial; with gg' = 0.05 nothing settles, the axis reading 1.09e-01,
+ * 1.15e-01, 9.18e-02, 8.76e-02 over the same sweep and not falling with h
+ * either.
+ *
+ * THE CONTROLS THAT SAY IT IS NOT THE GEOMETRY. FB-A's fixtures are
+ * Delta*-harmonic, so F == 0 and there is no load at all.
+ * theSolverReachesTheExteriorDatumOnTheHalfDisc runs on THIS mesh, this
+ * extension and this corner and converges at 1.99 / 2.99 / 3.99, because
+ * ExteriorMatched's F is built on ExteriorDtN::basis, which carries
+ * ( 1 - mu )( 1 + mu ) explicitly "so the axis is exactly zero" -- F ~ r^2 and
+ * F/r -> 0. And examples/free-boundary-halfdisc.toml, the shipped driver case,
+ * has the same gg' table and the same RMin = 0 and is HEALTHY at Psi = 1.0036,
+ * because it carries no limiter and so keeps psi_bnd = 0.
+ *
+ * SO THE REPAIR IS PHYSICAL AND IT ALREADY EXISTS: [source] ConfineToPlasma
+ * sets F = 0 wherever Psi <= 0, which is the statement that the vacuum carries
+ * no current. examples/limited-tokamak.toml -- a limiter, a free psi_bnd and a
+ * gmsh mesh reaching r = 0, i.e. every ingredient -- sets it and reads a
+ * normalised flux of 1.0016. For a domain reaching the axis with psi_bnd free it
+ * is a PRECONDITION rather than an option, in the same sense as j >= 1 at the
+ * plasma edge. This fixture does not set it, and measured, setting it here does
+ * not converge -- which is a finding of its own and not a repair.
+ *
+ * WHAT IS ASSERTED, AND ONE OF THE TWO IS RED ON PURPOSE.
+ *
+ *   * located -- an O-point of the sense the span asks for exists at all. Green,
+ *     and a precondition: without one there is nothing to compare against and
+ *     every number below would be vacuous.
+ *   * agrees -- the reported psi_ax IS the flux at that axis. RED, because it is
+ *     not, and this tree asserts the behaviour that is WANTED rather than
+ *     recording the defect in a test that passes. psi_ax is what the profiles
+ *     are normalised by, so a wrong one is not a bad number, it is a different
+ *     equilibrium. FREE-BOUNDARY-PLAN.md section 11.5 is the three candidate
+ *     repairs and none of them is costed; this goes green when one lands.
+ *
+ * The convergence of theTwoBordersConvergeTogether is NOT in question and is not
+ * re-asserted here -- the residuals, the iteration counts and psi_ax's own
+ * constraint at 1e-17 are statements about the solve closing, and it closes.
+ */
+BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
+{
+	int const order = 2;
+	int const n = 24;
+	double const mu0 = 1.0;
+
+	auto pPrime = std::make_shared<PowerProfile const>( 0.6, 1 );
+	auto ggPrime = std::make_shared<PowerProfile const>( 0.05, 1 );
+
+	HalfDisc d = makeHalfDisc( n );
+	meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 4 );
+	mfem::ConstantCoefficient zero( 0.0 );
+	// The same guess theTwoBordersConvergeTogether uses, because this must be
+	// the SAME solve: a case that reached a different equilibrium would be
+	// measuring something else and could not qualify that section's table.
+	mfem::FunctionCoefficient guess( []( mfem::Vector const &x )
+	{
+		double const dr = x( 0 ) - 0.75;
+		double const dz = x( 1 );
+		double const t = 1.0 - ( dr*dr + dz*dz )/( 0.40*0.40 );
+		return t > 0.0 ? 0.1*t : 0.0;
+	} );
+
+	std::printf( "\n  IS psi_ax A MAGNETIC AXIS ON SECTION 7.12b's CASE? "
+	             "( k = %d, n = %d, %d modes )\n", order, n, dtn.modeCount() );
+	std::printf( "    %-10s %15s %15s %13s %13s %10s %9s\n",
+	             "limiter R", "psi_ax reported", "at", "O-point psi",
+	             "at", "Psi there", "verdict" );
+
+	int refused = 0;
+	int located = 0;
+	for ( double limiterR : { 1.05, 1.15, 1.20, 1.30 } )
+	{
+		meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, mu0 );
+		meq::GradShafranovSolver solver( *d.sub, order );
+		solver.setInitialGuess( guess );
+		solver.setNewtonControl( 1.0e-9, 1.0e-12, 150 );
+		solver.setSource( source, 0.1 );
+		solver.setBoundaryData( zero );
+		solver.setExtension( *d.path, d.gammaHMarker );
+		solver.setBoundaryFluxPoint( limiterR, 0.0 );
+		solver.setExteriorCoupling( dtn );
+		solver.solve();
+
+		// The guard's answer only means anything on a solve that closed, and
+		// this case is not the one that establishes that -- so it is REQUIRED
+		// here rather than tested.
+		BOOST_TEST_REQUIRE( !solver.newtonResiduals().empty() );
+		BOOST_TEST_REQUIRE( solver.newtonResiduals().back() < 1.0e-8,
+			"the solve at limiter R = " << limiterR << " did not converge, so "
+			"there is no converged psi_ax to ask about. "
+			"theTwoBordersConvergeTogether is where that is measured." );
+
+		meq::CriticalPointFinder finder( solver );
+		meq::AxisAgreement const check =
+			finder.checkAxis( solver.psiAxis(), solver.psiBoundary() );
+
+		std::printf( "    %-10.2f %15.9e (%5.3f,%6.3f) ", limiterR,
+		             check.psiAxis, check.nodeR, check.nodeZ );
+		if ( check.located )
+			std::printf( "%13.6e (%5.3f,%6.3f) %10.4e %9s\n",
+			             check.axis.psi, check.axis.r, check.axis.z,
+			             check.normalisedFlux,
+			             check.agrees ? "AGREES" : "REFUSES" );
+		else
+			std::printf( "%13s %13s %10s %9s\n", "none", "-", "-", "NO AXIS" );
+		std::fflush( stdout );
+
+		if ( check.located )
+			located++;
+		if ( check.located && !check.agrees )
+			refused++;
+
+		// ONCE, ON THE ROW SECTION 7.12b QUOTES: what psi_ax is attained ON.
+		// This is what corrects that section's "corner spike" -- the largest
+		// nodal values are a LAYER along the whole axis, indistinguishable from
+		// each other, and the corner wins by round-off rather than by being the
+		// feature. It decides where a repair has to point: section 11.5's first
+		// option excludes elements touching a FITTED boundary, and on this
+		// geometry that is the entire r = 0 column rather than two corners.
+		if ( limiterR > 1.19 && limiterR < 1.21 )
+		{
+			mfem::GridFunction const &psi = solver.potential();
+			mfem::FiniteElementSpace const *space = psi.FESpace();
+			mfem::Mesh *m = space->GetMesh();
+			std::vector<double> onAxis;
+			double offAxis = -std::numeric_limits<double>::infinity();
+			double offAxisR = 0.0, offAxisZ = 0.0;
+			mfem::Array<int> dofs;
+			for ( int e = 0; e < m->GetNE(); ++e )
+			{
+				space->GetElementDofs( e, dofs );
+				mfem::FiniteElement const *fe = space->GetFE( e );
+				mfem::IntegrationRule const &ir = fe->GetNodes();
+				// A LOCAL transformation, never GetElementTransformation( int ):
+				// that hands out shared scratch and resets pointers from previous
+				// calls. CLAUDE.md records this trap and six call sites that had
+				// it.
+				mfem::IsoparametricTransformation tr;
+				m->GetElementTransformation( e, &tr );
+				for ( int i = 0; i < dofs.Size() && i < ir.GetNPoints(); ++i )
+				{
+					mfem::Vector x;
+					tr.Transform( ir.IntPoint( i ), x );
+					int const dof = dofs[ i ] >= 0 ? dofs[ i ] : -1 - dofs[ i ];
+					if ( x( 0 ) < 1.0e-12 )
+						onAxis.push_back( psi( dof ) );
+					else if ( psi( dof ) > offAxis )
+					{
+						offAxis = psi( dof );
+						offAxisR = x( 0 );
+						offAxisZ = x( 1 );
+					}
+				}
+			}
+			std::sort( onAxis.begin(), onAxis.end(), std::greater<double>() );
+			// The half-disc reaches r = 0 exactly and has 168 dofs there at
+			// n = 24, so ten is not a close thing -- but the indexing below is
+			// unguarded arithmetic and a geometry without an axis would make it
+			// undefined rather than merely wrong.
+			BOOST_TEST_REQUIRE( onAxis.size() >= 10,
+				"only " << onAxis.size() << " dofs sit at r = 0, so this mesh "
+				"does not reach the axis and there is no layer to measure" );
+			std::printf( "      what psi_ax is attained on, at limiter 1.20:\n" );
+			std::printf( "        %d dofs sit at r = 0; the largest ten span "
+			             "%.6e to %.6e, a spread of %.1e\n",
+			             static_cast<int>( onAxis.size() ), onAxis.front(),
+			             onAxis[ 9 ], onAxis.front() - onAxis[ 9 ] );
+			std::printf( "        the largest anywhere off the axis is %.6e at "
+			             "( %.5f, %.5f )\n", offAxis, offAxisR, offAxisZ );
+			std::fflush( stdout );
+
+			// A LAYER, NOT A SPIKE, and the numbers say which: ten dofs strung
+			// along the whole axis agreeing to 3.5e-05 of a value of 1.09e-01 is
+			// not one bad dof. Asserted rather than only printed, because
+			// section 7.12b calls it a corner spike and a reader following that
+			// description would aim a repair at the wrong place.
+			BOOST_TEST( onAxis.front() - onAxis[ 9 ]
+			            < 1.0e-3*std::abs( onAxis.front() ),
+				"the ten largest nodal values on r = 0 span "
+				<< onAxis.front() - onAxis[ 9 ] << ", which is not the flat layer "
+				"this case reports. If psi_ax is now attained on an isolated dof "
+				"instead, section 7.12b's 'corner spike' is right after all and "
+				"this header is wrong." );
+			BOOST_TEST( onAxis.front() > 2.0*offAxis,
+				"the axis layer reads " << onAxis.front() << " against "
+				<< offAxis << " off the axis, so it no longer dominates the "
+				"field and psi_ax may have stopped being drawn to it" );
+		}
+
+		// THE FIELD HAS AN AXIS. Green, and the precondition for the rest: a
+		// monotone psi with no interior extremum is the wall-hugging annulus
+		// branch, where there is no closed surface to be an axis of and the
+		// comparison below would be empty rather than failing.
+		BOOST_TEST( check.located,
+			"no O-point of q_h anywhere on the mesh at limiter R = " << limiterR
+			<< ", so this solve has no magnetic axis at all and psi_ax cannot be "
+			"the flux at one. If this fails on the CriticalPointFinder( solver ) "
+			"ctor alone, the suspect is flux() against the raw block: the raw one "
+			"holds -q, and in even dimension that turns every Maximum into a "
+			"Minimum silently." );
+
+		/*
+		 * AND THE FIELD IS A PHYSICAL ONE. RED, and deliberately.
+		 *
+		 * THIS ASSERTION USED TO BE `check.agrees` AND THAT IS NOW A TAUTOLOGY,
+		 * which is why it was re-aimed rather than kept. Since option 3,
+		 * psi_ax IS the flux at the located magnetic axis by construction, so
+		 * Psi there reads 1 whatever the field is doing -- measured, this very
+		 * configuration reports `Psi = 1.0000 AGREES` on a solve whose axis
+		 * source is a POLE. A test that cannot fail is worse than no test.
+		 *
+		 * checkAxisSource() is what still means something, and it asks the
+		 * question the defect is actually about: F/r is mu_0 j_phi, so a source
+		 * that does not vanish on the symmetry axis is an infinite toroidal
+		 * current density there. That is a statement about the FIELD, and no
+		 * definition of psi_ax can repair it.
+		 */
+		meq::GradShafranovSolver::AxisSourceCheck const axisSource =
+			solver.checkAxisSource();
+
+		BOOST_TEST_REQUIRE( axisSource.reachesAxis,
+			"no potential node sits at r = 0 at limiter R = " << limiterR
+			<< ", so there is no axis for the source to be unbounded on and this "
+			"case is measuring nothing" );
+
+		BOOST_TEST( axisSource.bounded,
+			"| F | on the symmetry axis reads " << axisSource.worstOnAxis
+			<< " at limiter R = " << limiterR << ", which is "
+			<< axisSource.relative << " of | F |'s own scale over the mesh. F/r "
+			"IS mu_0 j_phi, so that is an UNBOUNDED toroidal current density on "
+			"r = 0, and the discrete load ( F/r, w ) is not integrable against "
+			"an L2 basis that does not vanish there -- psi_h grows a layer along "
+			"the whole axis whose size the QUADRATURE sets rather than the mesh. "
+			"WHAT PUTS IT THERE: psi = 0 on the axis exactly, so the profiles "
+			"are evaluated at Psi = " << axisSource.normalisedFluxOnAxis
+			<< ", and an unconfined gg' does not vanish there. THIS IS THE KNOWN "
+			"OPEN DEFECT and it is expected red -- FREE-BOUNDARY-PLAN.md "
+			"section 11.3. THIS IS A FIXTURE DEFECT AND NOT A CAPABILITY GAP: "
+			"examples/limited-tokamak.toml has every ingredient this case has -- "
+			"a domain reaching r = 0, a limiter, an exterior coupling and "
+			"ConfineToPlasma -- and converges in 11 Newton steps. What it has "
+			"that this does not is COILS and a PRESCRIBED CURRENT. Made physical, "
+			"this fixture becomes the amplitude-fixed moving-support problem "
+			"section 7.14 records as a non-linear EIGENVALUE problem, which is "
+			"ill posed rather than merely hard -- measured, ConfineToPlasma and "
+			"clamped profiles each fail at all four radii, while clamped WITH a "
+			"prescribed current converges in 22 steps. So the repair is to give "
+			"it the confinement physics, not to relax this assertion." );
+
+		// AND THE PLASMA DOES NOT CONTAIN THE SYMMETRY AXIS, which is a
+		// different and worse failure than the pole: not a large error but the
+		// wrong topology, a plasma threading the machine's own centre line. It
+		// is asserted separately because the two are independent -- a bounded
+		// source can still sit on a solution of the wrong shape -- and because
+		// the fill's clamp does NOT prevent it: the clamp is on Psi, and a
+		// psi_bnd that goes negative puts Psi_axis above zero, so the axis lands
+		// inside the plasma and the clamp never bites.
+		// Precomputed rather than written inline: BOOST_TEST refuses `||` in its
+		// expression decomposition ( CANT_USE_LOGICAL_OPERATOR_OR_WITHIN_THIS_
+		// TESTING_TOOL ), which is a Boost limitation and not a hint about the
+		// predicate.
+		bool const axisIsInTheVacuum = !axisSource.axisInsidePlasma
+		                               || axisSource.sourceVanishesOnAxis;
+		BOOST_TEST( axisIsInTheVacuum,
+			"the plasma CONTAINS the symmetry axis at limiter R = " << limiterR
+			<< ": Psi on r = 0 reads " << axisSource.normalisedFluxOnAxis
+			<< ", which is positive, because psi_bnd = " << solver.psiBoundary()
+			<< " and the span carry opposite signs. A TOKAMAK is a torus about "
+			"R_0 > 0 and its symmetry axis is in the vacuum. A LEVITATED DIPOLE "
+			"or a MAGNETIC MIRROR does reach the axis -- and neither has a "
+			"toroidal field, so g vanishes identically in both, which is why the "
+			"escape clause is gg' == 0 rather than a device name. This source's "
+			"gg' does not vanish, so this is the tokamak case and it is wrong." );
+	}
+
+	// The two counts as one statement each, so that a partial change is legible
+	// rather than showing up as four separate failures with no summary.
+	BOOST_TEST( located == 4,
+		"an O-point was located on only " << located << " of the 4 limiter "
+		"positions" );
+	BOOST_TEST( refused == 0,
+		"the guard refuses the reported psi_ax on " << refused << " of 4 limiter "
+		"positions. That is the section 11.1 measurement and its answer: the "
+		"guard CATCHES section 7.12b's sighting rather than agreeing with it, "
+		"which is what the handoff did not know. Zero here means the defect is "
+		"fixed." );
+}
+
+
+
+/*
+ * THE 1/r POLE IN THE LOAD, AND THE GUARD THAT REFUSES IT.
+ * FREE-BOUNDARY-PLAN.md section 11.3.
+ *
+ * meq::SourceIntegrator assembles -( F/r, w ), and F/r IS mu_0 j_phi:
+ *
+ *     j_phi  =  r p'( Psi )  +  g g'( Psi ) / ( mu_0 r )
+ *
+ * so a finite toroidal current density on the symmetry axis REQUIRES
+ * F( 0, z ) = 0. F = mu_0 r^2 p' + g g' leaves only g g' there -- p' is
+ * protected by its own r^2 and g g' is not.
+ *
+ * WHICH Psi THE AXIS SITS AT IS THE WHOLE OF IT, AND IT IS FB-3 THAT OPENS THE
+ * TRAP. psi( 0, z ) = 0 exactly, so Psi_axis = -psi_bnd/span. On a FIXED
+ * boundary psi_bnd = 0, the axis sits at Psi = 0, and every profile in this tree
+ * vanishes there -- which is why nothing had ever met this.
+ * setBoundaryFluxPoint() makes psi_bnd an unknown, it comes out POSITIVE, and
+ * the profiles are then evaluated at NEGATIVE Psi: in the VACUUM, where the
+ * physics is g = const so g g' = 0, and where an unconfined profile
+ * EXTRAPOLATES and returns a current instead.
+ *
+ * WHAT IT COSTS is not a bad number in one place. psi_h picks up an O( 1 ) layer
+ * along the WHOLE axis -- 168 dofs at r = 0 agreeing to 3.5e-05 of 1.09e-01,
+ * against a true peak of 4.45e-02 -- because the DISCRETE load functional is
+ * unbounded there: the energy space's members vanish faster than r, and L2
+ * polynomials do not. The quadrature is the only thing making the assembly
+ * finite, so the answer depends on the RULE and not on the mesh.
+ *
+ * THIS CASE IS THE 2x2 THAT ISOLATES IT, and the third row is the one that
+ * makes the other two mean anything: it HAS the limiter, its axis sits at
+ * Psi = -0.22, deep in the vacuum, and it is clean -- because F( 0, z ) is
+ * machine zero. So it is neither the limiter alone nor gg' alone.
+ *
+ * It is GREEN: what is asserted is that the guard separates the three, not that
+ * the fixture is well posed. theTwoBorderSolveReportsATrueMagneticAxis is where
+ * the defect itself is asserted, and that one is red.
+ */
+BOOST_AUTO_TEST_CASE( theAxisSourceGuardSeparatesThePoleFromTheLimiter )
+{
+	int const order = 2;
+	int const n = 24;
+	double const mu0 = 1.0;
+
+	mfem::ConstantCoefficient zero( 0.0 );
+	mfem::FunctionCoefficient guess( []( mfem::Vector const &x )
+	{
+		double const dr = x( 0 ) - 0.75;
+		double const dz = x( 1 );
+		double const t = 1.0 - ( dr*dr + dz*dz )/( 0.40*0.40 );
+		return t > 0.0 ? 0.1*t : 0.0;
+	} );
+
+	struct Cell
+	{
+		char const *label;
+		bool limiter;
+		double ggAmplitude;
+		bool expectBounded;
+	};
+	std::vector<Cell> const cells = {
+		{ "no limiter, gg' = 0.05", false, 0.05, true  },
+		{ "LIMITER,    gg' = 0.05", true,  0.05, false },
+		{ "LIMITER,    gg' = 0   ", true,  0.00, true  },
+	};
+
+	std::printf( "\n  DOES F VANISH ON THE SYMMETRY AXIS? ( k = %d, n = %d )\n",
+	             order, n );
+	std::printf( "    %-24s %15s %13s %13s %11s %9s\n",
+	             "configuration", "psi_bnd", "Psi at axis", "| F | on axis",
+	             "of scale", "verdict" );
+
+	for ( Cell const &cell : cells )
+	{
+		auto pPrime = std::make_shared<PowerProfile const>( 0.6, 1 );
+		auto ggPrime = std::make_shared<PowerProfile const>( cell.ggAmplitude, 1 );
+
+		HalfDisc d = makeHalfDisc( n );
+		meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 4 );
+		meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, mu0 );
+		meq::GradShafranovSolver solver( *d.sub, order );
+		solver.setInitialGuess( guess );
+		solver.setNewtonControl( 1.0e-9, 1.0e-12, 150 );
+		solver.setSource( source, 0.1 );
+		solver.setBoundaryData( zero );
+		solver.setExtension( *d.path, d.gammaHMarker );
+		if ( cell.limiter )
+			solver.setBoundaryFluxPoint( 1.20, 0.0 );
+		solver.setExteriorCoupling( dtn );
+		solver.solve();
+
+		BOOST_TEST_REQUIRE( !solver.newtonResiduals().empty() );
+		BOOST_TEST_REQUIRE( solver.newtonResiduals().back() < 1.0e-8,
+			"the solve did not converge for " << cell.label
+			<< ", so there is no converged psi_bnd to evaluate the source at" );
+
+		meq::GradShafranovSolver::AxisSourceCheck const check =
+			solver.checkAxisSource();
+		double const span = solver.psiAxis() - solver.psiBoundary();
+
+		std::printf( "    %-24s %15.9e %13.4e %13.4e %11.3e %9s\n",
+		             cell.label, solver.psiBoundary(),
+		             -solver.psiBoundary()/span, check.worstOnAxis,
+		             check.relative, check.bounded ? "bounded" : "UNBOUNDED" );
+		std::fflush( stdout );
+
+		// THE MESH REACHES r = 0, or every other field is meaningless. The
+		// half-disc's flat side IS the axis -- FB-A requires that and
+		// makeHalfDisc builds the background from r = 0 exactly -- so a false
+		// here is the fixture having changed underneath the case.
+		BOOST_TEST_REQUIRE( check.reachesAxis,
+			"no potential node sits at r = 0 for " << cell.label
+			<< ", so there is no axis for the source to be unbounded on and this "
+			"case is measuring nothing" );
+
+		// Psi ON THE AXIS IS -psi_bnd/span, AND THE ARITHMETIC IS CHECKED HERE
+		// rather than trusted: it is two lines, and it is what the topology
+		// refusal turns on.
+		double const spanHere = solver.psiAxis() - solver.psiBoundary();
+		BOOST_TEST( std::abs( check.normalisedFluxOnAxis
+		                      - ( -solver.psiBoundary()/spanHere ) )
+		            <= 1.0e-14*std::max( 1.0, std::abs( spanHere ) ),
+			"checkAxisSource() reports Psi on the axis as "
+			<< check.normalisedFluxOnAxis << " where -psi_bnd/span is "
+			<< ( -solver.psiBoundary()/spanHere ) << " for " << cell.label );
+
+		// AND THE AXIS IS IN THE VACUUM ON ALL THREE, which is what makes the
+		// bounded/unbounded split above the ONLY variable: a cell whose axis had
+		// drifted inside the plasma would be failing for a second reason.
+		BOOST_TEST( !check.axisInsidePlasma,
+			"the plasma contains the symmetry axis for " << cell.label
+			<< " -- Psi there is " << check.normalisedFluxOnAxis
+			<< " -- so this cell is no longer isolating what it claims to" );
+
+		// AND `g VANISHES EXACTLY` DISCRIMINATES, which is the escape clause the
+		// topology refusal allows and would be worthless if it read true for
+		// everything. gg' = 0 is the only cell it may hold on.
+		BOOST_TEST( check.sourceVanishesOnAxis == ( cell.ggAmplitude == 0.0 ),
+			"F on the axis vanishes identically = "
+			<< check.sourceVanishesOnAxis << " for " << cell.label
+			<< ", where gg' is " << cell.ggAmplitude << ". That test is what "
+			"lets a g which is exactly constant past the topology refusal, so it "
+			"must separate the two sources and not merely pass." );
+
+		BOOST_TEST( check.bounded == cell.expectBounded,
+			"F on the axis reads " << check.worstOnAxis << " for " << cell.label
+			<< ", which is " << check.relative << " of | F |'s own scale, and the "
+			"guard calls that "
+			<< ( check.bounded ? "bounded" : "unbounded" ) << " where "
+			<< ( cell.expectBounded ? "bounded" : "unbounded" )
+			<< " is what this configuration should give. F/r is mu_0 j_phi, so "
+			"the question is whether the toroidal current density is finite on "
+			"r = 0." );
+	}
+
+	// AND THE LIMITER REALLY DOES PUT THE AXIS IN THE VACUUM, which is the step
+	// the third row would otherwise leave as an assertion in a comment: without
+	// it the reader cannot tell whether that row is clean because gg' vanishes
+	// or because the limiter failed to move psi_bnd off zero.
+	//
+	// Re-solved rather than remembered, because the loop above does not keep its
+	// solvers, and a value carried out of it would be the last cell's.
+	{
+		auto pPrime = std::make_shared<PowerProfile const>( 0.6, 1 );
+		auto ggPrime = std::make_shared<PowerProfile const>( 0.0, 1 );
+		HalfDisc d = makeHalfDisc( n );
+		meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 4 );
+		meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, mu0 );
+		meq::GradShafranovSolver solver( *d.sub, order );
+		solver.setInitialGuess( guess );
+		solver.setNewtonControl( 1.0e-9, 1.0e-12, 150 );
+		solver.setSource( source, 0.1 );
+		solver.setBoundaryData( zero );
+		solver.setExtension( *d.path, d.gammaHMarker );
+		solver.setBoundaryFluxPoint( 1.20, 0.0 );
+		solver.setExteriorCoupling( dtn );
+		solver.solve();
+
+		double const span = solver.psiAxis() - solver.psiBoundary();
+		BOOST_TEST( -solver.psiBoundary()/span < -0.05,
+			"the limiter left the axis at a normalised flux of "
+			<< -solver.psiBoundary()/span << ", so the clean third row of the "
+			"table above is not evidence that gg' is what matters -- it would be "
+			"clean anyway. psi_bnd came out " << solver.psiBoundary() );
+	}
+}
+
+/*
+ * TEMPORARY: the Shafranov derivation and a short sweep around it.
+ */
+BOOST_AUTO_TEST_CASE( zzExperiment )
+{
+	int const order = 2;
+	int const n = 24;
+	double const mu0 = 1.0;
+
+	double const plasmaCurrent = 0.35;   // mu0 I_p, mu0 = 1 here
+	double const majorRadius = 0.75;     // the guess bump's centre
+	double const minorRadius = 0.40;     // its radius
+
+	// SHAFRANOV: the vertical field a given current needs to sit still.
+	double const bracket = std::log( 8.0*majorRadius/minorRadius )
+	                       + 0.5 + 0.5 - 1.5;
+	double const verticalField =
+		-plasmaCurrent/( 4.0*M_PI*majorRadius )*bracket;
+
+	// The coil pair, and B_z per unit current in it, measured rather than
+	// derived: B_z = ( 1/r ) dpsi/dr and CoilSet::psi is the exact flux.
+	double const coilR = 0.85;
+	double const coilZ = 0.95;
+	double const coilHalf = 0.07;
+
+	meq::CoilSet unit( mu0 );
+	unit.add( meq::Coil( coilR, +coilZ, coilHalf, coilHalf, 1.0 ) );
+	unit.add( meq::Coil( coilR, -coilZ, coilHalf, coilHalf, 1.0 ) );
+	double const h = 1.0e-5;
+	double const bzPerAmp =
+		( unit.psi( majorRadius + h, 0.0 ) - unit.psi( majorRadius - h, 0.0 ) )
+		/( 2.0*h*majorRadius );
+	double const coilCurrent = verticalField/bzPerAmp;
+
+	std::printf( "\n  SHAFRANOV: bracket %.4f, B_v %.6e, B_z/amp %.6e, "
+	             "coil current %.6e\n", bracket, verticalField, bzPerAmp,
+	             coilCurrent );
+	std::fflush( stdout );
+
+	mfem::ConstantCoefficient zero( 0.0 );
+	mfem::FunctionCoefficient guess( []( mfem::Vector const &x )
+	{
+		double const dr = x( 0 ) - 0.75;
+		double const dz = x( 1 );
+		double const t = 1.0 - ( dr*dr + dz*dz )/( 0.40*0.40 );
+		return t > 0.0 ? 0.1*t : 0.0;
+	} );
+
+	HalfDisc d = makeHalfDisc( n );
+	meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 4 );
+
+	std::printf( "    %-8s %-10s %7s %13s %15s %15s %10s %9s\n",
+	             "coil x", "limiter", "newton", "residual", "psi_ax",
+	             "psi_bnd", "|F| axis", "verdict" );
+	for ( double scale : { 0.0, 0.25, 0.50, 0.75 } )
+	for ( double limiterR : { 1.20 } )
+	{
+		auto pPrime = std::make_shared<PowerProfile const>( 0.6, 1 );
+		auto ggPrime = std::make_shared<PowerProfile const>( 0.05, 1 );
+		auto plasma = std::make_shared<meq::NormalisedMHDSource>(
+			pPrime, ggPrime, 0.1, mu0 );
+		plasma->setPlasmaSupport( true );
+
+		auto coils = std::make_shared<meq::CoilSet>( mu0 );
+		coils->add( meq::Coil( coilR, +coilZ, coilHalf, coilHalf,
+		                       scale*coilCurrent ) );
+		coils->add( meq::Coil( coilR, -coilZ, coilHalf, coilHalf,
+		                       scale*coilCurrent ) );
+		meq::CoilAugmentedNormalisedSource source( plasma, coils );
+
+		meq::GradShafranovSolver solver( *d.sub, order );
+		solver.setInitialGuess( guess );
+		solver.setNewtonControl( 1.0e-9, 1.0e-12, 200 );
+		solver.setSource( source, 0.1 );
+		solver.setPlasmaCurrent( plasmaCurrent );
+		solver.setBoundaryData( zero );
+		solver.setExtension( *d.path, d.gammaHMarker );
+		solver.setBoundaryFluxPoint( limiterR, 0.0 );
+		solver.setExteriorCoupling( dtn );
+		try { solver.solve(); }
+		catch ( std::exception const &e )
+		{
+			std::printf( "    %-8.2f %-10.2f  THREW %s\n", scale, limiterR,
+			             e.what() );
+			std::fflush( stdout );
+			continue;
+		}
+		double const residual = solver.newtonResiduals().empty()
+		                        ? 1.0 : solver.newtonResiduals().back();
+		meq::GradShafranovSolver::AxisSourceCheck const a =
+			solver.checkAxisSource();
+		std::printf( "    %-8.2f %-10.2f %7d %13.3e %15.8e %15.8e %10.2e %9s\n",
+		             scale, limiterR, solver.newtonIterations(), residual,
+		             solver.psiAxis(), solver.psiBoundary(), a.worstOnAxis,
+		             a.bounded ? "bounded" : "POLE" );
+		std::fflush( stdout );
+	}
 }

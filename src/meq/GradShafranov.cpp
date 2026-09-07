@@ -1,5 +1,11 @@
 #include "GradShafranov.hpp"
 
+// For AxisConstraint::LocatedAxis, which constrains psi_ax at a zero of q_h
+// rather than at the largest nodal value of psi_h. CriticalPoints.hpp
+// includes this header, so the dependency goes one way and only through
+// the .cpp.
+#include "CriticalPoints.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -1756,6 +1762,183 @@ namespace
 	double GradShafranovSolver::psiBoundary() const
 	{
 		return psiBoundaryValue;
+	}
+
+	void GradShafranovSolver::setAxisConstraint( AxisConstraint choice )
+	{
+		axisConstraintChoice = choice;
+	}
+
+	GradShafranovSolver::AxisConstraint
+	GradShafranovSolver::axisConstraint() const
+	{
+		return axisConstraintChoice;
+	}
+
+	bool GradShafranovSolver::axisWasLocated() const
+	{
+		return axisLocatedValue;
+	}
+
+	double GradShafranovSolver::axisR() const
+	{
+		return axisRValue;
+	}
+
+	double GradShafranovSolver::axisZ() const
+	{
+		return axisZValue;
+	}
+
+	GradShafranovSolver::AxisSourceCheck
+	GradShafranovSolver::checkAxisSource( double tolerance ) const
+	{
+		AxisSourceCheck result;
+		if ( !nonlinearSource || !potentialFes )
+			return result;
+
+		/*
+		 * THE NODES, NOT THE QUADRATURE POINTS, AND THAT IS THE POINT.
+		 *
+		 * A Gauss rule never samples r = 0 exactly, so asking it would report
+		 * a large finite number rather than the unbounded one -- which is the
+		 * very substitution that hides this defect in the assembly. The closed
+		 * Gauss-Lobatto basis this solver builds its volume spaces on puts
+		 * nodes ON the element boundary, so a mesh reaching the axis HAS nodes
+		 * at r = 0 exactly, and F there is the limit the load is divided by r
+		 * against.
+		 *
+		 * A basis whose node count does not match its dof count -- which no
+		 * space MEQ builds has -- would fall out of the inner loop early and
+		 * report reachesAxis == false, which is the safe direction for a
+		 * diagnostic: it declines to answer rather than answering wrongly.
+		 */
+		mfem::Array< int > dofs;
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			potentialFes->GetElementDofs( e, dofs );
+			mfem::FiniteElement const *element = potentialFes->GetFE( e );
+			mfem::IntegrationRule const &nodes = element->GetNodes();
+
+			// A LOCAL transformation. GetElementTransformation( int ) hands out
+			// shared scratch and resets pointers obtained from previous calls;
+			// six sites in this tree had to be repaired for exactly that.
+			mfem::IsoparametricTransformation transformation;
+			mesh.GetElementTransformation( e, &transformation );
+
+			for ( int i = 0; i < dofs.Size() && i < nodes.GetNPoints(); ++i )
+			{
+				mfem::Vector point;
+				transformation.Transform( nodes.IntPoint( i ), point );
+
+				int const dof = dofs[ i ] >= 0 ? dofs[ i ] : -1 - dofs[ i ];
+				double const iterate = potentialGf( dof );
+
+				// The SCALE is the source as it was actually assembled, at the
+				// iterate's own psi, because that is what the axis value has to
+				// be judged large or small against.
+				double const scale = std::abs(
+					nonlinearSource->f( point( 0 ), point( 1 ), iterate ) );
+				if ( scale > result.sourceScale )
+					result.sourceScale = scale;
+
+				// EXACTLY zero, with no tolerance. The axis is a mesh boundary
+				// placed there deliberately -- FB-A requires the domain to reach
+				// r = 0 exactly and tools/mesh/halfdisc.py asserts it without a
+				// tolerance for the same reason -- so a node either is on it or
+				// is not.
+				if ( point( 0 ) != 0.0 )
+					continue;
+
+				result.reachesAxis = true;
+
+				/*
+				 * AND ON THE AXIS, psi = 0 RATHER THAN THE ITERATE. THE FIRST
+				 * VERSION USED THE ITERATE AND REFUSED A HEALTHY RUN.
+				 *
+				 * psi( 0, z ) = 0 EXACTLY for any axisymmetric field with
+				 * bounded B -- psi is the poloidal flux through a circle of
+				 * radius r, which vanishes with the area -- so that is the value
+				 * the physical condition F( 0, z ) = 0 is a condition ON, and it
+				 * is what makes this a statement about the PROBLEM rather than
+				 * about how far a particular solve has drifted.
+				 *
+				 * Asking the iterate instead measures the LAYER rather than its
+				 * cause, and it cannot separate the two cases: psi_h on the axis
+				 * is never exactly zero, so a healthy run reads a small non-zero
+				 * F there -- measured, 6.2e-05 of scale on
+				 * examples/free-boundary-halfdisc.toml, which a tolerance tight
+				 * enough to catch the real thing refuses. At psi = 0 the healthy
+				 * case is the table's own value at Psi = -psi_bnd/span, which is
+				 * zero to round-off, and the failing case is 4.6e-02 against a
+				 * scale of 3e-01. There is nothing in between.
+				 */
+				double const onAxis = std::abs(
+					nonlinearSource->f( point( 0 ), point( 1 ), 0.0 ) );
+				if ( onAxis > result.worstOnAxis )
+				{
+					result.worstOnAxis = onAxis;
+					result.worstR = point( 0 );
+					result.worstZ = point( 1 );
+				}
+			}
+		}
+
+		if ( !result.reachesAxis )
+			return result;
+
+		// A source that is identically zero everywhere is bounded on the axis
+		// by any reading, and dividing by its scale would be 0/0.
+		result.relative = result.sourceScale > 0.0
+			? result.worstOnAxis/result.sourceScale : 0.0;
+		result.bounded = result.relative <= tolerance;
+
+		/*
+		 * AND IS THE SYMMETRY AXIS INSIDE THE PLASMA? A SEPARATE AND WORSE
+		 * QUESTION THAN WHETHER THE LOAD IS BOUNDED.
+		 *
+		 * psi( 0, z ) = 0 exactly, so Psi there is -psi_bnd/span, and
+		 * insidePlasma()'s test makes the axis part of the plasma when that is
+		 * positive. A tokamak's axis is in the vacuum by construction, so a
+		 * positive reading is the wrong TOPOLOGY rather than a large error.
+		 */
+		double const span = psiAxisValue - psiBoundaryValue;
+		if ( span != 0.0 )
+			result.normalisedFluxOnAxis = ( 0.0 - psiBoundaryValue )/span;
+		result.axisInsidePlasma = result.normalisedFluxOnAxis > 0.0;
+
+		/*
+		 * DOES F VANISH ON THE AXIS FOR EVERY psi, NOT MERELY FOR THIS ONE?
+		 *
+		 * F( 0, z, . ) is g g' and nothing else, so this asks whether g g' is
+		 * identically zero -- the one configuration in which an axis inside the
+		 * plasma still carries no current, since j_phi = r p' vanishes with r
+		 * whatever p' does.
+		 *
+		 * OVER A SPREAD OF Psi, AND BOTH SIDES OF THE EDGE. Asking at psi = 0
+		 * alone cannot tell `g g' == 0` from `g g'( Psi_axis ) == 0 by luck`;
+		 * and asking only at Psi <= 0 would read zero for ANY profile once
+		 * setPlasmaSupport() is on, since F is switched off out there by
+		 * construction. Sampling across the plasma is what makes this a
+		 * statement about g.
+		 *
+		 * EXACTLY zero, with no tolerance, because that is what is being
+		 * claimed: a profile that merely happens to be small on the axis still
+		 * puts a 1/r in the load, and `bounded` above is where a small one is
+		 * judged.
+		 */
+		double const sample[] = { -0.5, 0.0, 0.25, 0.5, 0.75, 1.0, 1.5 };
+		result.sourceVanishesOnAxis = true;
+		for ( double psiN : sample )
+		{
+			double const psi = psiBoundaryValue + psiN*span;
+			if ( nonlinearSource->f( 0.0, result.worstZ, psi ) != 0.0 )
+			{
+				result.sourceVanishesOnAxis = false;
+				break;
+			}
+		}
+		return result;
 	}
 
 	/*
@@ -3670,6 +3853,199 @@ namespace
 		 * and so that a psi_ax the source refuses still throws from here, which is
 		 * what the line search below is catching.
 		 */
+		/*
+		 * AxisConstraint::LocatedAxis's SCRATCH AND ITS WARM START.
+		 *
+		 * The constraint point is a zero of q_h, so it has to be FOUND once per
+		 * Jacobian. Seeded from the previous accepted iterate's axis it is a
+		 * handful of Newton steps in one element; from cold it is a sweep. The
+		 * warm start is what keeps the cost small AND keeps the iteration
+		 * following ONE axis rather than re-running a competition between every
+		 * O-point in the field at every step -- which is the stability objection
+		 * to this constraint, and the answer to it.
+		 *
+		 * Hoisted out of the loop because both are O( dofs ) allocations and the
+		 * loop runs them per Jacobian.
+		 */
+		/*
+		 * NPC ONLY, AND REFUSED RATHER THAN DOWNGRADED. Under the condensation
+		 * psi is a function of the trace through every element's source, so the
+		 * row would have to be DIFFERENCED against 3( k + 1 ) trace dofs with a
+		 * root find inside each difference -- and the trap this file already
+		 * records for a differenced border applies twice over there, since a
+		 * local solve that ran out of iterations makes the difference meaningless.
+		 * Silently falling back to the nodal maximum would change which
+		 * equilibrium is reported without saying so, which is the one thing this
+		 * solver refuses to do.
+		 */
+		if ( axisConstraintChoice == AxisConstraint::LocatedAxis && !npcOrdering
+		     && hasNormalisation )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::solve: AxisConstraint::LocatedAxis "
+				"needs NonlinearOrdering::NPC. Under the condensation psi is a "
+				"function of the trace, so the border row would have to be "
+				"differenced with a root find inside every difference. Ask for "
+				"AxisConstraint::NodalMaximum deliberately if the condensation "
+				"is what you want" );
+
+		mfem::GridFunction axisFlux( fluxFes.get() );
+		mfem::GridFunction axisPotential( potentialFes.get() );
+		double previousAxisR = 0.0;
+		double previousAxisZ = 0.0;
+		bool havePreviousAxis = false;
+
+		// Where the constraint was last evaluated, for the border row: the
+		// element and the shape functions there. Filled by peakAt().
+		int constraintElement = -1;
+		mfem::Vector constraintShape;
+		bool constraintLocated = false;
+
+		/*
+		 * THE CONSTRAINT POINT: psi_h THERE, AND WHAT THE BORDER ROW NEEDS.
+		 *
+		 * Under AxisConstraint::NodalMaximum this is the largest nodal value and
+		 * `dof` is the whole of the row. Under LocatedAxis it is psi_h at the
+		 * magnetic axis and the row is the shape functions of the axis element,
+		 * which are computed here rather than recovered later -- the reference
+		 * coordinates are the root finder's own and re-deriving them by
+		 * TransformBack would be inviting the clamped-inverse-map failure this
+		 * tree records.
+		 *
+		 * A FALLBACK RATHER THAN A THROW WHEN NO O-POINT IS REACHED. That is the
+		 * wall-hugging annulus branch, where psi rises monotonically to the
+		 * boundary and there IS no closed surface to be an axis of. Refusing to
+		 * iterate would make the solver unable to reach a state it may have to
+		 * pass through; falling back to the nodal maximum keeps the constraint
+		 * well defined and axisWasLocated() records that it happened.
+		 */
+		auto locateAxisPoint = [ & ]( mfem::Vector const &state,
+		                              double normalisation, double &value,
+		                              int *element, int *dof ) -> bool
+		{
+			constraintElement = -1;
+			constraintShape.SetSize( 0 );
+
+			// q, NOT the raw block. DarcyForm holds -q, and in even dimension
+			// index( -v ) = index( v ), so a finder handed the raw block puts
+			// every Maximum where a Minimum is and the classification below
+			// silently picks the wrong extremum. CriticalPoints.hpp records this
+			// as the failure to watch for.
+			for ( int i = 0; i < blockOffsets[ 1 ]; ++i )
+				axisFlux( i ) = -state( i );
+			for ( int i = blockOffsets[ 1 ]; i < blockOffsets[ 2 ]; ++i )
+				axisPotential( i - blockOffsets[ 1 ] ) = state( i );
+
+			// THE SENSE FOLLOWS THE SPAN, exactly as checkAxis() does: the
+			// plasma is where ( psi - psi_bnd ) carries the span's sign, so a
+			// positive span puts the axis at a maximum. Guessing it instead
+			// would meet AxisSense::Either's refusal on every real problem.
+			//
+			// THE ITERATE'S span, NOT psiAxisValue's. The member is only written
+			// at the END of the solve, so inside the loop it still holds the
+			// value setSource() was given -- which is the initial GUESS, and on a
+			// problem whose span changes sign against it this would pick the
+			// wrong extremum for the whole iteration.
+			double const span = normalisation - sB;
+			CriticalPointType const wanted = span >= 0.0
+				? CriticalPointType::Maximum : CriticalPointType::Minimum;
+
+			CriticalPointFinder finder( axisFlux, axisPotential );
+			AxisSense const sense = span >= 0.0 ? AxisSense::Maximum
+			                                    : AxisSense::Minimum;
+
+			CriticalPoint best;
+			bool found = false;
+
+			/*
+			 * WARM: A SEEDED SEARCH FROM THE LAST AXIS, WHICH IS WHAT MAKES THIS
+			 * AFFORDABLE AND WHAT MAKES IT FOLLOW ONE AXIS.
+			 *
+			 * tryFindAxisFrom() roots the seed's element and widens by rings,
+			 * stopping at the first ring with a clean root: measured, ONE element
+			 * when the seed is still on the answer and 19 of 2048 when it is a
+			 * whole element away. A sweep roots every element, so the seeded
+			 * cost is bounded by a ring count rather than by the mesh and the
+			 * ratio IMPROVES with refinement -- which is the property a Newton
+			 * loop needs.
+			 *
+			 * And it is what answers the stability objection to this constraint:
+			 * following the extremum nearest the previous one is a continuation
+			 * in the axis rather than a fresh competition between every O-point
+			 * in the field at every step.
+			 */
+			if ( havePreviousAxis )
+				found = finder.tryFindAxisFrom( previousAxisR, previousAxisZ,
+				                                sense, best );
+
+			// COLD, or after the warm start lost it: the extremum carrying the
+			// largest normalised flux, which is checkAxis()'s own rule and the
+			// best available guess at which of several is the core.
+			if ( !found )
+			{
+				std::vector< CriticalPoint > const all = finder.sweep();
+				double bestScore = 0.0;
+				for ( std::size_t i = 0; i < all.size(); ++i )
+				{
+					if ( all[ i ].type != wanted )
+						continue;
+
+					double const score = span >= 0.0 ? all[ i ].psi
+					                                 : -all[ i ].psi;
+					if ( !found || score > bestScore )
+					{
+						found = true;
+						bestScore = score;
+						best = all[ i ];
+					}
+				}
+			}
+
+			if ( !found || best.element < 0 )
+				return false;
+
+			/*
+			 * THE SHAPE FUNCTIONS AT THE AXIS, ON ITS ELEMENT, AT THE ROOT
+			 * FINDER'S OWN REFERENCE COORDINATES.
+			 *
+			 * THE FIRST VERSION RE-INVERTED THE MAP WITH TransformBack AND IT
+			 * WAS BOTH WRONG AND UNNECESSARY. Newton on q_h = 0 works in
+			 * reference space, so the coordinates already exist exactly and
+			 * asking for them back is free; re-deriving them met the failure
+			 * CLAUDE.md records for a clamped inverse map. Measured on a shipped
+			 * example: TransformBack came back with a residual of 5.1e-02 on an
+			 * element of size 5e-02 -- the whole element -- because a zero of a
+			 * DISCONTINUOUS q_h can legitimately lie a little outside its own
+			 * element, which is CriticalPoint::overshoot, and the inverse map
+			 * does not converge there. It sent every solve down the
+			 * nodal-maximum fallback while the driver's own sweep found the
+			 * O-point perfectly well two lines later.
+			 */
+			mfem::IntegrationPoint const reference = best.referencePoint();
+
+			mfem::FiniteElement const *fe = potentialFes->GetFE( best.element );
+			constraintShape.SetSize( fe->GetDof() );
+			fe->CalcShape( reference, constraintShape );
+
+			mfem::Array< int > dofs;
+			potentialFes->GetElementDofs( best.element, dofs );
+
+			value = 0.0;
+			for ( int i = 0; i < dofs.Size() && i < constraintShape.Size(); ++i )
+				value += constraintShape( i )
+				         *state( blockOffsets[ 1 ] + dofs[ i ] );
+
+			constraintElement = best.element;
+			previousAxisR = best.r;
+			previousAxisZ = best.z;
+			havePreviousAxis = true;
+
+			if ( element )
+				*element = best.element;
+			if ( dof )
+				*dof = -1;
+			return true;
+		};
+
 		auto peakAt = [ & ]( mfem::Vector const &state, double normalisation,
 		                     int *element, int *dof )
 		{
@@ -3678,6 +4054,22 @@ namespace
 
 			if ( normalisedSource )
 				normalisedSource->setNormalisation( normalisation, sB );
+
+			// OPTION 3. The located axis where it is asked for and reachable;
+			// the nodal maximum below otherwise, with constraintLocated saying
+			// which happened so that the row is built to match and the run can
+			// report it.
+			constraintLocated = false;
+			if ( axisConstraintChoice == AxisConstraint::LocatedAxis )
+			{
+				double located = 0.0;
+				if ( locateAxisPoint( state, normalisation, located,
+				                      element, dof ) )
+				{
+					constraintLocated = true;
+					return located;
+				}
+			}
 
 			double best = -std::numeric_limits<double>::infinity();
 			int bestIndex = -1;
@@ -4010,7 +4402,44 @@ namespace
 			mfem::Array<int> borderDofs;
 			mfem::Vector border;
 
-			if ( npcOrdering )
+			if ( npcOrdering && constraintLocated )
+			{
+				/*
+				 * OPTION 3's ROW, AND IT IS EXACT FOR THE SAME REASON -e_j IS.
+				 *
+				 * G = s - psi_h( x* ) with x* a zero of q_h, so
+				 *
+				 *   dG/dlambda = -[ dpsi_h/dlambda |_x*
+				 *                   + grad( psi_h )( x* ) . dx* / dlambda ]
+				 *
+				 * and grad_bar( psi ) = r q, so grad( psi_h )( x* ) = 0 at a zero
+				 * of q_h IDENTICALLY. The position term vanishes -- the envelope
+				 * theorem -- so no sensitivity of the root find is needed and
+				 * nothing here is differenced. Under NPC psi is part of the
+				 * unknown, so dpsi_h( x* )/d( unknown ) is just the shape
+				 * functions at x* on that element's potential dofs.
+				 *
+				 * -e_j is the special case where x* lands on a node.
+				 */
+				mfem::Array< int > potentialDofs;
+				potentialFes->GetElementDofs( constraintElement, potentialDofs );
+
+				int const m = std::min( potentialDofs.Size(),
+				                        constraintShape.Size() );
+				borderDofs.SetSize( m );
+				border.SetSize( m );
+				for ( int i = 0; i < m; ++i )
+				{
+					// SHIFTED INTO THE FULL VECTOR. GetElementDofs indexes the
+					// potential SPACE and the border indexes the unknown, which
+					// carries the flux block first -- the same shift psi_bnd's
+					// dof needs, and the same one that read the flux block
+					// instead when it was missing there.
+					borderDofs[ i ] = blockOffsets[ 1 ] + potentialDofs[ i ];
+					border( i ) = coupled ? -constraintShape( i ) : 0.0;
+				}
+			}
+			else if ( npcOrdering )
 			{
 				// ONE ENTRY, EXACT, NOT DIFFERENCED. max psi_h is the argDof'th
 				// entry of the unknown, so d( max psi_h )/d( unknown ) is the unit
@@ -4497,6 +4926,11 @@ namespace
 
 		psiAxisValue = s;
 		psiBoundaryValue = sB;
+		// Where the constraint ended up, so a caller can tell a located axis from
+		// the annulus-branch fallback without re-running a search of its own.
+		axisLocatedValue = constraintLocated;
+		axisRValue = constraintLocated ? previousAxisR : 0.0;
+		axisZValue = constraintLocated ? previousAxisZ : 0.0;
 		if ( currentIsUnknown )
 		{
 			currentScaleValue = sL;

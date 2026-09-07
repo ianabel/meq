@@ -1466,7 +1466,7 @@ BOOST_AUTO_TEST_CASE( theDriverReachesTheExteriorCoupling )
 		return t > 0.0 ? 0.1*t : 0.0;
 	} );
 
-	meq::ExteriorDtN const dtn( 0.0, rhoGamma, 4 );
+	meq::ExteriorDtN const dtn( 0.0, rhoGamma, 16 );
 
 	auto solveOnce = [ & ]( bool coupled )
 	{

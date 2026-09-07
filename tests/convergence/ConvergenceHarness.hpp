@@ -257,12 +257,28 @@ namespace tests
 		bool converged;
 		std::vector<double> residuals;
 		/// The converged normalisation, and the constraint residual
-		/// psi_ax - max psi_h that says whether it is self consistent.
+		/// The solver's OWN constraint residual, GradShafranovSolver::
+		/// normalisationResidual(), which is what says the border closed.
+		///
+		/// ASK THE SOLVER RATHER THAN RECOMPUTING IT. This used to be checked by
+		/// taking max psi_h here and differencing -- correct while psi_ax WAS
+		/// the largest nodal value, and a comparison between two DEFINITIONS
+		/// since AxisConstraint::LocatedAxis became the default. The two differ
+		/// by O( h^2 ), so that check measured the definition gap and failed on
+		/// perfectly closed borders.
 		double psiAxis;
 		double constraint;
-		/// The extreme nodal values of psi_h. psiMax is what psi_ax is
-		/// constrained to equal, so the pair is the whole self-consistency
-		/// statement.
+		/// The extreme nodal values of psi_h, kept as a MEASUREMENT rather than
+		/// as the constraint: psi_ax is the flux at the located magnetic axis,
+		/// so psiMax is a second reading of the same field and the gap between
+		/// them is the O( h^2 ) difference between the two definitions.
+		///
+		/// The gap is NOT one-signed, which is worth knowing before asserting on
+		/// it: the two constraints solve DIFFERENT equations -- psi_ax is what
+		/// the profiles are normalised by -- and converge to different discrete
+		/// equilibria, so neither value brackets the other. Measured, psi_ax
+		/// sits below psiMax on one mesh of a rotating sweep and above it on the
+		/// next two.
 		double psiMin, psiMax;
 	};
 

@@ -109,16 +109,43 @@ zero. That locality is measured, not assumed.
 
 .. note::
 
-   :math:`\psiax` **is the largest NODAL value, and that is a definition rather
-   than an approximation.** It differs from the maximum of the polynomial by
-   :math:`O(h^{k+1})` and both converge to :math:`\max\psi`. The nodal one is
-   chosen because it is what makes the constraint differentiable in a form the
-   border can use.
+   :math:`\psiax` **is the flux at the located magnetic axis** — the point where
+   the flux :math:`q_h` vanishes — and that is a definition rather than an
+   approximation. :cpp:func:`meq::GradShafranovSolver::setAxisConstraint`
+   selects it; ``AxisConstraint::LocatedAxis`` is the default.
+   ``AxisConstraint::NodalMaximum`` takes the largest nodal value of
+   :math:`\psi_h` instead, and is kept as a control: the two differ by
+   :math:`O(h^2)` in value and :math:`O(h)` in position, **both independent of**
+   :math:`k`, so on a refined high-order mesh they separate rather than converge.
 
-Under the default nonlinear ordering — see :ref:`nonlinear-ordering` — two of
-the three bordered quantities are not finite differences at all: with
-:math:`\psi` an unknown of the system, :math:`b` is exactly :math:`-e_j` (one
-entry) and :math:`d` is exactly 1.
+**The located axis costs nothing in the Jacobian, which is the envelope
+theorem.** :math:`x^*` moves with the solution, so the chain rule gives
+
+.. math::
+
+   \frac{dG}{d\lambda}
+     = -\left[ \left.\frac{\partial\psi_h}{\partial\lambda}\right|_{x^*}
+       + \nabla\psi_h(x^*)\cdot\frac{\partial x^*}{\partial\lambda} \right]
+
+and :math:`\bar\nabla\psi = r\,q`, so :math:`\nabla\psi_h(x^*) = 0` at a zero
+of :math:`q_h` **identically**. The position term vanishes, no sensitivity of the
+root find is needed, and the row is the potential shape functions of
+:math:`x^*`'s element evaluated at :math:`x^*` — exact, undifferenced, one
+element.
+
+Under the default nonlinear ordering — see :ref:`nonlinear-ordering` — none of
+the bordered quantities is a finite difference: with :math:`\psi` an unknown of
+the system the row is that shape-function row (:math:`-e_j` in the special case
+where the axis lands on a node) and :math:`d` is exactly 1. The located-axis
+constraint **requires** that ordering and is refused under the condensation,
+where :math:`\psi` is a function of the trace and the row would have to be
+differenced with a root find inside every difference.
+
+The search is **warm started** from the previous iterate's axis, which is what
+keeps it affordable and what keeps the iteration following one axis rather than
+re-running a competition between every extremum at every step. Seeded on the
+answer it roots a single element; a whole element away, nineteen of two thousand.
+The cost is bounded by a ring count rather than by the mesh.
 
 .. _normalised-analytic-column:
 
@@ -270,35 +297,44 @@ its own.
 
 .. _normalised-axis-check:
 
-The constraint cannot tell an axis from a spike
------------------------------------------------
+What the axis check is for
+--------------------------
 
-:math:`\psiax` is the **largest nodal value** of :math:`\psi_h`, which is what
-makes the border row sparse. Nothing in that definition says the largest nodal
-value sits at a magnetic axis, and the constraint cannot notice the difference:
-:math:`G = \psiax - \max\psi_h` is satisfied at machine zero by a spurious nodal
-spike exactly as it is by an axis. So a run can converge, report the constraint
-at ``0.000e+00``, deliver a prescribed current to seven figures, and describe an
-equilibrium nobody asked for.
+Constraining :math:`\psiax` at a located axis removes the failure that
+motivated this check: a border on the largest nodal value is satisfied at machine
+zero by a spurious nodal spike exactly as it is by an axis, so a run could
+converge, report its constraint at ``0.000e+00``, deliver a prescribed current to
+seven figures, and describe an equilibrium nobody asked for.
 
-MEQ therefore locates the axis independently, as a zero of the **flux**
-:math:`q_h` — a solved variable carrying the potential's own order rather than a
-derivative of one — and reports the normalised flux there:
+MEQ still locates the axis independently after the solve, as a zero of the
+**flux** :math:`q_h` — a solved variable carrying the potential's own order
+rather than a derivative of one — and reports the normalised flux there:
 
 .. code-block:: text
 
-   psi_ax = 1.039163e-01 Wb/rad, constraint psi_ax - max psi_h = -1.388e-17
-   the axis, as a zero of q_h: psi = 1.039431e-01 at ( 1.0919, -0.0000 ),
-        normalised flux 1.0003
+   psi_ax = 1.039325e-01 Wb/rad, constraint psi_ax - max psi_h = -5.551e-17
+   psi_ax is constrained at the located magnetic axis, a zero of q_h
+   the axis, as a zero of q_h: psi = 1.039269e-01 at ( 1.0919, -0.0000 ),
+        normalised flux 0.9999
 
 **That last number must be 1.** :math:`\Psi` at the magnetic axis is 1 by
 definition when :math:`\psiax` is the axis flux, so the reading is a direct
-statement about the quantity the profiles consume. It approaches 1 from above,
-because the peak of a polynomial over a closed element is at least its largest
-nodal value; refining the example above takes it from 1.0003 to 1.0000. A
-reading materially below 1 means the profiles were evaluated over a range the
-plasma never reaches, and MEQ warns — a warning rather than a refusal, since the
-run converged and its files are still worth having.
+statement about the quantity the profiles consume. Under the default constraint
+it is very nearly 1 by construction, and the check is correspondingly weaker —
+what it still catches is a run with **no** interior extremum at all, and one
+where the extremum carrying the largest :math:`\Psi` is not the one the
+constraint followed. A reading materially below 1 means the profiles were
+evaluated over a range the plasma never reaches, and MEQ **refuses**: on a
+normalised run :math:`\psiax` is what the profiles are divided by, so a wrong one
+is a different equilibrium rather than a bad number.
+
+.. important::
+
+   The guard that carries the weight on a domain reaching :math:`r = 0` is a
+   different one — see :ref:`running-refusals`. :math:`F/r` is
+   :math:`\mu_0 j_\phi`, so a source that does not vanish on the symmetry axis
+   is an infinite current density there, and that is a statement about the
+   **field** which no definition of :math:`\psiax` can repair.
 
 A run whose flux carries no interior extremum at all is warned about separately:
 that is a plasma with no closed surface around an axis, and :math:`\psiax` is
