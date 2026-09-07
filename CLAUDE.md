@@ -35,12 +35,13 @@ converging quadratically. `tests/convergence/SolovievConvergence.cpp` and
   `setSource( NormalisedSource &, double )` closes it by a bordered Newton, with
   the two non-local terms in the border. `HighBetaConvergence` is the acceptance
   criterion and it is green. `meq::NormalisedMHDSource` is the production source
-  built on two `Profile`s and **is not yet reachable from a TOML file**.
+  built on two `Profile`s and is reachable from a TOML file as `[source] Type =
+  "mhd"` with `Normalised = true`, through `meq::makeNormalisedSource`.
 
 **MEQ is runnable.** `apps/meq.cpp` is the driver, `MEQ_BUILD_APP` defaults
 `ON`, and `meq config.toml` parses, builds the mesh and source, solves — with
 the adaptive loop if asked — and writes the same equilibrium **three times**,
-with exit codes 0/1/2/3 as `DRIVER-PLAN.md` §5 specifies:
+with exit codes 0/1/2/3 as `docs/running.rst` specifies:
 
 | | |
 |---|---|
@@ -342,7 +343,8 @@ file stays the technical record; that one is only about what to do first.
 | 6 | Adaptivity: the residual estimator and mesh update | **done** |
 
 Beyond the port, three campaigns have their own plans and their own staging:
-`FLOW-PLAN.md` (toroidal flow, FL-0 to FL-8, **done**), `INVERSION-PLAN.md`
+`docs/rotation.rst` (toroidal flow, FL-0 to FL-8, **done**, and the plan file
+converted to documentation), `INVERSION-PLAN.md`
 (solution inversion, IN-A to IN-P **done**, IN-5 and IN-6 open) and
 `FREE-BOUNDARY-PLAN.md` (FB-A and FB-0 **done 2026-09-04**, FB-1 and FB-2 part
 built, FB-3 to FB-6 open). Each has a section below; the free-boundary one is
@@ -903,7 +905,7 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 git submodule update --init --recursive     # extern/toml11
 cmake -B build
 cmake --build build -j4
-cd build && OMP_NUM_THREADS=4 ctest -j4      # ~225 s, 37/37 -- see below
+cd build && OMP_NUM_THREADS=4 ctest -j4      # 38/38 -- see below
 ```
 
 **RUN IT `-j4` WITH `OMP_NUM_THREADS=4`, WHICH IS 3.2x FASTER AND MEASURED.**
@@ -917,8 +919,10 @@ product at the core count is what pays:
 | `-j16`, `OMP=1` | 265.2 s | 350% |
 | **`-j4`, `OMP=4`** | **223.2 s** | 514% |
 
-37/37 in every configuration, which is the correctness half: nothing in the suite
-depends on a thread count. **`OMP_NUM_THREADS` is deliberately NOT pinned in
+37/37 in every configuration when that table was taken, and **38/38 today** —
+the count moves as cases are added, so read the table's ratios rather than its
+absolute seconds. Nothing in the suite depends on a thread count, which is the
+correctness half. **`OMP_NUM_THREADS` is deliberately NOT pinned in
 `tests/CMakeLists.txt`** — a plain `ctest` must still exercise threaded assembly
 as it ships, and pinning it would quietly change what the bit-exactness cases
 test.
@@ -2520,8 +2524,9 @@ more residual evaluation".
 
 ### What is not done
 
-`ψ_bnd` **is now settable, and is still not an unknown.** 2026-09-05:
-`setNormalisation( ψ_ax, ψ_bnd )` is the interface and the profiles take
+`ψ_bnd` **is settable AND is an unknown, and this section said otherwise until
+2026-09-06.** Two things landed on 2026-09-05 and only the first was written up.
+The first: `setNormalisation( ψ_ax, ψ_bnd )` is the interface and the profiles take
 `Ψ = (ψ − ψ_bnd)/(ψ_ax − ψ_bnd)`, where they used to take `ψ/ψ_ax` — MEQ's
 fixed-boundary problem has `ψ = 0` on `Γ`, so `ψ_bnd` vanished and the
 assumption was baked into the class.
@@ -2550,11 +2555,23 @@ Every equilibrium behind `ConvergenceHarness` is written for `Ψ = ψ/ψ_ax`, an
 silently dropping a boundary flux would converge beautifully to the wrong
 equilibrium.
 
-**What remains for FB-3 is the second border**: `ψ_bnd` as an *unknown*, closed
-like `ψ_ax` is. Under NPC it should be the cheaper of the two — `ψ_bnd` is `ψ` at
-one prescribed limiter point, so its border row is exactly `±e_j` and its corner
-exactly 1, where `ψ_ax`'s needed an argmax. `solveWithNormalisation()` does 1×1
-today; this makes it 2×2.
+**AND THE SECOND BORDER IS CLOSED — FB-3 IS DONE.** `setBoundaryFluxPoint( r, z )`
+makes `ψ_bnd` an unknown pinned by `ψ_h` at the nearest potential dof to the
+limiter contact, and `solveWithNormalisation()` does a general `( N + 2 )`
+elimination of which this is the `2×2` case. It is the cheaper of the two borders,
+as predicted: `ψ_bnd`'s dof is fixed at setup where `ψ_ax`'s needs an argmax, so
+under NPC the row is exactly `−e_j` and the corner exactly 1, neither differenced.
+`HighBetaConvergence` drives it and reads `ψ_ax`'s constraint at **1.88e-16** and
+**0.00e+00** on two meshes. **NPC only, and refused otherwise** — under the
+condensation `ψ` is a function of the trace through every element's source, so
+both the row and the corner would have to be differenced.
+
+**WHAT REMAINS IS THE DRIVER HALF, AND IT IS THE HALF FB-6 NEEDS.**
+`setBoundaryFluxPoint()` and `setExteriorCoupling()` are both library capability
+with **no route from a TOML file** — neither name appears in `apps/meq.cpp` or
+`Config.cpp`. So a machine case is reachable through the library and not through
+`meq config.toml`, which is the actual distance left to FB-6 and is smaller than
+"FB-3 is not built" made it sound.
 
 `Globalisation` other than `None` is refused on this path, loudly: the KINSOL
 paths drive a residual of their own and the Picard ones build no Jacobian to
@@ -2567,8 +2584,12 @@ mode outright. Under `NonlinearOrdering::NPC` the question does not arise at all
 exactly `1`**, neither of them differenced. See *The NPC port*.
 
 `meq::NormalisedMHDSource` is the production source built on two `meq::Profile`s
-in normalised flux. It is unit tested and **not yet wired into `Config` or
-`SourceFactory`** — that is driver work and belongs with the rest of it.
+in normalised flux. **It is wired**, and this paragraph used to say it was not:
+FL-8 wrote `makeNormalisedSource` for the rotating source and the MHD one came
+with it, so `[source] Type = "mhd"` with `Normalised = true` reaches the bordered
+Newton. `makeSource` **throws** on a normalised configuration rather than
+returning one, since a `NormalisedSource` is-a `Source` and the plain path would
+converge with `ψ_ax` frozen at the guess.
 
 **What working Newton looks like.** CEDRES++ Table 2, on 577k unknowns: relative
 residual `2.7e0 → 9.2e-2 → 1.8e-3 → 5.3e-6 → 3.9e-12` in five iterations. That is
@@ -3016,7 +3037,7 @@ that local Newton converges is machine- and environment-dependent. Do not treat
 42 iterations as reproducible. An intermediate claim in this file that LAPACK
 had fixed a third of the globalisation problem was wrong.
 
-**`MFEM_USE_EXCEPTIONS` is enabled** and does what `DRIVER-PLAN.md` §5 needs:
+**`MFEM_USE_EXCEPTIONS` is enabled** and does what the driver's exit codes need:
 `MFEM_ERROR_THROW` is the default error action and `mfem::ErrorException`
 derives from `std::exception`, so **no MEQ-side change was required** — an
 existing `catch ( std::exception const & )` already catches it. §4.4 at
@@ -3156,8 +3177,8 @@ can hide exactly this class of defect.
 
 **`meq::RotatingSource` solves the generalised Grad-Shafranov equation of
 `refs/RotatingGK.pdf` (136)**, closed by its (96) and (97), for two species in
-the local gauge `φ₀(r_ref) = 0`. `FLOW-PLAN.md` is the design and the staged
-plan; this section is only what a reader of the code needs. **Three or more
+the local gauge `φ₀(r_ref) = 0`. `docs/rotation.rst` is the derivation; this
+section is only what a maintainer needs. **Three or more
 species is `Closure::RootFind`** — a safeguarded scalar Newton on (97) with
 `φ₀`'s two `ψ`-derivatives by implicit differentiation — and
 `meq::NormalisedRotatingSource` puts the profiles in normalised flux, where
@@ -3312,7 +3333,7 @@ case-dependent one read off the configuration — which was the first attempt an
 failed again at `ω = 0`, where the scale is itself zero.
 
 **MASCHKE & PERRIN IS A SECOND EXACT BENCHMARK, AND THIS FILE'S PLAN SAID IT WAS
-NOT.** `FLOW-PLAN.md` rejected it as an adiabatic closure on the strength of a
+NOT.** The flow plan rejected it as an adiabatic closure on the strength of a
 `γ` in the equations. Wrong section of the paper: `refs/MaschkePerrin.pdf` —
 *Plasma Physics* **22** (1980) 579, not the Phys. Lett. A 102 (1984) everyone
 cites — carries two solutions, and its **§4** takes the temperature as a surface
@@ -3328,11 +3349,11 @@ alike — biting the plan that warns about it.
 
 **`INVERSION-PLAN.md` is the design and the staged plan** — `ψ(R, z)` to
 `R(Ψ, l)`, `z(Ψ, l)`, which is what `MANTA-COUPLING.md` needs, what
-`DRIVER-PLAN.md` §3's `(Ψ, θ)` grid needs, and what `ROADMAP.md` item 10 is.
+the driver's deferred `(Ψ, θ)` grid needs, and what `ROADMAP.md` item 10 is.
 This section is only what a reader of the code needs.
 
 **Nothing about the solve changes.** This is post-processing, in the same way
-`FLOW-PLAN.md` was a change to `F` alone: a new consumer of `ψ_h` and `q_h`.
+toroidal flow was a change to `F` alone: a new consumer of `ψ_h` and `q_h`.
 
 **AND `q` IS THE ASSET AGAIN, FOR THE THIRD TIME.** The band continuation of `ψ`
 uses it, the band continuation of `B` uses it, and now the inversion does: a
@@ -4087,7 +4108,7 @@ an angle about the axis has none on an open line. Note that arc length does
 relabelling and buys the same one order — which is why the two concerns are
 handled by separate machinery there.
 
-**IN-6, the output**, is `DRIVER-PLAN.md` §3's `(Ψ, θ)` grid plus the per-`ψ`
+**IN-6, the output**, is the deferred `(Ψ, θ)` grid plus the per-`ψ`
 cache `MANTA-COUPLING.md` §5's pointwise call pattern requires. **Both of its
 numbers are already measured**: the cache is worth `nodes/surfaces`, 5.1× on a
 60-node case, and evaluating a fit at many points by Vandermonde-plus-GEMM is

@@ -19,7 +19,7 @@
 #include "convergence/ConvergenceHarness.hpp"
 
 /*
- * FL-2 OF FLOW-PLAN.md, THROUGH THE SOLVER.
+ * THE omega -> 0 COLLAPSE, THROUGH THE SOLVER.
  *
  * RotatingSourceTests.cpp asserts that meq::RotatingSource at omega = 0 is
  * meq::MHDSource pointwise, which is the stronger statement of the two and is

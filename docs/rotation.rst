@@ -35,6 +35,98 @@ potential, for an arbitrary number of species in a local gauge.
    TemperatureScale = 1.602176634e-16
    Neutralising = true
 
+.. _rotation-equation:
+
+The equation, in MEQ's convention
+---------------------------------
+
+MEQ solves :math:`-\gradbar\cdot\left(\gradbar\psi/r\right) = F/r`, so what
+rotation changes is :math:`F`. Written out, with :math:`g \equiv rB_\phi` and
+:math:`e` the elementary charge,
+
+.. math::
+
+   F(r, z, \psi) = \mu_0 r^2 \sum_s n_s
+       \Big\{ T_s (\ln N_s)'
+         + \big[ Z_s e \phi_0 - \tfrac{1}{2} m_s \omega^2 r^2 + T_s \big]
+           (\ln T_s)' \Big\}
+     + \mu_0 r^4 \omega \omega' \sum_s m_s n_s
+     + g g',
+
+closed pointwise by the poloidal density variation and by quasineutrality,
+
+.. math::
+
+   n_s(r, \psi) &= N_s(\psi)\,
+       \exp\!\left[\frac{m_s \omega^2(\psi) r^2}{2 T_s(\psi)}
+                   - \frac{Z_s e \phi_0}{T_s(\psi)}\right], \\
+   0 &= \sum_s Z_s n_s(r, \psi) \qquad \text{which determines } \phi_0(r,\psi).
+
+Here :math:`N_s`, :math:`T_s`, :math:`\omega` and :math:`g` are flux functions;
+:math:`n_s` and :math:`\phi_0` are **not**, and that is the whole of what makes
+this a different equation.
+
+That is the form as the source paper writes it, in *its* gauge. MEQ fixes the
+gauge differently, which replaces :math:`r^2` in the exponent by
+:math:`r^2 - r_{\text{ref}}^2` and gives each :math:`N_s` a physical meaning —
+see :ref:`the next section <rotation-changes>` for the form MEQ evaluates and
+`The gauge`_ for why.
+
+.. _rotation-changes:
+
+.. note::
+
+   **The brace collapses, and that is the form MEQ implements.** Differentiating
+   :math:`p = \sum_s n_s T_s` at fixed :math:`r`, the
+   :math:`\partial\phi_0/\partial\psi` terms collect into
+   :math:`-e\,(\partial\phi_0/\partial\psi)\sum_s Z_s n_s`, which vanishes
+   *identically* by quasineutrality. What is left is
+
+   .. math::
+
+      F(r, z, \psi) = \mu_0 r^2
+          \left.\frac{\partial p}{\partial\psi}\right|_r + g g',
+      \qquad p(r, \psi) = \sum_s n_s(r, \psi)\, T_s(\psi),
+
+   which is :cpp:class:`meq::MHDSource`'s shape with an :math:`r`-dependent
+   :math:`p`. MEQ codes :math:`p` and differentiates it, rather than coding the
+   brace term by term: there are fewer places to drop a factor, and the brace
+   then becomes a *check* on the derivative rather than the thing being checked.
+
+Two independent confirmations, both worth repeating before anything new rests on
+this form. It is :cite:t:`Abel2013`'s own force balance projected on
+:math:`\nabla\psi`; and at :math:`\omega \to 0` it gives
+:math:`F \to \mu_0 r^2 \sum_s p_s' + gg'`, which is that paper's low-Mach
+result and is the ordinary Grad–Shafranov source MEQ already solves.
+
+Conventions, and where they differ from the source paper
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Every one of these has to be right for the equation above to be the equation in
+the paper, and none of them is visible in a convergence rate.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 78
+
+   * -
+     -
+   * - **Units**
+     - :cite:t:`Abel2013` is Gaussian — :math:`4\pi` where MEQ has
+       :math:`\mu_0`, and a :math:`c` MEQ does not carry. Their :math:`I` is
+       MEQ's :math:`g`.
+   * - **The sign**
+     - Their current expression makes :math:`\Delta^\star\psi` *negative* in
+       the brace, so :math:`F = -\Delta^\star\psi` is **positive** — matching
+       :cpp:class:`meq::MHDSource`'s :math:`F = \mu_0 r^2 p' + gg'`.
+   * - :math:`2\pi` **in** :math:`\psi`
+     - :math:`\psi` is poloidal flux **per radian**, in Wb/rad. That is what
+       MEQ's :math:`gg'` already assumes and what EQDSK tabulates as ``FF'``.
+       There is no :math:`2\pi` to insert.
+   * - :math:`\Delta^\star`
+     - :math:`\partial_{rr} - r^{-1}\partial_r + \partial_{zz}`, on which the
+       source paper, :cite:t:`LiZhu2021` and MEQ all agree.
+
 What changes, and what does not
 -------------------------------
 
@@ -143,6 +235,51 @@ Closing the potential
 
 The two agree to round-off at two species, which is what makes ``RootFind``
 usable as a cross-check rather than merely as a fallback.
+
+At two species the condition is linear in :math:`\phi_0` after taking
+logarithms, and both species end up sharing one exponent:
+
+.. math::
+
+   e\phi_0 = \frac{\omega^2 (r^2 - r_{\text{ref}}^2)}{2}\,
+             \frac{m_1 T_2 - m_2 T_1}{Z_1 T_2 - Z_2 T_1},
+   \qquad
+   C = \omega^2\,\frac{Z_1 m_2 - Z_2 m_1}{Z_1 T_2 - Z_2 T_1}.
+
+The numerator is a mass-weighted temperature difference, so two species with
+equal :math:`m/T` leave nothing for the field to separate and :math:`\phi_0`
+vanishes identically. MEQ keeps :math:`m_e/T_e` rather than dropping it: it costs
+one term and removes a question.
+
+Above two species the condition is transcendental and is solved at each
+evaluation point. **It is as well behaved as such a thing gets**, and that is a
+property of the equation rather than of the solver:
+
+.. math::
+
+   \frac{\partial}{\partial\phi_0}\sum_s Z_s n_s
+       = -e \sum_s \frac{Z_s^2}{T_s} n_s \;<\; 0
+   \qquad\text{strictly,}
+
+because every term carries :math:`Z_s^2`. With at least one charge of each sign
+the left-hand side runs monotonically from :math:`+\infty` to :math:`-\infty`,
+so the root **exists, is unique, and can be bracketed** — a safeguarded Newton
+cannot fail on it. The bracket comes from the two-species formula above, which is
+exact at :math:`n = 2` and close when the impurity fraction is small.
+
+.. warning::
+
+   :math:`\phi_0`'s :math:`\psi`-derivatives, which the Jacobian needs, are
+   obtained by **implicit differentiation** of the quasineutrality condition and
+   never by differencing the root find. Differencing an inner solve from outside
+   gives a derivative whose accuracy is the inner tolerance, and Newton then
+   degrades from quadratic to linear with no wrong answer and no failing test.
+
+   For the same reason MEQ does **not** cache :math:`\phi_0` across Newton steps,
+   although the previous iterate at the same quadrature point would be a good
+   guess: anything that makes an evaluation depend on history stops it being a
+   function of its arguments, and an assembled Jacobian is then differentiating
+   something that is not one.
 
 The cost in derivatives
 -----------------------

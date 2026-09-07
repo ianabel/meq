@@ -15,8 +15,9 @@
  * The equation is refs/RotatingGK.pdf eq (136) -- Abel, Plunk, Wang, Barnes,
  * Cowley, Dorland & Schekochihin, Rep. Prog. Phys. 76 (2013) 116201 -- closed by
  * its (96) for the poloidal density variation and (97) for the electrostatic
- * potential phi_0 that holds quasineutrality against it. FLOW-PLAN.md is the
- * design; this file implements FL-0 to FL-3 of it.
+ * potential phi_0 that holds quasineutrality against it. docs/rotation.rst is
+ * the derivation -- the equation written out, the collapse below, and the unit
+ * and sign conventions against the source paper.
  *
  * WHAT ROTATION CHANGES, AND IT IS ONE THING: the density is no longer a flux
  * function. Centrifugal force sweeps heavy species to the outboard side, and an

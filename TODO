@@ -311,11 +311,12 @@ Raised 2026-08-24.
 
 ================================================================================
 Sonic toroidal rotation
-Raised 2026-08-25. SUPERSEDED 2026-09-01 by FLOW-PLAN.md, which is the design.
+Raised 2026-08-25. SUPERSEDED 2026-09-01: built, and docs/rotation.rst is the
+derivation.
 ================================================================================
 
   DONE, FL-0 to FL-8, and reachable from a TOML file. src/meq/RotatingSource.*
-  is the source, FLOW-PLAN.md the derivation and the findings, and CLAUDE.md's
+  is the source, docs/rotation.rst the derivation, and CLAUDE.md's
   "Toroidal flow" every measurement. The equation is refs/RotatingGK.pdf (136)
   closed by its (96) and (97); the inputs are T_s(psi), omega(psi), n-1 density
   flux functions and I(psi). Taking q(psi) instead and finding I(psi) from it is
@@ -343,7 +344,7 @@ Raised 2026-08-25. SUPERSEDED 2026-09-01 by FLOW-PLAN.md, which is the design.
   (4.7) FORCES C constant -- and that is precisely the term Li & Zhu got the sign
   of wrong. Only RotatingSourceTests' dFdPsi sweep touches it. Putting
   Maschke-Perrin into tests/analytic/ is the cheap follow-up and is not done; see
-  FLOW-PLAN.md section 6.3, which verified it by substitution to 8e-26.
+  CLAUDE.md's Toroidal flow, which verified it by substitution to 8e-26.
 
   Nothing else that stood here is worth keeping; git has the working.
 ================================================================================
@@ -358,7 +359,7 @@ Raised 2026-08-25.
 
   NO REFERENCE IS PINNED FOR THIS YET, and one is needed before anything is
   written -- unlike the rotation case above, where refs/RotatingGK.pdf eq (136)
-  is the equation and FLOW-PLAN.md is the design. The seeds below come from the
+  is the equation and docs/rotation.rst is the derivation. The seeds below come from the
   CEDRES++ paper's own
   list of what it plans to add (refs/CEDRES.pdf, section 1 and its
   bibliography), so they are the set a production free-boundary code considered
@@ -373,7 +374,7 @@ Raised 2026-08-25.
                              the rotation work, verified by substitution to
                              8e-26, and is NOT yet in tests/analytic/; its
                              section 3, the actual polytrope, is not a benchmark
-                             for it at all. See FLOW-PLAN.md section 6.3
+                             for it at all. See CLAUDE.md, Toroidal flow
     Goedbloed & Lifschitz 1997   Stationary symmetric MHD flows, Phys. Plasmas 4, 3544
     Zwingmann, Eriksson & Stubberfield 2001   Equilibrium analysis of tokamak
                              discharges with anisotropic pressure, PPCF 43, 1441
@@ -834,3 +835,38 @@ Raised 2026-09-03. All but one closed 2026-09-04.
 
   The project's own name is settled: MEQ in prose, meq in code. See CLAUDE.md's
   Layout section for the rule and for what it does not extend to. (7cc20d6.)
+
+
+================================================================================
+Two sampling questions left behind by stage 7
+Raised 2026-09-06, when DRIVER-PLAN.md was converted to docs/ and these were the
+only two things in it that were neither built nor recorded anywhere else.
+================================================================================
+
+  GSLIB HAS A PRINCIPLED ANSWER WHERE meq::GridSampler HAS A SHRUG, AND IT HAS
+  NOT BEEN TAKEN. A grid node landing exactly on an inter-element face is
+  ambiguous, psi_h being discontinuous there: whichever element claims it first
+  wins. The disagreement is the face jump, O( h^(k+1) ), so it converges away
+  and nothing is wrong -- but it is an arbitrary choice where a rule exists.
+  FindPointsGSLIB::SetL2AvgType does arithmetic or harmonic averaging over the
+  elements meeting at a point, for exactly this case, and BOTH of MEQ's sampled
+  fields are L2. GSLIB has been on since stage 7 (meq::FieldTransfer uses it),
+  so this is reachable and simply has not been done.
+
+  Note the sampler does NOT otherwise want GSLIB: the output grid is uniform, so
+  locating a point is index arithmetic and the search is already free. It is the
+  multi-valued-at-a-face rule alone that is missing.
+
+  AND THE TWO SAMPLERS HAVE NEVER BEEN COMPARED TO EACH OTHER. meq::GridSampler
+  inverts the loop -- element bounding box to grid index range, then
+  TransformBack -- and meq::FieldTransfer goes through FindPointsGSLIB, whose
+  simplex path splits triangles into quads internally (mesh_split, ir_split,
+  split_element_map in fem/gslib.hpp). MEQ's meshes are triangles, so that is a
+  code path a quad-based user never exercises. WarmStartConvergence.cpp does run
+  it on triangles and does measure the result -- but against the EXACT SOLUTION,
+  not against GridSampler, so the two are never asked the same question at the
+  same points on the same mesh.
+
+  This project's standing position is that two independent implementations
+  agreeing is worth more than either one being plausible, and this is a case
+  where both already exist and the comparison is a few dozen lines.

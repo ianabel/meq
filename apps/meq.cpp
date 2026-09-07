@@ -5,7 +5,7 @@
  *
  * One binary, no subcommands, and deliberately NOT mfem::OptionsParser, which
  * the program this replaces used and which wants to own argument parsing for
- * the whole executable. See DRIVER-PLAN.md section 5.
+ * the whole executable. docs/running.rst is what the driver owes the user.
  *
  * EXIT CODES, because a shell script driving a parameter scan is a first-class
  * caller and "it printed something" is not an interface:
@@ -918,7 +918,7 @@ int main( int argc, char **argv )
 		{
 			/*
 			 * THE INTERPOLATING WARM START, AND THE REASON CYCLES AFTER THE FIRST
-			 * NO LONGER BEGIN COLD. DRIVER-PLAN section 4's second route, which
+			 * NO LONGER BEGIN COLD. The FULL-ORDER route of docs/running.rst, which
 			 * this file used to refuse on the grounds that it "needs GSLIB" --
 			 * and GSLIB has been on, with meq::FieldTransfer written and pinned
 			 * by WarmStartConvergence, for longer than that comment survived.
@@ -949,7 +949,7 @@ int main( int argc, char **argv )
 		{
 			// TWO ROUTES, AND THE MESH DECIDES WHICH. Same mesh, same degree:
 			// the EXACT restart, every coefficient. A different mesh: the
-			// INTERPOLATING restart of DRIVER-PLAN.md section 4, through
+			// INTERPOLATING restart of docs/running.rst, through
 			// meq::FieldTransfer. This branch used to refuse the second and say
 			// it "needs FindPointsGSLIB and is not written yet", which had been
 			// untrue for months -- see the else below.
@@ -1573,8 +1573,8 @@ int main( int argc, char **argv )
 		 * arises to stop that separating the charges -- so n_s and phi_0 are
 		 * genuine two-dimensional fields and a rotating equilibrium is not
 		 * interpretable without them. Both are ALGEBRAIC in ( r, psi ), so this
-		 * costs one pass over the grid and no solve. See FLOW-PLAN.md section
-		 * 5.6 and meq::RotatingSource.
+		 * costs one pass over the grid and no solve. See docs/rotation.rst under
+		 * Output, and meq::RotatingSource.
 		 *
 		 * SAMPLED BY HAND, AND NOT WITH sampleCoefficient(), WHICH IS THE TRAP
 		 * THIS BLOCK EXISTS TO AVOID. sample(), sampleComponent() and
@@ -1648,9 +1648,10 @@ int main( int argc, char **argv )
 		// scan output is unreadable otherwise, and "which commit was this?" is
 		// the first question asked of any result that looks wrong.
 		writer.attribute( "config_file", argument );
-		// WHICH PHYSICS, not just which discretisation. DRIVER-PLAN section 3
-		// lists this and it was not being written: two runs differing only in
-		// [source] Type produced files that were identical in every attribute.
+		// WHICH PHYSICS, not just which discretisation. This was specified and
+		// was not being written: two runs differing only in [source] Type
+		// produced files that were identical in every attribute. The variables
+		// and attributes are documented in docs/output.rst.
 		writer.attribute( "source_type", sourceTypeName( config->getSource().type ) );
 		writer.attribute( "polynomial_degree",
 		                  config->getDiscretisation().polynomialDegree );

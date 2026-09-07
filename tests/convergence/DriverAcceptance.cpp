@@ -716,7 +716,7 @@ BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
 /*
  * A ROTATING PLASMA, THROUGH THE DRIVER.
  *
- * FL-8 of FLOW-PLAN.md. The rotating source is a bigger piece of configuration
+ * The rotating source is a bigger piece of configuration
  * than anything else meq takes -- an array of tables, two profiles per species,
  * a scale on each, a derived density, a reference radius and a rotation
  * frequency -- and every one of those is a way for the file to reach the solver

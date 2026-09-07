@@ -22,8 +22,8 @@
  * Two claims to check and they fail differently. A sampler that locates points
  * in the wrong element gives wrong numbers, which an accuracy test catches. A
  * sampler that locates them by brute force gives the RIGHT numbers slowly, which
- * only a timing catches -- and DRIVER-PLAN section 3 says to time it rather than
- * assert linearity in a comment, because complexity claims rot.
+ * only a timing catches -- so it is timed rather than asserted to be linear in
+ * a comment, because complexity claims rot.
  */
 
 namespace

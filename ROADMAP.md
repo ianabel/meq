@@ -8,14 +8,19 @@ what is deliberately not being done yet. **Item numbers are cited from `TODO`,
 from the plan files and from `CLAUDE.md`, so they do not get renumbered**; a
 closed item becomes a marker rather than being removed.
 
-The four plan files, and none of them is a plan any more except one:
+The plan files. **`DRIVER-PLAN.md` and `FLOW-PLAN.md` are gone**, converted to
+`docs/` on 2026-09-06 under the standing rule that a plan with nothing left in it
+is documentation: everything they staged is built, so what a reader needs is the
+manual and what a maintainer needs is `CLAUDE.md`. Git has them.
 
 | | |
 |---|---|
-| `DRIVER-PLAN.md` | stage 7 — **done**; the file is now its findings |
-| `FLOW-PLAN.md` | item 9, FL-0 to FL-8 — **done**; the file is the derivation and its findings |
-| `INVERSION-PLAN.md` | item 10's machinery — IN-A to IN-4 **done**, IN-5 deferred, IN-6 open, IN-P under way |
-| `FREE-BOUNDARY-PLAN.md` | item 8 — FB-A, FB-0 and **FB-1 done**; FB-2 part built, FB-3 to FB-6 open. Still the one real plan left |
+| ~~`DRIVER-PLAN.md`~~ | stage 7 — **done**, and now `docs/running.rst`, `docs/output.rst` and `docs/configuration.rst` |
+| ~~`FLOW-PLAN.md`~~ | item 9, FL-0 to FL-8 — **done**, and now `docs/rotation.rst`, which carries the derivation `RotatingSource.hpp` defers to |
+| `INVERSION-PLAN.md` | item 10's machinery — IN-A to IN-4 and IN-P **done**, IN-5 deferred, IN-6 open |
+| `FREE-BOUNDARY-PLAN.md` | item 8 — FB-A, FB-0, FB-1, FB-2, FB-3 **done**, FB-4 **answered**, FB-5 part built, FB-6 open. Still the one real plan left |
+| `PLASMA-EDGE-PLAN.md` | a design out of FB-4, **deliberately not to be started** until `j ≥ 1` is finished |
+| `MANTA-COUPLING.md` | the socket MaNTA presents, written from MaNTA's side. No field model is registered there yet |
 
 ## So what is next
 
@@ -217,8 +222,8 @@ says a re-merge is available.
 A standing cost of the arrangement, and it falls on MEQ's side.
 ## 1. Finish the driver — **done**
 
-`DRIVER-PLAN.md` is the design and now carries its own findings; `CLAUDE.md` has
-the rates. `meq config.toml` parses, solves and writes the equilibrium three
+`docs/running.rst`, `docs/output.rst` and `docs/configuration.rst` are the
+user-facing account; `CLAUDE.md` has the rates and the findings. `meq config.toml` parses, solves and writes the equilibrium three
 times over, with exit codes 0/1/2/3, the curved boundary, the adaptive loop on
 both paths, and the reactive non-linear ladder. The two bullets that stood open
 here are closed: the normalised source is reachable from a TOML file (by FL-8,
@@ -244,8 +249,8 @@ at zero** when a guess is set, so under NPC a warm start is inconsistent in
 exactly the row that couples `q` to `ψ` and `‖r₀‖` goes *up*. The guess still
 works, the flux row being linear, but the stronger property wants
 `darcyFlux = −(1/r)∇̄ψ_guess` seeded through `GradientGridFunctionCoefficient` for
-the `GridFunction` overload. See `DRIVER-PLAN.md` §1 and `CLAUDE.md`, *A warm
-start no longer shows up in `‖r₀‖`*.
+the `GridFunction` overload. See `CLAUDE.md`, *A warm start no longer shows up
+in `‖r₀‖`*, and `TODO`.
 
 ## 2. ~~Symbolic factorisation reuse~~ — **done**
 
@@ -256,8 +261,8 @@ factorisation per iteration — a count and not a timing, and the only thing tha
 could notice the reuse lapsing, since a lapse costs speed and nothing else.
 ## 3. Hygiene — **done**
 
-All six bullets are closed and what they found is in `CLAUDE.md` and
-`DRIVER-PLAN.md` rather than here: the pedestal tripwire asserts the two
+All six bullets are closed and what they found is in `CLAUDE.md` rather than
+here: the pedestal tripwire asserts the two
 refinement cures rather than a knife edge that threaded-MKL rounding decides;
 `everyNonlinearPathReachesTheSameExactSolution` runs four paths to the same L2;
 `postProcess()`'s refusal is retired; `η₅` is rebuilt on
@@ -480,7 +485,7 @@ by its (96) and (97), and it is reachable from a TOML file.** Two species in
 closed form, `n` species by a safeguarded root find, normalised flux through the
 existing bordered Newton, and `[source] Type = "rotating"` with
 `examples/rotating-rectangle.toml` and `rotating-normalised.toml` as the worked
-examples. `FLOW-PLAN.md` is the derivation and the findings; `CLAUDE.md`'s
+examples. `docs/rotation.rst` is the derivation; `CLAUDE.md`'s
 *Toroidal flow* has every measurement, the three errors found in Li & Zhu, and
 the Maschke–Perrin reading **this file previously got wrong** — its §4 is (136)'s
 isothermal closure at every `γ`, and the paragraph that stood here called it an
@@ -578,7 +583,7 @@ section has the detail.
   pressure still has **no reference pinned**, which is the first thing it needs.
   **Sonic rotation has left this list**: it is item 9 and it is built, which is
   why `TODO`'s *Sonic toroidal rotation* entry is a stub pointing at
-  `FLOW-PLAN.md`. `TODO`'s PARDISO entry is down to its one open question,
+  `docs/rotation.rst`. `TODO`'s PARDISO entry is down to its one open question,
   reproducibility under threading, and its performance entry to what the
   threading campaign did not already answer.
 

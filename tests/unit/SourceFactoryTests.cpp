@@ -230,7 +230,7 @@ BOOST_AUTO_TEST_CASE( a_missing_profile_file_names_itself )
 
 
 /*
- * ROTATING SOURCES -- FLOW-PLAN.md's FL-8, from the file to the object.
+ * ROTATING SOURCES, from the file to the object.
  *
  * The fixtures below are not a plasma. The masses are kilogrammes of order one
  * and the temperatures Joules of order one, chosen so that the exponent of (96)
@@ -265,7 +265,8 @@ BOOST_AUTO_TEST_CASE( rotating_matches_a_hand_computed_value )
 	auto const built = meq::makeSource( config.getSource(), config.getFileName() );
 
 	/*
-	 * THE ARITHMETIC, from FLOW-PLAN.md section 4.1. With both temperatures
+	 * THE ARITHMETIC, from docs/rotation.rst's two-species closed form. With
+	 * both temperatures
 	 * constant and equal, omega constant, and Z = +1 / -1, the two species
 	 * share one exponent and the pressure is P0( psi ) exp[ C ( r^2 - rRef^2 )
 	 * / 2 ] with

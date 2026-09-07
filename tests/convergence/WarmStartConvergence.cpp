@@ -20,7 +20,7 @@
  * STAGE 7d: RESTARTING A SOLVE FROM ANOTHER ONE, AT THE ORDER IT WAS COMPUTED
  * WITH.
  *
- * DRIVER-PLAN.md section 4 argues that the full-order route is worth a
+ * docs/running.rst argues that the full-order route is worth a
  * dependency and the structured-grid route is not a substitute for it. This file
  * is that argument as measurements, because the difference is exactly the sort
  * that a working restart hides: BOTH routes converge, and the cheap one simply
@@ -219,7 +219,7 @@ BOOST_AUTO_TEST_CASE( theTransferIsExactOntoARefinedMesh )
 
 /*
  * THE SIMPLEST RESTART THERE IS: the same mesh, the same degree, and the answer
- * itself as the guess. DRIVER-PLAN.md section 4's first acceptance bullet, and
+ * itself as the guess. The EXACT route of docs/running.rst, and
  * the one that isolates the seeding from the interpolation -- nothing is
  * interpolated here at all.
  */
@@ -389,7 +389,7 @@ BOOST_AUTO_TEST_CASE( aWarmStartCutsTheWorkAndNotTheAnswer )
 	            "iteration count is what is left. If THAT has stopped moving, the "
 	            "guess is not reaching the iterate" );
 
-	// Six figures, per DRIVER-PLAN.md section 4's acceptance.
+	// Six figures: a starting point must move the path and not the answer.
 	BOOST_TEST( std::abs( warmError - coldError ) < 1.0e-6*coldError,
 	            "the warm start converged to L2 error " << warmError
 	            << " where the cold start reached " << coldError
@@ -399,8 +399,8 @@ BOOST_AUTO_TEST_CASE( aWarmStartCutsTheWorkAndNotTheAnswer )
 /*
  * THE MEASUREMENT THAT JUSTIFIES THE GSLIB DEPENDENCY RATHER THAN ASSERTING IT.
  *
- * DRIVER-PLAN.md section 4: the structured-grid route is SECOND ORDER in the
- * grid spacing whatever the solve's degree, so restarting a k = 3 solve through
+ * docs/output.rst, What the grid format costs: the structured-grid route is
+ * SECOND ORDER in the grid spacing whatever the solve's degree, so restarting a k = 3 solve through
  * it discards most of what the solve computed. Both routes converge, which is
  * exactly why this needs measuring -- the cheap one does not fail, it just
  * quietly does less.
@@ -506,7 +506,7 @@ BOOST_AUTO_TEST_CASE( fullOrderCarriesMoreThanAStructuredGrid )
 	            << ": the transfer is losing accuracy the representation already had" );
 
 	// AND THE GRID ROUTE IS SECOND ORDER IN THE GRID SPACING, whatever degree the
-	// solve was. That is DRIVER-PLAN.md section 4's claim and it is the whole
+	// solve was. That is docs/output.rst's claim and it is the whole
 	// argument for the dependency, so it is measured rather than repeated.
 	// MEASURED: 1.813 and 1.735 over 65 -> 129 -> 257 nodes, drifting DOWN from
 	// two rather than up to it -- because by 257 nodes the grid error (1.01e-5)
@@ -523,7 +523,7 @@ BOOST_AUTO_TEST_CASE( fullOrderCarriesMoreThanAStructuredGrid )
 		            << " in the grid spacing, not the second order bilinear "
 		            "interpolation gives. If it is now higher, the interchange "
 		            "route has stopped being the second-order thing "
-		            "DRIVER-PLAN.md section 4 argues against" );
+		            "docs/output.rst describes" );
 		BOOST_TEST( rate < 2.3,
 		            "the structured-grid guess converged at " << rate
 		            << ", above second order, which bilinear interpolation cannot "

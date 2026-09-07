@@ -7,8 +7,8 @@
  * Carrying a solved potential onto a different mesh, at the order it was
  * computed with.
  *
- * DRIVER-PLAN.md section 4 names three restart routes and they are not the same
- * problem:
+ * THREE RESTART ROUTES, AND THEY ARE NOT THE SAME PROBLEM. docs/running.rst is
+ * the user-facing version of this list:
  *
  *   EXACT          same mesh, same degree. Read the stored GridFunction and hand
  *                  it straight to setInitialGuess(). Bitwise resumable, and it

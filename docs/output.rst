@@ -186,6 +186,46 @@ iteration count and final residual, the boundary treatment, and for adaptive
 runs the cycle count, the final estimator and the marking strategy. This is what
 makes a ``.nc`` file self-describing enough to plot six months later.
 
+**The two-dimensional variables are indexed** ``(Z, R)``, **with** ``R``
+**varying fastest.** That is C row-major order, and it is the layout a transport
+code coupling to MEQ along :math:`(t, x)` already expects.
+
+.. _output-grid-cost:
+
+What the grid format costs
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+This file is **lossy, by construction**, and it is worth being precise about how,
+because the loss does not shrink when the solve improves.
+
+.. important::
+
+   **A structured grid is second order however fine it is.** :math:`\psi_h` is a
+   piecewise polynomial of degree :math:`k`; sampling it onto a grid and reading
+   it back by bilinear interpolation gives an error that is
+   :math:`O(h_{\text{grid}}^2)` — in the **grid** spacing, not the mesh's, and
+   with no dependence on :math:`k` at all.
+
+   So the accuracy of a ``.nc`` file is a property of **the file**. The accuracy
+   of the ``.gf`` output is a property of **the solve**. Refine the mesh or raise
+   the degree and the grid has to be refined quadratically to keep pace; the
+   exact route never has to be.
+
+That is the whole reason MEQ writes three formats rather than one, and it is why
+a warm start reads ``.gf`` and not ``.nc`` — see :ref:`running-warm-start`. It is
+not an argument against the gridded file, which is the right thing for its job:
+an outside code has to produce or consume :math:`\psi` on a rectangle and nothing
+else, with no finite element library, no mesh format and no agreement about
+element types.
+
+.. note::
+
+   A grid node landing exactly on an inter-element face is **ambiguous**, because
+   :math:`\psi_h` is discontinuous there and the two elements disagree. Whichever
+   element claims it first wins. The disagreement is the size of the face jump,
+   :math:`O(h^{k+1})`, so it converges away with everything else — but it is a
+   genuine arbitrary choice rather than an averaging rule.
+
 .. _output-band:
 
 The band between :math:`\Gamma_h` and :math:`\Gamma`

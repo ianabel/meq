@@ -18,7 +18,7 @@
 # Centrifugal force sweeps the heavy species to the outboard side and phi_0
 # arises to stop that separating the charges. Everything else about meq -- the
 # operator, the discretisation, tau, the hybridization, the estimator, the
-# adaptive loop -- is untouched. FLOW-PLAN.md is the design.
+# adaptive loop -- is untouched. docs/rotation.rst is the derivation.
 #
 # AND ROTATION REACHES psi ITSELF HERE, WHICH IS THE POINT OF THIS FILE AND IS A
 # MEASUREMENT RATHER THAN A CLAIM. Run against the same configuration with
@@ -62,7 +62,7 @@
 # not either, dF/dpsi vanishes identically and Newton finishes in one step --
 # the same affine problem examples/soloviev-nstx.toml poses, and for the same
 # reason nobody minds. The Jacobian, which is the load-bearing risk of
-# FLOW-PLAN.md section 5.3, therefore has nothing to do here and is measured
+# a rotating source, therefore has nothing to do here and is measured
 # where it can be seen: tests/convergence/RotatingNewtonConvergence.cpp asserts
 # the observed Newton order against a manufactured solution with real
 # psi-dependence in all of n_s0, T_s and omega.

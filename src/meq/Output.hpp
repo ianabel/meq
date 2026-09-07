@@ -13,9 +13,11 @@
  * The NetCDF file carries psi and both components of B on a uniform ( R, Z )
  * grid. It is lossy by construction -- a k+1 field sampled onto a rectangle --
  * and it is the format every downstream tool actually wants. It is also the
- * INTERCHANGE format of DRIVER-PLAN section 4: a structured grid interpolates
- * back in O( 1 ) per point with no mesh search, so a foreign code needs to
- * produce nothing but psi on a rectangle to warm-start MEQ.
+ * INTERCHANGE format -- see docs/running.rst -- because a structured grid
+ * interpolates back in O( 1 ) per point with no mesh search, so a foreign code
+ * needs to produce nothing but psi on a rectangle. What that costs is second
+ * order in the GRID spacing at every k, which docs/output.rst states as a limit
+ * rather than leaving to be discovered.
  *
  * WHICH POTENTIAL IS IN WHICH FILE, because there are now two and they are not
  * interchangeable. psi_h is the solved potential in P_k; psi* is the

@@ -6,7 +6,7 @@ and is authoritative on anything technical; `ROADMAP.md` is the priority order.
 This file is the design for one item.
 
 **IN-A, IN-0, IN-1, IN-2, IN-3 and IN-4 are done and green; IN-5 is deferred
-with free boundary, IN-6 is open, and IN-P is under way.** So §§2–6 are the
+with free boundary, IN-6 is open, and IN-P is done.** So §§2–6 are the
 design the code was built from and the arguments it was built on — several of
 which the measurement then falsified, which is why they are still here — and §7
 is what each stage found. **Section numbers are load bearing**: `src/meq` and
@@ -23,7 +23,7 @@ things that need it:
 
 * **`ROADMAP.md` item 10, the fixed-`q(ψ)` solver.** RoPP (142) is
   `q(ψ) = V′(ψ) I(ψ) ⟨r^{-2}⟩_ψ / 4π²` — a flux-surface average, and the
-  machinery `FLOW-PLAN.md` §3.3 deliberately avoided needing. **Here and in
+  machinery the rotating source's local gauge deliberately avoided needing. **Here and in
   §3.4, §4.3 and §4.4 that `q` is the safety factor and NOT MEQ's flux**, which
   is the same letter for a solved unknown of the discretisation; IN-2 settles
   what the code is allowed to call each.
@@ -31,7 +31,7 @@ things that need it:
   `dGeometry_dpsi` **with the moving-surface term** and *making `Geometry` fast
   enough for a pointwise call pattern* "the two genuinely hard ones. Everything
   else is bookkeeping." Both are this.
-* **`DRIVER-PLAN.md` §3's flux-surface `(Ψ, θ)` output grid**, deferred there as
+* **The flux-surface `(Ψ, θ)` output grid**, deferred by stage 7 as
   "worth doing; not worth blocking the driver on" precisely because it needs
   contour tracing.
 
@@ -47,7 +47,7 @@ extend. Read it before starting — `git show v0-legacy:FluxSurfaces.cpp`.
 
 **Nothing about the solve.** This is post-processing. The operator, the
 discretisation, `τ`, the hybridization, the estimator, the adaptive loop and the
-curved boundary are all untouched, in the same way `FLOW-PLAN.md` was a change
+curved boundary are all untouched, in the same way toroidal flow was a change
 to `F` alone. What is new is a consumer of `ψ_h` and `q_h`.
 
 **Four new pieces**, in increasing order of how much thought they need:
@@ -267,7 +267,7 @@ extracted manifold; moment-fitting (Müller, Kummer & Oberlack,
 `10.1002/nme.4569`) is cell-shape agnostic and is a third route.
 
 **But it returns a rule, not a curve.** `MANTA-COUPLING.md` needs
-`dGeometry_dpsi`, and `DRIVER-PLAN.md` §3 wants a `(Ψ, θ)` grid — both want the
+`dGeometry_dpsi`, and the driver wants a `(Ψ, θ)` grid — both want the
 curve. So implicit quadrature is a **cross-check on IN-2's integrals**, not the
 primary route. Worth building as a control precisely because it is independent.
 
@@ -1153,7 +1153,7 @@ Chebyshev per §4.2. **Deferred with free boundary**, per §6.
 
 ### IN-6 — the output
 
-`DRIVER-PLAN.md` §3's flux-surface `(Ψ, θ)` NetCDF grid, and whatever
+the flux-surface `(Ψ, θ)` NetCDF grid stage 7 deferred, and whatever
 `MANTA-COUPLING.md` settles on — **including the per-`ψ` cache**, which §11.1
 argues is a requirement of the pointwise call pattern rather than an
 optimisation, and whose invalidation contract is `MANTA-COUPLING.md` §8.

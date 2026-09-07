@@ -16,8 +16,7 @@
 #include "convergence/ConvergenceHarness.hpp"
 
 /*
- * FL-7 OF FLOW-PLAN.md: A ROTATING SOURCE IN NORMALISED FLUX, THROUGH THE
- * BORDERED NEWTON.
+ * A ROTATING SOURCE IN NORMALISED FLUX, THROUGH THE BORDERED NEWTON.
  *
  * Profiles specified against Psi = psi/psi_ax make psi_ax a functional of the
  * solution, so it is an unknown of the non-linear system rather than an input,

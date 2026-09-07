@@ -20,15 +20,15 @@
  * depend on psi at all. So this fixture measures the discretisation and the new
  * r-dependence -- which is the whole novelty of rotation, F acquiring a genuine
  * exponential in r^2 at fixed psi -- and says NOTHING WHATEVER about the Newton
- * Jacobian. FLOW-PLAN.md section 6.4 requires a manufactured nonlinear rotating
- * case for that, and this fixture is not a substitute for it.
+ * Jacobian. RotatingNewtonConvergence.cpp's manufactured nonlinear rotating
+ * case is what tests that, and this fixture is not a substitute for it.
  *
  * Source:
  *   refs/SpectralElementGSRotation.pdf  section 3.1, eqs (12), (14)-(16)
  *   refs/Refs.md   doi 10.1016/j.cpc.2020.107264 -- Li & Zhu, Comput. Phys.
  *                  Commun. 260 (2021) 107264
- *   FLOW-PLAN.md   section 6.2, which is why this fixture exists and what it
- *                  is allowed to be used for
+ *   docs/rotation.rst  on the three closures that look alike on the page, which
+ *                  is why this fixture exists and what it may be used for
  */
 
 #include <array>
@@ -65,7 +65,8 @@ namespace analytic
  *
  * i.e. with a pressure gradient that is a function of r as well as of psi.
  * That is the ONE structural change rotation makes to the source, and it is
- * what this fixture is for. See FLOW-PLAN.md section 2.2.
+ * what this fixture is for. See docs/rotation.rst, The equation in MEQ's
+ * convention.
  *
  * deltaStarFD() below recomputes Delta*( psi ) by central differences and
  * RotatingSolovievConvergence.cpp asserts it against -f() over the benchmark
@@ -257,8 +258,8 @@ class RotatingSolovievEquilibrium
 			} );
 		}
 
-		/// machSquared = 4, i.e. Mach 2, which is FLOW-PLAN.md section 8's
-		/// "a factor of 7 at M = 2": exp( machSquared/2 ) = 7.4 across a flux
+		/// machSquared = 4, i.e. Mach 2: the source is exponential in M^2, so
+		/// exp( machSquared/2 ) = 7.4 across a flux
 		/// surface, and exp( 3.84 ) = 46 across the whole box.
 		///
 		/// NOT USED IN THE deltaStarFD SCAN, and the reason is the check rather
@@ -352,8 +353,8 @@ class RotatingSolovievEquilibrium
 		/// single step.
 		///
 		/// It is also why this fixture cannot test a Jacobian, and why
-		/// FLOW-PLAN.md section 6.4 asks for a manufactured nonlinear rotating
-		/// case as well.
+		/// RotatingNewtonConvergence.cpp carries a manufactured nonlinear
+		/// rotating case as well.
 		double dFdPsi( double, double, double ) const
 		{
 			return 0.0;

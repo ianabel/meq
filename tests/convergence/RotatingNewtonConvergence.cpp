@@ -18,14 +18,14 @@
 #include "convergence/ConvergenceHarness.hpp"
 
 /*
- * FL-5 OF FLOW-PLAN.md: THE MANUFACTURED NON-LINEAR ROTATING CASE, AND THE
- * FIRST THING IN THE FLOW WORK THAT CAN SEE A WRONG JACOBIAN.
+ * THE MANUFACTURED NON-LINEAR ROTATING CASE, AND THE ONLY THING IN THE FLOW
+ * WORK THAT CAN SEE A WRONG JACOBIAN.
  *
- * Everything FL-0 to FL-4 measured is blind to meq::RotatingSource::dFdPsi.
+ * Every other rotating measurement is blind to meq::RotatingSource::dFdPsi.
  * Li & Zhu's rotating Solov'ev has T and Omega constant and p linear in psi, so
  * dF/dpsi is identically zero; so does Maschke & Perrin's, for the same reason
- * -- their (4.7) forces the exponent coefficient C to be a constant. FLOW-PLAN
- * §6.3 says it plainly: neither published rotating benchmark can see the
+ * -- their (4.7) forces the exponent coefficient C to be a constant.
+ * docs/rotation.rst says it plainly: neither published rotating benchmark sees the
  * C'( psi ) term, and C' is precisely where the chain rule through omega and
  * the temperatures lives. A wrong dFdPsi leaves every error and every rate in
  * those studies unchanged to six figures -- CLAUDE.md measures exactly that for
@@ -149,7 +149,7 @@ namespace
 
 	/// A polynomial in psi, exact at all three derivative levels.
 	///
-	/// meq::Profile grew doublePrime() for FLOW-PLAN §5.3's reason: p is not a
+	/// meq::Profile grew doublePrime() for this reason: p is not a
 	/// flux function, F is already dp/dpsi, and the Jacobian spends a second
 	/// derivative of every input. A polynomial is used here rather than
 	/// meq::HermiteCubicSpline deliberately -- a Hermite cubic is C^1, so its

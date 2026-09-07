@@ -7,8 +7,11 @@
  * The driver's output is a rectangular grid of psi and B, because that is what
  * every downstream tool expects and because a structured grid can be
  * interpolated back in O( 1 ) per point -- which is what makes a warm start from
- * a file cheap, and is why DRIVER-PLAN section 4 keeps the NetCDF file as the
- * interchange format.
+ * a file cheap, and is why the NetCDF file is the INTERCHANGE format rather than
+ * a restart format. docs/running.rst names the three restart routes and
+ * docs/output.rst says what this one costs: bilinear interpolation on a grid is
+ * SECOND ORDER however fine the grid is, so its accuracy is a property of the
+ * file where the .gf route's is a property of the solve.
  *
  * THE OBVIOUS ROUTE IS TOO SLOW, and this is recorded in CLAUDE.md as a trap:
  * mfem::Mesh::FindPoints is O( elements x points ), a brute-force scan over

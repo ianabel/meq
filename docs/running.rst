@@ -215,6 +215,61 @@ genuinely nonlinear source it cuts the number of Newton iterations
 substantially. It must not change the answer, and the test suite asserts both
 halves of that: strictly less work, and an :math:`L^2` error that does not move.
 
+.. _running-restart-routes:
+
+Three routes, and they are not the same problem
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 34 46
+
+   * - Route
+     - When
+     - What it carries
+   * - **Exact**
+     - Same mesh, same degree
+     - Every polynomial coefficient. Bitwise resumable, and it reads the stored
+       grid function directly.
+   * - **Full order**
+     - A different mesh or degree, same code
+     - The full :math:`k+1` accuracy of the solve it came from. This is
+       :cpp:class:`meq::FieldTransfer`, and it is why MEQ takes a dependency on
+       GSLIB.
+   * - **Interchange**
+     - Another code entirely
+     - :math:`\psi(R, Z)` on a structured grid, read back by interpolation. That
+       is the ``.nc`` file of :ref:`output-netcdf`.
+
+The first two are what ``[initialguess]`` selects between, and it selects
+automatically: a stored guess whose mesh matches is taken exactly, and one whose
+mesh does not is interpolated.
+
+.. important::
+
+   **The third is not a substitute for the second, and the gap does not close
+   with a finer grid.** Bilinear interpolation on a structured grid is second
+   order however fine that grid is (:ref:`output-grid-cost`), so restarting a
+   :math:`k = 3` solve through a gridded file throws away most of what the
+   previous solve computed. It still converges — a guess is only a guess — but
+   "warm" is then doing less work than it looks.
+
+   Staying inside the finite element representation is what carries the full
+   order, and that is the entire argument for the extra dependency. The gridded
+   route keeps its own job, which is genuinely the right one for it: foreign
+   input, where no shared mesh format exists to interpolate through.
+
+.. warning::
+
+   **A restart can quietly become a cold start.** A refined domain can reach
+   beyond the stored one, and on the curved path it does so by construction,
+   since the computational domain *grows* as it refines. Nodes with no data fall
+   back to the Dirichlet datum.
+
+   That fallback is deliberate and does not need to be clever — but the count is
+   **reported**, because a restart that found no data for most of the domain
+   converges like a cold start and nothing else in the output would say so.
+
 .. warning::
 
    **A warm start interacts badly with a relative convergence tolerance, and the

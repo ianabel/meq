@@ -15,7 +15,7 @@
 #include "convergence/ConvergenceHarness.hpp"
 
 /*
- * FLOW-PLAN.md stage FL-4: the HDG Grad-Shafranov operator measured against an
+ * The HDG Grad-Shafranov operator measured against an
  * exact ROTATING Solov'ev equilibrium, refs/SpectralElementGSRotation.pdf
  * section 3.1 (Li & Zhu, CPC 260 (2021) 107264).
  *
@@ -26,17 +26,17 @@
  * is still constant in psi -- so the problem is linear and dF/dpsi is
  * identically zero -- but it is EXPONENTIAL IN r^2 at fixed psi, which is the
  * whole structural consequence of sonic rotation: the pressure is no longer a
- * flux function, so mu0 dp/dpsi picks up an r. FLOW-PLAN.md section 1 records
- * that meq::Source's signature already carries r and so needs no change for
- * this; this file is where that claim stops being a claim.
+ * flux function, so mu0 dp/dpsi picks up an r. meq::Source's signature already
+ * carries r and so needed no change for this; this file is where that stops
+ * being a claim.
  *
  * WHAT THIS TEST CANNOT SEE. dF/dpsi = 0, so it is the same rung as
  * SolovievConvergence.cpp and has the same blind spot: a Newton Jacobian is
  * neither exercised nor checked, because every Jacobian converges in one step
- * on an affine system. FLOW-PLAN.md section 6.4 requires a manufactured
- * nonlinear rotating case for that, and FL-4 comes before FL-5 deliberately --
- * a failure here is the discretisation or the source and CANNOT be the
- * Jacobian.
+ * on an affine system. RotatingNewtonConvergence.cpp is the manufactured
+ * nonlinear rotating case that does test it, and this file comes first
+ * deliberately -- a failure here is the discretisation or the source and CANNOT
+ * be the Jacobian.
  *
  * ORDER OF THE TEST CASES IS LOAD BEARING. The Delta* scan comes first,
  * because everything below it is measured against a closed form that would
@@ -108,7 +108,7 @@ namespace
 ///
 /// THIS IS THE GUARD THE WHOLE FILE RESTS ON. It catches a mistyped term in
 /// eq (15), a sign slip between Li & Zhu's Delta* and meq's, and -- the reason
-/// FLOW-PLAN.md section 6.2 insists on it -- a closure that is not (136)'s
+/// docs/rotation.rst warns about it -- a closure that is not (136)'s
 /// isothermal one at all. Without it a wrong fixture would produce a perfect
 /// k+1 table for somebody else's equilibrium.
 ///

@@ -1088,8 +1088,8 @@ BOOST_AUTO_TEST_CASE( a_shape_missing_its_geometry_is_refused )
 
 
 /*
- * [source] Type = "rotating" -- the sonic toroidal rotation of FLOW-PLAN.md,
- * as configuration.
+ * [source] Type = "rotating" -- sonic toroidal rotation, as configuration.
+ * docs/rotation.rst is the physics.
  *
  * Two things here are new to meq's schema and are what these cases are mostly
  * about. [[source.species]] is the first ARRAY OF TABLES the parser reads, so
@@ -1185,7 +1185,7 @@ BOOST_AUTO_TEST_CASE( a_rotating_source_carries_its_species )
 /// BOTH OMEGA KEYS ABSENT MEANS NO ROTATION, which is a documented state and
 /// not an omission: the source then reduces to the static equation
 /// meq::MHDSource solves, and being able to ask for that from the same file is
-/// how the omega -> 0 collapse of FLOW-PLAN.md section 6.1 gets run.
+/// how the omega -> 0 collapse gets run from a configuration file.
 BOOST_AUTO_TEST_CASE( a_rotating_source_without_omega_is_not_rotating )
 {
 	Configuration config = parse( withSource(

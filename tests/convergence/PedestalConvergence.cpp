@@ -579,7 +579,8 @@ BOOST_AUTO_TEST_CASE( anInitialGuessReachesTheIterateButNotTheOtherBranch )
 	BOOST_TEST( std::abs( warm.psiMax ) < 1.0e-6,
 	            "psi came back at " << warm.psiMax << ", away from the trivial "
 	            "branch. If this now fails, a guess alone is escaping it, and both "
-	            "the comment above and DRIVER-PLAN.md section 1 are out of date" );
+	            "the comment above and docs/sources.rst on the trivial branch "
+	            "are out of date" );
 }
 
 /*

@@ -286,7 +286,7 @@ namespace meq
 	// electrostatic potential phi_0 that holds quasineutrality against it. The
 	// density is NOT a flux function -- centrifugal force sweeps heavy species
 	// outboard -- which is the whole content of this source. See
-	// meq::RotatingSource and FLOW-PLAN.md.
+	// meq::RotatingSource, and docs/rotation.rst for the derivation.
 	struct RotatingParameters
 	{
 		// The species, [[source.species]]. Between two and meq::maxSpecies, of
@@ -558,7 +558,8 @@ namespace meq
 		// says so. See refuseIterativeSolverKeys in Config.cpp.
 	};
 
-	// [initialguess] -- where Newton starts. See DRIVER-PLAN.md section 4.
+	// [initialguess] -- where Newton starts. See docs/running.rst, which names
+	// the three restart routes and what each one carries.
 	enum class InitialGuessType
 	{
 		// The Dirichlet datum extended inward, which is what prepare() does
@@ -580,7 +581,7 @@ namespace meq
 
 		// GridFunction: the stored potential and the mesh it lives on. The mesh
 		// must match the one being solved on -- this is the EXACT restart of
-		// DRIVER-PLAN.md section 4, not the interpolating one.
+		// docs/running.rst, not the interpolating one.
 		//
 		// THE INTERPOLATING ONE IS NOT "NOT WRITTEN", WHICH IS WHAT THIS SAID,
 		// AND IT IS NO LONGER UNWIRED EITHER. meq::FieldTransfer in

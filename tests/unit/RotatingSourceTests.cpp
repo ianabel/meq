@@ -14,10 +14,10 @@
 #include "meq/Source.hpp"
 
 /*
- * FL-0 to FL-3 of FLOW-PLAN.md, which is to say everything about the rotating
- * source that can be asserted without a solver.
+ * Everything about the rotating source that can be asserted without a solver.
  *
- * The order below is the order of the plan, and it is also the order of blame:
+ * The order below is the order the pieces were built in, and it is also the
+ * order of blame:
  * if the charge-neutrality helpers are wrong then the closed form for phi_0 is
  * derived from a false premise, if phi_0 is wrong then the pressure is, and if
  * the pressure is wrong then so is F. Each group therefore assumes the one above

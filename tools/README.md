@@ -71,9 +71,12 @@ difference, and it is the mesh being coarse there rather than an error.
 **The NetCDF file is the interchange format**, and the only lossy one — a `k+1`
 field sampled onto a rectangle. Its grid is `[output] GridNR × GridNZ`, which
 has nothing to do with `[mesh] NR/NZ`. It is the format every downstream tool
-actually wants, and the one `DRIVER-PLAN.md` §4 specifies for warm-starting MEQ
-from a foreign code: a structured grid interpolates back in `O(1)` per point
-with no mesh search.
+actually wants, and the one for warm-starting MEQ from a foreign code: a
+structured grid interpolates back in `O(1)` per point with no mesh search. What
+that costs is second order in the *grid* spacing at every `k`, so its accuracy is
+a property of the file rather than of the solve — `docs/output.rst` and
+`docs/running.rst` have the statement and the reason it decides which route a
+restart takes.
 
 **Nodes outside the domain carry both a NaN and a zero in `inside`.** Both,
 deliberately: some readers honour the fill attribute and some do not, and

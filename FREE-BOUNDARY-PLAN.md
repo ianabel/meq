@@ -6,7 +6,7 @@ two questions this plan is mostly about: what the coupled Jacobian looks like,
 and what has to come from MFEM before any of it can be tried.
 
 `CLAUDE.md` is the operational record and is authoritative on anything already
-measured; `ROADMAP.md` is the order of work. `DRIVER-PLAN.md` was the stage-7
+measured; `ROADMAP.md` is the order of work. `docs/` is the manual and carries the stage-7
 design this one follows and is now that stage's record.
 
 **Two things have arrived since this was written and both bear on §5.3.**
@@ -892,7 +892,7 @@ which is what turns a comparison into a measurement.
 `freegs4e` for rotating **magnetic mirrors**: it sets `ffprime = fpol = fvac = 0`,
 so `g ≡ 0`, there is no toroidal field, and its safety factor is identically
 zero. A mirror cannot stand in for FB-6's machine case. Its value is to
-`FLOW-PLAN.md` instead — see *Toroidal flow* in `CLAUDE.md`, where its
+the rotating source instead — see *Toroidal flow* in `CLAUDE.md`, where its
 independent implementation of Abel (136) is the first outside check of the
 `C′(ψ)` term.
 
