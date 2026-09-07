@@ -1,9 +1,13 @@
 # Free boundary: HDG inside, an exact exterior operator outside
 
-A plan, not an implementation. Nothing here has been built. Written 2026-08-29,
-**rewritten 2026-09-01 against the NPC API**, which changed the answer to the
-two questions this plan is mostly about: what the coupled Jacobian looks like,
-and what has to come from MFEM before any of it can be tried.
+Written 2026-08-29, **rewritten 2026-09-01 against the NPC API**, which changed
+the answer to the two questions this plan is mostly about: what the coupled
+Jacobian looks like, and what has to come from MFEM before any of it can be
+tried. **The sentence that stood here until 2026-09-06 — "a plan, not an
+implementation; nothing here has been built" — is four weeks out of date**:
+FB-A, FB-0, FB-1, FB-2 and FB-3 are built and measured, FB-4 is answered, and
+FB-5's bordered solve works. §7's table is the per-stage state and is the thing
+to believe. What is still a plan is FB-5's adaptivity, FB-6, and §10.
 
 `CLAUDE.md` is the operational record and is authoritative on anything already
 measured; `ROADMAP.md` is the order of work. `docs/` is the manual and carries the stage-7

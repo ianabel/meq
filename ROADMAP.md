@@ -26,80 +26,82 @@ manual and what a maintainer needs is `CLAUDE.md`. Git has them.
 
 Nothing is red and stages 0 to 7 are done, so the order is:
 
-1. **Free boundary** — item 8, `FREE-BOUNDARY-PLAN.md`, staged FB-A and FB-0 to
-   FB-6. The largest remaining item and the most structural. **FB-A IS DONE**,
-   2026-09-04, and it was the one stage needing no free boundary at all:
-   `tests/convergence/AxisConvergence.cpp` solves a vacuum field on a mesh whose
-   inner edge is `r = 0`, where the flux mass `(r q, v)` degenerates. The answer
-   is that **`ψ` keeps `k+1` there, `q` loses about half an order, and the
-   conditioning penalty is `O(1/h)` rather than `O(1/h²)`** — survivable, and
-   not a reason to stop. §7.2 of the plan has the tables and the mechanism.
-   **FB-0 IS ALSO DONE**, same day: `src/meq/ExteriorDtN.{hpp,cpp}` is the
-   Gegenbauer basis, the symbol and the mass, MFEM-free and unit tested so CI
-   can gate it. Its acceptance — a current loop's field, built from elliptic
-   integrals and sharing no code with the basis — reads **1.4e−15** in the trace
-   and **6.9e−14** in the DtN, against the plan's own 4.4e−14 and 6.8e−09; the
-   DtN column moved five orders because the plan's figure was limited by its
-   finite-difference reference, exactly as it said. §7.3 has the tables.
-   **What remains of FB-0** is §3.4's cross-check against CEDRES++'s own
-   boundary form, now specified in §3.5 but not built — and it is not trivial,
-   because their kernel is hypersingular and only their double-difference form
-   regularises it.
+1. **Free boundary** — item 8, `FREE-BOUNDARY-PLAN.md`. Still the largest
+   remaining item, but **the structure is built and measured**: FB-A, FB-0,
+   FB-1, FB-2 and FB-3 are done, FB-4 is answered, and FB-5's bordered solve
+   works. §8 below has the per-stage table. **What is next, in order:**
 
-   **FB-1 AND FB-2 ARE PART BUILT**, same day, and each turned up a correction
-   to the plan.
+   * **Wire the two borders to TOML.** `setBoundaryFluxPoint()` (FB-3) and
+     `setExteriorCoupling()` (FB-5) are library capability with no route from a
+     configuration file — neither appears in `apps/meq.cpp` or `Config.cpp`. A
+     machine case is a library caller until they are. This is schema and driver
+     work against numerics that are already green, which makes it the cheapest
+     item on the list and a prerequisite for the next two.
+   * ~~**FB-5's adaptive loop.**~~ **DONE 2026-09-06.** `η` monotone with `Γ`
+     fixed (2.51e-01 → 3.21e-02 over four cycles), P.1 preserved on a graded
+     `Γ_h`, one Newton step per cycle. **And it found that `η` cannot see the
+     coupling**: the exterior coefficients are frozen at 1.3194e-03 across the
+     whole loop because the elements touching `Γ_h` carry 0.00% of `η²`. `η` is
+     right — it estimates the interior error and the coefficients are a boundary
+     functional — but the loop will stall once the interior error passes the
+     frozen one, which at cycle 3 is a factor of 1.4 away. **A boundary
+     indicator is the cure and is not built; cost it before FB-6.** Plan §7.12.
+   * **A first coupled free-boundary solve.** Attempted twice on 2026-09-06;
+     §7.12 and §7.13 are the record. **The analytic border column is done and
+     wired** — `dR/ds` is assembled from the source's own `dF/ds` rather than
+     differenced, agreeing with the difference to ten digits and reaching
+     **5.70e-16 against 1.69e-13** — and the `( N + 1 )` bordered system now
+     closes on a genuinely non-linear source in **4 Newton steps**. **Coils were
+     the wrong instinct** and the write-up says why: the flux already crosses
+     zero at `r ≈ 1.03`, so an edge exists without a conductor, and both failed
+     attempts had put the limiter out in the tail. **What is left is one idea**:
+     a plasma-current constraint, which is how CEDRES++ and FreeGS pose it, and
+     which turns an ill-conditioned non-linear eigenvalue balance into an
+     ordinary unknown. **DONE 2026-09-06**: `setPlasmaCurrent()`, all four
+     Jacobian pieces analytic, and it converges the moving-support solve that
+     previously failed from everywhere — **63 Newton steps**, current delivered
+     to 3e-08. **What is left is branch selection**: the equilibrium it finds is
+     a wall-hugging annulus, a vertical field is what suppresses that branch, and
+     it does not yet converge from a cold start with conductors present. §7.14
+     lists what to try, and continuation in the coil current is first.
+   * **FB-6, the machine case**, against `../freegs4e`. §7.11 of the plan
+     settled the test problem: there is no reproducible ITER case, and the
+     answer is CEDRES++'s published profile family driven through freegs4e's
+     `ConstrainBetapIp`, which is the same model term for term. **Open it at
+     `γ = 2` or 3, not the published `γ = 1.395`** — the profile's vanishing
+     order at the edge *is* `γ`, so 1.395 caps `ψ*` at 3.895 and makes
+     `∂F/∂ψ` unbounded there. Bring the published value in afterwards, expecting
+     `k ≥ 2` not to hold `k+2` on it.
 
-   *FB-1*: the coupling matrix `P` is built and measured (§7.4). Its sharpest
-   number is that projecting a mode at the **foot** on `Γ` rather than at the
-   point on `Γ_h` differs by **18% at the coarsest mesh, falling at O(h)** —
-   both choices look like a coupling and one throws away the accuracy the
-   transfer technique exists to buy. Two corrections: §4.3's "one call to
-   `ProjectBdrCoefficient`" does not work, because a path coefficient must be
-   evaluated on the FACE transformation; and §4.3's requested measurement —
-   differencing the column at two iterates — **is not needed under NPC**, where
-   the border is exactly `−P` because `Γ_h`'s trace dofs are essential.
-   `tests/analytic/ExteriorMatched.hpp` is FB-1's exact answer (§7.4a), and
-   writing it found that the plan's proposed answer, filament loop fields,
-   **cannot support an order study at all**.
+   **The fixed-boundary rehearsal is already running and is at 8.8e-06**, which
+   is now limited by MEQ's own discretisation rather than by the boundary fit —
+   see *MEQ against freegs4e* in `CLAUDE.md`. FB-6 removes the fit from the
+   comparison entirely, which is the only way past that floor.
 
-   *FB-2*: `meq::CoilSet` and the acceptance identity are built (§7.6). The
-   outward flux matches `−μ₀I` to **3.3e−11** on the exact field, so when FB-2
-   applies it to a solve any discrepancy is the solve.
+   **AND DIVERTED PLASMAS ARE NOW PLANNED, AS §10 OF THAT FILE.** Every real
+   machine MEQ would be pointed at is diverted and all seven `freegs4e`
+   benchmark configurations are, so it is on the path rather than beyond it —
+   but it is **not scheduled**, and a limiter free-boundary solve comes first.
+   Two of its five stages, XP-0 and XP-1, need no free boundary at all and are
+   worth doing early for the reason FB-A was: XP-0 is a rate study against
+   `Soloviev::nstx()`, whose X-point is known in closed form. §10 also records
+   the one **live** defect the item turned up — `ConfineToPlasma`'s support test
+   is pointwise, so on a diverted plasma it switches the source on in the
+   private flux region. Latent today, because nothing diverted exists to run it.
 
-   **What blocks both is one piece**: the transmission row
-   `∫_Γ E_h(q_h)·ν C_m dΓ`, the Neumann half of the coupling. **Its MFEM half is
-   now done and is upstream's**, 2026-09-05 — `mfem::ExtensionBoundaryQuadrature`
-   was written here, filed as `doc/HDG-BEM-COUPLING-FROM-MEQ.md` said MEQ would,
-   and merged into `gf-hdg-subdomains-dev` as *"Merge meq's
-   ExtensionBoundaryQuadrature: quadrature over Gamma"*. Upstream then found the
-   same unsigned-weight defect in the sibling `ExtensionRegionQuadrature` and
-   fixed it, which is the return on filing rather than keeping it local. What is
-   still MEQ's is the row itself: sweep `Γ`, evaluate the extension of the flux
-   there, and contract against `C_m`. The pieces exist —
-   `ElementExtension::TransformBack`, `TransferPath`, and an analytic normal on
-   a semicircle — so it is assembly rather than research, but it is the critical
-   path. After it, the bordered solve at `N + 2` is mechanical: §4.4 is right
-   that `solveWithNormalisation()` already does it at `N = 1`.
+   **`PLASMA-EDGE-PLAN.md` is NOT on this list**, deliberately. It is the route
+   out of FB-4's `k ≤ j` cap, its own preamble forbids starting it before
+   `j ≥ 1` is finished, and its central premise is measured at two rungs out of
+   three. PE-0 is a day's work and settles that; everything after it waits.
 
-   **AND FB-6'S BENCHMARK EXISTS ON THIS MACHINE AND RUNS**: `../freegs4e`, a
-   free-boundary **tokamak** Grad-Shafranov solver by a different algorithm —
-   von Hagenow Green's functions, finite differences, Picard — solving the same
-   equation with the same `F` and the same `ψ` units. Drive its
-   `GeneralPprimeFFprime` with tabulated `p′`, `ff′`. That is a better FB-6
-   acceptance than the fine-mesh self-comparison it was written against, and
-   there is an interim version available **before FB-1 lands**: take freegs4e's
-   converged LCFS, fit it to MXH, and check MEQ's fixed-boundary solve against
-   it. §7 of the plan has the environment recipe, which is not trivial, and the
-   two conversion traps.
-
-   **Not to be confused with `../geq`**, which wraps freegs4e for rotating
-   **mirrors** with `g ≡ 0` and cannot stand in for a machine case. Its value is
-   to `FLOW-PLAN.md` — an independent implementation of Abel (136), and the
-   first outside check of the `C′(ψ)` term.
-2. **Finish the inversion** — item 10. IN-6, the `(Ψ, θ)` output grid and the
-   per-`ψ` cache `MANTA-COUPLING.md` §5's call pattern requires; and IN-P, the
-   performance harness, which is under way. IN-5, open surfaces, is **deferred
-   with free boundary** — a disc chart has no meaning through a separatrix.
+2. **Finish the inversion** — item 10. **IN-P is done**, so what is left is
+   IN-6 alone: the `(Ψ, θ)` output grid and the per-`ψ` cache
+   `MANTA-COUPLING.md` §5's call pattern requires. Both of its numbers are
+   already measured — the cache is worth `nodes/surfaces` (5.1× on a 60-node
+   case) and evaluating a fit at many points by Vandermonde-plus-GEMM is worth
+   34.7× — so it is assembly rather than research. IN-5, open surfaces, is
+   **deferred with free boundary**: a disc chart has no meaning through a
+   separatrix.
 3. **The fixed-`q(ψ)` solver itself** — also item 10, and reachable now that
    IN-2 measures `⟨r^{-2}⟩_ψ` and `V′(ψ)` against a converged reference.
 
@@ -418,10 +420,31 @@ to smuggle in.
 
 ---
 
-## 8. Free boundary — MEQ, planned and not started
+## 8. Free boundary — MEQ, structure built, the plasma is what remains
 
-`FREE-BOUNDARY-PLAN.md` is the design, and **it is the one file in this tree
-that is still a plan rather than a record**: nothing is built. The shape of it:
+`FREE-BOUNDARY-PLAN.md` is the design and is the one real plan left in the tree.
+**This section read "planned and not started … nothing is built" until
+2026-09-06**, which was written before FB-A and was four weeks out of date by the
+time anyone read it again. What is built, each against a measured number:
+
+| | |
+|---|---|
+| **FB-A** | the axis. `ψ` at `k+1` on a mesh reaching `r = 0`, `q` short by half an order, conditioning `O(1/h)` |
+| **FB-0** | `meq::ExteriorDtN`. Against a current loop **1.4e−15**; against CEDRES++'s own boundary form **diagonal to 1.15e-10**, which is the test §3.4 named as the one that would falsify all of §3 |
+| **FB-1** | the whole coupling on a vacuum problem. `ψ` at **1.99 / 2.99 / 3.99**, exterior coefficients recovered at **3.30** |
+| **FB-2** | a prescribed plasma current, and Ampère's law through the solve at round-off over `Γ_h` |
+| **FB-3** | `ψ_bnd` as a second border. `setBoundaryFluxPoint()`, constraint at **1.88e-16** |
+| **FB-4** | **answered rather than done**: the order is capped by the PROFILE, not the quadrature — `ψ*` keeps `k+2` exactly when `k ≤ j`. No cut rule was built and that is a decision. `PLASMA-EDGE-PLAN.md` is the route out of the cap and is not to be started yet |
+| **FB-5** | the `( N + 2 )` bordered Newton, agreeing with superposition to **2.3e-15** in **one** step. Adaptivity through it is what remains |
+| **FB-6** | the driver pieces — `[[coils]]`, `ConfineToPlasma`, `tools/mesh/halfdisc.py`. The machine case itself is open |
+
+**THE DISTANCE LEFT IS SMALLER THAN IT LOOKS AND IT IS DRIVER WORK.** FB-3's and
+FB-5's borders are library capability with no route from a TOML file —
+`setBoundaryFluxPoint()` and `setExteriorCoupling()` appear nowhere in
+`apps/meq.cpp` or `Config.cpp`. So the next two items are that wiring and FB-5's
+adaptive loop, not new numerics.
+
+The design, which is unchanged:
 
 * **The exterior is exact, not a BEM.** With `Γ` a semicircle centred on the
   axis, the exterior Dirichlet-to-Neumann map for `Δ*` is **diagonal** in the
@@ -446,12 +469,11 @@ that is still a plan rather than a record**: nothing is built. The shape of it:
   free boundary has no analytic solution is true of FB-4 upwards and false below
   it, and the exact answers available early are what should be spent first.
 
-**The two things most likely to hurt**, both named in the plan rather than left
-to be discovered: the axis, where the flux mass `(r q, v)` degenerates and
-`BoundaryShape` currently refuses to go — which is measurable **today**, with no
-free boundary at all, and is worth measuring before FB-1 — and cut-element
-quadrature for the plasma support, which is the one place a published code says
-it hit a wall.
+**The two things the plan named as most likely to hurt have both been measured,
+and neither hurt in the way predicted.** The axis costs `q` half an order and
+`O(1/h)` in conditioning, which a direct trace solve does not care about at these
+sizes. And cut-element quadrature turned out not to be the binding constraint at
+all — the profile's vanishing order `j` is. See FB-A and FB-4 above.
 
 **WHAT THIS NEEDS FROM THE OTHER TREE IS NOW NOTHING, FOR FB-0 THROUGH FB-3, AND
 THIS FILE SAID OTHERWISE.** It claimed §2 of `HDG-BEM-COUPLING-FROM-MEQ.md` — two
