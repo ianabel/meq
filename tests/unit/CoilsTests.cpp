@@ -30,8 +30,15 @@
 
 #include "meq/Coils.hpp"
 
+// The fixture this file's CurrentFilament is checked against. It is MFEM-free,
+// and tests/CMakeLists.txt already puts tests/ on the include path so that a
+// unit test can reach the closed forms in analytic/ -- SourceFactoryTests does
+// the same thing for the same reason.
+#include "analytic/CurrentLoop.hpp"
+
 using meq::Coil;
 using meq::CoilSet;
+using meq::CurrentFilament;
 
 namespace
 {
@@ -523,4 +530,405 @@ BOOST_AUTO_TEST_CASE( the_adapters_refuse_a_null_half )
 	                   std::invalid_argument );
 	BOOST_CHECK_THROW( meq::CoilAugmentedNormalisedSource( plasma, nullptr ),
 	                   std::invalid_argument );
+}
+
+/*
+ * THE GRADIENT, AGAINST A RICHARDSON-EXTRAPOLATED DIFFERENCE OF psi.
+ *
+ * A plain central difference cannot settle this and it is worth saying why
+ * rather than discovering it: it carries its own O( h^2 ) truncation, so the
+ * comparison FLOORS at the instrument rather than at the derivative, and no
+ * choice of h gets past it -- CLAUDE.md records that in four separate places,
+ * from Zernike's derivative to the flux-surface identity, and each time the cure
+ * is ( 4 D( h/2 ) - D( h ) )/3.
+ *
+ * Both columns are printed, because the PLAIN one is the control: if the two
+ * agreed there would be nothing to demonstrate, and its being three or four
+ * orders worse is what says the extrapolation is doing the work.
+ */
+BOOST_AUTO_TEST_CASE( the_gradient_is_analytic_and_a_plain_difference_cannot_see_it )
+{
+	auto richardson = [ ]( auto value, double h )
+	{
+		double const coarse = ( value( h ) - value( -h ) )/( 2.0*h );
+		double const fine = ( value( 0.5*h ) - value( -0.5*h ) )/h;
+		return std::make_pair( coarse, ( 4.0*fine - coarse )/3.0 );
+	};
+
+	std::printf( "\n  the analytic gradient against a difference of psi\n" );
+	std::printf( "    %-28s %12s %12s\n", "case", "plain", "Richardson" );
+
+	double worstPlain = 0.0;
+	double worstRich = 0.0;
+
+	// A FILAMENT and a COIL, because they are different code paths: the
+	// filament evaluates the derivative kernel once and the coil integrates it
+	// over a cross-section, so a sign or a factor could be right in one and
+	// wrong in the other.
+	CurrentFilament const filament( 1.5, 0.1, 1.0e6 );
+	Coil const coil = standardCoil();
+
+	struct Probe { char const *name; double r; double z; bool isCoil; };
+	std::vector<Probe> const probes = {
+		{ "filament, outboard",       2.40, 0.70, false },
+		{ "filament, above",          1.60, 1.30, false },
+		{ "filament, inboard",        0.60, 0.20, false },
+		{ "coil, 5 cm clear",         2.20, 0.00, true  },
+		{ "coil, far field",          5.00, 3.00, true  },
+		{ "coil, inboard",            1.00, 0.40, true  },
+	};
+
+	for ( Probe const &probe : probes )
+	{
+		double dR = 0.0;
+		double dZ = 0.0;
+		auto psiAt = [ & ]( double r, double z )
+		{
+			return probe.isCoil ? meq::coilPsi( coil, r, z )
+			                    : meq::filamentPsi( filament, r, z );
+		};
+		if ( probe.isCoil )
+			meq::coilGradPsi( coil, probe.r, probe.z, dR, dZ );
+		else
+			meq::filamentGradPsi( filament, probe.r, probe.z, dR, dZ );
+
+		double const h = 1.0e-3;
+		auto const inR = richardson(
+			[ & ]( double d ) { return psiAt( probe.r + d, probe.z ); }, h );
+		auto const inZ = richardson(
+			[ & ]( double d ) { return psiAt( probe.r, probe.z + d ); }, h );
+
+		// Relative to the size of the gradient rather than to either
+		// component, so that a component which is small by symmetry does not
+		// dominate the measure.
+		double const scale = std::fabs( dR ) + std::fabs( dZ );
+		double const plain =
+			( std::fabs( inR.first - dR ) + std::fabs( inZ.first - dZ ) )/scale;
+		double const rich =
+			( std::fabs( inR.second - dR )
+			  + std::fabs( inZ.second - dZ ) )/scale;
+
+		std::printf( "    %-28s %12.3e %12.3e\n", probe.name, plain, rich );
+		worstPlain = std::max( worstPlain, plain );
+		worstRich = std::max( worstRich, rich );
+	}
+	std::fflush( stdout );
+
+	BOOST_TEST( worstRich < 1.0e-9,
+	            "the analytic gradient disagrees with a Richardson-extrapolated "
+	            "difference of psi by " << worstRich << ". These are the same "
+	            "function differentiated two ways, so a disagreement is a "
+	            "defect in the chain rule and not a tolerance to widen" );
+
+	// THE CONTROL. If the plain difference were as good, the extrapolation
+	// would be decoration and this file would be claiming something it had not
+	// shown.
+	BOOST_TEST( worstPlain > 100.0*worstRich,
+	            "the plain central difference is " << worstPlain
+	            << " against the extrapolated " << worstRich
+	            << ", so the two are comparable and the Richardson step is "
+	            "buying nothing here. Either h has been chosen where the "
+	            "truncation and the round-off happen to cross, or the "
+	            "comparison is no longer measuring what it claims" );
+}
+
+/*
+ * meq::CurrentFilament AGAINST tests/analytic/CurrentLoop.hpp.
+ *
+ * Two implementations of one closed form, sharing no code: the fixture writes
+ * the textbook  psi = ( mu0 I/2 pi ) d [ ( 1 - k^2/2 )K - E ]  with
+ * std::comp_ellint of the MODULUS, and the library writes Carlson's symmetric
+ * forms of the COMPLEMENTARY modulus squared. So this is the check that the
+ * promotion is faithful, and it is the same shape as
+ * SolovievGeometryConvergence checking coefficients the solver also uses.
+ *
+ * NOT ROUND-OFF, AND THE HEADER ALREADY SAID SO. Coils.hpp records a worst
+ * 1.4e-12 relative between these two over the benchmark box, and that is a
+ * property of the two ALGEBRAIC arrangements rather than of either
+ * implementation -- ( 1 - k^2/2 )K - E is formed by cancellation and Carlson's
+ * k^2( R_D/3 - R_F/2 ) is not. Asserting round-off here would be asserting
+ * something known to be false; 1e-11 is the bar, and where they genuinely
+ * diverge -- at the conductor -- Coils.hpp measures that THIS file is the one
+ * that is right.
+ */
+BOOST_AUTO_TEST_CASE( the_filament_agrees_with_the_analytic_fixture )
+{
+	double const radius = 1.5;
+	double const height = 0.1;
+	double const current = 1.0e6;
+
+	CurrentFilament const filament( radius, height, current );
+	meq::analytic::CurrentLoop const loop( radius, height, current );
+
+	std::printf( "\n  meq::CurrentFilament against analytic::CurrentLoop\n" );
+	std::printf( "    %8s %8s %14s %12s %12s\n",
+	             "r", "z", "psi", "rel psi", "rel grad" );
+
+	double worstPsi = 0.0;
+	double worstGrad = 0.0;
+
+	for ( double r : { 0.4, 0.9, 2.2, 3.5 } )
+	{
+		for ( double z : { -1.1, 0.35, 1.7 } )
+		{
+			double const mine = meq::filamentPsi( filament, r, z );
+			double const theirs = loop.psi( r, z );
+			double const scale = std::max( std::fabs( theirs ), 1.0e-300 );
+			double const relPsi = std::fabs( mine - theirs )/scale;
+
+			double dR = 0.0;
+			double dZ = 0.0;
+			meq::filamentGradPsi( filament, r, z, dR, dZ );
+			double tR = 0.0;
+			double tZ = 0.0;
+			loop.gradPsi( r, z, tR, tZ );
+			double const gradScale =
+				std::max( std::fabs( tR ) + std::fabs( tZ ), 1.0e-300 );
+			double const relGrad =
+				( std::fabs( dR - tR ) + std::fabs( dZ - tZ ) )/gradScale;
+
+			std::printf( "    %8.2f %8.2f %14.6e %12.3e %12.3e\n",
+			             r, z, mine, relPsi, relGrad );
+			worstPsi = std::max( worstPsi, relPsi );
+			worstGrad = std::max( worstGrad, relGrad );
+		}
+	}
+	std::fflush( stdout );
+
+	BOOST_TEST( worstPsi < 1.0e-11,
+	            "meq::filamentPsi and analytic::CurrentLoop::psi differ by "
+	            << worstPsi << ". They are two arrangements of one closed form, "
+	            "so this is a transcription error rather than a tolerance" );
+	BOOST_TEST( worstGrad < 1.0e-11,
+	            "the two gradients differ by " << worstGrad
+	            << ". The library's is Carlson throughout and the fixture's "
+	            "divides by 1 - k^2; away from the conductor they must still "
+	            "agree, and near it Coils.hpp records which one to believe" );
+}
+
+/*
+ * THE AXIS, WHERE THE LIBRARY REACHES A LIMIT THE FIXTURE DOES NOT.
+ *
+ * This is the one place the two DELIBERATELY differ, so it is asserted rather
+ * than left to be discovered. CurrentLoop.hpp writes
+ * dk/dr = k[ 1/( 2r ) - ( a + r )/d^2 ] literally and says of it: *"the
+ * 1/( 2r ) is why this is NaN at r = 0. It is a real 1/r and not an artefact:
+ * psi ~ r^2 there, so d psi/d r ~ r and the limit exists, but the expression as
+ * written does not reach it."*
+ *
+ * The library's arrangement reaches it. Both brackets carry k^2 as an explicit
+ * factor and k^2 = 4ar/d^2 is exactly zero on the axis, so grad_bar psi is
+ * ( 0, 0 ) BIT EXACTLY -- not to round-off. That is worth having exactly for
+ * the same reason psi( 0, z ) = 0 is: it is the boundary condition the
+ * free-boundary problem imposes there.
+ *
+ * AND THE FLUX q IS STILL NaN, WHICH IS A SEPARATE STATEMENT. q divides that
+ * exact zero by r, and 0/0 is not 0. The limit is finite and this does not
+ * reach it. It matters because a semicircle centred on the axis MEETS the axis
+ * at both ends, so a sweep of such a Gamma samples exactly the point where q is
+ * unavailable -- a caller must handle its endpoints rather than discover NaN in
+ * a quadrature sum.
+ */
+BOOST_AUTO_TEST_CASE( the_gradient_is_exactly_zero_on_the_axis_where_the_flux_is_not )
+{
+	CurrentFilament const filament( 1.5, 0.1, 1.0e6 );
+
+	for ( double z : { -0.8, 0.0, 0.1, 2.0 } )
+	{
+		BOOST_TEST( meq::filamentPsi( filament, 0.0, z ) == 0.0,
+		            "psi is not exactly zero on the axis at z = " << z );
+
+		double dR = 1.0;
+		double dZ = 1.0;
+		meq::filamentGradPsi( filament, 0.0, z, dR, dZ );
+		BOOST_TEST( dR == 0.0,
+		            "d psi/d r on the axis at z = " << z << " is " << dR
+		            << " and not exactly 0.0. Both brackets carry k^2, which is "
+		            "exactly zero there, so anything else means the factored "
+		            "form has been replaced by the literal chain rule -- which "
+		            "is NaN here, as CurrentLoop.hpp records" );
+		BOOST_TEST( dZ == 0.0,
+		            "d psi/d z on the axis at z = " << z << " is " << dZ );
+
+		// AND THE FLUX IS NOT. 0/0, and deliberately not special-cased.
+		double qR = 0.0;
+		double qZ = 0.0;
+		meq::filamentFlux( filament, 0.0, z, qR, qZ );
+		BOOST_TEST( std::isnan( qR ),
+		            "q_r on the axis is " << qR << " rather than NaN. If this "
+		            "has become finite, someone has substituted the limit -- "
+		            "which is a kindness that hides from a caller sweeping a "
+		            "Gamma that MEETS the axis that its endpoints are special" );
+		BOOST_TEST( std::isnan( qZ ), "q_z on the axis is " << qZ );
+	}
+
+	// The fixture's behaviour, asserted so that the difference above is a
+	// measured contrast and not an assumption about someone else's code.
+	meq::analytic::CurrentLoop const loop( 1.5, 0.1, 1.0e6 );
+	double tR = 0.0;
+	double tZ = 0.0;
+	loop.gradPsi( 0.0, 0.3, tR, tZ );
+	BOOST_TEST( std::isnan( tR ),
+	            "analytic::CurrentLoop::dPsiDr is no longer NaN on the axis, so "
+	            "the contrast this case draws has gone away and its comment is "
+	            "stale" );
+}
+
+/*
+ * A FILAMENT AS THE LIMIT OF A SHRINKING COIL -- FOR THE GRADIENT THIS TIME.
+ *
+ * a_thin_coil_approaches_the_filament_at_second_order does this for psi, and
+ * took its limit from a very thin COIL rather than from a second
+ * implementation, deliberately: it wanted a statement about the cross-section
+ * and not about two transcriptions.
+ *
+ * THIS ONE TAKES THE LIMIT FROM meq::CurrentFilament, and that is the point.
+ * The two classes are separate code -- one integrates the derivative kernel
+ * over a rectangle at a quadrature order, the other evaluates it once -- so a
+ * convention mismatch between them is invisible to either alone. A factor of
+ * the area, a sign, a missing mu0, a current density confused with a current:
+ * every one of those leaves both classes internally consistent and makes them
+ * disagree here. It is the same argument the psi case makes for its own
+ * existence, applied across the seam instead of along it.
+ */
+BOOST_AUTO_TEST_CASE( a_shrinking_coils_gradient_approaches_the_filaments )
+{
+	double const current = 1.0e6;
+	double const centreR = 1.5;
+	double const centreZ = 0.1;
+	double const fieldR = 2.4;
+	double const fieldZ = 0.7;
+
+	CurrentFilament const filament( centreR, centreZ, current );
+	double limitR = 0.0;
+	double limitZ = 0.0;
+	meq::filamentGradPsi( filament, fieldR, fieldZ, limitR, limitZ );
+	double const limitScale = std::fabs( limitR ) + std::fabs( limitZ );
+
+	std::printf( "\n  a shrinking coil's GRADIENT against the filament's\n" );
+	std::printf( "    %10s %16s %16s %12s %10s\n",
+	             "half-size", "d psi/d r", "d psi/d z", "rel", "ratio" );
+
+	double previousDifference = 0.0;
+	bool first = true;
+	double worst = 0.0;
+
+	for ( double halfSize : { 0.16, 0.08, 0.04, 0.02, 0.01 } )
+	{
+		Coil const coil( centreR, centreZ, halfSize, halfSize, current );
+		double dR = 0.0;
+		double dZ = 0.0;
+		meq::coilGradPsi( coil, fieldR, fieldZ, dR, dZ );
+
+		double const difference =
+			( std::fabs( dR - limitR ) + std::fabs( dZ - limitZ ) )/limitScale;
+		double ratio = 0.0;
+		if ( !first && difference > 0.0 )
+			ratio = previousDifference/difference;
+
+		std::printf( "    %10.4f %16.8e %16.8e %12.3e %10.3f\n",
+		             halfSize, dR, dZ, difference, ratio );
+
+		if ( !first && previousDifference > 0.0 && difference > 0.0 )
+			BOOST_TEST( ratio > 3.0,
+			            "halving the cross-section reduced the gradient's "
+			            "difference from the filament by only " << ratio
+			            << "; second order demands about 4. A ratio near 1 "
+			            "means the two classes disagree by a CONSTANT, which "
+			            "is a convention mismatch -- an area, a sign, a mu0 -- "
+			            "and not a cross-section effect" );
+
+		previousDifference = difference;
+		worst = difference;
+		first = false;
+	}
+	std::fflush( stdout );
+
+	// AND IT ACTUALLY ARRIVES. A rate alone is satisfied by two quantities
+	// converging to different limits at second order.
+	BOOST_TEST( worst < 1.0e-4,
+	            "the thinnest coil's gradient is still " << worst
+	            << " from the filament's. The RATE above can be met by two "
+	            "sequences approaching different limits, so this is the half "
+	            "that says they approach the SAME one" );
+}
+
+/*
+ * AMPERE'S LAW ON THE FILAMENT, which is FB-2's acceptance identity applied to
+ * the class that has no cross-section.
+ *
+ *     oint ( 1/r ) dpsi/dn dl = -mu0 I
+ *
+ * Coils.hpp derives the sign and the_outward_flux_is_minus_mu0_times_the_total_current
+ * pins it for a rectangle, at 1.07e-08 by central differences of psi. THIS one
+ * uses the ANALYTIC gradient, so the only error left is the contour quadrature
+ * -- which is why it reaches so much further, and which makes it a check on the
+ * gradient rather than on the difference stencil.
+ *
+ * The contour encloses the filament, and the identity is exact for ANY contour
+ * that does: it is Ampere's law, and what is enclosed is the whole current.
+ */
+BOOST_AUTO_TEST_CASE( amperes_law_holds_on_the_filament )
+{
+	double const current = 1.0e6;
+	CurrentFilament const filament( 1.5, 0.1, current );
+	double const mu0 = meq::vacuumPermeability;
+
+	double const rLo = 0.7;
+	double const rHi = 2.6;
+	double const zLo = -0.9;
+	double const zHi = 1.2;
+
+	auto circulation = [ & ]( int panels )
+	{
+		double total = 0.0;
+		double const dr = ( rHi - rLo )/panels;
+		double const dz = ( zHi - zLo )/panels;
+		for ( int i = 0; i < panels; ++i )
+		{
+			double const r = rLo + ( i + 0.5 )*dr;
+			double const z = zLo + ( i + 0.5 )*dz;
+			double dR = 0.0;
+			double dZ = 0.0;
+
+			// The two vertical sides: n = +/- r-hat, dl = dz.
+			meq::filamentGradPsi( filament, rHi, z, dR, dZ );
+			total += ( dR/rHi )*dz;
+			meq::filamentGradPsi( filament, rLo, z, dR, dZ );
+			total += ( -dR/rLo )*dz;
+
+			// The two horizontal sides: n = +/- z-hat, dl = dr.
+			meq::filamentGradPsi( filament, r, zHi, dR, dZ );
+			total += ( dZ/r )*dr;
+			meq::filamentGradPsi( filament, r, zLo, dR, dZ );
+			total += ( -dZ/r )*dr;
+		}
+		return total;
+	};
+
+	double const coarse = circulation( 400 );
+	double const fine = circulation( 800 );
+	// Midpoint is second order in the panel count, so Richardson is
+	// ( 4 fine - coarse )/3 -- the same step the gradient test needs and for
+	// the same reason.
+	double const extrapolated = ( 4.0*fine - coarse )/3.0;
+	double const expected = -mu0*current;
+
+	std::printf( "\n  Ampere's law on a filament: oint ( 1/r ) dpsi/dn dl\n" );
+	std::printf( "    400 panels        %18.10e\n", coarse );
+	std::printf( "    800 panels        %18.10e\n", fine );
+	std::printf( "    Richardson        %18.10e\n", extrapolated );
+	std::printf( "    -mu0 I            %18.10e\n", expected );
+	std::printf( "    relative          %18.3e\n",
+	             std::fabs( extrapolated - expected )/std::fabs( expected ) );
+	std::fflush( stdout );
+
+	BOOST_TEST( std::fabs( extrapolated - expected )
+	            < 1.0e-9*std::fabs( expected ),
+	            "the circulation is " << extrapolated << " against -mu0 I = "
+	            << expected << ". THE SIGN IS THE THING TO CHECK FIRST: "
+	            "Coils.hpp records that the same identity as a circulation of B "
+	            "counterclockwise comes out POSITIVE, because phi-hat = "
+	            "z-hat x r-hat, and FREE-BOUNDARY-PLAN.md section 7 predicts it "
+	            "being got wrong at least once" );
 }

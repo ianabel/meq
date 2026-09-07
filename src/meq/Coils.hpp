@@ -402,6 +402,88 @@ namespace meq
 	                    double mu0 = vacuumPermeability );
 
 	/**
+	 * grad_bar( psi ) = ( d_r psi, d_z psi ) of a single filament, analytic.
+	 *
+	 * The same geometry, current and conventions as filamentPsi(), and the same
+	 * refusals. Not a difference: the chain rule is carried through in closed
+	 * form and Carlson's symmetric forms are used throughout, for the reason the
+	 * file comment gives for psi.
+	 *
+	 * THE ALGEBRA, BECAUSE IT IS WHERE THE ACCURACY IS WON. With
+	 * A( k ) = ( 1 - k^2/2 )K - E and psi = ( mu0 I/2 pi ) d A, the chain rule
+	 * needs dA/dk, and the standard dK/dk and dE/dk collapse it to
+	 * dA/dk = ( k/2 )[ E/( 1 - k^2 ) - K ]. Substituting the geometry and
+	 * letting the 1/( 2r ) in dk/dr cancel against the 2ar in d k^2 gives
+	 *
+	 *     d_r psi = ( mu0 I/2 pi )[ ( ( a + r )/d ) A
+	 *                               + ( a( a^2 - r^2 + dz^2 )/d^3 ) B ]
+	 *     d_z psi = ( mu0 I/2 pi )[ ( dz/d ) A - ( 2 a r dz/d^3 ) B ]
+	 *
+	 * with B := E/k'^2 - K, dz := z - z0. **Both bracketed forms are written
+	 * that way to avoid a cancellation**, and neither is the arrangement the
+	 * chain rule hands you:
+	 *
+	 *   * `a/d - 2ar( a + r )/d^3` is the coefficient of B as it falls out, and
+	 *     it VANISHES at the loop -- which is the cancellation that makes the
+	 *     gradient diverge like 1/distance rather than like 1/distance^2, since
+	 *     B itself goes as 1/k'^2. Factored to `a( a^2 - r^2 + dz^2 )/d^3` it is
+	 *     one subtraction of two comparable numbers instead of a difference of
+	 *     products, and it is EXACTLY zero at r = a, dz = 0.
+	 *   * B in Carlson's forms is `k^2( R_F - R_D/3 )/k'^2`, which carries k^2
+	 *     as an explicit factor and is therefore exactly 0.0 at k = 0. Written
+	 *     as `E/k'^2 - K` it is a difference of two numbers both near pi/2 on
+	 *     the axis and in the far field, and loses its figures there.
+	 *
+	 * **SO THIS IS FINITE ON THE AXIS WHERE tests/analytic/CurrentLoop.hpp IS
+	 * NaN**, and that is a difference from the fixture this was promoted from
+	 * rather than an oversight in it. That fixture writes
+	 * dk/dr = k[ 1/( 2r ) - ( a + r )/d^2 ] literally and its own header records
+	 * the consequence -- *"the 1/( 2r ) is why this is NaN at r = 0. It is a
+	 * real 1/r and not an artefact: psi ~ r^2 there, so d psi/d r ~ r and the
+	 * limit exists, but the expression as written does not reach it."* The
+	 * limit is what the factored form reaches: both A and B carry k^2, k^2 = 0
+	 * on the axis, and `d_r psi( 0, z )` is 0.0 bit exactly. `d_z psi( 0, z )`
+	 * is 0.0 as well and was already.
+	 *
+	 * IT STILL GIVES OUT AT THE CONDUCTOR, and sooner than psi does. B goes as
+	 * 1/k'^2 and k'^2 is the squared distance to the filament over d^2, so the
+	 * gradient diverges -- correctly, this being a line current. Carlson keeps
+	 * the geometry cancellation-free far past where the textbook form is NaN,
+	 * but the physical divergence is real. CurrentLoop.hpp's practical rule
+	 * holds: keep evaluation points at least 1e-5 of a loop radius away if the
+	 * gradient is wanted, 1e-7 if only psi is.
+	 *
+	 * @throws std::invalid_argument on the same conditions as filamentPsi().
+	 */
+	void filamentGradPsi( double r, double z, double loopRadius,
+	                      double loopHeight, double current,
+	                      double &dPsiDr, double &dPsiDz,
+	                      double mu0 = vacuumPermeability );
+
+	/**
+	 * The HDG flux q = ( 1/r ) grad_bar( psi ) of a single filament.
+	 *
+	 * THIS is the primitive a free-boundary coupling wants: the transmission
+	 * condition of FREE-BOUNDARY-PLAN.md section 4.2 is written in q, and its
+	 * Neumann half needs q . nu on Gamma.
+	 *
+	 * **NaN ON THE AXIS IN BOTH COMPONENTS, AND THAT IS NOT THE SAME STATEMENT
+	 * AS grad_bar psi's.** grad_bar psi is 0.0 there; dividing 0 by 0 is not.
+	 * The limit exists and is finite -- q_r -> mu0 I a^2/( 2 d^3 ) -- but this
+	 * expression does not reach it, exactly as CurrentLoop::flux() does not.
+	 * **A caller sweeping Gamma must know this**, because a semicircle centred
+	 * on the axis MEETS the axis at both ends: the endpoints of such a contour
+	 * are precisely where q is unavailable, and a quadrature that samples them
+	 * will get NaN rather than a large number.
+	 *
+	 * @throws std::invalid_argument on the same conditions as filamentPsi().
+	 */
+	void filamentFlux( double r, double z, double loopRadius,
+	                   double loopHeight, double current,
+	                   double &qR, double &qZ,
+	                   double mu0 = vacuumPermeability );
+
+	/**
 	 * The poloidal flux of one rectangular coil: the cross-section integral of
 	 * filamentPsi() over the coil, times its current density.
 	 *
@@ -419,6 +501,143 @@ namespace meq
 	double coilPsi( Coil const &coil, double r, double z,
 	                int order = defaultCoilQuadratureOrder,
 	                double mu0 = vacuumPermeability );
+
+	/**
+	 * grad_bar( psi ) of one rectangular coil: the cross-section integral of
+	 * filamentGradPsi() over the coil, times its current density.
+	 *
+	 * DIFFERENTIATED UNDER THE INTEGRAL SIGN, not differenced. The coil is a
+	 * fixed region and the field point is the variable, so d/dr commutes with
+	 * the integral over ( r', z' ) and this is the same panelled, cubically
+	 * graded rule with the kernel replaced by its derivative. That matters: a
+	 * difference of coilPsi() would cost two evaluations, floor at the
+	 * difference's own O( h^2 ), and -- as CLAUDE.md records for every other
+	 * differenced derivative in this tree -- need Richardson extrapolation to
+	 * see past its own truncation.
+	 *
+	 * **THE INTERIOR IS WORSE THAN psi's AND THE EXTERIOR IS NOT, AND THAT IS
+	 * MEASURED RATHER THAN ARGUED.** The derivative kernel is more singular
+	 * than the kernel -- psi's integrand carries a logarithm where the field
+	 * point meets the source and the gradient's carries a 1/distance -- so
+	 * inside the coil the graded rule has a harder integrand to resolve, and
+	 * outside it both integrands are analytic and both rules are spectral.
+	 * Relative error against an order-128 reference, on the 0.30 x 0.40 coil
+	 * at r = 2 with 1 MA:
+	 *
+	 *     probe                       n = 8    n = 16    n = 32    n = 48
+	 *     inside,       grad       3.51e-03  9.12e-05  2.29e-06  2.28e-07
+	 *                   psi        7.85e-07  1.59e-10  8.43e-13  1.24e-14
+	 *     1 mm outside, grad       2.30e-04  2.64e-06  6.63e-10  2.78e-13
+	 *                   psi        1.37e-06  1.63e-09  9.60e-14  1.04e-15
+	 *     5 cm outside, grad       8.86e-06  3.70e-10  4.63e-15  2.96e-15
+	 *                   psi        1.56e-07  2.48e-14  2.13e-15  4.82e-15
+	 *
+	 * **At the shipped default of 32 the exterior gradient is at round-off and
+	 * the interior is at 2e-06** -- seven orders above what psi reaches on the
+	 * same rule at the same point, and still falling only algebraically at
+	 * n = 48 where psi has been flat since n = 32. Outside, the gradient is a
+	 * constant behind psi rather than an order behind: it takes one more rung
+	 * to reach round-off (n = 32 against n = 16 at 5 cm) and then stops, which
+	 * is a spectral rule meeting the floor and not a rate.
+	 *
+	 * **FB-7 evaluates outside**, the conductor being beyond Gamma, so the
+	 * exterior column is the one that governs -- but a caller reading the
+	 * interior gradient should raise the order and check.
+	 *
+	 * @throws std::invalid_argument on the same conditions as coilPsi().
+	 */
+	void coilGradPsi( Coil const &coil, double r, double z,
+	                  double &dPsiDr, double &dPsiDz,
+	                  int order = defaultCoilQuadratureOrder,
+	                  double mu0 = vacuumPermeability );
+
+	/// The HDG flux q = ( 1/r ) grad_bar( psi ) of one rectangular coil.
+	/// NaN on the axis in both components, for the reason filamentFlux() gives.
+	void coilFlux( Coil const &coil, double r, double z,
+	               double &qR, double &qZ,
+	               int order = defaultCoilQuadratureOrder,
+	               double mu0 = vacuumPermeability );
+
+	/**
+	 * An IDEAL CIRCULAR FILAMENT: a ring current of zero cross-section,
+	 * coaxial with the axis.
+	 *
+	 * Same conventions as meq::Coil in every respect -- psi = r A_phi in weber
+	 * per radian, a SIGNED current in amperes that may be zero, geometry in
+	 * metres, and no permeability of its own because mu0 belongs to whatever
+	 * owns the conductor. It is deliberately shaped like Coil so that the two
+	 * read alike at a call site.
+	 *
+	 * WHY IT EXISTS, AND IT IS NOT THAT A FILAMENT IS BETTER. meq::Coil models
+	 * a real conductor: finite extent, uniform current density, a field that is
+	 * finite everywhere including inside itself. A filament is an
+	 * IDEALISATION, and FREE-BOUNDARY-PLAN.md section 7.19 records why MEQ
+	 * wants one anyway -- **`../freegs4e`'s default `Coil` IS an exact
+	 * filament**, `controlPsi` returning `Greens( R, Z, . )*turns` with its
+	 * `area` used only for a current-density limit and never entering the
+	 * field. So does FreeGS, and so do most codes of that family. MEQ could
+	 * not model what the reference code models, and section 7.16's published
+	 * 1.3e-04 agreement on `psi_ax` was reached ACROSS that mismatch rather
+	 * than with it removed. This is what lets the two be matched, and the
+	 * difference between two MEQ runs -- one filament, one rectangle, nothing
+	 * else changed -- is then the finite-size effect measured on one code with
+	 * one mesh and one solver.
+	 *
+	 * **IT STRUCTURALLY CANNOT DO WHAT Coil DOES, WHICH IS THE POINT OF HAVING
+	 * BOTH.** psi diverges logarithmically at the filament and grad psi like
+	 * 1/distance, so THERE IS NO SELF-FIELD AND NO SELF-FORCE -- the quantity a
+	 * finite cross-section exists to make finite. A force calculation needs
+	 * Coil whatever else is done. There is correspondingly no area(),
+	 * currentDensity(), contains() or f(): a filament has infinite current
+	 * density on a set of measure zero, so the Grad-Shafranov source term is
+	 * not a function and CoilSet::f() has nothing to add. **A filament belongs
+	 * OUTSIDE the computational domain**, which is exactly FB-7's
+	 * configuration; one inside it would be evaluated at mesh points that may
+	 * land on it, and the refusal in filamentPsi() is what that meets.
+	 */
+	class CurrentFilament
+	{
+		public:
+			/// @param radiusIn   the ring's major radius, metres. Strictly
+			///                   positive -- a filament at r <= 0 is the same
+			///                   refusal meq::Coil makes for a coil reaching
+			///                   the axis, and for the same reason: the
+			///                   operator's 1/r is not integrable through it.
+			/// @param heightIn   its height, metres.
+			/// @param currentIn  the current, amperes. Signed; zero allowed,
+			///                   because a scan over currents must be
+			///                   writable.
+			///
+			/// @throws std::invalid_argument if any argument is not finite or
+			///         if the radius is not positive.
+			CurrentFilament( double radiusIn, double heightIn,
+			                 double currentIn );
+
+			double radius() const;
+			double height() const;
+			double current() const;
+
+		private:
+			double radiusValue;
+			double heightValue;
+			double currentValue;
+	};
+
+	/// psi of a filament. Identical to the five-argument filamentPsi(); this
+	/// overload exists so that a caller holding a CurrentFilament need not
+	/// unpack it.
+	double filamentPsi( CurrentFilament const &filament, double r, double z,
+	                    double mu0 = vacuumPermeability );
+
+	/// grad_bar( psi ) of a filament. See the free function for the algebra.
+	void filamentGradPsi( CurrentFilament const &filament, double r, double z,
+	                      double &dPsiDr, double &dPsiDz,
+	                      double mu0 = vacuumPermeability );
+
+	/// q = ( 1/r ) grad_bar( psi ) of a filament. NaN on the axis.
+	void filamentFlux( CurrentFilament const &filament, double r, double z,
+	                   double &qR, double &qZ,
+	                   double mu0 = vacuumPermeability );
 
 	/**
 	 * A set of coils, and the two things a free-boundary solve wants from them:
@@ -520,6 +739,37 @@ namespace meq
 			/// One coil's contribution to psi(), for a caller separating them.
 			/// @throws std::out_of_range as coil() does.
 			double psiOf( std::size_t index, double r, double z ) const;
+
+			/**
+			 * grad_bar( psi ) of the whole set, and the HDG flux
+			 * q = ( 1/r ) grad_bar( psi ).
+			 *
+			 * **q IS WHAT FB-7 NEEDS**: a conductor outside Gamma enters the
+			 * coupling through the transmission condition, whose Neumann half
+			 * is q . nu on Gamma. grad_bar psi is offered beside it because
+			 * dividing by r is the caller's business on the axis -- see below
+			 * -- and because a consumer computing B wants the pair undivided.
+			 *
+			 * Delta* is linear, so these sum over the coils exactly as psi()
+			 * does, at the same quadrature order and permeability. An empty set
+			 * gives exactly 0.0 in both components.
+			 *
+			 * **flux() IS NaN ON THE AXIS AND gradPsi() IS 0.0 THERE**, which
+			 * is not the same statement twice. Every coil's grad_bar psi
+			 * vanishes at r = 0 -- exactly, k^2 being an explicit factor -- and
+			 * q divides that zero by zero. The limit is finite and this does
+			 * not reach it. It matters because **a semicircle centred on the
+			 * axis meets the axis at both ends**, so a sweep of such a Gamma
+			 * hits the one place q is unavailable.
+			 */
+			void gradPsi( double r, double z,
+			              double &dPsiDr, double &dPsiDz ) const;
+			void flux( double r, double z, double &qR, double &qZ ) const;
+
+			/// One coil's contribution to gradPsi().
+			/// @throws std::out_of_range as coil() does.
+			void gradPsiOf( std::size_t index, double r, double z,
+			                double &dPsiDr, double &dPsiDz ) const;
 
 			/// Gauss points per direction per panel for psi() and psiOf().
 			/// @throws std::invalid_argument outside

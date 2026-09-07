@@ -4017,3 +4017,296 @@ BOOST_AUTO_TEST_CASE( aConductorOutsideGammaReachesTheSolveThroughTheDatum )
 		<< controlRatio << "x, so the datum is barely reaching Gamma_h and the "
 		"rates above are measuring something else" );
 }
+
+/*
+ * FB-7, ACCEPTANCE 2: THE COUPLED SOLVE, AND THE COEFFICIENTS MUST CONVERGE TO
+ * ZERO AT THE DISCRETISATION'S OWN RATE.
+ *
+ * Acceptance 1 GIVES the datum and solves nothing about the exterior. This one
+ * turns the coupling on -- the a_n are unknowns of the same bordered Newton --
+ * with the conductor outside Gamma and no plasma at all.
+ *
+ * THE CONTINUOUS ANSWER IS a = 0 EXACTLY: the exterior field is entirely the
+ * conductor's, so psi~ = psi - psi_coil vanishes identically.
+ *
+ * THE DISCRETE ONE IS NOT, AND THIS CASE WAS WRITTEN EXPECTING IT TO BE. The
+ * transmission condition determines `a` from the DISCRETE interior flux
+ * extended to Gamma:
+ *
+ *     a_m = [ int ( q_coil . nu ) C_m - int ( q_h . nu ) C_m ] / blockEntry( m )
+ *
+ * and q_h is not q_coil -- it is q_coil to O( h^{k+1} ). So `a` is exactly the
+ * interior discretisation error projected onto the modes, and it goes to zero
+ * WITH the mesh rather than being zero on it. Asserting an exact zero would have
+ * been asserting that the interior solve is exact.
+ *
+ * IT IS STILL THE SIGN TEST, WHICH IS WHAT IT WAS FOR. A conductor moment
+ * entering transmissionConstraint with the wrong sign asks `a` to cancel TWICE
+ * the conductor's own flux, which is O( 1 ) against the datum on Gamma and does
+ * not fall with h at all. Measured here `a` is 2.7e-03 of that datum at k = 1
+ * and converges; a sign error is a fixed fraction of order one. And a wrong sign
+ * would still CONVERGE -- this file records that the transmission row's sign
+ * going wrong fails to converge rather than diverging, the same disguise as a
+ * stale load -- so a residual check could not tell.
+ *
+ * AND IT IS WHY THE TWO HALVES MAY NOT LAND SEPARATELY. The datum alone passes
+ * acceptance 1, which supplies a datum and solves nothing, while being wrong in
+ * every coupled run. Only this case can tell.
+ */
+BOOST_AUTO_TEST_CASE( aConductorOutsideGammaReachesTheCoupledSolve )
+{
+	int const order = 2;
+
+	meq::CoilSet coils( 1.0 );
+	coils.add( meq::Coil( 2.0, +0.5, 0.10, 0.10, 1.0 ) );
+	coils.add( meq::Coil( 2.0, -0.5, 0.10, 0.10, 1.0 ) );
+
+	// A meq::Source AND NOT A COEFFICIENT: the coupled path is NPC and needs a
+	// non-linear form to build its operator on -- the solver refuses a
+	// Coefficient and says so. F is identically zero because the conductor is
+	// OUTSIDE Omega and contributes nothing to the interior equation, which is
+	// the whole content of FB-7's decomposition.
+	struct EmptyInterior : public meq::Source
+	{
+		double f( double, double, double ) const override { return 0.0; }
+		double dFdPsi( double, double, double ) const override { return 0.0; }
+	};
+	EmptyInterior noSource;
+
+	// What `a` is measured against: the conductor's own datum on Gamma. A bound
+	// relative to 1 would be a statement about the coil current.
+	double const datumScale = std::abs( coils.psi( halfDiscGamma, 0.0 ) );
+	BOOST_TEST_REQUIRE( datumScale > 0.0 );
+
+	std::printf( "\n  FB-7: THE COUPLED SOLVE WITH A CONDUCTOR OUTSIDE Gamma\n" );
+	std::printf( "    no plasma, so the continuous answer is a = 0 and psi = "
+	             "psi_coil; the datum on Gamma is %.4e\n\n", datumScale );
+	std::printf( "    %5s %7s %14s %10s %14s %10s\n",
+	             "n", "newton", "worst |a_n|", "rate", "L2 psi", "rate" );
+
+	std::vector<double> coefficients;
+	std::vector<double> errors;
+
+	for ( int n : { 12, 24, 48 } )
+	{
+		HalfDisc d = makeHalfDisc( n );
+		meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 4 );
+		mfem::ConstantCoefficient zero( 0.0 );
+
+		meq::GradShafranovSolver solver( *d.sub, order );
+		solver.setSource( noSource );
+		solver.setBoundaryData( zero );
+		solver.setExtension( *d.path, d.gammaHMarker );
+		solver.setExteriorConductors( coils );
+		solver.setExteriorCoupling( dtn );
+		solver.solve();
+
+		std::vector<double> const &a = solver.exteriorCoefficients();
+		BOOST_TEST_REQUIRE( static_cast<int>( a.size() ) == dtn.modeCount() );
+		double worst = 0.0;
+		for ( double value : a )
+			worst = std::max( worst, std::abs( value ) );
+
+		mfem::FunctionCoefficient exact( [ &coils ]( mfem::Vector const &x )
+		{
+			return coils.psi( x( 0 ), x( 1 ) );
+		} );
+		double const error = solver.potentialError( exact );
+
+		double aRate = std::numeric_limits<double>::quiet_NaN();
+		double eRate = std::numeric_limits<double>::quiet_NaN();
+		if ( !coefficients.empty() )
+		{
+			aRate = meq::tests::rate( coefficients.back(), worst, 2.0 );
+			eRate = meq::tests::rate( errors.back(), error, 2.0 );
+		}
+		coefficients.push_back( worst );
+		errors.push_back( error );
+
+		std::printf( "    %5d %7d %14.4e %10.3f %14.6e %10.3f\n",
+		             n, solver.newtonIterations(), worst, aRate, error, eRate );
+		std::fflush( stdout );
+
+		// ONE NEWTON STEP. The conductor enters as a CONSTANT, so it cannot make
+		// an affine residual non-linear; more than one step would mean it had.
+		BOOST_TEST( solver.newtonIterations() <= 1,
+			"the coupled vacuum solve took " << solver.newtonIterations()
+			<< " Newton steps where the residual is affine in ( x, a ) and an "
+			"exact Jacobian must finish in one" );
+	}
+
+	double const aOverall = meq::tests::rate( coefficients.front(),
+	                                          coefficients.back(), 4.0 );
+	double const eOverall = meq::tests::rate( errors.front(), errors.back(), 4.0 );
+	std::printf( "\n    over the sequence: |a| at %.3f, psi at %.3f\n\n",
+	             aOverall, eOverall );
+	std::fflush( stdout );
+
+	// THE COEFFICIENTS GO TO ZERO WITH THE MESH, which is the statement that
+	// survives now that "exactly zero" has been measured out of it. If the
+	// conductor's moment carried the wrong sign this would be flat: `a` would be
+	// cancelling twice the conductor's own flux, which does not depend on h.
+	BOOST_TEST( aOverall > 1.0,
+		"the exterior coefficients converge at " << aOverall
+		<< ", i.e. barely or not at all. With a conductor outside and no plasma "
+		"the continuous answer is a = 0, so `a` should be the interior "
+		"discretisation error and fall with it. FLAT is what a WRONG SIGN on the "
+		"conductor's moment in transmissionConstraint produces -- it asks `a` to "
+		"cancel twice the conductor's flux, which does not depend on the mesh." );
+
+	// AND THEY ARE SMALL AGAINST THE DATUM THAT PRODUCED THEM. Same argument
+	// from the other side: a sign error is a fixed fraction of order one.
+	BOOST_TEST( coefficients.back() < 1.0e-3*datumScale,
+		"the largest coefficient is " << coefficients.back() << " against a datum "
+		"of " << datumScale << " on Gamma -- " << coefficients.back()/datumScale
+		<< " of it, where the continuous answer is zero" );
+
+	// AND psi IS psi_coil, at the interior rate. This is the same measurement
+	// acceptance 1 makes with the datum GIVEN, so agreement between the two says
+	// the coupling costs the interior solve nothing.
+	BOOST_TEST( eOverall > order + 1 - 0.30,
+		"psi converges on psi_coil at " << eOverall << " with the coupling live, "
+		"against " << order + 1 << " wanted -- acceptance 1 reads 3.409 for the "
+		"same problem with the datum given" );
+}
+
+/*
+ * FB-7, ACCEPTANCE 3: WHAT THE CONDUCTOR MODEL IS WORTH, MEASURED.
+ *
+ * ../freegs4e's default Coil IS AN EXACT FILAMENT -- controlPsi returns
+ * Greens( self.R, self.Z, R, Z )*turns, a point source, and its `area` attribute
+ * only imposes a current-density limit and never enters the field. MEQ's
+ * meq::Coil is a rectangular cross-section with uniform current density. So the
+ * two codes do not model the conductors alike, and section 7.16's published
+ * 1.3e-04 agreement in psi_ax was reached ACROSS that difference rather than
+ * because the models agree.
+ *
+ * THIS IS THE MEASUREMENT THAT SIZES IT, and it is available on one code with
+ * one mesh and one solver: solve the same problem twice, once with the
+ * conductor a rectangle and once with it a filament of the same total current at
+ * the same centre, and difference the two interior fields. Nothing else moves,
+ * so the difference IS the finite-size effect at that separation.
+ *
+ * IT USES ACCEPTANCE 1's ROUTE -- the datum GIVEN -- deliberately. The coupled
+ * path takes a meq::CoilSet, and CoilSet cannot hold a filament: CoilSet::f() is
+ * the interior source term and a filament has infinite current density on a
+ * measure-zero set, so there is nothing honest for it to return. Supplying the
+ * datum directly sidesteps a design question this case does not need to settle,
+ * and the field being compared is the same field either way.
+ *
+ * AND IT IS A LOWER BOUND ON WHAT THE MODEL COSTS, not an upper one: these
+ * conductors sit at rho = 2.06 against a domain reaching 1.5, so the plasma is
+ * about 0.5 away from a coil of half-extent 0.10. A machine puts them closer.
+ */
+BOOST_AUTO_TEST_CASE( theConductorModelIsWorthMeasuring )
+{
+	int const order = 3;
+	int const n = 24;
+
+	double const centreR = 2.0;
+	double const centreZ = 0.5;
+	double const half = 0.10;
+	double const current = 1.0;
+
+	meq::CoilSet rectangles( 1.0 );
+	rectangles.add( meq::Coil( centreR, +centreZ, half, half, current ) );
+	rectangles.add( meq::Coil( centreR, -centreZ, half, half, current ) );
+
+	meq::CurrentFilament const upper( centreR, +centreZ, current );
+	meq::CurrentFilament const lower( centreR, -centreZ, current );
+	auto filamentField = [ & ]( double r, double z )
+	{
+		return meq::filamentPsi( upper, r, z, 1.0 )
+		       + meq::filamentPsi( lower, r, z, 1.0 );
+	};
+
+	// ON Gamma FIRST, WITH NO SOLVER IN THE WAY, so the number below is not
+	// confounded with a discretisation. This is the datum the two solves differ
+	// by, and everything downstream is its consequence.
+	double worstOnGamma = 0.0;
+	double scaleOnGamma = 0.0;
+	for ( int i = 0; i <= 64; ++i )
+	{
+		double const t = M_PI*( static_cast<double>( i )/64.0 - 0.5 );
+		double const r = halfDiscGamma*std::cos( t );
+		double const z = halfDiscGamma*std::sin( t );
+		double const rect = rectangles.psi( r, z );
+		worstOnGamma = std::max( worstOnGamma,
+		                         std::abs( rect - filamentField( r, z ) ) );
+		scaleOnGamma = std::max( scaleOnGamma, std::abs( rect ) );
+	}
+
+	std::printf( "\n  FB-7: A RECTANGLE AGAINST A FILAMENT, SAME CURRENT AND "
+	             "CENTRE\n" );
+	std::printf( "    conductors at ( %.2f, +/-%.2f ), half-extent %.2f, "
+	             "rho = %.2f against Gamma = %.2f\n",
+	             centreR, centreZ, half, std::hypot( centreR, centreZ ),
+	             halfDiscGamma );
+	std::printf( "    on Gamma, before any solve: worst %.4e against %.4e, "
+	             "i.e. %.3e relative\n\n",
+	             worstOnGamma, scaleOnGamma, worstOnGamma/scaleOnGamma );
+
+	HalfDisc d = makeHalfDisc( n );
+	mfem::ConstantCoefficient noSource( 0.0 );
+	mfem::ConstantCoefficient zero( 0.0 );
+
+	meq::GradShafranovSolver a( *d.sub, order );
+	a.setSource( noSource );
+	a.setBoundaryData( zero );
+	a.setExtension( *d.path, d.gammaHMarker );
+	a.setExteriorDatum( [ &rectangles ]( mfem::Vector const &x )
+	{
+		return rectangles.psi( x( 0 ), x( 1 ) );
+	} );
+	a.solve();
+
+	meq::GradShafranovSolver b( *d.sub, order );
+	b.setSource( noSource );
+	b.setBoundaryData( zero );
+	b.setExtension( *d.path, d.gammaHMarker );
+	b.setExteriorDatum( [ &filamentField ]( mfem::Vector const &x )
+	{
+		return filamentField( x( 0 ), x( 1 ) );
+	} );
+	b.solve();
+
+	mfem::GridFunction const &psiA = a.potential();
+	mfem::GridFunction const &psiB = b.potential();
+	BOOST_TEST_REQUIRE( psiA.Size() == psiB.Size() );
+
+	double worst = 0.0;
+	double scale = 0.0;
+	for ( int i = 0; i < psiA.Size(); ++i )
+	{
+		worst = std::max( worst, std::abs( psiA( i ) - psiB( i ) ) );
+		scale = std::max( scale, std::abs( psiA( i ) ) );
+	}
+
+	std::printf( "    in the domain, k = %d, n = %d: worst %.4e against a peak "
+	             "of %.4e, i.e. %.3e relative\n\n", order, n, worst, scale,
+	             worst/scale );
+	std::fflush( stdout );
+
+	// THE TWO MODELS DIFFER, which is the finding: if they did not, the choice
+	// of conductor model would be free and section 7.16's mismatch would not
+	// matter. A filament is the LIMIT of a shrinking rectangle -- CoilsTests
+	// measures that limit at second order -- so at finite extent they must
+	// differ, and by something the mesh cannot explain away.
+	BOOST_TEST( worst/scale > 1.0e-6,
+		"the rectangle and the filament give the same interior field to "
+		<< worst/scale << " relative, which is small enough that the conductor "
+		"model would not matter. If that is now true, either the half-extent has "
+		"shrunk or the conductors have moved further out, and section 7.16's "
+		"modelling mismatch stops being worth measuring." );
+
+	// AND THE DIFFERENCE IS THE DATUM'S, CARRIED INWARD -- not something the
+	// solve invented. Delta* is linear and both solves are the same operator on
+	// the same mesh, so the interior difference is the harmonic extension of the
+	// boundary difference and cannot exceed it by the maximum principle.
+	BOOST_TEST( worst <= 1.05*worstOnGamma,
+		"the interior difference " << worst << " exceeds the difference on Gamma "
+		<< worstOnGamma << " that produced it. Both solves are the same linear "
+		"operator on the same mesh, so the interior difference is the extension "
+		"of the boundary one and cannot grow -- if it has, the two runs differ by "
+		"something other than the conductor model." );
+}

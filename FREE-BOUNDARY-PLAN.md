@@ -2871,12 +2871,90 @@ Two measurements, in the order they should be taken.
    **`q` IS NOT MEASURED YET AND THAT IS THE OTHER DELIVERABLE**: the exact flux
    needs `∇ψ_coil`, and `meq::CoilSet` exposes `psi` and no derivative. The same
    gap blocks the coupled case, whose Neumann half is `q_coil·ν`.
-2. **The two routes agreeing where both are legal** — a conductor placed inside
-   `Ω` and solved by quadrature, then moved outside `Γ` with the geometry
-   otherwise fixed, must give the same field in the plasma to the discretisation
-   error. Without this the first measurement is compatible with a coupling that
-   is self-consistently wrong, which is the failure `theDriverReachesTheExteriorCoupling`'s
-   control exists to catch.
+2. ~~**THE COUPLED SOLVE MUST RETURN `a = 0` EXACTLY**~~ — **DONE 2026-09-07,
+   AND "EXACTLY" WAS WRONG.** `aConductorOutsideGammaReachesTheCoupledSolve`,
+   `k = 2`, coupling live:
+
+   | `n` | Newton | worst `\|a_n\|` | rate | `L2` in `ψ` | rate |
+   |---|---|---|---|---|---|
+   | 12 | 1 | 7.0512e-04 | — | 2.0017e-04 | — |
+   | 24 | 1 | 6.5889e-05 | 3.420 | 2.1632e-05 | 3.210 |
+   | 48 | **1** | **2.4797e-06** | 4.732 | 3.9885e-07 | 5.761 |
+
+   `|a|` converges at **4.076** and `ψ` at **4.486**, in **one Newton step** at
+   every mesh — the conductor enters as a constant, so it cannot make an affine
+   residual non-linear.
+
+   **THE CONTINUOUS ANSWER IS `a = 0` AND THE DISCRETE ONE IS NOT**, which this
+   item asserted and had to be corrected. The transmission condition determines
+   `a` from the **discrete** interior flux extended to `Γ`, and `q_h` is `q_coil`
+   only to `O( h^{k+1} )` — so `a` **is** the interior discretisation error
+   projected onto the modes, and it goes to zero *with* the mesh rather than
+   being zero *on* it. Asserting an exact zero would have been asserting that the
+   interior solve is exact.
+
+   **It is still the sign test**, which is what it was for: a moment entering
+   with the wrong sign asks `a` to cancel **twice** the conductor's own flux,
+   which is `O( 1 )` against the datum and **does not fall with `h` at all**.
+   Measured, `a` is 4.3e-06 of the datum at the finest mesh and converging. So
+   the assertion is on the RATE, and flat is what a sign error gives.
+
+2b. **THE ORIGINAL FORM OF THIS ITEM, KEPT BECAUSE THE REASONING WAS RIGHT AND
+   THE PREDICTION WAS NOT.** Run the conductor-outside case again with the
+   coupling LIVE — the `aₙ` solved for rather than the datum given. The exterior
+   field is then *entirely* the conductor's, so `ψ̃ ≡ 0` and **every coefficient
+   is exactly zero**, which the modal space represents exactly. So the
+   acceptance is `a = 0` to round-off and `ψ = ψ_coil` at `k+1`, in **one**
+   Newton step, the residual being affine.
+
+   **It is the SIGN test, which is the thing most likely to be wrong.** This
+   file already records the transmission row's sign going wrong once, as
+   predicted, and that a wrong sign there does not diverge — it fails to
+   converge, which is the same disguise as a stale load. A conductor term
+   entering the border with the wrong sign gives `a ≠ 0` of about the right
+   magnitude and a `ψ` that looks plausible; `a = 0` has no such disguise,
+   because zero is not a number a wrong sign produces.
+
+3. **WHAT THE CONDUCTOR MODEL IS WORTH — DONE 2026-09-07, and it replaced the
+   test this item first named.** `theConductorModelIsWorthMeasuring` solves the
+   same problem twice, once with the conductor a **rectangle** and once with it a
+   **filament** of the same total current at the same centre, and differences the
+   two interior fields. Nothing else moves, so the difference IS the finite-size
+   effect at that separation:
+
+   | | worst | against | relative |
+   |---|---|---|---|
+   | on `Γ`, no solver in the way | 2.4717e-04 | 5.8265e-01 | **4.242e-04** |
+   | in the domain, `k = 3` | 2.3351e-04 | 5.7287e-01 | **4.076e-04** |
+
+   **THAT IS ABOUT THREE TIMES §7.16's PUBLISHED 1.3e-04 AGREEMENT IN `ψ_ax`**,
+   so the conductor model matters at exactly the level of the result it would
+   perturb — and it is a **lower** bound, these conductors sitting at `ρ = 2.06`
+   against a domain reaching 1.5 where a machine puts them closer. The interior
+   difference coming in *below* the boundary one is the maximum principle and is
+   asserted: both runs are the same linear operator on the same mesh, so the
+   interior difference is the harmonic extension of the boundary one and cannot
+   grow.
+
+   **It uses acceptance 1's route deliberately**, the datum given rather than
+   solved: the coupled path takes a `meq::CoilSet`, and **`CoilSet` cannot hold a
+   filament** — `CoilSet::f()` is the interior source term, and a filament has
+   infinite current density on a measure-zero set, so there is nothing honest for
+   it to return. Supplying the datum sidesteps a design question this case does
+   not need to settle.
+
+4. **STILL OPEN: the two routes agreeing where both are legal** — a conductor
+   inside `Ω` solved by quadrature against the same conductor reached from
+   outside. It needs a **second geometry**, since a conductor at a fixed position
+   is either inside `Ω` or outside `Γ` and never both, so the comparison is
+   between a larger mesh that contains it and the half-disc that does not. It is
+   the only test that would exercise the interior route as a control.
+
+**AND THE DATUM MAY NOT LAND WITHOUT THE TRANSMISSION TERM.** Adding `ψ_coil` to
+the datum while leaving the border row alone is the inconsistent pair warned
+about above, and it would pass acceptance 1 — which supplies the datum and
+solves nothing — while being wrong in every coupled run. The two halves land
+together or not at all.
 
 **And it unblocks something measured**: §7.19's own motivation is that the
 two-borders fixture has *"nowhere to put a coil genuinely outside the plasma"* —

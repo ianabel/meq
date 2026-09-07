@@ -6,6 +6,11 @@
 // the .cpp.
 #include "CriticalPoints.hpp"
 
+// FB-7: conductors outside Gamma. The header forward-declares CoilSet so that it
+// does not pull in a file it needs only by reference; the definition is needed
+// here, where the field is actually evaluated.
+#include "Coils.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -1588,15 +1593,75 @@ namespace
 		// a snapshot taken at setup.
 		ExteriorDtN const *dtn = &exterior;
 		std::vector<double> const *coefficients = &exteriorCoefficientValues;
-		setExteriorDatum( [ dtn, coefficients ]( mfem::Vector const &x )
+		// AND `this`, FOR FB-7's CONDUCTORS, read live for the same reason the
+		// coefficients are: setExteriorConductors() may be called after this,
+		// and a snapshot taken here would silently drop them.
+		GradShafranovSolver const *self = this;
+		setExteriorDatum( [ dtn, coefficients, self ]( mfem::Vector const &x )
 		{
 			double total = 0.0;
 			int const first = ExteriorDtN::firstMode();
 			for ( std::size_t i = 0; i < coefficients->size(); ++i )
 				total += ( *coefficients )[ i ]
 				         *dtn->basis( first + static_cast<int>( i ), x( 0 ), x( 1 ) );
+			// psi_coil on Gamma: the DIRICHLET half of FB-7. Its Neumann twin is
+			// exteriorConductorMoments(), and the two must land together.
+			if ( self->exteriorConductorSet )
+				total += self->exteriorConductorSet->psi( x( 0 ), x( 1 ) );
 			return total;
 		} );
+	}
+
+	void GradShafranovSolver::setExteriorConductors( CoilSet const &conductors )
+	{
+		exteriorConductorSet = &conductors;
+		// The datum installed by setExteriorCoupling() reads this member through
+		// `this`, so a coupling already in place picks the conductors up without
+		// being re-installed and the two calls may come in either order.
+	}
+
+	CoilSet const *GradShafranovSolver::exteriorConductors() const
+	{
+		return exteriorConductorSet;
+	}
+
+	double GradShafranovSolver::conductorNormalFlux( double r, double z,
+	                                                 double nuR,
+	                                                 double nuZ ) const
+	{
+		if ( !exteriorConductorSet )
+			return 0.0;
+
+		/*
+		 * q . nu FOR THE CONDUCTORS, AND THE AXIS NEEDS A RULE.
+		 *
+		 * q = ( 1/r ) grad_bar( psi ), and grad_bar( psi ) is EXACTLY ( 0, 0 ) at
+		 * r = 0 for any conductor off the axis -- both brackets of the elliptic
+		 * form carry k^2 = 4 a r/d^2, which vanishes there. So q is 0/0 and
+		 * CoilSet::flux() returns NaN, correctly: the flux has no value on the
+		 * axis and inventing one silently is what this avoids.
+		 *
+		 * BUT q . nu DOES HAVE A LIMIT THERE, AND IT IS ZERO. Gamma is a
+		 * semicircle centred on the axis, so at its two endpoints ( 0, +/-rho )
+		 * the outward normal is AXIAL -- the outward radial direction at r = 0
+		 * IS +/-z. So q . nu is q_z = ( 1/r ) d_z psi, and psi ~ c( z ) r^2 near
+		 * the axis for any regular field, giving d_z psi ~ c'( z ) r^2 and
+		 * q . nu ~ c'( z ) r -> 0.
+		 *
+		 * So the rule is the LIMIT and not a convention, and it is available
+		 * only because the normal is axial: a boundary meeting the axis
+		 * obliquely would have a radial component of nu multiplying a q_r that
+		 * tends to B_z, which is finite and non-zero. Gamma cannot do that,
+		 * being a circle about the axis, and the assertion in
+		 * aConductorOutsideGammaReachesTheCoupledSolve pins it.
+		 */
+		if ( !( r > 0.0 ) )
+			return 0.0;
+
+		double gradR = 0.0;
+		double gradZ = 0.0;
+		exteriorConductorSet->gradPsi( r, z, gradR, gradZ );
+		return ( gradR*nuR + gradZ*nuZ )/r;
 	}
 
 	std::vector<double> const &GradShafranovSolver::exteriorCoefficients() const
@@ -2167,6 +2232,13 @@ namespace
 				if ( radius > 0.0 )
 					exteriorNormal /= radius;
 
+				// AND FB-7's CONDUCTORS ARE PART OF THE EXTERIOR FIELD, so eta_6
+				// must see them or it would report a perfectly matched boundary
+				// as mismatched by exactly the conductor's own flux -- and
+				// mark on it.
+				exteriorNormal += conductorNormalFlux( pt.y( 0 ), pt.y( 1 ),
+				                                       pt.nu( 0 ), pt.nu( 1 ) );
+
 				// pt.weight is SIGNED, and a squared quantity integrated against
 				// a signed weight is not a norm. std::abs is what makes this one:
 				// the sign records a folded sweep, which is a property of the
@@ -2184,6 +2256,70 @@ namespace
 			// h_e, the scaling eta_3 uses for a flux jump, so that this term is
 			// commensurate with the others under one Doerfler threshold.
 			out( element ) += mesh.GetElementSize( element )*accumulated;
+		}
+	}
+
+	void GradShafranovSolver::exteriorConductorMoments(
+		ExteriorDtN const &exterior, std::vector< double > &out ) const
+	{
+		out.assign( static_cast< std::size_t >( exterior.modeCount() ), 0.0 );
+		if ( !exteriorConductorSet || !transferPath )
+			return;
+
+		/*
+		 * THE NEUMANN HALF OF FB-7: int_Gamma ( q_coil . nu ) C_m dGamma.
+		 *
+		 * Swept with the SAME quadrature as exteriorTransmissionRows(), which is
+		 * what makes the two comparable term by term -- a moment taken on a
+		 * different rule would leave an O( h ) mismatch against the row it is
+		 * subtracted from, and this file already records what an under-resolved
+		 * sweep of Gamma costs.
+		 *
+		 * NO 1/r IN THE MEASURE, for the reason the rows carry: the exterior
+		 * block is diagonal in the weight dGamma/r, and MEQ's q IS
+		 * ( 1/r ) grad_bar( psi ), so q . nu tested in the plain measure already
+		 * carries the radius. Writing dGamma/r would divide by it twice.
+		 *
+		 * AND pt.weight IS SIGNED AND USED AS IT STANDS, exactly as the rows use
+		 * it: the sign records a folded sweep, and this term is contracted
+		 * against the same rows rather than squared.
+		 */
+		mfem::Mesh &mesh = *traceFes->GetMesh();
+		int const modes = exterior.modeCount();
+
+		for ( int be = 0; be < mesh.GetNBE(); ++be )
+		{
+			int const attribute = mesh.GetBdrAttribute( be );
+			if ( attribute < 1 || attribute > gammaHMarker.Size()
+			     || !gammaHMarker[ attribute - 1 ] )
+				continue;
+
+			thread_local mfem::FaceElementTransformations faceScratch;
+			thread_local mfem::IsoparametricTransformation faceElem1;
+			thread_local mfem::IsoparametricTransformation faceElem2;
+			mesh.GetBdrFaceTransformations( be, faceScratch, faceElem1, faceElem2 );
+			if ( faceScratch.GetGeometryType() == mfem::Geometry::INVALID )
+				continue;
+
+			mfem::IntegrationRule const &faceRule =
+				mfem::IntRules.Get( faceScratch.GetGeometryType(),
+				                    transmissionQuadratureOrder );
+
+			mfem::ExtensionBoundaryQuadrature( faceScratch, *transferPath, faceRule,
+				[ & ]( mfem::ExtensionBoundaryPoint const &pt )
+			{
+				double const normal = conductorNormalFlux( pt.y( 0 ), pt.y( 1 ),
+				                                           pt.nu( 0 ), pt.nu( 1 ) );
+				if ( normal == 0.0 )
+					return;
+
+				for ( int m = 0; m < modes; ++m )
+				{
+					int const n = ExteriorDtN::firstMode() + m;
+					out[ static_cast< std::size_t >( m ) ] +=
+						pt.weight*exterior.basis( n, pt.y( 0 ), pt.y( 1 ) )*normal;
+				}
+			} );
 		}
 	}
 
@@ -4231,13 +4367,42 @@ namespace
 			fieldResidual( unknown, s, residual );
 		}
 
-		/// T_m = ( transmission integral of x )_m + blockEntry( m ) a_m.
+		/*
+		 * FB-7's CONDUCTOR TERM, once per solve, because it is geometry and
+		 * prescribed currents and moves with neither the iterate nor `a`.
+		 */
+		std::vector< double > conductorMoments;
+		if ( exteriorCoupling )
+			exteriorConductorMoments( *exteriorCoupling, conductorMoments );
+
+		/// T_m = ( transmission integral of x )_m + blockEntry( m ) a_m
+		///       - int_Gamma ( q_coil . nu ) C_m dGamma.
 		auto transmissionConstraint = [ & ]( mfem::Vector const &state, int mode )
 		{
 			double total = 0.0;
 			mfem::Vector const &row = exteriorRows[ static_cast<std::size_t>( mode ) ];
 			for ( int i = 0; i < n; ++i )
 				total += row( i )*state( i );
+			/*
+			 * THE MINUS IS DERIVED AND THEN TESTED, in that order, because this
+			 * file records the transmission row's sign going wrong once already
+			 * and that a wrong sign there does not diverge -- it fails to
+			 * converge, which is the same disguise as a stale load.
+			 *
+			 * row . state IS int_Gamma ( q_h . nu ) C_m dGamma: the row carries
+			 * -pt.weight to undo DarcyForm's -q, so the two negations cancel.
+			 * The condition is that the interior flux match the EXTERIOR one,
+			 * which with a conductor outside is q_coil . nu plus the modal part,
+			 * so the conductor's moment is SUBTRACTED.
+			 *
+			 * And the test that settles it is a = 0: with a conductor outside
+			 * and no plasma the exterior field is ENTIRELY the conductor's, so
+			 * every coefficient is exactly zero. A wrong sign gives `a` of about
+			 * the right magnitude and a plausible psi; zero is not a number a
+			 * wrong sign produces.
+			 */
+			if ( !conductorMoments.empty() )
+				total -= conductorMoments[ static_cast<std::size_t>( mode ) ];
 			return total
 			       + exteriorCoupling->blockEntry( ExteriorDtN::firstMode() + mode )
 			         *exteriorCoefficientValues[ static_cast<std::size_t>( mode ) ];

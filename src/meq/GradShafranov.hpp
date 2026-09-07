@@ -99,6 +99,10 @@
 
 namespace meq
 {
+	/// FB-7's exterior conductors; meq/Coils.hpp has it. Forward declared so
+	/// that this header does not pull in a file it needs only by reference.
+	class CoilSet;
+
 
 	/**
 	 * A constant HDG stabilisation parameter tau.
@@ -1400,6 +1404,62 @@ namespace meq
 			/// a length that is neither.
 			void setExteriorDatum( mfem::PositionFunction g );
 
+			/**
+			 * CONDUCTORS OUTSIDE `Γ`, entering through the coupling rather than
+			 * through the mesh. FB-7; `FREE-BOUNDARY-PLAN.md` §7.19.
+			 *
+			 * A coil the mesh does not reach contributes **nothing** to
+			 * `meq::SourceIntegrator`, which assembles `F` by quadrature over
+			 * the elements — the run converges and describes a machine with that
+			 * conductor switched off. This is the other route.
+			 *
+			 * **THE EXTERIOR PROBLEM IS LINEAR, WHICH IS THE WHOLE OF IT.**
+			 * Write `ψ = ψ_coil + ψ̃`. The conductor is outside `Γ ⊇ ∂Ω`, so
+			 * `Δ*ψ_coil = 0` INSIDE `Ω` and **the interior equation is
+			 * untouched** — there is no coil term in the source at all. And `ψ̃`
+			 * is `Δ*`-harmonic in the whole exterior and decays, its singular
+			 * support having been subtracted, so the Gegenbauer expansion is
+			 * valid for it. The conductor therefore enters **only through `Γ`**,
+			 * additively and KNOWN, on both halves:
+			 *
+			 *     psi|_Gamma      =  Sum a_n C_n        +  psi_coil|_Gamma
+			 *     q . nu|_Gamma   =  ( modal )          +  q_coil . nu|_Gamma
+			 *
+			 * No new unknowns and no change to the border's size.
+			 *
+			 * **BOTH HALVES LAND TOGETHER OR NOT AT ALL.** Adding the coil to the
+			 * datum while leaving the transmission row alone is an inconsistent
+			 * pair that converges to something — the same disguise the stale-load
+			 * defect wore, where the border sat at 1e-17 while the answer was
+			 * wrong. So this one call does both.
+			 *
+			 * **IT MUST BE OUTSIDE `Γ`, AND THAT IS NOT CHECKED HERE** because
+			 * this class does not know where `Γ` is until setExteriorCoupling()
+			 * is given a DtN. A conductor inside `Ω` belongs in the SOURCE, via
+			 * meq::CoilAugmentedSource, where its current is part of the interior
+			 * equation; put it here and the interior equation silently loses it.
+			 *
+			 * @param conductors borrowed, and must outlive the solve.
+			 */
+			void setExteriorConductors( CoilSet const &conductors );
+
+			/// The conductors of setExteriorConductors(), or nullptr.
+			CoilSet const *exteriorConductors() const;
+
+			/// The conductors' own `q . nu` at a point of `Gamma`, and zero when
+			/// there are none. Public because the transmission machinery and its
+			/// tests both need it, and because the AXIS RULE it carries is worth
+			/// being able to check directly -- see the implementation.
+			double conductorNormalFlux( double r, double z,
+			                            double nuR, double nuZ ) const;
+
+			/// Each transmission row's own conductor term,
+			/// `int_Gamma ( q_coil . nu ) C_m dGamma`, swept exactly as
+			/// exteriorTransmissionRows() sweeps. Empty when there are no
+			/// conductors.
+			void exteriorConductorMoments( ExteriorDtN const &exterior,
+			                               std::vector<double> &out ) const;
+
 			/// The rows of `T`: the transmission condition of
 			/// FREE-BOUNDARY-PLAN.md section 4.2, tested against each exterior
 			/// mode. The Neumann half of the coupling, and the other half of
@@ -2195,6 +2255,9 @@ namespace meq
 
 			Globalisation globalisationChoice;
 			LocalSolver localSolverChoice;
+
+			/// setExteriorConductors(), borrowed. Null unless FB-7 is in use.
+			CoilSet const *exteriorConductorSet = nullptr;
 
 			/// The exterior coupling of setExteriorCoupling(), borrowed, and the
 			/// coefficients it solves for. The datum function reads the vector,
