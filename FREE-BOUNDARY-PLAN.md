@@ -1890,6 +1890,42 @@ all — and leaves inherited attributes out of `gammaHMarker()`. Strictly more
 permissive, so every existing caller is unaffected.
 
 
+### 7.12b The two borders converge together, and §7.13's verdict was stale
+
+**RE-MEASURED 2026-09-06, AFTER THE `ψ_bnd` REPAIR, AND IT IS THE OPPOSITE OF
+WHAT §7.13 RECORDS.** That section — and the comment in
+`theBorderedSystemClosesOnANonlinearSource` — say `ψ_bnd` converges alone, the
+exterior coefficients converge alone, and the combination does not: *"the one
+combination still open"*. Every one of those attempts predates §7.17's fix, and
+**a border on a quantity the Jacobian could not see is exactly the border that
+would fail**. Nobody re-ran it afterwards.
+
+| limiter `R` | Newton | final residual | `ψ_ax` | `ψ_bnd` |
+|---|---|---|---|---|
+| 1.05 | 5 | 3.2276e-15 | 1.088199362e-01 | 8.557804281e-03 |
+| 1.15 | 9 | 4.2489e-15 | 1.117391871e-01 | 1.405147764e-02 |
+| 1.20 | 6 | 1.0735e-16 | 1.091632931e-01 | 9.210810991e-03 |
+| 1.30 | 5 | 2.9677e-15 | 1.088257139e-01 | 8.568770649e-03 |
+
+Machine zero at every one, `ψ_ax`'s constraint at 1e-17, `ψ_ax > ψ_bnd`
+throughout. `theTwoBordersConvergeTogether` is the case, and it also runs through
+the DRIVER: `[boundary.limiter]` beside `[boundary.exterior]` converges in 5
+Newton steps and reports both.
+
+**SO EVERYTHING IN §7.13 AND §7.14 THAT IS A FAILURE NEEDS RE-MEASURING**, not
+just this one. The wall-hugging annulus, the vertical field that would not
+converge from a cold bump, the currents at 0 / −0.05 / −0.10 / −0.20 giving
+converged / FAILED / FAILED / FAILED — all of them were measured with `ψ_bnd`
+zeroed inside the Jacobian window. **They may still be true.** They are no longer
+evidence.
+
+**THE TRANSFERABLE PART**: this project's rule about re-measuring a claim after
+the thing it was measured against changes has always been applied to successes.
+It applies to failures identically, and here it cost the one item standing
+between MEQ and a machine case being recorded as open for hours after it was
+fixed.
+
+
 ### 7.13 The first attempt at a coupled free-boundary solve, and what it needs
 
 **Attempted 2026-09-06. It does not converge yet, and the diagnosis is specific

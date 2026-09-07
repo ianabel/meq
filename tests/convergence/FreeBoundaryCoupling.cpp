@@ -2905,9 +2905,11 @@ BOOST_AUTO_TEST_CASE( theBorderedSystemClosesOnANonlinearSource )
 		solver.setSource( source, 0.1 );
 		solver.setBoundaryData( zero );
 		solver.setExtension( *d.path, d.gammaHMarker );
-		// psi_bnd is NOT bordered here: see section 7.13. It converges alone
-		// and it does not converge on top of the exterior coupling, which is
-		// the one combination still open.
+		// psi_bnd is not bordered here because this case is about the COLUMN,
+		// and a second border would change what is being compared. The claim
+		// that once stood in this comment -- that psi_bnd does not converge on
+		// top of the exterior coupling -- was measured BEFORE the psi_bnd
+		// repair and is false: see theTwoBordersConvergeTogether below.
 		solver.setExteriorCoupling( dtn );
 		solver.solve();
 
@@ -3204,4 +3206,96 @@ BOOST_AUTO_TEST_CASE( theBoundaryIndicatorRefinesGammaHAndMovesTheCoefficients )
 	BOOST_TEST( off.front().etaSix == 0.0,
 	            "eta_6 is nonzero without setExteriorCoupling(), so it is not "
 	            "opt-in and every existing estimator table has moved" );
+}
+
+
+/*
+ * THE TWO BORDERS TOGETHER, AND A STALE CLAIM CORRECTED BY RE-MEASURING IT.
+ *
+ * FREE-BOUNDARY-PLAN.md section 7.13 recorded that psi_bnd converges alone, the
+ * exterior coefficients converge alone, and the COMBINATION does not -- and that
+ * this was the one thing left before a machine case. Every one of those attempts
+ * predates the psi_bnd repair: setNormalisation( s ) where two arguments were
+ * meant, which zeroed psi_bnd for the whole window in which the Jacobian is
+ * assembled. A border on a quantity the Jacobian could not see is exactly the
+ * border that would fail.
+ *
+ * NOBODY RE-RAN IT AFTER THE FIX, which is the transferable part: a failure
+ * measured under a defect is not a property of the method, and this tree's
+ * standing rule that a claim needs re-measuring after the thing it was measured
+ * against changes applies to FAILURES as much as to successes.
+ *
+ * It converges. Four limiter positions, five to eight Newton steps each, with
+ * psi_ax's constraint at machine zero every time -- so this is a basin rather
+ * than a lucky point.
+ */
+BOOST_AUTO_TEST_CASE( theTwoBordersConvergeTogether )
+{
+	int const order = 2;
+	int const n = 24;
+	double const mu0 = 1.0;
+
+	auto pPrime = std::make_shared<PowerProfile const>( 0.6, 1 );
+	auto ggPrime = std::make_shared<PowerProfile const>( 0.05, 1 );
+
+	HalfDisc d = makeHalfDisc( n );
+	meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 4 );
+	mfem::ConstantCoefficient zero( 0.0 );
+	mfem::FunctionCoefficient guess( []( mfem::Vector const &x )
+	{
+		double const dr = x( 0 ) - 0.75;
+		double const dz = x( 1 );
+		double const t = 1.0 - ( dr*dr + dz*dz )/( 0.40*0.40 );
+		return t > 0.0 ? 0.1*t : 0.0;
+	} );
+
+	std::printf( "\n  BOTH BORDERS AT ONCE: psi_bnd AND THE EXTERIOR COEFFICIENTS"
+	             " ( k = %d, n = %d, %d modes )\n", order, n, dtn.modeCount() );
+	std::printf( "    %-10s %7s %15s %15s %15s\n",
+	             "limiter R", "newton", "residual", "psi_ax", "psi_bnd" );
+
+	int converged = 0;
+	for ( double limiterR : { 1.05, 1.15, 1.20, 1.30 } )
+	{
+		meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, mu0 );
+		meq::GradShafranovSolver solver( *d.sub, order );
+		solver.setInitialGuess( guess );
+		solver.setNewtonControl( 1.0e-9, 1.0e-12, 150 );
+		solver.setSource( source, 0.1 );
+		solver.setBoundaryData( zero );
+		solver.setExtension( *d.path, d.gammaHMarker );
+		solver.setBoundaryFluxPoint( limiterR, 0.0 );
+		solver.setExteriorCoupling( dtn );
+		solver.solve();
+
+		double const residual = solver.newtonResiduals().empty()
+		                        ? 1.0 : solver.newtonResiduals().back();
+		std::printf( "    %-10.2f %7d %15.4e %15.9e %15.9e\n",
+		             limiterR, solver.newtonIterations(), residual,
+		             solver.psiAxis(), solver.psiBoundary() );
+
+		// THE SPAN MUST BE POSITIVE OR THE NORMALISATION IS INSIDE OUT: a
+		// psi_bnd above psi_ax is a plasma whose edge is hotter than its core,
+		// and every profile would be evaluated at a negative Psi.
+		BOOST_TEST( solver.psiAxis() > solver.psiBoundary(),
+		            "psi_ax " << solver.psiAxis() << " is not above psi_bnd "
+		            << solver.psiBoundary() << " at limiter R = " << limiterR );
+
+		// psi_ax's own constraint, in its own units. The printed residual is a
+		// weighted combination over the whole bordered system and can be small
+		// while this is not.
+		BOOST_TEST( std::abs( solver.normalisationResidual() ) < 1.0e-12,
+		            "psi_ax - max psi_h is " << solver.normalisationResidual()
+		            << " at limiter R = " << limiterR );
+
+		if ( residual < 1.0e-8 )
+			converged++;
+	}
+	std::fflush( stdout );
+
+	BOOST_TEST( converged == 4,
+	            "only " << converged << " of 4 limiter positions converged with "
+	            "both borders live. Section 7.13 recorded this combination as "
+	            "failing, and that measurement predates the psi_bnd repair -- if "
+	            "it is failing again, the repair is what to look at" );
 }

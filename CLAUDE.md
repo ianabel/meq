@@ -2974,11 +2974,35 @@ spellings of one configuration, all of which parse:
 The third is a **different branch** — four times the axis flux on the same
 profiles — not a better answer.
 
-**WHAT IS STILL OPEN IS THE TWO BORDERS TOGETHER.** `ψ_bnd` converges alone and
-the exterior coefficients converge alone; the combination does not, which §7.13
-records. So the shipped example leaves `ψ_bnd` at zero and its plasma edge is the
-`ψ = 0` contour rather than a limiter contact — half of a free-boundary problem,
-and the half that is built.
+**AND THE TWO BORDERS TOGETHER WORK, WHICH THE RECORD SAID THEY DID NOT.**
+§7.13 recorded `ψ_bnd` converging alone, the exterior coefficients converging
+alone, and the combination failing — "the one combination still open". **Every
+one of those attempts predates the `ψ_bnd` repair**, and a border on a quantity
+the Jacobian could not see is exactly the border that would fail. **Nobody
+re-ran it after the fix.** Re-measured 2026-09-06, four limiter positions:
+
+| limiter `R` | Newton | final residual | `ψ_ax` | `ψ_bnd` |
+|---|---|---|---|---|
+| 1.05 | 5 | 3.2276e-15 | 1.088199362e-01 | 8.557804281e-03 |
+| 1.15 | 9 | 4.2489e-15 | 1.117391871e-01 | 1.405147764e-02 |
+| 1.20 | 6 | 1.0735e-16 | 1.091632931e-01 | 9.210810991e-03 |
+| 1.30 | 5 | 2.9677e-15 | 1.088257139e-01 | 8.568770649e-03 |
+
+Machine zero at every one, `ψ_ax`'s own constraint at 1e-17, and `ψ_ax > ψ_bnd`
+throughout — so it is a basin rather than a lucky point.
+`theTwoBordersConvergeTogether` guards it and its message names the repair as
+what to look at if it ever fails again.
+
+**THE TRANSFERABLE PART IS THAT A FAILURE MEASURED UNDER A DEFECT IS NOT A
+PROPERTY OF THE METHOD.** This file's standing rule — re-measure a claim after
+the thing it was measured against changes — has always been applied to
+*successes*. It applies to failures identically, and this is the first time that
+has cost anything: the one item standing between MEQ and a machine case had been
+fixed for hours and was still being recorded as open.
+
+The shipped example still leaves `ψ_bnd` at zero, because an example should
+demonstrate one thing; `[boundary.limiter]` beside it is a two-line addition and
+the case above is where the numbers live.
 
 `Globalisation` other than `None` is refused on this path, loudly: the KINSOL
 paths drive a residual of their own and the Picard ones build no Jacobian to
