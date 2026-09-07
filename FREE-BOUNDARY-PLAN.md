@@ -2329,3 +2329,216 @@ asymmetry is one more reason the coupling belongs on NPC.
 * **Anything from `attic/free-boundary/`.** The von Hagenow implementation there
   is the good algorithm badly amortised, and §2 says why the amortisation is what
   adaptivity destroys. It is worth reading and not worth restoring.
+
+---
+
+## 10. Diverted plasmas and the X-point
+
+**A planning item, written 2026-09-06. Nothing here is built, and it is
+deliberately not scheduled** — FB-5's adaptivity and FB-6 come first, and §10
+should not be started before a *limiter* free-boundary solve is green. It is
+written down now because every real tokamak MEQ would be pointed at is diverted,
+because `../freegs4e`'s seven benchmark configurations are **all** diverted, and
+because the tree already contains most of the machinery and one latent defect.
+
+### 10.1 The organising fact: `ψ` is analytic at an X-point
+
+**The X-point is not a singularity of the equation, and almost every worry about
+it is really a worry about a consumer of the level set.** At an X-point `∇̄ψ = 0`
+and the Hessian is indefinite, so locally
+
+```
+ψ − ψ_X  ≈  ½( a ξ² − b η² ),        a, b > 0
+```
+
+which is a perfectly ordinary analytic function. `Δ*` does not degenerate, the
+flux mass `(r q, v)` does not degenerate, and `q` is bounded and smooth. What has
+a **corner** is the curve `{ψ = ψ_X}`, and therefore everything that treats that
+curve as a domain boundary, as a contour, or as the edge of a chart.
+
+That splits the work cleanly, and it is the reason this is tractable at all:
+
+| | affected by an X-point? |
+|---|---|
+| the HDG solve on `Ω` | **no** — `Γ` is the semicircle and is smooth; the separatrix is never meshed |
+| the exterior DtN and the transmission row | **no** — same reason |
+| `ψ_bnd`, FB-3's border | **yes** — it becomes the saddle value, at a moving point |
+| `ConfineToPlasma`'s support test | **yes**, and it is wrong today — §10.3 |
+| transfer paths (stage 5, `PLASMA-EDGE-PLAN.md`) | **yes**, and this is the hard wall |
+| the disc chart (`INVERSION-PLAN.md` IN-5) | **yes**, already deferred here |
+| the MXH fit in `tools/freegs4e-benchmark/` | **yes**, and FB-6 deletes the need for it |
+
+**A prediction worth recording before it is measured, because it cuts the other
+way from expectation.** FB-4 caps the order by the profile's vanishing order `j`
+through the `|d|^{j+2}` behaviour across a *smooth* edge. At the X-point itself
+`Ψ` vanishes **quadratically**, so `F ~ Ψ^j` vanishes to order `2j` there — the
+crossing point is *smoother* than the rest of the edge, not rougher, for every
+`j ≥ 1`. The `|d|^{j+2}` story should therefore continue to hold along each
+branch and the crossing should contribute nothing extra, being a set of measure
+zero in a two-dimensional integral. **Predicted, not measured**, and §10.6's
+XP-1 is where it stops being a prediction.
+
+### 10.2 What is already built, and it is more than expected
+
+* **`meq::CriticalPointFinder` finds saddles sub-element.**
+  `CriticalPointType::Saddle` exists, `sweep()` returns them, and the tree
+  already locates `iterExample2`'s X-point to **4.5e-6** of its published
+  position. That is the capability CEDRES++ records as an open problem on its own
+  P1 discretisation — where the axis and the X-point are confined to mesh
+  vertices — and it exists here because `q` is a **solved** variable and a
+  critical point is a root of it.
+* **The Poincaré–Hopf audit is the consistency check a diverted configuration
+  needs.** `audit()` already demonstrates the case: a box enclosing an axis
+  *and* a saddle reads **winding 0 with two critical points inside**, and
+  `theWindingNumberIsASumOfIndicesAndNotACount` exists precisely so that a zero
+  degree is never read as "there is nothing here". For a single null the
+  expected reading is one `+1` and one `−1`; for a double null, one and two.
+* **AN EXACT X-POINT FIXTURE ALREADY SHIPS.** `Soloviev::nstx()` is
+  Cerfon–Freidberg's up-down asymmetric single null, and its twelve constraints
+  put the X-point **exactly at `(0.699700, −1.716000)` with `ψ = −2.6e-18`**.
+  So an X-point finder can be measured against a closed form **today**, on the
+  fitted path, with no free boundary and no coupling — the same shape as FB-A,
+  which is the stage that paid off best in this plan.
+* **`Source.hpp` already records the defect below** and names
+  `meq::CriticalPointFinder` as what would fix it. §10.3 is that note promoted
+  to a plan.
+
+### 10.3 The one live defect: the support test has no connectivity
+
+`NormalisedSource::insidePlasma()` is a **pointwise value test**,
+`(ψ − ψ_bnd)·span > 0`. For a limiter plasma that is correct. For a diverted one
+it is **wrong, and wrong in a specific direction**.
+
+Near the saddle the level `ψ = ψ_X` divides a neighbourhood into four sectors.
+Two of them — opposite each other — carry `Ψ > 0`: the **plasma**, and the
+**private flux region** under the divertor. So a pointwise test switches the
+source **on** in the private flux region, and further out along that sector `ψ`
+keeps rising toward the divertor coils, so it stays on. `ConfineToPlasma` would
+then describe a machine with a second, unphysical current channel below the
+X-point.
+
+**It is latent rather than broken**: no shipped example sets `ConfineToPlasma`,
+and MEQ has no diverted case, so nothing exercises it. It becomes live on the
+first diverted run and it will not announce itself — the run converges.
+
+**The fix is a flood fill on the element adjacency graph**, seeded at the element
+containing the magnetic axis, over elements where `Ψ > 0`. `freegs4e` does the
+same thing on its uniform grid (`critical.core_mask`) and has to **explicitly
+block a neighbourhood of each X-point** first, because on a grid the fill leaks
+diagonally through the saddle.
+
+> **MEQ's mesh should need no such blocking, and that is a claim to test rather
+> than to assume.** The two lobes meet at a *point*. A fill over **face**
+> neighbours cannot cross a shared vertex, so it should be blocked at the saddle
+> automatically — except in whichever element actually contains the X-point,
+> which is cut by both branches and is a face neighbour of both lobes. So the
+> expected leak is **one element wide**, not a whole region, and the question is
+> whether excluding the X-point's own element is enough. That is XP-1's
+> acceptance and it is cheap to measure.
+
+The cost is one fill per Newton step at worst, over elements rather than
+quadrature points, and it is `O(elements)`.
+
+### 10.4 `ψ_bnd` becomes a three-row border, and one block is differentiated
+
+FB-3 built `setBoundaryFluxPoint( r, z )`: `ψ_bnd = ψ_h` at the nearest potential
+dof to a **prescribed** point. That is right for a limiter, whose contact is a
+piece of hardware, and wrong for a divertor, whose X-point is a functional of the
+solution and moves as Newton moves.
+
+The natural generalisation is the one this tree has already run twice. Add three
+unknowns `(r_X, z_X, ψ_bnd)` and three rows:
+
+```
+q_r( r_X, z_X )  = 0
+q_z( r_X, z_X )  = 0          the X-point is a root of the SOLVED flux
+ψ_bnd − ψ_h( r_X, z_X ) = 0
+```
+
+`solveWithNormalisation()` already does a general `( N + 2 )` elimination against
+one factorisation, so this is `( N + 4 )` and is **mechanical** — the same
+statement §4.4 made about FB-5 and which held.
+
+**But one block is not exact, and this is the structural cost of the item.**
+Every border MEQ has built so far is either exactly `−e_j` (under NPC, because
+`ψ` and `q` are unknowns) or a local sensitivity. Here the corner block
+`∂( q_r, q_z )/∂( r_X, z_X )` is **`∇q`** — the Hessian of the potential — and
+there is no solved variable for it: differentiating an L2 field of degree `k`
+leaves `k−1`. This is the same wall recorded for the band continuation of `B`,
+where the honest answer was `O(h²)` at every `k`, and for the same reason.
+
+**What that costs is the Jacobian, not the answer.** An inexact corner block does
+not move the converged solution — `CLAUDE.md`'s *A wrong Jacobian is invisible to
+a convergence table* is the standing statement of this — it costs the quadratic
+rate. So **the acceptance for XP-3 must be the observed Newton order and not a
+convergence table**, and the fallback if the order goes is to difference the two
+rows in `(r_X, z_X)`, which is two extra residual evaluations in a 2-vector and
+is cheap. Note the standing warning that a differenced derivative of a hybridized
+residual is only as good as the local solves under it, which under NPC is not an
+issue at all.
+
+### 10.5 The two things that genuinely do not have an answer yet
+
+**THE TOPOLOGY CAN CHANGE UNDER NEWTON, AND `min` IS NOT DIFFERENTIABLE.** The
+plasma boundary is whichever comes first — the limiter contact or the X-point:
+
+```
+ψ_bnd = the value that puts the LCFS inside the vessel, i.e. a min/max over candidates
+```
+
+That switch is **not differentiable**, and a Newton that tries to differentiate
+through it is in exactly the position FB-4 measured at `j = 0`: chasing a root of
+a function with a jump in it, where an exact starting point and
+`PicardThenNewton` are equally useless. It is also combinatorial — an X-point can
+appear, vanish, or exchange with a second one as the iterate moves.
+
+**The answer, and it follows this tree's own precedent, is to fix the topology
+within a Newton solve and re-decide between solves.** Choose the bounding
+critical point, freeze that choice, run Newton on a smooth problem, then check
+whether the choice still holds; if it does not, re-decide and re-solve. That is
+an outer fixed point over a discrete state, and it has the failure mode
+`PLASMA-EDGE-PLAN.md` §7 already names for its own support iteration — two
+states alternating. The mitigation is the same: require the choice to change at
+most once per outer sweep and report when it does.
+
+**A NEAR-DOUBLE-NULL IS ILL-CONDITIONED AND NOTHING ABOUT THAT IS A BUG.** Two
+saddles at nearly equal `ψ` make the "which one bounds the plasma" decision
+arbitrarily sensitive, and a real machine is often run deliberately close to
+balanced double null. Expect the border to be poorly conditioned there, expect
+the discrete choice to flip between iterates, and **measure the conditioning
+rather than hoping** — `AxisConvergence` is the template, since it measured
+`O(1/h)` at the axis and thereby settled a risk that had been asserted for
+months.
+
+### 10.6 The staged pathway
+
+Each stage ends at a measured number and each is useful alone. **XP-0 and XP-1
+need no free boundary at all**, which is what makes them worth doing early — the
+same argument that made FB-A the best-value stage in this plan.
+
+| | | acceptance |
+|---|---|---|
+| **XP-0** | **The X-point against a closed form.** `CriticalPointFinder` on `Soloviev::nstx()`, whose X-point is known exactly. No solve, no free boundary. | position converging at the rate `findAxis()` reaches for the axis (2.34 / 3.48 / 4.45 at `k = 1, 2, 3` over a dyadic sweep), with the **pointwise, non-monotone** per-pair behaviour the axis study already documents, so the two-tier rate assertion is the pattern to copy. Plus `audit()` reading `+1` and `−1` over a box enclosing both |
+| **XP-1** | **The connectivity test.** `plasmaComponent()`: a face-neighbour flood fill from the axis element over `{Ψ > 0}`. | on a diverted fixture it excludes the private flux region where the pointwise test includes it, measured as an element count **and** as `∫\|F\|` — a count alone would not say the difference matters. **And the sharp one**: whether the fill leaks through the X-point's own element, which §10.3 predicts is the only place it can |
+| **XP-2** | **`ψ_bnd` from the located X-point, as an OUTER fixed point.** Locate, set the normalisation, re-solve. No new border. | it converges, and the answer agrees with XP-3 — which is what makes XP-3 a change of algorithm rather than a change of problem. This is the honest halfway house and may be enough for a long time |
+| **XP-3** | **The three-row border**, `(r_X, z_X, ψ_bnd)` inside the same Newton at `( N + 4 )`. | agreement with XP-2 at round-off, and **the observed Newton order**, which is the only thing that can see the inexact `∇q` corner block. `HighBetaConvergence` bit-identical, which is what says the generalisation reduces |
+| **XP-4** | **A diverted machine case** against `../freegs4e`. | all seven of its configurations are already diverted, so this needs no new reference. FB-6 at `j ≥ 1` comes first and this is FB-6 with the boundary found rather than fitted |
+
+**XP-0 IS THE STAGE TO PROTECT AND IT IS ALSO THE CHEAPEST.** It is a rate study
+against a closed form on a fixture that already ships, it needs nothing that is
+not already built, and it either shows that MEQ can find an X-point at the order
+its flux converges at or shows that it cannot. Everything above XP-1 assumes it.
+
+**And what it does NOT cover, stated so nobody discovers it at XP-4.** This
+pathway makes a diverted *free-boundary* solve reachable. It does **not** make a
+diverted plasma reachable for:
+
+* **`PLASMA-EDGE-PLAN.md`**, which needs transfer paths across the plasma edge
+  and whose §7 already records that both path families give out at a corner.
+  That plan is limiter-only and this item does not change it.
+* **the flux-surface inversion**, where `INVERSION-PLAN.md` IN-5 is the open
+  item and a disc chart has no meaning through a separatrix.
+* **a FIXED-boundary solve on a separatrix**, which is a domain with a genuine
+  re-entrant corner and is why `ExtensionConvergence` takes `Γ` to be
+  `ψ = −0.03` rather than `ψ = 0`. Nothing here rescues that, and nothing needs
+  to: free boundary is what removes the need to mesh the separatrix at all.

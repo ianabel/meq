@@ -219,7 +219,10 @@ transfer-path families give out — `CLAUDE.md` records `ExtensionConvergence`
 taking `Γ` to be `ψ = −0.03` rather than the separatrix for exactly this reason,
 and `INVERSION-PLAN.md`'s IN-5 stops at the same wall. **So this design covers
 LIMITER plasmas and not diverted ones**, which is a large scope limit and is not
-a detail to discover at PE-5. Whether an X-point can be handled by excluding a
+a detail to discover at PE-5. `FREE-BOUNDARY-PLAN.md` §10 is the diverted-plasma
+pathway and **it does not rescue this one**: it works by never meshing the
+separatrix, which is available to a free-boundary solve and is exactly what an
+interior interface cannot do. Whether an X-point can be handled by excluding a
 disc around it, and what that costs the order, is unexamined.
 
 **The band can exceed one element.** Where `Γ_p` runs nearly parallel to a mesh

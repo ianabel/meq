@@ -678,6 +678,24 @@ run setting `[source] Mu0 = 1` while the coils kept the SI value would sum two
 terms scaled a million-fold apart and converge, at full order, to a machine
 nobody described.
 
+**AND `ConfineToPlasma` IS A LIMITER PLASMA'S SUPPORT TEST, WHICH IS LATENT
+RATHER THAN BROKEN AND IS WORTH KNOWING BEFORE THE FIRST DIVERTED RUN.**
+`NormalisedSource::insidePlasma()` is a pointwise test on the value,
+`(ψ − ψ_bnd)·span > 0`, with no connectivity. Across an X-point the level
+`ψ = ψ_X` cuts a neighbourhood into four sectors and **two opposite ones carry
+`Ψ > 0`** — the plasma, and the **private flux region** under the divertor. So on
+a diverted plasma this switches the source **on** beneath the X-point, and
+further out along that sector `ψ` keeps rising toward the divertor coils, so it
+stays on. The run converges and describes a machine with a second current
+channel nobody asked for.
+
+It cannot fire today: no shipped example sets `ConfineToPlasma` and MEQ has no
+diverted case. The fix is a flood fill on the element adjacency graph from the
+axis element, and `FREE-BOUNDARY-PLAN.md` §10 is the pathway — including the
+prediction that a **face**-neighbour fill needs none of the explicit X-point
+blocking `freegs4e`'s grid-based `core_mask` requires, because two lobes meeting
+at a vertex are not face neighbours.
+
 **AND THE MOVING SUPPORT IS REACHABLE TOO, AS `[source] ConfineToPlasma`** —
 `F = 0` wherever `Ψ ≤ 0`, refused unless `Normalised = true` because the test is
 on `Ψ`. **The coil term is OUTSIDE that support and the order the sum is taken

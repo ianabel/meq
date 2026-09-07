@@ -258,6 +258,13 @@ namespace meq
 			 * exists this is a limiter plasma's support, and a diverted one's
 			 * only while the search region excludes the private flux.
 			 *
+			 * FREE-BOUNDARY-PLAN.md section 10.3 is that note promoted to a
+			 * plan, and it says which DIRECTION this is wrong in: the private
+			 * flux region is the sector OPPOSITE the plasma across the saddle,
+			 * so it carries Psi > 0 by value and this test switches the source
+			 * ON there. A diverted run would converge and would describe a
+			 * machine with a second current channel under the divertor.
+			 *
 			 * **A PRECONDITION, MEASURED RATHER THAN ASSUMED.** The profiles
 			 * must vanish at the plasma edge -- `p'( 0 ) = 0` -- or Newton does
 			 * not converge at all. With `p'( 0 ) != 0` the source JUMPS across
