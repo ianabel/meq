@@ -737,6 +737,138 @@ namespace meq
 		return points;
 	}
 
+	void CriticalPointFinder::nodalExtreme( bool wantMaximum, double &value,
+	                                        int &element, double &r,
+	                                        double &z ) const
+	{
+		// The same loop GradShafranovSolver runs to produce psi_ax: every element,
+		// every dof, strict comparison so a tie goes to the first seen. Written
+		// out rather than shared because the solver's version reads a block of the
+		// recovery scratch mid-Newton and this one reads a GridFunction after it.
+		mfem::FiniteElementSpace const *space = potentialField.FESpace();
+		double best = wantMaximum ? -std::numeric_limits<double>::infinity()
+		                          : std::numeric_limits<double>::infinity();
+		int bestElement = -1;
+		int bestLocal = -1;
+
+		mfem::Array<int> dofs;
+		for ( int e = 0; e < meshRef.GetNE(); ++e )
+		{
+			space->GetElementDofs( e, dofs );
+			for ( int i = 0; i < dofs.Size(); ++i )
+			{
+				int const index = dofs[ i ] >= 0 ? dofs[ i ] : -1 - dofs[ i ];
+				double const here = potentialField( index );
+				if ( wantMaximum ? here > best : here < best )
+				{
+					best = here;
+					bestElement = e;
+					bestLocal = i;
+				}
+			}
+		}
+
+		value = best;
+		element = bestElement;
+		r = 0.0;
+		z = 0.0;
+		if ( bestElement < 0 )
+			return;
+
+		// The node's own position, from the element's nodal IntegrationRule. Every
+		// space MEQ builds for the potential is a nodal L2 collection, so the rule
+		// has one point per dof; a basis where it does not gets the element centre
+		// rather than a throw, because this is a diagnostic and a basis choice is
+		// not the thing it is guarding.
+		mfem::FiniteElement const *fe = space->GetFE( bestElement );
+		mfem::IntegrationRule const &nodes = fe->GetNodes();
+
+		// THREAD LOCAL, NOT THE MESH'S SHARED SCRATCH -- see rootInElement().
+		thread_local mfem::IsoparametricTransformation scratch;
+		meshRef.GetElementTransformation( bestElement, &scratch );
+
+		mfem::IntegrationPoint node;
+		if ( nodes.GetNPoints() == fe->GetDof() )
+			node = nodes.IntPoint( bestLocal );
+		else
+			node = mfem::Geometries.GetCenter(
+				meshRef.GetElementBaseGeometry( bestElement ) );
+
+		mfem::Vector physical( 2 );
+		scratch.Transform( node, physical );
+		r = physical( 0 );
+		z = physical( 1 );
+	}
+
+	AxisAgreement CriticalPointFinder::checkAxis( double psiAxisIn,
+	                                             double psiBoundaryIn,
+	                                             double toleranceIn ) const
+	{
+		double const span = psiAxisIn - psiBoundaryIn;
+		if ( !( std::abs( span ) > 0.0 ) )
+			throw std::invalid_argument(
+				"CriticalPointFinder::checkAxis: psi_ax equals psi_bnd, so the "
+				"normalised flux is undefined and there is nothing to compare" );
+
+		AxisAgreement result;
+		result.psiAxis = psiAxisIn;
+		result.psiBoundary = psiBoundaryIn;
+
+		// THE SENSE FOLLOWS THE SPAN AND IS NOT GUESSED. The plasma is where
+		// ( psi - psi_bnd ) carries the span's sign -- NormalisedSource's own
+		// insidePlasma() -- so a positive span puts the axis at a maximum. That is
+		// what lets this dodge AxisSense::Either's refusal, which is the right
+		// behaviour for a caller who does not know the sign of F and the wrong one
+		// here, where psi_ax itself says which way round the plasma is.
+		CriticalPointType const wanted = span > 0.0 ? CriticalPointType::Maximum
+		                                            : CriticalPointType::Minimum;
+
+		nodalExtreme( span > 0.0, result.nodalExtreme, result.nodeElement,
+		              result.nodeR, result.nodeZ );
+
+		// A FULL SWEEP, NOT tryFindAxis(). Two reasons, and both are about the
+		// failure this exists to catch. tryFindAxis() seeds from the extreme nodal
+		// values -- the very quantity under suspicion -- and it returns false
+		// outright wherever more than one extremum is reachable, which on a real
+		// machine case with a spurious ridge near the axis is the ordinary
+		// outcome. A sweep costs two Newtons per element and is negligible beside
+		// the solve that produced the field.
+		std::vector<CriticalPoint> const all = sweep();
+		for ( std::size_t i = 0; i < all.size(); ++i )
+		{
+			if ( all[ i ].type == CriticalPointType::Saddle )
+				++result.saddles;
+			if ( all[ i ].type != wanted )
+				continue;
+
+			++result.extrema;
+			double const flux = ( all[ i ].psi - psiBoundaryIn )/span;
+			// THE LARGEST Psi WINS, deliberately: a spurious extremum then costs a
+			// missed detection rather than a false alarm, which is the right way
+			// round for a warning. AxisAgreement's comment carries the argument.
+			if ( !result.located || flux > result.normalisedFlux )
+			{
+				result.located = true;
+				result.axis = all[ i ];
+				result.normalisedFlux = flux;
+			}
+		}
+
+		if ( !result.located )
+			return result;
+
+		double const dr = result.axis.r - result.nodeR;
+		double const dz = result.axis.z - result.nodeZ;
+		result.separation = std::sqrt( dr*dr + dz*dz );
+
+		double const size = result.axis.element >= 0
+			? meshRef.GetElementSize( result.axis.element ) : 0.0;
+		result.separationInElements = size > 0.0 ? result.separation/size : 0.0;
+
+		result.agrees = result.normalisedFlux >= 1.0 - toleranceIn;
+		return result;
+	}
+
 	IndexAudit CriticalPointFinder::audit() const
 	{
 		IndexAudit result;

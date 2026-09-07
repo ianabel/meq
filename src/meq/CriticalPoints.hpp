@@ -269,6 +269,102 @@ namespace meq
 		Minimum
 	};
 
+	/**
+	 * Whether the psi_ax a solve REPORTS is the flux at a magnetic axis.
+	 *
+	 * THE DEFINITION SAYS NOTHING ABOUT AN AXIS, AND THAT IS THE WHOLE OF THE
+	 * PROBLEM THIS ANSWERS. GradShafranovSolver::psiAxis() is the largest NODAL
+	 * value of psi_h, chosen for the reason the header gives at length: one
+	 * nodal value is one entry of the discrete unknown, so the bordered Newton's
+	 * row is exactly -e_j. Nothing in "the largest number in the potential
+	 * vector" says that number sits at a magnetic axis, and the bordered Newton
+	 * cannot notice: G( lambda, s ) = s - max psi_h is satisfied at machine zero
+	 * by a spurious nodal spike exactly as it is by an axis.
+	 *
+	 * MEASURED, and this is why the check exists rather than being a precaution.
+	 * On a free-boundary machine case at k = 2 -- the SAME mesh, source and guess
+	 * on which k = 3 reproduces its reference to four digits -- the solve
+	 * converged in 17 Newton steps with psi_ax - max psi_h reading 0.000e+00, the
+	 * prescribed plasma current delivered to seven figures and every border at
+	 * machine zero, and reported psi_ax = 2.734289e+00 against a peak of
+	 * 8.64e-02: twenty-nine times too large, and a SINGLE dof of one element.
+	 * The runaway is self consistent -- a spurious psi_ax inflates the span, Psi
+	 * collapses, and the current border raises the profile scale by 980 to hold
+	 * the current -- so every diagnostic the run prints is green.
+	 *
+	 * WHAT IS COMPARED, AND WHY IT IS THE NORMALISED FLUX RATHER THAN A RATIO OF
+	 * FLUXES. The profiles are functions of
+	 *
+	 *     Psi = ( psi - psi_bnd )/( psi_ax - psi_bnd ),
+	 *
+	 * and Psi at the magnetic axis is 1 BY DEFINITION when psi_ax is the axis
+	 * flux. So evaluating Psi at a genuine O-point -- a zero of q_h, found by
+	 * this class rather than read off the nodes -- is a direct statement about
+	 * the quantity the source actually consumes, and it reduces to psi_O/psi_ax
+	 * on every fixed-boundary run, where psi_bnd is zero.
+	 *
+	 * IT IS ONE SIDED, AND THE SIDE IS FORCED. psi_ax is the largest nodal value,
+	 * and the peak of a polynomial over a closed element is at least its largest
+	 * nodal value, so on a healthy field Psi at the axis is 1 from ABOVE, short
+	 * only of the O( h^(k+1) ) by which q_h disagrees with itself across the face
+	 * that carries the extreme node. The failure drives it DOWN -- 0.032 on the
+	 * machine case above, 0.31 and 0.36 on a half-disc that latched onto the
+	 * corner where Gamma meets the axis. So the guard is on the low side and the
+	 * high side is reported rather than tested: a Psi above 1 is a field whose
+	 * element interior peaks well above its own nodes, which is coarseness rather
+	 * than a wrong equilibrium.
+	 *
+	 * WHAT IT CANNOT DO. sweep() is seeded Newton and is not exhaustive, so a
+	 * spurious extremum it happens to reach with a HIGHER Psi than the true axis
+	 * makes this pass -- the largest Psi is taken deliberately, so that noise
+	 * costs a missed detection rather than a false alarm. extrema and saddles are
+	 * reported for that reason: an axis found among nine other maxima is not the
+	 * same evidence as an axis found alone. And separation is corroboration and
+	 * not a second trigger, because on a graded mesh the axis element's own
+	 * diameter is not the scale the spike lives on.
+	 */
+	struct AxisAgreement
+	{
+		/// What the solve reported, and the boundary flux it is measured against.
+		double psiAxis = 0.0;
+		double psiBoundary = 0.0;
+
+		/// The extreme nodal value of psi_h recomputed here, and where it sits.
+		/// It is the same argmax GradShafranovSolver takes -- same field, same
+		/// rule -- so a disagreement with psiAxis above is itself a finding, and
+		/// is the reason this is recomputed rather than only passed in.
+		double nodalExtreme = 0.0;
+		double nodeR = 0.0;
+		double nodeZ = 0.0;
+		int nodeElement = -1;
+
+		/// Whether an extremum of the sense the span asks for was reached at all.
+		/// FALSE IS A RESULT, not an absence of one: a normalised solve whose flux
+		/// has no interior extremum anywhere is the wall-hugging annulus branch,
+		/// where psi rises monotonically to Gamma and there is no closed surface
+		/// to be an axis of.
+		bool located = false;
+
+		/// The O-point carrying the largest normalised flux. Valid if located.
+		CriticalPoint axis;
+
+		/// How many extrema of that sense the sweep reached, and how many saddles
+		/// beside them. See the header on why noise arrives in pairs.
+		int extrema = 0;
+		int saddles = 0;
+
+		/// Psi at @a axis. IT MUST BE 1.
+		double normalisedFlux = 0.0;
+
+		/// | x_axis - x_node |, in metres and in diameters of the axis element.
+		/// Corroboration for a reader, never the trigger.
+		double separation = 0.0;
+		double separationInElements = 0.0;
+
+		/// located, and normalisedFlux is within the tolerance below 1.
+		bool agrees = false;
+	};
+
 	/// The result of the boundary audit. Everything in it is a measurement of
 	/// one walk around the boundary of the mesh.
 	struct IndexAudit
@@ -404,6 +500,36 @@ namespace meq
 			/// Walk the boundary and accumulate the turning of q.
 			IndexAudit audit() const;
 
+			/**
+			 * Is @a psiAxisIn the flux at a magnetic axis, or merely the largest
+			 * number in the potential vector? See AxisAgreement, which is where
+			 * the reasoning and the measurements are.
+			 *
+			 * @param psiAxisIn     what the solve reported, ordinarily
+			 *                      GradShafranovSolver::psiAxis().
+			 * @param psiBoundaryIn psi_bnd, ordinarily
+			 *                      GradShafranovSolver::psiBoundary(). Zero on
+			 *                      every fixed-boundary run, where the profiles
+			 *                      take Psi = psi/psi_ax.
+			 * @param toleranceIn   how far below 1 the normalised flux at the
+			 *                      located axis may fall before AxisAgreement
+			 *                      says the two disagree. Default 0.10, which is
+			 *                      generous rather than tuned: a healthy field
+			 *                      reads 1 from above, and the failures this
+			 *                      exists for read 0.03 and 0.31.
+			 *
+			 * The sense follows the SIGN OF THE SPAN and is not guessed: the
+			 * plasma is where ( psi - psi_bnd ) has the span's sign, so a
+			 * positive span puts the axis at a maximum and a negative one at a
+			 * minimum. That is meq::NormalisedSource::insidePlasma()'s own test,
+			 * and it is why this does not meet AxisSense::Either's ambiguity.
+			 *
+			 * @throws std::invalid_argument if the span is zero, where Psi is
+			 *         undefined and there is nothing to compare.
+			 */
+			AxisAgreement checkAxis( double psiAxisIn, double psiBoundaryIn = 0.0,
+			                         double toleranceIn = 0.10 ) const;
+
 			/// Newton stops when | q | falls below this times the largest | q | on
 			/// the mesh. Default 1e-13: q_h is a polynomial and Newton on it is
 			/// quadratic, so this is reached in a handful of steps or not at all.
@@ -472,6 +598,19 @@ namespace meq
 			/// The largest | q | over the flux dofs, as the scale the Newton
 			/// tolerance is relative to.
 			double fluxScale() const;
+
+			/// The extreme nodal value of the potential and where it sits: the
+			/// same search GradShafranovSolver runs to produce psi_ax, so that
+			/// checkAxis() compares against the point psi_ax is actually AT
+			/// rather than against one recovered some other way.
+			///
+			/// The position is the node's own, from the element's nodal
+			/// IntegrationRule. A basis whose node count does not match its dof
+			/// count -- which no space MEQ builds has -- falls back to the
+			/// element centre, so that a diagnostic never throws over a basis
+			/// choice.
+			void nodalExtreme( bool wantMaximum, double &value, int &element,
+			                   double &r, double &z ) const;
 
 			/// Element indices to seed findAxis() from: the elements holding the
 			/// extreme nodal values of psi_h, and two rings of face neighbours

@@ -1012,6 +1012,49 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesForPsiAxisAsAnUnknown )
 	            << " against psi_ax = " << solver.psiAxis()
 	            << ", so the constraint psi_ax = max psi_h is not satisfied and "
 	            "the border is not closing the system" );
+
+	/*
+	 * AND WHETHER THAT psi_axis IS A MAGNETIC AXIS AT ALL, WHICH
+	 * normalisation_residual STRUCTURALLY CANNOT SAY.
+	 *
+	 * psi_ax is the largest NODAL value of psi_h by definition, so
+	 * G = psi_ax - max psi_h is satisfied at machine zero by a spurious nodal
+	 * spike exactly as it is by an axis -- the assertion two lines above passes
+	 * either way. The guard is meq::CriticalPointFinder::checkAxis(), which reads
+	 * the normalised flux at a zero of q_h and must find 1 there; what it catches
+	 * is measured in AxisAgreement.cpp.
+	 *
+	 * THIS ASSERTS THE WIRING, which is the half that has no other home. A driver
+	 * that computed nothing would leave the attribute absent and every other
+	 * check in this file would still pass -- and this tree records the same gap
+	 * shipping a defect once already, where the only driver test of a coupling
+	 * was one that could not see the term.
+	 */
+	double const axisFlux = headerAttribute( header, "axis_normalised_flux" );
+	double const axisR = headerAttribute( header, "axis_r" );
+
+	std::printf( "  the file says axis_normalised_flux = %.6f at r = %.6f\n",
+	             axisFlux, axisR );
+	std::fflush( stdout );
+
+	BOOST_TEST( std::isfinite( axisFlux ),
+	            "the file carries no axis_normalised_flux attribute, so a reader "
+	            "given psi_axis has nothing to judge it by. Either the driver did "
+	            "not run the check or it could not locate an axis on a converged "
+	            "single-hump equilibrium" );
+	BOOST_TEST( std::fabs( axisFlux - 1.0 ) < 0.1,
+	            "the driver's own example reports a normalised flux of " << axisFlux
+	            << " at the located axis, where it must read 1. Either psi_ax is "
+	            "not the axis flux on this example -- which is the defect the "
+	            "check exists for -- or the check is reading the wrong quantity" );
+
+	// The located axis and the largest nodal value must be the same object here,
+	// so a coordinate the file could not have got from psi_axis alone is what
+	// says the two halves of the wiring are joined.
+	bool const axisInBand = axisR > 1.0 && axisR < 1.2;
+	BOOST_TEST( axisInBand,
+	            "the file puts the magnetic axis at r = " << axisR
+	            << ", outside the band this example's single hump occupies" );
 }
 
 /*

@@ -170,7 +170,13 @@ set(MEQ_CONVERGENCE_TESTS
 	# answer is that the PROFILE decides the rate rather than the quadrature --
 	# psi* keeps k+2 exactly when p' vanishes at the edge to order j >= k. It
 	# also carries the measurement that says why no cut quadrature was built.
-	PlasmaEdgeConvergence)
+	PlasmaEdgeConvergence
+	# psi_ax is the largest NODAL value of psi_h, and nothing in that definition
+	# says the largest nodal value is a magnetic axis. This is the guard --
+	# CriticalPointFinder::checkAxis(), which reads the normalised flux at a zero
+	# of q_h and must find 1 there -- and it is a convergence test rather than a
+	# unit one because half of it drives the bordered Newton.
+	AxisAgreement)
 
 # DriverAcceptance is registered separately below: it runs the meq BINARY rather
 # than linking the library, so it needs the app to have been built and needs the

@@ -268,6 +268,53 @@ history and manufacture orders out of it.
 :cpp:func:`meq::GradShafranovSolver::normalisationResidual` reports :math:`G` on
 its own.
 
+.. _normalised-axis-check:
+
+The constraint cannot tell an axis from a spike
+-----------------------------------------------
+
+:math:`\psiax` is the **largest nodal value** of :math:`\psi_h`, which is what
+makes the border row sparse. Nothing in that definition says the largest nodal
+value sits at a magnetic axis, and the constraint cannot notice the difference:
+:math:`G = \psiax - \max\psi_h` is satisfied at machine zero by a spurious nodal
+spike exactly as it is by an axis. So a run can converge, report the constraint
+at ``0.000e+00``, deliver a prescribed current to seven figures, and describe an
+equilibrium nobody asked for.
+
+MEQ therefore locates the axis independently, as a zero of the **flux**
+:math:`q_h` — a solved variable carrying the potential's own order rather than a
+derivative of one — and reports the normalised flux there:
+
+.. code-block:: text
+
+   psi_ax = 1.039163e-01 Wb/rad, constraint psi_ax - max psi_h = -1.388e-17
+   the axis, as a zero of q_h: psi = 1.039431e-01 at ( 1.0919, -0.0000 ),
+        normalised flux 1.0003
+
+**That last number must be 1.** :math:`\Psi` at the magnetic axis is 1 by
+definition when :math:`\psiax` is the axis flux, so the reading is a direct
+statement about the quantity the profiles consume. It approaches 1 from above,
+because the peak of a polynomial over a closed element is at least its largest
+nodal value; refining the example above takes it from 1.0003 to 1.0000. A
+reading materially below 1 means the profiles were evaluated over a range the
+plasma never reaches, and MEQ warns — a warning rather than a refusal, since the
+run converged and its files are still worth having.
+
+A run whose flux carries no interior extremum at all is warned about separately:
+that is a plasma with no closed surface around an axis, and :math:`\psiax` is
+then the edge of nothing.
+
+The ``.nc`` file carries ``axis_normalised_flux``, ``axis_r`` and ``axis_z``
+beside ``psi_axis``, so a consumer differencing two runs can see the same thing
+without re-deriving it. Their **absence** is informative too: it means no axis
+was located.
+
+:cpp:func:`meq::CriticalPointFinder::checkAxis` is the check, and
+:cpp:class:`meq::AxisAgreement` is what it returns. The search it runs is seeded
+Newton rather than an exhaustive one, so a clean reading is evidence and not
+proof; the cost is linear in the mesh and small — 0.04 s over 768 elements and
+0.21 s over 12,288, against solves of 1 s and 36 s.
+
 .. _normalised-decoupled:
 
 The control that makes the measurement mean anything

@@ -27,6 +27,7 @@
 #include "meq/BoundaryShape.hpp"
 #include "meq/Coils.hpp"
 #include "meq/Config.hpp"
+#include "meq/CriticalPoints.hpp"
 #include "meq/Estimator.hpp"
 #include "meq/ExteriorDtN.hpp"
 #include "meq/Field.hpp"
@@ -1631,6 +1632,16 @@ int main( int argc, char **argv )
 		}
 	}
 
+	/*
+	 * WHETHER psi_ax IS THE FLUX AT A MAGNETIC AXIS, computed in the report block
+	 * below and read again by the writer, which is why it is declared out here.
+	 * The `.nc` carries the ratio for the same reason it carries `coil_current`:
+	 * a consumer differencing two runs cannot otherwise tell a good psi_axis from
+	 * a spurious one.
+	 */
+	meq::AxisAgreement axisCheck;
+	bool axisChecked = false;
+
 	{
 		// The background element count is the DOMAIN's after any refinement, not
 		// this scope's copy: AdaptiveDomain owns and refines its own.
@@ -1728,6 +1739,102 @@ int main( int argc, char **argv )
 				             solver->psiBoundary(),
 				             config->getBoundary().limiter.r,
 				             config->getBoundary().limiter.z );
+		}
+
+		/*
+		 * AND THAT CONSTRAINT CANNOT TELL AN AXIS FROM A SPIKE, WHICH IS WHY THE
+		 * LINE ABOVE IS NOT ENOUGH.
+		 *
+		 * psi_ax is the largest NODAL value of psi_h -- deliberately, since one
+		 * nodal value is one entry of the discrete unknown and the bordered
+		 * Newton's row is then exactly -e_j. But nothing in that definition says
+		 * the largest nodal value is a MAGNETIC AXIS, and G = psi_ax - max psi_h
+		 * is satisfied at machine zero by a spurious nodal spike exactly as it is
+		 * by an axis. Measured on a free-boundary machine case at k = 2: 17 Newton
+		 * steps, the constraint at 0.000e+00, the prescribed current delivered to
+		 * seven figures, and psi_ax reported twenty-nine times too large from a
+		 * single dof of one element. Every number the run printed was green.
+		 *
+		 * meq::CriticalPointFinder locates the axis properly, as a zero of q_h --
+		 * a SOLVED field carrying the potential's own order rather than a
+		 * derivative of one -- and the normalised flux there must be 1, because
+		 * that is what Psi = ( psi - psi_bnd )/( psi_ax - psi_bnd ) means at the
+		 * axis. So the comparison is in the units the profiles actually consume.
+		 *
+		 * A WARNING AND NOT A REFUSAL, on the same footing as the coil-outside-
+		 * the-mesh one above: the run converged, the files are worth writing, and
+		 * the honest thing is to say what was found. It is also opt-in by
+		 * accident of scope -- psi_ax is an answer only where the source is
+		 * normalised, so on every other path there is nothing to check.
+		 *
+		 * AND IT IS UNCONDITIONAL BECAUSE IT IS CHEAP, which was measured rather
+		 * than assumed: on examples/rotating-normalised.toml it costs 0.041 s over
+		 * 768 elements and 0.214 s over 12,288, against solves of 1.0 s and 36 s.
+		 * The sweep is two Newtons on a 2x2 system per element and is linear in
+		 * the mesh.
+		 */
+		if ( normalised )
+		{
+			try
+			{
+				meq::CriticalPointFinder finder( *solver );
+				axisCheck = finder.checkAxis( solver->psiAxis(),
+				                              solver->psiBoundary() );
+				axisChecked = true;
+			}
+			catch ( std::exception const &error )
+			{
+				// A diagnostic that cannot run is not a run that failed. Say so
+				// and carry on to the files, which are the answer.
+				std::fflush( stdout );
+				std::fprintf( stderr,
+					"MEQ: warning: the magnetic axis could not be located, so\n"
+					"     psi_ax was not checked against one: %s\n", error.what() );
+			}
+		}
+
+		if ( axisChecked && axisCheck.located )
+		{
+			std::printf( "     the axis, as a zero of q_h: psi = %.6e at "
+			             "( %.4f, %.4f ), normalised flux %.4f\n",
+			             axisCheck.axis.psi, axisCheck.axis.r, axisCheck.axis.z,
+			             axisCheck.normalisedFlux );
+
+			if ( !axisCheck.agrees )
+			{
+				// stdout carries the run's report and stderr the warning, so
+				// without this the two arrive interleaved wherever the pair is
+				// piped to one file -- and the warning is about the line printed
+				// immediately above it.
+				std::fflush( stdout );
+				std::fprintf( stderr,
+					"MEQ: warning: psi_ax = %.6e is the largest NODAL value of psi_h,\n"
+					"     at ( %.4f, %.4f ), and that point is NOT a magnetic axis. The\n"
+					"     nearest zero of q_h carries psi = %.6e, which is a normalised\n"
+					"     flux of %.4f where the axis must read 1, and it sits %.3e away\n"
+					"     -- %.1f diameters of its own element. The profiles have been\n"
+					"     evaluated over a normalised flux the plasma never reaches, so\n"
+					"     this equilibrium is NOT the one [source] describes. Look first\n"
+					"     at the initial guess, which chooses the branch, and at whether\n"
+					"     [mesh] resolves the plasma.\n",
+					axisCheck.psiAxis, axisCheck.nodeR, axisCheck.nodeZ,
+					axisCheck.axis.psi, axisCheck.normalisedFlux,
+					axisCheck.separation, axisCheck.separationInElements );
+			}
+		}
+		else if ( axisChecked )
+		{
+			std::fflush( stdout );
+			std::fprintf( stderr,
+				"MEQ: warning: no interior extremum of psi_h was found anywhere on\n"
+				"     the mesh, so psi_ax = %.6e is not the flux at a magnetic axis:\n"
+				"     this solve carries no closed flux surface around one. A search\n"
+				"     for zeros of q_h is seeded rather than exhaustive, so this is\n"
+				"     evidence and not proof -- but the branch it usually means is a\n"
+				"     wall-hugging annulus, where psi rises monotonically to the\n"
+				"     boundary and every constraint the solve imposes is satisfied by\n"
+				"     a plasma nobody asked for.\n",
+				axisCheck.psiAxis );
 		}
 
 		if ( adapt.enabled )
@@ -2062,6 +2169,29 @@ int main( int argc, char **argv )
 			writer.attribute( "psi_axis", solver->psiAxis() );
 			writer.attribute( "normalisation_residual",
 			                  solver->normalisationResidual() );
+		}
+		/*
+		 * AND WHETHER psi_axis IS A MAGNETIC AXIS, which normalisation_residual
+		 * structurally cannot say: it is satisfied at machine zero by a spurious
+		 * nodal spike, since psi_ax IS the largest nodal value by definition.
+		 *
+		 * `axis_normalised_flux` is Psi at the located O-point and MUST BE 1. It
+		 * is written for the reason `extrapolated_nodes` had to become a mask:
+		 * this is the interchange format, a consumer differencing two runs reads
+		 * `psi_axis` and has nothing else to judge it by, and a file that carries
+		 * a number without carrying whether it means anything is the shape of
+		 * defect this tree keeps finding. `axis_r` and `axis_z` come with it
+		 * because "where" is the next question and they cost nothing.
+		 *
+		 * Their ABSENCE is informative too: a run whose axis could not be located
+		 * writes none of the three, which is the annulus branch and the warning
+		 * on stderr above.
+		 */
+		if ( axisChecked && axisCheck.located )
+		{
+			writer.attribute( "axis_normalised_flux", axisCheck.normalisedFlux );
+			writer.attribute( "axis_r", axisCheck.axis.r );
+			writer.attribute( "axis_z", axisCheck.axis.z );
 		}
 		/*
 		 * THE COILS ARE PART OF F, SO THE FILE HAS TO SAY SO.
