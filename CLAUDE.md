@@ -5768,17 +5768,32 @@ The honest ceiling is 513².
   **This is not MEQ's to fix** — `../freegs4e` is somebody else's tree — and it
   is recorded only so the cost of a finer reference is known.
 
-  **WHAT *IS* OURS IS THAT WE DRIVE IT COLD, AND THE HARNESS ALREADY BUILT THE
-  THING THAT WOULD FIX IT.** `fgsref.py` keeps freegs4e's `2^n + 1` grid
-  convention **specifically** so that 129, 257, 513 and 1025 nest point for
-  point — its own comment says "that nesting is the whole reason to keep it: a
-  reference refinement study wants the coarse grid to be a subset of the fine
-  one". And then every `--nx` run **starts cold**: `picard_loop()` begins from
-  whatever `Equilibrium.__init__` left in `psi`, at every resolution. So a fine
-  grid pays the full cold Picard count — 23 to 103 steps — at its own per-step
-  cost, where seeding from the converged coarse answer should leave a handful.
-  Not done, and it is the single thing to change before refining the reference
-  again.
+  **WE USED TO DRIVE IT COLD, AND `--seed-from` IS THE FIX — WORTH 1.21x, NOT
+  THE ORDER OF MAGNITUDE THIS ENTRY PREDICTED.** `fgsref.py` keeps freegs4e's
+  `2^n + 1` grid convention **specifically** so that 129, 257, 513 and 1025 nest
+  point for point, and `--seed-from=auto` now lifts the converged coarse
+  `plasma_psi` onto the fine grid with a cubic `RectBivariateSpline` and starts
+  Picard there. Measured on `H_limited_circular`, 129² → 257²: **39 Picard steps
+  and 152.7 s cold against 31 and 126.1 s seeded**.
+
+  **THE PREDICTION WAS WRONG AND THE MECHANISM IS WHY.** This entry said a cold
+  fine run is "hours where a seeded one should be a handful of steps". That
+  assumes the cost of a Picard run is set by where it starts. It is set by how
+  far it has to go and by a contraction the seed does not change: here about
+  **0.60 a step**, and a *converged* coarse answer is still **1.6% wrong** on the
+  fine grid — that being the reference's own discretisation error, the quantity
+  the refinement exists to measure. So the seed starts a factor of ~62 closer and
+  buys `log(62)/log(1/0.60) ≈ 8` steps **at the top of the run and nothing
+  after**. A fixed number of steps, so proportionally less the longer the run.
+
+  **The answers are NOT bit-identical — 3.1e-08 relative in `ψ_ax`** — which is
+  four orders below the 1.6% being measured, so it does not move the benchmark.
+  Picard converges to the fine grid's own solution whatever it starts from; what
+  differs at the eighth digit is where `rtol = 1e-9` happened to bite. The
+  nesting is **asserted**: a coarse grid that does not divide, a seed finer than
+  the run, and a coarse file with different extents are all refused, while a
+  *missing* seed warns and runs cold — seeding is an optimisation, so its absence
+  costs time and never correctness.
 
   **AND ONE OF THAT FILE'S OWN COMMENTS WAS WRONG ABOUT WHY IT IS SLOW.** It
   attributed the 85 s → 656 s to *"the `n³` of a 2D sparse LU"*. It is not:

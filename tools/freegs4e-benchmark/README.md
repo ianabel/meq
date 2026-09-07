@@ -415,10 +415,9 @@ because 8.7e-06 is the boundary fit and not MEQ.
 ## Refining the reference: run it NESTED, not cold
 
 `fgsref.py --nx=N` keeps freegs4e's `2^n + 1` convention so that 129, 257, 513
-and 1025 nest **point for point**. That nesting exists to be used, and as of
-2026-09-06 it is not: every `--nx` run starts from whatever
-`Equilibrium.__init__` left in `psi`, so a fine grid pays the full cold Picard
-count — 23 to 103 steps — at its own per-step cost.
+and 1025 nest **point for point**, and `--seed-from` is what spends that: it
+reads the coarse `plasma_psi`, lifts it onto the fine grid with a cubic
+`RectBivariateSpline`, and hands it to Picard as its starting iterate.
 
 **What that costs.** The dominant per-step term is the free-boundary condition,
 measured at **0.512 s at 129², 3.540 s at 257²** — about 6.9x per doubling, so
@@ -430,17 +429,53 @@ this reason.
 
 ```sh
 export FGSREF_OUT=$SCRATCH/fgsref
-python3 fgsref.py --nx=129     # minutes
-python3 fgsref.py --nx=257     # seed from n129
-python3 fgsref.py --nx=513     # seed from n257
+python3 fgsref.py --nx=129                     # the coarse rung, cold
+python3 fgsref.py --nx=257 --seed-from=auto    # from n129
+python3 fgsref.py --nx=513 --seed-from=auto    # from n257
 ```
 
-**and the seeding step is the part that is NOT WRITTEN.** What it needs is to
-read the coarse `psi` from `FGSREF_OUT/n<coarse>/`, interpolate it onto the fine
-grid — `scipy.interpolate.RectBivariateSpline`, which this file already uses
-elsewhere — and hand it to `picard_loop` as its starting `psi`. The grids nest,
-so on the shared points the interpolation is exact and only the inserted points
-are new.
+`--seed-from=auto` derives the coarse directory one doubling down by the same
+naming rule `--nx` uses for its output, so a scan is a loop over `--nx` with
+nothing else to keep in step. `--seed-from=DIR` names one explicitly.
+
+**IT IS WORTH 8 PICARD STEPS, NOT AN ORDER OF MAGNITUDE, AND THIS SECTION
+PREDICTED THE WRONG THING.** Measured on `H_limited_circular`, 129² → 257²:
+
+| | Picard steps | wall | `ψ_ax` |
+|---|---|---|---|
+| cold | 39 | 152.7 s | 9.337971063593e-02 |
+| **seeded from 129²** | **31** | **126.1 s** | 9.337971354137e-02 |
+
+**1.21x, and the saving is a FIXED NUMBER OF STEPS rather than a fraction.**
+The mechanism is that Picard's contraction here is geometric at about **0.60 a
+step**, and a *converged* coarse answer is still **1.6 % wrong** on the fine grid
+— that is the reference's own discretisation error, the thing the refinement
+exists to measure. So the seed starts the run a factor of ~62 closer than cold
+does and buys `log(62)/log(1/0.60) ≈ 8` steps at the top, and nothing after.
+Eight steps out of 39 is 20 %; out of a longer run it is proportionally less.
+
+**So it does not rescue 1025².** The earlier claim here — "a cold 1025² run is
+hours where a seeded one should be a handful of steps" — was wrong in the way
+worth recording: it assumed the cost of a Picard run is set by *where it starts*,
+when it is set by *how far it has to go* and by a contraction the seed does not
+change. A 1025² run seeded from 513² should still take about three quarters of
+its cold step count.
+
+**And the answers are NOT bit-identical: they agree to 3.1e-08 relative in
+`ψ_ax` and 9.3e-08 in `ψ_bnd`.** That is far below the 1.6 % the grid refinement
+is measuring, so the seed does not move the benchmark — but it is worth saying
+plainly rather than claiming an identity that is not there. Picard converges to
+the fine grid's own solution whatever it starts from; what differs at the eighth
+digit is where its `rtol = 1e-9` stopping test happened to bite.
+
+**The nesting itself is asserted, not assumed.** `seed_from_coarse()` refuses a
+coarse grid that does not divide the fine one, a seed finer than the run, and a
+coarse file whose extents differ — the last of which would otherwise interpolate,
+converge, and describe the wrong machine. A *missing* seed is a warning and the
+run continues cold, which is the right way round: seeding is an optimisation, so
+its absence should cost time and never correctness. On the shared points the lift
+reproduces the coarse data to **7.5e-16** of `|ψ|max`, which is the check that
+the strides are right rather than a check on the spline.
 
 **Do not go past 513².** The reference is not the binding constraint on the
 benchmark — the **MXH boundary fit** is, and it improves only linearly in `h`,

@@ -74,6 +74,11 @@ VCYCLE_LEVELS = None
 # the default and nothing points at it.
 HAGENOW = False
 
+# --seed-from=DIR: the directory holding a COARSER run's .npz files, whose
+# converged answer seeds this one.  None means every case starts cold, which
+# is what it did before 2026-09-06.  See seed_from_coarse().
+SEED_FROM = None
+
 
 def install_vcycle(eq, order, levels):
     """A V-cycle on the generator matching @a order, which is what
@@ -510,6 +515,85 @@ def build_eq(case, tok):
     return eq
 
 
+def seed_from_coarse(eq, case, say):
+    """Start Picard from a converged COARSER grid, using the nesting.
+
+    THE GRIDS ARE 2^n + 1 SO THAT THEY NEST, AND UNTIL 2026-09-06 NOTHING USED
+    IT.  Every --nx run began from whatever Equilibrium.__init__ left in psi --
+    a Gaussian bump -- so a fine grid paid the full cold Picard count, 23 to 103
+    steps, at its own O( n^3 ) per-step boundary cost.  The boundary condition
+    alone scales about 6.9x per grid doubling, so that is the difference between
+    a handful of steps and an afternoon.
+
+    THE SEED CANNOT MOVE THE ANSWER, WHICH IS THE WHOLE REASON IT IS SAFE.
+    Picard converges to the FINE grid's own solution whatever it starts from, so
+    an interpolated coarse answer changes the number of iterations and nothing
+    else.  That is a claim to check rather than assume: run one case both ways
+    and difference psi_axis.  The same control is already recorded for the
+    ConstrainPaxisIp seed in run_case ("cold and seeded give bit-identical
+    answers on A").
+
+    A CUBIC SPLINE, NOT A BILINEAR LIFT, and not because of accuracy -- a seed
+    does not need accuracy.  It is freegs4e's own representation of psi
+    (Equilibrium._updatePlasmaPsi builds exactly this), so the seed is smooth in
+    the same sense the solver's own iterate is, and a kinked seed would spend
+    its first iterations being smoothed rather than being converged.
+
+    THE NESTING IS ASSERTED AND NOT ASSUMED.  A coarse file from a different
+    Rmin/Rmax, or at a resolution that does not divide, is a silent wrong answer
+    of exactly the kind this benchmark exists to catch: it would interpolate,
+    converge, and describe the machine it was given rather than the one asked
+    for.  Both are refused.
+    """
+    path = os.path.join(SEED_FROM, case["name"] + ".npz")
+    if not os.path.exists(path):
+        say("no coarse seed at %s -- starting cold" % path)
+        return None
+
+    with np.load(path, allow_pickle=True) as d:
+        Rc = np.asarray(d["R"], float)
+        Zc = np.asarray(d["Z"], float)
+        psi_c = np.asarray(d["plasma_psi"], float)
+
+    Rf, Zf = eq.R[:, 0], eq.Z[0, :]
+    nc, nf = len(Rc), len(Rf)
+    mc, mf = len(Zc), len(Zf)
+    if nc > nf or mc > mf:
+        raise ValueError("seed grid %dx%d is FINER than the run's %dx%d"
+                         % (nc, mc, nf, mf))
+    if (nf - 1) % (nc - 1) or (mf - 1) % (mc - 1):
+        raise ValueError("seed grid %dx%d does not nest inside %dx%d: the "
+                         "2^n + 1 convention is what makes the coarse points a "
+                         "subset of the fine ones" % (nc, mc, nf, mf))
+    sR, sZ = (nf - 1)//(nc - 1), (mf - 1)//(mc - 1)
+
+    # The extents have to agree too.  Same count, different Rmin, still divides.
+    off = max(np.abs(Rf[::sR] - Rc).max(), np.abs(Zf[::sZ] - Zc).max())
+    scale = max(Rf[-1] - Rf[0], Zf[-1] - Zf[0])
+    if off > 1e-12*scale:
+        raise ValueError("seed grid points do not lie on this run's grid: "
+                         "worst offset %.3e against an extent of %.3e -- the "
+                         "coarse run used different Rmin/Rmax/Zmin/Zmax"
+                         % (off, scale))
+
+    spline = sinterp.RectBivariateSpline(Rc, Zc, psi_c, kx=3, ky=3, s=0)
+    seed = spline(Rf, Zf)
+
+    # A cubic spline reproduces its own data, so this is a check on the GRIDS
+    # rather than on the interpolant: it fails if the strides above are wrong.
+    worst = float(np.abs(seed[::sR, ::sZ] - psi_c).max())
+    span = float(np.abs(psi_c).max()) or 1.0
+    if worst > 1e-9*span:
+        raise ValueError("the coarse points did not come back unchanged: "
+                         "%.3e against a psi scale of %.3e" % (worst, span))
+
+    eq._updatePlasmaPsi(seed)
+    say("seeded from %s (%dx%d, stride %dx%d); coincident points reproduce "
+        "to %.2e of |psi|max" % (path, nc, mc, sR, sZ, worst/span))
+    return dict(path=path, nx=nc, ny=mc, stride=[sR, sZ],
+                coincident_worst_rel=worst/span)
+
+
 def get_wall(case, eq):
     """The machine wall, for reference only -- it is NOT used as a limiter
     unless case["limiter"] says so.  Returns empty arrays if there is none."""
@@ -642,6 +726,8 @@ def run_case(case):
               % (VCYCLE_LEVELS, int(case["order"])), flush=True)
     ctrl = SyncConstrain(xpoints=case["xpoints"], isoflux=case["isoflux"],
                          gamma=1e-12)
+    rec["seed_from_coarse"] = (seed_from_coarse(eq, case, say)
+                               if SEED_FROM else None)
 
     psi_n = np.linspace(0.0, 1.0, NPSI)
     P0, F0 = split_amplitudes(case["frac_p"], case["R0"])
@@ -681,6 +767,10 @@ def run_case(case):
         eq = build_eq(case, tok)
         ctrl = SyncConstrain(xpoints=case["xpoints"],
                              isoflux=case["isoflux"], gamma=1e-12)
+        # build_eq() returns a COLD equilibrium, so re-seed or this branch
+        # silently throws the coarse answer away.
+        if SEED_FROM:
+            rec["seed_from_coarse"] = seed_from_coarse(eq, case, say)
         seed = PaxisProfile(case["seed_paxis"], case["Ip"], case["fvac"],
                             alpha_m=1.0, alpha_n=2.0, Raxis=1.0)
         attach(seed, case, eq)
@@ -980,23 +1070,33 @@ def main():
     # 513, 257 and 129 point for point on the coarse grid.  That nesting is the
     # whole reason to keep it: a reference refinement study wants the coarse
     # grid to be a subset of the fine one.
-    # AND WE DO NOT USE THE NESTING WE JUST WENT TO THE TROUBLE OF KEEPING.
-    # Every --nx run starts COLD: picard_loop() below begins from whatever
-    # Equilibrium.__init__ left in psi, at every resolution, so a fine grid pays
-    # the full cold Picard count -- 23 to 103 steps -- at its own O( n^3 )
-    # per-step boundary cost.  Seeding it from the converged coarse answer, which
-    # the nesting above exists to make trivial, is the obvious saving and is NOT
-    # DONE.  Measured cost of not doing it: the boundary condition alone scales
-    # about 6.9x per grid doubling, so a cold 1025^2 run is hours where a seeded
-    # one should be a handful of steps.
+    # AND --seed-from IS WHAT SPENDS THE NESTING.  Without it every --nx run
+    # starts COLD -- picard_loop() begins from whatever Equilibrium.__init__ left
+    # in psi, at every resolution -- so a fine grid pays the full cold Picard
+    # count, 23 to 103 steps, at its own O( n^3 ) per-step boundary cost.  The
+    # boundary condition alone scales about 6.9x per grid doubling, so a cold
+    # 1025^2 run is an afternoon where a seeded one is a handful of steps.
+    #
+    #     --seed-from=DIR    take the coarse answer from DIR/<case>.npz
+    #     --seed-from=auto   take it from this run's own naming rule one
+    #                        doubling down: 513 seeds from 257, 257 from 129
+    #
+    # A MISSING SEED IS A WARNING AND A WRONG ONE IS A REFUSAL, which is the
+    # right way round: seeding is an optimisation, so its absence should cost
+    # time and never correctness, while a coarse file from a different geometry
+    # would interpolate, converge, and describe the wrong machine.
+    # seed_from_coarse() checks the nesting and the extents and raises on both.
     nx = None
     vcycle = None
+    seed_from = None
     rest = []
     for a in argv:
         if a.startswith("--nx="):
             nx = int(a.split("=", 1)[1])
         elif a.startswith("--vcycle="):
             vcycle = int(a.split("=", 1)[1])
+        elif a.startswith("--seed-from="):
+            seed_from = a.split("=", 1)[1]
         elif a == "--hagenow":
             global HAGENOW
             HAGENOW = True
@@ -1020,6 +1120,35 @@ def main():
         os.makedirs(OUTDIR, exist_ok=True)
         print("resolution override: %d x %d, writing to %s" % (n, n, OUTDIR),
               flush=True)
+
+    if seed_from is not None:
+        global SEED_FROM
+        if seed_from == "auto":
+            # One doubling down, by the same naming rule OUTDIR uses above --
+            # 513 -> 257 -> 129.  Deriving it rather than taking a path is what
+            # makes a scan a loop over --nx with nothing else to keep in step.
+            if nx is None:
+                sys.exit("--seed-from=auto needs --nx: there is no coarser "
+                         "grid to derive from the case table's own 129^2")
+            n = nx if nx % 2 == 1 else nx + 1
+            coarse = (n - 1)//2 + 1
+            base = os.environ.get("FGSREF_OUT")
+            here = os.path.dirname(os.path.abspath(__file__))
+            SEED_FROM = (os.path.join(base, "n%d" % coarse) if base
+                         else os.path.join(os.path.dirname(here) or ".",
+                                           os.path.basename(here)
+                                           + "-n%d" % coarse))
+            if coarse == 129:
+                # 129^2 is the case table's own resolution, so its output is
+                # the undecorated directory rather than a -n129 one.
+                cand = os.path.join(here, "H_limited_circular.npz")
+                if not os.path.isdir(SEED_FROM) and os.path.exists(cand):
+                    SEED_FROM = here
+        else:
+            SEED_FROM = seed_from
+        if not os.path.isdir(SEED_FROM):
+            sys.exit("--seed-from: %s is not a directory" % SEED_FROM)
+        print("seeding from %s" % SEED_FROM, flush=True)
 
     only = rest
     results = []
