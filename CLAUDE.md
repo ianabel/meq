@@ -585,14 +585,72 @@ well resolved *for the interior problem*. The coefficients are a **boundary
 functional**: a transmission integral over `Γ` reached by extension from `Γ_h`.
 Nothing in `η` measures it. Both are true at once.
 
-**THE STALL IS QUANTIFIED AND HAS NOT HAPPENED YET.** At cycle 3 the interior
-error is 9.3e-04 against a frozen 1.3e-03 in the coefficients; a few more cycles
-and the second is the floor of the first, and the loop would report a falling `η`
-while `ψ` stopped improving. The cure is a **boundary indicator** — the
-transmission residual per face of `Γ_h`, which the border already computes and
-sums — added to the marking. **Not built**, and it should be costed before FB-6,
-since a machine case is where the interior error gets small enough to meet the
-floor. `FREE-BOUNDARY-PLAN.md` §7.12 is the write-up.
+**THE STALL IS QUANTIFIED, AND `η₆` IS THE CURE — BUILT AND MEASURED
+2026-09-06.** At cycle 3 the interior error was 9.3e-04 against a frozen 1.3e-03
+in the coefficients, a factor of 1.4 from the loop reporting a falling `η` while
+`ψ` stopped improving.
+
+`GradShafranovSolver::exteriorTransmissionResidual()` is the indicator and
+`ResidualEstimator::setExteriorCoupling()` puts it in `η` as a **sixth term**,
+zero unless asked for. What it measures is the pointwise mismatch
+
+```
+d( x ) = q_h·ν( x ) − ( 1/r ) Σ_n a_n symbol( n ) C_n( μ )
+```
+
+integrated as `h_e ∫|d|² dΓ` per element — `η₃`'s scaling for a flux jump. The
+border imposes only its **projection onto the retained modes**, so at convergence
+`d` is orthogonal to `C_2..C_{N+1}` and is **not zero**: what survives is the
+modes past the truncation and the discretisation error, which is exactly the
+quantity that froze.
+
+**AND ADDING IT TO `η` IS NOT ENOUGH, WHICH IS THE FINDING RATHER THAN THE
+PLAN.** §7.12 said "added to the marking" and that is what was built first. It
+does nothing: `η₆` is **8.58e-04** against an `η` of **2.51e-01**, so its share of
+`η²` is about **1e-5**, and a Dörfler competition at `γ = 0.6` never reaches it —
+`Γ_h` kept all **34** of its faces for four cycles with the term summed in.
+
+**That is not a threshold to lower.** The two are different quantities in
+different units — an interior discretisation error and a boundary functional — so
+one sum over both is a comparison with no meaning however it is weighted. The
+boundary term marks on **its own distribution** and the two sets are unioned.
+`η₆` stays *in* `η` regardless, because the **stopping** rule does have to see
+it: a loop halting on the interior error alone would report success with the
+boundary unresolved.
+
+**MEASURED, THE SAME LOOP RUN BOTH WAYS**, the only difference being one call:
+
+| cycle | `Γ_h` faces, off | `\|a − exact\|`, off | `Γ_h` faces, **on** | `\|a − exact\|`, **on** | `η₆` |
+|---|---|---|---|---|---|
+| 0 | 34 | 1.3194e-03 | 34 | 1.3194e-03 | 8.5849e-04 |
+| 1 | 34 | 1.3194e-03 | **46** | 1.1259e-03 | 5.3416e-04 |
+| 2 | 34 | 1.3194e-03 | **57** | 2.8643e-04 | 2.0841e-04 |
+| 3 | 34 | 1.3194e-03 | **64** | **1.5297e-04** | 1.2697e-04 |
+
+**8.6× on the boundary functional against a control that does not move at all**,
+and `η₆` falls with it.
+`theBoundaryIndicatorRefinesGammaHAndMovesTheCoefficients` is that table, and the
+**off column is the control**: a boundary term that did nothing would leave both
+columns identical and still satisfy every assertion about the on column alone.
+
+**ADDING THE TERM OVERRAN A BUFFER IN A TEST, WHICH IS THE TRAP TO EXPECT AGAIN.**
+`EstimatorConvergence` declared `double component[ 5 ]` beside a loop running to
+`ResidualEstimator::termCount`, so `termCount` going from 5 to 6 wrote off the
+end of a struct — a **memory access violation**, not a wrong number, and only in
+the one file that iterates the terms. Both arrays are `[ termCount ]` now: a
+count that lives in the class has to be read from the class. That file also
+asserts `η₆ == 0.0` there rather than a rate, which is the stronger statement —
+a boundary functional has nothing to converge to on a fitted rectangle, and what
+this file must guard is that the sixth term is **opt-in and inert**.
+
+**AND ON THE DRIVER'S OWN FREE-BOUNDARY EXAMPLE `η` RISES — NOT INVESTIGATED.**
+`examples/free-boundary-halfdisc.toml` with `[adaptivity]` gives `η` 3.10e-01 →
+4.08e-01 → 5.52e-01 over three cycles while the solve converges at every one. It
+is **not** the growing domain — FB-5's loop grows the same way and `η` falls
+there — so the suspect is the **tabulated** source: `j = 1` makes `∂F/∂ψ` jump at
+the plasma edge, `η₁` evaluates `F` at the potential, and a kink inside an
+element is a residual that refinement chases and does not remove. Plausible, not
+established, and no shipped example turns adaptivity on for that reason.
 
 **`meq::AdaptiveDomain` HAD TO BE RELAXED AND THE OLD GUARD WAS A REAL
 RESTRICTION.** It required `Ω` **strictly inside** the background box — exactly

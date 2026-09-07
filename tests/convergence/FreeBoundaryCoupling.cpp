@@ -2959,3 +2959,249 @@ BOOST_AUTO_TEST_CASE( theBorderedSystemClosesOnANonlinearSource )
 	            "the assembled column finished at " << analytic.residual
 	            << " and the differenced one at " << differenced.residual );
 }
+
+
+/*
+ * THE BOUNDARY INDICATOR, AND WHETHER IT ACTUALLY UNFREEZES THE COEFFICIENTS.
+ *
+ * theCoupledSolveSurvivesTheAdaptiveLoop above measured the gap rather than
+ * predicting it: eta fell 2.5109e-01 -> 3.2079e-02 over four cycles while the
+ * exterior coefficients sat at 1.3194e-03 at EVERY cycle, to five digits, and
+ * Gamma_h kept its 34 faces while the element count doubled. The elements
+ * touching Gamma_h are 11% of the mesh and carry 0.00% of eta^2, so no
+ * threshold would mark them -- it is not a Doerfler parameter to tune.
+ *
+ * eta_6 is the cure and this is the measurement of whether it is one. The SAME
+ * loop is run twice, the only difference being one call to
+ * ResidualEstimator::setExteriorCoupling(), and what has to change is the thing
+ * that was frozen. Anything else changing -- a different converged psi, a
+ * different eta on cycle 0 -- would say the term is perturbing the estimate
+ * rather than extending it.
+ *
+ * THE CONTROL IS THE OFF COLUMN AND IT IS NOT DECORATION. A boundary term that
+ * did nothing would leave both columns identical and this case would still
+ * "pass" on any assertion about the on column alone, which is exactly the shape
+ * of the freeze it exists to fix.
+ */
+BOOST_AUTO_TEST_CASE( theBoundaryIndicatorRefinesGammaHAndMovesTheCoefficients )
+{
+	int const order = 2;
+	int const cells = 12;
+	int const cycles = 4;
+	double const gamma = 0.6;
+
+	meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 4 );
+	int const modes = dtn.modeCount();
+	std::vector<double> const exact = halfDiscField().exteriorCoefficients( dtn );
+
+	struct VacuumSource : public meq::Source
+	{
+		double f( double r, double z, double /*psi*/ ) const override
+		{
+			return halfDiscField().f( r, z, 0.0 );
+		}
+		double dFdPsi( double, double, double ) const override
+		{
+			return 0.0;
+		}
+	};
+	VacuumSource source;
+	mfem::ConstantCoefficient zero( 0.0 );
+
+	struct Step
+	{
+		int elements;
+		int gammaHFaces;
+		double eta;
+		double etaSix;
+		double worstCoefficient;
+		double firstCoefficient;
+	};
+
+	auto sweep = [ & ]( bool useBoundaryIndicator )
+	{
+		mfem::Mesh background = mfem::Mesh::MakeCartesian2D(
+			cells, 2*cells, mfem::Element::TRIANGLE, false,
+			halfDiscBox, 2.0*halfDiscBox );
+		background.Transform( []( mfem::Vector const &in, mfem::Vector &out )
+		{
+			out( 0 ) = in( 0 );
+			out( 1 ) = in( 1 ) - halfDiscBox;
+		} );
+
+		meq::AdaptiveDomain domain( background, halfDiscLevelSet );
+		std::vector<Step> history;
+		mfem::Array<int> marked;
+
+		for ( int c = 0; c < cycles; ++c )
+		{
+			Step step;
+			{
+				mfem::SubMesh &sub = domain.computational();
+				int const gammaH = domain.gammaHAttribute();
+				mfem::VertexConePath path( sub, gammaH, halfDiscLevelSet,
+				                           12.0*domain.largestElement() );
+
+				meq::GradShafranovSolver solver( sub, order );
+				solver.setSource( source );
+				solver.setBoundaryData( zero );
+				solver.setExtension( path, domain.gammaHMarker() );
+				solver.setExteriorCoupling( dtn );
+				solver.solve();
+				solver.postProcess();
+
+				std::vector<double> const a = solver.exteriorCoefficients();
+				double worst = 0.0;
+				for ( int m = 0; m < modes; ++m )
+					worst = std::max( worst,
+						std::abs( a[ static_cast<std::size_t>( m ) ]
+						          - exact[ static_cast<std::size_t>( m ) ] ) );
+
+				mfem::PositionFunction const g =
+					[ &dtn, a ]( mfem::Vector const &x )
+				{
+					double total = 0.0;
+					for ( std::size_t m = 0; m < a.size(); ++m )
+						total += a[ m ]*dtn.basis(
+							meq::ExteriorDtN::firstMode() + static_cast<int>( m ),
+							x( 0 ), x( 1 ) );
+					return total;
+				};
+				std::unique_ptr<mfem::Coefficient> datum = solver.transferredDatum( g );
+
+				meq::ResidualEstimator estimator( solver, source );
+				estimator.setTransferredBoundary( domain.gammaHMarker(), datum.get() );
+				if ( useBoundaryIndicator )
+					estimator.setExteriorCoupling( &dtn );
+
+				mfem::Vector const &local = estimator.GetLocalErrors();
+				meq::markDoerfler( local, gamma, marked );
+
+				/*
+				 * A SECOND MARKING PASS, AND ADDING eta_6 TO eta IS NOT ENOUGH
+				 * WITHOUT IT. Measured: eta_6 is 8.58e-04 where eta is 2.51e-01,
+				 * so its share of eta^2 is about 1e-5 and a Doerfler competition
+				 * at gamma = 0.6 never reaches it -- Gamma_h kept all 34 of its
+				 * faces for four cycles with the term summed in. That is not a
+				 * threshold to lower: the two are DIFFERENT QUANTITIES in
+				 * different units -- an interior discretisation error and a
+				 * boundary functional -- and one sum over both is a comparison
+				 * that has no meaning however it is weighted.
+				 *
+				 * So the boundary term marks on ITS OWN distribution and the two
+				 * sets are unioned. The loop then drives both errors down, which
+				 * is what having two of them requires; eta_6 stays IN eta as
+				 * well, because the STOPPING rule does have to see it.
+				 */
+				if ( useBoundaryIndicator )
+				{
+					mfem::Vector boundary(
+						estimator.localSquares(
+							meq::ResidualEstimator::Term::Transmission ) );
+					for ( int e = 0; e < boundary.Size(); ++e )
+						boundary( e ) = std::sqrt( boundary( e ) );
+
+					mfem::Array<int> boundaryMarked;
+					meq::markDoerfler( boundary, gamma, boundaryMarked );
+
+					std::vector<char> already( sub.GetNE(), 0 );
+					for ( int i = 0; i < marked.Size(); ++i )
+						already[ marked[ i ] ] = 1;
+					for ( int i = 0; i < boundaryMarked.Size(); ++i )
+						if ( !already[ boundaryMarked[ i ] ] )
+						{
+							already[ boundaryMarked[ i ] ] = 1;
+							marked.Append( boundaryMarked[ i ] );
+						}
+					marked.Sort();
+				}
+
+				step.elements = sub.GetNE();
+				step.gammaHFaces = 0;
+				for ( int b = 0; b < sub.GetNBE(); ++b )
+					if ( sub.GetBdrAttribute( b ) == gammaH )
+						step.gammaHFaces++;
+				step.eta = estimator.GetTotalError();
+				step.etaSix = estimator.component(
+					meq::ResidualEstimator::Term::Transmission );
+				step.worstCoefficient = worst;
+				step.firstCoefficient = a.front();
+			}
+
+			history.push_back( step );
+			if ( c + 1 == cycles )
+				break;
+			BOOST_TEST_REQUIRE( marked.Size() > 0,
+			                    "nothing was marked at cycle " << c );
+			domain.refine( marked );
+		}
+		return history;
+	};
+
+	std::vector<Step> const off = sweep( false );
+	std::vector<Step> const on = sweep( true );
+
+	std::printf( "\n  THE BOUNDARY INDICATOR ( k = %d, %d modes, Doerfler gamma "
+	             "= %.1f )\n", order, modes, gamma );
+	std::printf( "  %5s | %26s | %34s\n", "",
+	             "eta_6 OFF, the control", "eta_6 ON" );
+	std::printf( "  %5s | %7s %6s %11s | %7s %6s %11s %11s\n",
+	             "cycle", "elem", "faces", "|a - exact|",
+	             "elem", "faces", "|a - exact|", "eta_6" );
+	for ( std::size_t c = 0; c < off.size(); ++c )
+		std::printf( "  %5d | %7d %6d %11.4e | %7d %6d %11.4e %11.4e\n",
+		             static_cast<int>( c ),
+		             off[ c ].elements, off[ c ].gammaHFaces,
+		             off[ c ].worstCoefficient,
+		             on[ c ].elements, on[ c ].gammaHFaces,
+		             on[ c ].worstCoefficient, on[ c ].etaSix );
+	std::fflush( stdout );
+
+	// THE CONTROL REPRODUCES THE FREEZE. If this ever stops holding, the
+	// comparison below is measuring something else and the case is empty.
+	BOOST_TEST( off.back().gammaHFaces == off.front().gammaHFaces,
+	            "the control refined Gamma_h from " << off.front().gammaHFaces
+	            << " to " << off.back().gammaHFaces
+	            << " faces without a boundary indicator, so there was no freeze "
+	            "to cure" );
+	// "Frozen to five digits" is the recorded observation and 1e-3 relative is
+	// what says so: the control moves by 2.4e-05 of itself over four cycles
+	// while the element count doubles. A tighter bound here would be measuring
+	// round-off in the border solve rather than the freeze.
+	BOOST_TEST( std::abs( off.back().worstCoefficient
+	                      - off.front().worstCoefficient )
+	            < 1.0e-3*off.front().worstCoefficient,
+	            "the control's coefficients moved from "
+	            << off.front().worstCoefficient << " to "
+	            << off.back().worstCoefficient );
+
+	// AND THE INDICATOR REFINES GAMMA_H, which is the mechanism: the term is
+	// nonzero exactly on the elements the other five cannot see.
+	BOOST_TEST( on.back().gammaHFaces > on.front().gammaHFaces,
+	            "with eta_6 on, Gamma_h still kept its "
+	            << on.front().gammaHFaces << " faces, so the term is not "
+	            "reaching the marking" );
+
+	// THE COEFFICIENTS MOVE, AND TOWARD THE ANSWER. Moving alone would be a
+	// perturbation; moving down is a refinement.
+	BOOST_TEST( on.back().worstCoefficient < 0.5*on.front().worstCoefficient,
+	            "|a - exact| went " << on.front().worstCoefficient << " -> "
+	            << on.back().worstCoefficient
+	            << " with the boundary indicator on, which is not a boundary "
+	            "that is being resolved" );
+
+	// eta_6 IS NOT ZERO AND IT FALLS. A term that were identically zero would
+	// satisfy every assertion above by leaving the marking unchanged.
+	BOOST_TEST( on.front().etaSix > 0.0,
+	            "eta_6 came back at zero on the first cycle, so the "
+	            "transmission residual is not being measured at all" );
+	BOOST_TEST( on.back().etaSix < on.front().etaSix,
+	            "eta_6 went " << on.front().etaSix << " -> "
+	            << on.back().etaSix );
+
+	// AND THE OFF COLUMN MUST STILL BE THE PUBLISHED ONE: eta_6 is an ADDITION,
+	// so a case that does not ask for it is bit-unchanged.
+	BOOST_TEST( off.front().etaSix == 0.0,
+	            "eta_6 is nonzero without setExteriorCoupling(), so it is not "
+	            "opt-in and every existing estimator table has moved" );
+}

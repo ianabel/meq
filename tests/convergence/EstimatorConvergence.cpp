@@ -156,9 +156,13 @@ namespace
 		double h;
 		int elements;
 		double eta;
-		double component[ 5 ];
+		// SIZED BY termCount AND NOT BY A LITERAL. It was 5, and eta_6 -- the
+		// boundary indicator, which is identically zero on every case in this
+		// file -- turned the loops below into a buffer overrun. A count that
+		// lives in the class must be read from the class.
+		double component[ meq::ResidualEstimator::termCount ];
 		double etaLiteral;
-		double componentLiteral[ 5 ];
+		double componentLiteral[ meq::ResidualEstimator::termCount ];
 		double etaTwoRaw;
 		double floorTerm;
 		double errorPsi;
@@ -407,6 +411,28 @@ BOOST_AUTO_TEST_CASE( everyComponentConvergesAtKPlusOne )
 
 			for ( int t = 0; t < termCount; ++t )
 			{
+				/*
+				 * eta_6 IS ASSERTED TO BE ZERO HERE RATHER THAN TO CONVERGE, and
+				 * that is the stronger statement on this fixture. It is the
+				 * transmission residual of an exterior coupling, and there is no
+				 * coupling on a fitted rectangle -- so it has no value to
+				 * converge to, and a rate over two zeros is a nan rather than a
+				 * measurement. What IS a property, and what this file is the
+				 * right place to guard, is that a sixth term added for free
+				 * boundary leaves every fixed-boundary number exactly as it was:
+				 * eta_6 must be opt-in and inert, or every table above has moved.
+				 */
+				if ( static_cast<Term>( t ) == Term::Transmission )
+				{
+					BOOST_TEST( points[ i ].component[ t ] == 0.0,
+					            "k = " << order << ", h = " << points[ i ].h
+					            << ": eta_6 is " << points[ i ].component[ t ]
+					            << " without setExteriorCoupling(), so the "
+					            "boundary indicator is not opt-in and every "
+					            "component in this file has moved" );
+					continue;
+				}
+
 				double const measured = rate( points[ i - 1 ].component[ t ],
 				                              points[ i ].component[ t ], ratio );
 				BOOST_TEST( measured >= expected,

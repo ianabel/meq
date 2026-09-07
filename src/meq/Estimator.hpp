@@ -6,6 +6,7 @@
 
 #include "mfem.hpp"
 
+#include "ExteriorDtN.hpp"
 #include "GradShafranov.hpp"
 #include "Source.hpp"
 
@@ -175,7 +176,8 @@ namespace meq
 				Constitutive,     ///< eta_2, the residual of q = grad_bar psi / r
 				FluxJump,         ///< eta_3, [[ q_h ]] across interior edges
 				PotentialJump,    ///< eta_4, [[ psi* ]] across interior edges
-				TraceMismatch     ///< eta_5, psihat_h against psi* on dK
+				TraceMismatch,    ///< eta_5, psihat_h against psi* on dK
+				Transmission      ///< eta_6, the exterior transmission residual
 			};
 
 			/// Which potential the psi-dependent terms are built on. See the file
@@ -197,7 +199,13 @@ namespace meq
 				Literal      ///< || psihat_h - psi* ||, eq (20) as printed
 			};
 
-			static constexpr int termCount = 5;
+			/// SIX SINCE 2026-09-06, AND THE SIXTH IS NOT THE PAPER'S. eq (20)
+			/// has five terms and they estimate the INTERIOR discretisation
+			/// error. eta_6 is a BOUNDARY functional -- the transmission residual
+			/// of the exterior coupling -- and it is identically zero unless
+			/// setExteriorCoupling() is called, so every case written against the
+			/// five is bit-unchanged.
+			static constexpr int termCount = 6;
 
 			/// @param solverIn  solved, and post-processed if the potential is
 			///                  PostProcessed. Borrowed.
@@ -291,11 +299,38 @@ namespace meq
 			/// additive quantity, and the one Doerfler marking needs.
 			mfem::Vector const &localSquares( Term term ) const;
 
-			/// "eta_1" ... "eta_5", for a table heading.
+			/**
+			 * COUPLE eta TO THE EXTERIOR, so that the marking can see the one
+			 * error the five terms structurally cannot.
+			 *
+			 * FB-5's adaptive loop measured `eta` falling by a factor of eight
+			 * over four cycles while the exterior coefficients sat at 1.3194e-03
+			 * at EVERY cycle, to five digits, and `Gamma_h` kept its 34 faces
+			 * while the element count doubled. Those 34 elements are 11% of the
+			 * mesh and carry 0.00% of `eta^2`, so no threshold would mark them.
+			 * The loop was refining the interior of a problem whose answer had
+			 * stopped moving on its boundary.
+			 *
+			 * eta_6 is GradShafranovSolver::exteriorTransmissionResidual(), which
+			 * is where the quantity and its scaling are described. Set this and
+			 * the term joins `GetLocalErrors()`, so Doerfler marking over the sum
+			 * sees `Gamma_h` without any change to the marking itself -- which is
+			 * the point: a second threshold on a second quantity would be a knob
+			 * to tune, and this is not.
+			 *
+			 * @param exteriorIn  the same DtN the solve was coupled to. BORROWED,
+			 *                    and it must outlive this estimator. Null clears.
+			 */
+			void setExteriorCoupling( ExteriorDtN const *exteriorIn );
+
+			/// "eta_1" ... "eta_6", for a table heading.
 			static char const *name( Term term );
 
 		private:
 			void compute() const;
+
+			/// The exterior coupling, or null. Borrowed; see setExteriorCoupling.
+			ExteriorDtN const *exterior = nullptr;
 
 			/// F at a point, from whichever of the two constructors was used.
 			double sourceValue( mfem::ElementTransformation &tr,

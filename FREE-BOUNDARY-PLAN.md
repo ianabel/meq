@@ -1821,6 +1821,64 @@ it returns the same coefficients to five digits each time says the border is a
 function of the geometry it is built on and not of the bookkeeping — which is not
 obvious, and is what a re-assembly per cycle most easily gets wrong.
 
+### 7.12a The cure, built the same day, and the plan's own prescription was wrong
+
+**§7.12 said the cure is "the transmission residual per face of `Γ_h` ... added
+to the marking". That was built first and it does nothing.** The quantity is
+right; the prescription is not.
+
+**`η₆` IS THE QUANTITY.** `GradShafranovSolver::exteriorTransmissionResidual()`
+sweeps `Γ` with the same `ExtensionBoundaryQuadrature` the transmission row uses
+and accumulates, per element,
+
+```
+h_e ∫ | q_h·ν − ( 1/r ) Σ_n a_n symbol( n ) C_n( μ ) |² dΓ
+```
+
+— `η₃`'s scaling for a flux jump. The border imposes only the **projection onto
+the retained modes**, so at convergence that mismatch is orthogonal to
+`C_2..C_{N+1}` and is not zero: the modes past the truncation and the
+discretisation error are what is left, and that is exactly the frozen quantity.
+`ResidualEstimator::setExteriorCoupling()` makes it a **sixth term**, identically
+zero unless asked for, so every case written against eq (20)'s five is unchanged.
+
+**AND SUMMING IT INTO `η` LEAVES `Γ_h` AT 34 FACES FOR FOUR CYCLES.** Measured:
+`η₆` is **8.5849e-04** where `η` is **2.5109e-01**, so its share of `η²` is about
+**1e-5**. A Dörfler competition at `γ = 0.6` never reaches it. §7.12 established
+that the boundary elements do not lose the competition *on the paper's five
+terms*; adding a sixth that is three orders smaller does not change that.
+
+**THE TWO ARE DIFFERENT QUANTITIES AND ONE SUM OVER BOTH IS MEANINGLESS
+HOWEVER IT IS WEIGHTED** — an interior discretisation error in `ψ`'s units and a
+boundary functional in the flux's. So the boundary term marks on **its own**
+distribution and the sets are unioned. `η₆` stays *in* `η`, because the
+**stopping** rule does have to see it: a loop halting on the interior error alone
+would report success with the boundary unresolved. That is the whole change, and
+it is not a threshold — no parameter was added.
+
+| cycle | `Γ_h` faces, off | `\|a − exact\|`, off | `Γ_h` faces, **on** | `\|a − exact\|`, **on** | `η₆` |
+|---|---|---|---|---|---|
+| 0 | 34 | 1.3194e-03 | 34 | 1.3194e-03 | 8.5849e-04 |
+| 1 | 34 | 1.3194e-03 | **46** | 1.1259e-03 | 5.3416e-04 |
+| 2 | 34 | 1.3194e-03 | **57** | 2.8643e-04 | 2.0841e-04 |
+| 3 | 34 | 1.3194e-03 | **64** | **1.5297e-04** | 1.2697e-04 |
+
+**8.6× on the boundary functional against a control that does not move**, and
+`theBoundaryIndicatorRefinesGammaHAndMovesTheCoefficients` runs both columns
+from one lambda so the only difference is the one call. **The off column is not
+decoration**: a term that did nothing would leave both columns identical and
+still satisfy every assertion about the on column alone, which is the exact shape
+of the freeze it exists to fix.
+
+**AND ON THE DRIVER'S OWN FREE-BOUNDARY EXAMPLE `η` RISES.** 3.10e-01 → 4.08e-01
+→ 5.52e-01 over three cycles, while every cycle's Newton converges. It is **not**
+the growing domain — this loop grows the same way and `η` falls — so the suspect
+is the **tabulated** source: `j = 1` makes `∂F/∂ψ` jump at the plasma edge, `η₁`
+evaluates `F` at the potential, and a kink inside an element is a residual
+refinement chases without removing. **Plausible, not established**, and it is why
+no shipped example turns adaptivity on over a coupling.
+
+
 **One thing had to change in MEQ for any of this to run.** `meq::AdaptiveDomain`
 required `Ω` to be **strictly inside** the background box — it threw unless the
 computational mesh had exactly one boundary attribute — and the half-disc is not

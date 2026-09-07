@@ -1672,6 +1672,147 @@ namespace
 	 * pushing each flux basis function through the extension in turn, which is
 	 * what the inner loop over element dofs is.
 	 */
+
+	void GradShafranovSolver::exteriorTransmissionResidual(
+		ExteriorDtN const &exterior, mfem::Vector &out ) const
+	{
+		if ( !transferPath )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::exteriorTransmissionResidual: there is "
+				"no Gamma_h on the fitted path, and so no transmission condition "
+				"whose residual could be measured" );
+		if ( exteriorCoefficientValues.empty() )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::exteriorTransmissionResidual: no "
+				"exterior coefficients -- setExteriorCoupling() was not called, "
+				"or solve() has not run since it was" );
+		if ( static_cast<int>( exteriorCoefficientValues.size() )
+		     != exterior.modeCount() )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::exteriorTransmissionResidual: the DtN "
+				"given has a different mode count from the one the solve was "
+				"coupled to" );
+
+		mfem::Mesh &mesh = *traceFes->GetMesh();
+		out.SetSize( mesh.GetNE() );
+		out = 0.0;
+
+		int const modes = exterior.modeCount();
+		int const dim = mesh.Dimension();
+		mfem::Array<int> vdofs;
+
+		// THE RAW BLOCK HOLDS -q, AND flux() UNDOES THAT. Reading the solution
+		// vector directly here would give the mismatch with its sign reversed --
+		// which squares to the same number and would hide the error rather than
+		// reveal it, so the corrected field is what is read.
+		mfem::GridFunction const &q = flux();
+
+		for ( int be = 0; be < mesh.GetNBE(); ++be )
+		{
+			int const attribute = mesh.GetBdrAttribute( be );
+			if ( attribute < 1 || attribute > gammaHMarker.Size()
+			     || !gammaHMarker[ attribute - 1 ] )
+				continue;
+
+			// The caller-allocated variants throughout, per CLAUDE.md: both
+			// GetBdrFaceTransformations( int ) and GetElementTransformation( int )
+			// hand out the Mesh's own shared scratch.
+			thread_local mfem::FaceElementTransformations faceScratch;
+			thread_local mfem::IsoparametricTransformation faceElem1;
+			thread_local mfem::IsoparametricTransformation faceElem2;
+			mesh.GetBdrFaceTransformations( be, faceScratch, faceElem1, faceElem2 );
+			if ( faceScratch.GetGeometryType() == mfem::Geometry::INVALID )
+				continue;
+
+			int const element = faceScratch.Elem1No;
+			mfem::FiniteElement const *fluxFe = fluxFes->GetFE( element );
+			if ( !fluxFe )
+				continue;
+
+			fluxFes->GetElementVDofs( element, vdofs );
+			int const dof = fluxFe->GetDof();
+
+			// A SECOND element transformation, and it must not be the mesh's:
+			// TransformBack runs a Newton solve that moves the transformation's
+			// own integration point while the sweep is reading faceScratch.Elem1.
+			thread_local mfem::IsoparametricTransformation elementScratch;
+			mesh.GetElementTransformation( element, &elementScratch );
+			mfem::ElementExtension extender;
+			extender.SetElement( elementScratch );
+
+			mfem::IntegrationRule const &faceRule =
+				mfem::IntRules.Get( faceScratch.GetGeometryType(),
+				                    transmissionQuadratureOrder );
+
+			mfem::Vector shape( dof );
+			double accumulated = 0.0;
+			bool reached = true;
+
+			mfem::ExtensionBoundaryQuadrature( faceScratch, *transferPath, faceRule,
+				[ & ]( mfem::ExtensionBoundaryPoint const &pt )
+			{
+				if ( !reached )
+					return;
+
+				mfem::IntegrationPoint eip;
+				if ( !extender.TransformBack( pt.y, eip ) )
+				{
+					reached = false;
+					return;
+				}
+
+				fluxFe->CalcShape( eip, shape );
+
+				// q.nu at the foot on Gamma, from the element's own polynomial
+				// read outside it. Same vdof ordering as the row assembly:
+				// byNODES, so component d of basis j is vdof dof*d + j.
+				double interiorNormal = 0.0;
+				for ( int d = 0; d < dim; ++d )
+				{
+					double component = 0.0;
+					for ( int j = 0; j < dof; ++j )
+						component += q( vdofs[ dof*d + j ] )*shape( j );
+					interiorNormal += component*pt.nu( d );
+				}
+
+				// The exterior's own normal derivative from the converged
+				// coefficients, divided by r because MEQ's q IS ( 1/r ) grad psi
+				// while symbol() is d psi/d rho. Getting that factor wrong is the
+				// same mistake the transmission row's missing 1/r would have been,
+				// from the other side.
+				double const radius = pt.y( 0 );
+				double exteriorNormal = 0.0;
+				for ( int m = 0; m < modes; ++m )
+				{
+					int const n = ExteriorDtN::firstMode() + m;
+					exteriorNormal +=
+						exteriorCoefficientValues[ static_cast<std::size_t>( m ) ]
+						*exterior.symbol( n )
+						*exterior.basis( n, pt.y( 0 ), pt.y( 1 ) );
+				}
+				if ( radius > 0.0 )
+					exteriorNormal /= radius;
+
+				// pt.weight is SIGNED, and a squared quantity integrated against
+				// a signed weight is not a norm. std::abs is what makes this one:
+				// the sign records a folded sweep, which is a property of the
+				// path family rather than of the error being measured.
+				double const d = interiorNormal - exteriorNormal;
+				accumulated += std::abs( pt.weight )*d*d;
+			} );
+
+			if ( !reached )
+				throw std::runtime_error(
+					"meq::GradShafranovSolver::exteriorTransmissionResidual: the "
+					"extension of an element of Gamma_h did not reach its foot on "
+					"Gamma -- assumption P.1 giving way" );
+
+			// h_e, the scaling eta_3 uses for a flux jump, so that this term is
+			// commensurate with the others under one Doerfler threshold.
+			out( element ) += mesh.GetElementSize( element )*accumulated;
+		}
+	}
+
 	std::vector<mfem::Vector>
 		GradShafranovSolver::exteriorTransmissionRows( ExteriorDtN const &exterior ) const
 	{

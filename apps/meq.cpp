@@ -1349,6 +1349,8 @@ int main( int argc, char **argv )
 			datum = solver->transferredDatum();
 			estimator.setTransferredBoundary( *gammaHMarker, datum.get() );
 		}
+		if ( exterior )
+			estimator.setExteriorCoupling( exterior.get() );
 
 		mfem::Vector const &local = estimator.GetLocalErrors();
 		record.eta = estimator.GetTotalError();
@@ -1360,6 +1362,62 @@ int main( int argc, char **argv )
 		if ( !lastCycle && !reachedTarget )
 		{
 			markElements( adapt.strategy, adapt.theta, local, marked );
+
+			/*
+			 * A SECOND MARKING PASS ON THE BOUNDARY TERM, AND SUMMING IT INTO
+			 * eta IS NOT ENOUGH WITHOUT ONE. eta_6 is the transmission residual
+			 * of the exterior coupling and it is the only error the paper's five
+			 * terms structurally cannot see -- but it is SMALL against them:
+			 * measured on FB-5's loop, 8.58e-04 against an eta of 2.51e-01, so
+			 * its share of eta^2 is about 1e-5 and a Doerfler competition never
+			 * reaches it. Gamma_h kept all 34 of its faces for four cycles with
+			 * the term summed in.
+			 *
+			 * THAT IS NOT A THRESHOLD TO LOWER. The two are different quantities
+			 * in different units -- an interior discretisation error and a
+			 * boundary functional -- so one sum over both is a comparison with no
+			 * meaning however it is weighted. The boundary term marks on its OWN
+			 * distribution and the sets are unioned, which makes the loop drive
+			 * both errors down rather than whichever happens to be larger.
+			 *
+			 * Measured with this in place: Gamma_h refines 34 -> 46 -> 57 -> 64
+			 * faces and the exterior coefficients' error falls 1.32e-03 ->
+			 * 1.53e-04, where the same loop without it leaves them at 1.32e-03
+			 * to five digits.
+			 *
+			 * eta_6 stays IN eta as well, because the STOPPING rule does have to
+			 * see it: a loop that halted on the interior error alone would report
+			 * success with the boundary unresolved.
+			 */
+			if ( exterior )
+			{
+				mfem::Vector boundary( estimator.localSquares(
+					meq::ResidualEstimator::Term::Transmission ) );
+				for ( int e = 0; e < boundary.Size(); ++e )
+					boundary( e ) = std::sqrt( boundary( e ) );
+
+				mfem::Array<int> boundaryMarked;
+				markElements( adapt.strategy, adapt.theta, boundary, boundaryMarked );
+
+				// local.Size() and not solveMesh->GetNE(): the estimator's own
+				// element count is what both marking passes indexed into.
+				std::vector<char> already( static_cast<std::size_t>(
+					local.Size() ), 0 );
+				for ( int i = 0; i < marked.Size(); ++i )
+					already[ static_cast<std::size_t>( marked[ i ] ) ] = 1;
+				for ( int i = 0; i < boundaryMarked.Size(); ++i )
+				{
+					std::size_t const e =
+						static_cast<std::size_t>( boundaryMarked[ i ] );
+					if ( !already[ e ] )
+					{
+						already[ e ] = 1;
+						marked.Append( boundaryMarked[ i ] );
+					}
+				}
+				marked.Sort();
+			}
+
 			record.marked = marked.Size();
 		}
 		history.push_back( record );

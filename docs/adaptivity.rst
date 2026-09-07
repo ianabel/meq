@@ -72,6 +72,61 @@ throws if it is asked to compute before ``postProcess()`` has been called.
    cannot see. Call ``Reset()`` after a second solve, or build a fresh
    estimator.
 
+.. _adaptivity-boundary:
+
+:math:`\eta_6`, the boundary indicator
+--------------------------------------
+
+The five terms above estimate the **interior** discretisation error. On a
+free-boundary run — ``[boundary.exterior]`` in :doc:`configuration` — there is a
+second error they structurally cannot see: the Gegenbauer coefficients on
+:math:`\Gamma` are a **boundary functional**, a transmission integral reached by
+extension from :math:`\Gamma_h`, and nothing in :math:`\eta_1 \ldots \eta_5`
+measures it.
+
+That is not a defect in :math:`\eta`. :math:`\eta_5` on :math:`\Gamma_h` compares
+:math:`\psi^*` against the datum actually imposed, so it correctly reports the
+boundary as well resolved *for the interior problem*. Both are true at once, and
+left alone the loop refines the interior of a problem whose answer has stopped
+moving on its boundary: measured on the half-disc, the elements touching
+:math:`\Gamma_h` are 11 % of the mesh and carry **0.00 %** of :math:`\eta^2`.
+
+:math:`\eta_6` is the transmission residual. The coupling imposes only the
+**projection onto the retained modes**, so at convergence the pointwise mismatch
+
+.. math::
+
+   d(x) = q_h\cdot\nu(x)
+          - \frac{1}{r}\sum_n a_n\,\sigma_n\,C_n(\mu),
+   \qquad \sigma_n = \frac{1-n}{\rho_\Gamma}
+
+is orthogonal to :math:`C_2 \ldots C_{N+1}` and is **not zero** — what survives is
+the modes past the truncation and the discretisation error. It is accumulated as
+:math:`h_e \int |d|^2\,\mathrm{d}\Gamma` per element, the scaling :math:`\eta_3`
+uses for a flux jump.
+
+.. important::
+
+   **Summing it into** :math:`\eta` **is not enough on its own.** :math:`\eta_6`
+   is small against the interior terms — measured, :math:`8.6\times10^{-4}`
+   against an :math:`\eta` of :math:`2.5\times10^{-1}`, a share of
+   :math:`\eta^2` around :math:`10^{-5}` — so a Dörfler competition never
+   reaches it, and :math:`\Gamma_h` keeps every face it started with.
+
+   This is **not a threshold to lower.** An interior discretisation error and a
+   boundary functional are different quantities in different units, and one sum
+   over both is a comparison with no meaning however it is weighted. The driver
+   therefore marks the boundary term on **its own** distribution and unions the
+   two sets, so the loop drives both errors down; :math:`\eta_6` stays *in*
+   :math:`\eta` because the **stopping** rule does have to see it.
+
+With the second pass in place, :math:`\Gamma_h` refines 34 → 46 → 57 → 64 faces
+over four cycles and the coefficients' error falls
+:math:`1.32\times10^{-3} \rightarrow 1.53\times10^{-4}`, against a control that
+does not move at all. It is automatic: a run with ``[boundary.exterior]`` and
+``[adaptivity]`` gets it, and a run without a coupling has :math:`\eta_6`
+identically zero and is unchanged.
+
 .. _adaptivity-eta5:
 
 Two problems with :math:`\eta_5`, and both are recorded because they converge

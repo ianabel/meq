@@ -31,12 +31,17 @@ Nothing is red and stages 0 to 7 are done, so the order is:
    FB-1, FB-2 and FB-3 are done, FB-4 is answered, and FB-5's bordered solve
    works. §8 below has the per-stage table. **What is next, in order:**
 
-   * **Wire the two borders to TOML.** `setBoundaryFluxPoint()` (FB-3) and
-     `setExteriorCoupling()` (FB-5) are library capability with no route from a
-     configuration file — neither appears in `apps/meq.cpp` or `Config.cpp`. A
-     machine case is a library caller until they are. This is schema and driver
-     work against numerics that are already green, which makes it the cheapest
-     item on the list and a prerequisite for the next two.
+   * ~~**Wire the two borders to TOML.**~~ **DONE 2026-09-06.**
+     `[boundary.limiter]` and `[boundary.exterior]` reach
+     `setBoundaryFluxPoint()` and `setExteriorCoupling()`, so a machine case is
+     no longer a library caller. `examples/free-boundary-halfdisc.toml` is the
+     first free-boundary equilibrium MEQ has produced from a file — 7 Newton
+     steps, four Gegenbauer coefficients solved for — and
+     `theDriverReachesTheExteriorCoupling` pins the driver against the library
+     at **7.0e-17**, with a control at **76.6%** saying the coupling is not
+     inert. A `bump` initial guess came with it: once the boundary is free the
+     guess chooses which equilibrium is reported, so it is part of the problem
+     statement.
    * ~~**FB-5's adaptive loop.**~~ **DONE 2026-09-06.** `η` monotone with `Γ`
      fixed (2.51e-01 → 3.21e-02 over four cycles), P.1 preserved on a graded
      `Γ_h`, one Newton step per cycle. **And it found that `η` cannot see the
@@ -44,8 +49,15 @@ Nothing is red and stages 0 to 7 are done, so the order is:
      whole loop because the elements touching `Γ_h` carry 0.00% of `η²`. `η` is
      right — it estimates the interior error and the coefficients are a boundary
      functional — but the loop will stall once the interior error passes the
-     frozen one, which at cycle 3 is a factor of 1.4 away. **A boundary
-     indicator is the cure and is not built; cost it before FB-6.** Plan §7.12.
+     frozen one, which at cycle 3 is a factor of 1.4 away. ~~**A boundary
+     indicator is the cure and is not built.**~~ **BUILT 2026-09-06**, as `η₆`,
+     and the plan's own prescription was wrong: *added to the marking* it does
+     nothing, because `η₆` is 8.58e-04 against an `η` of 2.51e-01 and never wins
+     a Dörfler competition. Two different quantities in different units cannot
+     share one threshold however it is weighted, so the boundary term marks on
+     its own distribution and the sets are unioned — `Γ_h` then refines
+     34 → 46 → 57 → 64 and `|a − exact|` falls **1.32e-03 → 1.53e-04** against a
+     control that does not move. Plan §7.12 and §7.12a.
    * **A first coupled free-boundary solve.** Attempted twice on 2026-09-06;
      §7.12 and §7.13 are the record. **The analytic border column is done and
      wired** — `dR/ds` is assembled from the source's own `dF/ds` rather than

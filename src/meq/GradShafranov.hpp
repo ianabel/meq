@@ -1310,6 +1310,54 @@ namespace meq
 			/// n = 2. Empty unless setExteriorCoupling() was called.
 			std::vector<double> const &exteriorCoefficients() const;
 
+			/**
+			 * THE TRANSMISSION RESIDUAL PER ELEMENT: a BOUNDARY error indicator,
+			 * and the one thing `meq::ResidualEstimator` structurally cannot see.
+			 *
+			 * FB-5 measured the gap rather than predicting it. Driving the
+			 * coupled solve through the adaptive loop, `eta` fell 2.5109e-01 ->
+			 * 3.2079e-02 over four cycles while the exterior coefficients sat at
+			 * **1.3194e-03 at every cycle, to five digits**, and `Gamma_h` kept
+			 * its 34 faces while the element count doubled. Under UNIFORM
+			 * refinement the same quantity converges at 3.32, so it is not a
+			 * mode-truncation floor -- the loop simply never refines there,
+			 * because those 34 elements are 11% of the mesh and carry 0.00% of
+			 * `eta^2`.
+			 *
+			 * AND `eta` IS RIGHT, WHICH IS WHY THIS IS A SEPARATE QUANTITY RATHER
+			 * THAN A FIX TO IT. `eta` estimates the INTERIOR discretisation
+			 * error, and `eta_5` on `Gamma_h` compares `psi*` against the datum
+			 * actually imposed -- so it correctly reports the boundary as well
+			 * resolved FOR THE INTERIOR PROBLEM. The coefficients are a BOUNDARY
+			 * FUNCTIONAL: a transmission integral over `Gamma` reached by
+			 * extension from `Gamma_h`. Nothing in `eta` measures it. Both are
+			 * true at once.
+			 *
+			 * WHAT IS COMPUTED. The transmission condition is that the interior
+			 * and exterior normal derivatives agree on `Gamma`, and
+			 * setExteriorCoupling() imposes its PROJECTION onto the retained
+			 * modes: `int_Gamma ( q_h.nu ) C_m dGamma + blockEntry( m ) a_m = 0`
+			 * for each `m`. So at convergence the mismatch
+			 *
+			 *     d( x ) = q_h.nu( x ) - ( 1/r ) sum_n a_n symbol( n ) C_n( mu )
+			 *
+			 * is orthogonal to `C_2 .. C_{N+1}` and is NOT zero: what survives is
+			 * the modes past the truncation and the discretisation error, which
+			 * is exactly the quantity that froze. This returns
+			 * `h_e int |d|^2 dGamma` per element -- the scaling `eta_3` uses for
+			 * the flux jump, so that the numbers are commensurate with the other
+			 * terms and Doerfler marking over their sum means something.
+			 *
+			 * @param exterior  the same DtN the solve was coupled to.
+			 * @param out       sized to the element count; zero on every element
+			 *                  not touching `Gamma_h`.
+			 *
+			 * @throws std::logic_error if there is no coupling, no `Gamma_h`, or
+			 *         the solve has not run.
+			 */
+			void exteriorTransmissionResidual( ExteriorDtN const &exterior,
+			                                   mfem::Vector &out ) const;
+
 			/// The converged `psi_bnd`. Zero unless setBoundaryFluxPoint() was
 			/// called. Valid after solve().
 			double psiBoundary() const;

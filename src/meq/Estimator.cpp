@@ -106,6 +106,12 @@ namespace meq
 		Reset();
 	}
 
+	void ResidualEstimator::setExteriorCoupling( ExteriorDtN const *exteriorIn )
+	{
+		exterior = exteriorIn;
+		Reset();
+	}
+
 	void ResidualEstimator::setExtraQuadratureOrder( int extraIn )
 	{
 		if ( extraIn != extraQuadratureOrder )
@@ -127,6 +133,7 @@ namespace meq
 			case Term::FluxJump:      return "eta_3";
 			case Term::PotentialJump: return "eta_4";
 			case Term::TraceMismatch: return "eta_5";
+			case Term::Transmission:  return "eta_6";
 		}
 		return "eta_?";
 	}
@@ -488,6 +495,27 @@ namespace meq
 				squares[ static_cast<int>( Term::PotentialJump ) ]( elementTwo )
 					+= 0.5*potentialJump/he;
 			}
+		}
+
+		/*
+		 * eta_6, AND IT IS THE ONLY TERM THAT IS NOT AN INTEGRAL OVER THE MESH.
+		 * The five above estimate the interior discretisation error; this is the
+		 * transmission residual on Gamma, reached by extension from Gamma_h, and
+		 * without it the marking cannot see the boundary at all -- measured, the
+		 * elements touching Gamma_h carry 0.00% of the other five put together
+		 * while the exterior coefficients sit frozen to five digits.
+		 *
+		 * It is computed by the SOLVER rather than here because it needs the
+		 * transfer path, the extension and the converged coefficients, all of
+		 * which are the solver's. Zero on every element not touching Gamma_h, and
+		 * absent entirely unless a coupling was set -- so every case written
+		 * against the paper's five terms is bit-unchanged.
+		 */
+		if ( exterior )
+		{
+			mfem::Vector transmission;
+			solver->exteriorTransmissionResidual( *exterior, transmission );
+			squares[ static_cast<int>( Term::Transmission ) ] = transmission;
 		}
 
 		for ( int t = 0; t < termCount; ++t )

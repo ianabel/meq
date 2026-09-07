@@ -873,9 +873,21 @@ only two things in it that were neither built nor recorded anywhere else.
 
 
 ================================================================================
-A boundary error estimator for the exterior coupling
+A boundary error estimator for the exterior coupling -- DONE 2026-09-06
 Raised 2026-09-06 by FB-5's adaptive loop, which measured the gap rather than
 predicting it. FREE-BOUNDARY-PLAN.md section 7.12 is the write-up.
+
+  CLOSED THE SAME DAY, and the entry is kept because the CURE IS NOT WHAT THIS
+  ENTRY PROPOSED. It said "add it to the marking". Added to eta as a sixth term
+  it does NOTHING: eta_6 is 8.58e-04 against an eta of 2.51e-01, so its share of
+  eta^2 is about 1e-5 and a Doerfler competition never reaches it -- Gamma_h kept
+  all 34 faces for four cycles with the term summed in. The two are different
+  quantities in different units, so one sum over both is a comparison with no
+  meaning however it is weighted. What works is a SECOND MARKING PASS on the
+  boundary term's own distribution, unioned with the interior one; eta_6 stays in
+  eta so the STOPPING rule sees it. Measured, Gamma_h then refines 34 -> 46 -> 57
+  -> 64 and |a - exact| falls 1.32e-03 -> 1.53e-04 against a control that does
+  not move. See CLAUDE.md, FB-5's section.
 ================================================================================
 
   THE ADAPTIVE LOOP CANNOT SEE THE COUPLING, AND eta IS NOT WRONG. Measured on
