@@ -13,7 +13,8 @@ Code organisation
    examples/    TOML run configurations
    refs/        Refs.md is tracked; the PDFs are gitignored, fetch by DOI
    docs/        this documentation; docs/manual/ is the pre-Sphinx LaTeX manual
-   attic/       free-boundary work, not ported and not built, kept visible
+   (attic/      removed 2026-09-07 -- the original von Hagenow / Lackner
+                free-boundary code, superseded by the exterior DtN coupling)
 
 The library
 -----------

@@ -37,9 +37,8 @@ Checks: >
   readability-identifier-naming
 
 # Header warnings are reported for meq's own headers only. Everything else a
-# translation unit pulls in -- MFEM, toml11, Boost, the standard library, and
-# the unported headers under attic/ -- has its own conventions and is not ours
-# to rename. A test .cpp opened in an editor is still checked; this option
+# translation unit pulls in -- MFEM, toml11, Boost and the standard library --
+# has its own conventions and is not ours to rename. A test .cpp opened in an editor is still checked; this option
 # governs which *headers* diagnostics are reported from, not which files are
 # analysed.
 HeaderFilterRegex: '.*/src/meq/[^/]*\.hpp$'

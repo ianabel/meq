@@ -52,10 +52,11 @@ docs/_build/
 docs/doctrees/
 
 # MFEM run output. A solve writes its mesh and its solution as a .mesh/.gf pair,
-# and VisIt/ParaView dumps as .vtk/.vtu. Note that the sample data under
-# attic/free-boundary/vacuum-testing/ is tracked and stays tracked -- these
-# patterns only ever affect files git does not already know about, but a new
-# file that is meant to be committed there will need `git add -f`.
+# and VisIt/ParaView dumps as .vtk/.vtu. These patterns only ever affect files
+# git does not already know about, so a new one that is meant to be committed
+# will need `git add -f`. ( The exception this note used to describe, the
+# tracked sample data under attic/free-boundary/vacuum-testing/, went with
+# attic/ on 2026-09-07. )
 *.mesh
 *.gf
 # THE ONE FIXTURE PAIR THAT IS SOURCE AND NOT OUTPUT. examples/limited-tokamak

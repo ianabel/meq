@@ -9,7 +9,7 @@
 # The residual estimator (src/meq/Estimator.hpp) and the driver (apps/meq.cpp)
 # still speak the old Waterloo HDG API, which no longer exists in 4.9.1, so they
 # are not compiled by anything here yet; see MEQ_BUILD_APP below and
-# attic/free-boundary/README.md for what happened to the rest.
+# git commit 635aa3d for what happened to the rest, in the removed attic/.
 
 cmake_minimum_required(VERSION 3.20)
 

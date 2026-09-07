@@ -397,7 +397,7 @@ else()
 	# convention wholesale, and it is renamed when it is ported, at which point
 	# it joins meq_core and is checked like everything else.
 	# src/meq/Estimator.{hpp,cpp} made that journey in stage 6 and is checked.
-	# attic/ is excluded permanently; see its README.
+	# attic/ used to be excluded here permanently; it was removed 2026-09-07.
 	#
 	# HeaderFilterRegex in ../.clang-tidy is what pulls src/meq/*.hpp into the
 	# check: a header is not a translation unit, so GradShafranov.hpp is seen
