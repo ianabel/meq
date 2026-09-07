@@ -378,6 +378,28 @@ Free boundary by a Dirichlet-to-Neumann map against free boundary by von Hagenow
 Green's functions; HDG Newton against finite-difference Picard; C++ against
 Python. **They share the equation and essentially no code.**
 
+**AND IT IS A REGRESSION, NOT AN ANECDOTE.**
+`DriverAcceptance::theDriverSolvesALimitedTokamak` drives the whole thing from
+`examples/limited-tokamak.toml` — `[[coils]]`, `[boundary.limiter]`,
+`[boundary.exterior]`, `[source] PlasmaCurrent`, `ConfineToPlasma`,
+`[mesh] File` and a `gridfunction` guess, all live at once — and gates `ψ_ax`,
+`ψ_bnd`, the profile scale and the delivered current, plus the reported
+`psi_axis` against the peak of the field the run actually **wrote**. A DRIVER
+test rather than a library one for a reason: all three defects found building
+this case were driver-side, in keys describing a box a file mesh never builds,
+and a library test would have caught none of them. **11.0 s wall, 17.0 s CPU**,
+and the fixture — the gmsh half-disc with the conductors meshed to, the two
+`dp/dΨ` tables and the Green's-function guess — is 216 kB in `examples/`.
+
+**Cost against the reference, both serial at `MKL_NUM_THREADS=1`**: freegs4e
+**24.77 s CPU** for 42 Picard steps over 16,641 grid points; MEQ **19.78 s** for
+**7 Newton steps** over **137,100** unknowns (76,040 flux, 38,020 potential,
+23,040 trace) with a **23,040**-dof trace system factorised seven times. Eight
+times the unknowns and a larger factorisation, slightly cheaper in total, because
+`O(n³)` Green's-function boundary conditions are what freegs4e pays per step. A
+wall-clock ratio between the two is not a statement about either code; accuracy
+per unknown is the only column with meaning.
+
 **AND THERE IS A SECOND EQUILIBRIUM, REACHED BY AN INPUT ERROR NOTHING ELSE
 CATCHES.** The same configuration can converge — every border at machine zero,
 the current delivered to seven figures — to `ψ_ax = 2.734289e+00` against
@@ -840,23 +862,58 @@ run setting `[source] Mu0 = 1` while the coils kept the SI value would sum two
 terms scaled a million-fold apart and converge, at full order, to a machine
 nobody described.
 
-**AND `ConfineToPlasma` IS A LIMITER PLASMA'S SUPPORT TEST, WHICH IS LATENT
-RATHER THAN BROKEN AND IS WORTH KNOWING BEFORE THE FIRST DIVERTED RUN.**
-`NormalisedSource::insidePlasma()` is a pointwise test on the value,
-`(ψ − ψ_bnd)·span > 0`, with no connectivity. Across an X-point the level
-`ψ = ψ_X` cuts a neighbourhood into four sectors and **two opposite ones carry
-`Ψ > 0`** — the plasma, and the **private flux region** under the divertor. So on
-a diverted plasma this switches the source **on** beneath the X-point, and
-further out along that sector `ψ` keeps rising toward the divertor coils, so it
-stays on. The run converges and describes a machine with a second current
-channel nobody asked for.
+**THE PLASMA SUPPORT IS A CONNECTED SET SINCE 2026-09-07, AND THIS SECTION USED
+TO CALL THE DEFECT LATENT.** `NormalisedSource::insidePlasma()` is a pointwise
+test on the value, `(ψ − ψ_bnd)·span > 0`, with no connectivity. Across an
+X-point the level `ψ = ψ_X` cuts a neighbourhood into four sectors and **two
+opposite ones carry `Ψ > 0`** — the plasma, and the **private flux region** under
+the divertor — so a diverted run describes a machine with a second current
+channel nobody asked for. This file said it "cannot fire today: no shipped
+example sets `ConfineToPlasma` and MEQ has no diverted case".
 
-It cannot fire today: no shipped example sets `ConfineToPlasma` and MEQ has no
-diverted case. The fix is a flood fill on the element adjacency graph from the
-axis element, and `FREE-BOUNDARY-PLAN.md` §10 is the pathway — including the
-prediction that a **face**-neighbour fill needs none of the explicit X-point
-blocking `freegs4e`'s grid-based `core_mask` requires, because two lobes meeting
-at a vertex are not face neighbours.
+**IT IS LIVE ON A LIMITER CASE.** `theTwoBordersConvergeTogether`'s configuration
+at limiter `R = 1.20`, reproduced to every published digit, has `{ψ > ψ_bnd}` in
+**705 of 1333 elements and more than one piece** — midplane
+`[0.35, 0.92] ∪ [1.25, 1.45]`; other rows of the §7.18 sweep read four and five
+components. **No X-point is needed to make a level set disconnected**, and that
+sentence had been generalising from the dramatic case to the only case.
+
+`meq::PlasmaComponent` is the fill — MFEM-free, a CSR graph of ints in and a mask
+out, so CI gates it — driven by `GradShafranovSolver::refreshPlasmaComponent()`,
+which takes its adjacency from `Mesh::ElementToElementTable()` and refreshes
+**before every residual and every Jacobian**, so both are taken at the same
+support. `[source] PlasmaConnectivity` selects it, `"component"` is the default,
+`"pointwise"` is the control, and it is **refused** under `CondenseThenLinearise`
+rather than silently downgraded.
+
+**AND §10.3's FACE-NEIGHBOUR PREDICTION IS HALF FALSE, WHICH IS THE FINDING.**
+The half that holds is the one worth having: vertex-touching lobes really are
+separated, so the element graph carries what `freegs4e`'s grid destroys and no
+explicit X-point blocking is needed for *that*. The half that fails is the leak
+estimate. **The lobes are not joined at the saddle — they are joined through the
+BAND of elements straddling the separatrix**, every one of which carries `Ψ > 0`
+at some vertex, so an inclusive candidate rule connects them all along the
+divertor legs rather than at a point. Measured on `iterExample2` at 36,864
+elements, a one-rule fill leaves **2,275 elements below the X-point, exactly what
+the pointwise test leaves**. And §10.3's own cure, blocking the saddle's element,
+is **resolution-dependent**: 161 of 2304 still leak at the coarsest of three
+meshes.
+
+**What ships needs no X-point finder and no parameter**: the fill traverses only
+strictly interior elements and shares the straddling band out by a **watershed**,
+reaching the blocked fill's mask to every printed digit. Fixed rings were tried
+first and measured out.
+
+**AND IT IS NOT A JUMP, WHICH DECIDES WHERE IT LIVES.** A lobe leaving whole is
+`O(1)` however smooth the profile is, so this looked like FB-4's `j = 0`
+discontinuity. Measured FB-4's way — slide `ψ_bnd`, refine the sampling, watch
+the largest step — both the pointwise and the connected support fall like `h²`
+(3.99, 4.00 against **3.94, 3.96**), so **the fill stays inside the Newton loop**.
+The watershed never hands over a lobe, only a *straddling* element where `Ψ ≈ 0`
+and at `j ≥ 1` the profile with it. **The ring-depth alternative DID jump** on the
+same experiment — 1.68 then 1.20, floored — which is what says the property
+belongs to the rule. It also helps: **24 Newton steps against 47** on a confined
+rectangle, because at intermediate iterates the level really does fragment.
 
 **AND THE MOVING SUPPORT IS REACHABLE TOO, AS `[source] ConfineToPlasma`** —
 `F = 0` wherever `Ψ ≤ 0`, refused unless `Normalised = true` because the test is
@@ -1296,7 +1353,7 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 git submodule update --init --recursive     # extern/toml11
 cmake -B build
 cmake --build build -j4
-cd build && OMP_NUM_THREADS=4 ctest -j4      # 38/38 -- see below
+cd build && OMP_NUM_THREADS=4 ctest -j4      # 41/41 -- see below
 ```
 
 **RUN IT `-j4` WITH `OMP_NUM_THREADS=4`, WHICH IS 3.2x FASTER AND MEASURED.**
@@ -1310,7 +1367,8 @@ product at the core count is what pays:
 | `-j16`, `OMP=1` | 265.2 s | 350% |
 | **`-j4`, `OMP=4`** | **223.2 s** | 514% |
 
-37/37 in every configuration when that table was taken, and **38/38 today** —
+37/37 in every configuration when that table was taken, and **41/41 today** at
+**335 s** —
 the count moves as cases are added, so read the table's ratios rather than its
 absolute seconds. Nothing in the suite depends on a thread count, which is the
 correctness half. **`OMP_NUM_THREADS` is deliberately NOT pinned in
@@ -1323,6 +1381,13 @@ at **199.7 s** — one `clang-tidy` invocation over every file in `src/meq`,
 single-threaded — against `PedestalConvergence`'s 178 s. So 223 s is very nearly
 "the suite costs one lint run", and going below it means parallelising
 clang-tidy (`run-clang-tidy`) rather than anything about the solver.
+
+**AND `naming` IS NO LONGER ALONE AT THE TOP.** At 41 tests the run is 335 s,
+with `naming` at 223.8 s and **`PlasmaConnectivity` at 122.9 s** — the second
+takes an extra 112 s of wall clock because `-j4` cannot overlap the two once
+everything else has finished. Its expensive halves are the diverted-fixture fill
+at three resolutions and the jump study's 6401-sample sweep, both of which are
+the measurements the case exists for.
 
 **ctest needs no environment set by hand.** `tests/CMakeLists.txt` puts
 `MKL_NUM_THREADS=1` on every registered test, without which the suite takes well
@@ -4049,7 +4114,7 @@ tuning parameter and that was checked**: swept over 0.001, 0.01, 0.05, 0.10 and
 0.20 across the whole `k × n` benchmark the located axis is identical to every
 digit printed.
 
-### `CriticalPointFinder`'s axis is NOT `GradShafranovSolver::psiAxis()`
+### `CriticalPointFinder`'s axis is NOT `GradShafranovSolver::psiAxis()` — AND SINCE 2026-09-07 IT CHECKS IT
 
 **They are different quantities, both correct, and neither should be changed to
 match the other.** `ψ_ax` is *the largest nodal value* — chosen because the
@@ -4059,6 +4124,64 @@ They differ by `O(h)` in position and `O(h²)` in value, **both independent of
 `k`**, so on a refined high-order mesh the two readings *separate* rather than
 converge: measured on the finest Solov'ev mesh the gap is **202×** `ψ_h`'s own L2
 error at `k = 2` and **4204×** at `k = 3`.
+
+**AND THAT DEFINITION IS THE WEAK POINT OF THE WHOLE FREE-BOUNDARY PATH, WHICH
+TURNED UP THREE INDEPENDENT WAYS IN ONE NIGHT.** Nothing in *the largest nodal
+value of `ψ_h`* says that value is a magnetic axis, and
+`G = ψ_ax − max ψ_h = 0` is satisfied at machine zero by a spurious nodal spike
+exactly as it is by an axis:
+
+* **A machine case converged to a spike.** Every border at machine zero, the
+  prescribed current delivered to seven figures, and `ψ_ax` **twenty-nine times
+  too large** from a single dof of one element — with `ψ*` on the output grid
+  peaking thirty times lower. The runaway is self-consistent: a spurious `ψ_ax`
+  inflates the span, `Ψ` collapses over the real plasma, and the current border
+  raises the profile scale by 980 to hold `∫F/r` at `μ₀I_p`. What reached it was
+  a profile table wrong by a factor of the span; `FREE-BOUNDARY-PLAN.md` §7.16.
+* **`ψ_ax` ON A PUBLISHED TABLE IS A CORNER ARTEFACT.**
+  `theTwoBordersConvergeTogether`'s converged answer at limiter `R = 1.20` attains
+  its `ψ_ax` in an element **touching `r = 0`** — the corner where `Γ` meets the
+  axis — reading **1.0916e-01** there against **4.4472e-02** as the largest `ψ_h`
+  anywhere off the axis, a factor of **2.5**. That is FB-1a's corner, the one
+  place the lifting weight `C = r` vanishes and a fitted `ψ = 0` meets a
+  transferred exterior trace. **The bordered Newton is constraining that value**,
+  and §7.12b's table is a table of it.
+* **The sweep saw the same corner on the toy fixture**, reading `ψ_ax` at 8.12e-02
+  against a field maximum of 2.50e-02 — ratio 0.31 — and 0.36 and ≈ 0 on two
+  others. §7.18 item 3.
+
+**So the check exists now.** `meq::CriticalPointFinder::checkAxis()` sweeps for
+zeros of `q_h`, picks the O-point of the sense **the sign of the span dictates**
+— which is `NormalisedSource::insidePlasma()`'s own test, and is how it avoids
+`AxisSense::Either`'s refusal without guessing — and reports the **normalised
+flux `Ψ` at the located axis**, which must be 1 by definition. The driver runs it
+after every converged normalised solve, prints one line, and **warns** on
+disagreement; `axis_normalised_flux`, `axis_r` and `axis_z` go into the `.nc`
+beside `psi_axis`, because that is the interchange format and a consumer reading
+`psi_axis` has nothing else to judge it by.
+
+**Three design decisions in it are worth not undoing.** It uses `sweep()` and not
+`tryFindAxis()`, because the latter seeds from the extreme nodal value — the
+quantity under suspicion — and refuses outright where more than one extremum is
+reachable, which the axis ridge guarantees. The test is **one-sided**: a
+polynomial's peak over a closed element is ≥ its largest nodal value, so a
+healthy field reads 1 **from above** and only the low side can indicate a defect.
+And **the largest `Ψ` among the extrema wins**, so a spurious O-point costs a
+missed detection and never a false alarm — which is the safe direction for a
+warning and is the honest answer to the axis ridge, where the flux mass
+`(r q, v)` degenerates and `sweep()` returns dozens of degenerate criticals.
+
+| | `Ψ` at the located axis | |
+|---|---|---|
+| projected paraboloid | **1.0000**, axis to 1e-8 | agrees |
+| one dof at 29× the peak | **3.4483e-02** = 1/29 | **refuses** |
+| one dof at 3.2× | **3.1250e-01** | **refuses** |
+| monotone `ψ`, the annulus branch | no O-point of that sense | **refuses** |
+| `HighBetaConvergence`'s real solve | **1.0005** | agrees |
+
+Through the driver, `rotating-normalised.toml` reads **1.0003** at 768 elements
+and **1.0000** at 12,288 — the `O(h²)`-in-value gap of the paragraph above,
+measured. It costs 0.041 s and 0.214 s against solves of 1.0 s and 36 s.
 
 **`findAxis()` seeds from BOTH nodal extremes, and the reason is a sign error
 this file's plan carried.** MEQ's `ψ` is not sign-normalised across sources:

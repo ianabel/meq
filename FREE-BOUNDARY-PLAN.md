@@ -1912,6 +1912,25 @@ throughout. `theTwoBordersConvergeTogether` is the case, and it also runs throug
 the DRIVER: `[boundary.limiter]` beside `[boundary.exterior]` converges in 5
 Newton steps and reports both.
 
+**AND THE `ψ_ax` COLUMN OF THAT TABLE IS A CORNER ARTEFACT, FOUND 2026-09-07
+WHILE BUILDING §10.3's FILL.** At `R = 1.20` the reported 1.091632931e-01 is
+attained in an element **touching `r = 0`** — the corner where `Γ` meets the axis
+— against **4.4472e-02** as the largest `ψ_h` anywhere off the axis, a factor of
+**2.5**. That is FB-1a's corner, the one place the lifting weight `C = r`
+vanishes and a fitted `ψ = 0` meets a transferred exterior trace; §7.18 item 3
+found the same thing on the toy fixture at ratios 0.31, 0.36 and ≈ 0, and §7.16
+found a third instance at the plasma edge.
+
+**What is NOT in doubt is the convergence**, which is what this section is
+about: the residuals, the iteration counts and `ψ_ax`'s own constraint at 1e-17
+are all statements about the solve closing, and it does. **What is in doubt is
+that the number is a flux at a magnetic axis** — and since `ψ_ax` is what the
+profiles are normalised by, the equilibrium behind this table is not the one
+`[source]` describes. `meq::CriticalPointFinder::checkAxis()` is the diagnostic
+now, and it should be run over this table before any of its `ψ_ax` values is
+quoted as physics. Recorded rather than re-measured, because the fix is FB-1a's
+corner rather than this section's.
+
 **SO EVERYTHING IN §7.13 AND §7.14 THAT IS A FAILURE NEEDS RE-MEASURING**, not
 just this one. The wall-hugging annulus, the vertical field that would not
 converge from a cold bump, the currents at 0 / −0.05 / −0.10 / −0.20 giving
@@ -2710,27 +2729,106 @@ keeps rising toward the divertor coils, so it stays on. `ConfineToPlasma` would
 then describe a machine with a second, unphysical current channel below the
 X-point.
 
-**It is latent rather than broken**: no shipped example sets `ConfineToPlasma`,
-and MEQ has no diverted case, so nothing exercises it. It becomes live on the
-first diverted run and it will not announce itself — the run converges.
+**~~It is latent rather than broken~~ — IT IS LIVE ON A LIMITER CASE, AND BUILT
+AND FIXED 2026-09-07.** This section said no shipped example sets
+`ConfineToPlasma` and MEQ has no diverted case, so nothing exercises it. Wrong:
+`theTwoBordersConvergeTogether`'s configuration at limiter `R = 1.20`,
+reproduced to every published digit, has `{ψ > ψ_bnd}` in **705 of 1333 elements
+and more than one piece** — midplane `[0.35, 0.92] ∪ [1.25, 1.45]`. Other rows of
+the §7.18 sweep read four and five components. **No X-point is needed to make a
+level set disconnected**, and the diverted case is the dramatic version rather
+than the only one.
 
-**The fix is a flood fill on the element adjacency graph**, seeded at the element
-containing the magnetic axis, over elements where `Ψ > 0`. `freegs4e` does the
-same thing on its uniform grid (`critical.core_mask`) and has to **explicitly
-block a neighbourhood of each X-point** first, because on a grid the fill leaks
-diagonally through the saddle.
+**The fix is a flood fill on the element adjacency graph**, and it is
+`meq::PlasmaComponent` — MFEM-free, a CSR graph of plain ints in and a mask out,
+so CI gates it — driven by
+`GradShafranovSolver::refreshPlasmaComponent()`, which takes the adjacency from
+`Mesh::ElementToElementTable()` and refreshes **before every residual and every
+Jacobian**, so both are taken at the same support. `[source] PlasmaConnectivity`
+selects it; `"component"` is the default and `"pointwise"` is kept as the
+control.
+
+**AND THE PREDICTION IN THE PARAGRAPH BELOW IS HALF FALSE, WHICH IS WHY IT IS
+KEPT.** It read:
 
 > **MEQ's mesh should need no such blocking, and that is a claim to test rather
 > than to assume.** The two lobes meet at a *point*. A fill over **face**
 > neighbours cannot cross a shared vertex, so it should be blocked at the saddle
 > automatically — except in whichever element actually contains the X-point,
 > which is cut by both branches and is a face neighbour of both lobes. So the
-> expected leak is **one element wide**, not a whole region, and the question is
-> whether excluding the X-point's own element is enough. That is XP-1's
-> acceptance and it is cheap to measure.
+> expected leak is **one element wide**, not a whole region.
 
-The cost is one fill per Newton step at worst, over elements rather than
+The **first** half holds: vertex-touching lobes really are separated, and the
+element graph carries what `freegs4e`'s grid destroys — which is the whole
+argument for doing this on a mesh. The **second** half does not. Measured on
+`Soloviev::iterExample2()`, whose saddle is closed-form, at 36,864 elements:
+
+| support | elements | below the X-point | `∫\|F\|` |
+|---|---|---|---|
+| pointwise `Ψ > 0` | 16688 | 2275 | 6.675241e-01 |
+| one-rule fill, nothing blocked | 16688 | **2275** | identical |
+| one-rule, X-point element blocked | | 0 | 5.982429e-01 |
+| **two-rule fill, nothing located** | 14412 | **0** | 5.982429e-01 |
+
+**The lobes are not joined at the saddle. They are joined through the BAND of
+elements straddling the separatrix**, every one of which carries `Ψ > 0` at some
+vertex, so an inclusive candidate rule connects them everywhere along the
+divertor legs rather than at a point. Sweeping the rule at 9216 elements:
+any-vertex gives 4286 candidates and **one** component; the centre gives 4058 and
+**two**; every-vertex gives 3821 and **two**. **The leak belongs to the inclusive
+rule, not to the graph.**
+
+And §10.3's own cure — block the saddle's element, which needs an X-point finder
+XP-0 has not built — is **resolution-dependent**: 161 of 2304 elements are still
+below the saddle at the coarsest of three meshes, where the two-rule fill leaves
+none.
+
+**What ships instead needs no X-point and no parameter**: the fill *traverses*
+only the strictly interior elements, and the straddling band is shared out
+between interior components by a **watershed**, one BFS wave from each at once.
+It reaches the blocked fill's mask to every printed digit. Fixed *rings* were
+tried first and measured out — depth 2 is the only value that works on the
+diverted fixture at three resolutions, and it fails on an ordinary confined
+rectangle where the band is three deep at a corner. The band has to come back at
+all because the interior rule alone drops 179 / 360 / 720 elements over two
+fourfold refinements — the `1/h` of a one-element band, which would put an
+`O(h^{1+j})` perturbation under FB-4's `k ≤ j` result.
+
+**AND IT IS NOT A JUMP, WHICH WAS THE STRUCTURAL WORRY AND IS THE MEASUREMENT
+THAT SETTLES WHERE THE FILL LIVES.** A lobe leaving whole is `O(1)` however
+smooth the profile is, so a connectivity change looked like FB-4's `j = 0`
+discontinuity. Measured FB-4's way — slide `ψ_bnd`, refine the sampling, watch
+the largest step between neighbouring samples:
+
+| support | 401 | 1601 | ratio | 6401 | ratio |
+|---|---|---|---|---|---|
+| pointwise `Ψ > 0` | 2.9303e-03 | 7.3409e-04 | 3.99 | 1.8363e-04 | 4.00 |
+| connected component | 4.8104e-04 | 1.2204e-04 | **3.94** | 3.0821e-05 | **3.96** |
+
+Both fall like `h²`, so **the fill stays inside the Newton loop and needs no
+freezing**. The reason is that the watershed never hands over a *lobe*, only a
+*straddling* element, where `Ψ ≈ 0` and at `j ≥ 1` the profile with it — worst
+step 0.0017% of `∫|F|`. **The ring-depth rule DID jump** on the same experiment,
+1.68 then 1.20 and floored at 1.6e-04, which is what says the property belongs to
+the rule rather than to connectivity as such.
+
+**And it helps.** An unconfined solve is unchanged at **0.000e+00** over 7998
+dofs. A confined single-lobe rectangle agrees to 9.5e-10 and holds all 512
+elements at convergence, in **24 Newton steps against 47** — because at
+intermediate iterates the level really does fragment and the pointwise support
+had to un-do pockets.
+
+The cost is one fill per residual and per Jacobian, over elements rather than
 quadrature points, and it is `O(elements)`.
+
+**TWO THINGS FOUND ON THE WAY THAT ARE NOT ABOUT CONNECTIVITY.** `ψ_ax` on
+`theTwoBordersConvergeTogether`'s converged answer is attained in an element
+**touching `r = 0`** — 1.0916e-01 there against 4.4472e-02 as the largest `ψ_h`
+anywhere off the axis — so `refreshPlasmaComponent()` seeds **off** the symmetry
+axis; see §7.12b. And on a box reaching past an X-point the private flux region
+can carry a **larger** `Ψ` than the core, 2.79 against 1.0 on `iterExample2`, so
+an argmax-`Ψ` seed finds the wrong lobe there; it cannot fire on a free-boundary
+solve where `Γ` bounds the domain.
 
 ### 10.4 `ψ_bnd` becomes a three-row border, and one block is differentiated
 

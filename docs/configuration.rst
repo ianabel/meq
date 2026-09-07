@@ -249,10 +249,11 @@ under a Solov'ev source is an unknown key, not an ignored one.
    Jacobian to iterate with. Measured, it does not converge at any degree, on
    any mesh, from the exact solution, or under ``PicardThenNewton``.
 
-   Note also that :math:`\psi_{\mathrm{bnd}}` is **fixed at zero** today, so
-   the edge is pinned at :math:`\psi = 0` rather than found. Making it an
-   unknown is a second border row of the same shape as :math:`\psiax`'s and is
-   not written.
+   Note also that :math:`\psi_{\mathrm{bnd}}` is zero unless a limiter is
+   given.  With ``[boundary.limiter]`` present it is an unknown of the same
+   bordered Newton, pinned by :math:`\psi_h` at the potential degree of freedom
+   nearest the limiter contact, and the plasma edge is then *found* rather than
+   pinned at :math:`\psi = 0`.
 
 .. note::
 
