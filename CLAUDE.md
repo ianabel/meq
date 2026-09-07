@@ -1491,16 +1491,40 @@ value faults throwing `logic_error` where the constructor throws
 `invalid_argument`. **Branch coverage, last seen at 48%, is the figure with real
 headroom in it and the one nobody has looked at.**
 
-**SPHINX IS INSTALLED SINCE 2026-09-07 AND THE DOCS STILL DO NOT BUILD HERE.**
-`sphinx-build` is 8.2.3, but `sphinx_material` (the theme, imported
-unconditionally at `docs/conf.py:75`), `sphinxcontrib.bibtex`, `myst_parser` and
-`breathe` are all **missing**, so `make -C docs html` under `-W` — which is what
-`.readthedocs.yaml` requires — cannot run. **What CAN be run, and is enough to
-check an edit, is `sphinx-build -W -b dummy`**: it parses every page and reports
-warnings without needing a theme or writing output. On a throwaway copy with the
-theme and bibtex stubbed out it reports 137 warnings, **all of them `cite:t` and
-`cite:p`**, i.e. artefacts of stubbing bibtex out and not defects in the pages.
-Anything else it reports is real.
+**THE DOCS BUILD, AND `.venv-docs` IS HOW. USE IT.**
+
+```sh
+.venv-docs/bin/sphinx-build -W -b html docs docs/_build/html
+```
+
+**Verified 2026-09-07: `build succeeded`, 31 pages, zero warnings under `-W`**,
+which is what `.readthedocs.yaml`'s `fail_on_warning` requires. The venv is
+gitignored (`.gitignore:110`) and carries exactly what `docs/requirements.txt`
+pins — **sphinx 7.4.7** and **sphinx-material 0.0.36** — so a local pass and an
+RTD pass mean the same thing, which is the whole point of the pin.
+
+**DO NOT REACH FOR `sphinx-build` ON `PATH`, AND DO NOT CREATE A SECOND VENV.**
+The system one is **8.2.3**, and `docs/requirements.txt` caps sphinx below 8 on
+purpose: sphinx-material has been unmaintained since 2023 and predates
+Sphinx 8. `python3 -c "import sphinx_material"` also fails against the system
+interpreter, because the theme is only in the venv — and `docs/conf.py:75`
+imports it unconditionally, so the failure is an unhandled `ModuleNotFoundError`
+at config-eval time rather than anything naming a theme.
+
+**AND THIS FILE SAID "THE DOCS STILL DO NOT BUILD HERE" FOR ONE SESSION, WHICH
+IS WHY THE VENV IS NAMED HERE RATHER THAN LEFT TO BE FOUND.** The check that
+produced that claim ran `command -v sphinx-build` and `python3 -c "import ..."`
+— both of which answer for `PATH` and the system interpreter and neither of
+which can see a venv nobody activated. A commit went out carrying an
+UNVERIFIED docs edit on the strength of it, and the recipe offered was to build
+a venv that already existed. **An absent tool and an unactivated venv are the
+same two commands and different facts**; `ls -d .venv*` separates them and costs
+nothing.
+
+For the record, since it is genuinely useful when a theme is what is missing:
+`sphinx-build -W -b dummy` parses every page and enforces `-W` **without needing
+a theme or writing output**. It is the right tool for checking prose and
+cross-references in an environment that cannot render. It is not needed here.
 
 **`gcovr` is not installed on this machine**, so the recipe above fails with
 `command not found`; a venv is the way round it, and it needs
