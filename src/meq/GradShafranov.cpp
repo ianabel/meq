@@ -598,7 +598,7 @@ namespace
 			throw std::logic_error( "meq::GradShafranovSolver::axisFlux: psi_ax is not an unknown of this solver" );
 		if ( !prepared )
 			throw std::logic_error( "meq::GradShafranovSolver::axisFlux: prepare() has not been called" );
-		return recoverPeak( trace, psiAxisValue, element );
+		return recoverPeak( trace, psiAxisValue, psiBoundaryValue, element );
 	}
 
 	void GradShafranovSolver::setNormalisationCoupling( Normalisation choice )
@@ -2306,9 +2306,15 @@ namespace
 	}
 
 	double GradShafranovSolver::recoverPeak( mfem::Vector const &trace, double psiAxisIn,
+	                                         double psiBoundaryIn,
 	                                         int *element, int *dof )
 	{
-		normalisedSource->setNormalisation( psiAxisIn );
+		// BOTH, and psi_bnd used not to be here either. It is inert today --
+		// setBoundaryFluxPoint() is NPC-only and this is the condensation's peak,
+		// so psi_bnd is zero whenever this runs -- but it is the same latent trap
+		// that cost the Jacobian its sign one screen up, and a signature that
+		// cannot express psi_bnd is how that trap gets set again.
+		normalisedSource->setNormalisation( psiAxisIn, psiBoundaryIn );
 
 		// Into scratch, not into the solution blocks: this is called from inside
 		// finite differences, and leaving the caller's psi_h perturbed would be a
@@ -2902,7 +2908,7 @@ namespace
 		                     int *element, int *dof )
 		{
 			if ( !npcOrdering )
-				return recoverPeak( state, normalisation, element, dof );
+				return recoverPeak( state, normalisation, sB, element, dof );
 
 			if ( normalisedSource )
 				normalisedSource->setNormalisation( normalisation, sB );
@@ -3214,8 +3220,8 @@ namespace
 			if ( coupled && !npcOrdering )
 			{
 				double const h = normalisationStep( s );
-				double const peakUp = recoverPeak( traceX, s + h );
-				double const peakDown = recoverPeak( traceX, s - h );
+				double const peakUp = recoverPeak( traceX, s + h, sB );
+				double const peakDown = recoverPeak( traceX, s - h, sB );
 				corner = 1.0 - ( peakUp - peakDown )/( 2.0*h );
 			}
 
@@ -3256,9 +3262,9 @@ namespace
 
 					double const saved = traceX( dof );
 					traceX( dof ) = saved + traceStep;
-					double const up = recoverPeak( traceX, s );
+					double const up = recoverPeak( traceX, s, sB );
 					traceX( dof ) = saved - traceStep;
-					double const down = recoverPeak( traceX, s );
+					double const down = recoverPeak( traceX, s, sB );
 					traceX( dof ) = saved;
 					border( i ) = -( up - down )/( 2.0*traceStep );
 				}
@@ -3270,8 +3276,21 @@ namespace
 			// ordering is load bearing under the condensation, where the
 			// differences run local solves that overwrite exactly those blocks; it
 			// is kept under NPC because it is the right thing to write either way.
+			// BOTH NORMALISATIONS, AND THE SECOND ONE WAS MISSING UNTIL
+			// 2026-09-06. The one-argument overload forwards to
+			// setNormalisation( psi_ax, 0 ), so this silently ZEROED psi_bnd for
+			// the rest of the iteration -- and the NPC Jacobian immediately
+			// below, and every plasma-current assembly further down, were built
+			// against Psi = psi/psi_ax on a support of { psi > 0 } instead of
+			// the iterate's own. Measured before the repair: the Newton
+			// direction failed to solve its own linearised system by 109%, and
+			// the current constraint came out with the OPPOSITE SIGN, so the
+			// right-hand side drove the profile scale the wrong way and no
+			// damping was a descent direction. Inert wherever psi_bnd = 0, which
+			// is every fixed-boundary case in this tree -- which is why it
+			// survived FB-3.
 			if ( normalisedSource )
-				normalisedSource->setNormalisation( s );
+				normalisedSource->setNormalisation( s, sB );
 
 			if ( npcOrdering )
 			{
@@ -3692,8 +3711,11 @@ namespace
 				normalisedSource->setCurrentScale( sL );
 		}
 		normalisationResidualValue = constraint;
+		// Both, for the reason above: leaving the source at psi_bnd = 0 after the
+		// solve makes every later evaluation -- postProcess(), the estimator, the
+		// sampler -- read a different source from the one that was solved.
 		if ( normalisedSource )
-			normalisedSource->setNormalisation( s );
+			normalisedSource->setNormalisation( s, sB );
 
 #ifdef MEQ_HAVE_DIRECT_TRACE_SOLVER
 		readFactorisationCounts( linear, symbolicFactorisationCount,

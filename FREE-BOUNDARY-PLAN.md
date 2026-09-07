@@ -2174,6 +2174,80 @@ claiming better than about 1e-03 against the 129² one would be measuring the
 reference.
 
 
+### 7.17 The defect: one argument where two were meant
+
+**Found 2026-09-06 by four agents working the same failure from four
+directions, and every one of them arrived at the same line.** In
+`GradShafranov.cpp`'s Newton loop:
+
+```
+normalisedSource->setNormalisation( s );        // ONE argument
+```
+
+`setNormalisation( double )` forwards to `setNormalisation( psiAxis, 0.0 )`, so
+`ψ_bnd` was **zero** from that line until it was restored some 140 lines later —
+and what is assembled in between is `GetGradient()` and all four plasma-current
+blocks. They were built against `Ψ = ψ/ψ_ax` on a support of `{ψ > 0}` rather
+than the iterate's own.
+
+| | before | after |
+|---|---|---|
+| Newton direction against its own linearised system | **109% wrong** | 1.167e-07 |
+| current column `∂R/∂λ` | **46.5%** | 1.232e-10 |
+| corner `D(λ, ψ_ax)` | **28.3%** | 1.904e-10 |
+| corner `D(λ, ψ_bnd)` | **92.8%**, a factor of 13.9 | 1.421e-10 |
+| corner `D(λ, λ)` | **23.6%** | 4.310e-10 |
+| `∫F/r` fed to the border | 4.4217e-01, **sign reversed** against the target | correct |
+
+The sign is the whole story: the right-hand side told the current row to
+**reduce** a current that was 10% short, so no damping was a descent direction
+and the line search sat at its smallest trial for ever.
+
+**IT IS INERT WHEREVER `ψ_bnd = 0`**, which is every other bordered case in the
+tree — and `HighBetaConvergence`'s FB-3 case, which *does* carry `ψ_bnd = 0.509`,
+has **constant profiles**, so `∂F/∂ψ ≡ 0` and the source never reaches the
+Jacobian. Its published table is **bit-identical** across the repair. That is
+simultaneously why the defect survived FB-3 and how the repair is known to have
+moved nothing else.
+
+**THREE HYPOTHESES WERE KILLED, AND THEY ARE THE REASON TO WRITE THIS UP.**
+§7.16 named unscaled border rows in SI as the prime suspect. It is wrong, and so
+are the two obvious alternatives:
+
+* **Not conditioning.** `cond( M ) ≈ 1.0e3` — three digits of sixteen — and the
+  corner solves its own system to **8.4e-16**. Equilibration is worth 36×, not
+  eleven orders: the SI dynamic range never reaches `M`, because every border row
+  is already a ratio.
+* **Not units.** Non-dimensionalising the entire problem reproduces the SI run
+  **to ten digits**, floor and all.
+* **Not combinatorial.** The `ψ_ax` argmax is **frozen** for all 21 stalled
+  steps, the support creeps one way only (39 points in, 0 out), and the line
+  search returns the identical verdict every step. The control is sharper: the
+  configuration that **converges** is the combinatorially noisier one — argmax
+  jumping three times, hundreds of support points flipping both ways.
+
+**A SECOND DEFECT WAS FOUND BESIDE IT AND IS ALSO FIXED.** `augmentedNorm` — the
+merit both the line search and the stopping rule use — was never given
+`constraintL`. The comment three lines above its own call site warns about
+precisely this for `ψ_bnd`. The current constraint would have been **98.5%** of
+the merit. It is **not** what caused the stall — the current-aware merit rises at
+every damping too — but it is why a solve delivering `∫F/r` **15.9% wrong** could
+report a converged-looking floor. And `plasmaCurrent()` published the `ψ_bnd = 0`
+integral, so `thePlasmaCurrentClosesAsABorderUnknown`'s 3e-08 was **checking the
+solve against the formula it used**.
+
+**WHAT REMAINS IS BRANCH SELECTION, NOT A DEFECT.** With the Jacobian repaired
+the limited tokamak still does not land on freegs4e's equilibrium: it converges
+toward a larger plasma, `scale ≈ 2.9` and `ψ_ax ≈ 1.4e-01` against 9.5e-02. But
+the same case with the profile amplitude **fixed** — `setPlasmaCurrent` dropped,
+scale pinned at 1 — lands at `ψ_ax` 9.3697e-02 and `ψ_bnd` 2.7961e-02 against
+freegs4e's 9.4831e-02 / 2.7818e-02: **1.2% and 0.5%**. So MEQ can already
+reproduce this equilibrium; what a free scale adds is a second solution carrying
+the same total current in a larger, flatter plasma, and Newton has no reason to
+prefer one. That is §7.15's territory, and the diagnostic it names — watch where
+`ψ_ax`'s argmax sits — is the one to print.
+
+
 ## 8. Risks, in the order they are likely to bite
 
 **The axis, and it is FB-A because it can be measured now.** The half-disc

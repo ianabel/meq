@@ -365,6 +365,96 @@ one of them.
 | **FB-1** | **DONE.** `P`, the transmission row, `setExteriorDatum()`, and both halves measured: `ψ` at 1.99/2.99/3.99 on the half-disc with the datum given, and the exterior coefficients recovered from the transmission condition to 1.9e-04, converging at 3.30. `tests/analytic/ExteriorMatched.hpp` is the exact answer — **the plan's proposed one, filament loop fields, cannot support an order study at all**, `ψ ∉ H¹` at a point source |
 | **FB-2** | `src/meq/Coils.{hpp,cpp}`, MFEM-free, and the acceptance identity `∮(1/r)∂ψ/∂n dl = −μ₀I` at **3.3e−11** on the exact field, so a discrepancy on a solve is the solve. **And the coils are reachable from a TOML file since 2026-09-06** — see below |
 
+### One argument where two were meant: psi_bnd was zeroed inside the Jacobian window
+
+**FOUND 2026-09-06 BY FOUR AGENTS DIAGNOSING THE SAME FAILURE INDEPENDENTLY, AND
+IT IS ONE LINE.** `GradShafranov.cpp`, inside the Newton loop under the comment
+*"LAST, and after the source is put back to s"*:
+
+```
+normalisedSource->setNormalisation( s );        // ONE argument
+```
+
+`setNormalisation( double )` forwards to `setNormalisation( psiAxis, 0.0 )`. So
+from that line until `setNormalisation( s, sB )` was restored ~140 lines later,
+**`ψ_bnd` was zero** — and what is assembled in that window is `GetGradient()`
+and every plasma-current assembly. All of them were built against
+`Ψ = ψ/ψ_ax` on a support of `{ψ > 0}` instead of the iterate's own.
+
+**IT IS INERT WHEREVER `ψ_bnd = 0`, WHICH IS EVERY OTHER BORDERED CASE IN THE
+TREE.** That is why it survived FB-3. `HighBetaConvergence`'s FB-3 case *does*
+carry `ψ_bnd = 0.509`, but its profiles are **constant**, so `∂F/∂ψ ≡ 0` and the
+source term never reaches the Jacobian at all — the published table is
+**bit-identical** across the repair, which is the proof that nothing else moved.
+
+**WHAT IT COST, MEASURED FOUR WAYS.**
+
+| | |
+|---|---|
+| the Newton direction against its own linearised system | **109% wrong**; 1.167e-07 once repaired |
+| the current column `∂R/∂λ` | **46.5%** wrong; 1.2e-10 repaired |
+| the corner entry `D(λ, ψ_bnd)` | **92.8%** wrong — a factor of **13.9**; 1.4e-10 repaired |
+| `∫F/r` fed to the border | 4.4217e-01 against a true 3.3768e-01, **and the OPPOSITE SIGN** against the target: `+6.55e-02` where the truth is `−3.93e-02` |
+
+So the right-hand side told the current row to **reduce** the current when it was
+10% short, and no damping was a descent direction. The line search then sat at
+its minimum trial for ever, Armijo failing every step, which is the "floors and
+then creeps upward" signature.
+
+**THE ASSUMED ZEROS REALLY ARE ZERO**, checked at the same time: all 66
+off-diagonal corner entries the code assumes vanish difference to an exact
+`0.000000e+00`. The exterior constraints do not depend on `ψ_ax`, `ψ_bnd` or the
+scale; neither normalisation constraint depends on the scale or on `a`.
+
+**AND THREE HYPOTHESES WERE KILLED ON THE WAY, WHICH IS WHY THEY ARE WORTH
+RECORDING.**
+
+* **Not conditioning.** The dense border matrix has `cond ≈ 1.0e3` — three digits
+  of sixteen — and solves its own system to **8.4e-16**. Equilibration is worth
+  36×, not eleven orders. The SI dynamic range never reaches `M`, because every
+  border row is already a ratio.
+* **Not units.** Non-dimensionalising the whole problem — `μ₀ = 1`, `ψ` scaled to
+  `O(1)`, currents and amplitudes rescaled — reproduces the SI run **to ten
+  digits**, floor and all. It neither fixes nor perturbs it.
+* **Not combinatorial.** In the stalled phase the `ψ_ax` argmax is **frozen** for
+  21 consecutive steps, the support creeps one-directionally (39 points in, 0
+  out), and the line search returns the identical verdict every step. The control
+  is sharper still: the configuration that *converges* is the combinatorially
+  noisier one, with the argmax jumping three times and hundreds of support points
+  flipping **both ways**.
+
+**A SECOND, SEPARATE DEFECT WAS FOUND IN THE SAME PLACE AND IS ALSO FIXED.**
+`augmentedNorm` — the merit the line search and the stopping rule both use — was
+never given `constraintL`. The comment three lines above its own call site warns
+about exactly this for `ψ_bnd`: *"BOTH constraints, or the line search is blind to
+the one it is not told about"*. The plasma-current constraint would have been
+**98.5%** of the merit had it been included. It is **not** what caused the stall —
+measured, the current-aware merit rises at every damping too — but it is why a
+solve delivering `∫F/r` **15.9% wrong** could report a converged-looking floor.
+
+**AND `plasmaCurrent()` WAS PUBLISHING THE `ψ_bnd = 0` INTEGRAL**, so
+`thePlasmaCurrentClosesAsABorderUnknown`'s assertion that the current is delivered
+to 3e-08 was **checking the solve against the formula it used** — this tree's own
+recorded trap, met from the inside. The third site is repaired too, and
+`recoverPeak()` now takes `ψ_bnd` as an argument rather than being unable to
+express it.
+
+**THAT TEST IS GONE, AND WHY IT HAD TO GO IS THE LAST PART OF THE STORY.** With
+the Jacobian repaired its configuration — no coils, a free profile scale, a
+prescribed current — **does not converge**: the scale runs away to **27.8** and
+`ψ_ax` to 3.8e-01, inflating the plasma until it carries the required current in
+a larger, flatter channel. It had only ever "converged" because the wrong
+Jacobian happened to pin it near scale 0.084, and it had only ever "delivered"
+its current because the quantity it asserted on was the one the defect computed.
+**A test that passes because of a defect is worse than no test**, so it is
+removed rather than re-based; §7.17 records the state.
+
+**WHAT A CURRENT-CONSTRAINED SOLVE STILL NEEDS is the thing that stops the
+plasma inflating**, and freegs4e shows what: its `ConstrainPaxisIp` fixes **two**
+quantities — the axis pressure *and* `I_p` — against two free parameters. MEQ's
+border fixes one. With one constraint and one scale the counting is right but the
+solution is not unique, and Newton has no reason to prefer the physical branch.
+
 ### The plasma current is a border unknown, and it is what makes a moving support solvable
 
 **Built 2026-09-06.** `setPlasmaCurrent( μ₀ I_p )` makes the profile **scale** an

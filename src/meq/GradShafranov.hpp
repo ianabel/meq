@@ -1789,6 +1789,7 @@ namespace meq
 			/// @param element  if not null, receives the element that attained it.
 			/// @param dof      if not null, receives the potential dof that did.
 			double recoverPeak( mfem::Vector const &trace, double psiAxisIn,
+			                    double psiBoundaryIn,
 			                    int *element = nullptr, int *dof = nullptr );
 
 			/// The trace dofs of the faces of @a element: the only trace dofs the
