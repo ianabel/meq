@@ -393,6 +393,19 @@ Free boundary by a Dirichlet-to-Neumann map against free boundary by von Hagenow
 Green's functions; HDG Newton against finite-difference Picard; C++ against
 Python. **They share the equation and essentially no code.**
 
+**AND THE TWO CODES DO NOT MODEL THE CONDUCTORS ALIKE, WHICH WAS NOT NOTICED
+UNTIL 2026-09-07.** `freegs4e`'s default `Coil` is an **exact filament** —
+`controlPsi` is `Greens( self.R, self.Z, R, Z )*turns`, a point source, and its
+`area` attribute only imposes a current-density limit and never enters the field.
+MEQ's four are 0.1 × 0.1 m **rectangles**. So the 1.3e-04 above was reached
+*despite* a modelling difference rather than because the models agree, and with
+the coils about 0.4 m from the plasma edge the leading finite-size correction
+goes as `( w/d )² ≈ 1.6e-02` on the near field — three orders above the quoted
+agreement before any cancellation. **Worth measuring rather than assuming
+small**, and `meq::CurrentFilament` (FB-7, plan §7.19) is what would measure it:
+match MEQ's conductor model to the reference's, and the difference between the
+two MEQ runs is the finite-size effect on one code with one mesh.
+
 **AND IT IS A REGRESSION, NOT AN ANECDOTE.**
 `DriverAcceptance::theDriverSolvesALimitedTokamak` drives the whole thing from
 `examples/limited-tokamak.toml` — `[[coils]]`, `[boundary.limiter]`,

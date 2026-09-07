@@ -964,7 +964,10 @@ the fallback to work.
 | **FB-4** | The moving plasma support and cut quadrature. | **ANSWERED 2026-09-05, AND THE ANSWER MOVED THE WORK RATHER THAN DOING IT — see §7.10.** The order is capped by the PROFILE and not by the quadrature: with `p' ~ Ψ^j` at the edge, `ψ*` keeps `k+2` exactly when **`k ≤ j`**, and that threshold is the same for an exact cut rule as for MEQ's plain one. `j = 3, k = 3` reads **4.989** against a target of 5. **No cut quadrature was built**, and there is no inconsistent-cut-Jacobian cost to measure because there is no cut rule — the quadrature points do not move, so the assembled Jacobian is exact. What IS measured is that `j = 0` does not converge at all |
 | **FB-5** | The augmented Newton as one bordered solve, and adaptivity through it. | **DONE 2026-09-06, BOTH HALVES — and the adaptive half found that `η` cannot see the coupling; see §7.12.** `theCoupledSolveSurvivesTheAdaptiveLoop` runs solve → post-process → estimate → mark → refine with the exterior coupling live: `η` **2.51e-01 → 3.21e-02** over four cycles with `Γ` fixed, `L2(ψ)` 3.58e-03 → 9.33e-04, **0 widened fans** so assumption P.1 holds on a graded `Γ_h`, and **one** Newton step per cycle. The bordered solve: `setExteriorCoupling()` carries the N Gegenbauer coefficients as unknowns of the same Newton as `psi_ax` and `psi_bnd`, and `solveWithNormalisation()` now does a general `( N + 2 )` elimination against ONE factorisation. On FB-1b's half-disc it agrees with the superposition route to **2.3e-15**, takes **one** Newton step because the residual is affine in `( x, a )`, and converges to the exact coefficients at **3.32** against FB-1b's 3.30. `HighBetaConvergence` is bit-identical. What remains is the adaptive loop through the coupling: eta monotone with `Gamma` fixed, and P.1 preserved |
 | **FB-6** | A machine case, against **`../freegs4e`**. **The driver pieces landed 2026-09-06**: `[[coils]]` reaches the solve through `meq::makeCoilSet` and the `CoilAugmentedSource` adapters, `[source] ConfineToPlasma` switches the source off outside `{ Ψ > 0 }`, and `tools/mesh/halfdisc.py` generates the half-disc-with-conductors mesh MFEM reads natively. What is still missing for a machine case is a **route from a config file** to the two borders FB-3 and FB-5 built: neither `setBoundaryFluxPoint()` nor `setExteriorCoupling()` is reachable from TOML, so a machine case is a library caller today. | Agreement with an independent free-boundary tokamak code by a **different algorithm** — von Hagenow Green's functions, finite differences, Picard — on the same coils and the same tabulated `p′`, `ff′` through its `GeneralPprimeFFprime`. A fine-mesh self-comparison is the fallback, not the target: it shares every convention with the code it checks. See §7 |
-| **FB-7** | **Conductors OUTSIDE `Γ`**, entering through the coupling instead of the mesh. | **NOT STARTED — §7.19 is the write-up.** The exterior stays linear, so `ψ = ψ_coil + ψ̃` with `ψ_coil` known in closed form and `Δ*ψ_coil = 0` inside `Ω`: the interior equation is untouched and the conductor enters as a KNOWN additive term on both halves of the transmission condition. No new unknowns and no change to the border. The one gap is a GRADIENT on `meq::CoilSet`. Acceptance: a vacuum solve with the conductor outside `Γ` reproducing `CoilSet::psi` at `k+1`, and the coil-inside / coil-outside routes agreeing where both are legal |
+| **FB-7** | **Conductors OUTSIDE `Γ`**, entering through the coupling instead of the mesh. | **NOT STARTED — §7.19 is the write-up.** The exterior stays linear, so `ψ = ψ_coil + ψ̃` with `ψ_coil` known in closed form and `Δ*ψ_coil = 0` inside `Ω`: the interior equation is untouched and the conductor enters as a KNOWN additive term on both halves of the transmission condition. No new unknowns and no change to the border. **Two deliverables**: a GRADIENT on
+`meq::CoilSet`, and `meq::CurrentFilament` — `../freegs4e`'s default coil IS an
+exact filament, so the §7.16 comparison has an unmeasured modelling mismatch in
+it. Acceptance: a vacuum solve with the conductor outside `Γ` reproducing `CoilSet::psi` at `k+1`, and the coil-inside / coil-outside routes agreeing where both are legal |
 
 **FB-1 is the stage to protect.** It exercises `ExteriorDtN`, the transferred
 datum with a non-zero `g`, the transmission condition, the augmented solve and
@@ -2743,6 +2746,81 @@ and its current is part of the interior equation.
 
 **So the deliverable is one gradient**, lifted into `meq::CoilSet` at the same
 quadrature order and with the same refusals, plus two known terms added on `Γ`.
+
+#### `meq::CurrentFilament`, because the codes we compare against use filaments
+
+**`../freegs4e`'s default `Coil` IS AN EXACT FILAMENT** — `controlPsi` returns
+`Greens( self.R, self.Z, R, Z ) * turns`, a point source at `( R, Z )`; its
+`area` attribute exists only to impose a current-density limit and never enters
+the field. `ShapedCoil` and `MultiCoil` are the finite-extent classes and are
+not what the benchmark cases use. FreeGS-family codes generally do this.
+
+**SO THE §7.16 COMPARISON HAS A MODELLING MISMATCH IN IT, AND IT WAS NOT
+NOTICED.** `examples/limited-tokamak.toml` carries four coils of half-extent
+0.05 m — 0.1 × 0.1 m squares — against `freegs4e`'s four points, and the two
+agreed on `ψ_ax` to **1.3e-04**. That agreement was reached *despite* the two
+codes modelling the conductors differently, not because they modelled them
+alike. With the coil ~0.4 m from the plasma edge the leading finite-size
+correction goes as `( w/d )² ≈ 1.6e-02` on the near field, which is three
+orders above the quoted agreement before any cancellation — so this is worth
+measuring rather than assuming small.
+
+**`meq::CurrentFilament` is what makes it measurable**: the same conventions as
+`meq::Coil` — `ψ = r A_φ`, signed current, the set's own `μ₀` — evaluated in
+closed form from complete elliptic integrals. `tests/analytic/CurrentLoop.hpp`
+already has the mathematics and has it checked, `dPsiDr` and `dPsiDz` against
+central differences; this is a promotion to production, not a derivation. Then a
+run can be made with MEQ's conductor model matched to the reference's, and the
+difference between the two MEQ runs IS the finite-size effect, measured on one
+code with one mesh and one solver.
+
+**AND IT STRUCTURALLY CANNOT DO EVERYTHING `meq::Coil` DOES, WHICH IS THE POINT
+OF HAVING BOTH.** A filament's own field diverges at the filament, so **there is
+no self-field and no self-force** — the quantity a finite cross-section exists to
+make finite. `CurrentLoop.hpp` records the practical edge of it: the gradient
+*"loses its figures a hundred times sooner than psi does"*, wanting `1e-5` of a
+minor radius clearance where `psi` wants `1e-7`. So a filament is for **matching
+another code's model**, and a finite coil is for **modelling a conductor**;
+neither replaces the other, and a filament inside `Ω` should be refused outright
+rather than evaluated at a mesh point that may land on it.
+
+#### The plasma's effect on `B` AT the coil — and why that is a reason to mesh
+
+**A real output, and it is what conductors are designed against**: the force on a
+coil needs `B` at the coil, and the plasma contributes to it. Meshing the
+conductor gives that directly, on one field, and is the honest reason to put
+coils inside the meshed region even when the exterior route would carry them.
+
+**BUT THE EXTERIOR ROUTE GIVES THE PLASMA'S SHARE TOO, IN CLOSED FORM, AND THIS
+IS NOT OBVIOUS.** The coefficients `a_n` that the coupled solve produces *are*
+the plasma's field in the exterior: `ψ̃ = Σ a_n × basis_n` holds at every point
+outside `Γ`, so the plasma's contribution at a conductor is a modal evaluation
+at that conductor's position — no mesh, no interpolation, and differentiable for
+`B`. The solve already computes everything needed.
+
+**Three caveats, and the first is the one that would bite.**
+
+* **The truncation is calibrated against `ψ_ax`, not against `B` near `Γ`.**
+  §11.6's `truncationRatio` says whether `N` is enough for the *interior*
+  answer — measured, `N = 10` is converged to 2.9e-04 in `ψ_ax` on §7.16's case.
+  `B` at a conductor is a different functional of the same coefficients, and
+  nothing measures its convergence yet. **A mode count adequate for one is not
+  adequate for the other**, and this file has already recorded that shape twice
+  — `η` cannot see the coupling, and an average does not escape the metric trap.
+* **A multipole expansion is WORST just outside `Γ` and improves outward**, which
+  is the opposite of near-field intuition. A conductor hard against `Γ` is
+  exactly where the truncated exterior is least trustworthy; one far out is
+  excellent. So the accuracy of this route depends on where the conductor is in
+  a way the interior route's does not.
+* **Differentiating a truncated expansion costs a mode.** `B` needs `∇ψ̃`, and
+  each derivative erodes the tail the truncation left.
+
+**So the two routes answer different questions and the choice is not free.** Mesh
+the conductor when you need `B` at it and want the interior discretisation to own
+the answer; use the exterior route when the conductor is far enough out that
+meshing to it is wasted elements, and take the plasma's share from the
+coefficients. **What is NOT available either way from a filament is the
+self-field**, so a force calculation needs `meq::Coil` whatever else is done.
 
 #### Three things to watch
 
