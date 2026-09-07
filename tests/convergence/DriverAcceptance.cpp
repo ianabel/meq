@@ -19,6 +19,7 @@
 #include <fstream>
 #include <sstream>
 #include <iterator>
+#include <limits>
 #include <utility>
 #include <memory>
 #include <string>
@@ -266,6 +267,63 @@ namespace
 		      at = text.find( from, at + to.size() ) )
 			text.replace( at, from.size(), to );
 		return text;
+	}
+
+	/*
+	 * THE LARGEST VALUE OF ONE (R, Z) GRID VARIABLE IN A .nc, THROUGH ncdump.
+	 *
+	 * Read this way rather than through meq's own writer for the reason
+	 * ncdumpHeader() gives, and read at all because a scalar the driver
+	 * REPORTS has to be checkable against the field the driver WROTE. psi_ax
+	 * is the largest NODAL value of psi_h -- a definition chosen because it
+	 * makes the bordered Newton's row exactly -e_j -- and nothing in it says
+	 * the largest nodal value is a magnetic axis. On a solve that latched onto
+	 * a single spiking dof the two differ by a factor of thirty while every
+	 * constraint sits at machine zero, so this is the only cheap thing that
+	 * can tell those apart.
+	 *
+	 * NaN of the data section's fill values (`_`) are skipped rather than
+	 * counted: a node outside the computational domain carries no answer.
+	 */
+	double gridPeak( std::string const &path, std::string const &variable )
+	{
+		std::string const scratch = "driver-acceptance-grid.txt";
+		std::string const command = "ncdump -v " + variable + " " + path
+		                            + " > " + scratch + " 2>&1";
+		if ( std::system( command.c_str() ) != 0 )
+			return std::nan( "" );
+
+		std::string const text = slurp( scratch );
+		std::remove( scratch.c_str() );
+
+		// The data section, not the header: " psi =" on its own appears only
+		// there, where the declaration reads "double psi(Z, R) ;" and the
+		// attributes read "psi:long_name".
+		std::size_t at = text.rfind( " " + variable + " =" );
+		if ( at == std::string::npos )
+			return std::nan( "" );
+		at += variable.size() + 3;
+
+		double peak = -std::numeric_limits<double>::infinity();
+		char const *p = text.c_str() + at;
+		char const *const end = text.c_str() + text.size();
+		while ( p < end && *p != ';' )
+		{
+			if ( *p == '-' || *p == '+' || *p == '.'
+			     || ( *p >= '0' && *p <= '9' ) )
+			{
+				char *stop = nullptr;
+				double const value = std::strtod( p, &stop );
+				if ( stop != p )
+				{
+					peak = std::max( peak, value );
+					p = stop;
+					continue;
+				}
+			}
+			++p;
+		}
+		return peak;
 	}
 
 	/// ||stored - computed|| / ||computed||, the figure every case here prints.
@@ -1568,4 +1626,384 @@ BOOST_AUTO_TEST_CASE( theDriverRefinesOverAnExteriorCoupling )
 
 	std::remove( "driver-acceptance-fb-adaptive.toml" );
 	std::remove( "driver-acceptance-fb-adaptive.log" );
+}
+
+
+/*
+ * A LIMITED TOKAMAK, AND THE ONLY CASE IN THIS TREE CHECKED AGAINST A CODE THAT
+ * IS NOT MEQ.
+ *
+ * Everything else in this file pins the DRIVER against the LIBRARY, for the
+ * reason theDriverSolvesTheSolovievBenchmarkAndWritesIt records: the same
+ * configuration must reach the same answer through a TOML file as through the
+ * API, and the closed forms in tests/analytic/ are where the discretisation is
+ * measured. This case does something neither of those can. It takes an
+ * equilibrium computed by freegs4e -- free boundary by von Hagenow Green's
+ * functions, fourth-order finite differences on a uniform (R, Z) grid, Picard
+ * with adaptive blending, in Python -- and requires MEQ to reproduce it from
+ * the same inputs. The two codes share the equation and essentially no code.
+ *
+ * WHY THAT IS WORTH MORE THAN A FINER MESH. Every other check MEQ makes shares
+ * MEQ's conventions, and this file's own history records three occasions where
+ * a convention was misread and the fixture checking it was misread the same way
+ * -- the Solov'ev coefficients, tau in eq (8e), DarcyForm's -q. A
+ * self-consistent tree cannot find that class of error at all.
+ *
+ * WHY THIS CASE AND NOT A DIVERTED ONE. meq::NormalisedSource::insidePlasma is
+ * a POINTWISE test on the value, with no connectivity, so across an X-point it
+ * switches the source on in the private flux region as well as in the plasma.
+ * freegs4e's H_limited_circular has vertical-field coils only, so no X-point
+ * exists in range and the boundary is the surface through the limiter contact.
+ * It is the one configuration of the seven in that benchmark MEQ can represent.
+ *
+ * WHAT IS ACTUALLY BEING SOLVED, because "free boundary" understates it. Gamma
+ * carries no prescribed datum: it is an artificial semicircle in the vacuum and
+ * meq::ExteriorDtN stands in for everything outside it. psi_ax, psi_bnd, the
+ * profile amplitude and TEN Gegenbauer coefficients are all unknowns of ONE
+ * bordered Newton beside the field. The amplitude is set by the plasma current
+ * asked for rather than given, the plasma support moves with the iterate, and
+ * the mesh is a gmsh half-disc reaching r = 0 exactly with the four conductors
+ * meshed to. Thirteen scalars and a field, in seven Newton steps.
+ *
+ * =====================================================================
+ * WHAT THE REFERENCE IS, AND WHAT IT IS NOT
+ * =====================================================================
+ *
+ * The numbers below are freegs4e's own, from its H_limited_circular case at
+ * 129^2 -- tools/freegs4e-benchmark/fgsref.py writes it and that directory's
+ * README.md is the recipe. They are REPEATED here rather than read, because the
+ * .npz and .json carrying them are gitignored: they are regenerated by rerunning
+ * freegs4e, which needs a Python environment this suite cannot assume.
+ *
+ * THE REFERENCE IS NOT CONVERGED AT 129^2, AND THAT IS WHY THE COMPARISON
+ * PRESCRIBES A POINT. Over its own grid scan psi_ax reads 9.483141e-02,
+ * 9.337971e-02, 9.308752e-02 at 129^2, 257^2 and 513^2, successive differences
+ * falling by 4.98 -- so Richardson gives psi_ax ~ 9.3014e-02 and psi_bnd ~
+ * 2.6158e-02, against which 129^2 is 2.0% and 6.3% out. The DIVERTED cases in
+ * that benchmark are converged at 129^2 to six figures; a limited boundary is a
+ * maximum over the limiter ring, a pointwise operation on a discrete set, and
+ * converges more slowly in the grid than a saddle located by interpolation.
+ *
+ * The mechanism is that freegs4e's limiter is a RING OF GRID CELLS: it takes
+ * psi_bndry to be the maximum over the innermost layer inside the wall, which on
+ * this case is attained at ( 1.3375, -0.0125 ) -- one cell in R and one in Z
+ * inside a wall circle of R0 = 1.00, a = 0.35. Interpolating the reference's own
+ * saved psi there returns 2.781829e-02, its reported psi_bndry to every digit.
+ * On the TRUE circle the maximum is 2.574498e-02 at ( 0.8157, 0.2976 ), on the
+ * INBOARD side and 7.5% lower, so the reference's plasma does not touch its
+ * limiter anywhere.
+ *
+ * So the comparison hands BOTH codes that same point -- MEQ's
+ * [boundary.limiter] is at ( 1.3375, 0 ) -- rather than a limiter curve. That
+ * takes the contact-finding out of the comparison and leaves a problem both
+ * codes solve identically.
+ *
+ * SO THE COMPARISON IS AGAINST THE 129^2 RUN DELIBERATELY. Comparing against the
+ * Richardson limit would be comparing against a number neither code computed.
+ *
+ * =====================================================================
+ * WHAT LIMITS THE AGREEMENT, IN ORDER
+ * =====================================================================
+ *
+ * MEQ reads psi_ax = 9.455354e-02 here, 2.9e-03 relative from the reference, and
+ * on a mesh of 3802 elements with the same configuration it reads 9.484390e-02,
+ * 1.3e-04. The shipped fixture is the COARSE mesh -- 1601 elements -- because it
+ * lands on the same branch, agrees to a part in three hundred, and costs a third
+ * of the time. What is left, largest first:
+ *
+ *   - MEQ's own mesh. 1601 elements over a half-disc of radius 2.6 is coarse,
+ *     and MEQ's answer moves by 0.3% between its two meshes.
+ *   - the reference's own 2.0% at 129^2, above.
+ *   - the conductor model. freegs4e's coils are FILAMENTS and MEQ's are
+ *     rectangles of half-width 0.05, differing by a quadrupole term of order
+ *     ( w/d )^2 ~ 3e-3 at the corner of the reference's box, which is where the
+ *     pointwise disagreement is worst.
+ *   - the limiter dof. MEQ pins psi_bnd at the nearest POTENTIAL DOF to the
+ *     requested point, which differs from it by O( h ) and moves psi_bnd by
+ *     about 0.25 h. That is a first-order error in the boundary condition, not
+ *     an O( h^{k+1} ) one.
+ *
+ * None of them is the solver, and the tolerances below are set from the coarse
+ * mesh's measured 2.9e-03 with a factor of about three in hand. THEY ARE NOT
+ * TIGHTENED UNTIL THEY PASS: a run agreeing to 1e-05 here would be agreeing
+ * better than either code knows its own answer.
+ *
+ * AND THEY ARE PINNED TO THE SHIPPED MESH RATHER THAN TO THE RESOLUTION, WHICH
+ * IS MEASURED. Two meshes regenerated by tools/mesh/halfdisc.py at the same
+ * nominal sizes -- 1716 and 1807 triangles against the fixture's 1775 -- read
+ * psi_ax = 9.337595e-02 and 9.317576e-02, i.e. 1.5e-02 and 1.7e-02 from the
+ * reference, and both would fail the bound below. Both converge cleanly, both
+ * satisfy every border at machine zero, and both are the same equilibrium: this
+ * is MEQ's own mesh scatter at 1600 elements, and the shipped mesh's 0.29% is
+ * fortune as much as resolution. So examples/limited-tokamak.msh IS the fixture.
+ * If it is ever regenerated, that is a RE-MEASUREMENT -- run the 3802-element
+ * mesh beside it, which reads 9.484390e-02, to separate scatter from a real
+ * change, and move the bound to what the new fixture measures rather than
+ * relaxing it to whatever passes.
+ *
+ * =====================================================================
+ * THE FIELD IS NOT COMPARED HERE, AND THAT IS A LIMITATION
+ * =====================================================================
+ *
+ * tools/freegs4e-benchmark/ compares psi node by node over the reference's box
+ * and reads rel L2 = 7.1e-03 on this mesh ( 5.3e-03 on the finer one ). Doing
+ * that needs the reference's grid, which is in the gitignored .npz, so this case
+ * asserts the five SCALARS the two codes both publish and leaves the field to
+ * the benchmark script. What it does assert about the field is the one thing it
+ * can check without the reference at all -- see the psi_ax-against-its-own-peak
+ * assertion below, which is a self-consistency check on MEQ's output rather than
+ * a comparison.
+ */
+BOOST_AUTO_TEST_CASE( theDriverSolvesALimitedTokamak )
+{
+	// freegs4e's H_limited_circular at 129^2. See the header above for what
+	// these are, and for why they are transcribed rather than read.
+	double const referencePsiAxis = 9.483140879792246e-02;      // Wb/rad
+	double const referencePsiBoundary = 2.78182873510414e-02;   // Wb/rad
+	double const referenceCurrent = 3.0e5;                      // A, the target
+
+	// The profile tables were built to freegs4e's own amplitude, so the scale
+	// MEQ solves for is 1 BY CONSTRUCTION. It is the sharpest of the five:
+	// nothing about the mesh or the limiter enters it, and it is the only number
+	// here that a units or normalisation error moves by orders rather than by
+	// percents. A table written as dp/dpsi where meq wants dp/dPsi comes back as
+	// scale ~ span, i.e. 6.7e-02 rather than 1, and with [source] PlasmaCurrent
+	// set there is no other symptom at all -- both profiles carry the same wrong
+	// factor and the current border absorbs it.
+	double const referenceScale = 1.0;
+
+	BOOST_TEST_REQUIRE( run( "examples/limited-tokamak.toml" ) == 0,
+	                    "the driver did not exit 0 on the limited tokamak" );
+
+	std::string const header = ncdumpHeader( "limited-tokamak.nc" );
+	BOOST_TEST_REQUIRE( !header.empty(), "limited-tokamak.nc is unreadable" );
+
+	double const psiAxis = headerAttribute( header, "psi_axis" );
+	double const psiBoundary = headerAttribute( header, "psi_boundary" );
+	double const current = headerAttribute( header, "plasma_current" );
+	double const scale = headerAttribute( header, "profile_scale" );
+	double const iterations = headerAttribute( header, "newton_iterations" );
+	double const border = headerAttribute( header, "normalisation_residual" );
+	double const modes = headerAttribute( header, "exterior_modes" );
+	double const coils = headerAttribute( header, "coils" );
+
+	// EVERY ONE OF THESE IS A PIECE OF DRIVER WIRING THAT DID NOT EXIST BEFORE
+	// FB-6, so an absent attribute is a configuration that silently did not
+	// reach the solver rather than a missing line in a header.
+	BOOST_TEST_REQUIRE( std::isfinite( psiAxis ),
+	                    "the run reported no psi_axis, so the bordered Newton "
+	                    "did not reach the solve" );
+	BOOST_TEST_REQUIRE( std::isfinite( psiBoundary ),
+	                    "the run reported no psi_boundary, so "
+	                    "[boundary.limiter] did not reach the solve" );
+	BOOST_TEST_REQUIRE( modes == 10.0,
+	                    "[boundary.exterior] Modes did not reach the solve: the "
+	                    "run reports " << modes << " exterior modes" );
+	BOOST_TEST_REQUIRE( coils == 4.0,
+	                    "[[coils]] did not reach the solve: the run reports "
+	                    << coils << " coils" );
+
+	double const axisError = std::fabs( psiAxis - referencePsiAxis )
+	                         /std::fabs( referencePsiAxis );
+	double const boundaryError = std::fabs( psiBoundary - referencePsiBoundary )
+	                             /std::fabs( referencePsiBoundary );
+	double const scaleError = std::fabs( scale - referenceScale );
+	double const currentError = std::fabs( current - referenceCurrent )
+	                            /referenceCurrent;
+
+	std::printf( "\n  A LIMITED TOKAMAK, MEQ AGAINST freegs4e\n"
+	             "                          freegs4e              MEQ      apart\n"
+	             "    psi_ax        %16.9e %16.9e  %9.1e\n"
+	             "    psi_bnd       %16.9e %16.9e  %9.1e\n"
+	             "    profile scale %16.9e %16.9e  %9.1e\n"
+	             "    I_p           %16.9e %16.9e  %9.1e\n"
+	             "    Newton steps %5d, psi_ax border %9.1e\n",
+	             referencePsiAxis, psiAxis, axisError,
+	             referencePsiBoundary, psiBoundary, boundaryError,
+	             referenceScale, scale, scaleError,
+	             referenceCurrent, current, currentError,
+	             static_cast<int>( iterations ), border );
+	std::fflush( stdout );
+
+	BOOST_TEST( axisError < 1.0e-2,
+	            "psi_ax is " << axisError << " from freegs4e's "
+	            << referencePsiAxis << ". The shipped mesh measures 2.9e-03 and "
+	            "the 3802-element one 1.3e-04, so a percent is three times the "
+	            "expected gap. If examples/limited-tokamak.msh has NOT changed, "
+	            "look at the profile tables and the limiter before the solver; "
+	            "if it HAS, this bound is pinned to that fixture and a "
+	            "regenerated mesh moves psi_ax by 1.5e-02 to 1.7e-02 without "
+	            "changing the equilibrium -- re-measure rather than relax" );
+	BOOST_TEST( boundaryError < 1.0e-2,
+	            "psi_bnd is " << boundaryError << " from freegs4e's "
+	            << referencePsiBoundary << ", measured 2.8e-03. psi_bnd is "
+	            "pinned at the potential dof NEAREST ( 1.3375, 0 ), so this term "
+	            "carries an O( h ) error and is the one quantity here a mesh "
+	            "change moves at first order" );
+
+	// The amplitude is the number a conversion error moves by ORDERS, so it
+	// gets a tolerance of its own reasoning: measured 5.5e-03 from 1, and a
+	// span-factor slip reads 6.7e-02.
+	BOOST_TEST( scaleError < 2.0e-2,
+	            "the profile scale came back as " << scale << " where the tables "
+	            "were built to make it 1. Measured 9.945e-01 on this mesh. A "
+	            "scale that is not O( 1 ) is the ONLY tell that the tables hold "
+	            "dp/dpsi where meq wants dp/dPsi -- with PlasmaCurrent set the "
+	            "border absorbs the factor and the equilibrium is right anyway" );
+
+	// I_p is the constraint rather than an outcome, so this checks that the
+	// border closed and is not a comparison against freegs4e. Measured 3.3e-06.
+	BOOST_TEST( currentError < 1.0e-4,
+	            "the delivered plasma current is " << current << " A against the "
+	            << referenceCurrent << " A [source] PlasmaCurrent asked for. "
+	            "That is a constraint, so this is the border failing to close "
+	            "rather than a disagreement with freegs4e" );
+
+	// psi_ax's OWN border, a separate statement from the agreement: psi_ax =
+	// max psi_h has to hold exactly whatever equilibrium was found.
+	BOOST_TEST( std::fabs( border ) < 1.0e-12,
+	            "psi_ax - max psi_h is " << border << ", so the normalisation "
+	            "border did not close" );
+
+	/*
+	 * AND THE REPORTED psi_ax HAS TO BE A VALUE A CONSUMER OF THE ANSWER CAN
+	 * SEE. This is the assertion that is NOT a comparison with freegs4e, and it
+	 * is here because psi_ax is the largest NODAL value of psi_h -- a definition
+	 * chosen so the bordered Newton's row is exactly -e_j, and one that says
+	 * nothing whatever about magnetic axes.
+	 *
+	 * A solve can satisfy every border at machine zero, deliver its current to
+	 * seven figures, and report a psi_ax that is a single spiking dof on the
+	 * plasma edge -- with the span inflated to match, Psi collapsed to a few per
+	 * cent over the real plasma, and the profile amplitude raised by the same
+	 * factor to hold int F/r. FREE-BOUNDARY-PLAN.md section 7.16 records exactly
+	 * that on an earlier state of this code, at psi_ax = 2.73e+00 against a field
+	 * whose psi* peaked at 8.64e-02: THE THREE UNKNOWNS CONSPIRE, and nothing in
+	 * the residual, the constraint residuals or the convergence history tells
+	 * that run apart from this one.
+	 *
+	 * What DOES tell them apart is the field the run wrote. Measured here, the
+	 * reported psi_ax and the peak of psi* on the output grid agree to 3.9e-04 at
+	 * degree 3 and 3.4e-03 at degree 2 -- what separates them being the
+	 * post-processing and the 129^2 sampling, not the equilibrium -- against a
+	 * factor of THIRTY on the spike. So 5% is loose by two orders on one side and
+	 * tight by nearly two on the other, which is what a discriminator should
+	 * look like.
+	 *
+	 * THIS IS A TEST ASSERTION AND NOT THE LIBRARY GUARD. A guard belongs in
+	 * meq, comparing psi_ax against meq::CriticalPointFinder's O-point, which
+	 * IN-A built and no free-boundary path consults.
+	 */
+	double const peak = gridPeak( "limited-tokamak.nc", "psi" );
+	BOOST_TEST_REQUIRE( std::isfinite( peak ), "could not read psi from the .nc" );
+	double const spike = std::fabs( peak - psiAxis )/std::fabs( psiAxis );
+	std::printf( "    reported psi_ax %.6e against the written field's peak "
+	             "%.6e, %.1e apart\n", psiAxis, peak, spike );
+	std::fflush( stdout );
+
+	BOOST_TEST( spike < 5.0e-2,
+	            "the run reports psi_ax = " << psiAxis << " and wrote a field "
+	            "peaking at " << peak << ", " << spike << " apart. psi_ax is the "
+	            "largest NODAL value of psi_h and nothing makes it an axis: a "
+	            "single spiking dof satisfies the border exactly and inflates the "
+	            "span and the scale with it. Read _psi.gf and find which element "
+	            "carries the value" );
+
+	/*
+	 * =================================================================
+	 * THE CONTROL: THE SAME EVERYTHING AT DEGREE 2
+	 * =================================================================
+	 *
+	 * ONE KEY CHANGED. Same mesh, same guess, same coils, same profiles, same
+	 * limiter, same ten modes.
+	 *
+	 * WHY A CONTROL IS NEEDED AT ALL. Every assertion above would pass if the
+	 * answer were a property of the FIXTURE rather than of the solve -- if the
+	 * guess were being handed back, say, or if the limiter and the current
+	 * between them pinned psi_ax whatever the discretisation did. The degree is
+	 * the cheapest variable that must move the answer, and must move it the
+	 * right way:
+	 *
+	 *            psi_ax          from the reference   profile scale
+	 *     k = 2  9.634577e-02    1.60e-02             1.0108
+	 *     k = 3  9.455354e-02    2.93e-03             0.9945
+	 *
+	 * so p-refinement is worth 5.5x in psi_ax and 4.1x in psi_bnd here, and 5.2x
+	 * in the field L2 the benchmark script measures ( 3.7e-02 against 7.1e-03 ).
+	 * THAT IS WHY THE EXAMPLE SHIPS AT DEGREE 3, and this is what stops it being
+	 * lowered to 2 to save two seconds.
+	 *
+	 * TWO THINGS ARE ASSERTED AND THEY GUARD OPPOSITE FAILURES. That degree 2
+	 * still lands on the SAME BRANCH is the guard against the spike above coming
+	 * back -- FREE-BOUNDARY-PLAN.md section 7.16 records degree 2 on this mesh
+	 * converging in 17 steps to psi_ax = 2.73e+00, twenty-eight times the
+	 * reference, which fails the first bound by two orders. That degree 3 is
+	 * MATERIALLY better is the guard against the control going empty.
+	 *
+	 * MEASURED, AND WORTH SAYING PLAINLY: this fixture does NOT reproduce that
+	 * degree-2 runaway on the code as it stands. The recorded configuration was
+	 * rerun verbatim -- same TOML, same 128^2 guess, same mesh, same profile
+	 * tables -- and converges in 8 steps to 9.676040e-02, on the physical branch.
+	 * What this case does is fail if it returns.
+	 */
+	std::string const shipped = slurp( "examples/limited-tokamak.toml" );
+	BOOST_TEST_REQUIRE( !shipped.empty() );
+
+	// LINE-ANCHORED, because the file's own prose discusses degree 2 and degree
+	// 3 several times before the key appears -- the same trap
+	// theDriverAddsTheCoilsToF records for [[coils]].
+	std::string degreeTwo = replaceAll( shipped, "\nPolynomialDegree = 3\n",
+	                                    "\nPolynomialDegree = 2\n" );
+	BOOST_TEST_REQUIRE( degreeTwo != shipped,
+	                    "the PolynomialDegree substitution matched nothing, so "
+	                    "the control below would rerun the shipped example" );
+	degreeTwo = replaceAll( degreeTwo, "Prefix = \"limited-tokamak\"",
+	                        "Prefix = \"driver-acceptance-limited-k2\"" );
+	{
+		std::ofstream file( "driver-acceptance-limited-k2.toml" );
+		file << degreeTwo;
+	}
+
+	BOOST_TEST_REQUIRE( run( "driver-acceptance-limited-k2.toml" ) == 0,
+	                    "the degree-2 control did not exit 0" );
+
+	std::string const twoHeader = ncdumpHeader( "driver-acceptance-limited-k2.nc" );
+	BOOST_TEST_REQUIRE( !twoHeader.empty() );
+	double const twoAxis = headerAttribute( twoHeader, "psi_axis" );
+	double const twoPeak = gridPeak( "driver-acceptance-limited-k2.nc", "psi" );
+	BOOST_TEST_REQUIRE( std::isfinite( twoAxis ) );
+	BOOST_TEST_REQUIRE( std::isfinite( twoPeak ) );
+
+	double const twoError = std::fabs( twoAxis - referencePsiAxis )
+	                        /std::fabs( referencePsiAxis );
+	double const twoSpike = std::fabs( twoPeak - twoAxis )/std::fabs( twoAxis );
+
+	std::printf( "    CONTROL, degree 2 on the same mesh and guess: psi_ax "
+	             "%.6e, %.2e from the reference against degree 3's %.2e ( %.1fx )\n",
+	             twoAxis, twoError, axisError,
+	             twoError/std::max( 1.0e-300, axisError ) );
+	std::fflush( stdout );
+
+	BOOST_TEST( twoError < 1.0e-1,
+	            "degree 2 reports psi_ax = " << twoAxis << ", " << twoError
+	            << " from freegs4e's " << referencePsiAxis << ", so it is not on "
+	            "the same branch as degree 3 at all. Measured 1.6e-02. "
+	            "FREE-BOUNDARY-PLAN.md section 7.16 records this configuration "
+	            "converging to 2.73e+00 with every border at machine zero and "
+	            "the equilibrium nonsense, which is what this bound exists to "
+	            "catch coming back" );
+	BOOST_TEST( twoSpike < 5.0e-2,
+	            "the degree-2 control reports psi_ax = " << twoAxis << " and "
+	            "wrote a field peaking at " << twoPeak << ". Measured 3.4e-03" );
+
+	BOOST_TEST( axisError*2.0 < twoError,
+	            "degree 3 is " << axisError << " from the reference and degree 2 "
+	            "is " << twoError << ", so p-refinement bought less than a factor "
+	            "of two where it measures 5.5. Either the answer stopped "
+	            "depending on the discretisation -- which would mean the fixture "
+	            "and not the solve is deciding it, and would empty every "
+	            "assertion above -- or degree 2 improved, in which case measure it "
+	            "and raise the shipped example rather than relaxing this" );
+
+	std::remove( "driver-acceptance-limited-k2.toml" );
 }
