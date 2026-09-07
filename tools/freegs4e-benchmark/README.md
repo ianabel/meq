@@ -38,7 +38,8 @@ reproduce the field inside.
    `[boundary.shape] Type = "mxh"` takes.
 4. `convert.py` — freegs4e's profiles onto MEQ's `ψ`.
 5. `make_case.py` — writes the TOML and the two profile tables.
-6. `compare.py` — reads MEQ's `.nc` and diffs.
+6. `compare.py` — reads MEQ's `.nc` and diffs. **It refuses a run whose
+   `ψ_ax` is not a magnetic axis**; see below.
 
 ```sh
 python3 -m venv venv
@@ -83,6 +84,33 @@ second solution beside it. Measured on case A, the amplitude sweep finds exactly
 two roots — 1.93e-03 and 5.23e-02 — and lands on the weak one for any amplitude
 below about 2× the axis height. `[initialguess] Type = "ramp"` at **6×** the
 expected axis value clears it on all seven.
+
+## compare.py refuses a run whose psi_ax is not a magnetic axis
+
+**`ψ_ax` is the largest NODAL value of `ψ_h`, and nothing in that definition
+makes it a magnetic axis.** The bordered Newton's constraint
+`ψ_ax − max ψ_h = 0` is satisfied at machine zero by a spurious nodal value
+exactly as it is by an axis, so nothing the solve reports can tell them apart —
+and `ψ_ax` is what the profiles are normalised by, so a wrong one is not a bad
+number, it is **a different equilibrium**. Differencing that against the
+reference compares two different problems, at whatever precision.
+
+So the driver writes `axis_normalised_flux` into the `.nc` — `Ψ` at the located
+O-point of `q_h`, which **must be 1** — and `compare.py` reads it and **exits
+non-zero without quoting any norm** when it falls below `0.90`. That threshold
+is `meq::CriticalPointFinder::checkAxis`'s own default, and the test is
+**one sided**: a healthy field approaches 1 from *above*, because `ψ_ax` is a
+nodal value and a polynomial's peak over a closed element is at least that.
+
+`--allow-bad-axis` prints the norms anyway, flagged `BAD AXIS`, for deliberately
+inspecting a known-bad run.
+
+**An absent attribute warns rather than refusing**, because three different
+things produce one: a run that was not normalised (no `psi_axis` either, so
+there is nothing to judge), the wall-hugging **annulus** branch where no O-point
+exists anywhere, and a `.nc` written before the attribute existed. The last two
+are indistinguishable from the file alone, and an old file must not become
+unreadable.
 
 ## It is psi-star that is compared, not psi_h
 
@@ -227,6 +255,72 @@ round-off here because the fit improves only linearly and is in the budget at
 all *because this is the fixed-boundary rehearsal*. **FB-6 proper removes it**:
 a free-boundary MEQ takes the same coils and profiles and never sees an LCFS.
 
+### Caching the default boundary condition, which is the better lever
+
+`boundary.freeBoundary` **rebuilds a geometry-only matrix on every Picard
+step**. `Greens` depends only on the grid and `romb` is linear, so the whole
+boundary condition is one fixed matrix applied to `Jtor`:
+
+```
+psi_bndry = M Jtor,      M[ b, ij ] = dR dZ w_i w_j G_b[ i, j ]
+```
+
+with `w` the Romberg weights and `G_b[ b ] = 0`, exactly as the loop zeroes its
+self term. Building it costs about one pass of the loop; every step after that
+is a matrix–vector product.
+
+| `n` | loop / step | build once | matvec | boundary values agree to | speed-up |
+|---|---|---|---|---|---|
+| 65 | 126.7 ms | 98.6 ms | 2.34 ms | 4.09e-16 | 54× |
+| 129 | 651.5 ms | 518.2 ms | **8.07 ms** | 5.46e-16 | **81×** |
+| 257 | 4271.0 ms | 4234.9 ms | **24.02 ms** | 5.46e-16 | **178×** |
+
+**End to end on `H_limited_circular`: 4.9 s against 29.2 s at 129², and 13.3 s
+against 175.1 s at 257²** — 6.0× and **13.2×** on the whole run, the ratio
+growing because the loop is `O(n³)` in elliptic-integral evaluations while the
+matvec is one BLAS call.
+
+**THE WEIGHTS COME FROM `scipy`, NOT FROM A REIMPLEMENTATION.** `romb` is linear,
+so `romb( I )` **is** the weight vector: one call on an identity, and the rule
+can never drift from the one the shipped loop uses. Writing Romberg out here
+would be a second definition of the quadrature when the point is that there is
+only one. Two details reproduced rather than tidied: the **corners appear twice**
+in `freegs4e`'s boundary index list (harmless — both writes put the same value in
+the same cell — but a different index set is a different matrix), and `M` is
+cached **on the Equilibrium object**, so it cannot outlive the grid it was built
+for. A case-keyed global would be one edit away from a stale matrix, which is a
+wrong answer rather than a slow one.
+
+**MEMORY IS THE CONSTRAINT.** `M` is `2( nx + ny ) × nx·ny` doubles: 69 MB at
+129², 0.54 GB at 257², **4.3 GB at 513²**, 35 GB at 1025². Above
+`CACHE_BOUNDARY_MAX_GB` the shipped loop runs instead, so too large a grid is
+slow rather than an OOM.
+
+#### The converged answers differ by 4.5e-08, and that is `freegs4e`'s floor
+
+Not the reassociation, and establishing that took three tries — two hypotheses
+were wrong and the third was the control that should have come first.
+
+* **The boundary condition itself is exact.** On the loop run's own converged
+  `Jtor`, the two agree to **6.8e-16** at 129² and 5.6e-16 at 257².
+* **Not the stopping rule.** Tightening the Picard tolerance from 1e-9 to 1e-11
+  to 1e-13 — 41, 60, then 401 iterations, the last hitting `maxits` — leaves the
+  gap at **4.511e-08 to four digits, unchanged**.
+* **Not amplification either.** Perturbing `M` deliberately by 1e-12, 1e-10 and
+  1e-8 relative moves the converged field by 3.39e-08, 6.50e-08 and 7.71e-08:
+  **four orders in the input, a factor of 2.3 in the output.** A floor, not a
+  gain.
+* **And the control that decides it**: each variant is **bit-reproducible against
+  itself**, `0.000e+00` run to run, so the difference is real and deterministic
+  rather than noise.
+
+So `freegs4e`'s converged answer on this case is determinate to about **5e-08**
+and no better, whatever the arithmetic does — a floor on any comparison against
+it. It sits five orders below that grid's own discretisation error (2.0e-02 at
+129², 7.9e-04 at 513²), so it does not matter for use; it matters for what may
+be *claimed*. The cache is exact where exactness is checkable, and the run-level
+agreement is the reference's own.
+
 ### `freegs4e`'s cost is its boundary condition, not its solve
 
 | grid | default boundary | von Hagenow | peak RSS (Hagenow) |
@@ -252,10 +346,17 @@ equilibrium silently solves a different problem; and a V-cycle built correctly
 on the 4th-order generator **does not converge at all**, failing with
 `ValueError: No opoints found!`. The multigrid path is second order only.
 
-### AND THE TWO BOUNDARY CONDITIONS DISAGREE, FLAT UNDER REFINEMENT
+### THE TWO BOUNDARY CONDITIONS DISAGREED, FLAT UNDER REFINEMENT — AND THE CAUSE IS ONE CONSTANT
 
-This is the finding that matters, and it is why the fast one was not simply
-adopted. Case A, the same equilibrium computed both ways:
+**RESOLVED 2026-09-07: the shipped von Hagenow branch is INCONSISTENT, and it
+is usable once the observation-point offset is tied to the cell.** The section
+below is what was measured before that, and it reads the flat gap as an open
+question about which boundary condition to believe. It is not open: a boundary
+condition whose disagreement with an exact integral does not shrink is wrong,
+and this one is wrong for a reason that takes one line to fix. See
+**Making von Hagenow usable** below.
+
+Case A, the same equilibrium computed both ways:
 
 | grid | rel. difference in `ψ_ax` | rel. difference in the field |
 |---|---|---|
@@ -270,21 +371,139 @@ level; this falls by 1.7 per cent. Self-convergence says which one is right:
 | default boundary | **2.78e-05** | — |
 | von Hagenow | 3.64e-04 | 1.22e-04 |
 
-The default is **converged at 129²** — `ψ_ax` stable to six figures — while von
-Hagenow creeps at about `O(h^1.6)` toward a different value. So **the default is
-the reference to use**, `freegs4e` does not agree with itself to better than
-3.2e-03 across its own two boundary conditions, and MEQ's agreement with it is
-already twenty times inside that spread.
+The default is **converged at 129²** on this case — `ψ_ax` stable to six figures
+— while von Hagenow creeps toward a different value.
 
-### 2048² is not reachable on this machine, and why
+**AND "TOWARD A DIFFERENT VALUE" WAS THE ANSWER ALL ALONG, NOT A CURIOSITY.**
+Two consistent discretisations of one problem must converge together; a gap that
+does not shrink means one of them is not a discretisation of that problem at all.
+That is what the next section establishes, and it makes the fast boundary
+condition usable rather than merely suspect.
 
-Memory. The von Hagenow ladder runs 293, 503, 1564 MB at 129², 257², 513²;
-1025² reached **6.0 GB** with 4 GB free and was stopped rather than risk an OOM
-on a shared machine. 2049² needs roughly 24 GB against 15 GB total. With the
-*faithful* boundary condition it would additionally be about ninety hours.
+### Making von Hagenow usable
 
-**So the honest ceiling here is 513², and the route to round-off is FB-6 rather
-than a finer grid.**
+`boundary.freeBoundaryHagenow` displaces its observation point off the boundary
+by a **hard-coded `eps = 1e-2` metres**, *"to avoid the singularity in `G(R,R')`
+when `R'=R`"*. That is a fixed **physical** distance: it does not shrink with the
+grid, so the `O(eps·∂ψ/∂n)` error it costs is a constant and the method converges
+to the wrong answer.
+
+Measured on one fixed `Jtor` with **no solve in the way** — so the direct
+Green's integral is ground truth and what is printed is von Hagenow's own error,
+on a `0.1 … 2.0` by `−1 … 1` box:
+
+| `eps` | order in `h` at `n` = 65, 129, 257 |
+|---|---|
+| `1e-2`, as shipped | 0.63, 0.21, **0.07** — stalling |
+| **`0.2 h`** | 0.90, **1.00, 0.99** — clean first order |
+| `0.5 h` | 0.97, 0.99, 0.99 — the same, 1.8× larger |
+
+**THE OPTIMUM IS NOT "AS SMALL AS POSSIBLE", WHICH IS WHY THE CONSTANT IS 0.2.**
+Swept at a fixed 129² grid the gap reads 7.6e-03, **3.3e-03**, 8.9e-03, 1.6e-02,
+2.3e-02 at `eps` = 1e-2, 3e-3, 1e-3, 3e-4, 1e-4. Below about `0.2 h` the log
+spike is **narrower than the cell** and the Romberg rule misses it; above it the
+displacement dominates. Tying `eps` to `h` is what keeps the two terms on the
+same footing.
+
+**AND ON THE REAL SOLVE**, `H_limited_circular`, against the direct integral:
+
+| variant | `n` | rel `ψ_ax` | rel `ψ_bnd` | rel L2 field | rate |
+|---|---|---|---|---|---|
+| shipped | 129 | 5.310e-03 | 1.797e-02 | 1.008e-02 | — |
+| shipped | 257 | 5.233e-03 | 1.836e-02 | 1.032e-02 | **−0.04** |
+| **scaled** | 129 | 1.087e-03 | 3.679e-03 | 2.139e-03 | — |
+| **scaled** | 257 | **5.378e-04** | **1.886e-03** | **1.093e-03** | **0.97** |
+
+The shipped one gets slightly **worse** under refinement. The scaled one halves,
+in all three measures at once.
+
+**WHAT IT IS GOOD FOR, AND THE HONEST CEILING.** First order is as far as a
+displaced observation point goes, so extrapolating: at 513² the boundary error is
+about **2.7e-04** in `ψ_ax`, against that grid's own discretisation error of
+**7.9e-04** on this case. So it does not dominate, and 513² costs **230 s**
+instead of hours. That is the whole point — it makes the reference refinable.
+
+**THE OBVIOUS HIGH-ORDER CURE DOES NOT WORK, AND MEASURING THAT IS WHAT SAYS
+WHERE THE ERROR IS.** `∮G σ dl` is a **single-layer** potential — continuous
+across the boundary, with its normal derivative jumping — so averaging the
+evaluations at `+eps` and `−eps` ought to cancel the `O(eps)` term exactly. It
+does not: 1.5e-02, 8.1e-03, 4.0e-03, 2.0e-03 against the one-sided 1.2e-02,
+6.5e-03, 3.3e-03, 1.6e-03 — the same rate of 1.00 and slightly worse. So the
+residual is the **quadrature of the near-singular kernel** rather than the
+displacement, and getting past first order needs the log subtracted and
+integrated in closed form. That is a boundary-element method and is deliberately
+not attempted.
+
+**`freegs4e` IS NOT EDITED.** The change is one constant, lifted out and tied to
+the cell, reinstalled from `fgsref.py` as WORKAROUND 5 beside the four already
+there. `--hagenow` gives the usable version; `--hagenow-eps=shipped` reproduces
+`freegs4e` exactly, so both readings are available on one problem; and the
+default boundary path is bit-unchanged — the 129² run still reports
+`psi_axis 0.0948314088`.
+
+### The converged 513² reference, and the baseline it sets
+
+**Run 2026-09-07 with the exact boundary condition cached** — 129² → 257² →
+513², each rung seeded from the one below, coincident points reproducing to
+9.44e-16. `baseline.json` is the machine-readable record and `baseline.py`
+regenerates it.
+
+| `n` | points | `ψ_ax` | `ψ_bnd` | Picard | wall | peak RSS |
+|---|---|---|---|---|---|---|
+| 129 | 16,641 | 0.09483140885 | 0.02781828740 | 41 | 4.85 s | 340 MB |
+| 257 | 66,049 | 0.09337971414 | 0.02649111261 | 31 | 12.84 s | 1000 MB |
+| **513** | **263,169** | **0.09308752051** | **0.02622461849** | **27** | **72.75 s** | **5663 MB** |
+
+**Successive differences fall by 4.97, so the order in `h` is 2.313** — slower
+than the fourth-order generator because a LIMITED boundary is a maximum over the
+limiter ring, a pointwise operation on a discrete set, where a diverted one is a
+saddle located by interpolation. Richardson gives
+
+```
+psi_ax  -> 0.093013888     513^2 is 7.92e-04 out
+psi_bnd -> 0.026157662     513^2 is 2.56e-03 out
+```
+
+**THAT 7.9e-04 IS THE FLOOR ON ANY COMPARISON AGAINST THIS REFERENCE.** A MEQ
+result closer to the 513² numbers than that is measuring the reference's own
+grid error, not MEQ. Beneath it sits `freegs4e`'s ~5e-08 indeterminacy, which is
+four orders lower and therefore never the binding constraint.
+
+**AND 72.75 s IS WHAT THE EXACT BOUNDARY CONDITION NOW COSTS AT 513²**, of which
+**37.4 s is building the 4.02 GB matrix once**. For scale, the table below
+estimates the shipped loop at *hours* for that rung and von Hagenow at 230 s —
+so the cache is **3× faster than the approximate method and exact**, which is
+why von Hagenow is not needed for refinement after all.
+
+**The Richardson sign was got wrong on the first pass and CLAUDE.md caught it.**
+The sequence DECREASES toward its limit, so the extrapolate is BELOW the finest
+rung; adding the correction instead of subtracting it put it above, at
+0.093161 rather than 0.093014. The tree's own independently recorded value is
+what refuted it — which is the argument for writing a number down the first time
+it is measured.
+
+### How far the grid can go, and what sets it
+
+**Memory, and this machine has 23 GB with 21 available.** Peak resident, measured:
+
+| | 129² | 257² | 513² | 1025² |
+|---|---|---|---|---|
+| exact boundary, cached | 340 MB | 1.0 GB | **5.7 GB** | 35 GB — out |
+| von Hagenow | 293 MB | 503 MB | 1.56 GB | ~6 GB |
+
+**So 513² is the rung that is both exact and fast** — 72.75 s with the matrix
+cached — and it is the one stored. **1025² is reachable for the RUN but not for
+the cached matrix**: `CACHE_BOUNDARY_MAX_GB` falls back to the shipped loop
+there, which makes it slow rather than impossible. 2049² is out on both counts,
+and with the faithful boundary condition would additionally be about ninety
+hours.
+
+**Re-check `free` rather than trusting this table.** The WSL2 allocation was
+raised on 2026-09-07 and every ceiling recorded before that was a claim about a
+smaller machine. A memory ceiling is a property of the day.
+
+**And the route past 513² is FB-6 rather than a finer grid** — a free-boundary
+MEQ never sees an LCFS, so the fit that limits this comparison stops existing.
 
 
 ## The floors, peeled one at a time — 2026-09-06

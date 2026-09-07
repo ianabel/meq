@@ -74,6 +74,23 @@ VCYCLE_LEVELS = None
 # the default and nothing points at it.
 HAGENOW = False
 
+# The observation-point offset von Hagenow's boundary integral uses, as a
+# MULTIPLE OF THE CELL, or None to leave freegs4e's shipped constant alone.
+# See WORKAROUND 5.
+HAGENOW_EPS = 0.2
+
+# Cache the DEFAULT boundary condition as the fixed matrix it is.  See
+# WORKAROUND 6.  This changes no answer -- it is the same arithmetic
+# reassociated -- so it is on by default and CACHE_BOUNDARY = False is the
+# control.
+CACHE_BOUNDARY = True
+
+# Above this the matrix is not built and the shipped loop runs instead: it is
+# 2( nx + ny ) x nx ny doubles, which is 69 MB at 129^2, 0.54 GB at 257^2,
+# 4.3 GB at 513^2 and 35 GB at 1025^2.  The cap is a guard against turning a
+# slow run into an OOM on a shared machine, not a tuning parameter.
+CACHE_BOUNDARY_MAX_GB = 6.0
+
 # --seed-from=DIR: the directory holding a COARSER run's .npz files, whose
 # converged answer seeds this one.  None means every case starts cold, which
 # is what it did before 2026-09-06.  See seed_from_coarse().
@@ -314,6 +331,232 @@ def picard_loop(eq, profiles, constrain, rtol=1e-9, atol=1e-12, blend=0.0,
 
 
 # ----------------------------------------------------------------------------
+# ----------------------------------------------------------------------------
+# WORKAROUND 6
+# boundary.freeBoundary REBUILDS A GEOMETRY-ONLY MATRIX ON EVERY PICARD STEP,
+# and that -- not the linear solve -- is what makes a refined reference
+# expensive.
+#
+# Its own docstring calls it "an integral over the area of the domain for each
+# point on the boundary": for each of the 2( nx + ny ) boundary points it
+# evaluates Greens over the whole nx x ny grid -- elliptic integrals, O( n^2 )
+# of them, O( n ) times -- and contracts against Jtor with a Romberg rule.  So
+# it is O( n^3 ) PER STEP.
+#
+# BUT Greens DEPENDS ONLY ON THE GEOMETRY AND romb IS LINEAR, so the whole
+# boundary condition is ONE FIXED MATRIX applied to Jtor:
+#
+#     psi_bndry = M Jtor,     M[ b, ij ] = dR dZ w_i w_j G_b[ i, j ]
+#
+# with w the Romberg weights and G_b[ b ] = 0, exactly as the loop zeroes the
+# self term.  M is the same at every iteration and is rebuilt at every
+# iteration.  Building it once costs about one pass of the loop and every
+# subsequent step is a matrix-vector product.
+#
+# THE WEIGHTS ARE TAKEN FROM scipy RATHER THAN REIMPLEMENTED.  romb is linear,
+# so romb( I ) IS the weight vector: one call on an identity, and the rule can
+# never drift from the one the shipped loop uses.  Reimplementing Romberg here
+# would be a second definition of the quadrature and the whole point is that
+# there is only one.
+#
+# WHAT IT COSTS IS MEMORY, WHICH IS WHY THERE IS A CAP.  M is
+# 2( nx + ny ) x nx ny doubles: 69 MB at 129^2, 0.54 GB at 257^2, 4.3 GB at
+# 513^2, 35 GB at 1025^2.  Above CACHE_BOUNDARY_MAX_GB the shipped loop runs
+# instead, so the only consequence of a grid too large is that it is slow again.
+#
+# A REFINEMENT NOT TAKEN: Jtor is zero outside the plasma, so only its support's
+# columns are needed and the matrix would shrink by about an order of magnitude.
+# It costs tracking a support that MOVES as Picard runs, and the whole appeal of
+# this is that M is a constant.
+# ----------------------------------------------------------------------------
+def _romb_weights(n):
+    """The Romberg weight vector scipy applies, at unit spacing.
+
+    romb is linear, so integrating the identity gives its weights directly.
+    """
+    from scipy.integrate import romb
+    return romb(np.eye(n), axis=-1)
+
+
+def _boundary_indices(nx, ny):
+    """The boundary points, in freegs4e's own order.
+
+    The corners appear TWICE, once from a horizontal edge and once from a
+    vertical one. That is the shipped behaviour and it is harmless -- both
+    write the same value to the same cell -- so it is reproduced rather than
+    tidied: a different index set would be a different matrix.
+    """
+    return np.concatenate([
+        [(x, 0) for x in range(nx)],
+        [(x, ny - 1) for x in range(nx)],
+        [(0, y) for y in range(ny)],
+        [(nx - 1, y) for y in range(ny)],
+    ]).astype(int)
+
+
+def _boundary_matrix(eq):
+    """M, built once and kept on the Equilibrium.
+
+    Cached on the object rather than in a module dict so that it cannot outlive
+    the grid it was built for: a stale M is a wrong answer, and a case-keyed
+    global would be one edit away from producing one.
+    """
+    R = eq.R
+    Z = eq.Z
+    nx, ny = R.shape
+    have = getattr(eq, "_meq_boundary_matrix", None)
+    if have is not None and have[0].shape[1] == nx*ny:
+        return have
+
+    gb = 2.0*(nx + ny)*nx*ny*8.0/(1024.0**3)
+    if gb > CACHE_BOUNDARY_MAX_GB:
+        print("   boundary matrix would be %.1f GB > %.1f GB cap: "
+              "using the shipped loop" % (gb, CACHE_BOUNDARY_MAX_GB),
+              flush=True)
+        eq._meq_boundary_matrix = None
+        return None
+
+    from freegs4e.gradshafranov import Greens
+
+    dR = R[1, 0] - R[0, 0]
+    dZ = Z[0, 1] - Z[0, 0]
+    weight = np.outer(_romb_weights(nx), _romb_weights(ny))*(dR*dZ)
+
+    idx = _boundary_indices(nx, ny)
+    started = time.time()
+    M = np.empty((idx.shape[0], nx*ny), dtype=float)
+    for row, (x, y) in enumerate(idx):
+        g = Greens(R, Z, R[x, y], Z[x, y])
+        g[x, y] = 0.0                      # the self term, as the loop zeroes it
+        M[row, :] = (g*weight).ravel()
+
+    # A DELIBERATE PERTURBATION, for measuring how far a round-off change in
+    # the boundary condition moves the converged state. Off unless asked.
+    probe = os.environ.get("FGSREF_M_PERTURB")
+    if probe:
+        M *= (1.0 + float(probe))
+        print("   boundary matrix perturbed by %s relative" % probe, flush=True)
+
+    print("   boundary matrix cached: %d x %d, %.2f GB, built in %.1f s"
+          % (M.shape[0], M.shape[1], gb, time.time() - started), flush=True)
+    eq._meq_boundary_matrix = (M, idx)
+    return eq._meq_boundary_matrix
+
+
+def _free_boundary_cached(eq, Jtor, psi):
+    """boundary.freeBoundary, reassociated. Same arithmetic, one matvec."""
+    have = _boundary_matrix(eq)
+    if have is None:
+        from freegs4e import boundary as _bnd
+        return _bnd.freeBoundary(eq, Jtor, psi)
+    M, idx = have
+    values = M @ np.asarray(Jtor, dtype=float).ravel()
+    psi[idx[:, 0], idx[:, 1]] = values
+
+
+# ----------------------------------------------------------------------------
+# WORKAROUND 5
+# boundary.freeBoundaryHagenow displaces its observation point off the boundary
+# by a HARD-CODED eps = 1e-2 METRES, "to avoid the singularity in G(R,R') when
+# R'=R".  That is a fixed PHYSICAL distance, so it does not shrink with the
+# grid, and the von Hagenow boundary condition is therefore INCONSISTENT: it
+# converges, but to a different answer from the direct Green's integral.
+#
+# THAT IS WHY THE TWO BOUNDARY CONDITIONS DISAGREE BY A GAP THAT DOES NOT
+# SHRINK.  README.md records 6.460e-04 at 129^2 and 6.404e-04 at 257^2 in
+# psi_ax and reads it as an open question about which one to believe.  It is
+# not: measured directly, on ONE fixed Jtor with no solve in the way -- so the
+# direct integral is ground truth and what is printed is von Hagenow's own
+# error -- the observed order in h is
+#
+#     eps = 1e-2 fixed :  0.63, 0.21, 0.07     <- stalling, i.e. inconsistent
+#     eps = 0.2 h      :  0.90, 1.00, 0.99     <- clean first order
+#     eps = 0.5 h      :  0.97, 0.99, 0.99     <- the same, 1.8x larger
+#
+# at n = 65, 129, 257 on a 0.1..2.0 by -1..1 box.
+#
+# AND THE OPTIMUM IS NOT "AS SMALL AS POSSIBLE", which is why the constant is
+# 0.2 rather than something tiny.  Swept at a FIXED grid of 129^2 the gap reads
+# 7.6e-03, 3.3e-03, 8.9e-03, 1.6e-02, 2.3e-02 at eps = 1e-2, 3e-3, 1e-3, 3e-4,
+# 1e-4: below about 0.2 h the log spike is NARROWER THAN THE CELL and the
+# Romberg rule misses it, above it the displacement error dominates.  Tying eps
+# to h is what keeps both terms on the same footing.
+#
+# WHAT THIS DOES NOT DO IS MAKE IT HIGH ORDER.  First order is the ceiling for
+# a displaced observation point, and the residual is the QUADRATURE of the
+# near-singular kernel rather than the displacement itself -- established by
+# trying the obvious cure and measuring that it does not work.  oint G sigma dl
+# is a SINGLE-LAYER potential, continuous across the boundary with its normal
+# derivative jumping, so averaging the evaluations at +eps and -eps ought to
+# cancel the O( eps ) term exactly.  Measured, it does not: 1.5e-02, 8.1e-03,
+# 4.0e-03, 2.0e-03 against the one-sided 1.2e-02, 6.5e-03, 3.3e-03, 1.6e-03 --
+# the same rate of 1.00 and slightly WORSE.  Getting past first order needs the
+# log singularity subtracted and integrated in closed form, which is a real
+# boundary-element method and is not this.
+#
+# Transcribed from ../freegs4e/freegs4e/boundary.py with the one constant
+# lifted out and nothing else changed.  freegs4e is not MEQ's to edit.
+# ----------------------------------------------------------------------------
+def _hagenow_scaled_eps(eq, Jtor, psi):
+    from freegs4e.gradshafranov import Greens
+    from scipy.integrate import romb
+
+    R = eq.R
+    Z = eq.Z
+    nx, ny = psi.shape
+    dR = R[1, 0] - R[0, 0]
+    dZ = Z[0, 1] - Z[0, 0]
+
+    rhs = eq.R*Jtor
+    rhs[0, :] = 0.0
+    rhs[:, 0] = 0.0
+    rhs[-1, :] = 0.0
+    rhs[:, -1] = 0.0
+    psi_fixed = eq.callSolver(psi, rhs)
+
+    coeffs = [(0, 25.0/12), (1, -4.0), (2, 3.0), (3, -16.0/12), (4, 1.0/4)]
+    dUdn_L = sum([w*psi_fixed[i, :] for i, w in coeffs])/dR
+    dUdn_R = sum([w*psi_fixed[-(1 + i), :] for i, w in coeffs])/dR
+    dUdn_D = sum([w*psi_fixed[:, i] for i, w in coeffs])/dZ
+    dUdn_U = sum([w*psi_fixed[:, -(1 + i)] for i, w in coeffs])/dZ
+
+    dd = np.sqrt(dR**2 + dZ**2)
+    dUdn_L[0] = dUdn_D[0] = sum(
+        [w*psi_fixed[i, i] for i, w in coeffs])/dd
+    dUdn_L[-1] = dUdn_U[0] = sum(
+        [w*psi_fixed[i, -(1 + i)] for i, w in coeffs])/dd
+    dUdn_R[0] = dUdn_D[-1] = sum(
+        [w*psi_fixed[-(1 + i), i] for i, w in coeffs])/dd
+    dUdn_R[-1] = dUdn_U[-1] = sum(
+        [w*psi_fixed[-(1 + i), -(1 + i)] for i, w in coeffs])/dd
+
+    # THE ONE CHANGED LINE. eps was 1e-2, a length in metres.
+    eps = HAGENOW_EPS*min(abs(dR), abs(dZ))
+
+    idx = np.concatenate([
+        [(x, 0, 0.0, -eps) for x in range(nx)],
+        [(x, ny - 1, 0.0, eps) for x in range(nx)],
+        [(0, y, -eps, 0.0) for y in range(ny)],
+        [(nx - 1, y, eps, 0.0) for y in range(ny)],
+    ])
+
+    for x, y, Reps, Zeps in idx:
+        x = int(round(x))
+        y = int(round(y))
+        Rpos = R[x, y] + Reps
+        Zpos = Z[x, y] + Zeps
+
+        result = romb(Greens(R[0, :], Z[0, :], Rpos, Zpos)
+                      * dUdn_L/R[0, :])*dZ
+        result += romb(Greens(R[-1, :], Z[-1, :], Rpos, Zpos)
+                       * dUdn_R/R[-1, :])*dZ
+        result += romb(Greens(R[:, 0], Z[:, 0], Rpos, Zpos)
+                       * dUdn_D/R[:, 0])*dR
+        result += romb(Greens(R[:, -1], Z[:, -1], Rpos, Zpos)
+                       * dUdn_U/R[:, -1])*dR
+        psi[x, y] = result
+
+
 # WORKAROUND 4
 # machine.DIIID() builds its coil list as a list of DICTS, while
 # Machine.__init__ -> getCurrentsVec() iterates it as (label, coil) pairs, so
@@ -718,8 +961,22 @@ def run_case(case):
     eq = build_eq(case, tok)
     if HAGENOW:
         from freegs4e import boundary as _bnd
-        eq._applyBoundary = _bnd.freeBoundaryHagenow
-        print("   von Hagenow boundary condition installed", flush=True)
+        eq._applyBoundary = (_bnd.freeBoundaryHagenow if HAGENOW_EPS is None
+                             else _hagenow_scaled_eps)
+        print("   von Hagenow boundary condition installed%s"
+              % ("" if HAGENOW_EPS is None
+                 else "  ( eps = %.3g h, WORKAROUND 5 )" % HAGENOW_EPS),
+              flush=True)
+    elif CACHE_BOUNDARY:
+        # THE DEFAULT BOUNDARY CONDITION, REASSOCIATED. Not an approximation
+        # and not an alternative method: the same Greens, the same Romberg
+        # rule, the same self term zeroed, contracted in a different order.
+        # So it is on unless asked otherwise, and von Hagenow -- which IS a
+        # different method and a different answer -- takes precedence when it
+        # is asked for.
+        eq._applyBoundary = _free_boundary_cached
+        print("   default boundary condition cached as a matrix "
+              "( WORKAROUND 6 )", flush=True)
     if VCYCLE_LEVELS:
         install_vcycle(eq, int(case["order"]), VCYCLE_LEVELS)
         print("   V-cycle installed: %d levels on the order-%d generator"
@@ -1100,6 +1357,20 @@ def main():
         elif a == "--hagenow":
             global HAGENOW
             HAGENOW = True
+        elif a.startswith("--rtol="):
+            global RTOL
+            RTOL = float(a.split("=", 1)[1])
+        elif a == "--no-cache-boundary":
+            global CACHE_BOUNDARY
+            CACHE_BOUNDARY = False
+        elif a.startswith("--hagenow-eps="):
+            # "shipped" is freegs4e's own 1e-2 metres, kept so the two can be
+            # measured against each other on one problem. Anything else is a
+            # multiple of the cell. See WORKAROUND 5.
+            global HAGENOW_EPS
+            HAGENOW = True
+            v = a.split("=", 1)[1]
+            HAGENOW_EPS = None if v == "shipped" else float(v)
         else:
             rest.append(a)
     global VCYCLE_LEVELS
