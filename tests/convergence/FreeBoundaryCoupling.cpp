@@ -3854,3 +3854,166 @@ BOOST_AUTO_TEST_CASE( theAxisSourceGuardSeparatesThePoleFromTheLimiter )
 			"clean anyway. psi_bnd came out " << solver.psiBoundary() );
 	}
 }
+
+/*
+ * FB-7, ACCEPTANCE 1: A CONDUCTOR OUTSIDE Gamma, ENTERING THROUGH THE COUPLING
+ * RATHER THAN THROUGH THE MESH. FREE-BOUNDARY-PLAN.md section 7.19.
+ *
+ * A coil the mesh does not reach contributes NOTHING today: F_coil is assembled
+ * by quadrature over the elements, so a conductor outside the box is never
+ * sampled and the run describes a machine with it switched off. The driver warns
+ * rather than refusing precisely because this route exists in principle.
+ *
+ * THE ROUTE. The exterior problem is LINEAR, so write psi = psi_coil + psi~.
+ * The conductor is outside Gamma, hence outside Omega, so Delta* psi_coil = 0
+ * INSIDE Omega and the interior equation is untouched -- there is no coil term
+ * in the source at all. What is left is that psi_coil is part of the DATUM, on
+ * the axis and on Gamma alike.
+ *
+ * SO THIS CASE IS FB-1a WITH THE DATUM COMING FROM A CONDUCTOR, and its exact
+ * answer is psi_coil itself: Delta*-harmonic in Omega, and equal to the imposed
+ * data on the whole boundary. A failure here is the datum or the transfer and
+ * cannot be the coupling, which is the point of doing it before the coupled
+ * case -- exactly the order FB-1a and FB-1b were done in.
+ *
+ * THE AXIS CONDITION IS HOMOGENEOUS FOR FREE, and that is physics rather than
+ * luck: psi is the poloidal flux through a circle of radius r, so psi( 0, z )
+ * vanishes with the area for ANY conductor off the axis. Measured on this
+ * fixture's pair, CoilSet::psi( 0, z ) is 0.000000e+00 exactly. So
+ * setBoundaryData( zero ) on the fitted side is the honest statement of the
+ * condition and not a convenience.
+ *
+ * WHAT IS NOT MEASURED HERE IS q, and why is worth saying: the exact flux needs
+ * grad( psi_coil ), and meq::CoilSet exposes psi and no derivative. That is
+ * FB-7's other deliverable and the blocker for the COUPLED case, whose Neumann
+ * half is q_coil . nu. Until it lands this case measures psi alone.
+ */
+BOOST_AUTO_TEST_CASE( aConductorOutsideGammaReachesTheSolveThroughTheDatum )
+{
+	// OUTSIDE Gamma, and by a margin: rho = sqrt( 2.0^2 + 0.5^2 ) = 2.06 against
+	// halfDiscGamma = 1.5. A pair, up-down symmetric, so the field it makes is
+	// the vertical-field shape a real machine would use.
+	meq::CoilSet coils( 1.0 );
+	coils.add( meq::Coil( 2.0, +0.5, 0.10, 0.10, 1.0 ) );
+	coils.add( meq::Coil( 2.0, -0.5, 0.10, 0.10, 1.0 ) );
+
+	for ( std::size_t i = 0; i < coils.size(); ++i )
+	{
+		double const cr = coils.coil( i ).centreR();
+		double const cz = coils.coil( i ).centreZ();
+		BOOST_TEST_REQUIRE( std::hypot( cr, cz ) > halfDiscGamma,
+			"coil " << i << " at ( " << cr << ", " << cz << " ) is INSIDE Gamma "
+			<< halfDiscGamma << ", so Delta* psi_coil is not zero in Omega and "
+			"the exact answer below is not psi_coil" );
+	}
+
+	// AND IT VANISHES ON THE AXIS, which is what lets the fitted datum be zero.
+	// Asserted rather than assumed: it is the flux through a circle of vanishing
+	// area, so it is exact, and a non-zero reading would mean the convention is
+	// not psi = r A_phi.
+	for ( double z : { -1.2, -0.4, 0.0, 0.4, 1.2 } )
+		BOOST_TEST_REQUIRE( coils.psi( 0.0, z ) == 0.0,
+			"psi_coil( 0, " << z << " ) is " << coils.psi( 0.0, z )
+			<< " and must be exactly zero" );
+
+	std::printf( "\n  FB-7: A CONDUCTOR OUTSIDE Gamma, THROUGH THE DATUM\n" );
+	std::printf( "    two coils at ( 2.00, +/-0.50 ), half-extent 0.10, "
+	             "rho = %.2f against Gamma = %.2f\n",
+	             std::hypot( 2.0, 0.5 ), halfDiscGamma );
+	std::printf( "    the exact answer is psi_coil itself: Delta*-harmonic in "
+	             "Omega, and the data on the whole boundary\n\n" );
+	std::printf( "    %-5s %5s %8s %14s %8s\n",
+	             "k", "n", "h", "L2 psi", "rate" );
+
+	double worstRate = 1.0e30;
+	double controlRatio = 0.0;
+
+	for ( int order = 1; order <= 3; ++order )
+	{
+		std::vector<double> errors;
+		std::vector<double> spacing;
+
+		for ( int n : { 12, 24, 48 } )
+		{
+			HalfDisc d = makeHalfDisc( n );
+
+			// VACUUM. No plasma at all: the only thing driving this solve is the
+			// conductor, through the boundary.
+			mfem::ConstantCoefficient noSource( 0.0 );
+			mfem::ConstantCoefficient zero( 0.0 );
+
+			meq::GradShafranovSolver solver( *d.sub, order );
+			solver.setSource( noSource );
+			solver.setBoundaryData( zero );
+			solver.setExtension( *d.path, d.gammaHMarker );
+			solver.setExteriorDatum( [ &coils ]( mfem::Vector const &x )
+			{
+				return coils.psi( x( 0 ), x( 1 ) );
+			} );
+			solver.solve();
+
+			mfem::FunctionCoefficient exact( [ &coils ]( mfem::Vector const &x )
+			{
+				return coils.psi( x( 0 ), x( 1 ) );
+			} );
+			double const error = solver.potentialError( exact );
+			errors.push_back( error );
+			spacing.push_back( d.h );
+
+			double rate = std::numeric_limits<double>::quiet_NaN();
+			if ( errors.size() > 1 )
+			{
+				std::size_t const j = errors.size() - 1;
+				rate = meq::tests::rate( errors[ j - 1 ], errors[ j ], 2.0 );
+				worstRate = std::min( worstRate, rate );
+			}
+			std::printf( "    %-5d %5d %8.4f %14.6e %8.3f\n",
+			             order, n, d.h, error, rate );
+			std::fflush( stdout );
+
+			// THE CONTROL, ONCE: the same solve with the conductor's datum
+			// REMOVED. A coupling that silently did nothing would still converge
+			// -- Gamma_h would carry zero and the run would report a plausible
+			// vacuum -- so without this every rate above is compatible with the
+			// datum never arriving. Same failure theDriverSolvesOnACurvedBoundary
+			// guards against for the transfer.
+			if ( order == 2 && n == 24 )
+			{
+				meq::GradShafranovSolver bare( *d.sub, order );
+				bare.setSource( noSource );
+				bare.setBoundaryData( zero );
+				bare.setExtension( *d.path, d.gammaHMarker );
+				bare.solve();
+				controlRatio = bare.potentialError( exact )/error;
+				std::printf( "      control, datum removed: L2 %14.6e "
+				             "( %.0fx this row )\n",
+				             bare.potentialError( exact ), controlRatio );
+				std::fflush( stdout );
+			}
+		}
+
+		double const overall = meq::tests::rate( errors.front(), errors.back(),
+		                                         4.0 );
+		std::printf( "    %-5d %5s %8s %14s %8.3f  <- over the sequence\n\n",
+		             order, "", "", "", overall );
+		std::fflush( stdout );
+
+		// k+1, with the slack the extension path needs. ExtensionConvergence
+		// records why a single pair cannot be asserted tightly here: Omega_h is
+		// the union of background elements inside Gamma, and WHICH elements
+		// those are is not a smooth function of h.
+		BOOST_TEST( overall > order + 1 - 0.30,
+			"psi converges at " << overall << " at k = " << order
+			<< ", where k+1 = " << order + 1 << " is wanted. The exact answer is "
+			"psi_coil, which is Delta*-harmonic in Omega because the conductor is "
+			"outside Gamma -- so a rate short here is the DATUM or the TRANSFER "
+			"and cannot be the coupling, which this case does not exercise." );
+	}
+
+	// AND THE DATUM IS DOING THE WORK. Without it the solve returns the vacuum
+	// with zero on Gamma_h, which is a different function entirely.
+	BOOST_TEST( controlRatio > 50.0,
+		"removing the conductor's datum changed the answer by only "
+		<< controlRatio << "x, so the datum is barely reaching Gamma_h and the "
+		"rates above are measuring something else" );
+}

@@ -2845,10 +2845,32 @@ self-field**, so a force calculation needs `meq::Coil` whatever else is done.
 
 Two measurements, in the order they should be taken.
 
-1. **A vacuum solve with the conductor outside `Γ`**, against `CoilSet::psi` as
-   the closed form: `ψ` at `k+1`. This is FB-1a's structure with the datum
-   supplied by the coil rather than by a mode, so it needs no plasma and no
-   border, and it is the cheapest thing that can fail.
+1. ~~**A vacuum solve with the conductor outside `Γ`**~~ — **DONE 2026-09-07,
+   AND IT WORKED FIRST TIME.**
+   `aConductorOutsideGammaReachesTheSolveThroughTheDatum` on the half-disc, two
+   coils at `( 2.00, ±0.50 )` with `ρ = 2.06` against `Γ = 1.5`, vacuum interior:
+
+   | `k` | 1 | 2 | 3 |
+   |---|---|---|---|
+   | rate in `ψ` | **1.980** | **3.409** | **4.069** |
+
+   which is `k+1` at every degree. **The control is 148,165×**: the same solve
+   with the conductor's datum removed. A datum that never arrived would still
+   converge — `Γ_h` would carry zero and the run would report a plausible vacuum
+   — so without that column every rate here is compatible with the coupling
+   doing nothing.
+
+   **AND THE AXIS CONDITION IS HOMOGENEOUS FOR FREE, WHICH IS PHYSICS RATHER
+   THAN LUCK.** `ψ` is the poloidal flux through a circle of radius `r`, so it
+   vanishes with the area for any conductor off the axis: `CoilSet::psi( 0, z )`
+   measures **0.000000e+00 exactly**, and `setBoundaryData( zero )` on the
+   fitted side is the honest statement of the condition rather than a
+   convenience. The case asserts it, since a non-zero reading would mean the
+   convention is not `ψ = r A_φ`.
+
+   **`q` IS NOT MEASURED YET AND THAT IS THE OTHER DELIVERABLE**: the exact flux
+   needs `∇ψ_coil`, and `meq::CoilSet` exposes `psi` and no derivative. The same
+   gap blocks the coupled case, whose Neumann half is `q_coil·ν`.
 2. **The two routes agreeing where both are legal** — a conductor placed inside
    `Ω` and solved by quadrature, then moved outside `Γ` with the geometry
    otherwise fixed, must give the same field in the plasma to the discretisation
