@@ -1,0 +1,157 @@
+# THE FIRST FREE-BOUNDARY CONFIGURATION MEQ CAN RUN FROM A FILE.
+#
+# Every other example in this directory solves a FIXED boundary problem: Gamma
+# is known, psi = 0 on it, and the plasma is whatever satisfies that. Here Gamma
+# is an ARTIFICIAL boundary -- a semicircle in the vacuum, carrying no prescribed
+# datum at all -- and what closes the problem is an exact operator standing in
+# for everything outside it.
+#
+# WHAT [boundary.exterior] IS. The vacuum region runs from the plasma out to
+# infinity with psi -> 0 there, and no finite element mesh represents that. The
+# standard remedy is to truncate at a Gamma and impose the Dirichlet-to-Neumann
+# map of the exterior: given psi on Gamma, it returns the normal derivative the
+# exterior solution would have. Truncation then costs NOTHING -- the map is
+# exact, not an approximation of a far field.
+#
+# AND ON A SEMICIRCLE CENTRED ON THE AXIS THAT MAP IS DIAGONAL, which is the
+# whole reason this block is three numbers rather than a boundary-element
+# solver. Separating Delta* in spherical coordinates gives the GEGENBAUER
+# equation, whose modes rho^( 1 - n ) C_n( cos theta ) each decay independently,
+# so the operator is one number per mode. No layer potentials, no singular
+# quadrature, no elliptic integrals. meq::ExteriorDtN is that statement and
+# FREE-BOUNDARY-PLAN.md section 3 is the derivation.
+#
+# THREE THINGS THIS BUYS THAT ARE EASY TO MISS.
+#
+#   * EVERY MODE VANISHES ON THE AXIS IDENTICALLY, C_n( +-1 ) = 0. So the flat
+#     side of the half-disc needs no treatment in the exterior at all: it is
+#     satisfied by construction rather than imposed.
+#   * THERE IS NO ADMISSIBLE CONSTANT MODE, so the undetermined constant at
+#     infinity and its compatibility condition -- the fiddliest parts of the
+#     Laplace version of this coupling -- do not arise. The axisymmetric problem
+#     is CLEANER than the one it is modelled on, which is not the usual
+#     direction.
+#   * THE COEFFICIENTS ARE UNKNOWNS OF THE SAME NEWTON, not something recovered
+#     afterwards. One factorisation, Modes + 1 backsolves.
+#
+# RMin MUST BE 0 AND THE DRIVER REFUSES ANYTHING ELSE. The separation above
+# holds on a semicircle centred on the axis and nowhere else, so a box starting
+# at RMin = 0.05 does not give a slightly worse version of this problem -- the
+# modes do not span its exterior at all, and the run would converge at full
+# order to a machine nobody described. That is FB-A's requirement arriving
+# through the configuration layer.
+
+[mesh]
+# The BACKGROUND box, reaching the axis exactly. D_h is cut FROM it: the
+# elements whose vertices lie inside the semicircle, which is a staircase
+# inscribed in Gamma, and the band between that staircase and Gamma is bridged
+# by the Cockburn-Solano transfer the curved path already uses.
+RMin = 0.0
+RMax = 1.7
+ZMin = -1.7
+ZMax = 1.7
+NR = 24
+NZ = 48
+
+[discretisation]
+PolynomialDegree = 2
+
+[solver]
+NewtonMaxIterations = 150
+
+[source]
+# A tabulated MHD source in NORMALISED flux, so psi_ax is an unknown of the
+# bordered Newton rather than an input. PsiAxis below is the STARTING VALUE for
+# that unknown and not a constraint on it.
+Type = "mhd"
+Normalised = true
+PsiAxis = 0.1
+# NORMALISED UNITS. mu0 = 1 and the profile amplitudes are O(1), which is what
+# makes this a readable example rather than an SI one spanning eleven orders.
+# The two tables are written against Psi and say so in their headers.
+Mu0 = 1.0
+PPrimeFile = "examples/fb-pprime.dat"
+GGPrimeFile = "examples/fb-ggprime.dat"
+# THE TABLES SPAN Psi IN [ -0.6, 1.4 ] AND THAT RANGE IS LOAD BEARING.
+# meq::SplineProfile CLAMPS outside its knots -- value held at the endpoint,
+# derivative zero -- which is deliberate, since a Newton iterate routinely
+# overshoots and a linear extrapolation of a steep edge profile is what turns an
+# overshoot into a NaN. But a table that STOPS at Psi = 0 does not describe the
+# same source as one that continues: it switches F off outside the plasma while
+# leaving dF/dpsi discontinuous there, which is a moving support imposed by the
+# table rather than by the solver. Measured on this configuration, all three
+# spellings converge to something and only one of them is this file:
+#
+#   table over [ 0, 1 ]                    does NOT converge -- creeps at 0.99
+#   table over [ -0.6, 1.4 ], as here      7 Newton steps, psi_ax = 9.76e-02
+#   the same plus ConfineToPlasma = true   92 steps, psi_ax = 4.08e-01
+#
+# The third is a DIFFERENT BRANCH and not a better answer -- four times the
+# axis flux on the same coils and profiles -- which is the multiplicity
+# docs/validation.rst records from the freegs4e comparison, met here from the
+# inside. Confining the source is the physical thing to do and it is a different
+# problem from this one; say ConfineToPlasma = true deliberately or not at all.
+
+[boundary]
+# Gamma carries the TRANSMISSION condition, not a datum, so this must be "zero"
+# -- and the driver refuses anything else beside an exterior block rather than
+# imposing two contradictory conditions on the same curve.
+Type = "zero"
+
+[boundary.exterior]
+# The semicircle, well outside the plasma. Radius is rho_Gamma; CentreZ defaults
+# to 0 and is written here because a machine case will not have it at zero.
+#
+# MODES IS A TRUNCATION AND NOT A DISCRETISATION. The map is exact mode by mode,
+# so this is the only approximation in the whole exterior, and its error falls
+# spectrally in the smoothness of the trace on Gamma. Four is generous for a
+# plasma this centred; a strongly shaped one wants more.
+Radius = 1.5
+CentreZ = 0.0
+Modes = 4
+
+# THE LIMITER IS DELIBERATELY ABSENT AND THAT IS A KNOWN GAP RATHER THAN A
+# CHOICE OF EXAMPLE.
+#
+#   [boundary.limiter]
+#   R = 1.2
+#   Z = 0.0
+#
+# would make psi_bnd an unknown too, pinned by psi at the nearest potential dof
+# to that point -- FB-3, and the third border. It works on its own and it does
+# NOT yet converge on top of the exterior coupling; FREE-BOUNDARY-PLAN.md
+# section 7.13 is the record of what was tried. With it absent psi_bnd stays at
+# zero, so the plasma edge here is the psi = 0 contour rather than a limiter
+# contact, and this file is HALF of a free-boundary problem: the exterior is
+# solved for and the edge is not.
+#
+# WHAT THIS FILE DEMONSTRATES, PRECISELY. That Gamma carries the exact exterior
+# map rather than a datum, that its Gegenbauer coefficients are unknowns of the
+# same Newton, and that the whole of it is reachable from a configuration file.
+# Removing the coupling and solving the same problem with a zero datum on
+# Gamma_h moves psi by 77% in L2 -- theDriverReachesTheExteriorCoupling measures
+# exactly that, as the control which says the coupling is not inert. It is NOT a
+# physical machine: there are no coils, the profiles are chosen for readability,
+# and the source does not vanish in the vacuum.
+
+[initialguess]
+# NOT A NICETY. A normalised source with p'( 0 ) = 0 vanishes at psi = 0, so
+# psi = 0 solves this problem and a cold Newton stops on it in zero iterations.
+# Worse, there are TWO non-trivial roots here -- see CLAUDE.md's account of the
+# freegs4e benchmark, where a ramp sweep steps from one to the other and the
+# physical solution lies BETWEEN them -- so the guess does not merely start the
+# iteration, it CHOOSES WHICH EQUILIBRIUM IS REPORTED.
+# A BUMP AND NOT A RAMP. A ramp is antisymmetric in z and describes no plasma;
+# this is a core, roughly where the answer's is, and it is what makes the
+# iteration land on the branch that is an equilibrium rather than on one of the
+# two either side of it.
+Type = "bump"
+CentreR = 0.75
+CentreZ = 0.0
+RadiusR = 0.40
+Amplitude = 0.1
+
+[output]
+Prefix = "free-boundary-halfdisc"
+GridNR = 129
+GridNZ = 129

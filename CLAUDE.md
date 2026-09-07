@@ -2864,12 +2864,63 @@ under NPC the row is exactly `−e_j` and the corner exactly 1, neither differen
 condensation `ψ` is a function of the trace through every element's source, so
 both the row and the corner would have to be differenced.
 
-**WHAT REMAINS IS THE DRIVER HALF, AND IT IS THE HALF FB-6 NEEDS.**
-`setBoundaryFluxPoint()` and `setExteriorCoupling()` are both library capability
-with **no route from a TOML file** — neither name appears in `apps/meq.cpp` or
-`Config.cpp`. So a machine case is reachable through the library and not through
-`meq config.toml`, which is the actual distance left to FB-6 and is smaller than
-"FB-3 is not built" made it sound.
+**THE DRIVER HALF IS DONE, 2026-09-06, AND MEQ SOLVES FREE BOUNDARY FROM A
+CONFIGURATION FILE.** `[boundary.limiter]` gives `setBoundaryFluxPoint()` its
+point and `[boundary.exterior]` gives `setExteriorCoupling()` its DtN, so a
+machine case is no longer a library caller. `examples/free-boundary-halfdisc.toml`
+converges in **7 Newton steps**, `ψ_ax = 9.758655e-02`, with four Gegenbauer
+coefficients solved for beside it, and `theDriverReachesTheExteriorCoupling`
+pins the driver against the library at **7.0e-17 over 7998 dofs**.
+
+**AND ITS CONTROL IS WHAT MAKES THAT MEAN ANYTHING**: the same problem with the
+coupling removed — a zero datum on `Γ_h`, which converges perfectly well — moves
+`ψ` by **76.6%** in L2. A coupling that had silently done nothing would have
+passed a driver-against-library check, because both sides would have done
+nothing.
+
+**`[boundary.exterior]` DEFINES `Γ` ITSELF, WHICH `[boundary.shape]` CANNOT.**
+`meq::BoundaryShape` refuses a surface reaching `r ≤ 0` — rightly, a closed
+plasma surface through the axis carries a non-integrable `1/r` — and this `Γ` is
+a **semicircle whose flat side IS the axis**. So the two blocks are alternatives
+and naming both is refused. The driver refuses `[mesh] RMin ≠ 0` at startup, with
+no tolerance, for the reason `halfdisc.py` does: a domain stopping at `r = 0.05`
+is not a slightly worse semicircle, the Gegenbauer modes do not span its
+exterior at all.
+
+**AND `buildSubdomain()` HAD TO BE RELAXED EXACTLY AS `AdaptiveDomain` WAS**, for
+the same geometry and by the same rule — some boundary must be **generated**
+rather than none inherited. The half-disc's flat side is the box's `r = 0` edge,
+which is fitted boundary wanting no transfer.
+
+**A `bump` INITIAL GUESS WAS NEEDED AND IS NOT A CONVENIENCE.** A ramp is
+antisymmetric in `z` and describes no plasma; it exists to keep `ψ = 0` off the
+trivial branch. Once the boundary is free the guess **chooses which equilibrium
+is reported**, so it is part of the problem statement — the same multiplicity the
+freegs4e rehearsal measures at 9.4% across three solve routes. Measured here: a
+ramp does not converge on this problem at all, and the bump does in 7 steps.
+
+**AND A TABULATED NORMALISED PROFILE MUST COVER THE RANGE THE ITERATE VISITS.**
+`meq::SplineProfile` **clamps** outside its knots — deliberately, since a linear
+extrapolation of a steep edge profile turns an overshoot into a NaN — but a table
+that STOPS at `Ψ = 0` does not describe the same source as one that continues:
+it switches `F` off outside the plasma while leaving `∂F/∂ψ` discontinuous there,
+which is a moving support imposed by the *table* rather than by the solver. Three
+spellings of one configuration, all of which parse:
+
+| | |
+|---|---|
+| table over `[0, 1]` | **does not converge** — creeps at 0.99 a step |
+| table over `[−0.6, 1.4]` | **7 Newton steps**, `ψ_ax = 9.76e-02` |
+| the same plus `ConfineToPlasma = true` | 92 steps, `ψ_ax = **4.08e-01**` |
+
+The third is a **different branch** — four times the axis flux on the same
+profiles — not a better answer.
+
+**WHAT IS STILL OPEN IS THE TWO BORDERS TOGETHER.** `ψ_bnd` converges alone and
+the exterior coefficients converge alone; the combination does not, which §7.13
+records. So the shipped example leaves `ψ_bnd` at zero and its plasma edge is the
+`ψ = 0` contour rather than a limiter contact — half of a free-boundary problem,
+and the half that is built.
 
 `Globalisation` other than `None` is refused on this path, loudly: the KINSOL
 paths drive a residual of their own and the Picard ones build no Jacobian to

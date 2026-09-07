@@ -605,13 +605,108 @@ currents one each way so that both spellings are exercised.
 
 .. note::
 
-   **This is not free boundary.** With ``[boundary] Type = "zero"`` on a mesh
-   that is the plasma, the conductors sit *inside* the plasma and the boundary
-   is where the file says it is rather than where the coil currents put it. A
-   machine case additionally needs a domain with a vacuum region, the plasma
-   boundary flux as an unknown, and the exterior coupling that makes :math:`\psi`
-   on the outer boundary the field the currents produce. None of those is
-   reachable from a configuration file yet.
+   **This example is not free boundary.** With ``[boundary] Type = "zero"`` on a
+   mesh that is the plasma, the conductors sit *inside* the plasma and the
+   boundary is where the file says it is rather than where the coil currents put
+   it. A machine case additionally needs a domain with a vacuum region, the
+   plasma boundary flux as an unknown, and the exterior coupling that makes
+   :math:`\psi` on the outer boundary the field the currents produce. The last
+   two are ``[boundary.limiter]`` and ``[boundary.exterior]`` above.
+
+``[boundary.limiter]``
+~~~~~~~~~~~~~~~~~~~~~~
+
+The contact point that pins :math:`\psi_{\mathrm{bnd}}`, making it an unknown of
+the bordered Newton beside :math:`\psi_{\mathrm{ax}}`.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 16 60
+
+   * - Key
+     - Default
+     - Meaning
+   * - ``R``, ``Z``
+     - *both required if either is given*
+     - The limiter contact, in metres. ``R`` must be strictly positive.
+
+The profiles are functions of
+:math:`\Psi = (\psi - \psi_{\mathrm{bnd}})/(\psi_{\mathrm{ax}} - \psi_{\mathrm{bnd}})`,
+so :math:`\psi_{\mathrm{bnd}}` is a functional of the solution exactly as
+:math:`\psi_{\mathrm{ax}}` is. The constraint is that it equals :math:`\psi_h`
+at the **nearest potential degree of freedom** to the point given — a definition
+rather than an approximation, and the same choice :math:`\psi_{\mathrm{ax}}`
+makes in taking the largest nodal value. It is what makes the constraint
+differentiable in a form the border can use.
+
+.. warning::
+
+   A limiter is **refused without** ``[source] Normalised = true``.
+   :math:`\psi_{\mathrm{bnd}}` enters only through :math:`\Psi`, so on a source
+   that does not read it the border would be solved and its answer discarded —
+   and the run would converge, at full order, to the equilibrium the file did
+   not describe.
+
+``[boundary.exterior]``
+~~~~~~~~~~~~~~~~~~~~~~~
+
+Present, this makes the run **free boundary**: :math:`\Gamma` is an artificial
+boundary in the vacuum carrying no prescribed datum, and the exact exterior
+Dirichlet-to-Neumann map stands in for everything outside it.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 16 60
+
+   * - Key
+     - Default
+     - Meaning
+   * - ``Radius``
+     - *required*
+     - :math:`\rho_\Gamma`, the radius of the semicircle, in metres. Must fit
+       strictly inside the ``[mesh]`` box.
+   * - ``CentreZ``
+     - ``0.0``
+     - The axial position of its centre.
+   * - ``Modes``
+     - ``4``
+     - How many Gegenbauer modes, degrees :math:`2 \ldots \texttt{Modes}+1`.
+
+The map is **diagonal**, which is why this block is three numbers rather than a
+boundary-element solver: separating :math:`\Delta^*` in spherical coordinates
+gives the Gegenbauer equation, whose modes
+:math:`\rho^{1-n} C_n(\cos\theta)` each decay independently. The truncation at
+``Modes`` is the only approximation in the exterior — the map is exact mode by
+mode — and its error falls spectrally in the smoothness of the trace on
+:math:`\Gamma`. The converged coefficients are printed by the driver and written
+into the ``.nc`` as ``exterior_a2``, ``exterior_a3``, …; they *are* the exterior
+solution, since :math:`\psi` outside the mesh is their sum against the basis.
+
+.. warning::
+
+   **The mesh must reach the axis exactly**: ``[mesh] RMin = 0``, and the driver
+   refuses anything else. The separation above holds on a semicircle centred on
+   the axis and nowhere else, so a box starting at :math:`r = 0.05` does not
+   give a slightly worse version of the problem — the modes do not span its
+   exterior at all. Every mode vanishes on the axis identically, so the flat
+   side needs no treatment in the exterior and is ordinary fitted boundary.
+
+   ``[boundary.exterior]`` and ``[boundary.shape]`` are **alternatives**, and
+   naming both is refused: one makes :math:`\Gamma` a semicircle about the axis
+   and the other a closed surface that may not reach :math:`r = 0`.
+   ``[boundary] Type`` must be ``"zero"`` beside an exterior block, since
+   :math:`\Gamma` carries the transmission condition rather than data.
+
+.. note::
+
+   **A limiter and an exterior coupling together do not yet converge.** Each
+   works on its own — :math:`\psi_{\mathrm{bnd}}` as a second border, and the
+   Gegenbauer coefficients as :math:`N` more — and the combination is the one
+   still open. With the limiter absent :math:`\psi_{\mathrm{bnd}}` stays at
+   zero, so the plasma edge is the :math:`\psi = 0` contour rather than a
+   limiter contact.
+
+``examples/free-boundary-halfdisc.toml`` is the worked example.
 
 ``[output]``
 ------------
@@ -651,15 +746,38 @@ See :doc:`output` for what gets written.
      - ``"none"``
      - ``"none"`` starts from the Dirichlet datum — a cold start. ``"ramp"``
        makes :math:`\psi` run from :math:`-\texttt{Amplitude}` to
-       :math:`+\texttt{Amplitude}` across :math:`z`. ``"gridfunction"`` reads a
-       stored answer.
+       :math:`+\texttt{Amplitude}` across :math:`z`. ``"bump"`` is a paraboloid
+       core. ``"gridfunction"`` reads a stored answer.
    * - ``Amplitude``
      - ``0.3``
-     - For ``"ramp"``; must be positive.
+     - For ``"ramp"`` and ``"bump"``; must be positive. For ``"bump"`` it is the
+       peak value at the centre.
+   * - ``CentreR``, ``CentreZ``
+     - *``CentreR`` required for* ``"bump"``
+     - The centre of the paraboloid, in metres.
+   * - ``RadiusR``, ``RadiusZ``
+     - *``RadiusR`` required for* ``"bump"``
+     - Its extent. ``RadiusZ`` defaults to ``RadiusR``. ``CentreR - RadiusR``
+       must be strictly positive: a bump reaching the axis describes no plasma.
    * - ``File``, ``MeshFile``
      - *required for* ``"gridfunction"``
      - The stored grid function and the mesh it lives on — a grid function
        cannot be read without its mesh.
+
+``"bump"`` gives
+:math:`\psi = \texttt{Amplitude}\,(1 - (\Delta r/\texttt{RadiusR})^2 - (\Delta z/\texttt{RadiusZ})^2)`
+where that is positive and zero elsewhere.
+
+.. important::
+
+   **Once the boundary is free the guess is part of the problem statement.** A
+   ramp is antisymmetric in :math:`z` and describes no plasma; it exists so that
+   :math:`\psi = 0` falls in the interior and the trivial branch is not a fixed
+   point. A free-boundary problem has **more than one converged solution**, and
+   the guess is what says which of them is reported — so a core is what selects
+   the branch that is an equilibrium. See :doc:`validation`, where three solve
+   routes reach discrete solutions 9.4 % apart and the physical root lies
+   *between* two that an amplitude sweep reaches.
 
 The ramp is not a nicety: see :ref:`sources-trivial-branch`. A stored guess on
 the *same* mesh is an exact restart; on a different one it is interpolated. It

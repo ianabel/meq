@@ -1,0 +1,71 @@
+# g dg/dPsi( Psi ) for examples/free-boundary-halfdisc.toml, against the NORMALISED
+# flux Psi = ( psi - psi_bnd )/( psi_ax - psi_bnd ).
+#
+# THE ABSCISSA IS Psi AND NOT psi, WHICH IS THE TRAP examples/rotating-density.dat
+# AND ITS -normalised TWIN EXIST TO DOCUMENT. A table written against psi and
+# handed to a `Normalised = true` source parses, solves and converges -- to an
+# equilibrium whose gradients are wrong by a factor of the flux span. There is
+# nothing in the file itself that says which it is, so the header has to.
+#
+# THE FORMAT. One knot per line,
+#
+#     Psi   f( Psi )   f'( Psi )
+#
+# whitespace separated, '#' comments, a blank line terminating the table.
+# meq::Profile's contract is that prime() is the EXACT derivative of
+# operator(), so the third column is given rather than fitted -- see
+# meq::SplineProfile.
+#
+# f( Psi ) = 0.05 * Psi, SO f'( Psi ) = 0.05 EVERYWHERE and a Hermite cubic
+# through these knots reproduces the line exactly. Two knots would do; the
+# spacing below is there so that a reader editing this into a real profile has
+# somewhere to put the shape.
+#
+# AND THE VANISHING ORDER AT THE EDGE IS j = 1, WHICH IS A PRECONDITION RATHER
+# THAN A STYLE. FB-4 measured that with j = 0 -- a profile with f( 0 ) != 0 --
+# the assembled residual is DISCONTINUOUS in the unknowns once the plasma
+# support moves, because a fixed quadrature point crossing the edge makes the
+# element integral jump. Newton does not converge on it: not at any degree, not
+# at any mesh, not started from the exact solution, and not under
+# PicardThenNewton. f( 0 ) = 0 is what makes this solvable.
+-0.6000   -3.0000000000e-02   5.0000000000e-02
+-0.5500   -2.7500000000e-02   5.0000000000e-02
+-0.5000   -2.5000000000e-02   5.0000000000e-02
+-0.4500   -2.2500000000e-02   5.0000000000e-02
+-0.4000   -2.0000000000e-02   5.0000000000e-02
+-0.3500   -1.7500000000e-02   5.0000000000e-02
+-0.3000   -1.5000000000e-02   5.0000000000e-02
+-0.2500   -1.2500000000e-02   5.0000000000e-02
+-0.2000   -1.0000000000e-02   5.0000000000e-02
+-0.1500   -7.5000000000e-03   5.0000000000e-02
+-0.1000   -5.0000000000e-03   5.0000000000e-02
+-0.0500   -2.5000000000e-03   5.0000000000e-02
+0.0000   5.5511151231e-18   5.0000000000e-02
+0.0500   2.5000000000e-03   5.0000000000e-02
+0.1000   5.0000000000e-03   5.0000000000e-02
+0.1500   7.5000000000e-03   5.0000000000e-02
+0.2000   1.0000000000e-02   5.0000000000e-02
+0.2500   1.2500000000e-02   5.0000000000e-02
+0.3000   1.5000000000e-02   5.0000000000e-02
+0.3500   1.7500000000e-02   5.0000000000e-02
+0.4000   2.0000000000e-02   5.0000000000e-02
+0.4500   2.2500000000e-02   5.0000000000e-02
+0.5000   2.5000000000e-02   5.0000000000e-02
+0.5500   2.7500000000e-02   5.0000000000e-02
+0.6000   3.0000000000e-02   5.0000000000e-02
+0.6500   3.2500000000e-02   5.0000000000e-02
+0.7000   3.5000000000e-02   5.0000000000e-02
+0.7500   3.7500000000e-02   5.0000000000e-02
+0.8000   4.0000000000e-02   5.0000000000e-02
+0.8500   4.2500000000e-02   5.0000000000e-02
+0.9000   4.5000000000e-02   5.0000000000e-02
+0.9500   4.7500000000e-02   5.0000000000e-02
+1.0000   5.0000000000e-02   5.0000000000e-02
+1.0500   5.2500000000e-02   5.0000000000e-02
+1.1000   5.5000000000e-02   5.0000000000e-02
+1.1500   5.7500000000e-02   5.0000000000e-02
+1.2000   6.0000000000e-02   5.0000000000e-02
+1.2500   6.2500000000e-02   5.0000000000e-02
+1.3000   6.5000000000e-02   5.0000000000e-02
+1.3500   6.7500000000e-02   5.0000000000e-02
+1.4000   7.0000000000e-02   5.0000000000e-02

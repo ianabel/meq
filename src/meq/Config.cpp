@@ -1080,7 +1080,7 @@ namespace meq
 		// [boundary]
 		{
 			Table boundary( document, "boundary", sourceName, false );
-			boundary.rejectUnknownKeys( { "Type", "shape" } );
+			boundary.rejectUnknownKeys( { "Type", "shape", "limiter", "exterior" } );
 
 			boundaryOptions.type = toBoundaryDataType( boundary, boundary.getStringOr( "Type", "zero" ) );
 
@@ -1124,6 +1124,70 @@ namespace meq
 						shape.fail( "Type", "\"mxh\" takes CosCoefficients and SinCoefficients, not Triangularity or Squareness; those are \"miller\" spellings" );
 					if ( s.cosCoefficients.empty() && s.sinCoefficients.empty() )
 						shape.fail( "Type", "\"mxh\" was given no harmonics at all, which describes an ellipse; say Type = \"miller\" with Triangularity = 0 if that is what is meant" );
+				}
+			}
+
+			// [boundary.limiter] -- the point that pins psi_bnd, FB-3.
+			{
+				Table limiter( boundary, "limiter", sourceName, false );
+				limiter.rejectUnknownKeys( { "R", "Z" } );
+
+				LimiterConfig & l = boundaryOptions.limiter;
+				l.given = limiter.has( "R" ) || limiter.has( "Z" );
+				if ( l.given )
+				{
+					// BOTH OR NEITHER. A limiter given only its height sits at
+					// r = 0, which is the axis; honouring that would pin psi_bnd
+					// on the one part of the boundary that is not a limiter.
+					l.r = limiter.getFloat( "R" );
+					l.z = limiter.getFloat( "Z" );
+
+					if ( !( l.r > 0.0 ) )
+						limiter.fail( "R", "the limiter contact must be at R > 0; the axis is not a limiter, and the operator's 1/r is not integrable there" );
+
+					// psi_bnd is read ONLY through Psi, so without a
+					// normalisation this is an unknown nothing consumes -- a
+					// file that would converge, at full order, to an
+					// equilibrium it did not describe.
+					if ( !sourceOptions.isNormalised() )
+						limiter.fail( "R", "a limiter pins psi_bnd, which only enters through the normalised flux; set [source] Normalised = true or remove [boundary.limiter]" );
+				}
+			}
+
+			// [boundary.exterior] -- the exact exterior DtN, FB-5, and what
+			// makes a run FREE boundary.
+			{
+				Table exterior( boundary, "exterior", sourceName, false );
+				exterior.rejectUnknownKeys( { "Radius", "CentreZ", "Modes" } );
+
+				ExteriorConfig & e = boundaryOptions.exterior;
+				e.given = exterior.has( "Radius" ) || exterior.has( "Modes" )
+				          || exterior.has( "CentreZ" );
+				if ( e.given )
+				{
+					e.radius = exterior.getFloat( "Radius" );
+					e.centreZ = exterior.getFloatOr( "CentreZ", 0.0 );
+					e.modes = exterior.getIntegerOr( "Modes", 4 );
+
+					if ( !( e.radius > 0.0 ) )
+						exterior.fail( "Radius", "the artificial boundary's radius must be positive" );
+					if ( e.modes < 1 )
+						exterior.fail( "Modes", "at least one Gegenbauer mode is needed; the exterior map is diagonal, so this is a truncation and not a discretisation" );
+
+					// ALTERNATIVES, NOT LAYERS. This block defines Gamma as a
+					// semicircle centred on the axis; [boundary.shape] defines
+					// it as a closed MXH surface that may not reach r = 0. A
+					// file naming both has described two different curves and
+					// silently taking one is how a run ends up solving on a
+					// domain nobody asked for.
+					if ( boundaryOptions.shape.type != ShapeType::None )
+						exterior.fail( "Radius", "[boundary.exterior] defines Gamma as a semicircle about the axis and [boundary.shape] defines it as a closed surface; they are alternatives, so remove one" );
+
+					// The exterior is a VACUUM: psi -> 0 at infinity is what the
+					// decaying modes represent. A datum of "exact" on Gamma
+					// would impose a second, contradictory condition there.
+					if ( boundaryOptions.type != BoundaryDataType::Zero )
+						exterior.fail( "Radius", "[boundary] Type must be \"zero\" with an exterior coupling: Gamma carries the transmission condition, not a prescribed datum" );
 				}
 			}
 		}
@@ -1213,17 +1277,20 @@ namespace meq
 		// [initialguess]
 		{
 			Table guess( document, "initialguess", sourceName, false );
-			guess.rejectUnknownKeys( { "Type", "File", "MeshFile", "Amplitude" } );
+			guess.rejectUnknownKeys( { "Type", "File", "MeshFile", "Amplitude",
+			                           "CentreR", "CentreZ", "RadiusR", "RadiusZ" } );
 
 			std::string const type = guess.getStringOr( "Type", "none" );
 			if ( type == "none" )
 				initialGuessOptions.type = InitialGuessType::None;
 			else if ( type == "ramp" )
 				initialGuessOptions.type = InitialGuessType::Ramp;
+			else if ( type == "bump" )
+				initialGuessOptions.type = InitialGuessType::Bump;
 			else if ( type == "gridfunction" )
 				initialGuessOptions.type = InitialGuessType::GridFunction;
 			else
-				guess.fail( "Type", "must be one of none, ramp, gridfunction, but is \"" + type + "\"" );
+				guess.fail( "Type", "must be one of none, ramp, bump, gridfunction, but is \"" + type + "\"" );
 
 			initialGuessOptions.file = guess.getStringOr( "File", "" );
 			initialGuessOptions.meshFile = guess.getStringOr( "MeshFile", "" );
@@ -1237,6 +1304,30 @@ namespace meq
 				if ( initialGuessOptions.meshFile.empty() )
 					guess.fail( "MeshFile", "is required when Type = \"gridfunction\": a "
 					            "GridFunction cannot be read without the mesh it lives on" );
+			}
+
+			if ( initialGuessOptions.type == InitialGuessType::Bump )
+			{
+				initialGuessOptions.centreR = guess.getFloat( "CentreR" );
+				initialGuessOptions.centreZ = guess.getFloatOr( "CentreZ", 0.0 );
+				initialGuessOptions.radiusR = guess.getFloat( "RadiusR" );
+				initialGuessOptions.radiusZ =
+					guess.getFloatOr( "RadiusZ", initialGuessOptions.radiusR );
+
+				if ( !( initialGuessOptions.centreR > 0.0 ) )
+					guess.fail( "CentreR", "the magnetic axis is at r > 0; a bump centred on "
+					            "or across the axis describes no plasma" );
+				if ( !( initialGuessOptions.radiusR > 0.0 )
+				     || !( initialGuessOptions.radiusZ > 0.0 ) )
+					guess.fail( "RadiusR", "must be positive" );
+				if ( !( initialGuessOptions.amplitude > 0.0 ) )
+					guess.fail( "Amplitude", "must be positive: it is the peak of the bump, and "
+					            "a flat one is the trivial branch this guess exists to avoid" );
+				// The bump must not straddle the axis, where psi is pinned and the
+				// operator's 1/r is not integrable.
+				if ( initialGuessOptions.centreR - initialGuessOptions.radiusR <= 0.0 )
+					guess.fail( "RadiusR", "the bump reaches r <= 0; CentreR - RadiusR must be "
+					            "strictly positive" );
 			}
 
 			if ( initialGuessOptions.type == InitialGuessType::Ramp

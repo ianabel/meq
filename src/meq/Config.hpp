@@ -464,10 +464,80 @@ namespace meq
 		std::vector< double > sinCoefficients;
 	};
 
+	/**
+	 * `[boundary.limiter]` -- the contact point that pins `psi_bnd`, FB-3.
+	 *
+	 * THE PLASMA EDGE IS WHERE THE PROFILES STOP, AND IN A FREE BOUNDARY IT IS
+	 * NOT KNOWN IN ADVANCE. The profiles are functions of
+	 * `Psi = ( psi - psi_bnd )/( psi_ax - psi_bnd )`, so `psi_bnd` is a
+	 * functional of the solution exactly as `psi_ax` is, and it gets a border
+	 * row of its own. This block is the point it is pinned at:
+	 * meq::GradShafranovSolver::setBoundaryFluxPoint.
+	 *
+	 * **IT IS MEANINGLESS WITHOUT A NORMALISATION**, and is refused without one.
+	 * `psi_bnd` only enters through `Psi`, so a file naming a limiter on a
+	 * source that is not `Normalised = true` has asked for an unknown nothing
+	 * reads -- which would converge, at full order, to the equilibrium the file
+	 * did not describe.
+	 */
+	struct LimiterConfig
+	{
+		/// Whether the file named one. False leaves `psi_bnd` fixed at zero and
+		/// the bordered solve is the 1x1 it always was.
+		bool given = false;
+
+		/// The contact, in metres. `R` must be strictly positive: the axis is
+		/// not a limiter, and the nearest potential dof to a point on `r = 0`
+		/// is in an element whose flux mass degenerates.
+		double r = 0.0;
+		double z = 0.0;
+	};
+
+	/**
+	 * `[boundary.exterior]` -- the exact exterior Dirichlet-to-Neumann map on
+	 * `Gamma`, FB-5, and the block that makes a run FREE boundary.
+	 *
+	 * **THIS BLOCK DEFINES `Gamma` ITSELF, WHICH `[boundary.shape]` CANNOT.**
+	 * meq::BoundaryShape refuses a surface reaching `r <= 0` -- rightly, since a
+	 * closed plasma surface through the axis has a non-integrable `1/r` on it --
+	 * and the artificial boundary this block describes is a SEMICIRCLE CENTRED
+	 * ON THE AXIS, whose flat side IS the axis. That is not a degenerate MXH
+	 * surface; it is a different object, and the axis half of it is ordinary
+	 * fitted boundary needing no transfer at all. So the two blocks are
+	 * alternatives rather than layers, and naming both is refused.
+	 *
+	 * **THE SEMICIRCLE IS A REQUIREMENT AND NOT A CONVENIENCE.** meq::ExteriorDtN
+	 * is diagonal because the Gegenbauer separation holds on a semicircle about
+	 * the axis and nowhere else; on any other curve the exterior map is a dense
+	 * boundary-integral operator and this class does not represent it. The
+	 * `[mesh]` box must therefore reach `r = 0` exactly, which the driver checks
+	 * rather than assumes.
+	 */
+	struct ExteriorConfig
+	{
+		/// Whether the file named one.
+		bool given = false;
+
+		/// `rho_Gamma`, the radius of the semicircle, in metres. > 0, and it
+		/// must fit strictly inside the `[mesh]` box.
+		double radius = 0.0;
+
+		/// The axial position of its centre, in metres. Zero is the common case.
+		double centreZ = 0.0;
+
+		/// How many Gegenbauer modes, degrees 2 .. modes + 1. The truncation is
+		/// the ONLY approximation in the exterior -- the map is exact mode by
+		/// mode -- and its error converges spectrally in the smoothness of the
+		/// trace, so this is small in practice. >= 1.
+		int modes = 0;
+	};
+
 	struct BoundaryConfig
 	{
 		BoundaryDataType type = BoundaryDataType::Zero;
 		ShapeConfig shape;
+		LimiterConfig limiter;
+		ExteriorConfig exterior;
 	};
 
 	// [solver] AssemblyMode -- who computes the element-local work.
@@ -570,6 +640,19 @@ namespace meq
 		// so with homogeneous data psi = 0 SOLVES the problem and Newton stops
 		// on it in zero iterations. See CLAUDE.md under Traps.
 		Ramp,
+		// A paraboloid BUMP: a core, positive inside an ellipse about a
+		// prescribed centre and zero outside it.
+		//
+		// THE RAMP IS THE WRONG SHAPE FOR A FREE BOUNDARY AND THIS IS WHY THERE
+		// ARE TWO. A ramp is antisymmetric in z -- it exists to put psi = 0 in
+		// the interior so the trivial branch is not a fixed point -- and it
+		// describes no plasma at all. A free-boundary solve has to be told
+		// WHICH EQUILIBRIUM to find: the fixed-boundary rehearsal against
+		// freegs4e measured three converged solutions of one discrete problem,
+		// with the physical one lying BETWEEN the two a ramp sweep reaches. So
+		// the guess is part of the problem statement here rather than an
+		// optimisation, and a core is what selects the branch that is one.
+		Bump,
 		// An MFEM GridFunction and its mesh, from a previous MEQ run.
 		GridFunction
 	};
@@ -598,7 +681,18 @@ namespace meq
 		// Ramp: psi runs from -Amplitude to +Amplitude across z, so that the
 		// interior crosses zero and the trivial branch is not a fixed point of
 		// the iteration.
+		//
+		// Bump: the PEAK value, at the centre. Positive.
 		double amplitude = 0.3;
+
+		// Bump only. The centre of the paraboloid, in metres, and its extent --
+		// psi = Amplitude*( 1 - ( dr/RadiusR )^2 - ( dz/RadiusZ )^2 ) where that
+		// is positive and zero elsewhere. RadiusZ defaults to RadiusR, which is
+		// the circular case.
+		double centreR = 0.0;
+		double centreZ = 0.0;
+		double radiusR = 0.0;
+		double radiusZ = 0.0;
 	};
 
 	// [adaptivity] -- the stage-6 loop, exposed rather than rebuilt.

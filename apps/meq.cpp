@@ -28,6 +28,7 @@
 #include "meq/Coils.hpp"
 #include "meq/Config.hpp"
 #include "meq/Estimator.hpp"
+#include "meq/ExteriorDtN.hpp"
 #include "meq/Field.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/Output.hpp"
@@ -200,6 +201,25 @@ namespace
 		};
 	}
 
+	/// The level set of the SEMICIRCLE `[boundary.exterior]` describes: negative
+	/// inside, zero on `Gamma`, positive outside.
+	///
+	/// **THIS IS NOT A meq::BoundaryShape AND CANNOT BE ONE.** That class refuses
+	/// a surface reaching `r <= 0`, rightly, since a closed plasma surface
+	/// through the axis carries a non-integrable `1/r`. `Gamma` here is an
+	/// ARTIFICIAL boundary whose flat side IS the axis, and the axis half of it
+	/// is ordinary fitted boundary that SubMesh leaves with its inherited
+	/// attribute -- so `Gamma_h` is the arc alone and nothing is ever
+	/// transferred across `r = 0`. meq::AdaptiveDomain was relaxed for exactly
+	/// this geometry.
+	mfem::PositionFunction semicircleLevelSet( double radius, double centreZ )
+	{
+		return [ radius, centreZ ]( mfem::Vector const &x )
+		{
+			return std::hypot( x( 0 ), x( 1 ) - centreZ ) - radius;
+		};
+	}
+
 	Subdomain buildSubdomain( mfem::Mesh &background,
 	                          mfem::PositionFunction const &levelSet,
 	                          double h )
@@ -218,6 +238,11 @@ namespace
 			background.SetAttribute( e, marker[ e ] ? 1 : 2 );
 		background.SetAttributes();
 
+		// The parent's largest boundary attribute, taken BEFORE the cut, because
+		// it is what tells a generated attribute from an inherited one below.
+		int const parentBoundaryMax = background.bdr_attributes.Size() > 0
+			? background.bdr_attributes.Max() : 0;
+
 		mfem::Array<int> domainAttribute( 1 );
 		domainAttribute[ 0 ] = 1;
 
@@ -225,18 +250,32 @@ namespace
 		subdomain.mesh = std::make_unique<mfem::SubMesh>(
 			mfem::SubMesh::CreateFromDomain( background, domainAttribute ) );
 
-		// SubMesh gives the boundary it had to generate ONE new attribute, and
-		// leaves anything inherited from the background with the attribute it
-		// already had. So more than one attribute means D_h reaches the edge of
-		// the box: part of Gamma_h would then be a fitted mesh boundary carrying
-		// no transferred datum, and the solve would silently impose zero there.
-		if ( subdomain.mesh->bdr_attributes.Size() != 1 )
-			throw std::runtime_error(
-				"[boundary.shape] touches the edge of the [mesh] box: the subdomain "
-				"has boundary inherited from it, so part of Gamma_h is fitted and "
-				"carries no transferred datum. Enlarge the box" );
-
+		// SubMesh gives the boundary it had to generate ONE new attribute, one
+		// past whatever the parent already used, and leaves inherited boundary
+		// with the attribute it already had. So Gamma_h is the generated one and
+		// it is the largest.
+		//
+		// INHERITED BOUNDARY IS LEGITIMATE AND THIS USED TO REFUSE IT, WHICH IS
+		// THE SAME RELAXATION meq::AdaptiveDomain NEEDED AND FOR THE SAME
+		// GEOMETRY. The guard required EXACTLY ONE attribute -- Omega strictly
+		// inside the box -- which every [boundary.shape] run satisfies and
+		// [boundary.exterior] never can: the half-disc's flat side IS the box's
+		// r = 0 edge, deliberately, because the exterior expansion is valid only
+		// on a semicircle centred on the axis. That edge is the AXIS. It is
+		// ordinary fitted boundary, it wants no transfer, and every Gegenbauer
+		// mode vanishes on it identically.
+		//
+		// What has to hold is that SOME boundary was generated -- that there is a
+		// Gamma_h to transfer to at all -- and that is what is checked now. A
+		// domain aligned with the box on every side generates nothing, leaving
+		// the largest attribute inherited and gammaH naming a fitted edge, which
+		// is the failure this guard exists to prevent.
 		subdomain.gammaH = subdomain.mesh->bdr_attributes.Max();
+		if ( subdomain.gammaH <= parentBoundaryMax )
+			throw std::runtime_error(
+				"no boundary was generated when cutting the subdomain, so Omega is "
+				"aligned with the [mesh] box everywhere and there is no Gamma_h to "
+				"transfer to" );
 
 		// Six h of search. The paths are about 1.3 h long, so this is a factor of
 		// four of slack. VertexConePath is the family Cockburn and Solano analyse,
@@ -640,7 +679,17 @@ int main( int argc, char **argv )
 	// ---- set the run up ------------------------------------------------
 	mfem::Mesh background;
 	std::unique_ptr<meq::BoundaryShape> shape;
+	/// The exterior coupling of [boundary.exterior]. BORROWED by the solver, so
+	/// it is declared out here and outlives every cycle -- and it is the SAME
+	/// object at every cycle deliberately: Gamma is fixed while only Gamma_h
+	/// climbs toward it, which is what makes the exterior coefficients
+	/// comparable across a refinement.
+	std::unique_ptr<meq::ExteriorDtN> exterior;
 	mfem::PositionFunction levelSet;
+	/// Curved: D_h is a strict subset of the background mesh, cut by levelSet.
+	/// True for [boundary.shape] AND for [boundary.exterior], which are two ways
+	/// of describing a Gamma that is not the mesh boundary.
+	bool curved = false;
 	mfem::ConstantCoefficient zero( 0.0 );
 	std::unique_ptr<mfem::FunctionCoefficient> ramp;
 	std::unique_ptr<mfem::Mesh> guessMesh;
@@ -752,6 +801,50 @@ int main( int argc, char **argv )
 		// fitted path solves on the background mesh itself. Everything
 		// downstream -- the solver, the sampler, the files -- follows this.
 		meq::ShapeConfig const &shapeConfig = config->getBoundary().shape;
+		meq::ExteriorConfig const &exteriorConfig = config->getBoundary().exterior;
+		curved = shapeConfig.type != meq::ShapeType::None || exteriorConfig.given;
+
+		if ( exteriorConfig.given )
+		{
+			/*
+			 * FREE BOUNDARY, AND Gamma IS THE SEMICIRCLE RATHER THAN A FLUX
+			 * SURFACE. Config has already refused this alongside
+			 * [boundary.shape], so exactly one of the two branches runs.
+			 *
+			 * THE BOX MUST REACH THE AXIS EXACTLY, and this is where that is
+			 * checked rather than discovered. meq::ExteriorDtN is diagonal
+			 * because the Gegenbauer separation holds on a semicircle CENTRED
+			 * ON THE AXIS; a box starting at rMin = 0.05 gives a domain whose
+			 * flat side is an arbitrary vertical line, the modes do not span
+			 * its exterior, and the run would converge at full order to a
+			 * machine nobody described. That is FB-A's requirement arriving
+			 * through the configuration layer.
+			 */
+			meq::MeshConfig const &meshConfig = config->getMesh();
+			if ( meshConfig.rMin != 0.0 )
+				throw std::runtime_error(
+					"[boundary.exterior] needs [mesh] RMin = 0 exactly: the "
+					"exterior expansion is valid only on a semicircle centred "
+					"on the axis, and a domain stopping short of r = 0 is not "
+					"a slightly worse one -- the Gegenbauer modes do not span "
+					"its exterior at all" );
+
+			double const zLow = exteriorConfig.centreZ - exteriorConfig.radius;
+			double const zHigh = exteriorConfig.centreZ + exteriorConfig.radius;
+			if ( exteriorConfig.radius >= meshConfig.rMax
+			     || zLow <= meshConfig.zMin || zHigh >= meshConfig.zMax )
+				throw std::runtime_error(
+					"[boundary.exterior] Radius puts Gamma outside or on the "
+					"[mesh] box; D_h is cut FROM that box, so Gamma must fit "
+					"strictly inside it" );
+
+			exterior = std::make_unique<meq::ExteriorDtN>(
+				exteriorConfig.centreZ, exteriorConfig.radius,
+				exteriorConfig.modes );
+			levelSet = semicircleLevelSet( exteriorConfig.radius,
+			                               exteriorConfig.centreZ );
+		}
+
 		if ( shapeConfig.type != meq::ShapeType::None )
 		{
 			shape = std::make_unique<meq::BoundaryShape>(
@@ -769,7 +862,10 @@ int main( int argc, char **argv )
 					                      shapeConfig.cosCoefficients,
 					                      shapeConfig.sinCoefficients ) );
 			levelSet = levelSetOf( *shape );
+		}
 
+		if ( curved )
+		{
 			/*
 			 * TWO CONSTRUCTIONS OF D_h, AND THE DIFFERENCE IS NOT COSMETIC.
 			 *
@@ -804,7 +900,9 @@ int main( int argc, char **argv )
 				catch ( std::exception const &error )
 				{
 					throw std::runtime_error(
-						std::string( "[boundary.shape] " ) + error.what()
+						std::string( curved && exterior ? "[boundary.exterior] "
+						                                : "[boundary.shape] " )
+						+ error.what()
 						+ " -- either the [mesh] box is too coarse for the surface, "
 						"or the surface is not strictly inside it" );
 				}
@@ -820,7 +918,7 @@ int main( int argc, char **argv )
 			}
 		}
 
-		if ( !shape )
+		if ( !curved )
 			solveMesh = &background;
 
 		// The guess objects are built once. The RAMP is a coefficient and so is
@@ -849,6 +947,30 @@ int main( int argc, char **argv )
 				break;
 			}
 
+			case meq::InitialGuessType::Bump:
+			{
+				// A CORE, WHICH IS WHAT SELECTS THE BRANCH. See Config.hpp: a
+				// free-boundary problem has more than one converged solution and
+				// the guess is what says which of them is wanted. A ramp is
+				// antisymmetric in z and describes no plasma; this is a
+				// paraboloid, positive inside its ellipse and zero outside.
+				meq::InitialGuessConfig const &g = config->getInitialGuess();
+				double const amplitude = g.amplitude;
+				double const centreR = g.centreR;
+				double const centreZ = g.centreZ;
+				double const radiusR = g.radiusR;
+				double const radiusZ = g.radiusZ;
+				ramp = std::make_unique<mfem::FunctionCoefficient>(
+					[ amplitude, centreR, centreZ, radiusR, radiusZ ]
+					( mfem::Vector const &x )
+					{
+						double const dr = ( x( 0 ) - centreR )/radiusR;
+						double const dz = ( x( 1 ) - centreZ )/radiusZ;
+						double const t = 1.0 - ( dr*dr + dz*dz );
+						return t > 0.0 ? amplitude*t : 0.0;
+					} );
+				break;
+			}
 			case meq::InitialGuessType::GridFunction:
 			{
 				guessMesh = std::make_unique<mfem::Mesh>(
@@ -902,6 +1024,23 @@ int main( int argc, char **argv )
 		else
 			fresh->setSource( *source );
 
+		/*
+		 * THE OTHER TWO BORDERS. Both are unknowns of the SAME bordered Newton
+		 * psi_ax already lives in -- N + 2 borders against one factorisation --
+		 * so the order they are set in does not matter and neither costs a
+		 * second solve.
+		 *
+		 * ORDER AGAINST setSource() DOES MATTER, though, and it is why these sit
+		 * here rather than beside setExtension() above: setBoundaryFluxPoint()
+		 * makes psi_bnd an unknown of a NORMALISATION that has to exist first.
+		 */
+		meq::LimiterConfig const &limiterConfig = config->getBoundary().limiter;
+		if ( limiterConfig.given )
+			fresh->setBoundaryFluxPoint( limiterConfig.r, limiterConfig.z );
+
+		if ( exterior )
+			fresh->setExteriorCoupling( *exterior );
+
 		fresh->setBoundaryData( zero );
 		fresh->setNewtonControl( config->getSolver().newtonRelativeTolerance,
 		                         config->getSolver().newtonAbsoluteTolerance,
@@ -940,7 +1079,8 @@ int main( int argc, char **argv )
 			             "interpolated, %d fell outside it\n",
 			             transfer.queried() - missed, transfer.queried(), missed );
 		}
-		else if ( config->getInitialGuess().type == meq::InitialGuessType::Ramp )
+		else if ( config->getInitialGuess().type == meq::InitialGuessType::Ramp
+		          || config->getInitialGuess().type == meq::InitialGuessType::Bump )
 		{
 			fresh->setInitialGuess( *ramp );
 		}
@@ -1370,6 +1510,36 @@ int main( int argc, char **argv )
 			             "= %.3e\n",
 			             solver->psiAxis(), solver->normalisationResidual() );
 
+		/*
+		 * THE EXTERIOR COEFFICIENTS ARE AN ANSWER AND NOT A DIAGNOSTIC, so they
+		 * are reported rather than left in the solver. On a free-boundary run
+		 * they ARE the boundary condition: psi on Gamma is their sum against the
+		 * Gegenbauer basis, and everything outside the mesh is determined by
+		 * them. A run that printed only psi_ax would be reporting the interior
+		 * of a problem whose whole point is what happens outside it.
+		 *
+		 * AND THEY ARE WHAT AN ADAPTIVE RUN CANNOT SEE. eta estimates the
+		 * INTERIOR error; these are a boundary functional, and FB-5 measured
+		 * them frozen to five digits across four refinement cycles while eta
+		 * fell by a factor of eight. Printing them per run is the cheapest way
+		 * for somebody to notice that before trusting a refinement.
+		 */
+		if ( exterior )
+		{
+			std::vector<double> const &a = solver->exteriorCoefficients();
+			std::printf( "     Gamma at rho = %g, %d Gegenbauer modes:",
+			             config->getBoundary().exterior.radius,
+			             static_cast<int>( a.size() ) );
+			for ( std::size_t m = 0; m < a.size(); ++m )
+				std::printf( " a%d=%.4e", static_cast<int>( m ) + 2, a[ m ] );
+			std::printf( "\n" );
+			if ( config->getBoundary().limiter.given )
+				std::printf( "     psi_bnd = %.6e Wb/rad at the limiter ( %g, %g )\n",
+				             solver->psiBoundary(),
+				             config->getBoundary().limiter.r,
+				             config->getBoundary().limiter.z );
+		}
+
 		if ( adapt.enabled )
 		{
 			std::printf( "\n  the adaptive loop: %s marking at %.2f\n",
@@ -1720,6 +1890,29 @@ int main( int argc, char **argv )
 		}
 		if ( config->getSource().confinesToPlasma() )
 			writer.attribute( "plasma_support", "moving (F = 0 where Psi <= 0)" );
+
+		// FREE BOUNDARY, and the file has to say so: without these a reader
+		// differencing two .nc files cannot tell a truncated vacuum from a
+		// prescribed datum on the same Gamma, and the coefficients are the
+		// exterior solution in full -- psi outside the mesh is their sum against
+		// the Gegenbauer basis and nothing else.
+		if ( exterior )
+		{
+			writer.attribute( "exterior_coupling", "Gegenbauer DtN on a semicircle about the axis" );
+			writer.attribute( "exterior_radius", config->getBoundary().exterior.radius );
+			writer.attribute( "exterior_centre_z", config->getBoundary().exterior.centreZ );
+			writer.attribute( "exterior_modes",
+			                  static_cast<int>( solver->exteriorCoefficients().size() ) );
+			std::vector<double> const &a = solver->exteriorCoefficients();
+			for ( std::size_t m = 0; m < a.size(); ++m )
+				writer.attribute( "exterior_a" + std::to_string( m + 2 ), a[ m ] );
+		}
+		if ( config->getBoundary().limiter.given )
+		{
+			writer.attribute( "limiter_r", config->getBoundary().limiter.r );
+			writer.attribute( "limiter_z", config->getBoundary().limiter.z );
+			writer.attribute( "psi_boundary", solver->psiBoundary() );
+		}
 
 		// A reader is entitled to know which nodes are the solution and which
 		// are a continuation of it past Gamma_h. Zero on the fitted path.

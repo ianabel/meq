@@ -2053,3 +2053,161 @@ BOOST_AUTO_TEST_CASE( the_coils_take_the_sources_permeability )
 		ConfigError,
 		[]( ConfigError const & e ) { return e.getKey() == "coils[0].Mu0"; } );
 }
+
+
+/*
+ * THE TWO FREE-BOUNDARY BORDERS, AND WHAT THE SCHEMA REFUSES RATHER THAN
+ * RESOLVES.
+ *
+ * setBoundaryFluxPoint() and setExteriorCoupling() have been library capability
+ * since FB-3 and FB-5 and had no route from a configuration file. Wiring them
+ * creates three ways for a file to describe something incoherent, and each is
+ * refused with a message naming what to change -- because all three would
+ * otherwise PARSE, SOLVE and CONVERGE, at full order, to an equilibrium the
+ * file did not describe. That is this project's standing failure mode and the
+ * reason the refusals are tested rather than the acceptances.
+ */
+BOOST_AUTO_TEST_CASE( the_free_boundary_borders_refuse_what_they_cannot_honour )
+{
+	auto const refuses = []( std::string const & text, std::string const & key )
+	{
+		BOOST_CHECK_EXCEPTION( parse( text ), ConfigError,
+			[&]( ConfigError const & e ) { return e.getKey() == key; } );
+	};
+
+	std::string const halfDisc =
+		"[mesh]\n"
+		"RMin = 0.0\n"
+		"RMax = 1.7\n"
+		"ZMin = -1.7\n"
+		"ZMax = 1.7\n"
+		"\n"
+		"[discretisation]\n"
+		"PolynomialDegree = 2\n"
+		"\n";
+
+	std::string const normalisedSource =
+		"[source]\n"
+		"Type = \"mhd\"\n"
+		"Normalised = true\n"
+		"PsiAxis = 0.1\n"
+		"PPrimeFile = \"examples/fb-pprime.dat\"\n"
+		"GGPrimeFile = \"examples/fb-ggprime.dat\"\n";
+
+	std::string const plainSource =
+		"[source]\n"
+		"Type = \"mhd\"\n"
+		"PPrimeFile = \"examples/fb-pprime.dat\"\n"
+		"GGPrimeFile = \"examples/fb-ggprime.dat\"\n";
+
+	// THE COUPLING ALONE IS ACCEPTED, which is the control: without it the
+	// refusals below would pass on a schema that refuses everything.
+	BOOST_CHECK_NO_THROW( parse( halfDisc + normalisedSource
+		+ "\n[boundary.exterior]\nRadius = 1.5\nModes = 4\n" ) );
+
+	Configuration const good = parse( halfDisc + normalisedSource
+		+ "\n[boundary.exterior]\nRadius = 1.5\nCentreZ = 0.25\nModes = 6\n"
+		+ "\n[boundary.limiter]\nR = 1.2\nZ = 0.0\n" );
+	BOOST_TEST( good.getBoundary().exterior.given );
+	BOOST_TEST( good.getBoundary().exterior.radius == 1.5 );
+	BOOST_TEST( good.getBoundary().exterior.centreZ == 0.25 );
+	BOOST_TEST( good.getBoundary().exterior.modes == 6 );
+	BOOST_TEST( good.getBoundary().limiter.given );
+	BOOST_TEST( good.getBoundary().limiter.r == 1.2 );
+
+	// A LIMITER WITHOUT A NORMALISATION. psi_bnd is read ONLY through
+	// Psi = ( psi - psi_bnd )/( psi_ax - psi_bnd ), so on a plain source it is
+	// an unknown nothing consumes: the border would be solved and the answer
+	// discarded.
+	refuses( halfDisc + plainSource + "\n[boundary.limiter]\nR = 1.2\nZ = 0.0\n",
+	         "boundary.limiter.R" );
+
+	// A LIMITER ON THE AXIS. r = 0 is not a limiter, and the nearest potential
+	// dof to it is in an element whose flux mass ( r q, v ) degenerates.
+	refuses( halfDisc + normalisedSource
+	         + "\n[boundary.limiter]\nR = 0.0\nZ = 0.0\n",
+	         "boundary.limiter.R" );
+
+	// BOTH COORDINATES OR NEITHER. A limiter given only its height sits at
+	// r = 0, which is the case above wearing a different spelling.
+	refuses( halfDisc + normalisedSource + "\n[boundary.limiter]\nZ = 0.0\n",
+	         "boundary.limiter.R" );
+
+	// TWO DESCRIPTIONS OF Gamma. [boundary.exterior] makes it a semicircle about
+	// the axis; [boundary.shape] makes it a closed surface that may not reach
+	// r = 0. They are alternatives, and silently taking one is how a run ends up
+	// solving on a domain nobody asked for.
+	refuses( halfDisc + normalisedSource
+	         + "\n[boundary.exterior]\nRadius = 1.5\nModes = 4\n"
+	         + "\n[boundary.shape]\nType = \"miller\"\nR0 = 1.0\n"
+	           "MinorRadius = 0.3\nElongation = 1.4\n",
+	         "boundary.exterior.Radius" );
+
+	// A DATUM ON Gamma BESIDE THE TRANSMISSION CONDITION. Gamma carries the
+	// exterior map, not prescribed data; imposing both is two conditions on one
+	// curve.
+	refuses( "[mesh]\nRMin = 0.0\nRMax = 1.7\nZMin = -1.7\nZMax = 1.7\n\n"
+	         "[discretisation]\nPolynomialDegree = 2\n\n"
+	         "[source]\nType = \"soloviev\"\nA = -0.52\n\n"
+	         "[boundary]\nType = \"exact\"\n\n"
+	         "[boundary.exterior]\nRadius = 1.5\nModes = 4\n",
+	         "boundary.exterior.Radius" );
+
+	// A TRUNCATION OF NOTHING. The exterior map is exact mode by mode, so the
+	// count is the only approximation in it; zero modes is a coupling that
+	// transmits nothing.
+	refuses( halfDisc + normalisedSource
+	         + "\n[boundary.exterior]\nRadius = 1.5\nModes = 0\n",
+	         "boundary.exterior.Modes" );
+	refuses( halfDisc + normalisedSource
+	         + "\n[boundary.exterior]\nRadius = -1.5\nModes = 4\n",
+	         "boundary.exterior.Radius" );
+}
+
+/*
+ * THE BUMP GUESS, AND WHY A RAMP IS NOT ENOUGH ONCE THE BOUNDARY IS FREE.
+ *
+ * A ramp is antisymmetric in z: it exists so that psi = 0 falls in the INTERIOR
+ * and the trivial branch is not a fixed point. It describes no plasma. A
+ * free-boundary problem has more than one converged solution -- the freegs4e
+ * rehearsal measured three, with the physical one BETWEEN the two a ramp sweep
+ * reaches -- so the guess is part of the problem statement rather than an
+ * optimisation, and a core is what selects the branch that is one.
+ */
+BOOST_AUTO_TEST_CASE( the_bump_guess_describes_a_core_and_refuses_one_that_is_not )
+{
+	auto const guess = []( std::string const & body )
+	{
+		return minimal() + "\n[initialguess]\nType = \"bump\"\n" + body;
+	};
+	auto const refuses = []( std::string const & text, std::string const & key )
+	{
+		BOOST_CHECK_EXCEPTION( parse( text ), ConfigError,
+			[&]( ConfigError const & e ) { return e.getKey() == key; } );
+	};
+
+	Configuration const good = parse( guess(
+		"CentreR = 1.0\nCentreZ = 0.1\nRadiusR = 0.4\nRadiusZ = 0.6\n"
+		"Amplitude = 0.2\n" ) );
+	BOOST_TEST( ( good.getInitialGuess().type == meq::InitialGuessType::Bump ) );
+	BOOST_TEST( good.getInitialGuess().centreR == 1.0 );
+	BOOST_TEST( good.getInitialGuess().radiusZ == 0.6 );
+
+	// RadiusZ defaults to RadiusR, which is the circular case.
+	Configuration const circular = parse( guess(
+		"CentreR = 1.0\nRadiusR = 0.4\nAmplitude = 0.2\n" ) );
+	BOOST_TEST( circular.getInitialGuess().radiusZ == 0.4 );
+
+	// A BUMP REACHING THE AXIS. psi is pinned there and the operator's 1/r is
+	// not integrable through it, so a guess straddling r = 0 describes no
+	// plasma however plausible its peak.
+	refuses( guess( "CentreR = 0.3\nRadiusR = 0.4\nAmplitude = 0.2\n" ),
+	         "initialguess.RadiusR" );
+	refuses( guess( "CentreR = 0.0\nRadiusR = 0.4\nAmplitude = 0.2\n" ),
+	         "initialguess.CentreR" );
+
+	// A FLAT BUMP IS THE TRIVIAL BRANCH, which is exactly what a guess exists
+	// to keep the iteration off.
+	refuses( guess( "CentreR = 1.0\nRadiusR = 0.4\nAmplitude = 0.0\n" ),
+	         "initialguess.Amplitude" );
+}
