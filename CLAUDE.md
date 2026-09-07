@@ -350,13 +350,56 @@ converted to documentation), `INVERSION-PLAN.md`
 built, FB-3 to FB-6 open). Each has a section below; the free-boundary one is
 new and short.
 
-### Free boundary: FB-A, FB-0 and FB-1 are done; the plasma is what remains
+### Free boundary: MEQ SOLVES A MACHINE CASE, AND IT AGREES WITH freegs4e
 
-**`ROADMAP.md` item 1, and the largest remaining item in the tree.** The plan is
-`FREE-BOUNDARY-PLAN.md`. **Nothing SOLVES yet** — there is no coupled solve on
-any mesh — but four things around it are built and measured, and the sentence
-this paragraph used to carry, *"nothing of the method is built"*, is no longer
-one of them.
+**`ROADMAP.md` item 1.** The plan is `FREE-BOUNDARY-PLAN.md`. This heading has
+read *"nothing of the method is built"*, then *"nothing SOLVES yet"*, then
+*"FB-A, FB-0 and FB-1 are done; the plasma is what remains"*. As of **2026-09-06
+MEQ solves a free-boundary tokamak equilibrium and reproduces an independent
+code's answer.**
+
+**THE CASE IS `freegs4e`'s LIMITED CIRCULAR TOKAMAK** — vertical-field coils
+only, so no X-point exists in range and the boundary is set by a limiter, which
+is the one configuration MEQ's pointwise plasma-support test can represent. Same
+four coils, same profile shape, same prescribed `I_p = 300 kA`, same limiter
+point. MEQ solves it on a **gmsh half-disc with the conductors meshed to**, with
+the exterior DtN on a semicircle at `ρ_Γ = 2.4`, and with `ψ_ax`, `ψ_bnd`, the
+profile scale and ten Gegenbauer coefficients all unknowns of **one** bordered
+Newton — **7 Newton steps**:
+
+| | freegs4e | MEQ, `k = 3` | apart |
+|---|---|---|---|
+| `ψ_ax` | 9.483141e-02 | **9.484390e-02** | **1.3e-04** |
+| `ψ_bnd` | 2.781829e-02 | **2.781989e-02** | **5.8e-05** |
+| profile amplitude | 1, by construction | **0.998902** | 1.1e-03 |
+| `ψ` over the reference's whole box | | | rel `L2` **5.3e-03** |
+
+Free boundary by a Dirichlet-to-Neumann map against free boundary by von Hagenow
+Green's functions; HDG Newton against finite-difference Picard; C++ against
+Python. **They share the equation and essentially no code.**
+
+**AND `k = 2` CONVERGES TO SOMETHING ELSE ENTIRELY, WHICH IS THE PART TO READ
+BEFORE TRUSTING A FREE-BOUNDARY RUN.** On the same mesh and the same guess,
+degree 2 converges — 17 Newton steps, every border at machine zero, the current
+delivered to seven figures — to `ψ_ax = 2.734289e+00` against 9.48e-02, because
+**`ψ_ax` is the largest NODAL value of `ψ_h` and nothing says the largest nodal
+value is a magnetic axis**: it latched onto a single dof spiking at the plasma
+edge, next to nodal values of 0.98, and the current border then raised the
+profile scale by 980 to keep `∫F/r` at `μ₀I_p`. Refining the mesh at degree 2
+gives a *third* answer. **`p`-refinement is what reaches the physical branch and
+`h` is not.** `FREE-BOUNDARY-PLAN.md` §7.16 is the record, and the diagnostic it
+asks for — compare `ψ_ax` against the field's own maximum, or better against
+`meq::CriticalPointFinder`'s O-point, which IN-A already built — **is not
+written**.
+
+**What is still open** is everything that decides WHICH equilibrium a
+free-boundary solve reports: a guess that is not already the answer does not
+reach it (a cold bump wanders for 200 iterations), the toy fixture of §7.14 finds
+a wall-hugging annulus at every coil current tried, and §7.18 records half of
+§7.14's and §7.15's recorded verdicts as false once the `ψ_bnd` defect was
+repaired.
+
+The pieces underneath, all measured:
 
 | | |
 |---|---|
@@ -3060,6 +3103,21 @@ trivial branch. Once the boundary is free the guess **chooses which equilibrium
 is reported**, so it is part of the problem statement — the same multiplicity the
 freegs4e rehearsal measures at 9.4% across three solve routes. Measured here: a
 ramp does not converge on this problem at all, and the bump does in 7 steps.
+
+**A NORMALISED PROFILE TABLE HOLDS `dp/dΨ`, NOT `dp/dψ`, AND WITH A PRESCRIBED
+CURRENT THE DIFFERENCE IS INVISIBLE.** `meq::NormalisedMHDSource::f` evaluates
+`F = scale·( μ₀r²p′( Ψ ) + gg′( Ψ ) )/span`, so the file is differentiated with
+respect to `Ψ` and converting another code's `dp/dψ` arrays means MULTIPLYING by
+`ψ_ax − ψ_bnd`. That is `examples/rotating-density.dat`'s trap, and
+`[source] PlasmaCurrent` **hides it completely**: both profiles carry the same
+wrong factor, the scale is an unknown, and the border absorbs it. Measured on the
+§7.16 machine case with the tables a factor of `span` too small, the run
+converged to the right equilibrium in every digit and the only tell was a scale
+of **6.713e-02 against a span of 6.689e-02** where it should be `O(1)`. **So
+read the reported profile scale**: on a correctly converted table it is 0.9989.
+With the amplitude fixed instead there is nothing to absorb it and the run is a
+plasma fifteen times too weak — which for a while looked like a failure of the
+amplitude-fixed formulation and was not.
 
 **AND A TABULATED NORMALISED PROFILE MUST COVER THE RANGE THE ITERATE VISITS.**
 `meq::SplineProfile` **clamps** outside its knots — deliberately, since a linear

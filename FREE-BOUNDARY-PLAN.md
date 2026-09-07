@@ -2174,80 +2174,204 @@ on a core it is interior. That is one integer per iteration and it distinguishes
 cannot.
 
 
-### 7.16 A limited tokamak: freegs4e has one now, MEQ does not converge on it
+### 7.16 A limited tokamak, and MEQ SOLVES IT — the first machine case
 
-**Built 2026-09-06.** `tools/freegs4e-benchmark/fgsref.py` gained
-`H_limited_circular`, and it is **the only limited case in that table** — every
-other machine there is diverted, which §10.3 records as the configuration MEQ's
-pointwise support test cannot represent.
+**MEQ REPRODUCES freegs4e's FREE-BOUNDARY LIMITED EQUILIBRIUM, 2026-09-06.** Same
+four coils, same profile shape, same prescribed `I_p`, same limiter point; MEQ
+solving the coupled free-boundary problem on a gmsh half-disc with the
+conductors meshed to and the exterior DtN on a semicircle at `ρ_Γ = 2.4`, with
+`ψ_ax`, `ψ_bnd`, the profile scale and the Gegenbauer coefficients all unknowns
+of one bordered Newton.
 
-**THE CONSISTENT INPUTS WERE SOLVED FOR RATHER THAN GUESSED, WHICH IS §7.15'S
-RECOMMENDATION CARRIED OUT.** The machine is vertical-field coils only — no
-divertor, so no X-point exists in range and the boundary can only be the flux
-surface through the limiter. freegs4e's own control system was then asked to
-hold a circular plasma of minor radius 0.35 at `R₀ = 1.0` with `I_p = 3e5 A`,
-and the currents it **solved for** are the prescribed input both codes share:
+`k = 3`, 3802 elements, ten exterior modes:
 
-| | | |
-|---|---|---|
-| P1U / P1L | `(1.75, ±0.90)` | **−182364 A** |
-| P2U / P2L | `(0.55, ±1.10)` | **−46186 A** |
+| | freegs4e | MEQ | apart |
+|---|---|---|---|
+| `ψ_ax` | 9.483141e-02 | **9.484390e-02** | **1.3e-04** |
+| `ψ_bnd` | 2.781829e-02 | **2.781989e-02** | **5.8e-05** |
+| profile amplitude | 1, by construction | **0.998902** | 1.1e-03 |
+| `I_p` | 3.0e+05 A | 3.000000e+05 A | it is the constraint |
+| `ψ`, over the reference's whole box | | | rel `L2` **5.3e-03** |
+| `ψ`, inside the reference's core | | | rel `L2` **2.5e-03** |
+| `ψ`, worst node | | | rel `L∞` 1.2e-01, **at a conductor** |
 
-It converges, reports `boundary: limited`, and is circular — `R₀ = 1.007`,
-`a = 0.330`, `A = 3.05`, `κ = 1.004`, `δ = +0.053` — with a GS residual of
-**2.2e-09** against its own 4th-order operator.
+**7 Newton steps to 6.24e-15**, and **5 steps to 1.56e-16** with the amplitude
+fixed at freegs4e's own value instead of the current prescribed.
 
-**AND THE TWO CODES' NORMALISED FLUX RUNS OPPOSITE WAYS**, which is a trap worth
-one line: freegs4e's `psi_norm` is **0 on the axis** and 1 at the boundary,
-MEQ's `Ψ` is **0 at the boundary** and 1 on the axis. So freegs4e's
-`(1 − ψ_n^α)^β` at `α = 1, β = 2` is MEQ's **`Ψ²`**. Checked rather than
-reasoned: read against MEQ's `Ψ`, the saved arrays are `C·Ψ²` to a relative
-spread of **1.3e-14**. `j = 2` also satisfies FB-4's precondition, so the
-profile is admissible without adjustment.
+**AND THE MESH IS NOT CONVERGED, WHICH IS THE HONEST CAVEAT ON THE TABLE.** At
+six modes MEQ's own answer moves by 0.3% between its two meshes at `k = 3` —
+`ψ_ax` 9.484057e-02 on 1601 elements against 9.511633e-02 on 3802 — so the
+1.3e-04 above is inside MEQ's own mesh scatter and should be read as *about a
+part in a thousand*, not as four figures. The reference is separately 2.0% from
+its own Richardson limit at 129² (below), which is why the comparison is against
+its 129² run and prescribes the same limiter POINT to both codes.
 
-**AND THE CAUSE WAS FOUND AND FIXED, 2026-09-06 — see §7.17.** It was one
-argument: `setNormalisation( s )` where `setNormalisation( s, sB )` was meant,
-zeroing `ψ_bnd` for the whole window in which the Jacobian and every
-plasma-current block are assembled. What follows is the failure as it was
-diagnosed, kept because the diagnosis is the useful part.
+**THE EXTERIOR TRUNCATION IS ONE OF THE ERRORS AND IT IS MEASURABLE IN ONE KEY.**
+`[boundary.exterior] Modes` on the coarse mesh at `k = 3`, everything else fixed:
 
-**MEQ DID NOT CONVERGE ON IT, AND THE SHAPE OF THE FAILURE WAS SPECIFIC.** Given
-the same coils, the same profiles and the same current, on a half-disc of radius
-2.40 enclosing both plasma and conductors:
+| `N` | 4 | 6 | 10 | 14 |
+|---|---|---|---|---|
+| `ψ_ax` | 9.678034e-02 | 9.484057e-02 | **9.455354e-02** | 9.457683e-02 |
+
+so `N = 6` costs **0.3%**, `N = 10` is converged, and 10 → 14 moves it by 0.02%.
+Raising it from 6 to 10 on the fine mesh is what takes `ψ_bnd` from 4.8e-03 to
+**5.8e-05** of the reference and the field `L2` from 1.0e-02 to **5.3e-03**, so
+the truncation was the largest single error in the boundary flux.
+**And the raw coefficients cannot be read as a decay test**: this run reports
+`a2 = −2.14e-01`, `a4 = −4.65e-02`, `a6 = +2.53e-01`, which looks like no decay
+at all, because `a_n` carries the mode's own normalisation through
+`ExteriorDtN::mass( n )`. The sweep is the test; the coefficients are not. That
+is the diagnostic the `Modes` study of `examples/free-boundary-halfdisc.toml`
+asked for, and it wants writing as `|a_n|·√mass( n )` or as this sweep, not as a
+glance at the printed line.
+
+**THE `L∞` IS AT A CONDUCTOR AND THE CONDUCTOR MODELS DIFFER, BUT THAT IS NOT
+YET SEPARATED FROM THE MESH.** The worst node is (1.9, −0.8), the corner of the
+reference box, 0.18 m from the coil at (1.75, −0.90); freegs4e's coils are
+FILAMENTS and MEQ's are rectangles of half-width 0.05, which differ by a
+quadrupole term of order `( w/d )²` ≈ 3e-3 relative there. Excluding 0.30 m
+around every conductor the same comparison reads rel `L2` **7.2e-03** and rel
+`L∞` **1.8e-02**. **The obvious test failed to confirm it**: shrinking MEQ's
+conductors to half-width 0.01 moved `ψ_ax` to 9.328077e-02, 1.6% the WRONG way —
+but that run also re-meshed (2875 elements against 1601, with 0.012 m cells
+inside the conductors), so two things changed at once and it establishes
+nothing. Doing it properly means either one mesh with both coil sizes, or
+rebuilding the reference on `freegs4e.shaped_coil.ShapedCoil` so that both codes
+carry the same rectangles. Neither is done.
+
+**THE FAILURE THIS SECTION USED TO RECORD WAS §7.17's DEFECT, AND THAT IS NOW
+THE THIRD TIME.** The four-good-steps-then-a-floor-that-creeps-upward history is
+gone. §7.12b was the first (the two borders together), §7.14's coil sweep the
+second, this the third. **A failure measured under a defect is not a property of
+the method**, and this file has now paid for that lesson three times in one day.
+
+**AND `k = 2` GIVES A DIFFERENT ANSWER ENTIRELY, WHICH IS THE FINDING RATHER
+THAN A FOOTNOTE.** On the SAME mesh at degree 2, started from the SAME guess,
+the solve converges perfectly well — 17 Newton steps, 5.70e-01 → 2.67e-11 — and
+reports
 
 ```
-it 0  5.164750e-02      it 4  4.633744e-03   <- the floor
-it 1  3.670491e-02      it 5  4.635750e-03
-it 2  2.400555e-02      ...   creeping UP by about 0.05% a step
-it 3  4.657920e-03      it 25 4.680089e-03
+psi_ax = 2.734289e+00        against a reference 9.483141e-02
+scale  = 9.807407e+02        against 1
+I_p    = 3.000004e+05 A      against the 3.000000e+05 asked for
+psi_ax - max psi_h = 0.000e+00
 ```
 
-**Four good steps, a factor of eleven, and then a floor it drifts upward from.**
-The drift is the line search accepting its least-bad trial when none improves —
-which is what that code is written to do — so the iteration is sitting where
-**no Newton direction is a descent direction**. That is a Jacobian statement, not
-a step-length one.
+Every border satisfied at machine zero, the current delivered to seven figures,
+and the equilibrium nonsense.
 
-**THE CONFIGURATION IS NOT THE PROBLEM, WHICH WAS CHECKED BEFORE BLAMING THE
-SOLVER.** The limiter contact was suspected first, since MEQ's `ψ_bnd` came back
-72% high — but `ψ` at the pinned point `(1.337, 0)` in freegs4e's own solution is
-**2.801e-02 against its `ψ_bndry` of 2.782e-02**, 0.7% apart. The point is right.
-MEQ's numbers are wrong because it is **stuck at 9% of its initial residual**,
-not because it was asked the wrong question.
+**`ψ_ax` IS A SPIKE, AND READING THE GridFunction IS WHAT SAYS SO.** `ψ_ax` is
+*the largest nodal value of `ψ_h`* — a definition chosen because it makes the
+border row exactly `−e_j` — and nothing in it says the largest nodal value is a
+magnetic axis. Parsed straight out of `_psi.gf`, the value 2.734289e+00 sits at
+ONE dof of one element, whose vertices are
 
-**WHAT IS NEW IN THIS PROBLEM**, and therefore where to look: coils through
-`CoilAugmentedNormalisedSource`, six exterior modes rather than four, and **SI
-units**, where the coil currents are `1.8e5`, `μ₀` is `1.26e-6` and `ψ` is
-`9e-2` — a dynamic range of eleven orders across the bordered system. The border
-rows are **not scaled** against each other: this file records `γ = ‖c‖` frozen
-from the first iterate for `ψ_ax`'s constraint precisely because *"`G` is a flux
-and `R` is a trace residual, so the two cannot simply be concatenated"* — and
-**no such factor was written for the current row or the boundary-flux row**.
-That is the first thing to measure: a differenced check of each border row and
-column against the assembled one, on this problem, in these units.
+```
+( 1.1499, -0.3884 )   ( 1.1104, -0.3097 )   ( 1.0693, -0.3846 )
+```
 
-**THE REFERENCE ITSELF IS NOT CONVERGED AT 129², WHICH IS NEW FOR THIS
-BENCHMARK.** Over the scan:
+— on the reference's own LCFS, below the midplane. The next three nodal values
+in the whole field are 9.82e-01, 9.71e-01 and 9.13e-01, and a few elements away
+it is 1.06e-01; `ψ*` sampled onto the output grid peaks at **8.64e-02**, thirty
+times smaller than the `ψ_ax` the solver reports. So the constraint
+`ψ_ax = max ψ_h` is met exactly, by a value no consumer of the answer can see.
+
+**AND THE RUNAWAY IS SELF-CONSISTENT, WHICH IS WHAT MAKES IT DANGEROUS RATHER
+THAN MERELY WRONG.** A spurious `ψ_ax` inflates the span; `Ψ = ( ψ − ψ_bnd )/(
+ψ_ax − ψ_bnd )` then collapses to a few per cent over the real plasma; and the
+current border raises the scale by the same factor to hold `∫F/r` at `μ₀I_p`.
+The three unknowns conspire. **A constraint satisfied by the artefact it was
+supposed to detect** is this file's most-repeated shape, and this is the sharpest
+instance of it yet: nothing in the residual, the constraint residuals or the
+convergence history distinguishes this run from the good one.
+
+**THE SWEEP FOUND THE SAME CLASS OF THING INDEPENDENTLY**, on the toy half-disc
+and in a different place — there `ψ_ax` latched onto a single node in the corner
+element where `Γ` meets the axis, reading 8.12e-02 against a field maximum of
+2.50e-02. See §7.14 item 3. **So the diagnostic is to compare `ψ_ax` against the
+field's own maximum**, and better still against `meq::CriticalPointFinder`'s
+O-point, which IN-A built and which no free-boundary path consults. That check
+is not written.
+
+**`p`-REFINEMENT IS WHAT REACHES THE PHYSICAL BRANCH.** Degree 2 and degree 3 on
+one mesh of 1601 elements, one changed key, same guess:
+
+| | elements | Newton | `ψ_ax` | scale | verdict |
+|---|---|---|---|---|---|
+| `k = 2` | 1601 | 17 | 2.734289e+00 | 9.81e+02 | a spike at the plasma edge |
+| `k = 2` | **3802** | 168 | 6.250994e-02 | 1.35e-03 | **a THIRD branch**, `ψ_bnd = −7.72e-02` |
+| **`k = 3`** | 1601 | **7** | **9.484057e-02** | **1.0018** | the equilibrium |
+| **`k = 3`** | 3802 | **7** | 9.511633e-02 | 1.0055 | the equilibrium |
+
+**So `h`-refinement does NOT cure it and `p`-refinement does.** The finer mesh at
+degree 2 converges cleanly, in 168 steps to 1.18e-14, onto a third equilibrium
+again — this one with a NEGATIVE boundary flux and a plasma a hundred times too
+weak. Three meshes, three answers, every one of them satisfying every border at
+machine zero.
+
+That is the pattern `tools/freegs4e-benchmark/README.md` already records from the
+fixed-boundary side — *"`k = 2, refine = 1` DOES NOT CONVERGE on MAST or DIII-D
+while `k = 3` does on the same mesh"* — appearing on the free-boundary path, and
+with a worse failure mode: there it failed to converge, here it converges to
+something else.
+
+**THE PROFILE TABLE IS `dp/dΨ` AND freegs4e's IS `dp/dψ`, AND WITH A CURRENT
+BORDER THE ERROR IS INVISIBLE.** `meq::NormalisedMHDSource::f` evaluates
+
+```
+F = scale * ( mu0 r^2 pprime( Psi ) + ggprime( Psi ) ) / span
+```
+
+so a table holds the derivative with respect to **`Ψ`**, and converting
+freegs4e's arrays means MULTIPLYING by the span. Getting it wrong is
+`examples/rotating-density.dat`'s trap exactly — and with `[source]
+PlasmaCurrent` set it produces **no symptom at all**: both profiles carry the
+same wrong factor, the scale is an unknown, and the border absorbs it. Measured,
+with the tables a factor of `span` too small the scale came back as **6.713e-02
+against a span of 6.689e-02** and the equilibrium was right to every digit. The
+tell is a scale that is not `O(1)`; with the tables corrected it reads
+**1.001795**. With the amplitude FIXED there is nothing to absorb it and the run
+is a plasma fifteen times too weak.
+
+**AND THE AMPLITUDE-FIXED PROBLEM CLOSES HERE, WHICH §7.13's FINDING 1 SAYS IT
+SHOULD NOT.** Dropping `PlasmaCurrent` and fixing the amplitude at freegs4e's
+own value: **5 Newton steps to 1.56e-16**, `ψ_ax = 9.479334e-02` and
+`ψ_bnd = 2.790257e-02`, both within 4e-04 and 3e-03 of the reference. §7.13
+argues that a confined equilibrium at fixed amplitude is a non-linear
+EIGENVALUE problem and does not close, and the sweep confirms that on the toy
+configuration at every coil current and both limiters. **Both are true, and the
+difference is consistency of the inputs**: freegs4e's amplitude IS an eigenvalue
+of this problem, because it came from an equilibrium; an amplitude chosen by eye
+is not an eigenvalue of anything and no solution exists near it. That is §7.15's
+own recommendation — *choose consistent inputs* — arriving as a measurement
+rather than as advice, and it is the strongest evidence for it in this file.
+
+**WHAT HAD TO BE FIXED IN THE DRIVER TO RUN THIS AT ALL, AND IT WAS FB-6's OWN
+CONFIGURATION THAT WAS UNREACHABLE.** `[boundary.exterior]` beside `[mesh] File`
+— a gmsh half-disc with the conductors meshed to, which is what §7.9 and
+`tools/mesh/halfdisc.py` exist for — did not run, and BOTH of the preconditions
+that block guards were mis-wired on that path:
+
+* the axis test read `[mesh] RMin`, which a file mesh leaves at its **default of
+  zero**, so it passed vacuously on a mesh nobody had looked at. A `.msh` whose
+  inner edge sat at `r = 0.05` would have sailed through the one check written
+  to stop it;
+* the radius test compared `Γ` against `[mesh] RMax`, also zero, so it refused
+  **every** file outright — with a message about a box the run does not have;
+* and `backgroundCellSize()` computed `( 0 − 0 )/( 0 · 1 )`, so the transfer
+  path's search length was **zero** and `mfem::VertexConePath` aborted on the
+  first vertex of `Γ_h`, five frames deep in MFEM.
+
+All three now read the mesh: `mfem::Mesh::GetBoundingBox` for the two
+preconditions and the largest element diameter for the search length, which is
+what the adaptive path already uses. The box branch is left computing exactly
+what it computed before, bit for bit, so no existing configuration moves.
+**`[mesh] File` had been wired for the FITTED path only** —
+`theDriverTakesItsGridFromAMeshItDidNotBuild` covers the output grid — and every
+CURVED-path quantity still read the box keys.
+
+**THE REFERENCE IS NOT CONVERGED AT 129², AND THAT IS WHY THE COMPARISON PINS THE
+LIMITER TO A POINT.** Over the grid scan:
 
 | grid | `ψ_ax` | `ψ_bnd` | `a` | `R₀` | GS residual (2nd order) |
 |---|---|---|---|---|---|
@@ -2255,21 +2379,58 @@ BENCHMARK.** Over the scan:
 | 257² | 9.337971e-02 | 2.649111e-02 | 0.339 | 1.004 | 3.974e-04 |
 | 513² | 9.308752e-02 | 2.622462e-02 | 0.341 | 1.003 | 9.857e-05 |
 
-**Both flux values converge at about 2.3** — the successive differences are
-1.452e-03 then 2.922e-04 in `ψ_ax`, and 1.327e-03 then 2.665e-04 in `ψ_bnd`, a
-ratio of 4.98 each time — and the GS residual falls at 2.0, so the solution
-itself is converging cleanly. Richardson-extrapolated, the answers are
-**`ψ_ax` ≈ 9.3014e-02** and **`ψ_bnd` ≈ 2.6158e-02**.
+Successive differences fall by 4.98 each time, so both flux values converge at
+about 2.3 and Richardson gives `ψ_ax ≈ 9.3014e-02`, `ψ_bnd ≈ 2.6158e-02` — against
+which **129² is 2.0% and 6.3% out**, where the diverted cases in that table are
+converged at 129² to six figures.
 
-**Against those, 129² is 2.0% and 6.3% out**, where the diverted cases in this
-table are converged at 129² to six figures. The mechanism is that a **limited**
-boundary is a maximum over the limiter ring — a pointwise operation on a discrete
-set — where a diverted one is a saddle located by interpolation to sub-cell
-accuracy. So a limited reference converges more slowly in the grid than a
-diverted one, and **129² is not good enough for this case**: whatever MEQ is
-eventually compared against here should be the 513² run, and a comparison
-claiming better than about 1e-03 against the 129² one would be measuring the
-reference.
+**THE MECHANISM IS THAT freegs4e's LIMITER IS A GRID RING**, and finding it is
+what made the comparison well posed. `FreeGSProfileMixin.attach_limiter` builds
+the innermost layer of grid CELLS inside the wall polygon and takes `ψ_bndry` to
+be the maximum over that layer. On this case that maximum is attained at
+**(1.3375, −0.0125)**, which is 0.0123 m — one cell — inside the limiter circle
+of radius 0.35, so the boundary flux carries an `O( h )` error. Measured on the
+same field, the maximum of `ψ` on the TRUE limiter circle is **2.5745e-02** at
+θ ≈ 122°, against a reported `ψ_bndry` of 2.7818e-02: the reference's plasma
+boundary is 8% inside the surface the limiter would actually cut, and it does not
+touch the limiter anywhere.
+
+**So the comparison prescribes the limiter as a POINT rather than as a curve**,
+and gives both codes the same one: MEQ's `[boundary.limiter] R = 1.3375, Z = 0`,
+which is where the reference's own ring maximum sits. That is a well-posed
+problem both codes solve identically, it is what MEQ's FB-3 border implements,
+and it takes the contact-finding logic out of the comparison. **It also caps what
+the agreement can mean**: MEQ pins `ψ_bnd` at the *nearest potential dof*, which
+differs from the requested point by `O( h )` and moves `ψ_bnd` by
+`h·|∂ψ/∂r| ≈ 0.25 h` — so a limiter point that is not a dof is a first-order
+error in the boundary condition, not an `O( h^{k+1} )` one. Choosing the point to
+be a dof, or comparing the reference at the dof MEQ actually used, is the way to
+remove it and is not done.
+
+**THE GUESS IS BUILT FROM THE SOURCE, NOT INTERPOLATED FROM THE ANSWER**, because
+freegs4e's `ψ` exists only on its own 1.6 × 1.6 box while MEQ's domain is a
+half-disc of radius 2.6. What IS available everywhere is `Jtor` on the 2199 core
+cells and the four coil currents, and `ψ` is the Green's-function sum of them in
+the same `ψ → 0 at infinity` gauge both codes use. Summed onto a 129² grid over
+the half-disc it reproduces the reference's own `ψ_axis` to **2.5e-04** — which
+is a free check on the whole conversion, since the sum and the PDE solve share
+nothing but the source. Two independent checks of the inputs came out at
+round-off on the way: the filament coil field against the reference's saved
+`coil_psi` at **1.0e-15**, and `F = μ₀r²p′( Ψ ) + gg′( Ψ )` against
+`μ₀ R J_φ` on the core at **4.8e-16**.
+
+**A COLD START DOES NOT REACH IT.** The bump guess of
+`examples/free-boundary-halfdisc.toml`'s kind wanders for 200 iterations around
+`‖r‖ ≈ 1.3` and never converges, at `k = 2` on 4176 elements. So on this problem
+the guess is part of the problem statement, exactly as §7.13 and the
+freegs4e rehearsal's three-root sweep both say.
+
+**WHAT IS LEFT.** The comparison is at 9.5e-03 and the pieces of that are known
+and separable: the conductor shape (`L∞`, worth 1.4e-01 → 1.8e-02 by exclusion),
+the limiter dof quantisation (`O( h )` in `ψ_bnd`), the mesh (1601 elements over
+a half-disc of radius 2.4 is coarse), and the reference's own 2% at 129². None
+of them is the solver. A regression case belongs in `tests/convergence/`, and the
+mesh, the two tables and the guess are the fixture it needs.
 
 
 ### 7.17 The defect: one argument where two were meant

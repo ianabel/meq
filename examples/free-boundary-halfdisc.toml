@@ -110,20 +110,24 @@ Radius = 1.5
 CentreZ = 0.0
 Modes = 4
 
-# THE LIMITER IS DELIBERATELY ABSENT AND THAT IS A KNOWN GAP RATHER THAN A
-# CHOICE OF EXAMPLE.
+# THE LIMITER IS ABSENT BECAUSE AN EXAMPLE SHOULD DEMONSTRATE ONE THING, AND
+# THIS COMMENT USED TO SAY SOMETHING STRONGER THAT IS NO LONGER TRUE.
 #
 #   [boundary.limiter]
 #   R = 1.2
 #   Z = 0.0
 #
-# would make psi_bnd an unknown too, pinned by psi at the nearest potential dof
-# to that point -- FB-3, and the third border. It works on its own and it does
-# NOT yet converge on top of the exterior coupling; FREE-BOUNDARY-PLAN.md
-# section 7.13 is the record of what was tried. With it absent psi_bnd stays at
-# zero, so the plasma edge here is the psi = 0 contour rather than a limiter
-# contact, and this file is HALF of a free-boundary problem: the exterior is
-# solved for and the edge is not.
+# makes psi_bnd an unknown too, pinned by psi at the nearest potential dof to
+# that point -- FB-3, and the third border.  It used to be recorded here as NOT
+# converging on top of the exterior coupling, on the strength of
+# FREE-BOUNDARY-PLAN.md section 7.13; every one of those attempts predates the
+# psi_bnd repair of section 7.17, and re-measured the two borders converge
+# together to machine zero from four limiter radii (section 7.12b).  With the
+# block absent psi_bnd stays at zero, so the plasma edge here is the psi = 0
+# contour rather than a limiter contact, and this file is HALF of a
+# free-boundary problem: the exterior is solved for and the edge is not.  For
+# the whole of it, see section 7.16 -- a machine case with coils, a limiter, a
+# prescribed current and the exterior coupling, all live at once.
 #
 # WHAT THIS FILE DEMONSTRATES, PRECISELY. That Gamma carries the exact exterior
 # map rather than a datum, that its Gegenbauer coefficients are unknowns of the
