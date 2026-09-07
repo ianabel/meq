@@ -6181,6 +6181,17 @@ way.
 
 **If a waiter is used, check it actually fired.**
 
+**AND NEVER COMMIT A FILE A SUBAGENT OWNS ON THE STRENGTH OF ITS COMPILING.**
+Done here on 2026-09-07: an agent was searching for a fixture in
+`FreeBoundaryCoupling.cpp`, the file was staged after checking it built, and the
+commit captured 99 lines of the agent's temporary `zzExperiment` scaffolding.
+**Scaffolding compiles.** The check that was wanted is a `git diff` against what
+the file is supposed to contain, or a `grep` for the marker names an agent uses
+for its own workings — not a build. Staging early does lock the content against
+a later write, which was the right instinct; it locks in whatever is there at
+that moment, which was the wrong assumption. **Ask the agent to confirm the file
+is clean, and read the diff.**
+
 **AND NEVER `cmake --build` WHILE `ctest` IS RUNNING.** Done here on 2026-09-02
 for a comment-only header change, which relinked ten test binaries *including
 the one ctest was starting*. Nothing errored — replacing a running executable's
