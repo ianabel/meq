@@ -7,6 +7,7 @@
 #include "mfem.hpp"
 
 #include "ExteriorDtN.hpp"
+#include "PlasmaComponent.hpp"
 #include "Source.hpp"
 
 /*
@@ -187,6 +188,29 @@ namespace meq
 			///                  what limits a measured rate.
 			explicit SourceIntegrator( Source const &sourceIn, int extraOrderIn = 4 );
 
+			/**
+			 * THE PLASMA'S CONNECTED COMPONENT, as a per-element test.
+			 *
+			 * XP-1. meq::NormalisedSource::insidePlasma() is pointwise on the
+			 * value and has no connectivity, so `{ Psi > 0 }` is a level set
+			 * rather than a plasma. The fill that fixes it needs element
+			 * adjacency, which is the mesh's, so it is computed by the solver
+			 * and handed here: on an element the fill did not reach, the plasma
+			 * term is off and NormalisedSource::fOutsidePlasma() is what
+			 * remains -- the coil term, or zero.
+			 *
+			 * @param component borrowed and may be null. Null, or a component
+			 *        that has not been filled, means no connectivity test and
+			 *        this class is bit-unchanged.
+			 *
+			 * The element number comes from ElementTransformation::ElementNo,
+			 * which mfem::Mesh::GetElementTransformation sets and
+			 * DarcyHybridization's own element workspaces carry through
+			 * unchanged -- checked rather than assumed, in
+			 * tests/convergence/PlasmaConnectivity.cpp.
+			 */
+			void setPlasmaComponent( PlasmaComponent const *component );
+
 			/// MFEM's spelling, from NonlinearFormIntegrator.
 			void AssembleElementVector( mfem::FiniteElement const &el, // NOLINT(readability-identifier-naming)
 			                            mfem::ElementTransformation &tr,
@@ -203,7 +227,25 @@ namespace meq
 			mfem::IntegrationRule const &rule( mfem::FiniteElement const &el,
 			                                   mfem::ElementTransformation &tr ) const;
 
+			/// Whether the fill reached @a element, and the constant true when
+			/// no fill is live.
+			bool elementCarriesPlasma( int element ) const;
+
+			/// `F` at a point in @a element: the source's own `f()` where the
+			/// fill reached, and what survives outside the plasma where it did
+			/// not.
+			double sourceValue( double r, double z, double psi, int element ) const;
+
 			Source const *source;
+
+			/// The same object as `source` when it is a NormalisedSource, and
+			/// null otherwise. Held so that a masked-out element can ask what
+			/// survives there without a dynamic_cast per element.
+			NormalisedSource const *normalised;
+
+			/// setPlasmaComponent(). Borrowed; null means no connectivity test.
+			PlasmaComponent const *plasmaComponent = nullptr;
+
 			int extraOrder;
 
 			/// Per-point scratch, and a MEMBER only in a build that cannot
@@ -471,6 +513,104 @@ namespace meq
 			/// separately from the trace residual because the two have different
 			/// units. Zero unless normalisationIsUnknown().
 			double normalisationResidual() const;
+
+			/**
+			 * WHETHER THE CONFINED SOURCE IS THE LEVEL SET OR THE CONNECTED
+			 * PLASMA: stage XP-1 of FREE-BOUNDARY-PLAN.md section 10.6.
+			 *
+			 * meq::NormalisedSource::setPlasmaSupport() switches F off wherever
+			 * `Psi <= 0`, and that test is POINTWISE -- it has no connectivity
+			 * in it, so what it selects is a level set and not a plasma. Section
+			 * 10.3 records the direction it is wrong in for a DIVERTED plasma,
+			 * where the private flux region carries `Psi > 0` and gets a second
+			 * current channel nobody asked for; MEASURED, it is wrong on
+			 * ordinary LIMITER cases too, because a level of a field that is not
+			 * monotone in radius cuts the domain into as many lobes as it likes.
+			 * tests/convergence/FreeBoundaryCoupling.cpp's own half-disc, with
+			 * no X-point anywhere, already converges to a `{ psi > psi_bnd }`
+			 * with more than one component.
+			 *
+			 * Component is the default, because a connected plasma is what
+			 * `ConfineToPlasma` MEANS. Pointwise is kept as the CONTROL, in the
+			 * manner of Normalisation::Decoupled and ResidualEstimator's
+			 * TraceComparison::Literal: a measurement of what the fill buys
+			 * needs the configuration it replaces, and a measurement that cannot
+			 * distinguish "the fix worked" from "there was nothing to fix" is
+			 * not a measurement.
+			 *
+			 * **INERT UNLESS setPlasmaSupport() IS ON.** With the support off
+			 * the domain IS the plasma and there is nothing to disconnect, so no
+			 * mask is built and every existing solve is bit-unchanged.
+			 */
+			enum class PlasmaConnectivity
+			{
+				/// The pointwise test alone: `{ Psi > 0 }`, whatever its
+				/// topology. The control, and what MEQ did before 2026-09-07.
+				Pointwise,
+				/// A face-neighbour flood fill over the elements carrying
+				/// `Psi > 0`, seeded at the element holding psi_ax. The default.
+				Component
+			};
+
+			/// Choose it. PlasmaConnectivity::Component is the default.
+			void setPlasmaConnectivity( PlasmaConnectivity choice );
+
+			/// Which one the next solve will use.
+			PlasmaConnectivity plasmaConnectivity() const;
+
+			/**
+			 * Recompute the plasma's connected component from @a state.
+			 *
+			 * Called by solve() before every residual and every Jacobian
+			 * assembly, so a caller normally never needs it; it is public
+			 * because the MEASUREMENT of what the fill costs Newton has to drive
+			 * it at a state of its own choosing, and because reporting on a
+			 * converged answer means refreshing at that answer.
+			 *
+			 * @param state the full ( flux, potential, trace ) block vector on
+			 *        this solver's offsets -- the NPC unknown -- or the
+			 *        potential block alone, which is what the condensation path
+			 *        has.
+			 *
+			 * Does nothing unless a NormalisedSource is set, its plasma support
+			 * is on, and PlasmaConnectivity::Component is chosen.
+			 *
+			 * @throws std::invalid_argument if @a state is neither of those two
+			 *         sizes. A vector of the wrong length would otherwise be
+			 *         read as a potential and produce a plausible mask.
+			 *
+			 * NOT THREAD SAFE, and it does not need to be: it runs on the master
+			 * thread before the element loop rather than inside it, so the mask
+			 * meq::SourceIntegrator reads under AssemblyMode::Threaded is
+			 * finished being written before any thread sees it.
+			 */
+			void refreshPlasmaComponent( mfem::Vector const &state );
+
+			/// Elements the fill reached: the plasma. Zero when no fill is live.
+			int plasmaComponentElements() const;
+
+			/// Elements carrying `Psi > 0` at any of their potential dofs, over
+			/// every component. The difference from plasmaComponentElements() is
+			/// what the connectivity test removed, and it is the number that
+			/// says whether the fill did anything.
+			int plasmaCandidateElements() const;
+
+			/// Components among those candidates. ONE means the pointwise test
+			/// was already right on this configuration, which is the control
+			/// every measurement of the fill needs.
+			int plasmaComponentCount() const;
+
+			/// True where the confined source is switched on, at element
+			/// granularity. Always true when no fill is live, so the assembly
+			/// tests it unconditionally.
+			bool elementInPlasma( int element ) const;
+
+			/// Which component an element is in, or -1 where it carries no
+			/// plasma. For reporting on a fill rather than for the assembly.
+			int plasmaComponentLabel( int element ) const;
+
+			/// The seed's component number. For the same reason.
+			int plasmaComponentSeedLabel() const;
 
 			/// The Dirichlet datum g_D for psi on Gamma. Non-homogeneous data is
 			/// the normal case: the level set psi = 0 is the plasma boundary, but a
@@ -1933,6 +2073,26 @@ namespace meq
 			/// Scratch for a trial recovery, so that a finite difference does not
 			/// disturb the solution blocks the caller is going to read.
 			mfem::BlockVector recoveryScratch;
+
+			/// setPlasmaConnectivity(). Component by default: a connected
+			/// plasma is what a confined source MEANS, and the pointwise test is
+			/// kept as the control. Inert unless the source is confined.
+			PlasmaConnectivity connectivityChoice = PlasmaConnectivity::Component;
+
+			/// The fill. Unfilled -- so holds() is the constant true -- unless a
+			/// confined source and PlasmaConnectivity::Component ask for it.
+			PlasmaComponent plasmaComponentMask;
+
+			/// The element adjacency, built once per mesh and reused: it is
+			/// geometry, and refreshPlasmaComponent() runs once per residual.
+			bool plasmaAdjacencyBuilt = false;
+
+			/// Whether the confined source needs a fill at all.
+			bool plasmaComponentWanted() const;
+
+			/// The element adjacency of the solve mesh, as CSR, into
+			/// plasmaComponentMask. Idempotent.
+			void buildPlasmaAdjacency();
 
 			/// Re-form the reduced system from whatever the solution blocks hold,
 			/// which is how the element-local non-linear solves are given a fresh

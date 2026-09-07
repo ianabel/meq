@@ -317,6 +317,52 @@ namespace meq
 			}
 
 			/**
+			 * `F` WITH THE PLASMA TERM SWITCHED OFF: what this source is worth
+			 * on a mesh element the plasma's connected component does not
+			 * reach.
+			 *
+			 * WHY IT EXISTS. insidePlasma() is a POINTWISE test on the value and
+			 * carries no connectivity, so `{ Psi > 0 }` is a level set and not
+			 * the plasma -- across an X-point the private flux region carries
+			 * Psi > 0 too, and even on a LIMITER case the level psi = psi_bnd
+			 * cuts the domain into as many lobes as it likes. XP-1's answer is a
+			 * face-neighbour flood fill from the element holding psi_ax, and a
+			 * fill needs a mesh, so it is computed SOLVER-side and applied
+			 * element by element by meq::SourceIntegrator.
+			 *
+			 * THE ELEMENT-LEVEL TEST CANNOT SIMPLY ZERO f(), AND THAT IS WHAT
+			 * THIS METHOD IS FOR. A coil sits in the vacuum region by
+			 * construction, so a wrapped source's `f()` is a SUM of which only
+			 * the plasma half is confined -- CLAUDE.md records that "the order
+			 * the sum is taken in is what puts the coil outside the support",
+			 * and zeroing the sum would switch off every conductor in the
+			 * machine wherever the fill did not reach. So the solver asks for
+			 * this instead of assuming zero.
+			 *
+			 * The default is zero, which is right for every source whose f() is
+			 * the plasma term alone. A source that adds anything NOT confined to
+			 * the plasma must override -- meq::CoilAugmentedNormalisedSource
+			 * does, returning the coil term -- and that is the same forwarding
+			 * obligation setPlasmaSupport() and normalisationDerivatives()
+			 * carry, met from the same direction and for the same reason.
+			 *
+			 * The other four quantities need no equivalent: dFdPsi(),
+			 * scaledF(), scaledDFdPsi() and normalisationDerivatives() are all
+			 * about the plasma alone -- a coil current is amperes and depends on
+			 * no flux -- so outside the component they are zero and the solver
+			 * simply skips the element.
+			 *
+			 * @param r,z the point. There is no psi argument on purpose: what
+			 *        survives out here does not depend on the solution, and one
+			 *        that did would be a plasma term by another name.
+			 */
+			virtual double fOutsidePlasma( double r, double z ) const
+			{
+				(void)r; (void)z;
+				return 0.0;
+			}
+
+			/**
 			 * dF/d(psi_ax) and dF/d(psi_bnd) AT FIXED psi, analytically.
 			 *
 			 * WHY THIS EXISTS. The bordered Newton's COLUMN is dR/ds, the

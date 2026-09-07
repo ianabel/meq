@@ -210,6 +210,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/FluxSurfaces.cpp
 	src/meq/GradShafranov.cpp
 	src/meq/Output.cpp
+	src/meq/PlasmaComponent.cpp
 	src/meq/Profiles.cpp
 	src/meq/RotatingSource.cpp
 	src/meq/Sampler.cpp
@@ -232,6 +233,14 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/Sampler.cpp
 	src/meq/SurfaceAverage.cpp
 	src/meq/WarmStart.cpp)
+
+# src/meq/PlasmaComponent.cpp is ABSENT from it too, and for a third reason
+# rather than the first two: XP-1's flood fill is a connected-component
+# labelling of a CSR graph -- plain integers in, a mask out -- and the
+# disconnected configurations worth testing (two lobes touching at a vertex, two
+# lobes bridged by a single element, a seed in the wrong lobe) are far easier to
+# write down as graphs than as meshes. The mesh half is three lines in
+# GradShafranovSolver and is where MFEM enters.
 
 # src/meq/Coils.cpp is ABSENT from it too, and for the same reasons: a coil is
 # a rectangle, a current and an elliptic-integral kernel -- geometry and special

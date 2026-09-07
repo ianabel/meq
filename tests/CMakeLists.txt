@@ -19,6 +19,7 @@ set(MEQ_UNIT_TESTS
 	CoilsTests
 	ConfigTests
 	ExteriorDtNTests
+	PlasmaComponentTests
 	ProfilesTests
 	RotatingSourceTests
 	SourceTests
@@ -154,6 +155,11 @@ set(MEQ_CONVERGENCE_TESTS
 	# exact solution -- see tests/analytic/VacuumHarmonic.hpp for why one exists
 	# at all, which the plan did not know.
 	AxisConvergence
+	# XP-1, the connectivity of the confined plasma support. It is a convergence
+	# test rather than a unit one because the flood fill's INPUT is a mesh and a
+	# solved field; the fill itself is MFEM-free and is unit tested as
+	# PlasmaComponentTests.
+	PlasmaConnectivity
 	# FB-1's coupling matrix P: the trace projection of the exterior modes onto
 	# Gamma_h. It needs a curved boundary and so needs MFEM, which is why it is
 	# a convergence test rather than a unit one -- ExteriorDtN's own tests, which

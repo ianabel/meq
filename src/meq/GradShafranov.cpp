@@ -247,8 +247,36 @@ namespace
 	}
 
 	SourceIntegrator::SourceIntegrator( Source const &sourceIn, int extraOrderIn )
-		: source( &sourceIn ), extraOrder( extraOrderIn )
+		: source( &sourceIn ),
+		  normalised( dynamic_cast< NormalisedSource const * >( &sourceIn ) ),
+		  extraOrder( extraOrderIn )
 	{
+	}
+
+	void SourceIntegrator::setPlasmaComponent( PlasmaComponent const *component )
+	{
+		plasmaComponent = component;
+	}
+
+	bool SourceIntegrator::elementCarriesPlasma( int element ) const
+	{
+		// The constant true when no fill is live, which is every solve that did
+		// not ask for a connectivity test -- so the branch is one predictable
+		// comparison and nothing existing moves.
+		return plasmaComponent == nullptr || plasmaComponent->holds( element );
+	}
+
+	double SourceIntegrator::sourceValue( double r, double z, double psi,
+	                                      int element ) const
+	{
+		if ( elementCarriesPlasma( element ) )
+			return source->f( r, z, psi );
+
+		// Off the plasma's component. `normalised` is null exactly when the
+		// source is not a NormalisedSource, in which case it cannot have been
+		// confined and no mask can have been set -- so this is unreachable
+		// there, and zero would be the same answer anyway.
+		return normalised ? normalised->fOutsidePlasma( r, z ) : 0.0;
 	}
 
 	mfem::IntegrationRule const &SourceIntegrator::rule( mfem::FiniteElement const &el,
@@ -295,7 +323,18 @@ namespace
 			double const psi = shape*elfun;
 			double const weight = ip.weight*tr.Weight();
 
-			elvect.Add( -weight*source->f( r, z, psi )/r, shape );
+			// XP-1's connectivity test, and it is an ELEMENT-level one: the
+			// fill is over the element adjacency graph, so what it decides is
+			// whether this element belongs to the plasma at all. Inside a
+			// reached element the pointwise Psi > 0 test still runs, in the
+			// source, and nothing here duplicates it.
+			//
+			// AND WHAT SURVIVES OUTSIDE IS NOT A ZERO. A wrapped source's f() is
+			// the SUM of the plasma term and the coils, and a coil sits in the
+			// vacuum region by construction -- so this asks the source, which
+			// answers zero for an ordinary one and the coil term for a
+			// coil-augmented one.
+			elvect.Add( -weight*sourceValue( r, z, psi, tr.ElementNo )/r, shape );
 		}
 	}
 
@@ -327,6 +366,12 @@ namespace
 			double const z = point( 1 );
 			double const psi = shape*elfun;
 			double const weight = ip.weight*tr.Weight();
+
+			// Whatever survives outside the plasma's component does not depend
+			// on psi -- a coil current is amperes -- so the Jacobian is exactly
+			// zero out there and the element contributes nothing.
+			if ( !elementCarriesPlasma( tr.ElementNo ) )
+				continue;
 
 			mfem::AddMult_a_VVt( -weight*source->dFdPsi( r, z, psi )/r, shape, elmat );
 		}
@@ -738,6 +783,70 @@ namespace
 		private:
 			mfem::Operator &residual;
 			mfem::Vector const &shift;
+	};
+
+	/*
+	 * THE PLASMA'S CONNECTED COMPONENT, REFRESHED BEFORE EVERY RESIDUAL AND
+	 * EVERY JACOBIAN -- XP-1.
+	 *
+	 * The support is a functional of the iterate, so the fill has to be redone
+	 * as the iterate moves, and the only things that see the iterate are Mult()
+	 * and GetGradient(). Wrapping the operator is what puts the refresh there
+	 * without either solve path having to know about it.
+	 *
+	 * **AND REFRESHING INSIDE THE LOOP IS ALLOWED BECAUSE IT WAS MEASURED, NOT
+	 * BECAUSE IT IS CONVENIENT.** FB-4 records that a source with p'( 0 ) != 0
+	 * makes the assembled residual genuinely discontinuous and Newton then
+	 * converges from nowhere -- not from the exact solution, not under
+	 * PicardThenNewton. A CONNECTIVITY change looks like a jump of the same
+	 * species and a worse one: a lobe leaving the component takes its whole
+	 * integral with it, O( 1 ), however smoothly the profile vanishes at the
+	 * edge.
+	 *
+	 * The watershed does not exercise it. What changes hands as the level slides
+	 * is a STRADDLING element, where Psi is near zero and the profile with it,
+	 * so int |F| over the confined support falls by 3.94 and then 3.96 as the
+	 * sampling is quartered -- against 3.99 and 4.00 for the pointwise support,
+	 * i.e. as continuous as the test it replaces. A fixed-ring rule DID jump on
+	 * the same experiment, 1.68 then 1.20, which is what says the property
+	 * belongs to the rule. tests/convergence/PlasmaConnectivity.cpp is that
+	 * measurement, taken the way PlasmaEdgeConvergence takes the j = 0 one.
+	 */
+	class ComponentRefreshed : public mfem::Operator
+	{
+		public:
+			using Refresh = std::function<void( mfem::Vector const & )>;
+
+			ComponentRefreshed( mfem::Operator &operatorIn, Refresh refreshIn )
+				: mfem::Operator( operatorIn.Height(), operatorIn.Width() ),
+				  residual( operatorIn ), refresh( std::move( refreshIn ) )
+			{
+			}
+
+			/// MFEM's spelling, from mfem::Operator.
+			void Mult( mfem::Vector const &x, // NOLINT(readability-identifier-naming)
+			           mfem::Vector &y ) const override
+			{
+				refresh( x );
+				residual.Mult( x, y );
+			}
+
+			/// MFEM's spelling, from mfem::Operator.
+			mfem::Operator &GetGradient( // NOLINT(readability-identifier-naming)
+				mfem::Vector const &x ) const override
+			{
+				// AT THE SAME STATE AS THE RESIDUAL, which is the whole reason
+				// this is a wrapper rather than a call in one place: a Jacobian
+				// assembled against a DIFFERENT support from the residual it is
+				// meant to differentiate is exactly the failure CLAUDE.md
+				// records as invisible to a convergence table.
+				refresh( x );
+				return residual.GetGradient( x );
+			}
+
+		private:
+			mfem::Operator &residual;
+			Refresh refresh;
 	};
 
 
@@ -2143,8 +2252,18 @@ namespace
 			// face stabilisation, convection -- on whichever of the two forms is in
 			// use, and so does this.
 			mfem::NonlinearForm *potentialMass = darcy->GetPotentialMassNonlinearForm();
-			potentialMass->AddDomainIntegrator(
-				new SourceIntegrator( *nonlinearSource, sourceQuadratureExtra ) );
+			auto *sourceTerm =
+				new SourceIntegrator( *nonlinearSource, sourceQuadratureExtra );
+
+			// XP-1's element-level plasma test. The mask is a member of this
+			// solver and the integrator borrows it, so a refresh inside the
+			// Newton loop is seen without re-building any form -- which matters,
+			// because the support moves with the iterate and re-preparing per
+			// residual is exactly what the exterior-datum load already costs.
+			// Handed unconditionally: an unfilled component is the constant
+			// true, so a solve that never asks for one is bit-unchanged.
+			sourceTerm->setPlasmaComponent( &plasmaComponentMask );
+			potentialMass->AddDomainIntegrator( sourceTerm );
 			potentialMass->AddInteriorFaceIntegrator( interior );
 			potentialMass->AddBdrFaceIntegrator( boundary, fittedMarker );
 		}
@@ -2723,6 +2842,281 @@ namespace
 	}
 
 	/*
+	 * XP-1: THE PLASMA IS A CONNECTED SET AND `{ Psi > 0 }` IS NOT.
+	 *
+	 * The pointwise support test lives in meq::NormalisedSource, which is
+	 * MFEM-free and knows nothing of a mesh. The connectivity is element
+	 * adjacency, which is the mesh's alone. So the split is: the source keeps
+	 * the value test, the solver owns the fill, and meq::SourceIntegrator
+	 * applies the fill's answer element by element -- reading
+	 * NormalisedSource::fOutsidePlasma() where the fill did not reach, because a
+	 * coil is not confined to the plasma and zeroing the sum there would switch
+	 * off every conductor in the machine.
+	 */
+
+	void GradShafranovSolver::setPlasmaConnectivity( PlasmaConnectivity choice )
+	{
+		connectivityChoice = choice;
+		if ( choice == PlasmaConnectivity::Pointwise )
+			plasmaComponentMask.clear();
+	}
+
+	GradShafranovSolver::PlasmaConnectivity
+	GradShafranovSolver::plasmaConnectivity() const
+	{
+		return connectivityChoice;
+	}
+
+	bool GradShafranovSolver::plasmaComponentWanted() const
+	{
+		// A fill is meaningless without a moving support: with the pointwise
+		// test off, F is evaluated everywhere and every element carries plasma
+		// by definition.
+		return connectivityChoice == PlasmaConnectivity::Component
+		       && normalisedSource != nullptr
+		       && normalisedSource->plasmaSupport();
+	}
+
+	void GradShafranovSolver::buildPlasmaAdjacency()
+	{
+		// THE ELEMENT COUNT IS THE GUARD, not a flag alone. An adaptive cycle
+		// refines the mesh this solver holds BY REFERENCE, and a cached
+		// adjacency would then describe a graph that no longer exists -- every
+		// index in it still valid, every one of them wrong. That is the shape of
+		// silent-wrong-answer this file catalogues, so it is checked rather than
+		// left to a caller remembering to rebuild.
+		if ( plasmaAdjacencyBuilt
+		     && plasmaComponentMask.nodeCount() == mesh.GetNE() )
+			return;
+		plasmaComponentMask.clear();
+
+		// FACE neighbours, which is the whole content of section 10.3's
+		// prediction: two lobes meeting at a VERTEX are not adjacent here, so
+		// the fill cannot leak diagonally across a saddle the way a uniform-grid
+		// fill does and freegs4e's core_mask has to block against.
+		// mfem::Mesh::ElementToElementTable is exactly that graph.
+		mfem::Table const &neighbours = mesh.ElementToElementTable();
+		int const elements = mesh.GetNE();
+
+		std::vector< int > offsets;
+		std::vector< int > list;
+		offsets.reserve( static_cast< std::size_t >( elements ) + 1 );
+		offsets.push_back( 0 );
+
+		for ( int e = 0; e < elements; ++e )
+		{
+			int const *row = neighbours.GetRow( e );
+			int const size = neighbours.RowSize( e );
+			for ( int i = 0; i < size; ++i )
+				// A boundary face has no neighbour and MFEM writes a negative
+				// entry rather than omitting it.
+				if ( row[ i ] >= 0 )
+					list.push_back( row[ i ] );
+			offsets.push_back( static_cast< int >( list.size() ) );
+		}
+
+		plasmaComponentMask.setAdjacency( std::move( offsets ), std::move( list ) );
+		plasmaAdjacencyBuilt = true;
+	}
+
+	void GradShafranovSolver::refreshPlasmaComponent( mfem::Vector const &state )
+	{
+		if ( !plasmaComponentWanted() )
+			return;
+
+		buildPlasmaAdjacency();
+
+		// The potential block, wherever it came from. The NPC unknown carries it
+		// as its second block; the condensation's unknown is the trace alone, so
+		// a caller there hands the recovered potential directly.
+		int const potentialSize = potentialFes->GetVSize();
+		int potentialStart = 0;
+		if ( state.Size() == blockOffsets[ 3 ] )
+			potentialStart = blockOffsets[ 1 ];
+		else if ( state.Size() != potentialSize )
+			throw std::invalid_argument( "meq::GradShafranovSolver::refreshPlasmaComponent: the state must be the full ( flux, potential, trace ) vector or the potential block alone" );
+
+		double const psiBnd = normalisedSource->boundaryNormalisation();
+		double const span = normalisedSource->normalisation() - psiBnd;
+
+		int const elements = mesh.GetNE();
+
+		/*
+		 * TWO RULES, AND MEASURING WHY IS WHAT SETTLED XP-1.
+		 *
+		 *   carriesPlasma  any potential dof with Psi > 0: every element with
+		 *                  ANY plasma in it, which is what the pointwise test
+		 *                  would switch the source on in.
+		 *   interior       every dof with Psi > 0: unambiguously inside.
+		 *
+		 * The fill TRAVERSES the interior and the mask then takes one ring of
+		 * straddling band around it. Section 10.3 predicted a face-neighbour fill
+		 * would need no X-point blocking; measured on an exact diverted fixture
+		 * the ONE-rule fill leaks the whole private flux region -- 2275 elements
+		 * of 16688 and 10.4% of int |F| -- because the straddling band around a
+		 * saddle is several elements wide and every element of it is a
+		 * candidate, so the band is what bridges the two lobes. Over the
+		 * interior alone they are two components with nothing blocked, which is
+		 * what the prediction wanted and by a different mechanism.
+		 *
+		 * The straddling band is then shared out between the interior
+		 * components by a watershed, and that is what keeps FB-4's order.
+		 * Filling on the interior alone would switch the source off in an O( h )
+		 * band INSIDE the plasma, and psi* keeps k+2 only while the support is
+		 * right -- an element-aligned edge would put an O( h^(1+j) )
+		 * perturbation under a result that costs a whole plan section to
+		 * establish. Measured on the diverted fixture, the interior alone drops
+		 * 179 / 360 / 720 elements over two fourfold refinements, which is the
+		 * 1/h of a one-element band and not something that goes away.
+		 *
+		 * A WATERSHED RATHER THAN A FIXED NUMBER OF RINGS, and that was measured
+		 * too. Rings work on the diverted fixture -- depth 2 is the only value
+		 * that keeps every plasma element and reaches none below the saddle at
+		 * three resolutions -- and fail on an ordinary confined RECTANGLE, where
+		 * the band along psi = 0 is three elements thick at a corner: 4 of 512
+		 * dropped, psi_ax moved by 1.5e-04, seven Newton steps lost. The
+		 * watershed has no number to choose and neither failure, and it cannot
+		 * undo the separation because it never re-assigns an interior element --
+		 * the band divides where the two waves meet, which near a saddle is the
+		 * pinch.
+		 *
+		 * THE NODAL VALUES rather than the quadrature points, deliberately: the
+		 * volume spaces are on the closed Gauss-Lobatto basis, so a dof IS a
+		 * point value; it is O( dofs ) against O( quadrature points ), and this
+		 * runs once per residual evaluation.
+		 */
+		std::vector< char > carriesPlasma( static_cast< std::size_t >( elements ), 0 );
+		std::vector< char > interior( static_cast< std::size_t >( elements ), 1 );
+
+		/*
+		 * THE SEED IS THE LARGEST NORMALISED FLUX OFF THE SYMMETRY AXIS, and
+		 * both halves of that are measured rather than chosen.
+		 *
+		 * NORMALISED, not the largest psi: the span is negative wherever F is
+		 * single-signed negative, and a fill seeded at the wrong extreme would
+		 * start from the boundary rather than from the core. CriticalPoints.hpp
+		 * records the same sign trap for findAxis(), which is where it was
+		 * first paid for.
+		 *
+		 * **AND OFF THE AXIS, BECAUSE THE GLOBAL ARGMAX IS NOT THE MAGNETIC
+		 * AXIS ON A HALF-DISC AND MEASURING IT IS WHAT FOUND THAT.** On
+		 * FreeBoundaryCoupling's own converged limiter case, psi_h reaches
+		 * 1.0916e-01 in an element TOUCHING r = 0, in the corner where Gamma
+		 * meets the axis, against 4.4472e-02 as the largest value anywhere else
+		 * -- a factor of 2.5. That corner is where two different data meet
+		 * (psi = 0 on the fitted axis, the transferred exterior trace on
+		 * Gamma_h) at the one place the lifting weight C = r vanishes, and FB-A
+		 * measured the flux mass ( r q, v ) giving those elements a weight of
+		 * order h and an O( 1/h ) conditioning penalty. Seeded there, the fill
+		 * names an 84-element pocket in that corner as the plasma.
+		 *
+		 * The magnetic axis of an axisymmetric equilibrium is never on r = 0 --
+		 * psi vanishes there for any field with finite B -- so excluding those
+		 * elements from the SEARCH costs nothing physical. They can still be
+		 * REACHED by the fill; what is refused is starting from one.
+		 *
+		 * A domain that does not touch r = 0 loses nothing: no element is
+		 * excluded and this is the plain argmax.
+		 */
+		auto touchesAxis = [ & ]( int element )
+		{
+			mfem::Array< int > vertices;
+			mesh.GetElementVertices( element, vertices );
+			for ( int i = 0; i < vertices.Size(); ++i )
+				if ( std::abs( mesh.GetVertex( vertices[ i ] )[ 0 ] ) <= 0.0 )
+					return true;
+			return false;
+		};
+
+		double bestPsiN = -std::numeric_limits< double >::infinity();
+		double bestAnywhere = -std::numeric_limits< double >::infinity();
+		int seed = -1;
+		int seedAnywhere = -1;
+
+		mfem::Array< int > dofs;
+		for ( int e = 0; e < elements; ++e )
+		{
+			potentialFes->GetElementDofs( e, dofs );
+			bool const onAxis = touchesAxis( e );
+
+			for ( int i = 0; i < dofs.Size(); ++i )
+			{
+				double const psi = state( potentialStart + dofs[ i ] );
+				double const psiN = ( psi - psiBnd )/span;
+
+				if ( psiN > 0.0 )
+					carriesPlasma[ static_cast< std::size_t >( e ) ] = 1;
+				else
+					interior[ static_cast< std::size_t >( e ) ] = 0;
+
+				if ( psiN > bestAnywhere )
+				{
+					bestAnywhere = psiN;
+					seedAnywhere = e;
+				}
+				if ( !onAxis && psiN > bestPsiN )
+				{
+					bestPsiN = psiN;
+					seed = e;
+				}
+			}
+		}
+
+		// A plasma that reaches the axis everywhere -- a mirror, or a domain
+		// entirely against r = 0 -- leaves nothing off it, and there the global
+		// argmax is the only answer available.
+		if ( seed < 0 || bestPsiN <= 0.0 )
+			seed = seedAnywhere;
+
+		if ( seed < 0 )
+			return;
+
+		// A plasma thinner than one element everywhere has no interior at all,
+		// and a fill over an empty set holds nothing -- which would switch the
+		// source off entirely and report a vacuum. That is a real configuration
+		// on a coarse first adaptive cycle, so it falls back to the one-rule
+		// fill rather than answering nothing: the connectivity is then as good
+		// as an inclusive rule allows, which is what MEQ had before XP-1.
+		if ( interior[ static_cast< std::size_t >( seed ) ] == 0 )
+		{
+			plasmaComponentMask.fill( carriesPlasma, seed );
+			return;
+		}
+
+		plasmaComponentMask.fill( interior, carriesPlasma, seed );
+	}
+
+	int GradShafranovSolver::plasmaComponentElements() const
+	{
+		return plasmaComponentMask.componentNodes();
+	}
+
+	int GradShafranovSolver::plasmaCandidateElements() const
+	{
+		return plasmaComponentMask.candidateNodes();
+	}
+
+	int GradShafranovSolver::plasmaComponentCount() const
+	{
+		return plasmaComponentMask.componentCount();
+	}
+
+	bool GradShafranovSolver::elementInPlasma( int element ) const
+	{
+		return plasmaComponentMask.holds( element );
+	}
+
+	int GradShafranovSolver::plasmaComponentLabel( int element ) const
+	{
+		return plasmaComponentMask.label( element );
+	}
+
+	int GradShafranovSolver::plasmaComponentSeedLabel() const
+	{
+		return plasmaComponentMask.seedLabel();
+	}
+
+	/*
 	 * THE THREE LOOPS BELOW ARE ONE LOOP WITH THREE INTEGRANDS, and they are
 	 * written out rather than shared because what differs is not only the
 	 * integrand but where the answer goes: two are covectors on the potential
@@ -2759,6 +3153,14 @@ namespace
 
 		for ( int e = 0; e < mesh.GetNE(); ++e )
 		{
+			// XP-1. Every quantity assembled in this loop is about the PLASMA
+			// term -- scaledF, scaledDFdPsi, the normalisation derivatives --
+			// and all of them are zero on an element the fill did not reach, so
+			// the element is skipped whole. Only meq::SourceIntegrator needs the
+			// fOutsidePlasma() branch, because only f() carries the coils.
+			if ( !elementInPlasma( e ) )
+				continue;
+
 			mfem::FiniteElement const &el = *potentialFes->GetFE( e );
 			thread_local mfem::IsoparametricTransformation scratch;
 			mesh.GetElementTransformation( e, &scratch );
@@ -2809,6 +3211,14 @@ namespace
 
 		for ( int e = 0; e < mesh.GetNE(); ++e )
 		{
+			// XP-1. Every quantity assembled in this loop is about the PLASMA
+			// term -- scaledF, scaledDFdPsi, the normalisation derivatives --
+			// and all of them are zero on an element the fill did not reach, so
+			// the element is skipped whole. Only meq::SourceIntegrator needs the
+			// fOutsidePlasma() branch, because only f() carries the coils.
+			if ( !elementInPlasma( e ) )
+				continue;
+
 			mfem::FiniteElement const &el = *potentialFes->GetFE( e );
 			thread_local mfem::IsoparametricTransformation scratch;
 			mesh.GetElementTransformation( e, &scratch );
@@ -2859,6 +3269,14 @@ namespace
 
 		for ( int e = 0; e < mesh.GetNE(); ++e )
 		{
+			// XP-1. Every quantity assembled in this loop is about the PLASMA
+			// term -- scaledF, scaledDFdPsi, the normalisation derivatives --
+			// and all of them are zero on an element the fill did not reach, so
+			// the element is skipped whole. Only meq::SourceIntegrator needs the
+			// fOutsidePlasma() branch, because only f() carries the coils.
+			if ( !elementInPlasma( e ) )
+				continue;
+
 			mfem::FiniteElement const &el = *potentialFes->GetFE( e );
 			thread_local mfem::IsoparametricTransformation scratch;
 			mesh.GetElementTransformation( e, &scratch );
@@ -2908,6 +3326,14 @@ namespace
 
 		for ( int e = 0; e < mesh.GetNE(); ++e )
 		{
+			// XP-1. Every quantity assembled in this loop is about the PLASMA
+			// term -- scaledF, scaledDFdPsi, the normalisation derivatives --
+			// and all of them are zero on an element the fill did not reach, so
+			// the element is skipped whole. Only meq::SourceIntegrator needs the
+			// fOutsidePlasma() branch, because only f() carries the coils.
+			if ( !elementInPlasma( e ) )
+				continue;
+
 			mfem::FiniteElement const &el = *potentialFes->GetFE( e );
 			thread_local mfem::IsoparametricTransformation scratch;
 			mesh.GetElementTransformation( e, &scratch );
@@ -2974,6 +3400,11 @@ namespace
 
 		for ( int e = 0; e < mesh.GetNE(); ++e )
 		{
+			// XP-1, as in the three loops above: dF/ds is zero wherever F is,
+			// and the fill switches F off on a whole element.
+			if ( !elementInPlasma( e ) )
+				continue;
+
 			mfem::FiniteElement const &el = *potentialFes->GetFE( e );
 
 			// The two-argument overload into a local, because the one-argument
@@ -3207,6 +3638,13 @@ namespace
 				normalisedSource->setNormalisation( normalisation, sB );
 			if ( npcOrdering )
 			{
+				// XP-1, and AFTER the normalisation is set: the fill's candidate
+				// test is on Psi, so a mask built before setNormalisation()
+				// would be the previous iterate's plasma. The gradient below
+				// refreshes at the same state for the same reason
+				// ComponentRefreshed does it in one place -- a Jacobian taken
+				// against a different support is not the residual's derivative.
+				refreshPlasmaComponent( state );
 				npc->Mult( state, out );
 				return;
 			}
@@ -3635,6 +4073,9 @@ namespace
 
 			if ( npcOrdering )
 			{
+				// The same support the residual was evaluated at. See
+				// fieldResidual above.
+				refreshPlasmaComponent( unknown );
 				mfem::Operator &jacobian = npc->GetGradient( unknown );
 				npcLinear.SetOperator( jacobian );
 				npcLinear.Mult( residual, y );
@@ -4095,6 +4536,25 @@ namespace
 		if ( normalisedSource && globalisationChoice != Globalisation::None )
 			throw std::logic_error( "meq::GradShafranovSolver::solve: psi_ax as an unknown is implemented for Globalisation::None only -- the KINSOL paths drive a residual of their own and the Picard ones build no Jacobian to border" );
 
+		/*
+		 * XP-1's CONNECTIVITY TEST IS NPC-ONLY, AND IT REFUSES RATHER THAN
+		 * QUIETLY GIVING BACK THE POINTWISE SUPPORT.
+		 *
+		 * The fill reads the POTENTIAL out of the iterate, and under
+		 * CondenseThenLinearise the iterate is the trace alone -- psi is a
+		 * function of it, recovered element by element inside the elimination,
+		 * and there is no state to read a support from at the point the residual
+		 * is being assembled. Downgrading silently would leave a run that asked
+		 * for a connected plasma solving for a level set instead, which is the
+		 * whole defect XP-1 exists to fix, arrived at by a different route.
+		 *
+		 * The Picard paths above are already out: they never build the Jacobian
+		 * this refresh hangs off, and a fixed point on the potential re-enters
+		 * prepare() per iteration.
+		 */
+		if ( plasmaComponentWanted() && orderingChoice != NonlinearOrdering::NPC )
+			throw std::logic_error( "meq::GradShafranovSolver::solve: PlasmaConnectivity::Component needs NonlinearOrdering::NPC -- under the condensation the unknown is the trace alone and there is no potential to read the plasma's support from. Choose PlasmaConnectivity::Pointwise to have the support MEQ had before XP-1, and know that it is a level set rather than a connected plasma" );
+
 		if ( nonlinearSource && globalisationChoice == Globalisation::PicardThenNewton )
 		{
 			solveByPicardThenNewton();
@@ -4253,9 +4713,31 @@ namespace
 				npcLinear = std::make_unique<mfem::DarcyNPCSolver>( linear );
 			}
 
-			mfem::Operator &residualOperator =
+			mfem::Operator &bareOperator =
 				npcOrdering ? static_cast<mfem::Operator &>( *npc )
 				            : static_cast<mfem::Operator &>( *reduced.Ptr() );
+
+			/*
+			 * XP-1. The plasma's connected component is a functional of the
+			 * iterate, so it is refreshed before every residual and every
+			 * Jacobian -- which is what wrapping the operator buys and what a
+			 * call in one place would not: the two must be taken at the SAME
+			 * support or the Jacobian is differentiating a different function.
+			 *
+			 * Only under NPC. The condensation's unknown is the trace alone, so
+			 * the wrapper would be handed a vector with no potential block in
+			 * it -- and that combination is refused at the top of solve() rather
+			 * than downgraded, so this test is a statement of which path is
+			 * live rather than a fallback.
+			 */
+			std::unique_ptr<ComponentRefreshed> refreshed;
+			if ( npcOrdering && plasmaComponentWanted() )
+				refreshed = std::make_unique<ComponentRefreshed>(
+					bareOperator,
+					[ this ]( mfem::Vector const &x ) { refreshPlasmaComponent( x ); } );
+
+			mfem::Operator &residualOperator =
+				refreshed ? static_cast<mfem::Operator &>( *refreshed ) : bareOperator;
 
 			// The unknown, and the right hand side Newton subtracts from the
 			// residual. BOTH RIGHT HAND SIDES ARE ZERO AND THEY ARE ZERO FOR
