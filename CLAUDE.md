@@ -2650,6 +2650,75 @@ entries and the rest are **exactly zero**. Measured, not assumed:
 `theAxisSensitivityIsLocalToItsElement` perturbs trace dofs off that element and
 `max ψ_h` moves by **0.0000e+00**, against 7.0e-5 for the element's own dofs.
 
+**THE COLUMNS ARE AVAILABLE IN CLOSED FORM SINCE 2026-09-06, AND THE PARAGRAPH
+BELOW — "there is no choice about it" — IS NOW HALF WRONG.** It is right about
+`b`, the row, which is a derivative of the *condensed* residual and would need
+the elimination's sensitivity. It is wrong about `c`, the column: `s` reaches the
+residual **only through the source**, so `∂R/∂s` is the assembly of `∂F/∂s`, and
+that is one line of algebra. With `F = g(Ψ)/σ`, `σ = ψ_ax − ψ_bnd` and
+`Ψ = (ψ − ψ_bnd)/σ`:
+
+```
+∂F/∂ψ_ax  = −( g′(Ψ)·Ψ + g(Ψ) )/σ²
+∂F/∂ψ_bnd =  ( g′(Ψ)·(Ψ − 1) + g(Ψ) )/σ²
+```
+
+`g(Ψ) = μ₀r²p′(Ψ) + gg′(Ψ)` is what `f()` already builds, and `g′` is one
+`Profile::prime()` of each stored profile — the second derivative level that
+exists because the rotating source needed it.
+`meq::NormalisedSource::normalisationDerivatives()` is the interface, non-pure
+so a source that has not implemented it keeps working, and
+`the_normalisation_derivatives_are_analytic` pins it against a
+Richardson-extrapolated difference at **1.5e-12 to 5e-12** over four values of
+`ψ`, both derivatives.
+
+**WHY IT MATTERS IS THE MOVING SUPPORT AND NOT THE SPEED.** A differenced column
+floors the iteration — measured on the half-disc, a coupled solve descends to
+about **3e-09 and then sits there** for as many iterations as it is given, which
+is the difference's accuracy and not the discretisation's. And with
+`ConfineToPlasma` on it is worse than a floor: perturbing `s` **moves the edge**,
+so the two evaluations have different supports and the difference straddles a
+kink. The closed form returns **exactly zero** outside the plasma, asserted.
+
+**IT IS WIRED IN AS OF 2026-09-06 AND THE SIGN WAS CHECKED RATHER THAN ARGUED.**
+`GradShafranovSolver::assembleNormalisationColumn()` runs `SourceIntegrator`'s
+own quadrature loop over `∂F/∂s`, into the potential block and nowhere else, with
+the same `−w F/r` sign — the flux and trace rows carry no `F`.
+`setBorderColumn()` keeps the differenced route as a control and
+`BorderColumn::Analytic` is the default, falling back silently for a source that
+does not supply the derivatives. **NPC only**: under the condensation the
+residual is the reduced trace one and this assembly is not it.
+
+**WHAT IT BUYS, MEASURED BOTH WAYS ON ONE PROBLEM.**
+`theAnalyticColumnAgreesWithTheDifferencedOne` reads `ψ_ax` and `ψ_bnd` agreeing
+to **ten digits** between the two routes — which is what says the sign and the
+block are right — and a final residual of **5.70e-16 against 1.69e-13**, a factor
+of **296**. The floor is gone. `HighBetaConvergence` is **bit identical**, every
+digit of the published table.
+
+**AND IT IS NOT A UNIVERSAL SPEED-UP.** On the `( N + 1 )` coupled system with a
+non-linear source the two routes are indistinguishable — 4 Newton steps each,
+the same residual to every digit. The assembled column earns its place where the
+*difference* is poor: a stiff border, and structurally wherever a moving support
+makes the two evaluations straddle the plasma edge.
+
+**AND THE WRAPPER HAD TO FORWARD IT, WHICH IS THE SAME TRAP `setPlasmaSupport`
+ALREADY DOCUMENTS.** `CoilAugmentedNormalisedSource` overrides
+`normalisationDerivatives()` to delegate — the coil term is amperes and
+contributes exactly zero to either derivative — because the base's default
+returns `false`, so without the override **every run carrying a `[[coils]]` block
+would have fallen back to a differenced column** and nothing would have said so.
+
+**AND THE AXIS POSITION NEEDS NO DERIVATIVE, WHICH IS A THEOREM AND NOT A
+SHORTCUT.** `ψ_ax` is a *stationary* value, so if the axis position moves with
+the solution the chain rule gives `dψ/dλ = ∂ψ/∂λ + ∇ψ·∂(r*,z*)/∂λ` and
+**`∇ψ = 0` at an interior extremum**. The second term vanishes identically, so
+the largest *nodal* value loses nothing the Jacobian would have used — the
+envelope theorem, and a better reason for that definition than the one recorded
+above. **It does not extend to an X-point**, where the constraint is `q = 0`
+rather than a stationary value and the corner block is `∇q`; see
+`FREE-BOUNDARY-PLAN.md` §10.4.
+
 **Both borders are differenced rather than assembled, and there is no choice
 about it.** They are derivatives of the *condensed* residual. Assembling them
 would need the sensitivity of the element-local eliminations — for `c` the

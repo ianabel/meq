@@ -120,6 +120,87 @@ the three bordered quantities are not finite differences at all: with
 :math:`\psi` an unknown of the system, :math:`b` is exactly :math:`-e_j` (one
 entry) and :math:`d` is exactly 1.
 
+.. _normalised-analytic-column:
+
+The column in closed form
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+That leaves :math:`c = \partial R/\partial s` as the only differenced quantity
+in the border, and it is available analytically. :math:`s` reaches the residual
+only through the source, and for
+:math:`F = g(\Psi)/\sigma` with :math:`\sigma = \psiax - \psi_{\text{bnd}}`
+and :math:`\Psi = (\psi - \psi_{\text{bnd}})/\sigma`,
+
+.. math::
+
+   \frac{\partial F}{\partial \psiax}
+       &= -\frac{g'(\Psi)\,\Psi + g(\Psi)}{\sigma^2}, \\
+   \frac{\partial F}{\partial \psi_{\text{bnd}}}
+       &= \frac{g'(\Psi)\,(\Psi - 1) + g(\Psi)}{\sigma^2},
+
+where :math:`g(\Psi) = \mu_0 r^2 p'(\Psi) + gg'(\Psi)` is what the source
+already evaluates and :math:`g'(\Psi)` is one further derivative of each stored
+profile — the level :cpp:func:`meq::Profile::doublePrime` supplies.
+:cpp:func:`meq::NormalisedSource::normalisationDerivatives` is the interface and
+:cpp:func:`meq::GradShafranovSolver::setBorderColumn` chooses between the
+assembled column and the differenced one, defaulting to assembled and falling
+back silently for a source that does not supply the derivatives.
+
+The formulae agree with a Richardson-extrapolated difference of the source to
+:math:`10^{-12}`, and end to end the two routes reach the same
+:math:`\psiax` and :math:`\psi_{\text{bnd}}` to ten digits while the assembled
+one finishes at a residual some **300 times lower** — the difference's own
+accuracy was the floor.
+
+.. note::
+
+   **It is not a universal speed-up, and the differenced route is kept rather
+   than removed.** On a well-conditioned border the two are indistinguishable —
+   same iteration count, same residual to every digit. The assembled column
+   earns its place where the *difference* is poor: a stiff border, and
+   structurally wherever a moving support makes the two evaluations straddle the
+   plasma edge. Keeping both is how the difference between them can be measured
+   rather than assumed.
+
+.. important::
+
+   **Outside the plasma both derivatives are exactly zero, and that is the
+   reason to prefer the closed form over a difference rather than a mere
+   efficiency.** When the support moves with the solution
+   (``ConfineToPlasma``, see :doc:`configuration`), perturbing the normalisation
+   *moves the edge*, so a difference evaluates the two sides at supports that do not
+   coincide and straddles a kink instead of measuring a derivative. A closed
+   form is evaluated pointwise at the current state and knows the point is
+   outside.
+
+   The precondition is the one :cpp:func:`meq::NormalisedSource::setPlasmaSupport`
+   already carries: with a moving support the true derivative picks up a surface
+   term where the edge sweeps, and that term vanishes exactly when the profiles
+   vanish at the edge.
+
+.. note::
+
+   **The magnetic axis needs no position derivative, and that is a theorem
+   rather than an approximation.** :math:`\psiax` is a *stationary* value, so if
+   the axis position :math:`(r_\ast, z_\ast)` is treated as moving with the
+   solution, the chain rule gives
+
+   .. math::
+
+      \frac{\mathrm{d}}{\mathrm{d}\lambda}
+        \psi\big(\lambda; r_\ast(\lambda), z_\ast(\lambda)\big)
+        = \frac{\partial \psi}{\partial \lambda}
+        + \nabla\psi \cdot \frac{\partial (r_\ast, z_\ast)}{\partial\lambda},
+
+   and :math:`\nabla\psi = 0` at an interior extremum. The second term vanishes
+   identically, so taking the largest *nodal* value loses nothing the Jacobian
+   would have used.
+
+   That argument does **not** extend to an X-point, where the constraint is
+   :math:`q = 0` rather than a stationary value: there the corner block is
+   :math:`\nabla q`, a differentiated quantity, and no envelope argument
+   removes it.
+
 .. _normalised-guess:
 
 The guess is part of the problem statement

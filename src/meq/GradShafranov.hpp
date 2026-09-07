@@ -420,6 +420,40 @@ namespace meq
 			/// unknown.
 			void setNormalisationCoupling( Normalisation choice );
 
+			/// How the bordered Newton obtains its column `dR/ds`.
+			enum class BorderColumn
+			{
+				/// Assembled from the source's own `dF/ds`, when it has one.
+				/// Falls back to Differenced otherwise, so this is always safe.
+				Analytic,
+				/// A central difference of two full residual evaluations. What
+				/// MEQ always did, kept so the two can be measured against each
+				/// other -- and the only route under the condensation, whose
+				/// residual is the reduced trace one rather than this assembly.
+				Differenced
+			};
+
+			/**
+			 * Choose it. The default is Analytic.
+			 *
+			 * IT IS NOT A PERFORMANCE KNOB, and the difference is largest
+			 * exactly where it matters most. A differenced column costs two
+			 * residual evaluations and so does the analytic one's fallback, so
+			 * there is no speed in it. What there is:
+			 *
+			 *   - a differenced column FLOORS the iteration at the difference's
+			 *     own accuracy, measured at about 3e-09 on a coupled half-disc
+			 *     solve, where the residual then sits for as many iterations as
+			 *     it is given;
+			 *   - and with setPlasmaSupport() on it is worse than a floor,
+			 *     because perturbing the normalisation MOVES THE PLASMA EDGE and
+			 *     the two evaluations then have different supports.
+			 *
+			 * Differenced is kept because a control that can be switched off is
+			 * how this project tells a repair from a coincidence.
+			 */
+			void setBorderColumn( BorderColumn choice );
+
 			/// Which coupling solve() will use.
 			Normalisation normalisationCoupling() const;
 
@@ -1637,6 +1671,7 @@ namespace meq
 			double psiAxisValue;
 			double normalisationResidualValue;
 			Normalisation normalisationChoice;
+			BorderColumn borderColumnChoice;
 			mfem::Coefficient *boundaryData;
 			std::unique_ptr<mfem::Coefficient> potentialRhsCoeff;
 
@@ -1756,6 +1791,28 @@ namespace meq
 			/// the trace and psi_ax solved together. See the .cpp.
 			void solveWithNormalisation();
 
+			/**
+			 * The bordered Newton's COLUMN, `dR/ds`, assembled rather than
+			 * differenced.
+			 *
+			 * `s` -- either normalisation -- reaches the residual ONLY through
+			 * the source, so `dR/ds` is the assembly of `dF/ds` by exactly the
+			 * loop meq::SourceIntegrator runs on `F`: same quadrature rule, same
+			 * `-w F/r` sign, into the potential block and nowhere else. The flux
+			 * and trace rows carry no `F` and are left at zero.
+			 *
+			 * @param axis  true for `dR/d(psi_ax)`, false for `dR/d(psi_bnd)`.
+			 *
+			 * @return false when it cannot be done -- no normalised source, not
+			 *         NonlinearOrdering::NPC, or a source that does not supply
+			 *         meq::NormalisedSource::normalisationDerivatives() -- and
+			 *         then the caller differences as it always did. Under the
+			 *         condensation the residual is the REDUCED trace one, which
+			 *         is not this assembly at all.
+			 */
+			bool assembleNormalisationColumn( mfem::Vector const &state,
+			                                  bool axis,
+			                                  mfem::Vector &out ) const;
 
 			/// `int F_plasma/r` over the domain at @a state, i.e. `mu0 I_p`.
 			double assemblePlasmaCurrent( mfem::Vector const &state ) const;

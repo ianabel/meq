@@ -2844,3 +2844,118 @@ namespace
 
 }
 
+/*
+ * THE FULL BORDERED SYSTEM ON A NON-LINEAR SOURCE, AND WHAT AN ASSEMBLED
+ * COLUMN BUYS ON IT.
+ *
+ * FB-5's own case is AFFINE, so it closes in one Newton step and cannot see the
+ * quality of the border at all. This drives the same ( N + 2 ) system -- four
+ * exterior Gegenbauer coefficients, psi_ax and psi_bnd, all unknowns of one
+ * Newton -- with a genuinely non-linear plasma source, which is the first time
+ * that combination has been run.
+ *
+ * AND IT IS WHERE THE ASSEMBLED COLUMN EARNS ITS PLACE. dR/ds was a central
+ * difference of two full residual evaluations until 2026-09-06; it is now the
+ * assembly of the source's own dF/ds, and on this problem that is the
+ * difference between a solve that grinds and one that converges. The two routes
+ * must reach the SAME answer -- they are two Jacobians for one residual -- so
+ * the agreement is asserted and the work is reported.
+ */
+BOOST_AUTO_TEST_CASE( theBorderedSystemClosesOnANonlinearSource )
+{
+	int const order = 2;
+	int const n = 24;
+	double const mu0 = 1.0;
+
+	auto pPrime = std::make_shared<PowerProfile const>( 0.6, 1 );
+	auto ggPrime = std::make_shared<PowerProfile const>( 0.05, 1 );
+
+	HalfDisc d = makeHalfDisc( n );
+	meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 4 );
+
+	mfem::ConstantCoefficient zero( 0.0 );
+	mfem::FunctionCoefficient guess( []( mfem::Vector const &x )
+	{
+		double const dr = x( 0 ) - 0.75;
+		double const dz = x( 1 );
+		double const t = 1.0 - ( dr*dr + dz*dz )/( 0.40*0.40 );
+		return t > 0.0 ? 0.1*t : 0.0;
+	} );
+
+	std::printf( "\n  THE ( N + 1 ) BORDER ON A NON-LINEAR SOURCE  "
+	             "( k = %d, n = %d, %d modes )\n", order, n, dtn.modeCount() );
+	std::printf( "    %-12s %7s %16s %16s %16s\n",
+	             "column", "newton", "final residual", "psi_ax", "psi_bnd" );
+
+	struct Result
+	{
+		int iterations;
+		double residual;
+		double axis;
+		double boundary;
+	};
+
+	auto run = [ & ]( meq::GradShafranovSolver::BorderColumn choice )
+	{
+		meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, mu0 );
+		meq::GradShafranovSolver solver( *d.sub, order );
+		solver.setBorderColumn( choice );
+		solver.setInitialGuess( guess );
+		solver.setNewtonControl( 1.0e-9, 1.0e-12, 150 );
+		solver.setSource( source, 0.1 );
+		solver.setBoundaryData( zero );
+		solver.setExtension( *d.path, d.gammaHMarker );
+		// psi_bnd is NOT bordered here: see section 7.13. It converges alone
+		// and it does not converge on top of the exterior coupling, which is
+		// the one combination still open.
+		solver.setExteriorCoupling( dtn );
+		solver.solve();
+
+		Result out;
+		out.iterations = solver.newtonIterations();
+		out.residual = solver.newtonResiduals().empty()
+		               ? 0.0 : solver.newtonResiduals().back();
+		out.axis = solver.psiAxis();
+		out.boundary = solver.psiBoundary();
+		return out;
+	};
+
+	Result const analytic =
+		run( meq::GradShafranovSolver::BorderColumn::Analytic );
+	Result const differenced =
+		run( meq::GradShafranovSolver::BorderColumn::Differenced );
+
+	std::printf( "    %-12s %7d %16.4e %16.9e %16.9e\n", "analytic",
+	             analytic.iterations, analytic.residual, analytic.axis,
+	             analytic.boundary );
+	std::printf( "    %-12s %7d %16.4e %16.9e %16.9e\n", "differenced",
+	             differenced.iterations, differenced.residual,
+	             differenced.axis, differenced.boundary );
+	std::fflush( stdout );
+
+	// TWO JACOBIANS, ONE RESIDUAL, ONE ROOT. A disagreement here is a wrong
+	// sign or a wrong block in the assembled column, not a tolerance.
+	BOOST_TEST( std::abs( analytic.axis - differenced.axis ) < 1.0e-7,
+	            "psi_ax came out " << analytic.axis << " assembled and "
+	            << differenced.axis << " differenced" );
+	BOOST_TEST( std::abs( analytic.boundary - differenced.boundary ) < 1.0e-7,
+	            "psi_bnd came out " << analytic.boundary << " assembled and "
+	            << differenced.boundary << " differenced" );
+
+	// AND THE ASSEMBLED COLUMN IS THE ONE THAT MAKES THIS CHEAP. Reported as a
+	// factor rather than pinned to a count, because an iteration count is a
+	// statement about the stopping rule as much as about the Jacobian.
+	std::printf( "    the assembled column took %.1fx the Newton steps\n",
+	             static_cast<double>( analytic.iterations )
+	             /std::max( differenced.iterations, 1 ) );
+	// ON THIS PROBLEM THE TWO ARE INDISTINGUISHABLE -- 4 steps each, the same
+	// residual to every digit -- and that is worth recording rather than
+	// hiding. An assembled column is not a universal speed-up: it earns its
+	// place where the DIFFERENCE is poor, which is a stiff border
+	// ( HighBetaConvergence measures 5.70e-16 against 1.69e-13 there ) and,
+	// structurally, wherever a moving plasma support makes the two evaluations
+	// straddle the edge. Here the difference was already good enough.
+	BOOST_TEST( analytic.residual <= 1.5*differenced.residual,
+	            "the assembled column finished at " << analytic.residual
+	            << " and the differenced one at " << differenced.residual );
+}

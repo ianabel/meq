@@ -388,6 +388,7 @@ namespace
 		  psiAxisValue( 0.0 ),
 		  normalisationResidualValue( 0.0 ),
 		  normalisationChoice( Normalisation::Coupled ),
+		  borderColumnChoice( BorderColumn::Analytic ),
 		  boundaryData( nullptr ),
 		  initialGuess( nullptr ),
 		  // In DECLARATION order, which is the order these are actually
@@ -599,6 +600,11 @@ namespace
 		if ( !prepared )
 			throw std::logic_error( "meq::GradShafranovSolver::axisFlux: prepare() has not been called" );
 		return recoverPeak( trace, psiAxisValue, psiBoundaryValue, element );
+	}
+
+	void GradShafranovSolver::setBorderColumn( BorderColumn choice )
+	{
+		borderColumnChoice = choice;
 	}
 
 	void GradShafranovSolver::setNormalisationCoupling( Normalisation choice )
@@ -2706,6 +2712,99 @@ namespace
 		}
 	}
 
+	bool GradShafranovSolver::assembleNormalisationColumn( mfem::Vector const &state,
+	                                                       bool axis,
+	                                                       mfem::Vector &out ) const
+	{
+		// Under the condensation the residual is the REDUCED trace residual and
+		// this element assembly is not it. NPC's residual is unreduced, which is
+		// what makes the column assemblable at all.
+		if ( !normalisedSource || orderingChoice != NonlinearOrdering::NPC )
+			return false;
+
+		// Ask the source once whether it can answer at all. A source that has
+		// not implemented the derivatives is differenced as before.
+		{
+			double probeAxis = 0.0;
+			double probeBoundary = 0.0;
+			if ( !normalisedSource->normalisationDerivatives( 1.0, 0.0, 0.0,
+			                                                  probeAxis,
+			                                                  probeBoundary ) )
+				return false;
+		}
+
+		out.SetSize( state.Size() );
+		out = 0.0;
+
+		mfem::Mesh &mesh = *potentialFes->GetMesh();
+		mfem::Array<int> dofs;
+		mfem::Vector shape;
+		mfem::Vector point;
+
+		int const potentialStart = blockOffsets[ 1 ];
+
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			mfem::FiniteElement const &el = *potentialFes->GetFE( e );
+
+			// The two-argument overload into a local, because the one-argument
+			// one hands out the mesh's own shared scratch -- CLAUDE.md records
+			// that trap under Traps and it has cost this tree six call sites.
+			thread_local mfem::IsoparametricTransformation scratch;
+			mesh.GetElementTransformation( e, &scratch );
+			mfem::ElementTransformation &tr = scratch;
+
+			potentialFes->GetElementDofs( e, dofs );
+			int const dof = el.GetDof();
+			shape.SetSize( dof );
+
+			// THE SAME RULE meq::SourceIntegrator USES, and it has to be: the
+			// column is the derivative of the assembled residual, not of the
+			// continuous one, so a different rule would be the derivative of a
+			// different function. See SourceIntegrator::rule().
+			int const quadratureOrder = 2*el.GetOrder() + tr.OrderW()
+			                            + sourceQuadratureExtra;
+			mfem::IntegrationRule const &ir =
+				mfem::IntRules.Get( el.GetGeomType(), quadratureOrder );
+
+			for ( int i = 0; i < ir.GetNPoints(); ++i )
+			{
+				mfem::IntegrationPoint const &ip = ir.IntPoint( i );
+				tr.SetIntPoint( &ip );
+				el.CalcShape( ip, shape );
+				tr.Transform( ip, point );
+
+				double const r = point( 0 );
+				double const z = point( 1 );
+
+				double psi = 0.0;
+				for ( int j = 0; j < dof; ++j )
+					psi += shape( j )*state( potentialStart + dofs[ j ] );
+
+				double dFdAxis = 0.0;
+				double dFdBoundary = 0.0;
+				if ( !normalisedSource->normalisationDerivatives( r, z, psi,
+				                                                  dFdAxis,
+				                                                  dFdBoundary ) )
+					return false;
+
+				double const derivative = axis ? dFdAxis : dFdBoundary;
+				double const weight = ip.weight*tr.Weight();
+
+				// EXACTLY SourceIntegrator's sign. It adds -w F/r against the
+				// shape functions, so the derivative of that is -w (dF/ds)/r
+				// against the same ones. Getting this wrong is the failure this
+				// file warns about repeatedly, which is why
+				// theAnalyticColumnAgreesWithTheDifferencedOne exists.
+				double const factor = -weight*derivative/r;
+				for ( int j = 0; j < dof; ++j )
+					out( potentialStart + dofs[ j ] ) += factor*shape( j );
+			}
+		}
+
+		return true;
+	}
+
 	void GradShafranovSolver::solveWithNormalisation()
 	{
 		if ( globalisationChoice != Globalisation::None )
@@ -2953,6 +3052,19 @@ namespace
 				out = 0.0;
 				return;
 			}
+			// THE ASSEMBLED COLUMN WHERE IT IS AVAILABLE. s reaches the
+			// residual only through the source, so dR/ds is the assembly of
+			// dF/ds -- exact, and in particular EXACTLY ZERO outside a moving
+			// plasma support, which is the half a difference cannot reproduce
+			// because perturbing s moves the edge between the two evaluations.
+			if ( borderColumnChoice == BorderColumn::Analytic )
+			{
+				if ( normalisedSource )
+					normalisedSource->setNormalisation( normalisation, sB );
+				if ( assembleNormalisationColumn( state, true, out ) )
+					return;
+			}
+
 			double const h = normalisationStep( normalisation );
 			fieldResidual( state, normalisation + h, out );
 			fieldResidual( state, normalisation - h, scratch );
@@ -3449,19 +3561,31 @@ namespace
 
 			if ( boundaryFluxIsUnknown )
 			{
-				// dR/d psi_bnd, the second column, by the same central difference
-				// the first one uses.
-				double const hB = normalisationStep( sB );
-				double const columnBase = sB;
-				sB = columnBase + hB;
-				fieldResidual( unknown, s, columnB );
-				sB = columnBase - hB;
-				fieldResidual( unknown, s, scratch );
-				sB = columnBase;
-				columnB -= scratch;
-				columnB /= 2.0*hB;
+				// dR/d psi_bnd, the second column, by the same route as the
+				// first: assembled from the source's own derivative where that
+				// is available, and differenced where it is not.
+				bool assembled = false;
+				if ( borderColumnChoice == BorderColumn::Analytic )
+				{
+					if ( normalisedSource )
+						normalisedSource->setNormalisation( s, sB );
+					assembled = assembleNormalisationColumn( unknown, false, columnB );
+				}
+				if ( !assembled )
+				{
+					double const hB = normalisationStep( sB );
+					double const columnBase = sB;
+					sB = columnBase + hB;
+					fieldResidual( unknown, s, columnB );
+					sB = columnBase - hB;
+					fieldResidual( unknown, s, scratch );
+					sB = columnBase;
+					columnB -= scratch;
+					columnB /= 2.0*hB;
+				}
 				npcLinear.Mult( columnB, zB );
 			}
+
 
 			if ( nBorderTotal == 1 )
 			{

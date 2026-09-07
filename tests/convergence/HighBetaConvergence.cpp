@@ -802,3 +802,130 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxClosesAsASecondBorder )
 		            "anything and this case is testing the 1x1 solve" );
 	}
 }
+
+/*
+ * THE BORDER COLUMN, ASSEMBLED AGAINST DIFFERENCED.
+ *
+ * dR/ds is the one part of the bordered Jacobian that was ever a finite
+ * difference: the rows are exact under NPC, and s reaches the residual only
+ * through the source, so dR/ds is the assembly of dF/ds and can be built rather
+ * than differenced. meq::NormalisedSource::normalisationDerivatives() supplies
+ * dF/ds and GradShafranovSolver::assembleNormalisationColumn() runs
+ * meq::SourceIntegrator's own quadrature loop over it.
+ *
+ * THE SIGN IS THE THING TO GET RIGHT AND THIS CASE IS HOW IT WAS GOT RIGHT.
+ * SourceIntegrator adds -w F/r against the shape functions, so the column is
+ * -w ( dF/ds )/r against the same ones -- and CLAUDE.md records that a sign in
+ * this tree has been settled by measurement rather than by argument four times.
+ * A wrong sign here does not give a wrong ANSWER: Newton converges to the same
+ * discrete solution whatever Jacobian carried it there. It costs the order and
+ * nothing else, which is exactly the defect *A wrong Jacobian is invisible to a
+ * convergence table* says no error norm can see. So the two routes are run
+ * against each other on the same problem.
+ */
+BOOST_AUTO_TEST_CASE( theAnalyticColumnAgreesWithTheDifferencedOne )
+{
+	int const order = 2;
+	meq::tests::Rectangle const box = standardBox();
+	double const limiterR = box.rMin + 0.68*( box.rMax - box.rMin );
+	double const limiterZ = box.zMin + 0.31*( box.zMax - box.zMin );
+
+	std::printf( "\n  THE BORDER COLUMN: ASSEMBLED AGAINST DIFFERENCED\n" );
+	std::printf( "    %-12s %8s %7s %14s %16s %16s\n",
+	             "column", "n", "newton", "final residual", "psi_ax", "psi_bnd" );
+
+	struct Result
+	{
+		double axis;
+		double boundary;
+		double residual;
+		int iterations;
+	};
+
+	auto run = [ & ]( int n, meq::GradShafranovSolver::BorderColumn choice )
+	{
+		mfem::Mesh mesh = meq::tests::makeMesh( box, n );
+		auto pPrime = std::make_shared<meq::ConstantProfile const>( 0.45 );
+		auto ggPrime = std::make_shared<meq::ConstantProfile const>( 0.30 );
+		meq::NormalisedMHDSource source( pPrime, ggPrime, 1.0, 1.0 );
+
+		mfem::ConstantCoefficient zero( 0.0 );
+		mfem::FunctionCoefficient guess = bump( 0.30 );
+
+		meq::GradShafranovSolver solver( mesh, order );
+		solver.setBorderColumn( choice );
+		solver.setBoundaryFluxPoint( limiterR, limiterZ );
+		solver.setSource( source, 0.30 );
+		solver.setBoundaryData( zero );
+		solver.setInitialGuess( guess );
+		solver.setNewtonControl( 1.0e-12, 1.0e-14, 40 );
+		solver.solve();
+
+		Result out;
+		out.axis = solver.psiAxis();
+		out.boundary = solver.psiBoundary();
+		out.iterations = solver.newtonIterations();
+		out.residual = solver.newtonResiduals().empty()
+		               ? 0.0 : solver.newtonResiduals().back();
+		return out;
+	};
+
+	for ( int n : { 8, 16 } )
+	{
+		Result const analytic =
+			run( n, meq::GradShafranovSolver::BorderColumn::Analytic );
+		Result const differenced =
+			run( n, meq::GradShafranovSolver::BorderColumn::Differenced );
+
+		std::printf( "    %-12s %8d %7d %14.4e %16.9e %16.9e\n",
+		             "analytic", n, analytic.iterations, analytic.residual,
+		             analytic.axis, analytic.boundary );
+		std::printf( "    %-12s %8d %7d %14.4e %16.9e %16.9e\n",
+		             "differenced", n, differenced.iterations,
+		             differenced.residual, differenced.axis,
+		             differenced.boundary );
+		std::fflush( stdout );
+
+		// THE TWO MUST REACH THE SAME DISCRETE SOLUTION. They are two Jacobians
+		// for one residual, so the fixed point is identical and only the path to
+		// it differs. A disagreement here is a wrong SIGN or a wrong block, not
+		// a tolerance.
+		double const axisGap = std::abs( analytic.axis - differenced.axis );
+		double const boundaryGap =
+			std::abs( analytic.boundary - differenced.boundary );
+
+		BOOST_TEST( axisGap < 1.0e-10,
+		            "n = " << n << ": psi_ax came out " << analytic.axis
+		            << " with the assembled column and " << differenced.axis
+		            << " with the differenced one. Two Jacobians for the same "
+		            "residual must reach the same root" );
+		BOOST_TEST( boundaryGap < 1.0e-10,
+		            "n = " << n << ": psi_bnd came out " << analytic.boundary
+		            << " against " << differenced.boundary );
+
+		/*
+		 * AND THE ASSEMBLED ONE REACHES A LOWER RESIDUAL, WHICH IS THE PROPERTY.
+		 * THE ITERATION COUNT IS NOT.
+		 *
+		 * Measured at n = 8: the assembled column finishes at 5.70e-16 and the
+		 * differenced one at 1.69e-13, a factor of 296 -- and the assembled one
+		 * takes SEVEN steps where the differenced one takes six. That is not a
+		 * cost. Both stop at max( rel*||r_0||, abs ), so the count says where
+		 * each crossed its threshold and nothing about the Jacobian; the
+		 * differenced column simply stopped higher. Asserting on the count would
+		 * be asserting on the stopping rule, which CLAUDE.md records under *One
+		 * more test moved from the stopping rule to the property* as a mistake
+		 * this tree has already made once.
+		 *
+		 * The floor is the point. A differenced column can only be as good as
+		 * the difference, and on a coupled free-boundary solve that floor is
+		 * what stops the iteration converging at all.
+		 */
+		BOOST_TEST( analytic.residual <= 1.5*differenced.residual,
+		            "n = " << n << ": the assembled column finished at "
+		            << analytic.residual << " and the differenced one at "
+		            << differenced.residual
+		            << ". The exact derivative should reach a residual at least "
+		            "as low as its own approximation" );
+	}
+}
