@@ -58,6 +58,16 @@ docs/doctrees/
 # file that is meant to be committed there will need `git add -f`.
 *.mesh
 *.gf
+# THE ONE FIXTURE PAIR THAT IS SOURCE AND NOT OUTPUT. examples/limited-tokamak
+# is a free-boundary machine case, and on it the initial guess is part of the
+# PROBLEM STATEMENT rather than an optimisation -- a cold start does not
+# converge at all. The guess is the reference equilibrium reconstructed by
+# Green's functions over this domain, written by
+# tools/freegs4e-benchmark/mkexactguess.py, and it cannot be regenerated at test
+# time because the reference .npz it is built from is itself ignored (below) and
+# needs freegs4e, scipy and a Picard solve to recreate.
+!examples/limited-tokamak-guess.mesh
+!examples/limited-tokamak-guess.gf
 *.vtk
 *.vtu
 *.pvtu

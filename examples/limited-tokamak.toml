@@ -1,0 +1,153 @@
+# A LIMITED TOKAMAK, SOLVED AS A FREE BOUNDARY PROBLEM -- MEQ's first machine
+# case, and the one configuration in examples/ that is checked against a code
+# that is not MEQ.
+#
+# WHAT IS FREE HERE.  Gamma carries no prescribed datum: it is an artificial
+# semicircle in the vacuum at rho = 2.4, and what closes the problem outside it
+# is meq::ExteriorDtN.  The plasma boundary is not prescribed either -- psi_bnd
+# is the flux at a limiter contact, psi_ax is the flux on the magnetic axis, the
+# profile amplitude is set by the plasma current asked for, and the ten
+# Gegenbauer coefficients of the exterior expansion are solved for beside them.
+# THIRTEEN SCALARS AND THE FIELD, ALL UNKNOWNS OF ONE BORDERED NEWTON.
+#
+# WHY THIS CASE AND NOT A DIVERTED ONE.  meq::NormalisedSource::insidePlasma is
+# a POINTWISE test on the value, ( psi - psi_bnd )*span > 0, with no
+# connectivity.  Across an X-point that switches the source on in the private
+# flux region as well as in the plasma, so MEQ is limiter-only until the flood
+# fill of FREE-BOUNDARY-PLAN.md section 10 is built.  This case has
+# vertical-field coils only, so no X-point exists in range.
+#
+# WHERE THE INPUTS CAME FROM.  freegs4e's own H_limited_circular, whose coil
+# currents were SOLVED FOR by its control system rather than chosen by eye --
+# which is what makes them consistent inputs, and which
+# FREE-BOUNDARY-PLAN.md section 7.15 argues is the thing that makes a
+# free-boundary Newton converge at all.  tools/freegs4e-benchmark/README.md is
+# the recipe and DriverAcceptance's theDriverSolvesALimitedTokamak is the
+# regression.
+#
+# THE GUESS IS PART OF THE PROBLEM STATEMENT, NOT AN OPTIMISATION.  A cold bump
+# start wanders for 200 iterations around ||r|| = 1.3 and never converges here.
+# examples/limited-tokamak-guess.{mesh,gf} is the reference equilibrium
+# reconstructed by Green's functions over this domain --
+# tools/freegs4e-benchmark/mkexactguess.py writes it, and records that the
+# answer does not move over a sixteenfold change in the guess's own resolution.
+#
+# AND THE DEGREE IS NOT FREE EITHER.  At PolynomialDegree = 2 on this mesh and
+# this guess the solve converges perfectly well, every border at machine zero,
+# and reports psi_ax = 2.73e+00 against a reference 9.48e-02 -- a single spiking
+# nodal value, not an axis.  p-refinement is what reaches the physical branch
+# and h-refinement is not.  Do not lower the degree here.
+
+[mesh]
+# A gmsh half-disc reaching r = 0 EXACTLY, with the four conductors meshed to
+# rather than cut.  tools/mesh/halfdisc.py writes it; mfem::Mesh::MakeCartesian2D
+# cannot make this geometry and the exterior expansion is valid on no other.
+File = "examples/limited-tokamak.msh"
+
+[discretisation]
+PolynomialDegree = 3
+
+[solver]
+NewtonMaxIterations = 200
+NewtonRelativeTolerance = 1.0e-10
+
+[source]
+Type = "mhd"
+Normalised = true
+
+# F = 0 wherever the normalised flux is non-positive, so the plasma edge is
+# found rather than prescribed.  The coil term is OUTSIDE this support by
+# construction -- a conductor sits in the vacuum region.
+ConfineToPlasma = true
+
+# A starting value only: psi_ax is an unknown of the bordered Newton.
+PsiAxis = 0.0948
+
+# THE AMPLITUDE IS SET BY THE CURRENT, NOT THE OTHER WAY ROUND.  The profiles
+# give the current's shape and this gives its size, which is what CEDRES++ and
+# FreeGS both do.  The argument is mu0*I_p, because that is what the constraint
+# integral int F/r already is.
+PlasmaCurrent = 3.0e5
+Mu0 = 1.25663706212e-6
+
+# Both tables are dp/dPsi and dgg/dPsi -- derivatives with respect to the
+# NORMALISED flux.  Their headers record the factor of the span that separates
+# them from freegs4e's own arrays, and why getting it wrong is invisible while
+# PlasmaCurrent is set.
+PPrimeFile = "examples/limited-tokamak-pprime.dat"
+GGPrimeFile = "examples/limited-tokamak-ggprime.dat"
+
+# The four poloidal field coils, as rectangles of half-width 0.05.  freegs4e's
+# are FILAMENTS, which differ by a quadrupole term of order ( w/d )^2 -- about
+# 3e-3 at the corner of its box, and the largest single contribution to the
+# pointwise disagreement there.  There is deliberately no Mu0 key on a coil
+# block: the coils share [source] Mu0, because a coil carrying the SI value
+# beside a normalised-unit source would scale two terms of one equation a
+# million-fold apart and converge to a machine nobody described.
+[[coils]]
+Name = "P1U"
+CentreR = 1.75
+CentreZ = 0.90
+HalfWidth = 0.05
+HalfHeight = 0.05
+Current = -182364.41559111327
+
+[[coils]]
+Name = "P1L"
+CentreR = 1.75
+CentreZ = -0.90
+HalfWidth = 0.05
+HalfHeight = 0.05
+Current = -182364.24132649833
+
+[[coils]]
+Name = "P2U"
+CentreR = 0.55
+CentreZ = 1.10
+HalfWidth = 0.05
+HalfHeight = 0.05
+Current = -46186.36644395813
+
+[[coils]]
+Name = "P2L"
+CentreR = 0.55
+CentreZ = -1.10
+HalfWidth = 0.05
+HalfHeight = 0.05
+Current = -46186.885522805154
+
+[boundary]
+Type = "zero"
+
+# THE LIMITER IS PRESCRIBED AS A POINT, NOT AS A CURVE, AND THAT IS WHAT MAKES
+# THE COMPARISON WELL POSED.  freegs4e takes psi_bndry to be the maximum over
+# the innermost ring of grid CELLS inside the wall, which on this case is
+# attained at ( 1.3375, -0.0125 ) -- one cell in R and one in Z inside a wall
+# circle of R0 = 1.00, a = 0.35.  So its boundary flux carries an O( h ) error
+# and its plasma does not touch the limiter anywhere: on the TRUE circle the
+# maximum of its own psi is 7.5% lower, and on the INBOARD side.  Giving both
+# codes that same point takes the contact-finding out of the comparison.
+[boundary.limiter]
+R = 1.3375
+Z = 0.0
+
+# rho = 2.4 is inside the background mesh's 2.6, so Gamma_h is a staircase of
+# element faces strictly inside Gamma and the transfer has a band to cross.
+# Modes = 10 is converged: 4 costs 2.4%, 6 costs 0.3%, and 10 -> 14 moves
+# psi_ax by 0.02%.  THE PRINTED COEFFICIENTS ARE NOT A DECAY TEST -- a_n carries
+# its own mode's normalisation through ExteriorDtN::mass( n ), so a2 = -2.1e-01
+# beside a6 = +2.5e-01 looks like no decay and is not.  Sweep Modes instead.
+[boundary.exterior]
+Radius = 2.40
+CentreZ = 0.0
+Modes = 10
+
+[initialguess]
+Type = "gridfunction"
+File = "examples/limited-tokamak-guess.gf"
+MeshFile = "examples/limited-tokamak-guess.mesh"
+
+[output]
+Prefix = "limited-tokamak"
+GridNR = 129
+GridNZ = 129

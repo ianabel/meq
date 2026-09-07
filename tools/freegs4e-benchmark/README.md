@@ -489,3 +489,172 @@ is genuinely `O(n²)` where the default is `O(n³)`, but freegs4e's two boundary
 conditions **disagree by 3.2e-03 with a flat gap**, and self-convergence says the
 default is the converged one — so it changes the answer at the level MEQ is being
 compared at. Seeding costs nothing and changes nothing.
+
+
+## The FREE-boundary case, and it is not driven from this directory
+
+**Everything above is the fixed-boundary rehearsal**: MEQ is handed freegs4e's
+own interior flux surface as a Dirichlet boundary and asked to reproduce the
+field inside. That comparison contains an MXH fit and therefore cannot reach
+round-off however fine either grid is.
+
+**`H_limited_circular` is the case that removes the fit**, and MEQ solves it as a
+FREE-boundary problem: same four coils, same profile shape, same prescribed
+`I_p`, same limiter point, and **no LCFS handed over at all**. It ships as
+`examples/limited-tokamak.toml` and its regression is
+`theDriverSolvesALimitedTokamak` in `tests/convergence/DriverAcceptance.cpp`, so
+it is driven from `examples/` rather than from here — but the reference, the
+profile conversion and the initial guess are all this directory's.
+
+| | freegs4e, 129² | MEQ, `k = 3`, 1601 elements | apart |
+|---|---|---|---|
+| `ψ_ax` | 9.483141e-02 | **9.455354e-02** | 2.9e-03 |
+| `ψ_bnd` | 2.781829e-02 | **2.774057e-02** | 2.8e-03 |
+| profile amplitude | 1, by construction | **0.994505** | 5.5e-03 |
+| `I_p` | 3.0e+05 A | 3.000010e+05 A | it is the constraint |
+| `ψ` over the reference's box | | | rel `L2` **7.1e-03** |
+
+and on 3802 elements at ten modes, `ψ_ax = 9.484390e-02` — **1.3e-04**, with
+`ψ_bnd` at 5.8e-05 and the field `L2` at 5.3e-03. The regression ships the
+COARSE mesh because it lands on the same branch at a third of the cost; the fine
+one is what the headline number in `FREE-BOUNDARY-PLAN.md` §7.16 is measured on.
+
+**WHY THE LIMITER IS PRESCRIBED AS A POINT AND NOT AS A CURVE.**
+`FreeGSProfileMixin.attach_limiter` builds the innermost layer of grid CELLS
+inside the wall polygon and takes `ψ_bndry` to be the maximum over that layer.
+The wall here is `R0_LIM, A_LIM = 1.00, 0.35`, and on this case that maximum sits
+at **( 1.3375, −0.0125 )** — one cell in `R` and one in `Z` inside the circle, `dR
+= dZ = 0.0125`. Interpolating the saved `ψ` there returns **2.781829e-02**, the
+reported `ψ_bndry` to every digit, which is the direct confirmation rather than
+an inference from the code.
+
+**So the reference's boundary flux carries an `O( h )` error and its plasma does
+not touch the limiter anywhere.** The maximum of `ψ` on the TRUE circle is
+**2.574498e-02 at θ = 121.8°, ( 0.8157, 0.2976 )** — on the INBOARD side, not
+beside the reported contact at all — which is **7.5%** below the `ψ_bndry` the
+run reports.
+
+So the comparison hands BOTH codes that same point, as MEQ's
+`[boundary.limiter] R = 1.3375, Z = 0`. It is a well-posed problem both codes
+solve identically and it takes the contact-finding out of the comparison
+entirely. **It also caps what the agreement can mean**: MEQ pins `ψ_bnd` at the
+nearest potential DOF, which differs from the requested point by `O( h )` and
+moves `ψ_bnd` by about `0.25 h`. Choosing a point that IS a dof, or comparing the
+reference at the dof MEQ used, is the way to remove that and is not done.
+
+**AND THE REFERENCE IS NOT CONVERGED AT 129² HERE, WHERE THE DIVERTED CASES
+ARE** — see the grid scan above, 2.0% in `ψ_ax` and 6.3% in `ψ_bnd` from its own
+Richardson limit. That is not a reason to compare against the limit instead: the
+limit is a number neither code computed. It is a reason not to read the 2.9e-03
+above as a statement about either code's discretisation.
+
+### Regenerating the fixture
+
+Three files in `examples/` come from this directory and none of them can be
+rebuilt at test time, because the reference `.npz` they are built from is
+gitignored and needs freegs4e, scipy and a Picard solve to recreate.
+
+```sh
+# 1. the reference, if it is not already here
+python3 fgsref.py --case=H_limited_circular
+
+# 2. the two profile tables.  freegs4e's arrays are dp/dpsi and MEQ's tables
+#    are dp/dPsi, so the conversion MULTIPLIES by the span -- see below.
+#    convert.py's header is the recipe; the tables carry it in their own.
+
+# 3. the initial guess, over MEQ's half-disc rather than freegs4e's box
+python3 mkexactguess.py H_limited_circular.npz \
+        ../../examples/limited-tokamak-guess.mesh \
+        ../../examples/limited-tokamak-guess.gf 2.60 32
+
+# 4. the mesh -- BUT SEE BELOW BEFORE REGENERATING IT
+python3 ../mesh/halfdisc.py --rho 2.6 --size 0.30 --coil-size 0.05 \
+        --coil 1.70  0.85 0.10 0.10  --coil 1.70 -0.95 0.10 0.10 \
+        --coil 0.50  1.05 0.10 0.10  --coil 0.50 -1.15 0.10 0.10 \
+        --plasma 0.60 -0.45 0.85 0.90 --plasma-size 0.09 --check \
+        -o ../../examples/limited-tokamak.msh
+```
+
+**THE SHIPPED `.msh` IS THE FIXTURE AND THAT COMMAND DOES NOT REPRODUCE IT.**
+The four conductors and `--rho` are read straight off the file and are certain;
+the three SIZE arguments are recovered from its element edges and are not. The
+command above writes 1807 triangles against the shipped 1775, with the same 14
+elements per coil and a plasma-region median edge of 0.090 against 0.090 — as
+close as guessing gets, and **not close enough**:
+
+| mesh | triangles | `ψ_ax` | from the reference |
+|---|---|---|---|
+| **shipped** | **1775** | **9.455354e-02** | **2.9e-03** |
+| `--plasma-size 0.09` | 1807 | 9.317576e-02 | 1.7e-02 |
+| `--plasma-size 0.10` | 1716 | 9.337595e-02 | 1.5e-02 |
+
+**So MEQ's own mesh scatter at this resolution is 1.5–2%, and the shipped mesh
+sits at 0.29% by fortune as much as by resolution.** Both regenerated meshes
+converge cleanly, both satisfy every border at machine zero, and both are on the
+physical branch — they are the same equilibrium at a different discretisation,
+not a different root. But `theDriverSolvesALimitedTokamak` gates `ψ_ax` at 1e-02
+and either of them would fail it.
+
+**Regenerating the mesh is therefore a re-measurement and not a rebuild.** If it
+has to happen, run the fine mesh too (3802 elements reads 9.484390e-02) to
+separate scatter from a real change, and move the gate to what the new fixture
+measures rather than relaxing it to whatever passes.
+
+**THE GUESS IS PART OF THE PROBLEM STATEMENT, NOT AN OPTIMISATION.** A cold bump
+start of `examples/free-boundary-halfdisc.toml`'s kind wanders for 200 iterations
+around `‖r‖ = 1.3` and never converges on this problem. `mkexactguess.py` builds
+it from the SOURCE rather than by interpolating the answer — `Jtor` on the 2199
+core cells plus the four coil filaments, summed by Green's functions — because
+freegs4e's `ψ` exists only on its own 1.6 × 1.6 box while MEQ's domain is a
+half-disc of radius 2.6. That is also a free check on the whole conversion, since
+the sum and the PDE solve share nothing but the source: the reconstruction
+reproduces the reference's own `ψ_axis` to **2.5e-04**.
+
+**AND THE ANSWER DOES NOT DEPEND ON THE GUESS'S RESOLUTION**, which is the
+property a guess should have and is worth measuring rather than assuming on a
+problem with more than one solution. One key changed, everything else fixed:
+
+| `n` | mesh + gf | Newton | `ψ_ax` |
+|---|---|---|---|
+| 128 | 1.6 MB | 7 | 9.455354e-02 |
+| 64 | 395 kB | 8 | 9.455354e-02 |
+| 48 | 223 kB | 7 | 9.455354e-02 |
+| **32** | **99 kB** | **7** | **9.455354e-02** |
+
+Not one printed digit moves over a sixteenfold change in size, while the work
+moves by one iteration. `n = 32` is what ships.
+
+**THE PROFILE TABLES ARE `dp/dΨ` AND freegs4e's ARRAYS ARE `dp/dψ`, AND WITH A
+PRESCRIBED CURRENT THE ERROR IS INVISIBLE.** `meq::NormalisedMHDSource::f`
+evaluates `F = scale·( μ₀r²p′( Ψ ) + gg′( Ψ ) )/span`, so converting means
+MULTIPLYING by `ψ_ax − ψ_bnd`. Getting it wrong is
+`examples/rotating-density.dat`'s trap exactly — and with `[source]
+PlasmaCurrent` set it produces **no symptom at all**: both profiles carry the
+same wrong factor, the scale is an unknown, and the border absorbs it. Measured,
+with the tables a factor of `span` too small the scale came back as **6.713e-02
+against a span of 6.689e-02** and the equilibrium was right to every digit. **The
+tell is a profile scale that is not `O(1)`**, and the regression asserts on it
+for that reason.
+
+### Degree 2 is not a cheaper degree 3 here
+
+One key changed, same mesh and same guess:
+
+| | `ψ_ax` | from the reference | profile scale |
+|---|---|---|---|
+| `k = 2` | 9.634577e-02 | 1.60e-02 | 1.0108 |
+| **`k = 3`** | **9.455354e-02** | **2.93e-03** | **0.9945** |
+
+`p`-refinement is worth **5.5×** in `ψ_ax`, 4.1× in `ψ_bnd` and 5.2× in the field
+`L2` (3.7e-02 against 7.1e-03). That is the same shape as the fixed-boundary
+finding above — *`k = 2, refine = 1` does not converge on MAST or DIII-D while
+`k = 3` does on the same mesh* — and it is why the regression runs degree 2 as a
+control rather than merely running degree 3.
+
+**`FREE-BOUNDARY-PLAN.md` §7.16 records a WORSE degree-2 failure than this** — 17
+Newton steps to `ψ_ax = 2.73e+00`, a single spiking nodal value with the profile
+scale raised by 980 to compensate. **That is not reproducible on the code as it
+stands**: the recorded configuration was rerun verbatim, same TOML and same 128²
+guess, and converges in 8 steps to 9.676040e-02, on the physical branch. The
+regression asserts that degree 2 stays on the branch, so it fails if that comes
+back.
