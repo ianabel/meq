@@ -750,6 +750,13 @@ filament. A `[coils]` table in the TOML, a `meq::CoilSet`, and a source that add
 the coil term. Nothing structural — and it is what makes FB-1 possible, which is
 the acceptance test for everything in §3 and §4.
 
+**AND THIS SECTION DESCRIBES ONE ROUTE WHERE THERE ARE TWO**, which
+`CLAUDE.md` has been citing it for since 2026-09-06. What is above is the
+**interior** route: the coil is meshed, `F_coil` is assembled by quadrature over
+the elements, and a conductor the mesh does not reach contributes exactly
+nothing. The **exterior** route — a conductor outside `Γ`, entering through the
+coupling rather than through the mesh — is FB-7 and is written up in §7.19.
+
 ## 6. The split: what belongs in MFEM
 
 **REWRITTEN 2026-09-01, AND THE ANSWER IS MUCH SMALLER THAN IT WAS.** The full
@@ -957,6 +964,7 @@ the fallback to work.
 | **FB-4** | The moving plasma support and cut quadrature. | **ANSWERED 2026-09-05, AND THE ANSWER MOVED THE WORK RATHER THAN DOING IT — see §7.10.** The order is capped by the PROFILE and not by the quadrature: with `p' ~ Ψ^j` at the edge, `ψ*` keeps `k+2` exactly when **`k ≤ j`**, and that threshold is the same for an exact cut rule as for MEQ's plain one. `j = 3, k = 3` reads **4.989** against a target of 5. **No cut quadrature was built**, and there is no inconsistent-cut-Jacobian cost to measure because there is no cut rule — the quadrature points do not move, so the assembled Jacobian is exact. What IS measured is that `j = 0` does not converge at all |
 | **FB-5** | The augmented Newton as one bordered solve, and adaptivity through it. | **DONE 2026-09-06, BOTH HALVES — and the adaptive half found that `η` cannot see the coupling; see §7.12.** `theCoupledSolveSurvivesTheAdaptiveLoop` runs solve → post-process → estimate → mark → refine with the exterior coupling live: `η` **2.51e-01 → 3.21e-02** over four cycles with `Γ` fixed, `L2(ψ)` 3.58e-03 → 9.33e-04, **0 widened fans** so assumption P.1 holds on a graded `Γ_h`, and **one** Newton step per cycle. The bordered solve: `setExteriorCoupling()` carries the N Gegenbauer coefficients as unknowns of the same Newton as `psi_ax` and `psi_bnd`, and `solveWithNormalisation()` now does a general `( N + 2 )` elimination against ONE factorisation. On FB-1b's half-disc it agrees with the superposition route to **2.3e-15**, takes **one** Newton step because the residual is affine in `( x, a )`, and converges to the exact coefficients at **3.32** against FB-1b's 3.30. `HighBetaConvergence` is bit-identical. What remains is the adaptive loop through the coupling: eta monotone with `Gamma` fixed, and P.1 preserved |
 | **FB-6** | A machine case, against **`../freegs4e`**. **The driver pieces landed 2026-09-06**: `[[coils]]` reaches the solve through `meq::makeCoilSet` and the `CoilAugmentedSource` adapters, `[source] ConfineToPlasma` switches the source off outside `{ Ψ > 0 }`, and `tools/mesh/halfdisc.py` generates the half-disc-with-conductors mesh MFEM reads natively. What is still missing for a machine case is a **route from a config file** to the two borders FB-3 and FB-5 built: neither `setBoundaryFluxPoint()` nor `setExteriorCoupling()` is reachable from TOML, so a machine case is a library caller today. | Agreement with an independent free-boundary tokamak code by a **different algorithm** — von Hagenow Green's functions, finite differences, Picard — on the same coils and the same tabulated `p′`, `ff′` through its `GeneralPprimeFFprime`. A fine-mesh self-comparison is the fallback, not the target: it shares every convention with the code it checks. See §7 |
+| **FB-7** | **Conductors OUTSIDE `Γ`**, entering through the coupling instead of the mesh. | **NOT STARTED — §7.19 is the write-up.** The exterior stays linear, so `ψ = ψ_coil + ψ̃` with `ψ_coil` known in closed form and `Δ*ψ_coil = 0` inside `Ω`: the interior equation is untouched and the conductor enters as a KNOWN additive term on both halves of the transmission condition. No new unknowns and no change to the border. The one gap is a GRADIENT on `meq::CoilSet`. Acceptance: a vacuum solve with the conductor outside `Γ` reproducing `CoilSet::psi` at `k+1`, and the coil-inside / coil-outside routes agreeing where both are legal |
 
 **FB-1 is the stage to protect.** It exercises `ExteriorDtN`, the transferred
 datum with a non-zero `g`, the transmission condition, the augmented solve and
@@ -2656,6 +2664,126 @@ asymmetry is one more reason the coupling belongs on NPC.
   `refs/Refs.md` keeps the analysis of what it did and got wrong.
 
 ---
+
+### 7.19 FB-7: conductors outside `Γ`, through the coupling rather than the mesh
+
+**NOT STARTED. Written 2026-09-07.** A conductor outside `Γ` contributes
+**nothing** today: `F_coil` is assembled by quadrature over the elements, so a
+coil the mesh does not reach is never sampled, the run converges, and it
+describes a machine with that conductor switched off. The driver warns rather
+than refuses, precisely because §5.4 contemplates this configuration — and until
+now §5.4 did not actually describe it.
+
+#### The decomposition, and why the exterior stays legal
+
+The exterior expansion of §3 is a separation of variables and needs
+`Δ*ψ = 0` outside `Γ`. A conductor out there breaks that. But the exterior
+problem is **linear**, so split
+
+```
+ψ  =  ψ_coil  +  ψ̃
+```
+
+with `ψ_coil` the conductor's own field. Two facts do the work:
+
+* **`Δ*ψ_coil = 0` inside `Ω`**, the conductor being outside `Γ ⊇ ∂Ω`. So the
+  interior equation is **untouched** — `Δ*ψ̃ = −F_plasma`, with no coil term in
+  the source at all.
+* **`ψ̃` is `Δ*`-harmonic in the whole exterior and decays**, the conductor's
+  singular support having been subtracted. So the Gegenbauer expansion is valid
+  for `ψ̃`, which is exactly the condition the DtN map needs.
+
+The conductor therefore enters **only through `Γ`**, additively and **known**:
+
+```
+ψ|_Γ       =  Σ a_n C_n( μ )                 +  ψ_coil|_Γ
+∂ψ/∂n|_Γ   =  Σ a_n symbol( n ) C_n( μ )     +  ∂ψ_coil/∂n|_Γ
+```
+
+**No new unknowns and no change to the border structure.** The `( N + 2 )`
+system stays as it is; the two extra terms are loads, the same shape as
+`setExteriorDatum()`'s existing one.
+
+#### IT IS NOT MORE ACCURATE, AND THE FIRST DRAFT OF THIS SECTION SAID IT WAS
+
+**What it buys is DOMAIN REDUCTION, not fidelity.** The claim it replaces —
+that a closed-form conductor field beats one assembled on the mesh — is wrong
+twice over.
+
+**First, because a real coil has finite extent and finite current density, and
+near the plasma that matters to the solution.** A filament is an *idealisation*:
+evaluating it exactly still solves the wrong problem when the conductor is close
+enough for its multipole content to reach the plasma. Exactness of evaluation
+and adequacy of the model are different questions, and only the second decides
+whether an answer is right.
+
+**Second, because MEQ's coils were never filaments.** `meq::Coil` is *"one coil
+of rectangular cross-section, carrying a prescribed total current uniformly
+distributed over it"*, and `coilPsi()` integrates the Green's function over that
+footprint with a graded Gauss rule — 32 points per direction by default, machine
+precision outside the coil and about 1e-12 inside. So **finite extent and finite
+current density are already modelled**, and the exterior route inherits that
+fidelity rather than trading it away. The filament is the limiting case, not the
+method.
+
+**So the honest statement of what FB-7 is for**: a conductor outside `Γ` is
+currently *unrepresentable*, and this makes it representable at the fidelity
+`meq::CoilSet` already has, without meshing out to it. The two routes are not
+competitors — a conductor inside `Ω` must be meshed, because it is in the domain
+and its current is part of the interior equation.
+
+#### What exists, and the one gap
+
+| | |
+|---|---|
+| `meq::CoilSet::psi( r, z )` | **exists** — production, MFEM-free, the Green's function integrated over the real cross-section |
+| `setExteriorDatum( PositionFunction )` | **exists** — takes a free function of position, so the Dirichlet half is one call |
+| `exteriorTransmissionResidual()` / `exteriorTransmissionRows()` | **exist** — where the Neumann term is added |
+| **`∇ψ_coil`, i.e. `q_coil·ν`** | **MISSING in production.** `tests/analytic/CurrentLoop.hpp` has `dPsiDr`, `dPsiDz`, `gradPsi` and `flux` by elliptic integrals, checked against central differences — but it is a TEST FIXTURE, and `CoilSet` exposes only `psi` |
+
+**So the deliverable is one gradient**, lifted into `meq::CoilSet` at the same
+quadrature order and with the same refusals, plus two known terms added on `Γ`.
+
+#### Three things to watch
+
+* **The `1/eps` gradient near a conductor.** `CurrentLoop.hpp` records it
+  already: the gradient *"loses its figures a hundred times sooner than psi does
+  — 1e-5 of a minor radius if the gradient is wanted, 1e-7 if only psi is"*.
+  Harmless for a conductor genuinely outside `Γ`, and a trap the moment one sits
+  just outside it. The finite cross-section helps here rather than hurting: the
+  singularity is integrated over, not evaluated at.
+* **The decay condition is on `ψ̃`, not on `ψ`.** Subtracting `ψ_coil` is what
+  makes the expansion legal, so a run that adds the coil field to the DATUM
+  while leaving the transmission row alone has an inconsistent pair and will
+  converge to something. That is the same shape as the stale-load defect §7.12a
+  records: a perfectly satisfied constraint is not evidence the coupling is
+  right.
+* **It does not extend to a conductor between `Γ_h` and `Γ`.** On the extension
+  path `Γ_h` is inscribed and there is a band that is inside neither
+  description; a conductor there is in the domain for one half of the argument
+  and outside it for the other. Refuse it rather than deciding.
+
+#### Acceptance
+
+Two measurements, in the order they should be taken.
+
+1. **A vacuum solve with the conductor outside `Γ`**, against `CoilSet::psi` as
+   the closed form: `ψ` at `k+1`. This is FB-1a's structure with the datum
+   supplied by the coil rather than by a mode, so it needs no plasma and no
+   border, and it is the cheapest thing that can fail.
+2. **The two routes agreeing where both are legal** — a conductor placed inside
+   `Ω` and solved by quadrature, then moved outside `Γ` with the geometry
+   otherwise fixed, must give the same field in the plasma to the discretisation
+   error. Without this the first measurement is compatible with a coupling that
+   is self-consistently wrong, which is the failure `theDriverReachesTheExteriorCoupling`'s
+   control exists to catch.
+
+**And it unblocks something measured**: §7.19's own motivation is that the
+two-borders fixture has *"nowhere to put a coil genuinely outside the plasma"* —
+the limiter sits at 0.70 to 0.87 of `Γ` there against 0.56 on
+`examples/limited-tokamak.toml`. A conductor outside `Γ` costs no mesh, so the
+vacuum region stops having to be paid for in elements.
+
 
 ## 10. Diverted plasmas and the X-point
 

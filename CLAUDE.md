@@ -942,7 +942,24 @@ in the unknowns, and `examples/mhd-ggprime.dat` is 1.35 at `ψ = 0`. With
 `ψ_bnd` still fixed at zero (FB-3) the edge is pinned at `ψ = 0` rather than
 found, so this is half of a moving boundary and the half that is built.
 
-**A COIL THE MESH DOES NOT REACH CONTRIBUTES NOTHING, AND THE DRIVER SAYS SO.**
+**A COIL THE MESH DOES NOT REACH CONTRIBUTES NOTHING, AND THE DRIVER SAYS SO.
+FB-7 IS THE ROUTE THAT WOULD FIX IT, AND IT IS WRITTEN UP NOW** —
+`FREE-BOUNDARY-PLAN.md` §7.19. The exterior stays linear, so
+`ψ = ψ_coil + ψ̃` with `Δ*ψ_coil = 0` inside `Ω`: the interior equation is
+untouched and the conductor enters as a **known** additive term on both halves of
+the transmission condition, with no new unknowns. The one gap is a **gradient**
+on `meq::CoilSet`, which has `psi()` and not `∇ψ`.
+
+**IT BUYS DOMAIN REDUCTION AND NOT ACCURACY, AND THE OPPOSITE WAS NEARLY
+RECORDED HERE.** A closed-form conductor field is not better than one assembled
+on the mesh: a real coil has finite extent and finite current density, and near
+the plasma that matters to the solution, so exactness of *evaluation* is not
+adequacy of the *model*. And MEQ's coils were never filaments in the first place
+— `meq::Coil` is a rectangular cross-section carrying a uniform current density,
+and `coilPsi()` integrates the Green's function over that footprint at machine
+precision outside it. The exterior route inherits that fidelity; what it removes
+is the need to mesh out to the conductor.
+
 `F` is assembled by quadrature over the elements, so a coil outside the `[mesh]`
 box is never sampled — the run converges, writes its files, and describes a
 machine with that conductor switched off, while `coil_current` in the `.nc`
