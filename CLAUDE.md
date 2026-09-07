@@ -1491,6 +1491,17 @@ value faults throwing `logic_error` where the constructor throws
 `invalid_argument`. **Branch coverage, last seen at 48%, is the figure with real
 headroom in it and the one nobody has looked at.**
 
+**SPHINX IS INSTALLED SINCE 2026-09-07 AND THE DOCS STILL DO NOT BUILD HERE.**
+`sphinx-build` is 8.2.3, but `sphinx_material` (the theme, imported
+unconditionally at `docs/conf.py:75`), `sphinxcontrib.bibtex`, `myst_parser` and
+`breathe` are all **missing**, so `make -C docs html` under `-W` — which is what
+`.readthedocs.yaml` requires — cannot run. **What CAN be run, and is enough to
+check an edit, is `sphinx-build -W -b dummy`**: it parses every page and reports
+warnings without needing a theme or writing output. On a throwaway copy with the
+theme and bibtex stubbed out it reports 137 warnings, **all of them `cite:t` and
+`cite:p`**, i.e. artefacts of stubbing bibtex out and not defects in the pages.
+Anything else it reports is real.
+
 **`gcovr` is not installed on this machine**, so the recipe above fails with
 `command not found`; a venv is the way round it, and it needs
 `--merge-mode-functions=separate` or it aborts on `Config.hpp`'s inline
@@ -4149,6 +4160,13 @@ exactly as it is by an axis:
 * **The sweep saw the same corner on the toy fixture**, reading `ψ_ax` at 8.12e-02
   against a field maximum of 2.50e-02 — ratio 0.31 — and 0.36 and ≈ 0 on two
   others. §7.18 item 3.
+
+**AND THE REPAIR IS NOT FINISHED. `FREE-BOUNDARY-PLAN.md` §11 IS THE LIST**, and
+the first item on it is that **the guard has never been run on the §7.12b
+sighting** — if that corner spike is itself an O-point of `q_h` then `Ψ` reads
+≈ 1 there and the check AGREES with it. It is one-sided and largest-`Ψ`-wins by
+design, so it misses rather than false-alarms, and until that is measured the
+guard is not known to catch the case that motivated half of it.
 
 **So the check exists now.** `meq::CriticalPointFinder::checkAxis()` sweeps for
 zeros of `q_h`, picks the O-point of the sense **the sign of the span dictates**

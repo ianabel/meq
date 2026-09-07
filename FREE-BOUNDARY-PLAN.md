@@ -2933,3 +2933,106 @@ diverted plasma reachable for:
   re-entrant corner and is why `ExtensionConvergence` takes `Γ` to be
   `ψ = −0.03` rather than `ψ = 0`. Nothing here rescues that, and nothing needs
   to: free boundary is what removes the need to mesh the separatrix at all.
+
+## 11. `ψ_ax` is the open defect, and this is the list
+
+**Written 2026-09-07 as a handoff.** Three independent sightings landed on one
+night and the diagnosis outran the repair. Everything below is *not done*.
+
+### 11.0 What the defect is
+
+`ψ_ax` is **the largest nodal value of `ψ_h`**. That is deliberate and should
+not be casually changed: one nodal value is one entry of the discrete unknown,
+so under NPC the border row is exactly `−e_j` and the corner exactly `1`, with
+nothing differenced. **But nothing in that definition says the largest nodal
+value is a magnetic axis**, and `G = ψ_ax − max ψ_h = 0` is satisfied at machine
+zero by a spurious nodal spike exactly as it is by an axis.
+
+| | where | reads | against |
+|---|---|---|---|
+| §7.16 | a spike at the plasma edge | 2.734289e+00 | 9.48e-02 — **29×** |
+| §7.12b | the corner where `Γ` meets the **axis** | 1.091633e-01 at `( 0.047, −1.393 )` | 4.447250e-02 at `( 1.393, 0.024 )` — **2.5×** |
+| §7.18 item 3 | the same corner, toy fixture | 8.12e-02 | 2.50e-02 — ratios 0.31, 0.36, ≈ 0 |
+
+**In every one of them the run converged with every constraint at machine zero.**
+And because `ψ_ax` is what the profiles are normalised by, a wrong one is not a
+bad answer — it is **a different equilibrium**, with the current, the geometry
+and every profile-derived quantity downstream of it.
+
+**What is built**: `meq::CriticalPointFinder::checkAxis()`, the driver's warning,
+and `axis_normalised_flux` / `axis_r` / `axis_z` in the `.nc`. Also
+`refreshPlasmaComponent()` seeds **off** the symmetry axis, which exists because
+of the §7.12b sighting.
+
+### 11.1 First, because it is cheap and it may invalidate the guard
+
+**Run `checkAxis()` on §7.12b's case.** It never has been. Its author flagged the
+gap explicitly: **if the corner spike is itself an O-point of `q_h`, then `Ψ`
+reads ≈ 1 there and the guard AGREES with it.** The guard is deliberately
+one-sided and largest-`Ψ`-wins, so it misses rather than false-alarms — which is
+the right direction for a warning and the wrong direction for this case. Until
+that is measured, **the guard is not known to catch the sighting that motivated
+half of it.**
+
+### 11.2 Then re-publish or retract §7.12b's table
+
+Four limiter radii, `ψ_ax` in every row, and the column is a corner artefact.
+The convergence claims in that section stand — the residuals, the iteration
+counts and `ψ_ax`'s own constraint at 1e-17 are statements about the solve
+closing, and it closes. **The `ψ_ax` and `ψ_bnd` values are not physics** and
+should not be quoted as such until re-measured against a located axis.
+`theTwoBordersConvergeTogether` is the fixture and it already prints both peaks.
+
+### 11.3 Are the corner spike and the corner FRAGILITY the same defect?
+
+`PLASMA-EDGE-PLAN.md` §9.4 measured the extension losing order at a corner
+between two **transferred** pieces. The axis–`Γ` corner is between a transferred
+piece and a **fitted** one, and FB-1a reads **1.99 / 2.99 / 3.99** there — so on
+the face of it they are different phenomena. But the spike sits in that corner,
+it is where the lifting weight `C = r` vanishes, and FB-A measured the flux mass
+`( r q, v )` giving those elements a weight of order `h` and an `O( 1/h )`
+conditioning penalty. **Three things meet at that corner and nobody has separated
+them.**
+
+**The discriminating experiment is cheap**: refine *only* the axis–`Γ` corner and
+watch the ratio. A discretisation artefact shrinks; a branch does not. That is
+the same test that separated a genuine second root from a discretisation error in
+the freegs4e rehearsal.
+
+### 11.4 Should the guard refuse rather than warn on the free-boundary path?
+
+Today it warns, on the coil-outside-the-mesh precedent. That precedent is about a
+configuration that is *not wrong in principle*. This is not that: on a
+fixed-boundary run a wrong `ψ_ax` is a bad number, and on a free-boundary run it
+is a different machine. **Argue it deliberately** rather than letting the default
+stand by inheritance.
+
+### 11.5 The definition itself, three options and none costed
+
+1. **Keep the nodal max, exclude elements touching a fitted boundary.** Cheapest,
+   would have prevented §7.12b, and is arbitrary — it names the symptom.
+2. **Restrict the argmax to the plasma component.** `meq::PlasmaComponent` exists
+   now and `refreshPlasmaComponent()` already seeds off-axis, so the machinery is
+   there. It couples `ψ_ax` to the support, which moves.
+3. **Constrain `ψ_ax` at the located O-point.** The principled one, and the
+   objection to it may not hold: it looks as though it costs the exact `−e_j`
+   row, because the O-point moves with the solution — but `CLAUDE.md` already
+   records the **envelope theorem** argument for why the nodal max needs no
+   position derivative (`ψ_ax` is a *stationary* value, so `∇ψ = 0` at an
+   interior extremum and the chain-rule term vanishes identically). **That
+   argument may transfer to a located axis**, in which case option 3 is nearly
+   free. It does **not** extend to an X-point, where the constraint is `q = 0`
+   and the corner block is `∇q`; see §10.4.
+
+### 11.6 Two loose ends beside it
+
+* **Nothing consumes the `.nc` diagnostic.** `tools/freegs4e-benchmark/compare.py`
+  should read `axis_normalised_flux` and refuse a comparison against a run whose
+  axis is not an axis. The attribute is written and unread.
+* **The exterior-coefficient decay diagnostic is still not written.** The
+  readable quantity is `|a_n|·√mass( n )` with
+  `mass( n ) = 2/( n( n−1 )( 2n−1 ) )`, so raw `a_n` carries `n^{-1.5}` and looks
+  flat when it is decaying — measured, `N = 6` costs 0.3% in `ψ_ax` on §7.16's
+  case and `N = 10` is converged. It was deferred once because
+  `[boundary.exterior]` did not exist in the tree it was written against. It does
+  now.
