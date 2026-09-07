@@ -76,6 +76,21 @@ Nothing is red and stages 0 to 7 are done, so the order is:
      a wall-hugging annulus, a vertical field is what suppresses that branch, and
      it does not yet converge from a cold start with conductors present. §7.14
      lists what to try, and continuation in the coil current is first.
+   * ~~**A machine case.**~~ **DONE 2026-09-06.**
+     `examples/limited-tokamak.toml` — coils, a limiter, an exterior coupling, a
+     prescribed current, a confined source and a gmsh mesh reaching `r = 0`, all
+     live at once — solves in 11 Newton steps and reproduces `freegs4e`'s limited
+     circular tokamak: `ψ_ax` **1.3e-04** apart, `ψ_bnd` 5.8e-05, `ψ` at
+     **5.3e-03** relative `L2` over the reference's whole box. Free boundary by a
+     DtN map against free boundary by von Hagenow Green's functions, HDG Newton
+     against finite-difference Picard, C++ against Python. §7.16.
+   * **`ψ_ax` was the weak point of all of it, and §11 is now worked through.**
+     `ψ_ax` was *the largest nodal value of `ψ_h`*, and nothing in that says it
+     is a magnetic axis — three configurations were found reporting one that was
+     not. It is now constrained at the **located axis**, a zero of `q_h`
+     (§11.5 option 3), which the envelope theorem makes free in the Jacobian; and
+     two guards refuse an unphysical answer, one on the axis current density and
+     one on the plasma containing the symmetry axis. §11.
    * **FB-6, the machine case**, against `../freegs4e`. §7.11 of the plan
      settled the test problem: there is no reproducible ITER case, and the
      answer is CEDRES++'s published profile family driven through freegs4e's
@@ -128,8 +143,13 @@ The solver works and every claim about it is a measured convergence rate. Stages
 0 to 6 are done, **stage 7 is finished** — MEQ is a program that solves on a
 curved boundary, refines its own mesh, and restarts from a previous answer in one
 Newton step — **toroidal flow is finished**, FL-0 to FL-8, and **solution
-inversion is finished up to its output stage**. The only thing the driver refuses
-is `[boundary] Type = "exact"`.
+inversion is finished up to its output stage**.
+
+**The driver now refuses FOUR things, where this paragraph used to say one.**
+`[boundary] Type = "exact"`, an `AssemblyMode` or `TraceSolver` the build cannot
+honour, **a `ψ_ax` that is not the flux at a magnetic axis**, and **a source that
+does not vanish on the symmetry axis** — the last two added 2026-09-07 and the
+first two that cost a solve, because `ψ_bnd` is an unknown of it.
 
 ## The nonlinear question is settled
 

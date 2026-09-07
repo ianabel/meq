@@ -68,10 +68,13 @@ done and what is next, and the measurements behind every claim above.
 Two things worth knowing up front, because earlier revisions of this file claimed
 otherwise:
 
-* MEQ is now a **fixed-boundary** solver. The free-boundary work — the von
-  Hagenow / Lackner Green's-function scheme — is unported and sits in
-  `attic/free-boundary/`, with a README explaining why it will not simply be
-  revived.
+* MEQ solves **fixed and free boundary alike**. Free boundary is an exterior
+  Dirichlet-to-Neumann coupling with the plasma edge, the axis flux and the
+  profile scale all unknowns of one bordered Newton; it reproduces an
+  independent code's limited tokamak. The *original* free-boundary work — the
+  von Hagenow / Lackner Green's-function scheme — was a different method, was
+  never ported, and has been removed: `git checkout 635aa3d -- attic/` brings
+  it back if the Green's-function route is ever wanted.
 * **The pre-port code never solved a Grad–Shafranov equation.** It computed the
   vacuum field from coil currents; the right-hand side took $\psi$ and ignored
   it, and the plasma model was never connected. Treat any description of MEQ

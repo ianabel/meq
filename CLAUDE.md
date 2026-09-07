@@ -212,6 +212,21 @@ on an MFEM without OpenMP or thread safety, and `[solver] TraceSolver` naming a
 package this build lacks. Both are checked once at startup, before a mesh
 exists, so a run that cannot be honoured costs milliseconds.
 
+**AND SINCE 2026-09-07 THERE ARE TWO MORE, AND THEY ARE THE FIRST THAT COST A
+SOLVE.** Both are about the **answer** rather than the file or the build, and
+neither can be recognised before the equilibrium exists — `ψ_bnd` is an unknown
+of the bordered Newton, so what the profiles are evaluated at on the axis is not
+known until it closes. **A `ψ_ax` that is not the flux at a magnetic axis**
+refuses on a *positive* detection only, `checkAxis()` being one-sided and
+missing rather than false-alarming; no interior extremum found at all stays a
+warning, since a wall-hugging annulus is a real thing to look at. **A source that
+does not vanish on the symmetry axis** refuses outright — `F/r` is `μ₀ j_φ`, so
+that is an infinite current density on `r = 0`. The source one is **ordered
+first**, because a bad `ψ_ax` is its consequence and the `ψ_ax` message's advice
+(look at the guess, look at the mesh) is wrong when the pole is the cause. Both
+exit 1 and write nothing; `docs/running.rst`'s gloss on code 1 is amended, since
+it said *"nothing was attempted"*.
+
 **THE TWO PERFORMANCE KEYS ARE THE ONLY SOLVER KNOBS EXPOSED TO TOML, AND THE
 LINE IS DRAWN WHERE IT IS FOR A REASON.** `AssemblyMode` and `TraceSolver`
 cannot change the answer — the assembly modes are asserted bit for bit and the
@@ -403,8 +418,9 @@ per unknown is the only column with meaning.
 **AND THERE IS A SECOND EQUILIBRIUM, REACHED BY AN INPUT ERROR NOTHING ELSE
 CATCHES.** The same configuration can converge — every border at machine zero,
 the current delivered to seven figures — to `ψ_ax = 2.734289e+00` against
-9.48e-02, because **`ψ_ax` is the largest NODAL value of `ψ_h` and nothing says
-the largest nodal value is a magnetic axis**: it latches onto a single dof
+9.48e-02, because **`ψ_ax` WAS the largest NODAL value of `ψ_h` and nothing said
+the largest nodal value is a magnetic axis** — the defect option 3 closed, and
+the reason it was worth closing: it latches onto a single dof
 spiking at the plasma edge, next to nodal values of 0.98, and the current border
 then raises the profile scale by 980 to keep `∫F/r` at `μ₀I_p`. A spurious
 `ψ_ax` inflates the span, `Ψ` collapses, and the scale compensates — the three
@@ -1353,7 +1369,7 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 git submodule update --init --recursive     # extern/toml11
 cmake -B build
 cmake --build build -j4
-cd build && OMP_NUM_THREADS=4 ctest -j4      # 41/41 -- see below
+cd build && OMP_NUM_THREADS=4 ctest -j4      # 40/41 -- one RED on purpose, see below
 ```
 
 **RUN IT `-j4` WITH `OMP_NUM_THREADS=4`, WHICH IS 3.2x FASTER AND MEASURED.**
@@ -1367,11 +1383,45 @@ product at the core count is what pays:
 | `-j16`, `OMP=1` | 265.2 s | 350% |
 | **`-j4`, `OMP=4`** | **223.2 s** | 514% |
 
-37/37 in every configuration when that table was taken, and **41/41 today** at
-**335 s** —
+37/37 in every configuration when that table was taken, and **40/41 today** at
+**249.7 s** —
 the count moves as cases are added, so read the table's ratios rather than its
 absolute seconds. Nothing in the suite depends on a thread count, which is the
-correctness half. **`OMP_NUM_THREADS` is deliberately NOT pinned in
+correctness half.
+
+**THE ONE FAILURE IS DELIBERATE AND IS `FreeBoundaryCoupling`.**
+`theTwoBorderSolveReportsATrueMagneticAxis` asserts `checkAxisSource().bounded`
+— that the toroidal current density is finite on the symmetry axis — and on that
+fixture it is not: `|F|` there reads 0.075 to 0.130 at the four limiter radii.
+`FREE-BOUNDARY-PLAN.md` §11.3 is the account.
+
+**IT USED TO ASSERT `checkAxis().agrees` AND OPTION 3 MADE THAT A TAUTOLOGY**,
+which is why it was re-aimed rather than kept: with `ψ_ax` constrained at the
+located axis, `Ψ` there reads 1 by construction — measured, that very
+configuration reports `Ψ = 1.0000 AGREES` on a solve whose axis source is a
+pole. A test that cannot fail is worse than no test.
+
+**AND IT IS A FIXTURE DEFECT RATHER THAN A CAPABILITY GAP, WHICH IS WORTH BEING
+PRECISE ABOUT.** `examples/limited-tokamak.toml` has **every** ingredient this
+case has — a domain reaching `r = 0`, `[boundary.limiter]`,
+`[boundary.exterior]` and `ConfineToPlasma` — and converges in **11 Newton
+steps** to a `Ψ` of 1.0000, reproducing freegs4e to 1.3e-04. What it has that the
+fixture does not is **coils and a prescribed current**.
+
+**So the fixture cannot be repaired IN PLACE, which is not the same as
+unsolvable.** Touching only the profiles leaves it amplitude-fixed with a moving
+support, and §7.14 records that as a non-linear **eigenvalue** problem — scaling
+`A` changes nothing, since the span moves with `√A` — i.e. ill posed rather than
+merely hard. Measured at all four limiter radii: `ConfineToPlasma` fails 4/4,
+clamped profiles fail 4/4, and **clamped WITH a prescribed current converges in
+22 steps**. The cure is the one §7.14 already documents; what the fixture needs
+is the confinement physics, not a different solver.
+
+Per *Testing stance*, a defect gets a **failing** test naming it, so **a red
+`FreeBoundaryCoupling` is the intended signal and not a break**. Every other case
+in that file passes. **Do not "fix" the suite by relaxing it.**
+
+**`OMP_NUM_THREADS` is deliberately NOT pinned in
 `tests/CMakeLists.txt`** — a plain `ctest` must still exercise threaded assembly
 as it ships, and pinning it would quietly change what the bit-exactness cases
 test.
@@ -1382,12 +1432,20 @@ single-threaded — against `PedestalConvergence`'s 178 s. So 223 s is very near
 "the suite costs one lint run", and going below it means parallelising
 clang-tidy (`run-clang-tidy`) rather than anything about the solver.
 
-**AND `naming` IS NO LONGER ALONE AT THE TOP.** At 41 tests the run is 335 s,
-with `naming` at 223.8 s and **`PlasmaConnectivity` at 122.9 s** — the second
-takes an extra 112 s of wall clock because `-j4` cannot overlap the two once
-everything else has finished. Its expensive halves are the diverted-fixture fill
-at three resolutions and the jump study's 6401-sample sweep, both of which are
-the measurements the case exists for.
+**AND `naming` IS NO LONGER ALONE AT THE TOP.** At 41 tests the run is 249.7 s,
+with `naming` at **211.5 s** and then `PedestalConvergence` at 148.4 s,
+`PlasmaConnectivity` at 142.8 s and `FreeBoundaryCoupling` at 122.4 s — four
+tests within a factor of 1.7, so `-j4` cannot overlap them once everything else
+has finished and the run is very nearly the cost of the longest chain rather than
+of the total work. `PlasmaConnectivity`'s expensive halves are the
+diverted-fixture fill at three resolutions and the jump study's 6401-sample
+sweep, both of which are the measurements the case exists for.
+
+**Read those seconds as one machine's one run.** The 335 s this paragraph used to
+quote and the 249.7 s it now quotes are the same suite plus one case, and
+*PARDISO and the MKL link line* records a 490 s / 540 s spread on identical code
+— so a change of a few tens of percent in a suite time is this machine, not a
+regression.
 
 **ctest needs no environment set by hand.** `tests/CMakeLists.txt` puts
 `MKL_NUM_THREADS=1` on every registered test, without which the suite takes well
@@ -2329,6 +2387,11 @@ solve whose initial guess could go stale. `HighBetaConvergence` reproduces
 **every `ψ_ax` in the table under *The measurement* to every digit printed**, and
 the constraint is now satisfied to machine zero:
 
+**These are `AxisConstraint::NodalMaximum` numbers**, which is what the tree ran
+until 2026-09-07 — the point of the table is what the NPC port did to the border,
+and re-measuring it under the located-axis constraint would change the variable
+being studied. `ψ_ax − max ψ_h` is that constraint's own residual.
+
 | `ν` | `A` | `ψ_ax` | `ψ_ax − max ψ_h`, was | now | Newton, was | now |
 |---|---|---|---|---|---|---|
 | 2 | 1 | 3.058984e-01 | 1.7e-16 | 0.0 | 4 | 4 |
@@ -3013,7 +3076,7 @@ returns `false`, so without the override **every run carrying a `[[coils]]` bloc
 would have fallen back to a differenced column** and nothing would have said so.
 
 **AND THE AXIS POSITION NEEDS NO DERIVATIVE, WHICH IS A THEOREM AND NOT A
-SHORTCUT.** `ψ_ax` is a *stationary* value, so if the axis position moves with
+SHORTCUT — AND IT IS WHAT MADE OPTION 3 AFFORDABLE.** `ψ_ax` is a *stationary* value, so if the axis position moves with
 the solution the chain rule gives `dψ/dλ = ∂ψ/∂λ + ∇ψ·∂(r*,z*)/∂λ` and
 **`∇ψ = 0` at an interior extremum**. The second term vanishes identically, so
 the largest *nodal* value loses nothing the Jacobian would have used — the
@@ -3021,6 +3084,14 @@ envelope theorem, and a better reason for that definition than the one recorded
 above. **It does not extend to an X-point**, where the constraint is `q = 0`
 rather than a stationary value and the corner block is `∇q`; see
 `FREE-BOUNDARY-PLAN.md` §10.4.
+
+**AND THE SAME THEOREM IS WHY OPTION 3 COSTS NOTHING IN THE JACOBIAN.** With
+`ψ_ax` constrained at the LOCATED axis, `G = ψ_ax − ψ_h( x* )` and `x*` moves
+with the solution — but `∇̄ψ = r q` and `q_h( x* ) = 0` by definition, so
+`∇ψ_h( x* ) = 0` and the position term vanishes there too. No sensitivity of the
+root find is needed, and under NPC the row is just the potential shape functions
+of `x*`'s element evaluated at `x*`: `( k+1 )( k+2 )/2` entries, exact, one
+element. `−e_j` is the special case where `x*` lands on a node. See *Option 3*.
 
 **Both borders are differenced rather than assembled, and there is no choice
 about it.** They are derivatives of the *condensed* residual. Assembling them
@@ -3031,8 +3102,12 @@ derivative of each local solve with respect to a parameter of its own source, fo
 same principle CEDRES++ states for the local term: differentiate the **discrete**
 residual, never the continuous equation.
 
-**`ψ_ax` is the largest NODAL value, and that is a definition rather than an
-approximation.** It differs from the maximum of the polynomial by `O(h^{k+1})`
+**~~`ψ_ax` is the largest NODAL value~~ — IT IS THE FLUX AT THE LOCATED MAGNETIC
+AXIS SINCE 2026-09-07, AND THE NODAL MAXIMUM IS NOW THE CONTROL.**
+`setAxisConstraint()` chooses; `AxisConstraint::LocatedAxis` is the default and
+constrains `ψ_ax` at a zero of `q_h`. What follows describes the nodal maximum,
+which every number in this file published before that date was measured with —
+see *Option 3* below for what changed and what it moved. It differs from the maximum of the polynomial by `O(h^{k+1})`
 and both converge to `max ψ`. The nodal one is chosen because it is what makes
 the constraint differentiable in a form the border can use.
 
@@ -3059,19 +3134,43 @@ comparable.
 `k = 2`, `n = 8`, converged `ψ_ax` against the dimensional estimate
 `√(νA/λ₁)`:
 
-| `ν` | `A` | `ψ_ax` | `ψ_ax − max ψ_h` | ratio to estimate | `max\|∂F/∂ψ\|/λ₁` | Newton |
-|---|---|---|---|---|---|---|
-| 2 | 1 | 3.058984e-01 | 1.7e-16 | 1.021 | 1.88 | 4 |
-| 2 | 10 | 9.607537e-01 | −4.4e-16 | 1.014 | 1.91 | 4 |
-| 2 | 100 | 3.036075e+00 | 4.4e-16 | 1.013 | 1.91 | 4 |
-| 4 | 1 | 2.834510e-01 | 3.1e-12 | 0.669 | 13.14 | 8 |
-| 4 | 10 | 8.643745e-01 | 8.9e-16 | 0.645 | 14.13 | 11 |
-| 4 | 100 | 2.720222e+00 | 1.0e-10 | 0.642 | 14.27 | 10 |
+| `ν` | `A` | `ψ_ax` | ratio to estimate | `max\|∂F/∂ψ\|/λ₁` | Newton |
+|---|---|---|---|---|---|
+| 2 | 1 | 3.059006e-01 | 1.0209 | 1.88 | 4 |
+| 2 | 10 | 9.607543e-01 | 1.0139 | 1.91 | 4 |
+| 2 | 100 | 3.036075e+00 | 1.0132 | 1.91 | 4 |
+| 4 | 1 | **3.068708e-01** | 0.7242 | 13.14 | **10** |
+| 4 | 10 | **9.462726e-01** | 0.7061 | 14.13 | **9** |
+| 4 | 100 | **2.981136e+00** | 0.7035 | 14.27 | **8** |
+
+**RE-MEASURED 2026-09-07 UNDER `AxisConstraint::LocatedAxis`, AND THE `ν = 4`
+ROWS MOVED BY 9%.** The `ν = 2` rows are unchanged to six figures; the `ν = 4`
+ones read 3.068708e-01 against 2.834510e-01, and the iteration counts went
+8/11/10 → 10/9/8. **The old column `ψ_ax − max ψ_h` is deleted rather than
+updated**: it was the constraint's own residual under a definition that no longer
+holds, and the quantity that replaces it is `normalisationResidual()`, which the
+test now asserts directly.
+
+**AND WHY `ν = 4` MOVED IS THE CLEAREST DEMONSTRATION OF THE DEFECT IN THE
+TREE.** `sweep()` on the converged `ν = 4, n = 8` field finds **exactly one**
+maximum, at `( 1.1112, −0.0083 )` with `|q| = 2.8e-14`, carrying
+`ψ = 3.068708e-01`. The largest NODAL value is **3.348506e-01 at
+`( 1.1500, 0.0000 )` — 9% ABOVE the field's only magnetic axis** — because
+`ψ_h` is discontinuous and that node sits on an element boundary where one
+element's polynomial overshoots. **The old constraint was pinning `ψ_ax` to an
+overshoot**, on a benchmark that has been in this suite since stage 4. The gap
+converges away: 7.63e-02 → 1.94e-03 → 7.63e-04 at `n = 8, 16, 32`.
+
+**AND THE LOCATED VALUE IS NOT MORE ACCURATE ON A COARSE MESH, WHICH IS WORTH
+SAYING BECAUSE IT WOULD BE THE COMFORTABLE CLAIM.** The `n = 32` answer is about
+2.841e-01, and at `n = 8` the located reading (3.069e-01) is *further* from it
+than the nodal one (2.835e-01) — the overshoot happened to compensate. **The
+argument for the definition is meaning, not accuracy.**
 
 At `ν = 2` the source is linear in `ψ` and the problem is a linear eigenvalue
 problem, which is why `ψ_ax` is converged in the mesh to six figures between
-`n = 8` and `n = 16` — 3.058984e-01 against 3.058988e-01. At `ν = 4` it is
-genuinely non-linear and the same pair reads 0.28345 and 0.28608.
+`n = 8` and `n = 16`. At `ν = 4` it is genuinely non-linear and under-resolved at
+`n = 8`, which is what the paragraph above measures.
 
 **`Normalisation::Decoupled` is the control, and it is what a test of this can
 actually assert on.** It is the same solver, mesh, guess, line search and
@@ -3123,7 +3222,12 @@ same run then finishes in five steps.
 hit this.** It is the reason a solver-level finite difference is not simply "one
 more residual evaluation".
 
-### What is not done
+### `ψ_bnd`: settable, an unknown, and reachable from a file
+
+**THIS SECTION WAS HEADED *What is not done* AND EVERYTHING IN IT IS NOW DONE**,
+which is the sort of heading that survives long after its content stops matching
+it. What follows is the history of how `ψ_bnd` became an unknown, kept because
+the traps in it recur.
 
 `ψ_bnd` **is settable AND is an unknown, and this section said otherwise until
 2026-09-06.** Two things landed on 2026-09-05 and only the first was written up.
@@ -3148,7 +3252,8 @@ checked separately because it carries **two** factors of the span and a missed
 one costs only the convergence, not the answer.
 
 **And `HighBetaConvergence` is unchanged to every digit** — `ψ_ax` at
-3.058984e-01 and 2.834510e-01, `ψ_ax − max ψ_h` at 0.00e+00 and −5.55e-17, 4 and
+3.058984e-01 and 2.834510e-01 **as they then were, under
+`AxisConstraint::NodalMaximum`**, `ψ_ax − max ψ_h` at 0.00e+00 and −5.55e-17, 4 and
 6 Newton iterations — which is what says the generalisation reduces exactly.
 
 **The analytic fixtures REFUSE a non-zero `ψ_bnd` rather than ignoring it.**
@@ -3972,7 +4077,7 @@ rather than pretending otherwise, and nothing has measured what it costs Newton.
 | Newton order on the manufactured nonlinear case | 1.980, and `k+1` at 2.007 / 2.999 / 4.002 |
 | root find vs closed form at two species | `φ₀` 1e-12, `∂φ₀/∂ψ` 1e-11, `F` 1e-11, `∂F/∂ψ` 1e-9 |
 | three species (D, C⁶⁺, e), `Σ_s Z_s n_s = 0` | 1e-12 at every radius |
-| bordered Newton, `ψ_ax − max ψ_h` | **0.000e+00** on three meshes; tail order 2.000 |
+| bordered Newton, the constraint residual | **0.000e+00** on three meshes; tail order 2.000. Measured as `ψ_ax − max ψ_h` before 2026-09-07 and as `normalisationResidual()` since, the definition having moved |
 
 **THREE PAPER ERRORS WERE FOUND ON THE WAY AND ALL THREE ARE THE KIND THAT
 CONVERGE BEAUTIFULLY.** Li & Zhu's (12)–(16) write `M₀²` where their prose
@@ -4149,16 +4254,22 @@ tuning parameter and that was checked**: swept over 0.001, 0.01, 0.05, 0.10 and
 0.20 across the whole `k × n` benchmark the located axis is identical to every
 digit printed.
 
-### `CriticalPointFinder`'s axis is NOT `GradShafranovSolver::psiAxis()` — AND SINCE 2026-09-07 IT CHECKS IT
+### `CriticalPointFinder`'s axis and `GradShafranovSolver::psiAxis()` are THE SAME POINT since 2026-09-07
 
-**They are different quantities, both correct, and neither should be changed to
-match the other.** `ψ_ax` is *the largest nodal value* — chosen because the
-bordered Newton needs a constraint it can differentiate, which under NPC makes
-the border row exactly `−e_j`. IN-A's axis is *the point where `q_h` vanishes*.
+**They used to be different quantities and this section used to say they must
+stay so.** `AxisConstraint::LocatedAxis` made them one: `ψ_ax` is constrained at
+a zero of `q_h`, which is what this class finds. A solve and a search may still
+land on the two sides of a face and differ by the `O(h^{k+1})` jump in `q_h`
+across it, so expect agreement at the field's own order rather than the last bit.
+
+**Under `AxisConstraint::NodalMaximum` — the control — they are different and
+must not be reconciled.** `ψ_ax` is then *the largest nodal value*, which makes
+the border row exactly `−e_j`; IN-A's axis is *the point where `q_h` vanishes*.
 They differ by `O(h)` in position and `O(h²)` in value, **both independent of
 `k`**, so on a refined high-order mesh the two readings *separate* rather than
 converge: measured on the finest Solov'ev mesh the gap is **202×** `ψ_h`'s own L2
-error at `k = 2` and **4204×** at `k = 3`.
+error at `k = 2` and **4204×** at `k = 3`. That is the reading every number in
+this file published before 2026-09-07 was taken under.
 
 **AND THAT DEFINITION IS THE WEAK POINT OF THE WHOLE FREE-BOUNDARY PATH, WHICH
 TURNED UP THREE INDEPENDENT WAYS IN ONE NIGHT.** Nothing in *the largest nodal
@@ -4173,24 +4284,157 @@ exactly as it is by an axis:
   inflates the span, `Ψ` collapses over the real plasma, and the current border
   raises the profile scale by 980 to hold `∫F/r` at `μ₀I_p`. What reached it was
   a profile table wrong by a factor of the span; `FREE-BOUNDARY-PLAN.md` §7.16.
-* **`ψ_ax` ON A PUBLISHED TABLE IS A CORNER ARTEFACT.**
+* **`ψ_ax` ON A PUBLISHED TABLE IS THE `r = 0` LAYER.**
   `theTwoBordersConvergeTogether`'s converged answer at limiter `R = 1.20` attains
-  its `ψ_ax` in an element **touching `r = 0`** — the corner where `Γ` meets the
-  axis — reading **1.0916e-01** there against **4.4472e-02** as the largest `ψ_h`
-  anywhere off the axis, a factor of **2.5**. That is FB-1a's corner, the one
-  place the lifting weight `C = r` vanishes and a fitted `ψ = 0` meets a
-  transferred exterior trace. **The bordered Newton is constraining that value**,
-  and §7.12b's table is a table of it.
+  its `ψ_ax` in an element **touching `r = 0`**, reading **1.0916e-01** there
+  against **4.4472e-02** as the largest `ψ_h` anywhere off the axis, a factor of
+  **2.5** — and the bordered Newton was constraining that value. **This entry
+  said "a corner artefact" and named FB-1a's corner; §11.1 measured that it is
+  not a corner at all** — the largest nodal values are a flat layer along the
+  **whole** axis, 168 dofs at `r = 0` whose largest ten agree to **3.5e-05** of
+  1.09e-01, and the corner wins the argmax by 2e-05 and lands on the *other*
+  corner at `k = 3`. It does not fall with `h` either: 1.0916e-01, 1.0982e-01,
+  1.0953e-01 at `n = 24, 32, 48`, against a datum of zero imposed on that very
+  boundary.
+
+  **`ψ_ax` NO LONGER REPORTS THE LAYER, AND THE LAYER IS STILL THERE.** Under
+  option 3 the same case reads `ψ_ax = 1.2595e-01` at the located axis while the
+  `r = 0` layer sits at **3.08e-01** — so the definition is repaired and the
+  FIELD is not, which is exactly the split §11.3 and §11.5 describe and why the
+  two guards are separate. `theTwoBorderSolveReportsATrueMagneticAxis` asserts
+  the field's half.
 * **The sweep saw the same corner on the toy fixture**, reading `ψ_ax` at 8.12e-02
   against a field maximum of 2.50e-02 — ratio 0.31 — and 0.36 and ≈ 0 on two
   others. §7.18 item 3.
 
-**AND THE REPAIR IS NOT FINISHED. `FREE-BOUNDARY-PLAN.md` §11 IS THE LIST**, and
-the first item on it is that **the guard has never been run on the §7.12b
-sighting** — if that corner spike is itself an O-point of `q_h` then `Ψ` reads
-≈ 1 there and the check AGREES with it. It is one-sided and largest-`Ψ`-wins by
-design, so it misses rather than false-alarms, and until that is measured the
-guard is not known to catch the case that motivated half of it.
+**AND OPTION 3 IS BUILT, 2026-09-07: `ψ_ax` IS THE FLUX AT THE LOCATED MAGNETIC
+AXIS.** `setAxisConstraint()`, default `AxisConstraint::LocatedAxis`, constrains
+`ψ_ax` at a zero of `q_h` rather than at the largest nodal value.
+`AxisConstraint::NodalMaximum` is kept as the **control**, because every number
+published here before that date was measured with it.
+
+**IT IS FREE IN THE JACOBIAN AND THAT IS THE ENVELOPE THEOREM** — `∇ψ_h( x* ) = 0`
+at a zero of `q_h`, so the position term vanishes and the row is the potential
+shape functions of `x*`'s element, exact and undifferenced. **The warm start is
+what makes the SEARCH free**: `CriticalPointFinder::tryFindAxisFrom()` seeds from
+the previous iterate's axis, roots **one element** when the seed is still on the
+answer and 19 of 2048 when it is an element away, so the cost is bounded by a
+ring count rather than by the mesh and the ratio against a sweep *improves* with
+refinement. `rotating-normalised` went 5.51 s → **2.25 s** when the sweep was
+replaced by it. **NPC only, refused under the condensation.**
+
+**TWO TRAPS, BOTH CAUGHT BY A TEST.** Re-inverting the map with `TransformBack`
+is wrong *and* unnecessary — a zero of a discontinuous `q_h` can lie outside its
+own element, where the inverse does not converge (measured, a residual of
+**5.1e-02 on an element of 5e-02**), and the finder has the reference coordinates
+exactly. And **stopping at the first root found puts the row on the WRONG
+element's dofs** — the same physical point across a face is a different element,
+harmless for a position and fatal for a row of shape functions.
+
+**WHAT IT MOVED**: every bordered `ψ_ax`, by the `O( h² )` gap between the
+definitions — `limited-tokamak` 9.455354e-02 → 9.466087e-02,
+`rotating-normalised` 1.039163e-01 → 1.039325e-01 — and all of them now read a
+normalised flux of **1.0000** at the located axis, which they did not before.
+
+**AND IT WEAKENS `checkAxis()` DELIBERATELY.** `Ψ` there is now nearly 1 by
+construction, so that guard is close to checking a solve against the formula it
+used; it still catches a run with **no** O-point, and one where the largest-`Ψ`
+O-point is not the one the constraint followed. **The guard that now carries the
+weight is `checkAxisSource()`** — is the toroidal current density bounded on the
+axis — which is untouched by any of this. The split is the right one: §11.3's
+defect is about the FIELD, §11.5's about the DEFINITION, and neither guard can be
+satisfied by repairing the other.
+
+**`FREE-BOUNDARY-PLAN.md` §11 IS THE LIST AND IT IS NOW WORKED THROUGH.** Its
+first item was that **the guard had never been run on the §7.12b sighting** — if
+that spike were itself an O-point of `q_h` then `Ψ` would read ≈ 1 there and the
+check would AGREE with it, the check being one-sided and largest-`Ψ`-wins by
+design, so it misses rather than false-alarms.
+
+**§11.1 IS DONE, 2026-09-07, AND THE GUARD CATCHES IT.** `Ψ` at the located
+O-point reads **0.56 / 0.51 / 0.35 / 0.52** at §7.12b's four limiter radii where
+1 is required — REFUSES at every one, and at `n = 24, 32, 48` and `k = 2, 3`
+alike, so it is not one mesh's accident. **The reason is structural rather than
+luck**: `ψ_ax` is attained at `r = 0` **exactly**, on the domain boundary, where
+an interior extremum cannot be, and every maximum `sweep()` finds sits at
+`r ≥ 0.76`. The located O-point at `R = 1.20` reads 4.420624e-02 at
+`( 1.411, −0.001 )` against the 4.4472e-02 the nodal argmax found off the axis —
+a root of `q_h` and an argmax reaching one feature by two routes.
+
+**AND §11.3 IS DONE TOO: THE CAUSE IS A `1/r` POLE IN THE LOAD, AND `F/r` IS
+`μ₀ j_φ`.** `meq::SourceIntegrator` assembles `−( F/r, w )`, and
+`j_φ = r p′( Ψ ) + gg′( Ψ )/( μ₀ r )` — so a finite current density on the
+symmetry axis **requires `F( 0, z ) = 0`**, and `F = μ₀r²p′ + gg′` leaves only
+`gg′` there. `p′` is protected by its own `r²`; `gg′` is not.
+
+**WHICH `Ψ` THE AXIS SITS AT IS THE WHOLE OF IT.** `ψ( 0, z ) = 0` exactly, the
+flux through a circle of vanishing area, so `Ψ_axis = −ψ_bnd/span`. **On a fixed
+boundary `ψ_bnd = 0` and the axis sits at `Ψ = 0`, where every profile in this
+tree vanishes** — which is why nothing had ever met this. **FB-3's limiter border
+makes `ψ_bnd` an unknown, it comes out positive, and the axis is then at negative
+`Ψ`: in the VACUUM**, where the physics is `g = const` so `gg′ = 0`, and where an
+unconfined profile extrapolates and returns `0.05·Ψ_axis` instead.
+
+A 2×2 factorial on that fixture, one variable at a time:
+
+| limiter | `gg′` | `ψ_bnd` | `Ψ_axis` | `F( 0, z )` | `ψ` on axis | verdict |
+|---|---|---|---|---|---|---|
+| no | 0.05 | 0 | 0 | 0.0e+00 | 1.25e-04 | AGREES |
+| **yes** | **0.05** | 9.21e-03 | **−9.22e-02** | **−4.61e-02** | **1.09e-01** | **REFUSES** |
+| no | 0 | 0 | 0 | 0.0e+00 | 1.28e-05 | AGREES |
+| yes | 0 | 2.13e-02 | −2.21e-01 | −1.4e-16 | 1.03e-05 | AGREES |
+
+**The fourth row rules out the limiter itself** — `Ψ_axis = −0.22`, deep in the
+vacuum, and clean, because `F( 0, z )` is machine zero. It is neither the limiter
+alone nor `gg′` alone; it is `F( 0, z ) ≠ 0`.
+
+**AND THE DISCRETE HALF IS WHY IT IS A DEFECT RATHER THAN AN UGLINESS.** The
+*continuous* problem is well posed: the energy `∫( 1/r )|∇̄ψ|²` forces its members
+to vanish faster than `r` — the physical `ψ ~ r²` — and against such test
+functions `∫( gg′/r ) w` converges. **The discrete space is `L2` polynomials,
+free to be nonzero at `r = 0`, and against those the load functional is
+UNBOUNDED**; the quadrature is the only thing making it finite. Sweeping
+`setSourceQuadratureOrder()` at fixed `h` is what proves it: with `gg′ = 0` the
+answer is **bit-identical at `extra` = 4, 8, 16, 20** — 1.034602461e-05 on the
+axis, 1.175887576e-01 off it, ten digits, `F/r` being a polynomial then — and
+with `gg′ = 0.05` nothing settles (1.09e-01, 1.15e-01, 9.18e-02, 8.76e-02), nor
+does it fall with `h`.
+
+**THREE CONTROLS SAY IT IS NOT THE GEOMETRY, THE CORNER, OR THE AXIS.** FB-A's
+fixtures are `Δ*`-harmonic, `F ≡ 0`, no load at all. **FB-1a runs on the same
+mesh, extension and corner** and converges at 1.99/2.99/3.99, because
+`ExteriorMatched`'s `F` is built on `ExteriorDtN::basis`, which carries
+`( 1 − μ )( 1 + μ )` explicitly *"so the axis is exactly zero"* — `F ~ r²`. And
+`examples/free-boundary-halfdisc.toml`, with the **same `gg′` table** and the
+**same `RMin = 0`**, is healthy at `Ψ = 1.0036`, because it has no limiter and so
+keeps `ψ_bnd = 0`.
+
+**SO THE REPAIR IS PHYSICAL AND ALREADY EXISTS: `[source] ConfineToPlasma`**,
+which sets `F = 0` wherever `Ψ ≤ 0` — the statement that the vacuum carries no
+current. `examples/limited-tokamak.toml` has every ingredient (a limiter, a free
+`ψ_bnd`, a gmsh mesh reaching `r = 0`), sets it, and reads `Ψ = 1.0016`. **For a
+domain reaching the axis with `ψ_bnd` free it is a PRECONDITION, not an option**,
+in the same sense as `j ≥ 1` at the plasma edge — and **nothing refuses it
+today**, which is the cheapest guard left in §11. Two things it does not close:
+switching it on for §7.12b's fixture **does not converge**, and
+`refreshPlasmaComponent()` refuses to *seed* an axis-touching element while
+allowing the fill to *reach* one, so an iterate lifting `ψ_h` above `ψ_bnd` on the
+axis re-opens the pole.
+
+**SO `ψ_ax` IS TWO DEFECTS WEARING ONE SYMPTOM**, which is the thing to carry
+forward: on §7.12b's case the **field** is wrong on a boundary layer and the
+argmax merely reports it, while on §7.16's the field is sound and only the argmax
+is not. §11.5's three redefinitions address the second and would **hide** the
+first.
+
+**WHAT IS DETECTED IS NOT WHAT IS FIXED**, and the defect is untouched:
+`FreeBoundaryCoupling::theTwoBorderSolveReportsATrueMagneticAxis` asserts that
+the reported `ψ_ax` **is** the flux at the located axis and is therefore **RED**,
+per this file's testing stance — a defect gets a failing test naming it, and its
+message names §11.5's three uncosted repairs as what turns it green. It asserts
+the *layer* as well, so a future `ψ_ax` attained on an isolated dof fails rather
+than passing under a header that says otherwise. **The suite is 40/41 for this
+reason and that is the intended signal.**
 
 **So the check exists now.** `meq::CriticalPointFinder::checkAxis()` sweeps for
 zeros of `q_h`, picks the O-point of the sense **the sign of the span dictates**
@@ -5375,10 +5619,16 @@ Jacobian rather than once per assembly.
 that needed answering locally. The timings are irreproducible **by a factor of
 thirty at fixed size** — three runs of the same binary on the same 9,408-dof
 problem gave 1.05 s, 1.13 s and 2.81 s — because WSL2 shares the GPU with the
-Windows host (`nvidia-smi` reports 7.5 of 8 GB used with no compute processes)
-and because a consumer card runs FP64 at 1/32 of FP32 where a datacentre part
-runs it at about 1/2. It won nothing on this hardware. **Do not re-time it
-here**; it needs a different machine, not another afternoon.
+Windows host, whose load MEQ does not control, and because a consumer card runs
+FP64 at 1/32 of FP32 where a datacentre part runs it at about 1/2. It won nothing
+on this hardware. **Do not re-time it here**; it needs a different machine, not
+another afternoon.
+
+**THE MEMORY FIGURE THIS PARAGRAPH USED TO CARRY IS DELETED RATHER THAN
+UPDATED.** It read *"`nvidia-smi` reports 7.5 of 8 GB used with no compute
+processes"*, and today the same command reports **1.1 of 8 GB** — the host's
+load, not a property of the card or of MEQ. The FP64 ratio is the part of the
+argument that does not move, and it is the part that decides.
 
 **AND ONE TRAP THAT WOULD HAVE POISONED ALL OF IT.** cuDSS queues work on a
 stream and returns. Timed without a device synchronise, the warm setup of a
@@ -6213,10 +6463,12 @@ there, because the fit is linear in `h` and is in the budget at all *only
 because this is the fixed-boundary rehearsal*. **FB-6 removes it entirely**: a
 free-boundary MEQ takes the same coils and profiles and never sees an LCFS.
 
-**AND 2048² IS NOT REACHABLE ON THIS MACHINE.** The reference at 1025² reached
-**6.0 GB** with 4 GB free and was stopped rather than risk an OOM on a machine
-another agent is building on; 2049² needs roughly 24 GB against 15 GB total.
-The honest ceiling is 513².
+**THE CEILING IS 1025², AND MEMORY IS WHAT SETS IT.** The reference at 1025²
+needs about **6.0 GB**, which this machine has; the cached boundary matrix there
+would need **35 GB**, which it has not, so that rung falls back to the shipped
+loop and is slow rather than impossible. 2049² is out on both counts. **513² is
+the rung that is both exact and fast** — 72.75 s with the matrix cached — and is
+the one stored.
 
 **FOUR THINGS ABOUT `freegs4e` CAME OUT OF THE ATTEMPT.**
 
@@ -6243,15 +6495,40 @@ The honest ceiling is 513².
   | agreement | **4.6e-16** relative — the same arithmetic, reassociated |
 
   **163x per step**, and over a whole run — 23 to 103 Picard steps are what this
-  benchmark sees — **20.9x to 64.8x**. The matrix is 0.51 GiB at `n = 257` and
-  4.3 GiB at `n = 513`, so caching is comfortable to 257² and affordable to 513²
-  on an idle machine; 1025² would need 34 GiB and is out. **A refinement not
+  benchmark sees — **20.9x to 64.8x**. The matrix is 0.51 GB at `n = 257` and
+  **4.02 GB at `n = 513`, measured**, so caching is comfortable at both; 1025²
+  would need 35 GB and is out, where `CACHE_BOUNDARY_MAX_GB` falls back to the
+  loop. **A refinement not
   measured**: `Jtor` is zero outside the plasma, so only its support's columns
   are needed, which should cut the matrix by about an order of magnitude — at
   the cost of tracking a support that moves as Picard runs.
 
-  **This is not MEQ's to fix** — `../freegs4e` is somebody else's tree — and it
-  is recorded only so the cost of a finer reference is known.
+  **`../freegs4e` IS NOT EDITED — IT IS CACHED FROM `fgsref.py`, 2026-09-07, AS
+  WORKAROUND 6.** `M` is built once and kept on the Equilibrium; the Romberg
+  weights come from `romb( I )` rather than a reimplementation, so the rule
+  cannot drift from the shipped loop's. Measured: the boundary values agree to
+  **5.5e-16**, the per-step cost goes 651.5 ms → **8.07 ms** at 129² and
+  4271 ms → **24.0 ms** at 257² (81× and 178×), and the whole run goes
+  **29.2 s → 4.9 s** at 129² and **175.1 s → 13.3 s** at 257². Memory is the
+  constraint — 0.54 GB at 257², **4.3 GB at 513²**, 35 GB at 1025² — so
+  `CACHE_BOUNDARY_MAX_GB` falls back to the loop rather than risking an OOM.
+  **This is what makes an exact 513² reference affordable**, which is what von
+  Hagenow was wanted for and is better than it: von Hagenow is a different
+  method converging at `O(h)`, this is the same arithmetic reassociated.
+
+  **AND THE CONVERGED ANSWERS DIFFER BY 4.5e-08, WHICH IS `freegs4e`'s OWN
+  FLOOR AND NOT THE REASSOCIATION.** Two hypotheses were wrong before the
+  control settled it. The boundary condition on the real converged `Jtor` agrees
+  to **6.8e-16**, so the arithmetic is exact. It is **not the stopping rule**:
+  tightening the Picard tolerance 1e-9 → 1e-11 → 1e-13, which takes 41 → 60 →
+  401 iterations, leaves the gap at 4.511e-08 **to four digits**. It is **not
+  amplification**: perturbing `M` by 1e-12, 1e-10 and 1e-8 moves the field by
+  3.39e-08, 6.50e-08 and 7.71e-08 — **four orders in, a factor of 2.3 out**, a
+  floor rather than a gain. And each variant is **bit-reproducible against
+  itself**, `0.000e+00`, which is the control that says the difference is real.
+  So this reference is determinate to about **5e-08 whatever the arithmetic
+  does** — five orders below its own grid error, so irrelevant to use and
+  material to what may be claimed.
 
   **WE USED TO DRIVE IT COLD, AND `--seed-from` IS THE FIX — WORTH 1.21x, NOT
   THE ORDER OF MAGNITUDE THIS ENTRY PREDICTED.** `fgsref.py` keeps freegs4e's
@@ -6303,14 +6580,45 @@ The honest ceiling is 513².
   `Equilibrium.order`, so calling it on a 4th-order equilibrium silently solves a
   different problem. A V-cycle built correctly on the 4th-order generator does
   not converge at all — `ValueError: No opoints found!`.
-* **ITS TWO BOUNDARY CONDITIONS DISAGREE BY 3.2e-03 AND THE GAP IS FLAT.**
-  6.460e-04 relative in `ψ_ax` at 129², 6.404e-04 at 257². A discretisation
-  difference falls 4× or 16× a level; this falls 1.7%. Self-convergence says
-  which is right: the default is **converged at 129²** (self-difference
-  2.78e-05, `ψ_ax` stable to six figures) while von Hagenow creeps at about
-  `O(h^1.6)` toward a different value. **So the default is the reference to use,
-  `freegs4e` does not agree with itself to better than 3.2e-03 across its own
-  two boundary conditions, and MEQ sits twenty times inside that spread.**
+* **~~ITS TWO BOUNDARY CONDITIONS DISAGREE BY 3.2e-03 AND THE GAP IS FLAT~~ —
+  THE FAST ONE IS INCONSISTENT AND IT IS ONE CONSTANT, FIXED 2026-09-07.**
+  `boundary.freeBoundaryHagenow` displaces its observation point off the
+  boundary by a hard-coded **`eps = 1e-2` METRES**, *"to avoid the singularity in
+  `G(R,R')` when `R'=R`"* — a fixed **physical** distance, so the
+  `O( eps·∂ψ/∂n )` error does not shrink with the grid and the method converges
+  to a different answer. **A gap that does not shrink between two
+  discretisations of one problem means one of them is not a discretisation of
+  it**, and reading it as an open question about which to believe was the
+  mistake.
+
+  Measured on one fixed `Jtor` with no solve in the way — the direct Green's
+  integral is ground truth, so what is printed is von Hagenow's own error —
+  the observed order in `h` at `n = 65, 129, 257` is **0.63, 0.21, 0.07** at the
+  shipped `eps` and **0.90, 1.00, 0.99** at `eps = 0.2 h`. On the real solve,
+  `H_limited_circular` against the direct integral, the relative `L2` gap goes
+  1.008e-02 → 1.032e-02 shipped (**rate −0.04**, slightly worse) and
+  2.139e-03 → **1.093e-03** scaled (**rate 0.97**).
+
+  **AND THE OPTIMUM IS NOT "AS SMALL AS POSSIBLE"**: swept at a fixed 129² grid
+  the gap reads 7.6e-03, **3.3e-03**, 8.9e-03, 1.6e-02, 2.3e-02 at `eps` = 1e-2,
+  3e-3, 1e-3, 3e-4, 1e-4 — below about `0.2 h` the log spike is narrower than the
+  cell and the Romberg rule misses it.
+
+  **FIRST ORDER IS THE CEILING AND THE RESIDUAL IS THE QUADRATURE, NOT THE
+  DISPLACEMENT.** `∮G σ dl` is a single-layer potential, continuous across the
+  boundary with its normal derivative jumping, so averaging `+eps` and `−eps`
+  ought to cancel the `O(eps)` term. Measured, it does not — same rate, slightly
+  worse — which is what locates the error in the near-singular quadrature.
+  Getting past first order needs the log subtracted analytically, i.e. a
+  boundary-element method, and is deliberately not attempted.
+
+  **WHAT IT BUYS**: extrapolated, the boundary error at 513² is about 2.7e-04 in
+  `ψ_ax` against that grid's own 7.9e-04 on this case, so it does not dominate —
+  and 513² costs **230 s** instead of hours. That is what makes the reference
+  refinable, which is the binding constraint on this benchmark.
+  **`freegs4e` is not edited**: one constant, tied to the cell, reinstalled from
+  `fgsref.py` as WORKAROUND 5. `--hagenow` is the usable version and
+  `--hagenow-eps=shipped` reproduces `freegs4e` exactly.
 
 **COST, AND THE ONLY COLUMN THAT MEANS ANYTHING IS ACCURACY PER UNKNOWN.** A
 wall-clock ratio is not a statement about either code: freegs4e converges a
@@ -6373,6 +6681,39 @@ gives `ψ_ax ≈ 9.3014e-02`, `ψ_bnd ≈ 2.6158e-02`, against which **129² is 
 and 6.3% out**. A **limited** boundary is a maximum over the limiter ring, a
 pointwise operation on a discrete set, where a diverted one is a saddle located
 by interpolation — so it converges more slowly in the grid. Use the 513² run.
+
+**AND THAT 513² RUN NOW EXISTS AS A STORED REFERENCE, 2026-09-07**, produced
+with the exact boundary condition cached — `tools/freegs4e-benchmark/ref-n513/`,
+with `baseline.json` the machine-readable record and `baseline.py` the
+regenerator. The whole nested ladder, each rung seeded from the one below:
+
+| `n` | points | `ψ_ax` | Picard | wall | peak RSS |
+|---|---|---|---|---|---|
+| 129 | 16,641 | 0.09483140885 | 41 | 4.85 s | 340 MB |
+| 257 | 66,049 | 0.09337971414 | 31 | 12.84 s | 1000 MB |
+| **513** | **263,169** | **0.09308752051** | **27** | **72.75 s** | **5663 MB** |
+
+**72.75 s, of which 37.4 s is building the 4.02 GB matrix once** — against
+*hours* for the shipped loop and 230 s for von Hagenow, so the cache is **3×
+faster than the approximate method and exact**. That is why FB-6 does not need
+von Hagenow after all.
+
+**THE NUMBER FB-6 HAS TO BEAT IS 7.92e-04**, which is how far 513² sits from its
+own Richardson limit. A MEQ result closer to the 513² values than that is
+measuring the REFERENCE's grid error rather than MEQ. Beneath it sits freegs4e's
+~5e-08 indeterminacy, four orders lower and so never binding.
+
+**THIS MACHINE HAS 23 GB, 21 of them available** — the WSL2 allocation was
+raised on 2026-09-07, so any memory ceiling recorded before that is a claim about
+a smaller machine. **Re-check `free` rather than trusting a number in this file**:
+the ceiling is a property of the day, and it has already moved once.
+
+**THE RICHARDSON SIGN WAS GOT WRONG ON THE FIRST PASS AND THIS FILE CAUGHT IT.**
+The sequence decreases toward its limit, so the extrapolate is BELOW the finest
+rung; adding the correction rather than subtracting it gave 0.093161 against the
+9.3014e-02 recorded above. **An independently recorded number refuted a fresh
+calculation**, which is the argument for writing one down the first time it is
+measured.
 
 **MEQ DOES NOT YET CONVERGE ON IT**: four good Newton steps to 4.63e-03, a factor
 of eleven, then a floor it drifts upward from — the line search taking its
@@ -6541,8 +6882,13 @@ tools/       plotting and visualisation. plot_equilibrium.py reads the
              python API. See *Meshing beyond MakeCartesian2D*
 examples/    TOML run configurations
 refs/        Refs.md is tracked; the PDFs are gitignored, fetch by doi
-attic/       free-boundary/ -- not ported, not built, kept visible; its own
-             README says why
+             ( attic/ is GONE, removed 2026-09-07. It held the original
+             von Hagenow / Lackner free-boundary code, unported and unbuilt,
+             and it is superseded rather than pending: MEQ's free boundary is
+             the exterior DtN coupling of FB-0..FB-5, which is a different
+             method. Recover it with
+             `git checkout 635aa3d -- attic/` if the Green's-function route is
+             ever wanted; refs/Refs.md keeps the analysis of what it did. )
 docs/        the Sphinx manual, published to Read the Docs. Built by
              `make -C docs html` or the `docs` CMake target, both under
              -W to match .readthedocs.yaml's fail_on_warning. Citations
@@ -6627,8 +6973,8 @@ both places because the naming check is what people meet first.
 **This is enforced**, by `.clang-tidy`'s `readability-identifier-naming` and a
 ctest named `naming`. It runs over `MEQ_CORE_SOURCES_PRESENT`, which is now
 **every** file in `src/meq` — the exclusions this file used to describe were for
-unported legacy sources and there are none left. `attic/` stays out permanently;
-see `attic/free-boundary/README.md`.
+unported legacy sources and there are none left, and `attic/` -- which used to
+be excluded permanently -- no longer exists.
 
 `src/meq` deliberately keeps MFEM out of `Profiles` and `Source` — plain `double`
 arguments, no `mfem::Vector` — so both are unit-testable without the library, and
