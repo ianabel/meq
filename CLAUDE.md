@@ -5558,6 +5558,60 @@ The honest ceiling is 513².
 
 **FOUR THINGS ABOUT `freegs4e` CAME OUT OF THE ATTEMPT.**
 
+* **IT DOES NOT PARALLELISE, AND THAT IS NOT WHY IT IS SLOW.** Checked
+  2026-09-06: three files carry `numba.njit`, **none** with `prange` or
+  `parallel=True`, and there is **no `multiprocessing`, `joblib`, `concurrent`
+  or `threading` anywhere in the package**. It is serial by construction apart
+  from whatever BLAS numpy pulls in — and the hot loop calls no BLAS.
+* **THE REAL COST IS THAT IT RECOMPUTES A GEOMETRY-ONLY MATRIX EVERY PICARD
+  STEP, AND CACHING IT IS WORTH 163x.** `boundary.freeBoundary` loops over the
+  `4n` boundary points and calls `Greens( R, Z, R[x,y], Z[x,y] )` over the whole
+  grid for each — elliptic integrals, `O(n²)` of them, `4n` times. **`Greens`
+  depends only on the geometry**, and `romb` is linear, so the whole boundary
+  condition is one fixed matrix `M` applied to `Jtor`: `psi_bndry = M Jtor`.
+  `M` is the same at every iteration and is rebuilt at every iteration.
+
+  Measured at `n = 129`, against freegs4e's own loop:
+
+  | | |
+  |---|---|
+  | the loop, per Picard step | **518.93 ms** |
+  | building `M` once | 496.82 ms, **66 MiB** |
+  | `M @ Jtor`, per Picard step | **3.19 ms** |
+  | agreement | **4.6e-16** relative — the same arithmetic, reassociated |
+
+  **163x per step**, and over a whole run — 23 to 103 Picard steps are what this
+  benchmark sees — **20.9x to 64.8x**. The matrix is 0.51 GiB at `n = 257` and
+  4.3 GiB at `n = 513`, so caching is comfortable to 257² and affordable to 513²
+  on an idle machine; 1025² would need 34 GiB and is out. **A refinement not
+  measured**: `Jtor` is zero outside the plasma, so only its support's columns
+  are needed, which should cut the matrix by about an order of magnitude — at
+  the cost of tracking a support that moves as Picard runs.
+
+  **This is not MEQ's to fix** — `../freegs4e` is somebody else's tree — and it
+  is recorded only so the cost of a finer reference is known.
+
+  **WHAT *IS* OURS IS THAT WE DRIVE IT COLD, AND THE HARNESS ALREADY BUILT THE
+  THING THAT WOULD FIX IT.** `fgsref.py` keeps freegs4e's `2^n + 1` grid
+  convention **specifically** so that 129, 257, 513 and 1025 nest point for
+  point — its own comment says "that nesting is the whole reason to keep it: a
+  reference refinement study wants the coarse grid to be a subset of the fine
+  one". And then every `--nx` run **starts cold**: `picard_loop()` begins from
+  whatever `Equilibrium.__init__` left in `psi`, at every resolution. So a fine
+  grid pays the full cold Picard count — 23 to 103 steps — at its own per-step
+  cost, where seeding from the converged coarse answer should leave a handful.
+  Not done, and it is the single thing to change before refining the reference
+  again.
+
+  **AND ONE OF THAT FILE'S OWN COMMENTS WAS WRONG ABOUT WHY IT IS SLOW.** It
+  attributed the 85 s → 656 s to *"the `n³` of a 2D sparse LU"*. It is not:
+  `multigrid.MGDirect.__init__` calls `factorized( A )` **once** at construction
+  and `__call__` only backsolves, so the LU is not a per-step cost at all — and
+  the `HAGENOW` note a few lines below said so correctly the whole time. The two
+  comments contradicted each other and the measurement settles it in favour of
+  the second. **The consequence is that `VCYCLE_LEVELS` is a lever on the wrong
+  term**: turning the multigrid on buys almost nothing, so leaving it off is
+  right for a reason the file did not give. Corrected 2026-09-06.
 * **Its cost is the boundary condition, not the solve.**
   `Equilibrium.__init__` takes `boundary=freeBoundary`, whose own docstring
   calls it *"an integral over the area of the domain for each point"* — it loops
@@ -5620,6 +5674,35 @@ to raise the degree is what works. That is `p`-refinement reaching a case neithe
 not solve it; nothing about the flux-surface machinery, since only `ψ` on a grid
 is differenced and freegs4e computes no averages; and nothing about a real
 reconstruction, since both codes are given analytic profile shapes.
+
+**AND THERE IS A LIMITED CASE NOW, WHICH IS THE ONLY ONE MEQ COULD EVER COMPARE
+AGAINST.** `fgsref.py`'s `H_limited_circular`, added 2026-09-06: vertical-field
+coils only, so no X-point exists in range and the boundary is the flux surface
+through the limiter. Every other case in that table is **diverted**, and MEQ's
+moving support is a pointwise test on `Ψ` — see `FREE-BOUNDARY-PLAN.md` §10.3.
+Its coil currents were **solved for** by freegs4e's own control system rather
+than guessed, which is what makes them consistent input for both codes.
+
+**IT IS NOT CONVERGED AT 129², AND THE DIVERTED CASES ARE.**
+
+| grid | `ψ_ax` | `ψ_bnd` |
+|---|---|---|
+| 129² | 9.483141e-02 | 2.781829e-02 |
+| 257² | 9.337971e-02 | 2.649111e-02 |
+| 513² | 9.308752e-02 | 2.622462e-02 |
+
+Successive differences fall by **4.98** each time — order ≈ 2.3 — and Richardson
+gives `ψ_ax ≈ 9.3014e-02`, `ψ_bnd ≈ 2.6158e-02`, against which **129² is 2.0%
+and 6.3% out**. A **limited** boundary is a maximum over the limiter ring, a
+pointwise operation on a discrete set, where a diverted one is a saddle located
+by interpolation — so it converges more slowly in the grid. Use the 513² run.
+
+**MEQ DOES NOT YET CONVERGE ON IT**: four good Newton steps to 4.63e-03, a factor
+of eleven, then a floor it drifts upward from — the line search taking its
+least-bad trial because none improves, i.e. no Newton direction is a descent
+direction there. §7.16 records the diagnosis and where to look, and the first
+suspect is that **the border rows are not scaled against each other** in SI units,
+where this problem spans eleven orders.
 
 **pyMFEM would improve this and is not used.** `mkguess.py` hand-writes MFEM's
 ASCII mesh and GridFunction format to seed the restart, and `compare.py` reads

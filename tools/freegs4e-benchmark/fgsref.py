@@ -41,10 +41,16 @@ OUTDIR = os.path.dirname(os.path.abspath(__file__))
 # ITS DEFAULT IS nlevels = 1, WHICH IS NOT MULTIGRID AT ALL.
 # Equilibrium.__init__ calls multigrid.createVcycle( ..., nlevels=1, ncycle=1,
 # niter=2, direct=True ), and at one level a V-cycle is a direct sparse solve on
-# the full grid.  The whole hierarchy is built and switched off.  Measured on
-# case A: 85 s at 129^2 against 656 s at 257^2, a factor of 7.7 for a fourfold
-# rise in unknowns -- which is the n^3 of a 2D sparse LU and not the n^2 of a
-# V-cycle.  Extrapolated, 2049^2 is days and tens of gigabytes.
+# the full grid.  The whole hierarchy is built and switched off.
+#
+# BUT TURNING IT ON BUYS ALMOST NOTHING, AND THIS COMMENT USED TO SAY OTHERWISE.
+# It attributed case A's 85 s at 129^2 against 656 s at 257^2 to "the n^3 of a
+# 2D sparse LU".  That is wrong, and the HAGENOW note below had it right all
+# along: multigrid.MGDirect.__init__ calls scipy factorized( A ) ONCE at
+# construction and __call__ only backsolves, so the LU is not a per-step cost at
+# all.  Measured 2026-09-06, the per-Picard-step boundary condition alone is
+# 0.512 s at 129^2 and 3.540 s at 257^2 -- against those 85 s and 656 s totals,
+# it is most of the run.  The V-cycle is a lever on the wrong term.
 #
 # AND setSolverVcycle() IS NOT THE WAY TO TURN IT ON, which is a trap rather
 # than an inconvenience: it hard-codes GSsparse -- the SECOND-order operator --
@@ -348,6 +354,31 @@ def split_amplitudes(frac_p, R0, P0=1.0):
     return P0, F0
 
 
+# ----------------------------------------------------------------------------
+# A LIMITED CIRCULAR TOKAMAK, for the comparison MEQ can actually make.
+#
+# Every other machine in this file is DIVERTED, and MEQ's moving plasma support
+# is a pointwise test on the normalised flux, which picks up the private flux
+# region beyond an X-point -- FREE-BOUNDARY-PLAN.md section 10.3.  So a
+# like-for-like free-boundary comparison needs a limited plasma, and no machine
+# in freegs4e is one.
+#
+# VERTICAL FIELD ONLY.  Two coil pairs, placed to give a field that holds the
+# plasma at R0 without producing a null anywhere in the box: with no divertor
+# coils there is no X-point for the boundary logic to find, and the plasma can
+# only be bounded by the limiter.
+R0_LIM, A_LIM = 1.00, 0.35
+_th = np.linspace(0.0, 2.0*np.pi, 257)
+LIMITER = (R0_LIM + A_LIM*np.cos(_th), A_LIM*np.sin(_th))
+
+
+def make_limited():
+    from freegs4e.machine import Coil, Machine, Wall
+    coils = [("P1U", Coil(1.75, 0.90)), ("P1L", Coil(1.75, -0.90)),
+             ("P2U", Coil(0.55, 1.10)), ("P2L", Coil(0.55, -1.10))]
+    return Machine(coils, Wall(LIMITER[0], LIMITER[1]))
+
+
 CASES = [
     dict(
         name="A_testtokamak_classic",
@@ -445,6 +476,24 @@ CASES = [
         limiter=None, seed_paxis=1.0e3,
         notes=("MAST-U (simplified single-strand coil set): spherical "
                "tokamak, different coil topology from C."),
+    ),
+    dict(
+        name="H_limited_circular",
+        machine="LimitedCircular", make=lambda: make_limited(),
+        grid=dict(Rmin=0.30, Rmax=1.90, Zmin=-0.80, Zmax=0.80, nx=129, ny=129),
+        order=4, Ip=3.0e5, fvac=1.0,
+        R0=1.00, frac_p=0.50, pa=1.0, pb=2.0, fa=1.0, fb=2.0,
+        xpoints=[],
+        isoflux=[(0.65, 0.0, 1.35, 0.0), (1.00, 0.35, 1.35, 0.0),
+                 (1.00, -0.35, 1.35, 0.0)],
+        limiter=LIMITER, seed_paxis=1.0e3,
+        notes=("A LIMITED plasma, and the only one here: vertical-field coils "
+               "only, so no X-point exists in range and the boundary is the "
+               "flux surface through the limiter contact rather than a "
+               "separatrix.  It is the case MEQ can actually compare against "
+               "-- FREE-BOUNDARY-PLAN.md section 10 records that MEQ's plasma "
+               "support test is pointwise and so is limiter-only, and that "
+               "every other case in this table is diverted."),
     ),
 ]
 
@@ -931,6 +980,15 @@ def main():
     # 513, 257 and 129 point for point on the coarse grid.  That nesting is the
     # whole reason to keep it: a reference refinement study wants the coarse
     # grid to be a subset of the fine one.
+    # AND WE DO NOT USE THE NESTING WE JUST WENT TO THE TROUBLE OF KEEPING.
+    # Every --nx run starts COLD: picard_loop() below begins from whatever
+    # Equilibrium.__init__ left in psi, at every resolution, so a fine grid pays
+    # the full cold Picard count -- 23 to 103 steps -- at its own O( n^3 )
+    # per-step boundary cost.  Seeding it from the converged coarse answer, which
+    # the nesting above exists to make trivial, is the obvious saving and is NOT
+    # DONE.  Measured cost of not doing it: the boundary condition alone scales
+    # about 6.9x per grid doubling, so a cold 1025^2 run is hours where a seeded
+    # one should be a handful of steps.
     nx = None
     vcycle = None
     rest = []

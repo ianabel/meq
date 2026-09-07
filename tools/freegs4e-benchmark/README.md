@@ -411,3 +411,46 @@ doing some of the rest.
 within one per cent, and 6.6x the accuracy. Going further buys nothing --
 `k=3` refine 3 costs 2.5x the time for 0.7 %, and `k=4` costs 1.6x for 1.5 % --
 because 8.7e-06 is the boundary fit and not MEQ.
+
+## Refining the reference: run it NESTED, not cold
+
+`fgsref.py --nx=N` keeps freegs4e's `2^n + 1` convention so that 129, 257, 513
+and 1025 nest **point for point**. That nesting exists to be used, and as of
+2026-09-06 it is not: every `--nx` run starts from whatever
+`Equilibrium.__init__` left in `psi`, so a fine grid pays the full cold Picard
+count — 23 to 103 steps — at its own per-step cost.
+
+**What that costs.** The dominant per-step term is the free-boundary condition,
+measured at **0.512 s at 129², 3.540 s at 257²** — about 6.9x per doubling, so
+roughly 24 s at 513² and 170 s at 1025². A hundred cold steps at 1025² is
+therefore hours, and a 1025² run was in fact killed at **12h36m** for exactly
+this reason.
+
+**The recipe, coarsest first:**
+
+```sh
+export FGSREF_OUT=$SCRATCH/fgsref
+python3 fgsref.py --nx=129     # minutes
+python3 fgsref.py --nx=257     # seed from n129
+python3 fgsref.py --nx=513     # seed from n257
+```
+
+**and the seeding step is the part that is NOT WRITTEN.** What it needs is to
+read the coarse `psi` from `FGSREF_OUT/n<coarse>/`, interpolate it onto the fine
+grid — `scipy.interpolate.RectBivariateSpline`, which this file already uses
+elsewhere — and hand it to `picard_loop` as its starting `psi`. The grids nest,
+so on the shared points the interpolation is exact and only the inserted points
+are new.
+
+**Do not go past 513².** The reference is not the binding constraint on the
+benchmark — the **MXH boundary fit** is, and it improves only linearly in `h`,
+so a finer reference buys progressively less. 1025² also carries about 6 GB,
+which on this machine competes with whatever else is building.
+
+**And do not reach for the two solver knobs first.** `--vcycle=` is a lever on
+the wrong term: `multigrid.MGDirect` factorises **once** at construction and only
+backsolves afterwards, so the linear solve is not a per-step cost. `--hagenow`
+is genuinely `O(n²)` where the default is `O(n³)`, but freegs4e's two boundary
+conditions **disagree by 3.2e-03 with a flat gap**, and self-convergence says the
+default is the converged one — so it changes the answer at the level MEQ is being
+compared at. Seeding costs nothing and changes nothing.

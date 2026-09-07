@@ -2076,6 +2076,104 @@ on a core it is interior. That is one integer per iteration and it distinguishes
 cannot.
 
 
+### 7.16 A limited tokamak: freegs4e has one now, MEQ does not converge on it
+
+**Built 2026-09-06.** `tools/freegs4e-benchmark/fgsref.py` gained
+`H_limited_circular`, and it is **the only limited case in that table** — every
+other machine there is diverted, which §10.3 records as the configuration MEQ's
+pointwise support test cannot represent.
+
+**THE CONSISTENT INPUTS WERE SOLVED FOR RATHER THAN GUESSED, WHICH IS §7.15'S
+RECOMMENDATION CARRIED OUT.** The machine is vertical-field coils only — no
+divertor, so no X-point exists in range and the boundary can only be the flux
+surface through the limiter. freegs4e's own control system was then asked to
+hold a circular plasma of minor radius 0.35 at `R₀ = 1.0` with `I_p = 3e5 A`,
+and the currents it **solved for** are the prescribed input both codes share:
+
+| | | |
+|---|---|---|
+| P1U / P1L | `(1.75, ±0.90)` | **−182364 A** |
+| P2U / P2L | `(0.55, ±1.10)` | **−46186 A** |
+
+It converges, reports `boundary: limited`, and is circular — `R₀ = 1.007`,
+`a = 0.330`, `A = 3.05`, `κ = 1.004`, `δ = +0.053` — with a GS residual of
+**2.2e-09** against its own 4th-order operator.
+
+**AND THE TWO CODES' NORMALISED FLUX RUNS OPPOSITE WAYS**, which is a trap worth
+one line: freegs4e's `psi_norm` is **0 on the axis** and 1 at the boundary,
+MEQ's `Ψ` is **0 at the boundary** and 1 on the axis. So freegs4e's
+`(1 − ψ_n^α)^β` at `α = 1, β = 2` is MEQ's **`Ψ²`**. Checked rather than
+reasoned: read against MEQ's `Ψ`, the saved arrays are `C·Ψ²` to a relative
+spread of **1.3e-14**. `j = 2` also satisfies FB-4's precondition, so the
+profile is admissible without adjustment.
+
+**AND THE CAUSE WAS FOUND AND FIXED, 2026-09-06 — see §7.17.** It was one
+argument: `setNormalisation( s )` where `setNormalisation( s, sB )` was meant,
+zeroing `ψ_bnd` for the whole window in which the Jacobian and every
+plasma-current block are assembled. What follows is the failure as it was
+diagnosed, kept because the diagnosis is the useful part.
+
+**MEQ DID NOT CONVERGE ON IT, AND THE SHAPE OF THE FAILURE WAS SPECIFIC.** Given
+the same coils, the same profiles and the same current, on a half-disc of radius
+2.40 enclosing both plasma and conductors:
+
+```
+it 0  5.164750e-02      it 4  4.633744e-03   <- the floor
+it 1  3.670491e-02      it 5  4.635750e-03
+it 2  2.400555e-02      ...   creeping UP by about 0.05% a step
+it 3  4.657920e-03      it 25 4.680089e-03
+```
+
+**Four good steps, a factor of eleven, and then a floor it drifts upward from.**
+The drift is the line search accepting its least-bad trial when none improves —
+which is what that code is written to do — so the iteration is sitting where
+**no Newton direction is a descent direction**. That is a Jacobian statement, not
+a step-length one.
+
+**THE CONFIGURATION IS NOT THE PROBLEM, WHICH WAS CHECKED BEFORE BLAMING THE
+SOLVER.** The limiter contact was suspected first, since MEQ's `ψ_bnd` came back
+72% high — but `ψ` at the pinned point `(1.337, 0)` in freegs4e's own solution is
+**2.801e-02 against its `ψ_bndry` of 2.782e-02**, 0.7% apart. The point is right.
+MEQ's numbers are wrong because it is **stuck at 9% of its initial residual**,
+not because it was asked the wrong question.
+
+**WHAT IS NEW IN THIS PROBLEM**, and therefore where to look: coils through
+`CoilAugmentedNormalisedSource`, six exterior modes rather than four, and **SI
+units**, where the coil currents are `1.8e5`, `μ₀` is `1.26e-6` and `ψ` is
+`9e-2` — a dynamic range of eleven orders across the bordered system. The border
+rows are **not scaled** against each other: this file records `γ = ‖c‖` frozen
+from the first iterate for `ψ_ax`'s constraint precisely because *"`G` is a flux
+and `R` is a trace residual, so the two cannot simply be concatenated"* — and
+**no such factor was written for the current row or the boundary-flux row**.
+That is the first thing to measure: a differenced check of each border row and
+column against the assembled one, on this problem, in these units.
+
+**THE REFERENCE ITSELF IS NOT CONVERGED AT 129², WHICH IS NEW FOR THIS
+BENCHMARK.** Over the scan:
+
+| grid | `ψ_ax` | `ψ_bnd` | `a` | `R₀` | GS residual (2nd order) |
+|---|---|---|---|---|---|
+| 129² | 9.483141e-02 | 2.781829e-02 | 0.330 | 1.007 | 1.659e-03 |
+| 257² | 9.337971e-02 | 2.649111e-02 | 0.339 | 1.004 | 3.974e-04 |
+| 513² | 9.308752e-02 | 2.622462e-02 | 0.341 | 1.003 | 9.857e-05 |
+
+**Both flux values converge at about 2.3** — the successive differences are
+1.452e-03 then 2.922e-04 in `ψ_ax`, and 1.327e-03 then 2.665e-04 in `ψ_bnd`, a
+ratio of 4.98 each time — and the GS residual falls at 2.0, so the solution
+itself is converging cleanly. Richardson-extrapolated, the answers are
+**`ψ_ax` ≈ 9.3014e-02** and **`ψ_bnd` ≈ 2.6158e-02**.
+
+**Against those, 129² is 2.0% and 6.3% out**, where the diverted cases in this
+table are converged at 129² to six figures. The mechanism is that a **limited**
+boundary is a maximum over the limiter ring — a pointwise operation on a discrete
+set — where a diverted one is a saddle located by interpolation to sub-cell
+accuracy. So a limited reference converges more slowly in the grid than a
+diverted one, and **129² is not good enough for this case**: whatever MEQ is
+eventually compared against here should be the 513² run, and a comparison
+claiming better than about 1e-03 against the 129² one would be measuring the
+reference.
+
+
 ## 8. Risks, in the order they are likely to bite
 
 **The axis, and it is FB-A because it can be measured now.** The half-disc
