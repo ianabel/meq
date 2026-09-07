@@ -206,6 +206,13 @@ Each stage ends at a **measured rate**, as every stage in this tree does.
 | **PE-5** | **Into the free-boundary solve**: `ψ_ax`, `ψ_bnd`, the exterior coupling and the plasma edge in one bordered system. | `HighBetaConvergence` and the FB-1 cases unchanged to every digit, which is what says the generalisation reduces |
 | **PE-6** | **A machine case at `j = 0`** against `../freegs4e`. | agreement at the level FB-6 reaches at `j = 1` |
 
+**AND A DIVERTED CASE NEEDS A STAGE BEFORE PE-0, WHICH §9.4 HAS ALREADY RUN
+ONCE.** PE-0's interface is smooth, so it is silent about the corner; the
+lens/union sweep of §9.4 is the corner's own premise test, it needs no coupling
+and no border, and it says the corner is not free. Extending it to say *where*
+the error lives is what decides whether an `O( h )` exclusion around the node
+is affordable — see §9.5.
+
 **PE-0 IS THE STAGE TO PROTECT.** It needs no coupling, no border and no moving
 geometry, and it either shows `k+2` at `j = 0` or shows that the whole premise
 is wrong. It is a day's work against a fixture that already exists. **Do PE-0
@@ -213,17 +220,27 @@ before believing any of the rest of this file.**
 
 ## 7. Risks
 
-**The X-point, and it is the one that could stop this being useful.** A diverted
-plasma's edge is a separatrix with a **corner**, where `∇ψ = 0` and both
-transfer-path families give out — `CLAUDE.md` records `ExtensionConvergence`
-taking `Γ` to be `ψ = −0.03` rather than the separatrix for exactly this reason,
-and `INVERSION-PLAN.md`'s IN-5 stops at the same wall. **So this design covers
-LIMITER plasmas and not diverted ones**, which is a large scope limit and is not
-a detail to discover at PE-5. `FREE-BOUNDARY-PLAN.md` §10 is the diverted-plasma
-pathway and **it does not rescue this one**: it works by never meshing the
-separatrix, which is available to a free-boundary solve and is exactly what an
-interior interface cannot do. Whether an X-point can be handled by excluding a
-disc around it, and what that costs the order, is unexamined.
+**The X-point, and it is the one that could stop this being useful. SECTION 9 IS
+NOW THE ACCOUNT OF IT AND THIS PARAGRAPH'S DIAGNOSIS WAS HALF WRONG.** A
+diverted plasma's edge is a separatrix with a **corner**, and this paragraph
+used to say that is because `∇ψ = 0` and both transfer-path families give out.
+Two claims, and only the second is measured: what the families meet is a
+**degenerate and double-valued defining function**, not a corner, and
+`ExtensionConvergence.cpp`'s own header says so precisely — a ray leaves the
+core, crosses the vacuum and lands in the private flux region *where `ψ` is
+negative again*. That is fixable, and §9.2 says how.
+
+**What is NOT fixable by a better path family is a corner between two
+transferred pieces**, and §9.4 measures what one costs: on a smooth exact
+solution, with the corner as the only variable, `ψ*` falls back to `ψ` and `q`
+to first order or worse — so a corner takes away exactly the two quantities this
+plan exists to recover. **So this design still covers LIMITER plasmas and not
+diverted ones**, which is a large scope limit and is not a detail to discover at
+PE-5; but the reason is now a number rather than a hand-wave, and §9.5 lists
+three geometries that would remove it. `FREE-BOUNDARY-PLAN.md` §10 is the
+diverted-plasma pathway and **it does not rescue this one**: it works by never
+meshing the separatrix, which is available to a free-boundary solve and is
+exactly what an interior interface cannot do.
 
 **The band can exceed one element.** Where `Γ_p` runs nearly parallel to a mesh
 line, `dist(Γ_{p,h}, Γ_p)/h_loc` grows and assumption P.1 fails. Stage 5's
@@ -286,3 +303,267 @@ costed separately rather than folded in here.
 
 **And it should not be started while `j ≥ 1` is unfinished.** See the top of this
 file.
+
+## 9. The diverted case, and the one measurement that says what it costs
+
+**§7 records the X-point as this plan's scope limit and gives one sentence of
+diagnosis: *"a separatrix with a corner, where `∇ψ = 0` and both transfer-path
+families give out"*. That is two claims welded together, only one of them is
+right, and neither is the thing that actually decides the case.** This section
+is the measurement.
+
+### 9.1 The separatrix is four analytic arcs and a node, not a singular curve
+
+**`ψ` is analytic at an X-point** — `FREE-BOUNDARY-PLAN.md` §10.1's organising
+fact — because `Δ*ψ = −F` with `F` bounded and the X-point is an ordinary
+non-degenerate saddle. The Morse lemma then gives coordinates in which
+
+```
+ψ − ψ_X = a( x ) · b( x )        with ∇a, ∇b independent at the node
+```
+
+so each of the four branches is an **analytic arc terminating at the node**.
+Nothing about the separatrix is singular; the *description* `ψ − ψ_X` is.
+
+**Measured on MEQ's own diverted equilibrium**, `Soloviev::nstx()` evaluated in
+closed form:
+
+```
+X-point   r = 0.699700   z = -1.716000   psi_X = -2.8e-17   |grad psi| = 1.6e-11
+axis      r = 1.318168   z = +0.011089   psi   = -2.663e-01
+Hessian eigenvalues  -0.4049  +0.6291
+```
+
+`ψ_X = 0` to round-off, which is a free confirmation that the **corrected**
+`c₇`/`c₁₀` put the separatrix where a Solov'ev normalisation says it belongs —
+`nstxAsPublished` puts it at −8.7e-3 and its zero set is not closed. The
+branches leave the node at 36.11°, 113.59°, −66.41° and −143.89°, and
+
+| | interior angle at the node | `π/ω` |
+|---|---|---|
+| **core** (the plasma; here `{ψ < ψ_X}`) | **77.48°** — convex | 2.323 |
+| **vacuum**, taken as one region | **282.52°** — re-entrant | 0.637 |
+| SOL lobe, if the node is cut | 102.5° | 1.756 |
+
+and the two boundary branches separate at **1.25 × arc length** from the node.
+
+### 9.2 What defeats the path families is the DEFINING FUNCTION, not the corner
+
+`mfem::TransferPath` takes a `PositionFunction φ` whose zero set is `Γ`, and the
+instinct is `φ = ψ − ψ_X`. That is what breaks, in two ways at once: `|∇φ| → 0`
+linearly at the node, so a root find along a ray is degenerate; and there are
+**two** roots within `O(h)`, so the nearest one is not the right one.
+
+**And this is already measured, in this tree, in a comment nobody had connected
+to §7.** `tests/convergence/ExtensionConvergence.cpp`'s header:
+
+> *"LevelSetPath aborts because the outward normal below the plasma tip never
+> meets the level set — it runs straight through the X-point into the
+> private-flux region, where psi is negative again — and VertexConePath aborts
+> for the same reason, its whole admissible fan missing Gamma."*
+
+**A ray leaving the core, crossing the vacuum and landing in the private flux
+region is a double-root problem and a connectivity problem. It is not a corner
+problem.** `LevelSetPath` even carries `search_steps` for "where `Γ` can be
+crossed twice within `search_length`", which is the same defect in its milder
+form.
+
+**The fix follows from §9.1**: give each branch its own defining function,
+`φ₁ = a`, `φ₂ = b`, each with `|∇φ| ≠ 0` at the node — in practice a signed
+distance to each traced arc. The node is located by
+`meq::CriticalPointFinder` as a root of `q_h`, which is a **solved** field at
+the potential's own order (IN-A measured the ITER saddle to **4.5e-6**), and the
+launch directions are the null directions of the Hessian there.
+
+### 9.3 The connectivity fix is a REGULARITY prerequisite, not a physics nicety
+
+`{ψ < ψ_X}` near the node is **two opposite sectors meeting at a point** — the
+core and the private flux region — and that set is not locally Lipschitz, so no
+extension analysis applies to it at all. Take the core alone and both domains
+become Lipschitz: 77.48° convex, 282.52° re-entrant.
+
+So `FREE-BOUNDARY-PLAN.md` §10.3's flood fill is not a later refinement for
+diverted plasmas. **It is what makes `Ω_p` a domain this plan can be posed on**,
+and the plan's dependency on it should be stated at the top rather than
+discovered at PE-5.
+
+### 9.4 THE MEASUREMENT: a corner is not free, and it is not the singularity
+
+**The design.** `Γ` is the intersection (a **lens**) or union of two equal discs,
+and the exact solution is the Solov'ev NSTX equilibrium — smooth everywhere and
+knowing nothing about the shape. So the corner is the only variable: no level
+set of `ψ`, no vanishing gradient, no private flux region, no connectivity. The
+datum `g = ψ_exact` is carried in by `setExteriorDatum()`. Two circles of radius
+`a` with centres `2e` apart meet at
+
+```
+lens    omega = pi - 2 asin( e/a )        union   omega = pi + 2 asin( e/a )
+```
+
+and `e/a = 0.7800` gives **77.48°** and **282.52°** — the two angles of §9.1,
+from one parameter.
+
+**What the theory predicts, and why it is the wrong prediction.** For a Dirichlet
+corner of interior angle `ω` the singular exponents are `mπ/ω`, so a general
+solution carries `ψ ~ r^{π/ω}` and `q ~ r^{π/ω − 1}`, capping the `L2` rates at
+`min( k+1, 1 + π/ω )` and `min( k+1, π/ω )`. **The exact solution here is
+smooth, so that mode's coefficient is zero and no cap applies to it** — exactly
+as it is zero at an X-point, where `ψ` is smooth across its own separatrix. Any
+order loss measured here is therefore the METHOD exciting a mode the solution
+does not have, and that is the only mechanism that carries over.
+
+**The control is clean at every degree.** One disc, no corner:
+
+| `k` | `ψ` | `q` | `ψ*` | target |
+|---|---|---|---|---|
+| 1 | 1.98, 1.99 | 2.00, 1.98 | 3.30, 2.97 | 2, 2, 3 |
+| 2 | 2.97, 2.99 | 2.90, 2.75 | 4.34, 3.80 | 3, 3, 4 |
+| 3 | 4.53, 4.02 | 4.32, 3.25 | 5.65, 4.39 | 4, 4, 5 |
+
+**AND THE SHARPEST CONTROL IN THE STUDY IS THE SAME LENS WITH THE CORNER
+ROUNDED.** `smax( u, v ) = ( u + v + √( ( u − v )² + ρ² ) )/2` at `ρ = 0.05` —
+nine cells at `n = 32` and thirty-six at `n = 128`, so every mesh resolves it.
+Same two discs, same thin geometry, same box, same datum, same path family; the
+corner is the only thing removed:
+
+| `k` | `ψ` | `q` | `ψ*` | target |
+|---|---|---|---|---|
+| 1 | 1.99, 1.99 | 2.54, 2.06 | 2.75, 3.08 | 2, 2, 3 |
+| 2 | 3.17, 3.09 | 3.80, 2.80 | 3.83, 4.76 | 3, 3, 4 |
+| 3 | 4.80, 6.37 | 4.39, 4.40 | 4.80, 6.36 | 4, 4, 5 |
+
+**Full order at every degree, and five orders of magnitude smaller**: `L2( ψ )`
+at `k = 3, n = 128` reads **2.1707e-12** rounded against **2.5437e-07** sharp.
+So it is the corner. Nothing else in the configuration is the variable, and no
+argument is needed.
+
+**The corner is not.** At `ω = 77.48°`, `n = 32, 64, 128`:
+
+| `k` | `ψ` rate | `q` rate | `ψ*` rate |
+|---|---|---|---|
+| 1 | 1.88, 2.11 | **0.53, 1.60** | 1.44, 2.63 |
+| 2 | 2.88, 1.09 | **1.33, 0.70** | 2.85, 1.13 |
+| 3 | 4.81, **−0.94** | **2.58, −0.72** | 4.80, **−0.94** |
+
+`L2( q )` sits at **1e-4** where the control reaches 1e-10, and at `k = 3` the
+error **rises** between the two finest meshes. **`ψ*` equals `ψ` to three
+figures throughout** — 1.7969e-06 against 1.8019e-06 at `k = 2, n = 32` — so
+the local post-processing, which is the whole of this plan's `k+2` claim, buys
+**nothing at all** on a domain with a corner.
+
+**AND IT IS NOT AN ORDER CAP. IT IS A MESH-DEPENDENT CATASTROPHE, WHICH IS
+BOTH BETTER AND WORSE NEWS.** Widen the corner and the failures do not become
+milder, they become **intermittent**:
+
+| shape | `k` | `L2( q )` at `n = 32, 64, 128` |
+|---|---|---|
+| lens, 150° | 2 | 1.2261e-06 → **4.2838e-06** → 6.5829e-09 |
+| lens, 150° | 3 | 1.6201e-08 → **1.0559e-04** |
+| lens, 120° | 1 | 3.2358e-05 → **1.8812e-04** → 1.7624e-05 |
+| union, 210° | 3 | 8.3199e-08 → 1.1503e-08 → **4.5115e-06** |
+| union, 210° | 1, 2 | clean: rates 1.99/1.98 and 3.03/2.30 |
+
+`6.58e-09` at 150°, `k = 2`, `n = 128` is **better than the control's
+1.70e-08** — so the method is fully capable of `k+1` at that corner and simply
+fails on particular meshes. That is a **geometric fragility**, not a regularity
+bound, and at 77.48° it has stopped being intermittent and become the rule.
+
+**Three things that are ruled out by the same runs**: `VertexConePath::NumWidened()`
+is **0** at every mesh, every angle and every degree, so the admissible fan
+never had to be widened; `dist(Γ_h, Γ)/h` stays in **[1.17, 1.33]**, so
+assumption P.1 holds; and the control shares the mesher, the datum route, the
+path family and the exact solution, so none of those is the variable.
+
+**And this tree already carries the discriminating control from the other
+side.** `theSolverReachesTheExteriorDatumOnTheHalfDisc` solves on a semicircle
+whose `Γ` meets the axis at **two right-angle corners**, and it reads
+**1.99 / 2.99 / 3.99** in `ψ`. The difference is that those corners are between
+a **transferred** piece and a **fitted** one. So what is fragile is specifically
+a corner between two TRANSFERRED pieces, which is exactly what a separatrix
+node is.
+
+### 9.5 What this means for the plan
+
+**It is not a scope note any more, it is a numbered risk with a number on it.**
+This plan exists to recover `k+2` in `ψ*` and `k+1` in `q` that a cut element
+costs; a corner in `Γ` takes `ψ*` down to `ψ` and `q` to first order or worse.
+**Trading the cut-element cap for a corner cap is not obviously a trade worth
+making**, and PE-0's premise test is silent on it because PE-0's interface is
+smooth.
+
+**So the staging gains a stage before PE-0 for the diverted case, and it is
+cheap**: the lens/union sweep above, extended to say *where* the error lives.
+If the loss is confined to the `O(h)` neighbourhood of the node, the cost of
+excluding it is estimable — `q·ν ~ distance` on a branch, so an excluded disc of
+radius `Ch` contributes `∫₀^{O(h)} O(s) ds = O(h²)` to a flux-balance row, which
+is affordable at `k = 1` and **not** at `k ≥ 2`. If it is not confined, the
+diverted case needs a different geometry rather than a better path family.
+
+**Three geometries, in increasing order of cost.**
+
+1. **Interface strictly inside, at `ψ = ψ_X − ε`.** Smooth, closed, no node, and
+   everything above becomes irrelevant. It gives up representing the current
+   jump exactly at the edge, which is what this plan is for — so it is a
+   fallback, not a design, and it is named here only so nobody rediscovers it.
+2. **A mesh node at the X-point.** This is what the SOL community does with
+   block-structured flux-aligned grids, and it converts the node into two
+   ordinary corners of the mesh with nothing to transfer across. It was
+   unavailable when this plan was written and is available now that FB-6 meshes
+   with gmsh — and §5.2's outer loop already freezes the geometry per iterate,
+   so a re-mesh per outer iteration is not absurd.
+3. **Four subdomains meeting at the node.** The four sectors are core 77.5°,
+   private flux 77.5°, and two SOL lobes of 102.5° — **every one convex**, every
+   `π/ω > 1.75`. Treating the vacuum as one region is what manufactures the
+   282.52°. This is the structural reason block-structured divertor grids exist,
+   and it costs two more solves and a four-way flux balance at the node.
+
+### 9.6 The modal border must be per-arc, and the plan inherited its smoothness from the wrong parent
+
+**§3 expands `λ( s )` in one curve parameter and claims spectral convergence with
+`N ~ log( 1/h )`. That claim comes from `CouplingAtADistance.pdf`, whose `Γ` is
+an ARTIFICIAL interface chosen smooth** — a circle, in its §4.2 — and which says
+so: *"the BEM is defined on a suitably chosen, **smooth** artificial interface"*,
+*"let `x : R → Γ` be a **smooth regular**"* parametrisation. They pick a smooth
+`Γ` precisely to avoid this question. It is the **extension** work,
+`HDG-CurvedExtensions.pdf` and the Joukowsky aerofoil of its §3.4, that is built
+for a sharp `Γ` — and `VertexConePath` exists because both closed-form families
+give out there.
+
+**So the transfer half of this plan has a parent that meets corners and the
+modal half does not**, and a global Fourier series on a closed curve with a
+corner converges at `O( 1/m² )`, not spectrally: `N ~ h⁻¹`, and §3's whole cost
+argument against a mortar space collapses.
+
+**The parametrisation that works** follows from §9.1 and needs nothing exotic,
+because each arc is analytic in arc length right up to the node:
+
+* **one arc per branch, normalised arc length from the node**, with the node's
+  position from `CriticalPointFinder` and the launch directions from the
+  Hessian's null directions;
+* **a per-arc polynomial basis** — Chebyshev or Legendre in `t ∈ [0,1]` — with
+  continuity of `λ` at the node as one linear constraint. Spectral per arc,
+  algebraic globally, which is why the split is not optional;
+* **testing weighted by the endpoint behaviour**: `q·ν = |q| ~ distance` on a
+  branch, so the flux-balance integrand vanishes linearly at the node and
+  `t·C_m`, or Jacobi `P^{(0,1)}`, stops the near-node modes being
+  ill-determined. Measure it rather than assuming it;
+* **branch assignment for every `Γ_h` face before any foot is searched for**, so
+  a ray cannot cross to the other branch — which is the failure
+  `ExtensionConvergence.cpp` recorded.
+
+**One cap that is not removable.** The analytic Morse lemma wants `ψ` analytic.
+In the **vacuum** it is (`Δ*ψ = 0`). In the **core** `ψ` is only as smooth as `F`
+allows: with `F ~ Ψ^j` extended by zero, `F ∈ C^{j−1}` and `ψ ∈ C^{j+1}` — `C³`
+at `j = 2`. So the per-arc basis converges algebraically at a rate set by `j`,
+not spectrally, and `N` is capped by the same regularity that caps everything
+else here. Consistent with §5 and with FB-4, and better stated now than
+discovered at PE-3.
+
+### 9.7 And there is a better answer than excluding the node
+
+Inside the `O(h)` disc where the two branches are closer together than the band
+is wide, you have a **closed-form local solution**: `ψ ≈ ψ_X + ½ ξᵀHξ`, three
+numbers plus the node position, all available from `CriticalPointFinder` at the
+flux's own order. The interface data there can be **computed rather than
+transferred**. **The X-point is the one place on the separatrix where more is
+known, not less**, and treating it as the hard part inverts that.
