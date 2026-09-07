@@ -410,6 +410,14 @@ namespace meq
 	 * refinement of triangles PROPAGATES, and a propagation that runs off the
 	 * edge of a trimmed mesh has nowhere to go. Keeping the box means it always
 	 * has somewhere.
+	 *
+	 * OMEGA NEED NOT BE STRICTLY INSIDE THE BOX, and this class used to require
+	 * it. Boundary INHERITED from the box is fitted and needs no transfer, so it
+	 * simply keeps its own attribute and is left out of gammaHMarker(). The case
+	 * that needs this is free boundary's half-disc, whose flat side IS the box's
+	 * r = 0 edge because the domain has to reach the axis exactly. What is still
+	 * required is that some boundary be GENERATED -- that there is a Gamma_h at
+	 * all -- and the constructor throws if there is not.
 	 */
 	class AdaptiveDomain
 	{

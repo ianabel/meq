@@ -65,6 +65,7 @@
 #include "mfem.hpp"
 
 #include "meq/Coils.hpp"
+#include "meq/Estimator.hpp"
 #include "meq/ExteriorDtN.hpp"
 #include "meq/GradShafranov.hpp"
 
@@ -2477,3 +2478,369 @@ BOOST_AUTO_TEST_CASE( theExteriorCouplingClosesInOneBorderedNewton )
 	            "the bordered coupling's coefficients converge at " << rate
 	            << ", where FB-1b's superposition route reaches 3.30" );
 }
+
+/*
+ * FB-5's SECOND HALF: THE COUPLED SOLVE THROUGH THE ADAPTIVE LOOP.
+ *
+ * theExteriorCouplingClosesInOneBorderedNewton above puts the exterior
+ * coefficients in the same Newton as the state, on a FIXED mesh. This is the
+ * same coupling driven through solve -> post-process -> estimate -> mark ->
+ * refine, which is what FREE-BOUNDARY-PLAN.md section 7's FB-5 row still has
+ * open.
+ *
+ * WHAT IS NEW HERE AND IS NOT A REPEAT OF STAGE 6. The adaptive loop on the
+ * curved boundary is already measured -- AdaptiveRefinement.cpp's
+ * theAdaptiveLoopRunsOnTheCurvedBoundary -- but there Gamma carries a datum
+ * that is KNOWN. Here the datum on Gamma is the trace of an exterior expansion
+ * whose coefficients are UNKNOWNS, solved for by the transmission condition,
+ * and every one of those unknowns is a boundary integral over Gamma evaluated
+ * through the extension from Gamma_h. So the loop is refining the very geometry
+ * the border is assembled on, and the question is whether the border survives
+ * it.
+ *
+ * GAMMA IS FIXED AND Gamma_h IS NOT, WHICH IS THE WHOLE POINT. rho_Gamma = 1.5
+ * never moves, so meq::ExteriorDtN is built ONCE, outside the loop, and is the
+ * same operator at every cycle. What refines is D_h, so Gamma_h climbs toward a
+ * Gamma that is standing still. An eta that came down while the coefficients
+ * did not would say the estimator is blind to the coupling; both coming down is
+ * what says the loop is refining the right thing.
+ *
+ * AND ASSUMPTION P.1 IS CHECKED ON A GRADED Gamma_h, for the reason
+ * AdaptiveRefinement.cpp gives: VertexConePath widens a fan when it cannot
+ * leave D_h through both faces at a vertex, the method still runs, and the
+ * analysis no longer covers it. A graded boundary is where that is most likely,
+ * and the transmission row is a sweep of exactly that boundary -- so here a
+ * widened fan would be assembling the border on a path family the estimate does
+ * not reach.
+ */
+BOOST_AUTO_TEST_CASE( theCoupledSolveSurvivesTheAdaptiveLoop )
+{
+	int const order = 2;
+	int const cells = 12;
+	int const cycles = 4;
+	double const gamma = 0.6;
+
+	// Gamma does not move, so the exterior operator is built once and is the
+	// same object at every cycle. That is what "eta monotone with Gamma fixed"
+	// means and it is why this is a legitimate refinement study at all.
+	meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 4 );
+	int const modes = dtn.modeCount();
+	std::vector<double> const exact = halfDiscField().exteriorCoefficients( dtn );
+
+	// F does not depend on psi, so the state is affine and each cycle's Newton
+	// is one step. The coupling is what is being exercised, not the iteration.
+	struct VacuumSource : public meq::Source
+	{
+		double f( double r, double z, double /*psi*/ ) const override
+		{
+			return halfDiscField().f( r, z, 0.0 );
+		}
+		double dFdPsi( double, double, double ) const override
+		{
+			return 0.0;
+		}
+	};
+	VacuumSource source;
+
+	mfem::FunctionCoefficient psiCoeff( []( mfem::Vector const &x )
+	{
+		return halfDiscField().psi( x( 0 ), x( 1 ) );
+	} );
+	mfem::VectorFunctionCoefficient fluxCoeff( 2, []( mfem::Vector const &x,
+	                                                 mfem::Vector &v )
+	{
+		halfDiscField().flux( x( 0 ), x( 1 ), v( 0 ), v( 1 ) );
+	} );
+	mfem::ConstantCoefficient zero( 0.0 );
+
+	mfem::Mesh background = mfem::Mesh::MakeCartesian2D(
+		cells, 2*cells, mfem::Element::TRIANGLE, false,
+		halfDiscBox, 2.0*halfDiscBox );
+	background.Transform( []( mfem::Vector const &in, mfem::Vector &out )
+	{
+		out( 0 ) = in( 0 );
+		out( 1 ) = in( 1 ) - halfDiscBox;
+	} );
+
+	meq::AdaptiveDomain domain( background, halfDiscLevelSet );
+
+	struct Step
+	{
+		int elements;
+		int traceDofs;
+		int marked;
+		int widened;
+		int newton;
+		int gammaHFaces;
+		int boundaryElements;
+		double boundaryShare;
+		double eta;
+		double errorPsi;
+		double errorFlux;
+		double worstCoefficient;
+	};
+
+	std::vector<Step> history;
+
+	for ( int c = 0; c < cycles; ++c )
+	{
+		mfem::Array<int> marked;
+		Step step;
+
+		{
+			// Scoped: domain.refine() replaces the SubMesh everything here is
+			// built on, so nothing may outlive the cycle but the recorded Step.
+			mfem::SubMesh &sub = domain.computational();
+			int const gammaH = domain.gammaHAttribute();
+
+			// Twelve times the LARGEST element, as the graded curved-boundary
+			// loop uses: on a locally refined mesh the coarse part needs the
+			// long search and the fine part is not harmed by having one.
+			mfem::VertexConePath path( sub, gammaH, halfDiscLevelSet,
+			                           12.0*domain.largestElement() );
+
+			meq::GradShafranovSolver solver( sub, order );
+			solver.setSource( source );
+			solver.setBoundaryData( zero );
+			solver.setExtension( path, domain.gammaHMarker() );
+			solver.setExteriorCoupling( dtn );
+			solver.solve();
+			solver.postProcess();
+
+			std::vector<double> const a = solver.exteriorCoefficients();
+			BOOST_TEST_REQUIRE( static_cast<int>( a.size() ) == modes,
+			                    "cycle " << c << " returned " << a.size()
+			                    << " coefficients against " << modes << " modes" );
+
+			double worst = 0.0;
+			for ( int m = 0; m < modes; ++m )
+				worst = std::max( worst, std::abs( a[ static_cast<std::size_t>( m ) ]
+				                                   - exact[ static_cast<std::size_t>( m ) ] ) );
+
+			// THE DATUM eta_5 MUST COMPARE AGAINST IS THE ONE THE SOLVE
+			// IMPOSED, and here that is the exterior trace at the coefficients
+			// just solved for -- not zero, and not the exact expansion. Pinning
+			// it to zero is the defect CLAUDE.md records under "A separate
+			// eta_5 problem on the extension path", where eta becomes nothing
+			// but the geometry error and converges at a half.
+			mfem::PositionFunction const g =
+				[ &dtn, a ]( mfem::Vector const &x )
+			{
+				double total = 0.0;
+				for ( std::size_t m = 0; m < a.size(); ++m )
+					total += a[ m ]*dtn.basis(
+						meq::ExteriorDtN::firstMode() + static_cast<int>( m ),
+						x( 0 ), x( 1 ) );
+				return total;
+			};
+			std::unique_ptr<mfem::Coefficient> datum = solver.transferredDatum( g );
+
+			meq::ResidualEstimator estimator( solver, source );
+			estimator.setTransferredBoundary( domain.gammaHMarker(), datum.get() );
+			mfem::Vector const &local = estimator.GetLocalErrors();
+
+			meq::markDoerfler( local, gamma, marked );
+
+			// WHY THE BOUNDARY IS NEVER MARKED: is its indicator small, or is
+			// it merely losing the Doerfler competition? Share of the total
+			// eta^2 carried by elements with a face on Gamma_h, against their
+			// share of the element count.
+			{
+				std::vector<char> touches( sub.GetNE(), 0 );
+				for ( int b = 0; b < sub.GetNBE(); ++b )
+				{
+					if ( sub.GetBdrAttribute( b ) != gammaH )
+						continue;
+					int e, info;
+					sub.GetBdrElementAdjacentElement( b, e, info );
+					touches[ e ] = 1;
+				}
+				double onBoundary = 0.0, total = 0.0;
+				int count = 0;
+				for ( int e = 0; e < sub.GetNE(); ++e )
+				{
+					total += local( e )*local( e );
+					if ( touches[ e ] )
+					{
+						onBoundary += local( e )*local( e );
+						count++;
+					}
+				}
+				step.boundaryShare = total > 0.0 ? onBoundary/total : 0.0;
+				step.boundaryElements = count;
+			}
+
+			step.elements = sub.GetNE();
+			step.traceDofs = solver.numTraceDofs();
+			step.marked = marked.Size();
+			step.widened = path.NumWidened();
+			step.newton = solver.newtonIterations();
+			step.gammaHFaces = 0;
+			for ( int b = 0; b < sub.GetNBE(); ++b )
+			{
+				if ( sub.GetBdrAttribute( b ) == gammaH )
+					step.gammaHFaces++;
+			}
+			step.eta = estimator.GetTotalError();
+			step.errorPsi = solver.potentialError( psiCoeff );
+			step.errorFlux = solver.fluxError( fluxCoeff );
+			step.worstCoefficient = worst;
+		}
+
+		history.push_back( step );
+
+		if ( c + 1 == cycles )
+			break;
+		BOOST_TEST_REQUIRE( marked.Size() > 0,
+		                    "nothing was marked at cycle " << c );
+		domain.refine( marked );
+	}
+
+	std::printf( "\n  FB-5: THE COUPLED SOLVE THROUGH THE ADAPTIVE LOOP "
+	             "( k = %d, %d modes, Doerfler gamma = %.1f )\n",
+	             order, modes, gamma );
+	std::printf( "  %5s %7s %8s %7s %5s %7s %7s %11s %11s %11s %12s\n",
+	             "cycle", "elem", "trace", "marked", "wide", "newton", "GammaH",
+	             "eta", "L2(psi)", "L2(q)", "|a - exact|" );
+	std::printf( "        (elements touching Gamma_h, and their share of eta^2)\n" );
+	for ( std::size_t c = 0; c < history.size(); ++c )
+	{
+		Step const &s = history[ c ];
+		std::printf( "  %5zu %7d %8d %7d %5d %7d %7d %11.4e %11.4e %11.4e %12.4e\n",
+		             c, s.elements, s.traceDofs, s.marked, s.widened, s.newton,
+		             s.gammaHFaces, s.eta, s.errorPsi, s.errorFlux,
+		             s.worstCoefficient );
+		std::printf( "        %d of %d elements, %.2f%% of eta^2\n",
+		             s.boundaryElements, s.elements, 100.0*s.boundaryShare );
+	}
+	std::fflush( stdout );
+
+	for ( std::size_t c = 1; c < history.size(); ++c )
+	{
+		BOOST_TEST( history[ c ].eta < history[ c - 1 ].eta,
+		            "eta went from " << history[ c - 1 ].eta << " to "
+		            << history[ c ].eta << " at cycle " << c
+		            << ", with Gamma fixed and only Gamma_h refining" );
+		BOOST_TEST( history[ c ].errorPsi < history[ c - 1 ].errorPsi,
+		            "the L2 error in psi went from " << history[ c - 1 ].errorPsi
+		            << " to " << history[ c ].errorPsi << " at cycle " << c
+		            << " -- eta came down and the true error did not" );
+	}
+
+	/*
+	 * AND HERE IS WHAT THE LOOP DOES NOT DO, WHICH IS THE FINDING OF THIS CASE
+	 * AND WAS NOT WHAT IT WAS WRITTEN TO CHECK.
+	 *
+	 * eta falls by a factor of about eight and the exterior coefficients DO NOT
+	 * MOVE -- 1.3194e-03 at every cycle, to five digits. The mechanism is
+	 * measured above and is not a marking accident: the elements touching
+	 * Gamma_h are 11% of the mesh and carry 0.00% of eta^2, so they are never
+	 * marked because their indicator is essentially zero, not because they lose
+	 * the Doerfler competition. Gamma_h therefore keeps its 34 faces at every
+	 * cycle while the interior doubles.
+	 *
+	 * ETA IS RIGHT AND IS ANSWERING A DIFFERENT QUESTION. It estimates the
+	 * INTERIOR discretisation error, and eta_5 on Gamma_h compares psi* against
+	 * the datum actually imposed -- which is the repair CLAUDE.md records under
+	 * "A separate eta_5 problem on the extension path", and which correctly
+	 * reads small. The coefficients are a BOUNDARY functional: a transmission
+	 * integral over Gamma, reached by extension from Gamma_h. Nothing in eta
+	 * measures that, so refining on eta cannot improve it.
+	 *
+	 * SO THE COUPLED LOOP WILL STALL, AND IT HAS NOT YET. At cycle 3 the
+	 * interior error is 9.3e-04 and the frozen coefficient error is 1.3e-03; a
+	 * few more cycles and the second is the floor of the first. What that wants
+	 * is a boundary indicator of its own -- the transmission residual per face
+	 * of Gamma_h -- added to the marking. It is not built, and
+	 * FREE-BOUNDARY-PLAN.md section 7's FB-5 row is where that is recorded.
+	 *
+	 * WHAT IS ASSERTED INSTEAD IS STABILITY, WHICH IS A REAL PROPERTY AND NOT A
+	 * CONSOLATION. The border is re-assembled every cycle on a new mesh, a new
+	 * path family and a new extension, against an exterior operator that is the
+	 * same object throughout because Gamma does not move. That it returns the
+	 * same coefficients to five digits each time is what says the border is a
+	 * function of the geometry it is built on and not of the bookkeeping.
+	 */
+	for ( std::size_t c = 1; c < history.size(); ++c )
+	{
+		double const drift = std::abs( history[ c ].worstCoefficient
+		                               - history[ 0 ].worstCoefficient );
+		BOOST_TEST( drift < 1.0e-6,
+		            "the exterior coefficient error moved from "
+		            << history[ 0 ].worstCoefficient << " to "
+		            << history[ c ].worstCoefficient << " at cycle " << c
+		            << ". If it came DOWN, something now marks Gamma_h and the "
+		            "comment above is out of date -- which would be good news. "
+		            "If it went UP, the border is drifting as the mesh changes "
+		            "underneath it, which is not" );
+	}
+
+	// The mechanism, pinned so that the paragraph above cannot go stale
+	// silently: the boundary elements carry essentially none of the indicator.
+	BOOST_TEST( history.front().boundaryShare < 0.01,
+	            "elements touching Gamma_h carry "
+	            << 100.0*history.front().boundaryShare << "% of eta^2 at cycle 0. "
+	            "This case's account of WHY the coefficients do not improve "
+	            "rests on that being negligible" );
+
+	for ( std::size_t c = 0; c < history.size(); ++c )
+	{
+		// Assumption P.1 on a graded Gamma_h, which is the boundary the
+		// transmission row sweeps.
+		BOOST_TEST( history[ c ].widened == 0,
+		            "cycle " << c << ": " << history[ c ].widened
+		            << " vertices of Gamma_h needed a widened fan, so the border "
+		            "is being assembled on paths assumption P.1 does not cover" );
+
+		// Affine in ( x, a ) at every cycle, not just on the fixed mesh.
+		BOOST_TEST( history[ c ].newton <= 2,
+		            "cycle " << c << " took " << history[ c ].newton
+		            << " Newton steps on a residual that is affine in both the "
+		            "state and the coefficients" );
+	}
+
+	// And the loop is adaptive rather than uniform.
+	for ( std::size_t c = 0; c + 1 < history.size(); ++c )
+		BOOST_TEST( history[ c ].marked < history[ c ].elements,
+		            "cycle " << c << " marked all " << history[ c ].elements
+		            << " elements, which is uniform refinement" );
+}
+
+
+namespace
+{
+	/// p'( Psi ) = amplitude * Psi^power, exact at all three derivative levels.
+	///
+	/// THE POWER IS A PRECONDITION, NOT A KNOB. FB-4 measured that a profile
+	/// with p'( 0 ) != 0 makes the assembled residual DISCONTINUOUS in the
+	/// unknowns and Newton converges from nowhere, the exact solution included.
+	/// Power 1 puts the value at zero on the edge, which is what section 7.10
+	/// records as the threshold.
+	class PowerProfile : public meq::Profile
+	{
+		public:
+			PowerProfile( double amplitudeIn, int powerIn )
+				: amplitude( amplitudeIn ), power( powerIn ) {}
+
+			double operator()( double psi ) const override
+			{
+				return amplitude*std::pow( psi, power );
+			}
+			double prime( double psi ) const override
+			{
+				return power < 1 ? 0.0
+				       : amplitude*power*std::pow( psi, power - 1 );
+			}
+			double doublePrime( double psi ) const override
+			{
+				return power < 2 ? 0.0
+				       : amplitude*power*( power - 1 )*std::pow( psi, power - 2 );
+			}
+
+		private:
+			double amplitude;
+			int power;
+	};
+
+}
+

@@ -950,8 +950,8 @@ the fallback to work.
 | **FB-2** | A **prescribed** plasma current, still linear. | **DONE 2026-09-05 — see §7.9.** `ψ` at 1.99 / 2.88 / 3.01, and Ampère's law through the solve: **round-off over `Γ_h`** and `k+1`-convergent on the half-disc. Two meshing findings came out of it, both about aligning the mesh to geometry that is known in advance |
 | **FB-3** | `ψ_bnd` as an unknown, plasma support still fixed. | **DONE 2026-09-05.** `setNormalisation( ψ_ax, ψ_bnd )` exists, the profiles take `(ψ − ψ_bnd)/(ψ_ax − ψ_bnd)`, the validation is on the SPAN, and the second BORDER is closed: `solveWithNormalisation()` does 2×2, with `ψ_ax`'s residual at **1.88e-16** and **0.00e+00** on two meshes. It is the cheaper of the two borders — `ψ_bnd`'s dof is fixed at setup where `ψ_ax`'s needs an argmax — and `HighBetaConvergence` is bit-identical, which is what says the generalisation reduces |
 | **FB-4** | The moving plasma support and cut quadrature. | **ANSWERED 2026-09-05, AND THE ANSWER MOVED THE WORK RATHER THAN DOING IT — see §7.10.** The order is capped by the PROFILE and not by the quadrature: with `p' ~ Ψ^j` at the edge, `ψ*` keeps `k+2` exactly when **`k ≤ j`**, and that threshold is the same for an exact cut rule as for MEQ's plain one. `j = 3, k = 3` reads **4.989** against a target of 5. **No cut quadrature was built**, and there is no inconsistent-cut-Jacobian cost to measure because there is no cut rule — the quadrature points do not move, so the assembled Jacobian is exact. What IS measured is that `j = 0` does not converge at all |
-| **FB-5** | The augmented Newton as one bordered solve, and adaptivity through it. | **THE BORDERED SOLVE IS BUILT AND MEASURED, 2026-09-06; adaptivity through it is not.** `setExteriorCoupling()` carries the N Gegenbauer coefficients as unknowns of the same Newton as `psi_ax` and `psi_bnd`, and `solveWithNormalisation()` now does a general `( N + 2 )` elimination against ONE factorisation. On FB-1b's half-disc it agrees with the superposition route to **2.3e-15**, takes **one** Newton step because the residual is affine in `( x, a )`, and converges to the exact coefficients at **3.32** against FB-1b's 3.30. `HighBetaConvergence` is bit-identical. What remains is the adaptive loop through the coupling: eta monotone with `Gamma` fixed, and P.1 preserved |
-| **FB-6** | A machine case, against **`../freegs4e`**. **The driver pieces landed 2026-09-06**: `[[coils]]` reaches the solve through `meq::makeCoilSet` and the `CoilAugmentedSource` adapters, `[source] ConfineToPlasma` switches the source off outside `{ Ψ > 0 }`, and `tools/mesh/halfdisc.py` generates the half-disc-with-conductors mesh MFEM reads natively. What is still missing for a machine case is `ψ_bnd` as an unknown (FB-3) and the exterior coupling from a config file. | Agreement with an independent free-boundary tokamak code by a **different algorithm** — von Hagenow Green's functions, finite differences, Picard — on the same coils and the same tabulated `p′`, `ff′` through its `GeneralPprimeFFprime`. A fine-mesh self-comparison is the fallback, not the target: it shares every convention with the code it checks. See §7 |
+| **FB-5** | The augmented Newton as one bordered solve, and adaptivity through it. | **DONE 2026-09-06, BOTH HALVES — and the adaptive half found that `η` cannot see the coupling; see §7.12.** `theCoupledSolveSurvivesTheAdaptiveLoop` runs solve → post-process → estimate → mark → refine with the exterior coupling live: `η` **2.51e-01 → 3.21e-02** over four cycles with `Γ` fixed, `L2(ψ)` 3.58e-03 → 9.33e-04, **0 widened fans** so assumption P.1 holds on a graded `Γ_h`, and **one** Newton step per cycle. The bordered solve: `setExteriorCoupling()` carries the N Gegenbauer coefficients as unknowns of the same Newton as `psi_ax` and `psi_bnd`, and `solveWithNormalisation()` now does a general `( N + 2 )` elimination against ONE factorisation. On FB-1b's half-disc it agrees with the superposition route to **2.3e-15**, takes **one** Newton step because the residual is affine in `( x, a )`, and converges to the exact coefficients at **3.32** against FB-1b's 3.30. `HighBetaConvergence` is bit-identical. What remains is the adaptive loop through the coupling: eta monotone with `Gamma` fixed, and P.1 preserved |
+| **FB-6** | A machine case, against **`../freegs4e`**. **The driver pieces landed 2026-09-06**: `[[coils]]` reaches the solve through `meq::makeCoilSet` and the `CoilAugmentedSource` adapters, `[source] ConfineToPlasma` switches the source off outside `{ Ψ > 0 }`, and `tools/mesh/halfdisc.py` generates the half-disc-with-conductors mesh MFEM reads natively. What is still missing for a machine case is a **route from a config file** to the two borders FB-3 and FB-5 built: neither `setBoundaryFluxPoint()` nor `setExteriorCoupling()` is reachable from TOML, so a machine case is a library caller today. | Agreement with an independent free-boundary tokamak code by a **different algorithm** — von Hagenow Green's functions, finite differences, Picard — on the same coils and the same tabulated `p′`, `ff′` through its `GeneralPprimeFFprime`. A fine-mesh self-comparison is the fallback, not the target: it shares every convention with the code it checks. See §7 |
 
 **FB-1 is the stage to protect.** It exercises `ExteriorDtN`, the transferred
 datum with a non-zero `g`, the transmission condition, the augmented solve and
@@ -1759,6 +1759,74 @@ the fixed-boundary rehearsal. Building an ITER coil set from public design data
 is possible and would not be *the* CEDRES++ case anyway, its currents being
 unpublished; it is worth doing only if an ITER-scale aspect ratio is wanted for
 its own sake.
+
+### 7.12 The adaptive loop cannot see the coupling, and `η` is not wrong
+
+**FB-5's second half, 2026-09-06, and the measurement was not what the stage was
+written to check.** The loop works: with `Γ` fixed at `ρ_Γ = 1.5` and only `Γ_h`
+refining toward it, `η` falls monotonically, the interior errors follow it, P.1
+survives on a graded boundary, and each cycle's bordered Newton takes one step.
+
+**And the exterior coefficients do not move at all.**
+
+| cycle | elements | `Γ_h` faces | `η` | `L2(ψ)` | `\|a − exact\|` |
+|---|---|---|---|---|---|
+| 0 | 314 | **34** | 2.5109e-01 | 3.5828e-03 | **1.3194e-03** |
+| 1 | 336 | **34** | 1.3938e-01 | 3.4459e-03 | **1.3194e-03** |
+| 2 | 461 | **34** | 7.0070e-02 | 2.0191e-03 | **1.3194e-03** |
+| 3 | 640 | **34** | 3.2079e-02 | 9.3347e-04 | **1.3194e-03** |
+
+Five digits, four cycles, while the element count doubles and `η` falls
+eightfold. On a **uniform** refinement the same quantity converges at 3.32 —
+1.32e-03 at `n = 12` against 1.32e-04 at `n = 24` — so this is not a truncation
+floor in the mode count. `Γ_h` keeps its **34 faces at every cycle**.
+
+**IT IS NOT A MARKING ACCIDENT, AND THAT IS THE PART THAT TOOK MEASURING.** The
+obvious diagnosis is that boundary elements lose the Dörfler competition. They do
+not: the 34 elements touching `Γ_h` are **11% of the mesh and carry 0.00% of
+`η²`**, rising only to 0.07% by cycle 3 as the interior improves around them.
+Their indicator is essentially zero, so no threshold whatever would mark them.
+
+**AND `η` IS RIGHT.** It estimates the **interior** discretisation error, and its
+`η₅` on `Γ_h` compares `ψ*` against the datum actually imposed — which is exactly
+the repair recorded in `CLAUDE.md` under *A separate `η₅` problem on the extension
+path*, worth 4.07e-01 → 9.6e-05, and which correctly reports that the boundary is
+well resolved *for the interior problem*. The coefficients are a different
+quantity: a **boundary functional**, a transmission integral over `Γ` reached by
+extension from `Γ_h`. Nothing in `η` measures it, so refining on `η` cannot
+improve it. Both statements are true at once and neither is a defect.
+
+**THE CONSEQUENCE IS A STALL THAT HAS NOT HAPPENED YET, AND IT IS QUANTIFIED.**
+At cycle 3 the interior error is 9.3e-04 and the frozen coefficient error is
+1.3e-03. A few more cycles and the second becomes the floor of the first — the
+loop would keep reporting a falling `η` while `ψ` stopped improving. **That is
+the shape of quiet wrong answer this tree exists to catalogue**, and it is
+recorded here before it is met rather than after.
+
+**WHAT IT WANTS IS A BOUNDARY INDICATOR AND IT IS NOT BUILT.** The natural one is
+the transmission residual per face of `Γ_h` — the same integral the border
+already assembles, kept per face instead of summed — added to the marking
+alongside `η`. It is a small piece of work against machinery that exists, and it
+should be costed before FB-6 rather than during it, because a machine case is
+exactly where the interior error gets small enough for the floor to bite.
+
+**AND WHAT IS ASSERTED INSTEAD IS STABILITY, WHICH IS A REAL PROPERTY.** The
+border is re-assembled every cycle on a new mesh, a new path family and a new
+extension, against an exterior operator that is the same object throughout. That
+it returns the same coefficients to five digits each time says the border is a
+function of the geometry it is built on and not of the bookkeeping — which is not
+obvious, and is what a re-assembly per cycle most easily gets wrong.
+
+**One thing had to change in MEQ for any of this to run.** `meq::AdaptiveDomain`
+required `Ω` to be **strictly inside** the background box — it threw unless the
+computational mesh had exactly one boundary attribute — and the half-disc is not
+and cannot be: its flat side **is** the box's `r = 0` edge, because FB-A requires
+the domain to reach the axis exactly. Inherited boundary is ordinary fitted
+boundary and wants no transfer, so the guard now checks the thing that actually
+matters — that some boundary was **generated**, i.e. that there is a `Γ_h` at
+all — and leaves inherited attributes out of `gammaHMarker()`. Strictly more
+permissive, so every existing caller is unaffected.
+
 
 ## 8. Risks, in the order they are likely to bite
 

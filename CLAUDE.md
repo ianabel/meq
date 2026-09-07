@@ -393,6 +393,51 @@ factorisation and `N + 2` backsolves — agreeing at round-off. And **one Newton
 step**, which is what says the columns really are constant: the residual is
 affine in `( x, a )` and an exact Jacobian must finish it in one.
 
+**AND THE ADAPTIVE LOOP RUNS THROUGH THE COUPLING, 2026-09-06, WHICH COMPLETES
+FB-5 — AND IT FOUND THAT `η` CANNOT SEE THE COUPLING AT ALL.**
+`theCoupledSolveSurvivesTheAdaptiveLoop` drives solve → post-process → estimate
+→ mark → refine with the exterior coefficients live, `Γ` fixed at `ρ_Γ = 1.5` so
+the DtN is the same object every cycle and only `Γ_h` climbs toward it. `η` falls
+**2.5109e-01 → 3.2079e-02** over four cycles, `L2(ψ)` 3.58e-03 → 9.33e-04, **0
+widened fans** so assumption P.1 holds on a graded `Γ_h`, and **one** Newton step
+per cycle because the residual stays affine.
+
+**The exterior coefficients do not move — 1.3194e-03 at every cycle, to five
+digits — and `Γ_h` keeps its 34 faces while the element count goes 314 → 640.**
+Under *uniform* refinement the same quantity converges at 3.32, so it is not a
+mode-truncation floor.
+
+**IT IS NOT A MARKING ACCIDENT.** The 34 elements touching `Γ_h` are 11% of the
+mesh and carry **0.00% of `η²`**, rising to 0.07% by cycle 3 only because the
+interior improves around them. No threshold would mark them.
+
+**AND `η` IS RIGHT, WHICH IS WHY THIS IS A SCOPE STATEMENT RATHER THAN A DEFECT.**
+`η` estimates the **interior** discretisation error, and `η₅` on `Γ_h` compares
+`ψ*` against the datum actually imposed — the repair recorded under *A separate
+`η₅` problem on the extension path* — so it correctly reports the boundary as
+well resolved *for the interior problem*. The coefficients are a **boundary
+functional**: a transmission integral over `Γ` reached by extension from `Γ_h`.
+Nothing in `η` measures it. Both are true at once.
+
+**THE STALL IS QUANTIFIED AND HAS NOT HAPPENED YET.** At cycle 3 the interior
+error is 9.3e-04 against a frozen 1.3e-03 in the coefficients; a few more cycles
+and the second is the floor of the first, and the loop would report a falling `η`
+while `ψ` stopped improving. The cure is a **boundary indicator** — the
+transmission residual per face of `Γ_h`, which the border already computes and
+sums — added to the marking. **Not built**, and it should be costed before FB-6,
+since a machine case is where the interior error gets small enough to meet the
+floor. `FREE-BOUNDARY-PLAN.md` §7.12 is the write-up.
+
+**`meq::AdaptiveDomain` HAD TO BE RELAXED AND THE OLD GUARD WAS A REAL
+RESTRICTION.** It required `Ω` **strictly inside** the background box — exactly
+one boundary attribute on the SubMesh — which every fixed-boundary case in this
+tree satisfies and **the one geometry free boundary needs does not**: the
+half-disc's flat side *is* the box's `r = 0` edge, because FB-A requires the
+domain to reach the axis exactly. Inherited boundary is fitted and wants no
+transfer, so the guard now checks that some boundary was **generated** — that
+there is a `Γ_h` at all — and leaves inherited attributes out of
+`gammaHMarker()`. Strictly more permissive, so no existing caller moves.
+
 **`HighBetaConvergence` IS BIT-IDENTICAL**, every digit of the table under *The
 measurement* including the `0.00e+00` and the `−5.55e-17`. The generalisation
 keeps the **scalar** division when there is one border rather than routing it

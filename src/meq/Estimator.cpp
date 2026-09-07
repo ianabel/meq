@@ -647,6 +647,11 @@ namespace meq
 		}
 		backgroundMesh.SetAttributes();
 
+		// The parent's largest boundary attribute, taken BEFORE the cut, because
+		// it is what tells a generated attribute from an inherited one below.
+		int const parentBoundaryMax = backgroundMesh.bdr_attributes.Size() > 0
+			? backgroundMesh.bdr_attributes.Max() : 0;
+
 		mfem::Array<int> domainAttribute( 1 );
 		domainAttribute[ 0 ] = 1;
 		computationalMesh = std::make_unique<mfem::SubMesh>(
@@ -654,11 +659,25 @@ namespace meq
 
 		// SubMesh gives the boundary it had to generate one new attribute, one
 		// past whatever the parent already used, and leaves inherited boundary
-		// with the attributes it had. Omega is strictly inside the box here, so
-		// the whole of Gamma_h is generated and there is exactly one attribute.
+		// with the attributes it had. So the generated attribute is the largest,
+		// and Gamma_h is that one alone.
+		//
+		// INHERITED BOUNDARY IS LEGITIMATE AND THIS USED TO REFUSE IT. The guard
+		// here required EXACTLY ONE attribute, i.e. that Omega be strictly inside
+		// the box, which is true of every fixed-boundary case in this tree and is
+		// FALSE OF THE ONE GEOMETRY FREE BOUNDARY NEEDS: the half-disc's flat side
+		// IS the box's r = 0 edge, deliberately, because FB-A requires the domain
+		// to reach the axis exactly and the axis is not an approximation of
+		// anything. It is ordinary fitted boundary and wants no transfer.
+		//
+		// What actually has to hold is that SOME boundary was generated -- that
+		// there is a Gamma_h at all -- and that is what is checked now. A domain
+		// aligned with the box on every side would generate nothing, leaving the
+		// largest attribute inherited and gammaH naming a fitted edge, which is
+		// the failure this guard exists to prevent.
 		gammaH = computationalMesh->bdr_attributes.Max();
-		if ( computationalMesh->bdr_attributes.Size() != 1 )
-			throw std::runtime_error( "meq::AdaptiveDomain: the computational mesh has boundary inherited from the background box, so Omega is not strictly inside it" );
+		if ( gammaH <= parentBoundaryMax )
+			throw std::runtime_error( "meq::AdaptiveDomain: no boundary was generated when cutting the computational mesh, so Omega is aligned with the background box everywhere and there is no Gamma_h to transfer to" );
 
 		gammaHMarkerValue.SetSize( gammaH );
 		gammaHMarkerValue = 0;

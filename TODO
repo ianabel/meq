@@ -870,3 +870,60 @@ only two things in it that were neither built nor recorded anywhere else.
   This project's standing position is that two independent implementations
   agreeing is worth more than either one being plausible, and this is a case
   where both already exist and the comparison is a few dozen lines.
+
+
+================================================================================
+A boundary error estimator for the exterior coupling
+Raised 2026-09-06 by FB-5's adaptive loop, which measured the gap rather than
+predicting it. FREE-BOUNDARY-PLAN.md section 7.12 is the write-up.
+================================================================================
+
+  THE ADAPTIVE LOOP CANNOT SEE THE COUPLING, AND eta IS NOT WRONG. Measured on
+  the half-disc at k = 2 over four cycles, with Gamma fixed and only Gamma_h
+  refining:
+
+      cycle   elements   Gamma_h faces        eta      L2(psi)   |a - exact|
+        0        314          34          2.5109e-01  3.5828e-03  1.3194e-03
+        3        640          34          3.2079e-02  9.3347e-04  1.3194e-03
+
+  eta falls eightfold, the interior error follows it, and the exterior
+  coefficients DO NOT MOVE -- five digits, four cycles. Under UNIFORM refinement
+  the same quantity converges at 3.32, so it is not a mode-truncation floor.
+
+  IT IS NOT A MARKING ACCIDENT. The 34 elements touching Gamma_h are 11% of the
+  mesh and carry 0.00% of eta^2, rising only to 0.07% by cycle 3 as the interior
+  improves around them. Their indicator is essentially zero, so no threshold
+  whatever would mark them, and Gamma_h keeps its 34 faces while the element
+  count doubles.
+
+  AND eta IS ANSWERING A DIFFERENT QUESTION. It estimates the INTERIOR
+  discretisation error, and eta_5 on Gamma_h compares psi* against the datum
+  actually imposed -- the repair CLAUDE.md records under "A separate eta_5
+  problem on the extension path" -- so it correctly reports the boundary as well
+  resolved FOR THE INTERIOR PROBLEM. The exterior coefficients are a BOUNDARY
+  FUNCTIONAL: a transmission integral over Gamma reached by extension from
+  Gamma_h. Nothing in eta measures it. Both statements are true at once and
+  neither is a defect.
+
+  WHAT IT COSTS, QUANTIFIED, AND IT HAS NOT BITTEN YET. At cycle 3 the interior
+  error is 9.3e-04 against a frozen 1.3e-03 in the coefficients. A few more
+  cycles and the second is the floor of the first: the loop would go on
+  reporting a falling eta while psi stopped improving. That is the shape of
+  quiet wrong answer this tree exists to catalogue, and it is recorded before
+  being met rather than after.
+
+  WHAT TO BUILD. The natural indicator is the TRANSMISSION RESIDUAL PER FACE of
+  Gamma_h -- the same integral exteriorTransmissionRows() already sweeps, kept
+  per face instead of contracted and summed -- added to the marking beside eta.
+  The machinery exists; what is missing is a per-face accumulation and a
+  decision about how to weigh two indicators of different quantities against
+  each other, which is the part that wants thought rather than typing.
+
+  DO IT BEFORE FB-6 RATHER THAN DURING IT. A machine case is exactly where the
+  interior error gets small enough for the boundary floor to bite, and
+  diagnosing a stalled machine case is much harder than diagnosing this.
+
+  THE CONTROL ALREADY EXISTS: theCoupledSolveSurvivesTheAdaptiveLoop asserts the
+  coefficients are STABLE across cycles and prints the boundary's share of
+  eta^2. If a boundary indicator lands, that case fails with a message saying so
+  -- which is the intended signal, not a regression.
