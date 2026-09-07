@@ -1197,6 +1197,43 @@ namespace meq
 			void setBoundaryFluxPoint( double r, double z );
 
 			/**
+			 * PRESCRIBE THE PLASMA CURRENT AND SOLVE FOR THE PROFILE SCALE,
+			 * which is how every production free-boundary code poses this.
+			 *
+			 * The profiles then give the SHAPE of the current and this gives its
+			 * SIZE. meq::NormalisedSource::setCurrentScale explains why the
+			 * alternative -- fixing the amplitude -- is a non-linear eigenvalue
+			 * problem whose eigenvalue depends on a plasma region that is itself
+			 * unknown, and why scaling the amplitude cannot fix it.
+			 *
+			 * @param muZeroCurrent  `mu0 * I_p`, NOT `I_p`.
+			 *
+			 * **THE ARGUMENT IS `mu0 I_p` DELIBERATELY, AND IT IS THE QUANTITY
+			 * EVERYTHING HERE ALREADY SPEAKS IN.** Ampere's law through this
+			 * solver reads `oint q.nu dGamma = -mu0 I_p`, outwardFlux() returns
+			 * the left side, and the constraint below is assembled as
+			 * `int F/r dOmega`, which IS `mu0 I_p`. Taking a current in amperes
+			 * would mean knowing `mu0` here, and a `mu0` that disagreed with the
+			 * source's own would scale two terms of one equation differently and
+			 * converge, at full order, to a machine nobody described -- the trap
+			 * CLAUDE.md records for why a coil block carries no `Mu0` key.
+			 *
+			 * **NPC ONLY**, and refused otherwise, for setBoundaryFluxPoint()'s
+			 * reason: the row is a covector on the POTENTIAL, which is an
+			 * unknown only under NPC.
+			 *
+			 * @throws std::invalid_argument if not finite or zero.
+			 */
+			void setPlasmaCurrent( double muZeroCurrent );
+
+			/// The converged scale. One unless setPlasmaCurrent() was called.
+			double plasmaCurrentScale() const;
+
+			/// `int F_plasma/r` over the domain at the converged state, which is
+			/// `mu0 I_p`. Zero unless setPlasmaCurrent() was called.
+			double plasmaCurrent() const;
+
+			/**
 			 * COUPLE THE EXTERIOR TO THE SOLVE, so that the Gegenbauer
 			 * coefficients on `Gamma` become unknowns of the same Newton rather
 			 * than being recovered afterwards by superposition.
@@ -1660,6 +1697,10 @@ namespace meq
 
 			/// FB-3's limiter contact, and whether one was given.
 			bool boundaryFluxIsUnknown = false;
+			bool currentIsUnknown = false;
+			double targetMuZeroCurrent = 0.0;
+			double currentScaleValue = 1.0;
+			double plasmaCurrentValue = 0.0;
 			double boundaryFluxR = 0.0;
 			double boundaryFluxZ = 0.0;
 			double psiBoundaryValue = 0.0;
@@ -1714,6 +1755,31 @@ namespace meq
 			/// The bordered Newton of setSource( NormalisedSource &, double ):
 			/// the trace and psi_ax solved together. See the .cpp.
 			void solveWithNormalisation();
+
+
+			/// `int F_plasma/r` over the domain at @a state, i.e. `mu0 I_p`.
+			double assemblePlasmaCurrent( mfem::Vector const &state ) const;
+
+			/// The current constraint's COLUMN, `dR/d(scale)`. `F` is linear in
+			/// the scale, so this is the residual's own source term divided by
+			/// it -- assembled by the same loop, with the same sign.
+			void assembleCurrentColumn( mfem::Vector const &state,
+			                            mfem::Vector &out ) const;
+
+			/// Its ROW, `d( int F/r )/dx`: the plasma's own `dF/dpsi` integrated
+			/// against the potential shape functions. A covector on the
+			/// potential block and zero everywhere else.
+			void assembleCurrentRow( mfem::Vector const &state,
+			                         mfem::Vector &out ) const;
+
+			/// AND ITS OFF-DIAGONAL CORNER ENTRIES, which are not zero and whose
+			/// absence costs the quadratic rate rather than the answer.
+			/// `int F/r` depends on `psi_ax` and `psi_bnd` EXPLICITLY, through
+			/// the normalisation the profiles are evaluated at, so the current
+			/// row of the corner block has entries against both of them.
+			void assembleCurrentNormalisationCorner( mfem::Vector const &state,
+			                                         double &againstAxis,
+			                                         double &againstBoundary ) const;
 
 			/// psi_h recovered from @a trace at normalisation @a psiAxisIn, and
 			/// its largest nodal value -- which is the discrete psi_ax. Writes

@@ -1828,6 +1828,254 @@ all — and leaves inherited attributes out of `gammaHMarker()`. Strictly more
 permissive, so every existing caller is unaffected.
 
 
+### 7.13 The first attempt at a coupled free-boundary solve, and what it needs
+
+**Attempted 2026-09-06. It does not converge yet, and the diagnosis is specific
+enough to be worth more than the attempt.** The configuration: the half-disc,
+`ExteriorDtN` with 4 modes as unknowns, a `NormalisedMHDSource` with `ψ_ax` and
+`ψ_bnd` as unknowns, `ConfineToPlasma` so the support moves, and one `( N + 2 )`
+bordered Newton over all of it.
+
+**WHAT WORKED, AND IT IS NEW.** With the moving support **off**, the full
+bordered system — `N` exterior modes, `ψ_ax` and `ψ_bnd`, on a **non-linear**
+source — converges: **37 Newton steps, residual 1.853e-01 → 3.55e-11**. FB-5's
+own case is affine and finishes in one step, so this is the first time the
+`( N + 2 )` border has been driven by a genuinely non-linear source at all.
+
+**WHAT DID NOT.** With `ConfineToPlasma` on, no configuration tried converged —
+three limiter radii, two profile exponents, warm-started from the unconfined
+answer, and up to 200 iterations. The residual descends by a factor of six to
+sixty and then stalls, oscillating.
+
+**THREE FINDINGS, IN INCREASING ORDER OF USEFULNESS.**
+
+**1. The profile exponent decides it, and the amplitude cannot.** At `j = 2` the
+solve stalls everywhere; at `j = 1` the unconfined system converges in 11 steps.
+Scaling the amplitude does **not** help and the reason is structural: with
+`p′ ~ Ψ^j` the problem is a non-linear eigenvalue problem in `Λ = A/σ²`, so
+`σ = ψ_ax − ψ_bnd` moves with `√A` and the reaction ratio `max|∂F/∂ψ|/λ₁` is
+**independent of `A`**. That is the same statement `CLAUDE.md` records for the
+high-β source, where the ratio is set by `ν` and not by the amplitude.
+
+**2. WITHOUT COILS THERE IS NO EDGE TO FIND, AND THIS IS THE ONE THAT MATTERS.**
+`ψ_bnd` came back at **−1.3e-04, 3.5e-07, −4.5e-04 and −1.1e-03** for limiter
+radii of 1.15, 1.10, 0.90 and 1.00 against a `ψ_ax` of about 0.1 — i.e. **`ψ` is
+already zero to four decimal places everywhere the limiter was put**. So
+`{ Ψ > 0 }` is nearly the whole domain, its edge sits in a fringe where `ψ` is at
+round-off, and the support jitters from step to step. That is exactly what
+`CLAUDE.md` says under the fixture pair: `Δ*` obeys a maximum principle, so a
+compactly contained plasma needs **coils**, and a manufactured problem has to put
+something there instead. **A free-boundary test problem without coils is not a
+free-boundary test problem.**
+
+**3. AND THE BORDER COLUMN IS DIFFERENCED, WHICH IS A FLOOR AND THEN A KINK.**
+Even unconfined, the iteration floors: it reaches about **3e-09** and then sits
+there, the residual creeping up in its last digits, for as many iterations as it
+is given. `∂R/∂s` is a central difference of two full residual evaluations, so
+the Jacobian is only that accurate and Newton cannot go below it — which is why
+a tolerance of `1e-12` relative reads as non-convergence. With the support
+**moving** it is worse than a floor: perturbing `s` moves the edge, so the two
+evaluations have different supports and the difference **straddles a kink**.
+
+**THE CLOSED FORM IS BUILT AND IS NOW WIRED IN, 2026-09-06.**
+`meq::NormalisedSource::normalisationDerivatives()` supplies `∂F/∂ψ_ax` and
+`∂F/∂ψ_bnd`; `GradShafranovSolver::assembleNormalisationColumn()` runs
+`meq::SourceIntegrator`'s own quadrature loop over them, into the potential block
+and nowhere else, with the same `−w F/r` sign; and `setBorderColumn()` keeps the
+differenced route so the two can be measured against each other.
+`BorderColumn::Analytic` is the default and falls back silently where a source
+does not supply the derivatives.
+
+**IT IS RIGHT, AND THE SIGN WAS CHECKED RATHER THAN ARGUED.**
+`theAnalyticColumnAgreesWithTheDifferencedOne` runs one problem both ways:
+`ψ_ax` and `ψ_bnd` agree to **ten digits**, and the assembled column finishes at
+**5.70e-16 against the differenced one's 1.69e-13** — the floor, removed, a
+factor of **296**. `HighBetaConvergence`'s published table is **bit identical**,
+every digit including the `0.00e+00` and the `−5.55e-17`.
+
+**AND IT IS NOT A UNIVERSAL SPEED-UP, WHICH IS WORTH SAYING.**
+`theBorderedSystemClosesOnANonlinearSource` drives the `( N + 1 )` system — four
+exterior coefficients and `ψ_ax`, on a genuinely non-linear source, which FB-5's
+affine case cannot exercise — and the two routes are **indistinguishable there**:
+4 Newton steps each, the same residual to every digit. The assembled column earns
+its place where the *difference* is poor: a stiff border, and structurally
+wherever a moving support makes the two evaluations straddle the edge.
+
+**THE ORDER OF WORK, AS IT STANDS AFTER THE SECOND ATTEMPT.**
+
+1. ~~**Wire the analytic column.**~~ **DONE**, above.
+2. ~~**Put coils in the test problem.**~~ **TRIED, AND IT WAS THE WRONG
+   INSTINCT.** Solving the unconfined problem and *looking at it* — which should
+   have been the first move — shows `ψ` peaking at **8.55e-02 near `r = 0.70`**
+   and **crossing zero at about `r = 1.03`**. So an edge exists with no conductor
+   at all, and the two failed attempts had simply put the limiter at `r = 1.15`
+   and `1.05`, out in the tail. At `r = 0.90`, `ψ` is 5.76e-02 — two thirds of
+   the peak, a gradient a moving edge can sit on. A first coil set guessed at
+   `−6 A` in normalised units produced `ψ_coil = −1.02` at the plasma centre
+   against an intended `ψ_ax` of 0.1, i.e. **ten times the field it was meant to
+   shape**, and drove the residual from 3.1e-02 to 1.06. **Measure the scales
+   before adding a conductor.**
+3. **THE PLASMA-CURRENT CONSTRAINT, WHICH IS NOW THE ONE REMAINING IDEA.**
+   CEDRES++ and FreeGS both prescribe `I_p` and solve for the profile scaling
+   rather than fixing the amplitude. With the amplitude fixed the problem is a
+   non-linear **eigenvalue** problem — `Λ = A/σ²` must be an eigenvalue of the
+   linearised operator *on the plasma region*, and the region is itself unknown —
+   which is exactly the delicacy measured above, and is why scaling the amplitude
+   changes nothing. A constraint turns that eigenvalue balance into an ordinary
+   unknown. It is one more border row of the shape MEQ already builds, its column
+   `∂R/∂λ` is `F/λ` and therefore **analytic and free** given the machinery just
+   added, and §7.11 already names `ConstrainBetapIp` as FB-6's reference model.
+
+**WHERE IT STANDS, PRECISELY.**
+
+| | |
+|---|---|
+| `ψ_ax` + exterior coupling, non-linear source | **converges, 4 Newton steps** — `theBorderedSystemClosesOnANonlinearSource` |
+| `ψ_ax` + `ψ_bnd`, no exterior | **converges, 11 steps** |
+| `ψ_ax` + `ψ_bnd` + exterior | does not converge |
+| any of the above + the moving support | does not converge |
+
+The exterior coupling is **doing the right physics**: with it on, `ψ_bnd` comes
+out at 2.87e-02 against a `ψ_ax` of 9.84e-02 — a healthy 29% — where without it
+`ψ_bnd` collapses to 8.6e-05. So it is not the coupling that is wrong; it is that
+the amplitude-fixed formulation has no slack left once two more constraints are
+added to it.
+
+**Acceptance, when it runs**: `∮_Γ q·ν = −∫_Ω F/r`, both sides from the converged
+state, with no `μ₀` and no constant. It is Ampère's law, FB-2 measured its
+machinery to 3.3e-11 on an exact field, and it needs no reference code. Beyond
+that, the plasma must be **compactly contained** — an edge strictly inside
+`Γ_h` — which is the property that makes the answer a free-boundary one rather
+than merely a conservative one.
+
+
+### 7.14 The plasma current as a border unknown, and what it unlocked
+
+**Built and measured 2026-09-06, and it is the piece §7.13 predicted would make
+the difference.** `setPlasmaCurrent( μ₀ I_p )` makes the profile SCALE an unknown
+of the same bordered Newton and prescribes the current instead. The profiles then
+give the current's *shape* and the border gives its *size*.
+
+**IT CONVERGES A CONFIGURATION THAT PREVIOUSLY COULD NOT BE SOLVED AT ALL.** The
+same problem §7.13 records failing from everywhere — three limiter radii, two
+profile exponents, warm starts, 200 iterations — closes in **63 Newton steps**
+with the moving support live, `ψ_ax`, `ψ_bnd` and four exterior coefficients all
+unknowns, and delivers `∫F/r = 3.499999970e-01` against the **0.35** it was asked
+for. The scale it solved for is **8.40e-02**, so the border did real work rather
+than sitting where it started.
+
+**ALL FOUR JACOBIAN PIECES ARE ANALYTIC**, which is why the constraint costs one
+extra backsolve and three element loops rather than a second factorisation:
+
+| | |
+|---|---|
+| `∂R/∂λ` | the residual's own source term divided by `λ` — `F` is linear in it |
+| `∂G/∂x` | `∫ (∂F/∂ψ)/r φ_j`, a covector on the potential block |
+| `∂G/∂λ` | `(∫F/r)/λ`, the same linearity |
+| `∂G/∂ψ_ax`, `∂G/∂ψ_bnd` | **not zero** — see below |
+
+**THE LAST ROW WAS MISSED AND IT COST THE RATE, NOT THE ANSWER.** `∫F/r` depends
+on both normalisations **explicitly**, through the `Ψ` the profiles are evaluated
+at, so the current row of the corner block is **not diagonal**. Without those two
+entries the solve converged **linearly**, at a clean geometric contraction of
+about **0.8 per step**, which is the signature this file records under *A wrong
+Jacobian is invisible to a convergence table*: the answer was right and the rate
+was gone. Adding them took the residual at iteration 60 from **7.06e-08 to
+1.69e-10**.
+
+**AND THE EQUILIBRIUM IT FINDS IS AN ANNULUS, NOT A CORE.** Measured on the
+midplane, `ψ` rises **monotonically** from 6.1e-04 at `r = 0.1` to 1.23e-01 at
+`r = 1.4`, so `{ψ > ψ_bnd}` is the OUTER shell and `ψ_ax` — the largest nodal
+value — sits near `Γ` rather than at an interior maximum. Every constraint is
+satisfied by it, and that is the point: they constrain the current and the
+normalisations, and **none of them says the plasma is a core**.
+
+**WHAT WOULD MAKE IT ONE IS A VERTICAL FIELD, AND THE SCALE IS NOW KNOWN.** Two
+conductors above and below carrying current opposite to the plasma give a flux
+falling like `−r²`, which is exactly what suppresses the outer branch. At
+`r = 1.2, z = ±0.7` with `μ₀I = −0.35` the set gives **−1.5e-02 at `r = 0.4`
+against −1.1e-01 at `r = 1.4`** — the right shape and the right size against a
+`ψ` of order 0.1, where the first attempt at conductors was **ten times too
+strong**.
+
+**WHAT IT DOES NOT DO IS CONVERGE FROM A COLD BUMP**, and the sweep says so
+sharply — coil currents of `0, −0.05, −0.10, −0.20` give **converged, FAILED,
+FAILED, FAILED**. That is **branch selection**, not a defect in the border: the
+cold iterate is a core bump, the no-coil equilibrium is an annulus, and with
+conductors present Newton is asked to cross between them. **What to try next, in
+order:**
+
+1. **Continuation in the coil current**, from the converged no-coil answer.
+   §7's own current-hole precedent is the template — adaptive steps, halve on
+   failure — and it is legitimate in a *test* where it would not be in the
+   driver, because the coil current is prescribed input rather than something
+   recovered from a black-box `F`.
+2. **A guess that already looks like the answer**: the core bump *plus* the coil
+   flux, so the starting iterate is on the branch being sought.
+3. **Watch `ψ_ax`'s argmax.** On the annular branch it sits near `Γ`; on a core
+   it is interior. That is a cheap, decisive diagnostic of which branch an
+   iterate is on, and it should be printed rather than inferred from a residual.
+
+
+### 7.15 Should a free-boundary run start from vacuum? No — and the question has a better answer
+
+**Asked 2026-09-06 after §7.14's coil sweep failed, and worth answering in the
+plan because the obvious homotopy is the wrong one.**
+
+**A VACUUM START DEGENERATES EVERY BORDER UNKNOWN AT ONCE, WHICH IS WHY IT IS
+NOT THE HOMOTOPY TO PICK.** At `F_plasma = 0` there is no plasma, and therefore:
+
+* `ψ_ax` — the largest nodal value — is a maximum of the **coil** field, not a
+  magnetic axis, and on a vertical-field set it sits on the boundary;
+* `ψ_bnd` — the flux at the limiter — is a number, but not the edge of anything;
+* the support `{Ψ > 0}` is empty or arbitrary, and `span = ψ_ax − ψ_bnd` has no
+  reason to be non-zero, which `setNormalisation()` refuses outright.
+
+So the three unknowns the continuation exists to carry are exactly the three that
+stop meaning anything at `λ = 0`. This is the same objection this file already
+records against `F_λ = λF` for the current hole — *"at `λ = 0` it degenerates to
+the harmonic problem"* — and it is sharper here, because there the degeneracy
+cost a starting point and here it costs the border its unknowns.
+
+**AND CONTINUATION IN THE RHS HAS THE SAME DEFECT, WITH ONE EXCEPTION.** Ramping
+the profile amplitude is the vacuum start in slow motion: the plasma vanishes at
+one end. Ramping **`I_p`** does not — the plasma is present at every step, all
+three unknowns keep their meaning, and the parameter is **prescribed input**
+rather than something recovered from a black-box `F`, so it carries none of the
+objection recorded against continuation in the driver. If a continuation is
+wanted, `I_p` from small-but-finite to target is the one to write, and
+`setPlasmaCurrent()` already makes it a one-line loop.
+
+**BUT THE REAL LESSON IS THAT §7.14's FAILURE WAS NOT A CONTINUATION PROBLEM.**
+`../freegs4e` never meets it, and checking why is decisive: its `constrain`
+object is a **control system that solves for the coil currents inside every
+Picard iteration** — `control.py` assembles a least-squares system over the coil
+currents against shape constraints (`Br = 0` and `Bz = 0` at a prescribed
+X-point, isoflux pairs) and applies it each step. **The coils adapt to the
+plasma.** MEQ's §7.14 attempt did the opposite: it *prescribed* currents chosen
+by eye and asked a cold Newton to find a core plasma consistent with them.
+
+So there are two honest routes, and neither is a vacuum start:
+
+1. **Choose currents that are consistent with the equilibrium wanted**, rather
+   than continuing toward them. The vertical field a given `I_p` needs is a
+   closed form — Shafranov's
+   `B_v = μ₀I_p/(4πR)·[ ln(8R/a) + β_p + l_i/2 − 3/2 ]` — so the conductors and
+   the initial guess can be made to agree **before** the solve rather than
+   discovered to disagree during it. This is not continuation at all; it is
+   picking inputs that describe one machine. **It is the cheap thing and should
+   be tried first.**
+2. **Solve for the currents**, as freegs4e does. That is the inverse problem,
+   which §9 lists as deliberately out of scope and which should stay there until
+   a forward free-boundary solve is routine.
+
+**THE DIAGNOSTIC THAT TELLS WHICH BRANCH AN ITERATE IS ON** is worth printing
+whichever route is taken: on the annular branch `ψ_ax`'s argmax sits near `Γ`,
+on a core it is interior. That is one integer per iteration and it distinguishes
+"not converging" from "converging to the wrong equilibrium", which a residual
+cannot.
+
+
 ## 8. Risks, in the order they are likely to bite
 
 **The axis, and it is FB-A because it can be measured now.** The half-disc

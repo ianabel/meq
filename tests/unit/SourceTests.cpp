@@ -769,3 +769,100 @@ BOOST_AUTO_TEST_CASE( the_plasma_support_does_not_assume_which_way_psi_runs )
 	BOOST_TEST( source.f( r, z, -0.4 ) != 0.0 );   // between them: plasma
 	BOOST_TEST( source.f( r, z, 0.2 ) == 0.0 );    // beyond the boundary: not
 }
+
+/*
+ * THE BORDERED NEWTON'S COLUMNS, ANALYTICALLY.
+ *
+ * solveWithNormalisation() obtains dR/d(psi_ax) and dR/d(psi_bnd) by a CENTRAL
+ * DIFFERENCE of two full residual evaluations. The rows are exact under NPC, so
+ * the columns are the only differenced thing in the border -- and they are what
+ * floors the iteration: a coupled solve on the half-disc descends to about
+ * 3e-09 and then sits there, which is the difference's own accuracy rather than
+ * the discretisation's.
+ *
+ * normalisationDerivatives() supplies them in closed form instead. This case is
+ * what says the algebra is right, and it checks against a central difference of
+ * f() ITSELF -- one level below the assembly -- so a failure here is the
+ * formula and cannot be anything else.
+ */
+BOOST_AUTO_TEST_CASE( the_normalisation_derivatives_are_analytic )
+{
+	double const r = 1.3;
+	double const z = 0.2;
+
+	meq::NormalisedMHDSource source( analyticPressureProfile(),
+	                                 analyticGGPrimeProfile(), 1.0, 1.0 );
+
+	// Richardson-extrapolated, because a plain central difference carries its
+	// own O( h^2 ) truncation and would floor the comparison at the instrument
+	// rather than at the derivative. CLAUDE.md records that trap three times.
+	auto difference = [ & ]( double psi, bool axis )
+	{
+		auto at = [ & ]( double step )
+		{
+			double const a = axis ? 0.9 + step : 0.9;
+			double const b = axis ? -0.2 : -0.2 + step;
+			source.setNormalisation( a, b );
+			double const plus = source.f( r, z, psi );
+			double const a2 = axis ? 0.9 - step : 0.9;
+			double const b2 = axis ? -0.2 : -0.2 - step;
+			source.setNormalisation( a2, b2 );
+			double const minus = source.f( r, z, psi );
+			return ( plus - minus )/( 2.0*step );
+		};
+		double const h = 1.0e-4;
+		return ( 4.0*at( h/2.0 ) - at( h ) )/3.0;
+	};
+
+	std::printf( "\n  THE BORDER COLUMNS IN CLOSED FORM\n" );
+	std::printf( "    %8s %16s %16s %12s %16s %16s %12s\n",
+	             "psi", "dF/dpsi_ax", "difference", "rel",
+	             "dF/dpsi_bnd", "difference", "rel" );
+
+	for ( double psi : { -0.1, 0.1, 0.4, 0.7 } )
+	{
+		source.setNormalisation( 0.9, -0.2 );
+		double analyticAxis = 0.0, analyticBoundary = 0.0;
+		BOOST_TEST_REQUIRE( source.normalisationDerivatives(
+			r, z, psi, analyticAxis, analyticBoundary ),
+			"NormalisedMHDSource must supply its normalisation derivatives" );
+
+		double const numericAxis = difference( psi, true );
+		double const numericBoundary = difference( psi, false );
+
+		double const scaleA = std::max( std::abs( numericAxis ), 1.0 );
+		double const scaleB = std::max( std::abs( numericBoundary ), 1.0 );
+		double const relA = std::abs( analyticAxis - numericAxis )/scaleA;
+		double const relB = std::abs( analyticBoundary - numericBoundary )/scaleB;
+
+		std::printf( "    %8.2f %16.8e %16.8e %12.2e %16.8e %16.8e %12.2e\n",
+		             psi, analyticAxis, numericAxis, relA,
+		             analyticBoundary, numericBoundary, relB );
+
+		BOOST_TEST( relA < 1.0e-8,
+		            "dF/dpsi_ax at psi = " << psi << " reads " << analyticAxis
+		            << " against a differenced " << numericAxis );
+		BOOST_TEST( relB < 1.0e-8,
+		            "dF/dpsi_bnd at psi = " << psi << " reads " << analyticBoundary
+		            << " against a differenced " << numericBoundary );
+	}
+	std::fflush( stdout );
+
+	/*
+	 * AND OUTSIDE THE PLASMA BOTH ARE EXACTLY ZERO, WHICH IS THE WHOLE POINT.
+	 *
+	 * A differenced column cannot reproduce this. Perturbing the normalisation
+	 * MOVES THE EDGE, so a point just outside is inside for one of the two
+	 * evaluations, and the difference reports a spurious derivative of size
+	 * F/( 2 step ) -- which diverges as the step is refined. The analytic value
+	 * knows the point is outside and returns zero.
+	 */
+	source.setPlasmaSupport( true );
+	source.setNormalisation( 0.9, -0.2 );
+	double outsideAxis = 1.0, outsideBoundary = 1.0;
+	BOOST_TEST_REQUIRE( source.normalisationDerivatives( r, z, -0.5,
+	                                                     outsideAxis,
+	                                                     outsideBoundary ) );
+	BOOST_TEST( outsideAxis == 0.0 );
+	BOOST_TEST( outsideBoundary == 0.0 );
+}

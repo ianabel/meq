@@ -2452,6 +2452,254 @@ namespace
 	 * gamma recomputed each step would put the Jacobian's own variation into the
 	 * convergence history and manufacture orders out of it.
 	 */
+	void GradShafranovSolver::setPlasmaCurrent( double muZeroCurrent )
+	{
+		if ( !std::isfinite( muZeroCurrent ) || muZeroCurrent == 0.0 )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::setPlasmaCurrent: mu0 * I_p must be "
+				"finite and non-zero -- a zero target is the trivial branch "
+				"asked for by name" );
+		if ( orderingChoice != NonlinearOrdering::NPC )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::setPlasmaCurrent: the current "
+				"constraint is implemented for NonlinearOrdering::NPC only -- "
+				"its row is a covector on the POTENTIAL, which is an unknown of "
+				"the system only under NPC" );
+
+		currentIsUnknown = true;
+		targetMuZeroCurrent = muZeroCurrent;
+		prepared = false;
+	}
+
+	double GradShafranovSolver::plasmaCurrentScale() const
+	{
+		return currentScaleValue;
+	}
+
+	double GradShafranovSolver::plasmaCurrent() const
+	{
+		return plasmaCurrentValue;
+	}
+
+	/*
+	 * THE THREE LOOPS BELOW ARE ONE LOOP WITH THREE INTEGRANDS, and they are
+	 * written out rather than shared because what differs is not only the
+	 * integrand but where the answer goes: two are covectors on the potential
+	 * block and one is a scalar.
+	 *
+	 * ALL THREE USE meq::SourceIntegrator'S OWN QUADRATURE RULE, and they have
+	 * to: these are derivatives of the ASSEMBLED residual, not of the continuous
+	 * one, so a different rule would differentiate a different function.
+	 */
+	namespace
+	{
+		/// The rule SourceIntegrator uses, so that every derivative of the
+		/// assembled source term is taken on the same points it was assembled on.
+		mfem::IntegrationRule const &sourceRule( mfem::FiniteElement const &el,
+		                                         mfem::ElementTransformation &tr,
+		                                         int extra )
+		{
+			return mfem::IntRules.Get( el.GetGeomType(),
+			                           2*el.GetOrder() + tr.OrderW() + extra );
+		}
+	}
+
+	double GradShafranovSolver::assemblePlasmaCurrent( mfem::Vector const &state ) const
+	{
+		if ( !normalisedSource )
+			return 0.0;
+
+		mfem::Mesh &mesh = *potentialFes->GetMesh();
+		mfem::Array<int> dofs;
+		mfem::Vector shape;
+		mfem::Vector point;
+		int const potentialStart = blockOffsets[ 1 ];
+		double total = 0.0;
+
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			mfem::FiniteElement const &el = *potentialFes->GetFE( e );
+			thread_local mfem::IsoparametricTransformation scratch;
+			mesh.GetElementTransformation( e, &scratch );
+			potentialFes->GetElementDofs( e, dofs );
+			int const dof = el.GetDof();
+			shape.SetSize( dof );
+
+			mfem::IntegrationRule const &ir =
+				sourceRule( el, scratch, sourceQuadratureExtra );
+			for ( int i = 0; i < ir.GetNPoints(); ++i )
+			{
+				mfem::IntegrationPoint const &ip = ir.IntPoint( i );
+				scratch.SetIntPoint( &ip );
+				el.CalcShape( ip, shape );
+				scratch.Transform( ip, point );
+
+				double psi = 0.0;
+				for ( int j = 0; j < dof; ++j )
+					psi += shape( j )*state( potentialStart + dofs[ j ] );
+
+				// scaledF, not f: with coils present f() is the SUM and the
+				// prescribed current is the plasma's alone.
+				total += ip.weight*scratch.Weight()
+				         *normalisedSource->scaledF( point( 0 ), point( 1 ), psi )
+				         /point( 0 );
+			}
+		}
+		return total;
+	}
+
+	void GradShafranovSolver::assembleCurrentColumn( mfem::Vector const &state,
+	                                                 mfem::Vector &out ) const
+	{
+		out.SetSize( state.Size() );
+		out = 0.0;
+		if ( !normalisedSource )
+			return;
+
+		double const scale = normalisedSource->currentScale();
+		if ( scale == 0.0 )
+			return;
+
+		mfem::Mesh &mesh = *potentialFes->GetMesh();
+		mfem::Array<int> dofs;
+		mfem::Vector shape;
+		mfem::Vector point;
+		int const potentialStart = blockOffsets[ 1 ];
+
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			mfem::FiniteElement const &el = *potentialFes->GetFE( e );
+			thread_local mfem::IsoparametricTransformation scratch;
+			mesh.GetElementTransformation( e, &scratch );
+			potentialFes->GetElementDofs( e, dofs );
+			int const dof = el.GetDof();
+			shape.SetSize( dof );
+
+			mfem::IntegrationRule const &ir =
+				sourceRule( el, scratch, sourceQuadratureExtra );
+			for ( int i = 0; i < ir.GetNPoints(); ++i )
+			{
+				mfem::IntegrationPoint const &ip = ir.IntPoint( i );
+				scratch.SetIntPoint( &ip );
+				el.CalcShape( ip, shape );
+				scratch.Transform( ip, point );
+
+				double psi = 0.0;
+				for ( int j = 0; j < dof; ++j )
+					psi += shape( j )*state( potentialStart + dofs[ j ] );
+
+				// F carries the scale linearly, so dF/d(scale) is F/scale --
+				// and the residual's source term is -w F/r, so this is that
+				// term divided by the scale. Exact, and one loop.
+				double const derivative =
+					normalisedSource->scaledF( point( 0 ), point( 1 ), psi )/scale;
+				double const factor =
+					-ip.weight*scratch.Weight()*derivative/point( 0 );
+				for ( int j = 0; j < dof; ++j )
+					out( potentialStart + dofs[ j ] ) += factor*shape( j );
+			}
+		}
+	}
+
+	void GradShafranovSolver::assembleCurrentNormalisationCorner(
+		mfem::Vector const &state, double &againstAxis,
+		double &againstBoundary ) const
+	{
+		againstAxis = 0.0;
+		againstBoundary = 0.0;
+		if ( !normalisedSource )
+			return;
+
+		mfem::Mesh &mesh = *potentialFes->GetMesh();
+		mfem::Array<int> dofs;
+		mfem::Vector shape;
+		mfem::Vector point;
+		int const potentialStart = blockOffsets[ 1 ];
+
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			mfem::FiniteElement const &el = *potentialFes->GetFE( e );
+			thread_local mfem::IsoparametricTransformation scratch;
+			mesh.GetElementTransformation( e, &scratch );
+			potentialFes->GetElementDofs( e, dofs );
+			int const dof = el.GetDof();
+			shape.SetSize( dof );
+
+			mfem::IntegrationRule const &ir =
+				sourceRule( el, scratch, sourceQuadratureExtra );
+			for ( int i = 0; i < ir.GetNPoints(); ++i )
+			{
+				mfem::IntegrationPoint const &ip = ir.IntPoint( i );
+				scratch.SetIntPoint( &ip );
+				el.CalcShape( ip, shape );
+				scratch.Transform( ip, point );
+
+				double psi = 0.0;
+				for ( int j = 0; j < dof; ++j )
+					psi += shape( j )*state( potentialStart + dofs[ j ] );
+
+				double dAxis = 0.0;
+				double dBoundary = 0.0;
+				if ( !normalisedSource->normalisationDerivatives(
+					     point( 0 ), point( 1 ), psi, dAxis, dBoundary ) )
+					return;
+
+				double const w = ip.weight*scratch.Weight()/point( 0 );
+				againstAxis += w*dAxis;
+				againstBoundary += w*dBoundary;
+			}
+		}
+	}
+
+	void GradShafranovSolver::assembleCurrentRow( mfem::Vector const &state,
+	                                              mfem::Vector &out ) const
+	{
+		out.SetSize( state.Size() );
+		out = 0.0;
+		if ( !normalisedSource )
+			return;
+
+		mfem::Mesh &mesh = *potentialFes->GetMesh();
+		mfem::Array<int> dofs;
+		mfem::Vector shape;
+		mfem::Vector point;
+		int const potentialStart = blockOffsets[ 1 ];
+
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			mfem::FiniteElement const &el = *potentialFes->GetFE( e );
+			thread_local mfem::IsoparametricTransformation scratch;
+			mesh.GetElementTransformation( e, &scratch );
+			potentialFes->GetElementDofs( e, dofs );
+			int const dof = el.GetDof();
+			shape.SetSize( dof );
+
+			mfem::IntegrationRule const &ir =
+				sourceRule( el, scratch, sourceQuadratureExtra );
+			for ( int i = 0; i < ir.GetNPoints(); ++i )
+			{
+				mfem::IntegrationPoint const &ip = ir.IntPoint( i );
+				scratch.SetIntPoint( &ip );
+				el.CalcShape( ip, shape );
+				scratch.Transform( ip, point );
+
+				double psi = 0.0;
+				for ( int j = 0; j < dof; ++j )
+					psi += shape( j )*state( potentialStart + dofs[ j ] );
+
+				// d/dx of int F/r: the plasma's own dF/dpsi against the shape
+				// functions. NOT negated -- this is the constraint's gradient,
+				// not a residual contribution.
+				double const factor =
+					ip.weight*scratch.Weight()
+					*normalisedSource->scaledDFdPsi( point( 0 ), point( 1 ), psi )
+					/point( 0 );
+				for ( int j = 0; j < dof; ++j )
+					out( potentialStart + dofs[ j ] ) += factor*shape( j );
+			}
+		}
+	}
+
 	void GradShafranovSolver::solveWithNormalisation()
 	{
 		if ( globalisationChoice != Globalisation::None )
@@ -2583,6 +2831,11 @@ namespace
 		};
 
 		mfem::Vector residual( n ), column( n ), y( n ), z( n ), scratch( n );
+		mfem::Vector columnL( n ), zL( n ), currentRow( n );
+		double currentIntegral = 0.0;
+		double constraintL = 0.0;
+		double currentAgainstAxis = 0.0;
+		double currentAgainstBoundary = 0.0;
 
 		double sB = 0.0;
 		int boundaryDof = -1;
@@ -2599,7 +2852,19 @@ namespace
 			              + nearestPotentialDof( boundaryFluxR, boundaryFluxZ );
 			sB = psiBoundaryValue;
 		}
-		int const nBorders = boundaryFluxIsUnknown ? 2 : 1;
+		// psi_ax is border 0 always; psi_bnd and the current scale take the next
+		// slots when they are unknowns, and the exterior modes follow them all.
+		int const boundaryIndex = 1;
+		int const currentIndex = boundaryFluxIsUnknown ? 2 : 1;
+		int const nBorders = 1 + ( boundaryFluxIsUnknown ? 1 : 0 )
+		                     + ( currentIsUnknown ? 1 : 0 );
+		(void)boundaryIndex;
+
+		// The scale starts where it was left, so a re-solve continues rather
+		// than restarting, and the source is told before any residual is taken.
+		double sL = currentIsUnknown ? currentScaleValue : 1.0;
+		if ( normalisedSource && currentIsUnknown )
+			normalisedSource->setCurrentScale( sL );
 
 		auto fieldResidual = [ & ]( mfem::Vector const &state, double normalisation,
 		                            mfem::Vector &out )
@@ -2840,10 +3105,11 @@ namespace
 		 * there is no second natural scale to give it.
 		 */
 		auto augmentedNorm = [ & ]( double fieldNorm, double cAx, double cBnd,
+		                            double cCurrent,
 		                            std::vector<double> const &cModes )
 		{
 			double total = fieldNorm*fieldNorm
-			             + gamma*gamma*( cAx*cAx + cBnd*cBnd );
+			             + gamma*gamma*( cAx*cAx + cBnd*cBnd + cCurrent*cCurrent );
 			for ( double v : cModes )
 				total += gamma*gamma*v*v;
 			return std::sqrt( total );
@@ -2888,6 +3154,9 @@ namespace
 			                           hasNormalisation ? s - coldPeak : 0.0,
 			                           boundaryFluxIsUnknown
 			                             ? sB - coldState( boundaryDof ) : 0.0,
+			                           currentIsUnknown
+			                             ? assemblePlasmaCurrent( coldState )
+			                               - targetMuZeroCurrent : 0.0,
 			                           coldModes );
 		}
 		double const target = std::max( newtonAbsoluteTolerance,
@@ -2918,7 +3187,8 @@ namespace
 		for ( int iteration = 0; iteration <= newtonMaxIterations; ++iteration )
 		{
 			double const norm = augmentedNorm( residual.Norml2(), constraint,
-			                                   constraintB, transmission );
+			                                   constraintB, constraintL,
+			                                   transmission );
 			newtonResidualHistory.push_back( norm );
 			newtonIterationCount = iteration;
 
@@ -3063,8 +3333,15 @@ namespace
 						total += border( j )*v( borderDofs[ j ] );
 					return total;
 				}
-				if ( i == 1 && nBorders == 2 )
+				if ( boundaryFluxIsUnknown && i == boundaryIndex )
 					return coupled ? -v( boundaryDof ) : 0.0;
+				if ( currentIsUnknown && i == currentIndex )
+				{
+					double total = 0.0;
+					for ( int j = 0; j < n; ++j )
+						total += currentRow( j )*v( j );
+					return total;
+				}
 
 				mfem::Vector const &row =
 					exteriorRows[ static_cast<std::size_t>( i - nBorders ) ];
@@ -3078,7 +3355,32 @@ namespace
 			auto cornerEntry = [ & ]( int i, int j )
 			{
 				if ( i < nBorders || j < nBorders )
-					return i == j ? ( i == 0 ? corner : 1.0 ) : 0.0;
+				{
+					// THE CURRENT ROW IS NOT DIAGONAL. int F/r depends on
+					// psi_ax and psi_bnd explicitly, through the normalisation
+					// the profiles are evaluated at, so it has entries against
+					// both. Leaving them out does not move the answer -- it
+					// costs the quadratic rate, and it was measured doing
+					// exactly that: a clean geometric contraction of about 0.8
+					// per step where Newton should be quadratic.
+					if ( currentIsUnknown && i == currentIndex && i != j )
+					{
+						if ( j == 0 )
+							return currentAgainstAxis;
+						if ( boundaryFluxIsUnknown && j == boundaryIndex )
+							return currentAgainstBoundary;
+						return 0.0;
+					}
+					if ( i != j )
+						return 0.0;
+					if ( i == 0 )
+						return corner;
+					// d( int F/r )/d( scale ) = ( int F/r )/scale, F being
+					// linear in it. Not 1, which is psi_bnd's corner.
+					if ( currentIsUnknown && i == currentIndex )
+						return sL != 0.0 ? currentIntegral/sL : 0.0;
+					return 1.0;
+				}
 				return i == j
 				       ? exteriorCoupling->blockEntry(
 				             ExteriorDtN::firstMode() + i - nBorders )
@@ -3089,7 +3391,8 @@ namespace
 			auto constraintAt = [ & ]( int i )
 			{
 				if ( i == 0 ) return constraint;
-				if ( i == 1 && nBorders == 2 ) return constraintB;
+				if ( boundaryFluxIsUnknown && i == boundaryIndex ) return constraintB;
+				if ( currentIsUnknown && i == currentIndex ) return constraintL;
 				return transmission[ static_cast<std::size_t>( i - nBorders ) ];
 			};
 
@@ -3097,11 +3400,35 @@ namespace
 			auto columnZ = [ & ]( int j ) -> mfem::Vector const &
 			{
 				if ( j == 0 ) return z;
-				if ( j == 1 && nBorders == 2 ) return zB;
+				if ( boundaryFluxIsUnknown && j == boundaryIndex ) return zB;
+				if ( currentIsUnknown && j == currentIndex ) return zL;
 				return exteriorZ[ static_cast<std::size_t>( j - nBorders ) ];
 			};
 
-			if ( nBorders == 2 )
+			if ( currentIsUnknown )
+			{
+				/*
+				 * THE CURRENT CONSTRAINT, ALL THREE PIECES ANALYTIC.
+				 *
+				 *   G_I    = int F/r - mu0 I_p        the constraint
+				 *   dR/dL  = ( source term )/L        F is LINEAR in the scale
+				 *   dG/dx  = int ( dF/dpsi )/r phi_j  a covector on the potential
+				 *   dG/dL  = ( int F/r )/L            for the same linearity
+				 *
+				 * None of it is differenced, which is the whole reason this is
+				 * cheap: prescribing the current costs one more backsolve and
+				 * three element loops, not a second factorisation.
+				 */
+				currentIntegral = assemblePlasmaCurrent( unknown );
+				constraintL = currentIntegral - targetMuZeroCurrent;
+				assembleCurrentColumn( unknown, columnL );
+				assembleCurrentRow( unknown, currentRow );
+				assembleCurrentNormalisationCorner( unknown, currentAgainstAxis,
+				                                    currentAgainstBoundary );
+				npcLinear.Mult( columnL, zL );
+			}
+
+			if ( boundaryFluxIsUnknown )
 			{
 				// dR/d psi_bnd, the second column, by the same central difference
 				// the first one uses.
@@ -3148,7 +3475,10 @@ namespace
 			}
 
 			double const deltaS = step[ 0 ];
-			double const deltaB = nBorders == 2 ? step[ 1 ] : 0.0;
+			double const deltaB = boundaryFluxIsUnknown
+			                      ? step[ static_cast<std::size_t>( boundaryIndex ) ] : 0.0;
+			double const deltaL = currentIsUnknown
+			                      ? step[ static_cast<std::size_t>( currentIndex ) ] : 0.0;
 
 			/*
 			 * BACKTRACKING, AND IT IS NOT OPTIONAL HERE.
@@ -3176,6 +3506,7 @@ namespace
 			mfem::Vector const savedState( unknown );
 			double const savedS = s;
 			double const savedB = sB;
+			double const savedL = sL;
 			std::vector<double> const savedCoefficients = exteriorCoefficientValues;
 
 			double bestNorm = std::numeric_limits<double>::infinity();
@@ -3202,10 +3533,17 @@ namespace
 					unknown.Add( -damping, y );
 					unknown.Add( -damping*deltaS, z );
 					s = savedS + damping*deltaS;
-					if ( nBorders == 2 )
+					if ( boundaryFluxIsUnknown )
 					{
 						unknown.Add( -damping*deltaB, zB );
 						sB = savedB + damping*deltaB;
+					}
+					if ( currentIsUnknown )
+					{
+						unknown.Add( -damping*deltaL, zL );
+						sL = savedL + damping*deltaL;
+						if ( normalisedSource )
+							normalisedSource->setCurrentScale( sL );
 					}
 					for ( int mode = 0; mode < nModes; ++mode )
 						unknown.Add( -damping*step[ static_cast<std::size_t>( nBorders + mode ) ],
@@ -3214,7 +3552,9 @@ namespace
 					peak = hasNormalisation
 					       ? peakAt( unknown, s, &argElement, &argDof ) : 0.0;
 					constraint = hasNormalisation ? s - peak : 0.0;
-					constraintB = nBorders == 2 ? sB - unknown( boundaryDof ) : 0.0;
+					constraintB = boundaryFluxIsUnknown ? sB - unknown( boundaryDof ) : 0.0;
+					if ( currentIsUnknown )
+						constraintL = assemblePlasmaCurrent( unknown ) - targetMuZeroCurrent;
 					fieldResidual( unknown, s, residual );
 					for ( int mode = 0; mode < nModes; ++mode )
 						transmission[ static_cast<std::size_t>( mode ) ] =
@@ -3222,8 +3562,13 @@ namespace
 					// BOTH constraints, or the line search is blind to the one it
 					// is not told about and will happily accept a step that has
 					// wrecked psi_bnd to improve psi_ax.
+					// EVERY constraint, or the line search is blind to the one it
+					// is not told about. constraintL was omitted when the current
+					// border was added, which is the same mistake this comment
+					// already warned against for psi_bnd.
 					trialNorm = augmentedNorm( residual.Norml2(), constraint,
-					                           constraintB, transmission );
+					                           constraintB, constraintL,
+					                           transmission );
 				}
 				catch ( std::exception const & )
 				{
@@ -3263,10 +3608,17 @@ namespace
 				unknown.Add( -bestDamping, y );
 				unknown.Add( -bestDamping*deltaS, z );
 				s = savedS + bestDamping*deltaS;
-				if ( nBorders == 2 )
+				if ( boundaryFluxIsUnknown )
 				{
 					unknown.Add( -bestDamping*deltaB, zB );
 					sB = savedB + bestDamping*deltaB;
+				}
+				if ( currentIsUnknown )
+				{
+					unknown.Add( -bestDamping*deltaL, zL );
+					sL = savedL + bestDamping*deltaL;
+					if ( normalisedSource )
+						normalisedSource->setCurrentScale( sL );
 				}
 				for ( int mode = 0; mode < nModes; ++mode )
 					unknown.Add( -bestDamping*step[ static_cast<std::size_t>( nBorders + mode ) ],
@@ -3274,7 +3626,9 @@ namespace
 				peak = hasNormalisation
 				       ? peakAt( unknown, s, &argElement, &argDof ) : 0.0;
 				constraint = hasNormalisation ? s - peak : 0.0;
-				constraintB = nBorders == 2 ? sB - unknown( boundaryDof ) : 0.0;
+				constraintB = boundaryFluxIsUnknown ? sB - unknown( boundaryDof ) : 0.0;
+					if ( currentIsUnknown )
+						constraintL = assemblePlasmaCurrent( unknown ) - targetMuZeroCurrent;
 				fieldResidual( unknown, s, residual );
 				for ( int mode = 0; mode < nModes; ++mode )
 					transmission[ static_cast<std::size_t>( mode ) ] =
@@ -3330,6 +3684,13 @@ namespace
 
 		psiAxisValue = s;
 		psiBoundaryValue = sB;
+		if ( currentIsUnknown )
+		{
+			currentScaleValue = sL;
+			plasmaCurrentValue = currentIntegral;
+			if ( normalisedSource )
+				normalisedSource->setCurrentScale( sL );
+		}
 		normalisationResidualValue = constraint;
 		if ( normalisedSource )
 			normalisedSource->setNormalisation( s );

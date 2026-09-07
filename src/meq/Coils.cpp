@@ -680,6 +680,39 @@ namespace meq
 		return plasmaSource->boundaryNormalisation();
 	}
 
+	void CoilAugmentedNormalisedSource::setCurrentScale( double scale )
+	{
+		plasmaSource->setCurrentScale( scale );
+		NormalisedSource::setCurrentScale( scale );
+	}
+
+	double CoilAugmentedNormalisedSource::currentScale() const
+	{
+		return plasmaSource->currentScale();
+	}
+
+	double CoilAugmentedNormalisedSource::scaledF( double r, double z,
+	                                               double psi ) const
+	{
+		return plasmaSource->scaledF( r, z, psi );
+	}
+
+	double CoilAugmentedNormalisedSource::scaledDFdPsi( double r, double z,
+	                                                    double psi ) const
+	{
+		return plasmaSource->scaledDFdPsi( r, z, psi );
+	}
+
+	bool CoilAugmentedNormalisedSource::normalisationDerivatives(
+		double r, double z, double psi, double &dFdAxis,
+		double &dFdBoundary ) const
+	{
+		// The coil term is independent of both normalisations, so the wrapped
+		// source's answer IS the sum's answer.
+		return plasmaSource->normalisationDerivatives( r, z, psi, dFdAxis,
+		                                               dFdBoundary );
+	}
+
 	void CoilAugmentedNormalisedSource::setPlasmaSupport( bool confined )
 	{
 		// ON THE WRAPPED SOURCE, not on this one. NormalisedSource::insidePlasma

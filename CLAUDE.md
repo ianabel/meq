@@ -365,6 +365,82 @@ one of them.
 | **FB-1** | **DONE.** `P`, the transmission row, `setExteriorDatum()`, and both halves measured: `ψ` at 1.99/2.99/3.99 on the half-disc with the datum given, and the exterior coefficients recovered from the transmission condition to 1.9e-04, converging at 3.30. `tests/analytic/ExteriorMatched.hpp` is the exact answer — **the plan's proposed one, filament loop fields, cannot support an order study at all**, `ψ ∉ H¹` at a point source |
 | **FB-2** | `src/meq/Coils.{hpp,cpp}`, MFEM-free, and the acceptance identity `∮(1/r)∂ψ/∂n dl = −μ₀I` at **3.3e−11** on the exact field, so a discrepancy on a solve is the solve. **And the coils are reachable from a TOML file since 2026-09-06** — see below |
 
+### The plasma current is a border unknown, and it is what makes a moving support solvable
+
+**Built 2026-09-06.** `setPlasmaCurrent( μ₀ I_p )` makes the profile **scale** an
+unknown of the same bordered Newton and prescribes the current instead — the
+profiles give the current's shape, the border gives its size. It is what
+CEDRES++ and FreeGS both do, and `FREE-BOUNDARY-PLAN.md` §7.14 is the record.
+
+**WHY IT IS NOT A CONVENIENCE.** With the amplitude fixed, a confined
+equilibrium is a non-linear **eigenvalue** problem: `Λ = A/span²` must be an
+eigenvalue of the linearised operator **on the plasma region**, and the region is
+itself unknown. Scaling `A` changes nothing, because `span` moves with `√A` and
+the reaction ratio is amplitude-independent — the same statement recorded for the
+high-β source. §7.13 measured the consequence: the coupled solve with a moving
+support failed from **everywhere** — three limiter radii, two profile exponents,
+warm starts, 200 iterations.
+
+**WITH THE CONSTRAINT IT CLOSES IN 63 NEWTON STEPS**, with `ψ_ax`, `ψ_bnd`, four
+exterior coefficients and the scale all unknowns and the support moving, and
+delivers `∫F/r = 3.499999970e-01` against the **0.35** asked for. The scale came
+out **8.40e-02**, so the border did real work.
+
+**ALL FOUR JACOBIAN PIECES ARE ANALYTIC** — `∂R/∂λ` is the source term over `λ`,
+`∂G/∂x` is `∫(∂F/∂ψ)/r φ_j`, `∂G/∂λ` is `(∫F/r)/λ` — so the constraint costs one
+backsolve and three element loops, not a second factorisation.
+
+**AND THE FOURTH WAS MISSED, WHICH COST THE RATE AND NOT THE ANSWER.** `∫F/r`
+depends on `ψ_ax` and `ψ_bnd` **explicitly**, through the `Ψ` the profiles are
+evaluated at, so the current row of the corner block is **not diagonal**. Without
+those two entries it converged **linearly**, at a clean geometric contraction of
+about **0.8 a step** — the signature *A wrong Jacobian is invisible to a
+convergence table* describes. Adding them took the residual at iteration 60 from
+**7.06e-08 to 1.69e-10**. **A linear rate on a Newton method is a Jacobian
+statement**, and this is the third time that has been the diagnosis in this tree.
+
+**THE ARGUMENT IS `μ₀ I_p`, NOT `I_p`, DELIBERATELY.** Everything here already
+speaks in it: Ampère's law reads `∮q·ν = −μ₀I_p`, `outwardFlux()` returns the
+left side, and the constraint is assembled as `∫F/r`, which **is** `μ₀I_p`.
+Taking amperes would mean knowing `μ₀` here, and one that disagreed with the
+source's own would scale two terms of one equation differently and converge, at
+full order, to a machine nobody described — the trap recorded for why a coil block
+carries no `Mu0` key.
+
+**WHAT IT DOES NOT YET GIVE IS A CORE.** The equilibrium it finds is a
+wall-hugging **annulus**: `ψ` rises monotonically from 6.1e-04 at `r = 0.1` to
+1.23e-01 at `r = 1.4`, so `{ψ > ψ_bnd}` is the outer shell and `ψ_ax` sits near
+`Γ`. Every constraint is satisfied by it — they constrain the current and the
+normalisations, and none says the plasma is a core. **A vertical field is what
+suppresses that branch** and the scale is now known (`μ₀I = −0.35` at
+`r = 1.2, z = ±0.7` gives −1.5e-02 at `r = 0.4` against −1.1e-01 at `r = 1.4`),
+but it does not converge from a cold bump: currents of `0, −0.05, −0.10, −0.20`
+give **converged, FAILED, FAILED, FAILED**. That is **branch selection**, not the
+border, and §7.14 lists what to try.
+
+**AND A VACUUM START IS NOT THE ANSWER, WHICH IS WORTH RECORDING BECAUSE IT IS
+THE OBVIOUS ONE.** At `F_plasma = 0` there is no plasma, so `ψ_ax` is a maximum
+of the *coil* field rather than an axis, `ψ_bnd` is the edge of nothing, and the
+support is empty with `span = ψ_ax − ψ_bnd` having no reason to be non-zero —
+which `setNormalisation()` refuses outright. **The three unknowns the
+continuation would exist to carry are exactly the three that stop meaning
+anything at `λ = 0`**, and ramping the profile amplitude is the same thing in
+slow motion. Ramping **`I_p`** is the exception and is fine: the plasma is
+present throughout, and it is prescribed input rather than something recovered
+from a black-box `F`.
+
+**THE DEEPER POINT IS THAT `../freegs4e` NEVER MEETS THIS, AND WHY IS
+DECISIVE.** Its `constrain` object is a **control system that solves for the
+coil currents inside every Picard iteration** — `control.py` assembles a
+least-squares system over the currents against shape constraints (`Br = 0` and
+`Bz = 0` at a prescribed X-point, isoflux pairs). **The coils adapt to the
+plasma.** MEQ's attempt prescribed currents chosen by eye and asked a cold Newton
+to find a core plasma consistent with them, which is the opposite. The cheap fix
+is not continuation at all but **choosing consistent inputs** — Shafranov's
+`B_v = μ₀I_p/(4πR)·[ ln(8R/a) + β_p + l_i/2 − 3/2 ]` gives the vertical field a
+given `I_p` needs, so the conductors and the guess can be made to agree before
+the solve rather than found to disagree during it. §7.15 is the write-up.
+
 ### FB-5: the exterior coupling is an unknown of the same Newton
 
 **Built and measured 2026-09-06.** `setExteriorCoupling( ExteriorDtN const & )`,

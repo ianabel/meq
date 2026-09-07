@@ -628,6 +628,31 @@ namespace meq
 
 			void setPlasmaSupport( bool confined ) override;
 
+			/// FORWARDED, AND FOR THE SAME REASON setPlasmaSupport() IS. The
+			/// normalisations belong to the profiles, which belong to the
+			/// wrapped source, so the derivatives do too -- and the COIL term
+			/// contributes exactly nothing to them, a coil current being
+			/// amperes and not a function of any flux. Without this override the
+			/// base's default returns false and every run carrying a [[coils]]
+			/// block would silently fall back to a DIFFERENCED border column,
+			/// which is the trap the base class documents one method up.
+			bool normalisationDerivatives( double r, double z, double psi,
+			                               double &dFdAxis,
+			                               double &dFdBoundary ) const override;
+
+			/// FORWARDED, for the third time and for the same reason: the scale
+			/// belongs to the plasma term and a COIL IS NOT SCALED. Its current
+			/// is amperes and is prescribed input, so scaling it would make the
+			/// prescribed plasma current move the conductors too.
+			void setCurrentScale( double scale ) override;
+			double currentScale() const override;
+
+			/// The plasma term alone, which is what the current constraint is
+			/// about -- this class's own f() is the SUM and would put the coil
+			/// current inside the prescribed plasma current.
+			double scaledF( double r, double z, double psi ) const override;
+			double scaledDFdPsi( double r, double z, double psi ) const override;
+
 			NormalisedSource & plasma() const;
 			CoilSet const & coils() const;
 

@@ -102,7 +102,8 @@ namespace meq
 
 		double const span = psiAxisValue - psiBoundaryValue;
 		double const psiN = ( psi - psiBoundaryValue )/span;
-		return ( permeability*r*r*( *pPrimeProfile )( psiN ) + ( *ggPrimeProfile )( psiN ) )
+		return currentScale()
+		       *( permeability*r*r*( *pPrimeProfile )( psiN ) + ( *ggPrimeProfile )( psiN ) )
 		       /span;
 	}
 
@@ -123,8 +124,46 @@ namespace meq
 
 		double const span = psiAxisValue - psiBoundaryValue;
 		double const psiN = ( psi - psiBoundaryValue )/span;
-		return ( permeability*r*r*pPrimeProfile->prime( psiN ) + ggPrimeProfile->prime( psiN ) )
+		return currentScale()
+		       *( permeability*r*r*pPrimeProfile->prime( psiN ) + ggPrimeProfile->prime( psiN ) )
 		       /( span*span );
+	}
+
+	bool NormalisedMHDSource::normalisationDerivatives( double r, double /*z*/,
+	                                                    double psi,
+	                                                    double &dFdAxis,
+	                                                    double &dFdBoundary ) const
+	{
+		// Outside the plasma F is identically zero however the normalisation
+		// moves, so both derivatives are too. This is the branch that makes an
+		// analytic column better than a differenced one rather than merely
+		// cheaper: a difference perturbs the normalisation, which MOVES THE
+		// EDGE, and then straddles it.
+		if ( !insidePlasma( psi ) )
+		{
+			dFdAxis = 0.0;
+			dFdBoundary = 0.0;
+			return true;
+		}
+
+		double const span = psiAxisValue - psiBoundaryValue;
+		double const psiN = ( psi - psiBoundaryValue )/span;
+
+		// g( Psi ) is exactly what f() assembles before dividing by the span,
+		// and g'( Psi ) is one Profile::prime() of each stored profile -- the
+		// SECOND derivative of p and of gg, which is the level meq::Profile
+		// already carries because the rotating source needed it.
+		double const g = permeability*r*r*( *pPrimeProfile )( psiN )
+		                 + ( *ggPrimeProfile )( psiN );
+		double const gPrime = permeability*r*r*pPrimeProfile->prime( psiN )
+		                      + ggPrimeProfile->prime( psiN );
+
+		// F = g( Psi )/span with dPsi/dpsi_ax = -Psi/span, dspan/dpsi_ax = +1,
+		// dPsi/dpsi_bnd = ( Psi - 1 )/span, dspan/dpsi_bnd = -1.
+		// The scale multiplies F, so it multiplies both derivatives too.
+		dFdAxis = -currentScale()*( gPrime*psiN + g )/( span*span );
+		dFdBoundary = currentScale()*( gPrime*( psiN - 1.0 ) + g )/( span*span );
+		return true;
 	}
 
 	Profile const & NormalisedMHDSource::pPrime() const

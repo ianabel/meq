@@ -309,12 +309,118 @@ namespace meq
 				return ( psi - boundaryNormalisation() )*span > 0.0;
 			}
 
+			/**
+			 * dF/d(psi_ax) and dF/d(psi_bnd) AT FIXED psi, analytically.
+			 *
+			 * WHY THIS EXISTS. The bordered Newton's COLUMN is dR/ds, the
+			 * derivative of the residual with respect to a normalisation, and
+			 * solveWithNormalisation() obtains it by a CENTRAL DIFFERENCE of two
+			 * full residual evaluations. The row is exact under NPC -- psi_ax's
+			 * is -e_j and psi_bnd's is too -- so the column is the only
+			 * differenced thing left, and it is what floors the iteration:
+			 * measured on the half-disc, a coupled solve descends to about 3e-09
+			 * and then sits there for as many iterations as it is given, which
+			 * is the difference's own accuracy and not the discretisation's.
+			 *
+			 * AND IT IS WORSE THAN A FLOOR WHEN THE SUPPORT MOVES.
+			 * setPlasmaSupport() makes the edge a function of the normalisation,
+			 * so perturbing s by a step moves the edge across quadrature points,
+			 * and a central difference then STRADDLES a kink rather than
+			 * measuring a derivative. An analytic value straddles nothing: it is
+			 * evaluated pointwise at the current state, and outside the plasma
+			 * it is zero for the same reason f() is.
+			 *
+			 * @return false if the source cannot supply these, in which case the
+			 *         solver differences the column as before. Deliberately NOT
+			 *         pure: this is an optimisation of the Jacobian and never of
+			 *         the answer, so a source that has not implemented it must
+			 *         keep working rather than fail to compile.
+			 *
+			 * PRECONDITION, AND IT IS THE SAME ONE dFdPsi() CARRIES. With a
+			 * moving support the true derivative of the assembled residual picks
+			 * up a SURFACE term where the edge sweeps, and that term vanishes
+			 * exactly when the profiles vanish at the edge. So this is the
+			 * derivative of the assembled residual when p'( 0 ) = 0 and is
+			 * missing a term when it is not -- which is the condition
+			 * setPlasmaSupport() already documents as its precondition.
+			 */
+			virtual bool normalisationDerivatives( double r, double z, double psi,
+			                                       double &dFdAxis,
+			                                       double &dFdBoundary ) const
+			{
+				(void)r; (void)z; (void)psi;
+				(void)dFdAxis; (void)dFdBoundary;
+				return false;
+			}
+
+			/**
+			 * SCALE THE PLASMA TERM, so that the TOTAL PLASMA CURRENT can be
+			 * prescribed instead of the profile amplitude.
+			 *
+			 * WHY THIS EXISTS, AND IT IS NOT A CONVENIENCE. With the amplitude
+			 * fixed, a confined equilibrium is a non-linear EIGENVALUE problem:
+			 * writing `p' ~ A Psi^j`, the equation reduces to
+			 * `Delta* u = -Lambda u^j (...)` with `Lambda = A/span^2`, so
+			 * `Lambda` has to be an eigenvalue of the linearised operator ON THE
+			 * PLASMA REGION -- and the region is itself unknown. Scaling `A`
+			 * therefore changes nothing, because `span` moves with `sqrt( A )`
+			 * and the reaction ratio is amplitude-independent; measured, and the
+			 * same statement CLAUDE.md records for the high-beta source.
+			 *
+			 * Prescribing `I_p` and solving for this scale turns that balance
+			 * into an ordinary unknown of the same bordered Newton. It is what
+			 * CEDRES++ and FreeGS both do -- FREE-BOUNDARY-PLAN.md section 7.11
+			 * names `ConstrainBetapIp` as FB-6's reference model -- and it is
+			 * why every production free-boundary code asks for a current rather
+			 * than for an amplitude.
+			 *
+			 * VIRTUAL FOR THE REASON setPlasmaSupport() IS: a wrapper must
+			 * forward it to the source that evaluates the profiles, and
+			 * meq::CoilAugmentedNormalisedSource does. **A coil is not scaled**
+			 * -- its current is amperes and is prescribed input, so the scale
+			 * multiplies the plasma term alone.
+			 */
+			virtual void setCurrentScale( double scale )
+			{
+				currentScaleValue = scale;
+			}
+
+			/// The scale in force. One unless it has been set.
+			virtual double currentScale() const
+			{
+				return currentScaleValue;
+			}
+
+			/**
+			 * The part of `f()` that carries setCurrentScale()'s factor, and its
+			 * `psi`-derivative.
+			 *
+			 * These are `f()` and `dFdPsi()` for an ordinary plasma source and
+			 * are NOT for a wrapped one: a coil-augmented source's `f()` is the
+			 * sum, and the current constraint is about the plasma alone. So a
+			 * wrapper overrides these to forward to what it holds, exactly as it
+			 * forwards setCurrentScale().
+			 */
+			virtual double scaledF( double r, double z, double psi ) const
+			{
+				return f( r, z, psi );
+			}
+
+			/// @see scaledF
+			virtual double scaledDFdPsi( double r, double z, double psi ) const
+			{
+				return dFdPsi( r, z, psi );
+			}
+
 			/// And the boundary value; zero unless it has been set.
 			virtual double boundaryNormalisation() const = 0;
 
 		private:
 			/// setPlasmaSupport(). Off by default; see it for why.
 			bool confinedToPlasma = false;
+
+			/// setCurrentScale(). One unless a current is prescribed.
+			double currentScaleValue = 1.0;
 
 		public:
 
@@ -360,6 +466,11 @@ namespace meq
 
 			double f( double r, double z, double psi ) const override;
 			double dFdPsi( double r, double z, double psi ) const override;
+
+			/// Analytic, so the bordered Newton need not difference its columns.
+			bool normalisationDerivatives( double r, double z, double psi,
+			                               double &dFdAxis,
+			                               double &dFdBoundary ) const override;
 
 			void setNormalisation( double psiAxis, double psiBoundary ) override;
 			using NormalisedSource::setNormalisation;
