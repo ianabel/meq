@@ -223,11 +223,15 @@ under a Solov'ev source is an unknown key, not an ignored one.
        finite and non-zero.
    * - ``ConfineToPlasma``
      - ``false``
-     - :math:`F` and :math:`\partial F/\partial\psi` are **zero wherever**
-       :math:`\Psi \le 0`, so the plasma's *support* moves with the solution
-       instead of being the whole domain. **Refused unless**
-       ``Normalised = true``, since the test is on :math:`\Psi`. See the
-       warning below before setting it.
+     - :math:`F` and :math:`\partial F/\partial\psi` are **zero outside the
+       plasma**, so the plasma's *support* moves with the solution instead of
+       being the whole domain. The plasma is the **connected** region of
+       :math:`\Psi > 0` containing the magnetic axis, found by a flood fill over
+       the mesh's element adjacency: a level of :math:`\psi` can cut the domain
+       into several pieces, and the ones that do not contain the axis are
+       pockets rather than plasma. **Refused unless** ``Normalised = true``,
+       since the test is on :math:`\Psi`. See the warning below before setting
+       it.
 
 .. note::
 

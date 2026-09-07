@@ -628,6 +628,18 @@ namespace meq
 
 			void setPlasmaSupport( bool confined ) override;
 
+			/// FORWARDED, AND THIS IS THE FOURTH TIME. XP-1's connectivity test
+			/// switches the PLASMA term off on any element the flood fill from
+			/// the axis does not reach, and meq::SourceIntegrator asks the
+			/// source what is left there. The base returns zero, which for this
+			/// class would switch off every conductor in the machine wherever
+			/// the fill did not reach -- and a coil sits in the vacuum region by
+			/// construction, so that is everywhere it matters. The answer is the
+			/// coil term, exactly, with no cancellation: computed as
+			/// f() - scaledF() it would be ( plasma + coil ) - plasma, which is
+			/// the coil term only to round-off.
+			double fOutsidePlasma( double r, double z ) const override;
+
 			/// FORWARDED, AND FOR THE SAME REASON setPlasmaSupport() IS. The
 			/// normalisations belong to the profiles, which belong to the
 			/// wrapped source, so the derivatives do too -- and the COIL term

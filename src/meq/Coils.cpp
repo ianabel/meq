@@ -724,6 +724,15 @@ namespace meq
 		NormalisedSource::setPlasmaSupport( confined );
 	}
 
+	double CoilAugmentedNormalisedSource::fOutsidePlasma( double r, double z ) const
+	{
+		// The coil term and nothing else, and it is the SAME expression f() adds
+		// -- so on an element the fill did not reach this class contributes
+		// exactly what it would have contributed with the plasma term absent,
+		// bit for bit rather than to round-off.
+		return coilSet->f( r, z );
+	}
+
 	NormalisedSource & CoilAugmentedNormalisedSource::plasma() const { return *plasmaSource; }
 	CoilSet const & CoilAugmentedNormalisedSource::coils() const { return *coilSet; }
 
