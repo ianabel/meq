@@ -750,6 +750,7 @@ namespace
 	{
 		ownedInitialGuess.reset();
 		initialGuess = &psiGuess;
+		initialGuessField = nullptr;
 		prepared = false;
 	}
 
@@ -760,7 +761,87 @@ namespace
 		ownedInitialGuess = std::make_unique<mfem::GridFunctionCoefficient>(
 			const_cast<mfem::GridFunction *>( &psiGuess ) );
 		initialGuess = ownedInitialGuess.get();
+		initialGuessField = &psiGuess;
 		prepared = false;
+	}
+
+	/*
+	 * THE FLUX BLOCK OF THE GUESS, WHICH USED TO BE LEFT AT ZERO.
+	 *
+	 * Under NonlinearOrdering::NPC the unknown is ( q, psi, psihat ), so a guess
+	 * that supplies psi and leaves q at zero is not a good starting point with
+	 * one row to tidy up -- it is a state whose flux row carries the WHOLE of
+	 * ( grad psi_g, v ). CLAUDE.md records the consequence and its own cure:
+	 * ||r_0|| goes UP with a good guess, because the guessed state is
+	 * inconsistent in exactly the row that couples psi to q.
+	 *
+	 * That was tolerable while the only cost was an iteration. It is not
+	 * tolerable on a free-boundary problem, where the guess is part of the
+	 * PROBLEM STATEMENT rather than an optimisation -- the equilibrium is not
+	 * unique and the guess is what says which one is wanted. Measured on the
+	 * freegs4e limited tokamak, started from that code's own converged answer:
+	 * the flux row alone is 5.70e-01 of a 5.70e-01 initial residual, the first
+	 * Newton step is correspondingly enormous, and the iterate leaves the branch
+	 * it was placed on and converges to a different equilibrium.
+	 *
+	 * THE PROJECTION IS WEIGHTED AND THAT IS THE WHOLE DESIGN. Writing
+	 * `q = ( 1/r ) grad psi_g` and interpolating it at the flux space's nodes is
+	 * the obvious thing and is wrong twice over: the closed Gauss-Lobatto basis
+	 * puts nodes ON element boundaries, so on FB-A's domain some of them sit at
+	 * `r = 0` exactly, where `1/r` is a division of one numerical zero by
+	 * another; and nodal interpolation is not what the residual asks for anyway.
+	 * The flux row of ( 8a ) is
+	 *
+	 *     ( r q, v ) + ( psi, div v ) - < psihat, v.n >  =  0
+	 *
+	 * whose continuous form after integrating by parts is ( r q, v ) =
+	 * ( grad psi, v ). Solving THAT for q_h therefore does not merely put q near
+	 * the right value, it makes the state satisfy the row -- and the weight r is
+	 * exactly the factor that removes the axis singularity rather than guarding
+	 * it. V_h is discontinuous, so the solve is element-local: one small dense
+	 * factorisation per element, which is the same work assembling the flux mass
+	 * matrix costs once.
+	 *
+	 * The sign is DarcyForm's: the block holds -q, for the reason recorded
+	 * against flux(), so the projection is negated on the way in.
+	 */
+	void GradShafranovSolver::seedFluxFromGuess( mfem::GridFunction const &psiGuess )
+	{
+		mfem::Mesh &mesh = *fluxFes->GetMesh();
+
+		mfem::GradientGridFunctionCoefficient gradient(
+			const_cast<mfem::GridFunction *>( &psiGuess ) );
+		mfem::FunctionCoefficient radius(
+			[]( mfem::Vector const &x ) { return x( 0 ); } );
+
+		mfem::VectorMassIntegrator mass( radius );
+		mfem::VectorDomainLFIntegrator load( gradient );
+
+		mfem::Array<int> vdofs;
+		mfem::DenseMatrix elementMass;
+		mfem::Vector elementLoad, elementFlux;
+
+		// A LOCAL transformation, not mesh.GetElementTransformation( int ). That
+		// one hands out shared scratch and resets what the previous call
+		// returned; this file records the trap in six other places.
+		mfem::IsoparametricTransformation transformation;
+
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			mfem::FiniteElement const &element = *fluxFes->GetFE( e );
+			mesh.GetElementTransformation( e, &transformation );
+
+			mass.AssembleElementMatrix( element, transformation, elementMass );
+			load.AssembleRHSElementVect( element, transformation, elementLoad );
+
+			mfem::DenseMatrixInverse inverse( elementMass );
+			elementFlux.SetSize( elementLoad.Size() );
+			inverse.Mult( elementLoad, elementFlux );
+			elementFlux.Neg();
+
+			fluxFes->GetElementVDofs( e, vdofs );
+			darcyFlux.SetSubVector( vdofs, elementFlux );
+		}
 	}
 
 	void GradShafranovSolver::setGlobalisation( Globalisation choice )
@@ -1069,6 +1150,7 @@ namespace
 	{
 		ownedInitialGuess.reset();
 		initialGuess = nullptr;
+		initialGuessField = nullptr;
 		prepared = false;
 	}
 
@@ -2258,6 +2340,12 @@ namespace
 		{
 			projectOntoTrace( *initialGuess, traceGf );
 			potentialGf.ProjectCoefficient( *initialGuess );
+
+			// AND THE FLUX, when the guess arrived as a field rather than as a
+			// bare Coefficient -- see seedFluxFromGuess() for why the flux row
+			// makes this a consistency question rather than a convenience.
+			if ( initialGuessField )
+				seedFluxFromGuess( *initialGuessField );
 		}
 
 		// The Dirichlet datum lives on the trace, and only on the trace: the flux

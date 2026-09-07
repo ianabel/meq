@@ -518,6 +518,24 @@ namespace meq
 			/// on this or another mesh. Borrowed; it must outlive the next
 			/// solve(). Evaluated through a GridFunctionCoefficient, so a guess
 			/// on a DIFFERENT mesh needs the caller to have transferred it first.
+			///
+			/// AND THIS OVERLOAD SEEDS THE FLUX AS WELL, WHICH THE COEFFICIENT
+			/// ONE STRUCTURALLY CANNOT. Under NonlinearOrdering::NPC `q` is an
+			/// unknown, so a state carrying the right `psi` and `q = 0` is
+			/// inconsistent in exactly the row that couples them: the flux row
+			/// reads `( r q, v ) + ( psi, div v ) - < psihat, v.n >`, which at
+			/// `q = 0` is the whole of `( grad psi, v )` and dominates the
+			/// initial residual. A GridFunction can be differentiated and a bare
+			/// Coefficient cannot, which is why the seed lives here.
+			///
+			/// It is a WEIGHTED projection, `( r q_h, v ) = ( grad psi_g, v )`
+			/// element by element, and not `q = ( 1/r ) grad psi` interpolated at
+			/// the nodes. Two reasons, and the second is the load-bearing one:
+			/// the weighted form IS the flux row of the residual, so it makes the
+			/// state consistent rather than merely close; and `1/r` is singular
+			/// on the axis, which is where FB-A's domain reaches and where a
+			/// nodal interpolation would divide a numerical zero by zero. The
+			/// weight `r` removes the singularity instead of guarding it.
 			void setInitialGuess( mfem::GridFunction const &psiGuess );
 
 			/// Forget the guess; the next solve() starts from the Dirichlet data
@@ -1728,6 +1746,15 @@ namespace meq
 			/// wrap one. Only one of the two is ever live.
 			mfem::Coefficient *initialGuess;
 			std::unique_ptr<mfem::Coefficient> ownedInitialGuess;
+
+			/// The same guess as a FIELD, when it arrived as one, so that its
+			/// gradient is available to seed the flux block. Null for the
+			/// Coefficient overload, which has nothing to differentiate.
+			mfem::GridFunction const *initialGuessField = nullptr;
+
+			/// Solve `( r q_h, v ) = ( grad psi_g, v )` on each element and put
+			/// `-q_h` -- DarcyForm's convention -- into the flux block.
+			void seedFluxFromGuess( mfem::GridFunction const &psiGuess );
 
 			/// Interpolate a coefficient onto the trace space, face by face.
 			/// GridFunction::ProjectCoefficient cannot: it loops volume elements.

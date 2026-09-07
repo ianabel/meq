@@ -2548,25 +2548,66 @@ and the difference is instructive: KINSOL applies an Armijo sufficient-decrease
 condition and so gives up honestly, while the hand-written one has only a
 monotone test and creeps instead. See the mechanism under *Why it fails*.
 
-### A warm start no longer shows up in `‖r₀‖`, and that is structural
+### ~~A warm start no longer shows up in `‖r₀‖`, and that is structural~~ — THE FLUX IS SEEDED NOW, AND IT BUYS A DIAGNOSTIC AND NOT ONE ITERATION
 
-`prepare()` projects the guess onto the potential and the trace and leaves the
-**flux block at zero**, deliberately — a guess for `ψ` says nothing about `q`
-without differentiating it, and the guess arrives as a bare `mfem::Coefficient`,
-which cannot be differentiated. While the unknown was the trace alone that cost
-nothing, because `q` was a function of it. **Under NPC `q` is an unknown**, so
-the guessed state is inconsistent in exactly the row that couples them and
-`‖r₀‖` goes *up*: measured at `k = 3`, cold 1.771e-01 against warm 2.638e-01.
+**This section used to end "Not done, and it wants its own measurement". It is
+done, 2026-09-06, and the measurement is the interesting half.**
 
-The guess still works — 2 Newton iterations against 4 cold, same L2 to every
-figure, and an exact restart still finishes in 1 — because the flux row is
-**linear** in `q`, so one Newton step recovers the `q` belonging to the guessed
-`ψ`. `aWarmStartCutsTheWorkAndNotTheAnswer` (renamed from
-`…CutsTheFirstResidual…`) asserts strictly fewer iterations and an unmoved
-answer. **The fix, if the stronger property is wanted, is to seed the flux** —
-`darcyFlux = −(1/r) ∇̄ψ_guess` via `GradientGridFunctionCoefficient`, for the
-`setInitialGuess( GridFunction const & )` overload that has something
-differentiable to work with. Not done, and it wants its own measurement.
+`prepare()` used to project the guess onto the potential and the trace and leave
+the **flux block at zero**, because a guess for `ψ` says nothing about `q`
+without differentiating it and a bare `mfem::Coefficient` cannot be
+differentiated. Under NPC `q` is an unknown, so the guessed state was
+inconsistent in exactly the row that couples them and `‖r₀‖` went **up** with a
+good guess: at `k = 3`, cold 1.771e-01 against warm 2.638e-01.
+
+`setInitialGuess( mfem::GridFunction const & )` now seeds it, and the projection
+is **weighted**:
+
+```
+( r q_h, v ) = ( ∇̄ψ_g, v )     on each element,   block := −q_h
+```
+
+which is the flux row of (8a) itself rather than an approximation of it — so the
+seeded state SATISFIES the row instead of merely being near it. Writing
+`q = (1/r)∇̄ψ_g` and interpolating at the nodes is the obvious alternative and is
+wrong twice: the closed Gauss-Lobatto basis puts nodes ON element boundaries, so
+on FB-A's domain some sit at `r = 0` exactly where `1/r` divides one numerical
+zero by another; and nodal interpolation is not what the residual asks for.
+**The weight `r` removes the singularity rather than guarding it.** `V_h` is
+discontinuous so the solve is element-local — one small dense factorisation each.
+
+**Measured, `‖r₀‖` went from 0.67× the cold value to 83×:**
+
+| | cold | warm |
+|---|---|---|
+| before | 1.771e-01 | 2.638e-01 — *worse than cold* |
+| **after** | 1.770849e-01 | **2.130472e-03** |
+
+**AND IT DOES NOT CHANGE THE ITERATE, WHICH IS THE FINDING RATHER THAN A
+DISAPPOINTMENT.** The whole residual is **affine in `q`** — the flux row, the
+potential row and the trace row are all linear in it, and `F` depends on `ψ`
+alone — so an undamped Newton step lands on the *same* point whatever `q` it
+started from. Measured on the free-boundary limited tokamak of
+`FREE-BOUNDARY-PLAN.md` §7.16, seeded and unseeded: **bit-identical residual
+histories from iteration 1 through 17**, seven digits, with only `‖r₀‖` moving.
+The warm-start iteration counts are unmoved too — 2 against 4 cold, and
+4 / 2 / 2 against 4 / 4 / 4 across adaptive cycles.
+
+So the standing suggestion was right about the mechanism and wrong about the
+prize: what it buys is an **honest initial residual**, which matters because
+`‖r₀‖` is what a reader uses to judge whether a guess was any good, and it
+matters on the free-boundary path where a guess is part of the problem
+statement. It buys no iterations, and it cannot: **the same argument says
+seeding the exterior coefficients would buy none either**, the residual being
+affine in `a` as well. What decides the branch is `ψ`, `ψ̂`, `ψ_ax`, `ψ_bnd` and
+the scale, and nothing else.
+
+**Where `‖r₀‖` still goes up is where the state genuinely cannot satisfy the
+row**: on the coupled free-boundary path the exterior coefficients start at zero,
+so the datum on `Γ_h` is absent, and no `q` makes the flux row vanish there. The
+limited case reads 5.697e-01 unseeded against 7.424e-01 seeded for exactly that
+reason. `aWarmStartCutsTheWorkAndNotTheAnswer` asserts strictly fewer iterations
+and an unmoved answer, which is the property that survives all of this.
 
 ### One more test moved from the stopping rule to the property
 
