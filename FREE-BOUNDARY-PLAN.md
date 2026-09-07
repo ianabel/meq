@@ -2507,6 +2507,63 @@ prefer one. That is §7.15's territory, and the diagnostic it names — watch wh
 `ψ_ax`'s argmax sits — is the one to print.
 
 
+### 7.18 §7.14 and §7.15 re-measured against the repaired code, and half of them are false
+
+**EVERY NUMBER IN §7.14 AND §7.15 WAS TAKEN UNDER §7.17's DEFECT.** Re-measured
+2026-09-06 on a reconstruction of §7.14's fixture, because
+`thePlasmaCurrentClosesAsABorderUnknown` was removed rather than re-based and
+`git grep` over all refs finds it only in prose. The fixture is
+`FreeBoundaryCoupling.cpp`'s `makeHalfDisc`, `PowerProfile` and bump guess
+verbatim — `n = 24`, `k = 2`, `μ₀ = 1`, `ExteriorDtN( 0, 1.5, 4 )`,
+`p′ = 0.6 Ψ`, `gg′ = 0.05 Ψ`, `ConfineToPlasma`, `setPlasmaCurrent( 0.35 )` — with
+two parameters the prose does not give, both then pinned by measurement: the
+coil currents are **per coil** (a pair at `( 1.2, ±0.7 )` at `μ₀I = −0.35` each
+reproduces §7.14's `−1.48809e-02` at `r = 0.4` and `−1.14329e-01` at `r = 1.4`),
+and the limiter is at **R = 0.80** (at 0.90 the scale runs to 30.6 and `ψ_ax` to
+3.96e-01, which is §7.17's own post-repair note of 27.8 and 3.8e-01).
+
+| § | claim | verdict |
+|---|---|---|
+| 7.14 | the current-constrained solve closes | **CONFIRMED** at limiter 0.80 — 80 steps against 63, `∫F/r` 3.500000036e-01 against 3.499999970e-01, scale 1.04e-01 against 8.40e-02 |
+| 7.14 | the equilibrium is an **annulus** | **CONFIRMED**, and now certified by an instrument rather than a midplane cut: `CriticalPointFinder::sweep()` finds exactly one O-point in the domain, a MAXIMUM at `( 1.3768, +0.0012 )` with `\|q\| = 4.1e-18`, hard against `Γ_h` |
+| 7.14 | vertical-field scale, `−1.5e-02` and `−1.1e-01` | **CONFIRMED**, and the current is per coil |
+| 7.14 | coil sweep `0/−0.05/−0.10/−0.20` → converged/FAILED/FAILED/FAILED | **FALSE.** All four converge at limiter 0.80 (80, 17, 34, 122 steps, all to 1e-11 or better); FAILED/FAILED/CONVERGED/CONVERGED at 0.90; the same verdicts at `n = 32`, and the `−0.10` solution converges in `h` |
+| 7.14 | "a vertical field is what would make it a core" | **NOT BORNE OUT.** The O-point moves from `r = 1.377` to `r = 1.298` over `0 → −0.20`, six per cent, and at `−0.35` the equilibrium flips past any core to a branch with `ψ < 0` across the whole midplane and the current in a channel hugging `r = 0`. **No coil current tried produces a core** |
+| 7.14 | "branch selection: Newton is asked to cross between a core bump and an annulus" | **FALSE as stated.** There is no crossing to make — with the conductors present the answer is still the annulus |
+| 7.14 | the corner block's two missing entries cost the rate | **COULD NOT REPRODUCE EITHER WAY** — measured under the defect, and the incomplete corner block is no longer selectable |
+| 7.14 | item 1, continuation in the coil current | **works and is not needed** at limiter 0.80; at 0.90 every step converges while the scale runs `5.03e-02 → 3.77e+02` and `ψ_ax → 5.36e+00`. Continuation reaches the currents that fail cold, and reaches them on a degenerate branch |
+| 7.14 | item 3, `ψ_ax`'s argmax as the branch diagnostic | **CONFIRMED for the annulus and MISLEADING otherwise.** Where the solve does not find the wall-hugging O-point, `ψ_ax` is attained at a single node in the corner element where `Γ` meets the axis and nothing else comes near it — 8.12e-02 against a field maximum of 2.50e-02, ratio 0.31; 0.36 at `−0.35`; ≈ 0 on the vacuum case. **Read it against the field's own maximum or it reports the corner element rather than the branch** |
+| 7.15 | a vacuum start is refused, the span having no reason to be non-zero | **FALSE.** It **converges in 2 Newton steps to 7.03e-17** with span `8.19e-03 − ( −3.01e-02 ) = 3.83e-02`. Nothing refuses, which is worse than the plan describes: the solve succeeds and reports unknowns that mean nothing |
+| 7.15 | `ψ_ax` is not a magnetic axis there and `ψ_bnd` is the edge of nothing | **CONFIRMED.** The only critical points are the two coil centres, minima at `( 1.1966, −0.6965 )` and `( 1.1912, +0.6954 )`; the grid maximum of `ψ_h` is `−6.06e-06` |
+| 7.15 | ramping `I_p` is the homotopy to write | **NOT BORNE OUT.** At coil `−0.05`, limiter 0.90 — the one place a cold solve fails — a ladder converges at `μ₀I_p` = 0.01 … 0.04 and **fails at 0.05** of the 0.35 wanted, on a coarse and a refined ladder alike, with every converged rung degenerate (`ψ < 0` across the midplane, scale ≤ 5.7e-04) |
+| 7.15 | "the real lesson: prescribe consistent currents rather than continue" | **the evidence for it has gone** — the cold failures it rested on do not occur — and §7.16 supplies much better evidence for the same conclusion: with a genuine equilibrium's own coils and profiles the amplitude-fixed problem closes in five Newton steps |
+
+**AND THE AMPLITUDE-FIXED CONTROL IS THE ROW THAT SAYS THE CURRENT BORDER DOES
+REAL WORK.** With no current border, the moving support and `ψ_bnd` and the
+exterior live, the same five coil currents reach the 200-cap at limiter 0.80 and
+at 0.90 alike. §7.13's finding 1 stands **on this configuration** — and §7.16
+shows why that is a statement about the inputs rather than about the method.
+
+**THREE THINGS FOUND ON THE WAY THAT ARE IN NEITHER SECTION.**
+
+* **The base case is limiter-sensitive and neither section records which limiter
+  it used.** Of five positions, 0.80 and 1.00 converge and 0.90, 1.05 and 1.20 do
+  not — and 1.00 converges to a *different* branch from 0.80's annulus
+  (axis-hugging, `ψ_bnd = 3.26e-06`, support `[0.10, 0.95]`). Any record of a
+  result on this fixture has to name the limiter.
+* **`theTwoBordersConvergeTogether`'s own converged solution already has a
+  disconnected support.** Its no-confine control at limiter 0.90 converges in 10
+  steps to 4.23e-14 with `{ψ > ψ_bnd}` on the midplane equal to
+  `[0.40, 0.85] ∪ [1.20, 1.45]` — two components; other rows show four and five.
+  So §10.3's connectivity defect in `insidePlasma()` is reachable on a **limiter**
+  case and not only on a diverted one, and the same fixture with
+  `ConfineToPlasma` on would be switching the source on in every lobe. That moves
+  §10.3 from "latent, needs a diverted case" to "reachable today".
+* **The comment in `examples/free-boundary-halfdisc.toml`** saying
+  `[boundary.limiter]` does not yet converge on top of the exterior coupling is
+  **stale**; §7.12b falsified it.
+
+
 ## 8. Risks, in the order they are likely to bite
 
 **The axis, and it is FB-A because it can be measured now.** The half-disc

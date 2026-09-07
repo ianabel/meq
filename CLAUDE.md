@@ -540,22 +540,38 @@ source's own would scale two terms of one equation differently and converge, at
 full order, to a machine nobody described — the trap recorded for why a coil block
 carries no `Mu0` key.
 
-**WHAT IT DOES NOT YET GIVE IS A CORE.** The equilibrium it finds is a
-wall-hugging **annulus**: `ψ` rises monotonically from 6.1e-04 at `r = 0.1` to
+**WHAT IT DOES NOT GIVE ON THAT FIXTURE IS A CORE.** The equilibrium it finds is
+a wall-hugging **annulus**: `ψ` rises monotonically from 6.1e-04 at `r = 0.1` to
 1.23e-01 at `r = 1.4`, so `{ψ > ψ_bnd}` is the outer shell and `ψ_ax` sits near
 `Γ`. Every constraint is satisfied by it — they constrain the current and the
-normalisations, and none says the plasma is a core. **A vertical field is what
-suppresses that branch** and the scale is now known (`μ₀I = −0.35` at
-`r = 1.2, z = ±0.7` gives −1.5e-02 at `r = 0.4` against −1.1e-01 at `r = 1.4`),
-but it does not converge from a cold bump: currents of `0, −0.05, −0.10, −0.20`
-give **converged, FAILED, FAILED, FAILED**. That is **branch selection**, not the
-border, and §7.14 lists what to try.
+normalisations, and none says the plasma is a core.
+`meq::CriticalPointFinder::sweep()` now certifies it: exactly **one** O-point in
+the whole domain, a maximum at `( 1.3768, +0.0012 )` with `|q| = 4.1e-18`.
 
-**AND A VACUUM START IS NOT THE ANSWER, WHICH IS WORTH RECORDING BECAUSE IT IS
-THE OBVIOUS ONE.** At `F_plasma = 0` there is no plasma, so `ψ_ax` is a maximum
-of the *coil* field rather than an axis, `ψ_bnd` is the edge of nothing, and the
-support is empty with `span = ψ_ax − ψ_bnd` having no reason to be non-zero —
-which `setNormalisation()` refuses outright. **The three unknowns the
+**AND THIS PARAGRAPH USED TO SAY A VERTICAL FIELD WOULD SUPPRESS THAT BRANCH,
+WITH A COIL SWEEP READING "converged, FAILED, FAILED, FAILED". BOTH HALVES ARE
+FALSE, RE-MEASURED 2026-09-06.** The sweep was taken under the `ψ_bnd` defect:
+repaired, `μ₀I = 0 / −0.05 / −0.10 / −0.20` per coil **all four converge** at
+limiter 0.80, to 1e-11 or better, and at limiter 0.90 the pattern is
+FAILED/FAILED/CONVERGED/CONVERGED — the same verdicts at `n = 32`, so these are
+discrete solutions rather than mesh artefacts. And the vertical field **does not
+make a core**: the O-point moves only `r = 1.377 → 1.298` over `0 → −0.20`, and
+at `−0.35` the equilibrium flips past any core onto an axis-hugging branch with
+`ψ < 0` across the whole midplane. The scale numbers themselves are confirmed
+(`−1.48809e-02` at `r = 0.4` against `−1.14329e-01` at `r = 1.4`), and the
+currents are **per coil**. `FREE-BOUNDARY-PLAN.md` §7.18 is the full
+re-measurement, and §7.16 is what a machine case with CONSISTENT inputs does
+instead.
+
+**AND A VACUUM START IS NOT THE ANSWER, THOUGH NOT FOR THE REASON THIS
+PARAGRAPH GAVE.** At `F_plasma = 0` there is no plasma, so `ψ_ax` is a maximum
+of the *coil* field rather than an axis and `ψ_bnd` is the edge of nothing —
+**confirmed**: the only critical points are the two coil centres and the grid
+maximum of `ψ_h` is `−6.06e-06`. What is **FALSE** is that `setNormalisation()`
+refuses it: measured, the vacuum solve **converges in 2 Newton steps to
+7.03e-17** with a span of 3.83e-02, and reports three unknowns that mean nothing.
+A solve that succeeds and describes nothing is worse than one that refuses.
+**The three unknowns the
 continuation would exist to carry are exactly the three that stop meaning
 anything at `λ = 0`**, and ramping the profile amplitude is the same thing in
 slow motion. Ramping **`I_p`** is the exception and is fine: the plasma is
