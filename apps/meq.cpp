@@ -179,8 +179,37 @@ namespace
 
 	/// The characteristic background cell size, which sets how far the transfer
 	/// paths are allowed to search.
-	double backgroundCellSize( meq::MeshConfig const &config )
+	/// The background mesh parameter, which sets the transfer path's search
+	/// length in buildSubdomain().
+	///
+	/// A MESH READ FROM A FILE HAS TO BE MEASURED RATHER THAN COMPUTED, AND
+	/// THIS USED TO TAKE ONLY THE CONFIG. `RMin` .. `ZMax`, `NR`, `NZ` and
+	/// `RefinementLevels` describe a box the driver BUILDS; with `[mesh] File`
+	/// they are absent, so the formula below reads `( 0 - 0 )/( 0*1 )` and the
+	/// search length came out as zero -- and a zero search length is not a
+	/// tolerance that merely fails on the odd vertex, it is
+	/// mfem::VertexConePath aborting on the FIRST vertex of Gamma_h, since no
+	/// ray reaches Gamma within nothing. `[mesh] File` beside a curved boundary
+	/// is exactly what FB-6 wants (a gmsh half-disc with the conductors meshed
+	/// to), and it was the one path this quantity had never been asked for on.
+	///
+	/// The measured branch is the LARGEST element diameter, which is what the
+	/// adaptive path already uses and is the right number on a graded mesh --
+	/// the coarse part needs the long search and the fine part is not harmed by
+	/// being given one. The built branch is left computing exactly what it
+	/// always computed, bit for bit, so no existing configuration moves: a
+	/// search length is a bound on where a ray may look, and widening it can
+	/// change which rays succeed and therefore NumWidened().
+	double backgroundCellSize( meq::MeshConfig const &config, mfem::Mesh &mesh )
 	{
+		if ( config.fromFile() )
+		{
+			double largest = 0.0;
+			for ( int e = 0; e < mesh.GetNE(); ++e )
+				largest = std::max( largest, meq::elementDiameter( mesh, e ) );
+			return largest;
+		}
+
 		double const levels = static_cast<double>( 1 << config.refinementLevels );
 		double const hR = ( config.rMax - config.rMin )/( config.nR*levels );
 		double const hZ = ( config.zMax - config.zMin )/( config.nZ*levels );
@@ -811,32 +840,52 @@ int main( int argc, char **argv )
 			 * SURFACE. Config has already refused this alongside
 			 * [boundary.shape], so exactly one of the two branches runs.
 			 *
-			 * THE BOX MUST REACH THE AXIS EXACTLY, and this is where that is
-			 * checked rather than discovered. meq::ExteriorDtN is diagonal
+			 * THE DOMAIN MUST REACH THE AXIS EXACTLY, and this is where that
+			 * is checked rather than discovered. meq::ExteriorDtN is diagonal
 			 * because the Gegenbauer separation holds on a semicircle CENTRED
-			 * ON THE AXIS; a box starting at rMin = 0.05 gives a domain whose
-			 * flat side is an arbitrary vertical line, the modes do not span
-			 * its exterior, and the run would converge at full order to a
-			 * machine nobody described. That is FB-A's requirement arriving
-			 * through the configuration layer.
+			 * ON THE AXIS; a domain starting at r = 0.05 has a flat side that
+			 * is an arbitrary vertical line, the modes do not span its
+			 * exterior, and the run would converge at full order to a machine
+			 * nobody described. That is FB-A's requirement arriving through
+			 * the configuration layer.
+			 *
+			 * BOTH TESTS ARE AGAINST THE MESH AND NOT AGAINST [mesh] RMin ..
+			 * ZMax, AND THAT IS THE WHOLE POINT OF THIS PARAGRAPH. Those keys
+			 * describe a box the driver BUILDS; with [mesh] File they are
+			 * absent and default to zero, so the axis test passed vacuously on
+			 * a mesh nobody had looked at and the radius test compared Gamma
+			 * against an rMax of 0 and refused every file outright, with a
+			 * message about a box the run does not have. That combination --
+			 * a gmsh half-disc with the conductors meshed to, plus the
+			 * exterior coupling -- is exactly the one FB-6 needs, and it was
+			 * the one path on which neither precondition was enforced.
+			 * mfem::Mesh::GetBoundingBox is the coarsest true statement on
+			 * every path and reproduces the box keys exactly where they apply.
 			 */
-			meq::MeshConfig const &meshConfig = config->getMesh();
-			if ( meshConfig.rMin != 0.0 )
+			mfem::Vector meshLow, meshHigh;
+			background.GetBoundingBox( meshLow, meshHigh );
+
+			if ( meshLow( 0 ) != 0.0 )
 				throw std::runtime_error(
-					"[boundary.exterior] needs [mesh] RMin = 0 exactly: the "
-					"exterior expansion is valid only on a semicircle centred "
-					"on the axis, and a domain stopping short of r = 0 is not "
-					"a slightly worse one -- the Gegenbauer modes do not span "
+					"[boundary.exterior] needs a mesh reaching r = 0 exactly, "
+					"and this one starts at r = "
+					+ std::to_string( meshLow( 0 ) ) + ": the exterior "
+					"expansion is valid only on a semicircle centred on the "
+					"axis, and a domain stopping short of r = 0 is not a "
+					"slightly worse one -- the Gegenbauer modes do not span "
 					"its exterior at all" );
 
 			double const zLow = exteriorConfig.centreZ - exteriorConfig.radius;
 			double const zHigh = exteriorConfig.centreZ + exteriorConfig.radius;
-			if ( exteriorConfig.radius >= meshConfig.rMax
-			     || zLow <= meshConfig.zMin || zHigh >= meshConfig.zMax )
+			if ( exteriorConfig.radius >= meshHigh( 0 )
+			     || zLow <= meshLow( 1 ) || zHigh >= meshHigh( 1 ) )
 				throw std::runtime_error(
 					"[boundary.exterior] Radius puts Gamma outside or on the "
-					"[mesh] box; D_h is cut FROM that box, so Gamma must fit "
-					"strictly inside it" );
+					"mesh, which spans r [0, "
+					+ std::to_string( meshHigh( 0 ) ) + "], z ["
+					+ std::to_string( meshLow( 1 ) ) + ", "
+					+ std::to_string( meshHigh( 1 ) ) + "]; D_h is cut FROM "
+					"that mesh, so Gamma must fit strictly inside it" );
 
 			exterior = std::make_unique<meq::ExteriorDtN>(
 				exteriorConfig.centreZ, exteriorConfig.radius,
@@ -910,7 +959,8 @@ int main( int argc, char **argv )
 			else
 			{
 				subdomain = buildSubdomain( background, levelSet,
-				                            backgroundCellSize( config->getMesh() ) );
+				                            backgroundCellSize( config->getMesh(),
+				                                                background ) );
 				solveMesh = subdomain.mesh.get();
 				gammaHMarker = &subdomain.gammaHMarker;
 				path = std::move( subdomain.path );

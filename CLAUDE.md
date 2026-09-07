@@ -2981,6 +2981,33 @@ no tolerance, for the reason `halfdisc.py` does: a domain stopping at `r = 0.05`
 is not a slightly worse semicircle, the Gegenbauer modes do not span its
 exterior at all.
 
+**AND `[boundary.exterior]` BESIDE `[mesh] File` DID NOT RUN AT ALL UNTIL
+2026-09-06 — WHICH IS FB-6's OWN CONFIGURATION.** A gmsh half-disc with the
+conductors meshed to, plus the exterior coupling, is what `tools/mesh/halfdisc.py`
+and §7.9 exist for, and it was the one path on which **neither** of the two
+preconditions `[boundary.exterior]` enforces was actually enforced:
+
+* the axis test read `[mesh] RMin`, which a file mesh leaves at its **default of
+  zero**, so it passed vacuously on a mesh nobody had looked at. A `.msh` whose
+  inner edge sat at `r = 0.05` would have gone straight through the one check
+  written to stop it, and converged at full order to a machine nobody described;
+* the radius test compared `Γ` against `[mesh] RMax`, also zero, so it **refused
+  every file outright** — with a message about a box the run does not have;
+* and `backgroundCellSize()` computed `( 0 − 0 )/( 0 · 1 )`, so the transfer
+  path's search length was **zero** and `mfem::VertexConePath` aborted on the
+  first vertex of `Γ_h`, several frames deep in MFEM with nothing naming a
+  configuration key.
+
+All three read the mesh now — `mfem::Mesh::GetBoundingBox` for the two
+preconditions, the largest element diameter for the search length, which is what
+the adaptive path already uses. The built-box branch computes exactly what it
+computed before, bit for bit, so no existing configuration moves. **The
+transferable part**: `[mesh] File` had been wired for the FITTED path only —
+`theDriverTakesItsGridFromAMeshItDidNotBuild` covers the output grid — and every
+CURVED-path quantity was still reading keys that describe a box the run never
+built. Expect more of them wherever a driver derives a length from
+`[mesh] RMin .. ZMax`.
+
 **AND `buildSubdomain()` HAD TO BE RELAXED EXACTLY AS `AdaptiveDomain` WAS**, for
 the same geometry and by the same rule — some boundary must be **generated**
 rather than none inherited. The half-disc's flat side is the box's `r = 0` edge,
