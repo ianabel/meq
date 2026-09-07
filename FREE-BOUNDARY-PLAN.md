@@ -2245,75 +2245,45 @@ gone. §7.12b was the first (the two borders together), §7.14's coil sweep the
 second, this the third. **A failure measured under a defect is not a property of
 the method**, and this file has now paid for that lesson three times in one day.
 
-**AND `k = 2` GIVES A DIFFERENT ANSWER ENTIRELY, WHICH IS THE FINDING RATHER
-THAN A FOOTNOTE.** On the SAME mesh at degree 2, started from the SAME guess,
-the solve converges perfectly well — 17 Newton steps, 5.70e-01 → 2.67e-11 — and
-reports
+**AND THERE IS A SECOND EQUILIBRIUM, REACHED BY AN INPUT ERROR NOTHING ELSE
+CATCHES. THIS PASSAGE USED TO BLAME THE POLYNOMIAL DEGREE AND THAT WAS WRONG.**
 
-```
-psi_ax = 2.734289e+00        against a reference 9.483141e-02
-scale  = 9.807407e+02        against 1
-I_p    = 3.000004e+05 A      against the 3.000000e+05 asked for
-psi_ax - max psi_h = 0.000e+00
-```
-
-Every border satisfied at machine zero, the current delivered to seven figures,
-and the equilibrium nonsense.
-
-**`ψ_ax` IS A SPIKE, AND READING THE GridFunction IS WHAT SAYS SO.** `ψ_ax` is
-*the largest nodal value of `ψ_h`* — a definition chosen because it makes the
-border row exactly `−e_j` — and nothing in it says the largest nodal value is a
-magnetic axis. Parsed straight out of `_psi.gf`, the value 2.734289e+00 sits at
-ONE dof of one element, whose vertices are
-
-```
-( 1.1499, -0.3884 )   ( 1.1104, -0.3097 )   ( 1.0693, -0.3846 )
-```
-
-— on the reference's own LCFS, below the midplane. The next three nodal values
-in the whole field are 9.82e-01, 9.71e-01 and 9.13e-01, and a few elements away
-it is 1.06e-01; `ψ*` sampled onto the output grid peaks at **8.64e-02**, thirty
-times smaller than the `ψ_ax` the solver reports. So the constraint
-`ψ_ax = max ψ_h` is met exactly, by a value no consumer of the answer can see.
+At `k = 2` on the coarse mesh the solve converges perfectly well — every border
+at machine zero, `psi_ax - max psi_h = 0.000e+00`, the current delivered to
+seven figures — to `ψ_ax = 2.734289e+00`, twenty-nine times too large, with a
+profile scale of **9.807e+02**. `ψ_ax` is a **spike**: parsed straight out of
+`_psi.gf`, that value sits at ONE dof of one element, whose vertices are
+`( 1.1499, −0.3884 )`, `( 1.1104, −0.3097 )`, `( 1.0693, −0.3846 )` — on the
+reference's own LCFS, below the midplane. The next three nodal values in the
+whole field are 9.82e-01, 9.71e-01 and 9.13e-01; `ψ*` on the output grid peaks
+at **8.64e-02**, thirty times below the `ψ_ax` the solver reports.
 
 **AND THE RUNAWAY IS SELF-CONSISTENT, WHICH IS WHAT MAKES IT DANGEROUS RATHER
 THAN MERELY WRONG.** A spurious `ψ_ax` inflates the span; `Ψ = ( ψ − ψ_bnd )/(
 ψ_ax − ψ_bnd )` then collapses to a few per cent over the real plasma; and the
 current border raises the scale by the same factor to hold `∫F/r` at `μ₀I_p`.
-The three unknowns conspire. **A constraint satisfied by the artefact it was
-supposed to detect** is this file's most-repeated shape, and this is the sharpest
-instance of it yet: nothing in the residual, the constraint residuals or the
-convergence history distinguishes this run from the good one.
+The three unknowns conspire, and **a constraint satisfied by the artefact it
+was supposed to detect** is this file's most-repeated shape.
 
-**THE SWEEP FOUND THE SAME CLASS OF THING INDEPENDENTLY**, on the toy half-disc
-and in a different place — there `ψ_ax` latched onto a single node in the corner
-element where `Γ` meets the axis, reading 8.12e-02 against a field maximum of
-2.50e-02. See §7.14 item 3. **So the diagnostic is to compare `ψ_ax` against the
-field's own maximum**, and better still against `meq::CriticalPointFinder`'s
-O-point, which IN-A built and which no free-boundary path consults. That check
-is not written.
+**WHAT REACHES THAT BRANCH IS THE PROFILE TABLE, NOT THE DEGREE.** This passage
+recorded `k = 2` finding a spike, `k = 2` on a finer mesh finding a third
+equilibrium, and `k = 3` finding the right one, and concluded *"`h`-refinement
+does NOT cure it and `p`-refinement does"*. **All of those runs used tables a
+factor of the span too small** — see the next paragraph. Re-measured with one
+variable changed and everything else held, same mesh, same degree, same guess:
 
-**`p`-REFINEMENT IS WHAT REACHES THE PHYSICAL BRANCH.** Degree 2 and degree 3 on
-one mesh of 1601 elements, one changed key, same guess:
+| tables | Newton | `ψ_ax` | profile scale |
+|---|---|---|---|
+| `dp/dψ`, a factor of `span` too small | 44 | **2.734289e+00** | **9.807e+02** |
+| `dp/dΨ`, correct | **8** | **9.676040e-02** | **1.0222** |
 
-| | elements | Newton | `ψ_ax` | scale | verdict |
-|---|---|---|---|---|---|
-| `k = 2` | 1601 | 17 | 2.734289e+00 | 9.81e+02 | a spike at the plasma edge |
-| `k = 2` | **3802** | 168 | 6.250994e-02 | 1.35e-03 | **a THIRD branch**, `ψ_bnd = −7.72e-02` |
-| **`k = 3`** | 1601 | **7** | **9.484057e-02** | **1.0018** | the equilibrium |
-| **`k = 3`** | 3802 | **7** | 9.511633e-02 | 1.0055 | the equilibrium |
-
-**So `h`-refinement does NOT cure it and `p`-refinement does.** The finer mesh at
-degree 2 converges cleanly, in 168 steps to 1.18e-14, onto a third equilibrium
-again — this one with a NEGATIVE boundary flux and a plasma a hundred times too
-weak. Three meshes, three answers, every one of them satisfying every border at
-machine zero.
-
-That is the pattern `tools/freegs4e-benchmark/README.md` already records from the
-fixed-boundary side — *"`k = 2, refine = 1` DOES NOT CONVERGE on MAST or DIII-D
-while `k = 3` does on the same mesh"* — appearing on the free-boundary path, and
-with a worse failure mode: there it failed to converge, here it converges to
-something else.
+So `p`-refinement is **not** the cure and the degree was never the variable. What
+survives, and is worth as much, is that **the spike branch is real, is reachable
+from an ordinary input error, and satisfies every constraint MEQ imposes**. The
+diagnostic is the **profile scale** — 9.807e+02 against an expected `O(1)` — and,
+independently, `ψ_ax` compared against the field's own maximum or against
+`meq::CriticalPointFinder`'s O-point, which IN-A built and which no
+free-boundary path consulted.
 
 **THE PROFILE TABLE IS `dp/dΨ` AND freegs4e's IS `dp/dψ`, AND WITH A CURRENT
 BORDER THE ERROR IS INVISIBLE.** `meq::NormalisedMHDSource::f` evaluates
@@ -2324,14 +2294,21 @@ F = scale * ( mu0 r^2 pprime( Psi ) + ggprime( Psi ) ) / span
 
 so a table holds the derivative with respect to **`Ψ`**, and converting
 freegs4e's arrays means MULTIPLYING by the span. Getting it wrong is
-`examples/rotating-density.dat`'s trap exactly — and with `[source]
-PlasmaCurrent` set it produces **no symptom at all**: both profiles carry the
-same wrong factor, the scale is an unknown, and the border absorbs it. Measured,
-with the tables a factor of `span` too small the scale came back as **6.713e-02
-against a span of 6.689e-02** and the equilibrium was right to every digit. The
-tell is a scale that is not `O(1)`; with the tables corrected it reads
-**1.001795**. With the amplitude FIXED there is nothing to absorb it and the run
-is a plasma fifteen times too weak.
+`examples/rotating-density.dat`'s trap exactly, **and it is worse than that trap
+because the current border can hide it**: both profiles carry the same wrong
+factor, the scale is an unknown, and the border absorbs it. At `k = 3` it
+absorbed it completely — the scale came back as **6.713e-02 against a span of
+6.689e-02** and the equilibrium was right to every digit. **At `k = 2` it did
+not**: the same error selected the spike branch above. So the same input mistake
+is silent at one degree and catastrophic at another, which is the worst
+combination available.
+
+**The tell is a profile scale that is not `O(1)`.** With the tables corrected it
+reads **1.001795** at `k = 3` and 1.0222 at `k = 2`; mis-scaled it reads
+6.713e-02 and 9.807e+02. Nothing else in the output moves. And with the
+amplitude FIXED instead there is nothing to absorb it and the run is a plasma
+fifteen times too weak — which for a while looked like a failure of the
+amplitude-fixed formulation and was not.
 
 **AND THE AMPLITUDE-FIXED PROBLEM CLOSES HERE, WHICH §7.13's FINDING 1 SAYS IT
 SHOULD NOT.** Dropping `PlasmaCurrent` and fixing the amplitude at freegs4e's

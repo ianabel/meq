@@ -378,19 +378,28 @@ Free boundary by a Dirichlet-to-Neumann map against free boundary by von Hagenow
 Green's functions; HDG Newton against finite-difference Picard; C++ against
 Python. **They share the equation and essentially no code.**
 
-**AND `k = 2` CONVERGES TO SOMETHING ELSE ENTIRELY, WHICH IS THE PART TO READ
-BEFORE TRUSTING A FREE-BOUNDARY RUN.** On the same mesh and the same guess,
-degree 2 converges — 17 Newton steps, every border at machine zero, the current
-delivered to seven figures — to `ψ_ax = 2.734289e+00` against 9.48e-02, because
-**`ψ_ax` is the largest NODAL value of `ψ_h` and nothing says the largest nodal
-value is a magnetic axis**: it latched onto a single dof spiking at the plasma
-edge, next to nodal values of 0.98, and the current border then raised the
-profile scale by 980 to keep `∫F/r` at `μ₀I_p`. Refining the mesh at degree 2
-gives a *third* answer. **`p`-refinement is what reaches the physical branch and
-`h` is not.** `FREE-BOUNDARY-PLAN.md` §7.16 is the record, and the diagnostic it
-asks for — compare `ψ_ax` against the field's own maximum, or better against
-`meq::CriticalPointFinder`'s O-point, which IN-A already built — **is not
-written**.
+**AND THERE IS A SECOND EQUILIBRIUM, REACHED BY AN INPUT ERROR NOTHING ELSE
+CATCHES.** The same configuration can converge — every border at machine zero,
+the current delivered to seven figures — to `ψ_ax = 2.734289e+00` against
+9.48e-02, because **`ψ_ax` is the largest NODAL value of `ψ_h` and nothing says
+the largest nodal value is a magnetic axis**: it latches onto a single dof
+spiking at the plasma edge, next to nodal values of 0.98, and the current border
+then raises the profile scale by 980 to keep `∫F/r` at `μ₀I_p`. A spurious
+`ψ_ax` inflates the span, `Ψ` collapses, and the scale compensates — the three
+unknowns conspire, and every constraint is satisfied by the artefact.
+
+**WHAT REACHES IT IS A PROFILE TABLE WRONG BY A FACTOR OF THE SPAN, AND THIS
+PARAGRAPH USED TO BLAME THE POLYNOMIAL DEGREE.** A normalised table holds
+`dp/dΨ`; another code's `dp/dψ` arrays are a factor of `ψ_ax − ψ_bnd` out.
+Measured with one variable changed and everything else held — same mesh, same
+degree, same guess — the mis-scaled table gives **44 Newton steps,
+`ψ_ax = 2.734289e+00`, scale 9.807e+02** and the corrected one **8 steps,
+9.676040e-02, scale 1.0222**. So `p`-refinement is not the cure and the degree
+was never the variable. **The tell is the profile scale**: `O(1)` when the table
+is right, and nothing else in the output moves. `FREE-BOUNDARY-PLAN.md` §7.16 is
+the record; the second, independent diagnostic — `ψ_ax` against the field's own
+maximum, or against `meq::CriticalPointFinder`'s O-point, which IN-A already
+built — is being wired.
 
 **What is still open** is everything that decides WHICH equilibrium a
 free-boundary solve reports: a guess that is not already the answer does not
