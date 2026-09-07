@@ -1038,6 +1038,25 @@ int main( int argc, char **argv )
 		if ( limiterConfig.given )
 			fresh->setBoundaryFluxPoint( limiterConfig.r, limiterConfig.z );
 
+		/*
+		 * THE THIRD BORDER, AND THE FILE SPEAKS AMPERES WHERE THE SOLVER SPEAKS
+		 * mu0 I_p. setPlasmaCurrent() takes mu0 I_p deliberately -- everything
+		 * inside the solver already does, Ampere's law reads the flux integral
+		 * as -mu0 I_p and the constraint is assembled as int F/r which IS
+		 * mu0 I_p -- and a solver that took amperes would need a mu0 of its own,
+		 * which could disagree with the source's and scale two terms of one
+		 * equation differently.
+		 *
+		 * THE CONFIGURATION LAYER HAS NO SUCH PROBLEM AND SO TAKES THE UNIT A
+		 * USER HAS. The file names exactly one mu0, under [source], and it is
+		 * the same one [[coils]] uses for its Current -- SourceConfig
+		 * ::permeability() exists for precisely that sharing. So the conversion
+		 * happens here, once, against the only mu0 in the file.
+		 */
+		if ( config->getSource().plasmaCurrent() != 0.0 )
+			fresh->setPlasmaCurrent( config->getSource().permeability()
+			                         *config->getSource().plasmaCurrent() );
+
 		if ( exterior )
 			fresh->setExteriorCoupling( *exterior );
 
@@ -1346,7 +1365,53 @@ int main( int argc, char **argv )
 		std::unique_ptr<mfem::Coefficient> datum;
 		if ( gammaHMarker )
 		{
-			datum = solver->transferredDatum();
+			/*
+			 * THE DATUM ON THE TRUE GAMMA, AND ON THE COUPLED PATH IT IS NOT
+			 * ZERO. transferredDatum()'s default `g` is the zero function, which
+			 * is right for every fixed-boundary case in this tree -- Gamma
+			 * carries psi = 0 there -- and WRONG the moment [boundary.exterior]
+			 * is present, where Gamma carries the Gegenbauer trace
+			 * `sum a_n C_n` that setExteriorDatum() deposits as a load.
+			 *
+			 * LEFT AT ZERO, eta_5 COMPARES psi* AGAINST A CONDITION NOBODY
+			 * IMPOSED, and the term does not merely become inaccurate -- it
+			 * DIVERGES. eta_5^2 carries an h_e^-1 weight, so an O(1) per-face
+			 * mismatch contributes one copy of its square per face and eta_5
+			 * grows as sqrt( faces ): measured under near-uniform refinement,
+			 * 2.864e-01, 4.262e-01, 6.151e-01, 8.787e-01 over 71, 142, 282, 570
+			 * faces, a ratio settling on 1.429 against sqrt( 2 ) = 1.414. Passing
+			 * the datum takes eta_5 from 2.864e-01 to 1.554e-04 -- a factor of
+			 * 1844 -- and eta from RISING ( 3.100e-01 -> 5.519e-01 ) to falling
+			 * ( 1.186e-01 -> 7.530e-02 ) over the same three cycles.
+			 *
+			 * AND IT WAS CORRUPTING THE MARKING, NOT ONLY THE NUMBER. The loop
+			 * spent its budget crowding Gamma_h against an indicator measuring
+			 * nothing: 33 and 68 elements marked against 13 and 29 once repaired.
+			 * That is the "refines the wrong elements" failure Estimator.hpp
+			 * warns about, in production.
+			 *
+			 * Rebuilt every cycle for the reason above: `a` moves with the
+			 * Newton, so a hoisted lambda would carry the previous cycle's trace.
+			 */
+			if ( exterior )
+			{
+				meq::ExteriorDtN const *dtn = exterior.get();
+				std::vector<double> const *a = &solver->exteriorCoefficients();
+				datum = solver->transferredDatum(
+					[ dtn, a ]( mfem::Vector const &x )
+				{
+					double total = 0.0;
+					for ( std::size_t m = 0; m < a->size(); ++m )
+						total += ( *a )[ m ]*dtn->basis(
+							meq::ExteriorDtN::firstMode() + static_cast<int>( m ),
+							x( 0 ), x( 1 ) );
+					return total;
+				} );
+			}
+			else
+			{
+				datum = solver->transferredDatum();
+			}
 			estimator.setTransferredBoundary( *gammaHMarker, datum.get() );
 		}
 		if ( exterior )
@@ -1582,6 +1647,23 @@ int main( int argc, char **argv )
 		 * fell by a factor of eight. Printing them per run is the cheapest way
 		 * for somebody to notice that before trusting a refinement.
 		 */
+		/*
+		 * THE CURRENT IS REPORTED IN AMPERES, WHICH IS WHAT WAS ASKED FOR, and
+		 * beside it the SCALE the border solved for -- because a scale far from
+		 * one is the statement that the profiles as written carry a very
+		 * different current from the one prescribed, which is a modelling fact a
+		 * user wants rather than an internal.
+		 */
+		if ( config->getSource().plasmaCurrent() != 0.0 )
+		{
+			double const mu0 = config->getSource().permeability();
+			std::printf( "     I_p = %.6e A against the %.6e A asked for, "
+			             "profile scale %.6e\n",
+			             mu0 != 0.0 ? solver->plasmaCurrent()/mu0 : 0.0,
+			             config->getSource().plasmaCurrent(),
+			             solver->plasmaCurrentScale() );
+		}
+
 		if ( exterior )
 		{
 			std::vector<double> const &a = solver->exteriorCoefficients();
@@ -1964,6 +2046,14 @@ int main( int argc, char **argv )
 			std::vector<double> const &a = solver->exteriorCoefficients();
 			for ( std::size_t m = 0; m < a.size(); ++m )
 				writer.attribute( "exterior_a" + std::to_string( m + 2 ), a[ m ] );
+		}
+		if ( config->getSource().plasmaCurrent() != 0.0 )
+		{
+			double const mu0 = config->getSource().permeability();
+			writer.attribute( "plasma_current_target", config->getSource().plasmaCurrent() );
+			writer.attribute( "plasma_current",
+			                  mu0 != 0.0 ? solver->plasmaCurrent()/mu0 : 0.0 );
+			writer.attribute( "profile_scale", solver->plasmaCurrentScale() );
 		}
 		if ( config->getBoundary().limiter.given )
 		{

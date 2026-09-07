@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <sstream>
 #include <iterator>
 #include <utility>
 #include <memory>
@@ -1477,4 +1478,94 @@ BOOST_AUTO_TEST_CASE( theDriverReachesTheExteriorCoupling )
 	            "exterior expansion is valid only on a semicircle centred on "
 	            "the axis" );
 	std::remove( "driver-acceptance-axis.toml" );
+}
+
+
+/*
+ * THE ADAPTIVE LOOP OVER AN EXTERIOR COUPLING, WHICH HAD NO DRIVER TEST AND
+ * WAS BROKEN THE WHOLE TIME IT DID NOT.
+ *
+ * theDriverReachesTheExteriorCoupling above is a single solve, so nothing
+ * exercised the loop against a coupling -- and the loop was passing eta_5 the
+ * WRONG DATUM. transferredDatum()'s default `g` is the zero function, right for
+ * every fixed-boundary case and wrong the moment Gamma carries the Gegenbauer
+ * trace instead of psi = 0.
+ *
+ * IT DID NOT MERELY BIAS eta, IT MADE IT DIVERGE. eta_5^2 carries an h_e^-1
+ * weight, so an O(1) per-face mismatch contributes one copy of its square per
+ * face and the term grows as sqrt( faces ): 2.864e-01, 4.262e-01, 6.151e-01,
+ * 8.787e-01 over 71, 142, 282, 570 faces under near-uniform refinement, settling
+ * on a ratio of 1.429 against sqrt( 2 ). eta ROSE, 3.100e-01 -> 5.519e-01, while
+ * every cycle's Newton converged cleanly -- and the marking was driven by the
+ * spurious term, spending the refinement budget crowding Gamma_h.
+ *
+ * SO THE ASSERTION IS MONOTONICITY, and it is a real one rather than a
+ * formality: the defect this replaces produced a strictly INCREASING sequence.
+ */
+BOOST_AUTO_TEST_CASE( theDriverRefinesOverAnExteriorCoupling )
+{
+	{
+		std::ifstream source( "examples/free-boundary-halfdisc.toml" );
+		BOOST_TEST_REQUIRE( source.good() );
+		std::string text( ( std::istreambuf_iterator<char>( source ) ),
+		                    std::istreambuf_iterator<char>() );
+
+		std::string const marker = "[output]";
+		std::size_t const at = text.find( marker );
+		BOOST_TEST_REQUIRE( at != std::string::npos );
+		text.insert( at, "[adaptivity]\nEnabled = true\nMaxIterations = 4\n"
+		                 "Theta = 0.6\n\n" );
+		text += "\n";
+
+		std::ofstream out( "driver-acceptance-fb-adaptive.toml" );
+		out << text;
+	}
+
+	// The prefix comes from the example, so the loop writes over the same stem
+	// the non-adaptive case uses. That is fine -- both are regenerated -- and it
+	// is why this case reads eta from the REPORT rather than from a file.
+	std::string const command = std::string( driver() )
+		+ " driver-acceptance-fb-adaptive.toml > driver-acceptance-fb-adaptive.log 2>&1";
+	int const status = std::system( command.c_str() );
+	BOOST_TEST_REQUIRE( ( WIFEXITED( status ) && WEXITSTATUS( status ) == 0 ),
+	                    "the driver did not exit 0 on an adaptive free-boundary run" );
+
+	// Parse the cycle table: "  cycle  elem  trace  marked  wide  eta  it".
+	std::string const log = slurp( "driver-acceptance-fb-adaptive.log" );
+	std::size_t at = log.find( "the adaptive loop" );
+	BOOST_TEST_REQUIRE( at != std::string::npos,
+	                    "the run did not report an adaptive loop at all" );
+
+	std::vector<double> etas;
+	std::istringstream stream( log.substr( at ) );
+	std::string line;
+	while ( std::getline( stream, line ) )
+	{
+		std::istringstream fields( line );
+		int cycle = 0, elements = 0, trace = 0, marked = 0, wide = 0;
+		double eta = 0.0;
+		if ( fields >> cycle >> elements >> trace >> marked >> wide >> eta )
+			etas.push_back( eta );
+	}
+
+	BOOST_TEST_REQUIRE( etas.size() >= 3,
+	                    "only " << etas.size() << " cycles were parsed from the "
+	                    "report, so the assertion below would be vacuous" );
+
+	std::printf( "\n  ADAPTIVE OVER AN EXTERIOR COUPLING, eta by cycle:" );
+	for ( double const eta : etas )
+		std::printf( " %.4e", eta );
+	std::printf( "\n" );
+	std::fflush( stdout );
+
+	for ( std::size_t c = 1; c < etas.size(); ++c )
+		BOOST_TEST( etas[ c ] < etas[ c - 1 ],
+		            "eta rose from " << etas[ c - 1 ] << " to " << etas[ c ]
+		            << " at cycle " << c << ". The first suspect is the datum "
+		            "eta_5 is compared against: on the coupled path Gamma carries "
+		            "the Gegenbauer trace, not zero, and transferredDatum()'s "
+		            "default g is the zero function" );
+
+	std::remove( "driver-acceptance-fb-adaptive.toml" );
+	std::remove( "driver-acceptance-fb-adaptive.log" );
 }

@@ -580,6 +580,34 @@ namespace meq
 			confine = source.getBooleanOr( "ConfineToPlasma", false );
 		}
 
+		/// `[source] PlasmaCurrent`, in amperes.
+		///
+		/// REFUSED WITHOUT A NORMALISATION, for the reason ConfineToPlasma is:
+		/// what this makes an unknown is the profile SCALE, and a scale is only
+		/// meaningful against profiles read at a normalised flux. On a plain
+		/// source the border would be solved and its answer would multiply
+		/// nothing.
+		void readPlasmaCurrent( Table const & source, bool normalised, double & current )
+		{
+			if ( !normalised )
+			{
+				if ( source.has( "PlasmaCurrent" ) )
+					source.fail( "PlasmaCurrent", "means nothing unless Normalised = true: prescribing the current makes the profile SCALE an unknown of the bordered Newton, and without a normalisation there is no bordered Newton for it to join" );
+				return;
+			}
+
+			current = source.getFloatOr( "PlasmaCurrent", 0.0 );
+
+			// ZERO IS THE DEFAULT AND MEANS "DO NOT CONSTRAIN". An explicit zero
+			// is refused rather than silently read as the default, because a
+			// prescribed current of zero describes no plasma -- the scale would
+			// be driven to make int F/r vanish, which it does at scale zero.
+			if ( source.has( "PlasmaCurrent" ) && current == 0.0 )
+				source.fail( "PlasmaCurrent", "is zero, which is not a plasma: the border would drive the profile scale to zero to satisfy it. Remove the key to leave the amplitude fixed" );
+			if ( source.has( "PlasmaCurrent" ) && !std::isfinite( current ) )
+				source.fail( "PlasmaCurrent", "must be finite" );
+		}
+
 		SourceType toSourceType( Table const & source, std::string const & spelling )
 		{
 			static std::map< std::string, SourceType > const types =
@@ -673,6 +701,22 @@ namespace meq
 		}
 
 		return false;
+	}
+
+	double SourceConfig::plasmaCurrent() const
+	{
+		switch ( type )
+		{
+			case SourceType::MHD:
+				return std::get< MHDParameters >( parameters ).plasmaCurrent;
+			case SourceType::Rotating:
+				return std::get< RotatingParameters >( parameters ).plasmaCurrent;
+			case SourceType::Soloviev:
+			case SourceType::Manufactured:
+				return 0.0;
+		}
+
+		return 0.0;
 	}
 
 	bool SourceConfig::confinesToPlasma() const
@@ -925,7 +969,7 @@ namespace meq
 					                            "PPrimeScale", "GGPrimeScale",
 					                            "PPrimeVariable", "PPrimeFit",
 					                            "GGPrimeVariable", "GGPrimeFit",
-					                            "Normalised", "PsiAxis", "ConfineToPlasma",
+					                            "Normalised", "PsiAxis", "ConfineToPlasma", "PlasmaCurrent",
 					                            "ProfileFile" } );
 					refuseReservedProfileFile( source );
 					// The "mhd" source has no constant form for either profile,
@@ -955,6 +999,7 @@ namespace meq
 						source.fail( "Mu0", "must be positive" );
 					readNormalisation( source, parameters.normalised, parameters.psiAxis );
 					readPlasmaSupport( source, parameters.normalised, parameters.confineToPlasma );
+					readPlasmaCurrent( source, parameters.normalised, parameters.plasmaCurrent );
 					sourceOptions.parameters = parameters;
 					break;
 				}
@@ -965,7 +1010,7 @@ namespace meq
 					                            "GGPrime", "GGPrimeFile", "GGPrimeScale",
 					                            "GGPrimeVariable", "GGPrimeFit",
 					                            "ReferenceRadius", "Mu0", "Normalised", "PsiAxis",
-					                            "ConfineToPlasma", "ProfileFile" } );
+					                            "ConfineToPlasma", "PlasmaCurrent", "ProfileFile" } );
 					refuseReservedProfileFile( source );
 					RotatingParameters parameters;
 
@@ -989,6 +1034,7 @@ namespace meq
 
 					readNormalisation( source, parameters.normalised, parameters.psiAxis );
 					readPlasmaSupport( source, parameters.normalised, parameters.confineToPlasma );
+					readPlasmaCurrent( source, parameters.normalised, parameters.plasmaCurrent );
 
 					std::vector< Table > const species = source.getTableArrayOr( "species" );
 					if ( species.size() < 2 )

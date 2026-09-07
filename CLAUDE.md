@@ -643,14 +643,50 @@ asserts `η₆ == 0.0` there rather than a rate, which is the stronger statement
 a boundary functional has nothing to converge to on a fitted rectangle, and what
 this file must guard is that the sixth term is **opt-in and inert**.
 
-**AND ON THE DRIVER'S OWN FREE-BOUNDARY EXAMPLE `η` RISES — NOT INVESTIGATED.**
-`examples/free-boundary-halfdisc.toml` with `[adaptivity]` gives `η` 3.10e-01 →
-4.08e-01 → 5.52e-01 over three cycles while the solve converges at every one. It
-is **not** the growing domain — FB-5's loop grows the same way and `η` falls
-there — so the suspect is the **tabulated** source: `j = 1` makes `∂F/∂ψ` jump at
-the plasma edge, `η₁` evaluates `F` at the potential, and a kink inside an
-element is a residual that refinement chases and does not remove. Plausible, not
-established, and no shipped example turns adaptivity on for that reason.
+**AND `η` ROSE ON THE DRIVER'S FREE-BOUNDARY EXAMPLE — A ONE-LINE DEFECT IN THE
+DRIVER, AND THE HYPOTHESIS THIS PARAGRAPH USED TO CARRY WAS WRONG.** It read that
+the suspect was the tabulated source's `j = 1` kink in `∂F/∂ψ` being chased by
+`η₁`. **There is no kink**: `examples/fb-pprime.dat` is `f(Ψ) = 0.6Ψ` with `f′`
+**constant everywhere** over the tabulated range, so `F` is linear in `ψ` across
+the whole domain. Guessing a mechanism from the shape of the problem, again.
+
+**THE CAUSE IS THE DATUM `η₅` IS COMPARED AGAINST.**
+`GradShafranovSolver::transferredDatum()`'s default `g` is the **zero function**
+— correct for every fixed-boundary case, and wrong the moment
+`[boundary.exterior]` is present, where `Γ` carries the Gegenbauer trace
+`Σ a_n C_n` that `setExteriorDatum()` deposits as a load. The driver never passed
+it. The **library** test gets this right and says so in a comment; the driver was
+not updated when the TOML wiring landed, and the only driver test of the coupling
+was a **non-adaptive single solve**, so nothing could see it.
+
+**IT DID NOT BIAS `η₅`, IT MADE IT DIVERGE.** `η₅²` carries an `h_e⁻¹` weight, so
+an `O(1)` per-face mismatch contributes one copy of its square **per face** and
+the term grows as `√(faces)`. Measured under near-uniform refinement:
+
+| `Γ_h` faces | 71 | 142 | 282 | 570 |
+|---|---|---|---|---|
+| `η₅` on `Γ_h` | 2.864e-01 | 4.262e-01 | 6.151e-01 | 8.787e-01 |
+| ratio, against `√2 = 1.4142` | — | 1.488 | 1.443 | **1.429** |
+
+and the arc-length RMS of the omitted datum over `Γ` is **3.464e-02** against
+`η₅/√faces` settling at **3.681e-02** — agreeing to **6%**. The accounting closes:
+`η₅` *was* the omitted exterior datum, one copy per face.
+
+**One variable changed, the datum:** `η₅` 2.864e-01 → **1.554e-04**, a factor of
+**1844**, and `η` from **rising** 3.100e-01 → 5.519e-01 to **falling** 1.186e-01
+→ 7.530e-02 over the same three cycles. Every other term fell throughout, which
+is what localised it.
+
+**AND IT WAS CORRUPTING THE MARKING, NOT ONLY THE NUMBER** — 33 and 68 elements
+marked against 13 and 29 once repaired, the budget spent crowding `Γ_h` against
+an indicator measuring nothing. That is the *refines the wrong elements* failure
+`Estimator.hpp` warns about, in production. `TargetError` could never be met
+either, since a diverging `η` never falls below anything.
+
+`theDriverRefinesOverAnExteriorCoupling` is the regression, and it asserts
+**monotonicity** — a real assertion rather than a formality, since the defect it
+replaces produced a strictly increasing sequence. There had been **no driver test
+of adaptivity over a coupling at all**, which is the gap that let a defect ship.
 
 **`meq::AdaptiveDomain` HAD TO BE RELAXED AND THE OLD GUARD WAS A REAL
 RESTRICTION.** It required `Ω` **strictly inside** the background box — exactly

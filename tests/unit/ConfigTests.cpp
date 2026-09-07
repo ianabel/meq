@@ -2211,3 +2211,57 @@ BOOST_AUTO_TEST_CASE( the_bump_guess_describes_a_core_and_refuses_one_that_is_no
 	refuses( guess( "CentreR = 1.0\nRadiusR = 0.4\nAmplitude = 0.0\n" ),
 	         "initialguess.Amplitude" );
 }
+
+
+/*
+ * [source] PlasmaCurrent: the third border, and the unit it is spelled in.
+ *
+ * meq::GradShafranovSolver::setPlasmaCurrent takes `mu0 I_p` deliberately --
+ * everything inside the solver already speaks in it, and a solver taking amperes
+ * would need a mu0 of its own that could disagree with the source's. THE
+ * CONFIGURATION LAYER HAS NO SUCH PROBLEM: the file names exactly one mu0, under
+ * [source], and it is the same one [[coils]] uses for its Current. So the key is
+ * in AMPERES and the driver multiplies once, which is the only spelling a user
+ * can write without knowing which of two mu0 values is meant.
+ */
+BOOST_AUTO_TEST_CASE( the_prescribed_plasma_current_is_amperes_and_needs_a_normalisation )
+{
+	auto const refuses = []( std::string const & text, std::string const & key )
+	{
+		BOOST_CHECK_EXCEPTION( parse( text ), ConfigError,
+			[&]( ConfigError const & e ) { return e.getKey() == key; } );
+	};
+
+	auto const mhd = []( std::string const & extra )
+	{
+		return withSource(
+			"[source]\n"
+			"Type = \"mhd\"\n"
+			"PPrimeFile = \"examples/fb-pprime.dat\"\n"
+			"GGPrimeFile = \"examples/fb-ggprime.dat\"\n" + extra );
+	};
+
+	Configuration const good = parse( mhd(
+		"Normalised = true\nPsiAxis = 0.1\nPlasmaCurrent = 3.0e5\n" ) );
+	BOOST_TEST( good.getSource().plasmaCurrent() == 3.0e5 );
+
+	// ABSENT MEANS "DO NOT CONSTRAIN", and reads as zero.
+	Configuration const none = parse( mhd( "Normalised = true\nPsiAxis = 0.1\n" ) );
+	BOOST_TEST( none.getSource().plasmaCurrent() == 0.0 );
+
+	// A NEGATIVE CURRENT IS ORDINARY. The sign is the direction of the toroidal
+	// current and refusing it would refuse half the machines in the world.
+	Configuration const reversed = parse( mhd(
+		"Normalised = true\nPsiAxis = 0.1\nPlasmaCurrent = -3.0e5\n" ) );
+	BOOST_TEST( reversed.getSource().plasmaCurrent() == -3.0e5 );
+
+	// WITHOUT A NORMALISATION there is no profile scale to make an unknown, so
+	// the border would be solved and its answer would multiply nothing.
+	refuses( mhd( "PlasmaCurrent = 3.0e5\n" ), "source.PlasmaCurrent" );
+
+	// AN EXPLICIT ZERO IS NOT THE DEFAULT WEARING A DIFFERENT SPELLING. It is a
+	// prescribed current of zero, which the border satisfies by driving the
+	// profile scale to zero -- a converged solve describing no plasma.
+	refuses( mhd( "Normalised = true\nPsiAxis = 0.1\nPlasmaCurrent = 0.0\n" ),
+	         "source.PlasmaCurrent" );
+}

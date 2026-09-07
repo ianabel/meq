@@ -225,6 +225,24 @@ namespace meq
 		// Nothing here can check that, the profile being a table; see
 		// meq::NormalisedSource::setPlasmaSupport.
 		bool confineToPlasma = false;
+
+		// [source] PlasmaCurrent, in AMPERES and signed. Non-zero makes the
+		// profile SCALE an unknown of the bordered Newton and prescribes the
+		// current instead: the profiles then give the current's SHAPE and this
+		// gives its SIZE. Zero, the default, fixes the amplitude as before.
+		//
+		// AMPERES HERE AND mu0 I_p AT THE LIBRARY, WHICH IS A DELIBERATE
+		// DIFFERENCE. meq::GradShafranovSolver::setPlasmaCurrent takes mu0 I_p
+		// because everything in the solver already speaks in it -- Ampere's law
+		// reads the flux integral as -mu0 I_p and the constraint is assembled as
+		// int F/r, which IS mu0 I_p -- and taking amperes THERE would mean the
+		// solver knowing a mu0, which could disagree with the source's own and
+		// scale two terms of one equation differently. The CONFIGURATION layer
+		// has no such problem: the file names exactly one mu0, under [source],
+		// and the driver multiplies by it. That is the same rule [[coils]]
+		// already follows for its Current, and it is why there is no Mu0 key
+		// anywhere but [source].
+		double plasmaCurrent = 0.0;
 	};
 
 	// The nonlinear manufactured solution of HDG-GradShafranov.pdf Example 5,
@@ -318,6 +336,7 @@ namespace meq
 		bool normalised = false;
 		double psiAxis = 0.0;
 		bool confineToPlasma = false;
+		double plasmaCurrent = 0.0;
 	};
 
 	using SourceParameters = std::variant< SolovievParameters, MHDParameters,
@@ -350,6 +369,13 @@ namespace meq
 		/// plasma's support moves with the solution. False for every source
 		/// that is not normalised, since the test is on Psi.
 		bool confinesToPlasma() const;
+
+		/// `[source] PlasmaCurrent` in AMPERES, signed, or zero if the file did
+		/// not prescribe one. Zero means the profile amplitude is fixed and the
+		/// current is whatever it comes out as; non-zero makes the amplitude an
+		/// unknown of the bordered Newton. See MHDParameters::plasmaCurrent for
+		/// why this is amperes where the library's setPlasmaCurrent is `mu0 I_p`.
+		double plasmaCurrent() const;
 
 		/// The permeability this source multiplies its pressure term by.
 		///

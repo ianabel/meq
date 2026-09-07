@@ -356,6 +356,53 @@ must carry charges of both signs; and ``*Variable``/``*Fit`` keys are reserved
 for a facility that does not exist yet and are refused rather than ignored, on
 this source type and on every other.
 
+``PlasmaCurrent`` — the third border
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``[source] PlasmaCurrent`` makes the profile **scale** an unknown of the bordered
+Newton and prescribes the current instead: the profiles then give the current's
+**shape** and this gives its **size**. It is how every production free-boundary
+code poses the problem. Absent, the amplitude is fixed and the current is
+whatever it comes out as.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 16 60
+
+   * - Key
+     - Default
+     - Meaning
+   * - ``PlasmaCurrent``
+     - *absent*
+     - :math:`I_p` in **amperes**, signed. Requires ``Normalised = true``.
+
+.. note::
+
+   **It is in amperes here and** :math:`\mu_0 I_p` **at the library, and the
+   difference is deliberate.** :cpp:func:`meq::GradShafranovSolver::setPlasmaCurrent`
+   takes :math:`\mu_0 I_p` because everything inside the solver already does —
+   Ampère's law reads the flux integral as :math:`-\mu_0 I_p` and the constraint
+   is assembled as :math:`\int F/r`, which *is* :math:`\mu_0 I_p` — and a solver
+   taking amperes would need a :math:`\mu_0` of its own, which could disagree
+   with the source's and scale two terms of one equation differently.
+
+   The configuration layer has no such problem: the file names exactly one
+   :math:`\mu_0`, under ``[source]``, and it is the same one ``[[coils]]`` uses
+   for its ``Current``. The conversion happens once, in the driver.
+
+An explicit ``PlasmaCurrent = 0.0`` is **refused** rather than read as the
+default: a prescribed current of zero is satisfied by driving the profile scale
+to zero, which is a converged solve describing no plasma.
+
+.. warning::
+
+   **With one constraint and one scale the counting is right and the solution is
+   not unique.** ``freegs4e`` fixes *two* quantities against two parameters — the
+   axis pressure **and** :math:`I_p`. MEQ's border fixes one, so Newton has no
+   reason to prefer the physical branch over a larger, flatter plasma carrying
+   the same current. The initial guess is what selects it; see
+   ``[initialguess]``.
+
 ``[boundary]``
 --------------
 
