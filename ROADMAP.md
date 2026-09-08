@@ -585,12 +585,24 @@ the Maschke–Perrin reading **this file previously got wrong** — its §4 is (
 isothermal closure at every `γ`, and the paragraph that stood here called it an
 adiabatic one.
 
+**Maschke–Perrin is in `tests/analytic/`** as `MaschkePerrin.hpp`, with
+`MaschkePerrinConvergence.cpp` driving it. Be precise about what it is worth:
+its **§4 PDE is Li & Zhu's (12) renamed**, so nothing about the discretisation
+is new. What is new is that its (4.7) constrains only `ω²/(R̄T)`, so it is the
+**one exact solution MEQ has with `T′ ≠ 0` and `ω′ ≠ 0`** — every other
+closed-form check of `meq::RotatingSource` runs at constant `T` and constant
+`ω`, and the varying case was covered only by a central difference of MEQ's own
+`f()`. Measured: the production source reproduces (4.10) to 4.3e-16 with a
+`dF/dψ` of 2.6e-15 against `O(1)` cancelling terms, and drives the solve at
+1.996 / 2.997 / 3.998.
+
 **One thing it turned up is still open**: no published rotating benchmark
 exercises the `C′(ψ)` term, because Li & Zhu's Solov'ev case holds `T` and `Ω`
 constant and Maschke–Perrin's (4.7) *forces* `C` constant — and that is precisely
 the term Li & Zhu got the sign of wrong. Only `RotatingSourceTests`' `dFdPsi`
-sweep touches it. Putting Maschke–Perrin into `tests/analytic/` is the cheap
-follow-up and has not been done.
+sweep touches it. **No exact solution can close it**: `C` constant is what makes
+the equation solvable in closed form at all, so the route is a manufactured
+solution rather than another paper.
 
 ## 10. The fixed-`q(ψ)` solver — MEQ, and its machinery now exists
 

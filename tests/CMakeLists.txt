@@ -145,6 +145,14 @@ set(MEQ_CONVERGENCE_TESTS
 	RotatingSolovievConvergence
 	RotatingSourceConvergence
 	RotatingNewtonConvergence
+	# Maschke & Perrin's section 4, the second exact rotating equilibrium. It
+	# solves the SAME equation as the rotating Solov'ev case above, so nothing
+	# about the discretisation is new; what is new is that its (4.7) constrains
+	# only omega^2/T, leaving both an arbitrary function of psi. It is therefore
+	# the only closed form MEQ has that can drive meq::RotatingSource with
+	# psi-DEPENDENT temperature and rotation, where the alternative check is a
+	# central difference of MEQ's own f().
+	MaschkePerrinConvergence
 	CriticalPointConvergence
 	FluxSurfaceConvergence
 	FluxGridConvergence

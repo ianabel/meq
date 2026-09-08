@@ -322,15 +322,25 @@ agreeing with the corrected form.
    that does not exercise a term cannot validate it.
 
    The same gap is why **no published rotating benchmark exercises the term
-   MEQ's Jacobian is most at risk in**. Only MEQ's own finite-difference sweep
-   over profiles with genuine :math:`\psi`-dependence in temperature and
-   rotation touches it.
+   MEQ's Jacobian is most at risk in** — the derivative of the shared density
+   exponent with respect to :math:`\psi`. Every exact rotating solution holds
+   that exponent constant, because holding it constant is what makes the
+   equation solvable in closed form. Only MEQ's own finite-difference sweep
+   touches it.
 
 **A citation that is wrong nearly everywhere.** :cite:t:`MaschkePerrin1980` is
 a second exact rotating benchmark, and almost every citation of the result names
 a different, later paper by the same authors. It is section 4 of the 1980 paper
 — temperature a surface quantity — that is the isothermal closure MEQ solves;
 that paper's section 3 is a genuine polytrope and is a *different* equation.
+
+That section 4 constrains only the *ratio* of the rotation frequency squared to
+the temperature, leaving both free functions of :math:`\psi`. It is therefore
+the exact solution MEQ measures :cpp:class:`meq::RotatingSource` against with
+**every profile varying** — two temperatures, two densities and the rotation —
+whose variations have to cancel to a source independent of :math:`\psi`. Its
+equilibrium equation is otherwise the same one :cite:t:`LiZhu2021` solve, so it
+is a second test of the source rather than of the discretisation.
 
 .. warning::
 

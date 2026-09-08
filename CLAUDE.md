@@ -4246,8 +4246,15 @@ paths point at another machine.
 **THE GAP THAT LEAVES IS WORTH KNOWING**: no published rotating benchmark
 exercises the `C′(ψ)` term — Li & Zhu's Solov'ev case has `T` and `Ω` constant,
 and Maschke & Perrin's (4.7) *forces* `C` constant — and that is precisely the
-term Li & Zhu got wrong. Only `RotatingSourceTests`' `dFdPsi` sweep, over
-profiles with genuine `ψ`-dependence in `ω` and `T`, touches it.
+term Li & Zhu got wrong. Only `RotatingSourceTests`' `dFdPsi` sweep touches it,
+and that is a difference of MEQ's own `f()` rather than a closed form.
+
+**`ψ`-DEPENDENT `T` AND `ω` ARE NO LONGER PART OF THAT GAP, AND THE TWO ARE
+WORTH KEEPING APART.** Maschke & Perrin's §4 leaves `T(ψ)` free and `ω(ψ)` with
+it, so `MaschkePerrinConvergence.cpp` drives `meq::RotatingSource` on five
+varying profiles against a closed form. **`C′ ≠ 0` is what remains**, and no
+exact solution can reach it — see *Maschke & Perrin is the second exact rotating
+benchmark*.
 
 **THE +5% MUTATION TEST WAS RE-RUN ON THE ROTATING CASE AND REPRODUCES THE
 STATIC RESULT EXACTLY.** Perturbing `RotatingSource::dFdPsi` by 5% leaves every
@@ -4280,18 +4287,82 @@ such point. The fix is a floor at the problem's own energy scale, not a
 case-dependent one read off the configuration — which was the first attempt and
 failed again at `ω = 0`, where the scale is itself zero.
 
-**MASCHKE & PERRIN IS A SECOND EXACT BENCHMARK, AND THIS FILE'S PLAN SAID IT WAS
-NOT.** The flow plan rejected it as an adiabatic closure on the strength of a
-`γ` in the equations. Wrong section of the paper: `refs/MaschkePerrin.pdf` —
-*Plasma Physics* **22** (1980) 579, not the Phys. Lett. A 102 (1984) everyone
-cites — carries two solutions, and its **§4** takes the temperature as a surface
-quantity and is (136)'s isothermal closure. `γ` appears there once, only inside
-`γΩ²`, and cancels out of the solution: **every `γ` works, not just `γ = 1`**.
-Verified by substitution rather than re-derivation — 8e-26 relative at 50 digits,
-exactly zero symbolically, `μ₀` restored by `p_SI = p_M&P/μ₀`. Its §3, the actual
-polytrope, is a power law in `r²` and is **not** ours. The mistake is left
-recorded because it is this project's standing hazard — three closures that look
-alike — biting the plan that warns about it.
+### Maschke & Perrin is the second exact rotating benchmark, and what it buys is the SOURCE and not the discretisation
+
+`tests/analytic/MaschkePerrin.hpp` and `tests/convergence/MaschkePerrinConvergence.cpp`.
+
+**THE FLOW PLAN REJECTED THIS PAPER AS AN ADIABATIC CLOSURE ON THE STRENGTH OF A
+`γ` IN THE EQUATIONS, AND THAT READING IS WRONG.** Wrong section:
+`refs/MaschkePerrin.pdf` — *Plasma Physics* **22** (1980) 579, not the Phys.
+Lett. A 102 (1984) everyone cites — carries two solutions, and its **§4** takes
+the temperature as a surface quantity and is (136)'s isothermal closure. `γ`
+appears there once, only inside `γΩ²`, whose job is to convert between the
+adiabatic sound speed of (4.11)'s Mach number and the isothermal one the
+equation actually knows, so it cancels out of the solution: **every `γ` works,
+not just `γ = 1`**, and `γΩ²` is the isothermal Mach number squared at `R₀`. Its
+**§3**, the actual polytrope, carries a **power law** where §4 carries an
+exponential and is **not** ours. The mistake is recorded because it is this
+project's standing hazard — three closures that look alike — biting the plan
+that warns about it. `μ₀` is restored by `p_SI = p_M&P/μ₀`, the paper working in
+`j = ∇×B`.
+
+**AND THE PDE IS LI & ZHU'S RENAMED, WHICH IS THE FINDING RATHER THAN A
+DISAPPOINTMENT.** Read (4.10) against Li & Zhu's (12):
+
+```
+Δ*ψ = −p₁ r² exp[ M₀²( r²/R₀² − 1 ) ] − F₀           Li & Zhu (12)
+Δ*ψ = −( P/R₀⁴ ) r² exp[ m r²/2R₀² ]   − M/R₀²       M&P (4.10),  m := γΩ²
+```
+
+— the same equation, differing by a constant absorbed into the amplitude; and
+(4.17)'s harmonic terms `1`, `R²`, `X²R² − R⁴/4` are three of Li & Zhu's four,
+with the same exponential particular solution. **So a convergence study on it is
+a restatement of `RotatingSolovievConvergence.cpp`**, and anything claiming this
+fixture is a second independent test of the *discretisation* is wrong.
+
+**WHAT IT BUYS IS THE ONLY EXACT SOLUTION MEQ HAS WITH `T′ ≠ 0` AND `ω′ ≠ 0`.**
+(4.7) constrains only the **ratio** `ω²/(R̄T)`, leaving `T(F)` an arbitrary
+surface function and `ω(F)` following it through (4.13). Every other closed-form
+check of `meq::RotatingSource` in this tree runs at **constant** `T` and
+**constant** `ω` — `RotatingSourceConvergence.cpp`'s species carry
+`ConstantMassProfile` for both, because Li & Zhu's Solov'ev case holds `T₀` and
+`Ω₀` constant and no closed form survives otherwise. What checks the varying
+case is a central difference of MEQ's own `f()`, which **cannot see a term
+missing from both `f()` and `dFdPsi()`**.
+
+In MEQ's language §4 is exactly two conditions: **`C(ψ)` constant** (that is
+(4.7)) and **`p₀(ψ)` linear** (that is (4.9)). Satisfying both while leaving
+every profile varying takes one shape function `θ(ψ) = 1 + σψ`, with
+`T_s = τ_sθ`, `ω = ω₀√θ` — which **is** (4.13) — and `n_s0 = c_s N(ψ)/θ` with
+`N` linear and `Σ Z_s c_s = 0`. **Five profiles varying, and their variations
+cancel to a source independent of `ψ`.** Measured over the benchmark box:
+
+| | |
+|---|---|
+| `meq::RotatingSource` against (4.10) | **4.3e-16** relative |
+| `dF/dψ`, which (4.9)'s linear `p_T` makes zero | **2.6e-15** |
+| the shared exponent's drift with `ψ`, i.e. (4.7) | **2.2e-16** |
+| the terms cancelling inside `μ₀r² d²p/dψ²` | **1.957**, so the zero above is not vacuous |
+| the same with (4.7) **broken** | **2.9e-01** and `dF/dψ = 5.8e+00` |
+
+and the production source drives the solve to **1.996 / 2.997 / 3.998** in `ψ`
+and 1.987 / 2.989 / 3.989 in `q`, Newton taking **1** step everywhere.
+
+**IT DOES NOT CLOSE THE `C′(ψ)` GAP AND NO EXACT SOLUTION CAN.** `C` constant is
+precisely what collapses (4.6) to (4.8); a varying `C` is what makes the
+equation unsolvable in closed form.
+
+**THE GEOMETRIC CONSTANTS NEED THEIR OWN CHECK, AND SUBSTITUTION INTO THE PDE
+CANNOT SUPPLY IT.** `C` of (4.18) and `ε_a` multiply `Δ*`-**harmonic** terms, so
+a wrong one leaves `F`, `Δ*ψ` and every rate exact — `Soloviev.hpp`'s lesson on a
+different paper. (4.19)'s axis ellipticity is the independent statement:
+separately published, recoverable from `ψ`'s own Hessian, reading **2.297442550
+against 2.297442541**. Mutating `C` is caught by that case and by nothing else in
+the file — the `Δ*` scan and all four rate tables stay green, which is the
+property being relied on rather than an accident. **(4.19) holds only at `M = 0`**,
+the poloidal-current term moving `∂²ψ/∂X²` and not `∂²ψ/∂R²`: at `M = 0.3` the
+true elongation is 1.767 against (4.19)'s 2.297, and that 23% is asserted as a
+control so the scope is not a footnote.
 
 ## Solution inversion: every stage but IN-5 is done
 
@@ -5503,8 +5574,11 @@ count buys a factor rather than a few percent.
 * **§3.3's implicit quadrature is the missing third leg** of IN-2's
   cross-check. Its acceptance said "all three agreeing is worth more than any one
   being plausible" and two were delivered.
-* **Maschke & Perrin is a verified exact rotating benchmark** — 8e-26 by
-  substitution — and is still not in `tests/analytic/`.
+* **Maschke & Perrin is in `tests/analytic/`**, as `MaschkePerrin.hpp` and
+  `MaschkePerrinConvergence.cpp`. See *Maschke & Perrin is the second exact
+  rotating benchmark*, and note what it does **not** buy: its PDE is Li & Zhu's
+  renamed, so the discretisation study is a restatement. What it buys is the
+  **source**.
 
 **What is deliberately absent from the tracer**, so nobody reads more into it
 than is there: it follows **one connected component** and neither finds nor
