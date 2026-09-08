@@ -1656,7 +1656,7 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 git submodule update --init --recursive     # extern/toml11
 cmake -B build
 cmake --build build -j4
-cd build && OMP_NUM_THREADS=4 ctest -j4      # 47/47, about 600 s
+cd build && OMP_NUM_THREADS=4 ctest -j4      # 48/48, about 700 s
 ```
 
 **RUN IT `-j4` WITH `OMP_NUM_THREADS=4`, WHICH IS 3.2x FASTER AND MEASURED.**
@@ -1666,7 +1666,7 @@ product at the core count is what pays:
 
 → **[M-14](MEASUREMENTS.md#m-14)** — wall · CPU
 
-37/37 in every configuration when that table was taken, and **47/47 today** —
+37/37 in every configuration when that table was taken, and **48/48 today** —
 the count moves as cases are added, so read the table's ratios rather than its
 absolute seconds. Nothing in the suite depends on a thread count, which is the
 correctness half.
@@ -1710,9 +1710,10 @@ single-threaded — against `PedestalConvergence`'s 178 s. So 223 s is very near
 "the suite costs one lint run", and going below it means parallelising
 clang-tidy (`run-clang-tidy`) rather than anything about the solver.
 
-**AND `naming` IS NO LONGER AT THE TOP AT ALL.** At **44** tests the two longest
-are **`FreeBoundaryCoupling` at 381.7 s** and `naming` at about 240 s, with
-`DriverAcceptance` at 70.4 s — the first two within a factor of 1.6, so `-j4`
+**AND `naming` IS NO LONGER AT THE TOP AT ALL.** At **48** tests the two longest
+are **`FreeBoundaryCoupling` at 413.2 s** and `naming` at 340.0 s, with
+`DriverAcceptance` at 124.2 s — which is 54 s more than it was, all of it the
+q-driven example's 43 equilibria — the first two within a factor of 1.6, so `-j4`
 cannot overlap them once everything else has finished and the run is very nearly
 the cost of the longest chain rather than of the total work.
 
