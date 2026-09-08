@@ -3230,6 +3230,25 @@ BOOST_AUTO_TEST_CASE( theBoundaryIndicatorRefinesGammaHAndMovesTheCoefficients )
  * It converges. Four limiter positions, five to eight Newton steps each, with
  * psi_ax's constraint at machine zero every time -- so this is a basin rather
  * than a lucky point.
+ *
+ * **WHAT THIS CASE DOES NOT SAY, AND SECTION 11 IS WHY.** The psi_ax and
+ * psi_bnd columns below are NOT a physical equilibrium. This fixture has a
+ * limiter, a free psi_bnd and a domain reaching r = 0, and its profiles are
+ * unconfined -- so gg'( Psi_axis ) is non-zero on the symmetry axis, F/r there
+ * is an unbounded mu_0 j_phi, and psi_h grows a LAYER of unconstrained dofs
+ * along the whole axis which psi_ax then reports: 1.09e-01 against a true peak
+ * of 4.45e-02 off the axis, a factor of 2.5.
+ *
+ * That does not touch what this case asserts. The residuals, the iteration
+ * counts and psi_ax's own constraint at 1e-17 are statements about the solve
+ * CLOSING -- the two borders reaching a common root, which is section 7.13's
+ * question -- and closing on an unphysical equilibrium is still closing. The
+ * numbers are therefore kept as the record of that, and are not to be quoted as
+ * a machine.
+ *
+ * **theTwoBorderSolveReportsATrueMagneticAxis IS THE PHYSICAL ONE**, and its
+ * header is the diagnosis and the repair: ConfineToPlasma, a prescribed current
+ * and a vertical field, each of which was measured to be necessary.
  */
 BOOST_AUTO_TEST_CASE( theTwoBordersConvergeTogether )
 {
@@ -3304,43 +3323,34 @@ BOOST_AUTO_TEST_CASE( theTwoBordersConvergeTogether )
 
 
 /*
- * SECTION 11.1: RUN THE GUARD ON SECTION 7.12b's CASE. IT HAD NEVER BEEN RUN,
- * AND THE HANDOFF FLAGGED THE GAP AS POSSIBLY FATAL TO THE GUARD.
+ * SECTION 11: DOES A TWO-BORDER SOLVE REPORT A TRUE MAGNETIC AXIS? IT DOES, ON
+ * A FIXTURE THAT DESCRIBES A MACHINE -- AND THIS CASE WAS RED FOR A DAY WHILE
+ * IT DESCRIBED SOMETHING ELSE.
  *
- * The worry was specific and it was the right one to have.
- * meq::CriticalPointFinder::checkAxis() is one sided and largest-Psi-wins by
- * design, so a spurious extremum costs it a MISSED detection rather than a false
- * alarm -- and if the thing psi_ax is attained on is ITSELF an O-point of q_h,
- * then Psi reads about 1 there and the guard AGREES with a number that is not a
- * magnetic axis. Until it was run on the sighting that motivated half of it, the
- * guard was not known to catch that sighting.
+ * THE HISTORY IS THE POINT AND IS KEPT. This case began as section 11.1: run
+ * meq::CriticalPointFinder::checkAxis() on section 7.12b's sighting, which had
+ * never been done. The worry was that the guard is one sided and
+ * largest-Psi-wins by design, so if the thing psi_ax is attained on were ITSELF
+ * an O-point of q_h the guard would AGREE with a number that is not an axis.
  *
- * IT CATCHES IT. Psi at the located O-point reads 0.35 to 0.56 against a
- * threshold of 0.90, at every one of theTwoBordersConvergeTogether's four
- * limiter radii, and REFUSES is the verdict at n = 24, 32 and 48 and at k = 2
- * and 3 alike. The flagged gap does not materialise here.
+ * IT CAUGHT IT. Psi at the located O-point read 0.35 to 0.56 against a threshold
+ * of 0.90 at every one of theTwoBordersConvergeTogether's four limiter radii, at
+ * n = 24, 32 and 48 and at k = 2 and 3 alike. And the reason was structural
+ * rather than luck: what psi_ax was attained on sat at r = 0 EXACTLY, on the
+ * flat side of the half-disc, where an interior extremum cannot be.
  *
- * AND THE REASON IS STRUCTURAL RATHER THAN LUCK, WHICH IS WHAT MAKES IT WORTH
- * MORE THAN ONE MEASUREMENT. What psi_ax is attained on sits at r = 0 EXACTLY --
- * on the flat side of the half-disc, which is the domain boundary -- and an
- * interior extremum cannot be there. Every maximum sweep() finds is at
- * r >= 0.76. So the competition the guard runs never sees it.
+ * IT WAS NOT A SPIKE AND NOT A CORNER, AND SECTION 7.12b's OWN LANGUAGE IS WHAT
+ * THAT CORRECTED. The twelve largest nodal values of psi_h were all at
+ * r = 0.00000 and all read 1.0913e-01 to within 4e-05 of each other, spread over
+ * the whole axis from z = -1.42 to z = +1.06 -- a LAYER of unconstrained dofs
+ * running the entire symmetry axis, not one bad dof where Gamma meets it. The
+ * corner was merely where the argmax landed, by 2e-05; at k = 3 it landed on the
+ * other corner. It did not fall with h -- 1.0916e-01, 1.0982e-01, 1.0953e-01 at
+ * n = 24, 32, 48 -- against a datum of zero imposed on that very boundary and a
+ * true peak of 4.447e-02.
  *
- * IT IS NOT A SPIKE AND IT IS NOT AT THE CORNER, AND SECTION 7.12b's OWN
- * LANGUAGE IS WHAT THIS CORRECTS. The twelve largest nodal values of psi_h are
- * all at r = 0.00000 and all read 1.0913e-01 to within 4e-05 of each other,
- * spread over the whole axis from z = -1.42 to z = +1.06. It is a LAYER of
- * unconstrained dofs running the entire symmetry axis, not one bad dof in the
- * corner where Gamma meets it; the corner is merely where the argmax happens to
- * land, and it wins by 2e-05. At k = 3 it lands on the OTHER corner. The layer
- * does not fall with h -- 1.0916e-01, 1.0982e-01, 1.0953e-01 at n = 24, 32, 48 --
- * against a datum of zero imposed on that very boundary and a true peak of
- * 4.447e-02, so it is not a discretisation error converging away either. Where
- * it comes from is section 11.3's question and this case does not answer it;
- * what this case establishes is that psi_ax reports the layer.
- *
- * AND THE MECHANISM IS MEASURED, 2026-09-07. IT IS A 1/r POLE IN THE LOAD, AND
- * WHAT PUTS IT THERE IS THE LIMITER BORDER MEETING AN UNCONFINED PROFILE.
+ * THE MECHANISM, MEASURED: A 1/r POLE IN THE LOAD, PUT THERE BY THE LIMITER
+ * BORDER MEETING AN UNCONFINED PROFILE.
  *
  * The load meq::SourceIntegrator assembles is -( F/r, w ), and F/r IS mu_0 j_phi
  * -- the toroidal current density, j_phi = r p'( Psi ) + gg'( Psi )/( mu_0 r ).
@@ -3357,7 +3367,8 @@ BOOST_AUTO_TEST_CASE( theTwoBordersConvergeTogether )
  * vacuum carries g = const, and where an unconfined profile EXTRAPOLATES instead
  * and hands back 0.05 * Psi_axis.
  *
- * A 2x2 factorial, this fixture's own configuration, one variable at a time:
+ * A 2x2 factorial on the old fixture, one variable at a time -- and it is kept
+ * because theAxisSourceGuardSeparatesThePoleFromTheLimiter still runs it:
  *
  *   limiter  gg'    psi_bnd     Psi_axis    F( 0, z )   psi on axis   verdict
  *   no       0.05   0           0           0.0e+00     1.25e-04      AGREES
@@ -3365,10 +3376,8 @@ BOOST_AUTO_TEST_CASE( theTwoBordersConvergeTogether )
  *   no       0      0           0           0.0e+00     1.28e-05      AGREES
  *   YES      0      2.13e-02    -2.21e-01   -1.4e-16    1.03e-05      AGREES
  *
- * The FOURTH row is the control that rules out the limiter itself: psi_bnd is
- * 2.1e-02 and the axis sits at Psi = -0.22, deeply into the vacuum, and there is
- * no layer -- because F( 0, z ) is machine zero. It is neither the limiter alone
- * nor gg' alone; it is F( 0, z ) != 0.
+ * The FOURTH row is the control that rules out the limiter itself. It is
+ * neither the limiter alone nor gg' alone; it is F( 0, z ) != 0.
  *
  * AND THE DISCRETE HALF IS WHY IT IS NOT MERELY UGLY. The CONTINUOUS problem is
  * well posed: the energy int ( 1/r )|grad psi|^2 forces its members to vanish
@@ -3377,46 +3386,63 @@ BOOST_AUTO_TEST_CASE( theTwoBordersConvergeTogether )
  * polynomials, free to be nonzero at r = 0, and against those the load
  * functional is UNBOUNDED. The quadrature is the only thing making it finite.
  * Measured, sweeping setSourceQuadratureOrder() at fixed h: with gg' = 0 the
- * answer is BIT-IDENTICAL at extra = 4, 8, 16 and 20 -- 1.034602461e-05 on the
- * axis and 1.175887576e-01 off it, ten digits -- because F/r is then a
- * polynomial; with gg' = 0.05 nothing settles, the axis reading 1.09e-01,
- * 1.15e-01, 9.18e-02, 8.76e-02 over the same sweep and not falling with h
- * either.
+ * answer is BIT-IDENTICAL at extra = 4, 8, 16 and 20 -- ten digits -- because
+ * F/r is then a polynomial; with gg' = 0.05 nothing settles, the axis reading
+ * 1.09e-01, 1.15e-01, 9.18e-02, 8.76e-02 over the same sweep.
  *
- * THE CONTROLS THAT SAY IT IS NOT THE GEOMETRY. FB-A's fixtures are
- * Delta*-harmonic, so F == 0 and there is no load at all.
- * theSolverReachesTheExteriorDatumOnTheHalfDisc runs on THIS mesh, this
- * extension and this corner and converges at 1.99 / 2.99 / 3.99, because
- * ExteriorMatched's F is built on ExteriorDtN::basis, which carries
- * ( 1 - mu )( 1 + mu ) explicitly "so the axis is exactly zero" -- F ~ r^2 and
- * F/r -> 0. And examples/free-boundary-halfdisc.toml, the shipped driver case,
- * has the same gg' table and the same RMin = 0 and is HEALTHY at Psi = 1.0036,
- * because it carries no limiter and so keeps psi_bnd = 0.
+ * ==========================================================================
+ * SO THE FIXTURE WAS THE DEFECT, AND THIS CASE NOW RUNS A PHYSICAL ONE.
+ * ==========================================================================
  *
- * SO THE REPAIR IS PHYSICAL AND IT ALREADY EXISTS: [source] ConfineToPlasma
- * sets F = 0 wherever Psi <= 0, which is the statement that the vacuum carries
- * no current. examples/limited-tokamak.toml -- a limiter, a free psi_bnd and a
- * gmsh mesh reaching r = 0, i.e. every ingredient -- sets it and reads a
- * normalised flux of 1.0016. For a domain reaching the axis with psi_bnd free it
- * is a PRECONDITION rather than an option, in the same sense as j >= 1 at the
- * plasma edge. This fixture does not set it, and measured, setting it here does
- * not converge -- which is a finding of its own and not a repair.
+ * The old fixture asked for an equilibrium that does not exist: a limiter, a
+ * free psi_bnd, a domain reaching the axis, an amplitude FIXED, and profiles
+ * that carry current into the vacuum. This case asserted the property that was
+ * WANTED and was red for a day, which is the stance -- and the repair is to give
+ * the fixture the physics it was missing, not to relax the assertion.
  *
- * WHAT IS ASSERTED, AND ONE OF THE TWO IS RED ON PURPOSE.
+ * THREE THINGS WERE MISSING AND ALL THREE ARE NECESSARY. Measured 2026-09-07,
+ * one at a time:
  *
- *   * located -- an O-point of the sense the span asks for exists at all. Green,
- *     and a precondition: without one there is nothing to compare against and
- *     every number below would be vacuous.
- *   * agrees -- the reported psi_ax IS the flux at that axis. RED, because it is
- *     not, and this tree asserts the behaviour that is WANTED rather than
- *     recording the defect in a test that passes. psi_ax is what the profiles
- *     are normalised by, so a wrong one is not a bad number, it is a different
- *     equilibrium. FREE-BOUNDARY-PLAN.md section 11.5 is the three candidate
- *     repairs and none of them is costed; this goes green when one lands.
+ *   * ConfineToPlasma -- F = 0 wherever Psi <= 0, which is the statement that
+ *     the vacuum carries no toroidal current. It makes | F | on the axis
+ *     EXACTLY zero, not merely small. **Alone it does not converge**, at any of
+ *     the four radii.
+ *   * A PRESCRIBED CURRENT. With the amplitude fixed and the support moving,
+ *     section 7.14's argument applies: Lambda = A/span^2 must be an eigenvalue
+ *     of the linearised operator ON the plasma region and the region is itself
+ *     unknown, so scaling A changes nothing and the problem is ill posed rather
+ *     than merely hard. setPlasmaCurrent() makes the scale an unknown instead.
+ *   * A VERTICAL FIELD. With the first two and no coils the solve converges at
+ *     limiter 1.05 -- passing every health check in this case -- to section
+ *     7.14's wall-hugging ANNULUS, its axis at r = 1.38 on a domain reaching
+ *     1.50, and does not converge at all at 1.15 or 1.20. Nothing in the
+ *     constraints says the plasma is a core; the coils are what say it.
  *
- * The convergence of theTwoBordersConvergeTogether is NOT in question and is not
- * re-asserted here -- the residuals, the iteration counts and psi_ax's own
- * constraint at 1e-17 are statements about the solve closing, and it closes.
+ * WITH ALL THREE IT IS HEALTHY AT EVERY RADIUS IN RANGE: | F | on the axis
+ * exactly 0.0, psi_ax attained at r = 0.85 to 0.96 rather than at r = 0.00000,
+ * an O-point of q_h at r = 0.86 to 0.96 carrying Psi = 1.0000, and the
+ * prescribed current delivered to every digit.
+ *
+ * WHERE IT GIVES OUT IS THE GEOMETRY AND IS RECORDED RATHER THAN HIDDEN. The
+ * fourth radius of the old sweep, 1.30, is 0.87 of rho_Gamma and this fixture
+ * does not reach a tokamak there: psi_bnd comes out NEGATIVE at -2.28e-02, the
+ * O-point lands at ( -0.001, 1.441 ) -- on the axis, at the top of the domain --
+ * carrying Psi = 1.14, and | F | on r = 0 is back. It converges, in 8 steps.
+ * That is a different branch and not a worse answer, and the honest fix is a
+ * larger Gamma rather than a looser assertion, so the sweep stops at 1.20.
+ *
+ * THE CONDUCTORS ARE OUTSIDE Gamma AND COST THIS FIXTURE NO MESH, which is FB-7
+ * being used by something other than its own acceptance the day after it landed.
+ * meq::ExteriorCoilSet is the set that can hold them; before it existed the only
+ * way to give a fixture coils was to mesh them in, which would have meant the
+ * gmsh half-disc and a different discretisation from the one this case is about.
+ *
+ * WHAT theTwoBordersConvergeTogether STILL SAYS, AND WHAT IT NO LONGER SAYS.
+ * That case closed section 7.13's "one combination still open" -- both borders
+ * converging together -- and it still does: the residuals, the iteration counts
+ * and psi_ax's own constraint at 1e-17 are statements about the solve CLOSING,
+ * and it closes. What its psi_ax and psi_bnd columns are NOT is a physical
+ * equilibrium, for everything above. Its header now says so and points here.
  */
 BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 {
@@ -3424,15 +3450,62 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 	int const n = 24;
 	double const mu0 = 1.0;
 
+	// j = 1 IN BOTH PROFILES, WHICH ConfineToPlasma REQUIRES. p'( 0 ) and
+	// gg'( 0 ) are zero, so switching F off at the edge leaves the residual C^1
+	// in the unknowns -- at j = 0 it is DISCONTINUOUS there and Newton chases a
+	// root of a discontinuous function, which PlasmaEdgeConvergence measures and
+	// which no starting point and no globalisation repairs.
 	auto pPrime = std::make_shared<PowerProfile const>( 0.6, 1 );
 	auto ggPrime = std::make_shared<PowerProfile const>( 0.05, 1 );
+
+	// THE MACHINE, DERIVED AND NOT TUNED BY EYE. Section 7.15 records that
+	// choosing coil currents by eye and asking a cold Newton to find a plasma
+	// consistent with them is the wrong way round -- freegs4e SOLVES for its
+	// currents inside every Picard step -- and that the cheap fix is Shafranov's
+	// vertical field, which says what field a given I_p needs:
+	//
+	//     B_v = mu0 I_p/( 4 pi R ) [ ln( 8R/a ) + beta_p + l_i/2 - 3/2 ]
+	//
+	// directed to oppose the hoop force, so NEGATIVE in z for a positive I_p:
+	// the force per unit length is I_phi phi-hat x B_z z-hat = I_phi B_z r-hat,
+	// and inward needs I_phi B_z < 0.
+	double const majorRadius = 0.75;
+	double const minorRadius = 0.30;
+	double const mu0Ip = 0.12;
+	double const shafranov = 1.0;                 // beta_p + l_i/2, order one
+	double const bracket =
+		std::log( 8.0*majorRadius/minorRadius ) + shafranov - 1.5;
+	double const verticalField =
+		-mu0Ip*bracket/( 4.0*M_PI*majorRadius );
+
+	// AND THE CURRENT THAT DELIVERS IT IS MEASURED FROM THE COILS THEMSELVES
+	// rather than from an on-axis formula, because ( R, 0 ) is not on the
+	// symmetry axis and the textbook loop expression does not apply there.
+	// B_z = ( 1/r ) d_r psi is MEQ's own convention, so this is one gradPsi()
+	// of a unit-current pair and a division.
+	meq::ExteriorCoilSet probe( mu0 );
+	probe.add( meq::Coil( 1.80, +0.90, 0.10, 0.10, 1.0 ) );
+	probe.add( meq::Coil( 1.80, -0.90, 0.10, 0.10, 1.0 ) );
+	double probeR = 0.0;
+	double probeZ = 0.0;
+	probe.gradPsi( majorRadius, 0.0, probeR, probeZ );
+	double const fieldPerAmp = probeR/majorRadius;
+	double const coilCurrent = verticalField/fieldPerAmp;
+
+	meq::ExteriorCoilSet coils( mu0 );
+	coils.add( meq::Coil( 1.80, +0.90, 0.10, 0.10, coilCurrent ) );
+	coils.add( meq::Coil( 1.80, -0.90, 0.10, 0.10, coilCurrent ) );
 
 	HalfDisc d = makeHalfDisc( n );
 	meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 4 );
 	mfem::ConstantCoefficient zero( 0.0 );
-	// The same guess theTwoBordersConvergeTogether uses, because this must be
-	// the SAME solve: a case that reached a different equilibrium would be
-	// measuring something else and could not qualify that section's table.
+
+	// THE CONDUCTORS ARE OUTSIDE Gamma AND ENTER THROUGH THE COUPLING, which is
+	// FB-7 and is why they cost this fixture no mesh at all: rho = 2.01 against
+	// Gamma at 1.50. A coil meshed in would have wanted the gmsh half-disc and
+	// would have changed the discretisation this case is about.
+	BOOST_TEST_REQUIRE( coils.clearance( dtn.zCentre(), dtn.rhoGamma() ) > 0.0 );
+
 	mfem::FunctionCoefficient guess( []( mfem::Vector const &x )
 	{
 		double const dr = x( 0 ) - 0.75;
@@ -3441,230 +3514,208 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 		return t > 0.0 ? 0.1*t : 0.0;
 	} );
 
-	std::printf( "\n  IS psi_ax A MAGNETIC AXIS ON SECTION 7.12b's CASE? "
-	             "( k = %d, n = %d, %d modes )\n", order, n, dtn.modeCount() );
-	std::printf( "    %-10s %15s %15s %13s %13s %10s %9s\n",
-	             "limiter R", "psi_ax reported", "at", "O-point psi",
-	             "at", "Psi there", "verdict" );
+	std::printf( "\n  A PHYSICAL TWO-BORDER EQUILIBRIUM, AND WHETHER psi_ax IS "
+	             "ITS AXIS ( k = %d, n = %d, %d modes )\n", order, n,
+	             dtn.modeCount() );
+	std::printf( "    mu0 I_p = %.3f, Shafranov bracket %.4f, B_v = %.4e, so "
+	             "each coil carries %.4e\n", mu0Ip, bracket, verticalField,
+	             coilCurrent );
+	std::printf( "    %-8s %-6s %5s %14s %14s %13s %19s %10s %8s\n",
+	             "limiter", "coils", "its", "psi_ax", "psi_bnd", "| F | on r=0",
+	             "psi_ax attained at", "Psi at O", "verdict" );
 
-	int refused = 0;
-	int located = 0;
-	for ( double limiterR : { 1.05, 1.15, 1.20, 1.30 } )
+	struct Row
+	{
+		double limiter = 0.0;
+		bool withCoils = false;
+		bool converged = false;
+		bool bounded = false;
+		bool agrees = false;
+		double nodeR = 0.0;
+		double axisR = 0.0;
+		double normalisedFlux = 0.0;
+		double current = 0.0;
+	};
+	std::vector<Row> rows;
+
+	// THE CONTROL RUNS AT ONE RADIUS ONLY, and that is the cheap choice rather
+	// than the weak one: at 1.05 the coil-free case CONVERGES and reports the
+	// wrong topology, which is a sharper statement than failing to converge.
+	// Measured 2026-09-07, the other two radii do not converge at all without
+	// the vertical field.
+	for ( double limiterR : { 1.05, 1.15, 1.20 } )
+	 for ( int withCoils : ( limiterR < 1.10 ? std::vector<int>{ 1, 0 }
+	                                         : std::vector<int>{ 1 } ) )
 	{
 		meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, mu0 );
+
+		// THE REPAIR, AND IT IS ONE LINE OF PHYSICS: the vacuum carries no
+		// toroidal current, so F = 0 wherever Psi <= 0. Without it the axis --
+		// which sits at Psi = -psi_bnd/span, NEGATIVE once the limiter border
+		// makes psi_bnd an unknown -- is handed gg'( Psi_axis ) != 0, and F/r
+		// is mu_0 j_phi.
+		source.setPlasmaSupport( true );
+
 		meq::GradShafranovSolver solver( *d.sub, order );
 		solver.setInitialGuess( guess );
 		solver.setNewtonControl( 1.0e-9, 1.0e-12, 150 );
 		solver.setSource( source, 0.1 );
+
+		// AND THE SECOND HALF OF THE REPAIR, WITHOUT WHICH THE FIRST DOES NOT
+		// CONVERGE. With the amplitude FIXED and the support moving this is a
+		// non-linear eigenvalue problem -- section 7.14 -- so scaling the
+		// profiles changes nothing and Newton has no branch to prefer.
+		// Prescribing I_p makes the scale an unknown instead, which is what
+		// CEDRES++ and FreeGS both do.
+		solver.setPlasmaCurrent( mu0Ip );
 		solver.setBoundaryData( zero );
 		solver.setExtension( *d.path, d.gammaHMarker );
 		solver.setBoundaryFluxPoint( limiterR, 0.0 );
+		if ( withCoils )
+			solver.setExteriorConductors( coils );
 		solver.setExteriorCoupling( dtn );
-		solver.solve();
 
-		// The guard's answer only means anything on a solve that closed, and
-		// this case is not the one that establishes that -- so it is REQUIRED
-		// here rather than tested.
-		BOOST_TEST_REQUIRE( !solver.newtonResiduals().empty() );
-		BOOST_TEST_REQUIRE( solver.newtonResiduals().back() < 1.0e-8,
-			"the solve at limiter R = " << limiterR << " did not converge, so "
-			"there is no converged psi_ax to ask about. "
-			"theTwoBordersConvergeTogether is where that is measured." );
+		Row row;
+		row.limiter = limiterR;
+		row.withCoils = withCoils != 0;
 
+		try
+		{
+			solver.solve();
+			row.converged = !solver.newtonResiduals().empty()
+			                && solver.newtonResiduals().back() < 1.0e-8;
+		}
+		catch ( std::exception const & )
+		{
+			row.converged = false;
+		}
+
+		if ( !row.converged )
+		{
+			std::printf( "    %-8.2f %-6s %5s %14s %14s %13s %19s %10s %8s\n",
+			             limiterR, withCoils ? "yes" : "NO", "-", "-", "-", "-",
+			             "-", "-", "NO SOLVE" );
+			rows.push_back( row );
+			continue;
+		}
+
+		meq::GradShafranovSolver::AxisSourceCheck const axisSource =
+			solver.checkAxisSource();
 		meq::CriticalPointFinder finder( solver );
 		meq::AxisAgreement const check =
 			finder.checkAxis( solver.psiAxis(), solver.psiBoundary() );
 
-		std::printf( "    %-10.2f %15.9e (%5.3f,%6.3f) ", limiterR,
-		             check.psiAxis, check.nodeR, check.nodeZ );
-		if ( check.located )
-			std::printf( "%13.6e (%5.3f,%6.3f) %10.4e %9s\n",
-			             check.axis.psi, check.axis.r, check.axis.z,
-			             check.normalisedFlux,
-			             check.agrees ? "AGREES" : "REFUSES" );
-		else
-			std::printf( "%13s %13s %10s %9s\n", "none", "-", "-", "NO AXIS" );
-		std::fflush( stdout );
+		row.bounded = axisSource.bounded;
+		row.agrees = check.agrees;
+		row.nodeR = check.nodeR;
+		row.axisR = check.located ? check.axis.r : -1.0;
+		row.normalisedFlux = check.normalisedFlux;
+		row.current = solver.plasmaCurrent();
+		rows.push_back( row );
 
-		if ( check.located )
-			located++;
-		if ( check.located && !check.agrees )
-			refused++;
+		std::printf( "    %-8.2f %-6s %5zu %14.6e %14.6e %13.4e "
+		             "  (%5.3f,%6.3f) %10.4f %8s\n",
+		             limiterR, withCoils ? "yes" : "NO",
+		             solver.newtonResiduals().size() - 1, solver.psiAxis(),
+		             solver.psiBoundary(), axisSource.worstOnAxis,
+		             check.nodeR, check.nodeZ, check.normalisedFlux,
+		             check.agrees ? "AGREES" : "REFUSES" );
+	}
+	std::fflush( stdout );
 
-		// ONCE, ON THE ROW SECTION 7.12b QUOTES: what psi_ax is attained ON.
-		// This is what corrects that section's "corner spike" -- the largest
-		// nodal values are a LAYER along the whole axis, indistinguishable from
-		// each other, and the corner wins by round-off rather than by being the
-		// feature. It decides where a repair has to point: section 11.5's first
-		// option excludes elements touching a FITTED boundary, and on this
-		// geometry that is the entire r = 0 column rather than two corners.
-		if ( limiterR > 1.19 && limiterR < 1.21 )
-		{
-			mfem::GridFunction const &psi = solver.potential();
-			mfem::FiniteElementSpace const *space = psi.FESpace();
-			mfem::Mesh *m = space->GetMesh();
-			std::vector<double> onAxis;
-			double offAxis = -std::numeric_limits<double>::infinity();
-			double offAxisR = 0.0, offAxisZ = 0.0;
-			mfem::Array<int> dofs;
-			for ( int e = 0; e < m->GetNE(); ++e )
-			{
-				space->GetElementDofs( e, dofs );
-				mfem::FiniteElement const *fe = space->GetFE( e );
-				mfem::IntegrationRule const &ir = fe->GetNodes();
-				// A LOCAL transformation, never GetElementTransformation( int ):
-				// that hands out shared scratch and resets pointers from previous
-				// calls. CLAUDE.md records this trap and six call sites that had
-				// it.
-				mfem::IsoparametricTransformation tr;
-				m->GetElementTransformation( e, &tr );
-				for ( int i = 0; i < dofs.Size() && i < ir.GetNPoints(); ++i )
-				{
-					mfem::Vector x;
-					tr.Transform( ir.IntPoint( i ), x );
-					int const dof = dofs[ i ] >= 0 ? dofs[ i ] : -1 - dofs[ i ];
-					if ( x( 0 ) < 1.0e-12 )
-						onAxis.push_back( psi( dof ) );
-					else if ( psi( dof ) > offAxis )
-					{
-						offAxis = psi( dof );
-						offAxisR = x( 0 );
-						offAxisZ = x( 1 );
-					}
-				}
-			}
-			std::sort( onAxis.begin(), onAxis.end(), std::greater<double>() );
-			// The half-disc reaches r = 0 exactly and has 168 dofs there at
-			// n = 24, so ten is not a close thing -- but the indexing below is
-			// unguarded arithmetic and a geometry without an axis would make it
-			// undefined rather than merely wrong.
-			BOOST_TEST_REQUIRE( onAxis.size() >= 10,
-				"only " << onAxis.size() << " dofs sit at r = 0, so this mesh "
-				"does not reach the axis and there is no layer to measure" );
-			std::printf( "      what psi_ax is attained on, at limiter 1.20:\n" );
-			std::printf( "        %d dofs sit at r = 0; the largest ten span "
-			             "%.6e to %.6e, a spread of %.1e\n",
-			             static_cast<int>( onAxis.size() ), onAxis.front(),
-			             onAxis[ 9 ], onAxis.front() - onAxis[ 9 ] );
-			std::printf( "        the largest anywhere off the axis is %.6e at "
-			             "( %.5f, %.5f )\n", offAxis, offAxisR, offAxisZ );
-			std::fflush( stdout );
+	int healthy = 0;
+	for ( Row const &row : rows )
+	{
+		if ( !row.withCoils )
+			continue;
 
-			// A LAYER, NOT A SPIKE, and the numbers say which: ten dofs strung
-			// along the whole axis agreeing to 3.5e-05 of a value of 1.09e-01 is
-			// not one bad dof. Asserted rather than only printed, because
-			// section 7.12b calls it a corner spike and a reader following that
-			// description would aim a repair at the wrong place.
-			BOOST_TEST( onAxis.front() - onAxis[ 9 ]
-			            < 1.0e-3*std::abs( onAxis.front() ),
-				"the ten largest nodal values on r = 0 span "
-				<< onAxis.front() - onAxis[ 9 ] << ", which is not the flat layer "
-				"this case reports. If psi_ax is now attained on an isolated dof "
-				"instead, section 7.12b's 'corner spike' is right after all and "
-				"this header is wrong." );
-			BOOST_TEST( onAxis.front() > 2.0*offAxis,
-				"the axis layer reads " << onAxis.front() << " against "
-				<< offAxis << " off the axis, so it no longer dominates the "
-				"field and psi_ax may have stopped being drawn to it" );
-		}
+		BOOST_TEST( row.converged,
+			"the physical fixture did not converge at limiter R = "
+			<< row.limiter << ". It carries a vertical field derived from "
+			"Shafranov's formula, ConfineToPlasma, and a prescribed current -- "
+			"if one of those has moved, the equilibrium is no longer the one "
+			"this case was built on." );
+		if ( !row.converged )
+			continue;
 
-		// THE FIELD HAS AN AXIS. Green, and the precondition for the rest: a
-		// monotone psi with no interior extremum is the wall-hugging annulus
-		// branch, where there is no closed surface to be an axis of and the
-		// comparison below would be empty rather than failing.
-		BOOST_TEST( check.located,
-			"no O-point of q_h anywhere on the mesh at limiter R = " << limiterR
-			<< ", so this solve has no magnetic axis at all and psi_ax cannot be "
-			"the flux at one. If this fails on the CriticalPointFinder( solver ) "
-			"ctor alone, the suspect is flux() against the raw block: the raw one "
-			"holds -q, and in even dimension that turns every Maximum into a "
-			"Minimum silently." );
+		// THE DEFECT, ASSERTED GONE RATHER THAN RECORDED. | F | on the symmetry
+		// axis is EXACTLY zero -- not small -- because ConfineToPlasma returns
+		// an exact zero outside the plasma rather than an extrapolated profile.
+		BOOST_TEST( row.bounded,
+			"| F | on the symmetry axis is non-zero at limiter R = "
+			<< row.limiter << ", so F/r = mu_0 j_phi is an unbounded toroidal "
+			"current density on r = 0 and psi_h grows a layer along the whole "
+			"axis whose size the QUADRATURE sets. ConfineToPlasma is what makes "
+			"it exactly zero; check that setPlasmaSupport( true ) is still "
+			"reaching the source that evaluates the profiles." );
 
-		/*
-		 * AND THE FIELD IS A PHYSICAL ONE. RED, and deliberately.
-		 *
-		 * THIS ASSERTION USED TO BE `check.agrees` AND THAT IS NOW A TAUTOLOGY,
-		 * which is why it was re-aimed rather than kept. Since option 3,
-		 * psi_ax IS the flux at the located magnetic axis by construction, so
-		 * Psi there reads 1 whatever the field is doing -- measured, this very
-		 * configuration reports `Psi = 1.0000 AGREES` on a solve whose axis
-		 * source is a POLE. A test that cannot fail is worse than no test.
-		 *
-		 * checkAxisSource() is what still means something, and it asks the
-		 * question the defect is actually about: F/r is mu_0 j_phi, so a source
-		 * that does not vanish on the symmetry axis is an infinite toroidal
-		 * current density there. That is a statement about the FIELD, and no
-		 * definition of psi_ax can repair it.
-		 */
-		meq::GradShafranovSolver::AxisSourceCheck const axisSource =
-			solver.checkAxisSource();
+		// AND psi_ax IS ATTAINED OFF THE AXIS, which is the direct negation of
+		// what section 11 found on the unphysical fixture: there the twelve
+		// largest nodal values all sat at r = 0.00000, a layer of unconstrained
+		// dofs running the length of the symmetry axis, and the argmax merely
+		// picked one of them.
+		BOOST_TEST( row.nodeR > 0.30,
+			"psi_ax is attained at r = " << row.nodeR << " at limiter R = "
+			<< row.limiter << ", which is on or beside the symmetry axis. That "
+			"is the axis layer of section 11.3 -- psi_ax is then a boundary "
+			"artefact and not a magnetic axis, and everything normalised by it "
+			"is a different equilibrium." );
 
-		BOOST_TEST_REQUIRE( axisSource.reachesAxis,
-			"no potential node sits at r = 0 at limiter R = " << limiterR
-			<< ", so there is no axis for the source to be unbounded on and this "
-			"case is measuring nothing" );
+		// AND IT IS THE FLUX AT A TRUE O-POINT OF q_h.
+		BOOST_TEST( row.agrees,
+			"the O-point of q_h carries Psi = " << row.normalisedFlux
+			<< " at limiter R = " << row.limiter << ", against the 1 it must "
+			"carry by definition. psi_ax is what the profiles are normalised "
+			"by, so a wrong one is not a bad number -- it is a different "
+			"equilibrium." );
 
-		BOOST_TEST( axisSource.bounded,
-			"| F | on the symmetry axis reads " << axisSource.worstOnAxis
-			<< " at limiter R = " << limiterR << ", which is "
-			<< axisSource.relative << " of | F |'s own scale over the mesh. F/r "
-			"IS mu_0 j_phi, so that is an UNBOUNDED toroidal current density on "
-			"r = 0, and the discrete load ( F/r, w ) is not integrable against "
-			"an L2 basis that does not vanish there -- psi_h grows a layer along "
-			"the whole axis whose size the QUADRATURE sets rather than the mesh. "
-			"WHAT PUTS IT THERE: psi = 0 on the axis exactly, so the profiles "
-			"are evaluated at Psi = " << axisSource.normalisedFluxOnAxis
-			<< ", and an unconfined gg' does not vanish there. THIS IS THE KNOWN "
-			"OPEN DEFECT and it is expected red -- FREE-BOUNDARY-PLAN.md "
-			"section 11.3. THIS IS A FIXTURE DEFECT AND NOT A CAPABILITY GAP: "
-			"examples/limited-tokamak.toml has every ingredient this case has -- "
-			"a domain reaching r = 0, a limiter, an exterior coupling and "
-			"ConfineToPlasma -- and converges in 11 Newton steps. What it has "
-			"that this does not is COILS and a PRESCRIBED CURRENT. Made physical, "
-			"this fixture becomes the amplitude-fixed moving-support problem "
-			"section 7.14 records as a non-linear EIGENVALUE problem, which is "
-			"ill posed rather than merely hard -- measured, ConfineToPlasma and "
-			"clamped profiles each fail at all four radii, while clamped WITH a "
-			"prescribed current converges in 22 steps. So the repair is to give "
-			"it the confinement physics, not to relax this assertion." );
+		// AND THE PRESCRIBED CURRENT IS DELIVERED, which is what says the third
+		// border closed rather than merely being present.
+		BOOST_TEST( std::abs( row.current - mu0Ip ) < 1.0e-5*mu0Ip,
+			"the delivered current is " << row.current << " against the "
+			<< mu0Ip << " prescribed" );
 
-		// AND THE PLASMA DOES NOT CONTAIN THE SYMMETRY AXIS, which is a
-		// different and worse failure than the pole: not a large error but the
-		// wrong topology, a plasma threading the machine's own centre line. It
-		// is asserted separately because the two are independent -- a bounded
-		// source can still sit on a solution of the wrong shape -- and because
-		// the fill's clamp does NOT prevent it: the clamp is on Psi, and a
-		// psi_bnd that goes negative puts Psi_axis above zero, so the axis lands
-		// inside the plasma and the clamp never bites.
-		// Precomputed rather than written inline: BOOST_TEST refuses `||` in its
-		// expression decomposition ( CANT_USE_LOGICAL_OPERATOR_OR_WITHIN_THIS_
-		// TESTING_TOOL ), which is a Boost limitation and not a hint about the
-		// predicate.
-		bool const axisIsInTheVacuum = !axisSource.axisInsidePlasma
-		                               || axisSource.sourceVanishesOnAxis;
-		BOOST_TEST( axisIsInTheVacuum,
-			"the plasma CONTAINS the symmetry axis at limiter R = " << limiterR
-			<< ": Psi on r = 0 reads " << axisSource.normalisedFluxOnAxis
-			<< ", which is positive, because psi_bnd = " << solver.psiBoundary()
-			<< " and the span carry opposite signs. A TOKAMAK is a torus about "
-			"R_0 > 0 and its symmetry axis is in the vacuum. A LEVITATED DIPOLE "
-			"or a MAGNETIC MIRROR does reach the axis -- and neither has a "
-			"toroidal field, so g vanishes identically in both, which is why the "
-			"escape clause is gg' == 0 rather than a device name. This source's "
-			"gg' does not vanish, so this is the tokamak case and it is wrong." );
+		if ( row.converged && row.bounded && row.agrees && row.nodeR > 0.30 )
+			++healthy;
 	}
 
-	// The two counts as one statement each, so that a partial change is legible
-	// rather than showing up as four separate failures with no summary.
-	BOOST_TEST( located == 4,
-		"an O-point was located on only " << located << " of the 4 limiter "
-		"positions" );
-	BOOST_TEST( refused == 0,
-		"the guard refuses the reported psi_ax on " << refused << " of 4 limiter "
-		"positions. That is the section 11.1 measurement and its answer: the "
-		"guard CATCHES section 7.12b's sighting rather than agreeing with it, "
-		"which is what the handoff did not know. Zero here means the defect is "
-		"fixed." );
+	BOOST_TEST( healthy == 3,
+		"only " << healthy << " of the three limiter radii gave a healthy "
+		"equilibrium" );
+
+	/*
+	 * THE CONTROL, AND IT IS WHAT SAYS THE VERTICAL FIELD IS DOING THE WORK.
+	 *
+	 * Remove the coils and nothing else, and the constraints are all still
+	 * satisfiable -- they constrain the current and the two normalisations, and
+	 * none of them says the plasma is a CORE. What the solve finds instead is
+	 * section 7.14's wall-hugging annulus: psi rising monotonically outward with
+	 * its O-point pressed against Gamma. Measured here, the axis moves from
+	 * r = 0.93 with the field to r = 1.38 without it, on a domain reaching 1.50.
+	 *
+	 * SO THE COIL-FREE ROW IS NOT A FAILURE TO CONVERGE. It converges, in 21
+	 * steps, with | F | on the axis at exactly zero and Psi at its O-point
+	 * reading 1.0000 -- every health check this case makes passes on it. It is
+	 * simply a different equilibrium, and the only thing that separates them is
+	 * WHERE the axis is. That is why the control asserts on the position.
+	 */
+	int controls = 0;
+	for ( Row const &row : rows )
+	{
+		if ( row.withCoils || !row.converged )
+			continue;
+		++controls;
+		BOOST_TEST( row.axisR > 1.10,
+			"without the vertical field the axis sits at r = " << row.axisR
+			<< ", which is a core rather than the wall-hugging annulus section "
+			"7.14 records. If the coil-free case now makes a core, the coils "
+			"have stopped being what confines this plasma and the derived "
+			"current above is no longer doing anything." );
+	}
+	BOOST_TEST( controls == 1,
+		"the coil-free control did not run: " << controls << " rows. Without it "
+		"every assertion above is compatible with a fixture that would be "
+		"healthy with no conductors at all." );
 }
 
 
@@ -3703,8 +3754,11 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
  * machine zero. So it is neither the limiter alone nor gg' alone.
  *
  * It is GREEN: what is asserted is that the guard separates the three, not that
- * the fixture is well posed. theTwoBorderSolveReportsATrueMagneticAxis is where
- * the defect itself is asserted, and that one is red.
+ * the fixture is well posed -- these four rows are deliberately UNPHYSICAL, two
+ * of them being the configuration section 11 diagnosed. What a physical
+ * two-border equilibrium looks like, and which three pieces of physics it takes
+ * to reach one, is theTwoBorderSolveReportsATrueMagneticAxis; this case is why
+ * the guard can tell them apart at all.
  */
 BOOST_AUTO_TEST_CASE( theAxisSourceGuardSeparatesThePoleFromTheLimiter )
 {
@@ -3879,33 +3933,39 @@ BOOST_AUTO_TEST_CASE( theAxisSourceGuardSeparatesThePoleFromTheLimiter )
  * THE AXIS CONDITION IS HOMOGENEOUS FOR FREE, and that is physics rather than
  * luck: psi is the poloidal flux through a circle of radius r, so psi( 0, z )
  * vanishes with the area for ANY conductor off the axis. Measured on this
- * fixture's pair, CoilSet::psi( 0, z ) is 0.000000e+00 exactly. So
+ * fixture's pair, ExteriorCoilSet::psi( 0, z ) is 0.000000e+00 exactly. So
  * setBoundaryData( zero ) on the fitted side is the honest statement of the
  * condition and not a convenience.
  *
- * WHAT IS NOT MEASURED HERE IS q, and why is worth saying: the exact flux needs
- * grad( psi_coil ), and meq::CoilSet exposes psi and no derivative. That is
- * FB-7's other deliverable and the blocker for the COUPLED case, whose Neumann
- * half is q_coil . nu. Until it lands this case measures psi alone.
+ * WHAT IS NOT MEASURED HERE IS q, and why is worth saying: this case gives the
+ * datum, so nothing it does needs grad( psi_coil ). The Neumann half,
+ * q_coil . nu, is what the COUPLED case exercises, and that is the next one --
+ * so the two together say that the Dirichlet half is right on its own and that
+ * the pair is consistent. This paragraph used to end "meq::CoilSet exposes psi
+ * and no derivative ... until it lands this case measures psi alone", which was
+ * true when it was written and stopped being so the moment gradPsi() landed.
  */
 BOOST_AUTO_TEST_CASE( aConductorOutsideGammaReachesTheSolveThroughTheDatum )
 {
 	// OUTSIDE Gamma, and by a margin: rho = sqrt( 2.0^2 + 0.5^2 ) = 2.06 against
 	// halfDiscGamma = 1.5. A pair, up-down symmetric, so the field it makes is
 	// the vertical-field shape a real machine would use.
-	meq::CoilSet coils( 1.0 );
+	meq::ExteriorCoilSet coils( 1.0 );
 	coils.add( meq::Coil( 2.0, +0.5, 0.10, 0.10, 1.0 ) );
 	coils.add( meq::Coil( 2.0, -0.5, 0.10, 0.10, 1.0 ) );
 
-	for ( std::size_t i = 0; i < coils.size(); ++i )
-	{
-		double const cr = coils.coil( i ).centreR();
-		double const cz = coils.coil( i ).centreZ();
-		BOOST_TEST_REQUIRE( std::hypot( cr, cz ) > halfDiscGamma,
-			"coil " << i << " at ( " << cr << ", " << cz << " ) is INSIDE Gamma "
-			<< halfDiscGamma << ", so Delta* psi_coil is not zero in Omega and "
-			"the exact answer below is not psi_coil" );
-	}
+	// THE PRECONDITION, ASKED OF THE TYPE THAT OWNS IT. This case used to
+	// compare each coil's CENTRE against halfDiscGamma by hand;
+	// meq::ExteriorCoilSet::clearance() measures the nearest POINT of each
+	// conductor, so a coil whose centre clears Gamma while its inboard edge
+	// does not is caught here and was not before. It is the same check
+	// GradShafranovSolver now makes for itself when a coupling and a conductor
+	// set are both in hand.
+	double const clearance = coils.clearance( 0.0, halfDiscGamma );
+	BOOST_TEST_REQUIRE( clearance > 0.0,
+		"a conductor reaches inside Gamma -- the nearest clears it by only "
+		<< clearance << " m -- so Delta* psi_coil is not zero in Omega and the "
+		"exact answer below is not psi_coil" );
 
 	// AND IT VANISHES ON THE AXIS, which is what lets the fitted datum be zero.
 	// Asserted rather than assumed: it is the flux through a circle of vanishing
@@ -4057,9 +4117,10 @@ BOOST_AUTO_TEST_CASE( aConductorOutsideGammaReachesTheCoupledSolve )
 {
 	int const order = 2;
 
-	meq::CoilSet coils( 1.0 );
+	meq::ExteriorCoilSet coils( 1.0 );
 	coils.add( meq::Coil( 2.0, +0.5, 0.10, 0.10, 1.0 ) );
 	coils.add( meq::Coil( 2.0, -0.5, 0.10, 0.10, 1.0 ) );
+	BOOST_TEST_REQUIRE( coils.clearance( 0.0, halfDiscGamma ) > 0.0 );
 
 	// A meq::Source AND NOT A COEFFICIENT: the coupled path is NPC and needs a
 	// non-linear form to build its operator on -- the solver refuses a
@@ -4187,12 +4248,22 @@ BOOST_AUTO_TEST_CASE( aConductorOutsideGammaReachesTheCoupledSolve )
  * the same centre, and difference the two interior fields. Nothing else moves,
  * so the difference IS the finite-size effect at that separation.
  *
- * IT USES ACCEPTANCE 1's ROUTE -- the datum GIVEN -- deliberately. The coupled
- * path takes a meq::CoilSet, and CoilSet cannot hold a filament: CoilSet::f() is
- * the interior source term and a filament has infinite current density on a
- * measure-zero set, so there is nothing honest for it to return. Supplying the
- * datum directly sidesteps a design question this case does not need to settle,
- * and the field being compared is the same field either way.
+ * IT MEASURES BOTH ROUTES, AND THIS PARAGRAPH USED TO SAY IT COULD NOT. It read
+ * "the coupled path takes a meq::CoilSet, and CoilSet cannot hold a filament:
+ * CoilSet::f() is the interior source term and a filament has infinite current
+ * density on a measure-zero set, so there is nothing honest for it to return",
+ * and it sidestepped that by giving the datum directly. **meq::ExteriorCoilSet
+ * is the answer to it**: an exterior conductor contributes nothing to the
+ * interior equation, so the set that carries one has no f() at all, and once
+ * that method is off the interface a rectangle and a filament can share a set.
+ *
+ * So the finite-size effect is measured TWICE -- once with the datum given, in
+ * which the two solves differ by nothing but the conductor model, and once
+ * through the coupling, where `a` is solved for and the transmission row sees
+ * q_coil . nu of each model. **The two must agree**, and that agreement is the
+ * cross-check: the datum-given route exercises the Dirichlet half alone, the
+ * coupled route exercises both halves, and a Neumann half inconsistent with its
+ * own Dirichlet twin would separate them.
  *
  * AND IT IS A LOWER BOUND ON WHAT THE MODEL COSTS, not an upper one: these
  * conductors sit at rho = 2.06 against a domain reaching 1.5, so the plasma is
@@ -4208,16 +4279,26 @@ BOOST_AUTO_TEST_CASE( theConductorModelIsWorthMeasuring )
 	double const half = 0.10;
 	double const current = 1.0;
 
-	meq::CoilSet rectangles( 1.0 );
+	meq::ExteriorCoilSet rectangles( 1.0 );
 	rectangles.add( meq::Coil( centreR, +centreZ, half, half, current ) );
 	rectangles.add( meq::Coil( centreR, -centreZ, half, half, current ) );
 
-	meq::CurrentFilament const upper( centreR, +centreZ, current );
-	meq::CurrentFilament const lower( centreR, -centreZ, current );
-	auto filamentField = [ & ]( double r, double z )
+	meq::ExteriorCoilSet filaments( 1.0 );
+	filaments.add( meq::CurrentFilament( centreR, +centreZ, current ) );
+	filaments.add( meq::CurrentFilament( centreR, -centreZ, current ) );
+
+	// THE SAME CURRENT AND THE SAME CENTRES, which is the whole premise: if the
+	// two sets carried different currents the difference below would be a
+	// current and not a model.
+	BOOST_TEST_REQUIRE( rectangles.totalCurrent() == filaments.totalCurrent() );
+	BOOST_TEST_REQUIRE( rectangles.coilCount() == 2u );
+	BOOST_TEST_REQUIRE( rectangles.filamentCount() == 0u );
+	BOOST_TEST_REQUIRE( filaments.coilCount() == 0u );
+	BOOST_TEST_REQUIRE( filaments.filamentCount() == 2u );
+
+	auto filamentField = [ &filaments ]( double r, double z )
 	{
-		return meq::filamentPsi( upper, r, z, 1.0 )
-		       + meq::filamentPsi( lower, r, z, 1.0 );
+		return filaments.psi( r, z );
 	};
 
 	// ON Gamma FIRST, WITH NO SOLVER IN THE WAY, so the number below is not
@@ -4309,4 +4390,174 @@ BOOST_AUTO_TEST_CASE( theConductorModelIsWorthMeasuring )
 		"operator on the same mesh, so the interior difference is the extension "
 		"of the boundary one and cannot grow -- if it has, the two runs differ by "
 		"something other than the conductor model." );
+
+	/*
+	 * AND NOW THE COUPLED ROUTE, WHICH IS WHAT meq::ExteriorCoilSet BOUGHT.
+	 *
+	 * Above, the datum is GIVEN and only the Dirichlet half of each conductor
+	 * model is exercised. Here `a` is an unknown and the transmission row sees
+	 * q_coil . nu, so a filament reaching the solve at all is new -- the set the
+	 * solver takes could not hold one until the type with no f() existed.
+	 *
+	 * F is identically zero because both conductors are outside Omega, which is
+	 * FB-7's decomposition; the interior equation never learns they are there.
+	 */
+	struct EmptyInterior : public meq::Source
+	{
+		double f( double, double, double ) const override { return 0.0; }
+		double dFdPsi( double, double, double ) const override { return 0.0; }
+	};
+	EmptyInterior emptyInterior;
+
+	meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 4 );
+	BOOST_TEST_REQUIRE( rectangles.clearance( dtn.zCentre(), dtn.rhoGamma() )
+	                    > 0.0 );
+	BOOST_TEST_REQUIRE( filaments.clearance( dtn.zCentre(), dtn.rhoGamma() )
+	                    > 0.0 );
+
+	auto coupledSolve = [ & ]( meq::ExteriorCoilSet const &conductors,
+	                           std::vector<double> &values )
+	{
+		meq::GradShafranovSolver solver( *d.sub, order );
+		solver.setSource( emptyInterior );
+		solver.setBoundaryData( zero );
+		solver.setExtension( *d.path, d.gammaHMarker );
+		solver.setExteriorConductors( conductors );
+		solver.setExteriorCoupling( dtn );
+		solver.solve();
+
+		mfem::GridFunction const &psi = solver.potential();
+		values.assign( psi.Size(), 0.0 );
+		for ( int i = 0; i < psi.Size(); ++i )
+			values[ static_cast<std::size_t>( i ) ] = psi( i );
+
+		double worstMode = 0.0;
+		for ( double value : solver.exteriorCoefficients() )
+			worstMode = std::max( worstMode, std::abs( value ) );
+		return worstMode;
+	};
+
+	std::vector<double> coupledRectangle;
+	std::vector<double> coupledFilament;
+	double const aRectangle = coupledSolve( rectangles, coupledRectangle );
+	double const aFilament = coupledSolve( filaments, coupledFilament );
+
+	BOOST_TEST_REQUIRE( coupledRectangle.size() == coupledFilament.size() );
+
+	double coupledWorst = 0.0;
+	double coupledScale = 0.0;
+	for ( std::size_t i = 0; i < coupledRectangle.size(); ++i )
+	{
+		coupledWorst = std::max( coupledWorst,
+			std::abs( coupledRectangle[ i ] - coupledFilament[ i ] ) );
+		coupledScale = std::max( coupledScale,
+			std::abs( coupledRectangle[ i ] ) );
+	}
+
+	std::printf( "    THROUGH THE COUPLING, a solved rather than the datum "
+	             "given:\n" );
+	std::printf( "      worst | a_n |: rectangles %.4e, filaments %.4e "
+	             "( the continuous answer is 0 )\n", aRectangle, aFilament );
+	std::printf( "      worst difference %.4e against a peak of %.4e, i.e. "
+	             "%.3e relative\n", coupledWorst, coupledScale,
+	             coupledWorst/coupledScale );
+	std::printf( "      against the datum-given route's %.4e: a ratio of "
+	             "%.4f\n\n", worst, coupledWorst/worst );
+	std::fflush( stdout );
+
+	// A FILAMENT REACHES THE COUPLED SOLVE, which is the capability being
+	// asserted rather than a number: the run above could not have been written
+	// before ExteriorCoilSet, because the set setExteriorConductors() takes
+	// could not carry one.
+	BOOST_TEST( coupledFilament.size() > 0u );
+
+	// THE TWO ROUTES AGREE ON THE FINITE-SIZE EFFECT. The datum-given pair
+	// differs only in the Dirichlet data; the coupled pair differs in that AND
+	// in q_coil . nu through the transmission row, and solves for `a` besides.
+	// They measure the same physical difference, so they must land together --
+	// a Neumann half inconsistent with its own Dirichlet twin is exactly what
+	// would separate them, and it would do so while every border still
+	// converged, which is the disguise section 7.19 warns about.
+	BOOST_TEST( std::abs( coupledWorst/worst - 1.0 ) < 0.10,
+		"the coupled route puts the finite-size effect at " << coupledWorst
+		<< " and the datum-given route at " << worst << ", a ratio of "
+		<< coupledWorst/worst << ". These are the same physical quantity "
+		"measured two ways -- one exercising the Dirichlet half of the "
+		"conductor coupling and one exercising both halves -- so a separation "
+		"says the Neumann half disagrees with its own Dirichlet twin." );
+}
+
+/*
+ * FB-7's PRECONDITION IS ENFORCED, AND IN BOTH ORDERS.
+ *
+ * A conductor inside Gamma breaks the decomposition FB-7 rests on: psi_coil is
+ * Delta*-harmonic in Omega only because the conductor is outside, and that is
+ * what lets it enter through the boundary alone and leave the interior equation
+ * untouched. Put one inside and the Gegenbauer expansion is asked to represent a
+ * field it does not span -- and the run CONVERGES, every border at machine zero,
+ * to a machine nobody described. That is the same disguise the stale-load defect
+ * wore and it is why this is a refusal rather than a warning.
+ *
+ * IT IS CHECKED FROM BOTH SETTERS BECAUSE EITHER MAY ARRIVE FIRST. The solver
+ * does not know where Gamma is until setExteriorCoupling() hands it a DtN, and
+ * does not know what the conductors are until setExteriorConductors() hands it a
+ * set; a check in one alone would be vacuous whenever the other had not
+ * happened yet. Both orders are exercised here for exactly that reason -- a
+ * guard written into one setter passes half of this case.
+ */
+BOOST_AUTO_TEST_CASE( aConductorInsideGammaIsRefusedInEitherOrder )
+{
+	HalfDisc d = makeHalfDisc( 12 );
+	meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 4 );
+
+	// STRADDLING Gamma, not merely near it: the centre is outside at 1.55 and
+	// the inboard edge is inside at 1.35. A check on the centre would pass this,
+	// which is why meq::ExteriorCoilSet::clearance() measures the nearest point.
+	meq::ExteriorCoilSet inside( 1.0 );
+	inside.add( meq::Coil( 1.55, 0.0, 0.20, 0.10, 1.0 ) );
+	BOOST_TEST_REQUIRE( inside.clearance( dtn.zCentre(), dtn.rhoGamma() ) < 0.0 );
+
+	meq::ExteriorCoilSet outside( 1.0 );
+	outside.add( meq::Coil( 2.0, 0.5, 0.10, 0.10, 1.0 ) );
+	BOOST_TEST_REQUIRE( outside.clearance( dtn.zCentre(), dtn.rhoGamma() )
+	                    > 0.0 );
+
+	auto solverOn = [ & ]()
+	{
+		auto solver = std::make_unique<meq::GradShafranovSolver>( *d.sub, 2 );
+		solver->setExtension( *d.path, d.gammaHMarker );
+		return solver;
+	};
+
+	// CONDUCTORS FIRST, COUPLING SECOND.
+	{
+		auto solver = solverOn();
+		solver->setExteriorConductors( inside );
+		BOOST_CHECK_THROW( solver->setExteriorCoupling( dtn ),
+		                   std::invalid_argument );
+	}
+
+	// COUPLING FIRST, CONDUCTORS SECOND.
+	{
+		auto solver = solverOn();
+		solver->setExteriorCoupling( dtn );
+		BOOST_CHECK_THROW( solver->setExteriorConductors( inside ),
+		                   std::invalid_argument );
+	}
+
+	// AND THE CONTROL, WITHOUT WHICH THE TWO ABOVE ARE COMPATIBLE WITH A SETTER
+	// THAT REFUSES EVERYTHING: the same two calls, in both orders, on a
+	// conductor that does clear Gamma.
+	{
+		auto solver = solverOn();
+		solver->setExteriorConductors( outside );
+		BOOST_CHECK_NO_THROW( solver->setExteriorCoupling( dtn ) );
+		BOOST_TEST( solver->exteriorConductors() == &outside );
+	}
+	{
+		auto solver = solverOn();
+		solver->setExteriorCoupling( dtn );
+		BOOST_CHECK_NO_THROW( solver->setExteriorConductors( outside ) );
+		BOOST_TEST( solver->exteriorConductors() == &outside );
+	}
 }

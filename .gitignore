@@ -118,3 +118,6 @@ docs/manual/*.rubbercache
 # is not, which is the same line drawn for every other run product here.
 tools/freegs4e-benchmark/*.npz
 tools/freegs4e-benchmark/*.json
+# And the same, one directory down: baseline.py writes each rung of the nested
+# ladder into its own ref-n<N>/, which the two patterns above do not reach.
+tools/freegs4e-benchmark/ref-n*/

@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <limits>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 
 #if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
@@ -1572,6 +1573,52 @@ namespace
 		prepared = false;
 	}
 
+	namespace
+	{
+		/*
+		 * FB-7's ONE PRECONDITION, CHECKED WHEREVER BOTH HALVES ARE KNOWN.
+		 *
+		 * The exterior expansion assumes psi_coil is Delta*-harmonic inside
+		 * Gamma, which is true exactly when every conductor lies outside it. A
+		 * conductor that does not is not a small error: the Gegenbauer series
+		 * then does not represent the field it is being asked to represent, and
+		 * every border still converges -- the same disguise the stale-load
+		 * defect wore.
+		 *
+		 * It is checked from BOTH setters rather than from one, because the two
+		 * calls may come in either order and a check in the first would be
+		 * vacuous whenever the second had not happened yet.
+		 */
+		void requireConductorsOutsideGamma( ExteriorCoilSet const &conductors,
+		                                    ExteriorDtN const &exterior,
+		                                    char const *where )
+		{
+			double const clear = conductors.clearance( exterior.zCentre(),
+			                                           exterior.rhoGamma() );
+			if ( clear > 0.0 )
+				return;
+
+			std::ostringstream message;
+			message.setf( std::ios::scientific );
+			message.precision( 6 );
+			message << where << ": a conductor reaches inside Gamma. The "
+			           "nearest one clears the semicircle of radius "
+			        << exterior.rhoGamma() << " about z = " << exterior.zCentre()
+			        << " by " << clear << " metres, and FB-7 needs that "
+			           "strictly positive: psi_coil is Delta*-harmonic in Omega "
+			           "only when the conductor is outside Gamma, which is what "
+			           "lets the conductor enter through the boundary alone and "
+			           "leave the interior equation untouched. A conductor "
+			           "INSIDE the domain belongs in the SOURCE instead, through "
+			           "meq::CoilAugmentedSource, where its current is part of "
+			           "the interior equation -- and one straddling Gamma "
+			           "belongs in neither. Without this the run would converge, "
+			           "every border at machine zero, to a machine nobody "
+			           "described";
+			throw std::invalid_argument( message.str() );
+		}
+	}
+
 	void GradShafranovSolver::setExteriorCoupling( ExteriorDtN const &exterior )
 	{
 		if ( !transferPath )
@@ -1581,6 +1628,14 @@ namespace
 				"comes first, and the fitted path cannot carry this coupling at "
 				"all because its datum reaches the boundary through essential "
 				"trace dofs rather than through a load term" );
+
+		// BEFORE anything is stored, so a refused call leaves the solver as it
+		// found it. Conductors given first are checked here; conductors given
+		// second are checked in setExteriorConductors().
+		if ( exteriorConductorSet )
+			requireConductorsOutsideGamma(
+				*exteriorConductorSet, exterior,
+				"meq::GradShafranovSolver::setExteriorCoupling" );
 
 		exteriorCoupling = &exterior;
 		exteriorCoefficientValues.assign(
@@ -1612,15 +1667,21 @@ namespace
 		} );
 	}
 
-	void GradShafranovSolver::setExteriorConductors( CoilSet const &conductors )
+	void GradShafranovSolver::setExteriorConductors(
+		ExteriorCoilSet const &conductors )
 	{
+		if ( exteriorCoupling )
+			requireConductorsOutsideGamma(
+				conductors, *exteriorCoupling,
+				"meq::GradShafranovSolver::setExteriorConductors" );
+
 		exteriorConductorSet = &conductors;
 		// The datum installed by setExteriorCoupling() reads this member through
 		// `this`, so a coupling already in place picks the conductors up without
 		// being re-installed and the two calls may come in either order.
 	}
 
-	CoilSet const *GradShafranovSolver::exteriorConductors() const
+	ExteriorCoilSet const *GradShafranovSolver::exteriorConductors() const
 	{
 		return exteriorConductorSet;
 	}

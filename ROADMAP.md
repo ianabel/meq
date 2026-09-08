@@ -91,13 +91,21 @@ Nothing is red and stages 0 to 7 are done, so the order is:
      (§11.5 option 3), which the envelope theorem makes free in the Jacobian; and
      two guards refuse an unphysical answer, one on the axis current density and
      one on the plasma containing the symmetry axis. §11.
-   * **FB-7, conductors outside `Γ`** — plan §7.19, not started. A coil the
-     mesh does not reach contributes nothing today, and the exterior route makes
-     it representable without meshing out to it: the interior equation is
-     untouched and the conductor is a known additive term on the transmission
-     condition. **One deliverable**, a gradient on `meq::CoilSet`. It buys domain
-     reduction rather than accuracy — MEQ's coils already carry finite extent and
-     current density, and near the plasma that is what matters.
+   * **FB-7, conductors outside `Γ`** — plan §7.19, **DONE 2026-09-07**.
+     `meq::ExteriorCoilSet` and `setExteriorConductors()`: the interior equation
+     is untouched and the conductor is a known additive term on **both** halves
+     of the coupling, the datum and the transmission row, with no new unknowns.
+     Rates 1.980/3.409/4.069 with the datum given against a control 148,165×
+     larger, and **one Newton step** on the coupled path. It buys domain
+     reduction rather than accuracy — MEQ's coils already carry finite extent
+     and current density, and near the plasma that is what matters. **The type
+     has no `f()`** and that is the design: an exterior conductor has no
+     interior current density, and neither has a filament, which is what lets
+     `meq::CurrentFilament` share a set with a rectangle and lets MEQ model what
+     `../freegs4e` models. **Acceptance 4 is still open** — the interior and
+     exterior routes agreeing where both are legal, which needs a second
+     geometry, a conductor being either inside `Ω` or outside `Γ` and never
+     both.
    * **FB-6, the machine case**, against `../freegs4e`. §7.11 of the plan
      settled the test problem: there is no reproducible ITER case, and the
      answer is CEDRES++'s published profile family driven through freegs4e's

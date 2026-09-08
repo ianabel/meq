@@ -785,6 +785,160 @@ namespace meq
 			int quadratureOrderValue;
 	};
 
+	/**
+	 * CONDUCTORS OUTSIDE `Gamma`: the set FB-7 couples through the boundary
+	 * rather than through the mesh. `FREE-BOUNDARY-PLAN.md` section 7.19.
+	 *
+	 * It holds meq::Coil and meq::CurrentFilament alike, sums their fields, and
+	 * **HAS NO f()**. That absence is the whole reason it is a type of its own
+	 * and not a flag on meq::CoilSet, and it is a modelling statement rather
+	 * than a gap:
+	 *
+	 *   * **AN EXTERIOR CONDUCTOR CONTRIBUTES NOTHING TO THE INTERIOR
+	 *     EQUATION.** Write psi = psi_coil + psi_tilde. The conductor is outside
+	 *     Gamma, which contains dOmega, so Delta* psi_coil = 0 throughout Omega
+	 *     and the source term is untouched. There is no interior current density
+	 *     to return, not merely one nobody has written down.
+	 *   * **AND A FILAMENT HAS NONE AT ALL**, anywhere: infinite current density
+	 *     on a set of measure zero is not a function, so `CoilSet::f()` could not
+	 *     be honest about one however the set were arranged. That is the design
+	 *     question section 7.19 left open, and this is the answer to it -- the
+	 *     two kinds of member can live in one set precisely because the one
+	 *     method neither of them can answer is not on the interface.
+	 *
+	 * So the type expresses its own precondition. Handing an interior coil to
+	 * GradShafranovSolver::setExteriorConductors() -- which silently drops its
+	 * current from the source -- is now a compile error rather than a converged
+	 * run describing a machine nobody asked for.
+	 *
+	 * **THERE IS DELIBERATELY NO CONVERSION FROM CoilSet.** The two sets answer
+	 * opposite questions about the same conductor and the one error this type
+	 * exists to prevent is a conductor appearing in BOTH -- once in the source
+	 * and once through the coupling, which double-counts it while every residual
+	 * and every border converges. Making that conversion one line would make the
+	 * mistake one line. A caller who genuinely wants the same geometry both ways
+	 * writes the coils out twice and can be asked why.
+	 *
+	 * **WHY IT CARRIES FILAMENTS AT ALL, AND IT IS NOT THAT THEY ARE BETTER.**
+	 * See meq::CurrentFilament: `../freegs4e`'s default `Coil` IS an exact
+	 * filament, so is FreeGS's, and section 7.16's published 1.3e-04 agreement
+	 * in `psi_ax` was reached ACROSS that modelling difference rather than with
+	 * it removed. A real coil has finite extent and finite current density, and
+	 * near the plasma that matters; the filament is here so the mismatch can be
+	 * MEASURED on one code with one mesh and one solver, not because it is the
+	 * more accurate model.
+	 *
+	 * mu0 is a constructor argument for the reason meq::CoilSet gives, and the
+	 * quadrature order is one for the reason coilPsi() gives -- **it governs the
+	 * RECTANGLES only**. A filament's field is closed form and costs two Carlson
+	 * evaluations whatever the order says.
+	 */
+	class ExteriorCoilSet
+	{
+		public:
+			/// @param mu0In  the permeability. Must be finite and positive.
+			explicit ExteriorCoilSet( double mu0In = vacuumPermeability );
+
+			/// Append a conductor. Both are copied; each is a handful of
+			/// doubles. The two overloads keep separate index spaces -- see
+			/// coil() and filament() -- because a single index over a
+			/// heterogeneous set would have to be decoded before it could be
+			/// used for anything.
+			void add( Coil const &coil );
+			void add( CurrentFilament const &filament );
+
+			/// Conductors of both kinds. size() is their sum, and is what
+			/// empty() is about.
+			std::size_t size() const;
+			bool empty() const;
+			std::size_t coilCount() const;
+			std::size_t filamentCount() const;
+
+			/// @throws std::out_of_range naming the index and the count.
+			Coil const &coil( std::size_t index ) const;
+			CurrentFilament const &filament( std::size_t index ) const;
+
+			std::vector<Coil> const &coils() const;
+			std::vector<CurrentFilament> const &filaments() const;
+
+			/// The signed sum of every conductor's current, in amperes.
+			///
+			/// **IT IS NOT WHAT FB-2's FLUX BALANCE CHECKS.** That identity,
+			/// `oint ( 1/r ) dpsi/dn dl = -mu0 I`, counts the current ENCLOSED,
+			/// and by construction none of this is: an exterior conductor
+			/// contributes exactly zero to a contour integral over Gamma. So
+			/// this number is for reporting what a machine description was
+			/// given, and for the acceptance that a rectangle and a filament
+			/// being compared carry the same current.
+			double totalCurrent() const;
+
+			/// The poloidal flux of the whole set at ( r, z ): coilPsi() over
+			/// the rectangles at this set's order, plus filamentPsi() over the
+			/// filaments. Delta* is linear, so a sum of fields is the field of
+			/// the sum. An empty set gives exactly 0.0.
+			///
+			/// **psi( 0, z ) IS 0.0 BIT EXACTLY** for both kinds of member, k^2
+			/// being an explicit factor of the kernel -- which is the boundary
+			/// condition the free-boundary problem imposes on the axis, and is
+			/// worth having exactly rather than to round-off, since Gamma is a
+			/// semicircle whose ends sit there.
+			double psi( double r, double z ) const;
+
+			/// grad_bar( psi ) of the whole set, and the HDG flux
+			/// q = ( 1/r ) grad_bar( psi ). Summed exactly as psi() is.
+			///
+			/// **q IS WHAT THE TRANSMISSION ROW NEEDS** -- its Neumann half is
+			/// q . nu on Gamma -- and **flux() IS NaN ON THE AXIS WHERE
+			/// gradPsi() IS 0.0**, which is not the same statement twice: every
+			/// member's grad_bar psi vanishes there exactly and q divides that
+			/// zero by zero. The limit is finite and this does not reach it.
+			/// GradShafranovSolver::conductorNormalFlux() carries the axis rule
+			/// that deals with it.
+			void gradPsi( double r, double z,
+			              double &dPsiDr, double &dPsiDz ) const;
+			void flux( double r, double z, double &qR, double &qZ ) const;
+
+			/**
+			 * How far the nearest conductor clears a semicircular `Gamma` of
+			 * radius @a rhoGamma centred at ( 0, @a centreZ ), in metres.
+			 * Positive when EVERY member lies strictly outside it, which is
+			 * this type's precondition; an empty set gives infinity.
+			 *
+			 * **THIS IS THE CHECK GradShafranovSolver COULD NOT MAKE.** Its
+			 * setExteriorConductors() documents that being outside Gamma "IS NOT
+			 * CHECKED HERE", because at that point the solver does not know
+			 * where Gamma is -- the DtN arrives separately. The geometry is
+			 * knowable the moment both are in hand, and this is the half of it
+			 * that needs no MFEM.
+			 *
+			 * A conductor inside Gamma is not a small error: psi_coil is then
+			 * not Delta*-harmonic where the expansion assumes it is, so the
+			 * Gegenbauer series does not represent the field it is being asked
+			 * to represent, and the run converges to a machine nobody described.
+			 *
+			 * The distance is to the nearest POINT of each member -- the closest
+			 * corner or edge of a rectangle, the ring itself for a filament --
+			 * so a coil straddling Gamma reports a negative clearance rather
+			 * than being judged by its centre.
+			 */
+			double clearance( double centreZ, double rhoGamma ) const;
+
+			/// Gauss points per direction per panel for the RECTANGLES.
+			/// @throws std::invalid_argument outside
+			///         [ 2, maximumCoilQuadratureOrder ].
+			void setQuadratureOrder( int order );
+			int quadratureOrder() const;
+
+			double mu0() const;
+
+		private:
+			std::vector<Coil> coilList;
+			std::vector<CurrentFilament> filamentList;
+			double permeability;
+			int quadratureOrderValue;
+	};
+
+
 
 	/**
 	 * A meq::Source that is a plasma source PLUS a coil set.

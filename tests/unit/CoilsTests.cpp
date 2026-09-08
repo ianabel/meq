@@ -932,3 +932,172 @@ BOOST_AUTO_TEST_CASE( amperes_law_holds_on_the_filament )
 	            "z-hat x r-hat, and FREE-BOUNDARY-PLAN.md section 7 predicts it "
 	            "being got wrong at least once" );
 }
+
+/*
+ * ExteriorCoilSet: THE SET FOR CONDUCTORS OUTSIDE Gamma, AND WHAT MAKES IT A
+ * TYPE OF ITS OWN RATHER THAN A FLAG.
+ *
+ * The distinguishing property is an ABSENCE -- there is no f() -- and an absence
+ * cannot be asserted at run time. What CAN be asserted is that the type is
+ * closed under the operations that make sense for it: a mixed set's field is the
+ * sum of its members' fields, whichever kind each member is, and the two kinds
+ * keep separate index spaces because a single index over a heterogeneous set
+ * would have to be decoded before it could be used.
+ *
+ * THE COMPILE-TIME HALF IS THE REAL GUARD and it is stated here for the record
+ * rather than tested: GradShafranovSolver::setExteriorConductors() takes an
+ * ExteriorCoilSet, so handing it a meq::CoilSet -- whose f() IS the interior
+ * source term, and which therefore describes a conductor the mesh is supposed to
+ * reach -- does not compile. Before the type existed it compiled and converged,
+ * having silently dropped that conductor's current from the source.
+ */
+BOOST_AUTO_TEST_CASE( the_exterior_set_sums_rectangles_and_filaments_alike )
+{
+	double const mu0 = 1.0;
+
+	meq::Coil const rectangle( 2.0, 0.4, 0.10, 0.15, 3.0e5 );
+	meq::CurrentFilament const filament( 1.7, -0.6, -1.2e5 );
+
+	meq::ExteriorCoilSet set( mu0 );
+	set.add( rectangle );
+	set.add( filament );
+
+	BOOST_TEST( set.size() == 2u );
+	BOOST_TEST( set.coilCount() == 1u );
+	BOOST_TEST( set.filamentCount() == 1u );
+	BOOST_TEST( !set.empty() );
+	BOOST_TEST( set.totalCurrent() == rectangle.current() + filament.current() );
+
+	// THE SUM IS EXACT, not merely close: psi() adds the same two numbers the
+	// free functions return, in the same order, so any difference would be a
+	// different quadrature order or a different mu0 rather than round-off.
+	for ( double r : { 0.35, 1.10, 2.05, 3.40 } )
+		for ( double z : { -0.90, 0.0, 0.55 } )
+		{
+			double const want =
+				meq::coilPsi( rectangle, r, z, set.quadratureOrder(), mu0 )
+				+ meq::filamentPsi( filament, r, z, mu0 );
+			BOOST_TEST( set.psi( r, z ) == want,
+				"psi at ( " << r << ", " << z << " ) is " << set.psi( r, z )
+				<< " against a member-by-member sum of " << want );
+
+			double wantR = 0.0;
+			double wantZ = 0.0;
+			double partR = 0.0;
+			double partZ = 0.0;
+			meq::coilGradPsi( rectangle, r, z, wantR, wantZ,
+			                  set.quadratureOrder(), mu0 );
+			meq::filamentGradPsi( filament, r, z, partR, partZ, mu0 );
+			wantR += partR;
+			wantZ += partZ;
+
+			double gotR = 0.0;
+			double gotZ = 0.0;
+			set.gradPsi( r, z, gotR, gotZ );
+			BOOST_TEST( gotR == wantR );
+			BOOST_TEST( gotZ == wantZ );
+
+			// q = grad_bar psi / r, and off the axis that is all it is.
+			double qR = 0.0;
+			double qZ = 0.0;
+			set.flux( r, z, qR, qZ );
+			BOOST_TEST( qR == wantR/r );
+			BOOST_TEST( qZ == wantZ/r );
+		}
+
+	// AN EMPTY SET IS EXACTLY ZERO AND EVALUATES NOTHING, which is what lets a
+	// solver hold one unconditionally.
+	meq::ExteriorCoilSet const none( mu0 );
+	BOOST_TEST( none.empty() );
+	BOOST_TEST( none.size() == 0u );
+	BOOST_TEST( none.totalCurrent() == 0.0 );
+	BOOST_TEST( none.psi( 1.0, 0.2 ) == 0.0 );
+
+	// AND psi( 0, z ) IS 0.0 BIT EXACTLY FOR BOTH KINDS OF MEMBER. That is the
+	// condition the free-boundary problem imposes on the axis, and Gamma is a
+	// semicircle whose two ends sit there -- so it is worth having exactly
+	// rather than to round-off. k^2 = 4 a r/d^2 carries r as a factor.
+	for ( double z : { -1.0, 0.0, 0.75 } )
+		BOOST_TEST( set.psi( 0.0, z ) == 0.0,
+			"psi on the axis at z = " << z << " is " << set.psi( 0.0, z )
+			<< " and not exactly zero" );
+}
+
+/*
+ * clearance(): THE PRECONDITION THE SOLVER COULD NOT CHECK FOR ITSELF.
+ *
+ * GradShafranovSolver::setExteriorConductors() cannot know where Gamma is -- the
+ * DtN arrives in a separate call -- so its header used to say the "must be
+ * outside Gamma" requirement "IS NOT CHECKED HERE" and leave it at that. The
+ * geometry is knowable the moment both are in hand, and this is the half of it
+ * that needs no MFEM.
+ *
+ * IT MEASURES THE NEAREST POINT AND NOT THE CENTRE, which is the whole reason it
+ * is worth having rather than a hypot() at the call site: a coil whose centre
+ * clears Gamma while its inboard edge does not is exactly the case a
+ * centre-based check waves through, and it is the case where psi_coil stops
+ * being Delta*-harmonic inside Gamma.
+ */
+BOOST_AUTO_TEST_CASE( the_exterior_sets_clearance_is_to_the_nearest_point )
+{
+	double const rhoGamma = 1.5;
+
+	// COMFORTABLY OUTSIDE. Nearest point of the rectangle to ( 0, 0 ) is
+	// ( 1.9, 0.4 ), at 1.9416, so it clears by 0.4416 -- and the CENTRE is at
+	// 2.0616, which would have said 0.5616. The two differ by the half-extents,
+	// which is the margin being protected.
+	meq::ExteriorCoilSet outside;
+	outside.add( meq::Coil( 2.0, 0.5, 0.10, 0.10, 1.0 ) );
+	BOOST_TEST( outside.clearance( 0.0, rhoGamma )
+	            == std::hypot( 1.9, 0.4 ) - rhoGamma,
+	            boost::test_tools::tolerance( 1.0e-14 ) );
+
+	// STRADDLING: the centre is outside at 1.55 and the inboard edge is inside
+	// at 1.35. A centre-based test passes it and this one does not, which is the
+	// case this method exists for.
+	meq::ExteriorCoilSet straddling;
+	straddling.add( meq::Coil( 1.55, 0.0, 0.20, 0.10, 1.0 ) );
+	BOOST_TEST( straddling.clearance( 0.0, rhoGamma ) < 0.0,
+		"a coil spanning r in [ 1.35, 1.75 ] reports a clearance of "
+		<< straddling.clearance( 0.0, rhoGamma ) << " against Gamma at "
+		<< rhoGamma << ", so it reads as outside while its inboard edge is "
+		"inside. THE NEAREST POINT is what decides this, not the centre." );
+
+	// A FILAMENT HAS NO EXTENT, so nearest point and centre coincide and the
+	// clearance is the plain distance.
+	meq::ExteriorCoilSet ring;
+	ring.add( meq::CurrentFilament( 2.0, 0.5, 1.0 ) );
+	BOOST_TEST( ring.clearance( 0.0, rhoGamma )
+	            == std::hypot( 2.0, 0.5 ) - rhoGamma,
+	            boost::test_tools::tolerance( 1.0e-14 ) );
+
+	// THE LEAST OVER THE WHOLE SET, mixed kinds included -- one conductor inside
+	// Gamma spoils the set however far out the others sit.
+	meq::ExteriorCoilSet mixed;
+	mixed.add( meq::Coil( 3.0, 0.0, 0.10, 0.10, 1.0 ) );
+	mixed.add( meq::CurrentFilament( 0.9, 0.0, 1.0 ) );
+	BOOST_TEST( mixed.clearance( 0.0, rhoGamma ) == 0.9 - rhoGamma,
+	            boost::test_tools::tolerance( 1.0e-14 ) );
+
+	// THE CENTRE OF Gamma IS AN ARGUMENT, because a half-disc need not be
+	// centred on z = 0. Slid up to the coil's own height, the same ring clears
+	// by its radius alone.
+	BOOST_TEST( ring.clearance( 0.5, rhoGamma ) == 2.0 - rhoGamma,
+	            boost::test_tools::tolerance( 1.0e-14 ) );
+
+	// AN EMPTY SET CLEARS EVERYTHING, and says so with an infinity rather than a
+	// large number a caller might read as a measurement.
+	meq::ExteriorCoilSet const none;
+	BOOST_TEST( std::isinf( none.clearance( 0.0, rhoGamma ) ) );
+	BOOST_TEST( none.clearance( 0.0, rhoGamma ) > 0.0 );
+
+	// THE REFUSALS.
+	BOOST_CHECK_THROW( meq::ExteriorCoilSet( 0.0 ), std::invalid_argument );
+	BOOST_CHECK_THROW( meq::ExteriorCoilSet( -1.0 ), std::invalid_argument );
+	BOOST_CHECK_THROW( ring.clearance( 0.0, 0.0 ), std::invalid_argument );
+	BOOST_CHECK_THROW( ring.clearance( 0.0, -1.0 ), std::invalid_argument );
+	BOOST_CHECK_THROW( outside.setQuadratureOrder( 1 ), std::invalid_argument );
+	BOOST_CHECK_THROW( outside.coil( 1 ), std::out_of_range );
+	BOOST_CHECK_THROW( outside.filament( 0 ), std::out_of_range );
+	BOOST_CHECK_THROW( ring.coil( 0 ), std::out_of_range );
+}

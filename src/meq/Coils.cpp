@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <stdexcept>
@@ -978,6 +979,199 @@ namespace meq
 	{
 		return permeability;
 	}
+
+	ExteriorCoilSet::ExteriorCoilSet( double mu0In )
+		: permeability( mu0In ),
+		  quadratureOrderValue( defaultCoilQuadratureOrder )
+	{
+		requireFinite( mu0In, "mu0", "meq::ExteriorCoilSet" );
+		if ( !( mu0In > 0.0 ) )
+			throw std::invalid_argument(
+				"meq::ExteriorCoilSet: mu0 must be positive. Zero would leave "
+				"every conductor silently inert -- psi() would be identically "
+				"zero on Gamma and the coupled solve would converge beautifully "
+				"to a machine with no conductors in it -- which is a worse "
+				"outcome than an error. Normalised units want 1" );
+	}
+
+	void ExteriorCoilSet::add( Coil const &coil )
+	{
+		coilList.push_back( coil );
+	}
+
+	void ExteriorCoilSet::add( CurrentFilament const &filament )
+	{
+		filamentList.push_back( filament );
+	}
+
+	std::size_t ExteriorCoilSet::size() const
+	{
+		return coilList.size() + filamentList.size();
+	}
+
+	bool ExteriorCoilSet::empty() const
+	{
+		return coilList.empty() && filamentList.empty();
+	}
+
+	std::size_t ExteriorCoilSet::coilCount() const
+	{
+		return coilList.size();
+	}
+
+	std::size_t ExteriorCoilSet::filamentCount() const
+	{
+		return filamentList.size();
+	}
+
+	Coil const &ExteriorCoilSet::coil( std::size_t index ) const
+	{
+		if ( index >= coilList.size() )
+			throw std::out_of_range(
+				"meq::ExteriorCoilSet::coil: index " + std::to_string( index )
+				+ " is outside a set of " + std::to_string( coilList.size() )
+				+ " rectangular coils. The filaments have an index space of "
+				"their own -- see filament()" );
+		return coilList[ index ];
+	}
+
+	CurrentFilament const &ExteriorCoilSet::filament( std::size_t index ) const
+	{
+		if ( index >= filamentList.size() )
+			throw std::out_of_range(
+				"meq::ExteriorCoilSet::filament: index "
+				+ std::to_string( index ) + " is outside a set of "
+				+ std::to_string( filamentList.size() )
+				+ " filaments. The rectangular coils have an index space of "
+				"their own -- see coil()" );
+		return filamentList[ index ];
+	}
+
+	std::vector<Coil> const &ExteriorCoilSet::coils() const
+	{
+		return coilList;
+	}
+
+	std::vector<CurrentFilament> const &ExteriorCoilSet::filaments() const
+	{
+		return filamentList;
+	}
+
+	double ExteriorCoilSet::totalCurrent() const
+	{
+		double sum = 0.0;
+		for ( Coil const &c : coilList )
+			sum += c.current();
+		for ( CurrentFilament const &one : filamentList )
+			sum += one.current();
+		return sum;
+	}
+
+	double ExteriorCoilSet::psi( double r, double z ) const
+	{
+		double sum = 0.0;
+		for ( Coil const &c : coilList )
+			sum += coilPsi( c, r, z, quadratureOrderValue, permeability );
+		for ( CurrentFilament const &one : filamentList )
+			sum += filamentPsi( one, r, z, permeability );
+		return sum;
+	}
+
+	void ExteriorCoilSet::gradPsi( double r, double z,
+	                               double &dPsiDr, double &dPsiDz ) const
+	{
+		// Delta* is linear, so the gradient of the sum is the sum of the
+		// gradients, exactly as psi() sums the fields. An empty set gives
+		// ( 0, 0 ) without evaluating anything.
+		double totalR = 0.0;
+		double totalZ = 0.0;
+
+		for ( Coil const &one : coilList )
+		{
+			double gradR = 0.0;
+			double gradZ = 0.0;
+			coilGradPsi( one, r, z, gradR, gradZ, quadratureOrderValue,
+			             permeability );
+			totalR += gradR;
+			totalZ += gradZ;
+		}
+
+		for ( CurrentFilament const &one : filamentList )
+		{
+			double gradR = 0.0;
+			double gradZ = 0.0;
+			filamentGradPsi( one, r, z, gradR, gradZ, permeability );
+			totalR += gradR;
+			totalZ += gradZ;
+		}
+
+		dPsiDr = totalR;
+		dPsiDz = totalZ;
+	}
+
+	void ExteriorCoilSet::flux( double r, double z,
+	                            double &qR, double &qZ ) const
+	{
+		gradPsi( r, z, qR, qZ );
+		// NaN on the axis in both components. gradPsi() is exactly zero there
+		// and this divides it by zero; the limit is finite and is not reached.
+		// See the header -- a semicircle centred on the axis MEETS it, and
+		// GradShafranovSolver::conductorNormalFlux() is where the rule lives.
+		qR /= r;
+		qZ /= r;
+	}
+
+	double ExteriorCoilSet::clearance( double centreZ, double rhoGamma ) const
+	{
+		requireFinite( centreZ, "the centre height",
+		               "meq::ExteriorCoilSet::clearance" );
+		requireFinite( rhoGamma, "the radius of Gamma",
+		               "meq::ExteriorCoilSet::clearance" );
+		if ( !( rhoGamma > 0.0 ) )
+			throw std::invalid_argument(
+				"meq::ExteriorCoilSet::clearance: the radius of Gamma must be "
+				"positive; got " + std::to_string( rhoGamma ) );
+
+		// An empty set clears everything, and says so with an infinity rather
+		// than with a large number a caller might mistake for a measurement.
+		double least = std::numeric_limits<double>::infinity();
+
+		for ( Coil const &one : coilList )
+		{
+			// The nearest point of the CLOSED rectangle to ( 0, centreZ ). The
+			// centre is on the axis and Coil refuses rMin <= 0, so the nearest
+			// radius is always rMin; only the height needs clamping. Taking the
+			// nearest point rather than the centre is what makes a coil
+			// straddling Gamma report a negative clearance.
+			double const nearZ = std::min( std::max( centreZ, one.zMin() ),
+			                               one.zMax() );
+			least = std::min( least,
+			                  std::hypot( one.rMin(), nearZ - centreZ ) );
+		}
+
+		for ( CurrentFilament const &one : filamentList )
+			least = std::min( least, std::hypot( one.radius(),
+			                                     one.height() - centreZ ) );
+
+		return least - rhoGamma;
+	}
+
+	void ExteriorCoilSet::setQuadratureOrder( int order )
+	{
+		requireOrder( order, "meq::ExteriorCoilSet::setQuadratureOrder" );
+		quadratureOrderValue = order;
+	}
+
+	int ExteriorCoilSet::quadratureOrder() const
+	{
+		return quadratureOrderValue;
+	}
+
+	double ExteriorCoilSet::mu0() const
+	{
+		return permeability;
+	}
+
 
 
 	CoilAugmentedSource::CoilAugmentedSource( std::shared_ptr<Source const> plasmaIn,

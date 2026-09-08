@@ -101,7 +101,15 @@ namespace meq
 {
 	/// FB-7's exterior conductors; meq/Coils.hpp has it. Forward declared so
 	/// that this header does not pull in a file it needs only by reference.
-	class CoilSet;
+	///
+	/// **IT IS `ExteriorCoilSet` AND NOT `CoilSet`, WHICH IS THE TYPE DOING THE
+	/// WORK.** An exterior conductor contributes nothing to the interior
+	/// equation, so the set that carries one has no `f()` -- and a `CoilSet`,
+	/// whose `f()` IS the interior source term, is therefore the wrong thing to
+	/// hand this class. Passing one is now a compile error rather than a run
+	/// that converges having silently dropped a conductor's current from the
+	/// source. See meq::ExteriorCoilSet.
+	class ExteriorCoilSet;
 
 
 	/**
@@ -1433,18 +1441,32 @@ namespace meq
 			 * defect wore, where the border sat at 1e-17 while the answer was
 			 * wrong. So this one call does both.
 			 *
-			 * **IT MUST BE OUTSIDE `Γ`, AND THAT IS NOT CHECKED HERE** because
-			 * this class does not know where `Γ` is until setExteriorCoupling()
-			 * is given a DtN. A conductor inside `Ω` belongs in the SOURCE, via
+			 * **IT MUST BE OUTSIDE `Γ`, AND THAT IS NOW CHECKED — but only
+			 * once both halves are in hand.** This paragraph used to end "AND
+			 * THAT IS NOT CHECKED HERE", which was true of one call and not of
+			 * the pair: the geometry is knowable the moment a DtN and a
+			 * conductor set are both present, and
+			 * meq::ExteriorCoilSet::clearance() is the half of it that needs no
+			 * MFEM. So **both this and setExteriorCoupling() refuse** a
+			 * conductor reaching inside `Γ`, whichever arrives second, and a
+			 * call made before its partner is checked when the partner lands.
+			 *
+			 * A conductor inside `Ω` belongs in the SOURCE, via
 			 * meq::CoilAugmentedSource, where its current is part of the interior
 			 * equation; put it here and the interior equation silently loses it.
+			 * One straddling `Γ` belongs in neither: `ψ_coil` is then not
+			 * `Δ*`-harmonic where the expansion assumes it is, so the Gegenbauer
+			 * series does not represent the field it is asked to, and the run
+			 * converges to a machine nobody described.
 			 *
 			 * @param conductors borrowed, and must outlive the solve.
+			 * @throws std::invalid_argument if a coupling is already set and any
+			 *         conductor fails to clear its `Γ`.
 			 */
-			void setExteriorConductors( CoilSet const &conductors );
+			void setExteriorConductors( ExteriorCoilSet const &conductors );
 
 			/// The conductors of setExteriorConductors(), or nullptr.
-			CoilSet const *exteriorConductors() const;
+			ExteriorCoilSet const *exteriorConductors() const;
 
 			/// The conductors' own `q . nu` at a point of `Gamma`, and zero when
 			/// there are none. Public because the transmission machinery and its
@@ -2257,7 +2279,7 @@ namespace meq
 			LocalSolver localSolverChoice;
 
 			/// setExteriorConductors(), borrowed. Null unless FB-7 is in use.
-			CoilSet const *exteriorConductorSet = nullptr;
+			ExteriorCoilSet const *exteriorConductorSet = nullptr;
 
 			/// The exterior coupling of setExteriorCoupling(), borrowed, and the
 			/// coefficients it solves for. The datum function reads the vector,

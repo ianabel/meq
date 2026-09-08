@@ -467,6 +467,7 @@ The pieces underneath, all measured:
 | **FB-0** | **DONE, and §3.4 closed it 2026-09-06.** `src/meq/ExteriorDtN.{hpp,cpp}` — the Gegenbauer basis, the DtN symbol and the mass, **MFEM-free** so CI gates it. Checked against a current loop built from elliptic integrals sharing no code with it: **1.4e−15** in the trace, **6.9e−14** in the DtN. And now against **CEDRES++'s own boundary form** — eq (3.5), a hypersingular double-layer kept in its double-difference form plus a single layer, elliptic-integral kernels throughout — which comes out **diagonal to 1.15e-10** against a scale of 2.56e-01, its diagonal matching `blockEntry( n )` to **3.20e-09**. A boundary integral against a separation of variables, sharing the equation and nothing else. §3.4 named this as the test that would falsify all of §3; it does not |
 | **FB-1** | **DONE.** `P`, the transmission row, `setExteriorDatum()`, and both halves measured: `ψ` at 1.99/2.99/3.99 on the half-disc with the datum given, and the exterior coefficients recovered from the transmission condition to 1.9e-04, converging at 3.30. `tests/analytic/ExteriorMatched.hpp` is the exact answer — **the plan's proposed one, filament loop fields, cannot support an order study at all**, `ψ ∉ H¹` at a point source |
 | **FB-2** | `src/meq/Coils.{hpp,cpp}`, MFEM-free, and the acceptance identity `∮(1/r)∂ψ/∂n dl = −μ₀I` at **3.3e−11** on the exact field, so a discrepancy on a solve is the solve. **And the coils are reachable from a TOML file since 2026-09-06** — see below |
+| **FB-7** | **DONE 2026-09-07. CONDUCTORS OUTSIDE `Γ`, THROUGH THE COUPLING RATHER THAN THE MESH.** `meq::ExteriorCoilSet` and `setExteriorConductors()`. The exterior problem is linear, so `ψ = ψ_coil + ψ̃` with `Δ*ψ_coil = 0` inside `Ω` — **the interior equation is untouched** — and the conductor enters through `Γ` alone, additively and KNOWN, on **both** halves: `ψ_coil` in the datum and `q_coil·ν` in the transmission row. No new unknowns. Rates **1.980 / 3.409 / 4.069** at `k = 1,2,3` with the datum given, against a datum-removed control **148,165×** larger; **one Newton step** on the coupled path, `\|a\|` at 4.076 and `ψ` at 4.486. See below |
 
 ### One argument where two were meant: psi_bnd was zeroed inside the Jacobian window
 
@@ -979,7 +980,84 @@ machine with that conductor switched off, while `coil_current` in the `.nc`
 reports the current whether or not it did any work. A **warning** rather than a
 refusal, because `FREE-BOUNDARY-PLAN.md` §5.4 offers exactly that configuration
 — coils outside `Ω`, entering through the exterior coupling — and that route is
-not wired.
+now wired, as FB-7. **The warning stays and is still right**: it fires on a coil
+in the `[[coils]]` block, which is the SOURCE, and FB-7's conductors do not go
+there. The two routes are different objects on purpose — see below.
+
+### FB-7: a conductor outside `Γ`, and the type that carries it has no `f()`
+
+**BUILT AND MEASURED 2026-09-07.** `meq::ExteriorCoilSet` in
+`src/meq/Coils.{hpp,cpp}` — MFEM-free, so CI gates it — and
+`GradShafranovSolver::setExteriorConductors()`.
+
+**THE DECOMPOSITION IS THE WHOLE OF IT.** Write `ψ = ψ_coil + ψ̃`. The conductor
+is outside `Γ ⊇ ∂Ω`, so `Δ*ψ_coil = 0` **inside `Ω`** and the interior equation
+is untouched — there is no coil term in the source at all; and `ψ̃` is
+`Δ*`-harmonic in the whole exterior and decays, its singular support having been
+subtracted, so the Gegenbauer expansion is valid for it. The conductor therefore
+enters **only through `Γ`**, additively and known, on both halves:
+`ψ|_Γ = Σ a_n C_n + ψ_coil|_Γ` and `q·ν|_Γ = (modal) + q_coil·ν|_Γ`. **No new
+unknowns and no change to the border's size.**
+
+**BOTH HALVES LAND TOGETHER OR NOT AT ALL**, which is why it is one call. Adding
+`ψ_coil` to the datum while leaving the transmission row alone is an inconsistent
+pair that **converges to something** — the disguise the stale-load defect wore,
+where the border sat at 1e-17 while the answer was wrong.
+
+**THE TYPE HAS NO `f()`, AND THAT ABSENCE IS THE DESIGN.** An exterior conductor
+contributes nothing to the interior equation, so there is no interior current
+density to return — not merely one nobody wrote down. And **a filament has none
+at all**: infinite current density on a set of measure zero is not a function, so
+`CoilSet::f()` could not be honest about one however the set were arranged. That
+is what had blocked a filament from reaching the coupled path, and removing the
+one method neither member kind can answer is what lets a rectangle and a filament
+share a set. **Handing the solver a `meq::CoilSet` is now a compile error**,
+where before it compiled and converged having silently dropped that conductor's
+current from the source.
+
+**THERE IS DELIBERATELY NO CONVERSION FROM `CoilSet`.** The one error the type
+exists to prevent is a conductor appearing in **both** — once in the source and
+once through the coupling, double-counted while every residual and every border
+converges. Making that conversion one line would make the mistake one line.
+
+**WHAT IS MEASURED**, `tests/convergence/FreeBoundaryCoupling.cpp`:
+
+| | |
+|---|---|
+| the datum given, `ψ` against `ψ_coil` | **1.980 / 3.409 / 4.069** at `k = 1,2,3`, against a datum-removed control **148,165×** larger |
+| the coupled path | **one Newton step** at `n = 12/24/48` — the residual is affine in `( x, a )` and an exact Jacobian must finish it in one — with `\|a\|` at **4.076** and `ψ` at **4.486** |
+| a rectangle against a filament, same current and centre | **4.242e-04** on `Γ` and **4.076e-04** in the domain, about **3×** §7.16's published 1.3e-04 agreement in `ψ_ax` |
+| the same, through the **coupled** path | **0.9998** of the datum-given answer |
+
+**THAT LAST ROW IS THE CROSS-CHECK AND IT IS WHAT THE FILAMENT BOUGHT.** The
+datum-given pair differs only in Dirichlet data; the coupled pair differs in that
+**and** in `q_coil·ν` through the transmission row, and solves for `a` besides.
+Same physical quantity two ways, and **a Neumann half inconsistent with its own
+Dirichlet twin would separate them while every border still converged.**
+
+**WHY A FILAMENT AT ALL, AND IT IS NOT THAT IT IS BETTER.** `../freegs4e`'s
+default `Coil` **is** an exact filament — `controlPsi` returns
+`Greens( R, Z, · )*turns`, its `area` only imposing a current-density limit and
+never entering the field — and so is FreeGS's. `meq::Coil` is a rectangle with
+uniform current density. §7.16's 1.3e-04 agreement was reached **across** that
+mismatch rather than with it removed, and `meq::CurrentFilament` is what lets the
+two be matched. A real conductor has finite extent and near the plasma that
+matters; the filament is for measuring the difference, not for being right.
+
+**AND THE PRECONDITION IS ENFORCED NOW, IN BOTH ORDERS.**
+`ExteriorCoilSet::clearance( centreZ, ρ_Γ )` measures the distance from `Γ`'s
+centre to the **nearest point** of each member — the closest edge of a rectangle,
+the ring itself for a filament — so a coil whose *centre* clears `Γ` while its
+inboard edge does not is caught, which a `hypot()` at the call site is not. Both
+`setExteriorConductors()` and `setExteriorCoupling()` refuse on it, whichever
+arrives second, which closes the *"IT MUST BE OUTSIDE `Γ`, AND THAT IS NOT
+CHECKED HERE"* the solver's own header carried. A conductor inside `Γ` is not a
+small error: `ψ_coil` is then not `Δ*`-harmonic where the expansion assumes it
+is, and the run converges to a machine nobody described.
+
+**AND IT PAID FOR ITSELF THE DAY AFTER IT LANDED** — §7.12b's fixture had
+*"nowhere to put a coil genuinely outside the plasma"*, and a conductor outside
+`Γ` costs no mesh. See *§7.12b's fixture was the defect*.
 
 **FB-1 IS COMPLETE AS OF 2026-09-05** — see the entries below for the two halves
 and for what building it found. What remains of free boundary is the **plasma**:
@@ -1399,7 +1477,7 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 git submodule update --init --recursive     # extern/toml11
 cmake -B build
 cmake --build build -j4
-cd build && OMP_NUM_THREADS=4 ctest -j4      # 40/41 -- one RED on purpose, see below
+cd build && OMP_NUM_THREADS=4 ctest -j4      # 41/41
 ```
 
 **RUN IT `-j4` WITH `OMP_NUM_THREADS=4`, WHICH IS 3.2x FASTER AND MEASURED.**
@@ -1413,43 +1491,49 @@ product at the core count is what pays:
 | `-j16`, `OMP=1` | 265.2 s | 350% |
 | **`-j4`, `OMP=4`** | **223.2 s** | 514% |
 
-37/37 in every configuration when that table was taken, and **40/41 today** at
-**249.7 s** —
+37/37 in every configuration when that table was taken, and **41/41 today** at
+**433.1 s** —
 the count moves as cases are added, so read the table's ratios rather than its
 absolute seconds. Nothing in the suite depends on a thread count, which is the
 correctness half.
 
-**THE ONE FAILURE IS DELIBERATE AND IS `FreeBoundaryCoupling`.**
-`theTwoBorderSolveReportsATrueMagneticAxis` asserts `checkAxisSource().bounded`
-— that the toroidal current density is finite on the symmetry axis — and on that
-fixture it is not: `|F|` there reads 0.075 to 0.130 at the four limiter radii.
-`FREE-BOUNDARY-PLAN.md` §11.3 is the account.
+**IT WAS 40/41 FOR A DAY AND THE ONE FAILURE WAS DELIBERATE**, which is worth
+keeping because of how it closed. `theTwoBorderSolveReportsATrueMagneticAxis`
+asserted `checkAxisSource().bounded` — that the toroidal current density is
+finite on the symmetry axis — and on that fixture it was not: `|F|` there read
+0.075 to 0.130 at the four limiter radii. That is this file's stance working:
+a defect gets a **failing** test naming it, and the test stays red until the
+behaviour is there.
+
+**WHAT NEEDED REPAIRING WAS THE FIXTURE, NOT THE SOLVER, AND THAT TOOK A DAY TO
+ESTABLISH.** `examples/limited-tokamak.toml` has **every** ingredient the case
+has — a domain reaching `r = 0`, `[boundary.limiter]`, `[boundary.exterior]` and
+`ConfineToPlasma` — and converges in **11 Newton steps** to a `Ψ` of 1.0000,
+reproducing freegs4e to 1.3e-04. What it had that the fixture did not is **coils
+and a prescribed current**. The fixture now has both, plus the confinement, and
+it is **green at three limiter radii out of four**; see *§7.12b's fixture was
+the defect*, and `FREE-BOUNDARY-PLAN.md` §11.3 for the diagnosis and §11.7 for
+the repair.
+
+**AN INTERMEDIATE VERSION OF THIS ENTRY SAID THE FIXTURE "CANNOT BE REPAIRED IN
+PLACE" AND IT WAS WRONG BY ONE INGREDIENT.** It measured `ConfineToPlasma`
+failing 4/4 and clamped profiles failing 4/4 and concluded a different geometry
+was needed. Both measurements stand; what they show is that confinement is **one
+third** of the repair, not that there is none — the same run recorded that
+"clamped WITH a prescribed current converges in 22 steps" and nobody followed it.
+**A measurement that rules two things out is not a measurement that rules
+everything out.**
 
 **IT USED TO ASSERT `checkAxis().agrees` AND OPTION 3 MADE THAT A TAUTOLOGY**,
 which is why it was re-aimed rather than kept: with `ψ_ax` constrained at the
 located axis, `Ψ` there reads 1 by construction — measured, that very
-configuration reports `Ψ = 1.0000 AGREES` on a solve whose axis source is a
-pole. A test that cannot fail is worse than no test.
+configuration reported `Ψ = 1.0000 AGREES` on a solve whose axis source was a
+pole. A test that cannot fail is worse than no test. It asserts four things now,
+and `checkAxisSource().bounded` is still the one with teeth.
 
-**AND IT IS A FIXTURE DEFECT RATHER THAN A CAPABILITY GAP, WHICH IS WORTH BEING
-PRECISE ABOUT.** `examples/limited-tokamak.toml` has **every** ingredient this
-case has — a domain reaching `r = 0`, `[boundary.limiter]`,
-`[boundary.exterior]` and `ConfineToPlasma` — and converges in **11 Newton
-steps** to a `Ψ` of 1.0000, reproducing freegs4e to 1.3e-04. What it has that the
-fixture does not is **coils and a prescribed current**.
-
-**So the fixture cannot be repaired IN PLACE, which is not the same as
-unsolvable.** Touching only the profiles leaves it amplitude-fixed with a moving
-support, and §7.14 records that as a non-linear **eigenvalue** problem — scaling
-`A` changes nothing, since the span moves with `√A` — i.e. ill posed rather than
-merely hard. Measured at all four limiter radii: `ConfineToPlasma` fails 4/4,
-clamped profiles fail 4/4, and **clamped WITH a prescribed current converges in
-22 steps**. The cure is the one §7.14 already documents; what the fixture needs
-is the confinement physics, not a different solver.
-
-Per *Testing stance*, a defect gets a **failing** test naming it, so **a red
-`FreeBoundaryCoupling` is the intended signal and not a break**. Every other case
-in that file passes. **Do not "fix" the suite by relaxing it.**
+Per *Testing stance*, a red suite is the intended signal while a defect stands.
+**Do not "fix" it by relaxing an assertion** — the repair here was to give a
+fixture the physics it was missing, and the assertion never moved.
 
 **`OMP_NUM_THREADS` is deliberately NOT pinned in
 `tests/CMakeLists.txt`** — a plain `ctest` must still exercise threaded assembly
@@ -1462,19 +1546,25 @@ single-threaded — against `PedestalConvergence`'s 178 s. So 223 s is very near
 "the suite costs one lint run", and going below it means parallelising
 clang-tidy (`run-clang-tidy`) rather than anything about the solver.
 
-**AND `naming` IS NO LONGER ALONE AT THE TOP.** At 41 tests the run is 249.7 s,
-with `naming` at **211.5 s** and then `PedestalConvergence` at 148.4 s,
-`PlasmaConnectivity` at 142.8 s and `FreeBoundaryCoupling` at 122.4 s — four
-tests within a factor of 1.7, so `-j4` cannot overlap them once everything else
-has finished and the run is very nearly the cost of the longest chain rather than
-of the total work. `PlasmaConnectivity`'s expensive halves are the
+**AND `naming` IS NO LONGER AT THE TOP AT ALL.** At 41 tests the run is 433.1 s,
+with **`FreeBoundaryCoupling` at 278.1 s**, `naming` at 217.1 s,
+`PedestalConvergence` at 160.0 s and `PlasmaConnectivity` at 149.1 s — four tests
+within a factor of 1.9, so `-j4` cannot overlap them once everything else has
+finished and the run is very nearly the cost of the longest chain rather than of
+the total work.
+
+**`FreeBoundaryCoupling` overtook the lint on 2026-09-07 and it is buying
+something.** It carries FB-7's three acceptances plus a coupled filament run, and
+its two-border case now solves a **physical** equilibrium four times — 35, 21, 51
+and 13 Newton steps at `n = 24` — where the unphysical one it replaced solved a
+cheaper problem badly. `PlasmaConnectivity`'s expensive halves are the
 diverted-fixture fill at three resolutions and the jump study's 6401-sample
 sweep, both of which are the measurements the case exists for.
 
-**Read those seconds as one machine's one run.** The 335 s this paragraph used to
-quote and the 249.7 s it now quotes are the same suite plus one case, and
-*PARDISO and the MKL link line* records a 490 s / 540 s spread on identical code
-— so a change of a few tens of percent in a suite time is this machine, not a
+**Read those seconds as one machine's one run.** The 335 s this paragraph has
+quoted and the 433.1 s it quotes now are the same suite plus cases, and *PARDISO
+and the MKL link line* records a 490 s / 540 s spread on identical code — so a
+change of a few tens of percent in a suite time is this machine, not a
 regression.
 
 **ctest needs no environment set by hand.** `tests/CMakeLists.txt` puts
@@ -4444,12 +4534,7 @@ which sets `F = 0` wherever `Ψ ≤ 0` — the statement that the vacuum carries
 current. `examples/limited-tokamak.toml` has every ingredient (a limiter, a free
 `ψ_bnd`, a gmsh mesh reaching `r = 0`), sets it, and reads `Ψ = 1.0016`. **For a
 domain reaching the axis with `ψ_bnd` free it is a PRECONDITION, not an option**,
-in the same sense as `j ≥ 1` at the plasma edge — and **nothing refuses it
-today**, which is the cheapest guard left in §11. Two things it does not close:
-switching it on for §7.12b's fixture **does not converge**, and
-`refreshPlasmaComponent()` refuses to *seed* an axis-touching element while
-allowing the fill to *reach* one, so an iterate lifting `ψ_h` above `ψ_bnd` on the
-axis re-opens the pole.
+in the same sense as `j ≥ 1` at the plasma edge.
 
 **SO `ψ_ax` IS TWO DEFECTS WEARING ONE SYMPTOM**, which is the thing to carry
 forward: on §7.12b's case the **field** is wrong on a boundary layer and the
@@ -4457,14 +4542,73 @@ argmax merely reports it, while on §7.16's the field is sound and only the argm
 is not. §11.5's three redefinitions address the second and would **hide** the
 first.
 
-**WHAT IS DETECTED IS NOT WHAT IS FIXED**, and the defect is untouched:
-`FreeBoundaryCoupling::theTwoBorderSolveReportsATrueMagneticAxis` asserts that
-the reported `ψ_ax` **is** the flux at the located axis and is therefore **RED**,
-per this file's testing stance — a defect gets a failing test naming it, and its
-message names §11.5's three uncosted repairs as what turns it green. It asserts
-the *layer* as well, so a future `ψ_ax` attained on an isolated dof fails rather
-than passing under a header that says otherwise. **The suite is 40/41 for this
-reason and that is the intended signal.**
+### §7.12b's fixture was the defect, and the suite is 41/41
+
+**THIS SECTION SAID "THE SUITE IS 40/41 AND THAT IS THE INTENDED SIGNAL" FOR A
+DAY.** It was — `theTwoBorderSolveReportsATrueMagneticAxis` asserted the property
+that was WANTED and failed until it was there, which is this file's stance. What
+it was waiting for turned out not to be §11.5's three uncosted redefinitions of
+`ψ_ax` at all. **The fixture was asking for an equilibrium that does not exist**,
+and the repair is to give it the physics it was missing.
+
+**THREE THINGS WERE MISSING AND ALL THREE ARE NECESSARY**, measured 2026-09-07
+one at a time on the same fixture:
+
+| removed | what happens |
+|---|---|
+| `ConfineToPlasma` | `\|F\|` on `r = 0` at **1.0e-02 of scale**; with it, **exactly 0.0** |
+| the prescribed current | **does not converge at any of the four radii** — §7.14's non-linear eigenvalue problem, `Λ = A/span²` on a region that is itself unknown, so scaling `A` changes nothing |
+| the vertical field | converges at limiter 1.05 to §7.14's **annulus**, axis at `r = 1.38` on a domain reaching 1.50; **does not converge at all** at 1.15 or 1.20 |
+
+**AND THE COIL CURRENT IS DERIVED RATHER THAN TUNED**, which is §7.15's finding
+applied: Shafranov's `B_v = μ₀I_p/(4πR)·[ln(8R/a) + β_p + l_i/2 − 3/2]` says what
+field a given `I_p` needs, and the current delivering it is measured **from the
+coils themselves** through `ExteriorCoilSet::gradPsi` — `B_z = (1/r)∂_rψ` at
+`( R₀, 0 )`, which is *not* on the symmetry axis, so the textbook on-axis loop
+formula does not apply and was not used.
+
+| limiter | coils | Newton | `ψ_ax` | `\|F\|` on `r = 0` | `ψ_ax` attained at | `Ψ` at the O-point |
+|---|---|---|---|---|---|---|
+| 1.05 | yes | 35 | 3.141820e-02 | **0.0000e+00** | ( 0.956, −0.035 ) | **1.0000** |
+| 1.05 | **NO** | 21 | 6.105278e-02 | 0.0000e+00 | **( 1.381, 0.000 )** | 1.0000 |
+| 1.15 | yes | 51 | 1.669769e-02 | **0.0000e+00** | ( 0.850, 0.000 ) | **1.0000** |
+| 1.20 | yes | 13 | 2.179752e-02 | **0.0000e+00** | ( 0.956, 0.000 ) | **1.0000** |
+
+`ψ_ax` is attained at `r = 0.85`–`0.96` where the old fixture attained it at
+`r = 0.00000`, and the prescribed current is delivered to every digit.
+
+**THE COIL-FREE ROW IS THE CONTROL AND IT IS SHARPER THAN A FAILURE WOULD BE.**
+It converges, `|F|` on the axis is exactly zero, and `Ψ` at its O-point reads
+**1.0000** — *every health check in the case passes on it*. It is simply a
+different equilibrium, and the only thing separating them is **where the axis
+is**, so the control asserts on the position.
+
+**WHERE IT GIVES OUT IS THE GEOMETRY AND IS RECORDED RATHER THAN HIDDEN.** The
+old sweep's fourth radius, **1.30**, is 0.87 of `ρ_Γ` and this fixture does not
+reach a tokamak there: `ψ_bnd` comes out **negative**, the O-point lands at
+`( −0.001, 1.441 )` carrying `Ψ = 1.14`, and `|F|` on `r = 0` is back. It
+converges, in 8 steps. **A different branch, not a worse answer** — the honest
+fix is a larger `Γ`, so the sweep stops at 1.20.
+
+**THE CONDUCTORS COST THE FIXTURE NO MESH**, which is FB-7 being used by
+something other than its own acceptance the day after it landed;
+`meq::ExteriorCoilSet` is what can hold them, and meshing them in would have
+meant the gmsh half-disc and a different discretisation from the one that case is
+about.
+
+**`theTwoBordersConvergeTogether` KEEPS ITS TABLE AND LOSES A CLAIM.** It closed
+§7.13's *"one combination still open"* — both borders reaching a common root —
+and it still does; closing on an unphysical equilibrium is still closing. What
+its `ψ_ax` and `ψ_bnd` columns are **not** is a machine. **Anything quoting
+§7.12b's numbers as an equilibrium is quoting the `r = 0` layer.**
+
+**THE TRANSFERABLE PART**: a red test names a defect, and *where* the defect is
+was got wrong for a day. The assertion was right, the diagnosis was right, and
+the thing that needed repairing was the fixture rather than the solver. §11.7 of
+`FREE-BOUNDARY-PLAN.md` is the full record. **The one thing it does not close**:
+`refreshPlasmaComponent()` refuses to *seed* an axis-touching element while
+allowing the fill to *reach* one, so an iterate lifting `ψ_h` above `ψ_bnd` on the
+axis re-opens the pole; whether that is reachable in practice is unmeasured.
 
 **So the check exists now.** `meq::CriticalPointFinder::checkAxis()` sweeps for
 zeros of `q_h`, picks the O-point of the sense **the sign of the span dictates**
