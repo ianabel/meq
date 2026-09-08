@@ -1890,6 +1890,306 @@ namespace
 		return psiBoundaryValue;
 	}
 
+	void GradShafranovSolver::setLimiterSurface( int attribute )
+	{
+		if ( attribute <= 0 )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::setLimiterSurface: the limiter region's "
+				"element attribute must be positive -- MFEM numbers attributes from "
+				"1, and tools/mesh/halfdisc.py writes the limiter interior as 20" );
+		if ( orderingChoice != NonlinearOrdering::NPC )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::setLimiterSurface: psi_bnd as an unknown "
+				"is implemented for NonlinearOrdering::NPC only -- under the "
+				"condensation psi is a function of the trace through every element's "
+				"source, so both the border row and its corner would have to be "
+				"differenced rather than being exact" );
+
+		// THE TWO ARE ALTERNATIVES AND NAMING BOTH IS REFUSED. A prescribed
+		// contact and a found one are different constraints on the same unknown,
+		// and both converge -- to different equilibria, by the O( h ) the point
+		// version costs. Picking one silently would make which answer you get
+		// depend on call order, which is exactly the class of quiet wrong answer
+		// this solver refuses elsewhere.
+		if ( boundaryFluxIsUnknown && limiterConstraintChoice
+		                              != LimiterConstraint::LocatedContact )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::setLimiterSurface: a limiter CONTACT was "
+				"already prescribed by setBoundaryFluxPoint(). The point and the "
+				"curve are alternatives: the curve FINDS the contact, so prescribing "
+				"one as well says the answer twice. Call one or the other." );
+
+		// COLLECT IT NOW, SO A WRONG ATTRIBUTE COSTS MILLISECONDS RATHER THAN A
+		// SOLVE. The spaces are built in the constructor, so the mesh is here to
+		// be asked -- and the failure this catches is the one that does not
+		// announce itself later: an empty polygon converges, to a psi_bnd pinned
+		// by nothing. The flags are rolled back on refusal so that a caller who
+		// catches is left with the solver it had.
+		bool const hadSurface = limiterSurfaceIsSet;
+		int const hadAttribute = limiterAttributeValue;
+		LimiterConstraint const hadChoice = limiterConstraintChoice;
+		bool const hadUnknown = boundaryFluxIsUnknown;
+
+		boundaryFluxIsUnknown = true;
+		limiterSurfaceIsSet = true;
+		limiterAttributeValue = attribute;
+		limiterConstraintChoice = LimiterConstraint::LocatedContact;
+		try
+		{
+			collectLimiterFaces();
+		}
+		catch ( ... )
+		{
+			limiterSurfaceIsSet = hadSurface;
+			limiterAttributeValue = hadAttribute;
+			limiterConstraintChoice = hadChoice;
+			boundaryFluxIsUnknown = hadUnknown;
+			limiterFaces.clear();
+			throw;
+		}
+
+		prepared = false;
+	}
+
+	bool GradShafranovSolver::limiterContactWasLocated() const
+	{
+		return limiterContactLocatedValue;
+	}
+
+	double GradShafranovSolver::limiterContactR() const
+	{
+		return limiterContactRValue;
+	}
+
+	double GradShafranovSolver::limiterContactZ() const
+	{
+		return limiterContactZValue;
+	}
+
+	/*
+	 * THE POLYGON, OUT OF THE ELEMENT ATTRIBUTES.
+	 *
+	 * A face is on the limiter exactly when it separates the enclosed region
+	 * from anything else, which is a question with a yes-or-no answer per face
+	 * and needs no geometry at all. Faces on the mesh BOUNDARY are skipped: the
+	 * limiter is a closed curve inside Omega, and a boundary face carrying the
+	 * attribute means the enclosed region runs off the edge of the mesh, which
+	 * is a limiter that is not enclosing anything.
+	 */
+	void GradShafranovSolver::collectLimiterFaces()
+	{
+		limiterFaces.clear();
+		if ( !limiterSurfaceIsSet )
+			return;
+
+		mfem::Mesh &mesh = *potentialFes->GetMesh();
+
+		int enclosed = 0;
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+			if ( mesh.GetAttribute( e ) == limiterAttributeValue )
+				++enclosed;
+
+		if ( enclosed == 0 )
+		{
+			std::ostringstream message;
+			message << "meq::GradShafranovSolver::setLimiterSurface: no element of "
+			           "the mesh carries attribute " << limiterAttributeValue
+			        << ", so the limiter polygon is empty. The attribute is the "
+			           "region the limiter ENCLOSES, not the limiter itself: "
+			           "tools/mesh/halfdisc.py --limiter writes that region as 20 "
+			           "and a mesh built without --limiter has no such region at "
+			           "all.";
+			throw std::runtime_error( message.str() );
+		}
+
+		for ( int f = 0; f < mesh.GetNumFaces(); ++f )
+		{
+			int first = -1, second = -1;
+			mesh.GetFaceElements( f, &first, &second );
+			if ( first < 0 || second < 0 )
+				continue;
+
+			bool const a = mesh.GetAttribute( first ) == limiterAttributeValue;
+			bool const b = mesh.GetAttribute( second ) == limiterAttributeValue;
+			if ( a == b )
+				continue;
+
+			LimiterFace entry;
+			entry.face = f;
+			entry.element = a ? first : second;
+			entry.second = !a;
+			limiterFaces.push_back( entry );
+		}
+
+		if ( limiterFaces.empty() )
+		{
+			std::ostringstream message;
+			message << "meq::GradShafranovSolver::setLimiterSurface: attribute "
+			        << limiterAttributeValue << " covers all " << enclosed
+			        << " elements it touches without bounding any interior face, so "
+			           "there is no limiter polygon. An empty polygon has a maximum "
+			           "of minus infinity and a border row of zeroes, which does not "
+			           "diverge -- it converges, to a psi_bnd pinned by nothing.";
+			throw std::runtime_error( message.str() );
+		}
+	}
+
+	/*
+	 * max psi_h OVER THE POLYGON, AND THE ROW THAT GOES WITH IT.
+	 *
+	 * Per face: psi_h restricted to a straight face is a polynomial of degree k
+	 * in one variable, so a coarse uniform scan brackets its maximum and a
+	 * golden section closes on it. Deliberately derivative-free -- the bracket
+	 * is what makes it robust against the several interior maxima a high-degree
+	 * restriction may carry, and a Newton step on psi' would find whichever
+	 * stationary point it started nearest, maximum or not.
+	 *
+	 * THE SCAN IS OVER THE WHOLE POLYGON AND NOT SEEDED FROM THE LAST CONTACT.
+	 * AxisConstraint::LocatedAxis can seed, because it is rooting a field over a
+	 * two-dimensional mesh where a sweep costs real time; this is a handful of
+	 * faces -- 19 on the shipped fixture -- so an exhaustive scan is cheaper than
+	 * the bookkeeping, and it cannot lose the contact to another lobe of the
+	 * curve the way a seeded search can.
+	 */
+	double GradShafranovSolver::locateLimiterContact( mfem::Vector const &state,
+	                                                  int &element,
+	                                                  mfem::Vector &shape,
+	                                                  mfem::Array<int> &dofs,
+	                                                  double &r, double &z ) const
+	{
+		mfem::Mesh &mesh = *potentialFes->GetMesh();
+
+		element = -1;
+		double best = -std::numeric_limits<double>::infinity();
+
+		mfem::Vector faceShape, physical( 2 );
+		mfem::Array<int> faceDofs;
+
+		for ( LimiterFace const &entry : limiterFaces )
+		{
+			mfem::FiniteElement const *fe = potentialFes->GetFE( entry.element );
+			if ( !fe )
+				continue;
+
+			// The caller-allocated variants, per CLAUDE.md: the Mesh's own
+			// FaceElementTransformations is shared scratch and a second call
+			// resets pointers taken from the first.
+			thread_local mfem::FaceElementTransformations faceScratch;
+			thread_local mfem::IsoparametricTransformation faceElem1;
+			thread_local mfem::IsoparametricTransformation faceElem2;
+			mesh.GetFaceElementTransformations( entry.face, faceScratch,
+			                                    faceElem1, faceElem2 );
+			if ( faceScratch.GetGeometryType() == mfem::Geometry::INVALID )
+				continue;
+
+			potentialFes->GetElementDofs( entry.element, faceDofs );
+			faceShape.SetSize( fe->GetDof() );
+
+			// psi_h at parameter t along the face, read INSIDE the element on
+			// the side the limiter encloses.
+			auto valueAt = [ & ]( double t )
+			{
+				mfem::IntegrationPoint faceIp;
+				faceIp.Set1w( t, 1.0 );
+				faceScratch.SetAllIntPoints( &faceIp );
+
+				mfem::IntegrationPoint const &inside =
+					entry.second ? faceScratch.GetElement2IntPoint()
+					             : faceScratch.GetElement1IntPoint();
+				fe->CalcShape( inside, faceShape );
+
+				double total = 0.0;
+				for ( int i = 0; i < faceDofs.Size(); ++i )
+					total += faceShape( i )
+					         *state( blockOffsets[ 1 ] + faceDofs[ i ] );
+				return total;
+			};
+
+			// Bracket. 8k+1 samples: enough that a degree-k restriction cannot
+			// hide a maximum between two of them at any k this solver runs.
+			int const samples = 8*fe->GetOrder() + 1;
+			int bestSample = 0;
+			double bestValue = -std::numeric_limits<double>::infinity();
+			for ( int i = 0; i < samples; ++i )
+			{
+				double const value = valueAt( static_cast<double>( i )
+				                              /( samples - 1 ) );
+				if ( value > bestValue )
+				{
+					bestValue = value;
+					bestSample = i;
+				}
+			}
+
+			// Close on it. The bracket is the sample either side, clamped, so an
+			// endpoint maximum -- which is what a polygon VERTEX is -- stays an
+			// endpoint rather than being pushed off the face.
+			double lower = static_cast<double>( std::max( bestSample - 1, 0 ) )
+			               /( samples - 1 );
+			double upper = static_cast<double>( std::min( bestSample + 1,
+			                                              samples - 1 ) )
+			               /( samples - 1 );
+
+			double const golden = 0.6180339887498949;
+			double c = upper - golden*( upper - lower );
+			double d = lower + golden*( upper - lower );
+			double fc = valueAt( c ), fd = valueAt( d );
+			for ( int i = 0; i < 60 && upper - lower > 1.0e-15; ++i )
+			{
+				if ( fc > fd )
+				{
+					upper = d;
+					d = c;
+					fd = fc;
+					c = upper - golden*( upper - lower );
+					fc = valueAt( c );
+				}
+				else
+				{
+					lower = c;
+					c = d;
+					fc = fd;
+					d = lower + golden*( upper - lower );
+					fd = valueAt( d );
+				}
+			}
+
+			// The scan's own best is kept beside the polished one: golden section
+			// on a bracket whose maximum is at an endpoint converges TO that
+			// endpoint but never evaluates past it, so on a vertex contact the
+			// sample is the answer and the refinement is a no-op.
+			double const middle = 0.5*( lower + upper );
+			double faceBest = valueAt( middle );
+			double faceAt = middle;
+			if ( bestValue > faceBest )
+			{
+				faceBest = bestValue;
+				faceAt = static_cast<double>( bestSample )/( samples - 1 );
+			}
+
+			if ( faceBest > best )
+			{
+				best = faceBest;
+				element = entry.element;
+
+				// Re-evaluate AT the winner so that the shape functions handed to
+				// the border row are the ones at the contact rather than whatever
+				// the search happened to leave in the scratch.
+				(void)valueAt( faceAt );
+				shape = faceShape;
+				dofs = faceDofs;
+
+				mfem::IntegrationPoint faceIp;
+				faceIp.Set1w( faceAt, 1.0 );
+				faceScratch.Transform( faceIp, physical );
+				r = physical( 0 );
+				z = physical( 1 );
+			}
+		}
+
+		return best;
+	}
+
 	void GradShafranovSolver::setLimiterConstraint( LimiterConstraint choice )
 	{
 		limiterConstraintChoice = choice;
@@ -4051,18 +4351,27 @@ namespace
 		int limiterElement = -1;
 		mfem::Vector limiterShape;
 		mfem::Array<int> limiterDofs;
+		// Cleared per solve, not per setter: a solver whose constraint was
+		// switched after a located run would otherwise still report the
+		// previous run's contact, which is a stale answer wearing a live flag.
+		limiterContactLocatedValue = false;
+		limiterContactRValue = 0.0;
+		limiterContactZValue = 0.0;
+
 		if ( boundaryFluxIsUnknown )
 		{
-			// INTO THE FULL VECTOR, not into the potential space. peakAt() scans
-			// [ blockOffsets[1], blockOffsets[2] ) and reports an index into the
-			// unknown, so the second border has to be shifted the same way or it
-			// reads the FLUX block instead. Measured before it was: psi_bnd came
-			// back 7.6e-02 from the field at the limiter and FLAT under
-			// refinement, which is the signature -- an O( h^{k+1} ) nodal
-			// difference would have fallen by a factor of eight.
-			boundaryDof = blockOffsets[ 1 ]
-			              + nearestPotentialDof( boundaryFluxR, boundaryFluxZ );
 			sB = psiBoundaryValue;
+
+			if ( limiterConstraintChoice == LimiterConstraint::NearestDof )
+				// INTO THE FULL VECTOR, not into the potential space. peakAt()
+				// scans [ blockOffsets[1], blockOffsets[2] ) and reports an index
+				// into the unknown, so the second border has to be shifted the
+				// same way or it reads the FLUX block instead. Measured before it
+				// was: psi_bnd came back 7.6e-02 from the field at the limiter and
+				// FLAT under refinement, which is the signature -- an
+				// O( h^{k+1} ) nodal difference would have fallen by eight.
+				boundaryDof = blockOffsets[ 1 ]
+				              + nearestPotentialDof( boundaryFluxR, boundaryFluxZ );
 
 			// AND THE POINT ITSELF, WHICH IS THE DEFAULT. The element and its
 			// shape functions are fixed for the whole solve -- a prescribed
@@ -4071,6 +4380,14 @@ namespace
 			if ( limiterConstraintChoice == LimiterConstraint::ExactPoint )
 				locatePotentialPoint( boundaryFluxR, boundaryFluxZ,
 				                      limiterElement, limiterShape, limiterDofs );
+
+			// THE POLYGON, AND IT IS COLLECTED PER SOLVE RATHER THAN PER
+			// SETTER. An adaptive cycle refines the mesh under a solver that
+			// keeps its settings, so face indices taken at setLimiterSurface()
+			// time would be stale by the second cycle -- and stale indices do
+			// not throw, they name other faces.
+			if ( limiterConstraintChoice == LimiterConstraint::LocatedContact )
+				collectLimiterFaces();
 		}
 		(void)limiterElement;
 
@@ -4087,6 +4404,30 @@ namespace
 		 * The corner is 1 either way: `G = psi_bnd - psi_h( x )` and `x` does
 		 * not depend on psi_bnd.
 		 */
+		/*
+		 * RE-FIND THE CONTACT, WHICH ONLY LocatedContact NEEDS.
+		 *
+		 * It moves with the solution, so this runs at every iterate -- and it
+		 * must run BEFORE limiterValue() is applied to that iterate and then stay
+		 * FROZEN while limiterValue() is applied to the backsolved directions.
+		 * That is not an optimisation: the border row is dG/dx AT the current
+		 * iterate, so relocating inside the elimination would contract each
+		 * direction against a different row and the step would solve no system at
+		 * all. Same discipline as the axis row, which peakAt() freezes for the
+		 * same reason.
+		 */
+		auto refreshLimiterContact = [ & ]( mfem::Vector const &state )
+		{
+			if ( limiterConstraintChoice != LimiterConstraint::LocatedContact )
+				return;
+			double r = 0.0, z = 0.0;
+			locateLimiterContact( state, limiterElement, limiterShape,
+			                      limiterDofs, r, z );
+			limiterContactRValue = r;
+			limiterContactZValue = z;
+			limiterContactLocatedValue = limiterElement >= 0;
+		};
+
 		auto limiterValue = [ & ]( mfem::Vector const &state )
 		{
 			if ( limiterConstraintChoice == LimiterConstraint::NearestDof )
@@ -4443,6 +4784,7 @@ namespace
 		double peak = hasNormalisation ? peakAt( unknown, s, &argElement, &argDof )
 		                               : 0.0;
 		double constraint = hasNormalisation ? s - peak : 0.0;
+		refreshLimiterContact( unknown );
 		double constraintB = boundaryFluxIsUnknown
 		                     ? sB - limiterValue( unknown ) : 0.0;
 		fieldResidual( unknown, s, residual );
@@ -5121,6 +5463,7 @@ namespace
 					peak = hasNormalisation
 					       ? peakAt( unknown, s, &argElement, &argDof ) : 0.0;
 					constraint = hasNormalisation ? s - peak : 0.0;
+					refreshLimiterContact( unknown );
 					constraintB = boundaryFluxIsUnknown ? sB - limiterValue( unknown ) : 0.0;
 					if ( currentIsUnknown )
 						constraintL = assemblePlasmaCurrent( unknown ) - targetMuZeroCurrent;
@@ -5195,6 +5538,7 @@ namespace
 				peak = hasNormalisation
 				       ? peakAt( unknown, s, &argElement, &argDof ) : 0.0;
 				constraint = hasNormalisation ? s - peak : 0.0;
+				refreshLimiterContact( unknown );
 				constraintB = boundaryFluxIsUnknown ? sB - limiterValue( unknown ) : 0.0;
 					if ( currentIsUnknown )
 						constraintL = assemblePlasmaCurrent( unknown ) - targetMuZeroCurrent;

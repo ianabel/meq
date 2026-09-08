@@ -668,8 +668,9 @@ currents one each way so that both spellings are exercised.
 ``[boundary.limiter]``
 ~~~~~~~~~~~~~~~~~~~~~~
 
-The contact point that pins :math:`\psi_{\mathrm{bnd}}`, making it an unknown of
-the bordered Newton beside :math:`\psi_{\mathrm{ax}}`.
+What pins :math:`\psi_{\mathrm{bnd}}`, making it an unknown of the bordered
+Newton beside :math:`\psi_{\mathrm{ax}}`.  Give **either** a contact point or a
+meshed limiter surface to find the contact on — not both.
 
 .. list-table::
    :header-rows: 1
@@ -680,23 +681,55 @@ the bordered Newton beside :math:`\psi_{\mathrm{ax}}`.
      - Meaning
    * - ``R``, ``Z``
      - *both required if either is given*
-     - The limiter contact, in metres. ``R`` must be strictly positive.
+     - The limiter contact, in metres, prescribed. ``R`` must be strictly
+       positive.
+   * - ``SurfaceAttribute``
+     - *none*
+     - The **element** attribute of the region the limiter encloses.  The
+       limiter is that region's boundary and the contact is **found** on it.
 
 The profiles are functions of
 :math:`\Psi = (\psi - \psi_{\mathrm{bnd}})/(\psi_{\mathrm{ax}} - \psi_{\mathrm{bnd}})`,
 so :math:`\psi_{\mathrm{bnd}}` is a functional of the solution exactly as
-:math:`\psi_{\mathrm{ax}}` is. The constraint is that it equals :math:`\psi_h`
-**at the point given**, evaluated inside the element containing it, so the
-border row is that element's potential shape functions there. Because a limiter
-contact is prescribed input and does not move with the solution, that is exact
-with no further argument — where :math:`\psi_{\mathrm{ax}}`, pinned at the
-*located magnetic axis*, needs the envelope theorem to say the same.
+:math:`\psi_{\mathrm{ax}}` is.
+
+With ``R`` and ``Z`` the constraint is that it equals :math:`\psi_h` **at the
+point given**, evaluated inside the element containing it.  With
+``SurfaceAttribute`` it is
+:math:`\psi_{\mathrm{bnd}} = \max \psi_h` **over the limiter surface**, which is
+what a machine actually does: the plasma edge is the flux surface that touches
+the limiter, and where it touches is an output of the solve.  Either way the
+border row is the contact element's potential shape functions there, exact and
+undifferenced — for the found contact because at a maximum along the surface the
+*tangential* derivative vanishes while the contact moves tangentially, so the
+envelope theorem removes the position term, as it does for
+:math:`\psi_{\mathrm{ax}}` at the located axis.
 
 .. note::
 
-   The contact is prescribed as a **point**, not as a curve, so MEQ does not
-   find the contact for you: the flux surface it reports is the one through the
-   point you name.  Give it the point the machine actually touches.
+   **The mesh must be fitted to the limiter**, which is what
+   ``SurfaceAttribute`` means: the limiter is the boundary of a region of
+   elements, so it is a union of mesh faces and the contact lies on one.
+   :program:`tools/mesh/halfdisc.py --limiter` fragments the limiter circle into
+   the geometry and writes the enclosed region as attribute ``20``.  The limiter
+   MEQ then uses is the **polygon** those faces make; fitting the mesh to the
+   curve puts its vertices on the true curve, so the polygon inscribes rather
+   than approximates.
+
+.. note::
+
+   Prescribing the contact is an :math:`O(h)` choice and finding it is not, so
+   prefer ``SurfaceAttribute`` when the limiter can be meshed.  A contact
+   named in the wrong place is wrong by
+   :math:`\mathrm{dist} \times |\nabla\psi|` however fine the mesh — measured,
+   a contact 0.15 m along the same curve is nearly thirty thousand times further
+   from the answer than the found one, and its error does not fall under
+   refinement at all.  If you must prescribe a point, give it the point the
+   machine actually touches, and be aware that a contact read off another
+   code's grid is a maximum over *cells*.
+
+   Where the contact was actually found is reported on the run and written into
+   the ``.nc`` as ``limiter_r``, ``limiter_z`` and ``limiter_contact_located``.
 
 .. warning::
 
@@ -788,6 +821,25 @@ solution, since :math:`\psi` outside the mesh is their sum against the basis.
      - Sampling **nodes** for the gridded output, so the spacing is
        :math:`(R_{\max} - R_{\min})/(\texttt{GridNR} - 1)`. Nothing to do with
        ``[mesh] NR``.
+   * - ``FluxSurfaces``
+     - ``false``
+     - Write ``<stem>_surfaces.nc``, the flux-surface geometry and the
+       flux-surface averages against a flux label. Off by default: it costs a
+       contour trace and an angle fit per surface, and it is the one output that
+       can be impossible on a run that solved perfectly well.
+   * - ``FluxSurfaceCount``
+     - ``24``
+     - Surfaces in the family. At least 2.
+   * - ``FluxAngleCount``
+     - ``128``
+     - Nodes on each surface, equispaced in the poloidal angle about the
+       magnetic axis. At least 3.
+   * - ``FluxInnerCut``, ``FluxOuterCut``
+     - ``0.05``, ``0.95``
+     - The range of normalised flux the family covers, strictly inside
+       :math:`(0, 1)`. Both ends are cut and for different reasons; see
+       :ref:`output-flux-surfaces`. A value at or past either end is **refused**
+       rather than clamped, whether or not the file is being written.
 
 See :doc:`output` for what gets written.
 

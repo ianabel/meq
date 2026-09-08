@@ -517,6 +517,29 @@ namespace meq
 		/// is in an element whose flux mass degenerates.
 		double r = 0.0;
 		double z = 0.0;
+
+		/**
+		 * `SurfaceAttribute` -- THE LIMITER AS A CURVE RATHER THAN A POINT.
+		 *
+		 * The ELEMENT attribute of the region the limiter encloses, so the
+		 * limiter is that region's boundary and `psi_bnd = max psi_h` over it,
+		 * with the contact FOUND rather than prescribed:
+		 * meq::GradShafranovSolver::setLimiterSurface. Zero when the file did
+		 * not name one.
+		 *
+		 * **IT IS AN ALTERNATIVE TO `R`/`Z` AND NAMING BOTH IS REFUSED.** A
+		 * prescribed contact and a found one are different constraints on the
+		 * same unknown, and both converge -- to equilibria that differ by the
+		 * `O( h )` the point version costs. A file that says the answer twice
+		 * has not asked a question with one answer.
+		 *
+		 * **THE MESH MUST BE FITTED TO THE LIMITER**, which is what makes the
+		 * polygon exact rather than approximate: `tools/mesh/halfdisc.py
+		 * --limiter` fragments the limiter circle into the geometry, so its
+		 * edges are mesh faces and its vertices sit on the true circle -- to
+		 * 3.3e-16, measured -- and it writes that region as attribute 20.
+		 */
+		int surfaceAttribute = 0;
 	};
 
 	/**

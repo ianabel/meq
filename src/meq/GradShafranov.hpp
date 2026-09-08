@@ -599,7 +599,46 @@ namespace meq
 				 * the same ladder scatters by **1.7%** instead of converging,
 				 * because the nearest dof moves with the mesh.
 				 */
-				NearestDof
+				NearestDof,
+
+				/**
+				 * `psi_bnd = max psi_h` over the limiter POLYGON, with the
+				 * contact FOUND rather than prescribed. Set by
+				 * setLimiterSurface(), which supplies the polygon; the two
+				 * enumerators above take a point from setBoundaryFluxPoint()
+				 * instead and are the controls for this one.
+				 *
+				 * **THIS IS THE PHYSICAL CONSTRAINT AND THE OTHER TWO ARE
+				 * APPROXIMATIONS OF IT.** A limiter is a material surface; the
+				 * plasma edge is the flux surface that touches it, so `psi_bnd`
+				 * is a maximum over a CURVE and the contact is an output of the
+				 * solve. Prescribing the point instead means being told the
+				 * answer, and FREE-BOUNDARY-PLAN.md section 7.20 measures what
+				 * that costs when the teller is another code's grid: the 513^2
+				 * `freegs4e` reference puts its contact 0.6 m round the same
+				 * limiter circle from where its own 129^2 run puts it, because
+				 * a contact read off a grid is a maximum over CELLS.
+				 *
+				 * **THE ROW IS AGAIN JUST THE SHAPE FUNCTIONS, AND IT IS THE
+				 * ENVELOPE THEOREM A SECOND TIME.** `x*` now moves with the
+				 * solution, so the chain rule gives
+				 * `dpsi/dlambda = partial psi/partial lambda + grad psi . d( x* )/dlambda`
+				 * -- and the second term vanishes for BOTH kinds of contact a
+				 * polygon admits. On the interior of an edge `x*` is a maximum
+				 * of the restriction, so the TANGENTIAL derivative is zero
+				 * while `d( x* )/dlambda` is tangential. At a vertex `x*` does not
+				 * move at all while it stays the argmax. So no sensitivity of
+				 * the contact is needed, exactly as AxisConstraint::LocatedAxis
+				 * needs none of the root find -- and unlike the axis, which
+				 * relies on `grad psi = 0` outright, this one is a statement
+				 * about the tangential component alone.
+				 *
+				 * **WHAT IS NOT SMOOTH IS THE ARGMAX CHANGING FACE**, where
+				 * `psi_bnd( lambda )` has a kink of the face jump's own size,
+				 * `O( h^{k+1} )`. That is the same character as the axis
+				 * argmax hopping between elements and is not a new hazard.
+				 */
+				LocatedContact
 			};
 
 			/// Choose it. LimiterConstraint::ExactPoint is the default.
@@ -1616,6 +1655,61 @@ namespace meq
 			void setBoundaryFluxPoint( double r, double z );
 
 			/**
+			 * THE LIMITER AS A CURVE, RESTRICTED TO THE POLYGON THE MESH IS
+			 * FITTED TO -- `psi_bnd = max psi_h` over it, contact FOUND.
+			 *
+			 * @param attribute  the ELEMENT attribute of the region the limiter
+			 *                   encloses. The limiter is that region's boundary:
+			 *                   every interior face with this attribute on one
+			 *                   side and something else on the other.
+			 *
+			 * **THE POLYGON IS NOT AN APPROXIMATION MEQ CHOOSES, IT IS THE
+			 * MESH.** `tools/mesh/halfdisc.py --limiter` fragments the limiter
+			 * circle into the geometry, so its edges ARE mesh faces and its
+			 * vertices ARE mesh vertices -- measured, they sit on the true
+			 * circle to **3.3e-16**, and the polygon's length falls short of the
+			 * circle's only by the chords ( 2.189108 against 2.199115 at
+			 * `--size 0.12` ). So there is no separate limiter geometry to keep
+			 * consistent with the mesh, no cut elements, and no question of
+			 * which element a contact belongs to: the contact is on a face, and
+			 * `O( h^2 )` of inscription is the whole geometric error.
+			 *
+			 * **AN ELEMENT ATTRIBUTE AND NOT A BOUNDARY ONE, AND THAT IS LOAD
+			 * BEARING.** `halfdisc.py`'s own docstring records why: MFEM's gmsh
+			 * reader turns 1-D elements into BOUNDARY elements whether or not
+			 * they are topologically on the boundary, and EnableHybridization
+			 * registers a flux constraint on every marked boundary attribute --
+			 * so a limiter tagged as a 1-D group would impose a boundary
+			 * condition through the middle of the plasma. Asking for the
+			 * interface between two ELEMENT attributes cannot do that.
+			 *
+			 * **`psi_h` IS TWO-VALUED ON THOSE FACES AND THE PLASMA SIDE WINS.**
+			 * The field is `L2`, so the face carries one value from each
+			 * neighbour, differing by `O( h^{k+1} )`. The value taken is the one
+			 * from the element carrying `attribute` -- the region the limiter
+			 * encloses, which is where the plasma is -- because that is the
+			 * element whose quadrature points the profiles are evaluated at, so
+			 * the edge the constraint defines is the edge the source sees.
+			 *
+			 * **NPC ONLY**, and refused otherwise, for setBoundaryFluxPoint()'s
+			 * reason: the row is a covector on the POTENTIAL.
+			 *
+			 * @throws std::logic_error if a contact point was already prescribed
+			 *         by setBoundaryFluxPoint(). The two are alternatives and
+			 *         naming both is a configuration that cannot be honoured
+			 *         rather than one with a sensible precedence.
+			 * @throws std::invalid_argument if the attribute is not positive.
+			 */
+			void setLimiterSurface( int attribute );
+
+			/// Where the last solve put the limiter contact, and whether the
+			/// polygon was searched at all. Valid after solve(); false, and
+			/// zeroes, unless setLimiterSurface() was called.
+			bool limiterContactWasLocated() const;
+			double limiterContactR() const;
+			double limiterContactZ() const;
+
+			/**
 			 * PRESCRIBE THE PLASMA CURRENT AND SOLVE FOR THE PROFILE SCALE,
 			 * which is how every production free-boundary code poses this.
 			 *
@@ -2335,6 +2429,53 @@ namespace meq
 
 			/// setLimiterConstraint().
 			LimiterConstraint limiterConstraintChoice = LimiterConstraint::ExactPoint;
+
+			/// setLimiterSurface(), and where the last solve put the contact.
+			bool limiterSurfaceIsSet = false;
+			int limiterAttributeValue = 0;
+			bool limiterContactLocatedValue = false;
+			double limiterContactRValue = 0.0;
+			double limiterContactZValue = 0.0;
+
+			/// One face of the limiter polygon: the mesh face, and the element on
+			/// the side the limiter encloses -- the plasma side, whose polynomial
+			/// is the one evaluated. See setLimiterSurface() for why that side.
+			struct LimiterFace
+			{
+				int face;
+				int element;
+				/// TRUE when `element` is the face's Elem2, which decides which of
+				/// the two integration points the face transformation carries is
+				/// the one to read.
+				bool second;
+			};
+
+			/// The polygon, collected once per prepare() from the element
+			/// attributes. Empty unless setLimiterSurface() was called.
+			std::vector<LimiterFace> limiterFaces;
+
+			/// Walk the element attributes and fill limiterFaces.
+			///
+			/// @throws std::runtime_error if the attribute is absent from the
+			///         mesh, or present but encloses nothing -- both of which
+			///         would otherwise leave an EMPTY polygon, whose maximum is
+			///         minus infinity and whose border row is all zeroes. That
+			///         does not diverge: it converges, to a `psi_bnd` pinned by
+			///         nothing.
+			void collectLimiterFaces();
+
+			/// `max psi_h` over the polygon at `state`, and the border row that
+			/// goes with it -- the containing element, its potential shape
+			/// functions at the contact, and its dofs. Also reports where the
+			/// contact is, which the driver prints and the `.nc` carries.
+			///
+			/// Re-run at EVERY residual and every Jacobian, unlike
+			/// LimiterConstraint::ExactPoint's one-off location, because the
+			/// contact moves with the solution.
+			double locateLimiterContact( mfem::Vector const &state, int &element,
+			                             mfem::Vector &shape,
+			                             mfem::Array<int> &dofs, double &r,
+			                             double &z ) const;
 
 			/// setAxisConstraint(), and where the last solve put the axis.
 			AxisConstraint axisConstraintChoice = AxisConstraint::LocatedAxis;

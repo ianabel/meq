@@ -3205,15 +3205,83 @@ exactly** instead.
 
 * the profile tables are the 129² run's; the scale of 0.94 is accounted for
   above to 3.8e-04, so regenerating them is cosmetic;
-* **the limiter is still prescribed as a POINT**, so MEQ is given the reference's
-  own grid artefact rather than finding its own contact. The physical problem is
-  `ψ_bnd = max ψ over the limiter CURVE`, and it is exact by the **same envelope
-  theorem** as the axis: the contact moves *along* the curve, and at a maximum of
-  `ψ|_L` the tangential derivative vanishes, so the position term drops and the
-  row is again just the shape functions. A limiter is prescribed input, so the
-  curve can be **meshed to** exactly as §7.9's conductors are — `halfdisc.py`
-  would embed it and the contact would then be found on mesh entities. That is
-  FB-6's remaining capability gap and it is a day's work;
+* ~~**the limiter is still prescribed as a POINT**~~ — **BUILT 2026-09-07, IN
+  THE RESTRICTED FORM: THE LIMITER AS A POLYGON THE MESH IS FITTED TO.**
+  `setLimiterSurface( attribute )` and `LimiterConstraint::LocatedContact`. The
+  limiter is the boundary of an element-attribute region, so it **is** a union
+  of mesh faces, and `ψ_bnd = max ψ_h` over it with the contact FOUND rather
+  than prescribed. `tests/convergence/LimiterCurve.cpp` is the acceptance, and
+  it costs **20.2 s** under `ctest -j4` on a quiet machine, and 31.8
+  and 29.5 s standalone with two agents building — three readings of one
+  binary.
+
+  **THE ROW IS AGAIN JUST THE SHAPE FUNCTIONS, AND THE ENVELOPE THEOREM IS WHY**
+  — for both kinds of contact a polygon admits: on the interior of an edge the
+  TANGENTIAL derivative vanishes at a maximum of the restriction while the
+  contact moves tangentially, and at a vertex the contact does not move at all.
+  So no sensitivity of the search enters the Jacobian. **The observed Newton
+  ORDER is what checks that, because nothing in an error norm can** — this
+  file's own *A wrong Jacobian is invisible to a convergence table* — and it
+  reads **2.000 at `n = 24` and at `n = 48`**, on histories that are textbook:
+  `8.00e-04 → 1.03e-06 → 1.72e-12`.
+
+  **THE FIXTURE KNOWS ITS OWN ANSWER**, which is what makes the acceptance sharp
+  rather than self-consistent. The box, the source and the boundary condition are
+  all symmetric in `z`, so the exact contact on the outboard edge is at `z = 0`
+  EXACTLY; `MakeCartesian2D`'s diagonal split is not symmetric, so the discrete
+  contact converges to it rather than sitting on it — at **2.217 and 2.127**,
+  which is `O( h² )` and is what a root of a DIFFERENTIATED quantity gives.
+
+  | | `n = 12` | `n = 24` | `n = 48` |
+  |---|---|---|---|
+  | found, against the exact contact | 2.149e-04 | 2.169e-05 | **2.382e-06** |
+  | **a wrong point on the SAME polygon** | 7.072e-02 | 7.051e-02 | **7.049e-02** |
+
+  **THE SECOND ROW IS THE CONTROL AND IT MUST NOT CONVERGE.** A contact
+  prescribed 0.15 m away along the same curve is wrong by `dist × |∇ψ|` however
+  fine the mesh, so its column is flat — **29,600×** the located one at
+  `n = 48`. That is §7.20's own defect in miniature, and it is the column that
+  says the constraint is doing work: without it every other assertion here is
+  satisfied by a solver that quietly ignores the polygon.
+
+  **AND ONLY THE PRODUCTION ROUTE CONVERGES TO A CURVE.** Painting a region by
+  centroid gives a closed polygon whose perimeter converges to the wrong number
+  — 2.828, 2.368, 2.611 against a circle's 1.885 — which is the staircase, and
+  `max ψ` over it would then converge at `O( h )`. `halfdisc.py --limiter`
+  fragments the circle into the geometry instead, so the polygon's VERTICES lie
+  on the true circle — measured, to **3.3e-16** — and it inscribes at `O( h² )`.
+  Verified end to end on a gmsh mesh: 19 limiter faces recovered from the
+  attribute interface, 7 Newton steps, and the contact lands **0.345370** from
+  the limiter centre against a radius of 0.350 — the chord sag of a 19-segment
+  inscribed polygon, `a( 1 − cos( π/19 ) ) = 0.0048`, to the digit.
+
+  **WHAT IS STILL RESTRICTED**: the limiter is a POLYGON and the mesh is fitted
+  to it, so a smooth limiter is reached only through the mesh, at whatever
+  inscription order the mesher gives. Nothing here cuts an element, and nothing
+  here needs to — which is the same trade §7.9 made for the conductors and for
+  the same reason, a limiter being prescribed input that does not move;
+
+  **AND IT REACHES THE SOLVE FROM A FILE**, as `[boundary.limiter]
+  SurfaceAttribute` — an **alternative** to `R`/`Z`, refused beside them, since
+  both converge and a precedence rule would pick the reported equilibrium by key
+  order. Driven end to end on a `halfdisc.py --limiter` mesh the driver
+  reproduces the library to every digit: `ψ_ax = 7.459870e-01`,
+  `ψ_bnd = 6.698128e-01`, contact `( 1.038429, 0.343225 )`, 7 Newton steps. The
+  `.nc` gains `limiter_contact_located` and reports the contact that produced
+  `ψ_bnd` rather than the configuration echoed back — different things on this
+  route. A wrong attribute is refused **at the setter**, because an empty
+  polygon converges to a `ψ_bnd` pinned by nothing;
+
+  **WHAT IT DOES NOT YET HAVE IS A SHIPPED EXAMPLE OR A DRIVER REGRESSION**, and
+  that is the gap this file warns about elsewhere — *"all three defects found
+  building this case were driver-side, and a library test would have caught none
+  of them"*. The driver route is verified by hand and recorded above; it is not
+  yet gated. **The natural way to close it is also the way to finish FB-6**:
+  regenerate `examples/limited-tokamak.msh` with `--limiter` on `freegs4e`'s own
+  limiter circle and switch that file from `R`/`Z` to `SurfaceAttribute`, which
+  would take the reference's grid-derived contact out of the comparison
+  altogether — the last hand-fed input in §7.20. Expect it to MOVE the published
+  `ψ_ax`, since the contact would then be MEQ's own;
 * the conductor model still differs — MEQ's rectangles against freegs4e's
   filaments — and §7.19's `meq::CurrentFilament` cannot fix it here, because the
   P2 coils sit at radius 1.163 from `Γ`'s centre while the plasma reaches 1.345,

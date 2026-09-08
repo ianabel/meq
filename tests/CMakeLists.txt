@@ -178,7 +178,14 @@ set(MEQ_CONVERGENCE_TESTS
 	# CriticalPointFinder::checkAxis(), which reads the normalised flux at a zero
 	# of q_h and must find 1 there -- and it is a convergence test rather than a
 	# unit one because half of it drives the bordered Newton.
-	AxisAgreement)
+	AxisAgreement
+	# FB-6's remaining capability gap: the limiter as a CURVE rather than a
+	# prescribed point, restricted to the POLYGON the mesh is fitted to. A
+	# convergence test rather than a unit one because the contact is found on a
+	# mesh and the constraint is closed by the bordered Newton -- and because the
+	# assertion with teeth is Newton's own observed ORDER, which is the only
+	# thing that can see whether the border row really is exact.
+	LimiterCurve)
 
 # DriverAcceptance is registered separately below: it runs the meq BINARY rather
 # than linking the library, so it needs the app to have been built and needs the

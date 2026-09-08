@@ -1088,7 +1088,13 @@ int main( int argc, char **argv )
 		 * makes psi_bnd an unknown of a NORMALISATION that has to exist first.
 		 */
 		meq::LimiterConfig const &limiterConfig = config->getBoundary().limiter;
-		if ( limiterConfig.given )
+		if ( limiterConfig.surfaceAttribute > 0 )
+			// THE CURVE. psi_bnd = max psi_h over the meshed limiter surface,
+			// with the contact found rather than prescribed. Config refuses
+			// this beside R/Z, so the two branches are exclusive here by
+			// construction rather than by precedence.
+			fresh->setLimiterSurface( limiterConfig.surfaceAttribute );
+		else if ( limiterConfig.given )
 			fresh->setBoundaryFluxPoint( limiterConfig.r, limiterConfig.z );
 
 		/*
@@ -1782,10 +1788,22 @@ int main( int argc, char **argv )
 			             tail > 1.0e-1
 			                 ? "; raise [boundary.exterior] Modes" : "" );
 			if ( config->getBoundary().limiter.given )
-				std::printf( "     psi_bnd = %.6e Wb/rad at the limiter ( %g, %g )\n",
-				             solver->psiBoundary(),
-				             config->getBoundary().limiter.r,
-				             config->getBoundary().limiter.z );
+			{
+				// THE CONTACT IS AN OUTPUT ON THE CURVE ROUTE AND AN INPUT ON
+				// THE POINT ONE, so it is read from the solver where it was
+				// found and echoed from the file where it was given. Printing
+				// the configured r and z under SurfaceAttribute would report
+				// ( 0, 0 ), which is on the axis and is not a limiter.
+				bool const located = solver->limiterContactWasLocated();
+				std::printf( "     psi_bnd = %.6e Wb/rad at the limiter "
+				             "( %g, %g )%s\n", solver->psiBoundary(),
+				             located ? solver->limiterContactR()
+				                     : config->getBoundary().limiter.r,
+				             located ? solver->limiterContactZ()
+				                     : config->getBoundary().limiter.z,
+				             located ? ", found on the limiter surface"
+				                     : ", as prescribed" );
+			}
 		}
 
 		/*
@@ -2553,8 +2571,17 @@ int main( int argc, char **argv )
 		}
 		if ( config->getBoundary().limiter.given )
 		{
-			writer.attribute( "limiter_r", config->getBoundary().limiter.r );
-			writer.attribute( "limiter_z", config->getBoundary().limiter.z );
+			// Where the contact ACTUALLY was, which on the curve route is a
+			// solved quantity and not the configuration echoed back. A reader
+			// differencing two runs needs the contact that produced psi_bnd.
+			bool const located = solver->limiterContactWasLocated();
+			writer.attribute( "limiter_r",
+			                  located ? solver->limiterContactR()
+			                          : config->getBoundary().limiter.r );
+			writer.attribute( "limiter_z",
+			                  located ? solver->limiterContactZ()
+			                          : config->getBoundary().limiter.z );
+			writer.attribute( "limiter_contact_located", located ? 1 : 0 );
 			writer.attribute( "psi_boundary", solver->psiBoundary() );
 		}
 

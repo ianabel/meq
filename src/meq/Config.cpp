@@ -1178,14 +1178,31 @@ namespace meq
 				}
 			}
 
-			// [boundary.limiter] -- the point that pins psi_bnd, FB-3.
+			// [boundary.limiter] -- what pins psi_bnd, FB-3: a prescribed
+			// contact, or the meshed limiter surface to find one on.
 			{
 				Table limiter( boundary, "limiter", sourceName, false );
-				limiter.rejectUnknownKeys( { "R", "Z" } );
+				limiter.rejectUnknownKeys( { "R", "Z", "SurfaceAttribute" } );
 
 				LimiterConfig & l = boundaryOptions.limiter;
-				l.given = limiter.has( "R" ) || limiter.has( "Z" );
-				if ( l.given )
+				bool const pointGiven = limiter.has( "R" ) || limiter.has( "Z" );
+				bool const surfaceGiven = limiter.has( "SurfaceAttribute" );
+
+				// THE POINT AND THE CURVE ARE ALTERNATIVES. Both converge, and
+				// to equilibria that differ by the O( h ) a prescribed contact
+				// costs -- so a precedence rule here would decide which answer
+				// the run reports on the strength of key order. Refuse instead.
+				if ( pointGiven && surfaceGiven )
+					limiter.fail( "SurfaceAttribute", "a limiter is a point OR a curve, not both: [boundary.limiter] SurfaceAttribute finds the contact on the meshed limiter surface, while R and Z prescribe it. Remove one" );
+
+				l.given = pointGiven || surfaceGiven;
+				if ( surfaceGiven )
+				{
+					l.surfaceAttribute = limiter.getInteger( "SurfaceAttribute" );
+					if ( l.surfaceAttribute <= 0 )
+						limiter.fail( "SurfaceAttribute", "the limiter region's element attribute must be positive; MFEM numbers attributes from 1, and tools/mesh/halfdisc.py --limiter writes the enclosed region as 20" );
+				}
+				if ( pointGiven )
 				{
 					// BOTH OR NEITHER. A limiter given only its height sits at
 					// r = 0, which is the axis; honouring that would pin psi_bnd
@@ -1195,14 +1212,16 @@ namespace meq
 
 					if ( !( l.r > 0.0 ) )
 						limiter.fail( "R", "the limiter contact must be at R > 0; the axis is not a limiter, and the operator's 1/r is not integrable there" );
-
-					// psi_bnd is read ONLY through Psi, so without a
-					// normalisation this is an unknown nothing consumes -- a
-					// file that would converge, at full order, to an
-					// equilibrium it did not describe.
-					if ( !sourceOptions.isNormalised() )
-						limiter.fail( "R", "a limiter pins psi_bnd, which only enters through the normalised flux; set [source] Normalised = true or remove [boundary.limiter]" );
 				}
+				// psi_bnd is read ONLY through Psi, so without a normalisation
+				// this is an unknown nothing consumes -- a file that would
+				// converge, at full order, to an equilibrium it did not
+				// describe. Reported against whichever key the file actually
+				// used: naming "R" on a file that wrote SurfaceAttribute would
+				// point at a key that is not there.
+				if ( l.given && !sourceOptions.isNormalised() )
+					limiter.fail( surfaceGiven ? "SurfaceAttribute" : "R",
+					              "a limiter pins psi_bnd, which only enters through the normalised flux; set [source] Normalised = true or remove [boundary.limiter]" );
 			}
 
 			// [boundary.exterior] -- the exact exterior DtN, FB-5, and what
