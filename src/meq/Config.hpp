@@ -227,7 +227,7 @@ namespace meq
 		// Psi = psi/psi_ax, rather than of psi itself. That makes psi_ax a
 		// functional of the solution and therefore an UNKNOWN of the non-linear
 		// system, which the solver closes by a bordered Newton -- see
-		// meq::NormalisedSource and CLAUDE.md, "Newton, and the obligation it
+		// meq::NormalisedSource and CLAUDE_HDGGS.md, "Newton, and the obligation it
 		// creates". False by default, because it changes what the tables mean.
 		bool normalised = false;
 		// PsiAxis: the starting value of psi_ax [Wb per radian]. REQUIRED when

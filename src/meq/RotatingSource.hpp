@@ -312,7 +312,7 @@ namespace meq
 	 * with psi = 0 on Gamma, so Psi = psi/psi_ax -- which makes psi_ax a
 	 * functional of the solution and therefore an unknown of the non-linear
 	 * system, not an input. meq::NormalisedSource is the interface the solver
-	 * closes by a bordered Newton; see CLAUDE.md, "Newton, and the obligation it
+	 * closes by a bordered Newton; see CLAUDE_HDGGS.md, "Newton, and the obligation it
 	 * creates", before using this.
 	 *
 	 * IT IS A WRAPPER AND NOT A REIMPLEMENTATION, which is the whole design. A

@@ -1,9 +1,14 @@
 # MEQ's published tables
 
-**Every number MEQ claims, in one place.** These are the measurement tables that
-used to sit inline in `CLAUDE.md`. They were moved out because a maintainer does
-not need them on every reading and does need to know where they are — the
-argument each one supports is still in `CLAUDE.md`, beside a pointer to the row.
+**Every number MEQ claims, in one place.** These are MEQ's measurement tables,
+kept here rather than inline because a maintainer does not need them on every
+reading and does need to know where they are. **The argument each one supports
+stays beside a pointer to the row**, in whichever of the four maintainer files
+owns the subject: `CLAUDE.md` (the index, the build, the traps),
+`CLAUDE_HDGGS.md` (the equation, the discretisation, the solve, toroidal flow,
+the linear solves), `CLAUDE_FB.md` (free boundary and the `freegs4e` benchmark)
+or `CLAUDE_INVERSION.md` (the flux-surface work). **Do not renumber the
+anchors** — all four point at them by `M-nn`, and all 67 are referenced.
 
 **THE RULES THEY WERE TAKEN UNDER HAVE NOT CHANGED, AND THEY ARE WHAT MAKES A
 TABLE HERE WORTH ANYTHING.**

@@ -271,7 +271,7 @@ namespace meq
 			 * the edge, so the assembled residual is discontinuous in the
 			 * unknowns and there is no Jacobian to iterate with: measured, it
 			 * fails at every degree and every mesh, from the exact solution, and
-			 * under PicardThenNewton. See CLAUDE.md's *At j = 0 the question
+			 * under PicardThenNewton. See CLAUDE_FB.md's *At j = 0 the question
 			 * does not arise*.
 			 */
 			/// **VIRTUAL, AND THAT IS NOT DECORATION.** A source that WRAPS

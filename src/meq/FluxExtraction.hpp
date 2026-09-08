@@ -84,7 +84,7 @@ namespace meq
 		std::size_t angles = 128;
 
 		/// The cut, in Psi_N. See FluxFamily.hpp section 2 for the decision and
-		/// CLAUDE.md's IN-6 section for the measurement behind the defaults.
+		/// CLAUDE_INVERSION.md's IN-6 section for the measurement behind the defaults.
 		double innerCut = 0.05;
 		double outerCut = 0.95;
 

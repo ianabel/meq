@@ -73,7 +73,7 @@
  *
  * The numbers themselves are measured on meq's own fixture rather than
  * inherited -- tests/convergence/FluxGridConvergence.cpp sweeps both ends and
- * prints where each quantity gives out, and CLAUDE.md's IN-6 section carries
+ * prints where each quantity gives out, and CLAUDE_INVERSION.md's IN-6 section carries
  * the table. They are configurable, because the right cut depends on the mesh
  * and on what the consumer needs, and because a cut chosen by the library and
  * not sayable by the caller is a cut nobody can measure.
@@ -116,7 +116,7 @@
  * to be impossible, and a hash makes it unlikely. The comparison is O( nDOF )
  * against an extraction that traces, fits and integrates a whole family, so it
  * is free at every size worth caching at; tests/unit/FluxFamilyTests.cpp prints
- * the cost of a served query and CLAUDE.md's IN-6 section carries the number.
+ * the cost of a served query and CLAUDE_INVERSION.md's IN-6 section carries the number.
  *
  * memcmp AND NOT ==, and the difference is in the safe direction. Two vectors
  * differing only in the sign of a zero compare EQUAL under == and UNEQUAL under

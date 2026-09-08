@@ -814,7 +814,7 @@ rather than a lossy filter, with critical points from §5. Carr, Snoeyink & Axen
 
 Every stage ended at a **measured rate**, not at "it runs". **IN-A, IN-0, IN-1,
 IN-2, IN-3, IN-4, IN-5 and IN-6 are done and green**, and so is IN-P.
-`CLAUDE.md`'s *Solution inversion* carries the measurements; what is
+`CLAUDE_INVERSION.md`'s *Solution inversion* carries the measurements; what is
 kept below per stage is where the code lives, what the stage **found** that this
 plan did not predict, and the few numbers that are recorded nowhere else.
 
@@ -1111,7 +1111,7 @@ and would fail for a reason that has nothing to do with the fit.
 a geometric Gauss–Newton on `Ψ_N(x(ρ,θ)) − Ψ`, warm-started by IN-3's linear fit,
 with `∇Ψ_N` from the solved flux — requires each disc node only to **land on the
 right surface**. **No `ψ`-element is needed and none is implemented.**
-`CLAUDE.md`'s *IN-4* has the measurements; four findings belong here.
+`CLAUDE_INVERSION.md`'s *IN-4* has the measurements; four findings belong here.
 
 > **THE EXPLICIT SPECTRAL-WIDTH PENALTY LOSES ON ITS OWN METRIC, AND THE REASON
 > IS STRUCTURAL.** `M(p,q) = Σ m^{p+q}(R²+Z²) / Σ m^p(R²+Z²)` is a **ratio** of
@@ -1219,7 +1219,7 @@ The flux-surface `(Ψ, θ)` NetCDF grid stage 7 deferred, and the per-`ψ` cache
 four sizes beside it. `tests/unit/FluxFamilyTests.cpp`,
 `tests/convergence/FluxGridConvergence.cpp`,
 `DriverAcceptance::theDriverWritesTheFluxSurfaceGrid`.
-`CLAUDE.md`'s *IN-6* carries the measurements; what is kept here is what the
+`CLAUDE_INVERSION.md`'s *IN-6* carries the measurements; what is kept here is what the
 stage found that this plan did not predict.
 
 **THE SPLIT IS ALONG THE CONTRACT AND NOT ALONG THE ARITHMETIC.** The container,
@@ -1445,12 +1445,21 @@ design against.
 
 ### 11.3 The threading constraints are MEQ's own, and two of them are traps
 
-**`MKL_NUM_THREADS=1` IS NOT NEGOTIABLE AND THIS ITEM DOES NOT GET TO RELAX
-IT.** `CLAUDE.md` records `ComputeH()`'s element-local dense LU degrading by a
-factor of **forty** at `k = 3` on threaded MKL, and the variable is
-process-wide. So parallelism here must be **OpenMP over independent work, never
-threaded BLAS**, and any harness that appears to gain from raising MKL threads
-is measuring the solver getting slower somewhere else.
+**PARALLELISM HERE IS OpenMP OVER INDEPENDENT WORK, NEVER THREADED BLAS**, and
+that conclusion is unchanged even though its premise has moved. `CLAUDE.md`
+records `ComputeH()`'s element-local dense work degrading by a factor of
+**forty** at `k = 3` on threaded MKL — the back-substitutions and the
+Schur-complement `dgemm` rather than the `dgetrf`, which does not move at these
+block sizes — and the variable is process-wide.
+
+**WHAT LETS THE SOLVER TAKE MKL THREADS DOES NOT HELP HERE.** MKL suppresses its
+own threading inside an *active* OpenMP region, so `AssemblyMode::Threaded`
+nests the element-local work and makes `MKL_NUM_THREADS > 1` free for it — worth
+1285× against `Serial` at `MKL=8`. **The extraction chain has no such region**:
+it is serial today, and 70% of it is `ContourTracer::sampleAt`, which calls no
+BLAS at all. So this item still wants `MKL_NUM_THREADS=1` and gains nothing from
+relaxing it, and a harness that appears to gain from raising MKL threads is
+measuring something else.
 
 > **`Mesh::GetElementTransformation( int )` RETURNS A POINTER TO SHARED
 > SCRATCH.** MFEM's own comment: *"The returned object is owned by the class and
@@ -1460,11 +1469,22 @@ is measuring the solver getting slower somewhere else.
 > transformation — **no crash, no error, a wrong point**. The thread-safe route
 > is the `( i, IsoparametricTransformation * )` overload into a thread-local.
 >
-> **This is not hypothetical: `src/meq/FluxSurfaces.cpp` uses the shared
-> overload at two sites and `src/meq/CriticalPoints.cpp` at one.** All three are
-> correct today because everything is serial. They are the concrete first item
-> of any threading work, and they should be changed *before* a parallel region
-> is written rather than during the debugging of one.
+> **DONE, AND THE COUNT MADE BY EYE WAS WRONG, WHICH IS THE POINT.** This box
+> read *two sites in `src/meq/FluxSurfaces.cpp` and one in
+> `src/meq/CriticalPoints.cpp`*. Asked properly there were **six** — five in
+> `FluxSurfaces.cpp` (`setBandExtension`'s face loop, `elementSize()`,
+> `locate()`, and **both** branches of `extendField()`) and one in
+> `CriticalPoints.cpp`. All six now take the caller-allocated overload into a
+> function-local `thread_local`, so a transformation held live across a call
+> cannot be reset underneath it, and every printed number in the four affected
+> convergence tests is **byte-identical** afterwards. Changed *before* a
+> parallel region was written, which is what this box asked for.
+>
+> **There is a fourth kind of shared scratch that nothing had named**:
+> `Mesh::GetBdrFaceTransformations( int )` returns the mesh's own
+> `FaceElementTransformations`. Its caller-allocated variant signals failure by
+> `GetGeometryType() == Geometry::INVALID` where the pointer version returns
+> `nullptr`.
 
 Three more, none of them exotic:
 
@@ -1475,8 +1495,18 @@ Three more, none of them exotic:
   `Mesh::ElementToElementTable()` builds and caches on first call; building it
   inside a parallel region is a data race on the cache.
 * **The `FindPoints` fallback must stay outside**, or be serialised. It is
-  already `O(elements × points)` and the tracer reports zero fallbacks, so this
-  costs nothing to honour.
+  already `O(elements × points)`, and it is **not reentrant**: it loops every
+  element through that same shared transformation *and* builds a
+  vertex-to-element table on the way, so an attempt to share one `ContourTracer`
+  across threads aborts with *"the axis is not in the mesh"*.
+
+  **AND "THE TRACER REPORTS ZERO FALLBACKS, SO THIS COSTS NOTHING TO HONOUR" IS
+  TRUE OF `trace()` AND FALSE OF THE ENTRY POINTS.** `traceFromAxis()` takes it
+  **once per surface unconditionally**, because it samples the axis with no
+  element hint — so this is the single blocker on a shared tracer rather than a
+  free rule. `setWalkDepth( 12 )`, now the default, removed the ray fallbacks
+  (183 of 576 at depth 4, none at 12); what is left is giving `traceFromAxis()`
+  its axis element as a hint, which `findAxis()` already knows.
 
 **THE HARNESS MUST ASSERT BIT-EXACT REPRODUCTION OF THE SERIAL ANSWER**, at
 `0.000e+00` and not at a tolerance — the precedent is
@@ -1485,14 +1515,20 @@ in a stronger form: independent surfaces and independent rays **reassociate
 nothing**, so exactness is available. A tolerance would be an admission that
 something is shared, which is exactly the defect being guarded against.
 
-> **AND DO NOT MAKE IT AUTOMATIC.** `CLAUDE.md` records a gate on
-> `omp_get_max_threads() > 1` being tried for assembly and **removed**: MFEM
-> forks a team per call, so a caller that assembles hundreds of times inside a
-> bordered Newton pays the fork every time, and `HighBetaConvergence` went 21.5 s
-> → 39 s under it. The same shape is here — a parallel region per surface is
-> right for a `(Ψ, θ)` grid built once and **wrong** for a single surface asked
-> for repeatedly, which is precisely MaNTA's pointwise call pattern. Informed
-> opt-in, like `setAssemblyMode()`.
+> **AND DO NOT MAKE IT AUTOMATIC — THOUGH THE PRECEDENT THIS BOX CITED HAS
+> SINCE INVERTED.** It leaned on threaded assembly being rejected as a default
+> because MFEM forks a team per call, `HighBetaConvergence` going 21.5 s → 39 s
+> under it. **That is no longer the verdict**: once the threading reached
+> `MultNL()` — the residual and the Jacobian, so every NPC step — the bordered
+> Newton became the case that argues *hardest for* the flag, and `Threaded` is
+> MEQ's default.
+>
+> **The shape of the argument still holds here, for a reason of its own rather
+> than by precedent.** A parallel region per surface is right for a `(Ψ, θ)`
+> grid built once and **wrong** for a single surface asked for repeatedly, which
+> is precisely MaNTA's pointwise call pattern — and the cure for *that* is
+> `meq::GeometryCache`, which serves a repeated point from one extraction rather
+> than parallelising it. Informed opt-in, like `setAssemblyMode()`.
 
 ### 11.4 Two ALGORITHMIC levers, both of which beat threading
 

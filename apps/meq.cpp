@@ -2432,7 +2432,7 @@ int main( int argc, char **argv )
 		 * can see it. The fix is "The postprocessing closes on the element
 		 * average, always", and it is on the gf-hdg-dev branch and on NO OTHER:
 		 * an MFEM built without it loses this silently. See INSTALL.md for which
-		 * branches MEQ-integration must contain, and CLAUDE.md's "Post-processing
+		 * branches MEQ-integration must contain, and CLAUDE_HDGGS.md's "Post-processing
 		 * is back" for the measurement.
 		 *
 		 * Until today that defect could only reach the error estimator, and a

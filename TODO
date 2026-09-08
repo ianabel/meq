@@ -317,7 +317,7 @@ derivation.
 
   DONE, FL-0 to FL-8, and reachable from a TOML file. src/meq/RotatingSource.*
   is the source, docs/rotation.rst the derivation, and CLAUDE.md's
-  "Toroidal flow" every measurement. The equation is refs/RotatingGK.pdf (136)
+  CLAUDE_FLOW.md every measurement. The equation is refs/RotatingGK.pdf (136)
   closed by its (96) and (97); the inputs are T_s(psi), omega(psi), n-1 density
   flux functions and I(psi). Taking q(psi) instead and finding I(psi) from it is
   ROADMAP.md item 10, not this.
@@ -344,7 +344,7 @@ derivation.
   (4.7) FORCES C constant -- and that is precisely the term Li & Zhu got the sign
   of wrong. Only RotatingSourceTests' dFdPsi sweep touches it. Putting
   Maschke-Perrin into tests/analytic/ is the cheap follow-up and is not done; see
-  CLAUDE.md's Toroidal flow, which verified it by substitution to 8e-26.
+  CLAUDE_FLOW.md, which verified it by substitution to 8e-26.
 
   Nothing else that stood here is worth keeping; git has the working.
 ================================================================================
@@ -374,7 +374,7 @@ Raised 2026-08-25.
                              the rotation work, verified by substitution to
                              8e-26, and is NOT yet in tests/analytic/; its
                              section 3, the actual polytrope, is not a benchmark
-                             for it at all. See CLAUDE.md, Toroidal flow
+                             for it at all. See CLAUDE_FLOW.md, Toroidal flow
     Goedbloed & Lifschitz 1997   Stationary symmetric MHD flows, Phys. Plasmas 4, 3544
     Zwingmann, Eriksson & Stubberfield 2001   Equilibrium analysis of tokamak
                              discharges with anisotropic pressure, PPCF 43, 1441
@@ -460,7 +460,7 @@ Raised 2026-08-25. See MANTA-COUPLING.md, which is the specification.
 
   AND THE CONSUMER'S JACOBIAN HAS THIS PROJECT'S OWN FAILURE MODE. MaNTA never
   assembles its Jacobian, so a missing surface-motion term "does not produce a
-  wrong answer, only slow Newton convergence". That is CLAUDE.md's "A wrong
+  wrong answer, only slow Newton convergence". That is CLAUDE_HDGGS.md's "A wrong
   Jacobian is invisible to a convergence table" arriving from the consumer's
   side, and the remedy is the one MEQ already uses on dFdPsi: finite-difference
   dGeometry_dpsi against Geometry directly, as a unit test, and never take
@@ -536,7 +536,7 @@ Raised 2026-08-25. A survey, not yet a decision.
      and both h- and p-refinement cure them independently; the "stiff sources"
      story came from benchmarking at one under-resolved point. 4.4 is the
      exception and is genuinely multi-valued -- dF/dpsi spans [-580, +566]
-     against a first Dirichlet eigenvalue of 22.3. See CLAUDE.md, "Why MEQ's
+     against a first Dirichlet eigenvalue of 22.3. See CLAUDE_HDGGS.md, "Why MEQ's
      Newton struggles", and item 7 of ROADMAP.md.
 
   2. GENUINELY NONLINEAR EXACT SOLUTIONS: Kaltsas & Throumoulopoulos,
@@ -627,7 +627,7 @@ IS DONE, and so is the run-time switch. Rewritten 2026-09-01 to what is left.
   DO NOT QUOTE THE TIMINGS THIS ENTRY USED TO CARRY. They were taken before
   2026-08-30, when a stray libmkl_sequential made MKL resolve sequential for
   everything, so they were sequential-against-sequential and were never labelled
-  as such. The live numbers are in CLAUDE.md, "Threading, measured".
+  as such. The live numbers are in CLAUDE_HDGGS.md, "Threading, measured".
 
   THREE HYPOTHESES WERE TESTED AGAINST THE OLD FAILURE AND ARE ALL DEAD, so do
   not re-test them if a new one appears: a METIS symbol collision with MFEM's
@@ -641,20 +641,43 @@ accuracy and not for patience.
 ================================================================================
 
   MUCH OF THIS ENTRY WAS SUPERSEDED BY THE 2026-08-30 THREADING WORK and has
-  been cut. CLAUDE.md's "Threading, measured" and "What to do, in order of
+  been cut. CLAUDE_HDGGS.md's "Threading, measured" and "What to do, in order of
   value" carry the numbers. What is kept here is what is still open, and the two
   arguments that decide the rest.
 
   WHAT IS STILL OPEN, in order of value.
 
-  1. GET ComputeH()'s ELEMENT-LOCAL DENSE LU OFF THREADED MKL. The largest item
-     by a wide margin, and it was invisible until the link line was fixed. The
-     per-element LUFactors go through LAPACK, so through MKL, on blocks of order
-     10-30; at k = 3 that is FORTY TIMES slower with MKL threading on. MEQ works
-     around it with MKL_NUM_THREADS=1 everywhere, which in turn puts PARDISO's
-     threaded advantage out of reach, MKL_NUM_THREADS being process-wide. Two
-     routes and neither is done: mkl_set_num_threads_local() around the trace
-     solve, or LocalFactorMode::Batched for the local factorisations.
+  1. DONE, AND NEITHER OF THE TWO ROUTES THIS ITEM NAMED WAS TAKEN. It read
+     "get ComputeH()'s element-local dense LU off threaded MKL", called it the
+     largest item by a wide margin, and offered
+     mkl_set_num_threads_local() around the trace solve or
+     LocalFactorMode::Batched for the local factorisations.
+
+     AssemblyMode::Threaded settles it with no new code: MKL SUPPRESSES ITS OWN
+     THREADING INSIDE AN ACTIVE OpenMP REGION, so once the element loop is
+     itself such a region the local dense work is NESTED and MKL_NUM_THREADS
+     costs it nothing, while the trace solve -- on the master thread, outside
+     any parallel region -- still takes all of them. Measured on a whole
+     nonlinear solve at k = 3, n = 16, OMP=8: 1285x between the two assembly
+     modes at MKL=8. So the recipe is Threaded + PARDISO with OMP and MKL at the
+     SAME value above one, and PARDISO's threaded advantage is back in reach.
+
+     TWO CORRECTIONS TO THIS ITEM'S OWN DIAGNOSIS, both worth keeping. It is NOT
+     the dense LU: dgetrf does not move at these block sizes at any thread count
+     (0.0137 s against 0.0138 s at k = 3). What degrades is the
+     back-substitution and the Schur-complement dgemm. And
+     LocalFactorMode::Batched IS NOT THE ANSWER and should not be taken -- it
+     batches InvertA()/InvertD(), which run once from Finalize(), while the
+     per-linearisation factorisation is inside ComputeElementH(), and it aborts
+     on an exact zero pivot where the serial loop carries on.
+
+     TWO CONFIGURATIONS TO AVOID, both met while measuring. UMFPACK can never
+     take MKL threads whatever the assembly mode, its BLAS calls being outside
+     any parallel region and so un-nested -- a sweep at MKL=8 including UMFPack
+     rows sat at 266% CPU making no progress. And threaded assembly at
+     OMP_NUM_THREADS=1 with MKL threads on is catastrophic (12.4 s against
+     0.069 s serial at k = 3), because a team of one thread gets no suppression;
+     apps/meq.cpp warns about exactly that combination at startup.
 
   2. PROFILE THE INSIDE OF A NEWTON SOLVE. tests/performance/ measures the
      assembly-versus-trace-solve split across two thread axes and four sizes, so
@@ -681,14 +704,32 @@ accuracy and not for patience.
      that, not against the nonlinear local solves this entry was first written
      for.
 
-     PART OF IT HAS LANDED, and it is worth about 1.2x sometimes and a 1.8x LOSS
-     otherwise. DarcyHybridization::SetAssemblyMode(Threaded), reached through
-     MEQ's setAssemblyMode(), threads the element-local half of ComputeH()
-     bit-for-bit against serial. It is NOT the default: HighBetaConvergence,
-     which assembles a small system hundreds of times inside a bordered Newton,
-     goes 21.5 s -> 39 s with it on. Mesh size does not separate the good case
-     from the bad one; how OFTEN assembly is called does, and the solver cannot
-     know which caller it has.
+     MOST OF IT HAS LANDED AND IT IS MEQ'S DEFAULT NOW, WHICH INVERTS WHAT THIS
+     PARAGRAPH USED TO SAY. SetAssemblyMode(Threaded) once threaded only
+     ComputeH()'s element-local half, was worth 1.2x sometimes and a 1.8x LOSS
+     otherwise, and was NOT the default: HighBetaConvergence went 21.5 s -> 39 s
+     with it on, and the verdict recorded here was that how OFTEN assembly is
+     called separates the good case from the bad one and the solver cannot know
+     which caller it has.
+
+     It now threads MultNL() too -- the residual and the Jacobian, so
+     NPCResidual() and NPCGradient(), which is EVERY NPC step -- plus
+     ReduceRHS(), ComputeSolution() and the two RHS eliminations. That inverts
+     the verdict: the bordered Newton is dominated by residual evaluations
+     rather than by assembly, so it is now the case that argues HARDEST FOR the
+     flag. defaultAssemblyMode() returns Threaded wherever the build can honour
+     it, build-conditional because the constructor bypasses the setter and MFEM
+     aborts rather than falling back.
+
+     The two kinds of loop are threaded differently and the difference is the
+     scatter target: ComputeH() writes an unfinalized SparseMatrix, which
+     carries one current_row for the whole matrix, so its scatter stays serial
+     and in element order; MultNL() writes a Vector, where disjoint indices
+     really are independent, so it is walked in element COLOUR order. Both are
+     bit for bit at MKL_NUM_THREADS=1 -- and NOT above it, which is arithmetic
+     reassociation inside MKL and not a race: at MKL=8 the two modes differ by
+     1.3e-15 in psi. It would not survive an H1_Trace (EDG) trace space, where a
+     dof takes more than two contributions; MEQ's is DG_Interface_FECollection.
 
   4. PARDISO'S REPRODUCIBILITY -- the entry above.
 
@@ -887,7 +928,7 @@ predicting it. FREE-BOUNDARY-PLAN.md section 7.12 is the write-up.
   boundary term's own distribution, unioned with the interior one; eta_6 stays in
   eta so the STOPPING rule sees it. Measured, Gamma_h then refines 34 -> 46 -> 57
   -> 64 and |a - exact| falls 1.32e-03 -> 1.53e-04 against a control that does
-  not move. See CLAUDE.md, FB-5's section.
+  not move. See CLAUDE_FB.md, FB-5's section.
 ================================================================================
 
   THE ADAPTIVE LOOP CANNOT SEE THE COUPLING, AND eta IS NOT WRONG. Measured on

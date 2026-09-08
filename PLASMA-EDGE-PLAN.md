@@ -2,18 +2,27 @@
 
 **A design, not an implementation, and deliberately not to be built yet.**
 Written 2026-09-05, out of FB-4's measurements. `FREE-BOUNDARY-PLAN.md` §5.3 and
-§7.10 are the measurements; `CLAUDE.md`'s *The plasma edge caps the order* is
+§7.10 are the measurements; `CLAUDE_FB.md`'s *The plasma edge caps the order* is
 the record. This file is the one route out of that cap that fits the machinery
 MEQ already has, worked out far enough to be costed and argued with.
 
-**THE PRECONDITION IS EXPLICIT: get `j ≥ 1` right first.** Nothing here should
-be started until the ordinary path is green and measured at `j = 1`.
-`PlasmaEdgeConvergence` is green as of 2026-09-05 and is the first half of
-that; what remains is FB-5's bordered solve carrying the moving support, and a
-machine case against `../freegs4e` at `j ≥ 1`. There
-is a real risk of building this instead of finishing that, and the numbers below
-are exactly the argument for not doing so: **`j ≥ 1` already gives `k+2` at
-`k ≤ j`, with nothing built.**
+**THE PRECONDITION WAS EXPLICIT — get `j ≥ 1` right first — AND IT IS NOW MET.**
+Nothing here was to be started until the ordinary path was green and measured at
+`j = 1`. All three parts of that have landed: `PlasmaEdgeConvergence` green as of
+2026-09-05, FB-5's bordered solve carrying the **moving support**
+(`setPlasmaCurrent()` and `[source] ConfineToPlasma`, with the support a
+connected component rather than a pointwise test), and a **machine case against
+`../freegs4e`** — `examples/limited-tokamak.toml`, whose profile tables are
+`Ψ²`, so `j = 2`.
+
+**SO WHAT HOLDS THIS PLAN IS NO LONGER A PREREQUISITE. IT IS THE COST-BENEFIT
+ITS OWN NUMBERS MAKE**, and that argument is unchanged: **`j ≥ 1` already gives
+`k+2` at `k ≤ j`, with nothing built.** There is still a real risk of building
+this instead of the things `ROADMAP.md` puts ahead of it — §10's diverted
+plasmas among them, which this plan explicitly cannot cover, both transfer path
+families giving out at a corner. And its own central premise is measured at two
+rungs out of three; **PE-0 settles that cheaply and is the only thing here worth
+starting on its own.**
 
 ## 1. What this fixes, and what it costs to leave unfixed
 
@@ -189,7 +198,7 @@ support is monotone. **Whether it oscillates in practice is unmeasured and is
 PE-4's acceptance criterion.**
 
 **5.3 It costs the `ψ_ax` border its exactness.** Under NPC the axis border row
-is exactly `−e_j` (`CLAUDE.md`, *The NPC port*). With the geometry frozen inside
+is exactly `−e_j` (`CLAUDE_HDGGS.md`, *The NPC port*). With the geometry frozen inside
 the Newton that stays true. With the geometry live it would not.
 
 ## 6. Staging

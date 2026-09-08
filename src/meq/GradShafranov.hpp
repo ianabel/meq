@@ -282,7 +282,7 @@ namespace meq
 			///
 			/// The Jacobian half is the worse one, and it is invisible to the
 			/// obvious test: SourceIntegrator IS the whole semi-linear term, and
-			/// CLAUDE.md's *A wrong Jacobian is invisible to a convergence
+			/// CLAUDE_HDGGS.md's *A wrong Jacobian is invisible to a convergence
 			/// table* records that a degraded dFdPsi leaves every error and
 			/// every rate unchanged to six figures while costing Newton its
 			/// order. A rate table cannot see this.
@@ -1084,7 +1084,7 @@ namespace meq
 			/// Which solver eliminates the flux and potential on each element.
 			/// This is a DIFFERENT iteration from the one setGlobalisation()
 			/// chooses, and on a stiff source it is the one that fails: see
-			/// CLAUDE.md, "The nonlinearity is inside the local solve".
+			/// CLAUDE_HDGGS.md, "The nonlinearity is inside the local solve".
 			enum class LocalSolver
 			{
 				Newton,   ///< undamped, MFEM's LSsolveType::Newton
@@ -1387,9 +1387,13 @@ namespace meq
 				/// factorisation and 1.41x on the backsolve at 37,248 trace dofs
 				/// -- and it is NOT the default anyway, because oneMKL's licence
 				/// is not everybody's to accept and most builds do not have it.
-				/// It scales a further 1.9x on MKL threads, which MEQ cannot
-				/// currently spend: see CLAUDE.md, *Threaded MKL is a
-				/// catastrophe*.
+				/// It scales a further 1.9x on MKL threads, and with
+				/// AssemblyMode::Threaded those threads ARE spendable: MKL
+				/// suppresses its own threading inside an active OpenMP
+				/// region, so the element-local dense work is nested and
+				/// free while the trace solve still takes them all. See
+				/// CLAUDE_HDGGS.md, *Threading, measured*. UMFPack cannot:
+				/// its BLAS calls sit outside any parallel region.
 				Pardiso,
 				/// NVIDIA cuDSS, `mfem::CuDSSSolver`, `NONSYMMETRIC` + `FULL`.
 				/// Needs `MFEM_USE_CUDSS` **and an `mfem::Device` configured for
