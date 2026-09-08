@@ -7137,8 +7137,16 @@ tests/       unit/ (Boost.Test), convergence/ (rate assertions),
              number in them is a timing. The NPC one exists separately
              because a linear solve never calls MultNL(), so it cannot see
              the loop AssemblyMode::Threaded now spends most of its time in)
-tools/       plotting and visualisation. plot_equilibrium.py reads the
-             NetCDF; tools/README.md says which of the three output formats
+tools/       plotting and visualisation. plot_equilibrium.py reads BOTH
+             NetCDF files -- the (R, Z) grid and the (Psi, theta) flux
+             surfaces -- and tells them apart by their own dimensions rather
+             than by the name, so a --what belonging to the other one is
+             refused rather than ignored. On the surfaces file it draws the
+             band PER NODE and shades the two cut regions, which is the whole
+             of why it exists: a traced curve cannot be read for which of its
+             arcs is solved data, and a family over Psi_N in [ 0.05, 0.95 ]
+             drawn on its own range looks like an answer rather than like a
+             cut. tools/README.md says which of the four output formats
              goes with which reader, and why they are not interchangeable.
              freegs4e-benchmark/ is the independent-code comparison.
              mesh/halfdisc.py is FB-6's geometry: a semicircle reaching the

@@ -32,7 +32,7 @@ there is a fourth file, which is not the equilibrium in another resolution but a
      - **The interchange format.** :math:`\psi` and :math:`\mathbf{B}` sampled on
        a uniform :math:`(R, Z)` grid. Lossy, and portable.
    * - ``<stem>_surfaces.nc``
-     - a 1-D transport code
+     - a 1-D transport code; ``plot_equilibrium.py``
      - **The reduction.** The flux surfaces themselves and the flux-surface
        averages over them, against a flux label. Written only when
        ``[output] FluxSurfaces`` is set. See :ref:`output-flux-surfaces`.
@@ -480,3 +480,21 @@ at the next, so the per-surface ``band(flux)`` flag under-reports in the middle
 of a band excursion — which is exactly where a :math:`q(\psi)` profile is being
 read. Drop nodes with ``extrapolated = 1`` before computing an error norm or
 differencing two runs; keep them for a picture.
+
+Looking at one
+~~~~~~~~~~~~~~
+
+:ref:`plot_equilibrium.py <tools-plot>` reads this file as well as the gridded
+one, and tells them apart by their dimensions rather than by the name:
+
+.. code-block:: sh
+
+   tools/plot_equilibrium.py run_surfaces.nc -o family.png
+
+It draws the traced surfaces in the poloidal plane beside a panel for every
+average the file carries — which is how a family with a ``safety_factor`` gets a
+panel for it and one without gets no empty axes — with the band drawn **per
+node** over the surfaces it affects, the affected surfaces ringed on the profile
+panels, and the two cut regions shaded so that a family over :math:`\Psi_N \in
+[0.05, 0.95]` reads as a cut rather than as an answer that starts somewhere.
+``tools/README.md`` has the options.

@@ -10,7 +10,7 @@ wrong one is the usual way to waste an afternoon.**
 | `<stem>.mesh`, `<stem>_psi.gf`, `<stem>_grad_psi.gf` | the discrete solution **exactly** — same spaces, same degree, every coefficient | GLVis; MEQ itself, for an exact restart |
 | `<stem>/<stem>.pvd` | VTK, at the solve's own polynomial degree | ParaView, VisIt |
 | `<stem>.nc` | ψ and **B** on a uniform `(R, Z)` grid, plus the boundary MEQ was given | `plot_equilibrium.py`; any downstream tool |
-| `<stem>_surfaces.nc` | the flux surfaces and the flux-surface averages, against a flux label. **Only when asked for** | a 1-D transport code |
+| `<stem>_surfaces.nc` | the flux surfaces and the flux-surface averages, against a flux label. **Only when asked for** | a 1-D transport code; `plot_equilibrium.py` |
 
 ## The three, and when each is the right one
 
@@ -180,6 +180,11 @@ MEQ does not, because a plausible `V′` past the boundary is worse than no answ
 
 ## `plot_equilibrium.py`
 
+**It reads both NetCDF files**, and tells them apart by their own dimensions
+rather than by the name — the surfaces file is the one with a `flux` dimension —
+so a renamed copy still plots and a `--what` meant for the other file is refused
+rather than quietly drawing something else.
+
 ```sh
 tools/plot_equilibrium.py run.nc                            # both, to a window
 tools/plot_equilibrium.py run.nc --what surfaces -o psi.png
@@ -198,6 +203,52 @@ automatically when writing to a file, so it works headless without `--show`.
 The figure's subtitle is provenance read out of the file's own attributes —
 degree, element count, Newton iterations, whether the boundary was fitted or
 curved, the final residual. A directory of scan output is unreadable otherwise.
+
+### The same script on `<stem>_surfaces.nc`
+
+```sh
+tools/plot_equilibrium.py run_surfaces.nc -o family.png
+tools/plot_equilibrium.py run_surfaces.nc --what geometry -o poloidal.png
+tools/plot_equilibrium.py run_surfaces.nc --what profiles -o averages.png
+tools/plot_equilibrium.py run_surfaces.nc --profiles V_prime,inverse_R_squared
+```
+
+* `--what geometry` — the traced surfaces in the poloidal plane, coloured by
+  `ρ`, with the magnetic axis from the file's own attributes.
+* `--what profiles` — one panel per flux-surface average, against `ρ`.
+* `--what both` — the plane beside the panels. The default.
+
+**The panel list comes out of the file, not out of the script.** Every variable
+on the `flux` dimension that is not a coordinate gets a panel, in the order the
+file carries them, so `safety_factor` — which is written only when a caller
+supplied `g(ψ)`, and is **absent rather than zero** otherwise — appears without
+the script being told it exists. `--profiles` takes a comma-separated list to
+pick a few, or `all` to add the per-surface diagnostics `worst_residual` and
+`transversality`. Naming a variable the file does not carry lists the ones it
+does, which is the quickest way to find out whether a run has a safety factor.
+
+**The band is drawn per node, in red, over the surface it belongs to.** A
+surface can be inside Ω_h at one θ and outside it at the next, so which arc of a
+curve is solved data is not something the curve can be read for — the extension
+answers as confidently as an element does. Nodes as well as a line, because the
+innermost surface to reach the band does so at a handful of isolated nodes.
+Beside the averages there is a **band fraction** panel, which is the per-node
+mask summed per surface: `band(flux)` says a surface is affected and this says
+by how much, and a surface one node into the extension and one nine tenths of
+the way through it are not the same statement about `V′(ρ)`. On the profile
+panels the affected surfaces are ringed — there `band(flux)` is the right flag,
+since an average is one number over a whole surface and a single continued node
+contaminates all of it.
+
+**The cut is drawn as a cut.** The profile axes span the whole of `ρ ∈ [0, 1]`
+with the two ends shaded, so a family over `Ψ_N ∈ [0.05, 0.95]` looks like what
+it is rather than like an answer that happens to start somewhere. Nothing is
+drawn in the shaded region: MEQ refuses a query there and so does the plot.
+
+**The label on the axes is `ρ = √Ψ_N`**, with `Ψ_N` on a secondary axis along
+the top row so neither has to be squared by eye. Which one a curve is against
+changes its shape near the axis and nothing in the numbers says so, which is why
+both are on the picture.
 
 ## What is not here
 

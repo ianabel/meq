@@ -340,14 +340,28 @@ mesh does not is interpolated.
 Looking at the answer
 ---------------------
 
-``tools/plot_equilibrium.py`` reads the NetCDF output and draws flux surfaces,
-the magnetic field, or both:
+``tools/plot_equilibrium.py`` reads either of the NetCDF files a run writes. On
+the gridded one it draws flux surfaces, the magnetic field, or both:
 
 .. code-block:: sh
 
    tools/plot_equilibrium.py run.nc                            # both, to a window
    tools/plot_equilibrium.py run.nc --what surfaces -o psi.png
    tools/plot_equilibrium.py run.nc --what field --levels 40 -o b.png
+
+and on ``<stem>_surfaces.nc``, when ``[output] FluxSurfaces`` asked for one, the
+traced surfaces in the poloidal plane and the flux-surface averages against
+:math:`\rho = \sqrt{\Psi_N}`:
+
+.. code-block:: sh
+
+   tools/plot_equilibrium.py run_surfaces.nc -o family.png
+   tools/plot_equilibrium.py run_surfaces.nc --what profiles -o averages.png
+
+The two are told apart by the file's own dimensions rather than by its name, and
+a ``--what`` belonging to the other one is refused rather than ignored. See
+:ref:`output-flux-surfaces` for what the second file carries, and how the band
+and the cut are drawn on it.
 
 It selects a non-interactive backend automatically when writing to a file, and
 it captions the figure with the run's provenance — polynomial degree, element
