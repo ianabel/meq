@@ -775,6 +775,45 @@ namespace meq
 		// potential space an exact restart reads back into. _psi.gf therefore
 		// keeps psi_h and this carries psi*; see apps/meq.cpp's write block.
 		std::string getPsiStarFile() const;
+
+		// ------------------------------------------------------------------
+		// [output] FluxSurfaces and its four sizes: the ( Psi, theta ) file,
+		// INVERSION-PLAN.md stage IN-6.
+		//
+		// OFF BY DEFAULT, AND NOT BECAUSE IT IS EXPERIMENTAL. It costs a
+		// contour trace and an angle fit per surface -- comparable with the
+		// solve on a coarse mesh -- and it is the one output that can FAIL on a
+		// run that solved perfectly well: a level whose surface is not closed,
+		// not star-shaped about the axis, or off the mesh has no flux-surface
+		// average, and meq refuses rather than inventing one. A run asking for
+		// the answer should not be made to pay for a reduction it did not ask
+		// for, and should not be made to fail for one either.
+		//
+		// FluxSurfaces: write <Directory>/<Prefix>_surfaces.nc.
+		bool fluxSurfaces = false;
+
+		// FluxSurfaceCount, FluxAngleCount: surfaces in the family, and nodes
+		// on each. Both are resolutions of the OUTPUT and have nothing to do
+		// with the mesh, in the same way GridNR and GridNZ do not.
+		int fluxSurfaceCount = 24;
+		int fluxAngleCount = 128;
+
+		// FluxInnerCut, FluxOuterCut: the range of normalised flux the family
+		// covers, 0 on the magnetic axis and 1 on the plasma boundary.
+		//
+		// BOTH ENDS ARE CUT AND FOR DIFFERENT REASONS -- see
+		// src/meq/FluxFamily.hpp, which carries the decision, and CLAUDE.md's
+		// IN-6 section, which carries the measurement it was made from. In
+		// short: at the inner end a surface shrinks to a point and drho/dpsi is
+		// unbounded; at the outer end the surface stops being made of solved
+		// data, because on a curved boundary Omega_h is inscribed in Gamma and
+		// the outermost surfaces cross the band. Nothing FAILS at either end,
+		// which is exactly why the cut has to be a decision.
+		double fluxInnerCut = 0.05;
+		double fluxOuterCut = 0.95;
+
+		// <Directory>/<Prefix>_surfaces.nc, the ( Psi, theta ) grid.
+		std::string getFluxSurfaceFile() const;
 	};
 
 	// A parsed, validated configuration. Construction either succeeds and

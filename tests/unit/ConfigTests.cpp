@@ -2265,3 +2265,72 @@ BOOST_AUTO_TEST_CASE( the_prescribed_plasma_current_is_amperes_and_needs_a_norma
 	refuses( mhd( "Normalised = true\nPsiAxis = 0.1\nPlasmaCurrent = 0.0\n" ),
 	         "source.PlasmaCurrent" );
 }
+
+/// [output] FluxSurfaces and the four sizes beside it: the ( Psi, theta ) file
+/// of INVERSION-PLAN.md stage IN-6.
+BOOST_AUTO_TEST_CASE( the_flux_surface_output_is_off_by_default_and_its_cut_is_validated )
+{
+	auto const refuses = []( std::string const & text, std::string const & key )
+	{
+		BOOST_CHECK_EXCEPTION( parse( text ), ConfigError,
+			[&]( ConfigError const & e ) { return e.getKey() == key; } );
+	};
+
+	// OFF BY DEFAULT, and the defaults are the ones src/meq/FluxFamily.hpp
+	// records the decision for. Asserted rather than assumed, because a
+	// reduction that started writing itself on every run would cost every
+	// existing configuration a contour trace per surface -- and could FAIL on a
+	// run that solved perfectly well.
+	Configuration const plain = parse( minimal() );
+	BOOST_TEST( !plain.getOutput().fluxSurfaces );
+	BOOST_TEST( plain.getOutput().fluxSurfaceCount == 24 );
+	BOOST_TEST( plain.getOutput().fluxAngleCount == 128 );
+	BOOST_TEST( plain.getOutput().fluxInnerCut == 0.05 );
+	BOOST_TEST( plain.getOutput().fluxOuterCut == 0.95 );
+
+	Configuration const asked = parse( minimal() +
+		"\n[output]\n"
+		"Prefix = \"run\"\n"
+		"FluxSurfaces = true\n"
+		"FluxSurfaceCount = 40\n"
+		"FluxAngleCount = 512\n"
+		"FluxInnerCut = 0.02\n"
+		"FluxOuterCut = 0.99\n" );
+	BOOST_TEST( asked.getOutput().fluxSurfaces );
+	BOOST_TEST( asked.getOutput().fluxSurfaceCount == 40 );
+	BOOST_TEST( asked.getOutput().fluxAngleCount == 512 );
+	BOOST_TEST( asked.getOutput().fluxInnerCut == 0.02 );
+	BOOST_TEST( asked.getOutput().fluxOuterCut == 0.99 );
+	BOOST_TEST( asked.getOutput().getFluxSurfaceFile() == "./run_surfaces.nc" );
+
+	// THE CUT IS REFUSED AT ITS ENDS AND NOT CLAMPED TO THEM. Psi_N = 0 is the
+	// magnetic axis, where the surface is a point and drho/dpsi is unbounded;
+	// Psi_N = 1 is the plasma boundary. Silently moving a caller's number to the
+	// nearest one it could honour is how a run comes to describe a family
+	// nobody asked for.
+	refuses( minimal() + "\n[output]\nFluxInnerCut = 0.0\n",
+	         "output.FluxInnerCut" );
+	refuses( minimal() + "\n[output]\nFluxInnerCut = -0.1\n",
+	         "output.FluxInnerCut" );
+	refuses( minimal() + "\n[output]\nFluxOuterCut = 1.0\n",
+	         "output.FluxOuterCut" );
+	refuses( minimal() + "\n[output]\nFluxInnerCut = 0.9\nFluxOuterCut = 0.5\n",
+	         "output.FluxInnerCut" );
+	refuses( minimal() + "\n[output]\nFluxSurfaceCount = 1\n",
+	         "output.FluxSurfaceCount" );
+	refuses( minimal() + "\n[output]\nFluxAngleCount = 2\n",
+	         "output.FluxAngleCount" );
+
+	// VALIDATED WHETHER OR NOT THE FILE IS BEING WRITTEN. A key that is present
+	// is a key the author meant, and every refusal above is taken with
+	// FluxSurfaces absent -- so a nonsense cut costs milliseconds at parse
+	// rather than the solve it would otherwise be discovered after.
+
+	// And an integer where a float is expected still reads: toml11's
+	// find_or<double> returns the DEFAULT on an integer node rather than
+	// converting, which is the silent-wrong-answer trap Config.cpp's asFloat()
+	// exists to close. A cut written as 1 rather than 1.0 must therefore be
+	// refused rather than quietly becoming 0.95.
+	refuses( minimal() + "\n[output]\nFluxOuterCut = 1\n",
+	         "output.FluxOuterCut" );
+}

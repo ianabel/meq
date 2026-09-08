@@ -14,14 +14,14 @@
  * So the rule now is the one the name implies: A HEADER APPEARS HERE UNLESS
  * THERE IS A REASON IN THIS COMMENT WHY NOT, and there are currently none.
  *
- * TWO OF THESE DO NOT NEED MFEM AND CAN BE INCLUDED ON THEIR OWN.
- * meq/Zernike.hpp and meq/SurfaceFit.hpp are plain doubles in and coefficients
- * out, deliberately, so that they are unit-testable without the finite element
- * library and so that continuous integration -- which cannot obtain the MFEM
- * branch MEQ needs, see INSTALL.md -- can build and test them. Including them
- * through this header is fine and costs nothing beyond the MFEM everything else
- * here already pulls in; a consumer who wants only the disc basis should
- * include it directly instead.
+ * THREE OF THESE DO NOT NEED MFEM AND CAN BE INCLUDED ON THEIR OWN.
+ * meq/Zernike.hpp, meq/SurfaceFit.hpp and meq/FluxFamily.hpp are plain doubles
+ * in and coefficients out, deliberately, so that they are unit-testable without
+ * the finite element library and so that continuous integration -- which cannot
+ * obtain the MFEM branch MEQ needs, see INSTALL.md -- can build and test them.
+ * Including them through this header is fine and costs nothing beyond the MFEM
+ * everything else here already pulls in; a consumer who wants only the disc
+ * basis, or only the geometry cache, should include it directly instead.
  *
  * meq/Solution.hpp is not missing but gone: DarcyForm owns the spaces and the
  * block structure it used to wrap, and GradShafranovSolver owns the rest.
@@ -33,6 +33,8 @@
 #include "meq/CriticalPoints.hpp"
 #include "meq/Estimator.hpp"
 #include "meq/Field.hpp"
+#include "meq/FluxExtraction.hpp"
+#include "meq/FluxFamily.hpp"
 #include "meq/FluxSurfaces.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/Output.hpp"

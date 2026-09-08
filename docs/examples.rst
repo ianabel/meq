@@ -44,6 +44,10 @@ relative path:
    * - ``miller-adaptive.toml``
      - The full adaptive loop on the curved path, including the companion-mesh
        update. :doc:`adaptivity`.
+   * - ``flux-surfaces.toml``
+     - The fourth output file: the equilibrium reduced to flux surfaces and
+       flux-surface averages against a flux label. Curved on purpose, so the
+       band mask is not identically zero. :ref:`output-flux-surfaces`.
    * - ``rotating-rectangle.toml``
      - Sonic toroidal rotation, two species, a tabulated density. The simplest
        complete rotating run. :doc:`rotation`.

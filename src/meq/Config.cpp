@@ -787,6 +787,11 @@ namespace meq
 		return directory.empty() ? prefix + "_psistar.gf" : directory + "/" + prefix + "_psistar.gf";
 	}
 
+	std::string OutputConfig::getFluxSurfaceFile() const
+	{
+		return directory.empty() ? prefix + "_surfaces.nc" : directory + "/" + prefix + "_surfaces.nc";
+	}
+
 	Configuration::Configuration( std::string const & fileName )
 		: Configuration( parseFile( fileName ), fileName )
 	{
@@ -1303,7 +1308,10 @@ namespace meq
 		// [output]
 		{
 			Table output( document, "output", sourceName, false );
-			output.rejectUnknownKeys( { "Directory", "Prefix", "GridNR", "GridNZ" } );
+			output.rejectUnknownKeys( { "Directory", "Prefix", "GridNR", "GridNZ",
+			                            "FluxSurfaces", "FluxSurfaceCount",
+			                            "FluxAngleCount", "FluxInnerCut",
+			                            "FluxOuterCut" } );
 
 			outputOptions.directory = output.getStringOr( "Directory", outputOptions.directory );
 			outputOptions.prefix = output.getStringOr( "Prefix", outputOptions.prefix );
@@ -1318,6 +1326,42 @@ namespace meq
 			if ( outputOptions.gridNZ < 2 )
 				output.fail( "GridNZ", "must be at least 2: these are grid NODES, so the "
 				             "spacing is ( ZMax - ZMin )/( GridNZ - 1 )" );
+
+			// The ( Psi, theta ) file: INVERSION-PLAN.md stage IN-6. See
+			// OutputConfig for why it is off by default and why both ends of
+			// the cut are cut.
+			outputOptions.fluxSurfaces =
+				output.getBooleanOr( "FluxSurfaces", outputOptions.fluxSurfaces );
+			outputOptions.fluxSurfaceCount =
+				output.getIntegerOr( "FluxSurfaceCount", outputOptions.fluxSurfaceCount );
+			outputOptions.fluxAngleCount =
+				output.getIntegerOr( "FluxAngleCount", outputOptions.fluxAngleCount );
+			outputOptions.fluxInnerCut =
+				output.getFloatOr( "FluxInnerCut", outputOptions.fluxInnerCut );
+			outputOptions.fluxOuterCut =
+				output.getFloatOr( "FluxOuterCut", outputOptions.fluxOuterCut );
+
+			// VALIDATED WHETHER OR NOT THE FILE IS BEING WRITTEN, which is the
+			// same stance the grid sizes take: a key that is present is a key
+			// the author meant, and refusing it at parse costs milliseconds
+			// where refusing it after the solve costs the solve.
+			if ( outputOptions.fluxSurfaceCount < 2 )
+				output.fail( "FluxSurfaceCount", "must be at least 2: a family with one "
+				             "surface has nothing to interpolate between" );
+			if ( outputOptions.fluxAngleCount < 3 )
+				output.fail( "FluxAngleCount", "must be at least 3: fewer nodes than that "
+				             "enclose nothing" );
+			if ( !( outputOptions.fluxInnerCut > 0.0 ) )
+				output.fail( "FluxInnerCut", "must be greater than zero: Psi_N = 0 is the "
+				             "magnetic axis, where the surface is a point and the geometry "
+				             "derivative is unbounded" );
+			if ( !( outputOptions.fluxOuterCut < 1.0 ) )
+				output.fail( "FluxOuterCut", "must be less than one: Psi_N = 1 is the "
+				             "plasma boundary, where the surface is the boundary itself and "
+				             "1/| grad psi | diverges if it is a separatrix" );
+			if ( !( outputOptions.fluxInnerCut < outputOptions.fluxOuterCut ) )
+				output.fail( "FluxInnerCut", "must be less than FluxOuterCut; the two are "
+				             "the ends of the range of normalised flux the family covers" );
 		}
 
 		// [initialguess]

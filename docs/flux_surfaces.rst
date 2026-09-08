@@ -24,11 +24,16 @@ the surfaces as a smooth map from a disc.
 
 .. note::
 
-   **This is library-only.** None of it is reachable from a configuration file
-   and none of it appears in the output files described in :doc:`output`. The
-   headers are ``meq/CriticalPoints.hpp``, ``meq/FluxSurfaces.hpp``,
-   ``meq/SurfaceAverage.hpp``, ``meq/Zernike.hpp`` and ``meq/SurfaceFit.hpp``,
-   and none of them is in the ``meq/meq.hpp`` umbrella; include them directly.
+   **Part of this is reachable from a configuration file and part is not.**
+   ``[output] FluxSurfaces`` runs the axis search, the trace, the fit and the
+   averages, and writes the result as ``<stem>_surfaces.nc`` — see
+   :ref:`output-flux-surfaces`. What is library-only is everything past that:
+   driving the extraction yourself, the disc fit of :doc:`surface_geometry`, and
+   the per-:math:`\psi` cache a pointwise consumer needs. The headers are
+   ``meq/CriticalPoints.hpp``, ``meq/FluxSurfaces.hpp``,
+   ``meq/SurfaceAverage.hpp``, ``meq/FluxExtraction.hpp``,
+   ``meq/FluxFamily.hpp``, ``meq/Zernike.hpp`` and ``meq/SurfaceFit.hpp``, all
+   of them in the ``meq/meq.hpp`` umbrella.
 
 .. code-block:: cpp
 

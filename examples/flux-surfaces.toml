@@ -1,0 +1,89 @@
+# The flux-surface output: the equilibrium reduced to a 1-D metric.
+#
+# Every other example writes the answer as a field on a domain -- exactly, as a
+# picture, and on a uniform (R, Z) grid. This one adds the fourth file,
+# <Prefix>_surfaces.nc, which is not the equilibrium in another resolution but a
+# REDUCTION of it: the flux surfaces themselves, and the integrals over them,
+# against a flux label. That is what a 1-D transport code reads, and getting it
+# out of a rasterised psi at the far end means contour tracing, flux-surface
+# quadrature and a critical-point search by a code that does not have q. meq has
+# q, so meq does it once.
+#
+#     meq examples/flux-surfaces.toml
+#
+# THE BOUNDARY IS CURVED ON PURPOSE. On a fitted rectangle Gamma IS the mesh
+# boundary and the outer surfaces run into the corners; on the curved path
+# Omega_h is inscribed in Gamma and the outermost surfaces cross the band
+# between them, which is the configuration a production run is in and the only
+# one in which the file's `extrapolated` mask is anything but zero. Read that
+# mask before using an outer surface for anything quantitative:
+# tools/README.md and docs/output.rst say why.
+#
+# UNITS. Metres and Wb/rad, as everywhere else.
+
+[mesh]
+RMin = 0.7
+RMax = 2.3
+ZMin = -1.9
+ZMax = 1.9
+NR = 8
+NZ = 10
+RefinementLevels = 2
+
+[discretisation]
+PolynomialDegree = 2
+Tau = 1.0
+
+[source]
+# Solov'ev, so the solve is one Newton step. What is being demonstrated is the
+# OUTPUT, not the nonlinearity.
+Type = "soloviev"
+A = -0.52
+
+[boundary]
+Type = "zero"
+
+[boundary.shape]
+Type = "miller"
+R0 = 1.5
+Z0 = 0.0
+MinorRadius = 0.5
+Elongation = 1.6
+Triangularity = 0.35
+Squareness = 0.0
+
+[solver]
+NewtonMaxIterations = 20
+NewtonRelativeTolerance = 1.0e-10
+NewtonAbsoluteTolerance = 1.0e-14
+
+[output]
+Directory = "."
+Prefix = "flux-surfaces"
+GridNR = 129
+GridNZ = 129
+
+# THE FOURTH FILE. Off by default everywhere else: it costs a contour trace and
+# an angle fit per surface, and it is the one output that can be impossible on a
+# run that solved perfectly well -- a level whose surface is not closed, or not
+# star-shaped about the magnetic axis, has no flux-surface average and meq
+# refuses rather than inventing one. A failure there is a warning and leaves the
+# exit code alone, because the equilibrium is already written.
+FluxSurfaces = true
+
+# Surfaces in the family, and nodes on each. Resolutions of the OUTPUT, with
+# nothing to do with the mesh -- the same relationship GridNR/GridNZ have.
+FluxSurfaceCount = 32
+FluxAngleCount = 256
+
+# THE CUT, IN NORMALISED FLUX, AND BOTH ENDS ARE CUT FOR DIFFERENT REASONS.
+# Psi_N = 0 is the magnetic axis, where the surface is a point and drho/dpsi is
+# unbounded; Psi_N = 1 is the plasma boundary. These are the shipped defaults,
+# written out because they are a DECISION rather than a limit anything reaches:
+# swept outward on this very geometry, every trace closes and every fit
+# converges right up to Psi_N = 0.995, while the share of each surface that is
+# band data rather than solved data climbs from 0% to 98%. Nothing fails, so the
+# cut cannot be discovered -- and the band is O(h), so the right cut moves with
+# the mesh. docs/output.rst has the table.
+FluxInnerCut = 0.05
+FluxOuterCut = 0.95

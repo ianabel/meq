@@ -2054,3 +2054,111 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesALimitedTokamak )
 
 	std::remove( "driver-acceptance-limited-k2.toml" );
 }
+
+/// The ( Psi, theta ) flux-surface file, through the driver, on the CURVED
+/// path: INVERSION-PLAN.md stage IN-6.
+///
+/// A DRIVER TEST AND NOT A LIBRARY ONE, for the reason this file exists at all:
+/// every defect found building the free-boundary case was driver-side, in keys
+/// describing a box the run never built, and a library test would have caught
+/// none of them. The two things that can only go wrong here are the ORDER --
+/// the extraction has to happen before the VTK step bends the boundary onto
+/// Gamma, because that changes the map the tracer reads geometry through -- and
+/// the BAND, which needs the transfer paths the driver holds and a library
+/// caller supplies for itself.
+BOOST_AUTO_TEST_CASE( theDriverWritesTheFluxSurfaceGrid )
+{
+	{
+		std::ofstream file( "driver-acceptance-surfaces.toml" );
+		file << "[mesh]\n"
+		        "RMin = 0.7\nRMax = 2.3\nZMin = -1.9\nZMax = 1.9\n"
+		        "NR = 8\nNZ = 10\nRefinementLevels = 2\n"
+		        "\n[discretisation]\nPolynomialDegree = 2\nTau = 1.0\n"
+		        "\n[source]\nType = \"soloviev\"\nA = -0.52\n"
+		        "\n[boundary]\nType = \"zero\"\n"
+		        "\n[boundary.shape]\n"
+		        "Type = \"miller\"\nR0 = 1.5\nZ0 = 0.0\nMinorRadius = 0.5\n"
+		        "Elongation = 1.6\nTriangularity = 0.35\nSquareness = 0.0\n"
+		        "\n[output]\nDirectory = \".\"\nPrefix = \"driver-surfaces\"\n"
+		        "GridNR = 33\nGridNZ = 33\n"
+		        "FluxSurfaces = true\nFluxSurfaceCount = 16\n"
+		        "FluxAngleCount = 64\n";
+	}
+
+	BOOST_TEST_REQUIRE( run( "driver-acceptance-surfaces.toml" ) == 0,
+	                    "the driver did not exit 0 with [output] FluxSurfaces" );
+	BOOST_TEST_REQUIRE( exists( "driver-surfaces_surfaces.nc" ),
+	                    "no flux-surface file was written" );
+
+	std::string const header = ncdumpHeader( "driver-surfaces_surfaces.nc" );
+	BOOST_TEST_REQUIRE( !header.empty(), "ncdump could not read the file" );
+
+	for ( char const *needle :
+	      { "flux = 16", "theta = 64", "double R(flux, theta)",
+	        "byte extrapolated(flux, theta)", "double V_prime(flux)",
+	        ":flux_label", ":band_extension = \"transfer lift\"" } )
+		BOOST_TEST( header.find( needle ) != std::string::npos,
+		            "the driver's flux-surface file does not declare '"
+		            << needle << "'" );
+
+	// The band mask has to be non-trivial on this path, or the case is testing
+	// the fitted one under a curved name. Omega_h is inscribed in Gamma, so the
+	// outer surfaces are partly outside the mesh and the extension answers for
+	// them; a zero here would mean the driver never configured the band and the
+	// tracer was quietly refusing those nodes instead.
+	std::size_t const at = header.find( ":extrapolated_nodes = " );
+	BOOST_TEST_REQUIRE( at != std::string::npos );
+	int const banded = std::atoi( header.c_str() + at
+	                              + std::string( ":extrapolated_nodes = " ).size() );
+	std::printf( "\n  the driver's flux-surface grid\n"
+	             "    16 surfaces x 64 nodes, %d of 1024 are band data\n",
+	             banded );
+	BOOST_TEST( banded > 0,
+	            "no node of the family is band data on a CURVED boundary, so "
+	            "the driver did not give the tracer its transfer paths" );
+	BOOST_TEST( banded < 16*64,
+	            "every node is band data, which would mean the family is "
+	            "entirely outside the mesh" );
+
+	// AND PUSHING THE CUT OUT DOES NOT FAIL -- IT JUST STOPS BEING SOLVED DATA,
+	// WHICH IS THE WHOLE REASON THE CUT IS A DECISION.
+	//
+	// The obvious sub-case here would be "an impossible cut is a warning and not
+	// an exit". It was written, and it was VACUOUS: at Psi_N = 0.999999 the
+	// trace still closes, the fit still converges and the file is still written,
+	// because the band extension answers for the nodes outside Omega_h as
+	// confidently as an element does. Nothing gives out, which is exactly what
+	// tests/convergence/FluxGridConvergence.cpp measures at seven levels on two
+	// meshes -- so the cut cannot be discovered from a failure and the per-node
+	// mask is the only signal there is. Asserting the mask saturates is the
+	// honest version of the sub-case.
+	std::remove( "driver-surfaces_surfaces.nc" );
+	{
+		std::ofstream file( "driver-acceptance-surfaces.toml", std::ios::app );
+		file << "FluxOuterCut = 0.999\n";
+	}
+	BOOST_TEST_REQUIRE( run( "driver-acceptance-surfaces.toml" ) == 0 );
+	BOOST_TEST_REQUIRE( exists( "driver-surfaces_surfaces.nc" ) );
+
+	std::string const pushed = ncdumpHeader( "driver-surfaces_surfaces.nc" );
+	std::size_t const pushedAt = pushed.find( ":extrapolated_nodes = " );
+	BOOST_TEST_REQUIRE( pushedAt != std::string::npos );
+	int const pushedBand = std::atoi(
+		pushed.c_str() + pushedAt
+		+ std::string( ":extrapolated_nodes = " ).size() );
+
+	std::printf( "    outer cut 0.95 -> %d band nodes, 0.999 -> %d\n",
+	             banded, pushedBand );
+
+	// STRICTLY MORE, AND NOT A FACTOR. This mesh is refined enough that the band
+	// is thin -- 95 of 1024 nodes at the shipped cut and 128 at 0.999, measured
+	// -- so a factor written down from intuition fails here and says nothing
+	// when it does. What is entailed is the direction.
+	BOOST_TEST( pushedBand > banded,
+	            "pushing the outer cut from 0.95 to 0.999 did not move the band "
+	            "share, so either the mask is not per node or the cut is not "
+	            "reaching Gamma" );
+
+	std::remove( "driver-acceptance-surfaces.toml" );
+	std::remove( "driver-surfaces_surfaces.nc" );
+}

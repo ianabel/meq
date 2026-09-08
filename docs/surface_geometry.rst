@@ -15,9 +15,11 @@ That is a fit over all the surfaces at once.
 
 .. note::
 
-   As with :doc:`flux_surfaces`, this is library-only: ``meq/SurfaceAverage.hpp``,
-   ``meq/Zernike.hpp`` and ``meq/SurfaceFit.hpp``, none of them in the
-   ``meq/meq.hpp`` umbrella, and none of it written to any output file.
+   The **averages** reach an output file: ``[output] FluxSurfaces`` writes them
+   against a flux label, per :ref:`output-flux-surfaces`. The **disc fit** does
+   not, and is library-only. The headers are ``meq/SurfaceAverage.hpp``,
+   ``meq/Zernike.hpp`` and ``meq/SurfaceFit.hpp``, all of them in the
+   ``meq/meq.hpp`` umbrella.
 
 .. _geometry-averages:
 

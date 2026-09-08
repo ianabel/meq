@@ -5,8 +5,8 @@ Written 2026-09-02, after a literature survey whose references are indexed in
 and is authoritative on anything technical; `ROADMAP.md` is the priority order.
 This file is the design for one item.
 
-**IN-A, IN-0, IN-1, IN-2, IN-3 and IN-4 are done and green; IN-5 is deferred
-with free boundary, IN-6 is open, and IN-P is done.** So §§2–6 are the
+**IN-A, IN-0, IN-1, IN-2, IN-3, IN-4, IN-6 and IN-P are done and green; IN-5 is
+deferred with free boundary.** So §§2–6 are the
 design the code was built from and the arguments it was built on — several of
 which the measurement then falsified, which is why they are still here — and §7
 is what each stage found. **Section numbers are load bearing**: `src/meq` and
@@ -807,8 +807,8 @@ rather than a lossy filter, with critical points from §5. Carr, Snoeyink & Axen
 ## 7. The staged plan
 
 Every stage ended at a **measured rate**, not at "it runs". **IN-A, IN-0, IN-1,
-IN-2, IN-3 and IN-4 are done and green**; IN-5 is deferred, IN-6 is open, IN-P is
-under way. `CLAUDE.md`'s *Solution inversion* carries the measurements; what is
+IN-2, IN-3, IN-4 and IN-6 are done and green**; IN-5 is deferred, IN-P is done.
+`CLAUDE.md`'s *Solution inversion* carries the measurements; what is
 kept below per stage is where the code lives, what the stage **found** that this
 plan did not predict, and the few numbers that are recorded nowhere else.
 
@@ -1151,12 +1151,86 @@ right surface**. **No `ψ`-element is needed and none is implemented.**
 
 Chebyshev per §4.2. **Deferred with free boundary**, per §6.
 
-### IN-6 — the output
+### IN-6 — the output — **DONE, 2026-09-07**
 
-the flux-surface `(Ψ, θ)` NetCDF grid stage 7 deferred, and whatever
-`MANTA-COUPLING.md` settles on — **including the per-`ψ` cache**, which §11.1
-argues is a requirement of the pointwise call pattern rather than an
-optimisation, and whose invalidation contract is `MANTA-COUPLING.md` §8.
+The flux-surface `(Ψ, θ)` NetCDF grid stage 7 deferred, and the per-`ψ` cache
+§11.1 calls a requirement rather than an optimisation.
+`src/meq/FluxFamily.{hpp,cpp}` (**MFEM-free**), `src/meq/FluxExtraction.{hpp,cpp}`,
+`meq::FluxGridWriter` in `src/meq/Output.{hpp,cpp}`, `[output] FluxSurfaces` and
+four sizes beside it. `tests/unit/FluxFamilyTests.cpp`,
+`tests/convergence/FluxGridConvergence.cpp`,
+`DriverAcceptance::theDriverWritesTheFluxSurfaceGrid`.
+`CLAUDE.md`'s *IN-6* carries the measurements; what is kept here is what the
+stage found that this plan did not predict.
+
+**THE SPLIT IS ALONG THE CONTRACT AND NOT ALONG THE ARITHMETIC.** The container,
+the interpolation and the cache are plain doubles and are gated by CI; only the
+trace-fit-average loop needs a mesh. That was worth doing because the part with a
+stated obligation attached — §8's *bit for bit* and *impossible rather than
+unlikely* — is the part CI can run.
+
+> **§8's SECOND RISK ASKED WHERE THE SEPARATRIX CUT GOES, AND THE ANSWER IS THAT
+> NOTHING GIVES OUT.** The instruction was to decide the cut deliberately
+> "rather than discovering it as a convergence failure", which presumes there is
+> a failure to discover. There is not. Swept on a curved Miller boundary at
+> `Ψ_N = 0.50 … 0.995` on two meshes, **every** trace closed, every fit
+> converged, **zero** rays stalled, transversality moved from 0.730 to 0.684, and
+> `|ψ_h − c|` sat at 2e-13 at every level. What changes is what the surface is
+> MADE OF: the band share goes 0% → 41% → 98% at `h = 0.0425` and 0% → 28% → 91%
+> at `h = 0.0212`, with the deepest excursion halving exactly with `h`.
+>
+> **The extension answers as confidently as an element does, and the residual
+> cannot tell them apart.** So the cut is a decision about data provenance, the
+> per-node mask is the only signal, and the right cut MOVES WITH THE MESH. MEQ
+> ships `[0.05, 0.95]`; the operational rule is to read `extrapolated`.
+>
+> **And the two ends are cut for different reasons**, which is why they are two
+> numbers. The outer end is the band. The inner end is that `traceFromAxis()`
+> brackets a level along a ray and near the axis the bracket is a fraction of an
+> element wide — `dρ/dψ`'s `1/(2√Ψ_N)` divergence is the COORDINATE, per IN-3's
+> 1.148, and is not what fails first.
+
+> **THE COAREA FORMULA IS A THIRD LEG AND IT WAS FREE.** IN-2 records §3.3's
+> implicit quadrature as the missing third cross-check. There is a cheaper one
+> for `V'` alone: Green's theorem gives `V = ∮ πR² dz`, a contour integral with
+> **no gradient in it at all**, against `V' = ∮2πR dl/|∇ψ|`, which divides by the
+> flux at every node, and the coarea formula says `V' = |dV/dψ|`. Measured at
+> `k = 3, n = 48`: **6.8e-09** Richardson-extrapolated against **5.2e-06** plain,
+> a factor of **755**, and the differenced-`ρ'` control at **4.70e-05** — *flat
+> to three figures across a fourfold change of step*, which is the trap's own
+> signature, and **6870×** worse. The Richardson finding again, and the third
+> reading of the metric trap after IN-1's arc length and IN-2's average.
+
+> **MEQ's `V'` IS `|dV/dψ|` AND THE HEADER COULD BE READ EITHER WAY.**
+> `SurfaceAverage.hpp` says both "`V' = ∮2πR dl/|∇ψ|`", which is positive by
+> construction, and "dV/dψ with V the volume enclosed by the surface", which
+> carries the sign of the direction the enclosed volume grows in. They agree on
+> `nstx()`, where the axis is an interior MINIMUM of `ψ`; on a fixture whose axis
+> is a maximum they differ by a sign. Nothing is wrong and nothing is being
+> changed — it is worth one sentence so the next reader does not have to
+> re-derive it.
+
+> **THE CACHE'S KEY IS THE `ψ` VECTOR COMPARED BITWISE, AND A HASH WAS REJECTED
+> ON §8's OWN WORDING.** §8 asks for a stale cache to be *impossible*; a hash
+> makes it *unlikely*. `memcmp` and not `==`, and the difference is in the safe
+> direction: two vectors differing only in the sign of a zero compare equal under
+> `==` and unequal under `memcmp`, so `memcmp` recomputes where `==` would serve,
+> and a NaN compares equal to itself under `memcmp`, which is correct and is what
+> stops the cache defeating itself. Cost of a served query over 400 dofs: **0.47
+> µs**.
+>
+> **And `resetForRun()` is not redundant with it**, which is the half easiest to
+> miss: the key catches a changed `ψ` and cannot catch a changed EXTRACTOR. A
+> second run whose `ψ` happens to start where the first ended, against a
+> different mesh, matches the key. The unit suite asserts that a reset forces the
+> rebuild and that without one the cache correctly does not.
+
+> **§11.1's `nodes / surfaces` IS CONFIRMED, AND THE BASELINE HAS TO BE NAMED OR
+> THE NUMBER IS MEANINGLESS.** Against a naive that locates the ONE surface
+> through each node — which is what a consumer without a cache would write, and
+> what IN-P measured — the saving is `nodes / surfaces`: **3.3× at 40 nodes over
+> 12 surfaces**, against a predicted 3.33. Against a naive that rebuilds the
+> whole family per node it is **42×**. The first is the honest column.
 
 ### IN-P — the performance harness
 
@@ -1187,11 +1261,17 @@ it is not.
    averages carry the differenced column as a four-column control rather than as
    a remark. It was the highest-probability, lowest-visibility risk and it is the
    one the ladder was ordered around.
-2. **The separatrix.** Everything degrades approaching it — `1/|∇ψ|` in the
-   integrand, the corner in the surface, the logarithm no polynomial basis
-   catches. Production codes simply stop: LIUQE cuts at `Ψ_N = 0.95`, FreeGS
-   extrapolates outside `[0.01, 0.99]`. **Decide MEQ's cut deliberately and
-   record it**, rather than discovering it as a convergence failure.
+2. ~~**The separatrix.**~~ **DECIDED AND RECORDED BY IN-6, AND THE PREMISE WAS
+   WRONG.** This item said to decide the cut deliberately "rather than
+   discovering it as a convergence failure", which presumes a failure exists to
+   be discovered. Swept at seven levels on two meshes, nothing gives out at all:
+   every trace closes, no ray stalls, and `|ψ_h − c|` stays at 2e-13 while the
+   share of the surface that is BAND data rather than solved data goes from 0% to
+   98%. The extension answers as confidently as an element, so the residual
+   cannot tell them apart and the per-node mask is the only signal. MEQ cuts at
+   `Ψ_N ∈ [0.05, 0.95]`, configurable, refusing rather than extrapolating outside
+   it; the band is `O(h)`, so the right cut moves with the mesh. See the IN-6
+   entry.
 3. ~~**The band silently truncating an outer surface.**~~ **Closed**, and the
    prior art is what it was closed against: `v0-legacy:FluxSurfaces.cpp` returns a
    partial curve with a message on stderr, and a flux-surface average over an arc

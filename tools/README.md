@@ -1,14 +1,16 @@
 # Looking at what MEQ wrote
 
 A run writes the same equilibrium three times, in three formats, for three
-different readers. **They are not interchangeable, and picking the wrong one is
-the usual way to waste an afternoon.**
+different readers, and on request a fourth file that is not the equilibrium at
+all but a **reduction** of it. **They are not interchangeable, and picking the
+wrong one is the usual way to waste an afternoon.**
 
 | file | what it is | read it with |
 |---|---|---|
 | `<stem>.mesh`, `<stem>_psi.gf`, `<stem>_grad_psi.gf` | the discrete solution **exactly** — same spaces, same degree, every coefficient | GLVis; MEQ itself, for an exact restart |
 | `<stem>/<stem>.pvd` | VTK, at the solve's own polynomial degree | ParaView, VisIt |
 | `<stem>.nc` | ψ and **B** on a uniform `(R, Z)` grid, plus the boundary MEQ was given | `plot_equilibrium.py`; any downstream tool |
+| `<stem>_surfaces.nc` | the flux surfaces and the flux-surface averages, against a flux label. **Only when asked for** | a 1-D transport code |
 
 ## The three, and when each is the right one
 
@@ -115,6 +117,66 @@ positive ψ**, worst +1.06e-02 against a peak of 2.5e-01. The flux version puts
 **none**, with a maximum of −5.9e-05. Its band error converges at the flux's own
 rate — measured 3.75 — where an extrapolation does not converge in the band at
 all.
+
+## The fourth file: `<stem>_surfaces.nc`, and why the other three cannot do its job
+
+**Off by default.** `[output] FluxSurfaces = true` turns it on, and
+`FluxSurfaceCount`, `FluxAngleCount`, `FluxInnerCut` and `FluxOuterCut` size it.
+
+The other three files are all the same object in different resolutions: a field
+on a domain. A 1-D transport code does not want a field on a domain. It wants
+**scalar functions of a flux label** — `V′(ρ)`, `⟨R^{-2}⟩(ρ)`, the shape of each
+surface — and getting those out of a rasterised ψ means contour tracing,
+flux-surface quadrature and a critical-point search at the far end, by a code
+that does not have `q`. MEQ does have `q`, so it does the reduction once and
+writes the answer.
+
+The layout is `flux × theta`, θ fastest, and the variables are named in
+`src/meq/Output.hpp`. Three things about it are worth knowing before reading
+one.
+
+**The label is `ρ = √Ψ_N`, and the file says so** in the `flux_label`
+attribute. `Ψ_N` is carried beside it so a consumer with its own normalised-flux
+grid need not square anything, but ρ is what the geometry is smooth in: ψ has a
+quadratic maximum at the axis, so a surface's minor radius grows like `√Ψ_N` and
+parametrising by `Ψ_N` puts a square-root branch point on the axis.
+
+**Both ends are cut, for different reasons, and the defaults are
+`Ψ_N ∈ [0.05, 0.95]`.** At the inner end a surface shrinks to a point and
+`dρ/dψ` is unbounded; at the outer end the surface stops being made of solved
+data. Nothing *fails* at either end — which is exactly why the cut has to be a
+decision rather than something discovered. See below.
+
+**`extrapolated(flux, theta)` is a mask and `extrapolated_nodes` is a count.**
+On the curved path Ω_h is inscribed in Γ, so the outer surfaces cross the band
+and the extension answers for those nodes. A surface can be inside Ω_h at one θ
+and outside it at the next, so `band(flux)` — the per-surface summary — under-
+reports in the middle of a band excursion, which is where a `q(ψ)` profile is
+being read. Drop nodes with `extrapolated = 1` before computing an error norm or
+differencing two runs.
+
+### Where the outer cut has to go, and why nothing tells you
+
+Measured on a curved Miller boundary at two resolutions, tracing at seven
+levels: the share of each surface's nodes that are **band data** rather than
+solved data.
+
+| `Ψ_N` | 0.50 | 0.80 | 0.90 | **0.95** | 0.98 | 0.99 | 0.995 |
+|---|---|---|---|---|---|---|---|
+| `h = 0.0425` | 0% | 1% | 15% | **41%** | 80% | 94% | 98% |
+| `h = 0.0212` | 0% | 0% | 2% | **28%** | 46% | 78% | 91% |
+
+**Every one of those traces closed, every fit converged, no ray stalled, and
+`|ψ_h − c|` sat at 2e-13 throughout.** The residual does not know the difference
+between an element and an extension, because the extension answers as
+confidently as an element does. So the cut cannot be found by pushing outward
+until something breaks; the mask is the only signal there is, and 0.95 is where
+MEQ stops by default — close to LIUQE's 0.95 and inside FreeGS's 0.99, and
+chosen here because it is where the outermost surface is still mostly solved
+data at production resolutions.
+
+A query outside the cut is **refused**, not extrapolated. FreeGS extrapolates;
+MEQ does not, because a plausible `V′` past the boundary is worse than no answer.
 
 ## `plot_equilibrium.py`
 

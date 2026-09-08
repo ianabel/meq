@@ -60,7 +60,7 @@ The library
      - Interpolating one mesh's answer onto another.
    * - ``Output``
      - yes
-     - The three output formats.
+     - The three output formats, and the flux-surface grid.
    * - ``CriticalPoints``
      - yes
      - The magnetic axis and any X-point, as roots of the flux, plus the
@@ -80,6 +80,14 @@ The library
      - no
      - The surfaces as a map from a disc: the linear fit, and the gauge-free
        refit.
+   * - ``FluxExtraction``
+     - yes
+     - One solved field to a whole family of flux surfaces: trace, fit and
+       average, once per level.
+   * - ``FluxFamily``
+     - no
+     - What that family is, the flux label it is expressed against, the
+       interpolation along it, and the per-:math:`\psi` geometry cache.
 
 .. _organization-mfem-free:
 
@@ -87,8 +95,8 @@ Why half of it does not include MFEM
 ------------------------------------
 
 ``Config``, ``Profiles``, ``Source``, ``RotatingSource``, ``SourceFactory``,
-``BoundaryShape``, ``Zernike`` and ``SurfaceFit`` take plain ``double``
-arguments and know nothing about finite elements. The ``mfem::Coefficient``
+``BoundaryShape``, ``Zernike``, ``SurfaceFit`` and ``FluxFamily`` take plain
+``double`` arguments and know nothing about finite elements. The ``mfem::Coefficient``
 adapters live with the assembly that needs them, and the two geometry headers
 take their field as a callable rather than as a grid function — which is why a
 caller writes the short loop that turns a traced surface into samples. See
@@ -122,6 +130,8 @@ The data flow of a run
      -> meq::poloidalField                      q -> B
      -> meq::GridSampler + meq::NetCDFWriter    the gridded file
      -> meq::writeMfem                          the exact restart
+     -> meq::extractFluxSurfaces                if asked: the flux surfaces
+        + meq::FluxGridWriter                   and the averages over them
      -> meq::curveBoundaryOnto + meq::writeVtu  the picture, LAST
 
 The ordering at the end is not incidental: ``curveBoundaryOnto`` mutates the
@@ -129,10 +139,11 @@ mesh geometry, so everything that reads the solved geometry must run before it.
 
 .. note::
 
-   The flux-surface machinery is **not** in that flow. ``CriticalPoints``,
-   ``FluxSurfaces``, ``SurfaceAverage``, ``Zernike`` and ``SurfaceFit`` are
-   library-only: nothing in the TOML schema reaches them and nothing they
-   produce is written to an output file. They are a second consumer of a solved
+   ``[output] FluxSurfaces`` is what puts the flux-surface machinery in that
+   flow, and it is the only thing that does: ``CriticalPoints``,
+   ``FluxSurfaces``, ``SurfaceAverage`` and ``FluxExtraction`` are reached
+   through it, while ``Zernike``, ``SurfaceFit`` and everything about the disc
+   map remain library-only. They are all a second consumer of a solved
    ``GradShafranovSolver``, alongside the estimator and the sampler. See
    :doc:`flux_surfaces` and :doc:`surface_geometry`.
 

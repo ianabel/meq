@@ -46,7 +46,8 @@ In order:
    :math:`\psiax` as an additional unknown. See :doc:`nonlinear`.
 #. **Post-processes**, building :math:`\psi^\star` — which is the potential
    every output but the restart file carries.
-#. **Writes the answer**, in three formats. See :doc:`output`.
+#. **Writes the answer**, in three formats — and, if ``[output] FluxSurfaces``
+   is set, reduces it to flux surfaces and writes those too. See :doc:`output`.
 
 What it prints
 --------------

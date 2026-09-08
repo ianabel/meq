@@ -17,7 +17,7 @@ manual and what a maintainer needs is `CLAUDE.md`. Git has them.
 |---|---|
 | ~~`DRIVER-PLAN.md`~~ | stage 7 — **done**, and now `docs/running.rst`, `docs/output.rst` and `docs/configuration.rst` |
 | ~~`FLOW-PLAN.md`~~ | item 9, FL-0 to FL-8 — **done**, and now `docs/rotation.rst`, which carries the derivation `RotatingSource.hpp` defers to |
-| `INVERSION-PLAN.md` | item 10's machinery — IN-A to IN-4 and IN-P **done**, IN-5 deferred, IN-6 open |
+| `INVERSION-PLAN.md` | item 10's machinery — IN-A to IN-4, IN-6 and IN-P **done**, IN-5 deferred |
 | `FREE-BOUNDARY-PLAN.md` | item 8 — FB-A, FB-0, FB-1, FB-2, FB-3, FB-7 **done**, FB-4 **answered**, FB-5 part built, and **FB-6 met 2026-09-07**: MEQ reproduces `freegs4e`'s converged limited tokamak to 1.5e-04 in `ψ_ax`. What is left of it is the limiter as a curve, and §10's diverted plasmas |
 | `PLASMA-EDGE-PLAN.md` | a design out of FB-4, **deliberately not to be started** until `j ≥ 1` is finished |
 | `MANTA-COUPLING.md` | the socket MaNTA presents, written from MaNTA's side. No field model is registered there yet |
@@ -159,14 +159,15 @@ Nothing is red and stages 0 to 7 are done, so the order is:
    `j ≥ 1` is finished, and its central premise is measured at two rungs out of
    three. PE-0 is a day's work and settles that; everything after it waits.
 
-2. **Finish the inversion** — item 10. **IN-P is done**, so what is left is
-   IN-6 alone: the `(Ψ, θ)` output grid and the per-`ψ` cache
-   `MANTA-COUPLING.md` §5's call pattern requires. Both of its numbers are
-   already measured — the cache is worth `nodes/surfaces` (5.1× on a 60-node
-   case) and evaluating a fit at many points by Vandermonde-plus-GEMM is worth
-   34.7× — so it is assembly rather than research. IN-5, open surfaces, is
-   **deferred with free boundary**: a disc chart has no meaning through a
-   separatrix.
+2. ~~**Finish the inversion**~~ — item 10, and **IN-6 landed 2026-09-07**, so
+   the only stage left is IN-5, open surfaces, which is **deferred with free
+   boundary**: a disc chart has no meaning through a separatrix. `[output]
+   FluxSurfaces` writes the `(Ψ, θ)` grid and `meq::GeometryCache` is the
+   per-`ψ` cache `MANTA-COUPLING.md` §5's call pattern requires — confirmed at
+   `nodes/surfaces`, 3.3× at 40 nodes over 12 surfaces against the naive that
+   locates one surface per node. The 34.7× Vandermonde-plus-GEMM figure was NOT
+   taken up and is still available: the file is written from the traced nodes
+   rather than from a `SurfaceFit`, so there is no Vandermonde in that path.
 3. **The fixed-`q(ψ)` solver itself** — also item 10, and reachable now that
    IN-2 measures `⟨r^{-2}⟩_ψ` and `V′(ψ)` against a converged reference.
 
@@ -181,7 +182,8 @@ The solver works and every claim about it is a measured convergence rate. Stages
 0 to 6 are done, **stage 7 is finished** — MEQ is a program that solves on a
 curved boundary, refines its own mesh, and restarts from a previous answer in one
 Newton step — **toroidal flow is finished**, FL-0 to FL-8, and **solution
-inversion is finished up to its output stage**.
+inversion is finished including its output stage**, every part of it but IN-5's
+open surfaces, which is deferred with free boundary.
 
 **The driver now refuses FOUR things, where this paragraph used to say one.**
 `[boundary] Type = "exact"`, an `AssemblyMode` or `TraceSolver` the build cannot
@@ -592,13 +594,12 @@ follow-up and has not been done.
 
 ## 10. The fixed-`q(ψ)` solver — MEQ, and its machinery now exists
 
-**`INVERSION-PLAN.md` is the design, and IN-A to IN-4 are done and green.** This
-item became reachable at **IN-2**, where the flux-surface averages `⟨r^{-2}⟩_ψ`
-and `V′(ψ)` are measured against a converged reference on the exact field. What
-is left of the machinery is **IN-6**, the `(Ψ, θ)` output grid and the per-`ψ`
-cache, and **IN-P**, the performance harness; **IN-5**, open surfaces, is
-deferred with free boundary, since a disc chart has no meaning through a
-separatrix.
+**`INVERSION-PLAN.md` is the design, and every stage but IN-5 is done and
+green.** This item became reachable at **IN-2**, where the flux-surface averages
+`⟨r^{-2}⟩_ψ` and `V′(ψ)` are measured against a converged reference on the exact
+field, and **IN-6** now writes them to a file against a flux label. **IN-5**,
+open surfaces, is deferred with free boundary, since a disc chart has no meaning
+through a separatrix.
 
 **Take `q(ψ)` as input and find `I(ψ)` from it**, rather than taking `I(ψ)`
 directly as items 1 and 9 both do. It is how a transport code hands an

@@ -594,6 +594,276 @@ namespace meq
 		zVar.putVar( z.data() );
 	}
 
+
+	struct FluxGridWriter::State
+	{
+		netCDF::NcFile file;
+		bool closed;
+	};
+
+	namespace
+	{
+		/// The surfaces' common node count, or a refusal.
+		///
+		/// A NetCDF variable is rectangular and a family is not obliged to be,
+		/// so this is checked rather than assumed. meq::extractFluxSurfaces()
+		/// fits every surface at the same angle count, so a ragged family means
+		/// something assembled one by hand and got it wrong -- which is worth a
+		/// message rather than a truncated file.
+		std::size_t commonNodeCount( FluxSurfaceFamily const &family )
+		{
+			if ( family.empty() )
+				throw std::invalid_argument(
+					"meq::FluxGridWriter: the family is empty, so there is no "
+					"( Psi, theta ) grid to write" );
+
+			std::size_t const angles = family.surfaces.front().count();
+			if ( angles < 3 )
+				throw std::invalid_argument(
+					"meq::FluxGridWriter: the first surface carries "
+					+ std::to_string( angles )
+					+ " nodes, which encloses nothing" );
+
+			for ( std::size_t i = 0; i < family.size(); ++i )
+			{
+				FluxSurface const &surface = family.surfaces[ i ];
+
+				// EVERY COLUMN, NOT JUST r. count() reports r.size(), so a
+				// family whose z or whose band mask is short would pass a check
+				// on count() alone and then be read past its end -- which is
+				// the one failure here that would not announce itself.
+				if ( surface.count() == angles
+				     && surface.z.size() == angles
+				     && surface.extended.size() == angles )
+					continue;
+
+				throw std::invalid_argument(
+					"meq::FluxGridWriter: surface " + std::to_string( i )
+					+ " carries " + std::to_string( surface.count() ) + " R, "
+					+ std::to_string( surface.z.size() ) + " Z and "
+					+ std::to_string( surface.extended.size() )
+					+ " mask entries where the first surface carries "
+					+ std::to_string( angles )
+					+ " of each, so the family is ragged and cannot be written "
+					"as a rectangular ( flux, theta ) array" );
+			}
+
+			return angles;
+		}
+	}
+
+	FluxGridWriter::FluxGridWriter( std::string const &path,
+	                                FluxSurfaceFamily const &family )
+		: state( new State{ {}, false } )
+	{
+		std::size_t const angles = commonNodeCount( family );
+		std::size_t const count = family.size();
+
+		try
+		{
+			state->file.open( path, netCDF::NcFile::replace );
+		}
+		catch ( netCDF::exceptions::NcException const &error )
+		{
+			throw std::runtime_error( "meq::FluxGridWriter: cannot create " + path
+			                          + ": " + error.what() );
+		}
+
+		netCDF::NcDim const fluxDim = state->file.addDim( "flux", count );
+		netCDF::NcDim const thetaDim = state->file.addDim( "theta", angles );
+
+		// The coordinates first, so the file is self-describing even if a later
+		// write fails.
+		auto column = [ & ]( char const *name, char const *longName,
+		                     char const *units,
+		                     double ( *of )( FluxSurface const & ) )
+		{
+			std::vector<double> values( count, 0.0 );
+			for ( std::size_t i = 0; i < count; ++i )
+				values[ i ] = of( family.surfaces[ i ] );
+
+			netCDF::NcVar var = state->file.addVar( name, netCDF::ncDouble,
+			                                       fluxDim );
+			var.putAtt( "long_name", longName );
+			var.putAtt( "units", units );
+			var.putVar( values.data() );
+		};
+
+		column( "rho", "Flux label, the square root of the normalised flux", "1",
+		        []( FluxSurface const &s ) { return s.radial; } );
+		column( "normalised_flux",
+		        "Normalised poloidal flux, 0 on the magnetic axis and 1 on the "
+		        "plasma boundary", "1",
+		        []( FluxSurface const &s ) { return s.normalisedFlux; } );
+		column( "psi", "Poloidal flux per radian at the surface", "Wb/rad",
+		        []( FluxSurface const &s ) { return s.level; } );
+
+		std::vector<double> theta( angles, 0.0 );
+		double const twoPi = 6.283185307179586476925286766559;
+		for ( std::size_t j = 0; j < angles; ++j )
+			theta[ j ] = twoPi*static_cast<double>( j )
+			             /static_cast<double>( angles );
+
+		netCDF::NcVar thetaVar = state->file.addVar( "theta", netCDF::ncDouble,
+		                                            thetaDim );
+		thetaVar.putAtt( "long_name",
+		                 "Geometric poloidal angle about the magnetic axis" );
+		thetaVar.putAtt( "units", "rad" );
+		thetaVar.putVar( theta.data() );
+
+		// The geometry: ( flux, theta ), theta fastest.
+		std::vector<netCDF::NcDim> const shape{ fluxDim, thetaDim };
+		std::vector<double> plane( count*angles, 0.0 );
+
+		auto surfaceColumn = [ & ]( char const *name, char const *longName,
+		                            char const *units,
+		                            std::vector<double> const
+		                                FluxSurface::*member )
+		{
+			for ( std::size_t i = 0; i < count; ++i )
+				for ( std::size_t j = 0; j < angles; ++j )
+					plane[ i*angles + j ] = ( family.surfaces[ i ].*member )[ j ];
+
+			netCDF::NcVar var = state->file.addVar( name, netCDF::ncDouble,
+			                                        shape );
+			var.putAtt( "long_name", longName );
+			var.putAtt( "units", units );
+			var.putVar( plane.data() );
+		};
+
+		surfaceColumn( "R", "Major radius of the flux surface", "m",
+		               &FluxSurface::r );
+		surfaceColumn( "Z", "Height of the flux surface", "m",
+		               &FluxSurface::z );
+
+		// THE BAND MASK, PER NODE. A count is not a mask: CLAUDE.md records that
+		// carrying only `extrapolated_nodes` on the ( R, Z ) file meant nothing
+		// downstream could tell WHICH nodes had been continued outward from
+		// Gamma_h. The same obligation applies here, one dimension up, and it is
+		// sharper: a flux surface can be inside Omega_h at one theta and outside
+		// it at the next, so a per-SURFACE flag under-reports in exactly the
+		// place a q( psi ) profile cares about.
+		std::vector<signed char> mask( count*angles, 0 );
+		for ( std::size_t i = 0; i < count; ++i )
+			for ( std::size_t j = 0; j < angles; ++j )
+				mask[ i*angles + j ] =
+					family.surfaces[ i ].extended[ j ] != 0 ? 1 : 0;
+
+		netCDF::NcVar bandVar = state->file.addVar( "extrapolated",
+		                                            netCDF::ncByte, shape );
+		bandVar.putAtt( "long_name",
+		                "1 where the node's field was continued across the "
+		                "Gamma_h-to-Gamma band rather than solved on" );
+		bandVar.putVar( mask.data() );
+
+		column( "V_prime", "dV/dpsi, the volume derivative", "m^3 rad/Wb",
+		        []( FluxSurface const &s ) { return s.vPrime; } );
+		column( "volume", "Volume enclosed by the surface", "m^3",
+		        []( FluxSurface const &s ) { return s.volume; } );
+		column( "cross_section_area",
+		        "Poloidal cross-section area enclosed by the surface", "m^2",
+		        []( FluxSurface const &s ) { return s.crossSectionArea; } );
+		column( "arc_length", "Poloidal circumference of the surface", "m",
+		        []( FluxSurface const &s ) { return s.arcLength; } );
+		column( "surface_area", "Area of the toroidal flux surface", "m^2",
+		        []( FluxSurface const &s ) { return s.surfaceArea; } );
+		column( "inverse_R_squared", "Flux-surface average of R^-2", "m^-2",
+		        []( FluxSurface const &s ) { return s.inverseRSquared; } );
+		column( "grad_psi_squared_over_R_squared",
+		        "Flux-surface average of | grad psi |^2 / R^2",
+		        "Wb^2 rad^-2 m^-4",
+		        []( FluxSurface const &s )
+		        { return s.gradPsiSquaredOverRSquared; } );
+		column( "abs_grad_psi", "Flux-surface average of | grad psi |",
+		        "Wb rad^-1 m^-1",
+		        []( FluxSurface const &s ) { return s.absGradPsi; } );
+		column( "grad_psi_squared", "Flux-surface average of | grad psi |^2",
+		        "Wb^2 rad^-2 m^-2",
+		        []( FluxSurface const &s ) { return s.gradPsiSquared; } );
+
+		// PRESENT ONLY WHEN IT MEANS SOMETHING. g( psi ) = R B_toroidal is the
+		// caller's to supply -- a meq::Source carries g g' and not g -- so a
+		// family without one has no safety factor, and writing a column of
+		// zeroes would be indistinguishable from a machine with none.
+		if ( family.safetyFactorAvailable )
+			column( "safety_factor",
+			        "Safety factor, V' g < R^-2 > / 4 pi^2", "1",
+			        []( FluxSurface const &s ) { return s.safetyFactor; } );
+
+		column( "worst_residual",
+		        "Worst | psi_h - level | over the nodes of the surface",
+		        "Wb/rad",
+		        []( FluxSurface const &s ) { return s.worstResidual; } );
+		column( "transversality",
+		        "min | u x t | over the angle fit: how close a ray came to being "
+		        "tangent to the surface", "1",
+		        []( FluxSurface const &s ) { return s.transversality; } );
+
+		std::vector<signed char> band( count, 0 );
+		for ( std::size_t i = 0; i < count; ++i )
+			band[ i ] = family.surfaces[ i ].crossesBand ? 1 : 0;
+
+		netCDF::NcVar surfaceBandVar = state->file.addVar( "band",
+		                                                   netCDF::ncByte,
+		                                                   fluxDim );
+		surfaceBandVar.putAtt( "long_name",
+		                       "1 where any node of the surface is band data" );
+		surfaceBandVar.putVar( band.data() );
+
+		// The family's own provenance. It goes in unconditionally rather than
+		// being left to the caller, because a file that does not say which axis
+		// its label is normalised against cannot be compared with another one.
+		state->file.putAtt( "flux_label", "rho = sqrt( Psi_N )" );
+		state->file.putAtt( "axis_r", netCDF::ncDouble, family.axisR );
+		state->file.putAtt( "axis_z", netCDF::ncDouble, family.axisZ );
+		state->file.putAtt( "psi_axis", netCDF::ncDouble, family.psiAxis );
+		state->file.putAtt( "psi_boundary", netCDF::ncDouble,
+		                    family.psiBoundary );
+		state->file.putAtt( "inner_cut", netCDF::ncDouble, family.innerCut );
+		state->file.putAtt( "outer_cut", netCDF::ncDouble, family.outerCut );
+		state->file.putAtt( "extrapolated_nodes", netCDF::ncInt,
+		                    family.extendedNodes() );
+		state->file.putAtt( "worst_residual", netCDF::ncDouble,
+		                    family.worstResidual() );
+	}
+
+	FluxGridWriter::~FluxGridWriter()
+	{
+		// Swallowed for the reason NetCDFWriter's is: a throw from a destructor
+		// terminates, and a caller who wants to see the error calls close().
+		try
+		{
+			close();
+		}
+		catch ( ... )
+		{
+		}
+	}
+
+	void FluxGridWriter::close()
+	{
+		if ( state->closed )
+			return;
+		state->file.close();
+		state->closed = true;
+	}
+
+	void FluxGridWriter::attribute( std::string const &name,
+	                                std::string const &value )
+	{
+		state->file.putAtt( name, value );
+	}
+
+	void FluxGridWriter::attribute( std::string const &name, double value )
+	{
+		state->file.putAtt( name, netCDF::ncDouble, value );
+	}
+
+	void FluxGridWriter::attribute( std::string const &name, int value )
+	{
+		state->file.putAtt( name, netCDF::ncInt, value );
+	}
+
 #else   // MEQ_USE_NETCDF
 
 	struct NetCDFWriter::State { };
@@ -617,5 +887,23 @@ namespace meq
 	void NetCDFWriter::boundary( std::vector<double> const &,
 	                             std::vector<double> const & ) { unavailable(); }
 
+
+	struct FluxGridWriter::State { };
+
+	namespace
+	{
+		[[noreturn]] void fluxGridUnavailable()
+		{
+			throw std::runtime_error( "meq::FluxGridWriter: MEQ was built without netcdf-cxx4" );
+		}
+	}
+
+	FluxGridWriter::FluxGridWriter( std::string const &,
+	                                FluxSurfaceFamily const & ) { fluxGridUnavailable(); }
+	FluxGridWriter::~FluxGridWriter() = default;
+	void FluxGridWriter::close() { }
+	void FluxGridWriter::attribute( std::string const &, std::string const & ) { fluxGridUnavailable(); }
+	void FluxGridWriter::attribute( std::string const &, double ) { fluxGridUnavailable(); }
+	void FluxGridWriter::attribute( std::string const &, int ) { fluxGridUnavailable(); }
 #endif  // MEQ_USE_NETCDF
 }

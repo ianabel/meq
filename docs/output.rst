@@ -3,7 +3,9 @@ Output
 
 Every run writes the same equilibrium **three times**, in three formats. That is
 not redundancy: no single format is simultaneously exact, portable and
-convenient, and each of the three gives up a different one of those.
+convenient, and each of the three gives up a different one of those. On request
+there is a fourth file, which is not the equilibrium in another resolution but a
+**reduction** of it: the flux surfaces and the integrals over them.
 
 .. list-table::
    :header-rows: 1
@@ -29,6 +31,11 @@ convenient, and each of the three gives up a different one of those.
      - anything that reads NetCDF
      - **The interchange format.** :math:`\psi` and :math:`\mathbf{B}` sampled on
        a uniform :math:`(R, Z)` grid. Lossy, and portable.
+   * - ``<stem>_surfaces.nc``
+     - a 1-D transport code
+     - **The reduction.** The flux surfaces themselves and the flux-surface
+       averages over them, against a flux label. Written only when
+       ``[output] FluxSurfaces`` is set. See :ref:`output-flux-surfaces`.
 
 ``<stem>`` is the output directory and prefix from the ``[output]`` table. MEQ
 does **not** create the output directory; if it does not exist the run exits 3
@@ -36,13 +43,12 @@ does **not** create the output directory; if it does not exist the run exits 3
 
 .. note::
 
-   **None of the three carries the flux surfaces.** MEQ can locate the magnetic
-   axis, trace the surfaces, take flux-surface averages over them and fit the
-   whole family as a map from a disc — see :doc:`flux_surfaces` and
-   :doc:`surface_geometry` — but all of that is reached through the C++ library
-   and none of it is written to a file or driven from a configuration key. A
-   consumer that wants :math:`V'`, :math:`\langle R^{-2}\rangle` or a safety
-   factor links against MEQ rather than reading its output.
+   **None of the first three carries the flux surfaces**, and that is what the
+   fourth file is for. A consumer wanting :math:`V'`,
+   :math:`\langle R^{-2}\rangle` or the shape of a surface reads
+   ``<stem>_surfaces.nc``; one wanting the family as a differentiable map from a
+   disc, or wanting to drive the extraction itself, links against the library —
+   see :doc:`flux_surfaces` and :doc:`surface_geometry`.
 
 .. _output-which-potential:
 
@@ -312,3 +318,165 @@ nothing is evaluated outside one survives.
    :math:`r^2`, it is wrong twice over. This was measured, and the difference is
    several orders of magnitude, which is why it is stated as a rule rather than
    left as a detail.
+
+.. _output-flux-surfaces:
+
+The flux-surface format
+-----------------------
+
+``[output] FluxSurfaces = true`` writes ``<stem>_surfaces.nc``: the flux
+surfaces, sampled at equispaced poloidal angle about the magnetic axis, and the
+flux-surface averages over them, against a flux label. It is what a 1-D
+transport code reads, and it is the one output that is a *reduction* rather than
+a resolution of the answer.
+
+**Off by default**, for two reasons. It costs a contour trace and an angle fit
+per surface, which on a coarse mesh is comparable with the solve; and it is the
+one output that can be impossible on a run that solved perfectly well — a level
+whose surface is not closed, or not star-shaped about the axis, has no
+flux-surface average, and MEQ refuses rather than inventing one. A failure there
+is reported on standard error and does not change the exit code: the equilibrium
+has already been written and is unaffected.
+
+The layout is ``flux × theta`` with ``theta`` fastest, which is C row-major and
+the same convention the gridded format uses:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 38 62
+
+   * - Variable
+     - What it is
+   * - ``rho(flux)``, ``normalised_flux(flux)``, ``psi(flux)``
+     - The label :math:`\rho = \sqrt{\Psi_N}`, the normalised flux
+       :math:`\Psi_N`, and the level :math:`\psi` itself.
+   * - ``theta(theta)``
+     - Geometric poloidal angle about the magnetic axis, radians.
+   * - ``R(flux, theta)``, ``Z(flux, theta)``
+     - The surface.
+   * - ``extrapolated(flux, theta)``
+     - 1 where the node's field came from the band extension rather than from an
+       element.
+   * - ``V_prime(flux)``
+     - :math:`V' = \oint 2\pi R \, \mathrm{d}l / |\nabla\psi|`. The
+       :math:`2\pi R` is part of the definition, so this is
+       :math:`|\mathrm{d}V/\mathrm{d}\psi|` with :math:`V` the enclosed volume.
+   * - ``volume(flux)``, ``cross_section_area(flux)``
+     - :math:`\oint \pi R^2 \, \mathrm{d}z` and :math:`\oint R \, \mathrm{d}z`,
+       by Green's theorem on the same nodes.
+   * - ``arc_length(flux)``, ``surface_area(flux)``
+     - :math:`\oint \mathrm{d}l` and :math:`\oint 2\pi R \, \mathrm{d}l`.
+   * - ``inverse_R_squared(flux)``
+     - :math:`\langle R^{-2} \rangle`.
+   * - ``grad_psi_squared_over_R_squared(flux)``
+     - :math:`\langle |\nabla\psi|^2 / R^2 \rangle`.
+   * - ``abs_grad_psi(flux)``, ``grad_psi_squared(flux)``
+     - :math:`\langle |\nabla\psi| \rangle` and
+       :math:`\langle |\nabla\psi|^2 \rangle`, which are what
+       :math:`\langle |\nabla\rho| \rangle` and
+       :math:`\langle |\nabla\rho|^2 \rangle` are, times the analytic
+       :math:`\mathrm{d}\rho/\mathrm{d}\psi`.
+   * - ``safety_factor(flux)``
+     - :math:`V' g \langle R^{-2}\rangle / 4\pi^2`. **Present only when a
+       caller supplied** :math:`g(\psi) = R B_\phi`; a ``meq::Source`` carries
+       :math:`g g'` and not :math:`g`, so the driver writes no such column and
+       the variable is absent rather than zero.
+   * - ``band(flux)``, ``worst_residual(flux)``, ``transversality(flux)``
+     - Per-surface diagnostics: whether any node is band data, the worst
+       :math:`|\psi_h - c|` over the surface, and how close a ray came to being
+       tangent to it.
+
+Global attributes carry the magnetic axis, :math:`\psi_{\mathrm{ax}}`,
+:math:`\psi_{\mathrm{bnd}}`, the cut, the total number of band nodes, and the
+provenance the gridded file carries.
+
+The label is :math:`\rho`, not :math:`\Psi_N`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The file's ``flux_label`` attribute says so. :math:`\psi` has a quadratic
+maximum at the magnetic axis, so :math:`\Psi_N` behaves like
+:math:`(\text{distance})^2` there and a surface's minor radius grows like
+:math:`\sqrt{\Psi_N}`. Parametrising by :math:`\Psi_N` therefore puts a
+square-root branch point on the axis, and every representation converges
+algebraically against it with nothing in the numbers to say why. Measured on a
+Solov'ev equilibrium, the same fit against :math:`\rho` rather than
+:math:`\Psi_N` is a factor of 204 better in the worst error, with the
+conditioning untouched — so it is the branch point and not the algebra.
+
+:math:`\Psi_N` is written beside it, so a consumer with its own normalised-flux
+grid need not square anything, and MEQ interpolates the family in :math:`\rho`.
+
+Both ends are cut, for different reasons
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``FluxInnerCut`` and ``FluxOuterCut`` default to :math:`\Psi_N \in [0.05,
+0.95]`.
+
+At the **inner** end a surface shrinks to a point, :math:`V' \to 0`, and
+:math:`\mathrm{d}\rho/\mathrm{d}\psi` diverges like
+:math:`1/(2\sqrt{\Psi_N})`. That divergence belongs to the *coordinate* rather
+than to the extraction — the product with :math:`2\sqrt{\Psi_N}` settles at
+1.148 down to :math:`\Psi_N = 0.005` — but the trace gives out first: MEQ
+brackets a level by walking outward along a ray from the axis, and near the axis
+the bracket is a fraction of an element wide.
+
+At the **outer** end nothing fails, and that is the point. On a curved boundary
+:math:`\Omega_h` is the union of background elements lying *inside*
+:math:`\Gamma`, so the outer surfaces cross the band between :math:`\Gamma_h`
+and :math:`\Gamma` and the extension answers for those nodes. Measured on a
+Miller boundary at two resolutions, the share of each surface that is band data:
+
+.. list-table::
+   :header-rows: 1
+
+   * - :math:`\Psi_N`
+     - 0.50
+     - 0.80
+     - 0.90
+     - **0.95**
+     - 0.98
+     - 0.99
+     - 0.995
+   * - :math:`h = 0.0425`
+     - 0%
+     - 1%
+     - 15%
+     - **41%**
+     - 80%
+     - 94%
+     - 98%
+   * - :math:`h = 0.0212`
+     - 0%
+     - 0%
+     - 2%
+     - **28%**
+     - 46%
+     - 78%
+     - 91%
+
+Every one of those traces closed, every fit converged, no ray stalled, and
+:math:`|\psi_h - c|` sat at :math:`2\times10^{-13}` throughout. **The residual
+does not distinguish an element from an extension**, because the extension
+answers as confidently as an element does. So the cut cannot be discovered by
+pushing outward until something breaks; the per-node mask is the only signal
+there is, and where to stop is a decision. MEQ's default is close to what
+production codes use, and is where the outermost surface is still mostly solved
+data at production resolutions. The band is :math:`O(h)`, so the right cut moves
+with the mesh — read ``extrapolated`` rather than trusting the default.
+
+.. warning::
+
+   **A query outside the cut is refused, not extrapolated.** Some codes
+   extrapolate past the last surface they can trace; MEQ does not. A plausible
+   :math:`V'` beyond the plasma boundary is worse than no answer, because
+   nothing downstream can tell it from a real one.
+
+``extrapolated`` is a mask, ``extrapolated_nodes`` is a count
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The same obligation the gridded format carries, one dimension up, and sharper: a
+flux surface can be inside :math:`\Omega_h` at one :math:`\theta` and outside it
+at the next, so the per-surface ``band(flux)`` flag under-reports in the middle
+of a band excursion — which is exactly where a :math:`q(\psi)` profile is being
+read. Drop nodes with ``extrapolated = 1`` before computing an error norm or
+differencing two runs; keep them for a picture.

@@ -19,6 +19,7 @@ set(MEQ_UNIT_TESTS
 	CoilsTests
 	ConfigTests
 	ExteriorDtNTests
+	FluxFamilyTests
 	PlasmaComponentTests
 	ProfilesTests
 	RotatingSourceTests
@@ -146,6 +147,7 @@ set(MEQ_CONVERGENCE_TESTS
 	RotatingNewtonConvergence
 	CriticalPointConvergence
 	FluxSurfaceConvergence
+	FluxGridConvergence
 	SurfaceAverageConvergence
 	SurfaceFitConvergence
 	# FB-A, the first stage of FREE-BOUNDARY-PLAN.md and the only one that needs

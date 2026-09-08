@@ -207,6 +207,8 @@ set(MEQ_CORE_SOURCES
 	src/meq/Estimator.cpp
 	src/meq/ExteriorDtN.cpp
 	src/meq/Field.cpp
+	src/meq/FluxExtraction.cpp
+	src/meq/FluxFamily.cpp
 	src/meq/FluxSurfaces.cpp
 	src/meq/GradShafranov.cpp
 	src/meq/Output.cpp
@@ -227,12 +229,27 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/CriticalPoints.cpp
 	src/meq/Estimator.cpp
 	src/meq/Field.cpp
+	src/meq/FluxExtraction.cpp
 	src/meq/FluxSurfaces.cpp
 	src/meq/GradShafranov.cpp
 	src/meq/Output.cpp
 	src/meq/Sampler.cpp
 	src/meq/SurfaceAverage.cpp
 	src/meq/WarmStart.cpp)
+
+# src/meq/FluxFamily.cpp is DELIBERATELY ABSENT from that list, and it is the
+# newest member of the MFEM-free half. IN-6 splits in two: turning a solved
+# psi_h and q_h into a family of flux surfaces needs a mesh and is
+# src/meq/FluxExtraction.cpp, which is on the list above; holding that family,
+# interpolating it in the flux label, and CACHING it per psi is plain doubles in
+# and out.
+#
+# The split is not tidiness. The cache's invalidation rule IS
+# MANTA-COUPLING.md section 8 -- a served answer must equal a cold one BIT FOR
+# BIT and a stale cache must be impossible rather than unlikely -- and that is
+# the part of IN-6 with a stated obligation attached. Continuous integration
+# cannot obtain the MFEM branch meq needs, so the contract is gated there and
+# only the extraction waits for a developer build.
 
 # src/meq/PlasmaComponent.cpp is ABSENT from it too, and for a third reason
 # rather than the first two: XP-1's flood fill is a connected-component

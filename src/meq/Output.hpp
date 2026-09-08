@@ -36,6 +36,7 @@
 
 #include "mfem.hpp"
 
+#include "FluxFamily.hpp"
 #include "Sampler.hpp"
 
 namespace meq
@@ -305,6 +306,106 @@ namespace meq
 			/// re-deriving it from the configuration.
 			void boundary( std::vector<double> const &r,
 			               std::vector<double> const &z );
+
+			/// Flush and close. Called by the destructor; call it explicitly to
+			/// see an error rather than have it thrown from a destructor.
+			void close();
+
+		private:
+			struct State;
+			std::unique_ptr<State> state;
+	};
+
+	/*
+	 * The ( Psi, theta ) flux-surface file: INVERSION-PLAN.md stage IN-6, and
+	 * the fourth of meq's output formats.
+	 *
+	 * WHAT IT IS FOR, AND WHY THE OTHER THREE DO NOT COVER IT. The .mesh/.gf
+	 * trio is exact and readable only by MFEM; the .vtu is a picture; the .nc
+	 * grid file is psi and B on a uniform ( R, Z ) lattice, which is what a
+	 * plotting tool wants and is the wrong shape entirely for a 1-D transport
+	 * code. A transport code reads scalar functions of a FLUX LABEL -- V'( rho ),
+	 * < R^-2 >( rho ), the geometry of each surface -- and reconstructing those
+	 * from a rasterised psi means re-doing the whole of the inversion item at the
+	 * far end. This file is that reduction, done once, by the code that has q in
+	 * hand.
+	 *
+	 * Layout, which is fixed and is what a reader may rely on:
+	 *
+	 *     dimensions  flux = surfaces, theta = angles
+	 *     double  rho( flux )                the flux label, sqrt( Psi_N )
+	 *     double  normalised_flux( flux )    Psi_N, 0 on the axis, 1 at the edge
+	 *     double  psi( flux )                the level itself, Wb/rad
+	 *     double  theta( theta )             poloidal angle about the axis, rad
+	 *     double  R( flux, theta )           major radius of the surface, m
+	 *     double  Z( flux, theta )           height, m
+	 *     byte    extrapolated( flux, theta ) 1 where the node is band data
+	 *     double  V_prime( flux )            dV/dpsi, m^3 / ( Wb/rad )
+	 *     double  volume( flux )             enclosed volume, m^3
+	 *     double  cross_section_area( flux ) enclosed poloidal area, m^2
+	 *     double  arc_length( flux )         poloidal circumference, m
+	 *     double  surface_area( flux )       area of the toroidal surface, m^2
+	 *     double  inverse_R_squared( flux )          < R^-2 >, m^-2
+	 *     double  grad_psi_squared_over_R_squared( flux )
+	 *     double  abs_grad_psi( flux )               < | grad psi | >
+	 *     double  grad_psi_squared( flux )           < | grad psi |^2 >
+	 *     double  safety_factor( flux )      RoPP (142). PRESENT ONLY when the
+	 *                                        family carries a g( psi )
+	 *     byte    band( flux )               1 where any node of the surface is
+	 *                                        band data
+	 *     double  worst_residual( flux )     worst | psi_h - level | on it
+	 *     double  transversality( flux )     min | u x t | over the fit
+	 *
+	 * ( flux, theta ) with theta fastest is C row-major, the same convention the
+	 * ( Z, R ) grid file uses.
+	 *
+	 * THE LABEL IS rho = sqrt( Psi_N ) AND THE FILE SAYS SO, in the global
+	 * attribute `flux_label`. Psi_N is carried beside it because a consumer
+	 * whose own grid is in normalised flux should not have to square anything,
+	 * but rho is what the geometry is smooth in and what meq interpolates
+	 * against. FluxFamily.hpp has the measurement.
+	 *
+	 * `extrapolated` IS A MASK AND `extrapolated_nodes` IS A COUNT, and the
+	 * distinction is the one the ( R, Z ) writer had to be repaired for:
+	 * CLAUDE.md records that carrying only the count meant nothing downstream
+	 * could tell WHICH of 1667 nodes had been continued into the band between
+	 * Gamma_h and Gamma. `band( flux )` is the per-surface summary of the same
+	 * thing, so a consumer can drop a whole surface rather than a node.
+	 *
+	 * THERE IS NO FILL VALUE AND NO `inside`, WHICH IS THE DIFFERENCE FROM THE
+	 * GRID FILE. A ( R, Z ) lattice has nodes outside the domain and has to say
+	 * so; a family has none. Every surface in the file was traced, fitted and
+	 * integrated, and a level that could not be is not in the file at all --
+	 * meq::extractFluxSurfaces() abandons the family rather than leaving a hole
+	 * an interpolation would bridge. So a reader does not have to check for
+	 * missing data; it has to check `extrapolated` and `worst_residual`, which
+	 * are about how good the data is rather than whether it is there.
+	 */
+	class FluxGridWriter
+	{
+		public:
+			/// @param path   the file to create.
+			/// @param family what to write. Everything is written here, at
+			///               construction; attributes are added afterwards, as
+			///               NetCDFWriter does.
+			/// @throws std::runtime_error if MEQ was built without netcdf-cxx4,
+			///         or if @a path cannot be created.
+			/// @throws std::invalid_argument if the family is empty or its
+			///         surfaces disagree about how many nodes they carry, since
+			///         a rectangular array cannot be written from a ragged one.
+			FluxGridWriter( std::string const &path,
+			                FluxSurfaceFamily const &family );
+			~FluxGridWriter();
+
+			FluxGridWriter( FluxGridWriter const & ) = delete;
+			FluxGridWriter &operator=( FluxGridWriter const & ) = delete;
+
+			/// A global attribute, as NetCDFWriter's. The family's own
+			/// provenance -- the axis, the two flux values, the cut, the label
+			/// -- is written by the constructor and needs no help.
+			void attribute( std::string const &name, std::string const &value );
+			void attribute( std::string const &name, double value );
+			void attribute( std::string const &name, int value );
 
 			/// Flush and close. Called by the destructor; call it explicitly to
 			/// see an error rather than have it thrown from a destructor.

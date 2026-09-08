@@ -31,6 +31,8 @@
 #include "meq/Estimator.hpp"
 #include "meq/ExteriorDtN.hpp"
 #include "meq/Field.hpp"
+#include "meq/FluxExtraction.hpp"
+#include "meq/FluxFamily.hpp"
 #include "meq/GradShafranov.hpp"
 #include "meq/Output.hpp"
 #include "meq/RotatingSource.hpp"
@@ -2647,6 +2649,108 @@ int main( int argc, char **argv )
 
 		writer.close();
 
+		/*
+		 * ---- the ( Psi, theta ) flux-surface file, INVERSION-PLAN.md IN-6 ----
+		 *
+		 * The fourth output format, and the one a 1-D transport code reads. The
+		 * other three are a field on a mesh, a picture, and a field on a
+		 * rasterised ( R, Z ) lattice; none of them is a set of scalar functions
+		 * of a flux label, and reconstructing those at the far end means redoing
+		 * the whole of the inversion item in the consumer. tools/README.md says
+		 * which reader goes with which.
+		 *
+		 * BEFORE THE VTK, AND THAT ORDER IS LOAD BEARING. The block below bends
+		 * the boundary out onto the true Gamma, which changes the map from
+		 * reference to physical space -- and the tracer reads geometry at every
+		 * corrector step. Extracting after the bend would trace contours of a
+		 * field on a mesh that is no longer the mesh it was solved on. This is
+		 * the same reason the comment below gives for the sampler, one consumer
+		 * further along.
+		 *
+		 * A WARNING RATHER THAN AN EXIT WHEN IT FAILS, and the reason is what
+		 * the file is. The equilibrium has already been solved, checked and
+		 * written; this is a derived product, and there are configurations that
+		 * solve perfectly well and have no closed flux surfaces at the levels
+		 * asked for -- an annulus, a level outside the plasma, a surface that
+		 * leaves the mesh. meq refuses to invent one, per MANTA-COUPLING.md
+		 * section 8, and refusing produces no file rather than a plausible one.
+		 * Losing the whole run to it would be the wrong trade, so this says so
+		 * on stderr and the exit code stays as the solve left it.
+		 */
+		bool wroteFluxSurfaces = false;
+		if ( output.fluxSurfaces )
+		{
+			try
+			{
+				meq::ContourTracer tracer( *solver );
+
+				// THE BAND, ON THE CURVED PATH ONLY. Omega_h is inscribed in
+				// Gamma, so the outermost surfaces of the family are partly
+				// outside the mesh; BandExtension::TransferLift continues the
+				// field along the same transfer paths the solve imposed its
+				// boundary condition through. Measured at k+2 against the flux
+				// Taylor step's second order -- see FluxSurfaces.hpp -- and it
+				// is what lets the outer cut sit anywhere near Gamma at all.
+				// Every node it answers for is marked, per node, in the file.
+				if ( gammaHMarker && path )
+					tracer.setBandExtension( meq::BandExtension::TransferLift,
+					                         *gammaHMarker, path.get() );
+
+				meq::CriticalPointFinder const finder( *solver );
+				meq::CriticalPoint const axis = finder.findAxis();
+
+				meq::FluxFamilyOptions options;
+				options.surfaces =
+					static_cast<std::size_t>( output.fluxSurfaceCount );
+				options.angles =
+					static_cast<std::size_t>( output.fluxAngleCount );
+				options.innerCut = output.fluxInnerCut;
+				options.outerCut = output.fluxOuterCut;
+
+				// NO g( psi ), SO NO SAFETY FACTOR COLUMN. g = R B_toroidal is
+				// not something a meq::Source carries -- it carries g g' -- and
+				// a column of zeroes would be indistinguishable from a machine
+				// with no toroidal field. The file says which by not having the
+				// variable at all.
+				meq::FluxSurfaceFamily const family = meq::extractFluxSurfaces(
+					tracer, axis, solver->psiBoundary(), options );
+
+				meq::FluxGridWriter surfaces( output.getFluxSurfaceFile(),
+				                              family );
+				surfaces.attribute( "title", "MEQ flux-surface geometry" );
+				surfaces.attribute( "meq_version", MEQ_VERSION );
+				surfaces.attribute( "config_file", argument );
+				surfaces.attribute( "source_type",
+				                    sourceTypeName( config->getSource().type ) );
+				surfaces.attribute( "polynomial_degree",
+				                    config->getDiscretisation().polynomialDegree );
+				surfaces.attribute( "potential", "post-processed" );
+				surfaces.attribute( "band_extension",
+				                    gammaHMarker && path ? "transfer lift"
+				                                         : "none (fitted)" );
+				surfaces.close();
+
+				wroteFluxSurfaces = true;
+				std::printf( "MEQ: %zu flux surfaces over Psi_N in [ %.3f, "
+				             "%.3f ], %zu nodes each; %d of %zu nodes are band "
+				             "data, worst | psi_h - level | %.3e\n",
+				             family.size(), family.innerCut, family.outerCut,
+				             family.angles, family.extendedNodes(),
+				             family.size()*family.angles,
+				             family.worstResidual() );
+			}
+			catch ( std::exception const &error )
+			{
+				std::fprintf( stderr,
+					"MEQ: warning: no flux-surface file was written: %s\n"
+					"MEQ:   the equilibrium itself is unaffected and the other "
+					"outputs are complete.\n"
+					"MEQ:   Narrow [output] FluxInnerCut/FluxOuterCut, or look "
+					"at the mesh where it gave out.\n",
+					error.what() );
+			}
+		}
+
 		// VTK LAST, AND FOR A REASON. Curving the mesh changes the map from
 		// reference to physical space, so everything that reads geometry --
 		// writeMfem(), the sampler -- has to have finished. Nothing below
@@ -2741,6 +2845,12 @@ int main( int argc, char **argv )
 		if ( series && series->frames() > 0 )
 			std::printf( "  %d refinement frames, scrubbable:  %s_cycles/%s_cycles.pvd\n",
 			             series->frames(), stem.c_str(), name.c_str() );
+		// Named on its own line rather than folded into the block above,
+		// because it is the one output that a run may legitimately not have:
+		// see the extraction block for why a failure there is a warning.
+		if ( wroteFluxSurfaces )
+			std::printf( "  (Psi, theta) surfaces, 1-D transport:  %s_surfaces.nc\n",
+			             stem.c_str() );
 	}
 	catch ( std::exception const &error )
 	{
