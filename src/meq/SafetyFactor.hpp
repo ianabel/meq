@@ -226,6 +226,104 @@ namespace meq
 	                                       EdgeExtension extension
 	                                           = EdgeExtension::Clamp );
 
+	/// The same, from coefficients already fitted. `gg' = ( 1/2 ) dG/dPsi` and
+	/// its derivative, both exact on the polynomial, over the whole of
+	/// `Psi` -- see the implementation on why the span is `[ 0, 1 ]` and not
+	/// the family's own range.
+	///
+	/// @throws std::invalid_argument if @a coefficients is empty or fewer than
+	///         two knots are asked for.
+	std::vector<Knot> ggPrimeKnotsFromCoefficients(
+		std::vector<double> const &coefficients, std::size_t samples = 17,
+		EdgeExtension extension = EdgeExtension::Clamp );
+
+	/**
+	 * ONE WHOLE PICARD STEP OF THE `q`-DRIVEN LOOP, AS A CALLABLE.
+	 *
+	 * `c -> gg' -> [ solve, extract ] -> invert -> fit -> c`, which is the map
+	 * `meq::solveForToroidalField` roots. Everything about the machine lives in
+	 * the callable handed to the constructor and nothing about it lives here,
+	 * so this stays **MFEM-free and CI-gated** while the equilibrium solve does
+	 * not.
+	 *
+	 *
+	 * 1. IT EXISTS BECAUSE THE MAP HAS TWO OBLIGATIONS THAT ARE EASY TO MISS
+	 *
+	 * **IT MUST BE TOTAL.** KINSOL is C, so an exception raised inside the
+	 * residual unwinds through its frames and denies the line search the finite
+	 * value it needs to reject a step with. Measured: with the map throwing,
+	 * the first full Newton step lands on `g^2 < 0` across the whole profile
+	 * and the run dies without backtracking once. So an inadmissible `c`
+	 * returns a residual pointing back at the last admissible one, which is
+	 * large there, vanishes nowhere, and can introduce no spurious root --
+	 * `g^2 < 0` is not an equilibrium.
+	 *
+	 * **AND THE TWO NORMALISED FLUXES RUN IN OPPOSITE DIRECTIONS.** The target
+	 * is asked for against the SOURCE's `Psi`, one on the axis, because that is
+	 * what a profile table in this tree is written in; meq::invertSafetyFactor
+	 * asks against the FAMILY's `Psi_N`, zero on the axis. The reflection
+	 * happens here and nowhere else. Getting it wrong does not fail -- it
+	 * converges, at full order, to an equilibrium with its shear reversed.
+	 *
+	 *
+	 * 2. AND THE SOLVE IS A CALLABLE RATHER THAN A SOLVER
+	 *
+	 * A caller driving this owns a mesh, a boundary, coils, a warm start and a
+	 * globalisation ladder, none of which this needs to know about. What it
+	 * needs is one question answered -- *given these `gg'` knots, what family
+	 * does the equilibrium have?* -- and a way to say "it did not converge"
+	 * that is not an exception. A null return is that way.
+	 */
+	class ToroidalFieldMap
+	{
+		public:
+			/// Solve with these `gg'` knots and hand back the surfaces, or
+			/// nullptr if the equilibrium did not converge or could not be
+			/// extracted. **It must not throw**: see section 1.
+			using Solve = std::function<
+				FluxSurfaceFamily const *( std::vector<Knot> const & )>;
+
+			struct Options
+			{
+				/// Degree of the `g^2` polynomial. The fit is what makes the
+				/// outer Newton affordable and what stops a noisy inversion
+				/// becoming shape; two or three is the usual.
+				unsigned int degree = 2;
+
+				/// The target `q`, against the SOURCE's `Psi` -- one on the
+				/// axis. Reflected to the family's label here.
+				std::function<double( double normalisedFlux )> target;
+
+				std::size_t knotSamples = 17;
+				EdgeExtension extension = EdgeExtension::Clamp;
+			};
+
+			ToroidalFieldMap( Solve solve, Options options );
+
+			/// One step. Never throws for a reason the loop could meet.
+			std::vector<double> operator()(
+				std::vector<double> const &coefficients );
+
+			/// Solves attempted, and steps that came back inadmissible. The
+			/// second is what says whether the line search was doing work.
+			int solves() const { return solveCount; }
+			int refusals() const { return refusalCount; }
+
+			/// The last coefficients that produced an equilibrium. Empty until
+			/// one does.
+			std::vector<double> const &lastAdmissible() const { return lastGood; }
+
+		private:
+			std::vector<double> refuse(
+				std::vector<double> const &coefficients ) const;
+
+			Solve solve;
+			Options options;
+			std::vector<double> lastGood;
+			int solveCount = 0;
+			int refusalCount = 0;
+	};
+
 	/**
 	 * Fritsch-Carlson limited slopes for the data `( x, y )`.
 	 *

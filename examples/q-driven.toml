@@ -1,0 +1,87 @@
+# DRIVING AN EQUILIBRIUM BY q( Psi ) -- ROADMAP.md item 10.
+#
+# Every other example in this directory PRESCRIBES the toroidal field, as
+# [source] GGPrimeFile, and reports the safety factor as an output. A transport
+# code hands an equilibrium code the other way round: q( Psi ) is the target and
+# g( Psi ) is what has to be found. This file is that run.
+#
+# WHAT IT COSTS. The loop is an outer Newton on the coefficients of g^2, and
+# EVERY MAP EVALUATION IS A WHOLE EQUILIBRIUM -- one solve per residual, and
+# 2 ( d + 1 ) more per Jacobian. It is affordable only because the profile is
+# FITTED, so the unknown is a handful of coefficients rather than nFieldDOF;
+# INVERSION-PLAN.md section 11.1 measures the alternative, differencing against
+# every field degree of freedom, at about 5.7 hours for one Jacobian.
+#
+# AND ONE SOLVER DOES ALL OF THEM. Only gg' changes between steps, so the mesh,
+# the spaces, the forms and the trace solver's symbolic factorisation all
+# survive, and each solve is warm-started from the last one's field.
+
+[mesh]
+RMin = 0.6
+RMax = 1.4
+ZMin = -0.6
+ZMax = 0.6
+NR = 8
+NZ = 8
+RefinementLevels = 1
+
+[discretisation]
+PolynomialDegree = 2
+Tau = 1.0
+
+[source]
+Type = "mhd"
+
+# psi_ax IS AN UNKNOWN AND HAS TO BE, because the profiles are functions of
+# normalised flux. Required by SafetyFactorFile for that reason: without the
+# normalisation there is no Psi for a target q to be a function of.
+Normalised = true
+PsiAxis = 0.30
+
+Mu0 = 1.0
+PPrimeFile = "examples/q-driven-pprime.dat"
+
+# THE TARGET, AND NOTE THAT THERE IS NO GGPrimeFile. The two are alternatives
+# and naming both is refused: one prescribes the toroidal field and the other
+# asks for whichever field delivers a given q, so a precedence rule would decide
+# which physics the run did on the strength of key order -- and both spellings
+# converge, to different equilibria.
+SafetyFactorFile = "examples/q-driven-q.dat"
+
+# The degree of the g^2 polynomial the loop iterates on. Two or three is the
+# usual. Higher is not better: a degree the surface family does not determine
+# leaves the outer Jacobian RANK DEFICIENT, which MEQ reports rather than
+# solves. The target here was built from a g linear in Psi, so g^2 is exactly
+# quadratic and 2 is the honest choice.
+SafetyFactorDegree = 2
+
+# g = R B_phi to open the loop at, as a constant, so it starts from gg' = 0 --
+# the vacuum. There is no default: q determines g through the geometry, but only
+# once there IS a geometry, and a machine's vacuum R0 B0 is the number to use.
+ToroidalFieldGuess = 2.2
+
+[boundary]
+Type = "zero"
+
+# A BUMP AND NOT A RAMP. The loop opens at gg' = 0, which is a weaker source
+# than the answer, and a normalised source needs psi to be the right SIZE before
+# Psi means anything -- the trivial branch is otherwise reachable and is a
+# solution. The peak matches [source] PsiAxis.
+[initialguess]
+Type = "bump"
+Amplitude = 0.30
+CentreR = 1.0
+CentreZ = 0.0
+RadiusR = 0.4
+RadiusZ = 0.6
+
+[solver]
+NewtonMaxIterations = 60
+NewtonRelativeTolerance = 1.0e-12
+NewtonAbsoluteTolerance = 1.0e-14
+
+[output]
+Directory = "."
+Prefix = "q-driven"
+GridNR = 65
+GridNZ = 65

@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <vector>
 
 #include "CriticalPoints.hpp"
 #include "FluxFamily.hpp"
@@ -97,6 +98,22 @@ namespace meq
 		/// flag rather than by the value.
 		std::function<double( double psi )> toroidalField;
 	};
+
+	/**
+	 * The labels the family will carry, without solving anything.
+	 *
+	 * `rho = sqrt( Psi_N )`, ascending, exactly the values
+	 * extractFluxSurfaces() traces at -- it is the same code, called from
+	 * there. Exposed because a caller driving the equilibrium BY a
+	 * surface quantity needs the grid before it has a family to read it off:
+	 * meq::ToroidalFieldMap builds `g^2` on these labels every step, and
+	 * generating them a second time in the caller is how the two would drift
+	 * apart while every column still converged.
+	 *
+	 * @throws std::invalid_argument on the same options extractFluxSurfaces()
+	 *         refuses, and for the same reasons.
+	 */
+	std::vector<double> fluxSurfaceLabels( FluxFamilyOptions const &options );
 
 	/**
 	 * Extract the family.

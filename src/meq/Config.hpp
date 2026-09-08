@@ -181,6 +181,35 @@ namespace meq
 	{
 		// PPrimeFile: path to the tabulated dp/dpsi  [Pa / (Wb per radian)]
 		std::string pPrimeFile;
+		// SafetyFactorFile: path to a tabulated TARGET q( Psi ), which makes
+		// gg' an OUTPUT of the run rather than an input and puts an outer
+		// Newton around the whole solve. ROADMAP.md item 10.
+		//
+		// IT IS AN ALTERNATIVE TO GGPrimeFile AND NAMING BOTH IS REFUSED.
+		// The two say opposite things about the same quantity -- one prescribes
+		// the toroidal field, the other asks for whatever field delivers a
+		// given q -- so a precedence rule would decide which physics a run did
+		// on the strength of key order, and both spellings converge.
+		//
+		// THE TABLE IS IN THE SOURCE'S Psi, one on the axis, like every other
+		// profile table in examples/. meq::ToroidalFieldMap owns the
+		// reflection to the family's Psi_N; see SafetyFactor.hpp section 2 on
+		// why getting it backwards converges to a reversed shear rather than
+		// failing.
+		std::string safetyFactorFile;
+
+		// SafetyFactorDegree: the degree of the g^2 polynomial the loop
+		// iterates on. The fit is what makes the outer Newton affordable -- the
+		// unknown is d + 1 coefficients rather than nFieldDOF -- and what stops
+		// a noisy inversion near the axis becoming SHAPE in gg'.
+		unsigned int safetyFactorDegree = 2;
+
+		// ToroidalFieldGuess: g = R B_phi to start from, as a constant, so the
+		// loop opens at gg' = 0. Required with SafetyFactorFile and has no
+		// default: q determines g through the geometry, but only once there IS
+		// a geometry, and a machine's vacuum R0 B0 is the number a user has.
+		double toroidalFieldGuess = 0.0;
+
 		// GGPrimeFile: path to the tabulated g dg/dpsi
 		//                                     [T^2 m^2 / (Wb per radian)]
 		std::string ggPrimeFile;

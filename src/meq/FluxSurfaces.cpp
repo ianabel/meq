@@ -70,9 +70,11 @@ namespace meq
 			case ContourStatus::Stalled:
 				return "stalled";
 			case ContourStatus::TooLong:
+				return "too long";
+			case ContourStatus::Open:
 				break;
 		}
-		return "too long";
+		return "open";
 	}
 
 	char const *bandExtensionName( BandExtension which )
@@ -1184,8 +1186,113 @@ namespace meq
 		return traceFrom( level, startR, startZ, seed );
 	}
 
+	Contour ContourTracer::traceOpen( double level, double startR,
+	                                  double startZ ) const
+	{
+		// The seed is located ONCE and both halves start from it, so this costs
+		// the same single Mesh::FindPoints trace() costs and not two.
+		int seed = -1;
+		{
+			mfem::DenseMatrix matrix( 2, 1 );
+			matrix( 0, 0 ) = startR;
+			matrix( 1, 0 ) = startZ;
+
+			mfem::Array<int> found;
+			mfem::Array<mfem::IntegrationPoint> ips;
+			meshRef.FindPoints( matrix, found, ips, false );
+			if ( found.Size() > 0 )
+				seed = found[ 0 ];
+		}
+		if ( seed < 0 )
+		{
+			std::ostringstream message;
+			message << "ContourTracer::traceOpen: ( " << startR << ", " << startZ
+			        << " ) is not in the mesh";
+			throw std::runtime_error( message.str() );
+		}
+
+		Contour forward = traceFrom( level, startR, startZ, seed, +1, false );
+
+		// A LEVEL THAT LOOPS IS NOT AN OPEN SURFACE, and saying so beats
+		// tracing it twice. With the closure gate suppressed a closed level
+		// runs until the point budget stops it, so TooLong here is the
+		// signature of a loop rather than of a long arc -- and the caller is
+		// told to use trace(), which can close.
+		if ( forward.status != ContourStatus::LeftMesh )
+			return forward;
+
+		Contour backward = traceFrom( level, startR, startZ, seed, -1, false );
+		if ( backward.status != ContourStatus::LeftMesh )
+			return backward;
+
+		/*
+		 * THE JOIN. The backward arc is reversed and put in front, its first
+		 * point -- the shared seed -- dropped, and the tangents of every
+		 * reversed point negated so that the whole curve carries ONE
+		 * orientation. Leaving them alone would give a contour whose Hermite
+		 * interpolation folds back on itself at the seam while every point of
+		 * it sits exactly on the level set, which is the class of quiet wrong
+		 * answer this file exists to catalogue.
+		 */
+		Contour joined;
+		joined.level = level;
+		joined.bandExtension = bandMethod;
+		joined.nominalStep = forward.nominalStep;
+		joined.correctorTarget = forward.correctorTarget;
+		joined.status = ContourStatus::Open;
+
+		joined.points.reserve( forward.points.size() + backward.points.size() );
+		for ( std::size_t i = backward.points.size(); i-- > 1; )
+		{
+			ContourPoint p = backward.points[ i ];
+			p.tangentR = -p.tangentR;
+			p.tangentZ = -p.tangentZ;
+			joined.points.push_back( p );
+		}
+		for ( ContourPoint const &p : forward.points )
+			joined.points.push_back( p );
+
+		// ARC LENGTH IS CUMULATIVE OVER THE WHOLE CURVE and is re-accumulated
+		// rather than patched: each half measured its own from its own zero, so
+		// the seam would otherwise carry two origins.
+		joined.points.front().arcLength = 0.0;
+		for ( std::size_t i = 1; i < joined.points.size(); ++i )
+		{
+			double const dr = joined.points[ i ].r - joined.points[ i - 1 ].r;
+			double const dz = joined.points[ i ].z - joined.points[ i - 1 ].z;
+			joined.points[ i ].arcLength =
+				joined.points[ i - 1 ].arcLength + std::sqrt( dr*dr + dz*dz );
+		}
+
+		joined.extendedPoints = forward.extendedPoints + backward.extendedPoints;
+		joined.deepestBandPoint = std::max( forward.deepestBandPoint,
+		                                    backward.deepestBandPoint );
+		joined.stalledCorrections =
+			forward.stalledCorrections + backward.stalledCorrections;
+		joined.fallbackLocations =
+			forward.fallbackLocations + backward.fallbackLocations;
+		joined.correctorIterationsTotal = forward.correctorIterationsTotal
+		                                  + backward.correctorIterationsTotal;
+		joined.worstCorrectorIterations =
+			std::max( forward.worstCorrectorIterations,
+			          backward.worstCorrectorIterations );
+		joined.worstResidual = std::max( forward.worstResidual,
+		                                 backward.worstResidual );
+		joined.shortestStep = std::min( forward.shortestStep,
+		                                backward.shortestStep );
+		joined.longestStep = std::max( forward.longestStep, backward.longestStep );
+
+		// TURNING IS NOT ADDITIVE ACROSS THE SEAM and is left at zero rather
+		// than summed. It is the winding of a CLOSED curve; on an open arc the
+		// two halves measure their turning from opposite orientations, so a sum
+		// of them is a number with no meaning that a reader would take for one.
+		joined.turning = 0.0;
+
+		return joined;
+	}
+
 	Contour ContourTracer::traceFrom( double level, double startR, double startZ,
-	                                  int seed ) const
+	                                  int seed, int sense, bool mayClose ) const
 	{
 		Contour contour;
 		contour.level = level;
@@ -1225,8 +1332,12 @@ namespace meq
 			ContourPoint p;
 			p.r = rIn;
 			p.z = zIn;
-			p.tangentR = -at.qZ/magnitude;
-			p.tangentZ = at.qR/magnitude;
+			// THE SENSE IS APPLIED HERE AND NOWHERE ELSE. Everything downstream
+			// -- the predictor, the closure gate, the Hermite interpolation --
+			// reads these stored tangents, so one sign here reverses the whole
+			// march and leaves the curve identical.
+			p.tangentR = -sense*at.qZ/magnitude;
+			p.tangentZ = sense*at.qR/magnitude;
 			p.fluxMagnitude = magnitude;
 			p.arcLength = arcLength;
 			p.element = at.element;
@@ -1299,8 +1410,9 @@ namespace meq
 			double const along = gapR*tangentR + gapZ*tangentZ;
 			double const gap = std::sqrt( gapR*gapR + gapZ*gapZ );
 
-			bool const turned = std::abs( contour.turning )
-			                    >= circuits*twoPi - 0.5*M_PI;
+			bool const turned = mayClose
+			                   && std::abs( contour.turning )
+			                      >= circuits*twoPi - 0.5*M_PI;
 
 			if ( turned && along > 0.0 && gap <= 1.5*stepLength )
 			{

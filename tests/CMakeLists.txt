@@ -199,6 +199,10 @@ set(MEQ_CONVERGENCE_TESTS
 	# g( psi ). A convergence test because the loop is solve -> extract ->
 	# invert -> re-solve, and what it asserts is that the fixed point is the
 	# equilibrium whose target q was built from a KNOWN g.
+	# INVERSION-PLAN.md stage IN-5: surfaces that do not close. A convergence
+	# test because what it asserts is that a Chebyshev series in normalised arc
+	# length converges on an open curve while a periodic basis cannot.
+	OpenSurfaces
 	SafetyFactorSolver)
 
 # DriverAcceptance is registered separately below: it runs the meq BINARY rather

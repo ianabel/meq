@@ -1,0 +1,51 @@
+# TARGET SAFETY FACTOR q( Psi ) for examples/q-driven.toml -- the INPUT of a
+# run in which the toroidal field is an OUTPUT. ROADMAP.md item 10.
+#
+# THE ABSCISSA IS THE SOURCE'S NORMALISED FLUX, ONE ON THE AXIS, like every
+# other profile table in examples/ and unlike meq::FluxSurfaceFamily's own
+# label, which is zero there. meq::ToroidalFieldMap owns the reflection between
+# them. Handing a table written the other way round does NOT fail: it converges,
+# at full order, to an equilibrium with its shear reversed -- which is a real
+# configuration a real machine can have, so nothing downstream looks wrong. See
+# src/meq/SafetyFactor.hpp section 2.
+#
+# The three columns are Psi, q and dq/dPsi, which is meq::SplineProfile's
+# format: a Hermite cubic needs the slope as well as the value, and MEQ will not
+# guess one for you.
+#
+# WHERE THIS TABLE CAME FROM, so that the example asserts something. It is the
+# q of an equilibrium built from the CLOSED FORM g( Psi ) = 2.20 + 0.55 Psi on
+# this box AND THIS MESH, measured through q = V' g < R^-2 >/4 pi^2 at 24
+# surfaces. Same mesh on purpose: the discretisation error is then common to the
+# measurement and to the loop that has to invert it, so what the acceptance
+# below reads is the LOOP's accuracy and not the mesh's. So the
+# loop's answer is known independently of the loop: it must recover that g, and
+# DriverAcceptance::theDriverSolvesForTheToroidalField asserts it does. A target
+# invented rather than measured would only have shown that the loop reaches
+# SOME fixed point.
+#
+#        Psi                  q                       dq/dPsi
+   0.050000             1.432488499             -2.062145804
+   0.112591             1.303416731             -1.611985892
+   0.173048             1.234136859             -0.968432335
+   0.231374             1.188383433             -0.686706710
+   0.287566             1.155496580             -0.522421761
+   0.341626             1.130785389             -0.411855651
+   0.393552             1.111845647             -0.330609500
+   0.443347             1.097155460             -0.267646558
+   0.491008             1.085761884             -0.216310409
+   0.536537             1.076997493             -0.173193005
+   0.579933             1.070360696             -0.135882789
+   0.621196             1.065493792             -0.102782431
+   0.660326             1.062097708             -0.073070342
+   0.697324             1.059931093             -0.045666755
+   0.732189             1.058815958             -0.020250706
+   0.764921             1.058562206             +0.003485986
+   0.795520             1.059036729             +0.025718146
+   0.823987             1.060081274             +0.046800734
+   0.850321             1.061601456             +0.066630553
+   0.874522             1.063448449             +0.085381241
+   0.896591             1.065552046             +0.103361219
+   0.916527             1.067790137             +0.119251146
+   0.934330             1.070052465             +0.134926448
+   0.950000             1.072306530             +0.143845884

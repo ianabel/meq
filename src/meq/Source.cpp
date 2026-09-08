@@ -180,6 +180,16 @@ namespace meq
 	{
 		return permeability;
 	}
+	
+	void NormalisedMHDSource::setGGPrime( std::shared_ptr<Profile const> ggPrime )
+	{
+		if ( !ggPrime )
+			throw std::invalid_argument(
+				"meq::NormalisedMHDSource::setGGPrime: no profile. A null g dg/"
+				"dPsi is not a vacuum -- it is a source that cannot be "
+				"evaluated" );
+		ggPrimeProfile = std::move( ggPrime );
+	}
 
 	SolovievSource::SolovievSource( double a )
 		: aValue( a )

@@ -203,7 +203,23 @@ under a Solov'ev source is an unknown key, not an ignored one.
    * - ``GGPrimeFile``
      - *required*
      - Path to tabulated :math:`g\,\mathrm{d}g/\mathrm{d}\psi` — what EQDSK
-       calls ``FF'``.
+       calls ``FF'``. **An alternative to** ``SafetyFactorFile``; naming both is
+       refused.
+   * - ``SafetyFactorFile``
+     - —
+     - Path to a tabulated **target** :math:`q(\Psi)`, which makes
+       :math:`g\,\mathrm{d}g/\mathrm{d}\psi` an **output** of the run rather
+       than an input. Requires ``Normalised = true`` and ``ToroidalFieldGuess``.
+       See :ref:`configuration-q-driven`.
+   * - ``SafetyFactorDegree``
+     - ``2``
+     - Degree of the :math:`g^2` polynomial the outer loop solves for. Only with
+       ``SafetyFactorFile``.
+   * - ``ToroidalFieldGuess``
+     - —
+     - **Required with** ``SafetyFactorFile``. The constant
+       :math:`g = R B_\phi` the loop opens at — a machine's vacuum
+       :math:`R_0 B_0`.
    * - ``PPrimeScale``, ``GGPrimeScale``
      - ``1.0``
      - Constant multiplying the table as read, so unit conversion needs no edit
@@ -921,3 +937,77 @@ previous cycle.
    * - ``TargetError``
      - ``1.0e-6``
      - Absolute, in the estimator's own norm.
+
+.. _configuration-q-driven:
+
+Driving the equilibrium by :math:`q(\Psi)`
+------------------------------------------
+
+Every other configuration in :doc:`examples` **prescribes** the toroidal field
+and reports the safety factor as an output. A transport code hands an
+equilibrium code the other way round: :math:`q(\Psi)` is the target and
+:math:`g(\Psi)` is what has to be found. ``[source] SafetyFactorFile`` is that
+run, and ``examples/q-driven.toml`` is the worked example.
+
+The algebra is a division. RoPP (142) gives
+
+.. math::
+
+   q = \frac{V' \, g \, \langle R^{-2}\rangle}{4\pi^2},
+   \qquad\text{so}\qquad
+   g = \frac{4\pi^2 q}{V' \, \langle R^{-2}\rangle},
+
+one division per flux surface at **fixed geometry**. What makes it a solver is
+that :math:`V'` and :math:`\langle R^{-2}\rangle` are functionals of the
+solution, and the solution depends on :math:`g`. So the loop is
+
+.. code-block:: text
+
+   solve  ->  extract the surfaces  ->  invert  ->  rebuild gg'  ->  solve
+
+and its fixed point is an equilibrium whose own :math:`q` is the one asked for.
+
+What it costs
+~~~~~~~~~~~~~
+
+**Every map evaluation is a whole equilibrium** — one per residual, and
+:math:`2(d+1)` more per Jacobian column. The shipped example converges in 12
+outer iterations and **43 equilibria**. It is affordable only because the
+profile is *fitted*: the unknown is the handful of coefficients of
+:math:`g^2 = \sum_j c_j \Psi^j` rather than every degree of freedom of the
+field.
+
+One solver serves all of them. Only :math:`g\,\mathrm{d}g/\mathrm{d}\Psi`
+changes between steps, so the mesh, the finite element spaces, the assembled
+forms and the trace solver's symbolic factorisation all survive, and each solve
+is warm-started from the previous one's field.
+
+A relaxed Picard iteration cannot replace the outer Newton, and that is a
+theorem rather than a preference: :math:`c \leftarrow c + \omega(G(c) - c)` has
+derivative :math:`1 + \omega(G' - 1)` at the fixed point, which exceeds one for
+**every** :math:`\omega > 0` when :math:`G' > 1`. Under-relaxation stabilises a
+map that oscillates and does nothing at all for one that runs away.
+
+Two things to get right
+~~~~~~~~~~~~~~~~~~~~~~~
+
+**The table is in the source's** :math:`\Psi`, one on the axis — like every
+other profile table in ``examples/``, and unlike the flux-surface family's own
+label, which is zero there. MEQ owns the reflection between them. A table
+written the other way round does **not** fail: it converges, at full order, to
+an equilibrium with its **shear reversed**, which is a configuration a real
+machine can have and which nothing downstream will look at twice.
+
+**The degree is a modelling choice and higher is not better.** A degree the
+surface family does not determine leaves the outer Jacobian rank deficient,
+which MEQ reports — ``did not converge … the outer Jacobian is RANK
+DEFICIENT`` — rather than solving. Two or three is the usual.
+
+What the run writes
+~~~~~~~~~~~~~~~~~~~
+
+The answer is :math:`g`, so it goes into the interchange file: ``<stem>.nc``
+carries ``toroidal_field_driven``, ``g_squared_coefficients`` — ascending in
+:math:`\Psi` — and ``safety_factor_target``. There is no ``GGPrimeFile`` beside
+the output for a reader to look the field up in, which is why it is recorded
+rather than left to the configuration.

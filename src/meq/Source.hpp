@@ -538,6 +538,25 @@ namespace meq
 
 			double mu0() const;
 
+			/**
+			 * REPLACE g g' IN PLACE, which is what a q-DRIVEN run needs.
+			 *
+			 * `ROADMAP.md` item 10 makes the toroidal field an OUTPUT: an outer
+			 * Newton on the coefficients of `g^2` re-solves the equilibrium
+			 * once per map evaluation, each time with a different `gg'`. Every
+			 * other input is unchanged, so rebuilding the source -- and with it
+			 * the solver, its spaces, its forms and its symbolic factorisation
+			 * -- would throw away everything the solve is entitled to keep.
+			 *
+			 * The **normalisation is deliberately untouched**: `psi_ax` and
+			 * `psi_bnd` are unknowns of the bordered Newton and belong to the
+			 * solve rather than to the profile, so resetting them here would
+			 * discard the warm start that makes the loop affordable.
+			 *
+			 * @throws std::invalid_argument on a null profile.
+			 */
+			void setGGPrime( std::shared_ptr<Profile const> ggPrime );
+
 		private:
 			std::shared_ptr<Profile const> pPrimeProfile;
 			std::shared_ptr<Profile const> ggPrimeProfile;

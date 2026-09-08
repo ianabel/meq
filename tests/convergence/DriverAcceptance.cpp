@@ -2306,3 +2306,116 @@ BOOST_AUTO_TEST_CASE( theDriverFindsTheLimiterContact )
 			<< " against " << psiAxis );
 	}
 }
+
+/*
+ * DRIVING THE EQUILIBRIUM BY q( Psi ) -- ROADMAP.md item 10, through a file.
+ *
+ * Every other example in examples/ PRESCRIBES the toroidal field and reports
+ * the safety factor. This one inverts the direction: [ source ] SafetyFactorFile
+ * gives a target q, gg' becomes an OUTPUT, and an outer Newton on the
+ * coefficients of g^2 wraps the whole solve -- one equilibrium per map
+ * evaluation.
+ *
+ * WHAT MAKES THIS AN ACCEPTANCE AND NOT A SMOKE TEST IS THAT THE ANSWER IS
+ * KNOWN INDEPENDENTLY OF THE LOOP. examples/q-driven-q.dat is not an invented
+ * profile: it is the q of an equilibrium built from the CLOSED FORM
+ * g( Psi ) = 2.20 + 0.55 Psi on that box and that mesh, measured through
+ * q = V' g < R^-2 >/4 pi^2. So g^2 is exactly quadratic with coefficients
+ * ( g0^2, 2 g0 g1, g1^2 ) = ( 4.84, 2.42, 0.3025 ), and the loop has to come
+ * back with them. A target invented rather than measured would only have shown
+ * that the loop reaches SOME fixed point, which is the failure
+ * SafetyFactorSolver's own conditioning case exists to describe: both outer
+ * methods once converged, correctly, to a fixed point that was not the answer.
+ *
+ * THE MESH IS THE SAME ONE THE TARGET WAS MEASURED ON, deliberately. The
+ * discretisation error is then common to the measurement and to the loop that
+ * inverts it, so what is read here is the LOOP's accuracy rather than the
+ * mesh's -- which is the quantity this case is about. FluxGridConvergence is
+ * where the extraction is measured against a closed form.
+ */
+BOOST_AUTO_TEST_CASE( theDriverSolvesForTheToroidalField )
+{
+	std::remove( "q-driven.nc" );
+
+	BOOST_TEST_REQUIRE( run( "examples/q-driven.toml" ) == 0,
+		"the q-driven example did not solve. The outer loop has no fallback: "
+		"psi_ax is a border unknown, so GradShafranovSolver refuses every "
+		"globalisation but None and the outer step length is the only control "
+		"there is" );
+	BOOST_TEST_REQUIRE( exists( "q-driven.nc" ) );
+
+	std::string const header = ncdumpHeader( "q-driven.nc" );
+	BOOST_TEST_REQUIRE( !header.empty() );
+
+	// THE ANSWER IS IN THE INTERCHANGE FORMAT, which for this route is not a
+	// convenience: the toroidal field is what the run FOUND, so there is no
+	// GGPrimeFile beside the output for a consumer to look it up in.
+	BOOST_TEST( headerAttribute( header, "toroidal_field_driven" ) == 1.0,
+		"the .nc does not record that this run solved FOR the toroidal field, "
+		"so a reader cannot tell g was an output rather than an input" );
+
+	std::string const needle = ":g_squared_coefficients = \"";
+	std::size_t const at = header.find( needle );
+	BOOST_TEST_REQUIRE( at != std::string::npos,
+		"the .nc carries no g^2 coefficients, which are the answer" );
+
+	std::vector<double> recovered;
+	{
+		char const *cursor = header.c_str() + at + needle.size();
+		char *end = nullptr;
+		for ( double value = std::strtod( cursor, &end ); end != cursor;
+		      value = std::strtod( cursor, &end ) )
+		{
+			recovered.push_back( value );
+			cursor = end;
+		}
+	}
+	BOOST_TEST_REQUIRE( recovered.size() == 3u,
+		"g^2 was asked for at degree 2, so there must be three coefficients" );
+
+	double const g0 = 2.20, g1 = 0.55;
+	std::vector<double> const exact = { g0*g0, 2.0*g0*g1, g1*g1 };
+
+	std::printf( "\n  DRIVING BY q( Psi ) THROUGH THE DRIVER\n" );
+	std::printf( "    coefficient       recovered          exact      relative\n" );
+	double worst = 0.0;
+	for ( std::size_t i = 0; i < exact.size(); ++i )
+	{
+		double const relative =
+			std::abs( recovered[ i ] - exact[ i ] )/std::abs( exact[ i ] );
+		worst = std::max( worst, relative );
+		std::printf( "      c%zu          %13.9f  %13.9f     %.3e\n",
+		             i, recovered[ i ], exact[ i ], relative );
+	}
+	std::printf( "    worst %.3e\n", worst );
+
+	BOOST_TEST( worst < 1.0e-04,
+		"the loop did not recover the closed-form g its target was measured "
+		"from: worst relative error " << worst << ". A loop that converged to "
+		"the WRONG fixed point reports success and looks exactly like this, so "
+		"check the outer residual at the known answer before the solver" );
+
+	/*
+	 * TWO CONTROLS, BOTH FREE, AND THE SECOND IS THE ONE WITH TEETH.
+	 *
+	 * The loop OPENS at a constant g = ToroidalFieldGuess = 2.2, which is
+	 * c = ( 4.84, 0, 0 ) -- and 4.84 is the correct c0. So a loop that did
+	 * nothing at all would already agree with the exact answer in its first
+	 * coefficient, and only the higher ones say it moved.
+	 *
+	 * And the SHEAR direction is what a reflected target would reverse: g rises
+	 * toward the axis here, so c1 and c2 are positive. Handing MEQ a q table
+	 * written in the family's Psi_N rather than the source's Psi does not fail
+	 * -- it converges, at full order, to an equilibrium with its shear the
+	 * other way round, which is a configuration a real machine can have and
+	 * which nothing downstream would look at twice.
+	 */
+	BOOST_TEST( std::abs( recovered[ 1 ] ) > 1.0,
+		"the loop came back with a g^2 that is nearly constant, which is where "
+		"it STARTED -- so it has not moved off ToroidalFieldGuess" );
+	BOOST_TEST( recovered[ 1 ] > 0.0 );
+	BOOST_TEST( recovered[ 2 ] > 0.0,
+		"g^2 falls toward the axis, so the recovered shear runs the wrong way. "
+		"The likeliest cause is the target being read in the family's Psi_N "
+		"rather than the source's Psi; see meq::ToroidalFieldMap" );
+}

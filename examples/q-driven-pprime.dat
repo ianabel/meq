@@ -1,0 +1,14 @@
+# ( dp/dPsi )( Psi ) for examples/q-driven.toml, against the SOURCE's normalised
+# flux -- one on the axis, zero at the plasma boundary.
+#
+# CONSTANT, deliberately. The point of that example is the outer loop on the
+# TOROIDAL field, so the pressure half is held as simple as it can be: a
+# constant dp/dPsi contributes mu0 r^2 * 0.45 to F and nothing that varies with
+# Psi, which leaves every change between outer iterations attributable to gg'.
+#
+# Mu0 = 1 in that file, so this is in the same normalised units as the rest of
+# it and is not a pascal per weber.
+#
+#        Psi              dp/dPsi                  d2p/dPsi2
+   0.000000            0.450000000              0.000000000
+   1.000000            0.450000000              0.000000000

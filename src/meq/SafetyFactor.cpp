@@ -49,6 +49,93 @@ namespace meq
 	 * three-point formula and are then limited against the adjacent secant,
 	 * because an unlimited endpoint is where a monotone rule most often is not.
 	 */
+	ToroidalFieldMap::ToroidalFieldMap( Solve solve, Options options )
+		: solve( std::move( solve ) ), options( std::move( options ) )
+	{
+		if ( !this->solve )
+			throw std::invalid_argument(
+				"meq::ToroidalFieldMap: no solve was given, so there is nothing "
+				"to take a Picard step with" );
+		if ( !this->options.target )
+			throw std::invalid_argument(
+				"meq::ToroidalFieldMap: no target safety factor was given, so "
+				"there is nothing to invert against" );
+		if ( this->options.degree == 0 )
+			throw std::invalid_argument(
+				"meq::ToroidalFieldMap: a degree-zero g^2 is a constant, which "
+				"makes gg' identically zero and the loop unable to move" );
+	}
+
+	std::vector<double> ToroidalFieldMap::refuse(
+		std::vector<double> const &coefficients ) const
+	{
+		/*
+		 * THE RESIDUAL AT AN INADMISSIBLE POINT, AND WHY IT IS THIS ONE.
+		 *
+		 * `G( c ) - c` has to be finite here and it has to point somewhere the
+		 * line search can go. Returning the last admissible coefficients makes
+		 * the residual `lastGood - c`, which is large wherever `c` has wandered
+		 * and is exactly zero only at `lastGood` itself -- and `lastGood` is a
+		 * point the map really was evaluated at, so it is not a root unless it
+		 * is the answer. Before ANY step has succeeded there is no such point,
+		 * and `c - 1` is used instead: a constant nonzero residual, which is
+		 * the honest statement that nothing is known yet.
+		 */
+		std::vector<double> out( coefficients.size() );
+		for ( std::size_t i = 0; i < coefficients.size(); ++i )
+			out[ i ] = lastGood.size() == coefficients.size()
+			           ? lastGood[ i ] : coefficients[ i ] - 1.0;
+		return out;
+	}
+
+	std::vector<double> ToroidalFieldMap::operator()(
+		std::vector<double> const &coefficients )
+	{
+		// ADMISSIBLE MEANS g^2 > 0 EVERYWHERE THE SOURCE WILL BE ASKED, which
+		// is the whole of Psi and not the family's cut -- the knots span
+		// [ 0, 1 ] and the profile is evaluated at every quadrature point of
+		// the domain, including outside the plasma.
+		std::size_t const checks = 64;
+		for ( std::size_t i = 0; i <= checks; ++i )
+		{
+			double const psi = static_cast<double>( i )
+			                   /static_cast<double>( checks );
+			double value = 0.0, power = 1.0;
+			for ( double c : coefficients )
+			{
+				value += c*power;
+				power *= psi;
+			}
+			if ( !( value > 0.0 ) || !std::isfinite( value ) )
+			{
+				++refusalCount;
+				return refuse( coefficients );
+			}
+		}
+
+		++solveCount;
+		FluxSurfaceFamily const *family = solve( ggPrimeKnotsFromCoefficients(
+			coefficients, options.knotSamples, options.extension ) );
+		if ( family == nullptr || family->empty() )
+		{
+			++refusalCount;
+			return refuse( coefficients );
+		}
+
+		// THE REFLECTION, ONCE. The family labels by Psi_N and the target is
+		// written in the source's Psi; see the header.
+		auto const &target = options.target;
+		ToroidalField const inverted = invertSafetyFactor(
+			*family,
+			[ &target ]( double normalisedFluxFamily )
+			{
+				return target( 1.0 - normalisedFluxFamily );
+			} );
+
+		lastGood = coefficients;
+		return fitToroidalFieldSquared( inverted, options.degree );
+	}
+
 	std::vector<double> monotoneSlopes( std::vector<double> const &x,
 	                                    std::vector<double> const &y )
 	{
@@ -302,11 +389,22 @@ namespace meq
 	                                       std::size_t samples,
 	                                       EdgeExtension extension )
 	{
+		return ggPrimeKnotsFromCoefficients(
+			fitToroidalFieldSquared( field, degree ), samples, extension );
+	}
+
+	std::vector<Knot> ggPrimeKnotsFromCoefficients(
+		std::vector<double> const &c, std::size_t samples,
+		EdgeExtension extension )
+	{
 		if ( samples < 2 )
 			throw std::invalid_argument(
-				"meq::ggPrimeKnotsFromFit: at least two knots are needed" );
-
-		std::vector<double> const c = fitToroidalFieldSquared( field, degree );
+				"meq::ggPrimeKnotsFromCoefficients: at least two knots are "
+				"needed" );
+		if ( c.empty() )
+			throw std::invalid_argument(
+				"meq::ggPrimeKnotsFromCoefficients: no coefficients, so there is "
+				"no g^2 to differentiate" );
 
 		// gg' = ( 1/2 ) dG/dPsi and its derivative, both exact on the
 		// polynomial -- which is the whole reason for fitting rather than

@@ -815,3 +815,40 @@ What the representation is not
      that did not fits two different accuracies into one expansion, which is a
      decision to be taken deliberately. ``Contour::crossesBand()`` and
      ``AngleParametrisation::crossesBand()`` are where a caller finds out.
+
+Open surfaces
+-------------
+
+Everything above describes a **closed** flux surface: the tracer closes it, the
+disc chart labels it by an angle about the magnetic axis, and the flux-surface
+averages integrate round it.
+
+A level outside :math:`\psi_\mathrm{bnd}` is none of those things. It runs to
+the wall and stops, so it has two genuine endpoints, no period, and no enclosed
+area — and the machinery that serves a closed surface says nothing useful about
+it. ``ContourTracer::traceOpen`` traces from its seed in **both** directions and
+joins the halves, so the points run from one endpoint to the other and the arc
+length is cumulative over the whole curve. Its status is ``Open``, which is a
+success; a level that loops comes back ``TooLong``, and ``trace`` is the call for
+that.
+
+``meq::fitOpenSurface`` represents such a curve as truncated Chebyshev series in
+**normalised arc length** :math:`t = 2s/L - 1`. Chebyshev is the natural basis on
+an interval, and there is a second reason beyond non-periodicity: an open surface
+approaching the separatrix becomes stiff near its ends, because arc length
+diverges logarithmically as it nears the X-point, and Chebyshev clusters its
+resolution exactly there.
+
+**A periodic basis cannot be used here**, and not merely because it is a poorer
+choice. It forces :math:`R(-1) = R(+1)` on a curve whose ends are metres apart,
+which the data does not satisfy, so it cannot converge however many modes it is
+given. Measured on an analytic fixture over 4 to 32 modes, the Chebyshev fit
+improves by :math:`5.3\times10^{5}` while the periodic control gets slightly
+*worse*.
+
+Two things are deliberately absent. There are no flux-surface **averages** over
+an open surface: :math:`V'` and :math:`\langle R^{-2}\rangle` are integrals round
+a closed loop, and the volume an open curve encloses is not defined. And the
+tracer is not X-point aware — a level *at* a separatrix stalls at the saddle,
+where the level set is not a one-dimensional manifold, and ``Stalled`` is the
+honest report rather than a defect.

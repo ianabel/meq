@@ -342,7 +342,7 @@ file stays the technical record; that one is only about what to do first.
 Beyond the port, three campaigns have their own plans and their own staging:
 `docs/rotation.rst` (toroidal flow, FL-0 to FL-8, **done**, and the plan file
 converted to documentation), `INVERSION-PLAN.md`
-(solution inversion, IN-A to IN-P **done**, IN-5 and IN-6 open) and
+(solution inversion, IN-A to IN-P, **every stage done**) and
 `FREE-BOUNDARY-PLAN.md` (FB-A and FB-0 **done**, FB-1 and FB-2 part
 built, FB-3 to FB-6 open). Each has a section below; the free-boundary one is
 new and short.
@@ -4364,13 +4364,13 @@ the poloidal-current term moving `∂²ψ/∂X²` and not `∂²ψ/∂R²`: at `
 true elongation is 1.767 against (4.19)'s 2.297, and that 23% is asserted as a
 control so the scope is not a footnote.
 
-## Solution inversion: every stage but IN-5 is done
+## Solution inversion: every stage is done
 
 **`INVERSION-PLAN.md` is the design and the staged plan** — `ψ(R, z)` to
 `R(Ψ, l)`, `z(Ψ, l)`, which is what `MANTA-COUPLING.md` needs, what the driver's
-`(Ψ, θ)` grid is, and what `ROADMAP.md` item 10 is. **IN-5, open surfaces, is
-the only stage left**, and it is deferred with free boundary. This section is
-only what a reader of the code needs.
+`(Ψ, θ)` grid is, and what `ROADMAP.md` item 10 is. **Every stage is done**,
+IN-5 included — it was deferred with free boundary, and free boundary now
+solves. This section is only what a reader of the code needs.
 
 **Nothing about the solve changes.** This is post-processing, in the same way
 toroidal flow was a change to `F` alone: a new consumer of `ψ_h` and `q_h`.
@@ -4909,6 +4909,128 @@ landing on the same wrong one to six digits.
 transferable part. Both failing configurations converged — to 3.5e-07 — and
 reported success. What separated them was measuring the residual at a point
 known independently to be right.
+
+**AND IT REACHES THE SOLVE FROM A FILE**, as `[source] SafetyFactorFile`, with
+`SafetyFactorDegree` and `ToroidalFieldGuess` beside it.
+`examples/q-driven.toml` is the worked example and
+`DriverAcceptance::theDriverSolvesForTheToroidalField` is the acceptance:
+**42.5 s, 12 outer iterations, 43 equilibria**, recovering a closed-form
+`g = 2.20 + 0.55Ψ` to **5.0e-06** in the worst of the three coefficients of
+`g²`.
+
+**THE TARGET IS MEASURED RATHER THAN INVENTED, WHICH IS THE WHOLE OF WHY THAT
+IS AN ACCEPTANCE.** `examples/q-driven-q.dat` is the `q` of an equilibrium built
+from that closed form on that box **and that mesh**, taken through
+`q = V′g⟨R⁻²⟩/4π²` at 24 surfaces — so the answer is known independently of the
+loop, and the discretisation error is common to the measurement and to the
+inversion, which leaves what the case reads the LOOP's accuracy rather than the
+mesh's. A target invented instead would only have shown that the loop reaches
+**some** fixed point, which is exactly the failure the knot-span defect
+produced.
+
+**ONE SOLVER SERVES EVERY MAP EVALUATION**, through
+`NormalisedMHDSource::setGGPrime()`. Only `gg′` changes between steps, so the
+mesh, the spaces, the forms and the trace solver's symbolic factorisation all
+survive, and each solve is warm-started from the previous one's field —
+rebuilding the solver per evaluation, which is what the library test does, would
+throw all of that away 43 times. **The normalisation is deliberately not reset
+by that setter**: `ψ_ax` and `ψ_bnd` are unknowns of the bordered Newton and
+belong to the solve rather than to the profile.
+
+**AND THE SOLVER IS NOT HOLDING THE ANSWER WHEN THE LOOP RETURNS**, which is
+the trap in wiring this to a driver. KINSOL's last call to the map is whatever
+it needed last, and on a converged run that is usually a **differencing
+column** — an equilibrium one step off the answer in one coefficient. Every
+output reads the solver, so the driver re-solves at the converged coefficients
+before writing; without that it would publish a perturbed equilibrium beside
+converged coefficients, agreeing with them to the differencing step and to
+nothing else.
+
+**`meq::ToroidalFieldMap` IS THE PICARD STEP AS AN OBJECT, AND IT IS MFEM-FREE.**
+The map is `c → gg′ → [ solve, extract ] → invert → fit → c`, and only the
+bracketed half needs a mesh — so that half is a **callable the caller supplies**
+and the rest is CI-gated arithmetic beside the inversion it wraps. It owns the
+two obligations that are easy to miss and were both hand-rolled in the test
+first: that the map is **total**, and that the target is asked in the SOURCE's
+`Ψ` while the family is labelled in `Ψ_N`. A null return is how the caller says
+"did not converge" without an exception.
+
+**THE `.nc` CARRIES THE ANSWER**, as `toroidal_field_driven`,
+`g_squared_coefficients` and `safety_factor_target`. On this route `g` is what
+the run **found**, so there is no `GGPrimeFile` beside the output for a consumer
+to look it up in — the same argument that put `axis_normalised_flux` there.
+
+**WHAT IS LEFT IS THE FIXTURE AND NOT THE MACHINERY**: the example is a
+rectangle with one closed plasma rather than a machine, and nothing has yet
+driven `q` on the limited tokamak, where the support moves and `ψ_bnd` is an
+unknown.
+
+### IN-5: an open surface is not a loop, and a periodic basis cannot fit one
+
+**`ContourTracer::traceOpen()` and `meq::fitOpenSurface()`.** Every surface
+IN-0 to IN-6 handles is a loop — the tracer closes it, the disc chart labels it
+by an angle about the axis, the averages integrate round it. **A level outside
+`ψ_bnd` is none of those.** It runs to the wall and stops, so it has two genuine
+endpoints, no period, and no enclosed area.
+
+**IT WAS DEFERRED WITH FREE BOUNDARY AND IS NOT ANY MORE**, for the reason the
+deferral gave: a fixed-boundary problem has no level outside its own boundary to
+trace, and free boundary now solves.
+
+**THE TRACE IS BOTH DIRECTIONS FROM THE SEED, JOINED.** `trace()` follows one
+and comes back with HALF the curve wearing the label `LeftMesh` — which is what
+`v0-legacy:FluxSurfaces.cpp` returned as a contour, printing *"Terminating
+because curve left domain"*. The second half is the same march with the tangent
+negated, which is **exact** rather than approximate: the tangent is
+`( −q_z, q_r )/|q|`, so one sign reverses the whole march and leaves the curve
+identical. Not a second tracer over `−q`, which does the same thing at the cost
+of a copy of the field and a second set of settings to keep in step.
+`ContourStatus::Open` is a **success**; a level that loops comes back `TooLong`,
+the closure gate being suppressed, and the caller is told to use `trace()`.
+
+**THREE THINGS IN THE JOIN THAT ARE SILENT IF WRONG.** The reversed half's
+tangents must be negated too, or the Hermite interpolation folds back at the
+seam while every point sits exactly on the level set. The arc length is
+re-accumulated from one endpoint rather than patched, since each half measured
+its own from the shared seed and the seam would otherwise carry two origins. And
+`turning` is left at **zero** rather than summed: it is the winding of a closed
+curve, and on an open arc the two halves measure it from opposite orientations,
+so a sum is a number with no meaning that a reader would take for one.
+
+**THE BASIS IS CHEBYSHEV IN NORMALISED ARC LENGTH**, `t = 2s/L − 1`, and the
+measurement is on an analytic fixture the tracer is pointed at directly —
+`ψ = z − a( r − r₀ )²` in an H1 space of degree 2, which represents that
+quadratic **exactly**, so nothing below is the discretisation:
+
+| modes | 4 | 12 | 20 | 28 | 32 |
+|---|---|---|---|---|---|
+| **Chebyshev**, off-sample | 3.31e-02 | 3.01e-04 | 6.97e-06 | 1.28e-07 | **6.24e-08** |
+| **periodic control** | 2.41e-01 | 3.02e-01 | 3.07e-01 | 3.11e-01 | **3.12e-01** |
+
+**5.3e+05 against 0.77**, and the control gets *worse*. Measured at 401 points
+the fit never saw, against the closed form — a residual at its own samples is
+what a least squares minimises and would flatter both columns.
+
+**THE RATIO IS WHAT SAYS GEOMETRIC, NOT THE TOTAL.** The steps are equal and
+**additive**, so a geometric `C q^m` holds its ratio while an algebraic `C m^-p`
+gives `(16/12)^p`, `(20/16)^p`, `(24/20)^p` — falling, because the multiplier
+falls. Measured, flat at **6.37 to 6.43**. It floors at 6e-08, which is the
+traced points' own 1.6e-10 through a least squares of 32 columns, and the
+assertion stops before it.
+
+**AND THE CONTROL FAILING IS THE POINT RATHER THAN THE CHEBYSHEV SUCCEEDING.** A
+periodic basis forces `R( −1 ) = R( +1 )` on a curve whose ends are 0.8 m apart,
+so it is **inadmissible** rather than merely worse; given more modes it fits the
+samples better while the periodicity pushes the curve further from the truth
+between them. Same mode count, same decomposition, same distance measure — the
+two differ in their basis and in nothing else.
+
+**WHAT IS DELIBERATELY ABSENT.** There are no flux-surface AVERAGES over an open
+surface and there should not be: `V′` and `⟨R⁻²⟩` are integrals round a closed
+loop and the volume an open curve encloses is not defined. IN-5 delivers the
+**geometry**, which is what a scrape-off-layer consumer asks for. And the tracer
+is still not X-point aware — a level AT a separatrix stalls at the saddle, where
+the level set is not a 1-manifold, and `Stalled` is the honest answer.
 
 ### The disc basis, and why `ρ = √Ψ_N` rather than `Ψ_N`
 
@@ -5674,16 +5796,16 @@ driver already gives for the sampler, one consumer further along.
 
 ### What is next
 
-**IN-A, IN-0 (both halves), IN-1, IN-2, IN-3, IN-4, IN-6 and IN-P are done.**
-What remains is IN-5, and a short list of things the stages left behind.
+**EVERY STAGE IS DONE** — IN-A, IN-0 (both halves), IN-1, IN-2, IN-3, IN-4,
+IN-5, IN-6 and IN-P. What is left is a short list of things the stages left
+behind.
 
-**IN-5, open surfaces**, is deferred with free boundary per §6. The canonical
-in-surface coordinate for it is **poloidal arc length normalised to `2π` from a
-fixed-`z` reference ray**: a disc chart has no meaning through a separatrix and
-an angle about the axis has none on an open line. Note that arc length does
-**not** fix axis regularity — for similar surfaces it is a `ρ`-independent
-relabelling and buys the same one order — which is why the two concerns are
-handled by separate machinery there.
+**IN-5 IS DONE** — see its own section above. Its in-surface coordinate is
+**arc length**, normalised to `[ −1, 1 ]` for Chebyshev rather than to `2π`: a
+disc chart has no meaning through a separatrix and an angle about the axis has
+none on an open line. Note that arc length does **not** fix axis regularity —
+for similar surfaces it is a `ρ`-independent relabelling and buys the same one
+order — which is why the two concerns are handled by separate machinery.
 
 **IN-6 is done** — see its own section above. What it did NOT take up is the
 other number IN-P measured: evaluating a fit at many points by

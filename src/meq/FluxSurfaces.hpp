@@ -517,7 +517,14 @@ namespace meq
 
 		/// The point budget ran out before the curve closed. Raise
 		/// setMaxPoints(), or the step floor is too small for the contour.
-		TooLong
+		TooLong,
+
+		/// BOTH ENDS REACHED THE EDGE OF THE FIELD, which is what an OPEN
+		/// surface is -- INVERSION-PLAN.md stage IN-5. Only traceOpen()
+		/// produces it, and it is a SUCCESS: a scrape-off-layer field line
+		/// runs from wall to wall and has genuine endpoints, where LeftMesh
+		/// on a closed surface means the curve was cut short.
+		Open
 	};
 
 	/// "closed", "left mesh", "stalled", "too long". For printing.
@@ -792,6 +799,42 @@ namespace meq
 			/// @throws std::runtime_error if the level is not bracketed on any
 			///         ray before the mesh runs out.
 			Contour traceFromAxis( double level, CriticalPoint const &axis ) const;
+			
+			/**
+			 * AN OPEN SURFACE, TRACED FROM THE SEED IN BOTH DIRECTIONS AND
+			 * JOINED -- INVERSION-PLAN.md stage IN-5.
+			 *
+			 * **A LEVEL OUTSIDE THE PLASMA IS NOT A LOOP.** Beyond `psi_bnd` a
+			 * flux surface is not closed: it runs to the edge of the field and
+			 * stops, so it has two genuine ENDPOINTS and no period. trace()
+			 * follows one direction from its seed and returns what it reached,
+			 * which for such a level is HALF the curve wearing the label
+			 * `LeftMesh` -- and `v0-legacy:FluxSurfaces.cpp` printed
+			 * "Terminating because curve left domain" and returned exactly that
+			 * arc as though it were a contour.
+			 *
+			 * This traces the other half as well and puts them together, so the
+			 * points run from one endpoint to the other and `arcLength` is
+			 * cumulative along the whole of it. The seed is not duplicated at
+			 * the join.
+			 *
+			 * **THE SECOND HALF IS THE SAME MARCH WITH THE TANGENT REVERSED**,
+			 * which is exact rather than approximate: the tangent is
+			 * `( -q_z, q_r )/|q|`, so negating it walks the identical level set
+			 * the other way. It is NOT a second tracer over `-q`, which would
+			 * do the same thing at the cost of a copy of the field and a second
+			 * set of settings to keep in step.
+			 *
+			 * @return a Contour whose status is Open when both ends reached the
+			 *         edge of the field. Any other status is the honest report
+			 *         that this is not an open surface -- `Closed` means the
+			 *         level loops and trace() was the right call, `Stalled`
+			 *         means a critical point was met, which for a level at a
+			 *         separatrix is the expected answer and not a defect.
+			 *
+			 * @throws std::runtime_error on the same conditions as trace().
+			 */
+			Contour traceOpen( double level, double startR, double startZ ) const;
 
 			/// psi_h and q at a physical point, located by the same walk the
 			/// tracer uses. Returns false if the point is not in the mesh.
@@ -1017,8 +1060,16 @@ namespace meq
 			/// trace(), given the element the start point is in. traceFromAxis()
 			/// already knows it from its own bracket search, so this is what
 			/// keeps a trace free of Mesh::FindPoints entirely.
+			/// @param sense +1 marches along ( -q_z, q_r ) and -1 against it,
+			/// which is the same level set traced the other way. traceOpen()
+			/// is the only caller that passes -1.
+			/// @param mayClose false suppresses the closure test, which an open
+			/// trace must not take: a long open arc can turn through more than
+			/// the gate allows and would then close onto a start point it never
+			/// returned to.
 			Contour traceFrom( double level, double startR, double startZ,
-			                   int seed ) const;
+			                   int seed, int sense = 1,
+			                   bool mayClose = true ) const;
 
 			/// THE SEAM. The only place psi and q are read at a physical point.
 			/// See the header: the band extension of IN-0's second half is a

@@ -2334,3 +2334,89 @@ BOOST_AUTO_TEST_CASE( the_flux_surface_output_is_off_by_default_and_its_cut_is_v
 	refuses( minimal() + "\n[output]\nFluxOuterCut = 1\n",
 	         "output.FluxOuterCut" );
 }
+
+/*
+ * [ source ] SafetyFactorFile: DRIVING BY q RATHER THAN BY g g'.
+ *
+ * ROADMAP.md item 10 inverts the usual direction, so the key that carries the
+ * toroidal field becomes an ALTERNATIVE to GGPrimeFile rather than a companion
+ * to it -- and the refusal matters more than the acceptance, because both
+ * spellings converge. A run given both would do whichever physics key order
+ * happened to select, at full order, with nothing in its output to say so.
+ */
+BOOST_AUTO_TEST_CASE( the_safety_factor_target_replaces_the_toroidal_field_table )
+{
+	auto const refuses = []( std::string const & text, std::string const & key )
+	{
+		BOOST_CHECK_EXCEPTION( parse( text ), ConfigError,
+			[&]( ConfigError const & e ) { return e.getKey() == key; } );
+	};
+
+	auto const mhd = []( std::string const & extra )
+	{
+		return withSource(
+			"[source]\n"
+			"Type = \"mhd\"\n"
+			"PPrimeFile = \"examples/fb-pprime.dat\"\n" + extra );
+	};
+
+	std::string const driven =
+		"Normalised = true\nPsiAxis = 0.3\n"
+		"SafetyFactorFile = \"examples/q-driven-q.dat\"\n"
+		"ToroidalFieldGuess = 2.2\n";
+
+	Configuration const good = parse( mhd( driven ) );
+	BOOST_TEST( good.getSource().getMHD().safetyFactorFile
+	            == "examples/q-driven-q.dat" );
+	BOOST_TEST( good.getSource().getMHD().toroidalFieldGuess == 2.2 );
+	BOOST_TEST( good.getSource().getMHD().safetyFactorDegree == 2u );
+	BOOST_TEST( good.getSource().getMHD().ggPrimeFile.empty(),
+		"a q-driven run has no gg' table, and leaving one here would let the "
+		"factory read a profile the loop is about to replace" );
+
+	// THE ORDINARY ROUTE IS UNTOUCHED, which is what says the alternative was
+	// added rather than substituted.
+	Configuration const prescribed = parse( mhd(
+		"GGPrimeFile = \"examples/fb-ggprime.dat\"\n" ) );
+	BOOST_TEST( prescribed.getSource().getMHD().safetyFactorFile.empty() );
+	BOOST_TEST( !prescribed.getSource().getMHD().ggPrimeFile.empty() );
+
+	// BOTH IS REFUSED. One prescribes the toroidal field and the other asks for
+	// whichever field delivers a given q; there is no safe precedence.
+	refuses( mhd( driven + "GGPrimeFile = \"examples/fb-ggprime.dat\"\n" ),
+	         "source.SafetyFactorFile" );
+
+	// NEITHER IS REFUSED TOO, and against GGPrimeFile, because that is the key
+	// an ordinary run is missing.
+	refuses( mhd( "Normalised = true\nPsiAxis = 0.3\n" ), "source.GGPrimeFile" );
+
+	// THE TARGET IS q( Psi ), so without the normalisation there is no Psi.
+	refuses( mhd( "SafetyFactorFile = \"examples/q-driven-q.dat\"\n"
+	              "ToroidalFieldGuess = 2.2\n" ),
+	         "source.SafetyFactorFile" );
+
+	// AND THE OPENING g HAS NO DEFAULT. q determines g through the geometry,
+	// but only once there is a geometry; a machine's vacuum R0 B0 is the number
+	// a user has and inventing one here would start the loop somewhere nobody
+	// chose.
+	refuses( mhd( "Normalised = true\nPsiAxis = 0.3\n"
+	              "SafetyFactorFile = \"examples/q-driven-q.dat\"\n" ),
+	         "source.ToroidalFieldGuess" );
+	// A duplicate key would be refused by the TOML parser rather than by MEQ,
+	// so the negative case is built WITHOUT the good guess rather than beside it.
+	refuses( mhd( "Normalised = true\nPsiAxis = 0.3\n"
+	              "SafetyFactorFile = \"examples/q-driven-q.dat\"\n"
+	              "ToroidalFieldGuess = -1.0\n" ),
+	         "source.ToroidalFieldGuess" );
+
+	// DEGREE ZERO IS A CONSTANT g^2, so gg' is identically zero and no
+	// coefficient the loop moves can change the equilibrium. A degree the
+	// surface family cannot determine is refused at the other end.
+	refuses( mhd( driven + "SafetyFactorDegree = 0\n" ),
+	         "source.SafetyFactorDegree" );
+	refuses( mhd( driven + "SafetyFactorDegree = 9\n" ),
+	         "source.SafetyFactorDegree" );
+
+	Configuration const cubic = parse( mhd( driven + "SafetyFactorDegree = 3\n" ) );
+	BOOST_TEST( cubic.getSource().getMHD().safetyFactorDegree == 3u );
+}

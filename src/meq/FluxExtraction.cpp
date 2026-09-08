@@ -67,6 +67,64 @@ namespace meq
 				area += rNode*dzdtheta*step;
 			}
 		}
+
+		/// The three refusals extractFluxSurfaces() and fluxSurfaceLabels() share.
+		/// One copy, because the two must refuse the SAME option sets: a caller
+		/// that got labels for options the extraction then rejects would have
+		/// built a grid for a family that cannot exist.
+		void validateFamilyOptions( FluxFamilyOptions const &options,
+		                            char const *who )
+		{
+			std::string const where( who );
+
+			if ( options.surfaces < 2 )
+				throw std::invalid_argument(
+					where + ": a family needs at least two surfaces to be "
+					"interpolated between, and "
+					+ std::to_string( options.surfaces ) + " were asked for" );
+
+			if ( options.angles < 3 )
+				throw std::invalid_argument(
+					where + ": a surface needs at least three angles to enclose "
+					"anything, and " + std::to_string( options.angles )
+					+ " were asked for" );
+
+			if ( !( options.innerCut > 0.0 ) || !( options.outerCut < 1.0 )
+			     || !( options.innerCut < options.outerCut ) )
+				throw std::invalid_argument(
+					where + ": the cut [ " + number( options.innerCut ) + ", "
+					+ number( options.outerCut ) + " ] is not a range of "
+					"normalised flux strictly inside ( 0, 1 ). Psi_N = 0 is the "
+					"magnetic axis, where a surface is a point and drho/dpsi is "
+					"unbounded, and Psi_N = 1 is the plasma boundary, where "
+					"1/| grad psi | diverges if it is a separatrix. See "
+					"FluxFamily.hpp on why both ends are cut and why the two "
+					"numbers are different" );
+		}
+
+	}
+
+	std::vector<double> fluxSurfaceLabels( FluxFamilyOptions const &options )
+	{
+		validateFamilyOptions( options, "meq::fluxSurfaceLabels" );
+
+		double const innerLabel = std::sqrt( options.innerCut );
+		double const outerLabel = std::sqrt( options.outerCut );
+		double const last = static_cast<double>( options.surfaces - 1 );
+
+		std::vector<double> labels;
+		labels.reserve( options.surfaces );
+		for ( std::size_t i = 0; i < options.surfaces; ++i )
+		{
+			double const t = static_cast<double>( i )/last;
+			if ( options.spacing == FluxLevelSpacing::Radial )
+				labels.push_back( innerLabel + t*( outerLabel - innerLabel ) );
+			else
+				labels.push_back( std::sqrt( options.innerCut
+				                             + t*( options.outerCut
+				                                   - options.innerCut ) ) );
+		}
+		return labels;
 	}
 
 	FluxSurfaceFamily extractFluxSurfaces( ContourTracer const &tracer,
@@ -74,29 +132,7 @@ namespace meq
 	                                       double psiBoundary,
 	                                       FluxFamilyOptions const &options )
 	{
-		if ( options.surfaces < 2 )
-			throw std::invalid_argument(
-				"meq::extractFluxSurfaces: a family needs at least two surfaces "
-				"to be interpolated between, and " + std::to_string( options.surfaces )
-				+ " were asked for" );
-
-		if ( options.angles < 3 )
-			throw std::invalid_argument(
-				"meq::extractFluxSurfaces: a surface needs at least three angles "
-				"to enclose anything, and " + std::to_string( options.angles )
-				+ " were asked for" );
-
-		if ( !( options.innerCut > 0.0 ) || !( options.outerCut < 1.0 )
-		     || !( options.innerCut < options.outerCut ) )
-			throw std::invalid_argument(
-				"meq::extractFluxSurfaces: the cut [ " + number( options.innerCut )
-				+ ", " + number( options.outerCut ) + " ] is not a range of "
-				"normalised flux strictly inside ( 0, 1 ). Psi_N = 0 is the "
-				"magnetic axis, where a surface is a point and drho/dpsi is "
-				"unbounded, and Psi_N = 1 is the plasma boundary, where "
-				"1/| grad psi | diverges if it is a separatrix. See "
-				"FluxFamily.hpp on why both ends are cut and why the two numbers "
-				"are different" );
+		validateFamilyOptions( options, "meq::extractFluxSurfaces" );
 
 		double const span = axis.psi - psiBoundary;
 		if ( span == 0.0 )
@@ -116,21 +152,16 @@ namespace meq
 		family.safetyFactorAvailable = static_cast<bool>( options.toroidalField );
 		family.surfaces.reserve( options.surfaces );
 
-		double const innerLabel = std::sqrt( options.innerCut );
-		double const outerLabel = std::sqrt( options.outerCut );
-		double const last = static_cast<double>( options.surfaces - 1 );
+		// ONE COPY OF THE GRID. fluxSurfaceLabels() is the same computation
+		// and is public, so a caller that needs the labels BEFORE it has a
+		// family -- meq::ToroidalFieldMap's loop drives the equilibrium by a
+		// quantity indexed on them -- gets exactly what this traces at, and
+		// not a second implementation that could drift.
+		std::vector<double> const labels = fluxSurfaceLabels( options );
 
 		for ( std::size_t i = 0; i < options.surfaces; ++i )
 		{
-			double const t = static_cast<double>( i )/last;
-
-			double label = 0.0;
-			if ( options.spacing == FluxLevelSpacing::Radial )
-				label = innerLabel + t*( outerLabel - innerLabel );
-			else
-				label = std::sqrt( options.innerCut
-				                   + t*( options.outerCut - options.innerCut ) );
-
+			double const label = labels[ i ];
 			double const normalised = label*label;
 			double const level = fluxAtNormalised( normalised, axis.psi,
 			                                       psiBoundary );

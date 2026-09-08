@@ -467,6 +467,78 @@ namespace meq
 		/// the top of this file: the failure mode is a silent default rather
 		/// than a refusal. Two keys make "which did you mean" a question the
 		/// parser answers rather than one it guesses at.
+		/**
+		 * GGPrimeFile and SafetyFactorFile, which are alternatives.
+		 *
+		 * Prescribing g g' and asking for the g that delivers a target q are
+		 * opposite statements about the same quantity, and BOTH SPELLINGS
+		 * CONVERGE -- to different equilibria. So naming both is refused rather
+		 * than resolved by precedence, which is the rule
+		 * [ boundary.limiter ] SurfaceAttribute already follows against R / Z
+		 * and for the same reason: a key order deciding which physics a run did
+		 * is a silent wrong answer.
+		 */
+		void readToroidalFieldTarget( Table const &source,
+		                              MHDParameters &parameters )
+		{
+			parameters.ggPrimeFile = source.getStringOr( "GGPrimeFile", "" );
+			parameters.safetyFactorFile =
+				source.getStringOr( "SafetyFactorFile", "" );
+
+			bool const prescribed = !parameters.ggPrimeFile.empty();
+			bool const driven = !parameters.safetyFactorFile.empty();
+
+			if ( prescribed && driven )
+				source.fail( "SafetyFactorFile",
+					"cannot be given beside GGPrimeFile. GGPrimeFile PRESCRIBES "
+					"the toroidal field and SafetyFactorFile asks for whichever "
+					"field delivers a target q, so the two are alternatives "
+					"rather than a pair -- and both converge, to different "
+					"equilibria, so there is no safe precedence between them. "
+					"Give one" );
+
+			if ( !prescribed && !driven )
+				source.fail( "GGPrimeFile",
+					"must be given, or SafetyFactorFile in its place. The "
+					"source needs g dg/dPsi either as input or as the output of "
+					"an outer solve for it" );
+
+			if ( !driven )
+				return;
+
+			// ROADMAP.md item 10 drives the loop through the bordered Newton,
+			// whose unknowns are psi_ax and psi_bnd, and the target is a
+			// function of NORMALISED flux. An un-normalised source has no Psi
+			// to write a q table against.
+			if ( !parameters.normalised )
+				source.fail( "SafetyFactorFile",
+					"requires Normalised = true. The target is q( Psi ) against "
+					"the normalised flux, and without the normalisation there is "
+					"no Psi for it to be a function of" );
+
+			parameters.safetyFactorDegree = static_cast<unsigned int>(
+				source.getIntegerOr( "SafetyFactorDegree", 2 ) );
+			if ( parameters.safetyFactorDegree < 1
+			     || parameters.safetyFactorDegree > 8 )
+				source.fail( "SafetyFactorDegree",
+					"must be between 1 and 8. Degree zero makes g^2 a constant, "
+					"so gg' is identically zero and no coefficient the loop "
+					"moves can change the equilibrium; and a degree the surface "
+					"family does not determine leaves the outer Jacobian rank "
+					"deficient, which is reported rather than solved" );
+
+			parameters.toroidalFieldGuess =
+				source.getFloatOr( "ToroidalFieldGuess", 0.0 );
+			if ( !( parameters.toroidalFieldGuess > 0.0 )
+			     || !std::isfinite( parameters.toroidalFieldGuess ) )
+				source.fail( "ToroidalFieldGuess",
+					"must be given and positive beside SafetyFactorFile. It is "
+					"g = R B_phi to open the loop at, as a constant, and a "
+					"machine's vacuum R0 B0 is the number to use. There is no "
+					"default: q determines g through the geometry, but only "
+					"once there is a geometry" );
+		}
+
 		void readEitherProfile( Table const & table, std::string const & key,
 		                        double & value, std::string & fileName, double & scale,
 		                        bool & given, bool required )
@@ -974,6 +1046,8 @@ namespace meq
 					                            "PPrimeScale", "GGPrimeScale",
 					                            "PPrimeVariable", "PPrimeFit",
 					                            "GGPrimeVariable", "GGPrimeFit",
+					                            "SafetyFactorFile", "SafetyFactorDegree",
+					                            "ToroidalFieldGuess",
 					                            "Normalised", "PsiAxis", "ConfineToPlasma", "PlasmaCurrent",
 					                            "ProfileFile" } );
 					refuseReservedProfileFile( source );
@@ -987,19 +1061,17 @@ namespace meq
 					refuseReservedVariableKeys( source, "GGPrime", false );
 					MHDParameters parameters;
 					parameters.pPrimeFile = source.getString( "PPrimeFile" );
-					parameters.ggPrimeFile = source.getString( "GGPrimeFile" );
 					parameters.mu0 = source.getFloatOr( "Mu0", parameters.mu0 );
 					parameters.pPrimeScale = source.getFloatOr( "PPrimeScale", 1.0 );
 					parameters.ggPrimeScale = source.getFloatOr( "GGPrimeScale", 1.0 );
 					parameters.normalised = source.getBooleanOr( "Normalised", false );
+					readToroidalFieldTarget( source, parameters );
 					if ( !std::isfinite( parameters.pPrimeScale ) )
 						source.fail( "PPrimeScale", "must be finite" );
 					if ( !std::isfinite( parameters.ggPrimeScale ) )
 						source.fail( "GGPrimeScale", "must be finite" );
 					if ( parameters.pPrimeFile.empty() )
 						source.fail( "PPrimeFile", "must not be empty" );
-					if ( parameters.ggPrimeFile.empty() )
-						source.fail( "GGPrimeFile", "must not be empty" );
 					if ( !( parameters.mu0 > 0.0 ) )
 						source.fail( "Mu0", "must be positive" );
 					readNormalisation( source, parameters.normalised, parameters.psiAxis );

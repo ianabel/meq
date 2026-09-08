@@ -1171,6 +1171,96 @@ namespace meq
 	/// worse it does worse with more freedom, not less.
 	std::size_t tensorProductModeCount( int maxDegree );
 
+	/**
+	 * AN OPEN SURFACE: R AND z AS TRUNCATED CHEBYSHEV SERIES IN NORMALISED ARC
+	 * LENGTH. INVERSION-PLAN.md stage IN-5, section 4.2.
+	 *
+	 *
+	 * 1. WHY NOT THE DISC BASIS, AND WHY NOT A PERIODIC ONE
+	 *
+	 * A surface beyond `psi_bnd` does not close: it runs to the wall and stops,
+	 * so it has two genuine ENDPOINTS and no period. The Zernike disc chart of
+	 * IN-3 has nothing to say about it -- there is no enclosed area and no
+	 * angle about an axis -- and **a periodic basis is not merely suboptimal
+	 * but wrong**: forcing `R( -1 ) = R( +1 )` on a curve whose ends are metres
+	 * apart is a constraint the data does not satisfy, so the fit cannot
+	 * converge however many modes it is given. The acceptance measures that
+	 * against this, as the control.
+	 *
+	 * Chebyshev is the natural basis on an interval, and there is a second
+	 * reason beyond non-periodicity: an open surface approaching the separatrix
+	 * becomes **stiff near its ends**, because arc length diverges
+	 * logarithmically as it nears the X-point. Chebyshev clusters its
+	 * resolution exactly there.
+	 *
+	 *
+	 * 2. THE PARAMETER IS ARC LENGTH AND NOT AN ANGLE
+	 *
+	 * `t = 2 s/L - 1` in `[ -1, 1 ]`, with `s` measured along the curve. IN-3
+	 * measured what happens when a parametrisation puts content where the basis
+	 * cannot look -- the geometric poloidal angle makes the disc map non-smooth
+	 * at the axis and the fit decays at `L^-1.2` and never converges. Arc
+	 * length is the one labelling of an open curve that is intrinsic to it, so
+	 * the same trap has no way in here. It does NOT fix axis regularity, which
+	 * is why the two concerns are handled by different machinery.
+	 */
+	struct OpenSurfaceFit
+	{
+		/// Chebyshev coefficients of R( t ) and z( t ), ascending in order, on
+		/// `t` in [ -1, 1 ].
+		std::vector<double> r;
+		std::vector<double> z;
+
+		/// The arc length the parametrisation was normalised by, so that a
+		/// consumer can turn `t` back into metres along the curve.
+		double length = 0.0;
+
+		/// The largest distance from a sample to the fitted curve, in metres.
+		/// The error measure is a DISTANCE and not a coefficient residual for
+		/// the reason IN-4 records: a beautiful residual over a folded map is
+		/// the class of quiet wrong answer this tree catalogues.
+		double worstDistance = 0.0;
+
+		std::size_t modes() const { return r.size(); }
+	};
+
+	/**
+	 * Fit @a modes Chebyshev coefficients to a traced open surface.
+	 *
+	 * @param arcLength cumulative along the curve, ascending, starting anywhere
+	 *        -- it is shifted and scaled to [ -1, 1 ] here.
+	 * @param r, z the sample positions, the same length.
+	 *
+	 * @throws std::invalid_argument unless the three arrays match, there are at
+	 *         least as many samples as modes, at least two modes are asked for,
+	 *         and the arc length is strictly ascending -- a repeated abscissa
+	 *         is a curve that stopped moving, which is a stalled trace rather
+	 *         than a surface.
+	 */
+	OpenSurfaceFit fitOpenSurface( std::vector<double> const &arcLength,
+	                               std::vector<double> const &r,
+	                               std::vector<double> const &z,
+	                               std::size_t modes );
+
+	/// The fitted position at @a t in [ -1, 1 ]. Outside that range the series
+	/// is evaluated anyway and is an EXTRAPOLATION of a truncated Chebyshev
+	/// expansion, which diverges quickly; the caller is trusted the way
+	/// meq::Zernike trusts one.
+	void evaluateOpenSurface( OpenSurfaceFit const &fit, double t,
+	                          double &r, double &z );
+
+	/// A periodic fit of the same samples, as the CONTROL for section 1. Real
+	/// Fourier modes -- 1, cos, sin, cos 2, ... -- over the same count, so it
+	/// is given the same freedom and differs only in being periodic.
+	OpenSurfaceFit fitOpenSurfacePeriodic( std::vector<double> const &arcLength,
+	                                       std::vector<double> const &r,
+	                                       std::vector<double> const &z,
+	                                       std::size_t modes );
+
+	/// Evaluate the periodic control at @a t in [ -1, 1 ].
+	void evaluateOpenSurfacePeriodic( OpenSurfaceFit const &fit, double t,
+	                                  double &r, double &z );
+
 }
 
 #endif // MEQ_SURFACEFIT_HPP

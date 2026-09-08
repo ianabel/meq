@@ -1,7 +1,9 @@
 #define BOOST_TEST_MODULE SafetyFactorTests
 #include <boost/test/unit_test.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <stdexcept>
 #include <vector>
 
@@ -281,4 +283,163 @@ BOOST_AUTO_TEST_CASE( the_vacuum_extension_adds_a_zero_at_the_plasma_edge )
 		BOOST_TEST( vacuum[ i + 1 ].psi == clamped[ i ].psi );
 		BOOST_TEST( vacuum[ i + 1 ].value == clamped[ i ].value );
 	}
+}
+
+/*
+ * THE MAP IS TOTAL, AND WHAT IT RETURNS WHERE IT CANNOT BE EVALUATED MATTERS
+ * MORE THAN WHERE IT CAN.
+ *
+ * meq::solveForToroidalField drives this through KINSOL, which is C: an
+ * exception raised inside it unwinds through its frames and denies the line
+ * search the finite value it needs to reject a step with. So the contract is
+ * that no reachable input throws, and the residual at an inadmissible point is
+ * finite, large, and not a root.
+ */
+BOOST_AUTO_TEST_CASE( the_map_is_total_where_g_squared_goes_negative )
+{
+	std::vector<double> const label = { 0.10, 0.30, 0.50, 0.70, 0.90 };
+
+	// A family that inverts to a CONSTANT g of 2, whatever is asked of it, so
+	// the map's own arithmetic is the only thing under test.
+	std::vector<double> vPrime( label.size(), 3.0 );
+	std::vector<double> inverseRSquared( label.size(), 0.5 );
+	meq::FluxSurfaceFamily const family =
+		familyOf( label, vPrime, inverseRSquared );
+
+	int solves = 0;
+	auto solve = [ & ]( std::vector<meq::Knot> const &knots )
+	{
+		++solves;
+		BOOST_TEST( !knots.empty() );
+		return &family;
+	};
+
+	meq::ToroidalFieldMap::Options options;
+	options.degree = 2;
+	options.target = []( double ) { return 4.0*M_PI*M_PI*2.0/( 3.0*0.5 ); };
+
+	meq::ToroidalFieldMap map( solve, options );
+
+	// A g^2 that is positive everywhere on [ 0, 1 ] is admissible and solves.
+	std::vector<double> const good = { 4.0, 0.0, 0.0 };
+	std::vector<double> const first = map( good );
+	BOOST_TEST( map.solves() == 1 );
+	BOOST_TEST( map.refusals() == 0 );
+	BOOST_TEST( first.size() == good.size() );
+
+	// g^2 = 1 - 4 Psi is negative over most of the range. It must NOT reach the
+	// solve, must not throw, and must come back finite.
+	std::vector<double> const bad = { 1.0, -4.0, 0.0 };
+	std::vector<double> hopeless;
+	BOOST_CHECK_NO_THROW( hopeless = map( bad ) );
+	BOOST_TEST( map.solves() == 1,
+		"an inadmissible g^2 reached the solve, which is a wasted equilibrium "
+		"and, with a moving support, one that may not converge at all" );
+	BOOST_TEST( map.refusals() == 1 );
+	for ( double value : hopeless )
+		BOOST_TEST( std::isfinite( value ) );
+
+	// AND THE REFUSAL POINTS BACK AT THE LAST ADMISSIBLE POINT, so the residual
+	// there is `lastGood - c`, which is large and is a root only at a place the
+	// map really was evaluated.
+	BOOST_TEST( map.lastAdmissible() == good, boost::test_tools::per_element() );
+	BOOST_TEST( hopeless == good, boost::test_tools::per_element() );
+
+	std::printf( "\n  the map refused g^2 = 1 - 4 Psi without solving, and "
+	             "returned the last admissible c\n" );
+}
+
+/*
+ * THE TARGET IS ASKED IN THE SOURCE'S Psi AND THE FAMILY IS LABELLED IN Psi_N,
+ * AND GETTING IT BACKWARDS CONVERGES TO A REVERSED SHEAR.
+ *
+ * This is the same trap the_two_normalised_fluxes_run_in_opposite_directions
+ * pins one level down, met where a CALLER meets it. The map owns the
+ * reflection, so the assertion is that the target sees 1 - Psi_N and not
+ * Psi_N -- checked by handing it a target that is not symmetric about 0.5, for
+ * the reason that a symmetric one cannot tell the two apart.
+ */
+BOOST_AUTO_TEST_CASE( the_map_asks_its_target_in_the_sources_normalised_flux )
+{
+	// NOT SYMMETRIC ABOUT 0.5, WHICH IS THE WHOLE POINT. Labels of 0.10 and
+	// 0.90 reflect to 0.90 and 0.10 -- the same SET -- so a check on the set
+	// would pass either way round and test nothing. 0.10 and 0.40 reflect to
+	// 0.90 and 0.60, which share no element with them.
+	std::vector<double> const label = { 0.10, 0.40 };
+	meq::FluxSurfaceFamily const family =
+		familyOf( label, { 3.0, 3.0 }, { 0.5, 0.5 } );
+
+	std::vector<double> asked;
+	meq::ToroidalFieldMap::Options options;
+	options.degree = 1;
+	options.target = [ &asked ]( double psi )
+	{
+		asked.push_back( psi );
+		return 1.0;
+	};
+
+	meq::ToroidalFieldMap map(
+		[ & ]( std::vector<meq::Knot> const & ) { return &family; }, options );
+	map( { 4.0, 0.0 } );
+
+	BOOST_TEST_REQUIRE( asked.size() == label.size() );
+
+	// THE PAIRING, IN ORDER, so a reflection applied to the wrong surface is
+	// caught as well as no reflection at all.
+	for ( std::size_t i = 0; i < label.size(); ++i )
+		BOOST_TEST( asked[ i ] == 1.0 - label[ i ],
+			boost::test_tools::tolerance( 1.0e-14 ) );
+
+	// And the control: the un-reflected labels are NOT what was asked, which is
+	// what says the assertion above has teeth on this fixture.
+	for ( std::size_t i = 0; i < label.size(); ++i )
+		BOOST_TEST( std::abs( asked[ i ] - label[ i ] ) > 0.1,
+			"the target was asked at the FAMILY's label rather than the "
+			"source's, so gg' comes back with its shear reversed" );
+
+	std::printf( "  the target was asked at Psi = %.2f, %.2f for surfaces at "
+	             "Psi_N = %.2f, %.2f\n",
+	             asked[ 0 ], asked[ 1 ], label[ 0 ], label[ 1 ] );
+}
+
+/*
+ * A MAP WITH NOTHING TO SOLVE WITH IS REFUSED AT CONSTRUCTION, because the
+ * alternative is a null callable met for the first time inside KINSOL.
+ */
+BOOST_AUTO_TEST_CASE( a_map_without_a_solve_or_a_target_is_refused )
+{
+	meq::FluxSurfaceFamily const family =
+		familyOf( { 0.5 }, { 3.0 }, { 0.5 } );
+	auto solve = [ & ]( std::vector<meq::Knot> const & ) { return &family; };
+
+	meq::ToroidalFieldMap::Options complete;
+	complete.target = []( double ) { return 1.0; };
+
+	BOOST_CHECK_THROW(
+		meq::ToroidalFieldMap( nullptr, complete ), std::invalid_argument );
+
+	meq::ToroidalFieldMap::Options noTarget;
+	BOOST_CHECK_THROW(
+		meq::ToroidalFieldMap( solve, noTarget ), std::invalid_argument );
+
+	// A degree-zero g^2 is a constant, so gg' is identically zero and no
+	// coefficient the loop moves can change the equilibrium.
+	meq::ToroidalFieldMap::Options flat = complete;
+	flat.degree = 0;
+	BOOST_CHECK_THROW(
+		meq::ToroidalFieldMap( solve, flat ), std::invalid_argument );
+
+	// And a solve that cannot produce an equilibrium is a refusal rather than
+	// a throw, since it is reachable from inside the Newton.
+	meq::ToroidalFieldMap failing(
+		[]( std::vector<meq::Knot> const & )
+		{
+			return static_cast<meq::FluxSurfaceFamily const *>( nullptr );
+		},
+		complete );
+	std::vector<double> out;
+	BOOST_CHECK_NO_THROW( out = failing( { 4.0, 0.0, 0.0 } ) );
+	BOOST_TEST( failing.refusals() == 1 );
+	for ( double value : out )
+		BOOST_TEST( std::isfinite( value ) );
 }

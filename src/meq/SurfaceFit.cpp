@@ -1496,4 +1496,174 @@ namespace meq
 		return fitted;
 	}
 
+
+	namespace
+	{
+		/// T_k( t ) for k = 0 .. modes-1, by the three-term recurrence. Not the
+		/// cos( k acos t ) form: it is exact at the ends where that loses the
+		/// last digits, and it costs no special functions.
+		void chebyshevBasis( double t, std::size_t modes,
+		                     std::vector<double> &out )
+		{
+			out.assign( modes, 0.0 );
+			if ( modes == 0 )
+				return;
+			out[ 0 ] = 1.0;
+			if ( modes > 1 )
+				out[ 1 ] = t;
+			for ( std::size_t k = 2; k < modes; ++k )
+				out[ k ] = 2.0*t*out[ k - 1 ] - out[ k - 2 ];
+		}
+
+		/// 1, cos( pi t ), sin( pi t ), cos( 2 pi t ), ... on t in [ -1, 1 ],
+		/// which is periodic with the interval as its period. The CONTROL.
+		void periodicBasis( double t, std::size_t modes,
+		                    std::vector<double> &out )
+		{
+			out.assign( modes, 0.0 );
+			for ( std::size_t k = 0; k < modes; ++k )
+			{
+				std::size_t const harmonic = ( k + 1 )/2;
+				double const angle = M_PI*static_cast<double>( harmonic )*t;
+				out[ k ] = ( k % 2 == 1 ) ? std::cos( angle )
+				                          : ( k == 0 ? 1.0 : std::sin( angle ) );
+			}
+		}
+
+		/// The shared least squares, so that the control differs from the
+		/// answer in its BASIS and in nothing else -- same decomposition, same
+		/// truncation, same distance measure.
+		OpenSurfaceFit fitOnBasis(
+			std::vector<double> const &arcLength,
+			std::vector<double> const &r, std::vector<double> const &z,
+			std::size_t modes,
+			void ( *basis )( double, std::size_t, std::vector<double> & ),
+			char const *who )
+		{
+			std::string const where( who );
+			std::size_t const n = arcLength.size();
+
+			if ( r.size() != n || z.size() != n )
+				throw std::invalid_argument(
+					where + ": the arc length and the two coordinate arrays must "
+					"be the same length" );
+			if ( modes < 2 )
+				throw std::invalid_argument(
+					where + ": at least two modes are needed; one is a point" );
+			if ( n < modes )
+				throw std::invalid_argument(
+					where + ": " + std::to_string( n ) + " samples cannot "
+					"determine " + std::to_string( modes ) + " coefficients" );
+			for ( std::size_t i = 1; i < n; ++i )
+				if ( !( arcLength[ i ] > arcLength[ i - 1 ] ) )
+					throw std::invalid_argument(
+						where + ": the arc length is not strictly ascending at "
+						"sample " + std::to_string( i ) + ". A repeated abscissa "
+						"is a curve that stopped moving, which is a stalled "
+						"trace rather than a surface" );
+
+			double const first = arcLength.front();
+			double const total = arcLength.back() - first;
+			if ( !( total > 0.0 ) )
+				throw std::invalid_argument(
+					where + ": the curve has no length to normalise by" );
+
+			Eigen::MatrixXd design( static_cast<Eigen::Index>( n ),
+			                        static_cast<Eigen::Index>( modes ) );
+			Eigen::MatrixXd rhs( static_cast<Eigen::Index>( n ), 2 );
+
+			std::vector<double> row;
+			for ( std::size_t i = 0; i < n; ++i )
+			{
+				double const t = 2.0*( arcLength[ i ] - first )/total - 1.0;
+				basis( t, modes, row );
+				for ( std::size_t k = 0; k < modes; ++k )
+					design( static_cast<Eigen::Index>( i ),
+					        static_cast<Eigen::Index>( k ) ) = row[ k ];
+				rhs( static_cast<Eigen::Index>( i ), 0 ) = r[ i ];
+				rhs( static_cast<Eigen::Index>( i ), 1 ) = z[ i ];
+			}
+
+			Eigen::JacobiSVD<Eigen::MatrixXd> const svd(
+				design, Eigen::ComputeThinU | Eigen::ComputeThinV );
+			Eigen::MatrixXd const solution = svd.solve( rhs );
+
+			OpenSurfaceFit fit;
+			fit.length = total;
+			fit.r.resize( modes );
+			fit.z.resize( modes );
+			for ( std::size_t k = 0; k < modes; ++k )
+			{
+				fit.r[ k ] = solution( static_cast<Eigen::Index>( k ), 0 );
+				fit.z[ k ] = solution( static_cast<Eigen::Index>( k ), 1 );
+			}
+
+			// THE ERROR IS A DISTANCE AT THE SAMPLES, in metres, because that
+			// is what a consumer of the geometry cares about and a coefficient
+			// residual is not.
+			for ( std::size_t i = 0; i < n; ++i )
+			{
+				double const t = 2.0*( arcLength[ i ] - first )/total - 1.0;
+				basis( t, modes, row );
+				double fittedR = 0.0, fittedZ = 0.0;
+				for ( std::size_t k = 0; k < modes; ++k )
+				{
+					fittedR += fit.r[ k ]*row[ k ];
+					fittedZ += fit.z[ k ]*row[ k ];
+				}
+				double const dr = fittedR - r[ i ];
+				double const dz = fittedZ - z[ i ];
+				fit.worstDistance = std::max( fit.worstDistance,
+				                              std::sqrt( dr*dr + dz*dz ) );
+			}
+			return fit;
+		}
+
+		void evaluateOnBasis(
+			OpenSurfaceFit const &fit, double t,
+			void ( *basis )( double, std::size_t, std::vector<double> & ),
+			double &r, double &z )
+		{
+			std::vector<double> row;
+			basis( t, fit.r.size(), row );
+			r = 0.0;
+			z = 0.0;
+			for ( std::size_t k = 0; k < fit.r.size(); ++k )
+			{
+				r += fit.r[ k ]*row[ k ];
+				z += fit.z[ k ]*row[ k ];
+			}
+		}
+	}
+
+	OpenSurfaceFit fitOpenSurface( std::vector<double> const &arcLength,
+	                               std::vector<double> const &r,
+	                               std::vector<double> const &z,
+	                               std::size_t modes )
+	{
+		return fitOnBasis( arcLength, r, z, modes, chebyshevBasis,
+		                   "meq::fitOpenSurface" );
+	}
+
+	OpenSurfaceFit fitOpenSurfacePeriodic( std::vector<double> const &arcLength,
+	                                       std::vector<double> const &r,
+	                                       std::vector<double> const &z,
+	                                       std::size_t modes )
+	{
+		return fitOnBasis( arcLength, r, z, modes, periodicBasis,
+		                   "meq::fitOpenSurfacePeriodic" );
+	}
+
+	void evaluateOpenSurface( OpenSurfaceFit const &fit, double t,
+	                          double &r, double &z )
+	{
+		evaluateOnBasis( fit, t, chebyshevBasis, r, z );
+	}
+
+	void evaluateOpenSurfacePeriodic( OpenSurfaceFit const &fit, double t,
+	                                  double &r, double &z )
+	{
+		evaluateOnBasis( fit, t, periodicBasis, r, z );
+	}
+
 }

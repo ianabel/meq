@@ -291,8 +291,22 @@ namespace meq
 
 				auto pPrime = loadEitherProfile( 0.0, parameters.pPrimeFile, parameters.pPrimeScale,
 				                                 true, "PPrime", configFileName );
-				auto ggPrime = loadEitherProfile( 0.0, parameters.ggPrimeFile, parameters.ggPrimeScale,
-				                                  true, "GGPrime", configFileName );
+				/*
+				 * A q-DRIVEN RUN OPENS AT gg' = 0 AND THE LOOP SUPPLIES THE
+				 * REST. ROADMAP.md item 10 makes the toroidal field an OUTPUT,
+				 * so there is no table to read and the driver replaces this
+				 * profile through NormalisedMHDSource::setGGPrime() once per
+				 * map evaluation. A CONSTANT ZERO rather than a null: an
+				 * unconfigured source must still be evaluable, and gg' = 0 is
+				 * both a real physical state -- the vacuum g = const -- and the
+				 * honest statement of what is known before the first solve.
+				 */
+				auto ggPrime = parameters.safetyFactorFile.empty()
+					? loadEitherProfile( 0.0, parameters.ggPrimeFile,
+					                     parameters.ggPrimeScale, true,
+					                     "GGPrime", configFileName )
+					: std::static_pointer_cast<Profile const>(
+						std::make_shared<ConstantProfile const>( 0.0 ) );
 
 				return guarded( [ & ]() -> std::shared_ptr<NormalisedSource>
 				{

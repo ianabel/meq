@@ -17,7 +17,7 @@ manual and what a maintainer needs is `CLAUDE.md`. Git has them.
 |---|---|
 | ~~`DRIVER-PLAN.md`~~ | stage 7 — **done**, and now `docs/running.rst`, `docs/output.rst` and `docs/configuration.rst` |
 | ~~`FLOW-PLAN.md`~~ | item 9, FL-0 to FL-8 — **done**, and now `docs/rotation.rst`, which carries the derivation `RotatingSource.hpp` defers to |
-| `INVERSION-PLAN.md` | item 10's machinery — IN-A to IN-4, IN-6 and IN-P **done**, IN-5 deferred |
+| `INVERSION-PLAN.md` | item 10's machinery — **every stage done**, IN-A to IN-P |
 | `FREE-BOUNDARY-PLAN.md` | item 8 — FB-A, FB-0, FB-1, FB-2, FB-3, FB-7 **done**, FB-4 **answered**, FB-5 part built, and **FB-6 met 2026-09-07**: MEQ reproduces `freegs4e`'s converged limited tokamak to 1.5e-04 in `ψ_ax`. What is left of it is the limiter as a curve, and §10's diverted plasmas |
 | `PLASMA-EDGE-PLAN.md` | a design out of FB-4, **deliberately not to be started** until `j ≥ 1` is finished |
 | `MANTA-COUPLING.md` | the socket MaNTA presents, written from MaNTA's side. No field model is registered there yet |
@@ -159,9 +159,13 @@ Nothing is red and stages 0 to 7 are done, so the order is:
    `j ≥ 1` is finished, and its central premise is measured at two rungs out of
    three. PE-0 is a day's work and settles that; everything after it waits.
 
-2. ~~**Finish the inversion**~~ — item 10, and **IN-6 landed 2026-09-07**, so
-   the only stage left is IN-5, open surfaces, which is **deferred with free
-   boundary**: a disc chart has no meaning through a separatrix. `[output]
+2. ~~**Finish the inversion**~~ — item 10, and **every stage is done**. IN-5,
+   open surfaces, was the last: `ContourTracer::traceOpen()` traces both ways
+   from the seed and joins, and `meq::fitOpenSurface()` is Chebyshev in
+   normalised arc length — **5.3e+05 over 4 → 32 modes against a periodic
+   control that gets worse**, since forcing `R( −1 ) = R( +1 )` on a curve
+   whose ends are 0.8 m apart is inadmissible rather than merely poor.
+   `[output]
    FluxSurfaces` writes the `(Ψ, θ)` grid and `meq::GeometryCache` is the
    per-`ψ` cache `MANTA-COUPLING.md` §5's call pattern requires — confirmed at
    `nodes/surfaces`, 3.3× at 40 nodes over 12 surfaces against the naive that
@@ -177,11 +181,17 @@ Nothing is red and stages 0 to 7 are done, so the order is:
    and the Newton is affordable only because the profile is *fitted*, so the
    Jacobian is a handful of coefficients rather than `nFieldDOF`.
 
-   **What is left is the consumer's side rather than the solver's**: the target
-   is supplied as a callable and there is no `[source] SafetyFactorFile` or
-   driver route, the fixture is a rectangle with one closed plasma rather than a
-   machine, and the map is a solve per evaluation with no reuse of the previous
-   factorisation.
+   **And it reaches the solve from a file**: `[source] SafetyFactorFile` with
+   `SafetyFactorDegree` and `ToroidalFieldGuess`, `examples/q-driven.toml` as
+   the worked example, and `theDriverSolvesForTheToroidalField` recovering a
+   closed-form `g` to **5.0e-06** in 12 outer iterations and 43 equilibria.
+   **One solver serves all of them** — only `gg′` changes, so the mesh, the
+   spaces, the forms and the symbolic factorisation survive, and each solve is
+   warm-started from the last.
+
+   **What is left is the fixture**: it is a rectangle with one closed plasma
+   rather than a machine, and nothing has driven `q` on the limited tokamak,
+   where the support moves and `ψ_bnd` is an unknown.
 
 Items 4 and 6 are performance and neither is urgent; item 5 is a defect in
 MFEM's local solves that MEQ works around and has **not filed**; item 7 is a
@@ -194,8 +204,8 @@ The solver works and every claim about it is a measured convergence rate. Stages
 0 to 6 are done, **stage 7 is finished** — MEQ is a program that solves on a
 curved boundary, refines its own mesh, and restarts from a previous answer in one
 Newton step — **toroidal flow is finished**, FL-0 to FL-8, and **solution
-inversion is finished including its output stage**, every part of it but IN-5's
-open surfaces, which is deferred with free boundary.
+inversion is finished**, every stage of it including IN-6's output and IN-5's
+open surfaces.
 
 **The driver now refuses FOUR things, where this paragraph used to say one.**
 `[boundary] Type = "exact"`, an `AssemblyMode` or `TraceSolver` the build cannot
@@ -618,12 +628,12 @@ solution rather than another paper.
 
 ## 10. The fixed-`q(ψ)` solver — MEQ, and the round trip closes
 
-**`INVERSION-PLAN.md` is the design, and every stage but IN-5 is done and
-green.** This item became reachable at **IN-2**, where the flux-surface averages
+**`INVERSION-PLAN.md` is the design, and every stage is done and green.** This
+item became reachable at **IN-2**, where the flux-surface averages
 `⟨r^{-2}⟩_ψ` and `V′(ψ)` are measured against a converged reference on the exact
-field, and **IN-6** now writes them to a file against a flux label. **IN-5**,
-open surfaces, is deferred with free boundary, since a disc chart has no meaning
-through a separatrix.
+field; **IN-6** writes them to a file against a flux label; and **IN-5** covers
+the surfaces that do not close, which needed free boundary to exist before there
+was one to trace.
 
 **Take `q(ψ)` as input and find `I(ψ)` from it**, rather than taking `I(ψ)`
 directly as items 1 and 9 both do. It is how a transport code hands an
@@ -655,10 +665,16 @@ for **every** `ω > 0` when `G′ > 1`: under-relaxation stabilises a map that
 oscillates and does nothing at all for one that runs away. Measured, this map
 runs away.
 
-**WHAT IS LEFT IS THE CONSUMER'S SIDE.** The target `q` is supplied as a
-callable and there is no `[source] SafetyFactorFile` or driver route; the
-fixture is a rectangle with one closed plasma rather than a machine; and the map
-is a whole solve per evaluation with no reuse of the previous factorisation.
+**AND IT REACHES THE SOLVE FROM A FILE.** `[source] SafetyFactorFile` makes
+`gg′` an output, `examples/q-driven.toml` is the worked example, and the `.nc`
+carries the recovered `g^2` coefficients — on this route there is no
+`GGPrimeFile` beside the output for a consumer to look the field up in.
+**One solver serves every map evaluation**, through
+`NormalisedMHDSource::setGGPrime()`.
+
+**WHAT IS LEFT IS THE FIXTURE.** It is a rectangle with one closed plasma rather
+than a machine, and nothing has yet driven `q` on the limited tokamak, where the
+support moves and `ψ_bnd` is an unknown.
 
 Three things written down before it was started, kept because two of them held:
 

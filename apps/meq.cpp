@@ -36,6 +36,8 @@
 #include "meq/GradShafranov.hpp"
 #include "meq/Output.hpp"
 #include "meq/RotatingSource.hpp"
+#include "meq/SafetyFactor.hpp"
+#include "meq/SafetyFactorSolve.hpp"
 #include "meq/Sampler.hpp"
 #include "meq/SourceFactory.hpp"
 #include "meq/WarmStart.hpp"
@@ -47,6 +49,7 @@
 #include <cstdlib>
 #include <exception>
 #include <fstream>
+#include <sstream>
 #include <limits>
 #include <memory>
 #include <string>
@@ -504,6 +507,28 @@ int main( int argc, char **argv )
 	 * paying only when the field is warm too.
 	 */
 	double psiAxisGuess = 0.0;
+
+	/*
+	 * ROADMAP.md ITEM 10: THE q-DRIVEN ROUTE, AND WHAT IT CARRIES ACROSS
+	 * ADAPTIVE CYCLES.
+	 *
+	 * With [ source ] SafetyFactorFile the toroidal field is an OUTPUT: an
+	 * outer Newton on the coefficients of `g^2` wraps the whole solve, one
+	 * equilibrium per map evaluation. The coefficients are carried between
+	 * cycles for exactly the reason psi_ax is -- a refined mesh starting the
+	 * outer loop again from the vacuum guess would throw away every solve the
+	 * coarse one paid for, and the loop is the expensive thing here.
+	 *
+	 * `toroidalDriven` is the PLASMA source rather than whatever handle the
+	 * solver holds. A [[coils]] block wraps it, and setGGPrime() has to reach
+	 * the object that evaluates the profiles -- the same trap
+	 * setPlasmaSupport() is virtual for, met by keeping the inner pointer
+	 * instead.
+	 */
+	std::shared_ptr<meq::NormalisedMHDSource> toroidalDriven;
+	std::shared_ptr<meq::Profile const> safetyFactorTarget;
+	std::vector<double> toroidalCoefficients;
+
 	try
 	{
 		config = std::make_unique<meq::Configuration>( argument );
@@ -514,6 +539,28 @@ int main( int argc, char **argv )
 		{
 			auto plasma = meq::makeNormalisedSource( config->getSource(), argument );
 			psiAxisGuess = config->getSource().psiAxisGuess();
+
+			if ( config->getSource().type == meq::SourceType::MHD
+			     && !config->getSource().getMHD().safetyFactorFile.empty() )
+			{
+				meq::MHDParameters const &mhd = config->getSource().getMHD();
+				toroidalDriven =
+					std::dynamic_pointer_cast<meq::NormalisedMHDSource>( plasma );
+				if ( !toroidalDriven )
+					throw meq::ConfigError( argument, "source.SafetyFactorFile",
+						"only the \"mhd\" source can be driven by a target q" );
+
+				safetyFactorTarget = std::make_shared<meq::SplineProfile const>(
+					meq::SplineProfile::fromFile( mhd.safetyFactorFile ) );
+
+				// THE LOOP OPENS AT A CONSTANT g, so g^2 = g0^2 and every
+				// higher coefficient is zero. That is gg' = 0 -- the vacuum --
+				// which is the honest statement of what is known before the
+				// first equilibrium exists.
+				toroidalCoefficients.assign( mhd.safetyFactorDegree + 1, 0.0 );
+				toroidalCoefficients[ 0 ] =
+					mhd.toroidalFieldGuess*mhd.toroidalFieldGuess;
+			}
 
 			/*
 			 * THE MOVING SUPPORT IS SET ON THE PLASMA SOURCE AND NOT ON THE
@@ -1327,9 +1374,131 @@ int main( int argc, char **argv )
 			return ConfigurationError;
 		}
 
+		/*
+		 * THE q-DRIVEN OUTER LOOP, ROADMAP.md ITEM 10.
+		 *
+		 * One equilibrium per map evaluation, with ONE solver for all of them:
+		 * only gg' changes between steps, so the mesh, the spaces, the forms
+		 * and the trace solver's symbolic factorisation are all entitled to
+		 * survive, and NormalisedMHDSource::setGGPrime() is what lets them.
+		 * The warm start comes for free with the solver -- each solve begins
+		 * from the last one's field, which is what makes the later steps of the
+		 * loop cheap.
+		 */
+		auto runToroidalLoop = [ & ]()
+		{
+			meq::FluxFamilyOptions family;
+			meq::FluxSurfaceFamily extracted;
+
+			// THE MAP MUST NOT THROW. Everything below is a REFUSAL, reported
+			// to the line search as a residual pointing back at the last
+			// admissible point; see meq::ToroidalFieldMap. A run that cannot
+			// converge anywhere still ends by saying so rather than by
+			// unwinding through KINSOL's C frames.
+			auto step = [ & ]( std::vector<meq::Knot> const &knots )
+				-> meq::FluxSurfaceFamily const *
+			{
+				try
+				{
+					toroidalDriven->setGGPrime(
+						std::make_shared<meq::SplineProfile const>( knots ) );
+					solver->solve();
+
+					// POST-PROCESS BEFORE EXTRACTING, because the tracer roots
+					// psi* by default and psi* does not exist until this runs.
+					// IN-0 measured the traced curve 60x, 54x and 83x closer to
+					// the truth on the post-processed pairing at k = 1, 2, 3,
+					// so this is the field the family should be built on and
+					// not merely one that happens to be available.
+					solver->postProcess();
+					extracted = meq::extractFluxSurfaces( *solver, family );
+				}
+				catch ( std::exception const & )
+				{
+					return nullptr;
+				}
+				return &extracted;
+			};
+
+			meq::ToroidalFieldMap::Options mapOptions;
+			mapOptions.degree = config->getSource().getMHD().safetyFactorDegree;
+			meq::Profile const &targetProfile = *safetyFactorTarget;
+			mapOptions.target = [ &targetProfile ]( double psi )
+			{
+				return targetProfile( psi );
+			};
+
+			meq::ToroidalFieldMap map( step, mapOptions );
+
+			// std::ref AND NOT THE OBJECT. solveForToroidalField takes a
+			// std::function, which COPIES what it is given -- so the copy would
+			// do the solving and keep the counts, and the map here would report
+			// zero of everything afterwards. A reference_wrapper keeps one map.
+			meq::OuterNewtonResult const outcome =
+				meq::solveForToroidalField( toroidalCoefficients,
+				                            std::ref( map ) );
+
+			std::printf( "  q-driven outer loop: %s\n", outcome.status.c_str() );
+			std::printf( "  %d equilibria solved, %d refused, outer Jacobian "
+			             "conditioning %.3e\n",
+			             map.solves(), map.refusals(),
+			             outcome.jacobianConditioning );
+
+			if ( !outcome.converged )
+				throw std::runtime_error(
+					"the outer Newton on the toroidal field did not converge: "
+					+ outcome.status );
+
+			toroidalCoefficients = outcome.coefficients;
+
+			// g( Psi ) = sqrt( sum c_j Psi^j ), which is the ANSWER and is what
+			// a reader of this run wants beside psi_ax. Printed at the two ends
+			// and in the middle rather than as a table: the file carries the
+			// coefficients, and three numbers say whether the shear came out
+			// the right way round.
+			auto gAt = [ & ]( double psi )
+			{
+				double value = 0.0, power = 1.0;
+				for ( double c : toroidalCoefficients )
+				{
+					value += c*power;
+					power *= psi;
+				}
+				return value > 0.0 ? std::sqrt( value ) : 0.0;
+			};
+			std::printf( "  recovered g( Psi ) = R B_phi:  %.6f on the "
+			             "boundary, %.6f at Psi = 0.5, %.6f on the axis\n",
+			             gAt( 0.0 ), gAt( 0.5 ), gAt( 1.0 ) );
+			std::printf( "  g^2 coefficients, ascending in Psi:" );
+			for ( double c : toroidalCoefficients )
+				std::printf( " %.6e", c );
+			std::printf( "\n" );
+
+			/*
+			 * AND THE SOLVER IS LEFT HOLDING THE ANSWER, WHICH IT IS NOT AFTER
+			 * THE LOOP RETURNS.
+			 *
+			 * KINSOL's last call to the map is whatever it needed last, and on
+			 * a converged run that is usually a DIFFERENCING COLUMN -- an
+			 * equilibrium one step off the answer in one coefficient. Every
+			 * output below reads the solver, so writing without this would
+			 * publish a perturbed equilibrium beside converged coefficients,
+			 * agreeing with them to the differencing step and to nothing else.
+			 */
+			if ( step( meq::ggPrimeKnotsFromCoefficients(
+					toroidalCoefficients, mapOptions.knotSamples,
+					mapOptions.extension ) ) == nullptr )
+				throw std::runtime_error(
+					"the outer Newton converged but its own answer does not "
+					"re-solve, so there is no equilibrium to write" );
+		};
+
 		try
 		{
-			solver->solve();
+			if ( toroidalDriven )
+				runToroidalLoop();
+			else
+				solver->solve();
 		}
 		catch ( std::exception const &firstAttempt )
 		{
@@ -2541,6 +2710,34 @@ int main( int argc, char **argv )
 			writer.attribute( "psi_axis", solver->psiAxis() );
 			writer.attribute( "normalisation_residual",
 			                  solver->normalisationResidual() );
+		}
+
+		/*
+		 * A q-DRIVEN RUN'S ANSWER IS g, AND IT GOES IN THE INTERCHANGE FORMAT.
+		 *
+		 * ROADMAP.md item 10 inverts the usual direction: the toroidal field is
+		 * what the run FOUND rather than what it was told, so a consumer
+		 * reading this file has nothing else to judge it by -- there is no
+		 * GGPrimeFile beside it to look up. The coefficients are of
+		 * g^2 = sum_j c_j Psi^j, ascending, against the SOURCE's normalised
+		 * flux; g itself is their square root, and gg' is half the derivative.
+		 *
+		 * Written as a string rather than as a vector because these are
+		 * metadata about the run and not a field on the ( R, Z ) grid every
+		 * other variable in this file lives on.
+		 */
+		if ( !toroidalCoefficients.empty() && toroidalDriven )
+		{
+			std::ostringstream coefficients;
+			coefficients.setf( std::ios::scientific );
+			coefficients.precision( 10 );
+			for ( std::size_t i = 0; i < toroidalCoefficients.size(); ++i )
+				coefficients << ( i == 0 ? "" : " " ) << toroidalCoefficients[ i ];
+
+			writer.attribute( "toroidal_field_driven", 1 );
+			writer.attribute( "g_squared_coefficients", coefficients.str() );
+			writer.attribute( "safety_factor_target",
+			                  config->getSource().getMHD().safetyFactorFile );
 		}
 		/*
 		 * AND WHETHER psi_axis IS A MAGNETIC AXIS, which normalisation_residual

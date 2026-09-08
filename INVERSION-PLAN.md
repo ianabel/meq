@@ -5,8 +5,10 @@ Written 2026-09-02, after a literature survey whose references are indexed in
 and is authoritative on anything technical; `ROADMAP.md` is the priority order.
 This file is the design for one item.
 
-**IN-A, IN-0, IN-1, IN-2, IN-3, IN-4, IN-6 and IN-P are done and green; IN-5 is
-deferred with free boundary.** So §§2–6 are the
+**EVERY STAGE IS DONE AND GREEN** — IN-A, IN-0, IN-1, IN-2, IN-3, IN-4, IN-5,
+IN-6 and IN-P. **IN-5 was deferred with free boundary and is no longer**: free
+boundary now solves, so a level outside `psi_bnd` is a thing MEQ can produce and
+an open surface is a thing it can be asked for. So §§2–6 are the
 design the code was built from and the arguments it was built on — several of
 which the measurement then falsified, which is why they are still here — and §7
 is what each stage found. **Section numbers are load bearing**: `src/meq` and
@@ -419,7 +421,7 @@ plain Fourier expansion in `R` and `z` needs. Miller is the ancestor.
 
 ### 4.2 Open surfaces: Chebyshev in `l`
 
-Deferred with free boundary (§7, IN-5), but the choice is settled. Open
+**Done, §7 IN-5**, and the choice was settled before it was built. Open
 surfaces terminate on the domain boundary, so they have genuine endpoints and a
 periodic basis is simply wrong. Chebyshev is the natural basis on an interval,
 and there is a second reason beyond non-periodicity: an open surface approaching
@@ -614,8 +616,12 @@ them is IN-5's whole problem.**
    smoothness all the way out, and that dies at the separatrix: the surface
    develops a corner at the X-point and flux-surface quantities diverge
    logarithmically. **No polynomial basis in `Ψ` converges against a logarithm.**
-   Untouched by IN-4, and it is why IN-5 is deferred with free boundary rather
-   than merely unstarted.
+   Untouched by IN-4, and it is why IN-5 waited on free boundary rather than
+   merely being unstarted. **IN-5 does not solve it either, and does not claim
+   to**: what it delivers is the geometry of a surface OUTSIDE the separatrix,
+   in a basis that clusters its resolution at the ends where arc length goes
+   logarithmic. A level AT the separatrix still stalls at the saddle, which is
+   the honest answer for a set that is not a 1-manifold.
 3. ~~**C¹ in `Ψ` at minimum**, because `MANTA-COUPLING.md` needs
    `dGeometry_dpsi`.~~ A global expansion is `C^∞`.
 4. ~~**Localising the band's damage**, §4.3.~~ Removed by the transfer lift,
@@ -807,7 +813,7 @@ rather than a lossy filter, with critical points from §5. Carr, Snoeyink & Axen
 ## 7. The staged plan
 
 Every stage ended at a **measured rate**, not at "it runs". **IN-A, IN-0, IN-1,
-IN-2, IN-3, IN-4 and IN-6 are done and green**; IN-5 is deferred, IN-P is done.
+IN-2, IN-3, IN-4, IN-5 and IN-6 are done and green**, and so is IN-P.
 `CLAUDE.md`'s *Solution inversion* carries the measurements; what is
 kept below per stage is where the code lives, what the stage **found** that this
 plan did not predict, and the few numbers that are recorded nowhere else.
@@ -1147,9 +1153,62 @@ right surface**. **No `ψ`-element is needed and none is implemented.**
 > reads flux-surface *averages*, and an average over a surface does not know how
 > the surface was parametrised. **The deliverable was gauge-invariant all along.**
 
-### IN-5 — open surfaces
+### IN-5 — open surfaces — **DONE**
 
-Chebyshev per §4.2. **Deferred with free boundary**, per §6.
+Chebyshev per §4.2, and the two halves of it are the tracing and the basis.
+
+**`ContourTracer::traceOpen()`** traces from the seed in BOTH directions and
+joins, so the curve runs from one endpoint to the other and `arcLength` is
+cumulative over the whole of it. The second half is the same march with the
+tangent reversed — `( -q_z, q_r )` negated, which is exact — rather than a
+second tracer over `-q`, which would cost a copy of the field and a second set
+of settings to keep in step. `ContourStatus::Open` is the new status and it is a
+SUCCESS: a level that runs wall to wall has genuine endpoints, where `LeftMesh`
+on a closed level means the curve was cut short. A level that loops comes back
+`TooLong` — the closure gate is suppressed for an open trace — and the caller
+is told to use `trace()`.
+
+**`meq::fitOpenSurface()`** is `R` and `z` as truncated Chebyshev series in
+normalised arc length, `t = 2s/L − 1`. MFEM-free, beside `SurfaceFit`'s Zernike.
+
+**MEASURED ON AN ANALYTIC FIXTURE**, `tests/convergence/OpenSurfaces.cpp`:
+`ψ = z − a( r − r₀ )²` interpolated into an H1 space of degree 2, which
+represents that quadratic **exactly** — so every number is a property of the
+tracing and the fit and none of it is the discretisation. Level sets are
+parabolas open across the box.
+
+| modes | 4 | 8 | 12 | 16 | 20 | 24 | 28 | 32 |
+|---|---|---|---|---|---|---|---|---|
+| **Chebyshev**, off-sample | 3.31e-02 | 2.33e-03 | 3.01e-04 | 4.44e-05 | 6.97e-06 | 1.08e-06 | 1.28e-07 | 6.24e-08 |
+| **periodic control** | 2.41e-01 | 2.91e-01 | 3.02e-01 | 3.06e-01 | 3.07e-01 | 3.10e-01 | 3.11e-01 | 3.12e-01 |
+
+**5.3e+05 against 0.77.** The error is measured at 401 points the fit never saw,
+against the closed form, because a residual at its own samples is what a least
+squares minimises and would flatter both columns.
+
+**THE RATIO IS WHAT SAYS GEOMETRIC AND THE TOTAL IS NOT.** The steps are equal
+and ADDITIVE — four modes each — so a geometric `C q^m` holds its ratio while an
+algebraic `C m^-p` gives `( 16/12 )^p`, `( 20/16 )^p`, `( 24/20 )^p`, which falls
+because the multiplier does. Measured, the column is **flat at 6.37 to 6.43**
+over that range. It floors at about 6e-08, which is the traced points' own
+1.6e-10 carried through a least squares of 32 columns, and the assertion stops
+before it.
+
+**AND THE CONTROL GETS WORSE RATHER THAN STALLING**, which is sharper than §4.2
+predicted. A periodic basis forces `R( −1 ) = R( +1 )` on a curve whose ends are
+0.8 m apart; given more modes it fits the samples better in the least-squares
+sense while the periodicity it cannot escape pushes the curve further from the
+truth BETWEEN them. Same mode count, same decomposition, same distance measure —
+the two differ in their basis and in nothing else.
+
+**WHAT IS NOT BUILT, AND IT IS THE SCOPE §6 DESCRIBES.** There are no
+flux-surface AVERAGES over an open surface, and there should not be: `V′` and
+`⟨R^{-2}⟩` are integrals round a closed loop, and the volume an open curve
+encloses is not defined. What IN-5 delivers is the GEOMETRY — the curve, its
+arc length and a basis that represents it — which is what a scrape-off-layer
+consumer asks for. Nor is the tracer X-point aware: a level AT a separatrix
+still stalls at the saddle, where the level set is not a 1-manifold, and
+`Stalled` is the honest answer rather than a defect.
 
 ### IN-6 — the output — **DONE, 2026-09-07**
 
