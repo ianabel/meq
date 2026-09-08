@@ -4220,10 +4220,69 @@ axis, which is the defect §11.0 opens with.
   `ψ = 0` cannot tell `gg′ ≡ 0` from `gg′( Ψ_axis ) = 0` by luck, and under a
   moving support it would read zero for any profile at all.
 
-* **NEW: the fill can still reach the axis.** `refreshPlasmaComponent()` refuses
-  to *seed* an axis-touching element and allows the fill to *reach* one, so an
-  iterate lifting `ψ_h` above `ψ_bnd` on the axis re-opens the pole even with
-  `ConfineToPlasma` on. Whether that is reachable in practice is unmeasured.
+* **MEASURED 2026-09-08: the fill DOES reach the axis, on intermediate iterates
+  of the shipped machine, and it does not survive to the answer.**
+  `refreshPlasmaComponent()` refuses to *seed* an axis-touching element and does
+  not refuse to *reach* one, so an iterate lifting `ψ_h` above `ψ_bnd` there puts
+  §11.3's `1/r` pole back with `ConfineToPlasma` on. It happens.
+  `theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses` in
+  `tests/convergence/PlasmaConnectivity.cpp` is the record; on §11.7's own
+  fixture at limiter 1.15, `k = 2`, 1333 elements:
+
+  | Newton step | 1 | 2 | 3 | converged (8) |
+  |---|---|---|---|---|
+  | `ψ_bnd` | **−4.43e-03** | **−2.00e-04** | **−3.90e-04** | +7.03e-04 |
+  | axis elements in the plasma, of 84 | **84** | **84** | **84** | **0** |
+  | `\|F\|` the assembly puts on `r = 0` | 3.75e-03 | 1.63e-03 | 4.97e-03 | **0.0** |
+
+  and the same shape at 314 and 573 elements, so it is not one resolution's
+  accident.
+
+  **THE FILL IS NOT THE DEFECT AND MUST NOT BE CHANGED.** At those iterates its
+  answer is *correct*: `ψ_bnd` is negative, so `{Ψ > 0}` genuinely is connected
+  and genuinely does contain `r = 0`, and a rule that refused to say so would be
+  a fill lying about the state it was handed. Blocking axis-touching elements
+  outright is also wrong for the one device class this section protects — a
+  levitated dipole and a magnetic mirror both have plasma to `r = 0`, both have
+  `gg′ ≡ 0` there, and the pole never existed.
+
+  **WHAT MAKES IT SAFE IS A COUPLING BETWEEN TWO READINGS, AND THAT IS NOW
+  ASSERTED RATHER THAN OBSERVED.** `ψ( 0, z ) = 0` exactly, so the axis is inside
+  the plasma precisely when `Ψ_axis = −ψ_bnd/span > 0` — which is
+  `checkAxisSource().axisInsidePlasma`, and which the driver refuses on. At a
+  *converged* answer `ψ_h( 0, z ) → 0`, so the fill can reach the axis only when
+  that reading is positive too. Measured over both branches: at limiter 1.15 it
+  reaches none of the 84 and the guard is clean; at 1.20, where this section
+  records `ψ_bnd` going negative, it reaches all 84 and the guard refuses on both
+  counts. **So the guard does catch the converged case**, and the assertion is
+  the implication rather than either column.
+
+  **THE GAP THE GUARD CANNOT SEE IS THE DISCRETE LAYER, AND THE MARGIN WIDENS
+  UNDER REFINEMENT.** `checkAxisSource()` asks at `ψ = 0` on purpose — asking the
+  iterate refuses a healthy run at 6.2e-05 of scale — so it cannot see a
+  `ψ_h( 0, z )` exceeding a *positive* `ψ_bnd`. That state exists: an unconfined
+  solve on this geometry grows a layer reaching `Ψ = 2.7` at `r = 0` while the
+  guard reads `Ψ_axis = −2.6e-01`. It is not reachable from a *confined* solve,
+  because the layer is what the pole builds and the pole is what confinement
+  removes — and where the layer does exist the **fill** separates it as its own
+  component, which is the other half of the coupling and is now asserted in
+  `theLimiterCaseAlreadyHasMoreThanOneLobe`: 84 candidates, **0 reached**, `|F|`
+  on the axis exactly `0.0`. **And what it is keeping out is measured, not
+  asserted at**: with `elementInPlasma()` ignored the same state assembles
+  `|F| = 1.376` on `r = 0`, so the fill is the whole of the difference between a
+  bounded load and `μ₀ j_φ` diverging like `1/r` along the entire symmetry axis.
+  Sliding `ψ_bnd` by hand on that state is the only way found to make the layer
+  merge with the plasma, and it takes `ψ_bnd = 1e-08` against the 7e-04 a real
+  solve carries. The margin:
+
+  | elements | 314 | 573 | 1333 |
+  |---|---|---|---|
+  | `max ψ_h` on `r = 0` | 5.34e-06 | 2.25e-06 | 6.68e-07 |
+  | as a fraction of `ψ_bnd` | 7.84e-03 | 3.22e-03 | 9.51e-04 |
+
+  falling at **2.92 against `k+1 = 3`** while `ψ_bnd` sits at 6.8e-04 → 7.0e-04.
+  So the two readings separate faster as the mesh is refined, and the coupling
+  is a limit rather than a number.
 * **DONE 2026-09-07.** `ExteriorDtN::modeAmplitudes()`, `traceNorm()` and
   `truncationRatio()`, and the driver prints the last of them every coupled run.
   The mass formula **checked out against the class's own derivation** rather than

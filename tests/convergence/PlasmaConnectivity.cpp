@@ -58,6 +58,18 @@
  *      given, in no more steps. Without this every case above is compatible
  *      with a fill that quietly perturbs the answer.
  *
+ *   6. theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses -- CAN THE FILL REACH
+ *      r = 0? refreshPlasmaComponent() refuses to SEED an axis-touching element
+ *      and does not refuse to REACH one, so an iterate lifting psi_h above
+ *      psi_bnd there would put section 11.3's 1/r pole back with
+ *      `ConfineToPlasma` on. IT DOES REACH IT, on the first Newton steps of the
+ *      shipped physical machine, where psi_bnd is transiently negative and
+ *      `{ Psi > 0 }` genuinely contains the axis -- and it clears by step 2 to 4.
+ *      At a CONVERGED answer it reaches the axis only where
+ *      checkAxisSource() refuses, which is what makes that guard sufficient and
+ *      is what this case asserts. The margin between the two readings is the
+ *      discrete axis layer, and it falls at k+1 while psi_bnd does not move.
+ *
  * AND ONE THING WAS FOUND THAT IS NOT ABOUT CONNECTIVITY AT ALL, in case 3:
  * psi_ax on that shipped converged answer is attained in an element TOUCHING
  * r = 0, and reads 2.5x the largest psi_h anywhere off the symmetry axis. That
@@ -222,6 +234,138 @@ namespace
 		backgrounds.push_back( std::move( background ) );
 		subs.push_back( std::move( sub ) );
 		paths.push_back( std::move( path ) );
+		return out;
+	}
+
+	/*
+	 * THE PHYSICAL TWO-BORDER MACHINE OF FREE-BOUNDARY-PLAN.md section 11.7,
+	 * transcribed rather than shared for the reason PowerProfile is: a change
+	 * to either file's fixture must not silently move the other's numbers.
+	 *
+	 * Three ingredients and all three are necessary -- ConfineToPlasma, a
+	 * prescribed current, and a vertical field -- and the field is DERIVED
+	 * rather than tuned: Shafranov's
+	 *
+	 *     B_v = mu0 I_p/( 4 pi R )[ ln( 8R/a ) + beta_p + l_i/2 - 3/2 ]
+	 *
+	 * with a = R_limiter - R_0, and the current that delivers it measured from
+	 * the conductors themselves through ExteriorCoilSet::gradPsi, because
+	 * ( R_0, 0 ) is not on the symmetry axis and the textbook on-axis loop
+	 * formula does not apply there.
+	 */
+	double const machineRadius = 0.75;
+	double const machineCurrent = 0.12;
+
+	meq::ExteriorCoilSet machineCoils( double limiterR, double mu0 )
+	{
+		double const minorRadius = limiterR - machineRadius;
+		double const bracket =
+			std::log( 8.0*machineRadius/minorRadius ) + 1.0 - 1.5;
+		double const field =
+			-machineCurrent*bracket/( 4.0*M_PI*machineRadius );
+
+		meq::ExteriorCoilSet probe( mu0 );
+		probe.add( meq::Coil( 1.80, +0.90, 0.10, 0.10, 1.0 ) );
+		probe.add( meq::Coil( 1.80, -0.90, 0.10, 0.10, 1.0 ) );
+		double probeR = 0.0;
+		double probeZ = 0.0;
+		probe.gradPsi( machineRadius, 0.0, probeR, probeZ );
+
+		double const current = field/( probeR/machineRadius );
+		meq::ExteriorCoilSet set( mu0 );
+		set.add( meq::Coil( 1.80, +0.90, 0.10, 0.10, current ) );
+		set.add( meq::Coil( 1.80, -0.90, 0.10, 0.10, current ) );
+		return set;
+	}
+
+	/// What the fill and the assembly say about the symmetry axis at the state
+	/// the solver is holding.
+	struct AxisReading
+	{
+		int elements = 0;      ///< elements with a vertex on r = 0
+		int candidates = 0;    ///< of those, elements carrying Psi > 0 somewhere
+		int reached = 0;       ///< of those, elements the fill put in the plasma
+		double layer = 0.0;    ///< the largest psi_h at a node ON r = 0
+		double assembled = 0.0;///< the largest | F | the ASSEMBLY puts on r = 0
+	};
+
+	/*
+	 * AND `assembled` IS THE ONE QUANTITY HERE THAT NOTHING ELSE MEASURES.
+	 *
+	 * GradShafranovSolver::checkAxisSource() evaluates F at psi = 0, which is
+	 * what psi( 0, z ) IS for any axisymmetric field with bounded B, and that is
+	 * deliberately the CONTINUOUS question: asking the iterate's own psi_h
+	 * instead measures the discretisation's axis layer rather than its cause and
+	 * refuses a healthy run at 6.2e-05 of scale.
+	 *
+	 * This is the DISCRETE question, and it is the one the load functional
+	 * answers to. meq::SourceIntegrator assembles -( F/r, w ) with
+	 * F = elementInPlasma( e ) ? f( r, z, psi_h ) : fOutsidePlasma( r, z ), so
+	 * that expression at a node on r = 0 is exactly what the assembly puts on
+	 * the symmetry axis. It needs no tolerance, because on a run where the fill
+	 * does not reach the axis there are no such nodes to read and it is EXACTLY
+	 * zero.
+	 */
+	AxisReading readAxis( GradShafranovSolver const &solver, mfem::Mesh &mesh,
+	                      meq::NormalisedSource const &source )
+	{
+		AxisReading out;
+		out.layer = -std::numeric_limits<double>::infinity();
+
+		mfem::GridFunction const &potential = solver.potential();
+		mfem::FiniteElementSpace const *fes = potential.FESpace();
+		double const psiBnd = source.boundaryNormalisation();
+		double const span = source.normalisation() - psiBnd;
+
+		mfem::Array<int> vertices;
+		mfem::Array<int> dofs;
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			mesh.GetElementVertices( e, vertices );
+			bool onAxis = false;
+			for ( int i = 0; i < vertices.Size(); ++i )
+				if ( mesh.GetVertex( vertices[ i ] )[ 0 ] <= 0.0 )
+					onAxis = true;
+			if ( !onAxis )
+				continue;
+
+			++out.elements;
+			bool const reached = solver.elementInPlasma( e );
+			if ( reached )
+				++out.reached;
+
+			// A LOCAL transformation: GetElementTransformation( int ) hands out
+			// shared scratch and resets pointers obtained from previous calls.
+			mfem::FiniteElement const *element = fes->GetFE( e );
+			mfem::IntegrationRule const &nodes = element->GetNodes();
+			mfem::IsoparametricTransformation transformation;
+			mesh.GetElementTransformation( e, &transformation );
+
+			fes->GetElementDofs( e, dofs );
+			bool candidate = false;
+			for ( int i = 0; i < dofs.Size() && i < nodes.GetNPoints(); ++i )
+			{
+				int const dof = dofs[ i ] >= 0 ? dofs[ i ] : -1 - dofs[ i ];
+				double const psi = potential( dof );
+				if ( ( psi - psiBnd )/span > 0.0 )
+					candidate = true;
+
+				mfem::Vector point;
+				transformation.Transform( nodes.IntPoint( i ), point );
+				if ( point( 0 ) != 0.0 )
+					continue;
+
+				out.layer = std::max( out.layer, psi );
+
+				// EXACTLY what meq::SourceIntegrator would evaluate here.
+				double const value = reached
+					? source.f( point( 0 ), point( 1 ), psi )
+					: source.fOutsidePlasma( point( 0 ), point( 1 ) );
+				out.assembled = std::max( out.assembled, std::abs( value ) );
+			}
+			if ( candidate )
+				++out.candidates;
+		}
 		return out;
 	}
 
@@ -1051,6 +1195,64 @@ BOOST_AUTO_TEST_CASE( theLimiterCaseAlreadyHasMoreThanOneLobe )
 	            "which is what puts it there -- or psi_ax is following the layer "
 	            "again, which would mean the axis constraint has reverted to "
 	            "AxisConstraint::NodalMaximum" );
+
+	/*
+	 * AND THE FILL SEPARATES THAT LAYER, WHICH IS THE ONE THING STANDING
+	 * BETWEEN IT AND THE ASSEMBLY.
+	 *
+	 * checkAxisSource() evaluates F at psi = 0 -- which psi( 0, z ) IS for any
+	 * axisymmetric field with bounded B -- so it asks the CONTINUOUS question
+	 * and reads clean here: psi_bnd is positive, Psi_axis = -psi_bnd/span is
+	 * negative, and the physical axis is in the vacuum. The DISCRETE state is
+	 * the opposite. This fixture's layer puts psi_h on r = 0 at Psi = 2.7,
+	 * deep inside `{ Psi > 0 }`, so every one of the 84 axis-touching elements
+	 * is a candidate and a pointwise support test would switch mu_0 j_phi on
+	 * along the whole symmetry axis.
+	 *
+	 * The fill reaches NONE of them, because the layer is its own component:
+	 * psi_h dips below psi_bnd between it and the plasma, and the two-rule fill
+	 * traverses only strictly interior elements. That is the half of the axis
+	 * guard nothing else covers -- theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses
+	 * asserts the other half, that at a converged answer the fill reaches r = 0
+	 * only where checkAxisSource() refuses.
+	 *
+	 * AND THE SIZE OF WHAT IT IS KEEPING OUT IS MEASURED RATHER THAN ASSERTED
+	 * AT: with elementInPlasma() ignored, this state assembles | F | = 1.376 on
+	 * r = 0 against a source scale of the same order -- so the fill is not
+	 * trimming an edge here, it is the whole of the difference between a bounded
+	 * load and mu_0 j_phi diverging like 1/r along the entire symmetry axis.
+	 */
+	meq::GradShafranovSolver::AxisSourceCheck const axisSource =
+		solver.checkAxisSource();
+	AxisReading const axisReading = readAxis( solver, *d.sub, source );
+	std::printf( "    %-38s %8d\n", "axis-touching elements, candidates",
+	             axisReading.candidates );
+	std::printf( "    %-38s %8d\n", "of those, reached by the fill",
+	             axisReading.reached );
+	std::printf( "    checkAxisSource() reads Psi on r = 0 as %.4e, so the "
+	             "CONTINUOUS test is clean\n",
+	             axisSource.normalisedFluxOnAxis );
+	std::fflush( stdout );
+
+	BOOST_TEST( axisReading.candidates > 0,
+	            "no axis-touching element carries Psi > 0 on this fixture, so "
+	            "the layer that makes it worth measuring is gone and the fill "
+	            "has nothing to separate" );
+	BOOST_TEST( !axisSource.axisInsidePlasma,
+	            "checkAxisSource() already reports the axis inside the plasma "
+	            "here, so this fixture no longer demonstrates the case the "
+	            "guard cannot see and the assertion below is redundant" );
+	BOOST_TEST( axisReading.reached == 0,
+	            "the fill put " << axisReading.reached << " of "
+	            << axisReading.elements << " axis-touching elements into the "
+	            "plasma's component, on a state where psi_h on r = 0 is "
+	            "Psi = " << ( axisReading.layer - psiBnd )/span << ". "
+	            "checkAxisSource() asks at psi = 0 and reads this state clean, "
+	            "so the fill is the only thing keeping mu_0 j_phi off the "
+	            "symmetry axis" );
+	BOOST_TEST( axisReading.assembled == 0.0,
+	            "the assembly puts | F | = " << axisReading.assembled
+	            << " on r = 0 at this state" );
 }
 
 
@@ -1559,5 +1761,314 @@ BOOST_AUTO_TEST_CASE( theFillDoesNotMoveASingleLobeAnswer )
 		BOOST_TEST( std::abs( pointwise.axis - component.axis ) < 1.0e-8,
 		            "psi_ax came out " << pointwise.axis << " without the fill "
 		            "and " << component.axis << " with it" );
+	}
+}
+/*
+ * CAN THE FILL REACH THE SYMMETRY AXIS, AND DOES IT MATTER?
+ *
+ * refreshPlasmaComponent() refuses to SEED an axis-touching element -- the
+ * argmax of psi_h on a half-disc is the r = 0 layer and not the magnetic axis,
+ * which theLimiterCaseAlreadyHasMoreThanOneLobe measures -- and it does not
+ * refuse to REACH one. So the question FREE-BOUNDARY-PLAN.md section 11.6
+ * leaves open is whether an iterate can lift psi_h above psi_bnd on the axis
+ * and put the 1/r pole of section 11.3 back with `ConfineToPlasma` on.
+ *
+ * IT CAN, AND IT DOES -- ON THE INTERMEDIATE ITERATES OF THE SHIPPED PHYSICAL
+ * FIXTURE, at every resolution tried. The first Newton step of section 11.7's
+ * own machine carries psi_bnd NEGATIVE, so `{ Psi > 0 }` genuinely contains
+ * r = 0, every axis-touching element is in the plasma's component, and the
+ * assembly puts a non-zero F on the axis. It clears by step 2 to 4 and the
+ * converged answer has no axis element that is even a candidate.
+ *
+ * SO THE FILL IS NOT THE DEFECT AND MUST NOT BE CHANGED. At those iterates the
+ * fill's answer is CORRECT: the level set really is connected and really does
+ * contain the axis, and a rule that refused to say so would be a fill that
+ * lies about the state it is given. Blocking axis-touching elements outright
+ * would also be wrong for the one device class section 11.6 protects -- a
+ * levitated dipole and a magnetic mirror both have plasma to r = 0, and both
+ * have gg' == 0 there, so F( 0, z ) vanishes and the pole never existed.
+ *
+ * WHAT MAKES IT SAFE IS A COUPLING BETWEEN TWO SEPARATE READINGS, AND THIS CASE
+ * IS THAT COUPLING ASSERTED. psi( 0, z ) = 0 exactly, so the axis is inside the
+ * plasma precisely when Psi_axis = -psi_bnd/span is positive -- which is
+ * checkAxisSource().axisInsidePlasma, and which the driver refuses on. At a
+ * CONVERGED answer psi_h( 0, z ) -> 0, so the fill can only reach the axis when
+ * that reading is positive too. Measured over both branches of the limiter
+ * sweep: at R = 1.15 the fill reaches none of the 84 axis elements and the
+ * guard is clean; at R = 1.20, where section 11.7 records psi_bnd going
+ * negative, it reaches all 84 and the guard refuses on both counts.
+ *
+ * THE GAP BETWEEN THE TWO READINGS IS THE DISCRETE LAYER, AND IT IS MEASURED
+ * RATHER THAN ASSUMED. checkAxisSource() asks at psi = 0 on purpose -- asking
+ * the iterate refuses a healthy run at 6.2e-05 of scale -- so it cannot see a
+ * psi_h( 0, z ) that exceeds a POSITIVE psi_bnd. That state exists: an
+ * unconfined solve on this same geometry grows a layer reaching Psi = 2.7 at
+ * r = 0. It is not reachable from a confined solve, because the layer is what
+ * the pole builds and the pole is what confinement removes -- and where the
+ * layer does exist the fill separates it as its own component, which is the
+ * other half of the coupling. What is asserted here is the margin: psi_h on the
+ * axis falls at the potential's own order while psi_bnd stays put, so the gap
+ * WIDENS under refinement rather than closing.
+ */
+BOOST_AUTO_TEST_CASE( theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses )
+{
+	int const order = 2;
+	double const mu0 = 1.0;
+
+	auto pPrime = std::make_shared<PowerProfile const>( 0.6, 1 );
+	auto ggPrime = std::make_shared<PowerProfile const>( 0.05, 1 );
+
+	meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 4 );
+	mfem::ConstantCoefficient zero( 0.0 );
+	mfem::FunctionCoefficient guess( [ ]( mfem::Vector const &x )
+	{
+		double const dr = x( 0 ) - machineRadius;
+		double const dz = x( 1 );
+		double const t = 1.0 - ( dr*dr + dz*dz )/( 0.40*0.40 );
+		return t > 0.0 ? 0.1*t : 0.0;
+	} );
+
+	struct Row
+	{
+		int n = 0;
+		double limiter = 0.0;
+		int cap = 0;
+		bool converged = false;
+		int iterations = 0;
+		double psiBnd = 0.0;
+		bool refused = false;      ///< checkAxisSource() would refuse this run
+		AxisReading axis;
+	};
+
+	// The mesh is built once per resolution: mfem::SubMesh keeps a pointer to
+	// its parent and makeHalfDisc()'s pools are what keep that alive.
+	std::vector<HalfDisc> meshes;
+	for ( int n : { 12, 16, 24 } )
+		meshes.push_back( makeHalfDisc( n ) );
+
+	auto run = [ & ]( std::size_t mesh, double limiterR, int cap ) -> Row
+	{
+		HalfDisc &d = meshes[ mesh ];
+
+		meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, mu0 );
+		source.setPlasmaSupport( true );
+
+		GradShafranovSolver solver( *d.sub, order );
+		solver.setInitialGuess( guess );
+		solver.setNewtonControl( 1.0e-9, 1.0e-12, cap );
+		solver.setSource( source, 0.1 );
+		solver.setPlasmaCurrent( machineCurrent );
+		solver.setBoundaryData( zero );
+		solver.setExtension( *d.path, d.gammaHMarker );
+		solver.setBoundaryFluxPoint( limiterR, 0.0 );
+		meq::ExteriorCoilSet const coils = machineCoils( limiterR, mu0 );
+		solver.setExteriorConductors( coils );
+		solver.setExteriorCoupling( dtn );
+
+		Row row;
+		row.limiter = limiterR;
+		row.cap = cap;
+		row.n = d.sub->GetNE();
+		try
+		{
+			solver.solve();
+			row.converged = !solver.newtonResiduals().empty()
+			                && solver.newtonResiduals().back() < 1.0e-8;
+		}
+		catch ( std::exception const & )
+		{
+			// A capped run is EXPECTED to land here: the point of it is the
+			// iterate, not the answer.
+			row.converged = false;
+		}
+		row.iterations = static_cast<int>( solver.newtonResiduals().size() ) - 1;
+		row.psiBnd = solver.psiBoundary();
+
+		// The mask as the last residual left it, refreshed at the iterate the
+		// solver is now holding so that what is read is the state, not a
+		// half-step behind it.
+		solver.refreshPlasmaComponent( solver.potential() );
+		row.axis = readAxis( solver, *d.sub, source );
+
+		GradShafranovSolver::AxisSourceCheck const check = solver.checkAxisSource();
+		row.refused = check.reachesAxis
+		              && ( !check.bounded
+		                   || ( check.axisInsidePlasma
+		                        && !check.sourceVanishesOnAxis ) );
+		return row;
+	};
+
+	std::printf( "\n  CAN THE FILL REACH r = 0, AND DOES checkAxisSource() SEE "
+	             "IT WHEN IT DOES?\n" );
+	std::printf( "    section 11.7's machine: ConfineToPlasma, mu0 I_p = %.2f, "
+	             "and Shafranov's field for a = R_limiter - %.2f\n",
+	             machineCurrent, machineRadius );
+	std::printf( "    %-9s %-8s %-5s %5s %14s %10s %11s %11s %12s %9s\n",
+	             "elements", "limiter", "cap", "its", "psi_bnd", "axis els",
+	             "candidates", "REACHED", "| F | on r=0", "guard" );
+
+	std::vector<Row> rows;
+
+	// 1. THE TRANSIENT, step by step, on the finest of the three meshes.
+	for ( int cap : { 1, 2, 3 } )
+		rows.push_back( run( 2, 1.15, cap ) );
+
+	// 2. THE CONVERGED ANSWER on both branches of the limiter sweep. 1.15 is
+	//    one of section 11.7's five healthy radii; 1.20 is where that section
+	//    records psi_bnd going negative and the O-point landing on Gamma.
+	std::size_t const healthyRow = rows.size();
+	rows.push_back( run( 2, 1.15, 150 ) );
+	std::size_t const spuriousRow = rows.size();
+	rows.push_back( run( 2, 1.20, 150 ) );
+
+	// 3. THE MARGIN under refinement, at the healthy radius.
+	std::size_t const marginRow = rows.size();
+	rows.push_back( run( 0, 1.15, 150 ) );
+	rows.push_back( run( 1, 1.15, 150 ) );
+
+	for ( Row const &row : rows )
+	{
+		char capText[ 16 ] = "-";
+		if ( row.cap < 150 )
+			std::snprintf( capText, sizeof capText, "%d", row.cap );
+		std::printf( "    %-9d %-8.2f %-5s %5d %14.6e %10d %11d %11d %12.4e "
+		             "%9s\n",
+		             row.n, row.limiter, capText, row.iterations, row.psiBnd,
+		             row.axis.elements, row.axis.candidates, row.axis.reached,
+		             row.axis.assembled, row.refused ? "REFUSES" : "clean" );
+	}
+
+	/*
+	 * THE MARGIN, COARSEST FIRST. `n` is an element count and h goes as its
+	 * square root on a two-dimensional mesh, so that is what the order is taken
+	 * against.
+	 */
+	std::vector<Row const *> margin{ &rows[ marginRow ], &rows[ marginRow + 1 ],
+	                                 &rows[ healthyRow ] };
+	std::vector<double> ratio;
+	for ( Row const *row : margin )
+		ratio.push_back( row->axis.layer/row->psiBnd );
+
+	auto observedOrder = [ & ]( std::size_t from, std::size_t to )
+	{
+		return std::log( ratio[ from ]/ratio[ to ] )
+		       /std::log( std::sqrt( static_cast<double>( margin[ to ]->n )
+		                             /margin[ from ]->n ) );
+	};
+
+	std::printf( "    the layer psi_h( 0, z ) against psi_bnd, at the healthy "
+	             "radius:\n" );
+	std::printf( "      %-10s %14s %14s %12s %8s\n", "elements", "max psi_h",
+	             "psi_bnd", "ratio", "order" );
+	for ( std::size_t i = 0; i < margin.size(); ++i )
+	{
+		char rateText[ 12 ] = "-";
+		if ( i > 0 )
+			std::snprintf( rateText, sizeof rateText, "%.3f",
+			               observedOrder( i - 1, i ) );
+		std::printf( "      %-10d %14.6e %14.6e %12.4e %8s\n", margin[ i ]->n,
+		             margin[ i ]->axis.layer, margin[ i ]->psiBnd, ratio[ i ],
+		             rateText );
+	}
+	std::printf( "      over the whole sequence: %.3f, against k+1 = %d\n",
+	             observedOrder( 0, margin.size() - 1 ), order + 1 );
+	std::fflush( stdout );
+
+	/*
+	 * 1. THE FILL DOES REACH THE AXIS, WHICH IS SECTION 11.6's QUESTION
+	 *    ANSWERED. Without this the case is vacuous: every assertion below
+	 *    would be satisfied by a fill that simply never got there.
+	 */
+	BOOST_TEST( rows[ 0 ].axis.reached > 0,
+	            "the first Newton step of the physical fixture put "
+	            << rows[ 0 ].axis.reached << " of " << rows[ 0 ].axis.elements
+	            << " axis-touching elements in the plasma's component. If that "
+	            "is now zero the transient this case exists to measure is gone "
+	            "-- check whether psi_bnd is still negative at step 1, which is "
+	            "what puts r = 0 inside `{ Psi > 0 }` -- and every assertion "
+	            "below has become vacuous" );
+	BOOST_TEST( rows[ 0 ].axis.assembled > 0.0,
+	            "the fill reached " << rows[ 0 ].axis.reached << " axis "
+	            "elements at step 1 and the assembly still puts | F | = "
+	            << rows[ 0 ].axis.assembled << " on r = 0. Reaching the axis "
+	            "without a source there would mean the pointwise test is "
+	            "closing the pole on its own and the fill is not load bearing" );
+
+	/*
+	 * 2. AND IT DOES NOT SURVIVE TO THE ANSWER. Exactly zero, with no
+	 *    tolerance, because on a healthy run there is no node on r = 0 in an
+	 *    element the fill reached and the reading is empty rather than small.
+	 */
+	BOOST_TEST( rows[ healthyRow ].converged );
+	BOOST_TEST( rows[ healthyRow ].axis.reached == 0,
+	            "the CONVERGED answer at limiter 1.15 has "
+	            << rows[ healthyRow ].axis.reached << " axis-touching elements "
+	            "in the plasma's component. An intermediate iterate touching "
+	            "r = 0 is harmless and this is not: it is a converged "
+	            "equilibrium carrying toroidal current on the machine's own "
+	            "centre line" );
+	BOOST_TEST( rows[ healthyRow ].axis.assembled == 0.0,
+	            "the converged healthy answer assembles | F | = "
+	            << rows[ healthyRow ].axis.assembled << " on r = 0, where the "
+	            "load is -( F/r, w ) and F/r is mu_0 j_phi" );
+	BOOST_TEST( !rows[ healthyRow ].refused,
+	            "checkAxisSource() refuses the healthy row, so this case is "
+	            "measuring a fixture that no longer describes a machine rather "
+	            "than the coupling it was written for" );
+
+	/*
+	 * 3. THE COUPLING, WHICH IS WHAT MAKES THE EXISTING GUARD SUFFICIENT. The
+	 *    fill is a DISCRETE reading of whether the plasma reaches r = 0 and
+	 *    checkAxisSource() is the CONTINUOUS one; they must not disagree at a
+	 *    converged answer, because only the second is wired to a refusal.
+	 */
+	BOOST_TEST( rows[ spuriousRow ].axis.reached > 0,
+	            "limiter 1.20 was chosen as the row where the fill DOES reach "
+	            "the axis at convergence -- FREE-BOUNDARY-PLAN.md section 11.7 "
+	            "records psi_bnd going negative there -- and it reached "
+	            << rows[ spuriousRow ].axis.reached << ". Without it the "
+	            "coupling below is asserted over no positive case at all" );
+	for ( std::size_t i = healthyRow; i < rows.size(); ++i )
+	{
+		if ( !rows[ i ].converged || rows[ i ].axis.reached == 0 )
+			continue;
+		BOOST_TEST( rows[ i ].refused,
+		            "the fill put " << rows[ i ].axis.reached << " of "
+		            << rows[ i ].axis.elements << " axis-touching elements in "
+		            "the plasma at a CONVERGED answer (limiter "
+		            << rows[ i ].limiter << ", " << rows[ i ].n << " elements) "
+		            "and checkAxisSource() reads clean. The driver refuses on "
+		            "the guard alone, so this is a run that would be reported "
+		            "as an equilibrium while the assembly carries a 1/r pole on "
+		            "the symmetry axis" );
+	}
+
+	/*
+	 * 4. AND THE MARGIN BETWEEN THE TWO READINGS WIDENS UNDER REFINEMENT. The
+	 *    guard evaluates F at psi = 0 and the assembly evaluates it at
+	 *    psi_h( 0, z ), so what separates them is the discrete axis layer. It
+	 *    falls at the potential's own order while psi_bnd is a converged O( 1 )
+	 *    quantity, so the coupling above is not a coincidence of one mesh.
+	 *
+	 *    TWO TIERS, because the layer is a MAXIMUM over nodes and a pointwise
+	 *    quantity need not fall smoothly from one mesh to the next -- the same
+	 *    reason CriticalPointConvergence and ExtensionConvergence both allow a
+	 *    pair more slack than the sequence.
+	 */
+	BOOST_TEST( observedOrder( 0, margin.size() - 1 ) > 2.5,
+	            "psi_h on the symmetry axis falls at order "
+	            << observedOrder( 0, margin.size() - 1 ) << " across the whole "
+	            "sequence, where k+1 = " << order + 1 << " is expected. A layer "
+	            "that stops falling is a layer the pole is feeding, and the "
+	            "margin that keeps checkAxisSource() sufficient is then a number "
+	            "rather than a limit" );
+	for ( std::size_t i = 1; i < margin.size(); ++i )
+	{
+		double const observed = observedOrder( i - 1, i );
+		BOOST_TEST( observed > 2.0,
+		            "psi_h on the symmetry axis is " << ratio[ i ]
+		            << " of psi_bnd at " << margin[ i ]->n << " elements "
+		            "against " << ratio[ i - 1 ] << " at " << margin[ i - 1 ]->n
+		            << ", an order of " << observed << " over that pair" );
 	}
 }

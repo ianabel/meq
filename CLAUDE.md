@@ -4690,10 +4690,57 @@ its `ψ_ax` and `ψ_bnd` columns are **not** is a machine. **Anything quoting
 **THE TRANSFERABLE PART**: a red test names a defect, and *where* the defect is
 was got wrong for a day. The assertion was right, the diagnosis was right, and
 the thing that needed repairing was the fixture rather than the solver. §11.7 of
-`FREE-BOUNDARY-PLAN.md` is the full record. **The one thing it does not close**:
-`refreshPlasmaComponent()` refuses to *seed* an axis-touching element while
-allowing the fill to *reach* one, so an iterate lifting `ψ_h` above `ψ_bnd` on the
-axis re-opens the pole; whether that is reachable in practice is unmeasured.
+`FREE-BOUNDARY-PLAN.md` is the full record.
+
+**AND THE FILL DOES REACH THE AXIS — ON INTERMEDIATE ITERATES OF THAT VERY
+FIXTURE, AND ON NO CONVERGED ANSWER THE GUARD LETS THROUGH.**
+`refreshPlasmaComponent()` refuses to *seed* an axis-touching element and does
+not refuse to *reach* one, so an iterate lifting `ψ_h` above `ψ_bnd` there puts
+§11.3's `1/r` pole back with `ConfineToPlasma` on. Measured on the machine above
+at limiter 1.15, `k = 2`, 1333 elements: `ψ_bnd` is **negative** for the first
+three Newton steps, all **84** axis-touching elements are in the plasma's
+component, and the assembly puts `|F|` of 3.7e-03 / 1.6e-03 / 5.0e-03 on `r = 0`.
+It clears by step 2 to 4 and the converged answer has **0** of the 84 as even a
+candidate, with `|F|` on the axis exactly `0.0`. Same shape at 314 and 573
+elements.
+
+**THE FILL IS NOT THE DEFECT AND CHANGING IT WOULD BE WRONG TWICE.** At those
+iterates its answer is *correct* — `{Ψ > 0}` really is connected and really does
+contain `r = 0` when `ψ_bnd < 0` — so a rule refusing to say so would be a fill
+lying about the state it was handed. And blocking axis-touching elements outright
+switches `p′` off in the one device class §11.6 protects: a levitated dipole and
+a magnetic mirror both carry plasma to `r = 0`, both have `gg′ ≡ 0` there, and
+the pole never existed.
+
+**WHAT MAKES IT SAFE IS A COUPLING BETWEEN TWO READINGS, AND IT IS ASSERTED
+RATHER THAN OBSERVED.** `ψ( 0, z ) = 0` exactly, so the axis is inside the plasma
+precisely when `Ψ_axis = −ψ_bnd/span > 0`, which is
+`checkAxisSource().axisInsidePlasma` and which the driver refuses on. At a
+converged answer `ψ_h( 0, z ) → 0`, so the fill can reach the axis only when that
+reading is positive too — measured on both branches, none of 84 at limiter 1.15
+with the guard clean, all 84 at 1.20 where `ψ_bnd` goes negative and the guard
+refuses on both counts. **So the guard does catch the converged case**, and
+`theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses` asserts the *implication*
+rather than either column.
+
+**THE GAP THE GUARD CANNOT SEE IS THE DISCRETE LAYER, AND THE MARGIN WIDENS
+UNDER REFINEMENT.** `checkAxisSource()` asks at `ψ = 0` deliberately, so it
+cannot see a `ψ_h( 0, z )` exceeding a *positive* `ψ_bnd`. That state exists —
+an unconfined solve grows a layer reaching `Ψ = 2.7` at `r = 0` while the guard
+reads `Ψ_axis = −2.6e-01` — and it is **not reachable from a confined solve**,
+because the layer is what the pole builds and the pole is what confinement
+removes. Where the layer does exist the **fill** is what separates it, as its own
+component: 84 candidates, **0 reached**, `|F|` on the axis exactly `0.0`, which
+`theLimiterCaseAlreadyHasMoreThanOneLobe` asserts — and with `elementInPlasma()`
+ignored the same state assembles **`|F| = 1.376`** there, so the fill is the
+whole of the difference between a bounded load and `μ₀ j_φ` diverging like `1/r`
+along the entire axis, not a trim at the edge. Sliding `ψ_bnd` by hand is the
+only way found to merge the layer with the plasma, and it takes
+`ψ_bnd = 1e-08` against the 7e-04 a real solve carries. `max ψ_h` on `r = 0` runs
+5.34e-06 → 2.25e-06 → 6.68e-07 over 314/573/1333 elements, i.e. 7.8e-03 → 9.5e-04
+of `ψ_bnd`, **falling at 2.92 against `k+1 = 3`** while `ψ_bnd` does not move. The
+two readings separate faster as the mesh is refined, so the coupling is a limit
+and not a number.
 
 **So the check exists now.** `meq::CriticalPointFinder::checkAxis()` sweeps for
 zeros of `q_h`, picks the O-point of the sense **the sign of the span dictates**
