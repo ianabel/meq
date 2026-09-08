@@ -727,16 +727,28 @@ profile conversion and the initial guess are all this directory's.
 
 | | freegs4e, 129² | MEQ, `k = 3`, 1601 elements | apart |
 |---|---|---|---|
-| `ψ_ax` | 9.483141e-02 | **9.455354e-02** | 2.9e-03 |
-| `ψ_bnd` | 2.781829e-02 | **2.774057e-02** | 2.8e-03 |
-| profile amplitude | 1, by construction | **0.994505** | 5.5e-03 |
-| `I_p` | 3.0e+05 A | 3.000010e+05 A | it is the constraint |
-| `ψ` over the reference's box | | | rel `L2` **7.1e-03** |
+| `ψ_ax` | 9.483141e-02 | **9.484400e-02** | **1.33e-04** |
+| `ψ_bnd` | 2.781829e-02 | **2.782291e-02** | **1.66e-04** |
+| profile amplitude | 1, by construction | **1.001239** | 1.24e-03 |
+| `I_p` | 3.0e+05 A | 3.000000e+05 A | it is the constraint |
 
-and on 3802 elements at ten modes, `ψ_ax = 9.484390e-02` — **1.3e-04**, with
-`ψ_bnd` at 5.8e-05 and the field `L2` at 5.3e-03. The regression ships the
-COARSE mesh because it lands on the same branch at a third of the cost; the fine
-one is what the headline number in `FREE-BOUNDARY-PLAN.md` §7.16 is measured on.
+**THOSE NUMBERS MOVED BY A FACTOR OF TWENTY ON 2026-09-07 AND THE MESH DID NOT
+CHANGE.** They read 9.455354e-02, 2.774057e-02 and 0.994505 — 2.9e-03, 2.8e-03
+and 5.5e-03 — while `ψ_bnd` was pinned at the potential dof NEAREST the limiter
+point rather than at the point. Snapping is an `O( h )` error at every degree,
+not the `O( h^{k+1} )` nodal choice it was described as; see
+`FREE-BOUNDARY-PLAN.md` §7.20 and `GradShafranovSolver::LimiterConstraint`.
+
+**AND MEQ CONVERGES IN ITS OWN MESH ON THIS CASE**, which could not be shown
+before, because the boundary condition was quantised by the mesh. Uniform
+refinement of the shipped `.msh`, `RefinementLevels = 0, 1, 2`:
+
+| elements | 1601 | 6527 | 26375 | order | limit | vs the reference |
+|---|---|---|---|---|---|---|
+| `ψ_ax` | 9.484400e-02 | 9.482652e-02 | 9.482423e-02 | **2.93** | 9.482388e-02 | **7.9e-05** |
+
+The regression ships the coarse mesh: it is on the same branch at a fraction of
+the cost and is now within 1.4e-04 of that limit.
 
 **WHY THE LIMITER IS PRESCRIBED AS A POINT AND NOT AS A CURVE.**
 `FreeGSProfileMixin.attach_limiter` builds the innermost layer of grid CELLS
@@ -756,10 +768,42 @@ run reports.
 So the comparison hands BOTH codes that same point, as MEQ's
 `[boundary.limiter] R = 1.3375, Z = 0`. It is a well-posed problem both codes
 solve identically and it takes the contact-finding out of the comparison
-entirely. **It also caps what the agreement can mean**: MEQ pins `ψ_bnd` at the
-nearest potential DOF, which differs from the requested point by `O( h )` and
-moves `ψ_bnd` by about `0.25 h`. Choosing a point that IS a dof, or comparing the
-reference at the dof MEQ used, is the way to remove that and is not done.
+entirely.
+
+**THIS PARAGRAPH USED TO END "it also caps what the agreement can mean: MEQ pins
+`ψ_bnd` at the nearest potential DOF … and is not done". IT IS DONE, 2026-09-07,
+AND THE CAP WAS THE WHOLE ERROR BUDGET.** MEQ evaluates `ψ_h` AT the point now.
+The size of what was being tolerated: sweeping the requested `R` with one key
+changed, the entire solve is **bit-identical over `[ 1.3250, 1.3500 ]`** — a
+plateau 0.025 m wide, 7% of the minor radius — and steps 5% in `ψ_ax` and 11% in
+`ψ_bnd` at each end.
+
+**AND THE CONTACT ITSELF IS A GRID ARTEFACT THAT MOVES TO THE OTHER SIDE OF THE
+MACHINE.** At 513² the same ring maximum sits at **( 0.8250, −0.3000 )**, the
+inboard shoulder, **0.6 m** from the 129² contact — and the maximum on the TRUE
+circle is on the inboard shoulder, `θ = 121.8°`, on *both* grids. So the 129² run
+reports a contact on the wrong side of the machine, and a comparison against a
+finer reference must take the limiter point, **and the coil currents**, from that
+same run.
+
+**THE COIL CURRENTS ARE AN OUTPUT OF freegs4e's CONTROL SYSTEM, NOT AN INPUT**,
+so they converge in the grid like everything else: P1 moves 1.4% between 129² and
+513² and **P2 moves 14%**, −46186 to −52740. A MEQ run carrying the currents in
+`examples/limited-tokamak.toml` and compared against `ref-n513/` is comparing two
+different machines.
+
+**AGAINST THE 513² REFERENCE, WITH ITS OWN CURRENTS, ITS OWN LIMITER POINT AND A
+GUESS REBUILT FROM ITS OWN SOURCE:**
+
+| | freegs4e, 513² | MEQ, `k = 3`, 26375 el | apart |
+|---|---|---|---|
+| `ψ_ax` | 9.308752e-02 | **9.307342e-02** | **1.5e-04** |
+| `ψ_bnd` | 2.622462e-02 | **2.622580e-02** | **4.5e-05** |
+
+both inside the **7.92e-04** the 513² run itself sits from its own Richardson
+limit, so what is left is the reference's grid error rather than MEQ's. With the
+dof-snapped constraint the same two runs read 1.0% and 1.5% out and did not
+converge in the mesh at all.
 
 **AND THE REFERENCE IS NOT CONVERGED AT 129² HERE, WHERE THE DIVERTED CASES
 ARE** — see the grid scan above, 2.0% in `ψ_ax` and 6.3% in `ψ_bnd` from its own

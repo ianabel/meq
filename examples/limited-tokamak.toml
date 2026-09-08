@@ -32,11 +32,22 @@
 # tools/freegs4e-benchmark/mkexactguess.py writes it, and records that the
 # answer does not move over a sixteenfold change in the guess's own resolution.
 #
-# AND THE DEGREE IS NOT FREE EITHER.  At PolynomialDegree = 2 on this mesh and
-# this guess the solve converges perfectly well, every border at machine zero,
-# and reports psi_ax = 2.73e+00 against a reference 9.48e-02 -- a single spiking
-# nodal value, not an axis.  p-refinement is what reaches the physical branch
-# and h-refinement is not.  Do not lower the degree here.
+# THE DEGREE USED TO BE LOAD BEARING AND IS NOT ANY MORE, AND THE REASON IS
+# WORTH KNOWING.  This comment read: "At PolynomialDegree = 2 the solve
+# converges perfectly well, every border at machine zero, and reports
+# psi_ax = 2.73e+00 against a reference 9.48e-02 -- a single spiking nodal
+# value, not an axis.  p-refinement is what reaches the physical branch."
+#
+# Re-measured 2026-09-07: at PolynomialDegree = 2 on this mesh and this guess
+# the run converges in 8 Newton steps to psi_ax = 9.349647e-02, which is the
+# PHYSICAL branch, 1.4% from the reference -- about what a degree costs.  The
+# spike branch is no longer reachable, because psi_ax is now the flux at the
+# LOCATED magnetic axis rather than the largest nodal value of psi_h, and a
+# single spiking dof is not a zero of q_h.  That is what AxisConstraint::
+# LocatedAxis was built for, closing the branch instead of detecting it.
+#
+# Degree 3 is still what this example ships, because it is what every number
+# quoted for this case was measured at.
 
 [mesh]
 # A gmsh half-disc reaching r = 0 EXACTLY, with the four conductors meshed to
@@ -127,6 +138,19 @@ Type = "zero"
 # and its plasma does not touch the limiter anywhere: on the TRUE circle the
 # maximum of its own psi is 7.5% lower, and on the INBOARD side.  Giving both
 # codes that same point takes the contact-finding out of the comparison.
+#
+# AND THAT POINT IS A 129^2 ARTEFACT WHICH MOVES TO THE OTHER SIDE OF THE
+# MACHINE AS THE REFERENCE REFINES.  At 513^2 the same ring maximum sits at
+# ( 0.8250, -0.3000 ) -- the INBOARD shoulder, 0.6 m away -- which is where the
+# true circle's maximum is on both grids.  So this key reproduces the
+# reference's grid error faithfully and is not the machine; a MEQ run compared
+# against a FINER reference has to take this point, and the coil currents, from
+# that same run.  FREE-BOUNDARY-PLAN.md section 7.20.
+#
+# MEQ EVALUATES psi_h AT THIS POINT, not at the nearest potential dof to it --
+# LimiterConstraint::ExactPoint, the default since 2026-09-07.  Snapping was an
+# O( h ) error at every degree and made this whole solve bit-identical over a
+# plateau 0.025 m wide in the R below.
 [boundary.limiter]
 R = 1.3375
 Z = 0.0

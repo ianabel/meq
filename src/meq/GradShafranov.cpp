@@ -1890,6 +1890,17 @@ namespace
 		return psiBoundaryValue;
 	}
 
+	void GradShafranovSolver::setLimiterConstraint( LimiterConstraint choice )
+	{
+		limiterConstraintChoice = choice;
+	}
+
+	GradShafranovSolver::LimiterConstraint
+	GradShafranovSolver::limiterConstraint() const
+	{
+		return limiterConstraintChoice;
+	}
+
 	void GradShafranovSolver::setAxisConstraint( AxisConstraint choice )
 	{
 		axisConstraintChoice = choice;
@@ -2117,6 +2128,59 @@ namespace
 				"meq::GradShafranovSolver::nearestPotentialDof: the mesh has no "
 				"potential dofs" );
 		return bestDof;
+	}
+
+	/*
+	 * THE ELEMENT CONTAINING A POINT, AND ITS SHAPE FUNCTIONS THERE.
+	 *
+	 * TransformBack IS SAFE HERE AND IS NOT SAFE FOR THE AXIS, WHICH IS WORTH
+	 * SAYING BECAUSE THIS TREE RECORDS IT FAILING. AxisConstraint::LocatedAxis
+	 * must NOT re-invert the map, because a zero of a DISCONTINUOUS q_h can lie
+	 * a little outside its own element and the inverse does not converge there
+	 * -- measured, a residual of 5.1e-02 on an element of 5e-02. A limiter
+	 * contact is a genuine point of the domain that somebody asked for, so it is
+	 * inside an element by construction and the inversion is the right question.
+	 * The elements here are straight-sided triangles, where the inverse map is
+	 * affine and `Inside` is exact rather than probable.
+	 */
+	void GradShafranovSolver::locatePotentialPoint( double r, double z,
+	                                                int &element,
+	                                                mfem::Vector &shape,
+	                                                mfem::Array<int> &dofs ) const
+	{
+		mfem::Mesh &mesh = *potentialFes->GetMesh();
+		mfem::Vector point( 2 );
+		point( 0 ) = r;
+		point( 1 ) = z;
+
+		element = -1;
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			thread_local mfem::IsoparametricTransformation scratch;
+			mesh.GetElementTransformation( e, &scratch );
+
+			mfem::IntegrationPoint reference;
+			if ( scratch.TransformBack( point, reference )
+			     != mfem::InverseElementTransformation::Inside )
+				continue;
+
+			mfem::FiniteElement const *fe = potentialFes->GetFE( e );
+			if ( !fe )
+				continue;
+
+			shape.SetSize( fe->GetDof() );
+			fe->CalcShape( reference, shape );
+			potentialFes->GetElementDofs( e, dofs );
+			element = e;
+			return;
+		}
+
+		std::ostringstream message;
+		message << "meq::GradShafranovSolver::locatePotentialPoint: no element "
+		           "of the mesh contains ( " << r << ", " << z << " ). A limiter "
+		           "contact has to be a point of Omega: check it against the "
+		           "mesh's own extent rather than against the machine's.";
+		throw std::runtime_error( message.str() );
 	}
 
 	void GradShafranovSolver::setTransmissionQuadratureOrder( int order )
@@ -3984,6 +4048,9 @@ namespace
 
 		double sB = 0.0;
 		int boundaryDof = -1;
+		int limiterElement = -1;
+		mfem::Vector limiterShape;
+		mfem::Array<int> limiterDofs;
 		if ( boundaryFluxIsUnknown )
 		{
 			// INTO THE FULL VECTOR, not into the potential space. peakAt() scans
@@ -3996,7 +4063,41 @@ namespace
 			boundaryDof = blockOffsets[ 1 ]
 			              + nearestPotentialDof( boundaryFluxR, boundaryFluxZ );
 			sB = psiBoundaryValue;
+
+			// AND THE POINT ITSELF, WHICH IS THE DEFAULT. The element and its
+			// shape functions are fixed for the whole solve -- a prescribed
+			// limiter contact does not move -- so this is located ONCE, where
+			// the axis has to be re-found at every residual.
+			if ( limiterConstraintChoice == LimiterConstraint::ExactPoint )
+				locatePotentialPoint( boundaryFluxR, boundaryFluxZ,
+				                      limiterElement, limiterShape, limiterDofs );
 		}
+		(void)limiterElement;
+
+		/*
+		 * psi_h AT THE LIMITER CONTACT, AND THE BORDER ROW THAT GOES WITH IT.
+		 *
+		 * Under LimiterConstraint::NearestDof both collapse to one entry --
+		 * `-e_j` and `unknown( boundaryDof )` -- which is what MEQ did until
+		 * 2026-09-07 and is kept as the control. Under ExactPoint they are the
+		 * containing element's shape functions at the point, which is the same
+		 * shape as AxisConstraint::LocatedAxis's row and is exact for a simpler
+		 * reason: the point is prescribed, so no envelope argument is needed.
+		 *
+		 * The corner is 1 either way: `G = psi_bnd - psi_h( x )` and `x` does
+		 * not depend on psi_bnd.
+		 */
+		auto limiterValue = [ & ]( mfem::Vector const &state )
+		{
+			if ( limiterConstraintChoice == LimiterConstraint::NearestDof )
+				return state( boundaryDof );
+
+			double total = 0.0;
+			for ( int i = 0; i < limiterDofs.Size() && i < limiterShape.Size(); ++i )
+				total += limiterShape( i )
+				         *state( blockOffsets[ 1 ] + limiterDofs[ i ] );
+			return total;
+		};
 		// psi_ax is border 0 always; psi_bnd and the current scale take the next
 		// slots when they are unknowns, and the exterior modes follow them all.
 		int const boundaryIndex = 1;
@@ -4343,7 +4444,7 @@ namespace
 		                               : 0.0;
 		double constraint = hasNormalisation ? s - peak : 0.0;
 		double constraintB = boundaryFluxIsUnknown
-		                     ? sB - unknown( boundaryDof ) : 0.0;
+		                     ? sB - limiterValue( unknown ) : 0.0;
 		fieldResidual( unknown, s, residual );
 
 		/*
@@ -4556,7 +4657,7 @@ namespace
 			reference = augmentedNorm( coldResidual.Norml2(),
 			                           hasNormalisation ? s - coldPeak : 0.0,
 			                           boundaryFluxIsUnknown
-			                             ? sB - coldState( boundaryDof ) : 0.0,
+			                             ? sB - limiterValue( coldState ) : 0.0,
 			                           currentIsUnknown
 			                             ? assemblePlasmaCurrent( coldState )
 			                               - targetMuZeroCurrent : 0.0,
@@ -4790,7 +4891,7 @@ namespace
 					return total;
 				}
 				if ( boundaryFluxIsUnknown && i == boundaryIndex )
-					return coupled ? -v( boundaryDof ) : 0.0;
+					return coupled ? -limiterValue( v ) : 0.0;
 				if ( currentIsUnknown && i == currentIndex )
 				{
 					double total = 0.0;
@@ -5020,7 +5121,7 @@ namespace
 					peak = hasNormalisation
 					       ? peakAt( unknown, s, &argElement, &argDof ) : 0.0;
 					constraint = hasNormalisation ? s - peak : 0.0;
-					constraintB = boundaryFluxIsUnknown ? sB - unknown( boundaryDof ) : 0.0;
+					constraintB = boundaryFluxIsUnknown ? sB - limiterValue( unknown ) : 0.0;
 					if ( currentIsUnknown )
 						constraintL = assemblePlasmaCurrent( unknown ) - targetMuZeroCurrent;
 					fieldResidual( unknown, s, residual );
@@ -5094,7 +5195,7 @@ namespace
 				peak = hasNormalisation
 				       ? peakAt( unknown, s, &argElement, &argDof ) : 0.0;
 				constraint = hasNormalisation ? s - peak : 0.0;
-				constraintB = boundaryFluxIsUnknown ? sB - unknown( boundaryDof ) : 0.0;
+				constraintB = boundaryFluxIsUnknown ? sB - limiterValue( unknown ) : 0.0;
 					if ( currentIsUnknown )
 						constraintL = assemblePlasmaCurrent( unknown ) - targetMuZeroCurrent;
 				fieldResidual( unknown, s, residual );

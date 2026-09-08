@@ -1870,26 +1870,30 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesALimitedTokamak )
 
 	BOOST_TEST( axisError < 1.0e-2,
 	            "psi_ax is " << axisError << " from freegs4e's "
-	            << referencePsiAxis << ". The shipped mesh measures 2.9e-03 and "
-	            "the 3802-element one 1.3e-04, so a percent is three times the "
+	            << referencePsiAxis << ". MEASURED 1.33e-04 on the shipped mesh "
+	            "since LimiterConstraint::ExactPoint became the default on "
+	            "2026-09-07; it read 2.9e-03 while psi_bnd was snapped to the "
+	            "nearest dof. Uniform refinement of this fixture takes it to "
+	            "7.9e-05 at order 2.93, so a percent is a hundred times the "
 	            "expected gap. If examples/limited-tokamak.msh has NOT changed, "
 	            "look at the profile tables and the limiter before the solver; "
-	            "if it HAS, this bound is pinned to that fixture and a "
-	            "regenerated mesh moves psi_ax by 1.5e-02 to 1.7e-02 without "
-	            "changing the equilibrium -- re-measure rather than relax" );
+	            "if it HAS, this bound is pinned to that fixture -- re-measure "
+	            "rather than relax" );
 	BOOST_TEST( boundaryError < 1.0e-2,
 	            "psi_bnd is " << boundaryError << " from freegs4e's "
-	            << referencePsiBoundary << ", measured 2.8e-03. psi_bnd is "
-	            "pinned at the potential dof NEAREST ( 1.3375, 0 ), so this term "
-	            "carries an O( h ) error and is the one quantity here a mesh "
-	            "change moves at first order" );
+	            << referencePsiBoundary << ". MEASURED 1.66e-04. psi_bnd is now "
+	            "psi_h AT ( 1.3375, 0 ) rather than at the nearest dof to it, "
+	            "which is what took this term from 2.8e-03: snapping is O( h ) "
+	            "at every degree, not O( h^{k+1} ), and it made the whole solve "
+	            "bit-identical over a 0.025 m plateau in the requested point. "
+	            "FREE-BOUNDARY-PLAN.md section 7.20" );
 
 	// The amplitude is the number a conversion error moves by ORDERS, so it
-	// gets a tolerance of its own reasoning: measured 5.5e-03 from 1, and a
+	// gets a tolerance of its own reasoning: measured 1.24e-03 from 1, and a
 	// span-factor slip reads 6.7e-02.
 	BOOST_TEST( scaleError < 2.0e-2,
 	            "the profile scale came back as " << scale << " where the tables "
-	            "were built to make it 1. Measured 9.945e-01 on this mesh. A "
+	            "were built to make it 1. Measured 1.0012 on this mesh. A "
 	            "scale that is not O( 1 ) is the ONLY tell that the tables hold "
 	            "dp/dpsi where meq wants dp/dPsi -- with PlasmaCurrent set the "
 	            "border absorbs the factor and the equilibrium is right anyway" );

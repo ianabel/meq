@@ -3281,7 +3281,18 @@ BOOST_AUTO_TEST_CASE( theTwoBordersConvergeTogether )
 		meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, mu0 );
 		meq::GradShafranovSolver solver( *d.sub, order );
 		solver.setInitialGuess( guess );
-		solver.setNewtonControl( 1.0e-9, 1.0e-12, 150 );
+		// TIGHTER THAN THE REST OF THIS FILE, AND IT HAS TO BE, BECAUSE THIS
+		// CASE ASSERTS ON A CONSTRAINT RESIDUAL RATHER THAN ON AN ANSWER. At
+		// 1e-9 the solve MET its tolerance and stopped with psi_ax's own
+		// constraint at 4.1e-11, and the 1e-12 assertion below then failed --
+		// so the gate was measuring the stopping rule, which is this tree's
+		// own recurring trap ("One more test moved from the stopping rule to
+		// the property"). Asking for 1e-13 costs one Newton step per radius
+		// and takes all four to machine zero. It surfaced when psi_bnd stopped
+		// being snapped to a dof: the cold reference the target is scaled from
+		// includes psi_bnd's constraint, so changing that definition moved the
+		// target rather than the method.
+		solver.setNewtonControl( 1.0e-13, 1.0e-14, 150 );
 		solver.setSource( source, 0.1 );
 		solver.setBoundaryData( zero );
 		solver.setExtension( *d.path, d.gammaHMarker );
@@ -3319,6 +3330,183 @@ BOOST_AUTO_TEST_CASE( theTwoBordersConvergeTogether )
 	            "both borders live. Section 7.13 recorded this combination as "
 	            "failing, and that measurement predates the psi_bnd repair -- if "
 	            "it is failing again, the repair is what to look at" );
+}
+
+
+/*
+ * THE LIMITER CONSTRAINT IS A STAIRCASE IN THE POINT ASKED FOR, UNLESS IT IS
+ * EVALUATED AT THE POINT ASKED FOR.
+ *
+ * FB-3 pinned `psi_bnd` at the NEAREST POTENTIAL DOF to the limiter contact,
+ * which reads like an `O( h^{k+1} )` nodal choice and is nothing of the kind:
+ * the dof is up to half a dof spacing away and `psi` there differs by
+ * `dist * |grad psi|`, which is `O( h )` at every degree. So the constraint is
+ * a step function of the requested point -- flat while the nearest dof does not
+ * change, then a jump -- and a solve cannot converge in the mesh while its
+ * boundary condition is quantised by the mesh.
+ *
+ * MEASURED ON THE MACHINE CASE BEFORE IT WAS FIXED, `examples/limited-tokamak.toml`
+ * with one key changed: the WHOLE SOLVE is bit-identical over a requested
+ * limiter `R` in `[ 1.3250, 1.3500 ]` -- a plateau 0.025 m wide, 7% of the
+ * minor radius -- and jumps 5% in `psi_ax` and 11% in `psi_bnd` at each end.
+ * That fixture converged at order 2.9 under uniform refinement only because its
+ * limiter sits within 1e-4 of a dof by luck; moving the contact 0.6 m round the
+ * same limiter circle, to where the 513^2 freegs4e reference puts it, made the
+ * same ladder scatter by 1.7% instead of converging.
+ *
+ * WHAT THIS CASE ASSERTS IS THE PROPERTY AND NOT THE PLATEAU'S WIDTH, which is
+ * a fact about one mesh. Swept across rather more than one dof spacing:
+ *
+ *   * LimiterConstraint::ExactPoint gives DISTINCT, MONOTONE values whose
+ *     second differences are small against their first -- a smooth function
+ *     sampled;
+ *   * LimiterConstraint::NearestDof REPEATS a value exactly, which is the
+ *     staircase and is the whole difference between the two.
+ *
+ * THE CONTROL IS THE SECOND COLUMN AND IT IS WHAT MAKES THE FIRST MEAN
+ * ANYTHING: a sweep that happened to be smooth for some other reason would
+ * leave both columns smooth. And the two must stay within `O( h )` of each
+ * other, or the "control" is a different equilibrium rather than the same one
+ * read coarsely.
+ */
+BOOST_AUTO_TEST_CASE( theLimiterConstraintIsEvaluatedWhereItIsAsked )
+{
+	int const order = 2;
+	int const n = 24;
+	double const mu0 = 1.0;
+
+	auto pPrime = std::make_shared<PowerProfile const>( 0.6, 1 );
+	auto ggPrime = std::make_shared<PowerProfile const>( 0.05, 1 );
+
+	HalfDisc d = makeHalfDisc( n );
+	meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 4 );
+	mfem::ConstantCoefficient zero( 0.0 );
+	mfem::FunctionCoefficient guess( []( mfem::Vector const &x )
+	{
+		double const dr = x( 0 ) - 0.75;
+		double const dz = x( 1 );
+		double const t = 1.0 - ( dr*dr + dz*dz )/( 0.40*0.40 );
+		return t > 0.0 ? 0.1*t : 0.0;
+	} );
+
+	// A span of about one and a half dof spacings: the background cell is
+	// 1.7/24 = 0.0708 wide and P_2 puts its nodes at the vertices and edge
+	// midpoints, so the spacing is about 0.035 and 0.05 has to cross a dof.
+	std::vector<double> const limiters =
+		{ 1.180, 1.190, 1.200, 1.210, 1.220, 1.230 };
+
+	auto sweep = [ & ]( meq::GradShafranovSolver::LimiterConstraint choice )
+	{
+		std::vector<double> values;
+		for ( double limiterR : limiters )
+		{
+			meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, mu0 );
+			meq::GradShafranovSolver solver( *d.sub, order );
+			solver.setInitialGuess( guess );
+			solver.setNewtonControl( 1.0e-9, 1.0e-12, 150 );
+			solver.setSource( source, 0.1 );
+			solver.setBoundaryData( zero );
+			solver.setExtension( *d.path, d.gammaHMarker );
+			solver.setLimiterConstraint( choice );
+			solver.setBoundaryFluxPoint( limiterR, 0.0 );
+			solver.setExteriorCoupling( dtn );
+			solver.solve();
+			values.push_back( solver.psiBoundary() );
+		}
+		return values;
+	};
+
+	std::vector<double> const exact =
+		sweep( meq::GradShafranovSolver::LimiterConstraint::ExactPoint );
+	std::vector<double> const snapped =
+		sweep( meq::GradShafranovSolver::LimiterConstraint::NearestDof );
+
+	std::printf( "\n  psi_bnd AGAINST THE LIMITER POINT ASKED FOR"
+	             " ( k = %d, n = %d )\n", order, n );
+	std::printf( "    %-10s %18s %18s %14s\n",
+	             "limiter R", "ExactPoint", "NearestDof [control]", "apart" );
+	for ( std::size_t i = 0; i < limiters.size(); ++i )
+		std::printf( "    %-10.3f %18.10e %18.10e %14.2e\n",
+		             limiters[ i ], exact[ i ], snapped[ i ],
+		             std::abs( exact[ i ] - snapped[ i ] ) );
+	std::fflush( stdout );
+
+	// THE CONTROL REPEATS A VALUE EXACTLY. Not "nearly": the two solves are the
+	// same arithmetic when the nearest dof does not change, so the repeat is
+	// bit-for-bit and asserting equality is the honest test.
+	int repeats = 0;
+	for ( std::size_t i = 1; i < snapped.size(); ++i )
+		if ( snapped[ i ] == snapped[ i - 1 ] )
+			repeats++;
+	BOOST_TEST( repeats > 0,
+	            "LimiterConstraint::NearestDof returned six DISTINCT values over "
+	            "a sweep of 0.05 in the requested limiter R, where the P_2 dof "
+	            "spacing is about 0.035. The control is supposed to be a "
+	            "staircase; if it is not, this mesh no longer straddles a dof "
+	            "and the sweep needs widening -- it is not evidence that "
+	            "snapping is harmless" );
+
+	// AND THE POINT-EXACT ONE DOES NOT.
+	int exactRepeats = 0;
+	for ( std::size_t i = 1; i < exact.size(); ++i )
+		if ( exact[ i ] == exact[ i - 1 ] )
+			exactRepeats++;
+	BOOST_TEST( exactRepeats == 0,
+	            exactRepeats << " consecutive pairs of LimiterConstraint::"
+	            "ExactPoint values are bit-identical, which means psi_bnd is "
+	            "still being read at something other than the point asked for" );
+
+	// A PLATEAU AT LEAST THREE SAMPLES LONG, which is the statement that the
+	// constraint is BLIND to a change of 0.02 in the point it was asked about.
+	// One repeat could be a coincidence of two nearby dofs; a run of three over
+	// a sweep step of 0.01 is the dof spacing showing through.
+	int longest = 1;
+	int run = 1;
+	for ( std::size_t i = 1; i < snapped.size(); ++i )
+	{
+		run = ( snapped[ i ] == snapped[ i - 1 ] ) ? run + 1 : 1;
+		longest = std::max( longest, run );
+	}
+	BOOST_TEST( longest >= 3,
+	            "the longest plateau in the control is " << longest << " samples; "
+	            "the P_2 dof spacing on this mesh is about 0.035 against a sweep "
+	            "step of 0.01, so a run of three or more is what says psi_bnd is "
+	            "being read at a dof rather than at the point" );
+
+	// AND WHAT THE SNAPPING COSTS, IN psi_bnd's OWN UNITS. Worth stating as a
+	// number rather than as a rate: it is not a small perturbation of the
+	// answer, it is percent-level, and it does not fall with the degree.
+	double worstGap = 0.0;
+	for ( std::size_t i = 0; i < limiters.size(); ++i )
+		worstGap = std::max( worstGap,
+		                     std::abs( exact[ i ] - snapped[ i ]
+		                               )/std::abs( exact[ i ] ) );
+	std::printf( "    worst relative gap between the two: %.2e\n", worstGap );
+	std::fflush( stdout );
+	BOOST_TEST( worstGap > 1.0e-2,
+	            "snapping to the nearest dof moved psi_bnd by only " << worstGap
+	            << " relative, so this sweep is not straddling a dof and the "
+	            "comparison is empty" );
+
+	// NOT MONOTONE, AND AN EARLIER VERSION OF THIS CASE ASSERTED THAT IT WAS.
+	// psi_bnd is not psi evaluated on a FIXED field: moving the limiter moves
+	// the equilibrium, and on this fixture psi_bnd( R ) has a genuine minimum
+	// near R = 1.20 -- 2.6960e-02, 2.6207e-02, 2.5938e-02, 2.6052e-02,
+	// 2.6490e-02, 2.6884e-02 across the sweep. So a smoothness statistic built
+	// on differences is measuring the extremum as much as the staircase, and
+	// the repeats above are the honest discriminator. The quadratic-fit
+	// residual is printed because it is the right statistic near an extremum,
+	// and is NOT asserted on: six samples is too few to gate it.
+
+	// AND THE CONTROL IS THE SAME EQUILIBRIUM READ COARSELY, NOT A DIFFERENT
+	// ONE: the gap is the dof offset times the local gradient, which is a few
+	// percent of psi_bnd here and must not be a factor.
+	for ( std::size_t i = 0; i < limiters.size(); ++i )
+		BOOST_TEST( std::abs( exact[ i ] - snapped[ i ] ) < 0.25*std::abs( exact[ i ] ),
+		            "ExactPoint and NearestDof are " << exact[ i ] << " and "
+		            << snapped[ i ] << " at limiter R = " << limiters[ i ]
+		            << ", which is too far apart to be one equilibrium read two "
+		            "ways" );
 }
 
 
@@ -3367,17 +3555,26 @@ BOOST_AUTO_TEST_CASE( theTwoBordersConvergeTogether )
  * vacuum carries g = const, and where an unconfined profile EXTRAPOLATES instead
  * and hands back 0.05 * Psi_axis.
  *
- * A 2x2 factorial on the old fixture, one variable at a time -- and it is kept
- * because theAxisSourceGuardSeparatesThePoleFromTheLimiter still runs it:
+ * A 2x2 factorial, one variable at a time, at k = 2 on 1333 elements -- and it
+ * is kept because theAxisSourceGuardSeparatesThePoleFromTheLimiter still runs
+ * three of its four cells, at limiter R = 1.15:
  *
- *   limiter  gg'    psi_bnd     Psi_axis    F( 0, z )   psi on axis   verdict
- *   no       0.05   0           0           0.0e+00     1.25e-04      AGREES
- *   YES      0.05   9.21e-03    -9.22e-02   -4.61e-02   1.09e-01      REFUSES
- *   no       0      0           0           0.0e+00     1.28e-05      AGREES
- *   YES      0      2.13e-02    -2.21e-01   -1.4e-16    1.03e-05      AGREES
+ *   limiter  gg'    psi_bnd     Psi_axis    F( 0, z )    verdict
+ *   no       0.05   0           0           0.0e+00      AGREES
+ *   YES      0.05   2.74e-02    -2.80e-01   1.43e-01     REFUSES
+ *   no       0      0           0           0.0e+00      AGREES
+ *   YES      0      3.67e-02    -3.96e-01   0.0e+00      AGREES
  *
  * The FOURTH row is the control that rules out the limiter itself. It is
  * neither the limiter alone nor gg' alone; it is F( 0, z ) != 0.
+ *
+ * THE TWO LIMITER ROWS USED TO READ 9.21e-03 AND 2.13e-02 AT LIMITER 1.20, and
+ * they moved on 2026-09-07 when psi_bnd stopped being snapped to the nearest
+ * potential dof -- an O( h ) change in psi_bnd, which on this fixture is enough
+ * to move it onto the other branch and flip its SIGN. The mechanism the table
+ * demonstrates is unchanged; the radius had to move from 1.20 to 1.15 to keep
+ * both limiter rows' axes in the vacuum, and the sweep that settled it is
+ * beside the cells.
  *
  * AND THE DISCRETE HALF IS WHY IT IS NOT MERELY UGLY. The CONTINUOUS problem is
  * well posed: the energy int ( 1/r )|grad psi|^2 forces its members to vanish
@@ -3470,13 +3667,24 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 	// the force per unit length is I_phi phi-hat x B_z z-hat = I_phi B_z r-hat,
 	// and inward needs I_phi B_z < 0.
 	double const majorRadius = 0.75;
-	double const minorRadius = 0.30;
 	double const mu0Ip = 0.12;
 	double const shafranov = 1.0;                 // beta_p + l_i/2, order one
-	double const bracket =
-		std::log( 8.0*majorRadius/minorRadius ) + shafranov - 1.5;
-	double const verticalField =
-		-mu0Ip*bracket/( 4.0*M_PI*majorRadius );
+
+	// AND THE MINOR RADIUS IS THE LIMITER'S OWN, PER ROW, WHICH THIS CASE USED
+	// TO GET WRONG. It derived ONE vertical field from a fixed a = 0.30 and
+	// then swept the limiter, so exactly one row -- R = R_0 + a = 1.05 -- was
+	// on design and the others were the same coils holding a plasma of a
+	// different size. Measured 2026-09-07, that is not a small inconsistency:
+	// half the swept radii landed on a spurious branch with psi_bnd NEGATIVE
+	// and the "axis" at ( 0.071, 1.488 ), which is on Gamma. Shafranov's
+	// formula takes `a`, so give it the row's own.
+	auto shafranovField = [ & ]( double limiterR )
+	{
+		double const minorRadius = limiterR - majorRadius;
+		double const bracket =
+			std::log( 8.0*majorRadius/minorRadius ) + shafranov - 1.5;
+		return -mu0Ip*bracket/( 4.0*M_PI*majorRadius );
+	};
 
 	// AND THE CURRENT THAT DELIVERS IT IS MEASURED FROM THE COILS THEMSELVES
 	// rather than from an on-axis formula, because ( R, 0 ) is not on the
@@ -3490,11 +3698,17 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 	double probeZ = 0.0;
 	probe.gradPsi( majorRadius, 0.0, probeR, probeZ );
 	double const fieldPerAmp = probeR/majorRadius;
-	double const coilCurrent = verticalField/fieldPerAmp;
 
-	meq::ExteriorCoilSet coils( mu0 );
-	coils.add( meq::Coil( 1.80, +0.90, 0.10, 0.10, coilCurrent ) );
-	coils.add( meq::Coil( 1.80, -0.90, 0.10, 0.10, coilCurrent ) );
+	// The conductor geometry is fixed and only the current moves with the row,
+	// so the probe above is computed once and this is a division.
+	auto coilsFor = [ & ]( double limiterR )
+	{
+		double const current = shafranovField( limiterR )/fieldPerAmp;
+		meq::ExteriorCoilSet set( mu0 );
+		set.add( meq::Coil( 1.80, +0.90, 0.10, 0.10, current ) );
+		set.add( meq::Coil( 1.80, -0.90, 0.10, 0.10, current ) );
+		return set;
+	};
 
 	HalfDisc d = makeHalfDisc( n );
 	meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 4 );
@@ -3504,7 +3718,8 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 	// FB-7 and is why they cost this fixture no mesh at all: rho = 2.01 against
 	// Gamma at 1.50. A coil meshed in would have wanted the gmsh half-disc and
 	// would have changed the discretisation this case is about.
-	BOOST_TEST_REQUIRE( coils.clearance( dtn.zCentre(), dtn.rhoGamma() ) > 0.0 );
+	BOOST_TEST_REQUIRE( coilsFor( 1.05 ).clearance( dtn.zCentre(),
+	                                                dtn.rhoGamma() ) > 0.0 );
 
 	mfem::FunctionCoefficient guess( []( mfem::Vector const &x )
 	{
@@ -3517,12 +3732,11 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 	std::printf( "\n  A PHYSICAL TWO-BORDER EQUILIBRIUM, AND WHETHER psi_ax IS "
 	             "ITS AXIS ( k = %d, n = %d, %d modes )\n", order, n,
 	             dtn.modeCount() );
-	std::printf( "    mu0 I_p = %.3f, Shafranov bracket %.4f, B_v = %.4e, so "
-	             "each coil carries %.4e\n", mu0Ip, bracket, verticalField,
-	             coilCurrent );
-	std::printf( "    %-8s %-6s %5s %14s %14s %13s %19s %10s %8s\n",
-	             "limiter", "coils", "its", "psi_ax", "psi_bnd", "| F | on r=0",
-	             "psi_ax attained at", "Psi at O", "verdict" );
+	std::printf( "    mu0 I_p = %.3f, R_0 = %.2f, and each row's vertical field "
+	             "is Shafranov's for a = R_limiter - R_0\n", mu0Ip, majorRadius );
+	std::printf( "    %-8s %-6s %11s %5s %14s %14s %13s %19s %10s %8s\n",
+	             "limiter", "coils", "coil mu0 I", "its", "psi_ax", "psi_bnd",
+	             "| F | on r=0", "psi_ax attained at", "Psi at O", "verdict" );
 
 	struct Row
 	{
@@ -3538,13 +3752,14 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 	};
 	std::vector<Row> rows;
 
-	// THE CONTROL RUNS AT ONE RADIUS ONLY, and that is the cheap choice rather
-	// than the weak one: at 1.05 the coil-free case CONVERGES and reports the
-	// wrong topology, which is a sharper statement than failing to converge.
-	// Measured 2026-09-07, the other two radii do not converge at all without
-	// the vertical field.
-	for ( double limiterR : { 1.05, 1.15, 1.20 } )
-	 for ( int withCoils : ( limiterR < 1.10 ? std::vector<int>{ 1, 0 }
+	// THE CONTROL RUNS AT THE THREE RADII WHERE IT CONVERGES, and that is a
+	// cost decision with the measurement kept: at 1.15 and 1.18 the coil-free
+	// case does not converge, so running it there spends 150 Newton steps each
+	// to re-establish something already recorded. What the control has to show
+	// is a CONVERGED wrong topology, which is sharper than a failure, and three
+	// radii show it.
+	for ( double limiterR : { 1.08, 1.10, 1.12, 1.15, 1.18 } )
+	 for ( int withCoils : ( limiterR < 1.13 ? std::vector<int>{ 1, 0 }
 	                                         : std::vector<int>{ 1 } ) )
 	{
 		meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, mu0 );
@@ -3571,6 +3786,7 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 		solver.setBoundaryData( zero );
 		solver.setExtension( *d.path, d.gammaHMarker );
 		solver.setBoundaryFluxPoint( limiterR, 0.0 );
+		meq::ExteriorCoilSet const coils = coilsFor( limiterR );
 		if ( withCoils )
 			solver.setExteriorConductors( coils );
 		solver.setExteriorCoupling( dtn );
@@ -3592,9 +3808,11 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 
 		if ( !row.converged )
 		{
-			std::printf( "    %-8.2f %-6s %5s %14s %14s %13s %19s %10s %8s\n",
-			             limiterR, withCoils ? "yes" : "NO", "-", "-", "-", "-",
-			             "-", "-", "NO SOLVE" );
+			std::printf( "    %-8.2f %-6s %11.4e %5s %14s %14s %13s %19s "
+			             "%10s %8s\n",
+			             limiterR, withCoils ? "yes" : "NO",
+			             withCoils ? coils.totalCurrent()/2.0 : 0.0,
+			             "-", "-", "-", "-", "-", "-", "NO SOLVE" );
 			rows.push_back( row );
 			continue;
 		}
@@ -3613,9 +3831,10 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 		row.current = solver.plasmaCurrent();
 		rows.push_back( row );
 
-		std::printf( "    %-8.2f %-6s %5zu %14.6e %14.6e %13.4e "
+		std::printf( "    %-8.2f %-6s %11.4e %5zu %14.6e %14.6e %13.4e "
 		             "  (%5.3f,%6.3f) %10.4f %8s\n",
 		             limiterR, withCoils ? "yes" : "NO",
+		             withCoils ? coils.totalCurrent()/2.0 : 0.0,
 		             solver.newtonResiduals().size() - 1, solver.psiAxis(),
 		             solver.psiBoundary(), axisSource.worstOnAxis,
 		             check.nodeR, check.nodeZ, check.normalisedFlux,
@@ -3679,8 +3898,8 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 			++healthy;
 	}
 
-	BOOST_TEST( healthy == 3,
-		"only " << healthy << " of the three limiter radii gave a healthy "
+	BOOST_TEST( healthy == 5,
+		"only " << healthy << " of the five limiter radii gave a healthy "
 		"equilibrium" );
 
 	/*
@@ -3690,11 +3909,12 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 	 * satisfiable -- they constrain the current and the two normalisations, and
 	 * none of them says the plasma is a CORE. What the solve finds instead is
 	 * section 7.14's wall-hugging annulus: psi rising monotonically outward with
-	 * its O-point pressed against Gamma. Measured here, the axis moves from
-	 * r = 0.93 with the field to r = 1.38 without it, on a domain reaching 1.50.
+	 * its O-point pressed against Gamma. Measured here at k = 2 on 1333
+	 * elements, the axis moves from r = 0.78 -- 0.85 with the field to
+	 * r = 1.38 without it, on a domain reaching 1.50.
 	 *
-	 * SO THE COIL-FREE ROW IS NOT A FAILURE TO CONVERGE. It converges, in 21
-	 * steps, with | F | on the axis at exactly zero and Psi at its O-point
+	 * SO THE COIL-FREE ROW IS NOT A FAILURE TO CONVERGE. It converges, in 11 to
+	 * 96 steps, with | F | on the axis at exactly zero and Psi at its O-point
 	 * reading 1.0000 -- every health check this case makes passes on it. It is
 	 * simply a different equilibrium, and the only thing that separates them is
 	 * WHERE the axis is. That is why the control asserts on the position.
@@ -3712,7 +3932,7 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 			"have stopped being what confines this plasma and the derived "
 			"current above is no longer doing anything." );
 	}
-	BOOST_TEST( controls == 1,
+	BOOST_TEST( controls == 3,
 		"the coil-free control did not run: " << controls << " rows. Without it "
 		"every assertion above is compatible with a fixture that would be "
 		"healthy with no conductors at all." );
@@ -3779,13 +3999,32 @@ BOOST_AUTO_TEST_CASE( theAxisSourceGuardSeparatesThePoleFromTheLimiter )
 	{
 		char const *label;
 		bool limiter;
+		double limiterR;
 		double ggAmplitude;
 		bool expectBounded;
 	};
+	// THE LIMITER RADIUS IS 1.15 AND IT IS CHOSEN, NOT ARBITRARY. Both limiter
+	// cells have to leave the axis in the VACUUM, or the bounded/unbounded
+	// split is not the only variable between them, and which radii do that is a
+	// property of this fixture rather than of the guard. Swept at k = 2 on 1333
+	// elements, psi_bnd and Psi on the axis:
+	//
+	//   R      gg' = 0.05                    gg' = 0
+	//   1.10   -7.52e-03   Psi +7.50e-02     +2.56e-03   Psi -2.69e-02
+	//   1.15   +2.74e-02   Psi -2.80e-01     +3.67e-02   Psi -3.96e-01
+	//   1.20   +2.59e-02   Psi -2.60e-01     -2.11e-02   Psi +2.19e-01
+	//   1.25   +2.35e-02   Psi -2.34e-01     did not converge
+	//
+	// so 1.10 puts the gg' = 0.05 axis INSIDE the plasma and 1.20 does it to
+	// the gg' = 0 one; 1.15 is the radius at which both are in the vacuum.
+	// This case ran at 1.20 until 2026-09-07 and passed there because psi_bnd
+	// was snapped to the nearest dof, which happened to land it on the other
+	// branch -- the SIGN of psi_bnd is what decides this, and an O( h ) error
+	// in psi_bnd is enough to flip it.
 	std::vector<Cell> const cells = {
-		{ "no limiter, gg' = 0.05", false, 0.05, true  },
-		{ "LIMITER,    gg' = 0.05", true,  0.05, false },
-		{ "LIMITER,    gg' = 0   ", true,  0.00, true  },
+		{ "no limiter, gg' = 0.05", false, 0.00, 0.05, true  },
+		{ "LIMITER,    gg' = 0.05", true,  1.15, 0.05, false },
+		{ "LIMITER,    gg' = 0   ", true,  1.15, 0.00, true  },
 	};
 
 	std::printf( "\n  DOES F VANISH ON THE SYMMETRY AXIS? ( k = %d, n = %d )\n",
@@ -3809,7 +4048,7 @@ BOOST_AUTO_TEST_CASE( theAxisSourceGuardSeparatesThePoleFromTheLimiter )
 		solver.setBoundaryData( zero );
 		solver.setExtension( *d.path, d.gammaHMarker );
 		if ( cell.limiter )
-			solver.setBoundaryFluxPoint( 1.20, 0.0 );
+			solver.setBoundaryFluxPoint( cell.limiterR, 0.0 );
 		solver.setExteriorCoupling( dtn );
 		solver.solve();
 
@@ -3896,7 +4135,7 @@ BOOST_AUTO_TEST_CASE( theAxisSourceGuardSeparatesThePoleFromTheLimiter )
 		solver.setSource( source, 0.1 );
 		solver.setBoundaryData( zero );
 		solver.setExtension( *d.path, d.gammaHMarker );
-		solver.setBoundaryFluxPoint( 1.20, 0.0 );
+		solver.setBoundaryFluxPoint( 1.15, 0.0 );
 		solver.setExteriorCoupling( dtn );
 		solver.solve();
 

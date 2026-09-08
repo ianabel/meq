@@ -559,6 +559,55 @@ namespace meq
 			/// The value setAxisConstraint() last set.
 			AxisConstraint axisConstraint() const;
 
+			/// HOW `psi_bnd` IS PINNED AT THE LIMITER CONTACT.
+			enum class LimiterConstraint
+			{
+				/**
+				 * `psi_bnd = psi_h( r, z )` at the point ASKED FOR, evaluated
+				 * inside the element containing it. The DEFAULT.
+				 *
+				 * The row is that element's potential shape functions at the
+				 * point -- `( k+1 )( k+2 )/2` entries, exact and undifferenced --
+				 * and the corner is exactly 1. It needs no envelope argument at
+				 * all, unlike AxisConstraint::LocatedAxis: a prescribed limiter
+				 * contact does not move with the solution, so there is no
+				 * position term to vanish.
+				 */
+				ExactPoint,
+
+				/**
+				 * `psi_bnd = psi_h` at the NEAREST POTENTIAL DOF to the point
+				 * asked for. What MEQ did until 2026-09-07, kept as the CONTROL.
+				 *
+				 * **IT IS NOT AN `O( h^{k+1} )` APPROXIMATION OF ExactPoint, IT
+				 * IS AN `O( h )` ONE**, and that is what makes it worth a choice
+				 * rather than a footnote: the dof is up to half a dof spacing
+				 * from the point, and `psi` there differs by
+				 * `dist * |grad psi|` however high the degree. Measured on
+				 * `examples/limited-tokamak.toml`, sweeping the requested
+				 * limiter `R` at fixed everything else, the whole solve is
+				 * **bit-identical** over `R` in `[ 1.3250, 1.3500 ]` -- a
+				 * plateau **0.025 m** wide, 7% of the minor radius -- and jumps
+				 * by 5% in `psi_ax` and 11% in `psi_bnd` at each end of it. The
+				 * constraint is a staircase in the requested point.
+				 *
+				 * **AND IT IS WHY THAT FIXTURE APPEARED TO CONVERGE.** Its
+				 * limiter sits within 1e-4 of a dof by luck, so uniform
+				 * refinement reproduced `psi_bnd` to 5e-05 relative and `psi_ax`
+				 * converged at order 2.9. Move the contact 0.6 m round the same
+				 * limiter circle -- to where the 513^2 reference puts it -- and
+				 * the same ladder scatters by **1.7%** instead of converging,
+				 * because the nearest dof moves with the mesh.
+				 */
+				NearestDof
+			};
+
+			/// Choose it. LimiterConstraint::ExactPoint is the default.
+			void setLimiterConstraint( LimiterConstraint choice );
+
+			/// The value setLimiterConstraint() last set.
+			LimiterConstraint limiterConstraint() const;
+
 			/// Where `psi_ax` was attained on the last solve, and whether it was
 			/// a located axis or the fallback. Valid after solve().
 			///
@@ -1549,12 +1598,12 @@ namespace meq
 			/// of the solution, exactly as `psi_ax` is. So it gets a border row
 			/// of its own and the bordered Newton becomes 2x2.
 			///
-			/// `( r, z )` is the limiter contact. The constraint is `psi_bnd =
-			/// psi_h` at the NEAREST POTENTIAL DOF to it, which is a definition
-			/// rather than an approximation and is the same choice `psi_ax` makes
-			/// in taking the largest nodal value: it is what makes the constraint
-			/// differentiable in a form the border can use, and under NPC the row
-			/// is then exactly `-e_j` and the corner exactly 1.
+			/// `( r, z )` is the limiter contact, and the constraint is `psi_bnd
+			/// = psi_h` THERE -- inside the element containing the point, with
+			/// the row that element's potential shape functions. See
+			/// LimiterConstraint for the dof-snapping alternative this replaced
+			/// on 2026-09-07 and for what it cost: an `O( h )` staircase in the
+			/// requested point, 0.025 m wide on the shipped machine case.
 			///
 			/// **NPC ONLY**, and refused otherwise. Under the condensation `psi`
 			/// is a function of the trace through every element's source, so both
@@ -2223,9 +2272,24 @@ namespace meq
 			/// must be evaluated on the FACE transformation rather than the
 			/// element one, and MFEM aborts rather than coping. See the
 			/// definition.
-			/// The potential dof nearest a point; FB-3's border pins psi_bnd
-			/// to one nodal value, as psi_ax is pinned to the largest.
+			/// The potential dof nearest a point. LimiterConstraint::NearestDof
+			/// only -- the CONTROL; see that enumerator for what snapping costs.
 			int nearestPotentialDof( double r, double z ) const;
+
+			/// The element containing a point, and that element's potential
+			/// shape functions AT the point -- what
+			/// LimiterConstraint::ExactPoint pins `psi_bnd` with.
+			///
+			/// `psi_h` is discontinuous, so a point landing exactly on a face is
+			/// two-valued; the first element reporting the point inside wins,
+			/// which is deterministic and differs from the other by the face
+			/// jump, `O( h^{k+1} )`.
+			///
+			/// @throws std::runtime_error if no element contains the point,
+			///         which for a limiter contact means it is outside `Omega`.
+			void locatePotentialPoint( double r, double z, int &element,
+			                           mfem::Vector &shape,
+			                           mfem::Array<int> &dofs ) const;
 
 			void projectPathTraceOntoGammaH( mfem::Coefficient &coeff,
 			                                 mfem::Vector &target ) const;
@@ -2268,6 +2332,9 @@ namespace meq
 			double boundaryFluxR = 0.0;
 			double boundaryFluxZ = 0.0;
 			double psiBoundaryValue = 0.0;
+
+			/// setLimiterConstraint().
+			LimiterConstraint limiterConstraintChoice = LimiterConstraint::ExactPoint;
 
 			/// setAxisConstraint(), and where the last solve put the axis.
 			AxisConstraint axisConstraintChoice = AxisConstraint::LocatedAxis;

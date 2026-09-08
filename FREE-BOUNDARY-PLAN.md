@@ -963,7 +963,7 @@ the fallback to work.
 | **FB-3** | `ψ_bnd` as an unknown, plasma support still fixed. | **DONE 2026-09-05.** `setNormalisation( ψ_ax, ψ_bnd )` exists, the profiles take `(ψ − ψ_bnd)/(ψ_ax − ψ_bnd)`, the validation is on the SPAN, and the second BORDER is closed: `solveWithNormalisation()` does 2×2, with `ψ_ax`'s residual at **1.88e-16** and **0.00e+00** on two meshes. It is the cheaper of the two borders — `ψ_bnd`'s dof is fixed at setup where `ψ_ax`'s needs an argmax — and `HighBetaConvergence` is bit-identical, which is what says the generalisation reduces |
 | **FB-4** | The moving plasma support and cut quadrature. | **ANSWERED 2026-09-05, AND THE ANSWER MOVED THE WORK RATHER THAN DOING IT — see §7.10.** The order is capped by the PROFILE and not by the quadrature: with `p' ~ Ψ^j` at the edge, `ψ*` keeps `k+2` exactly when **`k ≤ j`**, and that threshold is the same for an exact cut rule as for MEQ's plain one. `j = 3, k = 3` reads **4.989** against a target of 5. **No cut quadrature was built**, and there is no inconsistent-cut-Jacobian cost to measure because there is no cut rule — the quadrature points do not move, so the assembled Jacobian is exact. What IS measured is that `j = 0` does not converge at all |
 | **FB-5** | The augmented Newton as one bordered solve, and adaptivity through it. | **DONE 2026-09-06, BOTH HALVES — and the adaptive half found that `η` cannot see the coupling; see §7.12.** `theCoupledSolveSurvivesTheAdaptiveLoop` runs solve → post-process → estimate → mark → refine with the exterior coupling live: `η` **2.51e-01 → 3.21e-02** over four cycles with `Γ` fixed, `L2(ψ)` 3.58e-03 → 9.33e-04, **0 widened fans** so assumption P.1 holds on a graded `Γ_h`, and **one** Newton step per cycle. The bordered solve: `setExteriorCoupling()` carries the N Gegenbauer coefficients as unknowns of the same Newton as `psi_ax` and `psi_bnd`, and `solveWithNormalisation()` now does a general `( N + 2 )` elimination against ONE factorisation. On FB-1b's half-disc it agrees with the superposition route to **2.3e-15**, takes **one** Newton step because the residual is affine in `( x, a )`, and converges to the exact coefficients at **3.32** against FB-1b's 3.30. `HighBetaConvergence` is bit-identical. What remains is the adaptive loop through the coupling: eta monotone with `Gamma` fixed, and P.1 preserved |
-| **FB-6** | A machine case, against **`../freegs4e`**. **The driver pieces landed 2026-09-06**: `[[coils]]` reaches the solve through `meq::makeCoilSet` and the `CoilAugmentedSource` adapters, `[source] ConfineToPlasma` switches the source off outside `{ Ψ > 0 }`, and `tools/mesh/halfdisc.py` generates the half-disc-with-conductors mesh MFEM reads natively. What is still missing for a machine case is a **route from a config file** to the two borders FB-3 and FB-5 built: neither `setBoundaryFluxPoint()` nor `setExteriorCoupling()` is reachable from TOML, so a machine case is a library caller today. | Agreement with an independent free-boundary tokamak code by a **different algorithm** — von Hagenow Green's functions, finite differences, Picard — on the same coils and the same tabulated `p′`, `ff′` through its `GeneralPprimeFFprime`. A fine-mesh self-comparison is the fallback, not the target: it shares every convention with the code it checks. See §7 |
+| **FB-6** | **DONE 2026-09-07 and the record is §7.20.** MEQ solves `freegs4e`'s `H_limited_circular` as a free boundary and reproduces the CONVERGED 513² reference: `ψ_ax` **1.5e-04**, `ψ_bnd` **4.5e-05**, the profile scale **3.8e-04** against a value predicted from the reference's own `Ip_logic` factor — all three inside the **7.92e-04** that reference sits from its own Richardson limit, at `k = 3` on **26375 elements**, with MEQ converged in its own mesh to 3.2e-05 at order 2.93. `examples/limited-tokamak.toml` drives it and `theDriverSolvesALimitedTokamak` is the regression. **What was in the way was not the solver**: `ψ_bnd` was pinned at the potential dof NEAREST the limiter contact, an `O( h )` error at every degree that made whole solves bit-identical over a 0.025 m plateau in the requested point. | Agreement with an independent free-boundary tokamak code by a **different algorithm** — von Hagenow Green's functions, finite differences, Picard — on the same coils and the same tabulated `p′`, `ff′`. **MET.** What is left is the limiter as a CURVE rather than a point, so MEQ finds its own contact instead of being handed the reference's grid artefact; and the conductor model, rectangles against filaments. See §7.20 |
 | **FB-7** | **Conductors OUTSIDE `Γ`**, entering through the coupling instead of the mesh. | **NOT STARTED — §7.19 is the write-up.** The exterior stays linear, so `ψ = ψ_coil + ψ̃` with `ψ_coil` known in closed form and `Δ*ψ_coil = 0` inside `Ω`: the interior equation is untouched and the conductor enters as a KNOWN additive term on both halves of the transmission condition. No new unknowns and no change to the border. **Two deliverables**: a GRADIENT on
 `meq::CoilSet`, and `meq::CurrentFilament` — `../freegs4e`'s default coil IS an
 exact filament, so the §7.16 comparison has an unmeasured modelling mismatch in
@@ -3001,6 +3001,226 @@ strength of it. Meshing the coils in would have meant the gmsh half-disc and a
 different discretisation from the one that case is about.
 
 
+### 7.20 FB-6: the limiter was pinned to a dof, and that was the whole error budget
+
+**2026-09-07, and it moves FB-6 from "agrees to about a part in a thousand, on a
+mesh, by fortune" to "agrees to 1.5e-04 against the CONVERGED reference, at
+MEQ's own converged limit".**
+
+**THE DEFECT IS ONE PHRASE IN FB-3's OWN DESCRIPTION.** `setBoundaryFluxPoint()`
+pinned `ψ_bnd` at *the nearest potential dof* to the limiter contact, and the
+header called that *"a definition rather than an approximation … the same choice
+`ψ_ax` makes in taking the largest nodal value"*. **The analogy is false and it
+is what hid the size of the error.** `ψ_ax` as a nodal maximum is wrong by
+`O( h^{k+1} )`, because the maximum of a polynomial over a closed element is
+within one interpolation error of its largest nodal value. A limiter contact is
+a *prescribed point*, and the nearest dof to it is up to half a dof spacing
+away, so `ψ` there is wrong by `dist × |∇ψ|` — **`O( h )`, at every degree**, and
+`p`-refinement makes it *worse* per dof rather than better.
+
+**MEASURED AS A STAIRCASE, WHICH IS THE UNAMBIGUOUS FORM OF IT.** Sweep the
+requested limiter `R` on `examples/limited-tokamak.toml`, one key changed:
+
+| requested `R` | 1.3200 | 1.3250 … 1.3500 | 1.3550 |
+|---|---|---|---|
+| `ψ_ax` | 9.115506e-02 | **9.466087e-02, bit-identical at all six** | 9.789959e-02 |
+| `ψ_bnd` | 2.616396e-02 | **2.774057e-02, bit-identical** | 2.916802e-02 |
+| Newton | 14 | **11 at all six** | 21 |
+
+**A plateau 0.025 m wide — 7% of the minor radius — over which the entire solve
+is bit-for-bit the same**, and a 5% step in `ψ_ax` and 11% in `ψ_bnd` at each
+end. The boundary condition was quantised by the mesh.
+
+**AND IT IS WHY THE SHIPPED FIXTURE APPEARED TO CONVERGE.** Uniform refinement
+of `examples/limited-tokamak.msh`, `RefinementLevels = 0, 1, 2`:
+
+| | 1601 el | 6527 el | 26375 el | order | limit | vs 129² reference |
+|---|---|---|---|---|---|---|
+| **NearestDof** | 9.466087e-02 | 9.464282e-02 | 9.464039e-02 | 2.89 | 9.46400e-02 | 2.0e-03 |
+| **ExactPoint** | 9.484400e-02 | 9.482652e-02 | 9.482423e-02 | 2.93 | **9.482388e-02** | **7.9e-05** |
+
+The control converges *beautifully* — order 2.89 — and converges **to the wrong
+number**. It does that because this fixture's limiter sits within 1e-4 of a dof
+by luck, so the snapped constraint is nearly the exact one *at this point on this
+mesh* and refinement never disturbs it. **A clean convergence table is not
+evidence that the boundary condition is right**, which is this file's own
+standing lesson arriving on a boundary condition rather than on a Jacobian.
+
+**MOVE THE CONTACT AND THE LUCK GOES.** The 513² reference puts its limiter
+contact at `( 0.8250, −0.3000 )` — see below — and on the same three meshes:
+
+| | 1601 el | 6527 el | 26375 el | |
+|---|---|---|---|---|
+| **NearestDof** | *coil branch* | 9.215282e-02 | 9.373357e-02 | scattering by **1.7%** |
+| **ExactPoint** | *coil branch* | 9.307644e-02 | **9.307342e-02** | converged to **3.2e-05** |
+
+**THE REPAIR IS `LimiterConstraint::ExactPoint`, AND IT IS SIMPLER THAN THE AXIS
+ROW IT COPIES.** `ψ_bnd = ψ_h( r, z )` inside the element containing the point,
+with the row that element's potential shape functions there — `(k+1)(k+2)/2`
+entries, exact and undifferenced — and the corner still exactly 1.
+`AxisConstraint::LocatedAxis` needs the **envelope theorem** to be exact, because
+its point moves with the solution; a prescribed limiter contact does not move, so
+there is no position term to argue away at all. `LimiterConstraint::NearestDof`
+is kept as the control, and `theLimiterConstraintIsEvaluatedWhereItIsAsked`
+sweeps both: the control repeats a value over **four consecutive samples** and
+the two differ by **6.3%** of `ψ_bnd`.
+
+**AND `TransformBack` IS SAFE HERE WHERE IT IS NOT SAFE FOR THE AXIS**, which is
+worth stating because this tree records it failing. The axis is a zero of a
+*discontinuous* `q_h` and can lie outside its own element, where the inverse map
+does not converge — measured at a residual of 5.1e-02 on an element of 5e-02. A
+limiter contact is a point of `Ω` that somebody asked for, so it is inside an
+element by construction, and on straight-sided triangles the inverse is affine
+and `Inside` is exact rather than probable.
+
+#### The comparison was against a reference that had moved under it
+
+**TWO INPUTS OF `examples/limited-tokamak.toml` ARE 129²-GRID ARTEFACTS, AND
+BOTH MOVE WITH THE REFERENCE'S OWN GRID.**
+
+**THE COIL CURRENTS ARE AN OUTPUT OF freegs4e's CONTROL SYSTEM, NOT AN INPUT.**
+It solves for them inside every Picard step against the shape constraints, so
+they converge in the grid like everything else:
+
+| | 129² | 513² | apart |
+|---|---|---|---|
+| P1U / P1L | −182364.4 | −179895.4 | 1.4% |
+| P2U / P2L | −46186.4 | **−52739.9** | **14%** |
+
+So a MEQ run carrying the 129² currents and compared against the 513² reference
+is comparing **two different machines**, and that is not a small effect: 14% on a
+vertical-field coil. Every FB-6 comparison has to take the currents from the same
+run it is compared against.
+
+**AND THE LIMITER CONTACT MOVES TO THE OTHER SIDE OF THE MACHINE.**
+`attach_limiter` takes `ψ_bndry` to be the maximum over the innermost ring of
+grid *cells* inside the wall, so where that maximum sits is a grid artefact:
+
+| grid | ring maximum at | cells inside the wall | vs the max on the TRUE circle |
+|---|---|---|---|
+| 129² | **( 1.3375, −0.0125 )**, outboard midplane | 0.98 | **+8.05%** |
+| 513² | **( 0.8250, −0.3000 )**, inboard shoulder | 0.86 | +1.33% |
+
+and the maximum on the true limiter circle is at `θ = 121.8°`,
+`( 0.8157, ±0.2976 )` — **the inboard shoulder** — on *both* grids. So at 129²
+the reference's reported contact is on the **wrong side of the machine**, 0.6 m
+from where the plasma actually touches, and the shipped `[boundary.limiter]`
+faithfully reproduces that artefact. It is a well-posed problem and both codes
+solve it identically; it is simply not the machine.
+
+#### What FB-6 now reads
+
+The 513²-consistent case: the 513² coil currents, the 513² ring maximum as the
+limiter point, and a guess rebuilt from the 513² source.
+
+| | freegs4e, 513² | MEQ, `k = 3`, 26375 el | apart |
+|---|---|---|---|
+| `ψ_ax` | 9.308752e-02 | **9.307342e-02** | **1.5e-04** |
+| `ψ_bnd` | 2.622462e-02 | **2.622580e-02** | **4.5e-05** |
+| `I_p` | 3.0e+05 A | 3.000003e+05 A | it is the constraint |
+| profile scale | 1, by construction | 9.400254e-01 | 6.0e-02 |
+
+**AND THE NUMBER TO BEAT WAS 7.92e-04**, which is how far the 513² reference sits
+from its own Richardson limit. Both flux values are **inside** it, so what is
+being measured now is the reference's grid error and not MEQ. MEQ's own remaining
+discretisation error is **3.2e-05**, from its last two rungs.
+
+**AND THE PROFILE SCALE AT 0.94 IS A THIRD INDEPENDENT CHECK, NOT AN ANOMALY.**
+On the 129²-consistent case it reads 1.0012, the `O(1)` this file says to read it
+as; at 513² it reads 0.9400254. The tables were converted from the **129²** run,
+so they carry that run's own `Ip_logic` factor `L`, and MEQ's current border
+absorbs the difference. That is predictable from the reference's own metadata and
+nothing of MEQ's:
+
+```
+scale = ( L_513 / L_129 ) * ( span_513 / span_129 )
+      = ( 1.972787e+06 / 2.094736e+06 ) * ( 6.686290e-02 / 6.701312e-02 )
+      = 0.939672        against a measured 0.9400254 -- 3.8e-04 apart
+```
+
+**3.8e-04, which is the same size as the flux agreement itself.** So the scale is
+a *third* quantity predicted from the reference and reproduced by MEQ, alongside
+`ψ_ax` and `ψ_bnd` — and it is the column CLAUDE.md says to read as the tell for
+a mis-scaled table, now with its expected value derived rather than assumed.
+Regenerating the tables from the 513² arrays would put it back at 1 and is
+cosmetic.
+
+#### Three things found on the way, all of them live
+
+**1. THE LOCATED-AXIS CONSTRAINT CAN LOCK ONTO A CONDUCTOR'S OWN O-POINT.** On
+the coarse mesh with the 513² currents the solve **converges** — 199 Newton steps,
+every border satisfied — to `ψ_ax = −1.232718e-01` at **( 1.7516, 0.9000 )**,
+which is the P1U coil centre, with a profile scale of **−1.03**. The coil carries
+a negative current, so its own field has a minimum there; the span came out
+negative, so `AxisConstraint::LocatedAxis` went looking for a minimum and found
+the coil's. **And it reports `normalised flux 1.0000`**, because `Ψ` at the
+located axis is 1 by construction under that constraint — the tautology
+`CLAUDE.md` already warns about, meeting a case it cannot see. Refinement cures
+it (both finer meshes find the plasma), and the tells are the axis POSITION and
+the **negative profile scale**.
+
+**THE DRIVER WARNS ON IT NOW**, testing the located axis against every
+`[[coils]]` conductor's own rectangle — the one non-circular thing available,
+since anything phrased in terms of the plasma is satisfied at the coil by
+construction. A warning rather than a refusal, on the several-O-points
+precedent. Verified firing on this very run: *"the located magnetic axis
+( 1.7516, 0.9000 ) is INSIDE conductor 0, which spans r [ 1.7000, 1.8000 ]
+z [ 0.8500, 0.9500 ]"*.
+
+**2. `mkexactguess.py` SILENTLY DEGRADED ON A FINER REFERENCE, BY ALIASING.**
+Both grids are uniform, so a guess node landing on a source filament is
+systematic; at 513² it is **total** — the guess step is exactly 26 source cells
+in `R` and 52 in `Z`, so 20 of 33 `R` values and 9 of 33 `Z` values coincide
+exactly, every node inside the core came back infinite, and the neighbour fill
+the script did instead flattened the peak to **2.6e-02 against a reference axis
+of 9.3e-02 — 72% wrong**, in the one quantity a guess has to get right. At 129²
+the step is 6.5 cells, nothing aligns, and it never showed. The fix is to FLOOR
+the separation at the source cell's own geometric mean distance, `0.44705 d`,
+which is what a cell of finite area actually gives: **inert at 129²** (2.38e-04
+either way, which is the figure the README already quoted) and 2.0e-05 at 513².
+**An additive `soft²` was tried first and is wrong** — it damps the whole near
+field and took the 129² control from 4.6e-04 to 2.5e-03, five times worse.
+
+**3. AND `AxisConstraint::LocatedAxis` HAS CLOSED THE SPIKE BRANCH ON THIS CASE,
+NOT MERELY DETECTED IT.** `examples/limited-tokamak.toml` carried a comment
+saying the degree was load bearing: *"At PolynomialDegree = 2 the solve
+converges perfectly well, every border at machine zero, and reports
+`ψ_ax = 2.73e+00` against a reference 9.48e-02 — a single spiking nodal value,
+not an axis. `p`-refinement is what reaches the physical branch."* Re-measured
+2026-09-07 at `k = 2` on 1601 elements with everything else held: **8 Newton
+steps to `ψ_ax = 9.349647e-02`**, the physical branch, 1.4% from the reference —
+about what a degree costs. **A single spiking dof is not a zero of `q_h`**, so
+constraining `ψ_ax` at the located axis makes that branch unreachable rather
+than merely reportable. §11.5's option 3 earning its keep on a shipped case.
+
+**4. `ψ_bnd( R )` IS NOT MONOTONE IN THE LIMITER POSITION**, and an earlier
+version of the new test asserted that it was. Moving the limiter moves the
+*equilibrium*, so `ψ_bnd` is not `ψ` sampled on a fixed field: on the toy
+fixture it has a genuine minimum near `R = 1.20`. That also kills the obvious
+smoothness statistic, since second differences are large near an extremum by
+construction — which is why the test gates on the control **repeating a value
+exactly** instead.
+
+#### What is left
+
+* the profile tables are the 129² run's; the scale of 0.94 is accounted for
+  above to 3.8e-04, so regenerating them is cosmetic;
+* **the limiter is still prescribed as a POINT**, so MEQ is given the reference's
+  own grid artefact rather than finding its own contact. The physical problem is
+  `ψ_bnd = max ψ over the limiter CURVE`, and it is exact by the **same envelope
+  theorem** as the axis: the contact moves *along* the curve, and at a maximum of
+  `ψ|_L` the tangential derivative vanishes, so the position term drops and the
+  row is again just the shape functions. A limiter is prescribed input, so the
+  curve can be **meshed to** exactly as §7.9's conductors are — `halfdisc.py`
+  would embed it and the contact would then be found on mesh entities. That is
+  FB-6's remaining capability gap and it is a day's work;
+* the conductor model still differs — MEQ's rectangles against freegs4e's
+  filaments — and §7.19's `meq::CurrentFilament` cannot fix it here, because the
+  P2 coils sit at radius 1.163 from `Γ`'s centre while the plasma reaches 1.345,
+  so no `Γ` both encloses the plasma and excludes them. Rebuilding the reference
+  on `freegs4e.shaped_coil.ShapedCoil` is the way, and it is a reference-side job.
+
+
 ## 10. Diverted plasmas and the X-point
 
 **A planning item, written 2026-09-06. Nothing here is built, and it is
@@ -3832,7 +4052,7 @@ into the vacuum. Three of those are incompatible with each other:
 |---|---|---|
 | `ConfineToPlasma` | `gg′( Ψ_axis ) ≠ 0` on `r = 0`, so `F/r = μ₀ j_φ` is unbounded there and `ψ_h` grows a layer along the whole axis | `\|F\|` on the axis at **1.0e-02 of scale**; with it, **exactly 0.0** |
 | a prescribed current | §7.14's non-linear eigenvalue problem: `Λ = A/span²` must be an eigenvalue **on the plasma region** and the region is unknown, so scaling `A` changes nothing | confinement alone: **does not converge at any of the four radii** |
-| a vertical field | nothing in the constraints says the plasma is a **core** | without coils: converges at 1.05 to §7.14's **annulus**, axis at `r = 1.38` on a domain reaching 1.50; **does not converge at all** at 1.15 or 1.20 |
+| a vertical field | nothing in the constraints says the plasma is a **core** | without coils: converges at 1.08, 1.10 and 1.12 to §7.14's **annulus**, axis at `r = 1.38` on a domain reaching 1.50; **does not converge at all** at 1.15 or 1.18 |
 
 **ALL THREE ARE NECESSARY AND THE TABLE IS THE ONE-VARIABLE-AT-A-TIME PROOF OF
 IT.** Each row is the same fixture with one thing removed.
@@ -3842,35 +4062,55 @@ Shafranov's `B_v = μ₀I_p/(4πR)·[ ln(8R/a) + β_p + l_i/2 − 3/2 ]` says wh
 a given `I_p` needs, and the current that delivers it is measured **from the
 coils themselves** through `ExteriorCoilSet::gradPsi` — `B_z = (1/r)∂_rψ` at
 `( R₀, 0 )`, which is *not* on the symmetry axis, so the textbook on-axis loop
-formula does not apply and was not used. `μ₀I_p = 0.12`, `R₀ = 0.75`,
-`a = 0.30`, bracket **2.4957**, `B_v = −3.1777e-02`, coil current
-**−8.1172e-02** each.
+formula does not apply and was not used. `μ₀I_p = 0.12`, `R₀ = 0.75`.
 
-**THE RESULT, `k = 2`, `n = 24`, four Gegenbauer modes:**
+**AND `a` IS THE LIMITER'S OWN, PER ROW, SINCE 2026-09-07 — WHICH THIS CASE GOT
+WRONG WHEN IT WAS BUILT.** It derived ONE field from a fixed `a = 0.30`, so
+exactly one row — `R = R₀ + a = 1.05` — was on design and every other row was the
+same coils holding a plasma of a different size. That is not a small
+inconsistency: re-measured with `ψ_bnd` evaluated at the limiter point rather
+than snapped to a dof, **half the swept radii landed on a spurious branch** with
+`ψ_bnd` negative and the "axis" at `( 0.071, 1.488 )`, which is on `Γ` — and the
+healthy ones ALTERNATED, 1.10 good, 1.15 bad, 1.20 good, 1.25 bad. Shafranov's
+formula takes `a`, so it is given `a = R_limiter − R₀`, and the pattern becomes
+**contiguous**: five healthy radii in a row. A sweep that alternates is a sign
+the rows are not the same problem.
 
-| limiter | coils | Newton | `ψ_ax` | `ψ_bnd` | `\|F\|` on `r = 0` | `ψ_ax` attained at | `Ψ` at the O-point |
-|---|---|---|---|---|---|---|---|
-| 1.05 | yes | 35 | 3.141820e-02 | 1.673629e-02 | **0.0000e+00** | ( 0.956, −0.035 ) | **1.0000** |
-| 1.05 | **NO** | 21 | 6.105278e-02 | 3.690785e-02 | 0.0000e+00 | **( 1.381, 0.000 )** | 1.0000 |
-| 1.15 | yes | 51 | 1.669769e-02 | 4.207232e-03 | **0.0000e+00** | ( 0.850, 0.000 ) | **1.0000** |
-| 1.20 | yes | 13 | 2.179752e-02 | 7.599978e-03 | **0.0000e+00** | ( 0.956, 0.000 ) | **1.0000** |
+**THE RESULT, `k = 2`, 1333 elements (`n = 24`), four Gegenbauer modes:**
 
-`ψ_ax` is attained at `r = 0.85` to `0.96` where the old fixture attained it at
-`r = 0.00000`; the prescribed current is delivered to every digit at every row.
+| limiter | coil `μ₀I` | coils | Newton | `ψ_ax` | `ψ_bnd` | `\|F\|` on `r = 0` | `ψ_ax` attained at | `Ψ` at the O-point |
+|---|---|---|---|---|---|---|---|---|
+| 1.08 | −7.8072e-02 | yes | 11 | 1.212249e-02 | 1.366962e-03 | **0.0000e+00** | ( 0.779, 0.000 ) | **1.0000** |
+| 1.08 | 0 | **NO** | 96 | 6.222586e-02 | 3.854703e-02 | 0.0000e+00 | **( 1.381, 0.000 )** | 1.0000 |
+| 1.10 | −7.6159e-02 | yes | 11 | 1.203052e-02 | 1.156123e-03 | **0.0000e+00** | ( 0.779, 0.000 ) | **1.0000** |
+| 1.10 | 0 | **NO** | 11 | 6.361819e-02 | 4.050822e-02 | 0.0000e+00 | **( 1.381, 0.000 )** | 1.0000 |
+| 1.12 | −7.4351e-02 | yes | 24 | 1.189041e-02 | 9.539203e-04 | **0.0000e+00** | ( 0.815, 0.000 ) | **1.0000** |
+| 1.12 | 0 | **NO** | 15 | 6.523134e-02 | 4.264655e-02 | 0.0000e+00 | **( 1.381, 0.035 )** | 1.0000 |
+| 1.15 | −7.1816e-02 | yes | 8 | 1.177335e-02 | 7.029152e-04 | **0.0000e+00** | ( 0.815, 0.000 ) | **1.0000** |
+| 1.18 | −6.9463e-02 | yes | 8 | 1.167206e-02 | 4.794681e-04 | **0.0000e+00** | ( 0.850, 0.000 ) | **1.0000** |
+
+**FIVE HEALTHY RADII WHERE THERE WERE THREE.** `ψ_ax` is attained at
+`r = 0.78`–`0.85` where the old fixture attained it at `r = 0.00000`; the
+prescribed current is delivered to every digit at every row; and **both `ψ_ax`
+and `ψ_bnd` are monotone and smooth in the limiter radius**, which is itself a
+reading of the repaired limiter constraint of §7.20 — a dof-snapped one is a
+staircase in exactly that variable.
 
 **THE COIL-FREE ROW IS THE CONTROL AND IT IS SHARPER THAN A FAILURE WOULD BE.**
-It converges, `|F|` on the axis is exactly zero, and `Ψ` at its O-point reads
-**1.0000** — *every health check in the case passes on it*. It is simply a
-different equilibrium, and the only thing separating them is **where the axis
-is**. So the control asserts on the position, `r = 1.38` against `0.93`.
+It converges at three of the five, `|F|` on the axis is exactly zero, and `Ψ` at
+its O-point reads **1.0000** — *every health check in the case passes on it*. It
+is simply a different equilibrium, and the only thing separating them is **where
+the axis is**. So the control asserts on the position, `r = 1.38` against
+`0.78`–`0.85`. At 1.15 and 1.18 it does not converge at all.
 
-**WHERE IT GIVES OUT IS THE GEOMETRY, AND IS RECORDED RATHER THAN HIDDEN.** The
-old sweep's fourth radius, **1.30**, is 0.87 of `ρ_Γ` and this fixture does not
-reach a tokamak there: `ψ_bnd` comes out **negative** at −2.28e-02, the O-point
-lands at `( −0.001, 1.441 )` — on the axis, at the top of the domain — carrying
-`Ψ = 1.14`, and `|F|` on `r = 0` is back at 1.6e-01 of scale. It converges, in 8
-steps. **A different branch, not a worse answer**, and the honest fix is a larger
-`Γ` rather than a looser assertion, so the sweep stops at 1.20.
+**WHERE IT GIVES OUT IS THE GEOMETRY, AND IS RECORDED RATHER THAN HIDDEN.** From
+about `R = 1.20` — 0.8 of `ρ_Γ` — this fixture does not reach a tokamak: `ψ_bnd`
+comes out **negative** at about −1.6e-02, the O-point lands on `Γ` at
+`( 0.071, 1.488 )` carrying `Ψ ≈ 1.1`–`1.2`, and `|F|` on `r = 0` is back at
+about 2.9e-03. It converges, in 8 to 12 steps. **A different branch, not a worse
+answer**, and the honest fix is a larger `Γ` rather than a looser assertion, so
+the sweep stops at 1.18. And `R = 1.05` no longer converges at all, which is what
+the per-radius field cost: at `a = 0.30` the plasma fills the whole guess bump.
 
 **THE CONDUCTORS ARE OUTSIDE `Γ` AND COST THE FIXTURE NO MESH**, which is FB-7
 being used by something other than its own acceptance the day after it landed.

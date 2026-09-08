@@ -59,9 +59,40 @@ from mkguess import write_guess
 MU0 = 4.0e-7 * np.pi
 
 
-def greens(Rc, Zc, R, Z):
-	"""psi at (R, Z) of a unit current filament at (Rc, Zc), Wb/rad."""
-	k2 = 4.0 * R * Rc / ((R + Rc) ** 2 + (Z - Zc) ** 2)
+def greens(Rc, Zc, R, Z, soft=0.0):
+	"""psi at (R, Z) of a unit current filament at (Rc, Zc), Wb/rad.
+
+	`soft` REPLACES THE FILAMENT BY THE CELL IT STANDS FOR, and it is not a
+	numerical fudge.  Writing the denominator out,
+
+	    ( R + Rc )^2 + ( Z - Zc )^2 = ( R - Rc )^2 + ( Z - Zc )^2 + 4 R Rc
+
+	so 1 - k^2 carries the SEPARATION squared, and this FLOORS that separation
+	at `soft` -- it does not add to it.  The distinction is not pedantic: an
+	additive soft^2 is felt by every term, and measured on the 129^2 reference
+	it took the reconstructed axis flux from 4.6e-04 of the reference to
+	2.5e-03, five times WORSE, because the axis sits about half a cell from its
+	nearest filament and the whole near field was being damped.  A floor is
+	exact everywhere beyond `soft` and finite inside it.
+
+	The floor is the geometric mean distance of a square of side d from itself,
+	0.44705 d, which is the textbook self-inductance result: the source really
+	is a cell of finite area carrying a uniform current density, and its own
+	flux is finite.
+
+	WHY IT IS NEEDED RATHER THAN MERELY TIDY.  Both grids are uniform, so a
+	guess node landing on a source filament is systematic and not rare -- and at
+	the 513^2 reference it is TOTAL: the guess step is exactly 26 source cells
+	in R and 52 in Z, so 20 of 33 R values and 9 of 33 Z values coincide
+	exactly, every node inside the core is infinite, and the neighbour fill this
+	script used to do instead flattened the peak to 2.6e-02 against a reference
+	axis of 9.3e-02 -- 72% WRONG, in the one quantity a guess has to get right.
+	At 129^2 the same step is 6.5 cells, nothing aligns, and it never showed.
+	"""
+	gap2 = (R - Rc) ** 2 + (Z - Zc) ** 2
+	if soft > 0.0:
+		gap2 = np.maximum(gap2, soft * soft)
+	k2 = 4.0 * R * Rc / (gap2 + 4.0 * R * Rc)
 	k = np.sqrt(k2)
 	return (MU0 / (2.0 * np.pi)) * np.sqrt(R * Rc) * (
 		(2.0 / k - k) * ellipk(k2) - (2.0 / k) * ellipe(k2))
@@ -97,16 +128,23 @@ def main():
 	pos = [(1.75, 0.90), (1.75, -0.90), (0.55, 1.10), (0.55, -1.10)]
 	names = ["P1U", "P1L", "P2U", "P2L"]
 	currents = d["coil_currents"]
+	# The reference's coils ARE filaments, so there is no cell size to use; the
+	# floor here is MEQ's own conductor half-width, which is the scale at which
+	# the two codes' models stop agreeing anyway.  It only bites on a guess node
+	# that lands on a conductor.
 	for (rc, zc), I in zip(pos, currents):
-		psi[inner] += I * greens(rc, zc, RR[inner], ZZ[inner])
+		psi[inner] += I * greens(rc, zc, RR[inner], ZZ[inner], soft=0.05)
 	for name, I in zip(names, currents):
 		print("  coil %-4s %+.6e A at %s" % (name, I, pos[names.index(name)]))
+
+	# The geometric mean distance of a source CELL from itself.
+	cell = 0.44705 * np.sqrt(dA)
 
 	CH = 200
 	for a in range(0, src_I.size, CH):
 		b = min(a + CH, src_I.size)
 		g = greens(src_R[a:b][None, :], src_Z[a:b][None, :],
-		           RR[inner][:, None], ZZ[inner][:, None])
+		           RR[inner][:, None], ZZ[inner][:, None], soft=cell)
 		psi[inner] += g @ src_I[a:b]
 		print("  %d / %d" % (b, src_I.size), end="\r")
 	print()

@@ -244,13 +244,91 @@ Picard-then-Newton fails too, and the driver says to raise the degree.
 `p`-refinement reaches cases that neither refinement in `h` nor a globalisation
 does.
 
+The free-boundary comparison
+----------------------------
+
+Everything above is the **fixed**-boundary rehearsal, and it contains a boundary
+fit, so it cannot reach round-off however fine either grid is. The
+free-boundary comparison removes the fit: MEQ is given the same four coils, the
+same profile shapes, the same prescribed :math:`I_p` and the same limiter
+contact, **and no plasma boundary at all**. It ships as
+``examples/limited-tokamak.toml``.
+
+The reference is ``freegs4e``'s ``H_limited_circular`` — vertical-field coils
+only, so no X-point exists in range and the plasma boundary is the flux surface
+through the limiter contact. That is the one topology MEQ's pointwise
+plasma-support test can represent; see :doc:`normalised_flux`.
+
+Against the reference converged on a :math:`513^2` grid, with MEQ at
+:math:`k = 3` on **26,375 elements** and ten Gegenbauer modes:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 25 25 20
+
+   * - quantity
+     - ``freegs4e``, :math:`513^2`
+     - MEQ
+     - relative
+   * - :math:`\psi_{\mathrm{ax}}`
+     - 9.308752e-02
+     - 9.307342e-02
+     - 1.5e-04
+   * - :math:`\psi_{\mathrm{bnd}}`
+     - 2.622462e-02
+     - 2.622580e-02
+     - 4.5e-05
+   * - profile scale
+     - 0.939672
+     - 0.9400254
+     - 3.8e-04
+   * - :math:`I_p`
+     - 3.0e+05 A
+     - 3.000003e+05 A
+     - it is the constraint
+
+Three points about reading that table.
+
+**The reference is not exact either, and its own grid error is the floor.** At
+:math:`513^2` it sits **7.92e-04** from its own Richardson limit, so agreement
+closer than that is measuring the reference rather than MEQ. All three
+quantities above are inside it.
+
+**MEQ converges in its own mesh on this case.** Uniform refinement of the
+shipped mesh at :math:`k = 3` gives :math:`\psi_{\mathrm{ax}}` = 9.484400e-02,
+9.482652e-02, 9.482423e-02 on 1601, 6527 and 26,375 elements — order **2.93**,
+with the finest 3.2e-05 from the extrapolated limit. (Those are against the
+:math:`129^2` reference's coil currents, which the shipped file carries.)
+
+**The profile scale is predicted, not fitted.** ``freegs4e`` rescales both
+profiles by a factor :math:`L` to deliver the requested current, and MEQ's
+tables carry the :math:`129^2` run's :math:`L`. The scale MEQ's own current
+border should then report is
+:math:`(L_{513}/L_{129})(\mathrm{span}_{513}/\mathrm{span}_{129}) = 0.939672`,
+which it reproduces to 3.8e-04. So the scale is a third independent check and
+not a free parameter.
+
+Two inputs have to be taken from the same reference run being compared against,
+and neither is obvious. ``freegs4e``'s **coil currents** are an output of its
+control system, not an input, so they converge in the grid like everything else
+— one of them moves 14 % between :math:`129^2` and :math:`513^2`. And its
+**limiter contact** is the maximum over the innermost ring of grid *cells*
+inside the wall, so it too moves with the grid: on this case it sits on the
+outboard midplane at :math:`129^2` and on the inboard shoulder, 0.6 m away, at
+:math:`513^2`. Mixing a reference's currents with another's contact compares two
+different machines.
+
 What it does not establish
 --------------------------
 
-**Nothing about free boundary.** MEQ does not yet solve the free-boundary
-problem; this compares fixed-boundary MEQ against the interior of a
-free-boundary answer. The free-boundary comparison is what this benchmark is
-being built toward, and it is not this.
+**Nothing about a diverted plasma.** Both comparisons above are limited
+configurations. Every other case in the fixed-boundary table has an X-point,
+and MEQ's plasma-support test is limiter-only; see
+:doc:`normalised_flux`.
+
+**Nothing about a found limiter contact.** The contact is prescribed to MEQ as a
+point rather than searched for on the limiter curve, so the surface MEQ reports
+is the one through the point it is given.
 
 **Nothing about the flux-surface machinery.** Only :math:`\psi` on a grid is
 differenced. The quantities in :doc:`surface_geometry` are checked against

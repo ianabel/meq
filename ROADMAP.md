@@ -18,7 +18,7 @@ manual and what a maintainer needs is `CLAUDE.md`. Git has them.
 | ~~`DRIVER-PLAN.md`~~ | stage 7 — **done**, and now `docs/running.rst`, `docs/output.rst` and `docs/configuration.rst` |
 | ~~`FLOW-PLAN.md`~~ | item 9, FL-0 to FL-8 — **done**, and now `docs/rotation.rst`, which carries the derivation `RotatingSource.hpp` defers to |
 | `INVERSION-PLAN.md` | item 10's machinery — IN-A to IN-4 and IN-P **done**, IN-5 deferred, IN-6 open |
-| `FREE-BOUNDARY-PLAN.md` | item 8 — FB-A, FB-0, FB-1, FB-2, FB-3 **done**, FB-4 **answered**, FB-5 part built, FB-6 open. Still the one real plan left |
+| `FREE-BOUNDARY-PLAN.md` | item 8 — FB-A, FB-0, FB-1, FB-2, FB-3, FB-7 **done**, FB-4 **answered**, FB-5 part built, and **FB-6 met 2026-09-07**: MEQ reproduces `freegs4e`'s converged limited tokamak to 1.5e-04 in `ψ_ax`. What is left of it is the limiter as a curve, and §10's diverted plasmas |
 | `PLASMA-EDGE-PLAN.md` | a design out of FB-4, **deliberately not to be started** until `j ≥ 1` is finished |
 | `MANTA-COUPLING.md` | the socket MaNTA presents, written from MaNTA's side. No field model is registered there yet |
 
@@ -106,14 +106,37 @@ Nothing is red and stages 0 to 7 are done, so the order is:
      exterior routes agreeing where both are legal, which needs a second
      geometry, a conductor being either inside `Ω` or outside `Γ` and never
      both.
-   * **FB-6, the machine case**, against `../freegs4e`. §7.11 of the plan
-     settled the test problem: there is no reproducible ITER case, and the
-     answer is CEDRES++'s published profile family driven through freegs4e's
-     `ConstrainBetapIp`, which is the same model term for term. **Open it at
-     `γ = 2` or 3, not the published `γ = 1.395`** — the profile's vanishing
-     order at the edge *is* `γ`, so 1.395 caps `ψ*` at 3.895 and makes
-     `∂F/∂ψ` unbounded there. Bring the published value in afterwards, expecting
-     `k ≥ 2` not to hold `k+2` on it.
+   * ~~**FB-6, the machine case**, against `../freegs4e`.~~ **MET 2026-09-07**,
+     and plan §7.20 is the record. MEQ solves `H_limited_circular` as a free
+     boundary and reproduces the **converged** 513² reference at `k = 3` on
+     26375 elements: `ψ_ax` **1.5e-04**, `ψ_bnd` **4.5e-05**, and the profile
+     scale **3.8e-04** against a value predicted from the reference's own
+     current-scaling factor — all three inside the **7.92e-04** that reference
+     sits from its own Richardson limit, with MEQ converged in its own mesh to
+     3.2e-05 at order **2.93**.
+
+     **What was in the way was not the solver.** `ψ_bnd` was pinned at the
+     potential dof NEAREST the limiter contact, which its own header called *"a
+     definition rather than an approximation"* — and is an `O( h )` error at
+     every degree, not the `O( h^{k+1} )` nodal choice that phrase implies. It
+     made whole solves bit-identical over a **0.025 m** plateau in the requested
+     point. `LimiterConstraint::ExactPoint` is the repair and was worth a factor
+     of twenty on every column.
+
+     **What is left of FB-6 is two things.** The limiter is prescribed as a
+     **point**, so MEQ is handed the reference's own grid artefact rather than
+     finding its own contact; the physical problem is `ψ_bnd = max ψ` over the
+     limiter **curve**, which is exact by the same envelope theorem as the axis
+     and whose curve can be **meshed to** — `tools/mesh/halfdisc.py --limiter`
+     now embeds it, and the solver half is not built. And the conductor model
+     still differs, MEQ's rectangles against `freegs4e`'s filaments, which
+     FB-7's `CurrentFilament` cannot fix on this geometry because no `Γ` both
+     encloses the plasma and excludes the inner coil pair.
+
+     §7.11's ITER profile family stays the next *harder* case, and its advice
+     stands: **open it at `γ = 2` or 3, not the published `γ = 1.395`** — the
+     profile's vanishing order at the edge *is* `γ`, so 1.395 caps `ψ*` at 3.895
+     and makes `∂F/∂ψ` unbounded there.
 
    **The fixed-boundary rehearsal is already running and is at 8.8e-06**, which
    is now limited by MEQ's own discretisation rather than by the boundary fit —
@@ -483,7 +506,7 @@ time anyone read it again. What is built, each against a measured number:
 | **FB-3** | `ψ_bnd` as a second border. `setBoundaryFluxPoint()`, constraint at **1.88e-16** |
 | **FB-4** | **answered rather than done**: the order is capped by the PROFILE, not the quadrature — `ψ*` keeps `k+2` exactly when `k ≤ j`. No cut rule was built and that is a decision. `PLASMA-EDGE-PLAN.md` is the route out of the cap and is not to be started yet |
 | **FB-5** | the `( N + 2 )` bordered Newton, agreeing with superposition to **2.3e-15** in **one** step. Adaptivity through it is what remains |
-| **FB-6** | the driver pieces — `[[coils]]`, `ConfineToPlasma`, `tools/mesh/halfdisc.py`. The machine case itself is open |
+| **FB-6** | **MET 2026-09-07**, plan §7.20. `k = 3`, 26375 elements: `ψ_ax` 1.5e-04, `ψ_bnd` 4.5e-05 and the profile scale 3.8e-04 against the converged 513² reference, all inside its own 7.92e-04 grid error, with MEQ converged in its own mesh at order 2.93. `examples/limited-tokamak.toml` and `theDriverSolvesALimitedTokamak` |
 
 **THE DISTANCE LEFT IS SMALLER THAN IT LOOKS AND IT IS DRIVER WORK.** FB-3's and
 FB-5's borders are library capability with no route from a TOML file —

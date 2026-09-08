@@ -1906,6 +1906,61 @@ int main( int argc, char **argv )
 					axisCheck.axis.psi );
 			}
 
+			/*
+			 * AND AN "AXIS" INSIDE A CONDUCTOR IS NOT ONE, WHICH IS THE ONE
+			 * NON-CIRCULAR THING THAT CAN BE SAID HERE.
+			 *
+			 * Found 2026-09-07 while pushing FB-6. On a coarse mesh with a
+			 * consistent set of coil currents the solve CONVERGED -- every
+			 * border satisfied, the prescribed current delivered -- to
+			 * psi_ax = -1.2327e-01 at ( 1.7516, 0.9000 ), which is a coil
+			 * centre, with a profile scale of -1.03. The coils carry negative
+			 * current, so each has an O-point of its own field there; the span
+			 * came out negative, so AxisConstraint::LocatedAxis went looking
+			 * for a MINIMUM and found the coil's.
+			 *
+			 * NOTHING ELSE IN THIS BLOCK CAN SEE IT. checkAxis() reports the
+			 * normalised flux at the located axis, which under that constraint
+			 * is 1 BY CONSTRUCTION -- it read 1.0000 on that run -- and
+			 * checkAxisSource() asks about r = 0 and was clean. Every test that
+			 * refers to the plasma is circular at that point, because Psi = 1
+			 * there is what the constraint imposes. The conductor GEOMETRY is
+			 * outside all of it, and the driver is where it is known.
+			 *
+			 * A WARNING, on the precedent of the paragraph above: which O-point
+			 * is the core is the guess's choice, and refinement cures this one
+			 * (both finer meshes found the plasma). What can be said is that
+			 * the answer is inside a piece of copper, and said with the number.
+			 */
+			if ( solver && coils && solver->axisWasLocated() )
+			{
+				for ( std::size_t i = 0; i < coils->size(); ++i )
+				{
+					meq::Coil const &one = coils->coil( i );
+					if ( solver->axisR() < one.rMin()
+					     || solver->axisR() > one.rMax()
+					     || solver->axisZ() < one.zMin()
+					     || solver->axisZ() > one.zMax() )
+						continue;
+
+					std::fflush( stdout );
+					std::fprintf( stderr,
+						"MEQ: warning: the located magnetic axis ( %.4f, %.4f ) is\n"
+						"     INSIDE conductor %zu, which spans r [ %.4f, %.4f ]\n"
+						"     z [ %.4f, %.4f ].  A plasma has no magnetic axis inside a\n"
+						"     coil, so psi_ax is a coil's own O-point and not this\n"
+						"     equilibrium's -- and every profile is normalised by it.\n"
+						"     The normalised-flux check CANNOT see this: psi_ax is\n"
+						"     constrained at the located axis, so Psi there reads 1\n"
+						"     whatever the axis is.  Look at the sign of the profile\n"
+						"     scale and at the initial guess; refinement has been\n"
+						"     measured to cure it.\n",
+						solver->axisR(), solver->axisZ(), i,
+						one.rMin(), one.rMax(), one.zMin(), one.zMax() );
+					break;
+				}
+			}
+
 			if ( !axisCheck.agrees )
 			{
 				/*

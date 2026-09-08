@@ -251,9 +251,9 @@ under a Solov'ev source is an unknown key, not an ignored one.
 
    Note also that :math:`\psi_{\mathrm{bnd}}` is zero unless a limiter is
    given.  With ``[boundary.limiter]`` present it is an unknown of the same
-   bordered Newton, pinned by :math:`\psi_h` at the potential degree of freedom
-   nearest the limiter contact, and the plasma edge is then *found* rather than
-   pinned at :math:`\psi = 0`.
+   bordered Newton, pinned by :math:`\psi_h` **at the contact point given**,
+   and the plasma edge is then *found* rather than pinned at
+   :math:`\psi = 0`.
 
 .. note::
 
@@ -686,11 +686,17 @@ The profiles are functions of
 :math:`\Psi = (\psi - \psi_{\mathrm{bnd}})/(\psi_{\mathrm{ax}} - \psi_{\mathrm{bnd}})`,
 so :math:`\psi_{\mathrm{bnd}}` is a functional of the solution exactly as
 :math:`\psi_{\mathrm{ax}}` is. The constraint is that it equals :math:`\psi_h`
-at the **nearest potential degree of freedom** to the point given — a definition
-rather than an approximation. It is what makes the constraint differentiable in a
-form the border can use. :math:`\psi_{\mathrm{ax}}` is pinned differently, at
-the *located magnetic axis*: the limiter contact is prescribed input and does not
-move with the solution, so a nodal value serves, while an axis is found.
+**at the point given**, evaluated inside the element containing it, so the
+border row is that element's potential shape functions there. Because a limiter
+contact is prescribed input and does not move with the solution, that is exact
+with no further argument — where :math:`\psi_{\mathrm{ax}}`, pinned at the
+*located magnetic axis*, needs the envelope theorem to say the same.
+
+.. note::
+
+   The contact is prescribed as a **point**, not as a curve, so MEQ does not
+   find the contact for you: the flux surface it reports is the one through the
+   point you name.  Give it the point the machine actually touches.
 
 .. warning::
 

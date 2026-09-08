@@ -45,6 +45,22 @@ what that costs.  `occ.fragment` is what does it: it splits the disc along the
 coil rectangles so their edges are mesh edges.
 
 
+`--limiter` MESHES THE LIMITER CIRCLE IN, AND THE SOLVER HALF IS NOT BUILT
+------------------------------------------------------------------------
+
+Same argument as the coils, one line further: a limiter is prescribed input too,
+so it can be aligned to.  What that is FOR is the limiter as a CURVE --
+`psi_bnd = max psi` over it, with the contact found rather than prescribed,
+which is what every production free-boundary code does and what would take
+`freegs4e`'s own grid artefact out of MEQ's comparison against it
+(FREE-BOUNDARY-PLAN.md section 7.20).
+
+`meq::GradShafranovSolver` does not do that yet: `setBoundaryFluxPoint()` takes
+a POINT and `LimiterConstraint::ExactPoint` evaluates `psi_h` there.  So the
+option is the enabling half and buys nothing on its own today -- it is here
+because the mesh is the part that has to exist first, and because an interior
+curve is exactly the thing this file already records getting wrong once.
+
 THE BOUNDARY GROUPS ARE THE OUTER BOUNDARY AND NOTHING ELSE, AND THE FIRST
 VERSION OF THIS FILE GOT THAT WRONG IN A WAY NOTHING WOULD HAVE REPORTED
 -------------------------------------------------------------------------
@@ -127,6 +143,7 @@ AXIS_TOLERANCE = 1.0e-9
 
 VACUUM_ATTRIBUTE = 1
 FIRST_COIL_ATTRIBUTE = 10
+LIMITER_ATTRIBUTE = 20
 GAMMA_ATTRIBUTE = 1
 AXIS_ATTRIBUTE = 2
 
@@ -141,7 +158,7 @@ def _coil_of(centre, coils):
 
 
 def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
-          coil_size=None, transition=None):
+          coil_size=None, transition=None, limiter=None):
     """A half-disc of radius `rho` about the origin, r >= 0, with `coils` a list
     of (rmin, zmin, width, height) rectangles fragmented into it.
 
@@ -149,6 +166,25 @@ def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
     `plasma_size`; `coil_size` refines inside the conductors.  Both default to
     the background `size`, so a caller who asks for neither gets a uniform mesh
     and the size field is not installed at all.
+
+    `limiter` is an optional (R0, Z0, a) circle FRAGMENTED IN, for the same
+    reason the conductors are: a limiter is PRESCRIBED INPUT and does not move
+    with the solution, so it can be aligned to.  What that buys is that the
+    limiter contact -- where psi_bnd is pinned -- lies on mesh entities, so the
+    contact can be FOUND on the curve rather than prescribed as a point, and
+    the trace space lives exactly there.
+
+    ITS INTERIOR TAKES AN ELEMENT ATTRIBUTE AND NOT A 1-D GROUP, WHICH IS THE
+    ONE DECISION IN THIS THAT COULD GO SILENTLY WRONG.  Tagging the circle as a
+    1-D physical group would be the obvious thing and is exactly the defect this
+    module's docstring records: MFEM's reader turns 1-D elements into BOUNDARY
+    elements whether or not they are topologically on the boundary, and
+    EnableHybridization registers a flux constraint on every marked boundary
+    attribute -- so an interior curve tagged that way would impose a boundary
+    condition through the middle of the plasma.  A 2-D attribute is safe, and
+    the limiter faces are then recoverable as the interface between attribute
+    20 and its neighbours, which is a question about element attributes rather
+    than about boundary ones.
 
     Returns a dict of counts, which `main` prints and `--check` re-derives from
     the written file rather than trusting.
@@ -167,6 +203,9 @@ def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
         half, _ = occ.cut([(2, disc)], [(2, box)])
 
         tags = [occ.addRectangle(r, z, 0, w, h) for (r, z, w, h) in coils]
+        if limiter is not None:
+            lr, lz, la = limiter
+            tags.append(occ.addDisk(lr, lz, 0, la, la))
         if tags:
             occ.fragment(half, [(2, t) for t in tags])
         occ.synchronize()
@@ -184,9 +223,32 @@ def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
         for dim, tag in surfaces:
             owner[tag] = _coil_of(occ.getCenterOfMass(dim, tag), coils)
 
-        vacuum = sorted(t for t in owner if owner[t] is None)
+        # THE LIMITER INTERIOR IS TOLD BY AREA AND NOT BY ITS CENTRE OF MASS,
+        # and that is not fastidiousness: the OUTER region's centroid on this
+        # geometry sits at about r = 1.11, which is INSIDE a limiter circle of
+        # R0 = 1.00, a = 0.35, so a centre-of-mass test misclassifies the
+        # vacuum as the limiter and every element in the mesh changes
+        # attribute.  The areas differ by a factor of twenty-five.
+        inside_limiter = []
+        if limiter is not None:
+            lr, lz, la = limiter
+            for _, tag in surfaces:
+                if owner[tag] is not None:
+                    continue
+                x, y, _ = occ.getCenterOfMass(2, tag)
+                if (math.hypot(x - lr, y - lz) < la
+                        and occ.getMass(2, tag) < 1.05*math.pi*la*la):
+                    inside_limiter.append(tag)
+
+        vacuum = sorted(t for t in owner
+                        if owner[t] is None and t not in inside_limiter)
         gmsh.model.addPhysicalGroup(2, vacuum, VACUUM_ATTRIBUTE)
         gmsh.model.setPhysicalName(2, VACUUM_ATTRIBUTE, "vacuum")
+
+        if inside_limiter:
+            gmsh.model.addPhysicalGroup(2, sorted(inside_limiter),
+                                        LIMITER_ATTRIBUTE)
+            gmsh.model.setPhysicalName(2, LIMITER_ATTRIBUTE, "limiter")
 
         coil_surfaces = {}
         for tag, which in owner.items():
@@ -235,6 +297,7 @@ def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
                        in zip(*[gmsh.model.mesh.getElements(2)[i] for i in (0, 2)]))
         return dict(surfaces=len(surfaces), coils=len(coil_surfaces),
                     arc_curves=len(arc), axis_curves=len(axis),
+                    limiter_surfaces=len(inside_limiter),
                     nodes=len(node_tags), elements=elements)
     finally:
         gmsh.finalize()
@@ -420,6 +483,14 @@ def main():
                    help="a box to refine inside, where the plasma is expected")
     p.add_argument("--plasma-size", type=float, default=None,
                    help="element size inside --plasma; required with it")
+    p.add_argument("--limiter", type=float, nargs=3, default=None,
+                   metavar=("R0", "Z0", "A"),
+                   help="a circular limiter to mesh TO, given element "
+                        "attribute 20 inside it. A limiter is prescribed input "
+                        "and does not move with the solution, so aligning to "
+                        "it is the same argument as aligning to a conductor -- "
+                        "and it is what lets the contact be FOUND on the curve "
+                        "rather than prescribed as a point")
     p.add_argument("--transition", type=float, default=None,
                    help="width of the graded transition out of a refined "
                         "region, metres; defaults to four background sizes")
@@ -446,13 +517,36 @@ def main():
         p.error("--plasma and --plasma-size go together: a region with no size "
                 "refines nothing, and a size with no region has nowhere to act")
 
+    if a.limiter is not None:
+        lr, lz, la = a.limiter
+        if la <= 0.0:
+            p.error("a limiter of radius %g has no interior" % la)
+        if lr - la <= 0.0:
+            p.error("a limiter at R0 = %g a = %g reaches the axis; a closed "
+                    "plasma surface through r = 0 carries a non-integrable "
+                    "1/r, which is meq::BoundaryShape's own refusal" % (lr, la))
+        if math.hypot(lr + la, abs(lz) + la) >= a.rho:
+            p.error("a limiter reaching r = %g z = %g is outside Gamma at "
+                    "rho = %g; the plasma has to be inside the coupled domain"
+                    % (lr + la, abs(lz) + la, a.rho))
+        for (r, z, w, h) in coils:
+            nearest_r = min(max(lr, r), r + w)
+            nearest_z = min(max(lz, z), z + h)
+            if math.hypot(nearest_r - lr, nearest_z - lz) < la:
+                p.error("the limiter circle ( %g, %g ) a = %g cuts the "
+                        "conductor at ( %g, %g ); fragmenting both would make "
+                        "a surface that is inside the limiter AND inside a "
+                        "coil, which the attributes cannot express"
+                        % (lr, lz, la, r, z))
+
     transition = a.transition if a.transition is not None else 4.0 * a.size
     rep = build(a.rho, coils, a.size, a.out, a.order, a.plasma, a.plasma_size,
-                a.coil_size, transition)
-    print("  %s: %d elements, %d nodes, %d surfaces (%d coil), "
+                a.coil_size, transition, a.limiter)
+    print("  %s: %d elements, %d nodes, %d surfaces (%d coil, %d limiter), "
           "%d arc curves, %d axis curves"
           % (a.out, rep["elements"], rep["nodes"], rep["surfaces"],
-             rep["coils"], rep["arc_curves"], rep["axis_curves"]))
+             rep["coils"], rep["limiter_surfaces"], rep["arc_curves"],
+             rep["axis_curves"]))
 
     if a.check:
         problems = check(a.out, a.rho, coils)
