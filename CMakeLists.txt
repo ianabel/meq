@@ -216,6 +216,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/Profiles.cpp
 	src/meq/RotatingSource.cpp
 	src/meq/SafetyFactor.cpp
+	src/meq/SafetyFactorSolve.cpp
 	src/meq/Sampler.cpp
 	src/meq/Source.cpp
 	src/meq/SourceFactory.cpp
@@ -234,6 +235,11 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 	src/meq/FluxSurfaces.cpp
 	src/meq/GradShafranov.cpp
 	src/meq/Output.cpp
+	# The INVERSION is MFEM-free and CI gates it; the outer Newton around it is
+	# KINSOL through mfem::KINSolver and is not. The split is along the
+	# contract: g = 4 pi^2 q/( V' < R^-2 > ) is arithmetic a mesh cannot change,
+	# and the loop that closes it needs a solve per map evaluation.
+	src/meq/SafetyFactorSolve.cpp
 	src/meq/Sampler.cpp
 	src/meq/SurfaceAverage.cpp
 	src/meq/WarmStart.cpp)

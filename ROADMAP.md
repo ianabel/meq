@@ -168,8 +168,20 @@ Nothing is red and stages 0 to 7 are done, so the order is:
    locates one surface per node. The 34.7× Vandermonde-plus-GEMM figure was NOT
    taken up and is still available: the file is written from the traced nodes
    rather than from a `SurfaceFit`, so there is no Vandermonde in that path.
-3. **The fixed-`q(ψ)` solver itself** — also item 10, and reachable now that
-   IN-2 measures `⟨r^{-2}⟩_ψ` and `V′(ψ)` against a converged reference.
+3. **The fixed-`q(ψ)` solver** — also item 10, and **the round trip closes**:
+   `meq::SafetyFactor` inverts `q = V′ g ⟨r^{-2}⟩/4π²` (MFEM-free, CI-gated) and
+   `meq::SafetyFactorSolve` closes the loop on KINSOL. From a `g` 40% too large
+   everywhere it recovers the closed form to **2.5e-06** in 6 outer iterations
+   and 20 inner solves. **A damped Picard provably cannot do it** — the relaxed
+   derivative is `1 + ω( G′ − 1 )`, above one for every `ω > 0` when `G′ > 1` —
+   and the Newton is affordable only because the profile is *fitted*, so the
+   Jacobian is a handful of coefficients rather than `nFieldDOF`.
+
+   **What is left is the consumer's side rather than the solver's**: the target
+   is supplied as a callable and there is no `[source] SafetyFactorFile` or
+   driver route, the fixture is a rectangle with one closed plasma rather than a
+   machine, and the map is a solve per evaluation with no reuse of the previous
+   factorisation.
 
 Items 4 and 6 are performance and neither is urgent; item 5 is a defect in
 MFEM's local solves that MEQ works around and has **not filed**; item 7 is a
@@ -604,7 +616,7 @@ sweep touches it. **No exact solution can close it**: `C` constant is what makes
 the equation solvable in closed form at all, so the route is a manufactured
 solution rather than another paper.
 
-## 10. The fixed-`q(ψ)` solver — MEQ, and its machinery now exists
+## 10. The fixed-`q(ψ)` solver — MEQ, and the round trip closes
 
 **`INVERSION-PLAN.md` is the design, and every stage but IN-5 is done and
 green.** This item became reachable at **IN-2**, where the flux-surface averages
@@ -622,9 +634,33 @@ equilibrium code its target, and it is what a coupling to MaNTA will want. RoPP
 q(ψ) = V′(ψ) I(ψ) ⟨r^{-2}⟩_ψ / 4π²
 ```
 
-**What is left is the solver, not the geometry.** An inner iteration for `I(ψ)`,
-and that whole non-local dependence inside `∂F/∂ψ` if Newton is to stay
-quadratic. Three things worth writing down before anyone starts:
+**AND THE SOLVER IS BUILT.** `meq::SafetyFactor` is the inversion —
+`g = 4π²q/(V′⟨r^{-2}⟩)`, one division per surface, MFEM-free so CI gates it —
+and `meq::SafetyFactorSolve` is the outer Newton that closes it, on KINSOL.
+From a `g` 40% too large everywhere it recovers a closed form to **2.5e-06** in
+**6 outer iterations and 20 inner solves**.
+
+**IT IS AN OUTER LOOP AND NOT A NON-LOCAL JACOBIAN**, which is the shape this
+item did not anticipate. The paragraph below asked for `∂F/∂ψ` to carry the
+whole `V′⟨r^{-2}⟩` dependence — a continuum of border rows — and that is not
+what was needed: the profile is **fitted**, so the outer unknown is a handful of
+coefficients and a differenced Jacobian costs a few solves per step rather than
+`nFieldDOF` re-extractions. The fit was put there for conditioning and it paid
+for the Newton as well. The inner solve is MEQ's existing bordered Newton,
+untouched.
+
+**A damped Picard provably cannot replace it.** The relaxed iteration
+`c ← c + ω( G(c) − c )` has derivative `1 + ω( G′ − 1 )`, which is above one
+for **every** `ω > 0` when `G′ > 1`: under-relaxation stabilises a map that
+oscillates and does nothing at all for one that runs away. Measured, this map
+runs away.
+
+**WHAT IS LEFT IS THE CONSUMER'S SIDE.** The target `q` is supplied as a
+callable and there is no `[source] SafetyFactorFile` or driver route; the
+fixture is a rectangle with one closed plasma rather than a machine; and the map
+is a whole solve per evaluation with no reuse of the previous factorisation.
+
+Three things written down before it was started, kept because two of them held:
 
 * **The non-local Jacobian has a precedent in the tree.** `ψ_ax` is one border
   row and column today and `HighBetaConvergence` is the acceptance criterion for

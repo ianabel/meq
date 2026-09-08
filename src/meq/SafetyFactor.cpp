@@ -334,8 +334,27 @@ namespace meq
 			return value;
 		};
 
-		double const lowest = 1.0 - field.normalisedFlux.back();
-		double const highest = 1.0 - field.normalisedFlux.front();
+		/*
+		 * THE KNOTS SPAN THE WHOLE OF Psi, NOT THE FAMILY'S RANGE, AND THE
+		 * DISTINCTION IS THE DIFFERENCE BETWEEN A MODEL AND A MEASUREMENT.
+		 *
+		 * meq::FluxSurfaceFamily refuses to extrapolate, rightly: outside the
+		 * cut a traced surface is made of something else and only the band mask
+		 * can say so. A FIT is not a traced surface. It is a low-order model of
+		 * g^2 and evaluating it at Psi = 0 or 1 is what a model is for.
+		 *
+		 * SAMPLING ONLY [ 0.05, 0.95 ] AND LETTING SplineProfile CLAMP IS A
+		 * DIFFERENT PROFILE, AND IT COSTS THE FIXED POINT. Measured: with the
+		 * knots on the family's range, the outer residual at the CLOSED-FORM
+		 * answer is 1.3e-01 rather than zero -- because the clamped profile
+		 * differs from the closed form exactly where it clamps, near the axis
+		 * and near the edge, so the equilibrium it produces is a different one.
+		 * Both outer methods then converge, correctly, to a fixed point that is
+		 * not the answer, and no solver could have found the answer because it
+		 * was not a root of the map they were given.
+		 */
+		double const lowest = 0.0;
+		double const highest = 1.0;
 
 		std::vector<Knot> knots;
 		knots.reserve( samples + 1 );

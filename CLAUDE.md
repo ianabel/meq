@@ -1656,7 +1656,7 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 git submodule update --init --recursive     # extern/toml11
 cmake -B build
 cmake --build build -j4
-cd build && OMP_NUM_THREADS=4 ctest -j4      # 44/44, about 450 s
+cd build && OMP_NUM_THREADS=4 ctest -j4      # 47/47, about 600 s
 ```
 
 **RUN IT `-j4` WITH `OMP_NUM_THREADS=4`, WHICH IS 3.2x FASTER AND MEASURED.**
@@ -1666,7 +1666,7 @@ product at the core count is what pays:
 
 → **[M-14](MEASUREMENTS.md#m-14)** — wall · CPU
 
-37/37 in every configuration when that table was taken, and **44/44 today** —
+37/37 in every configuration when that table was taken, and **47/47 today** —
 the count moves as cases are added, so read the table's ratios rather than its
 absolute seconds. Nothing in the suite depends on a thread count, which is the
 correctness half.
@@ -4795,6 +4795,120 @@ Minimum**. The audit still passes. `sweep()` is seeded Newton and is **not
 exhaustive** — the certified subdivision of `INVERSION-PLAN.md` §5 is
 deliberately not built, because IN-A's acceptance needs the axis and the audit
 and neither needs exhaustiveness.
+
+### Driving by `q( ψ )`: the inversion, and the outer Newton that closes it
+
+**`ROADMAP.md` item 10.** Every source in this tree takes the toroidal field as
+input and reports `q` as an output; a transport code hands an equilibrium code
+the other way round. `src/meq/SafetyFactor.{hpp,cpp}` is the inversion —
+**MFEM-free, so CI gates it** — and `src/meq/SafetyFactorSolve.{hpp,cpp}` is the
+loop, on KINSOL.
+
+**THE ALGEBRA IS A DIVISION AND THE DIFFICULTY IS ALL GEOMETRY.**
+`q = V′ g ⟨R⁻²⟩/4π²`, so `g = 4π² q/( V′ ⟨R⁻²⟩ )` — one division per surface at
+fixed geometry. What makes it a solver is that `V′` and `⟨R⁻²⟩` are functionals
+of the solution. **The round trip closes**: from a `g` 40% too large everywhere,
+**6 KINSOL iterations and 20 inner solves** recover the closed form to
+**2.5e-06** and `ψ_ax` to **2.35e-06**.
+
+**THE TWO NORMALISED FLUXES RUN IN OPPOSITE DIRECTIONS**, and this is the trap
+the whole file is arranged around. `FluxSurfaceFamily`'s `Ψ_N` is **zero** on the
+axis; `NormalisedSource`'s `Ψ` is **one** there. So `Ψ = 1 − Ψ_N` and
+`d/dΨ = −d/dΨ_N`, and a `gg′` differentiated against the family's label and
+handed to the source without the sign **does not fail** — it converges, at full
+order, to an equilibrium with its **shear reversed**, which is a configuration a
+real machine can have. Pinned on exactly linear data, where it is an equality.
+
+**A DAMPED PICARD CANNOT DO THIS AND THAT IS A THEOREM RATHER THAN A
+MEASUREMENT.** The relaxed iteration has derivative `1 + ω( G′ − 1 )` at the
+fixed point, which for `G′ > 1` exceeds one for **every** `ω > 0`:
+under-relaxation stabilises a map that oscillates and can do nothing for one
+that runs away. Measured, the damped loop walks the error 0.362 → **0.019** and
+straight back up to 0.50, **the step never shrinking — including where the error
+passes through zero**. It does not stall at the fixed point, it crosses it.
+
+**AND THE NEWTON IS AFFORDABLE BECAUSE THE PROFILE IS FITTED.** `g²` is carried
+as a handful of least-squares coefficients rather than a table, so a differenced
+Jacobian costs a few map evaluations a step against `INVERSION-PLAN.md` §11.1's
+**5.7 hours** for `dGeometry_dpsi`. The fit was put there for conditioning — the
+innermost surface's inverted `g` moves **13% for a 1.3%** change in the profile,
+where the extraction is least reliable — and it pays for the Newton as well.
+
+**KINSOL RATHER THAN A HAND-ROLLED ITERATION, FOR THE LINE SEARCH.** An undamped
+outer Newton takes a first step the **inner** bordered Newton cannot solve at,
+and that inner solve has no globalisation of its own —
+`GradShafranovSolver` refuses every `Globalisation` but `None` while `ψ_ax` is a
+border unknown. So the outer step length is the only control there is. Writing
+the search here would repeat `HDG-NPC-GLOBALISATION-FROM-MEQ.md`'s recorded
+mistake: a monotone test with no sufficient-decrease constant accepts any small
+enough step and creeps instead of failing honestly. `KIN_LINESEARCH` applies
+Armijo.
+
+**AND THE MAP MUST BE TOTAL, BECAUSE KINSOL IS C.** An exception raised inside
+the residual unwinds through its frames and denies the line search a finite
+value at the trial point. With the map throwing, the first full step lands on
+`g² < 0` across the whole profile and the run dies **without backtracking
+once**. An inadmissible state returns a residual pointing back to the last
+admissible one instead; it can introduce no spurious root, `g² < 0` not being an
+equilibrium.
+
+**AND THE LINE SEARCH HAS A SECOND PRECONDITION, WHICH IS THAT THE JACOBIAN IS
+NOT SINGULAR — AND FAILING IT DOES NOT FAIL, IT HANGS.** `KIN_LINESEARCH`
+interpolates its step length on a quotient whose numerator and denominator both
+carry the directional derivative `⟨F, J p⟩`. A singular `J` makes that zero
+**whatever the step is**, so the quotient is `0/0`, the iterate goes to NaN —
+and **KINSOL then never returns**, because every one of its convergence and
+failure tests is a comparison against NaN and every comparison against NaN is
+false. Measured on a two-variable map with no root at all: still calling the map,
+at NaN, after **two million evaluations**, which on the real loop is two million
+equilibrium solves. It was found as a test case that ran for **36 minutes**
+without finishing.
+
+**NEITHER OBVIOUS REPAIR REACHES IT, AND THAT IS THE PART WORTH KEEPING.**
+Bounding the linear solver's iteration count does not: `mfem::GMRESSolver`'s own
+back-substitution is `y( i ) /= h( i, i )`, unguarded, and on a singular system
+`h( 0, 0 )` is zero, so it comes back **infinite on the first iteration** and a
+cap changes nothing. Replacing it with a rank-revealing dense solve does not
+either — **even though that is correct and returns a step of exactly zero** —
+because it is `⟨F, J p⟩` and not the step that has gone to zero. Both repairs
+were built and measured before that was understood. **The line search cannot be
+rescued from outside it**, so the degeneracy is detected *before* KINSOL is
+entered, and the Jacobian is cached on its point so KINSOL's own first
+evaluation reuses it and the check costs **no map evaluations at all**.
+
+**A ZERO JACOBIAN IS ALSO WHAT AN ALREADY-SOLVED PROBLEM HAS, AND THEY ARE
+OPPOSITE ANSWERS.** `G = identity` makes every point a fixed point, so returning
+at once is right there where refusing would be wrong — and the two are
+**indistinguishable by their Jacobians**, both exactly zero. The *residual* is
+the discriminator, and a refusal keyed on rank alone refuses both. Both cases are
+asserted, side by side, for that reason.
+
+**THE ASSERTION IS A COUNT AND NOT A TIMING**, on the same principle as the
+symbolic-factorisation reuse: a wall clock is a measurement about the machine
+where the map-evaluation count is a measurement about the code. A map with no
+root must be refused within one Jacobian and its residual — **5 evaluations, and
+the case now takes 393 µs**. The dense truncated-SVD solve is kept regardless,
+being the right solver for a small dense system and the thing that bounds a
+Jacobian going singular partway through, where the pre-flight check cannot see
+it.
+
+**THE ONE THAT LOOKED LIKE PHYSICS AND WAS ARITHMETIC.** The fit's knots must
+span the whole of `Ψ`, not the family's own range. `FluxSurfaceFamily` refuses to
+extrapolate and is right to — outside the cut a traced surface is made of
+something else — but **a fit is a model, not a measurement**, and evaluating it
+at `Ψ = 0` or `1` is what a model is for. Laying knots only over `[ 0.05, 0.95 ]`
+and letting `SplineProfile` clamp gives a profile differing from the closed form
+exactly where it clamps, so **the outer residual AT THE ANSWER was 1.3e-01
+rather than zero** — and both outer methods then converged, correctly, to a
+fixed point that was not the answer, from 40% away and from 5% away alike,
+landing on the same wrong one to six digits.
+`theOuterResidualsConditioningAtTheAnswer` found it and now guards it:
+**4.9e-13**, on a Jacobian whose degeneracy measure is 0.12.
+
+**A CONVERGED OUTER SOLVE IS NOT EVIDENCE THE ROOT IS THE ANSWER**, which is the
+transferable part. Both failing configurations converged — to 3.5e-07 — and
+reported success. What separated them was measuring the residual at a point
+known independently to be right.
 
 ### The disc basis, and why `ρ = √Ψ_N` rather than `Ψ_N`
 
