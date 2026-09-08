@@ -2670,7 +2670,10 @@ asymmetry is one more reason the coupling belongs on NPC.
 
 ### 7.19 FB-7: conductors outside `Γ`, through the coupling rather than the mesh
 
-**BUILT AND MEASURED 2026-09-07, acceptances 1–3 green; acceptance 4 open.**
+**BUILT AND MEASURED 2026-09-07, ALL FOUR ACCEPTANCES GREEN.** Acceptance 4 —
+the interior route as a control on the exterior one — landed later the same day
+and is at the end of this section.
+
 This section opened *"NOT STARTED"* and the paragraph below is what it was
 written against. A conductor outside `Γ` contributes
 **nothing** today: `F_coil` is assembled by quadrature over the elements, so a
@@ -2977,12 +2980,99 @@ Two measurements, in the order they should be taken.
    carries the control that stops it being compatible with a setter that refuses
    everything.
 
-4. **STILL OPEN: the two routes agreeing where both are legal** — a conductor
-   inside `Ω` solved by quadrature against the same conductor reached from
-   outside. It needs a **second geometry**, since a conductor at a fixed position
-   is either inside `Ω` or outside `Γ` and never both, so the comparison is
-   between a larger mesh that contains it and the half-disc that does not. It is
-   the only test that would exercise the interior route as a control.
+4. ~~**STILL OPEN: the two routes agreeing where both are legal**~~ — **DONE
+   2026-09-07, AND THE SECOND GEOMETRY IS A RECTANGLE RATHER THAN A SECOND
+   HALF-DISC.** `theTwoConductorRoutesAgreeOnTheOverlap`. A conductor at a fixed
+   position is inside `Ω` or outside `Γ` and never both, so the comparison is
+   between two domains:
+
+   * **run S** — the half-disc `ρ_Γ = 1.5` acceptances 1–3 use, with two
+     conductors at `( 2.0, ±0.4 )` of half-extent 0.20, `ρ = 2.28` at the far
+     corner. Outside `Γ` **and outside the background box**, so the mesh cannot
+     reach them even in principle. The coupling is live — `setExteriorConductors`
+     plus `setExteriorCoupling`, `a` an unknown — which is the production
+     configuration and the only one that exercises `q_coil·ν`.
+   * **run B** — the fitted rectangle `[ 0, 2.6 ] × [ −1.8, 1.8 ]`, which
+     contains both the conductors and the whole of run S's domain. They are a
+     **source term** there: `meq::CoilAugmentedSource` over a `meq::CoilSet`,
+     assembled by quadrature. The datum on the box is `ψ_coil` itself.
+
+   compared at 240 fixed points inside `ρ = 1.2`, which is the overlap.
+
+   | `k` | `n_S`/`n_B` | ‖S − ψ_coil‖ | ‖B − ψ_coil‖ | **‖S − B‖** | **rate** |
+   |---|---|---|---|---|---|
+   | 1 | 12/13 → 48/52 | 4.23e-04 → 2.11e-05 | 5.82e-04 → 4.41e-05 | 7.37e-04 → 4.93e-05 | **1.951** |
+   | 2 | 12/13 → 48/52 | 4.50e-05 → 1.91e-07 | 8.15e-06 → 1.55e-07 | 4.57e-05 → 2.61e-07 | **3.727** |
+   | 3 | 12/13 → 48/52 | 1.58e-06 → 6.96e-09 | 2.65e-07 → 1.16e-09 | 1.57e-06 → 7.26e-09 | **3.879** |
+
+   i.e. `k+1` at every degree, against an RMS `ψ_coil` of 9.38e-02.
+
+   **THE CONTROL IS 6306×**: run B with its coil term removed from the source and
+   the datum kept. It converges perfectly well — to the `Δ*`-harmonic extension
+   of `ψ_coil` into a box the conductor is inside, which is a different function
+   — so without that column every rate above is compatible with the interior
+   route never having assembled anything. **And the instrument is checked**:
+   quadrupling the sample count moves the difference by **1.46%**.
+
+   **RUN B IS A RECTANGLE ON PURPOSE.** It gives the control the maximum
+   independence from the thing it controls — no SubMesh, no level set, no
+   transfer path, no extension, no exterior expansion, no border — so the two
+   runs share the equation, the element loops and essentially nothing else. It
+   also removes the exterior truncation from run B, which would otherwise have
+   floored the comparison for a reason having nothing to do with either
+   conductor route: `N` Gegenbauer modes cannot represent a conductor sitting
+   close to `Γ`, and a modal floor does not fall with `h`. §8's warning that a
+   rectangle's right angle costs an order does not apply, for the reason it
+   gives itself — the datum here **is** the trace of a solution analytic at
+   every corner of the box.
+
+   **THE MESH IS ALIGNED TO THE CONDUCTOR AND THE CASE ASSERTS IT PER MESH.**
+   `F_coil` is a top hat, so on a mesh that cuts it the source is not integrated
+   exactly; §7.9 measured that costing more than a degree. The conductor's four
+   edges are multiples of the cell size at every rung of the sequence.
+
+   **THE PREDICTION MADE BEFORE RUNNING IT WAS `min( k+1, 3 )`, AND IT IS HALF
+   RIGHT — THE HALF THAT IS WRONG IS THE HALF THIS CASE MEASURES.** The argument
+   is sound: `Δ*ψ = −F` with `F` a top hat carries an `r² log r` term at each
+   corner of the support, so `ψ_coil` is in `H^{3−ε}` **there** and no degree
+   recovers it. Measured, run B's L2 over its **whole box** reads **2.741** at
+   `k = 2` and **3.052** at `k = 3` — §7.9's own aligned 2.88 / 3.01,
+   reproduced independently on a different mesh family. **But the corner term is
+   local and the overlap is not local to it**: the comparison region is half a
+   metre away, where the error is orders smaller and converges at `k+1`. So
+   3.052 globally against 3.879 on the overlap at `k = 3`, and both are right.
+   The global column is carried beside the far-field one for that reason, and
+   because it is the only thing in the case that could see a conductor the mesh
+   had started to cut.
+
+   **AND THE INTERIOR ROUTE IS THE BETTER OF THE TWO ON THE OVERLAP**, which was
+   not expected either: at `k ≥ 2` run B sits three to five times closer to
+   `ψ_coil` there than run S does, so the difference between the routes tracks
+   the **exterior** one. That is the extension path paying its own `O( h )`
+   geometry cost on `Γ_h` against a fitted rectangle that has none, and it means
+   the rate is a statement about run S with run B as the yardstick rather than
+   the other way round.
+
+   **THE GEOMETRY IS WRITTEN OUT TWICE AND THE CASE ASSERTS THE TWO COPIES
+   AGREE.** `Coils.hpp` refuses a conversion between `CoilSet` and
+   `ExteriorCoilSet`, because the one error the type split exists to prevent is
+   a conductor appearing in both at once. The price is a duplicated geometry,
+   and a typo in one copy is how this case would become a comparison of two
+   different machines while still converging; `interior.psi()` against
+   `exterior.psi()` at twenty points is what pays it.
+
+   **34 s wall run on its own**, and `FreeBoundaryCoupling` whole reads
+   **433.8 s** with it in. That is *not* 276 s plus 34: the 276 s CLAUDE.md
+   records predates the two-border case growing to eight solves, and a suite
+   time is only a measurement on an idle machine anyway — the delta was not
+   measured and is not claimed.
+
+   **Comparing `ψ_h` by point sampling rather than by a cross-mesh projection is
+   deliberate**: MEQ's volume spaces are on the closed
+   Gauss-Lobatto basis, so a dof is a point value **on** an element boundary
+   where an L2 field is two-valued, and reading one mesh's field at another
+   mesh's dof points is ambiguous by the face jump — which is the very quantity
+   being measured.
 
 **AND THE DATUM MAY NOT LAND WITHOUT THE TRANSMISSION TERM.** Adding `ψ_coil` to
 the datum while leaving the border row alone is the inconsistent pair warned

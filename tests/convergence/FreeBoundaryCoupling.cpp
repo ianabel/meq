@@ -4727,6 +4727,571 @@ BOOST_AUTO_TEST_CASE( theConductorModelIsWorthMeasuring )
 }
 
 /*
+ * FB-7, ACCEPTANCE 4: THE TWO CONDUCTOR ROUTES AGREEING WHERE BOTH ARE LEGAL.
+ * FREE-BOUNDARY-PLAN.md section 7.19.
+ *
+ * MEQ carries a conductor two ways and nothing had ever compared them.
+ *
+ *   INTERIOR  the conductor is meshed, and its current density enters F by
+ *             quadrature over the elements it occupies. meq::CoilSet::f(),
+ *             meq::CoilAugmentedSource, meq::SourceIntegrator. This is the
+ *             [[coils]] route.
+ *   EXTERIOR  the conductor is outside Gamma, contributes NOTHING to the
+ *             interior equation, and enters only through Gamma -- additively
+ *             and known -- on both halves of the transmission condition.
+ *             meq::ExteriorCoilSet, setExteriorConductors(), FB-7.
+ *
+ * They are two computations of one physical field and must agree. Acceptances
+ * 1-3 measure the exterior route against psi_coil; NOTHING measured the
+ * interior route through a solve at all, so nothing would have caught the two
+ * describing different conductors.
+ *
+ * IT NEEDS A SECOND GEOMETRY, WHICH IS WHY IT WAS LEFT OPEN. A conductor at a
+ * fixed position is inside Omega or outside Gamma and never both, so the
+ * comparison is between a domain that CONTAINS it and one that does not.
+ *
+ *   run S   the half-disc of radius 1.5 that acceptances 1-3 use. The
+ *           conductor's centre is at rho = 2.04 and its nearest corner at 1.81,
+ *           so it is outside Gamma AND outside the background box, which
+ *           reaches 1.7 -- the mesh cannot reach it even in principle. The
+ *           coupling is LIVE: setExteriorConductors() plus
+ *           setExteriorCoupling(), with `a` an unknown of the same bordered
+ *           Newton, which is the production configuration and is what
+ *           exercises q_coil . nu.
+ *   run B   the rectangle [ 0, 2.6 ] x [ -1.8, 1.8 ], which contains both the
+ *           conductor and the whole of run S's domain. The conductor is a
+ *           source term. The datum on the rectangle's boundary is psi_coil
+ *           itself.
+ *
+ * They are compared on the OVERLAP, which is run S's domain.
+ *
+ * WHY THEY ARE THE SAME PROBLEM, WHICH IS THE PART TO CHECK BEFORE BELIEVING
+ * ANY NUMBER BELOW. Both discretise
+ *
+ *     -Delta* psi = F_coil   on r > 0,   psi = 0 on r = 0,   psi -> 0 at infinity
+ *
+ * whose unique solution is psi_coil = CoilSet::psi. Run B solves it on a
+ * bounded rectangle carrying that solution's own trace, which is a well posed
+ * Dirichlet problem with psi_coil as its exact answer. Run S solves it on a
+ * half-disc from which the source has been EXCLUDED -- legally, since the
+ * conductor is outside Gamma, so Delta* psi_coil = 0 throughout Omega_S -- and
+ * recovers the same field through the boundary alone. So the two runs agree in
+ * the continuum, and what is measured here is whether they agree discretely.
+ *
+ * RUN B'S DOMAIN IS A RECTANGLE AND THAT IS DELIBERATE, NOT LAZINESS. It gives
+ * the control the maximum independence from the thing it is controlling: no
+ * SubMesh, no level set, no transfer path, no extension, no exterior
+ * expansion, no border. The two runs then share the equation, the element
+ * loops and essentially nothing else, which is the property that makes an
+ * agreement mean something. It also removes the exterior truncation from run B
+ * -- N Gegenbauer modes cannot represent a conductor sitting close to Gamma,
+ * and a modal floor that does not fall with h would have capped the whole
+ * comparison for a reason having nothing to do with either conductor route.
+ *
+ * CLAUDE.md WARNS THAT A RECTANGLE'S RIGHT ANGLE COSTS AN ORDER IN A
+ * SELF-CONVERGENCE STUDY, AND THAT WARNING DOES NOT APPLY HERE, FOR THE REASON
+ * IT GIVES ITSELF: "the exact-solution studies are immune because there the
+ * datum IS the trace of a smooth solution". psi_coil is analytic in a
+ * neighbourhood of every corner of this box.
+ *
+ * THE MESH IS ALIGNED TO THE CONDUCTOR, WHICH SECTION 7.9 MEASURED AS WORTH
+ * MORE THAN A DEGREE. F_coil is a top hat, so on a mesh that cuts the
+ * conductor the source is not integrated exactly and the rate collapses to
+ * about 1.3 at every k. The conductor's four edges here are at multiples of
+ * the background cell size at every mesh of the sequence, asserted below, so
+ * every element is wholly in or wholly out and f() is element-wise constant.
+ *
+ * THE PREDICTION MADE BEFORE THIS CASE WAS RUN WAS THAT THE CONDUCTOR'S
+ * CORNERS WOULD CAP IT AT min( k+1, 3 ), AND THAT IS HALF RIGHT -- WHICH IS
+ * WORTH RECORDING, BECAUSE THE HALF THAT IS WRONG IS THE HALF THIS CASE
+ * MEASURES. The argument is sound as far as it goes: the solution of
+ * Delta* psi = -F with F a top hat carries an r^2 log r term at each corner of
+ * the support, so psi_coil sits in H^{3-eps} THERE and no polynomial degree
+ * recovers it. Measured, run B's L2 over its whole box reads 2.741 at k = 2 and
+ * 3.052 at k = 3 -- section 7.9's own aligned 2.88 / 3.01, reproduced
+ * independently on a different mesh family, and the cap is real.
+ *
+ * IT IS LOCAL, AND THE OVERLAP IS NOT LOCAL TO IT. The corner term lives in the
+ * elements touching the conductor; the comparison region is the far field, half
+ * a metre away, where the error is orders smaller and converges at k+1. So the
+ * two columns of this table disagree BY DESIGN -- 3.052 globally against 3.879
+ * on the overlap at k = 3 -- and both are right. The global column is carried
+ * beside the far-field one for exactly that reason, and because it is the only
+ * thing here that could see a conductor the mesh had started to cut.
+ *
+ * AND THE INTERIOR ROUTE IS THE BETTER OF THE TWO ON THE OVERLAP, which was not
+ * expected either: at k >= 2 run B sits three to five times closer to psi_coil
+ * there than run S does, so the difference between the routes tracks the
+ * EXTERIOR one. That is the extension path paying its own O( h ) geometry cost
+ * on Gamma_h against a fitted rectangle that has none, and it means this case's
+ * rate is a statement about run S with run B as the yardstick rather than the
+ * other way round.
+ *
+ * THE CONTROL IS RUN B WITH ITS SOURCE REMOVED. The datum stays, so the run
+ * converges perfectly well -- to the Delta*-harmonic extension of psi_coil|
+ * into a box the conductor is inside, which is a DIFFERENT function. That is
+ * the exact analogue of acceptance 1's datum-removed control and it is
+ * mandatory here: a comparison in which the interior route silently
+ * contributed nothing would still converge, both runs would be smooth, and
+ * every rate above would be compatible with the coil term never having been
+ * assembled.
+ */
+namespace
+{
+	/// The conductor acceptance 4 carries, and the box run B solves in.
+	///
+	/// The centre and half-extent are multiples of 0.2, and every mesh of the
+	/// sequence has a cell size dividing 0.2, so the conductor's edges are mesh
+	/// lines throughout. The case asserts that rather than trusting it.
+	double const twoRouteCoilR = 2.0;
+	double const twoRouteCoilZ = 0.4;
+	double const twoRouteCoilHalf = 0.2;
+	double const twoRouteCurrent = 1.0;
+	double const twoRoutePermeability = 1.0;
+	double const twoRouteBoxR = 2.6;
+	double const twoRouteBoxZ = 1.8;
+
+	/// Sample points are taken inside this radius. Well within Omega_S even at
+	/// the coarsest mesh, whose inscribed polygon reaches 1.5 - sqrt(2) h = 1.30.
+	double const twoRouteSampleRadius = 1.2;
+
+	/// The conductor as the INTERIOR route sees it: a set that has an f().
+	meq::CoilSet twoRouteInteriorConductors()
+	{
+		meq::CoilSet set( twoRoutePermeability );
+		set.add( meq::Coil( twoRouteCoilR, +twoRouteCoilZ, twoRouteCoilHalf,
+		                    twoRouteCoilHalf, twoRouteCurrent ) );
+		set.add( meq::Coil( twoRouteCoilR, -twoRouteCoilZ, twoRouteCoilHalf,
+		                    twoRouteCoilHalf, twoRouteCurrent ) );
+		return set;
+	}
+
+	/// The same conductor as the EXTERIOR route sees it.
+	///
+	/// WRITTEN OUT TWICE ON PURPOSE. Coils.hpp refuses a conversion between the
+	/// two sets, because the one error the type split exists to prevent is a
+	/// conductor appearing in BOTH at once -- double counted, once in the
+	/// source and once through the coupling, while every residual converges.
+	/// The price of that refusal is a duplicated geometry, and the case pays it
+	/// by asserting the two fields agree pointwise before comparing solves.
+	meq::ExteriorCoilSet twoRouteExteriorConductors()
+	{
+		meq::ExteriorCoilSet set( twoRoutePermeability );
+		set.add( meq::Coil( twoRouteCoilR, +twoRouteCoilZ, twoRouteCoilHalf,
+		                    twoRouteCoilHalf, twoRouteCurrent ) );
+		set.add( meq::Coil( twoRouteCoilR, -twoRouteCoilZ, twoRouteCoilHalf,
+		                    twoRouteCoilHalf, twoRouteCurrent ) );
+		return set;
+	}
+
+	/// Run B's domain: a plain fitted rectangle, no SubMesh and no level set.
+	/// @a nr cells across in r, and as many in z as keep the cells square.
+	std::unique_ptr<mfem::Mesh> makeTwoRouteBox( int nr )
+	{
+		int const nz = static_cast<int>(
+			std::lround( 2.0*twoRouteBoxZ*nr/twoRouteBoxR ) );
+		auto mesh = std::make_unique<mfem::Mesh>(
+			mfem::Mesh::MakeCartesian2D( nr, nz, mfem::Element::TRIANGLE, false,
+			                             twoRouteBoxR, 2.0*twoRouteBoxZ ) );
+		mesh->Transform( []( mfem::Vector const &in, mfem::Vector &out )
+		{
+			out( 0 ) = in( 0 );
+			out( 1 ) = in( 1 ) - twoRouteBoxZ;
+		} );
+		return mesh;
+	}
+
+	/// psi read at a list of ( r, z ), each point located in @a mesh.
+	///
+	/// POINT SAMPLING RATHER THAN A CROSS-MESH PROJECTION, and the reason is
+	/// CLAUDE.md's: MEQ's volume spaces are on the closed Gauss-Lobatto basis,
+	/// so a dof is a point value ON an element boundary, where an L2 field is
+	/// discontinuous -- reading one mesh's field at another mesh's dof points is
+	/// ambiguous by the face jump, which is the very quantity being measured.
+	/// These points are interior to their elements on both meshes.
+	///
+	/// @returns false if any point was not located, which the caller must treat
+	///          as a failure rather than as a missing sample.
+	bool sampleTwoRouteField( mfem::Mesh &mesh, mfem::GridFunction const &psi,
+	                          std::vector<double> const &sampleR,
+	                          std::vector<double> const &sampleZ,
+	                          std::vector<double> &values )
+	{
+		int const count = static_cast<int>( sampleR.size() );
+		mfem::DenseMatrix points( 2, count );
+		for ( int i = 0; i < count; ++i )
+		{
+			points( 0, i ) = sampleR[ static_cast<std::size_t>( i ) ];
+			points( 1, i ) = sampleZ[ static_cast<std::size_t>( i ) ];
+		}
+
+		mfem::Array<int> elements;
+		mfem::Array<mfem::IntegrationPoint> reference;
+		mesh.FindPoints( points, elements, reference, false );
+
+		values.assign( static_cast<std::size_t>( count ), 0.0 );
+		for ( int i = 0; i < count; ++i )
+		{
+			if ( elements[ i ] < 0 )
+				return false;
+			values[ static_cast<std::size_t>( i ) ] =
+				psi.GetValue( elements[ i ], reference[ i ] );
+		}
+		return true;
+	}
+
+	/// Root mean square of a - b over the whole list.
+	double twoRouteRms( std::vector<double> const &a,
+	                    std::vector<double> const &b )
+	{
+		double sum = 0.0;
+		for ( std::size_t i = 0; i < a.size(); ++i )
+			sum += ( a[ i ] - b[ i ] )*( a[ i ] - b[ i ] );
+		return std::sqrt( sum/static_cast<double>( a.size() ) );
+	}
+}
+
+BOOST_AUTO_TEST_CASE( theTwoConductorRoutesAgreeOnTheOverlap )
+{
+	meq::CoilSet const interior = twoRouteInteriorConductors();
+	meq::ExteriorCoilSet const exterior = twoRouteExteriorConductors();
+
+	// THE TWO SETS ARE THE SAME CONDUCTOR, checked before anything is solved.
+	// The geometry is written out twice because Coils.hpp refuses to convert
+	// between the sets, so a typo in one copy is the way this case would become
+	// a comparison of two different machines while still converging.
+	BOOST_TEST_REQUIRE( interior.totalCurrent() == exterior.totalCurrent() );
+	for ( double r : { 0.3, 0.9, 1.4, twoRouteBoxR } )
+		for ( double z : { -1.1, -0.2, 0.0, 0.7, 1.5 } )
+			BOOST_TEST_REQUIRE( std::abs( interior.psi( r, z )
+			                              - exterior.psi( r, z ) )
+			                    <= 1.0e-14*( 1.0 + std::abs( interior.psi( r, z ) ) ),
+				"the interior and exterior descriptions of the conductor give "
+				"different fields at ( " << r << ", " << z << " ): "
+				<< interior.psi( r, z ) << " against " << exterior.psi( r, z )
+				<< ". They are written out separately because Coils.hpp refuses a "
+				"conversion, so this is where a divergence between the copies is "
+				"caught." );
+
+	// OUTSIDE Gamma FOR RUN S, asked of the type that owns the precondition.
+	double const clearance = exterior.clearance( 0.0, halfDiscGamma );
+	BOOST_TEST_REQUIRE( clearance > 0.0,
+		"the conductor reaches inside Gamma by " << -clearance << " m" );
+
+	// AND OUTSIDE RUN S'S BACKGROUND BOX ENTIRELY, which is the configuration
+	// the driver warns about: F is assembled by quadrature over the elements,
+	// so a conductor the mesh does not reach is never sampled. Run S therefore
+	// cannot be getting the conductor through the source by accident.
+	BOOST_TEST_REQUIRE( twoRouteCoilR - twoRouteCoilHalf > halfDiscBox,
+		"the conductor's inboard edge at "
+		<< twoRouteCoilR - twoRouteCoilHalf << " is inside run S's background "
+		"box, which reaches " << halfDiscBox );
+
+	// AND INSIDE RUN B'S BOX, with room between it and the boundary.
+	BOOST_TEST_REQUIRE( twoRouteCoilR + twoRouteCoilHalf < twoRouteBoxR );
+	BOOST_TEST_REQUIRE( twoRouteCoilZ + twoRouteCoilHalf < twoRouteBoxZ );
+
+	// THE SAMPLE LATTICE. Fixed in physical space, so it is the same instrument
+	// at every mesh, and offset by half a step in both the radius and the angle
+	// so that it carries neither rho = 0 nor the midplane. Whether a polar
+	// lattice lands on a Cartesian grid line is not something offsets can
+	// promise, which is why the instrument is CHECKED below rather than argued
+	// about: a point on a face would read one of two values and the answer
+	// would move with the sample set.
+	int const radii = 10;
+	int const angles = 24;
+	std::vector<double> sampleR;
+	std::vector<double> sampleZ;
+	for ( int i = 0; i < radii; ++i )
+		for ( int j = 0; j < angles; ++j )
+		{
+			double const rho = twoRouteSampleRadius
+				*( static_cast<double>( i ) + 0.5 )/static_cast<double>( radii );
+			double const theta = M_PI*( ( static_cast<double>( j ) + 0.5 )
+				/static_cast<double>( angles ) - 0.5 );
+			sampleR.push_back( rho*std::cos( theta ) );
+			sampleZ.push_back( rho*std::sin( theta ) );
+		}
+
+	std::vector<double> exact( sampleR.size(), 0.0 );
+	for ( std::size_t i = 0; i < sampleR.size(); ++i )
+		exact[ i ] = interior.psi( sampleR[ i ], sampleZ[ i ] );
+	std::vector<double> const zeros( sampleR.size(), 0.0 );
+	double const scale = twoRouteRms( exact, zeros );
+	BOOST_TEST_REQUIRE( scale > 0.0 );
+
+	std::printf( "\n  FB-7: THE TWO CONDUCTOR ROUTES AGREE WHERE BOTH ARE "
+	             "LEGAL\n" );
+	std::printf( "    conductors at ( %.2f, +/-%.2f ), half-extent %.2f, "
+	             "outermost corner at rho = %.3f\n",
+	             twoRouteCoilR, twoRouteCoilZ, twoRouteCoilHalf,
+	             std::hypot( twoRouteCoilR + twoRouteCoilHalf,
+	                         twoRouteCoilZ + twoRouteCoilHalf ) );
+	std::printf( "    run S: the half-disc rho = %.2f, conductor OUTSIDE and "
+	             "reaching the solve through the coupling\n", halfDiscGamma );
+	std::printf( "    run B: the rectangle [ 0, %.2f ] x [ %.2f, %.2f ], "
+	             "conductor INSIDE and meshed, psi_coil on the boundary\n",
+	             twoRouteBoxR, -twoRouteBoxZ, twoRouteBoxZ );
+	std::printf( "    compared at %d points inside rho = %.2f, against an RMS "
+	             "psi_coil of %.4e\n\n",
+	             radii*angles, twoRouteSampleRadius, scale );
+
+	// F IS IDENTICALLY ZERO IN RUN S: the conductor is outside Omega_S, so it
+	// contributes nothing to the interior equation. That is the whole of FB-7's
+	// decomposition and it is why ExteriorCoilSet has no f().
+	struct EmptyInterior : public meq::Source
+	{
+		double f( double, double, double ) const override { return 0.0; }
+		double dFdPsi( double, double, double ) const override { return 0.0; }
+	};
+
+	auto plasma = std::make_shared<EmptyInterior const>();
+	auto conductors = std::make_shared<meq::CoilSet const>( interior );
+	meq::CoilAugmentedSource interiorSource( plasma, conductors );
+
+	mfem::FunctionCoefficient coilDatum( [ &interior ]( mfem::Vector const &x )
+	{
+		return interior.psi( x( 0 ), x( 1 ) );
+	} );
+
+	double worstRate = 1.0e30;
+	double controlRatio = 0.0;
+	double instrumentDrift = 0.0;
+	double globalRate = 0.0;
+
+	// The global L2 column below is taken at these degrees and on these meshes
+	// only. See its comment: it is the expensive line in this case.
+	int const globalFromOrder = 2;
+	int const globalToMesh = 26;
+
+	for ( int order = 1; order <= 3; ++order )
+	{
+		std::vector<double> differences;
+
+		std::printf( "    %-3s %6s %8s %6s %8s %13s %13s %13s %8s %13s %8s\n",
+		             "k", "n_S", "h_S", "n_B", "h_B",
+		             "S - psi_coil", "B - psi_coil", "S - B", "rate",
+		             "B L2, box", "rate" );
+
+		std::vector<double> global;
+		int rung = 0;
+		for ( int nS : { 12, 24, 48 } )
+		{
+			int const nB = 13 << rung;
+			++rung;
+
+			// RUN S: THE EXTERIOR ROUTE, COUPLED.
+			HalfDisc d = makeHalfDisc( nS );
+			meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 4 );
+			mfem::ConstantCoefficient zero( 0.0 );
+
+			meq::GradShafranovSolver s( *d.sub, order );
+			s.setSource( *plasma );
+			s.setBoundaryData( zero );
+			s.setExtension( *d.path, d.gammaHMarker );
+			s.setExteriorConductors( exterior );
+			s.setExteriorCoupling( dtn );
+			s.solve();
+
+			// RUN B: THE INTERIOR ROUTE, ON A FITTED RECTANGLE.
+			std::unique_ptr<mfem::Mesh> box = makeTwoRouteBox( nB );
+			double const hB = twoRouteBoxR/static_cast<double>( nB );
+
+			// THE ALIGNMENT, ASSERTED RATHER THAN ARRANGED AND FORGOTTEN.
+			// Section 7.9 measured a cut conductor costing the rate a full
+			// order and more, so a mesh that stopped dividing the conductor's
+			// edges would silently turn this case into a measurement of the
+			// quadrature.
+			for ( double edge : { twoRouteCoilR - twoRouteCoilHalf,
+			                      twoRouteCoilR + twoRouteCoilHalf,
+			                      twoRouteCoilZ - twoRouteCoilHalf,
+			                      twoRouteCoilZ + twoRouteCoilHalf } )
+				BOOST_TEST_REQUIRE(
+					std::abs( edge/hB - std::round( edge/hB ) ) < 1.0e-10,
+					"the conductor edge at " << edge << " is not a multiple of "
+					"the cell size " << hB << " at n_B = " << nB << ", so the "
+					"conductor is CUT and the interior route is being measured "
+					"with its source integrated inexactly" );
+
+			meq::GradShafranovSolver b( *box, order );
+			b.setSource( interiorSource );
+			b.setBoundaryData( coilDatum );
+			b.solve();
+
+			std::vector<double> valuesS;
+			std::vector<double> valuesB;
+			BOOST_TEST_REQUIRE( sampleTwoRouteField( *d.sub, s.potential(),
+			                                         sampleR, sampleZ, valuesS ),
+				"a sample point fell outside run S's mesh at n_S = " << nS );
+			BOOST_TEST_REQUIRE( sampleTwoRouteField( *box, b.potential(),
+			                                         sampleR, sampleZ, valuesB ),
+				"a sample point fell outside run B's mesh at n_B = " << nB );
+
+			double const errorS = twoRouteRms( valuesS, exact );
+			double const errorB = twoRouteRms( valuesB, exact );
+			double const difference = twoRouteRms( valuesS, valuesB );
+			differences.push_back( difference );
+
+			// AND RUN B'S OWN L2 OVER ITS WHOLE BOX, on the two coarser meshes
+			// at k >= 2. It is a different measurement from the column beside
+			// it and it is here to size the corner term: the sample points are
+			// in the far field and the r^2 log r sits AT the conductor's
+			// corners, so a global norm sees what a far-field one cannot.
+			//
+			// RESTRICTED BECAUSE IT IS THE EXPENSIVE LINE IN THIS CASE.
+			// psi_coil is a 32-point graded quadrature per evaluation and an L2
+			// asks for it at every quadrature point of every element, which on
+			// the finest box is eighteen seconds a mesh against eighteen for
+			// the whole rest of the case. k = 1 is not capped by the corner at
+			// all -- k+1 = 2 is below 3 -- so it has nothing to show.
+			bool const globalHere = ( order >= globalFromOrder
+			                          && nB <= globalToMesh );
+			if ( globalHere )
+				global.push_back( b.potentialError( coilDatum ) );
+
+			double rate = std::numeric_limits<double>::quiet_NaN();
+			if ( differences.size() > 1 )
+			{
+				std::size_t const j = differences.size() - 1;
+				rate = meq::tests::rate( differences[ j - 1 ], differences[ j ],
+				                         2.0 );
+				worstRate = std::min( worstRate, rate );
+			}
+
+			std::printf( "    %-3d %6d %8.4f %6d %8.4f %13.4e %13.4e %13.4e "
+			             "%8.3f", order, nS, d.h, nB, hB, errorS, errorB,
+			             difference, rate );
+			if ( !globalHere )
+				std::printf( " %13s %8s\n", "-", "-" );
+			else if ( global.size() == 1 )
+				std::printf( " %13.4e %8s\n", global.back(), "-" );
+			else
+				std::printf( " %13.4e %8.3f\n", global.back(),
+				             meq::tests::rate( global[ global.size() - 2 ],
+				                               global.back(), 2.0 ) );
+			std::fflush( stdout );
+
+			// THE CONTROL, ONCE: run B with its SOURCE removed and the datum
+			// kept. It converges -- to the Delta*-harmonic extension of
+			// psi_coil into a box the conductor is inside, which is a different
+			// function. Without it every number above is compatible with the
+			// coil term never having been assembled at all.
+			if ( order == 2 && nS == 24 )
+			{
+				meq::GradShafranovSolver bare( *box, order );
+				bare.setSource( *plasma );
+				bare.setBoundaryData( coilDatum );
+				bare.solve();
+
+				std::vector<double> bareValues;
+				BOOST_TEST_REQUIRE( sampleTwoRouteField( *box, bare.potential(),
+				                                         sampleR, sampleZ,
+				                                         bareValues ) );
+				double const bareDifference = twoRouteRms( valuesS, bareValues );
+				controlRatio = bareDifference/difference;
+				std::printf( "      control, run B's coil term removed: "
+				             "S - B %13.4e ( %.0fx this row )\n",
+				             bareDifference, controlRatio );
+				std::fflush( stdout );
+
+				// AND THE INSTRUMENT, CHECKED THE WAY THIS TREE CHECKS EVERY
+				// OTHER ONE: refine the SAMPLING at fixed h and see whether the
+				// answer moves. A number that moves with the sample set is a
+				// measurement of the sample set.
+				std::vector<double> denseR;
+				std::vector<double> denseZ;
+				for ( int i = 0; i < 2*radii; ++i )
+					for ( int j = 0; j < 2*angles; ++j )
+					{
+						double const rho = twoRouteSampleRadius
+							*( static_cast<double>( i ) + 0.5 )
+							/static_cast<double>( 2*radii );
+						double const theta = M_PI*( ( static_cast<double>( j )
+							+ 0.5 )/static_cast<double>( 2*angles ) - 0.5 );
+						denseR.push_back( rho*std::cos( theta ) );
+						denseZ.push_back( rho*std::sin( theta ) );
+					}
+				std::vector<double> denseS;
+				std::vector<double> denseB;
+				BOOST_TEST_REQUIRE( sampleTwoRouteField( *d.sub, s.potential(),
+				                                         denseR, denseZ,
+				                                         denseS ) );
+				BOOST_TEST_REQUIRE( sampleTwoRouteField( *box, b.potential(),
+				                                         denseR, denseZ,
+				                                         denseB ) );
+				double const dense = twoRouteRms( denseS, denseB );
+				instrumentDrift = std::abs( dense/difference - 1.0 );
+				std::printf( "      instrument, %d points against %d: "
+				             "S - B %13.4e ( %.2f%% apart )\n",
+				             4*radii*angles, radii*angles, dense,
+				             100.0*instrumentDrift );
+				std::fflush( stdout );
+			}
+		}
+
+		double const overall = meq::tests::rate( differences.front(),
+		                                         differences.back(), 4.0 );
+		std::printf( "    %-3d %6s %8s %6s %8s %13s %13s %13s %8.3f", order,
+		             "", "", "", "", "", "", "", overall );
+		// FACTOR TWO, NOT FOUR: this column is taken on the first two meshes
+		// only, so its sequence spans one refinement and not two.
+		if ( global.size() > 1 )
+		{
+			globalRate = meq::tests::rate( global.front(), global.back(), 2.0 );
+			std::printf( " %13s %8.3f", "", globalRate );
+		}
+		std::printf( "  <- over the sequence\n\n" );
+		std::fflush( stdout );
+
+		// THE TWO ROUTES CONVERGE ON ONE ANSWER, at k+1, with the slack the
+		// extension path needs for the reason ExtensionConvergence gives:
+		// Omega_h is the union of background elements inside Gamma and WHICH
+		// elements those are is not a smooth function of h.
+		BOOST_TEST( overall > order + 1 - 0.30,
+			"the two conductor routes converge on each other at " << overall
+			<< " at k = " << order << ", where k+1 = " << order + 1 << " is "
+			"wanted. One of them is not solving the problem the other is: a "
+			"conductor reaching the interior equation with a different current, "
+			"sign, mu_0 or footprint from the one reaching the boundary would "
+			"leave both runs converging beautifully and leave this column "
+			"flat." );
+	}
+
+	BOOST_TEST( worstRate > 1.0,
+		"a pair of meshes reads " << worstRate << ", i.e. the difference "
+		"between the two routes barely fell. A pointwise difference is not "
+		"monotone -- ExtensionConvergence records why Omega_h is not a smooth "
+		"function of h -- so this is the loose bound and the per-order rate "
+		"above is the assertion with teeth." );
+
+	// AND THE INTERIOR ROUTE IS DOING THE WORK.
+	BOOST_TEST( controlRatio > 50.0,
+		"removing the coil term from run B's SOURCE changed its answer by only "
+		<< controlRatio << "x the difference between the two routes, so the "
+		"interior route is barely contributing and the agreement above is "
+		"between the exterior route and a harmonic extension." );
+
+	// AND THE MESH ALIGNMENT IS DOING ITS JOB, which the global column is the
+	// only thing here that can see: the far-field columns are in the far field
+	// and a cut conductor's damage is local to the elements it cuts. Section
+	// 7.9 measured a cut conductor at 1.09 at k = 3 against 3.01 aligned, so
+	// this bound separates the two by a mile and would fail outright if the box
+	// or the conductor were ever moved off the grid.
+	BOOST_TEST( globalRate > 2.70,
+		"run B's L2 over its own box converges at " << globalRate
+		<< " at k = 3, where the aligned conductor should "
+		"give about 3 -- section 7.9 reads 3.01 aligned and 1.09 cut. The "
+		"alignment is asserted per mesh above, so a failure here is the "
+		"quadrature or the corner and not the geometry." );
+
+	// AND THE SAMPLING IS NOT THE MEASUREMENT.
+	BOOST_TEST( instrumentDrift < 0.10,
+		"quadrupling the sample count moved the difference by "
+		<< 100.0*instrumentDrift << "%, so what is tabulated above is partly a "
+		"property of where it was sampled" );
+}
+
+/*
  * FB-7's PRECONDITION IS ENFORCED, AND IN BOTH ORDERS.
  *
  * A conductor inside Gamma breaks the decomposition FB-7 rests on: psi_coil is
