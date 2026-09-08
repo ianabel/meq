@@ -266,6 +266,26 @@ namespace
 				"[boundary.shape] encloses no background element. The mesh is too "
 				"coarse for the surface, or the surface lies outside the [mesh] box" );
 
+		// THE CUT'S MARKING IS SCRATCH AND THE MATERIAL ATTRIBUTES ARE NOT, SO
+		// THE ORIGINALS ARE SAVED ACROSS IT. A `.msh` carries the regions it was
+		// built with -- halfdisc.py writes the conductors as 10 + i and the
+		// limiter's interior as 20 -- and overwriting every element with 1 or 2
+		// to select the subdomain destroys them before SubMesh copies anything.
+		// Measured, that is not cosmetic: [boundary.limiter] SurfaceAttribute
+		// refused a mesh that plainly carried attribute 20, because by the time
+		// the solver saw the mesh it did not.
+		//
+		// The background is restored as well as the child, because an adaptive
+		// run cuts it again on the next cycle and would otherwise be cutting a
+		// mesh whose regions this function had already erased.
+		std::vector<int> const originalAttribute = [ &background ]
+		{
+			std::vector<int> saved( static_cast<std::size_t>( background.GetNE() ) );
+			for ( int e = 0; e < background.GetNE(); ++e )
+				saved[ static_cast<std::size_t>( e ) ] = background.GetAttribute( e );
+			return saved;
+		}();
+
 		for ( int e = 0; e < background.GetNE(); ++e )
 			background.SetAttribute( e, marker[ e ] ? 1 : 2 );
 		background.SetAttributes();
@@ -281,6 +301,24 @@ namespace
 		Subdomain subdomain;
 		subdomain.mesh = std::make_unique<mfem::SubMesh>(
 			mfem::SubMesh::CreateFromDomain( background, domainAttribute ) );
+
+		// Put the material attributes back, on both meshes. The child takes its
+		// parent's through the element map SubMesh keeps for exactly this kind
+		// of question.
+		{
+			mfem::Array<int> const &parent =
+				subdomain.mesh->GetParentElementIDMap();
+			for ( int e = 0; e < subdomain.mesh->GetNE(); ++e )
+				subdomain.mesh->SetAttribute(
+					e, originalAttribute[
+					       static_cast<std::size_t>( parent[ e ] ) ] );
+			subdomain.mesh->SetAttributes();
+
+			for ( int e = 0; e < background.GetNE(); ++e )
+				background.SetAttribute(
+					e, originalAttribute[ static_cast<std::size_t>( e ) ] );
+			background.SetAttributes();
+		}
 
 		// SubMesh gives the boundary it had to generate ONE new attribute, one
 		// past whatever the parent already used, and leaves inherited boundary
