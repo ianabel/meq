@@ -1209,10 +1209,13 @@ against that grid well posed. What is new is the measurement of what the
 artefact costs. **From the shipped guess the found-contact run reaches a
 different equilibrium** — 38 Newton steps, scale 13.6, `ψ_ax` at **1.48×** the
 peak of the field it wrote, which the existing gate catches — and from a
-converged nearby equilibrium it takes 8. Prescribing a point at the found
-contact reaches a *third*, whose own maximum over the polygon agrees with what
-it was given to 0.2%, so these are genuinely distinct fixed points and not a
-broken search. `FREE-BOUNDARY-PLAN.md` §7.20 has both tables.
+converged nearby equilibrium it takes 8. **Refinement does not cure it**: the
+same cold run at 5225 elements does not converge at all, 200 iterations with the
+residual floored at 6.84e-04 and the driver exiting 2, where the prescribed-point
+run on that mesh takes 7. The branch is chosen by the guess, not by the mesh.
+Prescribing a point at the found contact reaches a *third*, whose own maximum
+over the polygon agrees with what it was given to 0.2%, so these are genuinely
+distinct fixed points and not a broken search. `FREE-BOUNDARY-PLAN.md` §7.20 has both tables.
 
 **A WRONG SURFACE ATTRIBUTE IS REFUSED AT THE SETTER, NOT AT THE SOLVE**, which
 matters because the failure is otherwise silent: `max` over an empty polygon is

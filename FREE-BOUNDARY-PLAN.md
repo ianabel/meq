@@ -3420,6 +3420,15 @@ a ratio of **1.48**, which is §7.16's spike signature and which
 `theDriverSolvesALimitedTokamak` already gates. Started from a converged nearby
 equilibrium it converges in **8 steps** to the table above with a scale of 0.969.
 
+**AND REFINEMENT DOES NOT CURE IT, WHICH IS WHAT RULES OUT THE COMFORTABLE
+EXPLANATION.** This tree's standing rule is that a difficulty measured at one
+resolution is not a property of the problem, so the same cold run was taken at
+**5225 elements**: it does not converge at all. 200 iterations, the residual
+floored at 6.84e-04 — 2.74e-03 relative — with the iterate wandering and the
+driver exiting 2. The prescribed-point run on that same mesh takes **7** steps.
+So the branch is chosen by the guess and not by the mesh, and refining a cold
+free-boundary solve with a moving contact makes it worse rather than better.
+
 **THAT IS MULTIPLICITY RATHER THAN A BROKEN CONSTRAINT, AND ONE RUN SETTLES
 IT.** Prescribing a point at the found contact converges in 7 steps to
 `ψ_ax = 9.572369e-02`, and the maximum of that solution's own `ψ` over the
