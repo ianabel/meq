@@ -215,6 +215,7 @@ set(MEQ_CORE_SOURCES
 	src/meq/PlasmaComponent.cpp
 	src/meq/Profiles.cpp
 	src/meq/RotatingSource.cpp
+	src/meq/SafetyFactor.cpp
 	src/meq/Sampler.cpp
 	src/meq/Source.cpp
 	src/meq/SourceFactory.cpp

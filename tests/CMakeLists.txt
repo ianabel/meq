@@ -23,6 +23,7 @@ set(MEQ_UNIT_TESTS
 	PlasmaComponentTests
 	ProfilesTests
 	RotatingSourceTests
+	SafetyFactorTests
 	SourceTests
 	SourceFactoryTests
 	ZernikeTests)
@@ -193,7 +194,12 @@ set(MEQ_CONVERGENCE_TESTS
 	# mesh and the constraint is closed by the bordered Newton -- and because the
 	# assertion with teeth is Newton's own observed ORDER, which is the only
 	# thing that can see whether the border row really is exact.
-	LimiterCurve)
+	LimiterCurve
+	# ROADMAP.md item 10: driving the equilibrium by q( psi ) rather than by
+	# g( psi ). A convergence test because the loop is solve -> extract ->
+	# invert -> re-solve, and what it asserts is that the fixed point is the
+	# equilibrium whose target q was built from a KNOWN g.
+	SafetyFactorSolver)
 
 # DriverAcceptance is registered separately below: it runs the meq BINARY rather
 # than linking the library, so it needs the app to have been built and needs the
