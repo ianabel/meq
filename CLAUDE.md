@@ -1179,6 +1179,41 @@ order 1.999. The `.nc` carries `limiter_r`, `limiter_z` and
 configuration echoed back**, which on this route are different things and only
 one of them is any use to a reader differencing two runs.
 
+**AND THE DEFECT THAT FOUND WAS DRIVER-SIDE, WHICH A LIBRARY TEST STRUCTURALLY
+COULD NOT SEE.** `buildSubdomain()` selects `Ω_h` by overwriting **every element
+attribute** with 1 or 2 and cutting a `SubMesh`, so a `.msh`'s own regions —
+`halfdisc.py` writes conductors as `10 + i` and the limiter's interior as `20` —
+were gone before `SubMesh` copied anything, and `SurfaceAttribute` refused a
+mesh that plainly carried attribute 20. `LimiterCurve` builds a plain mesh and
+paints its own regions, so no cut stands between the attribute and the solver.
+**Between a file mesh and the solver there is always a cut, and only a driver
+test has one.** The cut's marking is scratch — `meq::AdaptiveDomain` uses 1/2/3
+for the same purpose and says so — and the material attributes are not; both
+meshes are restored across it. `theDriverFindsTheLimiterContact` is the
+regression, on `examples/limiter-halfdisc.toml`, and it asserts the contact
+lands **on the polygon**: 0.345370 from the limiter centre in the 4.8e-03 band
+between the polygon's inradius and its circle. **Its control is a fixed point**
+— prescribing the contact the search found must reproduce the solve, since the
+maximum is attained there — and the two agree to **5.5e-12**.
+
+**ON THE MACHINE CASE, FINDING THE CONTACT IS 11.7× CLOSER TO THE CONVERGED
+REFERENCE, AND IT COSTS BRANCH SENSITIVITY.** On a rebuild of
+`limited-tokamak`'s geometry with the limiter meshed in — 1607 elements against
+the shipped 1601 — the prescribed 129² contact gives `ψ_ax = 9.490127e-02`,
+1.95e-02 from the 513² reference, and the found one 9.293175e-02, **1.67e-03**.
+The found contact lands on the **inboard shoulder** at `( 0.7739, 0.2571 )`,
+which is where that file's own comment says the true circle's maximum is on both
+grids. **The shipped example keeps its prescribed point and should**: it
+reproduces `freegs4e`'s own 129² artefact, which is what makes the comparison
+against that grid well posed. What is new is the measurement of what the
+artefact costs. **From the shipped guess the found-contact run reaches a
+different equilibrium** — 38 Newton steps, scale 13.6, `ψ_ax` at **1.48×** the
+peak of the field it wrote, which the existing gate catches — and from a
+converged nearby equilibrium it takes 8. Prescribing a point at the found
+contact reaches a *third*, whose own maximum over the polygon agrees with what
+it was given to 0.2%, so these are genuinely distinct fixed points and not a
+broken search. `FREE-BOUNDARY-PLAN.md` §7.20 has both tables.
+
 **A WRONG SURFACE ATTRIBUTE IS REFUSED AT THE SETTER, NOT AT THE SOLVE**, which
 matters because the failure is otherwise silent: `max` over an empty polygon is
 minus infinity and its border row is all zeroes, so the bordered solve does not

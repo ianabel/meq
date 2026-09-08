@@ -81,6 +81,13 @@ docs/doctrees/
 *.pvd
 # The driver's (R, Z) grid file. Same reasoning: run output, not source.
 *.nc
+# Configs the DRIVER TESTS write, to drive a variant of a shipped example
+# without shipping a second one -- a prescribed contact against a found one, a
+# degree against a degree. Run output rather than source, on the same reasoning
+# as the .pvd line above: without this a DriverAcceptance run leaves half a
+# dozen `?? driver-acceptance-*.toml` behind and a clean tree stops meaning
+# anything.
+driver-acceptance-*.toml
 visit_dump*/
 ParaView/
 

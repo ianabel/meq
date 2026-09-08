@@ -1,0 +1,49 @@
+# g dg/dPsi( Psi ) for examples/limiter-halfdisc.toml, against the NORMALISED flux
+# Psi = ( psi - psi_bnd )/( psi_ax - psi_bnd ).  Columns: Psi, f, f'.
+#
+# IDENTICALLY ZERO, AND THAT IS A PRECONDITION RATHER THAN A CHOICE.  This
+# domain reaches r = 0, F/r is mu0 j_phi, and F = mu0 r^2 p' + g g' leaves
+# only g g' on the axis -- p' is protected by its own r^2.  A non-zero g g'
+# here is an infinite current density on the symmetry axis, which the driver
+# refuses.  CLAUDE.md, section 11.3.
+-0.6000  0.0  0.0
+-0.5500  0.0  0.0
+-0.5000  0.0  0.0
+-0.4500  0.0  0.0
+-0.4000  0.0  0.0
+-0.3500  0.0  0.0
+-0.3000  0.0  0.0
+-0.2500  0.0  0.0
+-0.2000  0.0  0.0
+-0.1500  0.0  0.0
+-0.1000  0.0  0.0
+-0.0500  0.0  0.0
+0.0000  0.0  0.0
+0.0500  0.0  0.0
+0.1000  0.0  0.0
+0.1500  0.0  0.0
+0.2000  0.0  0.0
+0.2500  0.0  0.0
+0.3000  0.0  0.0
+0.3500  0.0  0.0
+0.4000  0.0  0.0
+0.4500  0.0  0.0
+0.5000  0.0  0.0
+0.5500  0.0  0.0
+0.6000  0.0  0.0
+0.6500  0.0  0.0
+0.7000  0.0  0.0
+0.7500  0.0  0.0
+0.8000  0.0  0.0
+0.8500  0.0  0.0
+0.9000  0.0  0.0
+0.9500  0.0  0.0
+1.0000  0.0  0.0
+1.0500  0.0  0.0
+1.1000  0.0  0.0
+1.1500  0.0  0.0
+1.2000  0.0  0.0
+1.2500  0.0  0.0
+1.3000  0.0  0.0
+1.3500  0.0  0.0
+1.4000  0.0  0.0

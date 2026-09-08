@@ -1,0 +1,80 @@
+# THE LIMITER AS A CURVE: psi_bnd = max psi_h OVER A MESHED LIMITER SURFACE.
+#
+# `psi_bnd` is the flux at the plasma edge, and in a free boundary the edge is
+# where the plasma touches the limiter -- so it is a functional of the solution
+# exactly as `psi_ax` is, and it gets a border row of its own (FB-3).  WHERE it
+# touches can be prescribed or found:
+#
+#   [boundary.limiter] R, Z              the contact, PRESCRIBED
+#   [boundary.limiter] SurfaceAttribute  the limiter, contact FOUND on it
+#
+# and they are alternatives, refused together, because both converge -- to
+# equilibria an O( h ) apart -- so a precedence rule would pick which answer the
+# run reports by key order.  This file is the second.  examples/limited-tokamak
+# .toml is the first, and its own comment says why a machine case being compared
+# against another code wants the point that code used.
+#
+# THE MESH IS FITTED TO THE LIMITER, WHICH IS WHAT MAKES THE POLYGON EXACT.  A
+# limiter is prescribed input and does not move with the solution, so it can be
+# aligned to, exactly as FREE-BOUNDARY-PLAN.md section 7.9's conductors are:
+#
+#   python3 tools/mesh/halfdisc.py --rho 1.5 --size 0.12 \
+#           --limiter 1.00 0.0 0.35 -o examples/limiter-halfdisc.msh --check
+#
+# fragments the limiter circle into the geometry, so its edges ARE mesh faces
+# and its vertices ARE mesh vertices -- measured, on the true circle to 3.3e-16.
+# The limiter MEQ then uses is the POLYGON those 19 faces make, inscribed in the
+# circle, and the contact lands on it: 0.345370 from the centre against a radius
+# of 0.350, which is the chord sag of a 19-segment polygon to the digit.
+#
+# THE REGION IS TAGGED AS A 2-D ATTRIBUTE AND NOT A 1-D GROUP.  MFEM's gmsh
+# reader turns 1-D elements into BOUNDARY elements whether or not they are
+# topologically on the boundary, and EnableHybridization registers a flux
+# constraint on every marked boundary attribute -- so a limiter tagged that way
+# would impose a boundary condition through the middle of the plasma.  The
+# limiter faces are recovered as the interface between attribute 20 and its
+# neighbours, which is a question about ELEMENT attributes and cannot do that.
+
+[mesh]
+# A gmsh half-disc reaching r = 0 EXACTLY.  mfem::Mesh::MakeCartesian2D cannot
+# make this geometry, and the limiter circle has to be fragmented in rather than
+# cut, which is the whole point of the file.
+File = "examples/limiter-halfdisc.msh"
+
+[discretisation]
+PolynomialDegree = 2
+
+[solver]
+NewtonMaxIterations = 40
+
+[source]
+Type = "mhd"
+Normalised = true
+PsiAxis = 0.30
+Mu0 = 1.0
+# NO ConfineToPlasma: the support does not move here, so a constant p' -- j = 0
+# at the edge -- is admissible.  See the header of the pprime table.
+PPrimeFile = "examples/limiter-halfdisc-pprime.dat"
+GGPrimeFile = "examples/limiter-halfdisc-ggprime.dat"
+
+[boundary]
+Type = "zero"
+
+# 20 is what halfdisc.py --limiter writes the ENCLOSED region as.  The limiter
+# is that region's boundary; psi_bnd is the maximum of psi_h over it, and the
+# contact is an OUTPUT of the solve, reported on the run and written into the
+# .nc as limiter_r, limiter_z and limiter_contact_located.
+[boundary.limiter]
+SurfaceAttribute = 20
+
+[initialguess]
+Type = "bump"
+CentreR = 1.0
+CentreZ = 0.0
+RadiusR = 0.35
+Amplitude = 0.30
+
+[output]
+Prefix = "limiter-halfdisc"
+GridNR = 65
+GridNZ = 65

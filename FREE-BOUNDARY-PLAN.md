@@ -3362,21 +3362,73 @@ exactly** instead.
   route. A wrong attribute is refused **at the setter**, because an empty
   polygon converges to a `ψ_bnd` pinned by nothing;
 
-  **WHAT IT DOES NOT YET HAVE IS A SHIPPED EXAMPLE OR A DRIVER REGRESSION**, and
-  that is the gap this file warns about elsewhere — *"all three defects found
-  building this case were driver-side, and a library test would have caught none
-  of them"*. The driver route is verified by hand and recorded above; it is not
-  yet gated. **The natural way to close it is also the way to finish FB-6**:
-  regenerate `examples/limited-tokamak.msh` with `--limiter` on `freegs4e`'s own
-  limiter circle and switch that file from `R`/`Z` to `SurfaceAttribute`, which
-  would take the reference's grid-derived contact out of the comparison
-  altogether — the last hand-fed input in §7.20. Expect it to MOVE the published
-  `ψ_ax`, since the contact would then be MEQ's own;
+  **AND IT IS GATED**, by `examples/limiter-halfdisc.toml` and
+  `DriverAcceptance::theDriverFindsTheLimiterContact` — a **driver** test, not a
+  library one, and building it found a driver defect a library test structurally
+  could not: `buildSubdomain()` selected `Ω_h` by overwriting **every element
+  attribute**, so a `.msh`'s own regions were gone before `SubMesh` copied them
+  and `SurfaceAttribute` refused a mesh that plainly carried attribute 20.
+  Between a file mesh and the solver stands a cut, and only a driver test has
+  one. The cut's marking is scratch and the material attributes are not; both
+  meshes are restored across it now.
+
+  The case asserts the contact lands **on the polygon** — 0.345370 from the
+  limiter centre, in the band `[ 0.345226, 0.350000 ]` between the polygon's
+  inradius and the circle it is inscribed in, 4.8e-03 wide, which a dof, an
+  element centre or the circle's own outboard point would all miss. **Its
+  control is a fixed-point statement**: prescribing the contact the search FOUND
+  must reproduce the same solve, since the maximum is attained there and
+  `ExactPoint` at that point is the same constraint. Measured, they agree to
+  **5.5e-12** in both `ψ_ax` and `ψ_bnd`. Without that column every other
+  assertion is satisfied by a search returning any point of the curve at all.
 * the conductor model still differs — MEQ's rectangles against freegs4e's
   filaments — and §7.19's `meq::CurrentFilament` cannot fix it here, because the
   P2 coils sit at radius 1.163 from `Γ`'s centre while the plasma reaches 1.345,
   so no `Γ` both encloses the plasma and excludes them. Rebuilding the reference
   on `freegs4e.shaped_coil.ShapedCoil` is the way, and it is a reference-side job.
+
+#### What finding the contact is worth on the machine case
+
+**11.7× CLOSER TO THE CONVERGED REFERENCE, ON THE SAME MESH — AND IT NEEDS A
+GUESS IN THE RIGHT BASIN.** Measured on a rebuild of this case's own geometry
+with `--limiter 1.00 0.0 0.35` added: **1607 elements against the shipped 1601**,
+19 limiter faces, every polygon vertex on the true circle to 3.9e-16. Driven
+with the prescribed contact it gives `ψ_ax = 9.490127e-02`, and at 5225 elements
+**9.482963e-02** against §7.20's published MEQ limit of 9.482388e-02 — so
+fragmenting the limiter into the geometry costs essentially nothing and the
+rebuild reproduces this section.
+
+| on 1607 elements | `ψ_ax` | `ψ_ax`/written peak | vs the 513² reference |
+|---|---|---|---|
+| the **129²** contact, prescribed | 9.490127e-02 | 1.0013 | 1.95e-02 |
+| **found on the limiter surface** | 9.293175e-02 | 0.9971 | **1.67e-03** |
+
+**AND THE FOUND CONTACT LANDS WHERE THIS SECTION SAYS THE TRUE MAXIMUM IS**:
+`( 0.7739, 0.2571 )`, the **inboard shoulder**, against the prescribed
+`( 1.3375, 0 )` on the outboard midplane. That is the whole of the 11.7×. The
+shipped key reproduces `freegs4e`'s **129²** grid artefact faithfully — which is
+what makes the comparison against ITS OWN grid well posed, and is why
+`examples/limited-tokamak.toml` keeps it — but the 513² reference's contact has
+moved to the inboard shoulder by then, so comparing a prescribed 129² contact
+against a 513² answer prescribes the wrong point. Finding it removes that.
+
+**WHAT IT COSTS IS BRANCH SENSITIVITY, AND THE EXISTING GATE CATCHES IT.** From
+the shipped Green's-function guess the found-contact run reaches a **different
+equilibrium**: 38 Newton steps against 7, profile scale **13.6** against 1.004,
+and `ψ_ax = 2.033e-01` against a peak of **1.374e-01 in the field it wrote** —
+a ratio of **1.48**, which is §7.16's spike signature and which
+`theDriverSolvesALimitedTokamak` already gates. Started from a converged nearby
+equilibrium it converges in **8 steps** to the table above with a scale of 0.969.
+
+**THAT IS MULTIPLICITY RATHER THAN A BROKEN CONSTRAINT, AND ONE RUN SETTLES
+IT.** Prescribing a point at the found contact converges in 7 steps to
+`ψ_ax = 9.572369e-02`, and the maximum of that solution's own `ψ` over the
+polygon is **2.8159e-02** against the 2.8102e-02 it was given — 0.2%, which is
+the grid sampling. So it is a fixed point of the constraint, and the located run
+reached a different one. **Once the boundary is free the guess chooses which
+equilibrium is reported**, and a moving contact is one more way for it to
+matter: `ψ_bnd` moves with the iterate, which moves the support, which can walk
+it onto another branch.
 
 
 ## 10. Diverted plasmas and the X-point

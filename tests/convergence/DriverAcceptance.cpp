@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 #include <iterator>
 #include <limits>
@@ -2161,4 +2162,147 @@ BOOST_AUTO_TEST_CASE( theDriverWritesTheFluxSurfaceGrid )
 
 	std::remove( "driver-acceptance-surfaces.toml" );
 	std::remove( "driver-surfaces_surfaces.nc" );
+}
+
+/*
+ * THE LIMITER AS A CURVE, THROUGH THE DRIVER: [boundary.limiter]
+ * SurfaceAttribute, on a mesh fitted to the limiter.
+ *
+ * A DRIVER TEST AND NOT A LIBRARY ONE, FOR A REASON THIS FILE HAS PAID FOR
+ * BEFORE. `tests/convergence/LimiterCurve.cpp` covers the constraint on a plain
+ * mesh whose regions it paints itself, and it could not see the defect this
+ * case exists to keep fixed: buildSubdomain() selected Omega_h by overwriting
+ * every element attribute, so a `.msh`'s own regions were gone before SubMesh
+ * copied them and SurfaceAttribute refused a mesh that plainly carried
+ * attribute 20. Between a file mesh and the solver stands a cut, and only a
+ * driver test has one.
+ *
+ * THE CONTACT IS AN OUTPUT, SO THE ASSERTIONS ARE ABOUT WHERE IT LANDED. The
+ * limiter is the polygon inscribed in the circle by the 19 faces the mesh gives
+ * it, so a contact ON it lies between the polygon's inradius and the circle --
+ * a band 4.8e-03 wide, which a dof, an element centre or the circle's own
+ * outboard point would all miss.
+ */
+BOOST_AUTO_TEST_CASE( theDriverFindsTheLimiterContact )
+{
+	// examples/limiter-halfdisc.msh: halfdisc.py --limiter 1.00 0.0 0.35 at
+	// --size 0.12, which gives the limiter 19 faces.
+	double const centreR = 1.00;
+	double const centreZ = 0.00;
+	double const wall = 0.35;
+	int const segments = 19;
+	double const inradius = wall*std::cos( M_PI/segments );
+
+	BOOST_TEST_REQUIRE( run( "examples/limiter-halfdisc.toml" ) == 0,
+	                    "the driver did not exit 0 on the meshed limiter" );
+
+	std::string const header = ncdumpHeader( "limiter-halfdisc.nc" );
+	BOOST_TEST_REQUIRE( !header.empty(), "limiter-halfdisc.nc is unreadable" );
+
+	double const located = headerAttribute( header, "limiter_contact_located" );
+	double const contactR = headerAttribute( header, "limiter_r" );
+	double const contactZ = headerAttribute( header, "limiter_z" );
+	double const psiBoundary = headerAttribute( header, "psi_boundary" );
+	double const psiAxis = headerAttribute( header, "psi_axis" );
+	double const distance = std::hypot( contactR - centreR, contactZ - centreZ );
+
+	std::printf( "\n  THE LIMITER AS A CURVE, THROUGH THE DRIVER\n" );
+	std::printf( "    contact ( %.6f, %.6f ), %.6f from the limiter centre\n",
+	             contactR, contactZ, distance );
+	std::printf( "    the polygon lies between %.6f and %.6f\n", inradius, wall );
+	std::printf( "    psi_ax %.6e, psi_bnd %.6e\n", psiAxis, psiBoundary );
+
+	BOOST_TEST( located == 1.0,
+		"the run did not report a located contact, so [boundary.limiter] "
+		"SurfaceAttribute did not reach the solve. The first thing to suspect is "
+		"the mesh's regions being destroyed between the file and the solver: see "
+		"buildSubdomain()." );
+
+	// ON THE POLYGON. The band is 4.8e-03 wide, so this is a real statement
+	// about where the search looked and not a bounding box.
+	BOOST_TEST( distance >= inradius - 1.0e-9,
+		"the contact is " << distance << " from the limiter centre, inside the "
+		"polygon's own inradius of " << inradius << " -- so it is not on the "
+		"limiter at all" );
+	BOOST_TEST( distance <= wall + 1.0e-9,
+		"the contact is " << distance << " from the limiter centre, outside the "
+		"circle of " << wall << " the polygon is inscribed in" );
+
+	// AND psi_ax AGREES WITH THE FIELD THE RUN WROTE, which is the one health
+	// check here that is not phrased in terms of the plasma and so cannot be
+	// satisfied by an artefact -- see theDriverSolvesALimitedTokamak.
+	double const peak = gridPeak( "limiter-halfdisc.nc", "psi" );
+	BOOST_TEST_REQUIRE( std::isfinite( peak ), "could not read psi from the .nc" );
+	BOOST_TEST( std::abs( psiAxis/peak - 1.0 ) < 0.02,
+		"psi_ax is " << psiAxis << " against a written peak of " << peak
+		<< ", a ratio of " << psiAxis/peak << ". A reported axis well above the "
+		"field's own maximum is the spike branch." );
+
+	/*
+	 * THE CONTROL, AND IT IS A FIXED-POINT STATEMENT. Prescribing the contact
+	 * the search FOUND must reproduce the same solve: psi_bnd = max psi_h over
+	 * the polygon is attained THERE, so LimiterConstraint::ExactPoint at that
+	 * point is the same constraint. A search returning a point that is merely
+	 * on the polygon -- an endpoint, a quadrature node, the nearest vertex --
+	 * would land here and NOT be a fixed point.
+	 *
+	 * The second run is what makes this a control rather than a restatement:
+	 * without it every assertion above is satisfied by a search that returns
+	 * any point of the curve at all.
+	 */
+	{
+		std::string const config = "driver-acceptance-limiter-point.toml";
+		std::ifstream source( "examples/limiter-halfdisc.toml" );
+		std::string text( ( std::istreambuf_iterator<char>( source ) ),
+		                  std::istreambuf_iterator<char>() );
+		std::string const from = "SurfaceAttribute = 20";
+		std::size_t const at = text.find( from );
+		BOOST_TEST_REQUIRE( at != std::string::npos,
+			"examples/limiter-halfdisc.toml no longer names SurfaceAttribute" );
+
+		std::ostringstream point;
+		point << "R = " << std::setprecision( 17 ) << contactR
+		      << "\nZ = " << std::setprecision( 17 ) << contactZ;
+		text.replace( at, from.size(), point.str() );
+
+		std::size_t const prefix = text.find( "Prefix = \"limiter-halfdisc\"" );
+		BOOST_TEST_REQUIRE( prefix != std::string::npos, "no output prefix" );
+		text.replace( prefix, std::string( "Prefix = \"limiter-halfdisc\"" ).size(),
+		              "Prefix = \"limiter-halfdisc-point\"" );
+
+		std::ofstream out( config );
+		out << text;
+		out.close();
+
+		BOOST_TEST_REQUIRE( run( config ) == 0,
+		                    "the prescribed-point control did not exit 0" );
+		std::string const control = ncdumpHeader( "limiter-halfdisc-point.nc" );
+		BOOST_TEST_REQUIRE( !control.empty(), "the control .nc is unreadable" );
+
+		double const controlBoundary = headerAttribute( control, "psi_boundary" );
+		double const controlAxis = headerAttribute( control, "psi_axis" );
+		double const located2 = headerAttribute( control, "limiter_contact_located" );
+
+		std::printf( "    prescribed AT the found contact: psi_ax %.6e, "
+		             "psi_bnd %.6e\n", controlAxis, controlBoundary );
+		std::printf( "    apart: psi_ax %.3e, psi_bnd %.3e\n",
+		             std::abs( controlAxis - psiAxis )/std::abs( psiAxis ),
+		             std::abs( controlBoundary - psiBoundary )
+		                 /std::abs( psiBoundary ) );
+
+		BOOST_TEST( located2 == 0.0,
+			"the control reported a LOCATED contact, so it did not take the "
+			"prescribed-point path and is not a control at all" );
+		BOOST_TEST( std::abs( controlBoundary - psiBoundary )
+		            < 1.0e-8*std::abs( psiBoundary ),
+			"prescribing the contact the search found gives psi_bnd "
+			<< controlBoundary << " against the found " << psiBoundary
+			<< ". The maximum over the polygon is attained AT that point, so the "
+			"two are the same constraint and must agree; a gap means the search "
+			"returned a point that is on the curve but is not the maximum." );
+		BOOST_TEST( std::abs( controlAxis - psiAxis )
+		            < 1.0e-8*std::abs( psiAxis ),
+			"the same two runs disagree on psi_ax: " << controlAxis
+			<< " against " << psiAxis );
+	}
 }
