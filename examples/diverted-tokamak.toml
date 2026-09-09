@@ -1,0 +1,154 @@
+# A DIVERTED TOKAMAK, SOLVED AS A FREE BOUNDARY PROBLEM -- the second machine
+# case, and the first with an X-point.
+#
+# WHERE THE INPUTS CAME FROM.  freegs4e's own A_testtokamak_classic, the FreeGS
+# worked example's geometry: an up-down asymmetric double null whose coil
+# currents were SOLVED FOR by its control system rather than chosen by eye.
+# FREE-BOUNDARY-PLAN.md section 7.15 argues that is what makes a free-boundary
+# Newton converge at all, and section 10's own history is the evidence: a long
+# run of hand-designed diverted machines on the LIMITED case's geometry all
+# failed the same way, and every one of them was a machine nobody would build.
+#
+#   tools/freegs4e-benchmark/fgsref.py A          -> the reference .npz/.json
+#   tools/freegs4e-benchmark/make_diverted_case.py -> the two profile tables
+#   tools/freegs4e-benchmark/mkexactguess.py       -> the guess
+#   tools/mesh/halfdisc.py --rho 2.6 --size 0.18 \
+#       --coil 0.95 -1.15 0.10 0.10 --coil 0.95 1.05 0.10 0.10 \
+#       --coil 1.70 -0.65 0.10 0.10 --coil 1.70 0.55 0.10 0.10 \
+#       --coil-size 0.04 --plasma 0.75 -0.80 1.20 1.80 --plasma-size 0.07 \
+#       --check -o examples/diverted-tokamak.msh
+#
+# THE REFERENCE'S OWN ANSWER, for anything comparing against it:
+#
+#   psi_axis   8.271751444840184e-02      axis at ( 1.351273, +0.062226 )
+#   psi_bndry  3.240412550738516e-02
+#   X-points   ( 1.093144118, -0.603965084 ) psi 3.240412550738516e-02  ACTIVE
+#              ( 1.109127878, +0.796087599 ) psi 2.891018784455272e-02
+#
+# psi_bndry IS the lower X-point's flux to every digit -- that is what makes
+# this a single-ACTIVE-null equilibrium, and the upper null sits 3.5e-03 further
+# out.  So the boundary flux of a diverted plasma is a functional of the
+# solution, which is the whole of FREE-BOUNDARY-PLAN.md section 10.4.
+#
+# WHAT THIS FILE PINS, AND WHY IT IS NOT YET THE WHOLE STORY.  MEQ's
+# [boundary.limiter] takes a POINT and evaluates psi_h there -- FB-3, and right
+# for a limiter, whose contact is a piece of hardware.  A divertor's X-point is
+# not: it moves as Newton moves.  So this file pins psi_bnd at the REFERENCE's
+# X-point, which makes it a well-posed run and a fair comparison, and XP-2 is
+# what removes the need to know that point in advance:
+# tests/convergence/XPointOuter.cpp locates the saddle of the SOLVED q_h and
+# re-solves until the two agree.
+#
+# ONE DELIBERATE DEVIATION FROM THE REFERENCE, RECORDED BECAUSE IT WOULD
+# OTHERWISE LOOK LIKE SOLVER ERROR.  fgsref.py fits a UnivariateSpline to its
+# own analytic profile shape before solving, and the fit MOVES it: 2.514e-05 of
+# the amplitude in p' and 1.707e-02 in ff'.  The tables here are the ANALYTIC
+# shape, because it extends below Psi = 0 into the vacuum -- which a tabulation
+# on psi_n in [ 0, 1 ] cannot -- and because its edge behaviour is exactly
+# j = 2, which FB-4 says decides the rate and which ConfineToPlasma needs.  So
+# the reference's X-point is a cross-check at the per-cent level and not a tight
+# comparison.
+
+[mesh]
+# The gmsh half-disc: rho = 2.6, reaching r = 0 EXACTLY, with the four
+# conductors meshed to rather than cut.  2870 elements, 1475 nodes.
+File = "examples/diverted-tokamak.msh"
+
+[discretisation]
+# DEGREE 2 AND NOT 3, WHICH IS A COST DECISION AND IS THE ONE KEY HERE CHOSEN
+# FOR THE TEST RATHER THAN FOR THE PHYSICS.  XP-2's outer loop solves this
+# machine several times over, so the degree multiplies through the whole case.
+PolynomialDegree = 2
+
+[solver]
+NewtonMaxIterations = 200
+NewtonRelativeTolerance = 1.0e-10
+
+[source]
+Type = "mhd"
+Normalised = true
+
+# F = 0 wherever the normalised flux is non-positive, so the plasma edge is
+# found rather than prescribed.  On a DIVERTED plasma this is not enough on its
+# own -- the level set is disconnected across an X-point and the pointwise test
+# picks up the private flux region -- which is what PlasmaConnectivity is for
+# and what XP-1 built.  It defaults to the flood fill.
+ConfineToPlasma = true
+
+# A starting value only: psi_ax is an unknown of the bordered Newton.
+PsiAxis = 0.0827
+
+# The amplitude is set by the current, not the other way round.  The argument is
+# mu0*I_p, because that is what the constraint integral int F/r already is.
+PlasmaCurrent = 2.0e5
+Mu0 = 1.25663706212e-6
+
+# Both tables are dp/dPsi and dgg/dPsi against MEQ's NORMALISED flux, which runs
+# the other way from freegs4e's: Psi = 1 - psi_n, 1 on the axis and 0 on the
+# boundary.  Their headers carry the conversion and the span it costs.
+PPrimeFile = "examples/diverted-tokamak-pprime.dat"
+GGPrimeFile = "examples/diverted-tokamak-ggprime.dat"
+
+# The four poloidal field coils, at the currents freegs4e's control system
+# solved for.  P1L and P1U are freegs4e ShapedCoils and ARE 0.1 x 0.1
+# rectangles, so those two agree exactly; P2L and P2U are freegs4e filaments and
+# are given MEQ's own 0.05 half-width, which is the modelling difference
+# examples/limited-tokamak.toml already records.
+[[coils]]
+Name = "P1L"
+CentreR = 1.00
+CentreZ = -1.10
+HalfWidth = 0.05
+HalfHeight = 0.05
+Current = 137333.25436339402
+
+[[coils]]
+Name = "P1U"
+CentreR = 1.00
+CentreZ = 1.10
+HalfWidth = 0.05
+HalfHeight = 0.05
+Current = 62625.08544357837
+
+[[coils]]
+Name = "P2L"
+CentreR = 1.75
+CentreZ = -0.60
+HalfWidth = 0.05
+HalfHeight = 0.05
+Current = -99444.48228215592
+
+[[coils]]
+Name = "P2U"
+CentreR = 1.75
+CentreZ = 0.60
+HalfWidth = 0.05
+HalfHeight = 0.05
+Current = -67660.81780068338
+
+[boundary]
+Type = "zero"
+
+# THE ACTIVE X-POINT, prescribed here and FOUND by XP-2.  See the header.
+[boundary.limiter]
+R = 1.093144118182931
+Z = -0.6039650838688502
+
+# rho = 2.4 is inside the mesh's 2.6, so Gamma_h is a staircase of element faces
+# strictly inside Gamma and the transfer has a band to cross.  Every conductor
+# is inside Gamma and so enters through the SOURCE rather than through FB-7's
+# exterior coupling.
+[boundary.exterior]
+Radius = 2.40
+CentreZ = 0.0
+Modes = 10
+
+[initialguess]
+Type = "gridfunction"
+File = "examples/diverted-tokamak-guess.gf"
+MeshFile = "examples/diverted-tokamak-guess.mesh"
+
+[output]
+Prefix = "diverted-tokamak"
+GridNR = 129
+GridNZ = 129

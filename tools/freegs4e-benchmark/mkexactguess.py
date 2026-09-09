@@ -123,19 +123,40 @@ def main():
 	# there is zero, which is what the array is initialised to.
 	inner = RR > 0.0
 
-	# The coil positions are the case's own, and are asserted against the
-	# reference's saved coil field by the caller rather than trusted here.
-	pos = [(1.75, 0.90), (1.75, -0.90), (0.55, 1.10), (0.55, -1.10)]
-	names = ["P1U", "P1L", "P2U", "P2L"]
+	# THE COIL POSITIONS COME FROM THE REFERENCE, AND USED NOT TO.
+	#
+	# This carried its own table of the limited machine's four coils and zipped
+	# it against coil_currents POSITIONALLY. That is right for exactly one
+	# machine and silently wrong for any other: the currents are saved in
+	# tok.coils order, and TestTokamak's labels come out ['P1L','P1U','P2L',
+	# 'P2U'] where the limited machine's are ['P1U','P1L','P2U','P2L'] -- so the
+	# table would have paired every coil with its opposite number's current and
+	# produced a plausible, wrong guess.
+	#
+	# fgsref.py now saves coil_R and coil_Z beside the labels. The fallback is
+	# kept for the two reference files that predate them, and asserts the label
+	# order it assumes rather than trusting it.
+	names = [str(x) for x in d["coil_labels"]]
 	currents = d["coil_currents"]
+	if "coil_R" in d.files:
+		pos = list(zip([float(x) for x in d["coil_R"]],
+		               [float(x) for x in d["coil_Z"]]))
+	else:
+		legacy = ["P1U", "P1L", "P2U", "P2L"]
+		if names != legacy:
+			raise SystemExit(
+				"%s predates coil_R/coil_Z and its coil labels are %s, not the "
+				"limited machine's %s. Regenerate it with fgsref.py."
+				% (npz, names, legacy))
+		pos = [(1.75, 0.90), (1.75, -0.90), (0.55, 1.10), (0.55, -1.10)]
 	# The reference's coils ARE filaments, so there is no cell size to use; the
 	# floor here is MEQ's own conductor half-width, which is the scale at which
 	# the two codes' models stop agreeing anyway.  It only bites on a guess node
 	# that lands on a conductor.
 	for (rc, zc), I in zip(pos, currents):
 		psi[inner] += I * greens(rc, zc, RR[inner], ZZ[inner], soft=0.05)
-	for name, I in zip(names, currents):
-		print("  coil %-4s %+.6e A at %s" % (name, I, pos[names.index(name)]))
+	for (rc, zc), name, I in zip(pos, names, currents):
+		print("  coil %-4s %+.6e A at (%.4f, %.4f)" % (name, I, rc, zc))
 
 	# The geometric mean distance of a source CELL from itself.
 	cell = 0.44705 * np.sqrt(dA)

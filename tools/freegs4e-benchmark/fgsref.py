@@ -620,10 +620,58 @@ _th = np.linspace(0.0, 2.0*np.pi, 257)
 LIMITER = (R0_LIM + A_LIM*np.cos(_th), A_LIM*np.sin(_th))
 
 
+LIMITED_COILS = [("P1U", 1.75, 0.90), ("P1L", 1.75, -0.90),
+                 ("P2U", 0.55, 1.10), ("P2L", 0.55, -1.10)]
+
+# MEQ's conductors are RECTANGLES of half-width 0.05, so this is their extent.
+# examples/limited-tokamak.toml carries the same four numbers.
+LIMITED_COIL_HALFWIDTH = 0.05
+LIMITED_COIL_HALFHEIGHT = 0.05
+
+
 def make_limited():
     from freegs4e.machine import Coil, Machine, Wall
-    coils = [("P1U", Coil(1.75, 0.90)), ("P1L", Coil(1.75, -0.90)),
-             ("P2U", Coil(0.55, 1.10)), ("P2L", Coil(0.55, -1.10))]
+    coils = [(lab, Coil(R, Z)) for lab, R, Z in LIMITED_COILS]
+    return Machine(coils, Wall(LIMITER[0], LIMITER[1]))
+
+
+# ----------------------------------------------------------------------------
+# THE SAME MACHINE WITH THE CONDUCTORS GIVEN THEIR EXTENT, WHICH IS THE ONE
+# MODELLING DIFFERENCE LEFT BETWEEN THIS REFERENCE AND MEQ.
+#
+# freegs4e's default Coil is an exact FILAMENT: controlPsi is
+# Greens( self.R, self.Z, R, Z )*turns, a point source, and its `area`
+# attribute only imposes a current-density limit and never enters the field.
+# MEQ's four conductors are 0.1 x 0.1 m rectangles carrying a uniform current
+# density -- meq::Coil::currentDensity is I/area and the source is assembled by
+# quadrature over the meshed rectangle.  So FB-6's agreement was reached DESPITE
+# a modelling difference rather than because the models agree, and the leading
+# finite-size correction goes as ( w/d )^2, about 1.6e-02 on the near field with
+# the coils 0.4 m from the plasma edge -- three orders above the 1.3e-04 quoted.
+#
+# freegs4e.shaped_coil.ShapedCoil is freegs4e's OWN answer to this and is what
+# closes it: a polygon, triangulated, with a Gauss rule per triangle whose
+# weights sum to one, so controlPsi is the AVERAGE Greens over the cross-section
+# and the total current is spread uniformly across it.  That is MEQ's model term
+# for term, in the reference's own code rather than in a MEQ-side correction.
+#
+# THE RULE IS 12 POINTS AND THAT IS ENOUGH HERE, MEASURED RATHER THAN ASSUMED.
+# polygon_quad splits the square into two triangles and puts freegs4e's 6-point
+# degree-4 rule on each.  Against a 64 x 64 tensor Gauss-Legendre rule over the
+# same square, the worst relative error in controlPsi over this case's grid --
+# its whole boundary ring plus the grid point nearest each coil -- is 3.0e-05,
+# attained at ( 1.7500, 0.8000 ), the boundary point two half-heights below P1U.
+# It is the same at 129^2 and 513^2, being a property of the rule and the
+# geometry rather than of the grid.  Everywhere the plasma is it is far smaller.
+def make_limited_shaped(hw=LIMITED_COIL_HALFWIDTH, hh=LIMITED_COIL_HALFHEIGHT):
+    from freegs4e.machine import Machine, Wall
+    from freegs4e.shaped_coil import ShapedCoil
+
+    def square(Rc, Zc):
+        return [(Rc - hw, Zc - hh), (Rc + hw, Zc - hh),
+                (Rc + hw, Zc + hh), (Rc - hw, Zc + hh)]
+
+    coils = [(lab, ShapedCoil(square(R, Z))) for lab, R, Z in LIMITED_COILS]
     return Machine(coils, Wall(LIMITER[0], LIMITER[1]))
 
 
@@ -742,6 +790,27 @@ CASES = [
                "-- FREE-BOUNDARY-PLAN.md section 10 records that MEQ's plasma "
                "support test is pointwise and so is limiter-only, and that "
                "every other case in this table is diverted."),
+    ),
+    dict(
+        name="I_limited_shaped",
+        machine="LimitedCircular (ShapedCoil, 0.1 x 0.1 m)",
+        make=lambda: make_limited_shaped(),
+        grid=dict(Rmin=0.30, Rmax=1.90, Zmin=-0.80, Zmax=0.80, nx=129, ny=129),
+        order=4, Ip=3.0e5, fvac=1.0,
+        R0=1.00, frac_p=0.50, pa=1.0, pb=2.0, fa=1.0, fb=2.0,
+        xpoints=[],
+        isoflux=[(0.65, 0.0, 1.35, 0.0), (1.00, 0.35, 1.35, 0.0),
+                 (1.00, -0.35, 1.35, 0.0)],
+        limiter=LIMITER, seed_paxis=1.0e3,
+        notes=("H WITH THE CONDUCTORS GIVEN THEIR EXTENT, and identical to it "
+               "in every other field -- same grid, same order, same Ip, same "
+               "profile shape, same isoflux constraints, same wall.  It exists "
+               "so that the ONE remaining modelling difference between this "
+               "reference and MEQ can be measured rather than estimated: H's "
+               "coils are exact filaments and MEQ's are 0.1 x 0.1 m rectangles "
+               "carrying a uniform current density, which is what ShapedCoil "
+               "makes freegs4e do too.  Compare I against H at the same grid "
+               "and the difference is the conductor model alone."),
     ),
 ]
 
@@ -1287,6 +1356,15 @@ def run_case(case):
                  else np.zeros((0, 3))),
         coil_labels=np.array([l for l, _ in tok.coils]),
         coil_currents=np.array([float(c.current) for _, c in tok.coils]),
+        # THE POSITIONS, SO THAT NOTHING DOWNSTREAM HAS TO KNOW THE MACHINE.
+        # mkexactguess.py used to carry its own table of the limited case's four
+        # coils and zip it against coil_currents POSITIONALLY, which is wrong
+        # the moment a machine's labels come out in a different order -- and
+        # TestTokamak's do: ['P1L','P1U','P2L','P2U'] against the limited
+        # machine's ['P1U','P1L','P2U','P2L'].  Both Coil and ShapedCoil expose
+        # R and Z, so this is the same expression for either.
+        coil_R=np.array([float(c.R) for _, c in tok.coils]),
+        coil_Z=np.array([float(c.Z) for _, c in tok.coils]),
         boundary_kind=np.array(kind),
         psi_index_order=np.array("psi[iR, iZ]; R is axis 0, Z is axis 1"),
         pprime_units=np.array("dp/dpsi, Pa per (Wb/rad)"),
@@ -1412,8 +1490,14 @@ def main():
             if coarse == 129:
                 # 129^2 is the case table's own resolution, so its output is
                 # the undecorated directory rather than a -n129 one.
-                cand = os.path.join(here, "H_limited_circular.npz")
-                if not os.path.isdir(SEED_FROM) and os.path.exists(cand):
+                # ANY case's own 129^2 output, not one case's by name. This
+                # read "H_limited_circular.npz" while H was the only case that
+                # had ever been laddered, which silently seeds the wrong case
+                # -- or refuses to seed at all -- the moment a second one is.
+                cand = [os.path.join(here, c["name"] + ".npz")
+                        for c in CASES]
+                if not os.path.isdir(SEED_FROM) and any(map(os.path.exists,
+                                                            cand)):
                     SEED_FROM = here
         else:
             SEED_FROM = seed_from

@@ -171,6 +171,8 @@ set(MEQ_CONVERGENCE_TESTS
 	# solved field; the fill itself is MFEM-free and is unit tested as
 	# PlasmaComponentTests.
 	PlasmaConnectivity
+	# XP-2: psi_bnd from the located X-point, as an outer fixed point.
+	XPointOuter
 	# FB-1's coupling matrix P: the trace projection of the exterior modes onto
 	# Gamma_h. It needs a curved boundary and so needs MFEM, which is why it is
 	# a convergence test rather than a unit one -- ExteriorDtN's own tests, which
