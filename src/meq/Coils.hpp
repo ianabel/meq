@@ -976,6 +976,9 @@ namespace meq
 			Source const & plasma() const;
 			CoilSet const & coils() const;
 
+			/// The set above. See meq::Source::conductors for what asks.
+			CoilSet const * conductors() const override;
+
 		private:
 			std::shared_ptr<Source const> plasmaSource;
 			std::shared_ptr<CoilSet const> coilSet;
@@ -1055,6 +1058,11 @@ namespace meq
 			bool normalisationDerivatives( double r, double z, double psi,
 			                               double &dFdAxis,
 			                               double &dFdBoundary ) const override;
+
+			/// The set this wraps. See meq::Source::conductors for what asks.
+			/// NOT forwarded: the conductors are THIS class's, not the plasma
+			/// source's, which is the one thing here that does not delegate.
+			CoilSet const * conductors() const override;
 
 			/// FORWARDED, for the third time and for the same reason: the scale
 			/// belongs to the plasma term and a COIL IS NOT SCALED. Its current

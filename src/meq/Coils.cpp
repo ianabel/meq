@@ -1200,6 +1200,11 @@ namespace meq
 	Source const & CoilAugmentedSource::plasma() const { return *plasmaSource; }
 	CoilSet const & CoilAugmentedSource::coils() const { return *coilSet; }
 
+	CoilSet const * CoilAugmentedSource::conductors() const
+	{
+		return coilSet.get();
+	}
+
 	CoilAugmentedNormalisedSource::CoilAugmentedNormalisedSource(
 		std::shared_ptr<NormalisedSource> plasmaIn,
 		std::shared_ptr<CoilSet const> coilsIn )
@@ -1287,6 +1292,11 @@ namespace meq
 		// exactly what it would have contributed with the plasma term absent,
 		// bit for bit rather than to round-off.
 		return coilSet->f( r, z );
+	}
+
+	CoilSet const * CoilAugmentedNormalisedSource::conductors() const
+	{
+		return coilSet.get();
 	}
 
 	NormalisedSource & CoilAugmentedNormalisedSource::plasma() const { return *plasmaSource; }

@@ -126,6 +126,12 @@ namespace meq
 				"CriticalPointFinder: the flux and the potential are on different meshes" );
 	}
 
+	void CriticalPointFinder::setExcluded(
+		std::function< bool( double, double ) > excludedIn )
+	{
+		excluded = std::move( excludedIn );
+	}
+
 	void CriticalPointFinder::setTolerance( double toleranceIn )
 	{
 		if ( !( toleranceIn > 0.0 ) )
@@ -169,6 +175,46 @@ namespace meq
 				"CriticalPointFinder::setSeedRings: the number of rings cannot be "
 				"negative" );
 		seedRings = ringsIn;
+	}
+
+	bool CriticalPointFinder::senseAccepts( AxisSense sense,
+	                                        CriticalPointType type )
+	{
+		// Degenerate is refused by every sense, including Saddle. A determinant
+		// at round-off says the classification is not entitled, not that the
+		// point is indefinite -- see CriticalPointType's own comment -- and a
+		// caller following an X-point through a continuation would take one as
+		// the X-point having moved rather than as a point that could not be
+		// classified.
+		switch ( sense )
+		{
+			case AxisSense::Either:
+				return type == CriticalPointType::Maximum
+				       || type == CriticalPointType::Minimum;
+			case AxisSense::Maximum:
+				return type == CriticalPointType::Maximum;
+			case AxisSense::Minimum:
+				return type == CriticalPointType::Minimum;
+			case AxisSense::Saddle:
+				break;
+		}
+		return type == CriticalPointType::Saddle;
+	}
+
+	long CriticalPointFinder::newtonSolves() const
+	{
+		return newtonSolveCount;
+	}
+
+	long CriticalPointFinder::elementsRooted() const
+	{
+		return elementCount;
+	}
+
+	void CriticalPointFinder::resetCounters()
+	{
+		newtonSolveCount = 0;
+		elementCount = 0;
 	}
 
 	void CriticalPointFinder::setContainment( double containmentIn )
@@ -256,6 +302,13 @@ namespace meq
 	                                         CriticalPoint &found ) const
 	{
 		mfem::Geometry::Type const geom = meshRef.GetElementBaseGeometry( element );
+
+		// THE UNIT OF WORK, COUNTED AT THE TOP AND NOT AT THE BOTTOM. An attempt
+		// that diverges or lands outside its element costs the same iterations
+		// as one that succeeds, so counting only the accepted roots would make a
+		// search that fails everywhere look free. newtonSolves() is what the
+		// seeded entry points are measured against a sweep by.
+		++newtonSolveCount;
 
 		mfem::IntegrationPoint ip = seed;
 		mfem::Vector value( 2 );
@@ -519,16 +572,17 @@ namespace meq
 	}
 
 	std::vector<CriticalPoint>
-	CriticalPointFinder::extremaFrom( std::vector<int> const &elements,
-	                                  AxisSense sense ) const
+	CriticalPointFinder::pointsFrom( std::vector<int> const &elements,
+	                                 AxisSense sense ) const
 	{
-		std::vector<CriticalPoint> extrema;
+		std::vector<CriticalPoint> points;
 		std::vector<mfem::IntegrationPoint> seeds;
 		double const target = tolerance*fluxScale();
 
 		for ( std::size_t e = 0; e < elements.size(); ++e )
 		{
 			int const element = elements[ e ];
+			++elementCount;
 			elementSeeds( element, seeds );
 
 			for ( std::size_t i = 0; i < seeds.size(); ++i )
@@ -536,54 +590,60 @@ namespace meq
 				CriticalPoint point;
 				if ( !rootInElement( element, seeds[ i ], target, point ) )
 					continue;
-				if ( point.type != CriticalPointType::Maximum
-				     && point.type != CriticalPointType::Minimum )
-					continue;
-				if ( sense == AxisSense::Maximum
-				     && point.type != CriticalPointType::Maximum )
-					continue;
-				if ( sense == AxisSense::Minimum
-				     && point.type != CriticalPointType::Minimum )
+				if ( !senseAccepts( sense, point.type ) )
 					continue;
 
-				// One physical extremum found from two neighbouring elements gives
-				// two answers O( h^(k+1) ) apart, because that is how far q_h
+				// One physical critical point found from two neighbouring elements
+				// gives two answers O( h^(k+1) ) apart, because that is how far q_h
 				// disagrees with itself across a face. They are the same object, so
 				// they are merged whenever they are of the same type and within an
 				// element of each other -- a scale on which a seeded search cannot
-				// tell two extrema apart in any case. A maximum and a saddle are
+				// tell two of them apart in any case. A maximum and a saddle are
 				// never merged, so a spurious PAIR survives this and is reported,
-				// which is what sweep() is for.
+				// which is what sweep() is for. That the same-type rule is what
+				// keeps the pair is why this filters AFTER classifying rather than
+				// asking rootInElement() for one type: the merge needs to see both.
 				double const reach = meshRef.GetElementSize( element );
 				bool duplicate = false;
-				for ( std::size_t j = 0; j < extrema.size(); ++j )
+				for ( std::size_t j = 0; j < points.size(); ++j )
 				{
-					double const dr = extrema[ j ].r - point.r;
-					double const dz = extrema[ j ].z - point.z;
-					if ( extrema[ j ].type == point.type
+					double const dr = points[ j ].r - point.r;
+					double const dz = points[ j ].z - point.z;
+					if ( points[ j ].type == point.type
 					     && std::sqrt( dr*dr + dz*dz ) < reach )
 					{
 						duplicate = true;
-						if ( point.overshoot < extrema[ j ].overshoot )
-							extrema[ j ] = point;
+						if ( point.overshoot < points[ j ].overshoot )
+							points[ j ] = point;
 						break;
 					}
 				}
 				if ( !duplicate )
-					extrema.push_back( point );
+					points.push_back( point );
 			}
 		}
 
-		return extrema;
+		return points;
 	}
 
 	bool CriticalPointFinder::tryFindAxis( CriticalPoint &found,
 	                                       AxisSense sense ) const
 	{
+		// REFUSED RATHER THAN ANSWERED false, and the header says why: this
+		// entry point's seeds are the extreme NODAL values of psi_h, which an
+		// X-point is nowhere near, so a false here would report the absence of a
+		// saddle on the strength of never having looked for one.
+		if ( sense == AxisSense::Saddle )
+			throw std::invalid_argument(
+				"CriticalPointFinder::tryFindAxis: AxisSense::Saddle. This entry "
+				"point seeds from the extreme nodal values of psi_h, which is "
+				"where an axis is and is not where an X-point is. Use "
+				"tryFindCriticalPointFrom() with a prior, or sweep() without one" );
+
 		std::vector<int> elements;
 		axisSeeds( elements );
 
-		std::vector<CriticalPoint> extrema = extremaFrom( elements, sense );
+		std::vector<CriticalPoint> extrema = pointsFrom( elements, sense );
 
 		// THE SEEDED SEARCH IS THE FAST PATH AND NOT THE ONLY ONE, because the
 		// seed can be wrong and it is cheap to find out. A zero of q_h sitting on
@@ -612,18 +672,8 @@ namespace meq
 			std::vector<CriticalPoint> const all = sweep();
 			extrema.clear();
 			for ( std::size_t i = 0; i < all.size(); ++i )
-			{
-				if ( all[ i ].type != CriticalPointType::Maximum
-				     && all[ i ].type != CriticalPointType::Minimum )
-					continue;
-				if ( sense == AxisSense::Maximum
-				     && all[ i ].type != CriticalPointType::Maximum )
-					continue;
-				if ( sense == AxisSense::Minimum
-				     && all[ i ].type != CriticalPointType::Minimum )
-					continue;
-				extrema.push_back( all[ i ] );
-			}
+				if ( senseAccepts( sense, all[ i ].type ) )
+					extrema.push_back( all[ i ] );
 
 			// The sweep is a superset of the seeded search, so it should never do
 			// worse. If it somehow finds nothing where the seeded search found
@@ -664,6 +714,24 @@ namespace meq
 	                                          AxisSense sense,
 	                                          CriticalPoint &found ) const
 	{
+		// The whole of this function, and deliberately so: the search below
+		// serves a saddle perfectly well, and what is withheld here is only the
+		// NAME. See the header on why the axis keeps a name of its own over a
+		// search that finds more than one kind of point.
+		if ( sense == AxisSense::Saddle )
+			throw std::invalid_argument(
+				"CriticalPointFinder::tryFindAxisFrom: AxisSense::Saddle is not an "
+				"axis. The search itself serves it -- call "
+				"tryFindCriticalPointFrom(), which is this function without the "
+				"refusal" );
+
+		return tryFindCriticalPointFrom( r, z, sense, found );
+	}
+
+	bool CriticalPointFinder::tryFindCriticalPointFrom( double r, double z,
+	                                                   AxisSense sense,
+	                                                   CriticalPoint &found ) const
+	{
 		int const seed = nearestElementCentre( r, z );
 		if ( seed < 0 )
 			return false;
@@ -693,13 +761,13 @@ namespace meq
 		chosen[ static_cast<std::size_t>( seed ) ] = true;
 
 		std::vector<int> frontier( 1, seed );
-		std::vector<CriticalPoint> extrema;
+		std::vector<CriticalPoint> points;
 
 		for ( int ring = 0; ring <= seedRings && !frontier.empty(); ++ring )
 		{
 			std::vector<CriticalPoint> const reached =
-				extremaFrom( frontier, sense );
-			extrema.insert( extrema.end(), reached.begin(), reached.end() );
+				pointsFrom( frontier, sense );
+			points.insert( points.end(), reached.begin(), reached.end() );
 
 			/*
 			 * AN OUT-OF-ELEMENT ROOT IS NOT GOOD ENOUGH TO STOP AT, AND THAT IS
@@ -725,8 +793,8 @@ namespace meq
 			 * merely admissible does not.
 			 */
 			bool clean = false;
-			for ( std::size_t i = 0; i < extrema.size(); ++i )
-				clean = clean || ( extrema[ i ].overshoot <= 0.0 );
+			for ( std::size_t i = 0; i < points.size(); ++i )
+				clean = clean || ( points[ i ].overshoot <= 0.0 );
 			if ( clean )
 				break;
 
@@ -752,7 +820,7 @@ namespace meq
 			frontier.swap( next );
 		}
 
-		if ( extrema.empty() )
+		if ( points.empty() )
 			return false;
 
 		// STRICTLY INSIDE ITS ELEMENT FIRST, THEN NEAREST THE SEED.
@@ -769,12 +837,12 @@ namespace meq
 		std::size_t best = 0;
 		double bestDistance = std::numeric_limits<double>::infinity();
 		bool bestClean = false;
-		for ( std::size_t i = 0; i < extrema.size(); ++i )
+		for ( std::size_t i = 0; i < points.size(); ++i )
 		{
-			double const dr = extrema[ i ].r - r;
-			double const dz = extrema[ i ].z - z;
+			double const dr = points[ i ].r - r;
+			double const dz = points[ i ].z - z;
 			double const distance = dr*dr + dz*dz;
-			bool const isClean = ( extrema[ i ].overshoot <= 0.0 );
+			bool const isClean = ( points[ i ].overshoot <= 0.0 );
 
 			if ( i == 0 || ( isClean && !bestClean )
 			     || ( isClean == bestClean && distance < bestDistance ) )
@@ -785,12 +853,22 @@ namespace meq
 			}
 		}
 
-		found = extrema[ best ];
+		found = points[ best ];
 		return true;
 	}
 
 	CriticalPoint CriticalPointFinder::findAxis( AxisSense sense ) const
 	{
+		// Named here as well as in tryFindAxis(), so that the message a caller
+		// meets says findAxis() -- which is what they wrote -- rather than
+		// naming the helper it delegates to.
+		if ( sense == AxisSense::Saddle )
+			throw std::invalid_argument(
+				"CriticalPointFinder::findAxis: AxisSense::Saddle. An X-point is "
+				"not an extreme nodal value of psi_h and is not near one, so this "
+				"entry point's seeds cannot reach it. Use "
+				"tryFindCriticalPointFrom() with a prior, or sweep() without one" );
+
 		CriticalPoint found;
 		if ( tryFindAxis( found, sense ) )
 			return found;
@@ -854,6 +932,7 @@ namespace meq
 
 		for ( int element = 0; element < meshRef.GetNE(); ++element )
 		{
+			++elementCount;
 			elementSeeds( element, seeds );
 			double const reach = 0.5*meshRef.GetElementSize( element );
 
@@ -1004,6 +1083,14 @@ namespace meq
 			if ( all[ i ].type == CriticalPointType::Saddle )
 				++result.saddles;
 			if ( all[ i ].type != wanted )
+				continue;
+
+			// WHERE AN AXIS CANNOT BE. setExcluded() says at length what this
+			// is for; the short version is that a conductor's O-point is an
+			// extremum of psi and would otherwise win on flux. It is NOT
+			// counted in extrema either: the count is of candidates, and a
+			// point that cannot be an axis is not one.
+			if ( excluded && excluded( all[ i ].r, all[ i ].z ) )
 				continue;
 
 			++result.extrema;

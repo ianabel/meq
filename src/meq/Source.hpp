@@ -56,9 +56,45 @@ namespace meq
 	 * likes (a manufactured solution does); the physical MHD source does not use
 	 * it.
 	 */
+	class CoilSet;
+
 	class Source
 	{
 		public:
+
+			/**
+			 * THE CONDUCTORS THIS SOURCE CARRIES, OR NULL, AND IT EXISTS FOR
+			 * ONE QUESTION: IS THIS POINT INSIDE A COIL?
+			 *
+			 * A magnetic axis is a maximum of `psi`, and so is the O-point of
+			 * any conductor carrying current of the plasma's own sign. On a
+			 * machine whose coils are meshed INSIDE `Omega` -- which is every
+			 * machine MEQ can pose, since no semicircle centred on the axis both
+			 * encloses a plasma and excludes the coils near it -- a search for
+			 * the axis over the whole field can therefore return a COIL's
+			 * O-point, correctly and uselessly. Measured on the diverted machine
+			 * of FREE-BOUNDARY-PLAN.md section 10 -- freegs4e's TestTokamak,
+			 * whose P1L carries +1.37e+05 A against an `I_p` of 2.0e+05 A: the
+			 * located axis came back at ( 1.0103, -1.1018 ), inside that
+			 * conductor, at `psi` = 1.21e-01 where the reference equilibrium's
+			 * axis carries 8.3e-02. The reference code never meets this
+			 * because its computational box stops at `|z| = 1.0` and its coils
+			 * at `|z| = 1.1` are outside it, entering through Green's functions
+			 * alone.
+			 *
+			 * A plasma has no magnetic axis inside a conductor, so the fix is to
+			 * drop those candidates -- and that needs the geometry, which lives
+			 * with the coils and not with the solver.
+			 *
+			 * Null is the honest answer for a source with no conductors, and is
+			 * the default: a caller must then fall back to whatever it did
+			 * before, which is what every fixed-boundary case in this tree does.
+			 */
+			virtual CoilSet const * conductors() const
+			{
+				return nullptr;
+			}
+
 			virtual ~Source() = default;
 
 			/// F at ( r, z ) for the flux value psi, in the units of eq (2): the

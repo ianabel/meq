@@ -399,7 +399,7 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 ```sh
 git submodule update --init --recursive     # extern/toml11
 cmake -B build
-cmake --build build -j4
+cmake --build build -j6
 cd build && OMP_NUM_THREADS=4 ctest -j4      # 48/48, about 700 s
 ```
 
@@ -526,7 +526,7 @@ matters. See `CLAUDE_HDGGS.md`, *Threading, measured*.
 ### Coverage, and what CI can and cannot check
 
 ```sh
-cmake -B build-cov -DMEQ_ENABLE_COVERAGE=ON && cmake --build build-cov -j4
+cmake -B build-cov -DMEQ_ENABLE_COVERAGE=ON && cmake --build build-cov -j6
 cd build-cov && ctest
 gcovr --root .. --filter 'src/meq/' --print-summary        # or --html-details
 ```
@@ -1145,9 +1145,11 @@ machine that is not a measurement about the code.
 **Never run a bare `make -j`, anywhere.** With no argument it is unbounded, and
 this machine is WSL2 — the job count goes to the host's core count with a fraction
 of the host's memory behind it, and the whole VM falls over rather than the build
-merely failing. Always give a number: **4 to 8**, and for the MFEM tree
-specifically **`make -j4`, never more**, since its translation units are large
-enough that even 8 exhausts memory here. `cmake --build ... -j4` likewise.
+merely failing. Always give a number: **`-j6` for MEQ's own build**, and for
+the MFEM tree specifically **`make -j4`, never more**, since its translation
+units are large enough that even 8 exhausts memory here. The two limits are
+different because the trees are: MEQ's translation units are small enough that
+six fit, and `cmake --build ... -j6` is the ordinary build command.
 
 **And `make clean` after editing any MFEM header.** MFEM's
 makefiles have no `.d` files and no header dependency tracking. That trap has

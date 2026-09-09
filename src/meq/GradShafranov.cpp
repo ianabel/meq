@@ -4612,29 +4612,120 @@ namespace
 			 * in the axis rather than a fresh competition between every O-point
 			 * in the field at every step.
 			 */
+			// The conductors, if this source carries any. Both paths below
+			// consult them, and the WARM one has to: a cold pass that has no
+			// admissible candidate at all falls back to the whole field (see
+			// below), so a conductor's O-point CAN be adopted on a transient
+			// iterate -- and without this the seeded search would then follow
+			// it for the rest of the solve, which is exactly the failure the
+			// filter exists to prevent. Measured on the diverted machine: with
+			// the cold filter alone the run ends with psi_ax at
+			// ( 1.0053, -1.1016 ), inside P1L, having been handed it once.
+			CoilSet const *const conductors =
+				nonlinearSource != nullptr ? nonlinearSource->conductors()
+				                           : nullptr;
+
 			if ( havePreviousAxis )
+			{
 				found = finder.tryFindAxisFrom( previousAxisR, previousAxisZ,
 				                                sense, best );
+				if ( found && conductors != nullptr
+				     && conductors->indexContaining( best.r, best.z ) >= 0 )
+					found = false;
+			}
 
-			// COLD, or after the warm start lost it: the extremum carrying the
-			// largest normalised flux, which is checkAxis()'s own rule and the
-			// best available guess at which of several is the core.
+			/*
+			 * COLD, or after the warm start lost it: the extremum carrying the
+			 * largest normalised flux, which is checkAxis()'s own rule and the
+			 * best available guess at which of several is the core -- MINUS any
+			 * candidate inside a conductor.
+			 *
+			 * **A COIL'S O-POINT IS AN EXTREMUM OF psi AND COMPETES ON EXACTLY
+			 * THIS SCORE.** Any conductor carrying current of the plasma's own
+			 * sign has one, and on a machine whose coils are meshed inside Omega
+			 * -- which is every machine MEQ can pose, no semicircle centred on
+			 * the axis both enclosing a plasma and excluding the coils near it
+			 * -- it is a legitimate zero of q_h sitting in the same field.
+			 * Measured on the diverted machine of FREE-BOUNDARY-PLAN.md
+			 * section 10, whose P1L carries +1.37e+05 A against an I_p of
+			 * 2.0e+05 A: this loop returned ( 1.0103, -1.1018 ), inside that
+			 * conductor, carrying psi = 1.21e-01 where the reference
+			 * equilibrium's axis carries 8.3e-02. It WINS the score,
+			 * and every check downstream then passes -- psi_ax is constrained at
+			 * the located axis, so the normalised flux there reads 1 whatever
+			 * the axis is.
+			 *
+			 * A plasma has no magnetic axis inside a conductor, so the
+			 * candidates are dropped. meq::Source::conductors() is how the
+			 * geometry gets here and returns null for a source that carries
+			 * none, in which case this is the loop it always was.
+			 *
+			 * THE WARM PATH GETS THE SAME FILTER AND NOT FOR THE SAME REASON.
+			 * It follows the axis it already had, so on its own it would never
+			 * DISCOVER a conductor -- but the fallback below can hand it one on
+			 * a transient iterate, and a seeded search asked to continue from a
+			 * conductor's O-point finds that O-point. So the filter is on the
+			 * point ADOPTED rather than on the way it was reached.
+			 */
 			if ( !found )
 			{
 				std::vector< CriticalPoint > const all = finder.sweep();
-				double bestScore = 0.0;
-				for ( std::size_t i = 0; i < all.size(); ++i )
-				{
-					if ( all[ i ].type != wanted )
-						continue;
 
-					double const score = span >= 0.0 ? all[ i ].psi
-					                                 : -all[ i ].psi;
-					if ( !found || score > bestScore )
+				/*
+				 * TWO PASSES, AND THE SECOND ONE IS NOT A SOFTENING OF THE
+				 * FIRST -- IT IS WHAT KEEPS THE FILTER FROM CHANGING ANSWERS
+				 * ON ITERATES THAT ARE NOT YET EQUILIBRIA.
+				 *
+				 * Pass 0 drops the conductors. Pass 1 runs only if that left
+				 * NOTHING of the wanted sense anywhere on the mesh, and repeats
+				 * the competition over the whole field.
+				 *
+				 * The case that forces it is an inverted span. `wanted` follows
+				 * the ITERATE's span, so while psi_ax sits below psi_bnd the
+				 * search is for a MINIMUM -- and on a machine whose coils carry
+				 * current opposite to the plasma's, the only minima in the field
+				 * are the conductors' own O-points. Filtering them then leaves
+				 * the competition empty, this returns false, and the solve loses
+				 * the located-axis constraint mid-iteration.
+				 *
+				 * MEASURED ON examples/limited-tokamak.toml, WHERE THAT COSTS
+				 * THE ANSWER: the second pass fires on 3 of the 7 cold sweeps a
+				 * run makes, and with it the run is 12 Newton steps to
+				 * psi_ax = 9.484400e-02, digit for digit what the same solve
+				 * gives with no filter at all and 1.3e-04 from freegs4e. Without
+				 * it the same case takes 27 steps to 9.778179e-02 -- 3.1% out,
+				 * a hundred times the gap DriverAcceptance pins.
+				 *
+				 * So the rule is: a conductor's O-point is not a magnetic axis
+				 * and is not chosen while anything else is available; on an
+				 * iterate that offers nothing else, following it is better than
+				 * following nothing, and the equilibrium the iteration is
+				 * converging to gets the filter as soon as it has an extremum of
+				 * its own.
+				 */
+				for ( int pass = 0; !found && pass < 2; ++pass )
+				{
+					bool const dropConductors =
+						( pass == 0 ) && conductors != nullptr;
+					double bestScore = 0.0;
+					for ( std::size_t i = 0; i < all.size(); ++i )
 					{
-						found = true;
-						bestScore = score;
-						best = all[ i ];
+						if ( all[ i ].type != wanted )
+							continue;
+
+						if ( dropConductors
+						     && conductors->indexContaining( all[ i ].r,
+						                                     all[ i ].z ) >= 0 )
+							continue;
+
+						double const score = span >= 0.0 ? all[ i ].psi
+						                                 : -all[ i ].psi;
+						if ( !found || score > bestScore )
+						{
+							found = true;
+							bestScore = score;
+							best = all[ i ];
+						}
 					}
 				}
 			}

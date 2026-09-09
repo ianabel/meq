@@ -1,6 +1,7 @@
 #ifndef MEQ_CRITICALPOINTS_HPP
 #define MEQ_CRITICALPOINTS_HPP
 
+#include <functional>
 #include <vector>
 
 #include "mfem.hpp"
@@ -181,6 +182,23 @@
  * findAxis() therefore seeds from BOTH nodal extremes and returns whichever
  * yields a genuine interior extremum, and refuses rather than guesses if both
  * do. AxisSense is there for a caller who knows which they want.
+ *
+ * AND NEITHER SIGN CONVENTION REACHES A SADDLE, WHICH IS A THIRD THING AGAIN.
+ *
+ * An X-point is not an extreme nodal value of psi_h and is not near one, so
+ * every seeding rule above misses it by construction and findAxis() refuses
+ * AxisSense::Saddle rather than pretending otherwise. Unseeded, sweep() reaches
+ * it and costs one Newton per element per seed. Seeded,
+ * tryFindCriticalPointFrom( r, z, AxisSense::Saddle, ... ) reaches it on the
+ * same seed-and-rings contract the axis has -- which is what an outer iteration
+ * that relocates the X-point once per Jacobian needs, for the same reason the
+ * axis needed it.
+ *
+ * The sign caution above does NOT apply to that one, and the reason is the same
+ * index( -v ) = index( v ) that makes the audit blind to it: det dq/dx is a
+ * product of two sign flips and does not change. A saddle search handed the raw
+ * flux block -- which holds -q -- returns the same point, correctly classified.
+ * That is the one place in this file where getting the sign wrong is free.
  */
 
 namespace meq
@@ -292,15 +310,48 @@ namespace meq
 		}
 	};
 
-	/// Which extremum findAxis() should accept.
+	/**
+	 * Which zero of q_h a seeded search should accept.
+	 *
+	 * THE NAME SAYS "AXIS" AND THE ENUM CARRIES A SADDLE, WHICH IS ONE STRAIN
+	 * AND IS WORTH NAMING RATHER THAN SMOOTHING OVER. Everything else about it
+	 * holds: the values are a filter on CriticalPointType, every entry point
+	 * that takes one applies that filter the same way, and Saddle is exactly as
+	 * much "the sense of the point being followed" as Maximum and Minimum are.
+	 * What does NOT hold is reading Either as "any of the three" -- see below.
+	 *
+	 * A PARALLEL ENUM IS THE OBVIOUS ALTERNATIVE AND IT IS WORSE. A separate
+	 * SaddleSense with one value doubles every filter in this class, duplicates
+	 * the ring growth of the seeded search, and turns the one thing a caller
+	 * following a critical point wants -- to say WHICH KIND and hand it to one
+	 * search -- into a choice of function. See tryFindCriticalPointFrom(),
+	 * which is the search, and tryFindAxisFrom(), which is the axis-named way
+	 * in that refuses Saddle so that "axis" keeps meaning axis.
+	 */
 	enum class AxisSense
 	{
-		/// Take whichever of the two is found, and throw if both are. The
-		/// default, because MEQ's psi is not sign-normalised and a caller
-		/// usually does not want to have to know which way round F points.
+		/// Either EXTREMUM -- maximum or minimum -- and throw or decline if both
+		/// are found. NOT "any critical point": a saddle is never admitted by
+		/// this, whatever the entry point.
+		///
+		/// IT IS THE DEFAULT AND THE DEFAULT MUST NOT BECOME "ANYTHING", which
+		/// is the one way adding Saddle to this enum could have broken a caller
+		/// silently. findAxis() with no argument is the ordinary way the
+		/// magnetic axis is asked for, in this class's tests and in
+		/// GradShafranovSolver; if Either had grown to include saddles then a
+		/// diverted equilibrium would have started returning its X-point as the
+		/// axis, at the right rate, with every convergence table intact. MEQ's
+		/// psi is not sign-normalised, which is what Either is FOR, and that has
+		/// nothing to do with the sign of a determinant.
 		Either,
 		Maximum,
-		Minimum
+		Minimum,
+
+		/// An X-point: det dq/dx < 0, index -1. Only the seeded entry points
+		/// accept it -- findAxis() and tryFindAxis() refuse it by name, because
+		/// their seeds are the extreme NODAL values of psi_h and a saddle is not
+		/// near either of them.
+		Saddle
 	};
 
 	/**
@@ -511,18 +562,33 @@ namespace meq
 			 *         INVERSION-PLAN.md section 6 argues it cannot happen for the
 			 *         fixed-boundary problem with single-signed F -- and guessing
 			 *         would be worse than refusing.
+			 * @throws std::invalid_argument for AxisSense::Saddle, which this
+			 *         cannot serve and must not appear to. ITS SEEDS ARE THE
+			 *         EXTREME NODAL VALUES OF psi_h and an X-point is nowhere near
+			 *         either of them, so the seeded half would find nothing and
+			 *         the answer would come entirely from the sweep() fallback --
+			 *         a full mesh Newton wearing the name of a seeded search.
+			 *         Returning "not found" would be worse still: it would say
+			 *         there is no saddle where none was looked for. See
+			 *         tryFindCriticalPointFrom().
 			 */
 			CriticalPoint findAxis( AxisSense sense = AxisSense::Either ) const;
 
 			/// The same without the throw. Returns false where findAxis() would
-			/// throw, and leaves @a found untouched.
+			/// throw over the SEARCH, and leaves @a found untouched.
+			///
+			/// It still throws std::invalid_argument for AxisSense::Saddle. That
+			/// is not the failure this "try" is about: the try/throw pair is over
+			/// what the field turned out to contain, and a sense this entry point
+			/// cannot serve is a mistake in the call rather than a fact about the
+			/// equilibrium. Answering false to it would hide it.
 			bool tryFindAxis( CriticalPoint &found,
 			                  AxisSense sense = AxisSense::Either ) const;
 
 			/**
-			 * The axis NEAR a point already believed to be close to it: Newton on
-			 * `q_h = 0` seeded from the element nearest @a r, @a z and a couple of
-			 * rings of face neighbours around it, and nothing else.
+			 * The critical point NEAR a point already believed to be close to it:
+			 * Newton on `q_h = 0` seeded from the element nearest @a r, @a z and a
+			 * couple of rings of face neighbours around it, and nothing else.
 			 *
 			 * THIS IS THE WARM-START ENTRY POINT AND ITS WHOLE PURPOSE IS COST.
 			 * findAxis() and tryFindAxis() are written for a caller with no prior:
@@ -530,10 +596,25 @@ namespace meq
 			 * FREE-BOUNDARY-PLAN.md section 11 is about -- and they fall back to a
 			 * full sweep() whenever the seeded path is not unambiguous, which is
 			 * the right trade when the answer is wanted once after a solve. It is
-			 * the wrong trade INSIDE a Newton loop, where the axis is wanted once
-			 * per Jacobian and the previous iterate's axis is a seed that is
-			 * already correct to the size of the last step. This pays a search
-			 * over a handful of elements instead of two Newtons over every one.
+			 * the wrong trade INSIDE a Newton loop, where the point is wanted once
+			 * per Jacobian and the previous iterate's is a seed that is already
+			 * correct to the size of the last step. This pays a search over a
+			 * handful of elements instead of two Newtons over every one.
+			 *
+			 * AND FOR A SADDLE THERE IS NO OTHER SEEDED ROUTE AT ALL, WHICH IS THE
+			 * GAP THIS CLOSES. sweep() is the only thing in this class that
+			 * reaches an X-point without a prior, and it costs one Newton per
+			 * element per seed; findAxis() cannot reach one by construction. A
+			 * border that relocates the X-point once per Jacobian -- XP-3 -- would
+			 * have paid a full sweep every Newton step. AxisSense::Saddle here is
+			 * the same trade tryFindAxisFrom() already exists to make for the
+			 * axis, and it is measured the same way: see
+			 * theSeededSaddleSearchCostsLessThanASweep in
+			 * tests/convergence/CriticalPointConvergence.cpp, where the seeded
+			 * search reaches the same X-point sweep() reaches, to round-off, for
+			 * a thirtieth to a two-hundredth of the Newton solves -- and the
+			 * ratio widens with refinement, because rings are an absolute
+			 * element count and a sweep is the whole mesh.
 			 *
 			 * WHAT IT COSTS, MEASURED IN ELEMENTS ROOTED RATHER THAN IN SECONDS
 			 * -- a timing on one machine is a measurement about that machine, and
@@ -564,37 +645,60 @@ namespace meq
 			 * AND IT BREAKS TIES BY DISTANCE, WHERE tryFindAxis() REFUSES THEM.
 			 * That is the other difference and it follows from the same premise:
 			 * a caller with a prior is FOLLOWING one critical point, so when the
-			 * seed region offers more than one extremum of the requested sense the
+			 * seed region offers more than one point of the requested sense the
 			 * nearest to ( @a r, @a z ) is the continuation of the one being
 			 * followed. tryFindAxis() has no prior and so cannot prefer one, and
-			 * refuses instead. Do not use this to DISCOVER an axis: seeded far
-			 * from one it will return whatever extremum happens to lie in reach,
-			 * which is a different question from "where is the axis".
+			 * refuses instead. Do not use this to DISCOVER a critical point:
+			 * seeded far from one it will return whatever point of that sense
+			 * happens to lie in reach, which is a different question from "where
+			 * is the axis" or "where is the X-point".
 			 *
 			 * @param r,z   where to start looking. Need not be inside the mesh and
 			 *              need not be near an element boundary; the nearest
 			 *              element CENTRE is what is used, which costs one pass
 			 *              over the elements with no field evaluation in it.
-			 * @param sense which extremum is wanted. The same caution applies as
-			 *              everywhere else in this class: pass +q, never the raw
-			 *              flux block, or every Maximum silently becomes a
-			 *              Minimum. See the file header.
+			 * @param sense which kind of point is wanted -- Maximum, Minimum,
+			 *              Either for whichever extremum is there, or Saddle. The
+			 *              same caution applies as everywhere else in this class:
+			 *              pass +q, never the raw flux block, or every Maximum
+			 *              silently becomes a Minimum. A SADDLE IS THE ONE SENSE
+			 *              THAT CAUTION DOES NOT PROTECT, because det dq/dx is
+			 *              unchanged by q -> -q in even dimension: a search for a
+			 *              saddle on the wrong sign of the flux succeeds and
+			 *              returns the same point. That is the file header's
+			 *              index( -v ) = index( v ) remark, met from the other
+			 *              side.
 			 * @param found written only on success.
 			 *
-			 * @return false, rather than throwing, when no extremum of that sense
-			 *         is reachable from the seed region. There is nothing
-			 *         exceptional about that -- an iterate whose axis has left the
-			 *         search radius is an ordinary event in a continuation -- and
-			 *         the caller is expected to have a fallback.
+			 * @return false, rather than throwing, when no point of that sense is
+			 *         reachable from the seed region. There is nothing exceptional
+			 *         about that -- an iterate whose axis has left the search
+			 *         radius is an ordinary event in a continuation -- and the
+			 *         caller is expected to have a fallback.
 			 */
+			bool tryFindCriticalPointFrom( double r, double z, AxisSense sense,
+			                               CriticalPoint &found ) const;
+
+			/// tryFindCriticalPointFrom() under the name that says what a caller
+			/// following the magnetic axis is doing, with AxisSense::Saddle
+			/// refused so that "axis" keeps meaning axis.
+			///
+			/// IT IS A FORWARD AND NOT A SECOND IMPLEMENTATION, which is the point
+			/// of having both: the seed-and-rings contract above -- the ring cap,
+			/// the stop at the first root strictly inside its own element, the
+			/// distance tie-break, the absence of a sweep fallback -- is one piece
+			/// of code and one paragraph of documentation, and an X-point gets it
+			/// on exactly the terms the axis has.
+			///
+			/// @throws std::invalid_argument for AxisSense::Saddle.
 			bool tryFindAxisFrom( double r, double z, AxisSense sense,
 			                      CriticalPoint &found ) const;
 
-			/// The MOST rings of face neighbours tryFindAxisFrom() will grow
-			/// around its seed element before giving up. Default 6.
+			/// The MOST rings of face neighbours tryFindCriticalPointFrom() will
+			/// grow around its seed element before giving up. Default 6.
 			///
 			/// IT IS A CAP AND NOT A COST, because the search stops at the first
-			/// ring that yields an extremum of the requested sense. A warm start
+			/// ring that yields a point of the requested sense. A warm start
 			/// whose axis is still in the seed element roots ONE element; only a
 			/// seed that has fallen behind pays for the outer rings. That is why
 			/// the default can be generous.
@@ -659,6 +763,30 @@ namespace meq
 			AxisAgreement checkAxis( double psiAxisIn, double psiBoundaryIn = 0.0,
 			                         double toleranceIn = 0.10 ) const;
 
+			/**
+			 * WHERE A MAGNETIC AXIS CANNOT BE, as a predicate on position.
+			 *
+			 * **A CONDUCTOR'S O-POINT IS AN EXTREMUM OF psi AND COMPETES WITH
+			 * THE PLASMA'S ON EVERY SCORE THIS CLASS KNOWS.** Any coil carrying
+			 * current of the plasma's own sign has one, and on a machine whose
+			 * coils are meshed inside the domain it is a perfectly good zero of
+			 * q_h. Measured on the diverted machine of FREE-BOUNDARY-PLAN.md
+			 * section 10: checkAxis() returned the O-point at
+			 * ( 1.0099, -1.1018 ) -- inside the P1L conductor -- carrying
+			 * normalised flux 1.5564, and reported the solve's own axis as
+			 * disagreeing with it.
+			 *
+			 * A plasma has no magnetic axis inside a conductor, so the caller
+			 * says so. IT IS A PREDICATE AND NOT A meq::CoilSet deliberately:
+			 * this class is about a field on a mesh and knows nothing about
+			 * machines, and the dependency should not run that way. A caller
+			 * holding conductors passes a lambda over indexContaining().
+			 *
+			 * Unset -- the default -- excludes nothing, which is what every
+			 * fixed-boundary case in this tree wants.
+			 */
+			void setExcluded( std::function< bool( double, double ) > excludedIn );
+
 			/// Newton stops when | q | falls below this times the largest | q | on
 			/// the mesh. Default 1e-13: q_h is a polynomial and Newton on it is
 			/// quadratic, so this is reached in a handful of steps or not at all.
@@ -704,6 +832,39 @@ namespace meq
 			/// outside its own element wins, rather than the one with the lower
 			/// element index.
 			void setContainment( double containmentIn );
+
+			/**
+			 * How much work this finder has done since it was built or since
+			 * resetCounters(), counted rather than timed.
+			 *
+			 * THE COST OF A SEEDED SEARCH IS THE WHOLE REASON IT EXISTS, so it has
+			 * to be assertable, and a wall clock cannot do it: this project's
+			 * standing rule is that a timing on one machine is a measurement about
+			 * that machine. Both of these are properties of the algorithm and
+			 * reproduce anywhere.
+			 *
+			 * newtonSolves() counts calls to the element-local Newton -- one per
+			 * ( element, seed ) pair attempted, whether or not it converged, and
+			 * whether or not the root it reached was kept. That is the unit of
+			 * work: everything else in this class is table walks and distance
+			 * comparisons. elementsRooted() counts elements entered, which is the
+			 * unit tryFindCriticalPointFrom()'s own documentation quotes, and is
+			 * smaller by however many seeds elementSeeds() offers -- two on every
+			 * nodal basis MEQ builds.
+			 *
+			 * They count across every entry point, sweep() and audit() included,
+			 * because a caller measuring a seeded search against a sweep wants one
+			 * counter reading both. audit() adds nothing to either: it walks the
+			 * boundary and roots nothing.
+			 */
+			long newtonSolves() const;
+			long elementsRooted() const;
+
+			/// Both counters to zero. Non-const, unlike the searches themselves --
+			/// the counters are mutable so that a const finder can still be
+			/// measured, but clearing them is a thing done TO the finder and reads
+			/// better as one.
+			void resetCounters();
 
 		private:
 			/// Newton on q_h = 0 inside one element, from one reference-space
@@ -755,10 +916,15 @@ namespace meq
 			/// 696, which is not a face neighbour of it.
 			void axisSeeds( std::vector<int> &elements ) const;
 
-			/// The extrema among the roots reachable from a list of seed
-			/// elements, merged and filtered by @a sense.
-			std::vector<CriticalPoint> extremaFrom( std::vector<int> const &elements,
-			                                        AxisSense sense ) const;
+			/// The roots reachable from a list of seed elements, merged and
+			/// filtered by @a sense.
+			///
+			/// POINTS AND NOT EXTREMA, IN THE NAME AS WELL AS IN THE BODY. It
+			/// returns saddles for AxisSense::Saddle, and a private helper whose
+			/// name is a lie about its filter is exactly how one sense ends up
+			/// silently dropped by a caller who trusted the name over the code.
+			std::vector<CriticalPoint> pointsFrom( std::vector<int> const &elements,
+			                                       AxisSense sense ) const;
 
 			/// The seeds this element offers: its centre, and the node where
 			/// | q_h | is smallest.
@@ -779,6 +945,15 @@ namespace meq
 			/// absorbed by the first ring.
 			int nearestElementCentre( double r, double z ) const;
 
+			/// Whether a point of this type is one an @a sense search is asking
+			/// for. THE ONE PLACE THE FILTER IS WRITTEN, and it is one place
+			/// rather than one per entry point so that a sense added to AxisSense
+			/// cannot be honoured by tryFindAxis() and quietly ignored by the
+			/// seeded search. Degenerate is never accepted by anything: it is an
+			/// admission that no classification is entitled, and handing one back
+			/// as an X-point would be the worst answer available.
+			static bool senseAccepts( AxisSense sense, CriticalPointType type );
+
 			mfem::GridFunction const &fluxField;
 			mfem::GridFunction const &potentialField;
 			mfem::Mesh &meshRef;
@@ -790,6 +965,17 @@ namespace meq
 			double separation = 1.0e-8;
 			double containment = 0.10;
 			int seedRings = 6;
+
+			/// setExcluded(), or empty. Consulted only where CANDIDATES ARE
+			/// COMPETED -- checkAxis() -- and never inside the root find, which
+			/// has no business knowing where the answer may not be.
+			std::function< bool( double, double ) > excluded;
+
+			/// See newtonSolves(). Mutable because every search is const and the
+			/// cost of a search is a thing about the search rather than about the
+			/// field, so measuring one must not require a mutable finder.
+			mutable long newtonSolveCount = 0;
+			mutable long elementCount = 0;
 	};
 
 }

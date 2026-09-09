@@ -2050,6 +2050,24 @@ int main( int argc, char **argv )
 			try
 			{
 				meq::CriticalPointFinder finder( *solver );
+
+				// A PLASMA HAS NO MAGNETIC AXIS INSIDE A CONDUCTOR, and on a
+				// machine whose coils are meshed inside Omega one of them can
+				// carry a higher psi than the plasma does -- measured on the
+				// diverted machine of FREE-BOUNDARY-PLAN.md section 10, whose
+				// P1L runs at +1.37e+05 A against an I_p of 2.0e+05 A and whose
+				// O-point reads a normalised flux of 1.5564. The solver's own axis constraint
+				// already drops those candidates; this is the same exclusion for
+				// the DIAGNOSTIC, without which every run of such a machine
+				// warns that it found a higher O-point than the one it followed,
+				// correctly and uselessly.
+				if ( coils )
+					finder.setExcluded(
+						[ &coils ]( double r, double z )
+						{
+							return coils->indexContaining( r, z ) >= 0;
+						} );
+
 				axisCheck = finder.checkAxis( solver->psiAxis(),
 				                              solver->psiBoundary() );
 				axisChecked = true;

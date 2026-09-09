@@ -7,6 +7,7 @@
 
 #include "mfem.hpp"
 
+#include "meq/Coils.hpp"
 #include "meq/CriticalPoints.hpp"
 #include "meq/GradShafranov.hpp"
 
@@ -305,6 +306,156 @@ BOOST_AUTO_TEST_CASE( aSpikedNodalValueIsNotAMagneticAxis )
 			"separation reads only " << bad.separationInElements << " element "
 			"diameters, so the reported node is not where the spike is." );
 	}
+}
+
+/*
+ * A CONDUCTOR'S O-POINT IS AN EXTREMUM OF psi AND WINS EVERY SCORE THIS GUARD
+ * KNOWS, AND ON A MACHINE WHOSE COILS ARE MESHED INSIDE Omega IT IS THERE TO BE
+ * FOUND.
+ *
+ * Every machine MEQ can pose has them inside: no semicircle centred on the axis
+ * both encloses a plasma and excludes the coils near it, so the conductors are
+ * in the domain and enter through the SOURCE. Any one of them carrying current
+ * of the plasma's own sign contributes a local maximum of psi, and one carrying
+ * a large enough fraction of I_p contributes the LARGEST one. checkAxis()
+ * competes candidates on normalised flux, so it hands that back -- correctly,
+ * and uselessly, because a plasma has no magnetic axis inside a conductor.
+ *
+ * THE FIXTURE IS TWO GAUSSIAN BUMPS WITH AN EXACT FLUX, so nothing here depends
+ * on a solve: the plasma's peaks at 0.25 at ( 1.00, 0.00 ) and the conductor's
+ * at 0.40 at ( 1.60, 0.30 ). That ordering is the observed one on the diverted
+ * machine of FREE-BOUNDARY-PLAN.md section 10, where P1L carries +1.37e+05 A
+ * against an I_p of 2.0e+05 A and its O-point reads psi = 1.21e-01 against the
+ * reference equilibrium's axis at 8.3e-02.
+ *
+ * IT ASSERTS BOTH HALVES AND THE FIRST IS WHAT KEEPS THE SECOND HONEST:
+ * unfiltered, the guard must return the CONDUCTOR. If it did not, the exclusion
+ * would be untested whatever the filtered half reported.
+ */
+namespace
+{
+	double const plasmaR = 1.00;
+	double const plasmaZ = 0.00;
+	double const plasmaPeak = 0.25;
+	double const bumpWidth = 0.22;
+
+	double const conductorR = 1.60;
+	double const conductorZ = 0.30;
+	double const conductorPeak = 0.40;
+	double const conductorHalf = 0.06;
+
+	double twoBumps( mfem::Vector const &x )
+	{
+		double const a = ( x( 0 ) - plasmaR )/bumpWidth;
+		double const b = ( x( 1 ) - plasmaZ )/bumpWidth;
+		double const c = ( x( 0 ) - conductorR )/bumpWidth;
+		double const d = ( x( 1 ) - conductorZ )/bumpWidth;
+		return plasmaPeak*std::exp( -( a*a + b*b ) )
+		       + conductorPeak*std::exp( -( c*c + d*d ) );
+	}
+
+	/// q = ( 1/r ) grad_bar( psi ), the same convention paraboloidFlux() uses.
+	void twoBumpsFlux( mfem::Vector const &x, mfem::Vector &value )
+	{
+		value.SetSize( 2 );
+		double const w = bumpWidth*bumpWidth;
+		double const a = ( x( 0 ) - plasmaR )/bumpWidth;
+		double const b = ( x( 1 ) - plasmaZ )/bumpWidth;
+		double const c = ( x( 0 ) - conductorR )/bumpWidth;
+		double const d = ( x( 1 ) - conductorZ )/bumpWidth;
+		double const one = plasmaPeak*std::exp( -( a*a + b*b ) );
+		double const two = conductorPeak*std::exp( -( c*c + d*d ) );
+		value( 0 ) = ( -2.0*one*( x( 0 ) - plasmaR )/w
+		               - 2.0*two*( x( 0 ) - conductorR )/w )/x( 0 );
+		value( 1 ) = ( -2.0*one*( x( 1 ) - plasmaZ )/w
+		               - 2.0*two*( x( 1 ) - conductorZ )/w )/x( 0 );
+	}
+}
+
+BOOST_AUTO_TEST_CASE( aConductorsOwnOPointIsNotAMagneticAxis )
+{
+	int const order = 3;
+	int const n = 24;
+	meq::tests::Rectangle const box{ 0.60, 2.00, -0.60, 0.90 };
+
+	mfem::Mesh mesh = meq::tests::makeMesh( box, n );
+	mfem::L2_FECollection potentialCollection( order, mesh.Dimension(),
+	                                           mfem::BasisType::GaussLobatto );
+	mfem::L2_FECollection fluxCollection( order, mesh.Dimension(),
+	                                      mfem::BasisType::GaussLobatto );
+	mfem::FiniteElementSpace potentialSpace( &mesh, &potentialCollection );
+	mfem::FiniteElementSpace fluxSpace( &mesh, &fluxCollection, 2 );
+
+	mfem::GridFunction potential( &potentialSpace );
+	mfem::GridFunction flux( &fluxSpace );
+	mfem::FunctionCoefficient exactPotential( twoBumps );
+	mfem::VectorFunctionCoefficient exactFlux( 2, twoBumpsFlux );
+	potential.ProjectCoefficient( exactPotential );
+	flux.ProjectCoefficient( exactFlux );
+
+	// The conductor as a machine would carry it: the predicate the driver
+	// installs is a lambda over CoilSet::indexContaining(), so this uses the
+	// same call rather than an open-coded rectangle.
+	meq::CoilSet coils;
+	coils.add( meq::Coil( conductorR, conductorZ, conductorHalf,
+	                      conductorHalf, 1.0 ) );
+
+	double nodal = 0.0;
+	largestNodalDof( potential, nodal );
+
+	std::printf( "\n  two bumps, k = %d, n = %d: the plasma at ( %.2f, %.2f ) "
+	             "peaking %.2f, the conductor at ( %.2f, %.2f ) peaking %.2f\n",
+	             order, n, plasmaR, plasmaZ, plasmaPeak,
+	             conductorR, conductorZ, conductorPeak );
+
+	meq::CriticalPointFinder open( flux, potential );
+	meq::AxisAgreement const unfiltered = open.checkAxis( nodal );
+	report( "unfiltered", unfiltered );
+
+	BOOST_TEST_REQUIRE( unfiltered.located,
+		"the unfiltered guard found no interior extremum at all on a field that "
+		"has two by construction, so neither half of this case means anything." );
+	BOOST_TEST_REQUIRE( coils.indexContaining( unfiltered.axis.r,
+	                                           unfiltered.axis.z ) >= 0,
+		"the unfiltered guard returned ( " << unfiltered.axis.r << ", "
+		<< unfiltered.axis.z << " ), which is NOT inside the conductor. The "
+		"filtered half asserts that the exclusion MOVES the answer, and that can "
+		"only mean something if the answer starts on the conductor -- so this is "
+		"the fixture's premise rather than a claim about the code." );
+
+	// AND NOW THE SAME FIELD WITH THE CONDUCTOR EXCLUDED.
+	meq::CriticalPointFinder filtered( flux, potential );
+	filtered.setExcluded(
+		[ &coils ]( double r, double z )
+		{ return coils.indexContaining( r, z ) >= 0; } );
+	meq::AxisAgreement const guarded = filtered.checkAxis( nodal );
+	report( "conductor excluded", guarded );
+
+	BOOST_TEST_REQUIRE( guarded.located,
+		"the exclusion took the conductor's O-point and left the guard with "
+		"nothing, on a field carrying a second extremum 0.6 m away. "
+		"setExcluded() filters WHICH candidate is competed and must not empty "
+		"the competition." );
+	BOOST_TEST( std::abs( guarded.axis.r - plasmaR ) < 2.0e-2,
+		"with the conductor excluded the guard returned r = " << guarded.axis.r
+		<< " against the plasma bump's " << plasmaR );
+	BOOST_TEST( std::abs( guarded.axis.z - plasmaZ ) < 2.0e-2,
+		"with the conductor excluded the guard returned z = " << guarded.axis.z
+		<< " against the plasma bump's " << plasmaZ );
+	BOOST_TEST( std::abs( guarded.axis.psi - plasmaPeak ) < 1.0e-3,
+		"the excluded guard's axis carries psi = " << guarded.axis.psi
+		<< " against the plasma bump's peak of " << plasmaPeak << ". A value "
+		"near " << conductorPeak << " would mean it reached the conductor by "
+		"another route." );
+
+	// AND THE EXCLUDED POINT IS NOT COUNTED EITHER, which is what setExcluded()
+	// documents: the count is of CANDIDATES, and a point that cannot be an axis
+	// is not one. Without it the diagnostic would report a competition it did
+	// not hold.
+	BOOST_TEST( guarded.extrema == unfiltered.extrema - 1,
+		"the unfiltered sweep counted " << unfiltered.extrema
+		<< " extrema and the filtered one " << guarded.extrema
+		<< ", where exactly one candidate was excluded." );
 }
 
 /*
