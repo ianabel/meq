@@ -169,6 +169,52 @@ linear. `CLAUDE.md` carries the measurements.
 | SIAM Journal on Numerical Analysis 53 (2015) 805–819 | https://doi.org/10.1137/130919398 | Toth & Kelley, convergence analysis for Anderson acceleration. HDG-GS-1's [45], and the source of its **depth `m = 2`**: they report no gain beyond `m ≥ 3`, and HDG-GS-1's own experiments agreed. The reference for what Anderson does and does not guarantee, which matters if it is ever used as a fallback when Newton stalls. Paywalled | AndersonAcceleration.pdf |
 | SIAM Journal on Numerical Analysis 49 (2011) 1715–1735 | https://doi.org/10.1137/10078356x | Walker & Ni, Anderson acceleration for fixed-point iterations, and its relation to GMRES on the linearised problem. HDG-GS-2's [27]. Paywalled | AndersonWalkerNi.pdf |
 
+### Interpolatory HDG: assemble the nonlinear term ONCE, and the `ψ*` that keeps it superconvergent
+
+The route to removing MEQ's per-Newton-step source assembly, and it is a
+**different discretisation** rather than an implementation of the same one --
+a variational crime whose rates are proved. Interpolate the nonlinearity into
+the finite element space instead of integrating it: the load becomes a fixed
+matrix times the vector of pointwise `F` evaluations, and the Jacobian a
+diagonal scaling of the same fixed matrix. No quadrature of `F` anywhere, and
+nothing about the source reassembled between iterates.
+
+**THE FIRST VERSION LOSES SUPERCONVERGENCE AND THE SECOND RECOVERS IT BY
+EVALUATING `F` AT `u*`.** That is the whole content of the pair below, and it
+is why the two entries are not interchangeable: interpolating `F( u_h )` into
+`W_h` gives optimal rates for `u_h` and `q_h` and leaves the postprocessed
+`u*` no better than `u_h`, which for MEQ would silently cost the `k+2` that
+`OutputConvergence`, the estimator and the adaptive loop all rest on.
+Interpolating `F( u*_h )` into the postprocessing space `Z_h` restores it.
+
+| Reference | URL (doi or arxiv) | Short Description | File Name |
+| --- | --- | --- | --- |
+| ✔ Journal of Scientific Computing 79 (2019) 1777–1800 | https://doi.org/10.1007/s10915-019-00911-8 | Cockburn, Singler & Zhang, *Interpolatory HDG method for parabolic semilinear PDEs*. The ORIGINAL, and the one whose limitation is the reason for the next row: it approximates the nonlinear term by `I_h F( u_h )` with `I_h` the elementwise Lagrange interpolation into `W_h`, proves optimal rates for every variable, and — in its successor's words — *"did not observe superconvergence after an element-by-element postprocessing"*. **Not fetched** — read only through the successor's Remark 2.1 and §5. **AND ITS doi IS THIS FILE'S OWN RULE FIRING**: reconstructed from the successor's reference [16] it came out as `10.1007/s10915-019-01072-4`, which is a REAL doi in the right journal and the right volume — Wang, Zhang & Shu on implicit-explicit LDG, 81:2080–2114. Volume agreeing is what a wrong doi looks like. The one above is from a Crossref title search and matches on title, all three authors, volume and pages | InterpolatoryHDG-0.pdf |
+| ✔ Journal of Scientific Computing 81 (2019) 2188–2212 | https://doi.org/10.1007/s10915-019-01081-3 | Chen, Cockburn, Singler & Zhang, *Superconvergent Interpolatory HDG Methods for Reaction Diffusion Equations I: An HDG_k Method*. **THE ONE TO IMPLEMENT.** Remark 2.1 is the whole change: use `I_h F( u*_h )` with `I_h` mapping into the postprocessing space `Z_h = P^(k+1)`, rather than `I_h F( u_h )` into `W_h`. Its §2.2 gives the implementation in closed form and is worth transcribing rather than re-deriving — the postprocessing is written with a `P^0` Lagrange multiplier, eq (7), so `γ = B11 α + B12 β` is LINEAR in the flux and potential coefficients with `B11`, `B12` block diagonal and assembled once; the nonlinear term is `A9 F( γ )` and the Jacobian is `A9 diag( F'( γ ) ) B11` and `A9 diag( F'( γ ) ) B12`, eq after (9). **Note the second of those**: the source acquires a JACOBIAN BLOCK AGAINST THE FLUX, which MEQ's reaction term does not have today. Rates proved under a global and then a local Lipschitz condition; Table 1 reads 2.95, 3.02, 3.02, 3.01 for `u*` at `k = 1`, i.e. `k+2`. Its spaces are MEQ's spaces — `HDG_k`, all of `V_h`, `W_h`, `M_h` at degree `k`, `τ` constant and `O(1)`, simplices — which is why this is the one and not the sequel. Paywalled | SuperconvergentHDG-I.pdf |
+| Communications on Applied Mathematics and Computation 4 (2022) 477–499 | https://doi.org/10.1007/s42967-021-00128-3 | Chen, Cockburn, Singler & Zhang, *… II: HHO-Inspired Methods*. Context rather than a plan: it carries the same idea to HHO-flavoured HDG (ABC) methods on general polyhedral meshes, where the postprocessing is `p^(k+1)( u_h, û_h )` from the potential and its TRACE rather than from the flux, and `τ = 1/h`. Its Table 1 is the useful part — method (B) superconverges at `k+2` for **all `k ≥ 0`** where paper I's `HDG_k` needs `k ≥ 1`, and method (C) is only defined for `k ≥ 2`. Reaching any of them from MEQ means changing the spaces and the stabilisation, which paper I does not. **Not read beyond §2.2** | SuperconvergentHDG-II.pdf |
+
+Both PDFs are in `refs/` and were taken from `../MaNTA/refs/`, where the
+sibling project keeps them for the same reason.
+
+**WHAT THIS COSTS MEQ TO ADOPT, AND THE ONE PIECE THAT IS ALREADY THERE.** The
+`u*` the method needs is the CLASSIC postprocessing — Nguyen, Peraire &
+Cockburn eq (25), a pure Neumann local problem in `q_h` closed by the element
+average of `u_h` — and MFEM supplies exactly it as
+`mfem::HDGPotentialPostprocessor` in `fem/darcy/postprocess_hdg.hpp`, whose own
+comment says the average *"is not an option among several but the definition,
+and it is applied unconditionally"*. That is linear in `( q_h, u_h )` with `F`
+nowhere in it, which is what makes `B11` and `B12` constant.
+
+**IT IS NOT WHAT MEQ CALLS TODAY.** `GradShafranov.cpp` builds `ψ*` from
+`DarcyForm::Reconstruct()`, the richer mixed reconstruction, which LIFTS the
+non-linear potential integrators into its local problem and takes their gradient
+at the computed potential — so its local matrix contains `∂F/∂ψ` and its output
+is not a linear function of the unknowns. Feeding THAT back into the source
+would make each element's reconstruction an implicit local fixed point. The two
+postprocessings answer different questions, `postprocess_hdg.hpp` says so in as
+many words, and the interpolatory method wants the smaller one.
+
+
 ## Analytic benchmarks
 
 Every convergence claim in `tests/convergence` is measured against one of these.

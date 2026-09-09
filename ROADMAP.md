@@ -848,54 +848,121 @@ the symmetric traceless part differentiated — structure rather than an order, 
 it would need the source plumbed into `GridSampler`. `CLAUDE.md`'s *Status*
 section has the detail.
 
-## 12. Two cheap experiments nobody has run — MEQ, open
+## 12. Interpolatory HDG, and two experiments beside it — MEQ, open
 
-Both came out of one question — *is there mileage in evaluating the GS right
-hand side at `ψ*` rather than `ψ_h`, and could an interpolatory method save the
-repeated assembly?* — and neither is blocking anything. They are here so they
-are not re-derived.
+Came out of one question — *is there mileage in evaluating the GS right hand
+side at `ψ*` rather than `ψ_h`, and could an interpolatory method save the
+repeated assembly?* — and the answer turned out to be that **those are not two
+questions.** The `ψ*` evaluation is what makes the interpolatory method keep its
+superconvergence, and neither half is worth much without the other.
 
-**LOCATE THE PLASMA EDGE WITH `ψ*` AND KEEP ASSEMBLING `F` AT `ψ_h`.**
-Substituting `ψ*` into the *source* is not worth it: the consistency error of
-`F( ψ_h )` is `O( h^(k+1) )`, which is the method's own rate, so `ψ*`'s
-`O( h^(k+2) )` removes a term that limits nothing and buys a constant. It also
-costs three things — `Reconstruct()` builds `ψ*` from a local problem that
-already contains `F( ψ_h )`, so the element reconstruction becomes an implicit
-local fixed point; `∂F/∂ψ( ψ* )·∂ψ*/∂ψ_h` is a dense element block rather than
-`HDGDiffusionIntegrator`'s mass, so `LocalNLOperator` would need the chain rule
-and the parity gap would need re-measuring; and GS-1/GS-2's estimates are for
-`F( ψ_h )`.
+### 12.1 Interpolatory HDG — assemble the source ONCE
 
-**The place `ψ`'s accuracy DOES bind is the level set, not the load.**
-`ConfineToPlasma` locates `{ Ψ > 0 }` as a level set of `ψ_h`, and
-`PLASMA-EDGE-PLAN.md`'s rate cap is about the geometry of that set. Locating the
-edge with `ψ*` while still assembling `F` at `ψ_h` has none of the three costs
-above — no circularity, since the edge is read after the reconstruction rather
-than inside it; no Jacobian change; no new analysis — and the acceptance
-criterion already exists in `PlasmaEdgeConvergence`. It is an afternoon, and it
-is the version of that question worth funding.
+**THE METHOD.** Interpolate the nonlinearity into a finite element space instead
+of integrating it. The load becomes `A F⃗` with `A` assembled once and `F⃗` the
+vector of pointwise `Source::f()` values; the Jacobian becomes a diagonal
+scaling of the same fixed matrices. No quadrature of `F` anywhere and nothing
+about the source reassembled between Newton steps. It is a **different
+discretisation** — a variational crime — and not an implementation of the one
+MEQ has, so the acceptance is a rate and never a bit comparison.
 
-**REUSE THE JACOBIAN ACROSS NEWTON STEPS — a chord or Shamanskii iteration.**
+**AND THE OBVIOUS VERSION LOSES `k+2`.** Interpolating `F( ψ_h )` into `W_h` is
+Cockburn, Singler & Zhang (2019), which proves optimal rates for `ψ_h` and `q_h`
+and reports no superconvergence of the postprocessed `ψ*` at all. For MEQ that
+would be silent and expensive: `OutputConvergence`, `Estimator` and the whole
+adaptive loop rest on `ψ*` being a full order better. **The fix is to evaluate
+the nonlinearity at `ψ*`** — `I_h F( ψ*_h )`, interpolating into the
+postprocessing space `P^(k+1)` — which is Chen, Cockburn, Singler & Zhang I,
+Remark 2.1, and it restores `k+2`: their Table 1 reads 2.95, 3.02, 3.02, 3.01 at
+`k = 1`. `refs/Refs.md`, *Interpolatory HDG*, carries both with the dois checked.
+
+Their `HDG_k` is MEQ's method — `V_h`, `W_h`, `M_h` all at degree `k`, `τ`
+constant and `O(1)`, simplices — so paper I transfers and the HHO-flavoured
+sequel does not without changing the spaces and the stabilisation.
+
+**WHAT IT COSTS MEQ, IN THE ORDER THE WORK WOULD BE MET.**
+
+* **`ψ*` MUST COME FROM THE CLASSIC POSTPROCESSING AND MEQ DOES NOT USE IT.**
+  The method needs Nguyen, Peraire & Cockburn eq (25) — a pure Neumann local
+  problem in `q_h` closed by the element average of `ψ_h` — because that is
+  LINEAR in the unknowns, which is what makes the `B11`, `B12` of §2.2 constant
+  and assemblable once. MFEM supplies exactly it as
+  `mfem::HDGPotentialPostprocessor`. MEQ instead builds `ψ*` from
+  `DarcyForm::Reconstruct()`, the richer mixed reconstruction, which **lifts the
+  non-linear potential integrators into its local problem** and takes their
+  gradient at the computed potential — so its local matrix carries `∂F/∂ψ` and
+  feeding its output back into the source really would make each element's
+  reconstruction an implicit local fixed point. The two answer different
+  questions and `postprocess_hdg.hpp` says so; the interpolatory method wants
+  the smaller one.
+* **THE SOURCE ACQUIRES A JACOBIAN BLOCK AGAINST THE FLUX.** `ψ*` is built from
+  `q_h` as well as `ψ_h`, so the paper's Jacobian is
+  `A9 diag( F'( γ ) ) B11` against the flux coefficients and
+  `A9 diag( F'( γ ) ) B12` against the potential's. MEQ's reaction term is a
+  potential-potential block today. Everything stays element-local, so
+  hybridization survives, but this is not a new integrator dropped into the
+  existing nonlinear potential mass — `LocalNLOperator` and the parity gap both
+  need re-measuring.
+* **`ConfineToPlasma` IS THE REAL RISK.** `F` is discontinuous across
+  `{ Ψ = 0 }`, and an interpolant of a discontinuous function on a cut element
+  is an oscillating polynomial taking nodal values from the wrong side. The
+  answer is a hybrid — interpolate on uncut elements, keep the cut quadrature
+  where the edge is — which keeps the exact treatment exactly where
+  `PLASMA-EDGE-PLAN.md`'s rate cap lives and takes the fast path in the bulk,
+  the cut elements being `O( h^-1 )` against `O( h^-2 )`. The papers assume a
+  smooth `F` satisfying a local Lipschitz condition and say nothing about this.
+* **The axisymmetric weights and the explicit `( r, z )` dependence** are
+  outside the papers' `F( u )`, but only notationally: `A` becomes
+  `∫_K ( 1/r ) φ_j w_i` and `F` is evaluated at `( x_j, ψ*( x_j ) )`.
+
+**WHAT IT WOULD BUY, AND THE HONEST SHARE.**
 `../mfem-hdg-dev/doc/HDG-DEVICE-OFFLOAD.md` puts the integrators at **46–53%**
-of an NPC step and the local dense algebra at 7–10%, and `m = 3` would skip two
-of every three assemblies *and* two of every three `ComputeH()` factorisations.
-KINSOL already implements it (`msbset`) and MEQ already links KINSOL for
-`AndersonPicard` and `PicardThenNewton`, so the machinery is in the build. The
-cost is superlinear rather than quadratic convergence, and whether the extra
-iterations eat the saving is unknown for MEQ's sources — a sweep over
-`m = 1, 2, 3, 5` against `ManufacturedNonlinear` and `examples/limited-tokamak.toml`,
-reporting wall clock **and** iteration count, answers it. Expect the moving
-support to be the trap: it makes the residual mildly discontinuous, so a stale
-Jacobian may stall where a fresh one does not.
+of an NPC step, but that is ALL integrators; the `ψ`-dependent part is not
+apportioned and measuring it is the first thing to do. There is a second prize
+that is not a share of anything: **it should retire
+`setSourceQuadratureOrder()`.** The only reason that knob is swept into
+Grundmann–Möller territory — negative weights reaching `−1.9e+07`,
+`QUADRATURE-HIGH-ORDER-TRIANGLES-FROM-MEQ.md` — is that `F( ψ_h )` is a
+nonpolynomial integrand. Under interpolation the only quadrature left is
+`∫ ( 1/r ) φ_j w_i`, which the tabulated rules cover.
 
-**IT IS THE FALLBACK AND NOT THE FIRST CHOICE, because interpolatory HDG
-dominates it if it works.** Interpolating `F` into the nodal potential space
-turns the load into `A f⃗` with `A_ij = ∫_K ( 1/r ) φ_j w_i` assembled ONCE and
-`f⃗` the pointwise `Source::f()` values, and the Jacobian block into
-`A diag( dFdPsi )` — so the assembly goes away while the Jacobian stays EXACT
-and Newton stays quadratic. Jacobian reuse buys the same seconds by giving up
-the convergence rate. Run the interpolatory experiment first; this one is what
-to reach for if its rates do not hold.
+**ACCEPTANCE.** The ladder, not a tolerance: `k+1` in `ψ` and `q` and `k+2` in
+`ψ*` on `ManufacturedNonlinear` and `SimilarityExponential` at `k = 1…3`, plus
+`thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes`. `k = 0` is outside
+paper I's theory and is where the sequel's method (B) would be needed.
+
+### 12.2 Locate the plasma edge with `ψ*` — and this one is separate
+
+Substituting `ψ*` into the source **for its own sake**, with the quadrature
+left in place, is not worth it: the consistency error of `F( ψ_h )` is
+`O( h^(k+1) )`, the method's own rate, so `ψ*`'s `O( h^(k+2) )` removes a term
+that limits nothing and buys a constant. Its value in 12.1 is structural — it
+is what the interpolation needs to stay superconvergent — and not that the
+source was inaccurate.
+
+**The place `ψ`'s accuracy DOES bind is the level set.** `ConfineToPlasma`
+locates `{ Ψ > 0 }` as a level set of `ψ_h`, and `PLASMA-EDGE-PLAN.md`'s rate
+cap is about the geometry of that set rather than about the load. Locating the
+edge with `ψ*` while still assembling `F` at `ψ_h` is independent of 12.1, needs
+no new analysis and no Jacobian change, and has `PlasmaEdgeConvergence` waiting
+as its acceptance criterion. It is an afternoon.
+
+### 12.3 Reuse the Jacobian across Newton steps — the fallback
+
+A chord or Shamanskii iteration. `m = 3` would skip two of every three
+assemblies *and* two of every three `ComputeH()` factorisations, which is the
+46–53% plus the 7–10%. KINSOL implements it (`msbset`) and MEQ already links
+KINSOL for `AndersonPicard` and `PicardThenNewton`, so the machinery is in the
+build. A sweep over `m = 1, 2, 3, 5` against `ManufacturedNonlinear` and
+`examples/limited-tokamak.toml`, reporting wall clock **and** iteration count,
+answers whether the extra iterations eat the saving. Expect the moving support
+to be the trap: it makes the residual mildly discontinuous, so a stale Jacobian
+may stall where a fresh one does not.
+
+**IT IS THE FALLBACK BECAUSE 12.1 DOMINATES IT.** Interpolatory HDG buys the
+same assembly saving while keeping the Jacobian EXACT, so Newton stays
+quadratic; this buys it by giving the convergence rate up. Reach for it if
+12.1's rates do not hold.
 
 ## Deliberately not yet
 
