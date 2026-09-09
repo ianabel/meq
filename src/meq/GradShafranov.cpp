@@ -3772,9 +3772,68 @@ namespace
 			return false;
 		};
 
+		/*
+		 * **AND NOT INSIDE A CONDUCTOR, FOR THE REASON THE AXIS SEARCH IS NOT:
+		 * A COIL'S O-POINT WINS THIS ARGMAX TOO.**
+		 *
+		 * meq::Source::conductors() records why at length. The short version is
+		 * that any coil carrying current of the plasma's own sign contributes a
+		 * local extremum of psi, and on a machine whose coils are meshed inside
+		 * Omega -- which is every machine MEQ can pose -- one of them can carry
+		 * the largest normalised flux in the field. This competition is the same
+		 * "largest Psi wins" rule GradShafranovSolver's axis constraint uses, so
+		 * it loses to a conductor in the same way.
+		 *
+		 * MEASURED ON examples/diverted-tokamak.toml, WHERE IT DECIDES THE
+		 * ANSWER. From a Green's-function guess the first fill seeds at
+		 * ( 1.3766, 0.0206 ) -- the reference equilibrium's magnetic axis --
+		 * with Psi = 9.77e-01 over 2274 candidate elements. By the third
+		 * evaluation the seed is inside P1L at ( 1.0321, -1.1141 ), and it then
+		 * alternates between P1L and P2L at ( 1.7500, -0.6084 ) for the rest of
+		 * the solve, with Psi at the seed reaching 21, then 68, then 86, and the
+		 * span passing through zero and changing sign. The run ends with a
+		 * 260-element "plasma" at ( 0.8161, -0.5465 ) and a span six times the
+		 * physical one.
+		 *
+		 * A Psi of 86 AT THE SEED is the tell, and it is worth reading rather
+		 * than passing over: Psi is 1 at the axis by construction, so a seed
+		 * carrying 86 says the point the normalisation is anchored to is not the
+		 * dominant extremum of the field.
+		 *
+		 * THREE TIERS AND NOT TWO, and the middle one is what keeps this from
+		 * changing answers on iterates that are not yet equilibria. Off the axis
+		 * AND off the conductors first; off the axis alone second, which is
+		 * exactly the rule that was here before; anywhere last. An iterate whose
+		 * only positive-Psi elements are inside coils gets the seed it got
+		 * before rather than no fill at all -- the same reasoning as the
+		 * two-pass fallback in locateAxisPoint(), and for the same reason.
+		 */
+		CoilSet const *const conductors = normalisedSource->conductors();
+
+		auto insideConductor = [ & ]( int element )
+		{
+			if ( conductors == nullptr )
+				return false;
+
+			mfem::Array< int > vertices;
+			mesh.GetElementVertices( element, vertices );
+			double r = 0.0;
+			double z = 0.0;
+			for ( int i = 0; i < vertices.Size(); ++i )
+			{
+				r += mesh.GetVertex( vertices[ i ] )[ 0 ];
+				z += mesh.GetVertex( vertices[ i ] )[ 1 ];
+			}
+			r /= vertices.Size();
+			z /= vertices.Size();
+			return conductors->indexContaining( r, z ) >= 0;
+		};
+
 		double bestPsiN = -std::numeric_limits< double >::infinity();
+		double bestOffAxis = -std::numeric_limits< double >::infinity();
 		double bestAnywhere = -std::numeric_limits< double >::infinity();
 		int seed = -1;
+		int seedOffAxis = -1;
 		int seedAnywhere = -1;
 
 		mfem::Array< int > dofs;
@@ -3782,6 +3841,7 @@ namespace
 		{
 			potentialFes->GetElementDofs( e, dofs );
 			bool const onAxis = touchesAxis( e );
+			bool const inCoil = insideConductor( e );
 
 			for ( int i = 0; i < dofs.Size(); ++i )
 			{
@@ -3798,12 +3858,28 @@ namespace
 					bestAnywhere = psiN;
 					seedAnywhere = e;
 				}
-				if ( !onAxis && psiN > bestPsiN )
+				if ( !onAxis && psiN > bestOffAxis )
+				{
+					bestOffAxis = psiN;
+					seedOffAxis = e;
+				}
+				if ( !onAxis && !inCoil && psiN > bestPsiN )
 				{
 					bestPsiN = psiN;
 					seed = e;
 				}
 			}
+		}
+
+		// A plasma whose only positive-Psi elements are inside conductors gets
+		// the seed the rule above this one would have given it: better to follow
+		// a coil for one iterate than to hold no fill at all, and the
+		// equilibrium the iteration is converging to gets the exclusion back as
+		// soon as it has an extremum of its own.
+		if ( seed < 0 || bestPsiN <= 0.0 )
+		{
+			seed = seedOffAxis;
+			bestPsiN = bestOffAxis;
 		}
 
 		// A plasma that reaches the axis everywhere -- a mirror, or a domain
@@ -3814,6 +3890,7 @@ namespace
 
 		if ( seed < 0 )
 			return;
+
 
 		// A plasma thinner than one element everywhere has no interior at all,
 		// and a fill over an empty set holds nothing -- which would switch the

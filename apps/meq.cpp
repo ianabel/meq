@@ -562,20 +562,6 @@ int main( int argc, char **argv )
 					mhd.toroidalFieldGuess*mhd.toroidalFieldGuess;
 			}
 
-			/*
-			 * THE MOVING SUPPORT IS SET ON THE PLASMA SOURCE AND NOT ON THE
-			 * WRAPPER, WHICH IS WHY THE WRAPPER OVERRIDES IT. The coils are
-			 * OUTSIDE the plasma by construction -- confining them to it would
-			 * switch off every coil in the machine -- so the confinement
-			 * applies to the plasma term alone and the sum is taken after it.
-			 * meq::CoilAugmentedNormalisedSource::setPlasmaSupport forwards,
-			 * and meq::NormalisedSource::setPlasmaSupport is virtual so that
-			 * this call reaches the forwarding one whichever handle it goes
-			 * through.
-			 */
-			if ( config->getSource().confinesToPlasma() )
-				plasma->setPlasmaSupport( true );
-
 			if ( coils )
 			{
 				plasmaSource = plasma;
@@ -586,6 +572,38 @@ int main( int argc, char **argv )
 			{
 				normalised = std::move( plasma );
 			}
+
+			/*
+			 * THE MOVING SUPPORT IS SET ON THE HANDLE THE SOLVER WILL HOLD, AND
+			 * IT HAS TO BE SET AFTER THE WRAPPING RATHER THAN BEFORE.
+			 *
+			 * The coils are OUTSIDE the plasma by construction -- confining them
+			 * to it would switch off every coil in the machine -- so the
+			 * confinement applies to the plasma term alone, and
+			 * meq::CoilAugmentedNormalisedSource::setPlasmaSupport() forwards to
+			 * the wrapped source for exactly that reason. That is why
+			 * meq::NormalisedSource::setPlasmaSupport() is virtual.
+			 *
+			 * **AND A FORWARDING OVERRIDE CAN ONLY FORWARD IF IT IS THE OBJECT
+			 * YOU CALL.** Setting it on `plasma` before the wrapper exists
+			 * confines the plasma term correctly -- f() delegates, so the
+			 * pointwise support works -- and leaves the WRAPPER's own flag
+			 * false. plasmaSupport() is not virtual, so
+			 * GradShafranovSolver::plasmaComponentWanted() reads that false one
+			 * and the flood fill never runs: XP-1's connectivity was silently
+			 * inert on every run carrying a [[coils]] block, which is every
+			 * machine case in this tree. Measured on
+			 * examples/diverted-tokamak.toml before the reorder: the config
+			 * asked for confinement, the inner source reported it, and the
+			 * handle the solver was given reported 0.
+			 *
+			 * theConnectivityReachesACoilMachine in
+			 * tests/convergence/PlasmaConnectivity.cpp is the regression, and it
+			 * asserts on the HANDLE rather than on the wrapped source, because
+			 * asking the plasma source would have passed throughout.
+			 */
+			if ( config->getSource().confinesToPlasma() )
+				normalised->setPlasmaSupport( true );
 
 			source = normalised;
 		}
