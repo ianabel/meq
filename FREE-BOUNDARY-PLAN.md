@@ -3,11 +3,14 @@
 Written 2026-08-29, **rewritten 2026-09-01 against the NPC API**, which changed
 the answer to the two questions this plan is mostly about: what the coupled
 Jacobian looks like, and what has to come from MFEM before any of it can be
-tried. **The sentence that stood here until 2026-09-06 — "a plan, not an
-implementation; nothing here has been built" — is four weeks out of date**:
-FB-A, FB-0, FB-1, FB-2 and FB-3 are built and measured, FB-4 is answered, and
-FB-5's bordered solve works. §7's table is the per-stage state and is the thing
-to believe. What is still a plan is FB-5's adaptivity, FB-6, and §10.
+tried.
+
+**THE LADDER IS FINISHED AND §7's TABLE IS THE PER-STAGE STATE.** FB-A, FB-0,
+FB-1, FB-2, FB-3, FB-5 and FB-7 are built and measured, FB-4 is answered — the
+order is capped by the profile, so no cut rule was built — and FB-6 is met
+against `../freegs4e`. **What is still a plan is §10**, the diverted plasma, of
+which XP-1 and XP-0 are done and XP-2 is the next rung; and, beside the ladder,
+the conductor model of §7.20's *What is left*.
 
 `CLAUDE.md` is the operational record and is authoritative on anything already
 measured; `ROADMAP.md` is the order of work. `docs/` is the manual and carries the stage-7
@@ -3507,8 +3510,8 @@ rather than a missing prerequisite.
 
 **And it is no longer true that nothing here is built.** §10.3's connectivity
 defect was reachable, was measured, and is fixed — `meq::PlasmaComponent` and
-`[source] PlasmaConnectivity` — which also delivers XP-1 of §10.6. What remains
-unbuilt is XP-0 and everything above XP-1. It is written down because every real
+`[source] PlasmaConnectivity` — which also delivers XP-1 of §10.6, and XP-0 is
+measured. What remains unbuilt is everything above them. It is written down because every real
 tokamak MEQ would be pointed at is diverted, because `../freegs4e`'s seven
 benchmark configurations are **all** diverted, and because the tree already
 contains most of the machinery.
@@ -3638,8 +3641,8 @@ any-vertex gives 4286 candidates and **one** component; the centre gives 4058 an
 **two**; every-vertex gives 3821 and **two**. **The leak belongs to the inclusive
 rule, not to the graph.**
 
-And §10.3's own cure — block the saddle's element, which needs an X-point finder
-XP-0 has not built — is **resolution-dependent**: 161 of 2304 elements are still
+And §10.3's own cure — block the saddle's element, which needs the X-point
+finder XP-0 has since measured — is **resolution-dependent**: 161 of 2304 elements are still
 below the saddle at the coarsest of three meshes, where the two-rule fill leaves
 none.
 
@@ -3767,22 +3770,53 @@ Each stage ends at a measured number and each is useful alone. **XP-0 and XP-1
 need no free boundary at all**, which is what made them worth doing early — the
 same argument that made FB-A the best-value stage in this plan. **XP-1 was in
 fact done first**, out of order and ahead of XP-0, because §7.18 found its
-defect live on a limiter case; XP-0 is the one still open.
+defect live on a limiter case; XP-0 followed on 2026-09-08.
 
 | | | acceptance |
 |---|---|---|
-| **XP-0** | **The X-point against a closed form.** `CriticalPointFinder` on `Soloviev::nstx()`, whose X-point is known exactly. No solve, no free boundary. | position converging at the rate `findAxis()` reaches for the axis (2.34 / 3.48 / 4.45 at `k = 1, 2, 3` over a dyadic sweep), with the **pointwise, non-monotone** per-pair behaviour the axis study already documents, so the two-tier rate assertion is the pattern to copy. Plus `audit()` reading `+1` and `−1` over a box enclosing both |
+| **XP-0** | **The X-point against a closed form — DONE 2026-09-08.** `CriticalPointFinder` on `Soloviev::nstx()`, whose X-point the twelve Cerfon–Freidberg constraints put at `( 0.699700, −1.716000 )`. Three cases in `tests/convergence/CriticalPointConvergence.cpp`: the closed-form check, the rate study on a box holding the saddle alone, and the audit on a box holding both. No free boundary and no normalisation. | **met, and it needed no seed.** `findAxis()` cannot reach a saddle by construction — it looks for an extremum — and `sweep()` can: on a box holding exactly one saddle it returns exactly one, at every `k` and every `n` tried, so the located point carries no prior. Position rate **1.814 / 3.566 / 4.223** at `k = 1, 2, 3` over `{ 4, 8, 16, 32, 64 }` against `k+1` less the axis study's own 0.25 of slack, monotone at every refinement. **The reference is checked first and one fixture fails that check**: `nstxAsPublished()`'s prescribed X-point carries `|∇ψ| = 2.97e-02` and its saddle is **9.10e-02** away, so it ships as the control rather than as a second fixture. `audit()` reads `+1` at the axis and `−1` at the X-point over `[0.35, 1.55] × [−2.10, 0.30]` at three orders, summing to the boundary degree of **0** — and `consistent()` is **false and must be**, since `+1 − 1 = 0 ≠ χ = 1` forces `q` not to be outward-transverse; the half of Poincaré–Hopf that needs no hypothesis is the half that holds |
 | **XP-1** | **The connectivity test — DONE 2026-09-07**, ahead of XP-0, because §7.18 found the defect live on a *limiter* case. `meq::PlasmaComponent`, driven by `refreshPlasmaComponent()` before every residual and every Jacobian; `[source] PlasmaConnectivity` selects it and `"pointwise"` is the control. | met: `theFillSeparatesThePrivateFluxRegionFromThePlasma` excludes the private flux region where the pointwise test includes it, as an element count **and** as `∫\|F\|`. **And the sharp one came out half false**: the fill does not leak through the X-point's own element — it leaks through the **band** of elements straddling the separatrix, every one of which carries `Ψ > 0` at some vertex, so a one-rule fill leaves **2,275** elements below the X-point, exactly what the pointwise test leaves. §10.3's own cure, blocking the saddle, is resolution-dependent. What ships is a **watershed** over the straddling band, needing no X-point finder and no parameter |
 | **XP-2** | **`ψ_bnd` from the located X-point, as an OUTER fixed point.** Locate, set the normalisation, re-solve. No new border. | it converges, and the answer agrees with XP-3 — which is what makes XP-3 a change of algorithm rather than a change of problem. This is the honest halfway house and may be enough for a long time |
 | **XP-3** | **The three-row border**, `(r_X, z_X, ψ_bnd)` inside the same Newton at `( N + 4 )`. | agreement with XP-2 at round-off, and **the observed Newton order**, which is the only thing that can see the inexact `∇q` corner block. `HighBetaConvergence` bit-identical, which is what says the generalisation reduces |
 | **XP-4** | **A diverted machine case** against `../freegs4e`. | all seven of its configurations are already diverted, so this needs no new reference. **FB-6 at `j ≥ 1` was the prerequisite and it is met** — the shipped machine case runs at `j = 2` — so this is that case with the boundary found at a saddle rather than at a limiter |
 
-**XP-0 IS THE STAGE TO PROTECT AND IT IS ALSO THE CHEAPEST, AND IT IS THE ONE
-STILL OPEN.** It is a rate study against a closed form on a fixture that already
-ships, it needs nothing that is not already built, and it either shows that MEQ
-can find an X-point at the order its flux converges at or shows that it cannot.
-Everything above XP-1 assumes it — and XP-1 landed without it, because the
-watershed needs no X-point at all.
+**XP-0 WAS THE STAGE TO PROTECT AND IT WAS ALSO THE CHEAPEST.** It is a rate
+study against a closed form on a fixture that already ships, it needed nothing
+that was not already built, and it shows that **MEQ finds an X-point at the
+order its flux converges at**, unseeded, with the root finder adding nothing to
+the error of the field it roots. Everything above XP-1 assumes that — and XP-1
+landed without it, because the watershed needs no X-point at all.
+
+**TWO THINGS IT MEASURED THAT WERE NOT ASKED FOR, AND BOTH ARE WORTH CARRYING
+FORWARD.**
+
+**The conditioning of the root is two sided and the measurement fills it.**
+`q_h( x_h ) = 0` and `q( x* ) = 0` give `x_h − x* = −J⁻¹( q_h − q )( x* )` with
+`J = dq/dx = Hess( ψ )/r` at the saddle — **symmetric**, a Hessian being so —
+whose eigenvalues at `nstx()`'s X-point are `+0.899099` and `−0.578731`. So the
+position error is trapped between **1.112** and **1.728** times the pointwise
+flux error there, and over all fifteen points of the sweep the measured ratio is
+**1.11 to 1.73**, touching both ends. That is the sharp form of *the root finder
+adds nothing*, and it is sharper than the axis study can state: at the axis the
+window is 0.77 to 3.27 and the measurement sits inside it without reaching
+either end. **The test computes the window from the fixture's own Hessian**
+rather than quoting it, so a change of fixture moves it correctly.
+
+**And the rate must be read against the FIELD's pointwise error, not only
+against `k+1`.** At `k = 1` over `{ 4, 8, 16, 32 }` — the axis study's own
+sequence — the position rate is **1.685**, under target; the pointwise error of
+`q` at the same point reads **1.696**, and `L2( q )` over the same meshes reads
+1.971. Adding one level takes both to 1.814 and 1.862, and carrying `k = 1` to
+`n = 128` gives 1.916 from `n = 4` and 2.017 from `n = 8`. **The short sequence
+was short of levels, not of order** — a pointwise error carries a constant that
+is wherever in its element the point happens to fall, and a four-level rate
+measures the ratio of two of those constants as much as it measures an order.
+There is no sequence comfortable at all three orders at once: `n = 128` lifts
+`k = 1` to 1.916 and drops `k = 2` to 2.884. So the shipped case asserts the
+rate **and** asserts that it agrees with the pointwise flux error's own rate to
+0.3 — measured 0.048, 0.022 and 0.057 — which is the assertion that separates
+*the finder is wrong* from *the field is coarse here*, and which holds even
+where the margin on the rate itself is thin (0.064 at `k = 1`).
 
 **And what it does NOT cover, stated so nobody discovers it at XP-4.** This
 pathway makes a diverted *free-boundary* solve reachable. It does **not** make a

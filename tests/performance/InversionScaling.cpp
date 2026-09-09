@@ -1835,10 +1835,21 @@ namespace
 	 * half of this and got the premise wrong: it says the fallback "must stay
 	 * outside, or be serialised. It is already O( elements x points ) and the
 	 * tracer reports zero fallbacks, so this costs nothing to honour." The
-	 * tracer reports zero fallbacks ON A TRACE. traceFromAxis() begins by
-	 * sampling the axis with no hint at all, so it takes the fallback ONCE PER
-	 * SURFACE unconditionally, and section 3's K5 measures fitByAngle() taking
-	 * it 183 times in 576 rays at the default walk depth.
+	 * tracer reports zero fallbacks ON A TRACE, and Contour::fallbackLocations
+	 * cannot see a seed call at all -- sampleAt() hands sampleField() a local
+	 * counter and discards it -- so the count it reports is silent about exactly
+	 * the call that aborts here. Section 3's K5 measures fitByAngle() taking the
+	 * fallback 183 times in 576 rays at walk depth 4, and none at the default 12.
+	 *
+	 * THE SEED IS NO LONGER ONE OF THEM. traceFromAxis() now takes
+	 * CriticalPoint::element as its hint, which takes the unconditional
+	 * per-surface FindPoints to zero (6 -> 0 over six surfaces, 196 -> 1 over
+	 * SurfaceAverageConvergence). WHAT THAT DOES TO THE ABORT ABOVE IS NOT
+	 * MEASURED: the run recorded here predates the hint, the remaining calls are
+	 * data-dependent walk failures inside fitByAngle() and faceJump() rather than
+	 * seeds, and "rarer" is not "unreachable". The independent-state measurement
+	 * below therefore stands as written, and re-running the SHARED tracer is the
+	 * experiment that would replace this paragraph.
 	 *
 	 * So what is measured here is the parallelism that is AVAILABLE, by giving
 	 * each thread its own mesh, its own solve and its own tracer -- which shares

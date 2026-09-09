@@ -127,11 +127,73 @@ so its `omega_profile` callable is the only way to hand both codes the same
 **Nothing on that side runs here yet** — `freegs4e` is not importable and geq's
 paths point at another machine.
 
-**THE GAP THAT LEAVES IS WORTH KNOWING**: no published rotating benchmark
-exercises the `C′(ψ)` term — Li & Zhu's Solov'ev case has `T` and `Ω` constant,
-and Maschke & Perrin's (4.7) *forces* `C` constant — and that is precisely the
-term Li & Zhu got wrong. Only `RotatingSourceTests`' `dFdPsi` sweep touches it,
-and that is a difference of MEQ's own `f()` rather than a closed form.
+**THE `C′(ψ)` GAP IS CLOSED, BY A MANUFACTURED FIXTURE, AND NO PUBLISHED
+BENCHMARK COULD HAVE CLOSED IT.** `C` constant is what collapses Maschke &
+Perrin's (4.6) to its (4.8) and makes the equation solvable at all, so a varying
+`C` is exactly what has no closed form — the route is manufactured by necessity
+and there is no point looking for another paper.
+`tests/analytic/VaryingCentrifugal.hpp` and
+`tests/convergence/VaryingCentrifugalConvergence.cpp` are it.
+
+**THE CONSTRUCTION RUNS BACKWARDS FROM `C`, AND THAT IS THE DESIGN DECISION.**
+Choosing `ω` and the temperatures and reading `C` off leaves it a ratio whose two
+derivatives are awkward to state; prescribing `C(ψ)` as a quadratic and deriving
+`ω = √( C D / K )` from (97) makes `C`, `C′` and `C″` two lines each and leaves
+the temperatures free. `C` then drifts **2.50×** over the sweep with `C″ = 2.00`
+exactly, the densities vary **33.8×** across the box, and the two
+implementations agree at **7.13e-16 in `F`** and **5.26e-16 in `dF/dψ`**:
+
+→ **[M-68](MEASUREMENTS.md#m-68)** — both closures · `F` · `dF/dψ` · `p` · `φ₀`
+
+**AND TWO TRANSCRIPTIONS AGREEING ONLY PROVES THE COPYING WAS CONSISTENT**, so
+the fixture carries a second route to its own pressure: `potentialByBisection()`
+solves (97) by bisection with **`C` appearing nowhere**, and differencing it
+reaches the closed form's derivatives. A slip shared between MEQ's `C`-chain and
+the fixture's would pass the pointwise comparison and fail this one.
+
+→ **[M-69](MEASUREMENTS.md#m-69)** — (97)'s residual · `p` · `dp/dψ` · `d²p/dψ²`
+
+→ **[M-70](MEASUREMENTS.md#m-70)** — the mutations, and `p` not moving under them
+
+**THE STANDING CLAIM THAT ONLY THE `dFdPsi` SWEEP TOUCHED `C′` IS WRONG, AND THE
+REAL GAP WAS NARROWER AND SHARPER.** `RotatingSourceTests`'
+`thePressureMatchesTheIsothermalClosedForm` writes the exponent out by hand and
+pins `pressure()` and `densityExponent()` against it to **1e-14**, at profiles
+whose `C` drifts 1.21× — so **`C` itself was already independently pinned**, and
+`RotatingNewtonConvergence` runs at `C′ ≠ 0` as well. What had no analytic
+reference is `C′` and `C″`, which enter nothing but `dp/dψ` and `d²p/dψ²` — that
+is, nothing but `f()` and `dFdPsi()` — and were checked only by central
+differences at 1e-6 to 1e-7. An `O(1)` error would have been caught; a term
+smaller than the differencing floor would not.
+
+**AND IT FOUND A HOLE NOBODY HAD NAMED, IN THE CHARGE WEIGHTING.**
+`closedFormState()` is built on `Z₁T₂ − Z₂T₁`, `Z₁m₂ − Z₂m₁` and `m₁T₂ − m₂T₁`,
+and **every two-species rotating configuration in the tree runs at `Z = ±1`**,
+where those collapse to `T₁ + T₂` and `m₁ + m₂`. `Z = 6` appears only in
+three-species sets, which take `RootFind` and never form the closed-form
+combinations at all. **A closed form that wrote the plain sums would have passed
+everything in this tree.** The fixture is at `Z₁ = +2`, where `Z₁T₂ − Z₂T₁` is
+40.0% away from `T₁ + T₂` — nine orders above the tolerance — so the agreement
+above says the *weighting* is right and not only the chain rule.
+`theChargeWeightedCombinationsAreNotPlainSums` records it.
+
+**THE MANUFACTURED SOLVE IS REACHABLE AND ITS VALUE IS NARROW.** `meq::Source`
+is `f( r, z, ψ )`, so a test-local source adds a `ψ`-independent remainder built
+from **the fixture** rather than from MEQ's own `f()` — which is what
+`RotatingNewtonConvergence` does, and is why there `ψ_e` stays exact whatever
+`f()` computes. Rates are 1.999 / 2.997 / 3.999 in `ψ` at `k = 1, 2, 3`, Newton
+three steps throughout. The pointwise sweep is nine orders sharper, so the solve
+is not what closes the gap; what it reaches is the **assembly** — `SourceIntegrator`
+evaluating this source and its Jacobian at quadrature points, at `Z₁ = +2` and a
+quadratic `C`.
+
+**THE +5% MUTATION REPRODUCES ON A THIRD SOURCE.** Perturbing `dFdPsi` by 5%
+leaves both `L2` errors unchanged to seven figures and moves the observed Newton
+order 1.792 → 1.173 and the count 3 → 4. **1.792 is not a shortfall**: the first
+step already takes 500× off the residual, so the best triple straddles the
+pre-asymptotic step — `r₂/r₁² = 1.2e-02` says the iteration is quadratic and
+there is simply no clean tail. The threshold was calibrated between the two
+readings rather than copied.
 
 **`ψ`-DEPENDENT `T` AND `ω` ARE NO LONGER PART OF THAT GAP, AND THE TWO ARE
 WORTH KEEPING APART.** Maschke & Perrin's §4 leaves `T(ψ)` free and `ω(ψ)` with
@@ -234,7 +296,9 @@ and 1.987 / 2.989 / 3.989 in `q`, Newton taking **1** step everywhere.
 
 **IT DOES NOT CLOSE THE `C′(ψ)` GAP AND NO EXACT SOLUTION CAN.** `C` constant is
 precisely what collapses (4.6) to (4.8); a varying `C` is what makes the
-equation unsolvable in closed form.
+equation unsolvable in closed form. `tests/analytic/VaryingCentrifugal.hpp` is
+what closes it, and it is manufactured for exactly this reason — see *Toroidal
+flow* above.
 
 **THE GEOMETRIC CONSTANTS NEED THEIR OWN CHECK, AND SUBSTITUTION INTO THE PDE
 CANNOT SUPPLY IT.** `C` of (4.18) and `ε_a` multiply `Δ*`-**harmonic** terms, so

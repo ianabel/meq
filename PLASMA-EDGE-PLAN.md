@@ -20,9 +20,10 @@ ITS OWN NUMBERS MAKE**, and that argument is unchanged: **`j ≥ 1` already give
 `k+2` at `k ≤ j`, with nothing built.** There is still a real risk of building
 this instead of the things `ROADMAP.md` puts ahead of it — §10's diverted
 plasmas among them, which this plan explicitly cannot cover, both transfer path
-families giving out at a corner. And its own central premise is measured at two
-rungs out of three; **PE-0 settles that cheaply and is the only thing here worth
-starting on its own.**
+families giving out at a corner. **Its own central premise is now measured at all three rungs and it is TRUE** —
+PE-0, §6 — and the same measurement says the plan's own machinery does not cash
+it: the transfer costs `ψ*` about a full order, so PE-0's acceptance as written
+is not reachable and it is the acceptance that has to move.
 
 ## 1. What this fixes, and what it costs to leave unfixed
 
@@ -38,7 +39,17 @@ a **modelling** choice. Measured (FB-4):
 | `ψ*` | `min( k+2, j+2.5 )` | `min( k+2, j+2 )`, `j+2.5` with the rule raised |
 
 So `ψ*` keeps `k+2` **exactly when `k ≤ j`**, and the cap is a theorem about
-polynomials on a mesh that does not follow `Γ_p`, not about the equation. What
+polynomials on a mesh that does not follow `Γ_p`, not about the equation.
+
+**AND THE `ψ*` ROW OF WHAT THIS PLAN DELIVERS IS NOT `k+2`, WHICH PE-0
+MEASURED.** Removing `j` from `ψ_h` works and is measured — 2.00 / 3.04 / 4.01 at
+`j = 0` through the transfer, against the cut mesh's cap of 1.5 whatever `k` is.
+`ψ*` reaches `k+2` only where `λ` sits on `Γ_{p,h}`; through the transfer it
+reads 2.23 / 3.16 / 4.00, about `k+1` to `k+1.5`, which is the shortfall
+`ExtensionConvergence` already asserts on the outer boundary. Read the rows below
+as what an uncut *domain* admits, not as what this plan hands you.
+
+What
 this plan buys is the removal of the `j` in those expressions: with no element
 straddling `Γ_p`, every subdomain solution is smooth up to its own boundary and
 the rates go back to `k+1` and `k+2` **at every `j`, including `j = 0`**.
@@ -207,13 +218,42 @@ Each stage ends at a **measured rate**, as every stage in this tree does.
 
 | | | acceptance |
 |---|---|---|
-| **PE-0** | **A fixed interface, one side only.** Solve the plasma problem alone on `Ω_{p,h}` with `λ` GIVEN, against `PlasmaEdge`'s exact solution. No coupling, no vacuum side. | `ψ` at `k+1` and `ψ*` at `k+2` **at `j = 0`**, where the unfitted path reads 1.9 and 1.5. This is the whole claim of the plan, and PE-0 is where it is either true or not |
+| **PE-0** | **A fixed interface, one side only.** Solve the plasma problem alone on `Ω_{p,h}` with `λ` GIVEN, against `PlasmaEdge`'s exact solution. No coupling, no vacuum side. | **RUN.** `tests/convergence/PlasmaEdgeConvergence.cpp`, three cases, `j = 0, 1, 2` × `k = 1, 2, 3`; the control is the same solve with `λ` deleted and it is flat at −0.06. **`ψ` at `k+1`: MET.** At `j = 0` it reads **2.00 / 3.04 / 4.01** where the cut mesh is capped at `j + 1.5 = 1.5` whatever `k` is, and the cap is gone at every `j`. **`ψ*` at `k+2`: NOT MET with `λ` transferred** — 2.23 / 3.16 / 4.00 at `j = 0` — and **MET with the same `λ` imposed on `Γ_{p,h}` instead**, 2.88 / 3.94 / 4.93. The two columns differ only in the transfer, so **the premise is true and the TRANSFER is what costs `ψ*` its extra order**, by about a full order, at every `j`. `j` has left the rates: the spread of `ψ*` over `j = 0, 1, 2` is 0.07 / 0.18 / 0.29 against the cut mesh's 1.11 / 2.04 / 2.18. §7's `j = 2, k = 3` worry does NOT reproduce here — see the note under this table |
 | **PE-1** | **The vacuum side, with its inward paths.** Same, on `Ω_{v,h}`, `λ` still given. | the same rates from the other side, plus the mirrored star-shapedness margin `≥ 0` |
 | **PE-2** | **The two-sided sweep and its tiling check.** Both path families over the same `Γ_p`; weights from each must sum to `\|Γ_p\|`. | agreement to the cone-off floor, `~5e-10`, which is the number `ExtensionBoundaryQuadrature`'s own check reached. **Refine the RULE at fixed `h`** to separate coverage from smoothness — the mistake recorded in §7.7 of the free-boundary plan |
 | **PE-3** | **The coupling closed on a FIXED interface**, `λ` solved for by the `N` flux-balance rows in a border. Still no moving support: prescribe `Γ_p`. | `k+1` / `k+2` against the exact solution at `j = 0, 1, 2`, and `λ`'s truncation shown to be spectral in `N` and therefore not the binding term |
 | **PE-4** | **The support read off `ψ_h`**, with the outer fixed point of §5.2. | the same rates as PE-3 on `MovingPlasmaEdge`; the outer loop terminating on "no element changed"; **and `j = 0` converging at all**, which is the finding this plan exists to overturn |
 | **PE-5** | **Into the free-boundary solve**: `ψ_ax`, `ψ_bnd`, the exterior coupling and the plasma edge in one bordered system. | `HighBetaConvergence` and the FB-1 cases unchanged to every digit, which is what says the generalisation reduces |
 | **PE-6** | **A machine case at `j = 0`** against `../freegs4e`. | agreement at the level FB-6 reaches at `j = 1` |
+
+**§7'S `j = 2, k = 3` ANOMALY IS THE SUBDOMAIN'S STAIRCASE AND NOT THE PLASMA
+EDGE, AND PE-0 SEPARATES THE TWO WITH A THIRD CASE.** The same equilibrium on a
+**fitted rectangle** strictly inside the disc — no subdomain, no staircase, no
+transfer, and no plasma edge in the domain at all — reads, at worst over the
+three rungs, **2.99 in `ψ` and 3.99 in `ψ*`** at `k = 2` and **3.98 and 4.94** at
+`k = 3`. So the
+plasma-side solution admits `k+1` and `k+2` at every `j`, which is the premise
+as a statement about the SOLUTION, and it is not in doubt. On `Ω_{p,h}` with the
+same exact trace on its own boundary it reads 3.59 / 4.64 at `j = 2, k = 3` —
+short, and the shortfall is what the inscribed staircase boundary costs. Raising
+the source rule from `2k + 4` to `2k + 16` moves that column by not one digit,
+so it is not the quadrature; the fitted rectangle rules out the fixture and the
+solver. The obvious
+reading, and it is a reading rather than a measurement: HDG's `k+1` in `ψ_h` and
+`k+2` in `ψ*` come from a duality argument that wants the adjoint problem
+`H²`-regular, and `Γ_{p,h}` is a staircase of `270°` re-entrant corners.
+
+**AND THE TRANSFERRED ROUTE IS INTERMITTENT, ON A SMOOTH CIRCLE.** §9.4 records
+a mesh-dependent fragility and attributes it to a corner. PE-0 meets it with no
+corner anywhere: at `k = 3`, sweeping `n = 16, 24, 32, 48, 64, 96, 128`, the
+transferred `L2(ψ)` reads 3.39e–07 at `n = 16` and **5.89e–07 at `n = 24`**, and
+`L2(q)` improves by 0.67 of an order between `n = 64` and `n = 96` — with
+`VertexConePath::NumWidened()` **zero** at every mesh and
+`dist(Γ_{p,h}, Γ_p)/h` in **[1.02, 1.33]**, so P.1 holds throughout. Raising the
+path quadrature to order 24 changes the answer in the sixth figure. **So the
+corner sharpens that fragility rather than causing it**, and a per-pair rate is
+not assertable on the transferred route — which is why PE-0's pairwise tier
+asserts that the error FALLS rather than asserting a rate.
 
 **AND A DIVERTED CASE NEEDS A STAGE BEFORE PE-0, WHICH §9.4 HAS ALREADY RUN
 ONCE.** PE-0's interface is smooth, so it is silent about the corner; the
@@ -275,18 +315,23 @@ period-4 limit cycle `CLAUDE.md` records for NPC on §4.5. There is no
 globalisation for a combinatorial iteration; the answer if it happens is
 probably to require the support to grow monotonically within an outer sweep.
 
-**THE PREMISE ITSELF HAS ONE PIECE OF EVIDENCE AGAINST IT, AND PE-0 IS THE
-TEST OF EXACTLY THAT.** This plan rests on *no element straddling `Γ_p` implies
-full order*, which is why the uncut elements' own convergence matters.
-`theCutCapsTheOrderBeforeAnyMethodIsChosen` measures it, and at `j = 0` and
-`j = 1` it behaves — 2.88 / 3.88 / 4.98 and 2.96 / 3.72 / 4.76 against `k+2`.
-**At `j = 2, k = 3` it does not**: the pair rate FALLS, 4.67 then 4.50, onto the
-cap `j + 2.5 = 4.5` rather than climbing to `k+2 = 5`. A falling rate is not
-pre-asymptotics, and the uncut elements carry nothing but smooth functions, so
-either the classification of "uncut" is wrong or something couples the interior
-to the band. **Until that is understood the plan's central premise is measured
-at two rungs out of three.** PE-0 settles it directly and cheaply, which is the
-reason it is first and the reason not to skip it.
+**THE PREMISE HAD ONE PIECE OF EVIDENCE AGAINST IT AND PE-0 IS THE TEST THAT
+DISPOSED OF IT.** This plan rests on *no element straddling `Γ_p` implies full
+order*, which is why the uncut elements' own convergence matters.
+`theCutCapsTheOrderBeforeAnyMethodIsChosen` measures the best approximation, and
+at `j = 0` and `j = 1` it behaves — 2.88 / 3.88 / 4.98 and 2.96 / 3.72 / 4.76
+against `k+2` — while **at `j = 2, k = 3` its pair rate FALLS**, 4.67 then 4.50,
+onto the cap `j + 2.5` rather than climbing to `k+2 = 5`.
+
+**PE-0 SOLVES THE SAME EQUILIBRIUM AND THE FALL DOES NOT REPRODUCE.** On a
+FITTED rectangle strictly inside the plasma — no cut, no staircase, no transfer
+— `j = 2, k = 3` reads 3.98 / 3.98 / **4.94**, and on `Ω_{p,h}` with the exact
+trace the per-pair `ψ*` reads 4.70, 4.50, 4.74: scatter, and rising rather than
+falling. Raising the source rule from `2k+4` to `2k+16` moves that column in **no
+digit**, so it is not the quadrature either. **The premise is true at all three
+rungs**; what is left of the shortfall belongs to `Γ_{p,h}`'s staircase of 270°
+re-entrant corners, where HDG's duality argument wants an `H²`-regular adjoint
+and does not get one. §6's PE-0 row has the numbers.
 
 **And this is a research project, not a port.** Unlike stage 5, there is no
 paper that has done exactly this, no published table to reproduce, and no

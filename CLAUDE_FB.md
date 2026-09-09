@@ -1320,6 +1320,130 @@ the rates were measured on. And the affine-source check had to assert the
 finest mesh: `CLAUDE_HDGGS.md`, *One more test moved from the stopping rule to the property*, met
 again from scratch.
 
+## XP-0: MEQ locates an X-point at the order its flux converges at, unseeded
+
+**`FREE-BOUNDARY-PLAN.md` §10.6's cheapest stage, and the one everything above
+XP-1 assumes.** `Soloviev::nstx()`'s X-point is fixed by the twelve
+Cerfon–Freidberg constraints at `( 0.699700, −1.716000 )`, so it can be measured
+against a closed form with no free boundary, no normalisation and no coupling —
+the same shape as FB-A, which is the argument that made FB-A the best-value stage
+in that plan.
+
+→ **[M-72](MEASUREMENTS.md#m-72)** — the position sweep · **[M-73](MEASUREMENTS.md#m-73)** — the reference check and the audit
+
+**NOTHING IS SEEDED, AND THAT IS THE PART WORTH KNOWING.** `findAxis()` and
+`tryFindAxisFrom()` cannot reach a saddle by construction — both filter on
+`AxisSense` — so what reaches the X-point is `sweep()`, which roots every element
+from its own centre and its own quietest flux node. On a box holding exactly one
+saddle it returns exactly one, at every `k` and every `n` tried, so the located
+point carries no prior at all. The coarsest row is the proof: at `k = 1, n = 4` it
+lands 3.5e-3 away. `overshoot` is exactly zero at every point, so
+`setContainment()` never arbitrates here.
+
+**THE ROOT FINDER ADDS NOTHING, AND HERE THAT CAN BE SAID TWO-SIDEDLY.**
+`q_h( x_h ) = 0` and `q( x* ) = 0` give `x_h − x* = −J⁻¹( q_h − q )( x* )` with
+`J = dq/dx = Hess( ψ )/r`, which is **symmetric** — a Hessian being so — with
+eigenvalues `+0.899099` and `−0.578731` at this saddle. So the position error is
+trapped between **1.112** and **1.728** times the pointwise flux error, and over
+all fifteen points the measured ratio is **1.11 to 1.73**, touching both ends. The
+axis study can only state the upper half: there the window is 0.77 to 3.27 and the
+measurement never reaches either end. The test computes the window from the
+fixture's own Hessian rather than quoting it.
+
+**THE REFERENCE HAS TO BE CHECKED FIRST AND ONE FIXTURE FAILS THAT CHECK.**
+`nstxAsPublished()`'s prescribed X-point carries `|∇ψ| = 2.97e-02` and its saddle
+is **9.10e-02** away, at `( 0.695811, −1.806937 )` — exactly what `Soloviev.hpp`
+records. A rate study against that point would converge at a clean rate to a place
+the finder is right not to be, which is this tree's standing hazard. It ships as
+the control in `theClosedFormXPointIsASaddleOfTheClosedForm`, so that "`nstx()` is
+the right fixture" is a measurement rather than a preference.
+
+**A FOUR-LEVEL SEQUENCE IS NOT ENOUGH AT `k = 1`, AND THAT IS THE SEQUENCE AND NOT
+THE FINDER.** On the axis study's `{ 4, 8, 16, 32 }` the position rate is
+**1.685**, under `k+1` less 0.25 of slack; five levels give **1.814** and `n = 128`
+gives 1.916 from `n = 4` and 2.017 from `n = 8`. The pointwise error of `q` at the
+same point does the same thing in the same places — 1.696 then 1.862 — while
+`L2( q )` sits at 1.971 throughout. A pointwise error carries a constant that is
+wherever in its element the point falls, so a short sequence measures the ratio of
+two of those constants as much as it measures an order. **And there is no sequence
+comfortable at all three orders at once**: `n = 128` lifts `k = 1` to 1.916 and
+drops `k = 2` to 2.884, because at `n = 64` the X-point happens to fall where `q_h`
+is unusually good. So the shipped case asserts the rate **and** asserts that it
+agrees with the pointwise flux error's own rate to 0.3 — measured 0.048, 0.022,
+0.057 — which is the assertion that separates *the finder is wrong* from *the field
+is coarse here*.
+
+**AND `audit.consistent()` CANNOT HOLD OVER A BOX ENCLOSING BOTH, WHICH IS
+ARITHMETIC RATHER THAN A DISCRETISATION FAILURE.** Poincaré–Hopf says an
+outward-transverse `q` gives sum-of-indices `= χ = 1`; the interior indices are
+`+1` at the axis and `−1` at the X-point and sum to 0; so `q` is not
+outward-transverse on any such box, at any mesh, and the degree is entitled to
+disagree with χ. Measured at three orders: degree 0, χ 1, `transversality 0.00`.
+The half of the theorem that needs no hypothesis — degree equals the sum of the
+indices inside — holds at every order, and it is the half a diverted
+free-boundary solve would use: *the sweep has found everything the boundary says
+is in there*.
+
+**WHAT XP-0 EXPOSES FOR XP-2 AND XP-3.** `sweep()` is the only entry point that
+reaches a saddle, and it costs one Newton per element. XP-3's border relocates the
+X-point once per Jacobian, which is exactly the trade `tryFindAxisFrom()` exists to
+avoid for the axis — so a `Saddle` sense, or a sibling entry point with the same
+seed-and-rings contract, is wanted before the three-row border is built. That is a
+gap in the API rather than a defect in it.
+
+## PE-0: the premise is true, and the plan's own machinery does not cash it
+
+**`PLASMA-EDGE-PLAN.md` §6's first stage is run, and it splits the plasma edge's
+order loss into two halves that the plan had welded together.**
+`tests/convergence/PlasmaEdgeConvergence.cpp` solves `PlasmaEdge` on `Ω_{p,h}` —
+the elements lying entirely inside the disc — with `λ` given, which is stage 5's
+curved-boundary machinery pointed at an interior circle. **The premise is true.**
+On a fitted rectangle strictly inside the plasma the same equilibrium reads `k+1`
+and `k+2` to two decimal places at `j = 0`, `1` and `2` alike, and on `Ω_{p,h}`
+itself `ψ_h` climbs from the cut mesh's cap of `min( k+1, j+1.5 )` — **1.5 at
+`j = 0` whatever `k` is** — to **2.00 / 3.04 / 4.01**. `j` leaves the rates:
+`ψ*`'s spread over the three rungs falls from 1.11 / 2.04 / 2.18 on the cut mesh
+to **0.07 / 0.18 / 0.29** on the uncut one.
+
+→ **[M-74](MEASUREMENTS.md#m-74)** — the rate against `j`, both routes, against the cut mesh · **[M-75](MEASUREMENTS.md#m-75)** — the fitted-rectangle control
+
+**WHAT IS NOT TRUE IS THAT THE PLAN'S OWN MACHINERY CASHES IT, AND THE EXPERIMENT
+THAT SAYS SO IS FREE.** Each row is run twice — with `λ` on `Γ_{p,h}`, where it is
+the exact trace and the problem is consistent, and with `λ` on `Γ_p`, transferred,
+which is what PE-3 must do because there `λ` is the interface unknown and lives
+nowhere else. `ψ*` reaches **`k+2` on the first and never on the second**: 2.88 /
+3.94 / 4.93 against 2.23 / 3.16 / 4.00 at `j = 0`. The two differ only in the
+transfer, so **the missing order is the transfer's and not the plasma edge's** —
+the same shortfall `ExtensionConvergence` records on the OUTER boundary, where it
+asserts `k+1.5` rather than `k+2` for exactly this reason. **PE-0's acceptance as
+`PLASMA-EDGE-PLAN.md` §6 writes it is therefore not reachable, and it is the
+acceptance that has to move.** The case is red on that assertion and stays red,
+per *Testing stance*.
+
+**AND THE MESH-DEPENDENT FRAGILITY OF §9.4 IS NOT THE CORNER.** That section
+measures a transferred solve failing on particular meshes and reads the X-point's
+corner as the cause. PE-0 meets the same thing on a **smooth circle**: at `k = 3`
+the transferred `L2(ψ)` is 3.39e-07 at `n = 16` and **5.89e-07 at `n = 24`**, with
+`VertexConePath::NumWidened()` zero at every mesh, `dist( Γ_{p,h}, Γ_p )/h` in
+[1.02, 1.33] so assumption P.1 holds, and a path quadrature raised to order 24
+changing the sixth figure. **The corner sharpens the fragility rather than causing
+it.** A per-pair rate is not assertable on the transferred route, which is why
+PE-0's pairwise tier asserts that the error FALLS.
+
+→ **[M-76](MEASUREMENTS.md#m-76)** — the non-monotone transferred sequence
+
+**AND THE `j = 2, k = 3` ANOMALY IS THE STAIRCASE.**
+`theCutCapsTheOrderBeforeAnyMethodIsChosen`'s uncut column falls, 4.67 then 4.50,
+which `PLASMA-EDGE-PLAN.md` §7 records as the one piece of evidence against the
+premise. It does not reproduce on the solve: `Ω_{p,h}`'s per-pair `ψ*` reads 4.70,
+**4.50**, 4.74 — scatter, and rising rather than falling — while the fitted
+rectangle reads 4.94 on the same equilibrium at the same `j`. Raising the source
+rule from `2k+4` to `2k+16` moves the column in **no digit**, so it is not the
+quadrature. What is left is `Γ_{p,h}`'s staircase of 270° re-entrant corners,
+where HDG's duality argument for `k+1` and `k+2` wants an `H²`-regular adjoint
+and does not get one. The lever this tree already has is `meq::AdaptiveDomain`,
+GS-2 §3.3's companion mesh.
+
 ## `ψ_bnd`: settable, an unknown, and reachable from a file
 
 **This is FB-3.** It lives beside `ψ_ax`'s border, which it generalises, and

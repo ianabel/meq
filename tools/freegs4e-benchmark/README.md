@@ -732,6 +732,75 @@ profile conversion and the initial guess are all this directory's.
 | profile amplitude | 1, by construction | **1.001239** | 1.24e-03 |
 | `I_p` | 3.0e+05 A | 3.000000e+05 A | it is the constraint |
 
+### The conductors, and the two codes now model them alike
+
+**`freegs4e`'s default `Coil` IS AN EXACT FILAMENT.** `controlPsi` is
+`Greens( self.R, self.Z, R, Z )*turns`, a point source; its `area` attribute only
+imposes a current-density limit and never enters the field. MEQ's four are
+0.1 × 0.1 m **rectangles** meshed into the domain, carrying a uniform current
+density. So every number above was reached *despite* a modelling difference
+rather than because the models agree.
+
+**`freegs4e.shaped_coil.ShapedCoil` IS THE REFERENCE'S OWN ANSWER TO THIS**, and
+`fgsref.py`'s case **`I_limited_shaped`** is it: `H_limited_circular` with the
+same four conductors given the extent MEQ meshes — the squares
+`[1.70, 1.80] × [0.85, 0.95]` and their mirrors, which is exactly what
+`tools/mesh/halfdisc.py` cuts. `polygon_quad` triangulates and puts a 6-point
+degree-4 rule on each triangle with weights summing to one, so `controlPsi` is
+the **average** Greens over the cross-section: MEQ's model term for term, in the
+reference's own code rather than in a MEQ-side correction. Identical in every
+other field, so the difference between the two cases is the conductor model
+alone.
+
+**The 12-point rule is enough here, measured rather than assumed.** Against a
+64 × 64 tensor Gauss–Legendre rule over the same square, the worst relative error
+in `controlPsi` over this case's whole boundary ring plus the grid point nearest
+each coil is **3.0e-05**, at `( 1.7500, 0.8000 )` — the boundary point two
+half-heights below P1U. It is the same at 129² and 513², being a property of the
+rule and the geometry rather than of the grid.
+
+**WHAT THE CONDUCTOR MODEL IS WORTH, AND IT IS NOT WHERE IT WAS EXPECTED.**
+Both cases laddered 129 → 257 → 513, each rung seeded from the one below:
+
+| | filament | shaped | apart |
+|---|---|---|---|
+| `ψ_ax`, 513² | 9.30875205e-02 | 9.30851844e-02 | **2.5e-05** |
+| `ψ_bnd`, 513² | 2.62246185e-02 | 2.62221124e-02 | **9.6e-05** |
+| P1 current | −179895.4 | −179867.3 | 1.6e-04 |
+| P2 current | −52739.9 | −52787.4 | 9.0e-04 |
+| order in `h` | 2.313 | 2.313 | — |
+| from its own Richardson limit | 7.92e-04 | 7.91e-04 | — |
+
+**The core is shielded and the vacuum is not.** Over the whole 513² box the two
+fields differ by 2.6e-04 relative `L2` and **1.4e-03 relative `L∞`**, worst at
+`( 1.747, 0.800 )` directly under P1U, with `max|Δψ|` **3.7e-03** of the flux
+span — which is what `examples/limited-tokamak.toml`'s own comment predicted,
+"about 3e-3 at the corner of its box". Over the core it is 3.5e-05, a factor of
+seven down.
+
+**SO THE PREDICTION WAS RIGHT ABOUT THE SIZE AND WRONG ABOUT WHICH QUANTITY IT
+LANDS ON.** That comment called the conductor model "the largest single
+contribution to the pointwise disagreement there", and there it is; but the FB-6
+comparison is `ψ_ax` and `ψ_bnd`, which are core quantities, and on `ψ_ax` the
+conductor model is **six times smaller** than the 1.5e-04 residual it was
+supposed to explain. `ψ_bnd` is the sharp one: the two conductor models disagree
+about it by 9.6e-05, **twice** the 4.5e-05 MEQ is quoted as reaching against the
+filament reference. **An agreement tighter than the modelling difference is not
+measuring the solver.**
+
+**And the reference's own grid error does not move**, which is the control that
+says the two cases are the same problem: the same order 2.313 and the same
+7.9e-04 from the Richardson limit. Reproducing the ring maximum confirms it too —
+`( 0.8250, ∓0.3000 )` on both, the sign being a tie-break between two points
+that agree to 7e-12 because the configuration is up–down symmetric.
+
+**REGENERATING IT.** `python3 fgsref.py I_limited_shaped` for 129², then
+`FGSREF_OUT=<dir> python3 fgsref.py --nx=257 --seed-from=auto I_limited_shaped`
+and the same at 513. `--seed-from=auto` used to look for `H_limited_circular.npz`
+by name as its sentinel for "the undecorated directory holds 129² output", which
+seeds the wrong case the moment there is a second one; it checks every case's own
+name now.
+
 **THOSE NUMBERS MOVED BY A FACTOR OF TWENTY ON 2026-09-07 AND THE MESH DID NOT
 CHANGE.** They read 9.455354e-02, 2.774057e-02 and 0.994505 — 2.9e-03, 2.8e-03
 and 5.5e-03 — while `ψ_bnd` was pinned at the potential dof NEAREST the limiter

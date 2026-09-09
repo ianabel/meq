@@ -154,6 +154,17 @@ set(MEQ_CONVERGENCE_TESTS
 	# psi-DEPENDENT temperature and rotation, where the alternative check is a
 	# central difference of MEQ's own f().
 	MaschkePerrinConvergence
+	# The one thing the flow campaign was missing: meq::RotatingSource at
+	# C'( psi ) != 0 against an INDEPENDENT closed form. C is the exponent both
+	# species share and C' is non-zero only where omega^2/T varies from surface
+	# to surface -- which is the term Li & Zhu print with the wrong sign, and
+	# which no exact rotating solution can reach, C constant being precisely what
+	# makes the equation solvable in closed form. So the fixture is a manufactured
+	# one, tests/analytic/VaryingCentrifugal.hpp, deriving (96), (97) and (136)
+	# from the paper and calling no MEQ code. It carries a bisection route of its
+	# own beside the algebra, so that two transcriptions agreeing is not the whole
+	# of the evidence.
+	VaryingCentrifugalConvergence
 	CriticalPointConvergence
 	FluxSurfaceConvergence
 	FluxGridConvergence

@@ -196,21 +196,43 @@ Nothing is red and stages 0 to 7 are done, so the order is:
    unnecessary and resolution-dependent, and what ships is a watershed needing
    no X-point finder and no parameter.
 
-   **XP-0 is the one still open and it needs no free boundary**, which is what
-   makes it worth doing early for the reason FB-A was: a rate study of the
-   X-point position against `Soloviev::nstx()`, whose X-point is known in closed
-   form.
+   ~~**XP-0 is the one still open**~~ — **DONE 2026-09-08, and it needed no
+   free boundary and no seed.** `Soloviev::nstx()`'s X-point is fixed in closed
+   form, and `CriticalPointFinder::sweep()` locates it at **1.814 / 3.566 /
+   4.223** over five dyadic meshes, against `k+1` less the axis study's own 0.25
+   of slack. `findAxis()` and `tryFindAxisFrom()` cannot reach a saddle at all —
+   both filter on `AxisSense` — so **XP-3 will want a seeded saddle entry point
+   before its three-row border is built**, which is the one API gap XP-0
+   exposed. **XP-2 is now the next rung.** `CLAUDE_FB.md`, *XP-0*.
 
    **`PLASMA-EDGE-PLAN.md` is NOT on this list**, deliberately. It is the route
    out of FB-4's `k ≤ j` cap. **Its preamble's precondition is now met** —
    `PlasmaEdgeConvergence` is green, FB-5's bordered solve carries the moving
    support, and the machine case runs at `j = 2` — so what holds it is no longer
    a prerequisite but the cost-benefit its own numbers make: `j ≥ 1` already
-   gives `k+2` at `k ≤ j` with nothing built, and its central premise is still
-   measured at two rungs out of three. PE-0 is a day's work and settles that;
-   everything after it waits.
+   gives `k+2` at `k ≤ j` with nothing built.
 
-2. ~~**Finish the inversion**~~ — item 10, and **every stage is done**. IN-5,
+   **PE-0 IS RUN, 2026-09-08, AND IT CHANGED WHAT THE REST OF THAT PLAN IS
+   WORTH.** Its central premise is now measured at **all three rungs and is
+   true** — an uncut plasma subdomain admits `k+1` and `k+2` at `j = 0, 1, 2`
+   alike, and `ψ_h` climbs from the cut mesh's cap of 1.5 to **2.00 / 3.04 /
+   4.01**. But `ψ*` reaches `k+2` only with `λ` on `Γ_{p,h}`; **through the
+   transfer, which is what PE-3 must do, it reads 2.23 / 3.16 / 4.00** — about a
+   full order short, and the same shortfall `ExtensionConvergence` records on the
+   outer boundary. So PE-0's acceptance as the plan writes it is not reachable
+   with the plan's own machinery, the case is **red on that assertion** and stays
+   red, and the acceptance is what has to move. The `ψ_h` result alone is a
+   strong case at `j = 0`; the `ψ*` case is weaker than §1's table implied.
+   Everything after PE-0 still waits. `CLAUDE_FB.md`, *PE-0*.
+
+2. ~~**Finish the inversion**~~ — item 10, and **every stage is done**, with
+   the threading blocker closed since: `traceFromAxis()` takes the axis's own
+   element as its seed hint, so the library's extraction path makes no
+   `Mesh::FindPoints` call at all. It does **not** make `ContourTracer`
+   shareable on its own — `fitByAngle()` and `faceJump()` still reach the
+   counted last resort on real fixtures — and `Contour::fallbackLocations` could
+   never have seen the seed, which is why the scan sat under a test asserting
+   that count is zero. `CLAUDE_INVERSION.md` has it. IN-5,
    open surfaces, was the last: `ContourTracer::traceOpen()` traces both ways
    from the seed and joins, and `meq::fitOpenSurface()` is Chebyshev in
    normalised arc length — **5.3e+05 over 4 → 32 modes against a periodic
@@ -725,13 +747,21 @@ closed-form check of `meq::RotatingSource` runs at constant `T` and constant
 `dF/dψ` of 2.6e-15 against `O(1)` cancelling terms, and drives the solve at
 1.996 / 2.997 / 3.998.
 
-**One thing it turned up is still open**: no published rotating benchmark
-exercises the `C′(ψ)` term, because Li & Zhu's Solov'ev case holds `T` and `Ω`
-constant and Maschke–Perrin's (4.7) *forces* `C` constant — and that is precisely
-the term Li & Zhu got the sign of wrong. Only `RotatingSourceTests`' `dFdPsi`
-sweep touches it. **No exact solution can close it**: `C` constant is what makes
-the equation solvable in closed form at all, so the route is a manufactured
-solution rather than another paper.
+**The one thing it turned up is now closed**, and by the manufactured route it
+predicted: `C` constant is what makes the equation solvable in closed form at
+all, so no paper could have supplied it.
+`tests/analytic/VaryingCentrifugal.hpp` prescribes `C(ψ)` as a quadratic and
+derives `ω` from (97), so `ω²/T` varies across surfaces and `C` drifts 2.50×;
+two independent implementations of (96)/(97)/(136) then agree at **7.1e-16 in
+`F`** and **5.3e-16 in `dF/dψ`** on both closures, with a bisection route in
+which `C` appears nowhere as the third leg. Dropping `C′` moves `F` by 7.9e-01
+and flipping its sign — Li & Zhu's (9) — by 1.6e+00.
+
+**It also closed a hole nobody had named**: every two-species rotating
+configuration in the tree ran at `Z = ±1`, where the closure's charge-weighted
+combinations `Z₁T₂ − Z₂T₁` and `Z₁m₂ − Z₂m₁` collapse to `T₁ + T₂` and
+`m₁ + m₂`, so **a closed form written with the plain sums would have passed
+everything**. The fixture is at `Z₁ = +2`. `CLAUDE_FLOW.md` has both.
 
 ## 10. The fixed-`q(ψ)` solver — MEQ, and the round trip closes
 
@@ -817,6 +847,55 @@ with a *solved* variable and `∇q` is a *differentiated* one. `div q = −F/r` 
 the symmetric traceless part differentiated — structure rather than an order, and
 it would need the source plumbed into `GridSampler`. `CLAUDE.md`'s *Status*
 section has the detail.
+
+## 12. Two cheap experiments nobody has run — MEQ, open
+
+Both came out of one question — *is there mileage in evaluating the GS right
+hand side at `ψ*` rather than `ψ_h`, and could an interpolatory method save the
+repeated assembly?* — and neither is blocking anything. They are here so they
+are not re-derived.
+
+**LOCATE THE PLASMA EDGE WITH `ψ*` AND KEEP ASSEMBLING `F` AT `ψ_h`.**
+Substituting `ψ*` into the *source* is not worth it: the consistency error of
+`F( ψ_h )` is `O( h^(k+1) )`, which is the method's own rate, so `ψ*`'s
+`O( h^(k+2) )` removes a term that limits nothing and buys a constant. It also
+costs three things — `Reconstruct()` builds `ψ*` from a local problem that
+already contains `F( ψ_h )`, so the element reconstruction becomes an implicit
+local fixed point; `∂F/∂ψ( ψ* )·∂ψ*/∂ψ_h` is a dense element block rather than
+`HDGDiffusionIntegrator`'s mass, so `LocalNLOperator` would need the chain rule
+and the parity gap would need re-measuring; and GS-1/GS-2's estimates are for
+`F( ψ_h )`.
+
+**The place `ψ`'s accuracy DOES bind is the level set, not the load.**
+`ConfineToPlasma` locates `{ Ψ > 0 }` as a level set of `ψ_h`, and
+`PLASMA-EDGE-PLAN.md`'s rate cap is about the geometry of that set. Locating the
+edge with `ψ*` while still assembling `F` at `ψ_h` has none of the three costs
+above — no circularity, since the edge is read after the reconstruction rather
+than inside it; no Jacobian change; no new analysis — and the acceptance
+criterion already exists in `PlasmaEdgeConvergence`. It is an afternoon, and it
+is the version of that question worth funding.
+
+**REUSE THE JACOBIAN ACROSS NEWTON STEPS — a chord or Shamanskii iteration.**
+`../mfem-hdg-dev/doc/HDG-DEVICE-OFFLOAD.md` puts the integrators at **46–53%**
+of an NPC step and the local dense algebra at 7–10%, and `m = 3` would skip two
+of every three assemblies *and* two of every three `ComputeH()` factorisations.
+KINSOL already implements it (`msbset`) and MEQ already links KINSOL for
+`AndersonPicard` and `PicardThenNewton`, so the machinery is in the build. The
+cost is superlinear rather than quadratic convergence, and whether the extra
+iterations eat the saving is unknown for MEQ's sources — a sweep over
+`m = 1, 2, 3, 5` against `ManufacturedNonlinear` and `examples/limited-tokamak.toml`,
+reporting wall clock **and** iteration count, answers it. Expect the moving
+support to be the trap: it makes the residual mildly discontinuous, so a stale
+Jacobian may stall where a fresh one does not.
+
+**IT IS THE FALLBACK AND NOT THE FIRST CHOICE, because interpolatory HDG
+dominates it if it works.** Interpolating `F` into the nodal potential space
+turns the load into `A f⃗` with `A_ij = ∫_K ( 1/r ) φ_j w_i` assembled ONCE and
+`f⃗` the pointwise `Source::f()` values, and the Jacobian block into
+`A diag( dFdPsi )` — so the assembly goes away while the Jacobian stays EXACT
+and Newton stays quadratic. Jacobian reuse buys the same seconds by giving up
+the convergence rate. Run the interpolatory experiment first; this one is what
+to reach for if its rates do not hold.
 
 ## Deliberately not yet
 

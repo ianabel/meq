@@ -1291,7 +1291,7 @@ unlikely* — is the part CI can run.
 > 12 surfaces**, against a predicted 3.33. Against a naive that rebuilds the
 > whole family per node it is **42×**. The first is the honest column.
 
-### IN-P — the performance harness
+### IN-P — the performance harness — **DONE, 2026-09-03**
 
 **Not a stage in the ladder and not gated on one**: it can start as soon as IN-2
 exists, and it should, because every design choice after that point trades
@@ -1304,11 +1304,27 @@ threaded extraction reproduces the serial one **bit for bit**, which independent
 surfaces and independent rays make available and which a tolerance would
 undermine.
 
-**Do the three call-site changes of §11.3 first**, before any parallel region is
-written: `Mesh::GetElementTransformation( int )` hands out shared scratch and is
-used at two sites in `FluxSurfaces.cpp` and one in `CriticalPoints.cpp`. They
-are correct while everything is serial and are a silent wrong answer the moment
-it is not.
+**§11.3's call-site changes came first, before any parallel region was written,
+and the count made by eye was wrong** — `Mesh::GetElementTransformation( int )`
+hands out shared scratch at **six** sites, five in `FluxSurfaces.cpp` and one in
+`CriticalPoints.cpp`, not the three this entry first named. All six take the
+caller-allocated overload into a function-local `thread_local`, and every
+printed number in the four affected convergence tests is byte-identical
+afterwards. They were correct while everything was serial and are a silent wrong
+answer the moment it is not, which is why they were done ahead of the harness
+rather than beside it.
+
+**The last unconditional `Mesh::FindPoints` on the tracing path is closed**, and
+that scan is the non-reentrant one: `traceFromAxis()` seeds the walk with
+`CriticalPoint::element`, which `findAxis()` already knows, so the library's
+extraction path reaches it once per surface no longer —
+`theTracerClosesAndTheElementWalkDoesNotFallBack` goes 6 calls to 0 over its 6
+surfaces, and `SurfaceAverageConvergence` 196 to 1 over the whole binary.
+**It does not by itself make `ContourTracer` shareable**: the counted last
+resort is still reached from `fitByAngle()` and `faceJump()` on real fixtures,
+so a shared tracer needs those provably unreachable or the fallback made
+reentrant. §11.3 has the detail, including why the count had to be taken on a
+breakpoint.
 
 ---
 
@@ -1501,12 +1517,26 @@ Three more, none of them exotic:
   across threads aborts with *"the axis is not in the mesh"*.
 
   **AND "THE TRACER REPORTS ZERO FALLBACKS, SO THIS COSTS NOTHING TO HONOUR" IS
-  TRUE OF `trace()` AND FALSE OF THE ENTRY POINTS.** `traceFromAxis()` takes it
-  **once per surface unconditionally**, because it samples the axis with no
-  element hint — so this is the single blocker on a shared tracer rather than a
-  free rule. `setWalkDepth( 12 )`, now the default, removed the ray fallbacks
-  (183 of 576 at depth 4, none at 12); what is left is giving `traceFromAxis()`
-  its axis element as a hint, which `findAxis()` already knows.
+  TRUE OF `trace()` AND FALSE OF THE ENTRY POINTS**, which is a statement about
+  the instrument as much as about the code: `Contour::fallbackLocations` never
+  sees a **seed** call, because `sampleAt()` hands `sampleField()` a local
+  counter and discards it on both overloads. So a per-surface full-mesh scan sat
+  under a test asserting that count is zero, reading 0 before and 0 after while
+  the real count moved.
+  `setWalkDepth( 12 )`, now the default, removed the ray fallbacks (183 of 576
+  at depth 4, none at 12), and `traceFromAxis()` seeds the walk with
+  `CriticalPoint::element` rather than sampling the axis with no hint, which
+  takes the unconditional per-surface call to **zero** — measured on a breakpoint
+  in `mfem::Mesh::FindPoints`, 6 → 0 on
+  `theTracerClosesAndTheElementWalkDoesNotFallBack`'s six surfaces and 196 → 1
+  over `SurfaceAverageConvergence`; **[M-71](MEASUREMENTS.md#m-71)** has the
+  four binaries. No guard is written, because `locate()` already
+  refuses an out-of-range index and accepts an element only after inverting its
+  own map, so a stale hint costs a failed walk and never an answer.
+  **What is left is the COUNTED last resort**, which is data dependent rather
+  than structural: `fitByAngle()` and `faceJump()` still reach it — 1, 17 and 10
+  on three shipped fixtures — so a shared tracer needs those provably
+  unreachable or the fallback serialised.
 
 **THE HARNESS MUST ASSERT BIT-EXACT REPRODUCTION OF THE SERIAL ANSWER**, at
 `0.000e+00` and not at a tolerance — the precedent is

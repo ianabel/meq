@@ -1210,10 +1210,43 @@ count buys a factor rather than a few percent.
   which are placed by angle and land one to two cells apart: depth 4 takes the
   `FindPoints` fallback on 183 of 576 rays and depth 12 on none. Worth about
   **1.57× on a whole extraction** with the answers bit-identical at every depth.
-  **What is still open beside it is the threading blocker**: a shared tracer
-  aborts the moment any thread reaches `FindPoints`, and closing the last
-  unconditional call needs `traceFromAxis()` to be given its axis element as a
-  hint, which `findAxis()` already knows.
+  **The threading blocker beside it is closed, and the counter that should have
+  caught it could not.** `traceFromAxis()` takes `CriticalPoint::element` as its
+  seed hint — one line — and the library's extraction path is then free of
+  `Mesh::FindPoints` end to end: `SurfaceAverage.cpp` and `FluxExtraction.cpp`
+  reach the tracer only through `traceFromAxis()`, and the two remaining seeds,
+  in `trace()` and `traceOpen()`, are called from tests alone and can carry no
+  hint — their signatures take a bare point.
+
+  → **[M-71](MEASUREMENTS.md#m-71)** — `FindPoints` calls before · after
+
+  **NO GUARD IS WRITTEN AND THAT IS DELIBERATE.** `locate()` already checks the
+  hint twice — `tryElement()` refuses an index outside `[ 0, GetNE() )`, and an
+  element is accepted only after inverting **its own** map and finding the point
+  `Inside` — so an axis located against a different mesh, or a
+  default-constructed one carrying `-1`, costs a failed walk and falls through to
+  the `FindPoints` that would have run anyway. The degradation is in the cost and
+  never in the answer, and a hint that is merely *near* is the ordinary case:
+  `CriticalPoint::overshoot` records that a root beside a face sits slightly
+  outside the element that rooted it, and the first ring absorbs it.
+
+  **`Contour::fallbackLocations` CANNOT SEE A SEED, WHICH IS WHY A PER-SURFACE
+  FULL-MESH SCAN SAT UNDER A TEST ASSERTING THAT COUNT IS ZERO.** `sampleAt()`
+  declares a local `int fallbacks = 0`, hands it to `sampleField()` and throws it
+  away, on both the six- and seven-argument overloads — so the public seam reports
+  no fallback however it located the point, and
+  `theTracerClosesAndTheElementWalkDoesNotFallBack` read 0 before the fix and 0
+  after while the real count went 6 → 0. Measuring it needed a breakpoint on
+  `mfem::Mesh::FindPoints`. **An instrument that cannot see the thing it is named
+  for is worse than no instrument**, and it is the same species as the fixed line
+  range that produced a false claim about `ComputeHDGFaceEnergy()`.
+
+  **IT DOES NOT BY ITSELF MAKE `ContourTracer` SHAREABLE**, and saying so is the
+  point of measuring rather than asserting. `fitByAngle()` and `faceJump()` still
+  reach the counted last resort on real fixtures — 1 in `SurfaceAverageConvergence`,
+  17 in `FluxGridConvergence`, 10 in `OpenSurfaces` — and those are data-dependent
+  walk failures, not seeds. A shared tracer needs them provably unreachable or the
+  fallback made reentrant.
 * **`fitByAngle()` does NOT throw where the corrector would accept.** It keeps
   its best iterate, accepts it, and counts it in `stalledRays`; the only throw
   left on that path is a ray on which *every* evaluation left the field, which

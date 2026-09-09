@@ -1607,7 +1607,43 @@ namespace meq
 		// ray is needed, and it is a seed for the tracer rather than a
 		// parametrisation. fitByAngle() is where star-shapedness becomes a
 		// hypothesis, and it reports it.
-		int hint = -1;
+
+		/*
+		 * THE AXIS ARRIVES KNOWING ITS OWN ELEMENT, AND TAKING IT IS WHAT CLOSES
+		 * THE LAST UNCONDITIONAL Mesh::FindPoints ON THE TRACING PATH.
+		 *
+		 * Everything else in this file walks from the element the previous
+		 * evaluation used, so a whole trace costs no O( elements ) scan. This
+		 * location is the exception, because it happens before there is a previous
+		 * evaluation to walk from -- and it happens once per surface, so an
+		 * extraction over a family of levels pays it once per level.
+		 * CriticalPoint::element names the element whose polynomial the finder
+		 * rooted, which is precisely the seed the walk wants.
+		 *
+		 * AND IT IS TRIED RATHER THAN TRUSTED, WHICH IS WHY NO GUARD IS WRITTEN
+		 * HERE. locate() checks the hint twice already: tryElement() refuses an
+		 * index outside [ 0, GetNE() ), the ring walk is entered only for one
+		 * inside it, and an element is accepted only after inverting its OWN map
+		 * and finding the point Inside. So an axis located against a different
+		 * mesh, or a default-constructed one carrying -1, costs a failed walk and
+		 * falls through to the same FindPoints that would have been called
+		 * anyway -- the degradation is in the cost and never in the answer. A hint
+		 * that is merely NEAR is the ordinary case rather than a corner one:
+		 * CriticalPoint::overshoot records that a root beside a face sits a little
+		 * way outside the element that found it, and the first ring absorbs that.
+		 *
+		 * Contour::fallbackLocations DOES NOT SEE A CALL MADE HERE, so a seed that
+		 * scans the whole mesh can sit under a test asserting that count is zero
+		 * and never move it. sampleAt() hands sampleField() a local counter and
+		 * throws it away, so the public seam reports no fallback however it located
+		 * the point. Measured instead with a breakpoint on mfem::Mesh::FindPoints:
+		 * FluxSurfaceConvergence::theTracerClosesAndTheElementWalkDoesNotFallBack
+		 * takes 6 calls for its 6 surfaces with hint = -1 here and 0 with the axis
+		 * element, and SurfaceAverageConvergence goes from 196 to 1 -- the one left
+		 * being a genuine walk failure inside fitByAngle(), which IS counted, on
+		 * the case that draws its rays from a displaced origin.
+		 */
+		int hint = axis.element;
 		double psi = 0.0;
 		double qR = 0.0;
 		double qZ = 0.0;

@@ -421,7 +421,8 @@ has — a domain reaching `r = 0`, `[boundary.limiter]`, `[boundary.exterior]` a
 `ConfineToPlasma` — and converges in **11 Newton steps** to a `Ψ` of 1.0000,
 reproducing freegs4e to 1.3e-04. What it had that the fixture did not is **coils
 and a prescribed current**. The fixture now has both, plus the confinement, and
-it is **green at three limiter radii out of four**; see `CLAUDE_FB.md`,
+it is **green at five limiter radii in a row**, 1.08 to 1.18, with the coil-free
+control converging to the wrong topology at three of them; see `CLAUDE_FB.md`,
 *§7.12b's fixture was the defect*, and `FREE-BOUNDARY-PLAN.md` §11.3 for the diagnosis and §11.7 for
 the repair.
 
@@ -773,6 +774,23 @@ parses `-isystem` out of `MFEM_CXXFLAGS`.
 and MEQ's own sources still compile with `g++` rather than `nvcc`. What it
 enables is `BatchedLinAlg`'s `gpu_blas`/`magma` backends and `CuDSSSolver`. It
 is a prerequisite, not a speedup.
+
+**AND IT IS NOT FREE — IT COSTS 7% OF THE WALL CLOCK ON THE CPU PATH, MEASURED
+AGAINST AN OTHERWISE IDENTICAL INSTALL.** `../mfem/install-nocuda` differs from
+`../mfem/install` in `MFEM_USE_CUDA` and the `MFEM_USE_CUDSS` that must follow
+it, and in nothing else; the two produce **byte-identical output** on the machine
+case, so this is cost and not answers.
+
+→ **[M-77](MEASUREMENTS.md#m-77)** — wall · user · allocation count
+
+The mechanism is visible and only partly the obvious one: `mfem::forall` on the
+host path builds an `__nv_hdl_wrapper_t`, nvcc's host-lambda wrapper, whose
+`manager::do_call` shows in `perf` at 1.9–2.9% — and interposing `operator new`
+at its call site counts **226.7 million allocations in a 30-second run**, of
+which **55.4 million (24%) go away with CUDA off**. The other 171 million are
+MFEM's ordinary per-element temporaries and are not CUDA's doing. So the flag is
+a prerequisite that currently charges rent, and a CPU-only production build has
+a measured reason to be a separate install.
 
 **`../mfem-hdg-dev` is now the development tree and not what MEQ links.** That
 split exists because the alternative was demonstrated: mid-session that tree was
@@ -1304,11 +1322,21 @@ had never had to honour. Expect the next library update to find a third.
 FIXED LOCALLY.** It loops over every element through that same shared
 transformation *and* builds a vertex-to-element table on the way, so it is not
 reentrant — an attempt to share one `ContourTracer` across threads aborts with
-*"the axis is not in the mesh"*. Every entry point can reach it, and
-`traceFromAxis()` takes it **once per surface unconditionally**, because it
-samples the axis with no element hint. So "the tracer reports zero fallbacks" —
-which `INVERSION-PLAN.md` §11.3 offered as the reason honouring this rule is
-free — **is true of `trace()` and false of the entry points**.
+*"the axis is not in the mesh"*. Every entry point can reach it. The
+**unconditional** per-surface call is gone: `traceFromAxis()` seeds the walk with
+`CriticalPoint::element`, taking `theTracerClosesAndTheElementWalkDoesNotFallBack`
+from 6 calls to 0 over its six surfaces and `SurfaceAverageConvergence` from 196
+to 1 over the whole binary. What is left is the data-dependent
+last resort inside `fitByAngle()` and `faceJump()`, so a shared tracer still
+needs those unreachable or serialised.
+
+**AND "THE TRACER REPORTS ZERO FALLBACKS" COULD NOT HAVE SEEN ANY OF THAT.**
+`Contour::fallbackLocations` never counts a **seed** call —  `sampleAt()` hands
+`sampleField()` a local counter and discards it on both overloads — so a
+per-surface full-mesh scan sat under a test asserting that count is zero,
+reading 0 before and 0 after while the real count moved. The numbers above are
+from a breakpoint on `mfem::Mesh::FindPoints`, which is the only instrument that
+can see them. `INVERSION-PLAN.md` §11.3 has the detail.
 
 **`mfem::Mesh::FindPoints` is `O(elements × points)`** — a brute-force scan over
 element centres. It caps sample-cloud sizes in any off-grid error measure.

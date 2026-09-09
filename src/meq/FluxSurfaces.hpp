@@ -184,6 +184,18 @@
  * statement, not a correctness one, since FindPoints returns the same element.
  * On the benchmarks it is zero.
  *
+ * IT DOES NOT COUNT THE FIRST LOCATION OF ALL, AND THAT IS WORTH KNOWING
+ * BEFORE READING A ZERO AS "NO FindPoints ANYWHERE". A trace has to start
+ * somewhere, and the seed has no previous element to walk from.
+ * traceFromAxis() takes CriticalPoint::element for it, so a trace from a
+ * located axis -- which is the ordinary entry point and the only one the
+ * library itself calls -- makes NO Mesh::FindPoints call at all. trace() and
+ * traceOpen() are handed a bare ( r, z ) by a caller who may know nothing about
+ * the mesh, so they still locate their seed with one apiece; that is one per
+ * trace and is deliberately kept out of Contour::fallbackLocations, which
+ * measures the WALK and would otherwise read one on every trace and mean
+ * nothing.
+ *
  * THE STEP IS CURVATURE CONTROLLED, AND THE STANDARD STRATEGIES OPTIMISE THE
  * WRONG OBJECTIVE FOR US.
  *
@@ -795,6 +807,15 @@ namespace meq
 			/// implementation records which one and why. It is not an assumption
 			/// of star-shapedness -- one crossing on one ray is all it needs,
 			/// and it is a seed rather than a parametrisation.
+			///
+			/// @a axis.element IS READ AS WELL AS ITS POSITION, and it is what
+			/// makes this the one entry point that reaches no Mesh::FindPoints:
+			/// the element the finder rooted seeds the walk that locates the
+			/// axis, and every location after it walks from the one before. A
+			/// CriticalPoint from another mesh, or a default-constructed one
+			/// carrying -1, is not an error -- locate() only ever accepts an
+			/// element after inverting its own map, so a bad hint costs a failed
+			/// walk and the same FindPoints this would otherwise have made.
 			///
 			/// @throws std::runtime_error if the level is not bracketed on any
 			///         ray before the mesh runs out.

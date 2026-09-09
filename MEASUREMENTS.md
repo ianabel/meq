@@ -5,10 +5,10 @@ kept here rather than inline because a maintainer does not need them on every
 reading and does need to know where they are. **The argument each one supports
 stays beside a pointer to the row**, in whichever of the four maintainer files
 owns the subject: `CLAUDE.md` (the index, the build, the traps),
-`CLAUDE_HDGGS.md` (the equation, the discretisation, the solve, toroidal flow,
-the linear solves), `CLAUDE_FB.md` (free boundary and the `freegs4e` benchmark)
-or `CLAUDE_INVERSION.md` (the flux-surface work). **Do not renumber the
-anchors** — all four point at them by `M-nn`, and all 67 are referenced.
+`CLAUDE_HDGGS.md` (the equation, the discretisation, the solve, the linear
+solves), `CLAUDE_FB.md` (free boundary and the `freegs4e` benchmark),
+`CLAUDE_INVERSION.md` (the flux-surface work) or `CLAUDE_FLOW.md` (toroidal
+flow). **Do not renumber the anchors** — all five point at them by `M-nn`.
 
 **THE RULES THEY WERE TAKEN UNDER HAVE NOT CHANGED, AND THEY ARE WHAT MAKES A
 TABLE HERE WORTH ANYTHING.**
@@ -760,3 +760,210 @@ Anchors are stable: `CLAUDE.md` points at `M-nn`, so do not renumber.
 | `ψ_ax` | 9.308752e-02 | **9.307342e-02** | **1.5e-04** |
 | `ψ_bnd` | 2.622462e-02 | **2.622580e-02** | **4.5e-05** |
 
+
+### M-68
+
+`meq::RotatingSource` against `tests/analytic/VaryingCentrifugal.hpp`, over
+`r ∈ [0.6, 1.4] × z ∈ {−0.4, 0, 0.4} × ψ ∈ [−0.2, 1.0]`, relative with a floor
+of 1. Both closures, because at two species the general path must give the
+closed form's answer:
+
+| | `Closure::ClosedForm` | `Closure::RootFind` |
+|---|---|---|
+| `F` | **7.134e-16** | 1.070e-15 |
+| `dF/dψ` | **5.260e-16** | 8.801e-16 |
+| `p` | 4.44e-16 | 5.55e-16 |
+| `e φ₀` | 2.22e-16 | 5.00e-15 |
+| `d( e φ₀ )/dψ` | 1.11e-16 | 6.05e-15 |
+| `n_s` | 4.44e-16 | 2.94e-15 |
+
+### M-69
+
+The same fixture's two routes to its own pressure, which is what says its
+algebra follows from (96) and (97) rather than agreeing with MEQ's transcription
+of the same algebra. Route A bisects (97) with `C` appearing nowhere; route B is
+the closed form through `C`, `C′` and `C″`:
+
+| | |
+|---|---|
+| (97)'s residual at the bisected root | 6.94e-17 |
+| `p`, closed form against bisection | 3.33e-16 |
+| `dp/dψ`, closed form against a difference of the bisection | 4.04e-12 |
+| `d²p/dψ²`, the same | 4.53e-10 |
+
+### M-70
+
+The same fixture mutated, worst deviation from `meq::RotatingSource`. `C` drifts
+**2.50×** over the sweep and `C″ = 2.00` exactly, so `C′` is never small:
+
+| mutation | `F` | `dF/dψ` | `p` |
+|---|---|---|---|
+| conforming | 7.13e-16 | 5.26e-16 | — |
+| `C′, C″ → 0` | **7.90e-01** | **8.72e-01** | 4.44e-16 |
+| `C′, C″ → −C′, −C″`, which is Li & Zhu's (9) | **1.58e+00** | **1.02e+00** | 4.44e-16 |
+
+`p` does not move under either, which is what says the mutation is confined to
+the derivatives rather than being caught upstream of them.
+
+### M-71
+
+`mfem::Mesh::FindPoints` calls, counted on a breakpoint rather than by
+`Contour::fallbackLocations`, which cannot see a seed — before and after
+`ContourTracer::traceFromAxis()` takes `CriticalPoint::element` as its hint:
+
+| | before | after |
+|---|---|---|
+| `theTracerClosesAndTheElementWalkDoesNotFallBack`, 6 surfaces | **6** | **0** |
+| `SurfaceAverageConvergence`, whole binary | **196** | **1** |
+| `FluxSurfaceConvergence`, whole binary | 650 | 527 |
+| `FluxGridConvergence`, whole binary | 737 | 64 |
+
+The accounting closes: `SurfaceAverageConvergence` makes 195 `traceFromAxis`
+calls and 196 − 195 = 1, that one a genuine counted walk failure in
+`fitByAngle()`. What is left elsewhere is the band tests' own deliberate
+`Mesh::FindPoints` calls, the test-only three-argument `sampleAt()`, and counted
+walk failures — no seeds.
+
+### M-72
+
+XP-0: the X-point of `Soloviev::nstx()` as a zero of `q_h`, located by `sweep()`
+with no seed, on `[0.35, 1.15] × [−2.10, −1.30]`. Exact saddle
+`( 0.699700, −1.716000 )`. `ratio` is the position error over the pointwise
+error of `q` at that same point; `dq/dx` is symmetric with eigenvalues
+`+0.899099` and `−0.578731`, so it is trapped in `[ 1.112, 1.728 ]`.
+
+| k | h | `\|x − x_X\|` | rate | L2(q) | `\|q_h − q\|(x_X)` | rate | ratio |
+|---|---|---|---|---|---|---|---|
+| 1 | 0.20000 | 3.499506e-03 | – | 3.761508e-03 | 2.619010e-03 | – | 1.34 |
+| 1 | 0.10000 | 1.226291e-03 | 1.513 | 9.902667e-04 | 9.173171e-04 | 1.514 | 1.34 |
+| 1 | 0.05000 | 2.955408e-04 | 2.053 | 2.539655e-04 | 2.178164e-04 | 2.074 | 1.36 |
+| 1 | 0.02500 | 1.052146e-04 | 1.490 | 6.429865e-05 | 7.698971e-05 | 1.500 | 1.37 |
+| 1 | 0.01250 | 2.290133e-05 | 2.200 | 1.617600e-05 | 1.498590e-05 | 2.361 | 1.53 |
+| **1** | **whole** | | **1.814** | | | **1.862** | |
+| 2 | 0.20000 | 1.916478e-04 | – | 2.171810e-04 | 1.732927e-04 | – | 1.11 |
+| 2 | 0.10000 | 2.096125e-05 | 3.193 | 2.984338e-05 | 1.612502e-05 | 3.426 | 1.30 |
+| 2 | 0.05000 | 1.595953e-06 | 3.715 | 3.869881e-06 | 1.022963e-06 | 3.978 | 1.56 |
+| 2 | 0.02500 | 5.718299e-07 | 1.481 | 4.904573e-07 | 3.322901e-07 | 1.622 | 1.72 |
+| 2 | 0.01250 | 9.738147e-09 | 5.876 | 6.164823e-08 | 8.285009e-09 | 5.326 | 1.18 |
+| **2** | **whole** | | **3.566** | | | **3.588** | |
+| 3 | 0.20000 | 1.714588e-05 | – | 2.046713e-05 | 9.938342e-06 | – | 1.73 |
+| 3 | 0.10000 | 3.585823e-07 | 5.579 | 1.531698e-06 | 3.144368e-07 | 4.982 | 1.14 |
+| 3 | 0.05000 | 5.112740e-08 | 2.810 | 1.024806e-07 | 3.316105e-08 | 3.245 | 1.54 |
+| 3 | 0.02500 | 1.479874e-09 | 5.111 | 6.562879e-09 | 1.330497e-09 | 4.639 | 1.11 |
+| 3 | 0.01250 | 1.408137e-10 | 3.394 | 4.140062e-10 | 9.577455e-11 | 3.796 | 1.47 |
+| **3** | **whole** | | **4.223** | | | **4.166** | |
+
+Wanted 1.75 / 2.75 / 3.75, that is `k+1` less the axis study's 0.25 of slack.
+The whole-sequence rate over the axis study's shorter `{ 4, 8, 16, 32 }` is
+1.685 / 2.796 / 4.500, and at `n = 128` k = 1 reads 1.916 from `n = 4` and
+2.017 from `n = 8` while k = 2 drops to 2.884.
+
+### M-73
+
+XP-0's reference, checked before it is used: the prescribed X-point of each
+Solov'ev fixture against the saddle of its own `ψ`.
+
+| fixture | prescribed | `\|∇ψ\|` there | saddle of `ψ` | `\|∇ψ\|` | det | moved by |
+|---|---|---|---|---|---|---|
+| `nstx` | ( 0.699700, −1.716000 ) | 6.40e-17 | ( 0.699700, −1.716000 ) | 9.81e-17 | −0.2547 | 1.11e-16 |
+| `iterExample2` | ( 0.883840, −0.704000 ) | 4.48e-16 | ( 0.883840, −0.704000 ) | 1.78e-16 | −0.9098 | 3.33e-16 |
+| `nstxExample3` | ( 0.712570, −1.458600 ) | 1.78e-16 | ( 0.712570, −1.458600 ) | 4.16e-17 | −0.5773 | 2.22e-16 |
+| **`nstxAsPublished`** | ( 0.699700, −1.716000 ) | **2.97e-02** | **( 0.695811, −1.806937 )** | 6.99e-17 | −0.1712 | **9.10e-02** |
+
+And the audit over `[0.35, 1.55] × [−2.10, 0.30]`, `nstx`, n = 16, which holds
+both critical points:
+
+| k | degree | defect | χ | loops | found | Σ index | worst turn | transverse |
+|---|---|---|---|---|---|---|---|---|
+| 1 | 0 | 0.0e+00 | 1 | 1 | 2 | 0 | 0.088 | no (0.00) |
+| 2 | 0 | 2.8e-16 | 1 | 1 | 2 | 0 | 0.070 | no (0.00) |
+| 3 | 0 | 4.2e-16 | 1 | 1 | 2 | 0 | 0.070 | no (0.00) |
+
+### M-74
+
+PE-0: `PlasmaEdge` on `Ω_{p,h}`, the elements lying entirely inside the disc,
+`n = 8, 16, 32, 64` (26 → 2076 elements), sequence rates. Each row is run
+twice — with `λ` the exact trace on `Γ_{p,h}`, and with `λ` on `Γ_p` and
+transferred, which is what PE-3 must do. The cut column is M-10, the same
+equilibrium on a mesh the plasma edge cuts.
+
+| | `λ` on `Γ_{p,h}` | | | `λ` on `Γ_p`, transferred | | | CUT (M-10) | | |
+|---|---|---|---|---|---|---|---|---|---|
+| `j` | `k=1` | `k=2` | `k=3` | `k=1` | `k=2` | `k=3` | `k=1` | `k=2` | `k=3` |
+| **`ψ*`** | | | | | | | | | |
+| 0 | 2.876 | 3.942 | **4.932** | 2.230 | 3.161 | 4.000 | 1.89 | 1.95 | 1.70 |
+| 1 | 2.943 | 3.761 | 4.851 | 2.834 | 2.615 | 3.875 | 3.00 | 2.87 | 2.68 |
+| 2 | 2.945 | 3.942 | 4.644 | 3.057 | 3.238 | 3.946 | 3.00 | 3.99 | 3.88 |
+| **`ψ_h`** | | | | | | | | | |
+| 0 | 1.875 | 2.925 | 3.922 | **1.997** | **3.043** | **4.009** | 1.50 | 1.50 | 1.50 |
+| 1 | 1.945 | 2.753 | 3.832 | 1.979 | 2.789 | 3.913 | 2.00 | 2.50 | 2.50 |
+| 2 | 1.946 | 2.945 | 3.585 | 1.975 | 3.003 | 3.889 | 2.00 | 3.00 | 3.50 |
+
+`ψ*`'s spread over `j`: **0.069 / 0.181 / 0.288** on `Γ_{p,h}` against the cut
+mesh's **1.11 / 2.04 / 2.18**. The control — the same solve with `λ` deleted, so
+`ψ = 0` on `Γ_p` — is flat at **−0.064** and 1.0e+06 times larger at the finest
+mesh (2.9028e-01 against 2.7834e-07).
+
+### M-75
+
+PE-0's premise with the geometry taken out: the same equilibrium on a FITTED
+rectangle `r ∈ [0.85, 1.15] × z ∈ [−0.15, 0.15]`, strictly inside the disc, so
+no element is cut and no boundary is a staircase.
+
+| `j` | `k = 2`: `ψ` / `q` / `ψ*` | `k = 3`: `ψ` / `q` / `ψ*` |
+|---|---|---|
+| 0 | 2.998 / 2.998 / **4.003** | 3.999 / 3.996 / **4.998** |
+| 1 | 2.987 / 2.983 / **3.989** | 3.992 / 3.992 / **4.993** |
+| 2 | 3.000 / 2.991 / **3.995** | 3.981 / 3.982 / **4.944** |
+
+### M-76
+
+PE-0: the transferred route is INTERMITTENT on a smooth circle, so the
+mesh-dependent fragility `PLASMA-EDGE-PLAN.md` §9.4 attributes to the X-point's
+corner is met with no corner present. `j = 0`, `k = 3`,
+`VertexConePath::NumWidened() = 0` and `dist( Γ_{p,h}, Γ_p )/h ∈ [1.02, 1.33]`
+at every mesh.
+
+| `n` | 16 | 24 | 32 | 48 | 64 | 96 | 128 |
+|---|---|---|---|---|---|---|---|
+| `L2(ψ)` | 3.388e-07 | **5.886e-07** | 2.066e-08 | 4.075e-09 | 1.025e-09 | 3.083e-10 | 9.539e-11 |
+| `L2(q)` | 4.317e-06 | **1.757e-05** | 3.170e-07 | 1.078e-07 | 2.339e-08 | **1.785e-08** | 7.010e-09 |
+
+Raising the path quadrature to order 24 moves these in the sixth figure —
+2.339475e-08 against 2.339478e-08 at `n = 64` — so it is not the quadrature.
+
+### M-77
+
+**What the CUDA build costs MEQ on the CPU path.** Two MFEM installs identical
+in every option, TPL and path — SUNDIALS, SuiteSparse, GSLIB, OpenMP,
+`MFEM_THREAD_SAFE`, LAPACK, PARDISO, `MFEM_PRECISION=double` — differing only in
+`MFEM_USE_CUDA` and the `MFEM_USE_CUDSS` that has to follow it. Nothing in the
+run uses cuDSS: the driver refuses that key and UMFPack is the default. The case
+is `examples/limited-tokamak.toml`'s geometry at 1601 elements, `k = 3`,
+`MKL_NUM_THREADS=1`.
+
+**The two builds produce byte-identical output** — 19 Newton iterations,
+`ψ_ax = −1.232304e-01`, the same axis-inside-a-conductor warning — so the
+comparison is of cost and not of answers.
+
+| | CUDA = YES | CUDA = NO | |
+|---|---|---|---|
+| wall, `OMP=4`, five paired runs | 21.39 · 21.46 · 21.56 · 21.75 · 22.32 | 19.84 · 20.06 · 20.39 · 20.44 · 20.55 | **1.07×** |
+| user, `OMP=1` | 26.75 · 28.63 | 25.33 · 25.63 | ~1.09× |
+| `operator new` calls | **226,710,640** | **171,344,397** | **−55.4 M, −24%** |
+
+The allocation count is exact and load-invariant; the timings are not, and the
+run-to-run scatter is 3.6% and 4.3% against a 7% effect — which is why five
+pairs are quoted rather than one, and no-CUDA is faster in **five out of five**.
+
+**A first pair taken while another build was finishing read 31.05 s against
+26.09 s, 1.19×, and that number is wrong.** It is the same trap this tree
+records for every suite time: a timing under contention is a measurement about
+the machine.
+
+**The mechanism is only PARTLY the CUDA lambda wrapper.** `operator new`
+interposed at its call site shows the wrapper accounting for 24% of the
+allocation traffic — `mfem::forall` on the host path constructs an
+`__nv_hdl_wrapper_t`, whose `manager::do_call` is separately visible in `perf` at
+1.9–2.9% — but **171 M allocations survive with CUDA off**, so the bulk of the
+traffic is MFEM's ordinary per-element temporaries and not the wrapper.

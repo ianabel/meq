@@ -801,3 +801,736 @@ BOOST_AUTO_TEST_CASE( theMovingEdgeCostsTheRateNothingAndCostsNewtonEverythingAt
 		            "profiles vanish at the edge is too strong" );
 	}
 }
+
+/*
+ * PE-0: THE PLASMA SIDE ALONE, WITH THE INTERFACE DATUM GIVEN.
+ * PLASMA-EDGE-PLAN.md section 6's first stage, and section 7's premise test.
+ *
+ * Everything above measures what the plasma edge costs when the edge CUTS
+ * elements. PLASMA-EDGE-PLAN.md proposes to stop it cutting them: discretise
+ * the elements lying entirely inside Omega_p, discretise the elements lying
+ * entirely outside it, and couple the two across the O( h ) band between. Its
+ * central premise is one sentence --
+ *
+ *     no element straddling Gamma_p implies full order
+ *
+ * -- and PE-0 is the cheapest test of it: the PLASMA side alone, with lambda
+ * GIVEN from the exact solution rather than solved for. No coupling, no vacuum
+ * subdomain, no border, no moving geometry. Nothing new is built, because this
+ * is stage 5's curved-boundary machinery pointed at an interior circle:
+ *
+ *     Omega_{p,h}   MarkLevelSetSubdomain + SubMesh::CreateFromDomain
+ *     Gamma_{p,h}   the generated boundary attribute, INSCRIBED in Gamma_p
+ *     the paths     mfem::VertexConePath, pointing OUTWARD as stage 5's do
+ *     lambda        setExteriorDatum(), evaluated at the FOOT on Gamma_p
+ *
+ * THE FIXTURE IS THE ONE ABOVE, WHICH IS WHAT MAKES THIS A CONTROLLED
+ * COMPARISON. PlasmaEdge's exact solution is w + c ( phi_+ )^m with w
+ * Delta*-harmonic, so ON THE PLASMA SIDE it is w + c phi^m -- analytic, with no
+ * trace of the switch. Same w, same c, same circle, same j; the only variable
+ * is whether the edge cuts an element.
+ *
+ * THREE CASES, AND THEY TAKE THE PREMISE APART IN THE ORDER THAT MAKES THE
+ * ANSWER READABLE.
+ *
+ *   1. theSamePlasmaOnAFittedDomainIsCleanAtEveryVanishingOrder -- a fitted
+ *      RECTANGLE strictly inside the disc. No subdomain, no staircase, no
+ *      transfer, and no plasma edge in the domain at all. This is the premise
+ *      reduced to a statement about the exact solution, and it is met to two
+ *      decimal places at every j.
+ *   2. theUncutPlasmaKeepsItsOrderAtEveryVanishingOrder -- Omega_{p,h}, run
+ *      TWICE per row: with lambda on Gamma_{p,h} (the premise on the geometry
+ *      the plan actually proposes) and with lambda on Gamma_p, transferred
+ *      (PE-0 as staged, and what PE-3 will have to do).
+ *   3. theInterfaceDatumIsWhatBuysThatOrder -- the control, without which none
+ *      of the above is evidence that the interface reached the solve.
+ *
+ * WHY THE PAIRWISE TIER IS MONOTONICITY AND NOT A RATE. Every unfitted study in
+ * this tree is two-tier because which background elements fall inside Omega is
+ * not a smooth function of h. ExtensionConvergence measured its worst pair 0.176
+ * below k+1 and asserts 0.30. Omega_{p,h} here is between 26 and 2076 elements
+ * where that study's D_h is between about 1000 and 7300, and the scatter is
+ * correspondingly larger: over eighteen sequences the worst pair sits 0.86 below
+ * k+1, and on a sweep at k = 3 through n = 16, 24, 32, 48, 64, 96, 128 the
+ * TRANSFERRED error is not even monotone -- L2( psi ) reads 3.39e-07 at n = 16
+ * and 5.89e-07 at n = 24, and L2( q ) improves by only 0.67 of an order between
+ * n = 64 and n = 96. That is the same geometric fragility section 9.4 of the
+ * plan records for a corner, met here on a SMOOTH circle with
+ * VertexConePath::NumWidened() == 0 at every mesh and dist( Gamma_{p,h},
+ * Gamma_p )/h in [ 1.02, 1.33 ], so assumption P.1 holds throughout. A pair
+ * slack wide enough to cover it would be vacuous, so the pairwise tier asserts
+ * what is actually wanted and is not vacuous: the error must FALL at every
+ * refinement.
+ *
+ * WHAT IS BEING COMPARED AGAINST, from MEASUREMENTS.md M-09 and M-10 -- the same
+ * equilibrium on a mesh the edge cuts: psi_h at min( k+1, j+1.5 ), so 1.5 at
+ * j = 0 whatever k, and psi* at
+ *
+ *     j     k = 1   k = 2   k = 3
+ *     0      1.89    1.95    1.70
+ *     1      3.00    2.87    2.68
+ *     2      3.00    3.99    3.88
+ */
+namespace
+{
+	/// PlasmaEdge's own defaults. Repeated here because the subdomain and the
+	/// paths need the circle as a level set and the fixture exposes it only
+	/// through accessors; theUncutPlasmaKeepsItsOrder... asserts they agree.
+	double const edgeCentreR = 1.0;
+	double const edgeCentreZ = 0.0;
+	double const edgeRadius  = 0.23456789;
+
+	/// A background box hugging the disc, with square cells.
+	double const pe0RMin = 0.6, pe0RMax = 1.4;
+	double const pe0ZMin = -0.4, pe0ZMax = 0.4;
+
+	/// The level set Omega_{p,h} and the paths are built from: NEGATIVE INSIDE
+	/// the plasma, which is the convention mfem::MarkLevelSetSubdomain and
+	/// mfem::VertexConePath both take.
+	///
+	/// IT IS A SIGNED DISTANCE AND PlasmaEdge::levelSet IS NOT. The two have the
+	/// same zero set, so either marks the same elements; only this one has
+	/// |grad phi| = 1, which is what a root find along a ray wants and what makes
+	/// MarkLevelSetSubdomain's offset a distance rather than a number.
+	double edgeLevelSet( mfem::Vector const &x )
+	{
+		return std::hypot( x( 0 ) - edgeCentreR, x( 1 ) - edgeCentreZ ) - edgeRadius;
+	}
+
+	/// Omega_{p,h} and everything that has to live as long as it does.
+	struct PlasmaSubdomain
+	{
+		std::unique_ptr<mfem::SubMesh> sub;
+		std::unique_ptr<mfem::VertexConePath> path;
+		mfem::Array<int> gammaPMarker;
+		int gammaP = 0;
+		double h = 0.0;
+	};
+
+	PlasmaSubdomain makePlasmaSubdomain( int n )
+	{
+		/*
+		 * THE BACKGROUND MUST OUTLIVE THE SubMesh CUT FROM IT. mfem::SubMesh
+		 * keeps a POINTER to its parent and mfem::VertexConePath reads the
+		 * parent's edges through it, so a background that is a local of this
+		 * function dangles the moment it returns -- undefined behaviour that
+		 * presents as a segfault inside MFEM's own constructor, with no MEQ
+		 * frame in the backtrace. A static pool is the lifetime that is
+		 * certainly long enough; ExtensionConvergence::makeSubdomain records the
+		 * whole story.
+		 */
+		static std::vector<std::unique_ptr<mfem::Mesh>> backgrounds;
+		backgrounds.push_back( std::make_unique<mfem::Mesh>(
+			mfem::Mesh::MakeCartesian2D( n, n, mfem::Element::TRIANGLE, false,
+			                             pe0RMax - pe0RMin, pe0ZMax - pe0ZMin ) ) );
+		mfem::Mesh &background = *backgrounds.back();
+		background.Transform( []( mfem::Vector const &in, mfem::Vector &out )
+		{
+			out( 0 ) = in( 0 ) + pe0RMin;
+			out( 1 ) = in( 1 ) + pe0ZMin;
+		} );
+
+		PlasmaSubdomain d;
+		d.h = ( pe0RMax - pe0RMin )/static_cast<double>( n );
+
+		// extra_refine = 1, the cheap insurance ExtensionConvergence keeps: a
+		// disc is convex, so the vertex test alone is already exact here.
+		mfem::Array<int> marker;
+		int const inside = mfem::MarkLevelSetSubdomain( background, edgeLevelSet,
+		                                               0.0, marker, 1 );
+		BOOST_TEST_REQUIRE( inside > 0, "Omega_{p,h} is empty at n = " << n );
+		for ( int e = 0; e < background.GetNE(); ++e )
+			background.SetAttribute( e, marker[ e ] ? 1 : 2 );
+		background.SetAttributes();
+
+		mfem::Array<int> domainAttr( 1 );
+		domainAttr[ 0 ] = 1;
+		d.sub = std::make_unique<mfem::SubMesh>(
+			mfem::SubMesh::CreateFromDomain( background, domainAttr ) );
+
+		// The disc is strictly inside the box, so the whole of Gamma_{p,h} is
+		// generated by SubMesh and none of it is inherited: one attribute, every
+		// face transferred, nothing fitted.
+		d.gammaP = d.sub->bdr_attributes.Max();
+		BOOST_TEST_REQUIRE( d.sub->bdr_attributes.Size() == 1,
+		                    "Omega_{p,h} has boundary inherited from the background "
+		                    "box at n = " << n << ", so part of Gamma_{p,h} is fitted "
+		                    "and the box is too small" );
+		d.gammaPMarker.SetSize( d.gammaP );
+		d.gammaPMarker = 0;
+		d.gammaPMarker[ d.gammaP - 1 ] = 1;
+
+		// Six h of search length, the slack ExtensionConvergence uses; the paths
+		// here are about 1.3 h long.
+		d.path = std::make_unique<mfem::VertexConePath>( *d.sub, d.gammaP,
+		                                                edgeLevelSet, 6.0*d.h );
+		return d;
+	}
+
+	/// The largest distance from Gamma_{p,h} to Gamma_p along the paths, which is
+	/// the quantity assumption P.1 is about.
+	double pathDistance( PlasmaSubdomain const &d )
+	{
+		double largest = 0.0;
+		mfem::Vector x, xbar;
+		for ( int be = 0; be < d.sub->GetNBE(); ++be )
+		{
+			if ( d.sub->GetBdrAttribute( be ) != d.gammaP )
+				continue;
+			mfem::FaceElementTransformations *ftr =
+				d.sub->GetBdrFaceTransformations( be );
+			if ( !ftr )
+				continue;
+			mfem::IntegrationRule const &ir =
+				mfem::IntRules.Get( ftr->GetGeometryType(), 4 );
+			for ( int q = 0; q < ir.GetNPoints(); ++q )
+			{
+				d.path->Endpoint( *ftr, ir.IntPoint( q ), xbar );
+				ftr->Transform( ir.IntPoint( q ), x );
+				xbar -= x;
+				largest = std::max( largest, xbar.Norml2() );
+			}
+		}
+		return largest;
+	}
+
+	/// How the condition on the interface is imposed. Three routes, answering
+	/// three different questions -- only the second is a control.
+	///
+	///   Transferred   PE-0 as PLASMA-EDGE-PLAN.md section 6 stages it: lambda
+	///                 lives on Gamma_p and is carried in along the paths. This
+	///                 is what the coupled method has to do, because at PE-3
+	///                 lambda IS the interface unknown and exists nowhere else.
+	///   ZeroDatum     the same machinery with lambda deleted, so psi = 0 is
+	///                 imposed on Gamma_p. THE CONTROL. The true trace there is
+	///                 the vacuum field, O( 1 ), so this must go flat -- a
+	///                 Gamma_h carrying no transferred datum still converges to
+	///                 something, which is the quiet failure every rate table in
+	///                 this tree needs a column against.
+	///   Fitted        lambda evaluated on Gamma_{p,h} ITSELF, no transfer
+	///                 anywhere. NOT a control, and the first draft of this file
+	///                 had it down as one. On stage 5's OUTER boundary the
+	///                 analogous column collapses to first order, because there
+	///                 the datum is the value on Gamma and putting it on Gamma_h
+	///                 is O( h ) wrong. Here lambda is a FUNCTION of position
+	///                 known everywhere, so evaluating it on Gamma_{p,h} is the
+	///                 exact Dirichlet trace of the exact solution on
+	///                 Omega_{p,h} and the problem posed is CONSISTENT. So this
+	///                 column is the premise ON THE PLAN'S OWN GEOMETRY with the
+	///                 plan's machinery taken out of it, and the difference
+	///                 between it and Transferred is what the transfer costs.
+	enum class Interface
+	{
+		Transferred,
+		ZeroDatum,
+		Fitted
+	};
+
+	struct EdgePoint
+	{
+		double h;
+		int elements;
+		double distance;
+		int widened;
+		double psi, flux, star;
+	};
+
+	EdgePoint measureOnPlasma( PlasmaEdge const &eq, int order, int n, Interface how )
+	{
+		PlasmaSubdomain d = makePlasmaSubdomain( n );
+
+		// F on the plasma side, where it is analytic: a triangle with every
+		// vertex inside a disc is inside it, so every quadrature point of every
+		// element of Omega_{p,h} has phi > 0 and nothing here evaluates the
+		// switch.
+		mfem::FunctionCoefficient sourceCoeff( [ &eq ]( mfem::Vector const &x )
+			{ return eq.f( x( 0 ), x( 1 ) ); } );
+		mfem::FunctionCoefficient psiCoeff( [ &eq ]( mfem::Vector const &x )
+			{ return eq.psi( x( 0 ), x( 1 ) ); } );
+		mfem::VectorFunctionCoefficient fluxCoeff( 2,
+			[ &eq ]( mfem::Vector const &x, mfem::Vector &v )
+			{ eq.flux( x( 0 ), x( 1 ), v( 0 ), v( 1 ) ); } );
+		mfem::ConstantCoefficient zero( 0.0 );
+
+		meq::GradShafranovSolver solver( *d.sub, order );
+		solver.setSource( sourceCoeff );
+		if ( how == Interface::Fitted )
+		{
+			// No extension anywhere: Gamma_{p,h} is ordinary fitted boundary and
+			// the exact solution's own trace is imposed on it.
+			solver.setBoundaryData( psiCoeff );
+		}
+		else
+		{
+			// Nothing is fitted here, so this projects against an empty marker.
+			solver.setBoundaryData( zero );
+			solver.setExtension( *d.path, d.gammaPMarker );
+			if ( how == Interface::Transferred )
+				// lambda. mfem::PathTraceCoefficient evaluates it at the FOOT of
+				// the path, which is on Gamma_p -- where psi and the vacuum field
+				// coincide, because phi vanishes there.
+				solver.setExteriorDatum( [ &eq ]( mfem::Vector const &x )
+					{ return eq.psi( x( 0 ), x( 1 ) ); } );
+		}
+		solver.solve();
+
+		EdgePoint p;
+		p.h = d.h;
+		p.elements = d.sub->GetNE();
+		p.distance = pathDistance( d );
+		p.widened = d.path->NumWidened();
+		p.psi = solver.potentialError( psiCoeff );
+		p.flux = solver.fluxError( fluxCoeff );
+		// After the two above, so that whatever postProcess() does to the solver
+		// cannot move a number this file has already measured.
+		solver.postProcess();
+		p.star = solver.postProcessedPotentialError( psiCoeff );
+		return p;
+	}
+
+	double edgeRate( double coarse, double fine, double ratio )
+	{
+		return std::log( coarse/fine )/std::log( ratio );
+	}
+
+	/// Four dyadic backgrounds. The finest carries 2076 elements of
+	/// Omega_{p,h}, and it is the finest DELIBERATELY: at k = 3 the fitted
+	/// column reaches L2( psi* ) = 1.7e-14 by n = 128, which is 9e-14 of psi's
+	/// own size and therefore the double-precision floor rather than a rate.
+	std::vector<int> const pe0Meshes = { 8, 16, 32, 64 };
+
+	/// The rate is read across the whole sequence, as every unfitted study in
+	/// this tree reads it. See the header for why the pairwise tier is
+	/// monotonicity rather than a second rate.
+	double const pe0SequenceSlack = 0.15;
+
+	std::vector<EdgePoint> pe0Study( PlasmaEdge const &eq, int order,
+	                                 Interface how = Interface::Transferred )
+	{
+		std::vector<EdgePoint> points;
+		points.reserve( pe0Meshes.size() );
+		for ( int n : pe0Meshes )
+			points.push_back( measureOnPlasma( eq, order, n, how ) );
+		return points;
+	}
+
+	void printPe0Table( std::vector<EdgePoint> const &points )
+	{
+		std::printf( "      %8s %7s %7s %5s %13s %6s %13s %6s %13s %6s\n",
+		             "h", "elem", "dist/h", "wide", "L2(psi)", "rate",
+		             "L2(q)", "rate", "L2(psi*)", "rate" );
+		for ( std::size_t i = 0; i < points.size(); ++i )
+		{
+			EdgePoint const &p = points[ i ];
+			if ( i == 0 )
+			{
+				std::printf( "      %8.5f %7d %7.3f %5d %13.6e %6s %13.6e %6s "
+				             "%13.6e %6s\n",
+				             p.h, p.elements, p.distance/p.h, p.widened,
+				             p.psi, "-", p.flux, "-", p.star, "-" );
+			}
+			else
+			{
+				double const ratio = points[ i - 1 ].h/p.h;
+				std::printf( "      %8.5f %7d %7.3f %5d %13.6e %6.3f %13.6e %6.3f "
+				             "%13.6e %6.3f\n",
+				             p.h, p.elements, p.distance/p.h, p.widened,
+				             p.psi,  edgeRate( points[ i - 1 ].psi,  p.psi,  ratio ),
+				             p.flux, edgeRate( points[ i - 1 ].flux, p.flux, ratio ),
+				             p.star, edgeRate( points[ i - 1 ].star, p.star, ratio ) );
+			}
+		}
+		std::fflush( stdout );
+	}
+
+	struct SequenceRates { double psi, flux, star; };
+
+	/// One refinement sequence on Omega_{p,h}: print it, assert psi and q at
+	/// k+1 across the sequence and monotone per pair, and hand back the three
+	/// sequence rates for the summary.
+	SequenceRates runPe0Sequence( PlasmaEdge const &eq, int k, Interface how,
+	                              char const *what )
+	{
+		std::printf( "    %s:\n", what );
+		std::vector<EdgePoint> const points = pe0Study( eq, k, how );
+		printPe0Table( points );
+
+		double const span = points.front().h/points.back().h;
+		SequenceRates s;
+		s.psi  = edgeRate( points.front().psi,  points.back().psi,  span );
+		s.flux = edgeRate( points.front().flux, points.back().flux, span );
+		s.star = edgeRate( points.front().star, points.back().star, span );
+		std::printf( "      across the sequence: psi %.3f, q %.3f, psi* %.3f "
+		             "(k+1 = %d, k+2 = %d)\n", s.psi, s.flux, s.star, k + 1, k + 2 );
+		std::fflush( stdout );
+
+		int const j = eq.vanishingOrder();
+		for ( std::size_t i = 1; i < points.size(); ++i )
+		{
+			BOOST_TEST( points[ i ].psi < points[ i - 1 ].psi,
+			            what << ", j = " << j << ", k = " << k << ": L2( psi ) ROSE "
+			            "from " << points[ i - 1 ].psi << " at h = " << points[ i - 1 ].h
+			            << " to " << points[ i ].psi << " at h = " << points[ i ].h
+			            << ". Which background elements fall inside the disc is not a "
+			            "smooth function of h, so the rate wanders; the error itself "
+			            "is not allowed to" );
+			BOOST_TEST( points[ i ].flux < points[ i - 1 ].flux,
+			            what << ", j = " << j << ", k = " << k << ": L2( q ) rose from "
+			            << points[ i - 1 ].flux << " to " << points[ i ].flux
+			            << " on refinement" );
+			BOOST_TEST( points[ i ].star < points[ i - 1 ].star,
+			            what << ", j = " << j << ", k = " << k << ": L2( psi* ) rose "
+			            "from " << points[ i - 1 ].star << " to " << points[ i ].star
+			            << " on refinement" );
+		}
+		BOOST_TEST( s.psi >= k + 1.0 - pe0SequenceSlack,
+		            what << ", j = " << j << ", k = " << k << ": psi converged at "
+		            << s.psi << " on the UNCUT plasma subdomain, short of k+1 = "
+		            << k + 1 << ". Nothing straddles Gamma_p here, which is the whole "
+		            "premise of PLASMA-EDGE-PLAN.md; the fitted-rectangle case above "
+		            "says what the same equilibrium gives with the staircase removed "
+		            "as well" );
+		BOOST_TEST( s.flux >= k + 1.0 - pe0SequenceSlack,
+		            what << ", j = " << j << ", k = " << k << ": q converged at "
+		            << s.flux << " across the sequence, wanted "
+		            << k + 1.0 - pe0SequenceSlack );
+		BOOST_TEST( points.back().star < points.back().psi,
+		            what << ", j = " << j << ", k = " << k << ": psi* is "
+		            << points.back().star << " against psi_h's " << points.back().psi
+		            << " -- the post-processing has bought nothing" );
+		for ( EdgePoint const &p : points )
+			BOOST_TEST( p.widened == 0,
+			            what << ", j = " << j << ", k = " << k << ", h = " << p.h
+			            << ": " << p.widened << " vertices of Gamma_{p,h} needed a "
+			            "widened fan, so assumption P.1 does not hold on the "
+			            "interface" );
+		return s;
+	}
+
+	/// The spread of a column of three, which is how the j-independence claim is
+	/// read: j has no business appearing in a rate measured where the edge cuts
+	/// nothing.
+	double spreadOverJ( double const column[ 3 ] )
+	{
+		return std::max( { column[ 0 ], column[ 1 ], column[ 2 ] } )
+		     - std::min( { column[ 0 ], column[ 1 ], column[ 2 ] } );
+	}
+
+	/// A FITTED rectangle strictly inside the disc: r in [ 0.85, 1.15 ],
+	/// z in [ -0.15, 0.15 ], whose farthest corner is 0.212 from the centre
+	/// against the edge's 0.2346. Same equilibrium, same exact Dirichlet data,
+	/// and no staircase, no subdomain and no transfer.
+	SequenceRates fittedRectangleStudy( PlasmaEdge const &eq, int k,
+	                                    std::vector<int> const &meshes )
+	{
+		mfem::FunctionCoefficient sourceCoeff( [ &eq ]( mfem::Vector const &x )
+			{ return eq.f( x( 0 ), x( 1 ) ); } );
+		mfem::FunctionCoefficient psiCoeff( [ &eq ]( mfem::Vector const &x )
+			{ return eq.psi( x( 0 ), x( 1 ) ); } );
+		mfem::VectorFunctionCoefficient fluxCoeff( 2,
+			[ &eq ]( mfem::Vector const &x, mfem::Vector &v )
+			{ eq.flux( x( 0 ), x( 1 ), v( 0 ), v( 1 ) ); } );
+
+		std::vector<double> hs, ps, qs, ss;
+		for ( int n : meshes )
+		{
+			mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D(
+				n, n, mfem::Element::TRIANGLE, false, 0.30, 0.30 );
+			mesh.Transform( []( mfem::Vector const &in, mfem::Vector &out )
+			{
+				out( 0 ) = in( 0 ) + 0.85;
+				out( 1 ) = in( 1 ) - 0.15;
+			} );
+
+			meq::GradShafranovSolver solver( mesh, k );
+			solver.setSource( sourceCoeff );
+			solver.setBoundaryData( psiCoeff );
+			solver.solve();
+			double const ep = solver.potentialError( psiCoeff );
+			double const eq2 = solver.fluxError( fluxCoeff );
+			solver.postProcess();
+			double const es = solver.postProcessedPotentialError( psiCoeff );
+
+			hs.push_back( 0.30/static_cast<double>( n ) );
+			ps.push_back( ep );
+			qs.push_back( eq2 );
+			ss.push_back( es );
+			std::size_t const i = hs.size() - 1;
+			std::printf( "    %3d %5d %9.5f %13.6e %13.6e %13.6e", n, mesh.GetNE(),
+			             hs[ i ], ep, eq2, es );
+			if ( i > 0 )
+			{
+				double const ratio = hs[ i - 1 ]/hs[ i ];
+				std::printf( "   %6.3f %6.3f %6.3f",
+				             edgeRate( ps[ i - 1 ], ep, ratio ),
+				             edgeRate( qs[ i - 1 ], eq2, ratio ),
+				             edgeRate( ss[ i - 1 ], es, ratio ) );
+			}
+			std::printf( "\n" );
+			std::fflush( stdout );
+		}
+
+		double const span = hs.front()/hs.back();
+		return SequenceRates{ edgeRate( ps.front(), ps.back(), span ),
+		                      edgeRate( qs.front(), qs.back(), span ),
+		                      edgeRate( ss.front(), ss.back(), span ) };
+	}
+}
+
+/**
+ * THE PREMISE REDUCED TO A STATEMENT ABOUT THE EXACT SOLUTION, WHICH IS WHERE
+ * PE-0 HAS TO START.
+ *
+ * PLASMA-EDGE-PLAN.md section 7's premise -- no element straddling Gamma_p
+ * implies full order -- bundles two claims that come apart under measurement:
+ * that the plasma-side solution is smooth enough for k+1 and k+2, and that a
+ * subdomain of whole background elements can deliver them. This case tests the
+ * first alone, on a fitted rectangle strictly inside the disc. There is no
+ * plasma edge in this domain at all, so the only thing j can do here is change
+ * which analytic function is being approximated.
+ *
+ * It is also the discriminating control for the two cases below, and it is what
+ * turns "PE-0 fell short at j = 2, k = 3" into a statement about the GEOMETRY
+ * rather than about the fixture, the profile or the quadrature.
+ */
+BOOST_AUTO_TEST_CASE( theSamePlasmaOnAFittedDomainIsCleanAtEveryVanishingOrder )
+{
+	std::vector<int> const meshes = { 8, 16, 32 };
+
+	for ( int k : { 2, 3 } )
+		for ( int j = 0; j <= 2; ++j )
+		{
+			PlasmaEdge const eq( j );
+			std::printf( "\n  a FITTED rectangle inside the plasma, j = %d, k = %d\n"
+			             "    %3s %5s %9s %13s %13s %13s   %6s %6s %6s\n",
+			             j, k, "n", "elem", "h", "L2(psi)", "L2(q)", "L2(psi*)",
+			             "psi", "q", "psi*" );
+			SequenceRates const s = fittedRectangleStudy( eq, k, meshes );
+			std::printf( "    across the sequence: psi %.3f, q %.3f, psi* %.3f "
+			             "(k+1 = %d, k+2 = %d)\n", s.psi, s.flux, s.star, k + 1, k + 2 );
+			std::fflush( stdout );
+
+			// Tighter than anything on the unfitted path, and deliberately: this
+			// is a fitted convex rectangle and there is nothing here for a rate to
+			// wander about.
+			BOOST_TEST( s.psi >= k + 1.0 - 0.10,
+			            "j = " << j << ", k = " << k << ": psi converged at " << s.psi
+			            << " on a FITTED rectangle strictly inside the plasma, where "
+			            "the exact solution is w + c phi^m and analytic. If this is "
+			            "short of k+1 = " << k + 1 << " then the fixture or the "
+			            "solver is what is being measured, and nothing else in this "
+			            "file means anything" );
+			BOOST_TEST( s.flux >= k + 1.0 - 0.10,
+			            "j = " << j << ", k = " << k << ": q converged at " << s.flux
+			            << " on the fitted rectangle, wanted " << k + 1 );
+			BOOST_TEST( s.star >= k + 2.0 - 0.10,
+			            "j = " << j << ", k = " << k << ": psi* converged at " << s.star
+			            << " on the fitted rectangle, short of k+2 = " << k + 2
+			            << ". PLASMA-EDGE-PLAN.md's premise is that the plasma-side "
+			            "solution admits k+2 at every j; this is that claim with the "
+			            "subdomain, the staircase and the transfer all removed" );
+		}
+}
+
+/**
+ * PE-0 PROPER: Omega_{p,h}, THE SUBDOMAIN OF WHOLE ELEMENTS, AT EVERY j.
+ *
+ * Run twice per row, because section 7 asks one question and section 6's PE-0
+ * answers a harder one:
+ *
+ *   lambda on Gamma_{p,h}   THE PREMISE ON THE PLAN'S OWN GEOMETRY. The exact
+ *                           solution's own trace on the computational boundary,
+ *                           so the problem is consistent and only the
+ *                           approximation on a staircase domain is measured.
+ *   lambda on Gamma_p       PE-0 AS STAGED, and what PE-3 must do, because there
+ *                           lambda is the interface unknown and lives on Gamma_p
+ *                           and nowhere else.
+ *
+ * The gap between the two columns is the price of coupling at a distance, and it
+ * has nothing to do with the plasma edge.
+ */
+BOOST_AUTO_TEST_CASE( theUncutPlasmaKeepsItsOrderAtEveryVanishingOrder )
+{
+	// The circle this file marks the subdomain from must be the circle the
+	// fixture puts the source's edge on, or the whole study is a beautifully
+	// converging table for a different problem.
+	{
+		PlasmaEdge const eq( 0 );
+		BOOST_TEST_REQUIRE( eq.centre( 0 ) == edgeCentreR );
+		BOOST_TEST_REQUIRE( eq.centre( 1 ) == edgeCentreZ );
+		BOOST_TEST_REQUIRE( eq.edgeRadius() == edgeRadius );
+	}
+
+	// psi*'s rate on the CUT mesh, MEASUREMENTS.md M-10, for the comparison.
+	double const cutStar[ 3 ][ 3 ] = { { 1.89, 1.95, 1.70 },
+	                                   { 3.00, 2.87, 2.68 },
+	                                   { 3.00, 3.99, 3.88 } };
+	SequenceRates fitted[ 3 ][ 3 ], transferred[ 3 ][ 3 ];
+
+	for ( int j = 0; j <= 2; ++j )
+	{
+		PlasmaEdge const eq( j );
+		for ( int k = 1; k <= 3; ++k )
+		{
+			std::printf( "\n  PE-0: the plasma side alone, j = %d, k = %d "
+			             "(the CUT mesh gives psi_h min( k+1, %.1f ) and psi* %.2f)\n",
+			             j, k, j + 1.5, cutStar[ j ][ k - 1 ] );
+			fitted[ j ][ k - 1 ] =
+				runPe0Sequence( eq, k, Interface::Fitted,
+				                "lambda on Gamma_{p,h}, the premise on this geometry" );
+			transferred[ j ][ k - 1 ] =
+				runPe0Sequence( eq, k, Interface::Transferred,
+				                "lambda on Gamma_p, transferred -- PE-0 as staged" );
+
+			// PE-0's stated acceptance, on both routes.
+			BOOST_TEST( fitted[ j ][ k - 1 ].star >= k + 2.0 - pe0SequenceSlack,
+			            "j = " << j << ", k = " << k << ": psi* converged at "
+			            << fitted[ j ][ k - 1 ].star << " on the UNCUT plasma "
+			            "subdomain with the exact trace on its own boundary -- the "
+			            "premise with every other variable removed but the staircase "
+			            "shape of Gamma_{p,h}. k+2 = " << k + 2 << " is what "
+			            "PLASMA-EDGE-PLAN.md section 7 claims, and the fitted "
+			            "rectangle above reaches it on the same equilibrium at the "
+			            "same j. WHAT FIXES IT is a Gamma_{p,h} that is not a "
+			            "staircase of 270 degree re-entrant corners -- the companion "
+			            "mesh of GS-2 section 3.3, meq::AdaptiveDomain, is the lever "
+			            "this tree already has" );
+			BOOST_TEST( transferred[ j ][ k - 1 ].star >= k + 2.0 - pe0SequenceSlack,
+			            "j = " << j << ", k = " << k << ": psi* converged at "
+			            << transferred[ j ][ k - 1 ].star << " with lambda transferred "
+			            "from Gamma_p against " << fitted[ j ][ k - 1 ].star
+			            << " with it on Gamma_{p,h}, short of k+2 = " << k + 2
+			            << ". PLASMA-EDGE-PLAN.md section 6 makes this PE-0's "
+			            "acceptance criterion. WHAT FIXES IT IS NOT ON THE PLASMA "
+			            "SIDE: the two columns differ only in the transfer, and "
+			            "ExtensionConvergence asserts k+1.5 rather than k+2 for psi* "
+			            "on the same machinery at the OUTER boundary for the same "
+			            "reason. Either the transfer gains an order or PE-0's "
+			            "acceptance does" );
+		}
+	}
+
+	// THE CAP IS GONE, WHICH IS THE PLAN'S PAYOFF AND IS NOT IN DOUBT. On the cut
+	// mesh psi_h is capped at min( k+1, j+1.5 ), so at j = 0 it cannot exceed 1.5
+	// however large k is. Half an order above that cap is a margin no cut mesh can
+	// reach by any amount of noise.
+	for ( int k = 2; k <= 3; ++k )
+		for ( SequenceRates const &route : { fitted[ 0 ][ k - 1 ],
+		                                     transferred[ 0 ][ k - 1 ] } )
+			BOOST_TEST( route.psi > 2.0,
+			            "at j = 0, k = " << k << " psi_h converged at " << route.psi
+			            << " on the uncut plasma subdomain. The cut mesh caps it at "
+			            "j + 1.5 = 1.5 whatever k is, and removing that cap is the "
+			            "single thing PLASMA-EDGE-PLAN.md is for" );
+
+	std::printf( "\n  PE-0 summary: the rate against j, same equilibrium throughout\n"
+	             "          %-23s %-23s %-23s\n",
+	             "uncut, datum on Gamma_ph", "uncut, transferred", "CUT (M-10)" );
+	std::printf( "     j   %7s %7s %7s %7s %7s %7s %7s %7s %7s\n",
+	             "k = 1", "k = 2", "k = 3", "k = 1", "k = 2", "k = 3",
+	             "k = 1", "k = 2", "k = 3" );
+	std::printf( "   psi*\n" );
+	for ( int j = 0; j <= 2; ++j )
+		std::printf( "     %d   %7.3f %7.3f %7.3f %7.3f %7.3f %7.3f %7.2f %7.2f %7.2f\n",
+		             j,
+		             fitted[ j ][ 0 ].star, fitted[ j ][ 1 ].star, fitted[ j ][ 2 ].star,
+		             transferred[ j ][ 0 ].star, transferred[ j ][ 1 ].star,
+		             transferred[ j ][ 2 ].star,
+		             cutStar[ j ][ 0 ], cutStar[ j ][ 1 ], cutStar[ j ][ 2 ] );
+	std::printf( "   psi_h\n" );
+	for ( int j = 0; j <= 2; ++j )
+		std::printf( "     %d   %7.3f %7.3f %7.3f %7.3f %7.3f %7.3f %7.2f %7.2f %7.2f\n",
+		             j,
+		             fitted[ j ][ 0 ].psi, fitted[ j ][ 1 ].psi, fitted[ j ][ 2 ].psi,
+		             transferred[ j ][ 0 ].psi, transferred[ j ][ 1 ].psi,
+		             transferred[ j ][ 2 ].psi,
+		             std::min( 2.0, j + 1.5 ), std::min( 3.0, j + 1.5 ),
+		             std::min( 4.0, j + 1.5 ) );
+
+	// AND THE COLUMN, WHICH IS THE PLAN'S CLAIM STATED SO THAT IT CAN FAIL. A
+	// table reading k+2 at j = 2 and 1.9 at j = 0 would look like a success on two
+	// rows out of three; it is the SPREAD down the column that says the edge has
+	// stopped mattering. Asserted on the datum-on-Gamma_{p,h} column, which is the
+	// premise; the transferred column's spread is printed beside it and is
+	// dominated by the pair-to-pair scatter the header measures rather than by j.
+	for ( int k = 1; k <= 3; ++k )
+	{
+		double fittedStar[ 3 ], transferredStar[ 3 ], fittedPsi[ 3 ];
+		for ( int j = 0; j <= 2; ++j )
+		{
+			fittedStar[ j ]      = fitted[ j ][ k - 1 ].star;
+			transferredStar[ j ] = transferred[ j ][ k - 1 ].star;
+			fittedPsi[ j ]       = fitted[ j ][ k - 1 ].psi;
+		}
+		std::printf( "     k = %d: spread over j -- psi* %.3f on Gamma_{p,h} and "
+		             "%.3f transferred, psi %.3f  (the cut mesh's psi* spread is "
+		             "%.2f)\n", k, spreadOverJ( fittedStar ),
+		             spreadOverJ( transferredStar ), spreadOverJ( fittedPsi ),
+		             cutStar[ 2 ][ k - 1 ] - cutStar[ 0 ][ k - 1 ] );
+
+		BOOST_TEST( spreadOverJ( fittedStar ) < 0.4,
+		            "psi*'s rate at k = " << k << " moved by "
+		            << spreadOverJ( fittedStar ) << " between j = 0 and j = 2 on the "
+		            "UNCUT plasma subdomain. j is the order to which the source "
+		            "vanishes at an edge that cuts no element here, so it has no "
+		            "business appearing in these rates -- and its appearing is "
+		            "exactly what PLASMA-EDGE-PLAN.md's premise denies" );
+		BOOST_TEST( spreadOverJ( fittedPsi ) < 0.4,
+		            "psi_h's rate at k = " << k << " moved by "
+		            << spreadOverJ( fittedPsi ) << " between j = 0 and j = 2 on the "
+		            "uncut plasma subdomain" );
+	}
+	std::fflush( stdout );
+}
+
+/**
+ * AND THE MACHINERY IS NOT INERT, WHICH A RATE TABLE CANNOT SAY ON ITS OWN.
+ *
+ * Every number above is compatible with a solver that never looked at Gamma_p:
+ * Omega_{p,h} is a perfectly ordinary domain and a perfectly ordinary Dirichlet
+ * problem on it converges at k+1 too. So PE-0 needs the column
+ * ExtensionConvergence and theDriverSolvesOnACurvedBoundary both keep -- the
+ * same solve with the transferred datum deleted, which imposes psi = 0 on
+ * Gamma_p while the true trace there is the vacuum field.
+ *
+ * IT IS THE QUIET FAILURE, AND THAT IS WHY IT NEEDS A COLUMN. Nothing throws,
+ * the solve converges, and the answer is a different function.
+ */
+BOOST_AUTO_TEST_CASE( theInterfaceDatumIsWhatBuysThatOrder )
+{
+	PlasmaEdge const eq( 0 );
+	int const order = 2;
+
+	std::printf( "\n  PE-0's control, j = 0, k = %d\n", order );
+
+	std::printf( "    lambda transferred from Gamma_p:\n" );
+	std::vector<EdgePoint> const transferred = pe0Study( eq, order );
+	printPe0Table( transferred );
+
+	std::printf( "    lambda DELETED, so psi = 0 is imposed on Gamma_p:\n" );
+	std::vector<EdgePoint> const zeroDatum =
+		pe0Study( eq, order, Interface::ZeroDatum );
+	printPe0Table( zeroDatum );
+
+	double const span = transferred.front().h/transferred.back().h;
+	double const rateTransferred =
+		edgeRate( transferred.front().psi, transferred.back().psi, span );
+	double const rateZero = edgeRate( zeroDatum.front().psi, zeroDatum.back().psi, span );
+
+	std::printf( "    psi across the sequence: transferred %.3f, zero datum %.3f; "
+	             "final L2 %.4e against %.4e\n",
+	             rateTransferred, rateZero, transferred.back().psi,
+	             zeroDatum.back().psi );
+	std::fflush( stdout );
+
+	BOOST_TEST( rateZero < 0.5,
+	            "deleting lambda and imposing psi = 0 on Gamma_p still converges at "
+	            << rateZero << ". The true trace there is the vacuum field and is "
+	            "O( 1 ), so this column is supposed to be FLAT -- if it is not, the "
+	            "rates measured beside it are not evidence that the interface "
+	            "condition reached the solve at all" );
+	BOOST_TEST( zeroDatum.back().psi > 100.0*transferred.back().psi,
+	            "the zero-datum solve gives " << zeroDatum.back().psi << " against "
+	            << transferred.back().psi << " with lambda transferred, which is not "
+	            "the difference a boundary condition makes" );
+}
