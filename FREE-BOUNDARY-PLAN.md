@@ -3871,86 +3871,90 @@ exclusion is a third tier above the two that were there — off the axis AND off
 the conductors, then off the axis alone, then anywhere — and takes the seed from
 inside a conductor on most evaluations to 1 of 1189.
 
-### 10.8 Two further fixes are MEASURED, CORRECT IN INTENT, AND REGRESS FOUR CASES
+### 10.8 The fill's seed belongs to the axis, and `ψ_bnd`'s initial value is a lever with no safe setting
 
-Both are written up here rather than committed, because each fixes the diverted
-machine and breaks cases that are green. **The measurements are the point; the
-code is a twenty-minute re-implementation from this section.**
+Two candidate fixes came out of §10.7's diagnosis. **They are not alike, and the
+first guess about which caused what was wrong** — worth recording, because the
+evidence that suggested it was a failing test's own message.
 
-**SEED THE FILL AT THE LOCATED AXIS, WHICH IS WHAT ITS OWN CONTRACT SAYS.**
+**SEED THE FILL AT THE LOCATED AXIS. BUILT, AND IT REGRESSES NOTHING.**
 `GradShafranov.hpp` documents `Component` as a fill "seeded at the element
-holding `psi_ax`". It seeds at the argmax of `Ψ` instead, and the two agree only
+holding `psi_ax`". It seeded at the argmax of `Ψ` instead, and the two agree only
 while `ψ_ax` IS the field's maximum — which is what the axis constraint intends
-and exactly what a conductor breaks. **And the failure is a NEAR TIE, not a
-landslide**, which is why defect 2's exclusion is not enough: it stops the seed
-landing inside a coil and cannot stop the coil's peak being carried by the
-element beside it. Measured with `ψ_bnd` started on the physical branch: the
-solve holds a correct equilibrium for about thirty evaluations — `ψ_bnd` stable
-at 3.2379e-02 to 3.2410e-02 against the reference 3.240413e-02, 797 elements,
-the axis at ( 1.3576, 0.0562 ) against ( 1.351273, 0.062226 ) — while the seed
-alternates on every other evaluation between that axis element at
-`Ψ = 9.9847e-01` and the element beside P1L at `Ψ = 9.9878e-01`. **Three parts
-in ten thousand, and it decides the support**: each flip moves it by two
-elements, the residual is discontinuous in the unknowns, and the run leaves the
-branch.
+and exactly what a conductor breaks. **The failure is a NEAR TIE, not a
+landslide**, which is why §10.7's conductor exclusion is not enough: it stops the
+seed landing inside a coil and cannot stop the coil's peak being carried by the
+element beside it. Measured on `examples/diverted-tokamak.toml`: for about thirty
+evaluations the seed alternates on every other evaluation between the axis
+element at `Ψ = 9.9847e-01` and the element beside P1L at `Ψ = 9.9878e-01`.
+**Three parts in ten thousand, and it decides the support** — each flip moves it
+by two elements, so the residual is discontinuous in the unknowns and Newton has
+no derivative to iterate with. A tie at 3e-04 cannot be broken by making an
+argmax cleverer; the axis is a located point, not a competition.
 
-The implementation is a private `int plasmaSeedElement = -1`, written to
-`best.element` where `locateAxisPoint()` accepts a critical point, cleared where
-that constraint begins an evaluation, and read as a tier above the existing
-ladder in `refreshPlasmaComponent()`.
+**INITIALISE `ψ_bnd` FROM ITS OWN BORDER ROW. NOT BUILT, AND THE REASON IS THE
+LIMITED MACHINE.** `ψ_ax` gets an initial value from the caller and `ψ_bnd` gets
+none, so it starts every solve at 0. On a LIMITED machine that is nearly right —
+the contact is on the wall, where `ψ` is small. On a DIVERTED one the reference
+`ψ_bnd` is 3.240413e-02 against a span of 5.03e-02, **39% of the way from the
+axis to the boundary**, and the error lands not on `ψ_bnd` but on the SUPPORT it
+implies. From 0 the first fill calls **2274 of 2642** elements plasma, 86% of the
+half-disc; from `ψ_h` at the limiter it calls **800**, and the span comes out
+5.03e-02 on the first evaluation. With both changes the diverted machine solves
+in **six** Newton steps to `ψ_bnd` and `ψ_ax` both **0.07%** from freegs4e, with
+the axis 1.0e-03 m from the reference.
 
-**INITIALISE `ψ_bnd` FROM ITS OWN BORDER ROW RATHER THAN FROM ZERO.** `ψ_ax`
-gets an initial value from the caller — `setSource()`'s second argument,
-`[source] PsiAxis` in a file — and `ψ_bnd` gets none, so it starts every solve
-at `psiBoundaryValue`, which is 0. On a LIMITED machine that is nearly right,
-the contact being on the wall where `ψ` is small. On a DIVERTED one the
-reference `ψ_bnd` is 3.240413e-02 against a span of 5.03e-02 — **39% of the way
-from the axis to the boundary** — and the error lands not on `ψ_bnd` but on the
-SUPPORT it implies, `ConfineToPlasma` testing
-`Ψ = ( ψ - ψ_bnd )/( ψ_ax - ψ_bnd )`. Measured: from 0 the first fill calls
-**2274 of 2642 elements** plasma, 86% of the half-disc, and the prescribed
-`I_p = 2.0e+05 A` is delivered over that; from `ψ_h` at the limiter it calls
-**800**, and the span comes out 5.03e-02 on the first evaluation.
+**AND ITS FIRST GATE WAS WRONG IN A WAY WORTH KEEPING.** Gated on
+`hasInitialGuess()` it took FOUR green cases red. `hasInitialGuess()` conflates
+two opposite things: `setInitialGuess( GridFunction const & )` is a WARM START,
+a converged field where `ψ_h` at the limiter genuinely IS `ψ_bnd`, while
+`setInitialGuess( Coefficient & )` is the TRIVIAL-BRANCH ESCAPE the GS-2 §4.2–4.5
+sources need to get off `ψ ≡ 0` — a synthetic bump, where `ψ_h` at the limiter is
+a number about the bump. `initialGuessField` is null for the second and is the
+right test; its own comment already draws the distinction.
 
-Evaluating `ψ_h` at the limiter point on the incoming iterate is free — the
-element and its shape functions are located two lines away — and a COLD solve is
-bit-identical, since with no guess the iterate is the Dirichlet datum. NPC only:
-under the condensation the unknown is the trace alone and there is no potential
-block to read.
+**THE ATTRIBUTION, MEASURED RATHER THAN INFERRED, BECAUSE THE INFERENCE WAS
+WRONG.** `PlasmaConnectivity` failed with a message about the fill reaching the
+axis, which read as the seed change and was not:
 
-**WITH BOTH, THE DIVERTED MACHINE SOLVES.** Six Newton steps, residual
-6.782874e-02 to 3.950598e-12, `ψ_bnd = 3.237932e-02` against the reference
-3.240413e-02 and `ψ_ax = 8.266004e-02` against 8.271751e-02 — **both to 0.07%**
-— with the axis at ( 1.3504, 0.0626 ), 1.0e-03 m from ( 1.351273, 0.062226 ).
+| | axis seed alone | + `ψ_bnd` on `hasInitialGuess()` | + `ψ_bnd` on `initialGuessField` |
+|---|---|---|---|
+| `HighBetaConvergence` | pass | **fail** | pass |
+| `PlasmaConnectivity` | pass | **fail** | pass |
+| `FreeBoundaryCoupling` | pass | **fail** | pass |
+| `DriverAcceptance` | pass | **fail** | **fail** |
 
-**AND THE SELECTION IS SENSITIVE AT A LEVEL THAT IS ITS OWN FINDING.** With the
-axis seed but `ψ_bnd` from 0, the run reaches the RIGHT TOPOLOGY in 26 steps —
-`ψ_bnd = 3.229751e-02`, 0.33% — and settles with the axis at ( 1.4201, 0.0704 ),
-6.9e-02 m out, and `ψ_ax` 2.6% high. Initialising `ψ_bnd` from the guess gives
-3.284153e-02, which is the guess's own 1.3% error at the X-point, and lands on
-that same second solution in 17 steps rather than on the first. **Both satisfy
-their own border row at a residual of 5e-12**, so these are two discrete
-equilibria and the initial `ψ_bnd` selects between them — §10.5's subject, and
-the same phenomenon `CLAUDE_HDGGS.md` records for three solve routes landing
-9.4% apart. Whether the gap closes under refinement is UNMEASURED and is the
-next thing to measure.
+**The axis seed is innocent of all four.** All three of the cases the gate
+rescues use `mfem::FunctionCoefficient` bumps; `examples/limited-tokamak.toml`
+is the only fixture in the set with a stored `.gf`, which is why it is the only
+one the corrected gate does not reach.
 
-**THE FOUR REGRESSIONS, WHICH ARE INFORMATIVE RATHER THAN INCIDENTAL.** With
-both changes in, `ctest` reads 44/50 against 48/50 without them:
+**AND THAT LAST CELL IS THE FINDING, NOT AN OBSTACLE TO TIDY AWAY.** With
+`ψ_bnd` started at `ψ_h` on its own reference guess — the physically right value
+— the limited machine descends to 1.19e-01, `2.16e-02` of `‖r₀‖`, by step 17 and
+then **stalls and drifts upward monotonically for the remaining 183 steps**,
+observed order 1.000 to three figures, hitting the 200-iteration cap. From
+`ψ_bnd = 0` the same case converges in **11**. So starting `ψ_bnd` NEAR its
+answer puts the plasma edge on the limiter from step 0, where the support sits
+exactly on the boundary of flipping, while starting far from it gives a large
+plasma that shrinks monotonically and lands cleanly.
 
-| case | what it says |
-|---|---|
-| `DriverAcceptance` | `theDriverSolvesALimitedTokamak`: the driver no longer exits 0. The limited machine was 11 steps to `Ψ = 1.0000` and 1.3e-04 from freegs4e, so this is the load-bearing one |
-| `FreeBoundaryCoupling` | `theTwoBordersConvergeTogether` does not converge; `theAxisSourceGuardSeparatesThePoleFromTheLimiter` reports the plasma containing the symmetry axis at `Ψ = 0.2619` with `ψ_bnd = -0.024237`; the coil-free control runs 2 rows |
-| `PlasmaConnectivity` | `theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses`: limiter 1.20 was chosen as the row where the fill DOES reach the axis, and it now reaches 0. **Arguably the change working** — an axis-seeded fill has less reason to leak to `r = 0` — but the case needs a positive row to couple against, so it needs re-choosing rather than relaxing |
-| `HighBetaConvergence` | `theAnalyticColumnAgreesWithTheDifferencedOne` at `n = 16`: assembled 1.1137e-15 against differenced 5.1765e-16, both at round-off. It has NO coils, and it passes at 3.80 s with the two changes out, so it is caused rather than flaky |
+`ψ_bnd`'s initial value is therefore a real lever on which discrete equilibrium
+is reached and how easily, with **no setting that is right for both machines** —
+which is §10.5's subject arriving from a new direction. What it is not is a
+missing default to be filled in.
 
-The `ψ_bnd` initialisation is the likelier culprit for the first two: it changes
-the starting support of every warm-started limiter run in the tree, and
-`FREE-BOUNDARY-PLAN.md` §11.7's repaired fixture is a limiter sweep. Separating
-the two changes and re-running is the first step; the second is deciding whether
-the limited machine's 11-step answer depends on starting from `ψ_bnd = 0`, which
-would be a finding about that fixture rather than about this change.
+**THE SELECTION SENSITIVITY, SEPARATELY.** With the axis seed and `ψ_bnd` from 0,
+the diverted machine reaches the RIGHT TOPOLOGY in 26 steps — `ψ_bnd`
+3.229751e-02, 0.33% — and settles with the axis at ( 1.4201, 0.0704 ), 6.9e-02 m
+out, and `ψ_ax` 2.6% high. Initialising `ψ_bnd` from the guess gives 3.284153e-02,
+the guess's own 1.3% error at the X-point, and lands on that SAME second solution
+in 17 steps rather than on the first. Both satisfy their own border row at a
+residual of 5e-12, so these are two discrete equilibria and the initial `ψ_bnd`
+selects between them. **Whether the gap closes under refinement is UNMEASURED and
+is the next thing to measure** — at `k = 2` on 2642 elements an axis 6.9e-02 m
+out is 17% of a minor radius, which is too large to be discretisation and is not
+yet demonstrated to be anything else.
 
 ## 11. `ψ_ax` was the open defect, and the list is worked through
 

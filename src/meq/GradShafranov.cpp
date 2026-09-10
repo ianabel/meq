@@ -3871,12 +3871,45 @@ namespace
 			}
 		}
 
+		/*
+		 * **THE LOCATED AXIS FIRST, WHICH IS WHAT THIS FILL IS DOCUMENTED TO
+		 * START FROM AND IS NOT WHAT IT DID.** The argmax of Psi above is a
+		 * proxy for the axis element and agrees with it only while psi_ax is the
+		 * field's maximum. The axis constraint locates the real one every
+		 * residual, with conductors excluded.
+		 *
+		 * **AND A NEAR TIE IS WHAT MAKES THE PROXY FAIL, NOT A LANDSLIDE.** The
+		 * conductor exclusion above stops the seed landing INSIDE a coil; it
+		 * cannot stop the coil's own peak being carried by the element next to
+		 * it, and one element is all the argmax needs. Measured on
+		 * examples/diverted-tokamak.toml with psi_bnd started on the physical
+		 * branch: the solve holds a correct equilibrium for about thirty
+		 * evaluations -- psi_bnd stable at 3.2379e-02 to 3.2410e-02 against the
+		 * reference 3.240413e-02, 797 elements, the axis at ( 1.3576, 0.0562 )
+		 * against ( 1.351273, 0.062226 ) -- while the SEED alternates on every
+		 * other evaluation between that axis element at Psi = 9.9847e-01 and the
+		 * element beside P1L at Psi = 9.9878e-01. Three parts in ten thousand,
+		 * and it decides the support: each flip moves it by two elements, so the
+		 * residual is discontinuous in the unknowns and Newton has no derivative
+		 * to iterate with.
+		 *
+		 * A tie at 3e-04 cannot be broken by making the argmax cleverer. The
+		 * axis is not a competition -- it is a located point.
+		 */
+		bool fromAxis = false;
+		if ( plasmaSeedElement >= 0 && plasmaSeedElement < elements
+		     && carriesPlasma[ static_cast< std::size_t >( plasmaSeedElement ) ] != 0 )
+		{
+			seed = plasmaSeedElement;
+			fromAxis = true;
+		}
+
 		// A plasma whose only positive-Psi elements are inside conductors gets
 		// the seed the rule above this one would have given it: better to follow
 		// a coil for one iterate than to hold no fill at all, and the
 		// equilibrium the iteration is converging to gets the exclusion back as
 		// soon as it has an extremum of its own.
-		if ( seed < 0 || bestPsiN <= 0.0 )
+		if ( !fromAxis && ( seed < 0 || bestPsiN <= 0.0 ) )
 		{
 			seed = seedOffAxis;
 			bestPsiN = bestOffAxis;
@@ -3885,7 +3918,7 @@ namespace
 		// A plasma that reaches the axis everywhere -- a mirror, or a domain
 		// entirely against r = 0 -- leaves nothing off it, and there the global
 		// argmax is the only answer available.
-		if ( seed < 0 || bestPsiN <= 0.0 )
+		if ( !fromAxis && ( seed < 0 || bestPsiN <= 0.0 ) )
 			seed = seedAnywhere;
 
 		if ( seed < 0 )
@@ -4846,6 +4879,11 @@ namespace
 			previousAxisZ = best.z;
 			havePreviousAxis = true;
 
+			// AND THE FILL GETS THE SAME ELEMENT. See plasmaSeedElement: this is
+			// the one place that knows where the axis is on this iterate, and
+			// the fill's own contract is to start there.
+			plasmaSeedElement = best.element;
+
 			if ( element )
 				*element = best.element;
 			if ( dof )
@@ -4867,6 +4905,10 @@ namespace
 			// which happened so that the row is built to match and the run can
 			// report it.
 			constraintLocated = false;
+			// Cleared per evaluation, so the fill can tell "the axis is here"
+			// from "there was no axis on this iterate" and fall back to its own
+			// ladder for the second rather than reusing a stale element.
+			plasmaSeedElement = -1;
 			if ( axisConstraintChoice == AxisConstraint::LocatedAxis )
 			{
 				double located = 0.0;

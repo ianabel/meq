@@ -2431,6 +2431,26 @@ namespace meq
 			double boundaryFluxZ = 0.0;
 			double psiBoundaryValue = 0.0;
 
+			/**
+			 * The element holding the LOCATED magnetic axis on the iterate
+			 * refreshPlasmaComponent() is about to read, or -1.
+			 *
+			 * **IT EXISTS BECAUSE TWO PARTS OF THIS CLASS BOTH KNOW WHERE THE
+			 * AXIS IS AND HAD NO WAY TO AGREE.** PlasmaConnectivity::Component
+			 * is documented as a fill "seeded at the element holding psi_ax" --
+			 * the plasma is the component CONTAINING THE AXIS -- and the axis
+			 * constraint locates that element every residual, with conductors
+			 * excluded. The fill could not see it, so it competed its own argmax
+			 * of Psi instead, which agrees only while psi_ax IS the field's
+			 * maximum. A conductor breaks exactly that.
+			 *
+			 * Written by solve()'s axis constraint when it locates an axis and
+			 * left at -1 when it falls back to the nodal maximum, so the fill
+			 * can tell "here is the axis" from "there was none to be had" and
+			 * use its own ladder for the second.
+			 */
+			int plasmaSeedElement = -1;
+
 			/// setLimiterConstraint().
 			LimiterConstraint limiterConstraintChoice = LimiterConstraint::ExactPoint;
 
