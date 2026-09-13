@@ -124,6 +124,31 @@ namespace meq
 		if ( potentialIn.FESpace()->GetMesh() != &meshRef )
 			throw std::invalid_argument(
 				"CriticalPointFinder: the flux and the potential are on different meshes" );
+
+		/*
+		 * THIS CLASS IS HOST CODE THROUGHOUT, SO THE FIELDS COME TO THE HOST
+		 * ONCE, HERE.
+		 *
+		 * fluxScale() and the potential sweeps read these through operator(),
+		 * which is RAW -- it neither syncs nor invalidates -- and every other
+		 * reader goes through GetValue()/GetVectorValue(), which evaluate on
+		 * the host as well. With an mfem::Device configured the fields arrive
+		 * from a solve that left them device-resident, so those raw reads take
+		 * a stale host copy.
+		 *
+		 * THE CONSTRUCTOR IS THE RIGHT PLACE because the finder does not own
+		 * the fields and never writes them: one sync at the point they are
+		 * taken covers every method, where a sync per reader is a list that has
+		 * to be kept correct as methods are added. Found by
+		 * mfem::Device( "debug" ) faulting in fluxScale(), reached from
+		 * checkAxis() -- the driver's post-solve axis check, which is to say on
+		 * a path that had already produced the right answer and was about to
+		 * report on it.
+		 *
+		 * No-ops with no Device configured.
+		 */
+		fluxIn.HostRead();
+		potentialIn.HostRead();
 	}
 
 	void CriticalPointFinder::setExcluded(

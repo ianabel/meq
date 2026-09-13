@@ -5532,15 +5532,58 @@ namespace
 			}
 			else if ( npcOrdering )
 			{
-				// ONE ENTRY, EXACT, NOT DIFFERENCED. max psi_h is the argDof'th
-				// entry of the unknown, so d( max psi_h )/d( unknown ) is the unit
-				// vector e_argDof and b is its negation. Nothing is measured, so
-				// nothing here carries a truncation error, and the 3( k + 1 )
-				// recoveries the condensation spends on this are not spent.
-				borderDofs.SetSize( 1 );
-				borderDofs[ 0 ] = argDof;
-				border.SetSize( 1 );
-				border( 0 ) = coupled ? -1.0 : 0.0;
+				/*
+				 * ONE ENTRY, EXACT, NOT DIFFERENCED. max psi_h is the argDof'th
+				 * entry of the unknown, so d( max psi_h )/d( unknown ) is the unit
+				 * vector e_argDof and b is its negation. Nothing is measured, so
+				 * nothing here carries a truncation error, and the 3( k + 1 )
+				 * recoveries the condensation spends on this are not spent.
+				 *
+				 * AND argDof CAN BE -1 HERE, WHICH IS AN OUT-OF-BOUNDS READ AND
+				 * WAS ONE. peakAt() sets it in its dof scan and does NOT set it
+				 * on the located-axis option, which returns as soon as
+				 * locateAxisPoint() succeeds. `constraintLocated` is cleared per
+				 * EVALUATION, so it can read false at this point -- the residual
+				 * evaluation above runs several -- while argDof still carries
+				 * the -1 from a call that located. The two are out of step by
+				 * construction, and this branch is the one that pays.
+				 *
+				 * MEASURED on examples/limited-tokamak.toml, iteration 0, under
+				 * mfem::Device( "debug" ): coupled true, constraintLocated
+				 * false, argDof -1, border( 0 ) = -1 -- so rowDot() read
+				 * v( -1 ), eight bytes BELOW the vector, and multiplied it into
+				 * the border row rather than multiplying it away.
+				 *
+				 * It converges anyway, and that is luck with a reason: the eight
+				 * bytes below a new double[] are the allocator's size header,
+				 * which reinterpreted as a double is a denormal of order 1e-318.
+				 * The row was therefore already zero to every digit that matters,
+				 * which is why an EMPTY row is the conservative repair -- rowDot()
+				 * returns exactly 0.0 for an empty row, and no converged number
+				 * moves. Under a Device the same read is a guarded page and a
+				 * hard fault, which is how it was found at all.
+				 *
+				 * WHAT IS NOT SETTLED IS WHETHER THIS BRANCH SHOULD FIRE ON THE
+				 * LOCATED PATH AT ALL. The row it wants is the one the
+				 * `constraintLocated` branch above builds; a zero row decouples
+				 * the border, leaving step[ 0 ] = -constraint/corner, which is
+				 * what this case has been doing all along. Making the flag and
+				 * argDof describe the same evaluation is the real fix and it
+				 * changes the Jacobian, so it is a numerics decision rather than
+				 * a bug fix.
+				 */
+				if ( argDof < 0 )
+				{
+					borderDofs.SetSize( 0 );
+					border.SetSize( 0 );
+				}
+				else
+				{
+					borderDofs.SetSize( 1 );
+					borderDofs[ 0 ] = argDof;
+					border.SetSize( 1 );
+					border( 0 ) = coupled ? -1.0 : 0.0;
+				}
 			}
 			else
 			{
@@ -5624,6 +5667,32 @@ namespace
 				                exteriorZ[ static_cast<std::size_t>( mode ) ] );
 
 			/*
+			 * THE SOLVE OUTPUTS COME BACK TO THE HOST HERE, AT THE PRODUCER.
+			 *
+			 * Everything from this point to the end of the step is host
+			 * arithmetic: rowDot()'s dot products, the dense bordered matrix,
+			 * DenseMatrixInverse, the backtracking. All of it reads these
+			 * vectors through operator(), which is RAW -- it neither syncs nor
+			 * invalidates -- while a trace solve under an mfem::Device can
+			 * leave its output device-resident.
+			 *
+			 * SYNCING AT THE PRODUCER AND NOT AT EACH READER IS THE POINT. The
+			 * readers are many, they are spread over two hundred lines, and
+			 * they are easy to add to; the producers are these few lines and
+			 * they are where the device boundary actually is. Syncing per
+			 * reader is how a defect like this gets half fixed -- each fix
+			 * moves mfem::Device( "debug" )'s fault forward to the next
+			 * unsynced read and looks like progress.
+			 *
+			 * Inert with no Device configured, which is every build that has
+			 * not asked for one on the command line.
+			 */
+			y.HostRead();
+			z.HostRead();
+			for ( int mode = 0; mode < nModes; ++mode )
+				exteriorZ[ static_cast<std::size_t>( mode ) ].HostRead();
+
+			/*
 			 * THE BORDERED ELIMINATION, IN ITS GENERAL FORM.
 			 *
 			 * The system Newton solves is
@@ -5657,6 +5726,38 @@ namespace
 			// b_i . v, for each border row.
 			auto rowDot = [ & ]( int i, mfem::Vector const &v )
 			{
+				/*
+				 * AND THE FUNNEL SYNCS TOO, WHICH IS BELT AND BRACES AND IS
+				 * HERE BECAUSE THE PRODUCER LIST ABOVE WAS NOT COMPLETE.
+				 *
+				 * Syncing at the producer is the right instinct and it is not
+				 * sufficient on its own: the vectors reaching this lambda come
+				 * from six `Mult` call sites and four accessors, and a sync
+				 * placed at each is a list that has to be kept correct as the
+				 * border grows. This lambda is the ONE place all of them are
+				 * read on the host, so a sync here cannot be outgrown by a new
+				 * border row.
+				 *
+				 * Measured, and the reason the comment is this long: with the
+				 * producer syncs alone, mfem::Device( "debug" ) still faulted
+				 * on the first line of this function's body. Every HostRead()
+				 * is a no-op when the buffer is already host-valid and when no
+				 * Device is configured, so the duplication costs a branch and
+				 * buys the property that this cannot silently rot.
+				 *
+				 * AND THE DOF ARRAY IS DEVICE STATE TOO, WHICH IS THE HALF
+				 * THAT IS EASY TO MISS. `borderDofs` is an mfem::Array<int>
+				 * and reads like indexing metadata rather than like data --
+				 * but MFEM's device-aware vector operations take dof arrays by
+				 * `Array::Read( use_dev )`, so an array handed to one of them
+				 * comes back device-valid, and Array::operator[] is as raw as
+				 * Vector::operator(). With `v` and `border` both synced this
+				 * line still faulted, and `borderDofs[ j ]` was what was left.
+				 */
+				v.HostRead();
+				border.HostRead();
+				borderDofs.HostRead();
+
 				if ( i == 0 )
 				{
 					double total = 0.0;
@@ -5668,6 +5769,7 @@ namespace
 					return coupled ? -limiterValue( v ) : 0.0;
 				if ( currentIsUnknown && i == currentIndex )
 				{
+					currentRow.HostRead();
 					double total = 0.0;
 					for ( int j = 0; j < n; ++j )
 						total += currentRow( j )*v( j );
@@ -5676,6 +5778,7 @@ namespace
 
 				mfem::Vector const &row =
 					exteriorRows[ static_cast<std::size_t>( i - nBorders ) ];
+				row.HostRead();
 				double total = 0.0;
 				for ( int j = 0; j < n; ++j )
 					total += row( j )*v( j );
@@ -5757,6 +5860,9 @@ namespace
 				assembleCurrentNormalisationCorner( unknown, currentAgainstAxis,
 				                                    currentAgainstBoundary );
 				npcLinear.Mult( columnL, zL );
+				// See the sync after the main solve above: the limiter column's
+				// backsolve feeds the same host-side border algebra.
+				zL.HostRead();
 			}
 
 			if ( boundaryFluxIsUnknown )
@@ -5784,6 +5890,8 @@ namespace
 					columnB /= 2.0*hB;
 				}
 				npcLinear.Mult( columnB, zB );
+				// As zL above: this column is read by rowDot() on the host.
+				zB.HostRead();
 			}
 
 
