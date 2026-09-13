@@ -203,7 +203,18 @@ Nothing is red and stages 0 to 7 are done, so the order is:
    of slack. `findAxis()` and `tryFindAxisFrom()` cannot reach a saddle at all —
    both filter on `AxisSense` — so **XP-3 will want a seeded saddle entry point
    before its three-row border is built**, which is the one API gap XP-0
-   exposed. **XP-2 is now the next rung.** `CLAUDE_FB.md`, *XP-0*.
+   exposed. `CLAUDE_FB.md`, *XP-0*.
+
+   ~~**XP-2 is now the next rung**~~ — **DONE 2026-09-12, and `XPointOuter` is
+   green.** `psi_bnd` taken from the located X-point as an outer fixed point
+   contracts quadratically — 1.909e-03, 3.732e-06, 9.554e-10, 2.255e-13 — finds
+   both nulls of the double-null machine, and sits **4.378e-04 m** from
+   freegs4e's X-point with `psi_bnd` agreeing to 0.08%. → **[M-82](MEASUREMENTS.md#m-82)**.
+   **It needed two things and neither was sufficient alone**: XP-1's fill
+   actually running, which a fixture defect had silently disabled on the one
+   diverted case in the tree, and the plasma edge held fixed within each Newton.
+   **XP-3, the three-row border, is now the next rung**, and XP-0's API gap above
+   is its prerequisite.
 
    **`PLASMA-EDGE-PLAN.md` is NOT on this list**, deliberately. It is the route
    out of FB-4's `k ≤ j` cap. **Its preamble's precondition is now met** —
@@ -338,17 +349,12 @@ the three still open**, which is the only test of "landed" MEQ can apply. **Ask
 
 | filed | state |
 |---|---|
-| `HDG-LINEARISE-THEN-CONDENSE.md` | landed, then **retired** with the mode itself — on backup refs only now. `setNonlinearOrdering()` is gone; MEQ's default is `NPC` |
-| `DIRECT-SOLVER-SYMBOLIC-REUSE.md` | landed — `SetReuseSymbolic()` is on — and **retired**, on no branch at all |
-| `HDG-NPC-GLOBALISATION-FROM-MEQ.md` | **CLOSED 2026-09-06**, filed 2026-08-31 and answered the same day (`af82d42b14`). Not a defect report: two §6 claims withdrawn on MEQ's evidence, MEQ's own account of the mechanism corrected, and a defect found in the reference implementation MEQ had copied — `navierstokes.cpp` takes its globalisation from KINSOL now and the hand-rolled backtracking is gone. The §4.3 regression MEQ owed for it is the barrier one below |
-| `HDG-DEFECTS-FROM-MEQ.md` | **CLOSED 2026-09-06 and deletable.** All four are closed — two fixed, one withdrawn as not a defect, one fixed as `TransferredDatumCoefficient` — plus a fifth upstream added. The fourth, `ComputeHDGFaceEnergy()` ignoring an installed stabilisation, **is fixed**: `StabValue()` is called in the function body, and the claim that it was not came from reading a **fixed line range** that stopped short of the call at line 153 of a 194-line function |
-| `HDG-RECONSTRUCT-DEGENERATE-POTENTIAL-MASS.md` | **landed and retired** — the fix is *"The postprocessing closes on the element average, always"*, and the document is on no branch |
-| `HDG-CONE-TILING-FROM-MEQ.md` | **CLOSED 2026-09-06**, on `gf-hdg-subdomains-dev` and tracked. Filed and answered the same day, and **MEQ's diagnosis was the part that was wrong**: coverage is exact, the cone roughens the foot map and a 12th-order rule under-resolves it. Upstream turned the cone off by default and added the boundary-sweep case MEQ asked for; MEQ raised its rule to 80 and `transmissionQuadratureOrder` to 40 |
-| `HDG-BARRIER-REGRESSION-FROM-MEQ.md` | **DELIVERED 2026-09-06**, untracked on `gf-hdg-linearise-first`. §4.3's transport barrier as a `PedestalHDG` sibling, transcribed into upstream's own fixture and RUN before being sent: it drives the NPC residual to **5.56e+17** over sixty steps with every norm finite and no throw. Two converging configurations are the control, so it is under-resolution rather than a broken fixture |
-| `QUADRATURE-HIGH-ORDER-TRIANGLES-FROM-MEQ.md` | **filed 2026-09-06, OPEN.** `IntegrationRules::Get( TRIANGLE, order )` falls back to Grundmann–Möller above 25, whose negative weights reach **−1.9e+07** by order 64 — silently. Carries a second, separate measurement rather than a defect claim: `MomentFittingIntRules`' conditioning on a nearly degenerate cut, and that both cut backends are quadrilateral-only |
-| `CMAKE-TPL-COMPONENT-CACHE-FROM-MEQ.md` | **filed 2026-09-06, OPEN.** `mfem_find_package` quick-returns on a cached `${Prefix}_FOUND` without consulting the requested component list, so adding `IDAS` to `SUNDIALS_COMPONENTS` is silently ignored in an existing build directory. Explicitly **not** a report against the IDA work, which is correct; the helper predates it |
-| `HDG-ELEMENT-LOCAL-PARALLELISM.md` | **NOT A MEQ REQUEST**, and this row said it was. It is upstream's own working scratch, in the first person about their own to-do list, and it records that every element-local loop in the class is now threaded — which MEQ *has* seen: it is what makes `AssemblyMode::Threaded` MEQ's default. Nothing here is MEQ's to close |
-| `HDG-BEM-COUPLING-FROM-MEQ.md` | **§1 DELIVERED, §2 IS THE ONE ASK LEFT.** §1 said MEQ would write the quadrature over `Γ` and come back with it; MEQ did, and `mfem::ExtensionBoundaryQuadrature` was merged into `gf-hdg-subdomains-dev` 2026-09-05. §2 — auxiliary globally-coupled unknowns — is still worth doing and still not blocking, and **FB-5 now says what it would buy**: `N + 2` backsolves are affordable, but the datum reaches the residual as a load, so the border also costs one full re-assembly per accepted step. See item 8 |
+| **`HDG-BEM-COUPLING-FROM-MEQ.md` §2** | **the one thing still open.** Auxiliary globally-coupled unknowns — a request for a capability, not a finding: nothing in that tree has been measured wrong by it, and it says so |
+
+Every other report MEQ has filed is closed, and they are not listed: a closed one
+has left a fix with a test on it or a number under an `M-nn` anchor, and neither
+needs a ledger entry. `CLAUDE.md` has the two operational facts about that tree
+that do outlast a report.
 
 **What is NOT filed is the local-solve seed** — item 5. It was found from MEQ's
 side and nothing has been written into that tree about it, beyond one paragraph

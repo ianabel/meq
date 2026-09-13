@@ -967,3 +967,776 @@ allocation traffic — `mfem::forall` on the host path constructs an
 `__nv_hdl_wrapper_t`, whose `manager::do_call` is separately visible in `perf` at
 1.9–2.9% — but **171 M allocations survive with CUDA off**, so the bulk of the
 traffic is MFEM's ordinary per-element temporaries and not the wrapper.
+
+### M-78
+
+**Why PARDISO is the default trace solver, and what its MKL threads actually
+buy on a whole run.** Two problems on `examples/diverted-tokamak.toml`, both
+with `AssemblyMode = "threaded"` and `OMP_NUM_THREADS=8`, best of two, on a
+machine gated at `load < 0.7` for four consecutive samples and watched for
+foreign processes throughout every run — `intruders=[none]` on all sixteen.
+`dv` is the fixture as it ships, 2642 elements at `k = 2`; `rf` is
+`RefinementLevels = 1` at `k = 3`, 10701 elements, so the trace system is the
+larger share of the run.
+
+Wall seconds, whole driver run including all three output formats:
+
+| | `dv`, MKL=1 | `dv`, MKL=8 | `rf`, MKL=1 | `rf`, MKL=8 |
+|---|---|---|---|---|
+| UMFPack | 15.33 | 16.22 | 51.07 | 51.68 |
+| **PARDISO** | 13.92 | **12.81** | 47.37 | **44.43** |
+
+**Two separate effects, and only one of them is free.** Changing the solver at
+`MKL=1` is worth **1.10× and 1.08×** and costs nothing — user time falls too,
+35.25 s → 34.12 s and 72.10 s → 70.04 s. Adding MKL threads to PARDISO is worth
+a further **1.09× and 1.07×** and is **not** free: user time goes 35.62 s →
+62.42 s on `dv`, so a 9% wall gain costs **75% more CPU**. On a machine running
+one job that is a good trade and on a shared one it is not.
+
+**UMFPack moves the other way, which is the whole reason the pair of defaults is
+chosen together.** MKL threads make it *slower* — 15.33 → 16.22 s, −6% — while
+raising its user time 35.25 s → 45.70 s. Best against worst across the table is
+**1.27×** on `dv` and **1.16×** on `rf`.
+
+Per-stage, from `NpcThreadScaling --orders 2 --sizes 32 --repeats 2`, threaded
+assembly's `solve` column alone — which is where the difference lives, `prep`
+being flat at 0.98–1.04 in every configuration:
+
+| case | UMFPack MKL=1 | UMFPack MKL=8 | PARDISO MKL=1 | PARDISO MKL=8 |
+|---|---|---|---|---|
+| example5 | 0.2070 | 0.2493 (**−20%**) | 0.1634 | **0.1330** (+23%) |
+| pedestal | 0.2665 | 0.3430 (**−29%**) | 0.2090 | **0.1697** (+23%) |
+
+So on the solve in isolation the two ends of the table are **1.87×** and
+**2.02×** apart, against 1.27× and 1.16× on the whole run — the difference being
+everything else a driver run does. **The 1.9× that `setTraceSolver()`'s own
+documentation quotes for PARDISO's MKL threads is the isolated
+trace-solve figure and does not survive to the wall clock**; 7–9% does.
+
+**Correctness at `MKL=1` is exact and at `MKL=8` it is not, and that is
+expected rather than a finding.** At `MKL=1`: threaded against serial assembly
+0.000e+00 in both ψ and the flux, identical Newton counts, trace solvers
+agreeing to 1.110e-15. At `MKL=8`: 1.443e-15 in ψ and 1.839e-13 in the flux,
+because the serial element loop gets every MKL thread while the threaded one
+gets none — MKL suppresses itself inside an active OpenMP region — so a blocked
+BLAS-3 reassociates against an unblocked loop. `NpcThreadScaling` says so in
+the message and does not count it as a failure above `MKL=1`.
+
+**AND THE CHANGE COSTS ONE TEST, WHICH QUALIFIES A CLAIM THIS PROJECT MAKES
+ABOUT WHY `TraceSolver` IS SAFE TO EXPOSE.** `PedestalConvergence`'s
+`andersonPicardReachesTheSameSolutionAsNewton` goes **red** on PARDISO and green
+on UMFPack, isolated by rebuilding with that one line changed and nothing else.
+The failure is not a disagreement — it is a **precondition**:
+
+```
+n = 16: Newton did not converge, so there is nothing to compare Picard against
+```
+
+GS-2 section 4.2 at `k = 1`, `n = 16`, unglobalised Newton, 500 iterations
+allowed, tolerance 1e-8 — the coarsest and stiffest case in the suite. Under
+UMFPack Newton reaches it; under PARDISO it does not.
+
+**Nothing about this contradicts the 1e-15 agreement, and that is the point.**
+The trace solvers agree to 1.110e-15 *per solve*, and they do here too. What
+differs is which side of a convergence boundary several hundred compounded
+1e-15 differences land on, on a problem where Newton is marginal to begin with —
+the same binary prints `Newton alone : FAILED in 60 iterations` for a
+neighbouring case under *both* solvers, with `PicardThenNewton` converging in
+one stage-2 step, so unglobalised non-convergence here is a property of the
+problem rather than of the package.
+
+So the standing claim — *"`AssemblyMode` and `TraceSolver` cannot change the
+answer, so a file may choose them freely"* — needs one word: they cannot change
+the answer **where both converge**. On a marginal Newton they can change
+**whether** it converges. That is weaker than the `Globalisation` hazard it was
+contrasted against, which reaches two different discrete solutions 9.4% apart
+and reports one of them, but it is not nothing.
+
+### M-79
+
+**A whole NPC solve does not survive an `mfem::Device`, and cuDSS is a
+bystander.** `NpcThreadScaling --device cuda`, `k = 2`, `n = 32`, on an RTX 2070
+SUPER with CUDA 13.3. The Device configures correctly — `Device configuration:
+cuda,cpu`, `Memory configuration: host-std,cuda` — and then:
+
+| | cuDSS | PARDISO | UMFPack |
+|---|---|---|---|
+| example5 Newton steps, needs 4 | **0/0** | **0/0** | **0/0** |
+| pedestal Newton steps | 4/4 | 6/7 | 4/0 |
+| flux, threaded vs serial | **4.006e-02** | **4.006e-02** | **4.006e-02** |
+
+**The same 4.006e-02 to four figures on all three, and 0/0 on all three**, which
+is what says there is one common fault rather than three — and it says the fault
+is not cuDSS, since UMFPack and PARDISO are host solvers that never touch the
+device. At `OMP_NUM_THREADS=8` it does not merely mis-solve but aborts, from
+several threads at once, in `MemoryManager::CheckHostMemoryType_` reached
+through `Vector::AddElementVector` inside `DarcyHybridization::MultNL`'s own
+OpenMP region: *"host pointer is not registered"*. `MFEM_USE_EXCEPTIONS` turns
+that into a throw, which cannot leave a parallel region, so it lands as
+`terminate called recursively`.
+
+**Not localised to `BlockVector`, which was the first hypothesis and is wrong.**
+A standalone program doing `BlockVector::Update()` over four offsets, an
+`AddElementVector` into a block, and one into a `MakeRef` view of a block gives
+identical results under `"cpu"` and `"cuda"`, exit 0 both ways. The trigger is
+inside the HDG path.
+
+**The first backtrace taken was of a breakpoint on
+`CheckHostMemoryType_` and named MEQ's own constructor.** That function is
+called on every `Register_`, most of them successful, so the breakpoint fired on
+a benign call and the site it reported was innocent. `catch throw` names the
+real one. Same species as every other instrument-not-answer finding in this
+tree.
+
+Nothing here is filed upstream: `doc/HDG-DEVICE-OFFLOAD.md` says the integrator
+kernels are not built, and the standing rule is not to report findings against
+work that has not landed. It also means `apps/meq.cpp`'s refusal of
+`TraceSolver = "cudss"` is right for a second and stronger reason than the trade
+argument written beside it — **the solve does not survive a Device at all.**
+
+**THE DISCRIMINATING EXPERIMENT, RUN AT UPSTREAM'S REQUEST: A LINEAR SOURCE
+FAILS TOO, SO A NON-LINEAR INTEGRAND IS NOT THE CAUSE.** Upstream built their own
+reproduction of M-79 and it does **not** reproduce — not under `Device("debug")`
+and not under real CUDA on this same RTX 2070 SUPER — and they asked for
+`--device cuda` at `OMP_NUM_THREADS=1` with MEQ's source replaced by a linear
+one, to separate their leading hypothesis (MEQ's genuinely non-linear
+`SourceIntegrator` running a Newton loop) from the other three differences.
+
+`NpcThreadScaling --soloviev`, `k = 2`, `n = 32`, UMFPack, `OMP_NUM_THREADS=1`,
+`MKL_NUM_THREADS=1`. **`SolovievEquilibrium` is the right substitution and a
+truly `ψ`-independent source would not be**: `dFdPsi` is identically zero so the
+problem is linear and Newton takes one step, but it still arrives through
+`setSource( Source const & )`, so `nonlinearSource` is non-null,
+`usesNonlinearForms()` is true, and the **form routing is unchanged** — the same
+`c_bfi_p` branch, `meq::SourceIntegrator` still on the non-linear form's domain,
+`AssembleElementVector` still running per element per residual. A `ψ`-independent
+source would take the other branch of `buildForms()`, construct `M_p`, and change
+which arm of `EnableHybridization()` fires, so a pass would implicate the routing
+as readily as the integrand.
+
+| | Newton its | L2 vs exact | max &#124;ψ_h&#124; |
+|---|---|---|---|
+| `--device cpu` | 2/2 | **1.916e-07** | 2.662508e-01 |
+| `--device cuda` | **0/0** | **1.823e-01** | **0.000000e+00** |
+
+**The potential comes back IDENTICALLY ZERO**, and that is a stronger statement
+than "wrong". Newton stops at iteration zero because the residual it evaluated
+was zero, and `ψ_h` is left at the initial iterate — whose potential block is
+zero under NPC, the Dirichlet datum riding in the trace block. So 1.823e-01 is
+just ‖ψ_exact‖ and **nothing was computed at all**. The 10⁶ gap is not a
+numerical difference.
+
+**Which kills hypothesis 1 and hypothesis 2 together.** The source is linear, so
+a Newton loop over a non-linear integrand is not required to produce this. And
+`OMP_NUM_THREADS=1` with serial assembly reproduces it, so threaded assembly is
+not required either — upstream's reproduction runs the serial routes and passes,
+and so does this one on the same hardware, differing only in what MEQ puts on the
+forms.
+
+**AND UPSTREAM'S CONTROL CANNOT SEE THIS, BY CONSTRUCTION.** Their reproduction's
+domain integrator on the non-linear form "carries a zero coefficient, so it is
+arithmetically inert while the routing is yours" — but a contribution whose
+correct value is exactly zero is indistinguishable from a contribution that was
+never read back. That is the same blind spot they correctly identified in their
+own two-arm device cases, surviving into the fix for it. It is also the signature
+they already found once on hardware and called suspicious: a trace residual
+"non-zero on the host and **exactly zero** on the device… the signature of a
+value never read back".
+
+**AND THE CAUSE IS AN ALIAS LEAVING ITS BASE'S VALIDITY FLAGS STALE, FOUND WITH
+`mfem::Device( "debug" )` AND FIXED AT FOUR SITES.** That device has device
+memory semantics with host arithmetic and `mprotect`s the host page, so a raw
+host read of a device-valid buffer is a named fault with a backtrace rather than
+a wrong number. `NpcThreadScaling --soloviev --device debug` faults on the first
+Newton residual, and each fix moves the fault **forward** to the next site —
+which is what distinguishes a fix from a coincidence:
+
+| # | site | whose | the fault it produces |
+|---|---|---|---|
+| 1 | `DarcyNPCOperator::Mult` | MFEM | `NewtonSolver::Mult`'s `r -= b`, iteration 0 |
+| 2 | `DarcyNPCSolver::Mult` | MFEM | `NewtonSolver::Mult`'s `add( x, -c_scale, c, x )` |
+| 3 | `GradShafranovSolver::solve()` | **MEQ** | `GridFunction::operator=` |
+| 4 | `NpcThreadScaling`'s `copyOf()` | **MEQ** | a raw `g( i )` |
+
+`GetAliasDevicePtr()` ends in `AliasProtect()` on the **base's** host range and
+never touches the base's flags — `Memory::SyncAlias`'s own comment says so and
+says what is owed. So the base still reads `VALID_HOST`, the next `ReadWrite_`
+computes `copy = !( flags & VALID_DEVICE )` = true, and `GetDevicePtr()` memcpys
+h2d **out of the page it just protected**. Under CUDA there is no `mprotect`, so
+it silently copies the stale host copy over the device buffer the solve had
+correctly written.
+
+**Two symptoms, two different links, which is why it looked like one
+inexplicable fault.** Site 1 destroys the first residual and produces the
+**0/0**; site 3 is MEQ holding three long-lived `MakeRef` aliases —
+`darcyFlux`, `potentialGf`, `traceGf` — onto one `BlockVector solution`, and
+produces the **identically zero potential**, the solve by then being correct and
+nobody reading it back. The evidence for the mechanism is the faulting call
+itself: `operator-=` takes `v` first and `*this` second, and
+
+```
+    GetDevicePtr h_ptr=0x7fffbd1a5000 bytes=370176 copy=1     <- b, fine
+    GetDevicePtr h_ptr=0x7fffbd14a000 bytes=370176 copy=1     <- r, faults
+FAULT at 0x7fffbd14a000
+```
+
+the fault address is the residual's base `h_ptr` **to the byte**, block 0 being
+at offset 0.
+
+With all four fixed, `k = 2`, `n = 32`, UMFPack, `OMP_NUM_THREADS=1`:
+
+| | Newton its | L2 vs exact | max &#124;ψ_h&#124; |
+|---|---|---|---|
+| `--device cpu` | 2/2 | 1.916e-07 | 2.662508e-01 |
+| `--device cuda` | 2/2 | 1.916e-07 | 2.662508e-01 |
+| `--device debug` | 2/2 | 1.916e-07 | 2.662508e-01 |
+
+Every digit of the CPU row on both devices, and the `debug` row is the one that
+carries the confidence: the whole solve runs with the host pages protected and
+never faults. **The MFEM half is two hunks and four lines**, reported as
+`HDG-DEVICE-ALIAS-CHAIN-FROM-MEQ.md`; the `xb.Neg()` in site 2 re-protects the
+base, so the base sync has to come **after** it and `SyncFromBlocks()` alone
+leaves the fault where it was.
+
+**`DarcyHybridization::ReducedGradient()` is reached 12 times in this run and
+does not fault**, on a library predating upstream's own fix to it — so upstream's
+prediction that MEQ's `GradientMode::Assembled` plus a Dirichlet trace list
+would meet it is right about reachability and not borne out here.
+
+**AND NONE OF IT CHANGES THE TRADE.** The integrators are still 46–53% of a step
+with no kernels, so `apps/meq.cpp`'s refusal of `TraceSolver = "cudss"` stands —
+on the trade argument alone now, the stronger reason beside it having been this
+entry.
+
+**Finiteness was checked before any norm and passed**, on both arms and both
+assembly modes — `mfem::Vector::CheckFinite()` on the potential and the flux,
+taken ahead of every reduction, because `Norml2()` guards with `fabs(v) > 0` and
+so reports zero for an all-NaN vector. So the numbers in this entry are real
+numbers, including the 4.006e-02 above.
+
+### M-80
+
+**Where a MEQ Newton step's time goes** — the four-leg split
+`HDG-NEWTON-STEP-PROFILE-FROM-HDGDEV.md` asks for at its level 1.
+`tests/performance/NewtonStepProfile`, **median of five**, `OMP_NUM_THREADS=8`,
+`MKL_NUM_THREADS=1`, PARDISO, machine gated at `load < 0.7` for four
+consecutive samples and watched throughout: `intruders=[none]`, loadavg 0.10 at
+the gate and 0.23 at the end.
+
+The legs are split by call site and do not overlap; `other` is the **remainder**,
+total minus the five timed legs. `prepare()` is outside `total` entirely and is
+reported beside it, being paid once per mesh rather than once per step.
+
+| case | assembly | its | total s | residual | gradient | factor | backsolve | other |
+|---|---|---|---|---|---|---|---|---|
+| example5 k=2 n=24 | serial | 4 | 0.2030 | 29.1% | **45.8%** | 15.1% | 2.8% | 7.3% |
+| example5 k=2 n=24 | threaded | 4 | 0.0899 | 13.8% | 25.3% | **37.4%** | 6.6% | 16.8% |
+| pedestal k=2 n=32 | serial | 5 | 0.4764 | 26.0% | **43.1%** | 14.0% | 3.2% | 12.4% |
+| pedestal k=2 n=32 | threaded | 5 | 0.2033 | 12.4% | 24.9% | **34.4%** | 7.3% | 21.2% |
+| highbeta k=2 n=16 | serial | 4 | 0.1596 | **48.2%** | 24.7% | 6.5% | 2.7% | 17.5% |
+| highbeta k=2 n=16 | threaded | 4 | 0.0725 | 23.1% | 13.4% | 15.3% | 6.5% | **40.9%** |
+
+**THE ANSWER TO THE QUESTION AS ASKED: THE TRACE SOLVE IS NOT OVER HALF IN ANY
+ROW.** `factor + backsolve` reads **17.9%, 17.2%, 9.2%** serial and **44.0%,
+41.7%, 21.8%** threaded, against upstream's own 54–59% on 128×128 quads and
+gffp's ~1%. MEQ is between them and nearer gffp. Element-local work —
+`residual + gradient`, which is where both candidate pieces of work live — is
+**74.9%, 69.1%, 72.9%** serial and **39.1%, 37.3%, 36.5%** threaded.
+
+**AND THREADING HAS ALREADY TAKEN MOST OF WHAT (a) WOULD TAKE, WHICH IS THE
+FINDING THAT BEARS ON THE DECISION RATHER THAN ON THE PROFILE.** The gradient
+leg — `GetGradient`, which MFEM documents as "assemble and factor the Jacobian
+at x", so `ComputeH()` is inside it — falls from 45.8% to 25.3% on example5 and
+43.1% to 24.9% on the pedestal when the element loop becomes an OpenMP region.
+(a) removes *work* and threading removes *time*; they compose, but (a)'s ceiling
+against a threaded run is `0.7 × gradient` ≈ **9–18%**, where against a serial
+one it is 17–32%.
+
+**THE BORDERED ROW IS A DIFFERENT SHAPE AND IT IS THE ONE MEQ ACTUALLY RUNS.**
+With `ψ_ax` an unknown the residual leg dominates — 48.2% serial — because the
+border spends **four residual evaluations per step against one gradient and one
+factorisation**: measured call counts over four steps are residual ×16, gradient
+×4, factor ×4, backsolve ×8. So on MEQ's headline configuration the residual
+integrators matter more than `ComputeH()` does, which points at (b)'s half of
+the split rather than (a)'s. It forces **no re-assembly**: `setNormalisation()`
+changes what the source integrator evaluates and the source sits on the
+non-linear form, so the next residual picks it up without `darcy->Assemble()`.
+
+**`other` at 40.9% on that row is honest and is not a leg.** It is the bordered
+Newton's own cost — the located-axis search, the peak scan, the augmented norm,
+the border's dense algebra — plus MFEM's vector arithmetic inside the loop. It
+grows as a *share* under threading because the legs shrink and it does not: in
+seconds it is 0.0280 serial against 0.0296 threaded, i.e. flat.
+
+**AND THE PINNED `MKL_NUM_THREADS=1` MADE THE TRACE SOLVE'S SHARE AN UPPER
+BOUND, NOT A PRODUCTION NUMBER.** Upstream asked for the threaded rows again with
+MKL unpinned, on the reasoning that pinning is right for the *serial* rows — it
+stops the gradient leg being a measurement of MKL's threading threshold, the
+factor of forty at `k = 3` — while also stopping PARDISO threading, which is the
+only leg that would use it. Same medians of five, same process, loadavg 0.75 to
+1.37:
+
+| threaded, k=2 | trace solve | gradient | residual | other | total s |
+|---|---|---|---|---|---|
+| example5, pinned | **42.8%** | 26.5% | 13.2% | 17.2% | 0.0919 |
+| example5, **unpinned** | **30.1%** | 33.3% | 16.0% | 21.5% | 0.0826 |
+| pedestal, pinned | **41.0%** | 25.9% | 12.1% | 20.8% | 0.2249 |
+| pedestal, **unpinned** | **23.7%** | 33.4% | 14.5% | 28.0% | 0.1841 |
+| highbeta, pinned | 22.7% | 13.0% | 21.3% | 41.8% | 0.0828 |
+| highbeta, **unpinned** | 14.1% | 14.4% | 23.8% | 47.2% | 0.0760 |
+
+In seconds the trace solve falls **1.58× / 2.11× / 1.74×**, the whole solve only
+8–18%, and residual and gradient are within a few percent in absolute time across
+the two arms — which is the threaded-assembly prediction, MKL suppressing its own
+threading inside an active OpenMP region. **The trace solve is no longer the
+largest leg on any row**; the gradient is, on both fixed-boundary cases. The
+Amdahl ceiling on taking the element-local legs to zero rises with it, from
+1.66× / 1.61× / 1.52× to **1.97× / 1.92× / 1.62×**.
+
+**LEVEL 2 — `ComputeH()` INSIDE THE GRADIENT LEG — IS THE STABLEST NUMBER IN
+EITHER TABLE.** Upstream's `GetComputeHTime()` / `ResetComputeHTime()` /
+`GetComputeHCalls()`, statics over a function-local accumulator, wired into
+`StepProfile` as a **sub-split of the gradient leg rather than a sixth leg**:
+`ComputeH()` runs inside `GetGradient()`, so it is already counted there and
+adding it to the others double-counts.
+
+| threaded | ComputeH s | calls | % of gradient | % of whole solve |
+|---|---|---|---|---|
+| example5, pinned | 0.0177 | 4 | **72.7%** | 19.2% |
+| example5, **unpinned** | 0.0197 | 4 | **71.8%** | 23.9% |
+| pedestal, pinned | 0.0426 | 5 | **73.0%** | 18.9% |
+| pedestal, **unpinned** | 0.0452 | 5 | **73.4%** | 24.6% |
+| highbeta, pinned | 0.0074 | 4 | **68.5%** | 8.9% |
+| highbeta, **unpinned** | 0.0077 | 4 | **70.2%** | 10.1% |
+
+**68–73% on every row, in both arms, across three sources and three mesh
+sizes** — far more stable than anything else here, and it is the discriminator:
+the gradient leg is `ComputeH()` plus a quarter of other things. At upstream's
+70–75% of `ComputeElementH` by flop count, (a) is bounded at `0.725 × 23.9%` ≈
+**17%** of a whole solve on example5, **18%** on the pedestal and **7%** on
+highbeta — the top of the 9–18% estimated from the serial rows.
+
+**AND (a)'s PRECONDITION SURVIVES THE EXTENSION PATH, WHICH THIS HARNESS SAID IT
+DID NOT.** `NewtonStepProfile`'s level-3 note claimed the curved and
+free-boundary cases are the other side of a line and that the shares do not speak
+for them. Wrong, and withdrawn: the error is **asymmetry read as state
+dependence**, the same one CLAUDE.md already records. `Bnl_data` is written at one
+site, `ConstructGrad()`, and only from `grad_Aup`; `HDGExtensionIntegrator` is a
+`BilinearFormIntegrator` landing in `A`, assembled once per mesh. So the 17–18%
+carries to the problems MEQ exists for, and the note that said otherwise would
+have argued against (a) on every one of them.
+
+**AND THE BOUND MAY BE LOW.** The 17–18% is MEQ's 72.5% measured share of
+`ComputeElementH`; upstream's own flop count at these dimensions — `na=12`,
+`nd=6`, `nc=3`, `nf=3`, `T=9`, 3888 of 4770 — puts it at **82%**. Not worth
+arguing to a third digit, but it says which end of the range a delivered saving
+would come from, so read 17–18% as a floor rather than a target.
+
+Level 3, the dimensions, so the cacheable fraction can be computed elsewhere:
+
+| case | k | elements | na | nd | nc | nf | trace dofs | ess. trace | numfact/its |
+|---|---|---|---|---|---|---|---|---|---|
+| example5 | 2 | 1152 | 12 | 6 | 3 | 3 | 5328 | 288 | 4/4 |
+| pedestal | 2 | 2048 | 12 | 6 | 3 | 3 | 9408 | 384 | 5/5 |
+| highbeta | 2 | 512 | 12 | 6 | 3 | 3 | 2400 | 192 | 4/4 |
+
+`na` is flux dofs per element counting both components, `nd` potential dofs per
+element, `nc` trace dofs per face, `nf` faces per element. **The extension path
+is OFF on all three**, which is (a)'s stated precondition — fitted meshes, datum
+on the mesh boundary, so `HDGExtensionIntegrator` deposits nothing into the flux
+block and `Bnl` is not live. MEQ's curved and free-boundary cases are the other
+side of that line and this table does not speak for them.
+
+**A note on the statistic.** These are MEDIANS where `NpcThreadScaling` reports
+a best-of, and the difference is deliberate: a minimum is the right centre for a
+wall time and the wrong one for a share. The spread over five runs is 1.4% to
+14% of the total (0.1945–0.2227 on the widest row, example5 serial), which is
+the scatter upstream warned makes a single-run share meaningless.
+
+### M-81
+
+**PE-0's shortfall is not the measuring window, and refining discriminates
+against BOTH columns.** `tests/convergence/PlasmaEdgeConvergence`'s
+`theUncutPlasmaKeepsItsOrderAtEveryVanishingOrder` reports rates endpoint to
+endpoint over `{ 8, 16, 32, 64 }`. The obvious reading of its reds is that the
+coarse end is pre-asymptotic — at `h = 0.1` the plasma subdomain is **26
+elements**, its `dist/h` reads 0.851 against 1.02–1.33 everywhere else, and the
+transferred column's per-pair `psi*` rate climbs monotonically, 1.441, 2.415,
+2.836 at `j = 0, k = 1`. The whole study was therefore re-run at `n = 128` as
+well and every window read out of the five levels:
+
+| window | failing assertions |
+|---|---|
+| `{ 8, 16, 32, 64 }` — **the one in the tree** | **17** |
+| `{ 8, 16, 32, 64, 128 }` | 20 |
+| `{ 16, 32, 64, 128 }` | 21 |
+| `k <= 2` `{ 16, 32, 64, 128 }`, `k = 3` `{ 16, 32, 64 }` | 22 |
+| `k <= 2` `{ 16, 32, 64, 128 }`, `k = 3` `{ 8, 16, 32, 64 }` | 18 |
+
+**Every window is worse, and the two columns run out of room at opposite ends.**
+
+The **fitted** column — the exact trace on `Gamma_{p,h}`, so the staircase with
+every other variable removed — floors at `n = 128` exactly as that file's own
+comment predicts: `L2( psi* )` reads **3.63e-14** at `j = 0, k = 3` and
+**1.89e-14** at `j = 2, k = 3`, and the last-pair rate collapses to 4.764 and
+3.147 against `k+2 = 5`. Where it is NOT at the floor its per-pair rates reach
+the design order — **2.952** at `j = 0, k = 1` and **3.909** at `j = 1, k = 2`
+against `k+2 = 3` and `4`. So the staircase costs a slowly vanishing
+perturbation and not an order.
+
+The **transferred** column stalls for a different reason and three orders of
+magnitude above the floor. At `j = 0, k = 3`:
+
+| | `n = 64` | `n = 128` | last-pair rate |
+|---|---|---|---|
+| `L2( q )`, transferred | 2.339e-08 | 7.010e-09 | **1.739** |
+| `L2( psi* )`, transferred | 5.477e-10 | 7.842e-11 | **2.804** |
+| `L2( psi_h )`, transferred | 1.025e-09 | 9.539e-11 | 3.426 |
+| `L2( psi* )`, fitted | 9.866e-13 | 3.631e-14 | 4.764 (the floor) |
+
+`psi*` and `psi_h` land within 20% of each other, so **the post-processing has
+bought nothing there** — the transfer's own error is what both are measuring.
+
+**So the two halves of PE-0's red are different findings and one instrument
+cannot separate them.** What fixes the fitted column's REPORTED rate is a
+`Gamma_{p,h}` that is not a staircase — `meq::AdaptiveDomain`, the companion mesh
+of GS-2 §3.3.
+
+**AND THE SENTENCE THAT STOOD HERE — "what caps the transferred column is the
+transfer, and no geometry on the plasma side touches it" — IS WRONG.**
+→ **[M-83](MEASUREMENTS.md#m-83)**: that column loses no order at all. It carries
+a CONSTANT, amplified by the lifting extrapolating a degree-`k` polynomial
+outside its element, and the constant is set by `dist/h` — which is precisely
+what the companion mesh controls. **The same lever moves both columns, for
+unrelated reasons**, and the reading that they needed different cures came from
+reading a sequence rate as an order.
+
+### M-82
+
+**XP-2 needs TWO things and neither is sufficient alone: the connectivity fill
+actually running, and the plasma edge held fixed within each Newton.**
+`tests/convergence/XPointOuter` on `examples/diverted-tokamak.toml` —
+freegs4e's `A_testtokamak_classic`, `k = 2` on 2870 elements, the stored
+Green's-function guess, the bootstrap pin at `( 1.143144, −0.553965 )`.
+
+| fill live | edge frozen | outcome |
+|---|---|---|
+| ✗ | ✗ | **FAILED** at the 200 cap, `‖r‖` stalled at 4.79e-04 |
+| ✗ | ✓ | converged in 17 — to the **wrong branch**, `ψ_ax` = −7.99e-02 |
+| ✓ | ✗ | **FAILED** at the 200 cap |
+| ✓ | ✓ | **CONVERGED in 7**, and XP-2 is met |
+
+**EVERY SINGLE-KEY EXPERIMENT LANDS IN A FAILING ROW**, which is why this
+survived three sessions of changing one thing at a time.
+
+**THE FILL WAS NEVER RUNNING, AND THAT WAS A FIXTURE DEFECT.**
+`setPlasmaSupport()` was called on the plasma source *before* the coil wrapper
+was constructed, so the wrapper's own flag stayed false — and the wrapper is
+what the solver holds, so `plasmaComponentWanted()` read false and XP-1's flood
+fill never ran. `F` was still confined, the inner source's pointwise test being
+live, so nothing failed loudly. `apps/meq.cpp` has always done it the other way
+round and is correct. With it fixed, the pointwise test carries **752 elements
+over 3 components** and the fill keeps the **419** holding the axis: the other
+**333, 44% of the candidates, are the private flux region** — a current channel
+nobody asked for, on the only diverted case in the tree. §10.3 predicted exactly
+that and XP-1 was built for it.
+
+**THE FROZEN EDGE IS §10.5'S OWN PRESCRIPTION APPLIED TO THE SUPPORT** rather
+than only to the bounding point: `meq::NormalisedSource::freezePlasmaEdge` holds
+the values `insidePlasma()` tests against for the whole of one solve, and
+`GradShafranovSolver::setPlasmaSupportFrozen` holds the fill's mask the same
+way. `ψ_bnd` is pinned at `ψ_h` at a **saddle**, so it is a non-local functional
+of the iterate; letting the support edge follow it sweeps `F`'s on/off region
+across the plasma edge every residual, for which the Jacobian carries no surface
+term. Freezing the edge alone converges (7, 4, 4, 4, 4); freezing the mask too
+costs nothing and buys the tail (7, 4, 3, 2, 2).
+
+**XP-2 IS MET.** The outer fixed point contracts quadratically and finds both
+nulls of the double-null machine:
+
+| sweep | its | X-point | step | `ψ_ax` | `ψ_bnd` |
+|---|---|---|---|---|---|
+| boot | 7 | ( 1.093, −0.602 ) | — | 8.270827e-02 | 3.238153e-02 |
+| 1 | 4 | ( 1.093, −0.604 ) | 1.909e-03 | 8.266009e-02 | 3.237931e-02 |
+| 2 | 3 | ( 1.093, −0.604 ) | 3.732e-06 | 8.266004e-02 | 3.237932e-02 |
+| 3 | 2 | ( 1.093, −0.604 ) | 9.554e-10 | 8.266004e-02 | 3.237932e-02 |
+| 4 | 2 | ( 1.093, −0.604 ) | 2.255e-13 | 8.266004e-02 | 3.237932e-02 |
+
+Against freegs4e: the X-point sits **4.378e-04 m** away, `ψ_bnd` agrees to
+**0.08%** and `ψ_ax` to **0.07%**; the upper null is found at ( 1.109, 0.796 )
+carrying 2.8931e-02 against the reference's 2.891019e-02. `ψ_h` at the
+reference axis reads 8.265989e-02 against this solve's own `ψ_ax` of
+8.266004e-02, so the border closed on the field it constrains.
+
+**AND A MEASUREMENT THAT WAS TRUE SUPPORTED A CONCLUSION THAT WAS WRONG.**
+Turning `ConfineToPlasma` off does make the solve converge — 21 steps, to
+`ψ_ax` = −8.09e-02, a *different* equilibrium with `F` on in the vacuum.
+Reading that as "the moving support is the hazard" was an inference from a real
+one-key experiment to the wrong cause, because a third variable — the fill —
+was silently off in **both** of its rows. A one-key experiment separates two
+hypotheses only if everything else is where you think it is.
+
+### M-83
+
+**What caps `psi*` on the transferred route is the LIFTING'S EXTRAPOLATION, not
+the quadrature — and the quadrature hypothesis is falsified cleanly.** The
+transferred datum is `phi_h(x) = g(a(x)) + int_sigma C E_h(u_h).m ds`, entering
+the flux equation as `< phi_h, v.n >_e` on each face of `Gamma_{p,h}`. That is two
+quadratures: the inner one along the path integrates a polynomial of the flux
+degree on a straight-sided element and is exact, and `mfem::HDGExtensionIntegrator`'s
+own header says the **outer** one is not, because the foot map `a(x)` is not
+polynomial in `x`. MFEM defaults it to `2k+2`, and the data half through
+`VectorBoundaryFluxLFIntegrator` to `2k`. Neither had ever been varied — the
+experiment on record raised the *path* rule, which is the one that is already
+exact.
+
+`GradShafranovSolver::setExtensionQuadratureOrder()` is the knob. Swept at fixed
+`h` on `PlasmaEdge( 0 )`, `n = 32 -> 64`, rule orders `{ default, 12, 24, 48, 80 }`:
+
+| | `L2(q)` at `n=64` | rate | `L2(psi*)` at `n=64` | rate |
+|---|---|---|---|---|
+| `k=3`, transferred, default | 2.339479e-08 | 3.760 | 5.476803e-10 | 4.802 |
+| `k=3`, transferred, rule 12 | **8.673375e-09** | **4.637** | 4.335030e-10 | 4.790 |
+| `k=3`, transferred, rule 24/48/80 | 8.673373e-09 | 4.637 | 4.335022e-10 | 4.790 |
+| `k=3`, **fitted**, every rule | 1.451937e-09 | 3.937 | 9.866429e-13 | 4.949 |
+
+**Three things at once.** The rule **converges by order 12** — 12, 24, 48 and 80
+agree to six or seven digits. The fitted column is **bit-identical at every
+rule**, which is the null control, since it installs no extension. And the
+default really is inexact: `L2(q)` improves **2.7x** at `k=3` and its pair rate
+goes 3.760 -> 4.637, so MEQ's flux on the extension path is costing accuracy for
+nothing.
+
+**BUT IT DOES NOT CLOSE THE `psi*` GAP**, which is what the sweep was for:
+4.335e-10 converged against the fitted column's 9.866e-13, still **440x**. So a
+variational crime in the boundary quadrature is NOT what costs `psi*` its order.
+
+**THE GAP IS THE EXTRAPOLATION, AND THE EVIDENCE IS THAT IT TRACKS BOTH `d/h` AND
+`k`.** `E_h` is the element's own degree-`k` polynomial evaluated OUTSIDE its
+element, along a path of length `d ~ 1.3 h`. Extrapolating a degree-`k`
+polynomial a fixed multiple of its own support amplifies its error by a
+Chebyshev/Markov factor that explodes in `k`. Ratio of transferred to fitted
+`L2(psi*)` at `j = 0`, against the measured `dist(Gamma_p, Gamma_{p,h})/h`:
+
+| `d/h` | `k=1` | `k=2` | `k=3` |
+|---|---|---|---|
+| 0.851 | 7.8 | 18.4 | 80.0 |
+| 1.023 | 21.6 | 62.0 | 289.6 |
+| 1.264 | 28.5 | 88.5 | 501.3 |
+| 1.256 | 30.0 | 93.2 | 555.1 |
+
+Monotone in `d/h` at fixed `k`, and explosive in `k` at fixed `d/h`. For
+comparison `T_k( 1 + 2 d/h )` at `d/h = 1.26` reads **3.5 / 23.8 / 163.9** — the
+same shape and the same order of magnitude, which is as much as a bound of that
+kind should be expected to give.
+
+**WHY THE RATE LOOKS RIGHT LOCALLY AND WRONG ACROSS THE SEQUENCE.** The
+amplification is a CONSTANT, not an order: the transferred `psi*` pair rate at
+`n = 32 -> 64` reads 2.84 / 3.87 / 4.79 against `k+2` of 3 / 4 / 5. What the
+constant does is start the error one to two orders higher, so a rate read
+endpoint to endpoint over a finite range of `h` reads about `k+1` — and at `k=3,
+n=128` the transferred error stalls at 7.8e-11 where the fitted column has
+reached the double-precision floor.
+
+**THE RATIO DOES NOT PLATEAU CLEANLY ENOUGH TO GATE ON, AND THAT WAS PROPOSED
+AND MEASURED OUT.** Since the amplification is `( 1 + 2 d/h )^k` and P.1 bounds
+`d/h`, the ratio ought to stop growing, and over the last refinement most rows
+oblige -- 1.05 at `j = 0, k = 1` and `2`, 1.08 to 1.17 across `j = 1`, 1.30 at
+`j = 2, k = 3`. **`j = 2, k = 2` grows by 2.40**, its transferred pair rates
+reading 3.500, 3.520, 2.693, 2.037 while the fitted column is clean at 3.97. So
+the ratio inherits this route's own intermittency -- which PE-0's header already
+records on a geometry with no corner anywhere -- and any ceiling loose enough to
+pass that row is too loose to catch a transfer leaving its regime. It is printed
+per mesh and not asserted.
+
+**AND IT PREDICTS THE FIX, WHICH IS A LEVER THIS TREE ALREADY HAS.** If the gap
+is set by `d/h`, then shrinking `d/h` shrinks it — and `d/h` is exactly what
+GS-2 section 3.3's companion mesh, `meq::AdaptiveDomain`, exists to control.
+**[M-81](MEASUREMENTS.md#m-81)** names that same lever for the FITTED column's
+staircase, for an unrelated reason. Untested here, and it is the experiment to
+run next.
+
+### M-84
+
+**`Gamma_{p,h}`'s re-entrant corners are 225° AND 270°, not "a staircase of
+270°", and the band refinement that removes the transfer penalty does NOT make
+PE-0's rates pass.** Two measurements, both from
+`tests/convergence/PlasmaEdgeConvergence`.
+
+**THE CORNERS.** The background is `Element::TRIANGLE` — right triangles of
+45/45/90, six meeting at an interior vertex — so a boundary vertex's interior
+angle is a sum drawn from `{ 45°, 90° }` and the reachable re-entrant angles are
+225°, 270° and 315°. Summing the owning triangles' angles at every vertex of
+`Gamma_{p,h}`:
+
+| interior angle | `n = 16` | `n = 32` | `n = 64` |
+|---|---|---|---|
+| 90° | 6 | 12 | 22 |
+| 135° | 4 | 12 | 16 |
+| 180° | 14 | 20 | 54 |
+| **225°** | 0 | **8** | **12** |
+| **270°** | **4** | **10** | **20** |
+| 315° | 0 | 0 | 0 |
+
+**315° never occurs**, and the reason is the selection rule: an element is
+dropped if ANY vertex is outside, so a drop propagates to every triangle sharing
+that outside vertex and a lone 45° triangle can never be removed while its five
+neighbours stay. So the worst angle is **270° at every resolution** and the
+singular exponent is `pi/omega = 2/3` — which is what the old "270°" phrasing
+assumed, correctly, for the wrong reason. **The re-entrant count grows like
+`1/h`** — 4, 18, 32 over `n = 16, 32, 64` — so the corners are a fixed fraction
+of the interface however fine the mesh, which is why the fitted column's
+shortfall is a slowly vanishing perturbation rather than something refinement
+removes.
+
+**THE BAND REFINEMENT.** `meq::AdaptiveDomain`'s constructor is bit-for-bit what
+`makePlasmaSubdomain()` already did — same `MarkLevelSetSubdomain`, same
+`extraRefine`, same SubMesh — so only `refine()` can move anything. Marking the
+elements of `T_h` that own a face of `Gamma_{p,h}`, so step 3's second half
+pushes refinement into the band, at `j = 0`, `k = 3`, `n = 32`:
+
+| band | elem | `dist/h` | transferred `psi*` | fitted `psi*` | ratio |
+|---|---|---|---|---|---|
+| 0 | 490 | 0.894 | 1.527669e-08 | 3.047638e-11 | **501** |
+| 1 | 904 | 0.444 | 5.483084e-10 | 2.531174e-11 | 21.7 |
+| 2 | 1792 | 0.301 | 1.176300e-09 | 2.530864e-11 | 46.5 |
+| 3 | 3524 | 0.147 | **3.801957e-11** | 2.530864e-11 | **1.50** |
+
+**IT REMOVES THE TRANSFER PENALTY, WHICH CONFIRMS M-83'S MECHANISM.** `dist/h`
+falls 0.894 -> 0.147 because `refine()` grows `T_h` TOWARDS `Gamma_p` as band
+children fall inside, and the amplification collapses with it: the
+transferred/fitted ratio goes 28.5 -> 1.03 at `k = 1`, 88.5 -> 1.00 at `k = 2`
+and 501 -> 1.50 at `k = 3`. The transferred column stops being distinguishable
+from the fitted one, which is exactly what PE-0 set out to show.
+
+**AND IT DOES NOT MAKE THE RATES PASS — IT MAKES THEM WORSE.** Run as a
+sequence, three band refinements at every background mesh, `n = 8 -> 64`:
+
+| | `psi` | `q` | `psi*` | wanted |
+|---|---|---|---|---|
+| `j=0, k=1` fitted | 1.355 | 1.323 | 2.337 | 2 / 2 / 3 |
+| `j=0, k=2` fitted | 2.507 | 2.506 | 3.541 | 3 / 3 / 4 |
+| `j=0, k=3` fitted | 3.475 | 3.460 | 4.493 | 4 / 4 / 5 |
+
+Every rate falls about 0.5 below `k+1`, **including the fitted column's, which
+read 1.875 / 2.925 / 3.922 without the band refinement**. The cause is that a
+fixed band count is NOT a self-similar family: element counts go 688 -> 8388
+over an eightfold background refinement, 12.2x where a quasi-uniform 2-D family
+would give 64x, because conforming triangle refinement PROPAGATES and floods a
+large fraction of a coarse domain while staying near the boundary on a fine one.
+The coarse member is therefore disproportionately resolved and flattens the
+measured rate. Neither `h` nor `1/sqrt(NE)` is an honest abscissa for it.
+
+**AND "THE FAMILY IS NOT SELF-SIMILAR" IS THE WRONG DIAGNOSIS OF THAT**, which
+is worth recording because it is the reading the element counts invite. The
+family IS fixed-rule -- uniform background at `1/n`, three band refinements,
+`h_band/h_interior = 1/8` at every level -- so a rate against the interior `h` is
+well defined, and the count growing 12.2x rather than 64x only says the band is a
+1-D feature. Read the ERRORS and not the sequence rate and the banded pair rates
+are **rising monotonically** toward target:
+
+| `j=0, k=1` fitted | `L2(psi)` | pair | `L2(psi*)` | pair |
+|---|---|---|---|---|
+| `n=8`, 688 elem | 3.869755e-04 | — | 7.665502e-06 | — |
+| `n=16`, 1604 | 2.015991e-04 | 0.941 | 1.976824e-06 | 1.955 |
+| `n=32`, 3524 | 7.625434e-05 | 1.403 | 3.834074e-07 | 2.366 |
+| `n=64`, 8388 | 2.310155e-05 | **1.723** | 5.943014e-08 | **2.690** |
+
+against `k+1 = 2` and `k+2 = 3`; the same shape at `k = 3`, 3.062 / 3.572 /
+**3.792** and 4.078 / 4.594 / **4.806**. That is a **pre-asymptotic head**, not a
+broken abscissa: three band refinements at `n = 8` give **688 elements against a
+nominal `h` of 0.141**, so the coarse end is far better resolved than its `h`
+implies and the error range is compressed.
+
+**AND THE REASON NOT TO REACH FOR IT ANYWAY IS COST, WHICH IS THE SHARP
+FINDING.** Band refinement is not a general accuracy improvement — it is
+specifically an antidote to the transfer's extrapolation amplification, and it is
+a large net loss wherever that amplification is absent. At `k = 3`, `psi*`:
+
+| | elements | `psi*` |
+|---|---|---|
+| fitted, band 0, `n=32` | 490 | 3.0476e-11 |
+| fitted, band 3, `n=8` | 688 | 1.0329e-08 |
+| fitted, band 0, `n=64` | 2076 | 9.8664e-13 |
+| fitted, band 3, `n=64` | 8388 | 9.0468e-13 |
+
+At comparable cost the **uniform mesh is 339x better**, and at `n = 64` band 3
+buys 1.09x the accuracy for 4.0x the elements. It is spending elements resolving
+a boundary where the solution is smooth. On the TRANSFERRED route the same
+spend pays: band 3 at `n = 32` (3524 elements) beats plain `n = 64` (2076) by
+**14.4x**.
+
+**So the two routes want different meshes**, and PE-0 as staged measures them on
+one. That, rather than self-similarity, is the design question.
+
+### M-85
+
+**On the route the coupled method must use, band refinement is a clear win, and
+one refinement is the efficient point.** `Interface::Fitted` was renamed
+`Interface::ArtificialExactTraceOnGammaH` while taking this, because the old name
+invited exactly the error the previous round made: reading it as an
+implementation one could choose instead of the transfer, and then comparing costs
+against a column nobody can run. From PE-3 on `lambda` IS the interface unknown
+and exists nowhere but on `Gamma_p` — there is no function of position to
+evaluate on `Gamma_{p,h}`. It is a diagnostic, not a route.
+
+Transferred route, `j = 0`, values at `n = 64` over the sequence `{ 8, 16, 32, 64 }`:
+
+| `k` | band | elem | `dist/h` | `L2(psi)` | `L2(psi*)` | `r(psi)` | `r(psi*)` |
+|---|---|---|---|---|---|---|---|
+| 1 | 0 | 2076 | 1.256 | 2.798137e-05 | 1.972225e-06 | **1.997** | 2.230 |
+| 1 | **1** | 2976 | 0.471 | 2.329046e-05 | **2.769459e-07** | 1.515 | **2.694** |
+| 1 | 2 | 4752 | 0.281 | 2.310986e-05 | 7.564871e-08 | 1.366 | 2.577 |
+| 1 | 3 | 8388 | 0.148 | 2.310168e-05 | 6.088313e-08 | 1.356 | 2.341 |
+| 2 | 0 | 2076 | 1.256 | 2.783392e-07 | 4.529251e-08 | **3.043** | 3.161 |
+| 2 | **1** | 2976 | 0.471 | 2.411700e-07 | **3.241408e-09** | 2.535 | **3.694** |
+| 3 | 0 | 2076 | 1.256 | 1.025308e-09 | 5.476803e-10 | **4.009** | 4.000 |
+| 3 | **1** | 2976 | 0.471 | 7.589940e-10 | **8.240617e-11** | 3.493 | 3.876 |
+
+**ONE REFINEMENT BUYS MOST OF IT**: `psi*` improves **7x / 14x / 6.6x** at
+`k = 1, 2, 3` for **1.43x the elements**, and its RATE improves with it, 2.230 ->
+2.694 and 3.161 -> 3.694. Band 3 costs 4x the elements for a further 4.5x at
+`k = 1` and returns worse rates. `psi` itself saturates at band 1 and is
+interior dominated thereafter — 2.329e-05, 2.311e-05, 2.310e-05 — so the whole
+benefit is to the post-processing, which is what M-83 says the transfer was
+polluting.
+
+**AND `psi`'s MEASURED RATE FALLS, WHICH IS THE UNCOMFORTABLE HALF.** 1.997 ->
+1.515, 3.043 -> 2.535, 4.009 -> 3.493. Band refinement removes the geometric
+error — `Omega_{p,h}` against `Omega_p` — and that benefit is **3.2x at `n = 8`
+and 1.2x at `n = 64`**, so it decays FASTER than `psi`'s own `O( h^(k+1) )`.
+Removing it lowers the coarse end and leaves the sequence measuring the true
+behaviour from a lower baseline. **So band 0's `psi` rate of 1.997 is partly
+flattered**: it clears `k+1` with help from a higher-order coarse-end term, and
+the cleaner geometry exposes that rather than causing it.
+
+**NO BAND COUNT MAKES PE-0 GREEN.** Band 0 passes `psi` and fails `psi*`; band 1
+does the reverse. The errors are uniformly better at band 1 on both variables,
+which is what matters for the METHOD; what does not survive is the assumption
+that one uniform-sequence rate gate can score a geometry whose error has two
+terms converging at different orders.
+
+**WHAT PE-0 NOW GATES, AND WHAT IT STOPPED GATING.** Acting on the above:
+`psi` and `q` are reported and no longer rate-gated on `Omega_{p,h}` — they are
+interior dominated, and `theSamePlasmaOnAFittedDomainIsCleanAtEveryVanishingOrder`
+already scores that claim on a FITTED rectangle at a tighter slack, `k+1` less
+0.10 against this file's 0.15. The monotonicity check per pair stays, since that
+is the part a coarse-end contamination cannot flatter. `psi*` keeps its rate
+gates, on two rows answering two questions: the artificial column at `k+2`, which
+is the premise, and the TRANSFERRED column at **one band refinement** at `k+1`,
+which is the geometry the coupled method would run on.
+
+PE-0 goes from **10 failures to 4**, and the four are two causes rather than a
+mixed bag:
+
+| failing | rate | wanted | cause |
+|---|---|---|---|
+| artificial, `j=1, k=2` | 3.761 | 3.85 | the staircase corners, M-84 |
+| artificial, `j=2, k=3` | 4.643 | 4.85 | the same |
+| banded transferred, `j=2, k=2` | 2.741 | 2.85 | `j = 2`, the stiffest edge |
+| banded transferred, `j=2, k=3` | 3.372 | 3.85 | the same |
+
+**Both remaining transferred failures are at `j = 2` and neither is at `j = 0`
+or `j = 1`**, which is worth knowing before reading them as the transfer: `j` is
+the order to which the profiles vanish at the edge, so this is the corner of the
+grid where the solution is least regular across `Gamma_p`.

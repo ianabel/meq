@@ -240,8 +240,38 @@ it said *"nothing was attempted"*.
 
 **THE TWO PERFORMANCE KEYS ARE THE ONLY SOLVER KNOBS EXPOSED TO TOML, AND THE
 LINE IS DRAWN WHERE IT IS FOR A REASON.** `AssemblyMode` and `TraceSolver`
-cannot change the answer — the assembly modes are asserted bit for bit and the
-trace solvers agree to 1e-14 — so a file may choose them freely.
+cannot change the answer **where both converge** — the assembly modes are
+asserted bit for bit at `MKL_NUM_THREADS=1` and the trace solvers agree to
+1e-14 — so a file may choose them freely.
+
+**THAT QUALIFICATION IS MEASURED AND IT IS NEW.** Making PARDISO the default
+turned `PedestalConvergence`'s `andersonPicardReachesTheSameSolutionAsNewton`
+**red**, and not by disagreeing: at `k = 1`, `n = 16` — the coarsest and
+stiffest case in the suite, unglobalised, 500 iterations allowed — Newton
+*reaches* a solution under UMFPack and does not under PARDISO, so the case's
+precondition failed before any comparison happened. Isolated by rebuilding with
+that one line changed and nothing else. Several hundred compounded 1e-15
+differences land on different sides of a convergence boundary; the same binary
+prints `Newton alone : FAILED in 60 iterations` for a neighbouring case under
+**both** solvers, so unglobalised non-convergence there is the problem's
+property and not the package's. See **[M-78](MEASUREMENTS.md#m-78)**.
+
+**AND THE RED WAS THE TEST'S, NOT PARDISO'S.** `k = 1, n = 16` is the knife edge
+`pedestalConvergenceIsAResolutionThreshold` spends forty lines establishing must
+never be asserted on — whether that one element-local Newton converges is decided
+by a threaded BLAS-3's summation order at O(1e-16), so the same source converges
+in 42 iterations against one MFEM build and fails at the cap against another
+differing by a single flag. The comparison case was taking it as a hard
+precondition, which is the one thing its sibling forbids, and in the more brittle
+direction: a `BOOST_TEST_REQUIRE` abandons the whole sweep on the first mesh. It
+now skips a mesh either path fails, sweeps `{ 16, 24, 32, 48 }`, and requires
+three of the four to produce a comparison — so the knife edge may fall either way
+and two dropouts is still a finding. **Green, and the agreement is better than
+the assertion needs**: best 9.068e-14, worst 3.894e-12. **Changing the default
+did not change which problems MEQ can solve; it changed which mesh a test's
+precondition landed on.** This is
+still much weaker than the `Globalisation` hazard below, which reports one of
+two discrete solutions 9.4% apart.
 `Globalisation` and `NonlinearOrdering` are **not** exposed and must not be:
 `CLAUDE_HDGGS.md`, *Should `PicardThenNewton` simply be the default?* measures three solve routes
 reaching discrete solutions **9.4% apart** on an under-resolved mesh, which is
@@ -289,6 +319,171 @@ and must: `TraceSolverScaling` constructs the Device first and the
 `cuDSSTraceSolver` ctest is how its agreement with UMFPACK is checked at all.
 Only the config-file route is closed, and
 `theDriverRefusesASolverItCannotHonour` keeps it closed.
+
+**AND THE SOLVE UNDER AN `mfem::Device` WAS BROKEN BY AN ALIAS LEAVING ITS
+BASE'S VALIDITY FLAGS STALE, AT FOUR SITES, TWO OF THEM MEQ'S OWN.** The
+symptom was a whole NPC solve mis-solving at `OMP_NUM_THREADS=1` — `example5`
+reporting **0/0 Newton iterations on a case that needs four**, the potential
+coming back identically zero, and all three trace solvers agreeing to four
+figures, which is what said one common fault rather than three.
+
+→ **[M-79](MEASUREMENTS.md#m-79)** — the chain · the faulting call · cpu, cuda and debug agreeing to every digit
+
+**THE INSTRUMENT IS `mfem::Device( "debug" )` AND IT IS THE WHOLE STORY.** It
+has device memory semantics with host arithmetic and `mprotect`s the host page,
+so **a raw host read of a device-valid buffer is a named fault with a backtrace
+rather than a wrong number** — which is exactly the shape of a symptom that
+reads "identically zero". `NpcThreadScaling --device debug` costs nothing, the
+harness already takes the string, and it faults on the first Newton residual.
+Each fix then moves the fault **forward** to the next site, which is the only
+thing that distinguishes a fix from a coincidence. Reach for it before a
+debugger on anything device-shaped.
+
+`GetAliasDevicePtr()` ends in `AliasProtect()` on the **base's** host range and
+never touches the base's flags — `Memory::SyncAlias`'s own comment says so and
+says what is owed. The base still reads `VALID_HOST`, the next `ReadWrite_`
+computes `copy = !( flags & VALID_DEVICE )` = true, and `GetDevicePtr()` memcpys
+h2d out of the page it just protected. Under CUDA nothing is protected, so it
+silently copies the **stale host copy** over the device buffer the solve had
+correctly written.
+
+**MEQ'S HALF IS THE TRANSFERABLE PART**, because it was latent from the day it
+was written and could not fail until a Device existed: `buildForms()` makes
+three long-lived `MakeRef` aliases — `darcyFlux`, `potentialGf`, `traceGf` —
+onto the blocks of one `BlockVector solution`, and every one of them is a
+separate alias registration that never hears about a device write. `solve()`
+therefore calls `solution.SyncToBlocks()` and a `SyncMemory()` per grid function
+before the first host read, and they are inert with no Device configured. This
+is the **third** time a library update or a new configuration has turned a
+dormant MEQ contract into a failure in somebody else's code; see the `SubMesh`
+parent and `SourceIntegrator`'s shared scratch under *Traps*.
+
+**cuDSS is a bystander and always was.** UMFPack and PARDISO never touch the
+device and failed identically. With the four sites fixed, `--device cuda` and
+`--device debug` both reproduce the CPU answer to **every printed digit**.
+
+**AND THE REFUSAL OF `TraceSolver = "cudss"` STANDS, ON THE TRADE ARGUMENT
+ALONE.** The second and stronger reason that used to sit here — that the solve
+did not survive a Device — is gone, and what is left is the group-4-alone
+argument above, which is unchanged: the integrators are 46–53% of a step and
+have no kernels. The flag stays in the harness so that the day they get some,
+this costs one command.
+
+**THE MFEM HALF IS UPSTREAM'S AND IS LANDED** — `bf27f5a928` on
+`gf-hdg-linearise-first`, found independently the same afternoon and merged into
+`meq-integration`. `DarcyNPCOperator::Mult` and `DarcyNPCSolver::Mult` were the
+only two places in `darcyhybridization.cpp` writing a `BlockVector`'s blocks
+without syncing, an idiom the rest of that file uses at six other sites. **In
+`DarcyNPCSolver::Mult` the ORDER is a third constraint**: `Neg()` acts on `xb`'s
+own `Memory`, so the blocks are carried up to `xb` *before* it and `xb` up to `x`
+*after* it.
+
+**AND UPSTREAM'S FIX ALONE IS NOT SUFFICIENT, WHICH IS THE HALF ONLY MEQ CAN
+SEE.** With it in and MEQ's own two links out, the iteration count is repaired —
+0/0 becomes 2/2 — and `max|ψ_h|` is **still identically zero**. The `0/0` and the
+zero potential are *different links of one chain*, so a fix for either leaves a
+symptom standing, and upstream's own new regression asserts on the iteration
+count. A library-side test cannot see a caller's aliases.
+
+### Which integrators need device offload, and why kernels alone are not enough
+
+**THE INVENTORY, TAKEN FROM THE INSTALLED HEADERS RATHER THAN REMEMBERED.** Every
+integrator MEQ installs, and whether a device entry point exists for it today:
+
+| integrator | where MEQ installs it | device path |
+|---|---|---|
+| `mfem::VectorMassIntegrator( radius )` | flux mass, domain — `GradShafranov.cpp:3077` | **`AssemblePA`, `AssembleMF`, `AssembleDiagonalPA`, `AddMultPA`** — and separately `HDGElementMassBatched()` under `AssemblyMode::Batched` |
+| `mfem::VectorDivergenceIntegrator` | flux divergence, domain — `:3176` | **`AssemblePA`** |
+| `mfem::TransposeIntegrator( mfem::DGNormalTraceIntegrator )` | flux divergence, interior + boundary faces — `:3177`, `:3179` | the wrapper has PA and the wrapped integrator has none — **and neither matters**, because under hybridization these are never assembled. They are MARKERS; see the measured trap under *A trap in that table* |
+| `mfem::NormalTraceJumpIntegrator` | the hybridization constraint — `:3186` | `AssembleEAInteriorFaces` **only**: element assembly, interior faces, no `AddMultPA` and nothing for boundary faces |
+| **`mfem::HDGDiffusionIntegrator`** | potential mass, interior **and** boundary faces — `:3109`, `:3151`, `:3152` | **none** |
+| **`meq::SourceIntegrator`** | potential mass NON-LINEAR form, domain — `:3140`, `:3150` | **none, and it is the one MEQ owns** |
+| **`mfem::HDGExtensionIntegrator`** | flux mass, boundary faces, curved and free-boundary only — `:3098` | **none** |
+| `mfem::DomainLFIntegrator`, `mfem::VectorBoundaryFluxLFIntegrator` | the two right-hand sides — `:3465`, `:3414` | none, and it does not matter: once per mesh, not once per step |
+
+**TWO STRUCTURAL FACTS MATTER MORE THAN THE TABLE, AND EITHER ONE ALONE MAKES
+"ADD KERNELS" THE WRONG PLAN.**
+
+**The hybridized path never reaches a PA entry point.** `darcyform.hpp:169` says
+the hybridized assembly goes through `BilinearForm::ComputeElementMatrix()` —
+the dense, per-element, host route. So the three integrators that *do* have PA
+kernels are not using them in MEQ, and kernels added to the other three would
+not be reached either. What is missing is a **route**, which is upstream's group
+2 partial-assembly rewrite; kernels are necessary and nowhere near sufficient.
+
+**AND MEQ IS IN THE 15 THAT THE BATCHED FACE KERNEL TAKES, NOT THE 52 IT
+REFUSES — THIS FILE SAID THE OPPOSITE AND THE REASONING WAS WRONG.** The wrong
+step was inferring the constraint's ROUTE from which form the integrators are
+added to. MEQ does put both HDG face integrators on the potential-mass
+**non-linear** form, by the load-bearing decision at `GradShafranov.cpp:2975` —
+but that is not what decides `c_bfi_p` against `c_nlfi_p`. Read out of
+`darcyform.cpp` rather than reasoned about:
+
+* `GetPotentialMassForm()` is called at `GradShafranov.cpp:3156` and **only**
+  there, inside the `else` of `usesNonlinearForms()` — the Picard/Anderson path.
+  On the Newton path `M_p` is therefore **null**.
+* `EnableHybridization()` tests `if (M_p)` first (`darcyform.cpp:367`), falls
+  past it, and reaches `else if (Mnl_p && FaceIntegratorsAreLinear(...))` at
+  `:416`.
+* `FaceIntegratorsAreLinear()` (`:289`) asks two things: is the problem
+  non-linear for some other reason — `Mnl_p->GetDNFI()->Size() > 0`, which
+  `meq::SourceIntegrator` satisfies — and is **every** face integrator, interior
+  and boundary, a plain `BilinearFormIntegrator`.
+  `class HDGDiffusionIntegrator : public BilinearFormIntegrator`
+  (`bilininteg_hdg.hpp:843`), and both of MEQ's are.
+
+So MEQ's face constraint is installed as **`c_bfi_p`, the linear route, assembled
+once per solve rather than once per step** — which is exactly
+`CanBatchPotFaceAssembly()`'s domain. The one remaining gate inside
+`HDGFaceScatterCanBatch()` refuses a state-dependent stabilization hook
+(`bilininteg_hdg.cpp:2658`); MEQ's is `meq::ConstantStabilization`, so it passes
+that too.
+
+**The transferable part**: "which form an integrator is added to" and "which
+route its constraint takes" are different questions, and the second is decided by
+a predicate in somebody else's translation unit. This file inferred one from the
+other and got a requirement list wrong in MEQ's own favour.
+
+**MEQ also reaches neither batched path today**: its `AssemblyMode` enum carries
+`Serial` and `Threaded` and no `Batched`, and it never calls
+`SetLocalFactorMode`. So the two device-capable pieces upstream has already
+built — the batched local factorisation, and the batched flux-mass domain
+assembly — are unreachable from MEQ without a new enum value in each case.
+
+**THE ORDERED LIST, WEIGHTED BY THE LEG PROFILE RATHER THAN BY COUNT.** From
+**[M-80](MEASUREMENTS.md#m-80)**:
+
+1. **`meq::SourceIntegrator`** — the `F(r, z, ψ)` domain term, evaluated per
+   quadrature point per element per residual **and** per Jacobian. It is the
+   only one on this list MEQ can write itself, and it is the leg that dominates
+   MEQ's own bordered configuration: the residual leg reads **48.2% serial and
+   23.1% threaded** on the high-beta case, because the border spends four
+   residual evaluations per step.
+2. **`AssemblyMode::Batched` in MEQ's own enum**, which is the whole of what
+   stands between MEQ and the face kernel that already exists — see the
+   correction above. It is a smaller job than a new kernel and it is entirely in
+   this tree.
+3. **A device route through `DarcyHybridization`** that reaches those kernels
+   instead of `ComputeElementMatrix()`. Without this, 1 and 2 are unreachable.
+4. **`mfem::HDGExtensionIntegrator`** — needed only for the curved and
+   free-boundary paths, which is to say for every problem MEQ actually exists to
+   solve, and for none of the fixtures in M-80. **It does NOT disqualify the
+   condensation cache, and this file said it did.** `Bnl_data` is written at one
+   site, `darcyhybridization.cpp:6487` in `ConstructGrad()`, and only from
+   `grad_Aup` — the (0,1) block of a **block non-linear** integrator's element
+   gradient, i.e. a flux law depending on the potential. `HDGExtensionIntegrator`
+   is a `BilinearFormIntegrator` (`extension_hdg.hpp:509`) on the flux mass
+   **bilinear** form, so it lands in `A` and is assembled once. It makes `A`
+   asymmetric — MEQ's own 5.4e-01 — but not solution dependent, and `A⁻¹Bᵀ` is
+   constant whether or not `A` is symmetric. Same error as the one above:
+   asymmetry was read as state dependence.
+5. **Nothing for the two linear-form integrators.** They are assembled once per
+   mesh; offloading them would buy a share of `prepare()`, which is outside the
+   step entirely.
+
+**And none of it is worth starting before the Device works at all** — M-79 — or
+worth *timing* here afterwards, since this machine's consumer FP64 runs at 1/32
+to 1/64 of its FP32 rate where a datacentre part runs it at about 1/2.
 
 **The transferable part**: exposing a knob makes reachable, by somebody who has
 not read the library's documentation, every precondition that documentation
@@ -400,7 +595,7 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 git submodule update --init --recursive     # extern/toml11
 cmake -B build
 cmake --build build -j6
-cd build && OMP_NUM_THREADS=4 ctest -j4      # 48/48, about 700 s
+cd build && OMP_NUM_THREADS=4 ctest -j4      # 49/50, about 530 s
 ```
 
 **RUN IT `-j4` WITH `OMP_NUM_THREADS=4`, WHICH IS 3.2x FASTER AND MEASURED.**
@@ -410,7 +605,8 @@ product at the core count is what pays:
 
 → **[M-14](MEASUREMENTS.md#m-14)** — wall · CPU
 
-37/37 in every configuration when that table was taken, and **48/48 today** —
+37/37 in every configuration when that table was taken, and **49 of 50 today**,
+the one red being `PlasmaEdgeConvergence` and deliberate —
 the count moves as cases are added, so read the table's ratios rather than its
 absolute seconds. Nothing in the suite depends on a thread count, which is the
 correctness half.
@@ -440,9 +636,30 @@ very configuration reports `Ψ = 1.0000 AGREES` on a solve whose axis source is 
 pole. A test that cannot fail is worse than no test. It asserts four things, and
 `checkAxisSource().bounded` is the one with teeth.
 
+**AND IT HAS NOW HAPPENED TWICE, ON A CASE THAT HAD BEEN RED FOR SESSIONS.**
+`XPointOuter` was failing at its bootstrap solve with a long, careful list of
+ruled-out causes and two surviving suspects, both of them about the solver. It
+was neither: the fixture called `setPlasmaSupport()` on the plasma source
+**before** constructing the coil wrapper, so the wrapper's own flag stayed false,
+`plasmaComponentWanted()` read false, and **XP-1's flood fill never ran on the
+only diverted case in the tree** — 333 elements of private flux region, 44% of
+the candidates, carrying a current channel nobody asked for. `apps/meq.cpp` has
+always done it the other way round and is correct. See `CLAUDE_FB.md`,
+*`setPlasmaSupport()` only reaches the fill if it is called on the wrapper*, and
+→ **[M-82](MEASUREMENTS.md#m-82)**.
+
+**THE PART WORTH GENERALISING IS HOW IT HID.** Every experiment on that case
+changed one key and read the outcome, which is the right instinct and is exactly
+what could not find this: the fill was off in **both** arms of every one of them,
+so a real measurement — "turning `ConfineToPlasma` off makes it converge" —
+supported a conclusion that was wrong. It took a **2 × 2 cross** to see that the
+fill and the frozen plasma edge are each necessary and neither sufficient. *A
+one-key experiment separates two hypotheses only if everything else is where you
+think it is.*
+
 Per *Testing stance*, a red suite is the intended signal while a defect stands.
-**Do not "fix" it by relaxing an assertion** — the repair here was to give a
-fixture the physics it was missing, and the assertion never moved.
+**Do not "fix" it by relaxing an assertion** — the repair in both cases above was
+to give a fixture something it was missing, and the assertions never moved.
 
 **`OMP_NUM_THREADS` is deliberately NOT pinned in
 `tests/CMakeLists.txt`** — a plain `ctest` must still exercise threaded assembly
@@ -455,7 +672,7 @@ single-threaded — against `PedestalConvergence`'s 178 s. So 223 s is very near
 "the suite costs one lint run", and going below it means parallelising
 clang-tidy (`run-clang-tidy`) rather than anything about the solver.
 
-**AND `naming` IS NO LONGER AT THE TOP AT ALL.** At **48** tests the two longest
+**AND `naming` IS NO LONGER AT THE TOP AT ALL.** At **50** tests the two longest
 are **`FreeBoundaryCoupling` at 413.2 s** and `naming` at 340.0 s, with
 `DriverAcceptance` at 124.2 s — which is 54 s more than it was, all of it the
 q-driven example's 43 equilibria — the first two within a factor of 1.6, so `-j4`
@@ -973,47 +1190,24 @@ tree was left checked out on it — so the next person to touch it would have be
 on someone else's branch. Fetching from the dev tree is reading; everything else
 is not.
 
-**WHICH REQUESTS EXIST IS A QUESTION FOR `git`, NOT FOR `ls`, AND THIS FILE GOT
-IT WRONG EARLIER THE SAME DAY.** A listing of `../mfem-hdg-dev/doc/` reports
-whatever branch that tree happens to be checked out on, which is not MEQ's to
-control and changed twice on 2026-09-01. Asked properly —
-`git cat-file -e <branch>:doc/<file>` across every branch — the answer is:
+**WHAT IS OPEN WITH UPSTREAM, AND NOTHING ELSE ABOUT IT.**
 
-| document | lives on | |
-|---|---|---|
-| **`HDG-CONE-TILING-FROM-MEQ.md`** | **`gf-hdg-subdomains-dev`, and TRACKED — upstream committed it** | **CLOSED 2026-09-06 and MEQ is happy for it to be deleted; see `CLOSED-REPORTS-FROM-MEQ.md`.** All three of its §5 asks are met, the boundary-sweep tiling case exists as `TEST_CASE("Extension from subdomains: quadrature over Gamma")`, and the rule sweep reproduces to every digit. **FILED AND ANSWERED THE SAME DAY, and MEQ's diagnosis was the part that was wrong.** Coverage is exact; the cone roughens the foot map and a 12th-order rule under-resolves it. Upstream reproduced it, turned the cone off by default, added the boundary-sweep case MEQ asked for, and corrected their own commit's *"changes nothing"*. MEQ raised its rule to 80 and its `transmissionQuadratureOrder` to 40 |
-| **`QUADRATURE-HIGH-ORDER-TRIANGLES-FROM-MEQ.md`** | **`gf-hdg-linearise-first`, untracked in `doc/`** | **FILED 2026-09-06, open.** `IntegrationRules::Get( TRIANGLE, order )` is tabulated to 25 and falls back to Grundmann–Möller above it, whose negative weights reach **−1.9e+07** by order 64 and take a monomial from 1e-16 to **2.7e-05** — silently. MEQ met it by sweeping `setSourceQuadratureOrder()`. Carries a second, separate MEASUREMENT rather than a defect claim: `MomentFittingIntRules`' conditioning on a nearly degenerate cut, and the fact that both cut backends are quadrilateral-only |
-| **`CMAKE-TPL-COMPONENT-CACHE-FROM-MEQ.md`** | **`gf-hdg-linearise-first`, untracked in `doc/`** | **FILED 2026-09-06, open.** `mfem_find_package` quick-returns on a cached `${Prefix}_FOUND` **without consulting the requested component list** (`MfemCmakeUtilities.cmake:234`), so adding `IDAS` to `SUNDIALS_COMPONENTS` is silently ignored in an existing build directory and `libmfem.a` ends up referencing ten `IDA*` symbols the link line does not carry. **Explicitly NOT a report against the IDA work**, which is correct; the helper predates it |
-| `HDG-ELEMENT-LOCAL-PARALLELISM.md` | `gf-hdg-linearise-first` | **NOT A MEQ REQUEST, and this row said it was.** It is upstream's own working scratch, written in the first person about their own to-do list, and it records that every element-local loop in the class is now threaded. Nothing here is MEQ's to close |
-| `HDG-BEM-COUPLING-FROM-MEQ.md` | `gf-hdg-linearise-first` | **§1 DELIVERED, §2 IS THE ONE ASK LEFT.** §1 said MEQ would write the quadrature over `Γ` and come back with it; MEQ did, and `mfem::ExtensionBoundaryQuadrature` was merged into `gf-hdg-subdomains-dev` 2026-09-05. §2 — auxiliary globally-coupled unknowns — is still worth doing and still not blocking, and **FB-5 now says what it would buy**: MEQ's border costs `N + 2` backsolves, which is affordable, plus **one full re-assembly per accepted step**, because the auxiliary unknown reaches the residual through a load term. Kept |
-| `HDG-NPC-GLOBALISATION-FROM-MEQ.md` | `gf-hdg-linearise-first` | **CLOSED 2026-09-06: the last thing in it is delivered.** The implementation defect it turned up is fixed — `navierstokes.cpp` takes its globalisation from KINSOL and the hand-rolled backtracking is gone — and the §4.3 transport-barrier regression MEQ owed is now **`HDG-BARRIER-REGRESSION-FROM-MEQ.md`**, transcribed into upstream's own `PedestalHDG` fixture and RUN before being sent. Its other entry is a direction the file itself says MEQ is not asking for |
-| **`HDG-BARRIER-REGRESSION-FROM-MEQ.md`** | **`gf-hdg-linearise-first`, untracked in `doc/`** | **DELIVERED 2026-09-06.** §4.3's internal transport barrier as a `PedestalSource`/`PedestalHDG` sibling. Drives the NPC residual from 1.10e+00 to **5.56e+17** over sixty steps with every norm finite and no throw — a much harder exercise of `MFEM_VERIFY( IsFinite( norm ) )` than anything in that file. **The two converging configurations are the control**: `n = 32` at order 1 and, under the condensation, order 2 at `n = 16`, so the case is under-resolution rather than a broken fixture. It also reproduces the parity gap on a third source |
-| `HDG-DEFECTS-FROM-MEQ.md` | **`gf-hdg-dev` only** | **CLOSED 2026-09-06 and MEQ is happy for it to be deleted; see `CLOSED-REPORTS-FROM-MEQ.md`.** §1 and §2 fixed, §3 withdrawn as not a defect, §4 fixed as `TransferredDatumCoefficient`, and the fifth upstream added to it fixed. Every one checked against the code today rather than against the report |
-| `HDG-LINEARISE-THEN-CONDENSE.md` | backup refs only | retired with the mode |
-| `DIRECT-SOLVER-SYMBOLIC-REUSE.md` | no branch at all | retired |
+| | |
+|---|---|
+| **`HDG-BEM-COUPLING-FROM-MEQ.md` §2** | auxiliary globally-coupled unknowns. Worth doing, not blocking. **FB-5 says what it would buy**: MEQ's border costs `N + 2` backsolves, which is affordable, plus **one full re-assembly per accepted step**, because the auxiliary unknown reaches the residual through a load term |
 
-The three **older** open ones sit on `gf-hdg-linearise-first` alone, so with the
-tree on `gf-hdg-dev` they are invisible and `doc/` looks nearly empty. **The cone
-report is the exception**: it is on `gf-hdg-subdomains-dev`, which is where the
-extension machinery and the defect both live, and it is **untracked** — that tree
-is receive-only, so MEQ writes the file and never commits it. A `git status` there
-is how to see it, not `git cat-file`. **Reading that emptiness as a set of
-retirements is the mistake to avoid**: `2a50119ba1` deletes
-`HDG-DEFECTS-FROM-MEQ.md` on one line of history while the file is alive on two
-of the four branches MEQ merges, so a claim about someone else's working tree is a
-claim about their checkout.
+Everything else MEQ has sent is closed. **A CLOSED REPORT NEEDS NO ENTRY HERE**:
+what it changed is in the code with a test on it, or it is a measurement under an
+`M-nn` anchor, and either way this file is the wrong place to re-tell it. Two
+operational facts are worth the space and the rest is not:
 
-**`HDG-NPC-GLOBALISATION-FROM-MEQ.md`, 2026-08-31 — FILED, AND ANSWERED THE
-SAME DAY** (`af82d42b14` in that tree). Deliberately **not** a defect report:
-it disputed §6 of `HDG-ORDERING-API.md`, whose recommended backtracking line
-search MEQ had implemented from `miniapps/hdg/navierstokes.cpp` and measured
-making every case worse, and it asked what configuration produced §6's numbers
-rather than asserting they were wrong. Upstream withdrew two §6 claims on MEQ's
-evidence, corrected MEQ's own account of the mechanism, and found a defect in
-their reference implementation that MEQ had inherited by copying it faithfully.
-All of it is recorded under `CLAUDE_HDGGS.md`, *Why it fails, measured*. **That two of MEQ's claims
-were corrected by the exchange rather than by MEQ is the argument for writing
-these notes at all.**
+* **Upstream tracks and curates these documents themselves.** They commit the
+  ones MEQ writes and delete the ones that close, without MEQ touching anything.
+  So `doc/` is theirs, deleting from it is editing someone else's repository, and
+  the receive-only rule permits writing INTO it and nothing more.
+* **Which documents exist is a question for `git`, not for `ls`** — a listing
+  reports whatever branch that tree is checked out on, which is not MEQ's to
+  control and has changed under this file more than once.
 
 **And do not file findings against unfinished work.** A branch that exists is not
 a branch that is done. Measure it if it is useful to know, keep the numbers in
@@ -1146,8 +1340,37 @@ the evidence that suggested it proves nothing.
 
 **A `libmkl_sequential` behind SuiteSparse hides all of this**, since MKL then
 resolves sequential whatever it is asked for — see `CLAUDE_HDGGS.md`,
-*PARDISO and the MKL link line*. **`MKL_NUM_THREADS=1` is right for MEQ's solver and wrong for PARDISO**,
-which is a genuine tension rather than an oversight.
+*PARDISO and the MKL link line*.
+
+**AND THE TENSION THAT USED TO SIT HERE — `MKL_NUM_THREADS=1` BEING RIGHT FOR
+MEQ'S SOLVER AND WRONG FOR PARDISO — IS RESOLVED BY THE ASSEMBLY MODE, AND THE
+TWO DEFAULTS NOW MOVE TOGETHER.** Everything above is a measurement of the
+*serial* element loop. Under `AssemblyMode::Threaded`, which is the default, the
+element-local dense work is nested inside an active OpenMP region and MKL
+suppresses its own threading there, so `MKL_NUM_THREADS` costs it nothing —
+while the trace solve runs on the master thread outside every region and takes
+every thread. **So PARDISO is the default trace solver wherever
+`MFEM_USE_MKL_PARDISO` is set**, chosen by `defaultTraceSolver()`, which is
+build-conditional for exactly the reason `defaultAssemblyMode()` is: the
+constructor bypasses `setTraceSolver()`, and an unhonourable default would reach
+`makeTraceSolver()` and throw out of a solve.
+
+→ **[M-78](MEASUREMENTS.md#m-78)** — driver wall by solver × MKL · per-stage solve · what is free and what is not
+
+The short form: **the solver change is worth 8–10% and is free**, user time
+falling with it; **the MKL threads are worth a further 7–9% and cost 75% more
+CPU**; and UMFPack moves the *other* way under them, 6% slower for 30% more CPU,
+which is why the pair is chosen together and not separately. The 1.9× that
+`setTraceSolver()`'s documentation quotes for PARDISO's threads is an isolated
+trace-solve figure and does not survive to the wall clock.
+
+**The registered tests still pin `MKL_NUM_THREADS=1` and must**, because the
+bit-exactness assertions between the two assembly modes hold at that value and
+not above it: at `MKL=8` the modes hand MKL different thread counts and a
+blocked BLAS-3 reassociates, measured at 1.4e-15 in ψ and 1.8e-13 in the flux.
+That is arithmetic, not a race, and `NpcThreadScaling` now says so in its own
+diagnostic rather than sending the reader to hunt for shared scratch in MEQ's
+integrators — which is what its message used to advise.
 
 **This machine's GPU is for development, not for performance conclusions.**
 There is an RTX 2070 SUPER with CUDA 13.3, which is enough to write and debug a
@@ -1441,6 +1664,23 @@ way.
   anything mentioning the pattern. Use `pgrep -x`/`pkill -x`, which match the
   process *name*, or check for the artefact — a file's timestamp, an exit
   marker — rather than for a process at all.
+* **AND `-x` SILENTLY MATCHES NOTHING WHEN THE BINARY'S NAME IS LONGER THAN 15
+  CHARACTERS**, which is what the advice above sends you into. `-x` compares
+  against the kernel's `comm` field, which is capped at 15 bytes, so
+  `pgrep -x PlasmaEdgeConvergence` — 23 characters — never matches and never
+  errors: it just answers *not running*. A waiter built on it falls through
+  immediately, and what follows reads a **stale binary** and concludes something
+  false about it. Measured here: a `--run_test` filter reported "no test cases
+  matching" for a case that was in the source, because the waiter had returned
+  before the link finished.
+
+  **So both forms fail and in opposite directions** — `-f` never stops, `-x`
+  never starts — and `MEQ`'s test binaries are nearly all over 15 characters, so
+  the shorter form is the one that looks right here and is not. **Wait on the
+  ARTEFACT**: `until grep -q '<marker>' out.txt; do sleep 5; done`, or let the
+  harness's own completion notification do it. Five waiters spun for up to four
+  hours in one session on `until ! pgrep -f 'build/tests/PlasmaEdge...'`, every
+  one of them matching its own command line.
 
 **If a waiter is used, check it actually fired.**
 
@@ -1491,7 +1731,8 @@ call is at 153. Re-read by extracting the function body,
 and the function is the answer, which is the same species as every other
 instrument-not-answer finding in this file — in the one place where it produced
 a false claim about somebody else's code. **All four defects are now closed and
-the report is deletable**; see `CLOSED-REPORTS-FROM-MEQ.md`.
+the report is deletable** — and upstream has since deleted it from every working
+branch, along with the three other closed ones.
 
 ## The `freegs4e` benchmark → `CLAUDE_FB.md`
 
@@ -1642,11 +1883,20 @@ apps/        drivers. Only meq.cpp, and MEQ_BUILD_APP defaults ON.
 tests/       unit/ (Boost.Test), convergence/ (rate assertions),
              analytic/ (closed-form solutions used by both),
              performance/ (TraceSolverScaling + scan.sh for the LINEAR path,
-             NpcThreadScaling + npc-scan.sh for the NONLINEAR one, and
-             InversionScaling -- all built, NONE a ctest, because every
-             number in them is a timing. The NPC one exists separately
-             because a linear solve never calls MultNL(), so it cannot see
-             the loop AssemblyMode::Threaded now spends most of its time in)
+             NpcThreadScaling + npc-scan.sh for the NONLINEAR one,
+             NewtonStepProfile + newton-step-profile.sh for WHERE a step's
+             time goes, and InversionScaling -- all built, NONE a ctest,
+             because every number in them is a timing. The NPC one exists
+             separately because a linear solve never calls MultNL(), so it
+             cannot see the loop AssemblyMode::Threaded now spends most of
+             its time in. The PROFILE one exists separately from THAT because
+             the two want different statistics: a best-of is right for a
+             minimum wall time and a median for a leg SHARE, and it splits
+             the step into legs by call site -- residual, gradient, trace
+             factorisation, backsolve, plasma fill -- with `other` left as
+             an explicit remainder so nothing the legs miss inflates one of
+             them. GradShafranovSolver::StepProfile is the accessor and is
+             always on)
 tools/       plotting and visualisation. plot_equilibrium.py reads BOTH
              NetCDF files -- the (R, Z) grid and the (Psi, theta) flux
              surfaces -- and tells them apart by their own dimensions rather

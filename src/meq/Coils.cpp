@@ -1285,6 +1285,25 @@ namespace meq
 		NormalisedSource::setPlasmaSupport( confined );
 	}
 
+	void CoilAugmentedNormalisedSource::freezePlasmaEdge( double axis,
+	                                                     double boundary )
+	{
+		// ON THE WRAPPED SOURCE FIRST, for the reason setPlasmaSupport() is:
+		// the plasma term is evaluated through plasmaSource, so it is that
+		// object's insidePlasma() that decides where F is switched off. The
+		// base call after it keeps this wrapper's own plasmaEdgeIsFrozen() and
+		// supportAxis() honest, which is what the solver's connected-component
+		// fill reads.
+		plasmaSource->freezePlasmaEdge( axis, boundary );
+		NormalisedSource::freezePlasmaEdge( axis, boundary );
+	}
+
+	void CoilAugmentedNormalisedSource::thawPlasmaEdge()
+	{
+		plasmaSource->thawPlasmaEdge();
+		NormalisedSource::thawPlasmaEdge();
+	}
+
 	double CoilAugmentedNormalisedSource::fOutsidePlasma( double r, double z ) const
 	{
 		// The coil term and nothing else, and it is the SAME expression f() adds

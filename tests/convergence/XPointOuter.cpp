@@ -68,8 +68,8 @@
  * solve was being asked the wrong question rather than answering it badly.
  *
  *
- * THE INPUTS ARE CHECKED AND THE INNER SOLVE IS THE DEFECT. THIS CASE IS RED
- * AND WHAT FOLLOWS IS WHY.
+ * THE INPUTS WERE CHECKED AND THE INNER SOLVE WAS THE DEFECT. WHAT FOLLOWS IS
+ * THE DIAGNOSIS, AND THE TWO THINGS IT TOOK TO CLOSE IT.
  *
  * Both halves of the problem statement are verified independently of MEQ:
  *
@@ -105,20 +105,77 @@
  * psi_ax collapses, 7.24e-02, 3.78e-02, 2.28e-02, with the axis following it
  * out to ( 2.2042, 0.2313 ). The solve is nearly there and then leaves.
  *
- * What that rules out: the profile conversion, the guess, the polynomial
+ * What that ruled out: the profile conversion, the guess, the polynomial
  * degree, and the axis competition -- a conductor's O-point is excluded on both
  * paths now ( meq::Source::conductors ) and the runaway axis is in no coil.
- * What is left is the pair this stage exists to separate: a plasma support that
- * MOVES within the Newton, and a psi_bnd pinned exactly at a saddle, where the
- * enclosed area's derivative is not bounded. Section 10.5 says to freeze the
- * discrete choice within a solve, and the loop below does; what it does not yet
- * do is freeze the SUPPORT, and PlasmaConnectivity is a library control with no
- * TOML key, so that experiment belongs here rather than in an example.
+ * What was left is the pair section 10.5 names: a plasma support that MOVES
+ * within the Newton, and a psi_bnd pinned exactly at a saddle, where the
+ * enclosed area's derivative is not bounded.
  *
- * PER THE TESTING STANCE, THIS ASSERTS THE BEHAVIOUR WANTED AND FAILS UNTIL IT
- * IS THERE. It is not evidence that XP-2's loop is wrong -- the loop is the
- * eight lines below and nothing in the list above is about it -- it is evidence
- * that the loop has no equilibrium to iterate on yet.
+ *
+ * IT TOOK TWO THINGS, NEITHER OF THEM SUFFICIENT ALONE, AND THE FIRST WAS A
+ * DEFECT IN THIS FIXTURE.
+ *
+ * setPlasmaSupport() was called on the PLASMA source before the coil wrapper
+ * existed, so the wrapper's own flag stayed false -- and the wrapper is what
+ * the solver holds, so GradShafranovSolver::plasmaComponentWanted() read false
+ * and XP-1's flood fill never ran. F was still confined, the inner source's
+ * pointwise test being live, so nothing failed loudly. Measured once it was
+ * fixed: the pointwise test carries 752 elements over THREE components and the
+ * fill keeps the 419 holding the axis. The other 333 -- 44% of the candidates
+ * -- are the private flux region, and they were getting a current channel
+ * nobody asked for on the only diverted case in this tree. Section 10.3
+ * predicted exactly that and XP-1 was built for it.
+ *
+ * The second is section 10.5's own prescription applied to the support as well
+ * as to the bounding point: hold the edge insidePlasma() tests against fixed
+ * for the whole of one solve and move it between solves --
+ * meq::NormalisedSource::freezePlasmaEdge, with
+ * GradShafranovSolver::setPlasmaSupportFrozen holding the fill's own mask the
+ * same way. psi_bnd is pinned at psi_h at a SADDLE, so it is a non-local
+ * functional of the iterate; letting the support edge follow it sweeps F's
+ * on/off region across the plasma edge every residual, and the Jacobian carries
+ * no surface term for that.
+ *
+ * A FULL CROSS AND NOT A SWEEP OF ONE KEY, WHICH IS THE POINT:
+ *
+ *     fill   frozen edge   outcome
+ *     off    off           FAILED at the 200 cap, || r || stalled at 4.8e-04
+ *     off    on            converged in 17, and to the WRONG BRANCH:
+ *                          psi_ax -7.99e-02 against the reference's +8.27e-02
+ *     on     off           FAILED at the 200 cap
+ *     on     on            CONVERGED in 7, and XP-2 is met
+ *
+ * So neither is sufficient and both are necessary -- and every experiment that
+ * changes ONE of them from the configuration this case shipped with lands in a
+ * failing row, which is why a long run of one-key experiments narrowed the
+ * suspects without ever reaching the cause. MEASUREMENTS.md M-82 has the
+ * numbers.
+ *
+ * AND THE OLD "SUPPORT OFF CONVERGES" MEASUREMENT WAS TRUE AND ITS CONCLUSION
+ * WAS WRONG. Turning ConfineToPlasma off did make the solve converge -- in 21
+ * steps, to psi_ax = -8.09e-02, which is a DIFFERENT equilibrium with F switched
+ * on in the vacuum. Reading that as "the moving support is the hazard" was an
+ * inference from a real measurement to the wrong cause, because a third variable
+ * -- the fill -- was silently off in both of its rows. It is the same shape as
+ * this tree's other instrument-not-answer findings, and it is worth the space:
+ * a one-key experiment only separates two hypotheses if everything else is
+ * where you think it is.
+ *
+ * XP-2 IS MET. The outer fixed point contracts quadratically -- 1.909e-03,
+ * 3.732e-06, 9.554e-10, 2.255e-13 over four sweeps, the inner solve falling to
+ * two Newton steps as it does -- and it finds BOTH nulls of the double-null
+ * machine, the active one at ( 1.093, -0.604 ) carrying psi 3.2379e-02 and the
+ * upper at ( 1.109, 0.796 ) carrying 2.8931e-02, which is what
+ * examples/diverted-tokamak.toml records freegs4e reporting for each. The
+ * located X-point sits 4.378e-04 m from freegs4e's, psi_bnd agrees to 0.08% and
+ * psi_ax to 0.07%, and psi_h AT the reference axis reads 8.265989e-02 against
+ * this solve's own psi_ax of 8.266004e-02 -- the border closed on the field it
+ * is a constraint on.
+ *
+ * The loop was never the thing that was wrong: it is the eight lines below, and
+ * nothing in the diagnosis above is about it. What it lacked was an equilibrium
+ * to iterate on.
  */
 #define BOOST_TEST_MODULE XPointOuter
 #include <boost/test/unit_test.hpp>
@@ -293,12 +350,34 @@ namespace
 		                            sourceConfig.permeability(), machineFile );
 
 		m.plasma = meq::makeNormalisedSource( sourceConfig, machineFile );
-		// SET ON THE PLASMA SOURCE, and the wrapper forwards it: a conductor
-		// sits in the vacuum by construction, so confining the coil term to the
-		// plasma would switch off every coil in the machine.
-		m.plasma->setPlasmaSupport( true );
 		m.source = std::make_shared<meq::CoilAugmentedNormalisedSource>(
 			m.plasma, m.coils );
+
+		/*
+		 * ON THE WRAPPER AND AFTER IT EXISTS, WHICH IS WHAT apps/meq.cpp DOES
+		 * AND WHAT THIS FIXTURE DID NOT.
+		 *
+		 * setPlasmaSupport() is virtual so that a call on the WRAPPER reaches
+		 * the source that evaluates the profiles; forwarding runs that way and
+		 * only that way. Setting it on the inner source before wrapping leaves
+		 * the wrapper's own flag false -- and the wrapper is what the solver
+		 * holds, so GradShafranovSolver::plasmaComponentWanted() reads false and
+		 * XP-1's flood fill never runs. F is still confined, because the inner
+		 * source's pointwise test is live, so nothing fails loudly.
+		 *
+		 * WHAT THAT COSTS IS THE WHOLE OF XP-1 ON THE ONE DIVERTED CASE IN THIS
+		 * TREE. Section 10.3: a diverted plasma's level set is DISCONNECTED
+		 * across the X-point, so the pointwise test picks up the private flux
+		 * region and gives it a current channel nobody asked for. That is the
+		 * configuration XP-1 was built for and this fixture was running without
+		 * it -- the fill reporting 0 of 0 elements over 0 components, which is
+		 * what "no fill is live" prints and not what an empty plasma prints.
+		 *
+		 * The conductors stay outside the support either way: the wrapper's
+		 * override confines the PLASMA term only, and answers fOutsidePlasma()
+		 * with the coil term exactly, so a coil in the vacuum is untouched.
+		 */
+		m.source->setPlasmaSupport( true );
 
 		meq::ExteriorConfig const &exteriorConfig =
 			m.config->getBoundary().exterior;
@@ -434,10 +513,10 @@ namespace
 	/// psi_h at an arbitrary point, for the one thing the solver does not
 	/// expose: whether the LIMITER is inside the plasma or outside it once the
 	/// boundary flux has been taken from the X-point instead.
-	bool potentialAt( meq::GradShafranovSolver const &solver, double r,
-	                  double z, double &value )
+	bool valueAt( mfem::GridFunction const &field, double r, double z,
+	              double &value )
 	{
-		mfem::Mesh &mesh = *solver.potential().FESpace()->GetMesh();
+		mfem::Mesh &mesh = *field.FESpace()->GetMesh();
 		mfem::DenseMatrix points( 2, 1 );
 		points( 0, 0 ) = r;
 		points( 1, 0 ) = z;
@@ -448,8 +527,37 @@ namespace
 		     || elements[ 0 ] < 0 )
 			return false;
 
-		value = solver.potential().GetValue( elements[ 0 ], local[ 0 ] );
+		value = field.GetValue( elements[ 0 ], local[ 0 ] );
 		return true;
+	}
+
+	bool potentialAt( meq::GradShafranovSolver const &solver, double r,
+	                  double z, double &value )
+	{
+		return valueAt( solver.potential(), r, z, value );
+	}
+
+	/// **FIX THE SUPPORT FOR THE NEXT SOLVE AT @a state, AND RE-DECIDE IT HERE
+	/// RATHER THAN INSIDE NEWTON.** Section 10.5's prescription, applied to the
+	/// support as well as to the bounding point: the threshold insidePlasma()
+	/// tests against and the connected component the fill reaches are both held
+	/// for the whole of one solve and both moved between solves.
+	///
+	/// BOTH HALVES, because either alone leaves the support moving. The
+	/// threshold is the source's -- meq::NormalisedSource::freezePlasmaEdge --
+	/// and the component is the solver's; the mask is element granular, so
+	/// freezing it while the pointwise test drifts still moves the edge inside
+	/// every element the fill reached.
+	void freezeSupportAt( Machine &m, mfem::GridFunction const &state,
+	                      double axis, double boundary )
+	{
+		m.source->freezePlasmaEdge( axis, boundary );
+		// The PUBLIC refresh, which setPlasmaSupportFrozen() deliberately does
+		// not suppress: this is the outer loop moving the support, and it is
+		// the only thing that may.
+		m.solver->setPlasmaSupportFrozen( false );
+		m.solver->refreshPlasmaComponent( state );
+		m.solver->setPlasmaSupportFrozen( true );
 	}
 }
 
@@ -471,12 +579,44 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxConvergesToTheLocatedXPoint )
 	Machine m = buildMachine();
 	completeMachine( m );
 
+	/*
+	 * THE SUPPORT IS FROZEN BEFORE THE FIRST SOLVE AND RE-DECIDED IN THE LOOP,
+	 * WHICH IS THE ONLY THING THAT DISTINGUISHES THIS FROM THE RUN M-82
+	 * MEASURED FAILING.
+	 *
+	 * The bootstrap has no solved field to freeze at, so it freezes at the
+	 * problem statement instead: the file's own PsiAxis as the axis and the
+	 * transferred guess evaluated AT THE PIN as the edge, which is exactly what
+	 * psi_bnd will mean once the border closes. The guess is freegs4e's
+	 * equilibrium, so this is the reference's own topology and not a
+	 * construction of this test.
+	 */
+	double bootstrapEdge = 0.0;
+	BOOST_TEST_REQUIRE( valueAt( *m.carried, bootstrapR, bootstrapZ,
+	                             bootstrapEdge ),
+	                    "the transferred guess cannot be evaluated at the "
+	                    "bootstrap pin, so there is no edge to freeze at" );
+	freezeSupportAt( m, *m.carried,
+	                 m.config->getSource().psiAxisGuess(), bootstrapEdge );
+	std::printf( "\n  XP-2: the support is FROZEN within each solve and moved "
+	             "between them\n    bootstrap edge %.6e at the pin, psi_ax guess "
+	             "%.6e, %d of %d elements carry plasma over %d component(s)\n",
+	             bootstrapEdge, m.config->getSource().psiAxisGuess(),
+	             m.solver->plasmaComponentElements(),
+	             m.solver->plasmaCandidateElements(),
+	             m.solver->plasmaComponentCount() );
+	std::fflush( stdout );
+
 	// THE BOOTSTRAP: one solve pinned at the prior, and the saddle of its own
 	// solved q_h.
 	BOOST_TEST_REQUIRE( solveAt( m, bootstrapR, bootstrapZ ),
 	                    "the diverted machine did not converge pinned at ( "
-	                    << bootstrapR << ", " << bootstrapZ << " ), so the "
-	                    "outer loop has no starting point" );
+	                    << bootstrapR << ", " << bootstrapZ << " ) with the "
+	                    "support frozen, so the outer loop has no starting "
+	                    "point. M-82 measured the MOVING support as the cause "
+	                    "of this failing; if it still fails frozen, that "
+	                    "separation is wrong or the freeze does not cover the "
+	                    "whole support" );
 
 	meq::CriticalPoint x;
 	{
@@ -512,6 +652,10 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxConvergesToTheLocatedXPoint )
 	};
 	std::vector<Sweep> sweeps;
 	int seededSweeps = 0;
+	// Section 10.5's own warning is that a discrete outer state can alternate
+	// rather than settle, so how often the support changes size is counted and
+	// printed rather than assumed away.
+	int supportMoved = 0;
 
 	// THE WARM START LIVES ACROSS THE WHOLE LOOP, the guess being BORROWED and
 	// having to outlive the solve it seeds. Seeded from the bootstrap.
@@ -522,6 +666,14 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxConvergesToTheLocatedXPoint )
 	{
 		double const pinnedR = x.r;
 		double const pinnedZ = x.z;
+		// THE SUPPORT MOVES HERE AND NOWHERE ELSE, at the answer the previous
+		// sweep reached -- the same outer fixed point the X-point itself is on,
+		// and re-decided in the same place so the two cannot disagree about
+		// which iterate they belong to.
+		int const supportBefore = m.solver->plasmaComponentElements();
+		freezeSupportAt( m, previous, m.solver->psiAxis(),
+		                 m.solver->psiBoundary() );
+		supportMoved += ( m.solver->plasmaComponentElements() != supportBefore );
 		if ( !solveAt( m, pinnedR, pinnedZ, &previous ) )
 		{
 			broke = true;
@@ -610,6 +762,29 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxConvergesToTheLocatedXPoint )
 	// time is a different cost and would go unnoticed.
 	std::printf( "    %d of %zu sweeps reached the X-point from the previous "
 	             "one\n", seededSweeps, sweeps.size() );
+
+	/*
+	 * AND THE SUPPORT IS THE OTHER DISCRETE STATE ON THIS FIXED POINT, so it
+	 * gets the same treatment as the X-point: reported, and asserted to settle.
+	 *
+	 * Section 10.5 warns that a combinatorial outer iteration can alternate
+	 * rather than converge -- two element sets swapping on alternate sweeps --
+	 * and says there is no globalisation for one. There is no cure to assert
+	 * here, only the symptom: a support still changing size on the LAST sweep
+	 * has not settled, whatever the X-point did, and a psi_bnd read off it is a
+	 * statement about which of two states the loop stopped on.
+	 */
+	std::printf( "    the frozen support changed size on %d of %zu sweeps, and "
+	             "holds %d of %d candidate elements at the end\n", supportMoved,
+	             sweeps.size(), m.solver->plasmaComponentElements(),
+	             m.solver->plasmaCandidateElements() );
+	BOOST_TEST( supportMoved < static_cast<int>( sweeps.size() ),
+		"the frozen support changed size on every one of " << sweeps.size()
+		<< " sweeps, so the outer iteration has not settled on a topology -- "
+		"section 10.5's alternating discrete state, which has no globalisation. "
+		"The X-point's own convergence below says nothing about this: they are "
+		"two states on one fixed point and either can chatter while the other "
+		"contracts." );
 	BOOST_TEST( seededSweeps + 1 >= static_cast<int>( sweeps.size() ),
 		"only " << seededSweeps << " of " << sweeps.size() << " sweeps reached "
 		"the X-point from the previous one. The seeded search reaches about one "

@@ -1035,6 +1035,16 @@ namespace meq
 
 			void setPlasmaSupport( bool confined ) override;
 
+			/// FORWARDED, AND FOR THE REASON setPlasmaSupport() IS. The plasma
+			/// term is evaluated through the wrapped source, so it is that
+			/// source's frozen edge insidePlasma() consults; freezing only this
+			/// one would leave the support moving and say it was not.
+			/// @see meq::NormalisedSource::freezePlasmaEdge
+			void freezePlasmaEdge( double axis, double boundary ) override;
+
+			/// @see freezePlasmaEdge
+			void thawPlasmaEdge() override;
+
 			/// FORWARDED, AND THIS IS THE FOURTH TIME. XP-1's connectivity test
 			/// switches the PLASMA term off on any element the flood fill from
 			/// the axis does not reach, and meq::SourceIntegrator asks the

@@ -760,14 +760,30 @@ BOOST_AUTO_TEST_CASE( out_of_range_scalars_are_rejected )
 /*
  * The two performance keys parse, and their defaults are the measured ones.
  *
- * Threaded and UMFPack are not arbitrary defaults and the test says so, because
+ * Threaded and PARDISO are not arbitrary defaults and the test says so, because
  * the temptation to "improve" them in a config file is exactly what this pair of
- * keys creates. UMFPack is the only trace solver present in every build and the
- * one every rate in the suite was measured with. Threaded became the default on
- * 2026-09-04, having been Serial: MFEM extended the flag to cover the residual
- * and the Jacobian as well as the assembly, and the test that had most argued
- * against it -- HighBetaConvergence, 1.8x SLOWER under an automatic gate -- came
- * back 2.4x faster. See setAssemblyMode()'s own documentation for the table.
+ * keys creates. Threaded became the default when MFEM extended the flag to
+ * cover the residual and the Jacobian as well as the assembly, and the test
+ * that had most argued against it -- HighBetaConvergence, 1.8x SLOWER under an
+ * automatic gate -- came back 2.4x faster. See setAssemblyMode()'s own
+ * documentation for the table.
+ *
+ * PARDISO IS THE DEFAULT BECAUSE OF THE OTHER KEY, WHICH IS WHY THE PAIR IS
+ * TESTED TOGETHER. It is faster than UMFPack single-threaded and it is the only
+ * one of the two whose MKL threads are spendable under threaded assembly: MKL
+ * suppresses its own threading inside an active OpenMP region, so the
+ * element-local dense work is nested and free while the trace solve runs on the
+ * master thread outside every region and takes them all. UMFPack's BLAS sits
+ * outside any parallel region and pays full MKL threading per frontal matrix,
+ * so the two respond to MKL_NUM_THREADS in OPPOSITE directions.
+ *
+ * THE DEFAULT HERE IS UNCONDITIONAL AND THE LIBRARY'S IS NOT, and that
+ * asymmetry is the MFEM-free rule rather than an inconsistency. Config cannot
+ * ask whether this build has oneMKL -- it is one of the four translation units
+ * CI compiles without MFEM at all -- so it names PARDISO always and
+ * apps/meq.cpp downgrades an INHERITED one to UMFPack where the build has no
+ * PARDISO, refusing only one the file asked for. traceSolverWasGiven is what
+ * carries that distinction, and it is the reason the flag exists.
  *
  * Neither key may change the ANSWER, which is what makes exposing them safe at
  * all: the two assembly modes are bit-identical at MKL_NUM_THREADS=1 and the
@@ -779,32 +795,37 @@ BOOST_AUTO_TEST_CASE( the_two_performance_keys_parse_and_default_to_the_measured
 {
 	Configuration const bare = parse( minimal() );
 	BOOST_TEST( bare.getSolver().assemblyMode == AssemblyModeType::Threaded );
-	BOOST_TEST( bare.getSolver().traceSolver == TraceSolverType::UMFPack );
+	BOOST_TEST( bare.getSolver().traceSolver == TraceSolverType::Pardiso );
 
-	// AND IT WAS NOT ASKED FOR, which the driver has to know: an inherited
-	// "threaded" is downgraded to Serial on a build without OpenMP, while one
-	// the file states is refused. Without that distinction the default would
-	// make every example in this tree fail on a stock MFEM.
+	// AND NEITHER WAS ASKED FOR, which the driver has to know: an inherited
+	// "threaded" is downgraded to Serial on a build without OpenMP and an
+	// inherited "pardiso" to UMFPack on a build without oneMKL, while one the
+	// file states is refused. Without that distinction the defaults would make
+	// every example in this tree fail on a stock MFEM.
 	BOOST_TEST( bare.getSolver().assemblyModeWasGiven == false );
+	BOOST_TEST( bare.getSolver().traceSolverWasGiven == false );
 
 	Configuration const serial = parse( minimal()
-		+ "\n[solver]\nAssemblyMode = \"serial\"\nTraceSolver = \"pardiso\"\n" );
+		+ "\n[solver]\nAssemblyMode = \"serial\"\nTraceSolver = \"umfpack\"\n" );
 	BOOST_TEST( serial.getSolver().assemblyMode == AssemblyModeType::Serial );
-	BOOST_TEST( serial.getSolver().traceSolver == TraceSolverType::Pardiso );
+	BOOST_TEST( serial.getSolver().traceSolver == TraceSolverType::UMFPack );
 	BOOST_TEST( serial.getSolver().assemblyModeWasGiven == true );
+	BOOST_TEST( serial.getSolver().traceSolverWasGiven == true );
 
 	Configuration const device = parse( minimal()
 		+ "\n[solver]\nTraceSolver = \"cudss\"\n" );
 	BOOST_TEST( device.getSolver().traceSolver == TraceSolverType::cuDSS );
+	BOOST_TEST( device.getSolver().traceSolverWasGiven == true );
 
 	// And the explicit spellings of the defaults, so that writing them down
-	// cannot mean something different from leaving them out -- except in
-	// assemblyModeWasGiven, which is the whole point of that flag.
+	// cannot mean something different from leaving them out -- except in the
+	// two WasGiven flags, which is the whole point of them.
 	Configuration const explicitDefaults = parse( minimal()
-		+ "\n[solver]\nAssemblyMode = \"threaded\"\nTraceSolver = \"umfpack\"\n" );
+		+ "\n[solver]\nAssemblyMode = \"threaded\"\nTraceSolver = \"pardiso\"\n" );
 	BOOST_TEST( explicitDefaults.getSolver().assemblyMode == AssemblyModeType::Threaded );
-	BOOST_TEST( explicitDefaults.getSolver().traceSolver == TraceSolverType::UMFPack );
+	BOOST_TEST( explicitDefaults.getSolver().traceSolver == TraceSolverType::Pardiso );
 	BOOST_TEST( explicitDefaults.getSolver().assemblyModeWasGiven == true );
+	BOOST_TEST( explicitDefaults.getSolver().traceSolverWasGiven == true );
 }
 
 // ---------------------------------------------------------------------------

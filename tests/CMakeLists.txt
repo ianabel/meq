@@ -380,6 +380,32 @@ if(TARGET meq_core AND NOT _solver_index EQUAL -1
 	endif()
 endif()
 
+# NewtonStepProfile -- WHERE a Newton step's time goes, split into legs that do
+# not overlap. The measurement HDG-NEWTON-STEP-PROFILE-FROM-HDGDEV.md asks for.
+#
+# NOT a ctest, same standing reason: every number is a timing. It exits non-zero
+# only when a case fails to converge, since a leg share taken from a diverged
+# solve is a share of the wrong thing.
+#
+# It is separate from NpcThreadScaling rather than a flag on it because the two
+# answer different questions and want different statistics. That harness asks
+# whether threading and PARDISO are worth taking and reports a BEST-of, which is
+# right for a minimum wall time; this one asks what fraction of a step each leg
+# is and reports a MEDIAN of five, which is right for a share -- and upstream's
+# request says so explicitly, their own 1.36-1.59x on one loop having been
+# unresolvable against a 5% end-to-end scatter.
+if(TARGET meq_core AND NOT _solver_index EQUAL -1
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/performance/NewtonStepProfile.cpp")
+	add_executable(NewtonStepProfile "performance/NewtonStepProfile.cpp")
+	target_include_directories(NewtonStepProfile PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(NewtonStepProfile PRIVATE meq_core)
+
+	find_package(OpenMP QUIET COMPONENTS CXX)
+	if(TARGET OpenMP::OpenMP_CXX)
+		target_link_libraries(NewtonStepProfile PRIVATE OpenMP::OpenMP_CXX)
+	endif()
+endif()
+
 # ---------------------------------------------------------------------------
 # The driver, end to end. Everything above calls the library directly; this is
 # the only test that goes through a config file and out to files, which is the

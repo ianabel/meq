@@ -517,6 +517,72 @@ BOOST_AUTO_TEST_CASE( the_plasma_support_reaches_the_source_that_evaluates_the_p
 	BOOST_TEST( sum->f( 2.0, 0.0, outside ) != coils->f( 2.0, 0.0 ) );
 }
 
+/*
+ * AND THE FROZEN EDGE FORWARDS THE SAME WAY, FOR THE SAME REASON AND WITH THE
+ * SAME FAILURE MODE IF IT DOES NOT.
+ *
+ * XP-2 holds the plasma edge fixed within a Newton solve and moves it between
+ * solves. The plasma term is evaluated through the WRAPPED source, so it is
+ * that source's frozen edge insidePlasma() consults -- freeze only the wrapper
+ * and the support goes on moving while plasmaEdgeIsFrozen() says it does not,
+ * which is worse than not having the control at all.
+ *
+ * BOTH ENDS ARE ASSERTED, because they fail differently. The wrapped source not
+ * hearing is a support that still moves; the WRAPPER not hearing is a
+ * GradShafranovSolver::refreshPlasmaComponent() taking its fill at a different
+ * edge from the pointwise test it is the connectivity half of, which disagrees
+ * element by element exactly in the band where it matters.
+ */
+BOOST_AUTO_TEST_CASE( the_frozen_plasma_edge_reaches_the_wrapped_source )
+{
+	auto coils = std::make_shared<CoilSet>();
+	coils->add( standardCoil() );
+	auto plasma = std::make_shared<LinearPlasma>();
+	plasma->setNormalisation( 2.0, 0.0 );
+
+	auto sum = std::make_shared<meq::CoilAugmentedNormalisedSource>( plasma, coils );
+	meq::NormalisedSource &asBase = *sum;
+	asBase.setPlasmaSupport( true );
+
+	BOOST_TEST( sum->plasmaEdgeIsFrozen() == false );
+	BOOST_TEST( plasma->plasmaEdgeIsFrozen() == false );
+	// Unfrozen, the support edge IS the normalisation the source carries.
+	BOOST_TEST( sum->supportAxis() == 2.0 );
+	BOOST_TEST( sum->supportBoundary() == 0.0 );
+
+	// Through the base reference, which is the handle the solver holds.
+	asBase.freezePlasmaEdge( 2.0, 1.0 );
+	BOOST_TEST( sum->plasmaEdgeIsFrozen() == true );
+	BOOST_TEST( plasma->plasmaEdgeIsFrozen() == true,
+	            "freezePlasmaEdge() did not reach the wrapped source, so the "
+	            "plasma support would go on moving while the wrapper reported "
+	            "it frozen" );
+	BOOST_TEST( sum->supportBoundary() == 1.0 );
+
+	// AND THE FROZEN EDGE IS WHAT SWITCHES F OFF, not the live normalisation:
+	// psi = 0.5 is inside { psi > 0 } and outside { psi > 1 }.
+	BOOST_TEST( plasma->f( 2.0, 0.0, 0.5 ) == 0.0,
+	            "the wrapped source is still testing against its live boundary "
+	            "normalisation, so the freeze reached the flag and not the "
+	            "test" );
+	BOOST_TEST( sum->f( 2.0, 0.0, 0.5 ) == coils->f( 2.0, 0.0 ) );
+
+	// MOVING THE NORMALISATION UNDER A FROZEN EDGE MUST NOT MOVE THE SUPPORT,
+	// which is the whole contract: psi_ax and psi_bnd stay unknowns of the
+	// Newton while the region F is switched on in does not move.
+	asBase.setNormalisation( 4.0, -1.0 );
+	BOOST_TEST( sum->supportAxis() == 2.0 );
+	BOOST_TEST( sum->supportBoundary() == 1.0 );
+	BOOST_TEST( plasma->f( 2.0, 0.0, 0.5 ) == 0.0 );
+
+	asBase.thawPlasmaEdge();
+	BOOST_TEST( sum->plasmaEdgeIsFrozen() == false );
+	BOOST_TEST( plasma->plasmaEdgeIsFrozen() == false );
+	BOOST_TEST( sum->supportBoundary() == -1.0 );
+	// Thawed, psi = 0.5 is inside { psi > -1 } again.
+	BOOST_TEST( plasma->f( 2.0, 0.0, 0.5 ) != 0.0 );
+}
+
 BOOST_AUTO_TEST_CASE( the_adapters_refuse_a_null_half )
 {
 	auto coils = std::make_shared<CoilSet>();

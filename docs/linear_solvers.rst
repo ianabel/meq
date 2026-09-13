@@ -46,16 +46,20 @@ Choosing a trace solver
    * - Backend
      - Needs
      - Notes
-   * - **``UMFPack``**
-     - SuiteSparse
-     - **The default.** The only one present in every build, and what every
-       convergence rate in the suite was measured with.
-   * - ``Pardiso``
+   * - **``Pardiso``**
      - oneMKL
-     - Measurably faster than UMFPACK on both the factorisation and the
-       backsolve, even single-threaded, and it scales with MKL threads. Not the
-       default because most builds do not have it and its licence is not
-       everybody's to accept.
+     - **The default wherever the build has it.** Measurably faster than
+       UMFPACK on both the factorisation and the backsolve even
+       single-threaded, and — the reason it is the default rather than merely
+       an option — it is the only one of the two whose MKL threads are
+       spendable alongside ``AssemblyMode = "threaded"``. See
+       :ref:`linear-threading`.
+   * - ``UMFPack``
+     - SuiteSparse
+     - **The default on a build without oneMKL**, being the one package present
+       in every build, and what every convergence rate in the suite was
+       measured with. oneMKL's licence is not everybody's to accept, which is
+       why the fallback is where it is rather than being dropped.
    * - ``cuDSS``
      - CUDA and cuDSS, and an ``mfem::Device`` configured **before** the solver
        is built
@@ -165,9 +169,18 @@ That third entry is the surprise, and it is why the axes must be separated.
    resolving it needed either a thread-count scope around the trace solve or a
    batched local factorisation. Neither turned out to be necessary.
 
-   **The recipe, if you want threaded PARDISO**: ``AssemblyMode = "threaded"``,
-   ``TraceSolver = "pardiso"``, and ``OMP_NUM_THREADS`` and ``MKL_NUM_THREADS``
-   set to the *same* value greater than one.
+   **This is MEQ's default configuration**, and the two keys default to it
+   together for this reason: ``AssemblyMode = "threaded"`` and ``TraceSolver =
+   "pardiso"`` wherever the build has oneMKL. What is left to you is the
+   environment — set ``OMP_NUM_THREADS`` and ``MKL_NUM_THREADS`` to the *same*
+   value greater than one.
+
+   MEQ does not set either variable for you, and will not: they are
+   process-wide, a library has no business writing them, and the registered
+   tests deliberately pin ``MKL_NUM_THREADS=1`` because the bit-exactness
+   assertions between the assembly modes hold at that value and not above it
+   — threaded MKL reassociates a blocked BLAS-3 differently, which is
+   arithmetic and not a race.
 
 .. warning::
 

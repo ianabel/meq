@@ -1376,7 +1376,8 @@ namespace meq
 					solver.fail( "AssemblyMode", "must be one of serial, threaded, but is \""
 					             + mode + "\"" );
 
-				std::string const trace = solver.getStringOr( "TraceSolver", "umfpack" );
+				solverOptions.traceSolverWasGiven = solver.has( "TraceSolver" );
+				std::string const trace = solver.getStringOr( "TraceSolver", "pardiso" );
 				if ( trace == "umfpack" )
 					solverOptions.traceSolver = TraceSolverType::UMFPack;
 				else if ( trace == "pardiso" )

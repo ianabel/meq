@@ -766,16 +766,35 @@ int main( int argc, char **argv )
 
 	if ( !meq::GradShafranovSolver::traceSolverAvailable( traceSolver ) )
 	{
-		char const *needs =
-			( traceSolver == TS::Pardiso ) ? "MFEM_USE_MKL_PARDISO"
-			: ( traceSolver == TS::cuDSS ) ? "MFEM_USE_CUDSS" : "MFEM_USE_SUITESPARSE";
-		std::fprintf( stderr,
-			"MEQ: [solver] TraceSolver names a solver this build does not have;\n"
-			"     it needs %s. It is refused rather than\n"
-			"     silently replaced, because a caller naming a solver has a\n"
-			"     reason -- and all three reach the same equilibrium, so the\n"
-			"     substitution would be invisible in the answer.\n", needs );
-		return ConfigurationError;
+		/*
+		 * ASKED FOR IS REFUSED; INHERITED IS DOWNGRADED, exactly as for
+		 * AssemblyMode above and for the same reason. The default is "pardiso"
+		 * and most builds of MFEM have no MFEM_USE_MKL_PARDISO, so refusing
+		 * unconditionally would make every example in this repository fail on a
+		 * stock build. A file that says nothing has expressed no preference and
+		 * gets the solver that is there.
+		 *
+		 * The downgrade is to UMFPack unconditionally rather than to whatever
+		 * the library's defaultTraceSolver() would pick, because that function
+		 * has already picked -- it is what put PARDISO here. UMFPack is the
+		 * fallback in both places, and a build with neither package never
+		 * reaches makeTraceSolver() at all: MEQ_HAVE_DIRECT_TRACE_SOLVER is
+		 * unset and the GMRES path takes the solve.
+		 */
+		if ( config->getSolver().traceSolverWasGiven )
+		{
+			char const *needs =
+				( traceSolver == TS::Pardiso ) ? "MFEM_USE_MKL_PARDISO"
+				: ( traceSolver == TS::cuDSS ) ? "MFEM_USE_CUDSS" : "MFEM_USE_SUITESPARSE";
+			std::fprintf( stderr,
+				"MEQ: [solver] TraceSolver names a solver this build does not have;\n"
+				"     it needs %s. It is refused rather than\n"
+				"     silently replaced, because a caller naming a solver has a\n"
+				"     reason -- and all three reach the same equilibrium, so the\n"
+				"     substitution would be invisible in the answer.\n", needs );
+			return ConfigurationError;
+		}
+		traceSolver = TS::UMFPack;
 	}
 
 	/*

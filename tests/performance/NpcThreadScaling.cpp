@@ -54,7 +54,17 @@
  * true only at MKL=1.
  *
  * Usage:  NpcThreadScaling [--orders k,k] [--sizes n,n] [--repeats N]
- *                          [--highbeta] [--pedestal]
+ *                          [--highbeta] [--pedestal] [--example5]
+ *                          [--soloviev]   the LINEAR-source arm, on its own
+ *                          [--trace umfpack|pardiso|cudss|all]
+ *                          [--device cpu|cuda|debug]
+ *
+ * `--device debug` IS THE INSTRUMENT, NOT A SLOWER cuda. mfem::Device( "debug" )
+ * has device memory semantics with host arithmetic and mprotect's the host page,
+ * so a raw host read of a device-valid buffer is a NAMED FAULT WITH A BACKTRACE
+ * rather than a wrong number. Every link of the alias chain behind M-79 was
+ * found with it and none of them was visible under "cuda", which protects
+ * nothing and hands back a stale host copy instead. Reach for it first.
  */
 
 #include <algorithm>
@@ -79,6 +89,7 @@
 
 #include "analytic/ManufacturedNonlinear.hpp"
 #include "analytic/PressurePedestal.hpp"
+#include "analytic/Soloviev.hpp"
 
 namespace
 {
@@ -143,10 +154,46 @@ namespace
 		bool converged = false;
 		std::vector<double> psi;
 		std::vector<double> flux;
+
+		/*
+		 * THE TWO FIELDS THAT MAKE A DEVICE RUN READABLE, and neither was here
+		 * before upstream pointed out why they had to be.
+		 *
+		 * `finiteFailures` is mfem::Vector::CheckFinite() taken BEFORE any norm.
+		 * Norml2() guards its reduction with fabs(v) > 0, so an ALL-NaN vector
+		 * reports a norm of ZERO -- which would make a threaded-vs-serial
+		 * comparison of two NaN fields read as perfect agreement, and would make
+		 * a non-zero one meaningless in the other direction. It has to be asked
+		 * separately and first.
+		 *
+		 * `exactError` is the L2 error against a closed form, and it exists
+		 * because an ITERATION COUNT CANNOT DISCRIMINATE. Under a Device this
+		 * harness reported 0/0 Newton iterations on a case needing four; zero
+		 * iterations is also what a correct linear solve reports. Only a
+		 * comparison against an answer known before the code runs separates
+		 * them -- which is how upstream built their own reproduction, and the
+		 * reason theirs could see what a two-arm comparison could not.
+		 * Negative where the fixture has no closed form.
+		 */
+		int finiteFailures = -1;
+		double exactError = -1.0;
+
+		/// max |psi_h|, which separates "returned garbage" from "returned the
+		/// INITIAL ITERATE" -- and the second is what a residual evaluation
+		/// that silently produces nothing looks like from outside, since
+		/// Newton then stops at iteration zero on an apparently converged
+		/// residual and hands back what it was given.
+		double psiPeak = -1.0;
 	};
 
 	std::vector<double> copyOf( mfem::GridFunction const &g )
 	{
+		// operator()( int ) IS A RAW HOST READ. Under mfem::Device( "debug" ) the
+		// host page of a device-valid buffer is mprotect'd, so this faults rather
+		// than returning a stale number -- which is the whole point of that
+		// device and is how the alias chain behind M-79 was found. HostRead()
+		// first. It is a no-op with no Device configured.
+		g.HostRead();
 		std::vector<double> out( static_cast<size_t>( g.Size() ) );
 		for ( int i = 0; i < g.Size(); ++i )
 			out[ static_cast<size_t>( i ) ] = g( i );
@@ -180,6 +227,45 @@ namespace
 	/// source vanishes at psi = 0 -- with homogeneous data psi == 0 SOLVES the
 	/// problem and Newton stops on it in no iterations at all.
 	/// tests/convergence/PedestalConvergence.cpp gives the full account.
+	/*
+	 * The L2 error against a closed form, where the fixture has one.
+	 *
+	 * AN OVERLOAD PAIR RATHER THAN A RUNTIME PREDICATE, and the difference is
+	 * not style: a `if ( hasClosedForm( f ) )` inside one template still
+	 * INSTANTIATES the psi() call for every fixture, and PressurePedestal has
+	 * no psi() to instantiate. Overload resolution picks the concrete one for
+	 * Solov'ev and the template for everything else, so only the reachable body
+	 * is ever compiled.
+	 */
+	template<typename Fixture>
+	double exactErrorOf( Solver &, Fixture const & )
+	{
+		return -1.0;
+	}
+
+	double exactErrorOf( Solver &solver,
+	                     meq::analytic::SolovievEquilibrium const &fixture )
+	{
+		mfem::FunctionCoefficient exact( [ &fixture ]( mfem::Vector const &x )
+		{
+			return fixture.psi( x( 0 ), x( 1 ) );
+		} );
+		return solver.potential().ComputeL2Error( exact );
+	}
+
+	/// example5 has a closed form too, and the FAILING arm needs it as much as
+	/// the passing one: "0/0 Newton iterations" says the solve stopped, and only
+	/// this says what it stopped on.
+	double exactErrorOf( Solver &solver,
+	                     meq::analytic::ManufacturedNonlinear const &fixture )
+	{
+		mfem::FunctionCoefficient exact( [ &fixture ]( mfem::Vector const &x )
+		{
+			return fixture.psi( x( 0 ), x( 1 ) );
+		} );
+		return solver.potential().ComputeL2Error( exact );
+	}
+
 	template<typename Fixture>
 	Run runOnce( Box const &b, int order, int n, Fixture const &fixture,
 	             mfem::Coefficient &datum, bool guessFromDatum, AM mode, TS trace )
@@ -218,6 +304,11 @@ namespace
 
 		if ( out.converged )
 		{
+			// FINITENESS FIRST, before anything takes a norm. See Run.
+			out.finiteFailures = solver.potential().CheckFinite()
+			                   + solver.flux().CheckFinite();
+			out.exactError = exactErrorOf( solver, fixture );
+			out.psiPeak = solver.potential().Normlinf();
 			out.psi = copyOf( solver.potential() );
 			out.flux = copyOf( solver.flux() );
 		}
@@ -269,11 +360,69 @@ int main( int argc, char **argv )
 	int repeats = 3;
 	bool wantPedestal = true;
 	bool wantExample5 = true;
+	// OPT-IN, because it is a LINEAR problem and this harness is about the
+	// nonlinear path: including it by default would put a one-step solve in
+	// every thread-scaling table, where it measures assembly and nothing else.
+	bool wantSoloviev = false;
 	// Which trace solvers to include. Restricting matters here in a way it does
 	// not in TraceSolverScaling: UMFPACK and PARDISO respond to MKL_NUM_THREADS
 	// in OPPOSITE directions, so a row that sweeps both at MKL > 1 is dominated
 	// by UMFPACK's collapse and says nothing about PARDISO.
 	std::string wantTrace = "all";
+	/*
+	 * The device, if one is asked for. A FLAG AND NOT A DEFAULT, for the reason
+	 * TraceSolverScaling.cpp gives at the same place: mfem::Device is global
+	 * state deciding where every Vector afterwards allocates, cuDSS cannot be
+	 * measured without one -- it reads its matrix through
+	 * SparseMatrix::ReadI/ReadJ/ReadData and its vectors through Read()/Write(),
+	 * which hand back host pointers otherwise and abort inside CUDA -- and
+	 * configuring one changes where the rest of meq allocates too.
+	 *
+	 * WHAT IS NEW HERE, AND WHY IT IS WORTH A SECOND HARNESS. TraceSolverScaling
+	 * times cuDSS on an EXTRACTED trace matrix: assembly, reduction and one
+	 * factorisation, with no MultNL() anywhere. That is group 4 of MFEM's
+	 * doc/HDG-DEVICE-OFFLOAD.md measured on its own, which is the thing that
+	 * plan says not to do -- and it cannot show the cost of not doing groups 2
+	 * and 3, because a linear solve calls the element-local nonlinear path zero
+	 * times. A whole NPC solve calls it once per residual and once per Jacobian,
+	 * so this is where "the trace solve alone is worse than nothing" would
+	 * become a number rather than a prediction.
+	 *
+	 * IT DOES NOT GET THAT FAR, AND WHAT IT FINDS INSTEAD IS WORTH MORE THAN THE
+	 * TIMING WOULD HAVE BEEN. A whole NPC solve with an mfem::Device configured
+	 * for CUDA does not compute the right answer, and cuDSS is a BYSTANDER
+	 * rather than the cause -- measured on all three trace solvers at
+	 * --device cuda, k=2, n=32:
+	 *
+	 *   OMP_NUM_THREADS=8   aborts, and from several threads at once, in
+	 *                       MemoryManager::CheckHostMemoryType_ reached through
+	 *                       Vector::AddElementVector inside
+	 *                       DarcyHybridization::MultNL's own OpenMP region --
+	 *                       "host pointer is not registered". MFEM_USE_EXCEPTIONS
+	 *                       makes it a throw, which cannot leave a parallel
+	 *                       region, so it lands as `terminate called recursively`.
+	 *   OMP_NUM_THREADS=1   NO abort, and this is the dangerous one: example5
+	 *                       reports 0/0 Newton iterations on a case that needs
+	 *                       four, and the flux disagrees between assembly modes
+	 *                       by 4.006e-02 -- the SAME value to four figures on
+	 *                       UMFPack, PARDISO and cuDSS, which is what says there
+	 *                       is one common fault rather than three.
+	 *
+	 * So the refusal apps/meq.cpp already carries is right for a second and
+	 * stronger reason than the one written beside it: the trade would be bad,
+	 * AND the solve does not survive a Device at all. It is not localised to
+	 * MFEM's BlockVector either -- a bare Update() over four offsets, an
+	 * AddElementVector into a block, and one into a MakeRef view of a block all
+	 * behave identically under "cpu" and "cuda". The trigger is inside the HDG
+	 * path, which is exactly the code doc/HDG-DEVICE-OFFLOAD.md says is not
+	 * built yet, so nothing here is filed upstream: the standing rule is not to
+	 * report findings against work that has not landed.
+	 *
+	 * Re-run this the day the integrators get device kernels. The flag and the
+	 * cuDSS column are here so that it costs one command rather than an
+	 * afternoon.
+	 */
+	std::string device = "cpu";
 
 	for ( int i = 1; i < argc; ++i )
 	{
@@ -288,8 +437,39 @@ int main( int argc, char **argv )
 			wantExample5 = false;
 		else if ( arg == "--example5" )
 			wantPedestal = false;
+		else if ( arg == "--soloviev" )
+		{
+			// The linear-source arm ALONE, since its whole purpose is to be
+			// compared against the other two rather than averaged with them.
+			wantSoloviev = true;
+			wantExample5 = false;
+			wantPedestal = false;
+		}
 		else if ( arg == "--trace" && i + 1 < argc )
 			wantTrace = argv[ ++i ];
+		else if ( arg == "--device" && i + 1 < argc )
+			device = argv[ ++i ];
+	}
+
+	/*
+	 * CONSTRUCTED FIRST AND LEFT ALIVE for the whole run, which mfem::Device
+	 * requires. Before the meshes, before the sources, before any Vector.
+	 */
+	std::unique_ptr<mfem::Device> deviceHandle;
+	if ( device != "cpu" )
+	{
+#ifndef MFEM_USE_CUDA
+		// Exit 0, not 1: asking for a device in a build that has none is a skip,
+		// not a failure. This binary is not a ctest, but the rule is the same
+		// one TraceSolverScaling follows and there is no reason to differ.
+		std::printf( "\n  device \"%s\" requested, but this MFEM has no CUDA -- "
+		             "skipped\n\n", device.c_str() );
+		return 0;
+#else
+		deviceHandle = std::make_unique<mfem::Device>( device.c_str() );
+		std::printf( "\n" );
+		deviceHandle->Print();
+#endif
 	}
 
 	std::printf( "\n=== MEQ NPC thread scaling ===\n" );
@@ -341,13 +521,23 @@ int main( int argc, char **argv )
 		             mklRequested );
 
 	std::vector<TS> traceSolvers;
-	for ( TS t : { TS::UMFPack, TS::Pardiso } )
+	for ( TS t : { TS::UMFPack, TS::Pardiso, TS::cuDSS } )
 	{
 		if ( !Solver::traceSolverAvailable( t ) )
 			continue;
 		if ( wantTrace == "umfpack" && t != TS::UMFPack )
 			continue;
 		if ( wantTrace == "pardiso" && t != TS::Pardiso )
+			continue;
+		if ( wantTrace == "cudss" && t != TS::cuDSS )
+			continue;
+		// cuDSS IS OPT-IN EVEN WHEN THE BUILD HAS IT, and it is the only one of
+		// the three that is. Without an mfem::Device it does not fall back --
+		// it reads host pointers through the device-aware accessors and aborts
+		// inside CUDA with a message naming cudaMemcpyDeviceToDevice and
+		// nothing about the solver -- so an "all" sweep on a CPU run must not
+		// pick it up. --trace cudss --device cuda is the way to reach it.
+		if ( t == TS::cuDSS && ( wantTrace != "cudss" || device == "cpu" ) )
 			continue;
 		traceSolvers.push_back( t );
 	}
@@ -368,6 +558,39 @@ int main( int argc, char **argv )
 		= meq::analytic::ManufacturedNonlinear::example5();
 	meq::analytic::PressurePedestal const pedestal
 		= meq::analytic::PressurePedestal::pedestal();
+	/*
+	 * THE LINEAR-SOURCE ARM -- pass 2, --soloviev.
+	 *
+	 * The experiment HDG-DEVICE-AND-LEVEL-2-FROM-HDGDEV.md asks for: the same
+	 * solve with the source "replaced by a linear one", to separate a genuinely
+	 * non-linear integrand from the other three differences between MEQ's
+	 * failing device run and upstream's passing reproduction.
+	 *
+	 * SolovievEquilibrium IS THE RIGHT SUBSTITUTION AND A TRULY LINEAR SOURCE
+	 * WOULD NOT BE, which is the whole subtlety of the request. `dFdPsi` is
+	 * identically zero, so the problem is linear and Newton takes one exact
+	 * step -- but it still arrives through setSource( Source const & ), so
+	 * `nonlinearSource` is non-null, `usesNonlinearForms()` is true, and the
+	 * FORM ROUTING IS UNCHANGED: meq::SourceIntegrator on the potential-mass
+	 * non-linear form's domain, both HDGDiffusionIntegrators on its faces, M_p
+	 * null, and therefore the same c_bfi_p branch of EnableHybridization().
+	 * `AssembleElementVector` still runs per element per residual.
+	 *
+	 * Handing MEQ a psi-independent source instead would take the OTHER branch
+	 * of buildForms(), construct M_p, and change which arm of
+	 * EnableHybridization() fires -- so a pass would implicate the routing as
+	 * readily as the integrand and the experiment would decide nothing. This is
+	 * the same construction upstream used for their own reproduction, where an
+	 * inert domain integrator sits on the non-linear form so that "the routing
+	 * is yours".
+	 *
+	 * And it has a CLOSED FORM, which the other two fixtures do not. That is
+	 * what makes the arm readable at all: under a Device this harness reported
+	 * 0/0 Newton iterations, and zero iterations is also what a correct linear
+	 * solve reports.
+	 */
+	meq::analytic::SolovievEquilibrium const soloviev
+		= meq::analytic::SolovievEquilibrium::nstx();
 
 	std::printf( "\n  a whole nonlinear solve, serial assembly against threaded\n" );
 	std::printf( "    %-10s %2s %5s %8s %9s %9s %8s %9s %9s %8s %5s\n",
@@ -378,11 +601,13 @@ int main( int argc, char **argv )
 	// unflushed header makes that look like a hang rather than a measurement.
 	std::fflush( stdout );
 
-	for ( int pass = 0; pass < 2; ++pass )
+	for ( int pass = 0; pass < 3; ++pass )
 	{
-		char const *name = ( pass == 0 ) ? "example5" : "pedestal";
+		char const *name = ( pass == 0 ) ? "example5"
+		                 : ( pass == 1 ) ? "pedestal" : "soloviev";
 		if ( pass == 0 && !wantExample5 ) continue;
 		if ( pass == 1 && !wantPedestal ) continue;
+		if ( pass == 2 && !wantSoloviev ) continue;
 
 		// example5's datum is the trace of its own exact solution; the
 		// pedestal's is section 4.2's sign-changing ramp, which is also its
@@ -396,10 +621,20 @@ int main( int argc, char **argv )
 		{
 			return 0.3*x( 1 )/zMax;
 		} );
+		// Solov'ev's datum is the trace of ITS exact solution, as example5's is
+		// of its own. The source is F and not F/r; the solver applies the 1/r.
+		mfem::FunctionCoefficient solovievDatum(
+			[ &soloviev ]( mfem::Vector const &x )
+			{
+				return soloviev.psi( x( 0 ), x( 1 ) );
+			} );
 		mfem::Coefficient &datum = ( pass == 0 )
 			? static_cast<mfem::Coefficient &>( exactDatum )
-			: static_cast<mfem::Coefficient &>( rampDatum );
-		bool const guessFromDatum = ( pass != 0 );
+			: ( pass == 1 ) ? static_cast<mfem::Coefficient &>( rampDatum )
+			: static_cast<mfem::Coefficient &>( solovievDatum );
+		// Only the pedestal needs one: its source vanishes at psi = 0, so
+		// homogeneous data would make psi == 0 solve the problem.
+		bool const guessFromDatum = ( pass == 1 );
 
 		for ( int order : orders )
 		{
@@ -415,11 +650,16 @@ int main( int argc, char **argv )
 					{
 						Run s = ( pass == 0 )
 							? runOnce( box(), order, n, example5, datum, guessFromDatum, AM::Serial, trace )
-							: runOnce( box(), order, n, pedestal, datum, guessFromDatum, AM::Serial, trace );
+							: ( pass == 1 )
+							? runOnce( box(), order, n, pedestal, datum, guessFromDatum, AM::Serial, trace )
+							: runOnce( box(), order, n, soloviev, datum, guessFromDatum, AM::Serial, trace );
 						if ( s.prepareTime < best_s.prepareTime ) best_s.prepareTime = s.prepareTime;
 						if ( s.solveTime < best_s.solveTime ) best_s.solveTime = s.solveTime;
 						best_s.newtonIterations = s.newtonIterations;
 						best_s.converged = s.converged;
+						best_s.finiteFailures = s.finiteFailures;
+						best_s.exactError = s.exactError;
+						best_s.psiPeak = s.psiPeak;
 						if ( best_s.psi.empty() ) { best_s.psi = s.psi; best_s.flux = s.flux; }
 					}
 
@@ -429,11 +669,16 @@ int main( int argc, char **argv )
 						{
 							Run t = ( pass == 0 )
 								? runOnce( box(), order, n, example5, datum, guessFromDatum, AM::Threaded, trace )
-								: runOnce( box(), order, n, pedestal, datum, guessFromDatum, AM::Threaded, trace );
+								: ( pass == 1 )
+								? runOnce( box(), order, n, pedestal, datum, guessFromDatum, AM::Threaded, trace )
+								: runOnce( box(), order, n, soloviev, datum, guessFromDatum, AM::Threaded, trace );
 							if ( t.prepareTime < best_t.prepareTime ) best_t.prepareTime = t.prepareTime;
 							if ( t.solveTime < best_t.solveTime ) best_t.solveTime = t.solveTime;
 							best_t.newtonIterations = t.newtonIterations;
 							best_t.converged = t.converged;
+							best_t.finiteFailures = t.finiteFailures;
+							best_t.exactError = t.exactError;
+							best_t.psiPeak = t.psiPeak;
 							if ( best_t.psi.empty() ) { best_t.psi = t.psi; best_t.flux = t.flux; }
 						}
 					}
@@ -453,6 +698,23 @@ int main( int argc, char **argv )
 
 					if ( !best_s.converged || ( canThread && !best_t.converged ) )
 						std::printf( "  (did not converge)" );
+
+					// NON-FINITE FIRST. A NaN field reports an L2 error and a
+					// worst-difference of whatever the guarded reductions make
+					// of it, so this has to be said before either number is
+					// read rather than inferred from them afterwards.
+					if ( best_s.finiteFailures > 0
+					     || ( canThread && best_t.finiteFailures > 0 ) )
+						std::printf( "  *** NON-FINITE ENTRIES: %d serial, %d threaded",
+						             best_s.finiteFailures,
+						             canThread ? best_t.finiteFailures : 0 );
+					else if ( best_s.exactError >= 0.0 )
+						std::printf( "  L2 vs exact: %.3e ser", best_s.exactError );
+					if ( best_s.psiPeak >= 0.0 )
+						std::printf( "  max|psi_h| %.6e", best_s.psiPeak );
+					if ( canThread && best_s.exactError >= 0.0
+					     && best_s.finiteFailures == 0 )
+						std::printf( ", %.3e thr", best_t.exactError );
 					std::printf( "\n" );
 					std::fflush( stdout );
 
@@ -512,25 +774,57 @@ int main( int argc, char **argv )
 		std::printf( "    trace solvers agree to      : %.3e relative\n",
 		             worstTraceAgreement );
 
-	// The exit code. Only correctness, never a timing.
+	/*
+	 * The exit code. Only correctness, never a timing.
+	 *
+	 * AND EXACTNESS IS ONLY CLAIMED AT MKL_NUM_THREADS=1, WHICH THE DIAGNOSTIC
+	 * HAS TO SAY OR IT SENDS THE READER HUNTING A RACE THAT IS NOT THERE.
+	 * The two assembly modes hand MKL DIFFERENT THREAD COUNTS at MKL > 1: the
+	 * serial element loop is outside any parallel region and its element-local
+	 * dgetrs and dgemm get all of them, while the threaded loop is an active
+	 * OpenMP region and MKL suppresses its own threading inside one, so the same
+	 * kernels run sequentially. A blocked BLAS-3 sums in a different order from
+	 * an unblocked loop, so the two modes are then computing the same thing by
+	 * different associations -- arithmetic reassociation inside MKL, not a race
+	 * in MFEM and not shared scratch in MEQ. Measured here: 1.4e-15 in psi and
+	 * 1.8e-13 in the flux at MKL=8, against 0.0e+00 in both at MKL=1.
+	 *
+	 * GradShafranov.cpp's setAssemblyMode() documentation records the same
+	 * mechanism and the same magnitudes, which is why the message points there
+	 * rather than repeating the argument.
+	 */
+	bool const mklMayReassociate = ( mklRequested > 1 );
+	char const *reassociationNote = mklMayReassociate
+		? "      BUT MKL_NUM_THREADS > 1, AND EXACTNESS IS ONLY CLAIMED AT 1.\n"
+		  "      The serial element loop gets every MKL thread and the threaded\n"
+		  "      one gets none -- MKL suppresses itself inside an active OpenMP\n"
+		  "      region -- so a blocked BLAS-3 reassociates against an unblocked\n"
+		  "      loop. That is arithmetic, not a race. Re-run at\n"
+		  "      MKL_NUM_THREADS=1 before reading anything into this.\n"
+		: "      MFEM documents exactness on both its threaded loops, so\n"
+		  "      this is a real change rather than a tolerance to widen.\n"
+		  "      On a NONLINEAR source the loop is MultNL's, and the\n"
+		  "      caller's own integrators sit on it: check whether\n"
+		  "      anything MEQ installs holds per-point scratch as a\n"
+		  "      member. meq::SourceIntegrator's `shape` is guarded on\n"
+		  "      MFEM_THREAD_SAFE for exactly that reason.\n";
+
 	if ( canThread && worstThreadedPsi != 0.0 )
 	{
-		std::printf( "\n  *** threaded assembly is NOT bit for bit in psi (%.3e).\n"
-		             "      MFEM documents exactness on both its threaded loops, so\n"
-		             "      this is a real change rather than a tolerance to widen.\n"
-		             "      On a NONLINEAR source the loop is MultNL's, and the\n"
-		             "      caller's own integrators sit on it: check whether\n"
-		             "      anything MEQ installs holds per-point scratch as a\n"
-		             "      member. meq::SourceIntegrator's `shape` is guarded on\n"
-		             "      MFEM_THREAD_SAFE for exactly that reason.\n",
-		             worstThreadedPsi );
-		++failures;
+		std::printf( "\n  *** threaded assembly is NOT bit for bit in psi (%.3e).\n%s",
+		             worstThreadedPsi, reassociationNote );
+		// Not a failure at MKL > 1: the two modes are entitled to differ there,
+		// and counting it would make the binary's exit code a statement about
+		// the environment rather than about the code.
+		if ( !mklMayReassociate )
+			++failures;
 	}
 	if ( canThread && worstThreadedFlux != 0.0 )
 	{
-		std::printf( "\n  *** threaded assembly is NOT bit for bit in the flux (%.3e).\n",
-		             worstThreadedFlux );
-		++failures;
+		std::printf( "\n  *** threaded assembly is NOT bit for bit in the flux (%.3e).\n%s",
+		             worstThreadedFlux, mklMayReassociate ? reassociationNote : "" );
+		if ( !mklMayReassociate )
+			++failures;
 	}
 	if ( canThread && newtonMismatches > 0 )
 	{

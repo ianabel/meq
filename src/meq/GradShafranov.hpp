@@ -782,6 +782,43 @@ namespace meq
 			 */
 			void refreshPlasmaComponent( mfem::Vector const &state );
 
+			/**
+			 * **STOP solve() REFRESHING THE SUPPORT, SO IT IS FIXED WITHIN A
+			 * NEWTON AND RE-DECIDED BETWEEN SOLVES.** XP-2 of
+			 * `FREE-BOUNDARY-PLAN.md` §10.6, and §10.5's own prescription
+			 * applied to the support rather than to the bounding point.
+			 *
+			 * With this off -- the default, and every existing solve is
+			 * bit-unchanged -- `refreshPlasmaComponent()` runs before every
+			 * residual and every Jacobian, so the set of elements carrying `F`
+			 * is a functional of the iterate. Its derivative is a surface term
+			 * on a moving edge and the Jacobian does not carry it.
+			 *
+			 * **MEASURED, THAT IS WHAT BREAKS THE DIVERTED SOLVE.** One key
+			 * changed and nothing else: with the support moving the bootstrap
+			 * stalls at the 200 cap, and with `ConfineToPlasma` off -- at the
+			 * IDENTICAL pin, the same coils, the same guess -- it converges in
+			 * 21 steps. `MEASUREMENTS.md` M-82.
+			 *
+			 * **IT SUPPRESSES ONLY solve()'s OWN CALLS.** The public
+			 * `refreshPlasmaComponent()` still does the work, which is how a
+			 * caller drives the outer loop: refresh at the answer just reached,
+			 * freeze, solve again. It is the same shape as
+			 * `setBoundaryFluxPoint()` being re-decided between sweeps, and it
+			 * has the same failure mode -- §10.5's two states alternating --
+			 * which is a thing to measure rather than to assume away.
+			 *
+			 * **AND IT IS ONLY HALF THE SUPPORT ON ITS OWN.** The mask is
+			 * element granular; inside an element the fill reached, the
+			 * pointwise `Psi > 0` test still moves with `psi`. The other half is
+			 * `meq::NormalisedSource::freezePlasmaEdge`, and a caller wanting a
+			 * support that genuinely does not move needs both.
+			 */
+			void setPlasmaSupportFrozen( bool frozen );
+
+			/// Whether setPlasmaSupportFrozen() is in force.
+			bool plasmaSupportFrozen() const;
+
 			/// Elements the fill reached: the plasma. Zero when no fill is live.
 			int plasmaComponentElements() const;
 
@@ -1152,6 +1189,46 @@ namespace meq
 			/// The value setSourceQuadratureOrder() last set.
 			int sourceQuadratureOrder() const;
 
+			/**
+			 * **THE RULE ON EACH FACE OF `Gamma_h` FOR THE TRANSFERRED DATUM,
+			 * WHICH IS THE ONE INTEGRAL IN THE EXTENSION THAT IS NOT EXACT.**
+			 *
+			 * The transferred datum is `phi_h = g( a( x ) ) + L_e( u_h )( x )`
+			 * and it enters the flux equation as `< phi_h, v.n >_e`. That is two
+			 * quadratures and they are not alike:
+			 *
+			 * * the INNER one, along the path `sigma( x )`, integrates a
+			 *   polynomial of the flux degree on a straight-sided element, so
+			 *   `setExtension()`'s own line order integrates it EXACTLY;
+			 * * the OUTER one, over the face, does not — `a( x )`, the foot map,
+			 *   is not polynomial in `x`, and `mfem::HDGExtensionIntegrator`'s
+			 *   header says so in as many words. MFEM defaults it to `2k+2`, and
+			 *   `mfem::VectorBoundaryFluxLFIntegrator` defaults the data half to
+			 *   `2k`, both keyed to the polynomial degree rather than to how
+			 *   rough the foot map is.
+			 *
+			 * **WHY IT MIGHT MATTER MORE THAN IT LOOKS.** A quadrature error here
+			 * is a perturbation of the DIRICHLET DATUM, and the two variables do
+			 * not tolerate it equally. `psi_h`'s own estimate absorbs a datum
+			 * error of `O( h^(k+1) )`; `psi*`'s `k+2` rests on the element mean of
+			 * `psi_h` superconverging, which is a duality result, and the datum
+			 * term is exactly where the duality buys no extra power of `h`. So the
+			 * same inexactness can be invisible in `psi_h` and cost `psi*` a whole
+			 * order — which is the shape of what PE-0 measures.
+			 *
+			 * @param order the rule order on the face, or **negative for MFEM's
+			 *        own default**, which is what every solve used before this
+			 *        existed. The faces are SEGMENTs, so the rules are
+			 *        Gauss-Legendre and a high order here carries none of the
+			 *        Grundmann-Möller hazard `setSourceQuadratureOrder()` runs
+			 *        into on triangles.
+			 */
+			void setExtensionQuadratureOrder( int order );
+
+			/// The value setExtensionQuadratureOrder() last set; negative means
+			/// MFEM's default.
+			int extensionQuadratureOrder() const;
+
 			/// Which non-linear method the hybridization is asked for. A
 			/// DIFFERENT axis from setGlobalisation(): that picks the outer
 			/// iteration, this decides what the outer iteration's unknown IS,
@@ -1376,17 +1453,26 @@ namespace meq
 			enum class TraceSolver
 			{
 				/// SuiteSparse, `mfem::UMFPackSolver`, METIS ordering. **The
-				/// default**, because it is the one every rate in the suite was
-				/// measured with and the only one present in every build.
+				/// default only where the build has no PARDISO**, because it is
+				/// the one package present in every build -- and every rate in
+				/// the suite was measured with it, which is why it stays the
+				/// fallback rather than being dropped.
 				UMFPack,
 				/// oneMKL, `mfem::PardisoSolver`, `REAL_STRUCTURE_SYMMETRIC` --
 				/// structurally symmetric on both paths, symmetric in value only
 				/// on the fitted one. Needs `MFEM_USE_MKL_PARDISO`.
 				///
+				/// **THE DEFAULT WHEREVER MFEM_USE_MKL_PARDISO IS SET**, chosen
+				/// by defaultTraceSolver(), which is build-conditional for the
+				/// same reason defaultAssemblyMode() is. The licence argument
+				/// that used to keep it out of that slot -- oneMKL's terms are
+				/// not everybody's to accept -- is answered by the #ifdef rather
+				/// than by the choice, since a build without the option never
+				/// reaches oneMKL here.
+				///
 				/// **Faster than UMFPack even single-threaded** -- 1.50x on the
 				/// factorisation and 1.41x on the backsolve at 37,248 trace dofs
-				/// -- and it is NOT the default anyway, because oneMKL's licence
-				/// is not everybody's to accept and most builds do not have it.
+				/// -- so the choice pays before any thread is spent.
 				/// It scales a further 1.9x on MKL threads, and with
 				/// AssemblyMode::Threaded those threads ARE spendable: MKL
 				/// suppresses its own threading inside an active OpenMP
@@ -2263,6 +2349,96 @@ namespace meq
 			/// counts the residual at the initial guess too.
 			int newtonIterations() const;
 
+			/*
+			 * WHERE A NEWTON STEP'S TIME GOES, SPLIT INTO LEGS THAT DO NOT
+			 * OVERLAP -- the profile `HDG-NEWTON-STEP-PROFILE-FROM-HDGDEV.md`
+			 * asks for, at its level 1.
+			 *
+			 * The split is by CALL SITE and not by guesswork, which is what makes
+			 * the legs disjoint and the remainder meaningful:
+			 *
+			 *   residual   mfem::DarcyNPCOperator::Mult, through a timing wrapper
+			 *              placed INNERMOST in the operator chain -- inside
+			 *              ComponentRefreshed and ShiftedResidual, so neither the
+			 *              flood fill nor the shift is charged to it.
+			 *   gradient   mfem::DarcyNPCOperator::GetGradient, which MFEM
+			 *              documents as "assemble and factor the Jacobian at x",
+			 *              so ComputeH() is inside this leg and not beside it.
+			 *   trace      the direct solver MEQ owns and hands to
+			 *              mfem::DarcyNPCSolver, wrapped the same way: its
+			 *              SetOperator() is the numeric factorisation and its
+			 *              Mult() the backsolve, wherever MFEM calls them from.
+			 *              Split, because they scale differently in the trace dof
+			 *              count and only one of them is repeated by a border.
+			 *   component  refreshPlasmaComponent(), the XP-1 flood fill. Its own
+			 *              leg because it is a functional of the iterate evaluated
+			 *              once per residual AND once per gradient, so leaving it
+			 *              inside the residual would attribute a graph traversal
+			 *              to the integrators.
+			 *
+			 * `totalSeconds` is the whole of solve(), so
+			 * `totalSeconds - (the four legs)` is the "everything else" leg --
+			 * source refresh, the critical-point search, the boundary datum, and
+			 * MFEM's own vector arithmetic in NewtonSolver. It is a REMAINDER by
+			 * construction rather than a measurement, and reporting it that way is
+			 * the honest form: anything the legs miss lands there rather than
+			 * silently inflating one of them.
+			 *
+			 * ALWAYS ON, because the cost is one steady_clock read per call
+			 * against a leg measured in milliseconds, and a profile that needs a
+			 * special build is a profile nobody takes. Zeroed at the top of every
+			 * solve(), so the counts belong to the last solve alone.
+			 */
+			struct StepProfile
+			{
+				double residualSeconds = 0.0;
+				double gradientSeconds = 0.0;
+				double traceFactorSeconds = 0.0;
+				double traceSolveSeconds = 0.0;
+				double componentSeconds = 0.0;
+				double totalSeconds = 0.0;
+
+				long residualCalls = 0;
+				long gradientCalls = 0;
+				long traceFactorCalls = 0;
+				long traceSolveCalls = 0;
+				long componentCalls = 0;
+
+				/*
+				 * LEVEL 2, AND IT IS A SUB-SPLIT OF `gradientSeconds` RATHER THAN A
+				 * SIXTH LEG. `DarcyHybridization::ComputeH()` runs INSIDE
+				 * GetGradient(), so this is already counted in the gradient leg and
+				 * adding it to the others double-counts. It answers the one question
+				 * the four-leg split cannot: how much of the gradient leg is the
+				 * element-local condensation -- which is what upstream's candidate
+				 * (a), caching the state-independent half, would act on.
+				 *
+				 * The accumulator upstream exposes is a STATIC over a function-local,
+				 * so it is process-wide and counts every DarcyHybridization alive.
+				 * MEQ is serial and solves one at a time, so that is exact here; what
+				 * it does NOT survive is re-entry, since solveByPicardThenNewton()
+				 * calls solve() again and the inner call resets the accumulator. The
+				 * other legs use += and accumulate across re-entry; this one does not,
+				 * and on that path it reports the inner solve alone.
+				 */
+				double computeHSeconds = 0.0;
+				long computeHCalls = 0;
+
+				/// The remainder leg, which is never negative in practice but is
+				/// clamped so that a caller printing shares cannot get a negative
+				/// one out of clock noise on a solve that did almost nothing.
+				double otherSeconds() const
+				{
+					double const legs = residualSeconds + gradientSeconds
+					                  + traceFactorSeconds + traceSolveSeconds
+					                  + componentSeconds;
+					return ( totalSeconds > legs ) ? totalSeconds - legs : 0.0;
+				}
+			};
+
+			/// The leg split of the last solve(). See StepProfile.
+			StepProfile const &stepProfile() const;
+
 			/// Element-local NON-LINEAR iterations, summed over elements and over
 			/// every residual and gradient evaluation since the forms were built.
 			///
@@ -2451,6 +2627,13 @@ namespace meq
 			 */
 			int plasmaSeedElement = -1;
 
+			/// setExtensionQuadratureOrder(). Negative is MFEM's own default.
+			int extensionFaceOrder = -1;
+
+			/// setPlasmaSupportFrozen(). Off by default, so solve() refreshes
+			/// the component itself and nothing existing moves.
+			bool plasmaSupportFrozenValue = false;
+
 			/// setLimiterConstraint().
 			LimiterConstraint limiterConstraintChoice = LimiterConstraint::ExactPoint;
 
@@ -2522,6 +2705,9 @@ namespace meq
 			/// Extra quadrature order for meq::SourceIntegrator; see
 			/// setSourceQuadratureOrder().
 			int sourceQuadratureExtra;
+			/// The leg timings of the last solve; see stepProfile().
+			StepProfile profile;
+
 			NonlinearOrdering orderingChoice;
 			AssemblyMode assemblyModeChoice;
 			TraceSolver traceSolverChoice;

@@ -348,8 +348,84 @@ namespace meq
 			{
 				if ( !confinedToPlasma )
 					return true;
-				double const span = normalisation() - boundaryNormalisation();
-				return ( psi - boundaryNormalisation() )*span > 0.0;
+				double const edge = supportBoundary();
+				double const span = supportAxis() - edge;
+				return ( psi - edge )*span > 0.0;
+			}
+
+			/**
+			 * **HOLD THE EDGE THE SUPPORT TEST USES, SO THE SUPPORT STOPS
+			 * MOVING WITHIN A NEWTON WHILE `psi_ax` AND `psi_bnd` STAY UNKNOWNS
+			 * OF IT.** XP-2 of `FREE-BOUNDARY-PLAN.md` §10.6.
+			 *
+			 * With the support live, `F`'s on/off region is a functional of the
+			 * iterate through this class's own pointwise test -- so it moves
+			 * every residual, and its derivative is a surface term the Jacobian
+			 * does not carry. §10.5's answer is the one this tree already
+			 * applies to the bounding POINT: fix the topology within a solve and
+			 * re-decide between solves.
+			 *
+			 * **MEASURED, THAT IS THE LIVE HAZARD AND THE OTHER ONE IS NOT.**
+			 * On the diverted machine, one key changed and nothing else: with
+			 * the support moving the bootstrap solve stalls at the 200 cap, and
+			 * with `setPlasmaSupport()` off -- at the IDENTICAL pin -- it
+			 * converges in 21 steps. `MEASUREMENTS.md` M-82.
+			 *
+			 * This freezes the THRESHOLD and not the region: `psi` still moves,
+			 * so `{ Psi > 0 }` still moves with it. Freezing the region as well
+			 * is the solver's half, since the connected component is the
+			 * solver's -- `meq::GradShafranovSolver::setPlasmaSupportFrozen`.
+			 *
+			 * **VIRTUAL, AND FOR THE REASON setPlasmaSupport() IS.** A source
+			 * that WRAPS another evaluates the profiles through the source it
+			 * holds, so it is the HELD source's frozen edge that its
+			 * insidePlasma() consults. Non-virtual, a caller holding a
+			 * `NormalisedSource &` would freeze the wrapper and the wrapped
+			 * source would go on moving -- silently, which is the whole shape of
+			 * the defect this exists to remove. An override forwards; this base
+			 * is what an override calls to keep plasmaEdgeIsFrozen() honest.
+			 *
+			 * **INERT UNLESS setPlasmaSupport() IS ON**, since insidePlasma()
+			 * returns true before it reaches either value.
+			 */
+			virtual void freezePlasmaEdge( double axis, double boundary )
+			{
+				frozenAxis = axis;
+				frozenBoundary = boundary;
+				edgeIsFrozen = true;
+			}
+
+			/// Put the support test back on the normalisation the source
+			/// carries. @see freezePlasmaEdge
+			virtual void thawPlasmaEdge()
+			{
+				edgeIsFrozen = false;
+			}
+
+			/// Whether freezePlasmaEdge() is in force.
+			bool plasmaEdgeIsFrozen() const
+			{
+				return edgeIsFrozen;
+			}
+
+			/// The axis value the support test uses: the frozen one where
+			/// freezePlasmaEdge() is in force and the live normalisation
+			/// otherwise.
+			///
+			/// **ASK THIS RATHER THAN normalisation() WHEREVER THE QUESTION IS
+			/// WHERE THE PLASMA IS**, which is not the same question as what the
+			/// profiles are scaled by. The connected-component fill reads the
+			/// same field, and a fill taken at the live edge under a frozen
+			/// pointwise test would disagree with it element by element.
+			double supportAxis() const
+			{
+				return edgeIsFrozen ? frozenAxis : normalisation();
+			}
+
+			/// @see supportAxis
+			double supportBoundary() const
+			{
+				return edgeIsFrozen ? frozenBoundary : boundaryNormalisation();
 			}
 
 			/**
@@ -507,6 +583,12 @@ namespace meq
 		private:
 			/// setPlasmaSupport(). Off by default; see it for why.
 			bool confinedToPlasma = false;
+
+			/// freezePlasmaEdge(). Off by default, so every existing solve is
+			/// bit-unchanged.
+			bool edgeIsFrozen = false;
+			double frozenAxis = 0.0;
+			double frozenBoundary = 0.0;
 
 			/// setCurrentScale(). One unless a current is prescribed.
 			double currentScaleValue = 1.0;

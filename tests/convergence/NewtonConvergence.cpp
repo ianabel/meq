@@ -1256,13 +1256,20 @@ BOOST_AUTO_TEST_CASE( similarityOrderThreeConvergesAtFour )
 /*
  * THE SYMBOLIC ANALYSIS IS COMPUTED ONCE, NOT ONCE PER NEWTON STEP.
  *
- * UMFPACK splits a solve into a symbolic analysis, which depends only on the
- * sparsity pattern, and a numeric factorisation, which depends on the values.
- * NewtonSolver::Mult calls prec->SetOperator( *grad ) once per iteration, and
- * the hybridized trace system's pattern never changes between them -- so
- * without SetReuseSymbolic() the analysis is recomputed and discarded every
- * step. Measured before it was enabled, that was 22 to 24% of each step, and
- * meq asks for METIS ordering, which makes it dearer than the default.
+ * Both UMFPACK and PARDISO split a solve into a symbolic analysis, which
+ * depends only on the sparsity pattern, and a numeric factorisation, which
+ * depends on the values. NewtonSolver::Mult calls prec->SetOperator( *grad )
+ * once per iteration, and the hybridized trace system's pattern never changes
+ * between them -- so without SetReuseSymbolic() the analysis is recomputed and
+ * discarded every step. Measured before it was enabled, that was 22 to 24% of
+ * each step, and meq asks UMFPACK for METIS ordering, which makes it dearer
+ * than the default.
+ *
+ * THIS READS WHICHEVER SOLVER defaultTraceSolver() PICKED, which is PARDISO on
+ * a build with oneMKL and UMFPACK otherwise -- and it must, because the reuse
+ * is configured per package in makeTraceSolver() and a case pinned to one of
+ * them would stop covering the default the moment the default moved. It prints
+ * the name so a reading of the log says which package the count belongs to.
  *
  * This asserts the RATIO rather than a time, which is the house rule: a timing
  * would be a measurement about this machine, where the count is a measurement
@@ -1275,8 +1282,9 @@ BOOST_AUTO_TEST_CASE( similarityOrderThreeConvergesAtFour )
  */
 BOOST_AUTO_TEST_CASE( theSymbolicAnalysisIsReusedAcrossNewtonSteps )
 {
-#ifndef MFEM_USE_SUITESPARSE
-	BOOST_TEST_MESSAGE( "no SuiteSparse, so there is no UMFPACK analysis to reuse" );
+#if !defined( MFEM_USE_SUITESPARSE ) && !defined( MFEM_USE_MKL_PARDISO )
+	BOOST_TEST_MESSAGE( "no direct trace solver in this build, so there is no "
+	                    "analysis to reuse -- the GMRES fallback has none" );
 #else
 	meq::analytic::ManufacturedNonlinear const eq
 		= meq::analytic::ManufacturedNonlinear::example5();
@@ -1294,9 +1302,14 @@ BOOST_AUTO_TEST_CASE( theSymbolicAnalysisIsReusedAcrossNewtonSteps )
 	solver.setNewtonControl( 1.0e-10, 1.0e-14, 60 );
 	solver.solve();
 
-	std::printf( "\n  Newton took %d iterations: %ld symbolic analyses, "
+	char const *which =
+		( solver.traceSolver() == meq::GradShafranovSolver::TraceSolver::Pardiso )
+		? "PARDISO"
+		: ( solver.traceSolver() == meq::GradShafranovSolver::TraceSolver::cuDSS )
+		? "cuDSS" : "UMFPACK";
+	std::printf( "\n  Newton took %d iterations with %s: %ld symbolic analyses, "
 	             "%ld numeric factorisations\n",
-	             solver.newtonIterations(), solver.symbolicFactorisations(),
+	             solver.newtonIterations(), which, solver.symbolicFactorisations(),
 	             solver.numericFactorisations() );
 	std::fflush( stdout );
 

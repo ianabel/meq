@@ -12,6 +12,7 @@
 #include "Coils.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -122,6 +123,40 @@ namespace
 		return GradShafranovSolver::AssemblyMode::Threaded;
 #else
 		return GradShafranovSolver::AssemblyMode::Serial;
+#endif
+	}
+
+	/*
+	 * The default trace solver, and it is BUILD-CONDITIONAL for the same reason
+	 * defaultAssemblyMode() is: the constructor assigns this value directly,
+	 * bypassing setTraceSolver(), which is the only thing that refuses a choice
+	 * the build cannot honour. A bare `Pardiso` here would reach makeTraceSolver()
+	 * on a build without oneMKL and throw std::logic_error out of a solve.
+	 *
+	 * PARDISO WHERE THE BUILD HAS IT, AND THE CASE IS TWO INDEPENDENT WINS.
+	 * It is faster than UMFPack single-threaded -- 1.50x on the factorisation
+	 * and 1.41x on the backsolve at 37,248 trace dofs -- so the choice pays
+	 * before any thread is spent. And it is the only one of the two whose
+	 * threads are spendable at all: under AssemblyMode::Threaded, which is now
+	 * the default, MKL suppresses its own threading inside an active OpenMP
+	 * region, so the element-local dense work is nested and free while the trace
+	 * solve runs on the master thread outside every region and takes them all.
+	 * UMFPack's BLAS sits outside any parallel region and pays full MKL
+	 * threading per frontal matrix, which is why the two respond to
+	 * MKL_NUM_THREADS in OPPOSITE directions. See CLAUDE_HDGGS.md,
+	 * *Threading, measured*, and MEASUREMENTS.md M-78.
+	 *
+	 * UMFPack stays the fallback rather than the default because it is the one
+	 * package present in every build -- the licence argument that used to keep
+	 * PARDISO out of this slot is answered by the #ifdef rather than by the
+	 * choice, since a build without MFEM_USE_MKL_PARDISO never sees oneMKL here.
+	 */
+	GradShafranovSolver::TraceSolver defaultTraceSolver()
+	{
+#ifdef MFEM_USE_MKL_PARDISO
+		return GradShafranovSolver::TraceSolver::Pardiso;
+#else
+		return GradShafranovSolver::TraceSolver::UMFPack;
 #endif
 	}
 
@@ -483,7 +518,7 @@ namespace
 		  sourceQuadratureExtra( 4 ),
 		  orderingChoice( NonlinearOrdering::NPC ),
 		  assemblyModeChoice( defaultAssemblyMode() ),
-		  traceSolverChoice( TraceSolver::UMFPack ),
+		  traceSolverChoice( defaultTraceSolver() ),
 		  andersonDepth( 1 ),
 		  picardDamping( 1.0 ),
 		  newtonRelativeTolerance( 1.0e-12 ),
@@ -824,6 +859,111 @@ namespace
 	 * belongs to the rule. tests/convergence/PlasmaConnectivity.cpp is that
 	 * measurement, taken the way PlasmaEdgeConvergence takes the j = 0 one.
 	 */
+	/*
+	 * THE LEG TIMERS -- HDG-NEWTON-STEP-PROFILE-FROM-HDGDEV.md's level 1.
+	 *
+	 * Two wrappers, and WHERE THEY GO IN THE CHAIN IS THE WHOLE DESIGN. The
+	 * operator one is placed INNERMOST, around the bare mfem::DarcyNPCOperator
+	 * and inside both ComponentRefreshed and ShiftedResidual, so that the flood
+	 * fill and the right-hand-side shift are charged to their own leg and to the
+	 * remainder respectively rather than to the integrators. The solver one
+	 * wraps the direct solver MEQ owns BEFORE mfem::DarcyNPCSolver receives it,
+	 * so it catches the factorisation and the backsolve wherever MFEM calls them
+	 * from -- which is the point, since MEQ does not have to know whether
+	 * DarcyNPCSolver::SetOperator or ::Mult reaches the package.
+	 *
+	 * Neither wrapper allocates, and neither copies a vector. That matters
+	 * because the request names allocation-attributed-to-arithmetic as one of
+	 * the three things that would spoil the measurement: a wrapper that made a
+	 * temporary per call would put its own malloc inside the leg it is timing.
+	 */
+	double profileNow()
+	{
+		using namespace std::chrono;
+		return duration<double>( steady_clock::now().time_since_epoch() ).count();
+	}
+
+	class TimedOperator : public mfem::Operator
+	{
+		public:
+			TimedOperator( mfem::Operator &operatorIn,
+			               GradShafranovSolver::StepProfile &profileIn )
+				: mfem::Operator( operatorIn.Height(), operatorIn.Width() ),
+				  inner( operatorIn ), profile( profileIn )
+			{
+			}
+
+			/// MFEM's spelling, from mfem::Operator.
+			void Mult( mfem::Vector const &x, // NOLINT(readability-identifier-naming)
+			           mfem::Vector &y ) const override
+			{
+				double const t0 = profileNow();
+				inner.Mult( x, y );
+				profile.residualSeconds += profileNow() - t0;
+				++profile.residualCalls;
+			}
+
+			/// MFEM's spelling, from mfem::Operator.
+			mfem::Operator &GetGradient( // NOLINT(readability-identifier-naming)
+				mfem::Vector const &x ) const override
+			{
+				double const t0 = profileNow();
+				mfem::Operator &grad = inner.GetGradient( x );
+				profile.gradientSeconds += profileNow() - t0;
+				++profile.gradientCalls;
+				return grad;
+			}
+
+		private:
+			mfem::Operator &inner;
+			GradShafranovSolver::StepProfile &profile;
+	};
+
+	class TimedSolver : public mfem::Solver
+	{
+		public:
+			TimedSolver( mfem::Solver &solverIn,
+			             GradShafranovSolver::StepProfile &profileIn )
+				: mfem::Solver( solverIn.Height(), solverIn.Width() ),
+				  inner( solverIn ), profile( profileIn )
+			{
+			}
+
+			/// MFEM's spelling, from mfem::Solver.
+			void SetOperator( // NOLINT(readability-identifier-naming)
+				mfem::Operator const &op ) override
+			{
+				double const t0 = profileNow();
+				inner.SetOperator( op );
+				profile.traceFactorSeconds += profileNow() - t0;
+				++profile.traceFactorCalls;
+				// The wrapper's own shape follows the wrapped solver's, which only
+				// becomes known here: a direct solver sizes itself on its matrix.
+				height = inner.Height();
+				width = inner.Width();
+			}
+
+			/// MFEM's spelling, from mfem::Solver.
+			void Mult( mfem::Vector const &b, // NOLINT(readability-identifier-naming)
+			           mfem::Vector &x ) const override
+			{
+				// FORWARDED, because a wrapper that swallows it would change the
+				// answer rather than only the timing. A direct solver ignores the
+				// flag, but the GMRES fallback this same wrapper covers does not,
+				// and a decorator has no business deciding which one it wraps.
+				inner.iterative_mode = iterative_mode;
+
+				double const t0 = profileNow();
+				inner.Mult( b, x );
+				profile.traceSolveSeconds += profileNow() - t0;
+				++profile.traceSolveCalls;
+			}
+
+		private:
+			mfem::Solver &inner;
+			GradShafranovSolver::StepProfile &profile;
+	};
+
 	class ComponentRefreshed : public mfem::Operator
 	{
 		public:
@@ -1244,6 +1384,18 @@ namespace
 		localSolverChoice = choice;
 		built = false;
 		prepared = false;
+	}
+
+	void GradShafranovSolver::setExtensionQuadratureOrder( int order )
+	{
+		extensionFaceOrder = order;
+		built = false;
+		prepared = false;
+	}
+
+	int GradShafranovSolver::extensionQuadratureOrder() const
+	{
+		return extensionFaceOrder;
 	}
 
 	void GradShafranovSolver::setSourceQuadratureOrder( int extraOrder )
@@ -2955,10 +3107,15 @@ namespace
 			// the extension was written for, so MEQ's convention and the
 			// integrator's coincide. Measured: with -1 the rates collapse. See
 			// tests/convergence/ExtensionConvergence.cpp for the numbers.
-			fluxMass->AddBdrFaceIntegrator(
-				new mfem::HDGExtensionIntegrator( *transferPath, radius, +1.0,
-				                                  extensionLineOrder ),
-				gammaHMarker );
+			auto *extension = new mfem::HDGExtensionIntegrator(
+				*transferPath, radius, +1.0, extensionLineOrder );
+			// THE OUTER RULE, which is the inexact one. See
+			// setExtensionQuadratureOrder(); negative leaves MFEM's 2k+2 and
+			// every solve written before this existed is bit-unchanged.
+			if ( extensionFaceOrder >= 0 )
+				extension->SetIntRule( &mfem::IntRules.Get(
+					mfem::Geometry::SEGMENT, extensionFaceOrder ) );
+			fluxMass->AddBdrFaceIntegrator( extension, gammaHMarker );
 		}
 
 		// < tau( psi_h - psihat_h ), w > on every face of every element, interior
@@ -3271,9 +3428,16 @@ namespace
 			// Whole, every time. See the declaration.
 			fluxRhs = std::make_unique<mfem::LinearForm>();
 			fluxRhs->Update( fluxFes.get(), rhs.GetBlock( 0 ), 0 );
+			// g( a( x ) ) is no more polynomial in x than L_e is, so the data
+			// half takes the same rule as the solution half. MFEM's default
+			// here is 2k, lower still.
 			fluxRhs->AddBdrFaceIntegrator(
 				new mfem::VectorBoundaryFluxLFIntegrator(
-					*exteriorDatumCoefficient ),
+					*exteriorDatumCoefficient, 1.0,
+					( extensionFaceOrder >= 0 )
+						? &mfem::IntRules.Get( mfem::Geometry::SEGMENT,
+						                       extensionFaceOrder )
+						: nullptr ),
 				gammaHMarker );
 			fluxRhs->Assemble();
 		}
@@ -3663,6 +3827,16 @@ namespace
 		plasmaAdjacencyBuilt = true;
 	}
 
+	void GradShafranovSolver::setPlasmaSupportFrozen( bool frozen )
+	{
+		plasmaSupportFrozenValue = frozen;
+	}
+
+	bool GradShafranovSolver::plasmaSupportFrozen() const
+	{
+		return plasmaSupportFrozenValue;
+	}
+
 	void GradShafranovSolver::refreshPlasmaComponent( mfem::Vector const &state )
 	{
 		if ( !plasmaComponentWanted() )
@@ -3680,8 +3854,14 @@ namespace
 		else if ( state.Size() != potentialSize )
 			throw std::invalid_argument( "meq::GradShafranovSolver::refreshPlasmaComponent: the state must be the full ( flux, potential, trace ) vector or the potential block alone" );
 
-		double const psiBnd = normalisedSource->boundaryNormalisation();
-		double const span = normalisedSource->normalisation() - psiBnd;
+		// THE SUPPORT EDGE AND NOT THE LIVE NORMALISATION, which are the same
+		// thing until freezePlasmaEdge() is on and must not diverge after it:
+		// insidePlasma() is the pointwise test this fill is the connectivity
+		// half of, so a fill taken at one edge under a pointwise test taken at
+		// another would disagree element by element, in the band where it
+		// matters most. See meq::NormalisedSource::supportAxis.
+		double const psiBnd = normalisedSource->supportBoundary();
+		double const span = normalisedSource->supportAxis() - psiBnd;
 
 		int const elements = mesh.GetNE();
 
@@ -4576,15 +4756,42 @@ namespace
 				// refreshes at the same state for the same reason
 				// ComponentRefreshed does it in one place -- a Jacobian taken
 				// against a different support is not the residual's derivative.
-				refreshPlasmaComponent( state );
+				//
+				// THE TWO LEGS ARE SPLIT HERE, which is why the bordered path
+				// times inside this lambda rather than wrapping an operator as
+				// the plain Newton path does: this loop is hand rolled and there
+				// is no mfem::Operator chain to decorate. Timing it here also
+				// catches the residual evaluations the BORDER costs -- the
+				// finite-difference column in psi_ax and the limiter column --
+				// which is exactly the thing a per-step share of the bordered
+				// path is being asked about.
+				// setPlasmaSupportFrozen() suppresses solve()'s own refreshes
+				// and leaves the public one alone, so the caller's outer loop
+				// still moves the support between solves. The leg is not
+				// charged when nothing ran, which is what makes a frozen run's
+				// profile honest rather than a zero with calls against it.
+				if ( !plasmaSupportFrozenValue )
+				{
+					double const tc = profileNow();
+					refreshPlasmaComponent( state );
+					profile.componentSeconds += profileNow() - tc;
+					++profile.componentCalls;
+				}
+
+				double const tr = profileNow();
 				npc->Mult( state, out );
+				profile.residualSeconds += profileNow() - tr;
+				++profile.residualCalls;
 				return;
 			}
 			// Refetched rather than held: formSystem() replaces the handle every
 			// time the local seed is refreshed, and a reference taken before the
 			// loop would outlive the operator it names.
+			double const tr = profileNow();
 			reduced.Ptr()->Mult( state, out );
 			out -= traceB;
+			profile.residualSeconds += profileNow() - tr;
+			++profile.residualCalls;
 		};
 
 		/*
@@ -5237,7 +5444,12 @@ namespace
 		// `linear`, recover the local increments. So the two backsolves the
 		// border costs are still two TRACE solves against one factorisation, and
 		// the extra unknown still costs one factorisation and two backsolves.
-		mfem::DarcyNPCSolver npcLinear( linear );
+		// The trace leg, wrapped for the reason the plain Newton path wraps it:
+		// one decorator covers the factorisation and every backsolve, and the
+		// border's N+2 backsolves against ONE factorisation then fall out of the
+		// call counts rather than having to be argued for.
+		TimedSolver timedLinear( linear, profile );
+		mfem::DarcyNPCSolver npcLinear( timedLinear );
 
 		bool converged = false;
 		for ( int iteration = 0; iteration <= newtonMaxIterations; ++iteration )
@@ -5382,16 +5594,26 @@ namespace
 			if ( npcOrdering )
 			{
 				// The same support the residual was evaluated at. See
-				// fieldResidual above.
-				refreshPlasmaComponent( unknown );
+				// fieldResidual above -- including when that is the FROZEN one,
+				// which is the whole point: a Jacobian assembled on a different
+				// support from its residual is the defect this guards, one
+				// level up from the moving support itself.
+				if ( !plasmaSupportFrozenValue )
+					refreshPlasmaComponent( unknown );
+				double const tg = profileNow();
 				mfem::Operator &jacobian = npc->GetGradient( unknown );
+				profile.gradientSeconds += profileNow() - tg;
+				++profile.gradientCalls;
 				npcLinear.SetOperator( jacobian );
 				npcLinear.Mult( residual, y );
 				npcLinear.Mult( column, z );
 			}
 			else
 			{
+				double const tg = profileNow();
 				mfem::Operator &gradient = reduced.Ptr()->GetGradient( traceX );
+				profile.gradientSeconds += profileNow() - tg;
+				++profile.gradientCalls;
 				linear.SetOperator( gradient );
 				linear.Mult( residual, y );
 				linear.Mult( column, z );
@@ -5837,6 +6059,40 @@ namespace
 
 	void GradShafranovSolver::solve()
 	{
+		/*
+		 * THE LEG PROFILE IS ZEROED HERE AND THE TOTAL CLOCK STARTS HERE, so the
+		 * numbers belong to THIS solve and to nothing before it.
+		 *
+		 * At the very top, ahead of every dispatch below, because two of those
+		 * dispatches leave through a `return` -- solveByPicardThenNewton() and
+		 * solveByPicard() -- and a reset placed after them would leave the
+		 * Picard paths reporting the legs of whatever ran last. They accumulate
+		 * no legs of their own, so what they report is a total and four zeroes,
+		 * which is the truthful answer for a path that builds no Jacobian.
+		 *
+		 * `profileStart` is deliberately a local and not a member: solve() can be
+		 * re-entered -- solveByPicardThenNewton() calls it for stage 2 -- and a
+		 * member would have the inner call overwrite the outer one's start.
+		 */
+		profile = StepProfile{};
+
+		// Level 2. Process-wide and static, so it is reset here beside the legs
+		// and read in the same destructor that closes the total. See StepProfile.
+		mfem::DarcyHybridization::ResetComputeHTime();
+
+		double const profileStart = profileNow();
+		struct ProfileTotal
+		{
+			GradShafranovSolver::StepProfile &p;
+			double t0;
+			~ProfileTotal()
+			{
+				p.totalSeconds = profileNow() - t0;
+				p.computeHSeconds = mfem::DarcyHybridization::GetComputeHTime();
+				p.computeHCalls = mfem::DarcyHybridization::GetComputeHCalls();
+			}
+		} const profileTotal{ profile, profileStart };
+
 		// The Picard paths iterate a fixed point on the POTENTIAL, not a residual
 		// on the trace, so they do not go through prepare()-then-Newton at all --
 		// picardStep() re-enters prepare() itself, once per iteration.
@@ -5984,6 +6240,13 @@ namespace
 			linear.SetPrintLevel( -1 );
 #endif
 
+			// The trace leg. Wrapped HERE, before mfem::DarcyNPCSolver receives
+			// it, so that the factorisation and the backsolve are timed wherever
+			// MFEM chooses to call them from -- and so that ONE wrapper covers
+			// both orderings, the condensation handing this straight to Newton
+			// while NPC hands it to the elimination.
+			TimedSolver timedLinear( linear, profile );
+
 			// The reduced operator is DarcyHybridization itself, whose GetGradient()
 			// differentiates the assembled residual rather than the continuous
 			// equation. That is the point of doing it this way: CEDRES++ rejected
@@ -6025,7 +6288,7 @@ namespace
 			{
 				npc = std::make_unique<mfem::DarcyNPCOperator>(
 					*darcy->GetHybridization(), blockOffsets, darcyRhs );
-				npcLinear = std::make_unique<mfem::DarcyNPCSolver>( linear );
+				npcLinear = std::make_unique<mfem::DarcyNPCSolver>( timedLinear );
 			}
 
 			mfem::Operator &bareOperator =
@@ -6045,14 +6308,30 @@ namespace
 			 * than downgraded, so this test is a statement of which path is
 			 * live rather than a fallback.
 			 */
+			// The residual and gradient legs. INNERMOST, inside both wrappers
+			// below, so the flood fill and the shift are charged elsewhere.
+			TimedOperator timedOperator( bareOperator, profile );
+
 			std::unique_ptr<ComponentRefreshed> refreshed;
-			if ( npcOrdering && plasmaComponentWanted() )
+			if ( npcOrdering && plasmaComponentWanted()
+			     && !plasmaSupportFrozenValue )
 				refreshed = std::make_unique<ComponentRefreshed>(
-					bareOperator,
-					[ this ]( mfem::Vector const &x ) { refreshPlasmaComponent( x ); } );
+					timedOperator,
+					[ this ]( mfem::Vector const &x )
+					{
+						// The component leg, taken here rather than inside
+						// refreshPlasmaComponent() because this is the only place
+						// that knows the call belongs to a Newton step: the same
+						// function is also reached from the post-processing.
+						double const t0 = profileNow();
+						refreshPlasmaComponent( x );
+						profile.componentSeconds += profileNow() - t0;
+						++profile.componentCalls;
+					} );
 
 			mfem::Operator &residualOperator =
-				refreshed ? static_cast<mfem::Operator &>( *refreshed ) : bareOperator;
+				refreshed ? static_cast<mfem::Operator &>( *refreshed )
+				          : static_cast<mfem::Operator &>( timedOperator );
 
 			// The unknown, and the right hand side Newton subtracts from the
 			// residual. BOTH RIGHT HAND SIDES ARE ZERO AND THEY ARE ZERO FOR
@@ -6167,7 +6446,7 @@ namespace
 			if ( npcOrdering )
 				nonlinear->SetSolver( *npcLinear );
 			else
-				nonlinear->SetSolver( linear );
+				nonlinear->SetSolver( timedLinear );
 			nonlinear->SetMonitor( recorder );
 
 #ifdef MFEM_USE_SUNDIALS
@@ -6292,6 +6571,17 @@ namespace
 
 		if ( !fieldsAreState )
 			darcy->RecoverFEMSolution( traceX, darcyRhs, darcySolution );
+
+		// UNDER AN mfem::Device THE SOLVE WROTE THE BLOCKS THROUGH ALIASES OF
+		// `solution`, AND darcyFlux / potentialGf / traceGf ARE SEPARATE ALIAS
+		// REGISTRATIONS THAT NEVER HEARD ABOUT IT. An alias carries its own
+		// validity flags, so reading one on the host after a device solve reads
+		// the STALE HOST COPY -- silently, and zero is what it holds. On the
+		// host path every flag already says host-valid and these are no-ops.
+		solution.SyncToBlocks();
+		darcyFlux.SyncMemory( solution.GetBlock( 0 ) );
+		potentialGf.SyncMemory( solution.GetBlock( 1 ) );
+		traceGf.SyncMemory( solution.GetBlock( 2 ) );
 
 		// The one place the sign convention is undone. See the file comment.
 		fluxGf = darcyFlux;
@@ -6495,6 +6785,12 @@ namespace
 	int GradShafranovSolver::newtonIterations() const
 	{
 		return newtonIterationCount;
+	}
+
+	GradShafranovSolver::StepProfile const &
+	GradShafranovSolver::stepProfile() const
+	{
+		return profile;
 	}
 
 	long GradShafranovSolver::localNonlinearIterations() const

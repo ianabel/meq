@@ -584,6 +584,28 @@ same experiment — 1.68 then 1.20, floored — which is what says the property
 belongs to the rule. It also helps: **24 Newton steps against 47** on a confined
 rectangle, because at intermediate iterates the level really does fragment.
 
+**AND `setPlasmaSupport()` ONLY REACHES THE FILL IF IT IS CALLED ON THE WRAPPER,
+WHICH COST XP-2 THREE SESSIONS.** `plasmaComponentWanted()` asks
+`normalisedSource->plasmaSupport()`, and `normalisedSource` is whatever the
+solver was handed — on a free-boundary machine that is
+`meq::CoilAugmentedNormalisedSource`, whose constructor does **not** adopt the
+flag from the source it wraps. So `plasma->setPlasmaSupport( true )` followed by
+wrapping leaves the wrapper saying **false**, `plasmaComponentWanted()` is false,
+and **the fill never runs** — while `F` stays confined, because the inner
+source's pointwise test is live. Nothing fails loudly and nothing is logged; the
+only tell is `plasmaComponentElements()` reading `0 of 0 over 0 components`,
+which is what *no fill is live* prints and not what *an empty plasma* prints.
+
+`apps/meq.cpp` has always called it on the wrapper and is correct;
+`XPointOuter`'s fixture did not, so **the one diverted case in the tree ran
+without XP-1** — 333 elements of private flux region, 44% of the candidates,
+carrying a current channel nobody asked for. → **[M-82](MEASUREMENTS.md#m-82)**.
+The class documents the trap in the OTHER direction, a caller setting only the
+wrapper's flag and leaving the wrapped source unconfined; this is its mirror
+image and the documentation did not cover it. **The transferable part**: a
+virtual forwarder runs one way, and the object a *third* party interrogates may
+be neither the one you set nor the one that acts.
+
 **AND THE MOVING SUPPORT IS REACHABLE TOO, AS `[source] ConfineToPlasma`** —
 `F = 0` wherever `Ψ ≤ 0`, refused unless `Normalised = true` because the test is
 on `Ψ`. **The coil term is OUTSIDE that support and the order the sum is taken
@@ -1439,7 +1461,8 @@ premise. It does not reproduce on the solve: `Ω_{p,h}`'s per-pair `ψ*` reads 4
 **4.50**, 4.74 — scatter, and rising rather than falling — while the fitted
 rectangle reads 4.94 on the same equilibrium at the same `j`. Raising the source
 rule from `2k+4` to `2k+16` moves the column in **no digit**, so it is not the
-quadrature. What is left is `Γ_{p,h}`'s staircase of 270° re-entrant corners,
+quadrature. What is left is `Γ_{p,h}`'s re-entrant corners — 225° and 270° on a
+simplicial background, **[M-84](MEASUREMENTS.md#m-84)** —
 where HDG's duality argument for `k+1` and `k+2` wants an `H²`-regular adjoint
 and does not get one. The lever this tree already has is `meq::AdaptiveDomain`,
 GS-2 §3.3's companion mesh.

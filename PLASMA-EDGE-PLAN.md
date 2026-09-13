@@ -22,8 +22,30 @@ this instead of the things `ROADMAP.md` puts ahead of it — §10's diverted
 plasmas among them, which this plan explicitly cannot cover, both transfer path
 families giving out at a corner. **Its own central premise is now measured at all three rungs and it is TRUE** —
 PE-0, §6 — and the same measurement says the plan's own machinery does not cash
-it: the transfer costs `ψ*` about a full order, so PE-0's acceptance as written
-is not reachable and it is the acceptance that has to move.
+it. **PE-0's `ψ*` acceptance is `k+2` where `λ` sits on `Γ_{p,h}` and `k+1`
+through the transfer**, the latter being ExtensionConvergence's per-pair floor —
+`ψ*` is never worse than `ψ_h`'s own design rate — applied across the sequence.
+
+**AND THE TRANSFER DOES NOT COST AN ORDER, WHICH IS WHAT THIS PARAGRAPH USED TO
+SAY.** → **[M-83](MEASUREMENTS.md#m-83)**. Read pair by pair at the fine end the
+transferred `ψ*` gives **2.84 / 3.87 / 4.79** against `k+2` of 3 / 4 / 5: the
+rate is intact. What the transfer costs is a **constant** — 30×, 93× and 555×
+the fitted column at `k = 1, 2, 3` — because the lifting evaluates the element's
+own degree-`k` polynomial *outside* its element along a path of length
+`d ≈ 1.3 h`, and extrapolating a degree-`k` polynomial that far amplifies its
+error by a factor exploding in `k`. A rate read endpoint to endpoint over a
+finite range of `h` therefore reads `k+1`. The gate stays at `k+1` because that
+is the only floor holding over the range this sequence spans; it is not a
+statement that an order is gone. **The constant is set by `dist/h`**, so
+`meq::AdaptiveDomain` is the lever here too.
+
+**`k+1.5` IS THE OBVIOUS NUMBER AND IT IS MEASURED WRONG.** Mirroring
+`ExtensionConvergence`'s *sequence* floor on the outer boundary would fail seven
+of PE-0's nine rows: 2.23 against 2.35, 3.16 against 3.35 and 4.00 against 4.35
+at `j = 0` alone. **[M-81](MEASUREMENTS.md#m-81)** also shows that no measuring
+window on this mesh family rescues either column — refining floors the fitted
+one at 3.6e-14 and stalls the transferred one three orders *above* the floor,
+where `ψ*` and `ψ_h` land within 20% of each other.
 
 ## 1. What this fixes, and what it costs to leave unfixed
 
@@ -241,7 +263,12 @@ so it is not the quadrature; the fitted rectangle rules out the fixture and the
 solver. The obvious
 reading, and it is a reading rather than a measurement: HDG's `k+1` in `ψ_h` and
 `k+2` in `ψ*` come from a duality argument that wants the adjoint problem
-`H²`-regular, and `Γ_{p,h}` is a staircase of `270°` re-entrant corners.
+`H²`-regular, and `Γ_{p,h}` has re-entrant corners. **Measured, not assumed,
+and the phrase "a staircase of 270° corners" that stood here was quad language
+on a simplicial mesh**: the background is `Element::TRIANGLE`, right triangles of
+45/45/90 with six meeting at an interior vertex, so a boundary vertex's interior
+angle is a sum drawn from { 45°, 90° }. At `n = 64` the interface carries 22 at
+90°, 16 at 135°, 54 at 180°, **12 at 225° and 20 at 270°**. → **[M-84](MEASUREMENTS.md#m-84)**.
 
 **AND THE TRANSFERRED ROUTE IS INTERMITTENT, ON A SMOOTH CIRCLE.** §9.4 records
 a mesh-dependent fragility and attributes it to a corner. PE-0 meets it with no
@@ -329,7 +356,7 @@ FITTED rectangle strictly inside the plasma — no cut, no staircase, no transfe
 trace the per-pair `ψ*` reads 4.70, 4.50, 4.74: scatter, and rising rather than
 falling. Raising the source rule from `2k+4` to `2k+16` moves that column in **no
 digit**, so it is not the quadrature either. **The premise is true at all three
-rungs**; what is left of the shortfall belongs to `Γ_{p,h}`'s staircase of 270°
+rungs**; what is left of the shortfall belongs to `Γ_{p,h}`'s re-entrant 225° and 270°
 re-entrant corners, where HDG's duality argument wants an `H²`-regular adjoint
 and does not get one. §6's PE-0 row has the numbers.
 

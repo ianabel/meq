@@ -680,15 +680,21 @@ namespace meq
 		// to Serial when the answer is no, which is what keeps a file that says
 		// nothing working on every build.
 		AssemblyModeType assemblyMode = AssemblyModeType::Threaded;
-		TraceSolverType traceSolver = TraceSolverType::UMFPack;
+		// PARDISO, matching the library's own defaultTraceSolver(). It is faster
+		// than UMFPack single-threaded and it is the only one of the two whose
+		// MKL threads are spendable under the threaded assembly above, the two
+		// responding to MKL_NUM_THREADS in OPPOSITE directions.
+		TraceSolverType traceSolver = TraceSolverType::Pardiso;
 
-		// Whether the file SAID "threaded" or merely inherited it, and the two
-		// must behave differently on a build that cannot thread. A file that
-		// asks for it is refused, because a caller naming a mode has a reason;
-		// a file that says nothing falls back to Serial and runs. Without this
-		// flag the default would make MEQ unusable on any build without
-		// OpenMP -- which is most of them, and is exactly what CI builds.
+		// Whether the file SAID "threaded" or "pardiso" or merely inherited
+		// them, and the two must behave differently on a build that lacks the
+		// backing package. A file that asks is refused, because a caller naming
+		// a mode or a solver has a reason; a file that says nothing falls back
+		// -- to Serial, and to UMFPack -- and runs. Without these flags the
+		// defaults would make MEQ unusable on any build without OpenMP or
+		// without oneMKL, which is most of them and is exactly what CI builds.
 		bool assemblyModeWasGiven = false;
+		bool traceSolverWasGiven = false;
 
 		// Newton stops when either ||R|| <= NewtonAbsoluteTolerance or
 		// ||R|| <= NewtonRelativeTolerance * ||R_0||, and fails after

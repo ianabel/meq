@@ -520,10 +520,12 @@ since that is an ellipse.
      - ``"serial"`` or ``"threaded"``. Who computes the element-local work.
        See :ref:`linear-threading`.
    * - ``TraceSolver``
-     - ``"umfpack"``
+     - ``"pardiso"``
      - ``"umfpack"`` or ``"pardiso"``. Which direct solver factorises the
-       hybridized trace system. See :ref:`linear-trace-solver`. ``"cudss"``
-       parses but the driver refuses it — see the note below.
+       hybridized trace system. The default falls back to ``"umfpack"`` on a
+       build without oneMKL — a value the file *states* is refused there, one it
+       merely inherits is downgraded. See :ref:`linear-trace-solver`.
+       ``"cudss"`` parses but the driver refuses it — see the note below.
 
 .. note::
 
