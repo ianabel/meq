@@ -1800,6 +1800,87 @@ namespace meq
 			double limiterContactZ() const;
 
 			/**
+			 * XP-3: `psi_bnd` AT AN X-POINT THAT IS ITSELF TWO UNKNOWNS OF THE
+			 * SAME NEWTON. FREE-BOUNDARY-PLAN.md section 10.4 and 10.6.
+			 *
+			 * @param r,z  where the X-point is BELIEVED to be. It is an initial
+			 *             value for an unknown, not a prescription, and a
+			 *             re-solve continues from wherever the last one left it
+			 *             -- as the profile scale does.
+			 *
+			 * setBoundaryFluxPoint() pins `psi_bnd` at a PRESCRIBED point, which
+			 * is right for a limiter -- the contact is a piece of hardware -- and
+			 * wrong for a divertor, whose X-point is a functional of the solution
+			 * and moves as Newton moves. XP-2 answers that with an OUTER fixed
+			 * point: solve pinned, locate the saddle, re-pin, re-solve. This is
+			 * the same statement made INSIDE the Newton, so the three constraints
+			 *
+			 *     q_r( r_X, z_X )           = 0
+			 *     q_z( r_X, z_X )           = 0
+			 *     psi_bnd - psi_h( r_X, z_X ) = 0
+			 *
+			 * close together on one factorisation per step.
+			 *
+			 * **THE TWO NEW UNKNOWNS COST NO BACKSOLVE, WHICH IS NOT OBVIOUS AND
+			 * IS THE WHOLE ECONOMY OF THE STAGE.** The bordered elimination pays
+			 * one backsolve per border COLUMN, `c_j = dR/dp_j`, and the field
+			 * residual does not contain `( r_X, z_X )` at all: they reach it only
+			 * through `psi_bnd`, which has a column of its own already. So both
+			 * columns are exactly zero, `z_j = J^-1 0 = 0`, and the system grows
+			 * from `( N + 2 )` to `( N + 4 )` in the DENSE corner alone. An
+			 * X-point costs two rows of a 4x4 and nothing else.
+			 *
+			 * **AND THE CORNER BLOCK IS EXACT, WHERE THE PLAN EXPECTED IT NOT TO
+			 * BE.** Section 10.4 reads the block `d( q_r, q_z )/d( r_X, z_X )` as
+			 * `grad q` -- the potential's Hessian -- and notes there is no solved
+			 * variable for it, differentiating an L2 field of degree `k` leaving
+			 * `k - 1`. That is true of `grad q` as an approximation of the
+			 * CONTINUOUS Hessian and it is not what Newton needs: the derivative
+			 * wanted is that of the DISCRETE residual, and `q_h` is a polynomial
+			 * on its element, so `dq_h/dx` there is exact arithmetic. The same
+			 * goes for `d psi_h/d( r_X, z_X )` in the `psi_bnd` row. Nothing on
+			 * this path is differenced.
+			 *
+			 * **WHAT IS NOT SMOOTH IS THE ELEMENT CHANGING.** `q_h` is
+			 * discontinuous across a face, so the residual the border rows
+			 * evaluate jumps by `O( h^{k+1} )` when the iterate carries the point
+			 * over a mesh line. The element is therefore FROZEN within a Jacobian
+			 * and re-decided at each accepted step, which is the discipline the
+			 * axis row and the limiter contact already keep -- and a point a hair
+			 * outside its own element is evaluated IN it rather than refused, so
+			 * that a step across a face is a jump in the residual and not a
+			 * failure to have one.
+			 *
+			 * **NPC ONLY**, and refused otherwise: the two new rows are covectors
+			 * on the FLUX, and only under NonlinearOrdering::NPC is the flux an
+			 * unknown of the system.
+			 *
+			 * **IT DOES NOT DECIDE WHICH critical point BOUNDS THE PLASMA.** That
+			 * is section 10.5's discrete choice, it is not differentiable, and it
+			 * stays where XP-2 put it: outside the Newton. This follows ONE
+			 * saddle, from the value given here, exactly as the axis constraint
+			 * follows one O-point.
+			 *
+			 * @throws std::logic_error if a limiter was already named by
+			 *         setBoundaryFluxPoint() or setLimiterSurface(). They are
+			 *         alternatives: all three pin the same unknown.
+			 * @throws std::invalid_argument if the point is not finite, or `r` is
+			 *         not strictly positive -- the symmetry axis is not an
+			 *         X-point and the flux mass degenerates there.
+			 */
+			void setXPointBoundary( double r, double z );
+
+			/// Whether setXPointBoundary() made the X-point an unknown.
+			bool xPointIsAnUnknown() const;
+
+			/// Where the last solve left the X-point, and whether it was still
+			/// inside the mesh at the end. Valid after solve(); false, and the
+			/// values setXPointBoundary() was given, otherwise.
+			bool xPointWasLocated() const;
+			double xPointR() const;
+			double xPointZ() const;
+
+			/**
 			 * PRESCRIBE THE PLASMA CURRENT AND SOLVE FOR THE PROFILE SCALE,
 			 * which is how every production free-boundary code poses this.
 			 *
@@ -2683,6 +2764,43 @@ namespace meq
 			                             mfem::Vector &shape,
 			                             mfem::Array<int> &dofs, double &r,
 			                             double &z ) const;
+
+			/// setXPointBoundary(): XP-3's two extra unknowns. The values are the
+			/// ITERATE and not a prescription -- set to the guess by the setter
+			/// and left wherever solve() finishes, so a re-solve continues.
+			bool xPointIsUnknown = false;
+			bool xPointLocatedValue = false;
+			double xPointRValue = 0.0;
+			double xPointZValue = 0.0;
+
+			/**
+			 * The element containing ( @a r, @a z ) and the reference
+			 * coordinates there, trying @a hint first and scanning otherwise.
+			 *
+			 * **IT ADMITS A SMALL OVERSHOOT AND locatePotentialPoint() DOES
+			 * NOT**, which is the whole reason it is a second function. A
+			 * prescribed limiter contact is a point of the domain and
+			 * "no element contains it" is a configuration error; XP-3's X-point
+			 * is an UNKNOWN, so an iterate carrying it a rounding error outside
+			 * the element that held it last is an ordinary event, and refusing
+			 * there would turn a face crossing into a failed solve. The
+			 * polynomial of the element it is leaving is evaluated slightly
+			 * outside that element instead, which is what CriticalPoint's own
+			 * `overshoot` already allows for a root of a discontinuous `q_h`.
+			 *
+			 * **AND THE INVERSE MAP IS THE UNPROJECTED ONE.** MFEM's default
+			 * solver type is NewtonElementProject, which CLAMPS the iterate into
+			 * the reference element -- so an outside point comes back as a point
+			 * ON the boundary and its overshoot reads zero, which is exactly the
+			 * clamped-inverse-map failure CLAUDE.md records costing this tree a
+			 * whole solve path.
+			 *
+			 * @return false when no element is within the overshoot tolerance,
+			 *         which is the X-point having left the mesh. The caller is a
+			 *         line search and treats it as a rejected step.
+			 */
+			bool locateFieldPoint( double r, double z, int hint, int &element,
+			                       mfem::IntegrationPoint &reference ) const;
 
 			/// setAxisConstraint(), and where the last solve put the axis.
 			AxisConstraint axisConstraintChoice = AxisConstraint::LocatedAxis;

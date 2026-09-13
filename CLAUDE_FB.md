@@ -1406,12 +1406,121 @@ indices inside — holds at every order, and it is the half a diverted
 free-boundary solve would use: *the sweep has found everything the boundary says
 is in there*.
 
-**WHAT XP-0 EXPOSES FOR XP-2 AND XP-3.** `sweep()` is the only entry point that
-reaches a saddle, and it costs one Newton per element. XP-3's border relocates the
-X-point once per Jacobian, which is exactly the trade `tryFindAxisFrom()` exists to
-avoid for the axis — so a `Saddle` sense, or a sibling entry point with the same
-seed-and-rings contract, is wanted before the three-row border is built. That is a
-gap in the API rather than a defect in it.
+**WHAT XP-0 EXPOSED FOR XP-2 AND XP-3, AND IT IS CLOSED.** `sweep()` was the only
+entry point that reaches a saddle, and it costs one Newton per element.
+`tryFindCriticalPointFrom( r, z, AxisSense::Saddle, found )` is the seeded route
+— `tryFindAxisFrom()`'s own seed-and-rings contract, one piece of code, with the
+axis-named forward refusing `Saddle` so that *axis* keeps meaning axis. It is
+measured in `theSeededSaddleSearchCostsLessThanASweep`: the same X-point to
+round-off for a **thirtieth to a two-hundredth** of the Newton solves, the ratio
+widening with refinement because rings are an absolute element count and a sweep
+is the whole mesh.
+
+**AND XP-3 TURNED OUT NOT TO NEED IT, WHICH IS WORTH SAYING BECAUSE THE PLAN SAID
+IT WOULD.** The prediction here was that *"XP-3's border relocates the X-point
+once per Jacobian"*. It does not relocate it at all: the two rows `q_r = q_z = 0`
+ARE the root find, so Newton moves the point and all the border needs per
+iterate is a **point location** — which element holds `( r_X, z_X )` — and not a
+search. What the seeded search is actually for is XP-2, which uses it every
+sweep, and XP-3's own acceptance, which checks the border's answer against an
+independent root find on the same field.
+
+## XP-3: the X-point is two more unknowns of the same Newton
+
+**`FREE-BOUNDARY-PLAN.md` §10.4 and §10.6's last rung before a diverted machine
+case.** `meq::GradShafranovSolver::setXPointBoundary` is the whole interface, and
+what it adds to the bordered system of FB-5 is
+
+```
+q_r( r_X, z_X )             = 0
+q_z( r_X, z_X )             = 0
+psi_bnd - psi_h( r_X, z_X ) = 0
+```
+
+with `( r_X, z_X )` unknowns beside `ψ_ax`, `ψ_bnd`, the profile scale and the
+exterior coefficients. `tests/convergence/XPointBorder.cpp` is the acceptance and
+it shares XP-2's fixture through `tests/convergence/DivertedMachine.hpp` — the
+same machine and not a copy of it, because the headline assertion is agreement
+between the two.
+
+→ **[M-86](MEASUREMENTS.md#m-86)** — the sweeps · where it closed · against XP-2 · the cost · the `ψ_ax` first step
+
+**THE TWO NEW UNKNOWNS COST NO BACKSOLVE, AND THAT IS NOT OBVIOUS.** The bordered
+elimination pays one backsolve per border COLUMN, `c_j = ∂R/∂p_j`, and the field
+residual does not contain `( r_X, z_X )`: they reach it only through `ψ_bnd`,
+which has a column already. So both columns are **exactly zero**, `z_j = J⁻¹0 = 0`,
+and the system grows from `( N + 2 )` to `( N + 4 )` in the dense corner alone.
+An X-point costs two rows of a 4×4 and nothing else.
+
+**AND THE CORNER BLOCK IS EXACT, WHERE §10.4 EXPECTED IT NOT TO BE. THE ERROR IN
+THE PREDICTION IS WORTH KEEPING BECAUSE IT IS A CLASS OF ERROR.** The plan reads
+`∂( q_r, q_z )/∂( r_X, z_X )` as `∇q` — the potential's Hessian — and notes there
+is no solved variable for it, since differentiating an L2 field of degree `k`
+leaves `k−1`; it calls this *"the same wall recorded for the band continuation of
+`B`"* and plans a differenced fallback. The analogy does not carry. The band
+continuation needs `∇q` as an approximation of the **continuous** Hessian, and
+there it really is an order down. Newton needs the derivative of the **discrete**
+residual with respect to the discrete unknowns — and `q_h` is a polynomial on its
+element, so `∂q_h/∂x` there is exact arithmetic, not an approximation of
+anything. Nothing on this path is differenced, the fallback was not needed, and
+the same goes for `∂ψ_h/∂( r_X, z_X )` in the `ψ_bnd` row. *Approximating a
+continuous object and differentiating a discrete one are different questions, and
+the second is the one a Jacobian asks.*
+
+**THE `ψ_bnd` ROW'S TWO NEW ENTRIES ARE NOT `r q`.** `ψ_h` and `q_h` are separate
+solved fields whose identity `∇̄ψ = r q` is only weak, so the row takes the
+potential's own derivative from the same element. Both entries vanish at a
+converged X-point either way, which is exactly why writing them costs nothing and
+leaving them out would be invisible until the order was measured.
+
+**WHAT IS GENUINELY NOT SMOOTH IS THE ELEMENT CHANGING.** `q_h` is discontinuous
+across a face, so carrying the point over a mesh line changes the polynomial the
+rows evaluate, by `O( h^{k+1} )`. The element is therefore frozen within a
+Jacobian and re-decided at each accepted step — the discipline the axis row and
+the limiter contact already keep — and a point a hair outside its own element is
+evaluated **in** it rather than refused, so a step across a face is a jump in the
+residual rather than a failure to have one. `locateFieldPoint()` is that, and it
+uses MFEM's **unprojected** inverse map: the default `NewtonElementProject`
+clamps, and a clamped point reports an overshoot of zero however far outside it
+really is, which is the clamped-inverse-map failure `CLAUDE.md` already records.
+
+**IT IS NOT CHEAPER IN NEWTON STEPS THAN XP-2 AND THE WIN IS STRUCTURAL** — 21
+steps against 18 on the same fixture in the same process, M-86. What it buys is
+that the X-point stops being an **outer state**: §10.5 names two on XP-2's fixed
+point, which critical point bounds the plasma and which elements carry current,
+and XP-3 removes the first by making the position differentiable, which it is. It
+does not touch the second, which is not, so this case still freezes the support
+and still re-decides it between solves.
+
+**THE OBSERVED ORDER IS THE FIXTURE'S CEILING AND NOT THE BORDER'S, AND ONLY THE
+CONTROL COULD SAY SO.** XP-3's bootstrap tail reads 1.664 and XP-2's — the same
+bordered system less exactly these two rows — reads 1.667. Neither is quadratic,
+and what caps them is not known: the candidates are the axis argmax hopping
+elements, an `O( h^{k+1} )` kink, and the element-granular plasma support. The
+acceptance is therefore a **comparison** rather than an absolute bound, which is
+the only honest reading. A clean quadratic run on a bordered free-boundary solve
+is `LimiterCurve`'s, on a fixture with none of that.
+
+**AND THE FIRST NEWTON STEP OF EVERY BORDERED SOLVE IS TAKEN WITH THE `ψ_ax`
+BORDER DECOUPLED.** Found while looking for the order ceiling and measured with a
+trace at the border build: `constraintLocated` was last written by the `peakAt()`
+that computes the convergence target, which runs on the **cold** state where no
+axis exists — so iteration 0 builds the empty row and every iteration after it
+builds the real one. **Repairing it is three lines and it changes which
+equilibrium the diverted machine reports**: XP-3 goes 14 steps to 10 with the
+same answer in every digit, and XP-2 goes 7 steps to 3 and lands on a different
+branch, `ψ_ax` 8.052272e-02 against 8.266004e-02 with the X-point 1.26e-02 m away.
+The decoupled step is `ψ_ax ← max ψ_h`, which is conservative, and on this machine
+that is what keeps the iteration in the physical branch's basin. So it is a
+branch-selection question rather than a Jacobian one and it is **left alone** —
+recorded in M-86 and beside the code, so that the next person to find the stale
+flag does not repair it without measuring the second row.
+
+**WHAT IS NOT BUILT: A TOML ROUTE.** `[boundary.limiter]` reaches
+`setBoundaryFluxPoint()` and `setLimiterSurface()`; there is no key for
+`setXPointBoundary()`, exactly as there was none for XP-2. A diverted run from a
+file is XP-4's, and it wants the support's own outer loop in the driver as well,
+which is the piece neither stage has built.
 
 ## PE-0: the premise is true, and the plan's own machinery does not cash it
 

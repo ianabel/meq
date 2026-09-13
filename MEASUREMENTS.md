@@ -1740,3 +1740,76 @@ mixed bag:
 or `j = 1`**, which is worth knowing before reading them as the transfer: `j` is
 the order to which the profiles vanish at the edge, so this is the corner of the
 grid where the solution is least regular across `Gamma_p`.
+
+### M-86
+
+**XP-3: the X-point as two unknowns of the same Newton reaches XP-2's answer to
+1.9e-14 m, and costs no backsolve.** `tests/convergence/XPointBorder` on
+`examples/diverted-tokamak.toml` — the same fixture as M-82, `k = 2`, the stored
+Green's-function guess, the bootstrap pin at `( 1.143144, −0.553965 )`, which is
+7.07e-02 m from the answer and about two thirds of an element.
+
+The border adds `q_r( x ) = q_z( x ) = 0` to `ψ_bnd − ψ_h( x ) = 0` and makes
+`( r_X, z_X )` unknowns. The support is still an outer state — §10.5's
+combinatorial one, which is not differentiable — so the sweeps below move the
+support and nothing else:
+
+| sweep | its | X-point | moved | `ψ_ax` | `ψ_bnd` | tail order | support |
+|---|---|---|---|---|---|---|---|
+| 0 | 14 | ( 1.093, −0.603 ) | 7.043e-02 | 8.265144e-02 | 3.237253e-02 | **1.664** | 419/752 |
+| 1 | 3 | ( 1.093, −0.604 ) | 7.063e-05 | 8.266004e-02 | 3.237932e-02 | 1.088 | 440/797 |
+| 2 | 2 | ( 1.093, −0.604 ) | 3.041e-10 | 8.266004e-02 | 3.237932e-02 | 0.606 | 440/797 |
+| 3 | 2 | ( 1.093, −0.604 ) | 1.739e-14 | 8.266004e-02 | 3.237932e-02 | 0.606 | 440/797 |
+
+**THE BORDER CLOSES ON A SADDLE OF THE FIELD IT SOLVED**, which is the whole
+stage: an independent `CriticalPointFinder` root find on the converged field puts
+the saddle **6.355e-15 m** from where the border left the point, and `ψ_bnd`
+agrees with `ψ_h` there to **5.83e-16**. The point sits 0.067 into its element in
+reference coordinates, so it is not on a mesh line. Against freegs4e it is
+**4.378e-04 m** away — XP-2's own figure to every digit.
+
+**AGAINST XP-2 IN ONE PROCESS, ON ONE FIXTURE:**
+
+| | X-point | `ψ_ax` | `ψ_bnd` |
+|---|---|---|---|
+| border, XP-3 | ( 1.093103, −0.603529 ) | 8.266004e-02 | 3.237932e-02 |
+| outer loop, XP-2 | ( 1.093103, −0.603529 ) | 8.266004e-02 | 3.237932e-02 |
+| apart | **1.934e-14 m** | 1.278e-13 of the span | 3.616e-14 of the span |
+
+**IT IS NOT CHEAPER IN NEWTON STEPS AND THE WIN IS STRUCTURAL.** XP-3 spends
+14 + 3 + 2 + 2 = **21**; XP-2 spends 7 + 4 + 3 + 2 + 2 = **18** on the same
+fixture in the same process. The bootstrap is where it goes: XP-2's is pinned at
+a fixed point and is an easy smooth problem, and XP-3's carries the X-point
+7.07e-02 m with the line search damping hard for its first eight steps. What XP-3
+buys is that **the X-point is no longer an outer state** — one discrete state
+where XP-2 has two — and that the answer is a fixed point of the solve rather
+than of a loop around it.
+
+**THE OBSERVED ORDER IS THE FIXTURE'S AND NOT THE BORDER'S, AND THE CONTROL IS
+WHAT SAYS SO.** XP-3's bootstrap tail reads **1.664** over 14 iterations and
+XP-2's — the same bordered system less exactly these two rows — reads **1.667**
+over 7. Neither is quadratic. Every warm sweep on this fixture reaches the solve's
+floor in two steps, so an order read off one of those measures where the floor is:
+both routes read **0.606** on their last sweep, from histories that are three
+points long.
+
+**AND THE FIRST STEP OF EVERY BORDERED SOLVE IS TAKEN WITH THE `ψ_ax` BORDER
+DECOUPLED, WHICH IS A DEFECT WHOSE REPAIR CHANGES WHICH EQUILIBRIUM IS
+REPORTED.** `peakAt()` writes `constraintLocated` and it was last called on the
+COLD state when the convergence target was computed — where the flux and
+potential blocks are zero, so no axis is found. Measured with a trace at the
+border build: `located 0, rowSize 0` at iteration 0 of every solve and
+`located 1, rowSize 6` at every iteration after it. Re-establishing the state
+before the loop is three lines and does what it should:
+
+| | unrepaired | repaired |
+|---|---|---|
+| XP-3's bordered solve | 14 steps, orders 6.75 · 0.28 · 4.39 · 1.66 | **10 steps**, orders 1.88 · 1.37 · 1.33 · 1.51, **same answer every digit** |
+| XP-2's limiter-pinned solve | 7 steps, `ψ_ax` 8.266004e-02, X-point 4.4e-04 m from freegs4e | **3 steps**, `ψ_ax` **8.052272e-02**, X-point **1.26e-02 m** away and 1.1e-02 from freegs4e |
+
+So the decoupled first step is **conservative**, and on this machine it is what
+keeps the iteration inside the physical branch's basin while a full Newton step
+leaves it. That makes it a branch-selection question rather than a Jacobian one,
+CLAUDE.md's standing rule is that nothing may silently change which equilibrium
+is reported, and it is left alone — recorded here so that the next person to
+find the stale flag does not repair it without measuring the second row.

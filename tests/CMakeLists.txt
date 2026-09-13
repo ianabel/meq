@@ -184,6 +184,11 @@ set(MEQ_CONVERGENCE_TESTS
 	PlasmaConnectivity
 	# XP-2: psi_bnd from the located X-point, as an outer fixed point.
 	XPointOuter
+	# XP-3: the same statement made INSIDE the Newton -- the X-point is two more
+	# unknowns and q_r = q_z = 0 are two more rows. It shares XPointOuter's
+	# fixture through convergence/DivertedMachine.hpp, deliberately: its headline
+	# assertion is agreement with that case, so the two must solve one machine.
+	XPointBorder
 	# FB-1's coupling matrix P: the trace projection of the exterior modes onto
 	# Gamma_h. It needs a curved boundary and so needs MFEM, which is why it is
 	# a convergence test rather than a unit one -- ExteriorDtN's own tests, which

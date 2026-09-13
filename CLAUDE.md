@@ -557,7 +557,7 @@ their own file:
 |---|---|---|
 | toroidal flow | FL-0 to FL-8, **done** | `docs/rotation.rst` is the derivation, and `CLAUDE_FLOW.md` the record |
 | solution inversion | IN-A to IN-P, **every stage done** | `INVERSION-PLAN.md`, and `CLAUDE_INVERSION.md` |
-| free boundary | FB-A to FB-7 **done or answered**, FB-6 **met** | `FREE-BOUNDARY-PLAN.md`, and `CLAUDE_FB.md` |
+| free boundary | FB-A to FB-7 **done or answered**, FB-6 **met**, and §10's XP-0 to XP-3 **done** — the X-point is two unknowns of the bordered Newton | `FREE-BOUNDARY-PLAN.md`, and `CLAUDE_FB.md` |
 
 The two plan files that had nothing left in them are gone, converted to `docs/`:
 `DRIVER-PLAN.md` was stage 7 and `FLOW-PLAN.md` was the flow campaign. Git has
@@ -595,7 +595,7 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 git submodule update --init --recursive     # extern/toml11
 cmake -B build
 cmake --build build -j6
-cd build && OMP_NUM_THREADS=4 ctest -j4      # 49/50, about 530 s
+cd build && OMP_NUM_THREADS=4 ctest -j4      # 50/51, about 480 s
 ```
 
 **RUN IT `-j4` WITH `OMP_NUM_THREADS=4`, WHICH IS 3.2x FASTER AND MEASURED.**
@@ -605,7 +605,7 @@ product at the core count is what pays:
 
 → **[M-14](MEASUREMENTS.md#m-14)** — wall · CPU
 
-37/37 in every configuration when that table was taken, and **49 of 50 today**,
+37/37 in every configuration when that table was taken, and **50 of 51 today**,
 the one red being `PlasmaEdgeConvergence` and deliberate —
 the count moves as cases are added, so read the table's ratios rather than its
 absolute seconds. Nothing in the suite depends on a thread count, which is the
@@ -672,12 +672,15 @@ single-threaded — against `PedestalConvergence`'s 178 s. So 223 s is very near
 "the suite costs one lint run", and going below it means parallelising
 clang-tidy (`run-clang-tidy`) rather than anything about the solver.
 
-**AND `naming` IS NO LONGER AT THE TOP AT ALL.** At **50** tests the two longest
-are **`FreeBoundaryCoupling` at 413.2 s** and `naming` at 340.0 s, with
-`DriverAcceptance` at 124.2 s — which is 54 s more than it was, all of it the
-q-driven example's 43 equilibria — the first two within a factor of 1.6, so `-j4`
-cannot overlap them once everything else has finished and the run is very nearly
-the cost of the longest chain rather than of the total work.
+**AND `naming` IS NO LONGER AT THE TOP AT ALL.** At **51** tests the two longest
+are **`FreeBoundaryCoupling`** and **`naming`**, and back-to-back runs of the
+same tree read them at 281.8 s / 262.6 s and 311.7 s / 294.0 s — within a factor
+of 1.1 of each other in both runs, so `-j4` cannot overlap them once everything
+else has finished and the run is very nearly the cost of the longest chain
+rather than of the total work. `DriverAcceptance` read 77.3 s and 94.4 s;
+`XPointBorder`, XP-3's acceptance, 35.4 s and 49.7 s for five solves of the
+diverted machine. **Two readings of one tree, 477 s against 545 s**, which is
+the paragraph below making its own point rather than anything having changed.
 
 **AND THE `FreeBoundaryCoupling` FIGURE HAS BEEN 276 s, 433.8 s AND 381.7 s
 WITHOUT THE CODE BEING THE VARIABLE ANY OF THOSE TIMES.** 276 s is stale — the

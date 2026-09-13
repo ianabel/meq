@@ -3713,23 +3713,45 @@ q_z( r_X, z_X )  = 0          the X-point is a root of the SOLVED flux
 one factorisation, so this is `( N + 4 )` and is **mechanical** — the same
 statement §4.4 made about FB-5 and which held.
 
-**But one block is not exact, and this is the structural cost of the item.**
-Every border MEQ has built so far is either exactly `−e_j` (under NPC, because
-`ψ` and `q` are unknowns) or a local sensitivity. Here the corner block
-`∂( q_r, q_z )/∂( r_X, z_X )` is **`∇q`** — the Hessian of the potential — and
-there is no solved variable for it: differentiating an L2 field of degree `k`
-leaves `k−1`. This is the same wall recorded for the band continuation of `B`,
-where the honest answer was `O(h²)` at every `k`, and for the same reason.
+**This section predicted that one block would not be exact. DONE 2026-09-13, and
+the prediction was wrong — kept here because the mistake is a class of mistake.**
+What it said: every border MEQ has built so far is either exactly `−e_j` (under
+NPC, because `ψ` and `q` are unknowns) or a local sensitivity, and here the corner
+block `∂( q_r, q_z )/∂( r_X, z_X )` is **`∇q`** — the Hessian of the potential —
+with no solved variable for it, differentiating an L2 field of degree `k` leaving
+`k−1`; *"the same wall recorded for the band continuation of `B`"*.
 
-**What that costs is the Jacobian, not the answer.** An inexact corner block does
-not move the converged solution — `CLAUDE_HDGGS.md`'s *A wrong Jacobian is invisible to
-a convergence table* is the standing statement of this — it costs the quadratic
-rate. So **the acceptance for XP-3 must be the observed Newton order and not a
-convergence table**, and the fallback if the order goes is to difference the two
-rows in `(r_X, z_X)`, which is two extra residual evaluations in a 2-vector and
-is cheap. Note the standing warning that a differenced derivative of a hybridized
-residual is only as good as the local solves under it, which under NPC is not an
-issue at all.
+**The analogy does not carry.** The band continuation needs `∇q` as an
+approximation of the **continuous** Hessian, and there it really is an order down.
+Newton needs the derivative of the **discrete** residual with respect to the
+discrete unknowns — and `q_h` is a polynomial on its element, so `∂q_h/∂x` there
+is exact arithmetic, not an approximation of anything. The corner block is exact,
+the differenced fallback below was not needed, and the same goes for
+`∂ψ_h/∂( r_X, z_X )` in the `ψ_bnd` row. *Approximating a continuous object and
+differentiating a discrete one are different questions, and a Jacobian asks the
+second.*
+
+**What is genuinely not smooth is the ELEMENT changing**, `q_h` being
+discontinuous across a face: carrying the point over a mesh line moves the
+residual by `O( h^{k+1} )`. That is a floor rather than a cap, it only bites while
+the point is travelling, and the cure is the one the axis row already uses —
+freeze the element within a Jacobian, re-decide it at each accepted step, and
+evaluate a point a hair outside its element **in** that element rather than
+refusing it.
+
+**AND THE TWO NEW UNKNOWNS COST NO BACKSOLVE, WHICH THIS SECTION ALSO DID NOT
+SEE.** The elimination pays one backsolve per border COLUMN, and the field
+residual does not contain `( r_X, z_X )` — they reach it only through `ψ_bnd`,
+which has a column already. Both columns are exactly zero, so `( N + 4 )` grows
+over `( N + 2 )` in the dense corner alone.
+
+**The acceptance was still the right one**, for the reason given: an inexact
+corner block does not move the converged solution — `CLAUDE_HDGGS.md`'s *A wrong
+Jacobian is invisible to a convergence table* — it costs the rate. What XP-3
+measured is that the observed order is the **fixture's** ceiling rather than the
+border's, XP-2's identical bordered system less these two rows reading 1.667
+against XP-3's 1.664, so the acceptance had to become a comparison against that
+control. → **[M-86](MEASUREMENTS.md#m-86)**, and `CLAUDE_FB.md`, *XP-3*.
 
 ### 10.5 The two things that genuinely do not have an answer yet
 
@@ -3787,7 +3809,7 @@ defect live on a limiter case; XP-0 followed on 2026-09-08.
 | **XP-0** | **The X-point against a closed form — DONE 2026-09-08.** `CriticalPointFinder` on `Soloviev::nstx()`, whose X-point the twelve Cerfon–Freidberg constraints put at `( 0.699700, −1.716000 )`. Three cases in `tests/convergence/CriticalPointConvergence.cpp`: the closed-form check, the rate study on a box holding the saddle alone, and the audit on a box holding both. No free boundary and no normalisation. | **met, and it needed no seed.** `findAxis()` cannot reach a saddle by construction — it looks for an extremum — and `sweep()` can: on a box holding exactly one saddle it returns exactly one, at every `k` and every `n` tried, so the located point carries no prior. Position rate **1.814 / 3.566 / 4.223** at `k = 1, 2, 3` over `{ 4, 8, 16, 32, 64 }` against `k+1` less the axis study's own 0.25 of slack, monotone at every refinement. **The reference is checked first and one fixture fails that check**: `nstxAsPublished()`'s prescribed X-point carries `|∇ψ| = 2.97e-02` and its saddle is **9.10e-02** away, so it ships as the control rather than as a second fixture. `audit()` reads `+1` at the axis and `−1` at the X-point over `[0.35, 1.55] × [−2.10, 0.30]` at three orders, summing to the boundary degree of **0** — and `consistent()` is **false and must be**, since `+1 − 1 = 0 ≠ χ = 1` forces `q` not to be outward-transverse; the half of Poincaré–Hopf that needs no hypothesis is the half that holds |
 | **XP-1** | **The connectivity test — DONE 2026-09-07**, ahead of XP-0, because §7.18 found the defect live on a *limiter* case. `meq::PlasmaComponent`, driven by `refreshPlasmaComponent()` before every residual and every Jacobian; `[source] PlasmaConnectivity` selects it and `"pointwise"` is the control. | met: `theFillSeparatesThePrivateFluxRegionFromThePlasma` excludes the private flux region where the pointwise test includes it, as an element count **and** as `∫\|F\|`. **And the sharp one came out half false**: the fill does not leak through the X-point's own element — it leaks through the **band** of elements straddling the separatrix, every one of which carries `Ψ > 0` at some vertex, so a one-rule fill leaves **2,275** elements below the X-point, exactly what the pointwise test leaves. §10.3's own cure, blocking the saddle, is resolution-dependent. What ships is a **watershed** over the straddling band, needing no X-point finder and no parameter |
 | **XP-2** | **`ψ_bnd` from the located X-point, as an OUTER fixed point.** Locate, set the normalisation, re-solve. No new border. | **MET 2026-09-12.** → **[M-82](MEASUREMENTS.md#m-82)**. The outer fixed point contracts quadratically — steps 1.909e-03, 3.732e-06, 9.554e-10, 2.255e-13, the inner solve falling to two Newton steps — and finds **both** nulls of the double-null machine, 4.378e-04 m from freegs4e's X-point with `ψ_bnd` agreeing to 0.08%. **It needed TWO things and neither is sufficient alone**: XP-1's fill actually running, which a fixture defect had silently disabled — `setPlasmaSupport()` on the plasma source before the coil wrapper existed, leaving 333 elements of private flux region with a current channel — and §10.5's freeze applied to the SUPPORT as well as to the bounding point, `meq::NormalisedSource::freezePlasmaEdge` plus `GradShafranovSolver::setPlasmaSupportFrozen`. Every single-key experiment lands in a failing row |
-| **XP-3** | **The three-row border**, `(r_X, z_X, ψ_bnd)` inside the same Newton at `( N + 4 )`. | agreement with XP-2 at round-off, and **the observed Newton order**, which is the only thing that can see the inexact `∇q` corner block. `HighBetaConvergence` bit-identical, which is what says the generalisation reduces |
+| **XP-3** | **The three-row border**, `(r_X, z_X, ψ_bnd)` inside the same Newton at `( N + 4 )`. | **MET 2026-09-13.** → **[M-86](MEASUREMENTS.md#m-86)**. `meq::GradShafranovSolver::setXPointBoundary` and `tests/convergence/XPointBorder.cpp`, sharing XP-2's fixture through `DivertedMachine.hpp`. Agreement with XP-2 **in one process** at **1.934e-14 m** in the X-point, 1.3e-13 of the span in `ψ_ax`; the border's point is **6.4e-15 m** from an independent root find on its own solved field and `ψ_bnd` is `ψ_h` there to 5.8e-16. The corner block is **exact**, §10.4 above having been wrong about that, and the two unknowns cost **no backsolve**. The observed order is the FIXTURE's ceiling and not the border's — 1.664 against XP-2's 1.667 — so the acceptance is the comparison against that control rather than an absolute 2. `HighBetaConvergence` bit-identical, `xPointIsUnknown` being false on every other path |
 | **XP-4** | **A diverted machine case** against `../freegs4e`. | all seven of its configurations are already diverted, so this needs no new reference. **FB-6 at `j ≥ 1` was the prerequisite and it is met** — the shipped machine case runs at `j = 2` — so this is that case with the boundary found at a saddle rather than at a limiter |
 
 **XP-0 WAS THE STAGE TO PROTECT AND IT WAS ALSO THE CHEAPEST.** It is a rate

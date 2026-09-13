@@ -24,7 +24,7 @@ manual and what a maintainer needs is `CLAUDE.md`. Git has them.
 | ~~`DRIVER-PLAN.md`~~ | stage 7 — **done**, and now `docs/running.rst`, `docs/output.rst` and `docs/configuration.rst` |
 | ~~`FLOW-PLAN.md`~~ | item 9, FL-0 to FL-8 — **done**, and now `docs/rotation.rst`, which carries the derivation `RotatingSource.hpp` defers to |
 | `INVERSION-PLAN.md` | item 10's machinery — **every stage done**, IN-A to IN-P |
-| `FREE-BOUNDARY-PLAN.md` | item 8 — FB-A, FB-0, FB-1, FB-2, FB-3, FB-5, FB-7 **done**, FB-4 **answered**, and **FB-6 met 2026-09-07**: MEQ reproduces `freegs4e`'s converged limited tokamak to 1.5e-04 in `ψ_ax`, with the limiter as a curve landing the same day. What is left of it is the conductor model — MEQ's rectangles against the reference's filaments, a reference-side job — and §10's diverted plasmas, whose gate has opened |
+| `FREE-BOUNDARY-PLAN.md` | item 8 — FB-A, FB-0, FB-1, FB-2, FB-3, FB-5, FB-7 **done**, FB-4 **answered**, §10's XP-0 to XP-3 **done**, and **FB-6 met 2026-09-07**: MEQ reproduces `freegs4e`'s converged limited tokamak to 1.5e-04 in `ψ_ax`, with the limiter as a curve landing the same day. What is left of it is the conductor model — MEQ's rectangles against the reference's filaments, a reference-side job — and §10's diverted plasmas, whose gate has opened |
 | `PLASMA-EDGE-PLAN.md` | a design out of FB-4, still **not scheduled**. Its own precondition — `j ≥ 1` green, and a machine case at `j ≥ 1` — is now met, so what holds it is the cost-benefit its own numbers make: `j ≥ 1` already gives `k+2` at `k ≤ j` with nothing built |
 | `MANTA-COUPLING.md` | the socket MaNTA presents, written from MaNTA's side. No field model is registered there yet |
 
@@ -213,8 +213,42 @@ Nothing is red and stages 0 to 7 are done, so the order is:
    **It needed two things and neither was sufficient alone**: XP-1's fill
    actually running, which a fixture defect had silently disabled on the one
    diverted case in the tree, and the plasma edge held fixed within each Newton.
-   **XP-3, the three-row border, is now the next rung**, and XP-0's API gap above
-   is its prerequisite.
+
+   ~~**XP-3, the three-row border, is now the next rung**~~ — **DONE 2026-09-13,
+   and `XPointBorder` is green.** `setXPointBoundary()` makes `( r_X, z_X )` two
+   more unknowns of the same Newton, so `q_r = q_z = 0` are two more rows and
+   the root find IS part of the solve. It reaches XP-2's answer, in one process
+   on one fixture, to **1.934e-14 m** in the X-point and 1.3e-13 of the span in
+   `ψ_ax`, and its own point sits **6.4e-15 m** from an independent root find on
+   the field it solved. → **[M-86](MEASUREMENTS.md#m-86)**.
+
+   **XP-0's API gap was its stated prerequisite and was already closed** —
+   `tryFindCriticalPointFrom( …, AxisSense::Saddle, … )` landed on 2026-09-08 —
+   **and XP-3 turned out not to need it**: the two rows are the root find, so
+   the border needs a point LOCATION per iterate and not a search. The seeded
+   search is what XP-2 runs on and what XP-3's acceptance checks against.
+
+   **Two things §10.4 predicted came out the other way.** The corner block
+   `∂( q_r, q_z )/∂( r_X, z_X )` is **exact**, not an order down: `∇q` is an
+   order down as an approximation of the CONTINUOUS Hessian, and what Newton
+   needs is the derivative of the DISCRETE residual, where `q_h` is a polynomial
+   on its element. And the two unknowns cost **no backsolve at all**, the field
+   residual not containing them. What XP-3 does NOT buy is Newton steps — 21
+   against XP-2's 18 on the same fixture — and what it does buy is one outer
+   discrete state where XP-2 has two.
+
+   **AND IT FOUND THAT THE FIRST STEP OF EVERY BORDERED SOLVE IS TAKEN WITH THE
+   `ψ_ax` BORDER DECOUPLED**, the flag having last been written on the cold
+   state that sets the convergence target. Repairing it is three lines, it takes
+   XP-3 from 14 Newton steps to 10 with the same answer in every digit, **and it
+   moves XP-2 onto a different branch** — `ψ_ax` 8.052e-02 against 8.266e-02.
+   So it is branch selection rather than a Jacobian fix, and it is left alone
+   and recorded rather than taken.
+
+   **XP-4, a diverted machine case against `../freegs4e`, is now the next
+   rung**, and what it wants that neither XP-2 nor XP-3 built is the support's
+   own outer loop in the DRIVER: there is no TOML key for either border, so a
+   diverted run from a file does not exist yet.
 
    **`PLASMA-EDGE-PLAN.md` is NOT on this list**, deliberately. It is the route
    out of FB-4's `k ≤ j` cap. **Its preamble's precondition is now met** —

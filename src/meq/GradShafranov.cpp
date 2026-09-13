@@ -2031,6 +2031,18 @@ namespace
 				"element's source, so both the border row and its corner would "
 				"have to be differenced rather than being exact" );
 
+		// setXPointBoundary()'s refusal, read from the other side. Re-pinning a
+		// prescribed contact is ordinary -- XP-2's outer loop does exactly that
+		// -- so what is refused here is the KIND changing, not the point.
+		if ( xPointIsUnknown )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::setBoundaryFluxPoint: psi_bnd is "
+				"already an X-point's, by setXPointBoundary(). The two are "
+				"alternatives on one unknown: prescribing a contact as well "
+				"would say the answer twice, and on a diverted plasma the "
+				"limiter is outside the separatrix, so they are two different "
+				"equilibria rather than two ways of finding one" );
+
 		boundaryFluxIsUnknown = true;
 		boundaryFluxR = r;
 		boundaryFluxZ = z;
@@ -2063,6 +2075,14 @@ namespace
 		// version costs. Picking one silently would make which answer you get
 		// depend on call order, which is exactly the class of quiet wrong answer
 		// this solver refuses elsewhere.
+		if ( xPointIsUnknown )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::setLimiterSurface: psi_bnd is already "
+				"an X-point's, by setXPointBoundary(). The curve and the X-point "
+				"are alternatives on one unknown, and on a diverted plasma the "
+				"limiter is OUTSIDE the separatrix -- so this is a choice between "
+				"two equilibria rather than between two ways of finding one." );
+
 		if ( boundaryFluxIsUnknown && limiterConstraintChoice
 		                              != LimiterConstraint::LocatedContact )
 			throw std::logic_error(
@@ -2116,6 +2136,200 @@ namespace
 	double GradShafranovSolver::limiterContactZ() const
 	{
 		return limiterContactZValue;
+	}
+
+	void GradShafranovSolver::setXPointBoundary( double r, double z )
+	{
+		if ( !std::isfinite( r ) || !std::isfinite( z ) )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::setXPointBoundary: the X-point must "
+				"be finite" );
+		if ( !( r > 0.0 ) )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::setXPointBoundary: the X-point must "
+				"lie at a strictly positive radius. The symmetry axis is not an "
+				"X-point: psi vanishes identically on r = 0, so q_h there is "
+				"small everywhere and a sweep reports a ladder of near-saddles "
+				"that no divertor put there" );
+		if ( orderingChoice != NonlinearOrdering::NPC )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::setXPointBoundary: the X-point as an "
+				"unknown is implemented for NonlinearOrdering::NPC only -- its "
+				"two rows are covectors on the FLUX, and only under NPC is the "
+				"flux an unknown of the system rather than something recovered "
+				"from the trace" );
+
+		// ALL THREE PIN THE SAME UNKNOWN, so naming two of them is saying the
+		// answer twice -- the same refusal setLimiterSurface() makes against
+		// setBoundaryFluxPoint(), and for the same reason: a precedence rule
+		// here would decide which equilibrium is reported by call order.
+		if ( boundaryFluxIsUnknown )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::setXPointBoundary: psi_bnd is already "
+				"pinned, by setBoundaryFluxPoint() or setLimiterSurface(). A "
+				"limiter contact and an X-point are alternatives: both constrain "
+				"psi_bnd, and a diverted plasma's limiter is OUTSIDE its "
+				"separatrix, so which one is used is the difference between two "
+				"equilibria rather than between two ways of finding one" );
+
+		// The row the X-point border builds IS ExactPoint's -- the containing
+		// element's shape functions at a point -- so the other two choices have
+		// nothing to mean here. Refused rather than overridden, for the reason
+		// setLimiterConstraint() gives from the other side.
+		if ( limiterConstraintChoice != LimiterConstraint::ExactPoint )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::setXPointBoundary: a LimiterConstraint "
+				"other than ExactPoint was asked for, and there is no limiter on "
+				"this path for it to apply to" );
+
+		boundaryFluxIsUnknown = true;
+		xPointIsUnknown = true;
+		xPointRValue = r;
+		xPointZValue = z;
+		xPointLocatedValue = false;
+		// So that anything reading the pinned point -- the diagnostics, and the
+		// ExactPoint setup this path then skips -- sees the same place.
+		boundaryFluxR = r;
+		boundaryFluxZ = z;
+		prepared = false;
+	}
+
+	bool GradShafranovSolver::xPointIsAnUnknown() const
+	{
+		return xPointIsUnknown;
+	}
+
+	bool GradShafranovSolver::xPointWasLocated() const
+	{
+		return xPointLocatedValue;
+	}
+
+	double GradShafranovSolver::xPointR() const
+	{
+		return xPointRValue;
+	}
+
+	double GradShafranovSolver::xPointZ() const
+	{
+		return xPointZValue;
+	}
+
+	/*
+	 * HOW FAR OUTSIDE THE REFERENCE ELEMENT, measured the way
+	 * Geometry::CheckPoint measures inside: the worst violated face. Zero for a
+	 * point in the element. The same expression CriticalPointFinder uses for
+	 * CriticalPoint::overshoot, and it is written twice rather than shared
+	 * because the two files are otherwise independent of each other.
+	 */
+	namespace
+	{
+		double referenceOvershoot( mfem::Geometry::Type geom,
+		                           mfem::IntegrationPoint const &ip )
+		{
+			double overshoot = 0.0;
+			if ( geom == mfem::Geometry::TRIANGLE )
+				overshoot = std::max( std::max( -ip.x, -ip.y ),
+				                      ip.x + ip.y - 1.0 );
+			else
+				overshoot = std::max( std::max( -ip.x, ip.x - 1.0 ),
+				                      std::max( -ip.y, ip.y - 1.0 ) );
+			return std::max( overshoot, 0.0 );
+		}
+	}
+
+	bool GradShafranovSolver::locateFieldPoint(
+		double r, double z, int hint, int &element,
+		mfem::IntegrationPoint &reference ) const
+	{
+		mfem::Mesh &mesh = *potentialFes->GetMesh();
+		mfem::Vector point( 2 );
+		point( 0 ) = r;
+		point( 1 ) = z;
+
+		// A FIFTH OF AN ELEMENT, WHICH IS THE SAME BAND CriticalPointFinder's
+		// DEFAULT CONTAINMENT ALLOWS. It is a tolerance on the ANSWER rather
+		// than on the arithmetic: a point this far outside is a point whose own
+		// element has changed, and taking the polynomial of the element it left
+		// is a better statement of the residual than refusing to have one.
+		double const allowed = 0.2;
+
+		auto tryElement = [ & ]( int e, mfem::IntegrationPoint &ip ) -> int
+		{
+			// The two-argument overload into a thread-local, because the
+			// one-argument one hands out the mesh's own shared scratch. See
+			// CLAUDE.md under Traps, which records six call sites that took it.
+			thread_local mfem::IsoparametricTransformation scratch;
+			mesh.GetElementTransformation( e, &scratch );
+
+			mfem::InverseElementTransformation inverse( &scratch );
+			// UNPROJECTED. See locateFieldPoint's declaration: the default
+			// clamps, and a clamped point reports an overshoot of zero however
+			// far outside it really is.
+			inverse.SetSolverType( mfem::InverseElementTransformation::Newton );
+			return inverse.Transform( point, ip );
+		};
+
+		int bestElement = -1;
+		double bestOvershoot = std::numeric_limits<double>::infinity();
+		mfem::IntegrationPoint bestReference;
+
+		auto consider = [ & ]( int e ) -> bool
+		{
+			mfem::IntegrationPoint ip;
+			int const code = tryElement( e, ip );
+			if ( code == mfem::InverseElementTransformation::Unknown )
+				return false;
+
+			if ( code == mfem::InverseElementTransformation::Inside )
+			{
+				bestElement = e;
+				bestOvershoot = 0.0;
+				bestReference = ip;
+				return true;
+			}
+
+			double const overshoot =
+				referenceOvershoot( mesh.GetElementBaseGeometry( e ), ip );
+			if ( overshoot < bestOvershoot )
+			{
+				bestElement = e;
+				bestOvershoot = overshoot;
+				bestReference = ip;
+			}
+			return false;
+		};
+
+		// THE HINT FIRST, WHICH IS WHAT MAKES THIS O( 1 ) IN THE ORDINARY CASE.
+		// A Newton step moves the X-point by a fraction of an element, so the
+		// element that held it last holds it again on nearly every call, and the
+		// scan below is the exception rather than the rule.
+		if ( hint >= 0 && hint < mesh.GetNE() && consider( hint ) )
+		{
+			element = bestElement;
+			reference = bestReference;
+			return true;
+		}
+
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			if ( e == hint )
+				continue;
+			if ( consider( e ) )
+			{
+				element = bestElement;
+				reference = bestReference;
+				return true;
+			}
+		}
+
+		if ( bestElement >= 0 && bestOvershoot <= allowed )
+		{
+			element = bestElement;
+			reference = bestReference;
+			return true;
+		}
+
+		return false;
 	}
 
 	/*
@@ -2344,6 +2558,18 @@ namespace
 
 	void GradShafranovSolver::setLimiterConstraint( LimiterConstraint choice )
 	{
+		// THERE IS NO LIMITER TO CONSTRAIN ON THE XP-3 PATH. psi_bnd is the flux
+		// at a saddle there, and this enum picks between three ways of choosing a
+		// point on a limiter -- so honouring it would quietly replace the
+		// constraint the caller asked setXPointBoundary() for.
+		if ( xPointIsUnknown && choice != LimiterConstraint::ExactPoint )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::setLimiterConstraint: psi_bnd is an "
+				"X-point's, by setXPointBoundary(), so there is no limiter for "
+				"this to choose a point on. LimiterConstraint::ExactPoint is what "
+				"the X-point border builds -- the containing element's shape "
+				"functions at a point -- and the other two are about a limiter" );
+
 		limiterConstraintChoice = choice;
 	}
 
@@ -4667,7 +4893,15 @@ namespace
 			// shape functions are fixed for the whole solve -- a prescribed
 			// limiter contact does not move -- so this is located ONCE, where
 			// the axis has to be re-found at every residual.
-			if ( limiterConstraintChoice == LimiterConstraint::ExactPoint )
+			//
+			// XP-3 SHARES THESE THREE VARIABLES AND FILLS THEM ITSELF, at every
+			// iterate, from a point that is an unknown rather than a
+			// prescription. So the one-off location is skipped there and
+			// limiterValue() below is left exactly as it was -- the row for
+			// psi_bnd is the containing element's shape functions either way,
+			// and what differs is only where the element is found.
+			if ( limiterConstraintChoice == LimiterConstraint::ExactPoint
+			     && !xPointIsUnknown )
 				locatePotentialPoint( boundaryFluxR, boundaryFluxZ,
 				                      limiterElement, limiterShape, limiterDofs );
 
@@ -4729,13 +4963,198 @@ namespace
 				         *state( blockOffsets[ 1 ] + limiterDofs[ i ] );
 			return total;
 		};
-		// psi_ax is border 0 always; psi_bnd and the current scale take the next
-		// slots when they are unknowns, and the exterior modes follow them all.
+		/*
+		 * XP-3: THE X-POINT'S OWN TWO UNKNOWNS, AND EVERYTHING ONE ITERATE
+		 * NEEDS OF IT.
+		 *
+		 * `xR` and `xZ` are Newton state, sitting beside `s`, `sB` and `sL`;
+		 * everything else here is DERIVED at the current iterate by
+		 * refreshXPoint() and frozen while the elimination runs, exactly as the
+		 * axis element and the limiter contact are. The rows are:
+		 *
+		 *   q_r( x ) = 0            b = -( flux shape, r component )
+		 *   q_z( x ) = 0            b = -( flux shape, z component )
+		 *   psi_bnd - psi_h( x ) = 0   b = -( potential shape ), which is the
+		 *                              row limiterValue() already builds
+		 *
+		 * so the third of the three needs nothing new at all: refreshXPoint()
+		 * fills `limiterElement`, `limiterShape` and `limiterDofs`, and the
+		 * psi_bnd border above is unchanged.
+		 */
+		double xR = xPointIsUnknown ? xPointRValue : 0.0;
+		double xZ = xPointIsUnknown ? xPointZValue : 0.0;
+		int xElement = -1;
+		// q there, and dq/dx there: the constraint and its corner block.
+		double xFlux[ 2 ] = { 0.0, 0.0 };
+		double xFluxJacobian[ 2 ][ 2 ] = { { 0.0, 0.0 }, { 0.0, 0.0 } };
+		// d psi_h/dx there, which is the psi_bnd row's corner against the two
+		// new unknowns. NOT r q: q_h and psi_h are separate solved fields and
+		// the identity between them is weak, so the row wants the potential's
+		// own derivative and gets it from the same element.
+		double xPotentialGradient[ 2 ] = { 0.0, 0.0 };
+		// The two components' vdofs in the flux block, which IS the head of the
+		// unknown, so no offset is needed as it is for the potential.
+		mfem::Array<int> xFluxDofsR, xFluxDofsZ;
+		mfem::Vector xFluxShape;
+		// gamma converts a perturbation of a border unknown into the units the
+		// field residual is measured in, and q is not in psi's units -- so the
+		// two new constraints are scaled by a length before they may be added to
+		// the augmented norm. grad psi = r q, so r times the element's own size
+		// turns q into a change of psi ACROSS AN ELEMENT, which is the natural
+		// comparison. It scales the NORM only; the equation solved is q = 0.
+		double xScale = 1.0;
+		bool xScaleFrozen = false;
+		// SIZED ONLY WHERE THEY ARE READ, which is why they are default
+		// constructed and given a space rather than constructed on one: these
+		// are three FULL-LENGTH vectors -- 0.9 MB on the machine case -- and
+		// every solve in this tree but the diverted one would otherwise pay for
+		// them to hold zeroes. Only the X-point's own element is ever written or
+		// read, but GridFunction::GetVectorGradient() indexes the global vector.
+		mfem::GridFunction xFluxField;
+		mfem::GridFunction xPotentialField;
+		// Both border columns, once: see columnZ() below for why they are
+		// exactly zero rather than backsolved.
+		mfem::Vector xZeroColumn;
+		if ( xPointIsUnknown )
+		{
+			xFluxField.SetSpace( fluxFes.get() );
+			xPotentialField.SetSpace( potentialFes.get() );
+			xZeroColumn.SetSize( n );
+			xFluxField = 0.0;
+			xPotentialField = 0.0;
+			xZeroColumn = 0.0;
+		}
+
+		/*
+		 * THE X-POINT'S ELEMENT AND EVERYTHING READ ON IT, AT @a state.
+		 *
+		 * It runs at every iterate and then stays FROZEN through the
+		 * elimination, for refreshLimiterContact()'s reason: the border rows are
+		 * dG/dx AT the iterate, and re-locating inside the elimination would
+		 * contract each backsolved direction against a different row.
+		 *
+		 * **IT THROWS RATHER THAN RETURNING, AND THE LINE SEARCH IS WHAT CATCHES
+		 * IT.** An X-point that has left the mesh is a step that left the
+		 * problem, which is the same event as a psi_ax through zero and is
+		 * handled in the same place -- the trial loop's catch, which rejects the
+		 * damping and halves it. Outside the loop it is a genuine failure: the
+		 * INITIAL point was not in the mesh, and no damping fixes that.
+		 */
+		auto refreshXPoint = [ & ]( mfem::Vector const &state )
+		{
+			if ( !xPointIsUnknown )
+				return;
+
+			int element = -1;
+			mfem::IntegrationPoint reference;
+			if ( !locateFieldPoint( xR, xZ, xElement, element, reference ) )
+			{
+				std::ostringstream message;
+				message << "meq::GradShafranovSolver::solve: the X-point unknown "
+				           "reached ( " << xR << ", " << xZ << " ), which is "
+				           "outside the mesh. XP-3 follows ONE saddle from the "
+				           "point setXPointBoundary() was given; a step that "
+				           "leaves the domain means the iteration is not "
+				           "following it any more.";
+				throw std::runtime_error( message.str() );
+			}
+
+			xElement = element;
+
+			mfem::Mesh &mesh = *potentialFes->GetMesh();
+			thread_local mfem::IsoparametricTransformation scratch;
+			mesh.GetElementTransformation( element, &scratch );
+			scratch.SetIntPoint( &reference );
+
+			// THE psi_bnd ROW, INTO THE LIMITER'S OWN VARIABLES. Same row, same
+			// contraction, a different way of choosing the point.
+			mfem::FiniteElement const *potentialFe = potentialFes->GetFE( element );
+			limiterShape.SetSize( potentialFe->GetDof() );
+			potentialFe->CalcShape( reference, limiterShape );
+			potentialFes->GetElementDofs( element, limiterDofs );
+			limiterElement = element;
+
+			mfem::FiniteElement const *fluxFe = fluxFes->GetFE( element );
+			xFluxShape.SetSize( fluxFe->GetDof() );
+			fluxFe->CalcShape( reference, xFluxShape );
+			// PER COMPONENT THROUGH DofsToVDofs RATHER THAN BY SLICING
+			// GetElementVDofs, which would bake this space's byNODES ordering
+			// into arithmetic that has no reason to know it.
+			fluxFes->GetElementDofs( element, xFluxDofsR );
+			xFluxDofsZ = xFluxDofsR;
+			fluxFes->DofsToVDofs( 0, xFluxDofsR );
+			fluxFes->DofsToVDofs( 1, xFluxDofsZ );
+
+			/*
+			 * q AND ITS GRADIENT, THROUGH GridFunction RATHER THAN BY HAND.
+			 *
+			 * Only this element's dofs are read, so only they are written --
+			 * the fields are two full-length vectors and copying them per
+			 * iterate would be the most expensive thing on this path by a wide
+			 * margin.
+			 *
+			 * AND THE SIGN: DarcyForm's flux block holds -q, which is the trap
+			 * CriticalPoints.hpp records as the one to watch. It is undone here,
+			 * so `xFlux` and `xFluxJacobian` are q's, and the border rows carry
+			 * the negation back explicitly where they are built.
+			 */
+			for ( int i = 0; i < xFluxDofsR.Size(); ++i )
+				xFluxField( xFluxDofsR[ i ] ) = -state( xFluxDofsR[ i ] );
+			for ( int i = 0; i < xFluxDofsZ.Size(); ++i )
+				xFluxField( xFluxDofsZ[ i ] ) = -state( xFluxDofsZ[ i ] );
+			for ( int i = 0; i < limiterDofs.Size(); ++i )
+				xPotentialField( limiterDofs[ i ] ) =
+					state( blockOffsets[ 1 ] + limiterDofs[ i ] );
+
+			mfem::Vector value( 2 );
+			xFluxField.GetVectorValue( element, reference, value );
+			xFlux[ 0 ] = value( 0 );
+			xFlux[ 1 ] = value( 1 );
+
+			mfem::DenseMatrix gradient( 2, 2 );
+			xFluxField.GetVectorGradient( scratch, gradient );
+			for ( int i = 0; i < 2; ++i )
+				for ( int j = 0; j < 2; ++j )
+					xFluxJacobian[ i ][ j ] = gradient( i, j );
+
+			mfem::Vector potentialGradient( 2 );
+			xPotentialField.GetGradient( scratch, potentialGradient );
+			xPotentialGradient[ 0 ] = potentialGradient( 0 );
+			xPotentialGradient[ 1 ] = potentialGradient( 1 );
+
+			// FROZEN AT THE FIRST REFRESH, for the reason `gamma` is frozen at
+			// the first iterate: it is a unit conversion inside the norm the
+			// line search compares against, so recomputing it per trial would
+			// compare two states through two different yardsticks -- and past
+			// that, would put its own variation into the printed convergence
+			// history and manufacture an order. It moves by the ratio of two
+			// neighbouring elements' sizes at worst, so nothing is lost.
+			if ( !xScaleFrozen )
+			{
+				xScale = std::abs( xR )*mesh.GetElementSize( element );
+				if ( !( xScale > 0.0 ) || !std::isfinite( xScale ) )
+					xScale = 1.0;
+				xScaleFrozen = true;
+			}
+		};
+
+		// psi_ax is border 0 always; psi_bnd, XP-3's two X-point coordinates and
+		// the current scale take the next slots when they are unknowns, and the
+		// exterior modes follow them all.
 		int const boundaryIndex = 1;
-		int const currentIndex = boundaryFluxIsUnknown ? 2 : 1;
+		int const xPointIndex = xPointIsUnknown ? 2 : -1;
+		int const currentIndex = ( boundaryFluxIsUnknown ? 2 : 1 )
+		                         + ( xPointIsUnknown ? 2 : 0 );
 		int const nBorders = 1 + ( boundaryFluxIsUnknown ? 1 : 0 )
+		                     + ( xPointIsUnknown ? 2 : 0 )
 		                     + ( currentIsUnknown ? 1 : 0 );
 		(void)boundaryIndex;
+
+		/// Whether border `i` is one of XP-3's two, and which component.
+		auto isXPointRow = [ & ]( int i )
+		{
+			return xPointIsUnknown && i >= xPointIndex && i < xPointIndex + 2;
+		};
 
 		// The scale starts where it was left, so a re-solve continues rather
 		// than restarting, and the source is told before any residual is taken.
@@ -5202,6 +5621,9 @@ namespace
 		                               : 0.0;
 		double constraint = hasNormalisation ? s - peak : 0.0;
 		refreshLimiterContact( unknown );
+		// BEFORE limiterValue(), because on the XP-3 path this is what fills the
+		// shape functions limiterValue() contracts against.
+		refreshXPoint( unknown );
 		double constraintB = boundaryFluxIsUnknown
 		                     ? sB - limiterValue( unknown ) : 0.0;
 		fieldResidual( unknown, s, residual );
@@ -5367,14 +5789,26 @@ namespace
 		 * the same scale: T_m is a flux integral like the rest of the border and
 		 * there is no second natural scale to give it.
 		 */
+		/*
+		 * AND XP-3's TWO GET A LENGTH BEFORE THEY GET gamma. `cXr` and `cXz` are
+		 * components of q, which is not in psi's units, so adding them to a sum
+		 * of flux perturbations unscaled would compare two different quantities
+		 * -- and the answer would depend on the machine's size in metres.
+		 * grad psi = r q, so `xScale = r h` converts q into the change of psi
+		 * across the X-point's own element, which is the thing the other border
+		 * constraints already measure. It scales the NORM alone: the equation
+		 * the border solves is q = 0, undisturbed.
+		 */
 		auto augmentedNorm = [ & ]( double fieldNorm, double cAx, double cBnd,
 		                            double cCurrent,
-		                            std::vector<double> const &cModes )
+		                            std::vector<double> const &cModes,
+		                            double cXr = 0.0, double cXz = 0.0 )
 		{
 			double total = fieldNorm*fieldNorm
 			             + gamma*gamma*( cAx*cAx + cBnd*cBnd + cCurrent*cCurrent );
 			for ( double v : cModes )
 				total += gamma*gamma*v*v;
+			total += gamma*gamma*xScale*xScale*( cXr*cXr + cXz*cXz );
 			return std::sqrt( total );
 		};
 
@@ -5413,6 +5847,11 @@ namespace
 			for ( int mode = 0; mode < nModes; ++mode )
 				coldModes[ static_cast<std::size_t>( mode ) ] =
 					transmissionConstraint( coldState, mode );
+			// XP-3's two constraints are EXACTLY ZERO here and are not computed:
+			// coldState zeroes the flux and potential blocks outright, so q_h
+			// vanishes identically and q_h( x ) = 0 wherever x is. They are
+			// therefore absent from the reference by arithmetic rather than by
+			// omission, and the target this sets is the field's and psi's.
 			reference = augmentedNorm( coldResidual.Norml2(),
 			                           hasNormalisation ? s - coldPeak : 0.0,
 			                           boundaryFluxIsUnknown
@@ -5422,6 +5861,49 @@ namespace
 			                               - targetMuZeroCurrent : 0.0,
 			                           coldModes );
 		}
+		/*
+		 * AND THE ITERATE IS *NOT* RE-ESTABLISHED AFTER IT, WHICH IS A MEASURED
+		 * DECISION AND NOT AN OVERSIGHT.
+		 *
+		 * peakAt() writes `constraintLocated`, `constraintElement`,
+		 * `constraintShape` and `argDof`, and the block above called it on
+		 * `coldState` -- where the flux and potential blocks are zero, so no
+		 * axis is found and the flag comes back FALSE. Iteration 0 therefore
+		 * builds psi_ax's border row from a state that is not the iterate, and
+		 * gets the EMPTY row the argDof note further down describes:
+		 * `located 0, rowSize 0` at iteration 0 of every solve on this path and
+		 * `located 1, rowSize 6` at every iteration after it, measured on
+		 * examples/diverted-tokamak.toml. The first Newton step of every
+		 * bordered solve is taken with the axis border DECOUPLED --
+		 * step[ 0 ] = -constraint/corner, which is psi_ax <- max psi_h, a
+		 * Picard-like update -- and every step after it with the real Jacobian.
+		 *
+		 * **REPAIRING IT IS THREE LINES, IT DOES WHAT IT SHOULD, AND IT CHANGES
+		 * WHICH EQUILIBRIUM THE DIVERTED MACHINE REPORTS.** Adding
+		 * `peak = peakAt( unknown, s, &argElement, &argDof )` here makes the flag
+		 * describe the iterate, and measured on that machine:
+		 *
+		 *   XP-3's bordered solve  14 Newton steps -> 10, SAME answer to every
+		 *                          digit, and the alternating observed orders
+		 *                          6.75, 0.28, 4.39, 1.66 become 1.88, 1.37,
+		 *                          1.33, 1.51
+		 *   XP-2's limiter-pinned  7 steps -> 3, and a DIFFERENT equilibrium:
+		 *   solve                  psi_ax 8.052272e-02 where the same fixture
+		 *                          reaches 8.266004e-02 unrepaired, with the
+		 *                          X-point 1.26e-02 m away and 1.1e-02 m from
+		 *                          freegs4e's instead of 4.4e-04
+		 *
+		 * So the decoupled first step is CONSERVATIVE, and on this machine it is
+		 * what keeps the iteration in the physical branch's basin while a full
+		 * Newton step leaves it. That makes this a branch-selection question
+		 * rather than a Jacobian one -- CLAUDE.md's standing rule is that
+		 * nothing may silently change which equilibrium is reported -- and it is
+		 * left alone until somebody owns it, with a globalisation rather than
+		 * with a first-step accident. What it costs meanwhile is that no clean
+		 * Newton ORDER can be read off a history whose first step used a
+		 * different Jacobian from the rest.
+		 */
+
 		double const target = std::max( newtonAbsoluteTolerance,
 		                                newtonRelativeTolerance*reference );
 
@@ -5456,7 +5938,8 @@ namespace
 		{
 			double const norm = augmentedNorm( residual.Norml2(), constraint,
 			                                   constraintB, constraintL,
-			                                   transmission );
+			                                   transmission, xFlux[ 0 ],
+			                                   xFlux[ 1 ] );
 			newtonResidualHistory.push_back( norm );
 			newtonIterationCount = iteration;
 
@@ -5548,6 +6031,16 @@ namespace
 				 * the -1 from a call that located. The two are out of step by
 				 * construction, and this branch is the one that pays.
 				 *
+				 * **WHICH EVALUATION PUT THEM OUT OF STEP IS NOW KNOWN, AND IT
+				 * IS THE COLD REFERENCE.** The block beside `target` above
+				 * evaluates the constraint at `coldState`, where the flux and
+				 * potential blocks are zero and no axis exists, so the flag
+				 * comes back false for ITERATION 0 of every solve on this path
+				 * and true for every iteration after it. The long comment there
+				 * carries what repairing it was measured to do, which is not
+				 * what it looks like from here: it costs steps AND it moves the
+				 * diverted machine onto a different branch.
+				 *
 				 * MEASURED on examples/limited-tokamak.toml, iteration 0, under
 				 * mfem::Device( "debug" ): coupled true, constraintLocated
 				 * false, argDof -1, border( 0 ) = -1 -- so rowDot() read
@@ -5564,13 +6057,15 @@ namespace
 				 * hard fault, which is how it was found at all.
 				 *
 				 * WHAT IS NOT SETTLED IS WHETHER THIS BRANCH SHOULD FIRE ON THE
-				 * LOCATED PATH AT ALL. The row it wants is the one the
-				 * `constraintLocated` branch above builds; a zero row decouples
-				 * the border, leaving step[ 0 ] = -constraint/corner, which is
-				 * what this case has been doing all along. Making the flag and
-				 * argDof describe the same evaluation is the real fix and it
-				 * changes the Jacobian, so it is a numerics decision rather than
-				 * a bug fix.
+				 * LOCATED PATH AT ALL, and it is now measured rather than only
+				 * suspected. The row it wants is the one the `constraintLocated`
+				 * branch above builds; a zero row decouples the border, leaving
+				 * step[ 0 ] = -constraint/corner, which is what every solve on
+				 * this path does at iteration 0. Making the flag and argDof
+				 * describe the same evaluation changes the Jacobian, and on the
+				 * diverted machine it changes which EQUILIBRIUM is reported --
+				 * see the comment beside `target` above for the numbers. It is
+				 * a branch-selection decision rather than a bug fix.
 				 */
 				if ( argDof < 0 )
 				{
@@ -5767,6 +6262,33 @@ namespace
 				}
 				if ( boundaryFluxIsUnknown && i == boundaryIndex )
 					return coupled ? -limiterValue( v ) : 0.0;
+				if ( isXPointRow( i ) )
+				{
+					/*
+					 * XP-3's ROW, AND IT IS EXACT AND UNDIFFERENCED FOR THE
+					 * SAME REASON -e_j IS: q is an unknown of the system under
+					 * NPC, so d q_h( x )/d( unknown ) is this element's shape
+					 * functions on its own flux dofs and nothing else.
+					 *
+					 * AND IT IS NOT GATED ON `coupled`. That flag is about
+					 * psi_ax being an unknown or held fixed; q_h( x ) = 0 is a
+					 * statement about the field, true either way.
+					 *
+					 * The minus undoes DarcyForm's -q, as refreshXPoint() does
+					 * for the value -- so the two are consistent, which is the
+					 * thing a sign error here would break silently: a border
+					 * that is right in magnitude and wrong in sign does not
+					 * diverge, it fails to converge.
+					 */
+					mfem::Array<int> const &dofs =
+						( i == xPointIndex ) ? xFluxDofsR : xFluxDofsZ;
+					dofs.HostRead();
+					xFluxShape.HostRead();
+					double total = 0.0;
+					for ( int j = 0; j < dofs.Size() && j < xFluxShape.Size(); ++j )
+						total -= xFluxShape( j )*v( dofs[ j ] );
+					return total;
+				}
 				if ( currentIsUnknown && i == currentIndex )
 				{
 					currentRow.HostRead();
@@ -5803,8 +6325,42 @@ namespace
 							return currentAgainstAxis;
 						if ( boundaryFluxIsUnknown && j == boundaryIndex )
 							return currentAgainstBoundary;
+						// int F/r has no entry against ( r_X, z_X ): the
+						// X-point reaches the source only through psi_bnd,
+						// which is the column above.
 						return 0.0;
 					}
+
+					/*
+					 * XP-3's CORNER, AND IT IS THE ONE BLOCK THIS SYSTEM HAS
+					 * THAT IS NOT DIAGONAL, A SENSITIVITY OR A UNIT.
+					 *
+					 *   d q_i( x )/d x_j      = grad q, this element's own
+					 *   d psi_h( x )/d x_j    = grad psi_h, the same
+					 *
+					 * FREE-BOUNDARY-PLAN.md section 10.4 expects the first of
+					 * these to be inexact -- "there is no solved variable for
+					 * grad q" -- and that is a statement about approximating
+					 * the CONTINUOUS Hessian. What Newton needs is the
+					 * derivative of the DISCRETE residual, and q_h is a
+					 * polynomial on this element, so its gradient here is exact
+					 * arithmetic. See setXPointBoundary().
+					 *
+					 * The psi_bnd row's two entries are NOT r q. psi_h and q_h
+					 * are separate solved fields whose identity is only weak, so
+					 * the row wants the potential's own derivative and gets it.
+					 * They vanish AT a converged X-point either way, which is
+					 * exactly why writing them costs nothing and leaving them
+					 * out would be invisible until the rate was measured.
+					 */
+					if ( isXPointRow( i ) )
+						return isXPointRow( j )
+						       ? xFluxJacobian[ i - xPointIndex ][ j - xPointIndex ]
+						       : 0.0;
+					if ( boundaryFluxIsUnknown && i == boundaryIndex
+					     && isXPointRow( j ) )
+						return -xPotentialGradient[ j - xPointIndex ];
+
 					if ( i != j )
 						return 0.0;
 					if ( i == 0 )
@@ -5826,6 +6382,10 @@ namespace
 			{
 				if ( i == 0 ) return constraint;
 				if ( boundaryFluxIsUnknown && i == boundaryIndex ) return constraintB;
+				// UNSCALED, where the augmented norm scales it. The equation is
+				// q = 0 and a scale here would be a row scaling of the dense
+				// system, which changes the step rather than only the yardstick.
+				if ( isXPointRow( i ) ) return xFlux[ i - xPointIndex ];
 				if ( currentIsUnknown && i == currentIndex ) return constraintL;
 				return transmission[ static_cast<std::size_t>( i - nBorders ) ];
 			};
@@ -5835,6 +6395,15 @@ namespace
 			{
 				if ( j == 0 ) return z;
 				if ( boundaryFluxIsUnknown && j == boundaryIndex ) return zB;
+				/*
+				 * XP-3 COSTS NO BACKSOLVE AT ALL, AND THIS ZERO IS WHERE THAT
+				 * SHOWS. c_j = dR/dp_j, and the field residual does not contain
+				 * ( r_X, z_X ): they reach it only through psi_bnd, whose column
+				 * is zB above. So z_j = J^-1 0 = 0 exactly, not approximately --
+				 * the system grows from ( N + 2 ) to ( N + 4 ) in the dense
+				 * corner alone, and the trace solve is untouched.
+				 */
+				if ( isXPointRow( j ) ) return xZeroColumn;
 				if ( currentIsUnknown && j == currentIndex ) return zL;
 				return exteriorZ[ static_cast<std::size_t>( j - nBorders ) ];
 			};
@@ -5930,6 +6499,12 @@ namespace
 			                      ? step[ static_cast<std::size_t>( boundaryIndex ) ] : 0.0;
 			double const deltaL = currentIsUnknown
 			                      ? step[ static_cast<std::size_t>( currentIndex ) ] : 0.0;
+			// XP-3's two. They move NO field direction -- their columns are zero
+			// -- so they appear in the trial below only as themselves.
+			double const deltaXr = xPointIsUnknown
+			                       ? step[ static_cast<std::size_t>( xPointIndex ) ] : 0.0;
+			double const deltaXz = xPointIsUnknown
+			                       ? step[ static_cast<std::size_t>( xPointIndex + 1 ) ] : 0.0;
 
 			/*
 			 * BACKTRACKING, AND IT IS NOT OPTIONAL HERE.
@@ -5958,6 +6533,8 @@ namespace
 			double const savedS = s;
 			double const savedB = sB;
 			double const savedL = sL;
+			double const savedXr = xR;
+			double const savedXz = xZ;
 			std::vector<double> const savedCoefficients = exteriorCoefficientValues;
 
 			double bestNorm = std::numeric_limits<double>::infinity();
@@ -6000,10 +6577,26 @@ namespace
 						unknown.Add( -damping*step[ static_cast<std::size_t>( nBorders + mode ) ],
 						             exteriorZ[ static_cast<std::size_t>( mode ) ] );
 
+					// XP-3's two move only themselves -- no field direction to
+					// add -- and are damped with everything else, because the
+					// line search has to compare ONE state rather than a field
+					// at one damping and an X-point at another.
+					if ( xPointIsUnknown )
+					{
+						xR = savedXr + damping*deltaXr;
+						xZ = savedXz + damping*deltaXz;
+					}
+
 					peak = hasNormalisation
 					       ? peakAt( unknown, s, &argElement, &argDof ) : 0.0;
 					constraint = hasNormalisation ? s - peak : 0.0;
 					refreshLimiterContact( unknown );
+					// BEFORE limiterValue(): this is what moves psi_bnd's row to
+					// the new X-point, and it throws when the trial has carried
+					// the point out of the mesh -- which the catch below turns
+					// into a rejected damping, as it does for a psi_ax through
+					// zero.
+					refreshXPoint( unknown );
 					constraintB = boundaryFluxIsUnknown ? sB - limiterValue( unknown ) : 0.0;
 					if ( currentIsUnknown )
 						constraintL = assemblePlasmaCurrent( unknown ) - targetMuZeroCurrent;
@@ -6020,7 +6613,8 @@ namespace
 					// already warned against for psi_bnd.
 					trialNorm = augmentedNorm( residual.Norml2(), constraint,
 					                           constraintB, constraintL,
-					                           transmission );
+					                           transmission, xFlux[ 0 ],
+					                           xFlux[ 1 ] );
 				}
 				catch ( std::exception const & )
 				{
@@ -6075,10 +6669,16 @@ namespace
 				for ( int mode = 0; mode < nModes; ++mode )
 					unknown.Add( -bestDamping*step[ static_cast<std::size_t>( nBorders + mode ) ],
 					             exteriorZ[ static_cast<std::size_t>( mode ) ] );
+				if ( xPointIsUnknown )
+				{
+					xR = savedXr + bestDamping*deltaXr;
+					xZ = savedXz + bestDamping*deltaXz;
+				}
 				peak = hasNormalisation
 				       ? peakAt( unknown, s, &argElement, &argDof ) : 0.0;
 				constraint = hasNormalisation ? s - peak : 0.0;
 				refreshLimiterContact( unknown );
+				refreshXPoint( unknown );
 				constraintB = boundaryFluxIsUnknown ? sB - limiterValue( unknown ) : 0.0;
 					if ( currentIsUnknown )
 						constraintL = assemblePlasmaCurrent( unknown ) - targetMuZeroCurrent;
@@ -6142,6 +6742,16 @@ namespace
 		axisLocatedValue = constraintLocated;
 		axisRValue = constraintLocated ? previousAxisR : 0.0;
 		axisZValue = constraintLocated ? previousAxisZ : 0.0;
+		// XP-3: where the border left the X-point, so a re-solve continues from
+		// it rather than from the original guess -- the same rule the profile
+		// scale follows. `located` says the point was still in the mesh at the
+		// end, which is the only way this path can end without having thrown.
+		if ( xPointIsUnknown )
+		{
+			xPointRValue = xR;
+			xPointZValue = xZ;
+			xPointLocatedValue = xElement >= 0;
+		}
 		if ( currentIsUnknown )
 		{
 			currentScaleValue = sL;
