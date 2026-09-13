@@ -74,6 +74,14 @@ namespace
 			"  MEQ --help           this\n"
 			"  MEQ --version        the build this is\n"
 			"\n"
+			"  --device <name>      run under an mfem::Device: cpu (the\n"
+			"                       default), cuda, or debug. CORRECTNESS\n"
+			"                       rather than speed -- MEQ's integrators have\n"
+			"                       no device kernels, so a device run costs\n"
+			"                       Newton steps. \"debug\" has device memory\n"
+			"                       semantics with host arithmetic and turns a\n"
+			"                       stale host read into a named fault.\n"
+			"\n"
 			"Exit codes: 0 solved, 1 configuration, 2 solve did not converge,\n"
 			"3 output could not be written.\n" );
 	}
@@ -430,19 +438,130 @@ namespace
 
 int main( int argc, char **argv )
 {
-	std::string const argument = argc > 1 ? argv[ 1 ] : std::string();
+	/*
+	 * ONE POSITIONAL ARGUMENT -- the configuration file -- AND ONE OPTION.
+	 *
+	 * This was `argc != 2` and a single `argv[1]`, which is the right shape for
+	 * a driver whose whole interface is a TOML file and is why the file carries
+	 * everything else. `--device` is the exception, and it is an exception on
+	 * purpose: mfem::Device is PROCESS-WIDE state that has to be configured
+	 * before the first Vector is allocated, so it cannot be a key in a file
+	 * that is parsed after MFEM is already running. It is also not a property
+	 * of the equilibrium -- the same file must describe the same problem on a
+	 * machine with a GPU and on one without -- so putting it in [solver] beside
+	 * AssemblyMode would make a configuration unportable in a way none of the
+	 * other keys are.
+	 */
+	std::string configPath;
+	std::string deviceName;
+	bool deviceGiven = false;
+	bool wantHelp = false;
+	bool wantVersion = false;
+	bool badUsage = false;
 
-	if ( argc != 2 || argument == "--help" || argument == "-h" )
+	for ( int i = 1; i < argc; ++i )
 	{
-		usage();
-		return argument == "--help" || argument == "-h"
-			? Solved : ConfigurationError;
+		std::string const arg = argv[ i ];
+		if ( arg == "--help" || arg == "-h" )
+			wantHelp = true;
+		else if ( arg == "--version" )
+			wantVersion = true;
+		else if ( arg == "--device" )
+		{
+			if ( i + 1 >= argc )
+			{
+				std::fprintf( stderr,
+					"MEQ: --device needs a name, for example --device cuda.\n"
+					"     Names are MFEM's: cpu, cuda, debug, or any backend\n"
+					"     string mfem::Device accepts.\n" );
+				return ConfigurationError;
+			}
+			deviceName = argv[ ++i ];
+			deviceGiven = true;
+		}
+		else if ( !arg.empty() && arg[ 0 ] == '-' )
+		{
+			std::fprintf( stderr, "MEQ: unknown option \"%s\".\n", arg.c_str() );
+			badUsage = true;
+		}
+		else if ( configPath.empty() )
+			configPath = arg;
+		else
+		{
+			// REFUSED RATHER THAN IGNORED. Two files named is a mistake with
+			// two readings -- which one did they mean? -- and silently solving
+			// the first would put the answer to a different problem in the
+			// output directory under a name taken from the file that ran.
+			std::fprintf( stderr,
+				"MEQ: more than one configuration file named (\"%s\" and "
+				"\"%s\").\n", configPath.c_str(), arg.c_str() );
+			badUsage = true;
+		}
 	}
 
-	if ( argument == "--version" )
+	if ( wantHelp )
+	{
+		usage();
+		return Solved;
+	}
+
+	if ( wantVersion )
 	{
 		std::printf( "MEQ %s (MFEM %s)\n", MEQ_VERSION, MFEM_VERSION_STRING );
 		return Solved;
+	}
+
+	if ( badUsage || configPath.empty() )
+	{
+		usage();
+		return ConfigurationError;
+	}
+
+	std::string const argument = configPath;
+
+	/*
+	 * THE DEVICE, BEFORE ANYTHING ELSE ALLOCATES.
+	 *
+	 * mfem::Device decides where every Vector constructed after it lives, so it
+	 * has to be first and it has to outlive the solve. Held by unique_ptr and
+	 * not by value because "no device" has to remain the default: constructing
+	 * mfem::Device( "cpu" ) is nearly inert but it is not nothing, and a driver
+	 * run without the flag should be byte-for-byte the run it always was.
+	 *
+	 * WHAT IT IS FOR IS CORRECTNESS, NOT SPEED, AND THE DISTINCTION IS
+	 * MEASURED. MEQ's element-local integrators and its scatter have no device
+	 * kernels, so the per-Newton-step cost under a device is within a few
+	 * percent of the host's -- while the step COUNT rises, because the device
+	 * path's element-local evaluation is inexact where dF/dpsi is non-zero.
+	 * On the fixtures that is a 1.7x to 2.0x whole-solve loss. The flag exists
+	 * so that a physical case can be checked for the same behaviour, and so
+	 * that `--device debug` can be pointed at one.
+	 *
+	 * `--device debug` IS THE INSTRUMENT. It has device memory semantics with
+	 * host arithmetic and mprotects the host page, so a raw host read of a
+	 * device-valid buffer is a named fault with a backtrace rather than a wrong
+	 * number. Reach for it before a debugger on anything device-shaped.
+	 */
+	std::unique_ptr<mfem::Device> device;
+	if ( deviceGiven && deviceName != "cpu" )
+	{
+#ifndef MFEM_USE_CUDA
+		if ( deviceName.find( "cuda" ) != std::string::npos )
+		{
+			// REFUSED, not downgraded, and the asymmetry matches AssemblyMode
+			// below: a device asked for on the command line is a choice, where
+			// one merely inherited from a default would be an accident.
+			std::fprintf( stderr,
+				"MEQ: --device %s needs an MFEM built with MFEM_USE_CUDA, and\n"
+				"     this one is not. It is refused rather than run on the\n"
+				"     host, because a device run that silently is not one\n"
+				"     answers the question it was asked in the wrong direction.\n",
+				deviceName.c_str() );
+			return ConfigurationError;
+		}
+#endif
+		device = std::make_unique<mfem::Device>( deviceName.c_str() );
+		device->Print();
 	}
 
 
@@ -744,23 +863,50 @@ int main( int argc, char **argv )
 	 * against UMFPACK. What is refused here is only the config-file route, and
 	 * only until the field data has a reason to be on the device.
 	 */
-	if ( traceSolver == TS::cuDSS )
+	/*
+	 * AND THE GATE IS NOW `WITHOUT A DEVICE` RATHER THAN `ALWAYS`, because
+	 * --device changes which half of the argument above applies.
+	 *
+	 * The refusal has always had two reasons and they are not equally durable.
+	 * The IMMEDIATE one -- CuDSSSolver reads host pointers through the
+	 * device-aware accessors and aborts inside CUDA -- is a statement about a
+	 * process with no mfem::Device in it, and `--device cuda` removes it.
+	 * The STANDING one -- the trade -- is a statement about where the rest of
+	 * the solve runs, and it is untouched.
+	 *
+	 * What the trade argument actually says is that MEQ should not CONFIGURE a
+	 * device in order to reach cuDSS. It does not say that a caller who has
+	 * already configured one, deliberately, on the command line, and who is
+	 * therefore already paying for every Vector to live on the device, must
+	 * then be denied the one part of the solve that can use it. For that caller
+	 * cuDSS is the cheap option rather than the expensive one, and refusing it
+	 * would leave the device path measurable only from the library.
+	 *
+	 * So the config file alone still cannot reach cuDSS -- which is what
+	 * theDriverRefusesASolverItCannotHonour pins, and it runs without the flag.
+	 */
+	if ( traceSolver == TS::cuDSS && !device )
 	{
 		std::fprintf( stderr,
-			"MEQ: [solver] TraceSolver = \"cudss\" is not available through this\n"
-			"     driver, and it is withheld rather than merely unimplemented.\n"
+			"MEQ: [solver] TraceSolver = \"cudss\" needs a device, and this run\n"
+			"     configured none. Add --device cuda to ask for one.\n"
 			"\n"
-			"     A device solver is only worth having if the data stays on the\n"
-			"     device. MEQ's element-local integrators and its scatter into\n"
-			"     the trace matrix -- together most of a Newton step -- have no\n"
-			"     device kernels yet, so a device trace solve would copy the\n"
-			"     system across the bus once per iteration to accelerate one\n"
-			"     part of it. That is slower than staying on the host, which is\n"
-			"     what MFEM's own HDG device-offload plan concludes about doing\n"
-			"     exactly this group on its own.\n"
+			"     It is not reachable from the configuration file alone, and\n"
+			"     that is withheld rather than unimplemented. A device solver\n"
+			"     is only worth having if the data stays on the device: MEQ's\n"
+			"     element-local integrators and its scatter into the trace\n"
+			"     matrix -- together most of a Newton step -- have no device\n"
+			"     kernels yet, so configuring a device for the trace solve\n"
+			"     alone copies the system across the bus once per iteration to\n"
+			"     accelerate one part of it. That is what MFEM's own HDG\n"
+			"     device-offload plan concludes against doing.\n"
 			"\n"
-			"     Use \"umfpack\" or \"pardiso\". cuDSS stays reachable from the\n"
-			"     library, which is how its agreement with UMFPACK is checked.\n" );
+			"     Without --device this would not fall back either: CuDSSSolver\n"
+			"     reads host pointers through the device-aware accessors and\n"
+			"     aborts inside CUDA with a message naming cudaMemcpy and\n"
+			"     nothing about the key that caused it.\n"
+			"\n"
+			"     Use \"umfpack\" or \"pardiso\", or pass --device cuda.\n" );
 		return ConfigurationError;
 	}
 

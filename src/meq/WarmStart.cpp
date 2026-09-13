@@ -148,6 +148,38 @@ namespace meq
 		mfem::Array<unsigned int> const &code = finder.GetCode();
 		mfem::Vector const &distance = finder.GetDist();
 
+		/*
+		 * THE THREE HOST READS THAT FOLLOW, MADE HOST READS EXPLICITLY.
+		 *
+		 * Everything below this line is host arithmetic -- CalcShape, a dense
+		 * element mass matrix, DenseMatrixInverse -- and it reads `values`,
+		 * `code` and `distance` through operator() and operator[], which are
+		 * RAW: they neither sync nor invalidate. With an mfem::Device
+		 * configured, FindPointsGSLIB::Interpolate can leave its output on the
+		 * device (fem/gslib.hpp carries InterpolateOnDevice), so those raw
+		 * reads take a STALE HOST COPY.
+		 *
+		 * WHAT THAT COSTS IS NOT A CRASH, WHICH IS WHY IT IS WORTH THE COMMENT.
+		 * Under CUDA it is silent: the projection is built from whatever the
+		 * host buffer last held, so the warm start comes back wrong and the
+		 * solve begins from a different iterate. Measured on
+		 * examples/limited-tokamak.toml, ||r_0|| read 1.048568e-01 against the
+		 * host's 2.411595e-01 at the SAME stored guess, and the bordered Newton
+		 * then reported a singular Jacobian at iteration zero -- a failure that
+		 * names the border and has nothing to do with it.
+		 *
+		 * mfem::Device( "debug" ) is what turns it into a diagnosis: it
+		 * mprotects the host page, so the first of these reads is a named fault
+		 * with a backtrace instead of a wrong number.
+		 *
+		 * SAME SPECIES AS THE FOUR SITES BEHIND M-79, and dormant for the same
+		 * reason: a contract MEQ never had to honour until a Device existed.
+		 * These calls are no-ops with none configured.
+		 */
+		values.HostRead();
+		code.HostRead();
+		distance.HostRead();
+
 		mfem::Array<int> elementDofs;
 		mfem::DenseMatrix mass;
 		mfem::Vector shape, rhs, coefficients;

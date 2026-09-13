@@ -54,10 +54,16 @@
  * true only at MKL=1.
  *
  * Usage:  NpcThreadScaling [--orders k,k] [--sizes n,n] [--repeats N]
- *                          [--highbeta] [--pedestal] [--example5]
- *                          [--soloviev]   the LINEAR-source arm, on its own
+ *                          [--pedestal] [--example5]   the two defaults
+ *                          [--soloviev]   the LINEAR-source arm
+ *                          [--highbeta]   the BORDERED arm, psi_ax an unknown
  *                          [--trace umfpack|pardiso|cudss|all]
  *                          [--device cpu|cuda|debug]
+ *
+ * THE CASE FLAGS COMPOSE. With none given the two defaults run; the first one
+ * given clears them and each one after it adds. `--soloviev` and `--highbeta`
+ * are opt-in because each changes what the table means -- one is linear, the
+ * other bordered -- and neither should be averaged with the defaults.
  *
  * `--device debug` IS THE INSTRUMENT, NOT A SLOWER cuda. mfem::Device( "debug" )
  * has device memory semantics with host arithmetic and mprotect's the host page,
@@ -89,6 +95,7 @@
 
 #include "analytic/ManufacturedNonlinear.hpp"
 #include "analytic/PressurePedestal.hpp"
+#include "analytic/HighBetaPoloidal.hpp"
 #include "analytic/Soloviev.hpp"
 
 namespace
@@ -143,6 +150,51 @@ namespace
 
 		private:
 			Equilibrium const &eq;
+	};
+
+	/*
+	 * THE SAME ADAPTER FOR A SOURCE WHOSE psi_ax IS AN UNKNOWN, which the
+	 * high-beta arm needs and the other three do not. setSource( source, guess )
+	 * closes the pair by a bordered Newton, so this must be a
+	 * meq::NormalisedSource rather than a meq::Source.
+	 *
+	 * It holds the equilibrium BY VALUE where EquilibriumSource holds a
+	 * reference: setNormalisation() mutates it once per residual evaluation, so
+	 * a shared one would have two solves writing to the same psi_ax.
+	 */
+	template<typename Equilibrium>
+	class NormalisedEquilibriumSource : public meq::NormalisedSource
+	{
+		public:
+			explicit NormalisedEquilibriumSource( Equilibrium const &eqIn ) : eq( eqIn ) {}
+
+			double f( double r, double z, double psi ) const override
+			{
+				return eq.f( r, z, psi );
+			}
+
+			double dFdPsi( double r, double z, double psi ) const override
+			{
+				return eq.dFdPsi( r, z, psi );
+			}
+
+			void setNormalisation( double psiAxis, double psiBoundary ) override
+			{
+				// The analytic fixtures are written for psi_bnd = 0. Refused
+				// rather than ignored, which is this harness's own rule.
+				if ( psiBoundary != 0.0 )
+					throw std::invalid_argument(
+						"NpcThreadScaling: the high-beta fixture cannot represent "
+						"a non-zero boundary flux" );
+				eq.setPsiAxis( psiAxis );
+			}
+			using meq::NormalisedSource::setNormalisation;
+
+			double normalisation() const override { return eq.psiAxis(); }
+			double boundaryNormalisation() const override { return 0.0; }
+
+		private:
+			Equilibrium eq;
 	};
 
 	/// What one configuration cost, and what it produced.
@@ -315,6 +367,91 @@ namespace
 		return out;
 	}
 
+	/*
+	 * THE BORDERED ARM -- pass 3, --highbeta.
+	 *
+	 * psi_ax IS AN UNKNOWN HERE AND IS NOT ON THE OTHER THREE, which is what
+	 * earns it a pass of its own rather than another row. The border spends
+	 * extra residual evaluations and extra backsolves against the SAME
+	 * factorisation, so the balance between element-local work and the trace
+	 * solve is a different one -- and it is the configuration MEQ actually runs
+	 * on a physical problem, where example5 and the pedestal hold psi_ax fixed.
+	 *
+	 * OPT-IN rather than default, for the reason --soloviev is: it changes the
+	 * shape of the table, and a thread-scaling figure averaged over a bordered
+	 * case and two unbordered ones describes neither.
+	 *
+	 * IT HAS NO CLOSED FORM, so `exactError` stays negative and the row prints
+	 * max|psi_h| alone. That is weaker than the other three arms and is the
+	 * reason not to read this one on its own under a device: an iteration count
+	 * cannot discriminate a wrong answer from a right one. See Run.
+	 */
+	Run runBordered( Box const &b, int order, int n, int nu, double amplitude,
+	                 AM mode, TS trace )
+	{
+		Run out;
+
+		double const w = b.rMax - b.rMin;
+		double const h = b.zMax - b.zMin;
+		double const eigenvalue = M_PI*M_PI*( 1.0/( w*w ) + 1.0/( h*h ) );
+		double const estimate = std::sqrt( nu*amplitude/eigenvalue );
+
+		mfem::Mesh mesh = makeMesh( b, n );
+		Solver solver( mesh, order );
+		solver.setAssemblyMode( mode );
+		solver.setTraceSolver( trace );
+
+		NormalisedEquilibriumSource<meq::analytic::HighBetaPoloidal> source(
+			meq::analytic::HighBetaPoloidal::peaked( nu, amplitude, estimate ) );
+		mfem::ConstantCoefficient zero( 0.0 );
+
+		// The guess is PART OF THE PROBLEM STATEMENT here, not an optimisation:
+		// at a fixed normalisation this equation has a small positive solution
+		// and a large one, and Newton from the Dirichlet datum walks onto the
+		// small branch. HighBetaConvergence records the same bump for the reason.
+		double const rMin = b.rMin;
+		double const zMin = b.zMin;
+		mfem::FunctionCoefficient guess(
+			[ estimate, rMin, zMin, w, h ]( mfem::Vector const &x )
+			{
+				return estimate*std::sin( M_PI*( x( 0 ) - rMin )/w )
+				       *std::sin( M_PI*( x( 1 ) - zMin )/h );
+			} );
+
+		solver.setSource( source, estimate );
+		solver.setBoundaryData( zero );
+		solver.setInitialGuess( guess );
+		solver.setNewtonControl( 1.0e-10, 1.0e-14, 30 );
+
+		double const t0 = now();
+		solver.prepare();
+		double const t1 = now();
+		out.prepareTime = t1 - t0;
+
+		try
+		{
+			solver.solve();
+			out.converged = true;
+		}
+		catch ( std::exception const & )
+		{
+			out.converged = false;
+		}
+		out.solveTime = now() - t1;
+		out.newtonIterations = solver.newtonIterations();
+
+		if ( out.converged )
+		{
+			// FINITENESS FIRST, before anything takes a norm. See Run.
+			out.finiteFailures = solver.potential().CheckFinite()
+			                   + solver.flux().CheckFinite();
+			out.psiPeak = solver.potential().Normlinf();
+			out.psi = copyOf( solver.potential() );
+			out.flux = copyOf( solver.flux() );
+		}
+		return out;
+	}
+
 	std::vector<int> parseList( char const *text )
 	{
 		std::vector<int> out;
@@ -364,6 +501,21 @@ int main( int argc, char **argv )
 	// nonlinear path: including it by default would put a one-step solve in
 	// every thread-scaling table, where it measures assembly and nothing else.
 	bool wantSoloviev = false;
+	// OPT-IN for a different reason -- it is the BORDERED case, psi_ax an
+	// unknown. See runBordered().
+	bool wantHighBeta = false;
+	/*
+	 * THE CASE FLAGS COMPOSE, AND THEY USED NOT TO.
+	 *
+	 * Each was written as "turn the other one off", which reads correctly for
+	 * one flag and silently selects NOTHING for two: `--example5 --pedestal`
+	 * cleared both and the binary printed a header, a correctness block and no
+	 * rows. Nothing said so, because running no cases is not an error.
+	 *
+	 * So the first case flag clears the defaults and every flag after it ADDS.
+	 * One flag behaves exactly as before; two now mean what they say.
+	 */
+	bool selectionMade = false;
 	// Which trace solvers to include. Restricting matters here in a way it does
 	// not in TraceSolverScaling: UMFPACK and PARDISO respond to MKL_NUM_THREADS
 	// in OPPOSITE directions, so a row that sweeps both at MKL > 1 is dominated
@@ -433,17 +585,19 @@ int main( int argc, char **argv )
 			sizes = parseList( argv[ ++i ] );
 		else if ( arg == "--repeats" && i + 1 < argc )
 			repeats = std::atoi( argv[ ++i ] );
-		else if ( arg == "--pedestal" )
-			wantExample5 = false;
-		else if ( arg == "--example5" )
-			wantPedestal = false;
-		else if ( arg == "--soloviev" )
+		else if ( arg == "--pedestal" || arg == "--example5"
+		          || arg == "--soloviev" || arg == "--highbeta" )
 		{
-			// The linear-source arm ALONE, since its whole purpose is to be
-			// compared against the other two rather than averaged with them.
-			wantSoloviev = true;
-			wantExample5 = false;
-			wantPedestal = false;
+			if ( !selectionMade )
+			{
+				selectionMade = true;
+				wantExample5 = wantPedestal = false;
+				wantSoloviev = wantHighBeta = false;
+			}
+			if ( arg == "--pedestal" )      wantPedestal = true;
+			else if ( arg == "--example5" ) wantExample5 = true;
+			else if ( arg == "--soloviev" ) wantSoloviev = true;
+			else                            wantHighBeta = true;
 		}
 		else if ( arg == "--trace" && i + 1 < argc )
 			wantTrace = argv[ ++i ];
@@ -601,13 +755,15 @@ int main( int argc, char **argv )
 	// unflushed header makes that look like a hang rather than a measurement.
 	std::fflush( stdout );
 
-	for ( int pass = 0; pass < 3; ++pass )
+	for ( int pass = 0; pass < 4; ++pass )
 	{
 		char const *name = ( pass == 0 ) ? "example5"
-		                 : ( pass == 1 ) ? "pedestal" : "soloviev";
+		                 : ( pass == 1 ) ? "pedestal"
+		                 : ( pass == 2 ) ? "soloviev" : "highbeta";
 		if ( pass == 0 && !wantExample5 ) continue;
 		if ( pass == 1 && !wantPedestal ) continue;
 		if ( pass == 2 && !wantSoloviev ) continue;
+		if ( pass == 3 && !wantHighBeta ) continue;
 
 		// example5's datum is the trace of its own exact solution; the
 		// pedestal's is section 4.2's sign-changing ramp, which is also its
@@ -628,6 +784,9 @@ int main( int argc, char **argv )
 			{
 				return soloviev.psi( x( 0 ), x( 1 ) );
 			} );
+		// Pass 3 binds solovievDatum and never reads it: runBordered() carries
+		// its own homogeneous datum and its own guess, both being part of that
+		// problem's statement rather than of this harness's.
 		mfem::Coefficient &datum = ( pass == 0 )
 			? static_cast<mfem::Coefficient &>( exactDatum )
 			: ( pass == 1 ) ? static_cast<mfem::Coefficient &>( rampDatum )
@@ -640,6 +799,33 @@ int main( int argc, char **argv )
 		{
 			for ( int n : sizes )
 			{
+				/*
+				 * ONE DISPATCH FOR EVERY CALL SITE, AND THE DUPLICATION IT
+				 * REPLACES CARRIED A BUG.
+				 *
+				 * The four sites below -- serial, threaded, and the two the
+				 * trace-solver comparison runs -- each spelled the pass out as
+				 * a ternary chain. The two in the comparison stopped at
+				 * `pass == 0 ? example5 : pedestal`, so on the --soloviev arm
+				 * it ran the PEDESTAL fixture carrying Solov'ev's datum: a
+				 * combination that is neither case, and it still printed an
+				 * agreement figure. Adding a fourth pass to four chains would
+				 * have been a fifth chance to do it again.
+				 */
+				auto runCase = [ & ]( AM mode, TS trace ) -> Run
+				{
+					switch ( pass )
+					{
+						case 0:  return runOnce( box(), order, n, example5, datum, guessFromDatum, mode, trace );
+						case 1:  return runOnce( box(), order, n, pedestal, datum, guessFromDatum, mode, trace );
+						case 2:  return runOnce( box(), order, n, soloviev, datum, guessFromDatum, mode, trace );
+						// nu = 2, amplitude 1: HighBetaConvergence's own
+						// converging point, so a non-convergence here is the
+						// harness rather than the physics.
+						default: return runBordered( box(), order, n, 2, 1.0, mode, trace );
+					}
+				};
+
 				for ( TS trace : traceSolvers )
 				{
 					Run best_s, best_t;
@@ -648,11 +834,7 @@ int main( int argc, char **argv )
 
 					for ( int r = 0; r < repeats; ++r )
 					{
-						Run s = ( pass == 0 )
-							? runOnce( box(), order, n, example5, datum, guessFromDatum, AM::Serial, trace )
-							: ( pass == 1 )
-							? runOnce( box(), order, n, pedestal, datum, guessFromDatum, AM::Serial, trace )
-							: runOnce( box(), order, n, soloviev, datum, guessFromDatum, AM::Serial, trace );
+						Run s = runCase( AM::Serial, trace );
 						if ( s.prepareTime < best_s.prepareTime ) best_s.prepareTime = s.prepareTime;
 						if ( s.solveTime < best_s.solveTime ) best_s.solveTime = s.solveTime;
 						best_s.newtonIterations = s.newtonIterations;
@@ -667,11 +849,7 @@ int main( int argc, char **argv )
 					{
 						for ( int r = 0; r < repeats; ++r )
 						{
-							Run t = ( pass == 0 )
-								? runOnce( box(), order, n, example5, datum, guessFromDatum, AM::Threaded, trace )
-								: ( pass == 1 )
-								? runOnce( box(), order, n, pedestal, datum, guessFromDatum, AM::Threaded, trace )
-								: runOnce( box(), order, n, soloviev, datum, guessFromDatum, AM::Threaded, trace );
+							Run t = runCase( AM::Threaded, trace );
 							if ( t.prepareTime < best_t.prepareTime ) best_t.prepareTime = t.prepareTime;
 							if ( t.solveTime < best_t.solveTime ) best_t.solveTime = t.solveTime;
 							best_t.newtonIterations = t.newtonIterations;
@@ -733,14 +911,10 @@ int main( int argc, char **argv )
 				// serial path so that only one variable moves.
 				if ( traceSolvers.size() > 1 )
 				{
-					Run reference = ( pass == 0 )
-						? runOnce( box(), order, n, example5, datum, guessFromDatum, AM::Serial, traceSolvers[ 0 ] )
-						: runOnce( box(), order, n, pedestal, datum, guessFromDatum, AM::Serial, traceSolvers[ 0 ] );
+					Run reference = runCase( AM::Serial, traceSolvers[ 0 ] );
 					for ( size_t i = 1; i < traceSolvers.size(); ++i )
 					{
-						Run other = ( pass == 0 )
-							? runOnce( box(), order, n, example5, datum, guessFromDatum, AM::Serial, traceSolvers[ i ] )
-							: runOnce( box(), order, n, pedestal, datum, guessFromDatum, AM::Serial, traceSolvers[ i ] );
+						Run other = runCase( AM::Serial, traceSolvers[ i ] );
 						if ( reference.converged && other.converged )
 						{
 							double scale = 0.0;
