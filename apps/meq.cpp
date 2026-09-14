@@ -74,6 +74,18 @@ namespace
 			"  MEQ --help           this\n"
 			"  MEQ --version        the build this is\n"
 			"\n"
+			"  --mesh-command       print the generator command [mesh.generate]\n"
+			"                       describes, shell-quoted, and exit without\n"
+			"                       solving. MEQ links MFEM and not gmsh, so it\n"
+			"                       says what to run rather than running it.\n"
+			"                       Nothing on stdout, and exit 0, when the file\n"
+			"                       has no mesh to make.\n"
+			"  --mesh-ready         the caller has already made that mesh. A\n"
+			"                       configuration carrying [mesh.generate] is\n"
+			"                       REFUSED without this, so an edited geometry\n"
+			"                       cannot be answered from the previous one's\n"
+			"                       mesh. meq-run passes it; you should not.\n"
+			"\n"
 			"  --device <name>      run under an mfem::Device: cpu (the\n"
 			"                       default), cuda, or debug. CORRECTNESS\n"
 			"                       rather than speed -- MEQ's integrators have\n"
@@ -102,6 +114,137 @@ namespace
 	 * A warning that is usually wrong is one people learn to ignore, which
 	 * spends the credibility of every other message this driver prints.
 	 */
+
+	/**
+	 * A double spelled so that reading it back gives the same double, and no
+	 * longer than that. `%.17g` always round-trips and always looks wrong --
+	 * it writes 0.35 as 0.34999999999999998 -- and this command line is meant
+	 * to be read and pasted as well as executed, so the shortest exact
+	 * spelling is worth the two extra formats it costs.
+	 */
+	std::string exactly( double value )
+	{
+		char buffer[ 64 ];
+		for ( int digits = 15; digits <= 17; ++digits )
+		{
+			std::snprintf( buffer, sizeof buffer, "%.*g", digits, value );
+			if ( std::strtod( buffer, nullptr ) == value )
+				break;
+		}
+		return buffer;
+	}
+
+	/// One argument of a command line, quoted so a POSIX shell -- and Python's
+	/// shlex.split, which is what actually consumes this -- sees exactly the
+	/// bytes given. Single quotes, because they quote everything; the only
+	/// character that cannot appear inside them is a single quote, which is
+	/// spliced.
+	std::string shellQuoted( std::string const &word )
+	{
+		bool safe = !word.empty();
+		for ( char const c : word )
+			if ( !( std::isalnum( static_cast<unsigned char>( c ) ) || c == '_' || c == '-'
+			        || c == '.' || c == '/' || c == '=' || c == '+' || c == ',' || c == ':' ) )
+				safe = false;
+		if ( safe )
+			return word;
+
+		std::string quoted = "'";
+		for ( char const c : word )
+		{
+			if ( c == '\'' )
+				quoted += "'\\''";
+			else
+				quoted += c;
+		}
+		return quoted + "'";
+	}
+
+	/**
+	 * THE GENERATOR'S ARGUMENT LIST, BUILT FROM THE CONFIGURATION.
+	 *
+	 * This is the whole of what the driver knows about meshing, and it is
+	 * deliberately a STRING rather than a subprocess: `meq` links MFEM and not
+	 * gmsh -- tools/mesh/README.md records why, and the short form is that the
+	 * coupling between MEQ and a mesher is a FILE -- so the driver's honest
+	 * contribution is to say what to run. `meq-run` runs it.
+	 *
+	 * TWO CONVERSIONS HAPPEN HERE AND THEY ARE THE REASON THE SCHEMA IS NOT
+	 * JUST halfdisc.py's FLAGS SPELLED DIFFERENTLY:
+	 *
+	 *   * the refined box is four BOUNDS in the file, as [mesh]'s own box is,
+	 *     and a corner plus two EXTENTS on the command line;
+	 *   * the conductors are CENTRE and HALF-EXTENTS in [[coils]], because
+	 *     that is what meq::Coil takes, and corner plus extents here.
+	 *
+	 * Either convention is fine and having both in one file is not, so the
+	 * file gets MEQ's and this function pays the difference. The coils are
+	 * emitted in [[coils]] order, which is the order halfdisc.py assigns its
+	 * `10 + i` element attributes in -- that agreement is what lets a machine's
+	 * conductors be written once.
+	 */
+	std::string meshCommand( meq::Configuration const &config )
+	{
+		meq::MeshGeneratorConfig const &g = config.getMesh().generate;
+
+		std::vector<std::string> words;
+		auto word = [ &words ]( std::string const &text ) { words.push_back( text ); };
+		auto number = [ &words ]( double value ) { words.push_back( exactly( value ) ); };
+
+		word( g.tool );
+		word( "--rho" );    number( g.radius );
+		word( "--size" );   number( g.size );
+		if ( g.order != 1 )
+		{
+			word( "--order" );
+			word( std::to_string( g.order ) );
+		}
+		if ( g.coilSize > 0.0 )
+		{
+			word( "--coil-size" ); number( g.coilSize );
+		}
+		if ( g.plasmaGiven )
+		{
+			word( "--plasma" );
+			number( g.plasmaRMin );
+			number( g.plasmaZMin );
+			number( g.plasmaRMax - g.plasmaRMin );
+			number( g.plasmaZMax - g.plasmaZMin );
+			word( "--plasma-size" ); number( g.plasmaSize );
+		}
+		if ( g.limiterGiven )
+		{
+			word( "--limiter" );
+			number( g.limiterR );
+			number( g.limiterZ );
+			number( g.limiterRadius );
+		}
+		if ( g.transition > 0.0 )
+		{
+			word( "--transition" ); number( g.transition );
+		}
+		for ( meq::CoilParameters const &coil : config.getCoils().coils )
+		{
+			word( "--coil" );
+			number( coil.centreR - coil.halfWidth );
+			number( coil.centreZ - coil.halfHeight );
+			number( 2.0 * coil.halfWidth );
+			number( 2.0 * coil.halfHeight );
+		}
+		word( "-o" );
+		word( config.getMesh().file );
+		if ( g.check )
+			word( "--check" );
+
+		std::string line;
+		for ( std::string const &one : words )
+		{
+			if ( !line.empty() )
+				line += ' ';
+			line += shellQuoted( one );
+		}
+		return line;
+	}
 
 	/// What the file said [source] Type was, for the output's provenance. A
 	/// directory of scan output is unreadable without it: every other attribute
@@ -439,24 +582,36 @@ namespace
 int main( int argc, char **argv )
 {
 	/*
-	 * ONE POSITIONAL ARGUMENT -- the configuration file -- AND ONE OPTION.
+	 * ONE POSITIONAL ARGUMENT -- the configuration file -- AND THREE OPTIONS,
+	 * NONE OF WHICH DESCRIBES THE EQUILIBRIUM.
 	 *
 	 * This was `argc != 2` and a single `argv[1]`, which is the right shape for
 	 * a driver whose whole interface is a TOML file and is why the file carries
-	 * everything else. `--device` is the exception, and it is an exception on
-	 * purpose: mfem::Device is PROCESS-WIDE state that has to be configured
-	 * before the first Vector is allocated, so it cannot be a key in a file
-	 * that is parsed after MFEM is already running. It is also not a property
-	 * of the equilibrium -- the same file must describe the same problem on a
-	 * machine with a GPU and on one without -- so putting it in [solver] beside
-	 * AssemblyMode would make a configuration unportable in a way none of the
-	 * other keys are.
+	 * everything else. The exceptions are exceptions on purpose, and all three
+	 * are about the PROCESS rather than about the physics:
+	 *
+	 *   --device        mfem::Device is PROCESS-WIDE state that has to be
+	 *                   configured before the first Vector is allocated, so it
+	 *                   cannot be a key in a file that is parsed after MFEM is
+	 *                   already running. It is also not a property of the
+	 *                   equilibrium -- the same file must describe the same
+	 *                   problem on a machine with a GPU and on one without --
+	 *                   so putting it in [solver] beside AssemblyMode would
+	 *                   make a configuration unportable in a way none of the
+	 *                   other keys are.
+	 *   --mesh-command  a QUERY about the file, like --version is a query about
+	 *                   the build. It does not solve.
+	 *   --mesh-ready    a claim by the CALLER about the state of the working
+	 *                   directory, which is exactly what a file describing an
+	 *                   equilibrium cannot carry.
 	 */
 	std::string configPath;
 	std::string deviceName;
 	bool deviceGiven = false;
 	bool wantHelp = false;
 	bool wantVersion = false;
+	bool wantMeshCommand = false;
+	bool meshReady = false;
 	bool badUsage = false;
 
 	for ( int i = 1; i < argc; ++i )
@@ -466,6 +621,10 @@ int main( int argc, char **argv )
 			wantHelp = true;
 		else if ( arg == "--version" )
 			wantVersion = true;
+		else if ( arg == "--mesh-command" )
+			wantMeshCommand = true;
+		else if ( arg == "--mesh-ready" )
+			meshReady = true;
 		else if ( arg == "--device" )
 		{
 			if ( i + 1 >= argc )
@@ -518,6 +677,52 @@ int main( int argc, char **argv )
 	}
 
 	std::string const argument = configPath;
+
+	/*
+	 * --mesh-command: A QUERY, NOT A SOLVE, AND IT RETURNS BEFORE THE DEVICE.
+	 *
+	 * It answers "what makes this file's mesh?" out of the configuration
+	 * alone, which is MFEM-free -- so it costs a parse and nothing else, and
+	 * in particular it does NOT need the mesh to exist. That is the whole
+	 * point: it is what you run to bring the mesh into existence.
+	 *
+	 * ONE LINE ON STDOUT AND EVERY DIAGNOSTIC ON STDERR, because the consumer
+	 * is a program. `meq-run` reads it with shlex.split, so the quoting here
+	 * is the contract between the two.
+	 */
+	if ( wantMeshCommand )
+	{
+		try
+		{
+			meq::Configuration const query( argument );
+			// NOTHING TO MAKE IS NOT AN ERROR, AND THE SILENCE IS THE
+			// ANSWER. Most configurations name a mesh that already exists or
+			// a box this driver builds itself, and a wrapper asking "what
+			// makes this file's mesh?" has to be able to tell that apart from
+			// a file it could not read -- so empty output with exit 0 means
+			// "nothing", and a non-zero exit means the question was bad.
+			if ( !query.getMesh().generate.given )
+			{
+				std::fprintf( stderr,
+					"MEQ: %s has no [mesh.generate], so there is no mesh to\n"
+					"     make -- [mesh] names one that already exists, or a\n"
+					"     box this driver builds itself.\n", argument.c_str() );
+				return Solved;
+			}
+			std::printf( "%s\n", meshCommand( query ).c_str() );
+			return Solved;
+		}
+		catch ( meq::ConfigError const &error )
+		{
+			std::fprintf( stderr, "MEQ: %s\n", error.what() );
+			return ConfigurationError;
+		}
+		catch ( std::exception const &error )
+		{
+			std::fprintf( stderr, "MEQ: %s\n", error.what() );
+			return ConfigurationError;
+		}
+	}
 
 	/*
 	 * THE DEVICE, BEFORE ANYTHING ELSE ALLOCATES.
@@ -669,6 +874,42 @@ int main( int argc, char **argv )
 	try
 	{
 		config = std::make_unique<meq::Configuration>( argument );
+
+		/*
+		 * A GENERATED MESH IS A BUILD PRODUCT, AND MEQ WILL NOT SOLVE ONE IT
+		 * WAS NOT TOLD IS CURRENT.
+		 *
+		 * `[mesh.generate]` says the file NAMED under [mesh] File is made from
+		 * this file's own geometry. MEQ cannot make it -- it links MFEM and
+		 * not gmsh -- so it cannot check it either, and the failure it would
+		 * otherwise walk into is the quiet kind this tree refuses everywhere
+		 * else: edit a coil, forget to re-mesh, and the run converges at full
+		 * order to the machine the PREVIOUS mesh described, with every printed
+		 * number looking exactly as it should.
+		 *
+		 * So the handshake is explicit. `meq-run` generates and passes
+		 * --mesh-ready; a person who has just run the generator by hand can
+		 * pass it too, and is then making the claim themselves.
+		 */
+		if ( config->getMesh().generate.given && !meshReady )
+		{
+			std::fprintf( stderr,
+				"MEQ: this configuration carries [mesh.generate], so its mesh\n"
+				"     is the file's own build product -- and MEQ cannot make\n"
+				"     it, because MEQ links MFEM and not gmsh.\n"
+				"\n"
+				"     Run it with the wrapper, which makes the mesh and then\n"
+				"     runs this:\n"
+				"\n"
+				"         meq-run %s\n"
+				"\n"
+				"     or make the mesh yourself with the command that\n"
+				"     `meq --mesh-command` prints, and say so by re-running\n"
+				"     with --mesh-ready.\n",
+				argument.c_str() );
+			return ConfigurationError;
+		}
+
 		coils = meq::makeCoilSet( config->getCoils(),
 		                          config->getSource().permeability(), argument );
 

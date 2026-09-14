@@ -125,6 +125,111 @@ The background mesh: either a box that MEQ triangulates, or a file.
    and a mesh file supplies none — so a file plus a shape is not a configuration
    to reach for. A file with no shape, which is the free-boundary case, is fine.
 
+``[mesh.generate]``
+-------------------
+
+The mesh as **this file's own build product** rather than as an input. With
+this block present, ``File`` is where a generator *writes* and where the solve
+then reads, and ``meq-run`` — :doc:`running` — is the one command that does
+both.
+
+MEQ links MFEM and not gmsh, deliberately (``tools/mesh/README.md`` has the
+reasoning; the short form is that the coupling between MEQ and a mesher is a
+*file*). So ``meq`` does not run the generator. What it does is print the
+command the block describes:
+
+.. code-block:: sh
+
+   ./build/meq --mesh-command examples/diverted-tokamak-generated.toml
+
+and **refuse to solve** such a configuration unless the caller passes
+``--mesh-ready`` to say the mesh has been made from it. Without that refusal an
+edited geometry is answered from the previous geometry's mesh, at full order,
+with every printed number looking exactly as it should.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 16 60
+
+   * - Key
+     - Default
+     - Meaning
+   * - ``Tool``
+     - *required*
+     - Which generator. ``"halfdisc"`` is the only one — ``tools/mesh/halfdisc.py``,
+       a semicircle reaching :math:`r = 0` exactly with the conductors
+       fragmented in. Naming it is what makes the block recognisable at all.
+   * - ``Radius``
+     - *required*
+     - The **disc's** radius, metres. Not :math:`\Gamma` — see the warning below.
+   * - ``Size``
+     - *required*
+     - Background element size, metres.
+   * - ``Order``
+     - ``1``
+     - Geometric order. Above 1 the arc's mid-edge nodes are placed on the true
+       circle rather than on the chord, and the axis stays exact.
+   * - ``CoilSize``
+     - *the background* ``Size``
+     - Element size inside the conductors.
+   * - ``PlasmaRMin``, ``PlasmaRMax``, ``PlasmaZMin``, ``PlasmaZMax``
+     - *none*
+     - A box to refine inside, in the same four-bounds form ``[mesh]``'s own box
+       uses. All four go together with ``PlasmaSize``.
+   * - ``PlasmaSize``
+     - *none*
+     - Element size in that box.
+   * - ``LimiterR``, ``LimiterZ``, ``LimiterRadius``
+     - *none*
+     - A circular limiter **fragmented into** the geometry, so its edges are mesh
+       faces, written as element attribute 20 — which is what
+       ``[boundary.limiter] SurfaceAttribute`` reads.
+   * - ``Transition``
+     - *four background sizes*
+     - Width of the graded transition out of a refined region, metres.
+   * - ``Check``
+     - ``true``
+     - Re-read the written file and assert MEQ's preconditions on it: that
+       :math:`r` reaches 0 **exactly**, that :math:`\Gamma` and the axis are the
+       outer boundary and nothing else, and that each coil attribute covers its
+       rectangle.
+
+.. note::
+
+   **The conductors are not repeated here, and that is the point.** The
+   generator's ``--coil`` rectangles are derived from the ``[[coils]]`` blocks,
+   in file order — which is the order ``halfdisc.py`` assigns its ``10 + i``
+   element attributes in. So a machine's conductors are written once.
+
+   That is not tidiness. FB-2 measured what meshing *to* a conductor is worth
+   against cutting through it — rates of 1.99 / 2.88 / 3.01 aligned, against
+   1.33 / 1.27 / 1.09 cut — so a coil the mesh is not aligned to costs a full
+   order, silently. Deriving one list from the other makes that unreachable rather than
+   unlikely, and it aligns the mesh to the rectangle ``meq::Coil``'s quadrature
+   uses *to the last bit*, which a hand-copied command line cannot be.
+
+   The two conventions differ and MEQ's is what the file carries: ``[[coils]]``
+   is a centre and half-extents, ``halfdisc.py`` takes a corner and two extents,
+   and the refined box is four bounds here and a corner plus extents there. The
+   driver converts. One file does not get to hold two meanings of four numbers.
+
+.. warning::
+
+   **``Radius`` is the disc and not** :math:`\Gamma`, and it is easy to read
+   them as one number. :math:`\Omega_h` is cut *from* the generated mesh as the
+   elements lying inside ``[boundary.exterior] Radius``, so the arc gmsh draws
+   is the background's outer edge and :math:`\Gamma` is the smaller semicircle
+   inside it. The two are checked against each other at parse time, before gmsh
+   runs.
+
+.. note::
+
+   Two more things become parse errors once the mesh's geometry is in the file,
+   each of which otherwise costs a mesh generation to discover: a
+   ``[boundary.limiter] SurfaceAttribute`` naming a region this mesh will not
+   carry — which at the solve reads *"psi_bnd = max psi_h over the empty set"* —
+   and a limiter circle through the axis.
+
 ``[discretisation]``
 --------------------
 

@@ -427,7 +427,11 @@ if(TARGET meq AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/DriverAcceptan
 	# Passed rather than guessed. A test that assumed "../meq" would keep
 	# passing while running nothing at all under a different generator.
 	target_compile_definitions(DriverAcceptance PRIVATE
-		MEQ_DRIVER_PATH="$<TARGET_FILE:meq>")
+		MEQ_DRIVER_PATH="$<TARGET_FILE:meq>"
+		# And the wrapper beside it. Not a target -- file(GENERATE) writes a
+		# script, so there is no $<TARGET_FILE:> for it -- but the path is
+		# fixed by the same file(GENERATE) call in the top-level CMakeLists.
+		MEQ_RUN_PATH="${CMAKE_BINARY_DIR}/meq-run")
 
 	# The source tree, so examples/*.toml resolve -- and so the driver's output
 	# lands somewhere predictable for the read-back.

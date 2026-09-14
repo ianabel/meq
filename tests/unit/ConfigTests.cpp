@@ -2547,3 +2547,170 @@ BOOST_AUTO_TEST_CASE( the_safety_factor_target_replaces_the_toroidal_field_table
 	Configuration const cubic = parse( mhd( driven + "SafetyFactorDegree = 3\n" ) );
 	BOOST_TEST( cubic.getSource().getMHD().safetyFactorDegree == 3u );
 }
+
+/*
+ * `[mesh.generate]` -- THE MESH AS A BUILD PRODUCT, AND WHAT THAT LETS THE
+ * SCHEMA CHECK THAT IT OTHERWISE COULD NOT.
+ *
+ * Most of what is below is ordinary key validation. Three of the refusals are
+ * not, and they are the reason this block is parsed by MEQ rather than left to
+ * the wrapper: with the mesh's geometry IN the file, three questions that used
+ * to be answerable only by loading the mesh -- or not at all -- become parse
+ * errors.
+ *
+ *   * a [boundary.limiter] SurfaceAttribute naming a region this mesh will not
+ *     carry. Found at the solve, that reads "psi_bnd = max psi_h over the
+ *     empty set";
+ *   * a [boundary.exterior] Radius that does not fit inside the disc. Found at
+ *     the solve, after gmsh has run;
+ *   * a limiter circle through the axis, which halfdisc.py refuses -- but only
+ *     once it has been invoked.
+ *
+ * Each of them costs a mesh generation to discover any other way.
+ */
+BOOST_AUTO_TEST_CASE( the_generated_mesh_is_checked_against_the_file_that_makes_it )
+{
+	auto const refuses = []( std::string const & text, std::string const & key )
+	{
+		BOOST_CHECK_EXCEPTION( parse( text ), ConfigError,
+			[&]( ConfigError const & e ) { return e.getKey() == key; } );
+	};
+
+	std::string const source =
+		"[discretisation]\n"
+		"PolynomialDegree = 2\n"
+		"\n"
+		"[source]\n"
+		"Type = \"mhd\"\n"
+		"Normalised = true\n"
+		"PsiAxis = 0.1\n"
+		"PPrimeFile = \"examples/fb-pprime.dat\"\n"
+		"GGPrimeFile = \"examples/fb-ggprime.dat\"\n";
+
+	auto const mesh = []( std::string const & generate )
+	{
+		return "[mesh]\nFile = \"machine.msh\"\n\n[mesh.generate]\n" + generate + "\n";
+	};
+
+	std::string const disc = "Tool = \"halfdisc\"\nRadius = 2.6\nSize = 0.18\n";
+
+	// ---- the control: a mesh nobody generates -------------------------
+	//
+	// Every other configuration in examples/ is this one, so the default has
+	// to be OFF and has to stay off. Without this the refusals below would
+	// pass on a schema that had accidentally turned the block on everywhere.
+	Configuration const borrowed = parse(
+		"[mesh]\nFile = \"machine.msh\"\n\n" + source );
+	BOOST_TEST( borrowed.getMesh().generate.given == false );
+
+	// ---- acceptance ---------------------------------------------------
+	Configuration const made = parse( mesh(
+		disc +
+		"Order = 2\n"
+		"CoilSize = 0.04\n"
+		"PlasmaRMin = 0.75\n"
+		"PlasmaRMax = 1.95\n"
+		"PlasmaZMin = -0.80\n"
+		"PlasmaZMax = 1.00\n"
+		"PlasmaSize = 0.07\n"
+		"Transition = 0.72\n" ) + source );
+
+	meq::MeshGeneratorConfig const & g = made.getMesh().generate;
+	BOOST_TEST( g.given );
+	BOOST_TEST( g.tool == "halfdisc" );
+	BOOST_TEST( g.radius == 2.6 );
+	BOOST_TEST( g.size == 0.18 );
+	BOOST_TEST( g.order == 2 );
+	BOOST_TEST( g.coilSize == 0.04 );
+	BOOST_TEST( g.plasmaGiven );
+	BOOST_TEST( g.plasmaRMin == 0.75 );
+	BOOST_TEST( g.plasmaRMax == 1.95 );
+	BOOST_TEST( g.plasmaZMin == -0.80 );
+	BOOST_TEST( g.plasmaZMax == 1.00 );
+	BOOST_TEST( g.plasmaSize == 0.07 );
+	BOOST_TEST( g.transition == 0.72 );
+	BOOST_TEST( g.limiterGiven == false );
+	// THE CHECK DEFAULTS ON, WHERE THE SCRIPT'S OWN --check DEFAULTS OFF. A
+	// human meshing interactively reads the printed report; a mesh generated
+	// inside a run has nobody looking at it.
+	BOOST_TEST( g.check );
+
+	// The defaults are "whatever the generator does", spelled as zero rather
+	// than as a repeat of its numbers -- so a change to halfdisc.py's default
+	// transition does not silently disagree with a copy of it kept here.
+	Configuration const bare = parse( mesh( disc ) + source );
+	BOOST_TEST( bare.getMesh().generate.order == 1 );
+	BOOST_TEST( bare.getMesh().generate.coilSize == 0.0 );
+	BOOST_TEST( bare.getMesh().generate.transition == 0.0 );
+	BOOST_TEST( bare.getMesh().generate.plasmaGiven == false );
+
+	// ---- the block is its Tool ----------------------------------------
+	//
+	// ANY key without one, not a chosen few: a block with no generator named is
+	// a set of numbers nothing will ever read, which is the accepted-and-
+	// ignored failure this schema refuses everywhere else.
+	refuses( mesh( "Radius = 2.6\nSize = 0.18\n" ) + source, "mesh.generate.Tool" );
+	refuses( mesh( "Check = false\n" ) + source, "mesh.generate.Tool" );
+	// And an EMPTY block is not an error -- there is nothing in it to ignore.
+	BOOST_CHECK_NO_THROW( parse( mesh( "" ) + source ) );
+	refuses( mesh( "Tool = \"quadhex\"\nRadius = 2.6\nSize = 0.18\n" ) + source,
+	         "mesh.generate.Tool" );
+	refuses( mesh( disc + "Rho = 2.6\n" ) + source, "mesh.generate.Rho" );
+
+	// A GENERATOR WITH NOWHERE TO WRITE IS NOT A RUN, and File is also what
+	// the solve then reads -- so the two are one path by construction rather
+	// than by the author keeping two lines in step.
+	refuses( "[mesh]\nRMin = 0.0\nRMax = 1.7\nZMin = -1.7\nZMax = 1.7\n"
+	         "\n[mesh.generate]\n" + disc + "\n" + source, "mesh.generate.Tool" );
+
+	// ---- values -------------------------------------------------------
+	refuses( mesh( "Tool = \"halfdisc\"\nRadius = 0.0\nSize = 0.18\n" ) + source,
+	         "mesh.generate.Radius" );
+	refuses( mesh( "Tool = \"halfdisc\"\nRadius = 2.6\nSize = -0.1\n" ) + source,
+	         "mesh.generate.Size" );
+	refuses( mesh( disc + "Order = 0\n" ) + source, "mesh.generate.Order" );
+	refuses( mesh( disc + "Transition = -0.1\n" ) + source, "mesh.generate.Transition" );
+
+	// BOTH OR NEITHER, for halfdisc.py's own reason: a region with no size
+	// refines nothing and a size with no region has nowhere to act.
+	refuses( mesh( disc + "PlasmaRMin = 0.75\n" ) + source, "mesh.generate.PlasmaRMax" );
+	refuses( mesh( disc + "PlasmaSize = 0.07\n" ) + source, "mesh.generate.PlasmaRMin" );
+	refuses( mesh( disc + "PlasmaRMin = 1.95\nPlasmaRMax = 0.75\n"
+	                      "PlasmaZMin = -0.8\nPlasmaZMax = 1.0\nPlasmaSize = 0.07\n" ) + source,
+	         "mesh.generate.PlasmaRMax" );
+
+	// A LIMITER THROUGH THE AXIS. halfdisc.py refuses this too, and only once
+	// it has been invoked; here it costs a parse.
+	refuses( mesh( disc + "LimiterR = 0.3\nLimiterZ = 0.0\nLimiterRadius = 0.35\n" ) + source,
+	         "mesh.generate.LimiterR" );
+	refuses( mesh( disc + "LimiterR = 1.0\nLimiterZ = 0.0\nLimiterRadius = 0.0\n" ) + source,
+	         "mesh.generate.LimiterRadius" );
+
+	// ---- what the block lets the REST of the file be checked against ---
+	std::string const limiter =
+		"LimiterR = 1.0\nLimiterZ = 0.0\nLimiterRadius = 0.35\n";
+
+	BOOST_CHECK_NO_THROW( parse( mesh( disc + limiter ) + source
+		+ "\n[boundary.limiter]\nSurfaceAttribute = 20\n" ) );
+
+	// An attribute no element will carry. Found at the solve this is
+	// "psi_bnd = max psi_h over the empty set".
+	refuses( mesh( disc ) + source + "\n[boundary.limiter]\nSurfaceAttribute = 20\n",
+	         "boundary.limiter.SurfaceAttribute" );
+	refuses( mesh( disc + limiter ) + source + "\n[boundary.limiter]\nSurfaceAttribute = 7\n",
+	         "boundary.limiter.SurfaceAttribute" );
+
+	// TWO SEMICIRCLES, AND GAMMA IS THE INNER ONE -- which is the thing about
+	// this pairing that is easy to get backwards. D_h is cut FROM the disc, so
+	// the arc gmsh draws is the background's outer edge; Gamma has to fit
+	// strictly inside it.
+	BOOST_CHECK_NO_THROW( parse( mesh( disc ) + source
+		+ "\n[boundary]\nType = \"zero\"\n"
+		+ "\n[boundary.exterior]\nRadius = 2.4\nModes = 10\n" ) );
+	refuses( mesh( disc ) + source + "\n[boundary]\nType = \"zero\"\n"
+	         + "\n[boundary.exterior]\nRadius = 2.6\nModes = 10\n",
+	         "boundary.exterior.Radius" );
+	refuses( mesh( disc ) + source + "\n[boundary]\nType = \"zero\"\n"
+	         + "\n[boundary.exterior]\nRadius = 2.4\nCentreZ = 0.5\nModes = 10\n",
+	         "boundary.exterior.Radius" );
+}

@@ -7,9 +7,11 @@ Running MEQ
    meq --help           usage
    meq --version        the build this is
 
-There are no other flags and no subcommands. Everything about a run is in the
-configuration file, which :doc:`configuration` documents key by key, and which
-``examples/`` has worked instances of — see :doc:`examples`.
+There are no subcommands, and the four flags there are describe the *process*
+rather than the equilibrium: ``--device``, ``--mesh-command``, ``--mesh-ready``
+and ``--version``. Everything about a run is in the configuration file, which
+:doc:`configuration` documents key by key, and which ``examples/`` has worked
+instances of — see :doc:`examples`.
 
 .. code-block:: sh
 
@@ -22,6 +24,68 @@ configuration file, which :doc:`configuration` documents key by key, and which
    somebody asks six months later which equilibrium a plot came from, the answer
    should be a file that can be re-run, and every run's output carries the name
    of the file that produced it as an attribute.
+
+Making the mesh from the same file
+----------------------------------
+
+A free-boundary machine needs a mesh ``mfem::Mesh::MakeCartesian2D`` cannot
+build: a semicircle reaching :math:`r = 0` exactly, with the conductors
+fragmented in. That comes from gmsh, through ``tools/mesh/halfdisc.py``.
+
+``[mesh.generate]`` puts the geometry of that mesh in the same file as the
+equilibrium, and ``meq-run`` is the one command that makes it and then solves:
+
+.. code-block:: sh
+
+   ./build/meq-run examples/diverted-tokamak-generated.toml
+
+``meq-run`` is a script, built into the build directory beside the binary it
+runs. That is a decision rather than a stage: ``meq`` links MFEM and not gmsh —
+``tools/mesh/README.md`` has the reasoning — so *something* outside the solver
+has to run the generator, and this is that something. It is deliberately thin,
+and in particular it does **not** parse the configuration. There is one reader
+of MEQ's schema and it is ``meq``:
+
+.. code-block:: text
+
+   meq --mesh-command <config>   the generator's argument list, shell-quoted —
+                                 or nothing at all, and exit 0, when the file
+                                 names a mesh that already exists
+   <the generator>               writes the .msh
+   meq --mesh-ready <config>     the solve, exec'd, so the exit code is meq's
+
+Every number in that command line came out of the same parser the solve will
+use.
+
+.. code-block:: text
+
+   meq-run [options] <config.toml> [meq options ...]
+
+   --remesh       generate even when the stamp says the mesh is current
+   --mesh-only    stop after the mesh; do not solve
+   --dry-run      print what would be run, and run nothing
+   -v, --verbose  echo each command before running it
+
+Anything else is passed through, so ``meq-run f.toml --device debug`` works, and
+a file with no ``[mesh.generate]`` is simply solved.
+
+.. note::
+
+   **The generator command is written beside the mesh, as** ``<mesh>.meq-mesh``,
+   and a later run producing the same command skips the meshing. So editing a
+   coil re-meshes and editing ``PolynomialDegree`` does not — which is why the
+   stamp holds the *command* rather than the configuration file's modification
+   time.
+
+.. warning::
+
+   **``meq`` refuses a configuration carrying ``[mesh.generate]`` unless it is
+   given ``--mesh-ready``.** MEQ cannot make that mesh, so it cannot check it
+   either, and the failure it would otherwise walk into is the quiet kind: edit
+   a coil, forget to re-mesh, and the run converges at full order to the machine
+   the *previous* mesh described, with every printed number looking exactly as
+   it should. ``meq-run`` passes the flag; a person who has just run the
+   generator by hand can pass it too, and is then making the claim themselves.
 
 What a run does
 ---------------

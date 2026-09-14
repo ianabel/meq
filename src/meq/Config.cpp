@@ -3,6 +3,7 @@
 #include "RotatingSource.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
@@ -171,6 +172,14 @@ namespace meq
 				};
 
 				bool isPresent() const { return values != nullptr; };
+
+				/// True for an absent table AND for a present but empty one.
+				/// Both mean "the author wrote nothing here", which is what a
+				/// caller asking the question wants to know.
+				bool isEmpty() const
+				{
+					return values == nullptr || values->as_table().empty();
+				};
 
 				bool has( std::string const & key ) const { return find( key ) != nullptr; };
 
@@ -980,7 +989,7 @@ namespace meq
 		// [mesh]
 		{
 			Table mesh( document, "mesh", sourceName, true );
-			mesh.rejectUnknownKeys( { "RMin", "RMax", "ZMin", "ZMax", "NR", "NZ", "RefinementLevels", "File" } );
+			mesh.rejectUnknownKeys( { "RMin", "RMax", "ZMin", "ZMax", "NR", "NZ", "RefinementLevels", "File", "generate" } );
 
 			meshOptions.file = mesh.getStringOr( "File", "" );
 			meshOptions.refinementLevels = mesh.getIntegerOr( "RefinementLevels", 0 );
@@ -1007,6 +1016,122 @@ namespace meq
 					mesh.fail( "NR", "must be at least 1" );
 				if ( meshOptions.nZ < 1 )
 					mesh.fail( "NZ", "must be at least 1" );
+			}
+
+			// [mesh.generate] -- the mesh as a BUILD PRODUCT of this file.
+			//
+			// MEQ does not run the generator: `meq` links MFEM and not gmsh,
+			// for the reasons tools/mesh/README.md records. What it does with
+			// this block is print the generator's argument list on request
+			// (`meq --mesh-command`) and REFUSE to solve without
+			// `--mesh-ready`, so that an edited geometry cannot be answered
+			// from the mesh the previous geometry made. `meq-run` is the
+			// caller that does both, and it is the single executable the user
+			// runs.
+			//
+			// THE COILS ARE NOT HERE. They come from the [[coils]] blocks, in
+			// file order, which is the order halfdisc.py assigns its 10 + i
+			// element attributes in. Writing a machine's conductors twice --
+			// once on a command line and once in the file the solve reads --
+			// is what this block exists to stop.
+			{
+				Table generate( mesh, "generate", sourceName, false );
+				generate.rejectUnknownKeys( { "Tool", "Radius", "Size", "Order", "CoilSize",
+				                              "PlasmaRMin", "PlasmaRMax", "PlasmaZMin", "PlasmaZMax",
+				                              "PlasmaSize", "LimiterR", "LimiterZ", "LimiterRadius",
+				                              "Transition", "Check" } );
+
+				MeshGeneratorConfig & g = meshOptions.generate;
+				g.given = generate.has( "Tool" );
+
+				// TOOL IS THE BLOCK, AND THE TEST IS "ANY KEY AT ALL" RATHER
+				// THAN A LIST. A geometry with no generator named is a set of
+				// numbers nothing will read -- which is the accepted-and-
+				// ignored failure this schema refuses everywhere else -- and
+				// reporting it against the key that is MISSING is more useful
+				// than reporting it against whichever one happens to be first.
+				if ( !g.given && !generate.isEmpty() )
+					generate.fail( "Tool", "[mesh.generate] needs a Tool to name which generator makes the mesh; \"halfdisc\" is the one there is" );
+
+				if ( g.given )
+				{
+					g.tool = generate.getString( "Tool" );
+					if ( g.tool != "halfdisc" )
+						generate.fail( "Tool", "unknown mesh generator \"" + g.tool + "\"; the generators are [halfdisc], which is tools/mesh/halfdisc.py -- a semicircle reaching r = 0 exactly, with the conductors fragmented in" );
+
+					// A generator with nowhere to write is not a run. File is
+					// also what the solve then READS, so the two are the same
+					// path by construction rather than by the author keeping
+					// two lines in step.
+					if ( !meshOptions.fromFile() )
+						generate.fail( "Tool", "[mesh.generate] makes the mesh [mesh] File names, so File is required with it: it is where the generator writes and where the solve reads" );
+
+					g.radius = generate.getFloat( "Radius" );
+					g.size = generate.getFloat( "Size" );
+					g.order = generate.getIntegerOr( "Order", 1 );
+					g.coilSize = generate.getFloatOr( "CoilSize", 0.0 );
+					g.transition = generate.getFloatOr( "Transition", 0.0 );
+					g.check = generate.getBooleanOr( "Check", true );
+
+					if ( !( g.radius > 0.0 ) )
+						generate.fail( "Radius", "the disc's radius must be positive. NOTE it is the BACKGROUND's radius and not Gamma's: with an exterior coupling, D_h is cut from this mesh at [boundary.exterior] Radius, which has to fit strictly inside it" );
+					if ( !( g.size > 0.0 ) )
+						generate.fail( "Size", "the background element size must be positive" );
+					if ( g.order < 1 )
+						generate.fail( "Order", "the geometric order must be at least 1; above 1 the arc's mid-edge nodes are placed on the true circle rather than on the chord" );
+					if ( g.coilSize < 0.0 )
+						generate.fail( "CoilSize", "the element size inside the conductors must not be negative; omit it for the background Size" );
+					if ( g.transition < 0.0 )
+						generate.fail( "Transition", "the graded transition's width must not be negative; omit it for four background sizes" );
+
+					// THE REFINED BOX, IN MEQ's OWN CONVENTION. halfdisc.py
+					// takes a corner and two extents and [mesh] takes four
+					// bounds; the driver converts when it prints the command,
+					// so one file never carries two meanings of four numbers.
+					bool const boxGiven = generate.has( "PlasmaRMin" ) || generate.has( "PlasmaRMax" )
+					                      || generate.has( "PlasmaZMin" ) || generate.has( "PlasmaZMax" );
+					g.plasmaGiven = boxGiven || generate.has( "PlasmaSize" );
+					if ( g.plasmaGiven )
+					{
+						// BOTH OR NEITHER, for halfdisc.py's own reason: a
+						// region with no size refines nothing and a size with
+						// no region has nowhere to act.
+						g.plasmaRMin = generate.getFloat( "PlasmaRMin" );
+						g.plasmaRMax = generate.getFloat( "PlasmaRMax" );
+						g.plasmaZMin = generate.getFloat( "PlasmaZMin" );
+						g.plasmaZMax = generate.getFloat( "PlasmaZMax" );
+						g.plasmaSize = generate.getFloat( "PlasmaSize" );
+
+						if ( g.plasmaRMin < 0.0 )
+							generate.fail( "PlasmaRMin", "must not be negative: r is a cylindrical radius" );
+						if ( g.plasmaRMax <= g.plasmaRMin )
+							generate.fail( "PlasmaRMax", "must be greater than PlasmaRMin" );
+						if ( g.plasmaZMax <= g.plasmaZMin )
+							generate.fail( "PlasmaZMax", "must be greater than PlasmaZMin" );
+						if ( !( g.plasmaSize > 0.0 ) )
+							generate.fail( "PlasmaSize", "the element size in the refined box must be positive" );
+					}
+
+					// THE LIMITER, FRAGMENTED IN RATHER THAN CUT. Written as
+					// element attribute 20, which is what [boundary.limiter]
+					// SurfaceAttribute reads; the two are checked against each
+					// other where that block is parsed.
+					g.limiterGiven = generate.has( "LimiterR" ) || generate.has( "LimiterZ" )
+					                 || generate.has( "LimiterRadius" );
+					if ( g.limiterGiven )
+					{
+						g.limiterR = generate.getFloat( "LimiterR" );
+						g.limiterZ = generate.getFloat( "LimiterZ" );
+						g.limiterRadius = generate.getFloat( "LimiterRadius" );
+
+						if ( !( g.limiterRadius > 0.0 ) )
+							generate.fail( "LimiterRadius", "a limiter of zero radius has no interior to give an attribute to" );
+						if ( !( g.limiterR - g.limiterRadius > 0.0 ) )
+							generate.fail( "LimiterR", "the limiter circle reaches or crosses the axis: LimiterR - LimiterRadius = "
+							               + std::to_string( g.limiterR - g.limiterRadius )
+							               + " and must be strictly positive, because a closed plasma surface through r = 0 carries a non-integrable 1/r" );
+					}
+				}
 			}
 		}
 
@@ -1273,6 +1398,20 @@ namespace meq
 					l.surfaceAttribute = limiter.getInteger( "SurfaceAttribute" );
 					if ( l.surfaceAttribute <= 0 )
 						limiter.fail( "SurfaceAttribute", "the limiter region's element attribute must be positive; MFEM numbers attributes from 1, and tools/mesh/halfdisc.py --limiter writes the enclosed region as 20" );
+
+					// WHERE THE MESH IS THIS FILE'S OWN BUILD PRODUCT, THE
+					// ATTRIBUTE IS KNOWN AND CAN BE CHECKED. Without this the
+					// mistake is found at the solve, where the symptom is
+					// "psi_bnd = max psi_h over the empty set" -- an attribute
+					// no element carries -- rather than a key that is wrong.
+					if ( meshOptions.generate.given )
+					{
+						if ( !meshOptions.generate.limiterGiven )
+							limiter.fail( "SurfaceAttribute", "[mesh.generate] makes this mesh and was not asked for a limiter, so no element will carry this attribute; give [mesh.generate] LimiterR, LimiterZ and LimiterRadius, or pin the contact with [boundary.limiter] R and Z" );
+						if ( l.surfaceAttribute != generatedLimiterAttribute )
+							limiter.fail( "SurfaceAttribute", "[mesh.generate] writes the limiter's interior as attribute "
+							              + std::to_string( generatedLimiterAttribute ) + ", so that is what this must be" );
+					}
 				}
 				if ( pointGiven )
 				{
@@ -1365,6 +1504,23 @@ namespace meq
 					// would impose a second, contradictory condition there.
 					if ( boundaryOptions.type != BoundaryDataType::Zero )
 						exterior.fail( "Radius", "[boundary] Type must be \"zero\" with an exterior coupling: Gamma carries the transmission condition, not a prescribed datum" );
+
+					// TWO SEMICIRCLES, AND GAMMA IS THE INNER ONE. It is
+					// tempting to read [mesh.generate] Radius and this one as
+					// the same number and they are not: the generated arc is
+					// the BACKGROUND mesh's outer edge, and D_h is cut FROM
+					// that mesh as the elements inside Gamma, with the band
+					// between the resulting staircase and Gamma bridged by the
+					// Cockburn-Solano transfer. So Gamma has to fit STRICTLY
+					// inside the disc, which is what the driver checks against
+					// the loaded mesh's bounding box -- and what can be
+					// checked here, before gmsh has run at all, whenever the
+					// disc is this file's own build product.
+					if ( meshOptions.generate.given
+					     && std::abs( e.centreZ ) + e.radius >= meshOptions.generate.radius )
+						exterior.fail( "Radius", "Gamma must fit strictly inside the generated disc, and [mesh.generate] Radius = "
+						               + std::to_string( meshOptions.generate.radius )
+						               + " does not leave room for it: D_h is CUT FROM that mesh, so the arc gmsh draws is the background's outer edge and not Gamma. Give the generator the larger radius" );
 				}
 			}
 		}

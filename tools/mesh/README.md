@@ -17,6 +17,28 @@ python3 tools/mesh/halfdisc.py --rho 1.5 --size 0.15 \
 `File = "machine.msh"` under `[mesh]` is how a run reads it — MFEM
 reads gmsh's format natively, with no converter.
 
+## Or drive it from the configuration itself
+
+`[mesh.generate]` puts the geometry above in the same TOML file as the
+equilibrium, and `meq-run` makes the mesh and then solves:
+
+```sh
+./build/meq-run examples/diverted-tokamak-generated.toml
+```
+
+**The conductors are then written once.** The `--coil` rectangles are derived
+from the file's `[[coils]]` blocks, in file order — which is exactly the
+agreement *What the attributes mean* below records, and which is what makes the
+derivation possible at all. The command that results is printed by `meq
+--mesh-command <config>`, and written beside the mesh as `<mesh>.meq-mesh` so a
+re-run that would produce the same command skips the meshing.
+
+Nothing about this file changes: it is still a plain gmsh script with the CLI
+below, `meq-run` invokes it through that CLI, and `[mesh.generate]`'s schema is
+MEQ's own — four bounds where `--plasma` takes a corner and two extents, a
+centre and half-extents where `--coil` takes a corner and two extents. The
+driver converts.
+
 ## Why r = 0 is the requirement, not a preference
 
 `FREE-BOUNDARY-PLAN.md` §3 expands the exterior field in Gegenbauer functions
@@ -36,6 +58,14 @@ Read `--rho` as *where Γ is*, and note that Γ must **enclose every conductor**
 outside it the field has to be Δ\*-harmonic, and a current there is not. The
 tool refuses a coil that reaches or crosses Γ, and refuses one that reaches the
 axis for the same reason `meq::Coil` and `[[coils]]` do.
+
+**With the exterior coupling on, `--rho` is one step further out than that.**
+`[boundary.exterior] Radius` is Γ, and Ω_h is cut *from* this mesh as the
+elements lying inside it — so the arc drawn here is the **background's** outer
+edge and Γ is a smaller semicircle within it, with the band between the
+resulting staircase and Γ bridged by the same Cockburn–Solano transfer the
+curved path uses. The driver refuses a Γ that does not fit strictly inside the
+mesh, and with `[mesh.generate]` it refuses it before gmsh runs.
 
 ## What the attributes mean
 

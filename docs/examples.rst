@@ -75,6 +75,11 @@ relative path:
    * - ``diverted-tokamak.toml``
      - The same machine with the bounding point *prescribed* at the reference's
        X-point instead. Kept as the comparison that isolates the border.
+   * - ``diverted-tokamak-generated.toml``
+     - The same machine again, **meshing itself**: ``[mesh.generate]`` describes
+       the half-disc and the conductors' rectangles are derived from the
+       ``[[coils]]`` blocks, so each coil is written once. Run it with
+       ``meq-run`` — see :doc:`running`.
 
 .. _examples-benchmark-caveat:
 

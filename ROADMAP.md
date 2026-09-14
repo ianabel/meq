@@ -260,6 +260,23 @@ Nothing is red and stages 0 to 7 are done, so the order is:
    conductors freegs4e models as FILAMENTS and MEQ meshes as rectangles — the
    conductor model, not either solver. → **[M-87](MEASUREMENTS.md#m-87)**.
 
+   **AND THE MESH IS NOW PART OF THE FILE, 2026-09-13.** `[mesh.generate]`
+   describes the half-disc `tools/mesh/halfdisc.py` builds, and `meq-run` — a
+   script `file(GENERATE)`d beside the binary — makes it and then execs `meq`.
+   The conductors' rectangles are **derived from `[[coils]]`**, so a machine
+   whose coils were written twice in two conventions (once in a header comment,
+   once as blocks) is now written once, and the mesh aligns to the rectangle
+   `meq::Coil`'s quadrature uses to the ulp. `meq` refuses such a configuration
+   without `--mesh-ready`, so an edited geometry cannot be answered from the
+   previous geometry's mesh; `examples/diverted-tokamak-generated.toml` reaches
+   the committed mesh's answer to **1.6e-06 m in the X-point**.
+
+   **The obvious next rung is `tools/mesh/` growing a second generator**, since
+   every geometry in the tree is a half-disc with rectangles and MAST-U is not:
+   a 47-point limiter polygon and a 91-point wall are what `[mesh.generate]`
+   would have to name, and `Tool` exists so that arrives as a second value
+   rather than as a second table.
+
    **What is left in §10 is a machine nobody here designed.** `tools/MAST-U*` is
    a freegsnke configuration and is the next case up in complexity; the ladder
    above is what it is to be run against.

@@ -474,6 +474,31 @@ if(MEQ_BUILD_APP)
 		"${CMAKE_CURRENT_BINARY_DIR}/meq_version.hpp"
 		@ONLY)
 	target_include_directories(meq PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+
+	# meq-run: the mesh generator and the solver, from one file.
+	#
+	# GENERATED INTO THE BUILD DIRECTORY BESIDE THE BINARY IT RUNS, with both
+	# paths baked in, so it searches for nothing: not for meq -- which an older
+	# build earlier on PATH would answer -- and not for tools/mesh, which is in
+	# the source tree and not in this one. That is also why it is not a script
+	# you can run from apps/: it is a build product, exactly as meq is.
+	#
+	# Two steps because $<TARGET_FILE:meq> is a generator expression and
+	# configure_file cannot expand one; file(GENERATE) can, and it is also what
+	# sets the execute bit.
+	set(MEQ_RUN_BINARY "$<TARGET_FILE:meq>")
+	set(MEQ_RUN_TOOLS "${CMAKE_CURRENT_SOURCE_DIR}/tools")
+	configure_file(
+		"${CMAKE_CURRENT_SOURCE_DIR}/apps/meq-run.in"
+		"${CMAKE_CURRENT_BINARY_DIR}/meq-run.configured"
+		@ONLY)
+	file(GENERATE
+		OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/meq-run"
+		INPUT "${CMAKE_CURRENT_BINARY_DIR}/meq-run.configured"
+		FILE_PERMISSIONS
+			OWNER_READ OWNER_WRITE OWNER_EXECUTE
+			GROUP_READ GROUP_EXECUTE
+			WORLD_READ WORLD_EXECUTE)
 endif()
 
 if(MEQ_BUILD_TESTS)

@@ -26,6 +26,8 @@
 #include <string>
 #include <vector>
 
+#include <sys/stat.h>
+
 /*
  * THE DRIVER, END TO END.
  *
@@ -113,6 +115,41 @@ namespace
 		std::string const text = slurp( scratch );
 		std::remove( scratch.c_str() );
 		return text;
+	}
+
+	/// Where the wrapper is. Passed by CMake beside the driver, for the same
+	/// reason: a test that guessed the path would keep passing while running
+	/// nothing.
+	char const *wrapper()
+	{
+		return MEQ_RUN_PATH;
+	}
+
+	/// A command's standard output, with its exit status. The driver's
+	/// --mesh-command mode prints to stdout and diagnoses on stderr, which is
+	/// exactly so that a caller can do this.
+	std::string captureStdout( std::string const &command, int *status )
+	{
+		std::string const scratch = "driver-acceptance-capture.txt";
+		int const raw = std::system( ( command + " > " + scratch + " 2>/dev/null" ).c_str() );
+		if ( status != nullptr )
+			*status = WIFEXITED( raw ) ? WEXITSTATUS( raw ) : -1;
+
+		std::string const text = slurp( scratch );
+		std::remove( scratch.c_str() );
+		return text;
+	}
+
+	/// A file's modification time in nanoseconds, or 0 if it is not there. The
+	/// meshing tests below assert that a second run did NOT rewrite the mesh,
+	/// which is a statement about this and about nothing in the file.
+	long long modifiedAt( std::string const &path )
+	{
+		struct stat info;
+		if ( ::stat( path.c_str(), &info ) != 0 )
+			return 0;
+		return static_cast<long long>( info.st_mtim.tv_sec ) * 1000000000LL
+		       + info.st_mtim.tv_nsec;
 	}
 
 	/// One global attribute out of an ncdump header, as a double. NaN if it is
@@ -2312,6 +2349,251 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesADivertedTokamak )
 	            "the normalised flux at the located O-point is " << axisFlux
 	            << " where a magnetic axis reads 1 by definition, so psi_ax is "
 	            "not the flux at one" );
+}
+
+/*
+ * THE MESH THE CONFIGURATION MAKES -- one file, one command.
+ *
+ * A free-boundary machine is described in two places today and it used to be
+ * three: [[coils]] says where the conductors are, [mesh] names a .msh, and the
+ * command that made that .msh lived in a COMMENT saying the same rectangles
+ * again in a different convention. examples/diverted-tokamak.toml's header
+ * still carries that comment, and the four `--coil 0.95 -1.15 0.10 0.10`
+ * rectangles in it agree with its four [[coils]] blocks because somebody kept
+ * them in step by hand.
+ *
+ * [mesh.generate] closes that: the generator's rectangles are DERIVED from the
+ * [[coils]] blocks, so there is one statement of where each conductor is.
+ *
+ * WHAT THIS TEST ASSERTS, IN ORDER, AND WHY EACH ONE IS NOT IMPLIED BY THE
+ * NEXT:
+ *
+ *   1. `meq --mesh-command` prints a command derived from the FILE, with a
+ *      --coil for each [[coils]] block, converted. A driver that emitted the
+ *      generator's defaults would print something plausible and wrong.
+ *   2. It prints NOTHING, and exits 0, on a file with no mesh to make -- which
+ *      is what lets the wrapper tell "nothing to do" from "I could not read
+ *      that", and is the whole of the wrapper's control flow.
+ *   3. `meq` REFUSES such a configuration without --mesh-ready. Without this
+ *      an edited geometry is answered from the previous geometry's mesh, at
+ *      full order, with every printed number looking as it should.
+ *   4. The wrapper makes the mesh, and a second run does NOT remake it -- the
+ *      stamp, which is what makes this cheap enough to leave on.
+ *   5. The solve on the generated mesh reaches the same equilibrium as the
+ *      solve on the committed one. THIS is the assertion that the TOML block
+ *      and the comment describe the same machine.
+ *
+ * IT NEEDS gmsh, on the same footing as every ncdump read in this file: the
+ * meshing path cannot be tested without the mesher, and a test that skipped
+ * when it was absent would report green on a machine that had never run it.
+ */
+BOOST_AUTO_TEST_CASE( theDriverMeshesTheMachineItSolves )
+{
+	std::string const config = "examples/diverted-tokamak-generated.toml";
+	std::string const mesh = "examples/diverted-tokamak-generated.msh";
+	std::string const stamp = mesh + ".meq-mesh";
+
+	// ---- 1. the command, derived from the file ------------------------
+	int status = -1;
+	std::string const command = captureStdout(
+		std::string( driver() ) + " --mesh-command " + config, &status );
+
+	BOOST_TEST_REQUIRE( status == 0,
+	                    "meq --mesh-command exited " << status << " on "
+	                    << config );
+	std::printf( "\n  THE MESH %s DESCRIBES\n    %s\n",
+	             config.c_str(), command.c_str() );
+	std::fflush( stdout );
+
+	BOOST_TEST( command.find( "halfdisc " ) == 0u,
+	            "the command does not start with the generator's name: "
+	            << command );
+	BOOST_TEST( command.find( "--rho 2.6" ) != std::string::npos,
+	            "[mesh.generate] Radius did not reach the command: " << command );
+	BOOST_TEST( command.find( "-o " + mesh ) != std::string::npos,
+	            "the generator was not pointed at [mesh] File: " << command );
+	BOOST_TEST( command.find( "--check" ) != std::string::npos,
+	            "Check defaults ON for a generated mesh -- nobody is looking at "
+	            "the report -- and it is not in: " << command );
+
+	/*
+	 * THE FOUR CONDUCTORS, CONVERTED. [[coils]] carries a CENTRE and
+	 * HALF-extents, because that is what meq::Coil takes; halfdisc.py takes a
+	 * corner and two extents. A wrapper that passed the numbers through
+	 * unconverted would put every coil in the wrong place by half its own size
+	 * and the mesh would still generate, still check, and still solve.
+	 *
+	 * The spellings are the EXACT doubles: CentreZ - HalfHeight for P1L is
+	 * -1.10 - 0.05 = -1.1500000000000001, not the -1.15 the hand-written
+	 * comment in examples/diverted-tokamak.toml carries. That is the rectangle
+	 * meq::Coil's own quadrature uses, to the ulp, which is a thing a copied
+	 * command line cannot be.
+	 */
+	std::size_t coilCount = 0;
+	for ( std::size_t at = command.find( "--coil " ); at != std::string::npos;
+	      at = command.find( "--coil ", at + 1 ) )
+		++coilCount;
+	BOOST_TEST( coilCount == 4u,
+	            "the command carries " << coilCount << " --coil rectangles and "
+	            "the file has four [[coils]] blocks. The mesh is only aligned to "
+	            "the conductors the solve integrates over if these agree, and "
+	            "FB-2 measured what alignment is worth: 1.99 / 2.88 / 3.01 "
+	            "against 1.33 / 1.27 / 1.09" );
+	BOOST_TEST( command.find( "--coil 0.95 -1.1500000000000001 0.1 0.1" )
+	            != std::string::npos,
+	            "P1L's rectangle is not the conversion of its [[coils]] block. "
+	            "CentreR 1.00 HalfWidth 0.05 CentreZ -1.10 HalfHeight 0.05 is "
+	            "the corner ( 0.95, -1.15 ) and the extents ( 0.1, 0.1 ): "
+	            << command );
+	BOOST_TEST( command.find( "--coil 1.7 0.5499999999999999 0.1 0.1" )
+	            != std::string::npos,
+	            "P2U's rectangle is not the conversion of its [[coils]] block: "
+	            << command );
+
+	// The refined box is four BOUNDS in the file and a corner plus two extents
+	// on the command line, which is the other conversion.
+	BOOST_TEST( command.find( "--plasma 0.75 -0.8 1.2 1.8" ) != std::string::npos,
+	            "PlasmaRMin 0.75 PlasmaRMax 1.95 PlasmaZMin -0.80 PlasmaZMax "
+	            "1.00 is the corner ( 0.75, -0.8 ) and the extents ( 1.2, 1.8 ): "
+	            << command );
+
+	// ---- 2. nothing to make is not an error ---------------------------
+	//
+	// This is what the wrapper's control flow rests on: empty output and exit 0
+	// means "this file names a mesh that already exists", and a non-zero exit
+	// means the question was bad. Collapsing the two would make every
+	// ordinary configuration look like a broken one.
+	int borrowedStatus = -1;
+	std::string const nothing = captureStdout(
+		std::string( driver() ) + " --mesh-command examples/diverted-tokamak-xpoint.toml",
+		&borrowedStatus );
+	BOOST_TEST( borrowedStatus == 0,
+	            "meq --mesh-command exited " << borrowedStatus << " on a file "
+	            "with no [mesh.generate], where nothing to make is not an error" );
+	BOOST_TEST( nothing.find_first_not_of( " \t\n" ) == std::string::npos,
+	            "meq --mesh-command printed something for a file that names a "
+	            "mesh somebody else made: \"" << nothing << "\"" );
+
+	// ---- 3. the refusal -----------------------------------------------
+	BOOST_TEST( run( config ) == 1,
+	            "meq solved a configuration whose mesh is its own build product "
+	            "without being told the mesh had been made. That is how an "
+	            "edited geometry gets answered from the previous geometry's "
+	            "mesh -- at full order, with every printed number looking "
+	            "exactly as it should" );
+
+	// ---- 4. the mesh, and the stamp -----------------------------------
+	std::remove( mesh.c_str() );
+	std::remove( stamp.c_str() );
+
+	std::string const meshOnly = std::string( wrapper() ) + " --mesh-only " + config;
+	BOOST_TEST_REQUIRE( std::system( ( meshOnly + " > /dev/null 2>&1" ).c_str() ) == 0,
+	                    "the wrapper could not make the mesh. gmsh's python "
+	                    "module is what this needs, and it is on the same "
+	                    "footing as the ncdump every other case here reads "
+	                    "through: the meshing path cannot be tested without "
+	                    "the mesher" );
+	BOOST_TEST_REQUIRE( exists( mesh ), mesh << " was not written" );
+	BOOST_TEST_REQUIRE( exists( stamp ), stamp << " was not written" );
+
+	BOOST_TEST( slurp( stamp ).find( "--rho 2.6" ) != std::string::npos,
+	            "the stamp does not hold the command that made the mesh, so "
+	            "nothing downstream can tell whether the geometry has changed "
+	            "since" );
+
+	/*
+	 * AND A SECOND RUN MUST NOT REMAKE IT. The stamp holds the COMMAND rather
+	 * than the configuration file's modification time, which is the behaviour
+	 * wanted rather than a shortcut: editing a coil re-meshes and editing
+	 * PolynomialDegree does not.
+	 */
+	long long const firstWrite = modifiedAt( mesh );
+	BOOST_TEST_REQUIRE( std::system( ( meshOnly + " > /dev/null 2>&1" ).c_str() ) == 0 );
+	BOOST_TEST( modifiedAt( mesh ) == firstWrite,
+	            "the wrapper remade the mesh on a run where nothing had "
+	            "changed. The stamp is what makes meshing-on-every-run cheap "
+	            "enough to leave on" );
+
+	BOOST_TEST_REQUIRE( std::system(
+		( std::string( wrapper() ) + " --remesh --mesh-only " + config
+		  + " > /dev/null 2>&1" ).c_str() ) == 0 );
+	BOOST_TEST( modifiedAt( mesh ) != firstWrite,
+	            "--remesh did not remake the mesh, so there is no way to force "
+	            "one and the stamp is a one-way door" );
+
+	// ---- 5. the same machine ------------------------------------------
+	//
+	// MEQ's OWN ANSWER ON THE COMMITTED MESH, from theDriverSolvesADivertedTokamak
+	// above. Transcribed rather than read out of that test's .nc, which would
+	// make this case depend on the order the two run in.
+	double const committedXPointR = 1.093103369;        // m
+	double const committedXPointZ = -0.603529197;       // m
+	double const committedPsiAxis = 8.266003630e-02;    // Wb/rad
+	double const committedPsiBoundary = 3.237931762e-02;
+
+	BOOST_TEST_REQUIRE( std::system(
+		( std::string( wrapper() ) + " " + config + " > /dev/null 2>&1" ).c_str() ) == 0,
+		"the wrapper did not solve the machine it had just meshed" );
+
+	std::string const header = ncdumpHeader( "diverted-tokamak-generated.nc" );
+	BOOST_TEST_REQUIRE( !header.empty(),
+	                    "diverted-tokamak-generated.nc is unreadable" );
+
+	double const xR = headerAttribute( header, "xpoint_r" );
+	double const xZ = headerAttribute( header, "xpoint_z" );
+	double const psiAxis = headerAttribute( header, "psi_axis" );
+	double const psiBoundary = headerAttribute( header, "psi_boundary" );
+	double const settled = headerAttribute( header, "plasma_support_settled" );
+
+	double const apart = std::hypot( xR - committedXPointR, xZ - committedXPointZ );
+	double const axisError = std::fabs( psiAxis - committedPsiAxis )
+	                         /std::fabs( committedPsiAxis );
+	double const boundaryError = std::fabs( psiBoundary - committedPsiBoundary )
+	                             /std::fabs( committedPsiBoundary );
+
+	std::printf( "\n  THE GENERATED MESH AGAINST THE COMMITTED ONE\n"
+	             "                       committed        generated      apart\n"
+	             "    X-point R   %16.9e %16.9e\n"
+	             "    X-point Z   %16.9e %16.9e  %9.1e m\n"
+	             "    psi_ax      %16.9e %16.9e  %9.1e\n"
+	             "    psi_bnd     %16.9e %16.9e  %9.1e\n",
+	             committedXPointR, xR,
+	             committedXPointZ, xZ, apart,
+	             committedPsiAxis, psiAxis, axisError,
+	             committedPsiBoundary, psiBoundary, boundaryError );
+	std::fflush( stdout );
+
+	/*
+	 * THE BOUNDS ARE LOOSE ON PURPOSE AND THE REASON IS NOT SOLVER ERROR.
+	 *
+	 * These are two DIFFERENT meshes of one machine: the committed .msh was
+	 * written by whatever gmsh was installed the day it was made and this one
+	 * by whatever is installed now, so the element counts differ -- 2870
+	 * against 2854 here -- and the discretisation error differs with them.
+	 * What is being asserted is that the [mesh.generate] block and the comment
+	 * in examples/diverted-tokamak.toml describe the SAME machine, not that
+	 * gmsh is deterministic across versions.
+	 *
+	 * MEASURED: 1.6e-06 m in the X-point, 3.1e-06 in psi_ax, 2.6e-06 in
+	 * psi_bnd -- three orders inside these bounds, which is what says the
+	 * looseness is headroom rather than tolerance for a real disagreement. A
+	 * wrong conversion in any --coil would move psi_ax by percents.
+	 */
+	BOOST_TEST( apart < 5.0e-3,
+	            "the generated mesh puts the X-point " << apart << " m from "
+	            "where the committed mesh does. MEASURED 1.6e-06. The mesh is "
+	            "regenerated here, so a small difference is resolution; this "
+	            "one is large enough to be a different machine -- check the "
+	            "--coil conversion first" );
+	BOOST_TEST( axisError < 1.0e-3,
+	            "psi_ax is " << axisError << " from the committed mesh's "
+	            << committedPsiAxis << ". MEASURED 3.1e-06" );
+	BOOST_TEST( boundaryError < 1.0e-3,
+	            "psi_bnd is " << boundaryError << " from the committed mesh's "
+	            << committedPsiBoundary << ". MEASURED 2.6e-06" );
+	BOOST_TEST( settled == 1.0,
+	            "the plasma support did not settle on the generated mesh, where "
+	            "it settles in 3 sweeps on the committed one" );
 }
 
 /// The ( Psi, theta ) flux-surface file, through the driver, on the CURVED

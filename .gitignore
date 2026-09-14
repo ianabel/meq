@@ -69,6 +69,14 @@ docs/doctrees/
 # needs freegs4e, scipy and a Picard solve to recreate.
 !examples/limited-tokamak-guess.mesh
 !examples/limited-tokamak-guess.gf
+# A MESH THAT IS A CONFIGURATION'S OWN BUILD PRODUCT, AND THE STAMP THAT SAYS
+# WHICH GEOMETRY MADE IT. `[mesh.generate]` names a generator and meq-run runs
+# it, writing the .msh the file's [mesh] File points at and a <mesh>.meq-mesh
+# beside it holding the exact command. Both are regenerated from the TOML in a
+# second, so neither is source -- while the .msh files that have no such block
+# ARE source, since nothing in the tree records how to remake them.
+*.meq-mesh
+examples/diverted-tokamak-generated.msh
 *.vtk
 *.vtu
 *.pvtu

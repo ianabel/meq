@@ -1,0 +1,229 @@
+#!/usr/bin/env python3
+"""meq-run -- make the mesh a configuration describes, then solve on it.
+
+ONE EXECUTABLE, ONE FILE.  `meq` reads a TOML file and solves; where the mesh
+is that file's own build product -- `[mesh.generate]` -- something has to make
+it first, and that something is gmsh.  This is the thing that does both, so a
+run is one command and a machine is described in one place.
+
+    meq-run examples/diverted-tokamak-generated.toml
+
+IT IS A SCRIPT, AND THAT IS A DECISION RATHER THAN A STAGE ON THE WAY TO A
+BINARY.  `meq` links MFEM and not gmsh, deliberately: tools/mesh/README.md
+records the reasoning, and the short form is that the coupling between MEQ and
+a mesher is a FILE, so linking gmsh would buy no capability and would cost
+libgmsh-dev as a build dependency of a tree whose CI cannot build the solver at
+all.  What follows from that is that SOMEBODY outside the solver has to run the
+generator, and this is that somebody.
+
+WHAT IT DOES NOT DO IS PARSE THE CONFIGURATION.  There is exactly one reader of
+MEQ's schema and it is meq::Configuration; a wrapper with its own opinion about
+what `[mesh.generate]` means is how a format grows two readers that disagree
+and never say so.  So the flow is:
+
+    meq --mesh-command <config>     ->  the generator's argument list, or
+                                        nothing at all if there is no mesh to
+                                        make
+    <the generator>                 ->  the .msh file
+    meq --mesh-ready <config>       ->  the solve, exec'd, so the exit code
+                                        and the signals are the solver's
+
+and every number in that command line came out of the same parser the solve
+will use.
+
+THE STAMP IS WHAT MAKES A RE-RUN CHEAP AND A CHANGED GEOMETRY LOUD.  The
+generator command is written beside the mesh as `<mesh>.meq-mesh`, and a
+subsequent run that produces the same command skips the meshing.  So editing a
+coil re-meshes and editing PolynomialDegree does not -- which is the behaviour
+wanted, and is why the stamp holds the COMMAND rather than the modification
+time of the configuration file.
+"""
+
+import os
+import shlex
+import subprocess
+import sys
+
+# Filled in by CMake.  This script is generated into the build directory beside
+# the binary it runs, so neither path is searched for and neither can be the
+# wrong one from an older build sitting earlier on PATH.
+MEQ = "@MEQ_RUN_BINARY@"
+TOOLS = "@MEQ_RUN_TOOLS@"
+
+# The generators `[mesh.generate] Tool` can name, and where they live.  MEQ's
+# own refusal is the authority on which names are legal; this is only the map
+# from a legal name to a file on disk.
+GENERATORS = {
+	"halfdisc": os.path.join(TOOLS, "mesh", "halfdisc.py"),
+}
+
+USAGE = """meq-run -- make a configuration's mesh, then solve on it
+
+  meq-run [options] <config.toml> [meq options ...]
+
+  --remesh       generate even when the stamp says the mesh is current
+  --mesh-only    stop after the mesh; do not solve
+  --dry-run      print what would be run, and run nothing
+  -v, --verbose  echo each command before running it
+  -h, --help     this
+
+Any other option is passed through to meq, so `meq-run f.toml --device debug`
+works.  Exit codes are meq's own -- 0 solved, 1 configuration, 2 the solve did
+not converge, 3 output -- because the solve is exec'd rather than called.
+"""
+
+
+def fail(message, status=1):
+	print("meq-run: " + message, file=sys.stderr)
+	sys.exit(status)
+
+
+def main(argv):
+	remesh = False
+	mesh_only = False
+	dry_run = False
+	verbose = False
+	config = None
+	passthrough = []
+
+	# THIS SCRIPT'S OPTIONS COME BEFORE THE CONFIGURATION AND MEQ'S COME AFTER,
+	# AND AN UNKNOWN ONE IN FRONT IS REFUSED RATHER THAN PASSED ON.
+	#
+	# The two option sets cannot share a namespace, because meq's --device takes
+	# a VALUE and this script has no way to know that: `meq-run --device debug
+	# f.toml` in one namespace makes "debug" the configuration and f.toml an
+	# option, which fails with a message about a file nobody named.  Splitting
+	# at the configuration is the rule that needs no table of which options take
+	# arguments.
+	rest = list(argv)
+	mine = ("--remesh", "--mesh-only", "--dry-run", "-v", "--verbose")
+	while rest:
+		arg = rest.pop(0)
+		if arg in ("-h", "--help"):
+			print(USAGE, end="")
+			return 0
+		if config is None:
+			if arg == "--remesh":
+				remesh = True
+			elif arg == "--mesh-only":
+				mesh_only = True
+			elif arg == "--dry-run":
+				dry_run = True
+			elif arg in ("-v", "--verbose"):
+				verbose = True
+			elif arg.startswith("-"):
+				fail("%s is not one of meq-run's own options, which are %s.\n"
+				     "            meq's options go AFTER the configuration file:\n"
+				     "            meq-run <config.toml> %s ..."
+				     % (arg, " ".join(mine), arg))
+			else:
+				config = arg
+		else:
+			passthrough.append(arg)
+
+	if config is None:
+		print(USAGE, end="", file=sys.stderr)
+		return 1
+	if not os.path.exists(config):
+		fail("no such configuration file: %s" % config)
+	if not os.path.exists(MEQ):
+		fail("the meq binary is not at %s; rebuild, or run meq yourself" % MEQ)
+
+	def echo(words):
+		if verbose or dry_run:
+			print("meq-run: " + " ".join(shlex.quote(w) for w in words))
+
+	# ---- what makes this file's mesh? ---------------------------------
+	#
+	# Empty output and exit 0 is "nothing does": the file names a mesh that
+	# already exists, or a box meq builds itself.  A non-zero exit is a
+	# configuration meq could not read; the code is passed straight out rather
+	# than re-worded, since meq's message is better than anything here.
+	#
+	# STDERR IS CAPTURED AND ONLY SHOWN ON FAILURE.  On success meq's note is
+	# "this file has no mesh to make", which is the ordinary case and is not
+	# news to somebody who has just asked for a solve.
+	query = subprocess.run([MEQ, "--mesh-command", config],
+	                       stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+	                       text=True)
+	if query.returncode != 0:
+		sys.stderr.write(query.stderr)
+		return query.returncode
+
+	command = query.stdout.strip()
+
+	if not command:
+		if mesh_only:
+			fail("%s has no [mesh.generate]; there is no mesh to make" % config)
+		plain = [MEQ] + passthrough + [config]
+		echo(plain)
+		if dry_run:
+			return 0
+		os.execv(MEQ, plain)
+
+	words = shlex.split(command)
+	tool = GENERATORS.get(words[0])
+	if tool is None:
+		fail("meq named a generator this wrapper does not know: %s" % words[0])
+	if not os.path.exists(tool):
+		fail("the %s generator is not at %s" % (words[0], tool))
+
+	# `-o <path>` is where the generator writes and, by meq's own refusal,
+	# where the solve reads.  Found by asking rather than by reconstructing it
+	# from the configuration, so there is one authority on the path too.
+	try:
+		mesh = words[words.index("-o") + 1]
+	except (ValueError, IndexError):
+		fail("the generator command carries no -o: %s" % command)
+
+	stamp = mesh + ".meq-mesh"
+	current = False
+	if os.path.exists(mesh) and os.path.exists(stamp):
+		with open(stamp) as handle:
+			current = handle.read().strip() == command
+
+	# ---- the mesh -----------------------------------------------------
+	if current and not remesh:
+		if verbose or dry_run:
+			print("meq-run: %s is current" % mesh)
+	else:
+		generate = [sys.executable, tool] + words[1:]
+		echo(generate)
+		if not dry_run:
+			parent = os.path.dirname(os.path.abspath(mesh))
+			if parent and not os.path.isdir(parent):
+				os.makedirs(parent, exist_ok=True)
+			status = subprocess.run(generate).returncode
+			if status != 0:
+				# THE STAMP IS REMOVED ON FAILURE, NOT LEFT.  A half-written
+				# mesh beside a stamp claiming it is current is the one state
+				# this scheme must never reach.
+				if os.path.exists(stamp):
+					os.remove(stamp)
+				# A generator killed by a signal has a NEGATIVE returncode,
+				# which sys.exit would turn into something unrelated.
+				fail("the mesh generator failed", status if status > 0 else 1)
+			with open(stamp, "w") as handle:
+				handle.write(command + "\n")
+
+	if mesh_only:
+		return 0
+
+	# ---- the solve ----------------------------------------------------
+	#
+	# --mesh-ready is the claim that the mesh above was made from this file's
+	# own [mesh.generate]; meq refuses to solve such a configuration without
+	# it, so that an edited geometry cannot be answered from the mesh the
+	# previous geometry made.  EXEC rather than call: meq's exit code is
+	# documented and meaningful, and a wrapper in the middle is a thing that
+	# can lose it.
+	solve = [MEQ, "--mesh-ready"] + passthrough + [config]
+	echo(solve)
+	if dry_run:
+		return 0
+	os.execv(MEQ, solve)
+	return 0  # unreachable
+
+
+if __name__ == "__main__":
+	sys.exit(main(sys.argv[1:]))

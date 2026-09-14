@@ -22,8 +22,10 @@
  *     [initialguess]    where Newton starts
  *     [adaptivity]      the refinement loop, when there is one
  *
- * and two nested forms beneath those:
+ * and three nested forms beneath those:
  *
+ *     [mesh.generate]   how to MAKE the mesh named above, when it is this
+ *                       file's own build product rather than an input
  *     [boundary.shape]  the analytic curve Gamma, on the extension path
  *     [[source.species]] an ARRAY of tables, one per species, on the rotating
  *                       path -- the only array of tables in the schema
@@ -96,6 +98,124 @@ namespace meq
 			std::string keyName;
 	};
 
+	/**
+	 * `[mesh.generate]` -- THE MESH AS A BUILD PRODUCT OF THIS FILE.
+	 *
+	 * Everything else in `[mesh]` reads a mesh somebody already made. A free
+	 * boundary run cannot be made by `mfem::Mesh::MakeCartesian2D` at all --
+	 * it needs a semicircle reaching `r = 0` exactly, with the conductors
+	 * fragmented in -- so it comes from `tools/mesh/halfdisc.py`. Without this
+	 * block the geometry is stated TWICE: once on that script's command line
+	 * and once in the TOML the solve reads, with nothing checking that the two
+	 * agree. `examples/diverted-tokamak.toml`'s header is what that looks like.
+	 *
+	 * **THE COILS ARE NOT REPEATED HERE, AND THAT IS THE POINT.** The
+	 * generator's `--coil` rectangles are derived from the `[[coils]]` blocks,
+	 * in file order, which is the order `tools/mesh/halfdisc.py` documents its
+	 * `10 + i` element attributes in. So a machine's conductors are written
+	 * once and the mesh is aligned to the conductors the solve will actually
+	 * integrate over. FB-2 measured what that alignment is worth: rates of
+	 * **1.99 / 2.88 / 3.01 aligned against 1.33 / 1.27 / 1.09 with the
+	 * conductor cut by elements**, so a coil the mesh does not know about
+	 * costs a full order, silently.
+	 *
+	 * **MEQ DOES NOT RUN THE GENERATOR.** `meq` is linked against MFEM and not
+	 * against gmsh, deliberately -- `tools/mesh/README.md` records why -- so
+	 * what this block buys inside the driver is a REFUSAL and a QUERY:
+	 * `meq --mesh-command` prints the generator's argument list from these
+	 * values, and `meq` will not solve a configuration carrying this block
+	 * unless the caller passes `--mesh-ready` to say the mesh has been made
+	 * from it. `meq-run` is the caller that does both.
+	 *
+	 * **THE UNITS AND THE CONVENTIONS ARE MEQ'S, NOT THE SCRIPT'S.** The box
+	 * is `RMin`/`RMax`/`ZMin`/`ZMax` as `[mesh]`'s own box is, where
+	 * `halfdisc.py --plasma` takes a corner and two extents; the driver
+	 * converts. A schema that exposed the tool's convention would put two
+	 * meanings of four numbers in one file.
+	 */
+	struct MeshGeneratorConfig
+	{
+		/// Whether the file asked for one. False is every configuration that
+		/// names a mesh made somewhere else, which is all of them but one.
+		bool given = false;
+
+		/// `Tool` -- which generator. "halfdisc" is the only one there is;
+		/// naming it is what lets a second arrive without a second table.
+		std::string tool;
+
+		/// `Radius` -- the DISC's radius, metres, strictly positive. The
+		/// semicircle is centred on the origin and reaches `r = 0` exactly,
+		/// because that is the geometry the exterior expansion of
+		/// `meq::ExteriorDtN` is a statement about.
+		///
+		/// **IT IS NOT GAMMA, AND READING IT AS GAMMA IS THE EASY MISTAKE.**
+		/// `D_h` is cut FROM this mesh as the elements lying inside
+		/// `[boundary.exterior] Radius`, so the arc gmsh draws is the
+		/// BACKGROUND's outer edge and Gamma is the smaller semicircle within
+		/// it, with the band between the resulting staircase and Gamma bridged
+		/// by the Cockburn-Solano transfer. Gamma must therefore fit STRICTLY
+		/// inside this, which the `[boundary.exterior]` parse checks -- before
+		/// gmsh has run at all.
+		double radius = 0.0;
+
+		/// `Size` -- the background element size, metres, strictly positive.
+		double size = 0.0;
+
+		/// `Order` -- the geometric order, >= 1. Above 1 the arc is curved:
+		/// the mid-edge nodes are placed on the true circle rather than on the
+		/// chord, and the axis stays exact.
+		int order = 1;
+
+		/// `CoilSize` -- the element size inside the conductors, metres.
+		/// Zero means "the background `Size`", which is the script's own
+		/// default and not a special case here.
+		double coilSize = 0.0;
+
+		/// `PlasmaRMin` and friends -- a box to refine inside, where the
+		/// plasma is expected, with `PlasmaSize` the size in it. Gamma has to
+		/// stand far enough out for the exterior expansion to converge and the
+		/// plasma occupies a small part of what that encloses, so meshing the
+		/// whole disc at the plasma's resolution spends most of the elements on
+		/// vacuum. Measured, that is 2.6x at `Radius = 1.5` and 9.0x at 3.0.
+		bool plasmaGiven = false;
+		double plasmaRMin = 0.0;
+		double plasmaRMax = 0.0;
+		double plasmaZMin = 0.0;
+		double plasmaZMax = 0.0;
+		double plasmaSize = 0.0;
+
+		/// `LimiterR`, `LimiterZ`, `LimiterRadius` -- a circular limiter
+		/// FRAGMENTED IN rather than cut, so its edges are mesh faces, and
+		/// written as element attribute 20. That is what
+		/// `[boundary.limiter] SurfaceAttribute` reads, and the two are checked
+		/// against each other: a `SurfaceAttribute` naming a region this mesh
+		/// will not carry is refused rather than discovered at the solve.
+		bool limiterGiven = false;
+		double limiterR = 0.0;
+		double limiterZ = 0.0;
+		double limiterRadius = 0.0;
+
+		/// `Transition` -- the width of the graded transition out of a refined
+		/// region, metres. Zero means the script's default of four background
+		/// sizes.
+		double transition = 0.0;
+
+		/// `Check` -- re-read the written file and assert MEQ's preconditions
+		/// on it: that `r` reaches 0 EXACTLY, that Gamma and the axis are the
+		/// outer boundary and nothing else, and that each coil attribute covers
+		/// its rectangle. **It defaults to TRUE here and to false on the
+		/// script's own command line**, which is a deliberate disagreement: a
+		/// human meshing interactively reads the printed report, and a mesh
+		/// generated inside a run has nobody looking at it.
+		bool check = true;
+	};
+
+	/// The element attribute `tools/mesh/halfdisc.py` writes the interior of a
+	/// `--limiter` circle as. Named here because `[boundary.limiter]
+	/// SurfaceAttribute` is checked against it, and a bare 20 in a comparison
+	/// says nothing about where it came from.
+	inline constexpr int generatedLimiterAttribute = 20;
+
 	// [mesh]
 	//
 	// Following HDG-GradShafranov-Adaptive.pdf section 2.1, the computational
@@ -131,6 +251,10 @@ namespace meq
 		std::string file;
 
 		bool fromFile() const { return !file.empty(); };
+
+		/// `[mesh.generate]` -- how to MAKE the file named above, when the file
+		/// is this configuration's own build product. See MeshGeneratorConfig.
+		MeshGeneratorConfig generate;
 	};
 
 	// [discretisation]

@@ -1,0 +1,149 @@
+# THE SAME DIVERTED TOKAMAK, MESHING ITSELF.  One file, one command:
+#
+#     build/meq-run examples/diverted-tokamak-generated.toml
+#
+# WHAT THIS FILE IS FOR.  Every other free-boundary example here names a mesh
+# somebody made earlier, with the command that made it written in a COMMENT --
+# see the head of examples/diverted-tokamak.toml, which carries
+#
+#     tools/mesh/halfdisc.py --rho 2.6 --size 0.18 \
+#         --coil 0.95 -1.15 0.10 0.10 --coil 0.95 1.05 0.10 0.10 \
+#         ...
+#
+# beside four [[coils]] blocks saying the same four rectangles again, in a
+# different convention.  They agree because somebody kept them in step by hand.
+# THIS FILE SAYS EACH CONDUCTOR ONCE: [mesh.generate] takes the geometry of the
+# DISC and the refinement, and the generator's --coil rectangles are derived
+# from the [[coils]] blocks below, in file order -- which is the order
+# tools/mesh/halfdisc.py assigns its 10 + i element attributes in.
+#
+# That is not tidiness.  FB-2 measured what meshing TO a conductor is worth
+# against cutting through it -- rates of 1.99 / 2.88 / 3.01 aligned, against
+# 1.33 / 1.27 / 1.09 cut -- so a coil the mesh is not aligned to costs a full order,
+# silently, and a coil the mesh does not know about at all is a machine with
+# that coil switched off.  Deriving one list from the other is what makes those
+# failures unreachable rather than unlikely.
+#
+# `meq --mesh-command examples/diverted-tokamak-generated.toml` prints the
+# command this becomes, without running anything.
+#
+# EVERYTHING BELOW [mesh] IS examples/diverted-tokamak-xpoint.toml, which is
+# where the physics is explained: the reference this machine came from, the
+# X-point as two unknowns of the bordered Newton, and the plasma-support sweeps.
+# The only differences are this block, the output prefix, and the mesh path --
+# the committed examples/diverted-tokamak.msh is left alone, because two
+# configurations writing one mesh is a race nobody would enjoy debugging.
+
+[mesh]
+# WHERE THE GENERATOR WRITES AND WHERE THE SOLVE READS -- the same path by
+# construction, since [mesh.generate] has nowhere else to put it.  It is a
+# BUILD PRODUCT and is gitignored; meq-run remakes it whenever the block below
+# changes and skips it when it has not.
+File = "examples/diverted-tokamak-generated.msh"
+
+[mesh.generate]
+Tool = "halfdisc"
+
+# THE DISC, AND IT IS NOT GAMMA.  D_h is cut FROM this mesh as the elements
+# lying inside [boundary.exterior] Radius, so the arc gmsh draws is the
+# BACKGROUND's outer edge and Gamma is the smaller semicircle inside it.  The
+# two radii are checked against each other at parse time: 2.40 has to fit
+# strictly inside 2.6, and a file that gets them the wrong way round is refused
+# before gmsh runs.
+Radius = 2.6
+Size = 0.18
+
+# COARSE DISC, REFINED PLASMA.  Gamma has to stand far enough out for the
+# exterior expansion to converge and the plasma occupies a small part of what
+# that encloses, so meshing the whole disc at the plasma's resolution would
+# spend most of the elements on vacuum carrying no source.  Measured, that is
+# 2.6x at Radius = 1.5 and 9.0x at 3.0.
+#
+# FOUR BOUNDS, AS [mesh]'s OWN BOX IS -- halfdisc.py's --plasma takes a corner
+# and two extents, and the driver converts when it prints the command.  One
+# file does not get to carry two meanings of four numbers.
+PlasmaRMin = 0.75
+PlasmaRMax = 1.95
+PlasmaZMin = -0.80
+PlasmaZMax = 1.00
+PlasmaSize = 0.07
+
+# Inside the conductors, where F is a prescribed constant and the accuracy that
+# matters is the rectangle's own geometry.
+CoilSize = 0.04
+
+[discretisation]
+PolynomialDegree = 2
+
+[solver]
+NewtonMaxIterations = 200
+NewtonRelativeTolerance = 1.0e-10
+PlasmaSupportSweeps = 4
+
+[source]
+Type = "mhd"
+Normalised = true
+ConfineToPlasma = true
+PsiAxis = 0.0827
+PlasmaCurrent = 2.0e5
+Mu0 = 1.25663706212e-6
+PPrimeFile = "examples/diverted-tokamak-pprime.dat"
+GGPrimeFile = "examples/diverted-tokamak-ggprime.dat"
+
+# THE CONDUCTORS, WRITTEN ONCE.  These four blocks are what the solve
+# integrates over AND what the mesh is aligned to: [mesh.generate] emits
+# `--coil ( CentreR - HalfWidth ) ( CentreZ - HalfHeight ) 2*HalfWidth
+# 2*HalfHeight` for each, in this order.
+[[coils]]
+Name = "P1L"
+CentreR = 1.00
+CentreZ = -1.10
+HalfWidth = 0.05
+HalfHeight = 0.05
+Current = 137333.25436339402
+
+[[coils]]
+Name = "P1U"
+CentreR = 1.00
+CentreZ = 1.10
+HalfWidth = 0.05
+HalfHeight = 0.05
+Current = 62625.08544357837
+
+[[coils]]
+Name = "P2L"
+CentreR = 1.75
+CentreZ = -0.60
+HalfWidth = 0.05
+HalfHeight = 0.05
+Current = -99444.48228215592
+
+[[coils]]
+Name = "P2U"
+CentreR = 1.75
+CentreZ = 0.60
+HalfWidth = 0.05
+HalfHeight = 0.05
+Current = -67660.81780068338
+
+[boundary]
+Type = "zero"
+
+[boundary.xpoint]
+R = 1.143144118182931
+Z = -0.5539650838688502
+
+[boundary.exterior]
+Radius = 2.40
+CentreZ = 0.0
+Modes = 10
+
+[initialguess]
+Type = "gridfunction"
+File = "examples/diverted-tokamak-guess.gf"
+MeshFile = "examples/diverted-tokamak-guess.mesh"
+
+[output]
+Prefix = "diverted-tokamak-generated"
+GridNR = 129
+GridNZ = 129
