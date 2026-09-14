@@ -1289,7 +1289,13 @@ namespace
 	 */
 	void GradShafranovSolver::setAssemblyMode( AssemblyMode choice )
 	{
-		if ( choice == AssemblyMode::Threaded )
+		// BATCHED IS GROUPED WITH THREADED HERE, CONSERVATIVELY. It is a
+		// different mechanism -- a face kernel rather than an OpenMP loop --
+		// and whether it needs MFEM_THREAD_SAFE is not documented either way.
+		// Refusing it on a build that cannot honour Threaded costs such a build
+		// nothing it had, and assemblyModeAvailable() already answers this way,
+		// so the two agree rather than disagreeing silently.
+		if ( choice == AssemblyMode::Threaded || choice == AssemblyMode::Batched )
 		{
 #if !defined( MFEM_USE_OPENMP ) || !defined( MFEM_THREAD_SAFE )
 			throw std::invalid_argument(
@@ -3436,10 +3442,36 @@ namespace
 		// solve has exactly as much element-local work to thread as the Newton
 		// one. setAssemblyMode() has already refused Threaded if the build cannot
 		// honour it, so this cannot reach MFEM's abort.
-		darcy->GetHybridization()->SetAssemblyMode(
-			assemblyModeChoice == AssemblyMode::Threaded
-				? mfem::DarcyHybridization::AssemblyMode::Threaded
-				: mfem::DarcyHybridization::AssemblyMode::Serial );
+		switch ( assemblyModeChoice )
+		{
+			case AssemblyMode::Threaded:
+				darcy->GetHybridization()->SetAssemblyMode(
+					mfem::DarcyHybridization::AssemblyMode::Threaded );
+				break;
+			case AssemblyMode::Batched:
+				darcy->GetHybridization()->SetAssemblyMode(
+					mfem::DarcyHybridization::AssemblyMode::Batched );
+				break;
+			case AssemblyMode::Serial:
+				darcy->GetHybridization()->SetAssemblyMode(
+					mfem::DarcyHybridization::AssemblyMode::Serial );
+				break;
+		}
+
+		// THE OTHER TWO BATCHED AXES, AND THEY ARE SEPARATE KEYS FOR A REASON.
+		// They have different preconditions, different measured host costs and
+		// -- for the trace one -- different bit-exactness, so bundling them
+		// into one switch would make a regression unattributable. Each falls
+		// back silently in MFEM; batchedLocalFactorTaken() and its siblings are
+		// how a caller finds out.
+		darcy->GetHybridization()->SetLocalFactorMode(
+			localFactorChoice == LocalFactorMode::Batched
+				? mfem::DarcyHybridization::LocalFactorMode::Batched
+				: mfem::DarcyHybridization::LocalFactorMode::Serial );
+		darcy->GetHybridization()->SetTraceAssemblyMode(
+			traceAssemblyChoice == TraceAssemblyMode::Batched
+				? mfem::DarcyHybridization::TraceAssemblyMode::Batched
+				: mfem::DarcyHybridization::TraceAssemblyMode::Serial );
 
 		if ( usesNonlinearForms() )
 		{
@@ -4650,6 +4682,164 @@ namespace
 		}
 	}
 
+	/*
+	 * THE EXTERIOR COLUMNS, EXACTLY, AND WHY THERE IS A CLOSED FORM AT ALL.
+	 *
+	 * `a` reaches the residual through ONE route and it is a pure LOAD.
+	 * prepare() wraps the datum as a PathTraceCoefficient of `-g` and assembles
+	 * it into the FLUX BLOCK of the right hand side through a single
+	 * VectorBoundaryFluxLFIntegrator over `gammaHMarker` -- see the block in
+	 * prepare() that builds `fluxRhs`. `mfem::HDGExtensionIntegrator`, on the
+	 * flux MASS form, is the solution-dependent half of the transferred datum
+	 * and never sees `g` at all. Nothing else in the assembly reads `a`.
+	 *
+	 * So with `g( x ) = sum_m a_m phi_m( x ) + psi_coil( x )`,
+	 *
+	 *     b_flux( a ) = b_flux( 0 ) + sum_m a_m L[ -phi_m ]
+	 *
+	 * with `L` that one boundary-face assembly, and the residual is affine in
+	 * the load with a state-independent operator -- DarcyNPCOperator holds the
+	 * load by reference and NPCGradient substitutes ZeroLoad, so the JACOBIAN
+	 * does not read it. The column is therefore a single Gamma_h face assembly
+	 * per mode, constant for the life of the mesh.
+	 *
+	 * **IT IS AFFINE BY CONSTRUCTION AND NOT BY LUCK.** The exterior is the
+	 * vacuum: source free, and the operator there is linear. That is the same
+	 * fact that makes the Gegenbauer modes decay independently and the DtN map
+	 * diagonal, so a problem on which this were non-linear is one on which
+	 * meq::ExteriorDtN does not apply. A current outside Gamma would break it
+	 * and is refused -- requireConductorsOutsideGamma().
+	 *
+	 * WHAT IT REPLACES: `Modes + 2` full preparations and residual evaluations
+	 * per solve, differencing a map that was linear all along. The probe is
+	 * kept as BorderColumn::Differenced, because it is the reference this is
+	 * measured against and it is how this tree tells a repair from a
+	 * coincidence -- theExteriorColumnsAreExact asserts the two agree.
+	 *
+	 * THE RULE, THE MARKER AND THE SIGN ARE prepare()'s OWN, and that is not
+	 * tidiness: the column is the derivative of the ASSEMBLED residual, so a
+	 * different quadrature rule makes it the derivative of a different
+	 * function. Changing either place alone is a silent wrong Jacobian, which
+	 * costs the ORDER and no error norm sees it.
+	 */
+	void GradShafranovSolver::setLocalFactorMode( LocalFactorMode choice )
+	{
+		localFactorChoice = choice;
+		prepared = false;
+	}
+
+	GradShafranovSolver::LocalFactorMode
+	GradShafranovSolver::localFactorMode() const
+	{
+		return localFactorChoice;
+	}
+
+	void GradShafranovSolver::setTraceAssemblyMode( TraceAssemblyMode choice )
+	{
+		traceAssemblyChoice = choice;
+		prepared = false;
+	}
+
+	GradShafranovSolver::TraceAssemblyMode
+	GradShafranovSolver::traceAssemblyMode() const
+	{
+		return traceAssemblyChoice;
+	}
+
+	/*
+	 * WHETHER EACH BATCHED PATH WAS TAKEN, AND EVERY ONE OF THEM CAN SAY NO.
+	 *
+	 * These are not "did the caller ask" -- that is what the setters above
+	 * report. They are MFEM's own predicates, and every one of the three modes
+	 * falls back silently when its preconditions are not met: a nonlinear face
+	 * constraint, blocks of differing size, a connectivity that does not suit,
+	 * a problem that is not under NPC. MFEM's documentation on
+	 * CanBatchPotFaceAssembly() says to ask rather than to infer from a timing,
+	 * because the run-to-run scatter is wider than what the mode costs -- and
+	 * the mode was unreachable for every caller in its own tree until somebody
+	 * looked, with no timing revealing it.
+	 *
+	 * False before prepare(), when there is no hybridization to ask.
+	 */
+	bool GradShafranovSolver::batchedPotFaceAssemblyTaken() const
+	{
+		mfem::DarcyHybridization const *h =
+			darcy ? darcy->GetHybridization() : nullptr;
+		return h != nullptr && h->CanBatchPotFaceAssembly();
+	}
+
+	bool GradShafranovSolver::batchedLocalFactorTaken() const
+	{
+		mfem::DarcyHybridization const *h =
+			darcy ? darcy->GetHybridization() : nullptr;
+		return h != nullptr && h->CanBatchLocalFactor();
+	}
+
+	bool GradShafranovSolver::batchedLocalSolveTaken() const
+	{
+		mfem::DarcyHybridization const *h =
+			darcy ? darcy->GetHybridization() : nullptr;
+		return h != nullptr && h->CanBatchLocalSolve();
+	}
+
+	bool GradShafranovSolver::batchedTraceAssemblyTaken() const
+	{
+		mfem::DarcyHybridization const *h =
+			darcy ? darcy->GetHybridization() : nullptr;
+		return h != nullptr && h->CanBatchTraceAssembly();
+	}
+
+	bool GradShafranovSolver::assembleExteriorColumns(
+		std::vector<mfem::Vector> &columns )
+	{
+		columns.clear();
+		if ( !exteriorCoupling || !transferPath )
+			return false;
+
+		int const modes = exteriorCoupling->modeCount();
+		int const first = ExteriorDtN::firstMode();
+		int const n = blockOffsets[ 3 ];
+
+		mfem::Vector load( fluxFes->GetVSize() );
+		for ( int mode = 0; mode < modes; ++mode )
+		{
+			// THE SAME NEGATION prepare() APPLIES, so that this is the
+			// derivative of what is actually assembled rather than of its
+			// mirror image. See the sign note on the `fluxRhs` block there.
+			ExteriorDtN const *dtn = exteriorCoupling;
+			int const which = first + mode;
+			mfem::PathTraceCoefficient basis(
+				*transferPath,
+				[ dtn, which ]( mfem::Vector const &x )
+				{
+					return -dtn->basis( which, x( 0 ), x( 1 ) );
+				} );
+
+			load = 0.0;
+			mfem::LinearForm form;
+			form.Update( fluxFes.get(), load, 0 );
+			form.AddBdrFaceIntegrator(
+				new mfem::VectorBoundaryFluxLFIntegrator(
+					basis, 1.0,
+					( extensionFaceOrder >= 0 )
+						? &mfem::IntRules.Get( mfem::Geometry::SEGMENT,
+						                       extensionFaceOrder )
+						: nullptr ),
+				gammaHMarker );
+			form.Assemble();
+
+			// THE RESIDUAL CARRIES THE LOAD NEGATED: r = G( x ) - b, so
+			// dr/da_m = -db/da_m and the flux block is the only one `a`
+			// reaches. The potential and trace blocks are exactly zero, which
+			// theExteriorColumnsAreExact asserts rather than assumes.
+			columns.emplace_back( n );
+			columns.back() = 0.0;
+			for ( int i = 0; i < load.Size(); ++i )
+				columns.back()( i ) = -load( i );
+		}
+		return true;
+	}
+
 	bool GradShafranovSolver::assembleNormalisationColumn( mfem::Vector const &state,
 	                                                       bool axis,
 	                                                       mfem::Vector &out ) const
@@ -5706,33 +5896,61 @@ namespace
 			mfem::Vector const savedIterate( unknown );
 			std::vector<double> const savedCoefficients = exteriorCoefficientValues;
 
-			// The baseline, a = 0, and one unit response per mode.
-			auto residualAt = [ & ]( mfem::Vector &out )
-			{
-				reprepare();
-				unknown = savedIterate;
-				fieldResidual( unknown, s, out );
-			};
+			/*
+			 * ASSEMBLED EXACTLY, OR DIFFERENCED AS THE CONTROL.
+			 *
+			 * `a` reaches the residual as one boundary-face LOAD and nothing
+			 * else, so `dr/da_m` has a closed form and
+			 * assembleExteriorColumns() writes it -- see there for why, and for
+			 * why it is constant for the life of the mesh.
+			 *
+			 * The probe below is BorderColumn::Differenced's route and is kept
+			 * for the reason the same choice keeps it for `psi_ax`: it is the
+			 * reference the exact column is measured against, and a control
+			 * that can be switched off is how this project tells a repair from
+			 * a coincidence. theExteriorColumnsAreExact asserts the two agree;
+			 * measured on the DIII-D machine case, 7e-17 to 3e-16 relative,
+			 * with the potential and trace blocks exactly zero.
+			 */
+			bool assembled = false;
+			if ( borderColumnChoice == BorderColumn::Analytic )
+				assembled = assembleExteriorColumns( exteriorColumns );
 
-			std::fill( exteriorCoefficientValues.begin(),
-			           exteriorCoefficientValues.end(), 0.0 );
-			mfem::Vector baseline( n );
-			residualAt( baseline );
-
-			for ( int mode = 0; mode < nModes; ++mode )
+			if ( !assembled )
 			{
+				// The baseline, a = 0, and one unit response per mode. Costs
+				// `Modes + 2` full preparations and residual evaluations.
+				auto residualAt = [ & ]( mfem::Vector &out )
+				{
+					reprepare();
+					unknown = savedIterate;
+					fieldResidual( unknown, s, out );
+				};
+
 				std::fill( exteriorCoefficientValues.begin(),
 				           exteriorCoefficientValues.end(), 0.0 );
-				exteriorCoefficientValues[ static_cast<std::size_t>( mode ) ] = 1.0;
-				mfem::Vector response( n );
-				residualAt( response );
-				response -= baseline;
-				exteriorColumns.push_back( response );
+				mfem::Vector baseline( n );
+				residualAt( baseline );
+
+				for ( int mode = 0; mode < nModes; ++mode )
+				{
+					std::fill( exteriorCoefficientValues.begin(),
+					           exteriorCoefficientValues.end(), 0.0 );
+					exteriorCoefficientValues[ static_cast<std::size_t>( mode ) ] = 1.0;
+					mfem::Vector response( n );
+					residualAt( response );
+					response -= baseline;
+					exteriorColumns.push_back( response );
+				}
+
+				// ONLY THE PROBE DISTURBED THE STATE, so only the probe has to
+				// put it back. The exact route touches neither the coefficients
+				// nor the assembly.
+				exteriorCoefficientValues = savedCoefficients;
+				reprepare();
+				unknown = savedIterate;
 			}
 
-			exteriorCoefficientValues = savedCoefficients;
-			reprepare();
-			unknown = savedIterate;
 			fieldResidual( unknown, s, residual );
 		}
 

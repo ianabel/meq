@@ -1067,7 +1067,9 @@ int main( int argc, char **argv )
 	using TS = meq::GradShafranovSolver::TraceSolver;
 
 	AM assemblyMode =
-		( config->getSolver().assemblyMode == meq::AssemblyModeType::Threaded )
+		( config->getSolver().assemblyMode == meq::AssemblyModeType::Batched )
+			? AM::Batched
+		: ( config->getSolver().assemblyMode == meq::AssemblyModeType::Threaded )
 		? AM::Threaded : AM::Serial;
 
 	TS traceSolver = TS::UMFPack;
@@ -1750,6 +1752,20 @@ int main( int argc, char **argv )
 		// these cannot throw here, and a run that is going to be refused for
 		// its build is refused before it does any work.
 		fresh->setAssemblyMode( assemblyMode );
+
+		// THE OTHER TWO BATCHED AXES. Separate keys, separate setters: they
+		// have different preconditions, different measured host costs and --
+		// for the trace one -- different bit-exactness, so a run that turns one
+		// on can be told from a run that turned another on. Each falls back
+		// silently inside MFEM and the summary reports which were taken.
+		fresh->setLocalFactorMode(
+			config->getSolver().localFactorMode == meq::LocalFactorModeType::Batched
+				? meq::GradShafranovSolver::LocalFactorMode::Batched
+				: meq::GradShafranovSolver::LocalFactorMode::Serial );
+		fresh->setTraceAssemblyMode(
+			config->getSolver().traceAssemblyMode == meq::TraceAssemblyModeType::Batched
+				? meq::GradShafranovSolver::TraceAssemblyMode::Batched
+				: meq::GradShafranovSolver::TraceAssemblyMode::Serial );
 		fresh->setTraceSolver( traceSolver );
 
 		if ( !firstCycle && previousPotential )
@@ -3070,6 +3086,32 @@ int main( int argc, char **argv )
 			                 : "MOVES" );
 
 		Cycle const &last = history.back();
+		/*
+		 * WHICH BATCHED PATHS WERE ACTUALLY TAKEN, AND ASKING IS THE POINT.
+		 *
+		 * All three fall back SILENTLY inside MFEM when their preconditions are
+		 * not met -- a nonlinear face constraint, blocks of differing size, a
+		 * connectivity that does not suit. MFEM's own documentation says to ask
+		 * rather than infer it from a timing, because the run-to-run scatter is
+		 * wider than what the modes cost, and it records that the face mode was
+		 * unreachable for every caller in its own tree until somebody looked.
+		 *
+		 * Printed only when one was asked for: a run that wanted none should
+		 * not carry a line about them.
+		 */
+		if ( solver
+		     && ( config->getSolver().assemblyMode == meq::AssemblyModeType::Batched
+		          || config->getSolver().localFactorMode
+		             == meq::LocalFactorModeType::Batched
+		          || config->getSolver().traceAssemblyMode
+		             == meq::TraceAssemblyModeType::Batched ) )
+			std::printf( "MEQ: batched paths taken: face assembly %s, local "
+			             "factorisation %s, local solve %s, trace assembly %s\n",
+			             solver->batchedPotFaceAssemblyTaken() ? "yes" : "NO",
+			             solver->batchedLocalFactorTaken() ? "yes" : "NO",
+			             solver->batchedLocalSolveTaken() ? "yes" : "NO",
+			             solver->batchedTraceAssemblyTaken() ? "yes" : "NO" );
+
 		std::printf( "MEQ: converged in %d Newton iterations on %d elements, "
 		             "degree %d%s\n",
 		             last.iterations, last.elements,

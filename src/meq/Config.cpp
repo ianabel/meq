@@ -1530,7 +1530,8 @@ namespace meq
 			Table solver( document, "solver", sourceName, false );
 			solver.rejectUnknownKeys( { "PicardSweeps", "PicardBlend",
 			                            "NewtonMaxIterations", "NewtonRelativeTolerance", "NewtonAbsoluteTolerance",
-			                            "PlasmaSupportSweeps", "AssemblyMode", "TraceSolver",
+			                            "PlasmaSupportSweeps", "AssemblyMode",
+			                            "LocalFactorMode", "TraceAssemblyMode", "TraceSolver",
 			                            "LinearMaxIterations", "LinearTolerance" } );
 
 			solverOptions.newtonMaxIterations = solver.getIntegerOr( "NewtonMaxIterations", solverOptions.newtonMaxIterations );
@@ -1597,9 +1598,33 @@ namespace meq
 					solverOptions.assemblyMode = AssemblyModeType::Serial;
 				else if ( mode == "threaded" )
 					solverOptions.assemblyMode = AssemblyModeType::Threaded;
+				else if ( mode == "batched" )
+					solverOptions.assemblyMode = AssemblyModeType::Batched;
 				else
-					solver.fail( "AssemblyMode", "must be one of serial, threaded, but is \""
+					solver.fail( "AssemblyMode", "must be one of serial, threaded, batched, but is \""
 					             + mode + "\"" );
+
+				// THE OTHER TWO BATCHED AXES, AS SEPARATE KEYS. They have
+				// different preconditions, different measured host costs, and
+				// -- for the trace one -- different bit-exactness, so one key
+				// covering all three would make a regression unattributable.
+				std::string const local = solver.getStringOr( "LocalFactorMode", "serial" );
+				if ( local == "serial" )
+					solverOptions.localFactorMode = LocalFactorModeType::Serial;
+				else if ( local == "batched" )
+					solverOptions.localFactorMode = LocalFactorModeType::Batched;
+				else
+					solver.fail( "LocalFactorMode", "must be one of serial, batched, but is \""
+					             + local + "\"" );
+
+				std::string const traceAsm = solver.getStringOr( "TraceAssemblyMode", "serial" );
+				if ( traceAsm == "serial" )
+					solverOptions.traceAssemblyMode = TraceAssemblyModeType::Serial;
+				else if ( traceAsm == "batched" )
+					solverOptions.traceAssemblyMode = TraceAssemblyModeType::Batched;
+				else
+					solver.fail( "TraceAssemblyMode", "must be one of serial, batched, but is \""
+					             + traceAsm + "\"" );
 
 				solverOptions.traceSolverWasGiven = solver.has( "TraceSolver" );
 				std::string const trace = solver.getStringOr( "TraceSolver", "pardiso" );

@@ -547,6 +547,106 @@ namespace meq
 				LocatedAxis
 			};
 
+			/**
+			 * HOW THE ELEMENT-LOCAL BLOCKS ARE FACTORED -- a fourth axis, and
+			 * independent of the three above. The flux mass `A` and the
+			 * potential block `D` are factored one element at a time and each
+			 * factorisation is independent of every other, which is what static
+			 * condensation IS; these modes differ only in how that loop is
+			 * written, not in what it computes.
+			 */
+			enum class LocalFactorMode
+			{
+				/// One `LUFactors` per element, in element order. MFEM's
+				/// default and MEQ's.
+				Serial,
+				/**
+				 * The whole array in one `BatchedLinAlg::LUFactor()` call,
+				 * which makes a device path a backend selection rather than new
+				 * kernels.
+				 *
+				 * **THE ONE OF THE THREE BATCHED MODES WITH A MEASURED HOST
+				 * WIN, AND IT IS ORDER DEPENDENT.** Upstream's in-situ figure
+				 * is **10-12% faster at order 2 and 24% slower at order 6**;
+				 * the local solve on its own is 0.69 to 1.04x, slower at large
+				 * blocks, because it streams the blocked arrays where the
+				 * per-element route keeps one element's vectors in cache. MEQ's
+				 * machine cases run at `k = 2`.
+				 *
+				 * It needs every element's `A` and `D` block to be the same
+				 * size. batchedLocalFactorTaken() answers whether it was used
+				 * and batchedLocalSolveTaken() whether the local SOLVES were
+				 * batched too, which additionally needs a stored Schur
+				 * complement.
+				 */
+				Batched
+			};
+
+			/// Choose it. LocalFactorMode::Serial is the default, which is
+			/// MFEM's, so a caller that says nothing gets what it always got.
+			void setLocalFactorMode( LocalFactorMode choice );
+
+			/// The value setLocalFactorMode() last set.
+			LocalFactorMode localFactorMode() const;
+
+			/**
+			 * HOW THE ELEMENT BLOCKS REACH THE GLOBAL TRACE MATRIX -- a fifth
+			 * axis, and the only one of the five that is **not bit exact**.
+			 */
+			enum class TraceAssemblyMode
+			{
+				/// `ScatterElementH()` per element into an unfinalized
+				/// `SparseMatrix`, then `Finalize()`. MFEM's default and MEQ's.
+				Serial,
+				/**
+				 * The CSR built from the mesh connectivity ONCE and refilled by
+				 * a kernel per linearisation, instead of a linked-list matrix
+				 * rebuilt from scratch every time.
+				 *
+				 * **IT DOES NOT GIVE THE SAME MATRIX OBJECT, AND THAT IS A REAL
+				 * DIFFERENCE RATHER THAN A CAVEAT.** The two agree on the
+				 * pattern and on every value to the bit, but a row's columns
+				 * come out in a different ORDER, so `SparseMatrix::Mult()`
+				 * reassociates and the trace solve differs in its last bits.
+				 * Serial's order cannot be reproduced: it is the reverse of
+				 * insertion order, and `AddSubMatrix( skip_zeros )` declines to
+				 * insert an element's exact zeros -- so which element first
+				 * touches a column decides that column's position, and the
+				 * order is a function of the VALUES.
+				 *
+				 * So this is the one mode here a bit-exactness assertion will
+				 * not survive, and it is opt-in for that reason. What it buys
+				 * is the sparse third of `ComputeH()`, which had no device path
+				 * at all and which on a host rebuilds a linked-list matrix
+				 * every linearisation.
+				 *
+				 * It reaches NPC problems and not the reduced route.
+				 * batchedTraceAssemblyTaken() answers whether it was used.
+				 */
+				Batched
+			};
+
+			/// Choose it. TraceAssemblyMode::Serial is the default.
+			void setTraceAssemblyMode( TraceAssemblyMode choice );
+
+			/// The value setTraceAssemblyMode() last set.
+			TraceAssemblyMode traceAssemblyMode() const;
+
+			/**
+			 * WHETHER EACH BATCHED PATH WAS ACTUALLY TAKEN, which is a much
+			 * narrower question than whether it was asked for -- every one of
+			 * them falls back silently, and MFEM's own documentation says to
+			 * ASK rather than infer it from a timing, because the run-to-run
+			 * scatter is wider than what the modes cost.
+			 *
+			 * Valid after prepare(); false before there is a hybridization to
+			 * put the question to.
+			 */
+			bool batchedPotFaceAssemblyTaken() const;
+			bool batchedLocalFactorTaken() const;
+			bool batchedLocalSolveTaken() const;
+			bool batchedTraceAssemblyTaken() const;
+
 			/// Choose it. AxisConstraint::LocatedAxis is the default.
 			///
 			/// AxisConstraint::NodalMaximum is kept as the CONTROL rather than as
@@ -1369,7 +1469,32 @@ namespace meq
 				/// caller asking for this is asking a performance question and a silent
 				/// serial loop is not an answer to it. MEQ therefore checks the build
 				/// before passing it on.
-				Threaded
+				Threaded,
+				/**
+				 * `Batched`: the interior-face potential term assembled by one
+				 * kernel that scatters straight into E, G, H and D, instead of
+				 * one host call per face.
+				 *
+				 * **A DEVICE MODE, AND ON A HOST IT IS NOT FREE.** MFEM's own
+				 * note: its `D` accumulation goes through `AtomicAdd`, which
+				 * costs on a host where the per-face loop's plain `+=` does
+				 * not, and it needs the storage to be device-resident to be
+				 * worth anything. So it is a prerequisite for the offload work
+				 * rather than a speedup of the CPU path.
+				 *
+				 * **AND IT FALLS BACK SILENTLY.** The kernel covers
+				 * `HDGDiffusionIntegrator` with any of its coefficients, both
+				 * `HDGConvection*Integrator`s and a `SumIntegrator` of them, on
+				 * an interior face of a serial conforming mesh under NPC.
+				 * MEASURED, MEQ qualifies on all of it: with the mode set,
+				 * `CanBatchPotFaceAssembly()` reads true on the diverted
+				 * machine case and the answer does not move. But a silent
+				 * fallback is the normal case upstream, which is why
+				 * batchedPotFaceAssemblyTaken() exists -- ASK, rather than
+				 * inferring it from a timing, because the run-to-run scatter is
+				 * wider than what the mode costs.
+				 */
+				Batched
 			};
 
 			/// Choose it. **Serial is the default and there is no automatic
@@ -3054,6 +3179,15 @@ namespace meq
 			mfem::Vector traceB;
 
 			bool built;
+			/// The exterior response columns `dr/da_m`, assembled exactly from
+			/// the one boundary-face load `a` reaches the residual through.
+			/// False when there is no exterior coupling or no transfer path.
+			/// See the implementation for why a closed form exists.
+			bool assembleExteriorColumns( std::vector<mfem::Vector> &columns );
+
+			LocalFactorMode localFactorChoice = LocalFactorMode::Serial;
+			TraceAssemblyMode traceAssemblyChoice = TraceAssemblyMode::Serial;
+
 			bool prepared;
 			bool postProcessed;
 	};

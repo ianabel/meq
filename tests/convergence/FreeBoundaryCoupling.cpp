@@ -5365,3 +5365,122 @@ BOOST_AUTO_TEST_CASE( aConductorInsideGammaIsRefusedInEitherOrder )
 		BOOST_TEST( solver->exteriorConductors() == &outside );
 	}
 }
+
+/*
+ * THE EXTERIOR COLUMNS ARE EXACT, AND THE PROBE IS THE CONTROL.
+ *
+ * `dr/da_m` used to be obtained by DIFFERENCING: set `a = e_m`, re-prepare the
+ * whole system, evaluate the full field residual, subtract a baseline. That is
+ * `Modes + 2` preparations and residual evaluations per solve, and it was
+ * differencing a map that is LINEAR.
+ *
+ * It is linear because `a` reaches the residual through exactly one route and
+ * that route is a pure LOAD: prepare() assembles the datum as a
+ * PathTraceCoefficient of `-g` into the FLUX BLOCK of the right hand side,
+ * through a single VectorBoundaryFluxLFIntegrator over `Gamma_h`. Nothing else
+ * in the assembly reads `a`, and NPCGradient substitutes a zero load, so the
+ * Jacobian does not read it either. assembleExteriorColumns() writes the closed
+ * form: one boundary-face assembly per mode.
+ *
+ * AND IT IS LINEAR BY CONSTRUCTION RATHER THAN BY LUCK -- the exterior is the
+ * vacuum, source free, where the operator is linear, which is the same fact
+ * that makes the Gegenbauer modes decay independently and the DtN map diagonal.
+ *
+ * WHAT THIS ASSERTS, AND WHY IT IS THE RIGHT ASSERTION. A wrong Jacobian column
+ * does not give a wrong answer: Newton lands on the same discrete solution
+ * either way. It costs the ORDER, which no error norm sees -- CLAUDE.md's
+ * "a wrong Jacobian is invisible to a convergence table". So this compares the
+ * two routes on the SAME problem and asserts both the answer AND the
+ * convergence history, step for step. A column that changes the iteration count
+ * is a column that was wrong before or is wrong now.
+ */
+BOOST_AUTO_TEST_CASE( theExteriorColumnsAreExact )
+{
+	int const order = 2;
+	int const n = 24;
+
+	HalfDisc d = makeHalfDisc( n );
+	meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 6 );
+
+	struct VacuumSource : public meq::Source
+	{
+		double f( double r, double z, double ) const override
+		{
+			return halfDiscField().f( r, z, 0.0 );
+		}
+		double dFdPsi( double, double, double ) const override { return 0.0; }
+	};
+	VacuumSource source;
+	mfem::ConstantCoefficient zero( 0.0 );
+
+	auto run = [ & ]( meq::GradShafranovSolver::BorderColumn choice )
+	{
+		meq::GradShafranovSolver solver( *d.sub, order );
+		solver.setSource( source );
+		solver.setBoundaryData( zero );
+		solver.setExtension( *d.path, d.gammaHMarker );
+		solver.setExteriorCoupling( dtn );
+		solver.setBorderColumn( choice );
+		solver.solve();
+		return std::make_pair( solver.exteriorCoefficients(),
+		                       solver.newtonResiduals() );
+	};
+
+	auto const exact =
+		run( meq::GradShafranovSolver::BorderColumn::Analytic );
+	auto const probed =
+		run( meq::GradShafranovSolver::BorderColumn::Differenced );
+
+	BOOST_TEST_REQUIRE( exact.first.size() == probed.first.size() );
+
+	double scale = 0.0;
+	double worst = 0.0;
+	for ( std::size_t i = 0; i < exact.first.size(); ++i )
+	{
+		scale = std::max( scale, std::fabs( probed.first[ i ] ) );
+		worst = std::max( worst,
+		                  std::fabs( exact.first[ i ] - probed.first[ i ] ) );
+	}
+	double const relative = worst/std::max( scale, 1.0e-300 );
+
+	std::printf( "\n  THE EXTERIOR COLUMNS: ASSEMBLED AGAINST DIFFERENCED"
+	             "  ( k = %d, n = %d, %d modes )\n", order, n,
+	             static_cast<int>( exact.first.size() ) );
+	std::printf( "    %-4s %18s %18s %12s\n", "mode", "assembled",
+	             "differenced", "apart" );
+	for ( std::size_t i = 0; i < exact.first.size(); ++i )
+		std::printf( "    %-4d %18.10e %18.10e %12.3e\n",
+		             static_cast<int>( i ), exact.first[ i ], probed.first[ i ],
+		             std::fabs( exact.first[ i ] - probed.first[ i ] ) );
+	std::printf( "    worst %.3e relative; newton %d steps against %d\n",
+	             relative, static_cast<int>( exact.second.size() ),
+	             static_cast<int>( probed.second.size() ) );
+	std::fflush( stdout );
+
+	/*
+	 * THE COEFFICIENTS ARE THE ANSWER THE COLUMNS EXIST TO PRODUCE, so they are
+	 * what the two routes have to agree on. 1e-12 rather than machine zero
+	 * because the differenced route carries its own truncation -- it is the
+	 * route with the error, which is the whole point of replacing it.
+	 */
+	BOOST_TEST( relative < 1.0e-12,
+	            "the assembled exterior columns give coefficients " << relative
+	            << " from the differenced ones. MEASURED at machine precision: "
+	            "the two columns themselves agree to between 7e-17 and 3e-16 "
+	            "relative on the DIII-D machine case. A disagreement here is a "
+	            "sign, a quadrature rule or a marker -- assembleExteriorColumns"
+	            "() has to use prepare()'s own, because the column is the "
+	            "derivative of the ASSEMBLED residual" );
+
+	/*
+	 * AND THE HISTORY, WHICH IS THE ASSERTION WITH THE TEETH. A column that is
+	 * merely CLOSE still converges, to the same place, one step slower -- and
+	 * nothing above would notice.
+	 */
+	BOOST_TEST( exact.second.size() == probed.second.size(),
+	            "the assembled columns took " << exact.second.size()
+	            << " Newton steps and the differenced ones "
+	            << probed.second.size() << ". The two Jacobians are supposed to "
+	            "be the same matrix, so a step of difference means one of them "
+	            "is not the derivative of the residual it is paired with" );
+}

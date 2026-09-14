@@ -804,6 +804,20 @@ namespace meq
 	// build without the MFEM branch it cannot obtain. The driver maps it and
 	// asks GradShafranovSolver::assemblyModeAvailable() whether the build can
 	// honour it, which is a question only the linked library can answer.
+	// [solver] LocalFactorMode. See the member in SolverConfig.
+	enum class LocalFactorModeType
+	{
+		Serial,
+		Batched
+	};
+
+	// [solver] TraceAssemblyMode. See the member in SolverConfig.
+	enum class TraceAssemblyModeType
+	{
+		Serial,
+		Batched
+	};
+
 	enum class AssemblyModeType
 	{
 		// One thread.
@@ -818,7 +832,14 @@ namespace meq
 		// without them defaults to Serial, and a file that ASKS for "threaded"
 		// there is refused by the driver with a message about the build rather
 		// than relaying an exception.
-		Threaded
+		Threaded,
+		// The interior-face potential term through one batched kernel instead
+		// of a host call per face. **A DEVICE mode**: MFEM's own note is that
+		// its D accumulation goes through AtomicAdd, which costs on a host
+		// where the per-face loop's plain += does not, so on the CPU path this
+		// is a prerequisite for the offload work rather than a speedup. It
+		// falls back silently, and the run reports whether it was taken.
+		Batched
 	};
 
 	// [solver] TraceSolver -- which direct solver factorises the trace system.
@@ -853,6 +874,29 @@ namespace meq
 		// to Serial when the answer is no, which is what keeps a file that says
 		// nothing working on every build.
 		AssemblyModeType assemblyMode = AssemblyModeType::Threaded;
+
+	// [solver] LocalFactorMode -- how the element-local blocks are factored.
+	//
+	// A FOURTH AXIS, independent of AssemblyMode, and the one of the batched
+	// modes with a measured HOST win: upstream's in-situ figure is 10-12%
+	// faster at order 2 and 24% slower at order 6. MEQ's machine cases run at
+	// k = 2. Bit exact either way.
+	//
+	// Serial is the default, which is MFEM's, so a file that says nothing gets
+	// what it always got.
+	LocalFactorModeType localFactorMode = LocalFactorModeType::Serial;
+
+	// [solver] TraceAssemblyMode -- how the element blocks reach the global
+	// trace matrix.
+	//
+	// **THE ONE KEY HERE THAT IS NOT BIT EXACT**, and it is opt-in for that
+	// reason. The two modes agree on the pattern and on every value to the bit,
+	// but a row's columns come out in a different ORDER, so SparseMatrix::Mult
+	// reassociates and the trace solve differs in its last bits -- and Serial's
+	// order cannot be reproduced, being a function of the VALUES. What it buys
+	// is the sparse third of ComputeH(), which on a host rebuilds a linked-list
+	// matrix every linearisation.
+	TraceAssemblyModeType traceAssemblyMode = TraceAssemblyModeType::Serial;
 		// PARDISO, matching the library's own defaultTraceSolver(). It is faster
 		// than UMFPack single-threaded and it is the only one of the two whose
 		// MKL threads are spendable under the threaded assembly above, the two

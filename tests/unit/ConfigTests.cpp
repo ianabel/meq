@@ -2714,3 +2714,128 @@ BOOST_AUTO_TEST_CASE( the_generated_mesh_is_checked_against_the_file_that_makes_
 	         + "\n[boundary.exterior]\nRadius = 2.4\nCentreZ = 0.5\nModes = 10\n",
 	         "boundary.exterior.Radius" );
 }
+
+/*
+ * THE NON-LINEAR ORDERING IS NOT A CONFIGURATION KEY, AND THAT IS LOAD BEARING
+ * RATHER THAN AN OVERSIGHT.
+ *
+ * `meq::GradShafranovSolver::NonlinearOrdering::CondenseThenLinearise` exists
+ * and is reachable from the LIBRARY -- it is the backup that still converges on
+ * stiff under-resolved meshes, and PedestalConvergence and SolverContract drive
+ * it. What it is not is something a FILE can select, and several of MEQ's
+ * features are built on that:
+ *
+ *   * `psi_bnd`, the X-point and the plasma current are all rows on the
+ *     POTENTIAL, which is an unknown only under NPC. Their setters refuse the
+ *     condensation outright rather than downgrading;
+ *   * `PlasmaConnectivity::Component`'s flood fill reads the potential out of
+ *     the iterate, which under the condensation is the trace alone;
+ *   * and the exterior response columns are assembled from the ONE load `a`
+ *     reaches the residual through, which is affine under NPC and is not under
+ *     the condensation, where the load goes through the element-local
+ *     non-linear solve.
+ *
+ * So the driven configuration is NPC throughout, and none of those places
+ * carries a runtime gate for an ordering a file cannot ask for. This asserts
+ * the premise: the schema has no such key, on `[solver]` or anywhere else.
+ */
+BOOST_AUTO_TEST_CASE( the_nonlinear_ordering_is_not_reachable_from_a_file )
+{
+	auto const refuses = []( std::string const & text, std::string const & key )
+	{
+		BOOST_CHECK_EXCEPTION( parse( text ), ConfigError,
+			[&]( ConfigError const & e ) { return e.getKey() == key; } );
+	};
+
+	std::string const base =
+		"[mesh]\n"
+		"RMin = 0.0\nRMax = 1.7\nZMin = -1.7\nZMax = 1.7\n"
+		"\n[discretisation]\nPolynomialDegree = 2\n"
+		"\n[source]\nType = \"soloviev\"\nA = -0.52\n";
+
+	// THE CONTROL: the same file without the key parses, so the refusals below
+	// are about the key and not about the file.
+	BOOST_CHECK_NO_THROW( parse( base ) );
+
+	for ( char const *spelling : { "NonlinearOrdering", "Ordering",
+	                               "NonLinearOrdering" } )
+		refuses( base + "\n[solver]\n" + spelling
+		         + " = \"condensethenlinearise\"\n",
+		         std::string( "solver." ) + spelling );
+
+	// AND NOT UNDER [discretisation] EITHER, which is where somebody looking
+	// for it might reasonably put it. Written INTO that table rather than as a
+	// second one: TOML refuses a duplicate table itself, which would make this
+	// a test of toml11 rather than of MEQ's schema.
+	refuses( "[mesh]\nRMin = 0.0\nRMax = 1.7\nZMin = -1.7\nZMax = 1.7\n"
+	         "\n[discretisation]\nPolynomialDegree = 2\n"
+	         "NonlinearOrdering = \"npc\"\n"
+	         "\n[source]\nType = \"soloviev\"\nA = -0.52\n",
+	         "discretisation.NonlinearOrdering" );
+}
+
+/*
+ * THE THREE BATCHED AXES ARE THREE KEYS, AND THAT IS THE POINT OF THEM.
+ *
+ * `AssemblyMode`, `LocalFactorMode` and `TraceAssemblyMode` reach three
+ * different mechanisms in `DarcyHybridization`, with three different
+ * preconditions, three different measured costs on a host, and -- for the trace
+ * one -- different bit-exactness. One key covering all three would make a
+ * regression unattributable, which is the same argument this schema makes for
+ * keeping `AssemblyMode` and `TraceSolver` apart.
+ *
+ * All three default to what MFEM defaults to, so a file that says nothing gets
+ * the behaviour it always got.
+ */
+BOOST_AUTO_TEST_CASE( the_batched_assembly_axes_are_separate_keys )
+{
+	auto const refuses = []( std::string const & text, std::string const & key )
+	{
+		BOOST_CHECK_EXCEPTION( parse( text ), ConfigError,
+			[&]( ConfigError const & e ) { return e.getKey() == key; } );
+	};
+
+	std::string const base =
+		"[mesh]\n"
+		"RMin = 0.0\nRMax = 1.7\nZMin = -1.7\nZMax = 1.7\n"
+		"\n[discretisation]\nPolynomialDegree = 2\n"
+		"\n[source]\nType = \"soloviev\"\nA = -0.52\n";
+
+	// THE DEFAULTS ARE MFEM'S, so an existing file is bit-unchanged.
+	Configuration const silent = parse( base );
+	BOOST_TEST( ( silent.getSolver().localFactorMode
+	              == meq::LocalFactorModeType::Serial ) );
+	BOOST_TEST( ( silent.getSolver().traceAssemblyMode
+	              == meq::TraceAssemblyModeType::Serial ) );
+
+	Configuration const asked = parse( base + "\n[solver]\n"
+		"AssemblyMode = \"batched\"\n"
+		"LocalFactorMode = \"batched\"\n"
+		"TraceAssemblyMode = \"batched\"\n" );
+	BOOST_TEST( ( asked.getSolver().assemblyMode
+	              == meq::AssemblyModeType::Batched ) );
+	BOOST_TEST( ( asked.getSolver().localFactorMode
+	              == meq::LocalFactorModeType::Batched ) );
+	BOOST_TEST( ( asked.getSolver().traceAssemblyMode
+	              == meq::TraceAssemblyModeType::Batched ) );
+
+	// EACH IS INDEPENDENT of the other two, which is what "separate" means.
+	Configuration const one = parse( base
+		+ "\n[solver]\nLocalFactorMode = \"batched\"\n" );
+	BOOST_TEST( ( one.getSolver().localFactorMode
+	              == meq::LocalFactorModeType::Batched ) );
+	BOOST_TEST( ( one.getSolver().assemblyMode
+	              == meq::AssemblyModeType::Threaded ) );
+	BOOST_TEST( ( one.getSolver().traceAssemblyMode
+	              == meq::TraceAssemblyModeType::Serial ) );
+
+	// A MISSPELT CHOICE FAILS AT PARSE, which is where a string can be checked
+	// without the library -- the same split setAssemblyMode()'s own comment
+	// records between a wrong spelling and an unavailable choice.
+	refuses( base + "\n[solver]\nLocalFactorMode = \"threaded\"\n",
+	         "solver.LocalFactorMode" );
+	refuses( base + "\n[solver]\nTraceAssemblyMode = \"threaded\"\n",
+	         "solver.TraceAssemblyMode" );
+	refuses( base + "\n[solver]\nAssemblyMode = \"batch\"\n",
+	         "solver.AssemblyMode" );
+}
