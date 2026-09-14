@@ -1951,3 +1951,65 @@ seven cases it is not better at all. **A comparison against `freegs4e` means
 something at about 1e-04 relative and nothing below it**, at any grid — so a
 MEQ run that agrees to 1e-04 has reached the floor, and the way past it is a
 different reference rather than a finer one.
+
+### M-89
+
+**THE RACE, BOTH CODES COLD, ON DIII-D.** `F_diiid_conventional` is the one of
+the seven diverted machines MEQ solves from a genuinely cold start — the
+conductors at their given currents, a current blob shaped by the design
+profiles, `[boundary.xpoint]` seeded at the null the control system was *asked*
+for, and nothing from a converged equilibrium. So it is the one case on which a
+wall clock compares two solvers rather than two starting positions.
+
+Held equal: both on all 16 threads; MEQ on its own defaults, the PARDISO trace
+solver and threaded assembly, which M-78 measures as the fast pair. Both timed
+**end to end** — MEQ's includes generating its mesh with gmsh, the solve and
+four output formats; `freegs4e`'s includes its boundary matrix, the Picard loop
+and its own diagnostics. Neither is a solve time.
+
+| freegs4e, cold | wall | Picard | `ψ_ax` | `ψ_bnd` |
+|---|---|---|---|---|
+| 129² | 6.4 s | 33 | 3.758545305e-01 | 7.081839835e-02 |
+| 257² | 16.0 s | 32 | 3.758520294e-01 | 7.081519830e-02 |
+
+MEQ, cold, measured against the 513² reference of M-88. `rel L2` is over every
+comparable node and `no coils` excludes a 5 cm collar round each conductor,
+which is M-87's distinction between two solvers and two conductor models:
+
+| rung | elements | dofs | Newton | solve | wall | rel L2 | no coils | `ψ_ax` | `ψ_bnd` |
+|---|---|---|---|---|---|---|---|---|---|
+| k=1 | 4848 | — | — | — | — | **FAILED** | | | |
+| k=1, h/2 | 19507 | — | — | — | — | **FAILED** | | | |
+| **k=2** | **4848** | **87264** | **2** | **12.1 s** | **14.2 s** | 5.846e-03 | **7.456e-04** | 3.49e-04 | 5.36e-05 |
+| k=2, h/2 | 19507 | 351126 | 2 | 62.4 s | 67.6 s | 5.984e-03 | 6.710e-04 | 3.13e-04 | 2.84e-04 |
+| k=3 | 4848 | 145440 | 2 | 22.4 s | 25.5 s | 5.824e-03 | 6.104e-04 | 2.90e-04 | 3.47e-04 |
+| k=3, h/2 | 19507 | 585210 | 2 | 113.5 s | 122.7 s | 5.986e-03 | 6.818e-04 | 3.23e-04 | 2.68e-04 |
+| k=2, 3 adaptive cycles | 8234 | 148212 | 2 | 45.6 s | 47.4 s | 5.977e-03 | 6.681e-04 | 3.14e-04 | 2.73e-04 |
+| k=3, 3 adaptive cycles | 5752 | 172560 | 2 | 69.7 s | 71.5 s | 5.979e-03 | 6.825e-04 | 3.25e-04 | 2.70e-04 |
+
+**EVERY CONVERGED RUNG GIVES THE SAME ANSWER.** 6.7× the degrees of freedom and
+8.7× the wall clock, between the cheapest rung and the dearest, move the
+agreement by nothing: 6.1e-04 to 7.5e-04 outside the conductors and 2.9e-04 to
+3.5e-04 in `ψ_ax`, with no trend in `k` or in `h`. **MEQ is not the error
+here** — M-88 measures `freegs4e`'s own accuracy at about 1e-04 relative and
+about first order, so this is the floor between two codes and two conductor
+models, met at the very first rung.
+
+**SO THE ANSWER TO "WHAT DOES EQUIVALENT ACCURACY COST" IS 14.2 s AGAINST
+6.4 s**, at `k = 2` on 4848 elements against 129², with MEQ's 12.1 s solve being
+two Newton steps after three plasma-support sweeps. Read it as a factor of two
+and not as a ratio: MEQ is C++ against Python and writes four output files where
+`freegs4e` writes one, and 2.1 s of MEQ's wall is sampling `ψ` onto a 513² grid
+purely so this table could be made.
+
+**ADAPTIVITY BUYS NOTHING HERE, AND THAT IS NOT A CRITICISM OF IT.** Three
+cycles at `k = 2` grow the mesh from 4848 to 8234 elements and cost 3.8× the
+wall for an agreement that moves from 7.456e-04 to 6.681e-04 — inside the
+scatter of the column. A residual estimator refines where the DISCRETISATION
+error is, and on this problem there is no discretisation error left to chase
+above the floor. Adaptivity is for a problem whose answer is still moving.
+
+**`k = 1` DOES NOT CONVERGE AT ALL**, at either mesh — "no damping of the
+bordered Newton step gave a finite residual" on the coarse one and a plain
+non-convergence on the refined one. The cold start's margin is thinner than the
+converged answer suggests, and degree is part of what buys it.

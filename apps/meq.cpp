@@ -1349,6 +1349,25 @@ int main( int argc, char **argv )
 	/// own precondition rather than relying on a check in another file.
 	int const supportSweeps =
 		normalised ? config->getSolver().plasmaSupportSweeps : 0;
+
+	/// The basin-finding pre-stage -- [solver] PicardSweeps -- and the state it
+	/// reached. Outer-scoped for setInitialGuess()'s sake: it BORROWS, so the
+	/// guess has to outlive the solve that reads it, which is sweepState's
+	/// reason above.
+	int const picardSweeps =
+		normalised ? config->getSolver().picardSweeps : 0;
+	std::unique_ptr<mfem::GridFunction> picardState;
+
+	/// AND THE SOLVER WHOSE SPACE `picardState` LIVES ON, kept alive beside it.
+	/// mfem::GridFunction's copy constructor takes the FiniteElementSpace by
+	/// POINTER, so a state copied out of a solver that then goes out of scope
+	/// is a dangling space -- which surfaces as
+	/// "Verification failed: GetLastOperation() == Mesh::REFINE" from inside
+	/// MFEM, naming neither the state nor the solver. Assignment is Vector
+	/// assignment and keeps this space, which is why one home serves every
+	/// sweep: they all share the mesh and the degree.
+	std::unique_ptr<meq::GradShafranovSolver> picardHome;
+
 	int sweepsRun = 0;
 	bool supportSettled = false;
 
@@ -1632,7 +1651,20 @@ int main( int argc, char **argv )
 	 * explicit that a GradShafranovSolver must not be assumed reusable
 	 * afterwards, so the retry builds another one.
 	 */
-	auto makeSolver = [ & ]( mfem::Mesh &mesh, bool firstCycle )
+	/*
+	 * `bordered == false` IS THE PICARD PRE-STAGE'S SOLVER, and what it drops
+	 * is every border that makes a functional of the solution an unknown:
+	 * psi_ax, psi_bnd, the X-point and the plasma current. What it KEEPS is
+	 * the exterior coupling, because that is the boundary condition rather
+	 * than a constraint -- its Gegenbauer coefficients are unknowns of the
+	 * same system and always were, FB-5 predating all four of the others.
+	 *
+	 * With the normalisation frozen by the caller, a meq::NormalisedSource is
+	 * an ordinary meq::Source -- F( r, z, psi ), no unknowns in it -- so this
+	 * is the unbordered semi-linear problem MEQ has solved since stage 4.
+	 */
+	auto makeSolver = [ & ]( mfem::Mesh &mesh, bool firstCycle,
+	                         bool bordered = true )
 		-> std::unique_ptr<meq::GradShafranovSolver>
 	{
 		auto fresh = std::make_unique<meq::GradShafranovSolver>(
@@ -1645,7 +1677,7 @@ int main( int argc, char **argv )
 		// The bordered Newton, or the plain one. psiAxisGuess is the TOML's
 		// value on the first cycle and the previous cycle's answer afterwards;
 		// see its declaration.
-		if ( normalised )
+		if ( normalised && bordered )
 			fresh->setSource( *normalised, psiAxisGuess );
 		else
 			fresh->setSource( *source );
@@ -1661,7 +1693,9 @@ int main( int argc, char **argv )
 		 * makes psi_bnd an unknown of a NORMALISATION that has to exist first.
 		 */
 		meq::LimiterConfig const &limiterConfig = config->getBoundary().limiter;
-		if ( limiterConfig.surfaceAttribute > 0 )
+		if ( !bordered )
+			;                                  // see the note above makeSolver
+		else if ( limiterConfig.surfaceAttribute > 0 )
 			// THE CURVE. psi_bnd = max psi_h over the meshed limiter surface,
 			// with the contact found rather than prescribed. Config refuses
 			// this beside R/Z, so the two branches are exclusive here by
@@ -1699,7 +1733,7 @@ int main( int argc, char **argv )
 		 * ::permeability() exists for precisely that sharing. So the conversion
 		 * happens here, once, against the only mu0 in the file.
 		 */
-		if ( config->getSource().plasmaCurrent() != 0.0 )
+		if ( bordered && config->getSource().plasmaCurrent() != 0.0 )
 			fresh->setPlasmaCurrent( config->getSource().permeability()
 			                         *config->getSource().plasmaCurrent() );
 
@@ -2109,6 +2143,159 @@ int main( int argc, char **argv )
 			return 0.0;
 		};
 
+		/**
+		 * `mu0 I_p` OF A STATE, BY QUADRATURE, AND WHY THE DRIVER OWNS IT.
+		 *
+		 * `GradShafranovSolver::plasmaCurrent()` answers only where
+		 * `setPlasmaCurrent()` made the current an unknown, and the Picard
+		 * pre-stage below deliberately has no borders at all -- that is the
+		 * whole of what makes its field solve an ordinary one. So the delivered
+		 * current has to be measured rather than read, and `int F/r` over the
+		 * domain IS `mu0 I_p`, which is the same identity the solver's own
+		 * constraint is assembled from.
+		 *
+		 * THE PLASMA SOURCE AND NOT THE SUM. `source` is a
+		 * meq::CoilAugmentedSource wherever the file carries [[coils]], and the
+		 * conductors current is not the plasma’s -- integrating it would
+		 * rescale the profiles to make the coils' contribution up.
+		 * `plasmaSource` is the handle kept for exactly this kind of question.
+		 */
+		auto plasmaCurrentOf = [ & ]( mfem::GridFunction const &field ) -> double
+		{
+			meq::Source const &f = plasmaSource ? *plasmaSource : *source;
+			mfem::FiniteElementSpace const &space = *field.FESpace();
+			mfem::Mesh &mesh = *space.GetMesh();
+
+			double total = 0.0;
+			mfem::Vector shape;
+			mfem::Array<int> dofs;
+			for ( int e = 0; e < mesh.GetNE(); ++e )
+			{
+				mfem::FiniteElement const &element = *space.GetFE( e );
+				// Two orders above the field, as the source integrator itself
+				// takes: F is a profile of psi and is not a polynomial in it.
+				mfem::IntegrationRule const &rule = mfem::IntRules.Get(
+					element.GetGeomType(), 2*element.GetOrder() + 4 );
+				mfem::ElementTransformation &map = *mesh.GetElementTransformation( e );
+				space.GetElementDofs( e, dofs );
+				shape.SetSize( element.GetDof() );
+
+				for ( int q = 0; q < rule.GetNPoints(); ++q )
+				{
+					mfem::IntegrationPoint const &point = rule.IntPoint( q );
+					map.SetIntPoint( &point );
+					element.CalcShape( point, shape );
+
+					double psi = 0.0;
+					for ( int i = 0; i < dofs.Size(); ++i )
+						psi += shape( i )*field( dofs[ i ] );
+
+					double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
+					mfem::Vector here( coordinates, mesh.Dimension() );
+					map.Transform( point, here );
+					double const r = here( 0 );
+					if ( !( r > 0.0 ) )
+						continue;          // the axis carries no area anyway
+					total += point.weight*map.Weight()
+					         *f.f( r, here( 1 ), psi )/r;
+				}
+			}
+			return total;
+		};
+
+		/**
+		 * psi AT THE MAGNETIC AXIS OF A STATE -- a zero of `q_h` OUTSIDE EVERY
+		 * CONDUCTOR, and the filter is the point.
+		 *
+		 * The largest nodal value will not do and the reason is measured: MEQ's
+		 * domain is a half-disc that CONTAINS the conductors, where the
+		 * reference codes' boxes stop short of them, so a coil carrying current
+		 * of the plasma's own sign has an O-point in the same field and can
+		 * WIN. On case A's cold guess it does -- 8.24e-02 inside P1L against
+		 * 6.02e-02 at the plasma -- and a normalisation taken from it puts the
+		 * first frozen support inside the conductor.
+		 *
+		 * This is the same filter GradShafranovSolver's own located-axis
+		 * constraint applies, and for the same reason: a plasma has no magnetic
+		 * axis inside a conductor.
+		 */
+		double axisR = 0.0;
+		double axisZ = 0.0;
+		auto axisFluxOf = [ & ]( meq::GradShafranovSolver const &from,
+		                         double span, double &out ) -> bool
+		{
+			meq::CriticalPointFinder const finder( from );
+			meq::CriticalPointType const wanted =
+				span >= 0.0 ? meq::CriticalPointType::Maximum
+				            : meq::CriticalPointType::Minimum;
+
+			bool found = false;
+			double best = 0.0;
+			for ( meq::CriticalPoint const &point : finder.sweep() )
+			{
+				if ( point.type != wanted )
+					continue;
+				if ( coils && coils->indexContaining( point.r, point.z ) >= 0 )
+					continue;
+				double const score = span >= 0.0 ? point.psi : -point.psi;
+				if ( !found || score > best )
+				{
+					found = true;
+					best = score;
+					out = point.psi;
+					axisR = point.r;
+					axisZ = point.z;
+				}
+			}
+			return found;
+		};
+
+		/**
+		 * psi AT THE ACTIVE NULL OF A STATE, and why a FIXED point will not do.
+		 *
+		 * `edgeFluxOf` reads `psi` at the seed the file named, which is exactly
+		 * right for a limiter -- the tile is where the drawings say -- and
+		 * exactly wrong inside a fixed-point iteration on a DIVERTED machine.
+		 * The seed is a target, so it sits somewhere inside the plasma rather
+		 * than on its boundary, and `psi` there RISES as the current
+		 * concentrates: the core `{ psi > psi_bnd }` then shrinks, which
+		 * concentrates the current further. Measured, that runaway takes case
+		 * A's pre-stage from `psi_ax 4.5e-02` to `4.6e-01` and an `I_p` of
+		 * 4.5e+06 against a target of 2.0e+05 in one sweep, and the sweep after
+		 * it finds no O-point at all.
+		 *
+		 * The separatrix is what bounds the closed surfaces, so the null has to
+		 * be FOUND on each iterate. It is the same search XP-3's border does
+		 * with a Newton row; here it is a sweep and a nearest-to-the-seed pick,
+		 * which is cheap and is all an initialiser needs.
+		 */
+		auto nullFluxOf = [ & ]( meq::GradShafranovSolver const &from,
+		                         double reach, double &out ) -> bool
+		{
+			if ( !config->getBoundary().xpoint.given )
+				return false;
+
+			meq::CriticalPointFinder const finder( from );
+			bool found = false;
+			double nearest = 0.0;
+			for ( meq::CriticalPoint const &point : finder.sweep() )
+			{
+				if ( point.type != meq::CriticalPointType::Saddle )
+					continue;
+				double const gap = std::hypot( point.r - xPointSeedR,
+				                               point.z - xPointSeedZ );
+				if ( gap > reach )
+					continue;
+				if ( !found || gap < nearest )
+				{
+					found = true;
+					nearest = gap;
+					out = point.psi;
+				}
+			}
+			return found;
+		};
+
 		/// One solve, whichever kind this configuration asks for.
 		auto runSolve = [ & ]()
 		{
@@ -2120,6 +2307,253 @@ int main( int argc, char **argv )
 
 		/// The support loop, or the single solve it degenerates to at zero
 		/// sweeps -- which is what every file without the key gets, bit for bit.
+		/**
+		 * PICARD ON THE NORMALISATION, OUTSIDE THE BORDER: find the basin, then
+		 * let the Newton have it.
+		 *
+		 * WHAT IT IS FOR. A free-boundary Grad-Shafranov problem has several
+		 * solutions and which one is reported is decided by where the iteration
+		 * starts. Measured on freegs4e's TestTokamak from a cold start, MEQ's
+		 * bordered Newton converges CLEANLY -- seven steps, then six, then four
+		 * -- to psi_ax = 1.41e-01 where the reference has 8.27e-02, at the same
+		 * I_p and with psi_bnd right to 3.4%. It is not a failure to converge;
+		 * it is the wrong root, and seeding [source] PsiAxis with the
+		 * reference's own converged value moves it by not one digit.
+		 *
+		 * AND THERE IS NO GLOBALISATION TO REACH FOR. solve() refuses every
+		 * Globalisation but None once psi_ax is an unknown -- the KINSOL paths
+		 * drive a residual of their own and the Picard ones build no Jacobian
+		 * to border -- so the bordered loop's Armijo backtracking is all there
+		 * is, and it is damping a step that is already leaving the branch.
+		 *
+		 * SO THE PICARD GOES OUTSIDE. With ( psi_ax, psi_bnd ) HELD FIXED a
+		 * normalised source is an ordinary meq::Source, and the field solve is
+		 * the unbordered problem MEQ has always been able to solve. Each sweep
+		 *
+		 *     freezes the normalisation at the current estimate,
+		 *     solves that unbordered problem,
+		 *     re-reads psi_ax at the located O-point and psi_bnd at the
+		 *         bounding point, and rescales the profiles to the target I_p,
+		 *
+		 * under-relaxed by [solver] PicardBlend. That is freegs4e's own
+		 * algorithm, and it converges globally where a Newton converges
+		 * locally -- which is why freegs4e reaches these equilibria from a bare
+		 * Gaussian with no coil field in it at all.
+		 *
+		 * IT IS AN INITIALISER. It is not asked to meet a tolerance and its
+		 * answer is not the run's; the state it reaches becomes the bordered
+		 * solve's initial guess and its psi_ax becomes that solve's starting
+		 * value. Globalisation::PicardThenNewton's own documentation draws the
+		 * same line for the unbordered problem: "Picard's job here is NOT to
+		 * solve the problem."
+		 */
+		auto runPicardPrestage = [ & ]()
+		{
+			bool const confinedSource = config->getSource().confinesToPlasma();
+
+			picardHome = makeSolver( *solveMesh, cycle == 0, false );
+			picardHome->prepare();
+			picardState =
+				std::make_unique<mfem::GridFunction>( picardHome->potential() );
+
+			double axis = psiAxisGuess;
+			double boundary = edgeFluxOf( *picardState );
+			double scale = normalised->currentScale();
+			double const target = config->getSource().permeability()
+			                      *config->getSource().plasmaCurrent();
+
+			/*
+			 * THE AMPLITUDE BEFORE THE FIRST SOLVE, AND WITHOUT IT THE FIRST
+			 * SOLVE DOES NOT CONVERGE.
+			 *
+			 * The profile tables carry the reference's own SHAPE and not the
+			 * scale its control system found -- fgsref.py records
+			 * `Ip_logic_for_saved_profile: false` and an `Ip_logic_L` of
+			 * 3.45e+05 for case A -- so on the bordered path the scale is an
+			 * unknown and here it is nothing at all. Solving the unbordered
+			 * problem at scale 1 asks for an equilibrium carrying a current
+			 * five orders from the one wanted, and it diverges.
+			 *
+			 * One Picard update of the scale on the GUESS fixes it: `int F/r`
+			 * evaluated at the guess is not the delivered current of any
+			 * equilibrium, but it is the right order, which is all the first
+			 * solve needs.
+			 */
+			if ( target != 0.0 )
+			{
+				normalised->setNormalisation( axis, boundary );
+				normalised->setCurrentScale( scale );
+				if ( confinedSource )
+					normalised->freezePlasmaEdge( axis, boundary );
+				double const atGuess = plasmaCurrentOf( *picardState );
+				if ( std::isfinite( atGuess ) && atGuess != 0.0 )
+					scale *= target/atGuess;
+			}
+			double const blend = config->getSolver().picardBlend;
+
+			std::printf( "MEQ: %d Picard sweep%s on the normalisation before the "
+			             "bordered Newton, blend %.2f\n", picardSweeps,
+			             picardSweeps == 1 ? "" : "s", blend );
+			std::printf( "     %-6s %6s %14s %14s %14s %10s\n", "sweep", "its",
+			             "psi_ax", "psi_bnd", "I_p", "move" );
+			std::fflush( stdout );
+
+			for ( int sweep = 0; sweep < picardSweeps; ++sweep )
+			{
+				normalised->setNormalisation( axis, boundary );
+				normalised->setCurrentScale( scale );
+				if ( confinedSource )
+					normalised->freezePlasmaEdge( axis, boundary );
+
+				auto step = makeSolver( *solveMesh, cycle == 0, false );
+				// THE GLOBALISATION IS LEGAL HERE AND NOWHERE ELSE IN THIS RUN.
+				// solve() refuses anything but None once psi_ax is an unknown;
+				// with the normalisation frozen there is no such unknown, so
+				// Anderson-accelerated Picard into Newton is available -- which
+				// is the whole reason this stage is outside the border.
+				step->setGlobalisation(
+					meq::GradShafranovSolver::Globalisation::PicardThenNewton );
+
+				/*
+				 * A LOOSE TOLERANCE, BECAUSE THIS IS AN INITIALISER.
+				 *
+				 * The file's is 1e-10, which is right for the answer and wrong
+				 * for a stage whose only job is to choose a branch. Measured on
+				 * case A: the sweep drops from 8.985e-01 to 1.26e-01 in two
+				 * steps and then STALLS at about 1e-03, oscillating in the
+				 * fourth digit -- a limit cycle, not a divergence -- so at the
+				 * run's own tolerance every sweep "fails" while sitting on a
+				 * state that is a 0.1% solve of the problem it was posed.
+				 *
+				 * 1e-04 relative is three digits of the normalisation, which is
+				 * more than a topological question needs.
+				 */
+				step->setNewtonControl(
+					1.0e-4, config->getSolver().newtonAbsoluteTolerance,
+					std::min( 60, config->getSolver().newtonMaxIterations ) );
+				if ( confinedSource )
+				{
+					step->setPlasmaSupportFrozen( false );
+					step->refreshPlasmaComponent( *picardState );
+					step->setPlasmaSupportFrozen( true );
+				}
+				step->setInitialGuess( *picardState );
+				bool stalled = false;
+				try
+				{
+					step->solve();
+				}
+				catch ( std::exception const &error )
+				{
+					// A SWEEP THAT DOES NOT CONVERGE IS NOT AN ERROR AND IS NOT
+					// THE END OF THE LOOP, for the reason
+					// Globalisation::PicardThenNewton's stage 1 is neither:
+					// this is a globalisation, and the state it has reached is
+					// very often already in the right basin. Take it and carry
+					// on -- the next sweep re-poses the problem anyway, and a
+					// normalisation read off a 1e-03 solve is a better estimate
+					// than the one it replaces.
+					stalled = true;
+					std::printf( "     %-6d %6s  %s\n", sweep, "-",
+					             error.what() );
+					// THE HISTORY, because "did not converge" on a stage whose
+					// whole job is robustness is the one place a reader needs
+					// to see whether it was wandering or diverging.
+					std::vector<double> const &history = step->newtonResiduals();
+					std::printf( "            residuals:" );
+					for ( std::size_t i = 0; i < history.size(); ++i )
+						if ( i < 4 || i + 4 >= history.size() )
+							std::printf( " %.3e", history[ i ] );
+						else if ( i == 4 )
+							std::printf( " ..." );
+					std::printf( "\n" );
+					std::fflush( stdout );
+				}
+
+				// AFTER THE CATCH AND NOT INSIDE THE TRY. A solve that threw
+				// still leaves its last iterate in the solver, which is the
+				// state this stage is after; what it does not leave is a
+				// converged one, and nothing here claims otherwise.
+				//
+				// AND THE FIELD IS UNDER-RELAXED WITH THE NORMALISATION, not
+				// instead of it. Blending ( psi_ax, psi_bnd ) while taking the
+				// field whole leaves the two inconsistent -- the source is
+				// evaluated at a normalisation the field it came from never
+				// had -- and measured, that is the runaway: I_p goes from
+				// 3.2e+05 to 4.4e+06 in one sweep. freegs4e blends psi itself,
+				// which is what this is.
+				{
+					mfem::GridFunction const &latest = step->potential();
+					*picardState *= ( 1.0 - blend );
+					picardState->Add( blend, latest );
+				}
+				if ( stalled && !std::isfinite( picardState->Normlinf() ) )
+				{
+					std::printf( "            the iterate is not finite; "
+					             "stopping\n" );
+					break;
+				}
+
+				double freshAxis = axis;
+				if ( !axisFluxOf( *step, axis - boundary, freshAxis ) )
+				{
+					std::printf( "     %-6d %6d  no O-point outside the "
+					             "conductors; stopping\n", sweep,
+					             step->newtonIterations() );
+					break;
+				}
+				// THE NULL IF THERE IS ONE WITHIN REACH, else the seed. `reach`
+				// is the plasma's own scale -- the seed to the axis -- which is
+				// generous enough to follow a null that moves and tight enough
+				// not to adopt one of the coils'.
+				double freshBoundary = edgeFluxOf( *picardState );
+				if ( config->getBoundary().xpoint.given )
+				{
+					double atNull = freshBoundary;
+					double const reach = std::max(
+						0.5*std::hypot( xPointSeedR - axisR,
+						                xPointSeedZ - axisZ ), 0.1 );
+					if ( nullFluxOf( *step, reach, atNull ) )
+						freshBoundary = atNull;
+				}
+
+				// THE AMPLITUDE, freegs4e's Ip_logic by another name. Without
+				// it the tables deliver whatever current their own amplitude
+				// gives, which for these cases is out by the very factor the
+				// bordered solve exists to find.
+				double delivered = 0.0;
+				if ( target != 0.0 )
+				{
+					delivered = plasmaCurrentOf( *picardState );
+					// UNDER-RELAXED TOO, and by the same factor: a scale that
+					// jumped while the normalisation crept would be the same
+					// inconsistency from the other side.
+					if ( std::isfinite( delivered ) && delivered != 0.0
+					     && target/delivered > 0.0 )
+						scale *= std::pow( target/delivered, blend );
+				}
+
+				double const move =
+					( std::fabs( freshAxis - axis )
+					  + std::fabs( freshBoundary - boundary ) )
+					/std::max( std::fabs( axis - boundary ), 1.0e-300 );
+				axis += blend*( freshAxis - axis );
+				boundary += blend*( freshBoundary - boundary );
+
+				std::printf( "     %-6d %6d %14.6e %14.6e %14.6e %10.3e%s\n",
+				             sweep, step->newtonIterations(), axis, boundary,
+				             delivered/config->getSource().permeability(),
+				             move, stalled ? "  (stalled)" : "" );
+				std::fflush( stdout );
+			}
+
+			// THE ESTIMATE THE BORDERED SOLVE STARTS FROM. psi_ax is an initial
+			// value there, so this is the one number the pre-stage exists to
+			// produce; the state it reached is the other.
+			psiAxisGuess = axis;
+			normalised->setCurrentScale( scale );
+		};
+
 		auto runSolveWithSupportLoop = [ & ]()
 		{
 			if ( supportSweeps < 1 )
@@ -2222,6 +2656,18 @@ int main( int argc, char **argv )
 
 		try
 		{
+			// THE BASIN FIRST, WHEN ASKED FOR, AND THE SOLVER IS REBUILT AFTER
+			// IT. psi_ax is bound into the bordered solver at construction --
+			// setSource( NormalisedSource &, double ) takes it -- so a
+			// pre-stage that moved it has to be followed by a fresh one.
+			if ( picardSweeps > 0 && normalised )
+			{
+				runPicardPrestage();
+				solver = makeSolver( *solveMesh, cycle == 0 );
+				if ( picardState )
+					solver->setInitialGuess( *picardState );
+			}
+
 			runSolveWithSupportLoop();
 		}
 		catch ( std::exception const &firstAttempt )

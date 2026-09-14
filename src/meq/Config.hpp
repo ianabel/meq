@@ -910,6 +910,66 @@ namespace meq
 		 */
 		int plasmaSupportSweeps = 0;
 
+		/**
+		 * `PicardSweeps` -- FIND THE BASIN BEFORE DRIVING THE NEWTON.
+		 *
+		 * A free-boundary Grad-Shafranov problem has SEVERAL solutions and
+		 * which one is reported is decided by where the iteration starts.
+		 * Measured on freegs4e's TestTokamak from a cold start -- the
+		 * conductors at their given currents, a current blob shaped by the
+		 * design profiles, and nothing from a converged equilibrium -- MEQ's
+		 * bordered Newton converges cleanly to `psi_ax = 1.30e-01` where the
+		 * reference has `8.27e-02`, at the same `I_p`. Seeding `PsiAxis` with
+		 * the reference's own converged value changes it by not one digit, so
+		 * it is the basin and not the normalisation.
+		 *
+		 * **AND THERE IS NO GLOBALISATION TO REACH FOR.**
+		 * `GradShafranovSolver::solve` refuses every
+		 * `Globalisation` but `None` once `psi_ax` is an unknown: the KINSOL
+		 * paths drive a residual of their own and the Picard ones build no
+		 * Jacobian to border. The bordered loop's own Armijo backtracking is
+		 * what there is, and on these machines the step it is damping is
+		 * already leaving the branch.
+		 *
+		 * **SO THE PICARD IS OUTSIDE THE BORDER RATHER THAN INSIDE IT.** With
+		 * `( psi_ax, psi_bnd )` held FIXED, a normalised source is an ordinary
+		 * `meq::Source` -- `F( r, z, psi )` with no unknowns in it -- and the
+		 * field solve is the unbordered problem MEQ has always been able to
+		 * solve. This key counts sweeps of
+		 *
+		 *     freeze the normalisation at the current estimate
+		 *     solve the unbordered problem
+		 *     re-read `psi_ax` at the located O-point and `psi_bnd` at the
+		 *         bounding point, and rescale the profiles to the target `I_p`
+		 *
+		 * which is freegs4e's own algorithm, and which converges globally where
+		 * a Newton converges locally. The state it reaches is handed to the
+		 * bordered solve as its initial guess.
+		 *
+		 * **IT IS AN INITIALISER AND NOT A SOLVER.** It is not asked to meet
+		 * any tolerance and its answer is not the run's; what it has to do is
+		 * choose the branch, which is a topological question and survives a
+		 * loose sweep. `Globalisation::PicardThenNewton`'s own documentation
+		 * makes the same distinction for the unbordered problem.
+		 *
+		 * Zero is the default, so every existing configuration is unchanged,
+		 * and a run that converges without it does not want it.
+		 */
+		int picardSweeps = 0;
+
+		/**
+		 * `PicardBlend` -- how much of each Picard sweep's answer is taken.
+		 *
+		 * `1.0` is the plain fixed point and `0.5` is what freegs4e's own
+		 * adaptive blending averages out at on these cases. Under-relaxation
+		 * is what stops the normalisation and the support chasing each other:
+		 * the core is `{ psi > psi_bnd }`, so a `psi_bnd` that overshoots
+		 * shrinks the plasma, which concentrates the current, which moves
+		 * `psi_bnd` further -- measured here on a standalone reimplementation,
+		 * that runaway takes the core from 310 cells to 1 in 150 sweeps.
+		 */
+		double picardBlend = 0.5;
+
 		// THERE ARE NO INNER-LINEAR-SOLVE CONTROLS HERE, AND THAT IS THE POINT.
 		// LinearMaxIterations and LinearTolerance used to sit in this struct,
 		// parsed and validated and read by nothing. MEQ's trace solve is

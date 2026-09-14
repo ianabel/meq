@@ -1528,7 +1528,8 @@ namespace meq
 		// [solver]
 		{
 			Table solver( document, "solver", sourceName, false );
-			solver.rejectUnknownKeys( { "NewtonMaxIterations", "NewtonRelativeTolerance", "NewtonAbsoluteTolerance",
+			solver.rejectUnknownKeys( { "PicardSweeps", "PicardBlend",
+			                            "NewtonMaxIterations", "NewtonRelativeTolerance", "NewtonAbsoluteTolerance",
 			                            "PlasmaSupportSweeps", "AssemblyMode", "TraceSolver",
 			                            "LinearMaxIterations", "LinearTolerance" } );
 
@@ -1552,6 +1553,23 @@ namespace meq
 			// the identical problem until the iteration cap.
 			if ( solverOptions.plasmaSupportSweeps > 0 && !sourceOptions.confinesToPlasma() )
 				solver.fail( "PlasmaSupportSweeps", "freezes the plasma SUPPORT between solves, and there is no support to freeze unless the source is confined to one: set [source] ConfineToPlasma = true or remove this key" );
+
+			// PicardSweeps -- the basin, before the border. See SolverConfig.
+			solverOptions.picardSweeps = solver.getIntegerOr( "PicardSweeps", solverOptions.picardSweeps );
+			solverOptions.picardBlend = solver.getFloatOr( "PicardBlend", solverOptions.picardBlend );
+
+			if ( solverOptions.picardSweeps < 0 )
+				solver.fail( "PicardSweeps", "cannot be negative; 0 drives the bordered Newton from the initial guess, which is what a run without this key does" );
+			if ( !( solverOptions.picardBlend > 0.0 && solverOptions.picardBlend <= 1.0 ) )
+				solver.fail( "PicardBlend", "must lie in ( 0, 1 ]: 1 is the plain fixed point and anything below it under-relaxes. Zero would take none of each sweep's answer, which is not an iteration" );
+
+			// NOTHING TO ITERATE WITHOUT A NORMALISATION, and refused rather
+			// than ignored. The whole of what these sweeps do is hold
+			// ( psi_ax, psi_bnd ) fixed so the source becomes an ordinary
+			// meq::Source, and on an unnormalised source it already is one --
+			// so the loop would re-solve the identical problem N times.
+			if ( solverOptions.picardSweeps > 0 && !sourceOptions.isNormalised() )
+				solver.fail( "PicardSweeps", "iterates the NORMALISATION, and an unnormalised source has none: set [source] Normalised = true or remove this key" );
 
 			// AssemblyMode and TraceSolver. Both are performance keys and
 			// neither may change the answer, which is why they can be exposed at

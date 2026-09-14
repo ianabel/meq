@@ -78,13 +78,29 @@ CASES = [
 # ( polynomial degree, uniform refinement levels ).  RefinementLevels rather
 # than a coarser [mesh.generate] Size, so every rung of one case shares one
 # gmsh mesh and the comparison is a pure h-refinement of it.
-MEQ_RUNGS = [(1, 0), (2, 0), (2, 1), (3, 0), (3, 1)]
+# ( degree, uniform refinement levels [, adaptive cycles ] ).
+# RefinementLevels rather than a coarser [mesh.generate] Size, so every rung of
+# one case shares one gmsh mesh and the h-sweep is a pure refinement of it; the
+# adaptive rows use the driver's own loop, which warm starts each cycle from
+# the last and refines where the residual estimator says to.
+MEQ_RUNGS = [(1, 0), (1, 1), (2, 0), (2, 1), (3, 0), (3, 1),
+             (2, 0, 3), (3, 0, 3)]
 
 # freegs4e grids.  Its multigrid wants 2^n + 1 and the convention is kept even
 # for the direct solver, because a refinement study wants the coarse grid to be
 # a SUBSET of the fine one -- which is what lets the two be differenced without
 # interpolating either.
-FGS_GRIDS = [129, 257, 513]
+# TIMED COLD, and only as far as 257^2.  A cold 513^2 is an afternoon -- the
+# boundary condition alone scales about 6.9x per doubling -- and M-88 measures
+# what it would buy: freegs4e converges at about FIRST order here, so 513^2 is
+# a factor of two on 257^2 for five to seven times the cost.  The 513^2 the
+# errors below are measured against is the SEEDED one from that ladder, which
+# is the same equilibrium however it was reached.
+FGS_GRIDS = [129, 257]
+
+# Where the seeded 513^2 ladder of M-88 landed. Accuracy does not care how a
+# reference was reached; only the TIMED rows have to be cold.
+TRUTH = os.environ.get("MEQ_RACE_TRUTH", "")
 
 THREADS = str(os.cpu_count() or 1)
 
@@ -99,7 +115,7 @@ def environment():
 # ---------------------------------------------------------------------------
 # MEQ
 # ---------------------------------------------------------------------------
-def meq_toml(stem, degree, refine, scratch):
+def meq_toml(stem, degree, refine, scratch, sample=513, adaptive=0):
     """One rung's configuration, derived from the case's own file."""
     text = open(os.path.join(EXAMPLES, "%s.toml" % stem)).read()
     text = re.sub(r"^PolynomialDegree = .*$", "PolynomialDegree = %d" % degree,
@@ -108,7 +124,20 @@ def meq_toml(stem, degree, refine, scratch):
     # [mesh] rather than substituted.
     text = re.sub(r'^(File = "examples/%s\.msh")$' % re.escape(stem),
                   r"\1\nRefinementLevels = %d" % refine, text, flags=re.M)
+    # THE SAMPLING GRID IS THE COMPARISON'S AND NOT THE RUN'S. MEQ's .nc
+    # covers the whole half-disc, so 129^2 over a radius of 3.7 m is 0.029 m in
+    # the plasma against the 513^2 reference's 0.0035 m -- the sampling would
+    # be the error rather than the solve. It is raised to match, which inflates
+    # the `output` column and nothing else; that column is reported separately
+    # for exactly this reason.
+    text = re.sub(r"^GridNR = .*$", "GridNR = %d" % sample, text, flags=re.M)
+    text = re.sub(r"^GridNZ = .*$", "GridNZ = %d" % sample, text, flags=re.M)
+
     label = "%s-k%dr%d" % (stem, degree, refine)
+    if adaptive:
+        label += "a%d" % adaptive
+        text += ("\n[adaptivity]\nEnabled = true\nMaxIterations = %d\n"
+                 "Theta = 0.6\nTargetError = 1.0e-9\n" % adaptive)
     text = re.sub(r'^Prefix = ".*"$', 'Prefix = "%s"' % label, text, flags=re.M)
     text = re.sub(r'^(\[output\])$', r'\1\nDirectory = "%s"' % scratch,
                   text, flags=re.M)
@@ -117,8 +146,8 @@ def meq_toml(stem, degree, refine, scratch):
     return path, label
 
 
-def run_meq(stem, degree, refine, scratch):
-    path, label = meq_toml(stem, degree, refine, scratch)
+def run_meq(stem, degree, refine, scratch, sample=513, adaptive=0):
+    path, label = meq_toml(stem, degree, refine, scratch, sample, adaptive)
     started = time.perf_counter()
     done = subprocess.run([MEQ_RUN, path], capture_output=True, text=True,
                           cwd=ROOT, env=environment(), timeout=7200)
@@ -226,3 +255,98 @@ def conductor_mask(R, Z, flat, collar):
                   & (ZZ > c["Z"] - c["half_height"] - collar)
                   & (ZZ < c["Z"] + c["half_height"] + collar))
     return keep
+
+
+# ---------------------------------------------------------------------------
+# the table
+# ---------------------------------------------------------------------------
+def sweep(tag, ref, stem, scratch, rungs, grids, sample=513, collar=0.05):
+    fine = None
+    print("\n" + "="*78)
+    print("  CASE %s -- %s" % (tag, ref))
+    print("="*78)
+
+    # ---- freegs4e ------------------------------------------------------
+    rows = []
+    for nx in grids:
+        row = run_freegs(ref, nx, scratch)
+        rows.append(row)
+        if not row["ok"]:
+            print("  freegs4e %d^2 FAILED" % nx)
+            continue
+        fine = row["npz"]
+    print("\n  freegs4e, cold at each grid")
+    print("    %6s %10s %9s %15s %15s" %
+          ("grid", "wall/s", "picard", "psi_ax", "psi_bnd"))
+    for row in rows:
+        if not row["ok"]:
+            continue
+        r = row["rec"]
+        print("    %6d %10.1f %9d %15.9e %15.9e" %
+              (row["nx"], row["wall"], r.get("stage2_iterations", 0),
+               r["psi_axis"], r["psi_bndry"]))
+
+    if TRUTH:
+        candidate = os.path.join(TRUTH, "%s.npz" % ref)
+        if os.path.exists(candidate):
+            fine = candidate
+    if fine is None:
+        print("  no reference to measure against")
+        return
+    print("\n  measured against %s" % fine)
+
+    truth = json.load(open(fine.replace(".npz", ".json")))
+    flat = conductors.from_npz(np.load(os.path.join(HERE, "%s.npz" % ref),
+                                       allow_pickle=True))
+    boxes = [(c["R"], c["Z"], c["half_width"] + collar,
+              c["half_height"] + collar) for c in flat]
+
+    # ---- MEQ -----------------------------------------------------------
+    from compare import compare
+    print("\n  MEQ, cold")
+    print("    %-10s %9s %9s %7s %8s %8s %8s %11s %11s %10s %10s" %
+          ("rung", "elements", "dofs", "newton", "setup", "solve", "wall",
+           "rel L2", "no coils", "psi_ax", "psi_bnd"))
+    for rung in rungs:
+        row = run_meq(stem, rung[0], rung[1], scratch, sample=sample,
+                      adaptive=rung[2] if len(rung) > 2 else 0)
+        if not row["ok"] or "nc" not in row or not os.path.exists(row["nc"]):
+            print("    %-10s FAILED" % row["label"].split("-")[-1])
+            tail = [l for l in row["log"].splitlines()
+                    if "MEQ:" in l and ("not converge" in l or "error" in l)]
+            for line in tail[:2]:
+                print("      " + line.strip())
+            continue
+        try:
+            got = compare(fine, row["nc"], None, free_boundary=True,
+                          boxes=boxes)
+        except Exception as exc:
+            print("    %-10s compare failed: %r" % (row["label"], exc))
+            continue
+        with Dataset(row["nc"]) as ds:
+            psi_ax = float(getattr(ds, "psi_axis"))
+            psi_bnd = float(getattr(ds, "psi_boundary"))
+        ax = abs(psi_ax - truth["psi_axis"])/abs(truth["psi_axis"])
+        bn = abs(psi_bnd - truth["psi_bndry"])/max(abs(truth["psi_bndry"]),
+                                                   1e-300)
+        keep = got["kept"]["rel_l2"] if got["kept"] else float("nan")
+        print("    %-10s %9d %9d %7d %8.2f %8.2f %8.2f %11.3e %11.3e %10.2e "
+              "%10.2e" %
+              (row["label"].split(stem + "-")[-1], row.get("elements", -1),
+               row.get("dofs", -1), row.get("iterations", -1),
+               row.get("setup", float("nan")), row.get("solve", float("nan")),
+               row["wall"], got["rel_l2"], keep, ax, bn))
+
+
+if __name__ == "__main__":
+    scratch = sys.argv[1]
+    want = [a.upper() for a in sys.argv[2:]] or [c[0] for c in CASES]
+    os.makedirs(scratch, exist_ok=True)
+    print("\n  A RACE, BOTH CODES COLD, %s threads each" % THREADS)
+    print("  MEQ: PARDISO trace solver and threaded assembly, which are its")
+    print("  defaults; its wall includes gmsh, the solve and four output")
+    print("  formats. freegs4e's includes its boundary matrix, the Picard")
+    print("  loop and its own diagnostics. Neither is a solve time.")
+    for tag, ref, stem in CASES:
+        if tag in want:
+            sweep(tag, ref, stem, scratch, MEQ_RUNGS, FGS_GRIDS)
