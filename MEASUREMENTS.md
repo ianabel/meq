@@ -1886,3 +1886,68 @@ The comparison is
 `--free-boundary` is what says there is no gauge shift and no `-meta.json`, both
 codes solving `ψ → 0` at infinity, and `--exclude-box` reports the conductors as
 a row of its own rather than dropping them silently.
+
+### M-88
+
+**THE REFERENCE'S OWN ACCURACY, AND IT IS THE FLOOR THIS BENCHMARK HAS ALWAYS
+SAT ON.** `tools/README.md` and `docs/validation.rst` both record that MEQ
+*saturates* the `freegs4e` comparison — its error stops falling at about
+1.4e-04 because that is the reference's accuracy, not MEQ's — and "refine the
+reference, not MEQ" has been the standing next step since. This is that
+refinement, run: every one of the seven diverted cases at 129², 257² and 513²,
+the fine grids seeded from the coarse one (`fgsref.py --seed-from=auto`).
+
+**The grids nest point for point**, which is the reason for the `2ⁿ+1`
+convention, so `ψ` is differenced directly on the 129² points all three share.
+No interpolation enters, and the coarse grid *is* a subset of the fine one.
+
+| case | \|129−257\| | \|129−513\| | \|257−513\| | ratio |
+|---|---|---|---|---|
+| A TestTokamak | 3.054e-05 | 1.578e-04 | 1.547e-04 | **0.20** |
+| B ff′-dominated | 1.661e-05 | 2.302e-05 | 1.333e-05 | 1.25 |
+| C MAST | 5.059e-04 | 7.299e-04 | 2.367e-04 | 2.14 |
+| D TCV | 1.076e-03 | 1.172e-03 | 1.691e-04 | 6.36 |
+| E diamagnetic | 4.716e-05 | 7.141e-05 | 2.434e-05 | 1.94 |
+| F DIII-D | 1.345e-04 | 1.348e-04 | 7.082e-05 | 1.90 |
+| G MAST-U | 5.668e-02 | 6.811e-02 | 4.811e-02 | 1.18 |
+
+relative `L2` in `ψ`; `ratio` is `|129−257| / |257−513|`, which for a scheme
+converging at order `p` reads `2^p`.
+
+**IT IS ABOUT FIRST ORDER, ON A FOURTH-ORDER OPERATOR.** C, E and F read 1.9 to
+2.1 and B reads 1.25; only D reaches 6.4. `GSsparse4thOrder` is what discretises
+`Δ*`, so the operator is not what caps this — the **plasma edge** is.
+`psi_bndry` comes from a critical-point search on the grid and `core_mask` is a
+per-cell boolean, so which cells carry current is resolved to `O( h )` however
+accurate the stencil is. That is the same `k ≤ j` edge story FB-4 tells about
+MEQ's own moving support, met in a finite-difference code.
+
+**A's 513² IS FURTHER FROM ITS 257² THAN ITS 129² IS** — ratio 0.20, the only
+one below 1 — so on that case the finest run is the outlier rather than the
+truth, and its `ψ_ax` moves 8.271794e-02 → 8.272642e-02 where 129² → 257² moved
+it by 4e-10. **G does not converge at all**: 4.8e-02 between its two finest
+grids, with `ψ_bndry` wandering 5.569e-04 → 9.630e-04 → 7.416e-04. MAST-U's
+boundary flux is within a factor of a hundred of zero, so its normalised flux is
+ill-conditioned in a way none of the others are.
+
+**WHAT IT COSTS TO GET THERE, seeded**, which understates a cold run:
+
+| | 129² cold | 257² seeded | 513² seeded |
+|---|---|---|---|
+| A | 4.9 s | 13.8 s | 98.1 s |
+| C | 3.3 s | 12.2 s | 73.5 s |
+| D | 4.5 s | 14.1 s | 89.2 s |
+| E | 4.6 s | 18.1 s | **838.8 s** |
+| F | 2.7 s | 12.2 s | 69.4 s |
+| G | 7.6 s | 18.6 s | 260.9 s |
+
+so a grid doubling costs 3× and then a further 5–7×, for a factor of about two
+in accuracy. E's 838.8 s is its Picard hitting the iteration cap at 401 steps
+twice rather than converging.
+
+**THE TRANSFERABLE PART.** "Refine the reference" was the right instinct and
+does not work: at 20× the cost the reference is twice as good, and on two of
+seven cases it is not better at all. **A comparison against `freegs4e` means
+something at about 1e-04 relative and nothing below it**, at any grid — so a
+MEQ run that agrees to 1e-04 has reached the floor, and the way past it is a
+different reference rather than a finer one.
