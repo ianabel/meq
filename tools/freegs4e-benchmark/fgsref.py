@@ -32,6 +32,8 @@ from matplotlib.path import Path as MplPath
 from scipy import interpolate as sinterp
 
 from freegs4e import machine, jtor, equilibrium, control, critical
+
+import conductors
 from freegs4e.gradshafranov import GSElliptic, GSsparse4thOrder, mu0
 
 OUTDIR = os.path.dirname(os.path.abspath(__file__))
@@ -1276,6 +1278,19 @@ def run_case(case):
         % (rec["gs_resid_core_linf_2nd"], rec["gs_resid_core_l2_2nd"],
            rec["gs_resid_core_linf_4th"]))
 
+    # THE CONDUCTORS, FLATTENED, at the currents this solve ended on. Taken
+    # AFTER the solve for that reason: the control system moves them, and a
+    # table read before it would describe the machine nobody converged.
+    flat = conductors.flatten(tok)
+    shrunk = conductors.shrink_to_fit(flat)
+    for label, hw0, hh0, hw, hh in shrunk:
+        say("conductor %s capped from %.4f x %.4f to %.4f x %.4f m half-extents "
+            "so it does not overlap a neighbour or reach the axis"
+            % (label, hw0, hh0, hw, hh))
+    say("%d conductors, total current %+.6e A, all inside rho = %.4f"
+        % (len(flat), sum(c["current"] for c in flat),
+           conductors.bounding_radius(flat)))
+
     rec.update(
         psi_axis=psi_axis, psi_bndry=float(psi_bndry), Ip=Ip_ach,
         Ip_target=float(case["Ip"]), fvac=float(case["fvac"]),
@@ -1288,7 +1303,39 @@ def run_case(case):
         xpoints=[[float(a) for a in row] for row in np.atleast_2d(xpt)]
         if len(xpt) else [],
         core_cells=int(mask.sum()),
+        # THE CIRCUIT'S OWN CURRENT, which is what the control system solved
+        # for and what a reader of this file wants to see. The per-CONDUCTOR
+        # totals -- turns and multipliers resolved, solenoids summed -- are in
+        # the .npz, because that is what a mesh and a [[coils]] block need and
+        # they are a different question. conductors.py is the one authority on
+        # the second.
         coil_currents={l: float(c.current) for l, c in tok.coils},
+        conductors=[dict(c) for c in flat],
+        # THE CASE'S OWN INPUTS, KEPT SEPARATE FROM ITS ANSWER.
+        #
+        # Everything else in this record is what the solve PRODUCED. These are
+        # what it was ASKED FOR: the X-point locations the control system was
+        # told to hit, the isoflux pairs it was told to equalise, the design
+        # major radius and the target current. They are available before any
+        # equilibrium exists -- they are a machine's operating point and a
+        # scenario, which is what an experiment has.
+        #
+        # THE DISTINCTION IS THE WHOLE POINT. A comparison in which MEQ is
+        # seeded from the reference's converged axis, its converged null and a
+        # Green's sum over its converged Jtor is not a comparison of two
+        # solvers; it is a measurement of how well MEQ polishes an answer it was
+        # given. Anything MEQ is allowed to start from has to come from here.
+        design=dict(
+            xpoints=[[float(v) for v in p] for p in case["xpoints"]],
+            isoflux=[[float(v) for v in p] for p in case["isoflux"]],
+            R0=float(case["R0"]), Ip=float(case["Ip"]),
+            fvac=float(case["fvac"]), frac_p=float(case["frac_p"]),
+            pa=float(case["pa"]), pb=float(case["pb"]),
+            fa=float(case["fa"]), fb=float(case["fb"]),
+            seed_paxis=float(case["seed_paxis"]),
+            limiter=(None if case["limiter"] is None
+                     else [[float(v) for v in p] for p in case["limiter"]]),
+        ),
         wall_time_s=float(time.time() - t0),
     )
     rec["sanity_psi_axis_ne_bndry"] = bool(
@@ -1354,17 +1401,29 @@ def run_case(case):
         wall_Z=get_wall(case, eq)[1],
         xpoints=(np.atleast_2d(xpt).astype(float) if len(xpt)
                  else np.zeros((0, 3))),
-        coil_labels=np.array([l for l, _ in tok.coils]),
-        coil_currents=np.array([float(c.current) for _, c in tok.coils]),
-        # THE POSITIONS, SO THAT NOTHING DOWNSTREAM HAS TO KNOW THE MACHINE.
+        # THE CONDUCTORS, SO THAT NOTHING DOWNSTREAM HAS TO KNOW THE MACHINE.
         # mkexactguess.py used to carry its own table of the limited case's four
         # coils and zip it against coil_currents POSITIONALLY, which is wrong
         # the moment a machine's labels come out in a different order -- and
         # TestTokamak's do: ['P1L','P1U','P2L','P2U'] against the limited
-        # machine's ['P1U','P1L','P2U','P2L'].  Both Coil and ShapedCoil expose
-        # R and Z, so this is the same expression for either.
-        coil_R=np.array([float(c.R) for _, c in tok.coils]),
-        coil_Z=np.array([float(c.Z) for _, c in tok.coils]),
+        # machine's ['P1U','P1L','P2U','P2L'].
+        #
+        # AND `float( c.R )` OFF EVERY ENTRY IS WRONG TOO, which is what this
+        # replaces. Machine.coils holds four different classes and only two of
+        # them have an R: MAST, TCV and MAST-U are built from Circuits and
+        # Solenoids, so four of the seven diverted references SOLVED and could
+        # not be saved. conductors.py flattens the tree into the rectangles MEQ
+        # takes, resolving turns, circuit multipliers and solenoid windings
+        # into one TOTAL current each -- see its header for why that number is
+        # not `c.current`.
+        **conductors.to_arrays(flat),
+        # The design inputs again, as arrays, so a consumer reading only the
+        # .npz can build a cold start without the .json. Empty arrays where a
+        # case names none.
+        design_xpoints=np.array(case["xpoints"], dtype=float).reshape(-1, 2),
+        design_isoflux=np.array(case["isoflux"], dtype=float).reshape(-1, 4),
+        design_R0=np.array(float(case["R0"])),
+        design_Ip=np.array(float(case["Ip"])),
         boundary_kind=np.array(kind),
         psi_index_order=np.array("psi[iR, iZ]; R is axis 0, Z is axis 1"),
         pprime_units=np.array("dp/dpsi, Pa per (Wb/rad)"),

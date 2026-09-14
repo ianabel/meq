@@ -1,0 +1,158 @@
+# MACHINE-B-FFPRIME -- A FREE-BOUNDARY MEQ RUN OF
+# freegs4e's B_testtokamak_peaked_ffdom.
+#
+# WRITTEN BY tools/freegs4e-benchmark/make_diverted_case.py FROM THE
+# REFERENCE ITSELF -- every number here, the conductor rectangles and
+# the mesh included, is read out of the .npz and .json that script was
+# given.  Do not hand-edit it: re-run tools/freegs4e-benchmark/
+# make_all.sh.
+#
+# Same machine and shape control as A, so A/B/E form a controlled scan
+# over the source alone. Here p' is strongly peaked (exponents 2, 3) and
+# supplies only 35% of the on-axis current, and ff' is LINEAR in psi_n:
+# ff'-dominated, and the two profile shapes are as different from each
+# other as the tabulation allows. A symmetric double null was tried first
+# and limit-cycles: see the report.
+#
+# THE REFERENCE'S OWN ANSWER, for anything comparing against it:
+#
+#   psi_axis   9.723774318213926e-02   axis at ( 1.285419, +0.059173 )
+#   psi_bndry  4.612830158872462e-02
+#   I_p        2.499999982944952e+05 A
+#   R0 1.2637  a 0.6825  A 3.002  kappa 1.4328  delta +0.3059
+#   X-point    ( 1.092072340, -0.605253161 ) psi 4.612830158872462e-02  ACTIVE
+#   X-point    ( 1.111424278, +0.794733848 ) psi 4.022740865720086e-02
+#
+# ONE DELIBERATE DEVIATION FROM THE REFERENCE, and it is the same one
+# examples/diverted-tokamak.toml records: fgsref.py fits a
+# UnivariateSpline to its own analytic profile shape before solving and
+# the fit MOVES it, by 2.256e-05 of the amplitude in p' and 4.579e-16 in ff'.
+# The tables here are the ANALYTIC shape, because it extends below
+# Psi = 0 into the vacuum -- which a tabulation on psi_n in [ 0, 1 ]
+# cannot -- and because its edge behaviour is exactly j = 2, which FB-4
+# says decides the rate and which ConfineToPlasma needs.  So this is a
+# comparison at the per-cent level and not to the last digit.
+#
+# RUN IT WITH meq-run, WHICH MAKES THE MESH:
+#
+#     ./build/meq-run examples/machine-b-ffprime.toml
+
+[mesh]
+File = "examples/machine-b-ffprime.msh"
+
+# THE DISC IS NOT GAMMA.  D_h is cut from this mesh at
+# [boundary.exterior] Radius = 2.4, which has to fit strictly inside.
+# Every conductor lies within 1.9138 m of the origin.
+[mesh.generate]
+Tool = "halfdisc"
+Radius = 2.6
+Size = 0.182
+PlasmaRMin = 0.5925
+PlasmaRMax = 1.9575
+PlasmaZMin = -0.8100
+PlasmaZMax = 1.0100
+PlasmaSize = 0.1024
+# The smallest conductor here is 0.0500 m in its shorter half-extent.
+CoilSize = 0.04
+
+[discretisation]
+PolynomialDegree = 2
+
+[solver]
+NewtonMaxIterations = 200
+NewtonRelativeTolerance = 1.0e-10
+# The plasma support is a SET, so its derivative is a surface term the
+# Jacobian does not have: it is frozen within each solve and re-decided
+# between them.  MEASUREMENTS.md M-82 -- without this the first solve
+# stalls at the iteration cap rather than running slowly.
+PlasmaSupportSweeps = 4
+
+[source]
+Type = "mhd"
+Normalised = true
+ConfineToPlasma = true
+# THE STARTING VALUE OF AN UNKNOWN, taken from the peak of the cold
+# guess below.  psi_ax is a functional of the solution -- a bordered
+# Newton row and not data -- so what a file supplies is where to START,
+# and the best estimate available before solving is the best available
+# guess's own peak.  The reference converged to 9.723774e-02, which is 22%
+# away: this is a basin and not an answer.
+PsiAxis = 7.608671389e-02
+PlasmaCurrent = 2.4999999829e+05
+Mu0 = 1.25663706212e-6
+PPrimeFile = "examples/machine-b-ffprime-pprime.dat"
+GGPrimeFile = "examples/machine-b-ffprime-ggprime.dat"
+
+# THE CONDUCTORS, WRITTEN ONCE.  [mesh.generate] derives the mesher's
+# --coil rectangles from these blocks, in this order, so the mesh is
+# aligned to the conductors the solve integrates over.  Currents are the
+# TOTAL through each cross-section: freegs4e's turns, circuit
+# multipliers and solenoid windings are all resolved into them by
+# tools/freegs4e-benchmark/conductors.py.
+# This machine's are filament, shaped.
+
+[[coils]]
+Name = "P1L"
+CentreR = 1.000000
+CentreZ = -1.100000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 1.8969817700e+05
+
+[[coils]]
+Name = "P1U"
+CentreR = 1.000000
+CentreZ = 1.100000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 8.5309243162e+04
+
+[[coils]]
+Name = "P2L"
+CentreR = 1.750000
+CentreZ = -0.600000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.2090388200e+05
+
+[[coils]]
+Name = "P2U"
+CentreR = 1.750000
+CentreZ = 0.600000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -7.4226775549e+04
+
+[boundary]
+Type = "zero"
+
+# THE TARGET NULL, as an INITIAL VALUE of two unknowns rather than a
+# prescription: XP-3's border closes q_r = q_z = 0 and
+# psi_bnd = psi_h( r_X, z_X ) on the same Newton, and the seed selects
+# WHICH saddle is followed.
+#
+# THIS IS THE SHAPE THE OPERATOR ASKED FOR and not the null the
+# reference achieved, which is 0.0095 m away.  That distinction is the
+# whole of what makes this a cold start.
+[boundary.xpoint]
+R = 1.100000000000
+Z = -0.600000000000
+
+[boundary.exterior]
+Radius = 2.4
+CentreZ = 0.0
+Modes = 10
+
+# NOT A NICETY.  A cold start on a free-boundary machine case wanders
+# and does not converge; the guess is part of the problem statement.
+# tools/freegs4e-benchmark/mkexactguess.py builds it by summing the
+# reference's own Green's functions over MEQ's half-disc.
+[initialguess]
+Type = "gridfunction"
+File = "examples/machine-b-ffprime-guess.gf"
+MeshFile = "examples/machine-b-ffprime-guess.mesh"
+
+[output]
+Prefix = "machine-b-ffprime"
+GridNR = 129
+GridNZ = 129

@@ -46,6 +46,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <chrono>
 #include <cstdlib>
 #include <exception>
 #include <fstream>
@@ -769,6 +770,29 @@ int main( int argc, char **argv )
 		device->Print();
 	}
 
+
+	/*
+	 * THE CLOCK, AND IT IS SPLIT BY PHASE BECAUSE ONE NUMBER IS NOT USEFUL.
+	 *
+	 * A driver run is three things with different costs and different
+	 * remedies: reading the file and building the mesh, source and solver;
+	 * the non-linear solve; and writing the same equilibrium three times over
+	 * plus, on a machine case, a 129^2 sampling of it. Comparing MEQ against
+	 * another code -- which is what this project does constantly -- needs to
+	 * know which of the three a second went into, because the other code
+	 * writes one file and MEQ writes four.
+	 *
+	 * steady_clock and not system_clock: this measures an interval, and a
+	 * wall-clock adjustment mid-run should not appear as negative time.
+	 */
+	auto const started = std::chrono::steady_clock::now();
+	auto elapsedSince = []( std::chrono::steady_clock::time_point from )
+	{
+		return std::chrono::duration<double>(
+			std::chrono::steady_clock::now() - from ).count();
+	};
+	double setupSeconds = 0.0;
+	double solveSeconds = 0.0;
 
 	// ---- configuration -------------------------------------------------
 	std::unique_ptr<meq::Configuration> config;
@@ -1770,6 +1794,8 @@ int main( int argc, char **argv )
 
 		return fresh;
 	};
+
+	setupSeconds = elapsedSince( started );
 
 	// ---- solve, and refine if that is what was asked for ----------------
 	std::vector<Cycle> history;
@@ -3155,6 +3181,8 @@ int main( int argc, char **argv )
 		reportResiduals( solver->newtonResiduals() );
 	}
 
+	solveSeconds = elapsedSince( started ) - setupSeconds;
+
 	// ---- write ---------------------------------------------------------
 	try
 	{
@@ -3865,6 +3893,7 @@ int main( int argc, char **argv )
 		std::string const name =
 			stem.substr( stem.find_last_of( '/' ) + 1 );
 		std::printf(
+			"MEQ: wall %.3f s = setup %.3f + solve %.3f + output %.3f\n"
 			"MEQ: wrote\n"
 			"  exact, for GLVis and restart:  %s.mesh\n"
 			"                                 %s_psi.gf        (psi_h, degree %d)\n"
@@ -3874,6 +3903,8 @@ int main( int argc, char **argv )
 			"  (R, Z) grid, %d/%d inside:  %s.nc\n"
 			"  psi in the last two is psi*; _psi.gf keeps psi_h, which is what a\n"
 			"  restart reads back.\n",
+			elapsedSince( started ), setupSeconds, solveSeconds,
+			elapsedSince( started ) - setupSeconds - solveSeconds,
 			stem.c_str(),
 			stem.c_str(), config->getDiscretisation().polynomialDegree,
 			stem.c_str(),

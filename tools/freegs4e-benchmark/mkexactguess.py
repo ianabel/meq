@@ -55,6 +55,7 @@ from scipy.special import ellipe, ellipk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from mkguess import write_guess
+import conductors
 
 MU0 = 4.0e-7 * np.pi
 
@@ -137,10 +138,8 @@ def main():
 	# kept for the two reference files that predate them, and asserts the label
 	# order it assumes rather than trusting it.
 	names = [str(x) for x in d["coil_labels"]]
-	currents = d["coil_currents"]
 	if "coil_R" in d.files:
-		pos = list(zip([float(x) for x in d["coil_R"]],
-		               [float(x) for x in d["coil_Z"]]))
+		flat = conductors.from_npz(d)
 	else:
 		legacy = ["P1U", "P1L", "P2U", "P2L"]
 		if names != legacy:
@@ -148,15 +147,35 @@ def main():
 				"%s predates coil_R/coil_Z and its coil labels are %s, not the "
 				"limited machine's %s. Regenerate it with fgsref.py."
 				% (npz, names, legacy))
-		pos = [(1.75, 0.90), (1.75, -0.90), (0.55, 1.10), (0.55, -1.10)]
-	# The reference's coils ARE filaments, so there is no cell size to use; the
-	# floor here is MEQ's own conductor half-width, which is the scale at which
-	# the two codes' models stop agreeing anyway.  It only bites on a guess node
-	# that lands on a conductor.
-	for (rc, zc), I in zip(pos, currents):
-		psi[inner] += I * greens(rc, zc, RR[inner], ZZ[inner], soft=0.05)
-	for (rc, zc), name, I in zip(pos, names, currents):
-		print("  coil %-4s %+.6e A at (%.4f, %.4f)" % (name, I, rc, zc))
+		legacy_pos = [(1.75, 0.90), (1.75, -0.90), (0.55, 1.10), (0.55, -1.10)]
+		flat = [dict(label=n, R=r, Z=z, half_width=0.05, half_height=0.05,
+		             current=float(I), kind="filament")
+		        for n, (r, z), I in zip(names, legacy_pos, d["coil_currents"])]
+
+	# A CONDUCTOR IS A RECTANGLE AND A TALL ONE IS NOT A POINT.  MEQ's coils
+	# carry a uniform current density over a rectangle, and for most of these
+	# machines that rectangle is 0.1 x 0.1 m -- small enough that its own centre
+	# is a fine stand-in in a guess.  A SOLENOID IS NOT: MAST-U's is 0.04 m wide
+	# and 3.16 m tall, carrying more current than everything else in the machine
+	# put together, and collapsing it to its midpoint puts all of that at
+	# Z = 0.  So a conductor is subdivided until its pieces are roughly square.
+	filaments = []
+	for c in flat:
+		nz = max(1, int(round(c["half_height"]/max(c["half_width"], 1e-9))))
+		edges = np.linspace(c["Z"] - c["half_height"], c["Z"] + c["half_height"],
+		                    nz + 1)
+		centres = 0.5*(edges[:-1] + edges[1:])
+		for z in centres:
+			filaments.append((c["R"], float(z), c["current"]/nz,
+			                  max(c["half_width"], c["half_height"]/nz)))
+
+	for rc, zc, I, soft in filaments:
+		psi[inner] += I * greens(rc, zc, RR[inner], ZZ[inner], soft=soft)
+	for c in flat:
+		print("  coil %-10s %+.6e A at (%.4f, %+.4f) %.4f x %.4f  %s"
+		      % (c["label"], c["current"], c["R"], c["Z"], c["half_width"],
+		         c["half_height"], c["kind"]))
+	print("  %d conductors as %d filaments" % (len(flat), len(filaments)))
 
 	# The geometric mean distance of a source CELL from itself.
 	cell = 0.44705 * np.sqrt(dA)
