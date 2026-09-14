@@ -2682,6 +2682,17 @@ namespace meq
 			bool boundaryFluxIsUnknown = false;
 			bool currentIsUnknown = false;
 			double targetMuZeroCurrent = 0.0;
+			/// prepare(), with the option of NOT seeding the iterate from
+			/// [initialguess]. The bordered loop re-prepares whenever the
+			/// exterior coefficients move -- once per Gegenbauer mode to build
+			/// its response columns and once per line-search trial -- and
+			/// assigns the iterate from a saved state immediately afterwards,
+			/// so the seeding is computed and discarded. Measured on the DIII-D
+			/// machine case at Modes = 10: 49 preparations in twelve Newton
+			/// steps, with the projection and the flux seeding together about
+			/// 7% of the profile.
+			void prepare( bool seedFromGuess );
+
 			double currentScaleValue = 1.0;
 			double plasmaCurrentValue = 0.0;
 			double boundaryFluxR = 0.0;

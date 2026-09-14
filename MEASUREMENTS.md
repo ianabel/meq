@@ -2013,3 +2013,97 @@ above the floor. Adaptivity is for a problem whose answer is still moving.
 bordered Newton step gave a finite residual" on the coarse one and a plain
 non-convergence on the refined one. The cold start's margin is thinner than the
 converged answer suggests, and degree is part of what buys it.
+
+### M-90
+
+**WHERE MEQ'S TIME GOES ON THE DIII-D MACHINE CASE, AND EVERY STEP TAKEN IN A
+DUMBER WAY THAN `freegs4e`.** M-89 puts MEQ at 14.2 s against 6.4 s for a
+Python finite-difference Picard on the same equilibrium — a factor of two the
+wrong way for a compiled high-order code, which is a bug list rather than a
+property of the method.
+
+**THE UNIT THAT MATTERS IS THE NON-LINEAR STEP.** The run takes three plasma
+support sweeps of 7, 3 and 2 Newton steps — **twelve steps in ~13 s, 1.1 s
+each** — against `freegs4e`'s 33 Picard steps in 6.4 s, **0.19 s each**. So MEQ
+is about **six times slower per non-linear step** on a comparable system: 87264
+dofs hybridized to a ~22k trace against a 16641-point grid.
+
+`perf record -F 199 --call-graph dwarf`, `OMP_NUM_THREADS=1`, one process. The
+profile has no hot spot — the top entry is 8.2% — which is itself the finding:
+the cost is per-element dense work and allocation, run too many times.
+
+**1. `reprepare()` RE-SEEDED THE INITIAL GUESS, 49 TIMES. FIXED, AND IT IS 29%
+OF THE SOLVE.** The bordered loop re-prepares whenever the exterior
+coefficients move, and every call site assigns the iterate from a saved state
+on the **next line** — so `projectOntoTrace()` and `seedFluxFromGuess()` were
+computed and discarded every time. Counted on this case at `Modes = 10`: 20, 15
+and 14 preparations in the three solves.
+
+| | solve | wall |
+|---|---|---|
+| before | 10.44 s | 11.78 s |
+| after | **7.41 s** | **8.40 s** |
+
+`psi_ax` is 3.759851e-01 either way, the normalisation constraint moving in its
+last digit only (−6.465e-12 against −6.466e-12). `prepare( bool )` is the fix.
+
+**2. FOURTEEN LINEAR SOLVES PER NEWTON STEP WHERE `freegs4e` DOES ONE.** One for
+the Newton direction and thirteen for the borders — ten Gegenbauer modes,
+`psi_ax`, `psi_bnd` and the current. Each is a `DarcyNPCSolver::Mult`: an
+element loop to reduce, a trace backsolve, an element loop to recover. Twelve
+steps is **168 element-loop pairs**. They are solved one at a time and the
+thirteen border right-hand sides are all known at once, so one pass over
+thirteen vectors and one PARDISO call at `nrhs = 13` replaces thirteen passes.
+This is the largest structural item on the list.
+
+**3. THE EXTERIOR RESPONSE COLUMNS ARE FINITE-DIFFERENCED, `Modes + 2`
+PREPARATIONS AND RESIDUALS PER SOLVE.** Measured exactly — 6, 8 and 12
+preparations per solve at `Modes` 4, 6 and 10. **The coupling is LINEAR in `a`**:
+it reaches the residual as a load term, so `dr/da_m` is independent of the
+iterate, of the Newton step and of the plasma support. It is already hoisted out
+of the Newton loop; it is still rebuilt for each of the three support sweeps,
+and could be built once per mesh.
+
+**4. THE CUDA-ENABLED MFEM COSTS 7% OF THE CPU WALL.** M-77, already measured
+against an otherwise identical `../mfem/install-nocuda`, byte-identical output:
+`mfem::forall`'s host path builds nvcc's host-lambda wrapper, and 55.4 million
+of a 30-second run's 226.7 million allocations go away with CUDA off. A
+production build has a measured reason to be a separate install.
+
+**5. `L2_TriangleElement::CalcShape` IS 6% OF THE PROFILE.** Basis functions
+re-evaluated at every quadrature point of every element on every residual and
+every Jacobian. MFEM's `DofToQuad` cache exists for exactly this and the
+hybridized path cannot reach it: `DarcyForm` assembles through
+`BilinearForm::ComputeElementMatrix()`, the dense per-element host route.
+
+**6. ALLOCATION IS ABOUT 11%** — `operator new` 4.6%, `malloc` 3.5%, `free`
+2.7% — in per-element temporaries. Item 4 removes a quarter of it for free.
+
+**7. `AssemblyMode::Batched` IS UNREACHABLE FROM MEQ.** Upstream already has a
+batched local factorisation and a batched flux-mass domain assembly; MEQ's enum
+carries `Serial` and `Threaded` and never calls `SetLocalFactorMode`. The
+element-local dense work this would reach is `mkl_lapack__dgetrs_` 13.4%,
+`mfem::Mult( DenseMatrix, ... )` 10.5% and `MultNL` 12.7%. CLAUDE.md's offload
+list already ranks it second and calls it "a smaller job than a new kernel and
+entirely in this tree".
+
+**8. THREE SUPPORT SWEEPS ARE THREE FULL SOLVES**, 7 + 3 + 2 steps, and the
+third exists only to observe that the support did not move. A settling test that
+did not need a full re-solve would be worth about 15% of the run.
+
+**9. `Modes = 10` IS MORE THAN THIS CASE NEEDS.** The retained spectrum's tail
+reads 1.38e-02 at ten modes and 6.18e-02 at six, against the 1e-01 the run
+itself advises; `psi_ax` moves 4.5e-04 between them, which is at M-88's floor.
+Six modes costs four fewer preparations and residuals per solve and four fewer
+backsolves per step. Four modes is too coarse — 1.8e-03 in `psi_ax`, and the run
+says so.
+
+**10. THE `.nc` SAMPLING IS 0.97 s OF 8.40 s** at 129², and was 2.1 s at the
+513² M-89 used. It is output rather than solve, and it is reported separately
+for that reason.
+
+**THE ARITHMETIC OF THE REMAINING GAP.** After item 1 the solve is 7.41 s for
+twelve steps, 0.62 s each, against `freegs4e`'s 0.19 s. Items 2 and 3 are the
+per-step multiplier — fourteen solves and `Modes + 2` residuals where the
+reference does one of each — and items 4 to 7 are the constant factor on every
+element loop. None of them is about the discretisation.

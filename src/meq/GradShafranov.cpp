@@ -3555,6 +3555,11 @@ namespace
 
 	void GradShafranovSolver::prepare()
 	{
+		prepare( true );
+	}
+
+	void GradShafranovSolver::prepare( bool seedFromGuess )
+	{
 		if ( !linearSource && !nonlinearSource )
 			throw std::logic_error( "meq::GradShafranovSolver::prepare: no source has been set" );
 		// On the extension path a Gamma_h attribute carries no datum of its own --
@@ -3582,7 +3587,25 @@ namespace
 		// solves, which start from whatever the block vector holds -- see the
 		// header. The flux block is left at zero: nothing iterates from it, and a
 		// guess for psi says nothing about q without differentiating it.
-		if ( initialGuess && nonlinearSource )
+		/*
+		 * AND NOT WHEN THE CALLER IS ABOUT TO OVERWRITE THE ITERATE.
+		 *
+		 * The bordered loop calls prepare() again whenever the exterior
+		 * coefficients move -- once per Gegenbauer mode to build its response
+		 * columns, and once per line-search trial -- and every one of those
+		 * call sites assigns the iterate on the NEXT line, from a saved state.
+		 * So the projection and the flux seeding below are computed and thrown
+		 * away.
+		 *
+		 * MEASURED ON THE DIII-D MACHINE CASE, `Modes = 10`: 49 preparations in
+		 * a run of twelve Newton steps, of which 36 are the column build and
+		 * the rest line-search trials. seedFluxFromGuess() alone is 4.5% of the
+		 * profile and projectOntoTrace() another 2.9%, all of it discarded.
+		 *
+		 * The flag is internal and prepare() itself is unchanged: a caller that
+		 * wants an iterate seeded from the guess still gets one.
+		 */
+		if ( initialGuess && nonlinearSource && seedFromGuess )
 		{
 			projectOntoTrace( *initialGuess, traceGf );
 			potentialGf.ProjectCoefficient( *initialGuess );
@@ -4847,7 +4870,10 @@ namespace
 		 */
 		auto reprepare = [ & ]()
 		{
-			prepare();
+			// WITHOUT THE GUESS. Every caller below assigns the iterate from a
+			// saved state on the next line, so seeding it here is computed and
+			// discarded -- see prepare( bool ).
+			prepare( false );
 			if ( npcOrdering )
 			{
 				npc = std::make_unique<mfem::DarcyNPCOperator>(
