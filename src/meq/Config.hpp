@@ -572,6 +572,54 @@ namespace meq
 	};
 
 	/**
+	 * `[boundary.xpoint]` -- THE X-POINT AS TWO UNKNOWNS OF THE SAME NEWTON,
+	 * XP-3, and what `[boundary.limiter]` cannot be for a divertor.
+	 *
+	 * A LIMITER CONTACT IS HARDWARE AND AN X-POINT IS NOT. `[boundary.limiter]`
+	 * pins `psi_bnd` at a PRESCRIBED point, which is exactly right for a
+	 * material limiter -- the tile is where the drawings say it is -- and wrong
+	 * for a diverted plasma, whose null is a functional of the solution and
+	 * moves as Newton moves. This block makes `( r_X, z_X )` unknowns beside
+	 * `psi_bnd`, closing
+	 *
+	 *     q_r( r_X, z_X )             = 0
+	 *     q_z( r_X, z_X )             = 0
+	 *     psi_bnd - psi_h( r_X, z_X ) = 0
+	 *
+	 * on the same factorisation as everything else:
+	 * meq::GradShafranovSolver::setXPointBoundary, whose documentation carries
+	 * the derivation and the two structural facts that make it cheap.
+	 *
+	 * **`R` AND `Z` ARE A SEED AND NOT AN ANSWER**, which is the whole
+	 * difference from the block above. They are the initial value of an unknown,
+	 * so a file whose numbers are a few centimetres out describes the same
+	 * equilibrium as one whose numbers are exact -- and `meq` reports where the
+	 * solve actually put it. Getting them badly wrong selects a different
+	 * saddle, since this follows ONE null exactly as the axis constraint follows
+	 * one O-point.
+	 *
+	 * **IT IS AN ALTERNATIVE TO `[boundary.limiter]` AND NAMING BOTH IS
+	 * REFUSED**, for that block's own reason: all three routes pin the one
+	 * unknown `psi_bnd`, and a precedence rule here would decide which
+	 * equilibrium a run reports on the strength of key order.
+	 *
+	 * **AND IT IS MEANINGLESS WITHOUT A NORMALISATION**, again as the limiter
+	 * is: `psi_bnd` enters only through `Psi`.
+	 */
+	struct XPointConfig
+	{
+		/// Whether the file named one. False leaves `psi_bnd` to
+		/// `[boundary.limiter]` or to zero.
+		bool given = false;
+
+		/// Where the X-point is BELIEVED to be, in metres. `R` must be strictly
+		/// positive: the symmetry axis carries near-zeros of `q` that are not
+		/// X-points, and the flux mass `( r q, v )` degenerates there.
+		double r = 0.0;
+		double z = 0.0;
+	};
+
+	/**
 	 * `[boundary.exterior]` -- the exact exterior Dirichlet-to-Neumann map on
 	 * `Gamma`, FB-5, and the block that makes a run FREE boundary.
 	 *
@@ -615,6 +663,7 @@ namespace meq
 		BoundaryDataType type = BoundaryDataType::Zero;
 		ShapeConfig shape;
 		LimiterConfig limiter;
+		XPointConfig xpoint;
 		ExteriorConfig exterior;
 	};
 
@@ -703,6 +752,39 @@ namespace meq
 		int newtonMaxIterations = 20;
 		double newtonRelativeTolerance = 1.0e-8;
 		double newtonAbsoluteTolerance = 1.0e-12;
+
+		/*
+		 * PlasmaSupportSweeps -- THE SUPPORT'S OWN OUTER LOOP, and the one
+		 * discrete state the bordered Newton structurally cannot carry.
+		 *
+		 * With `ConfineToPlasma = true` the set of elements carrying `F` is a
+		 * functional of the iterate: the pointwise `Psi > 0` test moves with
+		 * `psi`, and so does the connected component the flood fill reaches.
+		 * Its derivative is a surface term on a moving edge and the Jacobian
+		 * does not carry it -- which is not a small error. **MEASURED, one key
+		 * changed and nothing else: on the diverted machine the bootstrap
+		 * stalls at the 200-iteration cap with the support moving and converges
+		 * in 21 steps with the confinement off.** MEASUREMENTS.md M-82.
+		 *
+		 * The answer is FREE-BOUNDARY-PLAN.md section 10.5's, applied to the
+		 * support rather than to the bounding point: fix the topology within a
+		 * solve and re-decide it between solves. This is how many times the
+		 * driver may re-decide it -- freeze at the answer just reached, solve
+		 * again, and stop when the support stops moving.
+		 *
+		 * **ZERO IS THE DEFAULT AND MEANS TODAY'S BEHAVIOUR**, the support
+		 * moving inside Newton, so every existing file is bit-unchanged. It is
+		 * opt-in rather than implied by `ConfineToPlasma` because the LIMITED
+		 * machine converges perfectly well without it -- examples/
+		 * limited-tokamak.toml takes 11 Newton steps -- and a key that silently
+		 * changed which equilibrium those runs report would be exactly the kind
+		 * of thing CLAUDE.md refuses to expose.
+		 *
+		 * One sweep is a freeze and a solve, so `1` is "decide the support from
+		 * the initial guess and hold it", and the loop below that is the whole
+		 * of the outer iteration XP-3 leaves standing.
+		 */
+		int plasmaSupportSweeps = 0;
 
 		// THERE ARE NO INNER-LINEAR-SOLVE CONTROLS HERE, AND THAT IS THE POINT.
 		// LinearMaxIterations and LinearTolerance used to sit in this struct,

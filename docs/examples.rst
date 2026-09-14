@@ -58,6 +58,23 @@ relative path:
      - The same profile written both ways. The **only** documentation in
        ``examples/`` of the tabulated file format — and a demonstration of the
        trap in :ref:`profiles-file-format`.
+   * - ``free-boundary-halfdisc.toml``
+     - The exterior coupling on its own: :math:`\Gamma` an artificial boundary
+       in the vacuum, no limiter, no coils. The smallest free-boundary run.
+   * - ``limiter-halfdisc.toml``
+     - The limiter as a **curve** rather than a point — the contact is found on
+       a meshed limiter surface rather than prescribed.
+   * - ``limited-tokamak.toml``
+     - A whole machine, free boundary: four coils, a prescribed :math:`I_p`, a
+       limiter contact and the exterior map, reproducing ``freegs4e``'s own
+       converged equilibrium. :doc:`validation`.
+   * - ``diverted-tokamak-xpoint.toml``
+     - The same, **diverted**: the X-point is two more unknowns of the Newton
+       rather than a point the file names, and the plasma support gets an outer
+       loop of its own. :doc:`validation`.
+   * - ``diverted-tokamak.toml``
+     - The same machine with the bounding point *prescribed* at the reference's
+       X-point instead. Kept as the comparison that isolates the border.
 
 .. _examples-benchmark-caveat:
 

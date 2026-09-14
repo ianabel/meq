@@ -1203,7 +1203,7 @@ namespace meq
 		// [boundary]
 		{
 			Table boundary( document, "boundary", sourceName, false );
-			boundary.rejectUnknownKeys( { "Type", "shape", "limiter", "exterior" } );
+			boundary.rejectUnknownKeys( { "Type", "shape", "limiter", "xpoint", "exterior" } );
 
 			boundaryOptions.type = toBoundaryDataType( boundary, boundary.getStringOr( "Type", "zero" ) );
 
@@ -1296,6 +1296,41 @@ namespace meq
 					              "a limiter pins psi_bnd, which only enters through the normalised flux; set [source] Normalised = true or remove [boundary.limiter]" );
 			}
 
+			// [boundary.xpoint] -- psi_bnd at an X-POINT THAT IS ITSELF TWO
+			// UNKNOWNS, XP-3. The block above prescribes the point; this one
+			// seeds it and lets the Newton move it.
+			{
+				Table xpoint( boundary, "xpoint", sourceName, false );
+				xpoint.rejectUnknownKeys( { "R", "Z" } );
+
+				XPointConfig & x = boundaryOptions.xpoint;
+				x.given = xpoint.has( "R" ) || xpoint.has( "Z" );
+				if ( x.given )
+				{
+					// BOTH OR NEITHER, for [boundary.limiter]'s reason: a seed
+					// given only its height starts the search on the symmetry
+					// axis, where q has near-zeros that sweep() reports as
+					// saddles and that no divertor put there.
+					x.r = xpoint.getFloat( "R" );
+					x.z = xpoint.getFloat( "Z" );
+
+					if ( !( x.r > 0.0 ) )
+						xpoint.fail( "R", "the X-point seed must be at R > 0; the symmetry axis carries near-zeros of q that are not X-points, and the flux mass ( r q, v ) degenerates there" );
+
+					// ALL THREE ROUTES PIN ONE UNKNOWN. GradShafranovSolver
+					// refuses the combination too, but arriving there would
+					// name a method rather than the two blocks a file wrote.
+					if ( boundaryOptions.limiter.given )
+						xpoint.fail( "R", "[boundary.limiter] and [boundary.xpoint] both pin psi_bnd and are alternatives: the limiter PRESCRIBES the bounding point, which is right for a material limiter, and the X-point is an UNKNOWN the Newton moves. Remove one" );
+
+					// psi_bnd is read ONLY through Psi, exactly as for a
+					// limiter: without a normalisation this solves two extra
+					// unknowns and a constraint nothing consumes.
+					if ( !sourceOptions.isNormalised() )
+						xpoint.fail( "R", "an X-point pins psi_bnd, which only enters through the normalised flux; set [source] Normalised = true or remove [boundary.xpoint]" );
+				}
+			}
+
 			// [boundary.exterior] -- the exact exterior DtN, FB-5, and what
 			// makes a run FREE boundary.
 			{
@@ -1338,13 +1373,29 @@ namespace meq
 		{
 			Table solver( document, "solver", sourceName, false );
 			solver.rejectUnknownKeys( { "NewtonMaxIterations", "NewtonRelativeTolerance", "NewtonAbsoluteTolerance",
-			                            "AssemblyMode", "TraceSolver",
+			                            "PlasmaSupportSweeps", "AssemblyMode", "TraceSolver",
 			                            "LinearMaxIterations", "LinearTolerance" } );
 
 			solverOptions.newtonMaxIterations = solver.getIntegerOr( "NewtonMaxIterations", solverOptions.newtonMaxIterations );
 			solverOptions.newtonRelativeTolerance = solver.getFloatOr( "NewtonRelativeTolerance", solverOptions.newtonRelativeTolerance );
 			solverOptions.newtonAbsoluteTolerance = solver.getFloatOr( "NewtonAbsoluteTolerance", solverOptions.newtonAbsoluteTolerance );
 			refuseIterativeSolverKeys( solver );
+
+			// PlasmaSupportSweeps -- the support's own outer loop. See
+			// SolverConfig for what it buys and M-82 for what its absence
+			// costs on a diverted machine.
+			solverOptions.plasmaSupportSweeps = solver.getIntegerOr( "PlasmaSupportSweeps", solverOptions.plasmaSupportSweeps );
+			if ( solverOptions.plasmaSupportSweeps < 0 )
+				solver.fail( "PlasmaSupportSweeps", "cannot be negative; 0 leaves the support moving inside Newton, which is what a run without this key does" );
+
+			// INERT WITHOUT A CONFINED SOURCE, and refused rather than ignored.
+			// The freeze fixes the threshold insidePlasma() tests against and
+			// the component the fill reaches -- and NormalisedSource::
+			// freezePlasmaEdge is documented inert unless setPlasmaSupport() is
+			// on, so on an unconfined source this key buys a loop that re-solves
+			// the identical problem until the iteration cap.
+			if ( solverOptions.plasmaSupportSweeps > 0 && !sourceOptions.confinesToPlasma() )
+				solver.fail( "PlasmaSupportSweeps", "freezes the plasma SUPPORT between solves, and there is no support to freeze unless the source is confined to one: set [source] ConfineToPlasma = true or remove this key" );
 
 			// AssemblyMode and TraceSolver. Both are performance keys and
 			// neither may change the answer, which is why they can be exposed at

@@ -628,6 +628,24 @@ int main( int argc, char **argv )
 	double psiAxisGuess = 0.0;
 
 	/*
+	 * THE X-POINT SEED, CARRIED FORWARD FOR psi_ax's REASON AND ONE MORE.
+	 *
+	 * [boundary.xpoint] makes ( r_X, z_X ) unknowns, so the file's numbers are
+	 * an initial value and the answer is wherever the solve left it. A fresh
+	 * solver per adaptive cycle re-arms the border, and re-arming it with the
+	 * file's seed would throw away the located null and start the search again
+	 * from a point the coarse mesh has already improved on.
+	 *
+	 * AND THE SECOND REASON IS SHARPER THAN psi_ax's. The X-point border follows
+	 * ONE saddle -- the seed is what selects it, exactly as the axis constraint's
+	 * guess selects one O-point -- so a cycle restarting from the file's number
+	 * could converge to a DIFFERENT null than the previous cycle did, and the
+	 * refinement study would then be comparing two equilibria.
+	 */
+	double xPointSeedR = 0.0;
+	double xPointSeedZ = 0.0;
+
+	/*
 	 * ROADMAP.md ITEM 10: THE q-DRIVEN ROUTE, AND WHAT IT CARRIES ACROSS
 	 * ADAPTIVE CYCLES.
 	 *
@@ -658,6 +676,8 @@ int main( int argc, char **argv )
 		{
 			auto plasma = meq::makeNormalisedSource( config->getSource(), argument );
 			psiAxisGuess = config->getSource().psiAxisGuess();
+			xPointSeedR = config->getBoundary().xpoint.r;
+			xPointSeedZ = config->getBoundary().xpoint.z;
 
 			if ( config->getSource().type == meq::SourceType::MHD
 			     && !config->getSource().getMHD().safetyFactorFile.empty() )
@@ -1047,6 +1067,26 @@ int main( int argc, char **argv )
 	/// setInitialGuess() borrows, so this has to outlive the solve.
 	std::unique_ptr<mfem::GridFunction> carried;
 
+	/// THE STATE THE SUPPORT LOOP CARRIES BETWEEN ITS SWEEPS, and out here for
+	/// `carried`'s reason: setInitialGuess() BORROWS, so a guess declared inside
+	/// the loop would leave the solver holding a dangling pointer the moment the
+	/// loop returned. Nothing dereferences it afterwards today, which is exactly
+	/// how this tree's SubMesh parent and DarcyForm alias defects stayed latent
+	/// for months.
+	std::unique_ptr<mfem::GridFunction> sweepState;
+
+	/// The support's outer loop -- [solver] PlasmaSupportSweeps -- and what it
+	/// did on the LAST cycle. Out here because the summary that reports them is
+	/// outside the adaptive loop that runs them.
+	///
+	/// GATED ON A NORMALISATION, which Config has already refused a file for
+	/// wanting without one; the guard is here so that the loop below reads its
+	/// own precondition rather than relying on a check in another file.
+	int const supportSweeps =
+		normalised ? config->getSolver().plasmaSupportSweeps : 0;
+	int sweepsRun = 0;
+	bool supportSettled = false;
+
 	meq::AdaptivityConfig const &adapt = config->getAdaptivity();
 	// MaxIterations counts SOLVES, not refinements: a run with MaxIterations = 1
 	// is a plain single solve with an estimate printed, and MaxIterations = 10
@@ -1364,6 +1404,20 @@ int main( int argc, char **argv )
 			fresh->setLimiterSurface( limiterConfig.surfaceAttribute );
 		else if ( limiterConfig.given )
 			fresh->setBoundaryFluxPoint( limiterConfig.r, limiterConfig.z );
+		else if ( config->getBoundary().xpoint.given )
+			/*
+			 * XP-3: THE X-POINT IS TWO MORE UNKNOWNS OF THIS SAME BORDER, not a
+			 * third pinning of psi_bnd. The two rows q_r = q_z = 0 join
+			 * psi_bnd - psi_h( r_X, z_X ) = 0 and all three close on one
+			 * factorisation per step -- and the two new columns are exactly
+			 * zero, so they cost no backsolve. See setXPointBoundary().
+			 *
+			 * THE SEED IS THE CARRIED ONE AND NOT THE FILE'S, which is the
+			 * difference between a value and an unknown; see its declaration.
+			 * Config refuses this beside [boundary.limiter], so the branches are
+			 * exclusive by construction rather than by precedence.
+			 */
+			fresh->setXPointBoundary( xPointSeedR, xPointSeedZ );
 
 		/*
 		 * THE THIRD BORDER, AND THE FILE SPEAKS AMPERES WHERE THE SOLVER SPEAKS
@@ -1676,12 +1730,232 @@ int main( int argc, char **argv )
 					"re-solve, so there is no equilibrium to write" );
 		};
 
-		try
+		/*
+		 * THE SUPPORT'S OWN OUTER LOOP, [solver] PlasmaSupportSweeps.
+		 * FREE-BOUNDARY-PLAN.md section 10.5, and the one discrete state XP-3
+		 * leaves outside the Newton.
+		 *
+		 * WITH ConfineToPlasma THE SET OF ELEMENTS CARRYING F IS A FUNCTIONAL OF
+		 * THE ITERATE, and its derivative is a surface term on a moving edge that
+		 * the Jacobian does not carry. Measured, one key changed and nothing
+		 * else: the diverted machine's bootstrap stalls at the 200 cap with the
+		 * support moving and converges in 21 steps with the confinement off.
+		 * MEASUREMENTS.md M-82. So the support is FIXED within a solve and
+		 * RE-DECIDED between solves, which is what this loop is.
+		 *
+		 * BOTH HALVES OF THE FREEZE, because either alone leaves the support
+		 * moving. The THRESHOLD insidePlasma() tests against is the source's --
+		 * meq::NormalisedSource::freezePlasmaEdge -- and the connected COMPONENT
+		 * the fill reaches is the solver's. The mask is element granular, so
+		 * freezing it while the pointwise test drifts still moves the edge inside
+		 * every element the fill reached.
+		 *
+		 * AND IT IS A FIXED POINT RATHER THAN A CONVERGENT ITERATION, which is
+		 * why the loop stops on the support REPEATING rather than on a tolerance:
+		 * the element count is an integer and the honest test is that a sweep
+		 * changed nothing. Alternation between two supports is a real possibility
+		 * -- section 10.5 names it -- and the cap is what bounds it; a run that
+		 * reaches the cap says so rather than reporting the last sweep as an
+		 * answer.
+		 */
+
+		/*
+		 * psi_bnd OF THE ITERATE THE FIRST SWEEP WILL START FROM, which is the
+		 * one number the freeze needs and the one the solver cannot yet supply:
+		 * psiBoundary() is the CONVERGED value and there is no converged value
+		 * before the first solve.
+		 *
+		 * It is read at the bounding point of whichever border the file named --
+		 * the X-point seed, the limiter contact, or the maximum over the meshed
+		 * limiter surface, which is what setLimiterSurface() itself computes. A
+		 * file with no border at all has psi_bnd fixed at zero and this returns
+		 * it, which is correct rather than a fallback.
+		 *
+		 * **AND A BAD ESTIMATE COSTS SWEEPS RATHER THAN CORRECTNESS**, which is
+		 * what makes this an acceptable amount of arithmetic to do here. The
+		 * loop is a fixed-point iteration over the support: whatever it starts
+		 * from, every sweep after the first re-decides it at the answer just
+		 * reached, and the run reports whether it settled. So this only has to
+		 * be in the right neighbourhood.
+		 *
+		 * **THE SurfaceAttribute BRANCH IS EXERCISED BY NO SHIPPED FIXTURE**,
+		 * and it is left in rather than refused because the combination is a
+		 * legitimate one -- a meshed limiter on a confined source -- and the
+		 * formula is setLimiterSurface()'s own. Building a fixture for it is not
+		 * small: the two meshes that carry a limiter region both run j = 0
+		 * profiles, and turning [source] ConfineToPlasma on over one of those is
+		 * the configuration FB-4's k <= j cap is about. Measured, on
+		 * examples/limiter-halfdisc.toml with ConfineToPlasma added the first
+		 * sweep fails with a singular bordered Jacobian in ( psi_ax, psi_bnd, a )
+		 * -- which is that example's own header predicting itself, not this
+		 * branch.
+		 */
+		auto edgeFluxOf = [ & ]( mfem::GridFunction const &field ) -> double
+		{
+			auto valueAt = []( mfem::GridFunction const &f, double r, double z,
+			                   double &out ) -> bool
+			{
+				mfem::DenseMatrix point( 2, 1 );
+				point( 0, 0 ) = r;
+				point( 1, 0 ) = z;
+				mfem::Array<int> elements;
+				mfem::Array<mfem::IntegrationPoint> local;
+				if ( f.FESpace()->GetMesh()->FindPoints( point, elements, local ) < 1
+				     || elements[ 0 ] < 0 )
+					return false;
+				out = f.GetValue( elements[ 0 ], local[ 0 ] );
+				return true;
+			};
+
+			double value = 0.0;
+			meq::LimiterConfig const &l = config->getBoundary().limiter;
+			meq::XPointConfig const &x = config->getBoundary().xpoint;
+
+			if ( x.given && valueAt( field, xPointSeedR, xPointSeedZ, value ) )
+				return value;
+			if ( l.given && l.surfaceAttribute == 0
+			     && valueAt( field, l.r, l.z, value ) )
+				return value;
+			if ( l.surfaceAttribute > 0 )
+			{
+				// THE CURVE. max psi_h over the region the limiter encloses,
+				// which is setLimiterSurface()'s own constraint evaluated on the
+				// guess rather than on the answer.
+				mfem::FiniteElementSpace const &space = *field.FESpace();
+				mfem::Array<int> dofs;
+				bool any = false;
+				for ( int e = 0; e < space.GetMesh()->GetNE(); ++e )
+				{
+					if ( space.GetMesh()->GetAttribute( e ) != l.surfaceAttribute )
+						continue;
+					space.GetElementDofs( e, dofs );
+					for ( int i = 0; i < dofs.Size(); ++i )
+					{
+						double const here = field( dofs[ i ] );
+						value = any ? std::max( value, here ) : here;
+						any = true;
+					}
+				}
+				if ( any )
+					return value;
+			}
+			return 0.0;
+		};
+
+		/// One solve, whichever kind this configuration asks for.
+		auto runSolve = [ & ]()
 		{
 			if ( toroidalDriven )
 				runToroidalLoop();
 			else
 				solver->solve();
+		};
+
+		/// The support loop, or the single solve it degenerates to at zero
+		/// sweeps -- which is what every file without the key gets, bit for bit.
+		auto runSolveWithSupportLoop = [ & ]()
+		{
+			if ( supportSweeps < 1 )
+			{
+				runSolve();
+				return;
+			}
+
+			/*
+			 * THE FIRST SWEEP'S STATE IS THE INITIAL GUESS, and prepare() is how
+			 * it is read. setInitialGuess() only records the guess; what puts it
+			 * into potential() is the projection prepare() does, and solve()
+			 * would do it a moment later anyway. So this costs one assembly per
+			 * cycle and is the only route that works for every guess route --
+			 * including the ramp and the bump, which arrive as Coefficients and
+			 * have no field to read.
+			 */
+			solver->prepare();
+
+			// PER CYCLE, not per run: a refined mesh re-decides its own support
+			// from the carried field, and the summary reports the last cycle's
+			// loop rather than the sum of every cycle's.
+			sweepsRun = 0;
+			supportSettled = false;
+
+			// A COPY, because this is handed back to setInitialGuess() and
+			// prepare() overwrites potential() from it. Aliasing the two would
+			// project a field onto itself while reading it.
+			sweepState = std::make_unique<mfem::GridFunction>(
+				solver->potential() );
+			mfem::GridFunction &state = *sweepState;
+			double axis = psiAxisGuess;
+			double boundary = edgeFluxOf( state );
+
+			std::printf( "MEQ: the plasma support is frozen within each solve and "
+			             "re-decided between them, at most %d sweeps\n",
+			             supportSweeps );
+			std::printf( "     %-6s %6s %14s %14s %14s %s\n", "sweep", "its",
+			             "psi_ax", "psi_bnd", "X-point", "support" );
+
+			for ( int sweep = 0; sweep < supportSweeps; ++sweep )
+			{
+				int const before = solver->plasmaComponentElements();
+
+				normalised->freezePlasmaEdge( axis, boundary );
+				// The PUBLIC refresh, which setPlasmaSupportFrozen() deliberately
+				// does not suppress: this is the outer loop moving the support,
+				// and it is the only thing that may.
+				solver->setPlasmaSupportFrozen( false );
+				solver->refreshPlasmaComponent( state );
+				solver->setPlasmaSupportFrozen( true );
+
+				if ( sweep > 0 )
+					solver->setInitialGuess( state );
+
+				runSolve();
+				++sweepsRun;
+
+				int const after = solver->plasmaComponentElements();
+				std::printf( "     %-6d %6d %14.6e %14.6e", sweep,
+				             solver->newtonIterations(), solver->psiAxis(),
+				             solver->psiBoundary() );
+				if ( solver->xPointIsAnUnknown() )
+					std::printf( "  (%6.3f,%7.3f)", solver->xPointR(),
+					             solver->xPointZ() );
+				else
+					std::printf( " %14s", "-" );
+				std::printf( "  %d/%d\n", after, solver->plasmaCandidateElements() );
+				std::fflush( stdout );
+
+				state = solver->potential();
+				axis = solver->psiAxis();
+				boundary = solver->psiBoundary();
+
+				// THE SUPPORT REPEATING IS THE FIXED POINT. The count alone
+				// would miss a swap of one element for another, so the mask is
+				// what the solver compares -- see refreshPlasmaComponent().
+				if ( sweep > 0 && after == before )
+				{
+					supportSettled = true;
+					break;
+				}
+			}
+
+			/*
+			 * AND THE FREEZE IS LEFT IN FORCE, DELIBERATELY.
+			 *
+			 * The answer is the solution of the problem the LAST sweep posed --
+			 * that support, that threshold -- and everything downstream reads
+			 * the source: the post-processing, the estimator, the flux surfaces
+			 * and the axis check. Thawing here would evaluate F on a support the
+			 * residual was never driven to zero on, which on a settled loop is
+			 * the same support to round-off and on an unsettled one is a
+			 * different problem wearing the answer's numbers.
+			 *
+			 * So the fixed-point question is answered by the loop and reported,
+			 * rather than smoothed over by a last refresh nobody solved with.
+			 */
+		};
+
+		try
+		{
+			runSolveWithSupportLoop();
 		}
 		catch ( std::exception const &firstAttempt )
 		{
@@ -1747,6 +2021,11 @@ int main( int argc, char **argv )
 		// mesh had already established.
 		if ( normalised )
 			psiAxisGuess = solver->psiAxis();
+		if ( solver->xPointIsAnUnknown() && solver->xPointWasLocated() )
+		{
+			xPointSeedR = solver->xPointR();
+			xPointSeedZ = solver->xPointZ();
+		}
 
 		Cycle record{ solveMesh->GetNE(), solver->numTraceDofs(), 0, widened,
 		              -1.0, solver->newtonIterations(), globalised };
@@ -2070,8 +2349,12 @@ int main( int argc, char **argv )
 			             coils->totalCurrent() );
 
 		if ( config->getSource().confinesToPlasma() )
-			std::printf( "MEQ: the plasma support MOVES: F = 0 wherever the "
-			             "normalised flux is non-positive\n" );
+			std::printf( "MEQ: the plasma support %s: F = 0 wherever the "
+			             "normalised flux is non-positive\n",
+			             supportSweeps > 0
+			                 ? "is FIXED within each solve and re-decided "
+			                   "between them"
+			                 : "MOVES" );
 
 		Cycle const &last = history.back();
 		std::printf( "MEQ: converged in %d Newton iterations on %d elements, "
@@ -2194,6 +2477,38 @@ int main( int argc, char **argv )
 				             located ? ", found on the limiter surface"
 				                     : ", as prescribed" );
 			}
+			if ( solver->xPointIsAnUnknown() )
+			{
+				/*
+				 * THE X-POINT IS AN OUTPUT, which is the whole difference from
+				 * the line above: [boundary.xpoint] R and Z are the initial
+				 * value of an unknown, so echoing the file would report the
+				 * question rather than the answer. HOW FAR IT MOVED is printed
+				 * for the same reason XP-2's sweeps print their step -- a null
+				 * that has not moved from a seed somebody typed is a null that
+				 * was already there, and one that has moved a long way may have
+				 * found a different saddle than the one the file meant.
+				 */
+				std::printf( "     psi_bnd = %.6e Wb/rad at the X-point "
+				             "( %.6f, %.6f ), %.3e m from the seed%s\n",
+				             solver->psiBoundary(), solver->xPointR(),
+				             solver->xPointZ(),
+				             std::hypot( solver->xPointR()
+				                         - config->getBoundary().xpoint.r,
+				                         solver->xPointZ()
+				                         - config->getBoundary().xpoint.z ),
+				             solver->xPointWasLocated()
+				                 ? "" : "; IT LEFT THE MESH -- the value is the "
+				                        "last one inside it" );
+			}
+			if ( sweepsRun > 0 )
+				std::printf( "     the plasma support took %d sweep%s and %s\n",
+				             sweepsRun, sweepsRun == 1 ? "" : "s",
+				             supportSettled
+				                 ? "settled"
+				                 : "DID NOT SETTLE -- raise [solver] "
+				                   "PlasmaSupportSweeps, and see whether it is "
+				                   "alternating rather than converging" );
 		}
 
 		/*
@@ -3019,6 +3334,27 @@ int main( int argc, char **argv )
 			                          : config->getBoundary().limiter.z );
 			writer.attribute( "limiter_contact_located", located ? 1 : 0 );
 			writer.attribute( "psi_boundary", solver->psiBoundary() );
+		}
+		if ( solver->xPointIsAnUnknown() )
+		{
+			// THE SOLVED NULL, not the seed. A reader differencing two runs --
+			// against another resolution, or against another code -- needs the
+			// point that produced psi_bnd, and on this route that point is an
+			// answer. xpoint_located says whether it was still inside the mesh
+			// at the end, so a run that lost it cannot be read as one that
+			// found it there.
+			writer.attribute( "xpoint_r", solver->xPointR() );
+			writer.attribute( "xpoint_z", solver->xPointZ() );
+			writer.attribute( "xpoint_located",
+			                  solver->xPointWasLocated() ? 1 : 0 );
+			writer.attribute( "psi_boundary", solver->psiBoundary() );
+		}
+		if ( sweepsRun > 0 )
+		{
+			// The support's outer loop, so that an equilibrium written from an
+			// UNSETTLED loop cannot be mistaken for a converged one.
+			writer.attribute( "plasma_support_sweeps", sweepsRun );
+			writer.attribute( "plasma_support_settled", supportSettled ? 1 : 0 );
 		}
 
 		// A reader is entitled to know which nodes are the solution and which

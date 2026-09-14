@@ -1516,11 +1516,78 @@ branch-selection question rather than a Jacobian one and it is **left alone** �
 recorded in M-86 and beside the code, so that the next person to find the stale
 flag does not repair it without measuring the second row.
 
-**WHAT IS NOT BUILT: A TOML ROUTE.** `[boundary.limiter]` reaches
-`setBoundaryFluxPoint()` and `setLimiterSurface()`; there is no key for
-`setXPointBoundary()`, exactly as there was none for XP-2. A diverted run from a
-file is XP-4's, and it wants the support's own outer loop in the driver as well,
-which is the piece neither stage has built.
+## XP-4: the diverted machine from a file, and against `freegs4e`
+
+**TWO KEYS, AND THE SECOND IS THE ONE THAT IS NOT OBVIOUS.**
+`[boundary.xpoint] R, Z` seeds `setXPointBoundary()` — and it is a SEED, which is
+the whole difference from `[boundary.limiter]`: the driver carries it forward
+across adaptive cycles as it carries `psiAxisGuess`, echoes nothing of it back
+into the `.nc`, and reports how far the solve moved it.
+`[solver] PlasmaSupportSweeps` is the other half, and it is the outer loop XP-3
+deliberately left standing: freeze the support, solve, refreeze at the answer,
+solve again, stop when a sweep changes nothing.
+
+**THE LOOP'S FIRST SWEEP NEEDS A `ψ_bnd` THE SOLVER CANNOT YET SUPPLY.**
+`psiBoundary()` is the CONVERGED value and there is none before the first solve,
+so the driver reads `ψ` of the initial iterate at whichever bounding point the
+file named — the X-point seed, the limiter contact, or the maximum over the
+meshed limiter surface. Getting the iterate is `prepare()`: `setInitialGuess()`
+only records the guess, and what puts it into `potential()` is the projection
+`prepare()` does, which `solve()` would do a moment later anyway. That costs one
+assembly per cycle and is the only route that works for the ramp and the bump,
+which arrive as `Coefficient`s and have no field to read.
+
+**AND THE FREEZE IS LEFT IN FORCE AFTERWARDS, DELIBERATELY.** The answer is the
+solution of the problem the LAST sweep posed — that support, that threshold — and
+everything downstream reads the source: the post-processing, the estimator, the
+flux surfaces, the axis check. Thawing would evaluate `F` on a support the
+residual was never driven to zero on, which on a settled loop is the same support
+to round-off and on an unsettled one is a different problem wearing the answer's
+numbers. So the fixed-point question is ANSWERED — `plasma_support_settled` in
+the `.nc` — rather than smoothed over by a last refresh nobody solved with.
+
+**THE DRIVER REPRODUCES `XPointBorder`'s IN-PROCESS ANSWER TO EVERY PRINTED
+DIGIT**, per-sweep iteration counts included, which is the check that says the
+TOML route and the API route are one computation.
+
+**AGAINST `freegs4e`, AND THIS COMPARISON IS SHARPER THAN THE LIMITED ONE.**
+`theDriverSolvesALimitedTokamak` hands BOTH codes the same limiter point, because
+freegs4e's own contact is a maximum over grid CELLS that moves 0.6 m between
+129² and 513²; that case deliberately takes the contact-finding out of the
+comparison. Here nothing is handed over — MEQ solves for the null as three rows
+of its Newton, from a seed 7.07e-02 m away, and freegs4e finds it by a
+critical-point search — so the agreement in its POSITION is a result.
+
+→ **[M-87](MEASUREMENTS.md#m-87)** — X-point 4.4e-04 m · `ψ_ax` 6.9e-04 · `ψ_bnd` 7.7e-04 · the field by region
+
+**THE FIELD COMPARISON FOUND THE CONDUCTOR MODEL AND NOTHING ELSE.** Over every
+comparable node the relative `L∞` is **2.973e-01**, which read alone would be a
+failure; **all of it is inside two coils**. `P2L` and `P2U` are freegs4e
+FILAMENTS — a point source with a logarithmic singularity — and MEQ meshes them
+as 0.1 × 0.1 m rectangles carrying a uniform current density, so a node inside
+one compares two conductor models rather than two solvers, and no refinement of
+either closes it. Excluded with a 5 cm collar, 5478 nodes agree at **5.3e-04**
+relative `L2` and **1.8e-03** `L∞`, worst on the outboard midplane near the
+plasma edge rather than anywhere near a conductor. `P1L` and `P1U` are
+`ShapedCoil`s and agree by construction — and contribute no nodes at all, sitting
+outside the reference's own box.
+
+**`compare.py --exclude-box` REPORTS THE EXCLUDED REGION AS A ROW OF ITS OWN
+rather than dropping it**, which is the point: a comparison that quietly threw
+away the nodes where it disagrees would be the instrument choosing the answer.
+`--free-boundary` is the other new flag and says there is no gauge shift and no
+`-meta.json` — both codes solve `ψ → 0` at infinity, MEQ through
+`meq::ExteriorDtN` on `Γ` and freegs4e through von Hagenow, so `ψ_ax` and
+`ψ_bnd` are directly comparable numbers rather than differences, and the MXH fit
+that floors the fixed-boundary rehearsal at 2–4e-04 m is absent entirely.
+
+**~7e-04 IS THE FLOOR THIS COMPARISON CAN MEAN AND THE BOUNDS SAY SO.**
+`fgsref.py` fits a `UnivariateSpline` to its own analytic profile shape before
+solving and the fit MOVES it — **1.707e-02** of the amplitude in `ff'` — while
+the TOML's tables are the analytic shape. The two codes are therefore solving
+sources that differ at the per-cent level, and an agreement much tighter than
+what is measured would be evidence of a shared mistake rather than of two right
+answers.
 
 ## PE-0: the premise is true, and the plan's own machinery does not cash it
 

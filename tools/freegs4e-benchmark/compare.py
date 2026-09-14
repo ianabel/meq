@@ -61,11 +61,36 @@ def axis_status(ds):
     return "absent", None, "not a normalised run, so psi_axis is not an answer"
 
 
-def compare(npz_path, nc_path, meta_path):
+def parse_box(text):
+    """`R,Z,halfWidth,halfHeight` -- one conductor's cross-section, in metres."""
+    parts = [float(x) for x in text.split(",")]
+    if len(parts) != 4:
+        raise argparse.ArgumentTypeError(
+            f"--exclude-box wants R,Z,halfWidth,halfHeight and got {text!r}")
+    return tuple(parts)
+
+
+def compare(npz_path, nc_path, meta_path, free_boundary=False, boxes=()):
     ref = np.load(npz_path, allow_pickle=True)
-    meta = json.load(open(meta_path))
-    # The surface MEQ was actually given, not the separatrix.
-    psi_surface = float(meta["psi_surface"])
+
+    # THE GAUGE, AND THE TWO COMPARISONS DIFFER IN IT.
+    #
+    # The FIXED-boundary rehearsal hands MEQ freegs4e's own psi_n = 0.9 surface
+    # as a Dirichlet boundary, with zero on it: MEQ's psi is therefore
+    # freegs4e's shifted by the flux of that surface, and `psi_surface` in the
+    # meta file is the shift.
+    #
+    # A FREE-boundary run shares freegs4e's gauge exactly -- both solve the same
+    # exterior problem, psi -> 0 at infinity, MEQ through meq::ExteriorDtN on
+    # Gamma and freegs4e through von Hagenow -- so there is no shift and no
+    # surface, which is why there is no meta file to read either. psi_ax and
+    # psi_bnd are then directly comparable numbers rather than differences, and
+    # the whole MXH fit that floors the rehearsal at 2-4e-04 m is absent.
+    psi_surface = 0.0
+    if not free_boundary:
+        meta = json.load(open(meta_path))
+        # The surface MEQ was actually given, not the separatrix.
+        psi_surface = float(meta["psi_surface"])
 
     with Dataset(nc_path) as ds:
         Rm = np.array(ds["R"][:], float)
@@ -110,6 +135,35 @@ def compare(npz_path, nc_path, meta_path):
 
     diff = psi_m[use] - ref_on_meq[use]
     scale = np.abs(ref_on_meq[use]).max()
+
+    # THE CONDUCTORS, WHERE THE TWO CODES ARE NOT SOLVING THE SAME PROBLEM.
+    #
+    # freegs4e's default `Coil` is an exact FILAMENT -- `controlPsi` is
+    # `Greens( R, Z )*turns`, a point source with a logarithmic singularity --
+    # and MEQ's conductors are rectangles meshed into the domain carrying a
+    # uniform current density. Inside and immediately around such a coil the two
+    # fields therefore differ by the conductor MODEL rather than by anything
+    # either solver did, and no refinement of either closes it.
+    #
+    # REPORTED RATHER THAN SILENTLY DROPPED. The excluded region is named, its
+    # own norms are printed, and the caller has to ask for the exclusion -- a
+    # comparison that quietly threw away the nodes where it disagrees would be
+    # the instrument choosing the answer.
+    excluded = np.zeros_like(use)
+    for r, z, halfWidth, halfHeight in boxes:
+        excluded |= ((np.abs(RR - r) <= halfWidth) & (np.abs(ZZ - z) <= halfHeight))
+    kept = use & ~excluded
+
+    def norms(mask):
+        if mask.sum() == 0:
+            return None
+        d = psi_m[mask] - ref_on_meq[mask]
+        return dict(nodes=int(mask.sum()),
+                    l2=float(np.sqrt(np.mean(d ** 2))),
+                    linf=float(np.abs(d).max()),
+                    rel_l2=float(np.sqrt(np.mean(d ** 2)) / scale),
+                    rel_linf=float(np.abs(d).max() / scale))
+
     return dict(nodes=int(use.sum()), inside=int(inside.sum()),
                 dropped_band=int((inside & extrap).sum()),
                 linf=float(np.abs(diff).max()),
@@ -117,6 +171,7 @@ def compare(npz_path, nc_path, meta_path):
                 scale=float(scale),
                 rel_linf=float(np.abs(diff).max() / scale),
                 rel_l2=float(np.sqrt(np.mean(diff ** 2)) / scale),
+                kept=norms(kept), conductors=norms(use & excluded),
                 axis_verdict=verdict, axis_flux=axis_flux, axis_note=axis_note)
 
 
@@ -135,6 +190,23 @@ if __name__ == "__main__":
              "the equilibrium [source] describes, and differencing it against "
              "the reference measures two different problems. It exists for "
              "deliberately inspecting a known-bad run.")
+    parser.add_argument(
+        "--free-boundary", action="store_true",
+        help="the run solved the FREE-boundary problem, so it shares "
+             "freegs4e's gauge exactly and there is no <stem>-meta.json to "
+             "read. Without this the comparison expects the fixed-boundary "
+             "rehearsal, where MEQ was handed an interior flux surface as a "
+             "Dirichlet boundary and its psi is freegs4e's shifted by that "
+             "surface's flux.")
+    parser.add_argument(
+        "--exclude-box", type=parse_box, action="append", default=[],
+        metavar="R,Z,HW,HH",
+        help="a conductor's cross-section to report separately, repeatable. "
+             "freegs4e's default Coil is an exact FILAMENT and MEQ's is a "
+             "meshed rectangle carrying a uniform current density, so nodes "
+             "inside one compare two conductor models rather than two solvers. "
+             "The excluded region gets a row of its own; nothing is dropped "
+             "silently.")
     args = parser.parse_args()
 
     rows = []
@@ -150,7 +222,8 @@ if __name__ == "__main__":
         if not os.path.exists(nc):
             print(f"    {stem:22s} {'-':>7s} MEQ produced no .nc")
             continue
-        r = compare(npz, nc, meta)
+        r = compare(npz, nc, meta, free_boundary=args.free_boundary,
+                    boxes=args.exclude_box)
 
         # THE AXIS GATE, BEFORE ANY NUMBER IS QUOTED. A run whose psi_ax is not
         # the flux at a magnetic axis solved a different equilibrium from the
@@ -177,6 +250,15 @@ if __name__ == "__main__":
         print(f"    {stem:22s} {r['nodes']:7d} {r['dropped_band']:6d} "
               f"{r['rel_l2']:11.3e} {r['rel_linf']:11.3e} {r['scale']:11.3e}"
               f"{flag}")
+        # THE TWO HALVES OF AN EXCLUSION, both printed. The row above is every
+        # comparable node and is the one a reader should distrust where the
+        # conductors differ; these say how much of it is the conductors.
+        if r["conductors"] is not None:
+            k, c = r["kept"], r["conductors"]
+            print(f"    {'  outside the conductors':22s} {k['nodes']:7d} "
+                  f"{'':6s} {k['rel_l2']:11.3e} {k['rel_linf']:11.3e}")
+            print(f"    {'  inside them':22s} {c['nodes']:7d} {'':6s} "
+                  f"{c['rel_l2']:11.3e} {c['rel_linf']:11.3e}")
     if rows:
         worst = max(r['rel_l2'] for _, r in rows)
         print(f"\n    worst relative L2 across {len(rows)} cases: {worst:.3e}\n")

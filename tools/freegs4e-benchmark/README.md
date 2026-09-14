@@ -717,6 +717,12 @@ own interior flux surface as a Dirichlet boundary and asked to reproduce the
 field inside. That comparison contains an MXH fit and therefore cannot reach
 round-off however fine either grid is.
 
+**There are TWO free-boundary cases and they remove different things.**
+`H_limited_circular` removes the MXH fit; `A_testtokamak_classic` removes the
+handed-over boundary point as well, MEQ solving for the X-point as two unknowns
+of its own Newton — see *The DIVERTED free-boundary case* at the end of this
+file.
+
 **`H_limited_circular` is the case that removes the fit**, and MEQ solves it as a
 FREE-boundary problem: same four coils, same profile shape, same prescribed
 `I_p`, same limiter point, and **no LCFS handed over at all**. It ships as
@@ -990,3 +996,110 @@ stands**: the recorded configuration was rerun verbatim, same TOML and same 128�
 guess, and converges in 8 steps to 9.676040e-02, on the physical branch. The
 regression asserts that degree 2 stays on the branch, so it fails if that comes
 back.
+
+## The DIVERTED free-boundary case, and what it removes from the comparison
+
+**`A_testtokamak_classic` is the second free-boundary case and it is the first
+where nothing about the plasma boundary is handed over.** It is the FreeGS
+worked example's geometry — an up-down asymmetric double null whose four coil
+currents freegs4e's own control system solved for — and MEQ solves it from
+`examples/diverted-tokamak-xpoint.toml` with the X-point as **two unknowns of its
+Newton**, seeded 7.07e-02 m away from the answer. Its regression is
+`theDriverSolvesADivertedTokamak` in `tests/convergence/DriverAcceptance.cpp`, so
+like the limited case it is driven from `examples/` rather than from here.
+
+**WHY THIS IS SHARPER THAN THE LIMITED CASE.** `H_limited_circular` hands BOTH
+codes the same limiter point, and deliberately: freegs4e's contact is the maximum
+over a ring of grid CELLS and it moves 0.6 m between 129² and 513², so that case
+takes the contact-finding out of the comparison on purpose. Here it is left in.
+MEQ finds the null as three rows of a bordered Newton on a triangulation;
+freegs4e finds it by a critical-point search on a finite-difference field. They
+share the equation and no code.
+
+| | freegs4e, 129² | MEQ, `k = 2`, 2642 el | apart |
+|---|---|---|---|
+| X-point | ( 1.093144118, −0.603965084 ) | **( 1.093103369, −0.603529197 )** | **4.4e-04 m** |
+| `ψ_ax` | 8.271751445e-02 | **8.266003630e-02** | **6.9e-04** |
+| `ψ_bnd` | 3.240412551e-02 | **3.237931762e-02** | **7.7e-04** |
+| `I_p` | 2.0e+05 A | 2.0e+05 A | the constraint, 8.9e-13 |
+| profile amplitude | 1, by construction | 9.985753e-01 | 1.4e-03 |
+
+**On a diverted plasma `ψ_bnd` IS the active null's flux**, so the second and
+third rows are two views of one disagreement rather than two checks. The upper
+saddle sits at ( 1.109128, +0.796088 ) carrying `ψ = 2.891019e-02`, 3.5e-03
+further out — which is what makes this a single-ACTIVE-null equilibrium, and what
+the seed in the TOML selects.
+
+### Running it
+
+```sh
+mkdir -p out && sed 's|^Prefix = .*|Directory = "out"\nPrefix = "A_testtokamak_classic"|' \
+    ../../examples/diverted-tokamak-xpoint.toml > out/case.toml
+../../build/meq out/case.toml
+cp A_testtokamak_classic.npz out/
+python3 compare.py --free-boundary \
+    --exclude-box 1.75,-0.60,0.10,0.10 --exclude-box 1.75,0.60,0.10,0.10 \
+    out/A_testtokamak_classic.npz
+```
+
+**`--free-boundary` says there is no gauge shift and no `-meta.json`.** The
+fixed-boundary rehearsal hands MEQ an interior flux surface as a Dirichlet
+boundary with zero on it, so MEQ's `ψ` is freegs4e's shifted by that surface's
+flux and `psi_surface` in the meta file is the shift. A free-boundary run shares
+freegs4e's gauge exactly — both solve `ψ → 0` at infinity, MEQ through
+`meq::ExteriorDtN` on `Γ` and freegs4e through von Hagenow — so `ψ_ax` and
+`ψ_bnd` are directly comparable numbers, and **the whole MXH fit that floors the
+rehearsal at 2–4e-04 m is absent**.
+
+### The conductor model is the entire pointwise disagreement, and it is measurable
+
+```
+    case                     nodes   band      rel L2    rel Linf       scale
+    A_testtokamak_classic     5610      0   7.116e-03   2.973e-01   1.051e-01
+      outside the conductors    5478          5.268e-04   1.818e-03
+      inside them                132          4.627e-02   2.973e-01
+```
+
+| region | nodes | rel L2 | rel L∞ | worst at |
+|---|---|---|---|---|
+| everything comparable | 5610 | 7.116e-03 | **2.973e-01** | ( 1.751, −0.615 ) |
+| inside P2L's box | 10 | 1.385e-01 | 2.973e-01 | ( 1.751, −0.615 ) |
+| inside P2U's box | 10 | 9.474e-02 | 1.924e-01 | ( 1.751, +0.584 ) |
+| **minus those two and a 5 cm collar** | 5478 | **5.268e-04** | **1.818e-03** | ( 1.639, −0.034 ) |
+| the plasma, `ψ_ref > ψ_bnd` | 1342 | 7.176e-04 | 1.818e-03 | ( 1.639, −0.034 ) |
+
+**A relative `L∞` of 0.30 read alone is a failure, and every bit of it is inside
+two conductors.** `P2L` and `P2U` are freegs4e **filaments** — `controlPsi` is
+`Greens( R, Z )*turns`, a point source with a logarithmic singularity — and MEQ's
+are 0.1 × 0.1 m rectangles meshed into the domain carrying a uniform current
+density. Inside one of those the two codes are not solving the same problem, and
+no refinement of either closes it. `P1L` and `P1U` ARE `ShapedCoil`s in this case
+and agree by construction; they contribute no nodes at all, sitting at `z = ±1.10`
+outside the reference's own `[ −1, 1 ]` box.
+
+**THE EXCLUSION IS REPORTED, NOT APPLIED SILENTLY.** `--exclude-box` prints the
+excluded region as a row of its own and the caller has to ask for it. A
+comparison that quietly threw away the nodes where it disagrees would be the
+instrument choosing the answer — which is the trap this directory's own history
+records four times over.
+
+Only 5610 of MEQ's 12612 interior nodes are comparable at all: MEQ's domain is
+the half-disc out to `ρ = 2.4` and freegs4e's box is `R ∈ [ 0.1, 2.0 ]`,
+`Z ∈ [ −1, 1 ]`.
+
+### The floor here is the profile fit, not either discretisation
+
+**`fgsref.py` fits a `UnivariateSpline` to its own analytic profile shape before
+solving, and the fit MOVES it**: 2.514e-05 of the amplitude in `p'` and
+**1.707e-02** in `ff'`. The TOML's tables are the ANALYTIC shape — because it
+extends below `Ψ = 0` into the vacuum, which a tabulation on `ψ_n ∈ [ 0, 1 ]`
+cannot, and because its edge behaviour is exactly `j = 2`, which FB-4 says
+decides the rate and which `ConfineToPlasma` needs.
+
+So the two codes are solving sources that differ at the per-cent level in `ff'`,
+and **an agreement much tighter than 7e-04 would be evidence of a shared mistake
+rather than of two right answers.** The regression's bounds are set at 1e-2 for
+that reason and the measured numbers sit an order inside them. Closing that gap
+is a REFERENCE-side job — solve `A_testtokamak_classic` against the unfitted
+analytic profile — and it is the same species as the conductor-model job the
+limited case records.

@@ -1,0 +1,128 @@
+# THE SAME DIVERTED TOKAMAK, WITH THE X-POINT SOLVED FOR RATHER THAN PRESCRIBED.
+# FREE-BOUNDARY-PLAN.md section 10, stage XP-3.
+#
+# examples/diverted-tokamak.toml is this machine with psi_bnd pinned at the
+# REFERENCE's X-point, which makes a well-posed run and a fair comparison and
+# requires knowing the answer first.  That is the right model for a LIMITER,
+# whose contact is a piece of hardware sitting where the drawings say, and the
+# wrong one for a DIVERTOR: an X-point is a functional of the solution and moves
+# as Newton moves.
+#
+# This file is the same machine asking the question instead.  [boundary.xpoint]
+# makes ( r_X, z_X ) two more unknowns of the bordered Newton psi_ax and psi_bnd
+# already live in, closing
+#
+#     q_r( r_X, z_X )             = 0
+#     q_z( r_X, z_X )             = 0
+#     psi_bnd - psi_h( r_X, z_X ) = 0
+#
+# on one factorisation per step.  Everything else below is byte for byte what
+# diverted-tokamak.toml carries, so a difference between the two runs is the
+# border and nothing else -- which is what tests/convergence/XPointBorder.cpp
+# asserts in one process, at 1.9e-14 m.
+#
+# THE SEED IS DELIBERATELY WRONG BY 5 cm IN EACH COORDINATE, which is about two
+# thirds of an element here and is roughly what a machine's drawings would get
+# you to.  A seed that was already the answer would demonstrate nothing; this one
+# has to travel, and it crosses at least one mesh face on the way.  The run
+# reports where it ended up and how far it moved.
+#
+# THE REFERENCE'S OWN ANSWER, for anything comparing against it:
+#
+#   psi_axis   8.271751444840184e-02      axis at ( 1.351273, +0.062226 )
+#   psi_bndry  3.240412550738516e-02
+#   X-points   ( 1.093144118, -0.603965084 ) psi 3.240412550738516e-02  ACTIVE
+#              ( 1.109127878, +0.796087599 ) psi 2.891018784455272e-02
+#
+# See examples/diverted-tokamak.toml's header for where every input came from,
+# and for the one deliberate deviation from the reference's profiles.
+
+[mesh]
+File = "examples/diverted-tokamak.msh"
+
+[discretisation]
+PolynomialDegree = 2
+
+[solver]
+NewtonMaxIterations = 200
+NewtonRelativeTolerance = 1.0e-10
+
+# THE ONE STATE THE BORDER CANNOT CARRY.  XP-3 makes the X-point's POSITION an
+# unknown, which it can be because it is differentiable.  WHICH ELEMENTS CARRY
+# CURRENT is not: the support is a set, its derivative is a surface term on a
+# moving edge, and the Jacobian does not have it.  So the support is fixed within
+# each solve and re-decided between them, which is what this key counts.
+#
+# MEASURED, ITS ABSENCE IS NOT A SLOW RUN BUT A FAILED ONE: with the support
+# moving inside Newton this machine's first solve stalls at the 200 cap.
+# MEASUREMENTS.md M-82.  Four is more than this case needs -- it settles on the
+# third -- and the run says which.
+PlasmaSupportSweeps = 4
+
+[source]
+Type = "mhd"
+Normalised = true
+ConfineToPlasma = true
+PsiAxis = 0.0827
+PlasmaCurrent = 2.0e5
+Mu0 = 1.25663706212e-6
+PPrimeFile = "examples/diverted-tokamak-pprime.dat"
+GGPrimeFile = "examples/diverted-tokamak-ggprime.dat"
+
+[[coils]]
+Name = "P1L"
+CentreR = 1.00
+CentreZ = -1.10
+HalfWidth = 0.05
+HalfHeight = 0.05
+Current = 137333.25436339402
+
+[[coils]]
+Name = "P1U"
+CentreR = 1.00
+CentreZ = 1.10
+HalfWidth = 0.05
+HalfHeight = 0.05
+Current = 62625.08544357837
+
+[[coils]]
+Name = "P2L"
+CentreR = 1.75
+CentreZ = -0.60
+HalfWidth = 0.05
+HalfHeight = 0.05
+Current = -99444.48228215592
+
+[[coils]]
+Name = "P2U"
+CentreR = 1.75
+CentreZ = 0.60
+HalfWidth = 0.05
+HalfHeight = 0.05
+Current = -67660.81780068338
+
+[boundary]
+Type = "zero"
+
+# THE SEED, AND IT IS AN INITIAL VALUE RATHER THAN A PRESCRIPTION.  The
+# reference's null plus 5 cm in each coordinate; see the header.  It selects
+# WHICH saddle the border follows -- this machine has two, and the upper one sits
+# 3.5e-03 further out in psi -- exactly as [source] PsiAxis selects one O-point.
+[boundary.xpoint]
+R = 1.143144118182931
+Z = -0.5539650838688502
+
+[boundary.exterior]
+Radius = 2.40
+CentreZ = 0.0
+Modes = 10
+
+[initialguess]
+Type = "gridfunction"
+File = "examples/diverted-tokamak-guess.gf"
+MeshFile = "examples/diverted-tokamak-guess.mesh"
+
+[output]
+Prefix = "diverted-tokamak-xpoint"
+GridNR = 129
+GridNZ = 129

@@ -2183,6 +2183,112 @@ BOOST_AUTO_TEST_CASE( the_free_boundary_borders_refuse_what_they_cannot_honour )
 	refuses( halfDisc + normalisedSource
 	         + "\n[boundary.exterior]\nRadius = -1.5\nModes = 4\n",
 	         "boundary.exterior.Radius" );
+
+	/*
+	 * AND THE THIRD ROUTE TO psi_bnd, XP-3: THE X-POINT AS AN UNKNOWN.
+	 *
+	 * [boundary.limiter] PRESCRIBES the bounding point, which is right for a
+	 * material limiter and wrong for a divertor -- a null is a functional of the
+	 * solution and moves as Newton moves. [boundary.xpoint] seeds it instead and
+	 * makes ( r_X, z_X ) two more unknowns of the same bordered Newton. So it
+	 * takes the same two refusals that block wears, for the same reasons, plus
+	 * the one that is new: all three routes pin ONE unknown.
+	 */
+	Configuration const seeded = parse( halfDisc + normalisedSource
+		+ "\n[boundary.exterior]\nRadius = 1.5\nModes = 4\n"
+		+ "\n[boundary.xpoint]\nR = 1.09\nZ = -0.60\n" );
+	BOOST_TEST( seeded.getBoundary().xpoint.given );
+	BOOST_TEST( seeded.getBoundary().xpoint.r == 1.09 );
+	BOOST_TEST( seeded.getBoundary().xpoint.z == -0.60 );
+	BOOST_TEST( !seeded.getBoundary().limiter.given );
+
+	// TWO DESCRIPTIONS OF ONE UNKNOWN. A precedence rule here would decide which
+	// equilibrium a run reports on the strength of key order -- and the two
+	// really are different equilibria, the prescribed point being wrong by
+	// however far the null has moved since somebody wrote it down.
+	refuses( halfDisc + normalisedSource
+	         + "\n[boundary.limiter]\nR = 1.2\nZ = 0.0\n"
+	         + "\n[boundary.xpoint]\nR = 1.09\nZ = -0.60\n",
+	         "boundary.xpoint.R" );
+
+	// AND THE CURVE ROUTE IS THE SAME CLASH WEARING A DIFFERENT SPELLING, which
+	// a refusal keyed on R and Z alone would let through.
+	refuses( halfDisc + normalisedSource
+	         + "\n[boundary.limiter]\nSurfaceAttribute = 20\n"
+	         + "\n[boundary.xpoint]\nR = 1.09\nZ = -0.60\n",
+	         "boundary.xpoint.R" );
+
+	// A SEED ON THE AXIS. psi vanishes identically on r = 0, so q has near-zeros
+	// there that a saddle search reports and that no divertor put there.
+	refuses( halfDisc + normalisedSource
+	         + "\n[boundary.xpoint]\nR = 0.0\nZ = -0.60\n",
+	         "boundary.xpoint.R" );
+
+	// BOTH COORDINATES OR NEITHER, which is the case above wearing a different
+	// spelling: a seed given only its height starts on the axis.
+	refuses( halfDisc + normalisedSource + "\n[boundary.xpoint]\nZ = -0.60\n",
+	         "boundary.xpoint.R" );
+
+	// AN X-POINT WITHOUT A NORMALISATION, for the limiter's own reason: psi_bnd
+	// is read only through Psi, so this would solve three extra unknowns and
+	// discard the answer.
+	refuses( halfDisc + plainSource + "\n[boundary.xpoint]\nR = 1.09\nZ = -0.60\n",
+	         "boundary.xpoint.R" );
+}
+
+/*
+ * THE SUPPORT'S OUTER LOOP, AND THE ONE THING IT IS INERT WITHOUT.
+ *
+ * [solver] PlasmaSupportSweeps freezes the plasma support within each solve and
+ * re-decides it between them -- FREE-BOUNDARY-PLAN.md section 10.5, and the one
+ * discrete state XP-3's border structurally cannot carry. What makes it worth a
+ * refusal rather than a default is that
+ * meq::NormalisedSource::freezePlasmaEdge is documented INERT unless
+ * setPlasmaSupport() is on: on an unconfined source the key buys a loop that
+ * re-solves the identical problem until the cap, which converges, costs a
+ * multiple of the run, and reports an equilibrium nobody can tell from the
+ * right one.
+ */
+BOOST_AUTO_TEST_CASE( the_plasma_support_loop_needs_a_support_to_freeze )
+{
+	std::string const head =
+		"[mesh]\nRMin = 0.0\nRMax = 1.7\nZMin = -1.7\nZMax = 1.7\n\n"
+		"[discretisation]\nPolynomialDegree = 2\n\n";
+
+	std::string const confined =
+		"[source]\nType = \"mhd\"\nNormalised = true\nConfineToPlasma = true\n"
+		"PsiAxis = 0.1\n"
+		"PPrimeFile = \"examples/fb-pprime.dat\"\n"
+		"GGPrimeFile = \"examples/fb-ggprime.dat\"\n";
+
+	std::string const unconfined =
+		"[source]\nType = \"mhd\"\nNormalised = true\nPsiAxis = 0.1\n"
+		"PPrimeFile = \"examples/fb-pprime.dat\"\n"
+		"GGPrimeFile = \"examples/fb-ggprime.dat\"\n";
+
+	Configuration const looped =
+		parse( head + confined + "\n[solver]\nPlasmaSupportSweeps = 4\n" );
+	BOOST_TEST( looped.getSolver().plasmaSupportSweeps == 4 );
+
+	// ZERO IS THE DEFAULT AND IS TODAY'S BEHAVIOUR -- the support moving inside
+	// Newton -- so every file without the key is bit-unchanged.
+	BOOST_TEST( parse( head + confined ).getSolver().plasmaSupportSweeps == 0 );
+
+	// AND ZERO IS ACCEPTED ON AN UNCONFINED SOURCE, which is the control: the
+	// refusal below has to be about the loop and not about the key existing.
+	BOOST_CHECK_NO_THROW(
+		parse( head + unconfined + "\n[solver]\nPlasmaSupportSweeps = 0\n" ) );
+
+	auto const refuses = []( std::string const & text, std::string const & key )
+	{
+		BOOST_CHECK_EXCEPTION( parse( text ), ConfigError,
+			[&]( ConfigError const & e ) { return e.getKey() == key; } );
+	};
+
+	refuses( head + unconfined + "\n[solver]\nPlasmaSupportSweeps = 4\n",
+	         "solver.PlasmaSupportSweeps" );
+	refuses( head + confined + "\n[solver]\nPlasmaSupportSweeps = -1\n",
+	         "solver.PlasmaSupportSweeps" );
 }
 
 /*

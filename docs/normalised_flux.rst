@@ -224,9 +224,15 @@ accuracy was the floor.
    would have used.
 
    That argument does **not** extend to an X-point, where the constraint is
-   :math:`q = 0` rather than a stationary value: there the corner block is
-   :math:`\nabla q`, a differentiated quantity, and no envelope argument
-   removes it.
+   :math:`q = 0` rather than a stationary value, so the corner block
+   :math:`\nabla q` has to be written down.  It does **not** have to be
+   approximated: ``[boundary.xpoint]`` writes it in closed form, and it is
+   exact.  :math:`\nabla q` is an order down as an approximation of the
+   *continuous* Hessian, which is a real wall elsewhere — see the band
+   continuation in :doc:`output` — and what a Jacobian needs is the derivative
+   of the *discrete* residual, where :math:`q_h` is a polynomial on its element.
+   Approximating a continuous object and differentiating a discrete one are
+   different questions.
 
 .. _normalised-guess:
 

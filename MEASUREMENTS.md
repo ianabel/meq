@@ -1813,3 +1813,76 @@ leaves it. That makes it a branch-selection question rather than a Jacobian one,
 CLAUDE.md's standing rule is that nothing may silently change which equilibrium
 is reported, and it is left alone — recorded here so that the next person to
 find the stale flag does not repair it without measuring the second row.
+
+### M-87
+
+**XP-4: the diverted machine from a TOML file, against freegs4e.** The driver on
+`examples/diverted-tokamak-xpoint.toml` — the same machine as M-82 and M-86, `k = 2`
+on 2642 elements, the stored Green's-function guess — and the reference is
+freegs4e's own `A_testtokamak_classic` at 129², an up-down asymmetric double null
+whose coil currents its control system solved for.
+
+**Nothing about the null is handed over.** MEQ finds it as three rows of its
+Newton, from a seed 7.07e-02 m away that the file states deliberately wrong;
+freegs4e finds it by a critical-point search on a finite-difference field. The
+agreement in its POSITION is therefore a result rather than a precondition, which
+is the structural difference from the limited case — `theDriverSolvesALimitedTokamak`
+hands BOTH codes the same limiter point, because freegs4e's own contact is a grid
+artefact that moves to the other side of the machine between 129² and 513².
+
+| | freegs4e, 129² | MEQ, `k = 2`, 2642 el | apart |
+|---|---|---|---|
+| X-point | ( 1.093144118, −0.603965084 ) | **( 1.093103369, −0.603529197 )** | **4.4e-04 m** |
+| `ψ_ax` | 8.271751445e-02 | **8.266003630e-02** | **6.9e-04** |
+| `ψ_bnd` | 3.240412551e-02 | **3.237931762e-02** | **7.7e-04** |
+| `I_p` | 2.0e+05 A | 2.0e+05 A | it is the constraint, 8.9e-13 |
+| profile scale | 1, by construction | 9.985753e-01 | 1.4e-03 |
+
+**THE SEED IS THE CONTROL.** It sits 7.071e-02 m from the reference and the
+border moves the point 7.043e-02 m, ending **161×** closer than it started. Every
+other row above is satisfiable by a border that never ran, since the seed is
+itself within 7.1e-02 m of the answer.
+
+**THE SUPPORT LOOP SETTLES IN THREE SWEEPS** — 14 + 3 + 2 Newton steps — and the
+driver reproduces `XPointBorder`'s in-process answer to **every printed digit**,
+including the per-sweep iteration counts. So the TOML route and the API route are
+the same computation.
+
+**THE FIELD, AND THE CONDUCTOR MODEL IS THE WHOLE OF THE DISAGREEMENT.** MEQ's
+`.nc` — `ψ*` at degree 3 on 129², the band dropped — against the reference
+bilinearly interpolated onto it. 5610 of MEQ's 12612 interior nodes are
+comparable, the rest lying outside freegs4e's own box; `scale` is
+`max |ψ_ref| = 1.051e-01`.
+
+| region | nodes | rel L2 | rel L∞ | worst at |
+|---|---|---|---|---|
+| everything comparable | 5610 | 7.116e-03 | **2.973e-01** | ( 1.751, −0.615 ) |
+| inside P2L's box | 10 | 1.385e-01 | 2.973e-01 | ( 1.751, −0.615 ) |
+| inside P2U's box | 10 | 9.474e-02 | 1.924e-01 | ( 1.751, +0.584 ) |
+| **minus those two and a 5 cm collar** | 5478 | **5.268e-04** | **1.818e-03** | ( 1.639, −0.034 ) |
+| the plasma, `ψ_ref > ψ_bnd` | 1342 | 7.176e-04 | 1.818e-03 | ( 1.639, −0.034 ) |
+
+**Every bit of the 2.97e-01 is inside two conductors**, and it is the conductor
+MODEL rather than either solver: `P2L` and `P2U` are freegs4e FILAMENTS — a point
+source with a logarithmic singularity — and MEQ's are 0.1 × 0.1 m rectangles
+meshed into the domain carrying a uniform current density. No refinement of
+either code closes that. `P1L` and `P1U` are `ShapedCoil`s and agree by
+construction; they contribute no nodes here at all, sitting at `z = ±1.10`
+outside the reference's `[ −1, 1 ]` box. Drop the two filaments and their collar
+and the two codes agree over 5478 nodes at **5.3e-04**, with the worst point on
+the outboard midplane near the plasma edge rather than anywhere near a coil.
+
+**AND ~7e-04 IS THE FLOOR THIS COMPARISON CAN MEAN.** `fgsref.py` fits a
+`UnivariateSpline` to its own analytic profile shape before solving and the fit
+MOVES it — 2.514e-05 of the amplitude in `p'` and **1.707e-02** in `ff'` — while
+the tables the TOML carries are the analytic shape, for the reasons
+`examples/diverted-tokamak.toml`'s header records. So the two codes are solving
+sources that differ at the per-cent level in `ff'`, and an agreement much tighter
+than what is measured would be evidence of a shared mistake rather than of two
+right answers.
+
+The comparison is
+`tools/freegs4e-benchmark/compare.py --free-boundary --exclude-box 1.75,-0.60,0.10,0.10 --exclude-box 1.75,0.60,0.10,0.10`;
+`--free-boundary` is what says there is no gauge shift and no `-meta.json`, both
+codes solving `ψ → 0` at infinity, and `--exclude-box` reports the conductors as
+a row of its own rather than dropping them silently.

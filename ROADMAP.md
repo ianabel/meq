@@ -24,7 +24,7 @@ manual and what a maintainer needs is `CLAUDE.md`. Git has them.
 | ~~`DRIVER-PLAN.md`~~ | stage 7 — **done**, and now `docs/running.rst`, `docs/output.rst` and `docs/configuration.rst` |
 | ~~`FLOW-PLAN.md`~~ | item 9, FL-0 to FL-8 — **done**, and now `docs/rotation.rst`, which carries the derivation `RotatingSource.hpp` defers to |
 | `INVERSION-PLAN.md` | item 10's machinery — **every stage done**, IN-A to IN-P |
-| `FREE-BOUNDARY-PLAN.md` | item 8 — FB-A, FB-0, FB-1, FB-2, FB-3, FB-5, FB-7 **done**, FB-4 **answered**, §10's XP-0 to XP-3 **done**, and **FB-6 met 2026-09-07**: MEQ reproduces `freegs4e`'s converged limited tokamak to 1.5e-04 in `ψ_ax`, with the limiter as a curve landing the same day. What is left of it is the conductor model — MEQ's rectangles against the reference's filaments, a reference-side job — and §10's diverted plasmas, whose gate has opened |
+| `FREE-BOUNDARY-PLAN.md` | item 8 — FB-A, FB-0, FB-1, FB-2, FB-3, FB-5, FB-7 **done**, FB-4 **answered**, §10's XP-0 to XP-4 **done**, and **FB-6 met 2026-09-07**: MEQ reproduces `freegs4e`'s converged limited tokamak to 1.5e-04 in `ψ_ax`, with the limiter as a curve landing the same day. What is left of it is the conductor model — MEQ's rectangles against the reference's filaments, a reference-side job — and §10's diverted plasmas, whose gate has opened |
 | `PLASMA-EDGE-PLAN.md` | a design out of FB-4, still **not scheduled**. Its own precondition — `j ≥ 1` green, and a machine case at `j ≥ 1` — is now met, so what holds it is the cost-benefit its own numbers make: `j ≥ 1` already gives `k+2` at `k ≤ j` with nothing built |
 | `MANTA-COUPLING.md` | the socket MaNTA presents, written from MaNTA's side. No field model is registered there yet |
 
@@ -245,10 +245,24 @@ Nothing is red and stages 0 to 7 are done, so the order is:
    So it is branch selection rather than a Jacobian fix, and it is left alone
    and recorded rather than taken.
 
-   **XP-4, a diverted machine case against `../freegs4e`, is now the next
-   rung**, and what it wants that neither XP-2 nor XP-3 built is the support's
-   own outer loop in the DRIVER: there is no TOML key for either border, so a
-   diverted run from a file does not exist yet.
+   **XP-4 IS DONE TOO, 2026-09-13**, and it is the rung that made the campaign
+   usable rather than only correct: `[boundary.xpoint]` seeds the X-point border
+   from a file and `[solver] PlasmaSupportSweeps` runs the support's outer loop
+   in the driver, which is what neither XP-2 nor XP-3 built.
+   `examples/diverted-tokamak-xpoint.toml` is the worked case and the driver
+   reproduces `XPointBorder`'s in-process answer to every printed digit.
+
+   **Against freegs4e's own diverted equilibrium**, with the null handed over in
+   neither direction — MEQ solves for it from a seed 7.07e-02 m away, freegs4e
+   finds it by a critical-point search — the X-point is **4.4e-04 m** apart,
+   `ψ_ax` 6.9e-04 and `ψ_bnd` 7.7e-04. The FIELD agrees at **5.3e-04** relative
+   `L2` over 5478 nodes, and the whole of the 2.97e-01 `L∞` is inside the two
+   conductors freegs4e models as FILAMENTS and MEQ meshes as rectangles — the
+   conductor model, not either solver. → **[M-87](MEASUREMENTS.md#m-87)**.
+
+   **What is left in §10 is a machine nobody here designed.** `tools/MAST-U*` is
+   a freegsnke configuration and is the next case up in complexity; the ladder
+   above is what it is to be run against.
 
    **`PLASMA-EDGE-PLAN.md` is NOT on this list**, deliberately. It is the route
    out of FB-4's `k ≤ j` cap. **Its preamble's precondition is now met** —

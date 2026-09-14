@@ -515,6 +515,11 @@ since that is an ellipse.
    * - ``NewtonAbsoluteTolerance``
      - ``1.0e-12``
      - 
+   * - ``PlasmaSupportSweeps``
+     - ``0``
+     - Freeze the plasma support within each solve and re-decide it between
+       them, at most this many times. ``0`` leaves it moving inside Newton.
+       Needs ``[source] ConfineToPlasma = true``; see the note below.
    * - ``AssemblyMode``
      - ``"threaded"``
      - ``"serial"`` or ``"threaded"``. Who computes the element-local work.
@@ -526,6 +531,35 @@ since that is an ellipse.
        build without oneMKL — a value the file *states* is refused there, one it
        merely inherits is downgraded. See :ref:`linear-trace-solver`.
        ``"cudss"`` parses but the driver refuses it — see the note below.
+
+.. note::
+
+   **What** ``PlasmaSupportSweeps`` **is for.** With ``ConfineToPlasma = true``
+   the set of elements carrying :math:`F` is a functional of the iterate: the
+   pointwise :math:`\Psi > 0` test moves with :math:`\psi`, and so does the
+   connected component the flood fill reaches. Its derivative is a surface term
+   on a moving edge and the Jacobian does not carry it.
+
+   On a **limited** machine that costs nothing measurable and the default of
+   ``0`` is right. On a **diverted** one it is the difference between a solve
+   and a failure: measured with one key changed and nothing else, the first
+   solve of ``examples/diverted-tokamak-xpoint.toml`` stalls at the 200-iteration
+   cap with the support moving, and converges in 14 steps with it held. So the
+   support is fixed within a solve and re-decided between solves — freeze,
+   solve, refreeze at the answer, solve again — and the loop stops when a sweep
+   changes nothing.
+
+   The run reports how many sweeps it took and whether it **settled**, and
+   writes both into the ``.nc`` as ``plasma_support_sweeps`` and
+   ``plasma_support_settled``. A loop that hit the cap has written the solution
+   of the problem its last sweep posed, which is not the same object as a
+   converged equilibrium; treat it as a failure to converge rather than as a
+   loose tolerance. Alternation between two supports is possible and the cap is
+   what bounds it.
+
+   The key is **refused without** ``ConfineToPlasma``, because there is then no
+   support to freeze and the loop would re-solve the identical problem until the
+   cap.
 
 .. note::
 
@@ -757,6 +791,78 @@ envelope theorem removes the position term, as it does for
    and the run would converge, at full order, to the equilibrium the file did
    not describe.
 
+``[boundary.xpoint]``
+~~~~~~~~~~~~~~~~~~~~~
+
+The same unknown as ``[boundary.limiter]`` — :math:`\psi_{\mathrm{bnd}}` — for a
+**diverted** plasma, where the bounding point is an X-point rather than a piece
+of hardware.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 16 60
+
+   * - Key
+     - Default
+     - Meaning
+   * - ``R``, ``Z``
+     - *both required if either is given*
+     - Where the X-point is **believed** to be, in metres.  A seed for an
+       unknown, not a prescription.  ``R`` must be strictly positive.
+
+A limiter contact is where the drawings say it is.  An X-point is not: it is a
+functional of the solution and moves as Newton moves.  So this block does not
+pin :math:`\psi_{\mathrm{bnd}}` at a point — it makes the point itself two more
+unknowns of the same bordered Newton, closing
+
+.. math::
+
+   q_r(r_X, z_X) = 0, \qquad
+   q_z(r_X, z_X) = 0, \qquad
+   \psi_{\mathrm{bnd}} - \psi_h(r_X, z_X) = 0
+
+on the same factorisation as everything else.  The two new unknowns cost **no
+extra backsolve**: the field residual does not contain :math:`(r_X, z_X)` at
+all — they reach it only through :math:`\psi_{\mathrm{bnd}}`, which has a column
+already — so both new columns are exactly zero and the system grows only in its
+dense corner.
+
+.. note::
+
+   **The seed is an answer's starting value, not the answer.**  A file whose
+   numbers are a few centimetres out describes the same equilibrium as one whose
+   numbers are exact, and the run reports where the solve actually put the
+   null — on the terminal, and in the ``.nc`` as ``xpoint_r``, ``xpoint_z`` and
+   ``xpoint_located``.  ``examples/diverted-tokamak-xpoint.toml`` deliberately
+   seeds 7 cm away and reports the distance it travelled.
+
+   What the seed **does** decide is **which** null.  This follows one saddle,
+   exactly as ``[source] PsiAxis`` follows one O-point, and a machine with two
+   nulls has two answers: the shipped example's is an up-down asymmetric double
+   null whose upper saddle sits 1.4 m away and 3.5e-03 further out in
+   :math:`\psi`.  Get the seed into the right half of the machine.
+
+.. warning::
+
+   ``[boundary.limiter]`` and ``[boundary.xpoint]`` are **alternatives** and
+   naming both is refused: all three routes to :math:`\psi_{\mathrm{bnd}}` pin
+   one unknown, and a precedence rule would decide which equilibrium the run
+   reports on the strength of key order.  Like a limiter, an X-point is refused
+   without ``[source] Normalised = true``.
+
+.. note::
+
+   **A diverted run wants** ``[solver] PlasmaSupportSweeps`` **as well.**  The
+   border makes the X-point's *position* an unknown, which it can be because it
+   is differentiable.  *Which elements carry current* is not, and on a diverted
+   plasma the level set is disconnected across the null, so that choice is a
+   real one.  See that key, and ``[source] ConfineToPlasma``.
+
+``examples/diverted-tokamak-xpoint.toml`` is the worked example, and
+``examples/diverted-tokamak.toml`` is the same machine with the contact
+prescribed instead — the comparison between the two is what
+``tests/convergence/XPointBorder.cpp`` measures.
+
 ``[boundary.exterior]``
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -809,14 +915,17 @@ solution, since :math:`\psi` outside the mesh is their sum against the basis.
 
 .. note::
 
-   **A limiter and an exterior coupling together do not yet converge.** Each
-   works on its own — :math:`\psi_{\mathrm{bnd}}` as a second border, and the
-   Gegenbauer coefficients as :math:`N` more — and the combination is the one
-   still open. With the limiter absent :math:`\psi_{\mathrm{bnd}}` stays at
-   zero, so the plasma edge is the :math:`\psi = 0` contour rather than a
-   limiter contact.
+   **A limiter and an exterior coupling together are the machine case**, and
+   they converge: :math:`\psi_{\mathrm{bnd}}` is one more border and the
+   Gegenbauer coefficients are :math:`N` more, all on one factorisation per
+   Newton step.  ``examples/limited-tokamak.toml`` is that case and reaches
+   freegs4e's own answer to 1.3e-04.  With the limiter absent
+   :math:`\psi_{\mathrm{bnd}}` stays at zero, so the plasma edge is the
+   :math:`\psi = 0` contour rather than a contact.
 
-``examples/free-boundary-halfdisc.toml`` is the worked example.
+``examples/free-boundary-halfdisc.toml`` is the worked example without a
+limiter; ``examples/limited-tokamak.toml`` and
+``examples/diverted-tokamak-xpoint.toml`` are the two machine cases.
 
 ``[output]``
 ------------

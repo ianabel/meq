@@ -2056,6 +2056,264 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesALimitedTokamak )
 	std::remove( "driver-acceptance-limited-k2.toml" );
 }
 
+/*
+ * XP-4: A DIVERTED MACHINE AGAINST freegs4e, DRIVEN FROM A FILE.
+ * FREE-BOUNDARY-PLAN.md section 10.6.
+ *
+ * WHAT IS NEW HERE AND NOT IN XPointBorder.cpp. That case establishes XP-3's
+ * BORDER -- that the three rows close, that they close on the saddle of the
+ * solved q_h, and that they reach XP-2's equilibrium to 1.9e-14 m -- in one
+ * process, by assembling the machine through the API. None of that exercises a
+ * single line of configuration or of apps/meq.cpp, and the free-boundary
+ * campaign's own history is that EVERY defect found wiring FB-6 was driver
+ * side: keys describing a box the run never built, a plasma support set on the
+ * wrong handle, a limiter block that parsed and did not reach the solver. A
+ * library test would have caught none of them.
+ *
+ * So this asserts the two things only a driver test can. That [boundary.xpoint]
+ * and [solver] PlasmaSupportSweeps REACH THE SOLVE at all -- an attribute that
+ * is absent is a configuration that silently did not arrive -- and that what
+ * comes out the other end is freegs4e's diverted equilibrium.
+ *
+ *
+ * AND THE COMPARISON IS SHARPER THAN THE LIMITED ONE, FOR A STRUCTURAL REASON.
+ *
+ * theDriverSolvesALimitedTokamak hands BOTH codes the same limiter point,
+ * because freegs4e's own contact is a grid artefact that moves to the other
+ * side of the machine between 129^2 and 513^2 -- so that case deliberately
+ * takes the contact-finding out of the comparison. Here nothing is handed over:
+ * the X-point is an unknown of MEQ's Newton and an output of freegs4e's
+ * critical-point search, found independently by two codes that share no code,
+ * and the agreement in its POSITION is a result rather than a precondition.
+ *
+ * WHAT IS NOT COMPARABLE, AND IT IS NAMED RATHER THAN TOLERATED. fgsref.py fits
+ * a UnivariateSpline to its own analytic profile shape before solving and the
+ * fit MOVES it -- 2.5e-05 of the amplitude in p' and 1.7e-02 in ff' -- while
+ * this file's tables are the analytic shape, for the reasons
+ * examples/diverted-tokamak.toml records. So the two codes are solving sources
+ * that differ at the per-cent level in ff', and an agreement much tighter than
+ * that would be evidence of a shared mistake rather than of two right answers.
+ * The bounds below are set at 1e-2 for exactly that reason and the measured
+ * numbers sit an order inside them.
+ */
+BOOST_AUTO_TEST_CASE( theDriverSolvesADivertedTokamak )
+{
+	/*
+	 * freegs4e's A_testtokamak_classic at 129^2, from
+	 * tools/freegs4e-benchmark/A_testtokamak_classic.json. TRANSCRIBED rather
+	 * than read, for theDriverSolvesALimitedTokamak's reason: the .npz and the
+	 * .json are gitignored and need freegs4e, scipy and a Picard solve to
+	 * recreate, so a test that read them would skip wherever they are absent --
+	 * which is every checkout but this one.
+	 *
+	 * THE ACTIVE NULL IS THE LOWER ONE. This machine is an up-down asymmetric
+	 * DOUBLE null and the upper saddle sits at ( 1.109128, +0.796088 ) carrying
+	 * psi = 2.891019e-02, which is 3.5e-03 further out -- so psi_bnd is the
+	 * lower one's flux to every digit and the seed in the TOML is what selects
+	 * it. A run that reported the upper null would agree with nothing below.
+	 */
+	double const referenceXPointR = 1.093144118182931;          // m
+	double const referenceXPointZ = -0.6039650838688502;        // m
+	double const referencePsiAxis = 8.271751444840184e-02;      // Wb/rad
+	double const referencePsiBoundary = 3.240412550738516e-02;  // Wb/rad
+	double const referenceCurrent = 2.0e5;                      // A, the target
+
+	// The seed the file carries, repeated here rather than parsed: a driver that
+	// read [boundary.xpoint] and then ignored it would agree with a test that
+	// also read the file, and disagree with this one.
+	double const seedR = 1.143144118182931;
+	double const seedZ = -0.5539650838688502;
+
+	BOOST_TEST_REQUIRE( run( "examples/diverted-tokamak-xpoint.toml" ) == 0,
+	                    "the driver did not exit 0 on the diverted tokamak" );
+
+	std::string const header = ncdumpHeader( "diverted-tokamak-xpoint.nc" );
+	BOOST_TEST_REQUIRE( !header.empty(),
+	                    "diverted-tokamak-xpoint.nc is unreadable" );
+
+	double const xR = headerAttribute( header, "xpoint_r" );
+	double const xZ = headerAttribute( header, "xpoint_z" );
+	double const located = headerAttribute( header, "xpoint_located" );
+	double const psiAxis = headerAttribute( header, "psi_axis" );
+	double const psiBoundary = headerAttribute( header, "psi_boundary" );
+	double const current = headerAttribute( header, "plasma_current" );
+	double const scale = headerAttribute( header, "profile_scale" );
+	double const border = headerAttribute( header, "normalisation_residual" );
+	double const axisFlux = headerAttribute( header, "axis_normalised_flux" );
+	double const sweeps = headerAttribute( header, "plasma_support_sweeps" );
+	double const settled = headerAttribute( header, "plasma_support_settled" );
+
+	/*
+	 * EVERY ONE OF THESE IS A PIECE OF WIRING THAT DID NOT EXIST BEFORE XP-4, so
+	 * an absent attribute is a key that silently did not reach the solver rather
+	 * than a missing line in a header. They are REQUIREs because every number
+	 * below is meaningless without them: a run where [boundary.xpoint] never
+	 * arrived would pin psi_bnd at zero and still converge, to an equilibrium
+	 * the file did not describe.
+	 */
+	BOOST_TEST_REQUIRE( std::isfinite( xR ),
+	                    "the run reported no xpoint_r, so [boundary.xpoint] did "
+	                    "not reach the solve" );
+	BOOST_TEST_REQUIRE( std::isfinite( xZ ),
+	                    "the run reported no xpoint_z, so [boundary.xpoint] did "
+	                    "not reach the solve" );
+	BOOST_TEST_REQUIRE( std::isfinite( sweeps ),
+	                    "the run reported no plasma_support_sweeps, so [solver] "
+	                    "PlasmaSupportSweeps did not reach the solve" );
+	BOOST_TEST_REQUIRE( located == 1.0,
+	                    "the X-point left the mesh during the solve, so the "
+	                    "reported position is the last one inside it rather "
+	                    "than a converged null" );
+
+	double const apart = std::hypot( xR - referenceXPointR,
+	                                 xZ - referenceXPointZ );
+	double const travelled = std::hypot( xR - seedR, xZ - seedZ );
+	double const seedApart = std::hypot( seedR - referenceXPointR,
+	                                     seedZ - referenceXPointZ );
+	double const axisError = std::fabs( psiAxis - referencePsiAxis )
+	                         /std::fabs( referencePsiAxis );
+	double const boundaryError = std::fabs( psiBoundary - referencePsiBoundary )
+	                             /std::fabs( referencePsiBoundary );
+	double const currentError = std::fabs( current - referenceCurrent )
+	                            /referenceCurrent;
+
+	std::printf( "\n  A DIVERTED TOKAMAK, MEQ AGAINST freegs4e\n"
+	             "                          freegs4e              MEQ      apart\n"
+	             "    X-point R     %16.9e %16.9e\n"
+	             "    X-point Z     %16.9e %16.9e  %9.1e m\n"
+	             "    psi_ax        %16.9e %16.9e  %9.1e\n"
+	             "    psi_bnd       %16.9e %16.9e  %9.1e\n"
+	             "    I_p           %16.9e %16.9e  %9.1e\n"
+	             "    profile scale %16s %16.9e\n"
+	             "    the seed was %.3e m away and the border moved it %.3e m\n"
+	             "    the support took %d sweep%s and %s, psi_ax border %9.1e\n",
+	             referenceXPointR, xR,
+	             referenceXPointZ, xZ, apart,
+	             referencePsiAxis, psiAxis, axisError,
+	             referencePsiBoundary, psiBoundary, boundaryError,
+	             referenceCurrent, current, currentError,
+	             "-", scale,
+	             seedApart, travelled,
+	             static_cast<int>( sweeps ), sweeps == 1.0 ? "" : "s",
+	             settled == 1.0 ? "settled" : "DID NOT SETTLE", border );
+	std::fflush( stdout );
+
+	/*
+	 * THE HEADLINE, AND IT IS THE ONE NUMBER NEITHER CODE WAS TOLD.
+	 *
+	 * MEQ finds the null as three rows of its Newton; freegs4e finds it by a
+	 * critical-point search on a 129^2 finite-difference field. Nothing is
+	 * handed over. 5 mm is a per cent of this machine's 0.467 m minor radius and
+	 * a third of the reference's own cell diagonal, which is the floor a 129^2
+	 * search sits on.
+	 */
+	BOOST_TEST( apart < 5.0e-3,
+	            "MEQ puts the X-point at ( " << xR << ", " << xZ << " ) and "
+	            "freegs4e at ( " << referenceXPointR << ", "
+	            << referenceXPointZ << " ), " << apart << " m apart. MEASURED "
+	            "4.4e-04 m. This is the number neither code was told, so a "
+	            "disagreement here is the equilibrium and not the constraint. "
+	            "If it has grown, check WHICH null was found before anything "
+	            "else -- the upper saddle is at ( 1.109128, +0.796088 ) and a "
+	            "run that converged to it would land about 1.4 m away" );
+
+	/*
+	 * AND THE CONTROL, WHICH IS WHAT SAYS THE BORDER DID ANY WORK.
+	 *
+	 * The seed is deliberately 7.1e-02 m from the answer -- about two thirds of
+	 * an element, and roughly what a machine's drawings would get you to -- so a
+	 * border that were inert, or a driver that echoed the configuration back
+	 * into the .nc, would report the seed. Every assertion above would then be
+	 * satisfied by the FILE rather than by the solve, since the seed is itself
+	 * within 7.1e-02 m of the reference.
+	 *
+	 * Stated as "it ended up closer than it started" rather than as a distance,
+	 * because that is the property that cannot be met by accident.
+	 */
+	BOOST_TEST( apart < 0.1*seedApart,
+	            "the reported X-point is " << apart << " m from freegs4e's and "
+	            "the SEED was " << seedApart << " m from it, so the border "
+	            "improved on the file by less than a factor of ten. MEASURED a "
+	            "factor of 161. A border that never moved the point would report "
+	            "the seed and satisfy every other bound here" );
+	BOOST_TEST( travelled > 1.0e-2,
+	            "the X-point moved " << travelled << " m from its seed, where the "
+	            "file puts the seed 7.1e-02 m from the answer. MEASURED 7.0e-02. "
+	            "A point that has not moved is a border that is not solving for "
+	            "it" );
+
+	BOOST_TEST( axisError < 1.0e-2,
+	            "psi_ax is " << axisError << " from freegs4e's "
+	            << referencePsiAxis << ". MEASURED 7.0e-04. The profile tables "
+	            "here are the ANALYTIC shape and the reference solved a spline "
+	            "fit of it, 1.7e-02 of the amplitude away in ff', so a per cent "
+	            "is the floor this comparison can mean -- see "
+	            "examples/diverted-tokamak.toml's header. Look at the tables and "
+	            "at which null was found before the solver" );
+	BOOST_TEST( boundaryError < 1.0e-2,
+	            "psi_bnd is " << boundaryError << " from freegs4e's "
+	            << referencePsiBoundary << ". MEASURED 7.7e-04. On a diverted "
+	            "plasma psi_bnd IS the active null's flux, so this and the "
+	            "X-point position are two views of one disagreement rather than "
+	            "two independent checks" );
+
+	// The amplitude is the number a units or conversion error moves by ORDERS
+	// rather than by percents, and the tables were built to freegs4e's own
+	// amplitude so it is 1 by construction. Measured 9.986e-01.
+	BOOST_TEST( std::fabs( scale - 1.0 ) < 2.0e-2,
+	            "the profile scale came back as " << scale << " where the tables "
+	            "were built to make it 1. A scale that is not O( 1 ) is the ONLY "
+	            "tell that the tables hold dp/dpsi where meq wants dp/dPsi -- "
+	            "with PlasmaCurrent set the border absorbs the factor and the "
+	            "equilibrium comes out right anyway" );
+
+	// I_p is the constraint rather than an outcome, so this is the border
+	// closing and not a comparison with freegs4e.
+	BOOST_TEST( currentError < 1.0e-4,
+	            "the delivered plasma current is " << current << " A against the "
+	            << referenceCurrent << " A [source] PlasmaCurrent asked for, "
+	            "which is a constraint: this is the border failing to close" );
+	BOOST_TEST( std::fabs( border ) < 1.0e-9,
+	            "psi_ax - max psi_h is " << border << ", so the normalisation "
+	            "border did not close" );
+
+	/*
+	 * THE SUPPORT'S OUTER LOOP HAS TO HAVE REACHED A FIXED POINT, and this is
+	 * the assertion that is not about freegs4e at all.
+	 *
+	 * The equilibrium written is the solution of the problem the LAST sweep
+	 * posed -- that support, that threshold -- and the driver deliberately does
+	 * not thaw afterwards. So an UNSETTLED loop has written an answer whose own
+	 * support disagrees with it, which is a different object from a converged
+	 * equilibrium however small its residual is.
+	 */
+	BOOST_TEST( settled == 1.0,
+	            "the plasma support did not settle in " << sweeps << " sweeps. "
+	            "MEASURED 3 on this fixture. Either raise [solver] "
+	            "PlasmaSupportSweeps, or look at whether it is ALTERNATING "
+	            "between two supports rather than converging -- "
+	            "FREE-BOUNDARY-PLAN.md section 10.5 names that as a real "
+	            "possibility and the cap is what bounds it" );
+	BOOST_TEST( sweeps > 1.0,
+	            "the support loop ran " << sweeps << " sweep, so nothing was "
+	            "re-decided and the key is doing the work of a plain solve. "
+	            "MEASURED 3" );
+
+	/*
+	 * AND THE REPORTED psi_ax HAS TO BE THE FLUX AT A MAGNETIC AXIS, which is
+	 * theDriverSolvesALimitedTokamak's own final check and is not a comparison
+	 * with anything: psi_ax is the largest NODAL value of psi_h, a definition
+	 * chosen so the border's row is exactly -e_j and one that says nothing
+	 * whatever about magnetic axes. A single spiking dof satisfies it exactly.
+	 */
+	BOOST_TEST_REQUIRE( std::isfinite( axisFlux ),
+	                    "the run located no magnetic axis at all" );
+	BOOST_TEST( std::fabs( axisFlux - 1.0 ) < 1.0e-2,
+	            "the normalised flux at the located O-point is " << axisFlux
+	            << " where a magnetic axis reads 1 by definition, so psi_ax is "
+	            "not the flux at one" );
+}
+
 /// The ( Psi, theta ) flux-surface file, through the driver, on the CURVED
 /// path: INVERSION-PLAN.md stage IN-6.
 ///

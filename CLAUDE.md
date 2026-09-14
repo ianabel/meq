@@ -557,7 +557,7 @@ their own file:
 |---|---|---|
 | toroidal flow | FL-0 to FL-8, **done** | `docs/rotation.rst` is the derivation, and `CLAUDE_FLOW.md` the record |
 | solution inversion | IN-A to IN-P, **every stage done** | `INVERSION-PLAN.md`, and `CLAUDE_INVERSION.md` |
-| free boundary | FB-A to FB-7 **done or answered**, FB-6 **met**, and §10's XP-0 to XP-3 **done** — the X-point is two unknowns of the bordered Newton | `FREE-BOUNDARY-PLAN.md`, and `CLAUDE_FB.md` |
+| free boundary | FB-A to FB-7 **done or answered**, FB-6 **met**, and §10's XP-0 to XP-4 **done** — the X-point is two unknowns of the bordered Newton, driveable from a file, and MEQ reproduces `freegs4e`'s DIVERTED equilibrium | `FREE-BOUNDARY-PLAN.md`, and `CLAUDE_FB.md` |
 
 The two plan files that had nothing left in them are gone, converted to `docs/`:
 `DRIVER-PLAN.md` was stage 7 and `FLOW-PLAN.md` was the flow campaign. Git has
@@ -677,10 +677,13 @@ are **`FreeBoundaryCoupling`** and **`naming`**, and back-to-back runs of the
 same tree read them at 281.8 s / 262.6 s and 311.7 s / 294.0 s — within a factor
 of 1.1 of each other in both runs, so `-j4` cannot overlap them once everything
 else has finished and the run is very nearly the cost of the longest chain
-rather than of the total work. `DriverAcceptance` read 77.3 s and 94.4 s;
-`XPointBorder`, XP-3's acceptance, 35.4 s and 49.7 s for five solves of the
-diverted machine. **Two readings of one tree, 477 s against 545 s**, which is
-the paragraph below making its own point rather than anything having changed.
+rather than of the total work. `DriverAcceptance` read 77.3 s, 94.4 s and 80.3 s;
+`XPointBorder`, XP-3's acceptance, 35.4 s, 49.7 s and 34.0 s for five solves of
+the diverted machine. **Three readings of one tree, 477 s, 545 s and 443 s**,
+which is the paragraph below making its own point rather than anything having
+changed. **The third of those carries XP-4's driver run and is the FASTEST**:
+`DriverAcceptance` grew a whole diverted free-boundary solve, 11.5 s standalone,
+and read 14 s LOWER than its previous figure. Read the ratios.
 
 **AND THE `FreeBoundaryCoupling` FIGURE HAS BEEN 276 s, 433.8 s AND 381.7 s
 WITHOUT THE CODE BEING THE VARIABLE ANY OF THOSE TIMES.** 276 s is stale — the

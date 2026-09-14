@@ -318,17 +318,92 @@ outboard midplane at :math:`129^2` and on the inboard shoulder, 0.6 m away, at
 :math:`513^2`. Mixing a reference's currents with another's contact compares two
 different machines.
 
+The diverted free-boundary comparison
+-------------------------------------
+
+The comparison above hands **both** codes the same limiter contact, on purpose:
+``freegs4e``'s own contact is the maximum over a ring of grid cells and moves
+0.6 m between :math:`129^2` and :math:`513^2`, so pinning it takes the
+contact-finding out of the comparison.
+
+The diverted case leaves it in. ``examples/diverted-tokamak-xpoint.toml`` is
+``freegs4e``'s ``A_testtokamak_classic`` — the FreeGS worked example's geometry,
+an up-down asymmetric double null whose four coil currents its control system
+solved for — and MEQ is told **nothing** about where the null is beyond a seed
+deliberately placed 7.1 cm away. It solves for the X-point as two more unknowns
+of its Newton (``[boundary.xpoint]``, see :doc:`configuration`); ``freegs4e``
+finds it by a critical-point search on a finite-difference field. So the
+agreement in its **position** is a result rather than a precondition.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 28 28 20
+
+   * - quantity
+     - ``freegs4e``, :math:`129^2`
+     - MEQ, :math:`k = 2`, 2642 el
+     - apart
+   * - X-point
+     - ( 1.093144118, −0.603965084 )
+     - ( 1.093103369, −0.603529197 )
+     - **4.4e-04 m**
+   * - :math:`\psi_{\mathrm{ax}}`
+     - 8.271751445e-02
+     - 8.266003630e-02
+     - 6.9e-04
+   * - :math:`\psi_{\mathrm{bnd}}`
+     - 3.240412551e-02
+     - 3.237931762e-02
+     - 7.7e-04
+   * - profile scale
+     - 1, by construction
+     - 9.985753e-01
+     - 1.4e-03
+   * - :math:`I_p`
+     - 2.0e+05 A
+     - 2.000000e+05 A
+     - it is the constraint
+
+On a diverted plasma :math:`\psi_{\mathrm{bnd}}` **is** the active null's flux,
+so the second and third rows are two views of one disagreement rather than two
+independent checks. The upper saddle carries 2.891019e-02, 3.5e-03 further out,
+which is what makes this a single-active-null equilibrium.
+
+Two things about reading that table.
+
+**The floor is the profile fit, not either discretisation.** ``fgsref.py`` fits a
+spline to its own analytic profile shape before solving, and the fit moves it —
+1.7e-02 of the amplitude in :math:`ff'` — while MEQ's tables are the analytic
+shape, because that extends below :math:`\Psi = 0` into the vacuum where a
+tabulation on :math:`\psi_n \in [0, 1]` cannot. The two codes are therefore
+solving sources that differ at the per-cent level, and agreement much tighter
+than what is measured would be evidence of a shared mistake.
+
+**The pointwise field comparison is dominated by the conductor model, and only
+by it.** Over every comparable node the relative :math:`L^\infty` in :math:`\psi`
+is 0.30, which read alone is a failure — and all of it is inside two coils.
+``freegs4e``'s default ``Coil`` is an exact **filament**, a point source with a
+logarithmic singularity; MEQ's conductors are rectangles meshed into the domain
+carrying a uniform current density. Excluded with a 5 cm collar, 5478 nodes agree
+at **5.3e-04** relative :math:`L^2` and 1.8e-03 :math:`L^\infty`, worst on the
+outboard midplane near the plasma edge rather than anywhere near a conductor. The
+benchmark's ``compare.py --exclude-box`` reports the excluded region as a row of
+its own rather than dropping it.
+
 What it does not establish
 --------------------------
 
-**Nothing about a diverted plasma.** Both comparisons above are limited
-configurations. Every other case in the fixed-boundary table has an X-point,
-and MEQ's plasma-support test is limiter-only; see
-:doc:`normalised_flux`.
+**Nothing about a found limiter contact under a free boundary.** In the limited
+comparison the contact is prescribed to MEQ as a point rather than searched for
+on the limiter curve, so the surface MEQ reports is the one through the point it
+is given. Finding it on a meshed curve is a capability
+(``[boundary.limiter] SurfaceAttribute``) and is checked against its own
+reference, not against ``freegs4e``.
 
-**Nothing about a found limiter contact.** The contact is prescribed to MEQ as a
-point rather than searched for on the limiter curve, so the surface MEQ reports
-is the one through the point it is given.
+**Nothing about the conductor model.** The diverted comparison above measures
+it and cannot resolve it: two of that machine's four coils are filaments in the
+reference and meshed rectangles in MEQ, which is a modelling difference no
+refinement of either code closes.
 
 **Nothing about the flux-surface machinery.** Only :math:`\psi` on a grid is
 differenced. The quantities in :doc:`surface_geometry` are checked against
