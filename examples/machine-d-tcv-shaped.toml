@@ -1,0 +1,317 @@
+# MACHINE-D-TCV-SHAPED -- A FREE-BOUNDARY MEQ RUN OF
+# freegs4e's D_tcv_conventional.
+#
+# WRITTEN BY tools/freegs4e-benchmark/make_diverted_case.py FROM THE
+# REFERENCE ITSELF -- every number here, the conductor rectangles and
+# the mesh included, is read out of the .npz and .json that script was
+# given.  Do not hand-edit it: re-run tools/freegs4e-benchmark/
+# make_all.sh.
+#
+# Conventional aspect ratio, strongly elongated, twenty small shaping
+# coils.
+#
+# THE REFERENCE'S OWN ANSWER, for anything comparing against it:
+#
+#   psi_axis   2.173601197429605e-02   axis at ( 0.914962, -0.002296 )
+#   psi_bndry  3.255279867897931e-03
+#   I_p        1.200000001701083e+05 A
+#   R0 0.8929  a 0.2860  A 3.392  kappa 2.0815  delta +0.5338
+#   X-point    ( 0.749879848, +0.550046158 ) psi 3.255279867897931e-03  ACTIVE
+#   X-point    ( 0.749877306, -0.550044664 ) psi 3.255279747788421e-03
+#   X-point    ( 0.495764376, +0.331575604 ) psi -2.692176466535791e-03
+#   X-point    ( 0.475689257, +0.216374966 ) psi -2.718639986353312e-03
+#   ( and 35 more saddles further out, at the coil nulls )
+#
+# ONE DELIBERATE DEVIATION FROM THE REFERENCE, and it is the same one
+# examples/diverted-tokamak.toml records: fgsref.py fits a
+# UnivariateSpline to its own analytic profile shape before solving and
+# the fit MOVES it, by 7.797e-06 of the amplitude in p' and 1.346e-02 in ff'.
+# The tables here are the ANALYTIC shape, because it extends below
+# Psi = 0 into the vacuum -- which a tabulation on psi_n in [ 0, 1 ]
+# cannot -- and because its edge behaviour is exactly j = 2, which FB-4
+# says decides the rate and which ConfineToPlasma needs.  So this is a
+# comparison at the per-cent level and not to the last digit.
+#
+# RUN IT WITH meq-run, WHICH MAKES THE MESH:
+#
+#     ./build/meq-run examples/machine-d-tcv-shaped.toml
+
+[mesh]
+File = "examples/machine-d-tcv-shaped.msh"
+
+# THE DISC IS NOT GAMMA.  D_h is cut from this mesh at
+# [boundary.exterior] Radius = 2.45, which has to fit strictly inside.
+# Every conductor lies within 1.9555 m of the origin.
+[mesh.generate]
+Tool = "halfdisc"
+Radius = 2.65
+Size = 0.1855
+PlasmaRMin = 0.6140
+PlasmaRMax = 1.1860
+PlasmaZMin = -0.7150
+PlasmaZMax = 0.7150
+PlasmaSize = 0.0429
+# The smallest conductor here is 0.0167 m in its shorter half-extent.
+CoilSize = 0.04
+
+[discretisation]
+PolynomialDegree = 2
+
+[solver]
+NewtonMaxIterations = 200
+NewtonRelativeTolerance = 1.0e-10
+# The plasma support is a SET, so its derivative is a surface term the
+# Jacobian does not have: it is frozen within each solve and re-decided
+# between them.  MEASUREMENTS.md M-82 -- without this the first solve
+# stalls at the iteration cap rather than running slowly.
+PlasmaSupportSweeps = 4
+
+[source]
+Type = "mhd"
+Normalised = true
+ConfineToPlasma = true
+# THE STARTING VALUE OF AN UNKNOWN, taken from the peak of the cold
+# guess below.  psi_ax is a functional of the solution -- a bordered
+# Newton row and not data -- so what a file supplies is where to START,
+# and the best estimate available before solving is the best available
+# guess's own peak.  The reference converged to 2.173601e-02, which is 18%
+# away: this is a basin and not an answer.
+PsiAxis = 1.778170099e-02
+PlasmaCurrent = 1.2000000017e+05
+Mu0 = 1.25663706212e-6
+PPrimeFile = "examples/machine-d-tcv-shaped-pprime.dat"
+GGPrimeFile = "examples/machine-d-tcv-shaped-ggprime.dat"
+
+# THE CONDUCTORS, WRITTEN ONCE.  [mesh.generate] derives the mesher's
+# --coil rectangles from these blocks, in this order, so the mesh is
+# aligned to the conductors the solve integrates over.  Currents are the
+# TOTAL through each cross-section: freegs4e's turns, circuit
+# multipliers and solenoid windings are all resolved into them by
+# tools/freegs4e-benchmark/conductors.py.
+# This machine's are shaped.
+
+[[coils]]
+Name = "E1"
+CentreR = 0.505000
+CentreZ = -0.700000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 1.9043489903e+04
+
+[[coils]]
+Name = "E2"
+CentreR = 0.505000
+CentreZ = -0.500000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -2.0483608691e+03
+
+[[coils]]
+Name = "E3"
+CentreR = 0.505000
+CentreZ = -0.300000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -2.0342977334e+04
+
+[[coils]]
+Name = "E4"
+CentreR = 0.505000
+CentreZ = -0.100000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -2.4287071191e+04
+
+[[coils]]
+Name = "E5"
+CentreR = 0.505000
+CentreZ = 0.100000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -2.3731750306e+04
+
+[[coils]]
+Name = "E6"
+CentreR = 0.505000
+CentreZ = 0.300000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.9196806859e+04
+
+[[coils]]
+Name = "E7"
+CentreR = 0.505000
+CentreZ = 0.500000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.1560237309e+03
+
+[[coils]]
+Name = "E8"
+CentreR = 0.505000
+CentreZ = 0.700000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 1.6829876083e+04
+
+[[coils]]
+Name = "F1"
+CentreR = 1.309500
+CentreZ = -0.770000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -4.5175826961e+03
+
+[[coils]]
+Name = "F2"
+CentreR = 1.309500
+CentreZ = -0.610000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.0637437833e+04
+
+[[coils]]
+Name = "F3"
+CentreR = 1.309500
+CentreZ = -0.310000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.6185038236e+04
+
+[[coils]]
+Name = "F4"
+CentreR = 1.309500
+CentreZ = -0.150000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.2229908375e+04
+
+[[coils]]
+Name = "F5"
+CentreR = 1.309500
+CentreZ = 0.150000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.2884329441e+04
+
+[[coils]]
+Name = "F6"
+CentreR = 1.309500
+CentreZ = 0.310000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.7600284358e+04
+
+[[coils]]
+Name = "F7"
+CentreR = 1.309500
+CentreZ = 0.610000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.3784336956e+04
+
+[[coils]]
+Name = "F8"
+CentreR = 1.309500
+CentreZ = 0.770000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -8.1425026744e+03
+
+[[coils]]
+Name = "T1"
+CentreR = 1.554000
+CentreZ = -0.780000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -5.1361285852e+03
+
+[[coils]]
+Name = "T2"
+CentreR = 1.717000
+CentreZ = -0.780000
+HalfWidth = 0.016650
+HalfHeight = 0.050000
+Current = -5.1214746743e+03
+
+[[coils]]
+Name = "T3"
+CentreR = 1.754000
+CentreZ = -0.780000
+HalfWidth = 0.016650
+HalfHeight = 0.050000
+Current = -5.0794136602e+03
+
+[[coils]]
+Name = "OH.OH1"
+CentreR = 0.430000
+CentreZ = 0.000000
+HalfWidth = 0.020000
+HalfHeight = 0.930000
+Current = 2.2509400798e+04
+
+[[coils]]
+Name = "OH.C1"
+CentreR = 0.621500
+CentreZ = -1.110000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 2.2509400798e+04
+
+[[coils]]
+Name = "OH.C2"
+CentreR = 0.621500
+CentreZ = 1.110000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 2.2509400798e+04
+
+[[coils]]
+Name = "OH.D1"
+CentreR = 1.176500
+CentreZ = -1.170000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 2.2509400798e+04
+
+[[coils]]
+Name = "OH.D2"
+CentreR = 1.176500
+CentreZ = 1.170000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 2.2509400798e+04
+
+[boundary]
+Type = "zero"
+
+# THE TARGET NULL, as an INITIAL VALUE of two unknowns rather than a
+# prescription: XP-3's border closes q_r = q_z = 0 and
+# psi_bnd = psi_h( r_X, z_X ) on the same Newton, and the seed selects
+# WHICH saddle is followed.
+#
+# THIS IS THE SHAPE THE OPERATOR ASKED FOR and not the null the
+# reference achieved, which is 1.1000 m away.  That distinction is the
+# whole of what makes this a cold start.
+[boundary.xpoint]
+R = 0.750000000000
+Z = -0.550000000000
+
+[boundary.exterior]
+Radius = 2.45
+CentreZ = 0.0
+Modes = 10
+
+# NOT A NICETY.  A cold start on a free-boundary machine case wanders
+# and does not converge; the guess is part of the problem statement.
+# tools/freegs4e-benchmark/mkexactguess.py builds it by summing the
+# reference's own Green's functions over MEQ's half-disc.
+[initialguess]
+Type = "gridfunction"
+File = "examples/machine-d-tcv-shaped-guess.gf"
+MeshFile = "examples/machine-d-tcv-shaped-guess.mesh"
+
+[output]
+Prefix = "machine-d-tcv-shaped"
+GridNR = 129
+GridNZ = 129

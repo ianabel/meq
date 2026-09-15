@@ -56,6 +56,61 @@ Shapely then fails to build on a missing `geos_c.h`. Relaxed, `numpy 2.5.2` /
 `shapely 2.1.2` / `numba 0.67` work. `numba` looks optional and is not:
 `critical.py`'s fallback calls `warnings.warn` without importing `warnings`.
 
+## `--shaped`: the reference's conductors with the extent MEQ gives them
+
+`freegs4e`'s default `Coil` is a **filament** — a point source with a log
+singularity in `psi` — and its `Solenoid` is a stack of them. MEQ's `meq::Coil`
+is a **rectangle** carrying a uniform current density. Six of the seven diverted
+references are mostly filaments, so a comparison against them measures two
+conductor models on top of two solvers, and `MEASUREMENTS.md` M-87 puts the
+whole of a 2.97e-01 relative `L-infinity` down to exactly that.
+
+`shaped.py` closes it in the reference rather than in MEQ, using freegs4e's own
+`shaped_coil.ShapedCoil`: a polygon, triangulated, with a Gauss rule per
+triangle, so `controlPsi` is the AVERAGE Greens over the cross-section. That is
+MEQ's model term for term.
+
+```sh
+PYTHONPATH=/home/ian/projects/freegs4e venv/bin/python fgsref.py --shaped
+venv/bin/python make_diverted_case.py X_case_shaped.npz X_case_shaped.json \
+    ../../examples machine-x-shaped
+```
+
+**It writes `<case>_shaped.npz`, never `<case>.npz`.** The two describe
+different machines, and a shaped run written over the filament baseline is
+indistinguishable from it afterwards — which happened once. The file and the
+machine label both carry `conductor_model`.
+
+**Regenerate the MEQ side from the shaped `.npz`.** These references come from
+an INVERSE solve against X-point and isoflux constraints, so giving the
+conductors extent changes the currents it picks — up to 38% relative on DIII-D's
+F3A. Reusing a configuration built from the filament reference would measure
+that instead.
+
+**Both sets of configurations are tracked in `examples/`**, `machine-x-*.toml`
+from the filament references and `machine-x-*-shaped.toml` from these, because
+they describe DIFFERENT MACHINES and neither is derivable from the other:
+freegs4e's inverse solve picks different coil currents once the conductors have
+extent. `make_all.sh --shaped` regenerates the second set, and wants
+`fgsref.py --shaped` to have been run first.
+
+**MOST OF THEM DO NOT YET CONVERGE FROM A COLD START, ON EITHER SET, AND THAT IS
+NOT THE CONDUCTOR MODEL.** Run both ways with the same settings, five of the
+seven behave identically — B and E fail at residuals agreeing to three figures,
+A converges to a `psi_ax` the axis guard rejects — which is M-89's finding that
+DIII-D is the one of the seven MEQ solves genuinely cold. The two that differ go
+in OPPOSITE directions, TCV gaining a solve and MAST-U losing one, and both are
+machines with a `Solenoid`, where the conversion stops being a perturbation and
+the inverse solve moves root. `MEASUREMENTS.md` M-96 has the table. A tracked
+configuration that does not converge is a case waiting for a seeded start, not a
+broken file.
+
+**The rectangles are `conductors.py`'s, including `shrink_to_fit`'s caps** — the
+same ones `[[coils]]` and `tools/mesh/halfdisc.py` get. Pass the same `half` to
+both sides or the comparison is about two different machines again. On DIII-D
+the conversion is worth **5.0x in relative `L2` and 7.2x in `L-infinity`**, and
+about 2x on the nodes *outside* the conductors as well; M-96 has the table.
+
 ## Four traps, each of which produces a plausible wrong answer
 
 **freegs4e's profiles are `dp/dψ`, NOT `dp/dψ_n`.** Its own docstring says

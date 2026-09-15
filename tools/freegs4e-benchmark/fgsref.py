@@ -110,6 +110,16 @@ def install_vcycle(eq, order, levels):
         eq.nx, eq.ny, gen, nlevels=levels, ncycle=2, niter=20, direct=True)
     return gen
 NPSI = 256
+# --shaped: rebuild the machine with every conductor a ShapedCoil on the
+# rectangle MEQ meshes, instead of the filaments and solenoid stacks the machine
+# definitions use.  See shaped.py, and MEASUREMENTS.md M-87 for what the
+# difference is worth on the diverted DIII-D comparison -- the whole of a
+# 2.97e-01 relative L-infinity, all of it inside the conductors.  It changes the
+# REFERENCE's physics, deliberately, so it is off by default and the run says so
+# in its own metadata rather than leaving two incomparable files with one name.
+SHAPED = False
+SHAPED_HALF = None     # None: shaped.py's own default, which is conductors.py's
+
 RTOL = 1.0e-9      # Picard: relative change in psi
 MAXITS = 400
 
@@ -1020,7 +1030,8 @@ def shape_params(lR, lZ):
 # ----------------------------------------------------------------------------
 def run_case(case):
     t0 = time.time()
-    rec = dict(name=case["name"], machine=case["machine"], notes=case["notes"])
+    rec = dict(name=case["name"], machine=machine_label(case),
+               conductor_model=conductor_model(), notes=case["notes"])
     log = []
 
     def say(*a):
@@ -1029,6 +1040,17 @@ def run_case(case):
         log.append(s)
 
     tok = case["make"]()
+    if SHAPED:
+        import shaped as _shaped
+        import conductors as _conductors
+        half = (_conductors.DEFAULT_HALF if SHAPED_HALF is None else SHAPED_HALF)
+        tok, moved = _shaped.shaped_machine(tok, half=half)
+        say("conductors rebuilt as ShapedCoil, half = %.4f m" % half)
+        for label, hw0, hh0, hw, hh in moved:
+            say("  %s shrunk %.4f x %.4f -> %.4f x %.4f m"
+                % (label, hw0, hh0, hw, hh))
+        if not moved:
+            say("  nothing shrunk: no two rectangles intersect at this half")
     eq = build_eq(case, tok)
     if HAGENOW:
         from freegs4e import boundary as _bnd
@@ -1367,7 +1389,7 @@ def run_case(case):
                 "formulation -- only f(psi_n) and hence B_tor.",
     }
 
-    npz = os.path.join(OUTDIR, case["name"] + ".npz")
+    npz = os.path.join(OUTDIR, case_stem(case) + ".npz")
     np.savez_compressed(
         npz,
         R=eq.R[:, 0].astype(float),
@@ -1386,7 +1408,8 @@ def run_case(case):
         Ip=np.float64(Ip_ach),
         Raxis=np.float64(opt[0][0]),
         Zaxis=np.float64(opt[0][1]),
-        machine=np.array(case["machine"]),
+        machine=np.array(machine_label(case)),
+        conductor_model=np.array(conductor_model()),
         order=np.int64(case["order"]),
         # extras
         Jtor=Jtor.astype(float),
@@ -1438,12 +1461,39 @@ def run_case(case):
             "core_mask; Delta* psi = -mu0*R*Jtor"),
     )
     rec["npz"] = npz
-    rec["json"] = os.path.join(OUTDIR, case["name"] + ".json")
+    rec["json"] = os.path.join(OUTDIR, case_stem(case) + ".json")
     with open(rec["json"], "w") as fh:
         json.dump(rec, fh, indent=2, sort_keys=True)
     say("wrote " + npz)
     rec["log"] = log
     return rec
+
+
+def case_stem(case):
+	"""The filename stem for this case, which --shaped changes.
+
+	A shaped reference and a filament one are DIFFERENT MACHINES, so they must
+	not share a filename: writing both to `<case>.npz` silently replaces the
+	baseline every measurement in MEASUREMENTS.md was taken against, with a file
+	that looks exactly like it.  Paid for once.
+	"""
+	return case["name"] + ("_shaped" if SHAPED else "")
+
+
+def machine_label(case):
+	"""The machine's name, saying so when --shaped changed its conductors.
+
+	A shaped reference and a filament one describe DIFFERENT MACHINES and are
+	written to the same filename, so the difference has to travel with the file
+	or the two are indistinguishable once saved.  conductor_model below is the
+	machine-readable half of the same statement.
+	"""
+	return (case["machine"] + " + ShapedCoil conductors"
+	        if SHAPED else case["machine"])
+
+
+def conductor_model():
+	return "shaped" if SHAPED else "as-defined"
 
 
 def main():
@@ -1491,6 +1541,12 @@ def main():
             vcycle = int(a.split("=", 1)[1])
         elif a.startswith("--seed-from="):
             seed_from = a.split("=", 1)[1]
+        elif a == "--shaped":
+            global SHAPED
+            SHAPED = True
+        elif a.startswith("--shaped-half="):
+            global SHAPED_HALF
+            SHAPED_HALF = float(a.split("=", 1)[1])
         elif a == "--hagenow":
             global HAGENOW
             HAGENOW = True
@@ -1576,10 +1632,10 @@ def main():
         except Exception as exc:
             import traceback
             traceback.print_exc()
-            results.append(dict(name=case["name"], machine=case["machine"],
+            results.append(dict(name=case["name"], machine=machine_label(case),
                                 failed=repr(exc)))
     print("=" * 78, flush=True)
-    with open(os.path.join(OUTDIR, "summary.json"), "w") as fh:
+    with open(os.path.join(OUTDIR, "summary_shaped.json" if SHAPED else "summary.json"), "w") as fh:
         json.dump(results, fh, indent=2, sort_keys=True, default=str)
     for r in results:
         if "failed" in r:

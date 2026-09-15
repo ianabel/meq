@@ -8,12 +8,27 @@
 # writing the same machine somebody once wrote out themselves.
 #
 #     sh tools/freegs4e-benchmark/make_all.sh [examples-dir]
+#     sh tools/freegs4e-benchmark/make_all.sh [examples-dir] --shaped
 #
 # Re-runnable: it overwrites the TOML, the two profile tables and the guess for
 # each case, all of which are derived from the .npz beside this script.
+#
+# --shaped READS THE OTHER SET OF REFERENCES and writes the other set of stems:
+# <ref>_shaped.npz -> machine-x-...-shaped.*, the machines whose conductors are
+# ShapedCoils on MEQ's own rectangles rather than filaments.  Those references
+# come from `fgsref.py --shaped` and have to exist first; see README.md.  The
+# two sets are tracked side by side in examples/ because they describe
+# DIFFERENT MACHINES -- freegs4e's inverse solve picks different coil currents
+# once the conductors have extent -- so neither is derivable from the other.
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
 out=${1:-$here/../../examples}
+suffix=""
+case "${2:-}" in
+	--shaped) suffix="_shaped" ;;
+	"") ;;
+	*) echo "unknown option: $2" >&2; exit 2 ;;
+esac
 
 for pair in \
 	"A_testtokamak_classic machine-a-testtokamak" \
@@ -28,7 +43,8 @@ do
 	ref=$1
 	stem=$2
 	echo "============================================================"
-	echo "$ref -> $stem"
+	echo "$ref$suffix -> $stem${suffix:+-shaped}"
 	"$here/venv/bin/python" "$here/make_diverted_case.py" \
-		"$here/$ref.npz" "$here/$ref.json" "$out" "$stem"
+		"$here/$ref$suffix.npz" "$here/$ref$suffix.json" "$out" \
+		"$stem${suffix:+-shaped}"
 done

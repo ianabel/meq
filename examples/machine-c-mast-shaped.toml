@@ -1,0 +1,212 @@
+# MACHINE-C-MAST-SHAPED -- A FREE-BOUNDARY MEQ RUN OF
+# freegs4e's C_mast_spherical.
+#
+# WRITTEN BY tools/freegs4e-benchmark/make_diverted_case.py FROM THE
+# REFERENCE ITSELF -- every number here, the conductor rectangles and
+# the mesh included, is read out of the .npz and .json that script was
+# given.  Do not hand-edit it: re-run tools/freegs4e-benchmark/
+# make_all.sh.
+#
+# Spherical tokamak (MAST, up-down symmetric circuits): aspect ratio about
+# 1.5, elongation above 2, low fvac.
+#
+# THE REFERENCE'S OWN ANSWER, for anything comparing against it:
+#
+#   psi_axis   9.011331684396987e-02   axis at ( 1.004409, +0.000000 )
+#   psi_bndry  9.261921768562758e-03
+#   I_p        4.998907381109183e+05 A
+#   R0 0.8695  a 0.8225  A 1.498  kappa 1.8836  delta +0.3014
+#   X-point    ( 0.699921034, -1.100053723 ) psi 9.261921768562758e-03  ACTIVE
+#   X-point    ( 0.699921035, +1.100053724 ) psi 9.261921631905489e-03
+#   X-point    ( 1.091854394, -1.095507708 ) psi -4.120191176848226e-03
+#   X-point    ( 1.149644679, +1.093153684 ) psi -5.846749626220671e-03
+#
+# ONE DELIBERATE DEVIATION FROM THE REFERENCE, and it is the same one
+# examples/diverted-tokamak.toml records: fgsref.py fits a
+# UnivariateSpline to its own analytic profile shape before solving and
+# the fit MOVES it, by 2.293e-04 of the amplitude in p' and 1.324e-02 in ff'.
+# The tables here are the ANALYTIC shape, because it extends below
+# Psi = 0 into the vacuum -- which a tabulation on psi_n in [ 0, 1 ]
+# cannot -- and because its edge behaviour is exactly j = 2, which FB-4
+# says decides the rate and which ConfineToPlasma needs.  So this is a
+# comparison at the per-cent level and not to the last digit.
+#
+# RUN IT WITH meq-run, WHICH MAKES THE MESH:
+#
+#     ./build/meq-run examples/machine-c-mast-shaped.toml
+
+[mesh]
+File = "examples/machine-c-mast-shaped.msh"
+
+# THE DISC IS NOT GAMMA.  D_h is cut from this mesh at
+# [boundary.exterior] Radius = 2.45, which has to fit strictly inside.
+# Every conductor lies within 1.9351 m of the origin.
+[mesh.generate]
+Tool = "halfdisc"
+Radius = 2.65
+Size = 0.1855
+PlasmaRMin = 0.0000
+PlasmaRMax = 1.6450
+PlasmaZMin = -1.4300
+PlasmaZMax = 1.4300
+PlasmaSize = 0.1234
+# The smallest conductor here is 0.0200 m in its shorter half-extent.
+CoilSize = 0.04
+
+[discretisation]
+PolynomialDegree = 2
+
+[solver]
+NewtonMaxIterations = 200
+NewtonRelativeTolerance = 1.0e-10
+# The plasma support is a SET, so its derivative is a surface term the
+# Jacobian does not have: it is frozen within each solve and re-decided
+# between them.  MEASUREMENTS.md M-82 -- without this the first solve
+# stalls at the iteration cap rather than running slowly.
+PlasmaSupportSweeps = 4
+
+[source]
+Type = "mhd"
+Normalised = true
+ConfineToPlasma = true
+# THE STARTING VALUE OF AN UNKNOWN, taken from the peak of the cold
+# guess below.  psi_ax is a functional of the solution -- a bordered
+# Newton row and not data -- so what a file supplies is where to START,
+# and the best estimate available before solving is the best available
+# guess's own peak.  The reference converged to 9.011332e-02, which is 53%
+# away: this is a basin and not an answer.
+PsiAxis = 4.193713832e-02
+PlasmaCurrent = 4.9989073811e+05
+Mu0 = 1.25663706212e-6
+PPrimeFile = "examples/machine-c-mast-shaped-pprime.dat"
+GGPrimeFile = "examples/machine-c-mast-shaped-ggprime.dat"
+
+# THE CONDUCTORS, WRITTEN ONCE.  [mesh.generate] derives the mesher's
+# --coil rectangles from these blocks, in this order, so the mesh is
+# aligned to the conductors the solve integrates over.  Currents are the
+# TOTAL through each cross-section: freegs4e's turns, circuit
+# multipliers and solenoid windings are all resolved into them by
+# tools/freegs4e-benchmark/conductors.py.
+# This machine's are shaped.
+
+[[coils]]
+Name = "P2.P2U"
+CentreR = 0.490000
+CentreZ = 1.760000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 2.3825637424e+05
+
+[[coils]]
+Name = "P2.P2L"
+CentreR = 0.490000
+CentreZ = -1.760000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 2.3825637424e+05
+
+[[coils]]
+Name = "P3.P3U"
+CentreR = 1.100000
+CentreZ = 1.100000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -8.6153118049e+03
+
+[[coils]]
+Name = "P3.P3L"
+CentreR = 1.100000
+CentreZ = -1.100000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -8.6153118049e+03
+
+[[coils]]
+Name = "P4.P4U"
+CentreR = 1.510000
+CentreZ = 1.095000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -9.4602891274e+03
+
+[[coils]]
+Name = "P4.P4L"
+CentreR = 1.510000
+CentreZ = -1.095000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -9.4602891274e+03
+
+[[coils]]
+Name = "P5.P5U"
+CentreR = 1.660000
+CentreZ = 0.520000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.5119440602e+05
+
+[[coils]]
+Name = "P5.P5L"
+CentreR = 1.660000
+CentreZ = -0.520000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.5119440602e+05
+
+[[coils]]
+Name = "P6.P6U"
+CentreR = 1.500000
+CentreZ = 0.900000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.5656773911e-03
+
+[[coils]]
+Name = "P6.P6L"
+CentreR = 1.500000
+CentreZ = -0.900000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 1.5656773911e-03
+
+[[coils]]
+Name = "P1"
+CentreR = 0.150000
+CentreZ = 0.000000
+HalfWidth = 0.020000
+HalfHeight = 1.450000
+Current = -3.4903138478e+02
+
+[boundary]
+Type = "zero"
+
+# THE TARGET NULL, as an INITIAL VALUE of two unknowns rather than a
+# prescription: XP-3's border closes q_r = q_z = 0 and
+# psi_bnd = psi_h( r_X, z_X ) on the same Newton, and the seed selects
+# WHICH saddle is followed.
+#
+# THIS IS THE SHAPE THE OPERATOR ASKED FOR and not the null the
+# reference achieved, which is 0.0001 m away.  That distinction is the
+# whole of what makes this a cold start.
+[boundary.xpoint]
+R = 0.700000000000
+Z = -1.100000000000
+
+[boundary.exterior]
+Radius = 2.45
+CentreZ = 0.0
+Modes = 10
+
+# NOT A NICETY.  A cold start on a free-boundary machine case wanders
+# and does not converge; the guess is part of the problem statement.
+# tools/freegs4e-benchmark/mkexactguess.py builds it by summing the
+# reference's own Green's functions over MEQ's half-disc.
+[initialguess]
+Type = "gridfunction"
+File = "examples/machine-c-mast-shaped-guess.gf"
+MeshFile = "examples/machine-c-mast-shaped-guess.mesh"
+
+[output]
+Prefix = "machine-c-mast-shaped"
+GridNR = 129
+GridNZ = 129
