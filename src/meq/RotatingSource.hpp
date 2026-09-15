@@ -342,6 +342,22 @@ namespace meq
 				double mu0 = vacuumPermeability,
 				RotatingSource::Closure closure = RotatingSource::Closure::Automatic );
 
+			/// Both honour setPlasmaSupport(): `F` and `dF/dpsi` are zero
+			/// wherever `Psi <= 0`, as meq::NormalisedMHDSource's are.
+			///
+			/// THE DIAGNOSTICS BELOW DELIBERATELY DO NOT. potential(), density()
+			/// and pressure() report what the profiles say at a flux value, which
+			/// is a question about the profiles and not about where the plasma
+			/// is; confining them would make a caller unable to ask.
+			///
+			/// AND normalisationDerivatives() IS STILL NOT OVERRIDDEN HERE, which
+			/// costs more now that the support can move than it did when it could
+			/// not. The base returns false, so the bordered Newton DIFFERENCES
+			/// that column -- and a difference perturbs the normalisation, which
+			/// moves the edge, so it straddles a kink rather than measuring a
+			/// derivative. It degrades rather than fails, and it is the reason
+			/// meq::NormalisedMHDSource supplies the analytic form; the rotating
+			/// closure's version is not written.
 			double f( double r, double z, double psi ) const override;
 			double dFdPsi( double r, double z, double psi ) const override;
 

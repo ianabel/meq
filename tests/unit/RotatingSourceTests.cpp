@@ -850,4 +850,71 @@ BOOST_AUTO_TEST_CASE( theNormalisationCanBeMovedAndIsRefusedAtZero )
 	BOOST_CHECK_EQUAL( source.normalisation(), 0.25 );
 }
 
+/**
+ * `ConfineToPlasma` IS SILENTLY INERT ON A ROTATING SOURCE, AND THIS CASE
+ * ASSERTS THE BEHAVIOUR THAT IS WANTED RATHER THAN THE ONE THAT IS THERE.
+ *
+ * meq::NormalisedSource::setPlasmaSupport() switches `F` off wherever `Psi <= 0`
+ * and meq::NormalisedMHDSource honours it at all three gates -- f(), dFdPsi()
+ * and normalisationDerivatives(). meq::NormalisedRotatingSource consults
+ * insidePlasma() at NONE of them, so the flag sets a member that nothing reads.
+ *
+ * IT IS REACHABLE FROM A FILE, which is what makes it a defect rather than an
+ * unimplemented corner. Config.cpp's Rotating branch lists "ConfineToPlasma"
+ * among its accepted keys and calls readPlasmaSupport(), and apps/meq.cpp calls
+ * setPlasmaSupport( true ) on whatever normalised source it built -- so
+ * `[source] Type = "rotating"` with `Normalised = true` and
+ * `ConfineToPlasma = true` parses, reports nothing, and solves the unconfined
+ * problem.
+ *
+ * WORSE THAN A MISSING ZERO, BECAUSE THE PROFILES CLAMP. A meq::SplineProfile
+ * holds its endpoint value outside the knot range, so at `Psi < 0` the source
+ * does not tail off: it sits at its plasma-edge value out to the wall, which is
+ * a current density filling the vacuum region. And the element-level half of the
+ * support DOES run -- GradShafranovSolver::plasmaComponentWanted() reads
+ * plasmaSupport(), which is true -- so XP-1's flood fill masks whole elements
+ * while the pointwise test inside them does nothing. Half a confinement is a
+ * harder thing to recognise in an answer than none.
+ *
+ * THIS IS THE SHAPE CLAUDE.md ALREADY RECORDS UNDER "A RESERVED KEY IS ONLY
+ * RESERVED ON THE PATHS THAT CALL THE REFUSAL": one source type reads a key
+ * directly where another goes through a shared helper, and nothing tested the
+ * pairing. The fix is the same three gates meq::NormalisedMHDSource has.
+ */
+BOOST_AUTO_TEST_CASE( aConfinedRotatingSourceVanishesOutsideThePlasma )
+{
+	// psi_ax = 1, psi_bnd = 0, so Psi = psi and psi < 0 is outside the plasma.
+	meq::NormalisedRotatingSource source( hydrogenicSpecies(), rotationProfile(),
+		ggPrimeProfile(), referenceRadius, 1.0 );
+	source.setPlasmaSupport( true );
+
+	BOOST_TEST_REQUIRE( source.plasmaSupport() );
+	// The base class's own test agrees the point is outside; it is only f() and
+	// dFdPsi() that do not ask it.
+	BOOST_TEST_REQUIRE( !source.insidePlasma( -0.5 ) );
+
+	for ( double r : testRadii )
+		for ( double psi : { -0.5, -0.1, -1.0e-6 } )
+		{
+			BOOST_TEST( source.f( r, 0.0, psi ) == 0.0,
+			            "F = " << source.f( r, 0.0, psi ) << " at r = " << r
+			            << ", Psi = " << psi << ", outside the plasma of a source "
+			            "with setPlasmaSupport() on. ConfineToPlasma is reachable "
+			            "for Type = \"rotating\" from a TOML file and is inert: "
+			            "NormalisedRotatingSource::f() never calls insidePlasma()" );
+			BOOST_TEST( source.dFdPsi( r, 0.0, psi ) == 0.0,
+			            "dF/dpsi = " << source.dFdPsi( r, 0.0, psi ) << " at r = "
+			            << r << ", Psi = " << psi << ", outside the plasma; see above" );
+		}
+
+	// And the confinement must not have switched anything off INSIDE, which is
+	// the half a bare "return 0" would break.
+	for ( double r : testRadii )
+	{
+		meq::NormalisedRotatingSource unconfined( hydrogenicSpecies(), rotationProfile(),
+			ggPrimeProfile(), referenceRadius, 1.0 );
+		BOOST_TEST( source.f( r, 0.0, 0.5 ) == unconfined.f( r, 0.0, 0.5 ) );
+	}
+}
+
 BOOST_AUTO_TEST_SUITE_END()

@@ -84,6 +84,52 @@ real**: a Hermite cubic is `C¹`, so its second derivative jumps at every
 interior knot — `the_second_derivative_jumps_at_an_interior_knot` asserts that
 rather than pretending otherwise, and nothing has measured what it costs Newton.
 
+## `ConfineToPlasma` reaches the rotating source, and for a long time it did not
+
+**`meq::NormalisedRotatingSource::f()` and `dFdPsi()` now gate on
+`insidePlasma()`, as `meq::NormalisedMHDSource`'s three gates always have.**
+Before that they consulted it at none of them, so `setPlasmaSupport( true )` set
+a member nothing read.
+
+**IT WAS REACHABLE FROM A FILE, WHICH IS WHAT MADE IT A DEFECT RATHER THAN AN
+UNIMPLEMENTED CORNER.** `Config.cpp`'s Rotating branch lists `ConfineToPlasma`
+among its accepted keys and calls `readPlasmaSupport()`, and `apps/meq.cpp`
+calls `setPlasmaSupport( true )` on whatever normalised source it built — so
+`[source] Type = "rotating"` with `Normalised = true` and
+`ConfineToPlasma = true` parsed, reported nothing and solved the unconfined
+problem.
+
+**AND IT WAS WORSE THAN A MISSING ZERO, BECAUSE THE PROFILES CLAMP.**
+`meq::SplineProfile` holds its endpoint value outside the knot range, so an
+ungated source does not tail off outside the plasma: it sits at its
+plasma-edge value out to the wall. Measured on a source with `gg' = 1`,
+`ψ_ax = 1`, `ψ_bnd = 0`: `f( r = 1, Ψ = −0.5 )` returned **1.0** where the MHD
+source under the identical flag returns **0**. That is a current density filling
+the vacuum region.
+
+**HALF A CONFINEMENT IS HARDER TO SEE IN AN ANSWER THAN NONE**, and that is what
+it was. The ELEMENT-level half did run —
+`GradShafranovSolver::plasmaComponentWanted()` reads `plasmaSupport()`, which was
+true — so XP-1's flood fill masked whole elements while the pointwise test inside
+the elements it kept did nothing.
+
+**THE SHAPE IS THE ONE `CLAUDE.md` ALREADY CATALOGUES** under *A reserved key is
+only reserved on the paths that call the refusal*: one source type reads a key
+directly where another goes through a shared helper, and nothing tested the
+pairing. `aConfinedRotatingSourceVanishesOutsideThePlasma` in
+`tests/unit/RotatingSourceTests.cpp` is the regression, and it was
+mutation-checked — 30 failures with the two gates removed, none with them in.
+
+**WHAT IS STILL NOT THERE, AND NOW COSTS MORE THAN IT DID.**
+`normalisationDerivatives()` is not overridden for the rotating closure, so the
+base returns false and the bordered Newton **differences** that column — and a
+difference perturbs the normalisation, which moves the edge, so it straddles a
+kink instead of measuring a derivative. That was harmless while the support
+could not move and is not any more. It degrades rather than fails, and the
+analytic form is the one piece of `meq::NormalisedMHDSource`'s treatment the
+rotating source still lacks.
+
+
 ## What is measured
 
 → **[M-41](MEASUREMENTS.md#m-41)** — `φ₀` against a **brentq root of (97)**, independent Python

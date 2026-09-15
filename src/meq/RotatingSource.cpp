@@ -656,6 +656,19 @@ namespace meq
 
 	double NormalisedRotatingSource::f( double r, double z, double psi ) const
 	{
+		// OUTSIDE THE PLASMA THERE IS NO SOURCE, exactly as for
+		// meq::NormalisedMHDSource, and the flag reaching here is the whole of
+		// what setPlasmaSupport() means. Off unless it was asked for, and then
+		// this is one comparison.
+		//
+		// AND IT MATTERS MORE HERE THAN A MISSING ZERO USUALLY WOULD, because
+		// the profiles CLAMP: meq::SplineProfile holds its endpoint value
+		// outside the knot range, so an ungated source does not tail off out
+		// here -- it sits at its plasma-edge value all the way to the wall,
+		// which is a current density filling the vacuum region.
+		if ( !insidePlasma( psi ) )
+			return 0.0;
+
 		// One factor of 1/psi_ax, because the profiles are functions of Psi and
 		// F is a psi-derivative of what they build.
 		double const span = psiAxisValue - psiBoundaryValue;
@@ -664,6 +677,16 @@ namespace meq
 
 	double NormalisedRotatingSource::dFdPsi( double r, double z, double psi ) const
 	{
+		// The derivative of a source that is identically zero out here is zero.
+		// NOT the one-sided limit from inside: at the edge itself dF/dpsi picks
+		// up a surface term F delta( Psi ), which this interface structurally
+		// cannot carry -- and which vanishes exactly when the profiles vanish at
+		// the edge, the condition setPlasmaSupport() documents as its
+		// precondition. Word for word meq::NormalisedMHDSource's position, and
+		// for the same reason.
+		if ( !insidePlasma( psi ) )
+			return 0.0;
+
 		// TWO factors, not one: the chain rule supplies a second whenever another
 		// psi-derivative is taken. meq::NormalisedMHDSource carries the same
 		// asymmetry, and RotatingSourceTests checks it against a difference.
