@@ -983,6 +983,36 @@ namespace
 				++profile.traceSolveCalls;
 			}
 
+			/**
+			 * MFEM's spelling, from mfem::Operator.
+			 *
+			 * FORWARDED RATHER THAN INHERITED, AND THAT IS THE WHOLE POINT OF THE
+			 * OVERRIDE. mfem::Operator::ArrayMult()'s base implementation LOOPS
+			 * Mult(), so a decorator that does not override it silently un-blocks
+			 * whatever it wraps -- and PardisoSolver, CuDSSSolver, MUMPSSolver,
+			 * SuperLUSolver and STRUMPACKSolver all override ArrayMult to walk
+			 * their factors ONCE for every column. Inheriting the base sends them
+			 * K separate walks instead, with identical answers and identical call
+			 * counts, which is exactly why the loss would be invisible.
+			 *
+			 * The counter still rises by one per COLUMN, so `traceSolveCalls`
+			 * keeps meaning backsolves and the bordered step still reads as N + 2
+			 * of them against one factorisation. The seconds are the blocked
+			 * call's, which is the quantity being measured.
+			 */
+			void ArrayMult( // NOLINT(readability-identifier-naming)
+				mfem::Array<mfem::Vector const *> const &b,
+				mfem::Array<mfem::Vector *> &x ) const override
+			{
+				// As Mult() above, and for the same reason.
+				inner.iterative_mode = iterative_mode;
+
+				double const t0 = profileNow();
+				inner.ArrayMult( b, x );
+				profile.traceSolveSeconds += profileNow() - t0;
+				profile.traceSolveCalls += b.Size();
+			}
+
 		private:
 			mfem::Solver &inner;
 			GradShafranovSolver::StepProfile &profile;
@@ -6448,6 +6478,98 @@ namespace
 			if ( normalisedSource )
 				normalisedSource->setNormalisation( s, sB );
 
+			/*
+			 * EVERY BACKSOLVE OF THIS STEP GOES THROUGH ONE ArrayMult, BECAUSE
+			 * THEY ALL SHARE ONE JACOBIAN.
+			 *
+			 * The bordered step needs J^-1 applied to the residual and to each
+			 * border column -- psi_ax's, psi_bnd's, the prescribed current's and
+			 * the N exterior modes' -- and every one of them is against the SAME
+			 * factorisation, the one GetGradient() has just left behind. XP-3's
+			 * two columns are the exception and cost nothing at all; see
+			 * columnZ() below for why they are exactly zero.
+			 *
+			 * mfem::DarcyNPCSolver::ArrayMult() is the entry point for precisely
+			 * that case, and MEQ is what it was built for. One pass over the mesh
+			 * in NPCReduce(), one call to the trace solver's own ArrayMult(), one
+			 * pass back in NPCRecover(). What is saved is the TRAVERSAL --
+			 * GetElementFaces(), GetFaceElements(), GetCtFaceMatrix(),
+			 * GetFaceVDofs() and the gathers run once instead of once per column
+			 * -- plus, since PardisoSolver overrides ArrayMult and is the default
+			 * trace solver wherever MFEM_USE_MKL_PARDISO is set, one walk of the
+			 * factors instead of K. The arithmetic on any one column is unchanged.
+			 *
+			 * SO THIS IS A TRAVERSAL SAVING AND NOT A DIFFERENT METHOD, and the
+			 * agreement it owes is to ROUND-OFF and not bitwise: with LAPACK the
+			 * dense products become GEMM where the single-vector route had GEMV.
+			 * Do not write a bitwise assertion here; a build without LAPACK would
+			 * pass it and this one would not.
+			 *
+			 * THE QUEUE IS WHAT LETS THE COLUMNS STAY WHERE THEY ARE ASSEMBLED.
+			 * columnL and columnB are built two hundred lines below, after the
+			 * lambdas the dense elimination needs, and hoisting their assembly up
+			 * here to group the solves would carry assemblePlasmaCurrent() across
+			 * refreshPlasmaComponent() -- a change of SUPPORT, not a reordering of
+			 * arithmetic. Queueing the solve instead defers J^-1 alone and leaves
+			 * every assembly at the line it was written on.
+			 *
+			 * Single-vector under the condensation, which has no blocked route of
+			 * its own: `queue` then solves and syncs immediately, which is what
+			 * that path did before there was a queue.
+			 */
+			mfem::Array<mfem::Vector const *> borderRhs;
+			mfem::Array<mfem::Vector *> borderOut;
+			auto queue = [ & ]( mfem::Vector const &rhs, mfem::Vector &out )
+			{
+				if ( npcOrdering )
+				{
+					borderRhs.Append( &rhs );
+					borderOut.Append( &out );
+					return;
+				}
+				npcLinear.Mult( rhs, out );
+				out.HostRead();
+			};
+
+			/*
+			 * THE FLUSH, AND THE SOLVE OUTPUTS COME BACK TO THE HOST AT IT.
+			 *
+			 * One ArrayMult applies the one factored Jacobian to every column
+			 * queued since the last flush. Empty under the condensation, where
+			 * `queue` has already solved each column as it arrived, so this is
+			 * inert there.
+			 *
+			 * Everything the dense elimination does afterwards is host
+			 * arithmetic: rowDot()'s dot products, the bordered matrix,
+			 * DenseMatrixInverse, the backtracking. All of it reads these vectors
+			 * through operator(), which is RAW -- it neither syncs nor
+			 * invalidates -- while a trace solve under an mfem::Device can leave
+			 * its output device-resident.
+			 *
+			 * SYNCING AT THE PRODUCER AND NOT AT EACH READER IS THE POINT. The
+			 * readers are many, they are spread over two hundred lines, and they
+			 * are easy to add to; the producer is this one call and it is where
+			 * the device boundary actually is. Syncing per reader is how a defect
+			 * like this gets half fixed -- each fix moves
+			 * mfem::Device( "debug" )'s fault forward to the next unsynced read
+			 * and looks like progress. Blocking the solves is what turned four
+			 * producers into one, which is the incidental half of what ArrayMult
+			 * bought here.
+			 *
+			 * Inert with no Device configured, which is every build that has not
+			 * asked for one on the command line.
+			 */
+			auto flush = [ & ]()
+			{
+				if ( borderRhs.Size() == 0 )
+					return;
+				npcLinear.ArrayMult( borderRhs, borderOut );
+				for ( int i = 0; i < borderOut.Size(); ++i )
+					borderOut[ i ]->HostRead();
+				borderRhs.SetSize( 0 );
+				borderOut.SetSize( 0 );
+			};
+
 			if ( npcOrdering )
 			{
 				// The same support the residual was evaluated at. See
@@ -6462,8 +6584,8 @@ namespace
 				profile.gradientSeconds += profileNow() - tg;
 				++profile.gradientCalls;
 				npcLinear.SetOperator( jacobian );
-				npcLinear.Mult( residual, y );
-				npcLinear.Mult( column, z );
+				queue( residual, y );
+				queue( column, z );
 			}
 			else
 			{
@@ -6477,34 +6599,8 @@ namespace
 			}
 
 			for ( int mode = 0; mode < nModes; ++mode )
-				npcLinear.Mult( exteriorColumns[ static_cast<std::size_t>( mode ) ],
-				                exteriorZ[ static_cast<std::size_t>( mode ) ] );
-
-			/*
-			 * THE SOLVE OUTPUTS COME BACK TO THE HOST HERE, AT THE PRODUCER.
-			 *
-			 * Everything from this point to the end of the step is host
-			 * arithmetic: rowDot()'s dot products, the dense bordered matrix,
-			 * DenseMatrixInverse, the backtracking. All of it reads these
-			 * vectors through operator(), which is RAW -- it neither syncs nor
-			 * invalidates -- while a trace solve under an mfem::Device can
-			 * leave its output device-resident.
-			 *
-			 * SYNCING AT THE PRODUCER AND NOT AT EACH READER IS THE POINT. The
-			 * readers are many, they are spread over two hundred lines, and
-			 * they are easy to add to; the producers are these few lines and
-			 * they are where the device boundary actually is. Syncing per
-			 * reader is how a defect like this gets half fixed -- each fix
-			 * moves mfem::Device( "debug" )'s fault forward to the next
-			 * unsynced read and looks like progress.
-			 *
-			 * Inert with no Device configured, which is every build that has
-			 * not asked for one on the command line.
-			 */
-			y.HostRead();
-			z.HostRead();
-			for ( int mode = 0; mode < nModes; ++mode )
-				exteriorZ[ static_cast<std::size_t>( mode ) ].HostRead();
+				queue( exteriorColumns[ static_cast<std::size_t>( mode ) ],
+				       exteriorZ[ static_cast<std::size_t>( mode ) ] );
 
 			/*
 			 * THE BORDERED ELIMINATION, IN ITS GENERAL FORM.
@@ -6747,10 +6843,8 @@ namespace
 				assembleCurrentRow( unknown, currentRow );
 				assembleCurrentNormalisationCorner( unknown, currentAgainstAxis,
 				                                    currentAgainstBoundary );
-				npcLinear.Mult( columnL, zL );
-				// See the sync after the main solve above: the limiter column's
-				// backsolve feeds the same host-side border algebra.
-				zL.HostRead();
+				// Queued, not solved: the flush below takes it with the rest.
+				queue( columnL, zL );
 			}
 
 			if ( boundaryFluxIsUnknown )
@@ -6767,6 +6861,33 @@ namespace
 				}
 				if ( !assembled )
 				{
+					/*
+					 * FLUSHED FIRST, BECAUSE A RESIDUAL EVALUATION MAY NOT SIT
+					 * BETWEEN THE GRADIENT AND A QUEUED SOLVE.
+					 *
+					 * fieldResidual() below reaches npc->Mult() -- and, on a moving
+					 * support, refreshPlasmaComponent() with it. NPCResidual() is
+					 * non-const on the hybridization where NPCReduce() and
+					 * NPCRecover() are const, and the support decides the source, so
+					 * neither the factored local blocks nor the problem they were
+					 * factored for can be assumed to survive it. Queueing a solve
+					 * ACROSS this would be a different Jacobian for the columns
+					 * queued before it, silently, and with a plausible answer.
+					 *
+					 * So the queue is emptied here and columnB then takes a queue of
+					 * its own, which the final flush sends through ArrayMult at
+					 * Size() == 1 -- documented to forward to Mult() and allocate
+					 * nothing. That is exactly the order this path had before there
+					 * was a queue, and this branch is the only one that needs it:
+					 * assemblePlasmaCurrent(), assembleCurrentColumn() and
+					 * assembleNormalisationColumn() are element loops into vectors
+					 * and touch neither the hybridization nor the support.
+					 *
+					 * The ANALYTIC column is the default and never reaches here, so
+					 * the ordinary path still blocks every column of the step.
+					 */
+					flush();
+
 					double const hB = normalisationStep( sB );
 					double const columnBase = sB;
 					sB = columnBase + hB;
@@ -6777,11 +6898,14 @@ namespace
 					columnB -= scratch;
 					columnB /= 2.0*hB;
 				}
-				npcLinear.Mult( columnB, zB );
-				// As zL above: this column is read by rowDot() on the host.
-				zB.HostRead();
+				// As columnL above.
+				queue( columnB, zB );
 			}
 
+
+			// Every column of the step is assembled by here, so this is the one
+			// ArrayMult on the ordinary path. See the lambda for what it saves.
+			flush();
 
 			if ( nBorderTotal == 1 )
 			{
