@@ -4167,6 +4167,20 @@ namespace
 		else if ( state.Size() != potentialSize )
 			throw std::invalid_argument( "meq::GradShafranovSolver::refreshPlasmaComponent: the state must be the full ( flux, potential, trace ) vector or the potential block alone" );
 
+		/*
+		 * AND THE HOST HAS TO OWN IT, for refreshXPoint()'s reason: the fill
+		 * reads the potential through mfem::Vector::operator(), which is a RAW
+		 * accessor that neither syncs nor invalidates, and the state it is
+		 * handed is what a device-side solve last wrote. Measured on the DIII-D
+		 * machine case under mfem::Device( "debug" ): once refreshXPoint() was
+		 * synced the fault moved here, which is what says that fix was real and
+		 * this one is the next link rather than the same one.
+		 *
+		 * READ and not read-write: the fill is a pure function of the state and
+		 * writes only its own membership array.
+		 */
+		state.HostRead();
+
 		// THE SUPPORT EDGE AND NOT THE LIVE NORMALISATION, which are the same
 		// thing until freezePlasmaEdge() is on and must not diverge after it:
 		// insidePlasma() is the pointwise test this fill is the connectivity
@@ -5346,6 +5360,35 @@ namespace
 			 * so `xFlux` and `xFluxJacobian` are q's, and the border rows carry
 			 * the negation back explicitly where they are built.
 			 */
+			/*
+			 * THE HOST HAS TO OWN ALL THREE VECTORS BEFORE A SINGLE operator()
+			 * TOUCHES THEM, AND UNDER A DEVICE IT DOES NOT.
+			 *
+			 * mfem::Vector::operator() is a RAW accessor: it neither syncs nor
+			 * invalidates. `state` is the iterate a device-side trace solve has
+			 * just written, so its host copy is stale and -- under
+			 * mfem::Device( "debug" ), which mprotects the host page -- reading
+			 * it is a named fault rather than a wrong number. Measured on the
+			 * DIII-D machine case: SIGSEGV in this lambda on the first support
+			 * sweep, with AssemblyMode serial, threaded and batched alike, so
+			 * it is the access and not the assembly.
+			 *
+			 * READ for the iterate and READ-WRITE for the two fields, which is
+			 * the distinction that matters: only this element's dofs are
+			 * written here and the rest of each field has to survive, so
+			 * HostWrite() -- whose contents are undefined -- would quietly lose
+			 * every other element's.
+			 *
+			 * AND IT IS DONE IN THE CONSUMER RATHER THAN AT THE PRODUCER, for
+			 * the reason rowDot() below gives: this lambda is a funnel that
+			 * every path into the X-point border goes through -- the Jacobian,
+			 * each line-search trial, and the fallback step -- so a sync here
+			 * cannot be outgrown by a new caller, where a list of producers can.
+			 */
+			state.HostRead();
+			xFluxField.HostReadWrite();
+			xPotentialField.HostReadWrite();
+
 			for ( int i = 0; i < xFluxDofsR.Size(); ++i )
 				xFluxField( xFluxDofsR[ i ] ) = -state( xFluxDofsR[ i ] );
 			for ( int i = 0; i < xFluxDofsZ.Size(); ++i )
