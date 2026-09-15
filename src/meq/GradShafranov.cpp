@@ -119,6 +119,30 @@ namespace
 		 * assemblyModeAvailable() answers, asked at the one place that bypasses
 		 * the setter.
 		 */
+		/*
+		 * AND BATCHED ON A DEVICE, BECAUSE THAT IS THE ONLY PLACE IT PAYS.
+		 *
+		 * AssemblyMode::Batched puts the interior-face potential term through
+		 * one kernel instead of a host call per face. MFEM's own note is that
+		 * it needs the storage to be device-resident to be worth anything and
+		 * that its `D` accumulation goes through AtomicAdd, which COSTS on a
+		 * host where the per-face loop's plain `+=` does not. So it is the
+		 * right default exactly when a device is configured and the wrong one
+		 * otherwise, and this asks rather than guessing.
+		 *
+		 * `Device::Allows( Backend::DEVICE_MASK )` is the question "is a device
+		 * backend live", which is what mfem::Device( "cuda" ) turns on and what
+		 * mfem::Device( "cpu" ) and no Device at all both leave off.
+		 *
+		 * IT IS ASKED AT CONSTRUCTION, and that is the honest semantics rather
+		 * than a limitation: mfem::Device is process-wide state that has to be
+		 * configured before the first Vector is allocated -- apps/meq.cpp's
+		 * `--device` says why -- so a solver built after it sees it, and one
+		 * built before it could not have used it anyway.
+		 */
+		if ( mfem::Device::Allows( mfem::Backend::DEVICE_MASK ) )
+			return GradShafranovSolver::AssemblyMode::Batched;
+
 #if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
 		return GradShafranovSolver::AssemblyMode::Threaded;
 #else
@@ -1289,13 +1313,19 @@ namespace
 	 */
 	void GradShafranovSolver::setAssemblyMode( AssemblyMode choice )
 	{
-		// BATCHED IS GROUPED WITH THREADED HERE, CONSERVATIVELY. It is a
-		// different mechanism -- a face kernel rather than an OpenMP loop --
-		// and whether it needs MFEM_THREAD_SAFE is not documented either way.
-		// Refusing it on a build that cannot honour Threaded costs such a build
-		// nothing it had, and assemblyModeAvailable() already answers this way,
-		// so the two agree rather than disagreeing silently.
-		if ( choice == AssemblyMode::Threaded || choice == AssemblyMode::Batched )
+		/*
+		 * THREADED ALONE, WHICH IS WHAT MFEM ITSELF REQUIRES.
+		 *
+		 * The first version of this grouped Batched in with it, conservatively,
+		 * on the grounds that whether a face kernel needs MFEM_THREAD_SAFE was
+		 * not obvious. Read rather than assumed --
+		 * DarcyHybridization::SetAssemblyMode aborts for Threaded and for
+		 * nothing else -- it is a kernel and not an OpenMP loop, and it needs
+		 * neither flag. The conservative grouping was not free: Batched is the
+		 * DEFAULT on a device, and a device build without OpenMP would then
+		 * have been refused its own default.
+		 */
+		if ( choice == AssemblyMode::Threaded )
 		{
 #if !defined( MFEM_USE_OPENMP ) || !defined( MFEM_THREAD_SAFE )
 			throw std::invalid_argument(
@@ -1313,7 +1343,9 @@ namespace
 
 	bool GradShafranovSolver::assemblyModeAvailable( AssemblyMode choice )
 	{
-		if ( choice == AssemblyMode::Serial )
+		// Serial always, and Batched always: MFEM's own setter aborts for
+		// Threaded alone, so those two are honourable on every build.
+		if ( choice == AssemblyMode::Serial || choice == AssemblyMode::Batched )
 			return true;
 
 #if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )

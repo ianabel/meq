@@ -2107,3 +2107,50 @@ twelve steps, 0.62 s each, against `freegs4e`'s 0.19 s. Items 2 and 3 are the
 per-step multiplier — fourteen solves and `Modes + 2` residuals where the
 reference does one of each — and items 4 to 7 are the constant factor on every
 element loop. None of them is about the discretisation.
+
+### M-91
+
+**THE BATCHED DEFAULTS, AND A DEVICE FAULT THE DEVICE DEFAULT CANNOT REACH.**
+MFEM carries three batched axes and MEQ now reaches all three. What each
+defaults to is a different answer, because what each is worth is different:
+
+| | default | why |
+|---|---|---|
+| `AssemblyMode` | `Batched` **on a device**, `Threaded` otherwise | it is a device mode; its `D` accumulation goes through `AtomicAdd`, which costs on a host where the per-face loop's plain `+=` does not |
+| `LocalFactorMode` | `Serial` | upstream's in-situ figure is **10–12% faster at order 2 and 24% slower at order 6**, so the sign depends on the problem |
+| `TraceAssemblyMode` | `Serial` | the one mode here that is **not bit exact** |
+
+The device question is `Device::Allows( Backend::DEVICE_MASK )`, asked at
+construction — `mfem::Device` is process-wide state configured before the first
+`Vector`, so a solver built after it sees it and one built before it could not
+have used it. In the driver it applies only where the file named no mode: an
+asked-for mode is honoured, an inherited one is chosen.
+
+**AND `AssemblyMode::Batched` NEEDS NEITHER `MFEM_USE_OPENMP` NOR
+`MFEM_THREAD_SAFE`**, which a first version of this got wrong by grouping it
+with `Threaded`. Read out of `DarcyHybridization::SetAssemblyMode` rather than
+assumed: it aborts for `Threaded` and for nothing else. The conservative
+grouping was not free — a device build without OpenMP would have been refused
+its own default.
+
+**THE FREE-BOUNDARY PATH DOES NOT SURVIVE A DEVICE, AND THAT IS NOT THIS
+CHANGE'S DOING.** `--device debug` on the DIII-D machine case faults in the
+first support sweep:
+
+    An illegal memory access was made!
+    MFEM abort: Error while accessing address 0x...
+     ... in function: void mfem::internal::MmuError( int, siginfo_t *, void * )
+
+**The control says it is pre-existing**: with `AssemblyMode` forced to `serial`
+and again to `threaded` — so no batched path is taken at all — the same case
+faults identically. So the device default is correct and currently unreachable
+end to end on a free-boundary run.
+
+It is M-79's class met at a new site. That entry fixed four unsynced host reads
+for the **unbordered** NPC solve; the bordered path has host arithmetic of its
+own — `rowDot()`'s dot products, the dense bordered matrix, the backtracking —
+reading solve outputs through `operator()`, which neither syncs nor
+invalidates. `solveWithNormalisation()` already syncs at several producers and
+says so; the fault says the list is not complete. **`--device debug` is the
+instrument and it names the site with a backtrace**, which is why it costs one
+command to take further.

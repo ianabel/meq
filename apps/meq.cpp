@@ -1072,6 +1072,31 @@ int main( int argc, char **argv )
 		: ( config->getSolver().assemblyMode == meq::AssemblyModeType::Threaded )
 		? AM::Threaded : AM::Serial;
 
+	/*
+	 * ON A DEVICE, AN UNSTATED ASSEMBLY MODE IS BATCHED.
+	 *
+	 * AssemblyMode::Batched puts the interior-face potential term through one
+	 * kernel instead of a host call per face, and MFEM's own note is that it
+	 * needs the storage to be device-resident to be worth anything -- its `D`
+	 * accumulation goes through AtomicAdd, which COSTS on a host where the
+	 * per-face loop's plain `+=` does not. So it is the right default exactly
+	 * when `--device` named one and the wrong one otherwise.
+	 *
+	 * ONLY WHERE THE FILE SAID NOTHING. A configuration that names a mode has a
+	 * reason and gets what it named -- the same line `[solver] AssemblyMode`
+	 * already draws between an asked-for mode, which is refused when it cannot
+	 * be honoured, and an inherited one, which is downgraded.
+	 *
+	 * AND ONLY THIS AXIS. LocalFactorMode and TraceAssemblyMode stay off on a
+	 * device as on a host: the first is a host-side trade whose measured sign
+	 * depends on the polynomial degree, and the second is the one mode here
+	 * that is NOT bit exact. Neither is something a run should acquire by
+	 * plugging in a GPU.
+	 */
+	bool const onDevice = mfem::Device::Allows( mfem::Backend::DEVICE_MASK );
+	if ( onDevice && !config->getSolver().assemblyModeWasGiven )
+		assemblyMode = AM::Batched;
+
 	TS traceSolver = TS::UMFPack;
 	switch ( config->getSolver().traceSolver )
 	{
@@ -3099,8 +3124,12 @@ int main( int argc, char **argv )
 		 * Printed only when one was asked for: a run that wanted none should
 		 * not carry a line about them.
 		 */
+		// THE EFFECTIVE MODE AND NOT THE FILE'S, because on a device the
+		// assembly mode is Batched by default and the file will not have said
+		// so -- and an unreported default is exactly the silent fallback these
+		// four predicates exist to make visible.
 		if ( solver
-		     && ( config->getSolver().assemblyMode == meq::AssemblyModeType::Batched
+		     && ( assemblyMode == AM::Batched
 		          || config->getSolver().localFactorMode
 		             == meq::LocalFactorModeType::Batched
 		          || config->getSolver().traceAssemblyMode
