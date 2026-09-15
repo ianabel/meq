@@ -2801,12 +2801,17 @@ BOOST_AUTO_TEST_CASE( the_batched_assembly_axes_are_separate_keys )
 		"\n[discretisation]\nPolynomialDegree = 2\n"
 		"\n[source]\nType = \"soloviev\"\nA = -0.52\n";
 
-	// THE DEFAULTS ARE MFEM'S, so an existing file is bit-unchanged.
+	// TWO DEFAULTS ARE MFEM'S AND THE THIRD IS NOT ANY MORE. TraceAssemblyMode
+	// defaults to Batched because it is the one axis of the three measured to
+	// pay -- 7 to 9 per cent on the DIII-D machine case, MEASUREMENTS.md M-99 --
+	// and the file that says nothing therefore no longer reproduces MFEM's
+	// trace matrix to the bit. That is the documented cost of the mode and the
+	// reason this assertion is written out rather than left implicit.
 	Configuration const silent = parse( base );
 	BOOST_TEST( ( silent.getSolver().localFactorMode
 	              == meq::LocalFactorModeType::Serial ) );
 	BOOST_TEST( ( silent.getSolver().traceAssemblyMode
-	              == meq::TraceAssemblyModeType::Serial ) );
+	              == meq::TraceAssemblyModeType::Batched ) );
 
 	Configuration const asked = parse( base + "\n[solver]\n"
 		"AssemblyMode = \"batched\"\n"
@@ -2827,6 +2832,14 @@ BOOST_AUTO_TEST_CASE( the_batched_assembly_axes_are_separate_keys )
 	BOOST_TEST( ( one.getSolver().assemblyMode
 	              == meq::AssemblyModeType::Threaded ) );
 	BOOST_TEST( ( one.getSolver().traceAssemblyMode
+	              == meq::TraceAssemblyModeType::Batched ) );
+
+	// AND THE DEFAULT IS OVERRIDABLE IN BOTH DIRECTIONS, which matters more for
+	// this key than for the other two: a caller comparing two runs to the bit
+	// needs Serial back, and a default nobody can turn off would take that away.
+	Configuration const back = parse( base
+		+ "\n[solver]\nTraceAssemblyMode = \"serial\"\n" );
+	BOOST_TEST( ( back.getSolver().traceAssemblyMode
 	              == meq::TraceAssemblyModeType::Serial ) );
 
 	// A MISSPELT CHOICE FAILS AT PARSE, which is where a string can be checked

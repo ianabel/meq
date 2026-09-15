@@ -1617,7 +1617,7 @@ namespace meq
 					solver.fail( "LocalFactorMode", "must be one of serial, batched, but is \""
 					             + local + "\"" );
 
-				std::string const traceAsm = solver.getStringOr( "TraceAssemblyMode", "serial" );
+				std::string const traceAsm = solver.getStringOr( "TraceAssemblyMode", "batched" );
 				if ( traceAsm == "serial" )
 					solverOptions.traceAssemblyMode = TraceAssemblyModeType::Serial;
 				else if ( traceAsm == "batched" )
