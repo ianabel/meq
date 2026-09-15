@@ -86,6 +86,12 @@ namespace
 			"                       REFUSED without this, so an edited geometry\n"
 			"                       cannot be answered from the previous one's\n"
 			"                       mesh. meq-run passes it; you should not.\n"
+			"  --profile            print the last solve\'s leg split -- residual,\n"
+			"                       gradient, trace factorisation, backsolve,\n"
+			"                       plasma fill, and an explicit remainder. The\n"
+			"                       timers are always on; this only prints them.\n"
+			"                       A leg share is only a measurement on an idle\n"
+			"                       machine.\n"
 			"\n"
 			"  --device <name>      run under an mfem::Device: cpu (the\n"
 			"                       default), cuda, or debug. CORRECTNESS\n"
@@ -613,6 +619,7 @@ int main( int argc, char **argv )
 	bool wantVersion = false;
 	bool wantMeshCommand = false;
 	bool meshReady = false;
+	bool wantProfile = false;
 	bool badUsage = false;
 
 	for ( int i = 1; i < argc; ++i )
@@ -626,6 +633,8 @@ int main( int argc, char **argv )
 			wantMeshCommand = true;
 		else if ( arg == "--mesh-ready" )
 			meshReady = true;
+		else if ( arg == "--profile" )
+			wantProfile = true;
 		else if ( arg == "--device" )
 		{
 			if ( i + 1 >= argc )
@@ -1087,11 +1096,23 @@ int main( int argc, char **argv )
 	 * already draws between an asked-for mode, which is refused when it cannot
 	 * be honoured, and an inherited one, which is downgraded.
 	 *
-	 * AND ONLY THIS AXIS. LocalFactorMode and TraceAssemblyMode stay off on a
-	 * device as on a host: the first is a host-side trade whose measured sign
-	 * depends on the polynomial degree, and the second is the one mode here
-	 * that is NOT bit exact. Neither is something a run should acquire by
-	 * plugging in a GPU.
+	 * AND ONLY THIS AXIS, WHICH NOW MEANS SOMETHING DIFFERENT FOR EACH OF THE
+	 * OTHER TWO. LocalFactorMode stays off everywhere, and it is a TRADE rather
+	 * than a knob that does nothing: DarcyHybridization::CanCacheCondensation()
+	 * refuses outright under LocalFactorMode::Batched -- "the batched
+	 * factorisation owns AiBt and the Schur complement itself and handing them
+	 * in would be two owners of one buffer" -- so turning it on BUYS a batched
+	 * factorisation and PAYS the condensation cache, the six products A^-1 B^T,
+	 * B A^-1 B^T and their kin that would otherwise be held across a Newton
+	 * loop. Verified on the DIII-D machine case, which reports `condensation
+	 * cache yes` by default and `NO` with the mode on. That is why the axis
+	 * reads neutral-to-negative rather than free -- not something a run should
+	 * acquire by plugging in a GPU. TraceAssemblyMode is no longer off anywhere: it is ON BY DEFAULT,
+	 * host and device alike, because it is the one axis of the three measured
+	 * to pay -- 7 to 9 per cent of the DIII-D solve at OMP = MKL = 8, in every
+	 * round of an interleaved cross, MEASUREMENTS.md M-99. It is still the one
+	 * mode here that is not bit exact, so a caller comparing two runs to the
+	 * bit names `TraceAssemblyMode = "serial"` and gets it.
 	 */
 	bool const onDevice = mfem::Device::Allows( mfem::Backend::DEVICE_MASK );
 	if ( onDevice && !config->getSolver().assemblyModeWasGiven )
@@ -3699,6 +3720,64 @@ int main( int argc, char **argv )
 	}
 
 	solveSeconds = elapsedSince( started ) - setupSeconds;
+
+	/*
+	 * THE LEG SPLIT, AND IT IS A REPORT RATHER THAN AN INSTRUMENT.
+	 *
+	 * `GradShafranovSolver::StepProfile` is always on -- the timers cost a
+	 * clock read per call and nothing decides whether to take them -- so the
+	 * only thing this flag buys is PRINTING it, and the only reason it is a
+	 * flag is that the numbers are meaningless on a contended machine and a
+	 * default-on report invites them being quoted anyway.
+	 *
+	 * `computeHSeconds` IS A SLICE OF `gradientSeconds` AND NOT A LEG.
+	 * StepProfile says so in its own doxygen; adding it to the others
+	 * double-counts, so it is printed indented under the gradient and left
+	 * out of the share column's sum. `otherSeconds()` is the explicit
+	 * remainder, which is what stops a leg the split misses from inflating a
+	 * leg it does not.
+	 *
+	 * It reports the LAST solve. An adaptive run or a moving-support sweep
+	 * calls solve() several times, so on those this is the final cycle rather
+	 * than the whole run, and the header says which.
+	 */
+	if ( wantProfile && solver )
+	{
+		meq::GradShafranovSolver::StepProfile const &p = solver->stepProfile();
+		double const whole = p.totalSeconds > 0.0 ? p.totalSeconds : 1.0;
+		auto leg = [ whole ]( char const *name, double seconds, long calls )
+		{
+			std::printf( "MEQ:   %-22s %8.3f s  %5.1f%%  %8ld calls\n",
+			             name, seconds, 100.0*seconds/whole, calls );
+		};
+		std::printf( "MEQ: the last solve's legs, total %.3f s\n", p.totalSeconds );
+		leg( "residual", p.residualSeconds, p.residualCalls );
+		leg( "gradient", p.gradientSeconds, p.gradientCalls );
+		leg( "  of which ComputeH", p.computeHSeconds, p.computeHCalls );
+		leg( "trace factorisation", p.traceFactorSeconds, p.traceFactorCalls );
+		leg( "trace backsolve", p.traceSolveSeconds, p.traceSolveCalls );
+		leg( "plasma fill", p.componentSeconds, p.componentCalls );
+		leg( "constraint location", p.constraintSeconds, p.constraintCalls );
+		leg( "  of which axis", p.axisSeconds, p.axisCalls );
+		leg( "    cold full sweep", p.axisSweepSeconds, p.axisSweepCalls );
+		leg( "  of which X-point", p.xPointSeconds, p.xPointCalls );
+		leg( "  of which limiter", p.limiterSeconds, p.limiterCalls );
+		leg( "  of which I_p", p.currentSeconds, p.currentCalls );
+		leg( "  of which transmission", p.transmissionSeconds, p.transmissionCalls );
+		leg( "border assembly", p.borderAssemblySeconds, p.borderAssemblyCalls );
+		leg( "border dense solve", p.borderSolveSeconds, p.borderSolveCalls );
+		leg( "re-assembly", p.prepareSeconds, p.prepareCalls );
+		// THE TWO REGIME PREDICATES, printed beside the legs they explain.
+		// Both are silent when false: the answer does not change and only the
+		// gradient leg grows. See fluxMassIsPrefactored().
+		std::printf( "MEQ:   flux mass prefactored (PotNL) %s, condensation "
+		             "cache %s\n",
+		             solver->fluxMassIsPrefactored() ? "yes" : "NO",
+		             solver->condensationCacheTaken() ? "yes" : "NO" );
+		std::printf( "MEQ:   %-22s %8.3f s  %5.1f%%\n", "other (remainder)",
+		             p.otherSeconds(), 100.0*p.otherSeconds()/whole );
+		std::fflush( stdout );
+	}
 
 	// ---- write ---------------------------------------------------------
 	try

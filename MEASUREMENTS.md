@@ -2636,3 +2636,242 @@ branch therefore flushes the queue *before* differencing and takes its own
 single-column solve afterwards — the exact order the path had before there was
 a queue. The analytic column is the default and never reaches it, so the
 ordinary path still blocks all 14.
+
+### M-99
+
+**THE THREE BATCHED AXES CROSSED, AND ONLY ONE OF THEM PAYS.**
+`[solver] AssemblyMode` × `LocalFactorMode` × `TraceAssemblyMode`, eight cells,
+on `examples/machine-f-diiid.toml` — 4848 elements at `k = 2`, `Modes = 10`,
+three plasma-support sweeps — at `OMP = MKL = 8` against
+`../mfem/install-nocuda`, `RelWithDebInfo`. Each round runs all eight cells back
+to back and is **normalised to its own baseline**, so a machine that drifts
+between rounds shows as spread within a column rather than as a difference
+between rows.
+
+| AssemblyMode | LocalFactor | TraceAssembly | r1* | r2 | r3 | r4* |
+|---|---|---|---|---|---|---|
+| threaded | serial | serial | 1.000 | 1.000 | 1.000 | 1.000 |
+| threaded | serial | **batched** | **0.906** | **0.929** | **0.910** | **0.928** |
+| threaded | batched | serial | 0.991 | 0.978 | 1.010 | 1.023 |
+| threaded | batched | batched | 0.990 | 0.965 | 0.954 | 0.982 |
+| **batched** | serial | serial | 1.246 | 1.171 | 1.180 | — |
+| **batched** | serial | batched | 1.183 | 1.151 | 1.192 | — |
+| **batched** | batched | serial | 1.268 | 1.174 | 1.264 | — |
+| **batched** | batched | batched | 1.735 | 1.159 | 1.222 | — |
+
+\* r1 and r4 began on a verified-idle machine; r2 and r3 ran against another
+agent's build, and r4's own last four cells were contaminated by a suite
+starting mid-round, which is why the `batched` half of that column is withheld
+rather than printed. **The ratios agree across contaminated and clean rounds
+alike**, which is the argument for normalising within a round.
+
+* **`TraceAssemblyMode = "batched"` is worth 7 to 9 per cent**, in all four
+  rounds, and it was OFF by default. It is now on.
+* **`AssemblyMode = "batched"` is a 15 to 27 per cent LOSS**, in all three
+  rounds that measured it. It is not a faster `threaded`; it is the mode whose
+  atomics pay for themselves on a device and charge rent on a host, which is
+  what `apps/meq.cpp` already says and what nothing had yet measured here.
+* **`LocalFactorMode = "batched"` is neutral** — 0.978 to 1.023 — and it makes
+  the trace win *worse* rather than better when both are on, 0.973 against
+  0.918 for the trace axis alone. The two are not additive and the pair is not
+  the configuration to ship.
+
+**Every cell converges in 2 Newton iterations to `psi_ax` 3.759851e-01**, to
+every digit the driver prints, across all 32 runs. The modes move the clock and
+not the answer — with the documented exception that the batched trace assembly
+orders a row's columns differently, so the last bits of the trace solve differ
+and a bitwise comparison needs `TraceAssemblyMode = "serial"` named explicitly.
+
+**AND TURNING IT ON BY DEFAULT COST A CONVERGENCE — IN THE CONTROL, NOT IN THE
+EQUILIBRIUM, WHICH IS NOT WHERE IT WAS LOOKED FOR.** With the member default
+flipped too, `theDriverReachesTheExteriorCoupling` throws *"the non-linear
+iteration did not converge"*. The obvious reading is that MFEM's batched trace
+matrix is delicate on a bordered free-boundary solve. It is not. Swept over
+( n = 24, 32, 40 ) × ( degree 2, 3 ) × ( serial, batched ), replicating that
+test's library arm exactly:
+
+| n | deg | coupled, serial | coupled, batched | control, serial | control, batched |
+|---|---|---|---|---|---|
+| 24 | 2 | 8 · 1.006474394e-01 | 8 · 1.006474394e-01 | 39 · 7.907820021e-02 | **did not converge** |
+| 24 | 3 | 9 · 1.002834451e-01 | 9 · 1.002834451e-01 | 69 · 1.269081676e-01 | 69 · 1.269081676e-01 |
+| 32 | 2 | 9 · 1.003226437e-01 | 9 · 1.003226437e-01 | 12 · 8.724452563e-02 | 12 · 8.724452563e-02 |
+| 32 | 3 | 8 · 1.001930645e-01 | 8 · 1.001930645e-01 | 9 · 1.269125268e-01 | 9 · 1.269125268e-01 |
+| 40 | 2 | 9 · 1.002709869e-01 | 9 · 1.002709869e-01 | 16 · −9.773981741e-02 | 16 · −9.773981743e-02 |
+| 40 | 3 | 8 · 1.001858541e-01 | 8 · 1.001858541e-01 | 8 · 1.269131498e-01 | 8 · 1.269131498e-01 |
+
+Newton steps · `psi_ax`. **The coupled arm is robust in all twelve cells** — 8
+or 9 steps, and serial against batched agreeing to every printed digit. The
+fragility is entirely the **control**, the same problem with the coupling
+removed, and it is not surprising once named: that is a zero datum on an
+artificial boundary in the vacuum, posed only to be different from the real
+problem, so it is not an equilibrium and nothing makes it well posed. At degree
+2 its `psi_ax` reads 7.91e-02, 8.72e-02, **−9.77e-02** across the three meshes —
+it changes **sign**, so it is picking a different branch at each resolution
+rather than converging — and the n = 40 pair differs between the trace modes in
+its last digit, which is the ulp sensitivity visible directly. At degree 3 it is
+stable to four figures on all three meshes.
+
+So the fixture moved to **( n = 32, degree 3 )**, where both arms converge
+comfortably under both modes, and **both defaults are now `batched`**. The case
+reads `7.257e-17` relative over 24130 dofs against the driver, with the control
+still `1.069` relative away.
+
+**THE GUESS AMPLITUDE WAS THE WRONG AXIS AND THE EXAMPLE SAYS SO IN WRITING.**
+The first attempt at de-fragilising this swept the bump amplitude and required a
+majority to converge, by analogy with
+`andersonPicardReachesTheSameSolutionAsNewton`'s mesh sweep. That analogy fails
+here: `examples/free-boundary-halfdisc.toml` records that this problem has two
+non-trivial roots and that the guess *"does not merely start the iteration, it
+CHOOSES WHICH EQUILIBRIUM IS REPORTED"*. Measured — at amplitude 0.06 the
+library converges in 15 steps to `psi_ax` 9.432e-02 against the driver's
+1.006e-01, **105% apart in L2**, which is the documented multiplicity met from
+the inside and not a solver defect. Sweeping a branch-selecting parameter in one
+arm of a two-arm pin compares different problems. The amplitude is part of the
+configuration and stays at the file's 0.1.
+
+**AND THE GUARD AGAINST A SILENT FALLBACK IS ITSELF PARTLY MISLABELLED, WHICH IS
+THE FINDING WORTH KEEPING.** Every one of these paths falls back silently in
+MFEM, so `GradShafranovSolver` exposes four predicates and the driver prints
+`batched paths taken: …`. But `batchedLocalFactorTaken()` returns
+`h->CanBatchLocalFactor()` — **can**, not **did** — and reads `yes` in every
+cell, including `LocalFactorMode = "serial"`. Its sibling
+`batchedLocalSolveTaken()` does track the mode, `NO` to `yes`, so the four are
+not consistent with one another and the header's promise that they answer "a
+much narrower question than whether it was asked for" holds for some and not
+others. Reading that row without opening the implementation would have supported
+a wrong conclusion about which path ran. The driver also prints the line **only
+when a batched mode is requested**, so the all-serial baseline — the one cell
+where what MFEM does by default is most worth knowing — reports nothing.
+
+### M-100
+
+**WHERE A THREADED BORDERED STEP ACTUALLY GOES, AND IT IS NOT WHERE THE FIVE-LEG
+SPLIT SAID.** `otherSeconds()` was **70% of a step at eight threads** against 43%
+at one — a remainder that GROWS with the thread count is measuring the wrong
+thing, because every named leg threads and whatever is left does not. The legs
+below are the decomposition that followed, on
+`examples/machine-f-diiid.toml`, `../mfem/install-nocuda`, `RelWithDebInfo`,
+last solve of three support sweeps.
+
+**The five original legs, 1 thread against 8:**
+
+| leg | `N = 1` | `N = 8` | speedup |
+|---|---|---|---|
+| residual | 0.324 | 0.051 | **6.4×** |
+| gradient | 0.114 | 0.046 | 2.5× |
+| trace factorisation | 0.092 | 0.053 | 1.7× |
+| trace backsolve | 0.135 | 0.072 | 1.9× |
+| **other** | **0.512** | **0.522** | **1.00×** |
+
+**Dead flat.** Inverting Amdahl on the 1.48× the whole solve gets from eight
+physical cores puts the serial fraction near 63%.
+
+**AND THE REASON IT WAS UNNAMED IS THAT THE WORK IS IN `const` MEMBERS CALLED
+FROM THE LINE SEARCH.** `assemblePlasmaCurrent()`, the row assemblers and
+`locateLimiterContact()` are const, and the backtracking re-evaluates
+`refreshXPoint`, the plasma current and all ten `transmissionConstraint` sweeps
+of Γ per trial damping. Timing at the call sites in the Newton loop missed
+exactly those calls; `profile` is now `mutable` and the timers live in the
+functions. `refreshXPoint` had no timer at all.
+
+**The constraint leg, decomposed — one slice is the whole of it:**
+
+| slice | s | share | calls |
+|---|---|---|---|
+| constraint location | 0.230 | 24.1% | 52 |
+| — **axis** | **0.204** | **21.3%** | 4 |
+| — — **cold full sweep** | **0.199** | **20.9%** | **2** |
+| — X-point | 0.004 | 0.4% | 3 |
+| — limiter | 0.000 | 0.0% | 0 |
+| — `I_p` | 0.015 | 1.7% | 5 |
+| — transmission | 0.000 | 0.0% | 0 |
+
+**Two `CriticalPointFinder::sweep()` calls are a fifth of a threaded step.** A
+sweep roots every one of 4848 elements; the seeded `tryFindAxisFrom()` is
+bounded by a ring count. **100 ms against 2.5 ms, a factor of 40.**
+
+**A HYPOTHESIS MEASURED AND KILLED ON THE WAY**: that
+`transmissionConstraint()` and `rowDot()` were the target, because the exterior
+rows are stored dense over the whole unknown (~110k) while being supported on Γ
+alone. The sparsity is real; the cost is not. Transmission reads **0.000 s**.
+
+**THE FIX IS TO STOP TAKING THE SWEEP, NOT TO MAKE IT FASTER.**
+`previousAxisR`, `previousAxisZ` and `havePreviousAxis` were **locals** of
+`solveWithNormalisation()`, so the warm route was reached from the second
+evaluation of a solve onwards and discarded at the closing brace — and
+`PlasmaSupportSweeps` calls `solve()` again on the same solver for an axis that
+moves about a millimetre between sweeps. They now seed from `axisLocatedValue`
+and its two coordinates, which are already members and already mean *where the
+last solve put the axis*.
+
+| | before | after |
+|---|---|---|
+| cold sweeps per solve | 2 | **1** |
+| axis leg | 0.204 s, 21.3% | **0.116 s, 13.5%** |
+| constraint location | 0.230 s, 24.1% | **0.146 s, 16.9%** |
+
+`psi_ax` 3.759851e-01 either way, 2 Newton iterations, same support sweeps. The
+constraint residual moves in its last printed digit, −6.465e-12 → −6.466e-12:
+the ring search and the full sweep reach the same critical point by different
+root-find paths.
+
+**THE REMAINING SWEEP CANNOT BE FIXED BY A SEED** and is a separate item. It is
+`peakAt( coldState, … )`, the cold reference for the convergence target, where
+the flux and potential blocks are zero and no axis exists — so it roots 4848
+elements in order to fail. `peakAt()` calls `locateAxisPoint()` unconditionally
+under `AxisConstraint::LocatedAxis`, while that call site passes `nullptr` for
+both `element` and `dof` and wants only the peak VALUE, which the nodal scan
+below already supplies. Guarding on those nulls looks behaviour-neutral —
+`constraintLocated` is false after the failed locate and would be false without
+it — but it sits in the branch `GradShafranov.cpp` already flags as *"a
+branch-selection decision rather than a bug fix"*, where making the flag and
+`argDof` describe the same evaluation changes which equilibrium the diverted
+machine reports. Not taken here on that ground.
+
+**WHAT THIS SAYS ABOUT CCSZ.** `meq::SourceIntegrator` lives in the residual
+leg, which is **8.0% of a threaded step on this case**. The 23–28% Amdahl
+ceiling in `INTERPOLATORY-HDG-PLAN.md` §3.4 comes off M-80's high-beta fixture —
+fixed boundary, no border, no exterior modes, no line-search constraint
+re-evaluation — and does not carry to a diverted free-boundary run. Making the
+source integrator free would buy under 8% here.
+
+### M-101
+
+**MEQ TAKES THE CONDENSATION CACHE, AND `LocalFactorMode = "batched"` IS WHAT
+TURNS IT OFF.**
+
+`DarcyHybridization` holds a `CondensationCache` — `A⁻¹Bᵀ`, `B A⁻¹Bᵀ`, `A⁻¹Cᵀ`,
+`B A⁻¹Cᵀ − E`, `C A⁻¹Bᵀ + G` and `C A⁻¹Cᵀ`, kept across a Newton loop — and
+upstream sizes it against MEQ's own M-80: 1.85× on `ComputeH()` at order 2, about
+**11% of a whole MEQ solve at k = 2**. It applies only under
+`LocalOpType::PotNL`, whose member `lop_type` defaults to `FullNL` and is
+inferred at `Finalize()`. MEQ asked neither predicate, so whether it was getting
+any of this was unknown rather than assumed.
+
+`GradShafranovSolver::fluxMassIsPrefactored()` and `condensationCacheTaken()`
+now expose the two, and `meq --profile` prints them. On the DIII-D machine case,
+`build-nocuda` at `OMP = MKL = 8`:
+
+| configuration | flux mass prefactored (PotNL) | condensation cache |
+|---|---|---|
+| as shipped | **yes** | **yes** |
+| `LocalFactorMode = "batched"` | yes | **NO** |
+
+**Both read `yes` by default, so MEQ was already getting it** — the question was
+worth asking and the answer is that nothing is being left on the table.
+
+**AND THE SECOND ROW IS THE FINDING.** `CanCacheCondensation()` has seven ways
+to return false, so it is not a tautology, and one of them is
+`lfac_mode == LocalFactorMode::Batched` — *"the batched factorisation owns AiBt
+and the Schur complement itself and hands them in; caching underneath it would
+be two owners of one buffer."* So that mode is a **trade** and not a knob that
+does nothing: it buys a batched local factorisation and pays the condensation
+cache. That is the mechanism behind M-99's flat `LocalFactorMode` axis, which
+was recorded there as neutral-to-negative with no explanation — two effects of
+opposite sign, not one absent effect. It also means the two modes must never be
+read as independent when the cross above is re-run.
+
+The other six refusals are a block non-linear (0,1) gradient (`Bnl_data`), a
+non-linear flux mass, a non-linear face constraint on either the potential row
+or the full system, and an empty mesh. MEQ trips none of them, which is the
+positive half of the first row.

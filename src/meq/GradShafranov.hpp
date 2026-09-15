@@ -596,7 +596,9 @@ namespace meq
 			enum class TraceAssemblyMode
 			{
 				/// `ScatterElementH()` per element into an unfinalized
-				/// `SparseMatrix`, then `Finalize()`. MFEM's default and MEQ's.
+				/// `SparseMatrix`, then `Finalize()`. MFEM's default, and MEQ's
+				/// until it was measured; see Batched below for why it is not
+				/// any more.
 				Serial,
 				/**
 				 * The CSR built from the mesh connectivity ONCE and refilled by
@@ -615,10 +617,37 @@ namespace meq
 				 * order is a function of the VALUES.
 				 *
 				 * So this is the one mode here a bit-exactness assertion will
-				 * not survive, and it is opt-in for that reason. What it buys
-				 * is the sparse third of `ComputeH()`, which had no device path
-				 * at all and which on a host rebuilds a linked-list matrix
-				 * every linearisation.
+				 * not survive. What it buys is the sparse third of
+				 * `ComputeH()`, which had no device path at all and which on a
+				 * host rebuilds a linked-list matrix every linearisation.
+				 *
+				 * **AND IT IS THE DEFAULT FOR A FILE, WHICH IT WAS NOT WHEN THIS
+				 * MODE WAS WRITTEN.** It was opt-in on the bit-exactness
+				 * argument alone, before anything had been timed. Measured on
+				 * the DIII-D free-boundary machine case at `OMP = MKL = 8`,
+				 * eight cells of the
+				 * ( AssemblyMode x LocalFactorMode x TraceAssemblyMode ) cross,
+				 * interleaved by round: **7 to 9 per cent off the solve, in
+				 * every round, on the only axis of the three that pays** --
+				 * LocalFactorMode is neutral and AssemblyMode::Batched is a 15
+				 * to 27 per cent LOSS. MEASUREMENTS.md M-99.
+				 *
+				 * **IT IS THE MEMBER DEFAULT TOO, AND THE SOLVE THAT ONCE
+				 * STOOD IN THE WAY OF THAT WAS THE CONTROL RATHER THAN THE
+				 * EQUILIBRIUM.** Turning this on for callers who construct a
+				 * solver directly made `theDriverReachesTheExteriorCoupling`
+				 * throw "the non-linear iteration did not converge", and the
+				 * natural reading -- that the batched matrix is delicate on a
+				 * bordered free-boundary solve -- is wrong. Swept over
+				 * ( n = 24, 32, 40 ) x ( degree 2, 3 ) x ( serial, batched ),
+				 * the COUPLED arm converges in 8 or 9 Newton steps in all
+				 * twelve cells and agrees between the two trace modes to every
+				 * printed digit. What fails is the case's CONTROL, the same
+				 * problem with the coupling removed, which is a zero datum on
+				 * an artificial boundary and so is not an equilibrium at all:
+				 * its psi_ax changes SIGN with the mesh at degree 2. The
+				 * fixture moved to a resolution where the control is well posed
+				 * and both defaults are now `batched`. MEASUREMENTS.md M-99.
 				 *
 				 * It reaches NPC problems and not the reduced route.
 				 * batchedTraceAssemblyTaken() answers whether it was used.
@@ -626,7 +655,9 @@ namespace meq
 				Batched
 			};
 
-			/// Choose it. TraceAssemblyMode::Serial is the default.
+			/// Choose it. **Batched is the default here and in a file alike**
+			/// -- see TraceAssemblyMode::Batched for what it is worth and for
+			/// the control solve that briefly made the two defaults differ.
 			void setTraceAssemblyMode( TraceAssemblyMode choice );
 
 			/// The value setTraceAssemblyMode() last set.
@@ -642,6 +673,37 @@ namespace meq
 			 * Valid after prepare(); false before there is a hybridization to
 			 * put the question to.
 			 */
+			/** @brief Whether the flux mass is factored ONCE and reused, which
+			 * is MFEM's `LocalOpType::PotNL` regime named by what a caller can
+			 * observe.
+			 *
+			 * **ASKED RATHER THAN ASSUMED, FOR THE SAME REASON THE BATCHED
+			 * PREDICATES ARE.** It holds when nothing makes the flux row
+			 * non-linear, and MEQ believes it does -- an L2 flux space, the
+			 * non-linearity on the potential mass, and face constraints that
+			 * take the LINEAR `c_bfi_p` route. But `lop_type` DEFAULTS to
+			 * `FullNL` and is inferred at Finalize() from what was installed,
+			 * so an integrator added on the wrong form silently costs the
+			 * general path -- measured by upstream at 5-7% of a Newton step at
+			 * order 2 and **20-26% at order 3** -- with no diagnostic and no
+			 * change of answer.
+			 *
+			 * It is also the gate on the CONDENSATION CACHE, so a false here
+			 * costs both at once. Valid after prepare(). */
+			bool fluxMassIsPrefactored() const;
+
+			/** @brief Whether the state-independent half of the condensation --
+			 * `A^-1 B^T`, `B A^-1 B^T`, `A^-1 C^T` and the rest -- is kept
+			 * across the Newton loop instead of rebuilt at every gradient.
+			 *
+			 * Upstream sizes it against MEQ's own M-80: `ComputeH()` is 68-73%
+			 * of the gradient leg, the cache is 1.85x on it at order 2, and
+			 * that is **about 11% of a whole solve** at MEQ's `k = 2`. It costs
+			 * `na*nd + nf*nc*(na + 2*nd) + nf^2*nc^2` reals an element.
+			 *
+			 * Valid after prepare(). */
+			bool condensationCacheTaken() const;
+
 			bool batchedPotFaceAssemblyTaken() const;
 			bool batchedLocalFactorTaken() const;
 			bool batchedLocalSolveTaken() const;
@@ -2604,11 +2666,65 @@ namespace meq
 				double componentSeconds = 0.0;
 				double totalSeconds = 0.0;
 
+				/*
+				 * THE FOUR LEGS OF THE BORDERED PATH, ADDED BECAUSE `otherSeconds()`
+				 * WAS 70% OF A THREADED STEP AND NAMED NOTHING.
+				 *
+				 * The five legs above are the ones a FIXED-boundary Newton step has,
+				 * and on the free-boundary bordered path they are the minority: the
+				 * residual and the gradient thread, and what is left over does not
+				 * thread at all -- measured, 0.512 s serial against 0.522 s on eight
+				 * threads, dead flat. A leg split whose remainder grows with the
+				 * thread count is measuring the wrong thing, so the remainder is
+				 * broken up here rather than explained away.
+				 *
+				 * `constraint` is locating what the borders CONSTRAIN -- the magnetic
+				 * axis as a zero of q_h, the peak of psi_h, and the limiter contact.
+				 * `borderAssembly` is building the rows and columns themselves, which
+				 * for FB-7 means sweeping Gamma once per exterior mode.
+				 * `borderSolve` is the dense elimination: rowDot() against every
+				 * column and the ( N + 4 ) inverse.
+				 * `prepare` is reprepare(), a full FormLinearSystem() re-assembly,
+				 * which the exterior datum forces because it reaches the system
+				 * through the right-hand side.
+				 */
+				double constraintSeconds = 0.0;
+				/*
+				 * SUB-SLICES OF `constraintSeconds`, on the pattern
+				 * `computeHSeconds` already sets: each is ALSO counted in the
+				 * leg above, so adding them to the other legs double-counts.
+				 * They exist because the leg came out at 22% of a threaded step
+				 * and "locating the constraints" is five different jobs with
+				 * five different fixes.
+				 */
+				double axisSeconds = 0.0;
+				/// The COLD half of axisSeconds: CriticalPointFinder::sweep(),
+				/// which roots every element of the mesh. The warm half is
+				/// tryFindAxisFrom(), bounded by a ring count.
+				double axisSweepSeconds = 0.0;
+				double xPointSeconds = 0.0;
+				double limiterSeconds = 0.0;
+				double currentSeconds = 0.0;
+				double transmissionSeconds = 0.0;
+				double borderAssemblySeconds = 0.0;
+				double borderSolveSeconds = 0.0;
+				double prepareSeconds = 0.0;
+
 				long residualCalls = 0;
 				long gradientCalls = 0;
 				long traceFactorCalls = 0;
 				long traceSolveCalls = 0;
 				long componentCalls = 0;
+				long constraintCalls = 0;
+				long axisCalls = 0;
+				long axisSweepCalls = 0;
+				long xPointCalls = 0;
+				long limiterCalls = 0;
+				long currentCalls = 0;
+				long transmissionCalls = 0;
+				long borderAssemblyCalls = 0;
+				long borderSolveCalls = 0;
+				long prepareCalls = 0;
 
 				/*
 				 * LEVEL 2, AND IT IS A SUB-SPLIT OF `gradientSeconds` RATHER THAN A
@@ -2637,7 +2753,9 @@ namespace meq
 				{
 					double const legs = residualSeconds + gradientSeconds
 					                  + traceFactorSeconds + traceSolveSeconds
-					                  + componentSeconds;
+					                  + componentSeconds + constraintSeconds
+					                  + borderAssemblySeconds + borderSolveSeconds
+					                  + prepareSeconds;
 					return ( totalSeconds > legs ) ? totalSeconds - legs : 0.0;
 				}
 			};
@@ -2960,7 +3078,11 @@ namespace meq
 			/// setSourceQuadratureOrder().
 			int sourceQuadratureExtra;
 			/// The leg timings of the last solve; see stepProfile().
-			StepProfile profile;
+			/// MUTABLE because the legs are measured inside const members --
+			/// assemblePlasmaCurrent() and the row assemblers are const and are
+			/// called from the LINE SEARCH, which is where the unnamed time was.
+			/// Timing at the call sites instead missed exactly those calls.
+			mutable StepProfile profile;
 
 			NonlinearOrdering orderingChoice;
 			AssemblyMode assemblyModeChoice;
@@ -3186,7 +3308,7 @@ namespace meq
 			bool assembleExteriorColumns( std::vector<mfem::Vector> &columns );
 
 			LocalFactorMode localFactorChoice = LocalFactorMode::Serial;
-			TraceAssemblyMode traceAssemblyChoice = TraceAssemblyMode::Serial;
+			TraceAssemblyMode traceAssemblyChoice = TraceAssemblyMode::Batched;
 
 			bool prepared;
 			bool postProcessed;

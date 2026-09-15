@@ -521,11 +521,19 @@ route its constraint takes" are different questions, and the second is decided b
 a predicate in somebody else's translation unit. This file inferred one from the
 other and got a requirement list wrong in MEQ's own favour.
 
-**MEQ also reaches neither batched path today**: its `AssemblyMode` enum carries
-`Serial` and `Threaded` and no `Batched`, and it never calls
-`SetLocalFactorMode`. So the two device-capable pieces upstream has already
-built — the batched local factorisation, and the batched flux-mass domain
-assembly — are unreachable from MEQ without a new enum value in each case.
+**MEQ REACHES ALL THREE BATCHED PATHS AND TWO OF THEM ARE TOML KEYS.** This file
+said the opposite — that `AssemblyMode` carried only `Serial` and `Threaded` and
+that reaching MFEM's batched work needed a new enum value — and every part of
+that is stale. `AssemblyMode::Batched`, `LocalFactorMode` and
+`TraceAssemblyMode` all exist in `GradShafranovSolver` and all three are
+settable from a file. What the measurement says is which of them is worth
+having: **only `TraceAssemblyMode`**, at 7 to 9 per cent of the DIII-D solve, and
+it is now the default in a file and in the class alike.
+**`AssemblyMode::Batched` is a 15 to 27 per cent LOSS** on the host, and
+**`LocalFactorMode::Batched` is a trade that comes out flat** — it buys a batched
+local factorisation and pays the condensation cache, since
+`CanCacheCondensation()` refuses outright under it.
+→ **[M-99](MEASUREMENTS.md#m-99)** and **[M-101](MEASUREMENTS.md#m-101)**.
 
 **THE ORDERED LIST, WEIGHTED BY THE LEG PROFILE RATHER THAN BY COUNT.** From
 **[M-80](MEASUREMENTS.md#m-80)**:
@@ -542,10 +550,12 @@ assembly — are unreachable from MEQ without a new enum value in each case.
    stages: the arithmetic there deflates the headline to 1.6–2.0× fewer `F`
    evaluations, `ComputeH()` is untouched, and the Amdahl ceiling off M-80 is
    23–28%.
-2. **`AssemblyMode::Batched` in MEQ's own enum**, which is the whole of what
-   stands between MEQ and the face kernel that already exists — see the
-   correction above. It is a smaller job than a new kernel and it is entirely in
-   this tree.
+2. ~~**`AssemblyMode::Batched` in MEQ's own enum**~~ — **built, and measured a
+   15 to 27 per cent LOSS on the host.** It was listed here as the whole of what
+   stood between MEQ and the face kernel that already exists, and it is; the
+   kernel is now reachable and does not pay on this machine. It stays a TOML key
+   for the device, where the trade may invert, and the item is closed rather
+   than pending. → **[M-99](MEASUREMENTS.md#m-99)**.
 3. **A device route through `DarcyHybridization`** that reaches those kernels
    instead of `ComputeElementMatrix()`. Without this, 1 and 2 are unreachable.
 4. **`mfem::HDGExtensionIntegrator`** — needed only for the curved and

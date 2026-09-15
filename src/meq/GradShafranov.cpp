@@ -629,6 +629,12 @@ namespace
 
 	void GradShafranovSolver::setSource( mfem::Coefficient &fIn )
 	{
+		// A NEW SOURCE IS A NEW PROBLEM, so the carried axis goes. See the
+		// seeding of previousAxisR in solveWithNormalisation(): a seeded search
+		// FOLLOWS the extremum it starts from, which is continuation between
+		// sweeps of one equilibrium and a wrong answer between two different
+		// ones. Clearing costs one sweep on the next solve and nothing after.
+		axisLocatedValue = false;
 		if ( built )
 			throw std::logic_error( "meq::GradShafranovSolver::setSource: the forms are already built; the source has to be set before the first solve" );
 		if ( nonlinearSource )
@@ -651,6 +657,12 @@ namespace
 
 	void GradShafranovSolver::setSource( Source const &fIn )
 	{
+		// A NEW SOURCE IS A NEW PROBLEM, so the carried axis goes. See the
+		// seeding of previousAxisR in solveWithNormalisation(): a seeded search
+		// FOLLOWS the extremum it starts from, which is continuation between
+		// sweeps of one equilibrium and a wrong answer between two different
+		// ones. Clearing costs one sweep on the next solve and nothing after.
+		axisLocatedValue = false;
 		if ( built )
 			throw std::logic_error( "meq::GradShafranovSolver::setSource: the forms are already built; the source has to be set before the first solve" );
 		if ( linearSource )
@@ -672,6 +684,12 @@ namespace
 
 	void GradShafranovSolver::setSource( NormalisedSource &fIn, double psiAxisGuessIn )
 	{
+		// A NEW SOURCE IS A NEW PROBLEM, so the carried axis goes. See the
+		// seeding of previousAxisR in solveWithNormalisation(): a seeded search
+		// FOLLOWS the extremum it starts from, which is continuation between
+		// sweeps of one equilibrium and a wrong answer between two different
+		// ones. Clearing costs one sweep on the next solve and nothing after.
+		axisLocatedValue = false;
 		if ( !std::isfinite( psiAxisGuessIn ) || psiAxisGuessIn == 0.0 )
 			throw std::invalid_argument( "meq::GradShafranovSolver::setSource: the psi_ax guess must be finite and non-zero" );
 		/*
@@ -906,6 +924,42 @@ namespace
 		using namespace std::chrono;
 		return duration<double>( steady_clock::now().time_since_epoch() ).count();
 	}
+
+	/**
+	 * A LEG TIMER THAT SURVIVES AN EARLY RETURN, WHICH IS WHY IT IS A CLASS.
+	 *
+	 * The legs it serves -- peakAt(), refreshLimiterContact() -- have several
+	 * return paths each, and a pair of profileNow() calls around a body is one
+	 * `return` away from charging nothing and reporting a call. Scope-bound, it
+	 * cannot be got wrong that way.
+	 *
+	 * The clock is read twice per construction, which at the call counts on the
+	 * bordered path is nanoseconds against legs measured in tenths of a second.
+	 * Do not put one inside rowDot(): it runs ( N + 4 ) squared times per step
+	 * and the block around the dense elimination measures the same thing for
+	 * one pair of reads.
+	 */
+	class LegTimer
+	{
+		public:
+			LegTimer( double &secondsIn, long &calls )
+				: seconds( secondsIn ), started( profileNow() )
+			{
+				++calls;
+			}
+
+			~LegTimer()
+			{
+				seconds += profileNow() - started;
+			}
+
+			LegTimer( LegTimer const & ) = delete;
+			LegTimer &operator=( LegTimer const & ) = delete;
+
+		private:
+			double &seconds;
+			double started;
+	};
 
 	class TimedOperator : public mfem::Operator
 	{
@@ -2491,6 +2545,8 @@ namespace
 	                                                  mfem::Array<int> &dofs,
 	                                                  double &r, double &z ) const
 	{
+		LegTimer const timer( profile.constraintSeconds, profile.constraintCalls );
+		LegTimer const slice( profile.limiterSeconds, profile.limiterCalls );
 		mfem::Mesh &mesh = *potentialFes->GetMesh();
 
 		element = -1;
@@ -3197,6 +3253,7 @@ namespace
 	std::vector<mfem::Vector>
 		GradShafranovSolver::exteriorTransmissionRows( ExteriorDtN const &exterior ) const
 	{
+		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCalls );
 		if ( !transferPath )
 			throw std::logic_error(
 				"meq::GradShafranovSolver::exteriorTransmissionRows: there is no "
@@ -4532,6 +4589,8 @@ namespace
 
 	double GradShafranovSolver::assemblePlasmaCurrent( mfem::Vector const &state ) const
 	{
+		LegTimer const timer( profile.constraintSeconds, profile.constraintCalls );
+		LegTimer const slice( profile.currentSeconds, profile.currentCalls );
 		if ( !normalisedSource )
 			return 0.0;
 
@@ -4585,6 +4644,7 @@ namespace
 	void GradShafranovSolver::assembleCurrentColumn( mfem::Vector const &state,
 	                                                 mfem::Vector &out ) const
 	{
+		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCalls );
 		out.SetSize( state.Size() );
 		out = 0.0;
 		if ( !normalisedSource )
@@ -4647,6 +4707,7 @@ namespace
 		mfem::Vector const &state, double &againstAxis,
 		double &againstBoundary ) const
 	{
+		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCalls );
 		againstAxis = 0.0;
 		againstBoundary = 0.0;
 		if ( !normalisedSource )
@@ -4704,6 +4765,7 @@ namespace
 	void GradShafranovSolver::assembleCurrentRow( mfem::Vector const &state,
 	                                              mfem::Vector &out ) const
 	{
+		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCalls );
 		out.SetSize( state.Size() );
 		out = 0.0;
 		if ( !normalisedSource )
@@ -4844,6 +4906,20 @@ namespace
 		return h != nullptr && h->CanBatchPotFaceAssembly();
 	}
 
+	bool GradShafranovSolver::fluxMassIsPrefactored() const
+	{
+		mfem::DarcyHybridization const *h =
+			darcy ? darcy->GetHybridization() : nullptr;
+		return h != nullptr && h->FluxMassIsPrefactored();
+	}
+
+	bool GradShafranovSolver::condensationCacheTaken() const
+	{
+		mfem::DarcyHybridization const *h =
+			darcy ? darcy->GetHybridization() : nullptr;
+		return h != nullptr && h->CanCacheCondensation();
+	}
+
 	bool GradShafranovSolver::batchedLocalFactorTaken() const
 	{
 		mfem::DarcyHybridization const *h =
@@ -4868,6 +4944,7 @@ namespace
 	bool GradShafranovSolver::assembleExteriorColumns(
 		std::vector<mfem::Vector> &columns )
 	{
+		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCalls );
 		columns.clear();
 		if ( !exteriorCoupling || !transferPath )
 			return false;
@@ -4920,6 +4997,7 @@ namespace
 	                                                       bool axis,
 	                                                       mfem::Vector &out ) const
 	{
+		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCalls );
 		// Under the condensation the residual is the REDUCED trace residual and
 		// this element assembly is not it. NPC's residual is unreduced, which is
 		// what makes the column assemblable at all.
@@ -5136,6 +5214,7 @@ namespace
 		 */
 		auto reprepare = [ & ]()
 		{
+			LegTimer const timer( profile.prepareSeconds, profile.prepareCalls );
 			// WITHOUT THE GUESS. Every caller below assigns the iterate from a
 			// saved state on the next line, so seeding it here is computed and
 			// discarded -- see prepare( bool ).
@@ -5234,6 +5313,8 @@ namespace
 		 */
 		auto refreshLimiterContact = [ & ]( mfem::Vector const &state )
 		{
+			// NO TIMER HERE. locateLimiterContact() carries one, and two
+			// LegTimers on the same accumulator around the same work add twice.
 			if ( limiterConstraintChoice != LimiterConstraint::LocatedContact )
 				return;
 			double r = 0.0, z = 0.0;
@@ -5334,6 +5415,9 @@ namespace
 		 */
 		auto refreshXPoint = [ & ]( mfem::Vector const &state )
 		{
+			LegTimer const timer( profile.constraintSeconds,
+			                      profile.constraintCalls );
+			LegTimer const slice( profile.xPointSeconds, profile.xPointCalls );
 			if ( !xPointIsUnknown )
 				return;
 
@@ -5586,9 +5670,40 @@ namespace
 
 		mfem::GridFunction axisFlux( fluxFes.get() );
 		mfem::GridFunction axisPotential( potentialFes.get() );
-		double previousAxisR = 0.0;
-		double previousAxisZ = 0.0;
-		bool havePreviousAxis = false;
+		/*
+		 * SEEDED FROM THE LAST SOLVE'S AXIS, NOT FROM NOTHING.
+		 *
+		 * These were locals initialised to "no axis yet", so the FIRST axis
+		 * location of every solve took CriticalPointFinder::sweep(), which
+		 * roots every element of the mesh. The warm route -- tryFindAxisFrom(),
+		 * bounded by a ring count rather than by the mesh -- was reached only
+		 * from the second evaluation onwards, and then thrown away at the
+		 * closing brace.
+		 *
+		 * THAT COST A FULL SWEEP PER SOLVE AND THERE IS MORE THAN ONE SOLVE.
+		 * `[solver] PlasmaSupportSweeps` re-decides the plasma support between
+		 * solves and calls solve() again on the SAME solver, so the diverted
+		 * machine pays it three times over a run for an axis that moves by
+		 * about a millimetre between sweeps. Measured on the DIII-D case:
+		 * 100 ms for a sweep against 2.5 ms for a seeded search, a factor of
+		 * 40, and 20.9% of a threaded Newton step went on two sweeps.
+		 * MEASUREMENTS.md M-100.
+		 *
+		 * `axisLocatedValue` and its two coordinates are already members and
+		 * already mean "where the last solve put the axis" -- they are what
+		 * axisR() and axisZ() report. Reading them here is the whole fix.
+		 *
+		 * IT IS A SEED AND NOT AN ANSWER, which is what makes it safe: a stale
+		 * one costs a failed ring search and falls through to the sweep below,
+		 * and the conductor filter is applied to the point ADOPTED rather than
+		 * to the way it was reached. setSource() clears it, because a new
+		 * source is a new problem and a seeded search FOLLOWS the extremum it
+		 * starts from -- the continuation that is wanted between sweeps of one
+		 * equilibrium is exactly wrong between two different ones.
+		 */
+		double previousAxisR = axisLocatedValue ? axisRValue : 0.0;
+		double previousAxisZ = axisLocatedValue ? axisZValue : 0.0;
+		bool havePreviousAxis = axisLocatedValue;
 
 		// Where the constraint was last evaluated, for the border row: the
 		// element and the shape functions there. Filled by peakAt().
@@ -5726,6 +5841,8 @@ namespace
 			 */
 			if ( !found )
 			{
+				LegTimer const cold( profile.axisSweepSeconds,
+				                     profile.axisSweepCalls );
 				std::vector< CriticalPoint > const all = finder.sweep();
 
 				/*
@@ -5841,6 +5958,9 @@ namespace
 		auto peakAt = [ & ]( mfem::Vector const &state, double normalisation,
 		                     int *element, int *dof )
 		{
+			LegTimer const timer( profile.constraintSeconds,
+			                      profile.constraintCalls );
+			LegTimer const slice( profile.axisSeconds, profile.axisCalls );
 			if ( !npcOrdering )
 				return recoverPeak( state, normalisation, sB, element, dof );
 
@@ -6071,6 +6191,8 @@ namespace
 		///       - int_Gamma ( q_coil . nu ) C_m dGamma.
 		auto transmissionConstraint = [ & ]( mfem::Vector const &state, int mode )
 		{
+			LegTimer const timer( profile.constraintSeconds,
+			                      profile.constraintCalls );
 			double total = 0.0;
 			mfem::Vector const &row = exteriorRows[ static_cast<std::size_t>( mode ) ];
 			for ( int i = 0; i < n; ++i )
@@ -6907,6 +7029,15 @@ namespace
 			// ArrayMult on the ordinary path. See the lambda for what it saves.
 			flush();
 
+			// rowDot() AND THE INVERSE TOGETHER, which is what the class comment
+			// on LegTimer says to do: ( N + 4 ) squared row contractions against
+			// one pair of clock reads. BRACED so the timer ends before the
+			// backtracking below, whose residual evaluations are the residual
+			// leg's and must not be charged here twice.
+			{
+			LegTimer const denseTimer( profile.borderSolveSeconds,
+			                           profile.borderSolveCalls );
+
 			if ( nBorderTotal == 1 )
 			{
 				double const borderDotY = rowDot( 0, y );
@@ -6935,6 +7066,7 @@ namespace
 						throw std::runtime_error( "meq::GradShafranovSolver::solve: the bordered Jacobian is singular in ( psi_ax, psi_bnd, a )" );
 					step[ static_cast<std::size_t>( i ) ] = solved( i );
 				}
+			}
 			}
 
 			double const deltaS = step[ 0 ];
