@@ -879,9 +879,51 @@ Raised 2026-09-03. All but one closed 2026-09-04.
 
 
 ================================================================================
-Two sampling questions left behind by stage 7
+Two sampling questions left behind by stage 7 -- BOTH ANSWERED 2026-09-14
 Raised 2026-09-06, when DRIVER-PLAN.md was converted to docs/ and these were the
 only two things in it that were neither built nor recorded anywhere else.
+================================================================================
+
+  BOTH ARE CLOSED, AND THE FIRST ONE'S PROPOSAL WAS WRONG. The entry below is
+  kept because what it proposed is the thing not to do, and because the
+  comparison it asked for found something neither question anticipated.
+  MEASUREMENTS.md M-93 has the numbers;
+  theTwoLocatorsAgreeAtTheSamePoints in tests/convergence/SamplerConvergence.cpp
+  is the case.
+
+  1. SetL2AvgType IS A REAL RULE AND IT IS THE WRONG ONE. This entry called it
+     "a principled answer where meq::GridSampler has a shrug". Measured on
+     psi_h at k = 2: with gslib's default averaging left on, ALL 577 border
+     nodes of a 65^2 grid disagree with GridSampler, worst 1.93e-06, because
+     the averaged value belongs to NEITHER element's polynomial -- which is the
+     same finding meq::FieldTransfer's constructor already records from the
+     other direction, at 28%, 10% and 12% wrong in L2 at k = 1, 2, 3. Picking a
+     side, which is what GridSampler does, is the better rule for a
+     DISCONTINUOUS field. The shrug was right and nothing is to be wired.
+
+  2. THE TWO ARE NOW COMPARED, AND THEY AGREE EXACTLY WHERE THE QUESTION HAS AN
+     ANSWER. 3648 of 3648 nodes strictly inside an element agree to 7.2e-16 --
+     two implementations sharing no locating machinery, which is the check an
+     exact-solution comparison structurally cannot make. Every disagreement is
+     a border node, where both are right and the difference is the face jump,
+     1.17e-06 against 2.03e-06 of error in psi_h itself.
+
+     TWO THINGS THE COMPARISON FOUND THAT NEITHER QUESTION ASKED. Border nodes
+     are COMMON -- 577 of 4225, one in seven, on a grid with no alignment
+     intended, because a uniform grid over a uniform mesh is commensurate with
+     it far more often than a generic point would be. And the count of nodes
+     the two resolve to DIFFERENT elements is not a stable number: one ulp in
+     the mesh extent, 0.7999999999999999 against 0.8, moves it from 202 to 331.
+     It is reported and never gated.
+
+  3. AND THE REAL DEFECT WAS IN NEITHER QUESTION. Setting gslib up on a mesh
+     calls Mesh::EnsureNodes(), and GridSampler's affine fast path was keyed on
+     Mesh::GetNodes() == nullptr -- so constructing a meq::FieldTransfer on a
+     mesh silently put every later GridSampler on it onto the Newton route,
+     159x at 129^2 and 83x at 513^2, with every answer unchanged. Fixed by
+     testing the geometry's DEGREE. Latent in the driver, which builds its
+     transfers on copies. CLAUDE.md's Traps carries it.
+
 ================================================================================
 
   GSLIB HAS A PRINCIPLED ANSWER WHERE meq::GridSampler HAS A SHRUG, AND IT HAS

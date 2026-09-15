@@ -22,6 +22,56 @@ namespace meq
 			return fe.GetMapType() == mfem::FiniteElement::VALUE
 			       && fe.GetRangeType() == mfem::FiniteElement::SCALAR;
 		}
+
+		/// Whether the mesh's geometry map is affine on simplices -- which is
+		/// what the fast inverse below needs, and is NOT the same question as
+		/// whether a nodal field exists.
+		///
+		/// A MESH ACQUIRES NODES WITHOUT BECOMING CURVED, AND THE DIFFERENCE IS
+		/// WORTH TWO ORDERS OF MAGNITUDE. Mesh::GetNodes() is null for every
+		/// mesh MEQ builds with MakeCartesian2D and every order-1 .msh gmsh
+		/// writes -- but any call to Mesh::EnsureNodes() installs one, and
+		/// meq::FieldTransfer's constructor makes exactly that call, because
+		/// FindPointsGSLIB refuses a mesh without nodes. Testing the POINTER
+		/// therefore drops this sampler onto the Newton route, permanently and
+		/// for the whole process, on any mesh a warm start has touched:
+		/// measured at 159x at 129^2 and 83x at 513^2, with the answer
+		/// unchanged, so nothing but a clock can see it.
+		///
+		/// An order-1 nodal field on a triangle describes the same affine map
+		/// the vertices do, so the test is on the geometry's DEGREE. The values
+		/// are compared with the vertex array rather than assumed equal to it:
+		/// MFEM lets a caller deform a mesh through its nodes while leaving the
+		/// vertices behind, and the loop below reads vertices. One pass over
+		/// the vertices, against an element loop that is the whole cost here.
+		bool affineGeometry( mfem::Mesh &mesh )
+		{
+			mfem::GridFunction const *nodes = mesh.GetNodes();
+			if ( nodes == nullptr )
+				return true;
+
+			mfem::FiniteElementSpace const *space = nodes->FESpace();
+			if ( space == nullptr || space->IsVariableOrder()
+			     || space->GetMaxElementOrder() != 1 )
+				return false;
+
+			// Nodes and vertices must be the same points, EXACTLY: this is a
+			// question about which array describes the geometry, not a
+			// tolerance on how far two descriptions of it have drifted apart.
+			//
+			// The loop is over the nodal field's own component count rather
+			// than the mesh dimension, the two differing for a surface mesh,
+			// because what is being read is the field.
+			int const components = space->GetVDim();
+			for ( int v = 0; v < mesh.GetNV(); ++v )
+			{
+				double const *vertex = mesh.GetVertex( v );
+				for ( int d = 0; d < components; ++d )
+					if ( ( *nodes )( space->DofToVDof( v, d ) ) != vertex[ d ] )
+						return false;
+			}
+			return true;
+		}
 	}
 
 	GridSampler::GridSampler( mfem::Mesh &meshIn,
@@ -61,12 +111,13 @@ namespace meq
 		 * spacing near the mesh's own only about one candidate in five is
 		 * inside.
 		 *
-		 * Mesh::GetNodes() is null exactly when the geometry is the vertices
-		 * alone, which is every mesh MEQ builds with MakeCartesian2D and every
-		 * order-1 .msh gmsh writes. A curved mesh keeps the Newton route, and
-		 * so does anything that is not a triangle.
+		 * A curved mesh keeps the Newton route, and so does anything that is
+		 * not a triangle. What decides is the geometry's DEGREE and not whether
+		 * a nodal field happens to exist -- see affineGeometry(), which is the
+		 * difference between this path and a 159x slower one on any mesh a
+		 * meq::FieldTransfer has been constructed on.
 		 */
-		bool const straightSided = ( mesh.GetNodes() == nullptr );
+		bool const straightSided = affineGeometry( mesh );
 
 		// InverseElementTransformation's own default, applied to the same test
 		// Geometry::CheckPoint() applies -- so the affine path accepts exactly
