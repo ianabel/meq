@@ -1995,6 +1995,13 @@ here** — M-88 measures `freegs4e`'s own accuracy at about 1e-04 relative and
 about first order, so this is the floor between two codes and two conductor
 models, met at the very first rung.
 
+**THE SECONDS IN THIS TABLE ARE SUPERSEDED BY
+[M-97](MEASUREMENTS.md#m-97)**, which re-takes the race on an idle machine and
+after M-90's `reprepare()` fix: 7.93 s against 3.99 s, a ratio of 1.99 rather
+than 2.22. The accuracy columns are unaffected — the answers are identical to
+every digit — and the rows below stand as a measurement of the code and the
+conditions of the day.
+
 **SO THE ANSWER TO "WHAT DOES EQUIVALENT ACCURACY COST" IS 14.2 s AGAINST
 6.4 s**, at `k = 2` on 4848 elements against 129², with MEQ's 12.1 s solve being
 two Newton steps after three plasma-support sweeps. Read it as a factor of two
@@ -2285,3 +2292,347 @@ is read by `SolverContract` and by nothing else, but it is an INPUT to
 `ReconstructFluxAndPot()`, so it is not droppable. This is the cost of reporting
 `psi*` rather than `psi_h`, which is a decision taken on its merits elsewhere;
 it is recorded here because a reader timing the output stage will meet it first.
+
+### M-93
+
+**THE TWO LOCATORS, AND WHAT A NODAL FIELD COSTS THE FAST ONE.** MEQ finds
+points in a mesh by two unrelated routes — `meq::GridSampler`, which inverts the
+element loop and then inverts the element map, and `mfem::FindPointsGSLIB`,
+which `meq::FieldTransfer` goes through and whose simplex path splits triangles
+into quads internally. They had never been asked the same question.
+`theTwoLocatorsAgreeAtTheSamePoints` in `tests/convergence/SamplerConvergence.cpp`
+is the comparison: `ψ_h` at `k = 2` on 2048 triangles, sampled at one set of
+points by both, with `SetL2AvgType( NONE )` on the gslib side.
+
+| grid | nodes | interior | differing | border | differing | different element | worst border |
+|---|---|---|---|---|---|---|---|
+| generic, 65² | 4225 | 3648 | **0** | 577 | 60 | 60 | 1.167e-06 |
+| face-aligned, 33² | 1089 | 0 | — | 1089 | **0** | 0 | 2.776e-17 |
+
+**WHERE THE POINT IS UNAMBIGUOUS THE TWO AGREE EXACTLY** — 3648 of 3648 interior
+nodes, worst difference **7.216e-16**. Two implementations sharing no locating
+machinery landing on the same element every time is the check no comparison
+against an exact solution can make, because a smooth field is nearly right in
+the neighbouring element too.
+
+**EVERY DISAGREEMENT IS A BORDER NODE, AND BORDER NODES ARE COMMON**: 577 of
+4225 on a grid with no alignment intended, **one in seven**, because a uniform
+grid over a uniform mesh is commensurate with it far more often than a generic
+point would be. The worst difference there is **1.167e-06** against **2.032e-06**
+of error in `ψ_h` itself, which is the face jump of an L2 field and not an error
+in either locator. On the fully aligned grid the two make the *same* tie-break
+on all 1089.
+
+**THE DIFFERENT-ELEMENT COUNT IS NOT A STABLE NUMBER AND MUST NOT BE GATED.**
+Building the same mesh with an extent of `0.8` rather than `1.4 − 0.6` — one
+ulp, `0.7999999999999999` against `0.8` — moves it from **202 to 331** on an
+otherwise identical grid. It is decided by which side of a face a node falls on
+at the last bit.
+
+**AND THE DEFAULT L2 AVERAGING MEASURES SOMETHING ELSE ENTIRELY.**
+`FindPointsGSLIB::Interpolate()` on an L2 field re-interpolates every border
+point through an H1 projection unless told not to. Left at the default, **all
+577 border nodes differ**, worst 1.93e-06, because the value returned belongs to
+neither element's polynomial. **This settles `TODO`'s first sampling question in
+the negative**: `SetL2AvgType` is a real rule and it is the wrong one for a
+discontinuous field, which is why `meq::FieldTransfer` already sets `NONE` and
+records the default costing it 28%, 10% and 12% in L2 at `k = 1, 2, 3`. Picking
+a side, which is what `GridSampler` does, is the better rule.
+
+**A MESH ACQUIRES NODES WITHOUT BECOMING CURVED, AND TESTING THE POINTER FOR
+NULL COSTS TWO ORDERS OF MAGNITUDE.** `GridSampler`'s affine fast path — M-92's
+69× and 81× — keyed on `Mesh::GetNodes() == nullptr`, and
+`meq::FieldTransfer`'s constructor calls `Mesh::EnsureNodes()` because
+`FindPointsGSLIB` refuses a mesh without one. Constructing a `FieldTransfer`
+therefore dropped every later `GridSampler` on that mesh onto the Newton route,
+for the life of the process, with the answer unchanged:
+
+| grid | nodes null | after a `FieldTransfer` | | repaired |
+|---|---|---|---|---|
+| 129² | 1.14 ms | 181.89 ms | **159.4×** | 0.73 ms |
+| 513² | 13.54 ms | 1129.31 ms | **83.4×** | 13.08 ms |
+
+The repair is to test the geometry's **degree** rather than the pointer: an
+order-1 nodal field on a triangle is the same affine map the vertices are, and
+the values are compared against the vertex array rather than assumed equal to
+it, since MFEM lets a caller deform a mesh through its nodes. **It was latent in
+the driver rather than live** — both `FieldTransfer`s in `apps/meq.cpp` are
+built on the stored or previous-cycle mesh, and `previousMesh` is a *copy* — so
+nothing enforced it and nothing would have reported it.
+
+### M-94
+
+**WHAT LOCATING THE PLASMA EDGE EXACTLY IS WORTH — `ROADMAP.md` ITEM 12.2's
+CEILING.** Item 12.2 proposes locating `{ Ψ > 0 }` with `ψ*` rather than `ψ_h`.
+The two fixtures in `tests/analytic/PlasmaEdge.hpp` bracket it without any of it
+being built: `MovingPlasmaEdge` reads its support off `ψ_h`, `PlasmaEdge` cuts
+at the **exact** edge, and they share one exact solution. `ψ*` is a better
+approximation to `ψ` than `ψ_h` is and the fixed cut *is* `ψ`, so the oracle
+column is an upper bound on the item.
+`locatingTheEdgeExactlyBuysNoOrder` is the case.
+
+| `j` | `k` | ratio moving/fixed in `ψ_h`, `n` = 8 → 32 | in `ψ*` |
+|---|---|---|---|
+| 1 | 1 | 0.950 · 0.952 · 0.953 | 0.541 · 0.582 · 0.600 |
+| 1 | 2 | 1.197 · 1.164 · 1.118 | 0.824 · 0.945 · 0.924 |
+| 1 | 3 | 1.035 · 1.002 · 1.002 | 1.015 · 1.092 · 1.065 |
+| 2 | 1 | 0.949 · 0.952 · 0.953 | 0.575 · 0.587 · 0.595 |
+| 2 | 2 | 1.261 · 1.279 · 1.283 | 0.507 · 0.499 · 0.493 |
+| 2 | 3 | **2.983 · 2.434 · 2.025** | 1.178 · 1.139 · 1.033 |
+
+**NO ORDER IS AVAILABLE.** If the level set limited the rate the oracle's
+advantage would grow as `h` fell. It does not: over a fourfold refinement the
+ratio grows by at most **1.018** in `ψ_h` and **1.121** in `ψ*`, and in the one
+row where the oracle is clearly ahead it *falls*, 2.98 → 2.03.
+
+**AND IN THE REGIME MEQ OPERATES IN IT IS WORTH NOTHING.** At `k ≤ j`, where
+`ψ*` keeps `k+2`, the exact edge is worth between **0.95× and 1.28×** — the
+moving edge is the better of the two in half those rows. The one corner with a
+real factor is `j = 2, k = 3`, about **2×**, which is `k > j`, the regime where
+the cut already caps the order and which `PLASMA-EDGE-PLAN.md` exists to address
+by a different route. `ψ*` would capture only the part of that gap lying between
+`ψ_h` and `ψ`.
+
+### M-95
+
+**CAN `Γ` GO BETWEEN THE PLASMA AND THE COILS? NO, ON ALL SEVEN DIVERTED
+MACHINES, AND THE OBSTRUCTION IS GEOMETRIC RATHER THAN NUMERICAL.** The
+proposal is FB-7's domain reduction taken to its limit: put the artificial
+boundary inside every conductor, mesh only the plasma, and carry the whole coil
+set as exterior filaments. `meq::ExteriorDtN`'s `Γ` is a semicircle centred at
+`( 0, zCentre )` on the symmetry axis, so the question is whether any
+`( zCentre, R )` encloses the last closed flux surface and excludes every
+conductor. Measured over `zCentre ∈ [ −60, 60 ]`, with each conductor's
+**nearest** point and each LCFS point's distance:
+
+| | machine | best `z_c` | margin, m | at `|z_c| = 50` | blocking conductor |
+|---|---|---|---|---|---|
+| A | testtokamak classic | 0.000 | **−0.368** | −1.753 | P1L, `r` = 1.000, `z` = −1.100 |
+| B | testtokamak peaked ff′ | 0.000 | **−0.270** | −1.754 | P1L, 1.000, −1.100 |
+| C | MAST spherical | 0.000 | **−1.320** | −2.912 | P1, 0.150, 0.000 |
+| D | TCV | −0.002 | **−0.746** | −1.761 | OH.OH1, 0.430, 0.000 |
+| E | testtokamak diamagnetic | 0.000 | **−0.255** | −1.749 | P1L, 1.000, −1.100 |
+| F | DIII-D | −0.002 | **−1.500** | −2.651 | F1A, 0.861, +0.168 |
+| G | MAST-U | 0.000 | **−1.354** | −3.151 | Pc, 0.067, 0.000 |
+
+The margin is `min over conductors of distance − max over the LCFS of distance`
+and has to be positive. It is negative everywhere, by 0.26 m at best, and
+**sliding the centre away makes it worse, not better** — the last column is the
+same quantity at `|z_c| = 50` m. A semicircle centred on the axis that reaches
+the plasma's outboard midplane necessarily swallows anything at smaller radius
+near the same height, and every one of these machines has such a conductor:
+a central solenoid on C, D, F and G, and on A, B and E a divertor coil tucked
+under the plasma at `r` = 1.0 where the plasma reaches `r` = 1.78.
+
+**AND THE MIXED CASE — SOME COILS IN, SOME OUT — FAILS ON A DIFFERENT
+CONSTRAINT, NOT ON GEOMETRY.** `Γ` may legally sit in any gap between
+conductors, keeping the ones inside meshed and carrying the ones outside as
+`meq::ExteriorCoilSet`. Taking the smallest such gap above the plasma gives
+1.5× to 4.3× in mesh area and puts up to 15 conductors outside — and it is
+unusable, because the exterior expansion converges as `( ρ_src/ρ_Γ )^n` and
+those radii sit at a **clearance of 1.01 to 1.02**. Requiring a usable
+clearance closes it:
+
+| required clearance | coils externalised, A…G | mesh area saved |
+|---|---|---|
+| 1.10 | 0, 0, 0, 0, 0, 0, **2** | 1.30× (2.08× on G) |
+| **1.25** | 0, 0, 0, 0, 0, 0, 0 | **1.00–1.03×** |
+| 1.40 | 0, 0, 0, 0, 0, 0, 0 | 0.80× — worse than today |
+
+**The coils cascade.** Clearing the outermost *kept* conductor by 25% puts `Γ`
+beyond the next conductor out, which must then also be kept, and so on — the
+gaps between conductors in distance-from-origin are smaller than the clearance
+the DtN needs. At clearance 1.25 the best admissible `Γ` is the one already
+configured: 2.39 against 2.40 on A, 3.38 against 3.40 on F, 3.49 against 3.50
+on G. **The existing radii are already at the optimum**, which was not known
+before and is the useful half of this measurement.
+
+### M-96
+
+**THE REFERENCES' CONDUCTORS REBUILT AS `ShapedCoil`, AND IT IS WORTH A FACTOR
+OF FIVE TO SEVEN ON THE DIII-D COMPARISON.** M-87 attributes the whole of that
+comparison's `2.97e-01` relative `L∞` to the conductor model: `freegs4e`'s
+`Coil` is a filament with a log singularity in `ψ` and MEQ's is a rectangle of
+uniform current density. `tools/freegs4e-benchmark/shaped.py` rebuilds any of
+the seven machines with every filament and solenoid replaced by
+`freegs4e.shaped_coil.ShapedCoil` on **`conductors.py`'s own rectangle** — the
+same one MEQ meshes — preserving circuit topology, `control` flags and the
+`current × turns` convention. `fgsref.py --shaped` is the switch.
+
+All seven converge. The rectangles are `shrink_to_fit`'s, so TCV narrows two
+conductors and MAST-U six, which is what keeps them from intersecting.
+
+**MEQ against the two references, same solver, same rungs** — `k = 2`, 4848
+elements, the reference's own 129² grid, 3672 comparable nodes of which 80 lie
+inside a conductor:
+
+| reference | rel `L2` | rel `L∞` | outside `L2` | outside `L∞` | inside `L2` | inside `L∞` |
+|---|---|---|---|---|---|---|
+| filaments | 4.593e-03 | 1.004e-01 | 9.697e-04 | 4.567e-03 | 3.043e-02 | 1.004e-01 |
+| **ShapedCoil** | **9.102e-04** | **1.403e-02** | **5.132e-04** | **2.047e-03** | **5.119e-03** | **1.403e-02** |
+| | **5.0×** | **7.2×** | 1.9× | 2.2× | **5.9×** | **7.2×** |
+
+**It improves the nodes OUTSIDE the conductors too, by about a factor of two,
+which M-87 did not predict.** The finite-size correction to a filament's field
+goes as `( w/d )²` and does not stop at the conductor's edge; `fgsref.py`'s own
+note on the limited case estimated it at 1.6e-02 on the near field. So the
+conductor model was not only the `L∞` — it was a fifth of the `L2` as well.
+
+**THE INVERSE SOLVE MOVES THE COIL CURRENTS, so the MEQ side must be
+regenerated.** These references are produced by `freegs4e`'s inverse solve
+against X-point and isoflux constraints, and giving the conductors extent
+changes the currents it chooses — up to 38% relative on DIII-D's F3A, though
+that is 1.8 kA on a coil set whose others carry 170 kA. A MEQ configuration
+built from the filament reference and compared against the shaped one would be
+measuring that, so `make_diverted_case.py` is re-run from the shaped `.npz`.
+
+**THE END-TO-END LOOP CLOSES ON DIII-D AND ON NO OTHER MACHINE, AND THAT IS
+MEQ'S COLD START RATHER THAN THE CONVERSION.** Every one of the seven was run
+both ways, same driver settings, same rungs — which is the only thing that can
+tell a conversion defect from a pre-existing one:
+
+| | machine | filament | shaped |
+|---|---|---|---|
+| A | testtokamak classic | converged, **axis guard fires** | converged, **axis guard fires** |
+| B | testtokamak peaked ff′ | FAILED at 3.975e-02 | FAILED at 3.977e-02 |
+| C | MAST spherical | FAILED at 5.857e-03 | FAILED at 3.266e-01 |
+| D | TCV | FAILED at 9.897e-01 | **converged** |
+| E | testtokamak diamagnetic | FAILED at 2.347e-02 | FAILED at 2.339e-02 |
+| F | DIII-D | converged | converged |
+| G | MAST-U | converged | FAILED at 2.945e-08 |
+
+**Five of the seven behave identically on the two arms.** B and E fail at
+residuals agreeing to three figures either way — 3.975 against 3.977e-02, 2.347
+against 2.339e-02 — which is about as clean a control as this lineup offers, and
+A converges to a `ψ_ax` the axis guard rejects on both. So those failures are
+M-89's finding restated: DIII-D is the one of the seven MEQ solves from a
+genuinely cold start, and the conversion does not change that.
+
+**The two that differ, differ in OPPOSITE directions**, which is what says this
+is branch selection and not accuracy: TCV gains a solve and MAST-U loses one.
+Those are two of the three machines carrying a `Solenoid`, and they are exactly
+where the conversion stops being a perturbation — the inverse solve moves to a
+different root, with **4 sign flips and Δψ_ax of 0.39 of the span on MAST, 6 and
+0.10 on MAST-U**, against no sign flips and 1.3e-05 to 7.1e-05 of span on the
+four machines without one. Turning a 100-to-324-filament solenoid stack into one
+uniform rectangle is a far larger modelling change than giving a filament a 5 cm
+box, and `conductors.py` says so in its own header. **MAST-U's "failure" is also
+not a divergence** — it is cycling at 2.9e-08 against a target the cold `‖r₀‖`
+put just below it.
+
+**So the reference side is finished for all seven and the comparison is
+finished for one.** What blocks the other six is MEQ's cold-start basin, which
+is a separate open item, and the honest reading of the DIII-D factor is that it
+is one machine's number until a seeded start lets the others be measured.
+
+**AND THE TWO REFERENCES MUST NOT SHARE A FILENAME.** They describe different
+machines. `--shaped` writes `<case>_shaped.npz` and stamps `conductor_model`
+into the file and the machine label — added after a first run overwrote the
+filament baseline that every number in M-87, M-88 and M-89 was taken against,
+with a file that looked exactly like it.
+
+### M-97
+
+**THE DIII-D RACE RE-TAKEN ON A QUIET MACHINE, BEST OF FIVE.** M-89's race was
+run while the machine was not idle and, more importantly, before M-90's
+`reprepare()` fix landed, so its absolute seconds are a measurement of different
+code under different conditions. Re-taken here with nothing else running —
+nothing above 1.6% CPU, load decayed to 1.4 after the test suite was stopped —
+`OMP_NUM_THREADS = MKL_NUM_THREADS = 16` on both arms, both cold, both timed end
+to end, and MEQ's mesh stamp deleted before every run so gmsh is inside the
+number as M-89 defined it.
+
+| | best | median | worst | spread |
+|---|---|---|---|---|
+| **freegs4e**, 129², cold | **3.985** | 4.055 | 4.795 | 1.20× |
+| **MEQ**, `k = 2`, 4848 elements | **7.927** | 8.322 | 8.743 | 1.10× |
+| — of which solve | 6.375 | 6.752 | 6.777 | 1.06× |
+| — of which gmsh | 0.716 | 0.730 | 1.105 | 1.54× |
+
+**Same work and the same answers, checked rather than assumed**: freegs4e
+reports `psi_axis` 0.3758545305 and `psi_bndry` 0.07081839835, every digit
+M-89's, and MEQ converges in 2 Newton steps on 4848 elements at degree 2 to
+`psi_ax` 3.759851e-01, which is M-90's post-fix value to every digit. So the
+accuracy columns of M-89 carry over unchanged and only the clock moved.
+
+**EQUIVALENT ACCURACY NOW COSTS 7.93 s AGAINST 3.99 s, A FACTOR OF 1.99**,
+where M-89 recorded 2.22×. The ratio is the robust part; the absolute seconds
+were not.
+
+**AND `freegs4e` IS THE CONTROL THAT SEPARATES THE TWO CAUSES**, which is the
+transferable half. Its code has not changed since M-89, so its whole 6.4 s →
+3.99 s — a factor of **1.61** — is the machine and nothing else. MEQ's 14.2 s →
+7.93 s is 1.79×, and M-90 already measured its own fix at 11.78 s → 8.40 s wall
+on that day's machine, so the decomposition is *the reprepare fix, then the
+machine*, in that order of size. **A timing arm whose code did not change is
+worth keeping in a race for exactly this reason**: without it there is no way to
+tell a code win from a quiet afternoon, and this file's standing rule — that a
+suite time is only a measurement on an idle machine — is otherwise unenforceable
+after the fact.
+
+**The spreads are also the argument for best-of-five rather than one run.**
+freegs4e's first run is the outlier at 4.795 s against 3.985 s for its best,
+which is cold file cache; MEQ's spread is 1.10× and its solve leg 1.06×. A
+single run of either could have been quoted 20% high.
+
+### M-98
+
+**THE BORDERED STEP'S BACKSOLVES, BLOCKED INTO ONE `ArrayMult`: 1.34× ON THE
+SOLVE LEG.** Every backsolve of a bordered Newton step is against one
+factorisation — the residual, `ψ_ax`'s column, `ψ_bnd`'s, the prescribed
+current's and the `N` exterior Gegenbauer columns — which is the case
+`mfem::DarcyNPCSolver::ArrayMult()` exists for and, by its own documentation,
+was built for at MEQ's request. On `examples/machine-f-diiid.toml`, `Modes = 10`
+at `k = 2` on 4848 elements, that is **14 columns against one Jacobian**.
+
+Controlled by rebuilding with the queue's dispatch flipped to the single-vector
+route and nothing else changed, and **run as three interleaved blocks** because
+two other agents' jobs were on the machine:
+
+| block | best | median | worst |
+|---|---|---|---|
+| **A1** blocked | **8.760** | 8.940 | 9.241 |
+| **B** single-vector control | 11.531 | 11.863 | 12.133 |
+| **A2** blocked | **8.580** | 9.388 | 9.665 |
+
+**1.34× best-of-five** (11.531 / 8.580), 1.26–1.33× on the medians. The blocked
+and control distributions do not overlap at all — the worst blocked run, 9.665,
+is faster than the best control run, 11.531 — so the effect is larger than the
+drift, which is the whole reason for interleaving rather than running A then B.
+
+**The absolute seconds are contended and are not comparable with M-97's 6.375 s
+solve**, which was taken on an idle machine. `rate3d` and an `extension` miniapp
+were running throughout. Read the ratio.
+
+**IT BEATS THE 1.24× MFEM MEASURED FOR THE SAME ROUTINE, AND THE DIFFERENCE IS
+THE TRACE SOLVE.** Upstream's figure is on 4802 triangles at order 2 with 13
+columns — very nearly this problem — with the trace leg unblocked *by
+construction*, since `UMFPackSolver` does not override `ArrayMult`. MEQ's
+default trace solver is PARDISO, which does, so MEQ gets a third leg upstream's
+number excludes: one walk of the factors instead of thirteen.
+
+**AND THAT LEG IS ONLY REACHED BECAUSE `TimedSolver` OVERRIDES `ArrayMult`
+TOO.** `mfem::Operator::ArrayMult()`'s base implementation loops `Mult()`, so a
+decorator that inherits it silently un-blocks whatever it wraps — same answers,
+same call counts, no diagnostic. MEQ wraps its trace solver in a timing
+decorator on every bordered path, so without the override the blocked trace
+solve would have been bought and then thrown away at the wrapper. **A
+pass-through decorator is not pass-through for a method it does not name.**
+
+**The answers do not move**: all fifteen runs report `psi_ax` 3.759851e-01 and
+`psi_bnd` 7.081394e-02, to every digit the driver prints, and converge in 2
+Newton steps. That is agreement to seven figures and not a bitwise claim —
+upstream's documentation is explicit that with LAPACK the blocked route's dense
+products become GEMM where the single-vector route had GEMV, so **a bitwise
+assertion here would pass on a build without LAPACK and fail on this one**.
+
+**WHAT IS NOT BLOCKED, AND WHY IT IS DELIBERATE.** `ψ_bnd`'s column has a
+differenced fallback that runs `fieldResidual()`, which reaches `npc->Mult()`
+and, on a moving support, `refreshPlasmaComponent()`. `NPCResidual()` is
+non-`const` on the hybridization where `NPCReduce()` and `NPCRecover()` are
+`const`, and the support decides the source, so neither the factored local
+blocks nor the problem they were factored for survive it by contract. That
+branch therefore flushes the queue *before* differencing and takes its own
+single-column solve afterwards — the exact order the path had before there was
+a queue. The analytic column is the default and never reaches it, so the
+ordinary path still blocks all 14.

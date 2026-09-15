@@ -535,7 +535,13 @@ assembly — are unreachable from MEQ without a new enum value in each case.
    only one on this list MEQ can write itself, and it is the leg that dominates
    MEQ's own bordered configuration: the residual leg reads **48.2% serial and
    23.1% threaded** on the high-beta case, because the border spends four
-   residual evaluations per step.
+   residual evaluations per step. **`INTERPOLATORY-HDG-PLAN.md` is the plan for
+   replacing it** with CCSZ interpolatory HDG — interpolate `F` into `P^{k+1}`
+   rather than integrating it — and the library half is already built and
+   linked, on `gf-interp-hdg-dev`. Read its falsifying experiment before its
+   stages: the arithmetic there deflates the headline to 1.6–2.0× fewer `F`
+   evaluations, `ComputeH()` is untouched, and the Amdahl ceiling off M-80 is
+   23–28%.
 2. **`AssemblyMode::Batched` in MEQ's own enum**, which is the whole of what
    stands between MEQ and the face kernel that already exists — see the
    correction above. It is a smaller job than a new kernel and it is entirely in
@@ -1101,8 +1107,9 @@ the dev tree deliberately when testing a fix; otherwise leave it alone.
 
 ### `meq-integration`: the branch MEQ builds from, and why it is local only
 
-MEQ needs work from **four MFEM branches**, and as of 2026-08-30 it takes
-**two merges** rather than three to get them, because the topology changed:
+MEQ needs work from **nine MFEM branches**, and for as long as this section
+existed it named four. See the warning under the containment loop for how the
+other five were found and why no check built from this table could find them:
 
 | branch | what MEQ needs from it | |
 |---|---|---|
@@ -1110,6 +1117,11 @@ MEQ needs work from **four MFEM branches**, and as of 2026-08-30 it takes
 | `direct-solver-symbolic-reuse` | `UMFPackSolver` and `PardisoSolver` keeping their symbolic factorisation across Newton steps | merge 1 |
 | `gf-hdg-linearise-first` | **`DarcyNPCOperator` / `DarcyNPCSolver`** — the NPC method, which is what MEQ's default ordering now is — plus `SetAssemblyMode`, `SetGradientMode`, `SetLocalFactorMode`. **`SetNonlinearOrdering` was on this list and is DELETED**; see `CLAUDE_HDGGS.md`, *The NPC port* | merge 2 |
 | `gf-hdg-dev` | ***"The postprocessing closes on the element average, always"*** — the reconstruction fix, without which `ψ*` is a different function wherever `∂F/∂ψ` vanishes | **merge 3, again** |
+| **`pardiso-multi-rhs`** | **`PardisoSolver::ArrayMult`** — the multi-RHS trace solve. MEQ's bordered step depends on it for **1.34×**, → **[M-98](MEASUREMENTS.md#m-98)**, and **losing it does not break the build**: `Operator::ArrayMult`'s base loops `Mult()`, so a recipe that drops this branch compiles, answers identically and is silently slower | merge 4 |
+| **`pardiso-device-host-sync`** | ***"PardisoSolver: synchronise the vectors, not just the matrix"*** — the other half of M-79's device chain, on the default trace solver | merge 5 |
+| **`sundials-ida-integration`** | `mfem::IDASolver`, and the `IDAS` component that broke every MEQ test binary's link when the cache went stale — see the CUDA section's fourth bullet | merge 6 |
+| **`gf-hdg-p-adaptivity`** | upstream's own §2 work; MEQ calls nothing from it, and it is in this table because it is in the merge, which is the point of the table | merge 7 |
+| **`gf-interp-hdg-dev`** | **CCSZ INTERPOLATORY HDG** — `fem/darcy/reaction_hdg.{hpp,cpp}` with `HDGInterpolatoryReactionIntegrator`, `NodalReactionFunction` and a quadrature control, plus `HDGPostprocessBlocks` in `postprocess_hdg.*` and `DarcyHybridization::Bg_data`. **15,024 insertions across `fem/darcy/`**, verified in `libmfem.a` by `nm`. MEQ does not call any of it yet; `INTERPOLATORY-HDG-PLAN.md` is the plan | merge 8 |
 
 **THE TOPOLOGY HAS NOW CHANGED THREE TIMES AND THIS ROW HAS BEEN WRONG TWICE.**
 It has read "pairwise independent", then "an ANCESTOR of both, so it needs no
@@ -1153,17 +1165,43 @@ git checkout -B meq-integration hdgdev/gf-hdg-subdomains-dev
 git merge hdgdev/direct-solver-symbolic-reuse     # 3 conflicts; see below
 git merge hdgdev/gf-hdg-linearise-first           # 3 conflicts; see below
 git merge hdgdev/gf-hdg-dev                       # 1 conflict as of 2026-09-05
+git merge hdgdev/pardiso-multi-rhs                # M-98 depends on this
+git merge hdgdev/pardiso-device-host-sync
+git merge hdgdev/sundials-ida-integration
+git merge hdgdev/gf-hdg-p-adaptivity
+git merge hdgdev/gf-interp-hdg-dev                # the interpolatory half
 # ALWAYS finish with this, and believe it over the table above:
 for b in gf-hdg-subdomains-dev direct-solver-symbolic-reuse \
-         gf-hdg-linearise-first gf-hdg-dev; do
+         gf-hdg-linearise-first gf-hdg-dev pardiso-multi-rhs \
+         pardiso-device-host-sync sundials-ida-integration \
+         gf-hdg-p-adaptivity gf-interp-hdg-dev; do
   git merge-base --is-ancestor hdgdev/$b HEAD && echo "$b contained" \
                                               || echo "$b NOT CONTAINED"
 done
 ```
 
-**Run that last loop.** It is four cheap commands and it is the only thing that
+**Run that last loop.** It is nine cheap commands and it is the only thing that
 catches a branch having moved out from under the recipe — which is precisely
 what happened to the three-branch version of this section.
+
+**AND IT CANNOT CATCH A BRANCH THE RECIPE NEVER NAMED, WHICH IS THE WORSE
+FAILURE AND IS THE ONE THAT HAPPENED.** The loop asks *is each branch I listed
+contained*, so it is only ever as complete as the list — and the list was
+missing **five of nine**. `gf-interp-hdg-dev` alone is 15,024 lines of
+`fem/darcy/`, the whole interpolatory-HDG half; `pardiso-multi-rhs` is what
+M-98's 1.34× rests on. Re-creating `meq-integration` from the recipe as it stood
+would have deleted all five, and **four of them without a compile error**:
+`Operator::ArrayMult` has a working base implementation, and MEQ calls nothing
+in `reaction_hdg.hpp` yet. The build stays green, the answers do not move, and
+the solver gets slower.
+
+**Ask the tree the other question instead.** It needs no list, which is the
+whole point, and it is what found this:
+
+```sh
+git -C ../mfem/mfem-src log --merges --format=%s meq-integration \
+  | grep -oE "hdgdev/[a-z0-9-]+" | sort -u
+```
 
 **BUT THE LOOP CHECKS THE BRANCH, NOT THE INSTALL, AND THAT GAP HAS ALREADY
 BITTEN.** Every command in it runs in `../mfem/mfem-src` and says nothing
@@ -1277,17 +1315,24 @@ is not.
 
 | | |
 |---|---|
-| **`HDG-BEM-COUPLING-FROM-MEQ.md` §2** | auxiliary globally-coupled unknowns. Worth doing, not blocking. **FB-5 says what it would buy**: MEQ's border costs `N + 2` backsolves, which is affordable, plus **one full re-assembly per accepted step**, because the auxiliary unknown reaches the residual through a load term |
+| **Auxiliary globally-coupled unknowns** | `SetNumAuxiliaryUnknowns()` and the two per-element assemble hooks. **The one unbuilt piece, and no longer worth asking for**: the entry points MEQ named are public already as `NPCReduce()` and `NPCRecover()`, and `DarcyNPCSolver::ArrayMult` applies them to several right-hand sides in one pass, so a differenced border is `K` applications of a routine that blocks them. **MEQ CALLS IT** — the bordered step queues every column and flushes once, worth **1.34×** on the DIII-D solve leg at 14 columns, → **[M-98](MEASUREMENTS.md#m-98)** |
 
 Everything else MEQ has sent is closed. **A CLOSED REPORT NEEDS NO ENTRY HERE**:
 what it changed is in the code with a test on it, or it is a measurement under an
-`M-nn` anchor, and either way this file is the wrong place to re-tell it. Two
+`M-nn` anchor, and either way this file is the wrong place to re-tell it. Three
 operational facts are worth the space and the rest is not:
 
-* **Upstream tracks and curates these documents themselves.** They commit the
-  ones MEQ writes and delete the ones that close, without MEQ touching anything.
-  So `doc/` is theirs, deleting from it is editing someone else's repository, and
-  the receive-only rule permits writing INTO it and nothing more.
+* **UPSTREAM DOES NOT TRACK INTER-PROJECT CORRESPONDENCE UNDER `doc/` AT ALL, SO
+  AN ABSENT DOCUMENT MEANS NOTHING.** `46ac3d3bc7` deletes every `*-FROM-MEQ.md`
+  in one commit, on the principle that working notes exchanged with a consumer
+  are not the library's documentation and that what they establish belongs in
+  doxygen on the thing it is about. **That is a policy and not a verdict** —
+  reading an empty `doc/` as "every request closed" is the obvious inference and
+  is wrong. What a request established survives in upstream's own plan documents
+  and in the doxygen; the correspondence does not.
+* **SO THE ONLY TEST OF "LANDED" IS THE CODE MEQ BUILDS AGAINST.** Look for the
+  symbol in `../mfem/install/include`, not for the document. That was always the
+  only test MEQ could apply and it is now the only one that exists.
 * **Which documents exist is a question for `git`, not for `ls`** — a listing
   reports whatever branch that tree is checked out on, which is not MEQ's to
   control and has changed under this file more than once.
@@ -1624,6 +1669,52 @@ meeting the threaded element loop. Both were dormant contracts — *the parent
 outlives the child*, *an integrator on a threaded loop is reentrant* — that MEQ
 had never had to honour. Expect the next library update to find a third.
 
+**AND A MESH ACQUIRES NODES WITHOUT BECOMING CURVED, WHICH COSTS `GridSampler`
+TWO ORDERS OF MAGNITUDE AND CHANGES NO ANSWER.** The affine fast path keyed on
+`Mesh::GetNodes() == nullptr`; `meq::FieldTransfer`'s constructor calls
+`Mesh::EnsureNodes()`, because `FindPointsGSLIB` refuses a mesh without one. So
+constructing a `FieldTransfer` dropped every later `GridSampler` on that mesh
+onto the Newton route for the life of the process — **159× at 129² and 83× at
+513²**, with every located node and every sampled value identical, so only a
+clock can see it. The fix is to ask the geometry's **degree**: an order-1 nodal
+field on a triangle is the same affine map the vertices are, checked against the
+vertex array rather than assumed equal to it, since MFEM lets a caller deform a
+mesh through its nodes while leaving the vertices behind.
+
+**It was latent rather than live, and nothing was keeping it that way.** Both
+`FieldTransfer`s in `apps/meq.cpp` are built on the stored guess's mesh or on
+`previousMesh`, which is a **copy** — so the mesh the driver samples was never
+the mesh gslib was set up on. That is an accident of how the adaptive loop
+happens to be written, not a rule anybody stated, and it is the second entry in
+this section where one component's requirement silently disabled another's
+optimisation. → **[M-93](MEASUREMENTS.md#m-93)**
+
+**AND THE THIRD IS A DECORATOR, WHICH IS PASS-THROUGH ONLY FOR THE METHODS IT
+NAMES.** `mfem::Operator::ArrayMult()` has a base implementation that loops
+`Mult()`, so it is never missing and never errors — it is merely slow. A
+decorator that overrides `Mult()` and not `ArrayMult()` therefore un-blocks
+whatever it wraps: `PardisoSolver`, `CuDSSSolver`, `MUMPSSolver`,
+`SuperLUSolver` and `STRUMPACKSolver` all override `ArrayMult` to walk their
+factors once for every column, and the base loop sends them `K` separate walks
+instead, **with identical answers and identical call counts**. MEQ wraps its
+trace solver in `TimedSolver` on every bordered path, so the blocked trace solve
+would have been bought and thrown away at the wrapper. The rule generalises past
+this one class: **when a library adds a batched entry point with a working
+default, every decorator in the chain has to be revisited, and nothing will tell
+you.** → **[M-98](MEASUREMENTS.md#m-98)**
+
+**A RESIDUAL EVALUATION MAY NOT SIT BETWEEN `NPCGradient()` AND THE SOLVES IT
+ENTITLES.** `NPCResidual()` is non-`const` on `DarcyHybridization` where
+`NPCReduce()` and `NPCRecover()` are `const`, and under a moving support MEQ's
+own `fieldResidual()` calls `refreshPlasmaComponent()` as well — so neither the
+factored local blocks nor the *problem they were factored for* survive it by
+contract. This is why the bordered step's differenced `psi_bnd` column flushes
+its queue before differencing rather than solving across it. The failure it
+guards has no symptom: a column solved against a Jacobian belonging to a
+different plasma support is a plausible number, and Newton converges to
+something.
+
+
 **THE ONE THAT ACTUALLY BLOCKS THREADING IS `Mesh::FindPoints`, AND IT CANNOT BE
 FIXED LOCALLY.** It loops over every element through that same shared
 transformation *and* builds a vertex-to-element table on the way, so it is not
@@ -1695,7 +1786,13 @@ of the message is true either way; and
 `the_reserved_profile_keys_are_refused_on_every_source` asserts **the pairing**
 rather than the refusal, since a single-path test would have passed throughout.
 **Recorded because the same shape can recur** wherever one source type reads a
-key directly and another goes through a shared helper.
+key directly and another goes through a shared helper. **And it recurred**, in
+the same pair of source types: `ConfineToPlasma` was accepted for
+`Type = "rotating"`, set its flag, and was consulted by none of
+`meq::NormalisedRotatingSource`'s gates, so the key parsed and the solve was
+unconfined — with XP-1's element-level fill running anyway, since that reads
+`plasmaSupport()`. `CLAUDE_FLOW.md`, *`ConfineToPlasma` reaches the rotating
+source*.
 
 **And `ConfigError::what()` carried a `MEQ: ` banner while `apps/meq.cpp`
 prefixes every line with the same thing**, so every configuration error read

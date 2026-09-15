@@ -63,6 +63,33 @@ small**, and `meq::CurrentFilament` (FB-7, plan §7.19) is what would measure it
 match MEQ's conductor model to the reference's, and the difference between the
 two MEQ runs is the finite-size effect on one code with one mesh.
 
+**AND IT WAS MEASURED THE OTHER WAY ROUND INSTEAD, WHICH IS THE BETTER
+DIRECTION.** Rather than degrading MEQ's rectangles to filaments, the REFERENCE
+is rebuilt with finite conductors: `tools/freegs4e-benchmark/shaped.py` replaces
+every filament and solenoid with a `freegs4e.shaped_coil.ShapedCoil` on
+`conductors.py`'s own rectangle — the same one MEQ meshes — and `fgsref.py
+--shaped` is the switch. All seven diverted machines converge with it. On the
+diverted DIII-D comparison it is worth **5.0× in relative `L2` and 7.2× in
+`L∞`**, and **about 2× on the nodes outside the conductors as well**, which is
+the part this section did not predict: the `( w/d )²` correction does not stop
+at the conductor's edge. → **[M-96](MEASUREMENTS.md#m-96)**.
+
+**Three things the conversion has to get right, each of which silently
+converges if got wrong.** The CIRCUIT TOPOLOGY, because the references come from
+an INVERSE solve and flattening a circuit into independent coils hands it more
+freedom than the machine has. The `control` flag per conductor, which says
+whether that current may move at all. And the rectangles must be
+`shrink_to_fit`'s, not fresh ones, or the two codes are still describing
+different machines — TCV narrows two conductors and MAST-U six.
+
+**The inverse solve then moves the currents**, up to 38% relative on DIII-D's
+F3A, so the MEQ side is regenerated from the shaped `.npz` rather than reused.
+
+**AND PUTTING `Γ` BETWEEN THE PLASMA AND THE COILS, WHICH WOULD HAVE MADE THE
+CONDUCTOR MODEL MOOT BY MAKING EVERY COIL EXTERIOR, IS IMPOSSIBLE ON ALL SEVEN**
+— measured, not argued: the margin is negative at every centre on every machine,
+−0.26 m at best. → **[M-95](MEASUREMENTS.md#m-95)**.
+
 **AND IT IS A REGRESSION, NOT AN ANECDOTE.**
 `DriverAcceptance::theDriverSolvesALimitedTokamak` drives the whole thing from
 `examples/limited-tokamak.toml` — `[[coils]]`, `[boundary.limiter]`,
@@ -488,7 +515,20 @@ the last bit of a published number is a refactor that has to be argued about.
 
 **WHAT IT COSTS**, and it is more than §4.4 predicted: `N + 2` backsolves against
 one factorisation, **plus one full re-assembly per accepted step**, because the
-datum reaches the system through the right-hand side. That is the same price the
+datum reaches the system through the right-hand side.
+
+**THE `N + 2` ARE ONE CALL AND NOT `N + 2` CALLS.** They share a Jacobian by
+construction, which is exactly `mfem::DarcyNPCSolver::ArrayMult()`'s case: one
+pass over the mesh in `NPCReduce()`, one blocked trace solve, one pass back in
+`NPCRecover()`. What is saved is the **traversal** — `GetElementFaces()`,
+`GetFaceElements()`, `GetCtFaceMatrix()`, `GetFaceVDofs()` and the gathers run
+once instead of once per column — plus, since PARDISO overrides `ArrayMult` and
+is the default trace solver, one walk of the factors instead of `N + 2`. The
+arithmetic on any one column is unchanged, so this is a traversal saving and not
+a different method, and the agreement it owes is to round-off rather than
+bitwise. **1.34× on the DIII-D solve leg at 14 columns**, and the decorator trap
+that would have thrown half of it away silently:
+→ **[M-98](MEASUREMENTS.md#m-98)**. That is the same price the
 condensation path already pays for its own reasons. Assembling the load directly
 would remove it and would have to be checked against the differenced column
 first, since `FormLinearSystem` transforms the right-hand side the residual is
