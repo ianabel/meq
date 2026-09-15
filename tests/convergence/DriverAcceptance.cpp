@@ -1422,6 +1422,31 @@ BOOST_AUTO_TEST_CASE( theDriverHasAUsableCommandLine )
  * theDriverSolvesOnACurvedBoundary guards against for the transfer. So the same
  * problem is solved with the coupling REMOVED and the two are required to
  * differ materially.
+ *
+ * AND THE CONTROL IS ALSO THE FRAGILE ARM, WHICH IS NOT WHERE ANYONE LOOKS.
+ * This case sat at a convergence knife edge and the natural reading was that
+ * the free-boundary SOLVE was delicate. It is not. Swept over
+ * ( n = 24, 32, 40 ) x ( degree 2, 3 ) x ( serial, batched ) trace assembly,
+ * the coupled arm converges in 8 or 9 Newton steps in all twelve cells and
+ * agrees between the two trace modes to every printed digit. The CONTROL is
+ * what moves: at degree 2 its psi_ax reads 7.91e-02, 8.72e-02, -9.77e-02 at the
+ * three meshes -- it changes SIGN, so it is picking a different branch each
+ * time rather than converging -- and at ( 24, 2 ) it takes 39 steps under
+ * serial trace assembly and DOES NOT CONVERGE under batched.
+ *
+ * That is the whole of the fragility, and it is not surprising once named: the
+ * control is deliberately not an equilibrium. Removing the coupling leaves a
+ * zero datum on an artificial boundary in the vacuum, a problem posed only to
+ * be different from the real one.
+ *
+ * So the fixture moved to ( n = 32, degree 3 ), where the control is stable to
+ * four figures across all three meshes and takes 9 steps under both trace
+ * modes. The guess amplitude is NOT swept to achieve this: the example file
+ * records that the bump amplitude CHOOSES WHICH of this problem's equilibria is
+ * reported, so sweeping it compares the library at one branch against a driver
+ * pinned to another. Measured -- at amplitude 0.06 the library converges to
+ * psi_ax 9.43e-02 against the driver's 1.01e-01, 105% apart in L2. The
+ * amplitude is part of the configuration and stays fixed at the file's 0.1.
  */
 BOOST_AUTO_TEST_CASE( theDriverReachesTheExteriorCoupling )
 {
@@ -1440,7 +1465,8 @@ BOOST_AUTO_TEST_CASE( theDriverReachesTheExteriorCoupling )
 	// a test that read them from the file could not catch the file changing.
 	double const rMax = 1.7;
 	double const rhoGamma = 1.5;
-	int const n = 24;
+	int const n = 32;
+	int const degree = 3;
 	double const h = rMax/static_cast<double>( n );
 
 	mfem::Mesh background = mfem::Mesh::MakeCartesian2D(
@@ -1517,7 +1543,7 @@ BOOST_AUTO_TEST_CASE( theDriverReachesTheExteriorCoupling )
 		};
 
 		meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, 1.0 );
-		meq::GradShafranovSolver solver( sub, 2, 1.0 );
+		meq::GradShafranovSolver solver( sub, degree, 1.0 );
 		solver.setInitialGuess( bump );
 		solver.setSource( source, 0.1 );
 		solver.setBoundaryData( zero );
@@ -1549,8 +1575,8 @@ BOOST_AUTO_TEST_CASE( theDriverReachesTheExteriorCoupling )
 	control -= uncoupled.potential;
 	double const controlRelative = control.Norml2()/scale;
 
-	std::printf( "\n  FREE BOUNDARY THROUGH THE DRIVER ( %d elements, degree 2, "
-	             "%d modes )\n", sub.GetNE(), dtn.modeCount() );
+	std::printf( "\n  FREE BOUNDARY THROUGH THE DRIVER ( %d elements, degree %d, "
+	             "%d modes )\n", sub.GetNE(), degree, dtn.modeCount() );
 	std::printf( "    driver against library      %.3e relative over %d dofs\n",
 	             relative, stored.Size() );
 	std::printf( "    psi_ax                      %.9e, %d Newton steps\n",

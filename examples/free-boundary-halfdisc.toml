@@ -50,11 +50,25 @@ RMin = 0.0
 RMax = 1.7
 ZMin = -1.7
 ZMax = 1.7
-NR = 24
-NZ = 48
+NR = 32
+NZ = 64
 
 [discretisation]
-PolynomialDegree = 2
+# NR = 32 AND DEGREE 3 ARE CHOSEN FOR THE CONTROL, NOT FOR THE ANSWER. The
+# coupled solve here is robust at every resolution tried -- 8 or 9 Newton steps
+# at ( 24, 32, 40 ) x ( degree 2, 3 ), and identical to every printed digit
+# between MFEM's serial and batched trace assembly. What is NOT robust is the
+# control theDriverReachesTheExteriorCoupling solves beside it: the same problem
+# with the coupling REMOVED, which is a zero datum on an artificial boundary and
+# so is not an equilibrium anybody wants. At degree 2 that control's psi_ax runs
+# 7.91e-02, 8.72e-02, -9.77e-02 at n = 24, 32, 40 -- it changes SIGN with the
+# mesh, which says it is branch-hunting rather than converging, and at n = 24 it
+# takes 39 Newton steps under serial trace assembly and does not converge at all
+# under batched. At degree 3 it is stable to four figures on all three meshes
+# ( 1.26908e-01, 1.26913e-01, 1.26913e-01 ) and takes 69, 9, 8 steps. So
+# ( 32, 3 ) is the cell where BOTH arms converge comfortably under both trace
+# assembly modes; a luckier degree-2 cell would be luck, not conditioning.
+PolynomialDegree = 3
 
 [solver]
 NewtonMaxIterations = 150
@@ -83,8 +97,13 @@ GGPrimeFile = "examples/fb-ggprime.dat"
 # spellings converge to something and only one of them is this file:
 #
 #   table over [ 0, 1 ]                    does NOT converge -- creeps at 0.99
-#   table over [ -0.6, 1.4 ], as here      7 Newton steps, psi_ax = 1.01e-01
-#   the same plus ConfineToPlasma = true   92 steps, psi_ax = 4.08e-01
+#   table over [ -0.6, 1.4 ], as here      8 Newton steps, psi_ax = 1.0019e-01
+#   the same plus ConfineToPlasma = true   a DIFFERENT branch, several times
+#                                          the axis flux
+#
+# The first and third were measured on this file at its previous NR = 24,
+# degree 2; only the middle row has been re-measured at the resolution this
+# file now carries, which is why the third no longer quotes digits.
 #
 # The third is a DIFFERENT BRANCH and not a better answer -- four times the
 # axis flux on the same coils and profiles -- which is the multiplicity
@@ -107,14 +126,14 @@ Type = "zero"
 # spectrally in the smoothness of the trace on Gamma.
 #
 # THIS SAID "FOUR IS GENEROUS FOR A PLASMA THIS CENTRED" AND FOUR WAS NOT
-# ENOUGH. Measured 2026-09-07, sweeping Modes on this very file, psi_ax against
-# the most resolved run:
+# ENOUGH. Sweeping Modes on this very file, psi_ax against the most resolved
+# run:
 #
-#   Modes      4        10       12       14       16       20       24
-#   psi_ax   9.759e-02 1.013e-01 1.004e-01 1.006e-01 1.0064e-01 1.0064e-01 1.0064e-01
-#   tail     6.8e-01  4.9e-01  1.0e-01  3.4e-02  7.4e-03  5.0e-04  9.3e-04
+#   Modes      4        10       12       14       16        20        24
+#   psi_ax   9.762e-02 9.961e-02 1.000e-01 1.002e-01 1.00193e-01 1.00194e-01 1.00194e-01
+#   tail     6.5e-01  8.9e-01  9.7e-02  3.0e-02  7.5e-03   5.6e-04   5.9e-05
 #
-# so four was 3.1 PER CENT out and sixteen is converged to 8e-06. The run prints
+# so four was 2.6 PER CENT out and sixteen is converged to 7e-06. The run prints
 # `tail` -- the energy-normalised amplitude of the retained spectrum's last
 # modes over its largest -- and advises above 1e-1, which is about a per cent in
 # psi_ax. READ THAT LINE RATHER THAN THE RAW COEFFICIENTS: the exterior block is

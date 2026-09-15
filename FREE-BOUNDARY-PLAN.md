@@ -4390,7 +4390,8 @@ back would change which equilibrium is reported without saying so.
 
 **WHAT IT MOVES.** Every bordered solve's `ψ_ax`, by the `O( h² )` gap between
 the two definitions — `examples/free-boundary-halfdisc.toml` 9.758655e-02 →
-1.006474e-01 (with `Modes` corrected to 16 at the same time),
+1.006474e-01 (with `Modes` corrected to 16 at the same time; that file has since
+moved to `NR = 32`, degree 3 and reads 1.001931e-01, for the reason in 11.6),
 `limited-tokamak` 9.455354e-02 → 9.466087e-02, `rotating-normalised`
 1.039163e-01 → 1.039325e-01. **All three now read a normalised flux of 1.0000 at
 the located axis**, which they did not before.
@@ -4579,8 +4580,18 @@ axis, which is the defect §11.0 opens with.
   **AND IT FOUND THAT A SHIPPED EXAMPLE IS UNDER-TRUNCATED.**
   `examples/free-boundary-halfdisc.toml` runs at `Modes = 4`, reads a tail of
   **6.8e-01**, and its `ψ_ax` moves **3.1%** between there and `Modes = 16`
-  (9.758655e-02 → 1.006388e-01). The example is left alone — its numbers are
-  quoted in this file — and the diagnostic now says so on every run.
+  (9.758655e-02 → 1.006388e-01). The example took `Modes = 16` and the
+  diagnostic now says so on every run.
+
+  **THE EXAMPLE HAS SINCE MOVED TO `NR = 32`, DEGREE 3**, so every `ψ_ax` quoted
+  for it in this file is that file at its earlier `NR = 24`, degree 2. It was
+  not moved for the exterior: it was moved because
+  `theDriverReachesTheExteriorCoupling`'s CONTROL — the same problem with the
+  coupling removed — is ill posed at degree 2 and changes sign with the mesh.
+  The coupled solve was robust at every resolution tried.
+  → **[M-99](MEASUREMENTS.md#m-99)**. At the new resolution the `Modes` study
+  reads 9.762e-02 at 4 against 1.00193e-01 at 16, so the 2.6% conclusion is
+  unchanged.
 
 ### 11.7 DONE 2026-09-07: the fixture was the defect, and it is repaired rather than relaxed
 
