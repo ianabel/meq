@@ -2154,3 +2154,49 @@ invalidates. `solveWithNormalisation()` already syncs at several producers and
 says so; the fault says the list is not complete. **`--device debug` is the
 instrument and it names the site with a backtrace**, which is why it costs one
 command to take further.
+
+**TAKEN FURTHER, AND IT WAS TWO SITES.** Each fix moved the fault FORWARD,
+which is the only thing that distinguishes a fix from a coincidence:
+
+| | fault at | fixed by |
+|---|---|---|
+| 1 | `refreshXPoint`, XP-3's border | `state.HostRead()`, and `HostReadWrite()` on the two fields it writes one element of |
+| 2 | `refreshPlasmaComponent`, called from the driver's support loop | `state.HostRead()` |
+| 3 | — the solve converges | |
+
+`mfem::Vector::operator()` is a RAW accessor — it neither syncs nor
+invalidates — and both sites read an iterate a device-side trace solve had just
+written. **Read and not read-write for the fill**, which is a pure function of
+the state; **read-WRITE for `refreshXPoint`'s two fields**, because only that
+element's dofs are written there and `HostWrite()`, whose contents are
+undefined, would silently lose every other element's.
+
+**THE FIX IS IN THE CONSUMER AND NOT AT THE PRODUCER**, which is the argument
+`rowDot()` already carries in the same function: both are funnels that every
+path into their border goes through — the Jacobian, each line-search trial, the
+fallback step — so a sync there cannot be outgrown by a new caller, where a list
+of producers can.
+
+**WITH BOTH IN, THE DIII-D CASE SOLVES UNDER `--device debug` AND THE ANSWER IS
+THE CPU'S**: `psi_ax = 3.759851e-01`, `psi_bnd = 7.081394e-02`, the X-point at
+( 1.200929, −0.999491 ), two Newton steps, the support settled in three sweeps.
+
+**WHAT IS LEFT IS UPSTREAM'S AND IS NOT ON THE SOLVE PATH.** After the solve,
+`postProcess()` aborts:
+
+    Verification failed: ( it != maps->memories.end() ) is false:
+     --> host pointer is not registered: h_ptr = 0x7fffaff0c000
+     ... in mfem::MemoryManager::CheckHostMemoryType_
+
+    #16 mfem::DarcyHybridization::ReconstructTotalFlux [ clone .cold ]
+    #17 mfem::DarcyForm::ReconstructTotalFlux
+    #18 meq::GradShafranovSolver::postProcess
+
+`0x7fff...` is the STACK, so the unregistered pointer is a `Vector` over a stack
+buffer, and the `.cold` frame says a second throw — from
+`MmuHostMemorySpace::Dealloc`, during unwinding — is what turns it into a
+`terminate`. MEQ hands that call only heap-backed grid functions and a block
+view over its own solution, and the smaller
+`examples/free-boundary-halfdisc.toml` runs the same post-processing clean. So
+it is recorded here rather than filed, the device offload being explicitly under
+construction.
