@@ -162,11 +162,38 @@ Nothing is red and stages 0 to 7 are done, so the order is:
      because reproducing `freegs4e`'s own 129² artefact is what makes that
      comparison well posed.
 
-     **The conductor model is what is left**, MEQ's rectangles against
-     `freegs4e`'s filaments, which FB-7's `CurrentFilament` cannot fix on this
-     geometry because no `Γ` both encloses the plasma and excludes the inner
-     coil pair. Rebuilding the reference on `freegs4e.shaped_coil.ShapedCoil`
-     is the way, and it is a reference-side job.
+     ~~**The conductor model is what is left**~~ — **DONE 2026-09-15**, and
+     both halves of that sentence were tested rather than one assumed.
+     → **[M-95](MEASUREMENTS.md#m-95)**, **[M-96](MEASUREMENTS.md#m-96)**.
+
+     **No `Γ` works, and now that is measured on all seven diverted machines
+     rather than argued on one.** The margin — nearest conductor minus furthest
+     LCFS point, over the whole axis — is negative everywhere, −0.26 m at best
+     and −1.50 m on DIII-D, and sliding the centre away makes it worse. The
+     mixed case, some conductors inside and some out, is legal geometrically
+     and dies on the DtN's mode convergence instead: at a usable clearance the
+     conductors CASCADE, nothing can be externalised on any of the seven, and
+     the `Γ` radii already configured turn out to be at the optimum.
+
+     **So the reference-side job is the one that was done.**
+     `tools/freegs4e-benchmark/shaped.py` rebuilds any of the seven machines
+     with every filament and solenoid a `freegs4e.shaped_coil.ShapedCoil` on
+     `conductors.py`'s own rectangle, preserving circuit topology and the
+     `control` flags the inverse solve needs; `fgsref.py --shaped` is the
+     switch and all seven converge. On DIII-D it is worth **5.0× in relative
+     `L2` and 7.2× in `L∞`** — and about 2× on the nodes OUTSIDE the
+     conductors, which M-87 did not predict, the finite-size correction not
+     stopping at the conductor's edge.
+
+     **The reference side is finished for all seven; the COMPARISON is finished
+     for one.** Every machine was run both ways and five of the seven behave
+     identically — B and E fail at residuals agreeing to three figures either
+     way, A trips the axis guard on both — so those are M-89's cold-start
+     finding restated and not the conversion. The two that differ do so in
+     opposite directions, TCV gaining a solve and MAST-U losing one, and both
+     carry a `Solenoid`, which is where the conversion stops being a
+     perturbation and the inverse solve moves root. **What is left here is
+     MEQ's cold start**, not the conductor model.
 
      §7.11's ITER profile family stays the next *harder* case, and its advice
      stands: **open it at `γ = 2` or 3, not the published `γ = 1.395`** — the
@@ -404,31 +431,44 @@ Numbers in `CLAUDE_HDGGS.md`, *Why MEQ's Newton struggles* and *Picard, then New
 write requests into its `doc/`, never branch, commit, check out or build there.
 MEQ owns `src/`, `tests/` and `apps/`.
 
-**Every request MEQ has filed is landed in the code MEQ builds against except
-the three still open**, which is the only test of "landed" MEQ can apply. **Ask
-`git` which documents exist, not `ls`**: the older open ones live on
-`gf-hdg-linearise-first` alone, so a listing taken while that tree sits on
-`gf-hdg-dev` shows an almost empty `doc/` and means nothing — and one is
-**untracked**, so `git status` there is how to see it rather than `git cat-file`.
-`CLAUDE.md` has the branch-by-branch table and the mistake that produced it.
+**UPSTREAM NO LONGER TRACKS INTER-PROJECT CORRESPONDENCE UNDER `doc/`, SO MEQ
+CANNOT LEARN WHAT IT HAS FILED BY LOOKING FOR ITS OWN DOCUMENTS THERE.**
+`46ac3d3bc7` deletes every `*-FROM-MEQ.md` in one commit, on the stated
+principle that working notes exchanged with a consumer are not the library's
+documentation and that what they establish belongs in doxygen on the thing it is
+about, or beside the code it constrains. **That is a policy and not a verdict**:
+a document's absence says nothing whatever about whether what it asked for was
+built. Reading an empty `doc/` as "everything closed" is the obvious inference
+and it is the wrong one. What survives is upstream's own plan documents —
+`doc/HDG-BEM-COUPLING.md` is where MEQ's coupling request went, absorbed rather
+than answered — and the doxygen on each thing that landed.
 
-| filed | state |
+**SO THE ONLY TEST OF "LANDED" MEQ CAN APPLY IS THE CODE MEQ BUILDS AGAINST**,
+which it always was, and it is now the only one available: look for the symbol,
+not for the document.
+
+**AND DO NOT CITE A SECTION NUMBER OF ANY OF THOSE FILES.** Upstream records
+that section numbers do not agree across the branch family, and this file has
+cited one capability as both `§2` and `§3` of the same request. Name the
+capability.
+
+| capability | state |
 |---|---|
-| **`HDG-BEM-COUPLING-FROM-MEQ.md` §2** | **the one thing still open.** Auxiliary globally-coupled unknowns — a request for a capability, not a finding: nothing in that tree has been measured wrong by it, and it says so |
+| **Auxiliary globally-coupled unknowns** — `SetNumAuxiliaryUnknowns()` and the two per-element assemble hooks | **the one unbuilt piece, and it is no longer worth asking for.** Upstream carries it as the single open item of `doc/HDG-BEM-COUPLING.md` and confirms nothing of it exists on any branch. **What retires it is the multi-RHS work**: the entry points MEQ named are already public as `NPCReduce()` and `NPCRecover()`, and `DarcyNPCSolver::ArrayMult` now applies them to several right-hand sides in one pass, so a differenced border is `K` applications of a routine that blocks them. MEQ gets the saving without the new API, **and now takes it**: the bordered step queues every column and flushes once, 1.34× on the DIII-D solve leg at 14 columns — → **[M-98](MEASUREMENTS.md#m-98)** |
 
-Every other report MEQ has filed is closed, and they are not listed: a closed one
-has left a fix with a test on it or a number under an `M-nn` anchor, and neither
-needs a ledger entry. `CLAUDE.md` has the two operational facts about that tree
-that do outlast a report.
+**The BEM coupling itself is not wanted and upstream says so in its own file.**
+It is marked FULLY OPTIONAL, on Gatica & Hsiao (1995): a circular or spherical
+artificial boundary makes the exterior operator exact and diagonal and deletes
+the layer potentials outright. `src/meq/ExteriorDtN.hpp` is that route already
+built — one number per Gegenbauer mode, no singular quadrature — so MEQ is
+listed there as the consumer who took it. **Build nothing against the coupling
+plan**, which is upstream's own instruction in it.
 
 **What is NOT filed is the local-solve seed** — item 5. It was found from MEQ's
 side and nothing has been written into that tree about it, beyond one paragraph
 inside the coupling request using it as the argument for why a caller should not
-have to difference a condensed residual.
-
-**And the coupling request is a request for a capability, not a finding.**
-Nothing in that tree has been measured to be wrong by it; §2 and §3 of it are
-things that do not exist rather than things that misbehave, and it says so.
+have to difference a condensed residual. That paragraph survives in upstream's
+plan, so the finding is on the record there even though the document is not.
 
 ---
 
@@ -761,15 +801,17 @@ sizes. And cut-element quadrature turned out not to be the binding constraint at
 all — the profile's vanishing order `j` is. See FB-A and FB-4 above.
 
 **WHAT THIS NEEDS FROM THE OTHER TREE IS NOW NOTHING, FOR FB-0 THROUGH FB-3, AND
-THIS FILE SAID OTHERWISE.** It claimed §2 of `HDG-BEM-COUPLING-FROM-MEQ.md` — two
-rectangular integrators — was blocking. It is not, and the reason is the NPC
+THIS FILE SAID OTHERWISE.** It claimed the two rectangular integrators MEQ asked
+upstream for were blocking. They are not, and the reason is the NPC
 port: the datum's data half is an **essential trace value**, not a weak form, so
 its block is `ProjectBdrCoefficient` against the `PathTraceCoefficient` that
 already exists; and the transmission block is reachable from `TransferPath::
 Endpoint` and `ElementExtension::TransformBack`, both public, in about forty
-lines of MEQ. §3, auxiliary globally-coupled unknowns, is an optimisation over
+lines of MEQ. The auxiliary globally-coupled unknowns are an optimisation over
 `N + 2` backsolves against one factorisation — the cost MEQ's `ψ_ax` border
-already pays. Plan §6.4 is the per-stage table.
+already pays, and one `DarcyNPCSolver::ArrayMult` now blocks. Plan §6.4 is the
+per-stage table. **Neither request exists as a document any more** and that is a
+policy of upstream's rather than a verdict; see *Division of labour*.
 
 **AND FB-4's "one real gap" CLOSED BY NOT OPENING IT.** MFEM *does* have
 cut-element quadrature — `mfem::MomentFittingIntRules` in `fem/intrules_cut.hpp`,
@@ -1002,7 +1044,37 @@ nonpolynomial integrand. Under interpolation the only quadrature left is
 `thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes`. `k = 0` is outside
 paper I's theory and is where the sequel's method (B) would be needed.
 
-### 12.2 Locate the plasma edge with `ψ*` — and this one is separate
+### 12.2 Locate the plasma edge with `ψ*` — MEASURED AND NOT WORTH BUILDING
+
+**ANSWERED 2026-09-14, and it cost no new code because the oracle was already in
+the tree.** → **[M-94](MEASUREMENTS.md#m-94)**. `tests/analytic/PlasmaEdge.hpp`
+carries two fixtures over one exact solution: `MovingPlasmaEdge` reads its
+support off `ψ_h`, which is what MEQ does, and `PlasmaEdge` cuts at the **exact**
+edge. Since `ψ*` is a better approximation to `ψ` than `ψ_h` is, and the fixed
+cut *is* `ψ`, the second column is an **upper bound on everything this item could
+buy**. `locatingTheEdgeExactlyBuysNoOrder` is the case.
+
+**NO ORDER IS ON THE TABLE.** If the level set limited the rate, the oracle's
+advantage would grow as `h` fell; over a fourfold refinement it grows by at most
+**1.018** in `ψ_h` and **1.121** in `ψ*`, and in the one row where the oracle is
+clearly ahead it *falls*, 2.98 → 2.03.
+
+**AND IN THE REGIME MEQ RUNS IN IT BUYS NOTHING AT ALL.** At `k ≤ j`, where `ψ*`
+keeps `k+2`, cutting at the exact edge is worth between **0.95× and 1.28×** — the
+moving edge is the better of the two in half those rows. The one corner with a
+real factor is `j = 2, k = 3`, about **2×**, which is `k > j`: the regime where
+the cut already caps the order, which is what `PLASMA-EDGE-PLAN.md` addresses by
+a different route, and where `ψ*` would capture only the part of the gap lying
+between `ψ_h` and `ψ`.
+
+**THE PREMISE BELOW IS THE PART THAT WAS WRONG**, and it is kept because it is
+the reasoning to not repeat: *"the place `ψ`'s accuracy DOES bind is the level
+set"*. It does not bind there either. What limits the cut is the **rule's
+blindness** — a quadrature rule cannot see a kink between its points, whatever
+field decided where the kink is — which
+`theLossIsTheRulesBlindnessAndNotItsResolution` measures separately and which
+no improvement to the level set can touch.
+
 
 Substituting `ψ*` into the source **for its own sake**, with the quadrature
 left in place, is not worth it: the consistency error of `F( ψ_h )` is
@@ -1017,6 +1089,14 @@ cap is about the geometry of that set rather than about the load. Locating the
 edge with `ψ*` while still assembling `F` at `ψ_h` is independent of 12.1, needs
 no new analysis and no Jacobian change, and has `PlasmaEdgeConvergence` waiting
 as its acceptance criterion. It is an afternoon.
+
+**It was an afternoon, and it was spent on the measurement instead of on the
+build — which is the cheaper order whenever an oracle exists.** Bounding what a
+change can buy before writing it needed two fixtures that were already there and
+one test case; writing it would have needed a second support field through
+`meq::SourceIntegrator` and a source-side way to evaluate `F` at one `ψ` while
+testing the support at another, which is an API change across all three
+`NormalisedSource` subclasses.
 
 ### 12.3 Reuse the Jacobian across Newton steps — the fallback
 

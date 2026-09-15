@@ -763,9 +763,12 @@ coupling rather than through the mesh — is FB-7 and is written up in §7.19.
 ## 6. The split: what belongs in MFEM
 
 **REWRITTEN 2026-09-01, AND THE ANSWER IS MUCH SMALLER THAN IT WAS.** The full
-request is `../mfem-hdg-dev/doc/HDG-BEM-COUPLING-FROM-MEQ.md`, filed 2026-08-29.
-That document asks for two things: §2, two rectangular integrators, and §3, a
-structural capability for auxiliary globally-coupled unknowns. **Under NPC MEQ
+request was filed 2026-08-29 and asks for two things: two rectangular
+integrators, and a structural capability for auxiliary globally-coupled
+unknowns. **It no longer exists as a document** — upstream does not track
+correspondence under `doc/` — and what it established lives in that tree's own
+`doc/HDG-BEM-COUPLING.md`, which carries the auxiliary unknowns as its one
+unbuilt piece. **Under NPC MEQ
 needs neither of them to start**, and the reasons are §4.3 and §4.4. It is worth
 being precise about why, because the request as filed overstates what is
 blocking.

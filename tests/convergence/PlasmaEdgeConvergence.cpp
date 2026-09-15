@@ -675,6 +675,113 @@ BOOST_AUTO_TEST_CASE( theLossIsTheRulesBlindnessAndNotItsResolution )
 }
 
 /**
+ * ROADMAP ITEM 12.2 -- LOCATING THE PLASMA EDGE WITH psi* -- CAN BUY A BOUNDED
+ * CONSTANT AND CANNOT BUY AN ORDER, AND THE ORACLE THAT SAYS SO WAS ALREADY IN
+ * THIS FILE.
+ *
+ * The proposal is to locate `{ Psi > 0 }` with `psi*` rather than with `psi_h`,
+ * on the argument that the place `psi`'s accuracy binds is the level set rather
+ * than the load. It is testable without building any of it, because the two
+ * fixtures here BRACKET it: MovingPlasmaEdge reads its support off `psi_h`,
+ * which is what MEQ does, and PlasmaEdge cuts at the EXACT edge -- and the two
+ * share one exact solution, so their errors are comparable numbers.
+ *
+ * THE FIXED CUT IS AN UPPER BOUND ON WHAT ITEM 12.2 COULD EVER BUY. `psi*` is a
+ * better approximation to `psi` than `psi_h` is; the fixed cut IS `psi`. So a
+ * level set located with `psi*` lands strictly between the two columns below,
+ * and whatever the oracle does not buy, `psi*` cannot buy either. That is what
+ * makes this a measurement of the item rather than a proxy for it.
+ *
+ * theMovingEdgeCostsTheRateNothing already compares the two as RATES and finds
+ * them equal to about a hundredth. That is not the whole question: ROADMAP's
+ * own argument against substituting `psi*` into the LOAD is that it "removes a
+ * term that limits nothing and buys a constant", so the constant is precisely
+ * what has to be looked at here, and this case reads the errors themselves.
+ *
+ * WHAT IT FINDS, AND IT IS NOT "NOTHING".
+ *
+ *   k <= j   the regime MEQ operates in, where psi* keeps k+2: the exact edge
+ *            is worth between 0.95x and 1.28x in L2( psi_h ). Below the scatter
+ *            of the study in half the rows, and the moving edge is BETTER in
+ *            the other half.
+ *   k > j    j = 2, k = 3, where the cut caps the rate: the exact edge is worth
+ *            about 2x, and the factor FALLS with refinement -- 2.98, 2.43, 2.03
+ *            over a fourfold refinement -- so it is a bounded constant and not
+ *            an order.
+ *
+ * SO THE CEILING ON ITEM 12.2 IS PART OF A FACTOR OF TWO IN ONE CORNER. The
+ * corner is the one where the cut already caps the order, which is the regime
+ * PLASMA-EDGE-PLAN.md exists to address by a different route entirely, and
+ * `psi*` would capture only the part of that gap between `psi_h` and `psi`.
+ *
+ * AND THE ASSERTION IS ON THE TREND RATHER THAN ON THE CONSTANT, because the
+ * trend is what decides the item. If the level set were limiting the order, the
+ * oracle's advantage would GROW as h fell; a ratio that is flat or falling says
+ * the two converge at the same rate and differ by a constant. The constants
+ * themselves are printed, not gated: which elements the edge cuts is not a
+ * smooth function of h, so they wander by tens of percent mesh to mesh.
+ */
+BOOST_AUTO_TEST_CASE( locatingTheEdgeExactlyBuysNoOrder )
+{
+	std::vector<int> const meshes = { 8, 16, 32 };
+
+	std::printf( "\n  item 12.2: the support read off psi_h against the support cut "
+	             "at the EXACT edge\n"
+	             "    j   k     n     L2 psi_h moving      fixed-cut     ratio"
+	             "   |   L2 psi* moving      fixed-cut     ratio\n" );
+
+	double worstPotentialRatio = 0.0;
+	double worstPotentialGrowth = 0.0, worstStarGrowth = 0.0;
+
+	for ( int j : { 1, 2 } )
+		for ( int k : { 1, 2, 3 } )
+		{
+			MovingPlasmaEdge const moving( j );
+			PlasmaEdge const fixed( j );
+			std::vector<Point> const m = study( moving, k, meshes );
+			std::vector<Point> const f = study( fixed, k, meshes );
+
+			std::vector<double> potentialRatio, starRatio;
+			for ( std::size_t i = 0; i < meshes.size(); ++i )
+			{
+				potentialRatio.push_back( m[ i ].psi/f[ i ].psi );
+				starRatio.push_back( m[ i ].star/f[ i ].star );
+				std::printf( "  %3d %3d %5d      %.6e  %.6e  %8.3f   |   "
+				             "%.6e  %.6e  %8.3f\n",
+				             j, k, meshes[ i ],
+				             m[ i ].psi, f[ i ].psi, potentialRatio.back(),
+				             m[ i ].star, f[ i ].star, starRatio.back() );
+				worstPotentialRatio = std::max( worstPotentialRatio,
+				                                potentialRatio.back() );
+			}
+
+			// Coarsest to finest: above one means the oracle is pulling ahead as
+			// the mesh refines, which is what an ORDER would look like.
+			double const potentialGrowth = potentialRatio.back()/potentialRatio.front();
+			double const starGrowth = starRatio.back()/starRatio.front();
+			worstPotentialGrowth = std::max( worstPotentialGrowth, potentialGrowth );
+			worstStarGrowth = std::max( worstStarGrowth, starGrowth );
+
+			BOOST_TEST( potentialGrowth < 1.5,
+			            "for j = " << j << ", k = " << k << " the exact edge's "
+			            "advantage in L2( psi_h ) GREW from " << potentialRatio.front()
+			            << " to " << potentialRatio.back() << " over a fourfold "
+			            "refinement. A constant does not grow, so the level set is "
+			            "costing an ORDER here and item 12.2 has a rate to collect "
+			            "rather than the bounded factor this case records" );
+			BOOST_TEST( starGrowth < 1.5,
+			            "for j = " << j << ", k = " << k << " the exact edge's "
+			            "advantage in L2( psi* ) grew from " << starRatio.front()
+			            << " to " << starRatio.back() << "; see above" );
+		}
+
+	std::printf( "\n  worst moving/fixed ratio %.3f in psi_h; worst growth of that "
+	             "ratio over a fourfold refinement %.3f in psi_h, %.3f in psi*\n",
+	             worstPotentialRatio, worstPotentialGrowth, worstStarGrowth );
+	std::fflush( stdout );
+}
+
+/**
  * AND THE EDGE MOVING COSTS THE RATE NOTHING, which is the question FB-4 is
  * actually about.
  *
