@@ -89,6 +89,141 @@ BOOST_AUTO_TEST_CASE( everyNodeIsFoundInAnElementThatContainsIt )
 	            "recorded reference point maps back " << worst << " away" );
 }
 
+/**
+ * The affine inverse must locate exactly what the Newton inverse locates.
+ *
+ * A STRAIGHT-SIDED TRIANGLE'S MAP IS AFFINE, so meq::GridSampler inverts it
+ * with a 2x2 solve rather than through ElementTransformation::TransformBack(),
+ * which constructs an InverseElementTransformation and iterates. That is worth
+ * about seventy times the cost of the constructor and it is only allowed to be
+ * if it decides the SAME THING -- both which element owns each node and where
+ * in it, since a node on an inter-element face is a legitimate candidate for
+ * two elements and the class's contract is that the first one to reach it keeps
+ * it.
+ *
+ * SO THE CONTROL IS THE NEWTON ROUTE ITSELF, run here over every element in
+ * index order, which is what the constructor would have done. The grid is
+ * chosen so that every fifth line falls exactly on a mesh line -- 41 nodes
+ * across 8 cells -- because a node in the middle of an element is the case that
+ * cannot distinguish the two and a node on a face is the case that can.
+ *
+ * THE ELEMENT IS READ OUT THROUGH A PIECEWISE-CONSTANT FIELD WHOSE VALUE IS THE
+ * ELEMENT INDEX, which is exact in P_0 and so reports ownership rather than
+ * approximating it. A smooth field is sampled beside it to pin the reference
+ * POINT as well: the same element with a different point would pass the first
+ * assertion and fail the second.
+ */
+BOOST_AUTO_TEST_CASE( theAffineInverseLocatesWhatTheNewtonInverseDoes )
+{
+	mfem::Mesh mesh = meq::tests::makeMesh( box(), 8 );
+
+	// The precondition, asserted rather than assumed: a mesh carrying nodes
+	// would take the Newton route in both arms and the case would pass
+	// vacuously.
+	BOOST_TEST_REQUIRE( mesh.GetNodes() == nullptr,
+	                    "this mesh is curved, so the affine path is not the one "
+	                    "under test" );
+
+	int const nodes = 41;
+	meq::GridSampler sampler( mesh,
+		box().rMin, box().rMax, nodes,
+		box().zMin, box().zMax, nodes );
+
+	// P_0: one dof per element, set to the element's own index.
+	mfem::L2_FECollection constants( 0, mesh.Dimension() );
+	mfem::FiniteElementSpace constantSpace( &mesh, &constants );
+	mfem::GridFunction owner( &constantSpace );
+	{
+		mfem::Array<int> dofs;
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			constantSpace.GetElementDofs( e, dofs );
+			owner( dofs[ 0 ] ) = e;
+		}
+	}
+
+	// Something with structure in it, so that a wrong reference point in the
+	// right element shows up.
+	mfem::L2_FECollection smoothColl( 3, mesh.Dimension() );
+	mfem::FiniteElementSpace smoothSpace( &mesh, &smoothColl );
+	mfem::GridFunction smooth( &smoothSpace );
+	mfem::FunctionCoefficient smoothCoeff( []( mfem::Vector const &x )
+	{
+		return std::sin( 7.0*x( 0 ) )*std::cos( 5.0*x( 1 ) ) + 2.0*x( 0 )*x( 1 );
+	} );
+	smooth.ProjectCoefficient( smoothCoeff );
+
+	std::vector<double> sampledOwner, sampledSmooth;
+	sampler.sample( owner, sampledOwner, -1.0 );
+	sampler.sample( smooth, sampledSmooth, 0.0 );
+
+	// The control: the element loop the constructor would have run, with the
+	// Newton inverse deciding.
+	int checked = 0, onAFace = 0;
+	double worstValue = 0.0;
+	mfem::Vector physical( 2 );
+	for ( int j = 0; j < nodes; ++j )
+		for ( int i = 0; i < nodes; ++i )
+		{
+			physical( 0 ) = sampler.rAt( i );
+			physical( 1 ) = sampler.zAt( j );
+
+			int expected = -1;
+			int claims = 0;
+			mfem::IntegrationPoint reference;
+			for ( int e = 0; e < mesh.GetNE(); ++e )
+			{
+				mfem::IsoparametricTransformation transformation;
+				mesh.GetElementTransformation( e, &transformation );
+				mfem::IntegrationPoint here;
+				if ( transformation.TransformBack( physical, here )
+				     == mfem::InverseElementTransformation::Inside )
+				{
+					++claims;
+					if ( expected < 0 )
+					{
+						expected = e;
+						reference = here;
+					}
+				}
+			}
+			if ( claims > 1 )
+				++onAFace;
+
+			std::size_t const at = static_cast<std::size_t>( j )*nodes + i;
+			BOOST_TEST_REQUIRE( sampler.located( i, j ) == ( expected >= 0 ),
+			                    "node ( " << i << ", " << j << " ) is located by "
+			                    "one inverse and not the other" );
+			if ( expected < 0 )
+				continue;
+
+			++checked;
+			BOOST_TEST_REQUIRE( static_cast<int>( sampledOwner[ at ] + 0.5 ) == expected,
+			                    "node ( " << i << ", " << j << " ) was filed under "
+			                    "element " << static_cast<int>( sampledOwner[ at ] + 0.5 )
+			                    << " and the Newton inverse gives " << expected );
+
+			worstValue = std::max( worstValue,
+				std::abs( sampledSmooth[ at ]
+				          - smooth.GetValue( expected, reference ) ) );
+		}
+
+	// A grid line on a mesh line is the whole point of the geometry above, so
+	// if none of them landed there the case is weaker than it reads.
+	BOOST_TEST( onAFace > 0,
+	            "no grid node fell on an inter-element face, so this case never "
+	            "exercised the ownership rule it exists for" );
+
+	std::printf( "\n  affine vs Newton: %d nodes located identically, %d of them "
+	             "claimed by more than one element, worst value difference %.3e\n",
+	             checked, onAFace, worstValue );
+	std::fflush( stdout );
+
+	BOOST_TEST( worstValue < 1.0e-12,
+	            "the two inverses agree on the element and not on the point in "
+	            "it: the sampled field differs by " << worstValue );
+}
+
 /// Outside is not an error, it is the mask. A grid larger than the mesh must
 /// find the interior and miss the exterior, which is what the output uses to
 /// decide where psi is defined.

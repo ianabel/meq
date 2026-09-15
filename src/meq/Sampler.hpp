@@ -258,6 +258,37 @@ namespace meq
 		private:
 			int index( int i, int j ) const { return j*nR + i; }
 
+			/**
+			 * The located nodes, grouped by the element that holds them.
+			 *
+			 * EVERY SAMPLING PASS IS A LOOP OVER ELEMENTS AND NOT OVER NODES,
+			 * and this is what makes that possible. A field's value at a node
+			 * needs three things from its element -- the dof list, the field's
+			 * coefficients on those dofs, and the shape function -- and only
+			 * the last of them depends on the node. Asking
+			 * GridFunction::GetValue() per node, which is the obvious loop,
+			 * therefore re-fetches the first two every time: an Array<int>, a
+			 * gathered Vector and a Vector for the shape, which is THREE HEAP
+			 * ALLOCATIONS and a gather for a dot product of ten numbers.
+			 * Measured on the DIII-D case, that is 0.35 us per node against
+			 * about 0.35 us of arithmetic per ELEMENT.
+			 *
+			 * AND IT IS ALSO WHAT WOULD MAKE THE PASSES PARALLEL. Grouped this
+			 * way each element writes a disjoint set of node indices, so the
+			 * outer loop is a forall with no reduction and no contention; a
+			 * node-major loop over a scattered element map is neither.
+			 *
+			 * CSR over element index: groupStart has GetNE() + 1 entries and
+			 * groupNode holds node indices, increasing within each group, so
+			 * the order a pass visits nodes in does not depend on how the
+			 * groups were built.
+			 */
+			void buildGroups() const;
+
+			mutable std::vector<int> groupStart;
+			mutable std::vector<int> groupNode;
+			mutable bool groupsValid = false;
+
 			mfem::Mesh &mesh;
 			double rMin, rMax, zMin, zMax;
 			int nR, nZ;

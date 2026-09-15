@@ -201,6 +201,33 @@ band `O(h)` wide that is inside the plasma and outside the mesh.
   computing an error norm or differencing two runs. **This is the interchange
   format, and `B` is what most readers open it for**, which is why it was an item
   rather than a footnote.
+
+  **AND WRITING IT COSTS ALMOST NOTHING; LOCATING THE GRID IN THE MESH DID.**
+  The NetCDF write is one `putVar` per variable — a bulk call, 5 ms — and what
+  stood beside it was `meq::GridSampler`'s constructor, inverting the element map
+  through `ElementTransformation::TransformBack()` at **1.45 us a call** for a
+  straight-sided triangle whose map is affine and whose inverse is a 2x2 solve.
+  `Mesh::GetNodes() == nullptr` is exactly that condition and a curved mesh keeps
+  the Newton route. **69x at 129² and 81x at 513²**, with every node landing in
+  the same element and the sampled fields moving by 1e-14 relative, which is
+  round-off in a different order of operations. The sampling passes then group
+  the located nodes **by element** rather than walking them in grid order, so the
+  dof list, the gathered coefficients and the shape vector — three heap
+  allocations per node through `GridFunction::GetValue()` — are fetched once per
+  element instead; that is 1.6x, and what is left is `CalcShape`, which is
+  genuinely per point. **The grouping is also what would make the passes
+  parallel**, each element writing a disjoint set of node indices, which a
+  node-major loop over a scattered element map cannot offer.
+
+  → **[M-92](MEASUREMENTS.md#m-92)** — the output stage per writer, at two grid
+  sizes · what the two fixes are worth · what does not move
+
+  **THE BIGGEST ITEM IN THAT PHASE IS NOT GRID-SHAPED AT ALL**, and anyone timing
+  the output will meet it first: `postProcess()` is **0.62 s, 67% of the output at
+  the default grid and 8% of the whole DIII-D run**, and it does not move with the
+  grid because it has nothing to do with it. It is `DarcyForm::Reconstruct()`
+  re-assembling four integrators at the enriched order per element, which is the
+  price of reporting `ψ*` rather than `ψ_h`.
 * **The `.vtu` bends the mesh onto `Γ`** — a curvature is installed and each
   boundary face is moved out. Since the VTK is already Lagrange cells this
   needed **nothing further from the format**; the two features composed.

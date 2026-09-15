@@ -2200,3 +2200,88 @@ view over its own solution, and the smaller
 `examples/free-boundary-halfdisc.toml` runs the same post-processing clean. So
 it is recorded here rather than filed, the device offload being explicitly under
 construction.
+
+
+### M-92
+
+**THE OUTPUT STAGE, AND WHERE ITS TIME ACTUALLY GOES.** The question was whether
+the NetCDF write loops efficiently. It does not cost anything worth looking at —
+one `putVar` per variable, a bulk call, **5 ms** — and the phase around it costs
+**0.95 s of a 7.98 s run, 12%**. Timed per writer on
+`examples/machine-f-diiid.toml`, `k = 2`, 4848 elements, `OMP_NUM_THREADS=4`,
+at two grid sizes because only some of it is grid-shaped:
+
+| | 129² before | 129² after | 513² before | 513² after |
+|---|---|---|---|---|
+| `postProcess()` | 0.637 | 0.632 | 0.618 | 0.622 |
+| `.mesh` + two `.gf` + `_psistar.gf` | 0.049 | 0.053 | 0.048 | 0.054 |
+| **`GridSampler` constructor** | **0.118** | **0.0017** | **0.567** | **0.0070** |
+| **the three sampling passes** | **0.0135** | **0.0085** | **0.211** | **0.134** |
+| the NetCDF write | 0.005 | 0.016 | 0.018 | 0.024 |
+| the `.vtu` | 0.127 | 0.130 | 0.126 | 0.131 |
+| **output total** | **0.949** | **0.842** | **1.587** | **0.972** |
+
+**THE LOCATOR IS 69x AND 81x, AND IT IS ONE LINE OF ARITHMETIC REPLACING A
+NEWTON SOLVE.** `ElementTransformation::TransformBack()` constructs an
+`InverseElementTransformation`, searches a point set for a starting guess and
+iterates — **1.45 us per call**, measured identically at both grid sizes
+(78k calls for 118 ms, 393k for 567 ms). A straight-sided triangle's map is
+affine, so its inverse is a 2x2 solve. `Mesh::GetNodes() == nullptr` is exactly
+the condition, and a curved mesh keeps the Newton route.
+
+**AND MOST OF THOSE CALLS WERE REJECTIONS**, which is why the win is larger than
+the arithmetic suggests. The element's index range is padded by one cell in each
+direction against round-off, so at a grid spacing near the mesh's own only about
+one candidate in five is inside: at 129² the constructor ran ~78k inversions to
+locate 12520 nodes.
+
+**THE SAMPLING PASSES ARE 1.6x AND THE REMAINDER IS `CalcShape`.**
+`GridFunction::GetValue()` and `GetVectorValue()` take an element and a point,
+so each call re-fetches what only the element decides — an `Array<int>` of dofs,
+a gathered `Vector`, a `Vector` for the shape. **Three heap allocations and a
+gather per node, for a dot product of ten numbers**, measured at 0.35 us. The
+located nodes are now grouped by element (a counting sort into CSR), so that
+half is hoisted out of the node loop and what is left is `CalcShape` — which for
+`L2_TriangleElement` is a Vandermonde solve and is genuinely per point.
+
+**THE GROUPING IS ALSO WHAT WOULD MAKE THE PASSES PARALLEL.** Grouped by
+element, each element writes a disjoint set of node indices, so the outer loop is
+a `forall` with no reduction and no contention; a node-major loop over a
+scattered element map is neither. Not done — at 129² the whole grid path is now
+27 ms.
+
+**THE ANSWER DOES NOT MOVE, AND THE MASK DOES NOT EITHER.** Against the same
+binary with the previous sampler, on the same solve:
+
+| | 129² | 513² |
+|---|---|---|
+| nodes located | 12520/16641, identical | 199651/263169, identical |
+| `inside`, `extrapolated` | bit for bit | bit for bit |
+| `psi` | 1.5e-14 relative | 5.5e-15 |
+| `B_R`, `B_Z` | 1.2e-14, 1.8e-14 | 2.2e-14, 2.4e-14 |
+
+That is round-off from a different order of operations, in the inverse map and
+in the dot product, and nothing else.
+
+**THE ACCEPTANCE IS THE NEWTON ROUTE ITSELF**, run over every element in index
+order — which is what the constructor would have done — with ownership read out
+through a `P_0` field whose value is the element index, so it is reported exactly
+rather than approximated. `theAffineInverseLocatesWhatTheNewtonInverseDoes`:
+**1681 nodes located identically, 783 of them claimed by more than one element**,
+worst sampled difference 4.66e-15. The grid is 41 nodes across 8 cells so that
+every fifth line falls on a mesh line: a node in the middle of an element cannot
+distinguish the two inverses and a node on a face can, and the case asserts that
+it met some.
+
+**AND THE BIGGEST ITEM IN THE OUTPUT PHASE IS NOT GRID-SHAPED AT ALL.**
+`postProcess()` is **0.62 s, 67% of the output at the default grid and 8% of the
+whole run**, and it does not move with the grid because it has nothing to do with
+it. It is one call into `DarcyForm::Reconstruct()`, and the profile says it is
+real per-element work rather than one-off setup: `VectorMassIntegrator`,
+`VectorDivergenceIntegrator`, `HDGDiffusionIntegrator` and
+`NormalTraceJumpIntegrator` all re-assembled at the enriched order, plus a local
+solve, for every element. `ReconstructTotalFlux` is 29% of it — and `totalFlux()`
+is read by `SolverContract` and by nothing else, but it is an INPUT to
+`ReconstructFluxAndPot()`, so it is not droppable. This is the cost of reporting
+`psi*` rather than `psi_h`, which is a decision taken on its merits elsewhere;
+it is recorded here because a reader timing the output stage will meet it first.

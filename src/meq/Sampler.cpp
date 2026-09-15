@@ -6,6 +6,24 @@
 
 namespace meq
 {
+	namespace
+	{
+		/// Whether a field on this element can be evaluated as shape . dofs.
+		///
+		/// THE GROUPED PASSES BELOW DO WHAT GridFunction::GetValue() DOES, with
+		/// the per-element half hoisted out of the node loop, and they are only
+		/// entitled to do that for the case it handles that way: a scalar-valued
+		/// element whose basis needs no transformation to evaluate. MEQ's own
+		/// spaces are all L2, so this is always true here -- but sample() is a
+		/// public entry point and an H(div) field handed to it must still get
+		/// the right answer rather than a fast wrong one.
+		bool plainNodal( mfem::FiniteElement const &fe )
+		{
+			return fe.GetMapType() == mfem::FiniteElement::VALUE
+			       && fe.GetRangeType() == mfem::FiniteElement::SCALAR;
+		}
+	}
+
 	GridSampler::GridSampler( mfem::Mesh &meshIn,
 	                          double rMinIn, double rMaxIn, int nRIn,
 	                          double zMinIn, double zMaxIn, int nZIn )
@@ -28,6 +46,39 @@ namespace meq
 
 		mfem::Vector physical( 2 );
 		mfem::Vector lower( 2 ), upper( 2 );
+
+		/*
+		 * A STRAIGHT-SIDED ELEMENT'S MAP IS AFFINE, SO ITS INVERSE IS A 2x2
+		 * SOLVE AND NOT A NEWTON ITERATION.
+		 *
+		 * ElementTransformation::TransformBack() constructs an
+		 * InverseElementTransformation, searches a point set for a starting
+		 * guess and iterates -- measured at 1.45 us per call on the DIII-D
+		 * case, which is the whole cost of this constructor. For a triangle
+		 * whose geometry is its three vertices the answer is exact in four
+		 * multiplications, and MOST OF THOSE CALLS ARE REJECTIONS: the index
+		 * range below is padded by an element in each direction, so at a grid
+		 * spacing near the mesh's own only about one candidate in five is
+		 * inside.
+		 *
+		 * Mesh::GetNodes() is null exactly when the geometry is the vertices
+		 * alone, which is every mesh MEQ builds with MakeCartesian2D and every
+		 * order-1 .msh gmsh writes. A curved mesh keeps the Newton route, and
+		 * so does anything that is not a triangle.
+		 */
+		bool const straightSided = ( mesh.GetNodes() == nullptr );
+
+		// InverseElementTransformation's own default, applied to the same test
+		// Geometry::CheckPoint() applies -- so the affine path accepts exactly
+		// the candidates TransformBack() accepts, rather than nearly them.
+		double const insideTolerance = 1.0e-8;
+
+		// The reentrant overload, into a local. Mesh::GetElementTransformation(
+		// int ) hands out ONE shared member of the mesh, which CLAUDE.md
+		// records as a silent wrong answer under threading; this loop is the
+		// obvious thing to parallelise and should not have to be rewritten
+		// first.
+		mfem::IsoparametricTransformation transformation;
 
 		for ( int e = 0; e < mesh.GetNE(); ++e )
 		{
@@ -60,7 +111,36 @@ namespace meq
 			if ( i1 < i0 || j1 < j0 )
 				continue;
 
-			mfem::ElementTransformation *transformation = mesh.GetElementTransformation( e );
+			// x = v0 + J ( xi, eta ), inverted once for the whole candidate
+			// box. A degenerate element falls back rather than dividing by
+			// zero -- Newton will report it Outside, which is the right answer.
+			bool affine = straightSided && vertices.Size() == 3
+			              && mesh.GetElementBaseGeometry( e ) == mfem::Geometry::TRIANGLE;
+			double originR = 0.0, originZ = 0.0;
+			double inverse[ 4 ] = { 0.0, 0.0, 0.0, 0.0 };
+			if ( affine )
+			{
+				double const *p0 = mesh.GetVertex( vertices[ 0 ] );
+				double const *p1 = mesh.GetVertex( vertices[ 1 ] );
+				double const *p2 = mesh.GetVertex( vertices[ 2 ] );
+				double const j00 = p1[ 0 ] - p0[ 0 ], j01 = p2[ 0 ] - p0[ 0 ];
+				double const j10 = p1[ 1 ] - p0[ 1 ], j11 = p2[ 1 ] - p0[ 1 ];
+				double const determinant = j00*j11 - j01*j10;
+				if ( determinant == 0.0 )
+					affine = false;
+				else
+				{
+					originR = p0[ 0 ];
+					originZ = p0[ 1 ];
+					inverse[ 0 ] =  j11/determinant;
+					inverse[ 1 ] = -j01/determinant;
+					inverse[ 2 ] = -j10/determinant;
+					inverse[ 3 ] =  j00/determinant;
+				}
+			}
+
+			if ( !affine )
+				mesh.GetElementTransformation( e, &transformation );
 
 			for ( int j = j0; j <= j1; ++j )
 				for ( int i = i0; i <= i1; ++i )
@@ -72,8 +152,23 @@ namespace meq
 					physical( 0 ) = rAt( i );
 					physical( 1 ) = zAt( j );
 
+					if ( affine )
+					{
+						double const dr = physical( 0 ) - originR;
+						double const dz = physical( 1 ) - originZ;
+						double const xi  = inverse[ 0 ]*dr + inverse[ 1 ]*dz;
+						double const eta = inverse[ 2 ]*dr + inverse[ 3 ]*dz;
+						if ( xi < -insideTolerance || eta < -insideTolerance
+						     || xi + eta > 1.0 + insideTolerance )
+							continue;
+						point[ at ].Set2( xi, eta );
+						element[ at ] = e;
+						++found;
+						continue;
+					}
+
 					mfem::IntegrationPoint reference;
-					if ( transformation->TransformBack( physical, reference )
+					if ( transformation.TransformBack( physical, reference )
 					     == mfem::InverseElementTransformation::Inside )
 					{
 						element[ at ] = e;
@@ -84,35 +179,131 @@ namespace meq
 		}
 	}
 
+	void GridSampler::buildGroups() const
+	{
+		if ( groupsValid )
+			return;
+
+		int const elements = mesh.GetNE();
+		groupStart.assign( static_cast<std::size_t>( elements ) + 1, 0 );
+
+		// A counting sort, which is what this is: the key is the element index
+		// and it is already an integer in [ 0, NE ).
+		for ( std::size_t at = 0; at < element.size(); ++at )
+			if ( element[ at ] >= 0 )
+				++groupStart[ static_cast<std::size_t>( element[ at ] ) + 1 ];
+		for ( int e = 0; e < elements; ++e )
+			groupStart[ static_cast<std::size_t>( e ) + 1 ] +=
+				groupStart[ static_cast<std::size_t>( e ) ];
+
+		groupNode.resize( static_cast<std::size_t>( groupStart.back() ) );
+		std::vector<int> cursor( groupStart.begin(), groupStart.end() - 1 );
+		for ( std::size_t at = 0; at < element.size(); ++at )
+			if ( element[ at ] >= 0 )
+				groupNode[ static_cast<std::size_t>(
+					cursor[ static_cast<std::size_t>( element[ at ] ) ]++ ) ] =
+					static_cast<int>( at );
+
+		groupsValid = true;
+	}
+
 	void GridSampler::samplePotentialWithFlux( mfem::GridFunction const &potential,
 	                                           mfem::GridFunction const &flux,
 	                                           std::vector<double> &values,
 	                                           double fill ) const
 	{
 		values.assign( static_cast<std::size_t>( nR )*nZ, fill );
-		mfem::Vector q( 2 );
-		for ( int j = 0; j < nZ; ++j )
-			for ( int i = 0; i < nR; ++i )
+		buildGroups();
+
+		mfem::FiniteElementSpace const &potentialSpace = *potential.FESpace();
+		mfem::FiniteElementSpace const &fluxSpace = *flux.FESpace();
+		mfem::Array<int> dofs, vdofs;
+		mfem::DofTransformation potentialTransform, fluxTransform;
+		mfem::Vector potentialLocal, fluxLocal, shape, fluxShape;
+
+		for ( int e = 0; e + 1 < static_cast<int>( groupStart.size() ); ++e )
+		{
+			int const from = groupStart[ static_cast<std::size_t>( e ) ];
+			int const to = groupStart[ static_cast<std::size_t>( e ) + 1 ];
+			if ( from == to )
+				continue;
+
+			mfem::FiniteElement const &fe = *potentialSpace.GetFE( e );
+			if ( !plainNodal( fe ) )
 			{
-				std::size_t const at = static_cast<std::size_t>( index( i, j ) );
-				int const e = element[ at ];
-				if ( e < 0 )
+				for ( int k = from; k < to; ++k )
+				{
+					std::size_t const at =
+						static_cast<std::size_t>( groupNode[ static_cast<std::size_t>( k ) ] );
+					values[ at ] = potential.GetValue( e, point[ at ] );
+				}
+			}
+			else
+			{
+				potentialSpace.GetElementDofs( e, dofs, potentialTransform );
+				potential.GetSubVector( dofs, potentialLocal );
+				if ( !potentialTransform.IsIdentity() )
+					potentialTransform.InvTransformPrimal( potentialLocal );
+				shape.SetSize( fe.GetDof() );
+
+				for ( int k = from; k < to; ++k )
+				{
+					std::size_t const at =
+						static_cast<std::size_t>( groupNode[ static_cast<std::size_t>( k ) ] );
+					fe.CalcShape( point[ at ], shape );
+					values[ at ] = shape*potentialLocal;
+				}
+			}
+
+			// THE BAND, AND ONLY IF THIS ELEMENT HAS ANY. Interior nodes have a
+			// zero offset, so on every element inside Gamma_h the flux is never
+			// fetched at all -- which on the ordinary run is all of them.
+			bool banded = false;
+			for ( int k = from; k < to && !banded; ++k )
+			{
+				std::size_t const at =
+					static_cast<std::size_t>( groupNode[ static_cast<std::size_t>( k ) ] );
+				banded = ( offsetR[ at ] != 0.0 || offsetZ[ at ] != 0.0 );
+			}
+			if ( !banded )
+				continue;
+
+			mfem::FiniteElement const &fluxFe = *fluxSpace.GetFE( e );
+			bool const fluxNodal = plainNodal( fluxFe );
+			int const fluxDof = fluxFe.GetDof();
+			if ( fluxNodal )
+			{
+				fluxSpace.GetElementVDofs( e, vdofs, fluxTransform );
+				flux.GetSubVector( vdofs, fluxLocal );
+				if ( !fluxTransform.IsIdentity() )
+					fluxTransform.InvTransformPrimal( fluxLocal );
+				fluxShape.SetSize( fluxDof );
+			}
+
+			mfem::Vector q( 2 );
+			for ( int k = from; k < to; ++k )
+			{
+				std::size_t const at =
+					static_cast<std::size_t>( groupNode[ static_cast<std::size_t>( k ) ] );
+				if ( offsetR[ at ] == 0.0 && offsetZ[ at ] == 0.0 )
 					continue;
 
-				double value = potential.GetValue( e, point[ at ] );
-
-				// Interior nodes have a zero offset, so this costs them a branch
-				// and nothing else.
-				if ( offsetR[ at ] != 0.0 || offsetZ[ at ] != 0.0 )
+				if ( fluxNodal )
 				{
-					flux.GetVectorValue( e, point[ at ], q );
-					// grad psi = r q, with r taken at the foot -- the point the
-					// flux was actually read at.
-					double const footR = rAt( i ) - offsetR[ at ];
-					value += footR*( q( 0 )*offsetR[ at ] + q( 1 )*offsetZ[ at ] );
+					fluxFe.CalcShape( point[ at ], fluxShape );
+					q( 0 ) = fluxShape*( &fluxLocal[ 0 ] );
+					q( 1 ) = fluxShape*( &fluxLocal[ fluxDof ] );
 				}
-				values[ at ] = value;
+				else
+					flux.GetVectorValue( e, point[ at ], q );
+
+				// grad psi = r q, with r taken at the foot -- the point the
+				// flux was actually read at.
+				int const i = static_cast<int>( at ) % nR;
+				double const footR = rAt( i ) - offsetR[ at ];
+				values[ at ] += footR*( q( 0 )*offsetR[ at ] + q( 1 )*offsetZ[ at ] );
 			}
+		}
 	}
 
 	void GridSampler::sampleComponentWithGradient( mfem::GridFunction const &field,
@@ -121,35 +312,74 @@ namespace meq
 	                                               double fill ) const
 	{
 		values.assign( static_cast<std::size_t>( nR )*nZ, fill );
-		mfem::Vector vector;
+		buildGroups();
+
+		mfem::FiniteElementSpace const &space = *field.FESpace();
+		mfem::Array<int> vdofs;
+		mfem::DofTransformation doftrans;
+		mfem::Vector local, shape, vector;
 		mfem::DenseMatrix gradient;
-		for ( std::size_t at = 0; at < element.size(); ++at )
+		mfem::IsoparametricTransformation transformation;
+
+		for ( int e = 0; e + 1 < static_cast<int>( groupStart.size() ); ++e )
 		{
-			int const e = element[ at ];
-			if ( e < 0 )
+			int const from = groupStart[ static_cast<std::size_t>( e ) ];
+			int const to = groupStart[ static_cast<std::size_t>( e ) + 1 ];
+			if ( from == to )
 				continue;
 
-			field.GetVectorValue( e, point[ at ], vector );
-			double value = vector( component );
-
-			// Interior nodes have a zero offset, so this costs them a branch and
-			// nothing else -- the same shape as samplePotentialWithFlux().
-			if ( offsetR[ at ] != 0.0 || offsetZ[ at ] != 0.0 )
+			mfem::FiniteElement const &fe = *space.GetFE( e );
+			bool const nodal = plainNodal( fe );
+			int const dof = fe.GetDof();
+			if ( nodal )
 			{
-				mfem::ElementTransformation *transformation =
-					mesh.GetElementTransformation( e );
-				transformation->SetIntPoint( &point[ at ] );
-				field.GetVectorGradient( *transformation, gradient );
-
-				// grad( i, j ) = d u_i / d x_j: COMPONENT first, DIRECTION
-				// second. Transposing it is wrong at every node whose gradient
-				// is not symmetric and silent everywhere else, so the test field
-				// in theBandVectorContinuesAtItsGradientsOrder is deliberately
-				// one with an asymmetric gradient.
-				value += gradient( component, 0 )*offsetR[ at ]
-				         + gradient( component, 1 )*offsetZ[ at ];
+				space.GetElementVDofs( e, vdofs, doftrans );
+				field.GetSubVector( vdofs, local );
+				if ( !doftrans.IsIdentity() )
+					doftrans.InvTransformPrimal( local );
+				shape.SetSize( dof );
 			}
-			values[ at ] = value;
+
+			bool transformed = false;
+			for ( int k = from; k < to; ++k )
+			{
+				std::size_t const at =
+					static_cast<std::size_t>( groupNode[ static_cast<std::size_t>( k ) ] );
+
+				double value;
+				if ( nodal )
+				{
+					fe.CalcShape( point[ at ], shape );
+					value = shape*( &local[ dof*component ] );
+				}
+				else
+				{
+					field.GetVectorValue( e, point[ at ], vector );
+					value = vector( component );
+				}
+
+				// Interior nodes have a zero offset, so this costs them a branch
+				// and nothing else -- the same shape as samplePotentialWithFlux().
+				if ( offsetR[ at ] != 0.0 || offsetZ[ at ] != 0.0 )
+				{
+					if ( !transformed )
+					{
+						mesh.GetElementTransformation( e, &transformation );
+						transformed = true;
+					}
+					transformation.SetIntPoint( &point[ at ] );
+					field.GetVectorGradient( transformation, gradient );
+
+					// grad( i, j ) = d u_i / d x_j: COMPONENT first, DIRECTION
+					// second. Transposing it is wrong at every node whose gradient
+					// is not symmetric and silent everywhere else, so the test field
+					// in theBandVectorContinuesAtItsGradientsOrder is deliberately
+					// one with an asymmetric gradient.
+					value += gradient( component, 0 )*offsetR[ at ]
+					         + gradient( component, 1 )*offsetZ[ at ];
+				}
+				values[ at ] = value;
+			}
 		}
 	}
 
@@ -249,8 +479,9 @@ namespace meq
 				physical( 0 ) = footR;
 				physical( 1 ) = footZ;
 				mfem::IntegrationPoint reference;
-				mfem::ElementTransformation *transformation =
-					mesh.GetElementTransformation( faces[ best ].element );
+				mfem::IsoparametricTransformation transformation;
+				mesh.GetElementTransformation( faces[ best ].element,
+				                               &transformation );
 
 				// TransformBack reports Outside for exactly the nodes this
 				// function is for, and still returns reference coordinates --
@@ -271,7 +502,7 @@ namespace meq
 				// The reference triangle is 0 <= x, y and x + y <= 1, so a point
 				// within `slack` of it is at most that far outside in reference
 				// units. One half is generous for a band one face deep.
-				transformation->TransformBack( physical, reference );
+				transformation.TransformBack( physical, reference );
 				// The foot is ON the element, so this should always pass; it is
 				// kept because a degenerate face could still defeat the inverse
 				// map, and a silent wild reference point is the failure this
@@ -302,6 +533,11 @@ namespace meq
 				++extended;
 				++filled;
 			}
+
+		// The band nodes are new members of their elements' groups, so whatever
+		// a previous sampling pass built is now short of them.
+		if ( filled > 0 )
+			groupsValid = false;
 		return filled;
 	}
 
@@ -324,22 +560,94 @@ namespace meq
 	                          std::vector<double> &values, double fill ) const
 	{
 		values.assign( static_cast<std::size_t>( nR )*nZ, fill );
-		for ( std::size_t at = 0; at < element.size(); ++at )
-			if ( element[ at ] >= 0 )
-				values[ at ] = field.GetValue( element[ at ], point[ at ] );
+		buildGroups();
+
+		mfem::FiniteElementSpace const &space = *field.FESpace();
+		mfem::Array<int> dofs;
+		mfem::DofTransformation doftrans;
+		mfem::Vector local, shape;
+
+		for ( int e = 0; e + 1 < static_cast<int>( groupStart.size() ); ++e )
+		{
+			int const from = groupStart[ static_cast<std::size_t>( e ) ];
+			int const to = groupStart[ static_cast<std::size_t>( e ) + 1 ];
+			if ( from == to )
+				continue;
+
+			mfem::FiniteElement const &fe = *space.GetFE( e );
+			if ( !plainNodal( fe ) )
+			{
+				for ( int k = from; k < to; ++k )
+				{
+					std::size_t const at =
+						static_cast<std::size_t>( groupNode[ static_cast<std::size_t>( k ) ] );
+					values[ at ] = field.GetValue( e, point[ at ] );
+				}
+				continue;
+			}
+
+			space.GetElementDofs( e, dofs, doftrans );
+			field.GetSubVector( dofs, local );
+			if ( !doftrans.IsIdentity() )
+				doftrans.InvTransformPrimal( local );
+			shape.SetSize( fe.GetDof() );
+
+			for ( int k = from; k < to; ++k )
+			{
+				std::size_t const at =
+					static_cast<std::size_t>( groupNode[ static_cast<std::size_t>( k ) ] );
+				fe.CalcShape( point[ at ], shape );
+				values[ at ] = shape*local;
+			}
+		}
 	}
 
 	void GridSampler::sampleComponent( mfem::GridFunction const &field, int component,
 	                                   std::vector<double> &values, double fill ) const
 	{
 		values.assign( static_cast<std::size_t>( nR )*nZ, fill );
-		mfem::Vector vector;
-		for ( std::size_t at = 0; at < element.size(); ++at )
-			if ( element[ at ] >= 0 )
+		buildGroups();
+
+		mfem::FiniteElementSpace const &space = *field.FESpace();
+		mfem::Array<int> vdofs;
+		mfem::DofTransformation doftrans;
+		mfem::Vector local, shape, vector;
+
+		for ( int e = 0; e + 1 < static_cast<int>( groupStart.size() ); ++e )
+		{
+			int const from = groupStart[ static_cast<std::size_t>( e ) ];
+			int const to = groupStart[ static_cast<std::size_t>( e ) + 1 ];
+			if ( from == to )
+				continue;
+
+			mfem::FiniteElement const &fe = *space.GetFE( e );
+			if ( !plainNodal( fe ) )
 			{
-				field.GetVectorValue( element[ at ], point[ at ], vector );
-				values[ at ] = vector( component );
+				for ( int k = from; k < to; ++k )
+				{
+					std::size_t const at =
+						static_cast<std::size_t>( groupNode[ static_cast<std::size_t>( k ) ] );
+					field.GetVectorValue( e, point[ at ], vector );
+					values[ at ] = vector( component );
+				}
+				continue;
 			}
+
+			int const dof = fe.GetDof();
+			space.GetElementVDofs( e, vdofs, doftrans );
+			field.GetSubVector( vdofs, local );
+			if ( !doftrans.IsIdentity() )
+				doftrans.InvTransformPrimal( local );
+			shape.SetSize( dof );
+
+			for ( int k = from; k < to; ++k )
+			{
+				std::size_t const at =
+					static_cast<std::size_t>( groupNode[ static_cast<std::size_t>( k ) ] );
+				fe.CalcShape( point[ at ], shape );
+				values[ at ] = shape*( &local[ dof*component ] );
+			}
+		}
 	}
 
 	void GridSampler::sampleCoefficient( mfem::Coefficient &coefficient,
@@ -347,13 +655,27 @@ namespace meq
 	                                     double fill ) const
 	{
 		values.assign( static_cast<std::size_t>( nR )*nZ, fill );
-		for ( std::size_t at = 0; at < element.size(); ++at )
-			if ( element[ at ] >= 0 )
+		buildGroups();
+
+		// One transformation per ELEMENT rather than per node, and a local one
+		// rather than the mesh's shared member -- see the constructor.
+		mfem::IsoparametricTransformation transformation;
+
+		for ( int e = 0; e + 1 < static_cast<int>( groupStart.size() ); ++e )
+		{
+			int const from = groupStart[ static_cast<std::size_t>( e ) ];
+			int const to = groupStart[ static_cast<std::size_t>( e ) + 1 ];
+			if ( from == to )
+				continue;
+
+			mesh.GetElementTransformation( e, &transformation );
+			for ( int k = from; k < to; ++k )
 			{
-				mfem::ElementTransformation *transformation =
-					mesh.GetElementTransformation( element[ at ] );
-				transformation->SetIntPoint( &point[ at ] );
-				values[ at ] = coefficient.Eval( *transformation, point[ at ] );
+				std::size_t const at =
+					static_cast<std::size_t>( groupNode[ static_cast<std::size_t>( k ) ] );
+				transformation.SetIntPoint( &point[ at ] );
+				values[ at ] = coefficient.Eval( transformation, point[ at ] );
 			}
+		}
 	}
 }
