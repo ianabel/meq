@@ -528,15 +528,6 @@ namespace tests
 		return point;
 	}
 
-	/// The non-linear ordering every study in this suite runs under, in ONE
-	/// place so that a test which has to branch on it -- because the two
-	/// orderings differ in which KINSOL strategy converges, say -- cannot drift
-	/// from what measureSelf() actually asks for.
-	inline meq::GradShafranovSolver::NonlinearOrdering defaultOrdering()
-	{
-		return meq::GradShafranovSolver::NonlinearOrdering::NPC;
-	}
-
 	/// Solve once with no exact solution to compare against, and sample the
 	/// result on @a cloud. @a boundary supplies the Dirichlet datum, which for
 	/// these benchmarks is a design choice rather than a restriction of a known
@@ -557,10 +548,7 @@ namespace tests
 	                             meq::GradShafranovSolver::Globalisation glob =
 	                                 meq::GradShafranovSolver::Globalisation::None,
 	                             meq::GradShafranovSolver::LocalSolver local =
-	                                 meq::GradShafranovSolver::LocalSolver::Newton,
-	                             meq::GradShafranovSolver::NonlinearOrdering ordering =
-	                                 meq::GradShafranovSolver::NonlinearOrdering::NPC )
-	                             // Keep in step with defaultOrdering() above.
+	                                 meq::GradShafranovSolver::LocalSolver::Newton )
 	{
 		mfem::Mesh mesh = makeMesh( box, n );
 		EquilibriumSource<Equilibrium> source( eq );
@@ -586,7 +574,6 @@ namespace tests
 			solver.setInitialGuess( *guess );
 		solver.setGlobalisation( glob );
 		solver.setLocalSolver( local );
-		solver.setNonlinearOrdering( ordering );
 
 		SelfMeasurement point;
 		point.h = box.width()/static_cast<double>( n );
@@ -947,21 +934,19 @@ namespace tests
 			            label << ", k = " << order << ", h = " << points[ i ].h
 			            << ": Newton did NOT converge in " << points[ i ].newtonIterations
 			            << " iterations. That is a finding about this benchmark, not a "
-			            "tolerance to be relaxed -- but SINCE meq USES "
-			            "NonlinearOrdering::NPC, MEASURE THE OTHER ORDERING BEFORE "
-			            "BLAMING THE BENCHMARK. setNonlinearOrdering( "
-			            "CondenseThenLinearise ) is one line and is kept as the "
-			            "backup for exactly this. THE PARITY GAP THIS MESSAGE USED "
-			            "TO NAME IS GONE WITH ITS CAUSE: it was a property of "
-			            "MFEM's LineariseThenCondense, a trace-only operator that "
-			            "kept the linearisation as hidden state, and upstream "
-			            "deleted that mode. NPC holds no state between calls at "
-			            "all, so a residual is a function of its argument and "
-			            "there is no frozen-Jacobian local correction to truncate. "
-			            "A failure here is therefore a NEW finding rather than a "
-			            "known one -- record which orderings reach it. Do not "
-			            "clear it by lowering the cap or switching the ordering "
-			            "back" );
+			            "tolerance to be relaxed. THERE IS NO LONGER A SECOND "
+			            "ORDERING TO FALL BACK ON: this message used to advise "
+			            "measuring CondenseThenLinearise before blaming the "
+			            "benchmark, and that ordering is gone -- nothing in meq "
+			            "reached it and only the tests kept it alive. THE PARITY "
+			            "GAP THIS MESSAGE ALSO NAMED IS GONE WITH ITS CAUSE: it was "
+			            "a property of MFEM's LineariseThenCondense, a trace-only "
+			            "operator that kept the linearisation as hidden state, and "
+			            "upstream deleted that mode. NPC holds no state between "
+			            "calls at all, so a residual is a function of its argument "
+			            "and there is no frozen-Jacobian local correction to "
+			            "truncate. A failure here is a NEW finding. Do not clear it "
+			            "by lowering the cap" );
 		}
 
 		// A RATE TAKEN ACROSS A SOLVE THAT DID NOT CONVERGE IS NOT A RATE. Such a

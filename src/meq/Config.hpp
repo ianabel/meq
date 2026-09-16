@@ -195,6 +195,29 @@ namespace meq
 		double limiterZ = 0.0;
 		double limiterRadius = 0.0;
 
+		/**
+		 * `Vessel` -- A CLOSED POLYGON, ALTERNATING `R` AND `Z` IN METRES,
+		 * FRAGMENTED IN. Everything inside `Gamma`, outside this, and not a
+		 * conductor takes element attribute **30**.
+		 *
+		 * It exists so that `[source] ExcludeAttributes = [ 30 ]` can say *the
+		 * plasma can never be here* ONCE, at mesh time. The support is
+		 * re-decided on every residual evaluation and a vessel does not move, so
+		 * a per-element geometric test would be paying repeatedly for an answer
+		 * that cannot change.
+		 *
+		 * **IT IS NOT CONFINEMENT.** `psi_bnd` confines the plasma -- `F` is
+		 * zero wherever `Psi <= 0` and setting `psi_bnd` IS the confinement --
+		 * and meq::PlasmaComponent separates the lobes of `{ Psi > 0 }` that a
+		 * level set leaves joined. This covers the one case neither can:
+		 * several O-points across a saddle, where connectivity cannot say which
+		 * is the plasma.
+		 *
+		 * Empty is the default. At least three points, so at least six numbers,
+		 * every `R >= 0`, and a non-zero area.
+		 */
+		std::vector<double> vessel;
+
 		/// `Transition` -- the width of the graded transition out of a refined
 		/// region, metres. Zero means the script's default of four background
 		/// sizes.
@@ -499,6 +522,30 @@ namespace meq
 	{
 		SourceType type = SourceType::Soloviev;
 		SourceParameters parameters = SolovievParameters{};
+
+		/**
+		 * `[source] ExcludeAttributes` -- MESH ELEMENT ATTRIBUTES THAT CAN NEVER
+		 * BE PLASMA, WHATEVER THE FLUX SAYS THERE.
+		 *
+		 * **A STATEMENT ABOUT THE DEVICE AND NOT ABOUT THE SOLUTION**, which is
+		 * why it lives beside `parameters` rather than inside one of them: it
+		 * means the same thing for every source type that has a plasma support
+		 * at all. `psi_bnd` confines the plasma -- `F` is zero wherever
+		 * `Psi <= 0`, and setting `psi_bnd` IS the confinement -- and
+		 * meq::PlasmaComponent separates the lobes of `{ Psi > 0 }` that a level
+		 * set leaves connected. **Neither can know that a lobe is behind a
+		 * wall.** That is the gap, and it is a real one only where several
+		 * O-points sit across a saddle, since connectivity handles every case
+		 * where the lobes are genuinely disjoint.
+		 *
+		 * AN ATTRIBUTE AND NOT A POLYGON: the support is re-decided on every
+		 * residual evaluation and this answer cannot move, so the mesher says it
+		 * once and the solve reads a lookup.
+		 *
+		 * Empty is the default and changes nothing. Refused unless
+		 * `Normalised = true`, for ConfineToPlasma's reason.
+		 */
+		std::vector<int> excludeAttributes;
 
 		// Typed access. Each throws ConfigError if the configured type is not
 		// the matching one, so a factory that has already switched on type()

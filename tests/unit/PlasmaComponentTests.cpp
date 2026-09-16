@@ -441,3 +441,76 @@ BOOST_AUTO_TEST_CASE( a_malformed_graph_is_refused )
 	BOOST_CHECK_THROW( good.fill( std::vector< char >( 4, 1 ), -1 ),
 	                   std::invalid_argument );
 }
+
+
+/*
+ * AN EXCLUDED NODE IS NEVER PLASMA, AND IT OUTRANKS THE CONSTANT TRUE.
+ *
+ * setExcluded() is a statement about the DEVICE -- the far side of a vessel
+ * wall -- rather than about an iterate, so it has to hold before any fill has
+ * run. holds() is documented as the constant true before fill(), and a caller
+ * that named an exclusion but never asked for connectivity would otherwise get
+ * current placed behind its own wall with nothing to say so.
+ */
+BOOST_AUTO_TEST_CASE( an_excluded_node_is_never_plasma_even_before_a_fill )
+{
+	PlasmaComponent g = grid( 1, 4 );
+
+	BOOST_TEST( g.holds( 2 ) );
+	BOOST_TEST( g.excludedNodes() == 0 );
+
+	g.setExcluded( { 0, 0, 1, 0 } );
+	BOOST_TEST( g.excludedNodes() == 1 );
+	BOOST_TEST( g.isExcluded( 2 ) );
+	BOOST_TEST( !g.isExcluded( 1 ) );
+	BOOST_TEST( !g.holds( 2 ) );
+	BOOST_TEST( g.holds( 1 ) );
+
+	// and after a fill that WOULD have reached it
+	g.fill( std::vector< char >( 4, 1 ), 0 );
+	BOOST_TEST( !g.holds( 2 ) );
+	BOOST_TEST( g.holds( 3 ) );
+}
+
+
+/*
+ * AND IT SURVIVES clear(), WHICH IS WHAT MAKES IT A PROPERTY OF THE DEVICE.
+ *
+ * clear() is called between solves and whenever the adjacency is rebuilt. A
+ * wall does not move, so an exclusion that evaporated on a refinement would be
+ * a silently-empty one -- the failure mode this facility exists to stop, since
+ * the run would converge and report nothing unusual.
+ */
+BOOST_AUTO_TEST_CASE( an_exclusion_survives_clear )
+{
+	PlasmaComponent g = grid( 1, 4 );
+	g.setExcluded( { 1, 0, 0, 0 } );
+	g.fill( std::vector< char >( 4, 1 ), 1 );
+
+	g.clear();
+
+	BOOST_TEST( g.excludedNodes() == 1 );
+	BOOST_TEST( !g.holds( 0 ) );
+	BOOST_TEST( g.holds( 1 ) );
+}
+
+
+/*
+ * A WRONGLY SIZED EXCLUSION THROWS RATHER THAN SILENTLY COVERING PART OF THE
+ * MESH, for the reason a_malformed_graph_is_refused gives: nothing downstream
+ * can tell a short mask from a right one.
+ */
+BOOST_AUTO_TEST_CASE( a_wrongly_sized_exclusion_is_refused )
+{
+	PlasmaComponent g = grid( 2, 2 );
+
+	BOOST_CHECK_THROW( g.setExcluded( std::vector< char >( 3, 1 ) ),
+	                   std::invalid_argument );
+	BOOST_CHECK_THROW( g.setExcluded( std::vector< char >( 5, 1 ) ),
+	                   std::invalid_argument );
+
+	// empty is how it is cleared, and must not throw
+	BOOST_CHECK_NO_THROW( g.setExcluded( {} ) );
+	BOOST_TEST( g.excludedNodes() == 0 );
+	BOOST_TEST( g.holds( 0 ) );
+}

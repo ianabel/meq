@@ -144,8 +144,53 @@ AXIS_TOLERANCE = 1.0e-9
 VACUUM_ATTRIBUTE = 1
 FIRST_COIL_ATTRIBUTE = 10
 LIMITER_ATTRIBUTE = 20
+
+# EVERYTHING OUTSIDE THE VESSEL, WHICH IS AN ATTRIBUTE AND NOT A GEOMETRY.
+#
+# `--vessel` fragments a closed polygon into the half-disc and tags what lies
+# OUTSIDE it, so that `[source] ExcludeAttributes = [ 30 ]` can say "the plasma
+# cannot be here" once, at mesh time, instead of the solve deciding
+# inside/outside per element on every residual evaluation.  A vessel does not
+# move; the support does.
+#
+# IT IS NOT CONFINEMENT AND MUST NOT BE READ AS SUCH.  `psi_bnd` confines the
+# plasma -- F is zero wherever Psi <= 0 -- and the connectivity fill separates
+# the lobes of { Psi > 0 } that a level set leaves joined.  This is for the one
+# case neither can settle: several O-points across a saddle, where connectivity
+# cannot say which of them is the plasma.
+OUTSIDE_VESSEL_ATTRIBUTE = 30
+
 GAMMA_ATTRIBUTE = 1
 AXIS_ATTRIBUTE = 2
+
+
+def _inside_polygon(x, y, polygon):
+    """Ray casting, on a closed polygon given as [ (r, z), ... ].
+
+    A centroid test alone is not enough to name the vessel's own fragments --
+    the OUTER region's centroid can land inside a convex shape, which is the
+    trap `--limiter` already records and pays for with an AREA check beside it.
+    """
+    inside = False
+    n = len(polygon)
+    for i in range(n):
+        x1, y1 = polygon[i]
+        x2, y2 = polygon[(i + 1) % n]
+        if (y1 > y) != (y2 > y):
+            crossing = x1 + (y - y1)*(x2 - x1)/(y2 - y1)
+            if x < crossing:
+                inside = not inside
+    return inside
+
+
+def _polygon_area(polygon):
+    total = 0.0
+    n = len(polygon)
+    for i in range(n):
+        x1, y1 = polygon[i]
+        x2, y2 = polygon[(i + 1) % n]
+        total += x1*y2 - x2*y1
+    return abs(total)/2.0
 
 
 def _coil_of(centre, coils):
@@ -158,7 +203,7 @@ def _coil_of(centre, coils):
 
 
 def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
-          coil_size=None, transition=None, limiter=None):
+          coil_size=None, transition=None, limiter=None, vessel=None):
     """A half-disc of radius `rho` about the origin, r >= 0, with `coils` a list
     of (rmin, zmin, width, height) rectangles fragmented into it.
 
@@ -186,6 +231,14 @@ def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
     20 and its neighbours, which is a question about element attributes rather
     than about boundary ones.
 
+    `vessel` is an optional closed polygon [ (r, z), ... ] fragmented in the
+    same way, whose OUTSIDE takes attribute 30 -- everything within Gamma that
+    is not inside the vessel and is not a conductor.  It exists so that
+    `[source] ExcludeAttributes` can name a region that can never be plasma
+    ONCE, at mesh time, rather than the solve deciding inside/outside per
+    element on every residual evaluation.  A vessel does not move and the
+    support does, so the work belongs here.
+
     Returns a dict of counts, which `main` prints and `--check` re-derives from
     the written file rather than trusting.
     """
@@ -206,6 +259,16 @@ def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
         if limiter is not None:
             lr, lz, la = limiter
             tags.append(occ.addDisk(lr, lz, 0, la, la))
+        if vessel is not None:
+            # A PLANE SURFACE FROM ITS OWN POINTS, not addPolygon: the OCC
+            # kernel has no polygon primitive, and building the loop explicitly
+            # is also what puts the vertices on the vessel EXACTLY rather than
+            # wherever a helper rounds them to -- the same property --coil
+            # depends on and halfdisc's own --check asserts.
+            points = [occ.addPoint(r, z, 0) for (r, z) in vessel]
+            lines = [occ.addLine(points[i], points[(i + 1) % len(points)])
+                     for i in range(len(points))]
+            tags.append(occ.addPlaneSurface([occ.addCurveLoop(lines)]))
         if tags:
             occ.fragment(half, [(2, t) for t in tags])
         occ.synchronize()
@@ -240,10 +303,35 @@ def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
                         and occ.getMass(2, tag) < 1.05*math.pi*la*la):
                     inside_limiter.append(tag)
 
+        # THE VESSEL'S OUTSIDE, BY THE SAME TWO-PART TEST THE LIMITER USES AND
+        # FOR THE SAME REASON: a centroid alone misclassifies the big outer
+        # region, whose centre of mass can sit inside a convex vessel.  Area is
+        # what separates them, and the two differ by a large factor here as
+        # well.  A conductor keeps its own attribute either way -- a coil is
+        # outside the vessel on every machine and saying so twice would lose
+        # the coil.
+        outside_vessel = []
+        if vessel is not None:
+            area = _polygon_area(vessel)
+            for _, tag in surfaces:
+                if owner[tag] is not None or tag in inside_limiter:
+                    continue
+                x, y, _ = occ.getCenterOfMass(2, tag)
+                if not (_inside_polygon(x, y, vessel)
+                        and occ.getMass(2, tag) < 1.05*area):
+                    outside_vessel.append(tag)
+
         vacuum = sorted(t for t in owner
-                        if owner[t] is None and t not in inside_limiter)
+                        if owner[t] is None and t not in inside_limiter
+                        and t not in outside_vessel)
         gmsh.model.addPhysicalGroup(2, vacuum, VACUUM_ATTRIBUTE)
         gmsh.model.setPhysicalName(2, VACUUM_ATTRIBUTE, "vacuum")
+
+        if outside_vessel:
+            gmsh.model.addPhysicalGroup(2, sorted(outside_vessel),
+                                        OUTSIDE_VESSEL_ATTRIBUTE)
+            gmsh.model.setPhysicalName(2, OUTSIDE_VESSEL_ATTRIBUTE,
+                                       "outside_vessel")
 
         if inside_limiter:
             gmsh.model.addPhysicalGroup(2, sorted(inside_limiter),
@@ -298,6 +386,7 @@ def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
         return dict(surfaces=len(surfaces), coils=len(coil_surfaces),
                     arc_curves=len(arc), axis_curves=len(axis),
                     limiter_surfaces=len(inside_limiter),
+                    outside_vessel_surfaces=len(outside_vessel),
                     nodes=len(node_tags), elements=elements)
     finally:
         gmsh.finalize()
@@ -483,6 +572,15 @@ def main():
                    help="a box to refine inside, where the plasma is expected")
     p.add_argument("--plasma-size", type=float, default=None,
                    help="element size inside --plasma; required with it")
+    p.add_argument("--vessel", type=float, nargs="+", default=None,
+                   metavar="R Z",
+                   help="a closed vessel polygon, given as alternating R and Z "
+                        "in metres. Everything inside Gamma, outside this and "
+                        "not a conductor takes element attribute %d, which "
+                        "[source] ExcludeAttributes can then name as a region "
+                        "that can never be plasma. The polygon is fragmented "
+                        "in, so its edges are mesh faces."
+                        % OUTSIDE_VESSEL_ATTRIBUTE)
     p.add_argument("--limiter", type=float, nargs=3, default=None,
                    metavar=("R0", "Z0", "A"),
                    help="a circular limiter to mesh TO, given element "
@@ -539,13 +637,30 @@ def main():
                         "coil, which the attributes cannot express"
                         % (lr, lz, la, r, z))
 
+    vessel = None
+    if a.vessel is not None:
+        if len(a.vessel) < 6 or len(a.vessel) % 2 != 0:
+            p.error("--vessel takes alternating R and Z and needs at least "
+                    "three points, so an even count of six or more; got %d "
+                    "numbers" % len(a.vessel))
+        vessel = [(a.vessel[i], a.vessel[i + 1])
+                  for i in range(0, len(a.vessel), 2)]
+        for (r, _) in vessel:
+            if r < 0.0:
+                p.error("--vessel reaches r = %g, and the half-disc is r >= 0"
+                        % r)
+        if _polygon_area(vessel) <= 0.0:
+            p.error("--vessel has zero area: its points are collinear or "
+                    "repeated")
+
     transition = a.transition if a.transition is not None else 4.0 * a.size
     rep = build(a.rho, coils, a.size, a.out, a.order, a.plasma, a.plasma_size,
-                a.coil_size, transition, a.limiter)
-    print("  %s: %d elements, %d nodes, %d surfaces (%d coil, %d limiter), "
-          "%d arc curves, %d axis curves"
+                a.coil_size, transition, a.limiter, vessel)
+    print("  %s: %d elements, %d nodes, %d surfaces (%d coil, %d limiter, "
+          "%d outside the vessel), %d arc curves, %d axis curves"
           % (a.out, rep["elements"], rep["nodes"], rep["surfaces"],
-             rep["coils"], rep["limiter_surfaces"], rep["arc_curves"],
+             rep["coils"], rep["limiter_surfaces"],
+             rep["outside_vessel_surfaces"], rep["arc_curves"],
              rep["axis_curves"]))
 
     if a.check:

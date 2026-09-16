@@ -856,10 +856,10 @@ BOOST_AUTO_TEST_CASE( kinsolAgreesWithNewtonWhereBothConverge )
 	 * library and which meq does not yet have. See
 	 * ../mfem-hdg-dev/doc/HDG-ORDERING-API.md section 3.1.
 	 */
-	G const kinsolStrategy =
-		meq::tests::defaultOrdering() == meq::GradShafranovSolver::NonlinearOrdering::NPC
-			? G::KinsolNoLineSearch
-			: G::LineSearch;
+	// KIN_NONE, because NPC is the only ordering meq has. This used to branch
+	// on meq::tests::defaultOrdering(), which could only ever answer NPC once
+	// CondenseThenLinearise stopped being reachable, and is gone with it.
+	G const kinsolStrategy = G::KinsolNoLineSearch;
 	char const *strategyName =
 		kinsolStrategy == G::KinsolNoLineSearch ? "KIN_NONE" : "KIN_LINESEARCH";
 

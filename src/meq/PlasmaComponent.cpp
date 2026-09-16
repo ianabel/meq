@@ -211,8 +211,44 @@ namespace meq
 		}
 	}
 
+	void PlasmaComponent::setExcluded( std::vector< char > excluded )
+	{
+		if ( !excluded.empty() && !labels.empty()
+		     && excluded.size() != labels.size() )
+			throw std::invalid_argument( "meq::PlasmaComponent::setExcluded: one entry per node, or empty" );
+		if ( !excluded.empty() && !rowOffsets.empty()
+		     && excluded.size() + 1 != rowOffsets.size() )
+			throw std::invalid_argument( "meq::PlasmaComponent::setExcluded: one entry per node, or empty" );
+
+		excludedNode = std::move( excluded );
+		excludedSize = 0;
+		for ( char const e : excludedNode )
+			if ( e != 0 )
+				++excludedSize;
+	}
+
+	bool PlasmaComponent::isExcluded( int element ) const
+	{
+		if ( excludedNode.empty() || element < 0
+		     || static_cast< std::size_t >( element ) >= excludedNode.size() )
+			return false;
+		return excludedNode[ static_cast< std::size_t >( element ) ] != 0;
+	}
+
+	int PlasmaComponent::excludedNodes() const
+	{
+		return excludedSize;
+	}
+
 	bool PlasmaComponent::holds( int element ) const
 	{
+		// AN EXCLUSION IS A STATEMENT ABOUT THE DEVICE AND OUTRANKS EVERYTHING
+		// BELOW IT, including the constant-true shortcut: a caller that never
+		// asked for connectivity but did name a region outside the vessel gets
+		// the exclusion and nothing else.
+		if ( isExcluded( element ) )
+			return false;
+
 		// The constant true before fill(), so a caller tests unconditionally and
 		// a solver that was never given a connectivity test is bit-unchanged.
 		if ( !filled )
@@ -264,6 +300,9 @@ namespace meq
 
 	void PlasmaComponent::clear()
 	{
+		// THE EXCLUSION SURVIVES A clear(), which is what makes it a property of
+		// the device rather than of an iterate: clear() is called between solves
+		// and whenever the adjacency is rebuilt, and a wall does not move.
 		labels.clear();
 		ring.clear();
 		labelCount = 0;

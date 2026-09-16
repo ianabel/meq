@@ -2147,6 +2147,132 @@ of `ψ_bnd`, **falling at 2.92 against `k+1 = 3`** while `ψ_bnd` does not move.
 two readings separate faster as the mesh is refined, so the coupling is a limit
 and not a number.
 
+**AND MACHINE C'S REFUSAL IS A FALSE ONE AFTER ALL — AND THIS SECTION SAID THE
+OPPOSITE FOR AN HOUR, ON A LEAKY INSTRUMENT IT HAD ALREADY DOCUMENTED.** The
+claim made here was that `C_mast_spherical`'s own reference reaches `R = 0.100`
+at `Ψ_N = +0.2863` with the magnetic axis's component, so the guard names a true
+property of the target and what saves `freegs4e` is its vessel mask. **The
+measurement behind it was a `scipy.ndimage` flood fill on `{ Ψ_N > 0 }`, which
+leaks through the X-point** — the identical failure recorded three paragraphs
+above for MEQ's own fill, and the one that made machine A's core read 1.13 m²
+against its true 0.784.
+
+**ERODE THE THRESHOLD BY A TENTH OF A PER MILLE AND THE LEAK CLOSES.** A level
+set touches its own saddle, so two regions meeting at a point are one component
+at `ε = 0` and two at any `ε > 0`; regions that genuinely overlap survive the
+erosion. On `C_mast_spherical`:
+
+| `ε` | components | axis component reaches | area |
+|---|---|---|---|
+| 0 | 1 | **R = 0.1000** | 3.196 m² |
+| 1e-04 | 2 | **R = 0.3078** | 1.632 m² |
+| 1e-02 | 2 | R = 0.3227 | 1.546 m² |
+
+and the reference's own `core_mask` reaches **R = 0.308**. `G_mastu_simple`
+behaves identically — R = 0.1000 at `ε = 0`, **0.2781** at 1e-04, against a
+`core_mask` reaching 0.278.
+
+**THE ONE-DIMENSIONAL CHECK NEEDS NO FILL AT ALL AND IS THE ONE TO REACH FOR.**
+Walk the midplane from the magnetic axis inboard and ask whether `ψ` dips below
+`ψ_bnd` on the way. On MAST it falls to **−3.0876e-02 at R = 0.1594**, below
+`ψ_bnd` = −2.3596e-02, before rising to −1.3990e-02 at `R = 0.100`. So the
+near-axis lobe is a SEPARATE component, connected to the core only through a
+saddle, and **connectivity alone separates it — no vessel mask is required.**
+`setting psi_bnd IS the confinement`, and the level set plus the component is the
+whole of it.
+
+**SO THE GUARD IS CONSULTING THE WRONG COLUMN, WHICH IS WHAT THE DRIVER'S OWN
+DIAGNOSTIC SAID ALL ALONG.** It refuses on `axisInsidePlasma` — the pure level
+set `−ψ_bnd/span > 0` at `ψ = 0` — while printing *"plasma component kept it:
+NO"* on the same line. The assembled source is what has or has not got a pole,
+and the component is what decides that, so the refusal belongs on
+`axisInPlasmaComponent`. **That strengthens rather than weakens the coupling
+asserted above**: `theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses` asserts
+*fill reaches ⇒ guard refuses*, one way, and machine C is the converse case the
+implication never covered.
+
+**BOTH GUARDS NOW ASK THE SUPPORT, AND MACHINE C CONVERGES.**
+`AxisSourceCheck` carries `supportReachesAxis`, `worstOnAxisInSupport` and
+`boundedInSupport` beside the level-set readings, and the driver refuses on
+those. **The second guard mattered as much as the first**: `bounded` reads
+`worstOnAxis`, which is `f()` evaluated pointwise and knows nothing about
+elements, so correcting only the topology guard would have moved the same false
+refusal one branch down. MAST's shipped configuration goes **exit 1 → exit 0**
+with `psi_ax`, `psi_bnd` and the axis unchanged to every digit — the same solve,
+a different verdict — and lands **1.737e-02** from its reference. The level-set
+reading is kept and REPORTED as a warning, because a run where the two disagree
+is one where the fill is the only thing between the load and a `1/r` pole.
+
+→ **[M-109](MEASUREMENTS.md#m-109)**
+
+**AND freegs4e IS NOT USING A WALL ON THAT MACHINE AT ALL**, which is the last
+nail in the version of this paragraph that blamed one: `C_mast_spherical.npz`
+carries **zero** wall points, so `mask_inside_limiter` is `None` and nothing
+masks `Jtor` geometrically there. Connectivity is the whole of what keeps the
+reference off the axis.
+
+**A THREADING NOTE, BECAUSE IT COST A WRONG CONCLUSION.** That case sits on the
+knife edge CLAUDE.md documents: at `MKL_NUM_THREADS=1` it fails in the bordered
+Newton with no finite damped step, and at `OMP = MKL = 16` it converges in 3.
+M-103 was taken at 16, so a guard fix verified at 1 reads as no change at all.
+
+**THE EXCEPTION THE FILL CANNOT SEE EITHER IS STILL THERE**: several O-points separated by saddles. Then the
+axis-containing component is the right answer only if the OTHER O-points'
+components are genuinely disconnected from it, and at the discrete level they
+touch at the saddle exactly as the near-axis lobe does. The erosion above is a
+diagnostic and not a rule -- it works because these lobes meet at a point, and
+`PlasmaConnectivity` would need its own saddle-aware cut to be sure. `freegs4e`
+carries `geom_inside_mask`, a half-plane through the active X-point, for exactly
+this.
+
+**AND THE ATTRIBUTE IS BUILT, WHICH IS WHAT COVERS THAT EXCEPTION.**
+`[source] ExcludeAttributes` names mesh ELEMENT attributes that can never be
+plasma; `meq::PlasmaComponent::holds()` tests them ahead of its own
+constant-true shortcut, so the source is off out there with or without
+`ConfineToPlasma`, and `refreshPlasmaComponent()` treats such an element as
+neither a candidate nor a seed nor traversable — which is what stops it BRIDGING
+two lobes that are otherwise separate, since the straddling band is shared out
+by a watershed over the candidates.
+
+**AN ATTRIBUTE AND NOT A POLYGON, AND THAT IS THE ECONOMY**: the support is
+re-decided on every residual evaluation and a vessel does not move, so a
+point-in-polygon per element per evaluation would be paying repeatedly for an
+answer that cannot change. `tools/mesh/halfdisc.py --vessel` fragments a closed
+polygon into the geometry and tags everything outside it — and not a conductor —
+as attribute **30**, by the same centroid-AND-AREA test `--limiter` already
+needs, since the outer region's centroid can land inside a convex vessel.
+`[mesh.generate] Vessel` is the key, and `meq --mesh-command` emits it at full
+precision beside the conductors.
+
+→ **[M-110](MEASUREMENTS.md#m-110)** — the whole path · what it excludes · what
+it leaves alone
+
+**INERT WHERE IT SHOULD BE, AND THAT IS THE PROPERTY THAT WAS MEASURED.** On
+machine A with its real vessel, 1373 of 2105 elements are excluded and `psi_ax`
+comes out **identical to every printed digit** to the same run with the
+exclusion removed. It buys the fill work rather than answers, until the
+configuration is one connectivity cannot settle. An attribute the mesh does not
+carry is **refused**, exit 1, listing what the mesh does have: a
+silently-empty exclusion is the worst outcome available, since the run would
+converge, report nothing unusual, and describe a machine with a current channel
+behind its own wall.
+
+**AND FRAGMENTING A VESSEL PERTURBS THE MESH.** On machine A the
+vessel-fragmented mesh fails in the bordered Newton from the shipped `PsiAxis`
+— **and so does the same mesh with the exclusion removed**, which is what says
+it is the mesh and not the feature; regenerating without the vessel converges.
+From `PsiAxis` = 5.0e-02, the same basin by M-107, the vessel mesh converges at
+1.917e-03 against the committed mesh's 2.762e-03. That machine sits near a fold
+with two roots, and a three per cent change in the mesh is what such a case is
+fragile to.
+
+**Most of the candidate restriction already existed** and this widens it:
+`[mesh.generate] PlasmaRMin/RMax/ZMin/ZMax` refines a box and the support
+reports candidates against it — 815 of **2148** on machine A. MAST's
+configuration sets `PlasmaRMin = 0.0000`, so the axis is a candidate at all,
+against machine A's 0.5925; a vessel would have bounded it independently of the
+guard.
+
 ## The geometry: meshing a half-disc that reaches the axis
 
 Free boundary is the one campaign here whose geometry
@@ -2300,6 +2426,235 @@ afterwards as the published case, expecting `k ≥ 2` not to hold `k+2` on it.
 drives seven configurations across them.
 
 ## MEQ against freegs4e, and root selection is the whole difficulty
+
+### STANDING RULE: COMPARE IN THE SAME MODE MEQ SOLVES IN
+
+**Every comparison against `freegs4e` is to be run with `freegs4e` in the SAME
+mode as MEQ — forward against forward — and the benchmark as it stands does
+not do this.**
+
+`fgsref.py` drives every one of the seven references through
+`SyncConstrain( xpoints = ..., isoflux = ... )`, which is `freegs4e`'s
+**INVERSE** solve: the coil currents are re-solved on every Picard pass to hit
+X-point and isoflux targets. **The currents are an OUTPUT of the reference and
+an INPUT to MEQ**, which solves FORWARD from them. So the two codes are not
+being asked the same question, and the difference between them is not a
+measurement of either solver.
+
+**WHAT THE MISMATCH COSTS, AND IT IS THE SIZE OF EVERY DISAGREEMENT IN THE
+BENCHMARK.** An inverse solve is pinned to its targets, so it reports very
+nearly the same equilibrium however its conductors are modelled; a forward
+solve is not, so every difference in conductor model, Green's function or
+discretisation moves the answer. Measured on machine A, both arms at `k = 2`:
+
+| | `psi_axis` |
+|---|---|
+| reference, filaments | 8.2717514448e-02 |
+| reference, `ShapedCoil` | 8.2716849781e-02 |
+| **the two references against each other** | **8e-06** |
+| MEQ forward, filament currents | 8.068175e-02 |
+| MEQ forward, shaped currents | 8.073704e-02 |
+| **MEQ against either** | **2.4e-02** |
+
+**The two references differ in conductor model and agree to 8e-06 BECAUSE the
+inverse solve re-tunes the currents to the same targets.** MEQ is 2.4e-02 from
+both. A comparison built this way measures the forward sensitivity of the
+equilibrium to a current set, which is a real and interesting quantity and is
+not what the benchmark claims to report.
+
+**AND IT IS WHY THE PER-MACHINE AGREEMENT SCATTERS BY FOUR ORDERS OF
+MAGNITUDE**, which nothing else explains — the machines with few conductors
+close to a small plasma are the ones whose forward solve is most sensitive to
+the current set, and DIII-D, with eighteen conductors far from a large one, is
+the least:
+
+| machine | MEQ `psi_ax` against its reference |
+|---|---|
+| DIII-D, shaped | **3.4e-06** |
+| DIII-D, filament | 3.5e-04 |
+| A testtokamak | 2.5e-02 |
+| TCV, shaped | 3.5e-02 |
+| MAST-U | 4.9e-02 |
+
+**SEVEN OTHER CAUSES WERE ELIMINATED FIRST, ON MACHINE A, AND THE RULE IS WHAT
+SURVIVED.** MEQ's own `h` and `p` refinement (converged, 8.056e-02 across a 4x
+element refinement and a degree change); `freegs4e`'s grid (converged —
+`psi_axis` moves 1.1e-05 relative from 129^2 to 513^2, so M-88's first-order
+reading does not apply to this quantity on this case); the conductor model
+(both arms, above); the exterior mode truncation (converged by `Modes = 20`);
+the `ff'` amplitude (a +-1.7e-02 change moves `psi_ax` by only -+2.9e-03, so
+closing 2.6e-02 would need 15 per cent); **the profile conversion entirely** —
+rebuilding MEQ's tables from the reference's OWN solved `pprime` / `ffprime`
+arrays rather than the analytic shape moves `psi_ax` by 1e-05 relative; and the
+plasma current, which agrees to **9e-11**.
+
+**What is left is the axis POSITION**: MEQ puts it 2.5 cm inboard and 1.5 cm
+high of the reference's, with `I_p` identical — the signature of the right
+total current distributed differently, which is exactly what a forward solve
+does with an inverse solve's currents.
+
+**HOW TO FIX THE COMPARISON.** Run `freegs4e` forward — no `constrain` — from
+the reference's own converged currents, and difference THAT against MEQ.
+`tools/freegs4e-benchmark/forward.py` is that run, and it reproduces the
+inverse reference on machine A to **6.3e-08**.
+
+**AND THE MODE MISMATCH IS NOT WHAT THE PER-MACHINE DISAGREEMENT IS. MEASURED,
+AND THIS FILE SAID OTHERWISE FOR HALF A DAY.** The sentence that stood here
+told a reader to treat M-87, M-96 and M-103's accuracy columns as "an upper
+bound carrying an unmeasured mode mismatch". It is measured now, on A:
+
+| | `psi_axis` |
+|---|---|
+| `freegs4e` INVERSE, 129² | 8.2717514448e-02 |
+| `freegs4e` FORWARD, 129² | 8.2717509068e-02 |
+| `freegs4e` FORWARD, 257² | 8.2726591774e-02 |
+| MEQ, `k = 3`, one refinement | **8.0567700000e-02** |
+
+**The two modes agree with each other to 6.5e-08 at the same grid, and refining
+the forward solve moves it by 1.1e-04** — three orders short of the 2.6e-02 MEQ
+sits away from both. So the mode was worth less than 1e-04 here and the
+disagreement is something else.
+
+**THE RULE STILL STANDS AND ITS REASON IS UNCHANGED**: an inverse solve's
+currents are an output, so a comparison built on them measures the forward
+sensitivity of an equilibrium to a current set. That is a methodological defect
+whatever its size, and the tell that provoked it — two references differing in
+conductor model and agreeing to 8e-06 — is still exactly what an inverse solve
+re-tuning to fixed targets looks like. What is falsified is only that the
+mismatch EXPLAINS the disagreement.
+
+**NINE CAUSES WERE ELIMINATED ON MACHINE A AND THE TENTH IS THE ANSWER: THE
+PRESCRIBED-CURRENT ROW, AT A TANGENCY.** The eliminations stand and are worth
+keeping, because each one is a thing nobody now has to re-test — MEQ's `h` and
+`p` refinement (`psi_ax` 8.056e-02 across a 4× element refinement AND a degree
+change); `freegs4e`'s grid in BOTH modes; the conductor model, now measured
+DIRECTLY rather than by the two references agreeing — spreading the reference's
+two point filaments into the 10 cm squares MEQ meshes moves `psi` by **1.5e-06
+at the axis and 4.7e-06 at the active X-point**, and the X-point itself by
+5e-05 m, the 22 per cent maximum difference being entirely the filament's own
+log singularity sitting on top of the coil; the exterior mode truncation
+(converged by `Modes = 20`, 4e-04); the exterior RADIUS, which is the test the
+mode count cannot do — a map with a wrong coefficient converges spectrally to
+the wrong answer — `psi_ax` reading 8.059e-02, 8.101e-02, 8.065e-02, 8.060e-02
+at `rho_Gamma` = 2.05, 2.2, 2.4, 2.55, every one of them 2.5e-02 from the
+reference; the `ff'` amplitude; **the profile conversion, exactly** — rebuilt on
+`freegs4e`'s OWN 256 knots so that `ff'( Ψ )` agrees between the codes to
+**5e-16**, since a C² cubic spline IS the cubic Hermite through its own values
+and derivatives and `meq::SplineProfile` is a Hermite cubic; the plasma support,
+which carries the core between the X-points and NOT the private flux region; and
+the source arithmetic itself, since MEQ's tables, span, scale and `mu0`
+reassembled from the written field reproduce MEQ's own reported `I_p` to
+**2.3e-06**.
+
+**AND THE 2.46e-02 ITSELF IS CONDITIONAL — READ M-107 BEFORE ANY OF WHAT
+FOLLOWS.** That number was taken on a configuration whose `[source] PsiAxis` had
+been set to the reference's own `psi_axis` while chasing something else, and
+`PsiAxis` is a STARTING VALUE that selects which of two roots is reported. From
+the SHIPPED value — the cold guess's peak — the same machine, the byte-identical
+seed file and the same everything else gives **2.76e-03**. The bad root's basin
+is the window ( 7.2e-02, 8.6e-02 ) and the true answer 8.271751e-02 is INSIDE
+it, so starting at the truth is a factor of nine worse than starting 25 per cent
+away. Everything below is a correct account of the branch reached from there; it
+is not an account of what the shipped configurations do.
+
+**WHAT REMAINED WAS ONE ROW, AND REMOVING IT CLOSES THE GAP BY A FACTOR OF
+SEVENTEEN.** `[source] PlasmaCurrent` makes the profile amplitude an unknown and
+prescribes the current instead. Drop it — the amplitude is then fixed at one,
+which is exactly the amplitude the tables were built at — and MEQ lands
+**1.49e-03** from the reference in `psi_ax` at `k = 3`, 3.9e-04 in `psi_bnd` and
+**3.6e-04 m** in the X-point, improving from `k = 2` to `k = 3` where the
+constrained arm does not improve at all.
+
+→ **[M-105](MEASUREMENTS.md#m-105)** — the two arms at two resolutions ·
+`I_p( λ )` and its maximum · what asking for less current does
+
+**THE MECHANISM IS A FOLD AND IT IS PHYSICS.** `I_p( λ )` on this machine PEAKS
+at 2.0013e+05 A near λ = 0.967, because raising the profile amplitude raises the
+current density and SHRINKS the plasma — core area falls 0.784 → 0.655 m² from
+λ = 0.967 to 1.10 — and past the peak the second effect wins. That is the
+equilibrium current limit. The prescribed 2.0000000e+05 sits **0.065 per cent
+below that maximum**, so the row `I_p( λ ) = I_target` is a near TANGENCY: two
+roots nearly on top of each other and `∂I_p/∂λ ≈ 0` between them. The one
+amplitude in the sweep that fails to converge outright is 0.97, at the top of
+the curve.
+
+**AND THE REFERENCE'S OWN OPERATING POINT IS NOT A ROOT.** `freegs4e` reports
+`Ip_logic` L = 1.000000 — λ = 1 carrying exactly 2.0e5 — where MEQ at λ = 1
+carries 1.997272e+05 at `k = 2` and 1.998794e+05 at `k = 3`. **That deficit is
+MEQ's own discretisation of the current integral and it halves under
+refinement**, but while it stands the target is unreachable on the branch the
+reference is on and the constrained Newton leaves for the tangency. Ask for
+1.99e+05 instead and MEQ comes back to **2.42e-03**; ask for 1.98e+05 and
+**1.17e-03**, with the scale flipping from 0.963 to 1.013 as the solver crosses
+the peak.
+
+**SO THE PROFILE SCALE IS A DIAGNOSTIC MEQ ALREADY PRINTS AND NOBODY READS.** On
+a case whose profiles came from a converged reference, λ far from one says the
+current row is working hard; here it says the row is at a tangency. The control
+is DIII-D, seeded identically from its own reference: **λ = 0.9993353**, and its
+constrained answer is 3.48e-04 from its reference. *That* is what M-103's
+"DIII-D is the only machine that closes" is measuring. **The obvious next move
+is for MEQ to report `∂I_p/∂λ`, which the bordered Newton already assembles as
+part of its own Jacobian, and to say so when it is small** — the number is free
+and the failure it names is otherwise invisible.
+
+**AND THE SCREEN WORKS ACROSS THE SET, WHICH IS THE PART THAT GENERALISES.**
+With every machine seeded from its own reference at `n = 128` and run on both
+arms, **six of fourteen close at 3.5e-02 or better against two in M-103** — and
+the amplitude separates the answers with nothing in between: every row with
+∣λ − 1∣ < 0.007 lands between **3.4e-06 and 3.5e-02**, and both B rows at 1.2302
+and both E rows at 0.4142 are **2.2e-01 to 6.9e-01** out. The axis guard
+independently refuses both B rows, so two screens that share no reasoning agree.
+
+→ **[M-106](MEASUREMENTS.md#m-106)** — the set, both arms, one seed each ·
+→ **[M-107](MEASUREMENTS.md#m-107)** — which root `PsiAxis` selects
+
+**THE COLD START IS THE LARGER HALF OF M-103.** Seven of its rows exit 2 with no
+finite damped step; most of those converge once the seed is the reference's own
+reconstruction, with nothing in the solver changed. **And the seed's RESOLUTION
+is a variable**: `mkexactguess.py` defaults to `n = 32`, measured on
+`examples/limited-tokamak.toml`, and at `n = 32` machine A fails on BOTH arms
+where the identical construction at `n = 128` converges on both. A sweep built on
+the default measures the seed.
+
+**DROPPING THE CURRENT ROW IS NOT A GENERAL CURE, AND MACHINE A'S FOLD IS A'S
+ALONE.** It is the whole answer on **C shaped** — prescribed has no finite damped
+step, fixed reaches 8.335e-04 — and the opposite on A, F and G, where the fixed
+arm is worse or stops converging: F shaped goes from 3.4e-06 to 2.5e-03.
+
+**THE VERTICAL-INSTABILITY READING IS CONFIRMED AND IT IS TEXTBOOK.** Seeded at
+its own converged equilibrium with the currents frozen and no constraint, the
+DIII-D forward solve holds for forty passes and then grows by a factor of ten
+every twenty: `Zaxis` −1.55e-04 → −0.555 while `Raxis` moves 1.4e-05 m, with
+`rel` growing in LOCKSTEP at 1.122 per iteration. One unstable eigenvalue, and
+it is a rigid vertical displacement. Machine A, run identically, reports a
+`Zaxis` span of **0.000000**.
+
+→ **[M-104](MEASUREMENTS.md#m-104)** — the trace · the gain scan · the whole
+set pinned
+
+**AND ONE SCALAR OF FEEDBACK COSTING LESS THAN A MILLIAMP FIXES IT**, which is
+what gives the standing rule a forward reference to compare against at all. One
+antisymmetric current combination driven by the axis's own height — no flux
+targeted anywhere, nothing re-optimised — converges DIII-D in 12 passes to
+**9.8e-08** of the inverse reference at a current increment of **8.1e-04 A**
+against coil currents of 1.75e+05 A. Eight of twelve cases close that way. Read
+`max |dI|` before the agreement: it is what says the pinned equilibrium IS the
+unpinned one. The four that do not close are over-driven rather than unpinnable,
+so the harness calibrates the gain from the machine's own response by default.
+
+**WHAT THIS DOES NOT SETTLE**: whether MEQ's own mode sits between forward and
+inverse. MEQ pins `psi_bnd` at a LOCATED X-point, and locating a saddle is a
+determination rather than a constraint — `freegs4e` does the same thing through
+`find_critical` — so the two look equivalent, and nothing here has tested it.
+
+**Two of `forward.py`'s rows are its own defect and must not be read**: TCV and
+MAST-U rebuild 24 and 26 conductors against 20 and 14 circuits, because
+solenoids expand into windings in the `.npz` and a per-row rebuild is not
+`freegs4e`'s `Solenoid`. Their flux is wrong before any iteration — 50× the
+field range on TCV — and M-96 already names those as the solenoid-carrying
+machines.
+
 
 **`tools/freegs4e-benchmark/`.** The first check of MEQ against a
 code that shares the equation and essentially no code — `../freegs4e`, a FreeGS

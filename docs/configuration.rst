@@ -184,6 +184,16 @@ with every printed number looking exactly as it should.
      - A circular limiter **fragmented into** the geometry, so its edges are mesh
        faces, written as element attribute 20 — which is what
        ``[boundary.limiter] SurfaceAttribute`` reads.
+   * - ``Vessel``
+     - *none*
+     - A closed vessel polygon, alternating :math:`R` and :math:`Z` in metres,
+       **fragmented into** the geometry so its edges are mesh faces. Everything
+       inside :math:`\Gamma`, outside this and not a conductor takes element
+       attribute **30**, which ``[source] ExcludeAttributes`` can then name as a
+       region that can never be plasma. At least three points, every
+       :math:`R \ge 0`, and a non-zero area. It is **not** confinement:
+       ``psi_bnd`` is what confines the plasma, and this covers the one case
+       connectivity cannot settle — several O-points across a saddle.
    * - ``Transition``
      - *four background sizes*
      - Width of the graded transition out of a refined region, metres.
@@ -353,6 +363,21 @@ under a Solov'ev source is an unknown key, not an ignored one.
        pockets rather than plasma. **Refused unless** ``Normalised = true``,
        since the test is on :math:`\Psi`. See the warning below before setting
        it.
+   * - ``ExcludeAttributes``
+     - ``[]``
+     - Mesh **element attributes** that can never be plasma, whatever the flux
+       says there — the far side of a vessel wall, a port, a pocket the mesh
+       carries for the coils' sake. ``psi_bnd`` already confines the plasma and
+       the connectivity fill already separates the lobes of :math:`\Psi > 0`
+       that a level set leaves joined; what neither can do is know that a lobe
+       is *behind a wall*, which matters where several O-points sit across a
+       saddle. An attribute rather than a polygon because the support is
+       re-decided on every residual evaluation and a vessel does not move.
+       ``[mesh.generate] Vessel`` is how to produce one, as attribute ``30``.
+       **Refused unless** ``Normalised = true``, and an attribute this mesh does
+       not carry is **refused** rather than ignored: a silently empty exclusion
+       would converge, report nothing unusual, and describe a machine with a
+       current channel behind its own wall.
 
 .. note::
 

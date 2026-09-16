@@ -221,6 +221,28 @@ namespace meq
 					return numbers;
 				};
 
+				/// As getFloatArrayOr(), for an array of INTEGERS -- a list of
+				/// mesh element attributes, which is the only thing MEQ reads
+				/// this way. An entry that is not an integer fails rather than
+				/// truncating: `30.5` is not an attribute and silently becoming
+				/// 30 is the class of error asFloat() exists to stop.
+				std::vector< int > getIntegerArrayOr( std::string const & key ) const
+				{
+					toml::value const * value = find( key );
+					if ( value == nullptr )
+						return {};
+					if ( !value->is_array() )
+						fail( key, "must be an array of integers, but is a " + toml::to_string( value->type() ) );
+
+					std::vector< int > numbers;
+					auto const & elements = value->as_array();
+					numbers.reserve( elements.size() );
+					for ( std::size_t i = 0; i < elements.size(); ++i )
+						numbers.push_back( asInteger( key + "[" + std::to_string( i ) + "]",
+						                              elements[ i ] ) );
+					return numbers;
+				};
+
 				std::string getStringOr( std::string const & key, std::string const & fallback ) const
 				{
 					toml::value const * value = find( key );
@@ -661,6 +683,46 @@ namespace meq
 			confine = source.getBooleanOr( "ConfineToPlasma", false );
 		}
 
+		/*
+		 * `[source] ExcludeAttributes` -- MESH ELEMENT ATTRIBUTES THAT CAN NEVER
+		 * BE PLASMA, WHATEVER THE FLUX SAYS THERE.
+		 *
+		 * A statement about the DEVICE and not about the solution: the far side
+		 * of a vessel wall, a port, a pocket the mesh carries for the coils'
+		 * sake. `psi_bnd` already confines the plasma and the connectivity fill
+		 * already separates the lobes of `{ Psi > 0 }`; what neither can do is
+		 * know that a lobe is behind a wall. It earns its place where several
+		 * O-points sit across a saddle and connectivity alone cannot say which
+		 * of them is the plasma.
+		 *
+		 * AN ATTRIBUTE AND NOT A POLYGON, because the support is re-decided on
+		 * every sweep and a geometric test would be a point-in-polygon per
+		 * element per residual evaluation for an answer that cannot move.
+		 *
+		 * REFUSED WITHOUT A NORMALISATION for ConfineToPlasma's reason: there is
+		 * no plasma support to exclude from.
+		 */
+		void readPlasmaExclusion( Table const & source, bool normalised,
+		                          std::vector< int > & attributes )
+		{
+			if ( !normalised )
+			{
+				if ( source.has( "ExcludeAttributes" ) )
+					source.fail( "ExcludeAttributes", "means nothing unless Normalised = true: it removes elements from the PLASMA SUPPORT, and a source that is not normalised has none -- F is whatever the profiles say everywhere" );
+				return;
+			}
+
+			attributes = source.getIntegerArrayOr( "ExcludeAttributes" );
+			for ( std::size_t i = 0; i < attributes.size(); ++i )
+				if ( attributes[ i ] <= 0 )
+					source.fail( "ExcludeAttributes[" + std::to_string( i ) + "]",
+					             "must be a positive mesh element attribute" );
+			for ( std::size_t i = 0; i < attributes.size(); ++i )
+				for ( std::size_t j = i + 1; j < attributes.size(); ++j )
+					if ( attributes[ i ] == attributes[ j ] )
+						source.fail( "ExcludeAttributes", "names the same attribute twice" );
+		}
+
 		/// `[source] PlasmaCurrent`, in amperes.
 		///
 		/// REFUSED WITHOUT A NORMALISATION, for the reason ConfineToPlasma is:
@@ -1039,7 +1101,7 @@ namespace meq
 				generate.rejectUnknownKeys( { "Tool", "Radius", "Size", "Order", "CoilSize",
 				                              "PlasmaRMin", "PlasmaRMax", "PlasmaZMin", "PlasmaZMax",
 				                              "PlasmaSize", "LimiterR", "LimiterZ", "LimiterRadius",
-				                              "Transition", "Check" } );
+				                              "Vessel", "Transition", "Check" } );
 
 				MeshGeneratorConfig & g = meshOptions.generate;
 				g.given = generate.has( "Tool" );
@@ -1131,6 +1193,42 @@ namespace meq
 							               + std::to_string( g.limiterR - g.limiterRadius )
 							               + " and must be strictly positive, because a closed plasma surface through r = 0 carries a non-integrable 1/r" );
 					}
+
+					/*
+					 * `Vessel` -- THE REGION THAT CAN NEVER BE PLASMA, CHECKED
+					 * HERE BECAUSE A SOLVE CANNOT CHECK IT AT ALL.
+					 *
+					 * The mesher writes attribute 30 outside this polygon and
+					 * `[source] ExcludeAttributes` names it; a polygon with
+					 * fewer than three points, an odd count of numbers, a
+					 * negative radius or zero area produces a mesh that is
+					 * wrong in a way the solve reads as an ordinary geometry.
+					 * Putting the geometry in the file is what turns those into
+					 * parse errors, which is this block's whole argument.
+					 */
+					g.vessel = generate.getFloatArrayOr( "Vessel" );
+					if ( !g.vessel.empty() )
+					{
+						if ( g.vessel.size() % 2 != 0 )
+							generate.fail( "Vessel", "is alternating R and Z, so it takes an EVEN count of numbers; this has "
+							               + std::to_string( g.vessel.size() ) );
+						if ( g.vessel.size() < 6 )
+							generate.fail( "Vessel", "is a closed polygon and needs at least three points, so at least six numbers; this has "
+							               + std::to_string( g.vessel.size() ) );
+						double area = 0.0;
+						for ( std::size_t k = 0; k < g.vessel.size(); k += 2 )
+						{
+							if ( g.vessel[ k ] < 0.0 )
+								generate.fail( "Vessel", "reaches r = "
+								               + std::to_string( g.vessel[ k ] )
+								               + ", and the domain is r >= 0" );
+							std::size_t const n = ( k + 2 ) % g.vessel.size();
+							area += g.vessel[ k ]*g.vessel[ n + 1 ]
+							        - g.vessel[ n ]*g.vessel[ k + 1 ];
+						}
+						if ( std::abs( area )/2.0 <= 0.0 )
+							generate.fail( "Vessel", "has zero area: its points are collinear or repeated" );
+					}
 				}
 			}
 		}
@@ -1174,6 +1272,7 @@ namespace meq
 					                            "SafetyFactorFile", "SafetyFactorDegree",
 					                            "ToroidalFieldGuess",
 					                            "Normalised", "PsiAxis", "ConfineToPlasma", "PlasmaCurrent",
+					                            "ExcludeAttributes",
 					                            "ProfileFile" } );
 					refuseReservedProfileFile( source );
 					// The "mhd" source has no constant form for either profile,
@@ -1201,6 +1300,7 @@ namespace meq
 						source.fail( "Mu0", "must be positive" );
 					readNormalisation( source, parameters.normalised, parameters.psiAxis );
 					readPlasmaSupport( source, parameters.normalised, parameters.confineToPlasma );
+					readPlasmaExclusion( source, parameters.normalised, sourceOptions.excludeAttributes );
 					readPlasmaCurrent( source, parameters.normalised, parameters.plasmaCurrent );
 					sourceOptions.parameters = parameters;
 					break;
@@ -1212,7 +1312,7 @@ namespace meq
 					                            "GGPrime", "GGPrimeFile", "GGPrimeScale",
 					                            "GGPrimeVariable", "GGPrimeFit",
 					                            "ReferenceRadius", "Mu0", "Normalised", "PsiAxis",
-					                            "ConfineToPlasma", "PlasmaCurrent", "ProfileFile" } );
+					                            "ConfineToPlasma", "ExcludeAttributes", "PlasmaCurrent", "ProfileFile" } );
 					refuseReservedProfileFile( source );
 					RotatingParameters parameters;
 
@@ -1236,6 +1336,7 @@ namespace meq
 
 					readNormalisation( source, parameters.normalised, parameters.psiAxis );
 					readPlasmaSupport( source, parameters.normalised, parameters.confineToPlasma );
+					readPlasmaExclusion( source, parameters.normalised, sourceOptions.excludeAttributes );
 					readPlasmaCurrent( source, parameters.normalised, parameters.plasmaCurrent );
 
 					std::vector< Table > const species = source.getTableArrayOr( "species" );

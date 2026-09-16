@@ -25,6 +25,84 @@ almost certainly geometric rather than either solver's: the MXH fit of the
 boundary is 2–4e-04 m on a minor radius of 0.24–0.61 m, which is 5e-04 to 1e-03
 relative, and the contour it fits is itself extracted from freegs4e's 129² grid.
 
+## STANDING RULE: run freegs4e in the SAME mode as MEQ
+
+**Comparisons are to be forward against forward, and this harness is not yet
+that.** `fgsref.py` builds every reference through
+`SyncConstrain( xpoints=..., isoflux=... )` — freegs4e's **inverse** solve,
+which re-solves the coil currents on every Picard pass to hit X-point and
+isoflux targets. Those currents are an **output** of the reference and an
+**input** to MEQ, which solves **forward**. The two codes are therefore not
+answering the same question, and the residual between them is not a
+measurement of either solver.
+
+The tell is that the filament and ShapedCoil references — different conductor
+models — agree with each other on machine A's `psi_axis` to **8e-06**, because
+the inverse solve re-tunes to the same targets either way, while MEQ sits
+**2.4e-02** from both. Agreement also scatters by four orders of magnitude
+across machines (DIII-D shaped 3.4e-06, TCV shaped 3.5e-02, MAST-U 4.9e-02),
+tracking how sensitive each machine's forward solve is to its current set.
+
+`forward.py` is that run: it rebuilds the machine from the `.npz` conductor
+table, freezes the currents, keeps `Ip_logic` on because MEQ prescribes the
+plasma current too, and solves with no `constrain`. On machine A it reproduces
+the inverse reference to **6.3e-08**.
+
+**BUT THE MODE IS NOT WHAT THE DISAGREEMENT IS, and that is measured rather
+than assumed.** On A the two modes agree with each other to 6.5e-08 at 129²,
+and refining the forward solve to 257² moves `psi_axis` by 1.1e-04 — against
+the 2.6e-02 MEQ sits away from both. So the rule stands as methodology and
+does NOT explain the per-machine scatter. Eight causes are eliminated on A and
+the gap is open; `CLAUDE_FB.md` has the list.
+
+`CLAUDE_FB.md`, *Standing rule: compare in the same mode MEQ solves in*, has
+the full elimination — seven other causes were ruled out on machine A first,
+including the profile conversion, which moves `psi_ax` by 1e-05.
+
+## Running freegs4e forward: `forward.py`
+
+`forward.py` is the forward-mode harness. It takes each reference's own
+converged coil currents FROZEN, its own profile arrays, its own grid and wall,
+the plasma current still prescribed, and **no constraint object** — which is the
+problem MEQ is given.
+
+```sh
+PYTHONPATH=/home/ian/projects/freegs4e venv/bin/python forward.py          # the set
+PYTHONPATH=... venv/bin/python forward.py --pin                            # ... vertically pinned
+PYTHONPATH=... venv/bin/python forward.py --trace --every 20 F_diiid       # the axis, per pass
+PYTHONPATH=... venv/bin/python forward.py --write out/                     # one script per case
+```
+
+**THE ELONGATED MACHINES DO NOT CONVERGE FORWARD, AND THE REASON IS NOT THE
+SOLVER.** Seeded at its own converged equilibrium, DIII-D holds for forty passes
+and then grows by a factor of ten every twenty passes in `Zaxis` AND in the
+residual at once, while `Raxis` does not move — one unstable eigenvalue, a rigid
+vertical displacement. `--trace` is what shows it; a residual history cannot,
+because a solve failing to resolve and one walking out of the machine look
+identical in it.
+
+**`--pin` IS THE MINIMUM FEEDBACK A REAL MACHINE HAS AND THIS PROBLEM DOES
+NOT**: one antisymmetric current combination driven by the axis's own height,
+with no flux targeted anywhere and nothing re-optimised, so the result is still
+the forward equilibrium of whatever currents come out. It converges DIII-D in 12
+passes to **9.8e-08** of the inverse reference at a current increment of
+**8.1e-04 A** against coil currents of 1.75e+05 A. **Read `max |dI|` before
+reading the agreement** — it is what says the pinned equilibrium is the unpinned
+one rather than a differently-controlled machine.
+
+The gain CALIBRATES by default, from one probe increment and the axis's response
+to it. A fixed gain does not travel: 1e+06 A/m holds DIII-D and destroys MAST,
+whose conductor table resolves solenoid windings into individual turns.
+`--pin-gain` overrides it and `--pin-coils` names a better combination than
+"every approximate mirror pair".
+
+→ **[M-104](../../MEASUREMENTS.md#m-104)**
+
+**TCV AND MAST-U ARE THE HARNESS'S OWN DEFECT HERE AND MUST NOT BE READ.**
+`build_machine()` rebuilds 24 and 26 conductors against 20 and 14 circuits,
+because solenoids expand into windings in the `.npz` and a per-row rebuild is
+not `freegs4e`'s `Solenoid`.
+
 ## What it does
 
 MEQ solves fixed boundary; freegs4e solves free boundary. So the comparison is:

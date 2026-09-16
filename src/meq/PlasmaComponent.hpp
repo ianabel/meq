@@ -226,8 +226,42 @@ namespace meq
 			           std::vector< char > const &carriesPlasma, int seed,
 			           int blockNode = -1 );
 
-			/// True where the plasma is. Always true before fill(), so a caller
-			/// may test unconditionally and an unconfigured solver is unchanged.
+			/**
+			 * ELEMENTS THAT CAN NEVER BE PLASMA, WHATEVER THE FLUX SAYS THERE.
+			 *
+			 * A geometric statement about the DEVICE rather than about the
+			 * iterate -- the far side of a vessel wall, a port, a region the
+			 * mesh carries for the coils' sake -- so it is set once and read on
+			 * every sweep, which is the whole economy: deciding inside/outside
+			 * from a polygon costs a point-in-polygon test per element per
+			 * evaluation, and an attribute costs a lookup.
+			 *
+			 * **IT IS NOT A SUBSTITUTE FOR THE FILL AND IT IS NOT A LEVEL SET.**
+			 * `psi_bnd` already confines the plasma and the fill already
+			 * separates the lobes of `{ Psi > 0 }`; what neither can do is know
+			 * that a lobe is on the far side of a wall. Where the fill's
+			 * judgement is right this changes nothing and only saves it work; it
+			 * earns its place where several O-points sit across a saddle and
+			 * connectivity alone cannot say which is the plasma.
+			 *
+			 * @param excluded  one entry per node, non-zero to exclude. Empty
+			 *                  clears it. Sized against the adjacency when one
+			 *                  is set.
+			 * @throws std::invalid_argument on a size that is neither empty nor
+			 *         nodeCount().
+			 */
+			void setExcluded( std::vector< char > excluded );
+
+			/// Whether setExcluded() named this node. False when nothing was
+			/// excluded, and for a node out of range.
+			bool isExcluded( int element ) const;
+
+			/// How many nodes setExcluded() named. Zero when it was not called.
+			int excludedNodes() const;
+
+			/// True where the plasma is. Always true before fill() EXCEPT where
+			/// setExcluded() says otherwise, so a caller may test
+			/// unconditionally and an unconfigured solver is unchanged.
 			bool holds( int element ) const;
 
 			/// Whether fill() has been called and holds() is therefore a real
@@ -270,6 +304,8 @@ namespace meq
 			/// watershed gave to the seed's component. Empty for the one-rule
 			/// fill.
 			std::vector< char > ring;
+			std::vector< char > excludedNode;
+			int excludedSize = 0;
 			int labelCount = 0;
 			int seedLabelValue = -1;
 			int componentSize = 0;

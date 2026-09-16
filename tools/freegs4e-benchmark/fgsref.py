@@ -309,7 +309,16 @@ def good_enough(st):
 
 
 def picard_loop(eq, profiles, constrain, rtol=1e-9, atol=1e-12, blend=0.0,
-                maxits=200):
+                maxits=200, watch=None):
+    """`watch( it, eq, profiles, arel )` after every solve, if given.
+
+    THE WATCH HOOK EXISTS BECAUSE A SCALAR HISTORY CANNOT SEE A DRIFT.
+    `rel_history` measures how far psi MOVED and says nothing about WHERE the
+    plasma went, so a forward solve walking its magnetic axis vertically out of
+    the machine and one genuinely failing to resolve look identical in it.  The
+    hook is additive and inert when unused, so every number this file has ever
+    printed is unchanged without it.
+    """
     if constrain is not None:
         constrain(eq)
     psi = eq.psi()
@@ -325,6 +334,8 @@ def picard_loop(eq, profiles, constrain, rtol=1e-9, atol=1e-12, blend=0.0,
         arel = amax / (np.max(psi) - np.min(psi))
         abs_hist.append(amax)
         rel_hist.append(arel)
+        if watch is not None:
+            watch(len(rel_hist) - 1, eq, profiles, arel)
         if amax < atol:
             status = "atol"
             break

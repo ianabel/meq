@@ -1,6 +1,7 @@
 #ifndef MEQ_GRADSHAFRANOV_HPP
 #define MEQ_GRADSHAFRANOV_HPP
 
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -1000,6 +1001,54 @@ namespace meq
 			/// tests it unconditionally.
 			bool elementInPlasma( int element ) const;
 
+			/**
+			 * A REGION OF THE MESH THAT CAN NEVER BE PLASMA, BY ELEMENT
+			 * ATTRIBUTE -- the far side of a vessel wall, a port, a pocket the
+			 * mesh carries for the coils' sake.
+			 *
+			 * **WHY AN ATTRIBUTE AND NOT A POLYGON.** The support is re-decided
+			 * on every sweep, so a geometric test would be a point-in-polygon
+			 * per element per evaluation for an answer that cannot change: the
+			 * wall does not move. The mesher already knows the geometry and can
+			 * say so once, and this reads a lookup.
+			 *
+			 * **IT DOES NOT REPLACE THE FILL AND MUST NOT BE THOUGHT OF AS
+			 * CONFINEMENT.** `psi_bnd` confines the plasma -- `F` is zero
+			 * wherever `Psi <= 0` and that is the whole of it -- and
+			 * PlasmaConnectivity separates the lobes of `{ Psi > 0 }` that a
+			 * level set leaves connected. Both are about the SOLUTION. This is
+			 * about the MACHINE, and it earns its place in exactly one place:
+			 * where several O-points sit across a saddle and connectivity alone
+			 * cannot say which of them is the plasma. Everywhere else it changes
+			 * no answer and only bounds the fill's work.
+			 *
+			 * **IT IS HONOURED WITH OR WITHOUT A CONNECTIVITY FILL**, because it
+			 * is not a connectivity statement: meq::PlasmaComponent::holds()
+			 * tests it ahead of its own constant-true shortcut, so a source with
+			 * no `ConfineToPlasma` still carries no current out here.
+			 *
+			 * Calling it with an empty list clears the exclusion. It may be
+			 * called before or after prepare(); the mask is rebuilt from the
+			 * mesh each time, and it survives the clear() that rebuilding the
+			 * adjacency does.
+			 *
+			 * @param attributes  mesh ELEMENT attributes, as
+			 *                    mfem::Mesh::GetAttribute() returns them.
+			 * @throws std::invalid_argument if an attribute is not positive.
+			 */
+			void setPlasmaExclusion( mfem::Array< int > const &attributes );
+
+			/// The attributes setPlasmaExclusion() last named, in the order
+			/// given. Empty when it was not called.
+			std::vector< int > const &plasmaExclusionAttributes() const;
+
+			/// How many elements those attributes matched. Zero when none were
+			/// named -- and zero when they were named and matched NOTHING, which
+			/// is a configuration error the driver reports rather than a state
+			/// this class refuses, since an attribute a mesh does not carry is
+			/// a fact about the pair and not about either.
+			int excludedElementCount() const;
+
 			/// Which component an element is in, or -1 where it carries no
 			/// plasma. For reporting on a fill rather than for the assembly.
 			int plasmaComponentLabel( int element ) const;
@@ -1391,92 +1440,73 @@ namespace meq
 			/// MFEM's default.
 			int extensionQuadratureOrder() const;
 
-			/// Which non-linear method the hybridization is asked for. A
-			/// DIFFERENT axis from setGlobalisation(): that picks the outer
-			/// iteration, this decides what the outer iteration's unknown IS,
-			/// and what one residual evaluation costs.
-			///
-			/// **A THIRD VALUE USED TO BE HERE AND MFEM DELETED IT.**
-			/// `LineariseThenCondense` was an operator on the trace alone whose
-			/// local blocks were eliminated against a retained linearisation,
-			/// and it claimed to be the NPC method. It was not -- NPC's fields
-			/// are Newton state, and a trace-only operator has nowhere to keep
-			/// them, which is why that mode needed `lin_u`, `lin_p` and
-			/// `lin_trace` as hidden state and why MEQ needed `Relinearised` to
-			/// pair the residual with the gradient. Upstream measured it slower
-			/// than the plain condensation on stiff problems and failing four
-			/// configurations that one solves, and removed it. MEQ's
-			/// `Relinearised` went with it. See
-			/// ../mfem-hdg-dev/doc/HDG-ORDERING-API.md.
-			enum class NonlinearOrdering
-			{
-				/// Condense first. Eliminating flux and potential on an element
-				/// is then itself a non-linear solve, one per element per
-				/// residual evaluation, and the outer unknown is the trace
-				/// alone. MFEM's own default, and **MEQ's backup rather than
-				/// MEQ's choice**.
-				///
-				/// It is kept, and is not merely legacy: it is the only route
-				/// that is parallel, the only one that accepts an H(div) flux,
-				/// and the only one whose reduced residual is an exact function
-				/// of the trace -- which is what setLocalSolver()'s tolerance
-				/// buys and what a differenced border needs when the fields are
-				/// not state. PedestalConvergence measures the two against each
-				/// other and needs this one for that.
-				CondenseThenLinearise,
-				/// Newton on the FULL ( q, psi, psihat ) system, with the
-				/// Jacobian solved by hybridized elimination -- Nguyen, Peraire
-				/// & Cockburn, refs/HDG-NPC-2.pdf section 2.6, eqs (14)-(18).
-				/// `mfem::DarcyNPCOperator` and `mfem::DarcyNPCSolver`.
-				///
-				/// **THIS IS MEQ'S DEFAULT.** It is how the method is defined,
-				/// and no paper in refs/ runs the other one: GS-1 and GS-2 avoid
-				/// the question with Anderson-accelerated Picard, NPC linearises
-				/// first.
-				///
-				/// **What it buys, and none of it is speed.** Every
-				/// element-local operation is ONE linear solve against ONE
-				/// factorisation, so `GetNumLocalNLIterations()` stays at zero
-				/// -- which is the acceptance signal that this really is NPC and
-				/// not a condensation wearing its name. The convergence test is
-				/// on the full residual rather than on the trace alone, and a
-				/// line search scales the fields and the trace together because
-				/// they are one vector. Upstream's own caveat is worth
-				/// repeating: **NPC is not automatically faster.** Its advantage
-				/// is the UNIFORMITY of the local work, which is also what makes
-				/// it the better batched or threaded workload, not fewer
-				/// floating-point operations.
-				///
-				/// **What it costs MEQ is that the unknown is the whole
-				/// system.** MEQ pays almost nothing for that, because
-				/// `solution` was already a three-block
-				/// { flux, potential, trace } vector on `blockOffsets` with
-				/// every GridFunction MakeRef'd into it -- so the NPC unknown IS
-				/// MEQ's solution vector, and `RecoverFEMSolution()` leaves the
-				/// Newton path entirely rather than needing rework. The fields
-				/// are already there when the solve returns.
-				///
-				/// **And it removes a trap rather than working around one.**
-				/// `DarcyHybridization` freezes the element-local Newton's
-				/// initial guess at `FormLinearSystem()` time, which cost the
-				/// bordered Newton its correctness until `formSystem()` was
-				/// factored out to re-form once per accepted step. NPC has no
-				/// element-local non-linear solve, so there is no seed to go
-				/// stale and no re-forming to do; see solveWithNormalisation().
-				///
-				/// **Two hard refusals**, both `MFEM_VERIFY` in `NPCCheck()`:
-				/// an H(div) flux space, and `LocalOpType::FluxNL`. MEQ meets
-				/// neither -- its flux space is L2 and its non-linearity is on
-				/// the potential mass.
-				NPC
-			};
-
-			/// Choose it. Needs an MFEM carrying `mfem::DarcyNPCOperator`; see
-			/// CLAUDE.md on the MEQ-integration branch.
-			void setNonlinearOrdering( NonlinearOrdering choice );
-
-			/// The ordering solve() will use.
-			NonlinearOrdering nonlinearOrdering() const;
+			/*
+			 * NPC IS THE ONLY ORDERING AND THERE IS NO LONGER A CHOICE.
+			 *
+			 * MEQ solves Newton on the FULL ( q, psi, psihat ) system with the
+			 * Jacobian solved by hybridized elimination -- Nguyen, Peraire &
+			 * Cockburn, refs/HDG-NPC-2.pdf section 2.6, eqs (14)-(18), through
+			 * mfem::DarcyNPCOperator and mfem::DarcyNPCSolver.
+			 *
+			 * `NonlinearOrdering` used to name a second route,
+			 * `CondenseThenLinearise`: condense first, so eliminating flux and
+			 * potential on an element is itself a non-linear solve, one per
+			 * element per residual evaluation, and the outer unknown is the
+			 * trace alone. It was kept as a backup and it is GONE -- nothing in
+			 * MEQ reached it, and what kept it alive was three cases in
+			 * SolverContract that existed to exercise it. The doxygen here
+			 * claimed "PedestalConvergence measures the two against each other
+			 * and needs this one for that", which was stale: that file never
+			 * called setNonlinearOrdering() at all.
+			 *
+			 * WHAT WENT WITH IT. Every feature MEQ has added since the port
+			 * refused the condensation outright -- psi_bnd as an unknown
+			 * ( setBoundaryFluxPoint, setLimiterSurface ), the X-point's two
+			 * rows, the plasma-current constraint, the exterior coupling,
+			 * AxisConstraint::LocatedAxis and PlasmaConnectivity::Component were
+			 * seven separate `throw`s saying NonlinearOrdering::NPC only. So the
+			 * condensation could reach the bordered Newton carrying psi_ax and
+			 * nothing else, a corner no test covered.
+			 *
+			 * **What NPC buys, and none of it is speed.** Every element-local
+			 * operation is ONE linear solve against ONE factorisation, so
+			 * `GetNumLocalNLIterations()` stays at zero -- which is the
+			 * acceptance signal that this really is NPC and not a condensation
+			 * wearing its name. The convergence test is on the full residual
+			 * rather than on the trace alone, and a line search scales the
+			 * fields and the trace together because they are one vector.
+			 * Upstream's own caveat is worth repeating: **NPC is not
+			 * automatically faster.** Its advantage is the UNIFORMITY of the
+			 * local work, which is also what makes it the better batched or
+			 * threaded workload, not fewer floating-point operations.
+			 *
+			 * **The unknown is the whole system, and MEQ pays almost nothing
+			 * for that**, because `solution` was already a three-block
+			 * { flux, potential, trace } vector on `blockOffsets` with every
+			 * GridFunction MakeRef'd into it -- so the NPC unknown IS MEQ's
+			 * solution vector, and `RecoverFEMSolution()` leaves the Newton path
+			 * entirely rather than needing rework.
+			 *
+			 * **And it removes a trap rather than working around one.**
+			 * `DarcyHybridization` freezes the element-local Newton's initial
+			 * guess at `FormLinearSystem()` time, which cost the bordered Newton
+			 * its correctness until `formSystem()` was factored out. NPC has no
+			 * element-local non-linear solve, so there is no seed to go stale.
+			 *
+			 * **Two hard refusals**, both `MFEM_VERIFY` in `NPCCheck()`: an
+			 * H(div) flux space, and `LocalOpType::FluxNL`. MEQ meets neither --
+			 * its flux space is L2 and its non-linearity is on the potential
+			 * mass.
+			 *
+			 * A THIRD VALUE ALSO USED TO BE HERE AND MFEM DELETED IT.
+			 * `LineariseThenCondense` was an operator on the trace alone whose
+			 * local blocks were eliminated against a retained linearisation, and
+			 * it claimed to be the NPC method. It was not -- NPC's fields are
+			 * Newton state, and a trace-only operator has nowhere to keep them.
+			 * Upstream measured it slower than the plain condensation on stiff
+			 * problems and failing four configurations that one solves, and
+			 * removed it. See ../mfem-hdg-dev/doc/HDG-ORDERING-API.md.
+			 */
 
 			/// How the element loop that builds the reduced system runs.
 			/// A THIRD axis, orthogonal to the two above: those decide what is
@@ -2105,6 +2135,44 @@ namespace meq
 			double plasmaCurrent() const;
 
 			/**
+			 * `d( mu0 I_p )/d lambda` ALONG THE SOLUTION MANIFOLD -- how much
+			 * current the profile scale actually BUYS, with the field, the
+			 * normalisation, the X-point and the exterior all re-solving.
+			 * NaN unless setPlasmaCurrent() made the scale an unknown.
+			 *
+			 * **THIS IS NOT THE PARTIAL DERIVATIVE, AND THE PARTIAL ONE IS
+			 * USELESS.** `F` is linear in `lambda`, so at a frozen field
+			 * `d( int F/r )/d lambda` is just `( int F/r )/lambda` -- never
+			 * small, never informative, and already assembled as the corner
+			 * entry. What decides whether the current row is well posed is the
+			 * TOTAL derivative, and that is the Schur complement the bordered
+			 * solve forms anyway: with `S` the reduced border matrix, the
+			 * sensitivity of border residual `i` to unknown `i` holding every
+			 * OTHER border residual at zero is `1/( S^-1 )_ii`. One extra solve
+			 * against a factorisation that already exists, on a matrix of order
+			 * at most `4 + modes`.
+			 *
+			 * **WHY IT IS WORTH REPORTING AT ALL.** A free-boundary equilibrium
+			 * at fixed coil currents has an EQUILIBRIUM CURRENT LIMIT: raising
+			 * the amplitude raises the current density and shrinks the plasma,
+			 * and past a point the second wins, so `I_p( lambda )` turns over.
+			 * A prescribed current at or near that turning point is a double
+			 * root -- two equilibria nearly on top of each other, this
+			 * derivative through zero between them, and which one is reported
+			 * decided by where `psi_ax` started. MEASURED on the `freegs4e`
+			 * benchmark's machine A, where the target sits 0.065% below the
+			 * maximum and the two roots differ by 2.5e-02 in `psi_ax`:
+			 * MEASUREMENTS.md M-105 and M-107. Nothing else MEQ prints says so,
+			 * and both roots converge quadratically and report the current they
+			 * were asked for.
+			 *
+			 * Divide by the SOURCE's `mu0` for amperes; better still, form the
+			 * dimensionless `( lambda/mu0 I_p ) d( mu0 I_p )/d lambda`, which is
+			 * about 1 on a healthy case and passes through 0 at the fold.
+			 */
+			double plasmaCurrentSensitivity() const;
+
+			/**
 			 * COUPLE THE EXTERIOR TO THE SOLVE, so that the Gegenbauer
 			 * coefficients on `Gamma` become unknowns of the same Newton rather
 			 * than being recovered afterwards by superposition.
@@ -2261,6 +2329,48 @@ namespace meq
 				double worstOnAxis = 0.0;
 				double worstR = 0.0;
 				double worstZ = 0.0;
+
+				/// The element that owns the node worstR, worstZ, and whether
+				/// the plasma component fill KEPT it. -1 when no axis node was
+				/// found or when no fill ran.
+				///
+				/// **axisInsidePlasma BELOW IS A LEVEL-SET TEST AND THE SOLVE
+				/// MAY NOT BE.** Psi on the axis positive makes the axis part of
+				/// `{ Psi > 0 }`, which is what insidePlasma() asks -- but under
+				/// PlasmaConnectivity::Component the current is placed on the
+				/// connected COMPONENT containing the magnetic axis, and a lobe
+				/// of that level set which the fill did not reach carries no
+				/// current whatever Psi reads on it. So these two fields are
+				/// what separates "the plasma reaches r = 0" from "a level set
+				/// does", and only the first is the wrong topology.
+				int worstElement = -1;
+				bool axisInPlasmaComponent = false;
+
+				/**
+				 * THE SAME TWO QUESTIONS ASKED OF THE SUPPORT MEQ ACTUALLY
+				 * ASSEMBLES, WHICH IS WHAT A REFUSAL HAS TO BE ABOUT.
+				 *
+				 * Everything above is a LEVEL-SET reading: `worstOnAxis` calls
+				 * `f()` pointwise, and `f()` knows nothing about elements. The
+				 * assembled load is `F` masked by
+				 * GradShafranovSolver::elementInPlasma(), so where the fill or
+				 * an exclusion has switched an axis element off there is no
+				 * pole, whatever `Psi` reads there.
+				 *
+				 * **AND THE TWO GENUINELY DISAGREE ON A SHIPPED CASE.** MAST
+				 * under filament conductors converges with `psi_bnd` negative,
+				 * so the level set contains `r = 0` and `axisInsidePlasma` is
+				 * true -- while the reference equilibrium's own near-axis lobe
+				 * is a SEPARATE component, joined to the core only through a
+				 * saddle, and MEQ's fill correctly declines to reach it. The
+				 * driver refused that run for a year on the level-set reading
+				 * while printing *"plasma component kept it: NO"* on the line
+				 * above. MEASUREMENTS.md M-103, and `CLAUDE_FB.md`.
+				 */
+				bool supportReachesAxis = false;
+				double worstOnAxisInSupport = 0.0;
+				double relativeInSupport = 0.0;
+				bool boundedInSupport = true;
 
 				/// The largest `| F |` anywhere, as the scale the one above is
 				/// judged against. A bare tolerance on `F` would be a statement
@@ -2598,6 +2708,72 @@ namespace meq
 			/// is frozen rather than recomputed so that the history compares like
 			/// with like; normalisationResidual() reports G on its own.
 			std::vector<double> const &newtonResiduals() const;
+
+			/**
+			 * ONE BORDERED NEWTON STEP, DECOMPOSED INTO WHAT THE LINE SEARCH
+			 * ACTUALLY WEIGHS.
+			 *
+			 * newtonResiduals() reports || ( R, gamma G ) || as a single number,
+			 * and a single number cannot say WHICH of six kinds of constraint
+			 * moved it. That matters because `gamma` is one scalar --
+			 * || dR/dpsi_ax || at the first iterate -- and it is applied to
+			 * psi_bnd, to the plasma current (which is mu_0 I_p and not a flux
+			 * perturbation at all), to every exterior transmission residual, and,
+			 * after the further factor xScale = r h, to XP-3's two rows. If the
+			 * merit is dominated by a term whose scale was borrowed from another
+			 * unknown, the Armijo test rejects steps that improve the field and
+			 * the iteration crawls at a damping of 1/8 or 1/512 -- which is a
+			 * property of the RULER and not of the direction.
+			 *
+			 * So each entry carries the weighted contributions separately, the
+			 * damping that was finally taken, and whether Armijo accepted it or
+			 * the fallback to `bestDamping` did. `directionFinite` is the other
+			 * half: the bordered SOLUTION is checked for finiteness but the field
+			 * direction `y` and the sensitivity column `z` are not, so a
+			 * non-finite direction reaches the line search and fails all twelve
+			 * halvings for a reason that has nothing to do with step length.
+			 *
+			 * Populated on the bordered path only, and empty everywhere else.
+			 */
+			struct BorderStep
+			{
+				/// || R ||, the field residual alone and unweighted.
+				double fieldNorm = 0.0;
+				/// gamma * G, the psi_ax constraint as the merit sees it.
+				double axis = 0.0;
+				/// gamma * ( psi_bnd - the bounding value ).
+				double boundary = 0.0;
+				/// gamma * ( assembled mu_0 I_p - the target ).
+				double current = 0.0;
+				/// gamma * || T_m ||, the exterior transmission rows together.
+				double exterior = 0.0;
+				/// gamma * xScale * || q( x_X ) ||, XP-3's two rows together.
+				double xPoint = 0.0;
+				/// The damping finally applied, 1.0 for a full Newton step.
+				double damping = 0.0;
+				/// How many halvings were tried before one was taken. 1 means
+				/// the full step was accepted.
+				int trials = 0;
+				/// Whether the Armijo test accepted, as against falling back to
+				/// the least-bad damping, which is how a non-improving step is
+				/// taken and how the residual can RISE from step to step.
+				bool armijo = false;
+				/// || y || and || z ||, the field direction and the psi_ax
+				/// sensitivity column. Non-finite here means the line search was
+				/// handed a direction it could never damp into usefulness.
+				double directionNorm = 0.0;
+				bool directionFinite = true;
+				/// Where the located X-point sat at this iterate. It moves with
+				/// the solution by construction; a JUMP between iterations is a
+				/// discontinuity in the merit and is what a line search cannot
+				/// survive.
+				double xR = 0.0;
+				double xZ = 0.0;
+			};
+
+			/// The per-iteration decomposition of the bordered step. Empty on
+			/// every path where psi_ax is not an unknown.
+			std::vector<BorderStep> const &borderSteps() const;
 
 			/// Iterations spent in stage 1 of Globalisation::PicardThenNewton.
 			/// Zero on every other path. newtonIterations() and newtonResiduals()
@@ -2938,6 +3114,8 @@ namespace meq
 
 			double currentScaleValue = 1.0;
 			double plasmaCurrentValue = 0.0;
+			double currentSensitivityValue =
+				std::numeric_limits<double>::quiet_NaN();
 			double boundaryFluxR = 0.0;
 			double boundaryFluxZ = 0.0;
 			double psiBoundaryValue = 0.0;
@@ -3084,7 +3262,6 @@ namespace meq
 			/// Timing at the call sites instead missed exactly those calls.
 			mutable StepProfile profile;
 
-			NonlinearOrdering orderingChoice;
 			AssemblyMode assemblyModeChoice;
 			TraceSolver traceSolverChoice;
 			int andersonDepth;
@@ -3199,6 +3376,12 @@ namespace meq
 			/// The fill. Unfilled -- so holds() is the constant true -- unless a
 			/// confined source and PlasmaConnectivity::Component ask for it.
 			PlasmaComponent plasmaComponentMask;
+			std::vector< int > plasmaExclusionAttributeList;
+
+			/// Rebuild plasmaComponentMask's exclusion from
+			/// plasmaExclusionAttributeList and the mesh. Idempotent, and a
+			/// no-op when nothing was excluded.
+			void refreshPlasmaExclusion();
 
 			/// The element adjacency, built once per mesh and reused: it is
 			/// geometry, and refreshPlasmaComponent() runs once per residual.
@@ -3226,6 +3409,7 @@ namespace meq
 			long symbolicFactorisationCount = 0;
 			long numericFactorisationCount = 0;
 			std::vector<double> newtonResidualHistory;
+			std::vector<BorderStep> borderStepHistory;
 			/// The Picard iterate that seeds stage 2. It must be a COPY: the
 			/// GridFunction overload of setInitialGuess() keeps a coefficient that
 			/// only references its argument, and stage 2 overwrites potentialGf.

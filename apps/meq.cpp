@@ -219,6 +219,17 @@ namespace
 			number( g.plasmaZMax - g.plasmaZMin );
 			word( "--plasma-size" ); number( g.plasmaSize );
 		}
+		if ( !g.vessel.empty() )
+		{
+			// EVERY NUMBER AS THE PARSER READ IT, which is the same rule the
+			// conductors follow one block down: the mesher fragments this
+			// polygon into the geometry, so a rounded vertex is a mesh that does
+			// not describe the vessel the file names.
+			word( "--vessel" );
+			for ( double const value : g.vessel )
+				number( value );
+		}
+
 		if ( g.limiterGiven )
 		{
 			word( "--limiter" );
@@ -581,6 +592,48 @@ namespace
 				std::printf( "        -" );
 			}
 			std::printf( "\n" );
+		}
+		std::printf( "\n" );
+	}
+
+	/**
+	 * WHAT THE LINE SEARCH ACTUALLY WEIGHED, per bordered Newton iteration.
+	 *
+	 * reportResiduals() above prints || ( R, gamma G ) || as one number, and one
+	 * number cannot say WHICH of six kinds of constraint carries it. These are
+	 * augmentedNorm()'s own terms with their weights applied, so a column that
+	 * dominates is a column the Armijo test is really deciding on -- and `gamma`
+	 * was derived from psi_ax's column alone.
+	 *
+	 * `damp` is the step length finally taken and `n` the halvings it cost: a
+	 * full Newton step reads 1.00e+00 at n = 1, and 1/8 or below means the
+	 * direction is being REJECTED rather than the problem being hard. `A` is
+	 * `NO` when Armijo refused and the fallback to the least-bad damping took a
+	 * non-improving step, which is how the residual rises from one row to the
+	 * next. `||y||` is the field direction, whose finiteness nothing checked.
+	 *
+	 * IT IS PRINTED ON FAILURE TOO, which is the point: the run that needs it is
+	 * the one that did not converge.
+	 */
+	void reportBorderSteps( meq::GradShafranovSolver const *solver )
+	{
+		if ( !solver || solver->borderSteps().empty() )
+			return;
+
+		std::printf( "\n   it     ||R||    g*axis     g*bnd     g*Ip"
+		             "   g*ext    g*xpt      damp  n   A       ||y||"
+		             "        X-point\n" );
+		auto const &steps = solver->borderSteps();
+		for ( std::size_t i = 0; i < steps.size(); ++i )
+		{
+			meq::GradShafranovSolver::BorderStep const &b = steps[ i ];
+			std::printf( "  %3zu  %9.3e %9.2e %9.2e %9.2e %8.1e %8.1e"
+			             "  %8.2e %2d %4s  %10.3e  ( %7.4f, %7.4f )%s\n",
+			             i, b.fieldNorm, b.axis, b.boundary, b.current,
+			             b.exterior, b.xPoint, b.damping, b.trials,
+			             b.armijo ? "yes" : "NO", b.directionNorm,
+			             b.xR, b.xZ,
+			             b.directionFinite ? "" : "  <- DIRECTION NOT FINITE" );
 		}
 		std::printf( "\n" );
 	}
@@ -1785,6 +1838,56 @@ int main( int argc, char **argv )
 			fresh->setPlasmaCurrent( config->getSource().permeability()
 			                         *config->getSource().plasmaCurrent() );
 
+		/*
+		 * `[source] ExcludeAttributes` -- THE REGION THAT CANNOT BE PLASMA.
+		 *
+		 * Set on the SOLVER and not on the source, because it is about the mesh:
+		 * it names element attributes, and the source has no mesh. It is read
+		 * once here and rebuilt from the mesh whenever the adjacency is, so an
+		 * adaptive cycle keeps it.
+		 *
+		 * AN ATTRIBUTE THE MESH DOES NOT CARRY IS REFUSED RATHER THAN IGNORED.
+		 * A silently-empty exclusion is the worst outcome available: the run
+		 * converges, reports nothing unusual, and describes a machine with a
+		 * current channel behind its own wall -- which is the failure this key
+		 * exists to stop. A mesh and a file that disagree about an attribute is
+		 * a fact about the PAIR, so the check belongs here and not in either.
+		 */
+		if ( !config->getSource().excludeAttributes.empty() )
+		{
+			mfem::Array< int > excluded;
+			for ( int const attribute : config->getSource().excludeAttributes )
+				excluded.Append( attribute );
+			fresh->setPlasmaExclusion( excluded );
+
+			if ( fresh->excludedElementCount() == 0 )
+			{
+				std::fflush( stdout );
+				std::fprintf( stderr,
+					"MEQ: [source] ExcludeAttributes names attributes no element of\n"
+					"     this mesh carries, so nothing would be excluded and the\n"
+					"     plasma would be free to form behind the wall this key is\n"
+					"     meant to keep it out of. The mesh has attributes" );
+				std::vector< int > present;
+				for ( int e = 0; e < mesh.GetNE(); ++e )
+				{
+					int const attribute = mesh.GetAttribute( e );
+					if ( std::find( present.begin(), present.end(), attribute )
+					     == present.end() )
+						present.push_back( attribute );
+				}
+				std::sort( present.begin(), present.end() );
+				for ( std::size_t i = 0; i < present.size(); ++i )
+					std::fprintf( stderr, "%s %d", i ? "," : "", present[ i ] );
+				std::fprintf( stderr, ". Nothing has been written.\n" );
+				std::exit( ConfigurationError );
+			}
+
+			std::printf( "MEQ: %d of %d elements are excluded from the plasma by "
+			             "attribute\n",
+			             fresh->excludedElementCount(), mesh.GetNE() );
+		}
+
 		if ( exterior )
 			fresh->setExteriorCoupling( *exterior );
 
@@ -2735,6 +2838,8 @@ int main( int argc, char **argv )
 		catch ( std::exception const &firstAttempt )
 		{
 			reportResiduals( solver->newtonResiduals() );
+			if ( wantProfile )
+				reportBorderSteps( solver.get() );
 
 			/*
 			 * THE LADDER HAS NO SECOND RUNG WHEN psi_ax IS AN UNKNOWN, and
@@ -3214,6 +3319,58 @@ int main( int argc, char **argv )
 			             mu0 != 0.0 ? solver->plasmaCurrent()/mu0 : 0.0,
 			             config->getSource().plasmaCurrent(),
 			             solver->plasmaCurrentScale() );
+
+			/*
+			 * HOW MUCH CURRENT THE SCALE ACTUALLY BUYS, WHICH IS THE ONE THING
+			 * A PRESCRIBED-CURRENT RUN CANNOT BE READ WITHOUT.
+			 *
+			 * A free-boundary equilibrium at fixed coil currents has an
+			 * equilibrium current limit: past a point, raising the amplitude
+			 * shrinks the plasma faster than it raises the current density and
+			 * `I_p( lambda )` turns over. A target at or past that turning
+			 * point is a DOUBLE ROOT, and both roots converge quadratically and
+			 * both report the current they were asked for -- so nothing else on
+			 * this page distinguishes them. The elasticity does: it is about 1
+			 * where the row is ordinary and passes through 0 at the fold.
+			 *
+			 * MEASURED, on the freegs4e benchmark: machine A's target sits
+			 * 0.065% below the maximum and its two roots differ by 2.5e-02 in
+			 * psi_ax, with which one is reported decided by where [source]
+			 * PsiAxis started. MEASUREMENTS.md M-105 and M-107.
+			 */
+			double const sensitivity = solver->plasmaCurrentSensitivity();
+			if ( std::isfinite( sensitivity ) && mu0 != 0.0 )
+			{
+				double const perAmp = sensitivity/mu0;
+				double const current = solver->plasmaCurrent()/mu0;
+				double const elasticity =
+					current != 0.0
+					? solver->plasmaCurrentScale()*perAmp/current : 0.0;
+				std::printf( "     d I_p/d scale = %+.4e A, i.e. %+.4f of "
+				             "I_p per unit relative scale\n",
+				             perAmp, elasticity );
+				if ( elasticity <= 0.0 )
+					std::printf(
+						"     THIS EQUILIBRIUM IS PAST THE CURRENT LIMIT AND IS NOT\n"
+						"     UNIQUE. A NEGATIVE %.3f means more profile would carry\n"
+						"     LESS current: the plasma is shrinking faster than its\n"
+						"     current density is rising, so I_p( scale ) has turned\n"
+						"     over below this scale and a SECOND equilibrium carries\n"
+						"     the same %.4e A at a lower one. Which of the two is\n"
+						"     reported is decided by where [source] PsiAxis started.\n"
+						"     Measured on the freegs4e benchmark's machine A: the two\n"
+						"     differ by 2.5e-02 in psi_ax. MEASUREMENTS.md M-105, M-107.\n",
+						elasticity, current );
+				else if ( elasticity < 0.1 )
+					std::printf(
+						"     THE CURRENT ROW IS NEARLY SINGULAR. %.3f means the\n"
+						"     prescribed current is within rounding of the maximum\n"
+						"     I_p( scale ) can reach, so its two roots have nearly\n"
+						"     merged and the scale is barely determined. Ask for a\n"
+						"     little less current, or check the answer against a run\n"
+						"     with PlasmaCurrent removed.\n",
+						elasticity );
+			}
 		}
 
 		if ( exterior )
@@ -3625,10 +3782,63 @@ int main( int argc, char **argv )
 			 * a curiosity rather than a defect, and it is tested over a spread
 			 * of Psi rather than at one value.
 			 */
+			/*
+			 * AND IT IS THE SUPPORT THAT IS ASKED, NOT THE LEVEL SET. THIS
+			 * REFUSED A CORRECT ANSWER WHILE PRINTING THE EVIDENCE AGAINST
+			 * ITSELF.
+			 *
+			 * `axisInsidePlasma` is `-psi_bnd/span > 0`, which is what
+			 * insidePlasma() asks POINTWISE. What MEQ assembles is F masked by
+			 * elementInPlasma(), so a lobe of `{ Psi > 0 }` that the
+			 * connectivity fill did not reach -- or that an exclusion region
+			 * removed -- carries no current whatever Psi reads on it.
+			 *
+			 * MEASURED, on MAST under filament conductors: `psi_bnd` converges
+			 * NEGATIVE, so the level set does contain `r = 0` -- and the
+			 * reference equilibrium's own near-axis lobe is a separate
+			 * component, joined to the core only through a saddle, which the
+			 * fill correctly declines to reach. Walking the reference's midplane
+			 * inboard from the magnetic axis, psi falls to -3.0876e-02 at
+			 * R = 0.159, BELOW psi_bnd = -2.3596e-02, before rising to
+			 * -1.3990e-02 at R = 0.100. The driver refused that run on the level
+			 * set while printing "plasma component kept it: NO" one line above.
+			 *
+			 * The level-set reading is kept and REPORTED, because a run where
+			 * the two disagree is one where the fill is the only thing between
+			 * the load and a 1/r pole, and that is worth saying out loud.
+			 */
 			if ( axisSource.reachesAxis && axisSource.axisInsidePlasma
-			     && !axisSource.sourceVanishesOnAxis )
+			     && !axisSource.sourceVanishesOnAxis
+			     && !axisSource.supportReachesAxis )
 			{
 				std::fflush( stdout );
+				std::fprintf( stderr,
+					"MEQ: warning: the LEVEL SET { Psi > 0 } contains the symmetry\n"
+					"     axis -- psi_bnd came out %+.6e against a span of %+.6e, so\n"
+					"     Psi( r = 0 ) = %+.4e -- but the plasma support does not\n"
+					"     reach it: the connected component containing the magnetic\n"
+					"     axis stops short, so | F | on r = 0 is assembled as zero\n"
+					"     where the pointwise test would have read %.6e. The answer\n"
+					"     stands and the connectivity is the whole of why. Turning\n"
+					"     [source] ConfineToPlasma off, or PlasmaConnectivity to\n"
+					"     pointwise, would put a 1/r in the load.\n",
+					solver->psiBoundary(),
+					solver->psiAxis() - solver->psiBoundary(),
+					axisSource.normalisedFluxOnAxis, axisSource.worstOnAxis );
+			}
+
+			if ( axisSource.reachesAxis && axisSource.axisInsidePlasma
+			     && !axisSource.sourceVanishesOnAxis
+			     && axisSource.supportReachesAxis )
+			{
+				std::fflush( stdout );
+				std::fprintf( stderr,
+					"MEQ: [diagnostic] axis node ( %.6f, %.6f ) is element %d; "
+					"Psi there %+.4e; plasma component kept it: %s\n",
+					axisSource.worstR, axisSource.worstZ,
+					axisSource.worstElement,
+					axisSource.normalisedFluxOnAxis,
+					axisSource.axisInPlasmaComponent ? "YES" : "NO" );
 				std::fprintf( stderr,
 					"MEQ: THE PLASMA CONTAINS THE SYMMETRY AXIS. This is not a\n"
 					"     large error, it is the wrong topology, and the run is\n"
@@ -3667,7 +3877,14 @@ int main( int argc, char **argv )
 				return ConfigurationError;
 			}
 
-			if ( axisSource.reachesAxis && !axisSource.bounded )
+			/*
+			 * THE SAME CORRECTION, AND IT IS NOT OPTIONAL: `bounded` reads
+			 * `worstOnAxis`, which is f() evaluated pointwise, so leaving this
+			 * one on the level set would simply move MAST's false refusal from
+			 * the guard above to this one. `boundedInSupport` asks the same
+			 * question of the elements the assembly actually integrates over.
+			 */
+			if ( axisSource.reachesAxis && !axisSource.boundedInSupport )
 			{
 				std::fflush( stdout );
 				std::fprintf( stderr,
@@ -3684,8 +3901,8 @@ int main( int argc, char **argv )
 					"     zero. Set [source] ConfineToPlasma = true, which is what says\n"
 					"     the vacuum carries no current, or give a GGPrime that vanishes\n"
 					"     for Psi <= 0. Nothing has been written.\n",
-					axisSource.worstOnAxis, axisSource.worstR, axisSource.worstZ,
-					axisSource.relative,
+					axisSource.worstOnAxisInSupport, axisSource.worstR,
+					axisSource.worstZ, axisSource.relativeInSupport,
 					solver->psiAxis() > solver->psiBoundary()
 					|| solver->psiAxis() < solver->psiBoundary()
 						? -solver->psiBoundary()
@@ -3741,6 +3958,9 @@ int main( int argc, char **argv )
 	 * calls solve() several times, so on those this is the final cycle rather
 	 * than the whole run, and the header says which.
 	 */
+	if ( wantProfile && solver )
+		reportBorderSteps( solver.get() );
+
 	if ( wantProfile && solver )
 	{
 		meq::GradShafranovSolver::StepProfile const &p = solver->stepProfile();

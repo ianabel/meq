@@ -540,7 +540,6 @@ namespace
 		  localSolverChoice( LocalSolver::Newton ),
 		  exteriorCoupling( nullptr ),
 		  sourceQuadratureExtra( 4 ),
-		  orderingChoice( NonlinearOrdering::NPC ),
 		  assemblyModeChoice( defaultAssemblyMode() ),
 		  traceSolverChoice( defaultTraceSolver() ),
 		  andersonDepth( 1 ),
@@ -1371,19 +1370,6 @@ namespace
 #endif
 	}
 
-	void GradShafranovSolver::setNonlinearOrdering( NonlinearOrdering choice )
-	{
-		orderingChoice = choice;
-		built = false;
-		prepared = false;
-	}
-
-	GradShafranovSolver::NonlinearOrdering
-	GradShafranovSolver::nonlinearOrdering() const
-	{
-		return orderingChoice;
-	}
-
 	/*
 	 * Threading the element-local assembly.
 	 *
@@ -2145,14 +2131,6 @@ namespace
 			throw std::invalid_argument(
 				"meq::GradShafranovSolver::setBoundaryFluxPoint: the limiter "
 				"contact must be finite" );
-		if ( orderingChoice != NonlinearOrdering::NPC )
-			throw std::logic_error(
-				"meq::GradShafranovSolver::setBoundaryFluxPoint: psi_bnd as an "
-				"unknown is implemented for NonlinearOrdering::NPC only -- under "
-				"the condensation psi is a function of the trace through every "
-				"element's source, so both the border row and its corner would "
-				"have to be differenced rather than being exact" );
-
 		// setXPointBoundary()'s refusal, read from the other side. Re-pinning a
 		// prescribed contact is ordinary -- XP-2's outer loop does exactly that
 		// -- so what is refused here is the KIND changing, not the point.
@@ -2183,14 +2161,6 @@ namespace
 				"meq::GradShafranovSolver::setLimiterSurface: the limiter region's "
 				"element attribute must be positive -- MFEM numbers attributes from "
 				"1, and tools/mesh/halfdisc.py writes the limiter interior as 20" );
-		if ( orderingChoice != NonlinearOrdering::NPC )
-			throw std::logic_error(
-				"meq::GradShafranovSolver::setLimiterSurface: psi_bnd as an unknown "
-				"is implemented for NonlinearOrdering::NPC only -- under the "
-				"condensation psi is a function of the trace through every element's "
-				"source, so both the border row and its corner would have to be "
-				"differenced rather than being exact" );
-
 		// THE TWO ARE ALTERNATIVES AND NAMING BOTH IS REFUSED. A prescribed
 		// contact and a found one are different constraints on the same unknown,
 		// and both converge -- to different equilibria, by the O( h ) the point
@@ -2273,14 +2243,6 @@ namespace
 				"X-point: psi vanishes identically on r = 0, so q_h there is "
 				"small everywhere and a sweep reports a ladder of near-saddles "
 				"that no divertor put there" );
-		if ( orderingChoice != NonlinearOrdering::NPC )
-			throw std::logic_error(
-				"meq::GradShafranovSolver::setXPointBoundary: the X-point as an "
-				"unknown is implemented for NonlinearOrdering::NPC only -- its "
-				"two rows are covectors on the FLUX, and only under NPC is the "
-				"flux an unknown of the system rather than something recovered "
-				"from the trace" );
-
 		// ALL THREE PIN THE SAME UNKNOWN, so naming two of them is saying the
 		// answer twice -- the same refusal setLimiterSurface() makes against
 		// setBoundaryFluxPoint(), and for the same reason: a precedence rule
@@ -2819,6 +2781,19 @@ namespace
 					result.worstOnAxis = onAxis;
 					result.worstR = point( 0 );
 					result.worstZ = point( 1 );
+					result.worstElement = e;
+				}
+
+				// AND THE SAME READING RESTRICTED TO WHAT IS ACTUALLY
+				// ASSEMBLED. f() is pointwise and knows nothing about elements;
+				// the load is F masked by elementInPlasma(), so an axis element
+				// the fill declined or an exclusion removed carries no pole
+				// however large F would have been on it.
+				if ( elementInPlasma( e ) )
+				{
+					result.supportReachesAxis = true;
+					if ( onAxis > result.worstOnAxisInSupport )
+						result.worstOnAxisInSupport = onAxis;
 				}
 			}
 		}
@@ -2831,6 +2806,9 @@ namespace
 		result.relative = result.sourceScale > 0.0
 			? result.worstOnAxis/result.sourceScale : 0.0;
 		result.bounded = result.relative <= tolerance;
+		result.relativeInSupport = result.sourceScale > 0.0
+			? result.worstOnAxisInSupport/result.sourceScale : 0.0;
+		result.boundedInSupport = result.relativeInSupport <= tolerance;
 
 		/*
 		 * AND IS THE SYMMETRY AXIS INSIDE THE PLASMA? A SEPARATE AND WORSE
@@ -2845,6 +2823,23 @@ namespace
 		if ( span != 0.0 )
 			result.normalisedFluxOnAxis = ( 0.0 - psiBoundaryValue )/span;
 		result.axisInsidePlasma = result.normalisedFluxOnAxis > 0.0;
+
+		/*
+		 * AND DID THE FILL ACTUALLY KEEP THAT ELEMENT? The test above is on the
+		 * LEVEL SET, which is what insidePlasma() asks pointwise; under
+		 * PlasmaConnectivity::Component the assembled current lives on the
+		 * connected component containing the axis instead, so a lobe of
+		 * { Psi > 0 } the fill never reached carries none. Reported rather than
+		 * folded into axisInsidePlasma, because the two are different questions
+		 * and a caller refusing a run should be able to see both.
+		 */
+		if ( result.worstElement >= 0 && plasmaComponentWanted()
+		     && plasmaComponentMask.seedLabel() >= 0 )
+			result.axisInPlasmaComponent =
+				plasmaComponentMask.label( result.worstElement )
+				== plasmaComponentMask.seedLabel();
+		else
+			result.axisInPlasmaComponent = result.axisInsidePlasma;
 
 		/*
 		 * DOES F VANISH ON THE AXIS FOR EVERY psi, NOT MERELY FOR THIS ONE?
@@ -4127,13 +4122,6 @@ namespace
 				"meq::GradShafranovSolver::setPlasmaCurrent: mu0 * I_p must be "
 				"finite and non-zero -- a zero target is the trivial branch "
 				"asked for by name" );
-		if ( orderingChoice != NonlinearOrdering::NPC )
-			throw std::logic_error(
-				"meq::GradShafranovSolver::setPlasmaCurrent: the current "
-				"constraint is implemented for NonlinearOrdering::NPC only -- "
-				"its row is a covector on the POTENTIAL, which is an unknown of "
-				"the system only under NPC" );
-
 		currentIsUnknown = true;
 		targetMuZeroCurrent = muZeroCurrent;
 		prepared = false;
@@ -4147,6 +4135,11 @@ namespace
 	double GradShafranovSolver::plasmaCurrent() const
 	{
 		return plasmaCurrentValue;
+	}
+
+	double GradShafranovSolver::plasmaCurrentSensitivity() const
+	{
+		return currentSensitivityValue;
 	}
 
 	/*
@@ -4224,6 +4217,12 @@ namespace
 		}
 
 		plasmaComponentMask.setAdjacency( std::move( offsets ), std::move( list ) );
+
+		// AND THE EXCLUSION IS REBUILT WITH IT, for the reason the adjacency is:
+		// an adaptive cycle refines the mesh this solver holds BY REFERENCE, so
+		// a cached per-element mask describes a mesh that no longer exists --
+		// every index still in range and every one of them wrong.
+		refreshPlasmaExclusion();
 		plasmaAdjacencyBuilt = true;
 	}
 
@@ -4325,6 +4324,22 @@ namespace
 		 */
 		std::vector< char > carriesPlasma( static_cast< std::size_t >( elements ), 0 );
 		std::vector< char > interior( static_cast< std::size_t >( elements ), 1 );
+
+		/*
+		 * AND AN EXCLUDED ELEMENT IS NEITHER, WHATEVER Psi READS ON IT.
+		 * setPlasmaExclusion() is a statement about the DEVICE, so it is applied
+		 * before the flux is looked at rather than after: an excluded element is
+		 * not a candidate, cannot be traversed, cannot be a seed, and does not
+		 * appear in the candidate count the driver reports. Making it a
+		 * non-candidate rather than filtering the result afterwards is what
+		 * stops it BRIDGING two lobes that are otherwise separate -- the
+		 * straddling band is shared out by a watershed over the candidates, and
+		 * a candidate outside the vessel could carry the wave across.
+		 */
+		auto excludedElement = [ & ]( int element )
+		{
+			return plasmaComponentMask.isExcluded( element );
+		};
 
 		/*
 		 * THE SEED IS THE LARGEST NORMALISED FLUX OFF THE SYMMETRY AXIS, and
@@ -4433,6 +4448,13 @@ namespace
 		mfem::Array< int > dofs;
 		for ( int e = 0; e < elements; ++e )
 		{
+			// Before the flux is read at all: see excludedElement above.
+			if ( excludedElement( e ) )
+			{
+				interior[ static_cast< std::size_t >( e ) ] = 0;
+				continue;
+			}
+
 			potentialFes->GetElementDofs( e, dofs );
 			bool const onAxis = touchesAxis( e );
 			bool const inCoil = insideConductor( e );
@@ -4552,6 +4574,55 @@ namespace
 	bool GradShafranovSolver::elementInPlasma( int element ) const
 	{
 		return plasmaComponentMask.holds( element );
+	}
+
+	void GradShafranovSolver::setPlasmaExclusion( mfem::Array< int > const &attributes )
+	{
+		for ( int i = 0; i < attributes.Size(); ++i )
+			if ( attributes[ i ] <= 0 )
+				throw std::invalid_argument( "meq::GradShafranovSolver::setPlasmaExclusion: a mesh element attribute is a positive integer" );
+
+		plasmaExclusionAttributeList.assign( attributes.begin(), attributes.end() );
+		refreshPlasmaExclusion();
+	}
+
+	std::vector< int > const &GradShafranovSolver::plasmaExclusionAttributes() const
+	{
+		return plasmaExclusionAttributeList;
+	}
+
+	int GradShafranovSolver::excludedElementCount() const
+	{
+		return plasmaComponentMask.excludedNodes();
+	}
+
+	void GradShafranovSolver::refreshPlasmaExclusion()
+	{
+		if ( plasmaExclusionAttributeList.empty() )
+		{
+			plasmaComponentMask.setExcluded( {} );
+			return;
+		}
+
+		/*
+		 * ONCE PER MESH AND NOT ONCE PER SWEEP, which is the entire argument for
+		 * an attribute over a polygon: the support moves with the iterate and is
+		 * re-decided on every residual evaluation, and this answer cannot move
+		 * because a vessel does not.
+		 */
+		int const elements = mesh.GetNE();
+		std::vector< char > excluded( static_cast< std::size_t >( elements ), 0 );
+		for ( int e = 0; e < elements; ++e )
+		{
+			int const attribute = mesh.GetAttribute( e );
+			for ( int const wanted : plasmaExclusionAttributeList )
+				if ( attribute == wanted )
+				{
+					excluded[ static_cast< std::size_t >( e ) ] = 1;
+					break;
+				}
+		}
+		plasmaComponentMask.setExcluded( std::move( excluded ) );
 	}
 
 	int GradShafranovSolver::plasmaComponentLabel( int element ) const
@@ -5001,7 +5072,7 @@ namespace
 		// Under the condensation the residual is the REDUCED trace residual and
 		// this element assembly is not it. NPC's residual is unreduced, which is
 		// what makes the column assemblable at all.
-		if ( !normalisedSource || orderingChoice != NonlinearOrdering::NPC )
+		if ( !normalisedSource )
 			return false;
 
 		// Ask the source once whether it can answer at all. A source that has
@@ -5096,11 +5167,6 @@ namespace
 	{
 		if ( globalisationChoice != Globalisation::None )
 			throw std::logic_error( "meq::GradShafranovSolver::solve: psi_ax as an unknown is implemented for Globalisation::None only -- the KINSOL paths drive a residual of their own and the Picard ones do not build a Jacobian at all" );
-		// No ordering guard: both surviving orderings carry psi_ax. They carry it
-		// DIFFERENTLY, and the difference is the whole content of this function --
-		// see the border and the corner below.
-
-		bool const npcOrdering = orderingChoice == NonlinearOrdering::NPC;
 
 		/*
 		 * FB-5. THIS FUNCTION NOW CARRIES THREE KINDS OF BORDER AND NOT ONE,
@@ -5125,14 +5191,6 @@ namespace
 		bool const hasNormalisation = normalisedSource != nullptr;
 		int const nModes = exteriorCoupling ? exteriorCoupling->modeCount() : 0;
 
-		if ( nModes > 0 && !npcOrdering )
-			throw std::logic_error(
-				"meq::GradShafranovSolver::solve: the exterior coupling needs "
-				"NonlinearOrdering::NPC. Its rows are the transmission "
-				"integrals, which are a covector on the FLUX, and only under NPC "
-				"is the flux an unknown of the system -- under the condensation "
-				"it is recovered from the trace and the row would need the "
-				"recovery's derivative, which DarcyHybridization does not expose" );
 		if ( nModes > 0 && !usesNonlinearForms() )
 			throw std::logic_error(
 				"meq::GradShafranovSolver::solve: the exterior coupling needs a "
@@ -5178,19 +5236,19 @@ namespace
 		 * NPC has no element-local non-linear solve at all, so there is no seed,
 		 * nothing to go stale, and nothing to re-form.
 		 */
-		mfem::Vector &unknown = npcOrdering ? solution : traceX;
+		mfem::Vector &unknown = solution;
 		int const n = unknown.Size();
 
 		recoveryScratch.Update( darcy->GetOffsets() );
 
 		newtonResidualHistory.clear();
+		borderStepHistory.clear();
 		newtonIterationCount = 0;
 		symbolicFactorisationCount = 0;
 		numericFactorisationCount = 0;
 
-		std::unique_ptr<mfem::DarcyNPCOperator> npc;
-		if ( npcOrdering )
-			npc = std::make_unique<mfem::DarcyNPCOperator>(
+		std::unique_ptr<mfem::DarcyNPCOperator> npc =
+			std::make_unique<mfem::DarcyNPCOperator>(
 				*darcy->GetHybridization(), blockOffsets, darcyRhs );
 
 		/*
@@ -5219,11 +5277,8 @@ namespace
 			// saved state on the next line, so seeding it here is computed and
 			// discarded -- see prepare( bool ).
 			prepare( false );
-			if ( npcOrdering )
-			{
-				npc = std::make_unique<mfem::DarcyNPCOperator>(
-					*darcy->GetHybridization(), blockOffsets, darcyRhs );
-			}
+			npc = std::make_unique<mfem::DarcyNPCOperator>(
+				*darcy->GetHybridization(), blockOffsets, darcyRhs );
 		};
 
 		mfem::Vector residual( n ), column( n ), y( n ), z( n ), scratch( n );
@@ -5572,7 +5627,6 @@ namespace
 		{
 			if ( normalisedSource )
 				normalisedSource->setNormalisation( normalisation, sB );
-			if ( npcOrdering )
 			{
 				// XP-1, and AFTER the normalisation is set: the fill's candidate
 				// test is on Psi, so a mask built before setNormalisation()
@@ -5606,32 +5660,19 @@ namespace
 				npc->Mult( state, out );
 				profile.residualSeconds += profileNow() - tr;
 				++profile.residualCalls;
-				return;
 			}
-			// Refetched rather than held: formSystem() replaces the handle every
-			// time the local seed is refreshed, and a reference taken before the
-			// loop would outlive the operator it names.
-			double const tr = profileNow();
-			reduced.Ptr()->Mult( state, out );
-			out -= traceB;
-			profile.residualSeconds += profileNow() - tr;
-			++profile.residualCalls;
 		};
 
 		/*
 		 * max psi_h, AND WHERE IT IS ATTAINED.
 		 *
-		 * Under NPC this is a READ rather than a recovery: the potential block of
-		 * the unknown holds every nodal value, so the peak is one scan and the
-		 * index it is attained at is the whole of the border row. Under the
-		 * condensation it is recoverPeak(), which runs ComputeSolution() to
-		 * rebuild psi from the trace and reports which ELEMENT attained it,
-		 * because the border there is supported on that element's trace dofs.
+		 * This is a READ rather than a recovery: the potential block of the
+		 * unknown holds every nodal value, so the peak is one scan and the index
+		 * it is attained at is the whole of the border row.
 		 *
-		 * The normalisation is set on both paths even though NPC does not need it
-		 * for the read, so that the two agree on the source's state afterwards --
-		 * and so that a psi_ax the source refuses still throws from here, which is
-		 * what the line search below is catching.
+		 * The normalisation is set even though the read does not need it, so that
+		 * a psi_ax the source refuses still throws from here, which is what the
+		 * line search below is catching.
 		 */
 		/*
 		 * AxisConstraint::LocatedAxis's SCRATCH AND ITS WARM START.
@@ -5658,16 +5699,6 @@ namespace
 		 * equilibrium is reported without saying so, which is the one thing this
 		 * solver refuses to do.
 		 */
-		if ( axisConstraintChoice == AxisConstraint::LocatedAxis && !npcOrdering
-		     && hasNormalisation )
-			throw std::logic_error(
-				"meq::GradShafranovSolver::solve: AxisConstraint::LocatedAxis "
-				"needs NonlinearOrdering::NPC. Under the condensation psi is a "
-				"function of the trace, so the border row would have to be "
-				"differenced with a root find inside every difference. Ask for "
-				"AxisConstraint::NodalMaximum deliberately if the condensation "
-				"is what you want" );
-
 		mfem::GridFunction axisFlux( fluxFes.get() );
 		mfem::GridFunction axisPotential( potentialFes.get() );
 		/*
@@ -5961,9 +5992,6 @@ namespace
 			LegTimer const timer( profile.constraintSeconds,
 			                      profile.constraintCalls );
 			LegTimer const slice( profile.axisSeconds, profile.axisCalls );
-			if ( !npcOrdering )
-				return recoverPeak( state, normalisation, sB, element, dof );
-
 			if ( normalisedSource )
 				normalisedSource->setNormalisation( normalisation, sB );
 
@@ -6303,7 +6331,7 @@ namespace
 		double reference = 0.0;
 		{
 			mfem::Vector coldState( unknown );
-			int const traceBase = npcOrdering ? blockOffsets[ 2 ] : 0;
+			int const traceBase = blockOffsets[ 2 ];
 			for ( int i = 0; i < traceBase; ++i )
 				coldState( i ) = 0.0;
 			for ( int i = traceBase; i < n; ++i )
@@ -6342,19 +6370,14 @@ namespace
 			double coldPeak = 0.0;
 			if ( hasNormalisation )
 			{
-				if ( npcOrdering )
-				{
-					LegTimer const timer( profile.constraintSeconds,
-					                      profile.constraintCalls );
-					LegTimer const slice( profile.axisSeconds,
-					                      profile.axisCalls );
-					if ( normalisedSource )
-						normalisedSource->setNormalisation( s, sB );
-					constraintLocated = false;
-					plasmaSeedElement = -1;
-				}
-				else
-					coldPeak = peakAt( coldState, s, nullptr, nullptr );
+				LegTimer const timer( profile.constraintSeconds,
+				                      profile.constraintCalls );
+				LegTimer const slice( profile.axisSeconds,
+				                      profile.axisCalls );
+				if ( normalisedSource )
+					normalisedSource->setNormalisation( s, sB );
+				constraintLocated = false;
+				plasmaSeedElement = -1;
 			}
 			std::vector<double> coldModes( static_cast<std::size_t>( nModes ), 0.0 );
 			for ( int mode = 0; mode < nModes; ++mode )
@@ -6456,6 +6479,32 @@ namespace
 			newtonResidualHistory.push_back( norm );
 			newtonIterationCount = iteration;
 
+			/*
+			 * THE SAME NUMBER, DECOMPOSED. `norm` above is the whole merit and
+			 * says nothing about which constraint carries it; these are the
+			 * terms of augmentedNorm() with their weights already applied, so
+			 * what is printed is what the Armijo test compares. The damping and
+			 * the direction are filled in at the bottom of this iteration, once
+			 * the line search has run.
+			 */
+			{
+				double modes = 0.0;
+				for ( double v : transmission )
+					modes += v*v;
+
+				BorderStep record;
+				record.fieldNorm = residual.Norml2();
+				record.axis = gamma*constraint;
+				record.boundary = gamma*constraintB;
+				record.current = gamma*constraintL;
+				record.exterior = gamma*std::sqrt( modes );
+				record.xPoint = gamma*xScale*std::sqrt( xFlux[ 0 ]*xFlux[ 0 ]
+				                                        + xFlux[ 1 ]*xFlux[ 1 ] );
+				record.xR = xR;
+				record.xZ = xZ;
+				borderStepHistory.push_back( record );
+			}
+
 			if ( norm <= target )
 			{
 				converged = true;
@@ -6474,14 +6523,7 @@ namespace
 			// differentiates to 1 in s. Under the condensation psi is a function of
 			// s through every element's source, so the derivative is real and has
 			// to be measured.
-			double corner = 1.0;
-			if ( coupled && !npcOrdering )
-			{
-				double const h = normalisationStep( s );
-				double const peakUp = recoverPeak( traceX, s + h, sB );
-				double const peakDown = recoverPeak( traceX, s - h, sB );
-				corner = 1.0 - ( peakUp - peakDown )/( 2.0*h );
-			}
+			double const corner = 1.0;
 
 			// b = -d( max psi_h )/d( unknown ). Essential dofs are left at zero:
 			// the step does not move them, so what they would contribute is
@@ -6489,7 +6531,7 @@ namespace
 			mfem::Array<int> borderDofs;
 			mfem::Vector border;
 
-			if ( npcOrdering && constraintLocated )
+			if ( constraintLocated )
 			{
 				/*
 				 * OPTION 3's ROW, AND IT IS EXACT FOR THE SAME REASON -e_j IS.
@@ -6526,7 +6568,7 @@ namespace
 					border( i ) = coupled ? -constraintShape( i ) : 0.0;
 				}
 			}
-			else if ( npcOrdering )
+			else
 			{
 				/*
 				 * ONE ENTRY, EXACT, NOT DIFFERENCED. max psi_h is the argDof'th
@@ -6591,32 +6633,6 @@ namespace
 					borderDofs[ 0 ] = argDof;
 					border.SetSize( 1 );
 					border( 0 ) = coupled ? -1.0 : 0.0;
-				}
-			}
-			else
-			{
-				// On the trace dofs of the element that attained the maximum and
-				// nowhere else -- under hybridization that element's recovered
-				// potential depends on no others. Asserted rather than assumed, in
-				// HighBetaConvergence.cpp's theAxisSensitivityIsLocalToItsElement.
-				traceDofsOfElement( argElement, borderDofs );
-				border.SetSize( borderDofs.Size() );
-				border = 0.0;
-
-				double const traceStep = 1.0e-6*std::max( traceX.Normlinf(), 1.0 );
-				for ( int i = 0; coupled && i < borderDofs.Size(); ++i )
-				{
-					int const dof = borderDofs[ i ];
-					if ( essential[ dof ] )
-						continue;
-
-					double const saved = traceX( dof );
-					traceX( dof ) = saved + traceStep;
-					double const up = recoverPeak( traceX, s, sB );
-					traceX( dof ) = saved - traceStep;
-					double const down = recoverPeak( traceX, s, sB );
-					traceX( dof ) = saved;
-					border( i ) = -( up - down )/( 2.0*traceStep );
 				}
 			}
 
@@ -6685,14 +6701,8 @@ namespace
 			mfem::Array<mfem::Vector *> borderOut;
 			auto queue = [ & ]( mfem::Vector const &rhs, mfem::Vector &out )
 			{
-				if ( npcOrdering )
-				{
-					borderRhs.Append( &rhs );
-					borderOut.Append( &out );
-					return;
-				}
-				npcLinear.Mult( rhs, out );
-				out.HostRead();
+				borderRhs.Append( &rhs );
+				borderOut.Append( &out );
 			};
 
 			/*
@@ -6734,7 +6744,6 @@ namespace
 				borderOut.SetSize( 0 );
 			};
 
-			if ( npcOrdering )
 			{
 				// The same support the residual was evaluated at. See
 				// fieldResidual above -- including when that is the FROZEN one,
@@ -6750,16 +6759,6 @@ namespace
 				npcLinear.SetOperator( jacobian );
 				queue( residual, y );
 				queue( column, z );
-			}
-			else
-			{
-				double const tg = profileNow();
-				mfem::Operator &gradient = reduced.Ptr()->GetGradient( traceX );
-				profile.gradientSeconds += profileNow() - tg;
-				++profile.gradientCalls;
-				linear.SetOperator( gradient );
-				linear.Mult( residual, y );
-				linear.Mult( column, z );
 			}
 
 			for ( int mode = 0; mode < nModes; ++mode )
@@ -7108,6 +7107,35 @@ namespace
 						throw std::runtime_error( "meq::GradShafranovSolver::solve: the bordered Jacobian is singular in ( psi_ax, psi_bnd, a )" );
 					step[ static_cast<std::size_t>( i ) ] = solved( i );
 				}
+
+				/*
+				 * d( mu0 I_p )/d lambda ALONG THE MANIFOLD, FOR FREE.
+				 *
+				 * `dense` IS the Schur complement of the border, so the
+				 * sensitivity of the current residual to the scale with every
+				 * other border residual held at zero is 1/( S^-1 )_II -- one
+				 * solve against the factorisation two lines above, on a matrix
+				 * of order at most 4 + modes. The PARTIAL derivative is not
+				 * this and is worthless: F is linear in lambda, so at a frozen
+				 * field it is ( int F/r )/lambda and can never be small.
+				 *
+				 * It is recomputed every iteration and the CONVERGED one is
+				 * what plasmaCurrentSensitivity() reports, which is the only
+				 * one that means anything -- an intermediate iterate's Jacobian
+				 * belongs to a different plasma support.
+				 */
+				if ( currentIsUnknown )
+				{
+					mfem::Vector unit( nBorderTotal ), response( nBorderTotal );
+					unit = 0.0;
+					unit( currentIndex ) = 1.0;
+					inverse.Mult( unit, response );
+					double const diagonal = response( currentIndex );
+					currentSensitivityValue =
+						( std::isfinite( diagonal ) && diagonal != 0.0 )
+						? 1.0/diagonal
+						: std::numeric_limits<double>::infinity();
+				}
 			}
 			}
 
@@ -7158,6 +7186,20 @@ namespace
 			double bestDamping = 0.0;
 			double damping = 1.0;
 			bool accepted = false;
+
+			/*
+			 * THE DIRECTION, BEFORE ANY STEP LENGTH IS TRIED. The bordered
+			 * SOLUTION is checked for finiteness where it is solved, but `y` --
+			 * the field direction the line search scales -- is not, so a
+			 * non-finite one reaches the loop below and fails all twelve
+			 * halvings. That failure is indistinguishable in the message from a
+			 * step that is merely too long, and it is a different defect.
+			 */
+			{
+				double const yNorm = y.Norml2();
+				borderStepHistory.back().directionNorm = yNorm;
+				borderStepHistory.back().directionFinite = std::isfinite( yNorm );
+			}
 
 			for ( int trial = 0; trial < 12 && !accepted; ++trial, damping *= 0.5 )
 			{
@@ -7251,12 +7293,25 @@ namespace
 				// step that does not make things worse, not an optimal one.
 				accepted = std::isfinite( trialNorm )
 				           && trialNorm < ( 1.0 - 1.0e-4*damping )*norm;
+				if ( accepted )
+				{
+					borderStepHistory.back().damping = damping;
+					borderStepHistory.back().trials = trial + 1;
+					borderStepHistory.back().armijo = true;
+				}
 			}
 
 			if ( !accepted )
 			{
 				if ( bestDamping == 0.0 )
 					throw std::runtime_error( "meq::GradShafranovSolver::solve: no damping of the bordered Newton step gave a finite residual -- psi_ax through zero, most often, which is the branch leaving the physical one" );
+				// The least-bad damping, which is NOT an Armijo step: it is how
+				// the residual rises from one iteration to the next, and the
+				// trace says so rather than leaving a reader to infer it.
+				borderStepHistory.back().damping = bestDamping;
+				borderStepHistory.back().trials = 12;
+				borderStepHistory.back().armijo = false;
+
 				// EVERY border, or the fallback step puts the fields back on a
 				// damping the exterior coefficients and psi_bnd never received,
 				// which is a state no equation in this system describes.
@@ -7342,13 +7397,6 @@ namespace
 			 * for a stale linearisation to corrupt. q and psi are Newton state and
 			 * are already in `unknown`.
 			 */
-			if ( !npcOrdering )
-			{
-				darcySolution = recoveryScratch;
-				rhs = 0.0;
-				formSystem();
-			}
-
 			sourceColumn( unknown, s, column );
 		}
 
@@ -7458,9 +7506,6 @@ namespace
 		 * this refresh hangs off, and a fixed point on the potential re-enters
 		 * prepare() per iteration.
 		 */
-		if ( plasmaComponentWanted() && orderingChoice != NonlinearOrdering::NPC )
-			throw std::logic_error( "meq::GradShafranovSolver::solve: PlasmaConnectivity::Component needs NonlinearOrdering::NPC -- under the condensation the unknown is the trace alone and there is no potential to read the plasma's support from. Choose PlasmaConnectivity::Pointwise to have the support MEQ had before XP-1, and know that it is a level set rather than a connected plasma" );
-
 		if ( nonlinearSource && globalisationChoice == Globalisation::PicardThenNewton )
 		{
 			solveByPicardThenNewton();
@@ -7490,8 +7535,7 @@ namespace
 		 * an unchecked back-substitution to reproduce fields MEQ already holds
 		 * exactly is a way to lose them, not a way to confirm them.
 		 */
-		bool const fieldsAreState = usesNonlinearForms()
-		                            && orderingChoice == NonlinearOrdering::NPC;
+		bool const fieldsAreState = usesNonlinearForms();
 
 		// psi_ax has to be in the source before anything assembles, so that
 		// prepare() and the first residual evaluation see the same normalisation.
@@ -7506,8 +7550,6 @@ namespace
 		}
 		else if ( nonlinearSource )
 		{
-			bool const npcOrdering = orderingChoice == NonlinearOrdering::NPC;
-
 			/*
 			 * THE COLD REFERENCE IS TAKEN FIRST, AND BY PREPARING WITHOUT THE
 			 * GUESS RATHER THAN BY EDITING THE TRACE. Both halves of that are
@@ -7527,18 +7569,10 @@ namespace
 			 */
 			auto coldNorm = [ & ]()
 			{
-				if ( npcOrdering )
-				{
-					mfem::DarcyNPCOperator cold( *darcy->GetHybridization(),
-					                             blockOffsets, darcyRhs );
-					mfem::Vector coldResidual( cold.Height() );
-					cold.Mult( solution, coldResidual );
-					return coldResidual.Norml2();
-				}
-
-				mfem::Vector coldResidual( traceX.Size() );
-				reduced.Ptr()->Mult( traceX, coldResidual );
-				coldResidual -= traceB;
+				mfem::DarcyNPCOperator cold( *darcy->GetHybridization(),
+				                             blockOffsets, darcyRhs );
+				mfem::Vector coldResidual( cold.Height() );
+				cold.Mult( solution, coldResidual );
 				return coldResidual.Norml2();
 			};
 
@@ -7617,18 +7651,13 @@ namespace
 			 * by the operator, so it must outlive it; it is a member, and
 			 * formSystem() has already pointed it at rhs's first two blocks.
 			 */
-			std::unique_ptr<mfem::DarcyNPCOperator> npc;
-			std::unique_ptr<mfem::DarcyNPCSolver> npcLinear;
-			if ( npcOrdering )
-			{
-				npc = std::make_unique<mfem::DarcyNPCOperator>(
+			std::unique_ptr<mfem::DarcyNPCOperator> npc =
+				std::make_unique<mfem::DarcyNPCOperator>(
 					*darcy->GetHybridization(), blockOffsets, darcyRhs );
-				npcLinear = std::make_unique<mfem::DarcyNPCSolver>( timedLinear );
-			}
+			std::unique_ptr<mfem::DarcyNPCSolver> npcLinear =
+				std::make_unique<mfem::DarcyNPCSolver>( timedLinear );
 
-			mfem::Operator &bareOperator =
-				npcOrdering ? static_cast<mfem::Operator &>( *npc )
-				            : static_cast<mfem::Operator &>( *reduced.Ptr() );
+			mfem::Operator &bareOperator = *npc;
 
 			/*
 			 * XP-1. The plasma's connected component is a functional of the
@@ -7637,19 +7666,13 @@ namespace
 			 * call in one place would not: the two must be taken at the SAME
 			 * support or the Jacobian is differentiating a different function.
 			 *
-			 * Only under NPC. The condensation's unknown is the trace alone, so
-			 * the wrapper would be handed a vector with no potential block in
-			 * it -- and that combination is refused at the top of solve() rather
-			 * than downgraded, so this test is a statement of which path is
-			 * live rather than a fallback.
 			 */
 			// The residual and gradient legs. INNERMOST, inside both wrappers
 			// below, so the flood fill and the shift are charged elsewhere.
 			TimedOperator timedOperator( bareOperator, profile );
 
 			std::unique_ptr<ComponentRefreshed> refreshed;
-			if ( npcOrdering && plasmaComponentWanted()
-			     && !plasmaSupportFrozenValue )
+			if ( plasmaComponentWanted() && !plasmaSupportFrozenValue )
 				refreshed = std::make_unique<ComponentRefreshed>(
 					timedOperator,
 					[ this ]( mfem::Vector const &x )
@@ -7677,12 +7700,9 @@ namespace
 			// carries none -- MEQ imposes psi = g_D as an ESSENTIAL condition,
 			// not as a Neumann datum, and a Neumann datum is the one thing that
 			// would have to ride here instead.
-			mfem::Vector &unknown = npcOrdering ? solution : traceX;
+			mfem::Vector &unknown = solution;
 			mfem::Vector newtonRhs( residualOperator.Height() );
-			if ( npcOrdering )
-				newtonRhs = 0.0;
-			else
-				newtonRhs = traceB;
+			newtonRhs = 0.0;
 
 			// KINSOL ignores the right hand side handed to Mult(), so the shift
 			// has to be in the operator. Built unconditionally and used only on
@@ -7778,10 +7798,7 @@ namespace
 			// them and its Mult() aborts. Handing the trace solver straight to
 			// Newton would fail loudly, which is upstream's design and better
 			// than the alternative.
-			if ( npcOrdering )
-				nonlinear->SetSolver( *npcLinear );
-			else
-				nonlinear->SetSolver( timedLinear );
+			nonlinear->SetSolver( *npcLinear );
 			nonlinear->SetMonitor( recorder );
 
 #ifdef MFEM_USE_SUNDIALS
@@ -7794,7 +7811,7 @@ namespace
 			// that a KINSOL run and a plain Newton run differ in the LINE SEARCH
 			// and in nothing else, which is what makes
 			// kinsolAgreesWithNewtonWhereBothConverge worth asserting.
-			if ( kinsol && npcOrdering )
+			if ( kinsol )
 				static_cast<mfem::KINSolver &>( *nonlinear ).SetMaxSetupCalls( 1 );
 #endif
 
@@ -8100,6 +8117,12 @@ namespace
 	std::vector<double> const &GradShafranovSolver::newtonResiduals() const
 	{
 		return newtonResidualHistory;
+	}
+
+	std::vector<GradShafranovSolver::BorderStep> const &
+	GradShafranovSolver::borderSteps() const
+	{
+		return borderStepHistory;
 	}
 
 	int GradShafranovSolver::picardIterations() const
