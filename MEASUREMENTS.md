@@ -2815,18 +2815,55 @@ constraint residual moves in its last printed digit, −6.465e-12 → −6.466e-
 the ring search and the full sweep reach the same critical point by different
 root-find paths.
 
-**THE REMAINING SWEEP CANNOT BE FIXED BY A SEED** and is a separate item. It is
-`peakAt( coldState, … )`, the cold reference for the convergence target, where
-the flux and potential blocks are zero and no axis exists — so it roots 4848
-elements in order to fail. `peakAt()` calls `locateAxisPoint()` unconditionally
-under `AxisConstraint::LocatedAxis`, while that call site passes `nullptr` for
-both `element` and `dof` and wants only the peak VALUE, which the nodal scan
-below already supplies. Guarding on those nulls looks behaviour-neutral —
-`constraintLocated` is false after the failed locate and would be false without
-it — but it sits in the branch `GradShafranov.cpp` already flags as *"a
-branch-selection decision rather than a bug fix"*, where making the flag and
-`argDof` describe the same evaluation changes which equilibrium the diverted
-machine reports. Not taken here on that ground.
+**THE REMAINING SWEEP CANNOT BE FIXED BY A SEED, AND IT DID NOT NEED ONE.** It
+is `peakAt( coldState, … )`, the cold reference for the convergence target,
+where the flux and potential blocks are zero and no axis exists — so it roots
+4848 elements in order to fail.
+
+**Warm starting it is impossible twice over**, which is worth recording because
+a seed is the obvious thing to reach for after the fix above. The seeded
+`tryFindAxisFrom()` needs an extremum to follow and this field has none, so it
+fails and falls through to the same cold sweep; and on a fresh solve
+`havePreviousAxis` is false anyway, since nothing has yet succeeded on a real
+iterate. A seed cannot help a search whose field is identically zero.
+
+**What it needed was an early-out, and the justification is local and
+provable.** Under NPC `traceBase` is `blockOffsets[ 2 ]`, so the loop three
+lines above the call has zeroed the flux block *and* the potential block
+outright. `q_h` and `psi_h` are therefore identically zero on that state by
+construction, the axis search cannot succeed, and `peakAt()`'s fallback — a
+nodal maximum over an all-zero potential block — is exactly `0`. The call is
+replaced by its own answer, with `constraintLocated = false`,
+`plasmaSeedElement = -1` and the source's normalisation set, which is precisely
+the state `peakAt()` leaves behind when the locate fails.
+
+| | with the sweep | early-out |
+|---|---|---|
+| cold sweeps per solve | 1 | **0** |
+| axis leg | 0.113–0.125 s | **0.002 s** |
+| constraint location | 0.120 s, 17.7% | **0.023 s, 3.9%** |
+| `psi_ax` | 3.759851e-01 | 3.759851e-01 |
+| constraint residual | −6.466e-12 | −6.466e-12 |
+
+Four interleaved rounds, `build-nocuda` at `OMP = MKL = 8`. **The axis leg
+saving is ~0.116 s and reproducible to the millisecond; the solve-level delta
+is consistent in sign across all four rounds but reads 0.04 to 0.48 s**, so on a
+machine at load 6.8 its magnitude is not resolvable and only the leg figure is
+claimed. Against a ~4 s solve that is about 3%. Note the legs sum to ~0.74 s
+against that solve: they instrument the Newton loop, not the assembly ahead of
+it.
+
+**AND THIS IS NOT THE BRANCH-SELECTION CHANGE THE SAME CALL SITE WARNS ABOUT**,
+which is the distinction that makes it safe to take. That warning is about
+adding `peak = peakAt( unknown, s, … )` *after* this block so the flag describes
+the ITERATE — which makes `constraintLocated` TRUE at iteration 0, couples the
+axis row on the first step, and moves the diverted machine to a different
+equilibrium. This change keeps the flag FALSE and therefore keeps the decoupled
+first step exactly; it declines to spend a full-mesh sweep discovering that
+falseness. The suite is 50/51 with only `PlasmaEdgeConvergence`'s deliberate red,
+so every bordered case in the tree — `HighBetaConvergence`,
+`FreeBoundaryCoupling`, `XPointBorder`, `LimiterCurve`, `DriverAcceptance` —
+confirms the locate was failing there too.
 
 **WHAT THIS SAYS ABOUT CCSZ.** `meq::SourceIntegrator` lives in the residual
 leg, which is **8.0% of a threaded step on this case**. The 23–28% Amdahl

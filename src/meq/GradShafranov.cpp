@@ -6312,8 +6312,50 @@ namespace
 
 			mfem::Vector coldResidual( n );
 			fieldResidual( coldState, s, coldResidual );
-			double const coldPeak = hasNormalisation
-			                        ? peakAt( coldState, s, nullptr, nullptr ) : 0.0;
+
+			/*
+			 * THE COLD PEAK IS ZERO BY CONSTRUCTION AND peakAt() WOULD SPEND A
+			 * FULL-MESH AXIS SWEEP DISCOVERING IT.
+			 *
+			 * Under NPC `traceBase` is `blockOffsets[ 2 ]`, so the loop three
+			 * lines up has just zeroed the flux block AND the potential block
+			 * outright -- `q_h` and `psi_h` are identically zero on this state.
+			 * locateAxisPoint() then searches a field with no extremum anywhere
+			 * and fails, and peakAt() falls through to its nodal maximum over
+			 * the potential block, which is a scan of zeros returning zero.
+			 * Measured on examples/machine-f-diiid.toml, that fruitless sweep is
+			 * the single largest item in the constraint leg.
+			 *
+			 * WARM STARTING IT IS NOT THE FIX AND CANNOT BE. The seeded search
+			 * needs an extremum to follow and this field has none, so
+			 * tryFindAxisFrom() fails and falls through to the same cold sweep;
+			 * and on a fresh solve there is no previous axis to seed it with in
+			 * the first place, `havePreviousAxis` being false until some
+			 * evaluation on a real iterate succeeds.
+			 *
+			 * The side effects are reproduced rather than skipped, because one
+			 * of them is load bearing: `constraintLocated` FALSE is what gives
+			 * iteration 0 the empty axis row, and the decoupled first step that
+			 * follows from it is the branch-selection behaviour the note below
+			 * says must not change silently.
+			 */
+			double coldPeak = 0.0;
+			if ( hasNormalisation )
+			{
+				if ( npcOrdering )
+				{
+					LegTimer const timer( profile.constraintSeconds,
+					                      profile.constraintCalls );
+					LegTimer const slice( profile.axisSeconds,
+					                      profile.axisCalls );
+					if ( normalisedSource )
+						normalisedSource->setNormalisation( s, sB );
+					constraintLocated = false;
+					plasmaSeedElement = -1;
+				}
+				else
+					coldPeak = peakAt( coldState, s, nullptr, nullptr );
+			}
 			std::vector<double> coldModes( static_cast<std::size_t>( nModes ), 0.0 );
 			for ( int mode = 0; mode < nModes; ++mode )
 				coldModes[ static_cast<std::size_t>( mode ) ] =
