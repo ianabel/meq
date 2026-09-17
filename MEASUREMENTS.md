@@ -3511,3 +3511,125 @@ converges. Moving `PsiAxis` to 5.0e-02, which M-107 shows is the same basin,
 converges on the vessel mesh at **1.917e-03** against the committed mesh's
 2.762e-03. Machine A sits near a fold with two roots; a three per cent
 perturbation of the mesh is exactly what such a case is fragile to.
+
+### M-111
+
+**THE RACE ON THREE MACHINES, AND DIII-D'S 1.34× IS THE BEST CASE RATHER THAN
+THE TYPICAL ONE.** M-97 and M-102 race one machine. The cold-forward audit
+behind [M-112](#m-112) says which others can be raced at all — MEQ must close
+from a cold start and freegs4e must reach the same equilibrium — and that is
+**C MAST** and **G MAST-U** beside **F DIII-D**. Interleaved, best of five, one
+case per invocation, each gated on the one-minute load falling below 0.5:
+
+| case | freegs4e 129², cold | MEQ, cold | ratio | MEQ's rung |
+|---|---|---|---|---|
+| **F DIII-D** | **3.903** | **5.408** | **1.39×** | `k = 2`, 4848 el |
+| **G MAST-U** | **8.612** | **26.298** | **3.05×** | `k = 3`, 6707 el |
+| **C MAST** | **4.666** | **18.044** | **3.87×** | `k = 2`, 4198 el |
+
+Spreads 1.03× on freegs4e's arm and 1.04× on MEQ's, and **`psi_ax` is identical
+across all five rounds of every case** — 5.896474e-02, 3.759851e-01,
+8.403188e-02 — which is what makes these timings rather than solves.
+
+**M-102 REPRODUCES, WHICH IS THE CHECK THAT LICENSES THE OTHER TWO ROWS.**
+freegs4e reads 3.903 against M-102's 3.922, **1.005×**; MEQ reads 5.408 against
+5.245, 1.03×; the ratio 1.39× against 1.34×. Both inside M-102's own spreads, on
+a day's worth of intervening commits.
+
+**AND THE ACCURACY THOSE SECONDS BUY**, from the same rungs, each measured
+against its own code's finest run:
+
+| case | rel `L2` | ... off the coils | `psi_ax` |
+|---|---|---|---|
+| F DIII-D | 5.785e-03 | **7.599e-04** | 3.54e-04 |
+| C MAST | 5.342e-03 | **3.268e-03** | 1.76e-02 |
+| G MAST-U | 1.919e-02 | **1.542e-02** | 1.29e-04 |
+
+**`k = 1` FAILS ON ALL THREE CASES, BOTH RUNGS**, which is uniform and is new.
+**C converges on ONE rung of eight** — `k2r0` — and every other one fails,
+so its row is a single point and not a ladder. **F's error does not refine**:
+5.785e-03, 5.802e-03, 5.763e-03, 5.803e-03 across a 16× range in dofs, with the
+off-coil column flat at 6.3e-04 to 7.6e-04. That is the conductor model, MEQ's
+rectangles against freegs4e's filaments, and M-87 sizes it; it is not a
+discretisation error and no rung buys it down. **Ignore G's `psi_bnd`**: the
+reference's is 5.6e-04, so a relative error on it is meaningless.
+
+**A DEFECT IN `race.py` ITSELF, AND IT IS WHY THIS IS NOT ITS OUTPUT.** The
+script runs its cases back to back and its rungs back to back, so on a
+multi-case invocation every case is timed on a machine the previous ones have
+been holding at sixteen threads. Measured on DIII-D's `k2r0`, one binary, one
+configuration, one answer:
+
+| | wall | solve |
+|---|---|---|
+| inside a three-case `race.py C F G` | 9.49 | 8.01 |
+| **settled, interleaved, best of five** | **5.41** | **≈3.8** |
+
+**A factor of two of pure machine state**, with `psi_ax` 3.759851e-01 either
+way. M-97 and M-102 never met this because they are single-case and interleaved.
+Anything multi-case must settle between cases and interleave its control, or it
+is measuring the box.
+
+**AND THE CONTROL HAS TO BE INTERLEAVED WITH WHAT IT CONTROLS, WHICH IS THE
+PART THAT WENT WRONG.** freegs4e's arm was read from inside the race and MEQ's
+from after it, and the pair was compared: freegs4e moved 1.05% and MEQ 2.2×, so
+the machine looked innocent and MEQ looked like a regression. It was neither.
+M-102 states the interleaving as protocol and the reason is exactly this.
+
+### M-112
+
+**NEITHER CODE'S COLD FORWARD RUN WORKS ANYWHERE, AND freegs4e'S FAILS ALL
+FOURTEEN.** A COLD FORWARD run is the machine's currents frozen, the profiles,
+`I_p` prescribed, no constraint, and nothing that was solved for. It is exactly
+what MEQ's shipped configurations are asked -- `make_diverted_case.py` builds
+their `[initialguess]` with `mkcoldguess.py`, from the conductors, the target
+current and the shape the operator asked for.
+
+`forward.py --cold-forward`, every reference:
+
+| | rel | | rel |
+|---|---|---|---|
+| A classic | 2.623e-01 | A shaped | 2.622e-01 |
+| B peaked ff′ | 2.065e-01 | B shaped | 2.063e-01 |
+| C MAST | 3.709e+00 | C shaped | 2.067e+00 |
+| D TCV | 1.093e+02 | D shaped | 1.300e+00 |
+| E diamagnetic | 4.442e-02 | E shaped | 1.480e+00 |
+| **F DIII-D** | **1.310e+00** | F shaped | 1.272e+00 |
+| G MAST-U | 6.797e-01 | G shaped | 5.580e+01 |
+
+**Nine of the fourteen run to the 401-iteration cap**; the five reporting `rtol`
+converge to a different equilibrium, with `Ip_logic` L reaching 6.9, 27.8 and
+0.093. **DIII-D — the one machine that closes every other way — is 1.310e+00 out
+with `psi_axis` NEGATIVE.**
+
+**MEQ's cold table, taken on the same tree**, `psi_ax` against each reference:
+
+| | rel | | rel |
+|---|---|---|---|
+| A classic | 5.687e-01 | A shaped | 5.690e-01 |
+| B ff′ | exit 2 | B shaped | exit 2 |
+| **C MAST** | **1.737e-02** | C shaped | exit 2 |
+| D TCV | exit 2 | **D shaped** | **3.517e-02** |
+| E diamagnetic | exit 2 | E shaped | exit 2 |
+| **F DIII-D** | **3.474e-04** | **F shaped** | **3.412e-06** |
+| **G MAST-U** | **4.943e-02** | G shaped | 4.171e+00 |
+
+**Five of fourteen, against freegs4e's zero, so the intersection is EMPTY.**
+There is no case in this benchmark where both codes solve the same problem from
+a cold start. C is a pass only since M-109 moved the axis guard onto the
+support; M-103 refused it.
+
+**SO THE RACE HAS NEVER BEEN FORWARD AGAINST FORWARD.** `race.py` drives
+freegs4e through `fgsref.py`, which builds with `SyncConstrain` -- the INVERSE
+solve, whose geometric targets are what carry it from cold. That is why its arm
+converges on all seven there while its forward arm fails everything, and it is
+the mode mismatch `CLAUDE_FB.md`'s standing rule names, sitting inside M-97,
+M-102 and M-111. The wall clocks compare different amounts of work and the
+accuracy columns compare MEQ-forward against freegs4e-inverse.
+
+**AND `make_diverted_case.py` WROTE A COMMENT NAMING THE WRONG GUESS BUILDER**,
+telling every generated file that `mkexactguess.py` had built its guess while
+the code called `mkcoldguess.py`. The two make this a different benchmark:
+`mkexactguess` sums Green's functions over the reference's own converged `Jtor`
+and puts the answer in the starting position. Believing the comment is what made
+M-103's failures look like something other than cold-start failures.

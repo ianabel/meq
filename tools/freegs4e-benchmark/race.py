@@ -43,6 +43,25 @@ reported, and their agreement at the finest is reported separately, as the floor
 it is.
 
     python3 race.py <scratch-dir> [case-letters]
+
+ONE CASE PER INVOCATION IF THE WALL CLOCKS ARE THE POINT, AND LET THE MACHINE
+SETTLE BETWEEN THEM.  This script runs its cases back to back and its rungs back
+to back, so on a multi-case run every case is timed on a machine the previous
+ones have been holding at sixteen threads.  Measured on DIII-D's k2r0 -- one
+binary, one configuration, psi_ax 3.759851e-01 either way -- 9.49 s inside a
+three-case `race.py C F G` against 5.41 s settled and interleaved.  A factor of
+two of pure machine state.  M-97 and M-102 never met it because they are
+single-case, and MEASUREMENTS.md M-111 is the three-case table taken properly.
+
+The ACCURACY columns are unaffected: those are answers, not clocks.
+
+AND THE freegs4e ARM IS THE INVERSE SOLVE.  run_freegs() calls fgsref.py, which
+builds through SyncConstrain, so this races MEQ's FORWARD problem against
+freegs4e's INVERSE one -- not a like-for-like comparison of solvers, and the
+reason freegs4e converges here from cold on all seven while its forward arm
+fails all fourteen.  M-112.  It is not a defect of this script so much as the
+only comparison available: there is no case where both codes solve the same
+problem from cold.
 """
 
 import json
