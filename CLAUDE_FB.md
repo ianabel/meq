@@ -2362,16 +2362,37 @@ the reaction, so convergence is linear at a rate set by the reaction against the
 elliptic operator. M-36 already records which side of that trade this is: **a
 robustness route, not a faster one.**
 
-**WHAT IT IS EXPECTED TO BE WORTH IS BOUNDED, AND THE BOUND IS WRITTEN DOWN
-BEFORE THE MEASUREMENT RATHER THAN AFTER.** The fixed point does not move, so it
-helps only by having a different basin, and `A_lin` is unconditionally
-invertible where `A_lin - K` is what goes near-singular. Against M-117's
-classification that is **B and B-shaped** (one fatal step out of twenty-odd) and
-**C-shaped** (chronic); it is **not** D, E or E-shaped, which are X-point
-excursions that no field-block preconditioner restrains. **Three of six is the
-predicted maximum and not a partial success**, and a rung that closes them all
-would mean the classification is wrong rather than that the rung is better than
-expected.
+**WHAT IT WAS EXPECTED TO BE WORTH WAS WRITTEN DOWN BEFORE THE MEASUREMENT, AND
+THE MEASUREMENT FALSIFIED IT.** The prediction: the fixed point does not move, so
+it helps only by having a different basin, and `A_lin` is unconditionally
+invertible where `A_lin - K` is what goes near-singular — which against M-117's
+classification made **B and B-shaped** (one fatal step) and **C-shaped**
+(chronic) the addressable ones and D/E/E-shaped the X-point excursions it could
+not reach. **Three of six, recorded as the maximum rather than the hope.**
+
+**IT CLOSES NONE OF THE SIX, AND THE ONE CASE IT HELPS IS NOT ONE OF THE TWO THE
+ARGUMENT LEANED ON.** → **[M-119](MEASUREMENTS.md#m-119)**. B and B-shaped are
+made *worse*, and both arms there plateau at about half the initial residual and
+wander — which is neither a fatal step nor anything a linearisation reaches.
+Four of six reach a worse minimum than plain Newton, E's residual growing 6.7×
+where Newton's merely stalls, because a Picard direction is longer and less well
+aimed and so walks the null further on exactly the excursion cases.
+
+**AND THE ONE ROW THAT PAYS, PAYS AS AN INSTRUMENT RATHER THAN AS A REPAIR.**
+`c-mast-shaped` goes from 163 iterations diverging to 3.0e+06 down to 3.19e-01
+in 35, and then throws *"the bordered Jacobian is singular in
+( psi_ax, psi_bnd, a )"* — a guard standing since FB-3 that the Newton arm never
+reaches. With the field block replaced by something that cannot be singular,
+what is left singular is **the border's Schur complement**. So the rung's real
+use is as a way of ASKING whether a failure is the field's, and on five of six
+the answer is no. That is `BORDERED-GLOBALISATION-PLAN.md` §0.1's first row
+reached by measurement, and it points at §6.1's degenerate axis row and at
+M-115 rather than at anything else in that plan.
+
+**The handoff tolerance is also measured useless here.** It is 1e-3 relative and
+no case gets below 2.5e-01, so on all six the phase change is the budget or the
+line-search rescue and never the tolerance. A tolerance is the right control for
+a case that is merely slow; none of these is.
 
 Two smaller departures from the plan, both recorded so the plan is not read as
 the built thing. BG-3 proposes re-purposing `Globalisation::PicardOnly`; a new
