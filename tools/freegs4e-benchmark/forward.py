@@ -399,9 +399,17 @@ def _antisymmetric_pairs(tok, want=None, tol_r=0.05, tol_z=0.05, z_min=0.05):
     return pairs
 
 
-def solve_forward(npz, case, nx=None, rtol=1e-9, maxits=400):
+def solve_forward(npz, case, nx=None, rtol=1e-9, maxits=400, seeded=True):
+    """`seeded=False` is the COLD FORWARD run: the machine's currents, the
+    profiles, the prescribed plasma current, and NOTHING that was solved for --
+    freegs4e's own Gaussian bump for a starting psi.  It is the question MEQ's
+    shipped configurations are asked, since `make_diverted_case.py` builds their
+    `[initialguess]` with `mkcoldguess.py`, and it is a much harder question than
+    the seeded one: trap 3 above records machine A converging to a three-O-point
+    plasma 2.6e-01 away.
+    """
     tok = build_machine(npz)
-    eq = build_equilibrium(npz, tok, nx)
+    eq = build_equilibrium(npz, tok, nx, seeded=seeded)
     prof = build_profile(npz, case)
 
     started = time.perf_counter()
@@ -517,6 +525,9 @@ def main():
     trace = "--trace" in argv
     if trace:
         argv.remove("--trace")
+    cold_forward = "--cold-forward" in argv
+    if cold_forward:
+        argv.remove("--cold-forward")
     pin_z = None
     if "--pin-z" in argv:
         i = argv.index("--pin-z")
@@ -620,8 +631,13 @@ def main():
         return
 
     print("\n  FORWARD AGAINST THE INVERSE REFERENCE IT CAME FROM", flush=True)
-    print("  currents frozen, Ip prescribed, no constraint, seeded from the "
-          "reference", flush=True)
+    if cold_forward:
+        print("  COLD: currents frozen, Ip prescribed, no constraint, and NOTHING\n"
+              "  that was solved for -- the same question MEQ's shipped\n"
+              "  configurations are asked.", flush=True)
+    else:
+        print("  currents frozen, Ip prescribed, no constraint, seeded from the "
+              "reference", flush=True)
     if pin_auto:
         print("  VERTICALLY PINNED: one antisymmetric current combination "
               "driven by the axis's own\n  height -- %s -- and NO flux targeted "
@@ -638,7 +654,10 @@ def main():
         npz = np.load(os.path.join(HERE, name + ".npz"), allow_pickle=True)
         for nx in (grids or [None]):
             try:
-                if pin_auto or pin_z is not None:
+                if cold_forward:
+                    r = solve_forward(npz, case, nx, seeded=False)
+                    dI = 0.0
+                elif pin_auto or pin_z is not None:
                     z0 = float(npz["Zaxis"]) if pin_auto else pin_z
                     r = trace_forward(npz, case, nx, pin_z=z0,
                                       pin_coils=pin_coils, pin_gain=pin_gain)
