@@ -3983,3 +3983,68 @@ field block has had one in `NewtonConvergence.cpp` all along.
 shape three times — `ConfineToPlasma`, `PlasmaCurrent` and
 `normalisationDerivatives()`. Every accepted key on Config's rotating branch is
 worth checking against what `meq::NormalisedRotatingSource` actually reads.
+
+### M-119
+
+**`Globalisation::BorderedPicardThenNewton` on the six cold failures: 0 of 6
+close, and the prediction that it would close three is FALSIFIED.**
+
+The shipped configurations, one `build/meq-run` each, `MKL=1 OMP=8`, machine
+idle (load average 0.03 before the first). **Both arms come from ONE run**: the
+driver's ladder tries `Globalisation::None` first and falls to the rung on the
+observed failure, so the comparison is the same binary, the same mesh and the
+same guess, with no possibility of the attribution error M-102 records.
+
+| case | Newton arm | | Picard arm | | |
+|---|---|---|---|---|---|
+| | its | min ‖r‖/‖r₀‖ | its | min ‖r‖/‖r₀‖ | |
+| `machine-b-ffprime` | 13 | **4.4776e-01** | 21 | 5.2024e-01 | worse |
+| `machine-b-ffprime-shaped` | 12 | **4.4773e-01** | 23 | 5.2084e-01 | worse |
+| `machine-c-mast-shaped` | 163 | 6.6615e-01, ending **3.0183e+06** | 35 | **3.1903e-01** | **much better, still fails** |
+| `machine-d-tcv` | 6 | **3.3509e-01** | 8 | 3.3742e-01 | level |
+| `machine-e-diamagnetic` | 9 | **2.5903e-01** | 10 | 6.1105e-01, ending 6.7623e+00 | worse |
+| `machine-e-diamagnetic-shaped` | 9 | **2.5806e-01** | 9 | 6.1116e-01, ending 6.7468e+00 | worse |
+
+**All six still exit 2.** Five fail with the same message in both arms — *no
+damping of the bordered Newton step gave a finite residual*.
+
+**WHAT WAS PREDICTED AND WHAT HAPPENED ARE DIFFERENT SETS, WHICH IS THE POINT OF
+HAVING WRITTEN THE PREDICTION DOWN FIRST.** M-117's classification said B and
+B-shaped (one fatal step) and C-shaped (chronic) were the shapes a field-block
+preconditioner could address, and D/E/E-shaped were X-point excursions it could
+not. Three of six was recorded as the *maximum*. The result is **one** of six
+showing improvement, and it is not one of the two the argument leaned on: B and
+B-shaped are made WORSE, and both arms there plateau at about 0.5 of the initial
+residual and then wander without descending, which is neither a fatal step nor
+something a linearisation choice reaches.
+
+**THE ONE INFORMATIVE ROW IS `c-mast-shaped`, AND ITS VALUE IS THE CHANGED
+FAILURE MODE RATHER THAN THE BETTER RESIDUAL.** Under Newton it spends 163
+iterations and diverges to 3.0e+06. Under Picard it reaches 3.19e-01 in 35 and
+then throws
+
+```
+the bordered Jacobian is singular in ( psi_ax, psi_bnd, a )
+```
+
+— a guard that has been in the tree since FB-3 (`64cca6e`) and that the Newton
+arm never reaches. **With the field block replaced by `A_lin`, which is
+unconditionally invertible, what is left singular is the BORDER'S Schur
+complement.** That is `BORDERED-GLOBALISATION-PLAN.md` §0.1's first row — *a
+non-finite direction; the Jacobian or its elimination is the defect* — reached
+by measurement rather than by argument, and it says the obstruction on this case
+is the border and not the field. §6.1's degenerate axis row and M-115 are where
+it points.
+
+**AND THE HANDOFF NEVER HAPPENS THE WAY IT WAS DESIGNED TO.** The tolerance is
+1e-3 relative and no case gets below 2.5e-01, so on all six the phase change is
+the budget or the line-search rescue, never the tolerance. A handoff tolerance
+is the right control for a case that is merely slow; none of these is.
+
+**The transferable part.** The bordered Picard is now a measured instrument
+rather than a candidate repair: replacing the field block with something that
+cannot be singular is a way of ASKING whether a failure is the field's, and on
+five of six the answer is no. Four of six getting worse is itself a finding —
+a Picard direction is longer and less well aimed, so on the X-point excursion
+cases it walks the null further, which is E's residual growing 6.7× where
+Newton's merely stalls.
