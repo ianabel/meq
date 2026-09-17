@@ -4048,3 +4048,114 @@ five of six the answer is no. Four of six getting worse is itself a finding —
 a Picard direction is longer and less well aimed, so on the X-point excursion
 cases it walks the null further, which is E's residual growing 6.7× where
 Newton's merely stalls.
+
+### M-120
+
+**The border's Jacobian-against-difference case, and what it found: the axis
+row's envelope argument is false, and the omission is 0.03 to 0.16 per cent of
+the row it sits in.**
+
+`NewtonConvergence.cpp` has checked the assembled FIELD Jacobian against a
+central difference of the assembled residual since stage 4. **The border never
+had the equivalent**, and M-118 records two defects one would have caught.
+`tests/convergence/BorderJacobian.cpp` is it.
+
+**THE IDENTITY THE AXIS ROW RESTS ON IS FALSE, AND `q_h` IS NOT THE REASON.**
+`C_Ax = s - psi_h( x* )` with `x*` a root of `q_h`; the position term is dropped
+by the envelope theorem, which is exact only if `grad psi_h( x* ) = 0`. At the
+located axis, on `HighBetaConvergence`'s rectangle at `k = 2`:
+
+| n | h | \|q_h(x*)\| | \|grad psi_h(x*)\| |
+|---|---|---|---|
+| 8 | 0.1000 | 7.9213e-17 | **4.9651e-03** |
+| 12 | 0.0667 | 1.5293e-16 | **1.1467e-02** |
+| 16 | 0.0500 | 1.2493e-14 | **8.3029e-04** |
+| 24 | 0.0333 | 1.6318e-13 | **2.5528e-03** |
+
+`q_h` is at round-off there — it *is* the root, so that column is the control
+saying the finder converged. `grad psi_h` is eleven to thirteen orders larger.
+
+**AND `psi*` IS THE RIGHT FIELD TO ASK, WHICH BUYS AN ORDER AND NOT AN
+IDENTITY.** `psi*` is the field whose gradient *is* the solved flux, so if the
+envelope argument holds anywhere it is there:
+
+| n | h | \|grad psi_h(x*)\| | \|grad psi*(x*)\| | ratio |
+|---|---|---|---|---|
+| 8 | 0.1000 | 4.9651e-03 | 1.2341e-03 | 0.249 |
+| 12 | 0.0667 | 1.1467e-02 | 9.6484e-04 | 0.084 |
+| 16 | 0.0500 | 8.3029e-04 | 1.5539e-04 | 0.187 |
+| 24 | 0.0333 | 2.5528e-03 | 1.1366e-04 | 0.045 |
+
+The ratio falls with `h`, which is the extra order showing — and `grad psi*` is
+still 1e-04, nowhere near round-off. The reason is structural rather than a
+matter of resolution: the local post-processing solves
+`( grad psi*, grad v )_K = ( r q_h, grad v )_K`, so `grad psi*` is the L2
+projection of `r q_h` onto the GRADIENTS of `P^(k+2)( K )` — the nearest
+gradient field to `r q_h` and not `r q_h` itself. `r q_h` is not a discrete
+gradient, so a residual survives however fine the mesh.
+
+**So there are three repairs and they are not the same one.** (a) evaluate
+`psi*` at the root of `q_h`: one order smaller, still wants the correction.
+(b) add the term to the row as it stands: exact for what `psi_ax` currently
+MEANS, one 2x2 solve from pieces already assembled. (c) define `x*` as a
+critical point of `psi*` and evaluate `psi*` there: then `grad psi*( x* ) = 0`
+is the DEFINING equation and the envelope theorem is exact by construction, with
+no correction term at all. (c) is the self-consistent design and it is not free
+— it redefines `psi_ax`, which `recoverPeak()` documents as chosen for
+differentiability, so it carries M-26's branch-selection risk; and the row
+becomes `-( d psi*/du )( x* )`, the local reconstruction operator applied to the
+shape functions, which is linear and per-element but is machinery MEQ does not
+expose. `postProcess()`'s 0.62 s is NOT the objection it looks like: only the
+axis element's reconstruction is wanted, not the mesh's.
+
+**None of the three removes the face jump below.** `psi*` is element-wise, so
+the jump shrinks by an order — `O( h^(k+2) )` against `O( h^(k+1) )` — and does
+not go away.
+**No rate is quoted and none should be**: where in its element the axis lands
+changes with the mesh, and the column is not monotone. The finding is that it is
+not zero, which an identity does not survive.
+
+**WHAT THE OMISSION IS WORTH, COMPUTED RATHER THAN DIFFERENCED.** MEQ's flux
+space is a scalar collection at `vdim = 2`, so `dq_d/dc_(j,d') = phi_j
+delta_(dd')` and, from `q_h( x* ) = 0`, the dropped entry on flux dof `(j, d')`
+is `w_d' phi_j( x* )` with `w = ( grad q_h )^-T grad psi_h`. The row MEQ does
+assemble has norm `| phi( x* ) |` over the potential dofs, so the ratio is
+`| w |` up to a shape-norm ratio the case reports rather than assumes:
+
+| n | \|grad q_h\| | \|neglected\| | of the kept row |
+|---|---|---|---|
+| 8 | 7.6937e+00 | 1.0364e-03 | **1.107e-03** |
+| 12 | 7.6584e+00 | 1.4468e-03 | **1.560e-03** |
+| 16 | 7.6806e+00 | 2.4331e-04 | **2.730e-04** |
+| 24 | 7.6701e+00 | 3.0546e-04 | **3.509e-04** |
+
+Every factor is already assembled for XP-3's own rows — `xFluxJacobian` is
+`grad q_h`, `xFluxShape` is `dq_h/du` — so the correction is one 2x2 solve and a
+scatter. **The case is RED until it is written**, per the testing stance, and
+reads `GradShafranovSolver::axisRowCarriesEnvelopeTerm` so that writing the term
+turns it green rather than needing the case edited.
+
+**AND THE FIRST VERSION OF THIS MEASUREMENT WAS WRONG IN A WAY THAT BECAME THE
+THIRD FINDING.** It differenced the term: perturb the flux, relocate `x*`,
+difference `psi_h( x* )`. The readings were -5.760e-04, -1.158e-03, -2.321e-03
+as the step halved — **doubling**, so the NUMERATOR was constant. A constant
+numerator is a discontinuity, not a derivative. Printing the element index
+settled it:
+
+| step | numerator | \|x* moved\| | element at -a | element at +a |
+|---|---|---|---|---|
+| 9.4434e-03 | -1.087822e-05 | 1.8698e-04 | **275** | **242** |
+| 4.7217e-03 | -1.093199e-05 | 1.0292e-04 | **275** | **242** |
+| 2.3609e-03 | -1.095862e-05 | 6.4947e-05 | **275** | **242** |
+
+The two arms land in **different elements at every step**, and `psi_h` is L2, so
+the difference reports the face jump however finely it is probed. **That is
+M-115's surviving hypothesis — a point evaluation of a broken field jumping
+across a face — observed on the AXIS row**, which M-117 notes carries 0.75 of
+MAST's merit and has no instrument at all where the X-point has four. It is now
+an asserted property: the numerator does not fall with the step.
+
+**The transferable part**: differencing a constraint whose evaluation point is
+*located* rather than prescribed measures the location's discontinuity, not its
+derivative, and the two are told apart by the element index rather than by the
+number. The closed form has no such trouble because it never leaves one element.

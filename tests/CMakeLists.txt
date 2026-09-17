@@ -189,6 +189,14 @@ set(MEQ_CONVERGENCE_TESTS
 	# fixture through convergence/DivertedMachine.hpp, deliberately: its headline
 	# assertion is agreement with that case, so the two must solve one machine.
 	XPointBorder
+	# THE BORDER'S JACOBIAN AGAINST A DIFFERENCE OF ITS CONSTRAINTS, which is the
+	# check NewtonConvergence.cpp has always made on the FIELD block and which
+	# the border has never had. M-118 records two defects one would have caught.
+	# What it settles is the envelope assumption the axis row rests on, in the
+	# one form that is decidable from outside the assembly: the row is supported
+	# on potential dofs, so it asserts that the constraint cannot respond to the
+	# FLUX -- and a flux perturbation moves the axis while leaving psi_h alone.
+	BorderJacobian
 	# FB-1's coupling matrix P: the trace projection of the exterior modes onto
 	# Gamma_h. It needs a curved boundary and so needs MFEM, which is why it is
 	# a convergence test rather than a unit one -- ExteriorDtN's own tests, which

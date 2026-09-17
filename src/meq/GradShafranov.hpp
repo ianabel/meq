@@ -1461,6 +1461,32 @@ namespace meq
 			Globalisation globalisation() const;
 
 			/**
+			 * WHETHER THE AXIS CONSTRAINT ROW CARRIES ITS ENVELOPE POSITION
+			 * TERM. **False, and it is a statement about the code rather than a
+			 * setting.**
+			 *
+			 * `C_Ax = s - psi_h( x* )` with `x*` a root of `q_h`, so its
+			 * derivative has two terms and solveWithNormalisation() assembles
+			 * one. Dropping the other is exact only if `grad psi_h( x* ) = 0`,
+			 * which holds for the CONTINUOUS fields and not for the discrete
+			 * ones: `r q_h - grad_bar psi_h` is the local lifting of the trace
+			 * jump, so it is `O( h^k )`. See the row's own comment in the .cpp
+			 * for the derivation and for the missing term, which is
+			 * `grad psi_h( x* )^T ( grad q_h )^-1 ( flux shape at x* )` on the
+			 * axis element's FLUX dofs -- where the row is currently zero.
+			 *
+			 * **FLIP THIS WHEN THE TERM IS WRITTEN.**
+			 * tests/convergence/BorderJacobian.cpp measures what the omission
+			 * costs and is RED until it is: that case exists so the correction
+			 * can be verified rather than merely believed, and reading this
+			 * constant is how it tells a row that carries the term from one
+			 * that does not. It is a compile-time constant because there is
+			 * nothing to decide at run time -- either the code assembles the
+			 * term or it does not.
+			 */
+			static constexpr bool axisRowCarriesEnvelopeTerm = false;
+
+			/**
 			 * WHERE Globalisation::BorderedPicardThenNewton HANDS OFF, as a
 			 * fraction of the merit at the cold iterate. Default 1e-3.
 			 *

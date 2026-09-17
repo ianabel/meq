@@ -6916,7 +6916,12 @@ namespace
 				 *
 				 * EVERY FACTOR IS ALREADY ASSEMBLED -- xFluxJacobian is grad q_h
 				 * and xFluxShape is dq_h/du, both built for XP-3's own rows -- so
-				 * writing it is one 2x2 solve and a dot product.
+				 * writing it is one 2x2 solve and a dot product. **WHOEVER
+				 * WRITES IT MUST ALSO FLIP axisRowCarriesEnvelopeTerm IN THE
+				 * HEADER**, which is what lets
+				 * tests/convergence/BorderJacobian.cpp tell a row that carries
+				 * the term from one that does not, and so what lets the
+				 * correction be verified rather than believed.
 				 *
 				 * IT IS NOT WRITTEN, AND DELIBERATELY SO UNTIL IT IS MEASURED.
 				 * A Jacobian error is invisible to an error norm, which is this
