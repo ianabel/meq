@@ -38,6 +38,32 @@ namespace meq
 namespace
 {
 	/*
+	 * THE STEP EVERY CENTRAL DIFFERENCE IN THE NORMALISATION USES.
+	 *
+	 * SHARED RATHER THAN DUPLICATED, because two differences of the same
+	 * quantity taken on two different steps do not compare -- and there are now
+	 * two callers, the psi_ax column's fallback in solveWithNormalisation() and
+	 * assembleCurrentNormalisationCorner()'s. It was a lambda local to the
+	 * first; a second copy of `1.0e-5*max( |value|, 1e-10 )` written out beside
+	 * the second is exactly the shape this file records going wrong elsewhere.
+	 *
+	 * 1e-5 RELATIVE, AND CENTRAL. Under the condensation the residual carries
+	 * the element-local solves' stopping tolerance as noise, so a forward
+	 * difference would leave an O( h ) truncation on top of it and the border
+	 * would be what limits Newton's order. Under NPC there are no local solves
+	 * and so no such noise, and the central difference is kept anyway: it is
+	 * the same quantity measured the same way, which is what lets the two paths
+	 * be compared.
+	 *
+	 * The floor keeps the step finite at psi_bnd = 0, which is where a limited
+	 * equilibrium's boundary sits by construction.
+	 */
+	double normalisationDifferenceStep( double value )
+	{
+		return 1.0e-5*std::max( std::abs( value ), 1.0e-10 );
+	}
+
+	/*
 	 * THE ASSEMBLY MODE A FRESH SOLVER STARTS IN, AND IT CHANGED ON 2026-09-04
 	 * FROM Serial TO Threaded. THE MEASUREMENT THAT SETTLED IT BEFORE WAS TAKEN
 	 * AGAINST A DIFFERENT OPTION.
@@ -324,6 +350,11 @@ namespace
 	{
 	}
 
+	void SourceIntegrator::setFieldLinearisation( FieldLinearisation const *choice )
+	{
+		fieldLinearisation = choice;
+	}
+
 	void SourceIntegrator::setPlasmaComponent( PlasmaComponent const *component )
 	{
 		plasmaComponent = component;
@@ -422,6 +453,24 @@ namespace
 #endif
 		elmat.SetSize( dof );
 		elmat = 0.0;
+
+		/*
+		 * PICARD IN THE FIELD: the reaction term is what distinguishes the two
+		 * linearisations and it is the whole of this integrator's gradient, so
+		 * omitting it leaves the caller with A_lin -- the flux mass, the
+		 * divergence and the tau stabilisation, which live on other integrators
+		 * and are untouched.
+		 *
+		 * BEFORE the quadrature loop rather than inside it: there is nothing to
+		 * integrate, and returning here is also what makes the Picard field
+		 * block independent of the plasma component, which is the structural
+		 * half of meq::FieldLinearisation's argument.
+		 *
+		 * The residual is NOT frozen with it. See meq::FieldLinearisation.
+		 */
+		if ( fieldLinearisation
+		     && *fieldLinearisation == FieldLinearisation::Picard )
+			return;
 
 		mfem::IntegrationRule const &ir = rule( el, tr );
 		mfem::Vector point;
@@ -1215,7 +1264,13 @@ namespace
 	void GradShafranovSolver::setGlobalisation( Globalisation choice )
 	{
 #ifndef MFEM_USE_SUNDIALS
-		if ( choice != Globalisation::None )
+		// BorderedPicardThenNewton is exempt and is the only value that is.
+		// Every other non-default on this list is a KINSOL strategy or reaches
+		// one through solveByPicardThenNewton(); that one is MEQ's own loop in
+		// solveWithNormalisation(), assembling MEQ's own Jacobian, and it calls
+		// nothing in SUNDIALS.
+		if ( choice != Globalisation::None
+		     && choice != Globalisation::BorderedPicardThenNewton )
 			throw std::logic_error(
 				"meq::GradShafranovSolver::setGlobalisation: MFEM was built without "
 				"MFEM_USE_SUNDIALS, so no KINSOL strategy is available" );
@@ -1525,6 +1580,31 @@ namespace
 	GradShafranovSolver::Globalisation GradShafranovSolver::globalisation() const
 	{
 		return globalisationChoice;
+	}
+
+	void GradShafranovSolver::setBorderedPicardTolerance( double relativeTolerance )
+	{
+		if ( !( relativeTolerance > 0.0 ) || relativeTolerance > 1.0 )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::setBorderedPicardTolerance: the handoff "
+				"target is a fraction of the merit at the cold iterate and must lie "
+				"in ( 0, 1 ]" );
+		borderedPicardToleranceValue = relativeTolerance;
+	}
+
+	double GradShafranovSolver::borderedPicardTolerance() const
+	{
+		return borderedPicardToleranceValue;
+	}
+
+	int GradShafranovSolver::borderedPicardIterations() const
+	{
+		return borderedPicardIterationCount;
+	}
+
+	bool GradShafranovSolver::borderedPicardConverged() const
+	{
+		return borderedPicardConvergedValue;
 	}
 
 	void GradShafranovSolver::clearInitialGuess()
@@ -3510,6 +3590,14 @@ namespace
 			// Handed unconditionally: an unfilled component is the constant
 			// true, so a solve that never asks for one is bit-unchanged.
 			sourceTerm->setPlasmaComponent( &plasmaComponentMask );
+
+			// THE SAME BORROWING, AND FOR THE SAME REASON. The bordered solve
+			// flips this between its Picard phase and its Newton phase without
+			// rebuilding anything -- which it could not do if the choice were a
+			// value on the integrator, because reaching the integrator means
+			// rebuilding the form that owns it and buildForms() replaces the
+			// DarcyForm the live DarcyNPCOperator is built on.
+			sourceTerm->setFieldLinearisation( &fieldLinearisationChoice );
 			potentialMass->AddDomainIntegrator( sourceTerm );
 			potentialMass->AddInteriorFaceIntegrator( interior );
 			potentialMass->AddBdrFaceIntegrator( boundary, fittedMarker );
@@ -4141,6 +4229,30 @@ namespace
 	{
 		return currentSensitivityValue;
 	}
+
+	void GradShafranovSolver::setXPointMeritWeight( double weight )
+	{
+		if ( !( weight > 0.0 ) || !std::isfinite( weight ) )
+			throw std::invalid_argument( "meq::GradShafranovSolver::setXPointMeritWeight: the weight must be finite and positive" );
+		xPointMeritWeightValue = weight;
+	}
+
+	double GradShafranovSolver::xPointMeritWeight() const
+	{
+		return xPointMeritWeightValue;
+	}
+
+	void GradShafranovSolver::setLineSearchMerit( LineSearchMerit choice )
+	{
+		lineSearchMeritChoice = choice;
+	}
+
+	GradShafranovSolver::LineSearchMerit
+	GradShafranovSolver::lineSearchMerit() const
+	{
+		return lineSearchMeritChoice;
+	}
+
 
 	/*
 	 * XP-1: THE PLASMA IS A CONNECTED SET AND `{ Psi > 0 }` IS NOT.
@@ -4784,6 +4896,79 @@ namespace
 		if ( !normalisedSource )
 			return;
 
+		/*
+		 * THE CAPABILITY TEST IS HOISTED OUT OF THE QUADRATURE LOOP, AND WHAT
+		 * REPLACES IT IS A DIFFERENCE RATHER THAN A ZERO.
+		 *
+		 * Asking inside the loop was wrong twice over. It made the answer depend
+		 * on WHERE a source first refused -- a refusal is a property of the type
+		 * and arrives at the first point, but a partial sum over the elements
+		 * already walked would have been returned if it ever arrived later --
+		 * and, worse, it left both entries at their initialised 0.0 with no
+		 * warning and no fallback. Its sibling assembleNormalisationColumn()
+		 * falls back to a central difference in the same situation: one degraded
+		 * and the other DELETED, which is the asymmetry this removes.
+		 *
+		 * AND A DELETED CORNER HAS A MEASURED COST rather than a theoretical
+		 * one. CLAUDE_FB.md records the current-bordered solve without these two
+		 * entries converging LINEARLY, at a clean geometric contraction of about
+		 * 0.8 a step; supplying them took iteration 60's residual from 7.06e-08
+		 * to 1.69e-10. So the silent branch turned a quadratic Newton into a
+		 * linear one and said nothing, which is the failure this project calls
+		 * a green suite compatible with a broken solver.
+		 *
+		 * The probe is one quadrature point of one element in the plasma. A
+		 * refusal is a property of the source's TYPE, so one answer settles it
+		 * for the whole mesh -- and asking a source that refuses costs nothing,
+		 * since the base implementation sets neither output.
+		 */
+		bool analytic = false;
+		{
+			double probeAxis = 0.0;
+			double probeBoundary = 0.0;
+			analytic = normalisedSource->normalisationDerivatives(
+				1.0, 0.0, normalisedSource->normalisation(), probeAxis,
+				probeBoundary );
+		}
+
+		if ( !analytic )
+		{
+			/*
+			 * THE SAME CENTRAL DIFFERENCE THE COLUMN FALLS BACK TO, on the same
+			 * step, and of the integral rather than of its integrand:
+			 * assemblePlasmaCurrent() IS the integral these are the derivatives
+			 * of, so differencing it needs nothing this class does not already
+			 * have.
+			 *
+			 * THE NORMALISATION IS RESTORED BEFORE RETURNING. Everything else in
+			 * this solve reads the source's normalisation where it finds it, so
+			 * leaving it perturbed by h would be a silent corruption of the next
+			 * assembly -- the same trap recoverPeak() documents for the
+			 * potential.
+			 */
+			double const axis = normalisedSource->normalisation();
+			double const boundary = normalisedSource->boundaryNormalisation();
+
+			double const hAxis = normalisationDifferenceStep( axis );
+			normalisedSource->setNormalisation( axis + hAxis, boundary );
+			double const axisUp = assemblePlasmaCurrent( state );
+			normalisedSource->setNormalisation( axis - hAxis, boundary );
+			double const axisDown = assemblePlasmaCurrent( state );
+
+			double const hBoundary =
+				normalisationDifferenceStep( boundary != 0.0 ? boundary : axis );
+			normalisedSource->setNormalisation( axis, boundary + hBoundary );
+			double const boundaryUp = assemblePlasmaCurrent( state );
+			normalisedSource->setNormalisation( axis, boundary - hBoundary );
+			double const boundaryDown = assemblePlasmaCurrent( state );
+
+			normalisedSource->setNormalisation( axis, boundary );
+
+			againstAxis = ( axisUp - axisDown )/( 2.0*hAxis );
+			againstBoundary = ( boundaryUp - boundaryDown )/( 2.0*hBoundary );
+			return;
+		}
+
 		mfem::Mesh &mesh = *potentialFes->GetMesh();
 		mfem::Array<int> dofs;
 		mfem::Vector shape;
@@ -4822,9 +5007,17 @@ namespace
 
 				double dAxis = 0.0;
 				double dBoundary = 0.0;
+				// THE PROBE ABOVE SETTLED THIS, so a refusal here means the
+				// source's answer depends on its arguments -- which the
+				// interface does not permit, and which would otherwise leave a
+				// partial sum looking like an assembled corner.
 				if ( !normalisedSource->normalisationDerivatives(
 					     point( 0 ), point( 1 ), psi, dAxis, dBoundary ) )
-					return;
+					throw std::logic_error(
+						"meq::GradShafranovSolver::assembleCurrentNormalisationCorner: "
+						"the source supplied normalisationDerivatives() at the probe and "
+						"refused at a quadrature point -- the capability must not depend "
+						"on the point" );
 
 				double const w = ip.weight*scratch.Weight()/point( 0 );
 				againstAxis += w*dAxis;
@@ -5165,8 +5358,23 @@ namespace
 
 	void GradShafranovSolver::solveWithNormalisation()
 	{
-		if ( globalisationChoice != Globalisation::None )
-			throw std::logic_error( "meq::GradShafranovSolver::solve: psi_ax as an unknown is implemented for Globalisation::None only -- the KINSOL paths drive a residual of their own and the Picard ones do not build a Jacobian at all" );
+		/*
+		 * TWO OF THE SEVEN ARE REACHABLE HERE, AND THE OTHER FIVE CANNOT BE.
+		 *
+		 * The KINSOL values drive a residual of their own, which is not this
+		 * bordered one; AndersonPicard and PicardOnly put the potential block on
+		 * the LINEAR form and so build no Jacobian for a border to be
+		 * eliminated against; and PicardThenNewton is those two in sequence.
+		 *
+		 * BorderedPicardThenNewton is none of that. It keeps the non-linear
+		 * form, this elimination, this Armijo loop and this merit, and changes
+		 * only which linearisation the field block carries -- so it is not an
+		 * exception to the rule above but a different thing entirely. See
+		 * meq::FieldLinearisation.
+		 */
+		if ( globalisationChoice != Globalisation::None
+		     && globalisationChoice != Globalisation::BorderedPicardThenNewton )
+			throw std::logic_error( "meq::GradShafranovSolver::solve: psi_ax as an unknown is implemented for Globalisation::None and Globalisation::BorderedPicardThenNewton only -- the KINSOL paths drive a residual of their own and the unbordered Picard ones do not build a Jacobian at all" );
 
 		/*
 		 * FB-5. THIS FUNCTION NOW CARRIES THREE KINDS OF BORDER AND NOT ONE,
@@ -5591,7 +5799,8 @@ namespace
 			// neighbouring elements' sizes at worst, so nothing is lost.
 			if ( !xScaleFrozen )
 			{
-				xScale = std::abs( xR )*mesh.GetElementSize( element );
+				xScale = xPointMeritWeightValue
+				         *std::abs( xR )*mesh.GetElementSize( element );
 				if ( !( xScale > 0.0 ) || !std::isfinite( xScale ) )
 					xScale = 1.0;
 				xScaleFrozen = true;
@@ -6044,7 +6253,7 @@ namespace
 		// way, which is what lets the two paths be compared.
 		auto normalisationStep = []( double value )
 		{
-			return 1.0e-5*std::max( std::abs( value ), 1.0e-10 );
+			return normalisationDifferenceStep( value );
 		};
 
 		auto sourceColumn = [ & ]( mfem::Vector const &state, double normalisation,
@@ -6273,6 +6482,13 @@ namespace
 			initialColumn /= 2.0*h;
 		}
 
+		// AND gamma CANNOT MOVE ONE BORDER ROW AGAINST ANOTHER, which is worth
+		// knowing before reaching for it: it multiplies the axis, boundary,
+		// current, exterior and X-point terms of augmentedNorm() identically, so
+		// it CANCELS in any ratio between two of them and the only balance it
+		// changes is border against FIELD. A weight on it was built, measured
+		// and removed -- raising it saturates, since Armijo's test is scale
+		// invariant once the border dominates. MEASUREMENTS.md M-114.
 		double gamma = initialColumn.Norml2();
 		if ( !( gamma > 0.0 ) || !std::isfinite( gamma ) )
 			gamma = 1.0;
@@ -6303,6 +6519,11 @@ namespace
 		                            std::vector<double> const &cModes,
 		                            double cXr = 0.0, double cXz = 0.0 )
 		{
+			// THE AXIS ROW IS 0.75 OF THIS SUM ON MAST WHERE THE X-POINT ROWS
+			// ARE 0.07, AND THAT IS NOT THE DEFECT. A weight on `cAx` alone was
+			// built and measured: its default is a LOCAL OPTIMUM, 0.03 costs 210
+			// iterations against 56 and 0.01 and 3.0 do not converge at all.
+			// MEASUREMENTS.md M-114.
 			double total = fieldNorm*fieldNorm
 			             + gamma*gamma*( cAx*cAx + cBnd*cBnd + cCurrent*cCurrent );
 			for ( double v : cModes )
@@ -6469,10 +6690,96 @@ namespace
 		TimedSolver timedLinear( linear, profile );
 		mfem::DarcyNPCSolver npcLinear( timedLinear );
 
-		bool converged = false;
-		for ( int iteration = 0; iteration <= newtonMaxIterations; ++iteration )
+		/*
+		 * THE PHASE LADDER, AND WHY IT IS ONE LOOP RATHER THAN TWO CALLS.
+		 *
+		 * Globalisation::BorderedPicardThenNewton runs this loop twice over:
+		 * phase 0 with FieldLinearisation::Picard to a loose target, phase 1
+		 * with the ordinary Newton linearisation to the run's own. Every other
+		 * globalisation -- which on this path means Globalisation::None, the
+		 * rest being refused at the top of this function -- is phase 1 alone
+		 * and is bit-unchanged by everything below.
+		 *
+		 * **INSIDE ONE LOOP, BECAUSE THE HANDOFF HAS TO BE LOSSLESS.**
+		 * solveByPicardThenNewton() gets to hand its stages over through two
+		 * calls to solve(), and pays for it: prepare() re-projects the guess and
+		 * under NPC that seeds the potential and the trace while leaving the
+		 * FLUX block at zero. Here the whole ( q, psi, psihat ) vector, the
+		 * differenced columns, gamma, the merit's reference and every border
+		 * unknown simply stay where they are, because nothing returns. It also
+		 * keeps the one thing a second call could not reproduce: gamma is frozen
+		 * at the FIRST iterate, so both phases are measured on one merit and the
+		 * printed history is comparable end to end.
+		 *
+		 * **THE BUDGET IS PER PHASE.** setNewtonControl()'s cap applies to each,
+		 * so asking for this globalisation never leaves the Newton phase with
+		 * less room than it would have had alone. That is a backstop and not a
+		 * control -- the trigger is the tolerance, for the reason
+		 * Globalisation::PicardThenNewton records: the handoff is not monotone
+		 * in Picard effort, and a budget tuned on one mesh betrays you on the
+		 * next.
+		 */
+		int const phaseCount =
+			globalisationChoice == Globalisation::BorderedPicardThenNewton ? 2 : 1;
+		int phase = phaseCount == 2 ? 0 : 1;
+		int phaseIteration = 0;
+
+		// RESTORED HOWEVER THIS EXITS, throw included. A solver left assembling
+		// a Picard Jacobian would go on reporting Newton iteration counts and
+		// Newton rates from it, which is precisely the silent failure
+		// meq::FieldLinearisation warns about.
+		struct RestoreLinearisation
 		{
-			double const norm = augmentedNorm( residual.Norml2(), constraint,
+			GradShafranovSolver *solver;
+			~RestoreLinearisation()
+			{
+				solver->fieldLinearisationChoice = FieldLinearisation::Newton;
+			}
+		} const restoreLinearisation { this };
+
+		fieldLinearisationChoice = phase == 0 ? FieldLinearisation::Picard
+		                                      : FieldLinearisation::Newton;
+		borderedPicardIterationCount = 0;
+		borderedPicardConvergedValue = false;
+
+		// The looser of the two, so a handoff tolerance below the run's own
+		// makes phase 1 a formality rather than doing anything surprising.
+		double phaseTarget =
+			phase == 0 ? std::max( target, borderedPicardToleranceValue*reference )
+			           : target;
+
+		/*
+		 * THE HANDOFF. Called from three places -- the target reached, the phase
+		 * budget spent, and a line search that found no finite trial -- and it
+		 * is the same operation in all three, because Picard's job is not to
+		 * solve the problem. It leaves the state exactly as it found it; the
+		 * only thing that moves is which linearisation the next GetGradient()
+		 * will assemble.
+		 *
+		 * @return false when there is no phase to hand off to, which is every
+		 *         ordinary solve and is what leaves the callers' own failure
+		 *         handling reachable.
+		 */
+		auto handOffToNewton = [ & ]( bool reachedTarget ) -> bool
+		{
+			if ( phase != 0 )
+				return false;
+			phase = 1;
+			fieldLinearisationChoice = FieldLinearisation::Newton;
+			phaseTarget = target;
+			phaseIteration = 0;
+			borderedPicardConvergedValue = reachedTarget;
+			return true;
+		};
+
+		bool converged = false;
+		for ( int iteration = 0; iteration <= newtonMaxIterations*phaseCount;
+		      ++iteration, ++phaseIteration )
+		{
+			if ( phase == 0 )
+				borderedPicardIterationCount = phaseIteration;
+			double const fieldReference = residual.Norml2();
+			double const norm = augmentedNorm( fieldReference, constraint,
 			                                   constraintB, constraintL,
 			                                   transmission, xFlux[ 0 ],
 			                                   xFlux[ 1 ] );
@@ -6502,16 +6809,50 @@ namespace
 				                                        + xFlux[ 1 ]*xFlux[ 1 ] );
 				record.xR = xR;
 				record.xZ = xZ;
+				record.norm = norm;
 				borderStepHistory.push_back( record );
 			}
 
-			if ( norm <= target )
+			if ( norm <= phaseTarget )
 			{
-				converged = true;
-				break;
+				// PHASE 0 HANDS OFF IN PLACE and does not re-enter the loop
+				// head: the state has not moved, so re-evaluating the merit
+				// would push a duplicate row into the history and spend an
+				// iteration to learn a number already in hand. Falling through
+				// to the second test is what catches a Picard phase that
+				// happened to reach the run's own tolerance as well, which is
+				// a converged answer and not a handoff.
+				if ( handOffToNewton( true ) )
+					borderStepHistory.back().handedOff = true;
+				if ( norm <= phaseTarget )
+				{
+					converged = true;
+					break;
+				}
 			}
-			if ( !std::isfinite( norm ) || iteration == newtonMaxIterations )
+			if ( !std::isfinite( norm ) )
 				break;
+			if ( phaseIteration == newtonMaxIterations )
+			{
+				// THE BUDGET, AND IT IS A BACKSTOP. A Picard phase that runs out
+				// is an expected outcome -- it is a globalisation, not a solver
+				// -- so it hands off rather than failing, exactly as stage 1 of
+				// Globalisation::PicardThenNewton does.
+				if ( !handOffToNewton( false ) )
+					break;
+				borderStepHistory.back().handedOff = true;
+			}
+
+			// AFTER THE TWO HANDOFF SITES ABOVE AND NOT WITH THE REST OF THE
+			// RECORD, because this row describes the step that is about to be
+			// COMPUTED while everything else in it describes the iterate the
+			// step starts from. A handoff at either site above means this row's
+			// step is a Newton one even though the merit above it was reached
+			// under Picard. The third handoff site -- the line search finding no
+			// finite trial -- is the other way round and leaves this alone: that
+			// step really was computed under Picard, and it `continue`s into a
+			// fresh row for the Newton retry.
+			borderStepHistory.back().linearisation = fieldLinearisationChoice;
 
 			bool const coupled = hasNormalisation
 			                     && normalisationChoice == Normalisation::Coupled;
@@ -6541,12 +6882,52 @@ namespace
 				 *   dG/dlambda = -[ dpsi_h/dlambda |_x*
 				 *                   + grad( psi_h )( x* ) . dx* / dlambda ]
 				 *
-				 * and grad_bar( psi ) = r q, so grad( psi_h )( x* ) = 0 at a zero
-				 * of q_h IDENTICALLY. The position term vanishes -- the envelope
-				 * theorem -- so no sensitivity of the root find is needed and
-				 * nothing here is differenced. Under NPC psi is part of the
-				 * unknown, so dpsi_h( x* )/d( unknown ) is just the shape
-				 * functions at x* on that element's potential dofs.
+				 * and the position term is DROPPED -- the envelope theorem -- so
+				 * no sensitivity of the root find is needed and nothing here is
+				 * differenced. Under NPC psi is part of the unknown, so
+				 * dpsi_h( x* )/d( unknown ) is just the shape functions at x* on
+				 * that element's potential dofs.
+				 *
+				 * **AND THE ENVELOPE ARGUMENT IS AN APPROXIMATION HERE, NOT AN
+				 * IDENTITY. THIS COMMENT SAID OTHERWISE AND WAS WRONG.**
+				 *
+				 * It read "grad_bar( psi ) = r q, so grad( psi_h )( x* ) = 0 at
+				 * a zero of q_h IDENTICALLY". That relation is CONTINUOUS. The
+				 * discrete flux equation gives, per element and for all v in the
+				 * flux space,
+				 *
+				 *   ( r q_h - grad_bar psi_h, v )_K = -< psi_h - psihat_h, v.n >_dK
+				 *
+				 * so r q_h - grad_bar psi_h is the local lifting of the trace
+				 * jump, not zero. Equivalently q_h converges at O( h^(k+1) ) and
+				 * grad psi_h at O( h^k ) -- which is the whole reason the mixed
+				 * method is worth having, and it means grad( psi_h )( x* ) is
+				 * O( h^k ) rather than zero.
+				 *
+				 * cornerEntry()'s XP-3 arm says exactly this about the same
+				 * identity -- "psi_h and q_h are separate solved fields whose
+				 * identity is only weak" -- and the two could not both be right.
+				 *
+				 * WHAT IS THEREFORE MISSING IS A RANK-<=2 TERM on this element's
+				 * FLUX dofs. From q_h( x* ) = 0, d( x* )/du = -( grad q_h )^-1
+				 * dq_h/du, so the dropped piece is
+				 *
+				 *   grad psi_h( x* )^T ( grad q_h )^-1 ( flux shape at x* ).
+				 *
+				 * EVERY FACTOR IS ALREADY ASSEMBLED -- xFluxJacobian is grad q_h
+				 * and xFluxShape is dq_h/du, both built for XP-3's own rows -- so
+				 * writing it is one 2x2 solve and a dot product.
+				 *
+				 * IT IS NOT WRITTEN, AND DELIBERATELY SO UNTIL IT IS MEASURED.
+				 * A Jacobian error is invisible to an error norm, which is this
+				 * tree's oldest lesson, so the only thing it can cost is the
+				 * observed order -- and XP-3 reads 1.664 against XP-2's 1.667
+				 * with three candidate causes already listed in CLAUDE_FB.md.
+				 * This is a fourth. Adding a term to the Jacobian also moves
+				 * which branch a marginal case selects, which M-26 measures at
+				 * 9.4% in max psi_h, so it wants the border-Jacobian-against-
+				 * difference case that does not yet exist before it wants a
+				 * patch.
 				 *
 				 * -e_j is the special case where x* lands on a node.
 				 */
@@ -7099,6 +7480,48 @@ namespace
 						dense( i, j ) = cornerEntry( i, j ) - rowDot( i, columnZ( j ) );
 				}
 
+				/*
+				 * THE BORDER'S OWN CONDITIONING, FOR FREE, BEFORE IT IS USED.
+				 * `dense` is S, the Schur complement, and its rows carry the
+				 * units of the constraints they belong to -- which is the thing
+				 * the merit has to reconcile and that gamma and xScale guess at.
+				 * One 1-norm of S and one of its inverse, on a matrix of order
+				 * at most 4 + modes.
+				 */
+				if ( !borderStepHistory.empty() )
+				{
+					BorderStep &record = borderStepHistory.back();
+					record.schurRowNorms.assign(
+						static_cast< std::size_t >( nBorderTotal ), 0.0 );
+					double norm1 = 0.0;
+					for ( int i = 0; i < nBorderTotal; ++i )
+					{
+						double rowSquared = 0.0;
+						double columnSum = 0.0;
+						for ( int j = 0; j < nBorderTotal; ++j )
+						{
+							rowSquared += dense( i, j )*dense( i, j );
+							columnSum += std::abs( dense( j, i ) );
+						}
+						record.schurRowNorms[ static_cast< std::size_t >( i ) ] =
+							std::sqrt( rowSquared );
+						norm1 = std::max( norm1, columnSum );
+					}
+
+					mfem::DenseMatrix inverted( nBorderTotal );
+					mfem::DenseMatrixInverse forCondition( dense );
+					forCondition.GetInverseMatrix( inverted );
+					double inverseNorm1 = 0.0;
+					for ( int j = 0; j < nBorderTotal; ++j )
+					{
+						double columnSum = 0.0;
+						for ( int i = 0; i < nBorderTotal; ++i )
+							columnSum += std::abs( inverted( i, j ) );
+						inverseNorm1 = std::max( inverseNorm1, columnSum );
+					}
+					record.schurCondition = norm1*inverseNorm1;
+				}
+
 				mfem::DenseMatrixInverse inverse( dense );
 				inverse.Mult( right, solved );
 				for ( int i = 0; i < nBorderTotal; ++i )
@@ -7204,6 +7627,7 @@ namespace
 			for ( int trial = 0; trial < 12 && !accepted; ++trial, damping *= 0.5 )
 			{
 				double trialNorm = std::numeric_limits<double>::infinity();
+				double trialField = std::numeric_limits<double>::infinity();
 				try
 				{
 					// `a` FIRST, then the right hand side it changes, and only
@@ -7270,7 +7694,8 @@ namespace
 					// is not told about. constraintL was omitted when the current
 					// border was added, which is the same mistake this comment
 					// already warned against for psi_bnd.
-					trialNorm = augmentedNorm( residual.Norml2(), constraint,
+					trialField = residual.Norml2();
+					trialNorm = augmentedNorm( trialField, constraint,
 					                           constraintB, constraintL,
 					                           transmission, xFlux[ 0 ],
 					                           xFlux[ 1 ] );
@@ -7284,6 +7709,21 @@ namespace
 					trialNorm = std::numeric_limits<double>::infinity();
 				}
 
+				// EVERY TRIAL, ACCEPTED OR NOT, AND THE FULL STEP FIRST. What
+				// this separates: a full step barely worse than the iterate
+				// means the direction is good and the merit is mis-scaled; a
+				// full step orders worse means the direction is bad and no
+				// reweighting of the merit can help.
+				borderStepHistory.back().trialNorms.push_back( trialNorm );
+				// AFTER refreshXPoint(), so this is where the saddle was FOUND
+				// at this damping rather than where the border unknown was put.
+				borderStepHistory.back().trialXR.push_back( xR );
+				borderStepHistory.back().trialXZ.push_back( xZ );
+				borderStepHistory.back().trialFieldNorms.push_back( trialField );
+				borderStepHistory.back().trialBoundaryConstraint.push_back(
+					constraintB );
+				borderStepHistory.back().trialXElement.push_back( xElement );
+
 				if ( std::isfinite( trialNorm ) && trialNorm < bestNorm )
 				{
 					bestNorm = trialNorm;
@@ -7291,8 +7731,19 @@ namespace
 				}
 				// Armijo, with the mildest useful constant: what is wanted is a
 				// step that does not make things worse, not an optimal one.
-				accepted = std::isfinite( trialNorm )
-				           && trialNorm < ( 1.0 - 1.0e-4*damping )*norm;
+				//
+				// AND ON WHICHEVER MERIT WAS ASKED FOR. The field block is the
+				// only part of this the step linearises -- see LineSearchMerit
+				// -- so comparing it alone is comparing the quantity the
+				// direction actually descends. The AUGMENTED norm still decides
+				// convergence and still drives the printed history either way:
+				// this changes which trial is taken, not what is solved.
+				bool const onField =
+					lineSearchMeritChoice == LineSearchMerit::Field;
+				double const judged = onField ? trialField : trialNorm;
+				double const against = onField ? fieldReference : norm;
+				accepted = std::isfinite( judged ) && std::isfinite( trialNorm )
+				           && judged < ( 1.0 - 1.0e-4*damping )*against;
 				if ( accepted )
 				{
 					borderStepHistory.back().damping = damping;
@@ -7304,7 +7755,29 @@ namespace
 			if ( !accepted )
 			{
 				if ( bestDamping == 0.0 )
+				{
+					/*
+					 * A PICARD PHASE HANDS OFF HERE RATHER THAN FAILING, and
+					 * this is the site the whole route exists for. The state is
+					 * untouched -- a rejected trial is never applied -- so what
+					 * Newton receives is the last accepted iterate, which is
+					 * exactly what it would have received had the phase stopped
+					 * one step earlier at its tolerance.
+					 *
+					 * MEASUREMENTS.md M-117 is why this is not merely tidy: on
+					 * the B-shaped cold failures the bordered Newton dies at a
+					 * SINGLE fatal step out of twenty-odd, and A_lin - K going
+					 * near-singular is the candidate mechanism. A_lin cannot,
+					 * so a Picard direction at that step is a direction rather
+					 * than an overflow.
+					 */
+					if ( handOffToNewton( false ) )
+					{
+						borderStepHistory.back().handedOff = true;
+						continue;
+					}
 					throw std::runtime_error( "meq::GradShafranovSolver::solve: no damping of the bordered Newton step gave a finite residual -- psi_ax through zero, most often, which is the branch leaving the physical one" );
+				}
 				// The least-bad damping, which is NOT an Armijo step: it is how
 				// the residual rises from one iteration to the next, and the
 				// trace says so rather than leaving a reader to infer it.
@@ -7487,8 +7960,21 @@ namespace
 		// a Picard globalisation would otherwise be routed into a fixed point on
 		// the potential that has no idea psi_ax is an unknown, and would converge
 		// to the solution of a different problem.
-		if ( normalisedSource && globalisationChoice != Globalisation::None )
-			throw std::logic_error( "meq::GradShafranovSolver::solve: psi_ax as an unknown is implemented for Globalisation::None only -- the KINSOL paths drive a residual of their own and the Picard ones build no Jacobian to border" );
+		if ( normalisedSource && globalisationChoice != Globalisation::None
+		     && globalisationChoice != Globalisation::BorderedPicardThenNewton )
+			throw std::logic_error( "meq::GradShafranovSolver::solve: psi_ax as an unknown is implemented for Globalisation::None and Globalisation::BorderedPicardThenNewton only -- the KINSOL paths drive a residual of their own and the unbordered Picard ones build no Jacobian to border" );
+
+		// AND THE OTHER WAY ROUND, because the failure would otherwise be
+		// silent: the bordered handoff has nothing to hand off WITHOUT a border.
+		// solveWithNormalisation() is the only function that reads phaseCount,
+		// and an unbordered run never reaches it -- so asking for this on a
+		// fixed-boundary solve would run an ordinary Newton and report Picard
+		// iterations of zero, which reads like a globalisation that did nothing
+		// rather than like one that was never run. Globalisation::PicardThenNewton
+		// is the unbordered route and the message says so.
+		if ( !normalisedSource
+		     && globalisationChoice == Globalisation::BorderedPicardThenNewton )
+			throw std::logic_error( "meq::GradShafranovSolver::solve: Globalisation::BorderedPicardThenNewton needs a border to keep -- set a meq::NormalisedSource, or use Globalisation::PicardThenNewton, which is the unbordered handoff" );
 
 		/*
 		 * XP-1's CONNECTIVITY TEST IS NPC-ONLY, AND IT REFUSES RATHER THAN
@@ -7772,6 +8258,19 @@ namespace
 						"the Newton block, which means the dispatch at the top of solve() "
 						"no longer routes it -- these paths iterate a fixed point on the "
 						"potential and build no Newton solver" );
+				// THE FOURTH, AND IT IS HERE FOR A DIFFERENT REASON FROM THOSE
+				// THREE. BorderedPicardThenNewton does build a Newton solver --
+				// MEQ's own, in solveWithNormalisation() -- so what makes it
+				// unreachable here is not the absence of a Jacobian but the
+				// dispatch: solve() sends it to the bordered path, and refuses
+				// it outright when there is no border to keep. Arriving here
+				// means one of those two has been changed without the other.
+				case Globalisation::BorderedPicardThenNewton:
+					throw std::logic_error(
+						"meq::GradShafranovSolver::solve: Globalisation::BorderedPicardThenNewton "
+						"reached the unbordered Newton block -- it is the bordered path's "
+						"globalisation and solve() must route it to solveWithNormalisation() "
+						"or refuse it" );
 			}
 
 			// The reduced operator is DarcyHybridization itself, whose GetGradient()

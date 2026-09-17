@@ -2,6 +2,7 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <limits>
 #include <cmath>
 #include <cstddef>
 #include <functional>
@@ -855,17 +856,16 @@ BOOST_AUTO_TEST_CASE( theNormalisationCanBeMovedAndIsRefusedAtZero )
  * ASSERTS THE BEHAVIOUR THAT IS WANTED RATHER THAN THE ONE THAT IS THERE.
  *
  * meq::NormalisedSource::setPlasmaSupport() switches `F` off wherever `Psi <= 0`
- * and meq::NormalisedMHDSource honours it at all three gates -- f(), dFdPsi()
- * and normalisationDerivatives(). meq::NormalisedRotatingSource consults
- * insidePlasma() at NONE of them, so the flag sets a member that nothing reads.
+ * and both normalised sources honour it at all three gates -- f(), dFdPsi() and
+ * normalisationDerivatives(). This case is what keeps the rotating one there.
  *
- * IT IS REACHABLE FROM A FILE, which is what makes it a defect rather than an
- * unimplemented corner. Config.cpp's Rotating branch lists "ConfineToPlasma"
- * among its accepted keys and calls readPlasmaSupport(), and apps/meq.cpp calls
- * setPlasmaSupport( true ) on whatever normalised source it built -- so
- * `[source] Type = "rotating"` with `Normalised = true` and
- * `ConfineToPlasma = true` parses, reports nothing, and solves the unconfined
- * problem.
+ * IT IS REACHABLE FROM A FILE, which is what made the omission a defect rather
+ * than an unimplemented corner. Config.cpp's Rotating branch lists
+ * "ConfineToPlasma" among its accepted keys and calls readPlasmaSupport(), and
+ * apps/meq.cpp calls setPlasmaSupport( true ) on whatever normalised source it
+ * built -- so `[source] Type = "rotating"` with `Normalised = true` and
+ * `ConfineToPlasma = true` parses, reports nothing, and would solve the
+ * unconfined problem.
  *
  * WORSE THAN A MISSING ZERO, BECAUSE THE PROFILES CLAMP. A meq::SplineProfile
  * holds its endpoint value outside the knot range, so at `Psi < 0` the source
@@ -879,7 +879,13 @@ BOOST_AUTO_TEST_CASE( theNormalisationCanBeMovedAndIsRefusedAtZero )
  * THIS IS THE SHAPE CLAUDE.md ALREADY RECORDS UNDER "A RESERVED KEY IS ONLY
  * RESERVED ON THE PATHS THAT CALL THE REFUSAL": one source type reads a key
  * directly where another goes through a shared helper, and nothing tested the
- * pairing. The fix is the same three gates meq::NormalisedMHDSource has.
+ * pairing. **AND IT HAS NOW HAPPENED THREE TIMES ON THIS ONE PAIR OF SOURCE
+ * TYPES** -- `ConfineToPlasma` here, `PlasmaCurrent` in
+ * theCurrentScaleMultipliesTheRotatingPlasmaTerm, and
+ * normalisationDerivatives() in theRotatingNormalisationDerivativesAreAnalytic.
+ * Every accepted key on the rotating branch of Config.cpp is worth checking
+ * against what meq::NormalisedRotatingSource actually reads; a fourth is more
+ * likely than not.
  */
 BOOST_AUTO_TEST_CASE( aConfinedRotatingSourceVanishesOutsideThePlasma )
 {
@@ -918,3 +924,206 @@ BOOST_AUTO_TEST_CASE( aConfinedRotatingSourceVanishesOutsideThePlasma )
 }
 
 BOOST_AUTO_TEST_SUITE_END()
+
+/*
+ * setCurrentScale() MULTIPLIES THE ROTATING PLASMA TERM, AND IT IS REACHABLE
+ * FROM A FILE THAT DID NOT GET IT.
+ *
+ * meq::NormalisedSource::setCurrentScale()'s contract is "SCALE THE PLASMA
+ * TERM, so that the TOTAL PLASMA CURRENT can be prescribed instead of the
+ * profile amplitude", and the bordered Newton makes that scale an unknown.
+ * meq::NormalisedMHDSource applies it in f() and in dFdPsi(); this class did
+ * not apply it anywhere.
+ *
+ * WHAT THAT COSTS IS NOT A MISSING FEATURE BUT A JACOBIAN DESCRIBING A
+ * DIFFERENT PROBLEM FROM THE RESIDUAL. With `F` independent of lambda:
+ *
+ *   - assemblePlasmaCurrent() returns an `int F/r` that does not respond to
+ *     lambda at all, so the constraint cannot be satisfied by the unknown that
+ *     exists to satisfy it;
+ *   - assembleCurrentColumn() computes dR/dlambda as scaledF/lambda, which is
+ *     not zero -- so the column is a fabrication;
+ *   - cornerEntry( I, I ) returns ( int F/r )/lambda, likewise.
+ *
+ * Newton is then driven towards a current it can never deliver by a
+ * sensitivity that does not exist.
+ *
+ * AND IT IS REACHABLE: Config.cpp's Rotating branch lists "PlasmaCurrent"
+ * among its accepted keys, readPlasmaCurrent() refuses it only when
+ * Normalised is false, and apps/meq.cpp calls setPlasmaCurrent() with no
+ * source-type guard. THE SAME SHAPE CLAUDE.md RECORDS UNDER "A RESERVED KEY IS
+ * ONLY RESERVED ON THE PATHS THAT CALL THE REFUSAL", and the second time this
+ * exact pair of source types has produced it.
+ *
+ * THE ASSERTION IS TO A FEW ULP AND NOT TO EXACT EQUALITY, and the reason is
+ * arithmetic rather than a concession. f() evaluates `( lambda H )/span` where
+ * this case computes `lambda ( H/span )` -- the division sits between the two
+ * multiplications, so they genuinely reassociate and differ in the last bit.
+ * The grouping matches meq::NormalisedMHDSource::f()'s, which is worth more
+ * than making one test's arithmetic exact. The property being asserted is
+ * `f( lambda ) = lambda f( 1 )`, and four ulp is the right tolerance for it.
+ */
+BOOST_AUTO_TEST_CASE( theCurrentScaleMultipliesTheRotatingPlasmaTerm )
+{
+	meq::NormalisedRotatingSource source( hydrogenicSpecies(), rotationProfile(),
+		ggPrimeProfile(), referenceRadius, 1.0 );
+	source.setNormalisation( 0.9, -0.2 );
+
+	BOOST_TEST_REQUIRE( source.currentScale() == 1.0,
+	                    "the scale must default to one, or every solve that "
+	                    "does not prescribe a current changes" );
+
+	for ( double const lambda : { 0.5, 1.0, 2.5 } )
+		for ( double const r : testRadii )
+			for ( double const psi : { 0.1, 0.4, 0.7 } )
+			{
+				source.setCurrentScale( 1.0 );
+				double const bareF = source.f( r, 0.0, psi );
+				double const bareD = source.dFdPsi( r, 0.0, psi );
+
+				source.setCurrentScale( lambda );
+				double const scaledFValue = source.f( r, 0.0, psi );
+				double const scaledDValue = source.dFdPsi( r, 0.0, psi );
+
+				auto closeEnough = []( double got, double want )
+				{
+					return std::abs( got - want )
+					       <= 4.0*std::numeric_limits<double>::epsilon()
+					          *std::max( std::abs( want ), 1.0e-300 );
+				};
+
+				BOOST_TEST( closeEnough( scaledFValue, lambda*bareF ),
+				            "f() at lambda = " << lambda << ", r = " << r
+				            << ", psi = " << psi << " reads " << scaledFValue
+				            << " against " << lambda*bareF );
+				BOOST_TEST( closeEnough( scaledDValue, lambda*bareD ),
+				            "dFdPsi() at lambda = " << lambda << ", r = " << r
+				            << ", psi = " << psi << " reads " << scaledDValue
+				            << " against " << lambda*bareD );
+			}
+
+	// AND scaledF() IS THE SAME THING HERE, because this is the plasma source
+	// itself and not a wrapper around one. A coil-augmented source overrides
+	// these to forward to what it holds; an unwrapped one must not, or the
+	// current border would count the scale twice.
+	//
+	// THIS PAIR IS EXACT, and legitimately so: the base implementation forwards
+	// the same call with the same arguments, so there is no arithmetic between
+	// them to reassociate.
+	source.setCurrentScale( 2.5 );
+	for ( double const r : testRadii )
+	{
+		BOOST_TEST( source.scaledF( r, 0.0, 0.4 ) == source.f( r, 0.0, 0.4 ) );
+		BOOST_TEST( source.scaledDFdPsi( r, 0.0, 0.4 )
+		            == source.dFdPsi( r, 0.0, 0.4 ) );
+	}
+}
+
+/*
+ * THE ROTATING SOURCE'S NORMALISATION DERIVATIVES ARE ANALYTIC, AND THE SPECIES
+ * CLOSURE NEVER HAS TO BE DIFFERENTIATED AGAIN TO GET THEM.
+ *
+ * The mirror of SourceTests.cpp's the_normalisation_derivatives_are_analytic,
+ * and it exists for a stronger reason than symmetry: without an override the
+ * base returns false, and TWO callers degrade rather than one.
+ * solveWithNormalisation()'s psi_ax column falls back to a central difference
+ * -- which perturbs the normalisation, which moves the plasma edge, so it
+ * straddles a kink rather than measuring a derivative -- and
+ * assembleCurrentNormalisationCorner() used to fall back to a silent ZERO,
+ * which CLAUDE_FB.md measures turning the current-bordered Newton from
+ * quadratic into a clean geometric contraction of about 0.8 a step.
+ *
+ * WHY IT IS SIX LINES AND NOT A DERIVATION. This class is a pure wrapper:
+ * F = S H( Psi )/span with H := inner.f, and inner.dFdPsi IS dH/dPsi. So the
+ * normalisation enters only through the argument and the overall 1/span, and
+ * meq::NormalisedMHDSource's algebra applies verbatim. The header said this
+ * was not written because "the rotating closure's version" would have to be;
+ * it does not.
+ *
+ * Checked against a difference of f() ITSELF, one level below any assembly, so
+ * a failure here is the formula and can be nothing else -- and Richardson
+ * extrapolated, because a plain central difference would floor the comparison
+ * at its own O( h^2 ) truncation rather than at the derivative.
+ */
+BOOST_AUTO_TEST_CASE( theRotatingNormalisationDerivativesAreAnalytic )
+{
+	double const z = 0.0;
+
+	meq::NormalisedRotatingSource source( hydrogenicSpecies(), rotationProfile(),
+		ggPrimeProfile(), referenceRadius, 1.0 );
+
+	// A SCALE OTHER THAN ONE, deliberately: the scale multiplies F and so
+	// multiplies both derivatives, and at lambda = 1 a formula that dropped it
+	// would pass.
+	source.setCurrentScale( 1.7 );
+
+	auto difference = [ & ]( double r, double psi, bool axis )
+	{
+		auto at = [ & ]( double step )
+		{
+			source.setNormalisation( axis ? 0.9 + step : 0.9,
+			                         axis ? -0.2 : -0.2 + step );
+			double const plus = source.f( r, z, psi );
+			source.setNormalisation( axis ? 0.9 - step : 0.9,
+			                         axis ? -0.2 : -0.2 - step );
+			double const minus = source.f( r, z, psi );
+			return ( plus - minus )/( 2.0*step );
+		};
+		double const h = 1.0e-4;
+		return ( 4.0*at( h/2.0 ) - at( h ) )/3.0;
+	};
+
+	std::printf( "\n  THE ROTATING BORDER COLUMNS IN CLOSED FORM\n" );
+	std::printf( "    %6s %8s %16s %16s %12s %16s %16s %12s\n",
+	             "r", "psi", "dF/dpsi_ax", "difference", "rel",
+	             "dF/dpsi_bnd", "difference", "rel" );
+
+	for ( double const r : testRadii )
+		for ( double const psi : { 0.1, 0.4, 0.7 } )
+		{
+			source.setNormalisation( 0.9, -0.2 );
+			double analyticAxis = 0.0, analyticBoundary = 0.0;
+			BOOST_TEST_REQUIRE( source.normalisationDerivatives(
+				r, z, psi, analyticAxis, analyticBoundary ),
+				"NormalisedRotatingSource must supply its normalisation "
+				"derivatives" );
+
+			double const numericAxis = difference( r, psi, true );
+			double const numericBoundary = difference( r, psi, false );
+
+			double const relA = std::abs( analyticAxis - numericAxis )
+			                    /std::max( std::abs( numericAxis ), 1.0 );
+			double const relB = std::abs( analyticBoundary - numericBoundary )
+			                    /std::max( std::abs( numericBoundary ), 1.0 );
+
+			std::printf( "    %6.2f %8.2f %16.8e %16.8e %12.2e %16.8e %16.8e "
+			             "%12.2e\n", r, psi, analyticAxis, numericAxis, relA,
+			             analyticBoundary, numericBoundary, relB );
+
+			BOOST_TEST( relA < 1.0e-8,
+			            "dF/dpsi_ax at r = " << r << ", psi = " << psi
+			            << " reads " << analyticAxis << " against a differenced "
+			            << numericAxis );
+			BOOST_TEST( relB < 1.0e-8,
+			            "dF/dpsi_bnd at r = " << r << ", psi = " << psi
+			            << " reads " << analyticBoundary
+			            << " against a differenced " << numericBoundary );
+		}
+	std::fflush( stdout );
+
+	/*
+	 * AND OUTSIDE THE PLASMA BOTH ARE EXACTLY ZERO, which is the half a
+	 * difference structurally cannot reproduce: perturbing the normalisation
+	 * moves the edge, so a point just outside is INSIDE for one of the two
+	 * evaluations and the difference reports a spurious F/( 2 step ) -- which
+	 * diverges as the step is refined rather than converging to anything.
+	 */
+	source.setPlasmaSupport( true );
+	source.setNormalisation( 0.9, -0.2 );
+	double outsideAxis = 1.0, outsideBoundary = 1.0;
+	BOOST_TEST_REQUIRE( source.normalisationDerivatives( testRadii[ 0 ], z, -0.5,
+	                                                     outsideAxis,
+	                                                     outsideBoundary ) );
+	BOOST_TEST( outsideAxis == 0.0 );
+	BOOST_TEST( outsideBoundary == 0.0 );
+}

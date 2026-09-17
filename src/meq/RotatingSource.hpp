@@ -350,16 +350,32 @@ namespace meq
 			/// is a question about the profiles and not about where the plasma
 			/// is; confining them would make a caller unable to ask.
 			///
-			/// AND normalisationDerivatives() IS STILL NOT OVERRIDDEN HERE, which
-			/// costs more now that the support can move than it did when it could
-			/// not. The base returns false, so the bordered Newton DIFFERENCES
-			/// that column -- and a difference perturbs the normalisation, which
-			/// moves the edge, so it straddles a kink rather than measuring a
-			/// derivative. It degrades rather than fails, and it is the reason
-			/// meq::NormalisedMHDSource supplies the analytic form; the rotating
-			/// closure's version is not written.
+			/// BOTH CARRY setCurrentScale()'s FACTOR, as
+			/// meq::NormalisedMHDSource's do. The contract is "scale the plasma
+			/// term", and `[source] Type = "rotating"` accepts `PlasmaCurrent`,
+			/// so a source that ignored it would give a current border that
+			/// cannot respond to its own unknown.
 			double f( double r, double z, double psi ) const override;
 			double dFdPsi( double r, double z, double psi ) const override;
+
+			/// ANALYTIC, AND THE CLOSURE IS NOT DIFFERENTIATED AGAIN TO GET IT.
+			///
+			/// This class is a pure wrapper -- `F = S H( Psi )/span` with
+			/// `H = inner.f` and `inner.dFdPsi` already equal to `dH/dPsi` -- so
+			/// the normalisation enters only through `Psi` and the overall
+			/// `1/span`, and meq::NormalisedMHDSource's algebra applies verbatim.
+			/// Whatever the species root find cost to differentiate has been
+			/// paid inside `inner.dFdPsi()`.
+			///
+			/// It matters because the alternative is a DIFFERENCE, which
+			/// perturbs the normalisation, which moves the edge, so it straddles
+			/// a kink rather than measuring a derivative -- and because
+			/// GradShafranovSolver::assembleCurrentNormalisationCorner() reaches
+			/// for it too, where until it existed the fallback was a silent zero
+			/// rather than a difference.
+			bool normalisationDerivatives( double r, double z, double psi,
+			                               double &dFdAxis,
+			                               double &dFdBoundary ) const override;
 
 			/// @throws std::invalid_argument if psi_ax is not finite or is zero:
 			///         Psi = psi/psi_ax is undefined there, and a solver that has

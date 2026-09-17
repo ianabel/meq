@@ -3633,3 +3633,353 @@ the code called `mkcoldguess.py`. The two make this a different benchmark:
 `mkexactguess` sums Green's functions over the reference's own converged `Jtor`
 and puts the answer in the starting position. Believing the comment is what made
 M-103's failures look like something other than cold-start failures.
+
+### M-113
+
+**`[solver] XPointMeritWeight`: IT BUYS ITERATIONS, IT NEVER MOVES THE ANSWER,
+AND ITS SENSITIVITY INVERTS BETWEEN CASES.** M-111 finds MAST spending 26 of its
+43 bootstrap iterations on a plateau where the line search halves eight or nine
+times per step and accepts 1/128 to 1/256 of the direction. The decomposition
+says why: the axis row carries about **0.75** of `augmentedNorm` and the X-point
+rows about **0.07**, so a step that would fix the null is never worth taking and
+it crawls a millimetre at a time -- 9 cm away from a seed that was 1 cm from the
+answer, and back. The key multiplies the length `r h` that puts those two rows
+into the merit, and into nothing else: the border still solves `q_r = q_z = 0`.
+
+**MAST, `k = 2`, 4198 elements, every sweep counted:**
+
+| weight | 0.1 | 0.3 | **1.0** | 3.0 | 6.0 | 10.0 | 15.0 | **20.0** | 30.0 | 100.0 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| iterations | 57 | 57 | **56** | 53 | 44 | 39 | 35 | **35** | **fails** | **fails** |
+| wall / s | 20.44 | 20.30 | 19.61 | 18.56 | 14.10 | 13.09 | 12.01 | **10.91** | exit 2 | exit 2 |
+
+**`psi_ax` is 5.896474e-02 and the X-point ( 0.708468, −1.095754 ) at EVERY
+weight that converges**, so this is work and not an answer. MAST goes from 3.87×
+freegs4e to **2.34×**. Below one it does nothing, which fits the diagnosis: the
+rows already counted for almost nothing, so starving them further changes
+nothing.
+
+**AND IT IS INERT WHERE THERE IS NO PLATEAU**, which is the other half of the
+claim:
+
+| | weight 1 | weight 10 |
+|---|---|---|
+| F DIII-D, `k2r0` | 12 its, 4.925 s | 12 its, 4.949 s |
+| G MAST-U, `k3r0` | 19 its, 26.886 s | 18 its, 26.619 s |
+
+So G's 3.05× really is dofs — 201,210 at `k = 3` against DIII-D's 87,264 — and
+not a line search fighting itself.
+
+**THE SENSITIVITY INVERTS, AND THAT IS WHY THE DEFAULT STAYS AT THE NATURAL
+SCALE.** On `examples/diverted-tokamak.toml`, XP-3's own acceptance fixture:
+
+| weight | 0.25 | **1.0** | 4.0 |
+|---|---|---|---|
+| bootstrap iterations | 13 | **14** | **82** |
+
+`psi_ax` 8.2660036302e-02 and X ( 1.093103, −0.603529 ) at 0.25 and at 4.0,
+identically -- the invariant holds -- but **raising the weight is 5.9× WORSE
+there** where on MAST it is 1.6× better. So the natural scale `r h` is right on
+one case and badly wrong on another, there is no value to promote to a default,
+and **a weight must not be carried between machines.** Above about 30 MAST fails
+outright with *"no damping gave a finite residual -- psi_ax through zero"*: the
+other border rows starved in the merit, which is the predicted failure and is
+loud rather than silent.
+
+**`theXPointMeritWeightChangesTheWorkAndNotTheAnswer` is the regression**, and it
+asserts the invariant at 0.25 AND at 4.0 -- both sides of one, since an
+invariant tested only in the direction that pays is half tested.
+
+### M-114
+
+**THE MERIT'S THREE WEIGHTS, MEASURED — AND "THE AXIS ROW IS OVER-WEIGHTED" IS
+FALSIFIED.** M-113 leaves the X-point weight helping MAST and nothing explaining
+why. Two further weights were built to find out, and both change the MERIT and
+nothing else: `gamma` and `xScale` appear only in `augmentedNorm()` and in the
+printed record, never in the step, so **the Newton direction is bit-identical at
+every weight and only the accept/reject verdict moves.** That is the fact the
+rest of this rests on.
+
+**FIRST, THE LINE SEARCH'S TRIAL LADDER, which is what says whether the
+direction or the merit is at fault.** MAST's plateau, iteration 15, every trial
+recorded:
+
+```
+ current merit   8.4313e-01
+ full step       4.5122e+00 -> 3.638 -> 2.162 -> 1.244 -> 0.9328 -> 0.8609 -> 0.8455 -> 0.8427
+```
+
+The full step is **3.8 to 5.4× worse than the iterate** right across the plateau,
+and the halving sequence descends monotonically, creeping under the current
+merit only at the seventh halving. **The Newton step buys almost no first-order
+decrease in this merit.** The discriminator proposed for this — *full step ≈
+current means the direction is good* — is WRONG, and measured: the ratio says
+"bad direction" while reweighting the same direction demonstrably halves the
+work. What matters is the SHAPE of the halving sequence, not the full step's
+ratio.
+
+**SECOND, THE THREE WEIGHTS ON MAST**, `k = 2`, 4198 elements, all four support
+sweeps counted, `psi_ax` **5.896474e-02** in every run that converged:
+
+| | 0.01 | 0.03 | 0.1 | 0.3 | **1.0** | 3.0 | 10 | 20 | 30 |
+|---|---|---|---|---|---|---|---|---|---|
+| `XPointMeritWeight` | | | 57 | 57 | **56** | 53 | 39 | **35** | fails |
+| `BorderMeritWeight` | | **38** | 52 | 55 | **56** | 56 | 56 | | 56 |
+| `AxisMeritWeight` | **fails** | **210** | 106 | 79 | **56** | **fails** | | | |
+
+**`BorderMeritWeight` SATURATES ABOVE ONE AND THAT IS A CORRECTNESS SIGNAL.**
+3, 10 and 30 give bit-identical sweep counts, as they must: once the border
+terms dominate, `gamma` is an overall factor and Armijo's test is scale
+invariant. Raising the whole border is structurally a no-op; only lowering it —
+which is raising the FIELD — does anything.
+
+**AND THE AXIS ROW'S DEFAULT IS A LOCAL OPTIMUM.** Both directions degrade and
+both ends fail: 0.03 costs 210 iterations against 56, and 0.01 and 3.0 do not
+converge at all. `AxisMeritWeight = 0.03` WITH `XPointMeritWeight = 20` also
+fails, so the two do not stack — they interfere.
+
+**WHAT THAT KILLS.** The hypothesis was that `gamma cAx` carrying 0.75 of the
+merit against the X-point rows' 0.07 made the axis row over-weighted, since the
+two interventions that help both cut its share. It is wrong. Lowering the WHOLE
+border by 33× helps and lowering the AXIS ALONE by 33× is four times worse, and
+what separates them is that the first preserves the ratios among border rows and
+the second destroys them. So the balance among the border rows is about right as
+it stands, and the coincidence that both helpful knobs reduce the axis share was
+a coincidence.
+
+**WHAT SURVIVES.** `XPointMeritWeight` pays on MAST and is measured; nothing
+explains WHY, and M-113's inversion on `examples/diverted-tokamak.toml` — 14
+iterations to 82 at weight 4 — still stands unexplained beside it. `gamma` being
+frozen at the first iterate cannot be the cause of any of this: it multiplies
+every border row identically and CANCELS in any ratio between two of them, so it
+can only move border against field. That was asserted here before it was checked
+and it is wrong.
+
+### M-115
+
+**WHY MAST'S LINE SEARCH PLATEAUS: SIX HYPOTHESES MEASURED AND KILLED, AND WHAT
+THE INSTRUMENTS SAY INSTEAD.** M-111 records MAST spending 26 of 43 bootstrap
+iterations at damping 1/128 to 1/256 while the residual falls 0.7% a step, and
+M-113 records a 20× weight on the X-point rows fixing it there and making
+`examples/diverted-tokamak.toml` **5.9× worse**. This is the account of what
+that is and is not.
+
+**THE ONE STRUCTURAL FACT EVERYTHING RESTS ON**: `gamma` and `xScale` appear
+only in `augmentedNorm()` and the printed record, never in the step. **The
+Newton direction is bit-identical at every weight and only the accept/reject
+verdict moves.**
+
+| # | hypothesis | killed by |
+|---|---|---|
+| 1 | `gamma` frozen at the first iterate mis-balances the rows | it multiplies every border row identically and CANCELS in any ratio between two of them; it can only move border against field |
+| 2 | the axis row is over-weighted ( 0.75 of the merit against the X-point's 0.07 ) | M-114: its default is a LOCAL OPTIMUM — 0.03 costs 210 iterations against 56, and 0.01 and 3.0 fail outright |
+| 3 | the merit is mis-equilibrated against the Schur complement | `‖S_axis‖/‖S_xpoint‖` = 1.00/79.3 predicts a weight of **0.26** where the measured optimum is **20** — wrong by 77× and pointing the wrong way |
+| 4 | the residual is discontinuous because the X-point is re-located per trial | the located point halves EXACTLY with the damping — 0.0972, 0.0487, 0.0243, 0.0121, 0.0061, 0.0030, 0.0016 — and extrapolates onto the iterate's own |
+| 5 | the Jacobian is inexact, so the direction is not `-J^-1 R` | the FIELD block's deviation from `( 1 - a )‖R_0‖` falls by **3.3 to 4.0** per halving, which is the `O( a^2 )` an exact direction owes |
+| 6 | so drop the constraints: judge Armijo on `‖R‖` alone | **MAST FAILS**, exit 2. The augmented residual wanders 6.19 → 108.8 → 155 → 6.01 → 47.3 → 8.42 → 24.1 and never closes |
+
+**HYPOTHESIS 5 WAS KILLED BY A TEST PROPOSED AGAINST IT, AND THE ARITHMETIC
+BEHIND IT WAS WRONG TWICE.** `augmentedNorm` returns `‖W F‖`, not `½‖W F‖²`, so
+the exact-Newton prediction is `phi( t ) = ( 1 - t ) phi( 0 )` with slope
+`-phi( 0 )` — not `-phi( 0 )²`, which is what was first compared against. And
+the augmented merit cannot answer this question at all: it carries constraints
+evaluated after `peakAt()`, `refreshLimiterContact()` and `refreshXPoint()` have
+re-located the axis, the contact and the saddle inside every trial, and nothing
+linearises those. **Only the field block is both smooth and linearised**, and it
+is clean.
+
+**WHAT NUMBER 6 ESTABLISHES IS WORTH MORE THAN THE FIX IT REFUTES**: the border
+constraints are in the merit for a reason. Remove them and the line search takes
+steps that improve the field while wrecking the constraints, and the solve never
+closes. So the repair cannot be to exclude the un-linearised part; it has to be
+to linearise it.
+
+**AND THE SEVENTH IS SUPPORTED BUT NOT PROVEN. `psi_h` IS AN L2 FIELD AND
+`psi_bnd - psi_h( x_X )` IS A POINT EVALUATION OF IT.** A broken space jumps
+across faces, so that constraint can be discontinuous in the X-point's position
+while the position itself is smooth. Measured on MAST at iteration 15, the
+constraint and the element the point was found in:
+
+```
+ +3.736e-03/e1518  +2.609e-03/e1707  +2.138e-03/e3905  +1.994e-03/e2413
+ +1.767e-03/e1132  +1.857e-03/e1132  +1.895e-03/e1132  +1.913e-03/e1132
+```
+
+Successive differences ×1e-6: **1127, 471, 144, 227**, 90, 38, 18 — ratios 2.39,
+3.27, **0.63**, 2.52, 2.37, 2.11. **Within one element it halves cleanly; across
+the face from e3905 into e2413 the ratio INVERTS.** The anomaly is about 5% of
+the constraint, which is `gamma cBnd` ≈ 0.10 of a merit of 0.843, against an
+Armijo decrease requirement of ~1e-07 at that damping — large enough to matter
+by four orders. **This is a correlation with face crossings and not a
+demonstration of cause**, and it is recorded as such: six hypotheses before it
+also fitted the data they were built from.
+
+**WHY MAST AND NOT DIII-D.** MAST's X-point traverses about 9 cm within a single
+plateau iteration, crossing many elements from a seed 1 cm from the answer;
+DIII-D's converges 1.06e-03 m from its seed and never leaves its element. The
+X-point weight helps MAST because it changes how much a face crossing costs in
+the merit, which is why it transfers to no other machine and inverts on the
+fixture.
+
+**THE INSTRUMENTS THIS LEAVES**, all of which paid for themselves: the trial
+ladder ( every trial's merit, the field block alone, and the deviation from
+`( 1 - a )‖R_0‖` ), the located X-point and the `psi_bnd` constraint per trial
+with the element index, and the Schur complement's row norms and `cond_1`. They
+are how six hypotheses were killed in a day rather than argued about.
+
+### M-116
+
+**`[solver] PicardSweeps` ON THE SIX COLD FAILURES: IT FIXES NONE OF THEM AND
+TURNS THREE INTO SILENT WRONG ANSWERS.** `BORDERED-GLOBALISATION-PLAN.md` §0.2
+records that **nothing in the tree has ever set this key** — no example, no test,
+no benchmark — so every row of M-103 was taken at zero, and it was the cheapest
+untried thing available: fourteen `meq-run` invocations and no code. It has now
+been run. The pre-stage freezes `psi_ax`, `psi_bnd` and the plasma edge and
+solves the UNBORDERED problem, where `PicardThenNewton` is legal because there
+is no `psi_ax` unknown.
+
+| case | sweeps 2 / 4 / 8 | `psi_ax` | vs its reference |
+|---|---|---|---|
+| B peaked ff′ | exit 2, exit 2, exit 2 | — | no change |
+| B shaped | exit 2, exit 2, exit 2 | — | no change |
+| **C MAST shaped** | **exit 0** | 3.519343e-01 | **2.905e+00** |
+| D TCV | exit 2, exit 2, exit 2 | — | no change |
+| **E diamagnetic** | **exit 0** | 1.030822e-01 | **2.306e-01** |
+| **E shaped** | **exit 0** | 1.030887e-01 | **2.306e-01** |
+
+**ZERO OF SIX FIXED, AND THREE OF SIX MADE WORSE IN THE ONE WAY THIS PROJECT
+CARES ABOUT MOST.** Those three exit **0** with **no warning of any kind** —
+the axis guard is silent, the source guard is silent, nothing in the output
+says the answer is a different machine — and C shaped is out by a factor of
+**3.9**. A run that fails is actionable; a green run reporting a different
+equilibrium is not, and *Testing stance* exists for exactly this.
+
+**AND THE SWEEP COUNT DOES NOT MATTER**: 2, 4 and 8 give bit-identical answers
+on all three, so the pre-stage reaches its own fixed point and the bordered
+solve inherits it whatever it is.
+
+**E's PROBLEM IS ROOT SELECTION AND NOT GLOBALISATION, WHICH THIS SETTLES.**
+The pre-stage reaches 1.030822e-01 and M-106's exact-seed run reached
+1.025203e-01 — 0.5% apart, both 23% from the reference. Two routes that share
+nothing find the same wrong branch, so no amount of step-length management is
+the repair there.
+
+### M-117
+
+**WHAT THE SIX COLD FAILURES ACTUALLY ARE, AND NOT ONE IS A NON-FINITE
+DIRECTION.** `BORDERED-GLOBALISATION-PLAN.md` §0.1 asks for this classification
+and names the condition that would make the whole globalisation campaign moot:
+if the bordered step's DIRECTION is non-finite, a line search can only choose
+how far along it to go and no globalisation is the repair. **It does not hold.**
+The border trace prints on failure under `--profile` and records
+`directionFinite` per step; it is true on every step of all six.
+
+| case | category | evidence |
+|---|---|---|
+| B peaked ff′ | **one fatal step** | 12 halvings exhausted on **1 of 27** steps |
+| B shaped | one fatal step | 1 of 26 |
+| C MAST shaped | **chronic** | 55 of 288 |
+| D TCV | **X-point EXCURSION** | seed ( 0.7500, −0.5500 ) → ( 0.9296, −1.9875 ) → ( 1.0288, −2.1393 ) |
+| E diamagnetic | X-point excursion | ( 1.1000, −0.6000 ) → ( 1.4909, **+0.9299** ) → ( 1.8960, +1.3010 ) |
+| E shaped | X-point excursion | as E |
+
+**TCV's NULL TRAVELS 1.6 m IN Z FROM ITS SEED AND E's FLIPS SIGN IN ONE STEP.**
+That is not a step-length failure at all; it is the iteration leaving the saddle
+XP-3 was told to follow, which `setXPointBoundary`'s own error message names.
+
+**AND THE MERIT'S COMPOSITION EXPLAINS BOTH ENDS AT ONCE, WHICH IS THE FINDING
+THAT UNIFIES M-111 THROUGH M-115.** Read off the same traces:
+
+| | merit dominated by | what the X-point does |
+|---|---|---|
+| **C MAST** | the BORDER — `g·axis` **0.75** of a merit of 0.843 | crawls a millimetre an iteration; the plateau |
+| **D TCV** | the FIELD — `g·axis` −1.31e-04 and `g·bnd` −1.74e-03 against ‖R‖ **2.953** | runs away unrestrained |
+
+**The border constraints are three orders of magnitude apart in their share of
+the merit between two machines in the same benchmark.** So there is no single
+weight that can be right for both, and M-113's inversion, M-114's local optimum
+and `BorderMeritWeight`'s one-sided saturation are all the same fact seen from
+different machines: **MAST is the case where the border already dominates, so
+raising it CANNOT do anything, and it is the only case the border weight was
+measured on.** That deletion was taken on one machine at one end of the range.
+
+### M-118
+
+**Three defects in the bordered Newton's derivative supply, found by an audit
+of what is analytic and what is differenced, and what each costs.**
+
+The audit's own headline first, because it corrects the premise the audit was
+commissioned under: **MEQ's bordered Jacobian is already almost entirely
+analytic.** Of roughly twenty derivative quantities entering `J`, three are
+differenced — `∂R/∂ψ_ax` at iteration 0 (always), the two normalisation columns
+when the source does not supply `normalisationDerivatives()`, and the exterior
+columns under `BorderColumn::Differenced`, which is the deliberate control.
+Every constraint row, every corner entry and the current column are closed form.
+
+**And the L2 jump is not an obstruction to an analytic derivative.** Six entries
+in the whole system need `d/dx` of a point evaluation — the two `ψ_bnd` corner
+entries against the X-point coordinates, and XP-3's four `∇q` ones — and all six
+are exact arithmetic on the element's own polynomial today. The jump obstructs
+the **constraint being differentiable at all**, which is a different problem and
+one that analytic differentiation cannot touch. M-115's plateau hypothesis is
+about the second, not the first.
+
+| | defect | reachable | what it cost |
+|---|---|---|---|
+| 1 | `NormalisedRotatingSource` never applied `currentScale()` | `[source] Type = "rotating"` + `Normalised` + `PlasmaCurrent`, no guard anywhere | `∫F/r` independent of λ, so the current constraint cannot be satisfied by the unknown that exists to satisfy it — while `assembleCurrentColumn()` and `cornerEntry( I, I )` report a sensitivity of `scaledF/λ` that does not exist |
+| 2 | `NormalisedRotatingSource::normalisationDerivatives()` unwritten | every bordered rotating solve | the two normalisation columns differenced, and a difference perturbs the normalisation, which moves the edge, so it straddles a kink |
+| 3 | `assembleCurrentNormalisationCorner()` returned a silent **zero** on a source that refused | any source without (2) | see below |
+
+**(3) IS THE ONE WORTH A NUMBER, AND THE NUMBER IS NOT WHAT WAS PREDICTED.** Its
+sibling `assembleNormalisationColumn()` falls back to a central difference in
+exactly the same situation: one degraded and the other deleted. The repair is a
+difference of `assemblePlasmaCurrent()` on the shared step, and the capability
+probe is hoisted out of the quadrature loop — asking inside it would return a
+partial sum over the elements already walked if a source ever refused late.
+
+Measured on `HighBetaConvergence`'s rectangle with `setPlasmaCurrent`, a
+refusing source against the same source unwrapped:
+
+| corner | n | Newton | final residual | `psi_ax` | scale |
+|---|---|---|---|---|---|
+| assembled | 8 | **4** | 2.0478e-15 | 5.242280976e-03 | 7.713043e-05 |
+| differenced | 8 | **5** | 1.1617e-16 | 5.242280976e-03 | 7.713043e-05 |
+| assembled | 16 | **4** | 2.1119e-15 | 5.242827733e-03 | 7.708217e-05 |
+| differenced | 16 | **5** | 1.7912e-17 | 5.242827733e-03 | 7.708217e-05 |
+
+**AND THE SAME TABLE WITH THE DEFECT PUT BACK, WHICH IS THE HALF THAT MATTERS:**
+the zeroed corner reads **42 iterations at both mesh sizes**, against 4 — and
+**still converges**, to 6.28e-13 and 2.81e-13. So on this problem a deleted
+corner costs a factor of ten in work and nothing in the answer.
+
+**That mutation changed what the test asserts.** The case was written asserting
+that a deleted corner fails to converge within its cap, on the arithmetic that
+a geometric 0.8 a step needs about 130 iterations to cross twelve decades —
+which is `CLAUDE_FB.md`'s measurement on a harder problem and is not this one.
+**The case passed against the defect it was written to catch**, and only running
+the mutation found that out. It now asserts on the iteration count, which sits
+an order of magnitude clear of both behaviours: 5 against a bound of 10, where
+the defect gives 42.
+
+**A fourth finding is recorded and NOT repaired**, because repairing it needs an
+instrument that does not exist. The axis row drops its position term by the
+envelope theorem, justified in `GradShafranov.cpp` by *"`grad_bar( psi ) = r q`,
+so `grad( psi_h )( x* ) = 0` at a zero of `q_h` **IDENTICALLY**"*. That relation
+is continuous: the discrete flux equation makes `r q_h − ∇̄ψ_h` the local lifting
+of the trace jump, so `∇ψ_h( x* )` is `O( h^k )` rather than zero — which is the
+same fact as `q_h` converging a full order better than `∇ψ_h`, and is why the
+mixed method exists. `cornerEntry()`'s XP-3 arm says exactly this about the same
+identity (*"whose identity is only weak"*) 380 lines away, and the two cannot
+both be right. The missing piece is
+`∇ψ_h( x* )ᵀ ( ∇q_h )⁻¹ ( flux shape at x* )`, and **every factor is already
+assembled** — `xFluxJacobian` is `∇q_h`, `xFluxShape` is `∂q_h/∂u`. It is a
+fourth candidate for XP-3's observed order of 1.664 against XP-2's 1.667,
+alongside the three `CLAUDE_FB.md` already lists. It is left alone because a
+Jacobian term moves which branch a marginal case selects — M-26 measures 9.4% in
+`max ψ_h` — and the border has no Jacobian-against-difference case, where the
+field block has had one in `NewtonConvergence.cpp` all along.
+
+**The transferable part**: `[source] Type = "rotating"` has now produced this
+shape three times — `ConfineToPlasma`, `PlasmaCurrent` and
+`normalisationDerivatives()`. Every accepted key on Config's rotating branch is
+worth checking against what `meq::NormalisedRotatingSource` actually reads.

@@ -908,6 +908,15 @@ namespace meq
 	};
 
 	// [solver] -- Newton on the outside, a linear solve on the inside.
+	/// `[solver] LineSearchMerit`. Mirrors
+	/// meq::GradShafranovSolver::LineSearchMerit, which this layer cannot name:
+	/// Config is deliberately MFEM-free.
+	enum class LineSearchMeritChoice
+	{
+		Augmented,
+		Field
+	};
+
 	struct SolverConfig
 	{
 		// Who computes the element-local work, and which direct solver
@@ -1000,6 +1009,28 @@ namespace meq
 		 * of the outer iteration XP-3 leaves standing.
 		 */
 		int plasmaSupportSweeps = 0;
+
+		// [solver] XPointMeritWeight -- a multiplier on the length that puts
+		// XP-3's two rows into the LINE SEARCH's merit, and into nothing else.
+		// The border solves q_r = q_z = 0 whatever this is, so it changes how
+		// many iterations a solve costs and must not change the answer.
+		// One is the natural scale ( r h, which turns q into a flux across the
+		// X-point's own element ) and is the default. See
+		// meq::GradShafranovSolver::setXPointMeritWeight for the plateau it
+		// exists to attack.
+		//
+		// AND THERE IS NO GOOD UNIVERSAL VALUE: the sensitivity INVERTS between
+		// cases. MAST goes 56 iterations to 35 at weight 20 and FAILS at 30,
+		// while examples/diverted-tokamak.toml goes 14 to 82 at weight 4. The
+		// natural scale is right on one and wrong on the other, so this is a
+		// per-case knob and 1.0 stays the default. MEASUREMENTS.md M-113.
+		double xPointMeritWeight = 1.0;
+
+		// [solver] LineSearchMerit -- what the Armijo backtracking compares,
+		// and NOT what is solved or when it stops. See
+		// meq::GradShafranovSolver::LineSearchMerit.
+		LineSearchMeritChoice lineSearchMerit = LineSearchMeritChoice::Augmented;
+
 
 		/**
 		 * `PicardSweeps` -- FIND THE BASIN BEFORE DRIVING THE NEWTON.

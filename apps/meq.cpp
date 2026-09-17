@@ -558,7 +558,30 @@ namespace
 		double eta;
 		int iterations;
 		bool globalised;
+		/// WHICH RUNG OF THE REACTIVE LADDER PRODUCED THIS CYCLE'S ANSWER.
+		///
+		/// A name and not just the bool beside it, because there are now two
+		/// fallbacks and they are different things: the bordered one keeps the
+		/// border and changes the field block's linearisation, the unbordered
+		/// one changes where the iterate is. CLAUDE.md's rule is that a run must
+		/// say which rung answered, and MEASUREMENTS.md M-26 is why -- three
+		/// solve routes reaching discrete solutions 9.4% apart, all converged.
+		/// A reader cannot tell that hazard from a converged equilibrium unless
+		/// the route is on the record.
+		///
+		/// A string literal, so it is never owned and never dangles.
+		char const *rung = "newton";
 	};
+
+	/// The parenthetical the converged line carries when a fallback rung
+	/// answered, as a pointer into a static buffer -- one summary line is
+	/// printed per run, so there is never a second live caller.
+	char const *viaRung( Cycle const &cycle )
+	{
+		static char text[ 64 ];
+		std::snprintf( text, sizeof text, " (via %s)", cycle.rung );
+		return text;
+	}
 
 	/// The residual history, in the shape CLAUDE.md records. It is the
 	/// diagnostic that separates a wrong Jacobian from a hard problem -- a run
@@ -635,6 +658,129 @@ namespace
 			             b.xR, b.xZ,
 			             b.directionFinite ? "" : "  <- DIRECTION NOT FINITE" );
 		}
+		std::printf( "\n" );
+
+		/*
+		 * THE TRIAL LADDER, WHICH IS WHAT SAYS WHETHER THE DIRECTION OR THE
+		 * MERIT IS AT FAULT.
+		 *
+		 * `damp` and `n` above report that a step was halved nine times and
+		 * cannot report why, and the two reasons want opposite repairs. The
+		 * ratio printed here is the full step's merit against the iterate's
+		 * own: NEAR ONE means the direction was nearly acceptable and a
+		 * reweighting of the merit would have taken it, and LARGE means the
+		 * direction is genuinely bad and reweighting cannot help.
+		 */
+		bool any = false;
+		for ( auto const &b : solver->borderSteps() )
+			if ( b.trials > 2 )
+				any = true;
+		if ( !any )
+			return;
+
+		std::printf( "   the line search's trial ladder, where it halved more "
+		             "than twice\n" );
+		std::printf( "   %3s %11s %11s %9s %s\n", "it", "merit now",
+		             "full step", "ratio", "... then each halving" );
+		for ( std::size_t i = 0; i < steps.size(); ++i )
+		{
+			meq::GradShafranovSolver::BorderStep const &b = steps[ i ];
+			if ( b.trials <= 2 || b.trialNorms.empty() )
+				continue;
+			double const full = b.trialNorms.front();
+			std::printf( "   %3zu %11.4e %11.4e %9.3g  ", i, b.norm, full,
+			             b.norm > 0.0 ? full/b.norm
+			                          : std::numeric_limits<double>::infinity() );
+			for ( std::size_t t = 1; t < b.trialNorms.size() && t < 11; ++t )
+				std::printf( "%s%.3e", t > 1 ? " " : "", b.trialNorms[ t ] );
+			std::printf( "\n" );
+
+			// AND WHERE THE SADDLE WAS FOUND AT EACH OF THOSE TRIALS. The step
+			// halves, so a SMOOTH residual moves the located point by half as
+			// much each time and the sequence converges geometrically on the
+			// iterate's own. A jump is the line search searching a function
+			// that is not continuous along its ray.
+			// THE FIELD BLOCK ALONE, against the exact-Newton prediction
+			// ( 1 - a )|| R_0 ||. Its deviation must be O( a^2 ) -- a ratio
+			// tending to 4 -- if the direction really is -J^-1 R. The augmented
+			// merit cannot say this: it carries constraints re-located at every
+			// trial, which nothing linearises.
+			if ( b.trialFieldNorms.size() == b.trialNorms.size()
+			     && b.fieldNorm > 0.0 )
+			{
+				std::printf( "       ||R|| dev:" );
+				double previous = 0.0;
+				double alpha = 1.0;
+				for ( std::size_t t = 0; t < b.trialFieldNorms.size()
+				                         && t < 11; ++t, alpha *= 0.5 )
+				{
+					double const d = b.trialFieldNorms[ t ]
+					                 - ( 1.0 - alpha )*b.fieldNorm;
+					std::printf( " %.2e", d );
+					if ( t > 0 && d != 0.0 )
+						std::printf( "[%.2f]", previous/d );
+					previous = d;
+				}
+				std::printf( "\n" );
+			}
+
+			// AND THE psi_bnd CONSTRAINT AT THOSE SAME TRIALS, with the element
+			// the X-point was found in. The coordinates halve smoothly; if this
+			// does NOT, a point evaluation of an L2 field has jumped across a
+			// face and the merit carries a discontinuity nothing linearises.
+			if ( b.trialBoundaryConstraint.size() == b.trialNorms.size() )
+			{
+				std::printf( "       psi_bnd con:" );
+				for ( std::size_t t = 0; t < b.trialBoundaryConstraint.size()
+				                         && t < 11; ++t )
+					std::printf( " %+.3e/e%d", b.trialBoundaryConstraint[ t ],
+					             t < b.trialXElement.size()
+					             ? b.trialXElement[ t ] : -1 );
+				std::printf( "\n" );
+			}
+
+			if ( b.trialXR.size() == b.trialNorms.size() )
+			{
+				std::printf( "       X at each trial:" );
+				for ( std::size_t t = 0; t < b.trialXR.size() && t < 11; ++t )
+					std::printf( " (%.4f,%.4f)", b.trialXR[ t ],
+					             b.trialXZ[ t ] );
+				std::printf( "\n" );
+			}
+		}
+		/*
+		 * AND THE BORDER'S OWN CONDITIONING, WHICH IS WHAT THE MERIT'S WEIGHTS
+		 * ARE GUESSING AT.
+		 *
+		 * The reduced border matrix S is the sensitivity of each constraint to
+		 * each border unknown with the field eliminated, and its ROWS carry the
+		 * units of the constraints they belong to. A merit weighting row i by
+		 * 1/|| S_i || would make a unit of residual in each row mean a
+		 * comparable error in the unknowns; MEQ weights the axis, boundary,
+		 * current and exterior rows by gamma and the X-point's two by
+		 * gamma*xScale, so || S_axis || / || S_xpoint || is what xScale OUGHT
+		 * to be. Printed beside what it IS.
+		 */
+		// THE FIRST STEP AND THE LAST, because `xScale` is FROZEN at the first
+		// iterate while S is re-formed every step: a ratio taken at convergence
+		// need not be the one the line search wanted at iteration 15.
+		std::printf( "   the border's reduced matrix S -- row 2-norms, axis "
+		             "first\n" );
+		for ( std::size_t k = 0; k < steps.size(); ++k )
+		{
+			if ( steps[ k ].schurRowNorms.empty() )
+				continue;
+			if ( k != 0 && k + 1 != steps.size() )
+				continue;
+			std::printf( "   %-5s cond_1 %10.3e   rows", k ? "last" : "first",
+			             steps[ k ].schurCondition );
+			for ( std::size_t i = 0; i < steps[ k ].schurRowNorms.size()
+			                         && i < 8; ++i )
+				std::printf( " %.3e", steps[ k ].schurRowNorms[ i ] );
+			std::printf( "%s\n",
+			             steps[ k ].schurRowNorms.size() > 8 ? " ..." : "" );
+		}
+
 		std::printf( "\n" );
 	}
 }
@@ -1817,7 +1963,14 @@ int main( int argc, char **argv )
 			 * Config refuses this beside [boundary.limiter], so the branches are
 			 * exclusive by construction rather than by precedence.
 			 */
+		{
 			fresh->setXPointBoundary( xPointSeedR, xPointSeedZ );
+
+			// `[solver] XPointMeritWeight` -- how heavily those two rows count
+			// in the LINE SEARCH and in nothing else. Set beside the rows it
+			// weights, and refused by Config without them.
+			fresh->setXPointMeritWeight( config->getSolver().xPointMeritWeight );
+		}
 
 		/*
 		 * THE THIRD BORDER, AND THE FILE SPEAKS AMPERES WHERE THE SOLVER SPEAKS
@@ -1887,6 +2040,14 @@ int main( int argc, char **argv )
 			             "attribute\n",
 			             fresh->excludedElementCount(), mesh.GetNE() );
 		}
+
+
+		// `[solver] LineSearchMerit` -- which quantity Armijo compares. Not what
+		// is solved and not when it stops.
+		fresh->setLineSearchMerit(
+			config->getSolver().lineSearchMerit == meq::LineSearchMeritChoice::Field
+			? meq::GradShafranovSolver::LineSearchMerit::Field
+			: meq::GradShafranovSolver::LineSearchMerit::Augmented );
 
 		if ( exterior )
 			fresh->setExteriorCoupling( *exterior );
@@ -2064,6 +2225,7 @@ int main( int argc, char **argv )
 		 * is exactly why it is the fallback and not the default.
 		 */
 		bool globalised = false;
+		char const *rung = "newton";
 		try
 		{
 			// Built here rather than inside the retry so that a configuration
@@ -2842,30 +3004,75 @@ int main( int argc, char **argv )
 				reportBorderSteps( solver.get() );
 
 			/*
-			 * THE LADDER HAS NO SECOND RUNG WHEN psi_ax IS AN UNKNOWN, and
-			 * saying so beats letting the retry throw.
+			 * THE BORDERED PATH'S SECOND RUNG, AND IT IS ITS OWN.
 			 *
-			 * Every globalisation MEQ has drives a residual of its own: the
-			 * KINSOL paths solve oper(x) = 0 through their own adapter, and the
-			 * Picard ones build no Jacobian at all. The border is a row and a
-			 * column ON THE NEWTON JACOBIAN, so neither has anywhere to put it,
-			 * and GradShafranovSolver refuses the combination -- correctly, and
-			 * with a std::logic_error that would surface here as
-			 * "Picard-then-Newton did not converge either", which is a
-			 * diagnosis of the wrong thing entirely.
+			 * Every OTHER globalisation MEQ has drives a residual of its own:
+			 * the KINSOL paths solve oper(x) = 0 through their own adapter, and
+			 * the unbordered Picard ones put the potential block on the linear
+			 * form and build no Jacobian at all. The border is a row and a
+			 * column ON THE NEWTON JACOBIAN, so none of them has anywhere to put
+			 * it, and GradShafranovSolver still refuses those combinations.
+			 *
+			 * Globalisation::BorderedPicardThenNewton is not one of them. It
+			 * keeps the border, the elimination, the Armijo loop and the merit,
+			 * and changes only which linearisation the FIELD block of the
+			 * Jacobian carries -- Picard to a loose target, then Newton from the
+			 * state that reached. See meq::FieldLinearisation.
+			 *
+			 * **AND WHAT IT IS EXPECTED TO BE WORTH IS BOUNDED AND WRITTEN
+			 * DOWN.** The fixed point does not move, so it helps only by having
+			 * a different basin; MEASUREMENTS.md M-117 classifies the cold
+			 * failures into one fatal step, a chronic case and an X-point
+			 * excursion, and only the first two are shapes a field-block
+			 * preconditioner can address. Do not read a rung that closes half
+			 * the failures as a partial success.
 			 */
 			if ( normalised )
 			{
 				std::fprintf( stderr,
-					"MEQ: Newton did not converge: %s\n"
-					"     [source] Normalised = true makes psi_ax an unknown, closed by a\n"
-					"     BORDERED Newton, and no globalisation MEQ has can carry that\n"
-					"     border -- so there is no fallback to try. The levers are a\n"
-					"     better [source] PsiAxis guess, an [initialguess] that puts psi\n"
-					"     near the right size, and RESOLUTION.\n",
+					"MEQ: the bordered Newton did not converge: %s\n"
+					"     Retrying with PICARD in the field block and Newton in the\n"
+					"     borders, then Newton throughout for the endgame. This is the\n"
+					"     observed-failure fallback and it does not change which\n"
+					"     equilibrium a converging run reports -- the fixed point is the\n"
+					"     same, only the iteration differs.\n",
 					firstAttempt.what() );
-				return SolveFailed;
+
+				try
+				{
+					// REBUILT, for the reason the unbordered rung below rebuilds:
+					// a caught mfem::ErrorException leaves a solver unusable.
+					solver = makeSolver( *solveMesh, cycle == 0 );
+					solver->setGlobalisation(
+						meq::GradShafranovSolver::Globalisation::BorderedPicardThenNewton );
+					solver->solve();
+					globalised = true;
+					rung = "bordered-picard-then-newton";
+				}
+				catch ( std::exception const &secondAttempt )
+				{
+					if ( solver )
+					{
+						reportResiduals( solver->newtonResiduals() );
+						if ( wantProfile )
+							reportBorderSteps( solver.get() );
+					}
+					std::fprintf( stderr,
+						"MEQ: the bordered Picard-then-Newton did not converge either: %s\n"
+						"     %d of its iterations ran under the Picard linearisation and it\n"
+						"     %s its handoff tolerance.\n"
+						"     The levers left are a better [source] PsiAxis guess, an\n"
+						"     [initialguess] that puts psi near the right size, and\n"
+						"     RESOLUTION.\n",
+						secondAttempt.what(),
+						solver ? solver->borderedPicardIterations() : 0,
+						solver && solver->borderedPicardConverged() ? "reached"
+						                                            : "did not reach" );
+					return SolveFailed;
+				}
 			}
+			else
+			{
 
 			std::fprintf( stderr,
 				"MEQ: Newton did not converge: %s\n"
@@ -2881,6 +3088,7 @@ int main( int argc, char **argv )
 					meq::GradShafranovSolver::Globalisation::PicardThenNewton );
 				solver->solve();
 				globalised = true;
+				rung = "picard-then-newton";
 			}
 			catch ( std::exception const &secondAttempt )
 			{
@@ -2892,6 +3100,7 @@ int main( int argc, char **argv )
 					"     [mesh], a higher [discretisation] Degree, or [adaptivity].\n",
 					secondAttempt.what() );
 				return SolveFailed;
+			}
 			}
 		}
 
@@ -2908,7 +3117,7 @@ int main( int argc, char **argv )
 		}
 
 		Cycle record{ solveMesh->GetNE(), solver->numTraceDofs(), 0, widened,
-		              -1.0, solver->newtonIterations(), globalised };
+		              -1.0, solver->newtonIterations(), globalised, rung };
 
 		if ( !adapt.enabled )
 		{
@@ -3271,7 +3480,7 @@ int main( int argc, char **argv )
 		             "degree %d%s\n",
 		             last.iterations, last.elements,
 		             config->getDiscretisation().polynomialDegree,
-		             last.globalised ? " (via Picard-then-Newton)" : "" );
+		             last.globalised ? viaRung( last ) : "" );
 
 		/*
 		 * BOTH NUMBERS, BECAUSE THEY HAVE DIFFERENT UNITS AND EITHER CAN BE
@@ -3928,7 +4137,10 @@ int main( int argc, char **argv )
 				Cycle const &e = history[ c ];
 				std::printf( "  %6zu %8d %8d %8d %6d %12.4e %5d%s\n",
 				             c, e.elements, e.traceDofs, e.marked, e.widened,
-				             e.eta, e.iterations, e.globalised ? "  P->N" : "" );
+				             e.eta, e.iterations,
+				             e.globalised ? ( e.rung[ 0 ] == 'b' ? "  bP->N"
+				                                                 : "  P->N" )
+				                          : "" );
 			}
 			std::fflush( stdout );
 		}

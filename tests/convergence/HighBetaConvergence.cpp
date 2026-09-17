@@ -1004,3 +1004,178 @@ BOOST_AUTO_TEST_CASE( theAnalyticColumnAgreesWithTheDifferencedOne )
 	}
 }
 
+
+/*
+ * THE CURRENT ROW'S TWO NORMALISATION CORNERS, ASSEMBLED AGAINST DIFFERENCED.
+ *
+ * `int F/r` depends on psi_ax and psi_bnd explicitly, through the normalisation
+ * the profiles are evaluated at, so the current row of the corner block has an
+ * entry against each of them. CLAUDE_FB.md measures what they are worth: without
+ * them the current-bordered solve converges LINEARLY, at a clean geometric
+ * contraction of about 0.8 a step, and supplying them took iteration 60's
+ * residual from 7.06e-08 to 1.69e-10.
+ *
+ * THE DEFECT THIS CASE EXISTS FOR WAS NOT A WRONG NUMBER BUT A SILENT ZERO.
+ * assembleCurrentNormalisationCorner() asked the source for its normalisation
+ * derivatives INSIDE its quadrature loop and, on a refusal, returned with both
+ * entries at their initialised 0.0 -- no warning, no fallback, and on a source
+ * that refused at a later point a PARTIAL SUM. Its sibling
+ * assembleNormalisationColumn() falls back to a central difference in exactly
+ * the same situation. One degraded and the other deleted, which is the kind of
+ * asymmetry that turns a quadratic Newton into a linear one while the suite
+ * stays green.
+ *
+ * SO THE CASE NEEDS A SOURCE THAT REFUSES, and every production source now
+ * supplies them -- meq::NormalisedMHDSource always did and
+ * meq::NormalisedRotatingSource does as of the same change. A two-line subclass
+ * is the only way to reach the fallback, which is itself worth noting: the
+ * branch is unreachable from the shipped sources and would otherwise be
+ * untested code guarding the case where somebody writes a new one.
+ *
+ * WHAT THE DEFECT COSTS HERE IS MEASURED AND IS NOT WHAT WAS EXPECTED: 42
+ * Newton iterations against 4, at both mesh sizes, and it still converges. See
+ * the iteration assertion below for why that changed which quantity this case
+ * asserts on.
+ */
+namespace
+{
+	/// meq::NormalisedMHDSource with its analytic normalisation derivatives
+	/// withheld, so the bordered Newton has to fall back. Nothing else differs,
+	/// which is what makes the comparison below a comparison of ROUTES.
+	class RefusingSource : public meq::NormalisedMHDSource
+	{
+		public:
+			using meq::NormalisedMHDSource::NormalisedMHDSource;
+
+			bool normalisationDerivatives( double, double, double, double &,
+			                               double & ) const override
+			{
+				return false;
+			}
+	};
+}
+
+BOOST_AUTO_TEST_CASE( theAnalyticCurrentCornerAgreesWithTheDifferencedOne )
+{
+	int const order = 2;
+	meq::tests::Rectangle const box = standardBox();
+	double const limiterR = box.rMin + 0.68*( box.rMax - box.rMin );
+	double const limiterZ = box.zMin + 0.31*( box.zMax - box.zMin );
+
+	struct Result
+	{
+		double axis = 0.0;
+		double boundary = 0.0;
+		double scale = 0.0;
+		double residual = 0.0;
+		int iterations = 0;
+	};
+
+	auto run = [ & ]( int n, bool refuse )
+	{
+		mfem::Mesh mesh = meq::tests::makeMesh( box, n );
+		auto pPrime = std::make_shared<meq::ConstantProfile const>( 0.45 );
+		auto ggPrime = std::make_shared<meq::ConstantProfile const>( 0.30 );
+
+		// Held by base reference so the two arms differ in the REFUSAL and in
+		// nothing else -- same profiles, same normalisation, same everything
+		// setSource() can see.
+		meq::NormalisedMHDSource analytic( pPrime, ggPrime, 1.0, 1.0 );
+		RefusingSource refusing( pPrime, ggPrime, 1.0, 1.0 );
+		meq::NormalisedSource &source =
+			refuse ? static_cast<meq::NormalisedSource &>( refusing )
+			       : static_cast<meq::NormalisedSource &>( analytic );
+
+		mfem::ConstantCoefficient zero( 0.0 );
+		mfem::FunctionCoefficient guess = bump( 0.30 );
+
+		meq::GradShafranovSolver solver( mesh, order );
+		solver.setBoundaryFluxPoint( limiterR, limiterZ );
+		solver.setSource( source, 0.30 );
+		// THE CURRENT BORDER, which is what puts the two corner entries in the
+		// system at all. Without it this case would assemble them and never
+		// use them.
+		solver.setPlasmaCurrent( 0.08 );
+		solver.setBoundaryData( zero );
+		solver.setInitialGuess( guess );
+		solver.setNewtonControl( 1.0e-12, 1.0e-14, 60 );
+		solver.solve();
+
+		Result out;
+		out.axis = solver.psiAxis();
+		out.boundary = solver.psiBoundary();
+		out.scale = solver.plasmaCurrentScale();
+		out.iterations = solver.newtonIterations();
+		out.residual = solver.newtonResiduals().empty()
+		               ? 0.0 : solver.newtonResiduals().back();
+		return out;
+	};
+
+	std::printf( "\n  THE CURRENT ROW'S NORMALISATION CORNERS\n" );
+	std::printf( "    %-12s %6s %7s %14s %16s %16s %14s\n", "corner", "n",
+	             "newton", "final residual", "psi_ax", "psi_bnd", "scale" );
+
+	for ( int n : { 8, 16 } )
+	{
+		Result const assembled = run( n, false );
+		Result const differenced = run( n, true );
+
+		std::printf( "    %-12s %6d %7d %14.4e %16.9e %16.9e %14.6e\n",
+		             "assembled", n, assembled.iterations, assembled.residual,
+		             assembled.axis, assembled.boundary, assembled.scale );
+		std::printf( "    %-12s %6d %7d %14.4e %16.9e %16.9e %14.6e\n",
+		             "differenced", n, differenced.iterations,
+		             differenced.residual, differenced.axis,
+		             differenced.boundary, differenced.scale );
+		std::fflush( stdout );
+
+		// THE SAME EQUILIBRIUM. The corner is a Jacobian entry, so it changes
+		// the work and not the answer -- and CLAUDE.md's *A wrong Jacobian is
+		// invisible to a convergence table* is exactly why this half of the
+		// assertion is the weak one.
+		BOOST_TEST( std::abs( assembled.axis - differenced.axis )
+		            <= 1.0e-8*std::abs( assembled.axis ),
+		            "psi_ax moved with the corner route at n = " << n );
+		BOOST_TEST( std::abs( assembled.scale - differenced.scale )
+		            <= 1.0e-8*std::abs( assembled.scale ),
+		            "the profile scale moved with the corner route at n = " << n );
+
+		// Both must converge at all, which is a precondition rather than the
+		// finding: a route that did not would make the agreement above vacuous.
+		BOOST_TEST( differenced.residual <= 1.0e-10,
+		            "the differenced corner reached only "
+		            << differenced.residual << " at n = " << n );
+
+		/*
+		 * AND THE ONE WITH TEETH IS THE ITERATION COUNT, WHICH IS NOT WHERE
+		 * THIS CASE FIRST LOOKED.
+		 *
+		 * It was written asserting that a deleted corner fails to converge
+		 * within the cap, on the arithmetic that a geometric 0.8 a step needs
+		 * about 130 iterations to cross twelve decades. MUTATION-TESTED BY
+		 * RESTORING THE DEFECT, and that is wrong here: this problem is easier
+		 * than the one CLAUDE_FB.md measured and a zeroed corner still reaches
+		 * 6.3e-13, comfortably inside the tolerance above. The case PASSED
+		 * against the defect it names.
+		 *
+		 * What the defect actually costs on this problem is 42 iterations
+		 * against 4, at both mesh sizes -- a factor of ten and not a failure.
+		 * So the count is the instrument and the residual is not, and the
+		 * factor of two below sits an order of magnitude clear of the repaired
+		 * behaviour (5 against 4) in one direction and of the defective one
+		 * (42 against 4) in the other.
+		 *
+		 * The general lesson is this project's own and is why the mutation was
+		 * run: a test asserting the wrong quantity passes regardless, and the
+		 * only way to find that out is to put the defect back.
+		 */
+		BOOST_TEST( differenced.iterations <= 2*assembled.iterations + 2,
+		            "the differenced corner took " << differenced.iterations
+		            << " Newton iterations against the assembled one's "
+		            << assembled.iterations << " at n = " << n
+		            << ", which is the signature of a corner that is ABSENT "
+		               "rather than approximate -- a fallback that degrades "
+		               "costs one step, a silent zero costs an order of "
+		               "magnitude" );
+	}
+}

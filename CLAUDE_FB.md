@@ -2273,6 +2273,117 @@ configuration sets `PlasmaRMin = 0.0000`, so the axis is a candidate at all,
 against machine A's 0.5925; a vessel would have bounded it independently of the
 guard.
 
+### The cold failures are three different things, and the merit's balance is machine-dependent
+
+**NOT ONE OF THE SIX COLD `exit 2` CASES HAS A NON-FINITE DIRECTION**, which is
+the condition `BORDERED-GLOBALISATION-PLAN.md` §0.1 names as the one that would
+make the whole globalisation campaign moot. They are three distinct failures:
+two machines lose a SINGLE step of twenty-seven; one is chronic, exhausting the
+halving ladder on 55 of 288; and three are not step-length failures at all but
+**X-point EXCURSIONS** — TCV's null travels 1.6 m in Z from its seed and E's
+flips sign in one step.
+
+→ **[M-117](MEASUREMENTS.md#m-117)** — the classification · the traces ·
+→ **[M-116](MEASUREMENTS.md#m-116)** — `PicardSweeps`, which fixes none of them
+
+**AND THE SAME TRACES EXPLAIN WHY NO MERIT WEIGHT EVER TRANSFERRED BETWEEN
+MACHINES.** The border constraints' share of `augmentedNorm` differs by three
+orders of magnitude across two cases of one benchmark: on MAST `g·axis` alone is
+**0.75** of a merit of 0.843, and on TCV the whole border is **~1e-03** against a
+field residual of 2.953. So MAST is the end where the border already dominates —
+raising it cannot do anything, which is exactly what `BorderMeritWeight`'s
+upward saturation measured — and TCV is the end where nothing restrains the
+X-point at all. M-113's inversion, M-114's local optimum and that saturation are
+one fact seen from opposite ends of a range, not three findings.
+
+**`PicardSweeps` IS THE CHEAPEST UNTRIED THING AND IT IS A TRAP.** It had never
+been set by anything in the tree. It fixes none of the six and turns **three of
+them from `exit 2` into `exit 0` with a wrong answer and no warning** — C shaped
+out by a factor of 3.9, both E rows by 23%. A failure is actionable; a green run
+reporting a different machine is not.
+
+**AND E's DEFECT IS ROOT SELECTION, NOT GLOBALISATION.** The Picard pre-stage
+and M-106's exact-seed run reach 1.0308e-01 and 1.0252e-01 — 0.5% apart, both
+23% from the reference. Two routes sharing nothing find the same wrong branch,
+so no step-length management is the repair there.
+
+### The bordered path has a globalisation, and it is Picard in the field alone
+
+`Globalisation::BorderedPicardThenNewton` is the second rung of the driver's
+reactive ladder on a free-boundary run, and until it existed there was no rung
+at all: every other globalisation MEQ has either drives a residual of its own
+(the KINSOL ones) or puts the potential block on the **linear** form and builds
+no Jacobian for a border to be eliminated against (`AndersonPicard`,
+`PicardOnly`, and `PicardThenNewton` which is those two in sequence).
+
+**IT CHANGES ONE BLOCK AND NOTHING ELSE.** The border, its elimination, the
+Armijo loop and the augmented norm are untouched; `meq::FieldLinearisation`
+chooses only what the semi-linear term contributes to the **derivative**:
+
+```
+Newton   field block = A_lin - ( 1/r )( dF/dpsi ) M
+Picard   field block = A_lin
+```
+
+**And that is why there is a Jacobian in a method that is not supposed to have
+one.** Undamped, from the current iterate, `A_lin d = -( A_lin u^k - b( u^k ) )`
+gives `u^{k+1} = A_lin^-1 b( u^k )` — the classical Picard map written as a
+defect correction. The increment form is what lets the bordered machinery be
+reused verbatim, and under hybridization applying `A_lin^-1` is a `ComputeH`
+plus a trace solve either way, so it costs nothing extra.
+
+**THE RESIDUAL IS NEVER FROZEN, WHICH IS A DEPARTURE FROM
+`BORDERED-GLOBALISATION-PLAN.md` §3.2 AND IS THE WHOLE OF THE DESIGN.** At the
+iterate `F( r, z, psi_h )` and `F( r, z, psi^k )` are the same numbers, so
+freezing the residual changes no step. It changes only what is evaluated AWAY
+from the iterate, and both places it reaches are places it does harm: the Armijo
+trials, where a frozen `F` makes the field part of the merit affine in the field
+so the line search stops seeing the excursion it exists to catch; and the
+differenced border columns, which would then be derivatives of a source the
+residual is not using. §3.3's "one-line consistency requirement" does not arise
+because the inconsistency does not arise. `AssembleElementVector` is untouched
+and the change is an early `return` in `AssembleElementGrad`.
+
+**IT CANNOT CHANGE WHICH EQUILIBRIUM IS REPORTED, AND THAT IS ASSERTED RATHER
+THAN ARGUED.** The fixed points of `Phi( x ) = x - alpha M( x )^-1 G( x )` are
+the zeros of `G` whatever non-singular `M` is, and only the field block of `M`
+moves — but `by construction` is exactly the class of claim this project does
+not accept on its own, and M-26 has three solve routes reaching discrete
+solutions 9.4% apart. `theBorderedPicardReachesTheSameEquilibriumAsTheBordered
+Newton` measures it on the diverted machine: **`psi_ax` 8.26600363e-02 and
+`psi_bnd` 3.23793176e-02 from both routes, every printed digit**, 14 Newton
+iterations against 15 of which 8 ran under Picard. The case also asserts that
+`borderedPicardIterations()` is non-zero, because an implementation that wired
+the enum through and quietly assembled the Newton Jacobian anyway would pass
+every agreement assertion perfectly.
+
+What changes is the iteration matrix, `I - M^-1 J = M^-1 diag( K, 0 )` with `K`
+the reaction, so convergence is linear at a rate set by the reaction against the
+elliptic operator. M-36 already records which side of that trade this is: **a
+robustness route, not a faster one.**
+
+**WHAT IT IS EXPECTED TO BE WORTH IS BOUNDED, AND THE BOUND IS WRITTEN DOWN
+BEFORE THE MEASUREMENT RATHER THAN AFTER.** The fixed point does not move, so it
+helps only by having a different basin, and `A_lin` is unconditionally
+invertible where `A_lin - K` is what goes near-singular. Against M-117's
+classification that is **B and B-shaped** (one fatal step out of twenty-odd) and
+**C-shaped** (chronic); it is **not** D, E or E-shaped, which are X-point
+excursions that no field-block preconditioner restrains. **Three of six is the
+predicted maximum and not a partial success**, and a rung that closes them all
+would mean the classification is wrong rather than that the rung is better than
+expected.
+
+Two smaller departures from the plan, both recorded so the plan is not read as
+the built thing. BG-3 proposes re-purposing `Globalisation::PicardOnly`; a new
+value is used instead, because `PicardOnly` makes `usesNonlinearForms()` false
+and so moves the potential block onto the linear form — the exact route §3.2
+spends four reasons ruling out. And BG-4 proposes two calls to `solve()`; both
+phases are iterations of **one** loop inside `solveWithNormalisation()`, because
+a second call re-enters `prepare()`, which under NPC seeds the potential and the
+trace and leaves the **flux** block at zero. One loop also keeps `gamma` frozen
+at the first iterate across both phases, so the printed history is one merit end
+to end.
+
 ## The geometry: meshing a half-disc that reaches the axis
 
 Free boundary is the one campaign here whose geometry

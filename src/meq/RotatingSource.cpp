@@ -671,8 +671,20 @@ namespace meq
 
 		// One factor of 1/psi_ax, because the profiles are functions of Psi and
 		// F is a psi-derivative of what they build.
+		//
+		// AND currentScale() MULTIPLIES IT, exactly as it multiplies
+		// meq::NormalisedMHDSource::f(). Leaving it off is not a missing
+		// convenience: `[source] Type = "rotating"` accepts `PlasmaCurrent`
+		// (Config.cpp's rotating key list) and apps/meq.cpp calls
+		// setPlasmaCurrent() with no source-type guard, so an unscaled f() gives
+		// a current border whose constraint cannot respond to the unknown it is
+		// solving for -- while assembleCurrentColumn() and cornerEntry( I, I )
+		// both compute their entries as scaledF/lambda and so report a
+		// sensitivity that does not exist. The Newton is then driven by a
+		// Jacobian describing a different problem from the residual.
 		double const span = psiAxisValue - psiBoundaryValue;
-		return inner.f( r, z, ( psi - psiBoundaryValue )/span )/span;
+		return currentScale()
+		       *inner.f( r, z, ( psi - psiBoundaryValue )/span )/span;
 	}
 
 	double NormalisedRotatingSource::dFdPsi( double r, double z, double psi ) const
@@ -690,8 +702,57 @@ namespace meq
 		// TWO factors, not one: the chain rule supplies a second whenever another
 		// psi-derivative is taken. meq::NormalisedMHDSource carries the same
 		// asymmetry, and RotatingSourceTests checks it against a difference.
+		// The scale multiplies F, so it multiplies every psi-derivative of F.
 		double const span = psiAxisValue - psiBoundaryValue;
-		return inner.dFdPsi( r, z, ( psi - psiBoundaryValue )/span )/( span*span );
+		return currentScale()
+		       *inner.dFdPsi( r, z, ( psi - psiBoundaryValue )/span )/( span*span );
+	}
+
+	bool NormalisedRotatingSource::normalisationDerivatives( double r, double z,
+	                                                         double psi,
+	                                                         double &dFdAxis,
+	                                                         double &dFdBoundary ) const
+	{
+		// Outside the plasma F is identically zero however the normalisation
+		// moves, so both derivatives are too -- and this branch is the whole
+		// reason an analytic column beats a differenced one rather than merely
+		// costing less: a difference perturbs the normalisation, which MOVES THE
+		// EDGE, and then straddles it. Word for word
+		// meq::NormalisedMHDSource's position.
+		if ( !insidePlasma( psi ) )
+		{
+			dFdAxis = 0.0;
+			dFdBoundary = 0.0;
+			return true;
+		}
+
+		/*
+		 * THE CLOSURE IS NOT DIFFERENTIATED AGAIN, WHICH IS WHY THIS IS SIX
+		 * LINES AND NOT A DERIVATION.
+		 *
+		 * This class is a pure wrapper: F = S H( Psi )/span with
+		 * H( Psi ) := inner.f( r, z, Psi ), and inner.dFdPsi( r, z, Psi ) is
+		 * exactly dH/dPsi -- RotatingSource::f() and ::dFdPsi() differ by one
+		 * level of pressureFrom()'s output and nothing else. So the
+		 * normalisation enters ONLY through the argument Psi and the overall
+		 * 1/span, and whatever the species root find cost to differentiate once
+		 * has already been paid inside inner.dFdPsi(). The two-species closed
+		 * form and the n-species root find are both invisible here.
+		 *
+		 * That leaves meq::NormalisedMHDSource's algebra verbatim under
+		 * g -> H, g' -> H':
+		 *
+		 *   dPsi/dpsi_ax  = -Psi/span,        dspan/dpsi_ax  = +1
+		 *   dPsi/dpsi_bnd = ( Psi - 1 )/span, dspan/dpsi_bnd = -1
+		 */
+		double const span = psiAxisValue - psiBoundaryValue;
+		double const psiN = ( psi - psiBoundaryValue )/span;
+		double const h = inner.f( r, z, psiN );
+		double const hPrime = inner.dFdPsi( r, z, psiN );
+
+		dFdAxis = -currentScale()*( hPrime*psiN + h )/( span*span );
+		dFdBoundary = currentScale()*( hPrime*( psiN - 1.0 ) + h )/( span*span );
+		return true;
 	}
 
 	double NormalisedRotatingSource::potential( double r, double psi ) const

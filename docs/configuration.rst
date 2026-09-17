@@ -650,6 +650,18 @@ since that is an ellipse.
      - Freeze the plasma support within each solve and re-decide it between
        them, at most this many times. ``0`` leaves it moving inside Newton.
        Needs ``[source] ConfineToPlasma = true``; see the note below.
+   * - ``XPointMeritWeight``
+     - ``1.0``
+     - How heavily the X-point's two rows count in the **line search's merit**,
+       as a multiplier on the length :math:`r h` that converts :math:`q` into a
+       flux. It changes the merit and nothing else — the border still solves
+       :math:`q_r = q_z = 0`, so a converged answer is the same answer at any
+       weight, and what moves is how many iterations it costs. **There is no
+       good universal value and the sensitivity inverts between machines**: one
+       benchmark case goes from 56 iterations to 35 at weight 20 and fails
+       outright at 30, while another goes from 14 to 82 at weight 4. Measure
+       your own case and do not carry a value between them. Refused without
+       ``[boundary.xpoint]``, and refused if non-positive.
    * - ``AssemblyMode``
      - ``"threaded"``
      - ``"serial"`` or ``"threaded"``. Who computes the element-local work.

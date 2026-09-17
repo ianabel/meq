@@ -209,7 +209,8 @@ def meq_field(path):
         return (np.array(ds["R"][:], float), np.array(ds["Z"][:], float),
                 psi, inside & ~extrapolated,
                 {k: float(getattr(ds, k)) for k in
-                 ("psi_axis", "psi_boundary", "plasma_current")
+                 ("psi_axis", "psi_boundary", "plasma_current",
+                  "xpoint_r", "xpoint_z")
                  if hasattr(ds, k)})
 
 
@@ -297,6 +298,24 @@ def sweep(tag, ref, stem, scratch, rungs, grids, sample=513, collar=0.05):
     print("\n  freegs4e, cold at each grid")
     print("    %6s %10s %9s %15s %15s" %
           ("grid", "wall/s", "picard", "psi_ax", "psi_bnd"))
+    # THE REFERENCE'S OWN ACTIVE NULL, so MEQ's column has something to be read
+    # against rather than only against the previous rung. Taken from the
+    # FINEST grid that ran, since that is what the errors are measured to.
+    # THE ACTIVE ONE IS THE ONE AT psi_bndry, not the first in the list.
+    # fgsref records every saddle it found -- 23 of them on MAST-U, most of
+    # them on the centre column -- so picking by index would name a null the
+    # plasma has nothing to do with.
+    for row in reversed(rows):
+        if not row["ok"]:
+            continue
+        xs = row["rec"].get("xpoints") or []
+        if not xs:
+            continue
+        b = row["rec"]["psi_bndry"]
+        r, z, _ = min(xs, key=lambda t: abs(t[2] - b))
+        print("      the reference's ACTIVE X-point at %d^2: ( %.4f, %.4f )"
+              "   [ %d saddles found ]" % (row["nx"], r, z, len(xs)))
+        break
     for row in rows:
         if not row["ok"]:
             continue
@@ -323,9 +342,16 @@ def sweep(tag, ref, stem, scratch, rungs, grids, sample=513, collar=0.05):
     # ---- MEQ -----------------------------------------------------------
     from compare import compare
     print("\n  MEQ, cold")
-    print("    %-10s %9s %9s %7s %8s %8s %8s %11s %11s %10s %10s" %
+    # THE X-POINT IS REPORTED BECAUSE A RUNG CAN SELECT THE WRONG NULL AND
+    # LOOK FINE. Measured on G MAST-U: k2r0 converges cleanly, reports a
+    # plausible psi_ax and has picked the X-point at ( 0.425, -1.932 ) where
+    # k3r0 picks ( 0.621, -1.130 ) -- a different equilibrium on a super-X
+    # geometry with several candidate nulls. Nothing in the other columns says
+    # so; psi_ax alone reads 4.79e-02 against 1.29e-04 and could be excused as
+    # coarseness. MEASUREMENTS.md M-111.
+    print("    %-10s %9s %9s %7s %8s %8s %8s %11s %11s %10s %10s %19s" %
           ("rung", "elements", "dofs", "newton", "setup", "solve", "wall",
-           "rel L2", "no coils", "psi_ax", "psi_bnd"))
+           "rel L2", "no coils", "psi_ax", "psi_bnd", "X-point"))
     for rung in rungs:
         row = run_meq(stem, rung[0], rung[1], scratch, sample=sample,
                       adaptive=rung[2] if len(rung) > 2 else 0)
@@ -345,16 +371,18 @@ def sweep(tag, ref, stem, scratch, rungs, grids, sample=513, collar=0.05):
         with Dataset(row["nc"]) as ds:
             psi_ax = float(getattr(ds, "psi_axis"))
             psi_bnd = float(getattr(ds, "psi_boundary"))
+            xr = float(getattr(ds, "xpoint_r", float("nan")))
+            xz = float(getattr(ds, "xpoint_z", float("nan")))
         ax = abs(psi_ax - truth["psi_axis"])/abs(truth["psi_axis"])
         bn = abs(psi_bnd - truth["psi_bndry"])/max(abs(truth["psi_bndry"]),
                                                    1e-300)
         keep = got["kept"]["rel_l2"] if got["kept"] else float("nan")
         print("    %-10s %9d %9d %7d %8.2f %8.2f %8.2f %11.3e %11.3e %10.2e "
-              "%10.2e" %
+              "%10.2e  ( %7.4f, %7.4f )" %
               (row["label"].split(stem + "-")[-1], row.get("elements", -1),
                row.get("dofs", -1), row.get("iterations", -1),
                row.get("setup", float("nan")), row.get("solve", float("nan")),
-               row["wall"], got["rel_l2"], keep, ax, bn))
+               row["wall"], got["rel_l2"], keep, ax, bn, xr, xz))
 
 
 if __name__ == "__main__":

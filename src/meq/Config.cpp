@@ -1631,7 +1631,8 @@ namespace meq
 			Table solver( document, "solver", sourceName, false );
 			solver.rejectUnknownKeys( { "PicardSweeps", "PicardBlend",
 			                            "NewtonMaxIterations", "NewtonRelativeTolerance", "NewtonAbsoluteTolerance",
-			                            "PlasmaSupportSweeps", "AssemblyMode",
+			                            "PlasmaSupportSweeps", "XPointMeritWeight", "LineSearchMerit",
+			                            			                            "AssemblyMode",
 			                            "LocalFactorMode", "TraceAssemblyMode", "TraceSolver",
 			                            "LinearMaxIterations", "LinearTolerance" } );
 
@@ -1644,6 +1645,41 @@ namespace meq
 			// SolverConfig for what it buys and M-82 for what its absence
 			// costs on a diverted machine.
 			solverOptions.plasmaSupportSweeps = solver.getIntegerOr( "PlasmaSupportSweeps", solverOptions.plasmaSupportSweeps );
+
+			/*
+			 * `XPointMeritWeight` -- HOW HEAVILY XP-3's TWO ROWS COUNT IN THE
+			 * LINE SEARCH, and NOT in the equation. The border still solves
+			 * q_r = q_z = 0 either way, so this may change how many iterations
+			 * a solve costs and must not change what it converges to.
+			 *
+			 * Refused without an X-point border, for the reason every other key
+			 * here is: a weight on rows that do not exist is a number nothing
+			 * will read, which is the accepted-and-ignored failure this schema
+			 * refuses everywhere.
+			 */
+			solverOptions.xPointMeritWeight = solver.getFloatOr( "XPointMeritWeight", solverOptions.xPointMeritWeight );
+			if ( !( solverOptions.xPointMeritWeight > 0.0 ) )
+				solver.fail( "XPointMeritWeight", "must be positive: it multiplies the length r h that converts q into a flux, and zero or negative would make the X-point rows count for nothing or against themselves in the merit" );
+			/*
+			 * `LineSearchMerit` -- WHAT THE ARMIJO BACKTRACKING COMPARES, and
+			 * not what is solved or when it stops. `augmented` is the field
+			 * residual plus every weighted border constraint, which is what MEQ
+			 * has always used; `field` is `|| R ||` alone, which is the only
+			 * part of it the Newton step LINEARISES.
+			 */
+			{
+				std::string const merit =
+					solver.getStringOr( "LineSearchMerit", "augmented" );
+				if ( merit == "augmented" )
+					solverOptions.lineSearchMerit = LineSearchMeritChoice::Augmented;
+				else if ( merit == "field" )
+					solverOptions.lineSearchMerit = LineSearchMeritChoice::Field;
+				else
+					solver.fail( "LineSearchMerit", "must be \"augmented\" or \"field\"" );
+			}
+
+			if ( solver.has( "XPointMeritWeight" ) && !boundaryOptions.xpoint.given )
+				solver.fail( "XPointMeritWeight", "weights the X-point rows of the bordered Newton, and this file has no [boundary.xpoint] for them to weight" );
 			if ( solverOptions.plasmaSupportSweeps < 0 )
 				solver.fail( "PlasmaSupportSweeps", "cannot be negative; 0 leaves the support moving inside Newton, which is what a run without this key does" );
 

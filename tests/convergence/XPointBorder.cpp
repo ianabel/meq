@@ -173,11 +173,26 @@ namespace
 		/// assertion. A warm sweep reaches the floor in two steps.
 		double bootstrapOrder = 0.0;
 		std::size_t bootstrapIterations = 0;
+		/// How many of the bootstrap sweep's iterations ran under
+		/// FieldLinearisation::Picard, and whether that phase reached its own
+		/// tolerance before handing off. Zero and false under
+		/// Globalisation::None, which is what says the two runs really were
+		/// different iterations rather than the same one twice.
+		int picardIterations = 0;
+		bool picardConverged = false;
 	};
 
 	/// XP-3, end to end: bootstrap, then the SUPPORT alone as an outer state.
-	Answer runBorder( Machine &m )
+	/// `weight` is `[solver] XPointMeritWeight`, which scales XP-3's two rows
+	/// in the LINE SEARCH and in nothing else.
+	Answer runBorder(
+		Machine &m, double weight = 1.0,
+		meq::GradShafranovSolver::Globalisation globalisation =
+			meq::GradShafranovSolver::Globalisation::None )
 	{
+		m.solver->setXPointMeritWeight( weight );
+		m.solver->setGlobalisation( globalisation );
+
 		Answer answer;
 
 		double bootstrapEdge = 0.0;
@@ -221,6 +236,8 @@ namespace
 			{
 				answer.bootstrapOrder = answer.order;
 				answer.bootstrapIterations = answer.iterations;
+				answer.picardIterations = m.solver->borderedPicardIterations();
+				answer.picardConverged = m.solver->borderedPicardConverged();
 			}
 			double const moved = std::hypot( answer.xR - lastR,
 			                                 answer.xZ - lastZ );
@@ -681,4 +698,223 @@ BOOST_AUTO_TEST_CASE( theXPointBorderRefusesASecondConstraintOnTheSameUnknown )
 		BOOST_CHECK_THROW( solver.setXPointBoundary( 0.0, 0.5 ),
 		                   std::invalid_argument );
 	}
+}
+
+
+/*
+ * THE X-POINT MERIT WEIGHT BUYS ITERATIONS AND MUST NOT BUY A DIFFERENT
+ * EQUILIBRIUM.
+ *
+ * `[solver] XPointMeritWeight` multiplies the length `r h` that puts XP-3's two
+ * rows into augmentedNorm(), which is the LINE SEARCH's yardstick and nothing
+ * else: the border still solves `q_r = q_z = 0`, so every weight that converges
+ * must converge to the same saddle and the same `psi_ax`. That is the whole
+ * contract, and it is the half that could go wrong silently -- a weight that
+ * quietly selected a different null would look like a speedup.
+ *
+ * WHY IT EXISTS, MEASURED on the freegs4e benchmark's MAST case: the first
+ * support sweep takes 43 Newton iterations, 26 of them a plateau where the line
+ * search halves eight or nine times per step and accepts 1/128 to 1/256 of the
+ * direction while the residual falls 0.7% an iteration. The axis row carries
+ * about 0.75 of the merit there and the X-point rows about 0.07, so a step that
+ * would fix the X-point is never worth taking and the null crawls a millimetre
+ * at a time. At weight 20 the same case takes 35 iterations instead of 56 and
+ * returns `psi_ax` to every digit. MEASUREMENTS.md M-113.
+ *
+ * AND THE WEIGHTS ARE CHOSEN EITHER SIDE OF ONE. A weight below one is the
+ * direction that cannot help -- the rows already count for little -- and it is
+ * here because an invariant asserted only in the direction that pays is an
+ * invariant half tested.
+ */
+BOOST_AUTO_TEST_CASE( theXPointMeritWeightChangesTheWorkAndNotTheAnswer )
+{
+	Machine reference = buildMachine();
+	completeMachine( reference );
+	Answer const one = runBorder( reference );
+	BOOST_TEST_REQUIRE( one.sweeps > 0,
+	                    "the reference weight must solve first" );
+
+	for ( double const weight : { 0.25, 4.0 } )
+	{
+		Machine other = buildMachine();
+		completeMachine( other );
+		Answer const got = runBorder( other, weight );
+
+		BOOST_TEST_REQUIRE( got.sweeps > 0,
+		                    "weight " << weight << " did not solve" );
+
+		// THE SADDLE AND THE AXIS, to the solve's own tolerance and not to a
+		// slack one: these are the same discrete problem reached by a different
+		// sequence of trial steps, so they agree to round-off and not merely
+		// closely.
+		BOOST_TEST( std::abs( got.psiAxis - one.psiAxis )
+		            <= 1.0e-9*std::abs( one.psiAxis ),
+		            "psi_ax moved with the merit weight: " << got.psiAxis
+		            << " against " << one.psiAxis << " at weight " << weight );
+		BOOST_TEST( std::abs( got.xR - one.xR ) <= 1.0e-7,
+		            "the X-point's R moved with the merit weight: " << got.xR
+		            << " against " << one.xR << " at weight " << weight );
+		BOOST_TEST( std::abs( got.xZ - one.xZ ) <= 1.0e-7,
+		            "the X-point's Z moved with the merit weight: " << got.xZ
+		            << " against " << one.xZ << " at weight " << weight );
+
+		std::printf( "    weight %6.2f : %2zu bootstrap iterations, "
+		             "psi_ax %.10e, X ( %.6f, %.6f )\n",
+		             weight, got.bootstrapIterations, got.psiAxis,
+		             got.xR, got.xZ );
+	}
+}
+
+/*
+ * AND A NON-POSITIVE WEIGHT IS REFUSED, where a zero would make the X-point
+ * rows count for nothing in the merit and a negative one would make them count
+ * against themselves. Both are states the line search cannot be asked to
+ * interpret, and neither has a plausible reading a caller might have meant.
+ */
+BOOST_AUTO_TEST_CASE( theXPointMeritWeightRefusesANonPositiveValue )
+{
+	Machine m = buildMachine();
+	completeMachine( m );
+	BOOST_CHECK_THROW( m.solver->setXPointMeritWeight( 0.0 ),
+	                   std::invalid_argument );
+	BOOST_CHECK_THROW( m.solver->setXPointMeritWeight( -1.0 ),
+	                   std::invalid_argument );
+	BOOST_CHECK_THROW( m.solver->setXPointMeritWeight(
+	                       std::numeric_limits<double>::quiet_NaN() ),
+	                   std::invalid_argument );
+	BOOST_TEST( m.solver->xPointMeritWeight() == 1.0 );
+}
+
+/*
+ * THE BORDERED PICARD REACHES THE SAME EQUILIBRIUM AS THE BORDERED NEWTON.
+ *
+ * BORDERED-GLOBALISATION-PLAN.md BG-4's second acceptance, and it is the one
+ * with teeth. Globalisation::BorderedPicardThenNewton runs the SAME bordered
+ * system through a different iteration -- Picard in the field block, Newton in
+ * the borders, the Armijo loop and the augmented norm untouched -- so the fixed
+ * point is unchanged by construction:
+ *
+ *     Phi( x ) = x - alpha M( x )^-1 G( x )
+ *
+ * has the zeros of G for its fixed points whatever non-singular M is, and only
+ * the field block of M moves. `by construction` is exactly the kind of claim
+ * this project does not accept on its own, which is why this case exists.
+ *
+ * **AND MEASUREMENTS.md M-26 IS WHY IT IS THE ONE WITH TEETH.** Three solve
+ * routes there reach discrete solutions 9.4% apart on an under-resolved mesh,
+ * all three converged to 1e-12. A globalisation that silently selected a
+ * different root would look, from every other reading, exactly like a
+ * globalisation that worked -- and CLAUDE.md's standing rule is that a rung may
+ * change the work and may not change the answer.
+ *
+ * **IT ALSO ASSERTS THAT THE PICARD PHASE RAN.** An implementation that wired
+ * the enum value through and quietly assembled the Newton Jacobian anyway would
+ * pass every agreement assertion above perfectly, which is the failure this
+ * project calls a test that cannot fail. borderedPicardIterations() reading
+ * zero under Globalisation::None and non-zero here is what separates `the two
+ * iterations agree` from `there was only ever one iteration`.
+ */
+BOOST_AUTO_TEST_CASE( theBorderedPicardReachesTheSameEquilibriumAsTheBorderedNewton )
+{
+	Machine reference = buildMachine();
+	completeMachine( reference );
+	Answer const newton = runBorder( reference );
+	BOOST_TEST_REQUIRE( newton.sweeps > 0,
+	                    "the bordered Newton must solve first, or there is "
+	                    "nothing to compare a globalisation against" );
+
+	Machine other = buildMachine();
+	completeMachine( other );
+	Answer const picard = runBorder(
+		other, 1.0,
+		meq::GradShafranovSolver::Globalisation::BorderedPicardThenNewton );
+
+	BOOST_TEST_REQUIRE( picard.sweeps > 0,
+	                    "Globalisation::BorderedPicardThenNewton did not solve "
+	                    "the case the bordered Newton solves, which is a "
+	                    "regression in the rung rather than a finding about it" );
+
+	// THE PHASE RAN. Under Globalisation::None both readings are the solver's
+	// defaults, so this pair is the whole of what says the two runs took
+	// different routes to the same place.
+	BOOST_TEST( newton.picardIterations == 0,
+	            "Globalisation::None reported " << newton.picardIterations
+	            << " Picard iterations, so the linearisation is not being "
+	               "restored between solves" );
+	BOOST_TEST( picard.picardIterations > 0,
+	            "the rung reported no Picard iterations, so the field block was "
+	            "linearised as Newton throughout and every agreement assertion "
+	            "below is comparing a run with itself" );
+
+	// THE EQUILIBRIUM, at the same tolerance the merit-weight case uses and for
+	// the same reason: this is one discrete problem reached by two sequences of
+	// trial steps, so the answers agree to round-off rather than merely closely.
+	BOOST_TEST( std::abs( picard.psiAxis - newton.psiAxis )
+	            <= 1.0e-9*std::abs( newton.psiAxis ),
+	            "psi_ax moved with the globalisation: " << picard.psiAxis
+	            << " against " << newton.psiAxis );
+	BOOST_TEST( std::abs( picard.psiBoundary - newton.psiBoundary )
+	            <= 1.0e-9*std::abs( newton.psiBoundary ),
+	            "psi_bnd moved with the globalisation: " << picard.psiBoundary
+	            << " against " << newton.psiBoundary );
+	BOOST_TEST( std::abs( picard.xR - newton.xR ) <= 1.0e-7,
+	            "the X-point's R moved with the globalisation: " << picard.xR
+	            << " against " << newton.xR );
+	BOOST_TEST( std::abs( picard.xZ - newton.xZ ) <= 1.0e-7,
+	            "the X-point's Z moved with the globalisation: " << picard.xZ
+	            << " against " << newton.xZ );
+
+	// AND THE SADDLE IS STILL A SADDLE OF THE SOLVED FIELD. The border makes
+	// psi_bnd equal psi_h at whatever point it carries; that the point is a
+	// critical point of q_h is the fixed-point property the whole stage exists
+	// for, and a rung that reached agreement while losing it would be a worse
+	// outcome than one that failed.
+	BOOST_TEST( picard.saddleFound,
+	            "the rung's answer carries no independently located saddle" );
+
+	std::printf( "\n  the two iterations on one bordered system\n" );
+	std::printf( "    %-28s %5s %8s %15s %15s\n", "globalisation", "its",
+	             "picard", "psi_ax", "psi_bnd" );
+	std::printf( "    %-28s %5zu %8d %15.8e %15.8e\n", "none",
+	             newton.bootstrapIterations, newton.picardIterations,
+	             newton.psiAxis, newton.psiBoundary );
+	std::printf( "    %-28s %5zu %8d %15.8e %15.8e  (%s its tolerance)\n",
+	             "bordered-picard-then-newton", picard.bootstrapIterations,
+	             picard.picardIterations, picard.psiAxis, picard.psiBoundary,
+	             picard.picardConverged ? "reached" : "did not reach" );
+	std::fflush( stdout );
+}
+
+/*
+ * AND THE RUNG IS REFUSED WHERE THERE IS NO BORDER TO KEEP.
+ *
+ * The failure it prevents is the silent kind rather than the loud one: with no
+ * meq::NormalisedSource, solve() never reaches solveWithNormalisation(), which
+ * is the only function that reads the phase count -- so the run would take an
+ * ordinary Newton, converge, and report borderedPicardIterations() == 0. That
+ * reads exactly like a globalisation which was tried and did nothing, when what
+ * happened is that it was never run at all. Globalisation::PicardThenNewton is
+ * the unbordered handoff and the message says so.
+ */
+BOOST_AUTO_TEST_CASE( theBorderedPicardRefusesToRunWithoutABorder )
+{
+	Machine m = buildMachine();
+	completeMachine( m );
+
+	// The setter itself must NOT refuse -- it cannot know, since a source can be
+	// set after a globalisation -- so the refusal belongs to solve().
+	BOOST_CHECK_NO_THROW( m.solver->setGlobalisation(
+		meq::GradShafranovSolver::Globalisation::BorderedPicardThenNewton ) );
+
+	// A SOLOV'EV SOURCE ON THE SAME MESH, which is the cheapest thing in the
+	// tree that is a meq::Source and not a meq::NormalisedSource. It is linear
+	// in psi, so the solve this refusal prevents would have cost one Newton
+	// step -- the point is that it must not be taken at all.
+	meq::GradShafranovSolver plain( *m.sub, 2 );
+	meq::SolovievSource unbordered( 0.0 );
+	plain.setSource( unbordered );
+	plain.setBoundaryData( m.zero );
+	plain.setGlobalisation(
+		meq::GradShafranovSolver::Globalisation::BorderedPicardThenNewton );
+	BOOST_CHECK_THROW( plain.solve(), std::logic_error );
 }

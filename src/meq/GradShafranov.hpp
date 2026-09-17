@@ -191,6 +191,69 @@ namespace meq
 	 * tests/convergence/NewtonConvergence.cpp checks once more at the level of
 	 * the assembled reduced operator.
 	 */
+	/**
+	 * WHICH LINEARISATION THE FIELD BLOCK OF THE JACOBIAN CARRIES.
+	 *
+	 * The residual is the same function either way. This chooses only what the
+	 * semi-linear term contributes to the DERIVATIVE of it, and so it chooses
+	 * the iteration rather than the problem:
+	 *
+	 *     Newton   field block = A_lin - ( 1/r )( dF/dpsi ) M
+	 *     Picard   field block = A_lin
+	 *
+	 * where A_lin is the hybridized HDG operator with no reaction term -- the
+	 * flux mass, the divergence and the tau stabilisation, and nothing that
+	 * depends on psi.
+	 *
+	 * **ONE STEP OF Picard IS THE CLASSICAL PICARD MAP, and that is why there is
+	 * a Jacobian in a method that is not supposed to have one.** Undamped, from
+	 * the current iterate u^k,
+	 *
+	 *     A_lin d = -( A_lin u^k - b( u^k ) )   =>   u^{k+1} = A_lin^-1 b( u^k ),
+	 *
+	 * which is `solve the linear problem with the source frozen at the last
+	 * iterate` written as a defect correction. The increment form is used
+	 * because it is what lets the bordered elimination, the Armijo loop and the
+	 * augmented norm be reused unchanged; under hybridization applying
+	 * A_lin^-1 is a ComputeH plus a trace solve either way, so it costs nothing
+	 * extra.
+	 *
+	 * **THE RESIDUAL IS NEVER FROZEN, AND THAT IS DELIBERATE.** At the iterate
+	 * F( r, z, psi_h ) and F( r, z, psi^k ) are the same numbers, so freezing it
+	 * changes no step; it changes only what is evaluated AWAY from the iterate,
+	 * which is the Armijo trials and the differenced border columns. Freezing it
+	 * there would make the field part of the merit affine in the field, so the
+	 * line search would stop seeing the field excursion it exists to catch, and
+	 * it would put the border columns on a source the residual is not using.
+	 * Both are avoided by leaving AssembleElementVector alone.
+	 *
+	 * **IT DOES NOT CHANGE WHICH EQUILIBRIUM IS REPORTED.** The fixed points of
+	 *
+	 *     Phi( x ) = x - alpha M( x )^-1 G( x )
+	 *
+	 * are the zeros of G whatever non-singular M is, and only the field block of
+	 * M moves here. What does change is the iteration matrix,
+	 * I - M^-1 J = M^-1 diag( K, 0 ) with K the reaction, so the convergence is
+	 * linear at a rate set by the reaction against the elliptic operator instead
+	 * of quadratic. That is the Picard trade and MEASUREMENTS.md M-36 already
+	 * records which side of it this is: a robustness route, not a faster one.
+	 *
+	 * Picard's other property here is structural rather than numerical.
+	 * AssembleElementGrad gates its contribution on the plasma component and
+	 * AssembleElementVector does not, so the reaction is the ONLY part of the
+	 * field Jacobian that depends on the moving support -- and dropping it is
+	 * what makes `a Jacobian assembled on a different support from its residual`
+	 * unable to arise in that block at all.
+	 */
+	enum class FieldLinearisation
+	{
+		/// The exact derivative of the residual. The default, and what every
+		/// rate in the suite is measured with.
+		Newton,
+		/// The reaction term omitted, leaving A_lin. See above.
+		Picard
+	};
+
 	class SourceIntegrator : public mfem::NonlinearFormIntegrator
 	{
 		public:
@@ -223,6 +286,26 @@ namespace meq
 			 * tests/convergence/PlasmaConnectivity.cpp.
 			 */
 			void setPlasmaComponent( PlasmaComponent const *component );
+
+			/**
+			 * NEWTON OR PICARD IN THE FIELD BLOCK -- see meq::FieldLinearisation
+			 * for what the choice means and for why the residual is not part of
+			 * it.
+			 *
+			 * @param choice borrowed and may be null, which is
+			 *        FieldLinearisation::Newton and leaves this class
+			 *        bit-unchanged. A POINTER rather than a value so the solver
+			 *        can flip it between iterations of one solve without
+			 *        rebuilding a form -- exactly as setPlasmaComponent()'s mask
+			 *        is flipped by a support refresh. Rebuilding is not an
+			 *        option here: buildForms() replaces the DarcyForm outright,
+			 *        and the bordered solve holds a DarcyNPCOperator onto its
+			 *        hybridization.
+			 *
+			 * Only AssembleElementGrad reads it. AssembleElementVector is the
+			 * residual and is the same function under both.
+			 */
+			void setFieldLinearisation( FieldLinearisation const *choice );
 
 			/// MFEM's spelling, from NonlinearFormIntegrator.
 			void AssembleElementVector( mfem::FiniteElement const &el, // NOLINT(readability-identifier-naming)
@@ -258,6 +341,10 @@ namespace meq
 
 			/// setPlasmaComponent(). Borrowed; null means no connectivity test.
 			PlasmaComponent const *plasmaComponent = nullptr;
+
+			/// setFieldLinearisation(). Borrowed; null is
+			/// FieldLinearisation::Newton.
+			FieldLinearisation const *fieldLinearisation = nullptr;
 
 			int extraOrder;
 
@@ -1300,7 +1387,51 @@ namespace meq
 				/// at k = 1 a budget of 3 diverges to 1e4. A budget tuned on one
 				/// mesh will betray you on the next; Picard's own tolerance is the
 				/// trigger that worked wherever it was reached.
-				PicardThenNewton
+				PicardThenNewton,
+				/// **THE SAME HANDOFF WITH THE BORDERS KEPT, and the only
+				/// globalisation the bordered path has.**
+				///
+				/// Every other value on this list is refused once psi_ax is an
+				/// unknown -- the KINSOL ones drive a residual of their own and
+				/// the two Picard ones build no Jacobian to border. This one is
+				/// built the other way round: the border, its elimination, its
+				/// Armijo loop and its augmented norm are untouched, and the
+				/// ONLY thing that moves is which linearisation the field block
+				/// of the Jacobian carries. See meq::FieldLinearisation.
+				///
+				/// Phase 1 runs with FieldLinearisation::Picard to a loose
+				/// target -- setBorderedPicardTolerance(), 1e-3 relative by
+				/// default -- and phase 2 runs the ordinary bordered Newton from
+				/// the state it reached. Both phases are iterations of ONE loop
+				/// inside solveWithNormalisation(), which is what makes the
+				/// handoff lossless: the flux, the potential, the trace and
+				/// every border unknown carry across unchanged, where a handoff
+				/// through two calls to solve() would re-prepare and seed the
+				/// flux block at zero.
+				///
+				/// **IT IS PICARD IN THE FIELD AND NEWTON IN THE BORDERS,
+				/// SIMULTANEOUSLY.** That is what distinguishes it from the two
+				/// things it is easily confused with, both of which are already
+				/// measured and dead: Normalisation::Decoupled is the OPPOSITE
+				/// split -- Newton on the field, Picard on the border -- and
+				/// MEASUREMENTS.md M-31 has it stalled at 8.239e-02 after 15
+				/// iterations where the coupled one reaches 4.447e-15 in 4; and
+				/// the driver's own [solver] PicardSweeps freezes the
+				/// normalisation and hands an UNBORDERED solver a different
+				/// problem, which M-116 measures fixing none of six cold
+				/// failures and turning three of them into silent wrong answers.
+				///
+				/// **What it can and cannot be expected to fix.** The fixed
+				/// point is unchanged, so it helps only by having a different
+				/// basin. Against M-117's classification that is the one fatal
+				/// step and the chronic case -- where A_lin is invertible and
+				/// A_lin - K is what goes near-singular -- and NOT the X-point
+				/// excursion, which no field-block preconditioner restrains.
+				/// Three of six is the predicted maximum, not a partial success.
+				///
+				/// Reactive only, like every other value here: reach for it when
+				/// Globalisation::None has been observed to fail.
+				BorderedPicardThenNewton
 			};
 
 			/// True when the potential block is assembled non-linearly, which is
@@ -1328,6 +1459,42 @@ namespace meq
 
 			/// Which solver solve() will use.
 			Globalisation globalisation() const;
+
+			/**
+			 * WHERE Globalisation::BorderedPicardThenNewton HANDS OFF, as a
+			 * fraction of the merit at the cold iterate. Default 1e-3.
+			 *
+			 * A TOLERANCE AND NOT AN ITERATION BUDGET, for the reason
+			 * Globalisation::PicardThenNewton records at length: the handoff is
+			 * not monotone in Picard effort, so a budget tuned on one mesh
+			 * betrays you on the next. The budget that does exist is
+			 * setNewtonControl()'s iteration cap, shared by both phases, and it
+			 * is a backstop rather than a control -- phase 1 running out of it
+			 * is not an error and does not stop phase 2.
+			 *
+			 * The effective target is the looser of this and the solve's own, so
+			 * a value below the run's tolerance makes phase 2 a formality rather
+			 * than doing anything surprising.
+			 *
+			 * @throws std::invalid_argument if not in ( 0, 1 ].
+			 */
+			void setBorderedPicardTolerance( double relativeTolerance );
+
+			/// setBorderedPicardTolerance().
+			double borderedPicardTolerance() const;
+
+			/// How many of the last bordered solve's iterations ran under
+			/// FieldLinearisation::Picard. Zero for every solve that was not
+			/// Globalisation::BorderedPicardThenNewton, and the count a reader
+			/// needs to tell which rung produced the answer.
+			int borderedPicardIterations() const;
+
+			/// Whether the last bordered solve's Picard phase reached
+			/// borderedPicardTolerance() before handing off. False when it ran
+			/// into the iteration cap instead, which is an expected outcome and
+			/// not an error -- but is the thing to look at first when the Newton
+			/// phase then fails too.
+			bool borderedPicardConverged() const;
 
 			/// Which solver eliminates the flux and potential on each element.
 			/// This is a DIFFERENT iteration from the one setGlobalisation()
@@ -2087,6 +2254,87 @@ namespace meq
 			 */
 			void setXPointBoundary( double r, double z );
 
+			/**
+			 * HOW HEAVILY XP-3's TWO ROWS COUNT IN THE LINE SEARCH'S MERIT, as
+			 * a multiplier on the `r h` that converts `q` into a flux. One is
+			 * the natural scale and the default; this exists because the
+			 * natural scale is not always the useful one.
+			 *
+			 * **THE MERIT IS NOT THE EQUATION AND THIS CHANGES ONLY THE MERIT.**
+			 * The border still solves `q_r = q_z = 0`, and a converged answer is
+			 * a converged answer at any weight. What moves is which trial step
+			 * the Armijo backtracking is willing to accept, so this buys
+			 * ITERATIONS and must not buy a different equilibrium -- which is
+			 * the property to assert when using it.
+			 *
+			 * **WHY IT IS WORTH A KNOB, MEASURED.** On the `freegs4e` benchmark's
+			 * MAST case the first support sweep takes 43 Newton iterations, 26 of
+			 * them a plateau where the line search halves eight or nine times per
+			 * step and accepts 1/128 to 1/256 of the direction while the residual
+			 * falls 0.7% an iteration. The decomposition says why: the axis row
+			 * contributes about 0.75 of the merit and the X-point rows about
+			 * 0.07, so a step that would fix the X-point is never worth taking
+			 * and it crawls a millimetre at a time -- 9 cm away from a seed that
+			 * was 1 cm from the answer, and back. At weight 20 that case takes
+			 * 35 iterations instead of 56 and returns `psi_ax` to every digit.
+			 *
+			 * **AND THERE IS NO GOOD UNIVERSAL VALUE, WHICH IS WHY THIS IS A
+			 * KNOB AND NOT A BETTER DEFAULT.** The sensitivity INVERTS between
+			 * cases. On `examples/diverted-tokamak.toml` the bootstrap sweep
+			 * costs 13 iterations at 0.25, **14 at the default**, and **82 at
+			 * 4.0** -- so the natural scale is already right there and raising
+			 * the weight is six times worse, while on MAST raising it is the
+			 * only thing that helps. Anything above about 30 fails MAST
+			 * outright, *"no damping gave a finite residual -- psi_ax through
+			 * zero"*, which is the other rows being starved in the merit.
+			 * **Measure the case; do not carry a value between them.**
+			 * MEASUREMENTS.md M-113, and M-114 for the two weights that were
+			 * built to explain it and did not: a weight on the whole border,
+			 * which SATURATES upward because `gamma` is then an overall factor
+			 * and Armijo is scale invariant, and a weight on the `psi_ax` row,
+			 * whose default turns out to be a local optimum with both
+			 * directions worse and both ends failing.
+			 *
+			 * @throws std::invalid_argument if not finite and positive.
+			 */
+			void setXPointMeritWeight( double weight );
+
+			/// What the Armijo backtracking compares.
+			enum class LineSearchMerit
+			{
+				/// `augmentedNorm` -- the field residual and every border
+				/// constraint, weighted. What MEQ has always used.
+				Augmented,
+				/// `|| R ||`, the FIELD BLOCK ALONE.
+				///
+				/// **THE FIELD BLOCK IS THE ONLY PART THE STEP LINEARISES, AND
+				/// THAT IS THE ARGUMENT FOR IT.** The augmented merit adds
+				/// constraints evaluated after `peakAt()`,
+				/// `refreshLimiterContact()` and `refreshXPoint()` have
+				/// RE-LOCATED the axis, the contact and the saddle inside every
+				/// trial -- root finds the bordered system never linearises,
+				/// treating the located points as fixed. Measured on the
+				/// `freegs4e` benchmark's MAST case: the field block's deviation
+				/// from `( 1 - a )|| R_0 ||` falls by 3.3 to 4.0 per halving,
+				/// which is the `O( a^2 )` an exact Newton direction owes, while
+				/// the augmented merit's own remainder does not. So the step
+				/// descends `|| R ||` and the line search was being asked about
+				/// something else.
+				Field
+			};
+
+			/// Which merit the line search compares. `Augmented` by default,
+			/// which is what every measurement before MEASUREMENTS.md M-115 was
+			/// taken with.
+			void setLineSearchMerit( LineSearchMerit choice );
+
+			/// The choice setLineSearchMerit() last made.
+			LineSearchMerit lineSearchMerit() const;
+
+			/// The weight setXPointMeritWeight() last set. One by default.
+			double xPointMeritWeight() const;
+
+
 			/// Whether setXPointBoundary() made the X-point an unknown.
 			bool xPointIsAnUnknown() const;
 
@@ -2751,6 +2999,17 @@ namespace meq
 				double xPoint = 0.0;
 				/// The damping finally applied, 1.0 for a full Newton step.
 				double damping = 0.0;
+				/// Which linearisation the field block of this step's Jacobian
+				/// carried. Picard only under
+				/// Globalisation::BorderedPicardThenNewton, and it is the one
+				/// thing that distinguishes the two phases -- everything else
+				/// in this record means the same in both.
+				FieldLinearisation linearisation = FieldLinearisation::Newton;
+				/// Whether the Picard phase handed off to Newton AT this step.
+				/// True on exactly one step of a two-phase solve, and reading
+				/// which one is how a reader tells the tolerance handoff from
+				/// the budget one and from the line-search rescue.
+				bool handedOff = false;
 				/// How many halvings were tried before one was taken. 1 means
 				/// the full step was accepted.
 				int trials = 0;
@@ -2769,6 +3028,104 @@ namespace meq
 				/// survive.
 				double xR = 0.0;
 				double xZ = 0.0;
+
+				/**
+				 * THE MERIT AT EVERY TRIAL DAMPING, FULL STEP FIRST.
+				 *
+				 * `damping` and `trials` say a step was halved nine times; they
+				 * cannot say WHY, and the two reasons want opposite repairs. If
+				 * the full step's merit is barely worse than the iterate's, the
+				 * Newton direction is good and the MERIT is mis-scaled, which a
+				 * reweighting fixes. If it is orders worse, the DIRECTION is
+				 * bad, the merit is reporting honestly, and no reweighting will
+				 * help -- the defect is then the Jacobian or the support moving
+				 * under the step.
+				 *
+				 * Infinite entries are trials that threw, which is an ordinary
+				 * outcome: a damping that drives `psi_ax` through zero refuses
+				 * the normalisation rather than returning a number.
+				 */
+				std::vector<double> trialNorms;
+				/**
+				 * WHERE THE X-POINT WAS LOCATED AT EACH TRIAL, and the
+				 * constraint values there.
+				 *
+				 * `refreshXPoint()` runs inside every trial, so the residual the
+				 * line search is comparing depends on a ROOT FIND along the ray.
+				 * A Newton direction is a descent direction for a weighted
+				 * merit whatever the weights -- the directional derivative is
+				 * -|| W F ||^2 for any positive diagonal W -- so a full step
+				 * that buys no first-order decrease cannot be a scaling
+				 * problem. It has to be an inexact Jacobian or a residual that
+				 * is not smooth along the ray, and a located saddle JUMPING
+				 * between trials is the second.
+				 */
+				std::vector<double> trialXR;
+				std::vector<double> trialXZ;
+
+				/**
+				 * `|| R ||` ALONE AT EACH TRIAL -- the FIELD block, without the
+				 * border's constraint terms.
+				 *
+				 * THIS IS THE ONE THAT CAN SETTLE IT, and `trialNorms` cannot.
+				 * `augmentedNorm` adds constraints evaluated after RE-LOCATING
+				 * the axis, the limiter contact and the X-point at every trial,
+				 * and those relocations are discrete operations the bordered
+				 * system never linearises. So a second-order remainder in the
+				 * augmented merit is not evidence about the Jacobian. The field
+				 * block is genuinely smooth and genuinely linearised, so for an
+				 * exact Newton direction its deviation from `( 1 - a )|| R_0 ||`
+				 * must be `O( a^2 )` -- a ratio tending to 4 as the damping
+				 * halves. Anything tending lower is a first-order error in the
+				 * direction itself.
+				 */
+				std::vector<double> trialFieldNorms;
+
+				/**
+				 * `psi_bnd - psi_h( x_X )` AT EACH TRIAL, and the element the
+				 * point was found in.
+				 *
+				 * **`psi_h` IS AN L2 FIELD AND THIS IS A POINT EVALUATION OF
+				 * IT.** The coordinates move smoothly along the ray -- measured,
+				 * they halve exactly with the damping -- but the value read at
+				 * them need not, because a broken space JUMPS across element
+				 * faces. So this is the constraint that can be discontinuous in
+				 * a way nothing linearises, and the element index beside it says
+				 * when a face was crossed.
+				 */
+				std::vector<double> trialBoundaryConstraint;
+				std::vector<int> trialXElement;
+				/// The merit the trials are judged against: this iterate's own.
+				double norm = 0.0;
+
+				/**
+				 * THE REDUCED BORDER MATRIX'S ROWS, AND WHAT SCALE THEY IMPLY.
+				 *
+				 * `dense` in the bordered solve IS the Schur complement `S` of
+				 * the border -- the sensitivity of each constraint to each
+				 * border unknown with the field eliminated -- and it is formed
+				 * and factored every iteration anyway. Its rows carry the UNITS
+				 * of the constraints they belong to, which is exactly what the
+				 * merit has to reconcile and what `gamma` and `xScale` are
+				 * guessing at.
+				 *
+				 * So a merit that weighted row `i` by `1/|| S_i ||` would make a
+				 * unit of residual in every row mean a comparable error in the
+				 * unknowns. The weights MEQ actually applies are `gamma` on the
+				 * axis, boundary, current and exterior rows and `gamma xScale`
+				 * on the X-point's two -- so the ratio
+				 * `|| S_axis || / || S_xpoint ||` is what `xScale` OUGHT to be,
+				 * and dividing it by the natural `r h` gives the weight this
+				 * would predict. MEASUREMENTS.md M-115 is that prediction
+				 * against the weight actually measured.
+				 *
+				 * Ordered as the border is: axis first, then whichever of
+				 * boundary, current and the X-point's two the solve carries,
+				 * then the exterior modes.
+				 */
+				std::vector<double> schurRowNorms;
+				/// `|| S ||_1 || S^-1 ||_1`, the border's own conditioning.
+				double schurCondition = 0.0;
 			};
 
 			/// The per-iteration decomposition of the bordered step. Empty on
@@ -3112,6 +3469,8 @@ namespace meq
 			/// 7% of the profile.
 			void prepare( bool seedFromGuess );
 
+			double xPointMeritWeightValue = 1.0;
+			LineSearchMerit lineSearchMeritChoice = LineSearchMerit::Augmented;
 			double currentScaleValue = 1.0;
 			double plasmaCurrentValue = 0.0;
 			double currentSensitivityValue =
@@ -3241,6 +3600,30 @@ namespace meq
 			double axisZValue = 0.0;
 
 			Globalisation globalisationChoice;
+
+			/**
+			 * WHICH LINEARISATION THE FIELD BLOCK IS ASSEMBLED WITH RIGHT NOW.
+			 *
+			 * A member rather than a parameter because meq::SourceIntegrator
+			 * borrows a POINTER to it: the bordered solve flips it between its
+			 * two phases, and the integrator sees the change without any form
+			 * being rebuilt. Its address is therefore taken in buildForms() and
+			 * must outlive every form this solver owns, which a member does.
+			 *
+			 * It is not a setting. Nothing outside solveWithNormalisation()
+			 * writes it, and that function restores it however it exits -- a
+			 * solver left reporting Newton rates from a Picard Jacobian is
+			 * exactly the silent failure meq::FieldLinearisation's own
+			 * documentation is about.
+			 */
+			FieldLinearisation fieldLinearisationChoice = FieldLinearisation::Newton;
+
+			/// setBorderedPicardTolerance().
+			double borderedPicardToleranceValue = 1.0e-3;
+
+			/// borderedPicardIterations(), borderedPicardConverged().
+			int borderedPicardIterationCount = 0;
+			bool borderedPicardConvergedValue = false;
 			LocalSolver localSolverChoice;
 
 			/// setExteriorConductors(), borrowed. Null unless FB-7 is in use.
