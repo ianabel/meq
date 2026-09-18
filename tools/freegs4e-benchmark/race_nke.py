@@ -15,9 +15,13 @@ wrong once.
   it.  The arms alternate per level, so a machine that drifts drifts through
   both.
 
-  QUIET FIRST, AND STILL QUIET AFTER.  --require-quiet samples the load average
-  before and after and refuses to publish if either end is loaded.  A race that
-  started quiet and finished loaded is not a measurement.
+  QUIET FIRST, AND CHECKED AGAIN BEFORE EVERY LEVEL -- NOT AFTERWARDS.  The
+  first version of this compared the load average before AND after and would
+  have refused every successful race, because after a multi-minute run the load
+  average is dominated by the race itself.  Measured: the reference ladder left
+  the load at 1.36 having started at 0.08, entirely its own doing.  So the
+  sample that means anything is taken just BEFORE each level, where the only
+  thing running is this script, and the threshold allows for one busy arm.
 
   MEDIAN OF REPEATS, NOT BEST-OF.  tests/performance/ draws the distinction:
   best-of is right for a minimum wall time, a median for a leg share.  This is
@@ -164,6 +168,11 @@ def main():
                   file=sys.stderr)
             return 2
     before = load_average()
+    # ONE BUSY ARM'S WORTH OF SLACK, because between levels this script's own
+    # previous level is still decaying out of the average and that is not
+    # contention -- it is the measurement.
+    per_level_limit = args.quiet_threshold + 1.5
+    intruded = []
 
     os.makedirs(args.out, exist_ok=True)
     wanted = [int(v) for v in args.levels.split(",") if v.strip()]
@@ -171,6 +180,10 @@ def main():
 
     rows = []
     for nx, ny in ladder:
+        if args.require_quiet:
+            level_load = load_average()
+            if level_load >= per_level_limit:
+                intruded.append((nx, level_load))
         nke, meq = [], []
         for _ in range(max(1, args.repeats)):
             # INTERLEAVED WITHIN THE REPEAT, not arm after arm.  M-102.
@@ -192,10 +205,11 @@ def main():
 
     after = load_average()
     verdict = "clean"
-    if args.require_quiet and max(before, after) >= args.quiet_threshold:
-        verdict = (f"REFUSED: load was {before:.2f} before and {after:.2f} after, "
-                   f"against a threshold of {args.quiet_threshold}. These seconds "
-                   f"are a measurement of the machine.")
+    if args.require_quiet and intruded:
+        verdict = ("REFUSED: something else was running. Load at the start of "
+                   + ", ".join(f"{nx}x: {l:.2f}" for nx, l in intruded)
+                   + f" against a per-level limit of {per_level_limit:.2f}. "
+                     "These seconds are a measurement of the machine.")
         print(verdict, file=sys.stderr)
 
     with open(os.path.join(args.out, "race-nke.json"), "w") as handle:

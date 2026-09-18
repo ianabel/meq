@@ -4241,3 +4241,47 @@ construction and there is no correction term to add at all.
 repair which is right by derivation was measured to be worse in practice*, after
 `PicardSweeps` (M-116) and the bordered Picard rung (M-119). All three share a
 shape — the derivation assumes a smoothness the discrete problem does not have.
+
+### M-122
+
+**The MAST-U forward reference over a resolution ladder, on a quiet machine —
+and the accuracy ceiling it sets for anything compared against it.**
+
+freegsnke's `example02` with the notebook removed and a grid sweep round it:
+MAST-U, **forward**, `constrain=None`, twelve prescribed active currents,
+`ConstrainPaxisIp` at `paxis = 8e3`, `I_p = 6e5`, `alpha_m = 1.8`,
+`alpha_n = 1.2`, `gs_operator_order = 4`, tolerance 1e-9. Median of three
+repeats per level; load 0.08 before, held under 0.5 for a sustained 300 s first.
+
+| grid | median s | peak MB | Picard | NK | rel | `psi_axis` | `I_p` |
+|---|---|---|---|---|---|---|---|
+| 33×65 | 0.05 | 357 | 15 | 11 | 6.08e-10 | 9.18724696e-02 | 6.00000e+05 |
+| 65×129 | 0.25 | 468 | 15 | 11 | 3.06e-10 | 9.18720993e-02 | 6.00000e+05 |
+| 129×257 | 1.05 | 1291 | 15 | 10 | 1.17e-10 | 9.18649766e-02 | 6.00000e+05 |
+| 257×513 | 6.88 | 6598 | 15 | 12 | 2.36e-10 | 9.18641969e-02 | 6.00000e+05 |
+
+**THE ITERATION COUNT IS MESH-INDEPENDENT — EXACTLY 15 PICARD AT EVERY LEVEL**,
+and 10 to 12 Newton–Krylov. That is the property that makes this a fair
+comparison point: the reference's work per level is flat, so a ratio against
+MEQ's is a statement about the codes rather than about how each degrades.
+
+**AND THE REFERENCE'S OWN ACCURACY CEILING IS ABOUT 1e-05, WHICH IS THE NUMBER
+TO READ THIS TABLE FOR.** `psi_axis` moves **7.8e-05** relative between 65×129
+and 129×257 and **8.5e-06** between 129×257 and 257×513 — non-monotone, so no
+clean order can be read off it. **Agreement better than about 1e-05 on this
+case is therefore meaningless**, exactly as `tools/README.md` records for the
+freegs4e benchmark saturating at 1.4e-04. Do not report a MEQ figure below that
+as accuracy; it is the reference's noise.
+
+**257×513 IS THE TOP RUNG ON THIS MACHINE AND NOT A CHOICE.** Peak resident
+memory is 6.6 GB there, against 1.3 GB one level down — very nearly ×5 per
+level, so 513×1025 would want about 26 GB and this is WSL2.
+
+**A DEFECT IN THE HARNESS, FOUND BY RUNNING IT.** `race_nke.py`'s
+`--require-quiet` first compared the load average before AND after and would
+have **refused every successful race**: the ladder above left the load at 1.36
+having started at 0.08, entirely its own doing, so an after-check cannot tell a
+busy machine from a busy measurement. The gate now samples just **before each
+level**, where the only thing running is the harness, with one busy arm's worth
+of slack. *A gate that always fires is worse than no gate, and only running it
+shows which it is.*
