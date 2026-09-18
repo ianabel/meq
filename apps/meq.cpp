@@ -1969,6 +1969,10 @@ int main( int argc, char **argv )
 			// `[solver] XPointMeritWeight` -- how heavily those two rows count
 			// in the LINE SEARCH and in nothing else. Set beside the rows it
 			// weights, and refused by Config without them.
+			fresh->setBorderRegularisation(
+				config->getSolver().borderRegularisation,
+				config->getSolver().borderCollinearityRegularisation );
+			fresh->setTopologyRetry( config->getSolver().topologyRetry );
 			fresh->setXPointMeritWeight( config->getSolver().xPointMeritWeight );
 		}
 

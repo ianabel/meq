@@ -4,6 +4,7 @@
 #include <limits>
 #include <memory>
 #include <vector>
+#include <string>
 
 #include "mfem.hpp"
 
@@ -1504,6 +1505,83 @@ namespace meq
 
 			/// @see AxisRow. Reactive and diagnostic, not a performance key.
 			void setAxisRow( AxisRow choice );
+
+			/**
+			 * REGULARISE THE DENSE BORDER SOLVE, Levenberg-style, so that a
+			 * near-singular Schur complement gives a DAMPED step instead of an
+			 * infinite one.
+			 *
+			 * Both default to zero, which is off and leaves the solve
+			 * bit-identical: at zero the existing exact inverse is taken, not a
+			 * regularised path with a zero parameter.
+			 *
+			 * **WHY, AND IT IS NOT SPECULATIVE.** M-119 caught
+			 * `machine-c-mast-shaped` throwing *"the bordered Jacobian is
+			 * singular in ( psi_ax, psi_bnd, a )"* under
+			 * Globalisation::BorderedPicardThenNewton -- with the field block
+			 * replaced by something that cannot be singular, what was left
+			 * singular was the BORDER. `BORDERED-GLOBALISATION-PLAN.md` section
+			 * 0.1 names the mechanism: `M_ij = D_ij - b_i.z_j` degenerating as
+			 * the X-point and `psi_bnd` rows collapse onto each other.
+			 *
+			 * **THE FORM IS freegsnke'S, ADAPTED FOR UNITS.** freegsnke solves
+			 * `( G^T G + reg ||R_0||^2 ) c = G^T( -R_0 )`, where the Gram matrix
+			 * makes `||R_0||^2` dimensionally right. MEQ's `dense` is a Schur
+			 * complement rather than a Gram matrix, so the same trick is applied
+			 * to ITS normal equations:
+			 *
+			 *     ( M^T M + lambda^2 ( I + P ) ) x = M^T b
+			 *
+			 * with `lambda = l2 * ||M||_F * min( 1, merit/reference )`. The
+			 * relative merit is what makes it VANISH at convergence, so it
+			 * cannot cost the quadratic endgame; the Frobenius norm is what
+			 * makes it scale free.
+			 *
+			 * @param l2 Tikhonov coefficient. A few times 1e-3 is a starting
+			 *        point; zero is off.
+			 * @param collinearity weight on `P`, the per-row penalty
+			 *        `max_j ( 1/( 1 - |cos( M_i, M_j )| )^2 ) - 1`, which
+			 *        punishes exactly the rows that have gone parallel. Zero
+			 *        leaves `P` out, which is the plain Levenberg form.
+			 *
+			 * @throws std::invalid_argument if either is negative or not finite.
+			 */
+			void setBorderRegularisation( double l2, double collinearity );
+
+			/// setBorderRegularisation()'s two coefficients.
+			double borderL2Regularisation() const;
+			double borderCollinearityRegularisation() const;
+
+			/**
+			 * RETRY A TRIAL THAT BROKE THE TOPOLOGY AT A SHORTER STEP, before
+			 * handing it to the Armijo ladder. Default 0, which is off.
+			 *
+			 * MEQ's line search turns a thrown constraint and an overflowing
+			 * merit into the same infinite trial norm, so both halve and both
+			 * end in the same message -- and five of M-119's six cold failures
+			 * print exactly that message with nothing saying which they are.
+			 * BorderStep::trialsThrew now says; this decides what to DO about
+			 * it.
+			 *
+			 * freegsnke shrinks by 0.75 and retries, without limit, when a
+			 * critical point disappears, and treats a merit increase entirely
+			 * differently. 0.75 rather than a halving because the object is to
+			 * find the largest step that keeps the topology, not to bracket a
+			 * minimum -- halving overshoots it by up to a factor of two every
+			 * time.
+			 *
+			 * @param attempts how many 0.75 reductions to try on a THROWING
+			 *        trial before falling back to the halving ladder. A cap
+			 *        rather than freegsnke's unbounded loop, because a state
+			 *        whose topology cannot be kept at any step length is a real
+			 *        outcome and should be reported rather than spun on.
+			 *
+			 * @throws std::invalid_argument if negative.
+			 */
+			void setTopologyRetry( int attempts );
+
+			/// setTopologyRetry().
+			int topologyRetry() const;
 
 			/// Which linearisation of the axis constraint the border carries.
 			AxisRow axisRow() const;
@@ -3053,6 +3131,51 @@ namespace meq
 				/// thing that distinguishes the two phases -- everything else
 				/// in this record means the same in both.
 				FieldLinearisation linearisation = FieldLinearisation::Newton;
+				/*
+				 * THE TWO WAYS A TRIAL FAILS, COUNTED SEPARATELY -- freegsnke
+				 * handles them as different events and MEQ used to collapse
+				 * both into an infinite trial norm, which is why five of
+				 * MEASUREMENTS.md M-119's six cold failures print one message
+				 * and nothing says which of them they are.
+				 *
+				 *   threw   a constraint could not be evaluated at all: a
+				 *           normalisation the source refuses, an X-point out of
+				 *           the mesh, no O-point. The step broke the TOPOLOGY.
+				 *   finite  the constraints evaluated and the merit was worse,
+				 *           or overflowed. The step is merely bad.
+				 *
+				 * A step that breaks the topology wants a shorter step; a step
+				 * that is merely bad may want a different direction. Telling
+				 * them apart is the whole point of counting them.
+				 */
+				int trialsThrew = 0;
+				/// How many rungs of this step's ladder were setTopologyRetry()'s
+				/// 0.75 reductions rather than halvings. Zero with the option
+				/// off, and zero with it on when nothing threw.
+				int topologyRetries = 0;
+				/// What the last throwing trial said, empty when none threw.
+				/// The exception's own text, because "psi_ax through zero" and
+				/// "the X-point left the mesh" want different repairs.
+				std::string lastTrialThrow;
+
+				/*
+				 * cos( angle ) BETWEEN THIS ITERATE'S FIELD RESIDUAL AND THE
+				 * PREVIOUS ONE. freegsnke escapes to a fresh direction above
+				 * 0.9, on the reasoning that consecutive parallel residuals mean
+				 * the iteration is stuck in one direction rather than
+				 * converging.
+				 *
+				 * RECORDED AND NOT ACTED ON. M-119 has B and B-shaped plateauing
+				 * at about half their initial residual and wandering, which is
+				 * what stagnation looks like -- and whether it IS stagnation is
+				 * exactly what this number settles. Measure before remedying;
+				 * this campaign has three repairs that were right by derivation
+				 * and wrong in practice.
+				 *
+				 * Zero on the first iterate, where there is no previous.
+				 */
+				double residualCollinearity = 0.0;
+
 				/// Whether the Picard phase handed off to Newton AT this step.
 				/// True on exactly one step of a two-phase solve, and reading
 				/// which one is how a reader tells the tolerance handoff from
@@ -3651,6 +3774,13 @@ namespace meq
 
 			/// setAxisRow(). See AxisRow for why the default drops the term.
 			AxisRow axisRowChoice = AxisRow::PositionDropped;
+
+			/// setBorderRegularisation(). Both zero is off and bit-identical.
+			double borderL2Value = 0.0;
+			double borderCollinearityValue = 0.0;
+
+			/// setTopologyRetry(). Zero is off.
+			int topologyRetryValue = 0;
 
 			/**
 			 * WHICH LINEARISATION THE FIELD BLOCK IS ASSEMBLED WITH RIGHT NOW.

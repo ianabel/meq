@@ -1629,7 +1629,8 @@ namespace meq
 		// [solver]
 		{
 			Table solver( document, "solver", sourceName, false );
-			solver.rejectUnknownKeys( { "PicardSweeps", "PicardBlend",
+			solver.rejectUnknownKeys( { "PicardSweeps", "PicardBlend", "BorderRegularisation",
+			                            "BorderCollinearityRegularisation", "TopologyRetry",
 			                            "NewtonMaxIterations", "NewtonRelativeTolerance", "NewtonAbsoluteTolerance",
 			                            "PlasmaSupportSweeps", "XPointMeritWeight", "LineSearchMerit",
 			                            			                            "AssemblyMode",
@@ -1657,6 +1658,18 @@ namespace meq
 			 * will read, which is the accepted-and-ignored failure this schema
 			 * refuses everywhere.
 			 */
+			solverOptions.borderRegularisation = solver.getFloatOr( "BorderRegularisation", solverOptions.borderRegularisation );
+			if ( !( solverOptions.borderRegularisation >= 0.0 ) )
+				solver.fail( "BorderRegularisation", "must be finite and non-negative; zero is off and leaves the border solve bit-identical" );
+			solverOptions.borderCollinearityRegularisation = solver.getFloatOr( "BorderCollinearityRegularisation", solverOptions.borderCollinearityRegularisation );
+			if ( !( solverOptions.borderCollinearityRegularisation >= 0.0 ) )
+				solver.fail( "BorderCollinearityRegularisation", "must be finite and non-negative; zero leaves the plain Levenberg form" );
+			if ( solverOptions.borderCollinearityRegularisation > 0.0
+			     && !( solverOptions.borderRegularisation > 0.0 ) )
+				solver.fail( "BorderCollinearityRegularisation", "weights a penalty that multiplies BorderRegularisation's lambda, so it does nothing on its own: set BorderRegularisation as well, or remove this key" );
+			solverOptions.topologyRetry = solver.getIntegerOr( "TopologyRetry", solverOptions.topologyRetry );
+			if ( solverOptions.topologyRetry < 0 )
+				solver.fail( "TopologyRetry", "cannot be negative; zero is off" );
 			solverOptions.xPointMeritWeight = solver.getFloatOr( "XPointMeritWeight", solverOptions.xPointMeritWeight );
 			if ( !( solverOptions.xPointMeritWeight > 0.0 ) )
 				solver.fail( "XPointMeritWeight", "must be positive: it multiplies the length r h that converts q into a flux, and zero or negative would make the X-point rows count for nothing or against themselves in the merit" );

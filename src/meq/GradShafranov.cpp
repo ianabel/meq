@@ -1592,6 +1592,42 @@ namespace
 		borderedPicardToleranceValue = relativeTolerance;
 	}
 
+	void GradShafranovSolver::setBorderRegularisation( double l2,
+	                                                   double collinearity )
+	{
+		if ( !std::isfinite( l2 ) || l2 < 0.0
+		     || !std::isfinite( collinearity ) || collinearity < 0.0 )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::setBorderRegularisation: both "
+				"coefficients must be finite and non-negative; zero is off" );
+		borderL2Value = l2;
+		borderCollinearityValue = collinearity;
+	}
+
+	double GradShafranovSolver::borderL2Regularisation() const
+	{
+		return borderL2Value;
+	}
+
+	double GradShafranovSolver::borderCollinearityRegularisation() const
+	{
+		return borderCollinearityValue;
+	}
+
+	void GradShafranovSolver::setTopologyRetry( int attempts )
+	{
+		if ( attempts < 0 )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::setTopologyRetry: the number of "
+				"reductions cannot be negative; zero is off" );
+		topologyRetryValue = attempts;
+	}
+
+	int GradShafranovSolver::topologyRetry() const
+	{
+		return topologyRetryValue;
+	}
+
 	void GradShafranovSolver::setAxisRow( AxisRow choice )
 	{
 		axisRowChoice = choice;
@@ -6934,6 +6970,12 @@ namespace
 			return true;
 		};
 
+		// BorderStep::residualCollinearity's other half: the previous iterate's
+		// field residual, carried so the two can be compared. A copy rather than
+		// a reference because `residual` is overwritten in place every trial.
+		mfem::Vector previousResidual;
+		bool havePreviousResidual = false;
+
 		bool converged = false;
 		for ( int iteration = 0; iteration <= newtonMaxIterations*phaseCount;
 		      ++iteration, ++phaseIteration )
@@ -6972,6 +7014,24 @@ namespace
 				record.xR = xR;
 				record.xZ = xZ;
 				record.norm = norm;
+
+				/*
+				 * cos( angle ) AGAINST THE PREVIOUS ITERATE'S FIELD RESIDUAL.
+				 * One dot product, always on, and acted on by nothing -- see
+				 * BorderStep::residualCollinearity for why measuring comes
+				 * first here.
+				 */
+				if ( previousResidual.Size() == residual.Size()
+				     && havePreviousResidual )
+				{
+					double const a = previousResidual.Norml2();
+					double const b = residual.Norml2();
+					if ( a > 0.0 && b > 0.0 )
+						record.residualCollinearity =
+							( previousResidual*residual )/( a*b );
+				}
+				previousResidual = residual;
+				havePreviousResidual = true;
 				borderStepHistory.push_back( record );
 			}
 
@@ -7719,12 +7779,162 @@ namespace
 					record.schurCondition = norm1*inverseNorm1;
 				}
 
+				/*
+				 * THE REGULARISED SOLVE, AND IT IS SKIPPED ENTIRELY WHEN OFF.
+				 *
+				 * At zero coefficients the exact inverse below is taken, not
+				 * this path with a zero parameter -- so an unregularised run is
+				 * bit-identical rather than merely equal, which is what lets
+				 * every published rate stand.
+				 *
+				 * See setBorderRegularisation() for the form and for why the
+				 * relative merit multiplies it: lambda vanishes as the solve
+				 * converges, so the quadratic endgame is untouched and only the
+				 * far-from-solution steps are damped.
+				 */
+				bool const regularising =
+					borderL2Value > 0.0 || borderCollinearityValue > 0.0;
+				if ( regularising && nBorderTotal > 0 )
+				{
+					double frobenius = 0.0;
+					for ( int i = 0; i < nBorderTotal; ++i )
+						for ( int j = 0; j < nBorderTotal; ++j )
+							frobenius += dense( i, j )*dense( i, j );
+					frobenius = std::sqrt( frobenius );
+
+					double const relative =
+						reference > 0.0 ? std::min( 1.0, norm/reference ) : 1.0;
+					double const lambda =
+						borderL2Value*frobenius*relative;
+
+					// THE COLLINEARITY PENALTY, per row, over the Schur
+					// complement's own rows -- which is where the degeneracy
+					// BORDERED-GLOBALISATION-PLAN.md section 0.1 predicts would
+					// show: the X-point rows and the psi_bnd row collapsing
+					// onto each other. max over the other rows, as freegsnke's
+					// is, so one parallel pair is enough to penalise a row.
+					std::vector<double> penalty(
+						static_cast< std::size_t >( nBorderTotal ), 0.0 );
+					if ( borderCollinearityValue > 0.0 )
+					{
+						std::vector<double> rowNorm(
+							static_cast< std::size_t >( nBorderTotal ), 0.0 );
+						for ( int i = 0; i < nBorderTotal; ++i )
+						{
+							double squared = 0.0;
+							for ( int j = 0; j < nBorderTotal; ++j )
+								squared += dense( i, j )*dense( i, j );
+							rowNorm[ static_cast< std::size_t >( i ) ] =
+								std::sqrt( squared );
+						}
+						for ( int i = 0; i < nBorderTotal; ++i )
+							for ( int j = 0; j < nBorderTotal; ++j )
+							{
+								if ( i == j )
+									continue;
+								double const ni =
+									rowNorm[ static_cast< std::size_t >( i ) ];
+								double const nj =
+									rowNorm[ static_cast< std::size_t >( j ) ];
+								if ( !( ni > 0.0 ) || !( nj > 0.0 ) )
+									continue;
+								double dot = 0.0;
+								for ( int k = 0; k < nBorderTotal; ++k )
+									dot += dense( i, k )*dense( j, k );
+								double const cosine =
+									std::min( 1.0 - 1.0e-12,
+									          std::abs( dot )/( ni*nj ) );
+								double const term =
+									1.0/( ( 1.0 - cosine )*( 1.0 - cosine ) )
+									- 1.0;
+								penalty[ static_cast< std::size_t >( i ) ] =
+									std::max( penalty[ static_cast< std::size_t >( i ) ],
+									          term );
+							}
+					}
+
+					// ( M^T M + lambda^2 ( I + w P ) ) x = M^T b. The normal
+					// equations rather than M + lambda I, because M is NOT
+					// symmetric -- shifting a non-symmetric spectrum does not
+					// guarantee an inverse, and the Gram matrix does.
+					mfem::DenseMatrix gram( nBorderTotal );
+					mfem::Vector rhs( nBorderTotal );
+					for ( int i = 0; i < nBorderTotal; ++i )
+					{
+						double total = 0.0;
+						for ( int k = 0; k < nBorderTotal; ++k )
+							total += dense( k, i )*right( k );
+						rhs( i ) = total;
+						for ( int j = 0; j < nBorderTotal; ++j )
+						{
+							double entry = 0.0;
+							for ( int k = 0; k < nBorderTotal; ++k )
+								entry += dense( k, i )*dense( k, j );
+							gram( i, j ) = entry;
+						}
+					}
+					for ( int i = 0; i < nBorderTotal; ++i )
+						gram( i, i ) +=
+							lambda*lambda
+							*( 1.0 + borderCollinearityValue
+							         *penalty[ static_cast< std::size_t >( i ) ] );
+
+					mfem::DenseMatrixInverse regularised( gram );
+					regularised.Mult( rhs, solved );
+
+					/*
+					 * THE CURRENT SENSITIVITY IS TAKEN OFF THE UNREGULARISED
+					 * SCHUR COMPLEMENT, AND IT HAS TO BE.
+					 *
+					 * d( mu0 I_p )/d lambda is a statement about the
+					 * EQUILIBRIUM MANIFOLD -- M-108 uses it to find the fold --
+					 * and the regularisation is a device for getting a step out
+					 * of a degenerate matrix, not a change to the physics being
+					 * reported. Reading it off `gram` would report the damping's
+					 * sensitivity rather than the equilibrium's.
+					 *
+					 * Which means it can legitimately fail here, since the
+					 * matrix may be the singular one regularisation exists to
+					 * survive. An infinite sensitivity IS the answer at a fold.
+					 */
+					if ( currentIsUnknown )
+					{
+						currentSensitivityValue =
+							std::numeric_limits<double>::infinity();
+						try
+						{
+							mfem::DenseMatrixInverse exact( dense );
+							mfem::Vector unit( nBorderTotal );
+							mfem::Vector response( nBorderTotal );
+							unit = 0.0;
+							unit( currentIndex ) = 1.0;
+							exact.Mult( unit, response );
+							double const diagonal = response( currentIndex );
+							if ( std::isfinite( diagonal ) && diagonal != 0.0 )
+								currentSensitivityValue = 1.0/diagonal;
+						}
+						catch ( std::exception const & )
+						{
+							// Left at infinity, which is what a singular border
+							// means for this quantity.
+						}
+					}
+					for ( int i = 0; i < nBorderTotal; ++i )
+					{
+						if ( !std::isfinite( solved( i ) ) )
+							throw std::runtime_error( "meq::GradShafranovSolver::solve: the REGULARISED bordered Jacobian is still singular in ( psi_ax, psi_bnd, a ) -- raise setBorderRegularisation()'s l2, or the degeneracy is not the border's" );
+						step[ static_cast<std::size_t>( i ) ] = solved( i );
+					}
+				}
+				else
+				{
+
 				mfem::DenseMatrixInverse inverse( dense );
 				inverse.Mult( right, solved );
 				for ( int i = 0; i < nBorderTotal; ++i )
 				{
 					if ( !std::isfinite( solved( i ) ) )
-						throw std::runtime_error( "meq::GradShafranovSolver::solve: the bordered Jacobian is singular in ( psi_ax, psi_bnd, a )" );
+						throw std::runtime_error( "meq::GradShafranovSolver::solve: the bordered Jacobian is singular in ( psi_ax, psi_bnd, a ) -- setBorderRegularisation() damps this instead of throwing" );
 					step[ static_cast<std::size_t>( i ) ] = solved( i );
 				}
 
@@ -7755,6 +7965,7 @@ namespace
 						( std::isfinite( diagonal ) && diagonal != 0.0 )
 						? 1.0/diagonal
 						: std::numeric_limits<double>::infinity();
+				}
 				}
 			}
 			}
@@ -7821,10 +8032,35 @@ namespace
 				borderStepHistory.back().directionFinite = std::isfinite( yNorm );
 			}
 
-			for ( int trial = 0; trial < 12 && !accepted; ++trial, damping *= 0.5 )
+			/*
+			 * THE LADDER, AND ITS RUNGS ARE NOT ALL THE SAME SIZE ONCE
+			 * setTopologyRetry() IS ON.
+			 *
+			 * Twelve halvings is the ladder MEQ has always had. What is added is
+			 * that a trial which BROKE THE TOPOLOGY -- a constraint that could
+			 * not be evaluated at all, as against a merit that came back worse
+			 * -- backs off by 0.75 instead, up to setTopologyRetry() times, and
+			 * those rungs are extra rather than taken out of the twelve.
+			 *
+			 * 0.75 because the object there is the largest step that KEEPS the
+			 * topology, and a halving overshoots it by up to a factor of two
+			 * every time; the twelve halvings remain what bracket a minimum once
+			 * the constraints evaluate at all. freegsnke makes the same split and
+			 * uses the same factor, unbounded; the cap is MEQ's, because a state
+			 * whose topology survives no step is a real outcome and should be
+			 * reported rather than spun on.
+			 *
+			 * With the option off this is `trial < 12` and `damping *= 0.5`
+			 * exactly as before, which is what keeps an untouched run
+			 * bit-identical.
+			 */
+			int gentleUsed = 0;
+			int const trialBudget = 12 + topologyRetryValue;
+			for ( int trial = 0; trial < trialBudget && !accepted; ++trial )
 			{
 				double trialNorm = std::numeric_limits<double>::infinity();
 				double trialField = std::numeric_limits<double>::infinity();
+				bool threw = false;
 				try
 				{
 					// `a` FIRST, then the right hand side it changes, and only
@@ -7897,14 +8133,26 @@ namespace
 					                           transmission, xFlux[ 0 ],
 					                           xFlux[ 1 ] );
 				}
-				catch ( std::exception const & )
+				catch ( std::exception const &broke )
 				{
 					// A normalisation the source will not accept -- psi_ax through
 					// zero, most often -- is a step that left the branch. Reject
 					// it like any other non-improving step rather than letting it
 					// end the solve.
+					//
+					// BUT RECORD THAT IT WAS A THROW AND NOT A BAD NUMBER. Both
+					// arrive at the Armijo test as an infinite trial norm, and
+					// collapsing them is why five of M-119's six cold failures
+					// print one message that cannot say which they are. A step
+					// that breaks the TOPOLOGY wants a shorter step; a step that
+					// merely made the merit worse may want a different
+					// direction.
 					trialNorm = std::numeric_limits<double>::infinity();
+					threw = true;
+					++borderStepHistory.back().trialsThrew;
+					borderStepHistory.back().lastTrialThrow = broke.what();
 				}
+
 
 				// EVERY TRIAL, ACCEPTED OR NOT, AND THE FULL STEP FIRST. What
 				// this separates: a full step barely worse than the iterate
@@ -7947,6 +8195,17 @@ namespace
 					borderStepHistory.back().trials = trial + 1;
 					borderStepHistory.back().armijo = true;
 				}
+
+				// WHICH RUNG COMES NEXT, decided by HOW this one failed rather
+				// than by the iteration number. See the comment on the loop.
+				if ( threw && gentleUsed < topologyRetryValue )
+				{
+					damping *= 0.75;
+					++gentleUsed;
+					++borderStepHistory.back().topologyRetries;
+				}
+				else
+					damping *= 0.5;
 			}
 
 			if ( !accepted )

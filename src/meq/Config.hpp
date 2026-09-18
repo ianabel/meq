@@ -1026,6 +1026,40 @@ namespace meq
 		// per-case knob and 1.0 stays the default. MEASUREMENTS.md M-113.
 		double xPointMeritWeight = 1.0;
 
+		/**
+		 * `[solver] BorderRegularisation` and
+		 * `[solver] BorderCollinearityRegularisation` -- Levenberg damping on
+		 * the DENSE border solve, so a near-singular Schur complement gives a
+		 * damped step rather than throwing. Both default to zero, which is off
+		 * and bit-identical.
+		 *
+		 * EXPOSED ON THE SAME GROUNDS AS `AssemblyMode`: they change the
+		 * Jacobian and so the WORK, and they cannot change the fixed point,
+		 * because the fixed points of `x - alpha M^-1 G( x )` are the zeros of
+		 * `G` for any non-singular `M`. That is the line `Globalisation` falls
+		 * the wrong side of and these do not.
+		 *
+		 * MEASUREMENTS.md M-119 is why they exist: `machine-c-mast-shaped`
+		 * throws *"the bordered Jacobian is singular in ( psi_ax, psi_bnd, a )"*
+		 * once the field block is made non-singular, so what is left degenerate
+		 * is the border itself.
+		 */
+		double borderRegularisation = 0.0;
+		double borderCollinearityRegularisation = 0.0;
+
+		/**
+		 * `[solver] TopologyRetry` -- how many 0.75 reductions a trial that
+		 * BROKE THE TOPOLOGY gets before the halving ladder takes over. Zero is
+		 * off and bit-identical.
+		 *
+		 * A constraint that cannot be evaluated at all and a merit that came
+		 * back worse are different failures wanting different responses, and
+		 * MEQ's line search reported them identically -- which is why five of
+		 * M-119's six cold failures print one message that cannot say which
+		 * they are.
+		 */
+		int topologyRetry = 0;
+
 		// [solver] LineSearchMerit -- what the Armijo backtracking compares,
 		// and NOT what is solved or when it stops. See
 		// meq::GradShafranovSolver::LineSearchMerit.

@@ -1264,3 +1264,20 @@ carries ``toroidal_field_driven``, ``g_squared_coefficients`` — ascending in
 :math:`\Psi` — and ``safety_factor_target``. There is no ``GGPrimeFile`` beside
 the output for a reader to look the field up in, which is why it is recorded
 rather than left to the configuration.
+
+``BorderRegularisation``, ``BorderCollinearityRegularisation``
+   Levenberg damping on the dense border solve, so a near-singular Schur
+   complement gives a damped step instead of failing. Both default to ``0.0``,
+   which is off and leaves the solve bit-identical. The damping is scaled by the
+   relative merit, so it vanishes as the solve converges and cannot cost the
+   quadratic endgame. ``BorderCollinearityRegularisation`` weights a per-row
+   penalty on border rows that have gone parallel to one another, and does
+   nothing unless ``BorderRegularisation`` is also set.
+
+``TopologyRetry``
+   How many gentle (0.75) reductions a trial step that could not be evaluated at
+   all -- a normalisation the source refuses, an X-point outside the mesh -- gets
+   before the ordinary halving line search takes over. Default ``0``, which is
+   off. A step that breaks the plasma's topology and a step that merely made the
+   residual worse are different failures; this is what lets the first be treated
+   as one.
