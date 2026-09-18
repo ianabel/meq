@@ -54,6 +54,22 @@ passive-conductor model.
 """
 import argparse, json, os, pickle, statistics, subprocess, sys, time
 
+# BOTH AXES, MATCHED, FOR BOTH ARMS -- which is what race.py has always done
+# and what an earlier draft of this file got wrong by pinning the MEQ arm to
+# MKL_NUM_THREADS=1 and leaving the freegsnke arm alone.
+#
+# MKL_NUM_THREADS=1 is the CTEST setting. It is pinned there because the
+# bit-exactness assertions between assembly modes hold at that value and not
+# above it; it is NOT the production setting. CLAUDE.md: under
+# AssemblyMode::Threaded -- the default -- the element-local dense work is
+# nested inside an active OpenMP region where MKL suppresses its own threading,
+# so MKL_NUM_THREADS costs the assembly nothing, while the TRACE SOLVE runs on
+# the master thread outside every region and takes every thread it is given.
+# M-78 sizes it: the MKL threads are worth a further 7 to 9 per cent. Pinning
+# them to 1 for a timed run hands that away and flatters whatever it is raced
+# against.
+from cores import physical_cores
+THREADS = str(physical_cores())
 MEQ = "/home/ian/projects/meq"
 VENV = f"{MEQ}/tools/freegs4e-benchmark/venv/bin/python"
 CURRENTS = "/home/ian/projects/freegsnke/examples/data/simple_diverted_currents_PaxisIp.pk"
@@ -125,7 +141,8 @@ def run_meq(config, out):
     started = time.perf_counter()
     done = subprocess.run([f"{MEQ}/build/meq-run", config],
                           capture_output=True, text=True,
-                          env={**os.environ, "MKL_NUM_THREADS": "1"})
+                          env={**os.environ, "OMP_NUM_THREADS": THREADS,
+                               "MKL_NUM_THREADS": THREADS})
     seconds = time.perf_counter() - started
     return dict(seconds=seconds, ok=done.returncode == 0, exit=done.returncode,
                 tail=done.stdout.strip().split("\n")[-1] if done.stdout else done.stderr[-200:])

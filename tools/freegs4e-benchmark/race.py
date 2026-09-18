@@ -121,7 +121,17 @@ FGS_GRIDS = [129, 257]
 # reference was reached; only the TIMED rows have to be cold.
 TRUTH = os.environ.get("MEQ_RACE_TRUTH", "")
 
-THREADS = str(os.cpu_count() or 1)
+# PHYSICAL cores, not os.cpu_count()'s LOGICAL 16. This machine is an 8-core
+# Ryzen with 2 threads per core, so asking for 16 gave half the "threads" to SMT
+# siblings sharing an FPU with a thread already saturating it.
+#
+# M-111 WAS TAKEN AT 16 AND ITS ABSOLUTE SECONDS ARE THEREFORE NOT MEQ'S BEST.
+# Both arms got 16, so the RATIOS are probably close to right -- but MEQ's
+# threaded assembly plus PARDISO and freegs4e's numpy are not equally SMT
+# sensitive, so "probably" is doing real work in that sentence and the race
+# wants re-taking before 3.87x is quoted again.
+from cores import physical_cores
+THREADS = str(physical_cores())
 
 
 def environment():
