@@ -4181,26 +4181,44 @@ d( x* )/du_(j,d') = -( grad q )^-1 dq/du = +( grad q )^-1 e_d' phi_j
 b_(j,d')          = -w_d' phi_j( x* ),   w := ( grad q )^-T grad psi_h
 ```
 
-**IT IS CORRECT, BY THE ONLY TEST THAT CAN SEE A JACOBIAN.** On XP-3's diverted
-machine the answer does not move — `psi_ax` 8.266004e-02, `psi_bnd` 3.237932e-02
-and the X-point at (1.093, -0.604) to every printed digit — and the work falls:
+**IT IS CORRECT, BY THE ONLY TEST THAT CAN SEE A JACOBIAN** — the equilibrium
+does not move. `psi_ax` 8.266004e-02, `psi_bnd` 3.237932e-02 and the X-point at
+(1.093, -0.604) to every printed digit, on both libraries and under both
+settings. A wrong sign would raise the iteration count; the counts below do not
+behave like that.
 
-| | dropped | with envelope |
-|---|---|---|
-| sweep 1 | 4 iterations, tail order 1.345 | **3 iterations, order 2.162** |
-| sweep 3, final residual | 1.702e-13 | **5.551e-16** |
-| bootstrap, final residual | 1.273e-14 | **1.736e-16** |
+**BUT WHAT IT IS WORTH IS LIBRARY-DEPENDENT, AND THE FIRST READING OF THIS TABLE
+CREDITED THE TERM WITH SOMETHING THE LIBRARY DID.** Taken first against
+`libmfem.a` of 2026-09-15 and re-taken against 2026-09-17, both arms each time:
 
-A wrong sign raises the count. This lowers it and leaves the equilibrium alone,
-which is what a Jacobian repair looks like.
+| XP-3 | 09-15 dropped | 09-15 envelope | 09-17 dropped | 09-17 envelope |
+|---|---|---|---|---|
+| bootstrap iterations | 15 | 15 | **14** | **15** |
+| sweep 1 iterations | **4** | **3** | **3** | **3** |
+| sweep 3, final residual | 1.702e-13 | 5.551e-16 | 1.511e-14 | 2.532e-15 |
+| bootstrap, final residual | 1.273e-14 | 1.736e-16 | — | — |
+
+**The 4-to-3 at sweep 1 was real on 09-15 and does not reproduce on 09-17,
+because the newer library reaches 3 on its own.** On today's library the term
+COSTS a bootstrap iteration, 14 against 15, and buys a final residual six times
+deeper. That is a much more marginal trade than the first reading of this table
+suggested, and it is recorded rather than quietly restated: the comparison was
+internally valid on the library it was taken on, and it did not survive the
+library moving under it. *A measurement of a Jacobian change is a measurement
+against one library, and this file already says that about suite times.*
 
 **AND IT COSTS A PHYSICAL CASE, WHICH IS WHY IT IS NOT THE DEFAULT.**
 
 | | dropped | with envelope |
 |---|---|---|
-| `FreeBoundaryCoupling`'s physical fixture | **5 of 5** limiter radii | **4 of 5** — R = 1.18 no longer converges |
-| `HighBetaConvergence` assembled corner, final residual | 2.048e-15 / 2.112e-15 | 3.017e-13 / 3.166e-13 |
-| XP-3 bootstrap, residual by step 8 | 6.0e-05 | 1.8e-03 |
+| `FreeBoundaryCoupling`, 09-15 | **5 of 5** limiter radii | **4 of 5** — R = 1.18 no longer converges |
+| `FreeBoundaryCoupling`, 09-17 | **passes** | **fails** — the coil-free control runs 2 rows of 3 |
+| `HighBetaConvergence` assembled corner, final residual (09-15) | 2.048e-15 / 2.112e-15 | 3.017e-13 / 3.166e-13 |
+| XP-3 bootstrap, residual by step 8 (09-15) | 6.0e-05 | 1.8e-03 |
+
+**The harm is the part that DOES reproduce across the library change**, with a
+different symptom — 09-15 lost a limiter radius outright, 09-17 loses a row of
+the coil-free control — and it is what decides the default.
 
 The endgame improves and the approach gets worse. That shape, and the lost
 radius, are what a more exact derivative of a function that is **not
