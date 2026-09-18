@@ -1462,29 +1462,51 @@ namespace meq
 
 			/**
 			 * WHETHER THE AXIS CONSTRAINT ROW CARRIES ITS ENVELOPE POSITION
-			 * TERM. **False, and it is a statement about the code rather than a
-			 * setting.**
+			 * TERM. **It does not by default, and that is a MEASUREMENT rather
+			 * than an omission.**
 			 *
 			 * `C_Ax = s - psi_h( x* )` with `x*` a root of `q_h`, so its
-			 * derivative has two terms and solveWithNormalisation() assembles
-			 * one. Dropping the other is exact only if `grad psi_h( x* ) = 0`,
-			 * which holds for the CONTINUOUS fields and not for the discrete
-			 * ones: `r q_h - grad_bar psi_h` is the local lifting of the trace
-			 * jump, so it is `O( h^k )`. See the row's own comment in the .cpp
-			 * for the derivation and for the missing term, which is
-			 * `grad psi_h( x* )^T ( grad q_h )^-1 ( flux shape at x* )` on the
-			 * axis element's FLUX dofs -- where the row is currently zero.
+			 * derivative has two terms and the row assembles one. Dropping the
+			 * other is exact only if `grad psi_h( x* ) = 0`, which holds for the
+			 * CONTINUOUS fields and not for the discrete ones: `r q_h -
+			 * grad_bar psi_h` is the local lifting of the trace jump, so it is
+			 * `O( h^k )`. MEASUREMENTS.md M-120 measures the dropped term at
+			 * **0.03 to 0.16 per cent** of the row it sits beside.
 			 *
-			 * **FLIP THIS WHEN THE TERM IS WRITTEN.**
-			 * tests/convergence/BorderJacobian.cpp measures what the omission
-			 * costs and is RED until it is: that case exists so the correction
-			 * can be verified rather than merely believed, and reading this
-			 * constant is how it tells a row that carries the term from one
-			 * that does not. It is a compile-time constant because there is
-			 * nothing to decide at run time -- either the code assembles the
-			 * term or it does not.
+			 * **AND ASSEMBLING IT IS MEASURED HARMFUL, WHICH IS M-121.** It is
+			 * written and it is correct -- XP-3's endgame improves and its
+			 * answer does not move -- and turning it on costs
+			 * `FreeBoundaryCoupling`'s physical fixture one of its five limiter
+			 * radii. The likely reason is M-120's OTHER finding: `C_Ax` is
+			 * discontinuous in the flux, jumping when the axis crosses a face,
+			 * so a Jacobian that describes the smooth part more exactly
+			 * describes a function that is not differentiable. Sharpening a
+			 * derivative of a jumping function is not obviously an improvement,
+			 * and here it is measurably not one.
+			 *
+			 * This is therefore a knob of exactly `BorderColumn`'s kind: it
+			 * changes the Jacobian and cannot change the fixed point, so it
+			 * changes the WORK and not the answer. It is not a TOML key, for the
+			 * reason `Globalisation` is not.
 			 */
-			static constexpr bool axisRowCarriesEnvelopeTerm = false;
+			enum class AxisRow
+			{
+				/// The envelope position term dropped. The default, and what
+				/// every rate in the suite is measured with.
+				PositionDropped,
+				/// The full derivative -- `-shape( x* )` on the axis element's
+				/// potential dofs and `-w_d phi_j( x* )` on its flux dofs, with
+				/// `w = ( grad q_h )^-T grad psi_h`. Empty on the flux dofs at a
+				/// degenerate axis, where `grad q_h` cannot be inverted and
+				/// `d( x* )/du` is genuinely unbounded.
+				WithEnvelope
+			};
+
+			/// @see AxisRow. Reactive and diagnostic, not a performance key.
+			void setAxisRow( AxisRow choice );
+
+			/// Which linearisation of the axis constraint the border carries.
+			AxisRow axisRow() const;
 
 			/**
 			 * WHERE Globalisation::BorderedPicardThenNewton HANDS OFF, as a
@@ -3626,6 +3648,9 @@ namespace meq
 			double axisZValue = 0.0;
 
 			Globalisation globalisationChoice;
+
+			/// setAxisRow(). See AxisRow for why the default drops the term.
+			AxisRow axisRowChoice = AxisRow::PositionDropped;
 
 			/**
 			 * WHICH LINEARISATION THE FIELD BLOCK IS ASSEMBLED WITH RIGHT NOW.

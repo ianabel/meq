@@ -4159,3 +4159,67 @@ an asserted property: the numerator does not fall with the step.
 *located* rather than prescribed measures the location's discontinuity, not its
 derivative, and the two are told apart by the element index rather than by the
 number. The closed form has no such trouble because it never leaves one element.
+
+### M-121
+
+**The axis row's envelope term, written — and assembling it is measured
+HARMFUL, so it is off by default.**
+
+M-120 established that the axis row drops a term worth 0.03 to 0.16 per cent of
+the row it sits in, and that every factor was already assembled for XP-3's own
+rows. It is now written. `GradShafranovSolver::AxisRow::WithEnvelope` turns it
+on and `PositionDropped` is the default.
+
+**The sign trap is `DarcyForm`'s `-q` and it bites twice**, which is worth
+setting out because a sign error here does not give a wrong answer — it costs
+convergence and nothing else. The unknown's flux block holds `-q`, so with
+`q_d = -sum_j u_(j,d) phi_j`:
+
+```
+dq_d/du_(j,d')    = -phi_j delta_(dd')
+d( x* )/du_(j,d') = -( grad q )^-1 dq/du = +( grad q )^-1 e_d' phi_j
+b_(j,d')          = -w_d' phi_j( x* ),   w := ( grad q )^-T grad psi_h
+```
+
+**IT IS CORRECT, BY THE ONLY TEST THAT CAN SEE A JACOBIAN.** On XP-3's diverted
+machine the answer does not move — `psi_ax` 8.266004e-02, `psi_bnd` 3.237932e-02
+and the X-point at (1.093, -0.604) to every printed digit — and the work falls:
+
+| | dropped | with envelope |
+|---|---|---|
+| sweep 1 | 4 iterations, tail order 1.345 | **3 iterations, order 2.162** |
+| sweep 3, final residual | 1.702e-13 | **5.551e-16** |
+| bootstrap, final residual | 1.273e-14 | **1.736e-16** |
+
+A wrong sign raises the count. This lowers it and leaves the equilibrium alone,
+which is what a Jacobian repair looks like.
+
+**AND IT COSTS A PHYSICAL CASE, WHICH IS WHY IT IS NOT THE DEFAULT.**
+
+| | dropped | with envelope |
+|---|---|---|
+| `FreeBoundaryCoupling`'s physical fixture | **5 of 5** limiter radii | **4 of 5** — R = 1.18 no longer converges |
+| `HighBetaConvergence` assembled corner, final residual | 2.048e-15 / 2.112e-15 | 3.017e-13 / 3.166e-13 |
+| XP-3 bootstrap, residual by step 8 | 6.0e-05 | 1.8e-03 |
+
+The endgame improves and the approach gets worse. That shape, and the lost
+radius, are what a more exact derivative of a function that is **not
+differentiable** would produce — and M-120's third finding is exactly that
+`C_Ax` is discontinuous in the flux, jumping by the L2 face jump whenever the
+axis crosses a face. Sharpening the smooth part's derivative aims the step more
+precisely at a residual that does not follow it there, and the line search
+rejects.
+
+**So the two halves of M-120 are in tension and the second wins.** The term is
+real, it is computable, it is correctly signed, and the constraint it
+differentiates is the wrong kind of function to be differentiating harder. **The
+route worth taking is the one that makes the constraint continuous first** —
+M-115's local reconstruction, or the `psi*` variants set out at the end of
+M-120, of which (c) is the self-consistent one: define `x*` as a critical point
+of `psi*` and evaluate `psi*` there, where the envelope theorem is exact by
+construction and there is no correction term to add at all.
+
+**The transferable part**: *this was the third time in this campaign that a
+repair which is right by derivation was measured to be worse in practice*, after
+`PicardSweeps` (M-116) and the bordered Picard rung (M-119). All three share a
+shape — the derivation assumes a smoothness the discrete problem does not have.

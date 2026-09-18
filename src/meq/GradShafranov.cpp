@@ -1592,6 +1592,16 @@ namespace
 		borderedPicardToleranceValue = relativeTolerance;
 	}
 
+	void GradShafranovSolver::setAxisRow( AxisRow choice )
+	{
+		axisRowChoice = choice;
+	}
+
+	GradShafranovSolver::AxisRow GradShafranovSolver::axisRow() const
+	{
+		return axisRowChoice;
+	}
+
 	double GradShafranovSolver::borderedPicardTolerance() const
 	{
 		return borderedPicardToleranceValue;
@@ -5952,6 +5962,17 @@ namespace
 		bool constraintLocated = false;
 
 		/*
+		 * THE ENVELOPE TERM'S HALF OF THE SAME ROW, on the axis element's FLUX
+		 * dofs. Indices are into the UNKNOWN and the values are the row's, both
+		 * filled by locateAxisPoint() beside constraintShape so that the two
+		 * halves cannot be assembled from different iterates. Empty whenever
+		 * grad q_h is too near singular to invert, which is the degenerate axis
+		 * and is the one state this correction has nothing to say about.
+		 */
+		mfem::Array<int> constraintFluxDofs;
+		mfem::Vector constraintFluxRow;
+
+		/*
 		 * THE CONSTRAINT POINT: psi_h THERE, AND WHAT THE BORDER ROW NEEDS.
 		 *
 		 * Under AxisConstraint::NodalMaximum this is the largest nodal value and
@@ -5975,6 +5996,8 @@ namespace
 		{
 			constraintElement = -1;
 			constraintShape.SetSize( 0 );
+			constraintFluxDofs.SetSize( 0 );
+			constraintFluxRow.SetSize( 0 );
 
 			// q, NOT the raw block. DarcyForm holds -q, and in even dimension
 			// index( -v ) = index( v ), so a finder handed the raw block puts
@@ -6182,6 +6205,145 @@ namespace
 			previousAxisR = best.r;
 			previousAxisZ = best.z;
 			havePreviousAxis = true;
+
+			/*
+			 * AND THE ENVELOPE TERM, WHICH THE ROW USED TO DROP AS ZERO.
+			 *
+			 * G = s - psi_h( x* ) with x* a root of q_h, so
+			 *
+			 *   dG/du = -[ dpsi_h/du |_x*  +  grad psi_h( x* ) . d( x* )/du ]
+			 *
+			 * and the second term is zero only if grad psi_h( x* ) is.
+			 * MEASUREMENTS.md M-120 measures that it is not: at the located axis
+			 * | q_h | is at round-off, being the root, while | grad psi_h | reads
+			 * 8e-04 to 1e-02. The two are different fields whose identity is only
+			 * WEAK -- r q_h - grad_bar psi_h is the local lifting of the trace
+			 * jump -- which is exactly what cornerEntry()'s XP-3 arm says about
+			 * the same relation, and why q_h converges a full order better than
+			 * grad psi_h. That gap IS the mixed method.
+			 *
+			 * THE SIGN TRAP IS DarcyForm'S -q AND IT BITES TWICE. The unknown's
+			 * flux block holds -q, so with q_d = -sum_j u_(j,d) phi_j,
+			 *
+			 *   dq_d/du_(j,d')  = -phi_j delta_(dd')
+			 *   d( x* )/du_(j,d') = -( grad q )^-1 dq/du = +( grad q )^-1 e_d' phi_j
+			 *
+			 * and the row entry is -grad psi_h . that, so with
+			 * w := ( grad q )^-T grad psi_h it is
+			 *
+			 *   b_(j,d') = -w_d' phi_j( x* ).
+			 *
+			 * Read the gradients off `state` and NOT off potentialGf or the flux
+			 * grid function: this runs inside residual evaluations, where the
+			 * grid functions are not the iterate being measured. axisFlux above
+			 * already negates for the same reason.
+			 *
+			 * MEASURED AT 0.03 TO 0.16 PER CENT of the row it sits beside, which
+			 * is a thousand times what a Jacobian entry has to be to be
+			 * negligible. tests/convergence/BorderJacobian.cpp is the acceptance
+			 * and GradShafranovSolver::axisRowCarriesEnvelopeTerm is what it
+			 * reads to tell a row that carries this from one that does not.
+			 */
+			if ( axisRowChoice == AxisRow::WithEnvelope )
+			{
+				constraintFluxDofs.SetSize( 0 );
+				constraintFluxRow.SetSize( 0 );
+
+				mfem::Mesh &axisMesh = *potentialFes->GetMesh();
+				int const dim = axisMesh.Dimension();
+
+				// The caller-allocated overload: the shared one resets what the
+				// previous call returned, which this file records at six sites.
+				thread_local mfem::IsoparametricTransformation envelopeScratch;
+				axisMesh.GetElementTransformation( best.element,
+				                                   &envelopeScratch );
+				envelopeScratch.SetIntPoint( &reference );
+
+				mfem::DenseMatrix potentialGrad( fe->GetDof(), dim );
+				fe->CalcPhysDShape( envelopeScratch, potentialGrad );
+
+				mfem::Vector gradPsi( dim );
+				gradPsi = 0.0;
+				for ( int j = 0; j < dofs.Size() && j < fe->GetDof(); ++j )
+				{
+					double const coefficient =
+						state( blockOffsets[ 1 ] + dofs[ j ] );
+					for ( int d = 0; d < dim; ++d )
+						gradPsi( d ) += coefficient*potentialGrad( j, d );
+				}
+
+				mfem::FiniteElement const *fluxFe =
+					fluxFes->GetFE( best.element );
+				mfem::Array<int> fluxScalarDofs;
+				fluxFes->GetElementDofs( best.element, fluxScalarDofs );
+
+				mfem::DenseMatrix fluxGrad( fluxFe->GetDof(), dim );
+				fluxFe->CalcPhysDShape( envelopeScratch, fluxGrad );
+
+				// grad q, NOT grad( -q ). The minus is DarcyForm's.
+				mfem::DenseMatrix gradQ( dim, dim );
+				gradQ = 0.0;
+				for ( int j = 0; j < fluxScalarDofs.Size(); ++j )
+					for ( int d = 0; d < dim; ++d )
+					{
+						// DofToVDof rather than GetElementVDofs, so the layout
+						// is asked for rather than assumed: a space's ordering
+						// is its own and byNODES against byVDIM would silently
+						// transpose the components.
+						double const coefficient =
+							-state( blockOffsets[ 0 ]
+							        + fluxFes->DofToVDof( fluxScalarDofs[ j ],
+							                              d ) );
+						for ( int i = 0; i < dim; ++i )
+							gradQ( d, i ) += coefficient*fluxGrad( j, i );
+					}
+
+				/*
+				 * THE DEGENERATE AXIS IS SKIPPED RATHER THAN APPROXIMATED. A
+				 * near-singular grad q is a fold of the critical point itself,
+				 * where d( x* )/du is genuinely unbounded and no finite row
+				 * describes it; dropping the correction there leaves exactly
+				 * the row this code had before, which converges. The threshold
+				 * is relative to the matrix's own size, so it is scale free.
+				 */
+				double const determinant = gradQ( 0, 0 )*gradQ( 1, 1 )
+				                           - gradQ( 0, 1 )*gradQ( 1, 0 );
+				double const size = gradQ.FNorm();
+				bool const invertible =
+					std::isfinite( determinant ) && std::isfinite( size )
+					&& std::abs( determinant ) > 1.0e-12*size*size;
+
+				if ( invertible )
+				{
+					// w solves grad q^T w = grad psi.
+					mfem::Vector w( dim );
+					w( 0 ) = ( gradQ( 1, 1 )*gradPsi( 0 )
+					           - gradQ( 1, 0 )*gradPsi( 1 ) )/determinant;
+					w( 1 ) = ( -gradQ( 0, 1 )*gradPsi( 0 )
+					           + gradQ( 0, 0 )*gradPsi( 1 ) )/determinant;
+
+					mfem::Vector fluxShape( fluxFe->GetDof() );
+					fluxFe->CalcShape( reference, fluxShape );
+
+					if ( std::isfinite( w( 0 ) ) && std::isfinite( w( 1 ) ) )
+					{
+						int const count = fluxScalarDofs.Size()*dim;
+						constraintFluxDofs.SetSize( count );
+						constraintFluxRow.SetSize( count );
+						int at = 0;
+						for ( int d = 0; d < dim; ++d )
+							for ( int j = 0; j < fluxScalarDofs.Size(); ++j )
+							{
+								constraintFluxDofs[ at ] =
+									blockOffsets[ 0 ]
+									+ fluxFes->DofToVDof( fluxScalarDofs[ j ],
+									                      d );
+								constraintFluxRow( at ) = -w( d )*fluxShape( j );
+								++at;
+							}
+					}
+				}
+			}
 
 			// AND THE FILL GETS THE SAME ELEMENT. See plasmaSeedElement: this is
 			// the one place that knows where the axis is on this iterate, and
@@ -6941,8 +7103,24 @@ namespace
 
 				int const m = std::min( potentialDofs.Size(),
 				                        constraintShape.Size() );
-				borderDofs.SetSize( m );
-				border.SetSize( m );
+
+				/*
+				 * TWO HALVES, AND THE SECOND IS THE ENVELOPE TERM. The first is
+				 * dpsi_h/du at a FIXED point and lands on the potential dofs;
+				 * the second is grad psi_h . d( x* )/du and lands on the axis
+				 * element's FLUX dofs, because x* is a root of q_h and so moves
+				 * with the flux and not with the potential. locateAxisPoint()
+				 * built it at the same iterate as constraintShape, which is
+				 * what keeps them consistent -- a row assembled from two states
+				 * is the defect this file guards against elsewhere.
+				 *
+				 * The flux half is EMPTY at a degenerate axis, where grad q_h
+				 * cannot be inverted; the row is then exactly what it was before
+				 * the term existed.
+				 */
+				int const extra = constraintFluxDofs.Size();
+				borderDofs.SetSize( m + extra );
+				border.SetSize( m + extra );
 				for ( int i = 0; i < m; ++i )
 				{
 					// SHIFTED INTO THE FULL VECTOR. GetElementDofs indexes the
@@ -6952,6 +7130,20 @@ namespace
 					// instead when it was missing there.
 					borderDofs[ i ] = blockOffsets[ 1 ] + potentialDofs[ i ];
 					border( i ) = coupled ? -constraintShape( i ) : 0.0;
+				}
+				for ( int i = 0; i < extra; ++i )
+				{
+					// ALREADY SHIFTED: locateAxisPoint() writes indices into the
+					// unknown, because a flux vdof needs the space's own
+					// DofToVDof as well as the block offset and doing both in
+					// one place is what stops the two being applied twice.
+					borderDofs[ m + i ] = constraintFluxDofs[ i ];
+					// GATED ON `coupled` EXACTLY AS THE OTHER HALF IS. The flag
+					// is about psi_ax being an unknown at all; with it false the
+					// whole row is zero and this half must be too, or the
+					// decoupled route would acquire a row it is defined not to
+					// have.
+					border( m + i ) = coupled ? constraintFluxRow( i ) : 0.0;
 				}
 			}
 			else

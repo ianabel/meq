@@ -2405,6 +2405,26 @@ trace and leaves the **flux** block at zero. One loop also keeps `gamma` frozen
 at the first iterate across both phases, so the printed history is one merit end
 to end.
 
+### The axis row's envelope term is written, correct, and off by default
+
+The row drops `grad psi_h( x* ) . d( x* )/du` by the envelope theorem, which is
+exact only if `grad psi_h( x* ) = 0`. That holds for the CONTINUOUS fields and
+not for the discrete ones — `r q_h - grad_bar psi_h` is the local lifting of the
+trace jump — and `cornerEntry()`'s XP-3 arm said so about the same identity all
+along. → **[M-120](MEASUREMENTS.md#m-120)** measures the dropped term at 0.03 to
+0.16 per cent of the row.
+
+`AxisRow::WithEnvelope` assembles it, and → **[M-121](MEASUREMENTS.md#m-121)**
+is why `PositionDropped` is the default. It is correctly signed — XP-3's answer
+does not move to any printed digit while its sweeps go 4 to 3 and its final
+residual 1.702e-13 to 5.551e-16 — and it costs `FreeBoundaryCoupling`'s physical
+fixture one of its five limiter radii. The endgame improves and the approach
+gets worse, which is the shape of a sharper derivative of a function that is not
+differentiable: M-120's other finding is that `C_Ax` JUMPS when the axis crosses
+a face. **Make the constraint continuous first**, and then the term is either
+unnecessary (define `x*` as a critical point of `psi*` and the envelope theorem
+is exact by construction) or safe.
+
 ## The geometry: meshing a half-disc that reaches the axis
 
 Free boundary is the one campaign here whose geometry
