@@ -70,7 +70,8 @@ def parse_box(text):
     return tuple(parts)
 
 
-def compare(npz_path, nc_path, meta_path, free_boundary=False, boxes=()):
+def compare(npz_path, nc_path, meta_path, free_boundary=False, boxes=(),
+            core=None):
     ref = np.load(npz_path, allow_pickle=True)
 
     # THE GAUGE, AND THE TWO COMPARISONS DIFFER IN IT.
@@ -164,6 +165,33 @@ def compare(npz_path, nc_path, meta_path, free_boundary=False, boxes=()):
                     rel_l2=float(np.sqrt(np.mean(d ** 2)) / scale),
                     rel_linf=float(np.abs(d).max() / scale))
 
+    # THE PLASMA'S INTERIOR, SEPARATELY, WHEN ASKED FOR.
+    #
+    # WHY IT IS WORTH A ROW OF ITS OWN. CLAUDE_FB.md's plasma-edge result caps
+    # the achievable ORDER at `k <= j`, where j is the order to which the
+    # profile vanishes at the edge -- and freegsnke's ConstrainPaxisIp at
+    # alpha_n = 1.2 gives j = 1.2, i.e. k = 1. That is a statement about the
+    # asymptotic RATE and NOT about which run is more accurate at a given
+    # element count: the error is an edge contribution, which is capped, plus an
+    # interior one, which is not. At the resolutions anybody runs -- 1e-03,
+    # 1e-04 -- the interior can dominate, and then a k = 3 solve is the better
+    # answer on a case whose rate says k = 1.
+    #
+    # A GLOBAL NORM CANNOT SEE THAT, because the edge contribution it is pooled
+    # with is exactly the part that does not improve. Hence a separate row.
+    #
+    # Psi_N comes from the REFERENCE's own psi_axis and psi_bndry, so the
+    # region is defined by the equilibrium being compared against rather than by
+    # whatever MEQ happened to converge to -- otherwise two MEQ runs would be
+    # scored on two different regions.
+    interior = None
+    if core is not None:
+        span = float(ref["psi_axis"]) - float(ref["psi_bndry"])
+        if span != 0.0:
+            psi_n_here = (float(ref["psi_axis"]) - ref_on_meq) / span
+            interior = norms(use & np.isfinite(psi_n_here)
+                             & (psi_n_here <= core) & (psi_n_here >= 0.0))
+
     return dict(nodes=int(use.sum()), inside=int(inside.sum()),
                 dropped_band=int((inside & extrap).sum()),
                 linf=float(np.abs(diff).max()),
@@ -172,6 +200,7 @@ def compare(npz_path, nc_path, meta_path, free_boundary=False, boxes=()):
                 rel_linf=float(np.abs(diff).max() / scale),
                 rel_l2=float(np.sqrt(np.mean(diff ** 2)) / scale),
                 kept=norms(kept), conductors=norms(use & excluded),
+                interior=interior, core=core,
                 axis_verdict=verdict, axis_flux=axis_flux, axis_note=axis_note)
 
 
@@ -207,6 +236,14 @@ if __name__ == "__main__":
              "inside one compare two conductor models rather than two solvers. "
              "The excluded region gets a row of its own; nothing is dropped "
              "silently.")
+    parser.add_argument(
+        "--core", type=float, default=None, metavar="PSI_N",
+        help="also report the norm over the plasma INTERIOR, Psi_N <= this. "
+             "0.9 is the usual choice. It exists because a capped ORDER at the "
+             "plasma edge is not the same claim as a worse ANSWER: the edge "
+             "contribution to a global norm is exactly the part that does not "
+             "refine, so pooling it hides whatever a higher degree buys in the "
+             "middle -- which at 1e-03 and 1e-04 is where the error lives.")
     args = parser.parse_args()
 
     rows = []
@@ -223,7 +260,7 @@ if __name__ == "__main__":
             print(f"    {stem:22s} {'-':>7s} MEQ produced no .nc")
             continue
         r = compare(npz, nc, meta, free_boundary=args.free_boundary,
-                    boxes=args.exclude_box)
+                    boxes=boxes, core=args.core)
 
         # THE AXIS GATE, BEFORE ANY NUMBER IS QUOTED. A run whose psi_ax is not
         # the flux at a magnetic axis solved a different equilibrium from the
@@ -253,6 +290,11 @@ if __name__ == "__main__":
         # THE TWO HALVES OF AN EXCLUSION, both printed. The row above is every
         # comparable node and is the one a reader should distrust where the
         # conductors differ; these say how much of it is the conductors.
+        if r.get("interior") is not None:
+            it = r["interior"]
+            print(f"    {'  plasma interior':22s} {it['nodes']:7d} {'':6s} "
+                  f"{it['rel_l2']:11.3e} {it['rel_linf']:11.3e}"
+                  f"   (Psi_N <= {r['core']:.2f})")
         if r["conductors"] is not None:
             k, c = r["kept"], r["conductors"]
             print(f"    {'  outside the conductors':22s} {k['nodes']:7d} "

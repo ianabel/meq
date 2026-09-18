@@ -92,7 +92,14 @@ def run_meq(config, stem, out_dir):
 
 
 def error_against(nc_path, truth_npz):
-    """Relative L2 of psi against the truth, through compare.py.
+    """( global rel L2, INTERIOR rel L2 ) against the truth, through compare.py.
+
+    BOTH, BECAUSE THE GLOBAL ONE CANNOT ANSWER THE QUESTION THIS SWEEP ASKS.
+    A fractional plasma edge caps the asymptotic ORDER at `k <= j` -- 1.2 on
+    this case -- and the edge is exactly the part of a global norm that does not
+    refine. Pooling it hides whatever a higher degree buys in the middle, and at
+    1e-03 and 1e-04 the middle is where the error lives. So `k = 3` is swept
+    whatever the rate says, and judged on both columns.
 
     compare.py already drops the band -- the .nc's `extrapolated` mask -- which
     CLAUDE.md requires before differencing two runs and which is one node in ten
@@ -100,15 +107,25 @@ def error_against(nc_path, truth_npz):
     too, and getting it wrong is silent.
     """
     done = subprocess.run([VENV, f"{MEQ}/tools/freegs4e-benchmark/compare.py",
-                           truth_npz, nc_path],
+                           truth_npz, nc_path, "--core", "0.9"],
                           capture_output=True, text=True, env=env())
     match = re.search(r"([0-9.]+e[-+][0-9]+)", done.stdout)
+    glob = inter = float("nan")
     for line in done.stdout.split("\n"):
-        if "rel_l2" in line or "relative" in line.lower():
-            found = re.findall(r"([0-9.]+e[-+][0-9]+)", line)
-            if found:
-                return float(found[0]), done.stdout
-    return (float(match.group(1)) if match else float("nan")), done.stdout
+        found = re.findall(r"([0-9.]+e[-+][0-9]+)", line)
+        if "plasma interior" in line and found:
+            inter = float(found[0])
+        elif found and "rel" not in line.lower() and inter != inter and \
+                glob != glob and line.strip() and not line.startswith("  "):
+            pass
+    for line in done.stdout.split("\n"):
+        found = re.findall(r"([0-9.]+e[-+][0-9]+)", line)
+        if found and "interior" not in line and "conductor" not in line \
+                and line.strip().startswith(("mastu", "meq", "  ")):
+            glob = float(found[0]); break
+    if glob != glob and match:
+        glob = float(match.group(1))
+    return (glob, inter), done.stdout
 
 
 def main():
@@ -145,7 +162,8 @@ def main():
     print(f"truth: {truth}\n")
 
     # ---- the MEQ arm: the whole ( k, h ) grid ----
-    print(f"  {'k':>2} {'size':>6} {'elements':>9} {'seconds':>9} {'rel L2':>11}  note")
+    print(f"  {'k':>2} {'size':>6} {'elements':>9} {'seconds':>9} {'rel L2':>11}"
+          f" {'interior':>11}  note")
     meq_rows = []
     for degree in [int(v) for v in args.degrees.split(",")]:
         for size in [float(v) for v in args.sizes.split(",")]:
@@ -156,13 +174,14 @@ def main():
             except subprocess.TimeoutExpired:
                 result = dict(seconds=float("inf"), ok=False, elements=0,
                               nc="", tail="timeout", exit=-1)
-            rel = float("nan")
+            rel = interior = float("nan")
             if result["ok"] and os.path.exists(result["nc"]):
-                rel, _ = error_against(result["nc"], truth)
+                (rel, interior), _ = error_against(result["nc"], truth)
             meq_rows.append(dict(degree=degree, size=size, **{
-                k: v for k, v in result.items() if k != "nc"}, rel_l2=rel))
+                k: v for k, v in result.items() if k != "nc"}, rel_l2=rel,
+                interior_l2=interior))
             print(f"  {degree:2d} {size:6.2f} {result['elements']:9d} "
-                  f"{result['seconds']:9.2f} {rel:11.3e}  "
+                  f"{result['seconds']:9.2f} {rel:11.3e} {interior:11.3e}  "
                   f"{'' if result['ok'] else result['tail'][:60]}")
             sys.stdout.flush()
 
@@ -172,6 +191,8 @@ def main():
     front = []
     for target in TARGETS:
         ok = [r for r in meq_rows if r["ok"] and r["rel_l2"] <= target]
+        ok_in = [r for r in meq_rows if r["ok"] and r["interior_l2"] <= target]
+        best_in = min(ok_in, key=lambda r: r["seconds"]) if ok_in else None
         best = min(ok, key=lambda r: r["seconds"]) if ok else None
         # freegsnke's own error against the truth is not measured here -- the
         # truth IS its finest level, so its error is zero by construction and a
@@ -180,7 +201,10 @@ def main():
         row = dict(target=target,
                    meq=best["seconds"] if best else None,
                    meq_k=best["degree"] if best else None,
-                   meq_h=best["size"] if best else None)
+                   meq_h=best["size"] if best else None,
+                   meq_interior=best_in["seconds"] if best_in else None,
+                   meq_interior_k=best_in["degree"] if best_in else None,
+                   meq_interior_h=best_in["size"] if best_in else None)
         front.append(row)
         print(f"  {target:8.0e} "
               + (f"{row['meq']:9.2f} k={row['meq_k']},h={row['meq_h']:.2f}"
