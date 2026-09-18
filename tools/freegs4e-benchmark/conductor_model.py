@@ -73,11 +73,41 @@ def psi_rectangle(Rc, Zc, hw, hh, current, RR, ZZ, order):
     return current * total / wsum
 
 
+def psi_shaped(Rc, Zc, hw, hh, current, RR, ZZ, npoints):
+    """freegs4e's OWN ShapedCoil over the same rectangle.
+
+    THIS IS THE ARM THAT NEEDS NO MEQ CHANGE.  ShapedCoil spreads current*turns
+    uniformly over a polygon and integrates it with `quadrature.polygon_quad` at
+    1, 3 or 6 points per triangle -- the same MODEL as meq::Coil's rectangle, so
+    a reference regenerated with it can be compared against MEQ like for like
+    today, with no filament support anywhere.
+
+    What it does NOT match is the QUADRATURE: 6 points per triangle against
+    MEQ's tensor Gauss rule, so a residual difference here is the integration
+    and not the physics.  Measuring that residual is the point of this arm --
+    it is the floor a shaped-against-shaped benchmark would sit on.
+    """
+    from freegs4e.shaped_coil import ShapedCoil
+    shape = [(Rc - hw, Zc - hh), (Rc + hw, Zc - hh),
+             (Rc + hw, Zc + hh), (Rc - hw, Zc + hh)]
+    coil = ShapedCoil(shape, current=current, npoints=npoints)
+    return coil.controlPsi(RR, ZZ) * current
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("toml", help="the MEQ config whose [[coils]] are the rectangles")
     ap.add_argument("npz", help="the reference, for the grid and the error scale")
+    ap.add_argument("--shaped", action="store_true",
+                    help="also compare freegs4e's own ShapedCoil against MEQ's "
+                         "exact rectangle -- the same MODEL on both sides, so "
+                         "what is left is the quadrature. This is the arm that "
+                         "needs no MEQ filament support: a reference "
+                         "regenerated with ShapedCoil can be raced against MEQ "
+                         "like for like today.")
+    ap.add_argument("--npoints", type=int, default=6,
+                    help="ShapedCoil quadrature points per triangle: 1, 3 or 6")
     ap.add_argument("--order", type=int, default=24,
                     help="Gauss points per direction over each rectangle")
     args = ap.parse_args()
@@ -97,10 +127,17 @@ def main():
 
     fil = np.zeros_like(RR)
     rec = np.zeros_like(RR)
+    shp = np.zeros_like(RR)
     inside = np.zeros(RR.shape, bool)
     for name, Rc, Zc, hw, hh, current in coils:
         fil += psi_filament(Rc, Zc, current, RR, ZZ)
         rec += psi_rectangle(Rc, Zc, hw, hh, current, RR, ZZ, args.order)
+        if args.shaped:
+            try:
+                shp += psi_shaped(Rc, Zc, hw, hh, current, RR, ZZ, args.npoints)
+            except Exception as error:
+                print(f"  ShapedCoil failed on {name}: {error}", file=sys.stderr)
+                args.shaped = False
         inside |= (np.abs(RR - Rc) <= hw) & (np.abs(ZZ - Zc) <= hh)
 
     diff = rec - fil
@@ -120,6 +157,21 @@ def main():
                 "<- the row M-111 reports")
     norms(finite & inside, "inside them",
           "upper bound: log kernel, quadrature limited")
+
+    if args.shaped:
+        print(f"\n  AND freegs4e's OWN ShapedCoil against MEQ's exact rectangle --")
+        print(f"  the SAME model on both sides, so this is the quadrature alone")
+        print(f"  and is the floor a shaped-against-shaped benchmark would sit on.")
+        print(f"  {'region':26s} {'nodes':>8} {'rel L2':>12} {'rel Linf':>12}")
+        saved, diff = diff, shp - rec
+        norms(finite, "everywhere")
+        shaped_off = norms(finite & ~inside, "off the conductors")
+        norms(finite & inside, "inside them", "log kernel both sides")
+        diff = saved
+        if shaped_off is not None and off is not None:
+            print(f"\n    shaped-vs-shaped is {off/max(shaped_off,1e-30):.0f}x SMALLER"
+                  f" off the conductors than\n    filament-vs-rectangle"
+                  f" ({shaped_off:.3e} against {off:.3e}).")
 
     print(f"\n  M-111's F DIII-D figures, for comparison:"
           f"\n    rel L2 5.785e-03 flat across a 16x range in dofs"

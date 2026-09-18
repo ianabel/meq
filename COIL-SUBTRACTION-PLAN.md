@@ -38,6 +38,43 @@ floor is something else — regularity, the plasma edge, or the reference's own
 accuracy. *The first version of the verdict in that script read only the
 off-conductor row and concluded the opposite; both rows have to be read.*
 
+## 0a. AND THE 2x2, WHICH MAKES THE BENCHMARK LIKE-FOR-LIKE TODAY
+
+Ian: *"we should also allow for freegs4e's filaments so we can compare against
+an equivalent model ( MEQ filament vs freegs filament + MEQ shaped vs freegs
+shaped )"*.
+
+**freegs4e ALREADY HAS BOTH SIDES.** `freegs4e/coil.py`'s `Coil` is the point
+filament, `multi_coil.py`'s `MultiCoil` is explicit filaments — what freegsnke's
+MAST-U uses — and **`shaped_coil.py`'s `ShapedCoil` is a polygon carrying a
+UNIFORM CURRENT DENSITY**, integrated by `quadrature.polygon_quad` at 1, 3 or 6
+points per triangle. That is `meq::Coil`'s model.
+
+Measured on the same 18 DIII-D currents:
+
+| | everywhere | off the conductors |
+|---|---|---|
+| filament against MEQ's rectangle — **what the benchmark does today** | 6.081e-03 | 2.315e-04 |
+| **`ShapedCoil` against MEQ's rectangle — the same model both sides** | **6.580e-04** | **6.731e-05** |
+
+**Matching the model is worth 9.2x globally and 3.4x off the conductors**, and
+takes the conductor floor from ABOVE M-111's flat 5.785e-03 to nine times below
+it — which is the difference between a benchmark that cannot see MEQ's
+discretisation and one that can.
+
+**AND THE SHAPED ARM NEEDS NO MEQ CHANGE.** It is a reference regeneration with
+`ShapedCoil` in place of `Coil`, on freegs4e's side, and it can be done before
+any of this plan is built. What is left, 6.580e-04, is the QUADRATURE alone —
+6 points per triangle against MEQ's 24^2 tensor Gauss — and `ShapedCoil` caps
+at 6, so that is the floor of a shaped-against-shaped race rather than something
+to tune away.
+
+**The FILAMENT arm is the one that needs MEQ**, and it falls out of CS-1 for
+free: a filament is the degenerate case of `psi_c`'s quadrature, a single point,
+so `meq::ConductorField` gives MEQ filament conductors as a by-product of being
+built at all. That is an argument for CS-1's ordering rather than an extra
+stage.
+
 ---
 
 ## 0b. THE OBJECTIVE IS ACCELERATION, NOT A CHANGE OF ANSWER
@@ -167,7 +204,8 @@ conductors.
 
 | | |
 |---|---|
-| **CS-0** | §0's two-Green's-function difference. Decides model against regularity, needs no MEQ, and can kill or redirect the plan |
+| **CS-0** | §0's two-Green's-function difference. **DONE** — the global irreducible error IS the conductor model, 1.05x |
+| **CS-0b** | regenerate the references with freegs4e's `ShapedCoil`. **Needs no MEQ change**, worth 9.2x on the conductor floor, and makes the existing race like-for-like. Do this FIRST — it is the cheapest thing on this list and it re-bases every number M-111 reports |
 | **CS-1** | `meq::ConductorField`: `psi_c` and `grad psi_c` by quadrature, against an analytic single-loop check |
 | **CS-2** | the split on a FIXED-boundary case with coils, where nothing else moves |
 | **CS-3** | the Dirichlet datum and the DtN coupling |
