@@ -84,6 +84,42 @@ EXAMPLES = os.path.join(ROOT, "examples")
 VENV = os.path.join(HERE, "venv", "bin", "python")
 
 # reference stem -> MEQ example stem
+# --shaped: RACE THE SAME CONDUCTOR MODEL ON BOTH SIDES.
+#
+# Without it the freegs4e arm is a FILAMENT reference and MEQ's conductors are
+# meshed rectangles carrying a uniform current density, so the two arms are not
+# solving the same problem and part of every accuracy figure is that rather than
+# either solver. tools/freegs4e-benchmark/conductor_model.py measures it on
+# DIII-D with no solver anywhere: 6.081e-03 globally against M-111's own
+# irreducible 5.785e-03, a 1.05x match, and freegs4e's ShapedCoil against MEQ's
+# exact rectangle is 6.580e-04 -- NINE TIMES smaller, and below the error the
+# race is trying to see.
+#
+# BOTH HALVES HAVE TO MOVE TOGETHER. The reference is regenerated with
+# `fgsref.py --shaped`, AND the MEQ config becomes the `-shaped` one, because
+# the guess and the profile tables are derived FROM the reference and a MEQ run
+# built from the filament conversion compared against a shaped reference would
+# be measuring the conversion. MEASUREMENTS.md says so in terms and re-runs
+# make_diverted_case.py from the shaped npz for exactly this reason.
+#
+# IT IS NOT A FREE UPGRADE AND THE TREE ALREADY MEASURED THAT. Of the seven
+# machines run both ways, five behave identically, D TCV goes from FAILED to
+# CONVERGED and G MAST-U goes the other way. That table predates M-109's axis
+# guard and M-111 races C successfully where it reads FAILED, so it wants
+# re-taking -- which is the point of this flag.
+SHAPED = "--shaped" in sys.argv
+if SHAPED:
+    sys.argv.remove("--shaped")
+
+
+def shaped_ref(ref):
+    return ref + "_shaped" if SHAPED else ref
+
+
+def shaped_stem(stem):
+    return stem + "-shaped" if SHAPED else stem
+
+
 CASES = [
     ("A", "A_testtokamak_classic", "machine-a-testtokamak"),
     ("B", "B_testtokamak_peaked_ffdom", "machine-b-ffprime"),
@@ -238,7 +274,8 @@ def run_freegs(ref, nx, scratch):
     if not os.path.exists(npz):
         started = time.perf_counter()
         done = subprocess.run([VENV, os.path.join(HERE, "fgsref.py"),
-                               "--nx=%d" % nx, ref[0]],
+                               "--nx=%d" % nx]
+                              + (["--shaped"] if SHAPED else []) + [ref[0]],
                               capture_output=True, text=True, cwd=HERE,
                               env=env, timeout=14400)
         wall = time.perf_counter() - started
@@ -399,11 +436,18 @@ if __name__ == "__main__":
     scratch = sys.argv[1]
     want = [a.upper() for a in sys.argv[2:]] or [c[0] for c in CASES]
     os.makedirs(scratch, exist_ok=True)
-    print("\n  A RACE, BOTH CODES COLD, %s threads each" % THREADS)
+    print("\n  A RACE, BOTH CODES COLD, %s threads each%s" %
+          (THREADS, ", SHAPED conductors on both sides" if SHAPED
+           else ", filament reference against MEQ's rectangles -- NOT the same "
+                "conductor model, see --shaped"))
     print("  MEQ: PARDISO trace solver and threaded assembly, which are its")
     print("  defaults; its wall includes gmsh, the solve and four output")
     print("  formats. freegs4e's includes its boundary matrix, the Picard")
     print("  loop and its own diagnostics. Neither is a solve time.")
     for tag, ref, stem in CASES:
         if tag in want:
-            sweep(tag, ref, stem, scratch, MEQ_RUNGS, FGS_GRIDS)
+            # BOTH HALVES TOGETHER -- see SHAPED's comment for why a shaped
+            # reference against a filament-derived MEQ config would be measuring
+            # the conversion rather than either solver.
+            sweep(tag, shaped_ref(ref), shaped_stem(stem), scratch,
+                  MEQ_RUNGS, FGS_GRIDS)
