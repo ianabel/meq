@@ -1,11 +1,14 @@
 #include "CriticalPoints.hpp"
+#include "Threading.hpp"
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <exception>
 #include <limits>
 #include <sstream>
 #include <stdexcept>
+#include <vector>
 
 /*
  * The implementation of INVERSION-PLAN.md stage IN-A. CriticalPoints.hpp
@@ -333,6 +336,12 @@ namespace meq
 		// as one that succeeds, so counting only the accepted roots would make a
 		// search that fails everywhere look free. newtonSolves() is what the
 		// seeded entry points are measured against a sweep by.
+		//
+		// ATOMIC, because sweep() calls this from an OpenMP region. A count is
+		// order independent, so the total is exactly the serial one -- which is
+		// why this is an atomic increment rather than a per-thread partial: the
+		// number is the same and there is nothing to reassociate.
+		MEQ_OMP( atomic )
 		++newtonSolveCount;
 
 		mfem::IntegrationPoint ip = seed;
@@ -951,21 +960,113 @@ namespace meq
 			                      + ( hi[ 1 ] - lo[ 1 ] )*( hi[ 1 ] - lo[ 1 ] ) );
 		}
 
-		std::vector<CriticalPoint> points;
-		std::vector<mfem::IntegrationPoint> seeds;
 		double const target = tolerance*fluxScale();
+		int const elementTotal = meshRef.GetNE();
 
-		for ( int element = 0; element < meshRef.GetNE(); ++element )
+		/*
+		 * THE ROOT FINDING IS THREADED AND THE DEDUPLICATION IS NOT, AND THAT
+		 * SPLIT IS THE WHOLE DESIGN.
+		 *
+		 * The merge rule below keeps "the one least outside its own element",
+		 * and the comment on it records why: on the Solov'ev benchmark at
+		 * k = 1, n = 6 the candidate strictly inside its element is 2.7e-3 from
+		 * the true axis and the neighbour sitting 8.5e-2 outside is 6.1e-3, so
+		 * WHICH candidate survives is the answer rather than a detail. The
+		 * serial loop compares each candidate against the list built SO FAR,
+		 * and that list is in element order. Deduplicating inside the parallel
+		 * region would make it thread-arrival order, and the reported axis
+		 * would move at the 1e-3 level with OMP_NUM_THREADS -- quietly, at a
+		 * magnitude that reads as mesh noise.
+		 *
+		 * So each element writes its own candidates, the buffers are walked in
+		 * ELEMENT ORDER afterwards, and the existing merge runs serially over
+		 * that concatenation. It sees exactly the sequence the serial loop saw,
+		 * so the returned vector is identical entry for entry and field for
+		 * field at any thread count.
+		 *
+		 * `reach` travels WITH the candidate: it is the size of the element the
+		 * root was found in, so a candidate compared later must be compared
+		 * against its own element's reach and not the one being merged into.
+		 */
+		struct Candidate
 		{
-			++elementCount;
-			elementSeeds( element, seeds );
-			double const reach = 0.5*meshRef.GetElementSize( element );
+			CriticalPoint point;
+			double reach = 0.0;
+		};
+		std::vector<std::vector<Candidate>> perElement(
+			static_cast<std::size_t>( elementTotal ) );
+		std::exception_ptr failure;
 
-			for ( std::size_t i = 0; i < seeds.size(); ++i )
+		MEQ_OMP( parallel for schedule( dynamic ) )
+		for ( int element = 0; element < elementTotal; ++element )
+		{
+			// Nothing on this path is documented to throw, but the region is
+			// structured and an escaping exception would be undefined
+			// behaviour rather than a diagnosable failure. Caught and rethrown
+			// after the region, as the border assemblers do.
+			try
 			{
-				CriticalPoint point;
-				if ( !rootInElement( element, seeds[ i ], target, point ) )
-					continue;
+				// PER THREAD, not the one vector the serial loop reused across
+				// elements: elementSeeds() clears and refills it, and a shared
+				// std::vector resized from several threads is a reallocation
+				// under another thread's iterator.
+				std::vector<mfem::IntegrationPoint> seeds;
+				elementSeeds( element, seeds );
+
+				/*
+				 * AND `Mesh::GetElementSize( int, int )` IS THE MESH'S SHARED
+				 * SCRATCH BY ANOTHER NAME, WHICH NOTHING HAD NAMED.
+				 *
+				 * It is `GetElementSize( GetElementTransformation( i ), type )`
+				 * -- the one-argument overload, the one CLAUDE.md records as
+				 * "the returned object is owned by the class and is shared" --
+				 * and it then calls SetIntPoint() and Jacobian() on it. Two
+				 * threads asking two elements for their size would each read
+				 * the other's geometry, with no crash and no error. The
+				 * const overload taking a transformation is the reentrant
+				 * route, and filling a local with the same
+				 * GetElementTransformation( i, & ) the shared one uses makes
+				 * the answer bit-identical.
+				 */
+				thread_local mfem::IsoparametricTransformation sizeScratch;
+				meshRef.GetElementTransformation( element, &sizeScratch );
+				double const reach = 0.5*meshRef.GetElementSize( &sizeScratch );
+
+				for ( std::size_t i = 0; i < seeds.size(); ++i )
+				{
+					CriticalPoint point;
+					if ( !rootInElement( element, seeds[ i ], target, point ) )
+						continue;
+					perElement[ static_cast<std::size_t>( element ) ].push_back(
+						Candidate{ point, reach } );
+				}
+			}
+			catch ( ... )
+			{
+				MEQ_OMP( critical( meqCriticalPointSweep ) )
+				{
+					if ( !failure )
+						failure = std::current_exception();
+				}
+			}
+		}
+
+		if ( failure )
+			std::rethrow_exception( failure );
+
+		// Unconditional in the serial loop and unconditional here: every
+		// element is visited whether or not it yields a candidate.
+		elementCount += elementTotal;
+
+		std::vector<CriticalPoint> points;
+
+		for ( int element = 0; element < elementTotal; ++element )
+		{
+			for ( Candidate const &candidate :
+			      perElement[ static_cast<std::size_t>( element ) ] )
+			{
+				CriticalPoint const &point = candidate.point;
+				double const reach = candidate.reach;
 
 				bool duplicate = false;
 				for ( std::size_t j = 0; j < points.size(); ++j )

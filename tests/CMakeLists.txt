@@ -197,6 +197,17 @@ set(MEQ_CONVERGENCE_TESTS
 	# on potential dofs, so it asserts that the constraint cannot respond to the
 	# FLUX -- and a flux perturbation moves the axis while leaving psi_h alone.
 	BorderJacobian
+	# THREADING-PLAN.md items A and B, which are one case each and share a
+	# fixture. Item A compresses the eleven border rows that walked the whole
+	# 109,200-entry vector onto the indices they are non-zero on; item B threads
+	# the five plasma element loops that build them. Both claim EXACTNESS rather
+	# than agreement -- dropping a term that is exactly zero cannot move a sum,
+	# and an L2 scatter is disjoint by construction -- so both assert at
+	# 0.000e+00 rather than at a tolerance. It calls the five assemblers
+	# directly, which is what they were made public for: a race that does not
+	# fire on this mesh at this thread count leaves a whole-solve pin looking
+	# perfect.
+	BorderAssembly
 	# [solver] UpDownSymmetry: the dof-for-dof projection onto fields even in z,
 	# which exists so a DOUBLE NULL need not be told which of its two saddles to
 	# follow. Two cases, and the second is the one MAST-U meets: the projection

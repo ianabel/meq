@@ -115,6 +115,98 @@ namespace meq
 
 
 	/**
+	 * The index of the first entry of @a v that is non-zero and is NOT listed in
+	 * @a support, or -1 when there is none.
+	 *
+	 * @a support must be sorted ascending and free of duplicates; the search is
+	 * a merge of the two, so it costs one pass over @a v.
+	 *
+	 * **THIS IS THE TEETH ON meq::CompressedRows AND IT IS NOT A FORMALITY.**
+	 * Compressing a border row is exact only while the recorded support really
+	 * does cover every non-zero the assembly wrote. A support list that falls
+	 * out of step with the scatter it came from drops real terms from a dot
+	 * product, and the bordered Newton then converges to something: a row that
+	 * is wrong in magnitude does not diverge, it reaches a different
+	 * equilibrium. So the list is checked against the thing it claims to
+	 * describe rather than trusted.
+	 */
+	int firstNonzeroOutside( mfem::Vector const &v,
+	                         std::vector<int> const &support );
+
+
+	/**
+	 * A set of border rows that share one support, stored as that support and
+	 * the values on it.
+	 *
+	 * **THE BORDER ROWS ARE 99% ZERO AND THE DOT PRODUCTS WALKED ALL OF IT.**
+	 * A transmission row is written only on the flux vdofs of the elements
+	 * owning a `Gamma_h` boundary face -- at `k = 2` on the shipped machine
+	 * case, at most 984 entries of about 109,200, a factor of 111 -- and the
+	 * current row only on the potential dofs of elements the plasma fill
+	 * reached. The bordered elimination contracts every row against every
+	 * column, `( N + 4 )^2` times per Newton step, so the leg was streaming
+	 * about 290 MB per call to multiply-add a quarter of a per cent of it.
+	 *
+	 * **AND COMPRESSING IT IS EXACT, WHICH A BLOCKED GEMM WOULD NOT BE.**
+	 * `total += row( i )*v( i )` with `row( i )` exactly `0.0` leaves `total`
+	 * bit-unchanged, so summing the surviving terms in ASCENDING INDEX ORDER
+	 * reproduces the dense loop's every partial sum. That is why the support is
+	 * sorted and why `dot()` walks it in order. The one thing it does not
+	 * reproduce is the SIGN of a total that is exactly zero -- `-0.0 + 0.0` is
+	 * `+0.0` -- and the second is a `v` carrying a NaN or an infinity outside
+	 * the support, which the dense loop would propagate and this does not. Both
+	 * are states in which the solve has already failed.
+	 *
+	 * **THE SUPPORT IS PLAIN HOST MEMORY AND THAT IS DELIBERATE.** `rowDot()`
+	 * carries three `HostRead()` calls and a comment recording that
+	 * `mfem::Array<int>` is device state on the same footing as an
+	 * `mfem::Vector` -- an array handed to a device-aware operation comes back
+	 * device-valid and `operator[]` is as raw as `Vector::operator()`. A
+	 * `std::vector<int>` is never handed to one, so it cannot acquire a device
+	 * copy and needs no sync. The vectors it gathers FROM still do.
+	 */
+	class CompressedRows
+	{
+		public:
+			/// Forget everything.
+			void clear();
+
+			/// Compress @a rows onto @a support, which must be sorted ascending
+			/// and free of duplicates. Every row must be at least as long as the
+			/// largest support index.
+			void compress( std::vector<mfem::Vector> const &rows,
+			               std::vector<int> const &support );
+
+			/// The one-row form.
+			void compress( mfem::Vector const &row,
+			               std::vector<int> const &support );
+
+			/// How many rows.
+			int rowCount() const;
+
+			/// The shared support, ascending.
+			std::vector<int> const &support() const;
+
+			/// @a v restricted to the support, in support order. One gather
+			/// serves every row.
+			void gather( mfem::Vector const &v, std::vector<double> &out ) const;
+
+			/// Row @a row against a vector already restricted by gather().
+			double dot( int row, std::vector<double> const &gathered ) const;
+
+			/// Row @a row against @a v, gathering into @a scratch on the way.
+			double dot( int row, mfem::Vector const &v,
+			            std::vector<double> &scratch ) const;
+
+		private:
+			std::vector<int> supportIndices;
+			/// rowCount() by supportIndices.size(), row major.
+			std::vector<double> rowValues;
+			int rows = 0;
+	};
+
+
+	/**
 	 * A constant HDG stabilisation parameter tau.
 	 *
 	 * Both papers set tau = 1 and note that optimal order needs only tau = O(1).
@@ -2269,8 +2361,20 @@ namespace meq
 			///
 			/// Throws std::logic_error on the fitted path, for the same reason
 			/// exteriorTraceColumns() does.
+			///
+			/// **EVERY MODE IS BUILT IN ONE SWEEP AND SO THEY SHARE ONE
+			/// SUPPORT.** The mode loop is innermost, inside the quadrature
+			/// callback, so all `N` rows are written on exactly the same flux
+			/// vdofs -- those of the elements owning a `Gamma_h` boundary face.
+			/// @a support, when given, receives that index set, sorted ascending
+			/// and free of duplicates, which is what meq::CompressedRows takes.
+			/// It is checked rather than asserted: every non-zero of every
+			/// returned row is verified to lie in it before returning, so a
+			/// support list that has fallen out of step with the scatter is a
+			/// throw and not a quietly shortened dot product.
 			std::vector<mfem::Vector>
-			exteriorTransmissionRows( ExteriorDtN const &exterior ) const;
+			exteriorTransmissionRows( ExteriorDtN const &exterior,
+			                          std::vector<int> *support = nullptr ) const;
 
 			/// Make `psi_bnd` an unknown too, pinned by `psi` at a prescribed
 			/// point — FREE-BOUNDARY-PLAN.md's FB-3.
@@ -4139,6 +4243,26 @@ namespace meq
 			/// the trace and psi_ax solved together. See the .cpp.
 			void solveWithNormalisation();
 
+		public:
+			/**
+			 * THE FIVE BORDER ASSEMBLERS ARE PUBLIC, AND FOR THE REASON
+			 * conductorNormalFlux() AND exteriorTransmissionRows() ARE.
+			 *
+			 * They are element loops over the plasma, and they are threaded --
+			 * so the property that has to be checked is that each of them
+			 * returns the same numbers at one thread and at eight, entry for
+			 * entry, at `0.000e+00`. That is a statement about the assembler and
+			 * not about any equilibrium it happens to be used in, and a
+			 * whole-solve pin can only see it by accident: a race that does not
+			 * fire on this mesh at this thread count leaves the solve looking
+			 * perfect. tests/convergence/BorderAssembly.cpp calls them directly
+			 * for exactly that reason.
+			 *
+			 * Nothing else about them changes: they are const, they take the
+			 * state and write an output, and they are the bordered Jacobian's
+			 * own pieces rather than a diagnostic.
+			 */
+
 			/**
 			 * The bordered Newton's COLUMN, `dR/ds`, assembled rather than
 			 * differenced.
@@ -4174,8 +4298,16 @@ namespace meq
 			/// Its ROW, `d( int F/r )/dx`: the plasma's own `dF/dpsi` integrated
 			/// against the potential shape functions. A covector on the
 			/// potential block and zero everywhere else.
+			///
+			/// @a support, when given, receives the potential dofs the loop
+			/// wrote -- sorted ascending and free of duplicates, which is what
+			/// meq::CompressedRows takes. As in exteriorTransmissionRows() it is
+			/// CHECKED against the assembled row before returning, so a support
+			/// that has fallen out of step with the scatter throws rather than
+			/// silently shortening a dot product.
 			void assembleCurrentRow( mfem::Vector const &state,
-			                         mfem::Vector &out ) const;
+			                         mfem::Vector &out,
+			                         std::vector<int> *support = nullptr ) const;
 
 			/// AND ITS OFF-DIAGONAL CORNER ENTRIES, which are not zero and whose
 			/// absence costs the quadratic rate rather than the answer.
@@ -4186,6 +4318,7 @@ namespace meq
 			                                         double &againstAxis,
 			                                         double &againstBoundary ) const;
 
+		private:
 			/// psi_h recovered from @a trace at normalisation @a psiAxisIn, and
 			/// its largest nodal value -- which is the discrete psi_ax. Writes
 			/// recoveryScratch and leaves the source's normalisation at
