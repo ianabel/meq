@@ -5573,3 +5573,73 @@ be `1/(1 − 0.185 × (1 − 1/6.5)) = 1.19×`; removing `re-assembly` outright 
 `1.06×`. Those are the two largest single levers on this path, and **both are
 larger than anything remaining in `THREADING-PLAN.md`**, which is the honest
 reason that plan closes rather than continues.
+
+### M-139
+
+**CS-0b: MATCHING THE CONDUCTOR MODEL TAKES DIII-D's BENCHMARK FLOOR FROM
+5.785e-03 TO 7.7e-04, AND LANDS IT ON THE QUADRATURE — WHICH IS WHERE
+`COIL-SUBTRACTION-PLAN.md` §0a SAID IT WOULD LAND.** M-111 reads MEQ against
+freegs4e's **filament** DIII-D at `5.785e-03` and records that it **does not
+refine**: 5.785e-03, 5.802e-03, 5.763e-03, 5.803e-03 across a 16× range in dofs.
+§0a measured the two conductor models directly and predicted that matching them
+would leave `6.580e-04`, the quadrature difference alone. This is that
+experiment run end to end.
+
+`race.py --shaped`, `F_diiid_conventional_shaped`, MEQ cold from
+`mkcoldguess.py`, measured against freegs4e's own 257² shaped reference:
+
+| rung | dofs | newton | rel `L2` | ... off the coils | `psi_ax` | X-point |
+|---|---|---|---|---|---|---|
+| k1r0 | 43,632 | **87** | **7.107e-01** | 7.318e-01 | 1.45e-01 | **( 1.0942, 0.1593 )** |
+| k1r1 | 175,563 | 14 | 9.059e-04 | 6.199e-04 | 8.23e-05 | ( 1.2000, **+0.9997** ) |
+| **k2r0** | 87,264 | 2 | **8.484e-04** | 5.273e-04 | **2.18e-06** | ( 1.2004, −0.9996 ) |
+| **k2r1** | 351,126 | 2 | **7.692e-04** | 3.740e-04 | 4.09e-05 | ( 1.2004, −0.9996 ) |
+| **k3r0** | 145,440 | 2 | **7.680e-04** | 3.718e-04 | 6.55e-05 | ( 1.2004, −0.9995 ) |
+| **k3r1** | 585,210 | 2 | **7.750e-04** | 3.867e-04 | 3.12e-05 | ( 1.2004, −0.9996 ) |
+| k2r0a3 | 147,726 | 2 | 7.754e-04 | 3.741e-04 | 4.00e-05 | ( 1.2004, −0.9995 ) |
+| k3r0a3 | 172,590 | 2 | 7.830e-04 | 3.909e-04 | 3.01e-05 | ( 1.2004, −0.9996 ) |
+
+**7.5× BETTER GLOBALLY AND 2.0× OFF THE COILS**, against §0a's predicted 9.2×
+and 3.4× on the model difference itself. The prediction was of the *difference
+between two conductor models*; this is what removing it from a *solve* is worth,
+and the two agreeing to within a factor of 1.2 is the part that says §0a
+measured the right thing.
+
+**AND IT STILL DOES NOT REFINE, WHICH IS THE RESULT RATHER THAN A
+DISAPPOINTMENT.** 8.484e-04 → 7.692e-04 → 7.680e-04 → 7.750e-04 over a **6.7×
+range in dofs** and from `k = 2` to `k = 3`: nine per cent, and not monotone.
+**The floor moved down by 7.5× and it is still not MEQ's discretisation.**
+§0a named what would be left — MEQ integrates its rectangles at 24² tensor
+Gauss and `freegs4e.shaped_coil.ShapedCoil` caps at **6 points per triangle**,
+so the two evaluate the same model to different precision — and predicted
+`6.580e-04`. **Measured, 7.7e-04.** That is agreement to 17% on a number
+predicted before the solve existed.
+
+**THE REFERENCE IS NOT THE LIMITER, WHICH HAD TO BE CHECKED BEFORE ANY OF THE
+ABOVE MEANT ANYTHING.** The 129² grid is a point-for-point subset of the 257²
+one, so the two references difference without interpolating either:
+**rel `L2` 9.864e-05**, rel `L∞` 1.567e-04, `psi_axis` 1.181e-06. An order of
+magnitude below the 7.7e-04 floor. So the floor is a real disagreement between
+the codes and not the reference's own resolution — and a 513² truth, which this
+run did not have, would not move it.
+
+**`k = 1` IS WORSE THAN FAILING NOW, AND THAT IS A CHANGE WORTH NAMING.** M-111
+records `k = 1` **failing** on all three cases. Here both `k = 1` rungs *return
+an answer*: `k1r0` takes **87** Newton steps to a completely different
+equilibrium — X-point at `( 1.0942, 0.1593 )` against the reference's active
+`( 1.1999, −1.0000 )`, `psi_ax` out by 14.5% — and `k1r1` converges to the
+**upper** null, `( 1.2000, +0.9997 )`, which on this nearly up-down symmetric
+machine is very nearly degenerate with the active one and still reads
+9.059e-04. **A rung that converges to the wrong branch is worse than one that
+fails**, and `psi_ax` alone would excuse `k1r1` at 8.23e-05. The X-point column
+is what separates them; M-111's own note about `k3r0` on MAST-U is the same
+trap.
+
+**EVERY OTHER RUNG TAKES TWO NEWTON STEPS AND FINDS THE SAME NULL** to
+`( 1.2004, −0.9996 )` against the reference's `( 1.1999, −1.0000 )`, which is
+4e-04 m in `R` and 4e-04 m in `Z`, and `k2r0` reports `psi_ax` to **2.18e-06**.
+
+**THE TIMING COLUMNS OF THIS RUN ARE NOT MEASUREMENTS AND ARE NOT QUOTED.**
+A peer's build started partway through the ladder. The accuracy columns are
+rates and norms and do not care; the wall clock does, and re-racing DIII-D
+shaped against M-111's filament row wants a quiet machine.

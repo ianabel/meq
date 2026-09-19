@@ -258,10 +258,77 @@ must.
 | | |
 |---|---|
 | **CS-0** | §0's two-Green's-function difference. **DONE** — the global irreducible error IS the conductor model, 1.05x |
-| **CS-0b** | regenerate the references with freegs4e's `ShapedCoil`. **Needs no MEQ change**, worth 9.2x on the conductor floor, and makes the existing race like-for-like. Do this FIRST — it is the cheapest thing on this list and it re-bases every number M-111 reports |
+| **CS-0b** | regenerate the references with freegs4e's `ShapedCoil`. **DONE** → **[M-139](MEASUREMENTS.md#m-139)**: DIII-D's benchmark floor goes **5.785e-03 → 7.7e-04, 7.5×**, and lands on §0a's predicted quadrature residual of 6.580e-04. **It still does not refine**, so the floor is lower and is still not MEQ's discretisation. §6 has what blocked it for a week |
 | **CS-1** | `meq::ConductorField` for FILAMENTS FIRST — one Carlson evaluation per point, no quadrature, and the only conductor MEQ structurally cannot mesh. §4b |
 | **CS-1b** | the same with a quadrature rule around it, which is the rectangle |
 | **CS-2** | the split on a FIXED-boundary case with coils, where nothing else moves |
 | **CS-3** | the Dirichlet datum and the DtN coupling |
 | **CS-4** | every consumer of `psi`, with a test per consumer that the total is read |
 | **CS-5** | re-take M-111 with the conductor models matched |
+
+---
+
+## 6. CS-0b, and what stood between the harness and its first run
+
+**`race.py --shaped` WAS BUILT AND HAD NEVER BEEN RUN, AND IT COULD NOT HAVE
+BEEN.** The flag, the `shaped_ref()`/`shaped_stem()` pair, the seven
+`*_shaped.npz` references and the seven `machine-*-shaped.toml` configurations
+all existed. What did not exist was the **initial guess** each of those
+configurations names, and the failure is a long way from its cause.
+
+**`.gitignore` ATE IT.** Lines 60–61 ignore `*.mesh` and `*.gf` across the whole
+tree — correct, since both are ordinarily run output. `make_all.sh` writes each
+machine's `<stem>-guess.mesh` and `<stem>-guess.gf` **beside** the TOML that
+names them, from `mkcoldguess.py`, so the configuration and its guess are one
+artefact; but only the TOML survives a commit. The **filament** set is tracked
+because somebody `git add -f`'d it. The **shaped** set, generated later, was
+written by the generator, swallowed by the ignore rule, and never committed.
+
+**So the symptom appeared eight rungs later in a different tool**: every MEQ
+rung of `race.py --shaped` reporting `FAILED`, with race.py's own failure filter
+printing nothing because it greps for `MEQ:` lines containing *not converge* or
+*error* and this was neither. Run by hand, the message is
+
+    MFEM abort: Mesh file not found: examples/machine-f-diiid-shaped-guess.mesh
+
+naming a file whose generator reports writing it. **A generated input that
+`.gitignore` eats does not fail at generation**, and nothing between the two
+points at the ignore rule.
+
+**THE MEASUREMENT IT UNBLOCKED IS [M-139](MEASUREMENTS.md#m-139), AND §0a's
+PREDICTION HELD.** Matching the model is worth **7.5×** on DIII-D's global
+floor — 5.785e-03 to 7.7e-04 — and 2.0× off the coils. **And the error still
+does not refine**: 8.484e-04 to 7.750e-04 over a 6.7× range in dofs and from
+`k = 2` to `k = 3`, nine per cent and not monotone. §0a said what would be left
+and put a number on it *before* the solve existed — the quadrature alone, MEQ's
+24² tensor Gauss against `ShapedCoil`'s 6 points per triangle, at **6.580e-04**
+— and the measured floor is **7.7e-04**. The reference is not the limiter: its
+own 129²-against-257² self-difference is **9.864e-05**, an order below.
+
+**SO CS-0b DOES NOT MAKE MEQ'S DISCRETISATION VISIBLE, AND THAT IS THE FINDING.**
+It was expected to: §0a's closing sentence calls the shaped arm *"the difference
+between a benchmark that cannot see MEQ's discretisation and one that can"*.
+It lowers the floor by 7.5× and the floor is still a conductor artefact — a
+**quadrature** one now rather than a **model** one, and one that cannot be tuned
+away from either side, since `ShapedCoil` caps at 6 points. **A benchmark
+against this reference can resolve MEQ no better than about 7e-04 whatever
+either code does**, which is the honest statement of what this harness is for
+and is worth knowing before CS-5 is planned around it.
+
+**Fixed** by `!examples/machine-*-guess.mesh` and `!examples/machine-*-guess.gf`,
+which covers both conductor models and both the existing and any future machine,
+beside the exception `examples/limited-tokamak-guess.*` already had for the same
+reason. The seven shaped guesses are now tracked.
+
+**AND THE TRACKED SHAPED CONFIGURATIONS WERE STALE, THOUGH ONLY IN PROSE.**
+Regenerating them changes nothing but a comment block — every number, including
+`PsiAxis = 2.888899229e-01`, is reproduced to the last digit, which is the check
+that the generator is deterministic. What the comment says, though, is worth
+having: the tracked copy still described the guess as *"a workaround, not a
+design"* and credited it to `mkexactguess.py`, and the generator now says
+plainly that `mkcoldguess.py` builds it, that `mkexactguess.py` is *"the OTHER
+one, which sums Green's functions over the reference's own converged Jtor"*, and
+that **a run seeded from `mkexactguess` has the answer in the starting position
+and is a different benchmark**. The filament set still carries the old comment
+and wants the same regeneration, which is deferred only because
+[M-137](MEASUREMENTS.md#m-137) was just measured on one of those files.

@@ -69,6 +69,21 @@ docs/doctrees/
 # needs freegs4e, scipy and a Picard solve to recreate.
 !examples/limited-tokamak-guess.mesh
 !examples/limited-tokamak-guess.gf
+# AND THE SEVEN BENCHMARK MACHINES' GUESSES, BOTH CONDUCTOR MODELS, for the
+# same reason and one more. They are part of the problem statement -- a cold
+# start on a free-boundary machine case wanders and does not converge -- and
+# make_all.sh writes them beside the TOML that names them, so the two are one
+# artefact and only one of them was surviving a commit.
+#
+# THE FAILURE THIS COSTS IS FAR FROM ITS CAUSE, WHICH IS WHY IT IS WORTH THE
+# COMMENT. The filament set is tracked because somebody `add -f`'d it; the
+# shaped set, generated later, was written by the generator, swallowed here,
+# and never committed -- and the symptom was `race.py --shaped` aborting eight
+# rungs later with an MFEM "Mesh file not found", naming a file the generator
+# reports writing. A generated input that .gitignore eats does not fail at
+# generation.
+!examples/machine-*-guess.mesh
+!examples/machine-*-guess.gf
 # A MESH THAT IS A CONFIGURATION'S OWN BUILD PRODUCT, AND THE STAMP THAT SAYS
 # WHICH GEOMETRY MADE IT. `[mesh.generate]` names a generator and meq-run runs
 # it, writing the .msh the file's [mesh] File points at and a <mesh>.meq-mesh

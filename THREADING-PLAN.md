@@ -878,8 +878,29 @@ MEQ installs exactly one of it, as the object handed to `EnableHybridization()`,
 and the reconstruction evaluates it **per face inside the element loop**. Two
 threads in different elements would overwrite each other's `face_shape`.
 
-**SO THIS IS THE SECOND UNGUARDED INTEGRATOR IN MEQ'S INSTALL AND IT IS THE ONE
-THE RECONSTRUCTION REACHES.** The other, `mfem::HDGExtensionIntegrator`, stays
+**REPORTED AND GUARDED UPSTREAM, ON THE TRUNK, SO ALL FIVE BRANCHES TAKE IT** —
+and **a clean MFEM rebuild is owed here**, because the class layout moves in a
+`MFEM_THREAD_SAFE` build even though it does not in a build without it.
+
+**ONE CORRECTION TO THE REPORT MEQ SENT, AND IT IS THE TENSE.** It said the
+class is reached by "the loop you are threading". **There is no such loop yet**:
+`darcyform.cpp`'s three `#pragma omp parallel` regions are all assembly, and
+both reconstruction entry points are serial today. MEQ inferred "they are
+threading it" from being told the work was in progress and wrote the inference
+as an observation. So the audit above is a **latent** hazard closed before it
+could go live, not a race running now — and upstream's own reply says that is
+the better order.
+
+**AND WHAT UPSTREAM TOOK AS THE REAL DEFECT WAS NOT THE CLASS BUT THE
+CONTRACT.** `SetIntegratorsThreadSafe()` made a promise whose scope was written
+down nowhere, so threading one more loop silently widens what a caller who set
+it months earlier has undertaken, with no version to check and no abort to
+notice. Its doxygen now states the scope: the promise is about **every
+integrator installed on the hybridization**, not about whichever loops happen to
+be threaded when the flag is set. **That is the half of this addendum worth
+keeping** — the class was one class, and the contract is every future loop.
+
+**THE SECOND UNGUARDED INTEGRATOR IN MEQ'S INSTALL IS NOT REACHED HERE.** The other, `mfem::HDGExtensionIntegrator`, stays
 latent here and for a reason worth keeping precise: it sits on the flux mass's
 **boundary faces**, and the reconstruction takes the flux mass from
 `M_u->GetDBFI()` — domain integrators only. **That is a property of one line of
@@ -892,11 +913,12 @@ a thing to rely on.
 
 ## What MEQ owes, in order
 
-1. **TELL UPSTREAM ABOUT `NormalTraceJumpIntegrator` NOW**, while they are
-   writing it, rather than after. It is four `Vector`s and two `DenseMatrix`es
-   and it is in `fem/bilininteg.hpp`, not in `fem/darcy/` — the same shape as the
-   eight classes they already put behind that switch, and outside the directory
-   they are working in, which is exactly how it gets missed.
+1. ~~**TELL UPSTREAM ABOUT `NormalTraceJumpIntegrator`**~~ — **DONE, and
+   guarded.** It was four `Vector`s and two `DenseMatrix`es in
+   `fem/bilininteg.hpp`, not in `fem/darcy/` — the same shape as the eight
+   classes already behind that switch, and outside the directory the work is in,
+   which is exactly how it got missed. **Sending it mid-work rather than after
+   is what this item was for**, and it cost one file.
 2. **Re-take the promise audit against the new loop when it lands.** The comment
    in `buildForms()` enumerates what the promise covers; the reconstruction's
    seven handles above are not in it, and the comment has to grow them or the

@@ -302,19 +302,17 @@ Radius = 2.45
 CentreZ = 0.0
 Modes = 10
 
-# A WORKAROUND, NOT A DESIGN.  MEQ does not converge on this case from a
-# cold start, so a reconstructed field is handed to it -- and BUILDING A
-# GOOD GUESS IS MEQ'S WORK, NOT THE USER'S.  freegsnke solves its MAST-U
-# from its own default initialisation with nothing supplied.
+# NOT A NICETY.  A cold start on a free-boundary machine case wanders
+# and does not converge; the guess is part of the problem statement.
 #
-# WHAT IS legitimately the user's is WHICH equilibrium: M-26 measures
-# three converged solutions of one discrete problem 9.4% apart, so a free
-# boundary has to be told which branch to find.  MEQ already takes that
-# as [boundary.xpoint], [source] PsiAxis and PlasmaCurrent.  A .gf built
-# by a helper script is a different thing and is this solver owing the
-# user a feature.
-# tools/freegs4e-benchmark/mkexactguess.py builds it by summing the
-# reference's own Green's functions over MEQ's half-disc.
+# IT IS COLD.  tools/freegs4e-benchmark/mkcoldguess.py builds it from
+# the MACHINE -- the conductors and their currents, the target plasma
+# current, and the shape the operator asked for -- and from nothing
+# that was solved for.  mkexactguess.py is the OTHER one, which sums
+# Green's functions over the reference's own converged Jtor; this
+# comment named it for a while and was wrong, which matters: a run
+# seeded from mkexactguess has the answer in the starting position,
+# and is a different benchmark.
 [initialguess]
 Type = "gridfunction"
 File = "examples/machine-d-tcv-shaped-guess.gf"
