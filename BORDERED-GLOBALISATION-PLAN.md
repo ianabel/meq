@@ -276,6 +276,11 @@ fallback. It damps **every** unknown together — the fields, the trace, `ψ_ax`
 two coordinates — which is the half of a line search a trace-only operator
 cannot express.
 
+**AND IT IS THE CALLER OF THE BUDGET'S LARGEST MEQ-OWNED SERIAL LEG.** Each of
+those twelve trials re-assembles a right-hand side that is exactly linear in the
+exterior coefficients it is varying, at 5.6% of a DIII-D run. That is §12, and
+anything that changes the trial loop has to know the cost is there.
+
 So the question is not "should the bordered path have a globalisation"; it has
 one. The question is what to do when a *step-length* rule is not enough, which
 is the same question `CLAUDE_HDGGS.md`, *Why it fails, measured — and why a line
@@ -1041,3 +1046,66 @@ below appears anywhere in this tree and none is invented here.**
     If the inputs are the problem, a globalisation is being asked to find an
     equilibrium that the conductors and the current target do not jointly
     describe.
+
+---
+
+## 12. The line search pays a full re-assembly to change ten numbers
+
+**THIS IS A COST ITEM ON A PATH THAT ALREADY WORKS, AND IT IS HERE BECAUSE §2.1's
+ARMIJO BACKTRACK IS THE CALLER.** It closes none of the six failures and must not
+be ranked as though it might. It is in this plan rather than in
+`THREADING-PLAN.md` because it is a restructure of the line search and not a
+loop anybody can thread — the leg reads **1.08 cores**, and the part of it that
+dominates is MFEM's.
+
+**THE LEG IS `re-assembly` AND IT IS NOW THE LARGEST SINGLE-THREADED ITEM MEQ
+OWNS.** → **[M-138](MEASUREMENTS.md#m-138)**: `0.191 s of a 3.427 s DIII-D run,
+5.6%`, at 1.08 cores, over 16 calls. Its share has grown without the leg moving
+— it was 4.2% of a 4.753 s run when it was first sized, and the run has since
+got shorter under it. **A fixed-cost serial leg gets more expensive every time
+somebody threads something else**, which is the general form and is worth
+holding on to: the same 0.19 s will be 7% of the run if `Reconstruct()` is ever
+threaded.
+
+**WHERE THE TIME GOES.** The leg is `prepare( bool )` and the `reprepare` lambda
+that wraps it. On the NPC path `rhsSource` is null — `usesNonlinearForms()` is
+true, so the domain load is the non-linear form's and not a `LinearForm` — and
+what is left is the `Γ_h` flux load over 82 boundary faces and
+`DarcyForm::FormLinearSystem()`. The second is essentially all of it, it is
+MFEM's, and MEQ cannot thread it.
+
+**WHAT MEQ CAN DO IS CALL IT LESS OFTEN, AND THE ARITHMETIC FOR THAT IS ALREADY
+IN THE TREE.** `reprepare()` runs **once per line-search trial** and once per
+fallback step, for one reason: the exterior coefficients `a` change, and they
+reach the residual as a boundary load on `Γ_h`. But MEQ already knows — and
+`assembleExteriorColumns()` depends on knowing — that **that load is exactly
+linear in `a`**, and it already computes the per-mode load vectors `L_m`. So a
+trial's right-hand side is
+
+    b₀ + Σ_m a_m L_m
+
+a linear combination of vectors MEQ has in hand, rather than an assembly. At up
+to twelve Armijo trials per step this is the only place in the budget where MEQ
+pays a full assembly to change ten numbers.
+
+**TWO THINGS STOP IT BEING A ONE-LINE CHANGE AND EACH NEEDS ITS OWN
+MEASUREMENT.** `FormLinearSystem()` also performs the essential-trace
+elimination, and `reprepare()` rebuilds the `mfem::DarcyNPCOperator`. The
+elimination is linear in the right-hand side, so in principle it composes;
+whether MFEM's entry points expose that is a question for
+`darcyhybridization.cpp` and not for this plan. The operator rebuild is the
+harder half and nobody has looked at whether it is necessary per trial.
+
+**THE CEILING IS `1.06×` AND THAT IS THE WHOLE OF IT** — removing the leg
+outright, which no version of this does, since the accepted step still needs one
+real assembly. A realistic target is the eleven rejected trials, so call it
+`1.05×`. **It is worth having and it is not worth doing before anything in §7's
+ranking**, every item of which changes which problems converge.
+
+**AND THERE IS A CORRECTNESS REASON TO WANT IT THAT HAS NOTHING TO DO WITH
+SPEED.** Each re-assembly is a fresh floating-point evaluation of a load that is
+mathematically linear in `a`, so two trials at the same `a` are not guaranteed
+the same bits, and the Armijo test compares residuals across trials. Forming the
+combination instead makes the trial residual an exact function of `a`. Nobody
+has seen this bite; it is the kind of thing that would present as a line search
+that occasionally takes one extra trial and never as a wrong answer.

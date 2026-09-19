@@ -1,28 +1,57 @@
 # THREADING-PLAN.md
 
 **WHAT MEQ'S OWN SERIAL CODE COSTS, AND WHICH PARTS OF IT ARE WORTH
-PARALLELISING.** The measurement this plans against is
-**[M-126](MEASUREMENTS.md#m-126)** and the whole-run leg budget `meq --profile`
-prints: on `examples/machine-f-diiid.toml` at `OMP = MKL = 8` with
-`OMP_WAIT_POLICY=passive`, roughly 30% of the run threads and 70% does not. Of
-the serial 70%, `NPCReduce`/`NPCRecover` (26.8%) and `DarcyForm::Reconstruct()`
-(13.0%) are **MFEM's**, filed as
-`../mfem-hdg-dev/doc/HDG-NPC-TRAVERSAL-FROM-MEQ.md`, and are out of scope here.
+PARALLELISING. THE PLAN IS COMPLETE: A, B, C AND D ARE BUILT AND THE PAYOFF IS
+MEASURED AT `1.16×`** → **[M-137](MEASUREMENTS.md#m-137)**, against the `1.14×`
+this file predicted.
 
-What is left is **about 25% of the run, and MEQ owns all of it**.
+**THE BUDGET BELOW IS THE ONE THE WORK WAS SIZED AGAINST AND IT IS NO LONGER THE
+BUDGET.** Read **[M-138](MEASUREMENTS.md#m-138)** for the current one; what
+follows is kept because every estimate in this file is against it and a reader
+checking the arithmetic needs the denominator it used. On
+`examples/machine-f-diiid.toml` at `OMP = MKL = 8` with `OMP_WAIT_POLICY=passive`
+it read: roughly **30% of the run threads and 70% does not**, and of the serial
+70%, `NPCReduce`/`NPCRecover` (26.8%) and `DarcyForm::Reconstruct()` (13.0%) are
+**MFEM's** and out of scope here, leaving **about 25% of the run that MEQ owns**.
 
-**THE HEADLINE IS THAT TWO OF THE SIX CANDIDATES ARE NOT THREADING PROBLEMS.**
-The largest single item in this plan — `border dense solve`, and the
-transmission slice of `border assembly` with it — is a **sparsity** problem:
-the exterior transmission rows carry at most 984 nonzeros in a vector of about
-109,000, and every dot product against them walks the zeros. Fixing that is
-worth more than eight cores would be, and it is **exact** where threading a sum
-is not. The second, `other (remainder)`, is not addressable by any loop MEQ can
-write; the measured lever there is the build (M-77).
+**WHAT M-138 SAYS INSTEAD, AND EVERY NUMBER IN IT HAS MOVED THE SAME WAY.** The
+run is 3.427 s where it was 4.753 s, and **about 59% of it now threads against
+41% that does not** — the inverse of the split above. Three things did that and
+only one is this plan's: upstream threaded the NPC traversal
+([M-135](MEASUREMENTS.md#m-135)) and the hybridized assembly loops, and items A,
+B and C took `constraint location` and `border assembly`.
+
+| | sized against | M-138 | |
+|---|---|---|---|
+| threads | ~30% | **59.1%** | inverted |
+| `NPCReduce`/`NPCRecover` | 26.8%, 1.00 cores | **14.9%, 3.41 cores** | upstream threaded it |
+| `Reconstruct()` (`postProcess`) | 13.0%, 1.00 cores | **18.5%, 1.00 cores** | unmoved, and now the largest serial item of any owner |
+| `border dense solve` | 3.9% | **0.1%** | item A |
+| `constraint location` | 3.9%, 1.01 cores | **1.7%, 4.04 cores** | items B and C |
+| `re-assembly` | 4.2% | **5.6%** | untouched; the share grew because the run shrank |
+
+**THE TWO CONCLUSIONS A READER SHOULD TAKE FROM THE NEW BUDGET RATHER THAN THE
+OLD ONE.** The largest single-threaded item in a MEQ run is
+`DarcyForm::Reconstruct()` at 18.5% and it is **MFEM's**; the largest MEQ owns is
+`re-assembly` at 5.6%, which is item G and has moved to
+`BORDERED-GLOBALISATION-PLAN.md` §12. **Both are larger than anything left in
+this plan**, which is why it closes rather than continues.
+
+**THE HEADLINE OF THE WORK ITSELF IS THAT TWO OF THE SIX CANDIDATES WERE NOT
+THREADING PROBLEMS.** The largest single item in this plan — `border dense
+solve`, and the transmission slice of `border assembly` with it — is a
+**sparsity** problem: the exterior transmission rows carry at most 984 nonzeros
+in a vector of about 109,000, and every dot product against them walks the
+zeros. Fixing that is worth more than eight cores would be, and it is **exact**
+where threading a sum is not. **Measured, it is the item that beat its
+estimate**: sized at 4.4% + 1.8% and delivering 8.2%, with the `border dense
+solve` leg going 41× and off the budget entirely. The second, `other
+(remainder)`, is not addressable by any loop MEQ can write; the measured lever
+there is the build (M-77).
 
 ---
 
-## STATUS: A, B, C AND D ARE BUILT. WHAT IS LEFT IS THE CLOCK
+## STATUS: A, B, C AND D ARE BUILT AND THE CLOCK IS TAKEN. THIS PLAN IS CLOSED
 
 Landed as `0108f49`, merged as `a226cd3`. Each item below carries its own
 marker; this table is what a reader needs before any of the estimates.
@@ -34,14 +63,32 @@ marker; this table is what a reader needs before any of the estimates.
 | **C** `CriticalPointFinder::sweep()` | **DONE.** Per-element candidate buffers and a serial dedup over an element-ordered concatenation, with `theAxisSweepDoesNotDependOnTheThreadCount` in `tests/convergence/CriticalPointConvergence.cpp` |
 | **D** the unnamed 3.2% | **DONE.** Two legs, `of which driver prepare` and `of which sweep overhead`, printed by `--profile` |
 | **E**, **F** | not to be done. Unchanged |
-| **G** re-assembly | still a restructure of the line search rather than a threading item, and still wants its own plan |
+| **G** re-assembly | **MOVED**, to `BORDERED-GLOBALISATION-PLAN.md` §12, which is where the Armijo backtrack that calls it sixteen times a run is described. It is a restructure of the line search and not a threading item — the leg reads 1.08 cores and the half that dominates is MFEM's — and it is now the **largest single-threaded leg MEQ owns**, 5.6% of the run in [M-138](MEASUREMENTS.md#m-138) |
+| **the payoff** | **TAKEN. `1.16×` at eight threads, against the `1.14×` predicted** → **[M-137](MEASUREMENTS.md#m-137)**, six interleaved pairs on a quiet machine, both arms against the shipping `libmfem.a` so MEQ's own source is the only variable. `1.03×` at one thread, which is item A alone, the two threaded items having nothing to give there |
 
-**THE CROSS-CUTTING ACCEPTANCE IS MET AND IT IS THE ONE WITH TEETH.**
-`machine-f-diiid` solved by the pre-threading baseline at `OMP=1`, by the merged
-tree at `OMP=1` and by the merged tree at `OMP=8` gives **one md5 over all
-three** — every field, including all ten Gegenbauer modes. `OMP_NUM_THREADS`
-does not change a printed digit, which is what every item's design was chosen
-for.
+**THE CROSS-CUTTING ACCEPTANCE IS MET, AND THE PAYOFF RUN SHARPENED IT INTO TWO
+STATEMENTS WHERE THIS FILE HAD ONE.** The rule is *`OMP_NUM_THREADS` must not
+change a printed digit*, and it holds: with **`MKL_NUM_THREADS` held at 1**,
+`machine-f-diiid` at `OMP=1` and at `OMP=8` gives byte-identical printed output.
+That is what every item's design was chosen for and it is intact.
+
+**WHAT IS NOT BIT-EXACT IS THE PRE-THREADING TREE AGAINST THIS ONE, AND THAT IS
+ITEM B BY CONSTRUCTION.** At `OMP = MKL = 1` the two arms' `ψ` differ by
+`2.6e-15` absolute against a `max |ψ|` of `3.76e-01` — **6.9e-15 relative** —
+and exactly one printed line moves with it, the iteration-2 Newton residual at
+`2.99e-12`, itself at the round-off floor. Item B replaced a running
+accumulation with per-element partial sums, which is a different grouping of the
+same contributions **at any thread count**, so this is not a threading artefact
+and no thread count makes it go away. Every physical quantity — `psi_ax`,
+`psi_bnd`, the X-point, the constraint, all ten Gegenbauer modes — is identical
+to every printed digit in all eighteen runs. → **[M-137](MEASUREMENTS.md#m-137)**.
+
+**AND MOVING BOTH THREAD AXES TOGETHER BLAMES THE WRONG ONE.** The first reading
+of this moved `OMP` and `MKL` together, saw the residual line change, and would
+have recorded it against OpenMP; holding `MKL_NUM_THREADS` at 1 and moving
+`OMP_NUM_THREADS` alone shows it is MKL's blocked BLAS-3 reassociating, which
+`CLAUDE_HDGGS.md` already records at 1.3e-15 and which the registered tests pin
+at `MKL_NUM_THREADS=1`. **A one-axis claim needs a one-axis experiment.**
 
 **AND THE `find_package( OpenMP )` THE CROSS-CUTTING SECTION ASKS FOR IS IN
 `CMakeLists.txt:433`**, with `OpenMP::OpenMP_CXX` linked `PUBLIC` onto
@@ -58,18 +105,35 @@ and the print moved under its true parent it reads **0.037 s, 1.00 cores, three
 calls, 28% of `border assembly` and about 1% of the run**, so item A's second
 half is closed too, and on the same ground. §0 has both.
 
-**WHAT IS STILL NOT DONE IS THE PAYOFF.** The A+B+C figure against the
-pre-threading baseline — predicted `1.14×`, or `1.106×` counting only the
-measured parts — needs a MEQ binary from before item A, which this tree does not
-have lying about the way it had a pre-upgrade MFEM. **Until it is taken those
-estimates stay estimates**; the standing rule is five quiet minutes before a
-timed run, and a figure taken under another agent's build is not a measurement
-about this work. That rule earned itself again on the day §0 was taken: the
-first pair was measured while a peer's build ran, and the peer then reported
-that the job they believed they had killed had been running throughout — they
-had killed the process group of a PID `setsid` had reparented, so an empty group
-died and the launcher reported success. Both arms were binned. **`pkill` by PID
-is the same class of instrument error this file's own §0 is about.**
+**THE PAYOFF IS TAKEN AND IT IS `1.16×`** → **[M-137](MEASUREMENTS.md#m-137)**,
+against the `1.14×` predicted below and clear of the `1.106×` floor that counted
+only the measured parts. Six interleaved pairs at `OMP = MKL = 8` under
+`OMP_WAIT_POLICY=passive`, pair ratios 1.133 to 1.200.
+
+**HOW THE "BEFORE" ARM WAS OBTAINED IS THE PART WORTH KEEPING, BECAUSE THE
+OBVIOUS ROUTE ABORTS.** A MEQ binary from before item A is `60d8505`, and that
+tree built against today's `libmfem.a` **exits 2** — the library now refuses
+`AssemblyMode::Threaded` on any problem whose threaded element loop would
+evaluate an integrator, and the one line that answers it,
+`SetIntegratorsThreadSafe()`, postdates the baseline by two months. So the arm
+is `60d8505` plus that single line cherry-picked from `c3af7e5`, which is a
+promise the library reads and not arithmetic MEQ executes. **The alternative was
+to build both arms against the preserved `../mfem/install-before-npcthread`**,
+which needs no patch — and it was declined, because a payoff quoted for a
+library MEQ no longer ships is a measurement about a tree nobody runs.
+
+**THE STANDING RULE IS FIVE QUIET MINUTES BEFORE A TIMED RUN**, and the harness
+that took this one checks the machine itself rather than accepting a claim. That
+rule earned itself twice. On the day §0 was taken the first pair was measured
+while a peer's build ran, and the peer then reported that the job they believed
+they had killed had been running throughout — they had killed the process group
+of a PID `setsid` had reparented, so an empty group died and the launcher
+reported success. Both arms were binned. **`pkill` by PID is the same class of
+instrument error this file's own §0 is about.** And the check has its own trap:
+`pgrep -f` matches the checking shell's own command line, while `pgrep -x`
+silently matches nothing for a binary whose name exceeds fifteen characters, so
+the harness uses `-x` only on short compiler names and takes the load average as
+the backstop.
 
 ## 0. Read the sub-slices before doing anything
 
@@ -84,8 +148,9 @@ OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 OMP_WAIT_POLICY=passive \
   build/meq --profile examples/machine-f-diiid.toml
 ```
 
-Where this plan says *unverified*, it means that line was not read. Read it
-before sizing item A's second half or item B's second half.
+Where this plan says *unverified*, it means that line was not read. **Both have
+since been read** — the two bullets below are the readings — so nothing in this
+file is still waiting on them.
 
 **THE RUN IS TAKEN AND ONE OF THE TWO LINES CANNOT EVER SAY ANYTHING.**
 `machine-f-diiid`, `OMP = MKL = 8`, `OMP_WAIT_POLICY=passive`:
@@ -224,22 +289,41 @@ traversal at 1.24× whole-run from 26.8% at 4.5×; the same method gives
 `1/(1 − 0.268×(1 − 1/4.5)) = 1.26×`. Agreement to the second digit, so the
 method below is not inventing its own units.
 
-| # | item | share | after | saves | run speedup | risk |
-|---|---|---|---|---|---|---|
-| **A** | sparse border rows | 4.4% + ~1.8%* | ~0.2% | ~6.1% | **1.065×** | low |
-| **B** | thread the four plasma element loops | 4.4% + ~0.9%* | ~0.8% | ~4.7% | **1.049×** | medium |
-| **C** | thread `CriticalPointFinder::sweep()` | 1.7% | 0.3% | ~1.5% | **1.015×** | medium |
-| **D** | instrument `outside solve()`'s unnamed 3.2% | 3.2% | — | unknown | — | none |
-| **E** | the output writers | 3.8% | — | — | **do not do** | — |
-| **F** | `other (remainder)` | 2.7% | — | — | **do not do** | — |
-| **G** | `re-assembly` | 4.1% | — | — | **not a threading item** | — |
+| # | item | share | after | saves | run speedup | risk | **measured** |
+|---|---|---|---|---|---|---|---|
+| **A** | sparse border rows | 4.4% + ~1.8%* | ~0.2% | ~6.1% | **1.065×** | low | `border dense solve` **41×**, 4.9% saved on that leg alone |
+| **B** | thread the four plasma element loops | 4.4% + ~0.9%* | ~0.8% | ~4.7% | **1.049×** | medium | B+C **3.2%** on `constraint location`, under it |
+| **C** | thread `CriticalPointFinder::sweep()` | 1.7% | 0.3% | ~1.5% | **1.015×** | medium | 7.79 cores on the sweep |
+| **D** | instrument `outside solve()`'s unnamed 3.2% | 3.2% | — | unknown | — | none | two legs, both printed |
+| **E** | the output writers | 3.8% | — | — | **do not do** | — | not done |
+| **F** | `other (remainder)` | 2.7% | — | — | **do not do** | — | not done |
+| **G** | `re-assembly` | 4.1% | — | — | **not a threading item** | — | **moved**, and now 5.6% |
 
 \* the starred halves are the `transmission` and `I_p` sub-slices of
-`constraint location`, unverified — see §0.
+`constraint location`, both since verified — see §0.
 
 **A + B + C together remove about 12.3% of the run, which is `1.14×`.** Taking
 only the parts that are measured rather than estimated — 4.3% + 3.8% + 1.5% =
 9.6% — it is **`1.106×`**. Both figures are on this case, at eight cores.
+
+**MEASURED: `1.16×`** → **[M-137](MEASUREMENTS.md#m-137)**, so the estimate was
+low by two points and the floor was cleared. **The interesting part is that the
+total is right while the split is not.** B and C were sized at 6.2% together and
+deliver **3.2%**; A's own leg, `border dense solve`, went **41×** rather than to
+the "~0.2%" predicted, because a dot product that skips 108,000 zeros does not
+get cheaper — it stops existing.
+
+**AND A CANNOT BE GIVEN ITS FULL CREDIT FROM THIS RUN, WHICH IS A PROPERTY OF
+THE INSTRUMENT RATHER THAN OF THE ITEM.** The `border assembly` `LegTimer` is
+installed at six sites, `exteriorTransmissionRows()` (item A) and three
+`assembleCurrent*()` loops (item B) among them, so that leg's 0.247 → 0.111 s
+belongs to both and its 2.60 cores is B's threading rather than A's sparsity.
+**A leg boundary drawn for reading a budget is not a boundary that attributes a
+change**, and separating these two needs a third binary carrying one item.
+
+**The transferable part**: an estimate built from a leg budget gets the
+denominator right and the per-item factors wrong — the same shape as M-135's
+prediction landing on the share while its leg factor was out by 1.7×.
 
 **Whether the set is worth starting**: it is worth about half of what the NPC
 traversal alone is worth (1.24×), and about the same as `Reconstruct()` (1.10×),
@@ -302,10 +386,16 @@ over data that is 99.1% zero. The change is a representation:
   change.
 
 **4. The payoff.** `border dense solve` 4.4% → about 0.06%, saving **4.3%**.
-The `transmission` sub-slice of `constraint location` — 10 dots of length
-`n` per constraint evaluation, at roughly 150 evaluations over the run —
-estimated at half that leg, so a further **~1.8%**, *unverified*. Together
-**~6.1%**, whole-run **1.065×**. Measured alone: **1.045×**.
+The `transmission` sub-slice — 10 dots of length `n` per constraint evaluation,
+at roughly 150 evaluations over the run — estimated at half that leg, so a
+further **~1.8%**. Together **~6.1%**, whole-run **1.065×**. Measured alone:
+**1.045×**.
+
+**§0 SINCE READ IT AND IT IS A SUB-SLICE OF `border assembly`, NOT OF
+`constraint location`** — 0.037 s, 1.00 cores, 28% of its parent and about 1% of
+the run, so the estimate above is high by roughly a factor of two. **The leg it
+does own outright went 41×**: `border dense solve` is 0.205 → 0.005 s
+→ **[M-137](MEASUREMENTS.md#m-137)**.
 
 **5. The cost and the risk.** One new small struct and three call sites, all in
 `GradShafranov.cpp`, no new dependency and no new environment sensitivity. The
@@ -398,8 +488,13 @@ and `assemblePlasmaCurrent()` `:5157`, which is the `I_p` sub-slice of
   sibling require `0.000e+00`, and that standard applies to MEQ's own loops too.
 
 **4. The payoff.** `border assembly` 4.4% → 0.68% at 6.5 cores, saving **3.8%**.
-The `I_p` sub-slice of `constraint location` a further **~0.9%**, *unverified*.
-Together **~4.7%**, whole-run **1.049×**; measured alone **1.040×**.
+The `I_p` sub-slice of `constraint location` a further **~0.9%**. Together
+**~4.7%**, whole-run **1.049×**; measured alone **1.040×**.
+
+**§0 SINCE READ `I_p` AND IT CLOSES THIS HALF BY MEASUREMENT RATHER THAN BY
+WORK**: 0.016 s, 0.5% of the run, already at 5.14 cores, so there was no
+headroom in it. **B and C together deliver 3.2%** against the 6.2% the two were
+sized at → **[M-137](MEASUREMENTS.md#m-137)**.
 
 Efficiency is likely a little under the residual leg's 6.5: these loops run over
 the plasma subset rather than the whole mesh, and `elementInPlasma` makes the
@@ -554,10 +649,14 @@ Writing the three files concurrently would take 0.20 s to 0.13 s, about 1.0%.
 MFEM's stream I/O is not documented reentrant and the three writers read the
 same `GridFunction`s; 1% is not worth finding out. **Do not do.**
 
-The 13.0% in this phase that *is* compute is `postProcess()` —
+The part of this phase that *is* compute is `postProcess()` —
 `DarcyForm::Reconstruct()`, four integrators re-assembled at the enriched order
-per element. It is MFEM's, it is sized at about 1.10× whole-run in M-126, and it
-is out of scope here.
+per element. It is MFEM's and out of scope here, and **it is the one number in
+this section the new budget moves**: 13.0% when this was written, **18.5% at
+1.00 cores** in [M-138](MEASUREMENTS.md#m-138), worth `1.19×` if it were
+threaded perfectly. The writers around it are unchanged — `output` less
+`postProcess` is 0.198 s, **5.8%**, and still serialization rather than
+arithmetic — so **the decline stands and the thing next to it got bigger.**
 
 ---
 
@@ -586,36 +685,29 @@ temporaries underneath them.
 **Do not thread this leg. Take the no-CUDA install instead, and say in the
 release notes that a CPU production build is a separate install.**
 
+**RE-CHECKED AGAINST [M-138](MEASUREMENTS.md#m-138) AND UNCHANGED**: the leg is
+0.116 s, **3.4%**, at 1.06 cores. M-77's 7% is still larger than every item this
+plan built except A, and it is still one CMake variable.
+
 ---
 
-### G. `re-assembly`, 4.1% — a structural item, not a threading one
+### G. `re-assembly` — **MOVED to `BORDERED-GLOBALISATION-PLAN.md` §12**
 
-The leg is `prepare( bool )` (`:4179`) and the `reprepare` lambda that wraps it
-(`:5865`). On the NPC path `rhsSource` is null — `usesNonlinearForms()` is true,
-so the domain load is the non-linear form's and not a `LinearForm` — and what is
-left is the Γ_h flux load over 82 boundary faces (`:4309`) and
-`DarcyForm::FormLinearSystem()` (`:4377`). The second is essentially all of it,
-it is MFEM's, it reads 1.05 cores, and MEQ cannot thread it.
+**It is not a threading item and it never was.** The leg reads **1.08 cores**
+and the half that dominates it is `DarcyForm::FormLinearSystem()`, which is
+MFEM's; what MEQ can do about it is call it less often, which is a restructure
+of the Armijo backtrack that calls it. That backtrack is described in
+`BORDERED-GLOBALISATION-PLAN.md` §2.1, so the item now lives beside its caller
+as **§12** of that file, with the mechanism — the `Γ_h` load being exactly
+linear in the exterior coefficients, so a trial right-hand side is
+`b₀ + Σ a_m L_m` over vectors `assembleExteriorColumns()` already computes — and
+the two things that stop it being a one-line change.
 
-**What MEQ can do is call it less often.** `reprepare()` runs **once per
-line-search trial** (`:8455`, `:8633`) and once per fallback step, for one
-reason: the exterior coefficients `a` change and they reach the residual as a
-boundary load on Γ_h. But MEQ already knows — and `assembleExteriorColumns()`
-at `:5592` depends on knowing — that **that load is exactly linear in `a`**, and
-it already computes the per-mode load vectors `L_m`. So the trial's right-hand
-side is `b₀ + Σ a_m L_m`, a linear combination of vectors MEQ has in hand,
-rather than a re-assembly.
-
-Two things stop this being a one-line change and both need their own
-measurement: `FormLinearSystem()` also performs the essential-trace elimination,
-and `reprepare()` rebuilds the `mfem::DarcyNPCOperator`. The elimination is
-linear in the right-hand side, so in principle it composes; whether MFEM's entry
-points expose that is a question for `darcyhybridization.cpp` and not for this
-plan.
-
-**Named here rather than planned**, because it is worth up to 4% and is the only
-item in the budget where MEQ is paying a full assembly to change ten numbers. It
-belongs in `BORDERED-GLOBALISATION-PLAN.md` or a successor, not here.
+**It is worth more now than when it was sized, and the leg did not move.**
+**[M-138](MEASUREMENTS.md#m-138)** reads it at **0.191 s, 5.6%, 1.08 cores**
+against the 4.2% it was sized at — the share grew because the run got shorter
+around it. It is the **largest single-threaded leg MEQ owns**, and the ceiling
+on it is `1.06×`.
 
 ---
 
@@ -676,7 +768,9 @@ order.
 1. **§0** — one `--profile` run, to read the `transmission` and `I_p` sub-slices.
    Two of the numbers above depend on them and they cost one command.
 2. **A** — the sparse border rows. Biggest, exact, no threading hazard at all,
-   one translation unit. 1.045× measured, ~1.065× including the unverified half.
+   one translation unit. 1.045× measured, ~1.065× including the second half.
+   **Done, and it is the item that beat its estimate**: `border dense solve`
+   went 41× and off the budget.
 3. **B** — the four plasma element loops. 1.049×. Second because the scratch and
    the exception path are real hazards that this project has already been bitten
    by once each, and because A's payoff is larger and its risk is lower.
@@ -684,17 +778,19 @@ order.
    case as well as the diagnostic.
 5. **D** — two timers on `outside solve()`, at any point. It is not work, it is
    an instrument, and 3.2% of the run currently has no name.
-6. **THE PAYOFF ITSELF**, against the pre-threading baseline binary, as
-   interleaved pairs at `OMP = MKL = 8` under `OMP_WAIT_POLICY=passive`. The
-   prediction is `1.14×`, or `1.106×` counting only the measured parts, and
-   until a quiet machine produces it this plan has delivered code and not a
-   number.
+6. **THE PAYOFF ITSELF — DONE, `1.16×`** → **[M-137](MEASUREMENTS.md#m-137)**.
+   Interleaved pairs at `OMP = MKL = 8` under `OMP_WAIT_POLICY=passive`, against
+   a `60d8505` binary carrying only the one-line thread-safety promise it needs
+   to start at all, both arms on the shipping `libmfem.a`. The prediction was
+   `1.14×`, or `1.106×` counting only the measured parts; the measurement clears
+   both. **So this plan has delivered code and a number, and it is closed.**
 
 **Not to be done**: E, the output writers (1% at best, for I/O concurrency
 nobody has established is safe); F, `other` (threading it is not available to
 MEQ, and the 7% that *is* available is a build variable); and the two Γ sweeps
 in `border assembly`, `exteriorTransmissionRows()` and
 `exteriorConductorMoments()`, which run three times each over 82 boundary faces
-and are already below the noise. G is real and worth up to 4% but is a
-restructure of the line search, not a threading item, and belongs in its own
-plan.
+and are already below the noise. G has **moved** to
+`BORDERED-GLOBALISATION-PLAN.md` §12: real, worth `1.06×`, a restructure of the
+line search rather than a threading item, and now the largest single-threaded
+leg MEQ owns.

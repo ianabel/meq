@@ -223,11 +223,20 @@ band `O(h)` wide that is inside the plasma and outside the mesh.
   sizes · what the two fixes are worth · what does not move
 
   **THE BIGGEST ITEM IN THAT PHASE IS NOT GRID-SHAPED AT ALL**, and anyone timing
-  the output will meet it first: `postProcess()` is **0.62 s, 67% of the output at
-  the default grid and 8% of the whole DIII-D run**, and it does not move with the
-  grid because it has nothing to do with it. It is `DarcyForm::Reconstruct()`
+  the output will meet it first: `postProcess()` is **0.632 s, 76% of the output
+  at the default grid and 18.5% of the whole DIII-D run at 1.00 cores**
+  → **[M-138](MEASUREMENTS.md#m-138)**, and it does not move with the grid
+  because it has nothing to do with it. It is `DarcyForm::Reconstruct()`
   re-assembling four integrators at the enriched order per element, which is the
   price of reporting `ψ*` rather than `ψ_h`.
+
+  **IT IS NOW THE LARGEST SINGLE-THREADED ITEM IN A MEQ RUN, AND ITS SHARE GREW
+  WITHOUT THE LEG MOVING.** It read 0.61 s when it was 8% of the run; it reads
+  0.63 s now that it is 18.5%, because the NPC traversal and MEQ's own serial
+  legs were threaded around it. **A fixed-cost serial leg gets more expensive
+  every time somebody threads something else**, which is the general form and is
+  why this is the next thing worth asking upstream for rather than a footnote to
+  the output stage. Threading it perfectly would be `1.19×` on the whole run.
 * **The `.vtu` bends the mesh onto `Γ`** — a curvature is installed and each
   boundary face is moved out. Since the VTK is already Lagrange cells this
   needed **nothing further from the format**; the two features composed.
@@ -1471,6 +1480,26 @@ a share measured on yours does.
 OpenMP region and the colouring being paid for and unusable. Upstream's own
 table has the same sign at the same size. A serial deployment of MEQ is
 very slightly worse off for this change.
+
+**MEQ'S OWN HALF OF THE THREADING IS ALSO MEASURED NOW, AND `THREADING-PLAN.md`
+IS CLOSED.** Items A, B and C — the sparse border rows and the five plasma
+element loops and the critical-point sweep — are worth **`1.16×` on the whole
+DIII-D run at eight threads**, against the `1.14×` that plan predicted, and
+`1.03×` at one thread where only the sparsity item has anything to give
+→ **[M-137](MEASUREMENTS.md#m-137)**. The `before` arm is the pre-threading
+commit carrying **one** cherry-picked line, `SetIntegratorsThreadSafe()`,
+without which it exits 2 against today's library — both arms on the shipping
+`libmfem.a`, so MEQ's own source is the only variable.
+
+**AND THE BUDGET EVERYTHING WAS SIZED AGAINST HAS INVERTED** →
+**[M-138](MEASUREMENTS.md#m-138)**. About **59% of a MEQ run now threads**
+against the ~30% M-126 measured, the run is 3.427 s where it was 4.753 s, and
+**the largest single-threaded item is `DarcyForm::Reconstruct()` at 18.5%** —
+MFEM's, unmoved by any of this, and now ahead of the NPC traversal it used to
+sit behind. The largest MEQ owns is `re-assembly` at 5.6%, which is the line
+search re-assembling a right-hand side that is linear in the exterior
+coefficients, and it lives in `BORDERED-GLOBALISATION-PLAN.md` §12. **Size
+anything on this path against M-138 and not against M-126.**
 
 Everything else MEQ has sent is closed. **A CLOSED REPORT NEEDS NO ENTRY HERE**:
 what it changed is in the code with a test on it, or it is a measurement under an

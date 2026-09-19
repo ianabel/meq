@@ -5402,3 +5402,174 @@ other route — which is the distinction `AssemblyMode` and `TraceSolver` are he
 to under *the two performance keys* in `CLAUDE.md`. What has changed is the
 **reason**: M-101 said the key was a trade, and it is now simply a small gain
 that MEQ does not take.
+
+### M-137
+
+**THE A+B+C PAYOFF: `1.16×` ON THE WHOLE DIII-D RUN AT EIGHT THREADS, AGAINST A
+PREDICTION OF `1.14×`.** `THREADING-PLAN.md`'s items A, B and C were built,
+merged and asserted bit-exact, and the one thing the plan never had was the
+clock. This is it.
+
+**BOTH ARMS ARE BUILT AGAINST THE SHIPPING `libmfem.a`, WHICH IS THE DESIGN
+DECISION THAT MAKES THIS A MEASUREMENT ABOUT MEQ.** `before` is `60d8505` — the
+commit before `0108f49` landed A, B, C and D — plus **one line** cherry-picked
+from `c3af7e5`, `SetIntegratorsThreadSafe()`. Without that line the baseline
+exits 2 against today's library and there is no arm at all; it is a promise the
+library reads before deciding whether a threaded loop is permitted, and it
+changes no arithmetic. `after` is the working tree. `libmfem.a` is static and
+both were linked after the install, so **MEQ's own source is the only
+variable** — the mirror image of [M-135](MEASUREMENTS.md#m-135), where the
+library was the only variable.
+
+`machine-f-diiid.toml`, `OMP_WAIT_POLICY=passive`, quiet machine verified by the
+harness itself rather than on a claim, interleaved `before, after, before,
+after`:
+
+| | pair ratios | median | best-of | arm medians |
+|---|---|---|---|---|
+| **`OMP = MKL = 8`**, six pairs | 1.133 1.136 1.143 1.170 1.196 1.200 | **1.156×** | 1.134× | 1.174× |
+| **`OMP = MKL = 1`**, three pairs | 1.020 1.032 1.033 | **1.032×** | 1.023× | 1.028× |
+
+The `before` arm's own spread is 1.065× and the `after` arm's is 1.032×, which
+is why the pair ratio rather than a ratio of medians is the statistic quoted:
+both arms drift together across a session and an interleaved pair cancels it.
+**`1.16×` against the plan's `1.14×`, and the `1.106×` floor it quoted for the
+measured parts alone is cleared.**
+
+**WHERE IT CAME FROM, LEG BY LEG, WHICH IS THE PART AN ESTIMATE CANNOT GIVE.**
+One pair, both arms, same run:
+
+| leg | before | cores | after | cores | | item |
+|---|---|---|---|---|---|---|
+| **border dense solve** | 0.205 | 1.00 | **0.005** | 1.00 | **41×** | A |
+| **border assembly** | 0.247 | 1.00 | **0.111** | 2.60 | **2.2×** | A **and** B |
+| **constraint location** | 0.190 | 1.01 | **0.057** | 4.04 | **3.3×** | B, C |
+| — of which cold full sweep | 0.076 | 1.00 | 0.014 | **7.79** | 5.4× | C |
+| — of which `I_p` | 0.069 | 1.03 | 0.017 | 5.30 | 4.1× | B |
+| — of which axis | 0.083 | 1.00 | 0.022 | 5.52 | 3.8× | C |
+| other (remainder) | 0.154 | 1.00 | 0.116 | 1.06 | 1.3× | — |
+| outside solve() | 0.317 | 1.14 | 0.239 | 1.67 | 1.3× | D instruments it |
+| residual | 0.332 | 6.76 | 0.318 | 6.75 | flat | — |
+| gradient | 0.278 | 4.66 | 0.270 | 4.75 | flat | — |
+| trace factorisation | 0.256 | 3.38 | 0.238 | 3.31 | flat | — |
+| trace backsolve | 0.554 | 3.17 | 0.523 | 3.22 | flat | — |
+| NPC reduce+recover | 0.548 | 3.39 | 0.510 | 3.41 | flat | — |
+| postProcess | 0.628 | 1.00 | 0.632 | 1.00 | flat | — |
+| **wall** | **4.114** | 2.49 | **3.427** | 2.84 | **1.20×** | |
+
+**WHAT CAN AND CANNOT BE ATTRIBUTED TO ONE ITEM, AND THE LEG BOUNDARIES DECIDE
+IT.** `border dense solve` is **item A alone**: 0.205 → 0.005 s, **0.200 s and
+4.9% of the before run**, from 5.0% of the budget to 0.1%. That is the sparsity
+argument landing exactly — 984 nonzeros in a vector of about 109,000, and the
+dot products no longer walk the zeros. A dot product that skips 108,000 zeros
+does not get cheaper, it stops existing, and "~0.2%" was the wrong shape of
+estimate for it. `constraint location` is **B and C**: 0.133 s, 3.2%, against
+the 6.2% the two were sized at together.
+
+**`border assembly` CANNOT BE SPLIT BY THIS RUN AND MUST NOT BE READ AS A's.**
+That `LegTimer` is installed at six sites — `exteriorTransmissionRows()`, which
+is item A's, and `assembleCurrentColumn()`, `assembleCurrentNormalisationCorner()`
+and `assembleCurrentRow()`, which are item B's threaded plasma loops — so its
+0.247 → 0.111 s carries both, and its **2.60 cores is B**, not a sparsity item
+acquiring parallelism. Separating them needs a third binary with one item in it.
+
+**THE LEGS NO ITEM TOUCHED ARE THE CONTROL.** residual, gradient, trace
+factorisation, trace backsolve and NPC reduce+recover are flat to 2–6%, one
+pair's noise, and `postProcess` is flat to **0.6%** — which is what says the
+difference is where the items are and not spread over the run.
+
+**THE `cores` COLUMN IS THE INDEPENDENT WITNESS.** Every leg an item threaded
+reads 1.00 in the `before` arm and 4.04 to 7.79 in the `after` one, and every
+leg no item touched reads the same in both. `cold full sweep` at **7.79 cores of
+8** is item C's critical-point sweep doing what it was written to do.
+
+**THE ANSWER SURVIVES IT, AND THE EXACTNESS CLAIM NEEDS ONE CORRECTION.**
+`psi_ax = 3.759851e-01` in all eighteen runs, with `psi_bnd`, the X-point
+`( 1.200929, −0.999491 )` and the constraint `−6.466e-12` identical throughout.
+The `psi.gf` md5 is constant within each arm at each thread count, so the runs
+are deterministic. **It is not constant ACROSS the arms**: at `OMP = MKL = 1`,
+`ψ` moves by `2.6e-15` absolute against a `max |ψ|` of `3.76e-01`, i.e. **6.9e-15
+relative**, and exactly one printed line moves with it — the iteration-2 Newton
+residual, `2.992906e-12` against `2.992877e-12`, itself at the round-off floor.
+Item B's per-element partial sums are a different grouping of the same
+quadrature contributions at any thread count, which is what that is.
+
+**BUT `OMP_NUM_THREADS` ITSELF STILL CHANGES NO PRINTED DIGIT, AND THE
+SEPARATION MATTERS.** Moving the thread count from 1 to 8 with **`MKL_NUM_THREADS`
+held at 1** gives byte-identical printed output; moving both together moves that
+same residual line. So the cross-cutting rule the plan states is intact and the
+mover is MKL's blocked BLAS-3 reassociating, which `CLAUDE_HDGGS.md` already
+records at 1.3e-15 and which the registered tests pin at `MKL_NUM_THREADS=1`.
+**A one-axis claim needs a one-axis experiment**: the first reading moved both
+and would have blamed OpenMP for MKL's arithmetic.
+
+**AND THE LIBRARY CHANGE IS INVISIBLE HERE, WHICH STRENGTHENS M-135.** The
+preserved pre-upgrade binary and today's give the same printed output to every
+digit at both thread counts, including that residual line — so M-135's
+"`psi_ax` did not move" is the weaker statement, and the true one is that the
+whole printed run did not move.
+
+### M-138
+
+**THE WHOLE-RUN BUDGET ON THE SHIPPING LIBRARY, AND IT IS NOT THE ONE
+`THREADING-PLAN.md` WAS WRITTEN AGAINST.** Same run as
+[M-137](MEASUREMENTS.md#m-137)'s `after` arm — `machine-f-diiid.toml`,
+`OMP = MKL = 8`, `OMP_WAIT_POLICY=passive`, quiet machine. This supersedes
+[M-126](MEASUREMENTS.md#m-126)'s budget as the sizing table for anything on this
+path; M-126 stays as the measurement that found the flat NPC leg.
+
+```
+MEQ: where the run went -- wall 3.427 s, cpu 9.745 s, 2.84 cores on average
+                              wall s   share   cores      calls
+  setup                       0.020    0.6%    1.00          1
+  solve                       2.577   75.2%    3.45          3
+  output                      0.830   24.2%    1.00          1
+    of which postProcess      0.632   18.5%    1.00          1
+  residual                    0.318    9.3%    6.75         28
+  gradient                    0.270    7.9%    4.75         12
+    of which ComputeH         0.160    4.7%       -         12
+  trace factorisation         0.238    6.9%    3.31         12
+  trace backsolve             0.523   15.2%    3.22        168
+  NPC reduce+recover          0.510   14.9%    3.41         12
+  constraint location         0.057    1.7%    4.04        253
+    of which axis             0.022    0.6%    5.52         19
+      cold full sweep         0.014    0.4%    7.79          1
+    of which X-point          0.017    0.5%    1.00         16
+    of which I_p              0.017    0.5%    5.30         28
+  border assembly             0.111    3.2%    2.60         66
+    of which transmission     0.033    1.0%    1.00          3
+  border dense solve          0.005    0.1%    1.00         12
+  re-assembly                 0.191    5.6%    1.08         16
+  other (remainder)           0.116    3.4%    1.06          0
+  outside solve()             0.239    7.0%    1.67          3
+    of which makeSolver       0.055    1.6%    1.00          1
+    of which axis checks      0.020    0.6%    6.91          1
+    of which driver prepare   0.159    4.7%    1.26          1
+```
+
+**THE 30/70 SPLIT IS INVERTED: ABOUT 59% OF THE RUN NOW THREADS AND 41% DOES
+NOT.** The seven legs reading 2.60 cores or better — residual, gradient, trace
+factorisation, trace backsolve, NPC reduce+recover, constraint location, border
+assembly — are **2.027 s of 3.427, 59.1%**. Three things moved it there and only
+one of them is MEQ's: upstream threaded the NPC traversal
+([M-135](MEASUREMENTS.md#m-135)) and the hybridized assembly loops, and MEQ's
+own A, B and C took `constraint location` and `border assembly`
+([M-137](MEASUREMENTS.md#m-137)).
+
+**THE LARGEST SINGLE-THREADED ITEM IS `Reconstruct()` AND IT IS MFEM'S.**
+`postProcess` is **0.632 s, 18.5%, at 1.00 cores** — four integrators
+re-assembled at the enriched order per element, the price of reporting `ψ*`
+rather than `ψ_h`. It did not move under any of this and it is now larger than
+the NPC traversal it used to sit behind.
+
+**THE LARGEST SINGLE-THREADED ITEM MEQ OWNS IS `re-assembly`, AT 5.6%.** That is
+`prepare()` under the line search, and it is the subject of
+`BORDERED-GLOBALISATION-PLAN.md` §12. Everything else MEQ owns and does not
+thread is under 3.5%: `other (remainder)` 3.4%, the non-`postProcess` part of
+`output` 5.8%, `makeSolver` 1.6%.
+
+**WHAT AN AMDAHL SUM SAYS IS LEFT.** Threading `Reconstruct()` perfectly would
+be `1/(1 − 0.185 × (1 − 1/6.5)) = 1.19×`; removing `re-assembly` outright is
+`1.06×`. Those are the two largest single levers on this path, and **both are
+larger than anything remaining in `THREADING-PLAN.md`**, which is the honest
+reason that plan closes rather than continues.
