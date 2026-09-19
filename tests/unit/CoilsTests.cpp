@@ -1167,3 +1167,122 @@ BOOST_AUTO_TEST_CASE( the_exterior_sets_clearance_is_to_the_nearest_point )
 	BOOST_CHECK_THROW( outside.filament( 0 ), std::out_of_range );
 	BOOST_CHECK_THROW( ring.coil( 0 ), std::out_of_range );
 }
+
+/*
+ * THE CONDUCTOR FIELD IS Delta*-HARMONIC AWAY FROM ITS CONDUCTORS, AND THAT IS
+ * THE WHOLE FOUNDATION OF THE SUBTRACTION PATH.
+ *
+ * COIL-SUBTRACTION-PLAN.md solves for a REMAINDER: `psi = psi_c + psi_p`, with
+ * `psi_c` the conductors' analytic field and `psi_p` what MEQ discretises. That
+ * is only a reformulation of the same problem if
+ *
+ *     Delta*( psi_c ) = 0   everywhere the conductors are not,
+ *
+ * because then `Delta*( psi_p ) = -mu0 r J_plasma` with the conductor term gone
+ * from the right-hand side entirely. If it did not hold, the remainder would
+ * carry a source nobody wrote down and the scheme would converge to the wrong
+ * machine.
+ *
+ * **IT IS ASSERTED HERE RATHER THAN ASSUMED, because nothing else in the tree
+ * checks it.** `filamentPsi()` is verified against an analytic fixture and
+ * Ampere's law, and `ExteriorCoilSet::psi()` against the sum of its members --
+ * both of which would pass on a field that satisfied some OTHER equation. This
+ * is the one property the subtraction needs and it is a different statement.
+ *
+ * WHY A FILAMENT IS THE RIGHT TEST CASE AND NOT A RECTANGLE. A filament is the
+ * conductor MEQ structurally cannot mesh -- a point source has no
+ * finite-element representation as a current density -- so it is the case the
+ * subtraction exists for, and it is also the harder test: the field is
+ * logarithmically singular at the ring, so a scheme that only worked far away
+ * would show up here.
+ *
+ * Delta* psi = r d/dr( ( 1/r ) dpsi/dr ) + d2psi/dz2, by central differences on
+ * the analytic field. The step is chosen relative to the distance to the
+ * nearest conductor, so the truncation is uniform across the probes rather than
+ * tightest where the field is flattest.
+ */
+BOOST_AUTO_TEST_CASE( the_conductor_field_is_delta_star_harmonic_off_the_conductors )
+{
+	meq::ExteriorCoilSet set;
+	// Two filaments of opposite sign, so a field that happened to be harmonic
+	// for one by symmetry is not trivially so for the pair.
+	set.add( meq::CurrentFilament( 1.40, 0.90, 3.0e5 ) );
+	set.add( meq::CurrentFilament( 0.75, -1.15, -1.7e5 ) );
+
+	auto deltaStar = [ & ]( double r, double z, double h )
+	{
+		// r d/dr( ( 1/r ) dpsi/dr ) expanded as psi_rr - psi_r/r, which avoids
+		// differencing a quotient and is the form the solver's own operator is
+		// written in.
+		double const pr = ( set.psi( r + h, z ) - set.psi( r - h, z ) )/( 2.0*h );
+		double const prr = ( set.psi( r + h, z ) - 2.0*set.psi( r, z )
+		                     + set.psi( r - h, z ) )/( h*h );
+		double const pzz = ( set.psi( r, z + h ) - 2.0*set.psi( r, z )
+		                     + set.psi( r, z - h ) )/( h*h );
+		return prr - pr/r + pzz;
+	};
+
+	/*
+	 * THE STEP IS REFINED AND THE RATE ASSERTED, NOT A TOLERANCE.
+	 *
+	 * THE FIRST VERSION OF THIS CASE ASSERTED 1e-06 AND FAILED AT 3.7e-03 --
+	 * and the bar was wrong, not the field. A central second difference at step
+	 * h carries O( h^2 ) truncation, so a residual scaled by the field's own
+	 * curvature sits at about ( h/L )^2 with L the field's scale length; at
+	 * h = 0.02*gap on a scale length of 0.5 that is 1.6e-03, which is what was
+	 * printed. Asserting 1e-06 was asserting the instrument.
+	 *
+	 * A RATE SEPARATES THE TWO CLEANLY where no tolerance can. Truncation falls
+	 * by four when the step halves; a field satisfying some OTHER equation
+	 * leaves a residual that does not move. That is the same distinction this
+	 * tree drew between a derivative and a jump in BorderJacobian.cpp, and it
+	 * is drawn the same way.
+	 */
+	std::printf( "\n  Delta* OF THE CONDUCTOR FIELD, REFINED\n" );
+	std::printf( "    %8s %8s %12s %12s %12s %8s\n",
+	             "r", "z", "h", "h/2", "h/4", "rate" );
+
+	double worstRate = 99.0;
+	for ( double const r : { 0.45, 0.90, 1.10, 1.75, 2.30 } )
+		for ( double const z : { -0.60, 0.0, 0.35, 1.50 } )
+		{
+			double const gap = std::min(
+				std::hypot( r - 1.40, z - 0.90 ),
+				std::hypot( r - 0.75, z + 1.15 ) );
+			double const h = 0.02*gap;
+			double const a = std::abs( deltaStar( r, z, h ) );
+			double const b = std::abs( deltaStar( r, z, h/2.0 ) );
+			double const c = std::abs( deltaStar( r, z, h/4.0 ) );
+
+			// The rate over the WHOLE range rather than one pair, for the
+			// reason ExtensionConvergence reads its rate across a sequence:
+			// one pair of a noisy quantity is not a rate.
+			double const rate = ( a > 0.0 && c > 0.0 )
+			                    ? std::log( a/c )/std::log( 4.0 ) : 0.0;
+			worstRate = std::min( worstRate, rate );
+			std::printf( "    %8.3f %8.3f %12.3e %12.3e %12.3e %8.2f\n",
+			             r, z, a, b, c, rate );
+		}
+	std::fflush( stdout );
+
+	/*
+	 * 1.5 RATHER THAN 2.0, because at h/4 the round-off floor of a second
+	 * difference -- O( eps/h^2 ) -- is starting to bite on the probes nearest
+	 * the rings, which flattens the last pair. What the bar rules out is a
+	 * residual that does not fall at all, which is what a non-harmonic field
+	 * gives and which reads as a rate near zero.
+	 */
+	BOOST_TEST( worstRate > 1.5,
+	            "the Delta* residual of the conductor field does not fall with "
+	            "the step -- worst rate " << worstRate << " against the 2.0 a "
+	            "truncation error gives. A residual that does not refine away "
+	            "is a field satisfying a DIFFERENT equation, and the "
+	            "subtraction path rests on this one." );
+
+	// AND THE AXIS, EXACTLY. Gamma is a semicircle whose ends sit on r = 0, so
+	// psi_c must vanish there BIT exactly or the subtracted Dirichlet datum
+	// acquires a spurious value at the two points the free-boundary problem is
+	// most sensitive to.
+	for ( double const z : { -2.0, -0.5, 0.0, 0.5, 2.0 } )
+		BOOST_TEST( set.psi( 0.0, z ) == 0.0 );
+}
