@@ -100,17 +100,38 @@ nothing there needs a non-linear solve and nothing there needs the resolution
 the plasma does — it needs only to carry a harmonic extension. MEQ already
 exploits this OUTSIDE `Gamma`, which is FB-5's exterior DtN coupling.
 
-**The two ideas compound, and that is the real acceleration argument.**
-`Gamma` currently has to sit outside every conductor, because the conductors are
-meshed: `examples/mastu-nke.toml` needs a disc of radius **3.4** for a machine
-whose plasma reaches 1.8. Take the conductors out of the mesh and `Gamma` can
-move inward to just outside the plasma's reach — a half-disc of radius 2.1
-instead of 3.4 is **2.6× less area** before a single element is saved on the
-coils themselves or on the 10× grading around them.
+**AND THE "SHRINK GAMMA" VERSION OF THAT ARGUMENT IS WRONG. THIS SECTION SAID
+2.6x AND THE GEOMETRY SAYS OTHERWISE.**
 
-So the ordering of the wins is the opposite of what §2 first said: the element
-count is the point, and it comes from moving `Gamma` in rather than from
-deleting 1024 coil triangles.
+What it claimed: `Gamma` sits at 3.4 in `examples/mastu-nke.toml` only because
+the conductors are meshed, so take them out and it moves to about 2.1 — 2.6x
+less area. **Both halves are false**, measured off the config's own 23 blocks:
+
+* `Gamma` must CONTAIN THE PLASMA, and MAST-U's limiter reaches `R = 1.80`,
+  `|Z| = 1.51`, i.e. **radius 2.35**. 2.1 was never available at any conductor
+  model.
+* and MEQ's EXISTING exterior machinery — `ExteriorCoilSet`,
+  `setExteriorConductors()`, which already takes a `meq::CurrentFilament` and
+  already computes its field by Carlson's elliptic integrals — requires a
+  conductor to CLEAR `Gamma`. At `Gamma = 2.4`, **2 of 23 conductors do.** The
+  Solenoid is at 0.189 and PX at 1.05: a tokamak's coils hug the vessel and the
+  plasma fills the vessel, so they interleave in radius rather than nesting.
+
+| `Gamma` | conductors outside it |
+|---|---|
+| 2.0 (too small for the plasma) | 6 of 23 |
+| **2.4 (the smallest that contains the plasma)** | **2 of 23** |
+| 2.8 | 0 of 23 |
+
+**So the free route does not exist and the honest win is smaller.** `Gamma` goes
+3.4 -> about 2.5, which is **1.85x in area**, not 2.6x — and getting even that
+requires the INTERIOR subtraction, because at any `Gamma` containing the plasma
+almost every conductor is inside it. `setExteriorConductors()` handles two of
+MAST-U's twenty-three and is not the answer.
+
+**What survives of §0c**: the vacuum is still linear and the conductors still
+need not be resolved by the mesh. What does not survive is the idea that MEQ's
+existing exterior expansion already does it.
 
 **What still has to be meshed**: the plasma AND the vacuum between its moving
 edge and `Gamma`, because the free boundary moves during the solve and a DtN map
@@ -153,9 +174,9 @@ its cost is amortised over every iteration of every support sweep.
 
 ## 2. What it buys, in the order the evidence supports
 
-**(a) THE DOMAIN SHRINKS, which is the acceleration.** See §0c: `Gamma` is at
-radius 3.4 only because the conductors are meshed, and can go to about 2.1 once
-they are not — 2.6× less area. On top of that, **1024 of 9361 triangles, 10.9%,
+**(a) THE DOMAIN SHRINKS, but by 1.85x and not 2.6x.** See §0c for the
+correction and the geometry behind it: `Gamma` goes 3.4 -> about 2.5, capped by
+the plasma's own 2.35 rather than by the conductors. On top of that, **1024 of 9361 triangles, 10.9%,
 carry a coil attribute** on `examples/mastu-nke.msh`, and `CoilSize = 0.03`
 against `Size = 0.30` forces a 10× graded refinement around each of them. The
 two together are the case for the plan.
@@ -200,13 +221,46 @@ needed to test it. Nor does it touch anything in M-115, M-117 or M-119 — the
 constraint discontinuities and the cold failures are about the border, not the
 conductors.
 
+## 4b. FILAMENTS FIRST, AND THE REASON IS NOT ONLY SPEED
+
+Ian: *"we should definitely implement a filament model in MEQ as it may be
+faster ( then solve for psi - psi_filaments, as that's nonsingular ), and an
+error of 1e-2 may be acceptable ( to some people )"*.
+
+**A FILAMENT CANNOT BE A DOMAIN SOURCE AT ALL, so filament support and the
+subtraction are ONE piece of work rather than two.** A point source has no
+finite-element representation as a current density; `psi` near it is
+logarithmic. The only way MEQ can carry a filament is to subtract its known
+field and solve for a remainder — which is precisely this plan. That is an
+argument for building it, not a caveat.
+
+**And the remainder is nonsingular, which is the whole trick.** `psi_c` carries
+the log; `psi - psi_c` satisfies `Delta*( psi - psi_c ) = -mu0 r J_plasma`, whose
+right-hand side is bounded and supported on the plasma alone.
+
+**Cheaper than the rectangle, too.** `psi_c` for a filament is ONE Carlson
+evaluation per point per conductor — `meq::Coil`'s own machinery, which
+`Coils.hpp` records agreeing to 7.0e-13 — against a tensor quadrature for a
+rectangle. So the filament case is both the easiest to build and the fastest to
+evaluate, and the rectangle is the same code with a quadrature rule around it.
+
+**THE ACCURACY IT COSTS IS MEASURED AND IS A PRODUCT DECISION.**
+`conductor_model.py` on DIII-D: filament against rectangle is **6.081e-03**
+globally and **4.143e-02 inside the conductors**, against **6.731e-05** off them
+for the matched model. So a filament MEQ is a percent-level answer near the
+coils and far better away from them — which, as Ian puts it, *may be acceptable
+to some people*, and is a MODE to offer rather than a defect to hide. It must
+say which model produced an answer, for the reason every other rung in this tree
+must.
+
 ## 5. Staging
 
 | | |
 |---|---|
 | **CS-0** | §0's two-Green's-function difference. **DONE** — the global irreducible error IS the conductor model, 1.05x |
 | **CS-0b** | regenerate the references with freegs4e's `ShapedCoil`. **Needs no MEQ change**, worth 9.2x on the conductor floor, and makes the existing race like-for-like. Do this FIRST — it is the cheapest thing on this list and it re-bases every number M-111 reports |
-| **CS-1** | `meq::ConductorField`: `psi_c` and `grad psi_c` by quadrature, against an analytic single-loop check |
+| **CS-1** | `meq::ConductorField` for FILAMENTS FIRST — one Carlson evaluation per point, no quadrature, and the only conductor MEQ structurally cannot mesh. §4b |
+| **CS-1b** | the same with a quadrature rule around it, which is the rectangle |
 | **CS-2** | the split on a FIXED-boundary case with coils, where nothing else moves |
 | **CS-3** | the Dirichlet datum and the DtN coupling |
 | **CS-4** | every consumer of `psi`, with a test per consumer that the total is read |
