@@ -13,6 +13,14 @@
 #include "meq/CriticalPoints.hpp"
 #include "meq/GradShafranov.hpp"
 
+// omp_get_max_threads() and omp_set_num_threads(), for
+// theAxisSweepDoesNotDependOnTheThreadCount. Guarded on the same pair
+// src/meq/Threading.hpp is: with either absent meq's sweep is serial by
+// construction and the case has nothing to compare.
+#if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
+#include <omp.h>
+#endif
+
 #include "analytic/Soloviev.hpp"
 #include "ConvergenceHarness.hpp"
 
@@ -2387,4 +2395,177 @@ BOOST_AUTO_TEST_CASE( theSeededSaddleSearchDeclinesRatherThanGuessing )
 	BOOST_CHECK_THROW( finder.tryFindAxisFrom( exactSaddle.r, exactSaddle.z,
 	                                           meq::AxisSense::Saddle, unused ),
 	                   std::invalid_argument );
+}
+
+/*
+ * ===========================================================================
+ * THE SWEEP IS THREADED AND THE ANSWER IS NOT ALLOWED TO KNOW
+ * ===========================================================================
+ *
+ * sweep() roots every element of the mesh, which is embarrassingly parallel --
+ * and the deduplication that follows is not, because the merge rule below
+ * `points[ j ].type == point.type && distance < reach` keeps "the one least
+ * outside its own element" and compares each candidate against the list built
+ * SO FAR. That list is in element order. Deduplicating inside the parallel
+ * region would make it thread-arrival order, and the measurement recorded on
+ * that rule says exactly what that costs: on the Solov'ev benchmark at
+ * k = 1, n = 6 the candidate strictly inside its element is 2.7e-3 from the
+ * true axis while the neighbour sitting 8.5e-2 outside is 6.1e-3, and the
+ * neighbour has the LOWER element index. So the two candidates are 3.4e-3
+ * apart in the answer and which one survives is decided by the order they are
+ * seen in.
+ *
+ * **THAT IS THE FAILURE THIS CASE EXISTS FOR AND IT IS THE QUIET KIND.** The
+ * axis would move at the 1e-3 level with OMP_NUM_THREADS, which on a coarse
+ * mesh reads as discretisation error rather than as a bug, and every
+ * convergence table in this file would still pass.
+ *
+ * So the assertion is EQUALITY AT 0.000e+00, entry for entry, in every field
+ * of CriticalPoint -- not a tolerance. The design claims the threaded sweep
+ * reproduces the serial one exactly, and an assertion should say what the
+ * design claims.
+ *
+ * k = 1, n = 6 IS THE MESH NAMED IN THAT MEASUREMENT, and it is used here for
+ * that reason: it is a configuration where the sweep is KNOWN to find
+ * duplicates the merge has to choose between. Two finer meshes ride along so
+ * that a case which found no duplicates at all -- and so could not fail --
+ * would show up as a suspiciously small candidate count rather than as a pass.
+ */
+BOOST_AUTO_TEST_CASE( theAxisSweepDoesNotDependOnTheThreadCount )
+{
+#if !defined( MFEM_USE_OPENMP ) || !defined( MFEM_THREAD_SAFE )
+	BOOST_TEST_MESSAGE( "MFEM is built without MFEM_USE_OPENMP and "
+	                    "MFEM_THREAD_SAFE together, so meq's sweep is serial "
+	                    "by construction and there is nothing to compare" );
+#else
+	Equilibrium const eq = Equilibrium::nstx();
+
+	int const ambient = omp_get_max_threads();
+	std::printf( "\n  THE SWEEP AT ONE THREAD AND AT %d\n", ambient );
+	std::printf( "    %-14s %-4s %-4s %10s %12s %12s\n", "box", "k", "n",
+	             "candidates", "newton", "elements" );
+	std::fflush( stdout );
+
+	/*
+	 * THE FIRST ROW IS THE ONE WITH TEETH AND THE FILE ALREADY SAYS WHY.
+	 *
+	 * seededXPointBox()'s own comment records the measurement: on xPointBox()
+	 * at k = 1, n = 16 the X-point at r = 0.699700 sits 3.0e-04 from the mesh
+	 * line at r = 0.700000, element 237 holds a root at r = 0.699826 and
+	 * element 238 holds its own at r = 0.700027, BOTH STRICTLY INSIDE and
+	 * 6.9e-04 apart -- so both have `overshoot` exactly zero, the merge rule's
+	 * `point.overshoot < points[ j ].overshoot` is FALSE either way, and
+	 * "sweep() merges the two and keeps whichever it saw first". That is the
+	 * one configuration in this file where the surviving candidate is decided
+	 * by the ORDER the candidates are seen in and by nothing else.
+	 *
+	 * **WITHOUT IT THIS CASE CANNOT FAIL.** Checked rather than assumed: with
+	 * the concatenation deliberately put into thread-arrival order the axis
+	 * rows below stay green, because there the two candidates have DIFFERENT
+	 * overshoots and the merge rule is decisive -- which is what the rule is
+	 * for. A test that cannot fail is worse than no test, so the fixture that
+	 * makes it fail is the first row and the others ride along as controls.
+	 */
+	struct Case
+	{
+		char const *name;
+		Rectangle box;
+		int order;
+		int n;
+	};
+	std::vector<Case> const cases = {
+		{ "xPoint", xPointBox(), 1, 16 },
+		{ "xPoint", xPointBox(), 1, 8 },
+		{ "standard", meq::tests::standardBox(), 1, 6 },
+		{ "standard", meq::tests::standardBox(), 2, 10 },
+	};
+
+	for ( Case const &one : cases )
+	{
+			SolvedEquilibrium run( eq, one.box, one.order, one.n );
+			meq::CriticalPointFinder finder( run.theSolver() );
+
+			omp_set_num_threads( 1 );
+			finder.resetCounters();
+			std::vector<meq::CriticalPoint> const serial = finder.sweep();
+			long const serialNewton = finder.newtonSolves();
+			long const serialElements = finder.elementsRooted();
+
+			omp_set_num_threads( ambient );
+			finder.resetCounters();
+			std::vector<meq::CriticalPoint> const threaded = finder.sweep();
+			long const threadedNewton = finder.newtonSolves();
+			long const threadedElements = finder.elementsRooted();
+
+			std::printf( "    %-14s %-4d %-4d %10zu %12ld %12ld\n", one.name,
+			             one.order, one.n, serial.size(), serialNewton,
+			             serialElements );
+			std::fflush( stdout );
+
+			BOOST_TEST_REQUIRE( serial.size() == threaded.size(),
+				one.name << " k = " << one.order << ", n = " << one.n
+				<< ": the sweep returned " << serial.size()
+				<< " candidates at one thread and " << threaded.size() << " at "
+				<< ambient
+				<< ". The deduplication must run serially over the candidates "
+				"concatenated in ELEMENT order; a different count means it did "
+				"not." );
+
+			// THE COUNTERS TOO, because they are what a caller measures a
+			// seeded search against a sweep by, and an atomic increment is
+			// exactly as order independent as a sum of ones.
+			BOOST_TEST( serialNewton == threadedNewton,
+				one.name << " k = " << one.order << ", n = " << one.n << ": "
+				<< serialNewton << " element-local Newton solves at one thread "
+				"against " << threadedNewton << " at " << ambient );
+			BOOST_TEST( serialElements == threadedElements,
+				one.name << " k = " << one.order << ", n = " << one.n << ": "
+				<< serialElements << " elements entered at one thread against "
+				<< threadedElements << " at " << ambient );
+
+			for ( std::size_t i = 0; i < serial.size(); ++i )
+			{
+				meq::CriticalPoint const &a = serial[ i ];
+				meq::CriticalPoint const &b = threaded[ i ];
+
+				// EVERY FIELD, AND AT ZERO. Position is what a reader looks at,
+				// but `element` and `overshoot` are what the merge rule DECIDES
+				// on -- so a dedup that picked the other candidate would be
+				// caught here even where the two sit at the same place to
+				// printing precision.
+				BOOST_TEST( a.r - b.r == 0.0,
+					one.name << " k = " << one.order << ", n = " << one.n
+					<< ", candidate " << i << ": r moved by " << ( a.r - b.r )
+					<< " between one thread and " << ambient );
+				BOOST_TEST( a.z - b.z == 0.0,
+					one.name << " k = " << one.order << ", n = " << one.n
+					<< ", candidate " << i << ": z moved by " << ( a.z - b.z ) );
+				BOOST_TEST( a.psi - b.psi == 0.0,
+					one.name << " k = " << one.order << ", n = " << one.n
+					<< ", candidate " << i << ": psi moved by "
+					<< ( a.psi - b.psi ) );
+				BOOST_TEST( a.fluxResidual - b.fluxResidual == 0.0 );
+				BOOST_TEST( a.determinant - b.determinant == 0.0 );
+				BOOST_TEST( a.trace - b.trace == 0.0 );
+				BOOST_TEST( a.overshoot - b.overshoot == 0.0,
+					one.name << " k = " << one.order << ", n = " << one.n
+					<< ", candidate " << i
+					<< ": overshoot moved, so the merge kept a DIFFERENT "
+					"candidate at the two thread counts. That is the 1e-3 "
+					"failure this case exists for." );
+				BOOST_TEST( a.referenceX - b.referenceX == 0.0 );
+				BOOST_TEST( a.referenceY - b.referenceY == 0.0 );
+				BOOST_TEST( a.element == b.element,
+					one.name << " k = " << one.order << ", n = " << one.n
+					<< ", candidate " << i << ": element " << a.element
+					<< " at one thread and " << b.element << " at " << ambient
+					<< ". The merge chose differently." );
+				bool const sameType = ( a.type == b.type );
+				BOOST_TEST( sameType );
+				BOOST_TEST( a.index == b.index );
+			}
+	}
+
+	omp_set_num_threads( ambient );
+#endif
 }

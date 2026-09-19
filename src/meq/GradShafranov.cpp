@@ -21,11 +21,16 @@
 #include <limits>
 #include <memory>
 #include <sstream>
+#include <exception>
 #include <stdexcept>
 
 #if defined( MFEM_USE_OPENMP ) && defined( MFEM_THREAD_SAFE )
 #include <omp.h>
 #endif
+
+// MEQ_OMP(), and the three hazards it does not excuse. One place, so the
+// condition is stated once and CriticalPoints.cpp is gated on the same pair.
+#include "Threading.hpp"
 
 // Whether this build has ANY direct trace solver. The fallback paths below are
 // guarded on this rather than on MFEM_USE_SUITESPARSE alone, which was the same
@@ -322,6 +327,114 @@ namespace
 #endif // MEQ_HAVE_DIRECT_TRACE_SOLVER
 }
 
+
+	int firstNonzeroOutside( mfem::Vector const &v,
+	                         std::vector<int> const &support )
+	{
+		// The vector may have been written by a device-aware operation; the loop
+		// below reads it raw. See rowDot()'s comment for the whole argument.
+		v.HostRead();
+
+		// A merge rather than a search per entry: `support` is ascending, so one
+		// cursor into it walks alongside `i` and the check costs one pass.
+		std::size_t next = 0;
+		for ( int i = 0; i < v.Size(); ++i )
+		{
+			while ( next < support.size() && support[ next ] < i )
+				++next;
+			if ( next < support.size() && support[ next ] == i )
+				continue;
+			if ( v( i ) != 0.0 )
+				return i;
+		}
+		return -1;
+	}
+
+	void CompressedRows::clear()
+	{
+		supportIndices.clear();
+		rowValues.clear();
+		rows = 0;
+	}
+
+	void CompressedRows::compress( std::vector<mfem::Vector> const &rowsIn,
+	                               std::vector<int> const &support )
+	{
+		supportIndices = support;
+		rows = static_cast<int>( rowsIn.size() );
+		rowValues.assign(
+			static_cast<std::size_t>( rows )*supportIndices.size(), 0.0 );
+
+		for ( int r = 0; r < rows; ++r )
+		{
+			mfem::Vector const &row = rowsIn[ static_cast<std::size_t>( r ) ];
+			row.HostRead();
+			std::size_t const base =
+				static_cast<std::size_t>( r )*supportIndices.size();
+			for ( std::size_t k = 0; k < supportIndices.size(); ++k )
+				rowValues[ base + k ] = row( supportIndices[ k ] );
+		}
+	}
+
+	void CompressedRows::compress( mfem::Vector const &row,
+	                               std::vector<int> const &support )
+	{
+		supportIndices = support;
+		rows = 1;
+		rowValues.assign( supportIndices.size(), 0.0 );
+		row.HostRead();
+		for ( std::size_t k = 0; k < supportIndices.size(); ++k )
+			rowValues[ k ] = row( supportIndices[ k ] );
+	}
+
+	int CompressedRows::rowCount() const
+	{
+		return rows;
+	}
+
+	std::vector<int> const &CompressedRows::support() const
+	{
+		return supportIndices;
+	}
+
+	void CompressedRows::gather( mfem::Vector const &v,
+	                             std::vector<double> &out ) const
+	{
+		v.HostRead();
+		out.resize( supportIndices.size() );
+		for ( std::size_t k = 0; k < supportIndices.size(); ++k )
+			out[ k ] = v( supportIndices[ k ] );
+	}
+
+	double CompressedRows::dot( int row,
+	                            std::vector<double> const &gathered ) const
+	{
+		std::size_t const m = supportIndices.size();
+		if ( gathered.size() != m )
+			throw std::logic_error(
+				"meq::CompressedRows::dot: the gathered vector is not the "
+				"support's length -- it was gathered against a different row "
+				"set" );
+		if ( row < 0 || row >= rows )
+			throw std::logic_error(
+				"meq::CompressedRows::dot: no such row" );
+
+		// ASCENDING, which is what makes this bit-identical to the dense loop:
+		// the surviving terms arrive in the same order and the dropped ones
+		// contributed exactly 0.0. See the class comment.
+		double total = 0.0;
+		std::size_t const base = static_cast<std::size_t>( row )*m;
+		for ( std::size_t k = 0; k < m; ++k )
+			total += rowValues[ base + k ]*gathered[ k ];
+		return total;
+	}
+
+	double CompressedRows::dot( int row, mfem::Vector const &v,
+	                            std::vector<double> &scratch ) const
+	{
+		gather( v, scratch );
+		return dot( row, scratch );
+	}
 
 	ConstantStabilization::ConstantStabilization( double tauIn )
 		: tauValue( tauIn )
@@ -3719,7 +3832,8 @@ namespace
 	}
 
 	std::vector<mfem::Vector>
-		GradShafranovSolver::exteriorTransmissionRows( ExteriorDtN const &exterior ) const
+		GradShafranovSolver::exteriorTransmissionRows( ExteriorDtN const &exterior,
+		                                              std::vector<int> *support ) const
 	{
 		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCpuSeconds, profile.borderAssemblyCalls );
 		if ( !transferPath )
@@ -3742,6 +3856,19 @@ namespace
 
 		mfem::Mesh &mesh = *traceFes->GetMesh();
 		mfem::Array<int> vdofs;
+
+		/*
+		 * THE SUPPORT, RECORDED BY THE SCATTER THAT WRITES IT.
+		 *
+		 * Every mode is built in THIS sweep over THESE faces -- the mode loop is
+		 * innermost, inside the quadrature callback -- so all N rows are written
+		 * on one index set and one list serves them all. It is collected here
+		 * rather than recovered afterwards by scanning for non-zeros, because a
+		 * scan cannot tell a support list that is wrong from one that is right:
+		 * it would agree with whatever the rows happen to hold. The check at the
+		 * end of this function is what compares the two.
+		 */
+		std::vector<int> written;
 
 		for ( int be = 0; be < mesh.GetNBE(); ++be )
 		{
@@ -3773,6 +3900,14 @@ namespace
 			fluxFes->GetElementVDofs( element, vdofs );
 			int const dof = fluxFe->GetDof();
 			int const dim = mesh.Dimension();
+
+			// Exactly the indices the scatter below can reach, taken from the
+			// same `vdofs` in the same ordering. Recorded once per face rather
+			// than once per quadrature point; duplicates across faces are
+			// removed after the sweep.
+			for ( int d = 0; d < dim; ++d )
+				for ( int j = 0; j < dof; ++j )
+					written.push_back( vdofs[ dof*d + j ] );
 
 			/*
 			 * A SECOND element transformation, and it must not be the mesh's:
@@ -3854,6 +3989,10 @@ namespace
 					"what keeps it bounded through refinement" );
 		}
 
+		std::sort( written.begin(), written.end() );
+		written.erase( std::unique( written.begin(), written.end() ),
+		               written.end() );
+
 		// Sanity: a row must live on the flux block alone. Anything outside it is
 		// an indexing error, and a silent one -- the bordered solve would simply
 		// couple the exterior to a potential or trace dof and converge to
@@ -3864,6 +4003,35 @@ namespace
 					throw std::logic_error(
 						"meq::GradShafranovSolver::exteriorTransmissionRows: a "
 						"transmission row has an entry outside the flux block" );
+
+		/*
+		 * AND THE STRONGER FORM OF THE SAME CHECK, WHICH IS WHAT LETS THE ROWS
+		 * BE COMPRESSED AT ALL.
+		 *
+		 * The block check above says the rows are clean outside the flux space.
+		 * meq::CompressedRows needs more than that: it needs the RECORDED
+		 * support to cover every non-zero, because it sums the terms on the
+		 * support and nothing else. A support that has fallen out of step with
+		 * the scatter -- a changed vdof ordering, a face reached by a route that
+		 * does not record it -- drops real terms from every dot product, and a
+		 * border row wrong in magnitude does not diverge: the bordered Newton
+		 * converges to a different equilibrium. So it is checked, once per
+		 * sweep, against the rows it claims to describe.
+		 */
+		for ( std::size_t m = 0; m < rows.size(); ++m )
+		{
+			int const stray = firstNonzeroOutside( rows[ m ], written );
+			if ( stray >= 0 )
+				throw std::logic_error(
+					"meq::GradShafranovSolver::exteriorTransmissionRows: a "
+					"transmission row is non-zero at an index its recorded "
+					"support does not list -- the support and the scatter have "
+					"fallen out of step, and a compressed contraction against "
+					"this row would silently drop terms" );
+		}
+
+		if ( support )
+			*support = written;
 
 		return rows;
 	}
@@ -5242,49 +5410,137 @@ namespace
 			return 0.0;
 
 		mfem::Mesh &mesh = *potentialFes->GetMesh();
-		mfem::Array<int> dofs;
-		mfem::Vector shape;
-		mfem::Vector point;
 		int const potentialStart = blockOffsets[ 1 ];
-		double total = 0.0;
+		int const elementTotal = mesh.GetNE();
 
-		for ( int e = 0; e < mesh.GetNE(); ++e )
+		/*
+		 * ONE PARTIAL SUM PER ELEMENT, SUMMED SERIALLY AFTERWARDS. NOT A
+		 * reduction( + : ).
+		 *
+		 * A reduction leaves the association to the runtime: the partial sums
+		 * arrive in whatever order the threads finish in, so the last bit of
+		 * `int F/r` would depend on OMP_NUM_THREADS -- and with it psi_ax, the
+		 * Newton iteration count and every published digit that rests on them.
+		 * An array indexed by ELEMENT and summed in ELEMENT ORDER gives the
+		 * same bits at every thread count, which is the property that matters,
+		 * and costs one double per element ( 39 KB on the shipped machine case ).
+		 *
+		 * **AND IT IS A RE-ASSOCIATION OF THE SUM, WHICH THE PLAN THAT ASKED
+		 * FOR IT SAID IT WAS NOT.** THREADING-PLAN.md item B claims per-element
+		 * partials are "bit-identical to the serial loop". They are not: the
+		 * loop this replaces carried ONE running total across every quadrature
+		 * point of every element, so its association crosses element
+		 * boundaries, and `( a + b ) + ( c + d )` is not `( ( a + b ) + c ) + d`
+		 * in floating point. A flat left fold cannot be reproduced from
+		 * per-element partials by any grouping, which is why no cheaper
+		 * arrangement is offered here. What IS reproduced exactly is the answer
+		 * at one thread against the answer at eight, which is the acceptance.
+		 * The three loops that write a VECTOR are bit-identical in both senses,
+		 * because the potential space is L2 and no two elements share a dof, so
+		 * each dof's accumulation order is untouched.
+		 */
+		std::vector<double> perElement(
+			static_cast<std::size_t>( elementTotal ), 0.0 );
+		std::exception_ptr failure;
+
+		MEQ_OMP( parallel for schedule( dynamic ) )
+		for ( int e = 0; e < elementTotal; ++e )
 		{
-			// XP-1. Every quantity assembled in this loop is about the PLASMA
-			// term -- scaledF, scaledDFdPsi, the normalisation derivatives --
-			// and all of them are zero on an element the fill did not reach, so
-			// the element is skipped whole. Only meq::SourceIntegrator needs the
-			// fOutsidePlasma() branch, because only f() carries the coils.
-			if ( !elementInPlasma( e ) )
-				continue;
-
-			mfem::FiniteElement const &el = *potentialFes->GetFE( e );
-			thread_local mfem::IsoparametricTransformation scratch;
-			mesh.GetElementTransformation( e, &scratch );
-			potentialFes->GetElementDofs( e, dofs );
-			int const dof = el.GetDof();
-			shape.SetSize( dof );
-
-			mfem::IntegrationRule const &ir =
-				sourceRule( el, scratch, sourceQuadratureExtra );
-			for ( int i = 0; i < ir.GetNPoints(); ++i )
+			/*
+			 * THE SOURCE MAY THROW, AND AN EXCEPTION LEAVING AN OPENMP
+			 * STRUCTURED BLOCK IS UNDEFINED BEHAVIOUR.
+			 *
+			 * meq::RotatingSource throws from f() when a species temperature
+			 * goes non-positive or the quasineutrality root find fails, and
+			 * scaledF() defaults to f(). Caught here into a stored
+			 * std::exception_ptr and rethrown after the region, which is the
+			 * local remedy: gating on the source TYPE instead would be a list
+			 * that has to be kept correct as source types are added.
+			 */
+			try
 			{
-				mfem::IntegrationPoint const &ip = ir.IntPoint( i );
-				scratch.SetIntPoint( &ip );
-				el.CalcShape( ip, shape );
-				scratch.Transform( ip, point );
+				// XP-1. Every quantity assembled in this loop is about the PLASMA
+				// term -- scaledF, scaledDFdPsi, the normalisation derivatives --
+				// and all of them are zero on an element the fill did not reach, so
+				// the element is skipped whole. Only meq::SourceIntegrator needs the
+				// fOutsidePlasma() branch, because only f() carries the coils.
+				if ( !elementInPlasma( e ) )
+					continue;
 
-				double psi = 0.0;
-				for ( int j = 0; j < dof; ++j )
-					psi += shape( j )*state( potentialStart + dofs[ j ] );
+				/*
+				 * EVERY PIECE OF SCRATCH IS DECLARED INSIDE THE BODY, AND THAT
+				 * IS THE WHOLE HAZARD OF THREADING THIS LOOP.
+				 *
+				 * `dofs`, `shape` and `point` sat above the loop. Shared across
+				 * threads they are exactly the meq::SourceIntegrator defect:
+				 * Vector::SetSize is a REALLOCATION, so the failure mode is
+				 * memory corruption rather than a stale read, and CalcShape
+				 * writing into a buffer another thread is reading is a wrong
+				 * number with no symptom.
+				 *
+				 * `doftrans` is the fourth, and it is the one nothing had
+				 * named. The two-argument GetElementDofs( elem, dofs ) writes
+				 * into FiniteElementSpace::DoFTrans, a MUTABLE MEMBER of the
+				 * space -- the same species as Mesh::GetElementTransformation's
+				 * shared IsoparametricTransformation. MFEM's own header says
+				 * the caller-provided overload is the way to avoid it. For an
+				 * L2 space the only write is a null, so the race is benign
+				 * today; it is benign by accident of the space and not by
+				 * contract.
+				 */
+				mfem::Array<int> dofs;
+				mfem::DofTransformation doftrans;
+				mfem::Vector shape;
+				mfem::Vector point;
 
-				// scaledF, not f: with coils present f() is the SUM and the
-				// prescribed current is the plasma's alone.
-				total += ip.weight*scratch.Weight()
-				         *normalisedSource->scaledF( point( 0 ), point( 1 ), psi )
-				         /point( 0 );
+				mfem::FiniteElement const &el = *potentialFes->GetFE( e );
+				thread_local mfem::IsoparametricTransformation scratch;
+				mesh.GetElementTransformation( e, &scratch );
+				potentialFes->GetElementDofs( e, dofs, doftrans );
+				int const dof = el.GetDof();
+				shape.SetSize( dof );
+
+				mfem::IntegrationRule const &ir =
+					sourceRule( el, scratch, sourceQuadratureExtra );
+				double elementSum = 0.0;
+				for ( int i = 0; i < ir.GetNPoints(); ++i )
+				{
+					mfem::IntegrationPoint const &ip = ir.IntPoint( i );
+					scratch.SetIntPoint( &ip );
+					el.CalcShape( ip, shape );
+					scratch.Transform( ip, point );
+
+					double psi = 0.0;
+					for ( int j = 0; j < dof; ++j )
+						psi += shape( j )*state( potentialStart + dofs[ j ] );
+
+					// scaledF, not f: with coils present f() is the SUM and the
+					// prescribed current is the plasma's alone.
+					elementSum +=
+						ip.weight*scratch.Weight()
+						*normalisedSource->scaledF( point( 0 ), point( 1 ), psi )
+						/point( 0 );
+				}
+				perElement[ static_cast<std::size_t>( e ) ] = elementSum;
+			}
+			catch ( ... )
+			{
+				MEQ_OMP( critical( meqPlasmaElementLoop ) )
+				{
+					if ( !failure )
+						failure = std::current_exception();
+				}
 			}
 		}
+
+		if ( failure )
+			std::rethrow_exception( failure );
+
+		// IN ELEMENT ORDER. See the array's own comment: this is what makes the
+		// answer independent of the thread count, bit for bit.
+		double total = 0.0;
+		for ( int e = 0; e < elementTotal; ++e )
+			total += perElement[ static_cast<std::size_t>( e ) ];
 		return total;
 	}
 
@@ -5302,52 +5558,87 @@ namespace
 			return;
 
 		mfem::Mesh &mesh = *potentialFes->GetMesh();
-		mfem::Array<int> dofs;
-		mfem::Vector shape;
-		mfem::Vector point;
 		int const potentialStart = blockOffsets[ 1 ];
+		int const elementTotal = mesh.GetNE();
+		std::exception_ptr failure;
 
-		for ( int e = 0; e < mesh.GetNE(); ++e )
+		/*
+		 * THE SCATTER IS DISJOINT BY CONSTRUCTION, WHICH IS A STRONGER POSITION
+		 * THAN MFEM'S OWN THREADED ELEMENT LOOP IS IN.
+		 *
+		 * The potential space is an L2_FECollection, so no two elements share a
+		 * potential dof: `out( potentialStart + dofs[ j ] )` is written by
+		 * exactly one element. No colouring, no atomics, and -- the part that
+		 * matters for the acceptance -- each dof's accumulation order is
+		 * UNCHANGED, so this loop is bit-identical both to itself at any other
+		 * thread count and to the serial loop it replaces. Compare the scalar
+		 * accumulators in assemblePlasmaCurrent(), where that second property
+		 * is not available.
+		 */
+		MEQ_OMP( parallel for schedule( dynamic ) )
+		for ( int e = 0; e < elementTotal; ++e )
 		{
-			// XP-1. Every quantity assembled in this loop is about the PLASMA
-			// term -- scaledF, scaledDFdPsi, the normalisation derivatives --
-			// and all of them are zero on an element the fill did not reach, so
-			// the element is skipped whole. Only meq::SourceIntegrator needs the
-			// fOutsidePlasma() branch, because only f() carries the coils.
-			if ( !elementInPlasma( e ) )
-				continue;
-
-			mfem::FiniteElement const &el = *potentialFes->GetFE( e );
-			thread_local mfem::IsoparametricTransformation scratch;
-			mesh.GetElementTransformation( e, &scratch );
-			potentialFes->GetElementDofs( e, dofs );
-			int const dof = el.GetDof();
-			shape.SetSize( dof );
-
-			mfem::IntegrationRule const &ir =
-				sourceRule( el, scratch, sourceQuadratureExtra );
-			for ( int i = 0; i < ir.GetNPoints(); ++i )
+			// The source may throw; see assemblePlasmaCurrent() for why the
+			// exception is caught here rather than allowed to leave the region.
+			try
 			{
-				mfem::IntegrationPoint const &ip = ir.IntPoint( i );
-				scratch.SetIntPoint( &ip );
-				el.CalcShape( ip, shape );
-				scratch.Transform( ip, point );
+				// XP-1. Every quantity assembled in this loop is about the PLASMA
+				// term -- scaledF, scaledDFdPsi, the normalisation derivatives --
+				// and all of them are zero on an element the fill did not reach, so
+				// the element is skipped whole. Only meq::SourceIntegrator needs the
+				// fOutsidePlasma() branch, because only f() carries the coils.
+				if ( !elementInPlasma( e ) )
+					continue;
 
-				double psi = 0.0;
-				for ( int j = 0; j < dof; ++j )
-					psi += shape( j )*state( potentialStart + dofs[ j ] );
+				// INSIDE THE BODY, all four. See assemblePlasmaCurrent().
+				mfem::Array<int> dofs;
+				mfem::DofTransformation doftrans;
+				mfem::Vector shape;
+				mfem::Vector point;
 
-				// F carries the scale linearly, so dF/d(scale) is F/scale --
-				// and the residual's source term is -w F/r, so this is that
-				// term divided by the scale. Exact, and one loop.
-				double const derivative =
-					normalisedSource->scaledF( point( 0 ), point( 1 ), psi )/scale;
-				double const factor =
-					-ip.weight*scratch.Weight()*derivative/point( 0 );
-				for ( int j = 0; j < dof; ++j )
-					out( potentialStart + dofs[ j ] ) += factor*shape( j );
+				mfem::FiniteElement const &el = *potentialFes->GetFE( e );
+				thread_local mfem::IsoparametricTransformation scratch;
+				mesh.GetElementTransformation( e, &scratch );
+				potentialFes->GetElementDofs( e, dofs, doftrans );
+				int const dof = el.GetDof();
+				shape.SetSize( dof );
+
+				mfem::IntegrationRule const &ir =
+					sourceRule( el, scratch, sourceQuadratureExtra );
+				for ( int i = 0; i < ir.GetNPoints(); ++i )
+				{
+					mfem::IntegrationPoint const &ip = ir.IntPoint( i );
+					scratch.SetIntPoint( &ip );
+					el.CalcShape( ip, shape );
+					scratch.Transform( ip, point );
+
+					double psi = 0.0;
+					for ( int j = 0; j < dof; ++j )
+						psi += shape( j )*state( potentialStart + dofs[ j ] );
+
+					// F carries the scale linearly, so dF/d(scale) is F/scale --
+					// and the residual's source term is -w F/r, so this is that
+					// term divided by the scale. Exact, and one loop.
+					double const derivative =
+						normalisedSource->scaledF( point( 0 ), point( 1 ), psi )/scale;
+					double const factor =
+						-ip.weight*scratch.Weight()*derivative/point( 0 );
+					for ( int j = 0; j < dof; ++j )
+						out( potentialStart + dofs[ j ] ) += factor*shape( j );
+				}
+			}
+			catch ( ... )
+			{
+				MEQ_OMP( critical( meqPlasmaElementLoop ) )
+				{
+					if ( !failure )
+						failure = std::current_exception();
+				}
 			}
 		}
+
+		if ( failure )
+			std::rethrow_exception( failure );
 	}
 
 	void GradShafranovSolver::assembleCurrentNormalisationCorner(
@@ -5434,117 +5725,227 @@ namespace
 		}
 
 		mfem::Mesh &mesh = *potentialFes->GetMesh();
-		mfem::Array<int> dofs;
-		mfem::Vector shape;
-		mfem::Vector point;
 		int const potentialStart = blockOffsets[ 1 ];
+		int const elementTotal = mesh.GetNE();
 
-		for ( int e = 0; e < mesh.GetNE(); ++e )
+		// Two partial sums per element, summed in element order afterwards; see
+		// assemblePlasmaCurrent() for why this is not a reduction( + : ) and for
+		// what it does and does not reproduce exactly.
+		std::vector<double> perElementAxis(
+			static_cast<std::size_t>( elementTotal ), 0.0 );
+		std::vector<double> perElementBoundary(
+			static_cast<std::size_t>( elementTotal ), 0.0 );
+		std::exception_ptr failure;
+
+		MEQ_OMP( parallel for schedule( dynamic ) )
+		for ( int e = 0; e < elementTotal; ++e )
 		{
-			// XP-1. Every quantity assembled in this loop is about the PLASMA
-			// term -- scaledF, scaledDFdPsi, the normalisation derivatives --
-			// and all of them are zero on an element the fill did not reach, so
-			// the element is skipped whole. Only meq::SourceIntegrator needs the
-			// fOutsidePlasma() branch, because only f() carries the coils.
-			if ( !elementInPlasma( e ) )
-				continue;
-
-			mfem::FiniteElement const &el = *potentialFes->GetFE( e );
-			thread_local mfem::IsoparametricTransformation scratch;
-			mesh.GetElementTransformation( e, &scratch );
-			potentialFes->GetElementDofs( e, dofs );
-			int const dof = el.GetDof();
-			shape.SetSize( dof );
-
-			mfem::IntegrationRule const &ir =
-				sourceRule( el, scratch, sourceQuadratureExtra );
-			for ( int i = 0; i < ir.GetNPoints(); ++i )
+			// The throw below is this function's own and is caught by the same
+			// machinery the source's is; see assemblePlasmaCurrent(). It is
+			// rethrown after the region, so the message a caller sees and the
+			// fact that it aborts the assembly are both unchanged -- only the
+			// point at which the stack unwinds moves.
+			try
 			{
-				mfem::IntegrationPoint const &ip = ir.IntPoint( i );
-				scratch.SetIntPoint( &ip );
-				el.CalcShape( ip, shape );
-				scratch.Transform( ip, point );
+				// XP-1. Every quantity assembled in this loop is about the PLASMA
+				// term -- scaledF, scaledDFdPsi, the normalisation derivatives --
+				// and all of them are zero on an element the fill did not reach, so
+				// the element is skipped whole. Only meq::SourceIntegrator needs the
+				// fOutsidePlasma() branch, because only f() carries the coils.
+				if ( !elementInPlasma( e ) )
+					continue;
 
-				double psi = 0.0;
-				for ( int j = 0; j < dof; ++j )
-					psi += shape( j )*state( potentialStart + dofs[ j ] );
+				// INSIDE THE BODY, all four. See assemblePlasmaCurrent().
+				mfem::Array<int> dofs;
+				mfem::DofTransformation doftrans;
+				mfem::Vector shape;
+				mfem::Vector point;
 
-				double dAxis = 0.0;
-				double dBoundary = 0.0;
-				// THE PROBE ABOVE SETTLED THIS, so a refusal here means the
-				// source's answer depends on its arguments -- which the
-				// interface does not permit, and which would otherwise leave a
-				// partial sum looking like an assembled corner.
-				if ( !normalisedSource->normalisationDerivatives(
-					     point( 0 ), point( 1 ), psi, dAxis, dBoundary ) )
-					throw std::logic_error(
-						"meq::GradShafranovSolver::assembleCurrentNormalisationCorner: "
-						"the source supplied normalisationDerivatives() at the probe and "
-						"refused at a quadrature point -- the capability must not depend "
-						"on the point" );
+				mfem::FiniteElement const &el = *potentialFes->GetFE( e );
+				thread_local mfem::IsoparametricTransformation scratch;
+				mesh.GetElementTransformation( e, &scratch );
+				potentialFes->GetElementDofs( e, dofs, doftrans );
+				int const dof = el.GetDof();
+				shape.SetSize( dof );
 
-				double const w = ip.weight*scratch.Weight()/point( 0 );
-				againstAxis += w*dAxis;
-				againstBoundary += w*dBoundary;
+				mfem::IntegrationRule const &ir =
+					sourceRule( el, scratch, sourceQuadratureExtra );
+				double axisSum = 0.0;
+				double boundarySum = 0.0;
+				for ( int i = 0; i < ir.GetNPoints(); ++i )
+				{
+					mfem::IntegrationPoint const &ip = ir.IntPoint( i );
+					scratch.SetIntPoint( &ip );
+					el.CalcShape( ip, shape );
+					scratch.Transform( ip, point );
+
+					double psi = 0.0;
+					for ( int j = 0; j < dof; ++j )
+						psi += shape( j )*state( potentialStart + dofs[ j ] );
+
+					double dAxis = 0.0;
+					double dBoundary = 0.0;
+					// THE PROBE ABOVE SETTLED THIS, so a refusal here means the
+					// source's answer depends on its arguments -- which the
+					// interface does not permit, and which would otherwise leave a
+					// partial sum looking like an assembled corner.
+					if ( !normalisedSource->normalisationDerivatives(
+						     point( 0 ), point( 1 ), psi, dAxis, dBoundary ) )
+						throw std::logic_error(
+							"meq::GradShafranovSolver::assembleCurrentNormalisationCorner: "
+							"the source supplied normalisationDerivatives() at the probe and "
+							"refused at a quadrature point -- the capability must not depend "
+							"on the point" );
+
+					double const w = ip.weight*scratch.Weight()/point( 0 );
+					axisSum += w*dAxis;
+					boundarySum += w*dBoundary;
+				}
+				perElementAxis[ static_cast<std::size_t>( e ) ] = axisSum;
+				perElementBoundary[ static_cast<std::size_t>( e ) ] = boundarySum;
 			}
+			catch ( ... )
+			{
+				MEQ_OMP( critical( meqPlasmaElementLoop ) )
+				{
+					if ( !failure )
+						failure = std::current_exception();
+				}
+			}
+		}
+
+		if ( failure )
+			std::rethrow_exception( failure );
+
+		for ( int e = 0; e < elementTotal; ++e )
+		{
+			againstAxis += perElementAxis[ static_cast<std::size_t>( e ) ];
+			againstBoundary += perElementBoundary[ static_cast<std::size_t>( e ) ];
 		}
 	}
 
 	void GradShafranovSolver::assembleCurrentRow( mfem::Vector const &state,
-	                                              mfem::Vector &out ) const
+	                                              mfem::Vector &out,
+	                                              std::vector<int> *support ) const
 	{
 		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCpuSeconds, profile.borderAssemblyCalls );
 		out.SetSize( state.Size() );
 		out = 0.0;
+		if ( support )
+			support->clear();
 		if ( !normalisedSource )
 			return;
 
 		mfem::Mesh &mesh = *potentialFes->GetMesh();
-		mfem::Array<int> dofs;
-		mfem::Vector shape;
-		mfem::Vector point;
 		int const potentialStart = blockOffsets[ 1 ];
+		int const elementTotal = mesh.GetNE();
+		std::exception_ptr failure;
 
-		for ( int e = 0; e < mesh.GetNE(); ++e )
+		// Disjoint L2 scatter, so bit-identical both across thread counts and
+		// against the serial loop; see assembleCurrentColumn().
+		MEQ_OMP( parallel for schedule( dynamic ) )
+		for ( int e = 0; e < elementTotal; ++e )
 		{
-			// XP-1. Every quantity assembled in this loop is about the PLASMA
-			// term -- scaledF, scaledDFdPsi, the normalisation derivatives --
-			// and all of them are zero on an element the fill did not reach, so
-			// the element is skipped whole. Only meq::SourceIntegrator needs the
-			// fOutsidePlasma() branch, because only f() carries the coils.
-			if ( !elementInPlasma( e ) )
-				continue;
-
-			mfem::FiniteElement const &el = *potentialFes->GetFE( e );
-			thread_local mfem::IsoparametricTransformation scratch;
-			mesh.GetElementTransformation( e, &scratch );
-			potentialFes->GetElementDofs( e, dofs );
-			int const dof = el.GetDof();
-			shape.SetSize( dof );
-
-			mfem::IntegrationRule const &ir =
-				sourceRule( el, scratch, sourceQuadratureExtra );
-			for ( int i = 0; i < ir.GetNPoints(); ++i )
+			try
 			{
-				mfem::IntegrationPoint const &ip = ir.IntPoint( i );
-				scratch.SetIntPoint( &ip );
-				el.CalcShape( ip, shape );
-				scratch.Transform( ip, point );
+				// XP-1. Every quantity assembled in this loop is about the PLASMA
+				// term -- scaledF, scaledDFdPsi, the normalisation derivatives --
+				// and all of them are zero on an element the fill did not reach, so
+				// the element is skipped whole. Only meq::SourceIntegrator needs the
+				// fOutsidePlasma() branch, because only f() carries the coils.
+				if ( !elementInPlasma( e ) )
+					continue;
 
-				double psi = 0.0;
-				for ( int j = 0; j < dof; ++j )
-					psi += shape( j )*state( potentialStart + dofs[ j ] );
+				// INSIDE THE BODY, all four. See assemblePlasmaCurrent().
+				mfem::Array<int> dofs;
+				mfem::DofTransformation doftrans;
+				mfem::Vector shape;
+				mfem::Vector point;
 
-				// d/dx of int F/r: the plasma's own dF/dpsi against the shape
-				// functions. NOT negated -- this is the constraint's gradient,
-				// not a residual contribution.
-				double const factor =
-					ip.weight*scratch.Weight()
-					*normalisedSource->scaledDFdPsi( point( 0 ), point( 1 ), psi )
-					/point( 0 );
-				for ( int j = 0; j < dof; ++j )
-					out( potentialStart + dofs[ j ] ) += factor*shape( j );
+				mfem::FiniteElement const &el = *potentialFes->GetFE( e );
+				thread_local mfem::IsoparametricTransformation scratch;
+				mesh.GetElementTransformation( e, &scratch );
+				potentialFes->GetElementDofs( e, dofs, doftrans );
+				int const dof = el.GetDof();
+				shape.SetSize( dof );
+
+				mfem::IntegrationRule const &ir =
+					sourceRule( el, scratch, sourceQuadratureExtra );
+				for ( int i = 0; i < ir.GetNPoints(); ++i )
+				{
+					mfem::IntegrationPoint const &ip = ir.IntPoint( i );
+					scratch.SetIntPoint( &ip );
+					el.CalcShape( ip, shape );
+					scratch.Transform( ip, point );
+
+					double psi = 0.0;
+					for ( int j = 0; j < dof; ++j )
+						psi += shape( j )*state( potentialStart + dofs[ j ] );
+
+					// d/dx of int F/r: the plasma's own dF/dpsi against the shape
+					// functions. NOT negated -- this is the constraint's gradient,
+					// not a residual contribution.
+					double const factor =
+						ip.weight*scratch.Weight()
+						*normalisedSource->scaledDFdPsi( point( 0 ), point( 1 ), psi )
+						/point( 0 );
+					for ( int j = 0; j < dof; ++j )
+						out( potentialStart + dofs[ j ] ) += factor*shape( j );
+				}
 			}
+			catch ( ... )
+			{
+				MEQ_OMP( critical( meqPlasmaElementLoop ) )
+				{
+					if ( !failure )
+						failure = std::current_exception();
+				}
+			}
+		}
+
+		if ( failure )
+			std::rethrow_exception( failure );
+
+		/*
+		 * THE SUPPORT, AND WHY IT IS A SECOND PASS RATHER THAN A PUSH INSIDE
+		 * THE QUADRATURE LOOP.
+		 *
+		 * The loop above is threaded, and a shared list pushed to from every
+		 * thread is the one thing this file's own hazard note forbids. The set
+		 * wanted is `the potential dofs of the elements the plasma fill
+		 * reached`, which is pure indexing -- no quadrature, no source -- so it
+		 * is cheaper to walk it again serially than to synchronise it. The
+		 * potential space is L2, so no two elements share a dof and the sort is
+		 * a formality; it is done anyway because meq::CompressedRows requires
+		 * ascending order for its exactness and that requirement should not
+		 * rest on a property of the space.
+		 */
+		if ( support )
+		{
+			mfem::Array<int> supportDofs;
+			for ( int e = 0; e < mesh.GetNE(); ++e )
+			{
+				if ( !elementInPlasma( e ) )
+					continue;
+				potentialFes->GetElementDofs( e, supportDofs );
+				for ( int j = 0; j < supportDofs.Size(); ++j )
+					support->push_back( potentialStart + supportDofs[ j ] );
+			}
+			std::sort( support->begin(), support->end() );
+			support->erase( std::unique( support->begin(), support->end() ),
+			                support->end() );
+
+			// As in exteriorTransmissionRows(): the list is checked against the
+			// row it claims to describe, not trusted. A compressed contraction
+			// against a row with a non-zero outside its support drops terms, and
+			// a border row wrong in magnitude converges to a different answer
+			// rather than failing.
+			if ( firstNonzeroOutside( out, *support ) >= 0 )
+				throw std::logic_error(
+					"meq::GradShafranovSolver::assembleCurrentRow: the current "
+					"row is non-zero at an index its recorded support does not "
+					"list -- the support and the scatter have fallen out of "
+					"step" );
 		}
 	}
 
@@ -5747,77 +6148,121 @@ namespace
 		out = 0.0;
 
 		mfem::Mesh &mesh = *potentialFes->GetMesh();
-		mfem::Array<int> dofs;
-		mfem::Vector shape;
-		mfem::Vector point;
-
 		int const potentialStart = blockOffsets[ 1 ];
+		int const elementTotal = mesh.GetNE();
+		std::exception_ptr failure;
 
-		for ( int e = 0; e < mesh.GetNE(); ++e )
+		/*
+		 * THE REFUSAL BECOMES A FLAG, BECAUSE A `return` MAY NOT LEAVE AN
+		 * OPENMP STRUCTURED BLOCK.
+		 *
+		 * Serially this returned false the moment a quadrature point was
+		 * refused, leaving `out` half written. Threaded it records the refusal
+		 * and the other elements finish, so `out` ends up MORE written -- and
+		 * that is not a behaviour change, because the contract is that `out` is
+		 * meaningless on false and every caller overwrites it with the
+		 * differenced column. What a caller can observe -- the bool -- is the
+		 * same.
+		 *
+		 * `int` and an atomic write rather than a bool set from every thread:
+		 * the value written is the same from all of them, but a plain
+		 * concurrent write is still a data race, and this is the cheapest
+		 * conforming way to say `at least one of you refused`.
+		 */
+		int refused = 0;
+
+		// Disjoint L2 scatter, so bit-identical both across thread counts and
+		// against the serial loop; see assembleCurrentColumn().
+		MEQ_OMP( parallel for schedule( dynamic ) )
+		for ( int e = 0; e < elementTotal; ++e )
 		{
-			// XP-1, as in the three loops above: dF/ds is zero wherever F is,
-			// and the fill switches F off on a whole element.
-			if ( !elementInPlasma( e ) )
-				continue;
-
-			mfem::FiniteElement const &el = *potentialFes->GetFE( e );
-
-			// The two-argument overload into a local, because the one-argument
-			// one hands out the mesh's own shared scratch -- CLAUDE.md records
-			// that trap under Traps and it has cost this tree six call sites.
-			thread_local mfem::IsoparametricTransformation scratch;
-			mesh.GetElementTransformation( e, &scratch );
-			mfem::ElementTransformation &tr = scratch;
-
-			potentialFes->GetElementDofs( e, dofs );
-			int const dof = el.GetDof();
-			shape.SetSize( dof );
-
-			// THE SAME RULE meq::SourceIntegrator USES, and it has to be: the
-			// column is the derivative of the assembled residual, not of the
-			// continuous one, so a different rule would be the derivative of a
-			// different function. See SourceIntegrator::rule().
-			int const quadratureOrder = 2*el.GetOrder() + tr.OrderW()
-			                            + sourceQuadratureExtra;
-			mfem::IntegrationRule const &ir =
-				mfem::IntRules.Get( el.GetGeomType(), quadratureOrder );
-
-			for ( int i = 0; i < ir.GetNPoints(); ++i )
+			try
 			{
-				mfem::IntegrationPoint const &ip = ir.IntPoint( i );
-				tr.SetIntPoint( &ip );
-				el.CalcShape( ip, shape );
-				tr.Transform( ip, point );
+				// XP-1, as in the three loops above: dF/ds is zero wherever F is,
+				// and the fill switches F off on a whole element.
+				if ( !elementInPlasma( e ) )
+					continue;
 
-				double const r = point( 0 );
-				double const z = point( 1 );
+				mfem::FiniteElement const &el = *potentialFes->GetFE( e );
 
-				double psi = 0.0;
-				for ( int j = 0; j < dof; ++j )
-					psi += shape( j )*state( potentialStart + dofs[ j ] );
+				// The two-argument overload into a local, because the one-argument
+				// one hands out the mesh's own shared scratch -- CLAUDE.md records
+				// that trap under Traps and it has cost this tree six call sites.
+				thread_local mfem::IsoparametricTransformation scratch;
+				mesh.GetElementTransformation( e, &scratch );
+				mfem::ElementTransformation &tr = scratch;
 
-				double dFdAxis = 0.0;
-				double dFdBoundary = 0.0;
-				if ( !normalisedSource->normalisationDerivatives( r, z, psi,
-				                                                  dFdAxis,
-				                                                  dFdBoundary ) )
-					return false;
+				// INSIDE THE BODY, all four. See assemblePlasmaCurrent().
+				mfem::Array<int> dofs;
+				mfem::DofTransformation doftrans;
+				mfem::Vector shape;
+				mfem::Vector point;
 
-				double const derivative = axis ? dFdAxis : dFdBoundary;
-				double const weight = ip.weight*tr.Weight();
+				potentialFes->GetElementDofs( e, dofs, doftrans );
+				int const dof = el.GetDof();
+				shape.SetSize( dof );
 
-				// EXACTLY SourceIntegrator's sign. It adds -w F/r against the
-				// shape functions, so the derivative of that is -w (dF/ds)/r
-				// against the same ones. Getting this wrong is the failure this
-				// file warns about repeatedly, which is why
-				// theAnalyticColumnAgreesWithTheDifferencedOne exists.
-				double const factor = -weight*derivative/r;
-				for ( int j = 0; j < dof; ++j )
-					out( potentialStart + dofs[ j ] ) += factor*shape( j );
+				// THE SAME RULE meq::SourceIntegrator USES, and it has to be: the
+				// column is the derivative of the assembled residual, not of the
+				// continuous one, so a different rule would be the derivative of a
+				// different function. See SourceIntegrator::rule().
+				int const quadratureOrder = 2*el.GetOrder() + tr.OrderW()
+				                            + sourceQuadratureExtra;
+				mfem::IntegrationRule const &ir =
+					mfem::IntRules.Get( el.GetGeomType(), quadratureOrder );
+
+				for ( int i = 0; i < ir.GetNPoints(); ++i )
+				{
+					mfem::IntegrationPoint const &ip = ir.IntPoint( i );
+					tr.SetIntPoint( &ip );
+					el.CalcShape( ip, shape );
+					tr.Transform( ip, point );
+
+					double const r = point( 0 );
+					double const z = point( 1 );
+
+					double psi = 0.0;
+					for ( int j = 0; j < dof; ++j )
+						psi += shape( j )*state( potentialStart + dofs[ j ] );
+
+					double dFdAxis = 0.0;
+					double dFdBoundary = 0.0;
+					if ( !normalisedSource->normalisationDerivatives( r, z, psi,
+					                                                  dFdAxis,
+					                                                  dFdBoundary ) )
+					{
+						MEQ_OMP( atomic write )
+						refused = 1;
+						break;
+					}
+
+					double const derivative = axis ? dFdAxis : dFdBoundary;
+					double const weight = ip.weight*tr.Weight();
+
+					// EXACTLY SourceIntegrator's sign. It adds -w F/r against the
+					// shape functions, so the derivative of that is -w (dF/ds)/r
+					// against the same ones. Getting this wrong is the failure this
+					// file warns about repeatedly, which is why
+					// theAnalyticColumnAgreesWithTheDifferencedOne exists.
+					double const factor = -weight*derivative/r;
+					for ( int j = 0; j < dof; ++j )
+						out( potentialStart + dofs[ j ] ) += factor*shape( j );
+				}
+			}
+			catch ( ... )
+			{
+				MEQ_OMP( critical( meqPlasmaElementLoop ) )
+				{
+					if ( !failure )
+						failure = std::current_exception();
+				}
 			}
 		}
 
-		return true;
+		if ( failure )
+			std::rethrow_exception( failure );
+
+		return refused == 0;
 	}
 
 	void GradShafranovSolver::solveWithNormalisation()
@@ -5955,6 +6400,11 @@ namespace
 
 		mfem::Vector residual( n ), column( n ), y( n ), z( n ), scratch( n );
 		mfem::Vector columnL( n ), zL( n ), currentRow( n );
+		/// The same row, on its support alone -- the potential dofs of the
+		/// elements the plasma fill reached. Rebuilt every Newton step, because
+		/// the support moves with the plasma. See meq::CompressedRows.
+		CompressedRows currentRows;
+		std::vector<int> currentRowSupport;
 		double currentIntegral = 0.0;
 		double constraintL = 0.0;
 		double currentAgainstAxis = 0.0;
@@ -6961,28 +7411,39 @@ namespace
 		 * question the residual answers. It costs one prepare() per mode, at
 		 * setup; prepare() zeroes the iterate, so it is saved and put back.
 		 */
-		std::vector<mfem::Vector> exteriorRows, exteriorColumns, exteriorZ;
+		/*
+		 * THE ROWS ARE HELD COMPRESSED, WHICH IS A REPRESENTATION AND NOT AN
+		 * APPROXIMATION.
+		 *
+		 * A transmission row is written only on the flux vdofs of the elements
+		 * owning a Gamma_h boundary face -- 82 boundary elements on the shipped
+		 * machine case, 12 vdofs each at k = 2, so at most 984 entries in about
+		 * 109,200. The dense elimination contracts every row against every
+		 * column ( N + 4 ) squared times per Newton step, so keeping the zeros
+		 * meant streaming 290 MB per call to multiply-add a quarter of a per
+		 * cent of it. Dropping terms that are EXACTLY zero leaves every partial
+		 * sum bit-unchanged; see meq::CompressedRows.
+		 */
+		CompressedRows transmissionRows;
+		std::vector<mfem::Vector> exteriorColumns, exteriorZ;
 		if ( nModes > 0 )
 		{
+			std::vector<int> transmissionSupport;
 			std::vector<mfem::Vector> const rows =
-				exteriorTransmissionRows( *exteriorCoupling );
+				exteriorTransmissionRows( *exteriorCoupling,
+				                          &transmissionSupport );
+
+			// NO NEGATION, AND THE FIRST VERSION HAD ONE. The rows are built
+			// to be contracted against flux(), which is the SIGN-CORRECTED
+			// field; the unknown carries DarcyForm's raw block, which is -q.
+			// So contracting the row against the unknown directly is already
+			// what FB-1b writes as rows[ m ] . ( -flux() ), and negating
+			// again gives a border that is right in magnitude and wrong in
+			// sign -- which does not diverge, it just fails to converge.
+			transmissionRows.compress( rows, transmissionSupport );
 
 			for ( int mode = 0; mode < nModes; ++mode )
-			{
-				// NO NEGATION, AND THE FIRST VERSION HAD ONE. The rows are built
-				// to be contracted against flux(), which is the SIGN-CORRECTED
-				// field; the unknown carries DarcyForm's raw block, which is -q.
-				// So contracting the row against the unknown directly is already
-				// what FB-1b writes as rows[ m ] . ( -flux() ), and negating
-				// again gives a border that is right in magnitude and wrong in
-				// sign -- which does not diverge, it just fails to converge.
-				mfem::Vector row( n );
-				row = 0.0;
-				for ( int i = 0; i < rows[ static_cast<std::size_t>( mode ) ].Size(); ++i )
-					row( i ) = rows[ static_cast<std::size_t>( mode ) ]( i );
-				exteriorRows.push_back( row );
 				exteriorZ.emplace_back( n );
-			}
 
 			mfem::Vector const savedIterate( unknown );
 			std::vector<double> const savedCoefficients = exteriorCoefficientValues;
@@ -7053,6 +7514,11 @@ namespace
 		if ( exteriorCoupling )
 			exteriorConductorMoments( *exteriorCoupling, conductorMoments );
 
+		/// Scratch for the gathers below; see meq::CompressedRows. Hoisted out of
+		/// the lambdas so a per-call std::vector allocation does not land in the
+		/// constraint leg.
+		std::vector<double> transmissionGather;
+
 		/// T_m = ( transmission integral of x )_m + blockEntry( m ) a_m
 		///       - int_Gamma ( q_coil . nu ) C_m dGamma.
 		auto transmissionConstraint = [ & ]( mfem::Vector const &state, int mode )
@@ -7060,10 +7526,11 @@ namespace
 			LegTimer const timer( profile.constraintSeconds,
 			                      profile.constraintCpuSeconds,
 			                      profile.constraintCalls );
-			double total = 0.0;
-			mfem::Vector const &row = exteriorRows[ static_cast<std::size_t>( mode ) ];
-			for ( int i = 0; i < n; ++i )
-				total += row( i )*state( i );
+			// The row is stored on its support alone, and the gather restricts
+			// the state to the same indices in the same ascending order -- so
+			// the sum below has the same terms in the same sequence as the walk
+			// over all n it replaces, and the answer is bit-identical.
+			double total = transmissionRows.dot( mode, state, transmissionGather );
 			/*
 			 * THE MINUS IS DERIVED AND THEN TESTED, in that order, because this
 			 * file records the transmission row's sign going wrong once already
@@ -7901,8 +8368,29 @@ namespace
 			int const nBorderTotal = nBorders + nModes;
 			std::vector<double> step( static_cast<std::size_t>( nBorderTotal ), 0.0 );
 
+			/*
+			 * THE ELEVEN ROWS THAT WALKED THE WHOLE VECTOR ARE COMPRESSED, AND
+			 * THEIR GATHERS ARE HOISTED OUT OF THE ELIMINATION'S INNER LOOP.
+			 *
+			 * Of the fifteen border rows on the shipped machine case four are
+			 * already short -- psi_ax over one element's trace dofs, psi_bnd
+			 * through limiterValue(), XP-3's two over one element's flux dofs --
+			 * and eleven walked all 109,200 entries: the current row and the ten
+			 * exterior modes. Both are held on their support alone, and a
+			 * BorderGather is a column already restricted to those two supports,
+			 * so the elimination gathers each column ONCE rather than once per
+			 * row. Passing none is legal and means "gather it yourself".
+			 */
+			struct BorderGather
+			{
+				std::vector<double> transmission;
+				std::vector<double> current;
+			};
+			std::vector<double> rowGatherScratch;
+
 			// b_i . v, for each border row.
-			auto rowDot = [ & ]( int i, mfem::Vector const &v )
+			auto rowDot = [ & ]( int i, mfem::Vector const &v,
+			                     BorderGather const *pre = nullptr )
 			{
 				/*
 				 * AND THE FUNNEL SYNCS TOO, WHICH IS BELT AND BRACES AND IS
@@ -7974,20 +8462,19 @@ namespace
 				}
 				if ( currentIsUnknown && i == currentIndex )
 				{
-					currentRow.HostRead();
-					double total = 0.0;
-					for ( int j = 0; j < n; ++j )
-						total += currentRow( j )*v( j );
-					return total;
+					// The row lives on the potential dofs of the elements the
+					// plasma fill reached and is exactly zero everywhere else,
+					// so the sum below has the same terms in the same ascending
+					// order as the walk over all n it replaces.
+					if ( pre )
+						return currentRows.dot( 0, pre->current );
+					return currentRows.dot( 0, v, rowGatherScratch );
 				}
 
-				mfem::Vector const &row =
-					exteriorRows[ static_cast<std::size_t>( i - nBorders ) ];
-				row.HostRead();
-				double total = 0.0;
-				for ( int j = 0; j < n; ++j )
-					total += row( j )*v( j );
-				return total;
+				int const mode = i - nBorders;
+				if ( pre )
+					return transmissionRows.dot( mode, pre->transmission );
+				return transmissionRows.dot( mode, v, rowGatherScratch );
 			};
 
 			// The corner block, row by row.
@@ -8108,7 +8595,8 @@ namespace
 				currentIntegral = assemblePlasmaCurrent( unknown );
 				constraintL = currentIntegral - targetMuZeroCurrent;
 				assembleCurrentColumn( unknown, columnL );
-				assembleCurrentRow( unknown, currentRow );
+				assembleCurrentRow( unknown, currentRow, &currentRowSupport );
+				currentRows.compress( currentRow, currentRowSupport );
 				assembleCurrentNormalisationCorner( unknown, currentAgainstAxis,
 				                                    currentAgainstBoundary );
 				// Queued, not solved: the flush below takes it with the rest.
@@ -8198,11 +8686,40 @@ namespace
 			{
 				mfem::DenseMatrix dense( nBorderTotal );
 				mfem::Vector right( nBorderTotal ), solved( nBorderTotal );
+
+				/*
+				 * ONE GATHER PER COLUMN, NOT ONE PER ( ROW, COLUMN ) PAIR.
+				 *
+				 * The compressed rows share two supports between them, so a
+				 * column restricted to those supports serves every row. Gathered
+				 * here, outside the i loop, the cost is ( N + 5 ) gathers rather
+				 * than ( N + 4 ) squared -- and the answer is untouched either
+				 * way, since a gather is a copy.
+				 */
+				BorderGather gatheredY;
+				std::vector<BorderGather> gatheredZ(
+					static_cast<std::size_t>( nBorderTotal ) );
+				auto gatherFor = [ & ]( mfem::Vector const &v,
+				                        BorderGather &out )
+				{
+					if ( transmissionRows.rowCount() > 0 )
+						transmissionRows.gather( v, out.transmission );
+					if ( currentRows.rowCount() > 0 )
+						currentRows.gather( v, out.current );
+				};
+				gatherFor( y, gatheredY );
+				for ( int j = 0; j < nBorderTotal; ++j )
+					gatherFor( columnZ( j ),
+					           gatheredZ[ static_cast<std::size_t>( j ) ] );
+
 				for ( int i = 0; i < nBorderTotal; ++i )
 				{
-					right( i ) = rowDot( i, y ) - constraintAt( i );
+					right( i ) = rowDot( i, y, &gatheredY ) - constraintAt( i );
 					for ( int j = 0; j < nBorderTotal; ++j )
-						dense( i, j ) = cornerEntry( i, j ) - rowDot( i, columnZ( j ) );
+						dense( i, j ) =
+							cornerEntry( i, j )
+							- rowDot( i, columnZ( j ),
+							          &gatheredZ[ static_cast<std::size_t>( j ) ] );
 				}
 
 				/*

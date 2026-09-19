@@ -414,6 +414,27 @@ if(MEQ_CORE_SOURCES_PRESENT)
 		target_link_libraries(meq_core PUBLIC meq_coverage)
 	endif()
 
+	# OpenMP, ASKED FOR RATHER THAN INHERITED.
+	#
+	# -fopenmp is already on meq_core's compile line today, but it arrives
+	# through MFEM_CXXFLAGS -- so meq's own `#pragma omp parallel for` regions,
+	# in src/meq/GradShafranov.cpp and src/meq/CriticalPoints.cpp, depend on a
+	# flag belonging to a dependency. Rebuild MFEM without OpenMP and those
+	# pragmas would become unknown-pragma warnings and every loop would
+	# silently serialise, which is slow rather than wrong, but is a change of
+	# behaviour nothing would report.
+	#
+	# PUBLIC, because the regions are compiled from meq's own translation units
+	# and the runtime has to be on the link line; and NOT REQUIRED, because the
+	# regions are guarded on MFEM_USE_OPENMP && MFEM_THREAD_SAFE and a build
+	# without either is a correct serial build. That is the same shape as the
+	# MFEM guard below: an unfound package leaves no target, so the link would
+	# fail at ld time rather than at configure.
+	find_package(OpenMP COMPONENTS CXX)
+	if(OpenMP_CXX_FOUND)
+		target_link_libraries(meq_core PUBLIC OpenMP::OpenMP_CXX)
+	endif()
+
 	# PUBLIC, not PRIVATE: meq's own headers include mfem.hpp and toml.hpp,
 	# so anything that includes them needs both on its compile line.
 	target_link_libraries(meq_core PUBLIC toml11::toml11)

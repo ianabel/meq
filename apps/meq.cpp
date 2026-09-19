@@ -1088,6 +1088,33 @@ int main( int argc, char **argv )
 	/// output phase rather than the solve.
 	double postSeconds = 0.0;
 	double postCpuSeconds = 0.0;
+	/*
+	 * THE TWO THAT NAME `outside solve()`'s UNNAMED REMAINDER.
+	 *
+	 * `outside solve()` is the solve phase less everything solve() itself
+	 * timed, and on the shipped machine case about HALF of it belonged to no
+	 * leg at all: the whole is 6.0% of the run and `makeSolver` (1.1%),
+	 * `support move` (0.0%) and `axis checks` (1.7%) account for 2.8% of it,
+	 * leaving 3.2% with no name. This project's own record says not to
+	 * act on an unnamed remainder -- M-126 exists because `otherSeconds()` was
+	 * 45% of a step and named nothing, and M-100 because the work was in const
+	 * members the call-site timers could not see -- so the two largest
+	 * candidates get a name before anybody decides whether they are worth
+	 * doing anything about.
+	 *
+	 *   * the DRIVER's own prepare(), once per adaptive cycle before the
+	 *     support sweeps, which is a full FormLinearSystem(). Separate from
+	 *     StepProfile::prepareSeconds, which is the solve's own reprepare().
+	 *   * the per-sweep block: everything in the support loop that is neither
+	 *     the support move nor the solve -- plasmaComponentElements() twice,
+	 *     edgeFluxOf(), the printf and its fflush, and the state copy.
+	 *
+	 * Instruments, not optimisations. They cost two clock reads per sweep.
+	 */
+	double driverPrepareSeconds = 0.0;
+	double driverPrepareCpuSeconds = 0.0;
+	double sweepOverheadSeconds = 0.0;
+	double sweepOverheadCpuSeconds = 0.0;
 
 	// ---- configuration -------------------------------------------------
 	std::unique_ptr<meq::Configuration> config;
@@ -3110,7 +3137,13 @@ int main( int argc, char **argv )
 			 * including the ramp and the bump, which arrive as Coefficients and
 			 * have no field to read.
 			 */
-			solver->prepare();
+			{
+				double const prepareStart = elapsedSince( started );
+				double const prepareStartCpu = cpuNow();
+				solver->prepare();
+				driverPrepareSeconds += elapsedSince( started ) - prepareStart;
+				driverPrepareCpuSeconds += cpuNow() - prepareStartCpu;
+			}
 
 			// PER CYCLE, not per run: a refined mesh re-decides its own support
 			// from the carried field, and the summary reports the last cycle's
@@ -3135,7 +3168,11 @@ int main( int argc, char **argv )
 
 			for ( int sweep = 0; sweep < supportSweeps; ++sweep )
 			{
+				double const overheadStart = elapsedSince( started );
+				double const overheadStartCpu = cpuNow();
 				int const before = solver->plasmaComponentElements();
+				sweepOverheadSeconds += elapsedSince( started ) - overheadStart;
+				sweepOverheadCpuSeconds += cpuNow() - overheadStartCpu;
 
 				double const supportStart = elapsedSince( started );
 				double const supportStartCpu = cpuNow();
@@ -3155,6 +3192,9 @@ int main( int argc, char **argv )
 				runSolve();
 				++sweepsRun;
 
+				double const tailStart = elapsedSince( started );
+				double const tailStartCpu = cpuNow();
+
 				int const after = solver->plasmaComponentElements();
 				std::printf( "     %-6d %6d %14.6e %14.6e", sweep,
 				             solver->newtonIterations(), solver->psiAxis(),
@@ -3170,6 +3210,9 @@ int main( int argc, char **argv )
 				state = solver->potential();
 				axis = solver->psiAxis();
 				boundary = solver->psiBoundary();
+
+				sweepOverheadSeconds += elapsedSince( started ) - tailStart;
+				sweepOverheadCpuSeconds += cpuNow() - tailStartCpu;
 
 				// THE SUPPORT REPEATING IS THE FIXED POINT. The count alone
 				// would miss a swap of one element for another, so the mask is
@@ -5294,6 +5337,14 @@ int main( int argc, char **argv )
 		     p.solves );
 		// The axis diagnostics, which root the mesh and are the driver's own.
 		leg( "  of which axis checks", checkSeconds, checkCpuSeconds, 1 );
+		// AND THE TWO THAT NAME WHAT THE THREE ABOVE LEFT OVER. The driver's
+		// own prepare() is a full FormLinearSystem() once per adaptive cycle;
+		// the sweep overhead is the support loop's body less the support move
+		// and less the solve. Both are instruments: see their declarations.
+		leg( "  of which driver prepare", driverPrepareSeconds,
+		     driverPrepareCpuSeconds, 1 );
+		leg( "  of which sweep overhead", sweepOverheadSeconds,
+		     sweepOverheadCpuSeconds, sweepsRun );
 		// THE TWO REGIME PREDICATES, printed beside the legs they explain.
 		// Both are silent when false: the answer does not change and only the
 		// gradient leg grows. See fluxMassIsPrefactored().
