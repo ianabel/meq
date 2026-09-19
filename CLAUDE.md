@@ -760,11 +760,21 @@ the repair.
 
 **AND "THE FIXTURE CANNOT BE REPAIRED IN PLACE" IS THE WRONG CONCLUSION TO DRAW
 FROM IT BY ONE INGREDIENT.** `ConfineToPlasma` alone fails 4/4 and clamped
-profiles alone fail 4/4; both measurements stand, and what they show is that
-confinement is **one third** of the repair rather than that there is none — the
-same run records "clamped WITH a prescribed current converges in 22 steps".
-**A measurement that rules two things out is not a measurement that rules
-everything out.**
+profiles alone fail 4/4; both measurements stand, and neither is a measurement
+about the pair — the same run records "clamped WITH a prescribed current
+converges in 22 steps". **A measurement that rules two things out is not a
+measurement that rules everything out.**
+
+**THE FOURTH CELL IS NOW RUN AND IT SAYS THE PAIR IS NOT ENOUGH EITHER** →
+**[M-134](MEASUREMENTS.md#m-134)**. Confinement **with** a prescribed current,
+swept over 250x in the target, reaches **2 of 4 at best** — 0 of 4 below
+`μ₀I_p = 0.20`, 2 of 4 at 0.50 and again at 2.00, and back to 0 of 4 at 5.00, so
+the maximum is interior and the sweep is not truncated. The clamped arm is cured
+outright by that same lever. So a prescribed current moves confinement off zero
+and does not repair it, and `theTwoBordersConvergeTogether` keeps
+`FREE-BOUNDARY-PLAN.md` §11.2's retraction of its `ψ_ax` and `ψ_bnd` as physics.
+**The lesson survives its own example**: it took the full 2 x 2 to say this, and
+each of the four one-key runs on its own supported a different wrong reading.
 
 **IT MUST NOT ASSERT `checkAxis().agrees`, WHICH IS A TAUTOLOGY UNDER THE
 LOCATED-AXIS CONSTRAINT**: `Ψ` there reads 1 by construction — measured, that
@@ -837,6 +847,15 @@ busy-wait loop of the session's own making, the next with another agent's build.
 **A suite time is only a measurement on an idle machine**, and this file already
 records a 490 s / 540 s spread on identical code. Read the ratios; re-time on an
 idle machine before reading anything into a change of tens of percent.
+
+**AND IT HAS JUST GROWN BY ABOUT 16 MINUTES, WHICH IS WORTH KNOWING BEFORE
+SOMEBODY TIMES THE SUITE AND CONCLUDES SOMETHING.** FB-T's
+`confinementWithAPrescribedCurrentIsTheFourthCell` is **forty solves** — a 2 x 2
+re-run whole with the target current swept across eight values — and it is kept
+at its full sweep deliberately, because a trimmed one would no longer reproduce
+[M-134](MEASUREMENTS.md#m-134)'s published table. `FreeBoundaryCoupling` is
+therefore the critical path by a distance now, not merely the longest test, and
+a suite time taken after this is not comparable with one taken before it.
 
 **`FreeBoundaryCoupling` overtakes the lint and it is buying
 something.** It carries FB-7's four acceptances, a coupled filament run, and

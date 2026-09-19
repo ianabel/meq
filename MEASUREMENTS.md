@@ -5144,3 +5144,142 @@ phenomenon is **not** an artefact of the driver's guess handling — it reproduc
 in a bare library fixture — and that `setBoundaryFluxInitial()` must stay a
 library setter and never become a TOML key, since a file that silently moved
 `psi_bnd`'s start by 3e-02 would move the reported `psi_bnd` by a factor of six.
+
+### M-133
+
+**AN X-POINT ON THE PLASMA EDGE COSTS THE APPROXIMATION NOTHING, AND THE
+SUPPORT-CORNER COUNTER-ARGUMENT DOES NOT BITE.** `FREE-BOUNDARY-PLAN.md` §10.1
+predicts this and says plainly that it cuts against expectation: at a null `Ψ`
+vanishes **quadratically**, so a source `F ~ Ψ^j` vanishes to order `2j` there
+and the crossing is *smoother* than the branches rather than rougher. §10.1
+nominated XP-1 to stop it being a prediction; XP-1 went elsewhere — to the fill
+leaking through the band of elements straddling the separatrix — so FB-S has
+been an argument and not a number for the whole campaign.
+
+**THE DESIGN NEEDS NO SOLVER AND NO EXACT DIVERTED EQUILIBRIUM**, which is why
+it could have been done at any point in the last month.
+`theCutCapsTheOrderBeforeAnyMethodIsChosen` already measures the plasma edge's
+cap as a property of **best approximation** — element-local L2 projection onto
+`P_k` over a dyadic mesh sequence, quadrature at `2k + 14` so the rule is never
+what is being read. FB-S is that case with **the cut as the only thing that
+differs**:
+
+| arm | `φ` | zero set |
+|---|---|---|
+| smooth | `a² − dr² − dz²` | a circle |
+| crossed | `dz² − dr²` | two lines through a null |
+
+with `ψ = (φ/a²)^m`, `m = j + 2`, over `n = 8, 16, 32, 64` and `k = 1, 2, 3`.
+The rate is taken across the whole sequence rather than per pair, for
+`ExtensionConvergence`'s reason: which elements the cut passes through is not a
+smooth function of `h`.
+
+```
+  j = 0 ( m = 2, cap m + 1/2 = 2.5 )
+    k       smooth     rate      crossed     rate   difference
+    1    2.709e-04    1.918    6.081e-03    1.988     +0.070
+    2    2.333e-05    2.484    8.069e-05    2.771     +0.287
+    3    7.583e-06    2.532    2.424e-05    2.513     -0.020
+
+  j = 1 ( m = 3, cap m + 1/2 = 3.5 )
+    1    2.631e-04    1.877    6.463e-02    1.963     +0.086
+    2    9.032e-06    2.943    8.194e-04    2.977     +0.033
+    3    7.166e-07    3.388    7.113e-06    3.908     +0.520
+
+  j = 2 ( m = 4, cap m + 1/2 = 4.5 )
+    1    2.813e-04    1.825    5.947e-01    1.924     +0.099
+    2    9.629e-06    2.995    1.082e-02    2.940     -0.055
+    3    3.254e-07    3.795    1.227e-04    3.960     +0.165
+```
+
+**THE WORST DROP OVER NINE `( j, k )` PAIRS IS 0.055 OF AN ORDER**, against the
+0.25 the case allows for a moving cut, and the crossed arm is **faster** in
+seven of the nine. So the prediction holds, and so does the reason for caring
+about it: the competing argument — that the support's **corner** costs an order
+the way `meq-corner-costs-the-extension-its-order` measures it costing the
+extension — would have capped a diverted plasma below FB-4's `|d|^{j+2}`
+wherever the null sits inside an element. It does not.
+
+**ONLY THE RATES ARE COMPARABLE AND THE TEST SAYS SO IN ITS ASSERTION.** The
+smooth arm's `φ` is bounded by `a²` and the crossed arm's grows to the corner of
+the box, so the two carry constants up to **2000×** apart — 2.813e-04 against
+5.947e-01 at `j = 2, k = 1`. A reader comparing the two error columns is reading
+the normalisation and not the cut, which is why `worstDrop` is a difference of
+rates.
+
+**WHAT IT DOES NOT SETTLE.** This is best approximation, so it bounds what any
+method on these spaces can do and says nothing about whether MEQ's solve
+attains it on a diverted machine — the fill, the moving support and the X-point
+border are all outside it. It is the half of §10.1 that was resting on an
+argument; the solved half is XP-3's and is already green.
+
+The case is `anXPointOnThePlasmaEdgeCostsTheApproximationNothing` in
+`tests/convergence/PlasmaEdgeConvergence.cpp`.
+
+### M-134
+
+**A PRESCRIBED CURRENT MOVES CONFINEMENT OFF ZERO AND DOES NOT CURE IT, SO THE
+FIXTURE IS NOT REPAIRABLE THE WAY §7.12b's WAS.** `FREE-BOUNDARY-PLAN.md` §11.2
+retracts `theTwoBordersConvergeTogether`'s `ψ_ax` and `ψ_bnd` as physics because
+the case closes only with a source that carries current in the **vacuum**, and
+records two repairs each tried alone and each failing 4 of 4. FB-T is the
+missing fourth cell — confinement **and** a prescribed current — and the
+attribution turns on it: if pinning the amplitude repairs confinement, the
+failure was §7.14's amplitude-fixed-with-a-moving-support difficulty, whose
+known cure is exactly the current border.
+
+**THE WHOLE 2 × 2 IS RE-RUN RATHER THAN ONE CELL BOLTED ONTO REMEMBERED
+NUMBERS**, which is M-82's lesson in this same file: a one-key experiment
+separates two hypotheses only if everything else is where you think it is, and
+there the fill was off in *both* arms of every experiment run on it. `k = 2`,
+`n = 24` on the half-disc, four limiter radii, `PowerProfile` at `j = 1`.
+
+```
+  arm                          R=1.05  R=1.15  R=1.20  R=1.30   converged
+  unconfined, no current        ok5     ok8     ok6     ok5      4/4   control
+  CONFINED, no current          --      --      --      --       0/4
+  CONFINED, mu0 Ip = 0.02       --      --      --      --       0/4
+  CONFINED, mu0 Ip = 0.05       --      --      --      --       0/4
+  CONFINED, mu0 Ip = 0.10       --      --      --      --       0/4
+  CONFINED, mu0 Ip = 0.20       ok20    --      --      --       1/4
+  CONFINED, mu0 Ip = 0.50       ok25    --      ok14    --       2/4
+  CONFINED, mu0 Ip = 1.00       ok40    --      --      --       1/4
+  CONFINED, mu0 Ip = 2.00       --      ok19    ok32    --       2/4
+  CONFINED, mu0 Ip = 5.00       --      --      --      --       0/4
+```
+
+**THE ANSWER IS PARTIAL SUPPORT AND AN EXPLICIT REFUSAL OF THE REST.** A
+prescribed current does move confinement off zero — 0 of 4 becomes 2 of 4 — so
+§7.14's diagnosis is doing real work and the amplitude is part of the
+difficulty. It is **not the whole difficulty**, and three things in that table
+say so:
+
+* **The clamped arm is cured outright by the same lever.** §11.2's own row reads
+  *clamped profiles with a prescribed current converge in 22 steps*, 4 of 4.
+  Confinement gets 2 of 4 at its best over a **250× range** of target current.
+* **The maximum is interior, so this is not a truncated sweep.** 0.50 and 2.00
+  both give 2 of 4 and 5.00 gives 0 of 4. The first run of this case peaked at
+  its own largest target and would have been published as "2 of 4" when the
+  sweep had simply stopped too early; the case now prints a warning when the
+  best cell is the largest target tried, and on this run it does not fire.
+* **WHICH radii close depends on the current, and not monotonically.** 0.50
+  closes `R = 1.05` and `1.20`; 2.00 closes `1.15` and `1.20`; 1.00, between
+  them, closes only `1.05`. Over the whole sweep three of the four radii close
+  at *some* current and `R = 1.30` never does, but **no single current closes
+  more than two** — 6 of 32 confined cells in all. A lever that cured the
+  underlying ill-posedness would not behave like this; a lever that shifts which
+  discrete branch a given radius lands on would.
+
+**SO THE FIXTURE IS NOT REPAIRABLE BY GIVING IT THE INGREDIENT IT LACKS**, and
+that is the opposite of how §7.12b's fixture and M-82's fill came out. §11.2's
+retraction stands unchanged, and what FB-T adds is that it is not going to be
+lifted by the current border.
+
+**THE ONLY ASSERTION IS THE CONTROL.** `baseline == 4` is what
+`theTwoBordersConvergeTogether` already asserts, and it is in this case so that a
+zero elsewhere in the cross is a statement about the key that moved rather than
+about the fixture having drifted underneath it. Asserting on the confined arms
+would be asserting a known defect, which the testing stance forbids.
+
+The case is `confinementWithAPrescribedCurrentIsTheFourthCell` in
+`tests/convergence/FreeBoundaryCoupling.cpp`.

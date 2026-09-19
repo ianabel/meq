@@ -50,6 +50,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <functional>
 #include <cstdio>
 #include <map>
 #include <vector>
@@ -540,6 +541,183 @@ BOOST_AUTO_TEST_CASE( theCutCapsTheOrderBeforeAnyMethodIsChosen )
  * ExtensionConvergence.cpp's are and for the same reason: the set of elements
  * the edge cuts is not a smooth function of h.
  */
+/*
+ * FB-S: DOES AN X-POINT ON THE PLASMA EDGE COST THE APPROXIMATION ANYTHING?
+ * FREE-BOUNDARY-PLAN.md section 10.1 and section 12.
+ *
+ * That section records a PREDICTION and says it is one: at a null `Psi` vanishes
+ * QUADRATICALLY, so `F ~ Psi^j` vanishes to order `2j` there and the crossing is
+ * SMOOTHER than the rest of the edge for every `j >= 1`, not rougher. The
+ * `| d |^{j+2}` cap should therefore continue to hold along each branch and the
+ * crossing should contribute nothing extra, being a set of measure zero in a
+ * two-dimensional integral. It nominates XP-1 as where it stops being a
+ * prediction, and XP-1 went elsewhere -- it found the fill leaking through the
+ * BAND of elements straddling the separatrix and shipped a watershed. So the
+ * order question was never asked.
+ *
+ * THERE IS A COMPETING ARGUMENT AND IT IS WHY THIS IS WORTH MEASURING RATHER
+ * THAN ASSERTING. The SUPPORT of a crossed edge has a CORNER -- two wedges
+ * meeting at the null -- and CLAUDE.md records a corner costing MEQ's extension
+ * its order in a different setting. Pointwise smoothness at the crossing and
+ * the shape of the region are not the same property, and the two arguments
+ * point opposite ways.
+ *
+ * THE MEASUREMENT NEEDS NO SOLVER AND NO EXACT DIVERTED EQUILIBRIUM, which is
+ * what makes it cheap enough to have been done at any point in the last month.
+ * It is theCutCapsTheOrderBeforeAnyMethodIsChosen's design: the element-local
+ * L2 projection error of a manufactured singular part onto P_k, over a mesh
+ * sequence, with the CUT as the only thing that differs between arms.
+ *
+ *      smooth   phi = a^2 - dr^2 - dz^2      one closed curve through the box
+ *      crossed  phi = dz^2 - dr^2            two branches meeting at a null
+ *
+ * Both raised to m = j + 2, so both carry the same `( distance )^m` kink ACROSS
+ * each branch -- near a point on `dz = dr` the crossed level set factorises as
+ * `( dz - dr )( dz + dr )`, linear in the normal distance times a smooth factor
+ * that does not vanish. The only difference between the arms is the one point
+ * where the branches meet. A rate that survives is the prediction; a rate that
+ * drops is the corner.
+ */
+BOOST_AUTO_TEST_CASE( anXPointOnThePlasmaEdgeCostsTheApproximationNothing )
+{
+	double const centreR = 1.0, centreZ = 0.0, radius = 0.23456789;
+
+	// The two singular parts. Both are C^{m-1} across their own zero set, and
+	// THAT IS THE ONLY THING HELD IN COMMON -- the smooth part's phi is bounded
+	// by radius^2 while the crossed part's grows to the corner of the box, so
+	// the two carry constants up to 2000x apart and ONLY THE RATES ARE
+	// COMPARABLE. The assertion below reads a difference of rates for exactly
+	// this reason; a reader comparing the two error columns is reading the
+	// normalisation and not the cut.
+	auto smoothPart = [ & ]( double r, double z, int m )
+	{
+		double const dr = r - centreR, dz = z - centreZ;
+		double const phi = radius*radius - dr*dr - dz*dz;
+		return phi > 0.0 ? std::pow( phi/( radius*radius ), m ) : 0.0;
+	};
+	auto crossedPart = [ & ]( double r, double z, int m )
+	{
+		double const dr = r - centreR, dz = z - centreZ;
+		double const phi = dz*dz - dr*dr;
+		return phi > 0.0 ? std::pow( phi/( radius*radius ), m ) : 0.0;
+	};
+
+	// Element-local L2 projection onto P_k, accumulated over the mesh. The
+	// quadrature is deliberately far richer than the space -- this is a
+	// statement about BEST APPROXIMATION and must not be one about a rule.
+	auto projectionError = []( mfem::Mesh &mesh, int k,
+	                           std::function<double( double, double )> const &u )
+	{
+		mfem::L2_FECollection fec( k, 2 );
+		mfem::FiniteElementSpace space( &mesh, &fec );
+		mfem::IntegrationRule const &ir =
+			mfem::IntRules.Get( mfem::Geometry::TRIANGLE, 2*k + 14 );
+
+		double total = 0.0;
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			mfem::FiniteElement const &el = *space.GetFE( e );
+			mfem::IsoparametricTransformation tr;
+			mesh.GetElementTransformation( e, &tr );
+
+			int const dof = el.GetDof();
+			mfem::DenseMatrix mass( dof );
+			mfem::Vector rhs( dof ), shape( dof ), point;
+			mass = 0.0;
+			rhs = 0.0;
+			for ( int i = 0; i < ir.GetNPoints(); ++i )
+			{
+				mfem::IntegrationPoint const &ip = ir.IntPoint( i );
+				tr.SetIntPoint( &ip );
+				el.CalcShape( ip, shape );
+				tr.Transform( ip, point );
+				double const w = ip.weight*tr.Weight();
+				mfem::AddMult_a_VVt( w, shape, mass );
+				rhs.Add( w*u( point( 0 ), point( 1 ) ), shape );
+			}
+			mfem::DenseMatrixInverse inverse( mass );
+			mfem::Vector coefficients( dof );
+			inverse.Mult( rhs, coefficients );
+
+			for ( int i = 0; i < ir.GetNPoints(); ++i )
+			{
+				mfem::IntegrationPoint const &ip = ir.IntPoint( i );
+				tr.SetIntPoint( &ip );
+				el.CalcShape( ip, shape );
+				tr.Transform( ip, point );
+				double const d = u( point( 0 ), point( 1 ) ) - ( shape*coefficients );
+				total += ip.weight*tr.Weight()*d*d;
+			}
+		}
+		return std::sqrt( total );
+	};
+
+	std::vector<int> const meshes = { 8, 16, 32, 64 };
+
+	std::printf( "\n  FB-S: A CROSSED PLASMA EDGE AGAINST A SMOOTH ONE\n" );
+	std::printf( "    best approximation in P_k, cut is the only difference\n" );
+
+	double worstDrop = 0.0;
+	for ( int j : { 0, 1, 2 } )
+	{
+		int const m = j + 2;
+		std::printf( "\n    j = %d ( m = %d, cap m + 1/2 = %.1f )\n",
+		             j, m, m + 0.5 );
+		std::printf( "      k   %10s %8s   %10s %8s   %s\n",
+		             "smooth", "rate", "crossed", "rate", "difference" );
+
+		for ( int k = 1; k <= 3; ++k )
+		{
+			std::vector<double> smooth, crossed;
+			for ( int n : meshes )
+			{
+				mfem::Mesh mesh = makeMesh( n );
+				smooth.push_back( projectionError( mesh, k,
+					[ & ]( double r, double z ) { return smoothPart( r, z, m ); } ) );
+				mesh = makeMesh( n );
+				crossed.push_back( projectionError( mesh, k,
+					[ & ]( double r, double z ) { return crossedPart( r, z, m ); } ) );
+			}
+
+			// The rate across the whole sequence rather than per pair: the cut
+			// moves through the mesh as h halves, so a single pair carries the
+			// geometry's own scatter. Same reason ExtensionConvergence reads
+			// its rate across the sequence.
+			auto rate = []( std::vector<double> const &e, std::vector<int> const &n )
+			{
+				return std::log( e.front()/e.back() )
+				       /std::log( static_cast<double>( n.back() )/n.front() );
+			};
+			double const rs = rate( smooth, meshes );
+			double const rc = rate( crossed, meshes );
+			worstDrop = std::max( worstDrop, rs - rc );
+
+			std::printf( "      %d   %10.3e %8.3f   %10.3e %8.3f   %+8.3f\n",
+			             k, smooth.back(), rs, crossed.back(), rc, rc - rs );
+		}
+	}
+	std::fflush( stdout );
+
+	/*
+	 * WHAT IS ASSERTED IS THE PREDICTION, AND IT IS A COMPARISON RATHER THAN AN
+	 * ABSOLUTE RATE. The cap m + 1/2 is what theCutCapsTheOrderBeforeAnyMethodIsChosen
+	 * already measures for the smooth arm; what section 10.1 claims is that the
+	 * crossing costs NOTHING ON TOP, so the crossed arm's rate must not fall
+	 * below the smooth arm's by more than the scatter a moving cut produces.
+	 * 0.25 is ExtensionConvergence's own per-sequence slack for the same
+	 * reason -- which elements the cut passes through is not a smooth function
+	 * of h.
+	 */
+	BOOST_TEST( worstDrop < 0.25,
+		"a crossed plasma edge converges " << worstDrop << " of an order worse "
+		"than a smooth one at its worst ( k, j ). FREE-BOUNDARY-PLAN.md "
+		"section 10.1 predicts no loss at all, on the argument that Psi "
+		"vanishes quadratically at a null so the crossing is SMOOTHER than the "
+		"branches; a real loss here is the SUPPORT's corner rather than the "
+		"function's smoothness, and it would mean a diverted plasma is capped "
+		"below FB-4's | d |^{j+2} wherever the null sits inside an element" );
+}
+
 BOOST_AUTO_TEST_CASE( thePlasmaEdgeCapIsSetByTheProfileAndNotByTheQuadrature )
 {
 	std::vector<int> const meshes = { 8, 16, 32 };

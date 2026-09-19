@@ -1102,6 +1102,36 @@ So that knob is only meaningful while `2k + extra ≤ 25`, which at `k = 3` is
 `extra ≤ 19`. `theLossIsTheRulesBlindnessAndNotItsResolution` pins the boundary
 so the next caller meets it as an assertion.
 
+## An X-point on that edge costs the approximation NOTHING — measured
+
+**§10.1 PREDICTED IT, NOTHING HAD MEASURED IT FOR THE WHOLE CAMPAIGN, AND IT
+HOLDS** → **[M-133](MEASUREMENTS.md#m-133)**. The prediction cuts against
+expectation and the section says so: at a null `Ψ` vanishes **quadratically**,
+so a source `F ~ Ψ^j` vanishes to order `2j` there and the crossing is
+*smoother* than the branches. The worry was never that — it was that the
+plasma's **support** acquires a corner at the null, and a corner is measured to
+cost MEQ's extension an order.
+
+**IT DOES NOT COST THE APPROXIMATION ONE.** Best approximation in `P_k` over
+`n = 8, 16, 32, 64`, a crossed edge (`φ = dz² − dr²`, two lines through a null)
+against a smooth one (`φ = a² − dr² − dz²`), with the cut as the only thing that
+differs: the **worst rate drop over nine `( j, k )` pairs is 0.055 of an
+order**, against the 0.25 a moving cut is allowed, and the crossed arm is
+*faster* in seven of the nine.
+
+**SO THE CAP ABOVE IS THE DIVERTED CAP TOO.** `min( k+1, j+1.5 )` for `ψ_h` and
+the `k ≤ j` threshold for `ψ*` are properties of the profile's exponent, and a
+null on the edge does not add a term to either. That is the half of §10.1 that
+had been resting on an argument; the solved half is XP-3's and is green.
+
+**TWO LIMITS, BOTH IN THE MEASUREMENT RATHER THAN AROUND IT.** Only the *rates*
+compare — the two arms are not normalised to a common magnitude and their
+constants stand up to 2000× apart, which is why the assertion is a difference of
+rates. And it is best approximation, so it bounds what any method on these
+spaces can do and says nothing about whether MEQ's solve attains it on a
+diverted machine, where the fill, the moving support and the X-point border all
+still apply.
+
 ## At `j = 0` the question does not arise: Newton cannot solve it at all
 
 **THE SHARPEST FB-4 FINDING, AND IT IS ABOUT THE JACOBIAN RATHER THAN THE

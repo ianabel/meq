@@ -4729,7 +4729,15 @@ quoting the axis layer.**
 
 ---
 
-## 12. What is left, collected: FB-R, FB-S and FB-T
+## 12. What is left, collected: FB-R, FB-S and FB-T — **ALL THREE MEASURED**
+
+**ALL THREE ARE NOW MEASURED, AND TWO OF THE THREE ANSWERS ARE NEGATIVE.** FB-R
+says the two discrete equilibria do **not** merge under refinement
+([M-132](MEASUREMENTS.md#m-132)); FB-S says an X-point costs the plasma edge
+**nothing** ([M-133](MEASUREMENTS.md#m-133)), which is the one confirmation;
+FB-T says a prescribed current moves confinement off zero and does **not** cure
+it ([M-134](MEASUREMENTS.md#m-134)). What each leaves open is written under it,
+and none of the three left a stage behind.
 
 **THE LADDER IS CLOSED AND THIS IS NOT A STAGE LIST.** FB-A to FB-7 and XP-0 to
 XP-4 are met; §7 and §10.6 carry their per-stage records. What is collected here
@@ -4827,7 +4835,40 @@ for the same reason: refining the gmsh mesh uniformly keeps the conductors and
 the limiter region where they are, where re-running `halfdisc.py` at a smaller
 `--size` would move them and put a second variable in a study about the first.
 
-### FB-S — does an X-point cost the plasma edge any order?
+### FB-S — does an X-point cost the plasma edge any order? — **ANSWERED: NO**
+
+**MEASURED, AND §10.1's PREDICTION HOLDS** → **[M-133](MEASUREMENTS.md#m-133)**.
+Nine `( j, k )` pairs of best approximation in `P_k`, a crossed plasma edge
+against a smooth one with the cut as the only difference. **The worst rate drop
+is 0.055 of an order** against the 0.25 the case allows for a moving cut, and
+the crossed arm is *faster* in seven of the nine.
+
+```
+  j = 0 ( m = 2 )   k=1 +0.070   k=2 +0.287   k=3 -0.020
+  j = 1 ( m = 3 )   k=1 +0.086   k=2 +0.033   k=3 +0.520
+  j = 2 ( m = 4 )   k=1 +0.099   k=2 -0.055   k=3 +0.165
+```
+
+**SO THE SUPPORT-CORNER COUNTER-ARGUMENT DOES NOT BITE**, which is the half of
+this item that had teeth. §10.1's own reasoning — `Ψ` vanishes quadratically at
+a null, so `F ~ Ψ^j` vanishes to order `2j` and the crossing is *smoother* than
+the branches — was never the worry; the worry was that the plasma's **support**
+acquires a corner there, and a corner is measured to cost the extension an
+order. It costs the approximation nothing.
+
+**ONLY THE RATES ARE COMPARABLE.** The two arms are not normalised to a common
+magnitude — the smooth `φ` is bounded by `a²` and the crossed one grows to the
+corner of the box — so the constants stand up to 2000x apart and the assertion
+is a difference of rates. **And it is best approximation**: it bounds what any
+method on these spaces can do and says nothing about whether MEQ's solve attains
+it on a diverted machine, which is XP-3's question and is already green.
+
+**The experiment cost no solver and no exact diverted equilibrium**, which is
+the uncomfortable part of closing it: it is
+`theCutCapsTheOrderBeforeAnyMethodIsChosen`'s design with one lambda changed, and
+it could have been run the day §10.1 was written.
+
+**The original statement of the item follows.**
 
 §10.1 records a prediction that **cuts against expectation** and says so: at the
 null `Ψ` vanishes **quadratically**, so `F ~ Ψ^j` vanishes to order `2j` there.
@@ -4850,7 +4891,42 @@ because the prediction is the reason nobody has worried about diverted
 convergence rates — and it is currently resting on an argument rather than on a
 number.
 
-### FB-T — what `theTwoBordersConvergeTogether` actually depends on
+### FB-T — what `theTwoBordersConvergeTogether` actually depends on — **MEASURED**
+
+**THE FOURTH CELL IS RUN AND THE ATTRIBUTION IS PARTIAL** →
+**[M-134](MEASUREMENTS.md#m-134)**. Confinement **with** a prescribed current,
+the whole 2 x 2 re-run rather than one cell added to remembered numbers, the
+target current swept over 250x:
+
+```
+  unconfined, no current   4/4   control
+  CONFINED, no current     0/4
+  CONFINED + mu0 Ip        0/4 at 0.02-0.10, 1/4 at 0.20, 2/4 at 0.50,
+                           1/4 at 1.00, 2/4 at 2.00, 0/4 at 5.00
+```
+
+**A prescribed current moves confinement off zero and does not cure it.** So
+§7.14's amplitude-fixed-with-a-moving-support diagnosis is doing real work — the
+amplitude is part of the difficulty — and it is **not the whole difficulty**,
+because the same lever cures the *clamped* arm outright at 4/4 in 22 steps while
+confinement reaches 2 of 4 at its best.
+
+**THE MAXIMUM IS INTERIOR, WHICH IS WHAT MAKES THIS A RESULT RATHER THAN A
+BOUNDARY.** The first run of this case peaked at its own largest target and
+would have gone into this file as "2 of 4" when the sweep had simply stopped too
+early. It now sweeps to 5.00, where the count falls back to 0 of 4, and prints a
+warning if the best cell is ever the largest target tried. **And which radii
+close depends on the current and not monotonically** — three of four close at
+*some* current, `R = 1.30` at none, and no single current closes more than two.
+That is the signature of a lever moving which discrete branch a radius lands on,
+not of one removing an ill-posedness.
+
+**SO THE ANSWER TO THE QUESTION AS ASKED IS: NOT REPAIRABLE THE WAY §7.12b's
+WAS.** §11.2's retraction of that case's `ψ_ax` and `ψ_bnd` as physics stands,
+and what FB-T adds is that the current border is not going to lift it. What the
+confinement is doing instead is not answered here and is the next question.
+
+**The original statement of the item follows.**
 
 §11.2 retracts that case's `ψ_ax` and `ψ_bnd` columns as physics and keeps them
 as a record of the solve closing, on a measured 2 × 2: `ConfineToPlasma` alone
@@ -4878,5 +4954,15 @@ currents.
 **None of them blocks anything and none of them is a stage.** FB-6 is met, the
 driver solves a diverted machine against an independent code with neither told
 where the null is, and the benchmark's remaining error is the conductor model
-and has its own plan. FB-R is the one to do first, because it is the only one
-whose answer could change what MEQ reports rather than how well it reports it.
+and has its own plan. FB-R was the one to do first, because it is the only one
+whose answer could change what MEQ *reports* rather than how well it reports it.
+
+**AND WITH ALL THREE RUN, WHAT IS LEFT OF §12 IS THREE SMALLER QUESTIONS RATHER
+THAN THREE ITEMS.** Each is written under its own heading above and none of them
+is this file's to answer alone:
+
+| | |
+|---|---|
+| **FB-R** | a **conductor-excluded** axis location, a topology diagnostic saying which equilibrium each row is, and a fourth level. §10.5's own `6.9e-02 m` must be re-checked against the coil list before it is quoted again, since the instrument that produced it found a coil's O-point |
+| **FB-S** | nothing. It is best approximation, it bounds what any method on these spaces can do, and the solved half is XP-3's and is green |
+| **FB-T** | what the confinement is doing, given that it is not the amplitude alone. `theTwoBordersConvergeTogether` keeps §11.2's retraction and is not going to be repaired by the current border |

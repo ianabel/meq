@@ -3334,6 +3334,167 @@ BOOST_AUTO_TEST_CASE( theTwoBordersConvergeTogether )
 
 
 /*
+ * FB-T: THE FOURTH CELL OF A 2x2 THAT HAS ONLY EVER BEEN RUN THREE WAYS.
+ * FREE-BOUNDARY-PLAN.md section 11.2 and section 12.
+ *
+ * theTwoBordersConvergeTogether above closes at all four limiter radii with a
+ * source that carries current in the VACUUM -- the profiles are plain powers of
+ * Psi and nothing stops them outside the plasma. Section 11.2 retracts that
+ * case's psi_ax and psi_bnd as physics for exactly that reason and records two
+ * repairs, each tried ALONE and each failing 4 of 4:
+ *
+ *      ConfineToPlasma alone                       0 of 4
+ *      profiles clamped to vanish at Psi <= 0      0 of 4
+ *      clamped WITH a prescribed current           converges, 22 steps
+ *      confined WITH a prescribed current          NEVER RUN
+ *
+ * The missing cell is the one that decides the attribution. If confinement
+ * converges once the amplitude is pinned, the failure was section 7.14's
+ * amplitude-fixed-with-a-moving-support difficulty -- a non-linear EIGENVALUE
+ * problem, ill posed rather than merely hard -- and the current border is its
+ * known cure. If it does not converge at any current, the confinement is doing
+ * something else and the fixture is not repairable the way section 7.12b's was.
+ *
+ * THE WHOLE CROSS IS RE-RUN HERE RATHER THAN ONE NEW CELL BOLTED ONTO REMEMBERED
+ * NUMBERS. M-82 is this file's own lesson: a one-key experiment separates two
+ * hypotheses only if everything else is where you think it is, and there the
+ * fill was off in BOTH arms of every experiment run on it.
+ *
+ * AND THE CURRENT IS SWEPT RATHER THAN CHOSEN. section 7.18's finding is that
+ * inconsistent inputs look exactly like branch selection, so a single target
+ * picked by eye could fail for a reason that has nothing to do with the
+ * confinement. The scale lambda is reported beside each row: lambda near 1 is a
+ * target the unconstrained problem would have delivered anyway, which is what
+ * "consistent" means here.
+ */
+BOOST_AUTO_TEST_CASE( confinementWithAPrescribedCurrentIsTheFourthCell )
+{
+	int const order = 2;
+	int const n = 24;
+	double const mu0 = 1.0;
+
+	HalfDisc d = makeHalfDisc( n );
+	meq::ExteriorDtN const dtn( 0.0, halfDiscGamma, 4 );
+	mfem::ConstantCoefficient zero( 0.0 );
+	mfem::FunctionCoefficient guess( []( mfem::Vector const &x )
+	{
+		double const dr = x( 0 ) - 0.75;
+		double const dz = x( 1 );
+		double const t = 1.0 - ( dr*dr + dz*dz )/( 0.40*0.40 );
+		return t > 0.0 ? 0.1*t : 0.0;
+	} );
+
+	double const radii[ 4 ] = { 1.05, 1.15, 1.20, 1.30 };
+
+	/// One solve of the shipped configuration with two keys moved. Returns the
+	/// final residual, or 1.0 if it threw -- a throw and a non-converging solve
+	/// are the same outcome for a cell of this cross, and both are reported.
+	auto run = [ & ]( double limiterR, bool confine, double muZeroCurrent,
+	                  double &psiAx, double &psiBnd, double &scale, int &its )
+	{
+		auto pPrime = std::make_shared<PowerProfile const>( 0.6, 1 );
+		auto ggPrime = std::make_shared<PowerProfile const>( 0.05, 1 );
+		meq::NormalisedMHDSource source( pPrime, ggPrime, 0.1, mu0 );
+		if ( confine )
+			source.setPlasmaSupport( true );
+
+		meq::GradShafranovSolver solver( *d.sub, order );
+		solver.setInitialGuess( guess );
+		solver.setNewtonControl( 1.0e-13, 1.0e-14, 150 );
+		solver.setSource( source, 0.1 );
+		if ( muZeroCurrent > 0.0 )
+			solver.setPlasmaCurrent( muZeroCurrent );
+		solver.setBoundaryData( zero );
+		solver.setExtension( *d.path, d.gammaHMarker );
+		solver.setBoundaryFluxPoint( limiterR, 0.0 );
+		solver.setExteriorCoupling( dtn );
+
+		psiAx = psiBnd = 0.0;
+		scale = 1.0;
+		its = 0;
+		try
+		{
+			solver.solve();
+		}
+		catch ( std::exception const & )
+		{
+			return 1.0;
+		}
+		psiAx = solver.psiAxis();
+		psiBnd = solver.psiBoundary();
+		scale = solver.plasmaCurrentScale();
+		its = solver.newtonIterations();
+		return solver.newtonResiduals().empty()
+		       ? 1.0 : solver.newtonResiduals().back();
+	};
+
+	auto arm = [ & ]( char const *name, bool confine, double muZeroCurrent )
+	{
+		int converged = 0;
+		std::printf( "    %-34s", name );
+		for ( double limiterR : radii )
+		{
+			double psiAx = 0.0, psiBnd = 0.0, scale = 1.0;
+			int its = 0;
+			double const residual =
+				run( limiterR, confine, muZeroCurrent, psiAx, psiBnd, scale,
+				     its );
+			bool const ok = residual < 1.0e-8;
+			if ( ok )
+				converged++;
+			std::printf( "  %3s%-3d", ok ? "ok" : "--", its );
+		}
+		std::printf( "   %d/4\n", converged );
+		std::fflush( stdout );
+		return converged;
+	};
+
+	std::printf( "\n  FB-T: THE 2x2, RE-RUN WHOLE ( k = %d, n = %d )\n",
+	             order, n );
+	std::printf( "    %-34s %-8s %-8s %-8s %-8s %s\n", "arm",
+	             "R=1.05", "R=1.15", "R=1.20", "R=1.30", "converged" );
+
+	int const baseline = arm( "unconfined, no current", false, 0.0 );
+	int const confinedAlone = arm( "CONFINED, no current", true, 0.0 );
+
+	std::printf( "    -- the missing cell, swept in the target current --\n" );
+	int best = 0;
+	double bestCurrent = 0.0;
+	for ( double target : { 0.02, 0.05, 0.10, 0.20, 0.50, 1.00, 2.00, 5.00 } )
+	{
+		char label[ 64 ];
+		std::snprintf( label, sizeof label, "CONFINED, mu0 Ip = %.2f", target );
+		int const got = arm( label, true, target );
+		if ( got > best )
+		{
+			best = got;
+			bestCurrent = target;
+		}
+	}
+
+	std::printf( "\n    baseline %d/4, confinement alone %d/4, "
+	             "confinement + current best %d/4 at mu0 Ip = %.2f\n",
+	             baseline, confinedAlone, best, bestCurrent );
+
+	// A BEST CELL AT THE TOP OF THE SWEEP IS NOT A RESULT, IT IS A BOUNDARY.
+	// The first run of this case peaked at its own largest target and would
+	// have been published as "2 of 4" when the sweep simply stopped too early.
+	if ( bestCurrent >= 5.00 )
+		std::printf( "    WARNING: the best cell is the LARGEST target tried, "
+		             "so this sweep is truncated and 'best' is a lower bound\n" );
+	std::fflush( stdout );
+
+	// THE ONLY THING ASSERTED IS THE CONTROL. The baseline is what
+	// theTwoBordersConvergeTogether already asserts, and it is here so that a
+	// zero in the other arms is a statement about the key that moved rather
+	// than about the fixture having drifted under this case.
+	BOOST_TEST( baseline == 4,
+	            "the unconfined control converged only " << baseline
+	            << " of 4, so every other row of this cross is uninterpretable "
+	            "-- repair the control before reading the arms" );
+}
+
+/*
  * THE LIMITER CONSTRAINT IS A STAIRCASE IN THE POINT ASKED FOR, UNLESS IT IS
  * EVALUATED AT THE POINT ASKED FOR.
  *
