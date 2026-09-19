@@ -18,12 +18,19 @@ freegs4e's `A_testtokamak_classic` with **neither code told where the null is**,
 point (**[M-82](MEASUREMENTS.md#m-82)**) and XP-3's three-row border
 (**[M-86](MEASUREMENTS.md#m-86)**).
 
-**SO WHAT IS LEFT OF THIS FILE IS ONE THING AND IT HAS ITS OWN PLAN.** §7.20's
-*What is left* is the conductor model — MEQ's rectangles against the reference's
-filaments — and that is now `COIL-SUBTRACTION-PLAN.md`, whose CS-0 **measures**
-what §7.20 could only infer: the global irreducible benchmark error **is** the
-conductor model, 6.081e-03 against M-111's 5.785e-03, a factor of 1.05. Read
-that file rather than restarting here.
+**SO THE STAGED LADDER IS CLOSED, AND WHAT IS LEFT IS THREE MEASUREMENTS AND A
+HANDOFF.** §7.20's *What is left* is the conductor model — MEQ's rectangles
+against the reference's filaments — and that is now `COIL-SUBTRACTION-PLAN.md`,
+whose CS-0 **measures** what §7.20 could only infer: the global irreducible
+benchmark error **is** the conductor model, 6.081e-03 against M-111's
+5.785e-03, a factor of 1.05. Read that file rather than restarting here.
+
+**THE THREE ARE NAMED, NUMBERED AND COLLECTED AT THE END OF THIS FILE** as
+FB-R, FB-S and FB-T, so that *"unmeasured"* buried at three different depths of
+a four-thousand-line document is a list a reader can act on. None is a stage,
+none blocks anything, and one of them — FB-R — is a question about **which
+equilibrium MEQ reports**, which is the only kind of open item in this file that
+could be a correctness problem rather than a refinement.
 
 `CLAUDE.md` is the operational record and is authoritative on anything already
 measured; `ROADMAP.md` is the order of work. `docs/` is the manual and carries the stage-7
@@ -869,16 +876,35 @@ it named is closed by not opening it, because MEQ adopts no cut rule.
 | **FB-2** prescribed plasma current | **nothing** new beyond FB-1 | clear |
 | **FB-3** `ψ_bnd` unknown | **nothing** — the `ψ_ax` border is the pattern and it is MEQ's own code | clear |
 | **FB-4** moving support + cut quadrature | **NOTHING, and the gap this row named is closed by not opening it.** MEQ adopts no cut rule, so there is no rule-sensitivity to supply: with fixed quadrature points the assembled Jacobian is already the exact derivative of the assembled residual. See §5.3's measurement | **clear** |
-| **FB-5** one bordered solve | §3 of the request: auxiliary unknowns carried through the elimination. **Still an optimisation and still not taken** — MEQ's border costs `N + 2` backsolves against one factorisation, which is affordable, plus ONE RE-ASSEMBLY per accepted step because the datum is a load term and `prepare()` is where a load is built | wanted, not blocking |
+| **FB-5** one bordered solve | §3 of the request: auxiliary unknowns carried through the elimination. **CLOSED, AND NOT BY BEING BUILT** — the entry points this row asks for are public already as `NPCReduce()` / `NPCRecover()`, and `DarcyNPCSolver::ArrayMult` applies them to several right-hand sides in one pass. **MEQ calls it**: the bordered step queues every column and flushes once, worth **1.34×** on the DIII-D solve leg at 14 columns → **[M-98](MEASUREMENTS.md#m-98)**. What is left is the ONE RE-ASSEMBLY per accepted step, because the datum is a load term and `prepare()` is where a load is built | **closed** |
 
-**Two things to ask for anyway, on their own merits and not as blockers.**
+**Two things to ask for anyway, on their own merits and not as blockers. BOTH
+ARE NOW CLOSED, AND THE SECOND CLOSED WITHOUT ANYBODY BUILDING IT.**
 §2.2's boundary quadrature on `Γ` with its tiling check was the first, *once MEQ
 had written one and used it* — **written, used, filed and merged upstream
 2026-09-05** as `mfem::ExtensionBoundaryQuadrature`, and the tiling check found
 an unsigned-weight defect in its sibling worth fifty-fold on somebody else's
-aerofoil. §3's auxiliary unknowns is the second and is **still open**: MEQ's
-`ψ_ax` border wants it today, and every global constraint on a hybridized system
-wants it.
+aerofoil.
+
+§3's auxiliary unknowns was the second, and **it is no longer worth asking for**.
+The reason is worth keeping because it is a species of error, not an accident:
+the request named a *capability* — carry `K` auxiliary unknowns through the
+elimination — when what it needed was a *batched entry point*, and that already
+existed. `NPCReduce()` and `NPCRecover()` are public, `DarcyNPCSolver::ArrayMult`
+blocks them over several right-hand sides, so a differenced border of `K` columns
+is `K` applications of a routine that already takes them together. MEQ's bordered
+step queues every column and flushes once: **1.34×** on the DIII-D solve leg →
+**[M-98](MEASUREMENTS.md#m-98)**.
+
+**AND THE TRAP IT MET ON THE WAY IS THE TRANSFERABLE PART.**
+`mfem::Operator::ArrayMult()` has a base implementation that loops `Mult()`, so
+it is never missing and never errors — merely slow. MEQ wraps its trace solver
+in `TimedSolver` on every bordered path, and a decorator overriding `Mult()` and
+not `ArrayMult()` silently un-blocks whatever it wraps, with **identical answers
+and identical call counts**. The blocked solve would have been bought and thrown
+away at the wrapper. *When a library adds a batched entry point with a working
+default, every decorator in the chain has to be revisited, and nothing will tell
+you.*
 
 **And one thing to keep watching rather than ask for.** `DarcyNPCOperator`'s
 `Jacobian` handle is **solve-only** — its `Mult()` aborts, because after
@@ -3940,8 +3966,14 @@ by two elements, so the residual is discontinuous in the unknowns and Newton has
 no derivative to iterate with. A tie at 3e-04 cannot be broken by making an
 argmax cleverer; the axis is a located point, not a competition.
 
-**INITIALISE `ψ_bnd` FROM ITS OWN BORDER ROW. NOT BUILT, AND THE REASON IS THE
-LIMITED MACHINE.** `ψ_ax` gets an initial value from the caller and `ψ_bnd` gets
+**INITIALISE `ψ_bnd` FROM ITS OWN BORDER ROW — DECLINED ON A MEASUREMENT, NOT
+PENDING.** Read the whole of this item before treating it as a missing default:
+it ends in *"what it is not is a missing default to be filled in"*, and the
+measurement that says so is the limited machine going from 11 Newton steps to
+the 200-iteration cap. What the item leaves genuinely open is the *selection*
+question at the end of it, which is `FB-R` in the closing section.
+
+**NOT BUILT, AND THE REASON IS THE LIMITED MACHINE.** `ψ_ax` gets an initial value from the caller and `ψ_bnd` gets
 none, so it starts every solve at 0. On a LIMITED machine that is nearly right —
 the contact is on the wall, where `ψ` is small. On a DIVERTED one the reference
 `ψ_bnd` is 3.240413e-02 against a span of 5.03e-02, **39% of the way from the
@@ -4694,3 +4726,157 @@ and it still does; closing on an unphysical equilibrium is still closing. What
 its `ψ_ax` and `ψ_bnd` columns are **not** is a machine, and its header now says
 so and points here. **Anything quoting §7.12b's numbers as an equilibrium is
 quoting the axis layer.**
+
+---
+
+## 12. What is left, collected: FB-R, FB-S and FB-T
+
+**THE LADDER IS CLOSED AND THIS IS NOT A STAGE LIST.** FB-A to FB-7 and XP-0 to
+XP-4 are met; §7 and §10.6 carry their per-stage records. What is collected here
+is every claim in this file that is still marked *unmeasured*, *predicted* or
+*open*, in one place, each with the experiment that would settle it and an
+honest statement of what turns on it. They are lettered rather than numbered so
+they cannot be mistaken for rungs of the ladder.
+
+**Two things that used to be on this list are gone rather than done.** §6.4's
+FB-5 row — auxiliary unknowns carried through the elimination — is closed
+because `NPCReduce()`/`NPCRecover()` were public already and
+`DarcyNPCSolver::ArrayMult` blocks them, M-98. And §10.5's *initialise `ψ_bnd`
+from its own border row* is **declined on its own measurement**, not pending:
+the limited machine goes from 11 Newton steps to the 200 cap under it, and that
+item's own conclusion is that this is a lever rather than a missing default.
+
+### FB-R — two discrete equilibria, and whether the gap closes under refinement
+
+**MEASURED, AND THE GAP DOES NOT CLOSE** → **[M-132](MEASUREMENTS.md#m-132)**.
+Three uniform refinements of the same machine on the **library** fixture, so
+the located axis, the support sweeps and the guess transfer are not variables;
+`GradShafranovSolver::setBoundaryFluxInitial()` exists because `psi_bnd` had no
+setter at all.
+
+| elements | seed | `psi_ax` | `psi_bnd` | its | `‖r‖` |
+|---|---|---|---|---|---|
+| 2642 | 0 | 8.48629920e-02 | 3.22975097e-02 | 26 | 5.53e-12 |
+| 2642 | 3.240e-02 | 8.26600366e-02 | 3.23793176e-02 | 7 | 3.95e-12 |
+| 10701 | 0 | 7.79347348e-02 | **4.63459237e-03** | 11 | 1.63e-14 |
+| 10701 | 3.240e-02 | 8.25753259e-02 | 3.23486098e-02 | 7 | 2.15e-12 |
+| 43026 | 0 | 7.56865206e-02 | **4.33770950e-03** | 12 | 2.88e-14 |
+| 43026 | 3.240e-02 | **1.29008101e-01** | 2.71353946e-02 | **97** | 2.21e-14 |
+
+**Every row converged** — worst residual 5.5e-12 — and at the finest mesh the
+two arms stand a factor of **6.3** apart in `psi_bnd`, having been 0.25% apart
+on the coarsest. So the answer to the question as asked is **no**.
+
+**IT IS NOT THE WHOLE ANSWER AND THE FILE SHOULD NOT PRETEND OTHERWISE.**
+Neither arm is a clean sequence: the unseeded one has its *coarse* level as the
+outlier and settles from the middle, while the seeded one is stable to 0.09%
+across two levels and then breaks on the third, at 97 iterations and a `psi_ax`
+56% above the reference. Two refinements do not establish a limit for either.
+
+**AND THE INSTRUMENT FOUND A CONDUCTOR.** The probe reported an axis from
+`findAxis( AxisSense::Maximum )` and got `( 1.006240, -1.099327 )` on every row
+of the first two levels — **inside coil P1L**, which spans `r ∈ [ 0.95, 1.05 ]`,
+`z ∈ [ -1.15, -1.05 ]`. Unforced, `findAxis()` refuses outright: *"3 maxima, 2
+minima and 2 saddles"*. **This is §10.7's defect 2 from the library side** —
+`apps/meq.cpp` carries a three-tier conductor exclusion on the fill seed and
+`meq::CriticalPointFinder` carries none, because a coil's O-point is a genuine
+critical point of `psi`. So an axis position taken that way on a machine with
+meshed conductors is about a conductor, and **§10.5's own `6.9e-02 m` should be
+re-checked against the coil list before it is quoted again**.
+
+**WHAT IS LEFT OF FB-R**: a conductor-excluded axis location, a topology
+diagnostic saying which equilibrium each row is, and a fourth level. What is
+settled is that the phenomenon is **not** an artefact of the driver's guess
+handling — it reproduces in a bare fixture — and that `setBoundaryFluxInitial()`
+must stay a library setter, since a file key that moved `psi_bnd`'s start by
+3e-02 would move the reported `psi_bnd` by a factor of six.
+
+**The original statement of the item follows.**
+
+**The only open item here that could be a correctness problem.** §10.5 measures
+the diverted machine reaching **two different equilibria** according to what
+`ψ_bnd` starts at:
+
+| initial `ψ_bnd` | steps | `ψ_bnd` | where the axis lands |
+|---|---|---|---|
+| 0 | 26 | 3.229751e-02, 0.33% out | ( 1.4201, 0.0704 ), **6.9e-02 m** from the reference, `ψ_ax` 2.6% high |
+| `ψ_h` at the limiter on the guess | 17 | 3.284153e-02 | the same second solution |
+
+**Both satisfy their own border row to 5e-12**, so neither is a failed solve,
+and at `k = 2` on 2642 elements an axis 6.9e-02 m out is **17% of a minor
+radius** — far too large to be discretisation and not yet demonstrated to be
+anything else.
+
+**The experiment.** The same fixture at `h`, `h/2` and `h/4`, both initial
+`ψ_bnd`, reporting the axis position, `ψ_ax`, `ψ_bnd` and the border residual
+for each. **Two outcomes and they mean opposite things**: if the two converge
+toward each other as `h` falls, this is one equilibrium reached along two paths
+and badly resolved on the coarse mesh, and the cure is the mesh. If the gap is
+flat in `h`, they are two equilibria of the discrete problem and **the initial
+`ψ_bnd` silently selects which one MEQ reports** — which is exactly the property
+`CLAUDE.md` refuses to let `Globalisation` be a TOML key for, and it would mean
+the same rule has to reach `ψ_bnd`'s initial value.
+
+~~**It needs one small thing that does not exist**: `ψ_bnd` starts every solve at
+`psiBoundaryValue`, which is written at the end of `solveWithNormalisation()`
+and has **no setter**.~~ **BUILT** as
+`GradShafranovSolver::setBoundaryFluxInitial()` — a library setter, never a TOML
+key, which is what makes the second arm reachable without the gate §10.5
+measured taking four green cases red. `buildMachine()` takes a refinement count
+for the same reason: refining the gmsh mesh uniformly keeps the conductors and
+the limiter region where they are, where re-running `halfdisc.py` at a smaller
+`--size` would move them and put a second variable in a study about the first.
+
+### FB-S — does an X-point cost the plasma edge any order?
+
+§10.1 records a prediction that **cuts against expectation** and says so: at the
+null `Ψ` vanishes **quadratically**, so `F ~ Ψ^j` vanishes to order `2j` there.
+The crossing is therefore *smoother* than the rest of the edge for every
+`j ≥ 1`, not rougher, and FB-4's `|d|^{j+2}` cap should continue to hold along
+each branch with the crossing contributing nothing extra — a set of measure zero
+in a two-dimensional integral.
+
+**Predicted, never measured.** That section nominates XP-1 as where it stops
+being a prediction, and XP-1 went elsewhere: it found the fill leaking through
+the **band** of elements straddling the separatrix rather than through the
+X-point's own element, and shipped a watershed. So the order question was never
+asked.
+
+**The experiment** is `PlasmaEdgeConvergence`'s own design applied to a diverted
+fixture: the same `j` sweep, the same dyadic meshes, with a null inside the
+domain rather than a smooth edge, read against the `min( k+1, j+1.5 )` the
+smooth case gives. **A confirmation is worth as much as a refutation here**,
+because the prediction is the reason nobody has worried about diverted
+convergence rates — and it is currently resting on an argument rather than on a
+number.
+
+### FB-T — what `theTwoBordersConvergeTogether` actually depends on
+
+§11.2 retracts that case's `ψ_ax` and `ψ_bnd` columns as physics and keeps them
+as a record of the solve closing, on a measured 2 × 2: `ConfineToPlasma` alone
+fails 4 of 4 limiter radii and clamped profiles alone fail 4 of 4, while clamped
+profiles **with** a prescribed current converge in 22 steps. So the case's result
+depends on the unphysical extrapolation — a source carrying current in the
+vacuum — and with physically correct confinement it does not close at all.
+
+**What is unmeasured is the attribution**: whether that is the
+amplitude-fixed-with-a-moving-support difficulty of §7.13 and §7.14, which
+§7.14's current border is what cures, or something else. The distinction decides
+whether the fixture is repairable the way §7.12b's was — by giving it the
+ingredient it lacks — or whether it is telling us something about the
+confinement itself.
+
+**The experiment** is the third arm of a cross that has already been run twice:
+confinement **and** a prescribed current, at the same four radii, everything else
+held. §11.2's own table has the other three cells. *A one-key experiment
+separates two hypotheses only if everything else is where you think it is*, and
+this file has paid for that lesson twice already — M-82's fill and §7.18's coil
+currents.
+
+### What none of the three is
+
+**None of them blocks anything and none of them is a stage.** FB-6 is met, the
+driver solves a diverted machine against an independent code with neither told
+where the null is, and the benchmark's remaining error is the conductor model
+and has its own plan. FB-R is the one to do first, because it is the only one
+whose answer could change what MEQ reports rather than how well it reports it.

@@ -5079,3 +5079,68 @@ against a slowly varying target.
 run with `theDriverSolvesForTheToroidalField`: the two are halves of one round
 trip, the run is 44 s, and running it twice would make the second case's numbers
 those of a different equilibrium.
+
+### M-132
+
+**THE INITIAL `psi_bnd` SELECTS AMONG DISCRETE EQUILIBRIA ON THE DIVERTED
+MACHINE, AND REFINEMENT DOES NOT MERGE THEM.** `FREE-BOUNDARY-PLAN.md` §10.5
+measured two answers from two starting values and nominated *"whether the gap
+closes under refinement"* as the next thing to measure — FB-R. It is now
+measured, on the **library** fixture rather than through the driver, so that the
+located axis, the support sweeps and the guess transfer are not variables.
+
+`tests/convergence/DivertedMachine.hpp` at three uniform refinements of
+`examples/diverted-tokamak.msh`, `k = 2`, the X-point pinned at freegs4e's
+`( 1.093144, -0.603965 )`, everything else identical. The seed is
+`GradShafranovSolver::setBoundaryFluxInitial()`, which exists because `psi_bnd`
+had no setter — it starts at `psiBoundary()`, zero on a fresh solver.
+
+| elements | seed | `psi_ax` | `psi_bnd` | its | final `‖r‖` |
+|---|---|---|---|---|---|
+| 2642 | 0 | 8.48629920e-02 | 3.22975097e-02 | 26 | 5.53e-12 |
+| 2642 | 3.240e-02 | 8.26600366e-02 | 3.23793176e-02 | 7 | 3.95e-12 |
+| 10701 | 0 | 7.79347348e-02 | **4.63459237e-03** | 11 | 1.63e-14 |
+| 10701 | 3.240e-02 | 8.25753259e-02 | 3.23486098e-02 | 7 | 2.15e-12 |
+| 43026 | 0 | 7.56865206e-02 | **4.33770950e-03** | 12 | 2.88e-14 |
+| 43026 | 3.240e-02 | **1.29008101e-01** | 2.71353946e-02 | **97** | 2.21e-14 |
+
+**EVERY ROW IS A CONVERGED SOLVE** — the worst final residual in the table is
+5.5e-12 and four of six are below 3e-12. None of this is a failure to converge.
+
+**THE ARMS DO NOT MERGE.** At 43,026 elements they stand at `psi_bnd`
+2.714e-02 against 4.338e-03, a factor of **6.3**, having been 0.25% apart on
+the coarsest mesh. Whatever else is true, *the gap does not close*, which is the
+question FB-R asked.
+
+**AND NEITHER ARM IS A CLEAN SEQUENCE, WHICH IS WHY THIS IS NOT THE WHOLE
+ANSWER.** The unseeded arm is the coarse mesh that is the outlier — 3.230e-02
+once, then 4.635e-03 and 4.338e-03, settling from the middle level. The seeded
+arm is the opposite: stable to **0.09%** across the first two levels and then
+**breaking** on the third, at 97 iterations and a `psi_ax` 56% above the
+reference. Two refinements are not enough to call either a limit.
+
+**THE AXIS COLUMN WAS DROPPED AND THE REASON IS WORTH MORE THAN THE COLUMN.**
+The probe reported a magnetic axis from
+`CriticalPointFinder::findAxis( AxisSense::Maximum )`, and on levels 0 and 1 it
+returned `( 1.006240, -1.099327 )` for every row. That is **inside coil P1L** —
+`CentreR = 1.00`, `CentreZ = -1.10`, half-extent 0.05, so `r ∈ [ 0.95, 1.05 ]`
+and `z ∈ [ -1.15, -1.05 ]`. `findAxis()` with no argument refuses outright here,
+reporting *"3 maxima, 2 minima and 2 saddles"*, and forcing a sense does not
+find the plasma — it picks a conductor's O-point.
+
+**This is §10.7's defect 2 arriving from the library side.** `apps/meq.cpp` has
+a three-tier conductor exclusion on the fill seed for exactly this reason; the
+library's `findAxis()` has none, because it is a general critical-point finder
+and a coil O-point is a real critical point of `psi`. So **any axis position
+taken from `findAxis()` on a machine with meshed conductors is about a
+conductor unless something excludes them**, and a displacement quoted in metres
+from such a call — §10.5's own `6.9e-02 m` among them — needs checking against
+the coil list before it is believed.
+
+**WHAT FB-R NOW NEEDS**, stated so the next attempt does not repeat this one: a
+conductor-excluded axis location, a topology diagnostic that says which
+equilibrium each row is, and a fourth level. What it has established is that the
+phenomenon is **not** an artefact of the driver's guess handling — it reproduces
+in a bare library fixture — and that `setBoundaryFluxInitial()` must stay a
+library setter and never become a TOML key, since a file that silently moved
+`psi_bnd`'s start by 3e-02 would move the reported `psi_bnd` by a factor of six.

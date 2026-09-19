@@ -2786,6 +2786,42 @@ namespace meq
 			void exteriorTransmissionResidual( ExteriorDtN const &exterior,
 			                                   mfem::Vector &out ) const;
 
+			/**
+			 * WHERE `psi_bnd` STARTS, AND IT IS A LEVER ON WHICH EQUILIBRIUM IS
+			 * REACHED RATHER THAN A TOLERANCE.
+			 *
+			 * `psi_bnd` is an unknown of the bordered Newton and starts every
+			 * solve at `psiBoundary()` -- zero on a fresh solver, and the
+			 * previous answer on a second solve, which is the warm start an
+			 * adaptive cycle wants. This overrides that for one solver.
+			 *
+			 * **IT IS NOT A TOLERANCE AND IT IS NOT A DEFAULT WAITING TO BE
+			 * FILLED IN.** `FREE-BOUNDARY-PLAN.md` section 10.5 measures both
+			 * halves. On a LIMITED machine, starting `psi_bnd` near its answer
+			 * puts the plasma edge on the limiter from step 0, where the support
+			 * sits exactly on the boundary of flipping: the solve descends to
+			 * 2.16e-02 of the initial residual by step 17 and then drifts upward
+			 * monotonically for 183 more, hitting the cap, where from zero the
+			 * same case converges in 11. On a DIVERTED one the two starts reach
+			 * **two different equilibria**, each satisfying its own border row
+			 * to 5e-12 and with their magnetic axes 6.9e-02 m apart.
+			 *
+			 * **SO IT IS DELIBERATELY NOT REACHABLE FROM A TOML FILE**, for the
+			 * reason `CLAUDE.md` refuses `Globalisation` and `NonlinearOrdering`
+			 * as keys: a key that silently changes which equilibrium is reported
+			 * is not a performance key. It is a library setter so that the
+			 * selection can be MEASURED -- FB-R -- and so that a caller who has
+			 * decided which branch it wants can ask for it in code, where the
+			 * decision is visible.
+			 *
+			 * @param psiBoundary the value to seed with. Any finite double;
+			 *        there is no check that it is between the axis and the wall,
+			 *        because the point of the setter is to reach branches.
+			 *
+			 * @throws std::invalid_argument if @a psiBoundary is not finite.
+			 */
+			void setBoundaryFluxInitial( double psiBoundary );
+
 			/// The converged `psi_bnd`. Zero unless setBoundaryFluxPoint() was
 			/// called. Valid after solve().
 			double psiBoundary() const;
@@ -4000,6 +4036,13 @@ namespace meq
 			double boundaryFluxR = 0.0;
 			double boundaryFluxZ = 0.0;
 			double psiBoundaryValue = 0.0;
+
+			/// setBoundaryFluxInitial(), and whether it was called. Separate
+			/// from psiBoundaryValue so that the default -- seed from the last
+			/// solve's answer -- survives, and so that seeding with exactly the
+			/// previous answer is distinguishable from not seeding at all.
+			double boundaryFluxInitialValue = 0.0;
+			bool boundaryFluxInitialGiven = false;
 
 			/**
 			 * The element holding the LOCATED magnetic axis on the iterate

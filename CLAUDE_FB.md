@@ -2284,6 +2284,29 @@ configuration sets `PlasmaRMin = 0.0000`, so the axis is a candidate at all,
 against machine A's 0.5925; a vessel would have bounded it independently of the
 guard.
 
+### `findAxis()` returns a COIL's O-point on a machine with meshed conductors
+
+**A coil's O-point is a genuine critical point of `ψ`, so a general
+critical-point finder is right to return it.** `meq::CriticalPointFinder` has no
+conductor exclusion and cannot have one — it is handed a field, not a machine.
+`apps/meq.cpp` carries a three-tier exclusion on the plasma fill's seed for
+exactly this reason, which is §10.7's defect 2, and **nothing carries one on
+`findAxis()`**.
+
+Measured on `examples/diverted-tokamak.toml`'s mesh through the library fixture:
+`findAxis()` with no argument **refuses**, reporting *"no unique interior
+extremum … 3 maxima, 2 minima and 2 saddles"*, which is the honest answer.
+Forcing it with `AxisSense::Maximum` returns `( 1.006240, -1.099327 )` — inside
+coil P1L, `r ∈ [ 0.95, 1.05 ]`, `z ∈ [ -1.15, -1.05 ]` — on every solve of two
+different equilibria at two resolutions. It is stable, reproducible and is not
+the magnetic axis.
+
+**So an axis position obtained that way on a machine with `[[coils]]` in the
+mesh is about a conductor until something says otherwise**, and a displacement
+quoted in metres from such a call needs checking against the coil list before it
+is believed. → **[M-132](MEASUREMENTS.md#m-132)**. The refusal is the feature;
+the forcing argument is what removes it.
+
 ### The cold failures are three different things, and the merit's balance is machine-dependent
 
 **NOT ONE OF THE SIX COLD `exit 2` CASES HAS A NON-FINITE DIRECTION**, which is

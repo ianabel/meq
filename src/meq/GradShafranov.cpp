@@ -2740,6 +2740,17 @@ namespace
 		return psiBoundaryValue;
 	}
 
+	void GradShafranovSolver::setBoundaryFluxInitial( double psiBoundary )
+	{
+		if ( !std::isfinite( psiBoundary ) )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::setBoundaryFluxInitial: psi_bnd must "
+				"start at a finite value -- it is an unknown of the bordered "
+				"Newton and the first residual is evaluated at it" );
+		boundaryFluxInitialValue = psiBoundary;
+		boundaryFluxInitialGiven = true;
+	}
+
 	void GradShafranovSolver::setLimiterSurface( int attribute )
 	{
 		if ( attribute <= 0 )
@@ -6424,7 +6435,14 @@ namespace
 
 		if ( boundaryFluxIsUnknown )
 		{
-			sB = psiBoundaryValue;
+			// THE DEFAULT IS THE LAST SOLVE'S ANSWER, which is zero on a fresh
+			// solver and a warm start on a second call -- what an adaptive
+			// cycle wants. setBoundaryFluxInitial() overrides it, and the
+			// header says at length why that is a library setter and not a
+			// TOML key: it selects between discrete equilibria rather than
+			// changing how well one is reached.
+			sB = boundaryFluxInitialGiven ? boundaryFluxInitialValue
+			                              : psiBoundaryValue;
 
 			if ( limiterConstraintChoice == LimiterConstraint::NearestDof )
 				// INTO THE FULL VECTOR, not into the potential space. peakAt()

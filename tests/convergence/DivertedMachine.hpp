@@ -110,7 +110,16 @@ namespace meqtest
 	/// The sequence follows apps/meq.cpp, which is the only place this assembly
 	/// exists; a test that assembled it differently would be measuring its own
 	/// wiring.
-	inline Machine buildMachine()
+	/// @param refinements uniform refinements of the gmsh mesh before anything
+	///        else happens, for a case that needs the SAME machine at more than
+	///        one resolution. Zero is the shipped mesh and is what every case
+	///        that does not ask gets. Refining here rather than re-running
+	///        `halfdisc.py` at a smaller `--size` is deliberate: a re-meshed
+	///        geometry moves which elements the conductors and the limiter
+	///        region occupy, which is a second variable in a study about the
+	///        first. Uniform refinement subdivides and carries the material
+	///        attributes down, so the machine is unchanged and only `h` moves.
+	inline Machine buildMachine( int refinements = 0 )
 	{
 		Machine m;
 		m.config = std::make_unique<meq::Configuration>( machineFile );
@@ -120,6 +129,8 @@ namespace meqtest
 
 		m.background = std::make_unique<mfem::Mesh>(
 			m.config->getMesh().file.c_str(), 1, 1 );
+		for ( int r = 0; r < refinements; ++r )
+			m.background->UniformRefinement();
 
 		// A MESH READ FROM A FILE HAS TO BE MEASURED RATHER THAN COMPUTED, and
 		// a zero search length is not a loose tolerance -- it is
