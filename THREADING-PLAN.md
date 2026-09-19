@@ -62,7 +62,7 @@ marker; this table is what a reader needs before any of the estimates.
 | **B** the four plasma element loops | **DONE**, and it is five of them — `assemblePlasmaCurrent()` with the four the item names — through `MEQ_OMP()` in the new `src/meq/Threading.hpp`, per-element partial sums rather than a `reduction(+:)`, and a per-thread `std::exception_ptr` so a throw inside a region is not undefined behaviour |
 | **C** `CriticalPointFinder::sweep()` | **DONE.** Per-element candidate buffers and a serial dedup over an element-ordered concatenation, with `theAxisSweepDoesNotDependOnTheThreadCount` in `tests/convergence/CriticalPointConvergence.cpp` |
 | **D** the unnamed 3.2% | **DONE.** Two legs, `of which driver prepare` and `of which sweep overhead`, printed by `--profile` |
-| **E**, **F** | not to be done. Unchanged |
+| **E**, **F** | **declined, and the decline is a decision rather than a deferral.** Re-checked against [M-138](MEASUREMENTS.md#m-138) and unchanged. If either grows, that is a **new plan** and not a reopening of this one — see *When E or F would be worth revisiting* below for what "grows" has to mean |
 | **G** re-assembly | **MOVED**, to `BORDERED-GLOBALISATION-PLAN.md` §12, which is where the Armijo backtrack that calls it sixteen times a run is described. It is a restructure of the line search and not a threading item — the leg reads 1.08 cores and the half that dominates is MFEM's — and it is now the **largest single-threaded leg MEQ owns**, 5.6% of the run in [M-138](MEASUREMENTS.md#m-138) |
 | **the payoff** | **TAKEN. `1.16×` at eight threads, against the `1.14×` predicted** → **[M-137](MEASUREMENTS.md#m-137)**, six interleaved pairs on a quiet machine, both arms against the shipping `libmfem.a` so MEQ's own source is the only variable. `1.03×` at one thread, which is item A alone, the two threaded items having nothing to give there |
 
@@ -688,6 +688,42 @@ release notes that a CPU production build is a separate install.**
 **RE-CHECKED AGAINST [M-138](MEASUREMENTS.md#m-138) AND UNCHANGED**: the leg is
 0.116 s, **3.4%**, at 1.06 cores. M-77's 7% is still larger than every item this
 plan built except A, and it is still one CMake variable.
+
+---
+
+### When E or F would be worth revisiting, and it is a NEW plan when it happens
+
+**E and F are declined and stay declined.** This section exists so that a reader
+meeting a bigger number later can tell whether it means anything, because this
+plan has just produced the counter-example: `re-assembly` went from 4.2% to 5.6%
+of the run **without the leg moving at all**, purely because the run got shorter
+around it.
+
+**A SHARE IS NOT A TRIGGER. SECONDS ARE.** Every share in a leg budget has the
+wall clock as its denominator, so threading anything at all inflates every share
+that did not move. Re-deriving M-138 is what makes a number in this file
+comparable with a number in it; comparing a share across budgets is not.
+
+**E — the output writers.** The leg is 0.198 s and **0.010 s of it is compute**;
+the rest is serialization and file I/O. So the trigger is not the leg, it is the
+`GridSampler` path inside it, and the two things that would move it are a much
+larger `[output] GridNR`/`GridNZ` — it is `O(nodes)` — or a case whose mesh makes
+the location work dominate. **Revisit at 0.1 s of sampling**, which is ten times
+what it costs now, and revisit the concurrent-write half only if somebody
+establishes MFEM's stream I/O is reentrant, which is the part that is not about
+size at all.
+
+**F — `other (remainder)`.** MEQ cannot thread it without configuring a
+process-wide `mfem::Device`, so its trigger is not a size at all: **it becomes
+reachable for free the day MEQ configures a Device on the host path for some
+other reason**, because `Vector::Add` and `Norml2` already dispatch through
+`mfem::forall`. Until then the lever is M-77's build variable and not a loop. If
+a Device does arrive, note that `Norml2` would reassociate and the augmented
+norm feeds the Armijo test, so the exactness rule above applies to it.
+
+**And either way it is a new plan.** This one is closed, its budget is
+superseded, and an item reopened against a stale denominator is how a closed
+plan quietly becomes a wrong one.
 
 ---
 
