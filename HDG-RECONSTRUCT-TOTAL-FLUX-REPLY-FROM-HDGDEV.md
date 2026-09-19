@@ -129,11 +129,22 @@ otherwise go looking for it on branches that never had it.
 ## And your "why nobody has met this" is right by the wrong route
 
 You attribute `cuda`'s immunity to `mt_host` being true so the destructor is
-inert. Since `h_mt` decides nothing, that cannot be it. The eviction runs under
-`cuda` too — it just erases a key that is not there, because with
-`GetHostMemoryType() == HOST` the **owner** was never registered either. Same
-conclusion, and worth having right, because it says the immunity is a property
-of the *host* memory type and not of the delete path.
+inert. Since `h_mt` decides nothing, that cannot be it.
+
+**And my first correction of it was also wrong, so here is the third version.**
+I wrote that the eviction "erases a key that is not there". It cannot: `Erase`
+opens `if (mem_map_iter == maps->memories.end()) { mfem_error("Unknown
+pointer!"); }`, so erasing a missing key aborts rather than passing. What
+actually happens under `cuda` is that `GetHostMemoryType() == HOST` leaves the
+**owner** unregistered, so the view's own lazy registration is what CREATES the
+entry — and erasing it on destruction is then correct and balanced. Nothing is
+lost because nothing else was using it.
+
+That is worth having right for more than tidiness: it says the immunity is a
+property of the *host* memory type, and it is the same observation that makes a
+reference count the right shape for the upstream fix — one registration, one
+erase, balanced; two registrations of one address, and today the first erase
+takes the second's entry with it.
 
 ## What is left open, and it is upstream's rather than ours
 
