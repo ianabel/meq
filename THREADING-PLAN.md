@@ -830,3 +830,93 @@ and are already below the noise. G has **moved** to
 `BORDERED-GLOBALISATION-PLAN.md` §12: real, worth `1.06×`, a restructure of the
 line search rather than a threading item, and now the largest single-threaded
 leg MEQ owns.
+
+---
+
+# ADDENDUM: taking a threaded `Reconstruct()`
+
+**THIS PLAN IS CLOSED AND THIS ADDENDUM IS NOT A NEW ITEM IN IT.** It exists
+because [M-138](MEASUREMENTS.md#m-138) makes `DarcyForm::Reconstruct()` the
+largest single-threaded item in a MEQ run — **0.632 s, 18.5%, 1.00 cores** — and
+upstream is working on it. What follows is what MEQ owes *before* that lands,
+which is an audit rather than code.
+
+**THE PRIZE.** At the residual leg's observed 6.5 cores of 8,
+`1/(1 − 0.185×(1 − 1/6.5)) = 1.19×` on the whole run, and MEQ writes none of it.
+That is larger than everything this plan built put together.
+
+## The finding: MEQ's promise is ALREADY MADE, so this lands without an abort
+
+**MEQ CALLS `SetIntegratorsThreadSafe()`** — `buildForms()`, beside
+`SetAssemblyMode()` — and that is a **promise, not a setting**. The library
+refuses a threaded element loop that would evaluate an integrator *unless* the
+caller has promised; MEQ has promised. **So the day upstream threads
+`ReconstructFluxAndPot()`, MEQ's build takes the new loop silently, with no
+abort and without being asked.** The audit behind that promise was taken against
+the loops that existed when it was made, and the reconstruction loop is not one
+of them.
+
+## What that loop actually evaluates, read out of `darcyform.cpp`
+
+`DarcyForm::ReconstructFluxAndPot()` is `for (int z = 0; z < mesh->GetNE(); z++)`
+with an inner `for (int f : faces)`, and it reaches:
+
+| handle | MEQ's integrator | scratch |
+|---|---|---|
+| `M_u->GetDBFI()` | `mfem::VectorMassIntegrator` | **guarded** upstream |
+| `B->GetDBFI()` | `mfem::VectorDivergenceIntegrator` | **guarded** upstream |
+| `M_p->GetDBFI()` | — null on the Newton path, `usesNonlinearForms()` being true | — |
+| `Mp_nl` | `meq::SourceIntegrator` | **guarded**, and MEQ's own |
+| `h.GetPotConstraintIntegrator()` (`c_bfi_p`) | `mfem::HDGDiffusionIntegrator` | **guarded**, `bilininteg_hdg.hpp` |
+| `h.GetPotConstraintNonlinearIntegrator()` (`c_nlfi_p`) | null — MEQ's face constraint takes the linear `c_bfi_p` route | — |
+| **`h.GetFluxConstraintIntegrator()` (`c_bfi`)** | **`mfem::NormalTraceJumpIntegrator`** | **UNGUARDED** |
+
+**`NormalTraceJumpIntegrator` CARRIES `Vector face_shape, normal, shape1_n,
+shape2_n` AND `DenseMatrix shape1, shape2` AS PLAIN MEMBERS**, with no
+`#ifndef MFEM_THREAD_SAFE` anywhere in the class (`fem/bilininteg.hpp:4872`).
+MEQ installs exactly one of it, as the object handed to `EnableHybridization()`,
+and the reconstruction evaluates it **per face inside the element loop**. Two
+threads in different elements would overwrite each other's `face_shape`.
+
+**SO THIS IS THE SECOND UNGUARDED INTEGRATOR IN MEQ'S INSTALL AND IT IS THE ONE
+THE RECONSTRUCTION REACHES.** The other, `mfem::HDGExtensionIntegrator`, stays
+latent here and for a reason worth keeping precise: it sits on the flux mass's
+**boundary faces**, and the reconstruction takes the flux mass from
+`M_u->GetDBFI()` — domain integrators only. **That is a property of one line of
+somebody else's code**, so it is a thing to re-check when the loop changes, not
+a thing to rely on.
+
+**The failure mode if this is missed is the worst kind.** Not an abort: a wrong
+`ψ*`, per element, on a run that converges and prints plausible numbers — and
+`ψ*` is what the driver reports and what every output file carries.
+
+## What MEQ owes, in order
+
+1. **TELL UPSTREAM ABOUT `NormalTraceJumpIntegrator` NOW**, while they are
+   writing it, rather than after. It is four `Vector`s and two `DenseMatrix`es
+   and it is in `fem/bilininteg.hpp`, not in `fem/darcy/` — the same shape as the
+   eight classes they already put behind that switch, and outside the directory
+   they are working in, which is exactly how it gets missed.
+2. **Re-take the promise audit against the new loop when it lands.** The comment
+   in `buildForms()` enumerates what the promise covers; the reconstruction's
+   seven handles above are not in it, and the comment has to grow them or the
+   promise is being made for loops nobody read.
+3. **Assert before measuring.** `ψ*` is pinned in several places —
+   `thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes`,
+   `theDriverRunsTheAdaptiveLoop` at 4.4e-14, `DriverAcceptance` at 1.189e-16 —
+   and the cross-cutting rule applies unchanged: **`OMP_NUM_THREADS` must not
+   change a printed digit**, at `MKL_NUM_THREADS=1`. A reconstruction that
+   reassociates would move `ψ*` and turn those into flaky tests. That is a
+   finding to bring back for an argument, not something to absorb with a
+   tolerance.
+4. **Then measure it, with the harness that already exists.** The payoff pair in
+   [M-137](MEASUREMENTS.md#m-137) is the template: two binaries against one
+   library where only the library changes, interleaved `before, after`, six
+   pairs, `OMP = MKL = 8` under `OMP_WAIT_POLICY=passive`, on a machine the
+   harness verifies quiet itself. Keep a pre-upgrade binary aside before
+   installing, since `libmfem.a` is static and that is what makes the arm
+   self-contained.
+
+**And size it against M-138 rather than against this plan's opening**, for the
+reason the opening now carries: every share in a leg budget has the wall clock
+as its denominator.
