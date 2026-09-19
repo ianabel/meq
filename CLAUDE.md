@@ -892,11 +892,13 @@ TIMES THE SUITE AND CONCLUDES SOMETHING.** FB-T's
 `confinementWithAPrescribedCurrentIsTheFourthCell` is **forty solves** — a 2 x 2
 re-run whole with the target current swept across eight values — and it is kept
 at its full sweep deliberately, because a trimmed one would no longer reproduce
-[M-134](MEASUREMENTS.md#m-134)'s published table. Measured on the same `-j4`
-run: `FreeBoundaryCoupling` **288.83 s → 1149.60 s**, against `naming` at
-364.44 s. **So the suite is now that one binary**, not the longest chain of
-several — the whole run reads 1149.60 s, which is `FreeBoundaryCoupling` and
-nothing else, and a suite time taken after this is not comparable with one taken
+[M-134](MEASUREMENTS.md#m-134)'s published table. Measured on two `-j4` runs of the
+same tree: `FreeBoundaryCoupling` **1149.60 s and 991.99 s**, against 288.83 s
+before FB-T and against `naming` at 364.44 s and 346.69 s. **So the suite is now
+that one binary**, not the longest chain of several — the whole run reads
+exactly `FreeBoundaryCoupling` and nothing else, and its own 1.16x spread
+between two runs of identical code is this machine rather than anything having
+changed, and a suite time taken after this is not comparable with one taken
 before it.
 
 **`FreeBoundaryCoupling` overtakes the lint and it is buying
