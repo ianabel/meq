@@ -5424,10 +5424,17 @@ int main( int argc, char **argv )
 		     p.limiterCalls );
 		leg( "  of which I_p", p.currentSeconds, p.currentCpuSeconds,
 		     p.currentCalls );
-		leg( "  of which transmission", p.transmissionSeconds,
-		     p.transmissionCpuSeconds, p.transmissionCalls );
 		leg( "border assembly", p.borderAssemblySeconds,
 		     p.borderAssemblyCpuSeconds, p.borderAssemblyCalls );
+		// PRINTED UNDER ITS OWN PARENT. This is exteriorTransmissionRows()
+		// sweeping Gamma for the exterior modes, which is inside `border
+		// assembly` and is NOT inside `constraint location`, where this line
+		// used to sit -- a sub-slice printed under the wrong parent is a share
+		// of the wrong denominator, and this one read 0.000 on every case for
+		// long enough that THREADING-PLAN.md section 0 told a reader to size an
+		// item against it.
+		leg( "  of which transmission", p.transmissionSeconds,
+		     p.transmissionCpuSeconds, p.transmissionCalls );
 		leg( "border dense solve", p.borderSolveSeconds,
 		     p.borderSolveCpuSeconds, p.borderSolveCalls );
 		leg( "re-assembly", p.prepareSeconds, p.prepareCpuSeconds,

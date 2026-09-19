@@ -13,7 +13,7 @@ What is left is **about 25% of the run, and MEQ owns all of it**.
 
 **THE HEADLINE IS THAT TWO OF THE SIX CANDIDATES ARE NOT THREADING PROBLEMS.**
 The largest single item in this plan — `border dense solve`, and the
-transmission slice of `constraint location` with it — is a **sparsity** problem:
+transmission slice of `border assembly` with it — is a **sparsity** problem:
 the exterior transmission rows carry at most 984 nonzeros in a vector of about
 109,000, and every dot product against them walks the zeros. Fixing that is
 worth more than eight cores would be, and it is **exact** where threading a sum
@@ -48,11 +48,15 @@ for.
 `meq_core`, so MEQ's own parallelism no longer arrives by inheritance from
 MFEM's compile flags.
 
-**§0's `--profile` RUN IS NOW TAKEN, ON A QUIET MACHINE, AND IT CLOSES ONE OF
-THE TWO HALVES IT WAS FOR.** `I_p` is 0.5% at 5.14 cores, so item B's second
-half is closed by measurement and the answer is that it was not worth doing.
-The `transmission` half is **not** closed and could not have been by that run:
-the leg it names is never written by any code path. §0 has the detail.
+**§0's `--profile` RUN IS TAKEN AND BOTH HALVES IT EXISTED FOR ARE CLOSED, ONE
+OF THEM ONLY AFTER FIXING THE INSTRUMENT.** `I_p` is 0.5% at 5.14 cores, so item
+B's second half is closed by measurement and the answer is that it was not worth
+doing. **The `transmission` half could not have been closed by that run at all**
+— the leg it names was never written by any code path, so it read `0.000` on
+every case while the work sat inside `border assembly`. With the timer installed
+and the print moved under its true parent it reads **0.037 s, 1.00 cores, three
+calls, 28% of `border assembly` and about 1% of the run**, so item A's second
+half is closed too, and on the same ground. §0 has both.
 
 **WHAT IS STILL NOT DONE IS THE PAYOFF.** The A+B+C figure against the
 pre-threading baseline — predicted `1.14×`, or `1.106×` counting only the
@@ -69,10 +73,11 @@ is the same class of instrument error this file's own §0 is about.**
 
 ## 0. Read the sub-slices before doing anything
 
-`meq --profile` already prints five sub-slices under `constraint location` —
-`axis`, `cold full sweep`, `X-point`, `limiter`, `I_p`, `transmission` — and the
-budget this plan was handed omits them. Two of the estimates below are
-**unverified for want of exactly those lines**, and they are one run away:
+`meq --profile` already prints four sub-slices under `constraint location` —
+`axis`, `cold full sweep`, `X-point`, `limiter`, `I_p` — and one under `border
+assembly`, `transmission`, and the budget this plan was handed omits them. Two
+of the estimates below were **unverified for want of exactly those lines**, and
+one run answers the first while the second needed the instrument built:
 
 ```sh
 OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 OMP_WAIT_POLICY=passive \
@@ -106,14 +111,33 @@ called from the bordered solve, so the Γ sweep is inside **`border assembly`,
 against, and is an upper bound on it rather than the thing itself. The sub-slice
 that would separate them is the dead one.
 
-**THE FIX IS ONE `LegTimer` AND A MOVED PRINT**, and it has to move: the leg is
-printed under `constraint location`, where the work is not, while
-`exteriorTransmissionRows()` lives under `border assembly`. Until that is done,
-**item A's second half stays unverified — but for a reason the plan can now
-name**, which is the difference between an unread line and a line that reports
-nothing. `meq::Estimator` also calls `exteriorTransmissionResidual()` on the
-adaptive path, which is a *different* parent, and that is the reason the slice
-needs a decision rather than a timer.
+**THE FIX WAS ONE `LegTimer` AND A MOVED PRINT, AND IT IS DONE.** The print had
+to move as well as the timer be installed: the leg was printed under
+`constraint location`, where the work is not, while `exteriorTransmissionRows()`
+lives under `border assembly` — **a sub-slice printed under the wrong parent is
+a share of the wrong denominator**. `meq::Estimator` also reaches the condition,
+through `exteriorTransmissionResidual()` on the adaptive path, and that call is
+deliberately **not** in the slice: a sub-slice that is a subset of its leg on
+one path and not on another cannot be read as a share of anything.
+
+**AND ITEM A's SECOND HALF IS NOW CLOSED BY MEASUREMENT, THE SAME WAY ITEM B's
+WAS.** `machine-f-diiid`, `OMP = MKL = 8`, three runs:
+
+| | seconds | cores | calls | of `border assembly` |
+|---|---|---|---|---|
+| `border assembly` | 0.128 / 0.131 / 0.130 | 2.7 | 66 | |
+| **`of which transmission`** | **0.037 / 0.039 / 0.036** | **1.00** | **3** | **28%** |
+
+**It is serial and it is about 1% of the run.** Three calls, one per plasma
+support sweep, at 1.00 cores — so there *is* headroom in it, unlike `I_p`, and
+the ceiling on taking all of it is **under one per cent of the wall**. That is
+below `E`'s and `F`'s thresholds and this item is closed on the same ground:
+**not worth doing, and now for a measured reason rather than an unread line.**
+
+*(Those three runs were taken after the machine was released back to a peer and
+are contended — the wall reads 3.97 to 4.03 s against 3.31 s quiet. The `cores`
+column, the call count and the ratio to the parent are what the conclusion rests
+on and all three are taken within the same runs.)*
 
 **THE TRANSFERABLE PART IS THIS FILE'S OWN**: an instrument that reports zero
 because it never counts is indistinguishable from an instrument reporting a

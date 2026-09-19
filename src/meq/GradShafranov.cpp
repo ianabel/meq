@@ -3847,6 +3847,23 @@ namespace
 		                                              std::vector<int> *support ) const
 	{
 		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCpuSeconds, profile.borderAssemblyCalls );
+		/*
+		 * THE TRANSMISSION SLICE, AND IT IS A SLICE OF THE LINE ABOVE RATHER
+		 * THAN A LEG OF ITS OWN.
+		 *
+		 * `border assembly` is every column of the bordered Jacobian; this is
+		 * the part of it that sweeps Gamma for the exterior modes, which is
+		 * what THREADING-PLAN.md item A's second half has to be sized against.
+		 * Without it that item can only be sized against its parent, which is
+		 * an upper bound and not the thing.
+		 *
+		 * meq::Estimator ALSO reaches the transmission condition, through
+		 * exteriorTransmissionResidual() on the adaptive path, and that call is
+		 * deliberately NOT in this slice: it has a different parent, and a
+		 * sub-slice that is a subset of its leg on one path and not on another
+		 * cannot be read as a share of anything.
+		 */
+		LegTimer const slice( profile.transmissionSeconds, profile.transmissionCpuSeconds, profile.transmissionCalls );
 		if ( !transferPath )
 			throw std::logic_error(
 				"meq::GradShafranovSolver::exteriorTransmissionRows: there is no "
