@@ -24,6 +24,8 @@
 
 #include <cmath>
 #include <cstdio>
+#include <chrono>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <utility>
@@ -1285,4 +1287,346 @@ BOOST_AUTO_TEST_CASE( the_conductor_field_is_delta_star_harmonic_off_the_conduct
 	// most sensitive to.
 	for ( double const z : { -2.0, -0.5, 0.0, 0.5, 2.0 } )
 		BOOST_TEST( set.psi( 0.0, z ) == 0.0 );
+}
+
+/*
+ * THE ELLIPTICAL COLUMN, WHICH EXISTS TO BE BOUNDED WHERE A FILAMENT IS NOT.
+ *
+ * meq::ellipsePsi() is the initial guess's plasma. The guess that preceded it
+ * carried I_p on a filament at the guessed magnetic axis, which is singular at
+ * exactly the point locateAxisPoint() has to find -- so the case that matters
+ * is not an accuracy but a BOUNDEDNESS, and the filament is carried alongside
+ * as the control that says the instrument can see a divergence at all.
+ */
+BOOST_AUTO_TEST_CASE( the_elliptical_column_is_bounded_where_a_filament_diverges )
+{
+	// MAST-U's scale: the guessed axis of examples/mastu-nke.toml and its
+	// prescribed current.
+	double const centreR = 0.95;
+	double const centreZ = 0.0;
+	double const semiR = 0.45;
+	double const semiZ = 0.70;
+	double const current = 6.0e5;
+
+	std::printf( "\n  APPROACHING THE GUESSED AXIS\n" );
+	std::printf( "    %10s %14s %14s\n", "distance", "ellipse", "filament" );
+
+	double ellipseLow = 1.0e300;
+	double ellipseHigh = 0.0;
+	double filamentLow = 1.0e300;
+	double filamentHigh = 0.0;
+
+	for ( double const distance : { 3.0e-1, 3.0e-2, 3.0e-3, 3.0e-4 } )
+	{
+		double const r = centreR + distance;
+		double const ellipse =
+			meq::ellipsePsi( r, centreZ, centreR, centreZ, semiR, semiZ,
+			                 current );
+		double const filament =
+			meq::filamentPsi( r, centreZ, centreR, centreZ, current );
+
+		std::printf( "    %10.1e %14.6e %14.6e\n", distance, ellipse,
+		             filament );
+
+		ellipseLow = std::min( ellipseLow, ellipse );
+		ellipseHigh = std::max( ellipseHigh, ellipse );
+		filamentLow = std::min( filamentLow, filament );
+		filamentHigh = std::max( filamentHigh, filament );
+	}
+	std::fflush( stdout );
+
+	/*
+	 * THE RATIO ACROSS FOUR DECADES OF APPROACH IS THE ASSERTION, not a value
+	 * at any one point. psi of a uniform elliptical column is smooth through
+	 * its own interior, so closing on the centre changes it by the curvature
+	 * of a quadratic over the approach -- a few per cent. psi of a filament
+	 * goes as log( 1/distance ) and has no bound at all.
+	 */
+	BOOST_TEST( ellipseHigh/ellipseLow < 1.3,
+	            "the elliptical column is not bounded on its own axis: psi "
+	            "spans " << ellipseLow << " to " << ellipseHigh << " over four "
+	            "decades of approach. This primitive exists BECAUSE a filament "
+	            "does not, and a guess that spikes at the guessed axis puts the "
+	            "spike where the axis search has to look" );
+
+	BOOST_TEST( filamentHigh/filamentLow > 3.0,
+	            "the FILAMENT control did not diverge, so this case cannot see "
+	            "the property it asserts: " << filamentLow << " to "
+	            << filamentHigh );
+
+	// AND THE AXIS, EXACTLY, for the reason the conductor case gives: Gamma is
+	// a semicircle whose ends sit on r = 0.
+	for ( double const z : { -2.0, -0.5, 0.0, 0.5, 2.0 } )
+		BOOST_TEST( meq::ellipsePsi( 0.0, z, centreR, centreZ, semiR, semiZ,
+		                             current ) == 0.0 );
+}
+
+/*
+ * AND IT IS THE FIELD OF THAT CURRENT DENSITY, which is what says the pi a b
+ * is right and the sign with it. Delta* psi = -mu0 r j_phi, so inside the
+ * ellipse it is -mu0 r I/( pi a b ) and outside it is zero -- the same
+ * instrument the conductor case uses, read against a NON-ZERO right-hand side
+ * for the first time in this file.
+ */
+BOOST_AUTO_TEST_CASE( the_elliptical_columns_current_density_is_uniform_and_is_i_over_the_area )
+{
+	double const centreR = 0.95;
+	double const centreZ = 0.0;
+	double const semiR = 0.45;
+	double const semiZ = 0.70;
+	double const current = 6.0e5;
+	double const density = current/( 3.14159265358979323846*semiR*semiZ );
+
+	auto psi = [ & ]( double r, double z )
+	{
+		return meq::ellipsePsi( r, z, centreR, centreZ, semiR, semiZ, current );
+	};
+
+	auto deltaStar = [ & ]( double r, double z, double h )
+	{
+		double const pr = ( psi( r + h, z ) - psi( r - h, z ) )/( 2.0*h );
+		double const prr =
+			( psi( r + h, z ) - 2.0*psi( r, z ) + psi( r - h, z ) )/( h*h );
+		double const pzz =
+			( psi( r, z + h ) - 2.0*psi( r, z ) + psi( r, z - h ) )/( h*h );
+		return prr - pr/r + pzz;
+	};
+
+	std::printf( "\n  Delta* OF THE ELLIPTICAL COLUMN\n" );
+	std::printf( "    %8s %8s %6s %14s %14s %10s\n",
+	             "r", "z", "where", "Delta*", "-mu0 r J", "relative" );
+
+	double worstInside = 0.0;
+	double worstOutside = 0.0;
+
+	for ( double const r : { 0.70, 0.95, 1.20, 1.60, 2.20 } )
+		for ( double const z : { -0.85, -0.30, 0.0, 0.40, 1.30 } )
+		{
+			double const normalised = ( r - centreR )*( r - centreR )
+			                          /( semiR*semiR )
+			                        + ( z - centreZ )*( z - centreZ )
+			                          /( semiZ*semiZ );
+
+			// Well clear of the boundary in either direction: the current
+			// density jumps across it, so Delta* is genuinely discontinuous
+			// there and a centred difference straddling it means nothing.
+			if ( normalised > 0.5 && normalised < 2.0 )
+				continue;
+
+			bool const inside = normalised < 1.0;
+			double const h = 0.01;
+			double const measured = deltaStar( r, z, h );
+			double const expected =
+				inside ? -meq::vacuumPermeability*r*density : 0.0;
+
+			// Scaled by the INTERIOR value throughout, so the exterior row is
+			// read as a fraction of the thing that is not zero rather than
+			// against its own zero.
+			double const scale = meq::vacuumPermeability*r*density;
+			double const relative = std::abs( measured - expected )/scale;
+
+			std::printf( "    %8.3f %8.3f %6s %14.6e %14.6e %10.2e\n",
+			             r, z, inside ? "in" : "out", measured, expected,
+			             relative );
+
+			if ( inside )
+				worstInside = std::max( worstInside, relative );
+			else
+				worstOutside = std::max( worstOutside, relative );
+		}
+	std::fflush( stdout );
+
+	BOOST_TEST( worstInside < 1.0e-3,
+	            "the current density inside the elliptical column is not "
+	            "I/( pi a b ): worst relative departure " << worstInside
+	            << ". This is the normalisation and the sign together, and "
+	            "nothing else in this file reads Delta* against a non-zero "
+	            "right-hand side" );
+
+	BOOST_TEST( worstOutside < 1.0e-3,
+	            "the elliptical column carries current OUTSIDE itself: worst "
+	            "Delta* residual " << worstOutside << " of the interior value" );
+}
+
+/*
+ * AND THE FAR FIELD IS THE FILAMENT'S, at second order in the semi-axes --
+ * the same statement a_thin_coil_approaches_the_filament_at_second_order makes
+ * for a rectangle, and the check that the quadrature is integrating the region
+ * it claims to.
+ */
+BOOST_AUTO_TEST_CASE( a_thin_elliptical_column_approaches_the_filament_at_second_order )
+{
+	double const centreR = 1.40;
+	double const centreZ = 0.20;
+	double const current = 3.0e5;
+
+	// Far enough that the multipole correction is the leading error and near
+	// enough that it is above round-off.
+	double const probeR = 2.60;
+	double const probeZ = 0.90;
+
+	double const reference =
+		meq::filamentPsi( probeR, probeZ, centreR, centreZ, current );
+
+	std::printf( "\n  A SHRINKING ELLIPTICAL COLUMN AGAINST ITS FILAMENT\n" );
+	std::printf( "    %8s %8s %14s %12s %8s\n",
+	             "semiR", "semiZ", "psi", "error", "rate" );
+
+	double previous = 0.0;
+	double worstRate = 99.0;
+	for ( double const shrink : { 1.0, 0.5, 0.25, 0.125 } )
+	{
+		double const semiR = shrink*0.40;
+		double const semiZ = shrink*0.60;
+		double const value =
+			meq::ellipsePsi( probeR, probeZ, centreR, centreZ, semiR, semiZ,
+			                 current );
+		double const error = std::abs( value - reference );
+		double const rate = previous > 0.0
+			? std::log( previous/error )/std::log( 2.0 ) : 0.0;
+		if ( previous > 0.0 )
+			worstRate = std::min( worstRate, rate );
+
+		std::printf( "    %8.3f %8.3f %14.6e %12.3e %8.2f\n",
+		             semiR, semiZ, value, error, rate );
+		previous = error;
+	}
+	std::fflush( stdout );
+
+	BOOST_TEST( worstRate > 1.8,
+	            "a shrinking elliptical column does not approach its filament "
+	            "at second order -- worst rate " << worstRate << ". The leading "
+	            "correction is the quadrupole moment of the cross-section, "
+	            "which is O( a^2 ), so anything slower says the quadrature is "
+	            "not integrating the ellipse it was given" );
+}
+
+BOOST_AUTO_TEST_CASE( the_elliptical_columns_refusals_are_the_contract )
+{
+	auto call = []( double r, double z, double centreR, double centreZ,
+	                double semiR, double semiZ, int order )
+	{
+		return meq::ellipsePsi( r, z, centreR, centreZ, semiR, semiZ, 1.0e5,
+		                        order );
+	};
+
+	// A negative field radius, which the half-disc mesh reaches to round-off.
+	BOOST_CHECK_THROW( call( -1.0e-12, 0.0, 1.0, 0.0, 0.3, 0.4, 16 ),
+	                   std::invalid_argument );
+	// Exactly zero is the VALUE, not a refusal.
+	BOOST_CHECK_NO_THROW( call( 0.0, 0.0, 1.0, 0.0, 0.3, 0.4, 16 ) );
+
+	BOOST_CHECK_THROW( call( 1.5, 0.0, 1.0, 0.0, 0.0, 0.4, 16 ),
+	                   std::invalid_argument );
+	BOOST_CHECK_THROW( call( 1.5, 0.0, 1.0, 0.0, 0.3, -0.4, 16 ),
+	                   std::invalid_argument );
+	// The ellipse reaching the axis, which is meq::Coil's refusal and
+	// meq::CurrentFilament's.
+	BOOST_CHECK_THROW( call( 1.5, 0.0, 0.30, 0.0, 0.30, 0.4, 16 ),
+	                   std::invalid_argument );
+	BOOST_CHECK_THROW( call( 1.5, 0.0, 1.0, 0.0, 0.3, 0.4, 1 ),
+	                   std::invalid_argument );
+	BOOST_CHECK_THROW(
+		call( std::numeric_limits<double>::quiet_NaN(), 0.0, 1.0, 0.0, 0.3,
+		      0.4, 16 ), std::invalid_argument );
+}
+
+/*
+ * THE SEAM BETWEEN THE TWO RULES, WHICH IS WHERE A SILENT ERROR WOULD LIVE.
+ *
+ * meq::ellipsePsi() switches quadrature at the boundary of the ellipse: a
+ * chord sweep from the field point inside it, the ellipse's own disc outside.
+ * psi itself is continuous there -- a current density with a jump gives a C^1
+ * potential -- so ANY step across the boundary is one rule or the other being
+ * wrong, and this is the only case in this file that can see it. The timing is
+ * printed because this primitive is evaluated once per quadrature point of a
+ * projection and its cost is the guess's cost.
+ */
+BOOST_AUTO_TEST_CASE( the_two_elliptical_sweeps_agree_across_their_own_seam )
+{
+	double const centreR = 0.95;
+	double const centreZ = 0.0;
+	double const semiR = 0.45;
+	double const semiZ = 0.70;
+	double const current = 6.0e5;
+
+	std::printf( "\n  ACROSS THE BOUNDARY OF THE ELLIPSE\n" );
+	std::printf( "    %8s %14s %14s %12s %10s\n",
+	             "angle", "from inside", "from outside", "step",
+	             "relative" );
+
+	/*
+	 * EXTRAPOLATED TO THE BOUNDARY FROM EACH SIDE, NOT DIFFERENCED ACROSS IT.
+	 *
+	 * THE FIRST VERSION OF THIS CASE STRADDLED THE BOUNDARY AND READ 3.7e-02,
+	 * AND ALMOST ALL OF THAT WAS psi DOING WHAT psi DOES. Two points a gap
+	 * apart differ by the gap times the gradient whether or not the quadrature
+	 * is right, so the instrument was measuring the field's own slope and
+	 * calling it a seam -- the same species of error as the conductor case's
+	 * first tolerance. Two points on ONE side give that side's limit at the
+	 * boundary to O( gap^2 ), and the two limits are of the SAME number.
+	 */
+	double const gap = 1.0e-3;
+	double worst = 0.0;
+	for ( double const angle : { 0.0, 0.7, 1.6, 2.4, 3.1, 4.0, 5.2 } )
+	{
+		double const cosine = std::cos( angle );
+		double const sine = std::sin( angle );
+
+		auto at = [ & ]( double s )
+		{
+			return meq::ellipsePsi( centreR + semiR*s*cosine,
+			                        centreZ + semiZ*s*sine, centreR,
+			                        centreZ, semiR, semiZ, current );
+		};
+
+		double const inside = 2.0*at( 1.0 - gap ) - at( 1.0 - 2.0*gap );
+		double const outside = 2.0*at( 1.0 + gap ) - at( 1.0 + 2.0*gap );
+		double const relative =
+			std::abs( inside - outside )/std::abs( inside );
+		worst = std::max( worst, relative );
+
+		std::printf( "    %8.2f %14.6e %14.6e %12.3e %10.2e\n",
+		             angle, inside, outside, inside - outside, relative );
+	}
+	std::fflush( stdout );
+
+	/*
+	 * THE BAR IS THE DISC SWEEP'S OWN WEAK POINT AND IS SET FROM IT. Just
+	 * outside the boundary the kernel is nearly singular immediately inside
+	 * the domain of integration, which is the one configuration the disc sweep
+	 * is not spectral for; the chord sweep is graded onto that same point and
+	 * is the better of the two there. A step of a few parts in 1e4 is that
+	 * error, and it is a guess's worth. A step of PER CENT would be a rule
+	 * integrating the wrong region.
+	 */
+	BOOST_TEST( worst < 2.0e-3,
+	            "the two elliptical sweeps disagree across the boundary they "
+	            "are split at -- worst relative step " << worst << ". psi is "
+	            "continuous there, so this is one of the two rules being "
+	            "wrong rather than anything physical" );
+
+	auto const start = std::chrono::steady_clock::now();
+	int const samples = 2000;
+	double sink = 0.0;
+	for ( int i = 0; i < samples; ++i )
+	{
+		// A spiral covering inside, the boundary band and well outside, so the
+		// figure is an average over the branches rather than of one of them.
+		double const s = 3.0*( i + 0.5 )/samples;
+		double const angle = 0.37*i;
+		// Clamped at the axis exactly as the driver's guess clamps it: this
+		// spiral reaches r < 0, and the mesh does too.
+		double const probe =
+			std::max( 0.0, centreR + semiR*s*std::cos( angle ) );
+		sink += meq::ellipsePsi( probe, centreZ + semiZ*s*std::sin( angle ),
+		                         centreR, centreZ, semiR, semiZ, current );
+	}
+	auto const elapsed = std::chrono::steady_clock::now() - start;
+	double const microseconds =
+		std::chrono::duration<double, std::micro>( elapsed ).count()/samples;
+
+	std::printf( "\n  ellipsePsi: %.2f us per point over %d points"
+	             " ( sink %.6e )\n", microseconds, samples, sink );
+	std::fflush( stdout );
 }

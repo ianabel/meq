@@ -1631,6 +1631,7 @@ namespace meq
 			Table solver( document, "solver", sourceName, false );
 			solver.rejectUnknownKeys( { "PicardSweeps", "PicardBlend", "BorderRegularisation",
 			                            "BorderCollinearityRegularisation", "TopologyRetry",
+			                            "UpDownSymmetry",
 			                            "NewtonMaxIterations", "NewtonRelativeTolerance", "NewtonAbsoluteTolerance",
 			                            "PlasmaSupportSweeps", "XPointMeritWeight", "LineSearchMerit",
 			                            			                            "AssemblyMode",
@@ -1668,6 +1669,7 @@ namespace meq
 			     && !( solverOptions.borderRegularisation > 0.0 ) )
 				solver.fail( "BorderCollinearityRegularisation", "weights a penalty that multiplies BorderRegularisation's lambda, so it does nothing on its own: set BorderRegularisation as well, or remove this key" );
 			solverOptions.topologyRetry = solver.getIntegerOr( "TopologyRetry", solverOptions.topologyRetry );
+			solverOptions.upDownSymmetry = solver.getBooleanOr( "UpDownSymmetry", solverOptions.upDownSymmetry );
 			if ( solverOptions.topologyRetry < 0 )
 				solver.fail( "TopologyRetry", "cannot be negative; zero is off" );
 			solverOptions.xPointMeritWeight = solver.getFloatOr( "XPointMeritWeight", solverOptions.xPointMeritWeight );
@@ -1869,10 +1871,20 @@ namespace meq
 				initialGuessOptions.type = InitialGuessType::Ramp;
 			else if ( type == "bump" )
 				initialGuessOptions.type = InitialGuessType::Bump;
+			else if ( type == "conductors" )
+				initialGuessOptions.type = InitialGuessType::Conductors;
 			else if ( type == "gridfunction" )
 				initialGuessOptions.type = InitialGuessType::GridFunction;
 			else
-				guess.fail( "Type", "must be one of none, ramp, bump, gridfunction, but is \"" + type + "\"" );
+				guess.fail( "Type", "must be one of none, ramp, bump, conductors, gridfunction, but is \"" + type + "\"" );
+
+			// CONDUCTORS NEEDS CONDUCTORS, and saying so at parse time beats a
+			// solve that starts from an identically zero guess and calls it a
+			// cold start. An empty [[coils]] with this Type is a file that asked
+			// for the vacuum field of nothing.
+			if ( initialGuessOptions.type == InitialGuessType::Conductors
+			     && coilOptions.coils.empty() )
+				guess.fail( "Type", "= \"conductors\" builds the guess from this file's own [[coils]], and there are none" );
 
 			initialGuessOptions.file = guess.getStringOr( "File", "" );
 			initialGuessOptions.meshFile = guess.getStringOr( "MeshFile", "" );
@@ -1886,6 +1898,74 @@ namespace meq
 				if ( initialGuessOptions.meshFile.empty() )
 					guess.fail( "MeshFile", "is required when Type = \"gridfunction\": a "
 					            "GridFunction cannot be read without the mesh it lives on" );
+			}
+
+			if ( initialGuessOptions.type == InitialGuessType::Conductors )
+			{
+				/*
+				 * THE PLASMA COLUMN IS OPTIONAL AND COSTS TWO NUMBERS.
+				 *
+				 * With no CentreR this is the conductors' own vacuum field and
+				 * nothing else, which is a complete and useful guess: it
+				 * carries the machine's scale and topology and is
+				 * Delta*-harmonic off the conductors. MEASURED on freegsnke's
+				 * MAST-U, it converges in 9 iterations -- to an X-point 1.574 m
+				 * from its seed, which is M-26's hazard reached by a guess that
+				 * describes no plasma.
+				 *
+				 * CentreR is therefore the guessed MAGNETIC AXIS, and
+				 * `[source] PlasmaCurrent` is spread over an ELLIPSE about it.
+				 * That is closer to the physics than a paraboloid -- a plasma
+				 * IS a current distribution, and a column of one has a
+				 * separatrix and an X-point where a paraboloid has no null at
+				 * all -- and it asks the user for something they know.
+				 *
+				 * **AND IT IS AN ELLIPSE RATHER THAN A FILAMENT BECAUSE A
+				 * FILAMENT IS SINGULAR AT THE ONE POINT THAT MATTERS.**
+				 * meq::filamentPsi() diverges logarithmically AT the filament,
+				 * so carrying I_p on one at the guessed axis puts an unbounded
+				 * spike exactly where the axis search has to look: on MAST-U it
+				 * reads 6.667e-01 at 3 mm from the guess against a reference
+				 * psi_axis of 9.187e-02. A rectangle would be bounded, and the
+				 * ellipse is preferred over one because a uniform current
+				 * density on a rectangle carries a logarithm in its second
+				 * derivatives at each of four corners, which is an artefact of
+				 * the shape and not of the equilibrium.
+				 *
+				 * RadiusR and RadiusZ are its semi-axes, and default to half
+				 * the guessed major radius, circular. That default cannot
+				 * reach the axis whatever CentreR is, which is the refusal it
+				 * would otherwise meet; an explicit RadiusR can, and does.
+				 * CentreZ defaults to 0 because an up-down symmetric machine
+				 * is the common case. Amplitude is NOT read here and is a
+				 * bump's business.
+				 */
+				initialGuessOptions.centreR = guess.getFloatOr( "CentreR", 0.0 );
+				initialGuessOptions.centreZ = guess.getFloatOr( "CentreZ", 0.0 );
+				if ( initialGuessOptions.centreR < 0.0 )
+					guess.fail( "CentreR", "is the guessed magnetic axis and must be at r > 0. "
+					            "Leave it out altogether for the conductors' own field with no "
+					            "plasma column in it" );
+
+				initialGuessOptions.radiusR =
+					guess.getFloatOr( "RadiusR", 0.5*initialGuessOptions.centreR );
+				initialGuessOptions.radiusZ =
+					guess.getFloatOr( "RadiusZ", initialGuessOptions.radiusR );
+
+				if ( initialGuessOptions.centreR > 0.0 )
+				{
+					if ( !( initialGuessOptions.radiusR > 0.0 )
+					     || !( initialGuessOptions.radiusZ > 0.0 ) )
+						guess.fail( "RadiusR", "the semi-axes of the plasma column must both be "
+						            "positive" );
+
+					if ( !( initialGuessOptions.centreR
+					        - initialGuessOptions.radiusR > 0.0 ) )
+						guess.fail( "RadiusR", "the plasma column reaches the axis: "
+						            "CentreR - RadiusR must be strictly positive, because psi is "
+						            "identically zero on r = 0 and a conductor there would sit in "
+						            "its own zero" );
+				}
 			}
 
 			if ( initialGuessOptions.type == InitialGuessType::Bump )

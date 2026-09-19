@@ -1839,6 +1839,88 @@ int main( int argc, char **argv )
 				break;
 			}
 
+			case meq::InitialGuessType::Conductors:
+			{
+				/*
+				 * THE CONDUCTORS' OWN VACUUM FIELD, FROM THIS FILE'S [[coils]].
+				 *
+				 * BUILDING A GOOD GUESS IS MEQ'S WORK, and every machine
+				 * example in this tree instead hands the solver a .gf that
+				 * mkexactguess.py reconstructed -- which is the solver asking
+				 * the user to do its convergence work. The information that
+				 * guess is made of is already in the file, so this computes it.
+				 *
+				 * meq::coilPsi() integrates one rectangle analytically by
+				 * Carlson's elliptic integrals; the sum is Delta*-harmonic off
+				 * the conductors at measured rate 2.00, so it is an exact
+				 * solution of the vacuum problem rather than an approximation
+				 * of one, and it carries the machine's scale and topology
+				 * without any plasma information at all.
+				 *
+				 * A PLASMA COLUMN ON TOP WHEN ONE IS ASKED FOR. The
+				 * conductors say nothing about the core, and the core is what
+				 * selects the branch -- so CentreR, CentreZ, RadiusR and
+				 * RadiusZ place an elliptical column carrying [source]
+				 * PlasmaCurrent, and leaving CentreR out leaves the vacuum
+				 * field alone.
+				 */
+				meq::CoilSet const *set = coils.get();
+				double const centreR = config->getInitialGuess().centreR;
+				double const centreZ = config->getInitialGuess().centreZ;
+				double const semiR = config->getInitialGuess().radiusR;
+				double const semiZ = config->getInitialGuess().radiusZ;
+				// THE PLASMA'S OWN CURRENT, spread over an ELLIPTICAL column
+				// about the guessed axis. It is already in the file as
+				// [source] PlasmaCurrent, so the guess costs the user ONE
+				// geometric number and no flux: CentreZ defaults to 0 and the
+				// semi-axes to half of CentreR, and M-124 measures the tuned
+				// ellipse and the round default reaching the same psi_ax to
+				// every printed digit.
+				//
+				// AND IT IS NOT FREE. meq::ellipsePsi() is 66 us a point at
+				// its default order, paid once per nodal point of this
+				// projection -- about 6 s of MAST-U's 291 s, against the 26 s
+				// the better guess saves in Newton steps. Pass a lower order
+				// if that trade ever goes the other way.
+				double const plasmaCurrent = config->getSource().plasmaCurrent();
+				ramp = std::make_unique<mfem::FunctionCoefficient>(
+					[ set, centreR, centreZ, semiR, semiZ, plasmaCurrent ]
+					( mfem::Vector const &x )
+					{
+						// CLAMPED AT THE AXIS, because the mesh REACHES r = 0
+						// exactly -- FB-5 requires the half-disc to -- and a
+						// node there lands at -1e-17 as often as +1e-17, which
+						// meq::coilPsi() refuses outright. psi( 0, z ) is
+						// documented as 0.0 bit exactly for both conductor
+						// kinds, so clamping is the value rather than a repair
+						// of one.
+						double const r = std::max( 0.0, x( 0 ) );
+						double total = 0.0;
+						if ( set )
+							for ( meq::Coil const &c : set->coils() )
+								total += meq::coilPsi( c, r, x( 1 ) );
+						// AND THE PLASMA, as an elliptical column carrying
+						// all of I_p about the guessed axis.
+						//
+						// A FILAMENT IS WHAT THIS IS NOT, AND THE DIFFERENCE
+						// IS THE WHOLE POINT. psi of a filament diverges
+						// logarithmically AT the filament, so I_p on one at
+						// the guessed axis is an unbounded spike exactly where
+						// locateAxisPoint() has to look -- measured on MAST-U,
+						// 6.667e-01 at 3 mm against a reference psi_axis of
+						// 9.187e-02, and still climbing. A finite cross-section
+						// stays bounded, and an ELLIPSE is the one to use
+						// because a rectangle's four corners each carry a
+						// logarithm in the second derivatives that nothing in
+						// the equilibrium put there.
+						if ( plasmaCurrent != 0.0 && centreR > 0.0 )
+							total += meq::ellipsePsi( r, x( 1 ), centreR,
+							                          centreZ, semiR, semiZ,
+							                          plasmaCurrent );
+						return total;
+					} );
+				break;
+			}
 			case meq::InitialGuessType::Bump:
 			{
 				// A CORE, WHICH IS WHAT SELECTS THE BRANCH. See Config.hpp: a
@@ -1973,6 +2055,7 @@ int main( int argc, char **argv )
 				config->getSolver().borderRegularisation,
 				config->getSolver().borderCollinearityRegularisation );
 			fresh->setTopologyRetry( config->getSolver().topologyRetry );
+			fresh->setUpDownSymmetry( config->getSolver().upDownSymmetry );
 			fresh->setXPointMeritWeight( config->getSolver().xPointMeritWeight );
 		}
 
@@ -2109,7 +2192,9 @@ int main( int argc, char **argv )
 			             transfer.queried() - missed, transfer.queried(), missed );
 		}
 		else if ( config->getInitialGuess().type == meq::InitialGuessType::Ramp
-		          || config->getInitialGuess().type == meq::InitialGuessType::Bump )
+		          || config->getInitialGuess().type == meq::InitialGuessType::Bump
+		          || config->getInitialGuess().type
+		             == meq::InitialGuessType::Conductors )
 		{
 			fresh->setInitialGuess( *ramp );
 		}

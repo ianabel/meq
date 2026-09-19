@@ -1060,6 +1060,24 @@ namespace meq
 		 */
 		int topologyRetry = 0;
 
+		/**
+		 * `[solver] UpDownSymmetry` -- find the up-down symmetric solution by
+		 * projecting every iterate onto the symmetric subspace. Off by default.
+		 *
+		 * **A STATEMENT ABOUT WHICH EQUILIBRIUM IS WANTED, exposed for the
+		 * reason `[boundary.xpoint]`'s seed is** -- a free boundary has more
+		 * than one solution and something must say which. What it replaces is
+		 * worse: seeding ONE null of a double null asks the user to break a
+		 * symmetry the machine does not break, and MEQ then follows whichever
+		 * saddle its search wanders to. On freegsnke's MAST-U, symmetric to
+		 * 2.4e-10 in its currents, that lands 1.574 m away on the other side.
+		 *
+		 * It is also the vertical instability's cure -- see
+		 * GradShafranovSolver::setUpDownSymmetry() -- and it REFUSES an
+		 * asymmetric mesh rather than deleting the asymmetry.
+		 */
+		bool upDownSymmetry = false;
+
 		// [solver] LineSearchMerit -- what the Armijo backtracking compares,
 		// and NOT what is solved or when it stops. See
 		// meq::GradShafranovSolver::LineSearchMerit.
@@ -1146,6 +1164,46 @@ namespace meq
 		// so with homogeneous data psi = 0 SOLVES the problem and Newton stops
 		// on it in zero iterations. See CLAUDE.md under Traps.
 		Ramp,
+		// THE CONDUCTORS' OWN FIELD, computed from this file's [[coils]] and
+		// nothing else. `Type = "conductors"`.
+		//
+		// **IT EXISTS BECAUSE BUILDING A GOOD GUESS IS MEQ'S WORK.** Every
+		// machine example in this tree hands the solver a .gf that
+		// tools/freegs4e-benchmark/mkexactguess.py reconstructed by summing
+		// Green's functions over the source -- which is MEQ asking the user to
+		// do its convergence work, and which no user of a free-boundary code
+		// should have to do. freegsnke solves its MAST-U from its own default
+		// initialisation with nothing supplied.
+		//
+		// MEQ ALREADY HAS EVERYTHING THAT GUESS IS MADE OF. The conductors and
+		// their currents are in this very file; meq::coilPsi() integrates one
+		// analytically by Carlson's elliptic integrals, agreeing with the
+		// filament limit to 7.0e-13; and the sum is Delta*-HARMONIC off the
+		// conductors at measured rate 2.00, which
+		// `the_conductor_field_is_delta_star_harmonic_off_the_conductors`
+		// asserts. So the vacuum half of the guess needs no external file and
+		// no helper script.
+		//
+		// THE PLASMA IS OPTIONAL AND IS AN ELLIPTICAL COLUMN. With no
+		// `CentreR` this is the vacuum field alone, which has the right scale
+		// and topology outside the plasma and says nothing about the core; on
+		// MAST-U that converges in 9 iterations to the WRONG branch, which is
+		// what a guess describing no plasma buys. `CentreR`/`CentreZ` then
+		// place a guessed magnetic axis and `[source] PlasmaCurrent` is spread
+		// over an ellipse of semi-axes `RadiusR`/`RadiusZ` about it, defaulting
+		// to half the major radius and circular.
+		//
+		// **NOT A FILAMENT, AND THAT IS MEASURED RATHER THAN PREFERRED.**
+		// meq::filamentPsi() diverges logarithmically at the filament, so I_p
+		// carried on one at the guessed axis reads 6.667e-01 at 3 mm from it
+		// against MAST-U's reference psi_axis of 9.187e-02 -- an unbounded
+		// spike at exactly the point the axis search exists to find, and the
+		// solve fails. **And an ellipse rather than a rectangle**, which
+		// meq::Coil already is and which would be bounded: a uniform current
+		// density over a rectangle carries a logarithm in its second
+		// derivatives at each of four corners, and those are artefacts of the
+		// shape rather than anything the equilibrium puts there.
+		Conductors,
 		// A paraboloid BUMP: a core, positive inside an ellipse about a
 		// prescribed centre and zero outside it.
 		//
@@ -1156,8 +1214,17 @@ namespace meq
 		// WHICH EQUILIBRIUM to find: the fixed-boundary rehearsal against
 		// freegs4e measured three converged solutions of one discrete problem,
 		// with the physical one lying BETWEEN the two a ramp sweep reaches. So
-		// the guess is part of the problem statement here rather than an
-		// optimisation, and a core is what selects the branch that is one.
+		// WHICH BRANCH is genuinely the user's to state, and a core is what
+		// selects the one that is physical.
+		//
+		// **THAT IS NOT A LICENCE TO REQUIRE A FIELD FILE.** Stating which
+		// equilibrium is wanted -- an X-point near here, this much current --
+		// is a physical input and MEQ already takes it as [boundary.xpoint],
+		// [source] PsiAxis and PlasmaCurrent. Handing MEQ a .gf reconstructed
+		// by a helper script is a different thing: it is the solver asking the
+		// user to do its convergence work. Every machine example in this tree
+		// does it, and that is a DEFECT those files now name as one rather
+		// than a precondition they document.
 		Bump,
 		// An MFEM GridFunction and its mesh, from a previous MEQ run.
 		GridFunction
@@ -1191,10 +1258,16 @@ namespace meq
 		// Bump: the PEAK value, at the centre. Positive.
 		double amplitude = 0.3;
 
-		// Bump only. The centre of the paraboloid, in metres, and its extent --
+		// Bump and Conductors. The centre, in metres, and the extent --
 		// psi = Amplitude*( 1 - ( dr/RadiusR )^2 - ( dz/RadiusZ )^2 ) where that
 		// is positive and zero elsewhere. RadiusZ defaults to RadiusR, which is
 		// the circular case.
+		//
+		// On Conductors the same four numbers place the ELLIPTICAL PLASMA
+		// COLUMN instead: CentreR/CentreZ are the guessed magnetic axis,
+		// RadiusR/RadiusZ its semi-axes, and RadiusR defaults to half of
+		// CentreR -- a default that cannot reach the axis whatever CentreR is.
+		// A zero centreR there means no column at all.
 		double centreR = 0.0;
 		double centreZ = 0.0;
 		double radiusR = 0.0;

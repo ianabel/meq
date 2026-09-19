@@ -1507,6 +1507,51 @@ namespace meq
 			void setAxisRow( AxisRow choice );
 
 			/**
+			 * FIND THE UP-DOWN SYMMETRIC SOLUTION, by projecting every iterate
+			 * onto the symmetric subspace. Off by default.
+			 *
+			 * **THIS IS A STATEMENT ABOUT WHICH EQUILIBRIUM IS WANTED, NOT A
+			 * PERFORMANCE KEY**, and it is exposed for the same reason
+			 * `[boundary.xpoint]`'s seed is: a free boundary has more than one
+			 * solution and something has to say which. What it replaces is
+			 * WORSE than itself -- seeding one null of a double null asks the
+			 * user to break a symmetry the machine does not break, and MEQ then
+			 * picks whichever saddle its search wanders to.
+			 *
+			 * **MEASURED on freegsnke's MAST-U, whose applied field is up-down
+			 * symmetric to 2.4e-10** -- every conductor pair carries identical
+			 * current and the one antisymmetric pair, P6, is at 1.9e-4 A
+			 * against a 1.6e6 A solenoid. Its two nulls sit at `+-1.09716964`
+			 * at IDENTICAL flux. Asked to follow one of them from a seed, MEQ
+			 * converges in 9 iterations to a null **1.574 m away on the other
+			 * side** and a `psi_ax` 3.5x the reference: M-26's hazard reached by
+			 * an arbitrary tiebreak on an exact symmetry.
+			 *
+			 * **AND IT IS ALSO THE VERTICAL INSTABILITY'S CURE**, which is why
+			 * it is worth more than the convenience. MEASUREMENTS.md M-104
+			 * measures DIII-D's forward Picard growing x10 every 20 passes in
+			 * `Zaxis`, converged by one antisymmetric current combination at
+			 * under a milliamp -- the unstable mode IS the antisymmetric one,
+			 * and projecting it out removes it rather than damping it.
+			 * freegsnke reaches for the same tool and says so in its own
+			 * source: it symmetrises its first three Picard updates by default,
+			 * commented *"this combats the instability of picard iterations"*.
+			 *
+			 * **IT REFUSES RATHER THAN PROJECTING AN ASYMMETRY AWAY.** A mesh
+			 * whose dofs do not mirror, or conductors whose currents do not,
+			 * would have their asymmetry silently deleted -- which is a
+			 * different machine solved without saying so. Both are checked and
+			 * both throw.
+			 *
+			 * @throws std::logic_error at solve time if the mesh is not
+			 *         mirror-symmetric about `z = 0`.
+			 */
+			void setUpDownSymmetry( bool wanted );
+
+			/// setUpDownSymmetry().
+			bool upDownSymmetry() const;
+
+			/**
 			 * REGULARISE THE DENSE BORDER SOLVE, Levenberg-style, so that a
 			 * near-singular Schur complement gives a DAMPED step instead of an
 			 * infinite one.
@@ -3774,6 +3819,28 @@ namespace meq
 
 			/// setAxisRow(). See AxisRow for why the default drops the term.
 			AxisRow axisRowChoice = AxisRow::PositionDropped;
+
+			/// setUpDownSymmetry(). Off by default, so every existing solve is
+			/// bit-unchanged.
+			bool upDownSymmetryWanted = false;
+
+			/// The mirror partner of each dof about z = 0, per block, and the
+			/// SIGN the mirror carries: +1 where the component is even in z and
+			/// -1 where it is odd. Built once per mesh by
+			/// buildMirrorMaps(), empty until then.
+			///
+			/// psi and psihat are EVEN. q is grad_bar( psi )/r, so q_r is even
+			/// and q_z is ODD -- getting that sign wrong would project onto the
+			/// ANTIsymmetric subspace, which is a different and empty problem.
+			std::vector<int> fluxMirror, potentialMirror, traceMirror;
+			std::vector<double> fluxMirrorSign;
+
+			/// Fills the three maps. @throws std::logic_error naming the first
+			/// dof with no partner.
+			void buildMirrorMaps();
+
+			/// x <- ( x + mirror( x ) )/2, in place, over the whole unknown.
+			void projectUpDown( mfem::Vector &unknown ) const;
 
 			/// setBorderRegularisation(). Both zero is off and bit-identical.
 			double borderL2Value = 0.0;

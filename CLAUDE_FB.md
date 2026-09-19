@@ -3208,3 +3208,74 @@ ASCII mesh and GridFunction format to seed the restart, and `compare.py` reads
 the **lossy** `.nc` rather than `_psi.gf`. Reading the exact `P_k` coefficients
 would take the grid sampling, the band mask and the interpolation out of the
 error budget — which matters now that the residual is at 1e-04.
+
+## MEQ solves MAST-U from a configuration file alone
+
+**THE GUESS IS MEQ'S WORK AND NOT THE USER'S**, and until recently every machine
+example in this tree said the opposite — each was handed a `.gf` that
+`mkexactguess.py` had reconstructed by summing Green's functions over the
+source, which is the solver asking the user to do its convergence work.
+`[initialguess] Type = "conductors"` is the replacement and it reads only what
+is already in the file.
+
+**IT IS IN TWO PARTS AND THE SECOND IS WHAT SELECTS THE BRANCH.**
+
+* **The conductors' own vacuum field**, summed over `[[coils]]` by
+  `meq::coilPsi`. It is Δ*-harmonic off the conductors at measured rate 2.00,
+  so it is an exact solution of the vacuum problem rather than an approximation
+  of one, and it carries the machine's scale and topology.
+* **`I_p` over an ELLIPTICAL COLUMN** about a guessed magnetic axis, by
+  `meq::ellipsePsi`. `[source] PlasmaCurrent` is already in the file, so this
+  costs the user ONE number — where the plasma is.
+
+**THE VACUUM FIELD ALONE CONVERGES TO A BRANCH THAT IS NOT ONE**, which is the
+measurement that makes the second part necessary rather than an improvement:
+MAST-U converges in 9 iterations to `psi_ax` 3.5× the reference, with its axis
+at ( 2.65, −0.91 ) — outside the machine.
+
+**AND THE COLUMN IS AN ELLIPSE BECAUSE OF WHAT THE OTHER TWO SHAPES DO.** A
+FILAMENT is singular at exactly the point `locateAxisPoint()` has to find —
+measured, 6.667e-01 at 3 mm from the guessed axis against MAST-U's reference
+`psi_axis` of 9.187e-02, and still climbing — and the solve fails. A RECTANGLE
+is bounded, `meq::Coil` already is one, and a uniform current density over it
+carries a logarithm in its second derivatives at each of four corners; those are
+artefacts of the shape rather than anything the equilibrium puts there.
+
+→ **[M-124](MEASUREMENTS.md#m-124)** — the three guesses against the reference ·
+the approach to the axis · `ellipsePsi`'s two quadrature rules and what one rule
+alone does
+
+**AND IT TAKES `BorderRegularisation` AS WELL.** M-123's repair and this one are
+necessary together and neither is sufficient: without the damping MAST-U fails
+whatever the guess, and without the guess it converges to the wrong branch. The
+committed example was measured failing with only one of them in it.
+
+**THE SHAPE OF THE COLUMN DOES NOT MATTER AND THAT IS WHAT MAKES IT USABLE.** A
+column tuned to MAST-U's own plasma and a round one at the default `0.5*CentreR`
+reach the same `psi_ax`, `psi_bnd` and X-point to every printed digit in the
+same 12 Newton iterations.
+
+### `UpDownSymmetry` is sound and is blocked on the mesher
+
+**A DOUBLE NULL SHOULD NOT NEED TO BE TOLD WHICH SADDLE TO FOLLOW**, and
+`[boundary.xpoint]` makes it: XP-3's border follows ONE saddle, chosen by its
+seed. `[solver] UpDownSymmetry` is the alternative — project the iterate onto
+the subspace of fields even in `z`, and the two saddles are exactly degenerate
+when the search looks for them.
+
+**IT IS A DOF-FOR-DOF AVERAGE, SO IT NEEDS A MIRROR-SYMMETRIC MESH, AND MAST-U'S
+IS NOT ONE.** 3624 of 4735 vertices have no mirror partner. The machine is not
+the problem — its 23 conductors are mirror-paired to the last digit, one pair
+excepted whose currents are equal and opposite at 8e-11 of the total. **gmsh's
+triangulation of a symmetric geometry is not symmetric**, and `halfdisc.py`
+would have to mesh one half and reflect it. `setUpDownSymmetry()` REFUSES such a
+mesh by name rather than projecting onto something that is not a reflection.
+
+→ **[M-125](MEASUREMENTS.md#m-125)** — the projection as the identity, in every
+block · the mesh · the two defects the acceptance case found
+
+**AND `MakeCartesian2D`'s TRIANGLES ARE NOT A SYMMETRIC MESH EITHER**: it splits
+every cell along one diagonal, so a box symmetric in `z` has a triangulation
+that is not. `LimiterCurve.cpp` records the same fact from the other side. The
+QUADRILATERAL variant has no diagonal to choose and is what
+`tests/convergence/UpDownSymmetry.cpp` solves on.

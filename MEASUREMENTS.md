@@ -4333,3 +4333,153 @@ converge; the guess is part of the problem statement."* M-112's cold-forward
 audit measures MEQ failing cold on 9 of 14 machine configurations. **So this
 result is consistent with "no guess" and is not evidence about the solver**;
 `mkexactguess.py` is the bounded work that would settle it.
+
+### M-124
+
+**MAST-U converges from its own configuration file, and what it took was
+spreading `I_p` over an ELLIPSE.**
+
+`examples/mastu-nke.toml`, freegsnke's `example02` machine, 9052 elements at
+`k = 2`, `OMP = MKL = 8`, `[initialguess] Type = "conductors"`. Nothing is
+supplied from outside the file — no `.gf`, no `mkexactguess.py`.
+
+**IT TAKES `BorderRegularisation` AS WELL, AND THAT IS NOT A DETAIL.** Every row
+below carries `BorderRegularisation = 1.0e-3`. Without it this machine fails
+whatever the guess: cold it dies at iteration 0 with a singular bordered
+Jacobian, which is M-123; WITH the ellipse it dies differently, at *"no damping
+of the bordered Newton step gave a finite residual — psi_ax through zero"*. So
+M-123's repair and this one are necessary together and neither is sufficient,
+and the committed example was measured failing with only one of them.
+
+| guess | Newton its | `psi_ax` | `psi_bnd` | X-point | from seed | wall |
+|---|---|---|---|---|---|---|
+| conductors alone | 17+8+7+9 = 41, support NEVER settled | **3.257887e-01** | 1.326955e-02 | ( 0.521, 0.475 ) | **1.574 m** | 318.4 s |
+| **+ ellipse ( 0.50, 0.90 )** | 7+3+2 = 12, settled in 3 | **9.162567e-02** | 2.864064e-02 | ( 0.598637, −1.097187 ) | **1.578e-04 m** | **292.8 s** |
+| + ellipse, DEFAULT semi-axes ( 0.425 round ) | 5+3+2+2 = 12, settled in 4 | **9.162567e-02** | 2.864064e-02 | ( 0.598637, −1.097187 ) | 1.578e-04 m | 314.5 s |
+| + FILAMENT at the same point | — | **fails** | | | | |
+| freegsnke reference | 25–27 Picard | 9.187209931e-02 | 2.867695588e-02 | ( 0.598480, −1.097170 ) | — | 0.25 s at 65×129 |
+
+**Against the reference: `psi_ax` to 2.68e-03 relative, `psi_bnd` to 1.27e-03,
+the X-point to 1.6e-04 m.** The residual history of the last sweep is
+3.010466e-02 → 4.401979e-11 → 1.953785e-15, and the axis lands at
+( 0.9489, −0.0000 ).
+
+**THE CONDUCTORS' FIELD ALONE FINDS A BRANCH THAT IS NOT ONE.** Its axis is at
+( 2.6509, −0.9134 ) — outside the machine — with `psi_ax` 3.5× the reference.
+That is M-26's hazard reached by a guess with the right scale and no plasma in
+it, and it is the clearest instance in this tree of a converged solve being the
+wrong answer rather than a failed one.
+
+**AND THE COLUMN'S SHAPE DOES NOT MATTER, WHICH IS THE RESULT THAT MAKES THIS
+USABLE.** A column tuned to MAST-U's own plasma — semi-axes ( 0.50, 0.90 )
+against a separatrix reaching `r = 0.26` to `1.4` and `|z| = 1.1` — and a round
+one at the DEFAULT `0.5*CentreR = 0.425` reach the same `psi_ax`, `psi_bnd` and
+X-point **to every printed digit**, in the same 12 Newton iterations. So the
+file costs the user ONE number, the guessed major radius, and MEQ supplies the
+rest.
+
+**THE FILAMENT IS WHAT THIS REPLACES AND IT FAILS OUTRIGHT.** `meq::filamentPsi`
+diverges logarithmically at the filament, so `I_p` carried on one at the guessed
+axis is an unbounded spike exactly where `locateAxisPoint()` has to look:
+
+| distance from the guessed axis | filament | ellipse ( 0.45, 0.70 ) |
+|---|---|---|
+| 0.300 m | 1.846806e-01 | 1.551829e-01 |
+| 0.030 m | 4.111789e-01 | 1.367698e-01 |
+| 0.003 m | 6.666827e-01 | 1.329906e-01 |
+| 0.0003 m | 9.281104e-01 | 1.325976e-01 |
+
+against a reference `psi_axis` of 9.187e-02. **A factor of 5.0 across four
+decades of approach for the filament against 1.17 for the ellipse**, and the
+filament is still climbing.
+
+**AND AN ELLIPSE RATHER THAN A RECTANGLE, WHICH `meq::Coil` ALREADY IS AND
+WHICH WOULD ALSO BE BOUNDED.** A uniform current density over a rectangle
+carries a logarithm in its second derivatives at each of four corners. Those are
+artefacts of the shape and nothing in the equilibrium puts them there; an
+ellipse is also what a plasma column actually is.
+
+**`meq::ellipsePsi()`, AND ITS QUADRATURE IS TWO RULES RATHER THAN ONE.**
+Measured in `tests/unit/CoilsTests.cpp`:
+
+| | |
+|---|---|
+| `Delta* psi` inside the column against `-mu0 r I/( pi a b )` | **1.5e-05 to 4.7e-05** relative — the second difference's own truncation |
+| `Delta* psi` outside it | **8.4e-07 to 1.8e-05** of the interior value |
+| a shrinking column against its filament | rate **1.98, 1.99, 2.00** — the quadrupole moment, `O( a^2 )` |
+| the step across the boundary, extrapolated from each side | **8.7e-06 to 9.2e-04** relative |
+| cost | **66 us** per field point at the default order |
+
+**ONE RULE WAS TRIED FIRST AND FAILS OUTSIDE, SEVERELY RATHER THAN GRADUALLY.**
+Sweeping chords from the field point is what kills the kernel's `log( 1/rho )`
+inside the ellipse, and it is the right rule there. Seen from OUTSIDE, the
+ellipse subtends a CONE, so a uniform rule in `theta` spends its nodes mostly on
+rays that miss — a distant or small ellipse gets a handful, sometimes none. With
+that rule alone the far field stopped converging to its filament at 1e-04 and
+then went BACKWARDS (errors 1.520e-03, 1.059e-04, 3.577e-03, 1.505e-02 over four
+halvings), and `Delta*` outside the column read **order the interior value with
+an erratic sign**. The second rule sweeps the ellipse's own disc, where the
+integrand is analytic.
+
+**AND HALVING THE ANGLES IS A REAL 2x THAT THE SEAM REFUSES.** 66 us to 34 us,
+with the far field and `Delta*` unmoved — both are spectral out there — and the
+step across the boundary going from 9.2e-04 to **3.5e-03**.
+
+### M-125
+
+**`UpDownSymmetry` is exact on a mirror-symmetric mesh, and MAST-U's mesh is not
+one.**
+
+The projection averages every dof with the dof at its own reflection, so it
+needs a mesh whose dofs are mirror-paired. `tests/convergence/UpDownSymmetry.cpp`
+is the acceptance and it has two cases.
+
+**ON A SYMMETRIC MESH IT IS THE IDENTITY, TO ROUND-OFF, IN EVERY BLOCK.** A
+bordered solve of an entirely even problem on the standard box in
+QUADRILATERALS, run with the projection and without it:
+
+| `k` | `n` | dofs | `psi_ax` | `d psi_ax` | `d psi` | `d flux` |
+|---|---|---|---|---|---|---|
+| 1 | 8 | 256 | 9.816290e-01 | 6.4e-15 | 7.9e-15 | 7.4e-15 |
+| 1 | 12 | 576 | 9.617180e-01 | 6.9e-16 | 1.8e-15 | 1.6e-15 |
+| 2 | 8 | 576 | 1.045507e+00 | 2.8e-15 | 3.4e-15 | 3.6e-15 |
+| 2 | 12 | 1296 | 1.042921e+00 | 2.1e-16 | 1.9e-15 | 3.2e-15 |
+
+The FLUX column is the one with teeth: `q_r` is even in `z` and `q_z` is odd, so
+the map carries a sign per component, and with it backwards the projection lands
+on the ANTIsymmetric subspace where the only even field is zero.
+
+**ON MAST-U IT REFUSES, AND IT IS RIGHT TO.** `examples/mastu-nke.msh` has
+**3624 of 4735 vertices with no mirror partner**. The machine is not the
+problem: its 23 `[[coils]]` are mirror-paired to the last digit, one pair
+excepted whose currents are **equal and opposite at 1.9107e-04 A** against a
+total of 2.310105e+06 A — 8e-11 of it, which is the 2.4e-10 the applied field
+was measured symmetric to. **The GEOMETRY is symmetric and gmsh's triangulation
+of it is not.** So the constraint is blocked on `tools/mesh/halfdisc.py`, which
+would have to mesh one half and reflect it.
+
+**AND `MakeCartesian2D`'s TRIANGLES ARE NOT THE SYMMETRIC MESH EITHER**, which
+is the trap to know before reaching for one: it splits every cell along ONE
+diagonal, so a box symmetric in `z` has a triangulation that is not. The refusal
+fires on it, naming the element at ( 0.633333, −0.500000 ). The QUADRILATERAL
+variant has no diagonal to choose.
+
+**TWO DEFECTS IN THE PROJECTION WERE FOUND BY BUILDING THAT CASE AND NEITHER
+COULD HAVE BEEN FOUND BY RUNNING MAST-U**, which throws before reaching them:
+
+* **`ProjectCoefficient( x -> x(0) )` is not the route to a dof's coordinates.**
+  It carries `MFEM_VERIFY( VectorDim() == 1 )`, so the FLUX space — the one
+  space with vdim 2 and the only one whose map needs a sign — throws out of it;
+  and the trace space's dofs are on FACES, which an element-wise projection does
+  not reach at all.
+* **A coordinate does not identify a dof.** Both volume spaces are L2 on the
+  closed Gauss-Lobatto basis, so a dof sits ON the element boundary and every
+  element meeting a vertex has its own dof there. A table keyed on position
+  holds one of them. The element is now matched first, by centroid, and the
+  dofs paired inside the matched pair.
+
+**THE FIRST VERSION OF THE SYMMETRIC CASE READ 0.000e+00 IN EVERY BLOCK AND WAS
+VACUOUS.** It used a plain linear `solve()`, and the projection is wired into
+`solveWithNormalisation()` and nowhere else — `psi_ax` being an unknown is what
+makes the branch a question at all. **An exact zero from a routine that
+reassociates sums is not a pass; it is a routine that did not run.**

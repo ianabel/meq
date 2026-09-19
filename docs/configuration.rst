@@ -1126,24 +1126,58 @@ See :doc:`output` for what gets written.
      - ``"none"``
      - ``"none"`` starts from the Dirichlet datum — a cold start. ``"ramp"``
        makes :math:`\psi` run from :math:`-\texttt{Amplitude}` to
-       :math:`+\texttt{Amplitude}` across :math:`z`. ``"bump"`` is a paraboloid
-       core. ``"gridfunction"`` reads a stored answer.
+       :math:`+\texttt{Amplitude}` across :math:`z`. ``"conductors"`` builds a
+       guess out of this file's own ``[[coils]]`` — see below. ``"bump"`` is a
+       paraboloid core. ``"gridfunction"`` reads a stored answer.
    * - ``Amplitude``
      - ``0.3``
      - For ``"ramp"`` and ``"bump"``; must be positive. For ``"bump"`` it is the
        peak value at the centre.
    * - ``CentreR``, ``CentreZ``
      - *``CentreR`` required for* ``"bump"``
-     - The centre of the paraboloid, in metres.
+     - The centre of the paraboloid, in metres. For ``"conductors"`` it is the
+       guessed magnetic axis and is optional; leaving it out gives the
+       conductors' field with no plasma column in it.
    * - ``RadiusR``, ``RadiusZ``
      - *``RadiusR`` required for* ``"bump"``
      - Its extent. ``RadiusZ`` defaults to ``RadiusR``. ``CentreR - RadiusR``
        must be strictly positive: a bump reaching the axis describes no plasma.
+       For ``"conductors"`` these are the semi-axes of the plasma column and
+       ``RadiusR`` defaults to half of ``CentreR``, which cannot reach the axis
+       whatever ``CentreR`` is.
+
    * - ``File``, ``MeshFile``
      - *required for* ``"gridfunction"``
      - The stored grid function and the mesh it lives on — a grid function
        cannot be read without its mesh.
 
+``Type = "conductors"`` builds the guess from what the file already says
+-------------------------------------------------------------------------
+
+A free-boundary problem has more than one converged solution, so something has
+to say which is wanted — but that is a physical statement, not a flux field, and
+MEQ has everything it needs to build one.
+
+The guess is the sum of two things. The **conductors' own vacuum field**, over
+the ``[[coils]]`` in this same file, computed by Carlson's elliptic integrals
+and :math:`\Delta^*`-harmonic off the conductors at measured rate 2.00. And,
+when ``CentreR`` is given, **the plasma's own current** — ``[source]
+PlasmaCurrent`` spread uniformly over an ellipse about that guessed magnetic
+axis.
+
+The plasma half is what selects the branch. The conductors alone have the right
+scale and topology outside the plasma and say nothing about the core; on
+freegsnke's MAST-U they converge in nine iterations to a magnetic axis outside
+the machine. The column is an **ellipse** rather than a point or a rectangle for
+two measured reasons: the flux of a filament diverges logarithmically at the
+filament, which puts an unbounded spike exactly where the axis search has to
+look, and a uniform current density over a rectangle carries a logarithm in its
+second derivatives at each of its four corners.
+
+How well the ellipse matches the real plasma does not matter much. On MAST-U a
+column tuned to the machine and a round one at the default ``0.5*CentreR`` reach
+the same :math:`\psi_\mathrm{ax}`, the same :math:`\psi_\mathrm{bnd}` and the
+same X-point to every printed digit, in the same number of Newton iterations.
 ``"bump"`` gives
 :math:`\psi = \texttt{Amplitude}\,(1 - (\Delta r/\texttt{RadiusR})^2 - (\Delta z/\texttt{RadiusZ})^2)`
 where that is positive and zero elsewhere.
@@ -1281,3 +1315,19 @@ rather than left to the configuration.
    off. A step that breaks the plasma's topology and a step that merely made the
    residual worse are different failures; this is what lets the first be treated
    as one.
+
+``UpDownSymmetry``
+   Project every Newton iterate onto the subspace of fields even in :math:`z`.
+   Default ``false``. A double null has two saddles at identical flux and
+   ``[boundary.xpoint]`` follows whichever its seed is nearer; with the
+   constraint on, the two are exactly degenerate and the choice stops mattering.
+
+   **It needs a mirror-symmetric mesh and it refuses one that is not.** The
+   projection averages each degree of freedom with the one at its own
+   reflection, so a degree of freedom with no partner has nothing to average
+   against; MEQ names the first such element rather than projecting away an
+   asymmetry the mesh describes. That is a real restriction rather than a
+   formality: an unstructured mesher given a perfectly symmetric machine does
+   not generally return a symmetric mesh, and neither does a triangulated
+   Cartesian grid, which splits every cell along one diagonal. A quadrilateral
+   grid symmetric about :math:`z = 0` does.

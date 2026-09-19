@@ -197,6 +197,14 @@ set(MEQ_CONVERGENCE_TESTS
 	# on potential dofs, so it asserts that the constraint cannot respond to the
 	# FLUX -- and a flux perturbation moves the axis while leaving psi_h alone.
 	BorderJacobian
+	# [solver] UpDownSymmetry: the dof-for-dof projection onto fields even in z,
+	# which exists so a DOUBLE NULL need not be told which of its two saddles to
+	# follow. Two cases, and the second is the one MAST-U meets: the projection
+	# is the identity on a problem that already has the symmetry -- the flux's
+	# per-component sign being what that can fail on -- and it REFUSES a mesh
+	# whose dofs are not mirror-paired, which gmsh's triangulation of a
+	# perfectly symmetric machine is not.
+	UpDownSymmetry
 	# FB-1's coupling matrix P: the trace projection of the exterior modes onto
 	# Gamma_h. It needs a curved boundary and so needs MFEM, which is why it is
 	# a convergence test rather than a unit one -- ExteriorDtN's own tests, which

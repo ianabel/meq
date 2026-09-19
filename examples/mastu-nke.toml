@@ -44,10 +44,37 @@ Radius = 3.0
 CentreZ = 0.0
 Modes = 10
 
+# WHERE THE PLASMA IS, WHICH IS WHAT SELECTS THE BRANCH.
+#
+# MEQ builds the guess itself from this file's own [[coils]] and
+# [source] PlasmaCurrent -- the vacuum field of the conductors, plus I_p spread
+# over an ELLIPTICAL COLUMN about the axis named here. The semi-axes default to
+# half of CentreR, circular, and MEASURED they need not be better than that:
+# the tuned ellipse ( 0.50, 0.90 ) and the round default ( 0.425 ) reach the
+# SAME psi_ax to every printed digit.
+#
+# **THE CONDUCTORS ALONE ARE NOT ENOUGH AND THAT IS MEASURED TOO.** Without
+# CentreR this file converges in 9 iterations to psi_ax 3.258e-01 -- 3.5x the
+# reference -- with its X-point 1.574 m from the seed and its axis at
+# ( 2.65, -0.91 ), outside the machine. A guess describing no plasma finds a
+# branch that is not one.
+[initialguess]
+Type = "conductors"
+CentreR = 0.85
+CentreZ = 0.0
+
 [discretisation]
 PolynomialDegree = 2
 
 [solver]
+# M-123: WITHOUT THIS THE BORDER SOLVE FAILS ON THIS MACHINE, and it is needed
+# whether or not there is a guess. Cold it dies at iteration 0 with a singular
+# bordered Jacobian; with the guess below it dies differently, at "no damping of
+# the bordered Newton step gave a finite residual". The damping is scaled by the
+# relative merit, so it vanishes as the solve converges and costs the quadratic
+# endgame nothing -- the run it makes possible finishes 3.01e-02 -> 4.40e-11 ->
+# 1.95e-15.
+BorderRegularisation = 1.0e-3
 NewtonMaxIterations = 200
 NewtonRelativeTolerance = 1.0e-10
 PlasmaSupportSweeps = 4

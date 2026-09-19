@@ -558,6 +558,80 @@ namespace meq
 	               int order = defaultCoilQuadratureOrder,
 	               double mu0 = vacuumPermeability );
 
+	/// The Gauss order ellipsePsi() uses unless told otherwise: nodes along
+	/// each chord, with 4 times that many angles around it.
+	///
+	/// 16 rather than coilPsi()'s 32 because the two rules are not doing the
+	/// same job. coilPsi() integrates a rectangle to 1e-12 INSIDE the
+	/// conductor and is a reference field; ellipsePsi() exists for an initial
+	/// GUESS, where the requirement is boundedness and smoothness rather than
+	/// figures, and where the cost is paid once per quadrature point of a
+	/// projection.
+	inline constexpr int defaultEllipseQuadratureOrder = 16;
+
+	/**
+	 * The poloidal flux of a uniform current density over an ELLIPTICAL
+	 * cross-section, coaxial with the axis: the cross-section integral of
+	 * filamentPsi() over the ellipse, times its current density.
+	 *
+	 * @param centreR,centreZ  the centre of the ellipse, in metres.
+	 * @param semiR,semiZ      its semi-axes. Both must be positive, and
+	 *                         @a semiR must be strictly less than @a centreR.
+	 * @param current          the SIGNED total current, which may be zero.
+	 * @param order            Gauss nodes per chord. At least 2, at most
+	 *                         maximumCoilQuadratureOrder.
+	 *
+	 * **WHY AN ELLIPSE AND NOT A RECTANGLE, WHICH meq::Coil ALREADY IS.** This
+	 * is the shape a PLASMA COLUMN is, and the difference is not cosmetic: a
+	 * uniform current density over a rectangle has four corners, and at each
+	 * of them the second derivatives of psi carry a logarithm. Those are
+	 * artefacts of the shape and nothing in the equilibrium puts them there.
+	 * An ellipse has no corners and psi is C^infinity across its boundary in
+	 * every direction but the normal, where it is C^1 -- which is what a
+	 * current density with a jump gives and is all any guess needs.
+	 *
+	 * **AND NOT A FILAMENT, WHICH IS THE FAILURE THIS REPLACES.** psi of a
+	 * filament diverges logarithmically AT the filament. Carrying I_p on one
+	 * at the guessed magnetic axis therefore puts an unbounded spike exactly
+	 * where the axis search has to look: measured on freegsnke's MAST-U,
+	 * filamentPsi() reads 6.667e-01 at 3 mm from the guessed axis against a
+	 * reference psi_axis of 9.187e-02, and it is still climbing. The same
+	 * current spread over a finite cross-section stays bounded -- that is the
+	 * whole of what a finite cross-section is for.
+	 *
+	 * **THE QUADRATURE IS POLAR ABOUT THE FIELD POINT, AND THAT IS WHAT MAKES
+	 * ONE RULE SERVE INSIDE AND OUTSIDE.** The ellipse is swept as chords
+	 * rho in [ rho-, rho+ ] along rays from the field point itself, so the
+	 * AREA element rho d rho d theta carries a factor rho that meets the
+	 * kernel's log( 1/rho ) head on; cubic grading toward rho- then leaves an
+	 * integrand vanishing like t^5 log t, which Gauss takes to round-off. No
+	 * node can land on the field point, because every node is at rho > 0.
+	 * A field point inside the ellipse has rho- = 0 on every ray and is the
+	 * case the grading is for; one outside has rho- > 0 and is graded toward
+	 * its own nearest approach, which is where the kernel is largest.
+	 *
+	 * **THE ONE PLACE IT IS ONLY THREE FIGURES IS OUTSIDE, AND IT IS THE
+	 * ANGLES RATHER THAN THE CHORDS.** Seen from an exterior point the ellipse
+	 * subtends a cone, and at the two tangent rays the chord length vanishes
+	 * like a square root -- so the midpoint rule in theta, which is spectral
+	 * for an interior point, converges at about n^-1.5 for an exterior one.
+	 * At the default order that is a few parts in 1e4 of the value, and rays
+	 * that miss the ellipse cost nothing, so a far field point is both cheap
+	 * and accurate. This is priced for a guess and is not a reference field;
+	 * coilPsi() is the reference field.
+	 *
+	 * psi( 0, z ) is 0.0 BIT EXACTLY, as it is for both other conductor kinds:
+	 * every chord's kernel carries k^2 = 4 a r/d^2 as a factor.
+	 *
+	 * @throws std::invalid_argument on a non-finite argument, a negative field
+	 *         radius, a non-positive semi-axis, an ellipse reaching the axis,
+	 *         or an order outside the accepted range.
+	 */
+	double ellipsePsi( double r, double z, double centreR, double centreZ,
+	                   double semiR, double semiZ, double current,
+	                   int order = defaultEllipseQuadratureOrder,
+	                   double mu0 = vacuumPermeability );
+
 	/**
 	 * An IDEAL CIRCULAR FILAMENT: a ring current of zero cross-section,
 	 * coaxial with the axis.

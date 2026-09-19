@@ -688,7 +688,7 @@ Each stage ends at a **measured convergence rate**, not at "it runs". See
 git submodule update --init --recursive     # extern/toml11
 cmake -B build
 cmake --build build -j6
-cd build && OMP_NUM_THREADS=4 ctest -j4      # 50/51, about 480 s
+cd build && OMP_NUM_THREADS=4 ctest -j4      # 52/53, about 480 s
 ```
 
 **RUN IT `-j4` WITH `OMP_NUM_THREADS=4`, WHICH IS 3.2x FASTER AND MEASURED.**
@@ -698,7 +698,7 @@ product at the core count is what pays:
 
 → **[M-14](MEASUREMENTS.md#m-14)** — wall · CPU
 
-37/37 in every configuration when that table was taken, and **50 of 51 today**,
+37/37 in every configuration when that table was taken, and **52 of 53 today**,
 the one red being `PlasmaEdgeConvergence` and deliberate —
 the count moves as cases are added, so read the table's ratios rather than its
 absolute seconds. Nothing in the suite depends on a thread count, which is the

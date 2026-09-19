@@ -1,3 +1,4 @@
+#include <map>
 #include "GradShafranov.hpp"
 
 // For AxisConstraint::LocatedAxis, which constrains psi_ax at a zero of q_h
@@ -1626,6 +1627,298 @@ namespace
 	int GradShafranovSolver::topologyRetry() const
 	{
 		return topologyRetryValue;
+	}
+
+	void GradShafranovSolver::setUpDownSymmetry( bool wanted )
+	{
+		upDownSymmetryWanted = wanted;
+		// The maps belong to a mesh and a set of spaces, so they are dropped
+		// rather than kept: turning this on after a solve must not reuse a map
+		// built for a mesh that has since been refined.
+		fluxMirror.clear();
+		potentialMirror.clear();
+		traceMirror.clear();
+		fluxMirrorSign.clear();
+	}
+
+	bool GradShafranovSolver::upDownSymmetry() const
+	{
+		return upDownSymmetryWanted;
+	}
+
+	void GradShafranovSolver::buildMirrorMaps()
+	{
+		/*
+		 * THE MIRROR PARTNER OF EVERY DOF, PAIRED ELEMENT BY ELEMENT.
+		 *
+		 * A dof's coordinates are not something mfem::FiniteElementSpace hands
+		 * out, but a NODAL element knows where its own nodes are:
+		 * FiniteElement::GetNodes() is the reference-space list, in dof order,
+		 * and the element transformation carries it to physical space. MEQ's
+		 * spaces are nodal throughout, so this is exact rather than a fit.
+		 *
+		 * **AND A COORDINATE IS NOT ENOUGH TO IDENTIFY A DOF, WHICH IS THE
+		 * TRAP AND IS WHY THIS PAIRS ENTITIES FIRST.** Both volume spaces are
+		 * L2 and their basis is closed Gauss-Lobatto, so a dof sits ON the
+		 * element boundary and every element meeting a vertex has its OWN dof
+		 * there -- six distinct dofs at one point, carrying six different
+		 * values of a discontinuous field. A table keyed on position holds one
+		 * of them and hands every query whichever was written last, so the
+		 * map would average a dof against a value from the wrong element. The
+		 * ELEMENT is therefore matched first, by its centroid, and the dofs
+		 * are then paired inside the matched pair, where the nodes really are
+		 * distinct.
+		 *
+		 * **AND ProjectCoefficient( x -> x(0) ) IS NOT THE ROUTE TO THE
+		 * COORDINATES EITHER, THOUGH IT READS LIKE ONE.** It carries
+		 * MFEM_VERIFY( VectorDim() == 1, "Cannot project scalar Coefficient
+		 * onto vector GridFunction" ), so the FLUX space -- the one space here
+		 * with vdim 2 and the only one whose map needs a sign -- throws out of
+		 * it. The trace space is worse than that: it is a
+		 * DG_Interface_FECollection whose dofs live on FACES, so an
+		 * element-wise projection does not reach them at all and the same
+		 * sweep has to go through GetFaceElement() and GetFaceVDofs(), which
+		 * is how Estimator.hpp already reads that space.
+		 *
+		 * THE TOLERANCE IS RELATIVE TO THE MESH AND NOT ABSOLUTE. A mesh
+		 * generated symmetric mirrors to round-off, but gmsh writes
+		 * coordinates in decimal and a node at -1.0972 need not be the exact
+		 * negation of one at +1.0972.
+		 */
+		double extent = 0.0;
+		for ( int v = 0; v < mesh.GetNV(); ++v )
+			extent = std::max( extent, std::abs( mesh.GetVertex( v )[ 0 ] )
+			                           + std::abs( mesh.GetVertex( v )[ 1 ] ) );
+		double const tolerance = 1.0e-9*std::max( extent, 1.0 );
+
+		auto cell = [ & ]( double value )
+		{
+			return static_cast< long long >( std::llround( value/tolerance ) );
+		};
+
+		/*
+		 * The nodes of one entity -- an element or a face -- in physical
+		 * space, in dof order, together with the dofs they belong to.
+		 */
+		struct Entity
+		{
+			std::vector<double> nodeR;
+			std::vector<double> nodeZ;
+			std::vector<int> dof;
+			double centreR = 0.0;
+			double centreZ = 0.0;
+		};
+
+		auto entitiesOf = [ & ]( mfem::FiniteElementSpace &space, bool onFaces )
+		{
+			std::vector<Entity> found;
+
+			// A function-local transformation, never the mesh's shared one --
+			// see CLAUDE.md under Traps, where six call sites in this tree
+			// took the shared overload and one of them was threaded.
+			mfem::IsoparametricTransformation local;
+			mfem::Array<int> dofs;
+			mfem::Vector point( 2 );
+
+			int const count = onFaces ? mesh.GetNumFaces() : space.GetNE();
+			for ( int i = 0; i < count; ++i )
+			{
+				mfem::FiniteElement const *element =
+					onFaces ? space.GetFaceElement( i ) : space.GetFE( i );
+				if ( element == nullptr || element->GetDof() == 0 )
+					continue;
+
+				if ( onFaces )
+				{
+					mesh.GetFaceTransformation( i, &local );
+					space.GetFaceVDofs( i, dofs );
+				}
+				else
+				{
+					mesh.GetElementTransformation( i, &local );
+					space.GetElementDofs( i, dofs );
+				}
+				if ( dofs.Size() == 0 )
+					continue;
+
+				mfem::IntegrationRule const &nodes = element->GetNodes();
+				Entity entity;
+				for ( int j = 0; j < dofs.Size() && j < nodes.GetNPoints();
+				      ++j )
+				{
+					local.Transform( nodes.IntPoint( j ), point );
+					entity.nodeR.push_back( point( 0 ) );
+					entity.nodeZ.push_back( point( 1 ) );
+					entity.dof.push_back(
+						dofs[ j ] >= 0 ? dofs[ j ] : -1 - dofs[ j ] );
+					entity.centreR += point( 0 );
+					entity.centreZ += point( 1 );
+				}
+				double const n =
+					static_cast< double >( entity.nodeR.size() );
+				entity.centreR /= n;
+				entity.centreZ /= n;
+				found.push_back( std::move( entity ) );
+			}
+			return found;
+		};
+
+		auto mapOf = [ & ]( mfem::FiniteElementSpace &space, bool onFaces,
+		                    std::vector<int> &into, int size,
+		                    char const *what )
+		{
+			std::vector<Entity> const entities = entitiesOf( space, onFaces );
+
+			std::map< std::pair< long long, long long >, std::size_t > table;
+			for ( std::size_t e = 0; e < entities.size(); ++e )
+				table[ { cell( entities[ e ].centreR ),
+				         cell( entities[ e ].centreZ ) } ] = e;
+
+			auto refuse = [ & ]( double r, double z, char const *which )
+			{
+				throw std::logic_error(
+					std::string( "meq::GradShafranovSolver::setUpDownSymmetry: the " )
+					+ what + " space's " + which + " at ( "
+					+ std::to_string( r ) + ", " + std::to_string( z )
+					+ " ) with no mirror partner about z = 0, so this mesh is not "
+					  "up-down symmetric. Projecting onto the symmetric subspace "
+					  "would delete an asymmetry the mesh describes rather than "
+					  "finding the symmetric solution." );
+			};
+
+			into.assign( static_cast< std::size_t >( size ), -1 );
+			for ( Entity const &entity : entities )
+			{
+				// The mirror ENTITY, by centroid. Reflection maps an element
+				// onto an element of the same shape and size, so its centroid
+				// is the reflection of this one's.
+				std::size_t partner = entities.size();
+				for ( long long dr = -1; dr <= 1; ++dr )
+					for ( long long dz = -1; dz <= 1; ++dz )
+					{
+						auto at = table.find(
+							{ cell( entity.centreR ) + dr,
+							  cell( -entity.centreZ ) + dz } );
+						if ( at != table.end()
+						     && std::abs( entities[ at->second ].centreR
+						                  - entity.centreR ) <= tolerance
+						     && std::abs( entities[ at->second ].centreZ
+						                  + entity.centreZ ) <= tolerance )
+							partner = at->second;
+					}
+				if ( partner == entities.size() )
+					refuse( entity.centreR, entity.centreZ,
+					        onFaces ? "face" : "element" );
+
+				// And the dofs INSIDE it, node against reflected node. Small
+				// and quadratic on purpose: an element has a handful of dofs,
+				// and a hash here would reintroduce exactly the ambiguity the
+				// entity match was built to remove.
+				Entity const &other = entities[ partner ];
+				for ( std::size_t j = 0; j < entity.dof.size(); ++j )
+				{
+					int mirrored = -1;
+					for ( std::size_t k = 0;
+					      k < other.dof.size() && mirrored < 0; ++k )
+						if ( std::abs( other.nodeR[ k ] - entity.nodeR[ j ] )
+						     <= tolerance
+						     && std::abs( other.nodeZ[ k ] + entity.nodeZ[ j ] )
+						        <= tolerance )
+							mirrored = other.dof[ k ];
+					if ( mirrored < 0 )
+						refuse( entity.nodeR[ j ], entity.nodeZ[ j ], "node" );
+					into[ static_cast< std::size_t >( entity.dof[ j ] ) ] =
+						mirrored;
+				}
+			}
+
+			// A dof no entity claimed carries nothing, so it is its own
+			// partner and the average over it is a no-op.
+			for ( std::size_t i = 0; i < into.size(); ++i )
+				if ( into[ i ] < 0 )
+					into[ i ] = static_cast< int >( i );
+
+			/*
+			 * AND THE MAP IS AN INVOLUTION, WHICH IS THE CHECK WITH TEETH.
+			 *
+			 * Every failure this routine can have short of throwing -- two
+			 * entities matching one partner, a node paired across the wrong
+			 * element, a tolerance wide enough to catch a neighbour -- leaves
+			 * a map that is not its own inverse. Reflecting twice is the
+			 * identity, so anything else is a map that is not a reflection,
+			 * and averaging against it would silently mix dofs that are not
+			 * partners.
+			 */
+			for ( std::size_t i = 0; i < into.size(); ++i )
+				if ( into[ static_cast< std::size_t >( into[ i ] ) ]
+				     != static_cast< int >( i ) )
+					throw std::logic_error(
+						std::string( "meq::GradShafranovSolver::setUpDownSymmetry: the " )
+						+ what + " space's mirror map is not an involution at dof "
+						+ std::to_string( i ) + ", which reflects to "
+						+ std::to_string( into[ i ] ) + " and back to "
+						+ std::to_string( into[ static_cast< std::size_t >( into[ i ] ) ] )
+						+ ". A reflection is its own inverse, so this is not one." );
+		};
+
+		mapOf( *potentialFes, false, potentialMirror,
+		       potentialFes->GetVSize(), "potential" );
+		mapOf( *traceFes, true, traceMirror, traceFes->GetVSize(), "trace" );
+
+		/*
+		 * THE FLUX IS vdim 2 AND IS THE ONE MAP THAT IS NOT THE NODE MAP.
+		 *
+		 * Two vdofs share every node, so the node map is built once on the
+		 * SCALAR dofs and expanded through DofToVDof(), which is the one call
+		 * that knows this space's ordering.
+		 *
+		 * AND THE COMPONENT CARRIES A SIGN, which is the one thing here that
+		 * cannot be got from geometry. q = grad_bar( psi )/r with psi EVEN in
+		 * z, so q_r = ( 1/r ) dpsi/dr is even and q_z = ( 1/r ) dpsi/dz is
+		 * ODD. Projecting with the wrong sign projects onto the ANTIsymmetric
+		 * subspace, where the only symmetric equilibrium is psi = 0 -- a
+		 * trivial branch reached silently, which is this tree's most-recorded
+		 * failure shape.
+		 */
+		std::vector<int> fluxNodes;
+		mapOf( *fluxFes, false, fluxNodes, fluxFes->GetNDofs(), "flux" );
+
+		int const scalar = fluxFes->GetNDofs();
+		int const total = fluxFes->GetVSize();
+		fluxMirror.assign( static_cast< std::size_t >( total ), -1 );
+		fluxMirrorSign.assign( static_cast< std::size_t >( total ), 1.0 );
+		for ( int d = 0; d < scalar; ++d )
+			for ( int component = 0; component < 2; ++component )
+			{
+				int const from = fluxFes->DofToVDof( d, component );
+				int const to = fluxFes->DofToVDof(
+					fluxNodes[ static_cast< std::size_t >( d ) ], component );
+				fluxMirror[ static_cast< std::size_t >( from ) ] = to;
+				fluxMirrorSign[ static_cast< std::size_t >( from ) ] =
+					( component == 1 ) ? -1.0 : 1.0;
+			}
+	}
+
+	void GradShafranovSolver::projectUpDown( mfem::Vector &unknown ) const
+	{
+		if ( potentialMirror.empty() )
+			return;
+		mfem::Vector copy( unknown );
+		auto average = [ & ]( int base, std::vector<int> const &map,
+		                      std::vector<double> const *sign )
+		{
+			for ( std::size_t i = 0; i < map.size(); ++i )
+			{
+				double const other =
+					copy( base + map[ i ] )
+					*( sign ? ( *sign )[ i ] : 1.0 );
+				unknown( base + static_cast< int >( i ) ) =
+					0.5*( copy( base + static_cast< int >( i ) ) + other );
+			}
+		};
+		average( blockOffsets[ 0 ], fluxMirror, &fluxMirrorSign );
+		average( blockOffsets[ 1 ], potentialMirror, nullptr );
+		average( blockOffsets[ 2 ], traceMirror, nullptr );
 	}
 
 	void GradShafranovSolver::setAxisRow( AxisRow choice )
@@ -6976,6 +7269,16 @@ namespace
 		mfem::Vector previousResidual;
 		bool havePreviousResidual = false;
 
+		// THE MIRROR MAPS, ONCE PER MESH AND ONLY WHEN ASKED FOR. They refuse a
+		// mesh that is not symmetric rather than projecting its asymmetry away.
+		if ( upDownSymmetryWanted && potentialMirror.empty() )
+			buildMirrorMaps();
+		// AND THE GUESS TOO. An iterate that starts antisymmetric would have to
+		// be projected back on the first accepted step anyway, and the axis and
+		// null searches run BEFORE that on the initial state.
+		if ( upDownSymmetryWanted )
+			projectUpDown( unknown );
+
 		bool converged = false;
 		for ( int iteration = 0; iteration <= newtonMaxIterations*phaseCount;
 		      ++iteration, ++phaseIteration )
@@ -8275,6 +8578,21 @@ namespace
 					xR = savedXr + bestDamping*deltaXr;
 					xZ = savedXz + bestDamping*deltaXz;
 				}
+
+				/*
+				 * THE SYMMETRIC SUBSPACE, BEFORE ANY CONSTRAINT IS RE-READ.
+				 *
+				 * The order matters: peakAt() and refreshXPoint() below LOCATE
+				 * points on this state, and locating them on an iterate that
+				 * still carries an antisymmetric part is how a double null's
+				 * two saddles get told apart by numerical noise. Projecting
+				 * first makes them genuinely degenerate, which is what they
+				 * physically are.
+				 *
+				 * Inert unless setUpDownSymmetry() asked for it.
+				 */
+				projectUpDown( unknown );
+
 				peak = hasNormalisation
 				       ? peakAt( unknown, s, &argElement, &argDof ) : 0.0;
 				constraint = hasNormalisation ? s - peak : 0.0;

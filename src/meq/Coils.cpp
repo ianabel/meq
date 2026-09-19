@@ -310,6 +310,207 @@ namespace meq
 			}
 		}
 
+		/// The cross-section integral of the unit kernel over one ellipse for
+		/// a field point INSIDE it, swept as chords along rays from the field
+		/// point itself.
+		///
+		/// The area element rho d rho d theta carries the factor rho that
+		/// meets the kernel's log( 1/rho ); cubic grading from rho = 0 then
+		/// leaves t^5 log t, which Gauss takes to round-off. No node can land
+		/// on the field point, every one being at rho > 0.
+		double ellipseChordSweep( double r, double z, double centreR,
+		                          double centreZ, double semiR, double semiZ,
+		                          int order )
+		{
+			GaussRule const &rule = gaussRule( order );
+
+			// Four angles per chord node. The theta rule is the accuracy
+			// limit outside the ellipse and costs nothing on a ray that
+			// misses, so it is the cheaper of the two axes to spend on.
+			int const angles = 4*order;
+			double const step = 2.0*pi/angles;
+
+			// The field point in the ellipse's own coordinates. cSquared is
+			// negative inside, zero on the boundary and positive outside, and
+			// it is the constant term of the chord quadratic.
+			double const u = ( r - centreR )/semiR;
+			double const v = ( z - centreZ )/semiZ;
+			double const outside = u*u + v*v - 1.0;
+
+			double total = 0.0;
+			for ( int m = 0; m < angles; ++m )
+			{
+				// The MIDPOINT rule, which is the trapezoid for a periodic
+				// integrand and puts no node on theta = 0, where a field
+				// point level with the centre would have its chord endpoints.
+				double const theta = ( m + 0.5 )*step;
+				double const cosine = std::cos( theta );
+				double const sine = std::sin( theta );
+
+				// Where the ray meets the ellipse: substituting
+				// ( r + rho cos, z + rho sin ) into ( . /semiR )^2 +
+				// ( . /semiZ )^2 = 1 gives a quadratic in rho.
+				double const quadratic = cosine*cosine/( semiR*semiR )
+				                         + sine*sine/( semiZ*semiZ );
+				double const linear = 2.0*( u*cosine/semiR + v*sine/semiZ );
+				double const discriminant =
+					linear*linear - 4.0*quadratic*outside;
+
+				// The ray misses the ellipse entirely, which is most of them
+				// for a distant field point and is why one is cheap.
+				if ( !( discriminant > 0.0 ) )
+					continue;
+
+				double const root = std::sqrt( discriminant );
+				double const far = ( -linear + root )/( 2.0*quadratic );
+				if ( !( far > 0.0 ) )
+					continue;
+
+				double const nearRoot = ( -linear - root )/( 2.0*quadratic );
+				// Clipped at the field point itself: inside the ellipse the
+				// near root is behind the ray and the chord starts at rho = 0,
+				// which is the singular case the grading below is for.
+				double const near = std::max( 0.0, nearRoot );
+				double const length = far - near;
+				if ( !( length > 0.0 ) )
+					continue;
+
+				double chord = 0.0;
+				for ( int i = 0; i < order; ++i )
+				{
+					std::size_t const iu = static_cast<std::size_t>( i );
+					double const t = 0.5*( rule.abscissa[ iu ] + 1.0 );
+					double const tCubed = t*t*t;
+					double const jacobian = 3.0*t*t;
+
+					// Graded toward the near end, which is the singularity
+					// when the point is inside and the nearest approach when
+					// it is not.
+					double const rho = near + length*tCubed;
+					double const weight =
+						0.5*rule.weight[ iu ]*length*jacobian;
+
+					double const source = r + rho*cosine;
+					double const height = z + rho*sine;
+
+					double d = 0.0;
+					double kSquared = 0.0;
+					double complementary = 0.0;
+					loopGeometry( r, z, source, height, d, kSquared,
+					              complementary );
+
+					// rho > 0 at every node, so this cannot fire on the field
+					// point. It guards the node rounding onto the SOURCE ring
+					// through the axis, which the refusal in ellipsePsi()
+					// already makes unreachable.
+					if ( !( complementary > 0.0 ) )
+						continue;
+
+					chord += weight*rho
+					         *geometricKernel( d, kSquared, complementary );
+				}
+				total += step*chord;
+			}
+
+			return total;
+		}
+
+		/// The same integral for a field point OUTSIDE the ellipse, swept in
+		/// the ELLIPSE'S OWN polar coordinates: every node lands in the
+		/// ellipse and none of them is near the field point.
+		///
+		/// **THE CHORD SWEEP CANNOT DO THIS AND THE FAILURE IS SEVERE RATHER
+		/// THAN GRADUAL.** Seen from outside, the ellipse subtends a CONE, and
+		/// a uniform rule in theta over the whole circle spends its nodes
+		/// mostly on rays that miss. A distant or small ellipse subtends a few
+		/// degrees, so a handful of nodes -- sometimes none -- carry the entire
+		/// integral. Measured before this branch existed: the far field of a
+		/// shrinking column stopped converging to its filament at 1e-04 and
+		/// then went BACKWARDS, and Delta* outside the column read order the
+		/// interior value with an erratic sign.
+		///
+		/// Here the integrand is analytic over the whole disc -- the field
+		/// point is off it -- so Gauss in s and the midpoint rule in phi are
+		/// both spectral, and the Jacobian s makes the polar origin ordinary.
+		/// What is left is a field point CLOSE to the boundary, where the
+		/// kernel is nearly singular just outside the domain of integration;
+		/// that is the one place this is three figures rather than machine
+		/// precision, and it is a guess's worth. See Coils.hpp.
+		double ellipseDiscSweep( double r, double z, double centreR,
+		                         double centreZ, double semiR, double semiZ,
+		                         int order )
+		{
+			GaussRule const &rule = gaussRule( order );
+
+			// FOUR PER CHORD NODE RATHER THAN TWO, AND IT IS THE BOUNDARY
+			// BAND THAT PAYS FOR IT. Halving this halves the cost -- 66 us a
+			// point to 34 -- and leaves the far field and Delta* where they
+			// were, because both are spectral out there. What it costs is the
+			// one place this rule is weakest: the step across the boundary
+			// between the two sweeps goes from 9.2e-04 to 3.5e-03, which
+			// the_two_elliptical_sweeps_agree_across_their_own_seam refuses.
+			int const angles = 4*order;
+			double const step = 2.0*pi/angles;
+
+			double total = 0.0;
+			for ( int m = 0; m < angles; ++m )
+			{
+				double const phi = ( m + 0.5 )*step;
+				double const cosine = std::cos( phi );
+				double const sine = std::sin( phi );
+
+				double ray = 0.0;
+				for ( int i = 0; i < order; ++i )
+				{
+					std::size_t const iu = static_cast<std::size_t>( i );
+					double const s = 0.5*( rule.abscissa[ iu ] + 1.0 );
+					double const weight = 0.5*rule.weight[ iu ];
+
+					double const source = centreR + semiR*s*cosine;
+					double const height = centreZ + semiZ*s*sine;
+
+					double d = 0.0;
+					double kSquared = 0.0;
+					double complementary = 0.0;
+					loopGeometry( r, z, source, height, d, kSquared,
+					              complementary );
+
+					if ( !( complementary > 0.0 ) )
+						continue;
+
+					ray += weight*s
+					       *geometricKernel( d, kSquared, complementary );
+				}
+				total += step*semiR*semiZ*ray;
+			}
+
+			return total;
+		}
+
+		/// The cross-section integral of the unit kernel over one ellipse.
+		/// Multiply by mu0 and by the current density to get psi.
+		///
+		/// TWO RULES, SPLIT ON WHERE THE FIELD POINT IS, because the
+		/// singularity is in the domain for one of them and outside it for the
+		/// other and no single rule is good at both. See each sweep for what
+		/// it is for and what it is bad at.
+		double ellipseIntegral( double r, double z, double centreR,
+		                        double centreZ, double semiR, double semiZ,
+		                        int order )
+		{
+			double const u = ( r - centreR )/semiR;
+			double const v = ( z - centreZ )/semiZ;
+
+			// The boundary itself goes to the chord sweep, which grades onto
+			// it; the disc sweep would have the singularity ON its own edge.
+			if ( u*u + v*v <= 1.0 )
+				return ellipseChordSweep( r, z, centreR, centreZ, semiR,
+				                          semiZ, order );
+
+			return ellipseDiscSweep( r, z, centreR, centreZ, semiR, semiZ,
+			                         order );
+		}
+
 		/// The cross-section integral of the unit kernel over one coil, panelled
 		/// and graded as the file comment describes. Multiply by mu0 and by the
 		/// current density to get psi.
@@ -776,6 +977,49 @@ namespace meq
 		coilGradPsi( coil, r, z, qR, qZ, order, mu0 );
 		qR /= r;
 		qZ /= r;
+	}
+
+	double ellipsePsi( double r, double z, double centreR, double centreZ,
+	                   double semiR, double semiZ, double current, int order,
+	                   double mu0 )
+	{
+		requireFinite( r, "the field point radius", "meq::ellipsePsi" );
+		requireFinite( z, "the field point height", "meq::ellipsePsi" );
+		requireFinite( centreR, "the centre radius", "meq::ellipsePsi" );
+		requireFinite( centreZ, "the centre height", "meq::ellipsePsi" );
+		requireFinite( semiR, "the radial semi-axis", "meq::ellipsePsi" );
+		requireFinite( semiZ, "the vertical semi-axis", "meq::ellipsePsi" );
+		requireFinite( current, "the current", "meq::ellipsePsi" );
+		requireFinite( mu0, "mu0", "meq::ellipsePsi" );
+		requireOrder( order, "meq::ellipsePsi" );
+
+		if ( r < 0.0 )
+			throw std::invalid_argument(
+				"meq::ellipsePsi: the field point radius must not be "
+				"negative" );
+
+		if ( !( semiR > 0.0 ) || !( semiZ > 0.0 ) )
+			throw std::invalid_argument(
+				"meq::ellipsePsi: both semi-axes must be positive" );
+
+		// The same refusal meq::Coil and meq::CurrentFilament make, and for
+		// the same reason: the operator's 1/r is not integrable through r = 0
+		// and psi is identically zero there, so a conductor reaching the axis
+		// would be sitting in its own zero.
+		if ( !( centreR - semiR > 0.0 ) )
+		{
+			std::ostringstream message;
+			message << "meq::ellipsePsi: the ellipse reaches or crosses the "
+			           "axis: centreR - semiR = " << centreR - semiR
+			        << " and must be positive";
+			throw std::invalid_argument( message.str() );
+		}
+
+		// The current density of a uniform ellipse, I/( pi a b ).
+		double const density = current/( pi*semiR*semiZ );
+
+		return mu0*density
+		       *ellipseIntegral( r, z, centreR, centreZ, semiR, semiZ, order );
 	}
 
 	CurrentFilament::CurrentFilament( double radiusIn, double heightIn,

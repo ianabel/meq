@@ -169,6 +169,10 @@ Current = {total:+.10e}
     print(f"nulls: {len(saddles)}; seeding ( {primary[0]:.6f}, {primary[1]:.6f} ) "
           f"at psi {primary[2]:.9e} against psi_bndry {psi_bnd:.9e}")
 
+    # ---- where the plasma is, for MEQ's own initial guess ----
+    axis = np.asarray(eq.opt, float)[0][:2] if len(eq.opt) else np.array([0.0, 0.0])
+    print(f"magnetic axis: ( {axis[0]:.6f}, {axis[1]:.6f} )")
+
     limiter = pickle.load(open(f"{M}/MAST-U_like_limiter.pickle", "rb"))
     lim = np.asarray( [ [ p["R"], p["Z"] ] for p in limiter ], float )
     print(f"limiter: {len(lim)} points, R [{lim[:,0].min():.4f}, {lim[:,0].max():.4f}] "
@@ -223,10 +227,38 @@ Radius = {disc - 0.4:.1f}
 CentreZ = 0.0
 Modes = 10
 
+# WHERE THE PLASMA IS, WHICH IS WHAT SELECTS THE BRANCH.
+#
+# MEQ builds the guess itself from this file's own [[coils]] and
+# [source] PlasmaCurrent -- the vacuum field of the conductors, plus I_p spread
+# over an ELLIPTICAL COLUMN about the axis named here. The semi-axes default to
+# half of CentreR, circular, and MEASURED they need not be better than that:
+# the tuned ellipse ( 0.50, 0.90 ) and the round default ( 0.425 ) reach the
+# SAME psi_ax to every printed digit.
+#
+# **THE CONDUCTORS ALONE ARE NOT ENOUGH AND THAT IS MEASURED TOO.** Without
+# CentreR this file converges in 9 iterations to psi_ax 3.258e-01 -- 3.5x the
+# reference -- with its X-point 1.574 m from the seed and its axis at
+# ( 2.65, -0.91 ), outside the machine. A guess describing no plasma finds a
+# branch that is not one.
+#
+# THE NUMBER COMES FROM THE REFERENCE, as [source] PsiAxis and
+# [boundary.xpoint] already do, and deriving it WITHOUT a reference is open
+# work rather than something this file settles.
+[initialguess]
+Type = "conductors"
+CentreR = {axis[0]:.6f}
+CentreZ = {axis[1]:.6f}
+
 [discretisation]
 PolynomialDegree = {args.degree}
 
 [solver]
+# M-123: WITHOUT THIS THE BORDER SOLVE FAILS ON THIS MACHINE, and it is needed
+# whether or not there is a guess. Cold it dies at iteration 0 with a singular
+# bordered Jacobian; with the guess below it dies differently, at "no damping of
+# the bordered Newton step gave a finite residual".
+BorderRegularisation = 1.0e-3
 NewtonMaxIterations = 200
 NewtonRelativeTolerance = 1.0e-10
 PlasmaSupportSweeps = 4
