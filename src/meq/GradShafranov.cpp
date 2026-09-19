@@ -4410,6 +4410,39 @@ namespace
 
 	void GradShafranovSolver::formSystem()
 	{
+		/*
+		 * THE OTHER HALF OF M-79'S ALIAS PROBLEM, AND IT RUNS THE OPPOSITE WAY.
+		 *
+		 * solve() ends by pushing `solution`'s state DOWN into the three grid
+		 * functions, because the solve wrote the blocks through aliases of
+		 * `solution` and those aliases never heard about it. Here the traffic is
+		 * UP: prepare() seeds the iterate by writing THROUGH darcyFlux,
+		 * potentialGf and traceGf, and under an mfem::Device a write through an
+		 * alias marks that ALIAS device-valid, mprotects the base's host range,
+		 * and -- by MFEM's own account in Memory::SyncAlias -- leaves the base's
+		 * validity flags exactly as they were.
+		 *
+		 * The two views built below inherit `solution`'s flags at the moment
+		 * they are made, so they inherit the lie: DarcyHybridization then reads
+		 * x.GetBlock(0) and x.GetBlock(1) on the host, out of a buffer whose
+		 * live copy is on the device. Under "debug" that is a named fault in
+		 * EliminateVDofsInRHS; under CUDA nothing is protected, the stale host
+		 * copy is used, the border columns are differenced against a state that
+		 * is not the iterate, and the run reports `the bordered Jacobian is
+		 * singular in ( psi_ax, psi_bnd, a )`. Same fault, two faces.
+		 *
+		 * SyncAliasMemory() is the repair rather than a copy: it brings each
+		 * alias into agreement with the base while KEEPING THE ALIAS'S DATA,
+		 * so the fresh seed is carried down into `solution`'s host buffer and
+		 * the page is unprotected on the way. With no Device configured
+		 * `solution` is not registered at all and Memory::SyncAlias returns on
+		 * its first line, so this is inert on the host path -- as the calls at
+		 * the end of solve() are.
+		 */
+		darcyFlux.SyncAliasMemory( solution );
+		potentialGf.SyncAliasMemory( solution );
+		traceGf.SyncAliasMemory( solution );
+
 		// traceX and traceB alias the trace blocks of the solution and right hand
 		// side. That aliasing is not cosmetic: FormLinearSystem() only calls
 		// EliminateTraceTrueDofsInRHS() -- the step that moves the essential trace
@@ -6879,6 +6912,12 @@ namespace
 		mfem::Array<int> const &essentialTrace =
 			darcy->GetHybridization()->GetEssentialTrueDofs();
 		std::vector<bool> essential( traceX.Size(), false );
+		// AND IT IS DEVICE STATE. FormLinearSystem() has just eliminated on this
+		// list, so under an mfem::Device its live copy is the device's, and
+		// Array<int>::operator[] is as raw an accessor as Vector's -- it neither
+		// syncs nor invalidates. Same obligation as rowDot()'s borderDofs and
+		// the X-point lambda's `state` below.
+		essentialTrace.HostRead();
 		for ( int i = 0; i < essentialTrace.Size(); ++i )
 			essential[ essentialTrace[ i ] ] = true;
 

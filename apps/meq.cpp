@@ -948,14 +948,41 @@ int main( int argc, char **argv )
 	 * mfem::Device( "cpu" ) is nearly inert but it is not nothing, and a driver
 	 * run without the flag should be byte-for-byte the run it always was.
 	 *
-	 * WHAT IT IS FOR IS CORRECTNESS, NOT SPEED, AND THE DISTINCTION IS
-	 * MEASURED. MEQ's element-local integrators and its scatter have no device
-	 * kernels, so the per-Newton-step cost under a device is within a few
-	 * percent of the host's -- while the step COUNT rises, because the device
-	 * path's element-local evaluation is inexact where dF/dpsi is non-zero.
-	 * On the fixtures that is a 1.7x to 2.0x whole-solve loss. The flag exists
-	 * so that a physical case can be checked for the same behaviour, and so
-	 * that `--device debug` can be pointed at one.
+	 * WHAT IT IS FOR IS CORRECTNESS, NOT SPEED. MEQ's element-local
+	 * integrators and its scatter have no device kernels, so a device buys no
+	 * arithmetic here; what it costs is measured per case and does NOT
+	 * generalise:
+	 *
+	 *   soloviev-nstx   plain, dF/dpsi=0   1 -> 1 step
+	 *   mhd-rectangle   plain Newton      5 -> 9 steps, 0.54 -> 1.20 s
+	 *   limited-tokamak bordered         12 -> 12 steps, 4.94 -> 5.43 s
+	 *   machine-f-diiid bordered          2 -> 2 steps, the host's every digit
+	 *
+	 * THIS COMMENT ONCE SAID THE COUNT RISES "WHERE dF/dpsi IS NON-ZERO", AT
+	 * 1.7x TO 2.0x, AND BOTH HALVES ARE FALSE. The middle row has non-zero
+	 * dF/dpsi and pays nothing, so that is not the discriminator; and the
+	 * ratios are a spread across cases rather than a range. The claim carried
+	 * no M-nn anchor and the commit that introduced it recorded the opposite
+	 * on its own case. See MEASUREMENTS.md M-129.
+	 *
+	 * AND THE machine-f-diiid ROW USED TO READ "the bordered Newton FAILS, the
+	 * ladder catches it, 13 steps, and psi_ax moves in its sixth digit". That
+	 * was real, reproducible, and NOT the device: it was two unsynced reads,
+	 * one in prepare()'s alias seeding and one on GetEssentialTrueDofs(), and
+	 * fixing them takes the case back to 2 steps and the host's every printed
+	 * digit. MEASUREMENTS.md M-130 has the chase. What is left on this list is
+	 * mhd-rectangle's 5 -> 9, which is unexplained and open.
+	 *
+	 * SO THE STANDING ADVICE IS: A DEVICE ROW THAT LOOKS LIKE A COST IS A
+	 * SUSPECT, NOT A DATUM. Reach for --device debug and walk it before
+	 * writing it down.
+	 *
+	 * AND AT OMP_NUM_THREADS=8 A DEVICE STILL ABORTS ON THE PLAIN PATH --
+	 * "host pointer is not registered", from several threads at once inside
+	 * MultNL's own OpenMP region -- while the bordered path survives it. That
+	 * is why this is a flag and not a [solver] key: it exists so a physical
+	 * case can be CHECKED, and so that `--device debug` can be pointed at
+	 * one.
 	 *
 	 * `--device debug` IS THE INSTRUMENT. It has device memory semantics with
 	 * host arithmetic and mprotects the host page, so a raw host read of a

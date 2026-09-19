@@ -437,7 +437,31 @@ parent and `SourceIntegrator`'s shared scratch under *Traps*.
 
 **cuDSS is a bystander and always was.** UMFPack and PARDISO never touch the
 device and failed identically. With the four sites fixed, `--device cuda` and
-`--device debug` both reproduce the CPU answer to **every printed digit**.
+`--device debug` both reproduce the CPU answer to **every printed digit** on
+the case that chain was walked with.
+
+**AND THE CHAIN HAD TWO MORE LINKS, WHICH ONLY A BORDERED FREE-BOUNDARY CASE
+COULD REACH.** `prepare()` seeds the iterate by writing THROUGH `potentialGf`
+and `traceGf`; a device write through an alias marks the ALIAS device-valid,
+`AliasProtect`s the base's host range, and leaves the base's flags unchanged —
+so `formSystem()`'s `darcySolution` and `traceX`, built from those flags,
+inherit the lie and `DarcyHybridization` reads the blocks on the host.
+`solveWithNormalisation()` then reads `GetEssentialTrueDofs()` through
+`Array<int>::operator[]`, which is as raw an accessor as `Vector`'s. Under
+`debug` the first is a named fault; under CUDA nothing is protected, the border
+columns are differenced against a state that is not the iterate, and the run
+reports *"the bordered Jacobian is singular"* — **one fault, two faces, and the
+CUDA face names a border rather than a memory.** `machine-f-diiid` now solves
+under `--device cuda` in 2 Newton steps to the host's every digit.
+→ **[M-130](MEASUREMENTS.md#m-130)**.
+
+**THE PART WORTH GENERALISING IS HOW THE SECOND PAIR SURVIVED M-79.** M-129
+measured them, reproduced them twice, and wrote them down as a property of the
+device path — while the sentence it closed with, *a device is an instrument for
+finding unsynced reads*, described exactly what it was holding. A result that is
+stable and reproducible is still a bug until something explains it, and the
+difference was one `gdb` session breaking on `mprotect` with the faulting page
+as the condition.
 
 **AND THE REFUSAL OF `TraceSolver = "cudss"` STANDS, ON THE TRADE ARGUMENT
 ALONE.** The second and stronger reason that used to sit here — that the solve

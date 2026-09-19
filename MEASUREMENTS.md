@@ -4862,3 +4862,153 @@ MAST-U's 291 s"*. That was measured and it was right: `ellipsePsi` is 0.18% of
 the run. What it did not say is that the same loop evaluates **23 conductors at
 the same points**, and those are the other 93.4%. **A measurement of one term in
 a loop is not a measurement of the loop.**
+
+### M-129
+
+**WHAT AN `mfem::Device` COSTS MEQ'S NON-LINEAR SOLVE, AND THE MECHANISM THE
+DRIVER CLAIMED IS NOT THE ONE THE CROSS SUPPORTS.** `apps/meq.cpp`'s `--device`
+comment asserted that the Newton step count rises *"because the device path's
+element-local evaluation is inexact where `dF/dpsi` is non-zero"*, at a
+*"1.7x to 2.0x whole-solve loss"*, with no anchor. Both halves are now
+measured. RTX 2070 SUPER, CUDA 13.3, `MFEM_USE_DOUBLE`; **this card runs FP64 at
+1/32 to 1/64 of FP32 where a datacentre part runs about 1/2, so the seconds are
+this machine's and the ITERATION COUNTS are the transferable half.**
+
+`OMP_NUM_THREADS = MKL_NUM_THREADS = 1`, `--device cpu` against `--device cuda`
+in one binary:
+
+| case | path | `dF/dpsi` | cpu | cuda |
+|---|---|---|---|---|
+| `soloviev-nstx`, k=3, 1536 el | plain | **0** | 1 it | 1 it |
+| `mhd-rectangle`, k=2, 768 el | plain | non-zero | 5 it, 0.54 s | **9 it, 1.20 s** |
+| `limited-tokamak`, k=3, 1601 el | **bordered** | non-zero | 12 it, 4.94 s | **12 it, 5.43 s** |
+| `machine-f-diiid`, k=2, 4848 el | **bordered** | non-zero | 2 it, 7.60 s | **fails, falls back, 13 it, 8.82 s** |
+
+**THE STATED MECHANISM IS FALSIFIED BY THE THIRD ROW.** `limited-tokamak` and
+`mhd-rectangle` are both `Type = "mhd"` with non-zero `dF/dpsi`, and one pays
+1.8x the steps while the other pays none. *"Where `dF/dpsi` is non-zero"* is
+therefore not the discriminator. The Solov'ev row says nothing either way: one
+step is one step.
+
+**AND THE 1.7x TO 2.0x IS NOT A RANGE, IT IS A SPREAD ACROSS CASES** — 2.2x,
+1.10x and 1.16x on the three that converge, with the third reaching a different
+answer.
+
+**THE DEVICE CAN CHANGE THE ANSWER AND CAN MAKE THE BORDERED NEWTON FAIL.**
+`machine-f-diiid` under `--device cuda` does not converge on the bordered
+Newton at all; the driver's reactive ladder catches it and
+`bordered-picard-then-newton` finishes in 13 steps. **`psi_ax` reads
+3.759873e-01 against the host's 3.759851e-01** — 2.2e-6 relative, in the sixth
+digit — with the constraint residual 9.37e-14 against −6.466e-12. Twice
+reproduced, to the same digits both times. **AND IT IS A DEFECT RATHER THAN A
+PROPERTY: M-130 walks it to two missing syncs, after which this row reads 2 it
+and the host's every digit.** The row stands because the failure it records is
+what a device does to an unsynced read, which is the reason to run one. `limited-tokamak` by contrast agrees
+exactly: 9.484400e-02 either way. So *"reproduces the CPU answer to every
+printed digit"* is true of the cases it was measured on and **not** a property
+of the device path.
+
+**AT `OMP_NUM_THREADS=8` THE DEVICE STILL ABORTS, BUT NOT EVERYWHERE**, which
+is the other half nobody had separated:
+
+| | `OMP=8`, `--device cuda` |
+|---|---|
+| `mhd-rectangle`, plain | **aborts** — `alias pointer is not registered` / `host pointer is not registered` in `MemoryManager::CheckHostMemoryType_`, from several threads at once, landing as `terminate called recursively` |
+| `limited-tokamak`, bordered | **converges**, 12 iterations, `psi_ax` 9.484400e-02, the host's answer |
+
+`--device debug` tracks `--device cuda` on every row above.
+
+**WHAT M-79 REPAIRED IS REPAIRED, AND IT IS A DIFFERENT SYMPTOM FROM THESE.**
+The `0/0 Newton iterations on a case that needs four` and the 4.006e-02 flux
+disagreement are gone: the same `OMP=1` configuration now runs a real Newton to
+a residual floor of 2.14e-15 against the host's 7.03e-17. What remains is a
+degraded rate, not a solve that does not run.
+
+**THE TRANSFERABLE PART.** A claim with no anchor survived in the tree because
+it was plausible and nobody could cheaply contradict it — and the commit that
+introduced it recorded the OPPOSITE on its own case, *"no iteration penalty"*
+on `limited-tokamak`, which this table reproduces. Both observations were
+right; the sentence that generalised one of them into a mechanism was not.
+**Two cases that disagree are a cross to run, not a discrepancy to pick a side
+of.**
+
+### M-130
+
+**`machine-f-diiid` SOLVES ON THE DEVICE, AND M-129'S WORST ROW WAS TWO MISSING
+SYNCS RATHER THAN A PROPERTY OF THE DEVICE PATH.** M-129 measured the bordered
+Newton failing under `--device cuda`, the reactive ladder finishing in 13 steps
+against 2, and `psi_ax` differing in its sixth digit. Every digit of that is
+reproducible and none of it is the device: it is M-79's alias chain with two
+links nobody had walked. Same machine, same binary, `OMP = MKL = 1`:
+
+| case | host | cuda, M-129 | cuda, with both syncs |
+|---|---|---|---|
+| `soloviev-nstx`, k=3 | 1 it | 1 it | 1 it |
+| `mhd-rectangle`, k=2 | 5 it | 9 it | **9 it — unchanged, and still open** |
+| `limited-tokamak`, k=3 | 12 it | 12 it | 12 it |
+| `machine-f-diiid`, k=2 | 2 it | fails, ladder, 13 it | **2 it** |
+
+`machine-f-diiid` under `--device cuda` now reads `psi_ax = 3.759851e-01`,
+`psi_bnd = 7.081394e-02`, X-point `( 1.200929, -0.999491 )` and constraint
+residual `-6.466e-12` — **the host's answer to every printed digit** — and runs
+to the same numbers under `--device debug`.
+
+**THE CHASE, BECAUSE THE METHOD IS THE TRANSFERABLE PART.**
+`mfem::Device( "debug" )` named the first fault on the first run, and each fix
+moved it FORWARD, which is the only thing separating a fix from a coincidence:
+
+| | where | what |
+|---|---|---|
+| 1 | `DarcyHybridization::EliminateVDofsInRHS`, `darcy_u = x.GetBlock(0)` | host memcpy out of an mprotected page |
+| 2 | `solveWithNormalisation()`, `essentialTrace[ i ]` | raw `Array<int>::operator[]` on device state |
+| 3 | `DarcyForm::ReconstructTotalFlux` in `postProcess()` | **MFEM's, still open**, and `debug`-only |
+
+**Link 1 is the same gap M-79 records, running the other way.** `prepare()`
+seeds the iterate by writing THROUGH `potentialGf` and `traceGf`, which are
+`MakeRef` aliases of `solution`. A device write through an alias marks the
+ALIAS device-valid, calls `AliasProtect` on the base's host range, and — by
+`Memory::SyncAlias`'s own account — leaves the base's validity flags exactly as
+they were. `formSystem()` then builds `darcySolution` and `traceX` from those
+flags, so both views inherit the lie. Caught by breaking on `mprotect` with the
+faulting page as the condition, which names the protector directly:
+
+```
+AliasProtect <- GetAliasDevicePtr <- Vector::operator= <- GridFunction::operator=
+              <- meq::GradShafranovSolver::prepare(bool)
+```
+
+`solve()` already synced base to aliases at the end; nothing synced aliases to
+base at the start. Three `SyncAliasMemory()` calls in `formSystem()`, inert
+without a Device because `Memory::SyncAlias` returns on its first line when the
+base is not registered.
+
+**Link 2 is MEQ's own and needed no MFEM at all.** `FormLinearSystem()` has
+just eliminated on `GetEssentialTrueDofs()`, so that `Array<int>` is device
+state, and `Array<int>::operator[]` neither syncs nor invalidates. One
+`HostRead()`.
+
+**WHAT THE TWO SYMPTOMS SHARE.** Under `debug` link 1 is a named fault with a
+backtrace. Under `cuda` nothing is protected, the stale host copy is used, the
+border columns are differenced against a state that is not the iterate, and the
+run reports *"the bordered Jacobian is singular in ( psi_ax, psi_bnd, a )"*.
+**One fault, two faces**, and the CUDA face names a border and not a memory.
+
+**IT IS NOT A REGRESSION FROM THE GUESS-SEED CACHE, WHICH IS WHERE THE
+INVESTIGATION SPENT ITS TIME.** The `mprotect` backtrace lands in `prepare()`'s
+cached branch — `potentialGf = guessSeedPotential`, 229,376 bytes, the potential
+block — so the cache looked like the trigger and the immediately preceding
+commit looked like the cause. Building the parent commit and running it under
+`--device debug` killed that: it faults too, and harder, terminating where the
+current tree recovers through the ladder. **The cached assignment is a device
+write where the projection it replaces was a host write, so it CHANGES WHICH
+SITE PROTECTS FIRST without being the defect.** A backtrace names the
+instruction, not the bug.
+
+**THE TRANSFERABLE PART, AND IT IS AGAINST M-129 RATHER THAN AGAINST ANYBODY
+ELSE.** M-129 measured correctly and concluded *"a device is an instrument for
+finding unsynced reads, not a second way to get the answer"* — while the thing
+it had in hand WAS an unsynced read, of exactly the kind that sentence names.
+The measurement was treated as a property to be recorded rather than a symptom
+to be chased, and the difference between those two is one `gdb` session.
+**A result that is stable, reproducible and in the sixth digit is still a bug
+until something explains it.**

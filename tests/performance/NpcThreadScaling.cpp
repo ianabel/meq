@@ -560,15 +560,36 @@ int main( int argc, char **argv )
 	 *                       UMFPack, PARDISO and cuDSS, which is what says there
 	 *                       is one common fault rather than three.
 	 *
-	 * So the refusal apps/meq.cpp already carries is right for a second and
-	 * stronger reason than the one written beside it: the trade would be bad,
-	 * AND the solve does not survive a Device at all. It is not localised to
-	 * MFEM's BlockVector either -- a bare Update() over four offsets, an
-	 * AddElementVector into a block, and one into a MakeRef view of a block all
-	 * behave identically under "cpu" and "cuda". The trigger is inside the HDG
-	 * path, which is exactly the code doc/HDG-DEVICE-OFFLOAD.md says is not
-	 * built yet, so nothing here is filed upstream: the standing rule is not to
-	 * report findings against work that has not landed.
+	 * THE 0/0 IS REPAIRED AND THE ABORT IS NOT, AND THEY WERE NEVER ONE
+	 * FAULT. M-79 found a device-memory alias chain at four sites, two of them
+	 * MEQ's own, and with those fixed the OMP_NUM_THREADS=1 symptom above is
+	 * gone: the same configuration now runs a real Newton to a residual floor
+	 * of 2.14e-15 against the host's 7.03e-17, rather than reporting 0/0 and
+	 * an identically zero potential.
+	 *
+	 * WHAT REMAINS, RE-MEASURED RATHER THAN REMEMBERED, IS TWO THINGS AND
+	 * NEITHER IS UNIVERSAL. At OMP_NUM_THREADS=8 a device still aborts on the
+	 * PLAIN path -- examples/mhd-rectangle.toml, the message above, from
+	 * several threads at once -- while the BORDERED path survives it and
+	 * reaches the host's answer, 12 iterations and psi_ax 9.484400e-02 on
+	 * examples/limited-tokamak.toml. And at one thread the device degrades
+	 * Newton's RATE by a case-dependent amount: 5 steps to 9 on the plain
+	 * case, none at all on that bordered one. MEASUREMENTS.md M-129 is the
+	 * table.
+	 *
+	 * ONE ROW OF THAT TABLE HAS SINCE BEEN WALKED AND WAS NOT THE DEVICE.
+	 * examples/machine-f-diiid failed its bordered Newton outright and
+	 * finished through the driver's ladder; that was two unsynced reads of
+	 * MEQ's own -- prepare()'s alias seeding and GetEssentialTrueDofs() -- and
+	 * with them fixed the case solves on a device in 2 steps to the host's
+	 * every digit. MEASUREMENTS.md M-130. Read the remaining plain-path
+	 * degradation as a suspect rather than a datum; nobody has walked it.
+	 *
+	 * So the refusal apps/meq.cpp carries rests on the trade argument, which
+	 * is unchanged: the integrators are 46-53% of an NPC step and have no
+	 * kernels. "The solve does not survive a Device at all" was the second
+	 * reason it used to rest on and it is too strong -- the bordered path,
+	 * which is what MEQ runs, survives one.
 	 *
 	 * Re-run this the day the integrators get device kernels. The flag and the
 	 * cuDSS column are here so that it costs one command rather than an
