@@ -1313,6 +1313,15 @@ carries ``toroidal_field_driven``, ``g_squared_coefficients`` — ascending in
 the output for a reader to look the field up in, which is why it is recorded
 rather than left to the configuration.
 
+**And with** ``[output] FluxSurfaces`` **this is the one route whose surfaces
+file reports** :math:`q` **itself.** Everywhere else a ``meq::Source`` carries
+:math:`g g'` and not :math:`g`, so there is no :math:`g` to build
+:math:`V' g \langle R^{-2}\rangle / 4\pi^2` from and the ``safety_factor``
+column is absent rather than zero — see :doc:`output`. Here the loop solved for
+:math:`g`, so the column is written, and the round trip can be read straight off
+the file: the reported :math:`q` against the table the run was given. On
+``examples/q-driven.toml`` the two agree to **4.5e-07** over all 24 surfaces.
+
 ``BorderRegularisation``, ``BorderCollinearityRegularisation``
    Levenberg damping on the dense border solve, so a near-singular Schur
    complement gives a damped step instead of failing. Both default to ``0.0``,

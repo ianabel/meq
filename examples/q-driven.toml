@@ -85,3 +85,15 @@ Directory = "."
 Prefix = "q-driven"
 GridNR = 65
 GridNZ = 65
+
+# THE ONE RUN THAT CAN REPORT ITS OWN q, AND THE ONLY ONE THAT MUST.
+#
+# Every other example prescribes g g', from which g -- and so the safety factor
+# -- cannot be recovered without a constant of integration no key supplies, so
+# their _surfaces.nc has no safety_factor column at all. Here the outer Newton
+# SOLVES for the coefficients of g^2, so g is known, and the column is written.
+#
+# That makes the round trip readable off the output rather than taken on faith:
+# this file's safety_factor against examples/q-driven-q.dat, which is the target
+# the run was given.
+FluxSurfaces = true

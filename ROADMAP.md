@@ -14,17 +14,33 @@ what is deliberately not being done yet. **Item numbers are cited from `TODO`,
 from the plan files and from the CLAUDE files, so they do not get renumbered**; a
 closed item becomes a marker rather than being removed.
 
-The plan files. **`DRIVER-PLAN.md` and `FLOW-PLAN.md` are gone**, converted to
-`docs/` on 2026-09-06 under the standing rule that a plan with nothing left in it
-is documentation: everything they staged is built, so what a reader needs is the
-manual and what a maintainer needs is `CLAUDE.md`. Git has them.
+The plan files. **Three are gone** under the standing rule that a plan with
+nothing left in it is not a plan. `DRIVER-PLAN.md` and `FLOW-PLAN.md` were
+converted to `docs/` on 2026-09-06, because everything they staged is built and
+what a reader needs is the manual. `INTERPOLATORY-HDG-DECISION.md` went on
+2026-09-19 for a different reason — it asked *where the code should live*,
+the answer was acted on, and upstream then built the half it assigned upstream —
+so there was nothing to convert and its two live questions moved into the plan
+that succeeded it. Git has all three.
+
+**A plan that is finished and a plan that is superseded both get closed, and
+they are not the same thing.** The first becomes documentation; the second
+becomes a pointer. What neither becomes is an entry that still reads like work.
 
 | | |
 |---|---|
 | ~~`DRIVER-PLAN.md`~~ | stage 7 — **done**, and now `docs/running.rst`, `docs/output.rst` and `docs/configuration.rst` |
 | ~~`FLOW-PLAN.md`~~ | item 9, FL-0 to FL-8 — **done**, and now `docs/rotation.rst`, which carries the derivation `RotatingSource.hpp` defers to |
-| `INVERSION-PLAN.md` | item 10's machinery — **every stage done**, IN-A to IN-P |
-| `FREE-BOUNDARY-PLAN.md` | item 8 — FB-A, FB-0, FB-1, FB-2, FB-3, FB-5, FB-7 **done**, FB-4 **answered**, §10's XP-0 to XP-4 **done**, and **FB-6 met 2026-09-07**: MEQ reproduces `freegs4e`'s converged limited tokamak to 1.5e-04 in `ψ_ax`, with the limiter as a curve landing the same day. What is left of it is the conductor model — MEQ's rectangles against the reference's filaments, a reference-side job — and §10's diverted plasmas, whose gate has opened |
+| ~~`INTERPOLATORY-HDG-DECISION.md`~~ | where CCSZ-I's code lives — **closed 2026-09-19**, superseded by `INTERPOLATORY-HDG-PLAN.md`. Its answer was *split, with the element-local algebra upstream*; both asks were filed and **upstream built them**, as `gf-interp-hdg-dev`. Its two surviving open questions — Remark 2.2's `ℓ`, and whether `HDGPotentialPostprocessor` is reentrant under a threaded element loop — are carried into that plan's §7.4. Git has it |
+| `INVERSION-PLAN.md` | item 10's machinery — **CLOSED 2026-09-19**, IN-A to IN-P, 9 of 9, with the ten acceptance tests verified passing together. **It stays rather than being converted** for a reason the other two did not have: the user-facing half already went to `docs/flux_surfaces.rst`, `docs/surface_geometry.rst` and `docs/normalised_flux.rst`, and what is left is the derivation, which `src/meq`, `tests/` and `apps/` cite by section and stage number at **125 sites across 32 files**. It is a design record, not a plan. **The one gap closing it found is now half fixed**: the driver set `options.toroidalField` nowhere, so `q` reached no output at all; the `q`-driven route now reports it to 4.5e-07 of target (M-131), and giving a prescribed-field run a `q` is a schema decision left open |
+| `INTERPOLATORY-HDG-PLAN.md` | item 12.1, and it **supersedes §12.1 below**. MFEM has already built the method and MEQ links it; this is a wiring job plus two small asks. **Read its §0 before its stages** — the falsifying arithmetic deflates the headline to 1.6–2.0× fewer `F` evaluations against an Amdahl ceiling of 23–28% |
+| `THREADING-PLAN.md` | MEQ's own serial 25%. **Items A, B, C and D are built** (`0108f49`); what is left is §0's `--profile` run and the payoff timing, both of which want a quiet machine |
+| `DEVICE-PLAN.md` | an audit of what a device-resident solve would need. **Not a commitment**, and §3.3's refusals stand. §1.2 and §4's stages 1 and 4 have since been walked → M-130 |
+| `BORDERED-GLOBALISATION-PLAN.md` | **the ladder is built and closes none of the six cold failures** — M-116, M-117, M-119. Read it for the design and the four families ruled out; do not start its §8 |
+| `BORDER-SCALING-PLAN.md` | **BS-0 is run** — M-117. H2 excluded, H1 and H3 split the six, and BS-5 is the stage its own gate selects |
+| `COIL-SUBTRACTION-PLAN.md` | the conductors out of the mesh. **CS-0 measured**, the rest open, and CS-0b needs no MEQ change at all |
+| `INVERSE-AND-RECONSTRUCTION-PLAN.md` | Part One an inverse solve, Part Two exploratory research on reconstruction. **Nothing run**; its §0 gate is a `freegs4e`-side experiment that costs no MEQ code |
+| `FREE-BOUNDARY-PLAN.md` | item 8 — FB-A, FB-0, FB-1, FB-2, FB-3, FB-5, FB-7 **done**, FB-4 **answered**, **FB-6 met 2026-09-07**, and **§10's XP-0 to XP-4 all met** — the diverted plasma is no longer a plan, M-82, M-86 and M-87 are its record. **What is left of the file is one item and it has its own plan**: the conductor model, now `COIL-SUBTRACTION-PLAN.md` |
 | `PLASMA-EDGE-PLAN.md` | a design out of FB-4, still **not scheduled**. Its own precondition — `j ≥ 1` green, and a machine case at `j ≥ 1` — is now met, so what holds it is the cost-benefit its own numbers make: `j ≥ 1` already gives `k+2` at `k ≤ j` with nothing built |
 | `MANTA-COUPLING.md` | the socket MaNTA presents, written from MaNTA's side. No field model is registered there yet |
 
@@ -36,9 +52,12 @@ Nothing is red and stages 0 to 7 are done, so the order is:
    done or answered**: FB-A, FB-0, FB-1, FB-2, FB-3, FB-5 and FB-7 built and
    measured, FB-4 answered, FB-6 met. §8 below has the per-stage table. **What
    the item is down to** is the conductor model against the reference's
-   filaments, which is a reference-side job, and §10's diverted plasmas, which
-   is a new campaign rather than a remainder. The bullets below are the record
-   of how it was reached and are kept for the findings in them:
+   filaments. **§10's diverted plasmas are done too** — XP-0 to XP-4 all met,
+   M-82, M-86 and M-87 — so that is no longer a remainder either, and the
+   conductor model has since become its own plan,
+   `COIL-SUBTRACTION-PLAN.md`, whose CS-0 measures what this item could only
+   infer. The bullets below are the record of how it was reached and are kept
+   for the findings in them:
 
    * ~~**Wire the two borders to TOML.**~~ **DONE 2026-09-06.**
      `[boundary.limiter]` and `[boundary.exterior]` reach
@@ -369,10 +388,17 @@ Nothing is red and stages 0 to 7 are done, so the order is:
    rather than a machine, and nothing has driven `q` on the limited tokamak,
    where the support moves and `ψ_bnd` is an unknown.
 
-Items 4 and 6 are performance and neither is urgent; item 5 is a defect in
-MFEM's local solves that MEQ works around and has **not filed**; item 7 is a
-closed investigation kept for its answer. Items 1, 2, 3, 9 and 11 are done and
-are markers.
+**Item 4 is done and is upstream's**, including the two legs MEQ asked for —
+it wants a `meq-integration` rebuild to reach MEQ, not more work. Item 6 is
+performance and is not urgent; item 5 is a defect in MFEM's local solves that
+MEQ works around and has **not filed**; item 7 is a closed investigation kept
+for its answer; **item 12.1 has moved into `INTERPOLATORY-HDG-PLAN.md`**. Items
+1, 2, 3, 9, 11 and 12.2 are done and are markers.
+
+**And what is not on this list at all is the standing work the plan table
+carries**: MEQ's own threading (A–D built, the payoff unmeasured), the device
+audit, the two border plans whose campaign came back negative, and the coil
+subtraction. Those are ordered inside their own files.
 
 ## The state in one paragraph
 
@@ -591,20 +617,41 @@ from every test left the sentence *about* it behind, pointing at nothing — the
 same species of residue as a stale measurement, and **harder to notice because it
 reads as a warning rather than as a claim.**
 
-## 4. Element-local parallelism — MFEM, outstanding
+## 4. Element-local parallelism — MFEM, **DONE upstream, not yet in MEQ's install**
 
 `../mfem-hdg-dev/doc/HDG-ELEMENT-LOCAL-PARALLELISM.md`, on
 `gf-hdg-linearise-first`. Twelve sequential element loops in
 `darcyhybridization.cpp` over work independent by construction.
 
-**IT IS NOT "PROBABLY THE LARGEST PERFORMANCE WIN AVAILABLE", WHICH IS WHAT
-THIS FILE SAID, AND UPSTREAM HAS MEASURED IT.** `d7ea90a538`, *"Element-local
-parallelism in NPC: the structural win is worth 6%"*, breaks an NPC step down
-per phase over six steps at four `(n, k)`: integrator-bound loops **59–63%**,
-integrator-free loops **5.4–6.2%**, trace solve **31–35%**. Their conclusion is
-that the loops threadable *today* are under 6% of the step and flat in both mesh
-size and order, so Amdahl caps any gain there until the integrators are made
-thread-safe. MEQ should stop quoting this as the big win.
+**EVERY ONE OF THEM IS NOW THREADED**, that file says so in its own words, and
+the last two to go were the ones MEQ asked for: `ComputeH`, `InvertA`,
+`InvertD`, `MultNL`, `ComputeSolution`, `EliminateVDofsInRHS`,
+`EliminateTrueDofsInRHS`, `ReduceRHS`, **`NPCReduce` and `NPCRecover`** —
+**4.35× at eight threads on the leg, bit for bit**.
+
+**AND THE "UNDER 6%" VERDICT THIS SECTION QUOTED IS WITHDRAWN BY THE PROJECT
+THAT MADE IT.** `d7ea90a538` measured the threadable loops at 5.4–6.2% of an NPC
+step and concluded Amdahl caps any gain — **on four fixed-boundary,
+single-right-hand-side cases**. `NPCReduce` and `NPCRecover` are
+`O( elements × columns )` where the integrator-bound legs are `O( elements )`,
+so a **bordered** Newton inverts the ratio, and MEQ measured the same two legs
+at **30.6% of its step and 1.00× across eight threads** →
+**[M-126](MEASUREMENTS.md#m-126)**. *A share measured on a problem with one
+right-hand side is not a share.*
+
+**IT IS NOT IN THE LIBRARY MEQ LINKS.** `GetNPCTraversalTime` is in
+`../mfem-hdg-dev/fem/darcy/darcyhybridization.hpp` and **not** in
+`../mfem/install/include/`, so this buys MEQ nothing until `meq-integration` is
+re-created and reinstalled. Per the standing rule, the only test of "landed" is
+the code MEQ builds against.
+
+**A second correction from the same file, and it is a live trap.** `InvertA` and
+`InvertD` are **not** OpenMP loops; what is threaded beside them is the
+*batched* route, which needs `LocalFactorMode::Batched` **and** a device
+backend. On the host `mfem::forall` is a serial loop, so asking for the batched
+local factorisation takes `ComputeH` from 0.418 s to **1.075 s and it stops
+scaling**. The default is `Serial`, so nothing is hit by default — and M-101
+already measured the trade flat from MEQ's side, for a different reason.
 
 **And §1 of it has LANDED and MEQ is not using it**: `LocalFactorMode`,
 `SetLocalFactorMode` and `CanBatchLocalFactor` are in the *installed*
@@ -922,9 +969,34 @@ carries the recovered `g^2` coefficients — on this route there is no
 **One solver serves every map evaluation**, through
 `NormalisedMHDSource::setGGPrime()`.
 
-**WHAT IS LEFT IS THE FIXTURE.** It is a rectangle with one closed plasma rather
-than a machine, and nothing has yet driven `q` on the limited tokamak, where the
-support moves and `ψ_bnd` is an unknown.
+**WHAT IS LEFT IS TWO THINGS, AND THE SECOND WAS FOUND BY CLOSING
+`INVERSION-PLAN.md` RATHER THAN BY USING THE CODE.**
+
+**THE FIXTURE.** It is a rectangle with one closed plasma rather than a machine,
+and nothing has yet driven `q` on the limited tokamak, where the support moves
+and `ψ_bnd` is an unknown. Nothing refuses the combination —
+`readToroidalFieldTarget()` requires only `Normalised = true` — so this is an
+experiment and not a port. Note the interaction it would test: `PlasmaCurrent`
+scales the whole source through the border unknown `λ`, and `q` is a statement
+about `g`, so the outer loop and the current border both act on the toroidal
+field and it is not obvious they are consistent.
+
+**AND `q` WAS NEVER REPORTED, SO THE ROUND TRIP COULD NOT BE READ OFF THE
+OUTPUT. FIXED ON THE DRIVEN ROUTE** → **[M-131](MEASUREMENTS.md#m-131)**.
+`FluxSurface::safetyFactor` was computed and `Output.cpp` had the column, gated
+on `FluxFamilyOptions::toroidalField`, which `apps/meq.cpp` set at neither
+extraction site. It now sets it from the coefficients the outer Newton solved
+for, `examples/q-driven.toml` carries `[output] FluxSurfaces`, and **the
+reported `q` is the target to 4.5e-07 over 24 surfaces** — an order better than
+the same run's `g`, because the target was measured on this mesh.
+`DriverAcceptance::theQDrivenRunReportsTheSafetyFactorItReached`.
+
+**The refusal stands where it was right.** A prescribed-field run still reports
+no `q`: a `meq::Source` carries `gg'` and not `g`, the constant of integration
+has no key, and a column of zeroes is indistinguishable from a machine with no
+toroidal field. **Giving it one is a schema decision and not a wiring job** — a
+new `[source]` key carrying the vacuum `R₀B₀`, which if wrong yields a plausible
+`q` that nothing contradicts. That is the remaining half.
 
 Three things written down before it was started, kept because two of them held:
 
@@ -970,6 +1042,22 @@ questions.** The `ψ*` evaluation is what makes the interpolatory method keep it
 superconvergence, and neither half is worth much without the other.
 
 ### 12.1 Interpolatory HDG — assemble the source ONCE
+
+**`INTERPOLATORY-HDG-PLAN.md` SUPERSEDES THIS SUBSECTION AND IS WHERE THE WORK
+IS.** Two things in it change the shape of the item and both postdate what
+follows. **MFEM has already built the method and MEQ links it today** —
+`HDGInterpolatoryReactionIntegrator`, `NodalReactionFunction`,
+`HDGPostprocessBlocks` and `DarcyHybridization::Bg_data`, all on
+`gf-interp-hdg-dev` and all inside `meq-integration` — so this is an MEQ wiring
+job against a built, documented, unit-tested facility rather than a feature
+request with a consumer attached. **And the headline below is deflated by that
+plan's own arithmetic**: at `extraOrder = 0` interpolation evaluates `F` *more*
+often than quadrature does, the honest figure is 1.6–2.0× fewer evaluations,
+`ComputeH()` is untouched, and the Amdahl ceiling off M-80 is **23–28%**. Read
+its §0 before its stages; IH-0 is a falsifier whose result may be *stop*.
+
+What is kept here is the argument for the method, which is unchanged and is why
+the plan exists.
 
 **THE METHOD.** Interpolate the nonlinearity into a finite element space instead
 of integrating it. The load becomes `A F⃗` with `A` assembled once and `F⃗` the
@@ -1139,6 +1227,22 @@ quadratic; this buys it by giving the convergence rate up. Reach for it if
 * **Partial assembly.** Not implemented for the HDG integrators at all, and its
   case is sum factorisation, which wants tensor-product elements where MEQ is
   triangles. A discretisation decision, not a flag.
+* **A fully device-resident solve.** `DEVICE-PLAN.md` is the audit and it is
+  explicitly not a commitment. What has changed since the paragraph above is
+  that *"group 2 needs a partial-assembly rewrite and is not built"* is now
+  only half true: there is still no partial-assembly route and MEQ is
+  simplices, so **that** economic case does not apply here at all — but what
+  upstream built instead is batched element and face kernels behind `CanBatch*`
+  predicates, MEQ passes most of them, and upstream's own chain measurement
+  reads **1.33× at 4096 elements** where its headline used to say *worse than
+  doing nothing*. **The refusal of `TraceSolver = "cudss"` from a file stands
+  regardless**, on the trade argument alone and on MEQ's own leg profile: M-126
+  puts the trace solve at 20.1% of a threaded step, so group-4-alone buys a
+  share of a fifth while paying a round trip on the other four fifths. Three
+  MEQ-specific facts keep upstream's crossover from being MEQ's — their fixture
+  is quads and MEQ is triangles everywhere, five of MEQ's eight shipped meshes
+  are *below* 4096 elements, and MEQ's Newton is bordered with the border being
+  host arithmetic that would not go to a device.
 * **The rest of the physics** — anisotropic pressure, NetCDF profiles, MaNTA
   coupling. `TODO` carries each with what has been established, and anisotropic
   pressure still has **no reference pinned**, which is the first thing it needs.

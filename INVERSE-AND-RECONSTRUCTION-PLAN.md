@@ -991,6 +991,29 @@ Both were written 2026-09-15 and both attack M-103 from the solver side. **The
 verdict is: complementary, with one of them a hard dependency, and this document
 is not a superset of either.**
 
+**THE DEPENDENCY HAS SINCE BEEN DISCHARGED, AND IT DISCHARGES IN THIS PLAN'S
+FAVOUR.** BG-0 and BS-0 are the same gate and it has been run →
+**[M-117](MEASUREMENTS.md#m-117)**: `directionFinite` is true on **every step of
+all six** exit-2 configurations, so hypothesis H2 — the non-finite direction
+that would have made both plans and this one moot — **does not hold**. The six
+are one fatal step (two), chronic (one) and **X-point excursions** (three),
+all of which are failures of the path or the problem rather than of the
+elimination.
+
+**And the solver-side campaign that followed came back negative**, which
+sharpens the case for changing the problem rather than the step:
+`Globalisation::BorderedPicardThenNewton` closes **0 of 6** and makes four of
+them worse (**[M-119](MEASUREMENTS.md#m-119)**), and `PicardSweeps` fixes none
+and turns three into silent wrong answers (**[M-116](MEASUREMENTS.md#m-116)**).
+What *has* moved cases is not a step rule at all —
+`setBorderRegularisation()` plus an `I_p` spread over an **ellipse**, M-123 and
+M-124, necessary together and neither sufficient — and an inverse solve is the
+same species of intervention: it changes what is being solved.
+
+**What none of that touches is §0.1.** The load-bearing claim here is still
+established for `freegs4e` and **assumed for MEQ**, and the experiment that
+would settle it still costs no MEQ code and has still not been run.
+
 | | | |
 |---|---|---|
 | **`BORDERED-GLOBALISATION-PLAN.md`** | **complementary, and its BG-0 gates this document's motivation** | It changes **how far the step goes**; an inverse solve changes **what problem is being solved**. Its §2.2 is load bearing here — no `Jᵀ` — and §3.4 above uses it to rule out CEDRES++'s architecture outright. And its **BG-0 experiment decides whether M-103's six exit-2 rows are path failures at all**: if they are non-finite directions rather than genuine excursions, neither a globalisation nor an inverse solve helps them, and both plans need re-aiming. §0.3 |

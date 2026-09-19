@@ -21,6 +21,37 @@ without letting a rung change which equilibrium a converging run reports.
 
 ---
 
+## STATUS: THE LADDER IS BUILT AND IT CLOSES NONE OF THE SIX
+
+**Every stage of §8 but BG-2 has been run, and the campaign's answer is
+negative on the cases this plan was written for.** `CLAUDE_FB.md` is the
+operational record and is authoritative over anything below; this table says
+which anchor holds which stage, so a reader does not plan work that is done.
+
+| stage | state |
+|---|---|
+| **BG-0** classify the exit-2 failure | **DONE** → **[M-117](MEASUREMENTS.md#m-117)**. §0.1's gate does **not** fire: `directionFinite` is true on every step of all six. Two are **one fatal step** — 12 halvings exhausted on 1 step of 27 and of 26 — one is **chronic** (55 of 288), and three are **X-point excursions** — TCV's null travels 1.6 m in `z` from its seed and E's flips sign in one step, which is §6.2 and not a step-length failure at all |
+| **BG-1** `PicardSweeps` as the control | **DONE** → **[M-116](MEASUREMENTS.md#m-116)**. §0.2 is right that nothing in the tree had ever set the key. It fixes **none** of the six and turns **three into silent wrong answers**, so the gate at four-of-six does not fire either |
+| **BG-2** the frozen source term, unbordered | **not built as written.** The built thing is `meq::FieldLinearisation`, a per-solve choice of what the field block of the Jacobian carries, rather than `SourceIntegrator::setFrozenPotential()` |
+| **BG-3** the bordered Picard | **DONE**, as `Globalisation::BorderedPicardThenNewton` → **[M-119](MEASUREMENTS.md#m-119)**. **0 of 6 close and the prediction that it would close three is falsified**; four of six reach a *worse* minimum than plain Newton. The one row that pays pays as an **instrument**: with the field block replaced by something that cannot be singular, what is left singular is the **border's Schur complement**, which is §0.1's first row reached by measurement |
+| **BG-4**, **BG-5** the handoff and the driver rung | **DONE**, with two departures `CLAUDE_FB.md` records: a new enum value rather than re-purposing `PicardOnly`, and **one** loop inside `solveWithNormalisation()` rather than two calls to `solve()`. The rung prints as `bP->N` |
+| **BG-6** re-take M-103 | **the six cold failures are re-taken** in M-116 and M-119, both arms from one run |
+| **BG-7** continuation in `μ₀ I_p` | **DEAD**, falsified in `BORDER-SCALING-PLAN.md` §1.4 |
+
+**WHERE THE CAMPAIGN POINTS INSTEAD.** M-119 says the obstruction on five of
+six is **not the field**, so §6.1's degenerate axis row and §6.2's X-point
+excursion — the two things this plan says none of its families fix — are what
+is left. What has since moved those is not a globalisation at all:
+`setBorderRegularisation()` removes the singular-Jacobian throw outright
+(**[M-123](MEASUREMENTS.md#m-123)**) and an initial guess that spreads `I_p`
+over an **ellipse** converges MAST-U from its own file
+(**[M-124](MEASUREMENTS.md#m-124)**) — **necessary together and neither
+sufficient**.
+
+**SO THIS FILE IS THE DESIGN AND THE ARGUMENT, NOT THE BACKLOG.** Read §§0–7
+for why each family was expected to work and why four of them were ruled out;
+do not start §8.
+
 ## 0. WHAT WOULD FALSIFY THIS, AND THE CHEAPEST EXPERIMENT
 
 Put first because it decides whether the rest is worth reading, and because in
@@ -754,7 +785,7 @@ Each stage ends at a **measured** acceptance criterion and names the file the
 assertion lives in. Stages are BG-0 to BG-7 so they do not collide with FB-*,
 XP-*, IN-* or PE-*.
 
-### BG-0 — Classify the exit-2 failure
+### BG-0 — Classify the exit-2 failure — **DONE, M-117**
 
 **Do.** Instrument the `!accepted` branch (`GradShafranov.cpp:7112-7116`) to
 record, per trial: whether `y`, `z` and every queued column were finite before
@@ -777,7 +808,7 @@ a deliberately singular border. The existing
 **Gate.** If the modal cause is a non-finite direction, stop here and open a
 different plan.
 
-### BG-1 — Repair `PicardSweeps` and measure it as the control
+### BG-1 — Repair `PicardSweeps` and measure it as the control — **DONE, M-116**
 
 **Do.** Give the pre-stage solver a real component fill. The cleanest route is
 to let the unbordered solver know its source is a `NormalisedSource` without
@@ -801,7 +832,7 @@ element count the fill reaches, against the pointwise control.
 **Gate.** If four or more of the six close, stop: family (b) is the answer and
 BG-2 onward is optional work.
 
-### BG-2 — The frozen source term, unbordered
+### BG-2 — The frozen source term, unbordered — **not built as written**
 
 **Do.** `meq::SourceIntegrator::setFrozenPotential( mfem::GridFunction const * )`
 per §3.2: `F` evaluated at the frozen field, the reaction term returning zero,
@@ -820,7 +851,7 @@ the same discretisation).
 **File.** `tests/convergence/SolverContract.cpp`, beside the existing ordering
 and source contracts.
 
-### BG-3 — The bordered Picard
+### BG-3 — The bordered Picard — **DONE and FALSIFIED, M-119**
 
 **Do.** Lift the two throws for `Globalisation::PicardOnly` alone. In
 `solveWithNormalisation()`, hold a local `bool frozen` that drives
@@ -842,7 +873,7 @@ orders larger than Newton's 4.
 **File.** `tests/convergence/HighBetaConvergence.cpp`, as
 `theBorderedPicardReachesTheSameSolutionAsTheBorderedNewton`.
 
-### BG-4 — The handoff, `PicardThenNewton` on the bordered path
+### BG-4 — The handoff, `PicardThenNewton` on the bordered path — **DONE**
 
 **Do.** Lift the throws for `PicardThenNewton`; run BG-3's iteration to a loose
 relative tolerance (start at `1e-4`, which is what the driver's pre-stage
@@ -868,7 +899,7 @@ ctest. **Not** `FreeBoundaryCoupling.cpp`, which is already the longest case in
 the suite (M-14's discussion has it at 281–433 s across three readings of one
 tree).
 
-### BG-5 — The driver rung, and saying which rung answered
+### BG-5 — The driver rung, and saying which rung answered — **DONE**
 
 **Do.** Replace the immediate `return SolveFailed` at `apps/meq.cpp:2752-2763`
 with one retry on the bordered `PicardThenNewton`, rebuilding the solver first
@@ -884,7 +915,7 @@ shipped example unchanged** — the driver-against-library pins
 (1.189e-16 over 15,360 dofs, 1.6e-16 on the curved path, 4.4e-14 on the adaptive
 loop) all hold to the digit, because nothing on a converging path may move.
 
-### BG-6 — Re-take M-103
+### BG-6 — Re-take M-103 — **DONE for the six cold failures**
 
 **Do.** Re-run all seven machines, both conductor models, shipped configurations
 plus the new rung, `OMP = MKL = 16`, both arms — which is the only thing that
@@ -895,7 +926,7 @@ can tell a conversion defect from a pre-existing one, per M-96's own note.
 note. **The number that decides it is how many of the six exit-2 configurations
 close with a located axis.**
 
-### BG-7 — Continuation in `μ₀ I_p`, conditional on BG-6
+### BG-7 — Continuation in `μ₀ I_p`, conditional on BG-6 — **DEAD, falsified**
 
 **Do.** Only if BG-6 leaves exit-2 rows standing. A `θ`-ramp on
 `setPlasmaCurrent()`'s argument with §4.4's adaptive step control, warm-started

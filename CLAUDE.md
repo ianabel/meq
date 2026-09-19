@@ -379,12 +379,24 @@ integrators on the host, so every iteration would copy the local blocks
 host↔device around host-side integrator work — plausibly slower than staying on
 the host throughout."*
 
-Group 2 needs a partial-assembly rewrite and is not built. **So a config-file
-cuDSS today is exactly the group-4-alone case that plan says not to do**: a
-Device would be configured, every Vector in the process would allocate through
-it, 58–70% of an NPC step would still run on the host, and each Newton
-iteration would pay a round trip for the one part that moved. The key opens when
-the offload work lands, not before.
+**"Group 2 needs a partial-assembly rewrite and is not built" IS HALF TRUE AND
+THE OTHER HALF IS STALE.** There is still no partial-assembly route, and MEQ is
+triangles everywhere, so **that** economic case — sum factorisation — does not
+apply to MEQ at any point. What upstream built *instead* is batched element and
+face kernels reached through `CanBatch*` predicates, MEQ already passes most of
+them, and upstream's own end-to-end measurement now reads **1.33× at 4096
+elements** where the headline quoted above said *worse than doing nothing*.
+`DEVICE-PLAN.md` §0 and §2 are the audit.
+
+**The refusal stands anyway, and on MEQ's own numbers rather than on that
+quotation.** M-126 puts the trace solve at **20.1%** of a threaded step, so a
+config-file cuDSS is still exactly the group-4-alone case: a Device would be
+configured, every Vector in the process would allocate through it, four fifths
+of the step would still run on the host, and each Newton iteration would pay a
+round trip for the one part that moved. **And upstream's crossover is not
+MEQ's** — their fixture is quads, five of MEQ's eight shipped meshes are *below*
+4096 elements, and MEQ's Newton is bordered with the border being host
+arithmetic that would not go to a device at all.
 
 **There is an immediate failure as well, and it is what made the refusal urgent
 rather than only principled.** Found by exercising the key rather than reasoning
@@ -425,10 +437,13 @@ silently copies the **stale host copy** over the device buffer the solve had
 correctly written.
 
 **MEQ'S HALF IS THE TRANSFERABLE PART**, because it was latent from the day it
-was written and could not fail until a Device existed: `buildForms()` makes
-three long-lived `MakeRef` aliases — `darcyFlux`, `potentialGf`, `traceGf` —
-onto the blocks of one `BlockVector solution`, and every one of them is a
-separate alias registration that never hears about a device write. `solve()`
+was written and could not fail until a Device existed: **the constructor**
+makes three long-lived `MakeRef` aliases — `darcyFlux`, `potentialGf`,
+`traceGf` — onto the blocks of one `BlockVector solution`, and every one of them
+is a separate alias registration that never hears about a device write. **They
+are in the constructor and not in `buildForms()`**, which is worth saying
+because `buildForms()` is the one that gets re-entered and is therefore where a
+reader looks. `solve()`
 therefore calls `solution.SyncToBlocks()` and a `SyncMemory()` per grid function
 before the first host read, and they are inert with no Device configured. This
 is the **third** time a library update or a new configuration has turned a
@@ -489,18 +504,22 @@ count. A library-side test cannot see a caller's aliases.
 ### Which integrators need device offload, and why kernels alone are not enough
 
 **THE INVENTORY, TAKEN FROM THE INSTALLED HEADERS RATHER THAN REMEMBERED.** Every
-integrator MEQ installs, and whether a device entry point exists for it today:
+integrator MEQ installs, and whether a device entry point exists for it today.
+**The sites name `buildForms()` and not a line number, deliberately**: this
+table carried line numbers for months, they were wrong by eight hundred lines
+when anybody checked, and the replacements offered for them were wrong again
+within three commits. `grep` for the integrator.
 
 | integrator | where MEQ installs it | device path |
 |---|---|---|
-| `mfem::VectorMassIntegrator( radius )` | flux mass, domain — `GradShafranov.cpp:3077` | **`AssemblePA`, `AssembleMF`, `AssembleDiagonalPA`, `AddMultPA`** — and separately `HDGElementMassBatched()` under `AssemblyMode::Batched` |
-| `mfem::VectorDivergenceIntegrator` | flux divergence, domain — `:3176` | **`AssemblePA`** |
-| `mfem::TransposeIntegrator( mfem::DGNormalTraceIntegrator )` | flux divergence, interior + boundary faces — `:3177`, `:3179` | the wrapper has PA and the wrapped integrator has none — **and neither matters**, because under hybridization these are never assembled. They are MARKERS; see the measured trap under *A trap in that table* |
-| `mfem::NormalTraceJumpIntegrator` | the hybridization constraint — `:3186` | `AssembleEAInteriorFaces` **only**: element assembly, interior faces, no `AddMultPA` and nothing for boundary faces |
-| **`mfem::HDGDiffusionIntegrator`** | potential mass, interior **and** boundary faces — `:3109`, `:3151`, `:3152` | **none** |
-| **`meq::SourceIntegrator`** | potential mass NON-LINEAR form, domain — `:3140`, `:3150` | **none, and it is the one MEQ owns** |
-| **`mfem::HDGExtensionIntegrator`** | flux mass, boundary faces, curved and free-boundary only — `:3098` | **none** |
-| `mfem::DomainLFIntegrator`, `mfem::VectorBoundaryFluxLFIntegrator` | the two right-hand sides — `:3465`, `:3414` | none, and it does not matter: once per mesh, not once per step |
+| `mfem::VectorMassIntegrator( radius )` | flux mass, domain — `buildForms()` | **`AssemblePA`, `AssembleMF`, `AssembleDiagonalPA`, `AddMultPA`** — and separately `HDGElementMassBatched()` under `AssemblyMode::Batched` |
+| `mfem::VectorDivergenceIntegrator` | flux divergence, domain — `buildForms()` | **`AssemblePA`** |
+| `mfem::TransposeIntegrator( mfem::DGNormalTraceIntegrator )` | flux divergence, interior + boundary faces — `buildForms()` | the wrapper has PA and the wrapped integrator has none — **and neither matters**, because under hybridization these are never assembled. They are MARKERS; see the measured trap under *A trap in that table* |
+| `mfem::NormalTraceJumpIntegrator` | the hybridization constraint, handed to `EnableHybridization()` | `AssembleEAInteriorFaces` **only**: element assembly, interior faces, no `AddMultPA` and nothing for boundary faces |
+| **`mfem::HDGDiffusionIntegrator`** | potential mass, interior **and** boundary faces — `buildForms()` | **none** |
+| **`meq::SourceIntegrator`** | potential mass NON-LINEAR form, domain — `buildForms()` | **none, and it is the one MEQ owns** |
+| **`mfem::HDGExtensionIntegrator`** | flux mass, boundary faces, curved and free-boundary only — `buildForms()` | **none** |
+| `mfem::DomainLFIntegrator`, `mfem::VectorBoundaryFluxLFIntegrator` | the two right-hand sides, in the two `assemble*Rhs()` helpers | none, and it does not matter: once per mesh, not once per step |
 
 **TWO STRUCTURAL FACTS MATTER MORE THAN THE TABLE, AND EITHER ONE ALONE MAKES
 "ADD KERNELS" THE WRONG PLAN.**
@@ -1351,7 +1370,27 @@ is not.
 |---|---|
 | **Auxiliary globally-coupled unknowns** | `SetNumAuxiliaryUnknowns()` and the two per-element assemble hooks. **The one unbuilt piece, and no longer worth asking for**: the entry points MEQ named are public already as `NPCReduce()` and `NPCRecover()`, and `DarcyNPCSolver::ArrayMult` applies them to several right-hand sides in one pass, so a differenced border is `K` applications of a routine that blocks them. **MEQ CALLS IT** — the bordered step queues every column and flushes once, worth **1.34×** on the DIII-D solve leg at 14 columns, → **[M-98](MEASUREMENTS.md#m-98)** |
 | **`AssemblyMode::Threaded` must not be refused on `CopyLinearGradBlocks()` declining** | Upstream is adding an abort for a real hazard — 67 of 99 MFEM integrators with scratch are unguarded — keyed on a predicate that catches MEQ for an unrelated reason. MEQ is `LocalOpType::PotNL`, so the cache **always** declines, and on that branch `ConstructGrad()` skips the flux block and evaluates only `meq::SourceIntegrator`, which is MEQ's own and reentrant. **An MFEM update carrying that abort stops every threaded MEQ run.** Filed as `../mfem-hdg-dev/doc/HDG-THREADED-REFUSAL-FROM-MEQ.md`; `CLAUDE_HDGGS.md`, *Threading, measured* |
-| **Threading `NPCReduce()` and `NPCRecover()`** | The two element loops either side of the trace solve are the only ones in `DarcyHybridization` with no `omp parallel`, and upstream's own doxygen declines them at *"under 6% of the step"* — measured fixed boundary, one right-hand side. MEQ's bordered step applies `J^-1` to `N + 4` columns, so the traversal is `O( elements × columns )` against integrator loops that are `O( elements )` and already threaded: **0.212 s at one thread and 0.212 s at eight, 30.6% of a threaded step and the largest leg in it.** `NPCRecover` writes only the calling element's own L2 dofs and needs neither colouring nor atomics. Filed as `../mfem-hdg-dev/doc/HDG-NPC-TRAVERSAL-FROM-MEQ.md`, → **[M-126](MEASUREMENTS.md#m-126)** |
+| **`DarcyForm::ReconstructTotalFlux` de-registers a buffer it does not own** | `debug`-only, and the last link of M-130's chain. `Memory<T>::Wrap( ptr, n, own = false )` sets `h_mt = MemoryManager::GetHostMemoryType()` — `HOST_DEBUG` under a debug device — while `Memory<T>::Delete()` computes `std_delete = !registered && ( h_mt == MemoryType::HOST )`, so a non-owning, unregistered wrap calls `MemoryManager::Delete_`. `Vector b_ze( b_z.GetData() + e*nd_ut, nd_ut )` at `darcyhybridization.cpp:10164` with `e == 0` aliases `b_z`'s base pointer exactly and de-registers it; the next element's `b_z = 0.` aborts. Filed as `../mfem-hdg-dev/doc/HDG-RECONSTRUCT-TOTAL-FLUX-FROM-MEQ.md`, with the seven same-pattern sites and two candidate fixes |
+
+**AND ONE HAS CLOSED, WHICH IS THE ROW THAT USED TO SIT HERE.** Threading
+`NPCReduce()` and `NPCRecover()` — MEQ's largest measured leg, 0.212 s at one
+thread and 0.212 s at eight, **30.6% of a threaded step** →
+**[M-126](MEASUREMENTS.md#m-126)** — is **done upstream**, at 4.35× on eight
+threads, bit for bit. Two things about how it closed are worth keeping.
+
+**The reason it had been declined was a share measured on the wrong problem.**
+Upstream's doxygen declined both loops at *"under 6% of the step"*, taken on
+four **fixed-boundary, single-right-hand-side** cases. A bordered Newton applies
+`J⁻¹` to `N + 4` columns, so the traversal is `O( elements × columns )` where
+the integrator loops are `O( elements )` — the ratio inverts, and the same two
+legs that are 6% there are 30.6% here. *A share is a property of a problem, not
+of a loop.*
+
+**And it is not in the library MEQ links.** `GetNPCTraversalTime` is in
+`../mfem-hdg-dev/fem/darcy/darcyhybridization.hpp` and **not** in
+`../mfem/install/include/`, so MEQ gets none of it until `meq-integration` is
+re-created and reinstalled. This is exactly the gap the *check the install too*
+rule above exists for.
 
 Everything else MEQ has sent is closed. **A CLOSED REPORT NEEDS NO ENTRY HERE**:
 what it changed is in the code with a test on it, or it is a measurement under an

@@ -22,6 +22,40 @@ write; the measured lever there is the build (M-77).
 
 ---
 
+## STATUS: A, B, C AND D ARE BUILT. WHAT IS LEFT IS THE CLOCK
+
+Landed as `0108f49`, merged as `a226cd3`. Each item below carries its own
+marker; this table is what a reader needs before any of the estimates.
+
+| item | state |
+|---|---|
+| **A** sparse border rows | **DONE.** `meq::CompressedRows` and `meq::firstNonzeroOutside` in `GradShafranov.cpp`, with the support check the item asks for grown teeth — it now asserts the recorded support covers every nonzero rather than only that the potential and trace blocks are clean. `tests/convergence/BorderAssembly.cpp` is new and `theCompressedBorderRowsContractExactly` requires `0.000e+00` |
+| **B** the four plasma element loops | **DONE**, and it is five of them — `assemblePlasmaCurrent()` with the four the item names — through `MEQ_OMP()` in the new `src/meq/Threading.hpp`, per-element partial sums rather than a `reduction(+:)`, and a per-thread `std::exception_ptr` so a throw inside a region is not undefined behaviour |
+| **C** `CriticalPointFinder::sweep()` | **DONE.** Per-element candidate buffers and a serial dedup over an element-ordered concatenation, with `theAxisSweepDoesNotDependOnTheThreadCount` in `tests/convergence/CriticalPointConvergence.cpp` |
+| **D** the unnamed 3.2% | **DONE.** Two legs, `of which driver prepare` and `of which sweep overhead`, printed by `--profile` |
+| **E**, **F** | not to be done. Unchanged |
+| **G** re-assembly | still a restructure of the line search rather than a threading item, and still wants its own plan |
+
+**THE CROSS-CUTTING ACCEPTANCE IS MET AND IT IS THE ONE WITH TEETH.**
+`machine-f-diiid` solved by the pre-threading baseline at `OMP=1`, by the merged
+tree at `OMP=1` and by the merged tree at `OMP=8` gives **one md5 over all
+three** — every field, including all ten Gegenbauer modes. `OMP_NUM_THREADS`
+does not change a printed digit, which is what every item's design was chosen
+for.
+
+**AND THE `find_package( OpenMP )` THE CROSS-CUTTING SECTION ASKS FOR IS IN
+`CMakeLists.txt:433`**, with `OpenMP::OpenMP_CXX` linked `PUBLIC` onto
+`meq_core`, so MEQ's own parallelism no longer arrives by inheritance from
+MFEM's compile flags.
+
+**WHAT IS NOT DONE IS EVERY NUMBER IN THIS FILE.** §0's one `--profile` run —
+on which the `transmission` half of A and the `I_p` half of B both depend — and
+the A+B+C payoff against the pre-threading baseline, predicted `1.14×` or
+`1.106×` counting only the measured parts. Both want a quiet machine and
+neither has had one. **Until they are taken, the estimates below stay
+estimates**; the standing rule is five quiet minutes before a timed run, and a
+figure taken under another agent's build is not a measurement about this work.
+
 ## 0. Read the sub-slices before doing anything
 
 `meq --profile` already prints five sub-slices under `constraint location` —
@@ -143,7 +177,7 @@ figure is near **1.7×**.
 
 ---
 
-### A. Compress the border rows. First, and by a distance
+### A. Compress the border rows. First, and by a distance — **DONE**
 
 **1. Where the code is.**
 
@@ -221,7 +255,7 @@ or `FreeBoundaryCoupling.cpp`:
 
 ---
 
-### B. Thread the four plasma element loops
+### B. Thread the four plasma element loops — **DONE**, and it is five
 
 **1. Where the code is.** `src/meq/GradShafranov.cpp` — `assembleCurrentColumn()`
 `:5211`, `assembleCurrentNormalisationCorner()` `:5273` (analytic branch from
@@ -319,7 +353,7 @@ mesh.
 
 ---
 
-### C. Thread `CriticalPointFinder::sweep()`
+### C. Thread `CriticalPointFinder::sweep()` — **DONE**
 
 **1. Where the code is.** `src/meq/CriticalPoints.cpp:932` `sweep()`; the unit of
 work is `rootInElement()` at `:324`; the driver reaches it from
@@ -406,7 +440,7 @@ duplicates — the Solov'ev `k = 1, n = 6` case named at `:987` is one.
 
 ---
 
-### D. `outside solve()`'s unnamed 3.2% — instrument it, do not thread it
+### D. `outside solve()`'s unnamed 3.2% — instrument it, do not thread it — **DONE**
 
 `outside solve()` is 6.0%, of which `makeSolver` is 1.1%, `support move` 0.0%
 and `axis checks` 1.7%. **The remaining 3.2% has no timer at all.**
@@ -560,6 +594,11 @@ work they are not doing.
 
 ## What to do first
 
+**A, B, C and D are built** — see the status table at the top. What survives of
+this ordering is the two measurements nobody has been able to take, and they are
+items 1 and 6 below. The rest is the record of why the set was taken in this
+order.
+
 1. **§0** — one `--profile` run, to read the `transmission` and `I_p` sub-slices.
    Two of the numbers above depend on them and they cost one command.
 2. **A** — the sparse border rows. Biggest, exact, no threading hazard at all,
@@ -571,6 +610,11 @@ work they are not doing.
    case as well as the diagnostic.
 5. **D** — two timers on `outside solve()`, at any point. It is not work, it is
    an instrument, and 3.2% of the run currently has no name.
+6. **THE PAYOFF ITSELF**, against the pre-threading baseline binary, as
+   interleaved pairs at `OMP = MKL = 8` under `OMP_WAIT_POLICY=passive`. The
+   prediction is `1.14×`, or `1.106×` counting only the measured parts, and
+   until a quiet machine produces it this plan has delivered code and not a
+   number.
 
 **Not to be done**: E, the output writers (1% at best, for I/O concurrency
 nobody has established is safe); F, `other` (threading it is not available to

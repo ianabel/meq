@@ -5012,3 +5012,70 @@ The measurement was treated as a property to be recorded rather than a symptom
 to be chased, and the difference between those two is one `gdb` session.
 **A result that is stable, reproducible and in the sixth digit is still a bug
 until something explains it.**
+
+### M-131
+
+**THE `q`-DRIVEN RUN NOW REPORTS THE `q` IT REACHED, AND IT IS THE TARGET TO
+4.5e-07.** MEQ computed the safety factor, carried a `safety_factor` column for
+it in `Output.cpp`, and wrote it on no run at all: the column is gated on
+`FluxSurfaceFamily::safetyFactorAvailable`, which is
+`static_cast<bool>( FluxFamilyOptions::toroidalField )`, and `apps/meq.cpp` set
+that at neither extraction site. **Found by closing `INVERSION-PLAN.md` rather
+than by using the code.**
+
+**THE REFUSAL WAS RIGHT FOR ONE CASE AND WAS NEVER REVISITED FOR THE OTHER.** A
+`meq::Source` carries `g g'` and not `g`, so a PRESCRIBED-field run cannot
+recover `g = sqrt( g_edge² + 2∫ g g' dΨ )` without a constant of integration no
+`[source]` key supplies — and a column of zeroes would be indistinguishable from
+a machine with no toroidal field, so absent is the correct signal and stays.
+**`[source] SafetyFactorFile` is the exception**: the outer Newton solves for
+the coefficients of `g²` itself, and `apps/meq.cpp` already held them in scope
+at the writer and already printed them to the `.nc` as an attribute. So the one
+run whose entire purpose is to reach a target `q` was the one run that could not
+show the `q` it reached.
+
+`examples/q-driven.toml`, 512 elements at `k = 2`, degree-2 `g²`, 24 surfaces
+over `Ψ_N ∈ [0.05, 0.95]`, one run, 44 s:
+
+| `Ψ_N` | `Ψ` source | `q` reached | `q` asked for | relative |
+|---|---|---|---|---|
+| 0.0500 | 0.9500 | 1.072306 | 1.072307 | 4.769e-08 |
+| 0.1255 | 0.8745 | 1.063448 | 1.063448 | 7.777e-08 |
+| 0.2351 | 0.7649 | 1.058562 | 1.058562 | 3.130e-08 |
+| 0.3788 | 0.6212 | 1.065494 | 1.065494 | 3.516e-08 |
+| 0.5567 | 0.4433 | 1.097155 | 1.097156 | 7.568e-08 |
+| 0.7686 | 0.2314 | 1.188384 | 1.188384 | 1.714e-07 |
+| 0.9500 | 0.0500 | 1.432489 | 1.432488 | 1.586e-07 |
+
+**Worst 4.547e-07 over all 24 surfaces**, against the same run's coefficient
+recovery of 5.037e-06 — the `q` reads an order better than the `g` it is built
+from because the target was measured on this mesh, so the extraction error is
+common to both sides.
+
+**THE HAZARD IS A REFLECTION AND IT WOULD HAVE BEEN INVISIBLE.**
+`extractFluxSurfaces` calls the callback with the **raw** `ψ`, and the
+coefficients are in the **source's** `Ψ` — `fitToroidalFieldSquared()` fits
+against `1 − normalisedFlux` for exactly this reason, because `meq::
+normalisedFlux` is zero on the axis and the source's `Ψ` is one there. A wiring
+that reached for the family's own label would have evaluated the polynomial
+reversed and reported a `q` that is smooth, plausible and the profile backwards.
+`examples/q-driven-q.dat`'s own header already records the same trap on the way
+IN: *"Handing a table written the other way round does NOT fail: it converges,
+at full order, to an equilibrium with its shear reversed"*. **The same
+convention pair, the same failure mode, met twice at opposite ends of one
+loop.**
+
+**TWO GUARDS, AND NEITHER IS DECORATION.** `g²` is a *fitted* polynomial, so a
+degree the family does not determine can dip below zero inside the cut while
+every coefficient looks ordinary; `sqrt` of that is a NaN in a file whose only
+per-node mask is about the band. Positivity is therefore checked over the
+family's own range before the callback is installed, and a failure leaves the
+variable **absent** — the same signal a prescribed run gives — and says so on
+stdout. And the acceptance asserts the column is **not flat**, because a lambda
+that ignored its argument would write one repeated value and pass a tolerance
+against a slowly varying target.
+
+`DriverAcceptance::theQDrivenRunReportsTheSafetyFactorItReached`. It shares one
+run with `theDriverSolvesForTheToroidalField`: the two are halves of one round
+trip, the run is 44 s, and running it twice would make the second case's numbers
+those of a different equilibrium.

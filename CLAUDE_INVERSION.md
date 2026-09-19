@@ -1163,11 +1163,37 @@ node within **5.2e-08 m** of the exact contour. Not a rate study —
 to it; what this asserts is that assembling a whole family delivers what the
 one-surface route already does.
 
-**`safety_factor` IS ABSENT RATHER THAN ZERO WHEN IT IS UNKNOWN.**
-`V' g ⟨R^{-2}⟩/4π²` needs `g(ψ) = R B_φ`, and a `meq::Source` carries `g g'` and
-not `g`. So the driver writes no such column, and a column of zeroes — which is
-what a caller would get from a "sensible default" — is indistinguishable from a
-machine with no toroidal field. The file says which by not having the variable.
+**`safety_factor` IS ABSENT RATHER THAN ZERO WHEN IT IS UNKNOWN, AND PRESENT ON
+THE ONE ROUTE THAT KNOWS `g`.** `V' g ⟨R^{-2}⟩/4π²` needs `g(ψ) = R B_φ`, and a
+`meq::Source` carries `g g'` and not `g`: recovering
+`g = sqrt( g_edge² + 2∫ g g' dΨ )` from a **prescribed** field needs a constant
+of integration no `[source]` key supplies, so there the driver writes no such
+column — a column of zeroes, which is what a "sensible default" would give, is
+indistinguishable from a machine with no toroidal field, and the file says which
+by not having the variable.
+
+**`[source] SafetyFactorFile` IS THE EXCEPTION AND IT IS THE RUN THAT NEEDS IT
+MOST**, because the outer Newton solves for the coefficients of `g²` itself.
+`apps/meq.cpp` sets `FluxFamilyOptions::toroidalField` from them, and the
+surfaces file carries `safety_factor` beside `toroidal_field_driven`,
+`g_squared_coefficients` and `safety_factor_target` — so the round trip is
+readable off the output rather than taken on faith. **The reported `q` is the
+target to 4.5e-07 over 24 surfaces** → **[M-131](MEASUREMENTS.md#m-131)**,
+which is an order better than the same run's recovered `g` because the target
+was measured on this mesh.
+
+**THE CONVENTION PAIR IS THE HAZARD AND IT BITES AT BOTH ENDS OF THE LOOP.**
+`extractFluxSurfaces` calls the callback with the **raw** `ψ`, while the
+coefficients are in the **source's** `Ψ` — `fitToroidalFieldSquared()` fits
+against `1 − normalisedFlux` for exactly this reason, `meq::normalisedFlux`
+being zero on the axis where the source's `Ψ` is one. Reading one as the other
+reverses the profile and reports a `q` that is smooth and plausible;
+`examples/q-driven-q.dat`'s header records the identical trap on the way **in**.
+And because `g²` is *fitted*, positivity is checked across the family's range
+before the callback is installed: a degree the family does not determine can dip
+below zero inside the cut with every coefficient looking ordinary, and `sqrt` of
+that is a NaN in a file whose only per-node mask is about the band. A failure
+leaves the variable absent and says so.
 
 **AND THE EXTRACTION HAPPENS BEFORE THE VTK STEP, WHICH IS LOAD BEARING.**
 `apps/meq.cpp` bends the mesh boundary out onto `Γ` for the `.vtu`, which

@@ -117,6 +117,49 @@ namespace
 		return text;
 	}
 
+	/// One variable's values out of a NetCDF file, through ncdump. The name is
+	/// looked for AFTER the `data:` marker rather than anywhere in the file,
+	/// because a variable's name also appears in its own declaration and in
+	/// every one of its attributes. Empty if ncdump could not read the file or
+	/// the variable is not in it, which is the distinction the callers below
+	/// assert on. A fill value prints as `_` and is skipped rather than parsed,
+	/// so a short vector means fills were met.
+	std::vector<double> ncdumpVariable( std::string const &path,
+	                                    std::string const &name )
+	{
+		std::string const scratch = "driver-acceptance-variable.txt";
+		std::string const command =
+			"ncdump -v " + name + " " + path + " > " + scratch + " 2>/dev/null";
+		if ( std::system( command.c_str() ) != 0 )
+			return std::vector<double>();
+
+		std::string const text = slurp( scratch );
+		std::remove( scratch.c_str() );
+
+		std::size_t at = text.find( "\ndata:" );
+		if ( at == std::string::npos )
+			return std::vector<double>();
+		at = text.find( "\n " + name + " = ", at );
+		if ( at == std::string::npos )
+			return std::vector<double>();
+
+		std::vector<double> values;
+		char const *cursor = text.c_str() + at + name.size() + 5;
+		while ( *cursor != '\0' && *cursor != ';' )
+		{
+			char *end = nullptr;
+			double const value = std::strtod( cursor, &end );
+			if ( end == cursor )
+			{
+				++cursor;
+				continue;
+			}
+			values.push_back( value );
+			cursor = end;
+		}
+		return values;
+	}
+
 	/// Where the wrapper is. Passed by CMake beside the driver, for the same
 	/// reason: a test that guessed the path would keep passing while running
 	/// nothing.
@@ -2668,6 +2711,27 @@ BOOST_AUTO_TEST_CASE( theDriverWritesTheFluxSurfaceGrid )
 		            "the driver's flux-surface file does not declare '"
 		            << needle << "'" );
 
+	/*
+	 * AND `safety_factor` IS ABSENT, WHICH IS A CONTRACT AND NOT AN OMISSION.
+	 *
+	 * `V' g < R^-2 >/4 pi^2` needs `g = R B_phi`, and a meq::Source carries
+	 * g g' and not g -- recovering g from a PRESCRIBED field needs a constant
+	 * of integration no [ source ] key supplies. A column of zeroes, which is
+	 * what a "sensible default" gives, is indistinguishable from a machine
+	 * with no toroidal field, so the file says which by not having the
+	 * variable. This is the negative half of
+	 * theQDrivenRunReportsTheSafetyFactorItReached, and it exists because the
+	 * wiring that made that case pass could just as easily have installed a
+	 * g( psi ) here that means nothing.
+	 */
+	BOOST_TEST( header.find( "double safety_factor(flux)" ) == std::string::npos,
+		"a Soloviev run declares a safety_factor column. There is no g to "
+		"build it from on this route, so whatever is in it is not a safety "
+		"factor -- and absent rather than zero is how this file says so" );
+	BOOST_TEST( header.find( ":toroidal_field_driven" ) == std::string::npos,
+		"a run that PRESCRIBES its source claims to have solved for the "
+		"toroidal field" );
+
 	// The band mask has to be non-trivial on this path, or the case is testing
 	// the fitted one under a curved name. Omega_h is inscribed in Gamma, so the
 	// outer surfaces are partly outside the mesh and the extension answers for
@@ -2899,11 +2963,33 @@ BOOST_AUTO_TEST_CASE( theDriverFindsTheLimiterContact )
  * mesh's -- which is the quantity this case is about. FluxGridConvergence is
  * where the extraction is measured against a closed form.
  */
+namespace
+{
+	/*
+	 * THE q-DRIVEN EXAMPLE, RUN AT MOST ONCE PER BINARY.
+	 *
+	 * It is about forty seconds -- one equilibrium per map evaluation, and the
+	 * outer Newton differences its Jacobian -- and the two cases below are the
+	 * two halves of ONE round trip read off ONE run: the loop recovers the g
+	 * its target was measured from, and the file then reports the q that g
+	 * delivers. Running it twice would buy nothing but wall clock, and would
+	 * also make the second case's numbers those of a different run.
+	 */
+	bool qDrivenExampleRan()
+	{
+		static bool const outcome = []
+		{
+			std::remove( "q-driven.nc" );
+			std::remove( "q-driven_surfaces.nc" );
+			return run( "examples/q-driven.toml" ) == 0;
+		}();
+		return outcome;
+	}
+}
+
 BOOST_AUTO_TEST_CASE( theDriverSolvesForTheToroidalField )
 {
-	std::remove( "q-driven.nc" );
-
-	BOOST_TEST_REQUIRE( run( "examples/q-driven.toml" ) == 0,
+	BOOST_TEST_REQUIRE( qDrivenExampleRan(),
 		"the q-driven example did not solve. The outer loop has no fallback: "
 		"psi_ax is a border unknown, so GradShafranovSolver refuses every "
 		"globalisation but None and the outer step length is the only control "
@@ -2984,4 +3070,117 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesForTheToroidalField )
 		"g^2 falls toward the axis, so the recovered shear runs the wrong way. "
 		"The likeliest cause is the target being read in the family's Psi_N "
 		"rather than the source's Psi; see meq::ToroidalFieldMap" );
+}
+
+/*
+ * AND THE RUN REPORTS THE q IT REACHED, WHICH IS THE OTHER HALF OF THE ROUND
+ * TRIP AND THE HALF A USER CAN READ.
+ *
+ * The case above asserts the loop recovered the CLOSED FORM its target was
+ * measured from, which is the strongest statement available -- and it is a
+ * statement about three coefficients in an attribute. A consumer of this run
+ * wants the q itself, on the surfaces, beside the geometry it goes with, and
+ * until `options.toroidalField` was wired the file did not carry it: MEQ
+ * computed the safety factor, had a column ready for it, and never wrote one.
+ *
+ * THIS IS THE ONE ROUTE THAT CAN CARRY IT AND THAT IS NOT AN OVERSIGHT. A
+ * meq::Source holds g g' and not g, so a PRESCRIBED-field run cannot recover
+ * `g = sqrt( g_edge^2 + 2 int g g' dPsi )` without a constant of integration no
+ * key supplies, and its file correctly has no safety_factor variable at all --
+ * absent rather than zero, since zero is a real machine. The driven run solves
+ * for the coefficients of g^2, so here g is known.
+ *
+ * THE ASSERTION IS AGAINST THE TARGET TABLE, EVALUATED THROUGH THE SAME SPLINE
+ * THE RUN WAS GIVEN, and the reflection is the whole hazard: the table's
+ * abscissa is the SOURCE's Psi, one on the axis, and the file's
+ * `normalised_flux` is the family's Psi_N, zero there. A wiring that dropped
+ * the reflection would report a q that is smooth, plausible, and the profile
+ * read backwards -- so this case also pins that, by construction, through
+ * numbers that are not symmetric in Psi.
+ */
+BOOST_AUTO_TEST_CASE( theQDrivenRunReportsTheSafetyFactorItReached )
+{
+	BOOST_TEST_REQUIRE( qDrivenExampleRan() );
+	BOOST_TEST_REQUIRE( exists( "q-driven_surfaces.nc" ),
+		"the q-driven example wrote no surfaces file, so [ output ] "
+		"FluxSurfaces is not set on it and there is nothing to read q from" );
+
+	std::string const header = ncdumpHeader( "q-driven_surfaces.nc" );
+	BOOST_TEST_REQUIRE( !header.empty() );
+
+	// THE PROVENANCE FIRST. safety_factor is only as good as the g behind it,
+	// and on this route that g is a polynomial the run SOLVED for rather than
+	// anything given -- a reader differencing two files has to be able to tell
+	// that from a prescribed field.
+	BOOST_TEST( headerAttribute( header, "toroidal_field_driven" ) == 1.0,
+		"the surfaces file does not record that g was an output of this run, "
+		"so a reader cannot tell where its safety factor came from" );
+	BOOST_TEST( header.find( ":g_squared_coefficients = \"" )
+	            != std::string::npos );
+
+	std::vector<double> const reached =
+		ncdumpVariable( "q-driven_surfaces.nc", "safety_factor" );
+	std::vector<double> const label =
+		ncdumpVariable( "q-driven_surfaces.nc", "normalised_flux" );
+
+	BOOST_TEST_REQUIRE( !reached.empty(),
+		"the surfaces file carries no safety_factor variable. MEQ computes it "
+		"-- FluxSurface::safetyFactor and SurfaceAverages::safetyFactor() -- "
+		"and Output.cpp has the column, gated on "
+		"FluxSurfaceFamily::safetyFactorAvailable, which is set from "
+		"FluxFamilyOptions::toroidalField. Something stopped supplying it" );
+	BOOST_TEST_REQUIRE( reached.size() == label.size() );
+
+	meq::SplineProfile const target(
+		meq::SplineProfile::fromFile( "examples/q-driven-q.dat" ) );
+
+	std::printf( "\n  THE q THE RUN REACHED, AGAINST THE q IT WAS ASKED FOR\n" );
+	std::printf( "      Psi_N    Psi_source      reached       target"
+	             "     relative\n" );
+	double worstQ = 0.0;
+	for ( std::size_t i = 0; i < reached.size(); ++i )
+	{
+		// THE REFLECTION. meq::normalisedFlux is zero on the axis and the
+		// source's Psi is one there; meq::ToroidalFieldMap owns the same
+		// conversion on the way in, at SafetyFactor.cpp's `target( 1 - ... )`.
+		double const sourcePsi = 1.0 - label[ i ];
+		double const wanted = target( sourcePsi );
+		double const relative = std::abs( reached[ i ] - wanted )
+		                        /std::abs( wanted );
+		worstQ = std::max( worstQ, relative );
+		if ( i % 4 == 0 || i + 1 == reached.size() )
+			std::printf( "   %9.4f    %9.4f  %11.6f  %11.6f    %.3e\n",
+			             label[ i ], sourcePsi, reached[ i ], wanted,
+			             relative );
+	}
+	std::printf( "    worst over %zu surfaces %.3e\n", reached.size(), worstQ );
+
+	/*
+	 * WHAT THE TOLERANCE IS AND WHY IT IS NOT TIGHTER. Three errors are in
+	 * here and none of them is the column's: the outer loop's own convergence
+	 * (M-nn-free, but the case above bounds it at 1e-04 in the coefficients),
+	 * the degree-2 fit of g^2 against a family of 24 surfaces, and the
+	 * extraction of V' and < R^-2 > on THIS mesh. The target was measured on
+	 * the same mesh so the third is largely common, which is why this reads
+	 * five orders better than the coefficient bound rather than worse.
+	 */
+	BOOST_TEST( worstQ < 1.0e-05,
+		"the reported safety factor is not the one that was asked for: worst "
+		"relative " << worstQ << " over " << reached.size() << " surfaces. If "
+		"it is large and SMOOTH, suspect the Psi reflection before the solve -- "
+		"the target is in the source's Psi and the file's label is the family's "
+		"Psi_N, and reading one as the other reverses the profile without "
+		"making anything look wrong" );
+
+	/*
+	 * AND THE COLUMN IS NOT FLAT, WHICH A REFLECTED OR CONSTANT g WOULD ALSO
+	 * SATISFY THE TOLERANCE WITH IF THE TARGET WERE FLAT. It is not: q rises
+	 * toward the axis on this equilibrium, so the innermost surface carries a
+	 * larger q than the outermost. Asserted on the data rather than assumed,
+	 * because a column of one repeated value is exactly what a broken lambda
+	 * that ignored its argument would write.
+	 */
+	BOOST_TEST( reached.back() > 1.05*reached.front(),
+		"the safety factor barely varies across the family, which is what a "
+		"g( psi ) lambda ignoring its argument would produce" );
 }

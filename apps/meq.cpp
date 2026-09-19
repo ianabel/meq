@@ -5062,11 +5062,95 @@ int main( int argc, char **argv )
 				options.innerCut = output.fluxInnerCut;
 				options.outerCut = output.fluxOuterCut;
 
-				// NO g( psi ), SO NO SAFETY FACTOR COLUMN. g = R B_toroidal is
-				// not something a meq::Source carries -- it carries g g' -- and
-				// a column of zeroes would be indistinguishable from a machine
-				// with no toroidal field. The file says which by not having the
-				// variable at all.
+				/*
+				 * g( psi ) FOR THE SAFETY FACTOR COLUMN, AND ONLY THE DRIVEN
+				 * PATH CAN SUPPLY IT.
+				 *
+				 * A meq::Source carries g g' and not g, so recovering
+				 * g = sqrt( g_edge^2 + 2 int g g' dPsi ) from a PRESCRIBED
+				 * field needs a constant of integration that no [ source ] key
+				 * supplies. There, the column is correctly absent: writing
+				 * zeroes would be indistinguishable from a machine with no
+				 * toroidal field, and the file says which by not having the
+				 * variable at all.
+				 *
+				 * [ source ] SafetyFactorFile is the exception, and it is the
+				 * run that needs the column most: the outer Newton solves for
+				 * the coefficients of g^2 itself, so g IS known here -- and
+				 * without this a run whose whole purpose is to reach a target q
+				 * could not show the q it reached.
+				 *
+				 * TWO CONVENTIONS MEET HERE AND THEY POINT OPPOSITE WAYS.
+				 * meq::extractFluxSurfaces calls this with the RAW psi, and the
+				 * coefficients are in the SOURCE's Psi -- see
+				 * fitToroidalFieldSquared(), which fits against
+				 * `1 - normalisedFlux` for exactly this reason. meq::
+				 * normalisedFlux is zero on the axis and the source's Psi is
+				 * one there, so a lambda that reached for the family's label
+				 * would evaluate the polynomial reversed and report a q that is
+				 * smooth, plausible and wrong.
+				 */
+				double const psiAxisValue = axis.psi;
+				double const psiBoundaryValue = solver->psiBoundary();
+				if ( !toroidalCoefficients.empty() && toroidalDriven
+				     && psiAxisValue != psiBoundaryValue )
+				{
+					std::vector<double> const gSquared = toroidalCoefficients;
+					auto atSourcePsi = [ gSquared ]( double sourcePsi )
+					{
+						double value = 0.0;
+						for ( std::size_t j = gSquared.size(); j-- > 0; )
+							value = value*sourcePsi + gSquared[ j ];
+						return value;
+					};
+
+					/*
+					 * g^2 MUST BE POSITIVE ACROSS THE RANGE THE COLUMN WILL BE
+					 * EVALUATED AT, and nothing guarantees it: g^2 is a fitted
+					 * polynomial, so a poorly determined high degree can dip
+					 * below zero inside the cut while every coefficient looks
+					 * ordinary. sqrt() of that is a NaN in a file whose only
+					 * per-node mask is about the band, so the column would be
+					 * unreadable in a way nothing announces.
+					 *
+					 * Checked over the source's Psi on the family's own cut,
+					 * which is 1 - [ innerCut, outerCut ] reversed. A failure
+					 * leaves the variable ABSENT -- the same signal as a
+					 * prescribed-field run -- and says so on stdout, because
+					 * absent-and-explained is better than present-and-NaN.
+					 */
+					double const fromPsi = 1.0 - options.outerCut;
+					double const toPsi = 1.0 - options.innerCut;
+					bool positive = true;
+					for ( int sample = 0; sample <= 64; ++sample )
+					{
+						double const at = fromPsi
+							+ ( toPsi - fromPsi )*sample/64.0;
+						if ( !( atSourcePsi( at ) > 0.0 ) )
+							positive = false;
+					}
+
+					if ( positive )
+						options.toroidalField =
+							[ atSourcePsi, psiAxisValue, psiBoundaryValue ]
+							( double psi )
+							{
+								return std::sqrt( atSourcePsi(
+									( psi - psiBoundaryValue )
+									/( psiAxisValue - psiBoundaryValue ) ) );
+							};
+					else
+						std::printf(
+							"MEQ: warning: the fitted g^2 is not positive across\n"
+							"     Psi in [ %.3f, %.3f ], so g = sqrt( g^2 ) is\n"
+							"     not real there and the safety factor is left\n"
+							"     OUT of %s rather than written as NaN. The g^2\n"
+							"     coefficients are still in the file; a lower\n"
+							"     [ source ] SafetyFactorDegree is the usual cure.\n",
+							fromPsi, toPsi,
+							output.getFluxSurfaceFile().c_str() );
+				}
+
 				meq::FluxSurfaceFamily const family = meq::extractFluxSurfaces(
 					tracer, axis, solver->psiBoundary(), options );
 
@@ -5083,6 +5167,33 @@ int main( int argc, char **argv )
 				surfaces.attribute( "band_extension",
 				                    gammaHMarker && path ? "transfer lift"
 				                                         : "none (fitted)" );
+
+				/*
+				 * AND THE SAFETY FACTOR COLUMN SAYS WHERE ITS g CAME FROM.
+				 *
+				 * `safety_factor` is `V' g < R^-2 >/4 pi^2`, so it is only as
+				 * good as `g`, and on this route `g` is a FITTED polynomial
+				 * that the run solved for rather than anything given. A reader
+				 * differencing two files has to be able to tell that apart from
+				 * a prescribed field, which is what these three say -- the same
+				 * three the ( R, Z ) grid carries, for the same reason.
+				 */
+				if ( !toroidalCoefficients.empty() && toroidalDriven )
+				{
+					std::ostringstream fitted;
+					fitted.setf( std::ios::scientific );
+					fitted.precision( 10 );
+					for ( std::size_t i = 0;
+					      i < toroidalCoefficients.size(); ++i )
+						fitted << ( i == 0 ? "" : " " )
+						       << toroidalCoefficients[ i ];
+
+					surfaces.attribute( "toroidal_field_driven", 1 );
+					surfaces.attribute( "g_squared_coefficients", fitted.str() );
+					surfaces.attribute( "safety_factor_target",
+					                    config->getSource().getMHD()
+					                        .safetyFactorFile );
+				}
 				surfaces.close();
 
 				wroteFluxSurfaces = true;

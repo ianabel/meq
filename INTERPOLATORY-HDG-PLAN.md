@@ -772,6 +772,36 @@ only**, which is a sensible place to stop anyway and is where §8's stages stop.
 * **No NPC change** — but see §9.1, which is a testing gap rather than a code
   gap.
 
+### 7.4 Two questions carried in from the placement decision
+
+**The placement question itself is closed**: it was whether CCSZ-I's machinery
+belongs in MFEM or in MEQ, the answer was *split, with the element-local algebra
+upstream*, the two asks were filed, and **upstream built them** —
+`HDGInterpolatoryReactionIntegrator`, `HDGPostprocessBlocks` and
+`DarcyHybridization::Bg_data` are the `(1,0)` gradient block and the exposed
+`B11`/`B12` that were asked for. That is why this plan opens by saying MFEM has
+already built this. Two of that decision's open questions are **not** answered
+by its being closed, and they are recorded here rather than lost:
+
+* **Which `ℓ` in paper I's Remark 2.2?** The postprocessing's multiplier may be
+  any `ℓ = 0, …, k−1`. `ℓ = 0` is the paper's choice and is what makes `B12`
+  rank one (§1.4); `ℓ = k−1` matches `u*` to `u_h`'s lower moments and may
+  behave better where `F` varies strongly **inside** an element, which for MEQ
+  is the plasma edge and is exactly §5.2's risk. The analysis covers all of
+  them and **MFEM's `HDGPostprocessBlocks` fixes one**, so the question is
+  first *which one it fixes* and only then whether MEQ wants another. Unmeasured
+  either way; it is the one genuine dial in the method.
+* **Is `HDGPotentialPostprocessor` reentrant enough to run inside `MultNL`'s
+  threaded element loop?** `postprocess_hdg.cpp` calls
+  `mesh->GetElementTransformation( z )` — the **shared-scratch** overload
+  `CLAUDE.md`'s *Traps* records as a silent wrong answer under threading, and
+  which MEQ has already had to fix at six of its own call sites. It is correct
+  where it is used today, which is a serial post-processing call once per solve.
+  **A residual evaluation is not that**: this method puts the postprocessing
+  inside the element loop, under `AssemblyMode::Threaded`, which is the default.
+  This is a **requirement on the new path**, not a defect in the existing one,
+  and it wants checking before IH-2 rather than after.
+
 ---
 
 ## 8. The stages

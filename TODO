@@ -348,6 +348,81 @@ derivation.
 
   Nothing else that stood here is worth keeping; git has the working.
 ================================================================================
+Report q( Psi ) in the flux-surface output -- (a) DONE, (b) open
+Raised 2026-09-19, by closing INVERSION-PLAN.md rather than by using the code.
+Part (a) closed the same day.
+================================================================================
+
+  (a) IS DONE. apps/meq.cpp sets FluxFamilyOptions::toroidalField from
+  toroidalCoefficients on the driven path, examples/q-driven.toml carries
+  [ output ] FluxSurfaces = true, and the surfaces file now has a
+  safety_factor column plus toroidal_field_driven, g_squared_coefficients and
+  safety_factor_target so a reader can tell a SOLVED g from a supplied one.
+  Measured: the reported q matches the target table to 5.2e-07 over all 24
+  surfaces. DriverAcceptance::theQDrivenRunReportsTheSafetyFactorItReached is
+  the acceptance, and it shares one run with
+  theDriverSolvesForTheToroidalField because the two are halves of one round
+  trip and the run is forty seconds.
+
+  TWO GUARDS CAME WITH IT AND NEITHER IS DECORATION. g^2 is a FITTED
+  polynomial, so a poorly determined degree can dip below zero inside the cut
+  while every coefficient looks ordinary; sqrt() of that is a NaN in a file
+  whose only per-node mask is about the band, so positivity is checked across
+  the family's own range first and a failure leaves the variable ABSENT and
+  says so on stdout. And the test asserts the column is not flat, because a
+  lambda ignoring its argument writes one repeated value that would pass a
+  tolerance against a slowly varying target.
+
+  (b) IS STILL OPEN and is the schema half; see the bottom of this entry.
+
+  WHAT THE PROBLEM WAS.
+
+  MEQ COMPUTES THE SAFETY FACTOR AND NEVER WRITES IT DOWN. FluxSurface::
+  safetyFactor is computed, SurfaceAverages::safetyFactor() is RoPP (142), and
+  Output.cpp carries a `safety_factor` column -- gated on
+  FluxSurfaceFamily::safetyFactorAvailable, which is
+  static_cast<bool>( options.toroidalField ). apps/meq.cpp sets
+  options.toroidalField at NEITHER extraction site, so no run ever writes it.
+
+  THE REFUSAL IS RIGHT FOR A PRESCRIBED-FIELD RUN AND MISSING FOR A DRIVEN ONE.
+  A meq::Source carries g g' and not g, so g = sqrt( g_edge^2 + 2 int g g' dPsi )
+  needs a constant of integration that no [source] key supplies; a column of
+  zeroes would be indistinguishable from a machine with no toroidal field, and
+  the file saying nothing is the correct refusal. Output.cpp's comment says
+  exactly this and is right.
+
+  BUT [source] SafetyFactorFile SOLVES FOR THE COEFFICIENTS OF g^2 AND
+  apps/meq.cpp HOLDS THEM. `toroidalCoefficients` is declared in main() and is
+  in scope at the surfaces writer -- it is already printed to the .nc as
+  coefficients. So the one run type whose entire purpose is to reach a target q
+  is the one that cannot show the q it reached, and a user has to take the round
+  trip on faith or recompute V' g < R^-2 > / 4 pi^2 by hand.
+
+  TWO PIECES, DIFFERENT SIZES.
+
+  (a) DONE. THE DRIVEN PATH, small. Set options.toroidalField from
+      toroidalCoefficients. THE TRAP IS THE ARGUMENT: extractFluxSurfaces calls
+      it with the RAW psi -- FluxExtraction.cpp passes `level` -- while the
+      coefficients are against Psi_N, so the lambda has to normalise by
+      ( psi - psi_bnd )/( psi_ax - psi_bnd ) or it silently evaluates the
+      polynomial at the wrong argument and reports a plausible wrong q.
+      The acceptance writes itself and is a round trip with a KNOWN answer:
+      examples/q-driven.toml's recovered safety_factor column against the
+      target table the run was given.
+
+  (b) OPEN. A VACUUM FIELD KEY, larger, and it is a schema question rather
+      than a wiring one. One [source] key carrying R0 B0 would make q reportable on
+      every machine case in the tree, which is the most asked-for profile an
+      equilibrium code produces. It is NOT free: a key that is wrong gives a
+      plausible q and nothing complains, so it wants the refusal-rather-than-
+      default treatment Config.cpp already gives GGPrimeFile against
+      SafetyFactorFile.
+
+  THIS WAS A GAP AND NOT A DEFECT. Nothing computed a wrong number; a correct
+  number was withheld, by a rule that is right in one case and was never
+  revisited for the other. That rule still holds for (b): a prescribed-field
+  run has no g and its file correctly says so by having no variable.
+
 Anisotropic pressure
 Raised 2026-08-25.
 ================================================================================
@@ -679,14 +754,43 @@ accuracy and not for patience.
      0.069 s serial at k = 3), because a team of one thread gets no suppression;
      apps/meq.cpp warns about exactly that combination at startup.
 
-  2. PROFILE THE INSIDE OF A NEWTON SOLVE. tests/performance/ measures the
-     assembly-versus-trace-solve split across two thread axes and four sizes, so
-     "nothing has ever been profiled" is no longer true at that granularity.
-     What is missing is the breakdown WITHIN a solve -- residual against
-     gradient against recovery -- and the reconstruction. perf, or
-     MFEM_USE_CALIPER.
+  2. DONE. PROFILE THE INSIDE OF A NEWTON SOLVE. It asked for the breakdown
+     WITHIN a solve -- residual against gradient against recovery -- and the
+     reconstruction, and all of it exists twice over.
 
-  3. ELEMENT-LOCAL PARALLELISM, WHICH IS UPSTREAM'S.
+     tests/performance/NewtonStepProfile.cpp plus newton-step-profile.sh splits
+     a STEP into legs by call site, with `other` left as an explicit remainder
+     so nothing the legs miss inflates one of them, and it takes MEDIANS where
+     the other harnesses take a best-of, because a leg SHARE and a minimum wall
+     time want different statistics. GradShafranovSolver::StepProfile is the
+     accessor and is always on. M-80 is the published table, down to a
+     sub-split of the gradient leg -- ComputeH() is 68-73% of it on every row,
+     the stablest number in either table.
+
+     And `meq --profile` does the same for a WHOLE RUN rather than a step,
+     which is what M-126 and M-128 are, and which is what THREADING-PLAN.md was
+     sized against. Neither perf nor MFEM_USE_CALIPER was needed.
+
+  3. DONE UPSTREAM, AND NOT YET IN THE LIBRARY MEQ LINKS.
+     HDG-ELEMENT-LOCAL-PARALLELISM.md now records every element-local loop in
+     DarcyHybridization as threaded -- ComputeH, InvertA, InvertD, MultNL,
+     ComputeSolution, EliminateVDofsInRHS, EliminateTrueDofsInRHS, ReduceRHS,
+     and the two MEQ asked for, NPCReduce and NPCRecover, at 4.35x on eight
+     threads bit for bit. GetNPCTraversalTime is in ../mfem-hdg-dev and NOT in
+     ../mfem/install, so it costs a meq-integration rebuild to reach MEQ.
+
+     TWO CORRECTIONS THIS ENTRY CARRIED AND SHOULD NOT. InvertA and InvertD are
+     NOT OpenMP loops; the threaded route beside them is the BATCHED one, which
+     needs LocalFactorMode::Batched and a device backend, and on the host
+     mfem::forall is serial -- asking for it takes ComputeH from 0.418 s to
+     1.075 s and it stops scaling. And the "under 6% of the step" verdict that
+     made this item look small was measured on four fixed-boundary
+     single-right-hand-side cases; a BORDERED Newton inverts the ratio, and MEQ
+     measured the same two legs at 30.6% of its step, M-126.
+
+     THE ORIGINAL ENTRY FOLLOWS, for the reading of the mechanism in it.
+
+     ELEMENT-LOCAL PARALLELISM, WHICH IS UPSTREAM'S.
      ../mfem-hdg-dev/doc/HDG-ELEMENT-LOCAL-PARALLELISM.md maps all twelve
      sequential element loops in darcyhybridization.cpp, separates the two
      hazards -- loop-hoisted scratch, which is easy, from write conflicts on

@@ -28,6 +28,42 @@ scale on a physical argument rather than on `r·h`.
 
 ---
 
+## STATUS: BS-0 IS RUN AND ITS GATE FIRES BOTH WAYS
+
+→ **[M-117](MEASUREMENTS.md#m-117)**. The instrument gaps §0.2 names are closed:
+`reportBorderSteps()` is reachable **on failure** and not only past a converged
+return, `directionFinite` is recorded and flagged per step, and the line
+search's **trial ladder** prints wherever it halved more than twice — which is
+the ratio that separates *a direction a reweighting would have taken* from *a
+direction reweighting cannot help*.
+
+**H2 IS EXCLUDED OUTRIGHT.** `directionFinite` is true on every step of all six
+exit-2 configurations, so §0.1's row that would have made this whole route moot
+does not hold and the elimination is not the defect.
+
+**H1 AND H3 SPLIT THE SIX, WHICH IS WHY THE GATE POINTS TWO WAYS AT ONCE.**
+Three cases are **X-point excursions** — TCV's null travels 1.6 m in `z` from
+its seed and E's flips sign in one step — which is H3 and makes **BS-5 the
+plan** for them, exactly as §7's gate says. The other three are step failures
+with a finite direction, which is H1.
+
+**AND §1.3's CENTRAL CLAIM IS MEASURED AND IS STRONGER THAN THE DOCUMENT PUT
+IT.** M-117 reads the merit's composition off the same traces: on C MAST the
+border dominates, `g·axis` **0.75** of a merit of 0.843, while on D TCV the
+field does, `g·axis` −1.31e-04 against a `‖R‖` of **2.953**. **The border's
+share of the merit is three orders of magnitude apart between two machines in
+one benchmark**, so there is no single `gamma` that can be right for both — and
+that unifies M-113's inversion, M-114's local optimum and `BorderMeritWeight`'s
+one-sided saturation, all three of which were taken on **one** machine at one
+end of that range.
+
+**WHAT HAS SINCE MOVED THE CASES IS NOT A RULER.** `setBorderRegularisation()`
+removes the singular-Jacobian throw (**[M-123](MEASUREMENTS.md#m-123)**) and an
+initial guess spreading `I_p` over an **ellipse** converges MAST-U from its own
+file (**[M-124](MEASUREMENTS.md#m-124)**), **necessary together and neither
+sufficient**. So BS-1 to BS-4 are unstarted and are no longer the first thing to
+reach for; BS-5, which this plan makes conditional, is the stage M-117 selects.
+
 ## 0. BS-0 — THE GATE, AND THE INSTRUMENT IS ALREADY BUILT
 
 Put first because it decides whether anything below is the right repair, and
@@ -638,7 +674,7 @@ machine.
 Stages are BS-0 to BS-6, not colliding with BG-*, FB-*, XP-*, IN-* or PE-*. Each
 ends in a **measured** acceptance and names its file.
 
-### BS-0 — Print the border decomposition, and classify the failure
+### BS-0 — Print the border decomposition, and classify the failure — **DONE, M-117**
 
 **Do.** Make the printer at `apps/meq.cpp:3744-3774` reachable from the
 bordered failure path — it is unreachable past the `return SolveFailed` at
@@ -748,7 +784,7 @@ summary from BS-0's printer, refusing `absent` as well as `bad` per M-103's own
 harness note. **The number that decides the route is how many of the six exit-2
 configurations close with a located O-point.**
 
-### BS-5 — The X-point relocation, conditional on BS-0 finding H3
+### BS-5 — The X-point relocation, conditional on BS-0 finding H3 — **SELECTED: M-117 finds H3 on three of six**
 
 **Do.** Only if BS-0 says the X-point jumps. `refreshXPoint()` already rejects a
 trial that carries the point out of the mesh; the change is to reject one that

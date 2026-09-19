@@ -8,9 +8,22 @@ tried.
 **THE LADDER IS FINISHED AND §7's TABLE IS THE PER-STAGE STATE.** FB-A, FB-0,
 FB-1, FB-2, FB-3, FB-5 and FB-7 are built and measured, FB-4 is answered — the
 order is capped by the profile, so no cut rule was built — and FB-6 is met
-against `../freegs4e`. **What is still a plan is §10**, the diverted plasma, of
-which XP-1 and XP-0 are done and XP-2 is the next rung; and, beside the ladder,
-the conductor model of §7.20's *What is left*.
+against `../freegs4e`.
+
+**AND §10 IS FINISHED TOO: XP-0, XP-1, XP-2, XP-3 AND XP-4 ARE ALL MET**, so
+the diverted plasma is no longer a plan — §10.6's table is its record.
+`examples/diverted-tokamak-xpoint.toml` runs through the driver against
+freegs4e's `A_testtokamak_classic` with **neither code told where the null is**,
+4.4e-04 m apart → **[M-87](MEASUREMENTS.md#m-87)**, on top of XP-2's outer fixed
+point (**[M-82](MEASUREMENTS.md#m-82)**) and XP-3's three-row border
+(**[M-86](MEASUREMENTS.md#m-86)**).
+
+**SO WHAT IS LEFT OF THIS FILE IS ONE THING AND IT HAS ITS OWN PLAN.** §7.20's
+*What is left* is the conductor model — MEQ's rectangles against the reference's
+filaments — and that is now `COIL-SUBTRACTION-PLAN.md`, whose CS-0 **measures**
+what §7.20 could only infer: the global irreducible benchmark error **is** the
+conductor model, 6.081e-03 against M-111's 5.785e-03, a factor of 1.05. Read
+that file rather than restarting here.
 
 `CLAUDE.md` is the operational record and is authoritative on anything already
 measured; `ROADMAP.md` is the order of work. `docs/` is the manual and carries the stage-7

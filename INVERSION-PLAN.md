@@ -5,16 +5,113 @@ Written 2026-09-02, after a literature survey whose references are indexed in
 and is authoritative on anything technical; `ROADMAP.md` is the priority order.
 This file is the design for one item.
 
-**EVERY STAGE IS DONE AND GREEN** — IN-A, IN-0, IN-1, IN-2, IN-3, IN-4, IN-5,
-IN-6 and IN-P. **IN-5 was deferred with free boundary and is no longer**: free
-boundary now solves, so a level outside `psi_bnd` is a thing MEQ can produce and
-an open surface is a thing it can be asked for. So §§2–6 are the
-design the code was built from and the arguments it was built on — several of
-which the measurement then falsified, which is why they are still here — and §7
-is what each stage found. **Section numbers are load bearing**: `src/meq` and
-`tests/` cite §2, §3.2, §3.3, §3.4, §4.1, §4.3, §4.4, §5, §6 and §11 by number,
-§4.4 cites §4.3, §4.3 cites §8.2, and `CLAUDE.md` cites §5 and §11. Do not
-renumber without a `grep -rn`.
+**THIS IS A CLOSED CAMPAIGN AND THE FILE IS NOW ITS DESIGN RECORD, NOT A PLAN.**
+Nothing here is scheduled and nothing here is waiting. **EVERY STAGE IS DONE AND
+GREEN** — IN-A, IN-0, IN-1, IN-2, IN-3, IN-4, IN-5, IN-6 and IN-P — and the ten
+acceptance tests that carry them pass together: `CriticalPointConvergence`,
+`FluxSurfaceConvergence`, `FluxGridConvergence`, `SurfaceAverageConvergence`,
+`SurfaceFitConvergence`, `OpenSurfaces`, `SafetyFactorSolver`, `ZernikeTests`,
+`FluxFamilyTests` and `SafetyFactorTests`, **10 of 10 in 112 s**. IN-5 was
+deferred with free boundary and is no longer: free boundary solves, so a level
+outside `psi_bnd` is a thing MEQ can produce and an open surface is a thing it
+can be asked for.
+
+**IT IS KEPT RATHER THAN CONVERTED, AND THE REASON IS NOT SENTIMENT.** The rule
+`ROADMAP.md` records is that a plan with nothing left in it becomes
+documentation — `DRIVER-PLAN.md` and `FLOW-PLAN.md` went that way. The
+user-facing half of this one **already** went: `docs/flux_surfaces.rst`,
+`docs/surface_geometry.rst` and `docs/normalised_flux.rst` are the manual, and
+`CLAUDE_INVERSION.md` is the maintainer's record. What is left here is the
+**derivation and the rejected alternatives**, and `src/meq`, `tests/` and
+`apps/` cite it by section and stage number at **125 sites across 32 files**.
+Deleting it would dangle every one of them. So: read §§2–6 for why the code is
+shaped as it is, and §7 for what each stage found that this document did not
+predict.
+
+**WHAT WAS STILL OWED WAS ONE THING AND IT IS NOW HALF CLOSED.** The driver
+could not report `q` at all; on the `q`-driven route it now does, to **4.5e-07**
+of the target → **[M-131](MEASUREMENTS.md#m-131)**. What is left is a schema
+question rather than a wiring one — see *The one thing this campaign did not
+finish* below.
+
+**Section numbers are load bearing**: `src/meq` and `tests/` cite §2, §3.2,
+§3.3, §3.4, §4.1, §4.3, §4.4, §5, §6 and §11 by number, §4.4 cites §4.3, §4.3
+cites §8.2, and `CLAUDE.md` cites §5 and §11. Do not renumber without a
+`grep -rn`.
+
+## The one thing this campaign did not finish
+
+**THE DRIVEN HALF IS DONE** → **[M-131](MEASUREMENTS.md#m-131)**.
+`apps/meq.cpp` sets `FluxFamilyOptions::toroidalField` from the coefficients the
+outer Newton solved for, `examples/q-driven.toml` carries
+`[output] FluxSurfaces`, and the surfaces file now has a `safety_factor` column
+beside `toroidal_field_driven`, `g_squared_coefficients` and
+`safety_factor_target` — so a reader can tell a **solved** `g` from a supplied
+one. The reported `q` is the target to **4.5e-07** over all 24 surfaces, which
+is an order better than the same run's `g` because the target was measured on
+this mesh. `DriverAcceptance::theQDrivenRunReportsTheSafetyFactorItReached`.
+
+**The reflection was the hazard and it is now pinned from both ends.** The
+callback receives the **raw** `ψ` and the coefficients are in the **source's**
+`Ψ`; `examples/q-driven-q.dat`'s header already recorded the identical trap on
+the way *in*. Two guards came with it: `g²` is checked positive across the
+family's range before the callback is installed — a fitted polynomial can dip
+below zero inside the cut with every coefficient looking ordinary, and `sqrt` of
+that is a NaN in a file with no mask for it — and the acceptance asserts the
+column is not flat, which is what a lambda ignoring its argument would write.
+
+**WHAT IS LEFT IS THE SCHEMA QUESTION AND IT IS DELIBERATELY NOT TAKEN.** A
+*prescribed*-field run still reports no `q`, and that refusal is still correct:
+see below for why. Giving it one means a new `[source]` key carrying the vacuum
+`R₀B₀`, and a key that is wrong produces a plausible `q` that nothing
+contradicts — so it wants the refusal-rather-than-default treatment
+`Config.cpp` already gives `GGPrimeFile` against `SafetyFactorFile`, and it is a
+decision about the schema rather than a wiring job.
+
+**THE ORIGINAL FINDING FOLLOWS, because the shape of it is the transferable
+part: a rule that is right in one case, never revisited for the other, and
+holding back a number the code had already computed.**
+
+**MEQ COMPUTES THE SAFETY FACTOR AND NEVER WRITES IT DOWN.**
+`FluxSurface::safetyFactor` exists, `SurfaceAverages::safetyFactor()` computes
+RoPP (142), and `Output.cpp` has a `safety_factor` column ready to write — gated
+on `FluxSurfaceFamily::safetyFactorAvailable`, which is
+`static_cast<bool>( options.toroidalField )`. **`apps/meq.cpp` never sets
+`options.toroidalField`, at either extraction site**, so the column is never
+written by any run.
+
+**The reason given is correct and no longer complete.** The comment at the
+surfaces writer says *"NO g( psi ), SO NO SAFETY FACTOR COLUMN … a meq::Source
+carries g g' and not g"*, and that is exactly right for a prescribed-field run:
+`g = sqrt( g_edge² + 2∫ gg' dΨ )` needs a constant of integration that no
+`[source]` key supplies. Writing zeroes would be indistinguishable from a
+machine with no toroidal field, so the file saying nothing is the right refusal.
+
+**But the `q`-driven run has `g` in hand and still does not report `q`**, and
+that is the part that is simply missing. `[source] SafetyFactorFile` carries
+`ToroidalFieldGuess`, the outer loop solves for the coefficients of `g²` against
+`Ψ`, and `apps/meq.cpp` holds them in `toroidalCoefficients` — in scope at the
+surfaces writer, and already written to the `.nc` as coefficients. **So the one
+run whose entire purpose is to hit a target `q` is the one run that cannot show
+you the `q` it reached.** A user has to take the round trip on faith, or
+recompute `V′ g ⟨r^{-2}⟩/4π²` by hand from columns the file does carry.
+
+Two things follow and they are different sizes:
+
+* ~~**Small, and it closes the loop**: on the driven path, set
+  `options.toroidalField` from `toroidalCoefficients`, remembering that
+  `extractFluxSurfaces` calls it with the **raw** `psi` (`FluxExtraction.cpp:229`
+  passes `level`) while the coefficients are against `Ψ_N`.~~ **DONE**, M-131.
+* **Larger, and it is a schema question**: a prescribed-field run could report
+  `q` too, given a vacuum `R₀B₀`. That is one new `[source]` key and it would
+  make `q` available on every machine case in the tree, which is the single most
+  asked-for profile an equilibrium code produces. It is **not** free — a key
+  that is wrong gives a plausible `q` and nothing complains — so it wants the
+  usual refusal-rather-than-default treatment.
+
+**This is recorded as a gap and not as a defect.** Nothing computes a wrong
+number; a correct number is withheld, by a rule that is right in one case and
+was never revisited for the other.
 
 **The problem.** MEQ solves for `ψ` on a mesh. Almost everything downstream
 wants the inverse: the flux surfaces themselves, as curves parametrised by a
@@ -1025,6 +1122,16 @@ from the axis (§3.4) is kept as the second extraction; **§3.3's implicit
 quadrature — a rule on the level set with no curve extracted at all — is the
 missing third leg** and is deliberately not built.
 
+**AND IT IS NOW DECLINED RATHER THAN OUTSTANDING**, so nobody reads it as work
+waiting. Two measurements close it. IN-P puts the quadrature at **1.8%** of the
+extraction chain against `gaugeFreeFit`'s 84.6%, so an implicit rule saves
+essentially nothing on the leg it replaces; and two independent extractions
+already disagree by less than the discretisation — the ray-bisection control
+agrees with the tracer, and the displaced-origin check moves `V′` by
+**3.6e-10**. A third route would be a third implementation to maintain in
+exchange for a check the second one already passes. If a reason to build it ever
+appears it will be a geometry the tracer cannot close, not a cost.
+
 **The fixture needed its own box.** `standardBox()` cannot hold these surfaces —
 `Ψ_N = 0.25` on `nstx()` already spans `r ∈ [0.99, 1.57]` against a box ending at
 1.4 — so the study runs on `[0.60, 1.90] × [-1.10, 1.10]`. And `Ψ_N = 0.75` is
@@ -1330,6 +1437,12 @@ breakpoint.
 
 ## 8. Risks, in likely-to-bite order
 
+**1 TO 3 ARE CLOSED AND 4 TO 7 ARE STANDING WARNINGS ABOUT USING THE
+MACHINERY, NOT WORK ITEMS.** The distinction matters now the campaign is
+finished: none of 4–7 is a thing to go and do, and each is a thing that will
+bite somebody who changes a parameter or points the tracer at a new geometry.
+They stay for exactly as long as the code does.
+
 1. ~~**The metric trap of §3.2.**~~ **Met, measured and now a live control.** A
    spectral rule fed a differenced Jacobian is silently second order — IN-1 reads
    7.03 against 1.97 on the same trapezoid over the same points, and IN-2's
@@ -1402,6 +1515,55 @@ MEQ is the only code in either survey with `q` in hand.
 ---
 
 ## 11. Performance, and where the parallelism is
+
+**THIS SECTION HAS BEEN MEASURED AND ITS COST MODEL IS WRONG. READ
+`CLAUDE_INVERSION.md`'s *IN-P* FIRST.** What follows is kept because it is the
+reasoning the harness was built to test, and because being wrong about where
+time goes is the most common way to optimise nothing.
+
+**IT PUTS THE WEIGHT ON THE TRACER'S PER-POINT CORRECTOR AND THE CORRECTOR IS
+NOT THE PROBLEM.** 97.3% of accepted points take **exactly two** corrector
+iterations, mean 1.994, worst 3, with `stalledCorrections` and
+`fallbackLocations` both zero on every trace. Measured at `k = 2`, `n = 48`,
+12 surfaces × 48 angles, serial:
+
+| leg | share |
+|---|---|
+| **`gaugeFreeFit`** | **84.6%** |
+| `trace` | 11.2% |
+| `fitByAngle` | 1.8% |
+| `surfaceAverages` | 1.8% |
+| the linear `SurfaceFit` | 0.6% |
+| `findAxis` | 0.01% |
+
+**`gaugeFreeFit` IS 85% OF THE CHAIN AND THIS SECTION DOES NOT MENTION IT** —
+it was written before IN-4 existed. Inside it, 82.5% is field evaluation, so
+**about 70% of the whole chain is `ContourTracer::sampleAt`** and the linear
+algebra is nowhere near the cost. What §11 got right is that the quadrature
+would not be where the time is: it is 1.8%.
+
+**And the largest lever turned out to be one integer.** `sampleAt` decomposes as
+26% walk, 0.9% evaluation and **73% `Mesh::FindPoints`** — the last-resort
+fallback, taken on 184 of 576 points because four rings of *face* neighbours
+reach about four triangles in a straight line while consecutive ray nodes are
+one to two cells apart. `setWalkDepth()`, answers bit-identical at every depth
+→ **[M-49](MEASUREMENTS.md#m-49)**.
+
+**Two more facts §11 would not have predicted.** Extraction cost is
+**independent of `k`** — 0.140, 0.141, 0.140 s at `k = 1, 2, 3` — and grows like
+`1/h`, because the step ceiling is a fraction of the element size. And in the
+angle count it is **not monotone**: 0.048 s at 24 angles against 0.023 s at 192,
+because closer spacing makes the element walk hit instead of missing. *More work
+can be less time when the work is a search.*
+
+**What the section below still gets right and is still owed** is the consumer's
+call pattern: `MANTA-COUPLING.md` §5's `Geometry` is pointwise, per node per
+residual, and the per-`ψ` cache and its invalidation contract are a requirement
+rather than an aside. That, and `dGeometry_dpsi`'s factor of `nFieldDOF`,
+survive every measurement above and are the reason the MaNTA coupling is a
+separate item.
+
+**The original reasoning follows.**
 
 **NOTHING IN THIS ITEM HAS BEEN TIMED, AND THAT IS THE FIRST THING TO SAY.**
 Every number in §7 is an accuracy measurement. The only cost datum in existence

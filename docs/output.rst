@@ -377,10 +377,19 @@ the same convention the gridded format uses:
        :math:`\langle |\nabla\rho|^2 \rangle` are, times the analytic
        :math:`\mathrm{d}\rho/\mathrm{d}\psi`.
    * - ``safety_factor(flux)``
-     - :math:`V' g \langle R^{-2}\rangle / 4\pi^2`. **Present only when a
-       caller supplied** :math:`g(\psi) = R B_\phi`; a ``meq::Source`` carries
-       :math:`g g'` and not :math:`g`, so the driver writes no such column and
-       the variable is absent rather than zero.
+     - :math:`V' g \langle R^{-2}\rangle / 4\pi^2`. **Present only when
+       :math:`g(\psi) = R B_\phi` is known**, which on the driver is exactly
+       the :math:`q`-driven route: a ``meq::Source`` carries :math:`g g'` and
+       not :math:`g`, so recovering
+       :math:`g = \sqrt{g_{\text{edge}}^2 + 2\int g g'\,\mathrm{d}\Psi}`
+       from a *prescribed* field needs a constant of integration no key
+       supplies, and there the variable is **absent rather than zero** —
+       because zero is a real machine. Under ``[source] SafetyFactorFile`` the
+       outer Newton solves for the coefficients of :math:`g^2` itself, so the
+       column is written and the run can be checked against the target it was
+       given. The file then also carries ``toroidal_field_driven``,
+       ``g_squared_coefficients`` and ``safety_factor_target``, so a reader can
+       tell a solved :math:`g` from a supplied one.
    * - ``band(flux)``, ``worst_residual(flux)``, ``transversality(flux)``
      - Per-surface diagnostics: whether any node is band data, the worst
        :math:`|\psi_h - c|` over the surface, and how close a ray came to being
