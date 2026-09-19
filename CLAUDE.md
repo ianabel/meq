@@ -501,6 +501,38 @@ zero potential are *different links of one chain*, so a fix for either leaves a
 symptom standing, and upstream's own new regression asserts on the iteration
 count. A library-side test cannot see a caller's aliases.
 
+### `AssemblyMode::Threaded` is now a PROMISE MEQ makes, and it is load bearing
+
+**MFEM REFUSES THREADED ASSEMBLY ON ANY PROBLEM WHOSE THREADED ELEMENT LOOP
+WOULD EVALUATE AN INTEGRATOR, AND MEQ IS SUCH A PROBLEM.** `MultNL()` aborts,
+naming `SetAssemblyMode()`, because the library can see exactly *which*
+integrator objects it will call and nothing whatever about whether they are
+reentrant — MFEM's convention is `#ifndef MFEM_THREAD_SAFE` around the scratch,
+which is a **build switch** rather than a property of the class, and 67 of the
+99 scratch-carrying classes do not use it at all.
+`DarcyHybridization::SetIntegratorsThreadSafe()` is where a caller who has read
+their integrators says so. Off by default, because the default decides what
+happens to a caller who has not read any of this.
+
+**MEQ CALLS IT, IN `buildForms()` BESIDE `SetAssemblyMode()`, AND THE AUDIT IS
+THE JUSTIFICATION.** Two sets are covered, because
+`DarcyForm::CanThreadAssembly()` gates the assembly element loops on the same
+flag and those loops exist to evaluate the **linear** domain integrators:
+`meq::SourceIntegrator` — MEQ's own, whose per-point scratch is already under
+`#ifndef MFEM_THREAD_SAFE` and therefore does not exist in this build — and
+`VectorMassIntegrator` and `VectorDivergenceIntegrator`, which upstream guarded
+in the commit that put eight classes behind that switch. **What is not covered
+is not reached**, and that was checked rather than assumed: see the
+`HDGExtensionIntegrator` row of the upstream table above.
+
+**IT IS NOT DECORATIVE, AND THAT IS FALSIFIED RATHER THAN ARGUED.** With the one
+line commented out and nothing else changed, `machine-f-diiid` exits **2** with
+*"AssemblyMode::Threaded is unsafe for this problem: this element loop evaluates
+a nonlinear integrator per element or per face"* — on both the Newton and the
+Picard-then-Newton path. So this file's standing warning that an MFEM update
+carrying that abort would stop every threaded MEQ run was correct, and one line
+is what answers it.
+
 ### Which integrators need device offload, and why kernels alone are not enough
 
 **THE INVENTORY, TAKEN FROM THE INSTALLED HEADERS RATHER THAN REMEMBERED.** Every
@@ -741,7 +773,7 @@ product at the core count is what pays:
 
 → **[M-14](MEASUREMENTS.md#m-14)** — wall · CPU
 
-37/37 in every configuration when that table was taken, and **52 of 53 today**,
+37/37 in every configuration when that table was taken, and **53 of 54 today**,
 the one red being `PlasmaEdgeConvergence` and deliberate —
 the count moves as cases are added, so read the table's ratios rather than its
 absolute seconds. Nothing in the suite depends on a thread count, which is the
@@ -848,14 +880,17 @@ busy-wait loop of the session's own making, the next with another agent's build.
 records a 490 s / 540 s spread on identical code. Read the ratios; re-time on an
 idle machine before reading anything into a change of tens of percent.
 
-**AND IT HAS JUST GROWN BY ABOUT 16 MINUTES, WHICH IS WORTH KNOWING BEFORE
-SOMEBODY TIMES THE SUITE AND CONCLUDES SOMETHING.** FB-T's
+**AND IT HAS JUST GROWN BY 14 MINUTES, WHICH IS WORTH KNOWING BEFORE SOMEBODY
+TIMES THE SUITE AND CONCLUDES SOMETHING.** FB-T's
 `confinementWithAPrescribedCurrentIsTheFourthCell` is **forty solves** — a 2 x 2
 re-run whole with the target current swept across eight values — and it is kept
 at its full sweep deliberately, because a trimmed one would no longer reproduce
-[M-134](MEASUREMENTS.md#m-134)'s published table. `FreeBoundaryCoupling` is
-therefore the critical path by a distance now, not merely the longest test, and
-a suite time taken after this is not comparable with one taken before it.
+[M-134](MEASUREMENTS.md#m-134)'s published table. Measured on the same `-j4`
+run: `FreeBoundaryCoupling` **288.83 s → 1149.60 s**, against `naming` at
+364.44 s. **So the suite is now that one binary**, not the longest chain of
+several — the whole run reads 1149.60 s, which is `FreeBoundaryCoupling` and
+nothing else, and a suite time taken after this is not comparable with one taken
+before it.
 
 **`FreeBoundaryCoupling` overtakes the lint and it is buying
 something.** It carries FB-7's four acceptances, a coupled filament run, and
@@ -1388,7 +1423,7 @@ is not.
 | | |
 |---|---|
 | **Auxiliary globally-coupled unknowns** | `SetNumAuxiliaryUnknowns()` and the two per-element assemble hooks. **The one unbuilt piece, and no longer worth asking for**: the entry points MEQ named are public already as `NPCReduce()` and `NPCRecover()`, and `DarcyNPCSolver::ArrayMult` applies them to several right-hand sides in one pass, so a differenced border is `K` applications of a routine that blocks them. **MEQ CALLS IT** — the bordered step queues every column and flushes once, worth **1.34×** on the DIII-D solve leg at 14 columns, → **[M-98](MEASUREMENTS.md#m-98)** |
-| **`AssemblyMode::Threaded` must not be refused on `CopyLinearGradBlocks()` declining** | Upstream is adding an abort for a real hazard — 67 of 99 MFEM integrators with scratch are unguarded — keyed on a predicate that catches MEQ for an unrelated reason. MEQ is `LocalOpType::PotNL`, so the cache **always** declines, and on that branch `ConstructGrad()` skips the flux block and evaluates only `meq::SourceIntegrator`, which is MEQ's own and reentrant. **An MFEM update carrying that abort stops every threaded MEQ run.** Filed as `../mfem-hdg-dev/doc/HDG-THREADED-REFUSAL-FROM-MEQ.md`; `CLAUDE_HDGGS.md`, *Threading, measured* |
+| **`mfem::HDGExtensionIntegrator` carries unguarded scratch** | `Vector shape, shape_ext, nor, x, xbar, m, y, CTm` and two `DenseMatrix` as plain members, with no `#ifndef MFEM_THREAD_SAFE` — the only integrator MEQ installs that is not guarded, after upstream put eight classes behind that switch. **Latent, not live**: it is a boundary-face integrator, the three threaded assembly loops are domain loops, and `ReconstructFluxAndPot()` re-assembles the flux mass from `GetDBFI()` alone, so nothing threaded evaluates it today. It is on the curved and free-boundary path, which is every problem MEQ exists to solve, so the day a boundary-face loop is threaded MEQ finds out by a wrong answer rather than by an abort |
 | **`DarcyForm::ReconstructTotalFlux` de-registers a buffer it does not own** | `debug`-only, and the last link of M-130's chain. `Memory<T>::Wrap( ptr, n, own = false )` sets `h_mt = MemoryManager::GetHostMemoryType()` — `HOST_DEBUG` under a debug device — while `Memory<T>::Delete()` computes `std_delete = !registered && ( h_mt == MemoryType::HOST )`, so a non-owning, unregistered wrap calls `MemoryManager::Delete_`. `Vector b_ze( b_z.GetData() + e*nd_ut, nd_ut )` at `darcyhybridization.cpp:10164` with `e == 0` aliases `b_z`'s base pointer exactly and de-registers it; the next element's `b_z = 0.` aborts. Filed as `../mfem-hdg-dev/doc/HDG-RECONSTRUCT-TOTAL-FLUX-FROM-MEQ.md`, with the seven same-pattern sites and two candidate fixes |
 
 **AND ONE HAS CLOSED, WHICH IS THE ROW THAT USED TO SIT HERE.** Threading

@@ -4210,6 +4210,53 @@ namespace
 		                            essentialFluxTdofs );
 		darcy->GetHybridization()->SetEssentialBC( dirichletMarker );
 
+		/*
+		 * THE PROMISE THAT KEEPS THREADED ASSEMBLY LEGAL, AND IT IS A PROMISE
+		 * RATHER THAN A SETTING.
+		 *
+		 * MFEM refuses AssemblyMode::Threaded -- aborts out of MultNL(), naming
+		 * SetAssemblyMode() -- on any problem whose threaded element loop would
+		 * evaluate an integrator, because it can see WHICH objects it will call
+		 * and nothing about whether they are reentrant. Its own convention is
+		 * `#ifndef MFEM_THREAD_SAFE` around the scratch, which is a BUILD
+		 * switch rather than a property of the class, and 67 of the 99
+		 * scratch-carrying integrators do not use it at all.
+		 * SetIntegratorsThreadSafe() is where a caller who HAS read their
+		 * integrators says so. Off by default, so a caller who has not read
+		 * this gets the abort.
+		 *
+		 * MEQ MAY MAKE IT, AND THE AUDIT IS THE WHOLE JUSTIFICATION. Two sets
+		 * are covered, because DarcyForm::CanThreadAssembly() gates the
+		 * assembly element loops on this same flag and those loops exist to
+		 * evaluate the LINEAR domain integrators:
+		 *
+		 *   meq::SourceIntegrator        MEQ's own, on the potential mass
+		 *                                non-linear form. Its per-point scratch
+		 *                                is under `#ifndef MFEM_THREAD_SAFE`
+		 *                                and the installed MFEM sets it, so in
+		 *                                this build the members do not exist
+		 *   VectorMassIntegrator         flux mass, domain
+		 *   VectorDivergenceIntegrator   flux divergence, domain
+		 *
+		 * The two stock ones are guarded upstream as of the commit that put
+		 * eight classes behind `#ifndef MFEM_THREAD_SAFE`; before it,
+		 * VectorMassIntegrator also rewrote `vdim` on every call, so two
+		 * threads raced on it even after it was set.
+		 *
+		 * WHAT IS NOT COVERED IS NOT REACHED, AND THAT IS CHECKED RATHER THAN
+		 * ASSUMED. mfem::HDGExtensionIntegrator -- the curved and free-boundary
+		 * path, which is to say every problem MEQ exists to solve -- carries
+		 * `shape, shape_ext, nor, x, xbar, m, y, CTm` and two DenseMatrix as
+		 * PLAIN members with no guard. It is safe here only because nothing
+		 * threaded evaluates it: it is a boundary-face integrator, the three
+		 * threaded assembly loops are domain loops, and
+		 * DarcyForm::ReconstructFluxAndPot() re-assembles the flux mass from
+		 * GetDBFI() alone. If upstream ever threads a boundary-face loop, this
+		 * promise stops being true and MEQ finds out by a wrong answer rather
+		 * than by an abort -- so it is written down here and reported there.
+		 */
+		darcy->GetHybridization()->SetIntegratorsThreadSafe();
+
 		// Who runs the element loop. OUTSIDE the branch below, deliberately:
 		// ComputeH() factors A, forms and factors the Schur complement and does
 		// one local back-substitution per trace dof on BOTH paths, so the linear
