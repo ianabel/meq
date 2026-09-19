@@ -605,9 +605,16 @@ settable from a file. What the measurement says is which of them is worth
 having: **only `TraceAssemblyMode`**, at 7 to 9 per cent of the DIII-D solve, and
 it is now the default in a file and in the class alike.
 **`AssemblyMode::Batched` is a 15 to 27 per cent LOSS** on the host, and
-**`LocalFactorMode::Batched` is a trade that comes out flat** — it buys a batched
-local factorisation and pays the condensation cache, since
-`CanCacheCondensation()` refuses outright under it.
+**`LocalFactorMode::Batched` IS NO LONGER A TRADE** — it bought a batched local
+factorisation and paid the condensation cache, since `CanCacheCondensation()`
+refused outright under it, and upstream has since handed
+`FactorElementsBatched()` the cache's own buffer. Re-measured on the new
+library: `condensationCacheTaken()` reads **yes** on that row, and the key is now
+a small consistent gain — `ComputeH` lower in all three interleaved pairs for
+about 4% — rather than a wash. **MEQ's default stays `Serial`**, because 1% of
+the wall is inside the serial arm's own spread and is not a reason to move a
+default that has never been asserted bit-for-bit against the other route.
+→ **[M-136](MEASUREMENTS.md#m-136)**.
 → **[M-99](MEASUREMENTS.md#m-99)** and **[M-101](MEASUREMENTS.md#m-101)**.
 
 **THE ORDERED LIST, WEIGHTED BY THE LEG PROFILE RATHER THAN BY COUNT.** From
@@ -1424,7 +1431,7 @@ is not.
 |---|---|
 | **Auxiliary globally-coupled unknowns** | `SetNumAuxiliaryUnknowns()` and the two per-element assemble hooks. **The one unbuilt piece, and no longer worth asking for**: the entry points MEQ named are public already as `NPCReduce()` and `NPCRecover()`, and `DarcyNPCSolver::ArrayMult` applies them to several right-hand sides in one pass, so a differenced border is `K` applications of a routine that blocks them. **MEQ CALLS IT** — the bordered step queues every column and flushes once, worth **1.34×** on the DIII-D solve leg at 14 columns, → **[M-98](MEASUREMENTS.md#m-98)** |
 | **`mfem::HDGExtensionIntegrator` carries unguarded scratch** | `Vector shape, shape_ext, nor, x, xbar, m, y, CTm` and two `DenseMatrix` as plain members, with no `#ifndef MFEM_THREAD_SAFE` — the only integrator MEQ installs that is not guarded, after upstream put eight classes behind that switch. **Latent, not live**: it is a boundary-face integrator, the three threaded assembly loops are domain loops, and `ReconstructFluxAndPot()` re-assembles the flux mass from `GetDBFI()` alone, so nothing threaded evaluates it today. It is on the curved and free-boundary path, which is every problem MEQ exists to solve, so the day a boundary-face loop is threaded MEQ finds out by a wrong answer rather than by an abort |
-| **`DarcyForm::ReconstructTotalFlux` de-registers a buffer it does not own** | `debug`-only, and the last link of M-130's chain. `Memory<T>::Wrap( ptr, n, own = false )` sets `h_mt = MemoryManager::GetHostMemoryType()` — `HOST_DEBUG` under a debug device — while `Memory<T>::Delete()` computes `std_delete = !registered && ( h_mt == MemoryType::HOST )`, so a non-owning, unregistered wrap calls `MemoryManager::Delete_`. `Vector b_ze( b_z.GetData() + e*nd_ut, nd_ut )` at `darcyhybridization.cpp:10164` with `e == 0` aliases `b_z`'s base pointer exactly and de-registers it; the next element's `b_z = 0.` aborts. Filed as `../mfem-hdg-dev/doc/HDG-RECONSTRUCT-TOTAL-FLUX-FROM-MEQ.md`, with the seven same-pattern sites and two candidate fixes |
+| **`DarcyForm::ReconstructTotalFlux` de-registers a buffer it does not own** | `debug`-only, and the last link of M-130's chain. `Memory<T>::Wrap( ptr, n, own = false )` sets `h_mt = MemoryManager::GetHostMemoryType()` — `HOST_DEBUG` under a debug device — while `Memory<T>::Delete()` computes `std_delete = !registered && ( h_mt == MemoryType::HOST )`, so a non-owning, unregistered wrap calls `MemoryManager::Delete_`. `Vector b_ze( b_z.GetData() + e*nd_ut, nd_ut )` at `darcyhybridization.cpp:10164` with `e == 0` aliases `b_z`'s base pointer exactly and de-registers it; the next element's `b_z = 0.` aborts. Filed as `../mfem-hdg-dev/doc/HDG-RECONSTRUCT-TOTAL-FLUX-FROM-MEQ.md`, with the seven same-pattern sites and two candidate fixes. **Answered, and the fix is the first candidate** — `Memory<T>::Delete()` keyed on `flags & Registered` rather than on `h_mt`, which is right because every allocating path sets that flag and a non-owning `Wrap` therefore owns nothing to delete. The second candidate, making `Wrap` take `HOST` when `!own`, was declined for the reason MEQ gave: it moves an ownership question into a type question, which is the confusion that produced the defect. **Still open for MEQ until it is in `../mfem/install`** — the pattern is at `darcyhybridization.cpp:10462` and `:10491` in the library MEQ links today, and the code MEQ builds against is the only test of landed |
 
 **AND ONE HAS CLOSED, WHICH IS THE ROW THAT USED TO SIT HERE.** Threading
 `NPCReduce()` and `NPCRecover()` — MEQ's largest measured leg, 0.212 s at one
@@ -1440,11 +1447,28 @@ the integrator loops are `O( elements )` — the ratio inverts, and the same two
 legs that are 6% there are 30.6% here. *A share is a property of a problem, not
 of a loop.*
 
-**And it is not in the library MEQ links.** `GetNPCTraversalTime` is in
-`../mfem-hdg-dev/fem/darcy/darcyhybridization.hpp` and **not** in
-`../mfem/install/include/`, so MEQ gets none of it until `meq-integration` is
-re-created and reinstalled. This is exactly the gap the *check the install too*
-rule above exists for.
+**AND IT IS NOW IN THE LIBRARY MEQ LINKS, AND MEASURED** →
+**[M-135](MEASUREMENTS.md#m-135)**. `../mfem/install` is rebuilt from
+`meq-integration` at `3424f33bd5`, the install is verified against the branch,
+and an interleaved pair on a quiet machine — a pre-upgrade binary kept aside,
+`libmfem.a` being static, so the library is the only variable — reads the leg at
+**1.315 s at 1.00 cores against 0.503 s at 3.32 cores, 2.61×**, with every other
+leg flat within 2% and the **whole run 1.25×**. Upstream predicted 1.24× from
+MEQ's own arithmetic. `psi_ax` is `3.759851e-01` in all twelve runs.
+
+**THE PREDICTION LANDED FOR A REASON WORTH KEEPING: THE SHARE WAS RIGHT EVEN
+THOUGH THE FACTOR WAS NOT.** The leg factor here is 2.61× where upstream
+measured 4.35× on their own fixture — MEQ's traversal is twelve calls of
+fourteen columns and theirs is not — and the *run* number still came out where
+the arithmetic said, because what that arithmetic rested on was M-126's
+**share**. A leg speedup quoted from somebody else's problem does not transfer;
+a share measured on yours does.
+
+**AND IT IS A 5% LOSS AT ONE THREAD**, which a speedup table hides: 1.375 →
+1.446 s on the leg and 6.983 → 7.121 s on the run at `OMP = MKL = 1`, the
+OpenMP region and the colouring being paid for and unusable. Upstream's own
+table has the same sign at the same size. A serial deployment of MEQ is
+very slightly worse off for this change.
 
 Everything else MEQ has sent is closed. **A CLOSED REPORT NEEDS NO ENTRY HERE**:
 what it changed is in the code with a test on it, or it is a measurement under an

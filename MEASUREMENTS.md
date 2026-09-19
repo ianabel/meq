@@ -2090,7 +2090,19 @@ hybridized path cannot reach it: `DarcyForm` assembles through
 batched local factorisation and a batched flux-mass domain assembly; MEQ's enum
 carries `Serial` and `Threaded` and never calls `SetLocalFactorMode`. The
 element-local dense work this would reach is `mkl_lapack__dgetrs_` 13.4%,
-`mfem::Mult( DenseMatrix, ... )` 10.5% and `MultNL` 12.7%. CLAUDE.md's offload
+`mfem::Mult( DenseMatrix, ... )` 10.5% and `MultNL` 12.7%.
+
+**THOSE THREE PERCENTAGES ARE `perf report --children`, i.e. INCLUSIVE, AND THE
+PARAGRAPH ABOVE THEM QUOTES A *SELF* FIGURE — TWO VIEWS IN ONE ANCHOR.** *"The
+profile has no hot spot, the top entry is 8.2%"* is `--no-children`, which is
+why item 7 can carry a 13.4% that appears to exceed the stated maximum: nothing
+is wrong with either number and they are not comparable. Re-taken on the current
+library at `OMP = MKL = 8` to settle it, since upstream asked which view this
+was: the top **self** entry is **7.66%** (`mkl_blas_def_dgemm_pst`), while
+`mkl_lapack__dgetrs_` reads **self 0.89%, children 8.38%**. **An anchor that
+mixes two views of one profile is a measurement about the instrument**, and it
+is recorded here rather than silently corrected because the numbers themselves
+stand. CLAUDE.md's offload
 list already ranks it second and calls it "a smaller job than a new kernel and
 entirely in this tree".
 
@@ -5283,3 +5295,110 @@ would be asserting a known defect, which the testing stance forbids.
 
 The case is `confinementWithAPrescribedCurrentIsTheFourthCell` in
 `tests/convergence/FreeBoundaryCoupling.cpp`.
+
+### M-135
+
+**THE THREADED NPC TRAVERSAL IS WORTH 1.25× ON THE WHOLE DIII-D RUN, AND IT IS
+THE ONLY THING THAT MOVED.** [M-126](MEASUREMENTS.md#m-126) measured
+`NPCReduce()`/`NPCRecover()` at 0.212 s whether given one thread or eight and
+called it MEQ's largest single serial leg at 30.6% of a threaded step; upstream
+threaded both overloads, and `../mfem/install` is rebuilt from `meq-integration`
+at `3424f33bd5` to take it.
+
+**THE PAIR IS INTERLEAVED AND THE MACHINE WAS QUIET**, which both matter here
+and neither is decoration. A binary built before the upgrade was kept, and
+`libmfem.a` is static, so the two arms differ in the library and in **nothing
+else** — same MEQ commit, same mesh, same configuration. Runs alternate
+`before, after, before, after`: a batched pair is what caught upstream's own
+`OMP_WAIT_POLICY` figure, and this machine had three agents on it that day.
+Three pairs per thread count, medians below, `machine-f-diiid.toml`,
+`OMP_WAIT_POLICY=passive`.
+
+**`OMP = MKL = 8`:**
+
+| leg | before | cores | after | cores | |
+|---|---|---|---|---|---|
+| **NPC reduce+recover** | **1.315** | **1.00** | **0.503** | **3.32** | **2.61×** |
+| residual | 0.301 | 6.76 | 0.301 | 6.74 | flat |
+| gradient | 0.244 | 4.71 | 0.250 | 4.67 | flat |
+| of which ComputeH | 0.148 | — | 0.152 | — | flat |
+| trace factorisation | 0.224 | 3.29 | 0.225 | 3.31 | flat |
+| trace backsolve | 0.490 | 3.18 | 0.494 | 3.20 | flat |
+| border assembly | 0.113 | 2.53 | 0.110 | 2.53 | flat |
+| of which driver prepare | 0.182 | 1.01 | 0.146 | **1.30** | the threaded assembly |
+| of which postProcess | 0.616 | 1.00 | 0.620 | 1.00 | flat, and see below |
+| **solve** | **3.316** | 2.42 | **2.471** | 3.39 | **1.34×** |
+| **wall** | **4.148** | | **3.310** | | **1.25×** |
+
+**TWO THINGS MOVED, NOT ONE.** The traversal is the headline; the other is
+`driver prepare`, 0.182 → 0.146 s with its `cores` going 1.01 → 1.30, which is
+upstream's threading of `DarcyForm`'s hybridized assembly loops arriving in MEQ.
+It is small here and it is the reason MEQ has to make the thread-safety promise
+at all — those loops evaluate the **linear** domain integrators, so the promise
+is wider than the one MEQ asked for.
+
+**AND THE ONE-THREAD TAX IS REAL, WHICH IS THE HALF A SPEEDUP TABLE HIDES.**
+At `OMP = MKL = 1` the same pair reads:
+
+| | before | after | |
+|---|---|---|---|
+| NPC reduce+recover | 1.375 | 1.446 | **0.95×** |
+| wall | 6.983 | 7.121 | 0.98× |
+
+**About 5% slower on the leg and 2% on the run**, from the OpenMP region and
+the colouring that a single thread pays for and cannot use. Upstream's own
+table shows the same sign at the same size, 0.199 → 0.218 s at one thread. So
+the threaded traversal is **not free below two threads**, and a serial
+deployment of MEQ is very slightly worse off for this change.
+
+**`psi_ax = 3.759851e-01` IN ALL TWELVE RUNS**, with the X-point at
+`( 1.200929, −0.999491 )` and the constraint at `−6.466e-12`. Upstream warned to
+expect the last bits to move, since the blocked traversal reassociates; on this
+problem it did not cost even those.
+
+**UPSTREAM PREDICTED 1.24× FROM MEQ'S OWN ARITHMETIC AND THE ANSWER IS 1.25×.**
+That is the part worth keeping: the prediction was made by taking M-126's table,
+applying a measured 4.35× to one leg and leaving every other leg alone. The leg
+factor here is 2.61× rather than 4.35× — MEQ's traversal is twelve calls of
+fourteen columns and upstream's fixture is not — and the *run* figure still
+lands where the arithmetic said, because the share was right even though the
+factor was not.
+
+**WHAT IS NOW THE LARGEST SERIAL ITEM.** `postProcess` — `DarcyForm::Reconstruct()`,
+four integrators re-assembled at the enriched order per element — is **0.620 s
+of a 3.302 s run, 18.8%, at 1.00 cores**, and it did not move. With the
+traversal threaded it is the biggest single-threaded thing left in a MEQ run
+after the direct trace solve.
+
+### M-136
+
+**`LocalFactorMode::Batched` NO LONGER COSTS THE CONDENSATION CACHE, SO
+[M-101](MEASUREMENTS.md#m-101)'s TRADE IS GONE.** M-101 read that key as *"a
+trade and not a knob that does nothing — it buys a batched local factorisation
+and pays the condensation cache"*, because `CanCacheCondensation()` refused
+outright under it. Upstream has since given `FactorElementsBatched()` the
+cache's own buffer as its destination and done the same for the batched
+face-pair kernel, and told MEQ that `condensationCacheTaken()` should now report
+`yes` on that row. **It does.**
+
+`machine-f-diiid.toml`, the new library, quiet machine, `OMP = MKL = 8`,
+`OMP_WAIT_POLICY=passive`, three interleaved pairs, medians:
+
+| `LocalFactorMode` | wall | solve | gradient | ComputeH | cache taken |
+|---|---|---|---|---|---|
+| `serial` — the default | 3.454 | 2.579 | 0.264 | 0.159 | **yes** |
+| `batched` | 3.418 | 2.578 | 0.256 | **0.152** | **yes** |
+
+**IT IS NOW A SMALL CONSISTENT WIN WHERE IT WAS A WASH, AND IT IS NOT WORTH A
+DEFAULT.** `ComputeH` is lower in **all three** pairs — 0.164/0.156,
+0.159/0.152, 0.157/0.152 — for about 4%, and the gradient leg follows it at 3%.
+The wall moves 1.0%, which is **inside the serial arm's own spread** of 3.431 to
+3.511 s. So the honest statement is that the batched local factorisation now
+buys 4% of a leg that is 6% of the solve, and nothing a user would see.
+
+**MEQ'S DEFAULT STAYS `Serial`**, on the ground that a 1% wall change is not a
+reason to move a default that has never been asserted bit-for-bit against the
+other route — which is the distinction `AssemblyMode` and `TraceSolver` are held
+to under *the two performance keys* in `CLAUDE.md`. What has changed is the
+**reason**: M-101 said the key was a trade, and it is now simply a small gain
+that MEQ does not take.

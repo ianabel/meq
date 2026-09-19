@@ -48,13 +48,24 @@ for.
 `meq_core`, so MEQ's own parallelism no longer arrives by inheritance from
 MFEM's compile flags.
 
-**WHAT IS NOT DONE IS EVERY NUMBER IN THIS FILE.** §0's one `--profile` run —
-on which the `transmission` half of A and the `I_p` half of B both depend — and
-the A+B+C payoff against the pre-threading baseline, predicted `1.14×` or
-`1.106×` counting only the measured parts. Both want a quiet machine and
-neither has had one. **Until they are taken, the estimates below stay
-estimates**; the standing rule is five quiet minutes before a timed run, and a
-figure taken under another agent's build is not a measurement about this work.
+**§0's `--profile` RUN IS NOW TAKEN, ON A QUIET MACHINE, AND IT CLOSES ONE OF
+THE TWO HALVES IT WAS FOR.** `I_p` is 0.5% at 5.14 cores, so item B's second
+half is closed by measurement and the answer is that it was not worth doing.
+The `transmission` half is **not** closed and could not have been by that run:
+the leg it names is never written by any code path. §0 has the detail.
+
+**WHAT IS STILL NOT DONE IS THE PAYOFF.** The A+B+C figure against the
+pre-threading baseline — predicted `1.14×`, or `1.106×` counting only the
+measured parts — needs a MEQ binary from before item A, which this tree does not
+have lying about the way it had a pre-upgrade MFEM. **Until it is taken those
+estimates stay estimates**; the standing rule is five quiet minutes before a
+timed run, and a figure taken under another agent's build is not a measurement
+about this work. That rule earned itself again on the day §0 was taken: the
+first pair was measured while a peer's build ran, and the peer then reported
+that the job they believed they had killed had been running throughout — they
+had killed the process group of a PID `setsid` had reparented, so an empty group
+died and the launcher reported success. Both arms were binned. **`pkill` by PID
+is the same class of instrument error this file's own §0 is about.**
 
 ## 0. Read the sub-slices before doing anything
 
@@ -70,6 +81,45 @@ OMP_NUM_THREADS=8 MKL_NUM_THREADS=8 OMP_WAIT_POLICY=passive \
 
 Where this plan says *unverified*, it means that line was not read. Read it
 before sizing item A's second half or item B's second half.
+
+**THE RUN IS TAKEN AND ONE OF THE TWO LINES CANNOT EVER SAY ANYTHING.**
+`machine-f-diiid`, `OMP = MKL = 8`, `OMP_WAIT_POLICY=passive`:
+
+* **`of which I_p` reads 0.016 s, 0.5% of the run, at 5.14 cores** — item B
+  threaded it and there is no headroom left in it. **Item B's second half is
+  closed by measurement**, and the answer is that it was not worth doing.
+  **And the `cores` column is only readable because of `passive`**: M-126
+  records the same leg reading **8.95 cores** under the default wait policy
+  while no thread but one entered it, the CPU being the other seven spinning.
+  Here 5.14 is real parallelism, which is item B having landed.
+* **`of which transmission` reads `0.000 0.0% — 0`, and it reads that on every
+  case, because NOTHING IN `src/` EVER WRITES `StepProfile::transmissionSeconds`.**
+  It is declared, summed in `add()`, printed by `apps/meq.cpp` — and never
+  incremented at any site. So §0's instruction to read that line before sizing
+  item A's second half is unsatisfiable as written, and a reader who followed it
+  would have concluded the transmission sweep is free.
+
+**IT IS NOT FREE AND IT IS NOT MISSING EITHER — IT IS FOLDED INTO ITS PARENT.**
+`exteriorTransmissionRows()` carries the `border assembly` `LegTimer` and is
+called from the bordered solve, so the Γ sweep is inside **`border assembly`,
+0.149 s and 2.6%** — which is the number item A's second half has to be sized
+against, and is an upper bound on it rather than the thing itself. The sub-slice
+that would separate them is the dead one.
+
+**THE FIX IS ONE `LegTimer` AND A MOVED PRINT**, and it has to move: the leg is
+printed under `constraint location`, where the work is not, while
+`exteriorTransmissionRows()` lives under `border assembly`. Until that is done,
+**item A's second half stays unverified — but for a reason the plan can now
+name**, which is the difference between an unread line and a line that reports
+nothing. `meq::Estimator` also calls `exteriorTransmissionResidual()` on the
+adaptive path, which is a *different* parent, and that is the reason the slice
+needs a decision rather than a timer.
+
+**THE TRANSFERABLE PART IS THIS FILE'S OWN**: an instrument that reports zero
+because it never counts is indistinguishable from an instrument reporting a
+true zero, and `CLAUDE_INVERSION.md` §11.3 records the same shape — the tracer's
+`fallbackLocations` read 0 before and after while the real count moved, because
+the seed call handed it a local counter and discarded it.
 
 ---
 
