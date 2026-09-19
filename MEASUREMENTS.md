@@ -4285,3 +4285,51 @@ busy machine from a busy measurement. The gate now samples just **before each
 level**, where the only thing running is the harness, with one busy arm's worth
 of slack. *A gate that always fires is worse than no gate, and only running it
 shows which it is.*
+
+### M-123
+
+**`BorderRegularisation` on MAST-U: it removes the failure it was built for, and
+the case still does not converge cold.**
+
+`examples/mastu-nke.toml`, freegsnke's `example02` machine as MEQ solves it,
+9361 elements at `k = 2`, `OMP = MKL = 8`, **no `[initialguess]`**.
+
+**WITHOUT IT the solve dies at iteration 0** with *"the bordered Jacobian is
+singular in ( psi_ax, psi_bnd, a )"* — on both the Newton arm and the bordered
+Picard one, 0 iterations each.
+
+**WITH `BorderRegularisation = 1e-3` (and 1e-2, and 1e-1) the throw is gone**,
+and what is behind it is this:
+
+| arm | behaviour |
+|---|---|
+| `Globalisation::None` | stalls **completely** at `7.539822e-01`, 5.44× the initial residual — **identical to seven digits at iterations 40, 80, 120, 160 and 200**. The iterate stops moving at all |
+| bordered Picard → Newton | reaches **1.51e-02** relative at best, then creeps UPWARD at a steady 1.001 per iteration to the 400 cap |
+
+**THE OPTION DID WHAT IT WAS DESIGNED TO DO.** It is the first thing this
+campaign has built that did — M-116, M-119 and M-121 are three repairs that were
+right by derivation and measured worse — and the difference is that it was aimed
+at a mechanism M-119 MEASURED (`c-mast-shaped` throwing on a singular border once
+the field block was made non-singular) rather than at one derived from first
+principles.
+
+**AND TWO THINGS IN THAT TABLE ARE NEW.**
+
+**The bordered Picard rung is the arm that makes progress here**, reaching
+1.51e-02 where plain Newton does not move at all. M-119 has it making four of
+six cold failures WORSE, so this is the first case where it is the better arm —
+one data point, and it is the opposite sign from that measurement.
+
+**The creep is an instability signature, not a stall.** A steady 1.001 per
+iteration is ×1.22 over 200, which is M-104's vertical mode's shape — that
+measured DIII-D's forward Picard growing ×10 per 20 passes in `Zaxis` — at about
+a hundredth of the rate. A residual that sits still is a dead iteration; one
+that grows geometrically is a mode being amplified.
+
+**WHAT IS NOT YET TESTED IS THE THING MOST LIKELY TO FIX IT.** The config has no
+`[initialguess]`, and `examples/machine-g-mastu.toml`'s own comment is *"NOT A
+NICETY. A cold start on a free-boundary machine case wanders and does not
+converge; the guess is part of the problem statement."* M-112's cold-forward
+audit measures MEQ failing cold on 9 of 14 machine configurations. **So this
+result is consistent with "no guess" and is not evidence about the solver**;
+`mkexactguess.py` is the bounded work that would settle it.
