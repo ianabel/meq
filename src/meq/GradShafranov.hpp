@@ -3458,6 +3458,81 @@ namespace meq
 				double borderAssemblySeconds = 0.0;
 				double borderSolveSeconds = 0.0;
 				double prepareSeconds = 0.0;
+				/*
+				 * THE TRAVERSAL AROUND THE TRACE SOLVE, WHICH IS THE LARGEST
+				 * SERIAL ITEM IN A BORDERED STEP AND HAD NO NAME.
+				 *
+				 * `J^-1` applied to a border column is three things:
+				 * `DarcyHybridization::NPCReduce()` down to the trace, the trace
+				 * solve itself, and `NPCRecover()` back to the element-local
+				 * increments. Only the middle one was timed -- `TimedSolver`
+				 * decorates the TRACE solver -- so the two element loops landed
+				 * in `otherSeconds()`, which is why that remainder was 45% of a
+				 * threaded step and named nothing.
+				 *
+				 * This leg is the two loops ALONE: the wall time of
+				 * `DarcyNPCSolver::ArrayMult()` MINUS the trace solve inside it,
+				 * so it is disjoint from `traceSolveSeconds` and adds with the
+				 * other legs rather than containing one.
+				 *
+				 * IT DOES NOT THREAD, and that is the finding rather than the
+				 * instrument: neither routine carries an `omp parallel`, where
+				 * every other element-local loop in that class does. Its cost is
+				 * `O( elements x columns )`, so a bordered step with N exterior
+				 * modes pays it N + 4 times over where a fixed-boundary step pays
+				 * it once -- which is why upstream sized it at under 6% of a step
+				 * and MEQ measures it at a quarter. See MEASUREMENTS.md M-126.
+				 *
+				 * ZERO OFF THE BORDERED PATH, where nothing queues a column and
+				 * `J^-1` is applied by MFEM's own NewtonSolver through a solver
+				 * MEQ does not decorate. The traversal is paid there too; it is
+				 * `otherSeconds()` there, as it was here, and the fixed-boundary
+				 * remainder is small enough that naming it has not been worth a
+				 * second decorator. Read a zero as "not on this path", not as
+				 * "free".
+				 */
+				double npcTraversalSeconds = 0.0;
+
+				/*
+				 * CPU SECONDS BESIDE EVERY LEG'S WALL SECONDS, AND
+				 * `cpu/wall` IS THE MEAN NUMBER OF CORES THE LEG USED.
+				 *
+				 * Wall time says how long a leg took and cannot say whether it
+				 * used the machine. A leg that threads reads near the thread
+				 * count here and one that does not reads near 1 -- from ONE
+				 * run, where otherwise the question needs a pair of runs at
+				 * different thread counts and Amdahl's arithmetic to answer.
+				 *
+				 * **IT COUNTS BARRIER SPIN, WHICH IS THE READING TO BE CAREFUL
+				 * WITH.** A thread waiting at an OpenMP barrier burns CPU
+				 * before it sleeps, so a leg whose threads mostly wait reads
+				 * HIGH rather than low. Measured, that is two fifths of the
+				 * whole process on a free-boundary run, and
+				 * `OMP_WAIT_POLICY=passive` is what separates the two
+				 * readings: it takes the CPU from about 308% to about 188%
+				 * for roughly 1.5% of the wall clock. Take a profile under
+				 * it -- without it a SERIAL leg reads HIGH rather than low,
+				 * because the other threads spin through it, and the same leg
+				 * that reads 1.01 cores under `passive` reads 5.76 under the
+				 * default. See MEASUREMENTS.md M-126.
+				 */
+				double residualCpuSeconds = 0.0;
+				double gradientCpuSeconds = 0.0;
+				double traceFactorCpuSeconds = 0.0;
+				double traceSolveCpuSeconds = 0.0;
+				double componentCpuSeconds = 0.0;
+				double totalCpuSeconds = 0.0;
+				double constraintCpuSeconds = 0.0;
+				double axisCpuSeconds = 0.0;
+				double axisSweepCpuSeconds = 0.0;
+				double xPointCpuSeconds = 0.0;
+				double limiterCpuSeconds = 0.0;
+				double currentCpuSeconds = 0.0;
+				double transmissionCpuSeconds = 0.0;
+				double borderAssemblyCpuSeconds = 0.0;
+				double borderSolveCpuSeconds = 0.0;
+				double prepareCpuSeconds = 0.0;
+				double npcTraversalCpuSeconds = 0.0;
 
 				long residualCalls = 0;
 				long gradientCalls = 0;
@@ -3474,6 +3549,10 @@ namespace meq
 				long borderAssemblyCalls = 0;
 				long borderSolveCalls = 0;
 				long prepareCalls = 0;
+				/// Blocked applications of `J^-1`, so one per Newton step on the
+				/// bordered path rather than one per column. See
+				/// npcTraversalSeconds.
+				long npcTraversalCalls = 0;
 
 				/*
 				 * LEVEL 2, AND IT IS A SUB-SPLIT OF `gradientSeconds` RATHER THAN A
@@ -3504,10 +3583,116 @@ namespace meq
 					                  + traceFactorSeconds + traceSolveSeconds
 					                  + componentSeconds + constraintSeconds
 					                  + borderAssemblySeconds + borderSolveSeconds
-					                  + prepareSeconds;
+					                  + prepareSeconds + npcTraversalSeconds;
 					return ( totalSeconds > legs ) ? totalSeconds - legs : 0.0;
 				}
+
+				/// The same remainder on the CPU clock. Not clamped against
+				/// `otherSeconds()`'s own zero: the two are independent sums and
+				/// a leg can be a smaller share of one than of the other, which
+				/// is the entire point of reading them together.
+				double otherCpuSeconds() const
+				{
+					double const legs = residualCpuSeconds + gradientCpuSeconds
+					                  + traceFactorCpuSeconds + traceSolveCpuSeconds
+					                  + componentCpuSeconds + constraintCpuSeconds
+					                  + borderAssemblyCpuSeconds + borderSolveCpuSeconds
+					                  + prepareCpuSeconds + npcTraversalCpuSeconds;
+					return ( totalCpuSeconds > legs ) ? totalCpuSeconds - legs : 0.0;
+				}
+
+				/**
+				 * ADD ANOTHER solve()'s LEGS INTO THIS ONE.
+				 *
+				 * What turns a per-solve profile into a per-RUN one, which is
+				 * what a moving-support sweep or an adaptive loop needs: those
+				 * call solve() several times and the per-solve profile reports
+				 * the last of them.
+				 *
+				 * `computeHSeconds` IS SUMMED LIKE THE REST, and it is the one
+				 * field where that needs an argument. Upstream's accumulator is
+				 * a static that solve() resets on entry, so each solve's figure
+				 * is already its own and the sum is a run's. On the re-entrant
+				 * Picard-then-Newton path the inner solve resets it under the
+				 * outer one, so the sum is SHORT there rather than wrong --
+				 * the same limitation the field itself documents.
+				 */
+				void add( StepProfile const &other )
+				{
+					residualSeconds += other.residualSeconds;
+					gradientSeconds += other.gradientSeconds;
+					traceFactorSeconds += other.traceFactorSeconds;
+					traceSolveSeconds += other.traceSolveSeconds;
+					componentSeconds += other.componentSeconds;
+					totalSeconds += other.totalSeconds;
+					constraintSeconds += other.constraintSeconds;
+					axisSeconds += other.axisSeconds;
+					axisSweepSeconds += other.axisSweepSeconds;
+					xPointSeconds += other.xPointSeconds;
+					limiterSeconds += other.limiterSeconds;
+					currentSeconds += other.currentSeconds;
+					transmissionSeconds += other.transmissionSeconds;
+					borderAssemblySeconds += other.borderAssemblySeconds;
+					borderSolveSeconds += other.borderSolveSeconds;
+					prepareSeconds += other.prepareSeconds;
+					npcTraversalSeconds += other.npcTraversalSeconds;
+					computeHSeconds += other.computeHSeconds;
+
+					residualCpuSeconds += other.residualCpuSeconds;
+					gradientCpuSeconds += other.gradientCpuSeconds;
+					traceFactorCpuSeconds += other.traceFactorCpuSeconds;
+					traceSolveCpuSeconds += other.traceSolveCpuSeconds;
+					componentCpuSeconds += other.componentCpuSeconds;
+					totalCpuSeconds += other.totalCpuSeconds;
+					constraintCpuSeconds += other.constraintCpuSeconds;
+					axisCpuSeconds += other.axisCpuSeconds;
+					axisSweepCpuSeconds += other.axisSweepCpuSeconds;
+					xPointCpuSeconds += other.xPointCpuSeconds;
+					limiterCpuSeconds += other.limiterCpuSeconds;
+					currentCpuSeconds += other.currentCpuSeconds;
+					transmissionCpuSeconds += other.transmissionCpuSeconds;
+					borderAssemblyCpuSeconds += other.borderAssemblyCpuSeconds;
+					borderSolveCpuSeconds += other.borderSolveCpuSeconds;
+					prepareCpuSeconds += other.prepareCpuSeconds;
+					npcTraversalCpuSeconds += other.npcTraversalCpuSeconds;
+
+					residualCalls += other.residualCalls;
+					gradientCalls += other.gradientCalls;
+					traceFactorCalls += other.traceFactorCalls;
+					traceSolveCalls += other.traceSolveCalls;
+					componentCalls += other.componentCalls;
+					constraintCalls += other.constraintCalls;
+					axisCalls += other.axisCalls;
+					axisSweepCalls += other.axisSweepCalls;
+					xPointCalls += other.xPointCalls;
+					limiterCalls += other.limiterCalls;
+					currentCalls += other.currentCalls;
+					transmissionCalls += other.transmissionCalls;
+					borderAssemblyCalls += other.borderAssemblyCalls;
+					borderSolveCalls += other.borderSolveCalls;
+					prepareCalls += other.prepareCalls;
+					npcTraversalCalls += other.npcTraversalCalls;
+					computeHCalls += other.computeHCalls;
+					++solves;
+				}
+
+				/// How many solve() calls this profile covers. One for a
+				/// per-solve profile, the sweep or cycle count for a run's.
+				long solves = 0;
 			};
+
+			/**
+			 * Every solve() this object has run, added together. See
+			 * StepProfile::add().
+			 *
+			 * THE ONE TO PRINT FOR A RUN, and the difference from
+			 * stepProfile() is not cosmetic: a moving-support sweep calls
+			 * solve() once per sweep and an adaptive loop once per cycle, so
+			 * the per-solve profile is the LAST of them and cannot be compared
+			 * against a wall clock that covers all of them. It is never reset,
+			 * the solver being built per run.
+			 */
+			StepProfile const &runStepProfile() const;
 
 			/// The leg split of the last solve(). See StepProfile.
 			StepProfile const &stepProfile() const;
@@ -3601,6 +3786,23 @@ namespace meq
 			/// gradient is available to seed the flux block. Null for the
 			/// Coefficient overload, which has nothing to differentiate.
 			mfem::GridFunction const *initialGuessField = nullptr;
+
+			/*
+			 * THE SEED PROJECTION, KEPT SO THAT prepare() DOES IT ONCE.
+			 *
+			 * prepare() is called twice with the same guess on the ordinary
+			 * driver path -- once by the caller to read potential(), once by
+			 * solve() -- and the projection is the same both times. For a
+			 * guess built from conductors it is the most expensive thing in
+			 * the run; see prepare() for the measurement and for the contract
+			 * this tightens.
+			 */
+			mfem::Coefficient const *guessSeedFrom = nullptr;
+			mfem::Vector guessSeedPotential;
+			mfem::Vector guessSeedTrace;
+			/// Forget the cached seed. Called by both setInitialGuess()
+			/// overloads, which is what keeps the cache honest.
+			void dropGuessSeed();
 
 			/// Solve `( r q_h, v ) = ( grad psi_g, v )` on each element and put
 			/// `-q_h` -- DarcyForm's convention -- into the flux block.
@@ -3892,6 +4094,12 @@ namespace meq
 			/// called from the LINE SEARCH, which is where the unnamed time was.
 			/// Timing at the call sites instead missed exactly those calls.
 			mutable StepProfile profile;
+			/// Every solve() added together; see runStepProfile().
+			mutable StepProfile runProfile;
+			/// solve() re-entry depth, so the run accumulator counts an
+			/// outermost solve once. solveByPicardThenNewton() is the caller
+			/// that makes it more than one.
+			mutable int solveDepth = 0;
 
 			AssemblyMode assemblyModeChoice;
 			TraceSolver traceSolverChoice;

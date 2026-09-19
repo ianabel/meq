@@ -1326,6 +1326,8 @@ is not.
 | | |
 |---|---|
 | **Auxiliary globally-coupled unknowns** | `SetNumAuxiliaryUnknowns()` and the two per-element assemble hooks. **The one unbuilt piece, and no longer worth asking for**: the entry points MEQ named are public already as `NPCReduce()` and `NPCRecover()`, and `DarcyNPCSolver::ArrayMult` applies them to several right-hand sides in one pass, so a differenced border is `K` applications of a routine that blocks them. **MEQ CALLS IT** — the bordered step queues every column and flushes once, worth **1.34×** on the DIII-D solve leg at 14 columns, → **[M-98](MEASUREMENTS.md#m-98)** |
+| **`AssemblyMode::Threaded` must not be refused on `CopyLinearGradBlocks()` declining** | Upstream is adding an abort for a real hazard — 67 of 99 MFEM integrators with scratch are unguarded — keyed on a predicate that catches MEQ for an unrelated reason. MEQ is `LocalOpType::PotNL`, so the cache **always** declines, and on that branch `ConstructGrad()` skips the flux block and evaluates only `meq::SourceIntegrator`, which is MEQ's own and reentrant. **An MFEM update carrying that abort stops every threaded MEQ run.** Filed as `../mfem-hdg-dev/doc/HDG-THREADED-REFUSAL-FROM-MEQ.md`; `CLAUDE_HDGGS.md`, *Threading, measured* |
+| **Threading `NPCReduce()` and `NPCRecover()`** | The two element loops either side of the trace solve are the only ones in `DarcyHybridization` with no `omp parallel`, and upstream's own doxygen declines them at *"under 6% of the step"* — measured fixed boundary, one right-hand side. MEQ's bordered step applies `J^-1` to `N + 4` columns, so the traversal is `O( elements × columns )` against integrator loops that are `O( elements )` and already threaded: **0.212 s at one thread and 0.212 s at eight, 30.6% of a threaded step and the largest leg in it.** `NPCRecover` writes only the calling element's own L2 dofs and needs neither colouring nor atomics. Filed as `../mfem-hdg-dev/doc/HDG-NPC-TRAVERSAL-FROM-MEQ.md`, → **[M-126](MEASUREMENTS.md#m-126)** |
 
 Everything else MEQ has sent is closed. **A CLOSED REPORT NEEDS NO ENTRY HERE**:
 what it changed is in the code with a test on it, or it is a measurement under an
@@ -1345,7 +1347,12 @@ operational facts are worth the space and the rest is not:
   only test MEQ could apply and it is now the only one that exists.
 * **Which documents exist is a question for `git`, not for `ls`** — a listing
   reports whatever branch that tree is checked out on, which is not MEQ's to
-  control and has changed under this file more than once.
+  control and has changed under this file more than once. **And a request MEQ
+  writes will never appear in `git` at all**: that tree's `.gitignore` carries
+  `doc/*-FROM-*.md`, so a report lands as an untracked working-tree file by
+  design and is read there. `git status` not showing it is the policy working,
+  not the write having failed — check with `ls`, which is the one question `ls`
+  answers better.
 
 **And do not file findings against unfinished work.** A branch that exists is not
 a branch that is done. Measure it if it is useful to know, keep the numbers in
@@ -2108,7 +2115,10 @@ tools/       plotting and visualisation. plot_equilibrium.py reads BOTH
              mesh/halfdisc.py is FB-6's geometry: a semicircle reaching the
              axis with rectangular coils MESHED TO, written against gmsh's
              python API. See `CLAUDE_FB.md`,
-             *Meshing beyond MakeCartesian2D*
+             *Meshing beyond MakeCartesian2D*. --symmetric meshes z >= 0 and
+             REFLECTS it, which is what [solver] UpDownSymmetry needs and is
+             reached from a file as [mesh.generate] Symmetric; --symmetry-check
+             asks the question of a mesh this tool did not make. M-127
 examples/    TOML run configurations
 MEASUREMENTS.md  the published tables, under stable `M-nn` anchors that
              all five CLAUDE files point at. Measurements only; the reference

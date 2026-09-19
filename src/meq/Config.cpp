@@ -1101,7 +1101,8 @@ namespace meq
 				generate.rejectUnknownKeys( { "Tool", "Radius", "Size", "Order", "CoilSize",
 				                              "PlasmaRMin", "PlasmaRMax", "PlasmaZMin", "PlasmaZMax",
 				                              "PlasmaSize", "LimiterR", "LimiterZ", "LimiterRadius",
-				                              "Vessel", "Transition", "Check" } );
+				                              "Vessel", "Transition", "Check",
+				                              "Symmetric" } );
 
 				MeshGeneratorConfig & g = meshOptions.generate;
 				g.given = generate.has( "Tool" );
@@ -1134,6 +1135,7 @@ namespace meq
 					g.coilSize = generate.getFloatOr( "CoilSize", 0.0 );
 					g.transition = generate.getFloatOr( "Transition", 0.0 );
 					g.check = generate.getBooleanOr( "Check", true );
+					g.symmetric = generate.getBooleanOr( "Symmetric", false );
 
 					if ( !( g.radius > 0.0 ) )
 						generate.fail( "Radius", "the disc's radius must be positive. NOTE it is the BACKGROUND's radius and not Gamma's: with an exterior coupling, D_h is cut from this mesh at [boundary.exterior] Radius, which has to fit strictly inside it" );
@@ -1670,6 +1672,23 @@ namespace meq
 				solver.fail( "BorderCollinearityRegularisation", "weights a penalty that multiplies BorderRegularisation's lambda, so it does nothing on its own: set BorderRegularisation as well, or remove this key" );
 			solverOptions.topologyRetry = solver.getIntegerOr( "TopologyRetry", solverOptions.topologyRetry );
 			solverOptions.upDownSymmetry = solver.getBooleanOr( "UpDownSymmetry", solverOptions.upDownSymmetry );
+			/*
+			 * AND IT IS REFUSED ON A GENERATED MESH THAT IS NOT SYMMETRIC,
+			 * BECAUSE THE ALTERNATIVE IS A THROW A LONG WAY IN.
+			 *
+			 * buildMirrorMaps() runs inside the bordered Newton driver and not
+			 * in prepare(), so the refusal arrives after the mesh, the spaces,
+			 * the assembly and the guess -- measured, past 150 s on MAST-U at
+			 * k = 2. Where the file also says HOW the mesh is made, MEQ knows
+			 * at parse time that the answer will be no.
+			 *
+			 * ONLY WHERE [mesh.generate] IS PRESENT. A mesh somebody else made
+			 * may be symmetric and this parser cannot read it, so a bare
+			 * [mesh] File is left alone and finds out the old way.
+			 */
+			if ( solverOptions.upDownSymmetry && meshOptions.generate.given
+			     && !meshOptions.generate.symmetric )
+				solver.fail( "UpDownSymmetry", "averages every dof with the dof at its own reflection, so it needs a mirror-symmetric MESH -- and gmsh's triangulation of a symmetric geometry is not symmetric, it picks a diagonal and picks freely. This file generates its mesh, so say [mesh.generate] Symmetric = true, which meshes z >= 0 and reflects it" );
 			if ( solverOptions.topologyRetry < 0 )
 				solver.fail( "TopologyRetry", "cannot be negative; zero is off" );
 			solverOptions.xPointMeritWeight = solver.getFloatOr( "XPointMeritWeight", solverOptions.xPointMeritWeight );

@@ -558,11 +558,19 @@ int main( int argc, char **argv )
 			             median( gradient )/its, last.profile.gradientCalls,
 			             median( factor )/its, last.profile.traceFactorCalls,
 			             median( backsolve )/its, last.profile.traceSolveCalls );
+			// NPCReduce()/NPCRecover() around the trace solve, DISJOINT from the
+			// backsolve column and taken out of `other` since it got a leg. It
+			// is zero on the fixed-boundary rows, which queue no border column,
+			// and it does not thread -- which is why it is printed rather than
+			// left inside a remainder. See MEASUREMENTS.md M-126.
 			std::printf( "    %-9s %-9s prepare() %.4f (outside total), "
-			             "component fill %.4f x%ld, spread total %.4f-%.4f\n",
+			             "component fill %.4f x%ld, NPC reduce+recover %.4f x%ld,"
+			             " spread total %.4f-%.4f\n",
 			             "", "",
 			             median( prep ), median( component ),
 			             last.profile.componentCalls,
+			             last.profile.npcTraversalSeconds,
+			             last.profile.npcTraversalCalls,
 			             smallest( total ), *std::max_element( total.begin(), total.end() ) );
 
 			/*

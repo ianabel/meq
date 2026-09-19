@@ -47,6 +47,7 @@
 #include <cmath>
 #include <cstdio>
 #include <chrono>
+#include <ctime>
 #include <cstdlib>
 #include <exception>
 #include <fstream>
@@ -249,6 +250,11 @@ namespace
 			number( 2.0 * coil.halfWidth );
 			number( 2.0 * coil.halfHeight );
 		}
+		// AFTER the conductors, because --symmetric checks them: the generator
+		// pairs every --coil about z = 0 and refuses an unpaired one, so the
+		// flag is a statement about the argv it follows.
+		if ( g.symmetric )
+			word( "--symmetric" );
 		word( "-o" );
 		word( config.getMesh().file );
 		if ( g.check )
@@ -999,8 +1005,62 @@ int main( int argc, char **argv )
 		return std::chrono::duration<double>(
 			std::chrono::steady_clock::now() - from ).count();
 	};
+	/*
+	 * AND THE PROCESS'S CPU CLOCK BESIDE THE WALL ONE, at the same phase
+	 * boundaries, so `cpu/wall` is the mean number of cores each phase used.
+	 * That is the question `--profile` gets asked -- is this threaded -- and
+	 * without it the answer needs two runs at different thread counts.
+	 * It counts barrier spin; see GradShafranovSolver::StepProfile.
+	 */
+	auto cpuNow = []()
+	{
+		timespec now = {};
+		if ( clock_gettime( CLOCK_PROCESS_CPUTIME_ID, &now ) != 0 )
+			return 0.0;
+		return static_cast<double>( now.tv_sec )
+		       + 1.0e-9*static_cast<double>( now.tv_nsec );
+	};
+	double const startedCpu = cpuNow();
 	double setupSeconds = 0.0;
 	double solveSeconds = 0.0;
+	double setupCpuSeconds = 0.0;
+	double solveCpuSeconds = 0.0;
+	/*
+	 * THE SUPPORT MOVE BETWEEN SWEEPS, TIMED HERE BECAUSE NOTHING ELSE CAN.
+	 *
+	 * `StepProfile::componentSeconds` counts the flood fills a NEWTON STEP
+	 * takes, deliberately: the leg is charged where the call is known to
+	 * belong to a step, since refreshPlasmaComponent() is also reached from
+	 * the post-processing. The outer loop's own fill -- the one that MOVES the
+	 * support, which solve() is forbidden to do -- is therefore outside every
+	 * leg, and on a moving-support run it read as an unexplained remainder
+	 * between solves. It is the driver's call and this is the driver.
+	 */
+	double supportSeconds = 0.0;
+	double supportCpuSeconds = 0.0;
+	/*
+	 * AND BUILDING THE SOLVER, WHICH IS IN THE SOLVE PHASE AND NOT IN SETUP.
+	 *
+	 * makeSolver() runs LAZILY -- once per adaptive cycle, and on the ordinary
+	 * path at the first solve -- so the spaces, the forms, the source and the
+	 * warm-start interpolation are all charged to the solve phase while
+	 * belonging to none of solve()'s legs. On the diverted machine case that
+	 * is most of a leg-free remainder nobody could account for, and the guess
+	 * transfer alone is gslib locating tens of thousands of points.
+	 */
+	double buildSeconds = 0.0;
+	double buildCpuSeconds = 0.0;
+	/// The driver's own post-solve checks -- CriticalPointFinder::checkAxis()
+	/// and checkAxisSource(). Both root the mesh, both are MEQ's, and neither
+	/// is inside a solve().
+	double checkSeconds = 0.0;
+	double checkCpuSeconds = 0.0;
+	/// postProcess(), which is DarcyForm::Reconstruct() re-assembling four
+	/// integrators at the enriched order per element. It is the price of
+	/// reporting psi* rather than psi_h, it is paid once, and it is in the
+	/// output phase rather than the solve.
+	double postSeconds = 0.0;
+	double postCpuSeconds = 0.0;
 
 	// ---- configuration -------------------------------------------------
 	std::unique_ptr<meq::Configuration> config;
@@ -1877,11 +1937,21 @@ int main( int argc, char **argv )
 				// ellipse and the round default reaching the same psi_ax to
 				// every printed digit.
 				//
-				// AND IT IS NOT FREE. meq::ellipsePsi() is 66 us a point at
-				// its default order, paid once per nodal point of this
-				// projection -- about 6 s of MAST-U's 291 s, against the 26 s
-				// the better guess saves in Newton steps. Pass a lower order
-				// if that trade ever goes the other way.
+				// AND IT IS NOT FREE, AND THE CONDUCTORS ARE THE EXPENSIVE
+				// HALF RATHER THAN THE COLUMN.
+				//
+				// meq::ellipsePsi() is 66 us a point and reads 0.18% of a
+				// MAST-U run. The 23 meq::coilPsi() calls beside it read
+				// **93.4%** at the default quadrature order, which is a
+				// reference order and not a guess's: 1392 us a point, paid at
+				// every nodal point of the potential space AND the trace
+				// space. meq::guessCoilQuadratureOrder is the measurement
+				// that fixes it, 28x cheaper at a thousandth of psi_ax.
+				//
+				// THE LESSON IS ABOUT THE ESTIMATE AND NOT THE NUMBER. This
+				// comment said "about 6 s of MAST-U's 291 s" and that figure
+				// was right about the term it timed and silent about the one
+				// standing next to it in the same loop. Time the loop.
 				double const plasmaCurrent = config->getSource().plasmaCurrent();
 				ramp = std::make_unique<mfem::FunctionCoefficient>(
 					[ set, centreR, centreZ, semiR, semiZ, plasmaCurrent ]
@@ -1898,7 +1968,9 @@ int main( int argc, char **argv )
 						double total = 0.0;
 						if ( set )
 							for ( meq::Coil const &c : set->coils() )
-								total += meq::coilPsi( c, r, x( 1 ) );
+								total += meq::coilPsi(
+									c, r, x( 1 ),
+									meq::guessCoilQuadratureOrder );
 						// AND THE PLASMA, as an elliptical column carrying
 						// all of I_p about the guessed axis.
 						//
@@ -1996,6 +2068,29 @@ int main( int argc, char **argv )
 	                         bool bordered = true )
 		-> std::unique_ptr<meq::GradShafranovSolver>
 	{
+		// SCOPE-BOUND, because this lambda returns from more than one place.
+		struct BuildTimer
+		{
+			double &seconds;
+			double &cpuSeconds;
+			double t0;
+			double c0;
+			~BuildTimer()
+			{
+				seconds += std::chrono::duration<double>(
+					std::chrono::steady_clock::now().time_since_epoch()
+					).count() - t0;
+				timespec now = {};
+				if ( clock_gettime( CLOCK_PROCESS_CPUTIME_ID, &now ) == 0 )
+					cpuSeconds += static_cast<double>( now.tv_sec )
+					              + 1.0e-9*static_cast<double>( now.tv_nsec )
+					              - c0;
+			}
+		} const buildTimer{ buildSeconds, buildCpuSeconds,
+			std::chrono::duration<double>(
+				std::chrono::steady_clock::now().time_since_epoch() ).count(),
+			cpuNow() };
+
 		auto fresh = std::make_unique<meq::GradShafranovSolver>(
 			mesh, config->getDiscretisation().polynomialDegree,
 			config->getDiscretisation().tau );
@@ -2245,6 +2340,7 @@ int main( int argc, char **argv )
 	};
 
 	setupSeconds = elapsedSince( started );
+	setupCpuSeconds = cpuNow() - startedCpu;
 
 	// ---- solve, and refine if that is what was asked for ----------------
 	std::vector<Cycle> history;
@@ -3014,6 +3110,8 @@ int main( int argc, char **argv )
 			{
 				int const before = solver->plasmaComponentElements();
 
+				double const supportStart = elapsedSince( started );
+				double const supportStartCpu = cpuNow();
 				normalised->freezePlasmaEdge( axis, boundary );
 				// The PUBLIC refresh, which setPlasmaSupportFrozen() deliberately
 				// does not suppress: this is the outer loop moving the support,
@@ -3024,6 +3122,8 @@ int main( int argc, char **argv )
 
 				if ( sweep > 0 )
 					solver->setInitialGuess( state );
+				supportSeconds += elapsedSince( started ) - supportStart;
+				supportCpuSeconds += cpuNow() - supportStartCpu;
 
 				runSolve();
 				++sweepsRun;
@@ -3558,12 +3658,39 @@ int main( int argc, char **argv )
 		             == meq::LocalFactorModeType::Batched
 		          || config->getSolver().traceAssemblyMode
 		             == meq::TraceAssemblyModeType::Batched ) )
-			std::printf( "MEQ: batched paths taken: face assembly %s, local "
-			             "factorisation %s, local solve %s, trace assembly %s\n",
+		{
+			/*
+			 * AVAILABLE, NOT TAKEN, AND THE WORDING IS THE WHOLE POINT.
+			 *
+			 * All four accessors report MFEM's `CanBatch*` predicates -- what
+			 * this configuration WOULD be allowed to batch -- and not what it
+			 * asked for. Reading a "yes" as "MEQ is doing this" is wrong in
+			 * both directions: it hides a mode that was requested and
+			 * refused, and it credits MEQ with a route it never selected.
+			 * That misreading has already been made off this very line by a
+			 * reader outside this project, who concluded MEQ was on the
+			 * batched local factorisation and losing 2.6x on `ComputeH` --
+			 * where the default is `LocalFactorMode::Serial` and always was.
+			 *
+			 * So both halves are printed: what was asked for, and what the
+			 * predicates allow.
+			 */
+			auto const &sc = config->getSolver();
+			std::printf( "MEQ: batched modes asked for: assembly %s, local "
+			             "factorisation %s, trace assembly %s\n",
+			             assemblyMode == AM::Batched ? "yes" : "no",
+			             sc.localFactorMode
+			                 == meq::LocalFactorModeType::Batched ? "yes" : "no",
+			             sc.traceAssemblyMode
+			                 == meq::TraceAssemblyModeType::Batched ? "yes" : "no" );
+			std::printf( "MEQ:   and what MFEM would ALLOW: face assembly %s, "
+			             "local factorisation %s, local solve %s, trace "
+			             "assembly %s\n",
 			             solver->batchedPotFaceAssemblyTaken() ? "yes" : "NO",
 			             solver->batchedLocalFactorTaken() ? "yes" : "NO",
 			             solver->batchedLocalSolveTaken() ? "yes" : "NO",
 			             solver->batchedTraceAssemblyTaken() ? "yes" : "NO" );
+		}
 
 		std::printf( "MEQ: converged in %d Newton iterations on %d elements, "
 		             "degree %d%s\n",
@@ -3826,8 +3953,12 @@ int main( int argc, char **argv )
 							return coils->indexContaining( r, z ) >= 0;
 						} );
 
+				double const checkStart = elapsedSince( started );
+				double const checkStartCpu = cpuNow();
 				axisCheck = finder.checkAxis( solver->psiAxis(),
 				                              solver->psiBoundary() );
+				checkSeconds += elapsedSince( started ) - checkStart;
+				checkCpuSeconds += cpuNow() - checkStartCpu;
 				axisChecked = true;
 			}
 			catch ( std::exception const &error )
@@ -4056,8 +4187,12 @@ int main( int argc, char **argv )
 		 */
 		if ( normalised && solver )
 		{
+			double const sourceCheckStart = elapsedSince( started );
+			double const sourceCheckStartCpu = cpuNow();
 			meq::GradShafranovSolver::AxisSourceCheck const axisSource =
 				solver->checkAxisSource();
+			checkSeconds += elapsedSince( started ) - sourceCheckStart;
+			checkCpuSeconds += cpuNow() - sourceCheckStartCpu;
 
 			/*
 			 * THE PLASMA CONTAINS THE SYMMETRY AXIS, WHICH IS NOT A LARGE ERROR
@@ -4238,67 +4373,26 @@ int main( int argc, char **argv )
 	}
 
 	solveSeconds = elapsedSince( started ) - setupSeconds;
+	solveCpuSeconds = cpuNow() - startedCpu - setupCpuSeconds;
 
 	/*
-	 * THE LEG SPLIT, AND IT IS A REPORT RATHER THAN AN INSTRUMENT.
+	 * THE BORDER STEPS HERE AND THE LEG BUDGET AT THE END, WHICH IS A SPLIT
+	 * BY WHAT THE READER IS DOING RATHER THAN BY WHAT THE NUMBER IS.
+	 *
+	 * The step table belongs beside the residual history it explains -- read
+	 * together, they say whether a damped step was the direction's fault or
+	 * the merit's. The leg budget belongs after the OUTPUT, because it closes
+	 * against the wall clock and the output is a sixth of it.
 	 *
 	 * `GradShafranovSolver::StepProfile` is always on -- the timers cost a
 	 * clock read per call and nothing decides whether to take them -- so the
 	 * only thing this flag buys is PRINTING it, and the only reason it is a
 	 * flag is that the numbers are meaningless on a contended machine and a
 	 * default-on report invites them being quoted anyway.
-	 *
-	 * `computeHSeconds` IS A SLICE OF `gradientSeconds` AND NOT A LEG.
-	 * StepProfile says so in its own doxygen; adding it to the others
-	 * double-counts, so it is printed indented under the gradient and left
-	 * out of the share column's sum. `otherSeconds()` is the explicit
-	 * remainder, which is what stops a leg the split misses from inflating a
-	 * leg it does not.
-	 *
-	 * It reports the LAST solve. An adaptive run or a moving-support sweep
-	 * calls solve() several times, so on those this is the final cycle rather
-	 * than the whole run, and the header says which.
 	 */
 	if ( wantProfile && solver )
 		reportBorderSteps( solver.get() );
 
-	if ( wantProfile && solver )
-	{
-		meq::GradShafranovSolver::StepProfile const &p = solver->stepProfile();
-		double const whole = p.totalSeconds > 0.0 ? p.totalSeconds : 1.0;
-		auto leg = [ whole ]( char const *name, double seconds, long calls )
-		{
-			std::printf( "MEQ:   %-22s %8.3f s  %5.1f%%  %8ld calls\n",
-			             name, seconds, 100.0*seconds/whole, calls );
-		};
-		std::printf( "MEQ: the last solve's legs, total %.3f s\n", p.totalSeconds );
-		leg( "residual", p.residualSeconds, p.residualCalls );
-		leg( "gradient", p.gradientSeconds, p.gradientCalls );
-		leg( "  of which ComputeH", p.computeHSeconds, p.computeHCalls );
-		leg( "trace factorisation", p.traceFactorSeconds, p.traceFactorCalls );
-		leg( "trace backsolve", p.traceSolveSeconds, p.traceSolveCalls );
-		leg( "plasma fill", p.componentSeconds, p.componentCalls );
-		leg( "constraint location", p.constraintSeconds, p.constraintCalls );
-		leg( "  of which axis", p.axisSeconds, p.axisCalls );
-		leg( "    cold full sweep", p.axisSweepSeconds, p.axisSweepCalls );
-		leg( "  of which X-point", p.xPointSeconds, p.xPointCalls );
-		leg( "  of which limiter", p.limiterSeconds, p.limiterCalls );
-		leg( "  of which I_p", p.currentSeconds, p.currentCalls );
-		leg( "  of which transmission", p.transmissionSeconds, p.transmissionCalls );
-		leg( "border assembly", p.borderAssemblySeconds, p.borderAssemblyCalls );
-		leg( "border dense solve", p.borderSolveSeconds, p.borderSolveCalls );
-		leg( "re-assembly", p.prepareSeconds, p.prepareCalls );
-		// THE TWO REGIME PREDICATES, printed beside the legs they explain.
-		// Both are silent when false: the answer does not change and only the
-		// gradient leg grows. See fluxMassIsPrefactored().
-		std::printf( "MEQ:   flux mass prefactored (PotNL) %s, condensation "
-		             "cache %s\n",
-		             solver->fluxMassIsPrefactored() ? "yes" : "NO",
-		             solver->condensationCacheTaken() ? "yes" : "NO" );
-		std::printf( "MEQ:   %-22s %8.3f s  %5.1f%%\n", "other (remainder)",
-		             p.otherSeconds(), 100.0*p.otherSeconds()/whole );
-		std::fflush( stdout );
-	}
 
 	// ---- write ---------------------------------------------------------
 	try
@@ -4345,7 +4439,13 @@ int main( int argc, char **argv )
 		 * the answer MEQ reports rather than the mesh it refines.
 		 */
 		if ( !solver->isPostProcessed() )
+		{
+			double const postStart = elapsedSince( started );
+			double const postStartCpu = cpuNow();
 			solver->postProcess();
+			postSeconds += elapsedSince( started ) - postStart;
+			postCpuSeconds += cpuNow() - postStartCpu;
+		}
 
 		// psi_h AND NOT psi*, AND THAT ASYMMETRY IS DELIBERATE. These three files
 		// are the exact restart format: "<stem>_psi.gf" is read back into the
@@ -5044,6 +5144,137 @@ int main( int argc, char **argv )
 	{
 		std::fprintf( stderr, "MEQ: could not write output: %s\n", error.what() );
 		return OutputFailed;
+	}
+
+	if ( wantProfile && solver )
+	{
+		/*
+		 * THE RUN'S OWN LEGS, NOT THE LAST SOLVE'S, AND THEY CLOSE AGAINST THE
+		 * WALL CLOCK.
+		 *
+		 * A moving-support run calls solve() once per sweep and an adaptive one
+		 * once per cycle, so a per-solve profile cannot be compared against a
+		 * wall clock covering all of them -- on the diverted machine case that
+		 * is 0.69 s of legs printed beside a 4.3 s solve phase, which reads as
+		 * five sixths missing and is three sweeps. runStepProfile() adds them.
+		 *
+		 * THE `cores` COLUMN IS WHY THIS EXISTS. It is `cpu/wall` over the
+		 * leg, so it is the mean number of cores busy in it: a leg that
+		 * threads reads near OMP_NUM_THREADS and one that does not reads near
+		 * 1, in one run. **It counts barrier spin**, so take the profile under
+		 * `OMP_WAIT_POLICY=passive` or a leg whose threads mostly wait will
+		 * read high; see MEASUREMENTS.md M-126, where that is two fifths of
+		 * the process.
+		 *
+		 * `computeHSeconds` IS A SLICE OF `gradientSeconds` AND NOT A LEG, and
+		 * the same is true of the five under `constraint location`. They are
+		 * printed indented and left out of the sum, which is what the explicit
+		 * `other (remainder)` is for.
+		 */
+		meq::GradShafranovSolver::StepProfile const &p = solver->runStepProfile();
+		double const runWall = elapsedSince( started );
+		double const runCpu = cpuNow() - startedCpu;
+		double const whole = runWall > 0.0 ? runWall : 1.0;
+		auto cores = []( double seconds, double cpuSeconds )
+		{
+			return ( seconds > 1.0e-6 ) ? cpuSeconds/seconds : 0.0;
+		};
+		// A DASH AND NOT A ZERO where there is no ratio to report, which is
+		// two different cases and both would read as "serial" written as 0.00:
+		// a leg that did not run, and ComputeH, whose accumulator is
+		// upstream's and has no CPU counterpart. An instrument that cannot
+		// tell "did not measure" from "measured one core" is worse than one
+		// that stays silent.
+		auto leg = [ whole, &cores ]( char const *name, double seconds,
+		                              double cpuSeconds, long calls )
+		{
+			char busy[ 16 ];
+			if ( seconds > 1.0e-6 && cpuSeconds > 0.0 )
+				std::snprintf( busy, sizeof busy, "%7.2f",
+				               cores( seconds, cpuSeconds ) );
+			else
+				std::snprintf( busy, sizeof busy, "%7s", "-" );
+			std::printf( "MEQ:   %-24s %8.3f %6.1f%% %s %10ld\n",
+			             name, seconds, 100.0*seconds/whole, busy, calls );
+		};
+
+		std::printf( "MEQ: where the run went -- wall %.3f s, cpu %.3f s, "
+		             "%.2f cores on average\n", runWall, runCpu,
+		             cores( runWall, runCpu ) );
+		std::printf( "MEQ:   %-24s %8s %7s %7s %10s\n",
+		             "", "wall s", "share", "cores", "calls" );
+		leg( "setup", setupSeconds, setupCpuSeconds, 1 );
+		leg( "solve", solveSeconds, solveCpuSeconds, p.solves );
+		leg( "output", runWall - setupSeconds - solveSeconds,
+		     runCpu - setupCpuSeconds - solveCpuSeconds, 1 );
+		// THE BIGGEST THING IN THE OUTPUT PHASE IS NOT GRID-SHAPED. postProcess()
+		// is DarcyForm::Reconstruct(), four integrators re-assembled at the
+		// enriched order per element -- the price of reporting psi* rather than
+		// psi_h, and it does not move with the output grid.
+		leg( "  of which postProcess", postSeconds, postCpuSeconds, 1 );
+
+		std::printf( "MEQ: the solve phase by leg, over %ld solve%s\n",
+		             p.solves, p.solves == 1 ? "" : "s" );
+		leg( "residual", p.residualSeconds, p.residualCpuSeconds,
+		     p.residualCalls );
+		leg( "gradient", p.gradientSeconds, p.gradientCpuSeconds,
+		     p.gradientCalls );
+		leg( "  of which ComputeH", p.computeHSeconds, 0.0, p.computeHCalls );
+		leg( "trace factorisation", p.traceFactorSeconds,
+		     p.traceFactorCpuSeconds, p.traceFactorCalls );
+		leg( "trace backsolve", p.traceSolveSeconds, p.traceSolveCpuSeconds,
+		     p.traceSolveCalls );
+		// DISJOINT from the backsolve above, not a slice of it: the wall time
+		// of DarcyNPCSolver::ArrayMult() less the trace solve inside it, which
+		// is NPCReduce() and NPCRecover() alone. Zero off the bordered path,
+		// where nothing queues a column.
+		leg( "NPC reduce+recover", p.npcTraversalSeconds,
+		     p.npcTraversalCpuSeconds, p.npcTraversalCalls );
+		leg( "plasma fill", p.componentSeconds, p.componentCpuSeconds,
+		     p.componentCalls );
+		leg( "constraint location", p.constraintSeconds,
+		     p.constraintCpuSeconds, p.constraintCalls );
+		leg( "  of which axis", p.axisSeconds, p.axisCpuSeconds, p.axisCalls );
+		leg( "    cold full sweep", p.axisSweepSeconds, p.axisSweepCpuSeconds,
+		     p.axisSweepCalls );
+		leg( "  of which X-point", p.xPointSeconds, p.xPointCpuSeconds,
+		     p.xPointCalls );
+		leg( "  of which limiter", p.limiterSeconds, p.limiterCpuSeconds,
+		     p.limiterCalls );
+		leg( "  of which I_p", p.currentSeconds, p.currentCpuSeconds,
+		     p.currentCalls );
+		leg( "  of which transmission", p.transmissionSeconds,
+		     p.transmissionCpuSeconds, p.transmissionCalls );
+		leg( "border assembly", p.borderAssemblySeconds,
+		     p.borderAssemblyCpuSeconds, p.borderAssemblyCalls );
+		leg( "border dense solve", p.borderSolveSeconds,
+		     p.borderSolveCpuSeconds, p.borderSolveCalls );
+		leg( "re-assembly", p.prepareSeconds, p.prepareCpuSeconds,
+		     p.prepareCalls );
+		leg( "other (remainder)", p.otherSeconds(), p.otherCpuSeconds(), 0 );
+		// AND WHAT THE LEGS DO NOT COVER, named rather than left to be found
+		// by subtracting: solve() is entered once per sweep and the driver's
+		// own work between them -- deciding the support, printing the row --
+		// is outside every one of them.
+		// EVERYTHING IN THE SOLVE PHASE THAT IS NOT IN A solve(), which is not
+		// only "between": makeSolver() runs lazily at the first solve, so the
+		// spaces, the forms and the warm-start interpolation are in here too.
+		// Named rather than left to be found by subtracting.
+		leg( "outside solve()", solveSeconds - p.totalSeconds,
+		     solveCpuSeconds - p.totalCpuSeconds, p.solves );
+		leg( "  of which makeSolver", buildSeconds, buildCpuSeconds, 1 );
+		leg( "  of which support move", supportSeconds, supportCpuSeconds,
+		     p.solves );
+		// The axis diagnostics, which root the mesh and are the driver's own.
+		leg( "  of which axis checks", checkSeconds, checkCpuSeconds, 1 );
+		// THE TWO REGIME PREDICATES, printed beside the legs they explain.
+		// Both are silent when false: the answer does not change and only the
+		// gradient leg grows. See fluxMassIsPrefactored().
+		std::printf( "MEQ:   flux mass prefactored (PotNL) %s, condensation "
+		             "cache %s\n",
+		             solver->fluxMassIsPrefactored() ? "yes" : "NO",
+		             solver->condensationCacheTaken() ? "yes" : "NO" );
+		std::fflush( stdout );
 	}
 
 	return Solved;

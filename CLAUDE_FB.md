@@ -529,7 +529,18 @@ a different method, and the agreement it owes is to round-off rather than
 bitwise. **1.34× on the DIII-D solve leg at 14 columns**, and the decorator trap
 that would have thrown half of it away silently:
 → **[M-98](MEASUREMENTS.md#m-98)**. That is the same price the
-condensation path already pays for its own reasons. Assembling the load directly
+condensation path already pays for its own reasons.
+
+**AND WHAT IS LEFT OF THAT TRAVERSAL IS THE BORDERED STEP'S SERIAL SPINE.**
+Blocking it made it one pass instead of `N + 2`; it did not make that pass
+parallel, and `NPCReduce()` / `NPCRecover()` are the only element loops in
+`DarcyHybridization` without an `omp parallel`. What is left is
+`O( elements × columns )` against integrator loops that are `O( elements )` and
+already threaded, so on DIII-D at 10 modes it reads **0.212 s at one thread and
+0.212 s at eight — 30.6% of a threaded step and the largest leg in it**. It has
+a `StepProfile` leg of its own, and `other` fell from 45% to 14% when it got
+one. `CLAUDE_HDGGS.md`, *Threading, measured*, and
+→ **[M-126](MEASUREMENTS.md#m-126)**. Assembling the load directly
 would remove it and would have to be checked against the differenced column
 first, since `FormLinearSystem` transforms the right-hand side the residual is
 measured against.
@@ -3245,6 +3256,21 @@ artefacts of the shape rather than anything the equilibrium puts there.
 the approach to the axis · `ellipsePsi`'s two quadrature rules and what one rule
 alone does
 
+**AND IT IS THE MOST EXPENSIVE THING IN THE RUN IF ITS QUADRATURE IS LEFT AT THE
+DEFAULT, WHICH IS A REFERENCE ORDER.** The guess evaluates every conductor at
+every nodal point of the potential space AND the trace space; at
+`defaultCoilQuadratureOrder = 32` that is 1392 us a point for MAST-U's 23
+conductors, and it read **93.6% of that machine's whole run** — against a solve
+it was helping by 26 s. `meq::guessCoilQuadratureOrder = 6` is the measured
+replacement, wrong by a thousandth of the `psi_ax` it is guessing, and
+`prepare()` now caches the seed so the driver's prepare and `solve()`'s do the
+projection once between them. **275 s to 21 s, with every printed digit of the
+answer unchanged.** The guess is not the problem statement, which is what makes
+its accuracy a free choice.
+
+→ **[M-128](MEASUREMENTS.md#m-128)** — the profile that found it · the order
+against accuracy and cost · what did not move
+
 **AND IT TAKES `BorderRegularisation` AS WELL.** M-123's repair and this one are
 necessary together and neither is sufficient: without the damping MAST-U fails
 whatever the guess, and without the guess it converges to the wrong branch. The
@@ -3255,7 +3281,7 @@ column tuned to MAST-U's own plasma and a round one at the default `0.5*CentreR`
 reach the same `psi_ax`, `psi_bnd` and X-point to every printed digit in the
 same 12 Newton iterations.
 
-### `UpDownSymmetry` is sound and is blocked on the mesher
+### `UpDownSymmetry` is sound, and it needs a mesh made for it
 
 **A DOUBLE NULL SHOULD NOT NEED TO BE TOLD WHICH SADDLE TO FOLLOW**, and
 `[boundary.xpoint]` makes it: XP-3's border follows ONE saddle, chosen by its
@@ -3263,16 +3289,33 @@ seed. `[solver] UpDownSymmetry` is the alternative — project the iterate onto
 the subspace of fields even in `z`, and the two saddles are exactly degenerate
 when the search looks for them.
 
-**IT IS A DOF-FOR-DOF AVERAGE, SO IT NEEDS A MIRROR-SYMMETRIC MESH, AND MAST-U'S
-IS NOT ONE.** 3624 of 4735 vertices have no mirror partner. The machine is not
-the problem — its 23 conductors are mirror-paired to the last digit, one pair
+**IT IS A DOF-FOR-DOF AVERAGE, SO IT NEEDS A MIRROR-SYMMETRIC MESH, AND AN
+ORDINARY ONE IS NOT.** `setUpDownSymmetry()` REFUSES such a mesh by name rather
+than projecting onto something that is not a reflection. On MAST-U's committed
+mesh 3624 of 4735 vertices have no mirror partner — and **the machine is not the
+problem**: its 23 conductors are mirror-paired to the last digit, one pair
 excepted whose currents are equal and opposite at 8e-11 of the total. **gmsh's
-triangulation of a symmetric geometry is not symmetric**, and `halfdisc.py`
-would have to mesh one half and reflect it. `setUpDownSymmetry()` REFUSES such a
-mesh by name rather than projecting onto something that is not a reflection.
+triangulation of a symmetric geometry is not symmetric**; it picks a diagonal
+and picks freely.
+
+**SO THE MESHER MAKES THE MESH INSTEAD OF GMSH CHOOSING IT.**
+`[mesh.generate] Symmetric = true` reaches `halfdisc.py --symmetric`, which
+meshes `z >= 0` and reflects it — 0 unpaired nodes and 0 involution failures on
+MAST-U's own geometry, at a worst pairing discrepancy of **0.000e+00 m** rather
+than a small one, because the image coordinate is the written decimal with its
+sign flipped. It REFUSES a geometry that is not itself mirror-symmetric rather
+than reflecting a machine into a different machine.
+
+**AND `[solver] UpDownSymmetry` ON A GENERATED MESH WITHOUT IT IS A PARSE
+ERROR**, because `buildMirrorMaps()` runs inside the bordered Newton driver and
+not in `prepare()`: the refusal otherwise arrives after the mesh, the spaces,
+the assembly and the guess — measured, past 150 s on MAST-U at `k = 2`. Where
+the file also says how the mesh is made, MEQ knows the answer at parse time.
 
 → **[M-125](MEASUREMENTS.md#m-125)** — the projection as the identity, in every
-block · the mesh · the two defects the acceptance case found
+block · the mesh · the two defects the acceptance case found —
+and **[M-127](MEASUREMENTS.md#m-127)** — the symmetric mesher, its exactness
+and its refusals
 
 **AND `MakeCartesian2D`'s TRIANGLES ARE NOT A SYMMETRIC MESH EITHER**: it splits
 every cell along one diagonal, so a box symmetric in `z` has a triangulation

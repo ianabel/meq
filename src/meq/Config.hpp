@@ -231,6 +231,29 @@ namespace meq
 		/// human meshing interactively reads the printed report, and a mesh
 		/// generated inside a run has nobody looking at it.
 		bool check = true;
+
+		/**
+		 * `Symmetric` -- mesh `z >= 0` and REFLECT it, so the mesh is exactly
+		 * mirror-symmetric about `z = 0`.
+		 *
+		 * **THIS IS WHAT MAKES `[solver] UpDownSymmetry` REACHABLE AT ALL.**
+		 * That projection averages every dof with the dof at its own
+		 * reflection, so it needs a mesh whose dofs are mirror-paired, and
+		 * gmsh's triangulation of a symmetric geometry is NOT symmetric --
+		 * it picks a diagonal and it picks freely. Measured on MAST-U's
+		 * committed mesh, 3588 of 4735 vertices have no partner.
+		 *
+		 * The generator REFUSES this on a geometry that is not itself
+		 * mirror-symmetric -- an unpaired conductor, a limiter off the
+		 * midplane, a vessel outline that is not its own image -- rather than
+		 * reflecting a machine into a different machine. `Plasma*` is the
+		 * exception and is allowed to be asymmetric: it is a size field and
+		 * not geometry, so the half that is meshed is refined as asked and the
+		 * other half gets the reflection.
+		 *
+		 * Defaults false, which is the mesh every existing example has.
+		 */
+		bool symmetric = false;
 	};
 
 	/// The element attribute `tools/mesh/halfdisc.py` writes the interior of a

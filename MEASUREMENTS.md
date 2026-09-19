@@ -4455,8 +4455,9 @@ problem: its 23 `[[coils]]` are mirror-paired to the last digit, one pair
 excepted whose currents are **equal and opposite at 1.9107e-04 A** against a
 total of 2.310105e+06 A — 8e-11 of it, which is the 2.4e-10 the applied field
 was measured symmetric to. **The GEOMETRY is symmetric and gmsh's triangulation
-of it is not.** So the constraint is blocked on `tools/mesh/halfdisc.py`, which
-would have to mesh one half and reflect it.
+of it is not.** `tools/mesh/halfdisc.py --symmetric` meshes one half and
+reflects it, which is M-127; the refusal below is what a mesh made without it
+still gets.
 
 **AND `MakeCartesian2D`'s TRIANGLES ARE NOT THE SYMMETRIC MESH EITHER**, which
 is the trap to know before reaching for one: it splits every cell along ONE
@@ -4483,3 +4484,381 @@ VACUOUS.** It used a plain linear `solve()`, and the projection is wired into
 `solveWithNormalisation()` and nowhere else — `psi_ax` being an unknown is what
 makes the branch a question at all. **An exact zero from a routine that
 reassociates sums is not a pass; it is a routine that did not run.**
+
+### M-126
+
+**WHERE THE OTHER FIVE CORES GO ON A BORDERED FREE-BOUNDARY SOLVE.** The
+question was why a MAST-U run at `OMP = MKL = 8` sits at 250–290% of a possible
+800%. Taken on `examples/machine-f-diiid.toml` as a five-second proxy for the
+same path — free boundary, X-point, 10 exterior modes, 4848 elements, `k = 2`,
+PARDISO, `AssemblyMode::Threaded` — on an 8-core Ryzen 7 3800X.
+
+**FIRST, A THIRD OF THAT PERCENTAGE IS NOT WORK.** `OMP_WAIT_POLICY=passive`
+deletes two fifths of the CPU time for about 1.5% of the wall clock — four
+interleaved pairs on a quiet machine, medians 4.965 s default against 5.040 s
+passive, 14.6 s of user time against 8.6 s, `passive` slower in all four pairs
+and the spread within each arm about 2%. **So it is very nearly free and not
+exactly free**, and a first reading that said "free" was six runs on a
+contended machine where the difference is below the noise:
+
+| | wall | user | %CPU |
+|---|---|---|---|
+| `OMP=8 MKL=8` | 5.45, 5.44 s | 16.51, 16.27 s | 316%, 312% |
+| `OMP=8 MKL=8` **passive** | 5.39, 5.46 s | 9.61, 9.57 s | **197%, 193%** |
+| `OMP=8 MKL=1` | 6.12, 6.48 s | 12.08, 12.63 s | 208%, 207% |
+| `OMP=8 MKL=1` **passive** | 6.38, 6.33 s | 8.84, 9.11 s | 153%, 157% |
+| `OMP=1 MKL=8` | 7.37, 7.12 s | 12.00, 11.94 s | 173%, 178% |
+| `OMP=1 MKL=8` **passive** | 7.07, 7.13 s | 8.23, 8.36 s | 126%, 126% |
+
+**6.8 s of a 16.4 s CPU budget is barrier spin**, and the two pools contribute
+independently and about equally — 3.3 s from MEQ's own OpenMP regions, 3.7 s
+from MKL's, and 3.3 + 3.7 = 7.0 against the 6.8 measured together.
+`GOMP_SPINCOUNT=1000` reads the same as `passive`. **So the utilisation figure
+that prompted the question is inflated by the runtime waiting, and the honest
+number is about 190%.**
+
+**AND IT IS WHAT MAKES A PER-LEG `cores` READING MEAN ANYTHING**, which is the
+reason to set it that has nothing to do with the trade above. Under the default
+policy the same run reports `constraint location` at **5.76 cores** and `I_p` at
+**8.95** — legs that read 1.01 and 1.03 under `passive`, and that no thread but
+one enters. The CPU is the other seven spinning through them. A serial leg
+therefore reads HIGH rather than low, which is the opposite of the mistake the
+column invites.
+
+**SECOND, THE WALL CLOCK: EIGHT CORES BUY 1.43x AND ONE LEG OWNS THE GAP.**
+
+**THE WHOLE-RUN BUDGET, WHICH CLOSES AGAINST THE WALL CLOCK**, quiet machine,
+`passive`, three support sweeps. `cores` is `cpu/wall` over the leg, so it is
+the mean number of cores busy in it; the legs sum to the solve phase and the
+three phases sum to the wall:
+
+```
+MEQ: wall 4.753 s = setup 0.020 + solve 3.927 + output 0.806
+MEQ: where the run went -- wall 4.753 s, cpu 9.138 s, 1.92 cores on average
+                              wall s   share   cores      calls
+  setup                       0.020    0.4%    1.00          1
+  solve                       3.927   82.6%    2.12          3
+  output                      0.806   17.0%    1.00          1
+    of which postProcess      0.609   12.8%    1.00          1
+  residual                    0.305    6.4%    6.75         28
+  gradient                    0.254    5.3%    4.78         12
+    of which ComputeH         0.152    3.2%       -         12
+  trace factorisation         0.230    4.8%    3.26         12
+  trace backsolve             0.545   11.5%    3.06        168
+  NPC reduce+recover          1.320   27.8%    1.00         12
+  constraint location         0.185    3.9%    1.01        253
+  border assembly             0.227    4.8%    1.00         66
+  border dense solve          0.184    3.9%    1.00         12
+  re-assembly                 0.198    4.2%    1.10         16
+  other (remainder)           0.143    3.0%    1.00          0
+  outside solve()             0.335    7.0%    1.00          3
+    of which makeSolver       0.061    1.3%    1.00          1
+    of which axis checks      0.096    2.0%    1.00          1
+```
+
+**Every leg that threads reads 3 to 6.8 cores and every leg that does not reads
+1.00**, which is the column doing its job. At `OMP = MKL = 1` the same run is
+6.775 s with **every leg at exactly 1.00** — the control that says the column is
+not measuring noise — so eight cores buy **1.43x**.
+
+**THE PER-SOLVE SPLIT AT 1 AND 8 THREADS**, which is how the flat leg was found
+before the run-level budget existed. Last solve of three support sweeps, 2
+Newton iterations, 14 border columns:
+
+| leg | `OMP = MKL = 1` | `OMP = MKL = 8` | speedup |
+|---|---|---|---|
+| residual | 0.384 s | 0.086 s | **4.5x** |
+| gradient | 0.123 s | 0.045 s | 2.7x |
+| — of which `ComputeH` | 0.040 s | 0.028 s | 1.4x |
+| trace factorisation | 0.105 s | 0.058 s | 1.8x |
+| trace backsolve | 0.145 s | 0.081 s | 1.8x |
+| **`NPCReduce` + `NPCRecover`** | **0.212 s** | **0.212 s** | **1.00x** |
+| constraint location | 0.023 s | 0.023 s | 1.00x |
+| border assembly | 0.046 s | 0.047 s | 0.98x |
+| border dense solve | 0.034 s | 0.039 s | 0.87x |
+| re-assembly | 0.002 s | 0.003 s | — |
+| other (remainder) | 0.094 s | 0.097 s | 0.97x |
+| **total** | **1.169 s** | **0.692 s** | 1.69x |
+| whole run | 7.631 s | 5.146 s | 1.48x |
+
+**Identical to the millisecond across a factor of eight in threads, and 30.6%
+of the threaded step** — the largest leg there, ahead of the residual's 12.5%.
+Serial legs together are 61% of a threaded step.
+
+**THE LEG IS NEW AND `other` IS WHAT IT CAME OUT OF.** `TimedSolver` decorates
+the TRACE solver, so it times the middle of
+`NPCReduce -> trace solve -> NPCRecover` and neither end; the two element loops
+landed in the remainder, which is why that remainder was **45% of a threaded
+step and named nothing**. Timing `DarcyNPCSolver::ArrayMult()` and subtracting
+the trace solve inside it leaves the traversal alone, and `other` falls from
+0.357 s to **0.097 s**. Same `psi_ax` to every digit, 3.759851e-01, constraint
+−6.466e-12: the change is a clock read.
+
+**TWO INSTRUMENTS FOUND IT BEFORE THE LEG EXISTED, WHICH IS WHY THE LEG IS
+BELIEVED.**
+
+* **`perf` with DWARF call graphs** — `.eh_frame` unwinds a Release build with
+  no `-g`. Of the main thread's 4.71 s, `NPCRecover` is 0.63 s and `NPCReduce`
+  0.59 s: **26% together, with every sample of both on the main thread.**
+  Beside them, also entirely serial: the trace solve 0.57 s,
+  `DarcyForm::Reconstruct()` for `psi*` 0.60 s, assembly 0.30 s, the critical
+  point searches 0.22 s. **`Reconstruct()` is the second item and is the same
+  shape** — `ReconstructTotalFlux()` and all three `ReconstructFluxAndPot()`
+  overloads are plain element loops with no `pragma omp` in their bodies,
+  checked by extracting each whole function rather than a line range. It is
+  harder than the traversal rather than easier: the scatter is disjoint, but
+  the loop re-assembles integrators at the enriched order, so it needs
+  `MFEM_THREAD_SAFE` and the reentrant `ElementTransformation` route. Worth
+  about 1.10x against the traversal's 1.24x.
+* **Column scaling** — sweeping `[boundary.exterior] Modes` at 10, 6, 3, which
+  is 14, 10 and 7 border columns, the then-unnamed remainder read 0.330, 0.283
+  and 0.232 s. A straight line in the column count, slope 0.014 s per column
+  and intercept 0.134 s, so **59% of it scaled with the columns** — which is
+  what said the traversal rather than the vector arithmetic around it.
+
+**THE MECHANISM IS A MEASUREMENT OF SOMEBODY ELSE'S THAT DOES NOT CARRY.**
+Neither routine has an `omp parallel` — single-vector or blocked — where every
+other element-local loop in `DarcyHybridization` does. That is deliberate, and
+upstream's doxygen on `NPCGradient` says why: the two loops are *"under 6% of
+the step, flat in mesh size and order, and Amdahl caps any gain there"*, on the
+pedestal problem at four resolutions. **Those four cases are fixed boundary and
+ONE right-hand side.** A bordered step applies `J^-1` to `N + 4` columns against
+one factorisation, so the traversal is `O( elements x columns )` where the
+integrator-bound loops are `O( elements )` and already threaded. The share
+inverts as soon as there is a border, and again with every exterior mode.
+
+**WHAT IT WOULD BE WORTH, AND WHO CAN DO IT.** At the residual leg's own
+efficiency on the same mesh in the same process — 4.5x — the traversal falls to
+about 0.047 s: the step from 0.692 s to 0.527 s, **1.31x**, and the whole DIII-D
+run about **1.24x**. `NPCRecover` is embarrassingly parallel as written, its
+only writes being the calling element's own L2 dofs; `NPCReduce` accumulates at
+face dofs shared by two elements and needs atomics or a face colouring. Both
+are MFEM's, and the request is
+`../mfem-hdg-dev/doc/HDG-NPC-TRAVERSAL-FROM-MEQ.md`.
+
+**WHAT IS NOT THE ANSWER, MEASURED.** `OMP_NUM_THREADS=4` is **slower** than 8
+— 5.8 s against 5.5 s — so the gap is not oversubscription of the 8 physical
+cores by a 16-thread hyperthreaded topology. And `AssemblyMode`,
+`LocalFactorMode` and `TraceAssemblyMode` are already at the settings M-99 and
+M-101 chose; nothing in that group moves this leg, which reaches none of them.
+
+### M-127
+
+**`halfdisc.py --symmetric` MESHES `z >= 0` AND REFLECTS IT, AND THE PAIRING IS
+EXACT RATHER THAN CLOSE.** M-125 established that `[solver] UpDownSymmetry` is
+the identity on a symmetric mesh and refuses MAST-U's; this is the mesh it
+stops refusing. The flag cuts the disc with a second half-plane, clips the
+conductors and the limiter to the upper half analytically, meshes, and then
+reflects.
+
+**THE REFLECTION ACTS ON THE WRITTEN FILE, AND THAT IS WHY THE PAIRING IS
+EXACT.** gmsh writes the half exactly as an ordinary run does and a pass then
+rewrites `$Nodes` and `$Elements` in place. **The image coordinate is the
+decimal TOKEN with its sign flipped** — drop a leading `-` or add one — which is
+exact at whatever precision gmsh chose, where negating the double and
+reformatting is exact only if the formatter is. `$MeshFormat` and
+`$PhysicalNames` pass through untouched, so nothing about the format is
+re-implemented.
+
+| | |
+|---|---|
+| MAST-U's 23 conductors paired about `z = 0` | worst discrepancy **2.220e-16 m**, 1 self-mirror (the solenoid) |
+| the symmetric mesh | 4753 nodes, 9396 triangles, 108 boundary segments, 43 seam nodes |
+| unpaired nodes · involution failures · elements with no image · non-positive areas | **0 · 0 · 0 · 0** |
+| worst node pairing | **0.000e+00 m**, at a tolerance of 4.808e-09 m |
+| the committed `mastu-nke.msh`, same checker | 4735 nodes, **3588 unpaired**, 8620 of 9468 elements with no image |
+| edge manifold | 14040 edges used twice, 108 once, the 108 exactly the tagged boundary |
+| order 2, mid-edge offset from the chord | **3.212e-03 in each half, identically** |
+| the default path, 4 option families | **byte-identical**; `diverted-tokamak-generated` 2854 elements, 1467 nodes |
+
+3588 unpaired by VERTEX against the 3624 `buildMirrorMaps()` reports by DOF is a
+different question with the same answer.
+
+**THE SEAM IS SHARED AND NOT DUPLICATED, AND THE NEAR MISS IS INVISIBLE.** A
+node at `z == 0.0` **exactly** keeps its tag and is used by both halves; a node
+at `0 < |z| <= tol` is REFUSED, because duplicating it gives a mesh that looks
+perfect and is two disconnected halves. Exact zero is available because the cut
+is a straight geometric edge, the same property the axis relies on. Checked
+topologically rather than by coordinates: every edge is used by exactly two
+triangles or exactly one, and the ones used once are precisely the tagged
+boundary segments.
+
+**AND THE `z = 0` LINE GETS NO PHYSICAL GROUP.** It bounds the meshed half and
+is INTERIOR to the finished file, so the boundary classification grows a third
+case. Without it the seam joins Gamma — which would impose Gamma's transferred
+exterior datum straight across the midplane, and is this module's own recorded
+defect one geometry further on.
+
+**THREE THINGS THAT COULD HAVE BEEN TABULATED AND ARE DERIVED INSTEAD.** The
+orientation permutation comes from gmsh's own reference-element table rather
+than from the two cases somebody thought to write down, so it is right at any
+geometric order — checked at order 2 by the mid-edge offset above. The conductor
+pairing is greedy AND CONSUMING, so two conductors at the same place pair with
+each other rather than both claiming the first match, which is what makes the
+table an INVOLUTION — the property `buildMirrorMaps()` itself asserts and the
+one a partner table can get wrong while leaving nothing unmatched. And a
+reflected conductor takes its PARTNER's attribute, which is not the attribute of
+the half-plane copy.
+
+**WHAT IT REFUSES**, each an `argparse` error at exit 2: an unpaired conductor,
+a `--limiter` off the midplane (that flag names ONE circle and a mirror pair is
+two), and a `--vessel` outline that is not its own image — tested on the CURVE
+and not the vertex set, since a symmetric vertex set joined up asymmetrically
+clips to an upper half whose reflection is a different outline.
+
+**`--plasma` IS NOT REFUSED WHEN ASYMMETRIC, AND THE LINE IS DRAWN
+DELIBERATELY.** It is a size field and not geometry: the machine is unchanged,
+the meshed half is refined exactly as asked and the other half gets the
+reflection. MAST-U's box IS asymmetric — `z` in [−1.5099, 1.4987] — so this is
+live, and the tool prints a note rather than leaving it to be discovered.
+
+**MEQ TAKES THE RESULT.** On the full symmetric mesh with
+`[solver] UpDownSymmetry = true`, at `k = 1` capped at two Newton iterations,
+`buildMirrorMaps()` built the potential, trace and flux maps, `projectUpDown()`
+ran on the guess, and the bordered Newton iterated 1.053e-01 → 3.814e-02 →
+2.825e-03 before the cap stopped it. The control on the committed asymmetric
+mesh, same configuration, throws *"the potential space's element at
+( 0.196750, −1.560556 ) with no mirror partner about z = 0"*.
+
+**TWO DEFECTS FOUND THAT HAVE NOTHING TO DO WITH SYMMETRY.**
+
+* **A `--vessel` reaching past Gamma silently meshes a bigger domain.**
+  `occ.fragment` keeps the parts of a tool lying OUTSIDE the shape it is
+  fragmented into, so a vessel polygon poking past `rho` becomes extra surfaces.
+  Measured at `--rho 1.5` with a polygon out to `r = 2.5`: the written mesh
+  reaches **r = 2.5**, with **32 nodes carrying Gamma's attribute** on edges
+  inside it — the transferred exterior datum imposed in the middle of the
+  domain. `--check` catches it, but only with `--check` and only after the mesh
+  is built. It is now a parse-time refusal, which `--coil` and `--limiter`
+  already had.
+* **Eleven conductors collide with the limiter's attribute and twenty-one with
+  the vessel's.** The conductors are `10 + i` while `LIMITER_ATTRIBUTE = 20` and
+  `OUTSIDE_VESSEL_ATTRIBUTE = 30`, so the eleventh coil IS the limiter's
+  attribute and the twenty-first is the outside of the vessel — and
+  `[source] ExcludeAttributes = [ 30 ]` would then exclude a conductor. No
+  example in the tree reaches it: MAST-U has 23 conductors and neither a
+  limiter nor a vessel, and the limiter cases have two conductors. **Refused
+  rather than renumbered**, since moving the constants would change every mesh
+  that already has one and every config that names it, to buy a case nobody has
+  posed.
+
+**AND A CORRECTION TO WHERE THE REFUSAL HAPPENS.** `buildMirrorMaps()` is NOT
+in `prepare()`. It is called from inside the bordered Newton driver, after the
+mesh, the spaces, the assembly and the guess — so a run that is going to be
+refused takes **about 55 s at 2322 elements and `k = 1`**, and printed nothing
+at 150 s on the full mesh at `k = 2`. That is why `[solver] UpDownSymmetry` on a
+file that also carries `[mesh.generate]` without `Symmetric = true` is now a
+PARSE error: where the file says how the mesh is made, MEQ knows at parse time
+that the answer will be no.
+
+**WHAT IS NOT MEASURED, PLAINLY.** `k = 2` on the full symmetric mesh was not
+run to convergence. The entity pairing is `k`-independent — elements match by
+centroid, faces by centroid, and the seam faces are their own mirrors; only the
+dof count INSIDE a matched entity changes, and those are symmetric iff the
+entity is — so `k = 2` is a sound inference and not a measurement. And no
+equilibrium was compared between the symmetric and committed MAST-U meshes:
+they are different meshes of the same machine, so nothing bit-comparable exists
+and only the reference would arbitrate.
+
+### M-128
+
+**MAST-U SPENT 93.6% OF ITS RUN EVALUATING THE INITIAL GUESS, AND THE LEG
+PROFILE IS WHAT FOUND IT.** M-126 asked where a free-boundary run's cores go and
+answered it on DIII-D. Asked of MAST-U, the same instrument gave a completely
+different shape — and the difference was not the solver.
+
+**Before**, `examples/mastu-nke.toml`, `OMP = MKL = 8`, `OMP_WAIT_POLICY=passive`,
+quiet machine (loadavg 0.24 at the gate):
+
+```
+MEQ: wall 275.437 s = setup 0.038 + solve 273.924 + output 1.474
+MEQ: where the run went -- wall 275.437 s, cpu 284.650 s, 1.03 cores on average
+  re-assembly               133.518   48.5%    1.00         16
+  outside solve()           133.447   48.4%    1.00          4
+  NPC reduce+recover          2.403    0.9%    1.00         12
+  trace backsolve             0.891    0.3%    3.32        168
+  residual                    0.629    0.2%    7.20         32
+```
+
+**97% in two rows at 1.00 cores, and the leg M-126 filed upstream is 0.9% of
+it.** `prepare()` cost **8.3 s a call here against 12 ms on DIII-D** — 670x for
+1.87x the elements, so not a mesh-size effect.
+
+**THE FLAT PROFILE NAMED IT IN ONE READING**, 56k samples over the whole
+converging run:
+
+| symbol | share |
+|---|---|
+| `meq::geometricKernel` | **50.23%** |
+| Boost `ellint_rd_imp` (Carlson `R_D`) | **38.10%** |
+| `meq::coilPsi` | **5.29%** |
+| `meq::ellipsePsi` | 0.18% |
+
+and the call graph put **all of it under `prepare()`** — 57% through
+`GridFunction::ProjectCoefficient` onto the potential space and 43% through
+`projectOntoTrace()`. What is projected is the `Type = "conductors"` guess: **23
+`coilPsi` calls plus one `ellipsePsi` at every nodal point of BOTH spaces**,
+about 95,000 points.
+
+**THE ORDER IS THE WHOLE COST, AND IT IS A REFERENCE ORDER USED FOR A GUESS.**
+`coilPsi` runs a panelled tensor Gauss rule; `defaultCoilQuadratureOrder = 32`
+is chosen to make the interior usable as a reference. Measured over 1176 points
+of MAST-U's disc against order 32, with `max |psi_coil| = 1.515779e-01 Wb/rad`,
+all 23 conductors per point:
+
+| order | max abs err | relative | us / point | vs 32 |
+|---|---|---|---|---|
+| 2 | 4.317102e-03 | 2.848e-02 | 6.6 | 211x |
+| 3 | 1.544457e-03 | 1.019e-02 | 13.4 | 104x |
+| 4 | 6.521601e-04 | 4.302e-03 | 23.2 | 60x |
+| **6** | **9.055783e-05** | **5.974e-04** | **50.0** | **28x** |
+| 8 | 1.168790e-05 | 7.711e-05 | 88.1 | 16x |
+| 12 | 9.744078e-07 | 6.428e-06 | 197.0 | 7x |
+| 16 | 4.775856e-08 | 3.151e-07 | 342.7 | 4x |
+| 32 | — | — | **1392.4** | 1x |
+
+**1392 us a point x 95,000 points x two projections is 265 s**, against the 267 s
+the two rows measured — which is what says the mechanism is understood rather
+than merely correlated.
+
+**TWO CHANGES, AND NEITHER TOUCHES THE EQUILIBRIUM.**
+
+* **`meq::guessCoilQuadratureOrder = 6`.** At 6 the guess is wrong by 9.1e-05
+  Wb/rad against a `psi_ax` of 9.2e-02 — a thousandth of the quantity being
+  guessed, and far below the 1.6e-04 m the X-point seed is already allowed.
+  **The guess is not the problem statement**; nothing about the answer depends
+  on it, only which basin Newton starts in.
+* **`prepare()` caches the seed projection.** The driver prepares once to read
+  `potential()` for its support sweep and `solve()` prepares again a moment
+  later; both seed, with the same guess, and nothing between them changes it.
+  The cached vectors are the projection's own output copied back, so this is
+  bit-exact. It tightens one contract: a caller mutating a guess **in place**
+  must call `setInitialGuess()` again. Both overloads drop the cache, and every
+  caller in the tree already does exactly that.
+
+| | wall | re-assembly | outside solve() |
+|---|---|---|---|
+| before | **275.437 s** | 133.518 s | 133.447 s |
+| order 6 alone | **31.394 s** | 10.439 s | 10.534 s |
+| order 6 + seed cache | **20.939 s** | **0.388 s** | 11.054 s |
+
+**13.2x, and the answer does not move**: `psi_ax` 9.162567e-02, `psi_bnd`
+2.864064e-02, the X-point at ( 0.598637, −1.097187 ) 1.578e-04 m from its seed,
+the axis at ( 0.9489, −0.0000 ), 2 Newton iterations in the last sweep — every
+printed digit as before. The constraint residual moves in its last, −1.990e-14
+to −1.986e-14, which is the guess having changed. DIII-D is unmoved on all of
+`psi_ax`, `psi_bnd`, the X-point and the constraint, warm-started and never
+touching this path.
+
+**WHAT IS LEFT IS ONE PROJECTION**, 11.054 s of 20.939 s, in `outside solve()` —
+the driver's own `prepare()`, which is the first and cannot be cached from
+anything. Lowering the order further, threading the projection, or evaluating
+the conductors once per distinct point are the remaining levers and none has
+been taken.
+
+**THE TRANSFERABLE PART IS ABOUT THE ESTIMATE AND NOT THE NUMBER.** The comment
+beside this guess read *"meq::ellipsePsi() is 66 us a point ... about 6 s of
+MAST-U's 291 s"*. That was measured and it was right: `ellipsePsi` is 0.18% of
+the run. What it did not say is that the same loop evaluates **23 conductors at
+the same points**, and those are the other 93.4%. **A measurement of one term in
+a loop is not a measurement of the loop.**

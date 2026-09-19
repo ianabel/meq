@@ -203,6 +203,20 @@ with every printed number looking exactly as it should.
        :math:`r` reaches 0 **exactly**, that :math:`\Gamma` and the axis are the
        outer boundary and nothing else, and that each coil attribute covers its
        rectangle.
+   * - ``Symmetric``
+     - ``false``
+     - Mesh :math:`z \ge 0` and **reflect it**, so the mesh is exactly
+       mirror-symmetric about :math:`z = 0`. This is what makes
+       ``[solver] UpDownSymmetry`` usable: that projection averages every
+       degree of freedom with the one at its own reflection, and gmsh's
+       triangulation of a symmetric geometry is *not* symmetric — it picks a
+       diagonal and picks freely. The generator **refuses** this on a geometry
+       that is not itself mirror-symmetric — an unpaired conductor, a limiter
+       off the midplane, a vessel outline that is not its own image — rather
+       than reflecting your machine into a different one. ``Plasma*`` is the
+       exception and may be asymmetric: it is a size field, not geometry, so
+       the meshed half is refined as asked and the other half gets the
+       reflection.
 
 .. note::
 
@@ -1331,3 +1345,12 @@ rather than left to the configuration.
    not generally return a symmetric mesh, and neither does a triangulated
    Cartesian grid, which splits every cell along one diagonal. A quadrilateral
    grid symmetric about :math:`z = 0` does.
+
+   **Where MEQ makes the mesh, say so there too.** Set
+   ``[mesh.generate] Symmetric = true``, which meshes :math:`z \ge 0` and
+   reflects it. Asking for ``UpDownSymmetry`` on a generated mesh *without*
+   that key is a **parse error**, because the mirror maps are built inside the
+   nonlinear solve rather than at setup — the refusal would otherwise arrive
+   minutes in, after the mesh, the spaces, the assembly and the initial guess.
+   A mesh you made yourself is left alone: MEQ cannot know whether it is
+   symmetric without looking, and finds out the slow way.

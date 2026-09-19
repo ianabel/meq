@@ -14,6 +14,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <ctime>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -975,6 +976,36 @@ namespace
 	}
 
 	/**
+	 * THE PROCESS'S CPU SECONDS, READ BESIDE EVERY LEG'S WALL SECONDS.
+	 *
+	 * Wall time says how long a leg took and cannot say whether it used the
+	 * machine. `cpu/wall` is the mean number of cores busy in it, so a leg
+	 * that threads reads near the thread count and one that does not reads
+	 * near 1 -- in ONE run, where otherwise it takes a pair of runs at
+	 * different thread counts and the arithmetic of Amdahl to say the same
+	 * thing. That difference is the whole reason this exists: the question
+	 * "is this threaded" is asked of a leg far more often than anyone is
+	 * willing to take two runs to answer it.
+	 *
+	 * IT COUNTS SPIN. A thread waiting at an OpenMP barrier burns CPU before
+	 * it sleeps, so a leg whose threads mostly wait reads HIGH rather than
+	 * low, and `OMP_WAIT_POLICY=passive` is what separates the two readings.
+	 * See MEASUREMENTS.md M-126, where that gap is two fifths of the process.
+	 *
+	 * `CLOCK_PROCESS_CPUTIME_ID` is process-wide, so a leg's figure includes
+	 * anything else the process is doing -- which for MEQ, being serial
+	 * outside its own OpenMP regions, is nothing.
+	 */
+	double profileCpuNow()
+	{
+		timespec now = {};
+		if ( clock_gettime( CLOCK_PROCESS_CPUTIME_ID, &now ) != 0 )
+			return 0.0;
+		return static_cast<double>( now.tv_sec )
+		       + 1.0e-9*static_cast<double>( now.tv_nsec );
+	}
+
+	/**
 	 * A LEG TIMER THAT SURVIVES AN EARLY RETURN, WHICH IS WHY IT IS A CLASS.
 	 *
 	 * The legs it serves -- peakAt(), refreshLimiterContact() -- have several
@@ -991,8 +1022,9 @@ namespace
 	class LegTimer
 	{
 		public:
-			LegTimer( double &secondsIn, long &calls )
-				: seconds( secondsIn ), started( profileNow() )
+			LegTimer( double &secondsIn, double &cpuSecondsIn, long &calls )
+				: seconds( secondsIn ), cpuSeconds( cpuSecondsIn ),
+				  started( profileNow() ), startedCpu( profileCpuNow() )
 			{
 				++calls;
 			}
@@ -1000,6 +1032,7 @@ namespace
 			~LegTimer()
 			{
 				seconds += profileNow() - started;
+				cpuSeconds += profileCpuNow() - startedCpu;
 			}
 
 			LegTimer( LegTimer const & ) = delete;
@@ -1007,7 +1040,9 @@ namespace
 
 		private:
 			double &seconds;
+			double &cpuSeconds;
 			double started;
+			double startedCpu;
 	};
 
 	class TimedOperator : public mfem::Operator
@@ -1025,8 +1060,10 @@ namespace
 			           mfem::Vector &y ) const override
 			{
 				double const t0 = profileNow();
+				double const c0 = profileCpuNow();
 				inner.Mult( x, y );
 				profile.residualSeconds += profileNow() - t0;
+				profile.residualCpuSeconds += profileCpuNow() - c0;
 				++profile.residualCalls;
 			}
 
@@ -1035,8 +1072,10 @@ namespace
 				mfem::Vector const &x ) const override
 			{
 				double const t0 = profileNow();
+				double const c0 = profileCpuNow();
 				mfem::Operator &grad = inner.GetGradient( x );
 				profile.gradientSeconds += profileNow() - t0;
+				profile.gradientCpuSeconds += profileCpuNow() - c0;
 				++profile.gradientCalls;
 				return grad;
 			}
@@ -1061,8 +1100,10 @@ namespace
 				mfem::Operator const &op ) override
 			{
 				double const t0 = profileNow();
+				double const c0 = profileCpuNow();
 				inner.SetOperator( op );
 				profile.traceFactorSeconds += profileNow() - t0;
+				profile.traceFactorCpuSeconds += profileCpuNow() - c0;
 				++profile.traceFactorCalls;
 				// The wrapper's own shape follows the wrapped solver's, which only
 				// becomes known here: a direct solver sizes itself on its matrix.
@@ -1081,8 +1122,10 @@ namespace
 				inner.iterative_mode = iterative_mode;
 
 				double const t0 = profileNow();
+				double const c0 = profileCpuNow();
 				inner.Mult( b, x );
 				profile.traceSolveSeconds += profileNow() - t0;
+				profile.traceSolveCpuSeconds += profileCpuNow() - c0;
 				++profile.traceSolveCalls;
 			}
 
@@ -1111,8 +1154,10 @@ namespace
 				inner.iterative_mode = iterative_mode;
 
 				double const t0 = profileNow();
+				double const c0 = profileCpuNow();
 				inner.ArrayMult( b, x );
 				profile.traceSolveSeconds += profileNow() - t0;
+				profile.traceSolveCpuSeconds += profileCpuNow() - c0;
 				profile.traceSolveCalls += b.Size();
 			}
 
@@ -1164,8 +1209,16 @@ namespace
 		boundaryData = &boundaryIn;
 	}
 
+	void GradShafranovSolver::dropGuessSeed()
+	{
+		guessSeedFrom = nullptr;
+		guessSeedPotential.SetSize( 0 );
+		guessSeedTrace.SetSize( 0 );
+	}
+
 	void GradShafranovSolver::setInitialGuess( mfem::Coefficient &psiGuess )
 	{
+		dropGuessSeed();
 		ownedInitialGuess.reset();
 		initialGuess = &psiGuess;
 		initialGuessField = nullptr;
@@ -1174,6 +1227,7 @@ namespace
 
 	void GradShafranovSolver::setInitialGuess( mfem::GridFunction const &psiGuess )
 	{
+		dropGuessSeed();
 		// GridFunctionCoefficient takes a non-const pointer but only reads, which
 		// is why the public interface can promise const.
 		ownedInitialGuess = std::make_unique<mfem::GridFunctionCoefficient>(
@@ -2926,8 +2980,8 @@ namespace
 	                                                  mfem::Array<int> &dofs,
 	                                                  double &r, double &z ) const
 	{
-		LegTimer const timer( profile.constraintSeconds, profile.constraintCalls );
-		LegTimer const slice( profile.limiterSeconds, profile.limiterCalls );
+		LegTimer const timer( profile.constraintSeconds, profile.constraintCpuSeconds, profile.constraintCalls );
+		LegTimer const slice( profile.limiterSeconds, profile.limiterCpuSeconds, profile.limiterCalls );
 		mfem::Mesh &mesh = *potentialFes->GetMesh();
 
 		element = -1;
@@ -3667,7 +3721,7 @@ namespace
 	std::vector<mfem::Vector>
 		GradShafranovSolver::exteriorTransmissionRows( ExteriorDtN const &exterior ) const
 	{
-		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCalls );
+		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCpuSeconds, profile.borderAssemblyCalls );
 		if ( !transferPath )
 			throw std::logic_error(
 				"meq::GradShafranovSolver::exteriorTransmissionRows: there is no "
@@ -4180,8 +4234,46 @@ namespace
 		 */
 		if ( initialGuess && nonlinearSource && seedFromGuess )
 		{
-			projectOntoTrace( *initialGuess, traceGf );
-			potentialGf.ProjectCoefficient( *initialGuess );
+			/*
+			 * THE SEED IS CACHED, BECAUSE prepare() IS CALLED TWICE WITH THE
+			 * SAME GUESS AND THE PROJECTION CAN COST MORE THAN THE SOLVE.
+			 *
+			 * The driver prepares once to read potential() into the state its
+			 * support sweep needs, and solve() prepares again a moment later;
+			 * both seed, and the projection is identical both times. With a
+			 * guess built from [[coils]] that projection evaluates every
+			 * conductor at every nodal point of BOTH spaces -- measured on
+			 * MAST-U at 10.5 s a time against a 31 s run, and at 133 s a time
+			 * before guessCoilQuadratureOrder existed. Nothing about it
+			 * depends on anything between the two calls.
+			 *
+			 * BIT-EXACT AND NOT AN APPROXIMATION: the cached vectors are the
+			 * projection's own output, copied back.
+			 *
+			 * WHAT IT ASSUMES, and it is a real tightening of the contract: a
+			 * caller that mutates a guess IN PLACE must call setInitialGuess()
+			 * again. Both overloads drop the cache, so handing the same
+			 * GridFunction back is enough -- which is what the support sweep
+			 * and the Picard ladder already do, every one of them. Mutating
+			 * the object behind a live Coefficient and calling prepare() is
+			 * what no longer re-reads it.
+			 */
+			bool const cached = guessSeedFrom == initialGuess
+			                    && guessSeedPotential.Size() == potentialGf.Size()
+			                    && guessSeedTrace.Size() == traceGf.Size();
+			if ( cached )
+			{
+				traceGf = guessSeedTrace;
+				potentialGf = guessSeedPotential;
+			}
+			else
+			{
+				projectOntoTrace( *initialGuess, traceGf );
+				potentialGf.ProjectCoefficient( *initialGuess );
+				guessSeedTrace = traceGf;
+				guessSeedPotential = potentialGf;
+				guessSeedFrom = initialGuess;
+			}
 
 			// AND THE FLUX, when the guess arrived as a field rather than as a
 			// bare Coefficient -- see seedFluxFromGuess() for why the flux row
@@ -5111,8 +5203,8 @@ namespace
 
 	double GradShafranovSolver::assemblePlasmaCurrent( mfem::Vector const &state ) const
 	{
-		LegTimer const timer( profile.constraintSeconds, profile.constraintCalls );
-		LegTimer const slice( profile.currentSeconds, profile.currentCalls );
+		LegTimer const timer( profile.constraintSeconds, profile.constraintCpuSeconds, profile.constraintCalls );
+		LegTimer const slice( profile.currentSeconds, profile.currentCpuSeconds, profile.currentCalls );
 		if ( !normalisedSource )
 			return 0.0;
 
@@ -5166,7 +5258,7 @@ namespace
 	void GradShafranovSolver::assembleCurrentColumn( mfem::Vector const &state,
 	                                                 mfem::Vector &out ) const
 	{
-		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCalls );
+		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCpuSeconds, profile.borderAssemblyCalls );
 		out.SetSize( state.Size() );
 		out = 0.0;
 		if ( !normalisedSource )
@@ -5229,7 +5321,7 @@ namespace
 		mfem::Vector const &state, double &againstAxis,
 		double &againstBoundary ) const
 	{
-		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCalls );
+		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCpuSeconds, profile.borderAssemblyCalls );
 		againstAxis = 0.0;
 		againstBoundary = 0.0;
 		if ( !normalisedSource )
@@ -5368,7 +5460,7 @@ namespace
 	void GradShafranovSolver::assembleCurrentRow( mfem::Vector const &state,
 	                                              mfem::Vector &out ) const
 	{
-		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCalls );
+		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCpuSeconds, profile.borderAssemblyCalls );
 		out.SetSize( state.Size() );
 		out = 0.0;
 		if ( !normalisedSource )
@@ -5547,7 +5639,7 @@ namespace
 	bool GradShafranovSolver::assembleExteriorColumns(
 		std::vector<mfem::Vector> &columns )
 	{
-		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCalls );
+		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCpuSeconds, profile.borderAssemblyCalls );
 		columns.clear();
 		if ( !exteriorCoupling || !transferPath )
 			return false;
@@ -5600,7 +5692,7 @@ namespace
 	                                                       bool axis,
 	                                                       mfem::Vector &out ) const
 	{
-		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCalls );
+		LegTimer const timer( profile.borderAssemblySeconds, profile.borderAssemblyCpuSeconds, profile.borderAssemblyCalls );
 		// Under the condensation the residual is the REDUCED trace residual and
 		// this element assembly is not it. NPC's residual is unreduced, which is
 		// what makes the column assemblable at all.
@@ -5819,7 +5911,7 @@ namespace
 		 */
 		auto reprepare = [ & ]()
 		{
-			LegTimer const timer( profile.prepareSeconds, profile.prepareCalls );
+			LegTimer const timer( profile.prepareSeconds, profile.prepareCpuSeconds, profile.prepareCalls );
 			// WITHOUT THE GUESS. Every caller below assigns the iterate from a
 			// saved state on the next line, so seeding it here is computed and
 			// discarded -- see prepare( bool ).
@@ -6018,8 +6110,9 @@ namespace
 		auto refreshXPoint = [ & ]( mfem::Vector const &state )
 		{
 			LegTimer const timer( profile.constraintSeconds,
+			                      profile.constraintCpuSeconds,
 			                      profile.constraintCalls );
-			LegTimer const slice( profile.xPointSeconds, profile.xPointCalls );
+			LegTimer const slice( profile.xPointSeconds, profile.xPointCpuSeconds, profile.xPointCalls );
 			if ( !xPointIsUnknown )
 				return;
 
@@ -6199,14 +6292,18 @@ namespace
 				if ( !plasmaSupportFrozenValue )
 				{
 					double const tc = profileNow();
+					double const cc = profileCpuNow();
 					refreshPlasmaComponent( state );
 					profile.componentSeconds += profileNow() - tc;
+					profile.componentCpuSeconds += profileCpuNow() - cc;
 					++profile.componentCalls;
 				}
 
 				double const tr = profileNow();
+				double const cr = profileCpuNow();
 				npc->Mult( state, out );
 				profile.residualSeconds += profileNow() - tr;
+				profile.residualCpuSeconds += profileCpuNow() - cr;
 				++profile.residualCalls;
 			}
 		};
@@ -6434,6 +6531,7 @@ namespace
 			if ( !found )
 			{
 				LegTimer const cold( profile.axisSweepSeconds,
+				                     profile.axisSweepCpuSeconds,
 				                     profile.axisSweepCalls );
 				std::vector< CriticalPoint > const all = finder.sweep();
 
@@ -6690,8 +6788,9 @@ namespace
 		                     int *element, int *dof )
 		{
 			LegTimer const timer( profile.constraintSeconds,
+			                      profile.constraintCpuSeconds,
 			                      profile.constraintCalls );
-			LegTimer const slice( profile.axisSeconds, profile.axisCalls );
+			LegTimer const slice( profile.axisSeconds, profile.axisCpuSeconds, profile.axisCalls );
 			if ( normalisedSource )
 				normalisedSource->setNormalisation( normalisation, sB );
 
@@ -6920,6 +7019,7 @@ namespace
 		auto transmissionConstraint = [ & ]( mfem::Vector const &state, int mode )
 		{
 			LegTimer const timer( profile.constraintSeconds,
+			                      profile.constraintCpuSeconds,
 			                      profile.constraintCalls );
 			double total = 0.0;
 			mfem::Vector const &row = exteriorRows[ static_cast<std::size_t>( mode ) ];
@@ -7083,8 +7183,10 @@ namespace
 			if ( hasNormalisation )
 			{
 				LegTimer const timer( profile.constraintSeconds,
+				                      profile.constraintCpuSeconds,
 				                      profile.constraintCalls );
 				LegTimer const slice( profile.axisSeconds,
+				                      profile.axisCpuSeconds,
 				                      profile.axisCalls );
 				if ( normalisedSource )
 					normalisedSource->setNormalisation( s, sB );
@@ -7678,7 +7780,28 @@ namespace
 			{
 				if ( borderRhs.Size() == 0 )
 					return;
+				/*
+				 * TIMED AS THE TRAVERSAL ALONE, BY SUBTRACTING THE TRACE SOLVE
+				 * THAT HAPPENS INSIDE IT.
+				 *
+				 * `TimedSolver` wraps the TRACE solver, so the seconds it adds
+				 * during this call are exactly the middle of NPCReduce -> solve
+				 * -> NPCRecover. Taking the difference leaves the two element
+				 * loops, which is the quantity worth a leg: they are
+				 * `O( elements x columns )`, they carry no `omp parallel`, and
+				 * until they had a name they were the bulk of a remainder that
+				 * GREW with the thread count. See StepProfile.
+				 */
+				double const t0 = profileNow();
+				double const c0 = profileCpuNow();
+				double const traceBefore = profile.traceSolveSeconds;
+				double const traceCpuBefore = profile.traceSolveCpuSeconds;
 				npcLinear.ArrayMult( borderRhs, borderOut );
+				profile.npcTraversalSeconds += profileNow() - t0
+					- ( profile.traceSolveSeconds - traceBefore );
+				profile.npcTraversalCpuSeconds += profileCpuNow() - c0
+					- ( profile.traceSolveCpuSeconds - traceCpuBefore );
+				++profile.npcTraversalCalls;
 				for ( int i = 0; i < borderOut.Size(); ++i )
 					borderOut[ i ]->HostRead();
 				borderRhs.SetSize( 0 );
@@ -7694,8 +7817,10 @@ namespace
 				if ( !plasmaSupportFrozenValue )
 					refreshPlasmaComponent( unknown );
 				double const tg = profileNow();
+				double const cg = profileCpuNow();
 				mfem::Operator &jacobian = npc->GetGradient( unknown );
 				profile.gradientSeconds += profileNow() - tg;
+				profile.gradientCpuSeconds += profileCpuNow() - cg;
 				++profile.gradientCalls;
 				npcLinear.SetOperator( jacobian );
 				queue( residual, y );
@@ -8018,6 +8143,7 @@ namespace
 			// leg's and must not be charged here twice.
 			{
 			LegTimer const denseTimer( profile.borderSolveSeconds,
+			                           profile.borderSolveCpuSeconds,
 			                           profile.borderSolveCalls );
 
 			if ( nBorderTotal == 1 )
@@ -8711,17 +8837,48 @@ namespace
 		mfem::DarcyHybridization::ResetComputeHTime();
 
 		double const profileStart = profileNow();
+		/*
+		 * AND THE RUN-LEVEL ACCUMULATION, WHICH IS WHAT MAKES THE LEGS ADD UP
+		 * TO A RUN RATHER THAN TO ONE solve().
+		 *
+		 * `profile` is this solve's and is zeroed above, which is right for
+		 * "where did a step go" and useless for "where did the run go": a
+		 * moving-support run calls solve() once per sweep and an adaptive one
+		 * once per cycle, so the reported legs were the LAST of them and the
+		 * driver had no way to add the others up.
+		 *
+		 * DEPTH-GUARDED, because solveByPicardThenNewton() calls solve()
+		 * again for its second stage and an unguarded accumulator would count
+		 * that run twice. The inner call still zeroes `profile`, so on that
+		 * path what is accumulated is the inner solve's legs under the outer
+		 * solve's total -- the same limitation `profile` itself has there, and
+		 * documented in StepProfile rather than papered over.
+		 */
 		struct ProfileTotal
 		{
 			GradShafranovSolver::StepProfile &p;
+			GradShafranovSolver::StepProfile &run;
+			int &depth;
 			double t0;
+			double c0;
+			ProfileTotal( GradShafranovSolver::StepProfile &pIn,
+			              GradShafranovSolver::StepProfile &runIn,
+			              int &depthIn, double t0In )
+				: p( pIn ), run( runIn ), depth( depthIn ), t0( t0In ),
+				  c0( profileCpuNow() )
+			{
+				++depth;
+			}
 			~ProfileTotal()
 			{
 				p.totalSeconds = profileNow() - t0;
+				p.totalCpuSeconds = profileCpuNow() - c0;
 				p.computeHSeconds = mfem::DarcyHybridization::GetComputeHTime();
 				p.computeHCalls = mfem::DarcyHybridization::GetComputeHCalls();
+				if ( --depth == 0 )
+					run.add( p );
 			}
-		} const profileTotal{ profile, profileStart };
+		} const profileTotal{ profile, runProfile, solveDepth, profileStart };
 
 		// The Picard paths iterate a fixed point on the POTENTIAL, not a residual
 		// on the trace, so they do not go through prepare()-then-Newton at all --
@@ -8802,7 +8959,17 @@ namespace
 		if ( normalisedSource )
 			normalisedSource->setNormalisation( psiAxisValue );
 
-		prepare();
+		{
+			// THE FIRST ASSEMBLY IS THE SAME LEG AS EVERY LATER ONE. It was
+			// untimed, so a full FormLinearSystem() per solve() -- 0.16 s of a
+			// 0.7 s diverted-machine step -- sat in `otherSeconds()` while the
+			// re-assemblies inside the Newton loop had a leg of their own.
+			// Same function, same work, same leg.
+			LegTimer const timer( profile.prepareSeconds,
+			                      profile.prepareCpuSeconds,
+			                      profile.prepareCalls );
+			prepare();
+		}
 
 		if ( normalisedSource || exteriorCoupling )
 		{
@@ -8942,8 +9109,10 @@ namespace
 						// that knows the call belongs to a Newton step: the same
 						// function is also reached from the post-processing.
 						double const t0 = profileNow();
+						double const c0 = profileCpuNow();
 						refreshPlasmaComponent( x );
 						profile.componentSeconds += profileNow() - t0;
+						profile.componentCpuSeconds += profileCpuNow() - c0;
 						++profile.componentCalls;
 					} );
 
@@ -9422,6 +9591,12 @@ namespace
 	GradShafranovSolver::stepProfile() const
 	{
 		return profile;
+	}
+
+	GradShafranovSolver::StepProfile const &
+	GradShafranovSolver::runStepProfile() const
+	{
+		return runProfile;
 	}
 
 	long GradShafranovSolver::localNonlinearIterations() const

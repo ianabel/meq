@@ -113,6 +113,67 @@ The saving grows with `rho`, which is the direction the exterior coupling
 pushes: moving Γ from 1.5 to 3.0 costs the graded mesh 14% more elements and
 the uniform one four times as many.
 
+## `--symmetric`, when the solve will project onto the symmetric subspace
+
+`[solver] UpDownSymmetry` finds the up–down symmetric equilibrium by projecting
+the iterate onto the fields even in `z`, which is what makes the two saddles of
+a double null exactly degenerate when the X-point search looks for them. It is
+a **dof-for-dof average**, so it needs a mesh that is its own mirror image, and
+`meq::GradShafranovSolver` refuses one that is not — by name, rather than
+projecting away an asymmetry the mesh describes.
+
+**A symmetric machine does not give a symmetric mesh.** Every triangulation
+picks diagonals and gmsh picks them freely: measured on MAST-U, 3624 of 4735
+vertices have no mirror partner while all 23 conductors are paired to the last
+printed digit. `--symmetric` meshes the half `z ≥ 0` and reflects it, sharing
+the nodes on `z = 0`:
+
+```sh
+python3 tools/mesh/halfdisc.py --rho 3.4 --size 0.30 --symmetric --check \
+    --coil ... -o machine.msh
+```
+
+It is **opt-in and changes nothing without it** — the default path is the same
+mesh it always was, to the byte.
+
+**The geometry has to be symmetric and an asymmetric one is refused**, naming
+what is unpaired: a conductor with no mirror partner, a `--limiter` circle off
+the midplane (the option names one circle, and a mirror pair of them is two),
+a `--vessel` outline that is not its own image. Reflecting any of those would
+produce a mesh of a machine nobody built, converging at full order, with
+nothing downstream able to question it. A conductor centred on `z = 0` — every
+spherical tokamak's solenoid — is its own mirror and is clipped rather than
+refused.
+
+**`--plasma` is not refused when it is asymmetric**, and the distinction is the
+point: it is a size field rather than geometry, so the machine is unaffected.
+The half that is meshed gets exactly the refinement asked for and the other
+half gets the reflection of it. The tool says so on stdout rather than leaving
+it to be noticed.
+
+**A reflected conductor carries its PARTNER's attribute.** `10 + i` is the
+`i`-th `--coil` in command-line order, so the image of coil `i` has to come out
+as coil `i`'s partner `j`; anything else gives every conductor below the
+midplane its opposite number's current.
+
+## `--symmetry-check FILE` asks the question MEQ asks
+
+```sh
+python3 tools/mesh/halfdisc.py --symmetry-check machine.msh
+```
+
+It reads any `.msh` — one this tool made or one it did not — pairs every node,
+and reports three things in ascending order of teeth: how many nodes have no
+partner; whether the pairing is an **involution**, `map[ map[ i ] ] == i`, which
+is what catches every way a pairing goes wrong short of leaving something
+unmatched; and whether the **element set** maps onto itself, since symmetric
+nodes do not make a symmetric mesh — the diagonal a triangulation picks is
+exactly what a node-only check cannot see. It also prints the attribute pairing
+it finds and the count of elements whose signed area came out non-positive, a
+reflection being orientation-reversing.
+
+`--symmetric --check` runs it on what it has just written.
+
 ## Always pass `--check` when the geometry changes
 
 It re-reads the written file — not the model still in memory, which would share

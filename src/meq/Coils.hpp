@@ -269,6 +269,43 @@ namespace meq
 	/// evaluates the exterior.
 	inline constexpr int defaultCoilQuadratureOrder = 32;
 
+	/**
+	 * The order an INITIAL GUESS wants, which is not the order a field wants.
+	 *
+	 * **THE DEFAULT IS FOR A REFERENCE AND IT IS RUINOUS FOR A GUESS.** A guess
+	 * built from `[[coils]]` evaluates every conductor at every nodal point of
+	 * the potential space AND the trace space, and at order 32 that is
+	 * **1392 us a point** for MAST-U's 23 conductors -- measured, and it made
+	 * the conductor field **93.6% of that machine's whole run**, dwarfing the
+	 * solve it was helping.
+	 *
+	 * 6 is chosen from a measurement rather than from taste. Against order 32
+	 * over 1176 points of MAST-U's disc, where `max |psi_coil|` is
+	 * 1.515779e-01 Wb/rad:
+	 *
+	 *     order   max abs err    relative    us/point
+	 *         2   4.317102e-03   2.848e-02        6.6
+	 *         4   6.521601e-04   4.302e-03       23.2
+	 *         6   9.055783e-05   5.974e-04       50.0
+	 *         8   1.168790e-05   7.711e-05       88.1
+	 *        16   4.775856e-08   3.151e-07      342.7
+	 *        32              --          --     1392.4
+	 *
+	 * At 6 the error is 9.1e-05 Wb/rad against a `psi_ax` of about 9.2e-02 --
+	 * a thousandth of the quantity being guessed, and far below the 1.6e-04 m
+	 * the X-point seed is already allowed to be wrong by. **28x cheaper than
+	 * the default.** 4 would also do and 2 probably would; 6 is taken because
+	 * the cost of being wrong here is a different equilibrium, and three orders
+	 * of magnitude of headroom is worth 27 us a point.
+	 *
+	 * **THE GUESS IS NOT THE PROBLEM STATEMENT**, which is what makes this a
+	 * free choice at all: nothing about the answer depends on it, only which
+	 * basin Newton starts in. M-124 measures the same indifference from the
+	 * other side -- a plasma column tuned to MAST-U and a round default reach
+	 * the same `psi_ax` to every printed digit.
+	 */
+	inline constexpr int guessCoilQuadratureOrder = 6;
+
 	/// The largest order coilPsi() will accept.
 	///
 	/// A REFUSAL RATHER THAN A LIMIT NOBODY MENTIONS. Cubic grading places the

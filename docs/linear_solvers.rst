@@ -182,6 +182,40 @@ That third entry is the surprise, and it is why the axes must be separated.
    — threaded MKL reassociates a blocked BLAS-3 differently, which is
    arithmetic and not a race.
 
+.. note::
+
+   **Do not read the process's CPU percentage as a utilisation.** Both thread
+   pools spin at their barriers before sleeping, and on a free-boundary run
+   that spin is about two fifths of the CPU time. Measured on the development
+   machine at ``OMP_NUM_THREADS=8`` and ``MKL_NUM_THREADS=8``, setting
+   ``OMP_WAIT_POLICY=passive`` takes the process from about 308% to about 188%
+   and costs roughly **1.5%** of the wall clock. The two pools contribute
+   independently and about equally.
+
+   So ``passive`` is worth setting if you are sharing a machine or are charged
+   for CPU time. It is not a speed-up, and it is not quite free either.
+
+   It is worth setting for a second reason that has nothing to do with that
+   trade: ``meq --profile``'s ``cores`` column is meaningless without it. Under
+   the default policy a **serial** leg reads *high*, not low — the other seven
+   threads are spinning through it — so on the same run a leg that reads 1.01
+   cores under ``passive`` reads 5.76 under the default.
+
+.. note::
+
+   **A free-boundary run does not scale like a fixed-boundary one, and the
+   reason is not in MEQ.** With :math:`\psi_{ax}`, :math:`\psi_{bnd}`, the
+   plasma current, the X-point and the exterior modes all unknowns of one
+   Newton, each step applies the Jacobian's inverse to every border column, and
+   the element loops either side of the trace solve are the one part of that
+   which does not thread. Measured on a diverted machine case at ten exterior
+   modes, they cost the same at one thread and at eight and are the largest
+   single leg of a threaded step; eight cores buy about 1.5 on the whole run
+   against about 4.5 on the residual alone.
+
+   ``meq --profile`` prints the leg split, including that one, so you can see
+   where your own case sits rather than assume it matches.
+
 .. warning::
 
    **UMFPACK can never take MKL threads**, whatever the assembly mode. Its BLAS

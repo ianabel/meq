@@ -1877,6 +1877,75 @@ MFEM notes this would *not* survive an `H1_Trace` (EDG) trace space, where a dof
 takes more than two contributions; MEQ's is `DG_Interface_FECollection`, so it
 holds.
 
+**EXCEPT FOR TWO, AND ON THE BORDERED PATH THEY ARE THE LARGEST LEG OF A
+THREADED STEP.** `NPCReduce()` and `NPCRecover()` — the element loops either
+side of the trace solve, which is how `J^-1` is applied — carry no
+`omp parallel`, single-vector or blocked. That is deliberate upstream and the
+doxygen on `NPCGradient()` gives the reason: they are *"under 6% of the step,
+flat in mesh size and order, and Amdahl caps any gain there"*, on the pedestal
+problem at four resolutions.
+
+**THAT MEASUREMENT IS FIXED BOUNDARY AND ONE RIGHT-HAND SIDE, AND MEQ'S
+BORDERED STEP IS NEITHER.** `J^-1` is applied to the field residual **and to
+every border column** — `psi_ax`, `psi_bnd`, the prescribed current, the
+X-point's two coordinates and the `N` exterior modes, all against the one
+factorisation — through `DarcyNPCSolver::ArrayMult()`. So the traversal is
+`O( elements x columns )` where the integrator-bound loops are
+`O( elements )` and already threaded, and the share inverts with the border and
+again with every exterior mode. Measured on DIII-D at 10 modes, **0.212 s at one
+thread and 0.212 s at eight**, which is 30.6% of the threaded step and the
+largest leg in it.
+
+`StepProfile` has a leg for it, and that leg is where `otherSeconds()` went:
+`TimedSolver` decorates the TRACE solver, so it times the middle of
+`NPCReduce -> solve -> NPCRecover` and neither end, and the remainder was 45% of
+a threaded step and named nothing. It is timed as the wall clock of
+`ArrayMult()` **minus** the trace solve inside it, so it is disjoint from the
+backsolve leg rather than containing it, and `other` falls to 14%.
+
+→ **[M-126](MEASUREMENTS.md#m-126)** — the leg split at 1 and 8 threads · the
+two instruments that found it before the leg existed · the barrier spin · what
+threading it would be worth
+
+**AND A THIRD OF THE `%CPU` ON THAT RUN IS BARRIER SPIN RATHER THAN WORK**,
+which matters here because it is what a utilisation figure is read off.
+`OMP_WAIT_POLICY=passive` takes the CPU from about 308% to about 188% for
+roughly 1.5% of the wall clock; MEQ's own OpenMP regions and MKL's contribute
+independently and about equally. **Set it before reading anything into a
+`%CPU`**, and do not read a low one as idle cores — here it is the honest number
+and the high one is the artefact.
+
+**AND THE ONE INTEGRATOR MEQ EVALUATES PER ELEMENT UNDER THREADING IS ITS
+OWN, WHICH IS WHY THIS IS SAFE.** MFEM's stock integrators are not uniformly
+thread safe — `VectorMassIntegrator`, `MassIntegrator` and `DiffusionIntegrator`
+hold their scratch as plain members, and 67 of the 99 classes carrying scratch
+are unguarded. MEQ installs the first of those. It is never reached from a
+threaded loop, and the reason is structural rather than lucky:
+
+* `CopyLinearGradBlocks()` **always declines for MEQ**, on
+  `lop_type == LocalOpType::PotNL`.
+* On that branch `ConstructGrad()` skips the flux block outright —
+  `else if ( !ad_done && !A_empty && lop_type != PotNL )` — because a
+  specialised local operator keeps its block factored in place.
+* What it does evaluate per element is `m_nlfi_p`, and that is
+  **`meq::SourceIntegrator`**, MEQ's own, made reentrant when it first met this
+  loop. See *Traps* in `CLAUDE.md`.
+
+The bit-exactness assertions between assembly modes are the independent check
+and have been green throughout; a shared-scratch integrator on eight threads
+does not survive them.
+
+**AND UPSTREAM IS ABOUT TO REFUSE THIS CONFIGURATION ON THE WRONG PREDICATE.**
+A proposed abort keys on *did `CopyLinearGradBlocks()` decline* — which MEQ does
+on every run, for the second of two unrelated reasons. Filed back as
+`../mfem-hdg-dev/doc/HDG-THREADED-REFUSAL-FROM-MEQ.md`; **expect an MFEM update
+to abort every threaded MEQ run until it lands.**
+
+**AND WITHOUT IT `--profile`'s `cores` COLUMN INVERTS.** A serial leg reads
+HIGH, not low, because the other seven threads are spinning through it: on one
+run `constraint location` reads 1.01 cores under `passive` and **5.76** under
+the default, and `I_p` reads 1.03 against **8.95**.
+
 **MEQ'S DEFAULT IS THEREFORE `Threaded` NOW, AND WAS `Serial`.** The measurement
 that settled it before was taken against the option as it then was, and the
 inversion is the whole justification:
