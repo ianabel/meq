@@ -2265,6 +2265,52 @@ recomputes `Δ*ψ` by central differences and the suite asserts it against `−f
 For McCarthy's eighteen-term Bessel and Neumann expansion that agrees to 3.6e-6,
 and its analytic gradients match finite differences to 5e-9.
 
+### And a rung above them all with no closed form at all: six machines, fixed boundary
+
+**THE LADDER ABOVE IS ANALYTIC AND THE TREE HAD NOTHING BETWEEN IT AND THE WHOLE
+FREE-BOUNDARY APPARATUS.** Every machine-geometry case here is free boundary —
+the half-disc reaching the axis, the DtN coupling, the two borders, the moving
+plasma edge — and the fixed-boundary examples are the fixtures above or one
+768-element box. `examples/fixed-*.toml` are that missing rung: **six real
+machines posed fixed boundary, 1,086 to 102,840 elements**, each with a
+tabulated `p'` and `gg'` and an independent code's answer to check against.
+
+**Ian's recipe, and it is what makes them a REFERENCE rather than only a source
+of geometry.** Solve the machine free boundary in `freegs4e` at `257²`; fit MXH
+to its `psi_n = 0.95` surface; hand MEQ that curve with `psi = 0` on it. `psi` is
+defined only up to an additive constant, so that is the **same equilibrium in a
+different gauge**, and the free solution shifted by the surface's flux is the
+answer MEQ must reproduce. `tools/freegs4e-benchmark/make_case.py` is the
+generator, `make_fixed.sh` the driver.
+
+**AND `psi_n = 0.95` IS WHAT LIFTS THE ORDER CAP, WHICH IS THE WHOLE REASON
+THESE EXIST.** On every free-boundary machine case `ConstrainPaxisIp` at
+`alpha_n = 1.2` makes `p'` a fractional power of `1 − Psi` at the plasma edge and
+the rate is capped at about **1.2** whatever the degree. At 0.95 that
+singularity is outside the domain and the profiles are analytic across Γ — so
+`psi*` reaches **`k + 2` on machine geometry**, measured at 3.15, 4.05 and 5.50
+for `k = 1, 2, 3`. The separatrix is also excluded for a second reason worth
+keeping: it passes through an X-point and has a **corner**, and MXH is a
+truncated Fourier series that cannot turn one.
+
+→ **[M-147](MEASUREMENTS.md#m-147)** — the six, their cost, their agreement with
+`freegs4e` (worst 1.1e-04 against the free-boundary comparison's 6.8e-03) · the
+rate table · and the THREE-SOLUTION finding that made `Normalised = true`
+mandatory rather than preferable
+
+**They carry no conductors and that is structural.** Γ is the plasma edge, so
+every coil is outside the computational domain and its whole influence is a
+Dirichlet datum that is identically zero — `[conductors] Model` has nothing to
+act on. A fixed-boundary case that **can** measure coil subtraction needs a
+domain larger than the plasma, which is what `examples/coils-rectangle.toml` is
+and why its split reads exactly 1.00×: that box was never graded to its coils.
+`TODO` carries what is still owed.
+
+`tests/convergence/MachineFixedBoundary.cpp` is the acceptance, and it drives
+the **shipped binary on the shipped file** on purpose: what rots about an
+example is the FILE, and a library-level fixture would re-implement the curved
+path and notice none of it.
+
 ## Layout
 
 ```

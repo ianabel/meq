@@ -1,0 +1,180 @@
+# A MACHINE-SHAPED FIXED-BOUNDARY EQUILIBRIUM: fixed-e-diamagnetic
+#
+#     meq examples/fixed-e-diamagnetic.toml
+#
+# GENERATED -- edit tools/freegs4e-benchmark/make_case.py, not this file, and
+# re-run tools/freegs4e-benchmark/make_fixed.sh.
+#
+# WHAT THIS IS. A real machine's equilibrium, posed as a FIXED-boundary problem
+# on a smooth closed flux surface. The reference
+#
+#     E_testtokamak_diamagnetic_shaped
+#
+# was solved FREE boundary by freegs4e on a 257 x 257 grid -- a
+# different code, a different algorithm, its own conductors and its own inverse
+# solve for their currents -- and its psi_n = 0.95 surface was fitted to MXH.
+# psi is defined only up to an additive constant, so subtracting that surface's
+# flux gives the SAME equilibrium with psi = 0 on Gamma. Inside it, this is the
+# fixed-boundary Grad-Shafranov equation with the machine's own p' and gg',
+# exactly.
+#
+# THE REFERENCE'S OWN ANSWER, for anything comparing against it:
+#
+#     psi_axis   8.376688890616e-02   at ( 1.335773, 0.000000 )
+#     psi_bndry  3.792971692068e-02   the separatrix
+#     psi at the psi_n = 0.95 surface   4.022157551995e-02
+#     I_p        2.000000e+05 A
+#
+# so in MEQ's gauge -- psi = 0 on Gamma -- the axis flux is
+#
+#     psi_ax     4.354531338621e-02 Wb/rad
+#
+# and [source] PsiAxis below is that number, as the starting value of an
+# unknown rather than as an input. MEASUREMENTS.md M-147 is what MEQ reports
+# on this file and how far it sits from the reference.
+#
+# WHY psi_n = 0.95 AND NOT THE SEPARATRIX, which is the one decision in this
+# file that is not mechanical. The reference is diverted, so its last closed
+# surface passes through an X-point and has a CORNER; MXH is a truncated
+# Fourier series and cannot turn one. Worse, the source AT the separatrix is
+# the plasma
+# edge, where the reference's alpha_n = 1.2 makes p' a fractional power of
+# 1 - Psi and caps any convergence rate at about 1.2 whatever the polynomial
+# degree. At 0.95 the boundary is smooth and closed and the profiles are
+# analytic across it:
+#
+#     p'  at Gamma   1.431978e+04 Pa per Wb/rad
+#                   which is 0.0150 of its value on the axis
+#     gg' at Gamma  -1.997726e-03 T^2 m^2 per Wb/rad
+#
+# Both comfortably nonzero, so this is NOT the trivial branch of CLAUDE.md's
+# Traps section -- and see [initialguess] for the OTHER branch, which is.
+#
+# THE SHAPE, read out of the fit rather than asserted:
+#
+#     R0 1.2831 m   a 0.3744 m   aspect 3.427   elongation 1.3052
+#     triangularity sin( s_1 )                    +0.3409
+#     largest further shaping | s_n |, n >= 2     0.1354
+#     up-down asymmetry, max | c_n | over n >= 0  0.0000
+#
+# The last one is zero to machine precision for an exactly up-down symmetric
+# machine, and it is the COS coefficients rather than the sin ones because
+# Z( t ) is odd whatever they do -- see make_case.py where these are computed.
+#
+# MXH fit residual 7.011e-05 m on a minor radius of 0.3744 m, i.e.
+# 1.87e-04 relative, at 20 harmonics. THAT NUMBER BOUNDS THE
+# COMPARISON AGAINST freegs4e AND BOUNDS NOTHING ABOUT MEQ. Gamma here IS the
+# MXH curve below -- analytic, smooth and exactly known -- so a convergence
+# study on this file is valid at any order however the coefficients were
+# arrived at.
+#
+# WHAT THIS FILE DOES NOT CARRY, said plainly because their absence is a
+# property of the problem rather than an omission:
+#
+#   * NO CONDUCTORS. Gamma is the plasma edge, so every coil of the real
+#     machine is OUTSIDE the computational domain and its whole influence is
+#     in the Dirichlet datum -- which is zero. `[conductors] Model` would have
+#     nothing to act on. A fixed-boundary case that CAN measure coil
+#     subtraction needs a domain larger than the plasma;
+#     examples/coils-rectangle.toml is the small one that does.
+#   * NO EXTERIOR COUPLING, NO X-POINT, NO LIMITER AND NO PLASMA-CURRENT
+#     BORDER. This is one Dirichlet problem, solved once, which is exactly why
+#     it is cheap enough to be worth having beside the free-boundary set.
+
+[mesh]
+# The background the curved boundary is cut FROM. Omega_h is the union of these
+# elements lying inside Gamma, so about 37% of them survive and
+# 5935 elements are predicted here; MEASUREMENTS.md M-147 has what MEQ
+# actually reported. Cells are near square, NZ/NR following the elongation.
+#
+# RefinementLevels IS THE SIZE KNOB AND THE REFINEMENT STUDY. Bisection of
+# triangles is exact, so raising it gives a mesh NESTED in this one and the
+# geometry does not move; raising NR or NZ instead changes which elements fall
+# inside Gamma, which is a different problem rather than a finer one.
+RMin = 0.777635
+RMax = 1.788487
+ZMin = -0.659705
+ZMax = 0.659705
+NR = 39
+NZ = 51
+RefinementLevels = 1
+
+[discretisation]
+PolynomialDegree = 2
+
+[boundary]
+# psi = 0 on Gamma, which is the MXH curve below and NOT the mesh's rectangle.
+Type = "zero"
+
+[boundary.shape]
+# GS-2 section 3's extension technique: Omega_h is inscribed in Gamma, the
+# datum is carried outward along transfer paths, and the band between them is
+# continued with the SOLVED flux. This is what MEQ is for, and this curve is
+# the only thing in this file that is not a number out of the reference.
+Type = "mxh"
+R0 = 1.2830612897
+Z0 = 0.0000000093
+MinorRadius = 0.3743896136
+Elongation = 1.3052452721
+CosCoefficients = [
+	-4.2605155098e-08,  4.4905651406e-08,  6.3553661750e-08, -5.4946224091e-08,
+	-9.3947959195e-08, -1.2658604550e-08,  4.6815121512e-08,  4.0195875694e-08,
+	 1.0950471565e-07,  1.0213080492e-08,  6.5979498146e-08,  4.2126771403e-08,
+	 2.9868108266e-08,  5.7060599874e-09,  8.5955095773e-08,  2.4191657345e-08,
+	 6.0903410452e-09, -2.3671514660e-08, -1.3283941251e-08, -1.5251290232e-08,
+	-4.1607637329e-09
+]
+SinCoefficients = [
+	 3.4788361332e-01,  1.3536575199e-01, -2.6529359314e-03, -7.5284482449e-03,
+	-9.2366552452e-04, -1.4826216175e-03, -1.5630041083e-03, -8.1164617904e-04,
+	-1.5105422359e-04,  5.0118853156e-05,  5.7374104694e-05,  1.8484954596e-05,
+	 6.5396190729e-05,  2.6574043512e-05, -2.1667809399e-05, -3.0833316197e-05,
+	 1.8305506983e-05,  2.4227180274e-06, -3.1241741283e-05, -1.5406117255e-05
+]
+
+# THE RAMP IS PART OF THE PROBLEM STATEMENT, NOT A TUNING PARAMETER.
+#
+# These sources do not vanish at psi = 0 -- see the two numbers at the top of
+# this file -- so this is not the trivial branch of CLAUDE.md's Traps section.
+# It is the SECOND SOLUTION beside it, which that file records for the
+# high-beta source: "this equation has a small positive solution and a large
+# one ... Newton from the Dirichlet datum walks straight onto it". The
+# amplitude is the axis height the reference itself has, so the iterate starts
+# at the right SCALE and Psi starts inside its own table.
+[initialguess]
+Type = "ramp"
+Amplitude = 4.3545313386e-02
+
+[source]
+Type = "mhd"
+# dp/dPsi and g dg/dPsi against MEQ's NORMALISED flux -- one on the axis, zero
+# on Gamma -- and both already the derivative quantities. See the tables' own
+# headers, and tools/freegs4e-benchmark/convert.py, which records both the
+# docstring error in freegs4e that this conversion survives and the reason the
+# normalised form is the one that can be shipped.
+PPrimeFile = "examples/fixed-e-diamagnetic-pprime.dat"
+GGPrimeFile = "examples/fixed-e-diamagnetic-ggprime.dat"
+
+# psi_ax IS AN UNKNOWN OF THE SOLVE AND THIS IS ITS STARTING VALUE.
+#
+# Normalised = true closes the system with psi_ax - max psi = 0 in the border,
+# so Psi is confined to [ 0, 1 ] BY CONSTRUCTION and the profiles are never
+# evaluated off their own tables. That is not a refinement -- it is what makes
+# this file shippable. Against psi in Wb/rad the table has to stop at the axis,
+# meq::SplineProfile extends it by a constant above that, and the plateau
+# carries a solution of its own: sweeping only the guess amplitude on machine A
+# reached 0.0105, 1.2604 and 0.9996 of the reference's axis height, in that
+# order, as the ramp grew. convert.py has the table.
+Normalised = true
+PsiAxis = 4.3545313386e-02
+
+[solver]
+NewtonMaxIterations = 40
+NewtonRelativeTolerance = 1.0e-10
+NewtonAbsoluteTolerance = 1.0e-14
+
+[output]
+Directory = "."
+Prefix = "fixed-e-diamagnetic"
+GridNR = 129
+GridNZ = 129

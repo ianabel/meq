@@ -1130,7 +1130,9 @@ predicting it. FREE-BOUNDARY-PLAN.md section 7.12 is the write-up.
 
 ================================================================================
 Half a dozen SERIOUS machine-relevant FIXED-BOUNDARY cases
-Raised 2026-09-19.
+Raised 2026-09-19.  SIX ARE BUILT AND SHIPPED, 2026-09-20 -- see WHAT WAS DONE
+at the bottom.  What is left is ONE of the three bullets, and it turned out to
+need something these cases structurally cannot give.
 ================================================================================
 
   WHAT IS MISSING, AND IT IS NOT A TEST. MEQ's fixed-boundary examples are
@@ -1231,3 +1233,72 @@ Raised 2026-09-19.
       like-for-like on both sides of COIL-SUBTRACTION-PLAN.md section 0a's 2x2,
       and it is the cheapest field to evaluate, so it is a plausible DEFAULT
       for the large end of the size range rather than only a comparison.
+
+  --------------------------------------------------------------------------
+  WHAT WAS DONE, 2026-09-20, AND WHAT IT DID AND DID NOT ANSWER.
+  --------------------------------------------------------------------------
+
+  SIX CASES ARE SHIPPED: examples/fixed-{h-circular,a-testtokamak,
+  e-diamagnetic,d-tcv,g-mastu,f-diiid}.toml, 1086 to 102840 elements, each with
+  its own tabulated p' and gg'.  The recipe is Ian's and it settles the first
+  of the three undecided questions outright: run a machine FREE boundary in
+  freegs4e at 257^2, fit MXH to its psi_n = 0.95 surface, and hand MEQ that
+  curve with psi = 0 on it.  psi is defined only up to a constant, so it is the
+  SAME equilibrium in a different gauge -- which makes the free solution a
+  REFERENCE and not merely a source of geometry.  A Miller/MXH parameterisation
+  and a traced separatrix were the two options written above; this is both,
+  and neither of the drawbacks.
+
+  tools/freegs4e-benchmark/make_case.py is the generator, make_fixed.sh the
+  driver, MEASUREMENTS.md M-147 the numbers, docs/examples.rst the account, and
+  tests/convergence/MachineFixedBoundary.cpp the acceptance -- which settles
+  the second undecided question, ctest or benchmark directory.  It is a ctest,
+  it runs the SHIPPED files through the SHIPPED binary, and it costs about 80 s
+  against a suite whose longest chain is 900 s or more, so it is free under
+  -j4.  A library-level fixture would re-implement the curved path and then
+  notice none of what actually rots about an example, which is the FILE.
+
+  BULLET 2 IS ANSWERED AND IT IS THE HEADLINE.  psi* converges at k+2 on
+  machine geometry -- 4.05 at k = 2 on the circular case -- because at
+  psi_n = 0.95 the edge singularity is OUTSIDE the domain.  Nothing else in
+  this tree can make that measurement.  BULLET 3 IS ANSWERED TOO: the whole
+  six-case set solves in under seven minutes, against FreeBoundaryCoupling's
+  900 to 1550 s for one binary.
+
+  BULLET 1 IS NOT ANSWERED AND CANNOT BE BY THESE CASES.  Gamma is the PLASMA
+  EDGE, so every conductor of the real machine is outside the computational
+  domain and its entire influence is in a Dirichlet datum that is identically
+  zero.  `[conductors] Model` has nothing to act on.  That is structural, not
+  an omission, and it corrects this entry as originally written: a
+  fixed-boundary case that can measure coil subtraction needs a domain LARGER
+  than the plasma, which is what examples/coils-rectangle.toml is and why its
+  split reads exactly 1.00x -- its box was never graded to its coils.
+
+  SO WHAT IS STILL OWED FOR BULLET 1 IS ONE FIXTURE, AND IT IS SMALLER THAN
+  THIS ENTRY WAS.  A machine-sized box (or vessel outline) enclosing BOTH the
+  plasma and its conductors, MESHED TO the conductor edges through
+  tools/mesh/, with psi = 0 on the box.  That is coils-rectangle.toml grown up
+  and graded, and it is the only thing between here and M-142's 1.96x on a
+  fixed boundary.  Two routes and they are not equivalent:
+
+    * A ZERO DATUM ON THE BOX.  Reachable today -- `[boundary] Type = "zero"`
+      -- and mathematically well posed, but the equilibrium it describes is not
+      the machine's, because the real flux is not zero on a vessel wall.  It
+      measures the MESH SAVING honestly and the physics not at all, which for
+      the coil-subtraction question is the whole of what is wanted.
+    * THE REFERENCE'S OWN DATUM ON THE BOX.  The honest one, and NOT REACHABLE:
+      [boundary] Type takes only "zero" and "exact", and "exact" needs a closed
+      form meq::Source does not carry.  A tabulated Dirichlet datum -- a curve
+      and a column of numbers, or a coefficient read from a .nc -- is a new
+      boundary data type and is the piece that does not exist.
+
+  The first is an afternoon and answers the measurement; the second is a
+  feature and answers the physics.  They are worth doing in that order.
+
+  AND ONE THING NOT ON THE ORIGINAL LIST THAT THESE CASES NOW MAKE CHEAP.  The
+  six span 10^3 to 10^5 elements on ONE problem family with ONE knob
+  (RefinementLevels, which is exact bisection and therefore nested), so
+  upstream's batched-kernel crossover at 4096 elements -- which this tree could
+  not say anything about, five of its eight shipped meshes being below it -- is
+  now a sweep of one key on one file rather than a fixture-building exercise.
+

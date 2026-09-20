@@ -260,7 +260,7 @@ if __name__ == "__main__":
             print(f"    {stem:22s} {'-':>7s} MEQ produced no .nc")
             continue
         r = compare(npz, nc, meta, free_boundary=args.free_boundary,
-                    boxes=boxes, core=args.core)
+                    boxes=args.exclude_box, core=args.core)
 
         # THE AXIS GATE, BEFORE ANY NUMBER IS QUOTED. A run whose psi_ax is not
         # the flux at a magnetic axis solved a different equilibrium from the

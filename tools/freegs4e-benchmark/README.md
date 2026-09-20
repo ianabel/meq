@@ -115,7 +115,9 @@ reproduce the field inside.
 3. `mxh.py` — fits it to the Miller eXtended Harmonic form MEQ's
    `[boundary.shape] Type = "mxh"` takes.
 4. `convert.py` — freegs4e's profiles onto MEQ's `ψ`.
-5. `make_case.py` — writes the TOML and the two profile tables.
+5. `make_case.py` — writes the TOML and the two profile tables, against
+   MEQ's NORMALISED flux. `make_fixed.sh` is the driver that writes the six
+   shipped `examples/fixed-*.toml` from `ref-n257/`; see its header.
 6. `compare.py` — reads MEQ's `.nc` and diffs. **It refuses a run whose
    `ψ_ax` is not a magnetic axis**; see below.
 

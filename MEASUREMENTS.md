@@ -5980,3 +5980,104 @@ by the remainder alone would ask for a relative accuracy below anything a
 discontinuous `psi_h` can offer. It would not give a wrong answer; it would
 stall every point and report it, which is a failure of the scale rather than of
 the field.
+
+---
+
+### M-147
+
+**SIX MACHINES POSED FIXED BOUNDARY: WHAT THEY COST, WHAT THEY AGREE TO, AND
+THE ORDER THEY REACH.** `examples/fixed-*.toml`, written by
+`tools/freegs4e-benchmark/make_fixed.sh` from `freegs4e` free-boundary solves at
+`257²`: each machine's `psi_n = 0.95` surface fitted to MXH and handed to MEQ as
+Γ with `psi = 0` on it, which is the **same equilibrium in a different gauge**.
+`k = 2`, `OMP = MKL = 8`, quiet machine.
+
+| case | elements | Newton | wall | `psi_ax` | freegs4e's own | relative |
+|---|---|---|---|---|---|---|
+| `fixed-h-circular` | 1,086 | 15 | 9.5 s | 6.353707e-02 | 6.354434e-02 | 1.14e-04 |
+| `fixed-a-testtokamak` | 2,480 | 7 | 9.8 s | 4.778900e-02 | 4.778846e-02 | 1.12e-05 |
+| `fixed-e-diamagnetic` | 6,033 | 7 | 20.1 s | 4.354586e-02 | 4.354531e-02 | 1.26e-05 |
+| `fixed-d-tcv` | 16,406 | 7 | 39.7 s | 1.755694e-02 | 1.755677e-02 | 9.41e-06 |
+| `fixed-g-mastu` | 39,399 | 9 | 84.5 s | 8.043321e-02 | 8.043177e-02 | 1.79e-05 |
+| `fixed-f-diiid` | 102,840 | 10 | 210.7 s | 2.897815e-01 | 2.897795e-01 | 6.99e-06 |
+
+and over the whole `129²` output grid, dropping the band, through
+`tools/freegs4e-benchmark/compare.py`:
+
+| case | nodes | band | rel L2 | rel L∞ |
+|---|---|---|---|---|
+| `fixed-f-diiid` | 12,564 | 111 | **5.045e-05** | 1.488e-04 |
+| `fixed-d-tcv` | 12,078 | 266 | 7.234e-05 | 1.888e-04 |
+| `fixed-h-circular` | 11,919 | 912 | 9.712e-05 | 3.343e-04 |
+| `fixed-a-testtokamak` | 11,091 | 641 | 9.732e-05 | 2.800e-04 |
+| `fixed-g-mastu` | 12,256 | 127 | 1.106e-04 | 3.453e-04 |
+| `fixed-e-diamagnetic` | 11,328 | 437 | 1.121e-04 | 2.879e-04 |
+
+**TWO INDEPENDENT CODES OVER ~12,000 NODES ON SIX MACHINES, WORST CASE
+1.1e-04** — against the free-boundary comparison's 1.5e-04 to 6.8e-03 on the
+same machines, [M-111](MEASUREMENTS.md#m-111)'s table. An order of magnitude
+better, and the reason is that the fixed-boundary problem removes the exterior
+map, the conductor models and the inverse-solve mode difference all at once: the
+two codes are then answering the same question with nothing between them but the
+MXH fit of Γ and `freegs4e`'s own grid.
+
+#### The order, which is what these cases exist for
+
+`fixed-h-circular` swept over `RefinementLevels` — exact bisection, so each
+level is **nested** in the last — against its own `r = 3` answer, relative L2 in
+`psi*` over the 11,919 grid nodes common to all four and outside the band:
+
+| | `r = 0`, 1,086 el | `r = 1`, 4,535 | `r = 2`, 18,458 | rates |
+|---|---|---|---|---|
+| `k = 1` | 9.0509e-04 | 2.7758e-04 | 3.1370e-05 | 1.71, **3.15** |
+| `k = 2` | 1.9557e-04 | 1.1836e-05 | 1.6754e-07 | **4.05**, 6.14 |
+| `k = 3` | 1.5786e-06 | 3.4947e-08 | 2.8684e-09 | **5.50**, 3.61 |
+
+**`k + 2` IS 3, 4 AND 5 AND THE TABLE REACHES ALL THREE.** The `.nc` carries
+`psi*`, the element-local post-processing at degree `k+1`, so `k+2` is its
+design rate and this is the first time it has been measured on machine geometry.
+The two departures are both the instrument rather than the solver, and in
+opposite directions: at `k = 1` the first pair is preasymptotic on 1,086
+elements, and at `k = 3` the second pair falls off because the *reference* is
+only one level finer and is itself at 2.9e-09. A self-convergence study against
+its own next refinement cannot resolve a rate once the two are the same size.
+
+**AND THE COMPARISON WITH THE FREE-BOUNDARY MACHINE CASES IS THE POINT, NOT THE
+NUMBER.** On every free-boundary machine in this tree `ConstrainPaxisIp` at
+`alpha_n = 1.2` makes `p'` a fractional power of `1 − Psi` at the plasma edge,
+which caps the rate at about **1.2** whatever the polynomial degree —
+`PLASMA-EDGE-PLAN.md` and `PlasmaEdgeConvergence` are the whole campaign about
+it. At `psi_n = 0.95` that singularity is **outside the domain**: `p'` at Γ is
+0.6% of its axis value on machine A and `gg'` is 4.1e-03, both smooth and
+nonzero. So this is the same physics at three to five times the order, and the
+difference is entirely where Γ was put.
+
+#### What set the floor, and it is the geometry
+
+The MXH fit residual, not either solver. At `129²` with ten harmonics it reads
+2.7e-04 to 7.6e-04 m; at `257²` with twenty, **4.4e-05 to 1.8e-04**. Above
+twenty harmonics nothing improves on any machine — DIII-D reads 4.36e-05 at 20
+and 4.62e-05 at 28 — which is what says the remainder is the grid the contour
+was extracted from rather than the truncation. `fixed-h-circular` refines
+1.14e-04 → 2.29e-05 → 1.60e-05 in `psi_ax` and then stops, which is that floor
+met from MEQ's side.
+
+#### One thing measured on the way that is a finding about the SOURCE
+
+Against `psi` in Wb/rad rather than normalised flux, this problem has **three
+solutions** and the initial guess chooses between them non-monotonically. The
+profile table necessarily stops at the axis — `freegs4e`'s profiles live on
+`psi_n ∈ [0, 1]` — and `meq::SplineProfile` extends a table by a **constant**
+beyond its end knots, so above the axis flux the source becomes a plateau that
+carries a solution of its own. Sweeping only `[initialguess] Amplitude` on
+machine A, as a ratio to the reference's axis height:
+
+| ramp | 1× | 2× | 3× | 4× | 5× | 6× | 8× | 12× |
+|---|---|---|---|---|---|---|---|---|
+| reached | 0.0105 | 0.0105 | 0.0105 | 1.2604 | 1.2604 | 1.2604 | 1.2604 | **0.9996** |
+
+Every one of those converged, cleanly, in single-figure Newton counts.
+`Normalised = true` removes the middle branch outright, because `Psi = psi/psi_ax`
+with `psi_ax` constrained to `max psi` is confined to `[0, 1]` and the profile
+is never evaluated off its own table — so the region that branch lived in does
+not exist. All six shipped cases use it, and it is why they are shippable.

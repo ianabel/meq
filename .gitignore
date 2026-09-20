@@ -115,6 +115,11 @@ examples/machine-*.msh
 # dozen `?? driver-acceptance-*.toml` behind and a clean tree stops meaning
 # anything.
 driver-acceptance-*.toml
+# And MachineFixedBoundary's, which is a DIRECTORY rather than a handful of
+# files: it overrides [output] Directory on the shipped examples/fixed-*.toml
+# so that running the test does not scatter six machines' worth of mesh, .gf,
+# .vtu and .nc across the repository root. Anchored, per the note below.
+/machine-fixed-boundary-scratch/
 visit_dump*/
 ParaView/
 

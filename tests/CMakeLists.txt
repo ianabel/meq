@@ -472,6 +472,31 @@ else()
 	message(STATUS "meq: DriverAcceptance not registered (needs MEQ_BUILD_APP=ON)")
 endif()
 
+# MachineFixedBoundary runs the SHIPPED examples/fixed-*.toml through the
+# shipped binary, so it needs the same two things DriverAcceptance does: the
+# driver's path, and the source tree as its working directory because those
+# files name their profile tables as `examples/...`.
+#
+# IT IS A DRIVER TEST ON PURPOSE. What rots about an example is the FILE -- a
+# key renamed, a default moved, a table's path -- and a library-level fixture
+# would re-implement the curved path and then notice none of that.
+if(TARGET meq AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/MachineFixedBoundary.cpp")
+	add_executable(MachineFixedBoundary "convergence/MachineFixedBoundary.cpp")
+	target_include_directories(MachineFixedBoundary PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(MachineFixedBoundary PRIVATE
+		meq_core
+		Boost::unit_test_framework)
+	target_compile_definitions(MachineFixedBoundary PRIVATE
+		MEQ_DRIVER_PATH="$<TARGET_FILE:meq>")
+	add_test(NAME MachineFixedBoundary COMMAND MachineFixedBoundary
+		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+	set_tests_properties(MachineFixedBoundary PROPERTIES
+		ENVIRONMENT "MKL_NUM_THREADS=1")
+else()
+	message(STATUS "meq: MachineFixedBoundary not registered (needs MEQ_BUILD_APP=ON)")
+endif()
+
 # ---------------------------------------------------------------------------
 # naming -- the identifier convention, enforced
 # ---------------------------------------------------------------------------

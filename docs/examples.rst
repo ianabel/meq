@@ -80,6 +80,101 @@ relative path:
        the half-disc and the conductors' rectangles are derived from the
        ``[[coils]]`` blocks, so each coil is written once. Run it with
        ``meq-run`` — see :doc:`running`.
+   * - ``fixed-h-circular.toml``, ``fixed-a-testtokamak.toml``,
+       ``fixed-e-diamagnetic.toml``, ``fixed-d-tcv.toml``,
+       ``fixed-g-mastu.toml``, ``fixed-f-diiid.toml``
+     - Six **machines posed fixed boundary**, from :math:`10^3` to
+       :math:`10^5` elements, each with a real tabulated profile pair and an
+       independent code's answer to check against. See below.
+
+.. _examples-machine-fixed-boundary:
+
+Six machines, posed fixed boundary
+----------------------------------
+
+**A real machine's equilibrium is the same equilibrium whichever boundary you
+pose it on, and that is what these are.** ``freegs4e`` solves each machine
+*free* boundary on a :math:`257^2` grid — its own conductors, its own inverse
+solve for their currents, its own algorithm — and its
+:math:`\psi_{\mathrm N} = 0.95` surface is fitted to an MXH parametrisation.
+:math:`\psi` is defined only up to an additive constant, so subtracting that
+surface's flux gives the **same** equilibrium with :math:`\psi = 0` on
+:math:`\Gamma`. Inside it, that is the fixed-boundary Grad–Shafranov equation
+with the machine's own :math:`p'` and :math:`gg'`, exactly — and the free
+solution, shifted, is a reference for it.
+
+``tools/freegs4e-benchmark/make_case.py`` is the generator and
+``make_fixed.sh`` the driver; both are re-runnable and the TOML headers say so.
+
+**Why** :math:`\psi_{\mathrm N} = 0.95` **and not the separatrix** is the one
+decision in the recipe that is not mechanical, and it buys two things at once.
+The last closed surface of a diverted machine passes through an X-point and has
+a **corner**, which a truncated Fourier series cannot turn; and the source *at*
+that surface is the plasma edge, where a profile exponent of 1.2 makes
+:math:`p'` a fractional power and caps any convergence rate at about 1.2
+whatever the polynomial degree. At 0.95 the boundary is smooth and closed and
+the profiles are analytic across it. **These are therefore the only
+machine-shaped problems in the tree on which a high-order claim can be made**,
+and the claim is measured: :math:`k+2` in :math:`\psi^{*}`.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 26 20 54
+
+   * - File
+     - Shape
+     - What it is there for
+   * - ``fixed-h-circular.toml``
+     - :math:`\kappa` 1.01, :math:`\delta` 0.05
+     - The nearly-circular **control**, and **limited**, so no X-point exists
+       anywhere in it. The smallest, about 1100 elements.
+   * - ``fixed-a-testtokamak.toml``
+     - :math:`\kappa` 1.19, :math:`\delta` 0.32
+     - The plain diverted case — and the same machine that
+       ``machine-a-testtokamak.toml`` solves *free* boundary, so the two are a
+       pair.
+   * - ``fixed-e-diamagnetic.toml``
+     - :math:`\kappa` 1.31, :math:`\delta` 0.35
+     - Exactly up–down symmetric, and :math:`gg'` of the other sign.
+   * - ``fixed-d-tcv.toml``
+     - :math:`\kappa` 1.75, :math:`\delta` 0.23
+     - The most elongated, and the smallest minor radius.
+   * - ``fixed-g-mastu.toml``
+     - aspect 1.56
+     - Spherical — the lowest aspect ratio in the set.
+   * - ``fixed-f-diiid.toml``
+     - :math:`\kappa` 1.47, :math:`a` 0.59 m
+     - The large conventional machine, near double null, about
+       :math:`10^5` elements.
+
+.. note::
+
+   **Every one uses** ``[source] Normalised = true``, **and that is not a
+   preference.** Against :math:`\psi` in Wb/rad the profile table necessarily
+   stops at the axis, because ``freegs4e``'s profiles are defined on
+   :math:`\psi_{\mathrm N} \in [0, 1]` and there is no :math:`\psi_{\mathrm
+   N} < 0`; MEQ's documented out-of-range policy extends a table by a constant,
+   so above the axis flux the source becomes a plateau — and that plateau
+   carries a solution of its own. Sweeping only the initial guess on one
+   machine reached 0.0105, then 1.2604, then 0.9996 of the reference's axis
+   height as the ramp grew. With ``Normalised = true``, :math:`\Psi` is
+   confined to :math:`[0, 1]` by the constraint :math:`\psi_{\rm
+   ax} = \max\psi`, so the region that branch lived in does not exist.
+
+.. note::
+
+   **They carry no conductors, and their absence is a property of the problem.**
+   :math:`\Gamma` is the plasma edge, so every coil of the real machine is
+   outside the computational domain and its whole influence is in a Dirichlet
+   datum that is identically zero. ``[conductors] Model`` would have nothing to
+   act on. A fixed-boundary case that *can* exercise coil subtraction needs a
+   domain larger than the plasma; ``coils-rectangle.toml`` is the small one that
+   does.
+
+**What they cost and what they agree to** is in ``MEASUREMENTS.md`` M-147, and
+``tests/convergence/MachineFixedBoundary.cpp`` is the acceptance — it runs the
+shipped files through the shipped binary, because what rots about an example is
+the *file*.
 
 .. _examples-benchmark-caveat:
 
@@ -147,9 +242,12 @@ Coverage gaps
 -------------
 
 For completeness, since a reader looking for an example of these will not find
-one. No shipped example uses ``[mesh] File``, ``[boundary.shape] Type = "mxh"``,
-``[initialguess]`` in any form, ``Strategy = "maximum"``, a tabulated ``Omega``
-or ``Temperature``, or more than two species.
+one. No shipped example uses ``[mesh] File``, ``Strategy = "maximum"``, a
+tabulated ``Omega`` or ``Temperature``, or more than two species.
+
+``[boundary.shape] Type = "mxh"`` and ``[initialguess] Type = "ramp"`` were on
+that list until the six machine cases above were added, and both are now
+exercised by all six.
 
 Those spellings come from :doc:`configuration` and from
 ``tests/unit/ConfigTests.cpp``, which does exercise all of them and is a good

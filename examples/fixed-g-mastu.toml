@@ -1,0 +1,180 @@
+# A MACHINE-SHAPED FIXED-BOUNDARY EQUILIBRIUM: fixed-g-mastu
+#
+#     meq examples/fixed-g-mastu.toml
+#
+# GENERATED -- edit tools/freegs4e-benchmark/make_case.py, not this file, and
+# re-run tools/freegs4e-benchmark/make_fixed.sh.
+#
+# WHAT THIS IS. A real machine's equilibrium, posed as a FIXED-boundary problem
+# on a smooth closed flux surface. The reference
+#
+#     G_mastu_simple_shaped
+#
+# was solved FREE boundary by freegs4e on a 257 x 257 grid -- a
+# different code, a different algorithm, its own conductors and its own inverse
+# solve for their currents -- and its psi_n = 0.95 surface was fitted to MXH.
+# psi is defined only up to an additive constant, so subtracting that surface's
+# flux gives the SAME equilibrium with psi = 0 on Gamma. Inside it, this is the
+# fixed-boundary Grad-Shafranov equation with the machine's own p' and gg',
+# exactly.
+#
+# THE REFERENCE'S OWN ANSWER, for anything comparing against it:
+#
+#     psi_axis   9.254679669587e-02   at ( 0.986852, -0.000001 )
+#     psi_bndry  7.881775980284e-03   the separatrix
+#     psi at the psi_n = 0.95 surface   1.211502701606e-02
+#     I_p        6.000000e+05 A
+#
+# so in MEQ's gauge -- psi = 0 on Gamma -- the axis flux is
+#
+#     psi_ax     8.043176967980e-02 Wb/rad
+#
+# and [source] PsiAxis below is that number, as the starting value of an
+# unknown rather than as an input. MEASUREMENTS.md M-147 is what MEQ reports
+# on this file and how far it sits from the reference.
+#
+# WHY psi_n = 0.95 AND NOT THE SEPARATRIX, which is the one decision in this
+# file that is not mechanical. The reference is diverted, so its last closed
+# surface passes through an X-point and has a CORNER; MXH is a truncated
+# Fourier series and cannot turn one. Worse, the source AT the separatrix is
+# the plasma
+# edge, where the reference's alpha_n = 1.2 makes p' a fractional power of
+# 1 - Psi and caps any convergence rate at about 1.2 whatever the polynomial
+# degree. At 0.95 the boundary is smooth and closed and the profiles are
+# analytic across it:
+#
+#     p'  at Gamma   7.134710e+03 Pa per Wb/rad
+#                   which is 0.0099 of its value on the axis
+#     gg' at Gamma   6.978875e-03 T^2 m^2 per Wb/rad
+#
+# Both comfortably nonzero, so this is NOT the trivial branch of CLAUDE.md's
+# Traps section -- and see [initialguess] for the OTHER branch, which is.
+#
+# THE SHAPE, read out of the fit rather than asserted:
+#
+#     R0 0.8504 m   a 0.5458 m   aspect 1.558   elongation 1.6358
+#     triangularity sin( s_1 )                    +0.2308
+#     largest further shaping | s_n |, n >= 2     0.0591
+#     up-down asymmetry, max | c_n | over n >= 0  0.0000
+#
+# The last one is zero to machine precision for an exactly up-down symmetric
+# machine, and it is the COS coefficients rather than the sin ones because
+# Z( t ) is odd whatever they do -- see make_case.py where these are computed.
+#
+# MXH fit residual 1.779e-04 m on a minor radius of 0.5458 m, i.e.
+# 3.26e-04 relative, at 20 harmonics. THAT NUMBER BOUNDS THE
+# COMPARISON AGAINST freegs4e AND BOUNDS NOTHING ABOUT MEQ. Gamma here IS the
+# MXH curve below -- analytic, smooth and exactly known -- so a convergence
+# study on this file is valid at any order however the coefficients were
+# arrived at.
+#
+# WHAT THIS FILE DOES NOT CARRY, said plainly because their absence is a
+# property of the problem rather than an omission:
+#
+#   * NO CONDUCTORS. Gamma is the plasma edge, so every coil of the real
+#     machine is OUTSIDE the computational domain and its whole influence is
+#     in the Dirichlet datum -- which is zero. `[conductors] Model` would have
+#     nothing to act on. A fixed-boundary case that CAN measure coil
+#     subtraction needs a domain larger than the plasma;
+#     examples/coils-rectangle.toml is the small one that does.
+#   * NO EXTERIOR COUPLING, NO X-POINT, NO LIMITER AND NO PLASMA-CURRENT
+#     BORDER. This is one Dirichlet problem, solved once, which is exactly why
+#     it is cheap enough to be worth having beside the free-boundary set.
+
+[mesh]
+# The background the curved boundary is cut FROM. Omega_h is the union of these
+# elements lying inside Gamma, so about 37% of them survive and
+# 35927 elements are predicted here; MEASUREMENTS.md M-147 has what MEQ
+# actually reported. Cells are near square, NZ/NR following the elongation.
+#
+# RefinementLevels IS THE SIZE KNOB AND THE REFINEMENT STUDY. Bisection of
+# triangles is exact, so raising it gives a mesh NESTED in this one and the
+# geometry does not move; raising NR or NZ instead changes which elements fall
+# inside Gamma, which is a different problem rather than a finer one.
+RMin = 0.113478
+RMax = 1.587265
+ZMin = -1.205376
+ZMax = 1.205375
+NR = 43
+NZ = 70
+RefinementLevels = 2
+
+[discretisation]
+PolynomialDegree = 2
+
+[boundary]
+# psi = 0 on Gamma, which is the MXH curve below and NOT the mesh's rectangle.
+Type = "zero"
+
+[boundary.shape]
+# GS-2 section 3's extension technique: Omega_h is inscribed in Gamma, the
+# datum is carried outward along transfer paths, and the band between them is
+# continued with the SOLVED flux. This is what MEQ is for, and this curve is
+# the only thing in this file that is not a number out of the reference.
+Type = "mxh"
+R0 = 0.8503711613
+Z0 = -0.0000000725
+MinorRadius = 0.5458470897
+Elongation = 1.6357524739
+CosCoefficients = [
+	-1.7802876950e-05,  3.6012083437e-05, -3.6036113401e-05,  3.5916128831e-05,
+	-3.5137119810e-05,  3.3434956493e-05, -3.0869616686e-05,  2.7406375403e-05,
+	-2.3436418603e-05,  1.9238025264e-05, -1.5123180426e-05,  1.1362595006e-05,
+	-8.1224493271e-06,  5.4744540962e-06, -3.4024054379e-06,  1.8387925722e-06,
+	-7.1903251202e-07, -7.0689053860e-08,  6.1381123651e-07, -1.0096459627e-06,
+	 1.2780480618e-06
+]
+SinCoefficients = [
+	 2.3295109311e-01,  5.9148489977e-02, -9.5907118675e-04,  5.1246804009e-04,
+	 1.4604521031e-02,  1.3230538133e-02,  9.0587432359e-03,  5.8830704382e-03,
+	 2.8831968925e-03,  1.3453406229e-03,  5.1689445149e-04,  3.9252413422e-04,
+	 8.3660999824e-06, -1.7330008804e-04, -8.2244930161e-05,  1.2381974675e-04,
+	-2.7721250510e-05, -1.7028754813e-04, -5.1674959405e-05,  1.2827820848e-04
+]
+
+# THE RAMP IS PART OF THE PROBLEM STATEMENT, NOT A TUNING PARAMETER.
+#
+# These sources do not vanish at psi = 0 -- see the two numbers at the top of
+# this file -- so this is not the trivial branch of CLAUDE.md's Traps section.
+# It is the SECOND SOLUTION beside it, which that file records for the
+# high-beta source: "this equation has a small positive solution and a large
+# one ... Newton from the Dirichlet datum walks straight onto it". The
+# amplitude is the axis height the reference itself has, so the iterate starts
+# at the right SCALE and Psi starts inside its own table.
+[initialguess]
+Type = "ramp"
+Amplitude = 8.0431769680e-02
+
+[source]
+Type = "mhd"
+# dp/dPsi and g dg/dPsi against MEQ's NORMALISED flux -- one on the axis, zero
+# on Gamma -- and both already the derivative quantities. See the tables' own
+# headers, and tools/freegs4e-benchmark/convert.py, which records both the
+# docstring error in freegs4e that this conversion survives and the reason the
+# normalised form is the one that can be shipped.
+PPrimeFile = "examples/fixed-g-mastu-pprime.dat"
+GGPrimeFile = "examples/fixed-g-mastu-ggprime.dat"
+
+# psi_ax IS AN UNKNOWN OF THE SOLVE AND THIS IS ITS STARTING VALUE.
+#
+# Normalised = true closes the system with psi_ax - max psi = 0 in the border,
+# so Psi is confined to [ 0, 1 ] BY CONSTRUCTION and the profiles are never
+# evaluated off their own tables. That is not a refinement -- it is what makes
+# this file shippable. Against psi in Wb/rad the table has to stop at the axis,
+# meq::SplineProfile extends it by a constant above that, and the plateau
+# carries a solution of its own: sweeping only the guess amplitude on machine A
+# reached 0.0105, 1.2604 and 0.9996 of the reference's axis height, in that
+# order, as the ramp grew. convert.py has the table.
+Normalised = true
+PsiAxis = 8.0431769680e-02
+
+[solver]
+NewtonMaxIterations = 40
+NewtonRelativeTolerance = 1.0e-10
+NewtonAbsoluteTolerance = 1.0e-14
+
+[output]
+Directory = "."
+Prefix = "fixed-g-mastu"
+GridNR = 129
+GridNZ = 129

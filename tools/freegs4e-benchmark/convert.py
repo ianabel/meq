@@ -78,14 +78,103 @@ def to_meq_table(psi_n, values, psi_axis, psi_bndry, psi_zero=None):
     return psi_meq[order], column[order], dcolumn[order]
 
 
-def write_meq_profile(path, psi, value, derivative, what, source_note):
+def to_meq_normalised_table(psi_n, values, level):
+    """(psi_n, dX/dpsi) -> (Psi, dX/dPsi, d2X/dPsi2) for `Normalised = true`.
+
+    WHY THE NORMALISED FORM IS THE RIGHT ONE HERE, AND IT IS NOT A PREFERENCE.
+
+    `to_meq_table` above writes the profile against psi in Wb/rad, which is
+    `Type = "mhd"` with `Normalised = false`.  That table necessarily STOPS at
+    the axis: freegs4e's profiles are defined on psi_n in [ 0, 1 ] and there is
+    no psi_n < 0.  meq::SplineProfile's documented out-of-range policy is to
+    extend by a CONSTANT, so above the axis flux the source becomes a constant
+    -- and that plateau manufactures a solution of its own.
+
+    MEASURED on machine A, sweeping only the [initialguess] ramp amplitude and
+    changing nothing else, as a ratio to the reference's own axis height:
+
+        1x, 2x, 3x -> 0.0105        a small solution
+        4x to 8x   -> 1.2604        the plateau's solution
+        12x        -> 0.9996        the equilibrium
+
+    Three branches, chosen non-monotonically by a guess.  That is not something
+    to ship in an example.
+
+    THE NORMALISED FORM HAS NO ABOVE-THE-AXIS REGION AT ALL.  Psi = psi/psi_ax
+    with psi_ax an UNKNOWN of the bordered Newton, constrained to be max psi --
+    so Psi <= 1 by construction and the profile is never evaluated off its own
+    table.  It is also the form freegs4e itself solves in, and the form an EQDSK
+    carries.  The clamp plateau is gone because the region it lived in does not
+    exist.
+
+    THE ALGEBRA, which has one factor in it that is easy to drop.  MEQ's
+    boundary is the psi_n = `level` surface, so
+
+        Psi = 1 - psi_n/level,      psi_MEQ = Psi * psi_ax_MEQ
+
+    and meq::NormalisedMHDSource evaluates
+
+        F = [ mu0 r^2 ( dp/dPsi )( Psi ) + ( g dg/dPsi )( Psi ) ] / psi_ax
+
+    -- so the VALUE column is d/dPsi, not d/dpsi, and the two differ by
+    psi_ax_MEQ = -level * D.  The division by psi_ax inside the source then
+    takes it straight back to dp/dpsi, which is why this is the same physical
+    source written in the coordinate the solve actually uses.
+
+    @param level  the psi_n of the surface handed to MEQ as Gamma.
+    @return       ( Psi, dX/dPsi / |scale|, d2X/dPsi2 ) with Psi ASCENDING, over
+                  Psi in [ 0, 1 ] only -- the table is CUT at Gamma rather than
+                  carried past it, because psi_n > level is outside the
+                  computational domain and tabulating it would invite exactly
+                  the extrapolation this function exists to remove.
+    """
+    psi_n = np.asarray(psi_n, float)
+    values = np.asarray(values, float)
+
+    keep = psi_n <= level + 1e-12
+    psi_n = psi_n[keep]
+    values = values[keep]
+    if len(psi_n) < 4:
+        raise ValueError("fewer than four profile points inside the boundary")
+
+    Psi = 1.0 - psi_n / level
+
+    # d/dPsi of the VALUE, which is currently d/dpsi. The chain factor is
+    # dpsi/dPsi = psi_ax_MEQ, and it is applied by the CALLER through `scale`
+    # so that this function stays a pure coordinate change; see build().
+    spline = CubicSpline(psi_n, values)
+    dvalues_dpsin = spline(psi_n, 1)
+    # dPsi/dpsi_n = -1/level, so d/dPsi = -level d/dpsi_n.
+    dvalues = -level * dvalues_dpsin
+
+    order = np.argsort(Psi)
+    return Psi[order], values[order], dvalues[order]
+
+
+DEFAULT_ABSCISSA = (
+    "Three columns: psi [Wb/rad], value, d(value)/dpsi.\n"
+    "psi is MEQ's, i.e. ZERO ON GAMMA and negative inside for a\n"
+    "normal-sign tokamak, NOT normalised flux.")
+
+NORMALISED_ABSCISSA = (
+    "Three columns: Psi, value, d(value)/dPsi.\n"
+    "Psi = psi/psi_ax is MEQ's NORMALISED flux: ONE on the magnetic\n"
+    "axis and ZERO on Gamma, which is the opposite sense to\n"
+    "freegs4e's psi_n and to EQDSK's. The value column is therefore\n"
+    "d/dPsi and not d/dpsi; meq::NormalisedMHDSource divides by\n"
+    "psi_ax itself, so do not pre-divide the table.")
+
+
+def write_meq_profile(path, psi, value, derivative, what, source_note,
+                      abscissa=DEFAULT_ABSCISSA):
     with open(path, "w") as f:
         f.write(f"# {what}\n#\n")
         for line in source_note.strip().split("\n"):
             f.write(f"# {line}\n")
-        f.write("#\n# Three columns: psi [Wb/rad], value, d(value)/dpsi.\n")
-        f.write("# psi is MEQ's, i.e. ZERO ON GAMMA and negative inside for a\n")
-        f.write("# normal-sign tokamak, NOT normalised flux.\n#\n")
+        f.write("#\n")
+        for line in abscissa.strip().split("\n"):
+            f.write(f"# {line}\n")
+        f.write("#\n")
         for p, v, d in zip(psi, value, derivative):
             f.write(f"{p: .12e}  {v: .12e}  {d: .12e}\n")
 

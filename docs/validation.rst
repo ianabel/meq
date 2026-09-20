@@ -432,6 +432,32 @@ that library worth knowing before trusting a result from it.
    for f in out/*.toml; do meq "$f"; done
    venv/bin/python compare.py out/*.npz
 
+The six **shipped** fixed-boundary machine cases are built by the same two
+scripts, from references refined a level further:
+
+.. code-block:: sh
+
+   cd tools/freegs4e-benchmark
+   FGSREF_OUT=$PWD PYTHONPATH=/path/to/freegs4e \
+       venv/bin/python fgsref.py --shaped --nx=257 --seed-from=auto
+   sh make_fixed.sh                                    # -> examples/fixed-*
+
+``--seed-from`` is what makes the refinement affordable: the grids are
+:math:`2^n + 1` and therefore nest, so a :math:`257^2` run starts from the
+committed :math:`129^2` answer and converges in a handful of Picard passes
+rather than the twenty to a hundred a cold start costs. All nine machines take
+about six minutes. The references at that resolution are **not** committed —
+they are 1.6 MB each and nothing but the comparison needs them; the shipped
+TOML carries the MXH coefficients and the profile tables, which is everything a
+*run* needs. See :ref:`examples-machine-fixed-boundary`.
+
+**The resolution is not a detail.** What floors the comparison is the MXH fit of
+:math:`\Gamma`, and that fit is extracted from ``freegs4e``'s grid: at
+:math:`129^2` with ten harmonics it reads 2.7e-04 to 7.6e-04 m, and at
+:math:`257^2` with twenty it reads 4.4e-05 to 1.8e-04. Above twenty harmonics
+nothing improves, which is what says the remaining residual is the grid rather
+than the truncation.
+
 Two pieces of the harness self-test, and both should be run first if anything
 looks wrong: ``mxh.py`` fits a shape whose coefficients it knows and demands
 them back, and ``convert.py`` checks its derivative column against a closed
