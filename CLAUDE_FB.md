@@ -2921,6 +2921,27 @@ This is the same multiplicity recorded under `CLAUDE_HDGGS.md`'s
 *Should `PicardThenNewton` simply be the default?*, where three solve routes reach discrete solutions 9.4% apart,
 met from outside the codebase.
 
+**AND IT IS NOW CURED RATHER THAN NAVIGATED, WHICH IS WHAT LET THE REHEARSAL
+BECOME SIX SHIPPED EXAMPLES.** → **[M-147](MEASUREMENTS.md#m-147)**. The upper
+root is an artefact of the COORDINATE: against `ψ` in Wb/rad the profile table
+necessarily stops at the axis, `freegs4e`'s profiles living on `ψ_n ∈ [0, 1]`,
+and `meq::SplineProfile` extends a table by a **constant** past its end knots —
+so above the axis flux the source is a plateau, and the plateau carries a
+solution. `[source] Normalised = true` confines `Ψ` to `[0, 1]` by the
+constraint `ψ_ax = max ψ`, the profile is never evaluated off its own table, and
+the region that root lived in does not exist. `examples/fixed-*.toml` are six
+machines on exactly this footing — `ψ_n = 0.95`, a `257²` reference, twenty
+harmonics — agreeing with `freegs4e` to **1.1e-04 worst case** against M-60's
+6.8e-03, and each converging from its own ramp with no seed at all.
+
+**ONE SENTENCE ABOVE IS QUALIFIED BY THAT SWEEP AND THE QUALIFICATION MATTERS
+MORE THAN THE CURE.** *"no amplitude finds it"* is true of the amplitudes
+swept; at `ψ_n = 0.95` a ramp at **12×** the reference's axis height reaches the
+physical root, having passed through the upper one at 4× to 8×. So the middle
+branch is reachable and the selection is **not monotone in the amplitude** —
+which is worse than unreachable for anything shipped, because it looks like a
+tunable parameter and is not one.
+
 **FOUR CONVERSIONS, EACH OF WHICH CONVERGES TO A WRONG ANSWER.**
 
 * **freegs4e's `pprime` is `dp/dψ`, and its own docstring says `dp/dψ_n`.** The

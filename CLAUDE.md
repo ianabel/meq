@@ -2293,10 +2293,26 @@ for `k = 1, 2, 3`. The separatrix is also excluded for a second reason worth
 keeping: it passes through an X-point and has a **corner**, and MXH is a
 truncated Fourier series that cannot turn one.
 
-→ **[M-147](MEASUREMENTS.md#m-147)** — the six, their cost, their agreement with
-`freegs4e` (worst 1.1e-04 against the free-boundary comparison's 6.8e-03) · the
-rate table · and the THREE-SOLUTION finding that made `Normalised = true`
-mandatory rather than preferable
+→ **[M-147](MEASUREMENTS.md#m-147)** — the six, their cost, their agreement
+with `freegs4e` · the rate table · and the cure for
+[M-61](MEASUREMENTS.md#m-61)'s three roots
+
+**THE COMPARISON IS AGAINST [M-60](MEASUREMENTS.md#m-60) AND NOT AGAINST THE
+FREE-BOUNDARY ONE**, which is worth saying because the machines are the same
+and the two are easy to confuse. M-60 IS this comparison — `CLAUDE_FB.md`'s
+fixed-boundary rehearsal — at `psi_n = 0.90`, a `129²` reference and ten
+harmonics, reading 1.5e-04 to 6.8e-03. Moving to 0.95, `257²` and twenty takes
+it to **5.0e-05 to 1.1e-04**, and [M-62](MEASUREMENTS.md#m-62) is the study that
+said where that order would come from: it swept the grid and the harmonic count
+on one machine and named the limiter at each step, the contour, then the fitter,
+then MEQ.
+
+**AND THE ROOT SELECTION IS M-61'S AND NOT NEW.** What is new is that
+`Normalised = true` removes the upper root rather than navigating around it, so
+these need no seed; and one sentence of M-61 is qualified — a ramp at 12× the
+axis height *does* reach the physical root, so the branch is reachable and the
+selection is **not monotone in the amplitude**. `CLAUDE_FB.md`, *Root selection
+is the finding, not the agreement*, carries both.
 
 **They carry no conductors and that is structural.** Γ is the plasma edge, so
 every coil is outside the computational domain and its whole influence is a

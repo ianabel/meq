@@ -6014,12 +6014,15 @@ and over the whole `129²` output grid, dropping the band, through
 | `fixed-e-diamagnetic` | 11,328 | 437 | 1.121e-04 | 2.879e-04 |
 
 **TWO INDEPENDENT CODES OVER ~12,000 NODES ON SIX MACHINES, WORST CASE
-1.1e-04** — against the free-boundary comparison's 1.5e-04 to 6.8e-03 on the
-same machines, [M-111](MEASUREMENTS.md#m-111)'s table. An order of magnitude
-better, and the reason is that the fixed-boundary problem removes the exterior
-map, the conductor models and the inverse-solve mode difference all at once: the
-two codes are then answering the same question with nothing between them but the
-MXH fit of Γ and `freegs4e`'s own grid.
+1.1e-04.** This is the same comparison [M-60](#m-60) records at **1.5e-04 to
+6.8e-03** — `CLAUDE_FB.md`'s fixed-boundary rehearsal — with three things
+changed and nothing else: the surface is `psi_n = 0.95` rather than 0.90, the
+reference is `257²` rather than `129²`, and the fit takes twenty harmonics
+rather than ten. **An order of magnitude, and [M-62](#m-62) predicted where it
+would come from**: that study swept the reference's grid and the harmonic count
+on one machine and named the limiter at each step — the contour, then the
+fitter, then MEQ. These six are that study's conclusion applied to a shipped
+set.
 
 #### The order, which is what these cases exist for
 
@@ -6062,22 +6065,43 @@ was extracted from rather than the truncation. `fixed-h-circular` refines
 1.14e-04 → 2.29e-05 → 1.60e-05 in `psi_ax` and then stops, which is that floor
 met from MEQ's side.
 
-#### One thing measured on the way that is a finding about the SOURCE
+#### Root selection: [M-61](#m-61)'s three solutions, re-met, and this time cured
 
-Against `psi` in Wb/rad rather than normalised flux, this problem has **three
-solutions** and the initial guess chooses between them non-monotonically. The
-profile table necessarily stops at the axis — `freegs4e`'s profiles live on
-`psi_n ∈ [0, 1]` — and `meq::SplineProfile` extends a table by a **constant**
-beyond its end knots, so above the axis flux the source becomes a plateau that
-carries a solution of its own. Sweeping only `[initialguess] Amplitude` on
-machine A, as a ratio to the reference's axis height:
+**THE MULTIPLICITY IS NOT NEW AND THE CURE IS.** M-61 and `CLAUDE_FB.md`'s
+*Root selection is the finding, not the agreement* already record that this
+problem, with `p'` and `gg'` given as functions of `psi`, has **three
+solutions** on machine A — a lower root at −95.7% of the reference, the physical
+one, and an upper at +15.4% — and that the upper is a genuine second solution
+rather than an error, because it reads +15.39% → +15.41% across two refinement
+levels and two degrees. Its answer was to **seed MEQ from the reference**, which
+is fine for a benchmark and is not something a shipped example can do.
+
+Re-met at `psi_n = 0.95` on the `257²` reference, sweeping only
+`[initialguess] Amplitude` as a multiple of the reference's own axis height and
+changing nothing else:
 
 | ramp | 1× | 2× | 3× | 4× | 5× | 6× | 8× | 12× |
 |---|---|---|---|---|---|---|---|---|
 | reached | 0.0105 | 0.0105 | 0.0105 | 1.2604 | 1.2604 | 1.2604 | 1.2604 | **0.9996** |
 
-Every one of those converged, cleanly, in single-figure Newton counts.
-`Normalised = true` removes the middle branch outright, because `Psi = psi/psi_ax`
-with `psi_ax` constrained to `max psi` is confined to `[0, 1]` and the profile
-is never evaluated off its own table — so the region that branch lived in does
-not exist. All six shipped cases use it, and it is why they are shippable.
+Same three roots, at 0.0105, 0.9996 and 1.2604 of the reference's axis height.
+
+**ONE THING IN M-61 IS QUALIFIED BY THIS AND IT IS WORTH THE LINE.** That entry
+says *"The physical one lies between the two a ramp reaches, and no amplitude
+finds it — the sweep steps from the lower root to the upper between 0.1 and
+0.2"*. On these settings a ramp **does** find it, at 12× the axis height, well
+past where the upper root takes over at 4×. So the middle branch is reachable
+from a ramp and the selection is **not monotone in the amplitude** — which is
+worse than unreachable for a shipped file, because it looks tunable and is not.
+
+**AND WHAT REMOVES THE UPPER ROOT IS A CHANGE OF COORDINATE, NOT A BETTER
+GUESS.** The mechanism is now identified: against `psi` in Wb/rad the profile
+table necessarily **stops at the axis**, `freegs4e`'s profiles living on
+`psi_n ∈ [0, 1]` with no `psi_n < 0`; `meq::SplineProfile`'s documented
+out-of-range policy extends a table by a **constant**; so above the axis flux
+the source is a plateau, and the plateau carries the upper root. With
+`Normalised = true`, `Psi = psi/psi_ax` and `psi_ax` is an unknown constrained
+to `max psi`, so `Psi ≤ 1` **by construction** and the profile is never
+evaluated off its own table. The region that root lived in does not exist. All
+six shipped cases use it, every one converges from its own ramp in 7 to 15
+Newton steps, and that is why they can be shipped at all.

@@ -67,6 +67,18 @@ elongations 1.3 to 2.1, including one case with :math:`g g' < 0` throughout.
 
 Over roughly 11,000 grid nodes per case, worst case 0.7 %.
 
+.. important::
+
+   **Those are the settings the harness shipped with, and the six cases in**
+   ``examples/`` **are the same comparison run better.** The boundary there is
+   the :math:`\psi_{\mathrm N} = 0.95` surface rather than 0.90, the reference
+   is :math:`257^2` rather than :math:`129^2`, and the MXH fit takes twenty
+   harmonics rather than ten — and the worst case falls from 6.8e-03 to
+   **1.1e-04**. Nothing about either solver changed; what changed is how well
+   :math:`\Gamma` is known, which is what the refinement study further down
+   this page says is the limiter. See
+   :ref:`examples-machine-fixed-boundary`.
+
 .. note::
 
    These numbers date from when the page was written and will drift. The

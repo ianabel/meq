@@ -6,7 +6,7 @@ are known to work and known to stay working. Each carries a long header
 explaining what it demonstrates and — usually more usefully — what it does
 *not*.
 
-Run them from the repository root, since two of them name profile files by
+Run them from the repository root, since several name their profile tables by
 relative path:
 
 .. code-block:: sh
