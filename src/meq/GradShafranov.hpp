@@ -1328,8 +1328,39 @@ namespace meq
 			 *
 			 * Ignored on the linear path, where the solve is direct and a
 			 * starting point means nothing.
+			 *
+			 * **WHAT THIS GUESS IS A GUESS *AT* DEPENDS ON WHETHER
+			 * setConductorField() IS IN USE, AND THE FILE CANNOT TELL YOU
+			 * WHICH.** The solver seeds the field it solves for. Without a
+			 * conductor field that is `psi`; with one it is the remainder
+			 * `psi_p`, and a guess at the physical flux would be wrong by
+			 * `psi_c` — which on a machine case is not a small number.
+			 *
+			 * **THIS IS ALLOWED RATHER THAN REFUSED**, because a caller
+			 * restarting one split run from another is doing exactly the right
+			 * thing and the meanings line up: a `.gf` written under a split
+			 * holds `psi_p` and is read back as `psi_p`. What is not checkable
+			 * is the mismatch — a guess written without a split and read with
+			 * one, or the reverse — because `mfem::GridFunction::Save()` has no
+			 * slot to record which it was. `COIL-SUBTRACTION-PLAN.md` §8.3 is
+			 * that finding and §9 is the format that fixes it.
+			 *
+			 * **SO THE OBLIGATION IS ON THE CALLER TO SAY SO.**
+			 * guessIsRemainder() reports which meaning is in force, for a
+			 * driver to warn on; this class does not print.
 			 */
 			void setInitialGuess( mfem::Coefficient &psiGuess );
+
+			/// Is the initial guess a guess at the REMAINDER `psi_p` rather
+			/// than at the physical flux `psi`? True exactly when
+			/// setConductorField() is in use.
+			///
+			/// **It exists so that a driver can say so loudly**, which matters
+			/// because a `.gf` cannot record which of the two it holds and the
+			/// two differ by `psi_c`. `apps/meq.cpp` is where the warning
+			/// belongs — the library prints nothing, by a convention this class
+			/// keeps and which `newtonResiduals()` is the model for.
+			bool guessIsRemainder() const;
 
 			/// The same, from a potential computed elsewhere -- a previous solve
 			/// on this or another mesh. Borrowed; it must outlive the next

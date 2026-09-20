@@ -403,6 +403,165 @@ BOOST_AUTO_TEST_CASE( theViewIsFreeWithoutConductorsAndExactWithThem )
 	BOOST_TEST( scale > 1.0e-3, "the field is trivial, so this proves nothing" );
 }
 
+// THE TWO ROUTES AGREE, AND THE MESHED ONE CONVERGES TO THE SUBTRACTED ONE.
+//
+// COIL-SUBTRACTION-PLAN.md §0a-pre is a STANDING REQUIREMENT: MEQ must always be
+// able to solve finite-sized coils accurately the old way, and the split is an
+// option rather than a replacement. This case is what gives that teeth, and it
+// is only possible because CS-1b put RECTANGLES in meq::ConductorField -- a
+// rectangle is the conductor that can go either way, so it is the only one that
+// can be the cross-check. A filament can only ever be subtracted.
+//
+// THE SUBTRACTED ARM IS THE TRUTH HERE, WHICH IS THE RIGHT WAY ROUND. With the
+// coil's own field as the datum and no plasma, the remainder is identically
+// zero and the total is psi_c EXACTLY -- §7.4's identity. The meshed arm solves
+// Delta* psi = -mu0 r j_phi with the same datum and a source that is a top hat
+// on the coil, so it approximates that same field to the mesh's order. So the
+// difference between them IS the meshed route's discretisation error, and it
+// must FALL under refinement. A difference that did not fall would say the two
+// routes are solving different problems, which is exactly what §0b forbids.
+BOOST_AUTO_TEST_CASE( theMeshedCoilConvergesToTheSubtractedOne )
+{
+	// A rectangle well inside the box, clear of its boundary, and ALIGNED TO
+	// THE MESH AT EVERY LEVEL: the box is [ 0.6, 1.4 ] x [ -0.4, 0.4 ] and the
+	// half-extents are 0.10, so the coil's edges sit at 0.90, 1.10, -0.10 and
+	// +0.10 -- which are vertices at n = 8, 16 and 32 alike.
+	//
+	// THAT ALIGNMENT IS THE EXPERIMENT AND NOT A CONVENIENCE. The source is a
+	// TOP HAT, so psi is not C^2 across the coil's edge; if the edge cuts
+	// element interiors then WHICH elements it cuts is not a smooth function of
+	// h, and the error is not even monotone. Measured, with half-extents of
+	// 0.06 instead: 6.756e-04, 1.276e-03, 1.917e-04 over the same three levels
+	// -- a rate of -0.92 and then +2.73. That is the unfitted-geometry
+	// behaviour CLAUDE.md's "Unfitted convergence needs a two-tier rate
+	// assertion" records for the extension path, met here for the same reason,
+	// and it is a fact about cutting a discontinuity rather than about either
+	// conductor route. MEQ meshes TO its coils -- tools/mesh/halfdisc.py exists
+	// to do exactly that -- so the aligned case is the configuration this plan
+	// is about.
+	meq::Coil const conductor( 1.00, 0.00, 0.10, 0.10, 1.0e5 );
+
+	meq::CoilSet meshed;
+	meshed.add( conductor );
+
+	meq::ConductorField subtracted;
+	subtracted.add( conductor );
+
+	// The coil as a DOMAIN SOURCE: F = mu0 r j_phi inside it and zero outside,
+	// which is meq::CoilSet::f() and is what meq::CoilAugmentedSource wraps.
+	struct MeshedCoilSource : public meq::Source
+	{
+		explicit MeshedCoilSource( meq::CoilSet const &c ) : coils( c ) {}
+
+		double f( double r, double z, double ) const override
+		{
+			return coils.f( r, z );
+		}
+
+		double dFdPsi( double, double, double ) const override
+		{
+			return 0.0;
+		}
+
+		meq::CoilSet const &coils;
+	};
+
+	MeshedCoilSource const source( meshed );
+	VacuumSource const vacuum;
+
+	mfem::FunctionCoefficient datum(
+		[ &meshed ]( mfem::Vector const &x )
+		{
+			return meshed.psi( x( 0 ), x( 1 ) );
+		} );
+
+	std::printf( "\n  §0a-pre: the same rectangle MESHED against SUBTRACTED\n" );
+	std::printf( "    %8s %10s %14s %8s\n", "elements", "dofs",
+	             "max |meshed - psi_c|", "rate" );
+
+	double previous = 0.0;
+	double worstRate = 1.0e30;
+
+	for ( int n : { 8, 16, 32 } )
+	{
+		mfem::Mesh meshA = makeBox( n );
+		meq::GradShafranovSolver meshedSolver( meshA, 2 );
+		meshedSolver.setSource( source );
+		meshedSolver.setBoundaryData( datum );
+		meshedSolver.solve();
+
+		// The subtracted arm on the same mesh, as the control that its own
+		// remainder is still identically zero with a RECTANGLE rather than a
+		// filament -- the identity must not depend on which kind it is.
+		mfem::Mesh meshB = makeBox( n );
+		meq::GradShafranovSolver splitSolver( meshB, 2 );
+		splitSolver.setSource( vacuum );
+		splitSolver.setBoundaryData( datum );
+		splitSolver.setConductorField( subtracted );
+		splitSolver.solve();
+
+		BOOST_TEST( maxAbs( splitSolver.potential() ) < 1.0e-12,
+		            "the rectangle's remainder is not zero" );
+
+		// Compare the meshed solution against psi_c, at quadrature points
+		// OUTSIDE the conductor: inside it the source is a top hat and the
+		// meshed route's order is capped by the jump, which is a different
+		// claim from the one being made here.
+		double worst = 0.0;
+		for ( int element = 0; element < meshA.GetNE(); ++element )
+		{
+			mfem::IntegrationRule const &rule = mfem::IntRules.Get(
+				meshA.GetElementBaseGeometry( element ), 4 );
+			mfem::IsoparametricTransformation transformation;
+			meshA.GetElementTransformation( element, &transformation );
+
+			for ( int q = 0; q < rule.GetNPoints(); ++q )
+			{
+				mfem::IntegrationPoint const &ip = rule.IntPoint( q );
+				transformation.SetIntPoint( &ip );
+				mfem::Vector point( 3 );
+				transformation.Transform( ip, point );
+
+				// Outside the conductor, where both routes represent a smooth
+				// field. Inside it the meshed one is resolving a top hat and
+				// its order is capped by the jump, which is a different claim.
+				if ( std::fabs( point( 0 ) - 1.00 ) < 0.13
+				     && std::fabs( point( 1 ) - 0.00 ) < 0.13 )
+					continue;
+
+				double const got = meshedSolver.potential().GetValue( element,
+				                                                      ip );
+				worst = std::max( worst,
+				                  std::fabs( got - subtracted.psi( point( 0 ),
+				                                                   point( 1 ) ) ) );
+			}
+		}
+
+		double const rate = previous > 0.0
+			? std::log2( previous/worst ) : 0.0;
+		if ( previous > 0.0 )
+			worstRate = std::min( worstRate, rate );
+
+		std::printf( "    %8d %10d %14.3e %8s", meshA.GetNE(),
+		             meshedSolver.potential().Size(), worst,
+		             previous > 0.0 ? "" : "   --\n" );
+		if ( previous > 0.0 )
+			std::printf( " %7.2f\n", rate );
+		previous = worst;
+	}
+
+	// THE ASSERTION IS THAT IT FALLS, not that it reaches any particular order.
+	// The source is a top hat, so psi is only C^1 across the coil's edge and no
+	// polynomial degree recovers a clean k+1 globally -- which is the ORDER
+	// argument and is not what §0a-pre needs. What it needs is that the two
+	// routes converge to the same field.
+	BOOST_TEST( worstRate > 0.9,
+	            "the meshed coil is not converging to the subtracted one: "
+	            "worst observed rate " << worstRate << ". The two routes are "
+	            "solving different problems, which COIL-SUBTRACTION-PLAN.md "
+	            "§0b forbids" );
+}
+
 // psi_c IS EXACTLY ZERO WHEN NO CONDUCTOR FIELD IS SET, which is what lets
 // CS-4's consumers add it unconditionally instead of branching.
 BOOST_AUTO_TEST_CASE( theConductorPsiIsZeroWithoutASplit )

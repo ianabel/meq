@@ -2730,6 +2730,15 @@ namespace
 		return conductorFieldSet;
 	}
 
+	bool GradShafranovSolver::guessIsRemainder() const
+	{
+		// The solver seeds the field it SOLVES for, so the guess means whatever
+		// that is: psi without a conductor field, psi_p with one. Nothing here
+		// checks which a caller supplied -- a .gf cannot record it -- so this
+		// exists for a driver to warn with. See setInitialGuess().
+		return conductorFieldSet != nullptr;
+	}
+
 	double GradShafranovSolver::conductorPsi( double r, double z ) const
 	{
 		// Exactly zero with no conductor field, so that psi_c + psi_p is

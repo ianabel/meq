@@ -5694,3 +5694,52 @@ for the exact field because a `.gf` cannot carry metadata; NetCDF stores
 **binary** doubles, so the round-trip question does not arise there at all — and
 the file is smaller than the ASCII it replaces. The precision fix makes the
 current format correct; the format change makes the question disappear.
+
+### M-141
+
+**THE TWO CONDUCTOR ROUTES AGREE, AND MESHING TO THE COIL IS WORTH 43× AT THE
+COARSEST LEVEL.** `COIL-SUBTRACTION-PLAN.md` §0a-pre is a standing requirement —
+MEQ must always be able to solve finite-sized coils accurately the old way, and
+the split is an option rather than a replacement. This is the measurement that
+gives it teeth, and it is only possible because CS-1b put **rectangles** in
+`meq::ConductorField`: a rectangle is the conductor that can go either way, so
+it is the only one that can be the cross-check. A filament can only be
+subtracted.
+
+**THE SUBTRACTED ARM IS THE TRUTH, WHICH IS THE RIGHT WAY ROUND.** With the
+coil's own field as the Dirichlet datum and no plasma, the remainder is
+identically zero and the total is `psi_c` **exactly**
+→ **[§7.4](COIL-SUBTRACTION-PLAN.md)**. The meshed arm solves
+`Δ* psi = −mu0 r j_phi` with the same datum and a **top-hat** source, so it
+approximates that same field to the mesh's order. The difference between them
+therefore *is* the meshed route's discretisation error.
+
+`k = 2`, box `[ 0.6, 1.4 ] × [ −0.4, 0.4 ]`, one rectangle at `( 1.00, 0.00 )`
+carrying `1.0e5 A`, compared at quadrature points outside the conductor:
+
+| elements | dofs | **coil edges ON vertices** (±0.10) | rate | **coil edges INSIDE elements** (±0.06) | rate |
+|---|---|---|---|---|---|
+| 128 | 768 | **1.585e-05** | — | 6.756e-04 | — |
+| 512 | 3,072 | **1.678e-06** | 3.24 | 1.276e-03 | **−0.92** |
+| 2,048 | 12,288 | **2.612e-07** | 2.68 | 1.917e-04 | 2.73 |
+
+**43× AT THE COARSEST LEVEL, AND THE UNFITTED COLUMN IS NOT EVEN MONOTONE.**
+The source is a top hat, so `psi` is not `C²` across the coil's edge; when that
+edge cuts element interiors, **which** elements it cuts is not a smooth function
+of `h` and the error wanders. That is exactly the behaviour `CLAUDE.md`'s
+*Unfitted convergence needs a two-tier rate assertion* records for the extension
+path, met here for the same reason — **a fact about cutting a discontinuity
+rather than about either conductor route**.
+
+**SO THIS IS A MEASUREMENT OF WHY `tools/mesh/halfdisc.py` MESHES TO THE COILS**,
+which that tool does by construction and which `CLAUDE.md` records as the reason
+`[[coils]]` emits exact doubles — *"so the mesh aligns to the rectangle
+`meq::Coil`'s quadrature uses to the ulp"*. The alignment was known to matter;
+this puts 43× on it.
+
+**AND THE RATES SAY THE TWO ROUTES CONVERGE TO ONE FIELD.** 3.24 and 2.68 at
+`k = 2`, where `k+1 = 3` is what a smooth solution gives — outside the conductor
+`Δ* psi = 0`, so smooth is what it is there. The acceptance asserts only that
+the difference **falls**, not that it reaches any particular order, because the
+order argument is about the top hat and the requirement is about the two routes
+solving the same problem.

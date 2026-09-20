@@ -11,6 +11,46 @@ to both. It is a DESIGN, not a measurement — nothing here has been built.
 
 ---
 
+## 0a-pre. A STANDING REQUIREMENT: THE MESHED FINITE COIL NEVER STOPS WORKING
+
+**MEQ must always be able to switch back to solving finite-sized coils
+accurately, and the split is an OPTION rather than a replacement.** This is a
+constraint on every stage below and it outranks any of them.
+
+**Why it has to be said rather than assumed.** A plan whose whole content is
+"take the conductors out of the mesh" drifts naturally towards making the other
+route second class — the meshed source stops being exercised, then stops being
+measured, then stops working, and nobody notices until a case needs it. And
+cases will: a finite coil carried as a domain source is the route that needs no
+`psi_c` evaluation per quadrature point, that puts the conductor's own current
+into the interior equation where a force calculation can see it, and that has
+been MEQ's answer since FB-2.
+
+**What it forbids, concretely.**
+
+* `meq::CoilSet::f()` and `meq::CoilAugmentedSource` stay, stay tested, and stay
+  the default for a rectangle. The split must be asked for.
+* **No stage may make the meshed route pay for the split.** Today it does not:
+  `setConductorField()` is off by default and every shift in the tree is guarded
+  on a null pointer, so a run that does not ask for it is **bit-identical** —
+  which CS-2's control case asserts rather than assumes.
+* CS-6's output format must be able to say a run used **either**, and a `.nc`
+  that regenerates its input regenerates whichever was asked for.
+
+**AND IT IS WHAT MAKES §7.2's SECOND ACCEPTANCE THE IMPORTANT ONE.** The same
+machine solved with a conductor **meshed** and with it **subtracted** must agree
+to the discretisation. That comparison is only available while both routes work,
+and it is the only check that says the split is a change of REPRESENTATION and
+not of answer — §0b's requirement. **So the two routes are not rivals; the
+meshed one is the subtraction's instrument.**
+
+**A rectangle is the conductor that can go either way**, which is what makes the
+comparison possible at all — CS-1b put rectangles in `meq::ConductorField` for
+that reason as much as for completeness. A filament can only be subtracted, so
+it can never be the cross-check.
+
+---
+
 ## 0. What would falsify it, and the cheapest experiment
 
 Put first, because this plan has one load-bearing assumption and it is testable
