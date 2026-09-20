@@ -160,3 +160,11 @@ tools/freegs4e-benchmark/*.json
 # And the same, one directory down: baseline.py writes each rung of the nested
 # ladder into its own ref-n<N>/, which the two patterns above do not reach.
 tools/freegs4e-benchmark/ref-n*/
+
+# Claude Code's own working area at the repository root. It holds `worktrees/`,
+# and each entry there is a real GIT WORKTREE of THIS repository -- a directory
+# with its own `.git` file pointing back into `.git/worktrees/`. So `git add -A`
+# does not merely stage some scratch: it warns about adding an embedded
+# repository and, taken at face value, commits a gitlink to a checkout that
+# exists only on this machine. Anchored, like the scratch directories above.
+/.claude/
