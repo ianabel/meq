@@ -21,7 +21,7 @@ namespace meq
 	 * with `psi_c` supplied here. **The conductors then need not be in the mesh
 	 * at all**, which is the point of the plan.
 	 *
-	 * **FILAMENTS ONLY, AND THAT IS CS-1 RATHER THAN A LIMITATION.** A filament
+	 * **A FILAMENT IS THE CONDUCTOR THIS EXISTS FOR.** A filament
 	 * is the one conductor MEQ structurally CANNOT carry any other way: a point
 	 * source has no finite-element representation as a current density, `psi`
 	 * near it is logarithmic, and `meq::CoilSet::f()` has nothing to add for it
@@ -29,8 +29,27 @@ namespace meq
 	 * subtraction is not one route to filament support, it is the only one --
 	 * and the remainder is well behaved for exactly the reason the subtraction
 	 * works: `psi_c` carries the whole logarithm, so `psi_p` sees a bounded
-	 * right-hand side supported on the plasma alone. A rectangle is the same
-	 * code with a quadrature rule around it and is CS-1b.
+	 * right-hand side supported on the plasma alone.
+	 *
+	 * **RECTANGLES ARE HERE TOO (CS-1b), AND THEY ARE A DIFFERENT KIND OF
+	 * CONDUCTOR RATHER THAN A BIGGER FILAMENT.** A `meq::Coil` carries a uniform
+	 * current density over an area, so its field is a quadrature of the filament
+	 * kernel over the cross-section and is **finite everywhere, including
+	 * inside the coil** -- `meq::coilPsi()` says so in those words. Two
+	 * consequences, and both are contracts rather than conveniences:
+	 *
+	 *   * **coincides() is about FILAMENTS ONLY.** A rectangle has no line
+	 *     singularity for a mesh point to land on, so there is nothing to
+	 *     refuse, and refusing a node inside a coil would reject the ordinary
+	 *     configuration this plan exists to make cheap.
+	 *   * a rectangle CAN be carried as a domain source instead, through
+	 *     `meq::CoilAugmentedSource`, and for a rectangle the split is a
+	 *     performance and accuracy choice rather than the only option. For a
+	 *     filament there is no alternative at all.
+	 *
+	 * The quadrature order is forwarded to the underlying `meq::CoilSet` and is
+	 * raisable, which is what `COIL-SUBTRACTION-PLAN.md` §7.2's replacement for
+	 * CS-5 needs: a reference field built far beyond what a solve would use.
 	 *
 	 * **THIS CLASS IS MFEM-FREE AND THAT DECIDES ITS INTERFACE.** It lives
 	 * beside `meq::Coils` in the half of `src/meq` that CI can build, so it
@@ -61,23 +80,45 @@ namespace meq
 			/// doubles.
 			void add( CurrentFilament const &filament );
 
+			/// Append a rectangle carrying a uniform current density. Copied,
+			/// as meq::CoilSet::add() copies.
+			void add( Coil const &coil );
+
+			/// Every conductor, filaments and rectangles together. `empty()` is
+			/// true only when there are none of either.
 			std::size_t size() const;
 			bool empty() const;
 
-			/// @throws std::out_of_range naming the index and the size.
+			std::size_t filamentCount() const;
+			std::size_t coilCount() const;
+
+			/// @throws std::out_of_range naming the index and the count.
 			CurrentFilament const &filament( std::size_t index ) const;
 
 			/// The filaments, in the order they were added.
 			std::vector<CurrentFilament> const &filaments() const;
 
-			/// The signed sum of the filament currents, in amperes. The check
-			/// a boundary integral of this field is made against, exactly as
+			/// The rectangles, as the set that evaluates them.
+			CoilSet const &coils() const;
+
+			/// The cross-section quadrature the RECTANGLES are integrated at;
+			/// filaments have no quadrature and are unaffected. Forwarded to
+			/// meq::CoilSet, whose default is what a solve uses -- raise it to
+			/// build the reference field §7.2 of the plan asks CS-5 for.
+			void setQuadratureOrder( int order );
+			int quadratureOrder() const;
+
+			/// The signed sum of EVERY conductor's current, filaments and
+			/// rectangles alike, in amperes. The check a boundary integral of
+			/// this field is made against, exactly as
 			/// meq::CoilSet::totalCurrent() is.
 			double totalCurrent() const;
 
 			double mu0() const;
 
-			/// psi_c at a point: the sum over filaments of meq::filamentPsi().
+			/// psi_c at a point: the sum over the filaments of
+			/// meq::filamentPsi() and over the rectangles of meq::coilPsi(),
+			/// which is the superposition `Delta*`'s linearity licenses.
 			///
 			/// **Exactly zero on the axis**, bit for bit, because `k^2` is an
 			/// exact factor of the kernel -- which is the boundary condition
@@ -130,6 +171,12 @@ namespace meq
 			 * half-plane and the tolerance is relative to the filament's own
 			 * radius, which is strictly positive by CurrentFilament's own
 			 * refusal.
+			 *
+			 * **RECTANGLES ARE NOT CONSIDERED AND THAT IS NOT AN OVERSIGHT.**
+			 * A coil's field is a quadrature over its cross-section and is
+			 * finite everywhere, inside it included, so a mesh point in a
+			 * rectangle is an ordinary point -- and refusing one would reject
+			 * the configuration this plan exists to make cheap.
 			 */
 			bool coincides( double r, double z ) const;
 
@@ -153,6 +200,7 @@ namespace meq
 			double mu0Value;
 			double toleranceValue;
 			std::vector<CurrentFilament> filamentList;
+			CoilSet coilList;
 	};
 }
 

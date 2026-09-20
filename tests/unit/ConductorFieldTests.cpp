@@ -1,17 +1,23 @@
 // Unit tests for the conductor field in src/meq/ConductorField.
 //
-// COIL-SUBTRACTION-PLAN.md CS-1. The split is psi = psi_c + psi_p, with psi_c
-// the conductors' own field evaluated exactly and psi_p what MEQ solves for, so
-// that the conductors need not be in the mesh at all. This file is the unit
-// under that: psi_c, and the refusal that decides which meshes may carry it.
+// COIL-SUBTRACTION-PLAN.md CS-1 and CS-1b. The split is psi = psi_c + psi_p,
+// with psi_c the conductors' own field evaluated exactly and psi_p what MEQ
+// solves for, so that the conductors need not be in the mesh at all. This file
+// is the unit under that: psi_c over FILAMENTS and RECTANGLES both, and the
+// refusal that decides which meshes may carry it.
 //
-// THREE THINGS HERE COULD BE SILENTLY WRONG AND NO CONVERGENCE RATE WOULD SEE
+// FOUR THINGS HERE COULD BE SILENTLY WRONG AND NO CONVERGENCE RATE WOULD SEE
 // ANY OF THEM:
 //
-//   * SUPERPOSITION. psi_c is a sum over filaments, and the whole plan rests on
-//     Delta* being linear -- so a set of N filaments must give exactly what the
-//     N single-filament fields give added up. A factor applied per filament
+//   * SUPERPOSITION. psi_c is a sum over conductors, and the whole plan rests
+//     on Delta* being linear -- so a set of N must give exactly what the N
+//     single-conductor fields give added up. A factor applied per conductor
 //     rather than once converges at full rate to the wrong equilibrium.
+//   * WHICH KIND THE COINCIDENCE TEST IS ABOUT. A filament has a line
+//     singularity and a rectangle does not -- meq::coilPsi() is "Valid
+//     EVERYWHERE, including inside the coil" -- so refusing a node inside a
+//     coil would reject the ordinary configuration this plan exists to make
+//     cheap, while NOT refusing one on a filament is an infinity in a solve.
 //   * THE AXIS. psi_c must be EXACTLY zero at r = 0, bit for bit, because that
 //     is the boundary condition the free-boundary problem imposes there and the
 //     split must not disturb it. An epsilon there is a boundary condition
@@ -52,7 +58,9 @@ namespace
 BOOST_AUTO_TEST_CASE( the_field_of_a_set_is_the_sum_of_its_filaments )
 {
 	meq::ConductorField const field = threeFilaments();
+	BOOST_TEST_REQUIRE( field.filamentCount() == 3u );
 	BOOST_TEST_REQUIRE( field.size() == 3u );
+	BOOST_TEST_REQUIRE( field.coilCount() == 0u );
 
 	double const points[][ 2 ] = { { 1.70, 0.00 }, { 0.40, -1.90 },
 	                               { 2.60, +0.90 }, { 1.05, +1.05 } };
@@ -60,7 +68,7 @@ BOOST_AUTO_TEST_CASE( the_field_of_a_set_is_the_sum_of_its_filaments )
 	for ( auto const &p : points )
 	{
 		double byHand = 0.0;
-		for ( std::size_t i = 0; i < field.size(); ++i )
+		for ( std::size_t i = 0; i < field.filamentCount(); ++i )
 			byHand += meq::filamentPsi( field.filament( i ), p[ 0 ], p[ 1 ],
 			                            field.mu0() );
 
@@ -73,7 +81,7 @@ BOOST_AUTO_TEST_CASE( the_field_of_a_set_is_the_sum_of_its_filaments )
 
 		double handR = 0.0;
 		double handZ = 0.0;
-		for ( std::size_t i = 0; i < field.size(); ++i )
+		for ( std::size_t i = 0; i < field.filamentCount(); ++i )
 		{
 			double dr = 0.0;
 			double dz = 0.0;
@@ -194,6 +202,110 @@ BOOST_AUTO_TEST_CASE( evaluating_on_a_filament_still_throws )
 	double b = 0.0;
 	BOOST_CHECK_THROW( field.gradPsi( 2.05, +0.35, a, b ),
 	                   std::invalid_argument );
+}
+
+// CS-1b: RECTANGLES SUM IN BESIDE THE FILAMENTS, AND AGAINST meq::CoilSet
+// TERM FOR TERM. Superposition again, and again as an identity rather than a
+// tolerance: the two arms are the same operations in the same order, so
+// anything but bit equality is a real difference.
+BOOST_AUTO_TEST_CASE( rectanglesSumInBesideTheFilaments )
+{
+	meq::ConductorField field = threeFilaments();
+	field.add( meq::Coil( 1.60, -0.30, 0.08, 0.12, -4.4e5 ) );
+	field.add( meq::Coil( 0.90, +0.70, 0.05, 0.05, +2.1e5 ) );
+
+	BOOST_TEST( field.filamentCount() == 3u );
+	BOOST_TEST( field.coilCount() == 2u );
+	BOOST_TEST( field.size() == 5u );
+	BOOST_TEST( !field.empty() );
+
+	// The rectangles' own set answers exactly what the pair added.
+	meq::CoilSet bare;
+	bare.add( meq::Coil( 1.60, -0.30, 0.08, 0.12, -4.4e5 ) );
+	bare.add( meq::Coil( 0.90, +0.70, 0.05, 0.05, +2.1e5 ) );
+
+	double const points[][ 2 ] = { { 1.70, 0.00 }, { 0.40, -1.90 },
+	                               { 2.60, +0.90 } };
+	for ( auto const &p : points )
+	{
+		double filaments = 0.0;
+		for ( std::size_t i = 0; i < field.filamentCount(); ++i )
+			filaments += meq::filamentPsi( field.filament( i ), p[ 0 ], p[ 1 ],
+			                               field.mu0() );
+
+		BOOST_TEST( field.psi( p[ 0 ], p[ 1 ] )
+		            == filaments + bare.psi( p[ 0 ], p[ 1 ] ),
+		            boost::test_tools::tolerance( 0.0 ) );
+	}
+
+	// And the axis is still exactly zero with rectangles present, which is the
+	// free-boundary boundary condition and must survive every conductor kind.
+	BOOST_TEST( field.psi( 0.0, 0.25 ) == 0.0,
+	            boost::test_tools::tolerance( 0.0 ) );
+
+	BOOST_TEST( field.totalCurrent()
+	            == 3.0e5 - 1.7e5 + 9.0e4 - 4.4e5 + 2.1e5,
+	            boost::test_tools::tolerance( 1.0e-15 ) );
+}
+
+// A MESH POINT INSIDE A RECTANGLE IS AN ORDINARY POINT, AND THAT IS A CONTRACT.
+//
+// coincides() is about filaments only. A coil's field is a quadrature of the
+// filament kernel over its cross-section and meq::coilPsi() is documented
+// "Valid EVERYWHERE, including inside the coil" -- so there is no line
+// singularity for a node to land on, and refusing one would reject exactly the
+// configuration this plan exists to make cheap.
+BOOST_AUTO_TEST_CASE( aPointInsideARectangleIsNotACoincidence )
+{
+	meq::ConductorField field;
+	field.add( meq::Coil( 1.60, -0.30, 0.08, 0.12, -4.4e5 ) );
+
+	// Dead centre of the coil, where a filament would be infinite.
+	BOOST_TEST( !field.coincides( 1.60, -0.30 ) );
+	BOOST_TEST( field.indexAt( 1.60, -0.30 ) == -1 );
+	BOOST_TEST( std::isfinite( field.psi( 1.60, -0.30 ) ) );
+
+	double gr = 0.0;
+	double gz = 0.0;
+	BOOST_CHECK_NO_THROW( field.gradPsi( 1.60, -0.30, gr, gz ) );
+	BOOST_TEST( std::isfinite( gr ) );
+	BOOST_TEST( std::isfinite( gz ) );
+
+	// A corner, and a point on the edge: still ordinary.
+	BOOST_TEST( !field.coincides( 1.60 + 0.08, -0.30 + 0.12 ) );
+	BOOST_TEST( std::isfinite( field.psi( 1.60 + 0.08, -0.30 ) ) );
+}
+
+// THE QUADRATURE ORDER FORWARDS, which is what COIL-SUBTRACTION-PLAN.md §7.2's
+// replacement for CS-5 needs: a reference field built far beyond what a solve
+// would use, on the same conductors and the same code.
+BOOST_AUTO_TEST_CASE( theQuadratureOrderForwardsAndChangesOnlyTheRectangles )
+{
+	meq::ConductorField field;
+	field.add( meq::CurrentFilament( 1.20, -0.80, +3.0e5 ) );
+
+	int const shipped = field.quadratureOrder();
+	double const filamentOnly = field.psi( 1.70, 0.0 );
+
+	field.setQuadratureOrder( shipped + 8 );
+	BOOST_TEST( field.quadratureOrder() == shipped + 8 );
+
+	// A filament has no quadrature, so raising the order must not move it by a
+	// single bit -- which is what says the order reaches the rectangles alone.
+	BOOST_TEST( field.psi( 1.70, 0.0 ) == filamentOnly,
+	            boost::test_tools::tolerance( 0.0 ) );
+
+	// And on a rectangle it DOES move, or the forwarding is inert and the test
+	// above proves nothing.
+	meq::ConductorField coarse;
+	coarse.add( meq::Coil( 1.60, -0.30, 0.08, 0.12, -4.4e5 ) );
+	meq::ConductorField fine;
+	fine.add( meq::Coil( 1.60, -0.30, 0.08, 0.12, -4.4e5 ) );
+	fine.setQuadratureOrder( 4 );
+
+	BOOST_TEST( coarse.quadratureOrder() != fine.quadratureOrder() );
+	BOOST_TEST( coarse.psi( 1.63, -0.28 ) != fine.psi( 1.63, -0.28 ),
+	            boost::test_tools::tolerance( 0.0 ) );
 }
 
 // THE REFUSALS ARE THE CONTRACT.

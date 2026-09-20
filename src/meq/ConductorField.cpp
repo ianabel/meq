@@ -27,7 +27,13 @@ namespace meq
 	ConductorField::ConductorField( double mu0In )
 		: mu0Value( mu0In ),
 		  toleranceValue( defaultCoincidenceTolerance ),
-		  filamentList()
+		  filamentList(),
+		  // ONE mu0 FOR BOTH KINDS. meq::CoilSet carries its own, and letting
+		  // the two disagree would make psi_c a sum of fields in different
+		  // unit systems -- which converges, at the full rate, to a machine
+		  // nobody described. The CoilSet's constructor refuses a non-positive
+		  // mu0 as this one does, so the check below is not duplicated here.
+		  coilList( mu0In )
 	{
 		requireFinite( mu0In, "mu0", "meq::ConductorField" );
 		if ( !( mu0In > 0.0 ) )
@@ -41,14 +47,44 @@ namespace meq
 		filamentList.push_back( filament );
 	}
 
+	void ConductorField::add( Coil const &coil )
+	{
+		coilList.add( coil );
+	}
+
 	std::size_t ConductorField::size() const
 	{
-		return filamentList.size();
+		return filamentList.size() + coilList.size();
 	}
 
 	bool ConductorField::empty() const
 	{
-		return filamentList.empty();
+		return filamentList.empty() && coilList.empty();
+	}
+
+	std::size_t ConductorField::filamentCount() const
+	{
+		return filamentList.size();
+	}
+
+	std::size_t ConductorField::coilCount() const
+	{
+		return coilList.size();
+	}
+
+	CoilSet const &ConductorField::coils() const
+	{
+		return coilList;
+	}
+
+	void ConductorField::setQuadratureOrder( int order )
+	{
+		coilList.setQuadratureOrder( order );
+	}
+
+	int ConductorField::quadratureOrder() const
+	{
+		return coilList.quadratureOrder();
 	}
 
 	CurrentFilament const &ConductorField::filament( std::size_t index ) const
@@ -58,7 +94,7 @@ namespace meq
 			std::ostringstream message;
 			message << "meq::ConductorField::filament: index " << index
 			        << " is out of range; the set holds "
-			        << filamentList.size();
+			        << filamentList.size() << " filaments";
 			throw std::out_of_range( message.str() );
 		}
 		return filamentList[ index ];
@@ -74,7 +110,7 @@ namespace meq
 		double total = 0.0;
 		for ( CurrentFilament const &f : filamentList )
 			total += f.current();
-		return total;
+		return total + coilList.totalCurrent();
 	}
 
 	double ConductorField::mu0() const
@@ -87,7 +123,9 @@ namespace meq
 		double total = 0.0;
 		for ( CurrentFilament const &f : filamentList )
 			total += filamentPsi( f, r, z, mu0Value );
-		return total;
+		// The rectangles, through their own set, which carries the quadrature
+		// and the same mu0. Empty is exactly zero rather than a special case.
+		return total + coilList.psi( r, z );
 	}
 
 	void ConductorField::gradPsi( double r, double z,
@@ -103,6 +141,12 @@ namespace meq
 			dPsiDr += dr;
 			dPsiDz += dz;
 		}
+
+		double coilR = 0.0;
+		double coilZ = 0.0;
+		coilList.gradPsi( r, z, coilR, coilZ );
+		dPsiDr += coilR;
+		dPsiDz += coilZ;
 	}
 
 	void ConductorField::flux( double r, double z,
