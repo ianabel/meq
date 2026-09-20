@@ -17,6 +17,7 @@ find_package(Boost CONFIG REQUIRED COMPONENTS unit_test_framework)
 set(MEQ_UNIT_TESTS
 	BoundaryShapeTests
 	CoilsTests
+	ConductorFieldTests
 	ConfigTests
 	ExteriorDtNTests
 	FluxFamilyTests

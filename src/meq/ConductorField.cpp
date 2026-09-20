@@ -1,0 +1,166 @@
+#include "ConductorField.hpp"
+
+#include <cmath>
+#include <sstream>
+#include <stdexcept>
+
+namespace meq
+{
+	namespace
+	{
+		// A local copy rather than a shared one: Coils.cpp's requireFinite() is
+		// in an anonymous namespace there, which is where a helper this small
+		// belongs. Exporting it to share four lines would put a name in the
+		// public header that no caller wants.
+		void requireFinite( double value, char const *what, char const *where )
+		{
+			if ( !std::isfinite( value ) )
+			{
+				std::ostringstream message;
+				message << where << ": " << what << " must be finite, but is "
+				        << value;
+				throw std::invalid_argument( message.str() );
+			}
+		}
+	}
+
+	ConductorField::ConductorField( double mu0In )
+		: mu0Value( mu0In ),
+		  toleranceValue( defaultCoincidenceTolerance ),
+		  filamentList()
+	{
+		requireFinite( mu0In, "mu0", "meq::ConductorField" );
+		if ( !( mu0In > 0.0 ) )
+			throw std::invalid_argument(
+				"meq::ConductorField: mu0 must be positive; a zero would make "
+				"every conductor silently inert" );
+	}
+
+	void ConductorField::add( CurrentFilament const &filament )
+	{
+		filamentList.push_back( filament );
+	}
+
+	std::size_t ConductorField::size() const
+	{
+		return filamentList.size();
+	}
+
+	bool ConductorField::empty() const
+	{
+		return filamentList.empty();
+	}
+
+	CurrentFilament const &ConductorField::filament( std::size_t index ) const
+	{
+		if ( index >= filamentList.size() )
+		{
+			std::ostringstream message;
+			message << "meq::ConductorField::filament: index " << index
+			        << " is out of range; the set holds "
+			        << filamentList.size();
+			throw std::out_of_range( message.str() );
+		}
+		return filamentList[ index ];
+	}
+
+	std::vector<CurrentFilament> const &ConductorField::filaments() const
+	{
+		return filamentList;
+	}
+
+	double ConductorField::totalCurrent() const
+	{
+		double total = 0.0;
+		for ( CurrentFilament const &f : filamentList )
+			total += f.current();
+		return total;
+	}
+
+	double ConductorField::mu0() const
+	{
+		return mu0Value;
+	}
+
+	double ConductorField::psi( double r, double z ) const
+	{
+		double total = 0.0;
+		for ( CurrentFilament const &f : filamentList )
+			total += filamentPsi( f, r, z, mu0Value );
+		return total;
+	}
+
+	void ConductorField::gradPsi( double r, double z,
+	                              double &dPsiDr, double &dPsiDz ) const
+	{
+		dPsiDr = 0.0;
+		dPsiDz = 0.0;
+		for ( CurrentFilament const &f : filamentList )
+		{
+			double dr = 0.0;
+			double dz = 0.0;
+			filamentGradPsi( f, r, z, dr, dz, mu0Value );
+			dPsiDr += dr;
+			dPsiDz += dz;
+		}
+	}
+
+	void ConductorField::flux( double r, double z,
+	                           double &qR, double &qZ ) const
+	{
+		// NOT a sum of filamentFlux() calls, deliberately. q = ( 1/r ) grad_bar
+		// psi, so summing the per-filament fluxes divides by r once per
+		// filament and then adds -- which is the same number in exact
+		// arithmetic and a different one in floating point, and is NaN for
+		// every filament on the axis rather than once. Take the gradient of the
+		// sum and divide once.
+		double dPsiDr = 0.0;
+		double dPsiDz = 0.0;
+		gradPsi( r, z, dPsiDr, dPsiDz );
+		qR = dPsiDr/r;
+		qZ = dPsiDz/r;
+	}
+
+	bool ConductorField::coincides( double r, double z ) const
+	{
+		return indexAt( r, z ) >= 0;
+	}
+
+	int ConductorField::indexAt( double r, double z ) const
+	{
+		requireFinite( r, "the field point radius",
+		               "meq::ConductorField::indexAt" );
+		requireFinite( z, "the field point height",
+		               "meq::ConductorField::indexAt" );
+
+		for ( std::size_t i = 0; i < filamentList.size(); ++i )
+		{
+			CurrentFilament const &f = filamentList[ i ];
+			double const dr = r - f.radius();
+			double const dz = z - f.height();
+			// std::hypot rather than sqrt( dr*dr + dz*dz ): the squares can
+			// underflow to zero for the very separations this test exists to
+			// resolve, which would report a coincidence that is not there.
+			if ( std::hypot( dr, dz ) <= toleranceValue*f.radius() )
+				return static_cast<int>( i );
+		}
+		return -1;
+	}
+
+	double ConductorField::coincidenceTolerance() const
+	{
+		return toleranceValue;
+	}
+
+	void ConductorField::setCoincidenceTolerance( double toleranceIn )
+	{
+		requireFinite( toleranceIn, "the coincidence tolerance",
+		               "meq::ConductorField::setCoincidenceTolerance" );
+		if ( toleranceIn < 0.0 )
+			throw std::invalid_argument(
+				"meq::ConductorField::setCoincidenceTolerance: the tolerance "
+				"must not be negative; zero is allowed and means exact "
+				"equality" );
+		toleranceValue = toleranceIn;
+	}
+}

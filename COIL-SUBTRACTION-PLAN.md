@@ -259,12 +259,12 @@ must.
 |---|---|
 | **CS-0** | §0's two-Green's-function difference. **DONE** — the global irreducible error IS the conductor model, 1.05x |
 | **CS-0b** | regenerate the references with freegs4e's `ShapedCoil`. **DONE** → **[M-139](MEASUREMENTS.md#m-139)**: DIII-D's benchmark floor goes **5.785e-03 → 7.7e-04, 7.5×**, and lands on §0a's predicted quadrature residual of 6.580e-04. **It still does not refine**, so the floor is lower and is still not MEQ's discretisation. §6 has what blocked it for a week |
-| **CS-1** | `meq::ConductorField` for FILAMENTS FIRST — one Carlson evaluation per point, no quadrature, and the only conductor MEQ structurally cannot mesh. §4b |
+| **CS-1** | `meq::ConductorField` for FILAMENTS FIRST — one Carlson evaluation per point, no quadrature, and the only conductor MEQ structurally cannot mesh. §4b. **BUILT**: `src/meq/ConductorField.{hpp,cpp}` and `tests/unit/ConductorFieldTests.cpp`, 7 cases, MFEM-free so CI runs it. §7 has the two decisions behind it and §7.3 what it does NOT yet do |
 | **CS-1b** | the same with a quadrature rule around it, which is the rectangle |
 | **CS-2** | the split on a FIXED-boundary case with coils, where nothing else moves |
 | **CS-3** | the Dirichlet datum and the DtN coupling |
 | **CS-4** | every consumer of `psi`, with a test per consumer that the total is read |
-| **CS-5** | re-take M-111 with the conductor models matched |
+| **CS-5** | re-take M-111 with the conductor models matched. **[M-139](MEASUREMENTS.md#m-139) partly kills this as written** — the benchmark cannot resolve MEQ below about 7e-04 whatever either code does, so it cannot be the acceptance for a change whose whole claim is that the conductors are resolved EXACTLY. **The replacement is MEQ's own**: an expensive quadrature-based reference, §7 |
 
 ---
 
@@ -332,3 +332,99 @@ that **a run seeded from `mkexactguess` has the answer in the starting position
 and is a different benchmark**. The filament set still carries the old comment
 and wants the same regeneration, which is deferred only because
 [M-137](MEASUREMENTS.md#m-137) was just measured on one of those files.
+
+---
+
+## 7. Two decisions taken, and what they settle
+
+### 7.1 A node or vertex ON a filament is refused, and PROXIMITY is not
+
+**The mesh is rejected if any node or vertex coincides with a filament.** That
+is the whole of the policy, and the reason it can be that small is measured
+rather than assumed: `filamentPsi()` is verified in `Coils.hpp` against an
+independent transcription to **1.4e-12** relative, and walking in to the
+conductor it keeps working where the textbook form does not —
+
+| eps | `CurrentLoop` | `filamentPsi()` | `−½ ln eps` |
+|---|---|---|---|
+| 1e-07 | 8.0828343 | 8.0987690 | 8.0590478 |
+| 1e-09 | **NaN** | 1.0401354e+01 | 1.0361633e+01 |
+| 1e-13 | **NaN** | 1.5006924e+01 | 1.4966803e+01 |
+
+sitting a constant 0.0397 above `−½ ln eps` at every one of the last rows, to
+`k'² = 1e-300`. **So a point NEAR a filament is not a problem, and only a point
+ON one is** — and a large value at one evaluation point is not a large error,
+because nothing here approximates `psi_c` by a polynomial. `psi_c` is
+*evaluated*; what is approximated is `psi_p`, which is smooth **because** `psi_c`
+carries the whole logarithm.
+
+**So the tolerance is about coincidence and not about conditioning**, and it is
+set to catch "the mesher put a node here" — a coordinate that came from the same
+double, possibly through a text round trip — rather than to enforce a clearance.
+A clearance rule would be a different and much stronger claim, and nothing
+measured supports needing one.
+
+**Why refuse at all rather than perturb or take the finite part.** A perturbed
+node changes the geometry the solve reports without saying so, and a finite part
+is a different field from the one `psi = psi_c + psi_p` names. Both make a run
+that looks like it worked. `CLAUDE.md`'s standing preference is a refusal that
+names the cause, and a coincident node is a thing the user chose — `[[coils]]`
+drives the mesher, so a filament at a meshed coil's centre is reachable by
+writing the obvious file.
+
+### 7.2 CS-5's acceptance is MEQ's own quadrature, not `freegs4e`
+
+**CS-5 as staged cannot work and [M-139](MEASUREMENTS.md#m-139) is why.** The
+benchmark's floor after matching the conductor models is `7.7e-04` and it does
+not refine, because `freegs4e.shaped_coil.ShapedCoil` caps at 6 points per
+triangle. **A change whose entire claim is that the conductors are resolved
+exactly cannot be accepted against a reference that resolves them to 6 points.**
+
+**The replacement is an expensive quadrature-based check of MEQ's own.** MEQ
+already owns the kernel — `coilPsi()` at whatever order is asked for, and
+`filamentPsi()` exactly — so a reference field can be built at a quadrature order
+far beyond what a solve would use, on the same conductors, and the subtraction
+measured against it. That is a self-comparison and it is the right one here: the
+claim is about representation, not about physics, and the two arms must reach the
+**same equilibrium** by construction (§0b) rather than merely agree.
+
+**The second acceptance is the one with teeth, and it needs no reference at
+all**: the same machine solved with a conductor MESHED and with it SUBTRACTED
+must agree to the discretisation. That is what says the split changed the
+representation and not the answer, and it is the property §0b exists to protect.
+
+### 7.3 What CS-1 is, and the three things it is not
+
+**`meq::ConductorField` is `psi_c` and nothing else**: a set of
+`meq::CurrentFilament`, `psi`/`gradPsi`/`flux` summed over them, `totalCurrent()`
+for the boundary-integral check, and `coincides()`/`indexAt()` for §7.1's
+refusal. Seven unit cases, three of them asserting at **zero tolerance** rather
+than a small one — superposition, `psi_c ≡ 0` on the axis, and the flux
+identity — because all three are identities rather than approximations.
+
+**IT IS MFEM-FREE AND THAT DECIDED THE REFUSAL'S SHAPE.** It sits beside
+`meq::Coils` in the half of `src/meq` CI can build, so it cannot take an
+`mfem::Mesh`; the check is a per-**point** predicate the caller loops over the
+mesh's vertices and nodes. That is not a limitation worked around — it keeps the
+physics unit-testable where a convergence study cannot run, and puts the mesh
+walking where meshes already live.
+
+**`flux()` is the gradient of the sum divided once, not a sum of quotients.**
+The same number in exact arithmetic; one division rather than `N`, and NaN once
+on the axis rather than per filament. Commented at the site, because it is
+exactly the kind of thing a later rewrite tidies back.
+
+Three things it deliberately does **not** do, each belonging to a later stage:
+
+| | |
+|---|---|
+| **no caching** | §1 wants `psi_c` precomputed once per mesh rather than per Newton step, and that is right — but there is no caller yet, and a cache built before its access pattern is known is a cache built against a guess. **CS-2** |
+| **no rectangles** | `CS-1b`, and it is the same code with a quadrature rule around it: `meq::CoilSet` already answers `psi`/`gradPsi`/`flux` for MEQ's rectangles, so CS-1b is a second `add()` and a second loop rather than new physics |
+| **nothing reads it** | no solver, datum, output writer or estimator consults it yet, which is **CS-2 to CS-4** and is where the plan's real cost lives — §3's *"every place that reads `psi` must read `psi_c + psi_p`"*, with a test per consumer |
+
+**The refusal is written but not yet CALLED**, which is the one gap a reader
+should not mistake for an oversight: `coincides()` exists and is tested, and the
+site that loops it over a mesh arrives with the first caller in CS-2. Until then
+a coincident node is still caught — by `meq::filamentPsi()`'s own throw, at the
+first evaluation instead of at setup. **The early check is a better message, not
+a missing guard.**

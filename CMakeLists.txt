@@ -202,6 +202,7 @@ set_target_properties(toml11::toml11 PROPERTIES
 set(MEQ_CORE_SOURCES
 	src/meq/BoundaryShape.cpp
 	src/meq/Coils.cpp
+	src/meq/ConductorField.cpp
 	src/meq/Config.cpp
 	src/meq/CriticalPoints.cpp
 	src/meq/Estimator.cpp
@@ -269,6 +270,15 @@ set(MEQ_CORE_SOURCES_NEEDING_MFEM
 # src/meq/Coils.cpp is ABSENT from it too, and for the same reasons: a coil is
 # a rectangle, a current and an elliptic-integral kernel -- geometry and special
 # functions, plain doubles in and out. FB-2 needs it and CI can test it.
+
+# src/meq/ConductorField.cpp is ABSENT for the same reasons and one more that is
+# a DESIGN CONSTRAINT rather than a convenience. It is psi_c, the conductors'
+# own field, for COIL-SUBTRACTION-PLAN.md's psi = psi_c + psi_p -- a sum of
+# elliptic-integral kernels, plain doubles in and out. Its mesh check therefore
+# CANNOT take an mfem::Mesh: it is a per-POINT predicate, coincides(), that the
+# caller loops over the mesh's vertices and nodes. That is not a limitation
+# worked around, it is what keeps the physics unit-testable and puts the mesh
+# walking where meshes already live.
 
 # src/meq/ExteriorDtN.cpp is ABSENT from that list for the same reasons, and it
 # is the newest member of the MFEM-free half: it is the exterior
