@@ -30,7 +30,12 @@
 
 #include "mfem.hpp"
 
+#include <limits>
+#include <memory>
+
 #include "meq/ConductorField.hpp"
+#include "meq/Profiles.hpp"
+#include "meq/Source.hpp"
 #include "meq/FieldViews.hpp"
 #include "meq/GradShafranov.hpp"
 
@@ -560,6 +565,119 @@ BOOST_AUTO_TEST_CASE( theMeshedCoilConvergesToTheSubtractedOne )
 	            "worst observed rate " << worstRate << ". The two routes are "
 	            "solving different problems, which COIL-SUBTRACTION-PLAN.md "
 	            "§0b forbids" );
+}
+
+// CS-4: A NORMALISED SOURCE UNDER THE SPLIT, WHICH THE REFUSAL USED TO FORBID.
+//
+// psi_ax IS AN UNKNOWN OF A BORDERED NEWTON AND A FUNCTIONAL OF THE PHYSICAL
+// FLUX, so until every consumer of psi read psi_c + psi_p this combination was
+// refused rather than approximated. The assertion here is the DEFINITION rather
+// than a tolerance on an answer: the psi_ax the solver reports must be the total
+// field at the axis it reports. If any consumer were still reading the
+// remainder -- peakAt(), the fill, the limiter, the source -- the two would
+// differ by psi_c, which on a machine is not a small number.
+//
+// AND THE CONTROL IS WHAT SAYS THE ASSERTION HAS TEETH: psi_c at that axis is
+// reported beside it, so a reader can see the number the test would be wrong by.
+BOOST_AUTO_TEST_CASE( aNormalisedSourceRunsUnderTheSplitAndReportsThePhysicalAxis )
+{
+	meq::ConductorField const conductors = insideFilament();
+
+	mfem::Mesh mesh = makeBox( 16 );
+	auto pPrime = std::make_shared< meq::ConstantProfile const >( 0.45 );
+	auto ggPrime = std::make_shared< meq::ConstantProfile const >( 0.30 );
+	meq::NormalisedMHDSource source( pPrime, ggPrime, 1.0, 1.0 );
+
+	// THE PHYSICAL flux is zero on the box boundary; setBoundaryData() keeps
+	// that meaning and the solver imposes psi|_Gamma - psi_c|_Gamma itself.
+	mfem::ConstantCoefficient datum( 0.0 );
+
+	// A separable sine bump, which is HighBetaConvergence's own guess for a
+	// bordered psi_ax and is what puts a maximum inside the box for the axis
+	// search to find. Without it the search has no interior extremum to locate
+	// and reports ( 0, 0 ) -- which this case detected on its first run.
+	mfem::FunctionCoefficient guess(
+		[]( mfem::Vector const &x )
+		{
+			return 0.30*std::sin( M_PI*( x( 0 ) - 0.6 )/0.8 )
+			       *std::sin( M_PI*( x( 1 ) + 0.4 )/0.8 );
+		} );
+
+	meq::GradShafranovSolver solver( mesh, 2 );
+	solver.setBoundaryData( datum );
+	solver.setInitialGuess( guess );
+
+	// THE REFUSAL IS GONE: this call used to throw.
+	BOOST_REQUIRE_NO_THROW( solver.setConductorField( conductors ) );
+	BOOST_REQUIRE_NO_THROW( solver.setSource( source, 0.30 ) );
+
+	solver.solve();
+
+	double const reported = solver.psiAxis();
+
+	/*
+	 * psi_ax's CONSTRAINT IS psi_ax - max psi = 0, SO THE TEST IS THAT MAXIMUM.
+	 * This configuration constrains against the NODAL PEAK rather than a
+	 * located critical point -- axisR() is only filled by the located-axis
+	 * mode, and reads ( 0, 0 ) here, which the first version of this case
+	 * asserted against and correctly refused to pass on.
+	 *
+	 * So the peak is recomputed here from outside the solver, over the total
+	 * and over the remainder alone, and psi_ax must match the FORMER. That is
+	 * exactly what peakAt() was changed to do, and the two differ by psi_c --
+	 * which the control below asserts is not a small number, or the case could
+	 * not tell them apart.
+	 */
+	mfem::GridFunction const &remainder = solver.potential();
+	mfem::FiniteElementSpace const *space = remainder.FESpace();
+
+	double peakTotal = -std::numeric_limits< double >::infinity();
+	double peakRemainder = -std::numeric_limits< double >::infinity();
+
+	mfem::Array< int > dofs;
+	for ( int e = 0; e < mesh.GetNE(); ++e )
+	{
+		space->GetElementDofs( e, dofs );
+		mfem::FiniteElement const *fe = space->GetFE( e );
+		mfem::IntegrationRule const &nodes = fe->GetNodes();
+
+		mfem::IsoparametricTransformation transformation;
+		mesh.GetElementTransformation( e, &transformation );
+
+		for ( int i = 0; i < dofs.Size(); ++i )
+		{
+			mfem::IntegrationPoint const &ip = nodes.IntPoint( i );
+			transformation.SetIntPoint( &ip );
+			mfem::Vector point( 3 );
+			transformation.Transform( ip, point );
+
+			int const dof = dofs[ i ] >= 0 ? dofs[ i ] : -1 - dofs[ i ];
+			double const solved = remainder( dof );
+			peakRemainder = std::max( peakRemainder, solved );
+			peakTotal = std::max( peakTotal,
+			                      solved + conductors.psi( point( 0 ),
+			                                               point( 1 ) ) );
+		}
+	}
+
+	std::printf( "\n  CS-4: a normalised source under the split, %d Newton steps\n",
+	             solver.newtonIterations() );
+	std::printf( "    psi_ax reported %12.6e\n", reported );
+	std::printf( "    peak of psi_c + psi_p %12.6e   <- what it must be\n",
+	             peakTotal );
+	std::printf( "    peak of psi_p alone   %12.6e   <- what it would be if "
+	             "peakAt() still read the remainder\n", peakRemainder );
+
+	BOOST_TEST_REQUIRE( std::isfinite( reported ) );
+
+	// The control: the two candidates must be far apart, or matching one of
+	// them says nothing.
+	BOOST_TEST( std::fabs( peakTotal - peakRemainder ) > 1.0e-3,
+	            "the total and the remainder peak at nearly the same value, so "
+	            "this case cannot tell which one psi_ax followed" );
+
+	BOOST_TEST( std::fabs( reported - peakTotal ) < 1.0e-6,
+	            "psi_ax is not the peak of the PHYSICAL flux" );
 }
 
 // psi_c IS EXACTLY ZERO WHEN NO CONDUCTOR FIELD IS SET, which is what lets

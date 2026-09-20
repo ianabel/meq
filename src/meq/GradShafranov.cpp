@@ -2762,28 +2762,30 @@ namespace
 		 * documentation already names for its own straddling case.
 		 */
 		/*
-		 * CS-4 AND NOT CS-2. A NormalisedSource divides by psi_ax and psi_bnd,
-		 * which are functionals of the PHYSICAL flux -- psi_ax is a bordered
-		 * Newton row -- and under the split the solver's own critical-point
-		 * search runs on psi_p. So the normalisation would be taken against the
-		 * remainder's axis rather than the equilibrium's, which is not a
-		 * failure but a different problem solved perfectly. The source VALUE is
-		 * shifted correctly by SourceIntegrator::setConductorField(); what is
-		 * not built is every consumer of psi that CS-4 names.
+		 * A NormalisedSource IS NOW ALLOWED, AND THE FOUR THINGS THAT HAD TO BE
+		 * TRUE FIRST ARE TRUE. It divides by psi_ax and psi_bnd, which are
+		 * functionals of the PHYSICAL flux, so every consumer of psi had to
+		 * read psi_c + psi_p rather than the solved remainder --
+		 * COIL-SUBTRACTION-PLAN.md CS-4:
+		 *
+		 *   psi_ax        peakAt() maximises over the total, through the
+		 *                 per-dof cache;
+		 *   psi_bnd       the limiter's contact SEARCH and its VALUE both take
+		 *                 psi_c, and the X-point goes through
+		 *                 meq::CriticalPointFinder, migrated whole -- seeds,
+		 *                 residual, Jacobian and stopping scale;
+		 *   the support   refreshPlasmaComponent()'s fill screens on the total,
+		 *                 and insidePlasma() is handed the total by
+		 *                 SourceIntegrator, which shifts before it calls;
+		 *   F, dF/dpsi    evaluated at psi_c + psi_p from the per-quadrature
+		 *                 point cache.
+		 *
+		 * WHAT IS NOT YET MEASURED IS A PHYSICAL MACHINE, which is the point of
+		 * lifting this: until now nothing with a plasma AND conductors could
+		 * run under the split at all, so there was nothing to put on a clock.
+		 * An exterior coupling is still refused below, so this is fixed
+		 * boundary only -- CS-3.
 		 */
-		if ( normalisedSource )
-			throw std::invalid_argument(
-				"meq::GradShafranovSolver::setConductorField: a normalised "
-				"source is set, and the conductor-field split does not yet "
-				"reach the quantities it normalises by. psi_ax and psi_bnd are "
-				"functionals of the PHYSICAL flux, and under the split this "
-				"solver's critical-point search runs on the remainder -- so "
-				"the normalisation would be taken against the wrong field and "
-				"the run would converge to a different equilibrium without "
-				"complaining. COIL-SUBTRACTION-PLAN.md CS-4 is the stage that "
-				"makes every consumer of psi read psi_c + psi_p. A plain "
-				"meq::Source is CS-2's domain and works today" );
-
 		if ( exteriorCoupling )
 			throw std::invalid_argument(
 				"meq::GradShafranovSolver::setConductorField: an exterior "
@@ -3458,6 +3460,33 @@ namespace
 				for ( int i = 0; i < faceDofs.Size(); ++i )
 					total += faceShape( i )
 					         *state( blockOffsets[ 1 ] + faceDofs[ i ] );
+
+				/*
+				 * THE CONTACT IS A MAXIMUM OF THE PHYSICAL FLUX. Under
+				 * COIL-SUBTRACTION-PLAN.md's split the state holds psi_p, and
+				 * a limiter is a piece of metal near the conductors -- exactly
+				 * where psi_c is largest and least uniform along a face.
+				 * Searching the remainder would put the contact in the wrong
+				 * place and then report psi_bnd from it, and psi_bnd is a
+				 * border unknown: the whole equilibrium moves with it.
+				 *
+				 * Evaluated rather than cached, and that is the right trade
+				 * here: ONE point per sample on a handful of faces, where the
+				 * source integrator's was every quadrature point of every
+				 * element. Exactly zero with no conductor field.
+				 */
+				if ( conductorFieldSet )
+				{
+					mfem::ElementTransformation &inner
+						= entry.second ? *faceScratch.Elem2
+						               : *faceScratch.Elem1;
+					double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
+					mfem::Vector position( coordinates, 3 );
+					inner.Transform( inside, position );
+					total += conductorFieldSet->psi( position( 0 ),
+					                                 position( 1 ) );
+				}
+
 				return total;
 			};
 
@@ -7005,13 +7034,22 @@ namespace
 
 		auto limiterValue = [ & ]( mfem::Vector const &state )
 		{
+			// psi_bnd IS THE PHYSICAL FLUX AT THE CONTACT, on both branches.
+			// The located one has the contact's ( r, z ) in hand, so psi_c is
+			// one evaluation; the nearest-dof one indexes the potential block,
+			// so it takes the per-dof cache. Exactly zero without the split.
 			if ( limiterConstraintChoice == LimiterConstraint::NearestDof )
-				return state( boundaryDof );
+				return state( boundaryDof )
+				       + conductorPsiAtDof( boundaryDof - blockOffsets[ 1 ] );
 
 			double total = 0.0;
 			for ( int i = 0; i < limiterDofs.Size() && i < limiterShape.Size(); ++i )
 				total += limiterShape( i )
 				         *state( blockOffsets[ 1 ] + limiterDofs[ i ] );
+
+			if ( limiterContactLocatedValue )
+				total += conductorPsi( limiterContactRValue,
+				                       limiterContactZValue );
 			return total;
 		};
 		/*
