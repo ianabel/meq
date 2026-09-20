@@ -333,10 +333,10 @@ namespace meq
 		// BasisType::GaussLobatto, so this shift is exact rather than a
 		// convenient approximation. On a non-nodal basis it would still be the
 		// right O( 1 ) correction for a SCREEN, which is all these callers are.
-		mfem::FiniteElement const *element_fe
+		mfem::FiniteElement const *elementFe
 			= potentialField.FESpace()->GetFE( element );
 		mfem::IntegrationPoint const &ip
-			= element_fe->GetNodes().IntPoint( localDof );
+			= elementFe->GetNodes().IntPoint( localDof );
 
 		double r = 0.0;
 		double z = 0.0;
@@ -379,9 +379,9 @@ namespace meq
 			mfem::FiniteElementSpace const &scalarSpace = *potentialField.FESpace();
 			for ( int element = 0; element < meshRef.GetNE(); ++element )
 			{
-				mfem::FiniteElement const *element_fe
+				mfem::FiniteElement const *elementFe
 					= scalarSpace.GetFE( element );
-				mfem::IntegrationRule const &nodes = element_fe->GetNodes();
+				mfem::IntegrationRule const &nodes = elementFe->GetNodes();
 
 				for ( int i = 0; i < nodes.GetNPoints(); ++i )
 				{
