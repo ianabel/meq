@@ -124,13 +124,17 @@ def build(npz_path, outdir, stem=None, degree=2, target_elements=4000,
 
     note = (f"Converted from {os.path.basename(npz_path)}, a {grid_n} x {grid_n}\n"
             f"freegs4e free-boundary solve.\n"
-            f"freegs4e tabulates against NORMALISED flux; this is against psi.\n"
             f"psi_axis = {psi_axis:.9e}, psi_surface = {psi_surface:.9e},\n"
             f"the psi_n = {level} surface, chosen to avoid the X-point corner\n"
             f"and the fractional power at the plasma edge.\n"
-            f"freegs4e's pprime/ffprime are ALREADY d/dpsi -- its docstring\n"
-            f"says d/dpsi_n and is wrong -- so the value column is unchanged\n"
-            f"and only the derivative column carries a chain-rule factor.")
+            f"BOTH abscissae are normalised flux and they run OPPOSITE WAYS:\n"
+            f"freegs4e's psi_n is 0 on the axis and 1 on the separatrix, and\n"
+            f"MEQ's Psi is 1 on the axis and 0 on Gamma, so\n"
+            f"Psi = 1 - psi_n/{level}.\n"
+            f"freegs4e's pprime/ffprime are d/dpsi -- its docstring says\n"
+            f"d/dpsi_n and is wrong -- so the value column carries ONE factor\n"
+            f"of dpsi/dPsi = psi_ax and nothing else. Do not pre-divide by\n"
+            f"psi_ax: meq::NormalisedMHDSource does that itself.")
 
     # psi_ax IN MEQ'S GAUGE, WHICH IS THE CHAIN FACTOR AND THE [source] SEED.
     # MEQ's psi is freegs4e's shifted so that Gamma is zero, so its axis flux is

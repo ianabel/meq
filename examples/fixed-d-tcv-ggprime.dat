@@ -2,21 +2,23 @@
 #
 # Converted from D_tcv_conventional_shaped.npz, a 257 x 257
 # freegs4e free-boundary solve.
-# freegs4e tabulates against NORMALISED flux; this is against psi.
 # psi_axis = 2.172471435e-02, psi_surface = 4.167939537e-03,
 # the psi_n = 0.95 surface, chosen to avoid the X-point corner
 # and the fractional power at the plasma edge.
-# freegs4e's pprime/ffprime are ALREADY d/dpsi -- its docstring
-# says d/dpsi_n and is wrong -- so the value column is unchanged
-# and only the derivative column carries a chain-rule factor.
+# BOTH abscissae are normalised flux and they run OPPOSITE WAYS:
+# freegs4e's psi_n is 0 on the axis and 1 on the separatrix, and
+# MEQ's Psi is 1 on the axis and 0 on Gamma, so
+# Psi = 1 - psi_n/0.95.
+# freegs4e's pprime/ffprime are d/dpsi -- its docstring says
+# d/dpsi_n and is wrong -- so the value column carries ONE factor
+# of dpsi/dPsi = psi_ax and nothing else. Do not pre-divide by
+# psi_ax: meq::NormalisedMHDSource does that itself.
 #
-# Three columns: Psi, value, d(value)/dPsi.
-# Psi = psi/psi_ax is MEQ's NORMALISED flux: ONE on the magnetic
-# axis and ZERO on Gamma, which is the opposite sense to
-# freegs4e's psi_n and to EQDSK's. The value column is therefore
-# d/dPsi and not d/dpsi; meq::NormalisedMHDSource divides by
-# psi_ax itself, so do not pre-divide the table.
+# Three columns: Psi, value, d(value)/dPsi, ascending in Psi and
+# reaching 0 and 1 EXACTLY -- so meq::SplineProfile interpolates
+# everywhere the solve can reach and its clamp never fires.
 #
+ 0.000000000000e+00   8.275068898241e-05   1.791264492538e-03
  1.031991744066e-03   8.462666599892e-05   1.844362573827e-03
  5.159958720330e-03   9.267701943733e-05   2.055771400936e-03
  9.287925696594e-03   1.015968136546e-04   2.265606631166e-03

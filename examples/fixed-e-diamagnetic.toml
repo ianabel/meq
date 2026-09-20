@@ -43,9 +43,9 @@
 # degree. At 0.95 the boundary is smooth and closed and the profiles are
 # analytic across it:
 #
-#     p'  at Gamma   1.431978e+04 Pa per Wb/rad
-#                   which is 0.0150 of its value on the axis
-#     gg' at Gamma  -1.997726e-03 T^2 m^2 per Wb/rad
+#     p'  at Gamma   1.391036e+04 Pa per Wb/rad
+#                   which is 0.0146 of its value on the axis
+#     gg' at Gamma  -1.953441e-03 T^2 m^2 per Wb/rad
 #
 # Both comfortably nonzero, so this is NOT the trivial branch of CLAUDE.md's
 # Traps section -- and see [initialguess] for the OTHER branch, which is.

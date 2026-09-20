@@ -27,8 +27,8 @@
   "refine": 0,
   "degree": 2,
   "predicted_elements": 2490.894,
-  "pprime_at_gamma": 1964.544220334578,
-  "ggprime_at_gamma": 0.004138679333354882,
+  "pprime_at_gamma": 1890.620393225158,
+  "ggprime_at_gamma": 0.00408206547482749,
   "cos": [
     -0.03798510707386163,
     -0.01434533143135159,

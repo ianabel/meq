@@ -130,14 +130,28 @@ def to_meq_normalised_table(psi_n, values, level):
     """
     psi_n = np.asarray(psi_n, float)
     values = np.asarray(values, float)
-
-    keep = psi_n <= level + 1e-12
-    psi_n = psi_n[keep]
-    values = values[keep]
     if len(psi_n) < 4:
-        raise ValueError("fewer than four profile points inside the boundary")
+        raise ValueError("fewer than four profile points")
+
+    # THE BOUNDARY IS INTERPOLATED IN RATHER THAN ROUNDED TO, WHICH IS WHAT
+    # MAKES "never evaluated off its own table" EXACTLY TRUE.
+    #
+    # `level` lands between two of freegs4e's 256 psi_n samples -- 0.95 x 255
+    # is 242.25 -- so simply keeping psi_n <= level leaves the table's lowest
+    # Psi at 1.03e-03 instead of zero, and MEQ then CLAMPS across that sliver
+    # at Gamma. It is a tiny window and the constant it clamps to is within a
+    # per cent of the truth, so nothing would look wrong; but the whole reason
+    # for the normalised form is that the profile is never extrapolated, and
+    # "never, except in a sliver at the boundary" is a different claim.
+    endpoint = CubicSpline(psi_n, values)(level)
+    keep = psi_n < level - 1e-12
+    psi_n = np.append(psi_n[keep], level)
+    values = np.append(values[keep], endpoint)
 
     Psi = 1.0 - psi_n / level
+    # And nail the endpoint against round-off, since the caller's abscissa has
+    # to reach 0 exactly for the clamp never to fire.
+    Psi[-1] = 0.0
 
     # d/dPsi of the VALUE, which is currently d/dpsi. The chain factor is
     # dpsi/dPsi = psi_ax_MEQ, and it is applied by the CALLER through `scale`
@@ -157,12 +171,9 @@ DEFAULT_ABSCISSA = (
     "normal-sign tokamak, NOT normalised flux.")
 
 NORMALISED_ABSCISSA = (
-    "Three columns: Psi, value, d(value)/dPsi.\n"
-    "Psi = psi/psi_ax is MEQ's NORMALISED flux: ONE on the magnetic\n"
-    "axis and ZERO on Gamma, which is the opposite sense to\n"
-    "freegs4e's psi_n and to EQDSK's. The value column is therefore\n"
-    "d/dPsi and not d/dpsi; meq::NormalisedMHDSource divides by\n"
-    "psi_ax itself, so do not pre-divide the table.")
+    "Three columns: Psi, value, d(value)/dPsi, ascending in Psi and\n"
+    "reaching 0 and 1 EXACTLY -- so meq::SplineProfile interpolates\n"
+    "everywhere the solve can reach and its clamp never fires.")
 
 
 def write_meq_profile(path, psi, value, derivative, what, source_note,

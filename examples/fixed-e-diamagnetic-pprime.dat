@@ -2,27 +2,29 @@
 #
 # Converted from E_testtokamak_diamagnetic_shaped.npz, a 257 x 257
 # freegs4e free-boundary solve.
-# freegs4e tabulates against NORMALISED flux; this is against psi.
 # psi_axis = 8.376688891e-02, psi_surface = 4.022157552e-02,
 # the psi_n = 0.95 surface, chosen to avoid the X-point corner
 # and the fractional power at the plasma edge.
-# freegs4e's pprime/ffprime are ALREADY d/dpsi -- its docstring
-# says d/dpsi_n and is wrong -- so the value column is unchanged
-# and only the derivative column carries a chain-rule factor.
+# BOTH abscissae are normalised flux and they run OPPOSITE WAYS:
+# freegs4e's psi_n is 0 on the axis and 1 on the separatrix, and
+# MEQ's Psi is 1 on the axis and 0 on Gamma, so
+# Psi = 1 - psi_n/0.95.
+# freegs4e's pprime/ffprime are d/dpsi -- its docstring says
+# d/dpsi_n and is wrong -- so the value column carries ONE factor
+# of dpsi/dPsi = psi_ax and nothing else. Do not pre-divide by
+# psi_ax: meq::NormalisedMHDSource does that itself.
 #
-# Three columns: Psi, value, d(value)/dPsi.
-# Psi = psi/psi_ax is MEQ's NORMALISED flux: ONE on the magnetic
-# axis and ZERO on Gamma, which is the opposite sense to
-# freegs4e's psi_n and to EQDSK's. The value column is therefore
-# d/dPsi and not d/dpsi; meq::NormalisedMHDSource divides by
-# psi_ax itself, so do not pre-divide the table.
+# Three columns: Psi, value, d(value)/dPsi, ascending in Psi and
+# reaching 0 and 1 EXACTLY -- so meq::SplineProfile interpolates
+# everywhere the solve can reach and its clamp never fires.
 #
- 1.031991744066e-03   6.235594418408e+02   1.735777278239e+04
- 5.159958720330e-03   6.965384742158e+02   1.799477061129e+04
- 9.287925696594e-03   7.720752133105e+02   1.859698168806e+04
- 1.341589267286e-02   8.500402754790e+02   1.917473670445e+04
- 1.754385964912e-02   9.303611367478e+02   1.973836635220e+04
- 2.167182662539e-02   1.012979488062e+03   2.028787063131e+04
+ 0.000000000000e+00   6.057311533839e+02   1.719308788828e+04
+ 1.031991744066e-03   6.235594418408e+02   1.735777277896e+04
+ 5.159958720330e-03   6.965384742158e+02   1.799477061221e+04
+ 9.287925696594e-03   7.720752133105e+02   1.859698168782e+04
+ 1.341589267286e-02   8.500402754790e+02   1.917473670452e+04
+ 1.754385964912e-02   9.303611367478e+02   1.973836635218e+04
+ 2.167182662539e-02   1.012979488062e+03   2.028787063132e+04
  2.579979360165e-02   1.097837020366e+03   2.082324954179e+04
  2.992776057792e-02   1.184875424604e+03   2.134450308363e+04
  3.405572755418e-02   1.274036391722e+03   2.185163125683e+04

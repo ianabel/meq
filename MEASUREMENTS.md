@@ -5994,12 +5994,15 @@ THE ORDER THEY REACH.** `examples/fixed-*.toml`, written by
 
 | case | elements | Newton | wall | `psi_ax` | freegs4e's own | relative |
 |---|---|---|---|---|---|---|
-| `fixed-h-circular` | 1,086 | 15 | 9.5 s | 6.353707e-02 | 6.354434e-02 | 1.14e-04 |
-| `fixed-a-testtokamak` | 2,480 | 7 | 9.8 s | 4.778900e-02 | 4.778846e-02 | 1.12e-05 |
-| `fixed-e-diamagnetic` | 6,033 | 7 | 20.1 s | 4.354586e-02 | 4.354531e-02 | 1.26e-05 |
-| `fixed-d-tcv` | 16,406 | 7 | 39.7 s | 1.755694e-02 | 1.755677e-02 | 9.41e-06 |
-| `fixed-g-mastu` | 39,399 | 9 | 84.5 s | 8.043321e-02 | 8.043177e-02 | 1.79e-05 |
-| `fixed-f-diiid` | 102,840 | 10 | 210.7 s | 2.897815e-01 | 2.897795e-01 | 6.99e-06 |
+| `fixed-h-circular` | 1,086 | 13 | 7.1 s | 6.353707e-02 | 6.354434e-02 | 1.14e-04 |
+| `fixed-a-testtokamak` | 2,480 | 7 | 10.8 s | 4.778900e-02 | 4.778846e-02 | 1.12e-05 |
+| `fixed-e-diamagnetic` | 6,033 | 7 | 18.8 s | 4.354586e-02 | 4.354531e-02 | 1.26e-05 |
+| `fixed-d-tcv` | 16,406 | 7 | 37.5 s | 1.755694e-02 | 1.755677e-02 | 9.41e-06 |
+| `fixed-g-mastu` | 39,399 | 9 | 84.3 s | 8.043321e-02 | 8.043177e-02 | 1.79e-05 |
+| `fixed-f-diiid` | 102,840 | 10 | 173.1 s | 2.897815e-01 | 2.897795e-01 | 6.99e-06 |
+
+**The whole set is 5 minutes 32 seconds**, against `FreeBoundaryCoupling`'s 809
+to 1550 s for one binary.
 
 and over the whole `129²` output grid, dropping the band, through
 `tools/freegs4e-benchmark/compare.py`:
@@ -6034,7 +6037,7 @@ level is **nested** in the last — against its own `r = 3` answer, relative L2 
 |---|---|---|---|---|
 | `k = 1` | 9.0509e-04 | 2.7758e-04 | 3.1370e-05 | 1.71, **3.15** |
 | `k = 2` | 1.9557e-04 | 1.1836e-05 | 1.6754e-07 | **4.05**, 6.14 |
-| `k = 3` | 1.5786e-06 | 3.4947e-08 | 2.8684e-09 | **5.50**, 3.61 |
+| `k = 3` | 1.5786e-06 | 3.4950e-08 | 2.8760e-09 | **5.50**, 3.60 |
 
 **`k + 2` IS 3, 4 AND 5 AND THE TABLE REACHES ALL THREE.** The `.nc` carries
 `psi*`, the element-local post-processing at degree `k+1`, so `k+2` is its
@@ -6044,6 +6047,17 @@ opposite directions: at `k = 1` the first pair is preasymptotic on 1,086
 elements, and at `k = 3` the second pair falls off because the *reference* is
 only one level finer and is itself at 2.9e-09. A self-convergence study against
 its own next refinement cannot resolve a rate once the two are the same size.
+
+**AND THE TABLE IS A CONTROL ON ONE OTHER THING.** It was taken twice, before
+and after the profile tables were changed to reach `Psi = 0` exactly — `0.95`
+lands between two of `freegs4e`'s 256 samples, so simply keeping
+`psi_n ≤ 0.95` left the lowest `Psi` at 1.03e-03 and `meq::SplineProfile`
+clamped across that sliver at Γ. Every entry above is **identical to five
+figures** either way and `psi_ax` is identical to seven on all six machines;
+only `fixed-h-circular`'s Newton count moved, 15 to 13. So the sliver was
+worth nothing numerically and the endpoint is interpolated in anyway, because
+*"the profile is never evaluated off its own table"* is the claim these cases
+rest on and *"never, except in a sliver at the boundary"* is a different one.
 
 **AND THE COMPARISON WITH THE FREE-BOUNDARY MACHINE CASES IS THE POINT, NOT THE
 NUMBER.** On every free-boundary machine in this tree `ConstrainPaxisIp` at
