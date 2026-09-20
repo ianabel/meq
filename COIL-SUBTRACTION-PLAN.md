@@ -531,3 +531,73 @@ this solver's critical-point search runs on `psi_p`. The normalisation would be
 taken against the remainder's axis — not a failure, a different problem solved
 perfectly. **CS-4 is the stage that makes every consumer read the total**, and
 until then the refusal is what stops the split being used where it is wrong.
+
+---
+
+## 8. CS-4 scoped: the inventory, the design, and the one place exactness cannot survive
+
+**CS-4 IS THE REAL COST OF THIS PLAN AND §3 SAID SO.** The solved field stops
+being the physical field, and every consumer that forgets is a silent wrong
+answer rather than a failure. This section is what makes it safe to start.
+
+### 8.1 The inventory, counted rather than remembered
+
+| where | reads | what |
+|---|---|---|
+| `apps/meq.cpp` | **19** | `potential()` ×8, `flux()` ×7, `postProcessedPotential()` ×4 — the four output formats |
+| `src/meq/GradShafranov.cpp` | **40** | `potentialGf`, `darcyFlux`, `traceGf` internally: the bordered rows, the support fill, the limiter and X-point |
+| `src/meq/FluxSurfaces.cpp` | 4 | the tracer and the surface averages |
+| `src/meq/Estimator.cpp` | 4 | the residual estimator, all four fields |
+| `src/meq/CriticalPoints.cpp` | 1 | the axis and X-point search |
+
+**About 68 sites.** The count matters because it decides the design: a change
+that has to be made correctly 68 times will not be.
+
+### 8.2 The design: hand each consumer `psi_c`, do not pre-add it
+
+**The rejected option is to form a total `GridFunction` once and let consumers
+read that.** It is the smallest diff and it throws away the plan's central
+claim: `psi_c` projected onto the discrete space is `psi_c` to the mesh's order,
+which is exactly the error §2(b) exists to remove. It would also reintroduce the
+singularity into a finite-element function, which for a filament is the thing
+that cannot be represented at all.
+
+**So each consumer takes a `ConductorField const *` and adds `psi_c` at its own
+evaluation points**, which is the pattern `SourceIntegrator::setConductorField()`
+already follows — null shifts by exactly zero, so no existing path moves by a
+bit. Consumers that evaluate pointwise keep the exactness; each is one setter
+and one addition at the point where it already has `( r, z )` in hand.
+
+### 8.3 AND THE `.gf` OUTPUT CANNOT KEEP IT, WHICH IS A FINDING RATHER THAN A GAP
+
+A `.gf` **is** a finite-element function — every `P_k` coefficient of a field in
+a space — so "write the physical flux to a `.gf`" and "represent `psi_c` in the
+discrete space" are the same request. For a filament that is not merely
+inaccurate, it is impossible: `psi_c` is logarithmic at the conductor and no
+polynomial space contains it.
+
+**So the split's exactness reaches the outputs unevenly, and the difference is
+structural:**
+
+| format | keeps `psi_c` exact? | |
+|---|---|---|
+| `.nc` grid, `_surfaces.nc` | **yes** | sampled pointwise, so `psi_c` is evaluated rather than represented |
+| flux surfaces, critical points, the tracer | **yes** | same reason |
+| `.gf`, `.vtu` | **no** | both are the field's own coefficients; `psi_c` can only be projected |
+
+**A `.gf` written under the split should therefore be the REMAINDER and say so**,
+rather than a projected total that silently loses what the plan bought — and
+since a `.gf` is MEQ's own restart format, a restart reading it wants the
+conductor set beside it, exactly as the mesh wants its `.meq-mesh` stamp. That
+is a schema decision and it is **open**.
+
+### 8.4 What unlocks what
+
+The two refusals in `setConductorField()` are the measure of CS-4's progress:
+
+* **a `NormalisedSource`** needs `psi_ax` and `psi_bnd` off the total, which is
+  `CriticalPoints.cpp` plus the limiter and X-point rows — and `insidePlasma()`,
+  which decides the support fill. That is the whole of what makes a *physical*
+  case reachable, so it is CS-4's first tranche and everything else can wait.
+* **an exterior coupling** is CS-3 and is a different question: the DtN's datum
+  and transmission rows, not a consumer of `psi`.
