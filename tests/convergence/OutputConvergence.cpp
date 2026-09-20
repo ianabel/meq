@@ -121,13 +121,23 @@ BOOST_AUTO_TEST_CASE( theMfemFilesRoundTripExactly )
 	std::printf( "\n  .gf round trip: worst coefficient difference %.3e\n", worst );
 	std::fflush( stdout );
 
-	// 16 digits written, so the round trip should be at round-off and not at
-	// the 1e-8 MFEM's default precision would give. That difference is the
-	// whole reason writeMfem() sets it.
-	BOOST_TEST( worst < 1.0e-13,
-	            "the grid function did not survive the round trip: worst "
-	            "coefficient moved by " << worst << ", which is the scale of a "
-	            "precision setting rather than of round-off" );
+	// BIT EQUALITY, AND THE CASE IS NAMED FOR IT. This assertion used to read
+	// `worst < 1.0e-13` under a comment reasoning that "16 digits written, so
+	// the round trip should be at round-off" -- which is the misconception the
+	// defect lived in. 16 is the number of digits a double is accurate TO;
+	// std::numeric_limits<double>::max_digits10 is 17 and is the number needed
+	// to RECOVER one. Measured on 200,000 doubles in [ -1, 1 ]: at precision 16,
+	// 25.1% do not parse back to the value written, and at 17 none do.
+	//
+	// So a tolerance of 1e-13 passed while a quarter of the coefficients came
+	// back one bit out -- a test whose NAME claimed the property it did not
+	// check, which is worse than no test because it looks like coverage.
+	// meq::writeMfem() writes 17 digits and this is now an identity.
+	BOOST_TEST( worst == 0.0,
+	            "the grid function did not survive the round trip BIT FOR BIT: "
+	            "worst coefficient moved by " << worst << ". An exact restart "
+	            "means the same doubles, and recovering a double needs "
+	            "max_digits10 = 17 rather than the 16 it is accurate to" );
 }
 
 /// CONTINUING THE POTENTIAL ACROSS THE Gamma_h-TO-Gamma BAND, and the rate

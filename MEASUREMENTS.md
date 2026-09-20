@@ -5643,3 +5643,54 @@ trap.
 A peer's build started partway through the ladder. The accuracy columns are
 rates and norms and do not care; the wall clock does, and re-racing DIII-D
 shaped against M-111's filament row wants a quiet machine.
+
+### M-140
+
+**MEQ's "EXACT RESTART" WAS ONE BIT OUT ON A QUARTER OF ITS COEFFICIENTS, AND A
+TEST NAMED `theMfemFilesRoundTripExactly` PASSED THROUGHOUT.** Found while
+asking whether a `GridFunction` could be written to NetCDF for
+`COIL-SUBTRACTION-PLAN.md` CS-6, which turns on whether the existing format is
+exact.
+
+**16 IS THE NUMBER OF DIGITS A DOUBLE IS ACCURATE TO; 17 IS THE NUMBER NEEDED TO
+RECOVER ONE.** `std::numeric_limits<double>::max_digits10` is **17**.
+`src/meq/Output.cpp` set `out.precision( 16 )` at both `.gf` sites, under a
+comment reasoning that 16 is exact where MFEM's default 8 is not — right about
+the 8 and wrong about the 16.
+
+200,000 doubles drawn uniformly from `[ −1, 1 ]`, formatted and parsed back:
+
+| precision | not bit-recovered |
+|---|---|
+| **16** | **50,204 of 200,000 — 25.1%** |
+| 17 | **0** |
+
+**AND IT IS NOT A PROPERTY OF RANDOM DOUBLES ONLY — IT IS MEASURED ON MEQ'S OWN
+FIELD.** `theMfemFilesRoundTripExactly` solves a Solov'ev case at `k = 2`,
+writes the pair, reads them back with no knowledge of what wrote them, and takes
+the worst coefficient difference:
+
+| `writeMfem()` precision | worst coefficient difference |
+|---|---|
+| 16 | **5.551e-17** — one ulp at that scale |
+| **17** | **0.000e+00** |
+
+**THE TEST'S NAME CLAIMED THE PROPERTY AND ITS ASSERTION DID NOT CHECK IT.** It
+read `BOOST_TEST( worst < 1.0e-13 )`, so one ulp passed by four orders of
+magnitude. A tolerance where the property is an identity — and the name made it
+look like coverage, which is worse than no test. It now asserts `worst == 0.0`,
+and **that is falsified rather than assumed**: reverting `Output.cpp` to 16 and
+rebuilding makes it fail with the 5.551e-17 above, and restoring 17 makes it
+pass at `0.000e+00`.
+
+**WHY NOTHING ELSE CAUGHT IT.** `WarmStartConvergence` is the other test of the
+restart and asserts on **iteration counts** — a warm start must change the work
+and not the answer — so a one-ulp perturbation sits far below the Newton
+tolerance and the restart still finishes in one iteration. A legitimate test
+that is structurally blind to this: it checks the consequence, not the property.
+
+**AND IT STRENGTHENS CS-6 RATHER THAN ONLY FIXING A BUG.** §9 proposes NetCDF
+for the exact field because a `.gf` cannot carry metadata; NetCDF stores
+**binary** doubles, so the round-trip question does not arise there at all — and
+the file is smaller than the ASCII it replaces. The precision fix makes the
+current format correct; the format change makes the question disappear.
