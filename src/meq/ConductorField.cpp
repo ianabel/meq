@@ -165,6 +165,41 @@ namespace meq
 		qZ = dPsiDz/r;
 	}
 
+	void ConductorField::poloidalField( double r, double z,
+	                                    double &bR, double &bZ ) const
+	{
+		if ( r > 0.0 )
+		{
+			double qR = 0.0;
+			double qZ = 0.0;
+			flux( r, z, qR, qZ );
+			bR = -qZ;
+			bZ = qR;
+			return;
+		}
+
+		// ON THE AXIS, WHERE flux() IS 0/0 AND THE LIMIT IS CLOSED FORM.
+		//
+		// B_R = -q_z is EXACTLY zero rather than approximately: psi ~ c( z ) r^2
+		// for a field regular on the axis, so d_z psi ~ c'( z ) r^2 and
+		// q_z ~ c'( z ) r. B_Z = q_r tends to c( z ), which is the on-axis
+		// field and is what the two AxisFlux kernels return.
+		//
+		// SUMMED PER CONDUCTOR AND NOT TAKEN OFF A SUMMED GRADIENT, which is
+		// the opposite of what flux() does eight lines above and is right for
+		// the opposite reason: there the division by r is what must happen once,
+		// here there is no division at all and each conductor's limit is its own
+		// closed form.
+		bR = 0.0;
+		bZ = 0.0;
+
+		for ( CurrentFilament const &one : filamentList )
+			bZ += filamentAxisFlux( one, z, mu0Value );
+
+		for ( Coil const &one : coilList.coils() )
+			bZ += coilAxisFlux( one, z, coilList.quadratureOrder(), mu0Value );
+	}
+
 	bool ConductorField::coincides( double r, double z ) const
 	{
 		return indexAt( r, z ) >= 0;

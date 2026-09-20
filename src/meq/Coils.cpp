@@ -979,6 +979,72 @@ namespace meq
 		qZ /= r;
 	}
 
+	double filamentAxisFlux( double z, double loopRadius, double loopHeight,
+	                         double current, double mu0 )
+	{
+		requireFinite( z, "the field point height", "meq::filamentAxisFlux" );
+		requireFinite( loopRadius, "the loop radius", "meq::filamentAxisFlux" );
+		requireFinite( loopHeight, "the loop height", "meq::filamentAxisFlux" );
+		requireFinite( current, "the current", "meq::filamentAxisFlux" );
+		requireFinite( mu0, "mu0", "meq::filamentAxisFlux" );
+
+		if ( !( loopRadius > 0.0 ) )
+			throw std::invalid_argument(
+				"meq::filamentAxisFlux: the loop radius must be positive" );
+
+		// d is the distance from the field point to the ring, which on the axis
+		// is the same for every point of it -- that is the whole reason this
+		// case is closed form where the general one needs elliptic integrals.
+		// It is strictly positive because the ring never meets the axis.
+		double const d = std::hypot( loopRadius, z - loopHeight );
+		return 0.5*mu0*current*loopRadius*loopRadius/( d*d*d );
+	}
+
+	double coilAxisFlux( Coil const &coil, double z, int order, double mu0 )
+	{
+		requireFinite( z, "the field point height", "meq::coilAxisFlux" );
+		requireFinite( mu0, "mu0", "meq::coilAxisFlux" );
+		requireOrder( order, "meq::coilAxisFlux" );
+
+		// A PLAIN TENSOR RULE, and the header says why: the axis is outside
+		// every meq::Coil by that class's own refusal, so nothing here is
+		// singular and the panelling and cubic grading crossSectionIntegral()
+		// carries would buy nothing.
+		GaussRule const &rule = gaussRule( order );
+
+		double const rLow = coil.rMin();
+		double const rHigh = coil.rMax();
+		double const zLow = coil.zMin();
+		double const zHigh = coil.zMax();
+		double const rLength = rHigh - rLow;
+		double const zLength = zHigh - zLow;
+
+		double total = 0.0;
+		for ( int i = 0; i < order; ++i )
+		{
+			std::size_t const iu = static_cast<std::size_t>( i );
+			double const source = rLow + rLength*0.5*( rule.abscissa[ iu ] + 1.0 );
+			double const rWeight = 0.5*rule.weight[ iu ]*rLength;
+
+			for ( int j = 0; j < order; ++j )
+			{
+				std::size_t const jv = static_cast<std::size_t>( j );
+				double const height =
+					zLow + zLength*0.5*( rule.abscissa[ jv ] + 1.0 );
+				double const zWeight = 0.5*rule.weight[ jv ]*zLength;
+
+				double const d = std::hypot( source, z - height );
+				total += rWeight*zWeight
+				         *0.5*source*source/( d*d*d );
+			}
+		}
+
+		// The current DENSITY, as every other coil kernel in this file does it:
+		// the cross-section integral above carries the geometry and the density
+		// carries the amperes.
+		return mu0*coil.currentDensity()*total;
+	}
+
 	double ellipsePsi( double r, double z, double centreR, double centreZ,
 	                   double semiR, double semiZ, double current, int order,
 	                   double mu0 )
@@ -1082,6 +1148,13 @@ namespace meq
 	{
 		filamentFlux( r, z, filament.radius(), filament.height(),
 		              filament.current(), qR, qZ, mu0 );
+	}
+
+	double filamentAxisFlux( CurrentFilament const &filament, double z,
+	                         double mu0 )
+	{
+		return filamentAxisFlux( z, filament.radius(), filament.height(),
+		                         filament.current(), mu0 );
 	}
 
 	CoilSet::CoilSet( double mu0In )

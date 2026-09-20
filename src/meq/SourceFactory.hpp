@@ -15,6 +15,7 @@
 #include <string>
 
 #include "Coils.hpp"
+#include "ConductorField.hpp"
 #include "Config.hpp"
 #include "Source.hpp"
 
@@ -74,6 +75,37 @@ namespace meq
 	std::shared_ptr<CoilSet const> makeCoilSet( CoilConfig const &config,
 	                                            double mu0 = vacuumPermeability,
 	                                            std::string const &configFileName = std::string() );
+
+	/// Construct the ANALYTIC conductor field `[conductors]` asks for, or a
+	/// null pointer when it asks for nothing -- `ConductorModel::Meshed`, or a
+	/// file with no `[[coils]]` at all.
+	///
+	/// **A NULL RETURN IS THE ORDINARY CASE, AS makeCoilSet()'s IS, AND IT IS
+	/// WHAT KEEPS THE MESHED ROUTE FREE.** Every shift inside the solver is
+	/// guarded on a null meq::ConductorField, so a configuration that does not
+	/// ask for the split runs the code it always ran and answers bit for bit.
+	/// `COIL-SUBTRACTION-PLAN.md` section 0a-pre is the standing requirement and
+	/// ConductorSubtraction.cpp's control case is what asserts it.
+	///
+	/// **THE TWO NON-NULL RETURNS ARE DIFFERENT MACHINES AND NOT TWO WAYS OF
+	/// WRITING ONE.** `ConductorModel::Subtracted` gives the same rectangles
+	/// meq::CoilSet carries, evaluated rather than meshed, and must reproduce
+	/// the meshed answer to the discretisation.
+	/// `ConductorModel::Filament` collapses each rectangle to a point at its
+	/// centre carrying the same total current, which is a per-cent-level
+	/// different field near the conductors -- see ConductorModel::Filament.
+	///
+	/// The caller owns the result and must keep it alive for the whole solve:
+	/// GradShafranovSolver::setConductorField() BORROWS.
+	///
+	/// @throws ConfigError naming the offending `[[coils]]` block, exactly as
+	///         makeCoilSet() does and for the same reason -- meq::Coil and
+	///         meq::CurrentFilament do not know they came from a file.
+	std::shared_ptr<ConductorField const>
+		makeConductorField( CoilConfig const &coils,
+		                    ConductorConfig const &conductors,
+		                    double mu0 = vacuumPermeability,
+		                    std::string const &configFileName = std::string() );
 }
 
 #endif // MEQ_SOURCEFACTORY_HPP

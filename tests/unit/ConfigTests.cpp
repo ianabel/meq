@@ -2852,3 +2852,108 @@ BOOST_AUTO_TEST_CASE( the_batched_assembly_axes_are_separate_keys )
 	refuses( base + "\n[solver]\nAssemblyMode = \"batch\"\n",
 	         "solver.AssemblyMode" );
 }
+
+// [conductors] Model -- THE KEY THAT TAKES THE COILS OUT OF THE MESH.
+//
+// COIL-SUBTRACTION-PLAN.md section 0a-pre is a standing constraint on the whole
+// campaign: the meshed finite coil never stops working, and the split is an
+// OPTION. That makes the DEFAULT the load-bearing assertion here -- a file
+// written before this table existed must still mean exactly what it meant --
+// and it is the one a reader would skip past.
+//
+// THE THREE REFUSALS ARE EACH A KEY THAT WOULD OTHERWISE BE ACCEPTED AND
+// IGNORED, which CLAUDE.md records happening twice already in this parser:
+// ConfineToPlasma on the rotating source, and the reserved profile keys on
+// "mhd". Both times the key parsed, set something, and was consulted by
+// nothing.
+BOOST_AUTO_TEST_CASE( the_conductor_model_decides_how_the_coils_enter )
+{
+	auto const refuses = []( std::string const & text, std::string const & key )
+	{
+		BOOST_CHECK_EXCEPTION( parse( text ), ConfigError,
+			[&]( ConfigError const & e ) { return e.getKey() == key; } );
+	};
+
+	std::string const base =
+		"[mesh]\n"
+		"RMin = 1.2\nRMax = 2.2\nZMin = -0.7\nZMax = 0.7\n"
+		"\n[discretisation]\nPolynomialDegree = 2\n"
+		"\n[source]\nType = \"soloviev\"\nA = -0.52\n";
+
+	std::string const oneCoil =
+		"\n[[coils]]\n"
+		"CentreR = 2.10\nCentreZ = 0.60\n"
+		"HalfWidth = 0.05\nHalfHeight = 0.05\nCurrent = 1.5e5\n";
+
+	// THE DEFAULT IS MESHED, WITH COILS AND WITHOUT THEM. A file with no
+	// [conductors] table subtracts nothing, which is what makes every example
+	// in this tree bit-identical to what it was.
+	Configuration const silent = parse( base + oneCoil );
+	BOOST_TEST( ( silent.getConductors().model
+	              == meq::ConductorModel::Meshed ) );
+	BOOST_TEST( !silent.getConductors().subtracts() );
+
+	Configuration const bare = parse( base );
+	BOOST_TEST( ( bare.getConductors().model == meq::ConductorModel::Meshed ) );
+
+	// AND ALL THREE VALUES PARSE, with subtracts() the one question the rest of
+	// MEQ asks -- the warm start's meaning, the output's, and whether the source
+	// may be augmented with the coils.
+	Configuration const meshed = parse( base + oneCoil
+		+ "\n[conductors]\nModel = \"meshed\"\n" );
+	BOOST_TEST( !meshed.getConductors().subtracts() );
+
+	Configuration const subtracted = parse( base + oneCoil
+		+ "\n[conductors]\nModel = \"subtracted\"\n" );
+	BOOST_TEST( ( subtracted.getConductors().model
+	              == meq::ConductorModel::Subtracted ) );
+	BOOST_TEST( subtracted.getConductors().subtracts() );
+
+	Configuration const filament = parse( base + oneCoil
+		+ "\n[conductors]\nModel = \"filament\"\n" );
+	BOOST_TEST( ( filament.getConductors().model
+	              == meq::ConductorModel::Filament ) );
+	BOOST_TEST( filament.getConductors().subtracts() );
+
+	// A MISSPELLING FAILS AT PARSE, where a string can be checked without the
+	// library -- the same split every other choice key in this file makes.
+	refuses( base + oneCoil + "\n[conductors]\nModel = \"subtract\"\n",
+	         "conductors.Model" );
+	refuses( base + oneCoil + "\n[conductors]\nSubtract = true\n",
+	         "conductors.Subtract" );
+
+	// ASKING FOR THE SPLIT WITH NOTHING TO SPLIT IS REFUSED, and this is the
+	// refusal that matters most. It cannot fail loudly later: a run that asked
+	// to take its conductors out of the mesh and had none would converge, report
+	// every diagnostic it always did, and be slower than it should be -- with
+	// nothing anywhere to look at. The MESHED value is still fine with no coils,
+	// because that is what the absence of the table already means.
+	refuses( base + "\n[conductors]\nModel = \"subtracted\"\n",
+	         "conductors.Model" );
+	refuses( base + "\n[conductors]\nModel = \"filament\"\n",
+	         "conductors.Model" );
+	BOOST_CHECK_NO_THROW( parse( base + "\n[conductors]\nModel = \"meshed\"\n" ) );
+
+	// QUADRATURE IS THE RECTANGLE'S AND ONLY THE RECTANGLE'S. A filament has no
+	// cross-section to integrate over and a meshed coil is integrated by the
+	// mesh, so on both of those this key would be accepted and ignored.
+	Configuration const graded = parse( base + oneCoil
+		+ "\n[conductors]\nModel = \"subtracted\"\nQuadratureOrder = 32\n" );
+	BOOST_TEST( graded.getConductors().quadratureOrder == 32 );
+
+	refuses( base + oneCoil
+		+ "\n[conductors]\nModel = \"filament\"\nQuadratureOrder = 32\n",
+		"conductors.QuadratureOrder" );
+	refuses( base + oneCoil
+		+ "\n[conductors]\nModel = \"meshed\"\nQuadratureOrder = 32\n",
+		"conductors.QuadratureOrder" );
+	refuses( base + oneCoil
+		+ "\n[conductors]\nModel = \"subtracted\"\nQuadratureOrder = 1\n",
+		"conductors.QuadratureOrder" );
+
+	// AND THE TABLE ITSELF IS PART OF THE SCHEMA, so a misspelt [conductor] is
+	// caught where a misplaced table is rather than reporting a key missing
+	// from a table the author never wrote.
+	BOOST_CHECK_THROW( parse( base + "\n[conductor]\nModel = \"meshed\"\n" ),
+	                   ConfigError );
+}

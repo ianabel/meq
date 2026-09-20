@@ -664,4 +664,94 @@ BOOST_AUTO_TEST_CASE( the_coil_factory_names_the_block_it_refuses )
 		} );
 }
 
+/// makeConductorField() -- THE FACTORY THAT TURNS `[conductors]` INTO psi_c.
+///
+/// THE NULL RETURN IS THE ASSERTION THAT MATTERS, and it is the one a reader
+/// skips. Every shift inside the solver is guarded on a null
+/// meq::ConductorField, so a null here is what keeps the meshed route
+/// bit-identical -- COIL-SUBTRACTION-PLAN.md section 0a-pre's standing
+/// requirement. Returning an EMPTY field instead would be a non-null pointer
+/// the solver takes, a per-quadrature-point cache built and filled, and every
+/// consumer shifted by exactly nought.
+BOOST_AUTO_TEST_CASE( the_conductor_factory_builds_only_what_was_asked_for )
+{
+	meq::CoilConfig coils;
+	meq::CoilParameters one;
+	one.name = "PF-upper";
+	one.centreR = 2.10;
+	one.centreZ = 0.60;
+	one.halfWidth = 0.05;
+	one.halfHeight = 0.05;
+	one.current = 1.5e5;
+	coils.coils.push_back( one );
+
+	meq::ConductorConfig meshed;
+	BOOST_TEST( ( meq::ConductorModel::Meshed == meshed.model ) );
+	BOOST_TEST( !meq::makeConductorField( coils, meshed ) );
+
+	// AND NO COILS IS ALSO NULL, whatever the model says -- Config refuses that
+	// pair, and the factory must not depend on Config having run.
+	meq::ConductorConfig subtracted;
+	subtracted.model = meq::ConductorModel::Subtracted;
+	meq::CoilConfig const none;
+	BOOST_TEST( !meq::makeConductorField( none, subtracted ) );
+
+	auto const rectangles = meq::makeConductorField( coils, subtracted );
+	BOOST_REQUIRE( rectangles );
+	BOOST_TEST( rectangles->coilCount() == 1u );
+	BOOST_TEST( rectangles->filamentCount() == 0u );
+	BOOST_TEST( rectangles->totalCurrent() == 1.5e5 );
+
+	// THE FILAMENT MODEL IS A DIFFERENT MACHINE AND NOT A COARSER RECTANGLE.
+	// The half-extents are DROPPED rather than averaged into anything, and the
+	// current is conserved -- which is the only collapse of a rectangle to a
+	// point that leaves the far field alone.
+	meq::ConductorConfig filaments;
+	filaments.model = meq::ConductorModel::Filament;
+	auto const points = meq::makeConductorField( coils, filaments );
+	BOOST_REQUIRE( points );
+	BOOST_TEST( points->filamentCount() == 1u );
+	BOOST_TEST( points->coilCount() == 0u );
+	BOOST_TEST( points->totalCurrent() == 1.5e5 );
+	BOOST_TEST( points->filament( 0 ).radius() == one.centreR );
+	BOOST_TEST( points->filament( 0 ).height() == one.centreZ );
+
+	// AND THE TWO DISAGREE, or the filament mode is a relabelling rather than
+	// the per-cent-level different conductor model section 4b measures. Read
+	// well away from the conductor, where both are smooth and the difference is
+	// the model rather than a quadrature.
+	BOOST_TEST( rectangles->psi( 1.70, 0.0 ) != points->psi( 1.70, 0.0 ),
+	            boost::test_tools::tolerance( 0.0 ) );
+
+	// THE QUADRATURE KEY REACHES THE RECTANGLES. Config refuses it on the other
+	// two models; here it must actually arrive.
+	meq::ConductorConfig graded;
+	graded.model = meq::ConductorModel::Subtracted;
+	graded.quadratureOrder = 6;
+	auto const coarse = meq::makeConductorField( coils, graded );
+	BOOST_REQUIRE( coarse );
+	BOOST_TEST( coarse->quadratureOrder() == 6 );
+	BOOST_TEST( coarse->quadratureOrder() != rectangles->quadratureOrder() );
+
+	// AND A BAD BLOCK IS NAMED, exactly as makeCoilSet() names it: meq::Coil
+	// and meq::CurrentFilament do not know they came from a file.
+	meq::CoilConfig bad;
+	meq::CoilParameters axis;
+	axis.name = "PF-inboard";
+	axis.centreR = 0.05;
+	axis.halfWidth = 0.10;
+	axis.halfHeight = 0.05;
+	axis.current = 1.0e6;
+	bad.coils.push_back( axis );
+
+	BOOST_CHECK_EXCEPTION(
+		meq::makeConductorField( bad, subtracted, meq::vacuumPermeability,
+		                         "<test>" ),
+		meq::ConfigError,
+		[]( meq::ConfigError const &error )
+		{
+			return error.getKey() == "coils[0] (PF-inboard)";
+		} );
+}
+
 BOOST_AUTO_TEST_SUITE_END()

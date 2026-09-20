@@ -372,4 +372,58 @@ namespace meq
 
 		return set;
 	}
+
+	std::shared_ptr<ConductorField const>
+		makeConductorField( CoilConfig const &coils,
+		                    ConductorConfig const &conductors,
+		                    double mu0,
+		                    std::string const &configFileName )
+	{
+		// Two ways to mean "nothing to subtract", and both return null rather
+		// than an empty field: a caller distinguishes them only by which it
+		// gets, and an empty ConductorField would still be a non-null pointer
+		// the solver would take and then shift everything by exactly zero --
+		// paying the whole cache for a field that is identically nought.
+		if ( !conductors.subtracts() || coils.coils.empty() )
+			return nullptr;
+
+		auto field = std::make_shared<ConductorField>( mu0 );
+
+		if ( conductors.quadratureOrder != 0 )
+			field->setQuadratureOrder( conductors.quadratureOrder );
+
+		for ( std::size_t i = 0; i < coils.coils.size(); ++i )
+		{
+			CoilParameters const &parameters = coils.coils[ i ];
+
+			// The block's own name, as makeCoilSet() does it and for the same
+			// reason: a refusal points at the line the author wrote.
+			std::string key = "coils[" + std::to_string( i ) + "]";
+			if ( !parameters.name.empty() )
+				key += " (" + parameters.name + ")";
+
+			guarded( [ & ]() -> int
+			{
+				if ( conductors.model == ConductorModel::Filament )
+					// THE CENTRE AND THE TOTAL CURRENT, which is the only
+					// collapse of a rectangle to a point that conserves the
+					// thing the far field depends on. The half-extents are
+					// DROPPED rather than averaged into anything: a filament
+					// has no cross-section, and pretending otherwise is what
+					// would make this look like an approximation to the
+					// rectangle instead of the different conductor model it is.
+					field->add( CurrentFilament( parameters.centreR,
+					                             parameters.centreZ,
+					                             parameters.current ) );
+				else
+					field->add( Coil( parameters.centreR, parameters.centreZ,
+					                  parameters.halfWidth,
+					                  parameters.halfHeight,
+					                  parameters.current ) );
+				return 0;
+			}, configFileName, key.c_str() );
+		}
+
+		return field;
+	}
 }

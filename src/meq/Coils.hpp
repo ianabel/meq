@@ -595,6 +595,48 @@ namespace meq
 	               int order = defaultCoilQuadratureOrder,
 	               double mu0 = vacuumPermeability );
 
+	/**
+	 * `q_r` ON THE AXIS: the finite limit that filamentFlux() and coilFlux()
+	 * deliberately do not reach.
+	 *
+	 * `q = ( 1/r ) grad_bar( psi )` is `0/0` at `r = 0`, and those two report
+	 * NaN there rather than substituting a limit quietly -- which is the right
+	 * default, because a caller that has not thought about the axis learns
+	 * something from a NaN and nothing from a plausible number. These two are
+	 * for the caller that HAS thought about it and needs the value: a `( R, Z )`
+	 * output grid whose first column sits on the axis, which every half-disc
+	 * machine's does.
+	 *
+	 * **THERE IS ONLY ONE COMPONENT BECAUSE THE OTHER ONE IS EXACTLY ZERO.**
+	 * `q_z = ( 1/r ) d_z psi`, and `psi ~ c( z ) r^2` near the axis for any
+	 * field regular there, so `d_z psi ~ c'( z ) r^2` and `q_z ~ c'( z ) r -> 0`.
+	 * `q_r` tends to `c( z )`, which is `B_z` on the axis and is finite and in
+	 * general non-zero -- returning a pair would invite a caller to read the
+	 * zero as the same kind of statement as the limit, and it is not.
+	 *
+	 * For a filament the limit is closed form, `mu0 I a^2/( 2 d^3 )` with
+	 * `d = hypot( a, z - h )`, which is the on-axis field of a current loop as
+	 * every textbook writes it.
+	 *
+	 * **AND THE COIL'S VERSION NEEDS NO PANELLING OR GRADING**, unlike
+	 * coilPsi()'s cross-section integral: meq::Coil refuses `rMin <= 0`, so the
+	 * axis is strictly outside every coil, the integrand `a^2/( 2 d^3 )` is
+	 * analytic over the whole rectangle and a plain tensor Gauss rule converges
+	 * spectrally. The grading in coilPsi() exists for a field point INSIDE the
+	 * conductor and there is no such point here.
+	 *
+	 * @throws std::invalid_argument on a non-finite argument, or -- for the
+	 *         filament -- a non-positive loop radius.
+	 */
+	double filamentAxisFlux( double z, double loopRadius, double loopHeight,
+	                         double current,
+	                         double mu0 = vacuumPermeability );
+
+	/// @copydoc filamentAxisFlux
+	double coilAxisFlux( Coil const &coil, double z,
+	                     int order = defaultCoilQuadratureOrder,
+	                     double mu0 = vacuumPermeability );
+
 	/// The Gauss order ellipsePsi() uses unless told otherwise: nodes along
 	/// each chord, with 4 times that many angles around it.
 	///
@@ -749,6 +791,10 @@ namespace meq
 	void filamentFlux( CurrentFilament const &filament, double r, double z,
 	                   double &qR, double &qZ,
 	                   double mu0 = vacuumPermeability );
+
+	/// q_r ON the axis for a filament. See the free function.
+	double filamentAxisFlux( CurrentFilament const &filament, double z,
+	                         double mu0 = vacuumPermeability );
 
 	/**
 	 * A set of coils, and the two things a free-boundary solve wants from them:

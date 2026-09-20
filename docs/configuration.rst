@@ -24,9 +24,9 @@ every key; :doc:`examples` walks through the shipped configurations.
 
 Three tables are **required**: ``[mesh]``, ``[discretisation]``, ``[source]``.
 The rest — ``[boundary]``, ``[solver]``, ``[output]``, ``[initialguess]``,
-``[adaptivity]`` — are optional, and an absent table behaves exactly like a
-present but empty one. ``[[coils]]`` is an *array* of tables rather than a
-table, so "absent" there means no conductors at all.
+``[adaptivity]``, ``[conductors]`` — are optional, and an absent table behaves
+exactly like a present but empty one. ``[[coils]]`` is an *array* of tables
+rather than a table, so "absent" there means no conductors at all.
 
 .. note::
 
@@ -862,6 +862,92 @@ needs to.
 
 ``examples/coils-rectangle.toml`` is the worked example, and it writes its two
 currents one each way so that both spellings are exercised.
+
+``[conductors]``
+----------------
+
+*How* the ``[[coils]]`` blocks enter the equation. One key decides it, and the
+default is what every file written before this table existed already means.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 16 60
+
+   * - Key
+     - Default
+     - Meaning
+   * - ``Model``
+     - ``"meshed"``
+     - ``"meshed"``, ``"subtracted"`` or ``"filament"``. See below.
+   * - ``QuadratureOrder``
+     - the library's
+     - Gauss points per direction per rectangle, for ``"subtracted"`` **only**.
+
+``"meshed"``
+   Each rectangle carries a uniform current density and enters as a **domain
+   source** on the mesh, which is the route described above. The mesh must
+   resolve the conductor, and ``[mesh.generate] CoilSize`` is what grades it.
+   This is the only route that puts the conductor's own current inside the
+   interior equation, which is where a force calculation would have to read it.
+
+``"subtracted"``
+   The same rectangles, integrated analytically and **taken out of the mesh**.
+   MEQ writes :math:`\psi = \psi_c + \psi_p`, computes :math:`\psi_c` from the
+   conductors exactly, and solves
+
+   .. math::
+
+      \Delta^{*}\psi_p = -\mu_0\, r\, J_{\mathrm{plasma}}(\psi_c + \psi_p),
+
+   which is legitimate because :math:`\Delta^{*}` is linear and the conductor
+   currents are prescribed inputs of a forward solve: the conductor's own
+   :math:`\delta`-like source cancels exactly, so the mesh need not carry it.
+   The conductors are then resolved to machine precision rather than to the
+   mesh's order, and the mesh loses both the conductor elements and the grading
+   around them.
+
+``"filament"``
+   A **point filament** at each rectangle's centre carrying the same total
+   current, subtracted the same way. This is the only way MEQ can carry a
+   filament at all: a point source has no finite-element representation as a
+   current density, and :math:`\psi` near it is logarithmic, so the subtraction
+   *is* the representation. It is also the cheaper field — one closed-form
+   evaluation per point per conductor against a tensor quadrature per rectangle.
+
+.. important::
+
+   **The three are not three ways of writing one machine.** ``"meshed"`` and
+   ``"subtracted"`` describe the same conductors and must agree to the
+   discretisation; ``"filament"`` describes **different** ones. Measured on
+   DIII-D's eighteen conductors, a filament model differs from the rectangles by
+   :math:`6.1\times10^{-3}` globally and :math:`4.1\times10^{-2}` *inside* the
+   conductors, against :math:`6.7\times10^{-5}` off them for the matched model
+   — a per-cent-level answer near the coils and far better away from them. That
+   is a mode to choose deliberately, and the ``.nc`` file records which one
+   produced it in its ``conductor_model`` attribute.
+
+.. warning::
+
+   **Under a subtracting model the warm start changes meaning, and so does the**
+   ``.gf`` **MEQ writes.** The solved field is :math:`\psi_p`, so
+   ``[initialguess] File`` is read as :math:`\psi_p` and ``<stem>_psi.gf`` holds
+   :math:`\psi_p`. A ``.gf`` carries no record of which it is — the format has
+   no slot for one — so a guess written by a run *without* ``[conductors]`` is
+   read as though :math:`\psi_c` had already been taken out of it. MEQ warns on
+   standard output whenever both are set. The gridded ``.nc`` output is
+   unaffected and always carries the physical :math:`\psi`, because it is
+   sampled pointwise and :math:`\psi_c` is *evaluated* there rather than
+   represented.
+
+.. note::
+
+   **The table is refused when there is nothing to subtract.** ``Model`` naming
+   anything but ``"meshed"`` with no ``[[coils]]`` blocks is a parse error, not a
+   no-op: a run that asked to take its conductors out of the mesh and had none
+   would converge, report every diagnostic it always did, and be slower than it
+   should be, with nothing anywhere to look at. ``QuadratureOrder`` is refused
+   on the other two models for the same reason — a filament has no cross-section
+   to integrate over and a meshed coil is integrated by the mesh.
 
 .. note::
 

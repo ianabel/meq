@@ -4,6 +4,8 @@
 #include "mfem.hpp"
 
 #include "meq/BoundaryShape.hpp"
+#include "meq/Coils.hpp"
+#include "meq/ConductorField.hpp"
 #include "meq/Estimator.hpp"
 #include "meq/ExteriorDtN.hpp"
 #include "meq/GradShafranov.hpp"
@@ -1247,6 +1249,148 @@ BOOST_AUTO_TEST_CASE( theDriverAddsTheCoilsToF )
 	for ( char const *path : { "driver-acceptance-zerocoil.toml",
 	                           "driver-acceptance-nocoil.toml" } )
 		std::remove( path );
+}
+
+/*
+ * `[conductors] Model = "subtracted"` -- THE SAME MACHINE WITH ITS CONDUCTORS
+ * TAKEN OUT OF THE MESH, AND THE CASE EXISTS FOR THE DOUBLE COUNT.
+ *
+ * COIL-SUBTRACTION-PLAN.md section 0a-pre: the split is an OPTION and the
+ * meshed route never stops working, so the two must describe ONE machine. What
+ * that leaves is a failure mode with no symptom of its own -- leaving
+ * meq::CoilAugmentedSource in place beside psi_c puts the same amperes into the
+ * equation TWICE, and the run converges, closes every border, and reports the
+ * file's own `coil_current` while carrying double it. Nothing in any output
+ * file could show that, which is why the control below is `psi_p + 2 psi_c`
+ * rather than a tolerance.
+ *
+ * THE SOLVED FIELD IS A REMAINDER AND THE OUTPUT GRID IS NOT, and both halves
+ * are asserted. Section 8.3 is the finding that divides them: a `.gf` is the
+ * field's own coefficients, so it keeps psi_p; the `.nc` grid is sampled
+ * pointwise, so psi_c is EVALUATED there and the file carries the physical
+ * flux. A reader of the interchange format must not have to know which route
+ * produced it -- which is also why `conductor_model` is an attribute.
+ *
+ * WHAT IS *NOT* ASSERTED HERE IS A RATE. The library case
+ * ConductorSubtraction.cpp holds that, on a fixture whose element edges lie on
+ * the conductor edges; examples/coils-rectangle.toml's deliberately do not --
+ * its own header says about three cells per coil are cut -- so the meshed arm
+ * carries an O( h ) source error at the conductor boundary that no refinement
+ * of THIS file removes cheaply. The gate below is set against that, and it is
+ * the meshed route's error rather than the split's.
+ */
+BOOST_AUTO_TEST_CASE( theDriverTakesTheConductorsOutOfTheMesh )
+{
+	BOOST_TEST_REQUIRE( run( "examples/coils-rectangle.toml" ) == 0 );
+	mfem::Mesh meshedMesh( "coils-rectangle.mesh", 1, 1 );
+	mfem::GridFunction const meshed =
+		readGridFunction( "coils-rectangle_psi.gf", meshedMesh );
+
+	// THE SAME FILE WITH ONE TABLE ADDED, by text substitution on the shipped
+	// one so that the two cannot drift apart. `[boundary]` is line-anchored for
+	// the reason theDriverAddsTheCoilsToF records: this file's own prose names
+	// the table several times before it appears.
+	std::string const shipped = slurp( "examples/coils-rectangle.toml" );
+	BOOST_TEST_REQUIRE( !shipped.empty() );
+	std::string split = replaceAll( shipped, "\n[boundary]\n",
+	                                "\n[conductors]\nModel = \"subtracted\"\n"
+	                                "\n[boundary]\n" );
+	BOOST_TEST_REQUIRE( split != shipped,
+	                    "the [boundary] substitution matched nothing" );
+	split = replaceAll( split, "Prefix = \"coils-rectangle\"",
+	                    "Prefix = \"subtracted\"" );
+	{
+		std::ofstream file( "driver-acceptance-subtracted.toml" );
+		file << split;
+		BOOST_TEST_REQUIRE( file.good() );
+	}
+
+	BOOST_TEST_REQUIRE( run( "driver-acceptance-subtracted.toml" ) == 0,
+	                    "the driver did not exit 0 under [conductors]" );
+
+	// THE PROVENANCE. A filament set and a rectangle set of the same currents
+	// are different machines, so a file that does not say which produced it
+	// cannot be differenced against another -- which is the one thing the
+	// interchange format exists for.
+	std::string const header = ncdumpHeader( "subtracted.nc" );
+	BOOST_TEST_REQUIRE( !header.empty(), "ncdump could not read subtracted.nc" );
+	BOOST_TEST( header.find( "conductor_model = \"subtracted\"" )
+	            != std::string::npos,
+	            "the .nc does not record which conductor model produced it" );
+	BOOST_TEST( headerAttribute( header, "coils" ) == 2.0 );
+	BOOST_TEST( headerAttribute( header, "coil_current" ) == 3.0e5,
+	            boost::test_tools::tolerance( 1.0e-12 ) );
+
+	mfem::Mesh splitMesh( "subtracted.mesh", 1, 1 );
+	mfem::GridFunction remainder =
+		readGridFunction( "subtracted_psi.gf", splitMesh );
+	BOOST_TEST_REQUIRE( remainder.Size() == meshed.Size(),
+	                    "the two routes did not produce the same space" );
+
+	// psi_c AT THE SAME DOFS. The potential space is a nodal GaussLobatto L2
+	// space, so a dof coefficient IS the value at its node and this projection
+	// is interpolation -- O( h^{k+1} ), the solution's own order, which is what
+	// makes the comparison below a statement about the discretisation rather
+	// than about the projection.
+	meq::ConductorField conductors;
+	conductors.add( meq::Coil( 2.10, 0.60, 0.05, 0.05, 1.5e5 ) );
+	conductors.add( meq::Coil( 2.10, -0.60, 0.05, 0.05, 1.5e5 ) );
+
+	mfem::FunctionCoefficient psiC(
+		[ &conductors ]( mfem::Vector const &x )
+		{
+			return conductors.psi( std::max( 0.0, x( 0 ) ), x( 1 ) );
+		} );
+	mfem::GridFunction analytic( remainder.FESpace() );
+	analytic.ProjectCoefficient( psiC );
+
+	// (1) THE SOLVED FIELD REALLY IS A REMAINDER. If the driver had quietly
+	// solved the same problem the meshed route does, this would be small and
+	// every other assertion here would pass for the wrong reason.
+	double const untouched = relativeDifference( remainder, meshed );
+	BOOST_TEST( untouched > 1.0e-1,
+	            "the .gf written under [conductors] is not a remainder: it "
+	            "differs from the meshed answer by only " << untouched );
+
+	mfem::GridFunction recovered( remainder );
+	recovered += analytic;
+	double const restored = relativeDifference( recovered, meshed );
+
+	// (2) AND ADDING psi_c BACK RECOVERS THE MESHED ANSWER.
+	//
+	// THE GATE IS THE MESHED ARM'S OWN ERROR AND NOT THE SPLIT'S, which is why
+	// it is 8% against an observed 4.7e-02 rather than anything near round-off.
+	// examples/coils-rectangle.toml's coils are 0.10 m square against cells of
+	// 0.0625 x 0.0583, so about three cells per conductor are CUT and the meshed
+	// source carries a jump inside an element -- its own header says so. Driving
+	// that number down is a property of the mesh, and the margin is deliberate:
+	// a case whose gate sits a few per cent above its reading goes red on an
+	// unrelated change to the quadrature or the refinement rather than on a
+	// defect. Measured at three refinement levels the difference falls at
+	// observed rate 2.69, which is what says it is the discretisation.
+	BOOST_TEST( restored < 8.0e-2,
+	            "psi_p + psi_c does not reproduce the meshed equilibrium: "
+	            << restored << " relative" );
+
+	// (3) THE DOUBLE-COUNT CONTROL, which is the whole reason this case exists.
+	// If `coils` were left wrapped around the source beside psi_c, the solved
+	// remainder would be short by one conductor field and psi_p + 2 psi_c would
+	// be the thing that matched. It must be much WORSE, not merely different.
+	mfem::GridFunction doubled( recovered );
+	doubled += analytic;
+	double const twice = relativeDifference( doubled, meshed );
+	BOOST_TEST( twice > 10.0*restored,
+	            "psi_p + 2 psi_c is " << twice << " against psi_p + psi_c at "
+	            << restored << ", which is not the separation a correctly "
+	            "counted conductor gives" );
+
+	std::printf( "\n  the conductors out of the mesh, through the driver\n"
+	             "    the .gf against the meshed psi   %.3e   (a remainder)\n"
+	             "    psi_p + psi_c                    %.3e   relative in L2\n"
+	             "    psi_p + 2 psi_c (double count)   %.3e   must be far worse\n",
+	             untouched, restored, twice );
+
+	std::remove( "driver-acceptance-subtracted.toml" );
 }
 
 /*

@@ -136,6 +136,41 @@
 #     currents produce rather than zero. src/meq/ExteriorDtN.hpp is that
 #     operator and GradShafranovSolver::setExteriorCoupling is how it is
 #     attached; it is not reachable from a configuration file yet.
+#
+#
+# AND THE CONDUCTORS NEED NOT BE MESHED AT ALL: ADD [conductors]
+# ---------------------------------------------------------------
+#
+# Everything above describes the MESHED route, where each rectangle enters F as
+# a domain source and the mesh has to resolve it. That is the default and it is
+# not going anywhere. The alternative is to take the conductors OUT of the mesh
+# and solve for the remainder -- add three lines to this file and nothing else:
+#
+#     [conductors]
+#     Model = "subtracted"
+#
+# MEQ then writes psi = psi_c + psi_p, computes psi_c from these two [[coils]]
+# blocks exactly, and solves for psi_p. Delta* is linear and the coil currents
+# are prescribed, so the conductor's own source cancels and the mesh need not
+# carry it; the conductors are resolved to machine precision rather than to
+# degree 2. `Model = "filament"` is the third value and is a DIFFERENT machine
+# rather than the same one computed differently -- a point filament at each
+# rectangle's centre, which is the only conductor MEQ structurally cannot mesh.
+#
+# ON THIS FILE THE SPLIT BUYS NOTHING AND THAT IS WORTH KNOWING BEFORE TIMING
+# IT. The mesh here is a plain Cartesian box that was never graded to the
+# coils -- see the discontinuity bullet above, which notes three cells per coil
+# are CUT -- so there is no coil refinement for the split to remove and the
+# element count is identical either way. What the split saves is exactly the
+# mesh a machine case builds AROUND its conductors, which is a geometry this
+# file does not have. Run it here to see the two routes agree, not to see one
+# of them win.
+#
+# AND THE .gf CHANGES MEANING, LOUDLY. Under [conductors] the solved field is
+# psi_p, so coils-rectangle_psi.gf holds the REMAINDER and [initialguess] File
+# would be read as one. The format cannot record which, so MEQ says so on
+# stdout; the .nc grid is unaffected and always carries the physical psi,
+# because it is sampled pointwise. docs/configuration.rst has the whole of it.
 
 [mesh]
 # The tokamak-shaped box of examples/mhd-rectangle.toml, unchanged: R0 = 1.7 m,

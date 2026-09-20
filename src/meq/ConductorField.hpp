@@ -144,6 +144,29 @@ namespace meq
 			void flux( double r, double z, double &qR, double &qZ ) const;
 
 			/**
+			 * B_pol of the conductors: `B_R = -q_z`, `B_Z = +q_r`, the same
+			 * relabelling meq::poloidalField() applies to a solved flux.
+			 *
+			 * **AND IT IS FINITE ON THE AXIS WHERE flux() IS NaN, WHICH IS THE
+			 * WHOLE REASON IT EXISTS.** `B_R` there is exactly zero and `B_Z`
+			 * is the closed-form limit meq::filamentAxisFlux() and
+			 * meq::coilAxisFlux() supply -- see those for the derivation and
+			 * for why only one component is a limit. An output grid on a
+			 * half-disc machine has its whole first column on `r = 0`, so a
+			 * caller adding the conductors' field to a sampled one meets this
+			 * at every such node rather than occasionally.
+			 *
+			 * This is the ONLY entry point here that special-cases the axis.
+			 * psi() needs none -- it is exactly zero there -- and flux() keeps
+			 * its NaN deliberately, so that a caller who has not thought about
+			 * the axis is told rather than handed a plausible number.
+			 *
+			 * @throws std::invalid_argument as psi() does.
+			 */
+			void poloidalField( double r, double z,
+			                    double &bR, double &bZ ) const;
+
+			/**
 			 * Does this point lie ON a filament?
 			 *
 			 * **THIS IS A COINCIDENCE TEST AND NOT A CLEARANCE TEST, AND THE

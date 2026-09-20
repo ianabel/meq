@@ -959,7 +959,7 @@ namespace meq
 		// Catch a misspelt or misplaced table before anything reports a key
 		// missing from a table that is not the one the author meant to write.
 		{
-			std::initializer_list< char const * > const tables = { "mesh", "discretisation", "source", "boundary", "solver", "output", "initialguess", "adaptivity", "coils" };
+			std::initializer_list< char const * > const tables = { "mesh", "discretisation", "source", "boundary", "solver", "output", "initialguess", "adaptivity", "coils", "conductors" };
 			for ( auto const & entry : document.as_table() )
 			{
 				auto matches = [ &entry ]( char const * candidate ) { return entry.first == candidate; };
@@ -1045,6 +1045,71 @@ namespace meq
 				}
 
 				coilOptions.coils.push_back( coil );
+			}
+		}
+
+		// [conductors] -- HOW the blocks above enter the equation.
+		//
+		// READ AFTER [[coils]] BECAUSE IT IS ABOUT THEM, and the refusal below
+		// needs to know whether there are any. A table with no [[coils]] to
+		// act on is refused rather than accepted and ignored: an
+		// accepted-and-ignored key is exactly the failure CLAUDE.md records
+		// twice already -- ConfineToPlasma on the rotating source, and the
+		// reserved profile keys on "mhd" -- and this one would be worse, since
+		// a user who asked for the split and got the meshed route would read a
+		// run that is slower than it should be rather than one that is wrong,
+		// and would have nothing to look at.
+		{
+			Table conductors( document, "conductors", sourceName, false );
+			conductors.rejectUnknownKeys( { "Model", "QuadratureOrder" } );
+
+			std::string const model = conductors.getStringOr( "Model", "meshed" );
+			if ( model == "meshed" )
+				conductorOptions.model = ConductorModel::Meshed;
+			else if ( model == "subtracted" )
+				conductorOptions.model = ConductorModel::Subtracted;
+			else if ( model == "filament" )
+				conductorOptions.model = ConductorModel::Filament;
+			else
+				conductors.fail( "Model", "must be meshed, subtracted or filament, "
+				                 "but is \"" + model + "\". \"meshed\" carries each "
+				                 "[[coils]] rectangle as a domain source and needs the "
+				                 "mesh to resolve it; \"subtracted\" integrates the same "
+				                 "rectangle analytically and solves for psi - psi_c, so "
+				                 "the mesh need not carry it; \"filament\" does the same "
+				                 "with a point filament at each rectangle's centre, "
+				                 "which is a different and cheaper conductor model "
+				                 "rather than the same one computed differently" );
+
+			conductorOptions.quadratureOrder =
+				conductors.getIntegerOr( "QuadratureOrder",
+				                         conductorOptions.quadratureOrder );
+
+			if ( conductorOptions.subtracts() && coilOptions.coils.empty() )
+				conductors.fail( "Model", "= \"" + model + "\" takes the conductors out "
+				                 "of the mesh, and this file describes none: there are "
+				                 "no [[coils]] blocks for it to act on. Written as it "
+				                 "stands the key would be accepted and do nothing" );
+
+			if ( conductorOptions.quadratureOrder != 0 )
+			{
+				if ( conductorOptions.model == ConductorModel::Filament )
+					conductors.fail( "QuadratureOrder", "a filament has no "
+					                 "cross-section to integrate over -- its field is "
+					                 "one closed-form evaluation -- so this key would "
+					                 "be accepted and ignored under Model = "
+					                 "\"filament\"" );
+				if ( conductorOptions.model == ConductorModel::Meshed )
+					conductors.fail( "QuadratureOrder", "this is the quadrature "
+					                 "meq::ConductorField integrates a SUBTRACTED "
+					                 "rectangle's cross-section with, and Model = "
+					                 "\"meshed\" subtracts nothing: the mesh's own "
+					                 "quadrature is what integrates a meshed coil, and "
+					                 "[discretisation] is where that is set" );
+				if ( conductorOptions.quadratureOrder < 2 )
+					conductors.fail( "QuadratureOrder", "must be at least 2 Gauss "
+					                 "points per direction; omit the key for "
+					                 "meq::ConductorField's own default" );
 			}
 		}
 

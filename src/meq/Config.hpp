@@ -690,6 +690,82 @@ namespace meq
 		std::vector< CoilParameters > coils;
 	};
 
+	/**
+	 * `[conductors] Model` -- HOW the `[[coils]]` enter the equation. Three
+	 * values, because there are three things MEQ can do with a conductor and
+	 * not two, and the third one cannot be reached any other way.
+	 *
+	 * **THE DEFAULT IS THE ROUTE THAT HAS ALWAYS WORKED, AND THAT IS A
+	 * REQUIREMENT RATHER THAN A CONVENIENCE.** `COIL-SUBTRACTION-PLAN.md`
+	 * section 0a-pre is a standing constraint on the whole campaign: the meshed
+	 * finite coil never stops working, the split is an OPTION, and a file that
+	 * does not ask for it must be bit-identical to one written before this key
+	 * existed. A key whose default changed the answer would be the thing
+	 * `CLAUDE.md` forbids outright.
+	 *
+	 * **AND IT IS A CHANGE OF REPRESENTATION, NOT OF EQUILIBRIUM, WHICH IS WHAT
+	 * MAKES IT A LEGAL TOML KEY AT ALL.** `Globalisation` and
+	 * `NonlinearOrdering` are withheld because they can report one of two
+	 * discrete solutions 9.4 per cent apart; `Subtracted` solves the same
+	 * continuous problem written differently and must agree with `Meshed` to
+	 * the discretisation. `ConductorSubtraction.cpp`'s meshed-against-
+	 * subtracted case is what holds that claim up, and it is the reason the
+	 * split is exposed where those two are not.
+	 */
+	enum class ConductorModel
+	{
+		/// The rectangle carries a uniform current density and enters as a
+		/// DOMAIN SOURCE on the mesh, through meq::CoilAugmentedSource. The
+		/// mesh must resolve the conductor; `[mesh.generate] CoilSize` is what
+		/// grades it. The default, and the only route that puts the
+		/// conductor's own current inside the interior equation.
+		Meshed,
+		/// The same rectangle, integrated analytically by meq::coilPsi() and
+		/// SUBTRACTED: MEQ solves for `psi_p = psi - psi_c` and the mesh need
+		/// not carry the conductor at all.
+		Subtracted,
+		/// A POINT FILAMENT at each rectangle's centre carrying the same total
+		/// current, subtracted the same way.
+		///
+		/// **THIS ONE HAS NO MESHED FORM AND THAT IS STRUCTURAL.** A point
+		/// source has no finite-element representation as a current density and
+		/// `psi` near it is logarithmic, so subtraction is the only way MEQ can
+		/// carry a filament -- `COIL-SUBTRACTION-PLAN.md` section 4b. It is
+		/// also the cheaper field, one Carlson evaluation per point per
+		/// conductor against a tensor quadrature per rectangle.
+		///
+		/// **AND IT IS A DIFFERENT MACHINE, MEASURED.** Against the rectangle
+		/// on DIII-D's eighteen conductors a filament model is 6.081e-03
+		/// globally and 4.143e-02 inside the conductors, against 6.731e-05 off
+		/// them for the matched model -- a per-cent-level answer near the coils
+		/// and far better away from them. That is a mode to offer and not an
+		/// approximation to hide, which is why it is its own value of this key
+		/// rather than a tolerance on another one.
+		Filament
+	};
+
+	/// `[conductors]` -- the conductor model, and nothing else. Absent is
+	/// `Meshed`, which is what every configuration written before this table
+	/// existed means.
+	struct ConductorConfig
+	{
+		ConductorModel model = ConductorModel::Meshed;
+
+		/// `QuadratureOrder` -- Gauss points per direction per rectangle, or 0
+		/// for meq::ConductorField's own default. Rectangles only; a filament
+		/// has no cross-section to integrate over and the key is refused with
+		/// `Model = "filament"` rather than accepted and ignored, for the
+		/// reason `CLAUDE.md` records under the reserved profile keys.
+		int quadratureOrder = 0;
+
+		/// Does this configuration solve for a REMAINDER rather than for psi?
+		/// The one question every other part of MEQ asks of this table -- the
+		/// warm start's meaning, the output's, and whether the source may be
+		/// augmented with the coils.
+		bool subtracts() const noexcept
+		{ return model != ConductorModel::Meshed; };
+	};
+
 	struct ShapeConfig
 	{
 		ShapeType type = ShapeType::None;
@@ -1413,6 +1489,12 @@ namespace meq
 			/// The `[[coils]]` blocks, in file order. Empty unless the file has
 			/// any, which every fixed-boundary configuration does not.
 			CoilConfig const & getCoils() const noexcept { return coilOptions; };
+
+			/// `[conductors]` -- HOW those blocks enter. Defaults to
+			/// ConductorModel::Meshed, so a file without the table means what
+			/// it meant before the table existed.
+			ConductorConfig const & getConductors() const noexcept
+			{ return conductorOptions; };
 			DiscretisationConfig const & getDiscretisation() const noexcept { return discretisationOptions; };
 			SourceConfig const & getSource() const noexcept { return sourceOptions; };
 			BoundaryConfig const & getBoundary() const noexcept { return boundaryOptions; };
@@ -1434,6 +1516,7 @@ namespace meq
 
 			MeshConfig meshOptions;
 			CoilConfig coilOptions;
+			ConductorConfig conductorOptions;
 			DiscretisationConfig discretisationOptions;
 			SourceConfig sourceOptions;
 			BoundaryConfig boundaryOptions;

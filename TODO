@@ -1126,3 +1126,108 @@ predicting it. FREE-BOUNDARY-PLAN.md section 7.12 is the write-up.
   coefficients are STABLE across cycles and prints the boundary's share of
   eta^2. If a boundary indicator lands, that case fails with a message saying so
   -- which is the intended signal, not a regression.
+
+
+================================================================================
+Half a dozen SERIOUS machine-relevant FIXED-BOUNDARY cases
+Raised 2026-09-19.
+================================================================================
+
+  WHAT IS MISSING, AND IT IS NOT A TEST. MEQ's fixed-boundary examples are
+  either analytic fixtures (soloviev-nstx, miller-curved, the manufactured
+  ladder) or one small hand-written box with a tabulated profile
+  (mhd-rectangle, and coils-rectangle which is that file plus two conductors).
+  Every case with real machine geometry in this tree is FREE boundary -- the
+  half-disc reaching the axis, the DtN coupling, the two borders, the moving
+  plasma edge -- so there is no rung between "a 768-element box" and "the whole
+  free-boundary apparatus". Half a dozen cases on that rung are wanted, and the
+  reason is that several separate questions currently have nowhere to be asked.
+
+  WHAT THEY ARE FOR, IN THE ORDER THE EVIDENCE ASKS FOR THEM.
+
+    * COIL SUBTRACTION HAS NOWHERE TO BE MEASURED. `[conductors] Model` is
+      built and works end to end, and COIL-SUBTRACTION-PLAN.md section 2(a)
+      says what it should buy: on examples/mastu-nke.msh, 1024 of 9361
+      triangles carry a coil attribute and `CoilSize = 0.03` against
+      `Size = 0.30` forces a 10x graded refinement around each -- 1.96x in
+      element count, M-142. NONE of that is reachable from a fixed-boundary
+      file today, because the only fixed-boundary case with conductors is
+      examples/coils-rectangle.toml, whose mesh is a plain Cartesian box that
+      was never graded to its coils. The split there is EXACTLY 1.00x by
+      construction. A case meshed TO its conductors, solved with them and
+      without them, is the measurement.
+
+    * THE PLASMA EDGE CAPS THE ORDER ON EVERY MACHINE CASE WE HAVE.
+      COIL-SUBTRACTION-PLAN.md section 4: `ConstrainPaxisIp` at
+      `alpha_n = 1.2` makes the edge a fractional power and caps the rate at
+      `k <= 1.2` whatever the conductors do, so MAST-U cannot demonstrate the
+      plan's benefit at all. A fixed-boundary case has no moving edge, so a
+      SMOOTH-EDGE machine-shaped problem is where a high-order claim can
+      actually be made. That is a different fixture from the ones above rather
+      than a setting on them.
+
+    * AND THE SUITE'S ONE EXPENSIVE BINARY IS FREE BOUNDARY. FreeBoundaryCoupling
+      is now the whole ctest run -- 1149.60 s and 991.99 s on two runs of one
+      tree, against `naming` at about 350 s -- so anything wanting a machine-
+      sized regression today pays for the free-boundary apparatus whether or
+      not it is what is being tested. A fixed-boundary machine case is cheap by
+      comparison: no exterior coupling, no borders, no support sweep.
+
+  WHAT "SERIOUS" HAS TO MEAN, AND EACH CLAUSE IS THERE BECAUSE ITS ABSENCE HAS
+  ALREADY COST SOMETHING.
+
+    * MESHED TO THE CONDUCTORS. gmsh through tools/mesh/, element edges ON the
+      coil edges. CLAUDE.md and Coils.hpp both record that a cut coil edge
+      costs the convergence rate, and M-141 measured the consequence directly:
+      the first cross-route fixture had unfitted coil edges at +-0.06 against
+      0.94/1.06 and produced rates of -0.92 and +2.73; aligned to +-0.10 it was
+      43x better with clean rates. A machine case that does not align is
+      measuring its own mesh.
+    * REAL PROFILES, tabulated, from a machine rather than invented -- and with
+      an edge that VANISHES smoothly, so the fixed-boundary problem is the one
+      a free-boundary solve converges to rather than a different problem with a
+      jump at Gamma.
+    * A RANGE OF SIZES. Five of MEQ's eight shipped meshes are below 4096
+      elements, which is under upstream's own batched-kernel crossover, so the
+      tree currently cannot say anything about where MEQ sits on that curve.
+      Half a dozen cases spanning 10^3 to 10^5 elements is the point of there
+      being six rather than one.
+    * A RANGE OF SHAPES. At least one with a genuine X-point-like indentation
+      in the fixed boundary, one up-down symmetric (for `[solver]
+      UpDownSymmetry`), one strongly shaped, one nearly circular as the
+      control.
+    * AND EACH ONE SOLVED BOTH WAYS -- conductors meshed and conductors
+      subtracted -- because COIL-SUBTRACTION-PLAN.md section 0a-pre makes the
+      meshed route the SUBTRACTION'S INSTRUMENT rather than its rival. The
+      agreement between the two is the only check that says the split is a
+      change of representation and not of answer.
+
+  WHAT ALREADY EXISTS AND SHOULD BE REUSED RATHER THAN REBUILT.
+  tools/mesh/halfdisc.py is FB-6's generator and already meshes rectangular
+  coils TO their edges from `--coil` arguments in [[coils]] order; `[mesh.generate]`
+  and `meq-run` already make the mesh a build product of the TOML, with the
+  `.meq-mesh` stamp so that editing a coil re-meshes and editing
+  PolynomialDegree does not. What is missing is a fixed-boundary OUTLINE
+  generator -- halfdisc.py draws a semicircle reaching the axis, which is the
+  free-boundary geometry -- so this needs either a `--outline` mode on it or a
+  sibling script taking a boundary curve plus conductors.
+
+  WHAT IS NOT YET DECIDED.
+
+    * WHERE THE BOUNDARY CURVE COMES FROM. A Miller/MXH parameterisation is
+      already in `[boundary.shape]` and would make the outline a handful of
+      numbers in the same file; a traced separatrix from a real equilibrium is
+      more honest and is a file MEQ would have to carry. The first is cheaper
+      and the second is what "machine-relevant" argues for.
+    * WHETHER THESE ARE ctest CASES OR A BENCHMARK DIRECTORY. Six machine-sized
+      solves is minutes, not seconds, and the suite is already dominated by one
+      binary. tests/performance/ is not a ctest for exactly this reason and may
+      be the right home; but then nothing keeps them green, which is how the
+      examples in this tree stayed runnable.
+    * AND WHETHER ANY OF THEM SHOULD CARRY A FILAMENT CONDUCTOR SET.
+      `Model = "filament"` is reachable and is a DIFFERENT machine -- 6.081e-03
+      globally and 4.143e-02 inside the conductors against the rectangles, on
+      DIII-D's eighteen. A filament arm would make the freegs4e comparison
+      like-for-like on both sides of COIL-SUBTRACTION-PLAN.md section 0a's 2x2,
+      and it is the cheapest field to evaluate, so it is a plausible DEFAULT
+      for the large end of the size range rather than only a comparison.

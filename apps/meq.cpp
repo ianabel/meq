@@ -26,6 +26,7 @@
 
 #include "meq/BoundaryShape.hpp"
 #include "meq/Coils.hpp"
+#include "meq/ConductorField.hpp"
 #include "meq/Config.hpp"
 #include "meq/CriticalPoints.hpp"
 #include "meq/Estimator.hpp"
@@ -1151,7 +1152,50 @@ int main( int argc, char **argv )
 	 */
 	std::shared_ptr<meq::Source const> plasmaSource;
 	/// The coils of `[[coils]]`, or null if the file described none.
+	///
+	/// **NULL ALSO WHEN `[conductors] Model` TOOK THEM OUT OF THE MESH**, and
+	/// that is the whole of how the two routes stay apart: a subtracted
+	/// conductor must NOT also be a domain source, or its current is counted
+	/// twice -- once in `F` and once in `psi_c` -- and the run converges to a
+	/// machine carrying double the coil current with every printed diagnostic
+	/// looking as it should. `conductorField` below is non-null in exactly the
+	/// cases this is null for that reason, and never both.
 	std::shared_ptr<meq::CoilSet const> coils;
+	/*
+	 * psi_c, THE ANALYTIC CONDUCTOR FIELD, or null when `[conductors]` did not
+	 * ask for one.
+	 *
+	 * GradShafranovSolver::setConductorField() BORROWS, and makeSolver() builds
+	 * a fresh solver every adaptive cycle, so this has to outlive all of them --
+	 * which is why it is a member here rather than a local of the builder.
+	 *
+	 * IT IS A FIELD AND NOT A SOURCE, which is the distinction the whole split
+	 * rests on: a meq::CoilSet enters `F` and is integrated by the mesh's own
+	 * quadrature, a meq::ConductorField is EVALUATED and never discretised at
+	 * all.
+	 */
+	std::shared_ptr<meq::ConductorField const> conductorField;
+	/*
+	 * THE CONDUCTOR RECTANGLES' GEOMETRY, WHICHEVER ROUTE CARRIED THEM, AND IT
+	 * EXISTS BECAUSE THREE DIAGNOSTICS ARE ABOUT WHERE THE COPPER IS RATHER
+	 * THAN ABOUT HOW IT ENTERS F.
+	 *
+	 * "A plasma has no magnetic axis inside a conductor" is true of the machine
+	 * and not of the discretisation, so the axis screen, checkAxis()'s
+	 * exclusion and the axis-inside-copper warning must all keep working when
+	 * the conductor is subtracted rather than meshed -- psi_c has its own
+	 * O-point in the middle of each rectangle exactly as the meshed source
+	 * does. Reading `coils` for it would silently switch all three off under
+	 * `[conductors]`, which is the shape of defect this campaign is otherwise
+	 * about.
+	 *
+	 * EMPTY UNDER `Model = "filament"`, CORRECTLY: a point has no interior for
+	 * a critical point to be inside of.
+	 *
+	 * Borrowed from whichever of the two above is non-null, both of which
+	 * outlive it.
+	 */
+	meq::CoilSet const *conductorGeometry = nullptr;
 	/*
 	 * psi_ax, CARRIED FORWARD BETWEEN ADAPTIVE CYCLES.
 	 *
@@ -1258,6 +1302,90 @@ int main( int argc, char **argv )
 
 		coils = meq::makeCoilSet( config->getCoils(),
 		                          config->getSource().permeability(), argument );
+
+		/*
+		 * `[conductors] Model` -- AND THE COIL SET IS DROPPED WHEN IT IS TAKEN.
+		 *
+		 * The two routes are exclusive and the exclusion has to be made HERE,
+		 * before the source is wrapped, because the wrapping is what would
+		 * double count. Under the split the conductor's current is carried by
+		 * psi_c and psi_c alone; leaving meq::CoilAugmentedSource in place as
+		 * well would put the same amperes into F a second time, and nothing
+		 * downstream could see it -- the solve converges, the borders close,
+		 * and `coil_current` in the output reports the file's own figure while
+		 * the equilibrium carries twice it.
+		 *
+		 * `coils` is released rather than merely unused, so that every later
+		 * `if ( coils )` in this file -- the source wrapping, the
+		 * inside-the-mesh check, the conductor guess, the critical-point
+		 * screen -- takes the no-coil branch without any of them having to
+		 * learn about this key.
+		 */
+		conductorField = meq::makeConductorField(
+			config->getCoils(), config->getConductors(),
+			config->getSource().permeability(), argument );
+		if ( conductorField )
+			coils.reset();
+
+		conductorGeometry = coils ? coils.get()
+		                  : conductorField ? &conductorField->coils()
+		                                   : nullptr;
+
+		/*
+		 * AND IT SAYS SO, LOUDLY, BEFORE ANYTHING IS SOLVED.
+		 *
+		 * TWO THINGS CHANGE MEANING UNDER THE SPLIT AND NEITHER IS VISIBLE IN
+		 * ANY FILE. The solved field becomes `psi_p = psi - psi_c`, so a stored
+		 * `.gf` written by this run is a REMAINDER and a `.gf` handed to it is
+		 * read as one -- and the format cannot record which, which is
+		 * `COIL-SUBTRACTION-PLAN.md` section 8.3's finding and the whole reason
+		 * CS-6 exists. Until it does, the only thing standing between a user and
+		 * a silently wrong restart is this paragraph on stdout.
+		 *
+		 * THE USER KNOWS WHAT THEY ARE DOING, WHICH IS THE POSITION TAKEN
+		 * DELIBERATELY: the warm start's meaning is allowed to change rather
+		 * than the key being refused alongside a guess. What is not allowed is
+		 * for it to change quietly.
+		 *
+		 * `fflush`, because this is stdout and the exit paths below write to
+		 * stderr: interleaved, a warning about a restart can arrive after the
+		 * error it explains.
+		 */
+		if ( conductorField )
+		{
+			char const *what =
+				config->getConductors().model == meq::ConductorModel::Filament
+				? "point filaments at their centres"
+				: "rectangles carrying a uniform current density";
+
+			std::printf(
+				"MEQ: [conductors] Model = \"%s\": %d conductor%s taken OUT of\n"
+				"     the mesh and evaluated analytically as %s,\n"
+				"     total current %+.6e A. MEQ solves for the REMAINDER\n"
+				"     psi_p = psi - psi_c; the conductors are not a domain\n"
+				"     source on this run and the mesh need not resolve them.\n",
+				config->getConductors().model == meq::ConductorModel::Filament
+					? "filament" : "subtracted",
+				static_cast<int>( conductorField->size() ),
+				conductorField->size() == 1 ? "" : "s",
+				what,
+				conductorField->totalCurrent() );
+
+			if ( config->getInitialGuess().type
+			     == meq::InitialGuessType::GridFunction )
+				std::printf(
+					"MEQ: WARNING: the warm start CHANGES MEANING on this run.\n"
+					"     [initialguess] File is read as psi_p, the REMAINDER,\n"
+					"     and NOT as psi -- because psi_p is the field this run\n"
+					"     solves for. A .gf carries no record of which it holds,\n"
+					"     so a guess written by a run WITHOUT [conductors] is read\n"
+					"     here as though psi_c had already been taken out of it,\n"
+					"     and the solve starts one whole conductor field away from\n"
+					"     where it believes it does. The psi this run WRITES is\n"
+					"     psi_p for the same reason.\n" );
+
+			std::fflush( stdout );
+		}
 
 		if ( config->getSource().isNormalised() )
 		{
@@ -1978,6 +2106,30 @@ int main( int argc, char **argv )
 				 * PlasmaCurrent, and leaving CentreR out leaves the vacuum
 				 * field alone.
 				 */
+				/*
+				 * NULL UNDER `[conductors]`, AND THAT IS THE RIGHT GUESS
+				 * RATHER THAN A GAP.
+				 *
+				 * The vacuum half of this guess IS psi_c -- the same sum of
+				 * meq::coilPsi() over the same rectangles -- and under the
+				 * split psi_c is subtracted out, so what Newton starts from
+				 * has to be a guess at the REMAINDER. Adding the conductors
+				 * here as well would hand it psi_c twice over: once as the
+				 * field the solver subtracts and once inside the guess for
+				 * what is left.
+				 *
+				 * So the elliptical plasma column below is the whole of the
+				 * guess under the split, which is exactly the information the
+				 * conductors could never supply anyway -- Config.hpp records
+				 * that the vacuum field alone converges to the WRONG BRANCH on
+				 * MAST-U, because it says nothing about the core. The split
+				 * removes the half that was carrying the machine's scale and
+				 * leaves the half that selects the branch.
+				 *
+				 * `coils.reset()` above is what makes this true; it is written
+				 * here as well because a reader of this block would otherwise
+				 * have to find that line to know the guess changed.
+				 */
 				meq::CoilSet const *set = coils.get();
 				double const centreR = config->getInitialGuess().centreR;
 				double const centreZ = config->getInitialGuess().centreZ;
@@ -2287,6 +2439,20 @@ int main( int argc, char **argv )
 
 		if ( exterior )
 			fresh->setExteriorCoupling( *exterior );
+
+		/*
+		 * psi_c, AND IT GOES ON EVERY FRESH SOLVER BECAUSE THE MESH CHECK IS
+		 * PER MESH.
+		 *
+		 * setConductorField() refuses a mesh with a node or a vertex ON a
+		 * filament -- COIL-SUBTRACTION-PLAN.md section 7.1, a COINCIDENCE test
+		 * and not a clearance one -- so it has to be re-asked on each adaptive
+		 * cycle's mesh rather than once at setup. It is the refinement that
+		 * introduces new nodes, and a filament sitting exactly on one of them
+		 * is not a thing the coarse mesh can rule out.
+		 */
+		if ( conductorField )
+			fresh->setConductorField( *conductorField );
 
 		fresh->setBoundaryData( zero );
 		fresh->setNewtonControl( config->getSolver().newtonRelativeTolerance,
@@ -2801,7 +2967,9 @@ int main( int argc, char **argv )
 			{
 				if ( point.type != wanted )
 					continue;
-				if ( coils && coils->indexContaining( point.r, point.z ) >= 0 )
+				if ( conductorGeometry
+				     && conductorGeometry->indexContaining( point.r,
+				                                            point.z ) >= 0 )
 					continue;
 				double const score = span >= 0.0 ? point.psi : -point.psi;
 				if ( !found || score > best )
@@ -3695,6 +3863,15 @@ int main( int argc, char **argv )
 			             static_cast<int>( coils->size() ),
 			             coils->size() == 1 ? "" : "s",
 			             coils->totalCurrent() );
+		// The same number under the split, from the field that replaced them,
+		// so the identity a reader checks is printed on both routes and not
+		// only on the one that happens to hold a meq::CoilSet.
+		if ( conductorField )
+			std::printf( "MEQ: %d subtracted conductor%s, total current "
+			             "%+.6e A\n",
+			             static_cast<int>( conductorField->size() ),
+			             conductorField->size() == 1 ? "" : "s",
+			             conductorField->totalCurrent() );
 
 		if ( config->getSource().confinesToPlasma() )
 			std::printf( "MEQ: the plasma support %s: F = 0 wherever the "
@@ -4016,11 +4193,11 @@ int main( int argc, char **argv )
 				// the DIAGNOSTIC, without which every run of such a machine
 				// warns that it found a higher O-point than the one it followed,
 				// correctly and uselessly.
-				if ( coils )
+				if ( conductorGeometry )
 					finder.setExcluded(
-						[ &coils ]( double r, double z )
+						[ conductorGeometry ]( double r, double z )
 						{
-							return coils->indexContaining( r, z ) >= 0;
+							return conductorGeometry->indexContaining( r, z ) >= 0;
 						} );
 
 				double const checkStart = elapsedSince( started );
@@ -4136,11 +4313,11 @@ int main( int argc, char **argv )
 			 * (both finer meshes found the plasma). What can be said is that
 			 * the answer is inside a piece of copper, and said with the number.
 			 */
-			if ( solver && coils && solver->axisWasLocated() )
+			if ( solver && conductorGeometry && solver->axisWasLocated() )
 			{
-				for ( std::size_t i = 0; i < coils->size(); ++i )
+				for ( std::size_t i = 0; i < conductorGeometry->size(); ++i )
 				{
-					meq::Coil const &one = coils->coil( i );
+					meq::Coil const &one = conductorGeometry->coil( i );
 					if ( solver->axisR() < one.rMin()
 					     || solver->axisR() > one.rMax()
 					     || solver->axisZ() < one.zMin()
@@ -4646,6 +4823,66 @@ int main( int argc, char **argv )
 		sampler.sampleComponentWithGradient( field, 1, bZ, outside );
 
 		/*
+		 * AND psi_c IS ADDED BACK HERE, WHICH IS WHERE THE SPLIT'S EXACTNESS
+		 * SURVIVES INTO AN OUTPUT FILE AND WHERE IT DOES NOT.
+		 *
+		 * Under `[conductors]` the solver's field is the REMAINDER psi_p, so
+		 * everything sampled above is a remainder and the physical flux is
+		 * psi_p + psi_c. COIL-SUBTRACTION-PLAN.md section 8.3 is the finding
+		 * that divides the four output formats:
+		 *
+		 *   .nc grid, _surfaces.nc   psi_c is EVALUATED at each node, so the
+		 *                            file carries the physical field exactly
+		 *   .gf, .vtu                both are the field's own coefficients, and
+		 *                            psi_c can only be PROJECTED into the
+		 *                            discrete space -- for a filament that is
+		 *                            not merely inaccurate but impossible,
+		 *                            psi_c being logarithmic at the conductor
+		 *
+		 * So this grid gets the total and the .gf keeps the remainder, which is
+		 * the honest division rather than a gap: a .gf is what a restart reads,
+		 * and a restart under the same [conductors] wants the remainder. What
+		 * it cannot do is SAY so, which is what CS-6 is for and why the driver
+		 * warns on stdout in the meantime.
+		 *
+		 * A NODE OUTSIDE THE DOMAIN IS LEFT ALONE, NaN AND ALL. `outside` is
+		 * NaN and NaN + anything is NaN, so the arithmetic would be harmless --
+		 * but psi_c is defined out there and adding it would turn a node the
+		 * mask calls absent into one carrying a real number, which is precisely
+		 * the "the band looked trustworthy" defect this file records for B.
+		 *
+		 * B GETS ITS OWN CALL RATHER THAN A RELABELLING OF flux(), because the
+		 * grid's first column is on the axis for every half-disc machine and
+		 * q = ( 1/r ) grad_bar psi is 0/0 there. meq::ConductorField
+		 * ::poloidalField() is the one entry point that takes the limit.
+		 */
+		if ( conductorField )
+		{
+			for ( int j = 0; j < sampler.nodesZ(); ++j )
+				for ( int i = 0; i < sampler.nodesR(); ++i )
+				{
+					if ( !sampler.located( i, j ) )
+						continue;
+					// j*nR + i, R fastest: meq::GridSampler's own layout and
+					// the NetCDF file's, taken from the accessor rather than
+					// recomputed, so a change of ordering cannot silently
+					// transpose this addition against the samples above.
+					std::size_t const node =
+						static_cast<std::size_t>( j )
+						*static_cast<std::size_t>( sampler.nodesR() )
+						+ static_cast<std::size_t>( i );
+					double const r = sampler.rAt( i );
+					double const z = sampler.zAt( j );
+					psi[ node ] += conductorField->psi( r, z );
+					double dbR = 0.0;
+					double dbZ = 0.0;
+					conductorField->poloidalField( r, z, dbR, dbZ );
+					bR[ node ] += dbR;
+					bZ[ node ] += dbZ;
+				}
+		}
+
+		/*
 		 * THE ROTATING FIELDS: n_s( R, Z ) AND e phi_0( R, Z ).
 		 *
 		 * With rotation the density is NOT a flux function -- centrifugal force
@@ -4848,6 +5085,33 @@ int main( int argc, char **argv )
 		{
 			writer.attribute( "coils", static_cast<int>( coils->size() ) );
 			writer.attribute( "coil_current", coils->totalCurrent() );
+			writer.attribute( "conductor_model", "meshed" );
+		}
+		/*
+		 * AND THE SUBTRACTED ROUTE WRITES THE SAME TWO PLUS THE MODEL, BECAUSE
+		 * A READER CANNOT INFER EITHER FROM THE GRID.
+		 *
+		 * `conductor_model` is not decoration. A filament set and a rectangle
+		 * set of the same currents are DIFFERENT MACHINES -- 6.081e-03 apart
+		 * globally on DIII-D's eighteen conductors and 4.143e-02 inside them --
+		 * so a file that does not say which one produced it cannot be
+		 * differenced against another, which is the one thing the interchange
+		 * format exists for. COIL-SUBTRACTION-PLAN.md section 4b: it must say
+		 * which model produced an answer.
+		 *
+		 * The GRID still carries the physical psi under either route: the
+		 * sampler reads the solver's total. What changes is the machine, not
+		 * the meaning of the variable.
+		 */
+		if ( conductorField )
+		{
+			writer.attribute( "coils",
+			                  static_cast<int>( conductorField->size() ) );
+			writer.attribute( "coil_current", conductorField->totalCurrent() );
+			writer.attribute( "conductor_model",
+			                  config->getConductors().model
+			                      == meq::ConductorModel::Filament
+			                  ? "filament" : "subtracted" );
 		}
 		if ( config->getSource().confinesToPlasma() )
 			writer.attribute( "plasma_support", "moving (F = 0 where Psi <= 0)" );

@@ -331,3 +331,134 @@ BOOST_AUTO_TEST_CASE( the_refusals_are_the_contract )
 	BOOST_TEST( field.coincides( 1.20, -0.80 ) );
 	BOOST_TEST( !field.coincides( std::stod( "1.2000000000000002" ), -0.80 ) );
 }
+
+// THE AXIS IS THE ONE PLACE q HAS A LIMIT RATHER THAN A VALUE, AND
+// poloidalField() IS THE ONLY ENTRY POINT THAT TAKES IT.
+//
+// flux() is 0/0 at r = 0 and reports NaN deliberately -- a caller who has not
+// thought about the axis learns something from a NaN and nothing from a
+// plausible number. But an output grid on a half-disc machine has its WHOLE
+// FIRST COLUMN on r = 0, so somebody has to take the limit, and a limit taken
+// wrongly is invisible: it would be one column of a 129 x 129 file, finite,
+// smooth against its neighbours, and wrong.
+//
+// THREE THINGS ARE ASSERTED AND THEY FAIL IN DIFFERENT DIRECTIONS.
+BOOST_AUTO_TEST_CASE( the_axis_limit_is_the_limit_and_not_a_substitute )
+{
+	double const a = 1.5;
+	double const h = 0.3;
+	double const current = 1.0e6;
+
+	meq::ConductorField field;
+	field.add( meq::CurrentFilament( a, h, current ) );
+
+	// (1) THE CLOSED FORM. On the axis every point of the ring is the same
+	// distance away, which is the whole reason this case needs no elliptic
+	// integral: q_r -> mu0 I a^2 / ( 2 d^3 ).
+	double const z = -0.4;
+	double const d = std::hypot( a, z - h );
+	double const expected =
+		0.5*meq::vacuumPermeability*current*a*a/( d*d*d );
+
+	double bR = 0.0;
+	double bZ = 0.0;
+	field.poloidalField( 0.0, z, bR, bZ );
+	BOOST_TEST( bZ == expected, boost::test_tools::tolerance( 1.0e-15 ) );
+
+	// (2) B_R IS EXACTLY ZERO AND NOT MERELY SMALL. psi ~ c( z ) r^2 near the
+	// axis, so d_z psi ~ c'( z ) r^2 and q_z ~ c'( z ) r -- the limit is zero
+	// identically, and a tolerance here would accept a limit taken by
+	// evaluating at some small r instead of by algebra.
+	BOOST_TEST( bR == 0.0, boost::test_tools::tolerance( 0.0 ) );
+
+	// (3) AND IT IS THE LIMIT OF THE THING IT REPLACES, which is what says the
+	// two kernels describe one field rather than two. flux() off the axis
+	// approaches it from the side, at a rate that halves the error as r halves
+	// -- so the check is that the approach happens at all and lands where the
+	// closed form says, not that any one r is close.
+	double previous = 0.0;
+	for ( double r : { 1.0e-2, 1.0e-3, 1.0e-4 } )
+	{
+		double qR = 0.0;
+		double qZ = 0.0;
+		field.flux( r, z, qR, qZ );
+		double const error = std::abs( qR - expected );
+		if ( previous > 0.0 )
+			BOOST_TEST( error < previous );
+		previous = error;
+	}
+	BOOST_TEST( previous < 1.0e-6*std::abs( expected ) );
+
+	// AND flux() ITSELF STILL REFUSES TO GUESS, which is the contract the
+	// header states and the reason poloidalField() had to be written at all.
+	double qR = 0.0;
+	double qZ = 0.0;
+	field.flux( 0.0, z, qR, qZ );
+	BOOST_TEST( std::isnan( qR ) );
+	BOOST_TEST( std::isnan( qZ ) );
+}
+
+// A RECTANGLE'S AXIS LIMIT IS THE FILAMENT'S IN THE THIN LIMIT, AND THE
+// QUADRATURE IS WHAT IS BEING CHECKED.
+//
+// meq::coilAxisFlux() integrates a^2/( 2 d^3 ) over the cross-section on a
+// PLAIN tensor Gauss rule -- no panelling and no grading, because the axis is
+// outside every meq::Coil by that class's own refusal and the integrand is
+// analytic there. If that reasoning were wrong the rule would be integrating a
+// near-singular function with no grading, and the symptom would be a value that
+// is merely a few per cent off rather than a failure.
+BOOST_AUTO_TEST_CASE( a_thin_rectangle_reaches_its_filament_on_the_axis )
+{
+	double const a = 1.5;
+	double const h = 0.3;
+	double const current = -7.5e5;
+	double const z = 0.9;
+
+	meq::ConductorField filament;
+	filament.add( meq::CurrentFilament( a, h, current ) );
+	double bR = 0.0;
+	double reference = 0.0;
+	filament.poloidalField( 0.0, z, bR, reference );
+
+	double previous = 0.0;
+	for ( double halfWidth : { 1.0e-1, 1.0e-2, 1.0e-3 } )
+	{
+		meq::ConductorField rectangle;
+		rectangle.add( meq::Coil( a, h, halfWidth, halfWidth, current ) );
+
+		double thisBR = 0.0;
+		double thisBZ = 0.0;
+		rectangle.poloidalField( 0.0, z, thisBR, thisBZ );
+
+		// The rectangle's own B_R on the axis is zero for the same reason the
+		// filament's is, and it is the sum of per-conductor zeros rather than a
+		// cancellation.
+		BOOST_TEST( thisBR == 0.0, boost::test_tools::tolerance( 0.0 ) );
+
+		double const error = std::abs( thisBZ - reference );
+		if ( previous > 0.0 )
+			BOOST_TEST( error < previous );
+		previous = error;
+	}
+	BOOST_TEST( previous < 1.0e-5*std::abs( reference ) );
+
+	// AND IT SUPERPOSES, which is the property the whole split rests on and is
+	// as easy to break on this path as on psi's: a factor applied per conductor
+	// rather than once gives the right answer for one and the wrong one for two.
+	meq::ConductorField pair;
+	pair.add( meq::CurrentFilament( a, h, current ) );
+	pair.add( meq::CurrentFilament( 0.8, -0.2, 3.0e5 ) );
+
+	meq::ConductorField second;
+	second.add( meq::CurrentFilament( 0.8, -0.2, 3.0e5 ) );
+
+	double pairR = 0.0;
+	double pairZ = 0.0;
+	double secondR = 0.0;
+	double secondZ = 0.0;
+	pair.poloidalField( 0.0, z, pairR, pairZ );
+	second.poloidalField( 0.0, z, secondR, secondZ );
+
+	BOOST_TEST( pairZ == reference + secondZ,
+	            boost::test_tools::tolerance( 1.0e-15 ) );
+}
