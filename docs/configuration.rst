@@ -942,10 +942,15 @@ default is what every file written before this table existed already means.
    :math:`\psi_p`. A ``.gf`` carries no record of which it is — the format has
    no slot for one — so a guess written by a run *without* ``[conductors]`` is
    read as though :math:`\psi_c` had already been taken out of it. MEQ warns on
-   standard output whenever both are set. The gridded ``.nc`` output is
-   unaffected and always carries the physical :math:`\psi`, because it is
-   sampled pointwise and :math:`\psi_c` is *evaluated* there rather than
-   represented.
+   standard output whenever both are set.
+
+   **The two sampled outputs are unaffected and always carry the physical**
+   :math:`\psi`. The gridded ``.nc`` adds :math:`\psi_c` back at every located
+   node, and :math:`B` with it; ``<stem>_surfaces.nc`` traces level sets of
+   :math:`\psi_c + \psi_p` and averages over them. Both can, because they
+   *evaluate* :math:`\psi_c` at a point rather than representing it in the
+   finite-element space — which is the same reason the ``.gf`` cannot, and for
+   a filament could not even in principle.
 
 .. note::
 

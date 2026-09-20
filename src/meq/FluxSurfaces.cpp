@@ -6,6 +6,8 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "ConductorField.hpp"
+
 /*
  * The implementation of INVERSION-PLAN.md stages IN-0 and IN-1.
  * FluxSurfaces.hpp carries the argument; this file carries the arithmetic, and
@@ -248,6 +250,14 @@ namespace meq
 				"last solve. It is the default because rooting psi* traces a "
 				"contour one order closer to the true one; Potential::Raw is the "
 				"other door and needs nothing" );
+
+		// COIL-SUBTRACTION-PLAN.md's split, TAKEN RATHER THAN ASKED FOR. A
+		// caller who reached this constructor has a solver, and the solver knows
+		// whether its field is the whole flux or a remainder -- so requiring the
+		// caller to pass it on would be one more thing to forget on a defect
+		// whose failure mode is a smooth plausible curve. Null unless the split
+		// is in use, which is every existing path.
+		setConductorField( solverIn.conductorField() );
 	}
 
 	ContourTracer::ContourTracer( mfem::GridFunction const &potentialIn,
@@ -476,6 +486,20 @@ namespace meq
 		                    []( mfem::Vector const & ) { return 0.0; } );
 	}
 
+	void ContourTracer::setConductorField( ConductorField const *conductorsIn )
+	{
+		conductors = conductorsIn;
+
+		// The scale is a property of the pair, so it cannot survive a change of
+		// conductors. Negative means "not yet taken"; see conductorScale().
+		conductorScaleCache = -1.0;
+	}
+
+	ConductorField const *ContourTracer::conductorField() const
+	{
+		return conductors;
+	}
+
 	void ContourTracer::clearBandExtension()
 	{
 		bandMethod = BandExtension::None;
@@ -521,11 +545,58 @@ namespace meq
 		return weight > 0.0 ? std::sqrt( weight ) : 0.0;
 	}
 
+	double ContourTracer::conductorScale() const
+	{
+		if ( !conductors )
+			return 0.0;
+		if ( conductorScaleCache >= 0.0 )
+			return conductorScaleCache;
+
+		// OVER THE VERTICES, WHICH IS O( vertices ) CARLSON EVALUATIONS ONCE
+		// per tracer rather than per trace: potentialScale() is called at the
+		// head of every traceFrom() and every fitByAngle(), and a family is
+		// dozens of those.
+		double worst = 0.0;
+		for ( int v = 0; v < meshRef.GetNV(); ++v )
+		{
+			double const *x = meshRef.GetVertex( v );
+			double const value = conductors->psi( x[ 0 ], x[ 1 ] );
+			if ( std::isfinite( value ) )
+				worst = std::max( worst, std::abs( value ) );
+		}
+
+		conductorScaleCache = worst;
+		return worst;
+	}
+
 	double ContourTracer::potentialScale() const
 	{
 		double worst = 0.0;
 		for ( int i = 0; i < potentialField.Size(); ++i )
 			worst = std::max( worst, std::abs( potentialField( i ) ) );
+
+		/*
+		 * AND psi_c's OWN SCALE, WHICH IS NOT A REFINEMENT BUT THE DIFFERENCE
+		 * BETWEEN A TOLERANCE AND A TIGHTENING NOBODY ASKED FOR.
+		 *
+		 * This number multiplies `tolerance` to give the corrector its ABSOLUTE
+		 * residual target, and under the split the residual it stops on is one
+		 * of `psi_p + psi_c`. A vacuum region's `psi_p` can be six orders below
+		 * the flux that is actually there -- ConductorSubtraction measures
+		 * 1.4e-08 against a datum of 6.4e-02 -- so scaling by the remainder
+		 * alone asks for a relative accuracy of 1e-12 times that ratio, which is
+		 * below what a discontinuous psi_h can offer anywhere. The corrector
+		 * would not go wrong; it would STALL, accept its best residual, and
+		 * report every point through Contour::stalledCorrections -- a loud
+		 * failure, but a failure of the scale rather than of the field.
+		 *
+		 * The SUM rather than the larger of the two, because it is | psi_p |
+		 * + | psi_c | that bounds | psi_p + psi_c |, and because a bound is what
+		 * a scale wants to be. conductorScale() is exactly zero with no
+		 * conductors, so every existing path keeps the value it had.
+		 */
+		worst += conductorScale();
+
 		return worst > 0.0 ? worst : 1.0;
 	}
 
@@ -898,8 +969,33 @@ namespace meq
 		mfem::Vector q( 2 );
 		fluxField.GetVectorValue( element, eip, q );
 
+		/*
+		 * THE DATUM IS PHYSICAL AND THE LIFT IS OF THE REMAINDER, SO psi_c COMES
+		 * OFF HERE AND GOES BACK ON AT THE SEAM.
+		 *
+		 * setBandExtension()'s `g` keeps the meaning its name has -- psi on the
+		 * TRUE boundary -- so that its default of zero stays right for a
+		 * fixed-boundary problem whether or not the conductors are subtracted.
+		 * What is lifted from it is `q_p`, which reaches psi_p at the point; so
+		 * the base has to be psi_p on Gamma, which is g - psi_c there. Then
+		 * sampleField() adds psi_c at the POINT, and
+		 *
+		 *   g( xbar ) - psi_c( xbar ) + int r q_p . dl + psi_c( x )
+		 *
+		 * is the physical flux exactly, because psi_c( x ) - psi_c( xbar ) IS
+		 * the line integral of r q_c along the same path -- no quadrature, no
+		 * truncation, and the conductor's logarithm never enters the lift.
+		 *
+		 * The FluxTaylor branch above needs none of this: its base is psi_p at
+		 * the foot and its step is q_p, both read inside the element, so the
+		 * seam's psi_c( x ) is the whole of the conductors' contribution there.
+		 */
+		double const datum = conductors
+			? bandDatum( xbar ) - conductors->psi( xbar( 0 ), xbar( 1 ) )
+			: bandDatum( xbar );
+
 		sample.ip = eip;
-		sample.psi = bandDatum( xbar ) + lift;
+		sample.psi = datum + lift;
 		sample.qR = q( 0 );
 		sample.qZ = q( 1 );
 		return true;
@@ -911,6 +1007,34 @@ namespace meq
 		// THE SEAM. Everything in this file that wants psi or q at a physical
 		// point comes through here, and the band of IN-0's second half is
 		// answered here and nowhere else.
+		//
+		// AND COIL-SUBTRACTION-PLAN.md's SPLIT IS ANSWERED HERE TOO, FOR THE
+		// SAME REASON AND AT THE SAME PLACE. Under it the two fields hold the
+		// REMAINDER and the physical flux is psi_p + psi_c, so a contour of what
+		// the caller asked for is a level set of the sum. Adding it once here
+		// rather than at each of the four callers is what makes a new entry
+		// point inherit it: see setConductorField() for why getting this wrong
+		// returns a plausible curve rather than an error.
+		auto addConductors = [ & ]( FieldSample &into )
+		{
+			if ( !conductors )
+				return;
+
+			into.psi += conductors->psi( r, z );
+
+			// THROUGH poloidalField() AND NOT flux(), WHICH IS THE AXIS. q is
+			// ( 1/r ) grad_bar( psi ) and is 0/0 on r = 0, where flux() returns
+			// NaN deliberately; poloidalField() is the entry point that takes
+			// the closed-form limit, and B_R = -q_z, B_Z = +q_r inverts to what
+			// is wanted here. Away from the axis the two are the same numbers
+			// through two sign flips, so nothing off it moves by a bit.
+			double bR = 0.0;
+			double bZ = 0.0;
+			conductors->poloidalField( r, z, bR, bZ );
+			into.qR += bZ;
+			into.qZ += -bR;
+		};
+
 		auto inElement = [ & ]( int element, mfem::IntegrationPoint const &ip )
 		{
 			mfem::Vector value( 2 );
@@ -934,6 +1058,7 @@ namespace meq
 		if ( locate( r, z, hint, element, ip, fallbacks, !band ) )
 		{
 			inElement( element, ip );
+			addConductors( sample );
 			return true;
 		}
 
@@ -943,6 +1068,7 @@ namespace meq
 			if ( extendField( r, z, extendedSample ) )
 			{
 				sample = extendedSample;
+				addConductors( sample );
 				return true;
 			}
 
@@ -952,6 +1078,7 @@ namespace meq
 			if ( locate( r, z, hint, element, ip, fallbacks, true ) )
 			{
 				inElement( element, ip );
+				addConductors( sample );
 				return true;
 			}
 		}
@@ -1149,6 +1276,13 @@ namespace meq
 			}
 		}
 
+		// THE REMAINDER, DELIBERATELY, AND UNDER THE SPLIT TOO. What this
+		// measures is the DG discontinuity of psi_h across a face, and psi_c is
+		// an analytic function of position: it takes the same value on both
+		// sides and cancels out of the difference exactly. Adding it would cost
+		// two Carlson evaluations per face crossing to subtract two equal
+		// numbers, and would put a cancellation of large quantities in front of
+		// a jump this project measures down to 6.8e-10.
 		double const a = potentialField.GetValue( loElement, loIp );
 		double const b = potentialField.GetValue( hiElement, hiIp );
 		return std::abs( a - b );

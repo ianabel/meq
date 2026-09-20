@@ -1021,6 +1021,18 @@ namespace meq
 			 *                       function of position. Defaults to zero, which
 			 *                       is MEQ's fixed-boundary problem -- Gamma IS
 			 *                       the level set psi = 0.
+			 *
+			 *                       IT IS THE PHYSICAL DATUM, NOT THE SOLVER'S.
+			 *                       Under COIL-SUBTRACTION-PLAN.md's split
+			 *                       GradShafranovSolver::setBoundaryData() is
+			 *                       given psi|_Gamma - psi_c|_Gamma, because the
+			 *                       solved field is the remainder; this one keeps
+			 *                       the meaning its name has and extendField()
+			 *                       subtracts psi_c at the foot itself. So the
+			 *                       default stays correct for a fixed-boundary
+			 *                       problem whether or not the conductors are
+			 *                       subtracted, which is the whole reason the two
+			 *                       conventions are allowed to differ.
 			 * @param reach          how far outside Gamma_h a point may sit and
 			 *                       still be answered, as a multiple of its
 			 *                       nearest face's own length. Default 2.
@@ -1076,6 +1088,37 @@ namespace meq
 			/// that the marker named the right attribute wants this rather than
 			/// the mesh's own boundary count.
 			std::size_t bandFaceCount() const;
+
+			/**
+			 * `psi_c` for `COIL-SUBTRACTION-PLAN.md`'s split, or null.
+			 *
+			 * **A FLUX SURFACE IS A LEVEL SET OF THE PHYSICAL FLUX AND THE
+			 * SOLVER ONLY HAS THE REMAINDER.** Under the split `potentialField`
+			 * is `psi_p` and `fluxField` is `q_p`, while the surface the caller
+			 * asked for is a component of `{ psi_p + psi_c = level }` and the
+			 * tangent that walks along it comes from `q_p + q_c`. Tracing the
+			 * remainder returns a smooth closed curve that is not a flux
+			 * surface — and every average taken over it, `V'`, `q`, the metric,
+			 * is then an average over the wrong curve with nothing in its own
+			 * output saying so.
+			 *
+			 * **IT IS SET IN ONE PLACE AND READ IN ONE PLACE.** The solver
+			 * constructor takes it from GradShafranovSolver::conductorField()
+			 * automatically, so the ordinary caller never touches this; the
+			 * bare-field constructor cannot know, which is why the setter
+			 * exists. `sampleField()` — the seam this class already documents
+			 * as the only place `psi` and `q` are read at a physical point — is
+			 * where the shift is added, so a new entry point inherits it.
+			 *
+			 * Null — the default — shifts by exactly zero, so every existing
+			 * path is bit-identical.
+			 *
+			 * @param conductorsIn borrowed, and must outlive the tracer.
+			 */
+			void setConductorField( ConductorField const *conductorsIn );
+
+			/// The conductors of setConductorField(), or nullptr.
+			ConductorField const *conductorField() const;
 
 		private:
 			/// trace(), given the element the start point is in. traceFromAxis()
@@ -1203,8 +1246,20 @@ namespace meq
 			double elementSize( int element ) const;
 
 			/// The scale | psi_h | is measured against by the corrector's
-			/// stopping rule: the largest | psi_h | over the potential's dofs.
+			/// stopping rule: the largest | psi_h | over the potential's dofs,
+			/// PLUS conductorScale() when the split is in use — because what the
+			/// corrector drives to zero is then a residual of `psi_p + psi_c`
+			/// and a scale taken from the remainder alone can be arbitrarily
+			/// smaller than the field it is scaling. Exactly the old value with
+			/// no conductors, conductorScale() being zero there.
 			double potentialScale() const;
+
+			/// max | psi_c | over the mesh's VERTICES, cached, zero without
+			/// conductors. Vertices rather than quadrature points because this
+			/// is a scale and not an integral, and because `psi_c` is unbounded
+			/// at a filament — a vertex cannot coincide with one, that being
+			/// what GradShafranovSolver::setConductorField() refuses.
+			double conductorScale() const;
 
 			/// Bisect along the segment for the point where the located element
 			/// changes, and return the disagreement of psi_h across it. Zero if
@@ -1237,6 +1292,13 @@ namespace meq
 			mfem::PositionFunction bandDatum;
 			double bandReach = 2.0;
 			int bandLineOrder = -1;
+
+			/// COIL-SUBTRACTION-PLAN.md's split; see setConductorField().
+			ConductorField const *conductors = nullptr;
+
+			/// conductorScale()'s cache. Negative means not yet taken, which is
+			/// what setConductorField() restores.
+			mutable double conductorScaleCache = -1.0;
 	};
 
 	/**

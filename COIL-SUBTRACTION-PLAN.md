@@ -303,7 +303,7 @@ must.
 | **CS-1b** | the same with a quadrature rule around it, which is the rectangle. **BUILT** — `add( Coil const & )` beside `add( CurrentFilament const & )`, summing through `meq::CoilSet`. **`coincides()` stays FILAMENT-ONLY**, which is a contract and not an omission: `meq::coilPsi()` is *"Valid EVERYWHERE, including inside the coil"*, so a rectangle has no line singularity for a mesh point to land on and refusing one would reject the ordinary configuration. The quadrature order forwards, which is what §7.2's CS-5 replacement needs |
 | **CS-2** | the split on a FIXED-boundary case with coils, where nothing else moves. **BUILT AND GREEN**, and the acceptance is an IDENTITY rather than a rate — §7.4 |
 | **CS-3** | the Dirichlet datum and the DtN coupling. **BUILT AND GREEN** — §10. Two halves that had to land together: `prepare()` transfers `g − psi_c` inward, and `transmissionConstraint()` ADDS the subtracted conductors' moment on Gamma where FB-7's is subtracted. The refusal in `setConductorField()` is lifted and replaced by a GEOMETRIC one — a subtracted conductor must lie strictly INSIDE Gamma, the mirror image of `setExteriorConductors()`' own precondition |
-| **CS-4** | every consumer of `psi`, with a test per consumer that the total is read. **TRANCHE ONE DONE** — the critical-point finder, the element fill, `peakAt`, the source and its Jacobian, the limiter search and value. **AND THE `.nc` GRID**, which §8.3 says is one of the two formats that CAN keep `psi_c` exact: the driver adds it back at every located node, and `B` with it through `meq::ConductorField::poloidalField()` — the one entry point that takes the axis limit, where `q = ( 1/r ) grad_bar psi` is `0/0` and a half-disc machine's whole first grid column sits. What is left is `_surfaces.nc` and the tracer |
+| **CS-4** | every consumer of `psi`, with a test per consumer that the total is read. **DONE** — the critical-point finder, the element fill, `peakAt`, the source and its Jacobian, the limiter search and value. **AND THE `.nc` GRID**, which §8.3 says is one of the two formats that CAN keep `psi_c` exact: the driver adds it back at every located node, and `B` with it through `meq::ConductorField::poloidalField()` — the one entry point that takes the axis limit, where `q = ( 1/r ) grad_bar psi` is `0/0` and a half-disc machine's whole first grid column sits. **AND TRANCHE TWO CLOSES IT** — `meq::ContourTracer` takes the solver's conductors in its constructor and shifts at its own seam, so `_surfaces.nc`, the flux-surface averages and the `(Psi, theta)` family are level sets of the physical flux. §12 |
 | **CS-T** | **`[conductors] Model`, the key that makes any of this reachable from a file.** **BUILT** — §11. `"meshed"` (the default, unchanged), `"subtracted"`, `"filament"`, plus `QuadratureOrder` for the rectangles. The driver drops its `meq::CoilSet` when the split is taken, because the double count is the failure with no symptom |
 | **CS-6** | **a restart format that self-describes.** §8.3: a `.gf` cannot say whether it holds `psi` or `psi − psi_c`, and a flag would not be enough because a remainder is only meaningful with the conductors it is a remainder from. NetCDF is the vehicle MEQ already has — §9 |
 | **CS-5** | re-take M-111 with the conductor models matched. **[M-139](MEASUREMENTS.md#m-139) partly kills this as written** — the benchmark cannot resolve MEQ below about 7e-04 whatever either code does, so it cannot be the acceptance for a change whose whole claim is that the conductors are resolved EXACTLY. **The replacement is MEQ's own**: an expensive quadrature-based reference, §7 |
@@ -979,3 +979,64 @@ built **around** its conductors, and this tree has no such case on a fixed
 boundary. `TODO` carries that as its own entry: half a dozen serious
 machine-relevant fixed-boundary cases, meshed to their conductors, is what turns
 this key into a measurement.
+
+---
+
+## 12. CS-4 tranche two: the tracer, and the curve that closed cleanly
+
+**THE LAST PLACE THE SPLIT COULD PRODUCE A WRONG ANSWER RATHER THAN A REFUSAL.**
+`meq::ContourTracer` roots the field it is handed, so under `[conductors]` it
+rooted `psi_p` — and a level set of the remainder is a smooth closed curve that
+is not a flux surface. Everything downstream inherited it: `V'`, the safety
+factor, the metric, `_surfaces.nc`'s every column, the `(Ψ, θ)` family, all
+computed correctly over the wrong curve.
+
+**IT HAD NO SYMPTOM, AND THE MEASUREMENT IS THAT RATHER THAN THE FIX.**
+→ **[M-146](MEASUREMENTS.md#m-146)**. Asked for *"the surface through this
+point"*, the conductor-blind tracer returns **89 points, closed**, at the same
+corrector tolerance as the real one, with an ordinary turning number and no
+stalled corrections — and the physical flux varies by **4.19e-02** along it
+against a level of 8.39e-02. Half the level, in a file whose only per-node mask
+is about the band.
+
+### 12.1 One seam, because the class already had one
+
+`sampleField()` is documented in `FluxSurfaces.hpp` as *"THE SEAM. The only
+place psi and q are read at a physical point"* — written for IN-0's band, and it
+paid for itself a second time here. The shift is one addition there and the
+four public entry points, `meq::surfaceAverages`, `meq::extractFluxSurfaces` and
+`AngleParametrisation` all inherit it without an edit each. **That is §8.5's
+argument arriving at its second customer**: the alternative was one shift per
+consumer on a defect whose failure mode is a plausible curve.
+
+**THE CONSTRUCTOR TAKES THE CONDUCTORS RATHER THAN ASKING FOR THEM.** A caller
+holding a `GradShafranovSolver` is holding something that knows whether its
+field is the whole flux or a remainder, so `ContourTracer( solver )` reads
+`solver.conductorField()` itself and `apps/meq.cpp` needed **no edit at all**.
+The bare-field constructor cannot know, which is the only reason
+`setConductorField()` is public.
+
+### 12.2 Three details that are not the obvious ones
+
+| | |
+|---|---|
+| **`q_c` comes through `poloidalField()`, not `flux()`** | `q = ( 1/r ) grad_bar psi` is `0/0` on `r = 0`, where `flux()` returns NaN deliberately. `poloidalField()` is the entry point that takes the closed-form limit, and `B_R = −q_z`, `B_Z = +q_r` inverts to what the sample wants. Off the axis the two are the same numbers through two sign flips, so nothing there moves by a bit — but a half-disc machine's contour can reach `r = 0` and a NaN would end the trace with `LeftMesh` |
+| **`faceJump()` keeps reading the REMAINDER, deliberately** | it measures the DG discontinuity of `psi_h` across a face, and `psi_c` is analytic: it takes the same value on both sides and cancels exactly. Adding it would cost two Carlson evaluations per face crossing to subtract two equal numbers, in front of a jump this project measures down to 6.8e-10 |
+| **the band datum is PHYSICAL and the lift is of the remainder** | `setBandExtension()`'s `g` keeps the meaning its name has, so its default of zero stays right for a fixed-boundary problem either way. `extendField()` subtracts `psi_c` at the foot and the seam adds it at the point, and `psi_c( x ) − psi_c( xbar )` **is** the line integral of `r q_c` along that path — exactly, no quadrature, and the conductor's logarithm never enters the lift |
+
+### 12.3 And the corrector's scale had to move with it
+
+`potentialScale()` multiplies `tolerance` to give an **absolute** residual
+target, and the residual the corrector now stops on is one of `psi_p + psi_c`.
+A vacuum remainder can sit six orders below the flux that is physically there —
+§10 measures `max | psi_p |` at 1.4e-08 against a datum of 6.4e-02 on Γ — so
+scaling by the remainder alone asks for a relative accuracy below anything a
+discontinuous `psi_h` can offer anywhere.
+
+**It would not give a wrong answer; it would stall every point and say so.**
+That is the milder failure, and it is still a failure of the SCALE rather than
+of the field, which is the kind that gets diagnosed as the tracer being broken.
+`conductorScale()` is `max | psi_c |` over the mesh's **vertices**, cached per
+tracer, and it is added: `| psi_p | + | psi_c |` bounds `| psi_p + psi_c |`, and
+a bound is what a scale wants to be. Exactly zero without conductors, so every
+existing path keeps the value it had.

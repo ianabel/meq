@@ -38,8 +38,11 @@
 #include "meq/ExteriorDtN.hpp"
 #include "meq/Profiles.hpp"
 #include "meq/Source.hpp"
+#include "meq/CriticalPoints.hpp"
 #include "meq/FieldViews.hpp"
+#include "meq/FluxSurfaces.hpp"
 #include "meq/GradShafranov.hpp"
+#include "meq/SurfaceAverage.hpp"
 
 namespace
 {
@@ -680,6 +683,206 @@ BOOST_AUTO_TEST_CASE( aNormalisedSourceRunsUnderTheSplitAndReportsThePhysicalAxi
 
 	BOOST_TEST( std::fabs( reported - peakTotal ) < 1.0e-6,
 	            "psi_ax is not the peak of the PHYSICAL flux" );
+}
+
+// CS-4 TRANCHE TWO: A FLUX SURFACE IS A LEVEL SET OF THE TOTAL, AND TRACING
+// THE REMAINDER RETURNS A PERFECTLY GOOD CURVE THAT IS NOT ONE.
+//
+// This is the failure the stage exists to close and it has no symptom of its
+// own. meq::ContourTracer roots the field it was given, so under the split it
+// would root psi_p -- converge, close, report a small corrector residual and a
+// clean turning number, and hand meq::surfaceAverages a curve that is not a
+// flux surface. V', q, the metric and every column of _surfaces.nc would then
+// be an average over the wrong curve, with nothing in the file saying so.
+//
+// THE TWO COLUMNS ARE THE WHOLE CASE. Along the traced contour:
+//
+//     spread of psi_p + psi_c    must be at the corrector's own tolerance
+//     spread of psi_p alone      must be LARGE, or the case cannot tell them
+//                                apart and proves nothing
+//
+// and the second is the control in exactly the sense CS-2's harmonic-extension
+// arm is: it is what the answer would look like if the shift were absent.
+//
+// The evaluation is INDEPENDENT of the seam under test. A second tracer is
+// built on the same two GridFunctions through the bare-field constructor, which
+// cannot know about conductors, so it returns psi_p; the test adds psi_c itself
+// from meq::ConductorField. What is shared is the element walk, which is not
+// what changed.
+BOOST_AUTO_TEST_CASE( theTracedSurfaceIsALevelSetOfTheTotalAndNotTheRemainder )
+{
+	meq::ConductorField const conductors = insideFilament();
+
+	mfem::Mesh mesh = makeBox( 24 );
+	auto pPrime = std::make_shared< meq::ConstantProfile const >( 0.45 );
+	auto ggPrime = std::make_shared< meq::ConstantProfile const >( 0.30 );
+	meq::NormalisedMHDSource source( pPrime, ggPrime, 1.0, 1.0 );
+
+	// The PHYSICAL flux is zero on the box boundary; the solver subtracts
+	// psi_c|_Gamma itself. Same configuration as the case above.
+	mfem::ConstantCoefficient datum( 0.0 );
+	mfem::FunctionCoefficient guess(
+		[]( mfem::Vector const &x )
+		{
+			return 0.30*std::sin( M_PI*( x( 0 ) - 0.6 )/0.8 )
+			       *std::sin( M_PI*( x( 1 ) + 0.4 )/0.8 );
+		} );
+
+	meq::GradShafranovSolver solver( mesh, 2 );
+	solver.setBoundaryData( datum );
+	solver.setInitialGuess( guess );
+	solver.setConductorField( conductors );
+	solver.setSource( source, 0.30 );
+	solver.solve();
+	solver.postProcess();
+
+	// THE TRACER TAKES THE CONDUCTORS FROM THE SOLVER AND THE CALLER NEVER
+	// ASKS. That is the point of doing it in the constructor: apps/meq.cpp
+	// builds its tracer from the solver and needed no edit at all.
+	meq::ContourTracer const tracer( solver );
+	BOOST_TEST_REQUIRE( tracer.conductorField() == &conductors );
+
+	// The control tracer: the same two fields through the door that cannot
+	// know about a split, so it answers psi_p and q_p.
+	meq::ContourTracer const bare( solver.postProcessedPotential(),
+	                               solver.postProcessedFlux() );
+	BOOST_TEST_REQUIRE( bare.conductorField() == nullptr );
+
+	// THE SEAM IDENTITY, AT ZERO TOLERANCE, BEFORE ANY TRACING. Whatever the
+	// geometry turns out to be, sampleAt() must be the bare answer plus psi_c
+	// at that point and nothing else -- so a failure of the case below is a
+	// failure of the tracing and not of the shift.
+	double worstSeam = 0.0;
+	for ( int i = 0; i < 7; ++i )
+		for ( int j = 0; j < 7; ++j )
+		{
+			double const r = 0.70 + 0.10*i;
+			double const z = -0.30 + 0.10*j;
+
+			double psiTotal = 0.0, qRTotal = 0.0, qZTotal = 0.0;
+			double psiBare = 0.0, qRBare = 0.0, qZBare = 0.0;
+			if ( !tracer.sampleAt( r, z, psiTotal, qRTotal, qZTotal ) )
+				continue;
+			BOOST_TEST_REQUIRE( bare.sampleAt( r, z, psiBare, qRBare, qZBare ) );
+
+			double bR = 0.0, bZ = 0.0;
+			conductors.poloidalField( r, z, bR, bZ );
+
+			worstSeam = std::max( worstSeam,
+				std::fabs( psiTotal - ( psiBare + conductors.psi( r, z ) ) ) );
+			worstSeam = std::max( worstSeam,
+			                      std::fabs( qRTotal - ( qRBare + bZ ) ) );
+			worstSeam = std::max( worstSeam,
+			                      std::fabs( qZTotal - ( qZBare - bR ) ) );
+		}
+
+	/*
+	 * THE LEVEL IS READ OFF THE FIELD RATHER THAN CHOSEN, because what value
+	 * the physical flux takes at a given point is a property of this solve and
+	 * not something a test may assume. The start point is on the far side of
+	 * the box from the filament, so the contour through it encloses both the
+	 * plasma's own maximum and the conductor.
+	 */
+	double level = 0.0, qRAt = 0.0, qZAt = 0.0;
+	BOOST_TEST_REQUIRE( tracer.sampleAt( 0.78, 0.00, level, qRAt, qZAt ) );
+
+	meq::Contour const contour = tracer.trace( level, 0.78, 0.00 );
+
+	double worstTotal = 0.0;
+	double lowRemainder = std::numeric_limits< double >::infinity();
+	double highRemainder = -std::numeric_limits< double >::infinity();
+
+	for ( std::size_t i = 0; i < contour.points.size(); ++i )
+	{
+		meq::ContourPoint const &point = contour.points[ i ];
+
+		double psiBare = 0.0, qR = 0.0, qZ = 0.0;
+		BOOST_TEST_REQUIRE( bare.sampleAt( point.r, point.z, psiBare, qR, qZ ) );
+
+		double const total = psiBare + conductors.psi( point.r, point.z );
+		worstTotal = std::max( worstTotal, std::fabs( total - level ) );
+		lowRemainder = std::min( lowRemainder, psiBare );
+		highRemainder = std::max( highRemainder, psiBare );
+	}
+
+	double const spreadRemainder = highRemainder - lowRemainder;
+
+	/*
+	 * THE FALSIFYING ARM, AND IT IS THE CURVE THIS STAGE REPLACES RATHER THAN
+	 * AN ARTIFICIAL ONE.
+	 *
+	 * Ask the conductor-blind tracer for "the surface through ( 0.78, 0 )" --
+	 * which is the trace of psi_p at the value psi_p takes there, and is
+	 * exactly what apps/meq.cpp wrote into _surfaces.nc before this change.
+	 * It closes, it reports a corrector residual at the same tolerance, and
+	 * nothing about it says it is wrong. What says so is the PHYSICAL flux
+	 * along it, measured here and reported beside the real surface's.
+	 */
+	double psiAtStart = 0.0, qRStart = 0.0, qZStart = 0.0;
+	BOOST_TEST_REQUIRE( bare.sampleAt( 0.78, 0.00, psiAtStart, qRStart,
+	                                   qZStart ) );
+	meq::Contour const blind = bare.trace( psiAtStart, 0.78, 0.00 );
+
+	double lowBlind = std::numeric_limits< double >::infinity();
+	double highBlind = -std::numeric_limits< double >::infinity();
+	for ( std::size_t i = 0; i < blind.points.size(); ++i )
+	{
+		meq::ContourPoint const &point = blind.points[ i ];
+
+		double psiBare = 0.0, qR = 0.0, qZ = 0.0;
+		BOOST_TEST_REQUIRE( bare.sampleAt( point.r, point.z, psiBare, qR,
+		                                   qZ ) );
+
+		double const total = psiBare + conductors.psi( point.r, point.z );
+		lowBlind = std::min( lowBlind, total );
+		highBlind = std::max( highBlind, total );
+	}
+	double const spreadBlind = blind.points.empty()
+		? 0.0 : highBlind - lowBlind;
+
+	std::printf( "\n  CS-4: the traced surface under the split\n" );
+	std::printf( "    seam, sampleAt against psi_p + psi_c    %11.4e   (exact)\n",
+	             worstSeam );
+	std::printf( "    level traced                            %11.4e\n", level );
+	std::printf( "    points %zu, closed %d, corrector target %11.4e\n",
+	             contour.points.size(), contour.closed() ? 1 : 0,
+	             contour.correctorTarget );
+	std::printf( "    worst | psi_p + psi_c - level |         %11.4e   <- the "
+	             "surface\n", worstTotal );
+	std::printf( "    spread of psi_p alone along it          %11.4e   <- what "
+	             "it is NOT a surface of\n", spreadRemainder );
+	std::printf( "    the conductor-blind curve: %zu points, closed %d\n",
+	             blind.points.size(), blind.closed() ? 1 : 0 );
+	std::printf( "    spread of psi_p + psi_c along THAT      %11.4e   <- the "
+	             "defect, had it stood\n", spreadBlind );
+
+	BOOST_TEST( worstSeam == 0.0,
+	            "sampleAt() is not exactly the solved field plus psi_c, so the "
+	            "shift is being applied somewhere other than at the seam" );
+
+	BOOST_TEST_REQUIRE( contour.points.size() > 20u );
+	BOOST_TEST( contour.closed(),
+	            "the contour did not close, so this case is measuring a trace "
+	            "that failed rather than the field it traced" );
+
+	// THE CONTROL FIRST: without a wide separation the assertion below is
+	// empty, because psi_p would then be nearly constant on this curve anyway.
+	BOOST_TEST( spreadRemainder > 1.0e-3,
+	            "psi_p barely varies along the traced contour, so this case "
+	            "cannot tell a level set of the total from one of the remainder" );
+
+	BOOST_TEST( worstTotal < 1.0e-4*spreadRemainder,
+	            "the traced curve is not a level set of psi_p + psi_c, which is "
+	            "what a flux surface is under COIL-SUBTRACTION-PLAN.md's split" );
+
+	// AND THE ARM THAT SAYS THE DEFECT WAS REAL. A curve that closed cleanly
+	// on the remainder carries a physical flux that is not constant along it
+	// at all, by four orders or more over what the real surface manages.
+	BOOST_TEST_REQUIRE( blind.points.size() > 20u );
+	BOOST_TEST( spreadBlind > 1.0e4*worstTotal,
+	            "the conductor-blind curve is very nearly a flux surface after "
+	            "all, so this fixture does not exhibit the defect the shift was "
+	            "added to close and the case above proves nothing" );
 }
 
 // psi_c IS EXACTLY ZERO WHEN NO CONDUCTOR FIELD IS SET, which is what lets

@@ -338,6 +338,17 @@ flux-surface average, and MEQ refuses rather than inventing one. A failure there
 is reported on standard error and does not change the exit code: the equilibrium
 has already been written and is unaffected.
 
+**Under** ``[conductors] Model`` **these are surfaces of the physical flux, not
+of the solved remainder.** A subtracting model leaves the solver holding
+:math:`\psi_p`, and a flux surface is a level set of :math:`\psi_c + \psi_p`;
+the tracer evaluates :math:`\psi_c` in closed form at each point it visits, so
+the surfaces, :math:`V'`, the safety factor and the metric are all quantities of
+the machine rather than of the remainder. The file records which conductor model
+produced it in its ``conductor_model`` attribute, beside ``coils`` and
+``coil_current``, for the same reason the gridded format does: a filament set and
+a rectangle set of the same currents are different machines, and two files that
+do not say which cannot be differenced.
+
 The layout is ``flux × theta`` with ``theta`` fastest, which is C row-major and
 the same convention the gridded format uses:
 

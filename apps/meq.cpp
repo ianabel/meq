@@ -5433,6 +5433,29 @@ int main( int argc, char **argv )
 				surfaces.attribute( "polynomial_degree",
 				                    config->getDiscretisation().polynomialDegree );
 				surfaces.attribute( "potential", "post-processed" );
+
+				/*
+				 * WHICH MACHINE, FOR THE SAME REASON THE GRID SAYS SO, AND ONE
+				 * MORE THAT IS THIS FILE'S OWN.
+				 *
+				 * The surfaces are level sets of the PHYSICAL flux under either
+				 * route -- meq::ContourTracer takes the solver's conductors and
+				 * shifts at its seam -- so, exactly as for the grid, what
+				 * changes between the models is the machine and not the meaning
+				 * of a variable. COIL-SUBTRACTION-PLAN.md section 4b: a file must
+				 * say which model produced it.
+				 */
+				if ( conductorField )
+				{
+					surfaces.attribute( "coils",
+						static_cast<int>( conductorField->size() ) );
+					surfaces.attribute( "coil_current",
+					                    conductorField->totalCurrent() );
+					surfaces.attribute( "conductor_model",
+						config->getConductors().model
+							== meq::ConductorModel::Filament
+						? "filament" : "subtracted" );
+				}
 				surfaces.attribute( "band_extension",
 				                    gammaHMarker && path ? "transfer lift"
 				                                         : "none (fitted)" );

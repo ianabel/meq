@@ -5925,3 +5925,58 @@ has nodes millimetres from each filament. A real machine has its conductors in a
 vacuum region outside the plasma, where only the last two rows of that table are
 reachable. **This fixture is the worst case for a filament model and not a
 typical one.**
+
+---
+
+### M-146
+
+**THE FLUX SURFACES UNDER THE SPLIT, AND THE CURVE THAT WAS BEING WRITTEN
+INSTEAD.** `COIL-SUBTRACTION-PLAN.md` CS-4's second tranche: `meq::ContourTracer`
+roots whatever field it is handed, so under `[conductors]` it rooted `psi_p` and
+`_surfaces.nc` carried level sets of the remainder. From
+`tests/convergence/ConductorSubtraction.cpp`,
+`theTracedSurfaceIsALevelSetOfTheTotalAndNotTheRemainder` — a filament of
+2.5e5 A inside a 24 × 24 box at `k = 2` with a normalised MHD source, one solve,
+two traces:
+
+| | |
+|---|---|
+| the level traced | 8.3926e-02 |
+| **worst `\| psi_p + psi_c − level \|` on the traced contour** | **2.6906e-13** |
+| the corrector's own target, `tolerance × potentialScale()` | 2.9546e-13 |
+| spread of `psi_p` alone along that contour | 2.9140e-02 |
+| **spread of `psi_p + psi_c` along the conductor-BLIND contour** | **4.1870e-02** |
+| `sampleAt()` against `psi_p( r, z ) + psi_c( r, z )`, 49 points | **0.0000e+00** |
+
+**THE SURFACE IS A SURFACE TO THE CORRECTOR'S OWN TOLERANCE AND NOT BETTER,
+WHICH IS THE RIGHT ANSWER.** 2.69e-13 against a target of 2.95e-13 says the
+contour is converged and that nothing else is limiting it — `psi_c` enters as an
+exact closed form at the same point the polynomial is read, so it costs the
+trace no accuracy at all.
+
+**THE THIRD AND FIFTH ROWS ARE THE CASE.** `psi_p` varies by 2.91e-02 along the
+real flux surface, so the curve is emphatically not a level set of the
+remainder; and the curve a conductor-blind tracer returns for *"the surface
+through this point"* — 89 points, **closed**, at the same corrector tolerance —
+carries a physical flux varying by 4.19e-02, which is **half the level itself**.
+That is the defect measured rather than argued: it produced a clean closed curve
+with a small residual and a plausible turning number, and every flux-surface
+average taken over it would have been an average over the wrong curve.
+
+**AND THE SEAM IS EXACT.** `ContourTracer::sampleAt()` agrees with the solved
+field plus `psi_c` to **0.0e+00** over 49 probe points, in `psi` and in both
+components of `q`, because the shift is one addition at `sampleField()` — the
+function this class already documents as *the only place `psi` and `q` are read
+at a physical point*. `meq::surfaceAverages`, `meq::extractFluxSurfaces` and
+`AngleParametrisation` inherit it without an edit each, which is the whole
+reason a seam is worth having.
+
+**THE CORRECTOR'S SCALE HAD TO MOVE WITH IT AND THAT IS NOT COSMETIC.**
+`potentialScale()` is what `tolerance` multiplies to give an ABSOLUTE residual
+target, and the residual it now stops on is one of `psi_p + psi_c`. A vacuum
+remainder can be six orders below the flux that is physically there — CS-3
+measures `max | psi_p |` at 1.4e-08 against a datum of 6.4e-02 on Γ — so scaling
+by the remainder alone would ask for a relative accuracy below anything a
+discontinuous `psi_h` can offer. It would not give a wrong answer; it would
+stall every point and report it, which is a failure of the scale rather than of
+the field.
