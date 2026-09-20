@@ -5743,3 +5743,57 @@ this puts 43× on it.
 the difference **falls**, not that it reaches any particular order, because the
 order argument is about the top hat and the requirement is about the two routes
 solving the same problem.
+
+### M-142
+
+**NOT MESHING THE COILS IS WORTH `1.96×` IN ELEMENTS ON MAST-U, AND THE DOMAIN
+SHRINK IS WORTH ALMOST NOTHING — WHICH IS THE OPPOSITE OF HOW
+`COIL-SUBTRACTION-PLAN.md` §2(a) RANKS THEM.** The question was when the
+coil-subtraction pathway can be tested for usefulness. The largest claimed
+benefit needs **no MEQ code and no solve at all**: it is a property of two gmsh
+meshes, which is the same shape as CS-0 measuring the conductor-model difference
+with no solver.
+
+`tools/mesh/halfdisc.py` takes `--coil` as `action="append"`, so omitting the
+flags already produces the coil-free mesh; nothing had to be written.
+
+| mesh | triangles | |
+|---|---|---|
+| `examples/diverted-tokamak-generated`, 4 coils at `--coil-size 0.04` | 2854 | |
+| the same with no coils | 2322 | **1.23×** |
+| **`examples/mastu-nke`, 23 coils at `--coil-size 0.03`** | **9361** | |
+| the same with no coils | **4774** | **1.96×** |
+| and with the disc `--rho 3.4 → 2.6` as well | 4375 | 1.09× more, **2.14× in total** |
+
+**9361 REPRODUCES `CLAUDE.md`'s OWN RECORDED COUNT**, which is the check that
+this is the mesh the tree means rather than a lookalike.
+
+**§2(a) PUTS "THE DOMAIN SHRINKS" FIRST AND THE COIL REFINEMENT SECOND, AND THE
+MEASUREMENT INVERTS THAT.** The outer annulus is meshed at the **coarse** size —
+`Size = 0.30` against `CoilSize = 0.03` — so removing it takes area and almost
+no elements, while the 10× grading around 23 coils is where the elements
+actually are. **An area argument over-weights coarse regions**, and §0c's
+careful correction of 2.6× to 1.85× *in area* was still answering the less
+important question.
+
+**THE COST SIDE IS WHERE THE RISK IS, AND IT SPLITS BY CONDUCTOR KIND.** `psi_c`
+is needed at every quadrature point of every element on every residual and every
+Jacobian. Per point:
+
+| | kernel evaluations per field point |
+|---|---|
+| 23 **filaments** | **23** — one Carlson evaluation each |
+| 23 **rectangles** | **~13,000** — a 24² cross-section quadrature each |
+
+So a rectangle machine uncached would buy back the 1.96× many times over, and a
+filament machine would barely notice. **That is an argument for the cache rather
+than against the plan**, and §1 already licensed it: the conductor currents do
+not move during a forward solve, so `psi_c` at a fixed point is a precompute.
+Three caches now exist — per quadrature point for the source and its Jacobian,
+per potential dof for the element fill and `peakAt` — and the quadrature one is
+**threaded**, each element writing its own disjoint slice with no reduction and
+no contention.
+
+**THE CACHE IS EXACT RATHER THAN CLOSE**, which is asserted rather than assumed:
+`ConductorSubtraction` reads `1.585e-05, 1.678e-06, 2.612e-07` and its three
+identities at `0.000e+00` both before and after it was introduced.

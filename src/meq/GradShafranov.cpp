@@ -488,27 +488,116 @@ namespace
 	void SourceIntegrator::setConductorField( ConductorField const *conductors )
 	{
 		conductorFieldShift = conductors;
+		conductorCache.clear();
+		cacheOffset.clear();
+	}
+
+	void SourceIntegrator::buildConductorCache(
+		mfem::FiniteElementSpace const &space )
+	{
+		/*
+		 * psi_c AT EVERY QUADRATURE POINT, ONCE PER MESH, AND WITHOUT IT THE
+		 * SPLIT IS NOT WORTH HAVING.
+		 *
+		 * sourceValue() and the Jacobian both need psi_c at every quadrature
+		 * point of every element, on every residual and every gradient. For a
+		 * machine with 23 RECTANGLES that is 23 cross-section quadratures per
+		 * point -- of order 1e4 Carlson evaluations -- against 23 for the same
+		 * machine as filaments. Uncached, the rectangle case alone buys back
+		 * the element-count saving the whole plan exists for, many times over.
+		 *
+		 * COIL-SUBTRACTION-PLAN.md §1 says why the cache is legitimate rather
+		 * than a trick: the conductor currents do not move during a forward
+		 * solve, only the profile scale does, so psi_c at a FIXED point is a
+		 * precompute. The rule below is the same `rule()` both loops use, so
+		 * the points are identical by construction rather than by agreement.
+		 *
+		 * THREADED, AND IT IS THE EASY KIND. Each element writes its own
+		 * disjoint slice and reads nothing another writes, so there is no
+		 * reduction and no contention -- the same shape as the five plasma
+		 * loops of THREADING-PLAN.md item B. The one hazard is MFEM's:
+		 * Mesh::GetElementTransformation( int ) hands out SHARED SCRATCH, so
+		 * this uses the caller-supplied overload into a per-thread object,
+		 * which is the rule CLAUDE.md records and which cost this project six
+		 * call sites once already.
+		 */
+		conductorCache.clear();
+		cacheOffset.clear();
+		if ( !conductorFieldShift )
+			return;
+
+		mfem::Mesh &mesh = *space.GetMesh();
+		int const elements = mesh.GetNE();
+		cacheOffset.assign( static_cast< std::size_t >( elements ) + 1, 0 );
+
+		// Sizes first, serially: the offsets are a prefix sum and the rule
+		// lookup is a cheap table read.
+		for ( int e = 0; e < elements; ++e )
+		{
+			mfem::FiniteElement const &el = *space.GetFE( e );
+			mfem::IsoparametricTransformation shapeOnly;
+			mesh.GetElementTransformation( e, &shapeOnly );
+			cacheOffset[ static_cast< std::size_t >( e ) + 1 ]
+				= cacheOffset[ static_cast< std::size_t >( e ) ]
+				  + rule( el, shapeOnly ).GetNPoints();
+		}
+
+		conductorCache.assign(
+			static_cast< std::size_t >(
+				cacheOffset[ static_cast< std::size_t >( elements ) ] ), 0.0 );
+
+		MEQ_OMP( parallel for schedule( dynamic ) )
+		for ( int e = 0; e < elements; ++e )
+		{
+			mfem::FiniteElement const &el = *space.GetFE( e );
+
+			// PER THREAD, not the mesh's own. See the note above.
+			mfem::IsoparametricTransformation transformation;
+			mesh.GetElementTransformation( e, &transformation );
+
+			mfem::IntegrationRule const &ir = rule( el, transformation );
+			std::size_t const base
+				= static_cast< std::size_t >(
+					cacheOffset[ static_cast< std::size_t >( e ) ] );
+
+			mfem::Vector point;
+			for ( int i = 0; i < ir.GetNPoints(); ++i )
+			{
+				mfem::IntegrationPoint const &ip = ir.IntPoint( i );
+				transformation.SetIntPoint( &ip );
+				transformation.Transform( ip, point );
+				conductorCache[ base + static_cast< std::size_t >( i ) ]
+					= conductorFieldShift->psi( point( 0 ), point( 1 ) );
+			}
+		}
+	}
+
+	double SourceIntegrator::conductorShiftAt( int element,
+	                                           int quadraturePoint ) const
+	{
+		// Exactly zero with no conductor field, which is what keeps every
+		// existing path bit-identical and unconditional.
+		if ( conductorCache.empty() )
+			return 0.0;
+
+		return conductorCache[
+			static_cast< std::size_t >(
+				cacheOffset[ static_cast< std::size_t >( element ) ] )
+			+ static_cast< std::size_t >( quadraturePoint ) ];
 	}
 
 	double SourceIntegrator::sourceValue( double r, double z, double psi,
 	                                      int element ) const
 	{
 		/*
-		 * THE SOURCE SEES THE TOTAL, NOT THE REMAINDER. Under
-		 * COIL-SUBTRACTION-PLAN.md's split the solved field is psi_p and the
-		 * `psi` above is therefore the remainder, while J_plasma is a function
-		 * of the PHYSICAL flux. Adding psi_c back here is what keeps the two
-		 * halves of the split consistent -- and getting it wrong is silent:
-		 * f( r, z, psi_p ) converges at the full rate to a different
-		 * equilibrium. The shift is exactly zero with no conductor field, so
-		 * every existing path is bit-identical.
+		 * THE SOURCE SEES THE TOTAL, NOT THE REMAINDER, and the caller has
+		 * already added psi_c -- from the per-quadrature-point cache, because
+		 * evaluating it here would be once per point per residual. See
+		 * buildConductorCache(). `psi` is the physical flux on every path, and
+		 * is the solved field unchanged when no conductor field is set.
 		 */
-		double const total = conductorFieldShift
-			? psi + conductorFieldShift->psi( r, z )
-			: psi;
-
 		if ( elementCarriesPlasma( element ) )
-			return source->f( r, z, total );
+			return source->f( r, z, psi );
 
 		// Off the plasma's component. `normalised` is null exactly when the
 		// source is not a NormalisedSource, in which case it cannot have been
@@ -572,7 +661,9 @@ namespace
 			// vacuum region by construction -- so this asks the source, which
 			// answers zero for an ordinary one and the coil term for a
 			// coil-augmented one.
-			elvect.Add( -weight*sourceValue( r, z, psi, tr.ElementNo )/r, shape );
+			elvect.Add( -weight*sourceValue( r, z,
+			                                 psi + conductorShiftAt( tr.ElementNo, i ),
+			                                 tr.ElementNo )/r, shape );
 		}
 	}
 
@@ -637,9 +728,7 @@ namespace
 			// defect CLAUDE.md's "A wrong Jacobian is invisible to a
 			// convergence table" is about: Newton still converges, to a
 			// solution of a different problem, or merely slower.
-			double const totalPsi = conductorFieldShift
-				? psi + conductorFieldShift->psi( r, z )
-				: psi;
+			double const totalPsi = psi + conductorShiftAt( tr.ElementNo, i );
 
 			mfem::AddMult_a_VVt( -weight*source->dFdPsi( r, z, totalPsi )/r,
 			                     shape, elmat );
@@ -4401,6 +4490,11 @@ namespace
 			// see psi_c + psi_p rather than the solved remainder. Null unless
 			// the split is in use, and null shifts by exactly zero.
 			sourceTerm->setConductorField( conductorFieldSet );
+			// AND THE CACHE HERE RATHER THAN IN prepare(), because this is
+			// where the integrator exists -- it is a local, owned by the form
+			// it is handed to. Empty and free unless the split is in use.
+			if ( potentialFes )
+				sourceTerm->buildConductorCache( *potentialFes );
 
 			// THE SAME BORROWING, AND FOR THE SAME REASON. The bordered solve
 			// flips this between its Picard phase and its Newton phase without
@@ -4664,6 +4758,11 @@ namespace
 			throw std::logic_error( "meq::GradShafranovSolver::prepare: no boundary data has been set" );
 
 		buildForms();
+
+		// psi_c at every potential dof, once per mesh rather than once per
+		// evaluation. Empty and free unless the split is in use.
+		buildConductorNodalCache();
+
 
 		solution = 0.0;
 		rhs = 0.0;
@@ -5289,6 +5388,75 @@ namespace
 		return plasmaSupportFrozenValue;
 	}
 
+	void GradShafranovSolver::buildConductorNodalCache()
+	{
+		/*
+		 * psi_c AT EVERY POTENTIAL DOF, ONCE PER MESH.
+		 *
+		 * COIL-SUBTRACTION-PLAN.md §1 asks for exactly this -- the conductor
+		 * currents do not move during a forward solve, so psi_c at a fixed
+		 * point is a precompute whose cost amortises over every iteration of
+		 * every support sweep. What forced it now rather than later is that
+		 * peakAt() scans the potential block BY RAW INDEX, so a shift computed
+		 * per ( element, local dof ) cannot reach it; a table indexed by dof
+		 * serves that caller and the element fill alike.
+		 *
+		 * THE POTENTIAL SPACE IS L2, SO EVERY DOF BELONGS TO EXACTLY ONE
+		 * ELEMENT and this walk visits each once. On an H1 space a shared dof
+		 * would be written several times with the same value, which is
+		 * harmless but would want saying.
+		 *
+		 * The cache is EMPTY when no conductor field is set, and
+		 * conductorPsiAtDof() then returns exactly zero -- so nothing that does
+		 * not use the split pays for this or moves by a bit.
+		 */
+		conductorNodalPsi.clear();
+		if ( !conductorFieldSet || !potentialFes )
+			return;
+
+		conductorNodalPsi.assign(
+			static_cast< std::size_t >( potentialFes->GetNDofs() ), 0.0 );
+
+		mfem::Array< int > dofs;
+		thread_local mfem::IsoparametricTransformation transformation;
+
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			potentialFes->GetElementDofs( e, dofs );
+			mfem::FiniteElement const *elementFe = potentialFes->GetFE( e );
+			mfem::IntegrationRule const &nodes = elementFe->GetNodes();
+
+			mesh.GetElementTransformation( e, &transformation );
+
+			for ( int i = 0; i < dofs.Size(); ++i )
+			{
+				mfem::IntegrationPoint const &ip = nodes.IntPoint( i );
+				transformation.SetIntPoint( &ip );
+
+				double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
+				mfem::Vector position( coordinates, 3 );
+				transformation.Transform( ip, position );
+
+				int const dof = dofs[ i ] >= 0 ? dofs[ i ] : -1 - dofs[ i ];
+				conductorNodalPsi[ static_cast< std::size_t >( dof ) ]
+					= conductorFieldSet->psi( position( 0 ), position( 1 ) );
+			}
+		}
+	}
+
+	double GradShafranovSolver::conductorPsiAtDof( int dof ) const
+	{
+		// Exactly zero with no conductor field, which is what makes every
+		// caller unconditional. A coefficient IS the value at its node here --
+		// meq's spaces are BasisType::GaussLobatto -- so adding this to a dof
+		// coefficient gives the coefficient of the total.
+		if ( conductorNodalPsi.empty() )
+			return 0.0;
+
+		int const index = dof >= 0 ? dof : -1 - dof;
+		return conductorNodalPsi[ static_cast< std::size_t >( index ) ];
+	}
+
 	void GradShafranovSolver::refreshPlasmaComponent( mfem::Vector const &state )
 	{
 		if ( !plasmaComponentWanted() )
@@ -5514,7 +5682,24 @@ namespace
 
 			for ( int i = 0; i < dofs.Size(); ++i )
 			{
-				double const psi = state( potentialStart + dofs[ i ] );
+				/*
+				 * THE TOTAL, NOT THE REMAINDER. Under
+				 * COIL-SUBTRACTION-PLAN.md's split the state holds psi_p and
+				 * the plasma's edge is a level set of the PHYSICAL flux, so a
+				 * fill run on the remainder labels the wrong elements -- and
+				 * the labels decide where F is switched off, which is a change
+				 * of SUPPORT rather than a small error. A conductor near the
+				 * plasma makes psi_c comparable to psi_p, so this is not a
+				 * correction at the margin.
+				 *
+				 * The shift is exact rather than approximate: meq's potential
+				 * space is BasisType::GaussLobatto, so a coefficient IS the
+				 * value at its node. Exactly zero with no conductor field, so
+				 * every existing fill is bit-identical -- which is what lets
+				 * XP-1's measured element counts stand unchanged.
+				 */
+				double const psi = state( potentialStart + dofs[ i ] )
+				                   + conductorPsiAtDof( dofs[ i ] );
 				double const psiN = ( psi - psiBnd )/span;
 
 				if ( psiN > 0.0 )
@@ -7622,9 +7807,16 @@ namespace
 			int bestIndex = -1;
 			for ( int i = blockOffsets[ 1 ]; i < blockOffsets[ 2 ]; ++i )
 			{
-				if ( state( i ) > best )
+				// THE PEAK OF THE PHYSICAL FLUX. psi_ax's constraint is
+				// psi_ax - max psi, and under the split the state holds psi_p
+				// -- so the maximum has to be taken over psi_p + psi_c or the
+				// border row closes on the wrong number. Exactly zero with no
+				// conductor field, so every existing path is bit-identical.
+				double const value = state( i )
+				                     + conductorPsiAtDof( i - blockOffsets[ 1 ] );
+				if ( value > best )
 				{
-					best = state( i );
+					best = value;
 					bestIndex = i;
 				}
 			}

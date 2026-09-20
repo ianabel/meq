@@ -409,6 +409,19 @@ namespace meq
 			 */
 			void setConductorField( ConductorField const *conductors );
 
+			/// Build `psi_c` at every quadrature point this integrator will
+			/// use, once per mesh. **Without this the split is not worth
+			/// having**: the alternative is one `psi_c` evaluation per point
+			/// per residual, which for a machine of rectangles is of order
+			/// `1e4` Carlson evaluations each and buys back the element-count
+			/// saving the whole plan exists for. Threaded; each element writes
+			/// its own disjoint slice.
+			void buildConductorCache( mfem::FiniteElementSpace const &space );
+
+			/// `psi_c` at one quadrature point, from that cache. Exactly zero
+			/// when the cache is empty.
+			double conductorShiftAt( int element, int quadraturePoint ) const;
+
 			/**
 			 * NEWTON OR PICARD IN THE FIELD BLOCK -- see meq::FieldLinearisation
 			 * for what the choice means and for why the residual is not part of
@@ -467,6 +480,11 @@ namespace meq
 			/// setConductorField()'s psi_c, borrowed. Null unless the split is
 			/// in use, and null is what makes the shift exactly zero.
 			ConductorField const *conductorFieldShift = nullptr;
+
+			/// psi_c per quadrature point, flattened, with cacheOffset[ e ]
+			/// the start of element e. Empty unless the split is in use.
+			std::vector< double > conductorCache;
+			std::vector< int > cacheOffset;
 
 			/// setFieldLinearisation(). Borrowed; null is
 			/// FieldLinearisation::Newton.
@@ -2428,6 +2446,23 @@ namespace meq
 			/// is set — so `psi_c + psi_p` is correct on every path and a caller
 			/// need not branch on whether the split is in use.
 			double conductorPsi( double r, double z ) const;
+
+		private:
+			/// `psi_c` at every potential dof, built once per mesh —
+			/// `COIL-SUBTRACTION-PLAN.md` §1's precompute. Empty unless the
+			/// split is in use.
+			void buildConductorNodalCache();
+
+			/// `psi_c` at one potential dof, from that cache. **Exactly zero
+			/// when the cache is empty**, which is what lets every caller add
+			/// it unconditionally. Exact rather than approximate because MEQ's
+			/// spaces are `BasisType::GaussLobatto`, so a coefficient is the
+			/// value at its node and this is the coefficient of the total.
+			double conductorPsiAtDof( int dof ) const;
+
+			std::vector< double > conductorNodalPsi;
+
+		public:
 
 			/// The conductors' own `q . nu` at a point of `Gamma`, and zero when
 			/// there are none. Public because the transmission machinery and its
