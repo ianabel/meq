@@ -12,6 +12,7 @@
 // here, where the field is actually evaluated.
 #include "Coils.hpp"
 #include "ConductorField.hpp"
+#include "FieldViews.hpp"
 
 #include <algorithm>
 #include <chrono>

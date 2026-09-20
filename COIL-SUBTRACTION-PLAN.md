@@ -264,6 +264,7 @@ must.
 | **CS-2** | the split on a FIXED-boundary case with coils, where nothing else moves. **BUILT AND GREEN**, and the acceptance is an IDENTITY rather than a rate — §7.4 |
 | **CS-3** | the Dirichlet datum and the DtN coupling |
 | **CS-4** | every consumer of `psi`, with a test per consumer that the total is read |
+| **CS-6** | **a restart format that self-describes.** §8.3: a `.gf` cannot say whether it holds `psi` or `psi − psi_c`, and a flag would not be enough because a remainder is only meaningful with the conductors it is a remainder from. NetCDF is the vehicle MEQ already has — §9 |
 | **CS-5** | re-take M-111 with the conductor models matched. **[M-139](MEASUREMENTS.md#m-139) partly kills this as written** — the benchmark cannot resolve MEQ below about 7e-04 whatever either code does, so it cannot be the acceptance for a change whose whole claim is that the conductors are resolved EXACTLY. **The replacement is MEQ's own**: an expensive quadrature-based reference, §7 |
 
 ---
@@ -585,11 +586,22 @@ structural:**
 | flux surfaces, critical points, the tracer | **yes** | same reason |
 | `.gf`, `.vtu` | **no** | both are the field's own coefficients; `psi_c` can only be projected |
 
-**A `.gf` written under the split should therefore be the REMAINDER and say so**,
-rather than a projected total that silently loses what the plan bought — and
-since a `.gf` is MEQ's own restart format, a restart reading it wants the
-conductor set beside it, exactly as the mesh wants its `.meq-mesh` stamp. That
-is a schema decision and it is **open**.
+**A `.gf` written under the split should therefore be the REMAINDER and say so
+— and it CANNOT say so, which is the finding.** `mfem::GridFunction::Save()` is
+`fes->Save( os )`, a newline, and the raw coefficients; the header carries
+`FiniteElementCollection`, `VDim` and `Ordering` and nothing else, and the
+loader reads the space and then the vector, so an extra line is consumed as
+data. **There is no slot for "this is a difference" in the format**, and a file
+that cannot distinguish `psi` from `psi − psi_c` is a restart waiting to read
+the wrong field.
+
+**AND A FLAG WOULD NOT BE ENOUGH EITHER, WHICH IS THE PART THAT DECIDES THE
+DESIGN.** A remainder is only meaningful WITH the conductors it is a remainder
+from: `psi_c` is not recoverable from the mesh, the space or the coefficients,
+and no amount of provenance short of the conductor set reconstructs the physical
+field. **A file holding a difference has to carry what it is a difference
+from.** So the requirement is not a boolean attribute bolted to a `.gf`, it is a
+container that holds data *and* metadata — which is CS-6.
 
 ### 8.4 What unlocks what
 
@@ -601,3 +613,119 @@ The two refusals in `setConductorField()` are the measure of CS-4's progress:
   case reachable, so it is CS-4's first tranche and everything else can wait.
 * **an exterior coupling** is CS-3 and is a different question: the DtN's datum
   and transmission rows, not a consumer of `psi`.
+
+### 8.5 The evaluation abstraction, which replaces §8.2's sixty-eight setters
+
+**§8.2 PROPOSED HANDING EACH CONSUMER A `ConductorField const *` AND WAS THE
+WRONG SHAPE.** It is correct and it is sixty-eight opportunities to forget, on a
+defect whose failure mode is a plausible answer. `src/meq/FieldViews.hpp` is the
+replacement: `meq::PotentialView` and `meq::FluxVectorView`, header-only.
+
+**WHAT MAKES FORGETTING HARD IS THE NAMED CONSTRUCTOR, NOT THE DOCUMENTATION.**
+There is no default constructor and no implicit conversion from a
+`GridFunction`, so a call site writes one of
+
+    PotentialView::physical( solved, conductors )   psi_c + psi_p
+    PotentialView::remainder( solved )              psi_p alone, deliberately
+
+and the choice is made in a word where it is made, rather than by knowing what
+the class does. `remainder()` is spelled out because there **are** consumers
+that want it — the residual estimator measures the discretisation of the problem
+actually solved — and because a reviewer can grep for it.
+
+**IT IS FREE WHEN THE SPLIT IS OFF, AND THAT IS ASSERTED RATHER THAN CLAIMED.**
+Every method is inline and the conductor pointer is null on every existing path.
+Measured over 128 elements at four quadrature points each:
+
+| | error |
+|---|---|
+| `remainder()` and `physical( …, nullptr )` against the bare `GridFunction` | **0.000e+00** |
+| `physical( …, &conductors )` against `GetValue` + `psi_c` at that point | **0.000e+00** |
+| the two `value()` overloads against each other | **0.000e+00** |
+
+against a field scale of 2.739e-01. **Bit equality is the point**: it is what
+lets sixty-eight call sites migrate without any of them moving an existing
+answer, so the migration can be done a file at a time and reviewed by its diff.
+
+**AND IT IS WHERE §1's CACHE BELONGS WHEN IT IS BUILT.** `psi_c` is a Carlson
+elliptic integral per filament and a cross-section quadrature per rectangle, at
+every point a consumer asks about; §1 wants it once per mesh. That is now **one
+type to change rather than sixty-eight call sites**, which is the second reason
+for the abstraction and the one that was not the motivation.
+
+**A TRAP IT ABSORBS ONCE INSTEAD OF SIXTY-EIGHT TIMES.** Adding `psi_c` needs
+the point's `( r, z )`, which needs the element's transformation — and
+`mfem::Mesh::GetElementTransformation( int )` hands out **shared scratch**,
+which `CLAUDE.md` records as a silent wrong answer under threading and which
+cost this project six call sites once already. The views take a caller-supplied
+transformation where one is in hand and use a function-local `thread_local`
+where it is not.
+
+### 8.6 The first migration has a complication, and it is not the views' fault
+
+`meq::CriticalPointFinder` is CS-4's first tranche — `psi_ax` is what lifts the
+`NormalisedSource` refusal — and it does **not** read the field only through
+`GetValue()`. Its screening passes read **raw dof coefficients**:
+`potentialField( dofs[ i ] )` at `:564` and `:1131`, and
+`fluxField( space.DofToVDof( i, 0 ) )` at `:268`.
+
+**A dof coefficient of `psi_p` plus `psi_c` at that dof's node is not the
+coefficient of the total**, and for a filament there is no coefficient of the
+total at all. So those passes cannot be shifted the way an evaluation can, and
+they need deciding one at a time:
+
+* where the read is a **screen** — "which elements could hold a maximum" — it
+  may be sound to screen on the remainder and evaluate the candidates on the
+  total, but that is an argument about where extrema can be and it needs making
+  rather than assuming;
+* where it is a **value**, it has to become an evaluation.
+
+**This is exactly the kind of place a hurried migration produces the silent
+defect the abstraction exists to prevent**, so it is written down here rather
+than attempted at the end of a long session.
+
+---
+
+## 9. CS-6: the exact field needs a container that carries metadata
+
+**THE REQUIREMENT, IN ONE LINE: A FILE HOLDING A DIFFERENCE HAS TO CARRY WHAT IT
+IS A DIFFERENCE FROM.** §8.3 establishes that `.gf` cannot — `GridFunction::Save`
+writes the FE space header and the raw coefficients, the loader reads the space
+and then the vector, and an extra line is consumed as data.
+
+**AND THE METADATA IS NOT A FLAG.** `content = "remainder"` tells a reader it is
+holding the wrong field; it does not let them fix it. `psi_c` is recoverable
+from neither the mesh, nor the space, nor the coefficients — only from the
+conductors. So the file must carry the **conductor set itself**: each filament's
+`( r, z, I )`, each rectangle's `( centre, half-extents, I )`, and `mu0`, which
+together with `meq::ConductorField` reconstruct `psi_c` exactly at any point.
+That is a few dozen numbers beside a field of tens of thousands, so the cost is
+nil and the alternative is a file nobody can safely read.
+
+**NetCDF IS THE VEHICLE AND MEQ ALREADY HAS IT.** `src/meq/Output.cpp` writes
+attributes through `putAtt` already — `axis_normalised_flux`, `psi_axis`,
+`extrapolated_nodes` — so what is missing is not a dependency but a second kind
+of NetCDF file: one holding **every `P_k` coefficient** rather than a sampled
+grid. The existing `.nc` is deliberately lossy and is the interchange format;
+this one is the *restart* format and must be exact.
+
+| | today | under CS-6 |
+|---|---|---|
+| `.gf` | exact, and MFEM's own format, which GLVis reads | **kept, unchanged, and documented as the REMAINDER under a split** — it is MFEM's format and MEQ should not redefine it |
+| the exact restart | the `.gf` pair | a NetCDF file: coefficients, the space description, `content`, the conductor set, `mu0` |
+| `.nc` grid | sampled, lossy | unchanged, and it can write the **total** exactly, since it samples pointwise — one attribute says which it did |
+
+**WHAT MAKES THIS MORE THAN BOOKKEEPING**: the `.nc` grid and the flux surfaces
+keep the split's exactness because they sample, so under CS-6 the *lossy*
+interchange format carries the physically exact field while the *exact* format
+carries a remainder. That inversion is worth stating in `tools/README.md`, which
+is the guide to which format goes with which reader, because it is the opposite
+of what the names suggest.
+
+**OPEN, AND NOT FOR THIS PLAN TO SETTLE ALONE**: whether the restart format
+should replace the `.gf` pair for MEQ's own warm start, or sit beside it. The
+warm start reads `.gf` today (`[initialguess] File`/`MeshFile`), and a
+configuration naming a `.gf` written under a split is exactly the failure this
+stage exists to prevent — so at minimum **the loader has to refuse a `.gf` when
+a conductor field is configured**, which needs no new format and could be done
+first.

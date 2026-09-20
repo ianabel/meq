@@ -31,6 +31,7 @@
 #include "mfem.hpp"
 
 #include "meq/ConductorField.hpp"
+#include "meq/FieldViews.hpp"
 #include "meq/GradShafranov.hpp"
 
 namespace
@@ -304,6 +305,102 @@ BOOST_AUTO_TEST_CASE( theSourceIsEvaluatedAtTheTotalFluxAndNotTheRemainder )
 	BOOST_TEST( worst < 1.0e-11*scale,
 	            "the split's source or Jacobian is not being evaluated at "
 	            "psi_c + psi_p" );
+}
+
+// THE EVALUATION ABSTRACTION: FREE WHEN THE SPLIT IS OFF, CORRECT WHEN IT IS ON.
+//
+// COIL-SUBTRACTION-PLAN.md §8.1 counts about sixty-eight places that read the
+// solved field, and §3 names the hazard: every consumer that forgets psi_c is a
+// silent wrong answer. meq::PotentialView is what makes the forgetting hard --
+// it is built by NAME, physical() or remainder(), so the choice is made in a
+// word at the call site rather than by knowing what the class does.
+//
+// BOTH HALVES ARE ASSERTED AT ZERO TOLERANCE, because both are identities.
+// With no conductors the view must be the SAME NUMBER as the bare GridFunction,
+// not a close one -- that is the property that lets sixty-eight call sites
+// migrate without any of them moving an existing answer. With conductors it
+// must be exactly the bare value plus psi_c at that point.
+BOOST_AUTO_TEST_CASE( theViewIsFreeWithoutConductorsAndExactWithThem )
+{
+	meq::ConductorField const conductors = insideFilament();
+	VacuumSource const source;
+
+	mfem::FunctionCoefficient physicalDatum(
+		[ &conductors ]( mfem::Vector const &x )
+		{
+			return conductors.psi( x( 0 ), x( 1 ) );
+		} );
+
+	mfem::Mesh mesh = makeBox( 8 );
+	meq::GradShafranovSolver solver( mesh, 2 );
+	solver.setSource( source );
+	solver.setBoundaryData( physicalDatum );
+	solver.solve();
+
+	mfem::GridFunction const &solved = solver.potential();
+
+	meq::PotentialView const bare
+		= meq::PotentialView::remainder( solved );
+	meq::PotentialView const nulled
+		= meq::PotentialView::physical( solved, nullptr );
+	meq::PotentialView const withConductors
+		= meq::PotentialView::physical( solved, &conductors );
+
+	BOOST_TEST( !bare.carriesConductors() );
+	BOOST_TEST( !nulled.carriesConductors() );
+	BOOST_TEST( withConductors.carriesConductors() );
+
+	mfem::IntegrationPoint ip;
+	double worstFree = 0.0;
+	double worstShift = 0.0;
+	double scale = 0.0;
+
+	for ( int element = 0; element < mesh.GetNE(); ++element )
+	{
+		mfem::IntegrationRule const &rule = mfem::IntRules.Get(
+			mesh.GetElementBaseGeometry( element ), 4 );
+
+		for ( int q = 0; q < rule.GetNPoints(); ++q )
+		{
+			ip = rule.IntPoint( q );
+			double const raw = solved.GetValue( element, ip );
+
+			// FREE: the null view is the bare value, bit for bit.
+			worstFree = std::max( worstFree,
+			                      std::fabs( bare.value( element, ip ) - raw ) );
+			worstFree = std::max( worstFree,
+			                      std::fabs( nulled.value( element, ip ) - raw ) );
+
+			// EXACT: the physical view is that value plus psi_c right there.
+			mfem::IsoparametricTransformation transformation;
+			mesh.GetElementTransformation( element, &transformation );
+			transformation.SetIntPoint( &ip );
+			mfem::Vector point( 3 );
+			transformation.Transform( ip, point );
+
+			double const expected
+				= raw + conductors.psi( point( 0 ), point( 1 ) );
+			worstShift = std::max( worstShift,
+			                       std::fabs( withConductors.value( element, ip )
+			                                  - expected ) );
+			scale = std::max( scale, std::fabs( expected ) );
+
+			// AND THE TWO OVERLOADS AGREE, so a consumer that already holds a
+			// transformation is not taking a different code path by accident.
+			worstShift = std::max(
+				worstShift,
+				std::fabs( withConductors.value( element, ip )
+				           - withConductors.value( transformation, ip ) ) );
+		}
+	}
+
+	std::printf( "\n  PotentialView over %d elements: free-path error %.3e, "
+	             "shifted-path error %.3e against a scale of %.3e\n",
+	             mesh.GetNE(), worstFree, worstShift, scale );
+
+	BOOST_TEST( worstFree == 0.0, boost::test_tools::tolerance( 0.0 ) );
+	BOOST_TEST( worstShift == 0.0, boost::test_tools::tolerance( 0.0 ) );
+	BOOST_TEST( scale > 1.0e-3, "the field is trivial, so this proves nothing" );
 }
 
 // psi_c IS EXACTLY ZERO WHEN NO CONDUCTOR FIELD IS SET, which is what lets
