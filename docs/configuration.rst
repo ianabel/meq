@@ -926,6 +926,14 @@ default is what every file written before this table existed already means.
    is a mode to choose deliberately, and the ``.nc`` file records which one
    produced it in its ``conductor_model`` attribute.
 
+   The difference is concentrated **at** the conductor, where :math:`\psi` of a
+   line current diverges. Measured through a whole MEQ solve on
+   ``examples/coils-rectangle.toml``, filament against rectangle: 1.23 relative
+   everywhere, :math:`3.8\times10^{-3}` beyond 0.10 m of a coil centre — i.e.
+   outside the conductor — and :math:`6.9\times10^{-4}` beyond 0.40 m. Choose
+   ``"filament"`` when the field near the conductors is not what you are asking
+   about.
+
 .. warning::
 
    **Under a subtracting model the warm start changes meaning, and so does the**

@@ -2681,6 +2681,54 @@ namespace
 			           "described";
 			throw std::invalid_argument( message.str() );
 		}
+
+		/*
+		 * AND THE MIRROR IMAGE, FOR THE CONDUCTORS THAT ARE SUBTRACTED RATHER
+		 * THAN COUPLED. COIL-SUBTRACTION-PLAN.md CS-3.
+		 *
+		 * The two preconditions are OPPOSITE and each is the other's failure.
+		 * setExteriorConductors() takes a conductor BEYOND Gamma, so that
+		 * psi_coil is Delta*-harmonic in Omega and the conductor enters through
+		 * the boundary alone. setConductorField() takes one WITHIN Gamma, and
+		 * the reason is dual: the exterior is represented by a Gegenbauer
+		 * series in rho^( 1 - n ), which stands for every source inside Gamma
+		 * and converges outside it only while that is true. A subtracted
+		 * conductor beyond Gamma puts a singularity in the region that series
+		 * describes -- and nothing would say so. The transmission constraint
+		 * would still close, every border would still reach machine zero, and
+		 * the answer would be a machine nobody described.
+		 *
+		 * SO A CONDUCTOR BELONGS TO EXACTLY ONE OF THE TWO ROUTES AND ONE
+		 * STRADDLING Gamma BELONGS TO NEITHER, which is what
+		 * ExteriorCoilSet::clearance() already says from its own side.
+		 */
+		void requireConductorsInsideGamma( ConductorField const &conductors,
+		                                   ExteriorDtN const &exterior,
+		                                   char const *where )
+		{
+			double const inside = conductors.containment( exterior.zCentre(),
+			                                              exterior.rhoGamma() );
+			if ( inside > 0.0 )
+				return;
+
+			std::ostringstream message;
+			message.setf( std::ios::scientific );
+			message.precision( 6 );
+			message << where << ": a SUBTRACTED conductor reaches outside Gamma. "
+			           "The farthest one is contained by the semicircle of radius "
+			        << exterior.rhoGamma() << " about z = " << exterior.zCentre()
+			        << " by " << inside << " metres, and CS-3 needs that strictly "
+			           "positive: the exterior is a Gegenbauer series in "
+			           "rho^( 1 - n ), which represents the sources INSIDE Gamma "
+			           "and converges outside it only while every one of them is. "
+			           "A conductor beyond Gamma puts a singularity in the region "
+			           "that series describes. Such a conductor belongs to "
+			           "setExteriorConductors() instead, where it enters through "
+			           "the boundary alone -- and one straddling Gamma belongs to "
+			           "neither. Without this the run would converge, every border "
+			           "at machine zero, to a machine nobody described";
+			throw std::invalid_argument( message.str() );
+		}
 	}
 
 	void GradShafranovSolver::setExteriorCoupling( ExteriorDtN const &exterior )
@@ -2699,6 +2747,15 @@ namespace
 		if ( exteriorConductorSet )
 			requireConductorsOutsideGamma(
 				*exteriorConductorSet, exterior,
+				"meq::GradShafranovSolver::setExteriorCoupling" );
+
+		// AND THE SAME FOR THE SUBTRACTED ONES, IN THE OTHER DIRECTION. The two
+		// calls may come in either order, so each end checks whichever half is
+		// already in hand -- which is the only way a geometric precondition
+		// about a PAIR can be enforced by two independent setters.
+		if ( conductorFieldSet )
+			requireConductorsInsideGamma(
+				*conductorFieldSet, exterior,
 				"meq::GradShafranovSolver::setExteriorCoupling" );
 
 		exteriorCoupling = &exterior;
@@ -2724,7 +2781,7 @@ namespace
 				total += ( *coefficients )[ i ]
 				         *dtn->basis( first + static_cast<int>( i ), x( 0 ), x( 1 ) );
 			// psi_coil on Gamma: the DIRICHLET half of FB-7. Its Neumann twin is
-			// exteriorConductorMoments(), and the two must land together.
+			// conductorMomentsOnGamma()'s `outside` half, and the two must land together.
 			if ( self->exteriorConductorSet )
 				total += self->exteriorConductorSet->psi( x( 0 ), x( 1 ) );
 			return total;
@@ -2753,15 +2810,6 @@ namespace
 	void GradShafranovSolver::setConductorField( ConductorField const &conductors )
 	{
 		/*
-		 * CS-3 AND NOT CS-2. The exterior coupling's datum and transmission
-		 * rows are written against the PHYSICAL psi on Gamma, and under the
-		 * split what lives on Gamma is psi_p -- so the two together need the
-		 * DtN's own halves shifted as well, which is CS-3 and is not built.
-		 * Refusing the pair is what stops a run that converges to a machine
-		 * nobody described, which is the failure setExteriorConductors()'
-		 * documentation already names for its own straddling case.
-		 */
-		/*
 		 * A NormalisedSource IS NOW ALLOWED, AND THE FOUR THINGS THAT HAD TO BE
 		 * TRUE FIRST ARE TRUE. It divides by psi_ax and psi_bnd, which are
 		 * functionals of the PHYSICAL flux, so every consumer of psi had to
@@ -2783,18 +2831,33 @@ namespace
 		 * WHAT IS NOT YET MEASURED IS A PHYSICAL MACHINE, which is the point of
 		 * lifting this: until now nothing with a plasma AND conductors could
 		 * run under the split at all, so there was nothing to put on a clock.
-		 * An exterior coupling is still refused below, so this is fixed
-		 * boundary only -- CS-3.
+		 */
+		/*
+		 * AN EXTERIOR COUPLING IS ALLOWED, AND CS-3 IS THE TWO PLACES THAT MADE
+		 * IT SO. Both halves of the DtN are written against the PHYSICAL psi on
+		 * Gamma, and under the split what the solver carries there is psi_p:
+		 *
+		 *   the DIRICHLET half   prepare() transfers g( x ) - psi_c( x ) inward
+		 *                        rather than g( x ), the same shift the fitted
+		 *                        path takes through RemainderDatumCoefficient;
+		 *   the NEUMANN half     the transmission constraint adds the interior
+		 *                        conductors' own moment on Gamma, because
+		 *                        row . state is now int ( q_p . nu ) C_m and the
+		 *                        condition is about q_p + q_c.
+		 *
+		 * THE TWO MUST MOVE TOGETHER OR THE DATUM IS DOUBLE COUNTED, which is
+		 * COIL-SUBTRACTION-PLAN.md section 3's warning and is why they landed in
+		 * one change rather than two.
+		 *
+		 * WHAT IS REFUSED INSTEAD IS THE GEOMETRY. A subtracted conductor must
+		 * lie strictly INSIDE Gamma -- see requireConductorsInsideGamma above,
+		 * which is the mirror image of the precondition
+		 * setExteriorConductors() carries.
 		 */
 		if ( exteriorCoupling )
-			throw std::invalid_argument(
-				"meq::GradShafranovSolver::setConductorField: an exterior "
-				"coupling is set, and the conductor-field split does not yet "
-				"reach it. COIL-SUBTRACTION-PLAN.md CS-3 is the stage that "
-				"shifts the DtN datum and the transmission rows by psi_c; "
-				"until it is built the pair would solve a consistent-looking "
-				"problem that is not the one asked for. A fixed-boundary case "
-				"is CS-2's domain and works today" );
+			requireConductorsInsideGamma(
+				conductors, *exteriorCoupling,
+				"meq::GradShafranovSolver::setConductorField" );
 
 		/*
 		 * A NODE OR VERTEX ON A FILAMENT IS A GEOMETRY ERROR AND IT IS CAUGHT
@@ -2877,6 +2940,33 @@ namespace
 		double gradR = 0.0;
 		double gradZ = 0.0;
 		exteriorConductorSet->gradPsi( r, z, gradR, gradZ );
+		return ( gradR*nuR + gradZ*nuZ )/r;
+	}
+
+	double GradShafranovSolver::conductorFieldNormalFlux( double r, double z,
+	                                                      double nuR,
+	                                                      double nuZ ) const
+	{
+		if ( !conductorFieldSet )
+			return 0.0;
+
+		// THE SAME AXIS RULE ITS EXTERIOR TWIN DERIVES ABOVE, and it holds for
+		// the same reason and not by analogy: the rule is about Gamma's
+		// geometry, not about which side the conductor is on. Gamma is a
+		// semicircle centred on the axis, so at its two endpoints the outward
+		// normal is AXIAL and q . nu is q_z = ( 1/r ) d_z psi, which tends to
+		// zero. meq::ConductorField::gradPsi() is exactly ( 0, 0 ) there for a
+		// conductor off the axis, so this is 0/0 and the limit is the answer.
+		//
+		// NOT meq::ConductorField::poloidalField(), which takes the OTHER
+		// component's limit: that one exists because B_Z on the axis is finite
+		// and non-zero, and it is not what a contour normal to the axis sees.
+		if ( !( r > 0.0 ) )
+			return 0.0;
+
+		double gradR = 0.0;
+		double gradZ = 0.0;
+		conductorFieldSet->gradPsi( r, z, gradR, gradZ );
 		return ( gradR*nuR + gradZ*nuZ )/r;
 	}
 
@@ -4069,6 +4159,16 @@ namespace
 					interiorNormal += component*pt.nu( d );
 				}
 
+				// AND CS-3's CONDUCTORS ARE PART OF THE INTERIOR FIELD, so
+				// eta_6 must see them for the same reason the line below adds
+				// FB-7's to the exterior: without it a perfectly matched
+				// boundary is reported as mismatched by exactly the subtracted
+				// conductors' own flux, and the adaptive loop MARKS ON IT --
+				// refining Gamma_h to chase an error that is not there.
+				interiorNormal +=
+					conductorFieldNormalFlux( pt.y( 0 ), pt.y( 1 ),
+					                          pt.nu( 0 ), pt.nu( 1 ) );
+
 				// The exterior's own normal derivative from the converged
 				// coefficients, divided by r because MEQ's q IS ( 1/r ) grad psi
 				// while symbol() is d psi/d rho. Getting that factor wrong is the
@@ -4114,11 +4214,15 @@ namespace
 		}
 	}
 
-	void GradShafranovSolver::exteriorConductorMoments(
-		ExteriorDtN const &exterior, std::vector< double > &out ) const
+	void GradShafranovSolver::conductorMomentsOnGamma(
+		ExteriorDtN const &exterior, std::vector< double > &outside,
+		std::vector< double > &inside ) const
 	{
-		out.assign( static_cast< std::size_t >( exterior.modeCount() ), 0.0 );
-		if ( !exteriorConductorSet || !transferPath )
+		outside.assign( static_cast< std::size_t >( exterior.modeCount() ), 0.0 );
+		inside.assign( static_cast< std::size_t >( exterior.modeCount() ), 0.0 );
+		if ( !transferPath )
+			return;
+		if ( !exteriorConductorSet && !conductorFieldSet )
 			return;
 
 		/*
@@ -4163,16 +4267,25 @@ namespace
 			mfem::ExtensionBoundaryQuadrature( faceScratch, *transferPath, faceRule,
 				[ & ]( mfem::ExtensionBoundaryPoint const &pt )
 			{
-				double const normal = conductorNormalFlux( pt.y( 0 ), pt.y( 1 ),
-				                                           pt.nu( 0 ), pt.nu( 1 ) );
-				if ( normal == 0.0 )
+				double const beyond =
+					conductorNormalFlux( pt.y( 0 ), pt.y( 1 ),
+					                     pt.nu( 0 ), pt.nu( 1 ) );
+				// CS-3's HALF, and it is the SAME INTEGRAL over the SAME points
+				// with a different field in it -- which is what makes one sweep
+				// the right shape rather than a saving.
+				double const within =
+					conductorFieldNormalFlux( pt.y( 0 ), pt.y( 1 ),
+					                          pt.nu( 0 ), pt.nu( 1 ) );
+				if ( beyond == 0.0 && within == 0.0 )
 					return;
 
 				for ( int m = 0; m < modes; ++m )
 				{
 					int const n = ExteriorDtN::firstMode() + m;
-					out[ static_cast< std::size_t >( m ) ] +=
-						pt.weight*exterior.basis( n, pt.y( 0 ), pt.y( 1 ) )*normal;
+					double const weighted =
+						pt.weight*exterior.basis( n, pt.y( 0 ), pt.y( 1 ) );
+					outside[ static_cast< std::size_t >( m ) ] += weighted*beyond;
+					inside[ static_cast< std::size_t >( m ) ] += weighted*within;
 				}
 			} );
 		}
@@ -4939,10 +5052,42 @@ namespace
 		if ( exteriorDatumFunction && transferPath )
 		{
 			mfem::PositionFunction g = exteriorDatumFunction;
+			/*
+			 * CS-3's DIRICHLET HALF: WHAT IS TRANSFERRED IS g - psi_c, BECAUSE
+			 * THE FIELD THIS LOAD DRIVES IS THE REMAINDER.
+			 *
+			 * The datum function reports the PHYSICAL flux on Gamma -- the modal
+			 * sum, plus FB-7's exterior conductors, plus whatever a caller
+			 * installed through setExteriorDatum(). Under the split the solved
+			 * field is psi_p = psi - psi_c, so the boundary condition it must
+			 * satisfy is psi_p = g - psi_c and the load has to carry the
+			 * difference. Exactly the shift the FITTED path takes a few lines
+			 * above through meq::RemainderDatumCoefficient; the two paths impose
+			 * their datum by different mechanisms -- essential trace dofs there,
+			 * a boundary load here -- and the shift is the same statement.
+			 *
+			 * HERE RATHER THAN INSIDE setExteriorCoupling()'s LAMBDA, so that a
+			 * datum a caller installs DIRECTLY is shifted too. One site, and it
+			 * is the site the weak form reads.
+			 *
+			 * conductorPsi() is EXACTLY ZERO with no conductor field, so a run
+			 * without the split builds the coefficient it always built and
+			 * answers bit for bit; ConductorSubtraction.cpp's control asserts
+			 * that rather than assuming it.
+			 *
+			 * `this` LIVE, for the reason the coefficient vector is captured
+			 * live in setExteriorCoupling(): prepare() runs once per mesh and
+			 * setConductorField() may have come after it.
+			 */
+			GradShafranovSolver const *self = this;
 			exteriorDatumCoefficient =
 				std::make_unique<mfem::PathTraceCoefficient>(
 					*transferPath,
-					[ g ]( mfem::Vector const &x ) { return -g( x ); } );
+					[ g, self ]( mfem::Vector const &x )
+					{
+						return -( g( x )
+						          - self->conductorPsi( x( 0 ), x( 1 ) ) );
+					} );
 
 			// Whole, every time. See the declaration.
 			fluxRhs = std::make_unique<mfem::LinearForm>();
@@ -8062,8 +8207,10 @@ namespace
 		 * prescribed currents and moves with neither the iterate nor `a`.
 		 */
 		std::vector< double > conductorMoments;
+		std::vector< double > subtractedMoments;
 		if ( exteriorCoupling )
-			exteriorConductorMoments( *exteriorCoupling, conductorMoments );
+			conductorMomentsOnGamma( *exteriorCoupling, conductorMoments,
+			                         subtractedMoments );
 
 		/// Scratch for the gathers below; see meq::CompressedRows. Hoisted out of
 		/// the lambdas so a per-call std::vector allocation does not land in the
@@ -8102,6 +8249,29 @@ namespace
 			 */
 			if ( !conductorMoments.empty() )
 				total -= conductorMoments[ static_cast<std::size_t>( mode ) ];
+			/*
+			 * AND CS-3's TERM IS ADDED WHERE FB-7's IS SUBTRACTED, WHICH IS A
+			 * DERIVATION RATHER THAN A SYMMETRY.
+			 *
+			 * The condition is that the PHYSICAL interior normal flux match the
+			 * exterior one. `row . state` is int_Gamma ( q_h . nu ) C_m over the
+			 * SOLVED flux, and under the split the solved flux is q_p while the
+			 * physical one is q_p + q_c -- so the interior side is short by the
+			 * subtracted conductors' own moment and it is put back with a PLUS.
+			 * FB-7's conductor is on the other side of the equation: its field
+			 * is part of the EXTERIOR, appears on both sides, and is removed
+			 * from the interior one with a MINUS.
+			 *
+			 * Same integral, opposite sign, and the reason is which side of
+			 * Gamma the conductor is on -- which is exactly what
+			 * requireConductorsInsideGamma() and requireConductorsOutsideGamma()
+			 * between them guarantee is unambiguous.
+			 *
+			 * Empty without a conductor field, so a run without the split
+			 * evaluates the expression it always did.
+			 */
+			if ( !subtractedMoments.empty() )
+				total += subtractedMoments[ static_cast<std::size_t>( mode ) ];
 			return total
 			       + exteriorCoupling->blockEntry( ExteriorDtN::firstMode() + mode )
 			         *exteriorCoefficientValues[ static_cast<std::size_t>( mode ) ];

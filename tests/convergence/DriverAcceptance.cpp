@@ -1367,7 +1367,8 @@ BOOST_AUTO_TEST_CASE( theDriverTakesTheConductorsOutOfTheMesh )
 	// a case whose gate sits a few per cent above its reading goes red on an
 	// unrelated change to the quadrature or the refinement rather than on a
 	// defect. Measured at three refinement levels the difference falls at
-	// observed rate 2.69, which is what says it is the discretisation.
+	// observed rate 2.69, which is what says it is the discretisation --
+	// MEASUREMENTS.md M-144 has that table.
 	BOOST_TEST( restored < 8.0e-2,
 	            "psi_p + psi_c does not reproduce the meshed equilibrium: "
 	            << restored << " relative" );

@@ -219,6 +219,47 @@ namespace meq
 			///         its coordinates never round-trip.
 			void setCoincidenceTolerance( double toleranceIn );
 
+			/**
+			 * How far the FARTHEST conductor lies inside a semicircular `Gamma`
+			 * of radius @a rhoGamma centred at `( 0, centreZ )`, in metres.
+			 * Positive when every conductor is strictly inside it; an empty
+			 * field gives infinity.
+			 *
+			 * **THIS IS THE MIRROR IMAGE OF meq::ExteriorCoilSet::clearance()
+			 * AND THE TWO PRECONDITIONS ARE OPPOSITE ONES.** A conductor handed
+			 * to setExteriorConductors() must be OUTSIDE `Gamma`, so that
+			 * `psi_coil` is `Delta*`-harmonic in `Omega` and the conductor can
+			 * enter through the boundary alone. A conductor handed to
+			 * setConductorField() must be INSIDE it, and for the dual reason:
+			 * the exterior field is represented by a Gegenbauer series in
+			 * `rho^( 1 - n )`, which converges outside `Gamma` only when every
+			 * source it stands for is within it. A subtracted conductor beyond
+			 * `Gamma` puts a singularity in the region that series describes,
+			 * and the run converges to a machine nobody described.
+			 *
+			 * So a conductor is required to be strictly on one side or the
+			 * other depending on WHICH ROUTE carries it, and one straddling
+			 * `Gamma` belongs to neither -- which is exactly what
+			 * `ExteriorCoilSet::clearance()`'s own documentation says from its
+			 * side.
+			 *
+			 * **AND IT CONSTRAINS NOTHING WITHOUT AN EXTERIOR COUPLING.** On a
+			 * fixed-boundary problem there is no series and no `Gamma`, so a
+			 * subtracted conductor may sit anywhere at all -- inside the mesh,
+			 * outside it, or straddling its edge. The caller is
+			 * GradShafranovSolver, which knows whether a DtN is installed; this
+			 * function only measures.
+			 *
+			 * The distance is to the FARTHEST point of each member -- the most
+			 * distant corner of a rectangle, the ring itself for a filament --
+			 * so a conductor straddling `Gamma` reports a negative containment
+			 * rather than being judged by its centre.
+			 *
+			 * @throws std::invalid_argument on a non-finite argument or a
+			 *         non-positive radius.
+			 */
+			double containment( double centreZ, double rhoGamma ) const;
+
 		private:
 			double mu0Value;
 			double toleranceValue;

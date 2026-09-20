@@ -166,6 +166,16 @@
 # file does not have. Run it here to see the two routes agree, not to see one
 # of them win.
 #
+# AND `Model = "filament"` IS THE WORST CASE ON THIS FILE RATHER THAN A TYPICAL
+# ONE. Omega here IS the plasma, so the conductors sit INSIDE the sampled
+# domain and the 129 x 129 output grid has nodes millimetres from each
+# filament -- where psi of a line current genuinely diverges. Measured against
+# the rectangle route, MEASUREMENTS.md M-145: 1.23 relative everywhere, 3.8e-03
+# beyond 0.10 m of a coil centre, 6.9e-04 beyond 0.40 m. The solve is unmoved
+# (5 Newton iterations either way); what changes is the field within a coil
+# radius of a conductor. A real machine has its coils in a vacuum region
+# outside the plasma, where only the last two of those figures are reachable.
+#
 # AND THE .gf CHANGES MEANING, LOUDLY. Under [conductors] the solved field is
 # psi_p, so coils-rectangle_psi.gf holds the REMAINDER and [initialguess] File
 # would be read as one. The format cannot record which, so MEQ says so on

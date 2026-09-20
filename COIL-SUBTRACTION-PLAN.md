@@ -302,8 +302,9 @@ must.
 | **CS-1** | `meq::ConductorField` for FILAMENTS FIRST — one Carlson evaluation per point, no quadrature, and the only conductor MEQ structurally cannot mesh. §4b. **BUILT**: `src/meq/ConductorField.{hpp,cpp}` and `tests/unit/ConductorFieldTests.cpp`, 7 cases, MFEM-free so CI runs it. §7 has the two decisions behind it and §7.3 what it does NOT yet do |
 | **CS-1b** | the same with a quadrature rule around it, which is the rectangle. **BUILT** — `add( Coil const & )` beside `add( CurrentFilament const & )`, summing through `meq::CoilSet`. **`coincides()` stays FILAMENT-ONLY**, which is a contract and not an omission: `meq::coilPsi()` is *"Valid EVERYWHERE, including inside the coil"*, so a rectangle has no line singularity for a mesh point to land on and refusing one would reject the ordinary configuration. The quadrature order forwards, which is what §7.2's CS-5 replacement needs |
 | **CS-2** | the split on a FIXED-boundary case with coils, where nothing else moves. **BUILT AND GREEN**, and the acceptance is an IDENTITY rather than a rate — §7.4 |
-| **CS-3** | the Dirichlet datum and the DtN coupling |
-| **CS-4** | every consumer of `psi`, with a test per consumer that the total is read |
+| **CS-3** | the Dirichlet datum and the DtN coupling. **BUILT AND GREEN** — §10. Two halves that had to land together: `prepare()` transfers `g − psi_c` inward, and `transmissionConstraint()` ADDS the subtracted conductors' moment on Gamma where FB-7's is subtracted. The refusal in `setConductorField()` is lifted and replaced by a GEOMETRIC one — a subtracted conductor must lie strictly INSIDE Gamma, the mirror image of `setExteriorConductors()`' own precondition |
+| **CS-4** | every consumer of `psi`, with a test per consumer that the total is read. **TRANCHE ONE DONE** — the critical-point finder, the element fill, `peakAt`, the source and its Jacobian, the limiter search and value. **AND THE `.nc` GRID**, which §8.3 says is one of the two formats that CAN keep `psi_c` exact: the driver adds it back at every located node, and `B` with it through `meq::ConductorField::poloidalField()` — the one entry point that takes the axis limit, where `q = ( 1/r ) grad_bar psi` is `0/0` and a half-disc machine's whole first grid column sits. What is left is `_surfaces.nc` and the tracer |
+| **CS-T** | **`[conductors] Model`, the key that makes any of this reachable from a file.** **BUILT** — §11. `"meshed"` (the default, unchanged), `"subtracted"`, `"filament"`, plus `QuadratureOrder` for the rectangles. The driver drops its `meq::CoilSet` when the split is taken, because the double count is the failure with no symptom |
 | **CS-6** | **a restart format that self-describes.** §8.3: a `.gf` cannot say whether it holds `psi` or `psi − psi_c`, and a flag would not be enough because a remainder is only meaningful with the conductors it is a remainder from. NetCDF is the vehicle MEQ already has — §9 |
 | **CS-5** | re-take M-111 with the conductor models matched. **[M-139](MEASUREMENTS.md#m-139) partly kills this as written** — the benchmark cannot resolve MEQ below about 7e-04 whatever either code does, so it cannot be the acceptance for a change whose whole claim is that the conductors are resolved EXACTLY. **The replacement is MEQ's own**: an expensive quadrature-based reference, §7 |
 
@@ -496,12 +497,11 @@ refusal, walked over the mesh's **vertices and nodes**, which are different sets
 a curved or high-order mesh carries nodes the vertex array does not, and it is
 the nodes the datum and the output grid are evaluated at.
 
-**AND `setConductorField()` REFUSES AN EXTERIOR COUPLING**, because the DtN's
-datum and transmission rows are written against the physical `psi` on `Γ` and
-would need shifting too. That is CS-3. **Refusing the pair is the point**: the
-two together would solve a consistent-looking problem that is not the one asked
-for, which is the failure `setExteriorConductors()`'s own documentation already
-names for its straddling case.
+**AND `setConductorField()` REFUSES A CONDUCTOR THAT IS NOT INSIDE `Γ`** when a
+DtN is installed — §10, which is where the coupling's own two halves are. On a
+**fixed**-boundary problem there is no `Γ` and no series, so a subtracted
+conductor may sit anywhere at all and no geometric refusal applies; that is
+this section's own domain.
 
 **THE ACCEPTANCE IS `0.000e+00` AND NOT A RATE.** Put a filament inside `Ω`,
 give the solve no plasma, and hand it the filament's own field as the physical
@@ -645,14 +645,16 @@ container that holds data *and* metadata — which is CS-6.
 
 ### 8.4 What unlocks what
 
-The two refusals in `setConductorField()` are the measure of CS-4's progress:
+The refusals `setConductorField()` carried are the measure of CS-4's progress,
+and both are now lifted:
 
 * **a `NormalisedSource`** needs `psi_ax` and `psi_bnd` off the total, which is
   `CriticalPoints.cpp` plus the limiter and X-point rows — and `insidePlasma()`,
   which decides the support fill. That is the whole of what makes a *physical*
   case reachable, so it is CS-4's first tranche and everything else can wait.
-* **an exterior coupling** is CS-3 and is a different question: the DtN's datum
-  and transmission rows, not a consumer of `psi`.
+* **an exterior coupling** was CS-3 and is a different question: the DtN's datum
+  and transmission rows, not a consumer of `psi`. §10 is what it took, and the
+  refusal it left behind is geometric rather than about progress.
 
 ### 8.5 The evaluation abstraction, which replaces §8.2's sixty-eight setters
 
@@ -811,6 +813,169 @@ into a field that nothing writes back, the accepted-and-ignored shape.
   its input has to carry them too, or it regenerates a file that cannot be run.
 * **whether the `.gf` pair survives at all** as MEQ's warm start.
   `[initialguess] File`/`MeshFile` reads `.gf` today, and a configuration naming
-  one written under a split is the failure this stage exists to prevent. **The
-  cheap guard needs no new format and should be done first**: refuse a `.gf`
-  warm start when a conductor field is configured.
+  one written under a split is the failure this stage exists to prevent.
+  **REFUSING THE PAIR WAS PROPOSED HERE AND WAS DECIDED AGAINST.** Ian:
+  *"assume the user knows what they're doing and so the warm start .gf file
+  changes meaning (from psi to psi_p); warn loudly on stdout that you're doing
+  it though."* So `apps/meq.cpp` prints the change of meaning whenever both are
+  set, and the key is not refused. What CS-6 owes is the format that makes the
+  warning unnecessary.
+
+
+---
+
+## 10. CS-3: the exterior coupling, and the two halves that had to land together
+
+**WHAT MOVED IS TWO EXPRESSIONS, AND §3 NAMED THEM BOTH IN ADVANCE**: *"The
+Dirichlet datum and the exterior coupling both move... the two must move
+together or the datum is double-counted."* That is exactly what happened and
+exactly what the acceptance falsifies.
+
+| half | where | what it became |
+|---|---|---|
+| **Dirichlet** | `prepare()`, at the one site that builds the `PathTraceCoefficient` | what is transferred inward is `g( x ) − psi_c( x )` rather than `g( x )` |
+| **Neumann** | `transmissionConstraint()` | the subtracted conductors' own moment on `Γ` is **ADDED**, where FB-7's exterior one is **SUBTRACTED** |
+
+**THE SIGNS ARE OPPOSITE AND THAT IS A DERIVATION RATHER THAN AN ASYMMETRY TO
+TIDY AWAY.** The condition is that the **physical** interior normal flux match
+the exterior one. `row . state` is `∫_Γ ( q_h · ν ) C_m` over the **solved**
+flux, which under the split is `q_p` while the physical flux is `q_p + q_c` — so
+the interior side is short by the subtracted conductors' moment and it is put
+back with a plus. FB-7's conductor is on the other side of the equation: its
+field is part of the **exterior**, appears on both sides, and is removed from
+the interior one with a minus. Same integral, opposite sign, and which it is
+depends on **which side of `Γ` the conductor is on**.
+
+**SO THE GEOMETRY IS NO LONGER OPTIONAL, AND THE OLD REFUSAL IS REPLACED BY A
+BETTER ONE.** A subtracted conductor must lie strictly **inside** `Γ`; an
+exterior one strictly **outside** it. `meq::ConductorField::containment()` is
+the mirror image of `meq::ExteriorCoilSet::clearance()`, measured to the
+**farthest** point of each conductor rather than to its centre, so one
+straddling `Γ` is refused by both and belongs to neither. The reason is dual to
+FB-7's: the exterior is a Gegenbauer series in `rho^( 1 − n )` standing for the
+sources **within** `Γ`, and a subtracted conductor beyond it puts a singularity
+in the region that series describes. **Both setters check the pair**, because
+either may be called first.
+
+**AND THE ESTIMATOR NEEDED THE SAME SHIFT.** `exteriorTransmissionResidual()`
+compares an interior normal flux against an exterior one, and under the split
+the interior one it reads off the solved field is `q_p`. Without `q_c` added,
+`η₆` reports a perfectly matched boundary as mismatched by exactly the
+subtracted conductors' own flux — and the adaptive loop **marks on it**,
+refining `Γ_h` to chase an error that is not there.
+
+### 10.1 The acceptance is FB-7's case turned inside out
+
+`aConductorOutsideGammaReachesTheCoupledSolve` puts a conductor **outside** `Γ`
+and the continuous answer is `a = 0`. CS-3 puts one **inside** and every part of
+that inverts: `psi_p` is identically zero and `a` is **not** zero — it is
+`psi_c`'s own Gegenbauer trace on `Γ`, the whole datum rather than an error.
+
+`theSplitReachesTheExteriorCoupling`, no plasma, twelve modes, conductors at
+`r = 0.50`, `z = ±0.20` inside `Γ = 1.5`:
+
+| `n` | Newton | `max |psi_p|` | modal sum `−` `psi_c` on `Γ` |
+|---|---|---|---|
+| 12 | 1 | 8.7964e-09 | 1.2045e-08 |
+| 24 | 1 | 1.4261e-08 | 1.2099e-08 |
+| 48 | 1 | 1.4687e-08 | 1.1955e-08 |
+
+`psi_c` on `Γ` is **6.3838e-02**, so the remainder is **2.3e-07 of the field it
+is a remainder from** and the modal sum reproduces `psi_c` to **1.9e-07** of it.
+
+**IT IS FLAT IN `h`, AND THAT IS THE RIGHT SHAPE RATHER THAN A DISAPPOINTMENT.**
+`psi_p` is identically zero in the continuum and the discrete problem has
+nothing to converge — the remainder equation's right-hand side is zero and its
+boundary data is zero to the series truncation. What is left is the twelve-mode
+residual plus round-off, neither of which depends on `h`. **A rate assertion
+here would be wrong in both directions**: it would fail on correct code, and it
+would pass on code merely converging towards the right answer from somewhere
+large. §7.4 makes the same choice for the same reason.
+
+**The conductor's distance from `Γ` is the experiment's precision.** The
+truncated series cannot represent what falls like `( reach/rhoGamma )^n`, so the
+fixture puts the conductors at 0.40 of `Γ` and twelve modes leave about `1e-08`
+— below the round-off rather than beside it. At `r = 0.9` the ratio is 0.73, the
+residual is 15%, and `psi_p` would be carrying the **series** rather than the
+solve.
+
+### 10.2 Both halves are falsified, not argued
+
+→ **[M-143](MEASUREMENTS.md#m-143)** — the three arms at `n = 48` · what each
+broken half leaves behind · why the gate is `1e-5` and not something loose
+
+**NEITHER BROKEN ARM DIVERGES OR FAILS TO CONVERGE.** Both take one Newton step
+and report a smooth, plausible field — the same disguise FB-7 records for the
+transmission row's own sign. A residual check could not tell them from the
+correct code; only a comparison against the closed form can.
+
+---
+
+## 11. CS-T: `[conductors] Model`, and the double count
+
+**Nothing in this plan was reachable from a file**, so the only thing that could
+run it was a convergence test — which is why *"at what point can we start
+testing if this pathway is useful?"* had no answer. One key decides it:
+
+| `Model` | | |
+|---|---|---|
+| `"meshed"` | **the default** | a rectangle carrying a uniform current density as a domain source, which the mesh must resolve. Unchanged, and §0a-pre is why the default is load bearing rather than a convenience |
+| `"subtracted"` | | the same rectangle, integrated analytically and taken out of the mesh |
+| `"filament"` | | a point at each rectangle's centre carrying the same total current — the only conductor MEQ structurally cannot mesh (§4b), and a **different machine** rather than the same one computed differently |
+
+`QuadratureOrder` is the rectangles' and only theirs; it is refused on the other
+two models rather than accepted and ignored, as is `Model` naming anything but
+`"meshed"` with no `[[coils]]` to act on.
+
+**THE DOUBLE COUNT IS THE FAILURE WITH NO SYMPTOM, AND IT IS WHAT THE DRIVER
+ACCEPTANCE IS BUILT AROUND.** Leaving `meq::CoilAugmentedSource` in place beside
+`psi_c` puts the same amperes into the equation **twice**: the run converges,
+closes every border, and reports the file's own `coil_current` while carrying
+double it. `coils.reset()` in the driver is what stops it, and the control is
+`psi_p + 2 psi_c` rather than a tolerance.
+
+→ **[M-144](MEASUREMENTS.md#m-144)** — the three figures · why the middle one is
+the MESHED arm's error · the refinement study behind the gate
+
+**THREE DIAGNOSTICS ARE ABOUT WHERE THE COPPER IS RATHER THAN HOW IT ENTERS
+`F`**, and reading the driver's `meq::CoilSet` for them would have switched all
+three off under the new key: the axis screen, `checkAxis()`'s exclusion, and the
+axis-inside-copper warning. *"A plasma has no magnetic axis inside a conductor"*
+is a statement about the machine, and `psi_c` has its own O-point in the middle
+of each rectangle exactly as the meshed source does.
+
+**AND THE `.nc` GRID CARRIES THE PHYSICAL `psi` UNDER BOTH ROUTES**, which is
+§8.3's division made real: the driver adds `psi_c` back at every located node,
+and `B` with it. That needed the **axis**, where `q = ( 1/r ) grad_bar psi` is
+`0/0` and a half-disc machine's whole first grid column sits —
+`meq::filamentAxisFlux()`, `meq::coilAxisFlux()` and
+`meq::ConductorField::poloidalField()` are the closed-form limit, and
+`flux()` keeps its NaN deliberately.
+
+### 11.1 And the filament model's error profile falls out, agreeing with §4b
+
+§4b measured filament-against-rectangle on DIII-D's eighteen conductors by two
+Green's-function sums with no solver anywhere: **6.081e-03** globally and
+**6.731e-05** off them. The key makes the same comparison available through a
+whole MEQ solve, on a different machine at a different scale, for the cost of
+one edit — and it lands in the same place.
+
+→ **[M-145](MEASUREMENTS.md#m-145)** — the profile against distance from a
+conductor · why the global figure is 1.23 and why that is the model working
+
+**THE ONE THING WORTH SAYING OUT LOUD**: `examples/coils-rectangle.toml` is
+fixed boundary on a mesh that IS the plasma, so its conductors sit *inside* the
+sampled domain and the output grid has nodes millimetres from each filament.
+That is the **worst case** for a filament model, not a typical one. A real
+machine has its coils in a vacuum region outside the plasma.
+
+### 11.2 And on `examples/coils-rectangle.toml` the split buys exactly 1.00×
+
+Worth saying before somebody times it. That file's mesh is a plain Cartesian box
+that was never graded to its coils — its own header notes about three cells per
+coil are **cut** — so there is no coil refinement for the split to remove and
+the element count is identical either way. M-142's **1.96×** lives on a mesh
+built **around** its conductors, and this tree has no such case on a fixed
+boundary. `TODO` carries that as its own entry: half a dozen serious
+machine-relevant fixed-boundary cases, meshed to their conductors, is what turns
+this key into a measurement.

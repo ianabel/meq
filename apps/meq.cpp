@@ -1356,14 +1356,19 @@ int main( int argc, char **argv )
 			char const *what =
 				config->getConductors().model == meq::ConductorModel::Filament
 				? "point filaments at their centres"
-				: "rectangles carrying a uniform current density";
+				: "rectangles of uniform current density";
 
 			std::printf(
 				"MEQ: [conductors] Model = \"%s\": %d conductor%s taken OUT of\n"
-				"     the mesh and evaluated analytically as %s,\n"
-				"     total current %+.6e A. MEQ solves for the REMAINDER\n"
-				"     psi_p = psi - psi_c; the conductors are not a domain\n"
-				"     source on this run and the mesh need not resolve them.\n",
+				"     the mesh and evaluated analytically as\n"
+				// THE MODEL DESCRIPTION GETS A LINE TO ITSELF, so that neither
+				// of the two spellings can push the banner past eighty columns
+				// -- which the longer one did when it shared a line.
+				"       %s,\n"
+				"     carrying %+.6e A in total.  MEQ solves for the\n"
+				"     REMAINDER psi_p = psi - psi_c; the conductors are not a\n"
+				"     domain source on this run and the mesh need not resolve\n"
+				"     them.\n",
 				config->getConductors().model == meq::ConductorModel::Filament
 					? "filament" : "subtracted",
 				static_cast<int>( conductorField->size() ),

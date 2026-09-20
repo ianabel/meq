@@ -1,6 +1,9 @@
 #include "ConductorField.hpp"
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
+#include <string>
 #include <sstream>
 #include <stdexcept>
 
@@ -163,6 +166,44 @@ namespace meq
 		gradPsi( r, z, dPsiDr, dPsiDz );
 		qR = dPsiDr/r;
 		qZ = dPsiDz/r;
+	}
+
+	double ConductorField::containment( double centreZ, double rhoGamma ) const
+	{
+		requireFinite( centreZ, "the centre height",
+		               "meq::ConductorField::containment" );
+		requireFinite( rhoGamma, "the radius of Gamma",
+		               "meq::ConductorField::containment" );
+		if ( !( rhoGamma > 0.0 ) )
+			throw std::invalid_argument(
+				"meq::ConductorField::containment: the radius of Gamma must be "
+				"positive; got " + std::to_string( rhoGamma ) );
+
+		// An empty field is contained by everything, and says so with an
+		// infinity rather than with a large number a caller might read as a
+		// measurement. The same convention ExteriorCoilSet::clearance() uses.
+		double farthest = 0.0;
+
+		for ( CurrentFilament const &one : filamentList )
+			farthest = std::max( farthest,
+			                     std::hypot( one.radius(),
+			                                 one.height() - centreZ ) );
+
+		for ( Coil const &one : coilList.coils() )
+		{
+			// The FARTHEST corner, which is rMax paired with whichever of the
+			// two heights is further from the centre. Taking the farthest point
+			// rather than the centre is what makes a conductor straddling Gamma
+			// report a negative containment.
+			double const reach = std::max( std::abs( one.zMin() - centreZ ),
+			                               std::abs( one.zMax() - centreZ ) );
+			farthest = std::max( farthest, std::hypot( one.rMax(), reach ) );
+		}
+
+		if ( empty() )
+			return std::numeric_limits<double>::infinity();
+
+		return rhoGamma - farthest;
 	}
 
 	void ConductorField::poloidalField( double r, double z,

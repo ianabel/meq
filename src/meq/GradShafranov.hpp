@@ -2471,12 +2471,34 @@ namespace meq
 			double conductorNormalFlux( double r, double z,
 			                            double nuR, double nuZ ) const;
 
-			/// Each transmission row's own conductor term,
+			/// The same for setConductorField()'s SUBTRACTED conductors, with
+			/// the same axis rule, and zero without a split. CS-3.
+			///
+			/// **THE TWO ENTER THE TRANSMISSION CONDITION WITH OPPOSITE SIGNS
+			/// AND THAT IS NOT AN ASYMMETRY TO TIDY AWAY.** An exterior
+			/// conductor's field is part of what the EXTERIOR carries, so its
+			/// moment is subtracted from the interior side; a subtracted one is
+			/// part of what the INTERIOR carries and the solved flux is missing
+			/// it, so its moment is added. Same integral, different side of the
+			/// equation.
+			double conductorFieldNormalFlux( double r, double z,
+			                                 double nuR, double nuZ ) const;
+
+			/// Each transmission row's two conductor terms,
 			/// `int_Gamma ( q_coil . nu ) C_m dGamma`, swept exactly as
-			/// exteriorTransmissionRows() sweeps. Empty when there are no
+			/// exteriorTransmissionRows() sweeps -- @a outside for the
+			/// conductors beyond `Gamma` and @a inside for the subtracted ones
+			/// within it. Either is all zeros when its route carries no
 			/// conductors.
-			void exteriorConductorMoments( ExteriorDtN const &exterior,
-			                               std::vector<double> &out ) const;
+			///
+			/// **ONE SWEEP FOR BOTH, AND THE RULE IS WHY.** A moment taken on a
+			/// different quadrature from the rows it is combined with leaves an
+			/// `O( h )` mismatch against them, so the two must share the sweep
+			/// as well as the rule; taking them separately is two chances for
+			/// that to drift.
+			void conductorMomentsOnGamma( ExteriorDtN const &exterior,
+			                              std::vector<double> &outside,
+			                              std::vector<double> &inside ) const;
 
 			/// The rows of `T`: the transmission condition of
 			/// FREE-BOUNDARY-PLAN.md section 4.2, tested against each exterior

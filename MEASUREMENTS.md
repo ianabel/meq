@@ -5797,3 +5797,131 @@ no contention.
 **THE CACHE IS EXACT RATHER THAN CLOSE**, which is asserted rather than assumed:
 `ConductorSubtraction` reads `1.585e-05, 1.678e-06, 2.612e-07` and its three
 identities at `0.000e+00` both before and after it was introduced.
+
+### M-143
+
+**CS-3's TWO HALVES ARE SEPARATELY LOAD BEARING, AND BOTH WERE BROKEN ON PURPOSE
+TO SHOW IT.** `COIL-SUBTRACTION-PLAN.md` §3 predicted the trap in advance —
+*"the two must move together or the datum is double-counted"* — so the question
+was not whether the pair works but whether **each** of them does something. The
+instrument is the dual of FB-7's coupled case: a conductor **inside** `Γ`,
+subtracted, with no plasma, where the continuous answer is `psi_p ≡ 0` and `a`
+is `psi_c`'s own Gegenbauer trace.
+
+`theSplitReachesTheExteriorCoupling`, `k = 2`, twelve modes, conductors at
+`r = 0.50`, `z = ±0.20` inside `Γ = 1.5`, with `psi_c` on `Γ` reading
+**6.3838e-02**:
+
+| `n` | Newton | `max |psi_p|` | of the datum | modal sum `−` `psi_c` on `Γ` |
+|---|---|---|---|---|
+| 12 | 1 | 8.7964e-09 | 1.4e-07 | 1.2045e-08 |
+| 24 | 1 | 1.4261e-08 | 2.2e-07 | 1.2099e-08 |
+| 48 | 1 | 1.4687e-08 | 2.3e-07 | 1.1955e-08 |
+
+**FLAT IN `h`, AND THAT IS THE RIGHT SHAPE.** `psi_p` is identically zero in the
+continuum and the discrete problem has nothing to converge: the remainder
+equation's right-hand side is zero and its boundary data is zero to the series
+truncation. What is left is the twelve-mode residual plus round-off, and the
+third column says so directly by not moving either. **A rate assertion would
+have been wrong in both directions** — it would fail on correct code, and it
+would pass on code merely converging towards the answer from somewhere large.
+
+**AND THE FALSIFICATION IS THE POINT OF THE ENTRY.** Each half was broken in
+turn, rebuilt, and the case re-run at `n = 48`:
+
+| | `max |psi_p|` | of the datum | modal `−` `psi_c` |
+|---|---|---|---|
+| **as built** | **1.47e-08** | **2.3e-07** | 1.20e-08 |
+| the interior moment's **sign** flipped | 4.20e-02 | 6.6e-01 | 4.12e-02 |
+| the **datum shift** removed from `prepare()` | 2.10e-02 | 3.3e-01 | 4.12e-02 |
+
+**NEITHER BROKEN ARM DIVERGES OR FAILS TO CONVERGE.** Both take one Newton step
+and report a smooth, plausible field — the disguise `CLAUDE_FB.md` already
+records for the transmission row's own sign. A residual check cannot tell them
+from correct code; only a comparison against the closed form can. That is also
+why the gate is `1e-5` of the datum rather than something loose: the separation
+between right and wrong here is six orders of magnitude, so a loose gate would
+be throwing away the discrimination the fixture was built for.
+
+### M-144
+
+**THE CONDUCTOR SPLIT THROUGH THE DRIVER, AND THE CONTROL IS THE DOUBLE COUNT
+RATHER THAN A TOLERANCE.** `[conductors] Model = "subtracted"` on
+`examples/coils-rectangle.toml`, against the same file meshed, `k = 2`, 768
+elements. The failure this is built around has no symptom of its own: leaving
+`meq::CoilAugmentedSource` in place beside `psi_c` puts the same amperes into
+the equation twice, and the run converges, closes every border, and reports the
+file's own `coil_current` while carrying double it.
+
+| | relative in L2 |
+|---|---|
+| the `.gf` against the meshed `psi` | 1.815e+00 — it really is a remainder |
+| `psi_p + I_h( psi_c )` | **4.744e-02** |
+| `psi_p + 2 I_h( psi_c )`, the double count | 1.800e+00 |
+
+**THE 4.7e-02 IS THE MESHED ARM'S OWN ERROR AND NOT THE SPLIT'S**, which is why
+the gate is 8% rather than anything near round-off. That file's coils are 0.10 m
+square against cells of 0.0625 × 0.0583, so about three cells per conductor are
+**cut** and the meshed source carries a jump inside an element. Driving it down
+is a property of the mesh: re-run at three refinement levels through the driver,
+the L2 difference reads
+
+| `RefinementLevels` | `max|Δψ|` | L2 `Δψ` | rate |
+|---|---|---|---|
+| 1 | 2.986803e-03 | 2.668126e-04 | — |
+| 2 | 1.898700e-03 | 2.751677e-04 | −0.04 |
+| 3 | 4.749327e-04 | 4.269867e-05 | **2.69** |
+
+— the non-monotone middle row being exactly the unfitted-geometry behaviour
+[M-141](#m-141) measured for the same reason, and the 2.69 being what says it is
+the discretisation.
+
+**AND THE SPLIT BUYS EXACTLY `1.00×` ON THIS FILE**, which is worth knowing
+before anybody times it: its mesh is a plain Cartesian box that was never graded
+to its coils, so there is no coil refinement to remove and the element count is
+identical either way. [M-142](#m-142)'s **1.96×** lives on a mesh built *around*
+its conductors, and MEQ has no fixed-boundary case of that kind — `TODO`'s
+*Half a dozen SERIOUS machine-relevant FIXED-BOUNDARY cases* is the entry for it.
+**So the key is built and its benefit is still unmeasured, and those are
+different sentences.**
+
+
+### M-145
+
+**THE FILAMENT MODEL'S ERROR PROFILE, MEASURED ON MEQ'S OWN FIXTURE, AND IT
+AGREES WITH §4b's DIII-D FIGURES.** `[conductors] Model = "filament"` against
+`"subtracted"` on `examples/coils-rectangle.toml` — the same two conductors, one
+as a rectangle of uniform current density and one as a point at its centre
+carrying the same total current, nothing else moved. Both converge in **5
+Newton iterations**. On the 129 × 129 output grid, relative to
+`max |psi|` = 1.411e-01:
+
+| region | `max |Δψ|` relative | nodes |
+|---|---|---|
+| **everywhere** | **1.23e+00** | 16,641 |
+| beyond 0.05 m of a coil centre | 2.00e-02 | 16,457 |
+| beyond 0.10 m — i.e. outside the conductor, whose half-extent is 0.05 m | **3.78e-03** | 15,911 |
+| beyond 0.20 m | 1.22e-03 | 14,711 |
+| beyond 0.40 m | **6.86e-04** | 11,513 |
+
+**THE 1.23 IS THE LOGARITHM AND NOTHING ELSE.** The worst node is at
+`R = 2.0984, Z = −0.6016`, **2.2 mm** from the filament, where `psi` of a line
+current genuinely diverges. That is the model behaving correctly rather than a
+defect, and it is why `COIL-SUBTRACTION-PLAN.md` §4b calls a filament MEQ *"a
+per-cent-level answer near the coils and far better away from them"* and a mode
+to offer rather than an approximation to hide.
+
+**AND THE PROFILE LANDS ON §4b's INDEPENDENT NUMBERS.** That section measured
+filament-against-rectangle on DIII-D's eighteen conductors at **6.081e-03**
+globally and **6.731e-05** off them for the matched model, by two
+Green's-function sums with no solver anywhere. This is the same comparison
+through a whole MEQ solve on a different machine at a different scale, and off
+the conductors it reads 3.78e-03 falling to 6.86e-04. Two routes to one number.
+
+**WHAT IT MEANS FOR THIS PARTICULAR FILE, WHICH IS WORTH SAYING BEFORE SOMEBODY
+TRIES IT.** `examples/coils-rectangle.toml` is fixed boundary on a mesh that IS
+the plasma, so its conductors sit INSIDE the sampled domain and the output grid
+has nodes millimetres from each filament. A real machine has its conductors in a
+vacuum region outside the plasma, where only the last two rows of that table are
+reachable. **This fixture is the worst case for a filament model and not a
+typical one.**
