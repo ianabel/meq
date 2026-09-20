@@ -261,7 +261,7 @@ must.
 | **CS-0b** | regenerate the references with freegs4e's `ShapedCoil`. **DONE** → **[M-139](MEASUREMENTS.md#m-139)**: DIII-D's benchmark floor goes **5.785e-03 → 7.7e-04, 7.5×**, and lands on §0a's predicted quadrature residual of 6.580e-04. **It still does not refine**, so the floor is lower and is still not MEQ's discretisation. §6 has what blocked it for a week |
 | **CS-1** | `meq::ConductorField` for FILAMENTS FIRST — one Carlson evaluation per point, no quadrature, and the only conductor MEQ structurally cannot mesh. §4b. **BUILT**: `src/meq/ConductorField.{hpp,cpp}` and `tests/unit/ConductorFieldTests.cpp`, 7 cases, MFEM-free so CI runs it. §7 has the two decisions behind it and §7.3 what it does NOT yet do |
 | **CS-1b** | the same with a quadrature rule around it, which is the rectangle |
-| **CS-2** | the split on a FIXED-boundary case with coils, where nothing else moves |
+| **CS-2** | the split on a FIXED-boundary case with coils, where nothing else moves. **BUILT AND GREEN**, and the acceptance is an IDENTITY rather than a rate — §7.4 |
 | **CS-3** | the Dirichlet datum and the DtN coupling |
 | **CS-4** | every consumer of `psi`, with a test per consumer that the total is read |
 | **CS-5** | re-take M-111 with the conductor models matched. **[M-139](MEASUREMENTS.md#m-139) partly kills this as written** — the benchmark cannot resolve MEQ below about 7e-04 whatever either code does, so it cannot be the acceptance for a change whose whole claim is that the conductors are resolved EXACTLY. **The replacement is MEQ's own**: an expensive quadrature-based reference, §7 |
@@ -428,3 +428,106 @@ site that loops it over a mesh arrives with the first caller in CS-2. Until then
 a coincident node is still caught — by `meq::filamentPsi()`'s own throw, at the
 first evaluation instead of at setup. **The early check is a better message, not
 a missing guard.**
+
+### 7.4 CS-2, and why its acceptance is an identity rather than a rate
+
+**`setConductorField()` IS THE OPPOSITE CASE TO `setExteriorConductors()`, AND
+THE ALGEBRA IS THE WHOLE DIFFERENCE.** FB-7's call needs its conductors
+**outside** `Γ`, because there `psi_coil` is `Δ*`-harmonic in `Ω` and the
+conductor can enter through the boundary alone — its own documentation says a
+conductor inside `Ω` "belongs in the SOURCE... put it here and the interior
+equation silently loses it". CS-2 is exactly the inside case, and what makes it
+work is that `psi_c` is **not** harmonic there:
+
+    Δ* psi_p = Δ* psi − Δ* psi_c
+             = −mu0 r ( J_plasma + J_coil ) − ( −mu0 r J_coil )
+             = −mu0 r J_plasma
+
+**the conductor's delta cancels exactly.** So the conductor is in neither the
+mesh nor the source, and the remainder sees a bounded right-hand side supported
+on the plasma alone.
+
+**WHAT MOVED IN THE SOLVER IS ONE COEFFICIENT AND ONE REFUSAL.**
+`setBoundaryData()` keeps its meaning — it is the datum for the **physical**
+`psi` — and what is projected onto `Γ` becomes `psi|_Γ − psi_c|_Γ`, through a
+`RemainderDatumCoefficient` at the one existing projection site. Plus the §7.1
+refusal, walked over the mesh's **vertices and nodes**, which are different sets:
+a curved or high-order mesh carries nodes the vertex array does not, and it is
+the nodes the datum and the output grid are evaluated at.
+
+**AND `setConductorField()` REFUSES AN EXTERIOR COUPLING**, because the DtN's
+datum and transmission rows are written against the physical `psi` on `Γ` and
+would need shifting too. That is CS-3. **Refusing the pair is the point**: the
+two together would solve a consistent-looking problem that is not the one asked
+for, which is the failure `setExteriorConductors()`'s own documentation already
+names for its straddling case.
+
+**THE ACCEPTANCE IS `0.000e+00` AND NOT A RATE.** Put a filament inside `Ω`,
+give the solve no plasma, and hand it the filament's own field as the physical
+datum. Then `Δ* psi_p = 0` with `psi_p|_Γ = 0`, so the remainder is identically
+zero and the reported total is the filament's field **exactly** — at every
+point, including arbitrarily close to the conductor, which no meshed solve of
+any degree can do. That is §2(b)'s claim reduced to something a zero-tolerance
+assertion can check:
+
+| `k` | elements | `max |psi_p|` | `max |psi_c|` on `Γ` |
+|---|---|---|---|
+| 1 | 128 | **0.000e+00** | 1.757e-01 |
+| 2 | 128 | **0.000e+00** | 1.757e-01 |
+| 3 | 128 | **0.000e+00** | 1.757e-01 |
+
+**AND IT DISCRIMINATES, WHICH IS THE HALF THAT MAKES IT WORTH HAVING.** The same
+configuration with `setConductorField()` simply not called gives
+`max |psi_h| = 7.854e-02` — 45% of the datum's own scale. It converges, it is
+smooth, and it is the harmonic extension of `psi_c|_Γ` rather than zero: a
+perfectly plausible solve of the wrong problem. Without that control the
+identity above would also be satisfied by a solver that ignored the datum
+entirely.
+
+`tests/convergence/ConductorSubtraction.cpp` is the acceptance, four cases.
+
+### 7.5 Writing the doxygen found two defects, which is the argument for writing it
+
+Annotating the accessors whose MEANING changes under the split — the task being
+"so we know these meanings, this could bite later" — required saying what each
+one returns, and two of those sentences turned out to be false of the code.
+
+**THE SOURCE WAS EVALUATED AT THE REMAINDER.**
+`SourceIntegrator::sourceValue()` calls `source->f( r, z, psi )` with the solved
+potential, which under the split is `psi_p` — while `J_plasma` is a function of
+the **physical** flux. `f( r, z, psi_p )` where `f( r, z, psi_p + psi_c )` is
+meant converges at the full rate to a different equilibrium. Fixed by
+`SourceIntegrator::setConductorField()`, on the existing `setPlasmaComponent()`
+pattern; null shifts by exactly zero, so nothing that does not use the split
+moves by a bit.
+
+**AND THE JACOBIAN TOOK THE WRONG ARGUMENT, WITH A PLAUSIBLE REASON FOR IT.**
+The first version of that doxygen said `dFdPsi` needs no shift because
+`d( psi_c + psi_p )/d( psi_p )` is exactly 1. **True of the factor and
+irrelevant to the argument**: `dFdPsi` is *evaluated at* a flux, and
+`dF/d(psi_p)` at `psi_p` is `dF/dpsi` at `psi_c + psi_p`. The assembly was
+passing the remainder. This is `CLAUDE_HDGGS.md`'s *A wrong Jacobian is
+invisible to a convergence table* in its exact form — Newton converges either
+way, to a different problem or merely more slowly.
+
+**NEITHER COULD HAVE BEEN CAUGHT BY §7.4's ACCEPTANCE**, and that is the
+transferable part. Its source is a vacuum, `f ≡ 0`, so it returns the same
+number whichever flux it is handed: **a test that cannot fail on the thing being
+changed**, which is the same shape as `Contour::fallbackLocations` reading 0
+before and after, and as the dead `of which transmission` counter. The case
+added for it compares the split against a control that does the shift **in the
+caller** — a source wrapper plus a caller-shifted datum, with no conductor field
+set — so the control runs none of the new code:
+
+    |split - control| = 8.979e-15   against a scale of 5.590e-02
+
+with the control's own scale asserted non-trivial, since a comparison between
+two ways of computing nothing would also agree.
+
+**AND ONE LIMIT IS REFUSED RATHER THAN DOCUMENTED AWAY.**
+`setConductorField()` rejects a `meq::NormalisedSource`: that machinery divides
+by `psi_ax` and `psi_bnd`, which are functionals of the physical flux, while
+this solver's critical-point search runs on `psi_p`. The normalisation would be
+taken against the remainder's axis — not a failure, a different problem solved
+perfectly. **CS-4 is the stage that makes every consumer read the total**, and
+until then the refusal is what stops the split being used where it is wrong.

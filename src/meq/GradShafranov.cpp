@@ -11,6 +11,7 @@
 // does not pull in a file it needs only by reference; the definition is needed
 // here, where the field is actually evaluated.
 #include "Coils.hpp"
+#include "ConductorField.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -483,11 +484,30 @@ namespace
 		return plasmaComponent == nullptr || plasmaComponent->holds( element );
 	}
 
+	void SourceIntegrator::setConductorField( ConductorField const *conductors )
+	{
+		conductorFieldShift = conductors;
+	}
+
 	double SourceIntegrator::sourceValue( double r, double z, double psi,
 	                                      int element ) const
 	{
+		/*
+		 * THE SOURCE SEES THE TOTAL, NOT THE REMAINDER. Under
+		 * COIL-SUBTRACTION-PLAN.md's split the solved field is psi_p and the
+		 * `psi` above is therefore the remainder, while J_plasma is a function
+		 * of the PHYSICAL flux. Adding psi_c back here is what keeps the two
+		 * halves of the split consistent -- and getting it wrong is silent:
+		 * f( r, z, psi_p ) converges at the full rate to a different
+		 * equilibrium. The shift is exactly zero with no conductor field, so
+		 * every existing path is bit-identical.
+		 */
+		double const total = conductorFieldShift
+			? psi + conductorFieldShift->psi( r, z )
+			: psi;
+
 		if ( elementCarriesPlasma( element ) )
-			return source->f( r, z, psi );
+			return source->f( r, z, total );
 
 		// Off the plasma's component. `normalised` is null exactly when the
 		// source is not a NormalisedSource, in which case it cannot have been
@@ -608,7 +628,20 @@ namespace
 			if ( !elementCarriesPlasma( tr.ElementNo ) )
 				continue;
 
-			mfem::AddMult_a_VVt( -weight*source->dFdPsi( r, z, psi )/r, shape, elmat );
+			// THE ARGUMENT IS SHIFTED EVEN THOUGH THE CHAIN-RULE FACTOR IS 1.
+			// d( psi_c + psi_p )/d( psi_p ) = 1, so no factor is owed -- but
+			// dFdPsi is EVALUATED AT a flux, and the flux it must be evaluated
+			// at is the physical one. dF/d(psi_p) at psi_p is dF/dpsi at
+			// psi_c + psi_p, and a Jacobian taken at the wrong point is the
+			// defect CLAUDE.md's "A wrong Jacobian is invisible to a
+			// convergence table" is about: Newton still converges, to a
+			// solution of a different problem, or merely slower.
+			double const totalPsi = conductorFieldShift
+				? psi + conductorFieldShift->psi( r, z )
+				: psi;
+
+			mfem::AddMult_a_VVt( -weight*source->dFdPsi( r, z, totalPsi )/r,
+			                     shape, elmat );
 		}
 	}
 
@@ -2435,6 +2468,101 @@ namespace
 		 * calls may come in either order and a check in the first would be
 		 * vacuous whenever the second had not happened yet.
 		 */
+		/*
+		 * COIL-SUBTRACTION-PLAN.md section 7.1's refusal, walked over the mesh.
+		 *
+		 * VERTICES AND NODES ARE DIFFERENT SETS AND BOTH ARE CHECKED. A curved
+		 * or high-order mesh carries nodes the vertex array does not, and it is
+		 * the NODES that the Dirichlet datum and the output grid are evaluated
+		 * at -- so checking vertices alone would pass a mesh whose datum
+		 * evaluation is an infinity. A straight-sided mesh has GetNodes() null
+		 * and the second loop simply does not run.
+		 */
+		void requireNoConductorOnAMeshPoint( mfem::Mesh &mesh,
+		                                     ConductorField const &conductors,
+		                                     char const *where )
+		{
+			auto refuse = [ where, &conductors ]( char const *what, int index,
+			                                      double r, double z, int hit )
+			{
+				CurrentFilament const &f =
+					conductors.filament( static_cast< std::size_t >( hit ) );
+				std::ostringstream message;
+				message.setf( std::ios::scientific );
+				message.precision( 9 );
+				message << where << ": mesh " << what << " " << index
+				        << " at ( " << r << ", " << z << " ) lies ON filament "
+				        << hit << ", which is at ( " << f.radius() << ", "
+				        << f.height() << " ) carrying " << f.current()
+				        << " A. psi_c is genuinely infinite there -- this is a "
+				           "line current and the flux diverges logarithmically "
+				           "at it -- so no tolerance makes the split valid on "
+				           "this pair. Move the filament off the mesh point or "
+				           "the mesh point off the filament. NEARNESS is fine "
+				           "and is not what this refuses: meq::filamentPsi() is "
+				           "measured correct to 1e-13 from the conductor, and a "
+				           "large psi_c at one evaluation point is not an error, "
+				           "since nothing approximates psi_c by a polynomial";
+				throw std::invalid_argument( message.str() );
+			};
+
+			for ( int v = 0; v < mesh.GetNV(); ++v )
+			{
+				double const *x = mesh.GetVertex( v );
+				int const hit = conductors.indexAt( x[ 0 ], x[ 1 ] );
+				if ( hit >= 0 )
+					refuse( "vertex", v, x[ 0 ], x[ 1 ], hit );
+			}
+
+			mfem::GridFunction const *nodes = mesh.GetNodes();
+			if ( !nodes )
+				return;
+
+			mfem::FiniteElementSpace const *nodeSpace = nodes->FESpace();
+			for ( int i = 0; i < nodeSpace->GetNDofs(); ++i )
+			{
+				double const r = ( *nodes )( nodeSpace->DofToVDof( i, 0 ) );
+				double const z = ( *nodes )( nodeSpace->DofToVDof( i, 1 ) );
+				int const hit = conductors.indexAt( r, z );
+				if ( hit >= 0 )
+					refuse( "node", i, r, z, hit );
+			}
+		}
+
+		/*
+		 * THE DATUM THE SPLIT ACTUALLY IMPOSES. setBoundaryData() keeps its
+		 * meaning -- it is the datum for the PHYSICAL psi -- and what goes onto
+		 * Gamma is psi|_Gamma - psi_c|_Gamma, because the solved field is the
+		 * remainder. Getting this wrong in the harmless-looking direction, by
+		 * imposing the physical datum unshifted, does not fail: it solves a
+		 * consistent problem whose answer is wrong by the harmonic extension of
+		 * psi_c|_Gamma, which is exactly the shape of defect this tree's
+		 * stale-load entry records.
+		 */
+		class RemainderDatumCoefficient : public mfem::Coefficient
+		{
+			public:
+				RemainderDatumCoefficient( mfem::Coefficient &physicalIn,
+				                           ConductorField const &conductorsIn )
+					: physical( physicalIn ), conductors( conductorsIn )
+				{
+				}
+
+				double Eval( mfem::ElementTransformation &transformation,
+				             mfem::IntegrationPoint const &point ) override
+				{
+					double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
+					mfem::Vector position( coordinates, 3 );
+					transformation.Transform( point, position );
+					return physical.Eval( transformation, point )
+					       - conductors.psi( position( 0 ), position( 1 ) );
+				}
+
+			private:
+				mfem::Coefficient &physical;
+				ConductorField const &conductors;
+		};
+
 		void requireConductorsOutsideGamma( ExteriorCoilSet const &conductors,
 		                                    ExteriorDtN const &exterior,
 		                                    char const *where )
@@ -2530,6 +2658,86 @@ namespace
 	ExteriorCoilSet const *GradShafranovSolver::exteriorConductors() const
 	{
 		return exteriorConductorSet;
+	}
+
+	void GradShafranovSolver::setConductorField( ConductorField const &conductors )
+	{
+		/*
+		 * CS-3 AND NOT CS-2. The exterior coupling's datum and transmission
+		 * rows are written against the PHYSICAL psi on Gamma, and under the
+		 * split what lives on Gamma is psi_p -- so the two together need the
+		 * DtN's own halves shifted as well, which is CS-3 and is not built.
+		 * Refusing the pair is what stops a run that converges to a machine
+		 * nobody described, which is the failure setExteriorConductors()'
+		 * documentation already names for its own straddling case.
+		 */
+		/*
+		 * CS-4 AND NOT CS-2. A NormalisedSource divides by psi_ax and psi_bnd,
+		 * which are functionals of the PHYSICAL flux -- psi_ax is a bordered
+		 * Newton row -- and under the split the solver's own critical-point
+		 * search runs on psi_p. So the normalisation would be taken against the
+		 * remainder's axis rather than the equilibrium's, which is not a
+		 * failure but a different problem solved perfectly. The source VALUE is
+		 * shifted correctly by SourceIntegrator::setConductorField(); what is
+		 * not built is every consumer of psi that CS-4 names.
+		 */
+		if ( normalisedSource )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::setConductorField: a normalised "
+				"source is set, and the conductor-field split does not yet "
+				"reach the quantities it normalises by. psi_ax and psi_bnd are "
+				"functionals of the PHYSICAL flux, and under the split this "
+				"solver's critical-point search runs on the remainder -- so "
+				"the normalisation would be taken against the wrong field and "
+				"the run would converge to a different equilibrium without "
+				"complaining. COIL-SUBTRACTION-PLAN.md CS-4 is the stage that "
+				"makes every consumer of psi read psi_c + psi_p. A plain "
+				"meq::Source is CS-2's domain and works today" );
+
+		if ( exteriorCoupling )
+			throw std::invalid_argument(
+				"meq::GradShafranovSolver::setConductorField: an exterior "
+				"coupling is set, and the conductor-field split does not yet "
+				"reach it. COIL-SUBTRACTION-PLAN.md CS-3 is the stage that "
+				"shifts the DtN datum and the transmission rows by psi_c; "
+				"until it is built the pair would solve a consistent-looking "
+				"problem that is not the one asked for. A fixed-boundary case "
+				"is CS-2's domain and works today" );
+
+		/*
+		 * A NODE OR VERTEX ON A FILAMENT IS A GEOMETRY ERROR AND IT IS CAUGHT
+		 * HERE RATHER THAN AT THE FIRST EVALUATION. meq::filamentPsi() refuses
+		 * a point on the loop already, so nothing silently returns an infinity
+		 * -- but that throw arrives from inside a solve and names a field
+		 * point, while this one names the NODE and the FILAMENT, at setup,
+		 * before a mesh has been assembled. COIL-SUBTRACTION-PLAN.md section
+		 * 7.1 records why this is a COINCIDENCE test and not a clearance test.
+		 *
+		 * Vertices AND nodes, because they are different sets: a curved or
+		 * high-order mesh carries nodes the vertex array does not, and the
+		 * datum and the output grid are evaluated at nodes.
+		 */
+		requireNoConductorOnAMeshPoint(
+			mesh, conductors,
+			"meq::GradShafranovSolver::setConductorField" );
+
+		conductorFieldSet = &conductors;
+	}
+
+	ConductorField const *GradShafranovSolver::conductorField() const
+	{
+		return conductorFieldSet;
+	}
+
+	double GradShafranovSolver::conductorPsi( double r, double z ) const
+	{
+		// Exactly zero with no conductor field, so that psi_c + psi_p is
+		// correct on every path and no caller has to branch on whether the
+		// split is in use. That is the property CS-4 will lean on when it
+		// reaches every consumer of psi.
+		if ( !conductorFieldSet )
+			return 0.0;
+		return conductorFieldSet->psi( r, z );
 	}
 
 	double GradShafranovSolver::conductorNormalFlux( double r, double z,
@@ -4179,6 +4387,10 @@ namespace
 			// Handed unconditionally: an unfilled component is the constant
 			// true, so a solve that never asks for one is bit-unchanged.
 			sourceTerm->setPlasmaComponent( &plasmaComponentMask );
+			// COIL-SUBTRACTION-PLAN.md CS-2: the source and its Jacobian must
+			// see psi_c + psi_p rather than the solved remainder. Null unless
+			// the split is in use, and null shifts by exactly zero.
+			sourceTerm->setConductorField( conductorFieldSet );
 
 			// THE SAME BORROWING, AND FOR THE SAME REASON. The bordered solve
 			// flips this between its Picard phase and its Newton phase without
@@ -4540,7 +4752,19 @@ namespace
 		// to zero rather than to a datum, since nothing references them. See
 		// setExtension().
 		if ( boundaryData && anyFitted )
-			traceGf.ProjectBdrCoefficient( *boundaryData, fittedMarker );
+		{
+			// CS-2: what is imposed is psi|_Gamma - psi_c|_Gamma, since the
+			// solved field is the remainder. With no conductor field set this
+			// is the same call it always was.
+			if ( conductorFieldSet )
+			{
+				RemainderDatumCoefficient remainder( *boundaryData,
+				                                     *conductorFieldSet );
+				traceGf.ProjectBdrCoefficient( remainder, fittedMarker );
+			}
+			else
+				traceGf.ProjectBdrCoefficient( *boundaryData, fittedMarker );
+		}
 
 		/*
 		 * THE DATUM ON Gamma_h, AND IT IS A LOAD TERM RATHER THAN AN ESSENTIAL

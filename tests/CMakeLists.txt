@@ -128,6 +128,7 @@ endforeach()
 # and in needing tests/ on the include path, since they pull the closed-form
 # solutions out of analytic/.
 set(MEQ_CONVERGENCE_TESTS
+	ConductorSubtraction
 	FieldConvergence
 	OutputConvergence
 	SamplerConvergence
