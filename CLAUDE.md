@@ -1232,8 +1232,8 @@ the dev tree deliberately when testing a fix; otherwise leave it alone.
 
 ### `meq-integration`: the branch MEQ builds from, and why it is local only
 
-MEQ needs work from **nine MFEM branches**, and for as long as this section
-existed it named four. See the warning under the containment loop for how the
+MEQ needs work from **ten branches**, nine of them `hdgdev`'s and one off MFEM
+master, and for as long as this section existed it named four. See the warning under the containment loop for how the
 other five were found and why no check built from this table could find them:
 
 | branch | what MEQ needs from it | |
@@ -1246,6 +1246,7 @@ other five were found and why no check built from this table could find them:
 | **`pardiso-device-host-sync`** | ***"PardisoSolver: synchronise the vectors, not just the matrix"*** — the other half of M-79's device chain, on the default trace solver | merge 5 |
 | **`sundials-ida-integration`** | `mfem::IDASolver`, and the `IDAS` component that broke every MEQ test binary's link when the cache went stale — see the CUDA section's fourth bullet | merge 6 |
 | **`gf-hdg-p-adaptivity`** | upstream's own §2 work; MEQ calls nothing from it, and it is in this table because it is in the merge, which is the point of the table | merge 7 |
+| **`memory-manager-registration-refcount`** | **NOT an `hdgdev` branch — it is off MFEM master**, which is why a recipe built from the `hdgdev` list cannot see it. `internal::Memory` gains the reference count `internal::Alias` always had, so registering one address twice no longer lets the first holder's `Delete` evict the second's entry. Four routines register lazily and reach it: `MakeAlias` on an unregistered base, the device-class arms of `Read`/`Write`/`ReadWrite`, and `SetDeviceMemoryType`. MEQ proposed this shape after both projects' first mechanism proved wrong; see the `Reconstruct()` row above | merge 9 |
 | **`gf-interp-hdg-dev`** | **CCSZ INTERPOLATORY HDG** — `fem/darcy/reaction_hdg.{hpp,cpp}` with `HDGInterpolatoryReactionIntegrator`, `NodalReactionFunction` and a quadrature control, plus `HDGPostprocessBlocks` in `postprocess_hdg.*` and `DarcyHybridization::Bg_data`. **15,024 insertions across `fem/darcy/`**, verified in `libmfem.a` by `nm`. MEQ does not call any of it yet; `INTERPOLATORY-HDG-PLAN.md` is the plan | merge 8 |
 
 **THE TOPOLOGY HAS NOW CHANGED THREE TIMES AND THIS ROW HAS BEEN WRONG TWICE.**
@@ -1295,6 +1296,7 @@ git merge hdgdev/pardiso-device-host-sync
 git merge hdgdev/sundials-ida-integration
 git merge hdgdev/gf-hdg-p-adaptivity
 git merge hdgdev/gf-interp-hdg-dev                # the interpolatory half
+git merge memory-manager-registration-refcount   # NOT hdgdev's -- off master
 # ALWAYS finish with this, and believe it over the table above:
 for b in gf-hdg-subdomains-dev direct-solver-symbolic-reuse \
          gf-hdg-linearise-first gf-hdg-dev pardiso-multi-rhs \
@@ -1303,6 +1305,8 @@ for b in gf-hdg-subdomains-dev direct-solver-symbolic-reuse \
   git merge-base --is-ancestor hdgdev/$b HEAD && echo "$b contained" \
                                               || echo "$b NOT CONTAINED"
 done
+git merge-base --is-ancestor memory-manager-registration-refcount HEAD \
+  && echo "memory-manager contained" || echo "memory-manager NOT CONTAINED"
 ```
 
 **Run that last loop.** It is nine cheap commands and it is the only thing that
@@ -1321,12 +1325,20 @@ in `reaction_hdg.hpp` yet. The build stays green, the answers do not move, and
 the solver gets slower.
 
 **Ask the tree the other question instead.** It needs no list, which is the
-whole point, and it is what found this:
+whole point, and it is what found this — **and it has now found a tenth branch
+the same way**, `memory-manager-registration-refcount`, which is off MFEM master
+rather than `hdgdev` and which the `hdgdev/`-anchored pattern below would itself
+have missed. Match both:
 
 ```sh
 git -C ../mfem/mfem-src log --merges --format=%s meq-integration \
-  | grep -oE "hdgdev/[a-z0-9-]+" | sort -u
+  | grep -oE "hdgdev/[a-z0-9-]+|memory-manager-[a-z-]+" | sort -u
 ```
+
+**The pattern is as much a list as the loop was**, which is the lesson repeating
+one level down: an `hdgdev/`-anchored grep encodes the assumption that every
+merge comes from that remote, and the first branch that does not is invisible to
+it. Widen the pattern or read the merge subjects unfiltered.
 
 **BUT THE LOOP CHECKS THE BRANCH, NOT THE INSTALL, AND THAT GAP HAS ALREADY
 BITTEN.** Every command in it runs in `../mfem/mfem-src` and says nothing
@@ -1339,6 +1351,19 @@ prolongation on a hanging-node-free NC mesh"*, the second in exactly the
 non-conforming meshes the adaptive loop makes. So the one check this project
 trusts passed on a tree whose measurements were all taken against a library a
 day out of date.
+
+**AND THE INSTALL IS STALE RIGHT NOW.** `meq-integration` is at `808358ca06`
+and `../mfem/install` is not built from it. Three things landed that MEQ asked
+for or cares about: `86b0b0fd13`, the `ReconstructTotalFlux` alias fix, so
+`Device( "debug" )` survives a `Reconstruct()`; the reference count above; and
+`NormalTraceJumpIntegrator`'s guard. **The third makes this a CLEAN rebuild
+rather than an incremental one** — the class layout moves in a
+`MFEM_THREAD_SAFE` build, which is MEQ's build, and MEQ constructs one of those
+objects itself. **MEQ must then be fully rebuilt too**, and the timing tables
+taken against `3424f33bd5` are historical afterwards:
+[M-138](MEASUREMENTS.md#m-138)'s budget is the one that wants re-taking, since
+it is absolute where [M-137](MEASUREMENTS.md#m-137)'s payoff is a ratio between
+two MEQ binaries on one library and survives.
 
 **Check the install too, and it is one command:**
 
