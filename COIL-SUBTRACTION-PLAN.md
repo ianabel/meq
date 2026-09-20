@@ -722,10 +722,55 @@ carries a remainder. That inversion is worth stating in `tools/README.md`, which
 is the guide to which format goes with which reader, because it is the opposite
 of what the names suggest.
 
-**OPEN, AND NOT FOR THIS PLAN TO SETTLE ALONE**: whether the restart format
-should replace the `.gf` pair for MEQ's own warm start, or sit beside it. The
-warm start reads `.gf` today (`[initialguess] File`/`MeshFile`), and a
-configuration naming a `.gf` written under a split is exactly the failure this
-stage exists to prevent — so at minimum **the loader has to refuse a `.gf` when
-a conductor field is configured**, which needs no new format and could be done
-first.
+**SETTLED: ONE NETCDF FILE CARRIES BOTH REPRESENTATIONS, AND THE `.gf` BECOMES A
+DERIVED ARTEFACT FOR GLVis.**
+
+| | |
+|---|---|
+| **the `.nc` carries two formats** | the **rasterization** it carries today — `psi` and `B` on a uniform `( R, Z )` grid, sampled, lossy, the interchange — **and the MFEM gridfunctions**: every `P_k` coefficient, on a `dof` dimension, with the space description in attributes. One file, two representations, and adding variables is backward compatible so existing readers are untouched |
+| **the `.gf` is emitted by a small script** | from the `.nc`, carrying the **full `psi`** for GLVis. It stops being MEQ's restart format and becomes a *viewing* artefact — which is the right place for the lossy step, since for a filament `psi_c` has no representation in the space and a picture is what is wanted |
+| **the input parameters go in the output** | so that the output file regenerates the input file |
+
+**THE THIRD ONE ALSO SATISFIES THE SECOND HALF OF §8.3 BY ITSELF, WHICH IS THE
+PART WORTH NOTICING.** §8.3 argues that a file holding a difference must carry
+what it is a difference from — the conductor set, not a flag. **The conductors
+ARE input parameters**, `[[coils]]` and whatever CS-6 adds for filaments, so an
+output that regenerates its input carries them by construction. One mechanism,
+not two, and the provenance requirement stops being special pleading for the
+split and becomes an ordinary consequence of reproducibility.
+
+### 9.1 What "the parameters that were read in" should mean, and it is two things
+
+`meq::Configuration` **has no serialiser and does not keep the parsed table** —
+it reads TOML into typed fields and the `toml::value` is gone. So there are two
+different artefacts here and they answer different questions:
+
+| | what it records | catches |
+|---|---|---|
+| **the input verbatim**, as a string attribute | the file as given | nothing, but it is trivially correct, costs a string, and makes the output self-contained **today** |
+| **what MEQ actually used**, serialised from `Configuration`'s fields | the resolved configuration, defaults included | **a key accepted and ignored** — which this tree has met twice, `ProfileFile` and its kind on one source type, and `ConfineToPlasma` on the rotating source |
+
+**Both, and they are not redundant.** The verbatim copy is provenance; the
+serialised one is what the solve was. **And the pair supports a test with real
+teeth**: parse a configuration, serialise it, parse the result, and require the
+two `Configuration` objects to agree — which fails exactly when a key is read
+into a field that nothing writes back, the accepted-and-ignored shape.
+
+### 9.2 What is open, and it is the geometry rather than the fields
+
+* **the mesh.** A `GridFunction` is meaningless without one, and GLVis needs
+  `.mesh` beside `.gf` — so either the `.nc` embeds the mesh (vertices,
+  connectivity, attributes, boundary) and the emitter script writes both, or the
+  `.mesh` stays a separate file named in an attribute. **Embedding is what makes
+  the file self-contained**, which is the whole design; it is also MEQ
+  re-implementing a mesh serialiser, and `[mesh.generate]` already makes the
+  mesh a build product of the TOML for the generated cases but not for the
+  hand-made ones.
+* **the profile tables.** `<stem>-pprime.dat` and `-ggprime.dat` are named by
+  the configuration and read by `meq::SplineProfile`. An output that regenerates
+  its input has to carry them too, or it regenerates a file that cannot be run.
+* **whether the `.gf` pair survives at all** as MEQ's warm start.
+  `[initialguess] File`/`MeshFile` reads `.gf` today, and a configuration naming
+  one written under a split is the failure this stage exists to prevent. **The
+  cheap guard needs no new format and should be done first**: refuse a `.gf`
+  warm start when a conductor field is configured.
