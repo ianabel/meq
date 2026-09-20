@@ -954,9 +954,56 @@ namespace meq
 			/// as an X-point would be the worst answer available.
 			static bool senseAccepts( AxisSense sense, CriticalPointType type );
 
+		public:
+			/**
+			 * `psi_c` for `COIL-SUBTRACTION-PLAN.md`'s split, or null.
+			 *
+			 * **A CRITICAL POINT IS A PROPERTY OF THE PHYSICAL FLUX AND THE
+			 * SOLVER ONLY HAS THE REMAINDER.** Under the split `fluxField` is
+			 * `q_p` and `potentialField` is `psi_p`, while the axis is a zero
+			 * of `q_p + q_c` and its flux is `psi_p + psi_c`. Everything this
+			 * class does — the seed search, the Newton residual, its Jacobian,
+			 * and the value it reports — takes the shift.
+			 *
+			 * **THE SEED SEARCH IS THE ONE THAT WOULD BE WRONG WORST.** It
+			 * screens for the element carrying the extreme nodal value, and a
+			 * nearby conductor's `psi_c` can dominate `psi_p` completely — so
+			 * screening on the remainder can seed in the wrong basin and find
+			 * a different equilibrium's axis. `CLAUDE_HDGGS.md` measures three
+			 * solve routes reaching discrete solutions **9.4% apart**; picking
+			 * the wrong one silently is that hazard, not a slower search.
+			 *
+			 * Null — the default — shifts by exactly zero, so every existing
+			 * path is bit-identical.
+			 *
+			 * @param conductors borrowed, and must outlive the search.
+			 */
+			void setConductorField( ConductorField const *conductors );
+
+			/// The conductors of setConductorField(), or nullptr.
+			ConductorField const *conductorField() const;
+
+		private:
+			/// `q_p + q_c` at a point, which is the field whose zeros are the
+			/// critical points. Exactly `GetVectorValue()` with no conductors.
+			void totalFlux( int element, mfem::IntegrationPoint const &ip,
+			                mfem::Vector &out ) const;
+
+			/// `psi_p + psi_c` at a point.
+			double totalPotential( int element,
+			                       mfem::IntegrationPoint const &ip ) const;
+
+			/// `psi_c` at a NODE of an element, for the seed searches, which
+			/// read dof coefficients rather than evaluating. MEQ's spaces are
+			/// `BasisType::GaussLobatto`, so a coefficient IS the value at that
+			/// node and this shift is exact rather than approximate. Zero with
+			/// no conductors, so the screen is bit-identical there.
+			double nodeShift( int element, int localDof ) const;
+
 			mfem::GridFunction const &fluxField;
 			mfem::GridFunction const &potentialField;
 			mfem::Mesh &meshRef;
+			ConductorField const *conductors = nullptr;
 
 			double tolerance = 1.0e-13;
 			int maxIterations = 50;

@@ -1,4 +1,6 @@
 #include "CriticalPoints.hpp"
+
+#include "ConductorField.hpp"
 #include "Threading.hpp"
 
 #include <algorithm>
@@ -110,6 +112,10 @@ namespace meq
 	CriticalPointFinder::CriticalPointFinder( GradShafranovSolver const &solverIn )
 		: CriticalPointFinder( solverIn.flux(), solverIn.potential() )
 	{
+		// The solver knows whether the split is in use, so a finder built from
+		// one never has to be told separately -- which is what stops a caller
+		// searching the remainder for a physical axis by forgetting a line.
+		setConductorField( solverIn.conductorField() );
 	}
 
 	CriticalPointFinder::CriticalPointFinder( mfem::GridFunction const &fluxIn,
@@ -253,6 +259,91 @@ namespace meq
 		containment = containmentIn;
 	}
 
+	void CriticalPointFinder::setConductorField( ConductorField const *c )
+	{
+		conductors = c;
+	}
+
+	ConductorField const *CriticalPointFinder::conductorField() const
+	{
+		return conductors;
+	}
+
+	namespace
+	{
+		/*
+		 * The physical point of a reference point, through the REENTRANT
+		 * transformation overload. CLAUDE.md records Mesh::GetElementTransformation( int )
+		 * handing out shared scratch, and this file already paid for that once:
+		 * its own site was among the six fixed into function-local thread_locals.
+		 */
+		void pointOf( mfem::Mesh &mesh, int element,
+		              mfem::IntegrationPoint const &ip, double &r, double &z )
+		{
+			thread_local mfem::IsoparametricTransformation transformation;
+			mesh.GetElementTransformation( element, &transformation );
+			transformation.SetIntPoint( &ip );
+
+			double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
+			mfem::Vector position( coordinates, 3 );
+			transformation.Transform( ip, position );
+			r = position( 0 );
+			z = position( 1 );
+		}
+	}
+
+	void CriticalPointFinder::totalFlux( int element,
+	                                     mfem::IntegrationPoint const &ip,
+	                                     mfem::Vector &out ) const
+	{
+		fluxField.GetVectorValue( element, ip, out );
+		if ( !conductors )
+			return;
+
+		double r = 0.0;
+		double z = 0.0;
+		pointOf( meshRef, element, ip, r, z );
+
+		double qR = 0.0;
+		double qZ = 0.0;
+		conductors->flux( r, z, qR, qZ );
+		out( 0 ) += qR;
+		out( 1 ) += qZ;
+	}
+
+	double CriticalPointFinder::totalPotential(
+		int element, mfem::IntegrationPoint const &ip ) const
+	{
+		double const solved = potentialField.GetValue( element, ip );
+		if ( !conductors )
+			return solved;
+
+		double r = 0.0;
+		double z = 0.0;
+		pointOf( meshRef, element, ip, r, z );
+		return solved + conductors->psi( r, z );
+	}
+
+	double CriticalPointFinder::nodeShift( int element, int localDof ) const
+	{
+		if ( !conductors )
+			return 0.0;
+
+		// A coefficient IS the value at its node here: meq's spaces are
+		// BasisType::GaussLobatto, so this shift is exact rather than a
+		// convenient approximation. On a non-nodal basis it would still be the
+		// right O( 1 ) correction for a SCREEN, which is all these callers are.
+		mfem::FiniteElement const *element_fe
+			= potentialField.FESpace()->GetFE( element );
+		mfem::IntegrationPoint const &ip
+			= element_fe->GetNodes().IntPoint( localDof );
+
+		double r = 0.0;
+		double z = 0.0;
+		pointOf( meshRef, element, ip, r, z );
+		return conductors->psi( r, z );
+	}
+
 	double CriticalPointFinder::fluxScale() const
 	{
 		// The largest | q | over the flux dofs. For a nodal basis those are
@@ -269,6 +360,46 @@ namespace meq
 			double const b = fluxField( space.DofToVDof( i, 1 ) );
 			worst = std::max( worst, std::sqrt( a*a + b*b ) );
 		}
+
+		/*
+		 * AND THE SCALE MUST BE THE PHYSICAL FIELD'S UNDER THE SPLIT, WHICH IS
+		 * NOT A TIDINESS POINT. The residual this scale sets a target for is
+		 * | q_p + q_c |, so a target of tolerance * max | q_p | is measured
+		 * against the wrong field -- and where a conductor dominates, q_p is
+		 * small while the residual is not, giving a target the Newton cannot
+		 * reach and a search that reports failure on a perfectly good axis. In
+		 * the vacuum limit q_p is identically zero and the fallback below would
+		 * make the rule absolute at `tolerance`, which is the same defect in
+		 * its most extreme form.
+		 *
+		 * One extra pass over the nodes, only when the split is in use.
+		 */
+		if ( conductors )
+		{
+			mfem::FiniteElementSpace const &scalarSpace = *potentialField.FESpace();
+			for ( int element = 0; element < meshRef.GetNE(); ++element )
+			{
+				mfem::FiniteElement const *element_fe
+					= scalarSpace.GetFE( element );
+				mfem::IntegrationRule const &nodes = element_fe->GetNodes();
+
+				for ( int i = 0; i < nodes.GetNPoints(); ++i )
+				{
+					double r = 0.0;
+					double z = 0.0;
+					pointOf( meshRef, element, nodes.IntPoint( i ), r, z );
+					if ( !( r > 0.0 ) )
+						continue;
+
+					double qR = 0.0;
+					double qZ = 0.0;
+					conductors->flux( r, z, qR, qZ );
+					worst = std::max( worst,
+					                  std::sqrt( qR*qR + qZ*qZ ) );
+				}
+			}
+		}
+
 		return worst > 0.0 ? worst : 1.0;
 	}
 
@@ -316,8 +447,8 @@ namespace meq
 			hi[ d ] += shift + jacobianStep;
 			lo[ d ] += shift - jacobianStep;
 
-			fluxField.GetVectorValue( element, referencePoint( hi[ 0 ], hi[ 1 ] ), high );
-			fluxField.GetVectorValue( element, referencePoint( lo[ 0 ], lo[ 1 ] ), low );
+			totalFlux( element, referencePoint( hi[ 0 ], hi[ 1 ] ), high );
+			totalFlux( element, referencePoint( lo[ 0 ], lo[ 1 ] ), low );
 
 			jacobian[ 0 ][ d ] = ( high( 0 ) - low( 0 ) )/( 2.0*jacobianStep );
 			jacobian[ 1 ][ d ] = ( high( 1 ) - low( 1 ) )/( 2.0*jacobianStep );
@@ -350,7 +481,7 @@ namespace meq
 		bool converged = false;
 		for ( int iteration = 0; iteration < maxIterations; ++iteration )
 		{
-			fluxField.GetVectorValue( element, ip, value );
+			totalFlux( element, ip, value );
 			double const residual = std::sqrt( value( 0 )*value( 0 )
 			                                   + value( 1 )*value( 1 ) );
 			if ( residual <= target )
@@ -389,7 +520,7 @@ namespace meq
 
 			if ( length < 1.0e-15 )
 			{
-				fluxField.GetVectorValue( element, ip, value );
+				totalFlux( element, ip, value );
 				converged = true;
 				break;
 			}
@@ -471,7 +602,7 @@ namespace meq
 
 		found.r = physical( 0 );
 		found.z = physical( 1 );
-		found.psi = potentialField.GetValue( element, ip );
+		found.psi = totalPotential( element, ip );
 		found.element = element;
 		found.fluxResidual = std::sqrt( value( 0 )*value( 0 ) + value( 1 )*value( 1 ) );
 		found.determinant = det;
@@ -519,7 +650,7 @@ namespace meq
 		mfem::Vector value( 2 );
 		for ( int i = 0; i < nodes.Size(); ++i )
 		{
-			fluxField.GetVectorValue( element, nodes[ i ], value );
+			totalFlux( element, nodes[ i ], value );
 			double const magnitude = std::sqrt( value( 0 )*value( 0 )
 			                                    + value( 1 )*value( 1 ) );
 			if ( magnitude < bestValue )
@@ -561,7 +692,11 @@ namespace meq
 			space.GetElementDofs( element, dofs );
 			for ( int i = 0; i < dofs.Size(); ++i )
 			{
-				double const value = potentialField( dofs[ i ] );
+				// SCREENING ON THE TOTAL, not the remainder: a nearby
+				// conductor's psi_c can dominate psi_p, and seeding in the
+				// wrong basin finds a different equilibrium's axis.
+				double const value = potentialField( dofs[ i ] )
+				                     + nodeShift( element, i );
 				if ( value > largest )
 				{
 					largest = value;
@@ -1128,7 +1263,9 @@ namespace meq
 			for ( int i = 0; i < dofs.Size(); ++i )
 			{
 				int const index = dofs[ i ] >= 0 ? dofs[ i ] : -1 - dofs[ i ];
-				double const here = potentialField( index );
+				// The same screen and the same reason; see nodeShift().
+				double const here = potentialField( index )
+				                    + nodeShift( e, i );
 				if ( wantMaximum ? here > best : here < best )
 				{
 					best = here;
@@ -1438,7 +1575,7 @@ namespace meq
 					mfem::IntegrationPoint faceIp = referencePoint( s2, 0.0 );
 					mfem::IntegrationPoint elementIp;
 					face->Loc1.Transform( faceIp, elementIp );
-					fluxField.GetVectorValue( face->Elem1No, elementIp, value );
+					totalFlux( face->Elem1No, elementIp, value );
 
 					double const magnitude = std::sqrt( value( 0 )*value( 0 )
 					                                    + value( 1 )*value( 1 ) );

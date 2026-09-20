@@ -7249,6 +7249,11 @@ namespace
 				? CriticalPointType::Maximum : CriticalPointType::Minimum;
 
 			CriticalPointFinder finder( axisFlux, axisPotential );
+			// The axis is a zero of the PHYSICAL flux and a value of the
+			// physical potential; under the split this solver holds only the
+			// remainder. Null unless the split is in use, and null shifts by
+			// exactly zero. COIL-SUBTRACTION-PLAN.md CS-4.
+			finder.setConductorField( conductorFieldSet );
 			AxisSense const sense = span >= 0.0 ? AxisSense::Maximum
 			                                    : AxisSense::Minimum;
 
