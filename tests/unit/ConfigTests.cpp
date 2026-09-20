@@ -2957,3 +2957,100 @@ BOOST_AUTO_TEST_CASE( the_conductor_model_decides_how_the_coils_enter )
 	BOOST_CHECK_THROW( parse( base + "\n[conductor]\nModel = \"meshed\"\n" ),
 	                   ConfigError );
 }
+
+// [mesh.generate] CoilSize AND A SUBTRACTING MODEL ARE MUTUALLY EXCLUSIVE.
+//
+// COIL-SUBTRACTION-PLAN.md section 13: the driver omits every `--coil` under a
+// subtracting model, which is the whole of how [conductors] reaches the
+// geometry, so a CoilSize beside it names an element size for a region the
+// generator is never told about. That is the accepted-and-ignored failure this
+// schema refuses everywhere -- and here it is the one a user would MOST easily
+// misread, the point of the split being that the mesh gets cheaper.
+BOOST_AUTO_TEST_CASE( coil_size_is_refused_beside_a_subtracting_conductor_model )
+{
+	std::string const base =
+		"[mesh]\n"
+		"File = \"m.msh\"\n"
+		"\n[mesh.generate]\n"
+		"Tool = \"halfdisc\"\nRadius = 2.6\nSize = 0.18\n";
+
+	std::string const tail =
+		"\n[discretisation]\nPolynomialDegree = 2\n"
+		"\n[source]\nType = \"soloviev\"\nA = -0.52\n"
+		"\n[[coils]]\n"
+		"CentreR = 2.10\nCentreZ = 0.60\n"
+		"HalfWidth = 0.05\nHalfHeight = 0.05\nCurrent = 1.5e5\n";
+
+	// MESHED KEEPS IT, which is the assertion that stops this refusal from
+	// quietly breaking every generated example in the tree.
+	Configuration const meshed =
+		parse( base + "CoilSize = 0.04\n" + tail );
+	BOOST_TEST( meshed.getMesh().generate.coilSize == 0.04 );
+
+	BOOST_CHECK_EXCEPTION(
+		parse( base + "CoilSize = 0.04\n" + tail
+		       + "\n[conductors]\nModel = \"subtracted\"\n" ),
+		ConfigError,
+		[]( ConfigError const & e )
+		{ return e.getKey() == "mesh.generate.CoilSize"; } );
+
+	BOOST_CHECK_EXCEPTION(
+		parse( base + "CoilSize = 0.04\n" + tail
+		       + "\n[conductors]\nModel = \"filament\"\n" ),
+		ConfigError,
+		[]( ConfigError const & e )
+		{ return e.getKey() == "mesh.generate.CoilSize"; } );
+
+	// AND OMITTING IT IS FINE UNDER EITHER, which is the configuration the
+	// refusal is steering people towards.
+	BOOST_CHECK_NO_THROW(
+		parse( base + tail + "\n[conductors]\nModel = \"subtracted\"\n" ) );
+}
+
+// [initialguess] Content -- WHAT A STORED .gf HOLDS, WHICH THE FILE CANNOT SAY.
+//
+// COIL-SUBTRACTION-PLAN.md section 8.3. The default is load bearing for the
+// same reason [conductors] Model's is: every .gf written before this key
+// existed means "remainder" under a split and "psi" without one, and those are
+// the same file.
+BOOST_AUTO_TEST_CASE( the_guess_content_says_which_field_a_stored_file_holds )
+{
+	std::string const base =
+		"[mesh]\n"
+		"RMin = 1.2\nRMax = 2.2\nZMin = -0.7\nZMax = 0.7\n"
+		"\n[discretisation]\nPolynomialDegree = 2\n"
+		"\n[source]\nType = \"soloviev\"\nA = -0.52\n";
+
+	std::string const stored =
+		"\n[initialguess]\nType = \"gridfunction\"\n"
+		"File = \"a.gf\"\nMeshFile = \"a.mesh\"\n";
+
+	Configuration const silent = parse( base + stored );
+	BOOST_TEST( ( silent.getInitialGuess().content
+	              == meq::GuessContent::Remainder ) );
+
+	Configuration const total =
+		parse( base + stored + "Content = \"total\"\n" );
+	BOOST_TEST( ( total.getInitialGuess().content
+	              == meq::GuessContent::Total ) );
+
+	Configuration const remainder =
+		parse( base + stored + "Content = \"remainder\"\n" );
+	BOOST_TEST( ( remainder.getInitialGuess().content
+	              == meq::GuessContent::Remainder ) );
+
+	BOOST_CHECK_EXCEPTION(
+		parse( base + stored + "Content = \"psi\"\n" ), ConfigError,
+		[]( ConfigError const & e )
+		{ return e.getKey() == "initialguess.Content"; } );
+
+	// AND IT DESCRIBES A STORED GUESS, so on every other Type it would be
+	// accepted and ignored -- the guess is built from this file, in whichever
+	// field the run solves for.
+	BOOST_CHECK_EXCEPTION(
+		parse( base + "\n[initialguess]\nType = \"ramp\"\n"
+		              "Content = \"total\"\n" ),
+		ConfigError,
+		[]( ConfigError const & e )
+		{ return e.getKey() == "initialguess.Content"; } );
+}

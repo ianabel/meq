@@ -24,6 +24,34 @@ differ by a relabelling (`B_R = −q_z`, `B_Z = +q_r`); see `src/meq/Field.hpp`.
 glvis -m run.mesh -g run_psi.gf
 ```
 
+**AND UNDER `[conductors] Model` THAT SENTENCE INVERTS, WHICH IS THE OPPOSITE OF
+WHAT THE NAMES SUGGEST.** A subtracting model solves for the remainder
+`psi_p = psi − psi_c`, so:
+
+| | what it holds under a split |
+|---|---|
+| `_psi.gf`, `_grad_psi.gf`, `_psistar.gf` | the **remainder**. MFEM's format has no slot for a third fact, so nothing in the file says so |
+| `<stem>.nc`'s gridded `psi`, `B_R`, `B_Z` | the **physical** field. The grid *samples*, so it adds `psi_c` back at every node |
+| `<stem>.nc`'s `psi_coefficients` + `conductor_*` + `mu0` | the remainder **and** what it is a remainder from. This is the restart |
+| `<stem>_psi_total.gf` | the physical field as `psi_h + I_h( psi_c )` — exact at the nodes, interpolated between them. **For looking at** |
+
+So the LOSSY interchange format carries the exact physical field and the EXACT
+format carries a difference. The reason is the same in both directions: a
+sampled format evaluates `psi_c` at a point, and a represented one would have to
+put it in the finite-element space — which for a filament is impossible in
+principle, `psi_c` being logarithmic at the conductor.
+
+**The restart is therefore the `.nc` and not the `.gf` pair.** `content` says
+which field the coefficients are, `fe_collection` and `fe_order` say what space
+they live in, `mesh_file` names the mesh beside them, and the conductor table
+plus `mu0` is everything `meq::ConductorField` needs to reconstruct `psi_c`
+exactly at any point. A flag would not have been enough: it tells a reader they
+hold the wrong field without letting them fix it.
+
+A `.gf` MEQ did not write, or one whose provenance is uncertain, is read as a
+remainder by default; `[initialguess] Content = "total"` says otherwise and MEQ
+takes `psi_c` off it as it reads.
+
 **The VTK files are for looking at.** They carry ψ and **B** — the physical
 field, already relabelled — written as VTK Lagrange cells at the polynomial
 degree of the solve. That last part matters more here than in most codes: VTK's

@@ -1395,6 +1395,173 @@ BOOST_AUTO_TEST_CASE( theDriverTakesTheConductorsOutOfTheMesh )
 }
 
 /*
+ * CS-6: THE RESTART FILE SAYS WHAT IT HOLDS AND WHAT IT IS A REMAINDER FROM.
+ *
+ * COIL-SUBTRACTION-PLAN.md §8.3's finding, and §9's answer to it. The finding:
+ * a `.gf` written under `[conductors] Model` holds `psi_p` and is
+ * INDISTINGUISHABLE from one that holds `psi` -- GridFunction::Save writes the
+ * space header and the coefficients, and there is nowhere for a third fact to
+ * go. The answer: the `.nc` carries a second representation beside its
+ * rasterization -- every coefficient, the space, `content`, and the conductor
+ * TABLE -- because a flag would tell a reader they hold the wrong field
+ * without letting them fix it.
+ *
+ * **THE ASSERTION IS A RECONSTRUCTION AND NOT A PRESENCE CHECK, AND THAT IS
+ * THE ONLY VERSION OF THIS TEST WORTH HAVING.** Asserting that the variables
+ * exist would pass against a file whose conductor table was transposed, whose
+ * currents were the wrong sign, or whose `mu0` was the wrong one. So this
+ * builds a meq::ConductorField FROM THE FILE'S OWN NUMBERS -- nothing is
+ * repeated from the TOML -- and requires that the coefficients plus that field
+ * reproduce the physical flux. If any column is wrong the sum is wrong.
+ *
+ * The only thing taken from outside the `.nc` is the mesh, which the file
+ * NAMES in `mesh_file` rather than embedding. §9.2 left that open and this is
+ * it answered the cheap way round: embedding it is MEQ re-implementing a
+ * serialiser MFEM already has.
+ */
+BOOST_AUTO_TEST_CASE( theRestartFileSaysWhatItHoldsAndWhatItIsARemainderFrom )
+{
+	std::string const shipped = slurp( "examples/coils-rectangle.toml" );
+	BOOST_TEST_REQUIRE( !shipped.empty() );
+	std::string split = replaceAll( shipped, "\n[boundary]\n",
+	                                "\n[conductors]\nModel = \"subtracted\"\n"
+	                                "\n[boundary]\n" );
+	BOOST_TEST_REQUIRE( split != shipped );
+	split = replaceAll( split, "Prefix = \"coils-rectangle\"",
+	                    "Prefix = \"cs6\"" );
+	{
+		std::ofstream file( "driver-acceptance-cs6.toml" );
+		file << split;
+		BOOST_TEST_REQUIRE( file.good() );
+	}
+	BOOST_TEST_REQUIRE( run( "driver-acceptance-cs6.toml" ) == 0 );
+
+	std::string const header = ncdumpHeader( "cs6.nc" );
+	BOOST_TEST_REQUIRE( !header.empty(), "ncdump could not read cs6.nc" );
+
+	// (1) IT SAYS WHICH FIELD IT HOLDS. The one attribute that makes §8.3
+	// answerable; a reader who does not look at it is exactly where the `.gf`
+	// leaves them.
+	BOOST_TEST( header.find( "content = \"remainder" ) != std::string::npos,
+	            "the restart file does not say that it holds a remainder" );
+	BOOST_TEST( header.find( "mesh_file = \"cs6.mesh\"" ) != std::string::npos,
+	            "the restart file does not name the mesh its coefficients live on" );
+	BOOST_TEST( header.find( "fe_collection" ) != std::string::npos,
+	            "the restart file does not describe its finite element space" );
+
+	// (2) THE CONDUCTORS, OUT OF THE FILE AND NOT OUT OF THE TOML.
+	std::vector<double> const kind = ncdumpVariable( "cs6.nc", "conductor_kind" );
+	std::vector<double> const cr = ncdumpVariable( "cs6.nc", "conductor_R" );
+	std::vector<double> const cz = ncdumpVariable( "cs6.nc", "conductor_Z" );
+	std::vector<double> const chw = ncdumpVariable( "cs6.nc", "conductor_half_width" );
+	std::vector<double> const chh = ncdumpVariable( "cs6.nc", "conductor_half_height" );
+	std::vector<double> const ci = ncdumpVariable( "cs6.nc", "conductor_current" );
+	double const mu0 = headerAttribute( header, "mu0" );
+
+	BOOST_TEST_REQUIRE( !kind.empty(),
+	                    "the restart file carries no conductor table, so a "
+	                    "reader cannot reconstruct what the remainder is a "
+	                    "remainder from" );
+	BOOST_TEST_REQUIRE( cr.size() == kind.size() );
+	BOOST_TEST_REQUIRE( cz.size() == kind.size() );
+	BOOST_TEST_REQUIRE( chw.size() == kind.size() );
+	BOOST_TEST_REQUIRE( chh.size() == kind.size() );
+	BOOST_TEST_REQUIRE( ci.size() == kind.size() );
+	BOOST_TEST_REQUIRE( ( std::isfinite( mu0 ) && mu0 > 0.0 ),
+	                    "the restart file carries no mu0, without which the "
+	                    "conductor table is a set of ampere-turns and no field" );
+
+	meq::ConductorField fromFile( mu0 );
+	for ( std::size_t i = 0; i < kind.size(); ++i )
+	{
+		if ( kind[ i ] == 0.0 )
+			fromFile.add( meq::Coil( cr[ i ], cz[ i ], chw[ i ], chh[ i ],
+			                         ci[ i ] ) );
+		else
+			fromFile.add( meq::CurrentFilament( cr[ i ], cz[ i ], ci[ i ] ) );
+	}
+
+	// (3) THE COEFFICIENTS, ALSO OUT OF THE FILE, AGAINST THE .gf THE SAME RUN
+	// WROTE. Equal to the last bit: the `.nc` holds the same doubles the `.gf`
+	// does, so any difference at all is a layout or a precision fault rather
+	// than a tolerance question.
+	std::vector<double> const coefficients =
+		ncdumpVariable( "cs6.nc", "psi_coefficients" );
+	mfem::Mesh mesh( "cs6.mesh", 1, 1 );
+	mfem::GridFunction const remainder = readGridFunction( "cs6_psi.gf", mesh );
+	BOOST_TEST_REQUIRE( coefficients.size()
+	                    == static_cast<std::size_t>( remainder.Size() ),
+	                    "the .nc carries " << coefficients.size()
+	                    << " coefficients where the .gf carries "
+	                    << remainder.Size() );
+
+	double worstCoefficient = 0.0;
+	for ( int i = 0; i < remainder.Size(); ++i )
+		worstCoefficient = std::max(
+			worstCoefficient,
+			std::fabs( coefficients[ static_cast<std::size_t>( i ) ]
+			           - remainder( i ) ) );
+
+	// ncdump prints at its own precision rather than round-tripping the bits,
+	// so this is a layout check and not a bit-exactness one -- the assertion is
+	// scaled to the field.
+	double biggest = 0.0;
+	for ( int i = 0; i < remainder.Size(); ++i )
+		biggest = std::max( biggest, std::fabs( remainder( i ) ) );
+	double const scale = std::max( 1.0e-300, biggest );
+	BOOST_TEST( worstCoefficient/scale < 1.0e-6,
+	            "the coefficients in the .nc are not the ones in the .gf: "
+	            << worstCoefficient/scale << " relative, which is a layout "
+	            "fault rather than a precision one" );
+
+	// (4) AND THE RECONSTRUCTION, WHICH IS THE ACCEPTANCE. The file's own
+	// conductor table, evaluated at the space's own nodes, added to the file's
+	// own coefficients, must give the physical flux -- which the same run wrote
+	// beside it as the viewing artefact.
+	mfem::FunctionCoefficient psiC(
+		[ &fromFile ]( mfem::Vector const &x )
+		{
+			return fromFile.psi( std::max( 0.0, x( 0 ) ), x( 1 ) );
+		} );
+	mfem::GridFunction rebuilt(
+		const_cast<mfem::FiniteElementSpace *>( remainder.FESpace() ) );
+	rebuilt.ProjectCoefficient( psiC );
+	rebuilt += remainder;
+
+	mfem::GridFunction const written =
+		readGridFunction( "cs6_psi_total.gf", mesh );
+	BOOST_TEST_REQUIRE( written.Size() == rebuilt.Size(),
+	                    "the driver did not write cs6_psi_total.gf on the same "
+	                    "space" );
+
+	double const agreement = relativeDifference( rebuilt, written );
+	BOOST_TEST( agreement < 1.0e-12,
+	            "the conductor table in the .nc does not reproduce the field "
+	            "the same run wrote: " << agreement << " relative. The file is "
+	            "then not enough to read itself, which is the whole of what "
+	            "CS-6 is for" );
+
+	// (5) AND THE CONTROL: THE REMAINDER IS NOT THE TOTAL. Without this the
+	// four assertions above would all pass on a run where psi_c happened to be
+	// negligible, and the test would be measuring nothing.
+	double const shift = relativeDifference( written, remainder );
+	BOOST_TEST( shift > 1.0e-1,
+	            "psi_c is only " << shift << " of the field here, so this case "
+	            "cannot tell a reconstructed total from the remainder it "
+	            "started with" );
+
+	std::printf( "\n  CS-6: the .nc read with nothing but itself\n"
+	             "    conductors in the table               %d\n"
+	             "    coefficients, .nc against .gf         %.3e relative\n"
+	             "    rebuilt total against the written one %.3e relative\n"
+	             "    and the remainder is %.3e from the total\n",
+	             static_cast<int>( kind.size() ), worstCoefficient/scale,
+	             agreement, shift );
+
+	std::remove( "driver-acceptance-cs6.toml" );
+}
+
+/*
  * A MESH FROM A FILE, AND THE GRID EXTENT THAT USED TO BE LOST WITH IT.
  *
  * `[mesh] File` supplies no `RMin`..`ZMax`, and those four keys are what the

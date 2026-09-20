@@ -944,6 +944,16 @@ default is what every file written before this table existed already means.
    read as though :math:`\psi_c` had already been taken out of it. MEQ warns on
    standard output whenever both are set.
 
+   **Both halves of that now have an answer.** ``[initialguess] Content =
+   "total"`` says the stored file holds :math:`\psi` and MEQ takes
+   :math:`\psi_c` off it as it reads it; and a subtracting run writes a fourth
+   grid function, ``<stem>_psi_total.gf``, holding
+   :math:`\psi_h + I_h( \psi_c )` for looking at. That one is exact at the
+   nodes and an interpolation between them, which is the right trade for a
+   picture and the wrong one for a restart — **the restart is the** ``.nc``,
+   which carries the coefficients, the space, ``content``, and the conductor
+   table that says what the remainder is a remainder *from*.
+
    **The two sampled outputs are unaffected and always carry the physical**
    :math:`\psi`. The gridded ``.nc`` adds :math:`\psi_c` back at every located
    node, and :math:`B` with it; ``<stem>_surfaces.nc`` traces level sets of
@@ -960,7 +970,21 @@ default is what every file written before this table existed already means.
    would converge, report every diagnostic it always did, and be slower than it
    should be, with nothing anywhere to look at. ``QuadratureOrder`` is refused
    on the other two models for the same reason — a filament has no cross-section
-   to integrate over and a meshed coil is integrated by the mesh.
+   to integrate over and a meshed coil is integrated by the mesh. And
+   ``[mesh.generate] CoilSize`` is refused beside a subtracting model: it grades
+   the mesh around conductors the generator is no longer told about, so it names
+   an element size for a region that does not exist.
+
+.. note::
+
+   **A subtracting model changes the mesh, and that is the point.** With
+   ``[mesh.generate]``, ``meq --mesh-command`` emits no ``--coil`` at all under
+   ``"subtracted"`` or ``"filament"``, so the generator neither fragments nor
+   grades the conductors. ``meq-run`` stamps the mesh with the command it used,
+   so changing ``Model`` changes the command and the mesh is rebuilt with
+   nothing else to do. Measured: ``examples/mastu-nke``'s 23 conductors take its
+   mesh from 9361 triangles to 4716, and
+   ``examples/diverted-tokamak-generated``'s four from 2854 to 2322.
 
 .. note::
 
@@ -1263,6 +1287,36 @@ See :doc:`output` for what gets written.
      - *required for* ``"gridfunction"``
      - The stored grid function and the mesh it lives on — a grid function
        cannot be read without its mesh.
+   * - ``Content``
+     - ``"remainder"``
+     - What that file *holds*: ``"total"`` for :math:`\psi` or ``"remainder"``
+       for :math:`\psi_p = \psi - \psi_c`. Read only with
+       ``Type = "gridfunction"``, and it matters only when this run subtracts —
+       see below.
+
+``Content`` says what a stored guess holds, because the file cannot
+--------------------------------------------------------------------
+
+A ``.gf`` carries the finite-element space and the coefficients and nothing
+else, so a file written under ``[conductors] Model`` holds
+:math:`\psi_p = \psi - \psi_c` and looks exactly like one that holds
+:math:`\psi`. ``Content`` is where the file's author says which it is.
+
+``"remainder"``, the default, is what a subtracting run writes and what every
+file written before this key existed means. ``"total"`` says the file holds the
+physical flux — a *meshed* run's answer, say — and MEQ takes :math:`\psi_c` off
+it at every node as it reads it, reporting the largest shift on standard output.
+
+**Without it one direction is unreachable, which is why this is not a second
+spelling of the same thing.** Restarting a subtracted run from its own output
+wants ``"remainder"``. Restarting from a meshed answer — the whole of the
+coarse-then-fine route, where a cheap filament solve hands a meshed one a
+starting point — wants ``"total"``, and there was no way to ask: the guess
+arrived one entire conductor field away from where the solver believed it was.
+
+The key describes the *file*, which does not change because the run reading it
+did, so it is accepted and ignored on a run that does not subtract rather than
+refused. :math:`\psi_c` is then zero and the two spellings mean the same file.
 
 ``Type = "conductors"`` builds the guess from what the file already says
 -------------------------------------------------------------------------

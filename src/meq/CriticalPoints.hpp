@@ -984,9 +984,36 @@ namespace meq
 			ConductorField const *conductorField() const;
 
 		private:
-			/// `q_p + q_c` at a point, which is the field whose zeros are the
-			/// critical points. Exactly `GetVectorValue()` with no conductors.
-			void totalFlux( int element, mfem::IntegrationPoint const &ip,
+			/**
+			 * `q_p + q_c` at a point, which is the field whose zeros are the
+			 * critical points. Exactly `GetVectorValue()` with no conductors.
+			 *
+			 * **AND IT CAN FAIL, WHICH IS WHY IT RETURNS A BOOL.** `false`
+			 * means the point is somewhere `q_c` is not a number and @a out
+			 * has not been written.
+			 *
+			 * `q_c = ( 1/r ) grad_bar psi_c` is a function on the OPEN
+			 * half-plane: it is NaN on `r = 0`, where meq::ConductorField
+			 * keeps the NaN deliberately, and meq::coilGradPsi REFUSES `r < 0`
+			 * outright. The element-local Newton below evaluates this
+			 * element's polynomial OUTSIDE the element on purpose -- that is
+			 * how a root near a face is found -- so on a half-disc machine,
+			 * whose elements reach `r = 0` exactly, an iterate can leave the
+			 * half-plane. With no conductors that is harmless, the polynomial
+			 * being defined everywhere; under the split it is a throw from
+			 * three frames down naming a radius and nothing else.
+			 *
+			 * **A point off the half-plane is not a point of the machine**, so
+			 * there is nothing there to find and abandoning the attempt is the
+			 * whole of the right answer. The callers do that: the Newton
+			 * returns false, the Jacobian returns a singular column, and the
+			 * two sweeps skip the sample. What none of them may do is carry on
+			 * with `q_p` alone, which would root a different function.
+			 *
+			 * Always `true` with no conductors, so every existing path is
+			 * bit-identical.
+			 */
+			bool totalFlux( int element, mfem::IntegrationPoint const &ip,
 			                mfem::Vector &out ) const;
 
 			/// `psi_p + psi_c` at a point.
@@ -999,6 +1026,72 @@ namespace meq
 			/// node and this shift is exact rather than approximate. Zero with
 			/// no conductors, so the screen is bit-identical there.
 			double nodeShift( int element, int localDof ) const;
+
+			/**
+			 * `psi_c` AND `q_c` AT EVERY NODE OF EVERY ELEMENT, ONCE, AND
+			 * WITHOUT IT THE SPLIT IS UNUSABLE ON A MACHINE.
+			 *
+			 * Three of this class's sweeps are over the whole mesh's nodes and
+			 * none of them depends on the solved field: fluxScale()'s
+			 * conductor pass, elementSeeds()'s best-node screen, and
+			 * nodeShift()'s two callers. Under the split each node costs one
+			 * meq::ConductorField evaluation, which for MAST-U's 23 rectangles
+			 * at the default 32-point cross-section quadrature is **1.9 ms** --
+			 * MEASURED, not estimated. On that machine's 9052 elements a
+			 * single such sweep is **102 s**, fluxScale() is called once per
+			 * ring of every seeded search, and there are several searches per
+			 * Newton step. The first run of the subtracted MAST-U case did not
+			 * finish a single iteration in seven minutes.
+			 *
+			 * `COIL-SUBTRACTION-PLAN.md` §1 licenses the cache for the reason
+			 * it licenses the solver's two: the conductor currents do not move
+			 * during a forward solve, so `psi_c` at a fixed point is a
+			 * precompute. This one is the third and it is the search's.
+			 *
+			 * **BUILT LAZILY AND THREADED, AND THE FINDER MUST THEREFORE
+			 * OUTLIVE ONE NEWTON STEP.** Once per finder is the contract; a
+			 * finder built inside the Newton loop pays 13 s of threaded build
+			 * per step and buys nothing, which is why
+			 * GradShafranovSolver::solve() hoists its finder out of the loop
+			 * and holds it for the solve. Nothing here can enforce that, so it
+			 * is said in both places.
+			 *
+			 * EMPTY WITH NO CONDUCTORS, and every reader then takes the
+			 * unshifted branch, so a run that does not ask for the split is
+			 * bit-identical and pays nothing.
+			 *
+			 * The tables are over the POTENTIAL space's element nodes and the
+			 * FLUX space's separately, because the two callers ask for
+			 * different ones and MEQ does not require the spaces to share a
+			 * node set.
+			 */
+			struct NodalConductors
+			{
+				/// Per ( element, local node ) of the potential space, laid out
+				/// by the offsets below.
+				std::vector< double > potentialPsi;
+				std::vector< int > potentialOffset;
+
+				/// q_c per ( element, local node ) of the FLUX space's scalar
+				/// nodes, interleaved ( qR, qZ ). NaN at a node on the axis,
+				/// which is meq::ConductorField::flux()'s own contract and is
+				/// screened by `fluxUsable`.
+				std::vector< double > fluxQ;
+				std::vector< bool > fluxUsable;
+				std::vector< int > fluxOffset;
+
+				/// max | q_c | over the flux nodes -- fluxScale()'s whole
+				/// conductor pass, reduced to one number at build time.
+				double scale = 0.0;
+
+				bool built = false;
+			};
+
+			mutable NodalConductors nodal;
+
+			/// Fills nodal on the first call and returns it. A no-op returning
+			/// an empty table when no conductor field is set.
+			NodalConductors const &nodalConductors() const;
 
 			mfem::GridFunction const &fluxField;
 			mfem::GridFunction const &potentialField;

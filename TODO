@@ -1274,12 +1274,36 @@ need something these cases structurally cannot give.
   than the plasma, which is what examples/coils-rectangle.toml is and why its
   split reads exactly 1.00x -- its box was never graded to its coils.
 
-  SO WHAT IS STILL OWED FOR BULLET 1 IS ONE FIXTURE, AND IT IS SMALLER THAN
-  THIS ENTRY WAS.  A machine-sized box (or vessel outline) enclosing BOTH the
+  AND BULLET 1 NO LONGER NEEDS A FIXED-BOUNDARY FIXTURE AT ALL, WHICH THIS
+  ENTRY GOT WRONG IN THE OTHER DIRECTION.  M-142's 1.96x lives on a FREE-
+  boundary half-disc, where the conductors are inside the computational domain
+  by construction -- and what stood between MEQ and it was not a fixture but
+  ONE LOOP: apps/meq.cpp emitted `--coil` for every [[coils]] block whatever
+  [conductors] Model said, so the key reached the solver and never reached the
+  mesh.  That is fixed, and examples/mastu-nke now meshes at 4716 triangles
+  against 9361 by editing one key -- MEASUREMENTS.md M-148.  A fixed-boundary
+  box remains a nice-to-have for a case with no exterior coupling in it; it is
+  no longer what the measurement is waiting on.
+
+  WHAT IS WAITING ON SOMETHING, AND IT IS MODELLING RATHER THAN PLUMBING:
+  Ian's pathway is "run with coarse mesh and filaments, use that to get so
+  close that we only need one or two big newton iterations using meshed
+  coils", so the split only has to WIN on filaments -- and a [[coils]] block
+  is currently ONE filament at the rectangle's centre.  MAST-U's solenoid is
+  12 mm by 3.18 m and sits beside the plasma, so that collapse is not a
+  machine whose equilibrium is near MAST-U's: the filament arm reaches a
+  relative residual of 7.0e-04 in 200 Newton steps and does not converge,
+  where the meshed arm converges in 2.  Subdividing a block into an n_R x n_Z
+  stack carrying I/( n_R n_Z ) each is the fix, it costs 2.38 us per 23
+  conductors, and the open question is how many and chosen how.
+  COIL-SUBTRACTION-PLAN.md section 13.5.
+
+  THE OLD TEXT OF THIS BULLET FOLLOWS, BECAUSE THE FIXED-BOUNDARY FIXTURE IS
+  STILL WORTH HAVING FOR THE PHYSICS EVEN THOUGH IT IS NO LONGER ON THE
+  CRITICAL PATH.  A machine-sized box (or vessel outline) enclosing BOTH the
   plasma and its conductors, MESHED TO the conductor edges through
   tools/mesh/, with psi = 0 on the box.  That is coils-rectangle.toml grown up
-  and graded, and it is the only thing between here and M-142's 1.96x on a
-  fixed boundary.  Two routes and they are not equivalent:
+  and graded.  Two routes and they are not equivalent:
 
     * A ZERO DATUM ON THE BOX.  Reachable today -- `[boundary] Type = "zero"`
       -- and mathematically well posed, but the equilibrium it describes is not

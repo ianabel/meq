@@ -607,6 +607,67 @@ namespace meq
 	}
 
 
+	namespace
+	{
+		/// The dimension of that name at that length, creating it if it is not
+		/// there and refusing it if it is there at another length.
+		netCDF::NcDim sharedDimension( netCDF::NcFile &file,
+		                               std::string const &name,
+		                               std::size_t length )
+		{
+			netCDF::NcDim existing = file.getDim( name );
+			if ( existing.isNull() )
+				return file.addDim( name, length );
+			if ( existing.getSize() != length )
+				throw std::runtime_error(
+					"meq::NetCDFWriter::vector: the dimension \"" + name
+					+ "\" is already " + std::to_string( existing.getSize() )
+					+ " long and this array is " + std::to_string( length )
+					+ ". Two arrays sharing a dimension name must share its "
+					  "length" );
+			return existing;
+		}
+	}
+
+	void NetCDFWriter::vector( std::string const &dimension,
+	                           std::string const &name,
+	                           std::vector<double> const &values,
+	                           std::string const &longName,
+	                           std::string const &units )
+	{
+		if ( values.empty() )
+			throw std::runtime_error( "meq::NetCDFWriter::vector: " + name
+			                          + " is empty; a zero-length NetCDF "
+			                            "dimension is UNLIMITED, which is not "
+			                            "what an empty array means. The caller "
+			                            "should not write the variable at all" );
+
+		netCDF::NcDim dim = sharedDimension( state->file, dimension,
+		                                     values.size() );
+		netCDF::NcVar var = state->file.addVar( name, netCDF::ncDouble, dim );
+		var.putAtt( "long_name", longName );
+		if ( !units.empty() )
+			var.putAtt( "units", units );
+		var.putVar( values.data() );
+	}
+
+	void NetCDFWriter::vector( std::string const &dimension,
+	                           std::string const &name,
+	                           std::vector<int> const &values,
+	                           std::string const &longName )
+	{
+		if ( values.empty() )
+			throw std::runtime_error( "meq::NetCDFWriter::vector: " + name
+			                          + " is empty; see the double overload" );
+
+		netCDF::NcDim dim = sharedDimension( state->file, dimension,
+		                                     values.size() );
+		netCDF::NcVar var = state->file.addVar( name, netCDF::ncInt, dim );
+		var.putAtt( "long_name", longName );
+		var.putVar( values.data() );
+	}
+
+
 	struct FluxGridWriter::State
 	{
 		netCDF::NcFile file;
@@ -891,6 +952,13 @@ namespace meq
 	NetCDFWriter::NetCDFWriter( std::string const &, GridSampler const & ) { unavailable(); }
 	NetCDFWriter::~NetCDFWriter() = default;
 	void NetCDFWriter::close() { }
+	void NetCDFWriter::vector( std::string const &, std::string const &,
+	                           std::vector<double> const &,
+	                           std::string const &, std::string const & )
+	{ unavailable(); }
+	void NetCDFWriter::vector( std::string const &, std::string const &,
+	                           std::vector<int> const &, std::string const & )
+	{ unavailable(); }
 	void NetCDFWriter::attribute( std::string const &, std::string const & ) { unavailable(); }
 	void NetCDFWriter::attribute( std::string const &, double ) { unavailable(); }
 	void NetCDFWriter::attribute( std::string const &, int ) { unavailable(); }

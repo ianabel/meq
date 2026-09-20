@@ -196,6 +196,64 @@ makes a ``.nc`` file self-describing enough to plot six months later.
 **varying fastest.** That is C row-major order, and it is the layout a transport
 code coupling to MEQ along :math:`(t, x)` already expects.
 
+.. _output-restart-variables:
+
+The same file also carries the exact solution, and the conductors
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Beside the rasterization above, ``<stem>.nc`` carries a second representation
+of the same answer:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Variable or attribute
+     - What it is
+   * - ``psi_coefficients(psi_dof)``
+     - every coefficient of :math:`\psi_h` in the finite-element space — the
+       solved potential, not the post-processed :math:`\psi^*`
+   * - ``flux_coefficients(flux_dof)``
+     - the same for the solved flux :math:`q`, with
+       :math:`\bar\nabla\psi = r\,q`
+   * - ``fe_collection``, ``fe_order``, ``flux_collection``, ``flux_vdim``,
+       ``flux_ordering``
+     - the spaces those coefficients live in, spelled as MFEM's
+       ``FiniteElementCollection::New()`` takes them back
+   * - ``mesh_file``
+     - the ``.mesh`` written beside this file. The mesh is **named, not
+       embedded**
+   * - ``content``
+     - ``"total (psi)"`` or ``"remainder (psi - psi_c)"``
+   * - ``conductor_kind``, ``conductor_R``, ``conductor_Z``,
+       ``conductor_half_width``, ``conductor_half_height``,
+       ``conductor_current``, ``mu0``
+     - every conductor, enough to rebuild :math:`\psi_c` exactly at any point.
+       ``kind`` is 0 for a rectangle of uniform current density and 1 for a
+       point filament, whose two half-extents are zero by definition rather
+       than by omission
+   * - ``input_toml``, ``input_file``
+     - the configuration that produced the run, verbatim
+
+.. important::
+
+   **Under a subtracting** ``[conductors] Model`` **the lossy format carries the
+   physically exact field and the exact format carries a difference.** That
+   inversion is the opposite of what the names suggest and is worth reading
+   twice. The gridded variables ``psi``, ``B_R`` and ``B_Z`` *sample*, so they
+   can add :math:`\psi_c` back at every node and do; the ``.gf`` files
+   *represent*, and :math:`\psi_c` has no representation in the space — for a
+   filament it is logarithmic at the conductor.
+
+   This is why the conductor table is here and not a flag. ``content =
+   "remainder"`` would tell you that you hold the wrong field without letting
+   you fix it: :math:`\psi_c` is recoverable from neither the mesh, nor the
+   space, nor the coefficients — only from the conductors.
+
+   A run under a split also writes ``<stem>_psi_total.gf``, holding
+   :math:`\psi_h + I_h(\psi_c)` — exact at the nodes and interpolated between
+   them. It is for **looking at**, and its name says so.
+
 .. _output-grid-cost:
 
 What the grid format costs

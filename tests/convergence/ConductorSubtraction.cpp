@@ -1268,3 +1268,586 @@ BOOST_AUTO_TEST_CASE( aSubtractedConductorOutsideGammaIsRefusedEitherWayRound )
 		BOOST_CHECK_NO_THROW( solver->setConductorField( beyond ) );
 	}
 }
+
+// CS-5: MEQ'S OWN EXPENSIVE QUADRATURE IS THE REFERENCE, BECAUSE THE BENCHMARK
+// CANNOT BE ONE.
+//
+// COIL-SUBTRACTION-PLAN.md §7.2 retires CS-5 as staged and says why:
+// MEASUREMENTS.md M-139 puts the freegs4e comparison's floor at 7.7e-04 and it
+// does NOT refine, because freegs4e's ShapedCoil caps at six points per
+// triangle. A change whose entire claim is that the conductors are resolved
+// EXACTLY cannot be accepted against a reference that resolves them to six
+// points.
+//
+// The replacement is a self-comparison, and it is the right one here because
+// the claim is about REPRESENTATION rather than about physics: MEQ owns the
+// kernel -- meq::coilPsi() at whatever order is asked for, up to
+// meq::maximumCoilQuadratureOrder -- so a reference field can be built far
+// beyond anything a solve would use, on the SAME conductors, and the shipped
+// rule measured against it.
+//
+// WHAT THIS CASE IS FOR, IN ONE LINE: to say how much of the split's error is
+// the quadrature, so that everything else measured about it can be attributed
+// elsewhere. It is the instrument that M-139 denied CS-5 as staged.
+//
+// AND IT IS SPLIT BY WHERE THE FIELD POINT IS, because the two regimes
+// converge differently and merging them would hide the slower one. OFF the
+// conductor the integrand is analytic and Gauss-Legendre is geometric in the
+// separation; ON or INSIDE it the kernel carries a logarithm, the rule's cubic
+// grading turns that into algebraic convergence, and no order in the shipped
+// range reaches round-off. That is a property of the integrand and not a defect
+// -- and it does not reach a subtracted solve, whose whole premise is that the
+// conductors are OUTSIDE the elements being integrated.
+BOOST_AUTO_TEST_CASE( theConductorQuadratureIsBoundedByAnExpensiveReference )
+{
+	// FAR BEYOND A SOLVE AND FAR BELOW THE CAP. meq::maximumCoilQuadratureOrder
+	// is 256 and requireOrder()'s message records that the rule reaches
+	// round-off at about 48, so 160 is a reference in the sense that matters:
+	// raising it further changes nothing this case can see.
+	int const reference = 160;
+	int const shipped = meq::defaultCoilQuadratureOrder;
+
+	// FOUR SHAPES AND THE ASPECT RATIO IS THE VARIABLE. A machine's conductors
+	// are not all compact: MAST-U's solenoid is 12 mm by 3.18 m, which is 265
+	// to 1, and it is the hardest case for any rule graded on a single length.
+	struct Shape
+	{
+		char const *name;
+		meq::Coil coil;
+	};
+
+	std::vector< Shape > const shapes = {
+		{ "square 0.1",  meq::Coil( 1.0000, 0.000, 0.0500, 0.0500, 1.0e5 ) },
+		{ "D3, 1.5:1",   meq::Coil( 0.8065, 1.982, 0.0431, 0.0284, 2.43e5 ) },
+		{ "PX1, 16:1",   meq::Coil( 0.2415, 1.224, 0.0125, 0.2014, 1.55e5 ) },
+		{ "solenoid",    meq::Coil( 0.1948, 0.000, 0.0060, 1.5900, 1.62e6 ) },
+	};
+
+	double const mu0 = meq::vacuumPermeability;
+
+	std::printf( "\n  CS-5: the shipped order %d against an order %d reference\n",
+	             shipped, reference );
+	std::printf( "    %-12s %10s %12s %12s %12s\n", "coil", "gap/size",
+	             "psi rel", "|grad| rel", "order 8 psi" );
+
+	double worstClear = 0.0;
+	double worstSurfacePsi = 0.0;
+	double worstSurfaceGrad = 0.0;
+	double worstInside = 0.0;
+	double leastGain = 1.0e30;
+
+	for ( Shape const &shape : shapes )
+	{
+		meq::Coil const &c = shape.coil;
+		// THE COIL'S OWN SIZE, not its smaller half-extent. The far field is
+		// set by the whole conductor, so this is the length the separation is
+		// similar in -- measured across all four shapes, which is what four
+		// shapes are here for.
+		double const size = std::max( c.halfWidth(), c.halfHeight() );
+
+		// TWO DIRECTIONS AND THE SECOND IS THE HARD ONE. Out past the CORNER
+		// the point is far from most of the conductor whatever its aspect
+		// ratio; out from the middle of the LONG FACE it is a coil-size away
+		// from the near edge and a whole half-length from the far one, which
+		// is where a rule graded on one length is weakest. On a 265:1 solenoid
+		// the two differ by orders of magnitude and quoting only the corner
+		// would understate the bound.
+		for ( int direction = 0; direction < 2; ++direction )
+		for ( double ratio : { -1.0, 0.0, 0.1, 0.5, 2.0, 10.0 } )
+		{
+			// ratio < 0 is the coil's CENTRE, which is the worst point of all:
+			// the field point is in the middle of the domain being integrated.
+			// It is the same point in both directions, so it is taken once.
+			bool const inside = ratio < 0.0;
+			if ( inside && direction == 1 )
+				continue;
+
+			double const r = inside ? c.centreR()
+			               : direction == 0 ? c.rMax() + ratio*size
+			                                : c.rMax() + ratio*size;
+			double const z = inside ? c.centreZ()
+			               : direction == 0 ? c.zMax() + ratio*size
+			                                : c.centreZ();
+
+			double const exact = meq::coilPsi( c, r, z, reference, mu0 );
+			double eR = 0.0;
+			double eZ = 0.0;
+			meq::coilGradPsi( c, r, z, eR, eZ, reference, mu0 );
+			double const gradScale = std::hypot( eR, eZ );
+
+			double const got = meq::coilPsi( c, r, z, shipped, mu0 );
+			double aR = 0.0;
+			double aZ = 0.0;
+			meq::coilGradPsi( c, r, z, aR, aZ, shipped, mu0 );
+
+			double const coarse = meq::coilPsi( c, r, z, 8, mu0 );
+
+			double const psiError = std::fabs( got - exact )
+			                        /std::max( std::fabs( exact ), 1.0e-300 );
+			double const gradError = std::hypot( aR - eR, aZ - eZ )
+			                         /std::max( gradScale, 1.0e-300 );
+			double const coarseError = std::fabs( coarse - exact )
+			                           /std::max( std::fabs( exact ), 1.0e-300 );
+
+			char where[ 32 ];
+			std::snprintf( where, sizeof( where ), "%s%s",
+			               inside ? "centre" :
+			               ratio == 0.0 ? "0" :
+			               ratio == 0.1 ? "0.1" :
+			               ratio == 0.5 ? "0.5" :
+			               ratio == 2.0 ? "2" : "10",
+			               inside ? "" : direction == 0 ? " corner" : " face" );
+			std::printf( "    %-12s %10s %12.3e %12.3e %12.3e\n", shape.name,
+			             where, psiError, gradError, coarseError );
+
+			double const worst = std::max( psiError, gradError );
+			if ( inside )
+				worstInside = std::max( worstInside, worst );
+			else if ( ratio == 0.0 )
+			{
+				// SPLIT, BECAUSE psi AND ITS GRADIENT ARE NOT THE SAME
+				// STATEMENT HERE and merging them loses the finding. On the
+				// conductor's own surface psi_c is still at 1e-12 -- the
+				// logarithm is integrable and the rule grades onto it -- while
+				// grad psi_c is four to seven orders worse, because
+				// differentiating under the integral puts the singularity one
+				// power up and the grading is not steep enough for that.
+				worstSurfacePsi = std::max( worstSurfacePsi, psiError );
+				worstSurfaceGrad = std::max( worstSurfaceGrad, gradError );
+			}
+			else
+			{
+				worstClear = std::max( worstClear, worst );
+				// REFINEMENT, WHICH IS THE PROPERTY M-139 SAYS THE BENCHMARK
+				// LACKS. Only where there is room for it: past a few coil
+				// sizes even order 8 is at round-off and the ratio of two
+				// round-off figures is noise.
+				if ( coarseError > 1.0e-10 )
+					leastGain = std::min( leastGain, coarseError/std::max( psiError, 1.0e-16 ) );
+			}
+		}
+	}
+
+	std::printf( "    worst: clear of the coil %.3e; ON its surface, psi %.3e "
+	             "and grad psi %.3e; at its centre %.3e\n",
+	             worstClear, worstSurfacePsi, worstSurfaceGrad, worstInside );
+	std::printf( "    least gain from order 8 to order %d, clear of the coil: "
+	             "%.1fx\n", shipped, leastGain );
+
+	// CLEAR OF THE CONDUCTOR THE SHIPPED RULE IS AT ROUND-OFF, and that is the
+	// regime a subtracted solve lives in: Omega_h does not contain the
+	// conductors -- that is the whole point of the split -- so every quadrature
+	// point of every element is a point of this kind.
+	BOOST_TEST( worstClear < 1.0e-8,
+	            "the shipped conductor quadrature is only good to "
+	            << worstClear << " relative CLEAR of the conductor, where the "
+	            "integrand is analytic. A subtracted solve evaluates psi_c "
+	            "nowhere else, so this bounds the split's quadrature error and "
+	            "it has to be far below the discretisation" );
+
+	// ON AND INSIDE IT, ALGEBRAIC AND LOOSER -- stated rather than hidden. The
+	// only consumers are a MESHED run's own comparison and the guess builder,
+	// neither of which is a claim about exactness.
+	//
+	// **AND THE GRADIENT IS THE WEAK ONE, BY SEVEN ORDERS.** The bound below
+	// is set by the 265:1 solenoid at the middle of its long face: psi_c there
+	// is 2.2e-12 and grad psi_c is 3.5e-05, on the same rule at the same
+	// point. That is not a defect to fix at this order -- it is what
+	// differentiating a logarithmic kernel under the integral does to a rule
+	// graded for the kernel itself -- and it reaches nothing: a subtracted
+	// solve has no quadrature point on a conductor's surface, because the
+	// conductors are not in Omega_h. A MESHED run never evaluates psi_c at
+	// all.
+	BOOST_TEST( worstSurfacePsi < 1.0e-8,
+	            "psi_c itself is only " << worstSurfacePsi << " relative ON "
+	            "the conductor's surface, where the rule grades onto an "
+	            "integrable logarithm and should still be near round-off" );
+	BOOST_TEST( worstSurfaceGrad < 1.0e-4,
+	            "grad psi_c is " << worstSurfaceGrad << " relative ON the "
+	            "conductor's surface" );
+	BOOST_TEST( worstInside < 1.0e-5,
+	            "the shipped quadrature is " << worstInside << " relative at "
+	            "the conductor's centre" );
+
+	// AND IT REFINES, which is the whole of why this can be a reference and
+	// freegs4e's six points per triangle cannot.
+	BOOST_TEST( leastGain > 20.0,
+	            "raising the order from 8 to " << shipped << " bought only "
+	            << leastGain << "x at its weakest point clear of the "
+	            "conductor. A reference that does not refine is M-139's "
+	            "freegs4e floor, which is exactly what §7.2 says CS-5 cannot "
+	            "be accepted against" );
+}
+
+// CS-5, THE SECOND HALF: THE SAME QUESTION ASKED OF A SOLVE RATHER THAN OF THE
+// KERNEL.
+//
+// The case above bounds meq::coilPsi() against its own expensive form. That is
+// necessary and it is not the claim: what CS-5 owes is a statement about the
+// SPLIT, which is the kernel plus a boundary datum plus a solve. This puts the
+// same rectangle through GradShafranovSolver at two quadrature orders -- the
+// shipped one and one far beyond it -- with everything else identical, and
+// measures how far apart the two reported equilibria are.
+//
+// THE COMPARISON IS AGAINST THE DISCRETISATION AND NOT AGAINST ZERO, which is
+// the point §7.2 makes about M-139: a reference is only a reference if it
+// resolves the thing being measured better than the thing being measured
+// resolves itself. theMeshedCoilConvergesToTheSubtractedOne reads
+// 1.6e-04 to 1.8e-05 on these meshes; a quadrature contribution of that size
+// would make the split's acceptance a measurement of the quadrature rule.
+BOOST_AUTO_TEST_CASE( theSolvedSplitIsInsensitiveToTheConductorQuadrature )
+{
+	meq::Coil const conductor( 1.00, 0.00, 0.10, 0.10, 1.0e5 );
+	int const reference = 96;
+
+	// THE DATUM IS THE EXPENSIVE FIELD IN BOTH ARMS, and that is what makes
+	// this measure anything at all. Shift the datum with the quadrature and
+	// the remainder is identically zero either way -- a beautiful, vacuous
+	// agreement -- because the same error would be subtracted from both sides
+	// of psi_p|_Gamma = g - psi_c|_Gamma. Holding g fixed at the reference
+	// leaves the quadrature's own error as the only thing that moves.
+	meq::CoilSet exact;
+	exact.add( conductor );
+	exact.setQuadratureOrder( reference );
+
+	mfem::FunctionCoefficient datum(
+		[ &exact ]( mfem::Vector const &x )
+		{
+			return exact.psi( x( 0 ), x( 1 ) );
+		} );
+
+	VacuumSource const vacuum;
+
+	std::printf( "\n  CS-5: the SOLVED split at two conductor quadratures\n" );
+	std::printf( "    %8s %16s %16s %10s\n", "elements", "max |psi diff|",
+	             "max |psi|", "relative" );
+
+	double worstRelative = 0.0;
+
+	for ( int n : { 8, 16 } )
+	{
+		std::vector< double > total[ 2 ];
+		double scale = 0.0;
+
+		for ( int arm = 0; arm < 2; ++arm )
+		{
+			meq::ConductorField field;
+			field.add( conductor );
+			field.setQuadratureOrder( arm == 0 ? meq::defaultCoilQuadratureOrder
+			                                   : reference );
+
+			mfem::Mesh mesh = makeBox( n );
+			meq::GradShafranovSolver solver( mesh, 2 );
+			solver.setSource( vacuum );
+			solver.setBoundaryData( datum );
+			solver.setConductorField( field );
+			solver.solve();
+
+			// THE TOTAL AT EVERY QUADRATURE POINT, which is the field a
+			// consumer sees -- psi_p alone would compare two remainders of two
+			// different splits and mean nothing.
+			for ( int element = 0; element < mesh.GetNE(); ++element )
+			{
+				mfem::IntegrationRule const &rule = mfem::IntRules.Get(
+					mesh.GetElementBaseGeometry( element ), 4 );
+				mfem::IsoparametricTransformation transformation;
+				mesh.GetElementTransformation( element, &transformation );
+
+				for ( int q = 0; q < rule.GetNPoints(); ++q )
+				{
+					mfem::IntegrationPoint const &ip = rule.IntPoint( q );
+					transformation.SetIntPoint( &ip );
+					mfem::Vector point( 3 );
+					transformation.Transform( ip, point );
+
+					double const value =
+						solver.potential().GetValue( element, ip )
+						+ field.psi( point( 0 ), point( 1 ) );
+					total[ arm ].push_back( value );
+					scale = std::max( scale, std::fabs( value ) );
+				}
+			}
+		}
+
+		BOOST_TEST_REQUIRE( total[ 0 ].size() == total[ 1 ].size() );
+
+		double worst = 0.0;
+		for ( std::size_t i = 0; i < total[ 0 ].size(); ++i )
+			worst = std::max( worst, std::fabs( total[ 0 ][ i ]
+			                                    - total[ 1 ][ i ] ) );
+
+		double const relative = scale > 0.0 ? worst/scale : 0.0;
+		worstRelative = std::max( worstRelative, relative );
+
+		std::printf( "    %8d %16.3e %16.3e %10.2e\n",
+		             static_cast< int >( total[ 0 ].size() ), worst, scale,
+		             relative );
+	}
+
+	// FOUR ORDERS BELOW THE DISCRETISATION IS THE BAR, and it is set from the
+	// sibling case's own table rather than picked: that reads 1.6e-04 at n = 8
+	// and 1.8e-05 at n = 16 for the same conductor on the same meshes, so a
+	// quadrature contribution at 1e-9 is a thousandth of the smaller of them
+	// and the split's acceptance is a measurement of the DISCRETISATION.
+	BOOST_TEST( worstRelative < 1.0e-9,
+	            "the solved split moves by " << worstRelative << " relative "
+	            "when the conductor quadrature is raised from the shipped "
+	            "order to " << reference << ". COIL-SUBTRACTION-PLAN.md §7.2 "
+	            "needs this far below the discretisation, or the split is "
+	            "being accepted against its own quadrature rule" );
+}
+
+// §0b's CENTRAL CLAIM, ON THE ONE COMBINATION NO OTHER CASE COVERS:
+// SPLIT + EXTERIOR COUPLING + PLASMA.
+//
+// THIS IS THE CELL NO OTHER ACCEPTANCE COVERS, WHICH IS §13.1's LESSON AND IS
+// THE WHOLE REASON IT IS SEPARATE:
+//
+//   * theSplitReachesTheExteriorCoupling       -- coupling, NO plasma
+//   * theMeshedCoilConvergesToTheSubtractedOne -- plasma, NO coupling
+//   * DriverAcceptance's split case (M-144)    -- plasma, NO coupling
+//
+// Each is sharp and none has both, so until this case existed the combination
+// every real machine is in had no acceptance at all -- and posing one found
+// four defects, M-148.
+//
+// THE FIXTURE IS THE VACUUM CASE ABOVE WITH A PLASMA PUT IN IT, deliberately:
+// same half-disc, same Gamma, same two rectangles inside it, same DtN. The only
+// thing added is a source that carries current, so anything this case sees and
+// its sibling does not is the plasma's doing.
+//
+// THE COMPARISON IS AGAINST THE MESHED ROUTE AND NOT AGAINST A CLOSED FORM,
+// because there is no closed form for this and §0b's claim is a comparison
+// anyway: the same conductors as a DOMAIN SOURCE, on the same mesh, must give
+// the same equilibrium to the discretisation.
+BOOST_AUTO_TEST_CASE( theSplitAndTheMeshedRouteAgreeUnderAnExteriorCoupling )
+{
+	int const order = 2;
+	int const modes = 12;
+
+	meq::ConductorField const subtracted = insideGammaPair();
+	meq::CoilSet meshed;
+	for ( std::size_t i = 0; i < subtracted.coils().size(); ++i )
+		meshed.add( subtracted.coils().coil( i ) );
+
+	// A PLASMA THAT IS A PLASMA: linear in psi, so the problem is genuinely
+	// semi-linear and the plasma current is a functional of the answer rather
+	// than a prescribed field. Kept small against the conductors' own scale so
+	// that the equilibrium is one the conductors dominate -- which is the
+	// regime the split exists for and the one where psi_c and psi_p are
+	// comparable rather than one being noise on the other.
+	struct LinearPlasma : public meq::Source
+	{
+		double f( double r, double, double psi ) const override
+		{
+			return 0.35*r*psi;
+		}
+
+		double dFdPsi( double r, double, double ) const override
+		{
+			return 0.35*r;
+		}
+	};
+
+	// THE SAME SOURCE PLUS THE COILS, which is meq::CoilSet::f() added to the
+	// plasma term -- the meshed route's whole content.
+	struct MeshedPlasma : public meq::Source
+	{
+		explicit MeshedPlasma( meq::CoilSet const &c ) : coils( c ) {}
+
+		double f( double r, double z, double psi ) const override
+		{
+			return 0.35*r*psi + coils.f( r, z );
+		}
+
+		double dFdPsi( double r, double, double ) const override
+		{
+			return 0.35*r;
+		}
+
+		meq::CoilSet const &coils;
+	};
+
+	LinearPlasma const plasma;
+	MeshedPlasma const withCoils( meshed );
+
+	std::printf( "\n  §0b UNDER AN EXTERIOR COUPLING, WITH A PLASMA\n" );
+	std::printf( "    %5s %10s %16s %8s\n", "n", "elements",
+	             "meshed - split", "rate" );
+
+	double previous = 0.0;
+	double first = 0.0;
+	double last = 0.0;
+	int firstN = 0;
+	int lastN = 0;
+	double lastRelative = 0.0;
+
+	for ( int n : { 16, 24, 32 } )
+	{
+	std::vector< double > total[ 2 ];
+	std::vector< std::pair< double, double > > at[ 2 ];
+	double scale = 0.0;
+	int elements = 0;
+
+	for ( int arm = 0; arm < 2; ++arm )
+	{
+		HalfDisc d = makeHalfDisc( n );
+		meq::ExteriorDtN const dtn( 0.0, gammaRadius, modes );
+		mfem::ConstantCoefficient zero( 0.0 );
+
+		meq::GradShafranovSolver solver( *d.sub, order );
+		if ( arm == 0 )
+			solver.setSource( withCoils );
+		else
+			solver.setSource( plasma );
+		solver.setBoundaryData( zero );
+		solver.setExtension( *d.path, d.gammaHMarker );
+		if ( arm == 1 )
+			solver.setConductorField( subtracted );
+		solver.setExteriorCoupling( dtn );
+		solver.solve();
+
+		// THE PHYSICAL FLUX AT EVERY QUADRATURE POINT, which is the field a
+		// consumer sees. Comparing psi_p against psi would compare a remainder
+		// with a total and be large for the right reason.
+		mfem::Mesh &mesh = *d.sub;
+		for ( int element = 0; element < mesh.GetNE(); ++element )
+		{
+			mfem::IntegrationRule const &rule = mfem::IntRules.Get(
+				mesh.GetElementBaseGeometry( element ), 4 );
+			mfem::IsoparametricTransformation transformation;
+			mesh.GetElementTransformation( element, &transformation );
+
+			for ( int q = 0; q < rule.GetNPoints(); ++q )
+			{
+				mfem::IntegrationPoint const &ip = rule.IntPoint( q );
+				transformation.SetIntPoint( &ip );
+				mfem::Vector point( 3 );
+				transformation.Transform( ip, point );
+
+				// NOT ON THE CONDUCTORS, and this exclusion is its sibling's
+				// and carries its reason: inside and beside a rectangle the
+				// MESHED route is resolving a top hat cut by element
+				// interiors, so psi is only C^1 there and no polynomial
+				// degree recovers it. theMeshedCoilConvergesToTheSubtractedOne
+				// excludes the same band for the same reason and measures a
+				// rate 2.69 outside it.
+				//
+				// **AND LEAVING IT IN MEASURES THE WRONG ARM, WHICH WAS
+				// MEASURED BEFORE IT WAS EXCLUDED**: the worst point of the
+				// whole comparison landed at ( 0.5602, 0.1995 ), one
+				// centimetre outside the coil at ( 0.50, 0.20 ), with the
+				// meshed arm reading 5.12e-02 against the subtracted arm's
+				// 1.83e-01. The SUBTRACTED number is the accurate one there --
+				// it is an exact quadrature of the same rectangle -- so a
+				// comparison including that point reports the split's
+				// ADVANTAGE as its error.
+				bool nearConductor = false;
+				for ( std::size_t c = 0; c < subtracted.coils().size(); ++c )
+				{
+					meq::Coil const &one = subtracted.coils().coil( c );
+					if ( std::fabs( point( 0 ) - one.centreR() )
+					         < 2.0*one.halfWidth()
+					     && std::fabs( point( 1 ) - one.centreZ() )
+					         < 2.0*one.halfHeight() )
+						nearConductor = true;
+				}
+				if ( nearConductor )
+					continue;
+
+				double value = solver.potential().GetValue( element, ip );
+				if ( arm == 1 )
+					value += subtracted.psi( std::max( 0.0, point( 0 ) ),
+					                         point( 1 ) );
+				total[ arm ].push_back( value );
+				at[ arm ].push_back( std::make_pair( point( 0 ),
+				                                     point( 1 ) ) );
+				scale = std::max( scale, std::fabs( value ) );
+			}
+		}
+
+		elements = mesh.GetNE();
+	}
+
+	BOOST_TEST_REQUIRE( total[ 0 ].size() == total[ 1 ].size() );
+
+	double worst = 0.0;
+	std::size_t worstAt = 0;
+	for ( std::size_t i = 0; i < total[ 0 ].size(); ++i )
+	{
+		double const gap = std::fabs( total[ 0 ][ i ] - total[ 1 ][ i ] );
+		if ( gap > worst )
+		{
+			worst = gap;
+			worstAt = i;
+		}
+	}
+	double const relative = scale > 0.0 ? worst/scale : 0.0;
+
+	// WHERE, AND NOT ONLY HOW MUCH. A disagreement concentrated at Gamma is a
+	// boundary term; one concentrated on the conductors is the source; one
+	// spread evenly is neither. That is the first question anyone reading a red
+	// here will have -- and it is what identified the exclusion above.
+	double const rate = previous > 0.0 ? std::log2( previous/worst ) : 0.0;
+	if ( previous == 0.0 )
+	{
+		first = worst;
+		firstN = n;
+	}
+	last = worst;
+	lastN = n;
+	previous = worst;
+	lastRelative = relative;
+
+	std::printf( "    %5d %10d %16.3e", n, elements, worst );
+	if ( rate != 0.0 )
+		std::printf( " %8.2f", rate );
+	std::printf( "        worst at ( %.4f, %.4f ), |x| = %.4f\n",
+	             at[ 0 ][ worstAt ].first, at[ 0 ][ worstAt ].second,
+	             std::hypot( at[ 0 ][ worstAt ].first,
+	                         at[ 0 ][ worstAt ].second ) );
+	}
+
+	// THE GATE IS THE MESHED ARM'S OWN DISCRETISATION, as M-144's is and for
+	// the same reason: the coils are cut by element interiors, so the meshed
+	// source carries a jump inside an element and its error is per cent level.
+	// A split that agreed to round-off would be suspicious; one that differs by
+	// more than the meshed arm can be wrong by is solving another problem.
+	BOOST_TEST( lastRelative < 1.0e-1,
+	            "the subtracted and meshed routes disagree by " << lastRelative
+	            << " relative under an exterior coupling with a plasma. "
+	            "COIL-SUBTRACTION-PLAN.md §0b requires the split to be a change "
+	            "of REPRESENTATION and not of answer" );
+
+	/*
+	 * AND THE DIFFERENCE FALLS, WHICH IS THE HALF WITH TEETH -- BUT ACROSS THE
+	 * WHOLE SEQUENCE AND NOT PER PAIR, AND THAT IS FORCED.
+	 *
+	 * A tolerance says the two routes are close on one mesh; a rate says they
+	 * are converging to the same field, which is §0b's actual claim.
+	 *
+	 * **PER PAIR IS NOT AVAILABLE HERE AND ITS SIBLING SHOWS WHY.**
+	 * theMeshedCoilConvergesToTheSubtractedOne can assert per pair only because
+	 * its coil's edges sit on mesh VERTICES at every level -- it says so, and
+	 * records 6.756e-04, 1.276e-03, 1.917e-04 with unaligned half-extents, a
+	 * rate of -0.92 and then +2.73. This fixture is a half-disc with a curved
+	 * Gamma and cannot align anything: the meshed source is a top hat whose
+	 * edge cuts element interiors, and WHICH elements it cuts is not a smooth
+	 * function of h. Measured here: 1.260e-01, 8.506e-03, 9.206e-03, so +3.89
+	 * and then -0.11, with the worst point hopping between coils.
+	 *
+	 * That is the same two-tier rule CLAUDE.md states for the extension path
+	 * under *Unfitted convergence needs a two-tier rate assertion*, met here
+	 * for the same reason, and it is geometry rather than either conductor
+	 * route.
+	 */
+	double const endToEnd =
+		std::log2( first/last )
+		/std::log2( static_cast< double >( lastN )/firstN );
+	std::printf( "    across the sequence: %.2f\n", endToEnd );
+
+	BOOST_TEST( endToEnd > 0.9,
+	            "the two routes are not converging to each other: "
+	            << endToEnd << " across the sequence under an exterior "
+	            "coupling with a plasma" );
+}

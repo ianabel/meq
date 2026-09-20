@@ -2079,6 +2079,22 @@ way.
 
 **If a waiter is used, check it actually fired.**
 
+**AN ELEMENT-LOCAL NEWTON EVALUATES ITS POLYNOMIAL OUTSIDE ITS ELEMENT ON
+PURPOSE, AND ANYTHING ADDED TO THAT POLYNOMIAL HAS TO SURVIVE IT.**
+`CriticalPointFinder::rootInElement()` lets the iterate leave the reference
+element by up to 2 — that is how a root near a face is found — and a polynomial
+is defined everywhere, so this cost nothing for as long as the field being
+rooted was one. Under `COIL-SUBTRACTION-PLAN.md`'s split the field is
+`q_p + q_c`, and `q_c` is a function on the OPEN half-plane: NaN on `r = 0`, and
+`meq::coilGradPsi` REFUSES `r < 0`. On a half-disc machine, whose elements reach
+`r = 0` exactly, the iterate leaves the half-plane and the run dies with
+*"the field point radius must not be negative"* — three frames down, naming a
+radius and nothing else. **A point off the half-plane is not a point of the
+machine**, so the seam returns a bool and every caller abandons rather than
+carrying on with `q_p` alone, which would root a different function. The
+transferable form: **a term added to an extrapolating evaluation must be defined
+wherever the extrapolation goes, or the evaluation has to be able to refuse.**
+
 **AND NEVER COMMIT A FILE A SUBAGENT OWNS ON THE STRENGTH OF ITS COMPILING.**
 an agent was searching for a fixture in
 `FreeBoundaryCoupling.cpp`, the file was staged after checking it built, and the
@@ -2163,6 +2179,24 @@ because a red suite nobody can action is one people learn to ignore.
 **A convergence table finds what unit tests do not.** This is the lesson from the
 sibling MFEM branch, where reproducing a published table turned up three library
 defects a passing unit suite had walked past for years — two of them silent.
+
+**AND A STAGED PLAN'S ACCEPTANCES CAN EACH BE SHARP AND JOINTLY MISS THE CELL
+WHERE TWO FEATURES MEET.** The coil-subtraction campaign has an acceptance per
+stage, every one of them an identity or a rate rather than a tolerance. CS-3's
+is a conductor inside `Γ` with **no plasma**; CS-4's driver acceptance is a
+**fixed-boundary box**. Neither has an X-point border and neither has a plasma
+current, so when the first machine was posed free boundary with its conductors
+subtracted, **both of those borders turned out to read the remainder rather than
+the total** — and the second failed in a way that named the wrong thing entirely,
+`int F/r` coming out exactly zero and the run reporting a singular bordered
+Jacobian. → **[M-148](MEASUREMENTS.md#m-148)**. The acceptance that was missing
+now exists and is green at a rate of 3.78, → **[M-151](MEASUREMENTS.md#m-151)**. The same shape as the `2 × 2`
+cross under *Commands* above, one level up: there a one-key experiment separated
+two hypotheses only if everything else was where you thought it was; here a
+per-stage acceptance covers a stage only if no other stage's feature is
+interacting with it. **When a plan's stages compose, the acceptance that matters
+is the one on the composition**, and enumerating consumers — CS-4's staging entry
+names nine — is exactly the kind of list that looks complete and is not.
 
 The specific hazard here is worth stating plainly, because it defeats the obvious
 test design: **a wrong sign convention converges, at the right rate, to the wrong

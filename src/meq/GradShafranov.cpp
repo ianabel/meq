@@ -22,6 +22,7 @@
 #include <cstdlib>
 #include <limits>
 #include <memory>
+#include <iomanip>
 #include <sstream>
 #include <exception>
 #include <stdexcept>
@@ -4632,6 +4633,10 @@ namespace
 			// see psi_c + psi_p rather than the solved remainder. Null unless
 			// the split is in use, and null shifts by exactly zero.
 			sourceTerm->setConductorField( conductorFieldSet );
+			// Borrowed for conductorPsiAtQuadrature(), which is the five
+			// plasma-current assemblies reading the same cache rather than
+			// building a second one on the same points.
+			sourceIntegrator = sourceTerm;
 			// AND THE CACHE HERE RATHER THAN IN prepare(), because this is
 			// where the integrator exists -- it is a local, owned by the form
 			// it is handed to. Empty and free unless the split is in use.
@@ -5812,7 +5817,10 @@ namespace
 		 * before rather than no fill at all -- the same reasoning as the
 		 * two-pass fallback in locateAxisPoint(), and for the same reason.
 		 */
-		CoilSet const *const conductors = normalisedSource->conductors();
+		// THE SOURCE'S RECTANGLES, OR THE SUBTRACTED ONES. See
+		// filterConductors(): under the split the source carries no coils at
+		// all, and the conductors are no less present for that.
+		CoilSet const *const conductors = filterConductors();
 
 		auto insideConductor = [ & ]( int element )
 		{
@@ -6070,6 +6078,104 @@ namespace
 		}
 	}
 
+	CoilSet const *GradShafranovSolver::filterConductors() const
+	{
+		/*
+		 * THE RECTANGLES TO KEEP AN EXTREMUM SEARCH OUT OF, WHICHEVER ROUTE
+		 * CARRIES THEM -- AND THE SPLIT TURNED THIS FILTER OFF.
+		 *
+		 * Two searches refuse a candidate that sits inside a conductor: the
+		 * axis constraint's, and the plasma fill's seed. meq::Source::conductors()
+		 * records why at length, and the short form is that **any coil carrying
+		 * current of the plasma's own sign has an O-point of its own and
+		 * competes on exactly the score these searches maximise** -- measured
+		 * on examples/diverted-tokamak.toml, where a run that loses the filter
+		 * ends with its axis inside P1L and a span six times the physical one.
+		 *
+		 * Both sites read the SOURCE's coil set, which is right on the meshed
+		 * route and silently empty on the subtracted one: apps/meq.cpp releases
+		 * its meq::CoilSet when the split is taken, because leaving it wrapped
+		 * around the source beside psi_c would double count. So the conductors
+		 * were no less present -- psi_c carries them, and CS-4 makes every
+		 * consumer read the total -- and the two filters that exist to keep
+		 * their O-points out of an argmax were **off**.
+		 *
+		 * FILAMENTS ARE DELIBERATELY NOT CONSIDERED, and it is the same
+		 * contract meq::ConductorField::coincides() states from its side: a
+		 * filament has no interior, so "inside a conductor" is a set of measure
+		 * zero and there is nothing for a mesh point to be inside of. Its
+		 * logarithmic peak IS an extremum the searches can find, and excluding
+		 * it would need a clearance rule rather than a containment test --
+		 * which nothing measured supports, and which that header refuses
+		 * explicitly.
+		 *
+		 * Null when there are no rectangles either way, which is every
+		 * conductor-free problem and every filament one.
+		 */
+		if ( nonlinearSource != nullptr
+		     && nonlinearSource->conductors() != nullptr )
+			return nonlinearSource->conductors();
+		if ( conductorFieldSet != nullptr
+		     && conductorFieldSet->coilCount() > 0 )
+			return &conductorFieldSet->coils();
+		return nullptr;
+	}
+
+	void GradShafranovSolver::totalPotential( mfem::GridFunction &into ) const
+	{
+		if ( !potentialFes )
+			throw std::logic_error(
+				"meq::GradShafranovSolver::totalPotential: prepare() has not "
+				"been called, so there is no space to build the field on" );
+
+		into.SetSpace( potentialFes.get() );
+		mfem::GridFunction const &solved = potential();
+		solved.HostRead();
+		into.HostWrite();
+
+		for ( int i = 0; i < solved.Size(); ++i )
+			into( i ) = solved( i ) + conductorPsiAtDof( i );
+	}
+
+	double GradShafranovSolver::conductorPsiAtQuadrature( int element,
+	                                                      int point ) const
+	{
+		/*
+		 * psi_c AT A SOURCE QUADRATURE POINT, AND THE FIVE CALLERS ARE WHY
+		 * THIS IS A FUNCTION AND NOT A LINE.
+		 *
+		 * COIL-SUBTRACTION-PLAN.md CS-4 is "every consumer of psi reads the
+		 * total", and its staging entry lists the critical-point finder, the
+		 * element fill, peakAt, the source and its Jacobian, the limiter and
+		 * the .nc grid. **FIVE MORE WERE NOT ON THAT LIST**, and they are all
+		 * in this file: the plasma-current integral and its four derivative
+		 * assemblies rebuild `psi` from the state at a quadrature point and
+		 * hand it to meq::NormalisedSource. Under the split the state holds
+		 * psi_p, so what they evaluate the profiles at is the REMAINDER.
+		 *
+		 * **IT PRESENTS AS A SINGULAR BORDER AND NOT AS A WRONG CURRENT**,
+		 * which is why no existing case caught it. With ConfineToPlasma the
+		 * profiles return zero wherever the normalised flux is negative, and
+		 * the remainder is negative nearly everywhere a conductor is
+		 * subtracted -- so `int F/r` comes out EXACTLY zero, the plasma-current
+		 * row of the dense corner is identically zero, and the run dies in
+		 * DenseMatrixInverse reporting *"the bordered Jacobian is singular in
+		 * ( psi_ax, psi_bnd, a )"*. That message names the block, so the search
+		 * starts at the exterior coupling, which is correct.
+		 *
+		 * THE SAME CACHE meq::SourceIntegrator ALREADY BUILDS, reached through
+		 * the integrator rather than duplicated. sourceRule() is documented as
+		 * "the rule SourceIntegrator uses, so that every derivative of the
+		 * assembled source term is taken on the same points it was assembled
+		 * on" -- so the points are identical BY CONSTRUCTION and a second cache
+		 * would be a second thing to keep in step. Exactly zero when no
+		 * conductor field is set, so every existing path is bit-identical.
+		 */
+		if ( !conductorFieldSet || !sourceIntegrator )
+			return 0.0;
+		return sourceIntegrator->conductorShiftAt( element, point );
+	}
+
 	double GradShafranovSolver::assemblePlasmaCurrent( mfem::Vector const &state ) const
 	{
 		LegTimer const timer( profile.constraintSeconds, profile.constraintCpuSeconds, profile.constraintCalls );
@@ -6181,6 +6287,7 @@ namespace
 					double psi = 0.0;
 					for ( int j = 0; j < dof; ++j )
 						psi += shape( j )*state( potentialStart + dofs[ j ] );
+					psi += conductorPsiAtQuadrature( e, i );
 
 					// scaledF, not f: with coils present f() is the SUM and the
 					// prescribed current is the plasma's alone.
@@ -6283,6 +6390,7 @@ namespace
 					double psi = 0.0;
 					for ( int j = 0; j < dof; ++j )
 						psi += shape( j )*state( potentialStart + dofs[ j ] );
+					psi += conductorPsiAtQuadrature( e, i );
 
 					// F carries the scale linearly, so dF/d(scale) is F/scale --
 					// and the residual's source term is -w F/r, so this is that
@@ -6450,6 +6558,7 @@ namespace
 					double psi = 0.0;
 					for ( int j = 0; j < dof; ++j )
 						psi += shape( j )*state( potentialStart + dofs[ j ] );
+					psi += conductorPsiAtQuadrature( e, i );
 
 					double dAxis = 0.0;
 					double dBoundary = 0.0;
@@ -6549,6 +6658,7 @@ namespace
 					double psi = 0.0;
 					for ( int j = 0; j < dof; ++j )
 						psi += shape( j )*state( potentialStart + dofs[ j ] );
+					psi += conductorPsiAtQuadrature( e, i );
 
 					// d/dx of int F/r: the plasma's own dF/dpsi against the shape
 					// functions. NOT negated -- this is the constraint's gradient,
@@ -6892,6 +7002,7 @@ namespace
 					double psi = 0.0;
 					for ( int j = 0; j < dof; ++j )
 						psi += shape( j )*state( potentialStart + dofs[ j ] );
+					psi += conductorPsiAtQuadrature( e, i );
 
 					double dFdAxis = 0.0;
 					double dFdBoundary = 0.0;
@@ -7389,6 +7500,74 @@ namespace
 			xPotentialGradient[ 0 ] = potentialGradient( 0 );
 			xPotentialGradient[ 1 ] = potentialGradient( 1 );
 
+			/*
+			 * AND THE X-POINT IS A NULL OF THE TOTAL FIELD, NOT OF THE
+			 * REMAINDER. COIL-SUBTRACTION-PLAN.md CS-4, and this border was
+			 * MISSING from its list.
+			 *
+			 * The three quantities above are psi_p's and q_p's. Under the
+			 * split XP-3's rows then read `q_p( x_X ) = 0` and
+			 * `psi_bnd = psi_p( x_X )`, which is a null of the wrong field:
+			 * the physical X-point is where `q_p + q_c` vanishes and there is
+			 * no reason for `q_p` alone to vanish anywhere near it.
+			 *
+			 * **AND IT DOES NOT PRESENT AS A WRONG ANSWER, WHICH IS WHY IT
+			 * SURVIVED CS-3 AND CS-4 BOTH.** M-143's acceptance is a
+			 * conductor inside Gamma with NO PLASMA, where there is no X-point
+			 * to find, and M-144's is a FIXED-boundary box, which has no
+			 * X-point border at all. The first case with both -- a real
+			 * machine, free boundary, conductors subtracted -- reports
+			 * *"the bordered Jacobian is singular in ( psi_ax, psi_bnd, a )"*
+			 * ON A RUN STARTED AT THE CONVERGED MESHED ANSWER, which is what
+			 * says a border rather than a hard problem.
+			 *
+			 * THE RESIDUAL IS EXACT AND THE JACOBIAN IS DIFFERENCED, and the
+			 * asymmetry is meq::ConductorField's rather than a shortcut: it
+			 * offers psi, grad psi and q in closed form and no second
+			 * derivative, so `grad q_c` has nothing exact to come from. A
+			 * differenced Jacobian costs Newton its last digit of the rate
+			 * and cannot move the answer, which is the trade this solver
+			 * already takes for the psi_bnd column.
+			 *
+			 * NOT REACHED WITHOUT A SPLIT -- conductorFieldSet is null and
+			 * every existing path is bit-identical.
+			 */
+			if ( conductorFieldSet && xR > 0.0 )
+			{
+				double qR = 0.0;
+				double qZ = 0.0;
+				conductorFieldSet->flux( xR, xZ, qR, qZ );
+				xFlux[ 0 ] += qR;
+				xFlux[ 1 ] += qZ;
+
+				double gradR = 0.0;
+				double gradZ = 0.0;
+				conductorFieldSet->gradPsi( xR, xZ, gradR, gradZ );
+				xPotentialGradient[ 0 ] += gradR;
+				xPotentialGradient[ 1 ] += gradZ;
+
+				// THE STEP IS RELATIVE TO THE X-POINT'S OWN RADIUS, which is
+				// the only length this expression has: psi_c varies on the
+				// scale of the conductors' distance, and the X-point of a
+				// machine is metres from them. A central difference at 1e-6
+				// of that leaves about ten digits in the derivative, where
+				// the row it fills is one Newton needs to a few.
+				double const step = 1.0e-6*std::max( 1.0, std::abs( xR ) );
+				if ( xR - step > 0.0 )
+				{
+					double aR = 0.0, aZ = 0.0, bR = 0.0, bZ = 0.0;
+					conductorFieldSet->flux( xR + step, xZ, aR, aZ );
+					conductorFieldSet->flux( xR - step, xZ, bR, bZ );
+					xFluxJacobian[ 0 ][ 0 ] += ( aR - bR )/( 2.0*step );
+					xFluxJacobian[ 1 ][ 0 ] += ( aZ - bZ )/( 2.0*step );
+
+					conductorFieldSet->flux( xR, xZ + step, aR, aZ );
+					conductorFieldSet->flux( xR, xZ - step, bR, bZ );
+					xFluxJacobian[ 0 ][ 1 ] += ( aR - bR )/( 2.0*step );
+					xFluxJacobian[ 1 ][ 1 ] += ( aZ - bZ )/( 2.0*step );
+				}
+			}
+
 			// FROZEN AT THE FIRST REFRESH, for the reason `gamma` is frozen at
 			// the first iterate: it is a unit conversion inside the norm the
 			// line search compares against, so recomputing it per trial would
@@ -7409,6 +7588,66 @@ namespace
 		// psi_ax is border 0 always; psi_bnd, XP-3's two X-point coordinates and
 		// the current scale take the next slots when they are unknowns, and the
 		// exterior modes follow them all.
+		/*
+		 * WHICH ROW, AND WHETHER IT IS A NaN OR A DEGENERACY -- because
+		 * "singular in ( psi_ax, psi_bnd, a )" names the block and not the
+		 * fault, and the two have completely different causes.
+		 *
+		 * A NON-FINITE ENTRY is a bug upstream of the solve: something
+		 * evaluated a field where it has no value. Under
+		 * `[conductors] Model` that is nearly always a conductor field asked
+		 * for `q_c` on the axis, where meq::ConductorField::flux() is NaN by
+		 * contract.
+		 *
+		 * A FINITE BUT DEGENERATE matrix is the thing setBorderRegularisation()
+		 * exists for, and the row norms say which constraint collapsed --
+		 * BORDERED-GLOBALISATION-PLAN.md section 0.1 predicts the X-point rows
+		 * and the psi_bnd row falling onto each other, and this is what would
+		 * show it.
+		 *
+		 * Built only on the failing path, so it costs a converging run
+		 * nothing.
+		 */
+		auto borderDiagnosis = [ & ]( mfem::DenseMatrix const &dense,
+		                              mfem::Vector const &right,
+		                              int n ) -> std::string
+		{
+			std::ostringstream out;
+			out << "     the " << n << " x " << n << " dense corner, row by row"
+			       " ( 0 is psi_ax, then psi_bnd, the X-point pair, the plasma"
+			       " current, then the exterior modes, whichever of those this"
+			       " run has ):\n";
+			bool anyNonFinite = false;
+			for ( int i = 0; i < n; ++i )
+			{
+				double squared = 0.0;
+				bool rowNonFinite = !std::isfinite( right( i ) );
+				for ( int j = 0; j < n; ++j )
+				{
+					double const entry = dense( i, j );
+					if ( !std::isfinite( entry ) )
+						rowNonFinite = true;
+					else
+						squared += entry*entry;
+				}
+				anyNonFinite = anyNonFinite || rowNonFinite;
+				out << "       row " << i << "  |row| "
+				    << std::scientific << std::setprecision( 3 )
+				    << std::sqrt( squared ) << "  rhs " << right( i );
+				if ( rowNonFinite )
+					out << "   <== NOT FINITE";
+				out << "\n";
+			}
+			out << ( anyNonFinite
+			         ? "     A NON-FINITE ENTRY IS NOT A DEGENERACY and no"
+			           " regularisation will help: some field was evaluated"
+			           " where it has no value.\n"
+			         : "     Every entry is finite, so this is a genuine"
+			           " degeneracy -- setBorderRegularisation() is the"
+			           " lever.\n" );
+			return out.str();
+		};
+
 		int const boundaryIndex = 1;
 		int const xPointIndex = xPointIsUnknown ? 2 : -1;
 		int const currentIndex = ( boundaryFluxIsUnknown ? 2 : 1 )
@@ -7654,9 +7893,7 @@ namespace
 			// filter exists to prevent. Measured on the diverted machine: with
 			// the cold filter alone the run ends with psi_ax at
 			// ( 1.0053, -1.1016 ), inside P1L, having been handed it once.
-			CoilSet const *const conductors =
-				nonlinearSource != nullptr ? nonlinearSource->conductors()
-				                           : nullptr;
+			CoilSet const *const conductors = filterConductors();
 
 			if ( havePreviousAxis )
 			{
@@ -9640,7 +9877,12 @@ namespace
 				for ( int i = 0; i < nBorderTotal; ++i )
 				{
 					if ( !std::isfinite( solved( i ) ) )
-						throw std::runtime_error( "meq::GradShafranovSolver::solve: the bordered Jacobian is singular in ( psi_ax, psi_bnd, a ) -- setBorderRegularisation() damps this instead of throwing" );
+						throw std::runtime_error(
+							"meq::GradShafranovSolver::solve: the bordered "
+							"Jacobian is singular in ( psi_ax, psi_bnd, a ) -- "
+							"setBorderRegularisation() damps this instead of "
+							"throwing.\n" + borderDiagnosis( dense, right,
+							                                 nBorderTotal ) );
 					step[ static_cast<std::size_t>( i ) ] = solved( i );
 				}
 

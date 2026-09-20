@@ -52,6 +52,7 @@
 #include <cstdlib>
 #include <exception>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <limits>
 #include <memory>
@@ -191,6 +192,24 @@ namespace
 	 * emitted in [[coils]] order, which is the order halfdisc.py assigns its
 	 * `10 + i` element attributes in -- that agreement is what lets a machine's
 	 * conductors be written once.
+	 *
+	 * **AND A SUBTRACTED CONDUCTOR IS NOT EMITTED AT ALL, WHICH IS THE ONE
+	 * PLACE `[conductors] Model` REACHES THE MESH.** The whole claim of
+	 * `COIL-SUBTRACTION-PLAN.md` is that the mesh need not carry the
+	 * conductors; a `--coil` here would make it carry them anyway, and the
+	 * generator would fragment and grade a region whose current the solve
+	 * evaluates analytically. Every other consequence of the key is inside the
+	 * solver, so this loop is the whole of its geometry half -- and
+	 * `[mesh.generate] CoilSize`, which exists only to grade around a `--coil`,
+	 * is refused at parse under a subtracting model rather than emitted here
+	 * and ignored there.
+	 *
+	 * **THE MESH IS STILL REBUILT WHEN THE KEY CHANGES**, and nothing extra
+	 * was needed for that: `meq-run` stamps the mesh with this COMMAND, so
+	 * flipping `Model` changes the argv, the stamp misses, and the coil-free
+	 * mesh is generated. That is the same mechanism that re-meshes on an
+	 * edited coil, and it is why the stamp holds the command rather than the
+	 * file's mtime.
 	 */
 	std::string meshCommand( meq::Configuration const &config )
 	{
@@ -243,17 +262,26 @@ namespace
 		{
 			word( "--transition" ); number( g.transition );
 		}
-		for ( meq::CoilParameters const &coil : config.getCoils().coils )
+		// NOT UNDER A SPLIT -- see this function's header. halfdisc.py takes
+		// --coil as action="append", so emitting none is already the coil-free
+		// mesh and no generator change was needed.
+		if ( !config.getConductors().subtracts() )
 		{
-			word( "--coil" );
-			number( coil.centreR - coil.halfWidth );
-			number( coil.centreZ - coil.halfHeight );
-			number( 2.0 * coil.halfWidth );
-			number( 2.0 * coil.halfHeight );
+			for ( meq::CoilParameters const &coil : config.getCoils().coils )
+			{
+				word( "--coil" );
+				number( coil.centreR - coil.halfWidth );
+				number( coil.centreZ - coil.halfHeight );
+				number( 2.0 * coil.halfWidth );
+				number( 2.0 * coil.halfHeight );
+			}
 		}
 		// AFTER the conductors, because --symmetric checks them: the generator
 		// pairs every --coil about z = 0 and refuses an unpaired one, so the
-		// flag is a statement about the argv it follows.
+		// flag is a statement about the argv it follows. Under a split there
+		// are none to pair, and the flag still means the same thing about the
+		// DISC -- halfdisc.py meshes z >= 0 and reflects it whatever the
+		// conductors are.
 		if ( g.symmetric )
 			word( "--symmetric" );
 		word( "-o" );
@@ -1377,7 +1405,9 @@ int main( int argc, char **argv )
 				conductorField->totalCurrent() );
 
 			if ( config->getInitialGuess().type
-			     == meq::InitialGuessType::GridFunction )
+			         == meq::InitialGuessType::GridFunction
+			     && config->getInitialGuess().content
+			        == meq::GuessContent::Remainder )
 				std::printf(
 					"MEQ: WARNING: the warm start CHANGES MEANING on this run.\n"
 					"     [initialguess] File is read as psi_p, the REMAINDER,\n"
@@ -1387,7 +1417,10 @@ int main( int argc, char **argv )
 					"     here as though psi_c had already been taken out of it,\n"
 					"     and the solve starts one whole conductor field away from\n"
 					"     where it believes it does. The psi this run WRITES is\n"
-					"     psi_p for the same reason.\n" );
+					"     psi_p for the same reason.\n"
+					"     Set [initialguess] Content = \"total\" if that file\n"
+					"     holds psi -- a meshed run's answer, say -- and psi_c\n"
+					"     will be taken off it as it is read.\n" );
 
 			std::fflush( stdout );
 		}
@@ -2237,6 +2270,80 @@ int main( int argc, char **argv )
 					throw std::runtime_error( "cannot read [initialguess] File \""
 					                          + config->getInitialGuess().file + "\"" );
 				guess = std::make_unique<mfem::GridFunction>( guessMesh.get(), stream );
+
+				/*
+				 * A STORED TOTAL BECOMES THE REMAINDER HERE, ONCE, ON THE
+				 * FILE'S OWN MESH.
+				 *
+				 * `[initialguess] Content = "total"` says the file holds psi
+				 * and this run solves for psi_p, so psi_c comes off it. Doing
+				 * it HERE rather than after the transfer is deliberate: the
+				 * conversion is a property of the FILE, so it belongs beside
+				 * the read, and both consumers below -- the exact restart on a
+				 * matching mesh and meq::FieldTransfer on a different one --
+				 * then see a guess that already means what they think it does.
+				 * The transfer is linear, so subtracting before or after is
+				 * the same arithmetic; being before is what makes it
+				 * impossible to reach one of them and not the other.
+				 *
+				 * A NODAL SPACE IS WHAT MAKES THIS EXACT, and the guess is one
+				 * by construction -- it is a potential written by a MEQ run,
+				 * whose spaces are BasisType::GaussLobatto, so a coefficient
+				 * IS the value at its node. On any other basis this would be
+				 * an interpolation of psi_c rather than psi_c, which is still
+				 * the right O( h^{k+1} ) correction for a GUESS but would want
+				 * saying; a guess is not an answer and nothing downstream
+				 * treats it as one.
+				 *
+				 * NOT REACHED WITHOUT A SPLIT: conductorField is null there,
+				 * psi_c is identically zero, and the two spellings of Content
+				 * describe the same file. Config.hpp says why that is accepted
+				 * rather than refused.
+				 */
+				if ( conductorField
+				     && config->getInitialGuess().content
+				        == meq::GuessContent::Total )
+				{
+					mfem::FiniteElementSpace const &space = *guess->FESpace();
+					mfem::Array<int> dofs;
+					thread_local mfem::IsoparametricTransformation transformation;
+					double worst = 0.0;
+
+					for ( int e = 0; e < guessMesh->GetNE(); ++e )
+					{
+						space.GetElementDofs( e, dofs );
+						mfem::IntegrationRule const &nodes
+							= space.GetFE( e )->GetNodes();
+						guessMesh->GetElementTransformation( e, &transformation );
+
+						for ( int i = 0; i < dofs.Size(); ++i )
+						{
+							mfem::IntegrationPoint const &ip = nodes.IntPoint( i );
+							transformation.SetIntPoint( &ip );
+
+							double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
+							mfem::Vector position( coordinates, 3 );
+							transformation.Transform( ip, position );
+							if ( position( 0 ) < 0.0 )
+								continue;
+
+							double const shift =
+								conductorField->psi( position( 0 ), position( 1 ) );
+							int const dof = dofs[ i ] >= 0 ? dofs[ i ]
+							                               : -1 - dofs[ i ];
+							( *guess )( dof ) -= shift;
+							worst = std::max( worst, std::abs( shift ) );
+						}
+					}
+
+					std::printf(
+						"MEQ: [initialguess] Content = \"total\": psi_c taken off the\n"
+						"     stored guess at every node of %s,\n"
+						"     largest shift %.6e Wb/rad. The file holds psi and this\n"
+						"     run solves for psi_p.\n",
+						config->getInitialGuess().file.c_str(), worst );
+					std::fflush( stdout );
+				}
 				break;
 			}
 		}
@@ -4708,6 +4815,46 @@ int main( int argc, char **argv )
 		meq::writeMfem( stem, *solveMesh, solver->potential(), solver->flux() );
 		meq::writePostProcessed( stem, solver->postProcessedPotential() );
 
+		/*
+		 * AND UNDER A SPLIT, A FOURTH `.gf` THAT IS THE PHYSICAL FLUX -- FOR
+		 * LOOKING AT, AND NOT FOR RESTARTING FROM.
+		 *
+		 * COIL-SUBTRACTION-PLAN.md §9 settles that the `.gf` becomes a VIEWING
+		 * artefact under the split and the `.nc` becomes the restart. The three
+		 * files above are unchanged and still hold `psi_p`, because they are
+		 * MFEM's format and MEQ should not redefine it -- open one in GLVis
+		 * under `[conductors] Model` and the picture is a remainder, with a
+		 * hole where each conductor is.
+		 *
+		 * **THE LOSS IS REAL AND IS WHY THIS IS NOT THE RESTART.** `psi_c` has
+		 * no representation in `V_h`; for a filament it is logarithmic at the
+		 * conductor. What is written here is `psi_h + I_h( psi_c )`, exact at
+		 * every node and an interpolation between them -- which is the right
+		 * trade for a picture and the wrong one for a restart, where the `.nc`
+		 * carries the remainder and the conductors that reconstruct `psi_c`
+		 * exactly at any point.
+		 *
+		 * NAMED `_psi_total.gf` so that the name says which it is, which is
+		 * the whole complaint §8.3 makes about the format.
+		 */
+		if ( conductorField )
+		{
+			mfem::GridFunction total;
+			solver->totalPotential( total );
+			std::string const totalPath = stem + "_psi_total.gf";
+			std::ofstream totalStream( totalPath );
+			if ( totalStream )
+			{
+				totalStream.precision( 17 );
+				total.Save( totalStream );
+			}
+			else
+				std::fprintf( stderr,
+					"MEQ: warning: cannot write %s; the remainder in "
+					"%s_psi.gf is unaffected\n",
+					totalPath.c_str(), stem.c_str() );
+		}
+
 		// B_poloidal, a RELABELLING of the solved flux and not a derivative of
 		// psi -- B_R = -q_z, B_Z = +q_r. That is the payoff for the mixed
 		// method: the field comes out at the same order as the potential
@@ -5271,6 +5418,207 @@ int main( int argc, char **argv )
 			              "J" );
 		}
 
+		/*
+		 * ---- CS-6: THE RESTART REPRESENTATION, BESIDE THE RASTERIZATION ----
+		 *
+		 * COIL-SUBTRACTION-PLAN.md §9. The requirement in one line: **A FILE
+		 * HOLDING A DIFFERENCE HAS TO CARRY WHAT IT IS A DIFFERENCE FROM.**
+		 * §8.3 establishes that a `.gf` cannot -- GridFunction::Save writes the
+		 * space header and the raw coefficients, the loader reads the space and
+		 * then the vector, and an extra line is consumed as data -- so a file
+		 * written under `[conductors] Model` is a REMAINDER and is
+		 * indistinguishable from one that is not.
+		 *
+		 * AND THE METADATA IS NOT A FLAG. `content = "remainder"` tells a
+		 * reader it is holding the wrong field; it does not let them fix it.
+		 * `psi_c` is recoverable from neither the mesh, nor the space, nor the
+		 * coefficients -- only from the CONDUCTORS. So the conductor TABLE is
+		 * written below, not just the count and the total current that the
+		 * attributes above carry: each one's geometry, its current and `mu0`,
+		 * which is everything meq::ConductorField needs to reconstruct `psi_c`
+		 * exactly at any point. A few dozen numbers beside a field of tens of
+		 * thousands.
+		 *
+		 * THE INVERSION IS WORTH STATING BECAUSE IT IS THE OPPOSITE OF WHAT THE
+		 * NAMES SUGGEST, and tools/README.md says it too: under a split the
+		 * LOSSY interchange format carries the physically exact field -- the
+		 * grid samples `psi_p + psi_c` pointwise, CS-4 -- while the EXACT
+		 * format, the `.gf`, carries a remainder.
+		 *
+		 * WHY THIS FILE AND NOT A FIFTH ONE. The `.nc` is already here, already
+		 * has attributes, and adding variables is backward compatible: every
+		 * existing reader of `psi( Z, R )` is untouched. One file, two
+		 * representations.
+		 *
+		 * WHAT IS DELIBERATELY *NOT* HERE. The MESH is named rather than
+		 * embedded -- `mesh_file` below -- which is §9.2's first open question
+		 * answered the cheap way round: embedding it is MEQ re-implementing a
+		 * serialiser MFEM already has, and the `.mesh` is written beside this
+		 * file by the same run. The PROFILE TABLES are named the same way, for
+		 * the same reason and with the same consequence: a `.nc` moved away
+		 * from its directory regenerates a configuration that cannot be run,
+		 * and it says which files it wanted.
+		 */
+		{
+			mfem::GridFunction const &potentialField = solver->potential();
+			mfem::FiniteElementSpace const &potentialSpace =
+				*potentialField.FESpace();
+
+			// THE COEFFICIENTS THEMSELVES, host side. HostRead() because a
+			// solve under an mfem::Device leaves them device-resident and
+			// GridFunction::GetData() is a raw pointer -- the same trap
+			// CLAUDE.md records at four other sites.
+			potentialField.HostRead();
+			std::vector<double> coefficients(
+				potentialField.GetData(),
+				potentialField.GetData() + potentialField.Size() );
+			writer.vector( "psi_dof", "psi_coefficients", coefficients,
+			               "every coefficient of the solved potential, in the "
+			               "finite element space named by the fe_* attributes; "
+			               "psi_h and NOT the post-processed psi*",
+			               "Wb/rad" );
+
+			mfem::GridFunction const &fluxField = solver->flux();
+			fluxField.HostRead();
+			std::vector<double> fluxCoefficients(
+				fluxField.GetData(),
+				fluxField.GetData() + fluxField.Size() );
+			writer.vector( "flux_dof", "flux_coefficients", fluxCoefficients,
+			               "every coefficient of the solved flux q, vdim 2 in "
+			               "the ordering named by flux_ordering; grad_bar psi "
+			               "= r q",
+			               "Wb/rad/m^2" );
+
+			// THE SPACE, so the coefficients mean something. MFEM's collection
+			// name is what FiniteElementCollection::New() takes back, which is
+			// what makes this a restart rather than a record.
+			writer.attribute( "fe_collection",
+			                  std::string( potentialSpace.FEColl()->Name() ) );
+			writer.attribute( "fe_order", potentialSpace.GetMaxElementOrder() );
+			writer.attribute( "fe_vdim", potentialSpace.GetVDim() );
+			writer.attribute( "flux_collection",
+			                  std::string( fluxField.FESpace()->FEColl()->Name() ) );
+			writer.attribute( "flux_vdim", fluxField.FESpace()->GetVDim() );
+			writer.attribute( "flux_ordering",
+			                  fluxField.FESpace()->GetOrdering()
+			                      == mfem::Ordering::byNODES
+			                  ? "byNODES" : "byVDIM" );
+			writer.attribute( "mesh_file", output.prefix + ".mesh" );
+
+			/*
+			 * **WHICH FIELD THE COEFFICIENTS ARE**, and this one attribute is
+			 * the whole of §8.3's finding made answerable. A reader that does
+			 * not look at it is in exactly the position a `.gf` leaves them.
+			 */
+			writer.attribute( "content",
+			                  conductorField ? "remainder (psi - psi_c)"
+			                                 : "total (psi)" );
+
+			/*
+			 * AND THE CONDUCTORS THEMSELVES WHEN THERE ARE ANY, under EITHER
+			 * route. A meshed run's conductors are part of the source rather
+			 * than of a difference, so they are not needed to interpret its
+			 * coefficients -- but they ARE needed to regenerate its input, and
+			 * §9 makes those the same mechanism deliberately: *"the conductors
+			 * ARE input parameters, so an output that regenerates its input
+			 * carries them by construction"*. One table, both routes, and the
+			 * `conductor_model` attribute above says which was taken.
+			 */
+			if ( conductorGeometry && conductorGeometry->size() > 0 )
+			{
+				std::vector<double> conductorR, conductorZ, conductorHalfR,
+				                    conductorHalfZ, conductorCurrent;
+				std::vector<int> conductorKind;
+
+				for ( std::size_t i = 0; i < conductorGeometry->size(); ++i )
+				{
+					meq::Coil const &one = conductorGeometry->coil( i );
+					conductorKind.push_back( 0 );
+					conductorR.push_back( one.centreR() );
+					conductorZ.push_back( one.centreZ() );
+					conductorHalfR.push_back( one.halfWidth() );
+					conductorHalfZ.push_back( one.halfHeight() );
+					conductorCurrent.push_back( one.current() );
+				}
+
+				// THE FILAMENTS OF A SUBTRACTED SET ARE A DIFFERENT KIND AND
+				// NOT A DEGENERATE RECTANGLE. Half-extents of zero would be a
+				// rectangle meq::Coil refuses to construct, so `kind` carries
+				// the distinction and the two half-extent columns are zero
+				// there -- which is what meq::CurrentFilament means and is not
+				// a missing value.
+				if ( conductorField )
+					for ( std::size_t i = 0;
+					      i < conductorField->filamentCount(); ++i )
+					{
+						meq::CurrentFilament const &one =
+							conductorField->filament( i );
+						conductorKind.push_back( 1 );
+						conductorR.push_back( one.radius() );
+						conductorZ.push_back( one.height() );
+						conductorHalfR.push_back( 0.0 );
+						conductorHalfZ.push_back( 0.0 );
+						conductorCurrent.push_back( one.current() );
+					}
+
+				if ( !conductorKind.empty() )
+				{
+					writer.vector( "conductor", "conductor_kind", conductorKind,
+					               "0 a rectangle of uniform current density, "
+					               "1 a point filament; a filament's two "
+					               "half-extents are zero and that is its "
+					               "definition rather than a missing value" );
+					writer.vector( "conductor", "conductor_R", conductorR,
+					               "major radius of the conductor's centre", "m" );
+					writer.vector( "conductor", "conductor_Z", conductorZ,
+					               "height of the conductor's centre", "m" );
+					writer.vector( "conductor", "conductor_half_width",
+					               conductorHalfR,
+					               "half-extent in R; zero for a filament", "m" );
+					writer.vector( "conductor", "conductor_half_height",
+					               conductorHalfZ,
+					               "half-extent in Z; zero for a filament", "m" );
+					writer.vector( "conductor", "conductor_current",
+					               conductorCurrent,
+					               "total current, ampere-turns", "A" );
+					writer.attribute( "mu0",
+					                  config->getSource().permeability() );
+					if ( conductorField )
+						writer.attribute( "conductor_quadrature_order",
+						                  conductorField->quadratureOrder() );
+				}
+			}
+
+			/*
+			 * AND THE CONFIGURATION VERBATIM, WHICH IS THE CHEAP HALF OF §9.1
+			 * AND THE ONLY HALF THAT EXISTS.
+			 *
+			 * §9.1 distinguishes two artefacts: the input AS GIVEN, which is
+			 * provenance and is trivially correct, and what MEQ ACTUALLY USED,
+			 * serialised from meq::Configuration's fields, which would catch a
+			 * key accepted and ignored. **THE SECOND IS NOT BUILT**:
+			 * meq::Configuration has no serialiser and does not keep the parsed
+			 * table -- it reads TOML into typed fields and the toml::value is
+			 * gone -- so writing it means writing one, and the test with real
+			 * teeth that §9.1 describes ( parse, serialise, re-parse, require
+			 * the two Configurations to agree ) comes with it. That is a stage
+			 * of its own and this attribute does not pretend to be it.
+			 *
+			 * What this IS: enough to re-run. Read `input_toml` out, write it
+			 * to a file, and with the `.mesh` and the profile tables named
+			 * above it is the run.
+			 */
+			std::ifstream configStream( argument );
+			if ( configStream )
+			{
+				std::string const text(
+					( std::istreambuf_iterator<char>( configStream ) ),
+					std::istreambuf_iterator<char>() );
+				writer.attribute( "input_toml", text );
+				writer.attribute( "input_file", argument );
+			}
+		}
+
 		writer.close();
 
 		/*
@@ -5612,6 +5960,25 @@ int main( int argc, char **argv )
 		if ( wroteFluxSurfaces )
 			std::printf( "  (Psi, theta) surfaces, 1-D transport:  %s_surfaces.nc\n",
 			             stem.c_str() );
+		/*
+		 * AND UNDER A SPLIT THE LISTING ABOVE IS WRONG WITHOUT THIS, which is
+		 * the whole of COIL-SUBTRACTION-PLAN.md §8.3 stated where a user will
+		 * meet it: "exact, for GLVis and restart" describes three files holding
+		 * a REMAINDER, and the inversion is the opposite of what the names
+		 * suggest -- the lossy `.nc` carries the physically exact field,
+		 * because it samples, and the exact `.gf` carries a difference.
+		 */
+		if ( conductorField )
+			std::printf(
+				"  UNDER [conductors] Model THE THREE EXACT FILES HOLD psi_p,\n"
+				"  the REMAINDER, and psi* with them. For a picture of the\n"
+				"  physical flux:                 %s_psi_total.gf\n"
+				"  (psi_h + I_h( psi_c ), exact at the nodes and interpolated\n"
+				"  between them -- a VIEWING artefact, not a restart.)\n"
+				"  The restart is %s.nc, which carries the coefficients, the\n"
+				"  space, `content`, and the conductor table that says what the\n"
+				"  remainder is a remainder FROM.\n",
+				stem.c_str(), stem.c_str() );
 	}
 	catch ( std::exception const &error )
 	{

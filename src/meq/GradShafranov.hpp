@@ -2453,6 +2453,18 @@ namespace meq
 			/// split is in use.
 			void buildConductorNodalCache();
 
+			/// The rectangles an extremum search must not adopt an O-point of,
+			/// from the SOURCE if it carries any and from the subtracted
+			/// conductors otherwise. Filaments are deliberately excluded. See
+			/// the definition for why the split silently turned this off.
+			CoilSet const *filterConductors() const;
+
+			/// `psi_c` at a SOURCE quadrature point, from
+			/// meq::SourceIntegrator's own cache. Zero with no conductor
+			/// field. See the definition for the five callers and for the
+			/// failure it fixes.
+			double conductorPsiAtQuadrature( int element, int point ) const;
+
 			/// `psi_c` at one potential dof, from that cache. **Exactly zero
 			/// when the cache is empty**, which is what lets every caller add
 			/// it unconditionally. Exact rather than approximate because MEQ's
@@ -2461,6 +2473,14 @@ namespace meq
 			double conductorPsiAtDof( int dof ) const;
 
 			std::vector< double > conductorNodalPsi;
+
+			/// The SourceIntegrator buildForms() installed, borrowed so that
+			/// the five plasma-current assemblies can reach its
+			/// per-quadrature-point psi_c cache. NOT owned -- the potential
+			/// mass form owns it -- and re-pointed by every buildForms(),
+			/// which is also what replaces the form. See
+			/// conductorPsiAtQuadrature().
+			SourceIntegrator *sourceIntegrator = nullptr;
 
 		public:
 
@@ -3344,6 +3364,35 @@ namespace meq
 			/// conductorPsi() is exactly zero.
 			mfem::GridFunction &potential();
 			mfem::GridFunction const &potential() const;
+
+			/**
+			 * `psi_h + I_h( psi_c )` ON THE POTENTIAL SPACE: the PHYSICAL flux
+			 * as a grid function, for a consumer that needs one rather than a
+			 * point evaluation.
+			 *
+			 * **AND IT IS AN INTERPOLATION WHERE psi() IS EXACT, WHICH IS THE
+			 * WHOLE OF §8.3's FINDING.** `psi_c` has no representation in
+			 * `V_h` -- for a filament it is logarithmic at the conductor -- so
+			 * anything that writes the total as a FIELD is lossy by
+			 * construction, and that is why `COIL-SUBTRACTION-PLAN.md` §9
+			 * makes the exact restart a NetCDF file carrying the remainder and
+			 * the conductor set, and demotes the `.gf` to a viewing artefact.
+			 * This is that artefact's maker, named so that nobody mistakes it
+			 * for the restart.
+			 *
+			 * The interpolation is exact AT THE NODES -- MEQ's potential space
+			 * is `BasisType::GaussLobatto`, so a coefficient is the value at
+			 * its node -- and it comes out of the per-dof cache
+			 * buildConductorNodalCache() fills, so it costs no conductor
+			 * evaluation at all.
+			 *
+			 * With no conductor field this is `potential()` copied, which is
+			 * the exact field and not an interpolation of anything.
+			 *
+			 * @param into resized to the potential space and overwritten.
+			 * @throws std::logic_error if prepare() has not run.
+			 */
+			void totalPotential( mfem::GridFunction &into ) const;
 
 			/// q_h = ( 1/r ) grad_bar( psi ) in V_h, in MEQ's sign convention.
 			/// Valid after solve(); see the sign note at the top of this file.

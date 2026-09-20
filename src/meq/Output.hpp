@@ -307,6 +307,37 @@ namespace meq
 			void boundary( std::vector<double> const &r,
 			               std::vector<double> const &z );
 
+			/**
+			 * A ONE-DIMENSIONAL ARRAY ON A DIMENSION OF ITS OWN, WHICH IS WHAT
+			 * CS-6 NEEDS AND field() CANNOT GIVE.
+			 *
+			 * `field()` writes on the ( Z, R ) lattice, which is the whole of
+			 * what this file held: a RASTERIZATION. `COIL-SUBTRACTION-PLAN.md`
+			 * §9 makes it carry a second representation beside it -- every
+			 * `P_k` coefficient of the solved fields, and the conductor set
+			 * that says what a REMAINDER is a remainder from -- and neither is
+			 * grid shaped.
+			 *
+			 * The dimension is created on first use and reused afterwards, so
+			 * several arrays share one; a second array of a different length
+			 * on the same name is refused rather than silently truncated.
+			 *
+			 * @throws std::runtime_error if @a dimension already exists at a
+			 *         different length, or if @a values is empty -- NetCDF's
+			 *         zero-length dimension is UNLIMITED, which is not what a
+			 *         caller writing no conductors means.
+			 */
+			void vector( std::string const &dimension, std::string const &name,
+			             std::vector<double> const &values,
+			             std::string const &longName,
+			             std::string const &units );
+
+			/// The same, for an integer column -- a conductor's KIND, which is
+			/// an enumeration and not a measurement.
+			void vector( std::string const &dimension, std::string const &name,
+			             std::vector<int> const &values,
+			             std::string const &longName );
+
 			/// Flush and close. Called by the destructor; call it explicitly to
 			/// see an error rather than have it thrown from a destructor.
 			void close();

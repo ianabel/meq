@@ -305,8 +305,9 @@ must.
 | **CS-3** | the Dirichlet datum and the DtN coupling. **BUILT AND GREEN** — §10. Two halves that had to land together: `prepare()` transfers `g − psi_c` inward, and `transmissionConstraint()` ADDS the subtracted conductors' moment on Gamma where FB-7's is subtracted. The refusal in `setConductorField()` is lifted and replaced by a GEOMETRIC one — a subtracted conductor must lie strictly INSIDE Gamma, the mirror image of `setExteriorConductors()`' own precondition |
 | **CS-4** | every consumer of `psi`, with a test per consumer that the total is read. **DONE** — the critical-point finder, the element fill, `peakAt`, the source and its Jacobian, the limiter search and value. **AND THE `.nc` GRID**, which §8.3 says is one of the two formats that CAN keep `psi_c` exact: the driver adds it back at every located node, and `B` with it through `meq::ConductorField::poloidalField()` — the one entry point that takes the axis limit, where `q = ( 1/r ) grad_bar psi` is `0/0` and a half-disc machine's whole first grid column sits. **AND TRANCHE TWO CLOSES IT** — `meq::ContourTracer` takes the solver's conductors in its constructor and shifts at its own seam, so `_surfaces.nc`, the flux-surface averages and the `(Psi, theta)` family are level sets of the physical flux. §12 |
 | **CS-T** | **`[conductors] Model`, the key that makes any of this reachable from a file.** **BUILT** — §11. `"meshed"` (the default, unchanged), `"subtracted"`, `"filament"`, plus `QuadratureOrder` for the rectangles. The driver drops its `meq::CoilSet` when the split is taken, because the double count is the failure with no symptom |
-| **CS-6** | **a restart format that self-describes.** §8.3: a `.gf` cannot say whether it holds `psi` or `psi − psi_c`, and a flag would not be enough because a remainder is only meaningful with the conductors it is a remainder from. NetCDF is the vehicle MEQ already has — §9 |
-| **CS-5** | re-take M-111 with the conductor models matched. **[M-139](MEASUREMENTS.md#m-139) partly kills this as written** — the benchmark cannot resolve MEQ below about 7e-04 whatever either code does, so it cannot be the acceptance for a change whose whole claim is that the conductors are resolved EXACTLY. **The replacement is MEQ's own**: an expensive quadrature-based reference, §7 |
+| **CS-6** | **a restart format that self-describes.** §8.3: a `.gf` cannot say whether it holds `psi` or `psi − psi_c`, and a flag would not be enough because a remainder is only meaningful with the conductors it is a remainder from. NetCDF is the vehicle MEQ already has — §9. **BUILT** → **[M-150](MEASUREMENTS.md#m-150)**: the `.nc` carries every `P_k` coefficient, the space, `content`, the conductor table and `mu0` beside its rasterization, and `theRestartFileSaysWhatItHoldsAndWhatItIsARemainderFrom` rebuilds the physical field from the file's own columns to **3.6e-15**. The `.gf` is demoted to a viewing artefact and a fourth one, `<stem>_psi_total.gf`, is written under a split. **What is NOT built is the second half of §9.1** — `meq::Configuration` still has no serialiser, so the output carries the input VERBATIM and not the resolved configuration |
+| **CS-5** | re-take M-111 with the conductor models matched. **[M-139](MEASUREMENTS.md#m-139) partly kills this as written** — the benchmark cannot resolve MEQ below about 7e-04 whatever either code does, so it cannot be the acceptance for a change whose whole claim is that the conductors are resolved EXACTLY. **The replacement is MEQ's own**: an expensive quadrature-based reference, §7. **BUILT** → **[M-149](MEASUREMENTS.md#m-149)**: clear of the conductors — the only regime a subtracted solve has — the shipped order 32 is **1.3e-12** against order 160, and the SOLVED split moves by **1.8e-11** when the order is raised to 96, against a discretisation error of 1.6e-04. §7.2's second acceptance, meshed against subtracted, was already built |
+| **CS-M** | **the mesh actually gets smaller, which is the whole of §2(a) and had never been reachable from a file.** **BUILT** → **[M-148](MEASUREMENTS.md#m-148)**: `apps/meq.cpp` omits every `--coil` under a subtracting `[conductors] Model` and refuses `[mesh.generate] CoilSize` beside it, so `examples/mastu-nke` drops from 9361 triangles to 4716 and `diverted-tokamak-generated` from 2854 to 2322 — [M-142](MEASUREMENTS.md#m-142)'s numbers, now reachable by editing one key. **The element count is not the finding**; see §13 for the three defects posing the first such case met |
 
 ---
 
@@ -1040,3 +1041,161 @@ of the field, which is the kind that gets diagnosed as the tracer being broken.
 tracer, and it is added: `| psi_p | + | psi_c |` bounds `| psi_p + psi_c |`, and
 a bound is what a scale wants to be. Exactly zero without conductors, so every
 existing path keeps the value it had.
+
+---
+
+## 13. CS-M, and the three defects that posing one machine found
+
+**THE KEY REACHED THE SOLVER AND NEVER REACHED THE MESH, WHICH IS HALF OF §2
+UNBUILT.** `[conductors] Model` was complete in every respect except the one the
+plan is named after: `apps/meq.cpp`'s `--mesh-command` builder emitted `--coil`
+for every `[[coils]]` block unconditionally, so a file asking for the split got
+a mesh graded to conductors nothing would integrate over. One conditional is the
+whole of the geometry half — `tools/mesh/halfdisc.py` takes `--coil` as
+`action="append"`, so emitting none is already the coil-free mesh — and the
+`.meq-mesh` stamp holds the COMMAND, so flipping `Model` changes the argv and
+re-meshes with nothing else added.
+
+`[mesh.generate] CoilSize` is refused at parse beside a subtracting model rather
+than emitted and ignored. It grades around a `--coil` that is never emitted, so
+it is the accepted-and-ignored failure this schema refuses everywhere — and here
+it is the one a user would most easily misread, the point of the split being
+that the mesh gets cheaper.
+
+→ **[M-148](MEASUREMENTS.md#m-148)** — the element counts, the three defects,
+and the cost of an uncached rectangle field
+
+### 13.1 Two of the three are CS-4 holes, and the enumeration is where they hid
+
+**CS-4's staging entry LISTS its consumers** — the critical-point finder, the
+element fill, `peakAt`, the source and its Jacobian, the limiter search and
+value, the `.nc` grid, the tracer. Nine, named individually, and the list was
+taken as complete. **Three more existed and all are in `GradShafranov.cpp`**:
+
+* **XP-3's X-point border.** `refreshXPoint()` reads `q_h` and `grad psi_h` off
+  the solved fields, so under the split the rows close `q_p( x_X ) = 0` and
+  `psi_bnd = psi_p( x_X )` — a null of the REMAINDER, which has no reason to lie
+  anywhere near the physical X-point. The residual is now shifted exactly and
+  the Jacobian by a central difference of `q_c`, the asymmetry being
+  `meq::ConductorField`'s: it offers `psi`, `grad psi` and `q` in closed form and
+  no second derivative, so `grad q_c` has nothing exact to come from.
+* **The conductor FILTER, which the split silently emptied.** Two searches
+  refuse a candidate that sits inside a conductor — the axis constraint's and
+  the plasma fill's seed — and both read `meq::Source::conductors()`. That is
+  right on the meshed route and empty on the subtracted one, because
+  `apps/meq.cpp` releases its `meq::CoilSet` when the split is taken. The
+  conductors were no less present, and the two filters that keep their O-points
+  out of an argmax were off. `filterConductors()` is the one site both now go
+  through, and it deliberately ignores FILAMENTS: a filament has no interior,
+  so "inside a conductor" is a set of measure zero and excluding its peak would
+  need a clearance rule, which `meq::ConductorField::coincides()` refuses
+  explicitly.
+* **The plasma-current border, at five sites.** `assemblePlasmaCurrent()` and its
+  four derivative assemblies rebuild `psi` from the state at a source quadrature
+  point and hand it to `meq::NormalisedSource`. All five now add `psi_c` from
+  `meq::SourceIntegrator`'s own per-quadrature-point cache — the same points, by
+  construction, since `sourceRule()` exists to make the derivatives share the
+  assembly's rule.
+
+**THE TRANSFERABLE PART IS WHY NO FIXTURE COULD SEE THEM.** CS-3's acceptance is
+a conductor inside `Γ` with **no plasma**: no X-point to find, no current to
+integrate. CS-4's driver acceptance is a **fixed-boundary box**: no X-point
+border, no exterior coupling. The two borders that were wrong are exactly the two
+neither fixture has. **A staged plan's acceptances can each be sharp and jointly
+miss the cell where two features meet**, and the cell here is the ordinary
+configuration — a machine, free boundary, conductors subtracted.
+
+### 13.2 The third is the half-plane, and it is not a CS-4 hole at all
+
+`CriticalPointFinder`'s element-local Newton evaluates this element's polynomial
+OUTSIDE the element on purpose — that is how a root near a face is found. On a
+half-disc, whose elements reach `r = 0` exactly, the iterate can leave the
+half-plane, and `meq::coilGradPsi` refuses a negative radius outright. With no
+conductors that is harmless; under the split it is a throw from three frames
+down naming a radius.
+
+**A point off the half-plane is not a point of the machine**, so abandoning the
+attempt is the whole of the right answer and `totalFlux()` now returns a bool
+saying so. What none of its callers may do is carry on with `q_p` alone, which
+would root a different function — so the Newton returns false, the Jacobian
+returns a singular column, and the two sweeps skip the sample. The same guard
+covers a node ON the axis, where `q_c` is NaN by contract and every comparison
+against it is false: the right outcome by accident, which is not what a
+half-disc machine's whole first column of nodes should rest on.
+
+### 13.3 And the cost is a rectangle problem, entirely
+
+Three of `CriticalPointFinder`'s sweeps are over the whole mesh's nodes and none
+depends on the solved field. Under a RECTANGLE split each node costs one
+`meq::ConductorField::flux()` — **1.88 ms** for MAST-U's 23 rectangles at the
+default `32²` cross-section quadrature — so one sweep over 9052 elements is
+**102 s**, and `fluxScale()` is called once per ring of every seeded search. The
+first subtracted MAST-U run did not finish one Newton iteration in seven
+minutes. A per-node cache, threaded, built once, is the fix and is the third of
+§1's precomputes.
+
+**THE SAME FIGURE FOR FILAMENTS IS 2.38 µs, A FACTOR OF 694.** Ian, 2026-09-20:
+*"subtraction only has to win on filaments (we will later design a better
+pathway algorithm. e.g. run with coarse mesh and filaments, use that to get so
+close that we only need one or two big newton iterations using meshed coils)"*.
+That settles what this campaign optimises: the rectangle route's speed is not a
+requirement, and an adaptive quadrature order — measured at **15×** on the
+kernel with no accuracy a solve can see, [M-149](MEASUREMENTS.md#m-149) — is
+recorded there and **not taken**.
+
+### 13.4 §0b's central claim, on the cell no acceptance covered
+
+**THE SPLIT + THE EXTERIOR COUPLING + A PLASMA NOW HAS AN ACCEPTANCE AND PASSES
+IT** → **[M-151](MEASUREMENTS.md#m-151)**.
+`theSplitAndTheMeshedRouteAgreeUnderAnExteriorCoupling` is §10's vacuum fixture
+with a plasma put in it, and the two routes converge to each other at **3.78
+across the sequence** — the meshed conductors as a domain source against the
+same conductors subtracted, compared at every quadrature point off them.
+
+**THE MACHINE-SCALE DISAGREEMENT IS BRANCH SELECTION AND THE CONTROL IS WHAT
+SAYS SO.** On `examples/diverted-tokamak-generated` the two arms converge to
+different equilibria from the same guess on the same mesh — and the **meshed
+arm restarted from its own answer** goes to a third. A restart resets `psi_bnd`
+while handing Newton a converged field, and `FREE-BOUNDARY-PLAN.md` §12 /
+[M-132](MEASUREMENTS.md#m-132) already record that the initial `psi_bnd` selects
+among discrete equilibria refinement does not merge. **A control that fails the
+same way as the treatment is not evidence about the treatment.**
+
+**AND THE FIRST VERSION OF THE NEW CASE MEASURED THE WRONG ARM**, which is the
+methodological half and is worth more than the result. Comparing over *every*
+quadrature point gave 4.2e-01 relative with the worst point one centimetre
+outside a coil, where the SUBTRACTED value is the accurate one — it is an exact
+quadrature of that rectangle and the meshed arm is resolving a top hat cut by
+element interiors. §7.2's sibling already excluded that band with the reason
+written out, and it had to be rediscovered by printing WHERE rather than only
+HOW MUCH.
+
+**WHAT IS OPEN IS NARROWER AND IS ABOUT CONVERGENCE RATHER THAN CORRECTNESS.**
+`examples/limited-tokamak` under `"subtracted"` does not converge and
+`examples/mastu-nke` under `"filament"` stalls at 7.0e-04, where the meshed arms
+take 12 and 2 Newton steps. The split changes the residual and the Jacobian, so
+it changes the path; on path-sensitive problems that is enough. §13.5 has the
+second and sufficient reason for the MAST-U case.
+
+### 13.5 What the pathway needs next, measured rather than guessed
+
+The coarse-filaments-then-meshed-coils pathway needs two things MEQ did not
+have, and one of them is now built.
+
+**BUILT: a warm start can cross the split.** `[initialguess] Content = "total"`
+says the stored `.gf` holds `psi`, and the driver takes `psi_c` off it at every
+node as it reads it. Without that the guess arrived one whole conductor field
+away from where the solver believed it was. The default stays `"remainder"`,
+which is what a subtracted run writes and what every file written before the key
+existed means.
+
+**NOT BUILT, AND IT IS THE PATHWAY'S REAL OBSTACLE: a `[[coils]]` block is ONE
+filament.** `meq::makeConductorField` collapses each rectangle to a point at its
+centre carrying the total current, which §4b defends as *a different conductor
+model rather than an approximation*. That is right as a contract and it is what
+bounds the pathway: MAST-U's solenoid is 12 mm by 3.18 m and sits beside the
+plasma, so one point at its centre is not a machine whose equilibrium is near
+MAST-U's. Subdividing a block into an `n_R × n_Z` stack of filaments carrying
+`I/( n_R n_Z )` each is the obvious fix, it is cheap at 2.38 µs per 23
+conductors, and it is a modelling decision — how many, chosen how — rather than
+a line of code.

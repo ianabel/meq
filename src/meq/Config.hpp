@@ -1330,6 +1330,19 @@ namespace meq
 	};
 
 	// [initialguess]
+	/// What a stored `[initialguess] File` HOLDS, which a `.gf` cannot say
+	/// for itself. See InitialGuessConfig::content.
+	enum class GuessContent
+	{
+		/// `psi` -- the physical flux, conductors and all. The driver takes
+		/// `psi_c` off it at load when this run subtracts, so a guess written
+		/// by a MESHED run restarts a subtracted one.
+		Total,
+		/// `psi_p = psi - psi_c` -- what a subtracted run itself writes, and
+		/// what a file written before this key existed means.
+		Remainder
+	};
+
 	struct InitialGuessConfig
 	{
 		InitialGuessType type = InitialGuessType::None;
@@ -1349,6 +1362,41 @@ namespace meq
 		// every coefficient rather than an interpolation.
 		std::string file;
 		std::string meshFile;
+
+		/**
+		 * `Content` -- `"total"` or `"remainder"`, and it exists because a
+		 * `.gf` CANNOT SAY WHICH IT HOLDS.
+		 *
+		 * `COIL-SUBTRACTION-PLAN.md` §8.3 is the finding: `GridFunction::Save`
+		 * writes the space header and the raw coefficients, so a file written
+		 * under `[conductors] Model = "subtracted"` is a REMAINDER and looks
+		 * exactly like one written without it. §9.2 left the question open
+		 * deliberately -- Ian: *"assume the user knows what they're doing and
+		 * so the warm start .gf file changes meaning; warn loudly"* -- and
+		 * this key is what lets them say so instead of being warned at.
+		 *
+		 * **IT IS NOT A SECOND ROUTE TO THE SAME THING; WITHOUT IT ONE
+		 * DIRECTION IS UNREACHABLE.** A subtracted run restarting from its own
+		 * output wants `remainder`, which is the default and is what every
+		 * file written before this key existed means. A run restarting from a
+		 * MESHED answer -- which is the whole of the coarse-then-fine pathway,
+		 * a cheap filament solve handing a meshed one a starting point --
+		 * wants `total`, and there was no way to ask for it: the guess arrived
+		 * one entire conductor field away from where the solver believed it
+		 * was, and Newton either wandered or reported a different equilibrium.
+		 *
+		 * **IT CHANGES A GUESS AND NEVER AN ANSWER**, which is what makes it a
+		 * legal TOML key where `Globalisation` is not: every other key in this
+		 * table already decides which branch a free-boundary problem converges
+		 * to, and this one is no stronger than `Amplitude` beside it.
+		 *
+		 * Ignored, rather than refused, when this run does not subtract:
+		 * `psi_c` is then zero and the two spellings mean the same file. That
+		 * is the one accepted-and-ignored case in this schema with a reason --
+		 * the key describes the FILE, which does not change because the run
+		 * reading it did.
+		 */
+		GuessContent content = GuessContent::Remainder;
 
 		// Ramp: psi runs from -Amplitude to +Amplitude across z, so that the
 		// interior crosses zero and the trivial branch is not a fixed point of

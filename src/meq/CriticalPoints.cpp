@@ -262,7 +262,9 @@ namespace meq
 	void CriticalPointFinder::setConductorField( ConductorField const *c )
 	{
 		conductors = c;
+		nodal = NodalConductors();
 	}
+
 
 	ConductorField const *CriticalPointFinder::conductorField() const
 	{
@@ -292,23 +294,35 @@ namespace meq
 		}
 	}
 
-	void CriticalPointFinder::totalFlux( int element,
+	bool CriticalPointFinder::totalFlux( int element,
 	                                     mfem::IntegrationPoint const &ip,
 	                                     mfem::Vector &out ) const
 	{
-		fluxField.GetVectorValue( element, ip, out );
 		if ( !conductors )
-			return;
+		{
+			fluxField.GetVectorValue( element, ip, out );
+			return true;
+		}
 
 		double r = 0.0;
 		double z = 0.0;
 		pointOf( meshRef, element, ip, r, z );
+
+		// THE DOMAIN TEST COMES BEFORE THE SOLVED FIELD, so that a refusal
+		// costs no evaluation and, more importantly, so that `out` is not
+		// half-written when one is returned. See the header for why an iterate
+		// gets here at all.
+		if ( !( r > 0.0 ) )
+			return false;
+
+		fluxField.GetVectorValue( element, ip, out );
 
 		double qR = 0.0;
 		double qZ = 0.0;
 		conductors->flux( r, z, qR, qZ );
 		out( 0 ) += qR;
 		out( 1 ) += qZ;
+		return true;
 	}
 
 	double CriticalPointFinder::totalPotential(
@@ -333,15 +347,122 @@ namespace meq
 		// BasisType::GaussLobatto, so this shift is exact rather than a
 		// convenient approximation. On a non-nodal basis it would still be the
 		// right O( 1 ) correction for a SCREEN, which is all these callers are.
-		mfem::FiniteElement const *elementFe
-			= potentialField.FESpace()->GetFE( element );
-		mfem::IntegrationPoint const &ip
-			= elementFe->GetNodes().IntPoint( localDof );
+		//
+		// FROM THE TABLE, because both callers of this are WHOLE-MESH screens
+		// and a conductor evaluation is milliseconds. See nodalConductors().
+		NodalConductors const &table = nodalConductors();
+		return table.potentialPsi[
+			static_cast< std::size_t >(
+				table.potentialOffset[ static_cast< std::size_t >( element ) ] )
+			+ static_cast< std::size_t >( localDof ) ];
+	}
 
-		double r = 0.0;
-		double z = 0.0;
-		pointOf( meshRef, element, ip, r, z );
-		return conductors->psi( r, z );
+	CriticalPointFinder::NodalConductors const &
+	CriticalPointFinder::nodalConductors() const
+	{
+		if ( nodal.built )
+			return nodal;
+		nodal.built = true;
+		if ( !conductors )
+			return nodal;
+
+		// SIZES FIRST, SERIALLY: two prefix sums over a table lookup each.
+		int const elements = meshRef.GetNE();
+		mfem::FiniteElementSpace const &potentialSpace = *potentialField.FESpace();
+		mfem::FiniteElementSpace const &fluxSpace = *fluxField.FESpace();
+
+		nodal.potentialOffset.assign(
+			static_cast< std::size_t >( elements ) + 1, 0 );
+		nodal.fluxOffset.assign(
+			static_cast< std::size_t >( elements ) + 1, 0 );
+		for ( int e = 0; e < elements; ++e )
+		{
+			std::size_t const i = static_cast< std::size_t >( e );
+			nodal.potentialOffset[ i + 1 ]
+				= nodal.potentialOffset[ i ]
+				  + potentialSpace.GetFE( e )->GetNodes().GetNPoints();
+			nodal.fluxOffset[ i + 1 ]
+				= nodal.fluxOffset[ i ]
+				  + fluxSpace.GetFE( e )->GetNodes().GetNPoints();
+		}
+
+		std::size_t const potentialPoints = static_cast< std::size_t >(
+			nodal.potentialOffset[ static_cast< std::size_t >( elements ) ] );
+		std::size_t const fluxPoints = static_cast< std::size_t >(
+			nodal.fluxOffset[ static_cast< std::size_t >( elements ) ] );
+
+		nodal.potentialPsi.assign( potentialPoints, 0.0 );
+		nodal.fluxQ.assign( 2*fluxPoints, 0.0 );
+		nodal.fluxUsable.assign( fluxPoints, false );
+
+		/*
+		 * THREADED, AND IT IS THE EASY KIND -- each element writes its own
+		 * disjoint slice and reads nothing another writes. The one hazard is
+		 * MFEM's, and CLAUDE.md records it: GetElementTransformation( int )
+		 * hands out shared scratch, so this takes the caller-supplied
+		 * overload into a per-thread object. `pointOf` already does that;
+		 * calling it here keeps one transcription of the transform rather
+		 * than two.
+		 *
+		 * THE SCALE IS A REDUCTION AND IS TAKEN SERIALLY AFTERWARDS. A max is
+		 * associative, so a threaded reduction would give the same answer --
+		 * over one array pass of a few tens of thousands of doubles, which is
+		 * nothing beside the kernel evaluations above.
+		 */
+		MEQ_OMP( parallel for schedule( dynamic ) )
+		for ( int e = 0; e < elements; ++e )
+		{
+			std::size_t const i = static_cast< std::size_t >( e );
+
+			mfem::IntegrationRule const &potentialNodes
+				= potentialSpace.GetFE( e )->GetNodes();
+			std::size_t const pBase = static_cast< std::size_t >(
+				nodal.potentialOffset[ i ] );
+			for ( int n = 0; n < potentialNodes.GetNPoints(); ++n )
+			{
+				double r = 0.0;
+				double z = 0.0;
+				pointOf( meshRef, e, potentialNodes.IntPoint( n ), r, z );
+				// psi_c IS EXACTLY ZERO ON THE AXIS and refuses r < 0, so the
+				// stored zero is the right value at a node on r = 0 and the
+				// right neutral one off the half-plane, which a node of an
+				// element cannot be anyway.
+				nodal.potentialPsi[ pBase + static_cast< std::size_t >( n ) ]
+					= r >= 0.0 ? conductors->psi( r, z ) : 0.0;
+			}
+
+			mfem::IntegrationRule const &fluxNodes
+				= fluxSpace.GetFE( e )->GetNodes();
+			std::size_t const qBase = static_cast< std::size_t >(
+				nodal.fluxOffset[ i ] );
+			for ( int n = 0; n < fluxNodes.GetNPoints(); ++n )
+			{
+				double r = 0.0;
+				double z = 0.0;
+				pointOf( meshRef, e, fluxNodes.IntPoint( n ), r, z );
+				if ( !( r > 0.0 ) )
+					continue;
+
+				double qR = 0.0;
+				double qZ = 0.0;
+				conductors->flux( r, z, qR, qZ );
+				std::size_t const at = qBase + static_cast< std::size_t >( n );
+				nodal.fluxQ[ 2*at ] = qR;
+				nodal.fluxQ[ 2*at + 1 ] = qZ;
+				nodal.fluxUsable[ at ] = true;
+			}
+		}
+
+		for ( std::size_t at = 0; at < fluxPoints; ++at )
+		{
+			if ( !nodal.fluxUsable[ at ] )
+				continue;
+			double const qR = nodal.fluxQ[ 2*at ];
+			double const qZ = nodal.fluxQ[ 2*at + 1 ];
+			nodal.scale = std::max( nodal.scale, std::sqrt( qR*qR + qZ*qZ ) );
+		}
+
+		return nodal;
 	}
 
 	double CriticalPointFinder::fluxScale() const
@@ -376,28 +497,11 @@ namespace meq
 		 */
 		if ( conductors )
 		{
-			mfem::FiniteElementSpace const &scalarSpace = *potentialField.FESpace();
-			for ( int element = 0; element < meshRef.GetNE(); ++element )
-			{
-				mfem::FiniteElement const *elementFe
-					= scalarSpace.GetFE( element );
-				mfem::IntegrationRule const &nodes = elementFe->GetNodes();
-
-				for ( int i = 0; i < nodes.GetNPoints(); ++i )
-				{
-					double r = 0.0;
-					double z = 0.0;
-					pointOf( meshRef, element, nodes.IntPoint( i ), r, z );
-					if ( !( r > 0.0 ) )
-						continue;
-
-					double qR = 0.0;
-					double qZ = 0.0;
-					conductors->flux( r, z, qR, qZ );
-					worst = std::max( worst,
-					                  std::sqrt( qR*qR + qZ*qZ ) );
-				}
-			}
+			// ONE NUMBER OUT OF THE TABLE, not a sweep. This is called once
+			// per RING of every seeded search and once per sweep, so the pass
+			// it replaces was 102 s of MAST-U per call -- see
+			// nodalConductors(), which reduces it at build time.
+			worst = std::max( worst, nodalConductors().scale );
 		}
 
 		return worst > 0.0 ? worst : 1.0;
@@ -447,8 +551,20 @@ namespace meq
 			hi[ d ] += shift + jacobianStep;
 			lo[ d ] += shift - jacobianStep;
 
-			totalFlux( element, referencePoint( hi[ 0 ], hi[ 1 ] ), high );
-			totalFlux( element, referencePoint( lo[ 0 ], lo[ 1 ] ), low );
+			// A DIFFERENCE POINT OFF THE HALF-PLANE ZEROES ITS COLUMN, which
+			// makes this Jacobian singular and sends solveTwoByTwo's caller
+			// home. That is the wanted outcome and it needs no new control
+			// flow here: the loop above has already tried three times to bring
+			// both points inside the element, so reaching this with one of
+			// them outside the machine means the element is on the axis and
+			// the iterate has walked off it.
+			if ( !totalFlux( element, referencePoint( hi[ 0 ], hi[ 1 ] ), high )
+			     || !totalFlux( element, referencePoint( lo[ 0 ], lo[ 1 ] ), low ) )
+			{
+				jacobian[ 0 ][ d ] = 0.0;
+				jacobian[ 1 ][ d ] = 0.0;
+				continue;
+			}
 
 			jacobian[ 0 ][ d ] = ( high( 0 ) - low( 0 ) )/( 2.0*jacobianStep );
 			jacobian[ 1 ][ d ] = ( high( 1 ) - low( 1 ) )/( 2.0*jacobianStep );
@@ -481,7 +597,8 @@ namespace meq
 		bool converged = false;
 		for ( int iteration = 0; iteration < maxIterations; ++iteration )
 		{
-			totalFlux( element, ip, value );
+			if ( !totalFlux( element, ip, value ) )
+				return false;
 			double const residual = std::sqrt( value( 0 )*value( 0 )
 			                                   + value( 1 )*value( 1 ) );
 			if ( residual <= target )
@@ -520,7 +637,8 @@ namespace meq
 
 			if ( length < 1.0e-15 )
 			{
-				totalFlux( element, ip, value );
+				if ( !totalFlux( element, ip, value ) )
+					return false;
 				converged = true;
 				break;
 			}
@@ -648,9 +766,30 @@ namespace meq
 		int best = -1;
 		double bestValue = std::numeric_limits<double>::infinity();
 		mfem::Vector value( 2 );
+		// THESE ARE THE FLUX SPACE'S OWN NODES, so the conductor half comes
+		// out of the table rather than being evaluated -- this loop runs once
+		// per element of a sweep and a conductor evaluation is milliseconds.
+		NodalConductors const *const table
+			= conductors ? &nodalConductors() : nullptr;
 		for ( int i = 0; i < nodes.Size(); ++i )
 		{
-			totalFlux( element, nodes[ i ], value );
+			fluxField.GetVectorValue( element, nodes[ i ], value );
+			if ( table )
+			{
+				std::size_t const at = static_cast< std::size_t >(
+					table->fluxOffset[ static_cast< std::size_t >( element ) ] )
+					+ static_cast< std::size_t >( i );
+				// A NODE ON THE AXIS IS SKIPPED RATHER THAN SCORED. `q_c` is
+				// NaN there and every comparison against a NaN is false, so
+				// leaving this to the < below would silently never pick such a
+				// node -- which is the right outcome by accident, and an
+				// accident is not what a half-disc machine's whole first
+				// column of nodes should rest on.
+				if ( !table->fluxUsable[ at ] )
+					continue;
+				value( 0 ) += table->fluxQ[ 2*at ];
+				value( 1 ) += table->fluxQ[ 2*at + 1 ];
+			}
 			double const magnitude = std::sqrt( value( 0 )*value( 0 )
 			                                    + value( 1 )*value( 1 ) );
 			if ( magnitude < bestValue )
@@ -1575,7 +1714,12 @@ namespace meq
 					mfem::IntegrationPoint faceIp = referencePoint( s2, 0.0 );
 					mfem::IntegrationPoint elementIp;
 					face->Loc1.Transform( faceIp, elementIp );
-					totalFlux( face->Elem1No, elementIp, value );
+					// SKIPPED, NOT SCORED, for the reason elementSeeds() gives
+					// one line at a time: a sample on the axis has no `q_c`,
+					// and a NaN in this loop would poison the winding sum
+					// rather than being ignored by it.
+					if ( !totalFlux( face->Elem1No, elementIp, value ) )
+						continue;
 
 					double const magnitude = std::sqrt( value( 0 )*value( 0 )
 					                                    + value( 1 )*value( 1 ) );

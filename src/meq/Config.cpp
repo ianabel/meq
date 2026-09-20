@@ -1210,6 +1210,22 @@ namespace meq
 						generate.fail( "Order", "the geometric order must be at least 1; above 1 the arc's mid-edge nodes are placed on the true circle rather than on the chord" );
 					if ( g.coilSize < 0.0 )
 						generate.fail( "CoilSize", "the element size inside the conductors must not be negative; omit it for the background Size" );
+
+					// COILSIZE GRADES THE MESH AROUND A --coil, AND A
+					// SUBTRACTED CONDUCTOR IS NEVER EMITTED AS ONE.
+					//
+					// The driver's mesh command omits every --coil under a
+					// subtracting [conductors] Model -- that is the whole of
+					// how the key reaches the geometry -- so a CoilSize beside
+					// it names an element size for a region the generator is
+					// never told about. Accepted and ignored is the one
+					// outcome this schema refuses everywhere, and here it is
+					// the outcome a user would MOST easily misread: the point
+					// of the split is that the mesh gets cheaper, and a key
+					// that looks like it is still paying for the conductors is
+					// exactly the wrong thing to leave sitting in the file.
+					if ( generate.has( "CoilSize" ) && conductorOptions.subtracts() )
+						generate.fail( "CoilSize", "[conductors] Model takes the conductors OUT of the mesh, so the generator is never told where they are and there is nothing for this element size to grade. Remove the key -- the background Size is what meshes that region now -- or set Model = \"meshed\" to carry the conductors as a domain source again" );
 					if ( g.transition < 0.0 )
 						generate.fail( "Transition", "the graded transition's width must not be negative; omit it for four background sizes" );
 
@@ -1945,7 +1961,8 @@ namespace meq
 		// [initialguess]
 		{
 			Table guess( document, "initialguess", sourceName, false );
-			guess.rejectUnknownKeys( { "Type", "File", "MeshFile", "Amplitude",
+			guess.rejectUnknownKeys( { "Type", "File", "MeshFile", "Content",
+			                           "Amplitude",
 			                           "CentreR", "CentreZ", "RadiusR", "RadiusZ" } );
 
 			std::string const type = guess.getStringOr( "Type", "none" );
@@ -1983,6 +2000,27 @@ namespace meq
 					guess.fail( "MeshFile", "is required when Type = \"gridfunction\": a "
 					            "GridFunction cannot be read without the mesh it lives on" );
 			}
+
+			// WHAT THE STORED FILE HOLDS. See Config.hpp for why a .gf cannot
+			// say this for itself and why the default is "remainder".
+			std::string const content = guess.getStringOr( "Content", "remainder" );
+			if ( content == "remainder" )
+				initialGuessOptions.content = GuessContent::Remainder;
+			else if ( content == "total" )
+				initialGuessOptions.content = GuessContent::Total;
+			else
+				guess.fail( "Content", "must be \"total\" or \"remainder\", but is \"" + content
+				            + "\". A .gf carries the coefficients and the space and nothing else, so "
+				              "under [conductors] Model it cannot say whether it holds psi or "
+				              "psi - psi_c; this is where the file's author says. \"remainder\" is "
+				              "what a subtracted run writes and what every file written before this "
+				              "key existed means" );
+
+			if ( guess.has( "Content" )
+			     && initialGuessOptions.type != InitialGuessType::GridFunction )
+				guess.fail( "Content", "describes a STORED guess and there is none: it is read "
+				            "only with Type = \"gridfunction\". Every other Type builds the guess "
+				            "from this file, in whichever field the run solves for" );
 
 			if ( initialGuessOptions.type == InitialGuessType::Conductors )
 			{
