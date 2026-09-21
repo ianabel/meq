@@ -9,9 +9,24 @@
 > ```sh
 > ./venv/bin/python race_desc.py \
 >     fixed-h-circular fixed-a-testtokamak fixed-e-diamagnetic \
->     fixed-d-tcv fixed-g-mastu fixed-f-diiid \
->     --mode accuracy --require-quiet --repeats 3 --out /tmp/race-desc
+>     fixed-g-mastu fixed-f-diiid \
+>     --mode accuracy --self-consistent 12 \
+>     --require-quiet --repeats 3 --out /tmp/race-desc
 > ```
+>
+> **`--self-consistent 12` IS THE PROTOCOL AND NOT AN OPTION.** It splits each
+> DESC arm in two. **Phase A, UNTIMED:** iterate the flux-label map to its fixed
+> point — arriving at the pressure and the field as functions of the toroidal
+> flux is *posing*, and posing is not solving, the same line `race.py` draws by
+> leaving MEQ's meshing outside its clock. **Phase B, TIMED:** one cold forward
+> solve, fresh process, on the converged profiles. That is the number.
+>
+> Without it the race is between three codes: posed from the reference, DESC's
+> input carries freegs4e's own interior surfaces, and that flatters DESC by
+> 2.9× — `psi_ax` 7.402e-05 from the reference against 2.129e-04
+> self-consistent, on `fixed-h-circular` at `M = 10`. The posing is **refused
+> rather than timed** if the fixed point is not reached in `N` sweeps;
+> `race_desc.py` prints `POSING FAILED ... -- not timed`.
 >
 > `--require-quiet` refuses to time anything while the load is above 0.5. **It
 > has not been run.** The ERROR columns below do not depend on load and are

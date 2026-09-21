@@ -398,7 +398,7 @@ def main():
 
 	case = convert.load_case(args.stem)
 	level = float(case["meta"]["level"])
-	field = (convert.field_from_meq(args.source, level) if args.source
+	field = (convert.field_from_file(args.source, level) if args.source
 	         else convert.field_from_reference(case["ref"], level, args.refine))
 	R, Z = grid_for(case, args.grid_from)
 

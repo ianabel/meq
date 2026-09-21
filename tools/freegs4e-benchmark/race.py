@@ -43,6 +43,28 @@ reported, and their agreement at the finest is reported separately, as the floor
 it is.
 
     python3 race.py <scratch-dir> [case-letters]
+    python3 race.py <scratch-dir> F --filament      # the matched race
+
+THE RACE TO RUN ON A QUIET MACHINE, and it is the `--filament` one:
+
+    cd tools/freegs4e-benchmark
+    nice -n 10 ./venv/bin/python race.py /tmp/race-fil F --filament
+
+**COLD-STARTED FORWARD FILAMENTS, BOTH SIDES.**  freegs4e's DIII-D reference
+carries its 18 conductors as point filaments and MEQ now carries the same 18 at
+the same positions -- `[conductors] Model = "filament"`, the conductors out of
+the mesh and evaluated analytically -- so for the first time the two arms are
+the SAME MACHINE rather than two approximations to one.  Both start cold: MEQ
+from `mkcoldguess.py --remainder`, which is the design footprint carrying the
+target current and no converged field anywhere in it.
+
+What makes it worth the machine time is that the matched model breaks below a
+floor this project has measured twice and called irreducible.
+MEASUREMENTS.md M-111 reads DIII-D flat at 5.785e-03 over a 16x range in dofs;
+M-154 reads the filament arm at **2.031e-03 against the meshed route's
+4.593e-03, on 1510 elements against 4848**.  So the expected shape is a race
+where one arm is both faster and more accurate, which is unusual enough to be
+worth pinning with a proper clock.
 
 ONE CASE PER INVOCATION IF THE WALL CLOCKS ARE THE POINT, AND LET THE MACHINE
 SETTLE BETWEEN THEM.  This script runs its cases back to back and its rungs back
@@ -110,6 +132,37 @@ VENV = os.path.join(HERE, "venv", "bin", "python")
 SHAPED = "--shaped" in sys.argv
 if SHAPED:
     sys.argv.remove("--shaped")
+
+# --filament: THE OTHER WAY TO MATCH THE CONDUCTOR MODEL, AND THE CHEAPER ONE.
+#
+# `--shaped` above moves the REFERENCE to MEQ's rectangles.  This moves MEQ to
+# the reference's FILAMENTS, and it is the direction `COIL-SUBTRACTION-PLAN.md`
+# exists for: `[conductors] Model = "filament"` takes the conductors out of the
+# mesh and evaluates them analytically at exactly the points freegs4e's own
+# `Coil` sits at, so the two arms are the same machine rather than two
+# approximations to one.
+#
+# IT IS ALSO A SMALLER MESH, which is the point of the plan rather than a side
+# effect: the conductors are not meshed, not graded to, and not fragmented.
+# Measured on DIII-D, MEASUREMENTS.md M-154 -- 5054 triangles to 1702, and the
+# field-wide error against the filament reference 4.593e-03 meshed against
+# 2.031e-03 subtracted, which is BELOW M-111's 5.785e-03 floor.
+#
+# FOUR THINGS MOVE TOGETHER AND ALL FOUR ARE REQUIRED.  `[mesh.generate]
+# CoilSize` is refused beside a subtracting model and has to go; the mesh needs
+# its own filename so the two arms do not fight over `<mesh>.meq-mesh`; the
+# guess has to be built as psi_p rather than converted from a total, because
+# psi_c diverges at a filament and any stored psi cannot; and the table needs
+# `[conductors] Model = "filament"` appended.  Leaving out the third is the
+# quiet one -- it converges, to a different equilibrium.
+FILAMENT = "--filament" in sys.argv
+if FILAMENT:
+    sys.argv.remove("--filament")
+if FILAMENT and SHAPED:
+    raise SystemExit("--shaped and --filament are the two DIRECTIONS of the "
+                     "same matching and asking for both is asking for neither: "
+                     "one moves the reference to MEQ's rectangles and the other "
+                     "moves MEQ to the reference's filaments")
 
 
 def shaped_ref(ref):
@@ -180,7 +233,40 @@ def environment():
 # ---------------------------------------------------------------------------
 # MEQ
 # ---------------------------------------------------------------------------
-def meq_toml(stem, degree, refine, scratch, sample=513, adaptive=0):
+def filament_guess(stem, ref, scratch):
+    """A COLD psi_p guess, for the filament arm, built once per case.
+
+    `mkcoldguess.py --remainder` sums the design plasma blob and NOT the
+    conductors, so this is a guess at the remainder the split solves for.  It
+    is COLD in the sense race.py's header requires -- the design footprint
+    carrying the target current, and no converged field anywhere in it.
+
+    CONVERTING THE SHIPPED TOTAL GUESS INSTEAD DOES NOT WORK, and it is worth
+    saying because `[initialguess] Content = "total"` makes it look available:
+    psi_c diverges logarithmically at each filament while any stored psi
+    cannot, so `psi - psi_c` at a node near one is a large negative number
+    where the true psi_p is smooth.  Measured on DIII-D, the largest such shift
+    is 6.790e-01 Wb/rad against a reference psi_axis of 3.759e-01.
+    """
+    mesh = os.path.join(scratch, "%s-filament-guess.mesh" % stem)
+    gf = os.path.join(scratch, "%s-filament-guess.gf" % stem)
+    if os.path.exists(gf) and os.path.exists(mesh):
+        return mesh, gf
+    # The disc the guess has to cover is [mesh.generate] Radius, out of the
+    # case's own file rather than a table here.
+    text = open(os.path.join(EXAMPLES, "%s.toml" % stem)).read()
+    rho = float(re.search(r"^\[mesh\.generate\][^\[]*?^Radius = ([-\d.eE+]+)",
+                          text, re.M | re.S).group(1))
+    argv = [sys.executable, os.path.join(HERE, "mkcoldguess.py"), "--remainder",
+            os.path.join(HERE, "%s.npz" % ref), mesh, gf, "%g" % rho, "32"]
+    done = subprocess.run(argv, capture_output=True, text=True)
+    if done.returncode != 0:
+        raise SystemExit("the filament guess could not be built for %s:\n%s"
+                         % (stem, done.stdout + done.stderr))
+    return mesh, gf
+
+
+def meq_toml(stem, degree, refine, scratch, sample=513, adaptive=0, ref=""):
     """One rung's configuration, derived from the case's own file."""
     text = open(os.path.join(EXAMPLES, "%s.toml" % stem)).read()
     text = re.sub(r"^PolynomialDegree = .*$", "PolynomialDegree = %d" % degree,
@@ -203,6 +289,23 @@ def meq_toml(stem, degree, refine, scratch, sample=513, adaptive=0):
         label += "a%d" % adaptive
         text += ("\n[adaptivity]\nEnabled = true\nMaxIterations = %d\n"
                  "Theta = 0.6\nTargetError = 1.0e-9\n" % adaptive)
+    if FILAMENT:
+        # (1) CoilSize is refused beside a subtracting model -- it grades the
+        # mesh around conductors the generator is no longer told about.
+        text = re.sub(r"^CoilSize = .*\n", "", text, flags=re.M)
+        # (2) its own mesh, so the two arms do not share a .meq-mesh stamp.
+        text = re.sub(r'^File = "examples/%s\.msh"$' % re.escape(stem),
+                      'File = "%s/%s-filament.msh"' % (scratch, stem),
+                      text, flags=re.M)
+        # (3) the guess is psi_p and is COLD; see filament_guess().
+        mesh_path, gf_path = filament_guess(stem, ref, scratch)
+        text = re.sub(r'^File = "examples/[^"]*-guess\.gf"$',
+                      'File = "%s"' % gf_path, text, flags=re.M)
+        text = re.sub(r'^MeshFile = "examples/[^"]*-guess\.mesh"$',
+                      'MeshFile = "%s"' % mesh_path, text, flags=re.M)
+        # (4) and the key itself.
+        text += '\n[conductors]\nModel = "filament"\n'
+        label += "-fil"
     text = re.sub(r'^Prefix = ".*"$', 'Prefix = "%s"' % label, text, flags=re.M)
     text = re.sub(r'^(\[output\])$', r'\1\nDirectory = "%s"' % scratch,
                   text, flags=re.M)
@@ -211,8 +314,8 @@ def meq_toml(stem, degree, refine, scratch, sample=513, adaptive=0):
     return path, label
 
 
-def run_meq(stem, degree, refine, scratch, sample=513, adaptive=0):
-    path, label = meq_toml(stem, degree, refine, scratch, sample, adaptive)
+def run_meq(stem, degree, refine, scratch, sample=513, adaptive=0, ref=""):
+    path, label = meq_toml(stem, degree, refine, scratch, sample, adaptive, ref)
     started = time.perf_counter()
     done = subprocess.run([MEQ_RUN, path], capture_output=True, text=True,
                           cwd=ROOT, env=environment(), timeout=7200)
@@ -401,7 +504,7 @@ def sweep(tag, ref, stem, scratch, rungs, grids, sample=513, collar=0.05):
            "rel L2", "no coils", "psi_ax", "psi_bnd", "X-point"))
     for rung in rungs:
         row = run_meq(stem, rung[0], rung[1], scratch, sample=sample,
-                      adaptive=rung[2] if len(rung) > 2 else 0)
+                      adaptive=rung[2] if len(rung) > 2 else 0, ref=ref)
         if not row["ok"] or "nc" not in row or not os.path.exists(row["nc"]):
             print("    %-10s FAILED" % row["label"].split("-")[-1])
             tail = [l for l in row["log"].splitlines()

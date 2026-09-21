@@ -348,6 +348,20 @@ def field_from_desc(path, level):
 	                       source=os.path.basename(path))
 
 
+def field_from_file(path, level):
+	"""A flux-label field from whichever kind of file this is.
+
+	A MEQ `.nc` and a `descrun.py` `.npz` are both "somebody's converged
+	answer" and the caller asking for `--from` does not care which; dispatching
+	on the extension here means neither the race nor the command line has to.
+	"""
+	if path.endswith(".nc"):
+		return field_from_meq(path, level)
+	if path.endswith(".npz"):
+		return field_from_desc(path, level)
+	raise SystemExit("--from takes a MEQ .nc or a descrun .npz, not %r" % path)
+
+
 def field_from_meq(path, level):
 	"""The same, out of a MEQ .nc -- so the map comes from the EXACT problem.
 
@@ -601,7 +615,7 @@ def main():
 
 	case = load_case(args.stem)
 	level = float(case["meta"]["level"])
-	field = (field_from_meq(args.source, level) if args.source
+	field = (field_from_file(args.source, level) if args.source
 	         else field_from_reference(case["ref"], level, args.refine))
 	out = build(case, n_levels=args.levels, n_fit=args.terms, field=field)
 	print(f"  {args.stem}   flux-label map from {out['map_source']}"

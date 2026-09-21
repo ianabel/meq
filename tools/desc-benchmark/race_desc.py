@@ -249,6 +249,46 @@ def meq_trace_dofs(elements, degree):
 
 
 # --------------------------------------------------------------- the DESC arm
+def pose_self_consistent(stem, out, M, sweeps, mix, terms=12, timeout=7200):
+	"""Iterate the flux-label map to a fixed point, UNTIMED, and return the
+	converged field as a file `run_desc` can be pointed at with `--from`.
+
+	**THE SWEEPS ARE POSING AND POSING IS NOT SOLVING**, which is the line
+	descrun.py's header draws and the reason MEQ's meshing sits outside
+	race.py's clock too.  What is being raced is a forward solve given the
+	pressure and the field as functions of the toroidal flux; arriving at those
+	functions is what this does, once, and a user who had them from anywhere
+	else would not pay for it.
+
+	It is also the only way the race is between two codes rather than three.
+	Posed from the reference, DESC's input carries freegs4e's own interior
+	surfaces and a MEQ-against-DESC number is partly MEQ against freegs4e --
+	measured, and it flatters DESC: on fixed-h-circular at M = 10 the
+	reference-posed `psi_ax` is 7.402e-05 from the reference and the
+	self-consistent one is 2.129e-04, because the first was partly circular.
+
+	Returns the .npz path, or "" if the fixed point was not reached -- in
+	which case the caller must NOT time a run on it and pretend otherwise.
+	"""
+	row_path = os.path.join(out, f"{stem}-desc-M{M}-sc.json")
+	argv = [VENV, os.path.join(HERE, "descrun.py"), stem, "-M", str(M),
+	        "--terms", str(terms), "--warm", "0", "--out", out,
+	        "--self-consistent", str(sweeps),
+	        "--self-consistent-mix", str(mix), "--json", row_path]
+	done = subprocess.run(pinned(argv), capture_output=True, text=True,
+	                      env=environment(), timeout=timeout)
+	if done.returncode != 0 or not os.path.exists(row_path):
+		return "", dict(ok=False, tail=(done.stdout or done.stderr)
+		                .strip().split("\n")[-1][:200])
+	row = json.load(open(row_path))
+	field = row.get("npz", "")
+	if not row.get("self_consistent_reached"):
+		return "", dict(ok=False, history=row.get("self_consistent_history"),
+		                tail="the posing did not reach its tolerance")
+	return field, dict(ok=True, sweeps=len(row.get("self_consistent_history", [])),
+	                   history=row.get("self_consistent_history"))
+
+
 def run_desc(stem, out, M, terms=12, warm=1, grid_from="", map_from="",
              timeout=7200):
 	"""A FRESH PROCESS, so the JAX compilation is inside the clock."""
@@ -307,6 +347,13 @@ def main():
 	                     "says why that is a different and better posing")
 	ap.add_argument("--match", choices=("dofs", "scale"), default="dofs",
 	                help="only for --mode wall; see this file's header")
+	ap.add_argument("--self-consistent", type=int, default=0, metavar="N",
+	                help="pose each case self-consistently first, UNTIMED, at "
+	                     "most N sweeps, and then time one cold forward solve "
+	                     "on the converged profiles. 0 poses from --map-from "
+	                     "or the reference and leaves that code in the posing")
+	ap.add_argument("--self-consistent-mix", type=float, default=0.5,
+	                help="see descrun.py: 1 does not converge")
 	ap.add_argument("--require-quiet", action="store_true")
 	ap.add_argument("--quiet-threshold", type=float, default=0.5)
 	ap.add_argument("--json", default="")
@@ -366,9 +413,27 @@ def main():
 				      f"{'':>10s} {'':>10s}")
 			else:
 				M = item[1]
+				# ---- PHASE A, UNTIMED: the posing ------------------------
+				# See pose_self_consistent().  A race target given the
+				# profiles as functions of the toroidal flux should not be
+				# charged for arriving at those functions, and the sweeps are
+				# how they are arrived at.  Skipped entirely at
+				# --self-consistent 0, which is the old behaviour.
+				posed = args.map_from
+				if args.self_consistent:
+					posed, sc = pose_self_consistent(
+						stem, args.out, M, args.self_consistent,
+						args.self_consistent_mix, terms=args.terms)
+					if not sc["ok"]:
+						print(f"    DESC  M={M}  POSING FAILED  {sc['tail']}"
+						      "  -- not timed")
+						continue
+					print(f"    DESC  M={M:<3d}  posed self-consistently in "
+					      f"{sc['sweeps']} sweeps ( untimed )")
+				# ---- PHASE B, TIMED: one cold forward solve --------------
 				trials = [run_desc(stem, args.out, M, warm=1,
 				                   grid_from=reference,
-				                   map_from=args.map_from,
+				                   map_from=posed,
 				                   terms=args.terms)
 				          for _ in range(args.repeats)]
 				result = trials[0]
