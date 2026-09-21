@@ -40,8 +40,11 @@ import json
 import os
 import numpy as np
 
+from scipy.interpolate import CubicSpline
+
 from mxh import fit_mxh, worst_distance
 from surface import interior_surface
+
 from convert import (to_meq_normalised_table, write_meq_profile,
                      NORMALISED_ABSCISSA)
 
@@ -163,6 +166,31 @@ def build(npz_path, outdir, stem=None, degree=2, target_elements=4000,
     ppEdge = float(np.interp(0.0, pp[0], pp[1])) / psi_ax
     ggEdge = float(np.interp(0.0, gg[0], gg[1])) / psi_ax
     ppAxis = float(np.interp(1.0, pp[0], pp[1])) / psi_ax
+
+    # ---- p AND g ON GAMMA, WHICH GRAD-SHAFRANOV DOES NOT DETERMINE ----------
+    #
+    # **THIS IS THE ONE THING A `fixed-*.toml` DOES NOT SAY ABOUT ITS OWN
+    # EQUILIBRIUM, AND IT IS NOT AN OVERSIGHT -- IT IS WHAT THE EQUATION IS.**
+    # Grad-Shafranov contains `dp/dpsi` and `g dg/dpsi` and nothing else, so a
+    # case file fixes `p` and `g^2` only up to an additive constant each, and
+    # MEQ's answer for `psi` is independent of both.  A FULL MHD equilibrium is
+    # not: `B_phi = g/r` and the toroidal flux are proportional to `g`, and the
+    # pressure is a profile rather than a gradient.
+    #
+    # So any code that solves more than Grad-Shafranov needs these two numbers
+    # and MEQ's input cannot supply them.  Measured consequence, on DESC:
+    # `tools/desc-benchmark` had to read them out of the freegs4e reference's
+    # own `pressure` and `fpol` arrays, which put a third code into the posing
+    # of a two-code comparison -- so a benchmark that was meant to be MEQ
+    # against DESC was partly MEQ against freegs4e.  Two numbers here remove
+    # that.
+    #
+    # THE INTERPOLATION IS convert.py'S OWN, at the same `level` and by the
+    # same cubic spline that puts the profile tables' endpoint exactly on
+    # Gamma, so these are consistent with the tables beside them rather than
+    # merely close to them.
+    pEdge = float(CubicSpline(d["psi_n"], d["pressure"])(level))
+    gEdge = float(CubicSpline(d["psi_n"], d["fpol"])(level))
 
     R0, Z0, a, kappa = fit["R0"], fit["Z0"], fit["a"], fit["kappa"]
     nr, nz, refine, predicted = choose_mesh(target_elements, kappa)
@@ -385,6 +413,9 @@ FluxAngleCount = 128
                 nr=nr, nz=nz, refine=refine, degree=degree,
                 predicted_elements=predicted,
                 pprime_at_gamma=ppEdge, ggprime_at_gamma=ggEdge,
+                # The two Grad-Shafranov does not fix; see where they are
+                # computed. Pa and T m.
+                p_at_gamma=pEdge, g_at_gamma=gEdge,
                 cos=list(map(float, fit["cos"])),
                 sin=list(map(float, fit["sin"])))
     with open(os.path.join(outdir, f"{stem}-meta.json"), "w") as f:

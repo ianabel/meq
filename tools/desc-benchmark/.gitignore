@@ -1,0 +1,4 @@
+# Outputs, not sources.  `runs/` is descrun.py's default --out and holds one
+# .npz of psi( R, z ) per ( case, resolution ) at a megabyte or so each; the
+# root .gitignore's `/runs/` is anchored on purpose and does not reach here.
+runs/
