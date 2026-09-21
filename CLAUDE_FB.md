@@ -74,6 +74,30 @@ diverted DIII-D comparison it is worth **5.0× in relative `L2` and 7.2× in
 the part this section did not predict: the `( w/d )²` correction does not stop
 at the conductor's edge. → **[M-96](MEASUREMENTS.md#m-96)**.
 
+**AND THE FIRST DIRECTION IS NOW MEASURED TOO, SO §0a's 2 × 2 IS COMPLETE.**
+`COIL-SUBTRACTION-PLAN.md`'s split makes MEQ able to carry the reference's OWN
+filaments, at the reference's own positions, and the driver now meshes without
+them — so `examples/machine-f-diiid.toml` under `[conductors] Model =
+"filament"` is the same machine `F_diiid_conventional` is, rather than a
+rectangle approximation to it. It reproduces that reference's `psi_axis` to
+**2.8e-05**, its magnetic axis to **0.3 mm** and its X-point to **0.64 mm**, in
+two Newton steps on **1510 elements** against the meshed route's 4848.
+
+**THE FIELD-WIDE NUMBER IS WHAT SETTLES [M-111](MEASUREMENTS.md#m-111).** That
+entry records DIII-D's relative error flat at 5.785e-03 over a 16× range in dofs
+and concludes the conductor model is what it is. Matching the model on MEQ's
+side reads **2.031e-03 against the meshed route's 4.593e-03** — 2.26× lower on
+3.2× fewer elements, and below a floor M-111 says no refinement buys down.
+→ **[M-154](MEASUREMENTS.md#m-154)**.
+
+**IT COST THREE MORE BORDERS READING THE REMAINDER**, none of them reachable by
+any fixture in the tree, and each named by an AGREEMENT rather than a
+disagreement — the reference saves `psi`, `coil_psi` and `plasma_psi`
+separately, so the decomposition MEQ's split is a decomposition INTO was there
+to compare against term by term. M-154a has the three and the order they have to
+be fixed in, which matters: two of the three intermediate states look like
+progress.
+
 **Three things the conversion has to get right, each of which silently
 converges if got wrong.** The CIRCUIT TOPOLOGY, because the references come from
 an INVERSE solve and flattening a circuit into independent coils hands it more

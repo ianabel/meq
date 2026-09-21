@@ -7296,51 +7296,74 @@ namespace
 		double xR = xPointIsUnknown ? xPointRValue : 0.0;
 		double xZ = xPointIsUnknown ? xPointZValue : 0.0;
 
-		auto limiterValue = [ & ]( mfem::Vector const &state )
+		/*
+		 * THE psi_bnd BORDER'S ROW, AS A LINEAR FUNCTIONAL, AND psi_c IS NOT
+		 * IN IT.
+		 *
+		 * This is applied to two completely different things and the
+		 * difference is the whole of the trap: to the ITERATE, where it must
+		 * report the physical flux at the contact, and to the BACKSOLVED
+		 * DIRECTIONS in rowDot(), where it is `d psi( contact )/d( unknown )`
+		 * and must not.
+		 *
+		 * **psi_c IS A CONSTANT, SO IT BELONGS IN THE FIRST AND IS POISON IN
+		 * THE SECOND.** A directional derivative shifted by a constant is not a
+		 * derivative of anything, and the entry it lands in is the psi_bnd row
+		 * of the dense Schur complement -- so the row's residual and the row's
+		 * Jacobian describe different functions and Newton can drive every
+		 * other border while that one stands still.
+		 *
+		 * MEASURED, because that is exactly what it looked like: on
+		 * F_diiid_conventional as a filament machine with `--profile`, the
+		 * weighted border terms over twelve steps take `g*ext` to 1.3e-17,
+		 * `g*xpt` to 8.6e-08 and `g*axis` to 1.3e-03 while **`g*bnd` GROWS from
+		 * -2.4e-02 to +5.7e-02 and sticks there**, with the line search
+		 * reporting Armijo satisfied throughout. A border that does not move
+		 * while its neighbours converge is a row whose two halves disagree.
+		 *
+		 * So this lambda is the functional alone and limiterTotal() below is
+		 * the physical value. Splitting them is the fix; a flag on one lambda
+		 * would put the decision at the call site, where it is exactly the
+		 * thing a reader gets wrong.
+		 */
+		auto limiterValue = [ & ]( mfem::Vector const &v )
 		{
-			// psi_bnd IS THE PHYSICAL FLUX AT THE CONTACT, on both branches.
-			// The located one has the contact's ( r, z ) in hand, so psi_c is
-			// one evaluation; the nearest-dof one indexes the potential block,
-			// so it takes the per-dof cache. Exactly zero without the split.
 			if ( limiterConstraintChoice == LimiterConstraint::NearestDof )
-				return state( boundaryDof )
-				       + conductorPsiAtDof( boundaryDof - blockOffsets[ 1 ] );
+				return v( boundaryDof );
 
 			double total = 0.0;
 			for ( int i = 0; i < limiterDofs.Size() && i < limiterShape.Size(); ++i )
 				total += limiterShape( i )
-				         *state( blockOffsets[ 1 ] + limiterDofs[ i ] );
+				         *v( blockOffsets[ 1 ] + limiterDofs[ i ] );
+			return total;
+		};
 
-			if ( limiterContactLocatedValue )
+		/*
+		 * AND THE PHYSICAL FLUX AT THE CONTACT, WHICH IS WHAT psi_bnd IS
+		 * CONSTRAINED TO EQUAL. Only ever applied to a STATE.
+		 *
+		 * Under COIL-SUBTRACTION-PLAN.md's split the state holds psi_p, and a
+		 * limiter is a piece of metal near the conductors -- exactly where
+		 * psi_c is largest -- while an X-point of a machine sits in the middle
+		 * of them. Three routes reach the contact and each knows where it is
+		 * differently: the nearest-dof one indexes the potential block and
+		 * takes the per-dof cache; the located one has the contact's ( r, z )
+		 * in hand; and XP-3's is the X-point itself, which the limiter search
+		 * never locates -- `limiterContactLocatedValue` is
+		 * refreshLimiterContact()'s and that search does not run there.
+		 *
+		 * Exactly zero without the split, on all three, so every existing path
+		 * is bit-identical.
+		 */
+		auto limiterTotal = [ & ]( mfem::Vector const &state )
+		{
+			double total = limiterValue( state );
+
+			if ( limiterConstraintChoice == LimiterConstraint::NearestDof )
+				total += conductorPsiAtDof( boundaryDof - blockOffsets[ 1 ] );
+			else if ( limiterContactLocatedValue )
 				total += conductorPsi( limiterContactRValue,
 				                       limiterContactZValue );
-			/*
-			 * AND ON XP-3's PATH THE CONTACT IS THE X-POINT, WHICH THE
-			 * LIMITER SEARCH NEVER LOCATES.
-			 *
-			 * `limiterContactLocatedValue` is set by refreshLimiterContact(),
-			 * and under XP-3 that search does not run -- refreshXPoint() fills
-			 * `limiterShape` and `limiterDofs` itself, from a point that is an
-			 * unknown rather than a prescription. So the branch above is dead
-			 * there and psi_bnd came out as the REMAINDER at the X-point.
-			 *
-			 * **IT IS A NORMALISATION FAULT AND NOT A REPORTING ONE**, which
-			 * is why it is worth the paragraph. psi_bnd is what
-			 * meq::NormalisedSource measures its own Psi against, so a psi_bnd
-			 * short by psi_c( x_X ) puts every profile evaluation on the wrong
-			 * abscissa, the plasma support on the wrong level set, and the
-			 * profile scale wherever it has to go to still deliver I_p.
-			 * MEASURED on F_diiid_conventional as a filament machine: MEQ
-			 * reported psi_bnd = 1.707074e-01 where freegs4e's own
-			 * `plasma_psi` at MEQ's X-point is 1.706956e-01 -- agreeing to
-			 * 7e-05, which is what identified it -- against a physical
-			 * psi_bndry of 7.082e-02. The support came out 193 of 193
-			 * candidate elements, a "plasma" with no boundary, and the profile
-			 * scale 11.1 against the meshed route's 0.9993.
-			 *
-			 * COIL-SUBTRACTION-PLAN.md CS-4's list of consumers now stands at
-			 * twelve, and this is the third border on it.
-			 */
 			else if ( xPointIsUnknown && xR > 0.0 )
 				total += conductorPsi( xR, xZ );
 			return total;
@@ -8072,6 +8095,37 @@ namespace
 				value += constraintShape( i )
 				         *state( blockOffsets[ 1 ] + dofs[ i ] );
 
+			/*
+			 * AND psi_c AT THE AXIS, BECAUSE psi_ax IS THE PHYSICAL FLUX
+			 * THERE. COIL-SUBTRACTION-PLAN.md CS-4, and this is the psi_bnd
+			 * row's exact mirror.
+			 *
+			 * The sum above contracts the shape functions against the STATE,
+			 * which under the split holds psi_p -- so it is the remainder at
+			 * the axis, and the nodal-maximum fallback a few lines below adds
+			 * conductorPsiAtDof() for precisely this reason while this branch
+			 * did not.
+			 *
+			 * **AND IT IS THE VALUE ONLY, NEVER THE ROW.** `constraintShape`
+			 * is dG/d( unknown ) and psi_c does not depend on the unknown, so
+			 * adding it there would be the trap limiterValue() and
+			 * limiterTotal() are split to avoid: a Jacobian row shifted by a
+			 * constant, describing a different function from its own residual.
+			 *
+			 * MEASURED on F_diiid_conventional as a filament machine, which is
+			 * how it was found: the axis is LOCATED correctly at every
+			 * evaluation -- ( 1.8175, +0.0166 ), against the reference's
+			 * ( 1.7684, -0.0002 ) -- while psi_ax converges to 7.42e-01
+			 * against the located point's own total of 4.38e-01. The gap is
+			 * 3.04e-01 and `coil_psi` at the reference axis is -2.93e-01,
+			 * which is what named it: psi_ax was converging to the REMAINDER
+			 * at a correctly located axis.
+			 *
+			 * Exactly zero with no conductor field, so every existing path is
+			 * bit-identical.
+			 */
+			value += conductorPsi( best.r, best.z );
+
 			constraintElement = best.element;
 			previousAxisR = best.r;
 			previousAxisZ = best.z;
@@ -8350,7 +8404,7 @@ namespace
 		// shape functions limiterValue() contracts against.
 		refreshXPoint( unknown );
 		double constraintB = boundaryFluxIsUnknown
-		                     ? sB - limiterValue( unknown ) : 0.0;
+		                     ? sB - limiterTotal( unknown ) : 0.0;
 		fieldResidual( unknown, s, residual );
 
 		/*
@@ -8704,7 +8758,7 @@ namespace
 			reference = augmentedNorm( coldResidual.Norml2(),
 			                           hasNormalisation ? s - coldPeak : 0.0,
 			                           boundaryFluxIsUnknown
-			                             ? sB - limiterValue( coldState ) : 0.0,
+			                             ? sB - limiterTotal( coldState ) : 0.0,
 			                           currentIsUnknown
 			                             ? assemblePlasmaCurrent( coldState )
 			                               - targetMuZeroCurrent : 0.0,
@@ -10096,7 +10150,7 @@ namespace
 					// into a rejected damping, as it does for a psi_ax through
 					// zero.
 					refreshXPoint( unknown );
-					constraintB = boundaryFluxIsUnknown ? sB - limiterValue( unknown ) : 0.0;
+					constraintB = boundaryFluxIsUnknown ? sB - limiterTotal( unknown ) : 0.0;
 					if ( currentIsUnknown )
 						constraintL = assemblePlasmaCurrent( unknown ) - targetMuZeroCurrent;
 					fieldResidual( unknown, s, residual );
@@ -10278,7 +10332,7 @@ namespace
 				constraint = hasNormalisation ? s - peak : 0.0;
 				refreshLimiterContact( unknown );
 				refreshXPoint( unknown );
-				constraintB = boundaryFluxIsUnknown ? sB - limiterValue( unknown ) : 0.0;
+				constraintB = boundaryFluxIsUnknown ? sB - limiterTotal( unknown ) : 0.0;
 					if ( currentIsUnknown )
 						constraintL = assemblePlasmaCurrent( unknown ) - targetMuZeroCurrent;
 				fieldResidual( unknown, s, residual );

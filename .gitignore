@@ -144,6 +144,13 @@ gmon.out
 __pycache__/
 .venv/
 
+# THE BENCHMARK VENVS, AND THEY ARE A GIT ACCIDENT WAITING TO HAPPEN.
+# tools/freegs4e-benchmark/venv has always been untracked and has always relied
+# on nobody running `git add -A`; tools/desc-benchmark/venv is **1 GB** of JAX
+# and makes that reliance expensive. Each is reproducible from its directory's
+# README and neither belongs in history.
+tools/*/venv/
+
 # The `docs` target's virtualenv, holding Sphinx and its theme. It is a
 # separate environment because docs/requirements.txt pins Sphinx below 8 for
 # the theme, and nothing else should be held to a docs constraint.

@@ -1143,39 +1143,59 @@ requirement, and an adaptive quadrature order — measured at **15×** on the
 kernel with no accuracy a solve can see, [M-149](MEASUREMENTS.md#m-149) — is
 recorded there and **not taken**.
 
-### 13.4 §0b's central claim, on the cell no acceptance covered
+### 13.4 §0b's central claim, and §0a's 2 x 2 completed
 
-**THE SPLIT + THE EXTERIOR COUPLING + A PLASMA NOW HAS AN ACCEPTANCE AND PASSES
+**THE SPLIT + THE EXTERIOR COUPLING + A PLASMA HAS AN ACCEPTANCE AND PASSES
 IT** → **[M-151](MEASUREMENTS.md#m-151)**.
 `theSplitAndTheMeshedRouteAgreeUnderAnExteriorCoupling` is §10's vacuum fixture
 with a plasma put in it, and the two routes converge to each other at **3.78
-across the sequence** — the meshed conductors as a domain source against the
-same conductors subtracted, compared at every quadrature point off them.
+across the sequence**.
 
-**THE MACHINE-SCALE DISAGREEMENT IS BRANCH SELECTION AND THE CONTROL IS WHAT
-SAYS SO.** On `examples/diverted-tokamak-generated` the two arms converge to
-different equilibria from the same guess on the same mesh — and the **meshed
-arm restarted from its own answer** goes to a third. A restart resets `psi_bnd`
-while handing Newton a converged field, and `FREE-BOUNDARY-PLAN.md` §12 /
-[M-132](MEASUREMENTS.md#m-132) already record that the initial `psi_bnd` selects
-among discrete equilibria refinement does not merge. **A control that fails the
-same way as the treatment is not evidence about the treatment.**
+**AND THE CAMPAIGN'S REASON FOR EXISTING IS NOW MEASURED ON A MACHINE** →
+**[M-154](MEASUREMENTS.md#m-154)**. `examples/machine-f-diiid.toml` under
+`Model = "filament"`, on the coil-free mesh the driver now generates,
+reproduces `freegs4e`'s `F_diiid_conventional` — whose 18 conductors that code
+carries as point filaments at exactly the positions MEQ puts its own — to
+**2.8e-05 in `psi_axis`**, 0.3 mm in the magnetic axis and 0.64 mm in the
+X-point, in two Newton steps on 1510 elements against the meshed route's 4848.
+Field-wide it reads **2.031e-03 against the meshed route's 4.593e-03**, which is
+**below [M-111](MEASUREMENTS.md#m-111)'s 5.785e-03 floor** — the one that entry
+says no refinement buys down, because it is the conductor model. §0's CS-0
+predicted exactly that and this measures it.
 
-**AND THE FIRST VERSION OF THE NEW CASE MEASURED THE WRONG ARM**, which is the
-methodological half and is worth more than the result. Comparing over *every*
-quadrature point gave 4.2e-01 relative with the worst point one centimetre
-outside a coil, where the SUBTRACTED value is the accurate one — it is an exact
-quadrature of that rectangle and the meshed arm is resolving a top hat cut by
-element interiors. §7.2's sibling already excluded that band with the reason
-written out, and it had to be rediscovered by printing WHERE rather than only
-HOW MUCH.
+**THE MACHINE-SCALE DISAGREEMENT ON `diverted-tokamak-generated` WAS BRANCH
+SELECTION AND THE CONTROL SAID SO** — the MESHED arm restarted from its own
+answer goes to a third equilibrium, which is M-132's finding met again. A
+control that fails the same way as the treatment is not evidence about the
+treatment.
 
-**WHAT IS OPEN IS NARROWER AND IS ABOUT CONVERGENCE RATHER THAN CORRECTNESS.**
-`examples/limited-tokamak` under `"subtracted"` does not converge and
-`examples/mastu-nke` under `"filament"` stalls at 7.0e-04, where the meshed arms
-take 12 and 2 Newton steps. The split changes the residual and the Jacobian, so
-it changes the path; on path-sensitive problems that is enough. §13.5 has the
-second and sufficient reason for the MAST-U case.
+**AND THE FIRST VERSION OF THE NEW FIXTURE MEASURED THE WRONG ARM**, which is
+the methodological half. Comparing over *every* quadrature point gave 4.2e-01
+relative with the worst point one centimetre outside a coil, where the
+SUBTRACTED value is the accurate one — it is an exact quadrature of that
+rectangle and the meshed arm is resolving a top hat cut by element interiors.
+§7.2's sibling already excluded that band with the reason written out, and it
+had to be rediscovered by printing WHERE rather than only HOW MUCH.
+
+### 13.4a Three more borders read the remainder, and the order of the fixes
+
+M-154a has the table. The transferable rule is the middle one:
+
+**A QUANTITY APPLIED BOTH TO A STATE AND TO A DIRECTION CANNOT CARRY A
+CONSTANT.** `limiterValue()` builds the `psi_bnd` border, and `rowDot()` applies
+it to the BACKSOLVED DIRECTIONS as well as to the iterate. Adding `psi_c` to it
+— which is what the residual needs — puts a constant into a directional
+derivative, so the row's residual and the row's Jacobian describe different
+functions and Newton drives every other border while that one stands still.
+Nothing in the types says so. It is now `limiterValue()`, the functional, and
+`limiterTotal()`, the physical value; `locateAxisPoint()`'s `value` against its
+`constraintShape` row is the same split, which that function had already made
+correctly by accident.
+
+**AND TWO OF THE THREE INTERMEDIATE STATES LOOK LIKE PROGRESS.** Fixing the
+`psi_bnd` residual alone makes the run converge to a WRONG equilibrium; fixing
+it and breaking the Jacobian makes it converge nowhere; all three together give
+M-154's table.
 
 ### 13.5 What the pathway needs next, measured rather than guessed
 

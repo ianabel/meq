@@ -6475,3 +6475,91 @@ left to be discovered: with `psi_bnd` physical the DIII-D filament run's
 residual drifts from 2.5e-01 to 4.8e-01 over 300 steps. What the fix removes is
 a wrong answer; what is left is M-151's open item, now with the source ruled out
 by [M-152](#m-152).
+
+
+### M-154
+
+**MEQ RUNS THE SAME FILAMENT MACHINE `freegs4e` RUNS, AND MATCHING THE
+CONDUCTOR MODEL BREAKS BELOW [M-111](#m-111)'s FLOOR.**
+
+`examples/machine-f-diiid.toml` with `[conductors] Model = "filament"`, on the
+coil-free mesh the driver now generates, against `F_diiid_conventional` — the
+reference whose 18 conductors `freegs4e` carries as point filaments at exactly
+the positions MEQ puts its own. This is §0a's missing diagonal: MEQ has been
+comparable to that reference only as RECTANGLES, which is a different machine.
+
+| | MEQ, filaments | `freegs4e` | |
+|---|---|---|---|
+| `psi_ax` | 3.758649e-01 | 3.758545e-01 | **2.8e-05** |
+| `psi_bnd` | 7.076249e-02 | 7.081840e-02 | 7.9e-04 |
+| magnetic axis | ( 1.7687, −0.0001 ) | ( 1.768397, −0.000155 ) | **0.3 mm** |
+| X-point | ( 1.200426, −0.999597 ) | ( 1.199930, −1.000001 ) | **0.64 mm** |
+| `I_p` | 1.000000e+06 A | 1.000000e+06 A | exact, profile scale 0.99907 |
+
+Two Newton iterations, 42.8 s, **1510 elements**.
+
+**AND IT DOES NOT NEED THE ANSWER IN THE STARTING POSITION**, which is what
+makes it shippable. The row above is seeded from `mkexactguess.py --remainder`,
+a Green's-function sum over the reference's own converged `Jtor` — the right
+tool for *does MEQ land here*, and the wrong one for a race, since the thing
+being raced to is already in the starting position. From
+`mkcoldguess.py --remainder` instead — the DESIGN footprint carrying the target
+current, and no reference field anywhere in it — the same case reaches
+`psi_ax = 3.770208e-01` (3.1e-03 from the reference), `psi_bnd = 7.068113e-02`
+(1.9e-03), and its axis at ( 1.7705, −0.0001 ), in 61 Newton steps through the
+Picard-then-Newton fallback. Slower and a hundred times less accurate, which is
+the trade a cold start is supposed to make.
+
+**THE GUESS HAS TO BE BUILT AS `psi_p` AND NOT CONVERTED FROM A TOTAL**, and
+for a filament machine that is structural rather than a convenience. `psi_c`
+diverges logarithmically at each conductor while any stored `psi` — a grid, a
+finite-element function — cannot, so `psi − psi_c` at a node near a filament is
+a large negative number where the true `psi_p` is smooth. Measured through
+`[initialguess] Content = "total"` on this case: the largest such shift is
+**6.790e-01 Wb/rad** against a reference `psi_axis` of 3.759e-01. Both guess
+builders already sum the conductors and the plasma separately, so `--remainder`
+is the coil half never summed and there is nothing to cancel.
+
+**AND THE FIELD-WIDE NUMBER IS THE POINT**, because M-111 records DIII-D's
+relative error FLAT at 5.785e-03 across a 16× range in dofs and concludes *"that
+is the conductor model … it is not a discretisation error and no rung buys it
+down"*. [M-139](#m-139) then took the benchmark's own side of that to 7.7e-04 by
+rebuilding the reference with `ShapedCoil`. This is the other side:
+
+| MEQ arm | elements | relative L2 against the filament reference |
+|---|---|---|
+| meshed rectangles | 4848 | **4.593e-03** |
+| subtracted filaments | **1510** | **2.031e-03** |
+
+**2.26× lower error on 3.2× fewer elements.** CS-0 predicted exactly this —
+*"taking the coils out of the mesh and computing their field analytically lets
+MEQ adopt freegs4e's own filament positions, and the floor becomes a modelling
+CHOICE"* — and it is now measured rather than inferred.
+
+### M-154a — the three defects between here and there, and how each was named
+
+Posing this run found three more consumers reading the remainder, all of them
+BORDERS, and none reachable by any fixture in the tree. What is worth keeping is
+that **each was identified by an AGREEMENT rather than by a disagreement** — the
+reference saves `psi`, `coil_psi` and `plasma_psi` separately, so the
+decomposition MEQ's split is a decomposition INTO was available to compare
+against term by term.
+
+| | how it was named |
+|---|---|
+| **`psi_bnd` was the remainder at the X-point** | MEQ reported 1.707074e-01 against a physical 7.082e-02 — an error of 2.4×, and 2.4× names nothing. `freegs4e`'s `plasma_psi` at MEQ's OWN X-point reads **1.706956e-01**: agreement to 7.0e-05 |
+| **the fix then broke the psi_bnd row's JACOBIAN** | `rowDot()` applies `limiterValue()` to the BACKSOLVED DIRECTIONS, where `psi_c` is a constant added to a directional derivative. `--profile`'s border table is what showed it: over twelve steps `g*ext` reaches 1.3e-17, `g*xpt` 8.6e-08 and `g*axis` 1.3e-03 while **`g*bnd` GROWS from −2.4e-02 to +5.7e-02 and sticks**, with Armijo satisfied throughout. A border that will not move while its neighbours converge is a row whose two halves disagree. Split into `limiterValue()`, the functional, and `limiterTotal()`, the physical value |
+| **`psi_ax` was the remainder at a correctly located axis** | `locateAxisPoint()` contracts the shape functions against the STATE and the nodal-maximum fallback beside it adds `conductorPsiAtDof()` while that branch did not. The axis was located correctly at every evaluation — ( 1.8175, +0.0166 ) — while `psi_ax` converged to 7.42e-01 against the located point's own total of 4.38e-01. The gap is **3.04e-01** and `coil_psi` at the reference axis is **−2.93e-01**, which is what named it |
+
+**THE SECOND ROW IS THE ONE TO REMEMBER**, and it is the trap the first row's fix
+walked into within the hour: a quantity that is applied both to a STATE and to a
+DIRECTION cannot carry a constant. The residual wants the physical value; the
+Jacobian wants the functional; one function cannot be both, and nothing in the
+types says so. `limiterValue()`/`limiterTotal()` is the shape of the answer, and
+`locateAxisPoint()`'s `value` against its `constraintShape` row is the same split
+already made correctly by accident.
+
+**AND THE ORDER MATTERS FOR ANYONE REPEATING THIS.** Fixing the residual alone
+(row 1) makes the run converge to a WRONG equilibrium; fixing the residual and
+breaking the Jacobian (row 2) makes it converge nowhere; all three together give
+the table above. Two of the three intermediate states look like progress.

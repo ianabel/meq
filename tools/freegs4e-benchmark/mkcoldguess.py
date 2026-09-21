@@ -218,10 +218,15 @@ def plasma_filaments(d, npz_path, cells=61):
 
 
 def main():
-	npz = sys.argv[1]
-	mesh_path, gf_path = sys.argv[2], sys.argv[3]
-	rho = float(sys.argv[4]) if len(sys.argv) > 4 else 2.60
-	n = int(sys.argv[5]) if len(sys.argv) > 5 else 32
+	# --remainder BEFORE the positional reads, so every existing caller is
+	# untouched.  See where the conductors are summed for what it is for.
+	argv = [a for a in sys.argv[1:] if a != "--remainder"]
+	remainder = len(argv) != len(sys.argv) - 1
+
+	npz = argv[0]
+	mesh_path, gf_path = argv[1], argv[2]
+	rho = float(argv[3]) if len(argv) > 3 else 2.60
+	n = int(argv[4]) if len(argv) > 4 else 32
 
 	d = np.load(npz)
 
@@ -246,11 +251,37 @@ def main():
 		for zmid in 0.5*(edges[:-1] + edges[1:]):
 			filaments.append((c["R"], float(zmid), c["current"]/nz,
 			                  max(c["half_width"], c["half_height"]/nz)))
+	coil_only = np.zeros_like(psi)
 	for rc, zc, current, soft in filaments:
-		psi[inner] += current*greens(rc, zc, RR[inner], ZZ[inner], soft=soft)
-	coil_only = psi.copy()
-	print("%d conductors as %d filaments, total %+.6e A"
-	      % (len(flat), len(filaments), sum(c["current"] for c in flat)))
+		coil_only[inner] += current*greens(rc, zc, RR[inner], ZZ[inner],
+		                                   soft=soft)
+	"""--remainder: THE BLOB ALONE, WHICH IS WHAT A SUBTRACTED RUN SOLVES FOR.
+
+	Under `[conductors] Model` MEQ's unknown is `psi_p = psi - psi_c`, so a
+	guess has to be a guess at psi_p -- and this script is already built out of
+	the two halves that decomposition needs, the conductors and the design
+	blob.  Leaving the first out is the whole of it.
+
+	CONVERTING A TOTAL IS THE OBVIOUS ROUTE AND IT IS WRONG FOR A FILAMENT
+	MACHINE, which is why this exists rather than
+	`[initialguess] Content = "total"` being used on the ordinary guess.  psi_c
+	diverges logarithmically at each conductor while any stored psi cannot, so
+	`psi - psi_c` at a node near a filament is a large negative number where
+	the true psi_p is smooth.  Measured on F_diiid_conventional: the largest
+	such shift is 6.790e-01 Wb/rad against a reference psi_axis of 3.759e-01.
+
+	There is nothing to cancel if the coil half is never summed.
+
+	IT IS STILL COLD, which is the property this script exists for: the blob is
+	the DESIGN footprint carrying the target current, not the reference's
+	converged Jtor.  mkexactguess.py --remainder is the other one, and it puts
+	the answer in the starting position.
+	"""
+	if not remainder:
+		psi += coil_only
+	print("%d conductors as %d filaments, total %+.6e A%s"
+	      % (len(flat), len(filaments), sum(c["current"] for c in flat),
+	         ", NOT SUMMED -- this guess is psi_p" if remainder else ""))
 
 	# ---- the blob ------------------------------------------------------
 	src_R, src_Z, src_I, soft, ellipse = plasma_filaments(d, npz)
@@ -280,6 +311,10 @@ def main():
 	      % (lo, hi, n + 1, n + 1, rho, -rho, rho))
 	print("the coils alone would give [%.6e, %.6e]; the blob is what puts an "
 	      "O-point in the plasma" % (coil_only.min(), coil_only.max()))
+	if remainder:
+		print("they are NOT in this guess: it is psi_p, for "
+		      "[conductors] Model, and [initialguess] Content must stay "
+		      "\"remainder\" -- which is the default")
 
 	# THE ONE NUMBER A CALLER NEEDS BACK, and it is deliberately the guess's
 	# own and not the reference's: [source] PsiAxis is the STARTING VALUE of an
