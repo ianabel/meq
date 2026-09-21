@@ -6017,7 +6017,18 @@ and over the whole `129²` output grid, dropping the band, through
 | `fixed-e-diamagnetic` | 11,328 | 437 | 1.121e-04 | 2.879e-04 |
 
 **TWO INDEPENDENT CODES OVER ~12,000 NODES ON SIX MACHINES, WORST CASE
-1.1e-04.** This is the same comparison [M-60](#m-60) records at **1.5e-04 to
+1.1e-04.**
+
+**AND THAT COLUMN IS NOT MEQ'S ERROR — IT IS THE REFERENCE'S, AND A THIRD CODE
+IS WHAT ESTABLISHED THAT.** CHEASE sits 1.13e-04 from the same reference and
+stays there while its own element count changes sixteen-fold, so ~1.1e-04 is
+what the `257²` free-boundary solve is worth on `fixed-h-circular`. The
+`fixed-h-circular` row above reads **better** than that, 9.712e-05, and is
+partly cancellation: against CHEASE the same MEQ run reads 1.942e-04.
+→ **[M-158](#m-158)**. The table stands as the measurement it is — MEQ against
+that reference — and is not a bound on MEQ's own discretisation.
+
+This is the same comparison [M-60](#m-60) records at **1.5e-04 to
 6.8e-03** — `CLAUDE_FB.md`'s fixed-boundary rehearsal — with three things
 changed and nothing else: the surface is `psi_n = 0.95` rather than 0.90, the
 reference is `257²` rather than `129²`, and the fit takes twenty harmonics
@@ -6794,3 +6805,150 @@ IS `k3r0`, so it fails there and never reaches a refinement; its numbers are
 **A defect being fixed and the symptom surviving is the ordinary case when a
 rung fails twice**, and the thing that would have hidden it is exactly what the
 first change here fixed: a failure row that prints one line and names one cause.
+
+### M-158
+
+**A THIRD CODE: CHEASE, AND IT SAYS [M-147](#m-147)'s COLUMN IS THE
+REFERENCE'S ERROR RATHER THAN MEQ'S.**
+
+CHEASE is EPFL/SPC's fixed-boundary Grad–Shafranov code — Fortran, bicubic
+Hermite finite elements on a flux-aligned mesh, Luetjens/Bondeson/Sauter CPC 97
+(1996) 219. It solves the **same equation from the same two free functions**,
+which makes it a closer comparison than either `freegs4e` (different algorithm)
+or DESC (different unknown). `tools/chease-benchmark/` is the harness and its
+`README.md` carries the conversion in full.
+
+**THE CONVERSION READS NEITHER MEQ'S ANSWER NOR THE REFERENCE**, which is the
+structural advantage over `tools/desc-benchmark`, whose flux-label map needs
+somebody's converged equilibrium. CHEASE takes `dp/dpsi` and `T dT/dpsi` against
+`s = sqrt( psi_N )`, which is what `examples/fixed-*-pprime.dat` already carry;
+the one scalar MEQ's formulation hides — `psi_ax` — comes out of a fixed point
+that is **exact in one step**, because scaling both profiles by `lambda` scales
+`psi` by `lambda` and leaves the label invariant, so CHEASE returns
+`A_C( A0 ) = K/A0` and `A = sqrt( A0 A_C )` closes it for any trial. Measured
+from `A0 = 1.0`, sixteen times away: residual 2.466e+02 → **3.940e-08** →
+2.870e-11 in three sweeps. **That the loop converges at all is itself a check on
+the conversion** — the reciprocal law holds only if the profiles were scaled by
+`1/A0` and by nothing else.
+
+**THE ACCEPTANCE IS THAT THE DIFFERENCE FALLS UNDER REFINEMENT IN BOTH
+DIRECTIONS**, because a conversion error is a fixed offset and cannot do that.
+`fixed-h-circular`, MEQ's 257² grid, CHEASE `NPSI = 200`, `NRBOX = 999`:
+
+| | `NS=NT=20` | `NS=NT=40` | `NS=NT=80` |
+|---|---|---|---|
+| MEQ `k=1 r=0` | 8.925e-04 | 8.912e-04 | 8.911e-04 |
+| MEQ `k=2 r=0` | 1.933e-04 | 1.945e-04 | 1.942e-04 |
+| MEQ `k=3 r=0` | 1.446e-05 | 1.123e-05 | **2.696e-06** |
+| MEQ `k=1 r=1` | 2.875e-04 | 2.886e-04 | 2.885e-04 |
+| MEQ `k=2 r=1` | 1.999e-05 | 1.722e-05 | 1.340e-05 |
+| MEQ `k=3 r=1` | 1.390e-05 | 1.085e-05 | **1.300e-06** |
+
+**686× corner to corner, and the SHAPE is the result.** The `k = 1` and `k = 2`
+rows are **flat in `NS`** — a sixteen-fold change in CHEASE's element count
+moves them under 1%, because MEQ's own error dominates and refining the other
+code cannot be seen. The `k = 3` rows **fall**, by 5.4× and 10.7×: MEQ has
+passed CHEASE and CHEASE's error is now the visible one. Every column falls with
+MEQ's ladder, 8.911e-04 → 1.942e-04 → 2.696e-06 at `NS = 80`.
+
+**`psi_ax` IS SHARPER STILL, BEING ONE NUMBER WITH NO INTERPOLATION NEAR IT.**
+CHEASE's own settles to 2.7e-08 between `NS = 40` and 80. Against it, MEQ:
+
+| rung | vs CHEASE `NS=80` | vs the `freegs4e` reference |
+|---|---|---|
+| `k=1 r=0` | 7.700e-04 | 7.855e-04 |
+| `k=2 r=0` | 1.299e-04 | 1.144e-04 |
+| `k=2 r=1` | 7.353e-06 | 2.284e-05 |
+| `k=3 r=0` | 1.198e-06 | 1.668e-05 |
+| `k=3 r=1` | **2.785e-08** | 1.551e-05 |
+
+**MONOTONE OVER FOUR AND A HALF ORDERS, ENDING AT 2.8e-08 — eight significant
+figures between two codes sharing nothing but the equation and the input
+files.** And **the right-hand column stops falling at 1.55e-05 while the left
+keeps going**: MEQ is converging and the yardstick is not.
+
+**SO M-147's NUMBER IS FLOORED BY THE REFERENCE, AND THIS IS THE MEASUREMENT
+THAT SAYS SO RATHER THAN A BOUND.** CHEASE against `freegs4e` over CHEASE's own
+sixteen-fold sweep:
+
+| | `NS=20` | `NS=30` | `NS=40` | `NS=80` |
+|---|---|---|---|---|
+| CHEASE vs `freegs4e` | 1.1237e-04 | **1.1350e-04** | 1.1319e-04 | 1.1267e-04 |
+
+**Flat to 1% while the code producing it is refined sixteen-fold**, and flat
+while CHEASE-against-MEQ over the same sweep falls tenfold. A number that does
+not move when you refine the code producing it belongs to the thing it is
+measured against. The `NS = 30` cell is this session's own re-run at
+`NRBOX = 257`, which is why it sits slightly high.
+
+**AND THE CANCELLATION IS CAUGHT IN THE WILD**, which is the part worth keeping.
+MEQ at `k=2 r=0` reads **9.7266e-05** against the reference — *better* than
+CHEASE's 1.1267e-04 — and **1.942e-04** against CHEASE. Both are true; the first
+is partly MEQ's error and the reference's lying on the same side.
+`compare_desc.py`'s header warns in the abstract that two codes agreeing to `X`
+does not make either accurate to `X`, and here it is with numbers. The MEQ arm
+reproduces M-147's published 9.712e-05 as 9.7266e-05, so this is that same
+measurement and not a different one.
+
+**THE FLOOR IS NOT REACHED AND THE THING THAT STOPS IT IS THE INSTRUMENT.** The
+largest item at the bottom of the matrix is neither code: it is the bilinear
+interpolation of CHEASE's EQDSK box onto MEQ's grid. Holding both codes fixed
+and changing only the box:
+
+| `NRBOX` | 129 | 257 | 513 | 999 |
+|---|---|---|---|---|
+| MEQ vs CHEASE | 7.6057e-05 | 1.8991e-05 | 4.7723e-06 | **1.2999e-06** |
+| ratio | — | 4.005 | 3.980 | 3.671 |
+| CHEASE `psi_ax` | 6.3545319800e-02 | 6.3545319800e-02 | 6.3545319800e-02 | 6.3545319800e-02 |
+
+**Exactly second order, with `psi_ax` identical to eleven digits** — the solve
+did not move and the whole column is how the answer was *printed*. The `h²` law
+puts the box error at 999 at about 1.26e-06 against a measured 1.2999e-06, so
+the true disagreement is **below 1.3e-06 and this comparison cannot resolve
+it** — two orders below the `freegs4e` comparison's floor and 90× below the DESC
+one's. The matrix was first taken at `NRBOX = 513`, read 4.77e-06 in that cell,
+and was **re-taken rather than quoted** once the control said the number
+belonged to the grid. The other control is clean: `NPSI` doubled from 200 to 400
+moves that cell from 4.7723e-06 to 4.7723e-06, the same five figures.
+
+**ALL SIX CASES, NOTHING TUNED**, `NS = NT = 40`, trial `A0 = 1.0` everywhere —
+16× to 300× from the answer — and every one converged in three sweeps:
+
+| case | CHEASE `psi_ax` | the reference's | relative | vs `freegs4e` |
+|---|---|---|---|---|
+| `fixed-f-diiid` | 2.8978148570e-01 | 2.8977947450e-01 | **6.94e-06** | 5.6104e-05 |
+| `fixed-d-tcv` | 1.7556945580e-02 | 1.7556774814e-02 | 9.73e-06 | 7.7360e-05 |
+| `fixed-e-diamagnetic` | 4.3545915020e-02 | 4.3545313386e-02 | 1.38e-05 | 1.1503e-04 |
+| `fixed-a-testtokamak` | 4.7789133020e-02 | 4.7788462591e-02 | 1.40e-05 | 8.9321e-05 |
+| `fixed-h-circular` | 6.3545318050e-02 | 6.3544336033e-02 | 1.55e-05 | 1.1319e-04 |
+| `fixed-g-mastu` | 8.0433203720e-02 | 8.0431769680e-02 | 1.78e-05 | 1.6513e-04 |
+
+**THAT COLUMN IS PROBABLY MEASURING THE REFERENCE TOO.** On the one case where
+CHEASE's own convergence was checked, its `psi_ax` is settled to 2.7e-08 and the
+whole 1.55e-05 belongs to the reference. The other five sit in the same band
+without that check having been run, so the honest reading is that all six are
+**consistent with the reference carrying ~1e-05 in `psi_ax`** — not that CHEASE
+is accurate to 1e-05.
+
+**`fixed-d-tcv` IS THE ROW TO LOOK AT TWICE.** It is the most elongated at
+`kappa = 1.75` and it is the case `tools/desc-benchmark` has an open problem
+about — DESC reads 2.17e-03 there at `M = 12` and does not converge monotonically
+in `M`. CHEASE reads 9.73e-06 with no special handling and MEQ has no trouble
+either. **Elongation is hard for a truncated spectral boundary and is not hard
+for either code that takes the curve as points.**
+
+**A CHEASE DEFECT FOUND ON THE WAY, AND IT EXITS 0.** `NRBOX` or `NZBOX` at 1000
+or more writes a G-EQDSK no reader can parse: the header format is
+`(A28,I2.2,A10,A8,3I4)` (`src-f90/iodisk.f90:2092`), so a four-digit box fills
+its `I4` field and the three integers run together —
+`... UNITS20260920   310251025`, on which `freegs4e._geqdsk.read` dies at
+`int( 'UNITS20260920' )`. `convert_chease.namelist_text` refuses above 999 rather
+than letting it be met downstream. **Not reported upstream**: `CLAUDE.md`'s rule
+routes MFEM requests to `../mfem-hdg-dev/doc/` and there is no equivalent channel
+for CHEASE, so it is recorded here for whoever wants to send it.
+
+**NO TIMING OF ANY KIND IS QUOTED.** Everything above was measured under load at
+5 to 20 against 8 physical cores, and `NRBOX = 999` makes CHEASE write a 999²
+ASCII box twice per sweep, which is a large and unmeasured share of any wall
+clock. The error columns do not depend on load; a race in `race_desc.py`'s shape
+has not been written, let alone run.

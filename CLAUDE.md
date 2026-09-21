@@ -2430,6 +2430,15 @@ tools/       plotting and visualisation. plot_equilibrium.py reads BOTH
              known until the equilibrium is, so race_desc.py poses each
              resolution self-consistently UNTIMED and clocks only the one
              forward cold-start solve that follows. M-157.
+             chease-benchmark/ is the THIRD, against CHEASE -- which solves
+             the same equation from the same two free functions, so its
+             conversion needs nothing from anybody's converged answer and
+             the one scalar MEQ hides, psi_ax, comes out of a fixed point
+             that is exact in one step. converge.py is the acceptance and
+             it is a MATRIX rather than a pair: a conversion error is a
+             fixed offset, so only a difference that FALLS as each code is
+             refined separately rules one out. M-158, and it is what says
+             M-147's column is the reference's error rather than MEQ's.
              mesh/halfdisc.py is FB-6's geometry: a semicircle reaching the
              axis with rectangular coils MESHED TO, written against gmsh's
              python API. See `CLAUDE_FB.md`,

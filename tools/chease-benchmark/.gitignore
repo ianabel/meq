@@ -1,9 +1,6 @@
-# WORK IN PROGRESS, AND NOT MINE TO COMMIT.
-#
-# An agent is building this directory now. CLAUDE.md's rule is that a file a
-# subagent owns is never committed on the strength of its compiling -- the
-# check wanted is a diff somebody has read, and nobody has read these. They
-# are ignored until that happens, because a `git add tools/` for a NEIGHBOURING
-# directory swept one of them into cf1eee0 and it had to be taken back out.
-*
-!.gitignore
+# Outputs, not sources.  `runs/` is cheaserun.py's default --out and holds one
+# .npz of psi( R, z ) per ( case, resolution ) at a couple of megabytes each --
+# a 999^2 box is larger still.  The root .gitignore's `/runs/` is anchored on
+# purpose and does not reach here, so this is the same rule tools/desc-benchmark
+# states for itself.
+runs/
