@@ -100,10 +100,15 @@ def greens(Rc, Zc, R, Z, soft=0.0):
 
 
 def main():
-	npz = sys.argv[1]
-	mesh_path, gf_path = sys.argv[2], sys.argv[3]
-	rho = float(sys.argv[4]) if len(sys.argv) > 4 else 2.60
-	n = int(sys.argv[5]) if len(sys.argv) > 5 else 32
+	# --remainder BEFORE the positional reads, so every existing caller is
+	# untouched.  See the block comment on `remainder` below for what it is for.
+	argv = [a for a in sys.argv[1:] if a != "--remainder"]
+	remainder = len(argv) != len(sys.argv) - 1
+
+	npz = argv[0]
+	mesh_path, gf_path = argv[1], argv[2]
+	rho = float(argv[3]) if len(argv) > 3 else 2.60
+	n = int(argv[4]) if len(argv) > 4 else 32
 
 	d = np.load(npz)
 	R1, Z1 = d["R"], d["Z"]
@@ -169,13 +174,40 @@ def main():
 			filaments.append((c["R"], float(z), c["current"]/nz,
 			                  max(c["half_width"], c["half_height"]/nz)))
 
-	for rc, zc, I, soft in filaments:
-		psi[inner] += I * greens(rc, zc, RR[inner], ZZ[inner], soft=soft)
+	'''--remainder: THE PLASMA'S OWN FLUX, WHICH IS WHAT A SUBTRACTED MEQ RUN
+	SOLVES FOR.
+
+	Under `[conductors] Model = "subtracted"` or `"filament"` MEQ's unknown is
+	psi_p = psi - psi_c, so a guess has to be a guess at psi_p.  Converting a
+	total is the obvious route and it is the WRONG one for a FILAMENT machine:
+	psi_c diverges logarithmically at each conductor while any stored psi is a
+	grid or a finite-element function that cannot, so psi - psi_c at a node
+	near a filament is a large negative number where the true psi_p is smooth
+	and modest.  Measured on F_diiid_conventional through
+	`[initialguess] Content = "total"`: the largest shift is 6.790e-01 Wb/rad
+	against a reference psi_axis of 3.759e-01 -- the guess is nearly twice the
+	axis flux wrong, at one node, and the bordered Newton walks off.
+
+	Here there is nothing to cancel.  This script builds psi by summing
+	Green's functions over the SOURCE, and the source comes in two parts
+	already: the conductors, and Jtor on the core cells.  psi_p is the second
+	sum alone -- smooth everywhere, including AT a conductor, because no
+	conductor is in it.
+
+	The conductors are still read and still printed, because the run they are
+	a guess for still has them: what changes is only whether their field is
+	added.
+	'''
+	if not remainder:
+		for rc, zc, I, soft in filaments:
+			psi[inner] += I * greens(rc, zc, RR[inner], ZZ[inner], soft=soft)
 	for c in flat:
 		print("  coil %-10s %+.6e A at (%.4f, %+.4f) %.4f x %.4f  %s"
 		      % (c["label"], c["current"], c["R"], c["Z"], c["half_width"],
 		         c["half_height"], c["kind"]))
-	print("  %d conductors as %d filaments" % (len(flat), len(filaments)))
+	print("  %d conductors as %d filaments%s"
+	      % (len(flat), len(filaments),
+	         ", NOT SUMMED -- this is psi_p" if remainder else ""))
 
 	# The geometric mean distance of a source CELL from itself.
 	cell = 0.44705 * np.sqrt(dA)
@@ -218,8 +250,30 @@ def main():
 	      % (lo, hi, n + 1, n + 1, rho, -rho, rho))
 	print("reference psi_axis %.6e  psi_bndry %.6e"
 	      % (d["psi_axis"], d["psi_bndry"]))
-	print("reconstruction peak against the reference axis: %.2e relative"
-	      % (abs(hi - d["psi_axis"]) / abs(d["psi_axis"])))
+
+	if remainder:
+		# AGAINST THE REFERENCE'S OWN DECOMPOSITION, which it saves: `psi` is
+		# the total and `plasma_psi` is the plasma's half, so this sum has
+		# something exact to be checked against rather than only a peak to
+		# compare.  A reconstruction of psi_p cannot be checked against
+		# psi_axis at all -- the axis flux is a property of the total.
+		if "plasma_psi" in d.files:
+			ref = np.asarray(d["plasma_psi"], float)
+			scale = max(abs(ref.max()), abs(ref.min()))
+			print("reference plasma_psi in [%.6e, %.6e]"
+			      % (ref.min(), ref.max()))
+			print("this reconstruction of psi_p in [%.6e, %.6e]" % (lo, hi))
+			print("peak against the reference's own plasma_psi: %.2e relative"
+			      % (abs(max(abs(hi), abs(lo)) - scale)/scale))
+		else:
+			print("this reconstruction of psi_p in [%.6e, %.6e]" % (lo, hi))
+			print("%s carries no plasma_psi, so there is nothing exact to "
+			      "check the sum against" % npz)
+		print("USE IT WITH [initialguess] Content = \"remainder\", which is "
+		      "the default -- this file IS psi_p and must not be converted")
+	else:
+		print("reconstruction peak against the reference axis: %.2e relative"
+		      % (abs(hi - d["psi_axis"]) / abs(d["psi_axis"])))
 
 
 if __name__ == "__main__":

@@ -7288,6 +7288,14 @@ namespace
 			limiterContactLocatedValue = limiterElement >= 0;
 		};
 
+		/*
+		 * XP-3's TWO UNKNOWNS, DECLARED HERE RATHER THAN WITH THE REST OF ITS
+		 * STATE BELOW, because limiterValue() is the psi_bnd row and on the
+		 * X-point path the contact IS ( xR, xZ ).
+		 */
+		double xR = xPointIsUnknown ? xPointRValue : 0.0;
+		double xZ = xPointIsUnknown ? xPointZValue : 0.0;
+
 		auto limiterValue = [ & ]( mfem::Vector const &state )
 		{
 			// psi_bnd IS THE PHYSICAL FLUX AT THE CONTACT, on both branches.
@@ -7306,6 +7314,35 @@ namespace
 			if ( limiterContactLocatedValue )
 				total += conductorPsi( limiterContactRValue,
 				                       limiterContactZValue );
+			/*
+			 * AND ON XP-3's PATH THE CONTACT IS THE X-POINT, WHICH THE
+			 * LIMITER SEARCH NEVER LOCATES.
+			 *
+			 * `limiterContactLocatedValue` is set by refreshLimiterContact(),
+			 * and under XP-3 that search does not run -- refreshXPoint() fills
+			 * `limiterShape` and `limiterDofs` itself, from a point that is an
+			 * unknown rather than a prescription. So the branch above is dead
+			 * there and psi_bnd came out as the REMAINDER at the X-point.
+			 *
+			 * **IT IS A NORMALISATION FAULT AND NOT A REPORTING ONE**, which
+			 * is why it is worth the paragraph. psi_bnd is what
+			 * meq::NormalisedSource measures its own Psi against, so a psi_bnd
+			 * short by psi_c( x_X ) puts every profile evaluation on the wrong
+			 * abscissa, the plasma support on the wrong level set, and the
+			 * profile scale wherever it has to go to still deliver I_p.
+			 * MEASURED on F_diiid_conventional as a filament machine: MEQ
+			 * reported psi_bnd = 1.707074e-01 where freegs4e's own
+			 * `plasma_psi` at MEQ's X-point is 1.706956e-01 -- agreeing to
+			 * 7e-05, which is what identified it -- against a physical
+			 * psi_bndry of 7.082e-02. The support came out 193 of 193
+			 * candidate elements, a "plasma" with no boundary, and the profile
+			 * scale 11.1 against the meshed route's 0.9993.
+			 *
+			 * COIL-SUBTRACTION-PLAN.md CS-4's list of consumers now stands at
+			 * twelve, and this is the third border on it.
+			 */
+			else if ( xPointIsUnknown && xR > 0.0 )
+				total += conductorPsi( xR, xZ );
 			return total;
 		};
 		/*
@@ -7326,8 +7363,6 @@ namespace
 		 * fills `limiterElement`, `limiterShape` and `limiterDofs`, and the
 		 * psi_bnd border above is unchanged.
 		 */
-		double xR = xPointIsUnknown ? xPointRValue : 0.0;
-		double xZ = xPointIsUnknown ? xPointZValue : 0.0;
 		int xElement = -1;
 		// q there, and dq/dx there: the constraint and its corner block.
 		double xFlux[ 2 ] = { 0.0, 0.0 };
