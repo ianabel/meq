@@ -462,3 +462,72 @@ BOOST_AUTO_TEST_CASE( a_thin_rectangle_reaches_its_filament_on_the_axis )
 	BOOST_TEST( pairZ == reference + secondZ,
 	            boost::test_tools::tolerance( 1.0e-15 ) );
 }
+
+// PSI_C IS EVEN IN r, AND THAT IS WHAT LETS AN EXTRAPOLATING EVALUATION OFF
+// THE HALF-PLANE BE ANSWERED INSTEAD OF KILLING A SOLVE.
+//
+// Two of MEQ's evaluations of psi_c reach points with r < 0 by design and
+// neither is a geometry error. The exterior datum is assembled at transfer
+// path TARGETS on Gamma, and on a half-disc machine Gamma is a semicircle
+// whose two endpoints lie exactly ON the axis -- so a target near an endpoint
+// lands either side of r = 0 by an amount that is a property of the path map
+// rather than of the mesh's validity. Measured on the DIII-D filament case at
+// k = 3, that point is ( r, z ) = ( -1.0984e-03, 3.4 ), which is Gamma's own
+// upper endpoint and about one per cent of h. The other is
+// meq::CriticalPointFinder, whose element-local Newton is allowed to leave its
+// element by up to 2 in reference coordinates on purpose.
+//
+// psi = r A_phi, and under r -> -r at fixed z the point is the same physical
+// point rotated by pi in phi: phi-hat reverses, A_phi changes sign, and the
+// product does not. So the reflection is the ANALYTIC CONTINUATION and the
+// equality below is exact rather than a tolerance -- which is the assertion
+// that separates it from a clamp to r = 0, a substitution that would also
+// "work" and would be wrong by O( r^2 ).
+//
+// AND THE VECTOR ENTRY POINTS MUST STILL REFUSE, which is the other half and
+// the one a careless widening of this fix would break: d_r psi is ODD where
+// psi is even, so the three of them continue with a sign that differs BETWEEN
+// THE TWO ENTRIES of one vector, and there is no single rule a caller holding
+// one can apply. meq::CriticalPointFinder::totalFlux is the seam that meets
+// this for q and it abandons the evaluation rather than continuing.
+BOOST_AUTO_TEST_CASE( psiIsEvenInRAndTheVectorEntryPointsStillRefuse )
+{
+	meq::ConductorField field = threeFilaments();
+	field.add( meq::Coil( 1.60, -0.30, 0.08, 0.12, -4.4e5 ) );
+	field.add( meq::Coil( 0.90, +0.70, 0.05, 0.05, +2.1e5 ) );
+
+	// The last of these is the measured point from the DIII-D case, to the
+	// digits the throw reported it at.
+	double const points[][ 2 ] = { { 1.70, 0.00 }, { 0.40, -1.90 },
+	                               { 2.60, +0.90 }, { 1.0984e-03, 3.40 } };
+	for ( auto const &p : points )
+	{
+		BOOST_TEST( field.psi( -p[ 0 ], p[ 1 ] ) == field.psi( p[ 0 ], p[ 1 ] ),
+		            boost::test_tools::tolerance( 0.0 ) );
+	}
+
+	// AND IT IS NOT A CLAMP. psi_c ~ c( z ) r^2 near the axis, so reflecting
+	// and clamping differ at second order -- small, and not zero. A point at
+	// r = 1.0984e-03 must give the SAME number as its reflection and a
+	// DIFFERENT one from the axis, or the continuation has been replaced by a
+	// substitution that this test would otherwise pass.
+	double const near = field.psi( -1.0984e-03, 3.40 );
+	BOOST_TEST( field.psi( 0.0, 3.40 ) == 0.0,
+	            boost::test_tools::tolerance( 0.0 ) );
+	BOOST_TEST( near != 0.0 );
+
+	// -0.0 reflects to +0.0 and the axis value is still exactly zero, so the
+	// bit-for-bit boundary condition psi_c_vanishes_on_the_axis_bit_for_bit
+	// asserts survives the reflection.
+	BOOST_TEST( field.psi( -0.0, 3.40 ) == 0.0,
+	            boost::test_tools::tolerance( 0.0 ) );
+
+	double a = 0.0;
+	double b = 0.0;
+	BOOST_CHECK_THROW( field.gradPsi( -1.0984e-03, 3.40, a, b ),
+	                   std::invalid_argument );
+	BOOST_CHECK_THROW( field.flux( -1.0984e-03, 3.40, a, b ),
+	                   std::invalid_argument );
+	BOOST_CHECK_THROW( field.poloidalField( -1.0984e-03, 3.40, a, b ),
+	                   std::invalid_argument );
+}

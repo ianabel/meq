@@ -62,9 +62,20 @@ What makes it worth the machine time is that the matched model breaks below a
 floor this project has measured twice and called irreducible.
 MEASUREMENTS.md M-111 reads DIII-D flat at 5.785e-03 over a 16x range in dofs;
 M-154 reads the filament arm at **2.031e-03 against the meshed route's
-4.593e-03, on 1510 elements against 4848**.  So the expected shape is a race
-where one arm is both faster and more accurate, which is unusual enough to be
-worth pinning with a proper clock.
+4.593e-03, on 1510 elements against 4848**.
+
+**AND THIS DOCSTRING PREDICTED "A RACE WHERE ONE ARM IS BOTH FASTER AND MORE
+ACCURATE", WHICH IS HALF RIGHT AND THE WRONG HALF.**  Run -- M-155 -- MEQ is
+**6.2x to 19.8x SLOWER**: freegs4e takes 4.9 s at 129^2 and 12.9 s at 257^2
+where MEQ's converging rungs take 80 to 256 s.  The accuracy half stands, and
+the right shape for the expectation was always the one M-154 actually
+measured -- fewer elements for a better answer -- which is a statement about
+DOFS and says nothing whatever about seconds.  The two arms do different
+amounts of work per unknown and nothing here had compared that.
+
+The race is still the one to run, for the accuracy and because a wall clock is
+the only thing that can say how much the accuracy costs.  It is not a race MEQ
+is expected to win.
 
 ONE CASE PER INVOCATION IF THE WALL CLOCKS ARE THE POINT, AND LET THE MACHINE
 SETTLE BETWEEN THEM.  This script runs its cases back to back and its rungs back

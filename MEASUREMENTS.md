@@ -6563,3 +6563,234 @@ already made correctly by accident.
 (row 1) makes the run converge to a WRONG equilibrium; fixing the residual and
 breaking the Jacobian (row 2) makes it converge nowhere; all three together give
 the table above. Two of the three intermediate states look like progress.
+
+### M-155
+
+**THE FIRST MATCHED RACE: COLD FORWARD FILAMENTS, MEQ AGAINST `freegs4e` ON
+DIII-D. MEQ IS 6.2× TO 19.8× SLOWER AND `race.py`'s OWN DOCSTRING PREDICTED THE
+OPPOSITE.**
+
+`race.py /tmp/race-fil F --filament` on a quiet machine — load 0.04 at the
+start. Both arms carry the same 18 conductors as point filaments at the same
+positions, so for the first time this is one machine rather than two
+approximations to one; MEQ's are out of the mesh under `[conductors] Model =
+"filament"` and evaluated analytically, `freegs4e`'s are its own `Coil`. Both
+start cold: MEQ from `mkcoldguess.py --remainder`, the design footprint carrying
+the target current and no converged field anywhere in it.
+
+| `freegs4e`, cold | wall/s | picard | `psi_ax` | `psi_bnd` |
+|---|---|---|---|---|
+| 129² | **4.9** | 33 | 3.758545940e-01 | 7.081834458e-02 |
+| 257² | **12.9** | 32 | 3.758518322e-01 | 7.081506366e-02 |
+
+| MEQ rung | elements | dofs | newton | wall/s | rel `L2` | off the coils | `psi_ax` | X-point |
+|---|---|---|---|---|---|---|---|---|
+| k1r0 | 1510 | 13,590 | **103** | 80.34 | **5.894e-01** | 6.068e-01 | 6.94e-01 | **( 0.9009, −1.2272 )** |
+| k1r1 | 6134 | 55,206 | 5 | 93.73 | 9.533e-04 | 4.270e-04 | 5.26e-04 | ( 1.2003, −0.9992 ) |
+| k2r0 | 1510 | 27,180 | 61 | 140.05 | 2.198e-03 | 2.214e-03 | 3.11e-03 | ( 1.2012, −0.9994 ) |
+| **k2r1** | 6134 | 110,412 | 2 | 122.52 | **9.512e-04** | 4.312e-04 | **1.62e-05** | ( 1.2004, −0.9996 ) |
+| k3r0 | — | — | — | — | **FAILED** | `meq::filamentPsi`: the field point radius must not be negative | | |
+| **k3r1** | 6134 | 184,020 | 2 | 255.65 | **9.473e-04** | 4.219e-04 | 1.97e-05 | ( 1.2004, −0.9996 ) |
+| k2r0a3 | — | — | — | — | **FAILED** | the non-linear iteration did not converge | | |
+| k3r0a3 | — | — | — | — | **FAILED** | `meq::filamentPsi`: the field point radius must not be negative | | |
+
+**THE PREDICTION WAS "A RACE WHERE ONE ARM IS BOTH FASTER AND MORE ACCURATE",
+AND THE SECONDS SAY THE REVERSE.** MEQ's converging rungs take 80 to 256 s
+against `freegs4e`'s 4.9 s and 12.9 s — **6.2× the 257² reference's wall at
+best, 19.8× at the rung that gives the best answer, and 16× to 52× against the
+129² grid.** The accuracy half of the prediction stands; the shape it was
+inferred from — [M-154](#m-154)'s 2.26× lower error on 3.2× fewer elements — is
+a statement about **dofs**, and nothing in it compares work per unknown. Two
+codes may want very different numbers of unknowns and very different costs for
+each, and only a clock says which way the product goes.
+
+**AND IT DOES NOT REFINE, WHICH IS THE THIRD TIME THIS FLOOR HAS BEEN MET.**
+9.533e-04 → 9.512e-04 → 9.473e-04 from k1r1 through k3r1, a **3.3× range in
+dofs** and two polynomial degrees, for **0.6%**. [M-111](#m-111) met it at
+5.785e-03 with the conductor models differing, [M-139](#m-139) at 7.7e-04 with
+them matched as rectangles, and this is the filament diagonal at 9.5e-04. **The
+model difference is now exactly zero and a floor is still there**, so whatever
+is left is not the conductor model.
+
+**WHERE IT IS, MEASURED RATHER THAN ARGUED: MORE THAN HALF OF IT IS WITHIN THE
+COIL BOXES.** The `off the coils` column drops to **4.2e-04** on every
+converging rung — a factor of 2.3 — against a reference that self-converges
+between its own two grids at 7.3e-06 in `psi_ax`. **What this does NOT establish
+is whose error it is.** `freegs4e` carries a filament as a source on a
+finite-difference grid, so its `psi` near one is a discretisation of a
+logarithm, where MEQ's is the logarithm; the two disagreeing most exactly there
+is what either story predicts. The experiment that separates them is the same
+run measured against the **129²** reference as well: MEQ's own error cannot know
+which reference it is being read against, so a near-coil disagreement that grows
+as the reference coarsens is the reference's. **It has not been run**, and until
+it is, `4.2e-04` is the honest number to quote for MEQ and `9.5e-04` is the
+honest number to quote for the comparison.
+
+**`k1r0` CONVERGES TO A DIFFERENT EQUILIBRIUM AND TAKES 103 NEWTON STEPS TO DO
+IT** — X-point at ( 0.9009, −1.2272 ) against the reference's null at
+|z| ≈ 1.000, `psi_ax` out by 69%. The same trap [M-139](#m-139) records for its
+own `k = 1` rungs: a rung that returns a wrong answer is worse than one that
+fails, and the X-point column is what separates them.
+
+**A CAVEAT ON THE X-POINT COLUMN.** The harness prints *"the reference's ACTIVE
+X-point at 257²: ( 1.2000, 1.0000 ) [ 2 saddles found ]"*, naming the UPPER
+null, where [M-139](#m-139)'s run of the same reference named the lower one at
+( 1.1999, −1.0000 ). DIII-D here is nearly up-down symmetric and the two nulls
+are very nearly degenerate, so which is called active is not stable between
+runs. Read this column as `|z| ≈ 1.000` and not as a signed comparison.
+
+**THE TWO `filamentPsi` FAILURES ARE ONE DEFECT AND `k2r0a3` IS NOT IT.** This
+is worth separating because the failure rows all print the same width: `k3r0`
+and `k3r0a3` die in `meq::filamentPsi` on a field point with `r < 0`, and
+`k2r0a3` is a plain non-convergence with no conductor in it. → [M-156](#m-156).
+
+### M-156
+
+**THE NEGATIVE-RADIUS DEFECT: `Γ`'s OWN ENDPOINT, AND `psi_c` IS EVEN IN `r`.**
+
+The throw named a radius and did not say what it was, so the first change was to
+put the point in the message. Re-run, `k3r0` dies at
+
+```
+meq::filamentPsi: the field point radius must not be negative; r = 0 is
+allowed and gives exactly zero. The point is ( r, z ) = ( -0.0010984, 3.4 )
+```
+
+and `gdb -ex 'catch throw'` names the site in five frames:
+`meq::filamentPsi` ← `meq::ConductorField::psi` ←
+`GradShafranovSolver::prepare`'s exterior-datum lambda ←
+`mfem::VectorBoundaryFluxLFIntegrator::AssembleRHSElementVect` ←
+`mfem::LinearForm::Assemble` ← `prepare()`.
+
+**`z = 3.4` IS `Γ`'s UPPER ENDPOINT AND THE OVERSHOOT IS ABOUT 1% OF `h`.** `Γ`
+is a semicircle centred on the axis, so its two endpoints lie exactly ON `r = 0`;
+a transfer path targeting one of them lands either side by an amount that is a
+property of the path map, not of whether the mesh is valid. 1.1e-03 against
+`h ≈ 0.11` on 1510 elements. **Not round-off, and not a geometry error either.**
+
+**THE FIX IS A CONTINUATION AND NOT A CLAMP.** `psi = r A_φ`; under `r → −r` at
+fixed `z` the point is the same physical point rotated by `π` in `φ`, so `φ̂`
+reverses, `A_φ` changes sign, and the product does not. So
+`psi_c( −r, z ) = psi_c( r, z )` **exactly**, and `ConductorField::psi` reflects.
+Near the axis `psi_c ~ c(z) r²`, so a point a hair past `r = 0` gets a hair
+above zero, which is what the physics says. Clamping to `r = 0` would also
+"work" and would be wrong by `O(r²)`; the unit test asserts the reflection as a
+**bit equality** and separately asserts the near-axis value is not zero, which is
+what distinguishes the two.
+
+**AND THE VECTOR ENTRY POINTS MUST STILL REFUSE**, which is the half a careless
+widening breaks. `∂_r psi` is **odd** where `psi` is even, so `gradPsi`, `flux`
+and `poloidalField` continue with a sign that differs **between the two entries
+of one vector**, and a caller holding one cannot apply a single rule to both.
+`CriticalPointFinder::totalFlux` is the seam that meets this for `q` and it
+abandons the evaluation; that stays. **So the asymmetry between the two seams is
+the parity and not an inconsistency** — which is also why `totalPotential`, the
+scalar sibling that was left unguarded when `totalFlux` was fixed, needs no
+guard of its own now: it inherits the continuation.
+
+**A SECOND, SILENT DEFECT AT THE SAME SEAM, FOUND BY THE TEST AND NOT BY THE
+RUN.** `ConductorField::poloidalField` branched on `if ( r > 0.0 )` and treated
+everything else as *on the axis*, returning the closed-form axis limit — so a
+point PAST the axis got a plausible number rather than a refusal, while the
+method's own doxygen promised it *"throws as psi() does"*. Nothing reached it
+with `r < 0` in this run; it is on the output path, where an `.nc` grid on a
+half-disc machine has its whole first column on `r = 0` and the wrong branch
+would be one column of a 129² file, finite and smooth against its neighbours.
+It now refuses below zero and keeps the limit at zero.
+
+### M-157
+
+**THE SECOND RACE: THE MXH FIXED-BOUNDARY CASES AGAINST DESC, TIME TO ACCURACY.
+MEQ IS 2.0× TO 3.6× FASTER COLD AT 1e-03 AND 9.4× AT 1e-04.**
+
+`race_desc.py --self-consistent 12 --repeats 3` over the five
+`examples/fixed-*.toml` machines of [M-147](#m-147). **The protocol is two
+phase and the phases are timed differently on purpose**: DESC takes its profiles
+against `ρ = √(Φ/Φ_edge)`, a toroidal-flux label that is not known until the
+equilibrium is, so each `M` is first iterated to self-consistency — reported as
+`posed self-consistently in N sweeps ( untimed )` — and only the one forward
+cold-start solve from the settled profiles is on the clock. N falls **12 → 4**
+as `M` rises, which is the posing getting easier as the representation improves.
+
+| case | target | MEQ | at | DESC | at | DESC warm | **ratio** |
+|---|---|---|---|---|---|---|---|
+| `fixed-h-circular` | 1e-03 | 9.68 | k2r0 | 34.91 | M=10 | 0.62 | **3.61×** |
+| `fixed-a-testtokamak` | 1e-03 | 14.85 | k2r0 | 29.19 | M=12 | 1.35 | **1.97×** |
+| `fixed-e-diamagnetic` | 1e-03 | 11.06 | k1r0 | 33.36 | M=10 | 0.69 | **3.02×** |
+| `fixed-g-mastu` | 1e-03 | 11.35 | k1r0 | 33.70 | M=12 | 3.87 | **2.97×** |
+| `fixed-f-diiid` | 1e-03 | 9.95 | k1r0 | 31.26 | M=16 | 2.43 | **3.14×** |
+| `fixed-f-diiid` | **1e-04** | **10.99** | k2r0 | **103.21** | M=20 | 38.11 | **9.39×** |
+
+**THE MARGIN WIDENS WITH ACCURACY, AND THAT IS THE RESULT RATHER THAN THE
+RATIO.** MEQ buys an order on DIII-D for **1.04 s** — 9.95 s at k1r0 to 10.99 s
+at k2r0 — where DESC pays **3.3×**, 31.26 s at M=16 to 103.21 s at M=20. A
+single-target race would have reported 3.14× and missed that.
+
+**DESC *WARM* BEATS MEQ AT 1e-03 ON ALL FIVE**, 0.62 s to 3.87 s against MEQ's
+9.68 s to 14.85 s. Most of DESC's cold seconds are JAX tracing and compilation,
+which is a real cost to a user running one equilibrium and very nearly free to
+one running a scan — and separating those two readings is what the harness
+exists for. **At 1e-04 the sign flips even warm**: MEQ 10.99 s against DESC's
+38.11 s.
+
+| `fixed-f-diiid` | dofs | wall/s | vs `freegs4e` |
+|---|---|---|---|
+| MEQ k=1 r=0 | 4,536 | 9.95 | 4.4649e-04 |
+| **MEQ k=2 r=0** | 6,804 | **10.99** | **3.8974e-05** |
+| MEQ k=3 r=1 | 37,470 | 23.23 | 5.1078e-05 |
+| DESC M=10 | 268 | 27.36 | 1.3676e-03 |
+| DESC M=16 | 553 | 31.26 | 1.5975e-04 |
+| **DESC M=20** | 803 | **103.21** | **2.2953e-05** |
+
+**DESC USES 8.5× FEWER UNKNOWNS AND IS 9.4× SLOWER**, which is the same lesson
+[M-155](#m-155) closes with, seen from the other side: 803 spectral
+coefficients against MEQ's 6,804 dofs, and 103.21 s against 10.99 s. It buys a
+**1.7× better answer** for that — 2.2953e-05 against 3.8974e-05 — so it is not
+the same answer and it is not a tenth of the work either. **A count of unknowns
+is not a cost**, and a spectral method's advantage in unknowns is being spent
+here rather than banked.
+
+**THE FLOORS ARE 5.2e-05 TO 5.5e-04 AND EVERYTHING BELOW THEM WAS REFUSED**
+rather than reported — 1e-05 and 1e-06 on every case, and 1e-04 on four of the
+five. The floor is the two codes' own best answers differing, so it bounds what
+this comparison can resolve and is not an accuracy of either.
+
+**TWO CAVEATS, AND NEITHER IS SMALL.**
+
+**9 OF 30 RUNGS REPORT `POSING FAILED`** — the damped self-consistent iteration
+not reaching its tolerance in 12 sweeps. It is **not spread evenly**:
+`fixed-a-testtokamak` posed **one** of its six (M=12 alone) and
+`fixed-g-mastu` two failed of six, while `fixed-e-diamagnetic` and
+`fixed-f-diiid` posed all six. So the `testtokamak` row rests on a single DESC
+rung and its 1.97× is the weakest number in the table. The damping is `mix =
+0.5`, tuned on one case at one `M`, and it does not generalise; a refusal is the
+right outcome and a matrix this thin is not.
+
+**AND `--require-quiet` WAS CHECKED ONCE, NOT PER CASE.** The five cases began
+at load **0.39, 3.36, 7.83, 5.29 and 7.72**. Those are the race's own arms
+draining between cases with no other workload present, so the seconds are not
+believed to be wrong — but nothing in the output said so while the flag implied
+otherwise, and the two most contended starts are two of the five rows. Fixed
+afterwards, as a per-case settle; **these numbers were taken before the fix** and
+a re-run on a machine settling between cases is what would retire the caveat.
+
+**AND THE THREE FAILING RUNGS STILL FAIL, WHICH IS THE RESULT AND NOT A
+SHORTFALL OF THE FIX.** Re-run with the continuation in:
+
+| rung | before | after |
+|---|---|---|
+| `k3r0` | `meq::filamentPsi`: radius must not be negative | **156 Newton sweeps, then 197 under Picard-then-Newton — did not converge** |
+| `k2r0a3` | the non-linear iteration did not converge | 164, then 200 — unchanged, and never was this defect |
+| `k3r0a3` | `meq::filamentPsi`: radius must not be negative | 156, then 197 — did not converge |
+
+**`k3r0` HAD TWO REASONS TO FAIL AND THIS WAS ONE OF THEM.** The throw is gone
+from every site; what is left is the coarse-mesh cold start, which the rungs
+either side of it show in the same table — `k1r0` takes 103 steps to a *wrong*
+equilibrium and `k2r0` 61 steps to a right one, on the same 1510 elements. At
+`k = 3` it does not land at all. `k3r0a3` is an adaptive run whose first cycle
+IS `k3r0`, so it fails there and never reaches a refinement; its numbers are
+`k3r0`'s to the digit.
+
+**A defect being fixed and the symptom surviving is the ordinary case when a
+rung fails twice**, and the thing that would have hidden it is exactly what the
+first change here fixed: a failure row that prints one line and names one cause.

@@ -125,6 +125,18 @@ namespace meq
 			/// the free-boundary problem imposes at `r = 0` and is the reason
 			/// the split does not disturb it.
 			///
+			/// **AND EVEN IN `r`, SO A POINT PAST THE AXIS IS ANSWERED RATHER
+			/// THAN REFUSED.** `psi = r A_phi` and both factors change sign
+			/// under `r -> -r`, so `psi( -r, z ) == psi( r, z )` exactly; this
+			/// is the analytic continuation of the flux and not a clamp. Two
+			/// of MEQ's evaluations extrapolate off the half-plane by design
+			/// -- the exterior datum, whose transfer paths target a `Gamma`
+			/// that MEETS the axis, and the critical-point Newton, which is
+			/// allowed to leave its element -- and this is what lets them.
+			/// gradPsi(), flux() and poloidalField() still refuse, because
+			/// `d_r psi` is ODD where `psi` is even and a vector cannot take
+			/// one rule for both entries; see ConductorField::psi()'s body.
+			///
 			/// @throws std::invalid_argument if the point is ON a filament,
 			///         where psi is genuinely infinite. That refusal is
 			///         meq::filamentPsi()'s and it is the LAST line of defence

@@ -90,6 +90,27 @@ side reads **2.031e-03 against the meshed route's 4.593e-03** — 2.26× lower o
 3.2× fewer elements, and below a floor M-111 says no refinement buys down.
 → **[M-154](MEASUREMENTS.md#m-154)**.
 
+**AND THE FULL COLD RACE ON THAT MATCHED MACHINE IS RUN, AND MEQ LOSES IT.**
+`race.py F --filament` on a quiet machine: `freegs4e` takes **4.9 s at 129² and
+12.9 s at 257²** where MEQ's converging rungs take **80 to 256 s** — 6.2× the
+257² reference at best and 19.8× at the rung that gives the best answer.
+`race.py`'s own docstring predicted *"a race where one arm is both faster and
+more accurate"*, and the accuracy half is the only half that survived: the
+prediction was inferred from M-154's **dofs**, where nothing compares work per
+unknown. → **[M-155](MEASUREMENTS.md#m-155)**.
+
+**THE ERROR STILL DOES NOT REFINE, AND NOW THE CONDUCTOR MODEL CANNOT BE THE
+REASON.** 9.533e-04 → 9.473e-04 across a 3.3× range in dofs and two degrees.
+M-111 met this floor at 5.785e-03 with the models differing and M-139 at 7.7e-04
+with them matched as rectangles; **the filament diagonal makes the model
+difference exactly zero and a floor is still there.** More than half of it is
+inside the coil boxes — the off-coil column reads 4.2e-04 — and **whose error
+that is has not been established**: `freegs4e` carries a filament as a source on
+a finite-difference grid, so its `psi` near one is a discretisation of a
+logarithm where MEQ's is the logarithm. The experiment that separates them is
+the same run read against the **129²** reference as well, and it has not been
+run.
+
 **IT COST THREE MORE BORDERS READING THE REMAINDER**, none of them reachable by
 any fixture in the tree, and each named by an AGREEMENT rather than a
 disagreement — the reference saves `psi`, `coil_psi` and `plasma_psi`

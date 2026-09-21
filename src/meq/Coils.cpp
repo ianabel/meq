@@ -293,6 +293,22 @@ namespace meq
 			}
 		}
 
+		/// The refusal for a field point off the half-plane, WITH THE POINT IN
+		/// IT. A caller who reaches this has extrapolated an evaluation past
+		/// the axis, and the one thing they need to know is by how much: a
+		/// radius at round-off is a different defect from one at element
+		/// scale, and a message naming neither sends the reader to a debugger
+		/// to recover a number the throw site already had.
+		[[noreturn]] void refuseNegativeRadius( char const *where, double r,
+		                                        double z )
+		{
+			std::ostringstream message;
+			message << where << ": the field point radius must not be "
+			           "negative; r = 0 is allowed and gives exactly zero. "
+			           "The point is ( r, z ) = ( " << r << ", " << z << " )";
+			throw std::invalid_argument( message.str() );
+		}
+
 		void requireOrder( int order, char const *where )
 		{
 			if ( order < 2 || order > maximumCoilQuadratureOrder )
@@ -856,9 +872,7 @@ namespace meq
 			throw std::invalid_argument(
 				"meq::filamentPsi: the loop radius must be positive" );
 		if ( r < 0.0 )
-			throw std::invalid_argument(
-				"meq::filamentPsi: the field point radius must not be "
-				"negative; r = 0 is allowed and gives exactly zero" );
+			refuseNegativeRadius( "meq::filamentPsi", r, z );
 
 		double d = 0.0;
 		double kSquared = 0.0;
@@ -942,8 +956,7 @@ namespace meq
 		requireOrder( order, "meq::coilPsi" );
 
 		if ( r < 0.0 )
-			throw std::invalid_argument(
-				"meq::coilPsi: the field point radius must not be negative" );
+			refuseNegativeRadius( "meq::coilPsi", r, z );
 
 		return mu0*coil.currentDensity()
 		       *crossSectionIntegral( coil, r, z, order );
@@ -958,9 +971,7 @@ namespace meq
 		requireOrder( order, "meq::coilGradPsi" );
 
 		if ( r < 0.0 )
-			throw std::invalid_argument(
-				"meq::coilGradPsi: the field point radius must not be "
-				"negative" );
+			refuseNegativeRadius( "meq::coilGradPsi", r, z );
 
 		double gradR = 0.0;
 		double gradZ = 0.0;

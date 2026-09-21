@@ -123,12 +123,41 @@ namespace meq
 
 	double ConductorField::psi( double r, double z ) const
 	{
+		/*
+		 * EVEN IN r, AND THAT IS AN ANALYTIC CONTINUATION RATHER THAN A CLAMP.
+		 *
+		 * psi = r A_phi. Under r -> -r at fixed z the point is the same
+		 * physical point rotated by pi in phi, so phi-hat reverses and A_phi
+		 * changes sign with it; the product does not. So psi_c( -r, z ) is
+		 * psi_c( r, z ) EXACTLY, and reflecting is the unique smooth extension
+		 * of the flux across the axis rather than a convenient substitute for
+		 * one. Near the axis psi_c ~ c( z ) r^2, so the value this returns for
+		 * a point a hair past r = 0 is a hair above zero, which is what the
+		 * physics says it should be.
+		 *
+		 * IT IS HERE AND NOT AT A CALLER BECAUSE IT IS A PROPERTY OF THE
+		 * FUNCTION, and because MEQ has two evaluations of psi_c that
+		 * legitimately extrapolate off the half-plane and would each otherwise
+		 * need their own rule: the exterior datum, whose transfer paths target
+		 * a Gamma that MEETS the axis, and CriticalPointFinder, whose
+		 * element-local Newton is allowed to leave its element on purpose.
+		 *
+		 * gradPsi(), flux() and poloidalField() still REFUSE, and the
+		 * asymmetry is the parity rather than an oversight: d_r psi is ODD
+		 * where psi is even, so the three of them continue with a sign that
+		 * differs per component, and a caller holding a vector cannot apply
+		 * one rule to both of its entries. meq::CriticalPointFinder::totalFlux
+		 * is the seam that meets this for q and it abandons the evaluation,
+		 * for the reason recorded against it.
+		 */
+		double const rho = std::abs( r );
+
 		double total = 0.0;
 		for ( CurrentFilament const &f : filamentList )
-			total += filamentPsi( f, r, z, mu0Value );
+			total += filamentPsi( f, rho, z, mu0Value );
 		// The rectangles, through their own set, which carries the quadrature
 		// and the same mu0. Empty is exactly zero rather than a special case.
-		return total + coilList.psi( r, z );
+		return total + coilList.psi( rho, z );
 	}
 
 	void ConductorField::gradPsi( double r, double z,
@@ -218,6 +247,19 @@ namespace meq
 			bZ = qR;
 			return;
 		}
+
+		// AND r < 0 IS NOT "ON THE AXIS", WHICH THE r > 0 TEST ABOVE LEAVES IT
+		// INDISTINGUISHABLE FROM. B is a VECTOR -- B_R = -q_z is odd under
+		// r -> -r where B_Z = q_r is even -- so it continues past the axis with
+		// a sign that differs between its two entries, exactly as gradPsi() and
+		// flux() do, and this refuses for their reason. psi() is the one entry
+		// point here that continues, because it is a scalar and even.
+		if ( r < 0.0 )
+			throw std::invalid_argument(
+				"meq::ConductorField::poloidalField: the field point radius "
+				"must not be negative; r = 0 is the axis and gives the closed-"
+				"form limit. psi() continues past the axis by reflection and B "
+				"cannot, because B_R and B_Z carry opposite parities" );
 
 		// ON THE AXIS, WHERE flux() IS 0/0 AND THE LIMIT IS CLOSED FORM.
 		//

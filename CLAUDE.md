@@ -2095,6 +2095,23 @@ carrying on with `q_p` alone, which would root a different function. The
 transferable form: **a term added to an extrapolating evaluation must be defined
 wherever the extrapolation goes, or the evaluation has to be able to refuse.**
 
+**AND THE SAME THROW CAME BACK AT A SECOND SEAM, WHERE THE FIRST BRANCH OF THAT
+RULE IS THE RIGHT ONE — THE TERM *IS* DEFINED THERE, AND THE PARITY IS WHAT
+DECIDES WHICH SEAM GETS WHICH ANSWER.** The exterior datum is assembled at
+transfer-path TARGETS on `Γ`, and on a half-disc machine `Γ` is a semicircle
+whose two endpoints lie exactly ON `r = 0` — so a target near an endpoint lands
+either side of the axis by an amount that belongs to the path map and not to
+whether the mesh is valid. Measured, `( r, z ) = ( −1.0984e-03, 3.4 )`, about 1%
+of `h`. **`psi = r A_φ` is EVEN in `r`**, both factors changing sign together, so
+`meq::ConductorField::psi` reflects and the point is answered exactly rather than
+refused or clamped. `gradPsi`, `flux` and `poloidalField` still refuse, because
+`∂_r psi` is **odd** where `psi` is even and the continuation therefore differs
+in sign **between the two entries of one vector** — which is why
+`CriticalPointFinder::totalFlux` above keeps its bool and `totalPotential`, the
+scalar sibling, needs no guard at all. **The two seams differ by the parity of
+what they evaluate, not by how carefully each was written.**
+→ **[M-156](MEASUREMENTS.md#m-156)**.
+
 **AND NEVER COMMIT A FILE A SUBAGENT OWNS ON THE STRENGTH OF ITS COMPILING.**
 an agent was searching for a fixture in
 `FreeBoundaryCoupling.cpp`, the file was staged after checking it built, and the
@@ -2406,6 +2423,13 @@ tools/       plotting and visualisation. plot_equilibrium.py reads BOTH
              cut. tools/README.md says which of the four output formats
              goes with which reader, and why they are not interchangeable.
              freegs4e-benchmark/ is the independent-code comparison.
+             desc-benchmark/ is the SECOND one, against DESC -- a
+             fixed-boundary inverse spectral code, so it races the
+             examples/fixed-*.toml machines rather than the free-boundary
+             ones. Its profiles are labelled by TOROIDAL flux, which is not
+             known until the equilibrium is, so race_desc.py poses each
+             resolution self-consistently UNTIMED and clocks only the one
+             forward cold-start solve that follows. M-157.
              mesh/halfdisc.py is FB-6's geometry: a semicircle reaching the
              axis with rectangular coils MESHED TO, written against gmsh's
              python API. See `CLAUDE_FB.md`,
