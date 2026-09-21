@@ -416,6 +416,30 @@ FluxAngleCount = 128
                 # The two Grad-Shafranov does not fix; see where they are
                 # computed. Pa and T m.
                 p_at_gamma=pEdge, g_at_gamma=gEdge,
+                # EVERY QUANTITY'S UNITS, BECAUSE TWO OF THEM ARE A TRAP AND
+                # JSON HAS NOWHERE ELSE TO SAY SO.
+                #
+                # `pprime_at_gamma` is d/dpsi -- the PHYSICAL derivative, per
+                # Wb/rad -- and the value column of `<stem>-pprime.dat` beside
+                # it is d/dPsi, per unit NORMALISED flux.  They differ by
+                # psi_ax, which is 0.0635 on fixed-h-circular, so the two
+                # numbers a reader meets next to each other are a factor of
+                # 15.7 apart and both are right.  Each file documents its own
+                # units correctly and that was not enough: an agent converting
+                # between them read a CORRECT conversion as 15.7x wrong before
+                # spotting it, which is exactly the failure a units field
+                # prevents and a units convention does not.
+                units=dict(
+                    psi_axis="Wb/rad", psi_bndry="Wb/rad",
+                    psi_surface="Wb/rad", D="Wb/rad",
+                    pprime_at_gamma="Pa per Wb/rad -- d/dpsi, NOT the "
+                                    "-pprime.dat value column's d/dPsi; they "
+                                    "differ by psi_ax",
+                    ggprime_at_gamma="T^2 m^2 per Wb/rad -- d/dpsi, and the "
+                                     "same caution as pprime_at_gamma",
+                    p_at_gamma="Pa", g_at_gamma="T m",
+                    minor_radius="m", R0="m", Z0="m", shape_error_m="m",
+                    kappa="dimensionless", level="dimensionless"),
                 cos=list(map(float, fit["cos"])),
                 sin=list(map(float, fit["sin"])))
     with open(os.path.join(outdir, f"{stem}-meta.json"), "w") as f:

@@ -31,6 +31,22 @@
   "ggprime_at_gamma": 0.00408206547482749,
   "p_at_gamma": 1.6010991415245655,
   "g_at_gamma": 2.000004816894381,
+  "units": {
+    "psi_axis": "Wb/rad",
+    "psi_bndry": "Wb/rad",
+    "psi_surface": "Wb/rad",
+    "D": "Wb/rad",
+    "pprime_at_gamma": "Pa per Wb/rad -- d/dpsi, NOT the -pprime.dat value column's d/dPsi; they differ by psi_ax",
+    "ggprime_at_gamma": "T^2 m^2 per Wb/rad -- d/dpsi, and the same caution as pprime_at_gamma",
+    "p_at_gamma": "Pa",
+    "g_at_gamma": "T m",
+    "minor_radius": "m",
+    "R0": "m",
+    "Z0": "m",
+    "shape_error_m": "m",
+    "kappa": "dimensionless",
+    "level": "dimensionless"
+  },
   "cos": [
     -0.03798510707386163,
     -0.01434533143135159,
