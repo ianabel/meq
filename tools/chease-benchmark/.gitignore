@@ -1,0 +1,9 @@
+# WORK IN PROGRESS, AND NOT MINE TO COMMIT.
+#
+# An agent is building this directory now. CLAUDE.md's rule is that a file a
+# subagent owns is never committed on the strength of its compiling -- the
+# check wanted is a diff somebody has read, and nobody has read these. They
+# are ignored until that happens, because a `git add tools/` for a NEIGHBOURING
+# directory swept one of them into cf1eee0 and it had to be taken back out.
+*
+!.gitignore
