@@ -6386,3 +6386,92 @@ land somewhere else or nowhere. For MAST-U there is a second and sufficient
 reason: its solenoid is 12 mm by 3.18 m and a single filament at its centre is
 not a machine whose equilibrium is near MAST-U's — `COIL-SUBTRACTION-PLAN.md`
 §13.5.
+
+
+### M-152
+
+**MEQ'S SOURCE, EVALUATED AT THE REFERENCE'S OWN CONVERGED STATE, REPRODUCES
+THE REFERENCE'S OWN `Jtor` — SO THE EQUATIONS ARE NOT WHERE THE DISAGREEMENT
+LIVES.**
+
+A residual between MEQ and `freegs4e` is three things at once: the SOURCE MEQ
+was given, the DISCRETISATION it solves with, and the ITERATION that got there.
+`tools/freegs4e-benchmark/source_check.py` separates the first from the other
+two exactly — no solver, no mesh, no interpolation of a field. It evaluates
+`meq::NormalisedMHDSource::f` at `freegs4e`'s own converged `psi` and compares
+`F/( mu0 r )` against `freegs4e`'s own current density on the same grid.
+
+| case | relative L2 | core-current ratio | core current |
+|---|---|---|---|
+| `machine-f-diiid` | 1.489e-03 | 0.999648 | 9.99648e+05 A against 1.0e+06 |
+| `machine-a-testtokamak` | 1.565e-03 | 0.999833 | 1.99967e+05 A against 2.0e+05 |
+| `machine-e-diamagnetic` | 4.097e-04 | 1.000104 | 2.00021e+05 A against 2.0e+05 |
+| `machine-g-mastu` | 8.962e-04 | 1.000236 | 6.00142e+05 A against 6.0e+05 |
+| `machine-d-tcv` | 1.577e-03 | 0.999533 | 1.19944e+05 A against 1.2e+05 |
+
+**EVERY STEP OF THE CONVERSION IS UNDER TEST AT ONCE, AND EACH ONE FAILS
+SILENTLY ON ITS OWN**: the SENSE of the normalised flux, MEQ's `Psi` being 1 on
+the axis where `freegs4e`'s `psi_n` is 0; the SPAN, which appears once in
+`meq::NormalisedMHDSource::f`'s `1/span` and once more in the tables being
+`d/dPsi` where the reference's arrays are `d/dpsi`; the `mu0 r^2` on `p'` and
+nothing on `gg'`; and the tabulation. A factor dropped anywhere here converges
+to a different equilibrium and complains about nothing.
+
+**WHAT THIS RULES OUT AND WHAT IT LEAVES.** It was taken to settle whether
+[M-151](#m-151)'s open item — the filament machine not converging — is a
+normalisation fault, which the symptom strongly suggested: the failing DIII-D
+run reported a **profile scale of 11.1** against the meshed route's 0.9993, and
+a profile scale is exactly what absorbs a mis-normalised source. It is not. The
+scale was a CONSEQUENCE of `psi_bnd` being the remainder at the X-point
+(M-153), which puts `Psi` on the wrong abscissa without the source expression
+being wrong anywhere.
+
+So the source is exact to the tabulation, and what is left is the BORDERS and
+the iteration. The cell that still has no acceptance is narrower than §13.1's
+by one term: **split + exterior coupling + a NORMALISED source**, since
+`theSplitAndTheMeshedRouteAgreeUnderAnExteriorCoupling` carries a linear plasma
+and therefore no `psi_ax` or `psi_bnd` border at all, and
+`aNormalisedSourceRunsUnderTheSplitAndReportsThePhysicalAxis` carries the
+borders and no coupling. Extending the first fixture to a normalised source is
+the next instrument, and it is minutes rather than hours where a machine run is
+the reverse.
+
+
+### M-153
+
+**`psi_bnd` UNDER THE SPLIT WAS THE REMAINDER AT THE X-POINT, WHICH IS A
+NORMALISATION FAULT WEARING A REPORTING FAULT'S CLOTHES.**
+
+`limiterValue()` builds the `psi_bnd` border's value and does add `psi_c` at the
+contact — but the shape-contraction branch gates that on
+`limiterContactLocatedValue`, which `refreshLimiterContact()` sets and XP-3's
+path never reaches: under an X-point border `refreshXPoint()` fills the shape
+functions itself, from a point that is an unknown rather than a prescription.
+The branch was dead exactly where it was needed, and the comment beside the row
+said it "needs nothing new at all", which was true before the split.
+
+**IT WAS IDENTIFIED BY AN AGREEMENT RATHER THAN BY A DISAGREEMENT**, which is
+the part worth keeping. On `F_diiid_conventional` as a filament machine MEQ
+reported `psi_bnd = 1.707074e-01` against a physical `psi_bndry` of
+7.082e-02 — an obvious error of 2.4×, and 2.4× is not a number that names
+anything. What named it is that `freegs4e`'s own `plasma_psi`, at MEQ's OWN
+X-point rather than at the reference's, reads **1.706956e-01**: agreement to
+**7.0e-05**, which is not a coincidence a wrong equilibrium produces. The
+reference saves `psi`, `coil_psi` and `plasma_psi` separately, so the
+decomposition MEQ's split is a decomposition INTO was available to compare
+against term by term.
+
+The consequences, all downstream of `Psi` being measured from the wrong
+boundary:
+
+| | filament arm, before the fix | meshed control |
+|---|---|---|
+| plasma support | **193 of 193** candidate elements — a plasma with no boundary | 382 of 1004 |
+| profile scale | **11.1** | 0.9993 |
+| `psi_ax` | 9.2527e-01 | 3.7599e-01 against the reference's 3.7585e-01 |
+
+**AND THE FIX DOES NOT MAKE THE CASE CONVERGE**, which is said here rather than
+left to be discovered: with `psi_bnd` physical the DIII-D filament run's
+residual drifts from 2.5e-01 to 4.8e-01 over 300 steps. What the fix removes is
+a wrong answer; what is left is M-151's open item, now with the source ruled out
+by [M-152](#m-152).
