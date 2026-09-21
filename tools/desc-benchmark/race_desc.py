@@ -356,6 +356,10 @@ def main():
 	                help="see descrun.py: 1 does not converge")
 	ap.add_argument("--require-quiet", action="store_true")
 	ap.add_argument("--quiet-threshold", type=float, default=0.5)
+	ap.add_argument("--settle-seconds", type=float, default=20.0,
+	                help="with --require-quiet, how long to wait between load "
+	                     "checks before each case")
+	ap.add_argument("--settle-tries", type=int, default=30)
 	ap.add_argument("--json", default="")
 	args = ap.parse_args()
 
@@ -366,6 +370,35 @@ def main():
 		      "these seconds would be a measurement of the machine, not of the "
 		      "codes", file=sys.stderr)
 		return 2
+	# **AND THE LOAD IS RECORDED PER CASE, BECAUSE ONE CHECK AT THE TOP IS NOT
+	# THE GUARANTEE THE FLAG LOOKS LIKE.**
+	#
+	# The check above fires once.  Measured on the first full run of this
+	# harness: the five cases started at load 0.39, 3.36, 7.83, 5.29 and 7.72,
+	# so only the FIRST was timed under the condition --require-quiet was asked
+	# for -- the rest started while the previous case's arms were still
+	# draining.  Those numbers are the race's OWN work and no other workload was
+	# present, so they are not wrong; what was wrong is that nothing said so and
+	# the flag implied otherwise.
+	#
+	# A SETTLE RATHER THAN A REFUSAL, because refusing mid-matrix would throw
+	# away the cases already run, and because the load a race leaves behind is
+	# its own and will drain on its own.  It waits, and it records what it
+	# waited for, so a reader can see which rows were taken clean.
+	def settle(tag):
+		if not args.require_quiet:
+			return load_average()
+		for _ in range(args.settle_tries):
+			now = load_average()
+			if now < args.quiet_threshold:
+				return now
+			time.sleep(args.settle_seconds)
+		now = load_average()
+		print(f"    {tag}: load {now:.2f} did not fall below "
+		      f"{args.quiet_threshold} in "
+		      f"{args.settle_tries * args.settle_seconds} s -- THESE SECONDS "
+		      f"ARE NOT A QUIET-MACHINE MEASUREMENT", file=sys.stderr)
+		return now
 
 	degrees = [int(v) for v in args.degrees.split(",") if v.strip()]
 	refines = [int(v) for v in args.refinements.split(",") if v.strip()]
@@ -377,7 +410,7 @@ def main():
 		reference = os.path.join(convert.REFDIR, f"{convert.CASES[stem]}.npz")
 		meta_path = os.path.join(convert.MEQ, "examples", f"{stem}-meta.json")
 		meta = json.load(open(meta_path))
-		print(f"\n  {stem}   load {load_average():.2f}")
+		print(f"\n  {stem}   load {settle(stem):.2f}")
 		print(f"    {'code':5s} {'resolution':>12s} {'dofs':>9s} {'scale m':>9s} "
 		      f"{'seconds':>9s} {'warm':>8s} {'vs ref':>10s} {'vs other':>10s}")
 

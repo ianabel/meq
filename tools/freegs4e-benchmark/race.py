@@ -314,6 +314,12 @@ def meq_toml(stem, degree, refine, scratch, sample=513, adaptive=0, ref=""):
     return path, label
 
 
+def rung_label(label):
+    """"k2r0" out of "<stem>-k2r0" or "<stem>-k2r0-fil"."""
+    parts = [p for p in label.split("-") if p and p[0] == "k"]
+    return parts[-1] if parts else label
+
+
 def run_meq(stem, degree, refine, scratch, sample=513, adaptive=0, ref=""):
     path, label = meq_toml(stem, degree, refine, scratch, sample, adaptive, ref)
     started = time.perf_counter()
@@ -506,7 +512,11 @@ def sweep(tag, ref, stem, scratch, rungs, grids, sample=513, collar=0.05):
         row = run_meq(stem, rung[0], rung[1], scratch, sample=sample,
                       adaptive=rung[2] if len(rung) > 2 else 0, ref=ref)
         if not row["ok"] or "nc" not in row or not os.path.exists(row["nc"]):
-            print("    %-10s FAILED" % row["label"].split("-")[-1])
+            # THE RUNG, NOT THE SUFFIX.  `label` is "<stem>-k2r0[-fil]", so
+            # taking the last dash-separated field printed "fil" for every
+            # failure under --filament and three rungs were indistinguishable
+            # in the first run of that flag.
+            print("    %-10s FAILED" % rung_label(row["label"]))
             tail = [l for l in row["log"].splitlines()
                     if "MEQ:" in l and ("not converge" in l or "error" in l)]
             for line in tail[:2]:
@@ -539,10 +549,19 @@ if __name__ == "__main__":
     scratch = sys.argv[1]
     want = [a.upper() for a in sys.argv[2:]] or [c[0] for c in CASES]
     os.makedirs(scratch, exist_ok=True)
-    print("\n  A RACE, BOTH CODES COLD, %s threads each%s" %
-          (THREADS, ", SHAPED conductors on both sides" if SHAPED
-           else ", filament reference against MEQ's rectangles -- NOT the same "
-                "conductor model, see --shaped"))
+    # THE BANNER HAS TO NAME THE CONDUCTOR MODEL CORRECTLY, because it is the
+    # one line a reader of a pasted table sees and there are now THREE cases.
+    # It said "NOT the same conductor model, see --shaped" under --filament
+    # once, which is the exact opposite of what --filament does.
+    if SHAPED:
+        models = ", SHAPED conductors on both sides -- the models MATCH"
+    elif FILAMENT:
+        models = (", FILAMENT conductors on both sides -- the models MATCH, "
+                  "MEQ's subtracted at the reference's own positions")
+    else:
+        models = (", filament reference against MEQ's rectangles -- NOT the "
+                  "same conductor model, see --shaped and --filament")
+    print("\n  A RACE, BOTH CODES COLD, %s threads each%s" % (THREADS, models))
     print("  MEQ: PARDISO trace solver and threaded assembly, which are its")
     print("  defaults; its wall includes gmsh, the solve and four output")
     print("  formats. freegs4e's includes its boundary matrix, the Picard")
