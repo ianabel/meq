@@ -72,7 +72,7 @@ Anchors are stable: `CLAUDE.md` points at `M-nn`, so do not renumber.
 | the Newton direction against its own linearised system | **109% wrong**; 1.167e-07 once repaired |
 | the current column `∂R/∂λ` | **46.5%** wrong; 1.2e-10 repaired |
 | the corner entry `D(λ, ψ_bnd)` | **92.8%** wrong — a factor of **13.9**; 1.4e-10 repaired |
-| `∫F/r` fed to the border | 4.4217e-01 against a true 3.3768e-01, **and the OPPOSITE SIGN** against the target: `+6.55e-02` where the truth is `−3.93e-02` |
+| `∫F/R` fed to the border | 4.4217e-01 against a true 3.3768e-01, **and the OPPOSITE SIGN** against the target: `+6.55e-02` where the truth is `−3.93e-02` |
 
 
 ## FB-5: the exterior coupling is an unknown of the same Newton
@@ -518,13 +518,13 @@ Anchors are stable: `CLAUDE.md` points at `M-nn`, so do not renumber.
 
 | removed | what happens |
 |---|---|
-| `ConfineToPlasma` | `\|F\|` on `r = 0` at **1.0e-02 of scale**; with it, **exactly 0.0** |
+| `ConfineToPlasma` | `\|F\|` on `R = 0` at **1.0e-02 of scale**; with it, **exactly 0.0** |
 | the prescribed current | **does not converge at any of the four radii** — §7.14's non-linear eigenvalue problem, `Λ = A/span²` on a region that is itself unknown, so scaling `A` changes nothing |
-| the vertical field | converges at limiter 1.05 to §7.14's **annulus**, axis at `r = 1.38` on a domain reaching 1.50; **does not converge at all** at 1.15 or 1.20 |
+| the vertical field | converges at limiter 1.05 to §7.14's **annulus**, axis at `R = 1.38` on a domain reaching 1.50; **does not converge at all** at 1.15 or 1.20 |
 
 ### M-45
 
-| limiter | coil `μ₀I` | coils | Newton | `ψ_ax` | `ψ_bnd` | `\|F\|` on `r = 0` | `ψ_ax` attained at | `Ψ` at the O-point |
+| limiter | coil `μ₀I` | coils | Newton | `ψ_ax` | `ψ_bnd` | `\|F\|` on `R = 0` | `ψ_ax` attained at | `Ψ` at the O-point |
 |---|---|---|---|---|---|---|---|---|
 | 1.08 | −7.8072e-02 | yes | 11 | 1.212249e-02 | 1.366962e-03 | **0.0000e+00** | ( 0.779, 0.000 ) | **1.0000** |
 | 1.08 | 0 | **NO** | 96 | 6.222586e-02 | 3.854703e-02 | 0.0000e+00 | **( 1.381, 0.000 )** | 1.0000 |
@@ -710,12 +710,12 @@ Anchors are stable: `CLAUDE.md` points at `M-nn`, so do not renumber.
 
 | changed | MXH fit | MEQ rel `L2` | limited by |
 |---|---|---|---|
-| 129², 10 harmonics, `k=2 r=2` | 2.060e-04 | 1.519e-04 | the contour |
+| 129², 10 harmonics, `k=2 R=2` | 2.060e-04 | 1.519e-04 | the contour |
 | 257² | 1.063e-04 | 6.751e-05 | the contour |
 | 513² | **1.032e-04** | 5.726e-05 | **the FITTER** — 3% for 4× the grid |
 | 16 harmonics | **2.206e-05** | 5.825e-05 | **MEQ** — `L2` did not move |
 | MEQ `k=3` | | **8.802e-06** | ? |
-| `k=3 r=3` | | 8.744e-06 | not MEQ |
+| `k=3 R=3` | | 8.744e-06 | not MEQ |
 | output grid 257², 513² | | 8.797e-06, 8.800e-06 | not the sampling |
 
 ### M-63
@@ -764,7 +764,7 @@ Anchors are stable: `CLAUDE.md` points at `M-nn`, so do not renumber.
 ### M-68
 
 `meq::RotatingSource` against `tests/analytic/VaryingCentrifugal.hpp`, over
-`r ∈ [0.6, 1.4] × z ∈ {−0.4, 0, 0.4} × ψ ∈ [−0.2, 1.0]`, relative with a floor
+`R ∈ [0.6, 1.4] × z ∈ {−0.4, 0, 0.4} × ψ ∈ [−0.2, 1.0]`, relative with a floor
 of 1. Both closures, because at two species the general path must give the
 closed form's answer:
 
@@ -907,7 +907,7 @@ mesh (2.9028e-01 against 2.7834e-07).
 ### M-75
 
 PE-0's premise with the geometry taken out: the same equilibrium on a FITTED
-rectangle `r ∈ [0.85, 1.15] × z ∈ [−0.15, 0.15]`, strictly inside the disc, so
+rectangle `R ∈ [0.85, 1.15] × z ∈ [−0.15, 0.15]`, strictly inside the disc, so
 no element is cut and no boundary is a staircase.
 
 | `j` | `k = 2`: `ψ` / `q` / `ψ*` | `k = 3`: `ψ` / `q` / `ψ*` |
@@ -1153,7 +1153,7 @@ which is what distinguishes a fix from a coincidence:
 
 | # | site | whose | the fault it produces |
 |---|---|---|---|
-| 1 | `DarcyNPCOperator::Mult` | MFEM | `NewtonSolver::Mult`'s `r -= b`, iteration 0 |
+| 1 | `DarcyNPCOperator::Mult` | MFEM | `NewtonSolver::Mult`'s `R -= b`, iteration 0 |
 | 2 | `DarcyNPCSolver::Mult` | MFEM | `NewtonSolver::Mult`'s `add( x, -c_scale, c, x )` |
 | 3 | `GradShafranovSolver::solve()` | **MEQ** | `GridFunction::operator=` |
 | 4 | `NpcThreadScaling`'s `copyOf()` | **MEQ** | a raw `g( i )` |
@@ -1682,7 +1682,7 @@ evaluate on `Gamma_{p,h}`. It is a diagnostic, not a route.
 
 Transferred route, `j = 0`, values at `n = 64` over the sequence `{ 8, 16, 32, 64 }`:
 
-| `k` | band | elem | `dist/h` | `L2(psi)` | `L2(psi*)` | `r(psi)` | `r(psi*)` |
+| `k` | band | elem | `dist/h` | `L2(psi)` | `L2(psi*)` | `R(psi)` | `R(psi*)` |
 |---|---|---|---|---|---|---|---|
 | 1 | 0 | 2076 | 1.256 | 2.798137e-05 | 1.972225e-06 | **1.997** | 2.230 |
 | 1 | **1** | 2976 | 0.471 | 2.329046e-05 | **2.769459e-07** | 1.515 | **2.694** |
@@ -1750,7 +1750,7 @@ Green's-function guess, the bootstrap pin at `( 1.143144, −0.553965 )`, which 
 7.07e-02 m from the answer and about two thirds of an element.
 
 The border adds `q_r( x ) = q_z( x ) = 0` to `ψ_bnd − ψ_h( x ) = 0` and makes
-`( r_X, z_X )` unknowns. The support is still an outer state — §10.5's
+`( R_X, z_X )` unknowns. The support is still an outer state — §10.5's
 combinatorial one, which is not differentiable — so the sweeps below move the
 support and nothing else:
 
@@ -2419,7 +2419,7 @@ conductor. Measured over `zCentre ∈ [ −60, 60 ]`, with each conductor's
 
 | | machine | best `z_c` | margin, m | at `|z_c| = 50` | blocking conductor |
 |---|---|---|---|---|---|
-| A | testtokamak classic | 0.000 | **−0.368** | −1.753 | P1L, `r` = 1.000, `z` = −1.100 |
+| A | testtokamak classic | 0.000 | **−0.368** | −1.753 | P1L, `R` = 1.000, `z` = −1.100 |
 | B | testtokamak peaked ff′ | 0.000 | **−0.270** | −1.754 | P1L, 1.000, −1.100 |
 | C | MAST spherical | 0.000 | **−1.320** | −2.912 | P1, 0.150, 0.000 |
 | D | TCV | −0.002 | **−0.746** | −1.761 | OH.OH1, 0.430, 0.000 |
@@ -2434,7 +2434,7 @@ same quantity at `|z_c| = 50` m. A semicircle centred on the axis that reaches
 the plasma's outboard midplane necessarily swallows anything at smaller radius
 near the same height, and every one of these machines has such a conductor:
 a central solenoid on C, D, F and G, and on A, B and E a divertor coil tucked
-under the plasma at `r` = 1.0 where the plasma reaches `r` = 1.78.
+under the plasma at `R` = 1.0 where the plasma reaches `R` = 1.78.
 
 **AND THE MIXED CASE — SOME COILS IN, SOME OUT — FAILS ON A DIFFERENT
 CONSTRAINT, NOT ON GEOMETRY.** `Γ` may legally sit in any gap between
@@ -3047,7 +3047,7 @@ properly located axis — ( 1.0156, −0.0000 ), normalised flux 1.0000 — and 
 then refused, exit 1, by the topology guard: *"THE PLASMA CONTAINS THE SYMMETRY
 AXIS. This is not a large error, it is the wrong topology."* `psi_bnd` came out
 **−2.356703e-02** against `psi_ax` +5.896474e-02, so −`psi_bnd`/( `psi_ax` −
-`psi_bnd` ) = +2.8555e-01 is positive and the plasma reaches `r = 0`. M-96 had
+`psi_bnd` ) = +2.8555e-01 is positive and the plasma reaches `R = 0`. M-96 had
 this as a plain non-convergence at 5.857e-03; the solver now gets far enough
 for the guard to name what is wrong with the answer.
 
@@ -3435,7 +3435,7 @@ it: NO"* on the line above it.
 
 **THE LEVEL SET AND THE SUPPORT GENUINELY DISAGREE THERE, AND THE REFERENCE
 SETTLES WHICH IS RIGHT.** `C_mast_spherical.npz` converges with
-`psi_bndry` = **−2.3596e-02**, so `Psi( r = 0 ) = +0.2863` and the level set does
+`psi_bndry` = **−2.3596e-02**, so `Psi( R = 0 ) = +0.2863` and the level set does
 contain the axis. Its near-axis lobe is nevertheless a SEPARATE component:
 walking the reference's own midplane inboard from the magnetic axis, `psi` falls
 to **−3.0876e-02 at R = 0.1594**, below `psi_bnd`, before rising to −1.3990e-02
@@ -3465,7 +3465,7 @@ knows nothing about elements, so correcting only the topology guard would have
 moved the same false refusal one branch down. `AxisSourceCheck` now carries
 `supportReachesAxis`, `worstOnAxisInSupport` and `boundedInSupport` beside the
 level-set readings, which are kept and REPORTED — a run where the two disagree
-is one where the fill is the only thing between the load and a `1/r` pole.
+is one where the fill is the only thing between the load and a `1/R` pole.
 
 | | before | after |
 |---|---|---|
@@ -3476,7 +3476,7 @@ is one where the fill is the only thing between the load and a `1/r` pole.
 | against its reference 5.795820e-02 | — | **1.737e-02** |
 
 **IT IS THE SAME SOLVE TO EVERY DIGIT** — only the verdict changed — and it now
-emits a warning naming the disagreement: `| F |` on `r = 0` is assembled as zero
+emits a warning naming the disagreement: `| F |` on `R = 0` is assembled as zero
 where the pointwise test reads 9.208398e-02.
 
 **A THREADING NOTE, BECAUSE IT COST A WRONG CONCLUSION FOR TEN MINUTES.** That
@@ -3655,7 +3655,7 @@ times per step and accepts 1/128 to 1/256 of the direction. The decomposition
 says why: the axis row carries about **0.75** of `augmentedNorm` and the X-point
 rows about **0.07**, so a step that would fix the null is never worth taking and
 it crawls a millimetre at a time -- 9 cm away from a seed that was 1 cm from the
-answer, and back. The key multiplies the length `r h` that puts those two rows
+answer, and back. The key multiplies the length `R h` that puts those two rows
 into the merit, and into nothing else: the border still solves `q_r = q_z = 0`.
 
 **MAST, `k = 2`, 4198 elements, every sweep counted:**
@@ -3691,7 +3691,7 @@ SCALE.** On `examples/diverted-tokamak.toml`, XP-3's own acceptance fixture:
 
 `psi_ax` 8.2660036302e-02 and X ( 1.093103, −0.603529 ) at 0.25 and at 4.0,
 identically -- the invariant holds -- but **raising the weight is 5.9× WORSE
-there** where on MAST it is 1.6× better. So the natural scale `r h` is right on
+there** where on MAST it is 1.6× better. So the natural scale `R h` is right on
 one case and badly wrong on another, there is no value to promote to a default,
 and **a weight must not be carried between machines.** Above about 30 MAST fails
 outright with *"no damping gave a finite residual -- psi_ax through zero"*: the
@@ -3938,7 +3938,7 @@ about the second, not the first.
 
 | | defect | reachable | what it cost |
 |---|---|---|---|
-| 1 | `NormalisedRotatingSource` never applied `currentScale()` | `[source] Type = "rotating"` + `Normalised` + `PlasmaCurrent`, no guard anywhere | `∫F/r` independent of λ, so the current constraint cannot be satisfied by the unknown that exists to satisfy it — while `assembleCurrentColumn()` and `cornerEntry( I, I )` report a sensitivity of `scaledF/λ` that does not exist |
+| 1 | `NormalisedRotatingSource` never applied `currentScale()` | `[source] Type = "rotating"` + `Normalised` + `PlasmaCurrent`, no guard anywhere | `∫F/R` independent of λ, so the current constraint cannot be satisfied by the unknown that exists to satisfy it — while `assembleCurrentColumn()` and `cornerEntry( I, I )` report a sensitivity of `scaledF/λ` that does not exist |
 | 2 | `NormalisedRotatingSource::normalisationDerivatives()` unwritten | every bordered rotating solve | the two normalisation columns differenced, and a difference perturbs the normalisation, which moves the edge, so it straddles a kink |
 | 3 | `assembleCurrentNormalisationCorner()` returned a silent **zero** on a source that refused | any source without (2) | see below |
 
@@ -3975,9 +3975,9 @@ the defect gives 42.
 
 **A fourth finding is recorded and NOT repaired**, because repairing it needs an
 instrument that does not exist. The axis row drops its position term by the
-envelope theorem, justified in `GradShafranov.cpp` by *"`grad_bar( psi ) = r q`,
+envelope theorem, justified in `GradShafranov.cpp` by *"`grad_bar( psi ) = R q`,
 so `grad( psi_h )( x* ) = 0` at a zero of `q_h` **IDENTICALLY**"*. That relation
-is continuous: the discrete flux equation makes `r q_h − ∇̄ψ_h` the local lifting
+is continuous: the discrete flux equation makes `R q_h − ∇̄ψ_h` the local lifting
 of the trace jump, so `∇ψ_h( x* )` is `O( h^k )` rather than zero — which is the
 same fact as `q_h` converging a full order better than `∇ψ_h`, and is why the
 mixed method exists. `cornerEntry()`'s XP-3 arm says exactly this about the same
@@ -4101,9 +4101,9 @@ envelope argument holds anywhere it is there:
 The ratio falls with `h`, which is the extra order showing — and `grad psi*` is
 still 1e-04, nowhere near round-off. The reason is structural rather than a
 matter of resolution: the local post-processing solves
-`( grad psi*, grad v )_K = ( r q_h, grad v )_K`, so `grad psi*` is the L2
-projection of `r q_h` onto the GRADIENTS of `P^(k+2)( K )` — the nearest
-gradient field to `r q_h` and not `r q_h` itself. `r q_h` is not a discrete
+`( grad psi*, grad v )_K = ( R q_h, grad v )_K`, so `grad psi*` is the L2
+projection of `R q_h` onto the GRADIENTS of `P^(k+2)( K )` — the nearest
+gradient field to `R q_h` and not `R q_h` itself. `R q_h` is not a discrete
 gradient, so a residual survives however fine the mesh.
 
 **So there are three repairs and they are not the same one.** (a) evaluate
@@ -4384,7 +4384,7 @@ wrong answer rather than a failed one.
 
 **AND THE COLUMN'S SHAPE DOES NOT MATTER, WHICH IS THE RESULT THAT MAKES THIS
 USABLE.** A column tuned to MAST-U's own plasma — semi-axes ( 0.50, 0.90 )
-against a separatrix reaching `r = 0.26` to `1.4` and `|z| = 1.1` — and a round
+against a separatrix reaching `R = 0.26` to `1.4` and `|z| = 1.1` — and a round
 one at the DEFAULT `0.5*CentreR = 0.425` reach the same `psi_ax`, `psi_bnd` and
 X-point **to every printed digit**, in the same 12 Newton iterations. So the
 file costs the user ONE number, the guessed major radius, and MEQ supplies the
@@ -4416,7 +4416,7 @@ Measured in `tests/unit/CoilsTests.cpp`:
 
 | | |
 |---|---|
-| `Delta* psi` inside the column against `-mu0 r I/( pi a b )` | **1.5e-05 to 4.7e-05** relative — the second difference's own truncation |
+| `Delta* psi` inside the column against `-mu0 R I/( pi a b )` | **1.5e-05 to 4.7e-05** relative — the second difference's own truncation |
 | `Delta* psi` outside it | **8.4e-07 to 1.8e-05** of the interior value |
 | a shrinking column against its filament | rate **1.98, 1.99, 2.00** — the quadrupole moment, `O( a^2 )` |
 | the step across the boundary, extrapolated from each side | **8.7e-06 to 9.2e-04** relative |
@@ -4737,8 +4737,8 @@ mesh, same configuration, throws *"the potential space's element at
 * **A `--vessel` reaching past Gamma silently meshes a bigger domain.**
   `occ.fragment` keeps the parts of a tool lying OUTSIDE the shape it is
   fragmented into, so a vessel polygon poking past `rho` becomes extra surfaces.
-  Measured at `--rho 1.5` with a polygon out to `r = 2.5`: the written mesh
-  reaches **r = 2.5**, with **32 nodes carrying Gamma's attribute** on edges
+  Measured at `--rho 1.5` with a polygon out to `R = 2.5`: the written mesh
+  reaches **R = 2.5**, with **32 nodes carrying Gamma's attribute** on edges
   inside it — the transferred exterior datum imposed in the middle of the
   domain. `--check` catches it, but only with `--check` and only after the mesh
   is built. It is now a parse-time refusal, which `--coil` and `--limiter`
@@ -5135,7 +5135,7 @@ reference. Two refinements are not enough to call either a limit.
 The probe reported a magnetic axis from
 `CriticalPointFinder::findAxis( AxisSense::Maximum )`, and on levels 0 and 1 it
 returned `( 1.006240, -1.099327 )` for every row. That is **inside coil P1L** —
-`CentreR = 1.00`, `CentreZ = -1.10`, half-extent 0.05, so `r ∈ [ 0.95, 1.05 ]`
+`CentreR = 1.00`, `CentreZ = -1.10`, half-extent 0.05, so `R ∈ [ 0.95, 1.05 ]`
 and `z ∈ [ -1.15, -1.05 ]`. `findAxis()` with no argument refuses outright here,
 reporting *"3 maxima, 2 minima and 2 saddles"*, and forcing a sense does not
 find the plasma — it picks a conductor's O-point.
@@ -5710,7 +5710,7 @@ subtracted.
 coil's own field as the Dirichlet datum and no plasma, the remainder is
 identically zero and the total is `psi_c` **exactly**
 → **[§7.4](COIL-SUBTRACTION-PLAN.md)**. The meshed arm solves
-`Δ* psi = −mu0 r j_phi` with the same datum and a **top-hat** source, so it
+`Δ* psi = −mu0 R j_phi` with the same datum and a **top-hat** source, so it
 approximates that same field to the mesh's order. The difference between them
 therefore *is* the meshed route's discretisation error.
 
@@ -5809,7 +5809,7 @@ subtracted, with no plasma, where the continuous answer is `psi_p ≡ 0` and `a`
 is `psi_c`'s own Gegenbauer trace.
 
 `theSplitReachesTheExteriorCoupling`, `k = 2`, twelve modes, conductors at
-`r = 0.50`, `z = ±0.20` inside `Γ = 1.5`, with `psi_c` on `Γ` reading
+`R = 0.50`, `z = ±0.20` inside `Γ = 1.5`, with `psi_c` on `Γ` reading
 **6.3838e-02**:
 
 | `n` | Newton | `max |psi_p|` | of the datum | modal sum `−` `psi_c` on `Γ` |
@@ -5946,7 +5946,7 @@ two traces:
 | the corrector's own target, `tolerance × potentialScale()` | 2.9546e-13 |
 | spread of `psi_p` alone along that contour | 2.9140e-02 |
 | **spread of `psi_p + psi_c` along the conductor-BLIND contour** | **4.1870e-02** |
-| `sampleAt()` against `psi_p( r, z ) + psi_c( r, z )`, 49 points | **0.0000e+00** |
+| `sampleAt()` against `psi_p( R, z ) + psi_c( R, z )`, 49 points | **0.0000e+00** |
 
 **THE SURFACE IS A SURFACE TO THE CORRECTOR'S OWN TOLERANCE AND NOT BETTER,
 WHICH IS THE RIGHT ANSWER.** 2.69e-13 against a target of 2.95e-13 says the
@@ -6041,10 +6041,10 @@ set.
 #### The order, which is what these cases exist for
 
 `fixed-h-circular` swept over `RefinementLevels` — exact bisection, so each
-level is **nested** in the last — against its own `r = 3` answer, relative L2 in
+level is **nested** in the last — against its own `R = 3` answer, relative L2 in
 `psi*` over the 11,919 grid nodes common to all four and outside the band:
 
-| | `r = 0`, 1,086 el | `r = 1`, 4,535 | `r = 2`, 18,458 | rates |
+| | `R = 0`, 1,086 el | `R = 1`, 4,535 | `R = 2`, 18,458 | rates |
 |---|---|---|---|---|
 | `k = 1` | 9.0509e-04 | 2.7758e-04 | 3.1370e-05 | 1.71, **3.15** |
 | `k = 2` | 1.9557e-04 | 1.1836e-05 | 1.6754e-07 | **4.05**, 6.14 |
@@ -6162,9 +6162,9 @@ defects in a row, each hidden behind the last:
 
 | | what it was | how it presented |
 |---|---|---|
-| `CriticalPointFinder::totalFlux` had no half-plane guard | the element-local Newton evaluates this element's polynomial OUTSIDE the element deliberately, and on a half-disc whose elements reach `r = 0` the iterate leaves the half-plane, where `meq::coilGradPsi` REFUSES a negative radius | `the bordered Newton did not converge: meq::coilGradPsi: the field point radius must not be negative` — a throw from three frames down naming a radius and nothing else |
+| `CriticalPointFinder::totalFlux` had no half-plane guard | the element-local Newton evaluates this element's polynomial OUTSIDE the element deliberately, and on a half-disc whose elements reach `R = 0` the iterate leaves the half-plane, where `meq::coilGradPsi` REFUSES a negative radius | `the bordered Newton did not converge: meq::coilGradPsi: the field point radius must not be negative` — a throw from three frames down naming a radius and nothing else |
 | **the X-point border read `q_p`, not `q_p + q_c`** | XP-3's rows close `q( x_X ) = 0` and `psi_bnd = psi( x_X )`, and both read the SOLVED field. Under the split that is a null of the remainder, which has no reason to be anywhere near the physical X-point | the bordered Jacobian went singular, and it did so **on a run started at the converged meshed answer** — which is what said a border rather than a hard problem |
-| **the plasma-current integral and its four derivative assemblies read the remainder** | five sites in `GradShafranov.cpp` rebuild `psi` from the state at a source quadrature point and hand it to `meq::NormalisedSource`. With `ConfineToPlasma` the profiles return zero wherever the normalised flux is negative, and a remainder is negative nearly everywhere a conductor is subtracted | `int F/r` came out **exactly zero**, so the plasma-current row of the dense corner was identically zero — `row 4  \|row\| 0.000e+00  rhs 2.513e-01`, and `2.513e-01` is `μ₀ I_p` to every digit |
+| **the plasma-current integral and its four derivative assemblies read the remainder** | five sites in `GradShafranov.cpp` rebuild `psi` from the state at a source quadrature point and hand it to `meq::NormalisedSource`. With `ConfineToPlasma` the profiles return zero wherever the normalised flux is negative, and a remainder is negative nearly everywhere a conductor is subtracted | `int F/R` came out **exactly zero**, so the plasma-current row of the dense corner was identically zero — `row 4  \|row\| 0.000e+00  rhs 2.513e-01`, and `2.513e-01` is `μ₀ I_p` to every digit |
 
 | **the conductor filter read the SOURCE's coil set, which the split empties** | two searches refuse a candidate sitting inside a conductor — the axis constraint's and the plasma fill's seed — because any coil carrying current of the plasma's own sign has an O-point competing on exactly the score they maximise. Both read `Source::conductors()`, which is right on the meshed route and **empty** on the subtracted one, since the driver releases its `meq::CoilSet` to avoid double counting | nothing. The filter was simply off, and the failure it guards against is a run that ends with its axis inside a coil and a span six times the physical one |
 
@@ -6410,7 +6410,7 @@ was given, the DISCRETISATION it solves with, and the ITERATION that got there.
 `tools/freegs4e-benchmark/source_check.py` separates the first from the other
 two exactly — no solver, no mesh, no interpolation of a field. It evaluates
 `meq::NormalisedMHDSource::f` at `freegs4e`'s own converged `psi` and compares
-`F/( mu0 r )` against `freegs4e`'s own current density on the same grid.
+`F/( mu0 R )` against `freegs4e`'s own current density on the same grid.
 
 | case | relative L2 | core-current ratio | core current |
 |---|---|---|---|
@@ -6424,7 +6424,7 @@ two exactly — no solver, no mesh, no interpolation of a field. It evaluates
 SILENTLY ON ITS OWN**: the SENSE of the normalised flux, MEQ's `Psi` being 1 on
 the axis where `freegs4e`'s `psi_n` is 0; the SPAN, which appears once in
 `meq::NormalisedMHDSource::f`'s `1/span` and once more in the tables being
-`d/dPsi` where the reference's arrays are `d/dpsi`; the `mu0 r^2` on `p'` and
+`d/dPsi` where the reference's arrays are `d/dpsi`; the `mu0 R^2` on `p'` and
 nothing on `gg'`; and the tabulation. A factor dropped anywhere here converges
 to a different equilibrium and complains about nothing.
 
@@ -6660,19 +6660,19 @@ runs. Read this column as `|z| ≈ 1.000` and not as a signed comparison.
 
 **THE TWO `filamentPsi` FAILURES ARE ONE DEFECT AND `k2r0a3` IS NOT IT.** This
 is worth separating because the failure rows all print the same width: `k3r0`
-and `k3r0a3` die in `meq::filamentPsi` on a field point with `r < 0`, and
+and `k3r0a3` die in `meq::filamentPsi` on a field point with `R < 0`, and
 `k2r0a3` is a plain non-convergence with no conductor in it. → [M-156](#m-156).
 
 ### M-156
 
-**THE NEGATIVE-RADIUS DEFECT: `Γ`'s OWN ENDPOINT, AND `psi_c` IS EVEN IN `r`.**
+**THE NEGATIVE-RADIUS DEFECT: `Γ`'s OWN ENDPOINT, AND `psi_c` IS EVEN IN `R`.**
 
 The throw named a radius and did not say what it was, so the first change was to
 put the point in the message. Re-run, `k3r0` dies at
 
 ```
-meq::filamentPsi: the field point radius must not be negative; r = 0 is
-allowed and gives exactly zero. The point is ( r, z ) = ( -0.0010984, 3.4 )
+meq::filamentPsi: the field point radius must not be negative; R = 0 is
+allowed and gives exactly zero. The point is ( R, z ) = ( -0.0010984, 3.4 )
 ```
 
 and `gdb -ex 'catch throw'` names the site in five frames:
@@ -6682,17 +6682,17 @@ and `gdb -ex 'catch throw'` names the site in five frames:
 `mfem::LinearForm::Assemble` ← `prepare()`.
 
 **`z = 3.4` IS `Γ`'s UPPER ENDPOINT AND THE OVERSHOOT IS ABOUT 1% OF `h`.** `Γ`
-is a semicircle centred on the axis, so its two endpoints lie exactly ON `r = 0`;
+is a semicircle centred on the axis, so its two endpoints lie exactly ON `R = 0`;
 a transfer path targeting one of them lands either side by an amount that is a
 property of the path map, not of whether the mesh is valid. 1.1e-03 against
 `h ≈ 0.11` on 1510 elements. **Not round-off, and not a geometry error either.**
 
-**THE FIX IS A CONTINUATION AND NOT A CLAMP.** `psi = r A_φ`; under `r → −r` at
+**THE FIX IS A CONTINUATION AND NOT A CLAMP.** `psi = R A_φ`; under `R → −R` at
 fixed `z` the point is the same physical point rotated by `π` in `φ`, so `φ̂`
 reverses, `A_φ` changes sign, and the product does not. So
-`psi_c( −r, z ) = psi_c( r, z )` **exactly**, and `ConductorField::psi` reflects.
-Near the axis `psi_c ~ c(z) r²`, so a point a hair past `r = 0` gets a hair
-above zero, which is what the physics says. Clamping to `r = 0` would also
+`psi_c( −R, z ) = psi_c( R, z )` **exactly**, and `ConductorField::psi` reflects.
+Near the axis `psi_c ~ c(z) r²`, so a point a hair past `R = 0` gets a hair
+above zero, which is what the physics says. Clamping to `R = 0` would also
 "work" and would be wrong by `O(r²)`; the unit test asserts the reflection as a
 **bit equality** and separately asserts the near-axis value is not zero, which is
 what distinguishes the two.
@@ -6708,12 +6708,12 @@ scalar sibling that was left unguarded when `totalFlux` was fixed, needs no
 guard of its own now: it inherits the continuation.
 
 **A SECOND, SILENT DEFECT AT THE SAME SEAM, FOUND BY THE TEST AND NOT BY THE
-RUN.** `ConductorField::poloidalField` branched on `if ( r > 0.0 )` and treated
+RUN.** `ConductorField::poloidalField` branched on `if ( R > 0.0 )` and treated
 everything else as *on the axis*, returning the closed-form axis limit — so a
 point PAST the axis got a plausible number rather than a refusal, while the
 method's own doxygen promised it *"throws as psi() does"*. Nothing reached it
-with `r < 0` in this run; it is on the output path, where an `.nc` grid on a
-half-disc machine has its whole first column on `r = 0` and the wrong branch
+with `R < 0` in this run; it is on the output path, where an `.nc` grid on a
+half-disc machine has its whole first column on `R = 0` and the wrong branch
 would be one column of a 129² file, finite and smooth against its neighbours.
 It now refuses below zero and keeps the limit at zero.
 
@@ -6754,9 +6754,9 @@ exists for. **At 1e-04 the sign flips even warm**: MEQ 10.99 s against DESC's
 
 | `fixed-f-diiid` | dofs | wall/s | vs `freegs4e` |
 |---|---|---|---|
-| MEQ k=1 r=0 | 4,536 | 9.95 | 4.4649e-04 |
-| **MEQ k=2 r=0** | 6,804 | **10.99** | **3.8974e-05** |
-| MEQ k=3 r=1 | 37,470 | 23.23 | 5.1078e-05 |
+| MEQ k=1 R=0 | 4,536 | 9.95 | 4.4649e-04 |
+| **MEQ k=2 R=0** | 6,804 | **10.99** | **3.8974e-05** |
+| MEQ k=3 R=1 | 37,470 | 23.23 | 5.1078e-05 |
 | DESC M=10 | 268 | 27.36 | 1.3676e-03 |
 | DESC M=16 | 553 | 31.26 | 1.5975e-04 |
 | **DESC M=20** | 803 | **103.21** | **2.2953e-05** |
@@ -6845,12 +6845,12 @@ DIRECTIONS**, because a conversion error is a fixed offset and cannot do that.
 
 | | `NS=NT=20` | `NS=NT=40` | `NS=NT=80` |
 |---|---|---|---|
-| MEQ `k=1 r=0` | 8.925e-04 | 8.912e-04 | 8.911e-04 |
-| MEQ `k=2 r=0` | 1.933e-04 | 1.945e-04 | 1.942e-04 |
-| MEQ `k=3 r=0` | 1.446e-05 | 1.123e-05 | **2.696e-06** |
-| MEQ `k=1 r=1` | 2.875e-04 | 2.886e-04 | 2.885e-04 |
-| MEQ `k=2 r=1` | 1.999e-05 | 1.722e-05 | 1.340e-05 |
-| MEQ `k=3 r=1` | 1.390e-05 | 1.085e-05 | **1.300e-06** |
+| MEQ `k=1 R=0` | 8.925e-04 | 8.912e-04 | 8.911e-04 |
+| MEQ `k=2 R=0` | 1.933e-04 | 1.945e-04 | 1.942e-04 |
+| MEQ `k=3 R=0` | 1.446e-05 | 1.123e-05 | **2.696e-06** |
+| MEQ `k=1 R=1` | 2.875e-04 | 2.886e-04 | 2.885e-04 |
+| MEQ `k=2 R=1` | 1.999e-05 | 1.722e-05 | 1.340e-05 |
+| MEQ `k=3 R=1` | 1.390e-05 | 1.085e-05 | **1.300e-06** |
 
 **686× corner to corner, and the SHAPE is the result.** The `k = 1` and `k = 2`
 rows are **flat in `NS`** — a sixteen-fold change in CHEASE's element count
@@ -6864,11 +6864,11 @@ CHEASE's own settles to 2.7e-08 between `NS = 40` and 80. Against it, MEQ:
 
 | rung | vs CHEASE `NS=80` | vs the `freegs4e` reference |
 |---|---|---|
-| `k=1 r=0` | 7.700e-04 | 7.855e-04 |
-| `k=2 r=0` | 1.299e-04 | 1.144e-04 |
-| `k=2 r=1` | 7.353e-06 | 2.284e-05 |
-| `k=3 r=0` | 1.198e-06 | 1.668e-05 |
-| `k=3 r=1` | **2.785e-08** | 1.551e-05 |
+| `k=1 R=0` | 7.700e-04 | 7.855e-04 |
+| `k=2 R=0` | 1.299e-04 | 1.144e-04 |
+| `k=2 R=1` | 7.353e-06 | 2.284e-05 |
+| `k=3 R=0` | 1.198e-06 | 1.668e-05 |
+| `k=3 R=1` | **2.785e-08** | 1.551e-05 |
 
 **MONOTONE OVER FOUR AND A HALF ORDERS, ENDING AT 2.8e-08 — eight significant
 figures between two codes sharing nothing but the equation and the input
@@ -6890,7 +6890,7 @@ measured against. The `NS = 30` cell is this session's own re-run at
 `NRBOX = 257`, which is why it sits slightly high.
 
 **AND THE CANCELLATION IS CAUGHT IN THE WILD**, which is the part worth keeping.
-MEQ at `k=2 r=0` reads **9.7266e-05** against the reference — *better* than
+MEQ at `k=2 R=0` reads **9.7266e-05** against the reference — *better* than
 CHEASE's 1.1267e-04 — and **1.942e-04** against CHEASE. Both are true; the first
 is partly MEQ's error and the reference's lying on the same side.
 `compare_desc.py`'s header warns in the abstract that two codes agreeing to `X`
@@ -7157,7 +7157,7 @@ subtracting conductor model a bad estimate costs **92% of the run**.
 `edgeFluxOf` IS APPLIED TO A STATE.** All three call sites pass an iterate, never
 a backsolved direction, so the constant survives; M-154a's second row is the same
 question answered the other way for `rowDot()`, where it must not.
-`ConductorField::psi` is even in `r` ([M-156](#m-156)), so a seed on the axis is
+`ConductorField::psi` is even in `R` ([M-156](#m-156)), so a seed on the axis is
 answered rather than refused. The surface-maximum branch takes its maximum on the
 **total** at each dof's own point — `max( psi_p ) + psi_c` is not
 `max( psi_p + psi_c )` and they pick different dofs.
@@ -7283,7 +7283,7 @@ at the contact, applied only to states, where `psi_c` belongs. That much is
 | route | `LimiterConstraint` | how it knows the point | conductor term |
 |---|---|---|---|
 | nearest dof | `NearestDof` | an index into the potential block | `conductorPsiAtDof()` ✔ |
-| located contact | `LocatedContact` | `refreshLimiterContact()` at this iterate | `conductorPsi( r, z )` ✔ |
+| located contact | `LocatedContact` | `refreshLimiterContact()` at this iterate | `conductorPsi( R, z )` ✔ |
 | the X-point | `ExactPoint` + `xPointIsUnknown` | XP-3's own unknown | `conductorPsi( xR, xZ )` ✔ |
 | **a prescribed point** | **`ExactPoint`** | **`[boundary.limiter] R`, `Z` — given data** | **none** |
 
@@ -7317,7 +7317,7 @@ the `freegs4e` limited machine, against that reference's own span:
 
 It converges, every border at machine zero, the plasma current met to seven
 figures — onto a branch with `psi_bnd > psi_ax`, a **negative** profile scale,
-no O-point anywhere and `r = 0` inside the plasma. The only thing that caught
+no O-point anywhere and `R = 0` inside the plasma. The only thing that caught
 it is `apps/meq.cpp`'s source-on-the-axis refusal, which fires on the
 consequence rather than the cause and whose advice ("look at the limiter and
 the initial guess") is wrong here.
@@ -7664,14 +7664,14 @@ that file ships `PolynomialDegree = 3`.
 
 | | seconds | warm | vs `freegs4e` | vs the other code |
 |---|---|---|---|---|
-| **MEQ `k=2 r=0`** | **7.16** | — | 9.7266e-05 | 1.1815e-04 |
-| MEQ `k=3 r=0` | 8.37 | — | 1.1808e-04 | 1.3658e-04 |
-| MEQ `k=3 r=1` | 23.94 | — | 1.1443e-04 | 1.3317e-04 |
+| **MEQ `k=2 R=0`** | **7.16** | — | 9.7266e-05 | 1.1815e-04 |
+| MEQ `k=3 R=0` | 8.37 | — | 1.1808e-04 | 1.3658e-04 |
+| MEQ `k=3 R=1` | 23.94 | — | 1.1443e-04 | 1.3317e-04 |
 | **DESC `M = 12`** | **34.38** | **0.60** | 9.3509e-05 | 1.3957e-04 |
 | DESC `M = 16` | 37.36 | 1.40 | 5.9189e-05 | 1.1815e-04 |
 | DESC `M = 20` | 39.95 | 2.64 | 7.4928e-05 | 1.2733e-04 |
 
-At matched accuracy — MEQ `k = 2 r = 0` at 9.73e-05 against DESC `M = 12` at
+At matched accuracy — MEQ `k = 2 R = 0` at 9.73e-05 against DESC `M = 12` at
 9.35e-05 — **MEQ is 4.80× faster cold and DESC is 11.9× faster warm.** Both
 clocks, as [M-157](#m-157) insists; the cold one is what solving an equilibrium
 once costs and the warm one is what a parameter scan pays. The mutual floor is
@@ -8166,3 +8166,372 @@ sharp claim is section 2's, which differences against `meq::coilPsi()` rather
 than against a discretisation. **A driver acceptance on a fixture whose
 reference is worse than the effect is a test of reachability, and saying so is
 what stops it being quoted as a test of accuracy.**
+
+### M-167
+
+**MEQ'S ROTATING SOURCE AGAINST AN INDEPENDENT IMPLEMENTATION OF RoPP (136),
+AND THE WHOLE OF THE DISAGREEMENT IS THE REFERENCE'S OWN `phi_0` CONVERGENCE.**
+
+`../geq` drives `../freegs4e`'s `ProfilesCentrifugalMirror` for rotating
+magnetic mirrors, in Python, by finite differences and Picard. It implements
+Abel et al. 2013, Rep. Prog. Phys. 76 116201, eq (136) closed by its (96) and
+(97) — the same paper from the same equations as `meq::RotatingSource`. Two
+independent implementations of one equation, which is rarer than it sounds.
+
+`tools/geq-benchmark/export_mirror.py` writes a prescribed state — a
+vacuum-field mirror with species, rotation and the quasineutrality potential
+solved — and `tests/convergence/GeqSourceComparison.cpp` evaluates MEQ's `F` at
+it against geq's own `mu0 R Jtor`. **No solver runs on either side**, which is
+what separates the source from the discretisation and the iteration exactly.
+
+#### 1. The state
+
+65 x 65 grid, 1300 nodes inside the plasma, `psi` in [ 5.637801e-03,
+6.610117e-02 ] Wb/rad, `R_ref = 0.254914` m.
+
+**THE TWO CASES SIT AT DIFFERENT MACH NUMBERS AND IT IS FORCED.** With
+`M^2 = m_i omega^2 R( z=0 )^2/T_e` on the `psi_n = 0.5` surface, `two` is at
+**M = 5.999** — the operating point [M-168](#m-168) says the exterior assumption
+needs — and `three` at **M = 0.757**. `meta.txt` records it per case. Section 7
+is why the second cannot be raised.
+
+| | two species | three species |
+|---|---|---|
+| species | electron, deuterium | electron, deuterium, **carbon, `Z = 6`** |
+| MEQ closure | `ClosedForm` | **`RootFind`** |
+| `M( psi_n = 0.5 )` | **5.999** | 0.757 |
+| `omega` | 4.7580e+06 .. 6.1854e+06 rad/s, drift 1.300x | 6.0000e+05 .. 7.8000e+05 |
+| `T` | 343 .. 1280 eV (e), 354 .. 1530 eV (i) | the same |
+| `n_s0` spread | **2.538e+22x** | 1.338e+01x (e), 1.100e+01x (D), 9.540e+01x (C) |
+| max abs exponent | **374.269** | 35.710 |
+| `max abs F` | 6.038901e-01 | 1.387489e-01 |
+
+**`C( psi )` DRIFTS 7.58x ON THIS STATE**, against 2.50x on
+`tests/analytic/VaryingCentrifugal.hpp`. That fixture closed the `C'( psi )` gap
+and shares an author and a reading of the paper with MEQ; this one does not.
+
+#### 2. The agreement
+
+| | geq's `phi_0` as it ships | `phi_0` tightened | sharpened by |
+|---|---|---|---|
+| two (M = 6.0), relative L2 | 1.324229e-03 | **4.445418e-07** | 2979x |
+| two, worst point | 1.087805e-02 | 9.950587e-07 | |
+| three (M = 0.76), relative L2 | 6.338398e-06 | **6.169679e-09** | 1027x |
+| three, worst point | 3.906299e-05 | 4.283585e-08 | |
+
+**geq's OWN `phi_0` RESIDUAL IS 600x LARGER AT M = 6**, which is the reference
+getting harder rather than MEQ getting worse: a stiffer quasineutrality problem
+is one geq's field solve converges less far on. Section 3 is the proof that it is
+the reference's.
+
+#### 3. The 2.2e-06 is geq's, and that is measured rather than argued
+
+It is **not** tabulation: sweeping the exported knot count against the
+as-shipped reference it converges and stops — 2.497536e-06 at 129 knots,
+2.245753e-06 at 257, 2.225882e-06 at 513, 2.223114e-06 at 1025, 2.223054e-06 at
+2049. A stable, reproducible, resolution-independent residual, and every one of
+those properties is equally consistent with a small fault in MEQ.
+
+What separated them was asking the **reference about itself**.
+`solve_quasineutrality_global` converges the `phi_0` FIELD to
+**5.510e-05 rms and 1.541e-04 max** in `Sum_s Z_s n_s` (two species;
+1.187e-04 and 3.527e-04 at three), where MEQ solves the same condition to 1e-14
+pointwise. Recomputing **geq's own `Jtor`** with `phi_0` solved pointwise, with
+nothing of MEQ's anywhere in the calculation:
+
+| | geq against itself | MEQ against geq |
+|---|---|---|
+| two, M = 6.0 | **1.324204e-03** | 1.324229e-03 |
+| two, M = 0.76 | **2.223068e-06** | 2.223054e-06 |
+| three, M = 0.76 | **6.338347e-06** | 6.338332e-06 |
+
+**Four to six significant figures**, at both Mach numbers. The residual is
+entirely the reference's.
+
+#### 4. Against the tightened reference there is no floor on either side
+
+What is left is the interchange tables, and it converges away:
+
+| knots | 129 | 257 | 513 | 1025 | 2049 | 4097 |
+|---|---|---|---|---|---|---|
+| two, M = 0.76 | 1.110419e-06 | 1.918259e-07 | 2.838872e-08 | 5.978682e-09 | 1.454653e-09 | 3.463697e-10 |
+| three, M = 0.76 | 1.136474e-06 | 1.968826e-07 | 2.920257e-08 | 6.169679e-09 | 1.509666e-09 | 3.664358e-10 |
+| **two, M = 6.0** | | | 2.843700e-05 | 3.393558e-06 | 4.445418e-07 | 5.593192e-08 |
+
+About **4x** a doubling at `M = 0.76` and a clean **8x — third order —** at
+`M = 6`, where the density table spans 22 orders and the interpolant has to work
+for its accuracy. **HIGH MACH DOES NOT BREAK THE AGREEMENT, IT MAKES THE TABLES
+WORK HARDER**: at 4097 knots `M = 6` reaches 5.59e-08, which is what `M = 0.76`
+reaches at 513. **So the two implementations are the same function to whatever
+accuracy the tables are asked to carry, at both operating points.** The committed
+references are 2049 knots for `two` and 1025 for `three`, chosen for file size.
+
+#### 5. The gauge is load bearing, and it fails as a refusal rather than a number
+
+MEQ pins `phi_0( R_ref, psi ) = 0`, one condition per flux surface; geq pins one
+global point at `psi_n = 0.5` on the midplane. `N_s` absorbs the difference
+through `exp( Z_s e delta/T_s )`, a **different factor per species**, so no
+single rescaling relates the two codes' tables. Handing MEQ geq's raw `N_s`
+gives `Sum_s Z_s N_s = -4.999999e+19` at `R_ref`, **9.999994e-01 of the density
+scale**, and `meq::RotatingSource`'s constructor throws `std::invalid_argument`.
+
+**It cannot be got wrong by accident**, which is a stronger property than a large
+error would be, and it is why `meq::chargeNeutralityResidual` is public. The
+transfer itself is geq's own quasineutrality solved at `R = R_ref`, with the
+`psi`-derivative by implicit differentiation rather than by differencing —
+`F` is `mu0 R^2 dp/dpsi`, so the tables' derivative column IS the thing compared.
+It reaches **1.423e-14** relative neutrality at `R_ref` (6.924e-16 at three
+species), which is what MEQ's constructor checks.
+
+#### 7. The single-`R_ref` gauge does not survive a high-Mach MULTI-SPECIES mirror
+
+**AND THIS IS MEQ'S OWN INTERFACE, NOT THE BENCHMARK'S.**
+`meq::Species::density` is `n_s0( psi )`, the physical density on ONE curve
+`R = R_ref`, for every flux surface. Transferring a surface whose own midplane
+radius is `R_mid` therefore carries
+`exp( m_s omega^2 ( R_ref^2 - R_mid^2 )/2T_s )` — an exponent **linear in the
+species mass**. Measured at `psi_n = 0.05 / 0.5 / 0.95`:
+
+| | M = 0.76 | M = 6.0 |
+|---|---|---|
+| electron | +0.0 / +0.0 / −0.0 | +0.0 / +0.0 / −0.0 |
+| deuterium | +0.5 / +0.0 / −0.8 | +31.2 / +0.0 / −51.8 |
+| **carbon** | +3.0 / +0.0 / −4.9 | **+187.2 / +0.0 / −310.5** |
+
+Double precision overflows at `exp( 709.8 )`. Carbon's `n_s0` therefore spans
+about **1e216** at `M = 6`, and the transfer's root find loses its bracket
+outright — `RuntimeError: no bracket for phi_0` — so **the three-species case
+cannot be posed at `M = 6` at all**. Deuterium alone is 1e36 and survives, which
+is why `two` is the case that carries the operating point.
+
+**`R_ref` IS ALREADY AT ITS OPTIMUM, SO THIS IS NOT A TUNING FAILURE.** The
+range is minimised by `R_ref^2` midway between the extreme surfaces' `R_mid^2`,
+which is `sqrt( ( 0.1241^2 + 0.3415^2 )/2 ) = 0.257` against the 0.2549 the
+export picks. There is no better single radius.
+
+**The shape of the fix is a gauge that is per-surface** — geq references each
+surface's own midplane radius, which is exactly why its `N_s` stays `O( n )` —
+or storing `log n_s0`. Neither is a benchmark change. `MIRROR-PLAN.md` item 6
+carries it, because a mirror is a high-Mach multi-species device by definition
+and this is on the path to MR-4.
+
+#### 6. What this does not reach
+
+The mirror is `g = 0` throughout, so `g g'` is untested here and the comparison
+is the pressure term alone. It is a **source** comparison: no mesh, no
+discretisation, no boundary condition and no iteration on either side. And geq
+has since grown an anisotropic and kinetic closure — `kinetic_closure.py`,
+`fast_species.py`, `test_anisotropic_jtor.py` — which MEQ has no counterpart
+for; this is pinned to the isotropic `ProfilesCentrifugalMirror` path and must
+stay there.
+
+### M-168
+
+**WHERE A MIRROR'S TOROIDAL CURRENT LIVES, AND WHAT IT COSTS THE HALF-DISC
+EXTERIOR.**
+
+MEQ's free boundary truncates at a **semicircle** `Γ` centred on the axis and
+represents everything outside it by a Gegenbauer expansion whose modes decay as
+`ρ^(1−n)`. That is exact only where the exterior is current-free, and
+`MIRROR-PLAN.md`'s standing assumption is the working form of it: `Γ` large
+enough, and the confinement good enough, that the plasma's `j_φ` is negligible
+**on and beyond** `Γ`. Not that there is no plasma out there — only that what is
+out there does not move `B`.
+
+**SUPERSEDED BY [M-169](#m-169) — READ THAT FIRST.** Everything below measures
+the current beyond **`ρ = 1.2`**, a radius chosen for no reason on a machine
+that extends to `ρ = 1.63`. With `Γ` outside the machine the current beyond it
+is **exactly zero at every Mach number**, so the Mach threshold this entry
+derives is a property of that one arbitrary radius and not of centrifugal
+mirrors. What survives is the *shape* of the measurements — where a mirror's
+current sits, and how the density contrast scales — and the two corrections
+below, which stand.
+
+**IT IS A CONDITION ON THE CONFIGURATION, AND geq'S SHIPPED MIRROR DOES NOT MEET
+IT AT `ρ_Γ = 1.2` BECAUSE ITS DEFAULT ROTATION IS SUBSONIC.** Measured on the two-species state of [M-167](#m-167) at 129 x 129, domain
+`R` in [ 0.050, 0.630 ], `Z` in [ -1.500, 1.500 ]:
+
+| | |
+|---|---|
+| plasma `ψ_n` in [ 0, 1 ] reaches | `\|Z\| = 1.500`, `ρ = 1.511` — the full domain |
+| `ρ` enclosing 90% of `∫\|j_φ\|` | 1.2016 |
+| 99% · 99.9% · 99.99% | 1.4837 · 1.5084 · 1.5099 |
+| `max \|J\|` at `Z = 0.00` · 0.49 · 1.01 · 1.41 | 4.2341e+05 · 3.4484e+05 · 2.3551e+05 · 2.0467e+05 |
+
+**The current falls by a factor of 2 from the midplane to the coil plane, not to
+nothing**, and 10.2% of `∫|j_φ|` lies beyond `ρ = 1.2`.
+
+#### CORRECTION: THE SWEEP BELOW WAS IN THE WRONG REGIME, AND ROTATION IS NOT A WEAK LEVER
+
+**READ THIS BEFORE THE TWO TABLES THAT FOLLOW.** They were taken at
+`omega_axis` of 6.0e+05 to 2.4e+06, which on `M^2 = m_i omega^2 R( z=0 )^2/T_e`
+is **M = 0.57 to 1.98** at the default and only **M = 2.28 to 3.03** at the top
+of the sweep on the mid surface. A centrifugal mirror is operated at **M >= 4**,
+and the conclusion "rotation is a weak lever" is an artefact of never reaching
+it. The tables stay because the shape of the error is worth keeping: a lever
+swept over the wrong decade looks like no lever.
+
+**Calibrated on the `psi_n = 0.5` surface** — `R_mid = 0.2549`, `T_e = 1280` eV,
+`T_i = 1530` eV — with `omega` chosen to hit each target:
+
+| `M( 0.5 )` | `omega_axis` | `n( end )/n( 0 )` | `j( end )/j( 0 )` | `∫\|I\|` beyond `ρ = 1.2` | beyond `ρ = 1.45` |
+|---|---|---|---|---|---|
+| 2.0 | 1.586e+06 | 5.014e-01 | 2.644e-01 | 7.093e-02 | 1.473e-02 |
+| 4.0 | 3.172e+06 | 6.382e-02 | 3.179e-02 | 1.410e-02 | 2.856e-03 |
+| 6.0 | 4.758e+06 | 2.055e-03 | 1.323e-03 | 7.530e-04 | 1.525e-04 |
+| 8.0 | 6.344e+06 | 1.675e-05 | 1.604e-04 | 3.967e-05 | 8.537e-06 |
+| 10.0 | 7.930e+06 | 3.453e-08 | 1.371e-05 | 2.294e-06 | 5.189e-07 |
+
+**SO THE ASSUMPTION IS SATISFIABLE AND `M = 6` IS ABOUT WHERE IT STARTS.** At
+`M = 6` the current beyond `ρ = 1.2` is 7.5e-04, at the `1e-3` MR-0 asks for; at
+`M = 8` it is 4.0e-05 with real margin.
+
+**AND THE LAW IS CLOSED FORM, WHICH IS WHAT MAKES IT A DESIGN TOOL.** The
+density contrast along a field line from midplane to throat is
+
+```
+n( end )/n( 0 ) = exp( -( M^2/2 )( T_e/( T_e + T_i ) )( 1 - 1/R_m ) )
+```
+
+which reproduces every row: 0.074 against 0.064 at `M = 4`, 2.8e-03 against
+2.1e-03 at 6, 3.0e-05 against 1.7e-05 at 8, 8.3e-08 against 3.5e-08 at 10. Here
+`R_m = 3.5`, read off the flux tube as `( R_mid/R_throat )^2 = ( 0.2549/0.1361 )^2`.
+
+**THE AMBIPOLAR FACTOR IS NOT A DETAIL AND IT IS WHY `M` ALONE MISLEADS.** The
+two-species closure shares one exponent `C = omega^2( Z_1 m_2 - Z_2 m_1 )/( Z_1 T_2 - Z_2 T_1 )`,
+which for electrons and deuterium is `omega^2( m_D + m_e )/( T_e + T_i )` — so a
+Mach number defined on `T_e` alone **overstates the confining exponent by
+`T_e/( T_e + T_i )`**, here **0.456**. `M = 4` on that definition confines like
+`M_eff = 2.7`. The electrons must come along, and the field that holds them back
+is half the centrifugal well.
+
+**AND `j` DOES NOT FALL AS FAST AS `n`, WHICH IS THE QUANTITY THAT MATTERS.** At
+`M = 10` the density ratio is 3.5e-08 and the current ratio only 1.4e-05 — three
+orders apart — because `j` carries a term in `m n R^2 omega domega/dpsi` that
+grows with `omega^2` while `n` falls exponentially. **The exterior assumption is
+about the CURRENT**, so size it on the `j` column and not on the `n` one.
+
+#### Rotation is a weak lever and temperature is none at all -- AT M < 3, WHICH IS NOT THE OPERATING POINT
+
+| `ω_axis` | `T_edge` | `j(Z_end)/j(0)` | `ρ` at 99% | `∫\|I\|` beyond `ρ = 1.2` |
+|---|---|---|---|---|
+| 6.00e+05 | 300 | 4.830e-01 | 1.4837 | 1.017e-01 |
+| 6.00e+05 | 100 | 4.846e-01 | 1.4837 | 1.016e-01 |
+| 1.20e+06 | 300 | 3.571e-01 | 1.4813 | 8.538e-02 |
+| 1.20e+06 | 100 | 3.585e-01 | 1.4813 | 8.543e-02 |
+| 2.40e+06 | 300 | 1.037e-01 | 1.4335 | 3.772e-02 |
+| 2.40e+06 | 100 | 1.056e-01 | 1.4338 | 3.864e-02 |
+
+A **4x** in `ω` buys less than a decade at the end plane, and `T_edge` moves the
+third figure. So the axial density contrast
+`exp( m ω² ( R_mid² − R_throat² )/2T )` is set by the **mirror ratio** far more
+than by anything a benchmark would naturally sweep.
+
+#### And moving `Γ` outward makes it WORSE, which is the counter-intuitive half
+
+| `z_extent` | `ω_axis` | `j(Z_end)/j(0)` | `∫\|I\|` beyond `ρ = 1.6` |
+|---|---|---|---|
+| 1.5 | 6.00e+05 | 4.830e-01 | 0.000e+00 |
+| 1.5 | 2.40e+06 | 1.037e-01 | 0.000e+00 |
+| 2.5 | 6.00e+05 | 8.870e-01 | 3.166e-01 |
+| 2.5 | 2.40e+06 | 6.032e-01 | 2.249e-01 |
+| 4.0 | 6.00e+05 | 2.892e+00 | 8.624e-01 |
+| 4.0 | 2.40e+06 | **3.828e+05** | 1.000e+00 |
+
+**geq's plasma region is labelled by FLUX ALONE** — the mask is `0 ≤ ψ_n ≤ 1`
+with no axial cutoff — and beyond the throat the same flux values recur in the
+expander, so extending the domain enrols a growing region as "plasma". At
+`z_extent = 4.0` the end-plane current exceeds the midplane's by **five orders**.
+geq's own `build_mirror_eq` ends the domain at the coil planes and its comment
+says so; the default is load bearing.
+
+**AND THIS TABLE IS CONFOUNDED — IT MOVES THE MACHINE, NOT `Γ`.** `z_extent`
+is geq's own COMPUTATIONAL DOMAIN, and enlarging it enrols more of the expander
+as plasma because geq's mask is `0 ≤ ψ_n ≤ 1` with no axial cutoff. So this
+measures *a larger machine*, which is a different question from *a larger
+truncation radius around a fixed machine*. [M-169](#m-169) asks the second and
+the answer is the opposite: moving `Γ` out at fixed machine drives the
+unrepresentable current to zero. The paragraph below drew the wrong conclusion
+from the right numbers, and it is kept because the confound is the lesson.
+
+**~~SO "PUT `Γ` FURTHER OUT" IS NOT THE LEVER~~ — IT IS EXACTLY THE LEVER, AND
+THIS SENTENCE WAS WRONG.** For a tokamak it is the lever — the plasma is a compact blob
+and `( ρ_plasma/ρ_Γ )^n` improves with every metre. For a mirror the flux tube
+leaves the machine, so the expansion's premise has to be bought from the
+**physics** — trapping and rotation suppressing the density at the throat — and
+then **checked on the answer**, which is `MIRROR-PLAN.md` MR-0.
+
+**The measurement is a property of geq's mask, not of centrifugal mirrors.** A
+configuration with a stronger mirror ratio, or a plasma region that is cut off
+axially rather than by flux alone, can satisfy the assumption comfortably. What
+this rules out is assuming it.
+
+### M-169
+
+**THE MIRROR EXTERIOR NEEDS NO NEW MODEL. IT NEEDS `Γ` PUT OUTSIDE THE MACHINE,
+AND THEN EVERY MACH NUMBER IS ADMISSIBLE.**
+
+[M-168](#m-168) reported that a mirror's toroidal current does not vanish on
+`Γ` and concluded that the exterior assumption forces `M ≳ 6`. **That conclusion
+was an artefact of one arbitrary choice**: it measured the current beyond
+`ρ = 1.2`, a radius picked for no reason, on a machine that extends to
+`ρ = 1.63`. Moving `Γ` outside the machine removes the problem at every Mach
+number, and what is left is a mode count.
+
+#### The experiment
+
+geq's own `j_φ` at Mach `M`, split at `ρ_Γ` into the current inside and the
+current outside. Each cell is a filament and `freegs4e`'s own `Greens` gives its
+flux on a semicircle `Γ` centred at `( 0, 0 )`. Two quantities, and **conflating
+them was the earlier error**:
+
+* **irreducible** — the field on `Γ` of the current lying OUTSIDE it. No number
+  of modes represents this; it is the admissibility assumption itself.
+* **reducible** — the truncation of `Σ a_n C_n( μ )` for the current INSIDE.
+  This is a mode count, which is border columns, which is cost.
+
+Relative L2 on `Γ`, `C_n = ( P_{n−2} − P_n )/( 2n − 1 )` projected in the
+operator's own weight `dΓ/R`:
+
+| `M` | `ρ_Γ` | `∫\|I\|` outside | irreducible | N=4 | N=8 | N=16 | N=32 | N=64 |
+|---|---|---|---|---|---|---|---|---|
+| 2.0 | 1.20 | 7.09e-02 | **2.09e-02** | 4.15e-02 | 1.67e-02 | 4.31e-03 | 2.76e-03 | 7.20e-04 |
+| 2.0 | **1.70** | **0.00e+00** | **0.00e+00** | 2.07e-02 | 6.47e-03 | 1.12e-03 | **2.65e-05** | 1.99e-07 |
+| 2.0 | 2.20 | 0.00e+00 | 0.00e+00 | 7.36e-03 | 8.09e-04 | 1.78e-05 | 5.07e-09 | — |
+| 4.0 | 1.20 | 1.41e-02 | 2.77e-03 | 9.52e-03 | 2.96e-03 | 8.03e-04 | 2.25e-04 | 7.72e-05 |
+| 4.0 | 1.70 | 0.00e+00 | 0.00e+00 | 3.73e-03 | 9.03e-04 | 1.65e-04 | 3.10e-06 | 3.08e-08 |
+| 4.0 | 2.20 | 0.00e+00 | 0.00e+00 | 1.35e-03 | 1.13e-04 | 2.64e-06 | 5.19e-09 | — |
+| 6.0 | 1.20 | 7.53e-04 | 1.70e-04 | 1.58e-03 | 2.70e-04 | 7.44e-05 | 5.27e-06 | 3.34e-06 |
+| 6.0 | 1.70 | 0.00e+00 | 0.00e+00 | 4.79e-04 | 6.00e-05 | 1.08e-05 | 4.22e-07 | 1.33e-08 |
+| 6.0 | 2.20 | 0.00e+00 | 0.00e+00 | 1.74e-04 | 7.60e-06 | 1.73e-07 | 4.59e-09 | — |
+
+The 1.4e-08 floor at `N = 64` is the quadrature, not the expansion.
+
+#### What it says
+
+**`ρ_Γ = 1.7` PUTS THE IRREDUCIBLE ERROR AT EXACTLY ZERO AT `M = 2`**, and at
+every other Mach number, because the machine ends at `ρ = 1.63` and the plasma
+with it. There is no Mach threshold for admissibility. There never was one; the
+threshold in M-168 was a statement about `ρ_Γ = 1.2`.
+
+**LOW MACH COSTS MODES, AND NOT MANY.** At `ρ_Γ = 1.7`, `M = 2` needs **32
+modes for 2.65e-05** where `M = 6` needs 32 for 4.22e-07 — about a decade and a
+half of accuracy between them at equal cost, and `M = 2` at `N = 32` is already
+far below the discretisation error of any mesh MEQ would run. At `ρ_Γ = 2.2`,
+`M = 2` reaches 1.78e-05 with **16**.
+
+**THE TRADE IS MESH AREA AGAINST MODE COUNT, AND BOTH ARE CHEAP HERE.** A
+half-disc to `ρ_Γ = 1.7` is 4.54 m² against the machine's own 1.89 m², about
+**2.4x**, and the extra is vacuum where the field is smooth and the elements can
+be coarse — which is what the adaptive loop does unprompted. Each mode is a
+border column, and [M-98](#m-98) made a column cheap by blocking the trace
+solves.
+
+**SO THE EXTENSION TO BUILD IS NONE.** `ρ_Γ` and `N` are both already
+parameters. What was reported as a physics constraint is a placement choice, and
+the placement that removes it costs 2.4x in mesh area and 32 modes.
+
+**AND THE GENERAL FORM IS THE ONE THIS FILE KEEPS MEETING.** A threshold
+measured at one arbitrary value of a free parameter is a statement about that
+value. `ρ_Γ = 1.2` was never justified; it was carried from one exploratory run
+into a conclusion about achievable Mach numbers, and two tables were built on it.

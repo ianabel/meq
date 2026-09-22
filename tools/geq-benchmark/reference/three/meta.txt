@@ -1,0 +1,11 @@
+case three
+mach_at_half 7.56531579787546260e-01
+R_ref 2.54914065489639519e-01
+mu0 1.25663706143591729e-06
+psi_axis 5.63780116139572449e-03
+psi_boundary 6.61011729156637251e-02
+ggprime 0.0
+species 3
+name electron mass 9.10938371389999982e-31 charge -1.00000000000000000e+00 temperature T_electron.dat density n_electron.dat
+name deuterium mass 3.34358377680000006e-27 charge 1.00000000000000000e+00 temperature T_deuterium.dat density n_deuterium.dat
+name carbon mass 2.00615026607999989e-26 charge 6.00000000000000000e+00 temperature T_carbon.dat density n_carbon.dat

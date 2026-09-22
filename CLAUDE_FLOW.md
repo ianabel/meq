@@ -24,7 +24,7 @@ machinery are all `CLAUDE_HDGGS.md`'s and are inherited rather than restated.
 
 **`meq::RotatingSource` solves the generalised Grad-Shafranov equation of
 `refs/RotatingGK.pdf` (136)**, closed by its (96) and (97), for two species in
-the local gauge `φ₀(r_ref) = 0`. `docs/rotation.rst` is the derivation; this
+the local gauge `φ₀(R_ref) = 0`. `docs/rotation.rst` is the derivation; this
 section is only what a maintainer needs. **Three or more
 species is `Closure::RootFind`** — a safeguarded scalar Newton on (97) with
 `φ₀`'s two `ψ`-derivatives by implicit differentiation — and
@@ -64,7 +64,7 @@ whose density gradient is out by a factor of ten. Both headers say so, and they
 are also the only place in `examples/` that documents the `SplineProfile` file
 format at all.
 
-**(136) collapses to `F = μ₀ r² ∂p/∂ψ|_r + g g′`** with `p = Σ_s n_s T_s`,
+**(136) collapses to `F = μ₀ R² ∂p/∂ψ|_R + g g′`** with `p = Σ_s n_s T_s`,
 because the `∂φ₀/∂ψ` terms cancel identically against quasineutrality. So the
 residual needs `φ₀` and never its derivative; only the Jacobian does. **Two
 species need no root find at all** — (97) is linear in `φ₀` after logs, giving
@@ -103,7 +103,7 @@ problem.
 `meq::SplineProfile` holds its endpoint value outside the knot range, so an
 ungated source does not tail off outside the plasma: it sits at its
 plasma-edge value out to the wall. Measured on a source with `gg' = 1`,
-`ψ_ax = 1`, `ψ_bnd = 0`: `f( r = 1, Ψ = −0.5 )` returned **1.0** where the MHD
+`ψ_ax = 1`, `ψ_bnd = 0`: `f( R = 1, Ψ = −0.5 )` returned **1.0** where the MHD
 source under the identical flag returns **0**. That is a current density filling
 the vacuum region.
 
@@ -153,16 +153,52 @@ equations, in Python, by finite differences and Picard. So it and
 `meq::RotatingSource` are two independent implementations of one equation, which
 is a rarer thing than it sounds and is exactly what the `C′(ψ)` gap wants.
 
-**The smallest comparison is source against source and needs no solve**: geq's
-`Jtor × μ₀R` against MEQ's `F`, pointwise on a prescribed `ψ` and prescribed
-species profiles. `geq/tests/test_jtor_abel.py` already does this against a
-hand-written reference, so MEQ's would substitute for that reference.
+**IT IS BUILT AND IT IS GREEN.** `tools/geq-benchmark/` is the harness and
+`tests/convergence/GeqSourceComparison.cpp` the acceptance, a registered ctest.
+No solver runs on either side: the export writes a prescribed state and the test
+evaluates MEQ's `F` at it against geq's own `μ₀ R Jtor`, which separates the
+source from the discretisation and the iteration exactly. Both of MEQ's closures
+are covered — two species takes `ClosedForm`, three takes `RootFind` and carries
+`Z = 6`.
+
+→ **[M-167](MEASUREMENTS.md#m-167)** — the state · the agreement · what the
+residual turned out to be · the knot sweep · the gauge
+
+**THE HEADLINE IS THAT THE DISAGREEMENT IS THE REFERENCE'S AND THIS WAS
+MEASURED RATHER THAN ARGUED.** MEQ agrees with geq as it ships to **2.223e-06**
+at two species and **6.338e-06** at three — stable, reproducible and, by a knot
+sweep, *not* tabulation. Every one of those properties is equally consistent
+with a small fault in MEQ. What separated them was asking the **reference about
+itself**: `solve_quasineutrality_global` converges the `φ₀` field to 5.5e-05 rms
+in `Σ Z_s n_s`, and recomputing **geq's own** `Jtor` with `φ₀` solved pointwise
+moves it by **2.223068e-06** against MEQ's **2.223054e-06** — six figures, with
+nothing of MEQ's in the first number. Against the tightened reference the
+agreement is **5.98e-09** and falls about 4× per knot doubling, so **neither
+implementation has an error floor of its own**.
+
+**A FLOOR IS NOT A TOLERANCE UNTIL SOMETHING EXPLAINS IT**, and the only
+experiment that can attribute a residual to one side of a comparison is a
+measurement of the reference against itself. It cost one script.
+
+**AND THE `C′` CLAIM IS NOW WEAKER AND BETTER.** The gap was closed by
+`tests/analytic/VaryingCentrifugal.hpp`, which is manufactured and shares an
+author and a reading of the paper with MEQ. geq's state drifts `C` by **7.58×**
+against that fixture's 2.50×, and nothing in it came from MEQ — so this is the
+first **outside** confirmation rather than the only check.
+
+**AND THE NEXT RUNG IS A MIRROR SOLVE RATHER THAN A SOURCE COMPARISON.**
+`MIRROR-PLAN.md` is the plan — MR-0 to MR-5 — and its first stage is a
+falsifying experiment about whether MEQ's semicircular exterior is admissible
+for a machine whose flux tube leaves the domain. Read
+[M-168](MEASUREMENTS.md#m-168) before its stages: geq's shipped mirror does NOT
+satisfy the assumption the exterior rests on, rotation is a weak lever, and
+moving `Γ` outward makes it worse rather than better.
 
 **RECONCILE THE `φ₀` GAUGE FIRST — IT IS NOT A DETAIL.** MEQ pins
 `φ₀(ReferenceRadius, ψ) = 0`, one condition per flux surface. geq pins **one
 point globally**, at `ψ_n = 0.5` on the midplane. `N_s(ψ)` absorbs the difference
 through `exp(Z_s e δ/T_s)`, so **the two codes' tabulated densities mean
-different things** until it is fixed. Compare `n_s(r,z)` and `F`; never `N_s(ψ)`.
+different things** until it is fixed. Compare `n_s(R,z)` and `F`; never `N_s(ψ)`.
 Smaller traps beside it: geq wants `T` in **eV** and MEQ in **Joules**; geq
 derives `ω` from a Mach number or a voltage and re-derives it every Picard step,
 so its `omega_profile` callable is the only way to hand both codes the same
@@ -170,11 +206,17 @@ so its `omega_profile` callable is the only way to hand both codes the same
 `GGPrime = 0` and the trivial-branch warning in
 `examples/rotating-rectangle.toml`.
 
-**Nothing on that side runs here yet** — `freegs4e` is not importable and geq's
-paths point at another machine.
+**Both run here**, in MEQ's own benchmark venv at
+`tools/freegs4e-benchmark/venv` with `geq/src` on `PYTHONPATH`; geq's own
+`tests/test_jtor_abel.py` passes. `pint` and `xarray` are absent, so `geq.utils`
+does not import and nothing in the (136) path needs it. **geq's `CLAUDE.md`
+names a conda env and `/Users/...` paths and is another machine's recipe** —
+which is what made this look unrunnable for as long as it did.
 
 **THE `C′(ψ)` GAP IS CLOSED, BY A MANUFACTURED FIXTURE, AND NO PUBLISHED
-BENCHMARK COULD HAVE CLOSED IT.** `C` constant is what collapses Maschke &
+BENCHMARK COULD HAVE CLOSED IT** — though an independent *implementation* has
+since confirmed it at 7.58× the drift, [M-167](MEASUREMENTS.md#m-167).
+`C` constant is what collapses Maschke &
 Perrin's (4.6) to its (4.8) and makes the equation solvable at all, so a varying
 `C` is exactly what has no closed form — the route is manufactured by necessity
 and there is no point looking for another paper.
@@ -224,7 +266,7 @@ above says the *weighting* is right and not only the chain rule.
 `theChargeWeightedCombinationsAreNotPlainSums` records it.
 
 **THE MANUFACTURED SOLVE IS REACHABLE AND ITS VALUE IS NARROW.** `meq::Source`
-is `f( r, z, ψ )`, so a test-local source adds a `ψ`-independent remainder built
+is `f( R, z, ψ )`, so a test-local source adds a `ψ`-independent remainder built
 from **the fixture** rather than from MEQ's own `f()` — which is what
 `RotatingNewtonConvergence` does, and is why there `ψ_e` stays exact whatever
 `f()` computes. Rates are 1.999 / 2.997 / 3.999 in `ψ` at `k = 1, 2, 3`, Newton
@@ -258,7 +300,7 @@ are blind to the defect, and the Jacobian check and the order are what see it.
 **THREE TRAPS FROM FL-5 TO FL-7, ALL OF THE SAME SPECIES.**
 
 **A control on the reference curve is blind to the entire rotation chain rule.**
-The gauge pins `φ₀(r_ref) = 0`, so at `r = r_ref` the exponent and *both* its
+The gauge pins `φ₀(R_ref) = 0`, so at `R = R_ref` the exponent and *both* its
 `ψ`-derivatives vanish and `∂²p/∂ψ²` collapses to `P₀″(ψ)` — the answer a
 non-rotating source gives. A check that `∂F/∂ψ` varies with `ψ`, placed there,
 read 0.333 against 7.300 at the outboard edge. **The one radius where the gauge
@@ -273,7 +315,7 @@ the last triple above the round-off floor and is bounded **both** sides: 1 is a
 broken Jacobian, 3.8 is an artefact.
 
 **A comparison against an exact zero has no relative tolerance.** `φ₀` vanishes
-identically on `r = r_ref`, and identically everywhere at `ω = 0`, so the
+identically on `R = R_ref`, and identically everywhere at `ω = 0`, so the
 root-find-against-closed-form check compared 1e-33 with 0.0 and failed at every
 such point. The fix is a floor at the problem's own energy scale, not a
 case-dependent one read off the configuration — which was the first attempt and

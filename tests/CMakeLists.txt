@@ -497,6 +497,36 @@ else()
 	message(STATUS "meq: MachineFixedBoundary not registered (needs MEQ_BUILD_APP=ON)")
 endif()
 
+# GeqSourceComparison evaluates meq::RotatingSource at an exported geq state and
+# compares against geq's own current density. It is the only check in the tree
+# of MEQ's rotating source against an INDEPENDENT implementation of eq (136).
+#
+# IT NEEDS NEITHER THE DRIVER NOR A MESH NOR PYTHON. The reference is committed
+# under tools/geq-benchmark/reference/, so this runs anywhere meq_core builds --
+# including a configuration without MFEM, since meq::RotatingSource is
+# MFEM-free by the same rule meq::Profiles and meq::Source are. Regenerating the
+# reference needs ../geq, ../freegs4e and the benchmark venv; the command is in
+# tools/geq-benchmark/README.md.
+list(FIND MEQ_CORE_SOURCES_PRESENT "src/meq/RotatingSource.cpp" _rotating_index)
+if(TARGET meq_core AND NOT _rotating_index EQUAL -1
+		AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/convergence/GeqSourceComparison.cpp")
+	add_executable(GeqSourceComparison "convergence/GeqSourceComparison.cpp")
+	target_include_directories(GeqSourceComparison PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}")
+	target_link_libraries(GeqSourceComparison PRIVATE
+		meq_core
+		Boost::unit_test_framework)
+
+	# The source tree, because the reference is named by a path relative to it --
+	# the same reason ConfigTests needs it for examples/*.toml.
+	add_test(NAME GeqSourceComparison COMMAND GeqSourceComparison
+		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+	set_tests_properties(GeqSourceComparison PROPERTIES
+		ENVIRONMENT "MKL_NUM_THREADS=1")
+else()
+	message(STATUS "meq: GeqSourceComparison not registered")
+endif()
+
 # ---------------------------------------------------------------------------
 # naming -- the identifier convention, enforced
 # ---------------------------------------------------------------------------
