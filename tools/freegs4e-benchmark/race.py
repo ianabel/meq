@@ -192,7 +192,30 @@ CASES = [
     ("E", "E_testtokamak_diamagnetic", "machine-e-diamagnetic"),
     ("F", "F_diiid_conventional", "machine-f-diiid"),
     ("G", "G_mastu_simple", "machine-g-mastu"),
+    # THE ONE LIMITED MACHINE, AND IT IS HERE BECAUSE IT IS THE ONLY CASE
+    # EVERY COMPETITOR CAN TAKE.  A to G are diverted, which rules out DESC's
+    # free-boundary objective -- its LCFS is a truncated Fourier series and a
+    # separatrix has an X-point corner -- and TSC's own deck needs a rectangle
+    # holding the plasma while excluding the coils, which DIII-D's inboard F
+    # coils at R = 0.8608 very nearly forbid.  This machine has neither
+    # problem, so it is the common yardstick.
+    ("H", "H_limited_circular", "limited-tokamak"),
 ]
+
+#: stem -> a SHIPPED filament configuration, for cases where DERIVING one from
+#: the meshed file does not work.
+#:
+#: meq_toml()'s four edits below assume the case carries `[mesh.generate]`:
+#: edit (2) points the mesh at a scratch path that the generator then has to
+#: make, and filament_guess() reads `Radius` out of the same block to size the
+#: guess.  examples/limited-tokamak.toml names a COMMITTED mesh and has no
+#: such block -- tools/freegs4e-benchmark/README.md records that the shipped
+#: .msh is the fixture and that the generator command does NOT reproduce it,
+#: 1775 triangles against 1807 with MEQ's own scatter at that resolution
+#: 1.5-2% in psi_ax.  So the filament arm is a file rather than a derivation.
+FILAMENT_FILE = {
+	"limited-tokamak": "limited-tokamak-filament",
+}
 
 # ( polynomial degree, uniform refinement levels ).  RefinementLevels rather
 # than a coarser [mesh.generate] Size, so every rung of one case shares one
@@ -216,6 +239,21 @@ MEQ_RUNGS = [(1, 0), (1, 1), (2, 0), (2, 1), (3, 0), (3, 1),
 # errors below are measured against is the SEEDED one from that ladder, which
 # is the same equilibrium however it was reached.
 FGS_GRIDS = [129, 257]
+
+# --grids 129,257,513: THE REFERENCE RESOLUTIONS, AND THE FINEST IS WHAT MEQ IS
+# SCORED AGAINST.  It is a flag because a case's MEQ configuration is posed
+# against ONE reference grid and has to be scored against that one: freegs4e's
+# coil currents and profile amplitudes are OUTPUTS of its control system, so
+# they converge in the grid like everything else -- P2 moves 14% between 129^2
+# and 513^2 on the limited machine, and its psi_bndry contact moves 0.6 m to
+# the other side of the plasma.  examples/limited-tokamak-filament.toml carries
+# ref-n513/'s, so racing it against a 257^2 reference is scoring one machine
+# against another.  MEASUREMENTS.md M-161's own case file says the same thing.
+for _i, _a in enumerate(sys.argv):
+    if _a == "--grids" and _i + 1 < len(sys.argv):
+        FGS_GRIDS = [int(g) for g in sys.argv[_i + 1].split(",")]
+        del sys.argv[_i:_i + 2]
+        break
 
 # Where the seeded 513^2 ladder of M-88 landed. Accuracy does not care how a
 # reference was reached; only the TIMED rows have to be cold.
@@ -279,12 +317,15 @@ def filament_guess(stem, ref, scratch):
 
 def meq_toml(stem, degree, refine, scratch, sample=513, adaptive=0, ref=""):
     """One rung's configuration, derived from the case's own file."""
-    text = open(os.path.join(EXAMPLES, "%s.toml" % stem)).read()
+    # WHICH FILE, AND IT IS NOT ALWAYS THE CASE'S.  See FILAMENT_FILE.
+    shipped = FILAMENT_FILE.get(stem) if FILAMENT else None
+    source = shipped or stem
+    text = open(os.path.join(EXAMPLES, "%s.toml" % source)).read()
     text = re.sub(r"^PolynomialDegree = .*$", "PolynomialDegree = %d" % degree,
                   text, flags=re.M)
     # RefinementLevels is not in the generated file, so it is inserted into
     # [mesh] rather than substituted.
-    text = re.sub(r'^(File = "examples/%s\.msh")$' % re.escape(stem),
+    text = re.sub(r'^(File = "examples/%s\.msh")$' % re.escape(source),
                   r"\1\nRefinementLevels = %d" % refine, text, flags=re.M)
     # THE SAMPLING GRID IS THE COMPARISON'S AND NOT THE RUN'S. MEQ's .nc
     # covers the whole half-disc, so 129^2 over a radius of 3.7 m is 0.029 m in
@@ -300,7 +341,14 @@ def meq_toml(stem, degree, refine, scratch, sample=513, adaptive=0, ref=""):
         label += "a%d" % adaptive
         text += ("\n[adaptivity]\nEnabled = true\nMaxIterations = %d\n"
                  "Theta = 0.6\nTargetError = 1.0e-9\n" % adaptive)
-    if FILAMENT:
+    if shipped:
+        # ALREADY ALL FOUR, and the file says so in its own header.  Applying
+        # the edits below to it would strip a CoilSize that is not there,
+        # repoint a mesh whose generator block IS the point, and overwrite a
+        # cold guess built from this case's own reference with one built from
+        # a different grid's.
+        label += "-fil"
+    elif FILAMENT:
         # (1) CoilSize is refused beside a subtracting model -- it grades the
         # mesh around conductors the generator is no longer told about.
         text = re.sub(r"^CoilSize = .*\n", "", text, flags=re.M)
@@ -501,8 +549,19 @@ def sweep(tag, ref, stem, scratch, rungs, grids, sample=513, collar=0.05):
     print("\n  measured against %s" % fine)
 
     truth = json.load(open(fine.replace(".npz", ".json")))
-    flat = conductors.from_npz(np.load(os.path.join(HERE, "%s.npz" % ref),
-                                       allow_pickle=True))
+    # THROUGH with_design(), BECAUSE THE OLDER REFERENCES CARRY NO COIL
+    # POSITIONS.  fgsref.py only started saving `coil_R`/`coil_Z` and the
+    # `design_*` block when make_diverted_case.py needed them, so
+    # H_limited_circular.npz -- and every file under ref-n257/ and ref-n513/ --
+    # has the labels and the currents and not the geometry.  with_design()
+    # recovers both from fgsref.py's own CASES table, which is what wrote them
+    # in the first place, and asserts the label order against the machine
+    # rather than assuming it.
+    from mkcoldguess import with_design
+    reference = os.path.join(HERE, "%s.npz" % ref)
+    flat = conductors.from_npz(with_design(np.load(reference,
+                                                   allow_pickle=True),
+                                           reference))
     boxes = [(c["R"], c["Z"], c["half_width"] + collar,
               c["half_height"] + collar) for c in flat]
 

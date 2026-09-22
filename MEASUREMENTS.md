@@ -7468,13 +7468,179 @@ neither is the other's: the plasma's size is pinned by the contact in one and by
 `Psi` in the other. A disagreement can live there as well as in either
 discretisation.
 
-**AND DESC'S FREE-BOUNDARY PROBLEM HAS A SECOND BRANCH THAT ITS OWN OBJECTIVE
-PREFERS.** Started from a circle of the machine's design size rather than from
-the reference's LCFS — `--boundary circle`, the cold arm — it converges in 5
-iterations to a boundary **1.9163e-01 m** from the reference's, with `psi_ax`
-**15.1%** out, and a residual sum of squares of **4.760e-06 against the
-reference boundary's own 1.369e-05**. It is not under-converged: it found a
-better minimum of the objective as posed, at a different equilibrium. That is
-[M-26](#m-26)'s finding in DESC's coordinates — a free boundary has to be told
-which branch — and it means the honest matched posing hands both codes the same
-branch selection rather than letting either search.
+**AND DESC'S FREE-BOUNDARY ANSWER ON THIS CASE IS NOT MONOTONE IN RESOLUTION,
+WHICH RETRACTS THE ROW ABOVE AS AN ACCURACY.** The `M = 10` figure is the best
+of a sweep, and the sweep does not converge. `psi_ax` against the reference,
+over both starting boundaries:
+
+| `M` | from the reference's LCFS | from a design circle |
+|---|---|---|
+| 8 | 6.757e-04 | 7.695e-03 |
+| **10** | **2.937e-05** | 1.020e-01 |
+| 12 | 8.580e-03 | 3.853e-02 |
+| 16 | 7.202e-03 | 2.213e-03 |
+
+**Three and a half orders of magnitude, in neither column ordered by `M`.** And
+the `M = 10` row took **one** optimiser iteration, so what it says is *the
+reference's own LCFS is a stationary point of the objective at that
+resolution*, not that DESC converged to it.
+
+**IT IS NOT THE OPTIMISER'S TOLERANCE.** `--ftol` tightened from 1e-6 to
+**1e-10** with `--maxiter` raised to 200 reproduces `M = 12` and `M = 16`
+**to every printed digit** — 6.628922934e-02 and 6.638137926e-02 — at the same
+4 and 7 iterations. They are converged; they are converged somewhere else.
+
+**AND THE NUMBER OF FREE BOUNDARY MODES MOVES IT AS MUCH AS `M` DOES**, also
+without order. At `M = 12` from the reference's LCFS:
+
+| boundary modes free | `psi_ax` against the reference |
+|---|---|
+| `\|m\| <= 2` | 8.580e-03 |
+| `\|m\| <= 4` | **2.406e-04** |
+| `\|m\| <= 6` | 2.563e-03 |
+
+**So no single row of this sweep is a measurement of DESC's accuracy**, and the
+`MEQ vs DESC` figure in the table above rests on the `M = 10` run and inherits
+that. What the sweep does establish is that the reference's LCFS is a
+stationary point, which is a statement about the reference; and that the
+objective has many of them, which is [M-26](#m-26)'s finding in DESC's
+coordinates — a free boundary has to be told which branch. The honest matched
+posing hands both codes the same branch selection rather than letting either
+search, and MEQ's side of that is `[boundary.xpoint]`, `[source] PsiAxis` and
+the initial guess. **What is not yet known is whether this is DESC, the posing,
+or this machine being nearly circular with a weak shaping signal** — the
+fixed-boundary ladder is monotone in `M` on the same geometry, which points at
+the free-boundary objective rather than at the discretisation, and is as far as
+the evidence goes.
+
+### M-163
+
+**EVERY RACE MEQ CAN DRIVE, ON A QUIET MACHINE, IN ONE SITTING — AND MEQ IS
+FASTER THAN ALL THREE COMPETITORS ON EVERY CASE.**
+
+Taken 2026-09-21 between 21:48 and 23:24, one stage at a time, with the
+one-minute load average printed at the head of each and a settle loop that
+waits for it to fall below 0.7 before starting the clock. **A neighbouring
+session was asked to hold its parallel test suites and did**; its remaining
+serial work ran at `nice 19`. The start-of-stage loads are in the table and the
+one stage that ran contended is marked.
+
+**WHAT EACH WALL CLOCK CONTAINS, because none of them is a solve time.** MEQ's
+is the whole driver — gmsh, assembly, the solve and four output formats, with
+the `.nc` grid raised to 513² so the sampling is not the error.  `freegs4e`'s
+is its boundary matrix, its Picard loop and its own diagnostics. DESC's is a
+fresh process, so it carries JAX compilation; the warm column is the same shape
+solved again in the same process. CHEASE's is the binary plus the fixed point
+that closes its amplitude.
+
+#### 1. `freegs4e`, DIVERTED DIII-D, filament conductors on both sides — load 1.01
+
+| | wall/s | its | `psi_ax` rel | rel L2 |
+|---|---|---|---|---|
+| `freegs4e` 129² | 4.4 | 33 Picard | — | — |
+| `freegs4e` 257² | 13.2 | 32 Picard | — | — |
+| MEQ `k1r0` | 3.57 | 8 Newton | 3.72e-03 | 1.427e-03 |
+| **MEQ `k2r0`** | **3.23** | **2 Newton** | **3.47e-05** | 5.830e-04 |
+| MEQ `k3r0` | 3.98 | 2 | 1.76e-05 | 5.416e-04 |
+| MEQ `k2r1` | 8.03 | 2 | 1.62e-05 | 9.512e-04 |
+| MEQ `k3r1` | 13.36 | 2 | 1.97e-05 | 9.473e-04 |
+
+**MEQ AT 3.23 s AGAINST THE 257² REFERENCE'S 13.2 s IS 4.1×, AND IT IS 1.4×
+FASTER THAN THE 129² ONE TOO**, at a `psi_ax` 3.5e-05 from the reference.
+Against [M-155](#m-155)'s defective ladder the same rungs read 126.9 s at
+`k2r1` and FAILED at `k3r0`; [M-160](#m-160) is what moved them.
+
+#### 2. `freegs4e`, LIMITED, filament conductors on both sides — load 0.45
+
+Scored against the 513² reference, which is the one
+`examples/limited-tokamak-filament.toml` is posed against.
+
+| | wall/s | its | `psi_ax` rel | `psi_bnd` rel |
+|---|---|---|---|---|
+| `freegs4e` 129² | 3.1 | 41 Picard | — | — |
+| `freegs4e` 257² | 10.0 | 39 | — | — |
+| **`freegs4e` 513²** | **64.6** | **39** | — | — |
+| MEQ `k1r0` | **FAILED** | — | — | — |
+| MEQ `k1r1` | 143.63 | 96 Newton | 2.02e-03 | 2.75e-05 |
+| MEQ `k2r0` | 2.82 | 3 | 5.09e-04 | 2.51e-04 |
+| **MEQ `k3r0`** | **4.62** | **2** | **3.48e-05** | **6.73e-06** |
+| MEQ `k2r1` | 9.80 | 3 | 7.36e-05 | 8.54e-05 |
+| MEQ `k3r1` | 16.04 | 2 | 1.52e-05 | 3.13e-06 |
+
+**MEQ REACHES THE 513² REFERENCE'S OWN `psi_ax` TO 3.5e-05 IN 4.62 s AGAINST
+THE 64.6 s THAT REFERENCE COST — 14×.** And `k = 1` is not merely coarse here,
+it is a different regime: `k1r0` does not converge at all and `k1r1` takes 96
+Newton iterations and 143 s to reach 2.0e-03. That is the same degree
+sensitivity `examples/limited-tokamak.toml`'s own header records, and it is why
+that file ships `PolynomialDegree = 3`.
+
+#### 3. DESC, FIXED boundary, `fixed-h-circular` — load 0.63
+
+| | seconds | warm | vs `freegs4e` | vs the other code |
+|---|---|---|---|---|
+| **MEQ `k=2 r=0`** | **7.16** | — | 9.7266e-05 | 1.1815e-04 |
+| MEQ `k=3 r=0` | 8.37 | — | 1.1808e-04 | 1.3658e-04 |
+| MEQ `k=3 r=1` | 23.94 | — | 1.1443e-04 | 1.3317e-04 |
+| **DESC `M = 12`** | **34.38** | **0.60** | 9.3509e-05 | 1.3957e-04 |
+| DESC `M = 16` | 37.36 | 1.40 | 5.9189e-05 | 1.1815e-04 |
+| DESC `M = 20` | 39.95 | 2.64 | 7.4928e-05 | 1.2733e-04 |
+
+At matched accuracy — MEQ `k = 2 r = 0` at 9.73e-05 against DESC `M = 12` at
+9.35e-05 — **MEQ is 4.80× faster cold and DESC is 11.9× faster warm.** Both
+clocks, as [M-157](#m-157) insists; the cold one is what solving an equilibrium
+once costs and the warm one is what a parameter scan pays. The mutual floor is
+**1.1815e-04** and the harness refuses targets below it.
+
+**M-157's 8.4× WAS TAKEN UNDER LOAD AND THIS 4.80× SUPERSEDES IT.** The
+mechanism did not change — a JAX compilation either happened inside the clock
+or it did not — but the ratio did, by a factor of 1.75, on a quiet machine.
+That is the size of the correction this file's standing warning is about.
+
+**AND THE OTHER FOUR FIXED CASES RAN AT LOAD 4 TO 6** — a neighbouring
+session's niced serial suites — so `fixed-a-testtokamak`, `fixed-e-diamagnetic`,
+`fixed-f-diiid` and `fixed-g-mastu` are recorded as CONTENDED and their seconds
+are not quoted here.
+
+#### 4. DESC, FREE boundary, the limited machine — load 0.61
+
+Cold **62 to 82 s** and warm **13 to 21 s** over `M` in {8, 10, 12, 16} and both
+starting boundaries. **No accuracy is quoted, because the sweep does not
+converge in `M`** — see [M-162](#m-162), which retracts the single-`M` figure
+this campaign first reported. The split is roughly 24 s for the fixed-boundary
+seed and 40 s for the free-boundary step, and the step is where the
+non-monotonicity lives.
+
+**MEQ solves the same equilibrium in 4.62 s cold**, so the wall-clock verdict
+does not depend on which DESC row is believed — but a ratio against a number
+that is not resolution-converged is not a measurement and none is given.
+
+#### 5. CHEASE, `fixed-h-circular` — load 0.63
+
+| | seconds | |
+|---|---|---|
+| CHEASE `NS = NT = 60` | 101.4 | 2 sweeps |
+| CHEASE `NS = NT = 80` | 106.9 | 2 sweeps |
+| MEQ `k2r0` | 10.4 | 13 Newton |
+| MEQ `k3r1` | 27.6 | 16 Newton |
+
+**MEQ IS 3.9× TO 10× FASTER, AND THE TWO CODES AGREE AN ORDER BETTER THAN
+EITHER AGREES WITH `freegs4e`.** MEQ `k3r1` against CHEASE `NS80` is
+**1.300e-06** in a relative L2 of `psi`, while each against the `freegs4e`
+reference neither of them saw reads 1.1443e-04 and 1.1267e-04. **CHEASE's
+column is flat in `NS` at 1.126–1.135e-04**, which is [M-158](#m-158)'s point
+made again on clean timings: that number is the REFERENCE's error and not
+CHEASE's.
+
+**MEQ'S SECONDS DIFFER BETWEEN HARNESSES AND BOTH ARE HONEST.** `k2r0` reads
+7.16 s under `race_desc.py` and 10.4 s under `converge.py`; they write
+different output grids and take different numbers of Newton steps to different
+tolerances. Compare a code against its competitor within one harness, never
+across two.
+
+#### What is NOT here
+
+**NICE and TSC.** Both are built and both have decks — NICE converges on the
+limited machine in 9 Newton steps and on DIII-D in 6, reproducing the diverted
+reference's `psi_ax` to 6.1e-04; TSC meets its `GP2 = 0` target identically
+under `IFUNC = 4` and has not yet reached MEQ's branch. Neither has been timed,
+and neither is timed here rather than being timed badly.
