@@ -45,8 +45,8 @@ what that costs.  `occ.fragment` is what does it: it splits the disc along the
 coil rectangles so their edges are mesh edges.
 
 
-`--limiter` MESHES THE LIMITER CIRCLE IN, AND THE SOLVER HALF IS NOT BUILT
-------------------------------------------------------------------------
+`--limiter` MESHES THE LIMITER CIRCLE IN, AND THE EQUILIBRIUM IT ENABLES IS OPEN
+-------------------------------------------------------------------------------
 
 Same argument as the coils, one line further: a limiter is prescribed input too,
 so it can be aligned to.  What that is FOR is the limiter as a CURVE --
@@ -55,11 +55,13 @@ which is what every production free-boundary code does and what would take
 `freegs4e`'s own grid artefact out of MEQ's comparison against it
 (FREE-BOUNDARY-PLAN.md section 7.20).
 
-`meq::GradShafranovSolver` does not do that yet: `setBoundaryFluxPoint()` takes
-a POINT and `LimiterConstraint::ExactPoint` evaluates `psi_h` there.  So the
-option is the enabling half and buys nothing on its own today -- it is here
-because the mesh is the part that has to exist first, and because an interior
-curve is exactly the thing this file already records getting wrong once.
+THE SOLVER HALF IS BUILT NOW -- `LimiterConstraint::LocatedContact`, reached
+from a file as `[boundary.limiter] SurfaceAttribute`.  What is NOT settled is
+whether it converges on a machine: `examples/limited-tokamak-filament-curve.toml`
+is the same equilibrium as its point-limiter sibling with only the posture
+changed, and it lands on a wall-hugging annulus from two starting points a whole
+equilibrium apart, reaching the same wrong answer to every digit.  M-164 section
+4.  So this option's mesh is correct and the equilibrium it enables is open.
 
 THE BOUNDARY GROUPS ARE THE OUTER BOUNDARY AND NOTHING ELSE, AND THE FIRST
 VERSION OF THIS FILE GOT THAT WRONG IN A WAY NOTHING WOULD HAVE REPORTED

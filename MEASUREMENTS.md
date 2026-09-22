@@ -7710,5 +7710,175 @@ across two.
 **NICE and TSC.** Both are built and both have decks — NICE converges on the
 limited machine in 9 Newton steps and on DIII-D in 6, reproducing the diverted
 reference's `psi_ax` to 6.1e-04; TSC meets its `GP2 = 0` target identically
-under `IFUNC = 4` and has not yet reached MEQ's branch. Neither has been timed,
-and neither is timed here rather than being timed badly.
+under `IFUNC = 4` and has not yet reached MEQ's branch. **Both are timed in
+[M-164](#m-164)**, which also retires this table's headline: NICE is faster
+than MEQ at every resolution it was run at, and M-164 section 3 shows the
+accuracy column above compares solutions of more than one problem.
+
+### M-164
+
+**NICE AND TSC, TIMED — AND THE FAIRNESS AUDIT THAT CAME WITH THEM, WHICH
+FOUND MEQ HOLDING TWO ADVANTAGES IT HAD NOT DECLARED.**
+
+Taken 2026-09-22 on a quiet machine, the same settle discipline as
+[M-163](#m-163) with one repair: the wait for the load to fall below 0.7 is
+**unbounded**. The capped version — 90 tries, then a `WARNING` and proceed —
+was found parked behind a neighbouring session's parallel build with fourteen
+minutes left before it would have measured anyway. **A precondition that
+eventually gives up and proceeds is a courtesy with extra steps**, and it is
+worse than no gate, because the warning makes a contaminated run look like a
+considered exception rather than an accident.
+
+#### 1. WHICH OF THESE CODES CAN USE EIGHT THREADS, ASKED OF THE BINARIES
+
+| | can take | established by |
+|---|---|---|
+| MEQ | 8 | `OMP_NUM_THREADS`, `AssemblyMode::Threaded` |
+| **NICE** | **8, and was not being given them** | **270 `#pragma omp` in `src/`**, with `build/CMakeCache.txt` reading `CHOOSE_OPENMP:BOOL=OFF` |
+| TSC | **1** | no `GOMP_*` symbols, no MPI, no `-fopenmp` in `tsc.gfortran.mk`. Only MKL could thread, through `libmkl_rt` |
+| CHEASE | **1** | no `GOMP_*`, no MPI, no external BLAS at all. The `mpif90` lines in `Makefile.define_*` select a compiler wrapper for other machines; `src-f90/*.f90` contains no `MPI_` call |
+| DESC | 8 | already pinned by `race_desc.py` — both thread axes at 8, `taskset` to one logical cpu per physical core |
+
+**So every NICE figure this project has published was taken with NICE's
+parallelism compiled out.** It is rebuilt in `build-omp` with
+`-DCHOOSE_OPENMP=ON -DEIGEN3_INCLUDE_DIR=/usr/include/eigen3`.
+`-DEIGEN_DONT_PARALLELIZE` is unconditional in NICE's own `CMakeLists.txt` and
+is left alone: it is the author's choice, and what `CHOOSE_OPENMP` switches on
+is NICE's own pragma regions, not Eigen's.
+
+**AND IT BUYS NICE NOTHING, WHICH IS THE POINT OF HAVING MEASURED IT.**
+
+| area-scale | P1 dofs | OMP off, 1 thr | off, 8 thr | OMP on, 1 thr | **on, 8 thr** |
+|---|---|---|---|---|---|
+| 1.0 | 1,933 | 0.44 s (92%) | 0.48 s (276%) | 0.45 s (94%) | **0.50 s (331%)** |
+| 0.25 | 6,674 | 1.37 s (98%) | 1.51 s (245%) | 1.36 s (98%) | **1.39 s (316%)** |
+| 0.0625 | 26,166 | 5.61 s (99%) | 5.78 s (219%) | 5.67 s (99%) | **5.65 s (264%)** |
+
+The pragma regions move the wall clock by at most 1% while burning 2.6 to 3.3
+cores, and the **non**-OpenMP build is actively *slower* with eight MKL threads
+— 1.51 s against 1.37 s at 6,674 dofs. TSC is the same story with no build to
+change: **17.49 s at `MKL_NUM_THREADS=1` and 17.89 s at 8, both at 99% CPU**,
+so its MKL threads are never engaged. **The fairness question had one real
+answer and three non-answers, and the one real answer did not change a race.**
+
+#### 2. THE TIMINGS
+
+Both codes cold at every rung, whole-driver wall clocks. NICE's includes its
+own mesh generation; TSC's includes the python that writes its deck.
+
+| | unknowns | wall/s | iterations |
+|---|---|---|---|
+| NICE, area 1.0 | 1,933 P1 | **0.44** | 9 Newton |
+| NICE, area 0.25 | 6,674 | **1.37** | 9 |
+| NICE, area 0.0625 | 26,166 | **5.61** | 9 |
+| TSC, 61 x 69 | 3,953 | **2.18** | Picard |
+| TSC, 121 x 137 | 16,065 | **17.28** | Picard |
+| TSC, 181 x 205 | 36,337 | **59.03** | Picard |
+| MEQ `k3r0`, point limiter | 54,690 | **4.11** | 2 Newton |
+
+**TSC'S DIAGNOSTICS ARE FREE**: `--isurf 1 --ipest 1 --npsi 400`, which adds
+the flux surfaces and a geqdsk, reads **17.28 s** against the same grid's
+17.28 s without them.
+
+**NICE IS THE FASTEST CODE IN THIS COMPARISON AND MEQ IS NOT**, at every
+resolution NICE was run at. That is a change from [M-163](#m-163)'s verdict,
+which held against `freegs4e`, DESC and CHEASE and was not tested against
+either of these. NICE is P1 on an unstructured triangulation with a direct
+Newton and reports its own solve at 110 ms of its 0.44 s; MEQ is HDG at `k = 3`
+carrying 28x the unknowns, and its 4.11 s is the whole driver including gmsh
+and four output writers. **These are not the same work and the row is not a
+like-for-like efficiency claim** — which is exactly why section 3 matters.
+
+#### 3. THE ACCURACY COLUMN COMPARES SOLUTIONS OF AT LEAST TWO DIFFERENT
+#### PROBLEMS, AND MEQ IS SCORED ON DATA DERIVED FROM ITS COMPETITOR'S GRID
+
+`examples/limited-tokamak.toml`'s header already records the mechanism, and
+this is that record meeting the first two codes that do **not** adopt it.
+`freegs4e` takes `psi_bndry` to be the maximum of `psi` over the innermost ring
+of grid nodes inside the wall. Reconstructed from the published 513² `.npz`
+and its own `wall_R`/`wall_Z`:
+
+| | |
+|---|---|
+| ring nodes | 632 |
+| `max psi` over the ring | 2.622461948179e-02 |
+| `freegs4e`'s recorded `psi_bndry` | 2.622461948179e-02 |
+| difference | **0.000e+00, every digit** |
+| the winning node | `( 0.82500, 0.30000 )`, radius 0.34731, `h` = 0.003125 |
+
+**So the reference's boundary flux is the value of `psi` at one grid node
+0.86 `h` inside the limiter, its converged LCFS reaches only 0.34731, and its
+plasma never touches its own limiter anywhere.** On the true circle the
+maximum of its own field is 2.588141e-02, **1.31% below** what it reports.
+
+**`examples/limited-tokamak-filament.toml` PRESCRIBES THAT NODE** —
+`[boundary.limiter] R = 0.825, Z = -0.300`, the winning node reflected in `z`,
+which the up-down symmetry makes equivalent. The reference's field there reads
+2.622461725e-02 against the recorded 2.622461948e-02, agreeing to **8.5e-08**.
+MEQ then returns `psi_bnd = 2.622480e-02`, 6.9e-06 from the reference. **That
+is a correct test of MEQ's free-boundary solve against a prescribed-flux
+boundary and it is not a test of anybody's limiter**: MEQ is handed the number
+it is then scored on.
+
+**THE h-REFINEMENT CONTROL CONFIRMS IT, AND IT HAD ALREADY BEEN RUN WITHOUT
+BEING READ THIS WAY.** If the agreement were physics it would be insensitive
+to the reference's grid; if it is manufactured by the shared input it tracks
+that input. The ring node sits at `( 1.3375, -0.0125 )` on the 129² reference
+and at `( 0.8250, -0.3000 )` on the 513² one — **0.6 m across the machine, from
+the outboard midplane to the inboard shoulder, as `h` halves twice** — and MEQ
+ships one file per node, each scored against its own reference, each agreeing
+well. **The agreement follows the shared input as the shared input moves.**
+
+**THE CONSEQUENCE FOR THE COLUMN.** The three codes were given three different
+boundary conditions, and the reference's own field puts numbers on the spread:
+
+| posture | who | `psi` there, in the 513² reference's field | vs its `psi_bndry` |
+|---|---|---|---|
+| ring node `( 0.825, -0.300 )` | MEQ, `freegs4e` | 2.622462e-02 | — |
+| the true circle's maximum | NICE, contact **found** | 2.588141e-02 | **−1.31%** |
+| `( 1.3375, 0 )` | TSC, from `limited-tokamak.toml` | 2.801073e-02 | **+6.81%** |
+
+**So each code must be scored against the reference its own posture was taken
+from**, and scoring TSC against 513² — which this campaign did first — charges
+it 8.5% in `psi_bnd` for correctly using the point it was given. Against its
+own 129² reference TSC reads **+0.92% in `psi_ax` and +2.32% in `psi_bnd` at
+181 × 205, monotone in the grid**, which is a discretisation difference. NICE
+converges just as cleanly in its own ladder — `psi_ax` moving 0.98% then 0.23%
+over the three rungs and `psi_bnd` flat to 1e-05 relative by the last two — to
+a boundary condition neither reference imposes.
+
+#### 4. PUTTING MEQ ON NICE'S FOOTING DOES NOT WORK YET, AND THE GUESS IS NOT
+#### THE VARIABLE
+
+MEQ already has the posture: `[boundary.limiter] SurfaceAttribute` finds the
+contact on a meshed limiter surface, `[mesh.generate] LimiterR / LimiterZ /
+LimiterRadius` makes `halfdisc.py` fragment the circle in, and
+`LimiterConstraint::LocatedContact` is implemented — `tools/mesh/halfdisc.py`'s
+note that *"the solver half is not built"* is stale.
+`examples/limited-tokamak-filament-curve.toml` is that file: identical to the
+point case in coils, currents, profiles, `I_p`, degree and guess, differing in
+those two keys alone. gmsh builds the mesh — 2063 elements, one limiter
+surface — and the solve lands on a **wall-hugging annulus**:
+
+| | point posture | **curve posture** |
+|---|---|---|
+| wall | **4.11 s**, 2 Newton | 72.67 s, 21 Newton, **exit 1** |
+| `psi_ax` | 9.309076e-02 | **9.778761e-03** |
+| `psi_bnd` | 2.622480e-02 at `( 0.825, -0.3 )`, prescribed | **−1.917567e-02** at `( 0.65, 0 )`, found |
+| `profile scale` | 0.9999423 | **4.304152e-03** |
+| O-point | found | **none reachable** |
+
+**AND THE SECOND RUN IS WHAT MAKES THIS A FINDING RATHER THAN A FAILED
+ATTEMPT.** Re-run from the POINT case's own converged answer — a whole
+equilibrium away from the shipped guess — it takes **254 Newton iterations and
+192.20 s against 21 and 72.67 s**, and arrives at the same `psi_ax`, the same
+`psi_bnd`, the same contact and the same scale **to every printed digit**. Two
+starting points that far apart reaching one answer is an **attracting spurious
+solution**, not a basin-of-attraction accident, so the obvious remedy is
+already measured and does not work.
+
+So the comparison cannot be made posture-matched from MEQ's side today, and
+[M-163](#m-163)'s single accuracy column is replaced by section 3's statement
+of which boundary condition each code was given. **`profile scale` is the free
+diagnostic that names it**: 0.9999 on the posture that works and 4.3e-03 on the
+one that does not, without reference to anybody's answer.

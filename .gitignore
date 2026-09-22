@@ -92,6 +92,8 @@ docs/doctrees/
 # ARE source, since nothing in the tree records how to remake them.
 *.meq-mesh
 examples/diverted-tokamak-generated.msh
+examples/limited-tokamak-filament.msh
+examples/limited-tokamak-filament-curve.msh
 # The freegs4e benchmark's seven machine cases, whose meshes tools/freegs4e-
 # benchmark/make_all.sh regenerates from the references along with everything
 # else in them.

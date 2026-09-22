@@ -3545,6 +3545,24 @@ comparison exists on and `tools/desc-benchmark/descfreeb.py` is its runner.
 report · the conversion's four self-audits · the toroidal field · the second
 branch
 
+**AND THE COMPARISON THAT TABLE SITS IN IS NOT ONE PROBLEM, WHICH ONLY TWO
+FURTHER CODES COULD SHOW.** `freegs4e` takes `psi_bndry` to be the maximum of
+`psi` over the innermost ring of grid NODES inside its wall, so the reference's
+boundary flux is the value at one node `0.86 h` inside the limiter and its
+plasma never touches its own limiter anywhere.
+`examples/limited-tokamak-filament.toml` prescribes that node, which is what
+makes MEQ's agreement on this case well posed and also means **MEQ is handed
+the number it is then scored on**. NICE finds its contact on the true circle
+and TSC is given a different point, so the accuracy column compares solutions
+of at least two problems and is reported per posture rather than as one column.
+MEQ's own `SurfaceAttribute` posture, which would remove the difference, does
+not converge — see the M-164 pointer below.
+
+→ **[M-164](MEASUREMENTS.md#m-164)** — NICE and TSC timed · which codes can
+take eight threads and what it buys them · the staircase ring reproduced to
+every digit · the limiter-as-a-curve run that lands on an annulus from two
+starting points alike
+
 **THE CONDUCTOR MODEL IS EXACT ON ALL THREE ARMS, WHICH NO OTHER CASE CAN SAY.**
 `freegs4e`'s `H_limited_circular` is point filaments, MEQ's `Model = "filament"`
 is point filaments, and DESC's `FourierPlanarCoil` with one `r_n` is a circular
