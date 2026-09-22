@@ -564,17 +564,24 @@ truncation turns; it is the same fact that forces the fixed ladder to
 .toml` is limited, so its edge is smooth, and it is the only free-boundary case
 here.
 
-**WHAT IT READS** → **[M-162](../../MEASUREMENTS.md#m-162)**:
+**AND IT DOES NOT CONVERGE** → **[M-162](../../MEASUREMENTS.md#m-162)**.
 
-| pair | rel L2 | nodes |
-|---|---|---|
-| DESC vs `freegs4e` 513² | 1.3329e-04 | 37,523 |
-| MEQ vs `freegs4e` 513² | 2.0379e-04 | 136,242 |
-| **MEQ vs DESC** | **1.2873e-04** | 19,296 |
+This section used to publish a three-code agreement at 1.3e-04. It is
+withdrawn. `descfreeb.py` never read `result["success"]`, so a run that stopped
+at its starting point was reported as an answer — and a boundary seeded from the
+reference's own LCFS starts at a stationary point, cannot be improved on by the
+trust region, and therefore reports the reference back with a tiny error
+**because it did not move**. The 1.3329e-04 and 1.2873e-04 rows both came from
+that run.
 
-**Same mutual floor as the fixed ladder**, and for the same reason: each
-pairing is the size of each arm's own distance from the reference, so nothing
-resolves below about 1e-04.
+Re-taken with a convergence check, **3 of 13 runs converge**, and the three land
+at −2.7e-02, −3.9e-02 and −4.6e-02 — **none within 1e-02 of the reference**.
+There is no resolution-converged free-boundary answer here to quote.
+
+**USE THE FIXED-BOUNDARY LADDER.** It is monotone in `M`, agrees with MEQ at
+9.35e-05, and is what the race numbers rest on — M-157 and M-163 section 3.
+`tools/benchmarks/HOW_TO_DRIVE_DESC.md` is the short version of which arm to
+trust and why.
 
 ### Three things this comparison needs that the fixed one does not
 

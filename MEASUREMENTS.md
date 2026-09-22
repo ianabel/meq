@@ -7373,26 +7373,47 @@ column that separates "converged" from "converged to the right thing".
 
 ### M-162
 
-**MEQ, DESC AND `freegs4e` ON ONE **FREE-BOUNDARY** EQUILIBRIUM, WHICH IS THE
-FIRST TIME THE DESC COMPARISON HAS LEFT THE FIXED-BOUNDARY LADDER.**
+**MEQ, DESC AND `freegs4e` ON ONE **FREE-BOUNDARY** EQUILIBRIUM — AND THE DESC
+ARM OF IT DOES NOT CONVERGE, WHICH TOOK A CONVERGENCE CHECK TO SEE.**
+
+**READ THE RETRACTION BEFORE THE TABLES.** This entry was written as a
+three-code agreement at 1.3e-04 and it is not one: `descfreeb.py` never read
+`result["success"]`, so runs that stopped at their starting point were reported
+as answers. Of thirteen runs re-taken with the check in place **three
+converged**, and none of the three is within 1e-02 of the reference. The
+conversion audits, the conductor models and the toroidal-field finding below all
+stand — they are properties of the posing and were checked against the reference
+by routes that do not use the optimiser. What is withdrawn is every number that
+came out of the free-boundary solve. **The DESC comparison that is built on is
+the FIXED-boundary ladder**, which is monotone in `M` and agrees with MEQ at
+9.35e-05 ([M-157](#m-157), [M-163](#m-163) section 3).
 
 `examples/limited-tokamak-filament.toml` against `ref-n513/H_limited_circular`,
 `tools/desc-benchmark/descfreeb.py` at `M = 10`. Relative L2 of `psi` over the
 nodes both arms answer for, `compare.py`'s own norm with its band mask:
 
-| pair | rel L2 | rel Linf | nodes |
-|---|---|---|---|
-| DESC vs `freegs4e` 513² | **1.3329e-04** | 5.5778e-04 | 37,523 |
-| MEQ vs `freegs4e` 513² | **2.0379e-04** | 1.2602e-02 | 136,242 |
-| **MEQ vs DESC** | **1.2873e-04** | 4.0235e-04 | 19,296 |
+| pair | rel L2 | rel Linf | nodes | |
+|---|---|---|---|---|
+| DESC vs `freegs4e` 513² | ~~1.3329e-04~~ | ~~5.5778e-04~~ | 37,523 | **WITHDRAWN** |
+| MEQ vs `freegs4e` 513² | **2.0379e-04** | 1.2602e-02 | 136,242 | stands — MEQ's own |
+| **MEQ vs DESC** | ~~1.2873e-04~~ | ~~4.0235e-04~~ | 19,296 | **WITHDRAWN** |
+
+**THE TWO WITHDRAWN ROWS COME FROM A DESC RUN THAT DID NOT CONVERGE** — `M = 10`
+seeded at the reference's own LCFS, which stops where it starts. See *the
+free-boundary sweep* below; nothing in this entry's free-boundary arm should be
+quoted from above that point.
 
 and the one scalar all three report, the flux span `psi_ax − psi_bnd`:
 
-| | span, Wb/rad | from the reference |
-|---|---|---|
-| `freegs4e` 513² | 6.686290202243769e-02 | — |
-| MEQ, 1823 el, `k = 3` | 6.686596e-02 | **+4.6e-05** |
-| DESC, `M = 10` | 6.686094e-02 | **−2.9e-05** |
+| | span, Wb/rad | from the reference | |
+|---|---|---|---|
+| `freegs4e` 513² | 6.686290202243769e-02 | — | |
+| MEQ, 1823 el, `k = 3` | 6.686596e-02 | **+4.6e-05** | stands |
+| DESC, `M = 10` | ~~6.686094e-02~~ | ~~−2.9e-05~~ | **WITHDRAWN**, same failed run |
+
+**THE DESC SPAN IS SMALL FOR THE SAME REASON THE TWO ROWS ABOVE ARE**: it is
+the seed's span, the seed was fitted to the reference, and the optimiser did not
+move. The three converged runs give −2.7e-02, −3.9e-02 and −4.6e-02.
 
 **THE MUTUAL FLOOR IS THE SAME SIZE AS EACH ARM'S OWN DISTANCE FROM THE
 REFERENCE**, exactly as the fixed-boundary race found, so nothing here resolves
@@ -7468,118 +7489,115 @@ neither is the other's: the plasma's size is pinned by the contact in one and by
 `Psi` in the other. A disagreement can live there as well as in either
 discretisation.
 
-**AND DESC'S FREE-BOUNDARY ANSWER ON THIS CASE IS NOT MONOTONE IN RESOLUTION,
-WHICH RETRACTS THE ROW ABOVE AS AN ACCURACY.** The `M = 10` figure is the best
-of a sweep, and the sweep does not converge. `psi_ax` against the reference,
-over both starting boundaries:
+**AND THE FREE-BOUNDARY SWEEP BELOW WAS TAKEN BY A HARNESS THAT COULD NOT TELL
+A CONVERGED RUN FROM A STOPPED ONE, SO IT IS WITHDRAWN RATHER THAN
+REINTERPRETED.** `descfreeb.py` read `result["x"]` and never read
+`result["success"]`. `scipy`'s least-squares result carries the final iterate
+whether or not the optimiser got anywhere, so a run that stopped at its own
+starting point returned that starting point, the harness printed it beside the
+reference, and a seed fitted to the reference's own LCFS printed a small number
+**because it had not moved**. Every figure this entry first carried came off
+that path.
 
-| `M` | from the reference's LCFS | from a design circle |
+**THREE DEFECTS, ALL THE SAME SHAPE: THE HARNESS REPORTED SOMETHING OTHER THAN
+WHAT RAN.**
+
+| | what it recorded | what had happened |
 |---|---|---|
-| 8 | 6.757e-04 | 7.695e-03 |
-| **10** | **2.937e-05** | 1.020e-01 |
-| 12 | 8.580e-03 | 3.853e-02 |
-| 16 | 7.202e-03 | 2.213e-03 |
+| **no convergence check** | the final iterate, unlabelled | the optimiser may have failed; `success` was never read |
+| **`boundary_start`** | the `--boundary` flag | `--blend` overrides it, so every blended run was labelled with a seed it did not use — `blend = 0.000` is the CIRCLE and was stored as `"reference"` |
+| **`boundary_moved`** on a circle seed | distance from `+a sin θ` | the seed surface is `−a sin θ`, so the displacement was measured against the circle's own REFLECTION and is wrong by up to `2a` |
 
-**Three and a half orders of magnitude, in neither column ordered by `M`.** And
-the `M = 10` row took **one** optimiser iteration, so what it says is *the
-reference's own LCFS is a stationary point of the objective at that
-resolution*, not that DESC converged to it.
+The seed **surfaces** are not affected and were checked rather than assumed:
+`--boundary circle` builds an exact two-mode circle and `--blend 0.0` fits the
+same curve to `M` modes, and the two surfaces agree to **9.2e-16 m**, so the
+docstring's *"`t = 0` reproduces `--boundary circle`"* is true of the seed. It
+is the diagnostic tuple returned beside it that carries the reflection.
 
-**IT IS NOT THE OPTIMISER'S TOLERANCE.** `--ftol` tightened from 1e-6 to
-**1e-10** with `--maxiter` raised to 200 reproduces `M = 12` and `M = 16`
-**to every printed digit** — 6.628922934e-02 and 6.638137926e-02 — at the same
-4 and 7 iterations. They are converged; they are converged somewhere else.
+**AND A FOURTH, WHICH IS WHY THE ARCHIVED RUNS CANNOT BE RESCUED BY RE-READING
+THEM: THE `.npz` DOES NOT RECORD THE TOLERANCES OR THE ITERATION CAP THE RUN WAS
+GIVEN.** It
+stores `M` and `free_modes` and not `ftol`, `xtol`, `gtol` or `maxiter`, so a
+file written during the tolerance study cannot be told from one written during
+the seed study, and none of them can be compared with a run taken today. That
+is why the table below is rebuilt from new runs under the guard rather than
+re-scored from what was on disk.
 
-**AND THE NUMBER OF FREE BOUNDARY MODES MOVES IT AS MUCH AS `M` DOES**, also
-without order. At `M = 12` from the reference's LCFS:
+**THE VERIFIED TALLY.** Every run below carries the convergence guard. The
+`flags` column is the previous paragraph's point: rows marked `defaults` were
+taken after the `.npz` began recording its tolerances, at `ftol` 1e-6, `xtol`
+1e-8, `gtol` 1e-10, `maxiter` 50 and two free boundary modes; rows marked
+*unrecorded* predate that and **cannot be placed**, so they are shown rather
+than quoted. `span` is `psi_ax − psi_bnd` against the reference's
+6.686290202243769e-02. **The bold `boundary moved` entries are the
+circle-seeded rows and read about `2a = 0.68 m` because of the reflected
+diagnostic above** — they are the defect, not a displacement.
 
-| boundary modes free | `psi_ax` against the reference |
-|---|---|
-| `\|m\| <= 2` | 8.580e-03 |
-| `\|m\| <= 4` | **2.406e-04** |
-| `\|m\| <= 6` | 2.563e-03 |
+| `M` | seed | flags | optimiser | span | from the reference | boundary moved |
+|---|---|---|---|---|---|---|
+| 8 | circle, `--blend 0` | defaults | FAILED | 6.737719111e-02 | +7.692e-03 | 2.1644e-02 m |
+| 8 | circle, `--boundary` | defaults | FAILED | 6.737719111e-02 | +7.692e-03 | **6.8518e-01** m |
+| 8 | reference, `--boundary` | defaults | FAILED | 6.690771632e-02 | +6.702e-04 | 1.5617e-03 m |
+| 10 | circle, `--boundary` | defaults | FAILED | 7.367842896e-02 | +1.019e-01 | **7.0623e-01** m |
+| 10 | reference, `--boundary` | defaults | FAILED | 6.685981981e-02 | -4.610e-05 | 6.1443e-05 m |
+| 12 | blend t = 0.900 | *unrecorded* | **converged** | 6.378545735e-02 | **-4.603e-02** | 5.5927e-02 m |
+| 12 | blend t = 0.990 | *unrecorded* | **converged** | 6.508006456e-02 | **-2.666e-02** | 3.4742e-02 m |
+| 12 | blend t = 0.999 | *unrecorded* | FAILED | 6.642787547e-02 | -6.506e-03 | 7.9147e-03 m |
+| 12 | circle, `--boundary` | defaults | **converged** | 6.428642967e-02 | **-3.853e-02** | **6.7948e-01** m |
+| 12 | reference, `--boundary` | defaults | FAILED | 6.628845686e-02 | -8.591e-03 | 1.6760e-02 m |
+| 16 | circle, `--blend 0` | *unrecorded* | FAILED | 6.700908688e-02 | +2.186e-03 | 1.3182e-02 m |
+| 16 | circle, `--boundary` | defaults | FAILED | 6.700908688e-02 | +2.186e-03 | **6.8332e-01** m |
+| 16 | reference, `--boundary` | defaults | FAILED | 6.638041952e-02 | -7.216e-03 | 8.4279e-03 m |
 
-**THE SEED WAS SWEPT NEXT, AND THE ANSWER DEPENDS ON THE RESOLUTION — WHICH IS
-WHY ONE RESOLUTION'S ANSWER WAS PUBLISHED AND IS WRONG.** If these were basins
-then the STARTING boundary would decide which one is reached and `M` would only
-be a proxy for it, the surface being re-fitted at every resolution.
-`descfreeb.py --blend t` tests that directly: it seeds at `( 1 - t )` of the
-design circle plus `t` of the reference's curve, sampled at the same poloidal
-parameter, so the seed moves continuously at FIXED `M`. `t = 0` and `t = 1`
-reproduce `--boundary circle` and `--boundary reference` exactly, by
-construction.
+**THREE OF THIRTEEN CONVERGED — AND OF THE NINE RUN AT RECORDED DEFAULTS,
+ONE.** The three land at **−2.7e-02, −3.9e-02 and −4.6e-02**, so
+**no converged free-boundary run is within 1e-02 of the reference.** Every
+small number in the table is on a row the optimiser FAILED, and it is small for
+a mechanical reason: a reference-seeded run that cannot move reports its seed,
+and the seed was fitted to the reference's own LCFS. `boundary moved` is the
+column that says so — `M = 10` from the reference reads `−4.6e-05` from the
+reference after travelling **6.1e-05 m**.
 
-`psi_ax` against the reference, and the distance the solved boundary ends up
-from the reference's own LCFS:
+**SO THE TOP OF THIS ENTRY RESTS ON A RUN THAT DID NOT CONVERGE.** The
+`DESC vs freegs4e` 1.3329e-04 and the `MEQ vs DESC` 1.2873e-04 both come from
+`M = 10` seeded at the reference, which fails with *"A bad approximation caused
+failure to predict improvement"*. **Those two rows are withdrawn.** The
+`MEQ vs freegs4e` row is MEQ's own and stands.
 
-| seed `t` | seed's distance from the LCFS | `M = 12` | `M = 10` |
-|---|---|---|---|
-| 0.00 — the circle | 1.9296e-02 m | 3.853e-02 | 1.020e-01 |
-| 0.25 | 1.4472e-02 m | 5.026e-02 | **1.423e-01** |
-| 0.50 | 9.6481e-03 m | 3.737e-02 | **4.050e-03** |
-| 0.75 | 4.8241e-03 m | 4.327e-02 | 7.001e-03 |
-| 0.90 | 1.9296e-03 m | 4.476e-02 | 1.122e-03 |
-| 0.99 | 1.9296e-04 m | 2.665e-02 | — |
-| 0.999 | 1.9296e-05 m | 6.457e-03 | — |
-| 1.00 — the reference | 0 | 8.580e-03 | **2.937e-05** |
+**THE DEGENERACY READING WAS RIGHT AND THE ARGUMENT THAT DISMISSED IT WAS
+NOT.** A reference seed is a stationary point of the objective, so the trust
+region cannot predict improvement and the solve stops where it started — which
+is what the optimiser's own message says on **every** reference-seeded row, at
+all four `M`. This entry previously argued against that from the `t = 0.999`
+figure, on the ground that a continuous approach to `t = 1` ruled out a
+degenerate one. **That argument tested the predicted VALUE and not the run's
+STATUS**: `t = 0.999` fails too, so the "smooth path" was two failed runs
+reporting their own starting points, and the *severe sensitivity* said to
+survive at `M = 12` goes with it.
 
-**AT `M = 12` SIX SEEDS LAND WITHIN A FACTOR OF 1.3 OF EACH OTHER. AT `M = 10`
-THEY SCATTER OVER FOUR ORDERS OF MAGNITUDE.** So "the seed is not the variable"
-is true at one resolution and false at the next, and a claim of seed
-independence made from the `M = 12` fan alone — which is what this entry first
-carried — generalises one resolution to a sweep it does not describe. **That is
-the same error as quoting one `M` as an accuracy, one level down**, and it was
-made immediately after recording the first.
+**THE SOLVE IS DETERMINISTIC AND THE ARCHIVE IS SIMPLY UNPLACEABLE, WHICH THE
+TABLE SETTLES WITHOUT A SEPARATE EXPERIMENT.** `--boundary circle` and
+`--blend 0.0` are the same seed, and today's pairs agree to **every digit** —
+`M = 8` gives 6.737719111e-02 both ways and `M = 16` gives 6.700908688e-02 both
+ways, differing only in the reflected `boundary moved`. Yet the ARCHIVED
+`M = 8` blend-zero run converged at 6.735344620e-02, moving 2.0922e-02 m, where
+the re-run at the defaults FAILS at 6.737719111e-02 having moved 2.1644e-02 m —
+it is the row in the table, the re-run having overwritten the archive, which a
+copy taken beforehand preserved. Same seed, same code, different outcome, so
+the difference is the flags — and the flags were not recorded. **That is the cost of the fourth
+defect stated as a measurement** rather than as a worry.
 
-**WHAT SURVIVES AT `M = 12` IS THE SENSITIVITY, AND IT IS SEVERE.** The
-approach to `t = 1` is continuous rather than degenerate — `t = 0.999` reads
-6.5e-03 and not the ~4e-02 a null first step would give — so `t = 1` is the end
-of a smooth path and is a data point. But a seed **1.9e-04 m** from the
-reference's own LCFS, 5.7e-04 of the minor radius, already lands 3.5e-02 m
-away, and it takes a seed within 2e-05 m to finish inside 1e-02.
-
-**AND THE `t = 1` ROW IS SEEDED FROM THE REFERENCE AT EVERY `M` BY
-CONSTRUCTION, SO THE ORIGINAL SWEEP'S `reference` COLUMN IS NOT A MEASUREMENT
-OF WHAT DESC CONVERGES TO.** `--boundary reference` and `--blend 1.0` call the
-same sampler and the same fit; at `M = 12` both print `psi_ax` 6.628922934e-02.
-**THAT AGREEMENT IS A WIRING CHECK AND NOT EVIDENCE** — it is one code path
-reached two ways and it could not have come out otherwise, which is the same
-shape as a control that agrees because neither arm does what it is believed to.
-The claim it looks like it supports rests on reading the code, not on the
-number.
-
-**AND THE RECASTING THAT FOLLOWED IT WAS TOO STRONG.** "The `reference` column
-measures how nearly stationary the reference's LCFS is" holds only where the
-solve stays put, and the displacement says where that is:
-
-| `M` | 8 | 10 | 12 | 16 |
-|---|---|---|---|---|
-| reference-seeded run's distance from the LCFS | 1.5617e-03 m | **6.1443e-05 m** | 1.6760e-02 m | 8.4279e-03 m |
-
-**Only `M = 10` is stationary.** At `M = 12` and `M = 16` the reference-seeded
-run moves 8e-03 to 1.7e-02 m — a long way toward the `M = 12` attractor's
-4.7e-02 m without arriving — so those rows are partial drifts and not
-stationarity.
-
-**SO THERE IS NO RESOLUTION-CONVERGED ANSWER AND NO SEED-INDEPENDENT ANSWER,
-AND WHICH OF THOSE TWO FAILURES APPLIES DEPENDS ON THE RESOLUTION.** The
-`circle` column cannot be quoted as "the attractor at each `M`" either, because
-at `M = 10` the circle seed is simply one of several destinations — `t = 0.25`
-from that same fan reaches 1.423e-01 and `t = 0.50` reaches 4.050e-03.
-
-**So no single row of this sweep is a measurement of DESC's accuracy**, and the
-`MEQ vs DESC` figure in the table above rests on the `M = 10` run and inherits
-that. What the sweep does establish is that the reference's LCFS is a
-stationary point, which is a statement about the reference; and that the
-objective has many of them, which is [M-26](#m-26)'s finding in DESC's
-coordinates — a free boundary has to be told which branch. The honest matched
-posing hands both codes the same branch selection rather than letting either
-search, and MEQ's side of that is `[boundary.xpoint]`, `[source] PsiAxis` and
-the initial guess. **What is not yet known is whether this is DESC, the posing,
-or this machine being nearly circular with a weak shaping signal** — the
-fixed-boundary ladder is monotone in `M` on the same geometry, which points at
-the free-boundary objective rather than at the discretisation, and is as far as
-the evidence goes.
+**WHAT THIS DOES AND DOES NOT SAY ABOUT DESC.** It is a statement about DESC's
+free-boundary objective **on this machine**, and about a harness that could not
+see failure — not about DESC. The **fixed-boundary ladder on the same geometry
+is monotone in `M` and agrees with MEQ at 9.35e-05**
+([M-157](#m-157), [M-163](#m-163) section 3), so the discretisation is not what
+is failing. `examples/limited-tokamak-filament.toml` is nearly circular with a
+weak shaping signal, and a free boundary has to be told which branch it is on —
+[M-26](#m-26)'s finding in DESC's coordinates. **The fixed comparison is the
+one that is built on**; the free-boundary arm is recorded here and not driven
+further. `tools/benchmarks/HOW_TO_DRIVE_DESC.md` says which is which for
+whoever picks this up next.
 
 ### M-163
 

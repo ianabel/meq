@@ -3529,7 +3529,7 @@ iterations over 4 sweeps, against **127** for the exact guess built from the
 reference's own `Jtor` — the same answer to every digit, and the warm start is
 seven times the work.
 
-## DESC on a free boundary: only a limited case reaches it, and three codes then agree to 1.3e-04
+## DESC on a free boundary: only a limited case reaches it, and the solve then does not converge
 
 **DESC's `BoundaryError` CONSTRAINS THE LCFS, AND THE LCFS IS A
 `FourierRZToroidalSurface` — A TRUNCATED FOURIER SERIES.** Every free-boundary
@@ -3541,9 +3541,18 @@ edge is the smooth flux surface tangent to the limiter and is representable, so
 `examples/limited-tokamak-filament.toml` is the case the free-boundary
 comparison exists on and `tools/desc-benchmark/descfreeb.py` is its runner.
 
-→ **[M-162](MEASUREMENTS.md#m-162)** — the three pairings · the span all three
-report · the conversion's four self-audits · the toroidal field · the second
-branch
+**AND THE DESC ARM OF IT DOES NOT CONVERGE.** `descfreeb.py` never read
+`result["success"]`, so a run that stopped at its starting point was reported as
+an answer — and a boundary seeded from the reference's own LCFS starts at a
+stationary point, so it reports the reference back with a tiny error **because
+it did not move**. Re-taken with the check, **3 of 13 runs converge** and none
+of the three is within 1e-02. The three-pairing agreement at 1.3e-04 this
+section used to carry is withdrawn. What stands is the conversion's own audits,
+which are checked against the reference by routes that do not use the optimiser.
+**The DESC comparison that is built on is the FIXED ladder.**
+
+→ **[M-162](MEASUREMENTS.md#m-162)** — the retraction · the verified tally ·
+the four harness defects · the conversion's self-audits · the toroidal field
 
 **AND THE COMPARISON THAT TABLE SITS IN IS NOT ONE PROBLEM, WHICH ONLY TWO
 FURTHER CODES COULD SHOW.** `freegs4e` takes `psi_bndry` to be the maximum of

@@ -186,7 +186,14 @@ def initial_surface(spec, meta, M, kind, blend=None):
 		R_lmn=[R0, a], modes_R=[[0, 0], [1, 0]],
 		Z_lmn=[-a], modes_Z=[[-1, 0]], NFP=1, sym=spec["up_down_symmetric"])
 	theta = np.linspace(0.0, 2.0 * np.pi, 512, endpoint=False)
-	return surface, (theta, R0 + a * np.cos(theta), a * np.sin(theta))
+	# -sin, MATCHING THE SURFACE JUST BUILT.  `modes_Z = [[-1, 0]]` with
+	# coefficient -a is Z = -a sin( theta ), and this tuple is what
+	# `boundary_residual` measures the solved boundary against -- so a +sin
+	# here compares the answer with the seed's own REFLECTION and reports a
+	# displacement wrong by up to 2a on an up-down symmetric machine, where
+	# the two curves are the same SET of points traversed oppositely and
+	# nothing looks amiss.  The blend branch above already had this right.
+	return surface, (theta, R0 + a * np.cos(theta), -a * np.sin(theta))
 
 
 def solve_free(eq, field, M_boundary, ftol=1e-6, xtol=1e-8, gtol=1e-10,
@@ -223,10 +230,18 @@ def solve_free(eq, field, M_boundary, ftol=1e-6, xtol=1e-8, gtol=1e-10,
 	constraints = constraints + (FixBoundaryR(eq=eq, modes=modes_R),
 	                             FixBoundaryZ(eq=eq, modes=modes_Z))
 	started = time.perf_counter()
+	# `ftol=None` HANDS DESC ITS OWN DEFAULT, which is not the same as passing
+	# a tight number: a trust-region method whose tolerances are set below what
+	# its model can resolve stops on "failure to predict improvement" rather
+	# than on any of them, and then reports a point that is not a minimum.
+	# Distinguishing that from the problem being hard needs the library's own
+	# settings as a control.
+	kwargs = {k: v for k, v in
+	          dict(ftol=ftol, xtol=xtol, gtol=gtol).items() if v is not None}
 	eq, result = eq.optimize(objective, constraints,
-	                         optimizer="proximal-lsq-exact", ftol=ftol,
-	                         xtol=xtol, gtol=gtol, maxiter=maxiter,
-	                         verbose=verbose, copy=False)
+	                         optimizer="proximal-lsq-exact",
+	                         maxiter=maxiter, verbose=verbose, copy=False,
+	                         **kwargs)
 	return eq, result, time.perf_counter() - started
 
 
@@ -249,6 +264,11 @@ def main():
 	                     "ones are held")
 	ap.add_argument("--maxiter", type=int, default=50)
 	ap.add_argument("--ftol", type=float, default=1e-6)
+	ap.add_argument("--xtol", type=float, default=1e-8)
+	ap.add_argument("--gtol", type=float, default=1e-10)
+	ap.add_argument("--desc-defaults", action="store_true",
+	                help="pass none of the three tolerances, so DESC uses its "
+	                     "own -- the control for a trust-region collapse")
 	ap.add_argument("--current-sign", type=float, default=+1.0)
 	ap.add_argument("--warm", type=int, default=0,
 	                help="solve the free-boundary step this many more times "
@@ -296,7 +316,10 @@ def main():
 	fixed_seconds = time.perf_counter() - started
 
 	eq, result, free_seconds = solve_free(eq, coils, args.free_modes,
-	                                      ftol=args.ftol, maxiter=args.maxiter,
+	                                      ftol=None if args.desc_defaults else args.ftol,
+	                                      xtol=None if args.desc_defaults else args.xtol,
+	                                      gtol=None if args.desc_defaults else args.gtol,
+	                                      maxiter=args.maxiter,
 	                                      verbose=args.verbose)
 	cold = fixed_seconds + free_seconds
 
@@ -310,7 +333,29 @@ def main():
 
 	rho, psi_line = descrun.poloidal_flux(eq)
 	psi_ax_desc = float(psi_line[0])
-	print("\n    fixed-boundary seed   %8.2f s" % fixed_seconds)
+	# WHY THE OPTIMISER STOPPED, AND IT IS NOT THE ITERATION COUNT.  A sweep
+	# of --ftol that leaves both the answer and the count unmoved does NOT
+	# establish that the run was converged rather than halted: if some OTHER
+	# termination test fired -- xtol, gtol, a step-size floor, a cap -- then
+	# ftol was never what stopped it and tightening it could not have changed
+	# anything.  The exit reason names which, and nothing else does.
+	# A FAILED OPTIMISATION IS NOT AN ANSWER, AND IT PRINTS ONE.  Every
+	# quantity below is computed from `eq` whether or not the optimiser
+	# reached a minimum, so without this the run reports a plausible psi_ax,
+	# a plausible boundary and a wall clock, with nothing saying that the
+	# trust region collapsed four iterations in.  MEASUREMENTS.md M-162 is
+	# what that cost: a whole campaign of resolution and seed sweeps built on
+	# runs that had all failed, and three published revisions chasing
+	# structure in the scatter.
+	succeeded = bool(result.get("success", False))
+	print("\n    optimiser exit        %r"
+	      % str(result.get("message", "?")).replace("\n", " "))
+	if not succeeded:
+		print("    *** THE OPTIMISER DID NOT SUCCEED.  Nothing below is an "
+		      "answer: it is the iterate the solve stopped at.  The usual "
+		      "cause here is starting AT a stationary point -- a reference "
+		      "seed -- where the trust region cannot predict improvement.")
+	print("    fixed-boundary seed   %8.2f s" % fixed_seconds)
 	print("    free-boundary step    %8.2f s   ( %d iterations )"
 	      % (free_seconds, result.get("nit", -1)))
 	print("    cold total            %8.2f s" % cold)
@@ -343,12 +388,37 @@ def main():
 	descrun.write_npz(out, R, Z, psi_meq, spec, eq, result,
 	                  dict(cold=cold, free=free_seconds, fixed=fixed_seconds,
 	                       warm=warm),
-	                  dict(free_boundary=True, boundary_start=args.boundary,
+	                  dict(free_boundary=True,
+	                       # THE SEED THAT ACTUALLY RAN, not the flag.  --blend
+	                       # OVERRIDES --boundary, so recording args.boundary
+	                       # here labelled every blended run with whatever
+	                       # --boundary happened to default to: `blend = 0.000`
+	                       # is the CIRCLE and was stored as "reference".  The
+	                       # filename was right throughout and this field was
+	                       # not, which is the same defect as the one the
+	                       # optimiser_success guard below exists to close --
+	                       # a harness reporting something other than what ran.
+	                       boundary_start=(
+	                           args.boundary if args.blend is None
+	                           else "blend t = %.3f" % args.blend),
+	                       optimiser_success=succeeded,
+	                       optimiser_message=str(result.get("message", "")),
 	                       boundary_moved=moved,
 	                       boundary_vs_reference=against_reference,
 	                       seconds_cold=cold, seconds_free=free_seconds,
 	                       seconds_fixed=fixed_seconds,
 	                       seconds_warm=np.array(warm, dtype=float),
+	                       # WHAT THE RUN WAS GIVEN.  Without these an archived
+	                       # file from the tolerance study cannot be told from
+	                       # one from the seed study, and neither can be
+	                       # compared with a run taken later -- which is what
+	                       # made M-162's first sweep unrescuable by re-reading
+	                       # it.
+	                       ftol=(np.nan if args.desc_defaults else args.ftol),
+	                       xtol=(np.nan if args.desc_defaults else args.xtol),
+	                       gtol=(np.nan if args.desc_defaults else args.gtol),
+	                       maxiter=args.maxiter,
+	                       desc_defaults=bool(args.desc_defaults),
 	                       M=args.M, free_modes=args.free_modes))
 	print("    wrote %s" % out)
 
