@@ -7523,15 +7523,51 @@ other**, at about 4e-02, and the one that does not is `t = 1` exactly.
 control and it passes, so the blend path and the reference path are the same
 computation where they should be.
 
-**So the seed is not the variable; `M` and the free-mode count are.** What the
-objective has at this resolution is an attractor near `psi_ax = 6.4e-02` that
-essentially every start reaches, and the reference's equilibrium is not it. The
-`M = 10` row is then the reference's own LCFS being very nearly STATIONARY at
-that one resolution rather than an answer DESC converged to from anywhere —
-which is what its single iteration said and what this sweep confirms from the
-other side. **That points at the posing and the truncated boundary
-representation rather than at multiple basins**, and naming the mechanism
-further is beyond what has been measured.
+**AND THE LAST TENTH OF THAT PATH IS WHERE THE WHOLE QUESTION LIVES, SO IT WAS
+SAMPLED.** A plateau to `t = 0.9` and then a factor of five admits two readings
+that the table above cannot separate — a narrow basin with `psi_ax` continuous
+in `t`, or `t = 1` being DEGENERATE, the free-boundary parameters starting at
+their own fixed point so the first step is null. The iteration count does not
+discriminate: 4 at `t = 1.00` and 4 at `t = 0.25`. Two more seeds settle it,
+and the seed distance is quoted in metres because that is what makes it read:
+
+| seed `t` | the seed's own worst distance from the LCFS | `psi_ax` against the reference | its |
+|---|---|---|---|
+| 0.90 | 1.9296e-03 m | 4.476e-02 | 29 |
+| 0.99 | 1.9296e-04 m | 2.665e-02 | 15 |
+| **0.999** | **1.9296e-05 m** | **6.457e-03** | 2 |
+| 1.000 | 0 | 8.580e-03 | 4 |
+
+**CONTINUOUS, NOT DEGENERATE.** `t = 0.999` reads 6.5e-03 and not the ~4e-02
+the degenerate reading predicts, so `t = 1` is the end of a smooth approach
+rather than the instrument measuring itself. What is left is the sensitivity,
+and it is severe: **a seed 1.9e-04 m from the reference's own LCFS — 5.7e-04 of
+the minor radius — already lands 3.5e-02 m away**, and it takes a seed within
+2e-05 m to finish inside 1e-02. The map from seed to answer is continuous with
+an enormous derivative there.
+
+**SO DESC DOES NOT FIND THIS EQUILIBRIUM, IT RETAINS IT.** Handed the answer it
+stays near it; handed anything else, including the answer to four decimal
+places, it drifts to the attractor. That is a statement about the free-boundary
+objective as posed and not about DESC's discretisation, and the fixed-boundary
+ladder being monotone in `M` on the same geometry is the control that says so.
+
+**AND THAT RECASTS EVERY ROW OF THE ORIGINAL SWEEP, NOT ONLY `M = 10`.** Its
+`reference` column IS `t = 1` at each resolution, by construction — `M = 12`
+reads 6.628922934e-02 in both tables, the same computation reached two ways.
+So that column never measured what DESC converges to; it measured **how nearly
+stationary the reference's LCFS is at each `M`**, which is a property of the
+reference. The `circle` column is `t = 0`, the attractor, and is the one that
+answers what DESC delivers when it has to find the boundary:
+
+| `M` | 8 | 10 | 12 | 16 |
+|---|---|---|---|---|
+| the attractor, `psi_ax` against the reference | 7.695e-03 | 1.020e-01 | 3.853e-02 | 2.213e-03 |
+
+**Non-monotone over a factor of 46, and two orders worse than the `reference`
+column that was first reported.** That is the honest size of DESC's
+free-boundary answer on this case, and the original table did not contain it
+anywhere.
 
 **So no single row of this sweep is a measurement of DESC's accuracy**, and the
 `MEQ vs DESC` figure in the table above rests on the `M = 10` run and inherits
