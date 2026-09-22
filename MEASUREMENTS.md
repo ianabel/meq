@@ -7882,7 +7882,19 @@ converges just as cleanly in its own ladder — `psi_ax` moving 0.98% then 0.23%
 over the three rungs and `psi_bnd` flat to 1e-05 relative by the last two — to
 a boundary condition neither reference imposes.
 
-#### 4. Putting MEQ on NICE's footing does not work yet, and the guess is not the variable
+#### 4. Putting MEQ on NICE's footing — the run below is REPAIRED, and the repair is [M-165](#m-165)
+
+**READ [M-165](#m-165) BEFORE THIS SECTION.** Everything below is the
+measurement of a defect in `apps/meq.cpp`'s first plasma-support freeze, not a
+property of the limiter-as-a-curve constraint, and it is kept because the *way*
+it hid is the transferable half. With the freeze posed on the constraint the
+border actually imposes, the same file converges in **3 sweeps and 3.817 s** to
+`psi_ax = 9.273894e-02` with the contact found at `( 0.81699, 0.297389 )` — so
+MEQ **can** take NICE's posture, and the closing sentence of this section is
+withdrawn. The two-column reporting stays, for section 3's reason rather than
+for this one.
+
+##### What was measured before the repair
 
 MEQ already has the posture: `[boundary.limiter] SurfaceAttribute` finds the
 contact on a meshed limiter surface, `[mesh.generate] LimiterR / LimiterZ /
@@ -7911,8 +7923,121 @@ starting points that far apart reaching one answer is an **attracting spurious
 solution**, not a basin-of-attraction accident, so the obvious remedy is
 already measured and does not work.
 
-So the comparison cannot be made posture-matched from MEQ's side today, and
-[M-163](#m-163)'s single accuracy column is replaced by section 3's statement
-of which boundary condition each code was given. **`profile scale` is the free
-diagnostic that names it**: 0.9999 on the posture that works and 4.3e-03 on the
-one that does not, without reference to anybody's answer.
+~~So the comparison cannot be made posture-matched from MEQ's side today~~ —
+**WITHDRAWN, [M-165](#m-165)**: it can, and what stood in the way was the
+driver's first support freeze rather than the constraint.
+[M-163](#m-163)'s single accuracy column is still replaced by section 3's
+statement of which boundary condition each code was given, which is a fact
+about the three postures and does not depend on this. **`profile scale` is the
+free diagnostic that names it** and it stands unchanged: 0.9999 on the posture
+that works, 4.3e-03 on the mis-posed run, 0.9962 on the repaired curve
+posture — without reference to anybody's answer.
+
+### M-165
+
+**[M-164](#m-164) SECTION 4's ATTRACTING ANNULUS IS THE DRIVER'S FIRST
+PLASMA-SUPPORT FREEZE POSED WITH A SPAN OF −1.63e−05 WHERE THE TRUE ONE IS
++4.76e−02, BECAUSE ONE HELPER MAXIMISED OVER THE LIMITER'S INTERIOR WHERE THE
+BORDER MAXIMISES OVER ITS BOUNDARY.**
+
+`apps/meq.cpp`'s `edgeFluxOf()` supplies `psi_bnd` of the iterate the first
+support sweep will start from — the one number the freeze needs and the one the
+solver cannot yet give, `psiBoundary()` being the converged value. Under
+`[boundary.limiter] SurfaceAttribute` it took *"the maximum over the meshed
+limiter surface"* to mean **every dof of every element carrying the
+attribute**, which is the region the limiter ENCLOSES.
+`GradShafranovSolver::setLimiterSurface()` constrains `psi_bnd` to the maximum
+over the **faces bounding** that region. The two readings of one phrase are
+different functionals and **the enclosed region contains the magnetic axis**.
+
+**MEASURED ON `examples/limited-tokamak-filament-curve.toml`, BOTH READINGS OF
+THE SAME GUESS IN ONE RUN**, 1853 elements at `k = 3`, `Model = "filament"`:
+
+| | value | where |
+|---|---|---|
+| the polygon — what the border imposes | **2.779806e-02** | on the limiter |
+| the region — what `edgeFluxOf()` returned | **7.545003e-02** | `( 1.02350, 0.00019 )` |
+| `psiAxisGuess`, from `[source] PsiAxis` | 7.543374e-02 | — |
+
+The region maximum agrees with `psi_ax` to **2.2e-04 relative**, and its
+location is the guess's own axis — the converged axis is `( 1.0521, 0.0000 )`.
+So `freezePlasmaEdge( axis, boundary )` was called with `boundary` **greater**
+than `axis`: a span of **−1.63e-05** against the true **+4.76e-02**, wrong by a
+factor of 2.9e+03 **and of the wrong sign**. `F = 0` wherever the normalised
+flux is non-positive, so an inverted span inverts the support and the plasma
+becomes everything the plasma is not.
+
+**THE FIX IS ONE IMPLEMENTATION RATHER THAN A CORRECTED SECOND ONE.**
+`meq::collectLimiterPolygon()` and `meq::limiterPolygonMaximum()` are free
+functions carrying what `locateLimiterContact()` had inside it; the border calls
+them and so does the driver, on its own field with `offset = 0`.
+
+| | defective | **repaired** |
+|---|---|---|
+| exit | 1, refused | **0** |
+| Newton | 200 at the cap, then 23 on the `bP->N` rung | **11 + 3 + 2** over 3 sweeps, support settled 408/408 |
+| `psi_ax` | 9.778761e-03 | **9.273894e-02**, axis located at `( 1.0521, 0.0000 )` |
+| `psi_bnd` | −1.917567e-02 at `( 0.65, 0 )` | **2.606986e-02** at `( 0.81699, 0.297389 )` |
+| `profile scale` | 4.304152e-03 | **9.962071e-01** |
+| O-point | none reachable | found, normalised flux 1.0000 |
+| wall | not comparable — the defective run exits before the summary prints one | **3.817 s** = setup 0.013 + solve 3.173 + output 0.631 |
+
+**THE DEFECTIVE COLUMN IS A RE-RUN AND NOT A QUOTATION, WHICH MATTERS FOR THE
+TWO ROWS THAT DIFFER FROM [M-164](#m-164).** Every reported quantity —
+`psi_ax`, `psi_bnd`, the contact, the scale, the missing O-point, the exit code
+— reproduces M-164 section 4 **to every printed digit**, which is what says the
+defect is the code and not the occasion. The **iteration count does not**: this
+run takes the 200-step cap and then 23 on the `bordered-picard-then-newton`
+rung, where M-164 records 21, and M-164's 72.67 s and its 254-step warm-start
+experiment were not re-taken. The reactive ladder chooses its rung on *observed*
+failure, so which rung a diverging run ends on is not a property of the
+equilibrium. **A wrong answer reproduced in every digit and a path that does
+not is the expected signature**, and quoting the path from the earlier occasion
+would have hidden it.
+
+**AND THE ANSWER IS NOT THE POINT POSTURE'S, WHICH IS THE RESULT RATHER THAN
+THE CONVERGENCE.** `psi_ax` reads 9.273894e-02 against the point posture's
+9.309076e-02, **0.38% apart** — the two files differ in the boundary condition
+and in nothing else. M-164 section 3 sizes that difference from the reference's
+own field: its recorded `psi_bndry` is the value at a grid node 0.86 `h` inside
+the wall and the maximum on the true circle is **1.31% below** it. MEQ's found
+contact sits at radius 0.349192 from the limiter's centre, **8.08e-04 inside**
+the circle of radius 0.35 — which is the inscribed polygon's sagitta at
+`[mesh.generate] PlasmaSize = 0.048`, `( 0.048/2 )²/( 2 × 0.35 ) = 8.23e-04`,
+and not an error in the search. The polygon INSCRIBES the curve it was fitted
+to, which `tests/convergence/LimiterCurve.cpp` records as the whole of what the
+restriction gives up.
+
+**SO M-164's TWO COLUMNS STAY TWO COLUMNS AND THE REASON CHANGES.** They were
+two because MEQ could not take NICE's posture; they are two because the three
+codes are given three boundary conditions and each is scoreable only against
+the reference its own posture was taken from. What is withdrawn is section 4's
+closing sentence — the comparison *can* now be made posture-matched from MEQ's
+side — and `profile scale` survives as the free diagnostic exactly as written.
+
+**WHY IT SURVIVED, AND IT IS THE `M-160` SHAPE ONE LEVEL UP.** M-160 found the
+same helper returning the remainder where every consumer wants the total; the
+fix added `psi_c` to all four of its branches and left the branch that was
+computing the wrong *functional* computing it correctly in the split. The
+comment above `edgeFluxOf()` recorded both the escape and the reason it was
+thought safe: **"a bad estimate costs sweeps rather than correctness"**, which
+is true of an estimate OF `psi_bnd` and says nothing about an estimate of a
+different quantity — and **"THE SurfaceAttribute BRANCH IS EXERCISED BY NO
+SHIPPED FIXTURE"**, written as a cost note about building one and standing as
+the reason nothing caught it. *A bound on how wrong an estimate may be is a
+bound on the estimate of that quantity.*
+
+**THE REGRESSION IS `theDriversOwnEstimateIsTheSameFunctionalAsTheBorder`** in
+`tests/convergence/LimiterCurve.cpp`, on the painted-polygon fixture, and it
+carries its own control because the agreement alone would be vacuous:
+
+| n | `psi_bnd` | polygon max | region max | `psi_ax` |
+|---|---|---|---|---|
+| 12 | 5.157565e-01 | 5.157565e-01 | 5.967952e-01 | 5.967056e-01 |
+| 24 | 5.156999e-01 | 5.156999e-01 | 5.966538e-01 | 5.966536e-01 |
+| 48 | 5.156896e-01 | 5.156896e-01 | 5.966335e-01 | 5.966443e-01 |
+
+The shared entry point reproduces the border to every digit, **and the region
+maximum reproduces `psi_ax` instead** — to four figures at `n = 24` and `n = 48`
+on a fixture that knows nothing about the machine. That second column is the
+defect restated as a property rather than as an incident.

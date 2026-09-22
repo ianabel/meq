@@ -116,6 +116,101 @@ namespace meq
 
 
 	/**
+	 * ONE FACE OF A LIMITER POLYGON: the mesh face, and the element on the side
+	 * the limiter ENCLOSES -- the plasma side, whose polynomial is the one
+	 * evaluated there.
+	 */
+	struct LimiterPolygonFace
+	{
+		int face;
+		int element;
+		/// TRUE when `element` is the face's Elem2, which decides which of the
+		/// two integration points the face transformation carries is the one to
+		/// read.
+		bool second;
+	};
+
+
+	/**
+	 * THE LIMITER POLYGON OF @a mesh: the faces separating @a attribute from
+	 * everything else.
+	 *
+	 * A face is on the limiter exactly when it separates the enclosed region
+	 * from anything else, which is a question with a yes-or-no answer per face
+	 * and needs no geometry at all. Faces on the mesh BOUNDARY are skipped: the
+	 * limiter is a closed curve inside Omega, and a boundary face carrying the
+	 * attribute means the enclosed region runs off the edge of the mesh, which
+	 * is a limiter that is not enclosing anything.
+	 *
+	 * @throws std::runtime_error if the attribute is absent from the mesh, or
+	 *         present but bounding no interior face -- both of which would
+	 *         otherwise leave an EMPTY polygon, whose maximum is minus infinity
+	 *         and whose border row is all zeroes. That does not diverge: it
+	 *         converges, to a `psi_bnd` pinned by nothing.
+	 */
+	std::vector<LimiterPolygonFace> collectLimiterPolygon( mfem::Mesh &mesh,
+	                                                       int attribute );
+
+
+	/**
+	 * `max( psi_h + psi_c )` OVER THE POLYGON, AND THE BORDER ROW THAT GOES
+	 * WITH IT -- the containing element, its potential shape functions at the
+	 * contact, its dofs, and where the contact is.
+	 *
+	 * **THIS IS THE ONE IMPLEMENTATION OF THE CONSTRAINT `setLimiterSurface()`
+	 * IMPOSES, AND IT IS FREE RATHER THAN A METHOD SO THAT IT CAN STAY THE
+	 * ONLY ONE.** `apps/meq.cpp` needs the same number before the first solve,
+	 * on a field of its own -- `GradShafranovSolver::psiBoundary()` is the
+	 * CONVERGED value and there is none yet -- and one of its three call sites
+	 * runs on the Picard pre-stage's home solver, which is built unbordered and
+	 * never hears of the limiter. So no method could serve all three without an
+	 * ordering rule, and a caller who cannot call this writes the constraint out
+	 * again.
+	 *
+	 * **WHICH IS THE THING TO AVOID, BECAUSE THE WRONG RESTATEMENT CONVERGES.**
+	 * "max psi over the meshed limiter surface" describes the maximum over the
+	 * enclosed REGION as well as it describes this one, and the region contains
+	 * the magnetic axis -- so that reading returns `psi_ax`, the driver's first
+	 * plasma-support freeze is posed with a span of nearly zero, and the run
+	 * reaches a wall-hugging annulus rather than failing. MEASUREMENTS.md M-165.
+	 *
+	 * @a values is read at `offset + dof` in @a space's numbering, so a bordered
+	 * Newton's block state vector and a bare `mfem::GridFunction` both work.
+	 * @a conductors may be null, and then `psi_c` is exactly zero and every
+	 * meshed path is bit-identical.
+	 *
+	 * Per face: `psi_h` restricted to a straight face is a polynomial of degree
+	 * `k` in one variable, so a coarse uniform scan brackets its maximum and a
+	 * golden section closes on it. Deliberately derivative-free -- the bracket
+	 * is what makes it robust against the several interior maxima a high-degree
+	 * restriction may carry, and a Newton step on `psi'` would find whichever
+	 * stationary point it started nearest, maximum or not.
+	 *
+	 * THE SCAN IS OVER THE WHOLE POLYGON AND NOT SEEDED FROM THE LAST CONTACT.
+	 * AxisConstraint::LocatedAxis can seed, because it is rooting a field over a
+	 * two-dimensional mesh where a sweep costs real time; this is a handful of
+	 * faces -- 19 on the shipped fixture -- so an exhaustive scan is cheaper
+	 * than the bookkeeping, and it cannot lose the contact to another lobe of
+	 * the curve the way a seeded search can.
+	 */
+	double limiterPolygonMaximum( mfem::FiniteElementSpace const &space,
+	                              std::vector<LimiterPolygonFace> const &polygon,
+	                              mfem::Vector const &values, int offset,
+	                              ConductorField const *conductors,
+	                              int &element, mfem::Vector &shape,
+	                              mfem::Array<int> &dofs, double &r, double &z );
+
+
+	/**
+	 * The same maximum, of a caller's own field, with nothing else wanted from
+	 * it. Collects the polygon from @a field's own mesh, so it needs no solver
+	 * and no ordering against one.
+	 */
+	double limiterPolygonMaximum( mfem::GridFunction const &field, int attribute,
+	                              ConductorField const *conductors );
+
+
+	/**
 	 * The index of the first entry of @a v that is non-zero and is NOT listed in
 	 * @a support, or -1 when there is none.
 	 *
@@ -4368,31 +4463,17 @@ namespace meq
 			double limiterContactRValue = 0.0;
 			double limiterContactZValue = 0.0;
 
-			/// One face of the limiter polygon: the mesh face, and the element on
-			/// the side the limiter encloses -- the plasma side, whose polynomial
-			/// is the one evaluated. See setLimiterSurface() for why that side.
-			struct LimiterFace
-			{
-				int face;
-				int element;
-				/// TRUE when `element` is the face's Elem2, which decides which of
-				/// the two integration points the face transformation carries is
-				/// the one to read.
-				bool second;
-			};
-
 			/// The polygon, collected once per prepare() from the element
 			/// attributes. Empty unless setLimiterSurface() was called.
-			std::vector<LimiterFace> limiterFaces;
-
-			/// Walk the element attributes and fill limiterFaces.
 			///
-			/// @throws std::runtime_error if the attribute is absent from the
-			///         mesh, or present but encloses nothing -- both of which
-			///         would otherwise leave an EMPTY polygon, whose maximum is
-			///         minus infinity and whose border row is all zeroes. That
-			///         does not diverge: it converges, to a `psi_bnd` pinned by
-			///         nothing.
+			/// meq::LimiterPolygonFace is a free type rather than a nested one
+			/// because meq::limiterPolygonMaximum() is a free function, and it is
+			/// free because the driver needs the same constraint on a field of
+			/// its own before any solver has been built. See that function.
+			std::vector<LimiterPolygonFace> limiterFaces;
+
+			/// Walk the element attributes and fill limiterFaces, by
+			/// meq::collectLimiterPolygon(), which is where the refusals are.
 			void collectLimiterFaces();
 
 			/// `max psi_h` over the polygon at `state`, and the border row that

@@ -1,34 +1,47 @@
-# THIS FILE DOES NOT CONVERGE, AND IT IS HERE BECAUSE OF THAT.  It is the
-# reproducer for M-164 section 4: the limiter as a CURVE on the machine
-# examples/limited-tokamak-filament.toml solves as a POINT in 4.11 s.
-#
-# Identical to that file in every other respect -- same coils, same currents,
-# same profiles, same I_p, same degree, same guess -- and differing only in
-# these two keys:
+# THE LIMITER AS A CURVE, WHICH IS THE POSTURE EVERY OTHER FREE-BOUNDARY CODE
+# TAKES.  Identical to examples/limited-tokamak-filament.toml -- same coils,
+# same currents, same profiles, same I_p, same degree, same guess -- and
+# differing only in these two keys:
 #
 #   [mesh.generate] LimiterR / LimiterZ / LimiterRadius   fragment the circle in
 #   [boundary.limiter] SurfaceAttribute = 20              find the contact on it
 #
-# and it lands on a WALL-HUGGING ANNULUS instead of the tokamak: the contact
-# goes to ( 0.65, 0 ), the inboard midplane, psi_bnd comes out NEGATIVE at
-# -1.917567e-02 against a psi_ax of 9.778761e-03, no O-point is reachable, and
-# `profile scale` reads 4.304152e-03 where the point posture reads 0.9999.
-# The driver refuses it and exits 1.
+#     ./build/meq-run examples/limited-tokamak-filament-curve.toml
 #
-# THE INITIAL GUESS IS NOT THE VARIABLE, WHICH IS THE PART WORTH KNOWING.
-# Run from the shipped guess it takes 21 Newton iterations and 72.67 s; run
-# from the POINT case's own converged answer it takes 254 and 192.20 s -- and
-# both arrive at the same psi_ax, the same psi_bnd, the same contact and the
-# same scale to every printed digit.  Two starting points a whole equilibrium
-# apart reaching one answer is an ATTRACTING spurious solution, not a basin
-# accident, so "warm-start it better" is already measured and does not work.
+# 3 support sweeps, 11 + 3 + 2 Newton iterations, support settled at 408/408:
+#
+#   psi_ax   9.273894e-02   axis located at ( 1.0521, 0.0000 )
+#   psi_bnd  2.606986e-02   contact FOUND at ( 0.81699, 0.297389 )
+#   profile scale 0.9962
 #
 # WHAT IT IS FOR.  Every production free-boundary code finds its limiter
 # contact; freegs4e, NICE and TSC all do, in three different ways.  MEQ is the
-# one that is handed a point, and M-164 section 3 shows that point is the
-# reference's own O( h ) grid artefact -- so this posture is what would take
-# somebody else's discretisation out of MEQ's comparison against them.  Until
-# it converges, the comparison is reported in two columns and not one.
+# one that could only be handed a point, and M-164 section 3 shows that point
+# is the reference's own O( h ) grid artefact -- so this posture is what takes
+# somebody else's discretisation out of MEQ's comparison against them.
+#
+# AND IT IS A DIFFERENT BOUNDARY CONDITION FROM THE SIBLING'S, NOT A BETTER
+# ANSWER TO THE SAME ONE.  freegs4e reports psi_bndry at a grid node 0.86 h
+# inside the wall and its plasma never touches its own limiter; the maximum of
+# its own field on the true circle is 1.31% below what it reports.  So this
+# file's psi_bnd is NOT expected to reproduce ref-n513's 2.622462e-02, and the
+# 0.38% it differs from the sibling's psi_ax is that 1.31% propagating.  Score
+# each posture against the reference its posture was taken from.
+#
+# IT DID NOT CONVERGE UNTIL 2026-09-22, AND THE DEFECT WAS IN THE DRIVER'S
+# FIRST PLASMA-SUPPORT FREEZE RATHER THAN IN THE CONSTRAINT.  apps/meq.cpp
+# needs psi_bnd of the iterate the first sweep starts from, before any solve
+# has produced one, and it read the maximum over the region the limiter
+# ENCLOSES where the border reads the maximum over that region's BOUNDARY.
+# The region contains the magnetic axis, so the estimate was psi_ax --
+# 7.545003e-02 against a PsiAxis of 7.543374e-02, a span of -1.63e-05 where
+# the true one is +4.76e-02, NEGATIVE, so the support inverted and the run
+# reached a wall-hugging annulus from two starting points a whole equilibrium
+# apart.  MEASUREMENTS.md M-165.
+#
+# SO IF THIS FILE STOPS CONVERGING, READ `profile scale` FIRST.  It is 0.9962
+# here and 4.3e-03 on that branch, and it says which of the two was reached
+# without reference to anybody else's answer.
 #
 # LIMITED-TOKAMAK-FILAMENT -- THE SAME MACHINE AS examples/limited-tokamak.toml
 # WITH ITS FOUR CONDUCTORS TAKEN OUT OF THE MESH AND EVALUATED ANALYTICALLY,
@@ -82,7 +95,8 @@
 # -- from ( 1.3375, -0.0125 ) at 129^2 to ( 0.8250, -0.3000 ) at 513^2, the
 # other side of the machine.  A file carrying one grid's currents and compared
 # against the other grid's answer is comparing two different machines.  So the
-# currents below, the limiter point below and the guess are all ref-n513/'s.
+# currents below and the guess are both ref-n513/'s -- this file takes no
+# limiter point at all, which is the whole of what it is for.
 # tools/freegs4e-benchmark/README.md, "Regenerating the fixture".
 #
 # THE REFERENCE'S OWN ANSWER, for anything comparing against it:
@@ -213,11 +227,12 @@ Current = -5.2739898377e+04
 [boundary]
 Type = "zero"
 
-# THE LIMITER IS PRESCRIBED AS A POINT, AND IT IS THE 513^2 CONTACT.  Giving
-# both codes the same point takes the contact-finding out of the comparison;
-# taking it from the SAME run as the coil currents is what keeps them one
-# machine.  MEQ evaluates psi_h here rather than at the nearest dof --
-# LimiterConstraint::ExactPoint.
+# THE LIMITER IS THE CURVE AND THE CONTACT IS AN OUTPUT.  psi_bnd is
+# max( psi_h + psi_c ) over the faces bounding attribute 20 --
+# LimiterConstraint::LocatedContact -- so the contact is found rather than
+# given, which is what the sibling's two commented lines would do instead.
+# Both converge, to equilibria that differ by the boundary condition; the
+# header above says which reference each one is scoreable against.
 [boundary.limiter]
 SurfaceAttribute = 20
 #R = 0.825

@@ -3,6 +3,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <limits>
 #include <vector>
 
 #include "mfem.hpp"
@@ -655,5 +656,111 @@ BOOST_AUTO_TEST_CASE( anEmptyPolygonAndADoublyPinnedContactAreBothRefused )
 			"setLimiterSurface() did not install LocatedContact, so the three "
 			"refusals above are compatible with a setter that refuses "
 			"everything" );
+	}
+}
+
+/*
+ * THE DRIVER'S OWN ESTIMATE IS THE SAME FUNCTIONAL AS THE BORDER, AND THE
+ * REGION IS NOT IT.
+ *
+ * `apps/meq.cpp` needs `psi_bnd` of the iterate the FIRST plasma-support sweep
+ * will start from, and the solver cannot supply it: `psiBoundary()` is the
+ * CONVERGED value and there is no converged value before the first solve. So
+ * the driver evaluates the constraint itself, on a field of its own -- and for
+ * as long as no shipped file reached that branch it evaluated a DIFFERENT
+ * functional under the same name. `max psi over the meshed limiter surface`
+ * describes the maximum over the enclosed REGION exactly as well as it
+ * describes the maximum over its boundary, and the region is what was written.
+ *
+ * THE REGION CONTAINS THE MAGNETIC AXIS. So the estimate was `psi_ax` rather
+ * than `psi_bnd`, and `freezePlasmaEdge( axis, boundary )` was posed with a
+ * span of nearly zero -- on examples/limited-tokamak-filament-curve.toml,
+ * 7.545003e-02 against a `psiAxisGuess` of 7.543374e-02, a span of
+ * -1.63e-05 where the true one is +4.76e-02. NEGATIVE, so the support inverts
+ * and the plasma becomes everything the plasma is not. MEASUREMENTS.md M-165.
+ *
+ * TWO ASSERTIONS, AND THE SECOND IS WHAT STOPS THE FIRST BEING VACUOUS. The
+ * shared entry point must agree with the border to round-off, and the region
+ * maximum must NOT -- on a fixture where they happened to coincide, agreement
+ * would say nothing about which one is being computed.
+ *
+ * IT IS A UNIT CHECK ON A SOLVED FIELD RATHER THAN A DRIVER RUN because what
+ * is being pinned is that there is ONE implementation: the driver calls
+ * meq::limiterPolygonMaximum() and so does the border, so a driver run would
+ * re-measure the agreement of a function with itself.
+ */
+BOOST_AUTO_TEST_CASE( theDriversOwnEstimateIsTheSameFunctionalAsTheBorder )
+{
+	int const order = 2;
+	meq::tests::Rectangle const box = meq::tests::standardBox();
+
+	std::printf( "\n  THE POLYGON MAXIMUM AGAINST THE REGION MAXIMUM\n" );
+	std::printf( "    %5s %14s %14s %14s %12s\n",
+	             "n", "psi_bnd", "polygon max", "region max", "psi_ax" );
+
+	for ( int n : { 12, 24, 48 } )
+	{
+		mfem::Mesh mesh = meq::tests::makeMesh( box, n );
+		paintLimiter( mesh );
+
+		auto pPrime = std::make_shared<meq::ConstantProfile const>( 0.45 );
+		auto ggPrime = std::make_shared<meq::ConstantProfile const>( 0.30 );
+		meq::NormalisedMHDSource source( pPrime, ggPrime, 1.0, 1.0 );
+
+		mfem::ConstantCoefficient zero( 0.0 );
+		mfem::FunctionCoefficient guess = bump( 0.30 );
+
+		GradShafranovSolver solver( mesh, order );
+		solver.setLimiterSurface( limiterAttribute );
+		solver.setSource( source, 0.30 );
+		solver.setBoundaryData( zero );
+		solver.setInitialGuess( guess );
+		solver.setNewtonControl( 1.0e-12, 1.0e-14, 40 );
+		solver.solve();
+
+		BOOST_TEST_REQUIRE( solver.limiterContactWasLocated(),
+			"no contact was located at n = " << n );
+
+		mfem::GridFunction const &potential = solver.potential();
+
+		// WHAT THE DRIVER CALLS, on the solver's own answer so that the border
+		// has a value to be compared against.
+		double const polygon = meq::limiterPolygonMaximum(
+			potential, limiterAttribute, nullptr );
+
+		// AND WHAT STOOD IN ITS PLACE: every dof of every element carrying the
+		// attribute, which is the region's interior.
+		mfem::FiniteElementSpace const &space = *potential.FESpace();
+		mfem::Array<int> dofs;
+		double region = -std::numeric_limits<double>::infinity();
+		for ( int e = 0; e < mesh.GetNE(); ++e )
+		{
+			if ( mesh.GetAttribute( e ) != limiterAttribute )
+				continue;
+			space.GetElementDofs( e, dofs );
+			for ( int i = 0; i < dofs.Size(); ++i )
+				region = std::max( region, potential( dofs[ i ] ) );
+		}
+
+		std::printf( "    %5d %14.6e %14.6e %14.6e %14.6e\n",
+		             n, solver.psiBoundary(), polygon, region,
+		             solver.psiAxis() );
+
+		BOOST_TEST( std::fabs( polygon - solver.psiBoundary() )
+		            <= 1.0e-12*std::max( 1.0, std::fabs( solver.psiBoundary() ) ),
+			"meq::limiterPolygonMaximum() gives " << polygon << " at n = " << n
+			<< " where the border the same solve closed on gives "
+			<< solver.psiBoundary() << ". The driver poses the first support "
+			"freeze with the first of these and the solve is constrained by "
+			"the second, so they have to be one function." );
+
+		// THE CONTROL. Without this the assertion above is compatible with
+		// both readings being the same number on this fixture.
+		BOOST_TEST( region > polygon + 1.0e-03,
+			"the region maximum at n = " << n << " is " << region
+			<< " and the polygon maximum is " << polygon << ", which are not "
+			"far enough apart for the agreement above to be evidence. The "
+			"region contains the magnetic axis and the polygon is its "
+			"boundary: a fixture where they agree cannot tell the two apart." );
 	}
 }

@@ -2018,6 +2018,29 @@ identifies itself by a namespace-qualified function name —
 `meq::SplineProfile::fromFile` and its kind — so `ConfigError` was the odd one
 out rather than the model.
 
+**A BOUND ON HOW WRONG AN ESTIMATE MAY BE IS A BOUND ON AN ESTIMATE OF THAT
+QUANTITY, AND SAYS NOTHING ABOUT AN ESTIMATE OF A DIFFERENT ONE.** The driver's
+plasma-support loop is a fixed point over the support, so `apps/meq.cpp`'s own
+comment is right that *"a bad estimate costs sweeps rather than correctness"* —
+the next sweep re-decides from the answer just reached. That licence is what
+made a second, informal reading of a constraint look safe to write, and the
+second reading computed something else: `max psi` over the region a limiter
+ENCLOSES rather than over the faces BOUNDING it. The region holds the magnetic
+axis, so the estimate was `psi_ax`, the first freeze was posed with a span of
+**−1.63e-05 where the true one is +4.76e-02** — negative, so the support
+inverted — and the loop **converged**, from two starting points a whole
+equilibrium apart, to one wall-hugging annulus in every printed digit.
+`meq::limiterPolygonMaximum()` is the single implementation both now call.
+→ **[M-165](MEASUREMENTS.md#m-165)**, and `CLAUDE_FB.md`, *The driver's first
+support freeze read a different functional under the same words*.
+
+**AND THE ESCAPE WAS WRITTEN DOWN BESIDE IT, AS A COST NOTE.** The same comment
+said *"THE SurfaceAttribute BRANCH IS EXERCISED BY NO SHIPPED FIXTURE"* and then
+explained why building one was not small. **A sentence naming what nothing
+tests is a finding, not a caveat** — it is the same shape as the reserved-key
+pairing above, where a refusal that only one of two source types reached was
+listed as accepted on both.
+
 **Four tooling traps that cost one session six idle polling loops**, and the
 reason they are worth writing down is that a polling loop which can never
 terminate is *invisible* when the thing it polls for is also reported some other

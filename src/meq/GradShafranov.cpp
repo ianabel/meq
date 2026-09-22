@@ -3413,34 +3413,22 @@ namespace
 		return false;
 	}
 
-	/*
-	 * THE POLYGON, OUT OF THE ELEMENT ATTRIBUTES.
-	 *
-	 * A face is on the limiter exactly when it separates the enclosed region
-	 * from anything else, which is a question with a yes-or-no answer per face
-	 * and needs no geometry at all. Faces on the mesh BOUNDARY are skipped: the
-	 * limiter is a closed curve inside Omega, and a boundary face carrying the
-	 * attribute means the enclosed region runs off the edge of the mesh, which
-	 * is a limiter that is not enclosing anything.
-	 */
-	void GradShafranovSolver::collectLimiterFaces()
+	std::vector<LimiterPolygonFace> collectLimiterPolygon( mfem::Mesh &mesh,
+	                                                       int attribute )
 	{
-		limiterFaces.clear();
-		if ( !limiterSurfaceIsSet )
-			return;
-
-		mfem::Mesh &mesh = *potentialFes->GetMesh();
+		std::vector<LimiterPolygonFace> polygon;
 
 		int enclosed = 0;
 		for ( int e = 0; e < mesh.GetNE(); ++e )
-			if ( mesh.GetAttribute( e ) == limiterAttributeValue )
+			if ( mesh.GetAttribute( e ) == attribute )
 				++enclosed;
 
 		if ( enclosed == 0 )
 		{
 			std::ostringstream message;
-			message << "meq::GradShafranovSolver::setLimiterSurface: no element of "
-			           "the mesh carries attribute " << limiterAttributeValue
+			message << "meq::collectLimiterPolygon, for "
+			           "GradShafranovSolver::setLimiterSurface: no element of "
+			           "the mesh carries attribute " << attribute
 			        << ", so the limiter polygon is empty. The attribute is the "
 			           "region the limiter ENCLOSES, not the limiter itself: "
 			           "tools/mesh/halfdisc.py --limiter writes that region as 20 "
@@ -3456,57 +3444,42 @@ namespace
 			if ( first < 0 || second < 0 )
 				continue;
 
-			bool const a = mesh.GetAttribute( first ) == limiterAttributeValue;
-			bool const b = mesh.GetAttribute( second ) == limiterAttributeValue;
+			bool const a = mesh.GetAttribute( first ) == attribute;
+			bool const b = mesh.GetAttribute( second ) == attribute;
 			if ( a == b )
 				continue;
 
-			LimiterFace entry;
+			LimiterPolygonFace entry;
 			entry.face = f;
 			entry.element = a ? first : second;
 			entry.second = !a;
-			limiterFaces.push_back( entry );
+			polygon.push_back( entry );
 		}
 
-		if ( limiterFaces.empty() )
+		if ( polygon.empty() )
 		{
 			std::ostringstream message;
-			message << "meq::GradShafranovSolver::setLimiterSurface: attribute "
-			        << limiterAttributeValue << " covers all " << enclosed
+			message << "meq::collectLimiterPolygon, for "
+			           "GradShafranovSolver::setLimiterSurface: attribute "
+			        << attribute << " covers all " << enclosed
 			        << " elements it touches without bounding any interior face, so "
 			           "there is no limiter polygon. An empty polygon has a maximum "
 			           "of minus infinity and a border row of zeroes, which does not "
 			           "diverge -- it converges, to a psi_bnd pinned by nothing.";
 			throw std::runtime_error( message.str() );
 		}
+
+		return polygon;
 	}
 
-	/*
-	 * max psi_h OVER THE POLYGON, AND THE ROW THAT GOES WITH IT.
-	 *
-	 * Per face: psi_h restricted to a straight face is a polynomial of degree k
-	 * in one variable, so a coarse uniform scan brackets its maximum and a
-	 * golden section closes on it. Deliberately derivative-free -- the bracket
-	 * is what makes it robust against the several interior maxima a high-degree
-	 * restriction may carry, and a Newton step on psi' would find whichever
-	 * stationary point it started nearest, maximum or not.
-	 *
-	 * THE SCAN IS OVER THE WHOLE POLYGON AND NOT SEEDED FROM THE LAST CONTACT.
-	 * AxisConstraint::LocatedAxis can seed, because it is rooting a field over a
-	 * two-dimensional mesh where a sweep costs real time; this is a handful of
-	 * faces -- 19 on the shipped fixture -- so an exhaustive scan is cheaper than
-	 * the bookkeeping, and it cannot lose the contact to another lobe of the
-	 * curve the way a seeded search can.
-	 */
-	double GradShafranovSolver::locateLimiterContact( mfem::Vector const &state,
-	                                                  int &element,
-	                                                  mfem::Vector &shape,
-	                                                  mfem::Array<int> &dofs,
-	                                                  double &r, double &z ) const
+	double limiterPolygonMaximum( mfem::FiniteElementSpace const &space,
+	                              std::vector<LimiterPolygonFace> const &polygon,
+	                              mfem::Vector const &values, int offset,
+	                              ConductorField const *conductors,
+	                              int &element, mfem::Vector &shape,
+	                              mfem::Array<int> &dofs, double &r, double &z )
 	{
-		LegTimer const timer( profile.constraintSeconds, profile.constraintCpuSeconds, profile.constraintCalls );
-		LegTimer const slice( profile.limiterSeconds, profile.limiterCpuSeconds, profile.limiterCalls );
-		mfem::Mesh &mesh = *potentialFes->GetMesh();
+		mfem::Mesh &mesh = *space.GetMesh();
 
 		element = -1;
 		double best = -std::numeric_limits<double>::infinity();
@@ -3514,9 +3487,9 @@ namespace
 		mfem::Vector faceShape, physical( 2 );
 		mfem::Array<int> faceDofs;
 
-		for ( LimiterFace const &entry : limiterFaces )
+		for ( LimiterPolygonFace const &entry : polygon )
 		{
-			mfem::FiniteElement const *fe = potentialFes->GetFE( entry.element );
+			mfem::FiniteElement const *fe = space.GetFE( entry.element );
 			if ( !fe )
 				continue;
 
@@ -3531,7 +3504,7 @@ namespace
 			if ( faceScratch.GetGeometryType() == mfem::Geometry::INVALID )
 				continue;
 
-			potentialFes->GetElementDofs( entry.element, faceDofs );
+			space.GetElementDofs( entry.element, faceDofs );
 			faceShape.SetSize( fe->GetDof() );
 
 			// psi_h at parameter t along the face, read INSIDE the element on
@@ -3549,8 +3522,7 @@ namespace
 
 				double total = 0.0;
 				for ( int i = 0; i < faceDofs.Size(); ++i )
-					total += faceShape( i )
-					         *state( blockOffsets[ 1 ] + faceDofs[ i ] );
+					total += faceShape( i )*values( offset + faceDofs[ i ] );
 
 				/*
 				 * THE CONTACT IS A MAXIMUM OF THE PHYSICAL FLUX. Under
@@ -3566,7 +3538,7 @@ namespace
 				 * source integrator's was every quadrature point of every
 				 * element. Exactly zero with no conductor field.
 				 */
-				if ( conductorFieldSet )
+				if ( conductors )
 				{
 					mfem::ElementTransformation &inner
 						= entry.second ? *faceScratch.Elem2
@@ -3574,8 +3546,7 @@ namespace
 					double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
 					mfem::Vector position( coordinates, 3 );
 					inner.Transform( inside, position );
-					total += conductorFieldSet->psi( position( 0 ),
-					                                 position( 1 ) );
+					total += conductors->psi( position( 0 ), position( 1 ) );
 				}
 
 				return total;
@@ -3664,6 +3635,45 @@ namespace
 		}
 
 		return best;
+	}
+
+	double limiterPolygonMaximum( mfem::GridFunction const &field, int attribute,
+	                              ConductorField const *conductors )
+	{
+		mfem::FiniteElementSpace const &space = *field.FESpace();
+
+		int element = -1;
+		mfem::Vector shape;
+		mfem::Array<int> dofs;
+		double r = 0.0, z = 0.0;
+
+		return limiterPolygonMaximum(
+			space, collectLimiterPolygon( *space.GetMesh(), attribute ), field,
+			0, conductors, element, shape, dofs, r, z );
+	}
+
+	void GradShafranovSolver::collectLimiterFaces()
+	{
+		limiterFaces.clear();
+		if ( !limiterSurfaceIsSet )
+			return;
+
+		limiterFaces = collectLimiterPolygon( *potentialFes->GetMesh(),
+		                                      limiterAttributeValue );
+	}
+
+	double GradShafranovSolver::locateLimiterContact( mfem::Vector const &state,
+	                                                  int &element,
+	                                                  mfem::Vector &shape,
+	                                                  mfem::Array<int> &dofs,
+	                                                  double &r, double &z ) const
+	{
+		LegTimer const timer( profile.constraintSeconds, profile.constraintCpuSeconds, profile.constraintCalls );
+		LegTimer const slice( profile.limiterSeconds, profile.limiterCpuSeconds, profile.limiterCalls );
+
+		return limiterPolygonMaximum( *potentialFes, limiterFaces, state,
+		                              blockOffsets[ 1 ], conductorFieldSet,
+		                              element, shape, dofs, r, z );
 	}
 
 	void GradShafranovSolver::setLimiterConstraint( LimiterConstraint choice )

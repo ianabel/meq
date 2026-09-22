@@ -3564,13 +3564,58 @@ makes MEQ's agreement on this case well posed and also means **MEQ is handed
 the number it is then scored on**. NICE finds its contact on the true circle
 and TSC is given a different point, so the accuracy column compares solutions
 of at least two problems and is reported per posture rather than as one column.
-MEQ's own `SurfaceAttribute` posture, which would remove the difference, does
-not converge — see the M-164 pointer below.
+**MEQ TAKES NICE's POSTURE TOO, AND `examples/limited-tokamak-filament-curve
+.toml` IS IT** — the same machine with the contact FOUND on a meshed limiter
+circle, 3 support sweeps and 3.817 s to a `psi_ax` of 9.273894e-02 with the
+contact at `( 0.81699, 0.297389 )`. That is **0.38% from the point posture's
+`psi_ax`**, which is the 1.31% in `psi_bnd` above propagating, so the two files
+are one machine under two boundary conditions rather than one problem solved
+twice. **The column stays two columns anyway**: three codes, three postures,
+and each is scoreable only against the reference its own posture was taken
+from.
 
 → **[M-164](MEASUREMENTS.md#m-164)** — NICE and TSC timed · which codes can
 take eight threads and what it buys them · the staircase ring reproduced to
-every digit · the limiter-as-a-curve run that lands on an annulus from two
-starting points alike
+every digit · §4 REPAIRED, and its retraction points at M-165
+
+## The driver's first support freeze read a different functional under the same words
+
+**AND IT IS WHY THE CURVE POSTURE LOOKED IMPOSSIBLE.** `apps/meq.cpp`'s
+`edgeFluxOf()` supplies `psi_bnd` of the iterate the first sweep starts from —
+the one number the freeze needs and the one `psiBoundary()` cannot give before
+a solve. Under `[boundary.limiter] SurfaceAttribute` it read *"the maximum over
+the meshed limiter surface"* as the maximum over the region the limiter
+**encloses**, where `setLimiterSurface()` constrains `psi_bnd` to the maximum
+over the faces **bounding** it. **The enclosed region contains the magnetic
+axis**, so the estimate was `psi_ax`: 7.545003e-02 against a `psiAxisGuess` of
+7.543374e-02, a span of **−1.63e-05 where the true one is +4.76e-02** — wrong
+by 2.9e+03 and of the wrong sign, so the support inverted and the plasma became
+everything the plasma is not.
+
+**THE FIX IS ONE IMPLEMENTATION, NOT A CORRECTED SECOND ONE.**
+`meq::collectLimiterPolygon()` and `meq::limiterPolygonMaximum()` are free
+functions holding what `locateLimiterContact()` had inside it; the border calls
+them and so does the driver, on its own field at `offset = 0`. A free function
+because the driver needs the constraint **before any solver exists** — the
+Picard pre-stage's home solver is built unbordered and never hears of the
+limiter at all — so no method on `GradShafranovSolver` could serve all three
+call sites without an ordering rule.
+
+**THE BOUND THAT LET IT THROUGH IS THE TRANSFERABLE PART.** That helper's own
+comment says *"a bad estimate costs sweeps rather than correctness"*, and it is
+right: the sweep loop is a fixed point over the support, so any estimate in the
+neighbourhood is recovered. **An estimate of a DIFFERENT QUANTITY is not in the
+neighbourhood**, and the loop converged — from two starting points a whole
+equilibrium apart, to the same annulus in every printed digit. *A bound on how
+wrong an estimate may be is a bound on the estimate of that quantity.* The same
+comment recorded the escape in the next breath — *"THE SurfaceAttribute BRANCH
+IS EXERCISED BY NO SHIPPED FIXTURE"* — written as a note on the cost of
+building one.
+
+→ **[M-165](MEASUREMENTS.md#m-165)** — both readings of one guess · the
+repaired run against the defective one · the regression's own control, where
+the region maximum reproduces `psi_ax` on a fixture that knows nothing about
+the machine
 
 **THE CONDUCTOR MODEL IS EXACT ON ALL THREE ARMS, WHICH NO OTHER CASE CAN SAY.**
 `freegs4e`'s `H_limited_circular` is point filaments, MEQ's `Model = "filament"`

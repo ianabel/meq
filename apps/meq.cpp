@@ -2923,17 +2923,27 @@ int main( int argc, char **argv )
 		 * reached, and the run reports whether it settled. So this only has to
 		 * be in the right neighbourhood.
 		 *
-		 * **THE SurfaceAttribute BRANCH IS EXERCISED BY NO SHIPPED FIXTURE**,
-		 * and it is left in rather than refused because the combination is a
-		 * legitimate one -- a meshed limiter on a confined source -- and the
-		 * formula is setLimiterSurface()'s own. Building a fixture for it is not
-		 * small: the two meshes that carry a limiter region both run j = 0
-		 * profiles, and turning [source] ConfineToPlasma on over one of those is
-		 * the configuration FB-4's k <= j cap is about. Measured, on
-		 * examples/limiter-halfdisc.toml with ConfineToPlasma added the first
-		 * sweep fails with a singular bordered Jacobian in ( psi_ax, psi_bnd, a )
-		 * -- which is that example's own header predicting itself, not this
-		 * branch.
+		 * **AND THE BOUND ABOVE HOLDS ONLY FOR AN ESTIMATE OF psi_bnd, WHICH IS
+		 * THE ONE WAY OUT OF IT AND HAS BEEN TAKEN.** "A bad estimate costs
+		 * sweeps rather than correctness" is a property of the fixed point over
+		 * the SUPPORT: any starting psi_bnd in the neighbourhood is recovered by
+		 * the next sweep. An estimate of a DIFFERENT QUANTITY is not in that
+		 * neighbourhood, and the loop then converges rather than failing.
+		 *
+		 * **THE QUANTITY THAT IS EASIEST TO REACH BY MISTAKE IS THE LIMITER
+		 * REGION'S MAXIMUM.** "max psi over the meshed limiter surface"
+		 * describes the maximum over the region the attribute marks exactly as
+		 * well as it describes the maximum over the faces BOUNDING it, and only
+		 * the second is what setLimiterSurface() imposes. The region contains
+		 * the magnetic axis, so the first IS psi_ax: measured on
+		 * examples/limited-tokamak-filament-curve.toml, 7.545003e-02 against a
+		 * psiAxisGuess of 7.543374e-02, a span of -1.63e-05 where the true one
+		 * is +4.76e-02 -- NEGATIVE, so the support inverts and the run reaches a
+		 * wall-hugging annulus from two starting points a whole equilibrium
+		 * apart, in every printed digit. MEASUREMENTS.md M-165.
+		 *
+		 * So the branch below CALLS the constraint rather than restating it, and
+		 * meq::limiterPolygonMaximum() is the only implementation there is.
 		 */
 		/*
 		 * AND IT RETURNS THE TOTAL, WHICH UNDER [conductors] Model IS NOT WHAT
@@ -3001,52 +3011,13 @@ int main( int argc, char **argv )
 			     && valueAt( field, l.r, l.z, value ) )
 				return value + conductorPsi( l.r, l.z );
 			if ( l.surfaceAttribute > 0 )
-			{
-				// THE CURVE. max psi_h over the region the limiter encloses,
-				// which is setLimiterSurface()'s own constraint evaluated on the
-				// guess rather than on the answer.
-				//
-				// THE MAXIMUM IS TAKEN ON THE TOTAL AND NOT ON THE REMAINDER,
-				// because max( psi_p ) + psi_c is not max( psi_p + psi_c ) and
-				// the two pick different dofs. psi_c is read at each dof's own
-				// point, by the same transformation walk
-				// GradShafranovSolver::refreshConductorNodalPsi() uses, and the
-				// spaces are GaussLobatto so a coefficient IS the value there.
-				mfem::FiniteElementSpace const &space = *field.FESpace();
-				mfem::Array<int> dofs;
-				thread_local mfem::IsoparametricTransformation transformation;
-				bool any = false;
-				for ( int e = 0; e < space.GetMesh()->GetNE(); ++e )
-				{
-					if ( space.GetMesh()->GetAttribute( e ) != l.surfaceAttribute )
-						continue;
-					space.GetElementDofs( e, dofs );
-					mfem::IntegrationRule const &nodes =
-						space.GetFE( e )->GetNodes();
-					if ( conductorField )
-						space.GetMesh()->GetElementTransformation(
-							e, &transformation );
-					for ( int i = 0; i < dofs.Size(); ++i )
-					{
-						double here = field( dofs[ i ] );
-						if ( conductorField )
-						{
-							mfem::IntegrationPoint const &ip =
-								nodes.IntPoint( i );
-							double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
-							mfem::Vector position( coordinates, 3 );
-							transformation.SetIntPoint( &ip );
-							transformation.Transform( ip, position );
-							here += conductorPsi( position( 0 ),
-							                      position( 1 ) );
-						}
-						value = any ? std::max( value, here ) : here;
-						any = true;
-					}
-				}
-				if ( any )
-					return value;
-			}
+				// THE CURVE, AND IT IS THE CURVE AND NOT THE DISC -- see the
+				// note above for what the disc costs and what it measures.
+				// meq::limiterPolygonMaximum() is the ONE implementation of the
+				// constraint setLimiterSurface() imposes, so this estimate and
+				// the border it is an estimate of cannot drift apart.
+				return meq::limiterPolygonMaximum( field, l.surfaceAttribute,
+				                                   conductorField.get() );
 			return 0.0;
 		};
 
