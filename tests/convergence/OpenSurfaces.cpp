@@ -27,7 +27,7 @@
  *
  * THE FIXTURE IS ANALYTIC AND THE TRACER IS POINTED AT IT DIRECTLY, which is
  * what separates "the open machinery is wrong" from "the discretisation is
- * coarse". psi = z - a ( r - r0 )^2 has level sets z = c + a ( r - r0 )^2 --
+ * coarse". psi = z - a ( R - R_0 )^2 has level sets z = c + a ( R - R_0 )^2 --
  * parabolas, open across the box, and known in closed form. Interpolated into
  * an H1 space of degree 2 the quadratic is represented EXACTLY, so the traced
  * points sit on the true curve to the corrector's tolerance and every number
@@ -39,21 +39,21 @@
 namespace
 {
 	double const a = 2.0;
-	double const r0 = 1.0;
-	double const rMin = 0.6, rMax = 1.4, zMin = -0.8, zMax = 0.8;
+	double const radius0 = 1.0;
+	double const minRadius = 0.6, maxRadius = 1.4, zMin = -0.8, zMax = 0.8;
 	double const level = 0.0;
 
-	double exactZ( double r ) { return level + a*( r - r0 )*( r - r0 ); }
+	double exactZ( double radius ) { return level + a*( radius - radius0 )*( radius - radius0 ); }
 
 	/// Distance from a point to the exact parabola, to first order in the
 	/// offset: the vertical gap over the slope's hypotenuse. Exact enough at
 	/// the sizes below -- the fits reach 1e-9 m against a curve of length 1 m --
 	/// and a genuine foot-of-perpendicular would be a root find whose own
 	/// tolerance would then be in the budget.
-	double distanceToExact( double r, double z )
+	double distanceToExact( double radius, double z )
 	{
-		double const gap = z - exactZ( r );
-		double const slope = 2.0*a*( r - r0 );
+		double const gap = z - exactZ( radius );
+		double const slope = 2.0*a*( radius - radius0 );
 		return std::abs( gap )/std::sqrt( 1.0 + slope*slope );
 	}
 
@@ -69,18 +69,18 @@ namespace
 	};
 
 	/// psi and grad psi on an n x n mesh. The tracer is handed grad psi rather
-	/// than q, which its own header says "changes the corrector's scaling by r
-	/// and nothing else" -- and here there is no r weight to respect, the field
+	/// than q, which its own header says "changes the corrector's scaling by R
+	/// and nothing else" -- and here there is no R weight to respect, the field
 	/// being a manufactured one rather than an equilibrium.
 	Field buildField( int n )
 	{
 		Field out;
 		out.mesh = std::make_unique<mfem::Mesh>( mfem::Mesh::MakeCartesian2D(
-			n, n, mfem::Element::TRIANGLE, false, rMax - rMin, zMax - zMin ) );
+			n, n, mfem::Element::TRIANGLE, false, maxRadius - minRadius, zMax - zMin ) );
 		for ( int i = 0; i < out.mesh->GetNV(); ++i )
 		{
 			double *v = out.mesh->GetVertex( i );
-			v[ 0 ] += rMin;
+			v[ 0 ] += minRadius;
 			v[ 1 ] += zMin;
 		}
 
@@ -96,12 +96,12 @@ namespace
 
 		mfem::FunctionCoefficient psi( []( mfem::Vector const &x )
 		{
-			return x( 1 ) - a*( x( 0 ) - r0 )*( x( 0 ) - r0 );
+			return x( 1 ) - a*( x( 0 ) - radius0 )*( x( 0 ) - radius0 );
 		} );
 		mfem::VectorFunctionCoefficient grad( 2,
 			[]( mfem::Vector const &x, mfem::Vector &value )
 			{
-				value( 0 ) = -2.0*a*( x( 0 ) - r0 );
+				value( 0 ) = -2.0*a*( x( 0 ) - radius0 );
 				value( 1 ) = 1.0;
 			} );
 
@@ -124,16 +124,16 @@ BOOST_AUTO_TEST_CASE( anOpenLevelIsTracedFromWallToWall )
 	Field const field = buildField( 40 );
 	meq::ContourTracer tracer( *field.potential, *field.flux );
 
-	meq::Contour const half = tracer.trace( level, r0, exactZ( r0 ) );
-	meq::Contour const whole = tracer.traceOpen( level, r0, exactZ( r0 ) );
+	meq::Contour const half = tracer.trace( level, radius0, exactZ( radius0 ) );
+	meq::Contour const whole = tracer.traceOpen( level, radius0, exactZ( radius0 ) );
 
 	std::printf( "\n  ONE DIRECTION AGAINST BOTH\n" );
-	std::printf( "    trace()      %s, %zu points, r from %.4f to %.4f\n",
+	std::printf( "    trace()      %s, %zu points, R from %.4f to %.4f\n",
 	             meq::contourStatusName( half.status ), half.points.size(),
-	             half.points.front().r, half.points.back().r );
-	std::printf( "    traceOpen()  %s, %zu points, r from %.4f to %.4f\n",
+	             half.points.front().radius, half.points.back().radius );
+	std::printf( "    traceOpen()  %s, %zu points, R from %.4f to %.4f\n",
 	             meq::contourStatusName( whole.status ), whole.points.size(),
-	             whole.points.front().r, whole.points.back().r );
+	             whole.points.front().radius, whole.points.back().radius );
 
 	BOOST_TEST( ( half.status == meq::ContourStatus::LeftMesh ),
 		"trace() on an open level should reach the edge of the field and say "
@@ -147,22 +147,22 @@ BOOST_AUTO_TEST_CASE( anOpenLevelIsTracedFromWallToWall )
 	// BOTH ENDS ARE AT THE WALL, and at OPPOSITE walls -- which is the property
 	// that says the two halves were traced in opposite directions rather than
 	// the same one twice.
-	double const lowR = std::min( whole.points.front().r, whole.points.back().r );
-	double const highR = std::max( whole.points.front().r, whole.points.back().r );
-	BOOST_TEST( lowR < rMin + 0.05,
-		"the low end stopped at r = " << lowR << " rather than at the wall" );
-	BOOST_TEST( highR > rMax - 0.05,
-		"the high end stopped at r = " << highR << " rather than at the wall" );
+	double const lowR = std::min( whole.points.front().radius, whole.points.back().radius );
+	double const highR = std::max( whole.points.front().radius, whole.points.back().radius );
+	BOOST_TEST( lowR < minRadius + 0.05,
+		"the low end stopped at R = " << lowR << " rather than at the wall" );
+	BOOST_TEST( highR > maxRadius - 0.05,
+		"the high end stopped at R = " << highR << " rather than at the wall" );
 
 	// THE JOIN DOES NOT DUPLICATE THE SEED and does not fold: consecutive
-	// points advance monotonically in r on this fixture, which a reversed
+	// points advance monotonically in R on this fixture, which a reversed
 	// second half would break at the seam while every point stayed on the
 	// level set. That is the quiet failure the join has to avoid.
 	BOOST_TEST( whole.points.size() > half.points.size() );
 	std::size_t reversals = 0;
 	for ( std::size_t i = 1; i < whole.points.size(); ++i )
-		if ( ( whole.points[ i ].r - whole.points[ i - 1 ].r )
-		     *( whole.points[ 1 ].r - whole.points[ 0 ].r ) <= 0.0 )
+		if ( ( whole.points[ i ].radius - whole.points[ i - 1 ].radius )
+		     *( whole.points[ 1 ].radius - whole.points[ 0 ].radius ) <= 0.0 )
 			++reversals;
 	BOOST_TEST( reversals == 0u,
 		"the joined curve turns back on itself " << reversals << " times, so "
@@ -181,7 +181,7 @@ BOOST_AUTO_TEST_CASE( anOpenLevelIsTracedFromWallToWall )
 	// nothing about the mesh.
 	double worst = 0.0;
 	for ( meq::ContourPoint const &p : whole.points )
-		worst = std::max( worst, distanceToExact( p.r, p.z ) );
+		worst = std::max( worst, distanceToExact( p.radius, p.z ) );
 
 	/*
 	 * THE BOUND IS THE RESIDUAL THE CORRECTOR ACHIEVED, NOT THE ONE IT WAS
@@ -238,16 +238,16 @@ BOOST_AUTO_TEST_CASE( theChebyshevFitConvergesWhereAPeriodicOneFloors )
 {
 	Field const field = buildField( 60 );
 	meq::ContourTracer tracer( *field.potential, *field.flux );
-	meq::Contour const curve = tracer.traceOpen( level, r0, exactZ( r0 ) );
+	meq::Contour const curve = tracer.traceOpen( level, radius0, exactZ( radius0 ) );
 	BOOST_TEST_REQUIRE( ( curve.status == meq::ContourStatus::Open ),
 		"the fixture's level is not open: "
 		<< meq::contourStatusName( curve.status ) );
 
-	std::vector<double> arc, r, z;
+	std::vector<double> arc, radius, z;
 	for ( meq::ContourPoint const &p : curve.points )
 	{
 		arc.push_back( p.arcLength );
-		r.push_back( p.r );
+		radius.push_back( p.radius );
 		z.push_back( p.z );
 	}
 	std::printf( "\n  AN OPEN SURFACE FITTED IN NORMALISED ARC LENGTH\n" );
@@ -276,9 +276,9 @@ BOOST_AUTO_TEST_CASE( theChebyshevFitConvergesWhereAPeriodicOneFloors )
 	std::vector<double> chebyshev, periodic;
 	for ( std::size_t modes : counts )
 	{
-		meq::OpenSurfaceFit const fit = meq::fitOpenSurface( arc, r, z, modes );
+		meq::OpenSurfaceFit const fit = meq::fitOpenSurface( arc, radius, z, modes );
 		meq::OpenSurfaceFit const control =
-			meq::fitOpenSurfacePeriodic( arc, r, z, modes );
+			meq::fitOpenSurfacePeriodic( arc, radius, z, modes );
 		chebyshev.push_back( offSample( fit, false ) );
 		periodic.push_back( offSample( control, true ) );
 		std::printf( "     %2zu           %.3e            %.3e",

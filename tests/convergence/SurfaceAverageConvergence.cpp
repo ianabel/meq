@@ -65,7 +65,7 @@
  * BUY AN ORDER HERE. The tracer's default pairing roots psi*, which converges at
  * k+2, so the natural expectation is k+2 in the averages. Every quantity in this
  * file converges at k+1 with EITHER pairing, because the weight divides by
- * | grad psi | = r | q | and q* converges at k+1 like q_h -- the reconstruction
+ * | grad psi | = R | q | and q* converges at k+1 like q_h -- the reconstruction
  * buys its order in the potential and there is no k+2 flux to be had. What psi*
  * buys is a constant, measured at a factor of 1.3 to 7.5 on the finest mesh. The
  * table asserts k+1 on both columns and prints the ratio at every degree.
@@ -79,8 +79,8 @@
  * a profile is what the consumer reads anyway.
  *
  * WHY nstx() AND WHY A BOX THAT IS NOT standardBox(). The reference values are
- * recorded on SolovievEquilibrium::nstx(), whose axis sits at r = 1.318, and its
- * surfaces are ELONGATED: the Psi_N = 0.50 surface reaches r in [ 0.81, 1.66 ]
+ * recorded on SolovievEquilibrium::nstx(), whose axis sits at R = 1.318, and its
+ * surfaces are ELONGATED: the Psi_N = 0.50 surface reaches R in [ 0.81, 1.66 ]
  * and z in [ -0.87, 0.90 ], which does not fit inside [0.6,1.4]x[-0.6,0.6] at
  * all. The box below is chosen so that every surface measured -- Psi_N = 0.15,
  * 0.25, 0.35 and 0.50 -- sits well inside it: the smallest psi anywhere on its
@@ -89,7 +89,7 @@
  *
  * THE THIRD TABULATED SURFACE, Psi_N = 0.75, IS NOT MEASURED HERE AND THAT IS A
  * PROPERTY OF THE FIXTURE RATHER THAN OF THE METHOD. It reaches z = +/- 1.18 and
- * r = 1.73, so enclosing it needs a box whose margin at the coarsest mesh of any
+ * R = 1.73, so enclosing it needs a box whose margin at the coarsest mesh of any
  * dyadic sweep is under one cell -- at which point what would be measured is the
  * contour's distance to the mesh boundary. Its reference value is still asserted
  * below, because the reference is a function of the level and costs no solve.
@@ -130,14 +130,14 @@ namespace
 	/// FluxSurfaceConvergence.cpp, which is where the argument for it is.
 	struct ExactAxis
 	{
-		double r;
+		double radius;
 		double z;
 		double psi;
 	};
 
 	ExactAxis exactAxis( Equilibrium const &eq, double rGuess, double zGuess )
 	{
-		double r = rGuess;
+		double radius = rGuess;
 		double z = zGuess;
 		double const step = 1.0e-5;
 
@@ -145,32 +145,32 @@ namespace
 		{
 			double gr = 0.0;
 			double gz = 0.0;
-			eq.gradPsi( r, z, gr, gz );
+			eq.gradPsi( radius, z, gr, gz );
 
 			double a0 = 0.0;
 			double a1 = 0.0;
 			double b0 = 0.0;
 			double b1 = 0.0;
 			double hessian[ 2 ][ 2 ];
-			eq.gradPsi( r + step, z, a0, b0 );
-			eq.gradPsi( r - step, z, a1, b1 );
+			eq.gradPsi( radius + step, z, a0, b0 );
+			eq.gradPsi( radius - step, z, a1, b1 );
 			hessian[ 0 ][ 0 ] = ( a0 - a1 )/( 2.0*step );
 			hessian[ 1 ][ 0 ] = ( b0 - b1 )/( 2.0*step );
-			eq.gradPsi( r, z + step, a0, b0 );
-			eq.gradPsi( r, z - step, a1, b1 );
+			eq.gradPsi( radius, z + step, a0, b0 );
+			eq.gradPsi( radius, z - step, a1, b1 );
 			hessian[ 0 ][ 1 ] = ( a0 - a1 )/( 2.0*step );
 			hessian[ 1 ][ 1 ] = ( b0 - b1 )/( 2.0*step );
 
 			double const det = hessian[ 0 ][ 0 ]*hessian[ 1 ][ 1 ]
 			                   - hessian[ 0 ][ 1 ]*hessian[ 1 ][ 0 ];
-			r += -(  hessian[ 1 ][ 1 ]*gr - hessian[ 0 ][ 1 ]*gz )/det;
+			radius += -(  hessian[ 1 ][ 1 ]*gr - hessian[ 0 ][ 1 ]*gz )/det;
 			z += -( -hessian[ 1 ][ 0 ]*gr + hessian[ 0 ][ 0 ]*gz )/det;
 		}
 
 		ExactAxis axis;
-		axis.r = r;
+		axis.radius = radius;
 		axis.z = z;
-		axis.psi = eq.psi( r, z );
+		axis.psi = eq.psi( radius, z );
 		return axis;
 	}
 
@@ -193,7 +193,7 @@ namespace
 	                                            ExactAxis const &axis,
 	                                            double level, int angles = 1024 )
 	{
-		return meq::analytic::surfaceQuadrature( eq, axis.r, axis.z, level,
+		return meq::analytic::surfaceQuadrature( eq, axis.radius, axis.z, level,
 		                                         angles, 2.0 );
 	}
 
@@ -201,7 +201,7 @@ namespace
 	{
 		return s.average( []( meq::analytic::SurfacePoint const &p )
 		{
-			return 1.0/( p.r*p.r );
+			return 1.0/( p.radius*p.radius );
 		} );
 	}
 
@@ -374,10 +374,10 @@ BOOST_AUTO_TEST_CASE( theConvergedReferenceReproducesItsRecordedValues )
 	std::printf( "\n  The reference, on the EXACT field of nstx(). A converged "
 	             "VALUE, not a closed form.\n" );
 	std::printf( "  axis ( %.12f, %.12f ), psi_ax = %.12e\n",
-	             axis.r, axis.z, axis.psi );
+	             axis.radius, axis.z, axis.psi );
 
 	// The axis itself, first: every level below is built from it.
-	BOOST_TEST( std::abs( axis.r - 1.318167937714 ) < 1.0e-9 );
+	BOOST_TEST( std::abs( axis.radius - 1.318167937714 ) < 1.0e-9 );
 	BOOST_TEST( std::abs( axis.z - 0.011088725858 ) < 1.0e-9 );
 	BOOST_TEST( std::abs( axis.psi + 2.662896051834e-01 ) < 1.0e-12 );
 
@@ -449,7 +449,7 @@ BOOST_AUTO_TEST_CASE( theExactIdentityNeedsRichardsonAndNotACentralDifference )
 		meq::analytic::SurfaceQuadrature const s = reference( eq, axis, c, angles );
 		return s.vPrime*s.average( []( meq::analytic::SurfacePoint const &p )
 		{
-			return ( p.psiR*p.psiR + p.psiZ*p.psiZ )/( p.r*p.r );
+			return ( p.psiR*p.psiR + p.psiZ*p.psiZ )/( p.radius*p.radius );
 		} );
 	};
 
@@ -458,7 +458,7 @@ BOOST_AUTO_TEST_CASE( theExactIdentityNeedsRichardsonAndNotACentralDifference )
 	double const rightHandSide = here.average(
 		[ & ]( meq::analytic::SurfacePoint const &p )
 		{
-			return -eq.f( p.r, p.z, level )/( p.r*p.r );
+			return -eq.f( p.radius, p.z, level )/( p.radius*p.radius );
 		} );
 
 	std::printf( "\n  The averaged Grad-Shafranov identity on the EXACT field, "
@@ -600,7 +600,7 @@ BOOST_AUTO_TEST_CASE( theQuadratureIsOnlyAsGoodAsItsMetric )
 
 	auto inverseSquare = []( meq::SurfaceNode const &node )
 	{
-		return 1.0/( node.r*node.r );
+		return 1.0/( node.radius*node.radius );
 	};
 
 	for ( std::size_t c = 0; c < counts.size(); ++c )
@@ -704,7 +704,7 @@ BOOST_AUTO_TEST_CASE( theQuadratureIsOnlyAsGoodAsItsMetric )
  *
  * The angle count is fixed and large, so the quadrature error of the previous
  * table is out of the way and what is left is the discretisation: how far
- * { psi_h = c } is from { psi = c }, and how far r | q_h | is from | grad psi |.
+ * { psi_h = c } is from { psi = c }, and how far R | q_h | is from | grad psi |.
  * BOTH enter, and by different routes -- the first sets where the nodes are and
  * the second sets what they weigh.
  *
@@ -716,7 +716,7 @@ BOOST_AUTO_TEST_CASE( theQuadratureIsOnlyAsGoodAsItsMetric )
  * post-processed pairing buys an order in the averages too.
  *
  * IT DOES NOT, AND THE REASON IS STRUCTURAL. The weight is
- * 2 pi R dl / | grad psi | and | grad psi | is r | q |: a FLUX, not a potential.
+ * 2 pi R dl / | grad psi | and | grad psi | is R | q |: a FLUX, not a potential.
  * q_h converges at k+1 and so does q*, the reconstruction buying its extra
  * order in the POTENTIAL and not in the field that divides every weight in this
  * file. So the level set improves by an order and the weight does not, and the
@@ -771,7 +771,7 @@ BOOST_AUTO_TEST_CASE( theAveragesConvergeInTheMeshAgainstTheExactField )
 	             "the exact field.\n  A reference VALUE, not a closed form: "
 	             "these quantities have none on this fixture.\n"
 	             "  nstx() on [%.2f,%.2f]x[%.2f,%.2f], %d angles, RMS over "
-	             "Psi_N =", box.rMin, box.rMax, box.zMin, box.zMax,
+	             "Psi_N =", box.minRadius, box.maxRadius, box.zMin, box.zMax,
 	             static_cast<int>( angles ) );
 	for ( double fraction : fractions )
 		std::printf( " %.2f", fraction );
@@ -867,7 +867,7 @@ BOOST_AUTO_TEST_CASE( theAveragesConvergeInTheMeshAgainstTheExactField )
 			            << ": V' converges at " << vRate << " rather than the "
 			            << expected << " the flux's own order gives. Both the "
 			            << "level set and the weight enter, and the weight is "
-			            << "1/( r | q | ) -- so a lost order here is a lost "
+			            << "1/( R | q | ) -- so a lost order here is a lost "
 			            << "order in q" );
 
 			BOOST_TEST( aRate > expected - sequenceSlack,
@@ -950,11 +950,11 @@ BOOST_AUTO_TEST_CASE( theAveragedIdentityHoldsOnTheDiscreteFieldAndConverges )
 	std::vector<int> const sizes = { 12, 24, 48, 96 };
 
 	// THE F THE SOLVER IS FED, forwarded rather than re-derived: SolvedEquilibrium
-	// hands the solver eq.f( r, z, 0 ) as its source coefficient, and this is the
+	// hands the solver eq.f( R, z, 0 ) as its source coefficient, and this is the
 	// same function.
-	auto source = [ &eq ]( double r, double z, double psi )
+	auto source = [ &eq ]( double radius, double z, double psi )
 	{
-		return eq.f( r, z, psi );
+		return eq.f( radius, z, psi );
 	};
 
 	std::printf( "\n  The averaged Grad-Shafranov identity on { psi* = c }, "
@@ -1322,7 +1322,7 @@ BOOST_AUTO_TEST_CASE( theTwoExtractionsAgree )
 		for ( double offset : { 0.05, 0.10, 0.15 } )
 		{
 			meq::CriticalPoint displaced = axis;
-			displaced.r += offset;
+			displaced.radius += offset;
 			displaced.z -= 0.7*offset;
 
 			meq::AngleParametrisation const fit =
@@ -1442,7 +1442,7 @@ BOOST_AUTO_TEST_CASE( theFacilityCarriesItsFlagsAndItsWrappersAreThin )
 	{
 		hermite.averageDifferenced( []( meq::SurfaceNode const &node )
 		{
-			return 1.0/( node.r*node.r );
+			return 1.0/( node.radius*node.radius );
 		} );
 	}
 	catch ( std::runtime_error const & )
@@ -1460,11 +1460,11 @@ BOOST_AUTO_TEST_CASE( theFacilityCarriesItsFlagsAndItsWrappersAreThin )
 	// wrapper that has drifted.
 	double const inverse = angle.average( []( meq::SurfaceNode const &node )
 	{
-		return 1.0/( node.r*node.r );
+		return 1.0/( node.radius*node.radius );
 	} );
 	double const gradient = angle.average( []( meq::SurfaceNode const &node )
 	{
-		return node.gradient*node.gradient/( node.r*node.r );
+		return node.gradient*node.gradient/( node.radius*node.radius );
 	} );
 
 	BOOST_TEST( angle.inverseRSquared() == inverse,
@@ -1474,7 +1474,7 @@ BOOST_AUTO_TEST_CASE( theFacilityCarriesItsFlagsAndItsWrappersAreThin )
 	            "gradPsiSquaredOverRSquared() is not "
 	            "average( |grad psi|^2 / R^2 )" );
 
-	// < | grad psi |^2 / R^2 > IS < | q |^2 >, exactly, since grad psi = r q.
+	// < | grad psi |^2 / R^2 > IS < | q |^2 >, exactly, since grad psi = R q.
 	// Checked because it is stated in the header and because a reader meeting
 	// the long form is entitled to know the short one is the same number.
 	double const fluxSquared = angle.average( []( meq::SurfaceNode const &node )
@@ -1483,7 +1483,7 @@ BOOST_AUTO_TEST_CASE( theFacilityCarriesItsFlagsAndItsWrappersAreThin )
 	} );
 	BOOST_TEST( relative( gradient, fluxSquared ) < 1.0e-14,
 	            "< |grad psi|^2 / R^2 > reads " << gradient << " against "
-	            << "< |q|^2 > = " << fluxSquared << ". grad_bar( psi ) = r q, so "
+	            << "< |q|^2 > = " << fluxSquared << ". grad_bar( psi ) = R q, so "
 	            << "these are the same quantity and the header says so" );
 
 	// THE SAFETY FACTOR IS NEVER CALLED q. It is V' g < R^-2 > / 4 pi^2, RoPP
@@ -1504,7 +1504,7 @@ BOOST_AUTO_TEST_CASE( theFacilityCarriesItsFlagsAndItsWrappersAreThin )
 	// arcLength() IS ALGEBRAICALLY THE PRODUCING OBJECT'S OWN LENGTH, which is
 	// not an independent measurement and is not quoted as one -- see the header.
 	// What it checks is that every weight really is 2 pi R | dx/ds | ds /
-	// | grad psi |: a missing r, a wrong dtheta or a gradient on the wrong side
+	// | grad psi |: a missing R, a wrong dtheta or a gradient on the wrong side
 	// of the division all break the identity.
 	std::printf( "  arc length: facility %.14e, IN-1's fit %.14e, Hermite "
 	             "%.14e\n", angle.arcLength(), fitted.fit.length(),

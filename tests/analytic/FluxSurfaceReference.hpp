@@ -137,9 +137,9 @@ namespace meq
 			double theta = 0.0;    ///< angle about the magnetic axis
 			double rho = 0.0;      ///< distance from the axis along that ray
 			double rhoPrime = 0.0; ///< d rho / d theta, pointwise from grad psi
-			double r = 0.0;
+			double radius = 0.0;
 			double z = 0.0;
-			double psiR = 0.0;     ///< d psi / d r at the point
+			double psiR = 0.0;     ///< d psi / d R at the point
 			double psiZ = 0.0;
 			double gradient = 0.0; ///< | grad psi |
 			double metric = 0.0;   ///< | dx / d theta | = sqrt( rho'^2 + rho^2 )
@@ -174,7 +174,7 @@ namespace meq
 
 				for ( SurfacePoint const &p : points )
 				{
-					double const w = p.r*p.metric/p.gradient;
+					double const w = p.radius*p.metric/p.gradient;
 					weighted += w*f( p );
 					total += w;
 				}
@@ -197,7 +197,7 @@ namespace meq
 
 				for ( SurfacePoint const &p : points )
 				{
-					sum += 2.0*M_PI*p.r*f( p )*p.metric/p.gradient;
+					sum += 2.0*M_PI*p.radius*f( p )*p.metric/p.gradient;
 				}
 
 				return sum*dTheta;
@@ -215,7 +215,7 @@ namespace meq
 				std::size_t const previous = ( j + n - 1 )%n;
 				double const dTheta = 2.0*M_PI/static_cast<double>( n );
 
-				double const dr = ( points[ next ].r - points[ previous ].r )/( 2.0*dTheta );
+				double const dr = ( points[ next ].radius - points[ previous ].radius )/( 2.0*dTheta );
 				double const dz = ( points[ next ].z - points[ previous ].z )/( 2.0*dTheta );
 
 				return std::sqrt( dr*dr + dz*dz );
@@ -224,10 +224,10 @@ namespace meq
 
 		/**
 		 * Sample the surface psi = level at @a angles equispaced angles about
-		 * ( rAxis, zAxis ).
+		 * ( R_axis, zAxis ).
 		 *
-		 * @param eq        anything with psi( r, z ) and gradPsi( r, z, gr, gz ).
-		 * @param reach     how far along a ray to search, in the same units as r.
+		 * @param eq        anything with psi( R, z ) and gradPsi( R, z, gr, gz ).
+		 * @param reach     how far along a ray to search, in the same units as R.
 		 *                  A bracket is found by marching and then closed by a
 		 *                  safeguarded Newton; the march is only ever used to
 		 *                  BRACKET, never to locate.
@@ -240,7 +240,7 @@ namespace meq
 		 */
 		template<class Equilibrium>
 		SurfaceQuadrature surfaceQuadrature( Equilibrium const &eq,
-		                                     double rAxis, double zAxis,
+		                                     double axisRadius, double zAxis,
 		                                     double level, int angles,
 		                                     double reach,
 		                                     int marchSteps = 400 )
@@ -265,7 +265,7 @@ namespace meq
 
 				auto along = [ & ]( double rho )
 				{
-					return eq.psi( rAxis + rho*cosine, zAxis + rho*sine ) - level;
+					return eq.psi( axisRadius + rho*cosine, zAxis + rho*sine ) - level;
 				};
 
 				// Bracket. The march exists only to find a sign change; every
@@ -305,13 +305,13 @@ namespace meq
 
 				for ( int iteration = 0; iteration < 100; ++iteration )
 				{
-					double const r = rAxis + rho*cosine;
+					double const radius = axisRadius + rho*cosine;
 					double const z = zAxis + rho*sine;
 					double gr = 0.0;
 					double gz = 0.0;
-					eq.gradPsi( r, z, gr, gz );
+					eq.gradPsi( radius, z, gr, gz );
 
-					double const value = eq.psi( r, z ) - level;
+					double const value = eq.psi( radius, z ) - level;
 					double const slope = gr*cosine + gz*sine;
 
 					if ( value*lowerValue > 0.0 )
@@ -348,11 +348,11 @@ namespace meq
 				SurfacePoint &p = surface.points[ static_cast<std::size_t>( j ) ];
 				p.theta = theta;
 				p.rho = rho;
-				p.r = rAxis + rho*cosine;
+				p.radius = axisRadius + rho*cosine;
 				p.z = zAxis + rho*sine;
-				eq.gradPsi( p.r, p.z, p.psiR, p.psiZ );
+				eq.gradPsi( p.radius, p.z, p.psiR, p.psiZ );
 				p.gradient = std::sqrt( p.psiR*p.psiR + p.psiZ*p.psiZ );
-				p.residual = std::abs( eq.psi( p.r, p.z ) - level );
+				p.residual = std::abs( eq.psi( p.radius, p.z ) - level );
 
 				// rho' pointwise, from the gradient alone. u' = ( -sin, cos ).
 				double const alongRay = p.psiR*cosine + p.psiZ*sine;
@@ -408,18 +408,18 @@ namespace meq
 		 */
 		template<class Equilibrium>
 		double averagedGradShafranovResidual( Equilibrium const &eq,
-		                                      double rAxis, double zAxis,
+		                                      double axisRadius, double zAxis,
 		                                      double level, int angles,
 		                                      double reach, double step )
 		{
 			auto weighted = [ & ]( double c )
 			{
 				SurfaceQuadrature const s = surfaceQuadrature(
-					eq, rAxis, zAxis, c, angles, reach );
+					eq, axisRadius, zAxis, c, angles, reach );
 				return s.vPrime*s.average(
 					[]( SurfacePoint const &p )
 					{
-						return ( p.psiR*p.psiR + p.psiZ*p.psiZ )/( p.r*p.r );
+						return ( p.psiR*p.psiR + p.psiZ*p.psiZ )/( p.radius*p.radius );
 					} );
 			};
 
@@ -430,14 +430,14 @@ namespace meq
 			double const derivative = ( 4.0*fine - coarse )/3.0;
 
 			SurfaceQuadrature const here = surfaceQuadrature(
-				eq, rAxis, zAxis, level, angles, reach );
+				eq, axisRadius, zAxis, level, angles, reach );
 
 			double const leftHandSide = derivative/here.vPrime;
 			double const rightHandSide = here.average(
 				[ & ]( SurfacePoint const &p )
 				{
 					// Delta* psi = -F, and F is the source the solver is fed.
-					return -eq.f( p.r, p.z, level )/( p.r*p.r );
+					return -eq.f( p.radius, p.z, level )/( p.radius*p.radius );
 				} );
 
 			return leftHandSide - rightHandSide;

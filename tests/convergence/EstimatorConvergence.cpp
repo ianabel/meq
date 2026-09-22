@@ -118,8 +118,8 @@
 namespace
 {
 
-	double const rMin = 0.6;
-	double const rMax = 1.4;
+	double const minRadius = 0.6;
+	double const maxRadius = 1.4;
 	double const zMin = -0.6;
 	double const zMax = 0.6;
 
@@ -138,14 +138,14 @@ namespace
 
 	/// The same rectangle SolovievConvergence.cpp measures on, so that the errors
 	/// in the effectivity denominator are the ones already regression-tested
-	/// there. Triangles, r well away from zero.
+	/// there. Triangles, R well away from zero.
 	mfem::Mesh makeMesh( int n )
 	{
 		mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D( n, n, mfem::Element::TRIANGLE, false,
-		                                               rMax - rMin, zMax - zMin );
+		                                               maxRadius - minRadius, zMax - zMin );
 		mesh.Transform( []( mfem::Vector const &in, mfem::Vector &out )
 		{
-			out( 0 ) = in( 0 ) + rMin;
+			out( 0 ) = in( 0 ) + minRadius;
 			out( 1 ) = in( 1 ) + zMin;
 		} );
 		return mesh;
@@ -298,7 +298,7 @@ namespace
 		meq::ResidualEstimator estimator( solver, source );
 
 		Measurement point;
-		point.h = ( rMax - rMin )/static_cast<double>( n );
+		point.h = ( maxRadius - minRadius )/static_cast<double>( n );
 		point.elements = mesh.GetNE();
 
 		point.eta = estimator.GetTotalError();

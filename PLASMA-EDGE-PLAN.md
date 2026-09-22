@@ -107,7 +107,7 @@ the plasma edge.
 
 **The transmission conditions are homogeneous, which is the piece of luck that
 makes this tractable.** Across `Γ_p`, with `F` bounded, `ψ` is `C¹` and
-`q = (1/r)∇̄ψ` is continuous — both components, not merely `q·n`. So there is no
+`q = (1/R)∇̄ψ` is continuous — both components, not merely `q·n`. So there is no
 interface data to model: the conditions are
 
 ```
@@ -159,9 +159,9 @@ alternative and is **not** preferred: it needs the crossing points of `Γ_p` wit
 every element face, which is the geometry a cut rule needs, and it costs
 `O(1/h)` dofs where the modal route costs `O(log 1/h)`.
 
-**And the `1/r` is not there, for the same reason it is not there in
-`exteriorTransmissionRows()`**: MEQ's `q` *is* `(1/r)∇̄ψ`, so contracting it
-against the plain measure already carries the radius. Writing `dΓ/r` divides by
+**And the `1/R` is not there, for the same reason it is not there in
+`exteriorTransmissionRows()`**: MEQ's `q` *is* `(1/R)∇̄ψ`, so contracting it
+against the plain measure already carries the radius. Writing `dΓ/R` divides by
 it twice. Expect to get this wrong once anyway.
 
 ## 4. What MEQ already has
@@ -486,7 +486,7 @@ from one parameter.
 
 **What the theory predicts, and why it is the wrong prediction.** For a Dirichlet
 corner of interior angle `ω` the singular exponents are `mπ/ω`, so a general
-solution carries `ψ ~ r^{π/ω}` and `q ~ r^{π/ω − 1}`, capping the `L2` rates at
+solution carries `ψ ~ R^{π/ω}` and `q ~ R^{π/ω − 1}`, capping the `L2` rates at
 `min( k+1, 1 + π/ω )` and `min( k+1, π/ω )`. **The exact solution here is
 smooth, so that mode's coefficient is zero and no cap applies to it** — exactly
 as it is zero at an X-point, where `ψ` is smooth across its own separatrix. Any

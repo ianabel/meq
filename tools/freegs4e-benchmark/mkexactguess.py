@@ -42,7 +42,7 @@ examples/limited-tokamak-guess.* carries.
 
 WHAT DOES NOT WORK is a cold start: the analytic bump of
 examples/free-boundary-halfdisc.toml's kind wanders for 200 iterations around
-||r|| = 1.3 and never converges on this problem.  So on a free-boundary machine
+||R|| = 1.3 and never converges on this problem.  So on a free-boundary machine
 case the guess is part of the problem statement, which is the same finding the
 three-root sweep in tools/freegs4e-benchmark/README.md reports from the
 fixed-boundary side.
@@ -125,7 +125,7 @@ def main():
 	RR, ZZ = np.meshgrid(rs, zs, indexing="ij")
 	psi = np.zeros_like(RR)
 
-	# r = 0 exactly would make Greens singular in sqrt(R*Rc)*(...); the value
+	# R = 0 exactly would make Greens singular in sqrt(R*Rc)*(...); the value
 	# there is zero, which is what the array is initialised to.
 	inner = RR > 0.0
 
@@ -153,9 +153,9 @@ def main():
 				"limited machine's %s. Regenerate it with fgsref.py."
 				% (npz, names, legacy))
 		legacy_pos = [(1.75, 0.90), (1.75, -0.90), (0.55, 1.10), (0.55, -1.10)]
-		flat = [dict(label=n, R=r, Z=z, half_width=0.05, half_height=0.05,
+		flat = [dict(label=n, R=R, Z=z, half_width=0.05, half_height=0.05,
 		             current=float(I), kind="filament")
-		        for n, (r, z), I in zip(names, legacy_pos, d["coil_currents"])]
+		        for n, (R, z), I in zip(names, legacy_pos, d["coil_currents"])]
 
 	# A CONDUCTOR IS A RECTANGLE AND A TALL ONE IS NOT A POINT.  MEQ's coils
 	# carry a uniform current density over a rectangle, and for most of these
@@ -244,7 +244,7 @@ def main():
 			psi = np.where(bad & (cnt > 0), fill / np.maximum(cnt, 1.0), psi)
 			bad = ~np.isfinite(psi)
 
-	box = dict(rmin=0.0, rmax=rho, zmin=-rho, zmax=rho)
+	box = dict(Rmin=0.0, Rmax=rho, zmin=-rho, zmax=rho)
 	lo, hi = write_guess(mesh_path, gf_path, rs, zs, psi.T, box, n=n)
 	print("guess psi in [%.6e, %.6e] on a %d x %d grid over [0, %g] x [%g, %g]"
 	      % (lo, hi, n + 1, n + 1, rho, -rho, rho))

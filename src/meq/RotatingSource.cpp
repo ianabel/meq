@@ -11,7 +11,7 @@
 namespace
 {
 
-	// Charge neutrality on r = rRef is checked by sampling, because the densities
+	// Charge neutrality on R = R_ref is checked by sampling, because the densities
 	// are profiles and the constraint has to hold at every psi. meq::Profile
 	// documents itself on [ 0, 1 ], so that is where the samples go.
 	int const neutralitySamples = 21;
@@ -122,7 +122,7 @@ namespace meq
 		double mu0,
 		Closure closure )
 		: speciesData( std::move( species ) ), omegaProfile( std::move( omega ) ),
-		  ggPrimeProfile( std::move( ggPrime ) ), rRef( referenceRadius ), permeability( mu0 ),
+		  ggPrimeProfile( std::move( ggPrime ) ), refRadius( referenceRadius ), permeability( mu0 ),
 		  closureChoice( closure )
 	{
 		if ( speciesData.size() < 2 )
@@ -137,7 +137,7 @@ namespace meq
 
 		requireProfile( ggPrimeProfile, "the g dg/dpsi profile" );
 
-		if ( !std::isfinite( rRef ) || rRef <= 0.0 )
+		if ( !std::isfinite( refRadius ) || refRadius <= 0.0 )
 			throw std::invalid_argument( "meq::RotatingSource: the reference radius must be finite and positive" );
 		if ( !std::isfinite( permeability ) )
 			throw std::invalid_argument( "meq::RotatingSource: mu0 must be finite" );
@@ -183,25 +183,25 @@ namespace meq
 		}
 	}
 
-	RotatingSource::State RotatingSource::closedFormState( double r, double psi ) const
+	RotatingSource::State RotatingSource::closedFormState( double radius, double psi ) const
 	{
 		// Two species. Taking logarithms of (97) makes it linear in phi_0, and
 		// the two exponents come out EQUAL:
 		//
 		//     C( psi ) = omega^2 ( Z_1 m_2 - Z_2 m_1 )/( Z_1 T_2 - Z_2 T_1 )
-		//     e phi_0  = omega^2 ( r^2 - rRef^2 )( m_1 T_2 - m_2 T_1 )/2( Z_1 T_2 - Z_2 T_1 )
+		//     e phi_0  = omega^2 ( R^2 - R_ref^2 )( m_1 T_2 - m_2 T_1 )/2( Z_1 T_2 - Z_2 T_1 )
 		//
 		// which for ions and electrons ( Z_2 = -1 ) is the familiar
 		// omega^2 ( m_i + Z_i m_e )/( T_i + Z_i T_e ). The electron mass is kept
 		// rather than dropped: it costs one term and removes a question. That the
-		// exponents are equal is what makes Sum_s Z_s n_s vanish at every r once
-		// it vanishes at rRef.
+		// exponents are equal is what makes Sum_s Z_s n_s vanish at every R once
+		// it vanishes at R_ref.
 		State state{};
 
 		Species const & one = speciesData[ 0 ];
 		Species const & two = speciesData[ 1 ];
 
-		double const halfDelta = ( r*r - rRef*rRef )/2.0;
+		double const halfDelta = ( radius*radius - refRadius*refRadius )/2.0;
 
 		if ( !omegaProfile )
 		{
@@ -273,7 +273,7 @@ namespace meq
 		return state;
 	}
 
-	RotatingSource::State RotatingSource::rootFindState( double r, double psi ) const
+	RotatingSource::State RotatingSource::rootFindState( double radius, double psi ) const
 	{
 		// The general closure. (97) is transcendental for three or more species,
 		// but as well behaved as such a thing gets: its derivative in phi_0 is
@@ -285,7 +285,7 @@ namespace meq
 		// runs from +infinity to -infinity, so the root exists, is unique, and can
 		// be bracketed -- a safeguarded Newton cannot fail.
 		std::size_t const n = speciesData.size();
-		double const halfDelta = ( r*r - rRef*rRef )/2.0;
+		double const halfDelta = ( radius*radius - refRadius*refRadius )/2.0;
 
 		std::array<double, maxSpecies> t{}, tPrime{}, tDoublePrime{};
 		std::array<double, maxSpecies> nRef{}, nRefPrime{}, nRefDoublePrime{};
@@ -489,9 +489,9 @@ namespace meq
 		return state;
 	}
 
-	RotatingSource::State RotatingSource::stateAt( double r, double psi ) const
+	RotatingSource::State RotatingSource::stateAt( double radius, double psi ) const
 	{
-		return closureChoice == Closure::ClosedForm ? closedFormState( r, psi ) : rootFindState( r, psi );
+		return closureChoice == Closure::ClosedForm ? closedFormState( radius, psi ) : rootFindState( radius, psi );
 	}
 
 	void RotatingSource::pressureFrom( State const & state, double psi,
@@ -528,62 +528,62 @@ namespace meq
 		}
 	}
 
-	double RotatingSource::densityExponent( std::size_t index, double r, double psi ) const
+	double RotatingSource::densityExponent( std::size_t index, double radius, double psi ) const
 	{
 		if ( index >= speciesData.size() )
 			throw std::out_of_range( "meq::RotatingSource::densityExponent: no such species" );
 
-		return stateAt( r, psi ).exponent[ index ];
+		return stateAt( radius, psi ).exponent[ index ];
 	}
 
-	double RotatingSource::potential( double r, double psi ) const
+	double RotatingSource::potential( double radius, double psi ) const
 	{
-		return stateAt( r, psi ).potential;
+		return stateAt( radius, psi ).potential;
 	}
 
-	double RotatingSource::dPotentialDPsi( double r, double psi ) const
+	double RotatingSource::dPotentialDPsi( double radius, double psi ) const
 	{
-		return stateAt( r, psi ).potentialPrime;
+		return stateAt( radius, psi ).potentialPrime;
 	}
 
-	double RotatingSource::density( std::size_t index, double r, double psi ) const
+	double RotatingSource::density( std::size_t index, double radius, double psi ) const
 	{
 		if ( index >= speciesData.size() )
 			throw std::out_of_range( "meq::RotatingSource::density: no such species" );
 
-		return ( *speciesData[ index ].density )( psi )*std::exp( stateAt( r, psi ).exponent[ index ] );
+		return ( *speciesData[ index ].density )( psi )*std::exp( stateAt( radius, psi ).exponent[ index ] );
 	}
 
-	double RotatingSource::pressure( double r, double psi ) const
+	double RotatingSource::pressure( double radius, double psi ) const
 	{
 		double p = 0.0, pPrime = 0.0, pDoublePrime = 0.0;
-		pressureFrom( stateAt( r, psi ), psi, p, pPrime, pDoublePrime );
+		pressureFrom( stateAt( radius, psi ), psi, p, pPrime, pDoublePrime );
 
 		return p;
 	}
 
-	double RotatingSource::dPressureDPsi( double r, double psi ) const
+	double RotatingSource::dPressureDPsi( double radius, double psi ) const
 	{
 		double p = 0.0, pPrime = 0.0, pDoublePrime = 0.0;
-		pressureFrom( stateAt( r, psi ), psi, p, pPrime, pDoublePrime );
+		pressureFrom( stateAt( radius, psi ), psi, p, pPrime, pDoublePrime );
 
 		return pPrime;
 	}
 
-	double RotatingSource::f( double r, double, double psi ) const
+	double RotatingSource::f( double radius, double, double psi ) const
 	{
 		double p = 0.0, pPrime = 0.0, pDoublePrime = 0.0;
-		pressureFrom( stateAt( r, psi ), psi, p, pPrime, pDoublePrime );
+		pressureFrom( stateAt( radius, psi ), psi, p, pPrime, pDoublePrime );
 
-		return permeability*r*r*pPrime + ( *ggPrimeProfile )( psi );
+		return permeability*radius*radius*pPrime + ( *ggPrimeProfile )( psi );
 	}
 
-	double RotatingSource::dFdPsi( double r, double, double psi ) const
+	double RotatingSource::dFdPsi( double radius, double, double psi ) const
 	{
 		double p = 0.0, pPrime = 0.0, pDoublePrime = 0.0;
-		pressureFrom( stateAt( r, psi ), psi, p, pPrime, pDoublePrime );
+		pressureFrom( stateAt( radius, psi ), psi, p, pPrime, pDoublePrime );
 
-		return permeability*r*r*pDoublePrime + ggPrimeProfile->prime( psi );
+		return permeability*radius*radius*pDoublePrime + ggPrimeProfile->prime( psi );
 	}
 
 	std::vector<Species> const & RotatingSource::species() const
@@ -608,7 +608,7 @@ namespace meq
 
 	double RotatingSource::referenceRadius() const
 	{
-		return rRef;
+		return refRadius;
 	}
 
 	double RotatingSource::mu0() const
@@ -654,7 +654,7 @@ namespace meq
 		return psiAxisValue;
 	}
 
-	double NormalisedRotatingSource::f( double r, double z, double psi ) const
+	double NormalisedRotatingSource::f( double radius, double z, double psi ) const
 	{
 		// OUTSIDE THE PLASMA THERE IS NO SOURCE, exactly as for
 		// meq::NormalisedMHDSource, and the flag reaching here is the whole of
@@ -684,10 +684,10 @@ namespace meq
 		// Jacobian describing a different problem from the residual.
 		double const span = psiAxisValue - psiBoundaryValue;
 		return currentScale()
-		       *inner.f( r, z, ( psi - psiBoundaryValue )/span )/span;
+		       *inner.f( radius, z, ( psi - psiBoundaryValue )/span )/span;
 	}
 
-	double NormalisedRotatingSource::dFdPsi( double r, double z, double psi ) const
+	double NormalisedRotatingSource::dFdPsi( double radius, double z, double psi ) const
 	{
 		// The derivative of a source that is identically zero out here is zero.
 		// NOT the one-sided limit from inside: at the edge itself dF/dpsi picks
@@ -705,10 +705,10 @@ namespace meq
 		// The scale multiplies F, so it multiplies every psi-derivative of F.
 		double const span = psiAxisValue - psiBoundaryValue;
 		return currentScale()
-		       *inner.dFdPsi( r, z, ( psi - psiBoundaryValue )/span )/( span*span );
+		       *inner.dFdPsi( radius, z, ( psi - psiBoundaryValue )/span )/( span*span );
 	}
 
-	bool NormalisedRotatingSource::normalisationDerivatives( double r, double z,
+	bool NormalisedRotatingSource::normalisationDerivatives( double radius, double z,
 	                                                         double psi,
 	                                                         double &dFdAxis,
 	                                                         double &dFdBoundary ) const
@@ -731,7 +731,7 @@ namespace meq
 		 * LINES AND NOT A DERIVATION.
 		 *
 		 * This class is a pure wrapper: F = S H( Psi )/span with
-		 * H( Psi ) := inner.f( r, z, Psi ), and inner.dFdPsi( r, z, Psi ) is
+		 * H( Psi ) := inner.f( R, z, Psi ), and inner.dFdPsi( R, z, Psi ) is
 		 * exactly dH/dPsi -- RotatingSource::f() and ::dFdPsi() differ by one
 		 * level of pressureFrom()'s output and nothing else. So the
 		 * normalisation enters ONLY through the argument Psi and the overall
@@ -747,28 +747,28 @@ namespace meq
 		 */
 		double const span = psiAxisValue - psiBoundaryValue;
 		double const psiN = ( psi - psiBoundaryValue )/span;
-		double const h = inner.f( r, z, psiN );
-		double const hPrime = inner.dFdPsi( r, z, psiN );
+		double const h = inner.f( radius, z, psiN );
+		double const hPrime = inner.dFdPsi( radius, z, psiN );
 
 		dFdAxis = -currentScale()*( hPrime*psiN + h )/( span*span );
 		dFdBoundary = currentScale()*( hPrime*( psiN - 1.0 ) + h )/( span*span );
 		return true;
 	}
 
-	double NormalisedRotatingSource::potential( double r, double psi ) const
+	double NormalisedRotatingSource::potential( double radius, double psi ) const
 	{
-		return inner.potential( r, ( psi - psiBoundaryValue )/( psiAxisValue - psiBoundaryValue ) );
+		return inner.potential( radius, ( psi - psiBoundaryValue )/( psiAxisValue - psiBoundaryValue ) );
 	}
 
-	double NormalisedRotatingSource::density( std::size_t index, double r, double psi ) const
+	double NormalisedRotatingSource::density( std::size_t index, double radius, double psi ) const
 	{
-		return inner.density( index, r,
+		return inner.density( index, radius,
 		                      ( psi - psiBoundaryValue )/( psiAxisValue - psiBoundaryValue ) );
 	}
 
-	double NormalisedRotatingSource::pressure( double r, double psi ) const
+	double NormalisedRotatingSource::pressure( double radius, double psi ) const
 	{
-		return inner.pressure( r, ( psi - psiBoundaryValue )/( psiAxisValue - psiBoundaryValue ) );
+		return inner.pressure( radius, ( psi - psiBoundaryValue )/( psiAxisValue - psiBoundaryValue ) );
 	}
 
 	RotatingSource const & NormalisedRotatingSource::unnormalised() const

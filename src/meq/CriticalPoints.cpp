@@ -280,7 +280,7 @@ namespace meq
 		 * its own site was among the six fixed into function-local thread_locals.
 		 */
 		void pointOf( mfem::Mesh &mesh, int element,
-		              mfem::IntegrationPoint const &ip, double &r, double &z )
+		              mfem::IntegrationPoint const &ip, double &radius, double &z )
 		{
 			thread_local mfem::IsoparametricTransformation transformation;
 			mesh.GetElementTransformation( element, &transformation );
@@ -289,7 +289,7 @@ namespace meq
 			double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
 			mfem::Vector position( coordinates, 3 );
 			transformation.Transform( ip, position );
-			r = position( 0 );
+			radius = position( 0 );
 			z = position( 1 );
 		}
 	}
@@ -304,22 +304,22 @@ namespace meq
 			return true;
 		}
 
-		double r = 0.0;
+		double radius = 0.0;
 		double z = 0.0;
-		pointOf( meshRef, element, ip, r, z );
+		pointOf( meshRef, element, ip, radius, z );
 
 		// THE DOMAIN TEST COMES BEFORE THE SOLVED FIELD, so that a refusal
 		// costs no evaluation and, more importantly, so that `out` is not
 		// half-written when one is returned. See the header for why an iterate
 		// gets here at all.
-		if ( !( r > 0.0 ) )
+		if ( !( radius > 0.0 ) )
 			return false;
 
 		fluxField.GetVectorValue( element, ip, out );
 
 		double qR = 0.0;
 		double qZ = 0.0;
-		conductors->flux( r, z, qR, qZ );
+		conductors->flux( radius, z, qR, qZ );
 		out( 0 ) += qR;
 		out( 1 ) += qZ;
 		return true;
@@ -332,10 +332,10 @@ namespace meq
 		if ( !conductors )
 			return solved;
 
-		double r = 0.0;
+		double radius = 0.0;
 		double z = 0.0;
-		pointOf( meshRef, element, ip, r, z );
-		return solved + conductors->psi( r, z );
+		pointOf( meshRef, element, ip, radius, z );
+		return solved + conductors->psi( radius, z );
 	}
 
 	double CriticalPointFinder::nodeShift( int element, int localDof ) const
@@ -420,15 +420,15 @@ namespace meq
 				nodal.potentialOffset[ i ] );
 			for ( int n = 0; n < potentialNodes.GetNPoints(); ++n )
 			{
-				double r = 0.0;
+				double radius = 0.0;
 				double z = 0.0;
-				pointOf( meshRef, e, potentialNodes.IntPoint( n ), r, z );
-				// psi_c IS EXACTLY ZERO ON THE AXIS and refuses r < 0, so the
-				// stored zero is the right value at a node on r = 0 and the
+				pointOf( meshRef, e, potentialNodes.IntPoint( n ), radius, z );
+				// psi_c IS EXACTLY ZERO ON THE AXIS and refuses R < 0, so the
+				// stored zero is the right value at a node on R = 0 and the
 				// right neutral one off the half-plane, which a node of an
 				// element cannot be anyway.
 				nodal.potentialPsi[ pBase + static_cast< std::size_t >( n ) ]
-					= r >= 0.0 ? conductors->psi( r, z ) : 0.0;
+					= radius >= 0.0 ? conductors->psi( radius, z ) : 0.0;
 			}
 
 			mfem::IntegrationRule const &fluxNodes
@@ -437,15 +437,15 @@ namespace meq
 				nodal.fluxOffset[ i ] );
 			for ( int n = 0; n < fluxNodes.GetNPoints(); ++n )
 			{
-				double r = 0.0;
+				double radius = 0.0;
 				double z = 0.0;
-				pointOf( meshRef, e, fluxNodes.IntPoint( n ), r, z );
-				if ( !( r > 0.0 ) )
+				pointOf( meshRef, e, fluxNodes.IntPoint( n ), radius, z );
+				if ( !( radius > 0.0 ) )
 					continue;
 
 				double qR = 0.0;
 				double qZ = 0.0;
-				conductors->flux( r, z, qR, qZ );
+				conductors->flux( radius, z, qR, qZ );
 				std::size_t const at = qBase + static_cast< std::size_t >( n );
 				nodal.fluxQ[ 2*at ] = qR;
 				nodal.fluxQ[ 2*at + 1 ] = qZ;
@@ -718,7 +718,7 @@ namespace meq
 		// one of the three answers.
 		double const degenerate = 1.0e-10*norm*norm;
 
-		found.r = physical( 0 );
+		found.radius = physical( 0 );
 		found.z = physical( 1 );
 		found.psi = totalPotential( element, ip );
 		found.element = element;
@@ -915,7 +915,7 @@ namespace meq
 				bool duplicate = false;
 				for ( std::size_t j = 0; j < points.size(); ++j )
 				{
-					double const dr = points[ j ].r - point.r;
+					double const dr = points[ j ].radius - point.radius;
 					double const dz = points[ j ].z - point.z;
 					if ( points[ j ].type == point.type
 					     && std::sqrt( dr*dr + dz*dz ) < reach )
@@ -997,7 +997,7 @@ namespace meq
 		return true;
 	}
 
-	int CriticalPointFinder::nearestElementCentre( double r, double z ) const
+	int CriticalPointFinder::nearestElementCentre( double radius, double z ) const
 	{
 		int best = -1;
 		double bestDistance = std::numeric_limits<double>::infinity();
@@ -1006,7 +1006,7 @@ namespace meq
 		for ( int element = 0; element < meshRef.GetNE(); ++element )
 		{
 			meshRef.GetElementCenter( element, centre );
-			double const dr = centre( 0 ) - r;
+			double const dr = centre( 0 ) - radius;
 			double const dz = centre( 1 ) - z;
 			double const distance = dr*dr + dz*dz;
 			if ( distance < bestDistance )
@@ -1018,7 +1018,7 @@ namespace meq
 		return best;
 	}
 
-	bool CriticalPointFinder::tryFindAxisFrom( double r, double z,
+	bool CriticalPointFinder::tryFindAxisFrom( double radius, double z,
 	                                          AxisSense sense,
 	                                          CriticalPoint &found ) const
 	{
@@ -1033,14 +1033,14 @@ namespace meq
 				"tryFindCriticalPointFrom(), which is this function without the "
 				"refusal" );
 
-		return tryFindCriticalPointFrom( r, z, sense, found );
+		return tryFindCriticalPointFrom( radius, z, sense, found );
 	}
 
-	bool CriticalPointFinder::tryFindCriticalPointFrom( double r, double z,
+	bool CriticalPointFinder::tryFindCriticalPointFrom( double radius, double z,
 	                                                   AxisSense sense,
 	                                                   CriticalPoint &found ) const
 	{
-		int const seed = nearestElementCentre( r, z );
+		int const seed = nearestElementCentre( radius, z );
 		if ( seed < 0 )
 			return false;
 
@@ -1147,7 +1147,7 @@ namespace meq
 		bool bestClean = false;
 		for ( std::size_t i = 0; i < points.size(); ++i )
 		{
-			double const dr = points[ i ].r - r;
+			double const dr = points[ i ].radius - radius;
 			double const dz = points[ i ].z - z;
 			double const distance = dr*dr + dz*dz;
 			bool const isClean = ( points[ i ].overshoot <= 0.0 );
@@ -1345,7 +1345,7 @@ namespace meq
 				bool duplicate = false;
 				for ( std::size_t j = 0; j < points.size(); ++j )
 				{
-					double const dr = points[ j ].r - point.r;
+					double const dr = points[ j ].radius - point.radius;
 					double const dz = points[ j ].z - point.z;
 					double const distance = std::sqrt( dr*dr + dz*dz );
 					if ( distance < separation*diameter )
@@ -1382,7 +1382,7 @@ namespace meq
 	}
 
 	void CriticalPointFinder::nodalExtreme( bool wantMaximum, double &value,
-	                                        int &element, double &r,
+	                                        int &element, double &radius,
 	                                        double &z ) const
 	{
 		// The same loop GradShafranovSolver runs to produce psi_ax: every element,
@@ -1416,7 +1416,7 @@ namespace meq
 
 		value = best;
 		element = bestElement;
-		r = 0.0;
+		radius = 0.0;
 		z = 0.0;
 		if ( bestElement < 0 )
 			return;
@@ -1442,7 +1442,7 @@ namespace meq
 
 		mfem::Vector physical( 2 );
 		scratch.Transform( node, physical );
-		r = physical( 0 );
+		radius = physical( 0 );
 		z = physical( 1 );
 	}
 
@@ -1492,7 +1492,7 @@ namespace meq
 			// extremum of psi and would otherwise win on flux. It is NOT
 			// counted in extrema either: the count is of candidates, and a
 			// point that cannot be an axis is not one.
-			if ( excluded && excluded( all[ i ].r, all[ i ].z ) )
+			if ( excluded && excluded( all[ i ].radius, all[ i ].z ) )
 				continue;
 
 			++result.extrema;
@@ -1511,7 +1511,7 @@ namespace meq
 		if ( !result.located )
 			return result;
 
-		double const dr = result.axis.r - result.nodeR;
+		double const dr = result.axis.radius - result.nodeR;
 		double const dz = result.axis.z - result.nodeZ;
 		result.separation = std::sqrt( dr*dr + dz*dz );
 

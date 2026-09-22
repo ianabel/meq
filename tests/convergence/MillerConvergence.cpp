@@ -26,7 +26,7 @@
  * PressurePedestal.hpp and TransportBarrier.hpp vanishes at psi = 0, so psi == 0
  * solves the homogeneous problem and meq's Newton iteration -- which has no
  * setInitialGuess() -- stops there; see PedestalConvergence.cpp. Example 6's
- * F( r, 0 ) = r^2/2 is not zero, so there is no trivial branch and no need to
+ * F( R, 0 ) = R^2/2 is not zero, so there is no trivial branch and no need to
  * invent a datum.
  *
  * THE DOMAIN, AND THE ONE DELIBERATE DEPARTURE FROM THE PAPER.
@@ -63,7 +63,7 @@
  * move to the extension path and give up nested self-convergence.
  *
  * AND THE NON-LINEARITY IS NEGLIGIBLE HERE. On this geometry psi comes out at
- * about 1.3e-2, so the psi^2 term of F/r^2 = 1/2 + psi^2 - psi^4/2 contributes
+ * about 1.3e-2, so the psi^2 term of F/R^2 = 1/2 + psi^2 - psi^4/2 contributes
  * 3e-4 relative and dF/dpsi is about 3e-2. Newton finishes in two steps
  * everywhere. That is a property of the benchmark as the paper specifies it, not
  * of the solver: Example 6 tests geometry and order, not the Newton path. See
@@ -196,13 +196,13 @@ namespace
 			int const candidates = 60000;
 			for ( int i = 1; i <= candidates; ++i )
 			{
-				double const r = boundingBox.rMin
+				double const radius = boundingBox.minRadius
 				                 + SampleCloud::halton( i, 2 )*boundingBox.width();
 				double const z = boundingBox.zMin
 				                 + SampleCloud::halton( i, 3 )*boundingBox.height();
-				if ( shape().levelSet( r, z ) < -margin )
+				if ( shape().levelSet( radius, z ) < -margin )
 				{
-					points.push_back( r );
+					points.push_back( radius );
 					points.push_back( z );
 				}
 			}
@@ -310,32 +310,32 @@ namespace
  * -------------------------------------------------------------------------
  */
 
-/// F must be r^2 dp/dpsi, and it is NOT for the p the paper prints -- see the
+/// F must be R^2 dp/dpsi, and it is NOT for the p the paper prints -- see the
 /// header of tests/analytic/MillerDShape.hpp. This asserts the correction: with
-/// psi^4/5 in place of the printed psi^5/5, p' is exactly F/r^2.
+/// psi^4/5 in place of the printed psi^5/5, p' is exactly F/R^2.
 BOOST_AUTO_TEST_CASE( theCorrectedPressureDifferentiatesToThePrintedSource )
 {
 	double worstCorrected = 0.0;
 	double worstAsPrinted = 0.0;
 
-	for ( double r = 0.7; r < 1.35; r += 0.05 )
+	for ( double radius = 0.7; radius < 1.35; radius += 0.05 )
 	{
 		for ( double psi = -1.2; psi < 1.25; psi += 0.01 )
 		{
-			double const source = shape().f( r, 0.0, psi );
+			double const source = shape().f( radius, 0.0, psi );
 			worstCorrected = std::max( worstCorrected,
-				std::abs( source - r*r*MillerDShape::pPrime( psi ) ) );
+				std::abs( source - radius*radius*MillerDShape::pPrime( psi ) ) );
 
 			// p as printed: ( psi/2 )( 1 + 2 psi^2/3 - psi^5/5 ), differentiated.
 			double const printedPrime = 0.5 + psi*psi - 0.6*std::pow( psi, 5 );
 			worstAsPrinted = std::max( worstAsPrinted,
-				std::abs( source - r*r*printedPrime ) );
+				std::abs( source - radius*radius*printedPrime ) );
 		}
 	}
 
-	std::printf( "\n  Example 6, F against r^2 p':\n"
-	             "    p with psi^4/5 (corrected)  worst |F - r^2 p'| = %.3e\n"
-	             "    p with psi^5/5 (as printed) worst |F - r^2 p'| = %.3e\n",
+	std::printf( "\n  Example 6, F against R^2 p':\n"
+	             "    p with psi^4/5 (corrected)  worst |F - R^2 p'| = %.3e\n"
+	             "    p with psi^5/5 (as printed) worst |F - R^2 p'| = %.3e\n",
 	             worstCorrected, worstAsPrinted );
 	std::fflush( stdout );
 
@@ -354,13 +354,13 @@ BOOST_AUTO_TEST_CASE( theJacobianIsTheDerivativeOfTheSource )
 {
 	double const step = 1.0e-6;
 	double worst = 0.0;
-	for ( double r = 0.7; r < 1.35; r += 0.05 )
+	for ( double radius = 0.7; radius < 1.35; radius += 0.05 )
 	{
 		for ( double psi = -1.2; psi < 1.25; psi += 0.01 )
 		{
-			double const difference = ( shape().f( r, 0.0, psi + step )
-			                            - shape().f( r, 0.0, psi - step ) )/( 2.0*step );
-			double const analytic = shape().dFdPsi( r, 0.0, psi );
+			double const difference = ( shape().f( radius, 0.0, psi + step )
+			                            - shape().f( radius, 0.0, psi - step ) )/( 2.0*step );
+			double const analytic = shape().dFdPsi( radius, 0.0, psi );
 			worst = std::max( worst, std::abs( difference - analytic )
 			                         /( 1.0 + std::abs( analytic ) ) );
 		}
@@ -373,9 +373,9 @@ BOOST_AUTO_TEST_CASE( theJacobianIsTheDerivativeOfTheSource )
 /// PedestalConvergence.cpp.
 BOOST_AUTO_TEST_CASE( theSourceDoesNotVanishAtZeroFlux )
 {
-	for ( double r = 0.7; r < 1.35; r += 0.1 )
+	for ( double radius = 0.7; radius < 1.35; radius += 0.1 )
 	{
-		BOOST_TEST( std::abs( shape().f( r, 0.0, 0.0 ) - 0.5*r*r ) < 1.0e-14 );
+		BOOST_TEST( std::abs( shape().f( radius, 0.0, 0.0 ) - 0.5*radius*radius ) < 1.0e-14 );
 	}
 }
 

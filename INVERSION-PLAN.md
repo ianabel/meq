@@ -94,7 +94,7 @@ that is the part that is simply missing. `[source] SafetyFactorFile` carries
 surfaces writer, and already written to the `.nc` as coefficients. **So the one
 run whose entire purpose is to hit a target `q` is the one run that cannot show
 you the `q` it reached.** A user has to take the round trip on faith, or
-recompute `V′ g ⟨r^{-2}⟩/4π²` by hand from columns the file does carry.
+recompute `V′ g ⟨R^{-2}⟩/4π²` by hand from columns the file does carry.
 
 Two things follow and they are different sizes:
 
@@ -121,7 +121,7 @@ flux label and an in-surface coordinate, and the integrals taken over them.
 things that need it:
 
 * **`ROADMAP.md` item 10, the fixed-`q(ψ)` solver.** RoPP (142) is
-  `q(ψ) = V′(ψ) I(ψ) ⟨r^{-2}⟩_ψ / 4π²` — a flux-surface average, and the
+  `q(ψ) = V′(ψ) I(ψ) ⟨R^{-2}⟩_ψ / 4π²` — a flux-surface average, and the
   machinery the rotating source's local gauge deliberately avoided needing. **Here and in
   §3.4, §4.3 and §4.4 that `q` is the safety factor and NOT MEQ's flux**, which
   is the same letter for a solved unknown of the discretisation; IN-2 settles
@@ -201,7 +201,7 @@ The contour is the solution set of one scalar equation in two unknowns,
 correct back with the minimum-norm Newton step:
 
 ```
-t     = ( −∂_z ψ, ∂_R ψ ) / |∇ψ|          the tangent -- and r q IS grad-bar psi
+t     = ( −∂_z ψ, ∂_R ψ ) / |∇ψ|          the tangent -- and R q IS grad-bar psi
 x*    = x_i + Δs t                        predictor (explicit Euler)
 x    <- x + ∇ψ ( c − ψ(x) ) / |∇ψ|²       corrector, iterate to tolerance
 ```
@@ -304,7 +304,7 @@ predictor and its corrector. The spacing requirement drops from
 > AND IT IS THE FINDING THAT STAGE DID NOT EXPECT.** The interpolant is built on
 > tangents from the **flux** and is measured against the level set of the
 > **potential**. Those are the same curve only to the extent that the two fields
-> agree — and `∇ψ_h/r` agrees with `q_h` only to `O(h^k)`, because
+> agree — and `∇ψ_h/R` agrees with `q_h` only to `O(h^k)`, because
 > differentiating an L2 potential of degree `k` loses an order while `q_h` keeps
 > `k+1`. So paired with `ψ_h`, the Hermite is fourth order in `Δs` **until the
 > tangent tilt takes over and second order afterwards**: rates 3.809 → 1.400 →
@@ -326,9 +326,9 @@ predictor and its corrector. The spacing requirement drops from
 >
 > **The usual reason given for the pairing is wrong, and was checked rather than
 > repeated.** It is not that the local post-processing is built so that
-> `∇ψ*` matches `r q*`: MFEM's reconstruction drives Stenberg's local problem
+> `∇ψ*` matches `R q*`: MFEM's reconstruction drives Stenberg's local problem
 > with the reconstructed **total** flux `q̂_h` in `RT_k` — the normally
-> continuous field the constraint equation projects onto — so `∇ψ*` and `r q*`
+> continuous field the constraint equation projects onto — so `∇ψ*` and `R q*`
 > are different objects. What is true, and measured, is that they agree an order
 > better than the raw pair does. Right answer, wrong mechanism, and the
 > distinction matters because the wrong mechanism would predict exactness.
@@ -587,7 +587,7 @@ Three candidates were considered, and MEQ already owned machinery for two:
 | | | |
 |---|---|---|
 | **the flux Taylor step** | what `GridSampler::samplePotentialWithFlux()` already does: `ψ(p) ≈ ψ(x₀) + r₀ q(x₀)·(p − x₀)` from the foot `x₀` on `Γ_h` | **nothing is ever evaluated outside an element**, which is the property that made it right for the `.nc`. But `∇ψ` in the band is then **frozen at the foot**, so the extended field is affine and **contours in the band are straight lines** — the curvature is gone, whatever `k` is |
-| **the transfer-path lift** — **CHOSEN** | the extension technique's own construction. **NOT through `PathLiftCoefficient`, which this file named and which cannot do it**: that class `dynamic_cast`s its `ElementTransformation` to `FaceElementTransformations` and lifts from *that face's own* integration point, answering "what is `φ_h` on `Γ_h`" — η₅'s question, not this one. The usable primitive is one level down and public, **`mfem::PathIntegral( Cu, x, xbar, line_ir )`, which takes arbitrary endpoints**, with `mfem::ElementExtension` supplying `E_h(q_h)`. MFEM's own comment on it — it must return `p(x) − p(a(x))` "whatever the path" — is the licence | **method-native**: it is how the solver itself relates `ψ` on `Γ` to `ψ` on `Γ_h`, by integrating `r q` along the path. So the answer to "is it usable at an arbitrary band point" is **yes, but not through the class named here first** |
+| **the transfer-path lift** — **CHOSEN** | the extension technique's own construction. **NOT through `PathLiftCoefficient`, which this file named and which cannot do it**: that class `dynamic_cast`s its `ElementTransformation` to `FaceElementTransformations` and lifts from *that face's own* integration point, answering "what is `φ_h` on `Γ_h`" — η₅'s question, not this one. The usable primitive is one level down and public, **`mfem::PathIntegral( Cu, x, xbar, line_ir )`, which takes arbitrary endpoints**, with `mfem::ElementExtension` supplying `E_h(q_h)`. MFEM's own comment on it — it must return `p(x) − p(a(x))` "whatever the path" — is the licence | **method-native**: it is how the solver itself relates `ψ` on `Γ` to `ψ` on `Γ_h`, by integrating `R q` along the path. So the answer to "is it usable at an arbitrary band point" is **yes, but not through the class named here first** |
 | **the known boundary condition** | `ψ = 0` exactly on `Γ`, and `Γ` is known analytically from `BoundaryShape` | the outermost contour is therefore known **exactly**, for free, with no tracing at all — a fact worth exploiting whatever else is chosen |
 
 > **A WARNING FROM THE TREE, BECAUSE THE OBVIOUS COMBINATION HAS BEEN TRIED AND
@@ -796,7 +796,7 @@ chart is awkward. **This plan takes the first**, because it reuses the prior art
 and because IN-2's integrals are per-surface anyway; the second is the thing to
 reach for if IN-4 finds the chart is the binding constraint.
 
-**`q` gives the residual directly.** `∇̄ψ = r q`, so `q = 0` is a 2×2 system in
+**`q` gives the residual directly.** `∇̄ψ = R q`, so `q = 0` is a 2×2 system in
 which the residual is a *solved field* and only the Hessian needs differencing.
 Compare CEDRES++, which records as an open problem that in P1 continuous
 Galerkin the axis and X-point are confined to mesh vertices; MEQ's high-order
@@ -843,8 +843,8 @@ topological**:
 * Poincaré–Hopf on a disc gives `#max + #min − #saddle = χ = 1`. That is an
   *identity*, not an absence — two maxima and one saddle also sums to 1.
 * What excludes an interior extremum of ONE sign is the **maximum principle**,
-  and *which* sign depends on the sign of `F`. `1/r` is bounded away from zero
-  and infinity since `r > 0`, so the operator is uniformly elliptic in
+  and *which* sign depends on the sign of `F`. `1/R` is bounded away from zero
+  and infinity since `R > 0`, so the operator is uniformly elliptic in
   divergence form either way:
   * `F ≥ 0` makes `ψ` a **supersolution**, its minimum sits on `Γ`, and
     `#min = 0`.
@@ -866,8 +866,8 @@ topological**:
 > interior extrema; `AxisSense` is for a caller who knows which they want.
 
 The conclusion is immune to all three of MEQ's sign conventions: `ψ → −ψ` swaps
-max and min and both have index +1 in 2D; `q = ∇̄ψ / r` has the same zeros and
-indices since `r > 0`; and `DarcyForm` holding `−q` changes nothing because in
+max and min and both have index +1 in 2D; `q = ∇̄ψ / R` has the same zeros and
+indices since `R > 0`; and `DarcyForm` holding `−q` changes nothing because in
 even dimension `index(−v) = index(v)`.
 
 **FREE BOUNDARY IS WHERE THIS CHANGES, AND IT CHANGES BY FORCE.** The vacuum
@@ -1045,7 +1045,7 @@ case, not fixed by MaNTA" and its illustrative set is known to be under revision
 `V′ = ∮ 2πR dl/|∇ψ|`, `⟨X⟩ = (1/V′) ∮ 2πR X dl/|∇ψ|`.
 
 > **A NAME COLLISION, SETTLED.** In this project `q` is the **flux**,
-> `q = (1/r)∇̄ψ`. The safety factor is also universally written `q`. **In code the
+> `q = (1/R)∇̄ψ`. The safety factor is also universally written `q`. **In code the
 > safety factor is `safetyFactor` and never `q`**, and in this file it is named in
 > words. A reader who meets `q` in `src/meq` is entitled to assume the flux, and
 > one silent conflation would be very hard to see afterwards.
@@ -1108,7 +1108,7 @@ changes it. Verified on `ψ = (R−2)² + z²`, whose level sets are circles, to
 > There is an optimum and it must be found rather than assumed.
 
 **Two expectations died here**, and both are in `CLAUDE.md`: `ψ*` does **not**
-buy `k+2` in an average, because the weight carries `|∇ψ| = r|q|` and there is no
+buy `k+2` in an average, because the weight carries `|∇ψ| = R|q|` and there is no
 `k+2` flux to divide by; and an average does **not** escape the metric trap, a
 ratio cancelling a constant (about 40×) and **nothing in the order**.
 
@@ -1133,7 +1133,7 @@ exchange for a check the second one already passes. If a reason to build it ever
 appears it will be a geometry the tracer cannot close, not a cost.
 
 **The fixture needed its own box.** `standardBox()` cannot hold these surfaces —
-`Ψ_N = 0.25` on `nstx()` already spans `r ∈ [0.99, 1.57]` against a box ending at
+`Ψ_N = 0.25` on `nstx()` already spans `R ∈ [0.99, 1.57]` against a box ending at
 1.4 — so the study runs on `[0.60, 1.90] × [-1.10, 1.10]`. And `Ψ_N = 0.75` is
 **not measurable on a fitted rectangle at all**: enclosing it leaves under one
 cell of margin at the coarsest mesh of a dyadic sweep, at which point one is
@@ -1279,7 +1279,7 @@ is told to use `trace()`.
 normalised arc length, `t = 2s/L − 1`. MFEM-free, beside `SurfaceFit`'s Zernike.
 
 **MEASURED ON AN ANALYTIC FIXTURE**, `tests/convergence/OpenSurfaces.cpp`:
-`ψ = z − a( r − r₀ )²` interpolated into an H1 space of degree 2, which
+`ψ = z − a( R − r₀ )²` interpolated into an H1 space of degree 2, which
 represents that quadratic **exactly** — so every number is a property of the
 tracing and the fit and none of it is the discretisation. Level sets are
 parabolas open across the box.

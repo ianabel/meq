@@ -156,7 +156,7 @@ namespace
 	/// different searches over the same set, which is what makes the comparison
 	/// below a statement about the answer rather than about the algorithm.
 	double sampledMaximum( mfem::Mesh &mesh, mfem::GridFunction const &potential,
-	                       int samplesPerFace, double &r, double &z )
+	                       int samplesPerFace, double &radius, double &z )
 	{
 		double best = -std::numeric_limits<double>::infinity();
 		for ( PolygonFace const &entry : polygonFaces( mesh ) )
@@ -183,7 +183,7 @@ namespace
 					best = value;
 					mfem::Vector point( 2 );
 					faceScratch.Transform( ip, point );
-					r = point( 0 );
+					radius = point( 0 );
 					z = point( 1 );
 				}
 			}
@@ -196,14 +196,14 @@ namespace
 	mfem::FunctionCoefficient bump( double height )
 	{
 		meq::tests::Rectangle const box = meq::tests::standardBox();
-		double const rMin = box.rMin;
+		double const minRadius = box.minRadius;
 		double const zMin = box.zMin;
 		double const width = box.width();
 		double const depth = box.height();
 		return mfem::FunctionCoefficient(
-			[ height, rMin, zMin, width, depth ]( mfem::Vector const &x )
+			[ height, minRadius, zMin, width, depth ]( mfem::Vector const &x )
 			{
-				return height*std::sin( M_PI*( x( 0 ) - rMin )/width )
+				return height*std::sin( M_PI*( x( 0 ) - minRadius )/width )
 				       *std::sin( M_PI*( x( 1 ) - zMin )/depth );
 			} );
 	}
@@ -312,7 +312,7 @@ BOOST_AUTO_TEST_CASE( theContactIsFoundWhereTheFieldIsLargestOnThePolygon )
 	std::printf( "\n  THE LOCATED CONTACT AGAINST A DENSE SAMPLE OF THE POLYGON\n" );
 	std::printf( "    %5s %7s %14s %14s %14s %12s %12s\n",
 	             "n", "newton", "psi_ax", "psi_bnd", "sampled max",
-	             "contact r", "contact z" );
+	             "contact R", "contact z" );
 
 	for ( int n : { 12, 24, 48 } )
 	{
@@ -383,9 +383,9 @@ namespace
 	};
 
 	/// `located` chooses the constraint: the polygon when true, the prescribed
-	/// point ( r, z ) when false. EVERYTHING ELSE IS HELD, which is what makes
+	/// point ( R, z ) when false. EVERYTHING ELSE IS HELD, which is what makes
 	/// the difference between two calls a statement about the constraint.
-	Solved solveWith( int n, int order, bool located, double r, double z )
+	Solved solveWith( int n, int order, bool located, double radius, double z )
 	{
 		meq::tests::Rectangle const box = meq::tests::standardBox();
 		mfem::Mesh mesh = meq::tests::makeMesh( box, n );
@@ -402,7 +402,7 @@ namespace
 		if ( located )
 			solver.setLimiterSurface( limiterAttribute );
 		else
-			solver.setBoundaryFluxPoint( r, z );
+			solver.setBoundaryFluxPoint( radius, z );
 		solver.setSource( source, 0.30 );
 		solver.setBoundaryData( zero );
 		solver.setInitialGuess( guess );

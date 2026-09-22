@@ -9,22 +9,22 @@ The problem
 -----------
 
 An axisymmetric magnetohydrodynamic equilibrium in cylindrical coordinates
-:math:`(r, \varphi, z)` is described entirely by a scalar, the poloidal flux per
-radian :math:`\psi(r, z)`. Force balance reduces to one semi-linear elliptic
+:math:`(R, \varphi, z)` is described entirely by a scalar, the poloidal flux per
+radian :math:`\psi(R, z)`. Force balance reduces to one semi-linear elliptic
 equation for it,
 
 .. math::
 
-   -\gradbar \cdot \left( \frac{1}{r} \gradbar \psi \right)
-       = \frac{F(r, z, \psi)}{r},
+   -\gradbar \cdot \left( \frac{1}{R} \gradbar \psi \right)
+       = \frac{F(R, z, \psi)}{R},
    \qquad
-   F(r, z, \psi) := \mu_0 r^2 \frac{\mathrm{d}p}{\mathrm{d}\psi}
+   F(R, z, \psi) := \mu_0 R^2 \frac{\mathrm{d}p}{\mathrm{d}\psi}
                   + g \frac{\mathrm{d}g}{\mathrm{d}\psi},
 
-with :math:`p(\psi)` the plasma pressure and :math:`g(\psi)/r` the toroidal
+with :math:`p(\psi)` the plasma pressure and :math:`g(\psi)/R` the toroidal
 field function. The operator on the left is the Grad–Shafranov operator
-:math:`-\dstar`, and it is *not* the Laplacian: the weights :math:`1/r` and
-:math:`r` are what distinguish it, and :math:`\gradbar := (\partial_r,
+:math:`-\dstar`, and it is *not* the Laplacian: the weights :math:`1/R` and
+:math:`R` are what distinguish it, and :math:`\gradbar := (\partial_r,
 \partial_z)` acts formally like a vector of partial derivatives rather than
 being the cylindrical gradient. :doc:`formulation` is precise about this,
 because the distinction is the entire content of those weights.
@@ -47,7 +47,7 @@ downstream codes want is the magnetic field, which is built from
 :math:`\gradbar\psi`. A method that computes :math:`\psi` to order :math:`k+1`
 and then differentiates it delivers the field at order :math:`k` — one order
 worse, in the quantity people actually use. MEQ therefore uses a **mixed**
-method, in which the scaled gradient :math:`q = \gradbar\psi / r` is an
+method, in which the scaled gradient :math:`q = \gradbar\psi / R` is an
 independent unknown solved for directly, at the same order as :math:`\psi`.
 That is the reason to prefer HDG here, and it keeps paying off in places nobody
 designed for: it is what continues the solution into the band outside a curved
@@ -138,7 +138,7 @@ estimator is built on, :doc:`curved_boundary` for the transfer technique, and
 the system and is the place to go when a run does not converge.
 
 :doc:`flux_surfaces` and :doc:`surface_geometry` are about what happens *after*
-a solve: turning :math:`\psi(r, z)` into the flux surfaces, the flux-surface
+a solve: turning :math:`\psi(R, z)` into the flux surfaces, the flux-surface
 averages and the geometry a transport code reads. Both are library-only — none
 of it is driven from a configuration file or written to an output file.
 

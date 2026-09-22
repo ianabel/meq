@@ -17,20 +17,20 @@
  *
  * MEQ solves the fixed-boundary problem
  *
- *     -div_bar( ( 1/r ) grad_bar( psi ) ) = F( r, z, psi ) / r    in Omega
+ *     -div_bar( ( 1/R ) grad_bar( psi ) ) = F( R, z, psi ) / R    in Omega
  *                                     psi = g_D                   on Gamma
  *
- * with the flux q := ( 1/r ) grad_bar( psi ) carried as an unknown in its own
+ * with the flux q := ( 1/R ) grad_bar( psi ) carried as an unknown in its own
  * right, so that the magnetic field is obtained at the same order as psi rather
  * than one order down. In first-order form,
  *
- *     r q - grad_bar( psi ) = 0,     -div_bar( q ) = F/r.
+ *     R q - grad_bar( psi ) = 0,     -div_bar( q ) = F/R.
  *
  * This is the LDG-H method of refs/HDG-GradShafranov.pdf eq (8), restated with
  * the block structure explicit as refs/HDG-GradShafranov-Adaptive.pdf eq (13):
  *
- *     ( r q_h, v )_Th + ( psi_h, div_bar v )_Th - < psihat_h, v.n >_dTh  = 0
- *     ( q_h, grad_bar w )_Th - < qhat_h.n, w >_dTh                       = ( F/r, w )_Th
+ *     ( R q_h, v )_Th + ( psi_h, div_bar v )_Th - < psihat_h, v.n >_dTh  = 0
+ *     ( q_h, grad_bar w )_Th - < qhat_h.n, w >_dTh                       = ( F/R, w )_Th
  *     < qhat_h.n, mu >_dTh\Gamma_h                                       = 0
  *     psihat_h = g_D  on Gamma_h
  *
@@ -70,7 +70,7 @@
  *
  *     phi_h( x ) = g( a( x ) ) + int_sigma C E_h( u_h ) . m ds
  *
- * -- with C = r, u_h the flux as DarcyForm holds it, which is -q, and m the unit
+ * -- with C = R, u_h the flux as DarcyForm holds it, which is -q, and m the unit
  * tangent of the path from x on Gamma_h to a( x ) on Gamma -- depends on the
  * unknown flux through the second term, so it is not data to be eliminated; it
  * is a coupling into the operator. See setExtension() for how that
@@ -198,7 +198,7 @@ namespace meq
 	                              mfem::Vector const &values, int offset,
 	                              ConductorField const *conductors,
 	                              int &element, mfem::Vector &shape,
-	                              mfem::Array<int> &dofs, double &r, double &z );
+	                              mfem::Array<int> &dofs, double &radius, double &z );
 
 
 	/**
@@ -353,10 +353,10 @@ namespace meq
 	 * This is the whole of what makes the problem semi-linear, and the only
 	 * place dF/dpsi is used. It contributes
 	 *
-	 *     residual: -( F( r, z, psi_h ), w )/r
-	 *     Jacobian: -( ( dF/dpsi )( r, z, psi_h ) w, v )/r
+	 *     residual: -( F( R, z, psi_h ), w )/R
+	 *     Jacobian: -( ( dF/dpsi )( R, z, psi_h ) w, v )/R
 	 *
-	 * on each element. The minus and the 1/r are the same pair that
+	 * on each element. The minus and the 1/R are the same pair that
 	 * setSource( mfem::Coefficient & ) applies to the linear right hand side,
 	 * and for a Source whose f() does not depend on psi the two paths assemble
 	 * exactly the same numbers -- which is worth knowing, because it makes the
@@ -368,7 +368,7 @@ namespace meq
 	 *
 	 *     B u + D psi + E psihat = -bp.
 	 *
-	 * Moving -( F/r, w ) from bp into D is what puts the source under the
+	 * Moving -( F/R, w ) from bp into D is what puts the source under the
 	 * Newton iteration, and it arrives with the sign it had on the right hand
 	 * side. See the note in the .cpp for the arithmetic.
 	 *
@@ -387,7 +387,7 @@ namespace meq
 	 * semi-linear term contributes to the DERIVATIVE of it, and so it chooses
 	 * the iteration rather than the problem:
 	 *
-	 *     Newton   field block = A_lin - ( 1/r )( dF/dpsi ) M
+	 *     Newton   field block = A_lin - ( 1/R )( dF/dpsi ) M
 	 *     Picard   field block = A_lin
 	 *
 	 * where A_lin is the hybridized HDG operator with no reaction term -- the
@@ -408,7 +408,7 @@ namespace meq
 	 * extra.
 	 *
 	 * **THE RESIDUAL IS NEVER FROZEN, AND THAT IS DELIBERATE.** At the iterate
-	 * F( r, z, psi_h ) and F( r, z, psi^k ) are the same numbers, so freezing it
+	 * F( R, z, psi_h ) and F( R, z, psi^k ) are the same numbers, so freezing it
 	 * changes no step; it changes only what is evaluated AWAY from the iterate,
 	 * which is the Armijo trials and the differenced border columns. Freezing it
 	 * there would make the field part of the merit affine in the field, so the
@@ -483,8 +483,8 @@ namespace meq
 			 * REMAINDER.** Under the split the solved field is `psi_p`, so the
 			 * `psi` this integrator is handed at a quadrature point is the
 			 * remainder — while `J_plasma` is a function of the **physical**
-			 * flux. Without this, `f( r, z, psi_p )` is evaluated where
-			 * `f( r, z, psi_p + psi_c )` is meant, which for any source with a
+			 * flux. Without this, `f( R, z, psi_p )` is evaluated where
+			 * `f( R, z, psi_p + psi_c )` is meant, which for any source with a
 			 * `psi` dependence is a silent wrong answer: it converges, at the
 			 * full rate, to a different equilibrium.
 			 *
@@ -560,7 +560,7 @@ namespace meq
 			/// `F` at a point in @a element: the source's own `f()` where the
 			/// fill reached, and what survives outside the plasma where it did
 			/// not.
-			double sourceValue( double r, double z, double psi, int element ) const;
+			double sourceValue( double radius, double z, double psi, int element ) const;
 
 			Source const *source;
 
@@ -629,7 +629,7 @@ namespace meq
 	 * Usage, linear:
 	 *
 	 *     meq::GradShafranovSolver solver( mesh, order );
-	 *     solver.setSource( fCoefficient );          // F( r, z ), not F/r
+	 *     solver.setSource( fCoefficient );          // F( R, z ), not F/R
 	 *     solver.setBoundaryData( psiCoefficient );  // psi on Gamma
 	 *     solver.solve();
 	 *     solver.potential();  solver.flux();
@@ -660,9 +660,9 @@ namespace meq
 	class GradShafranovSolver
 	{
 		public:
-			/// @param meshIn   the computational domain. Borrowed, and r > 0 is
+			/// @param meshIn   the computational domain. Borrowed, and R > 0 is
 			///                 required everywhere on it -- the operator carries a
-			///                 1/r and the Solov'ev expansion carries a log r.
+			///                 1/R and the Solov'ev expansion carries a log R.
 			/// @param orderIn  the polynomial degree k, used for all three spaces.
 			///                 Hybridization removes the inf-sup condition that
 			///                 would otherwise force them apart.
@@ -674,13 +674,13 @@ namespace meq
 			GradShafranovSolver( GradShafranovSolver const & ) = delete;
 			GradShafranovSolver &operator=( GradShafranovSolver const & ) = delete;
 
-			/// The right hand side F( r, z ) of a source that does not depend on
-			/// psi -- NOT F/r. The 1/r belongs to the weak form and is applied
+			/// The right hand side F( R, z ) of a source that does not depend on
+			/// psi -- NOT F/R. The 1/R belongs to the weak form and is applied
 			/// here, which keeps meq::Source free of it too (see Source.hpp).
 			/// The problem is then linear and solve() does one direct solve.
 			void setSource( mfem::Coefficient &fIn );
 
-			/// The source F( r, z, psi ) of a semi-linear problem, with its
+			/// The source F( R, z, psi ) of a semi-linear problem, with its
 			/// derivative. Borrowed. The problem is closed by Newton, and
 			/// Source::dFdPsi is what the Jacobian is built from -- an error
 			/// there does not move the converged answer, it only wrecks, or
@@ -841,7 +841,7 @@ namespace meq
 				 *     dG/dlambda = -[ dpsi_h/dlambda |_x*
 				 *                     + grad( psi_h )( x* ) . dx* / dlambda ]
 				 *
-				 * and `grad_bar( psi ) = r q`, so `grad( psi_h )( x* ) = 0` at a
+				 * and `grad_bar( psi ) = R q`, so `grad( psi_h )( x* ) = 0` at a
 				 * zero of `q_h` **identically**. The position term vanishes, no
 				 * sensitivity of the root find is needed, and the row is the
 				 * potential shape functions of `x*`'s element evaluated at `x*` --
@@ -1052,7 +1052,7 @@ namespace meq
 			enum class LimiterConstraint
 			{
 				/**
-				 * `psi_bnd = psi_h( r, z )` at the point ASKED FOR, evaluated
+				 * `psi_bnd = psi_h( R, z )` at the point ASKED FOR, evaluated
 				 * inside the element containing it. The DEFAULT.
 				 *
 				 * The row is that element's potential shape functions at the
@@ -1413,7 +1413,7 @@ namespace meq
 			 *
 			 * WHY THIS EXISTS. Every source of
 			 * refs/HDG-GradShafranov-Adaptive.pdf sections 4.2 to 4.5 satisfies
-			 * F( r, 0 ) = 0, so with homogeneous Dirichlet data psi == 0 SOLVES
+			 * F( R, 0 ) = 0, so with homogeneous Dirichlet data psi == 0 SOLVES
 			 * the discrete problem. Newton starts from the Dirichlet data, lands
 			 * on that branch, and stops in zero iterations with an identically
 			 * zero residual -- which looks exactly like success. GS-1's
@@ -1423,7 +1423,7 @@ namespace meq
 			 * WHERE THE GUESS ACTUALLY GOES, which is not where it looks.
 			 * Newton's unknown is the TRACE: solve() runs it on the condensed
 			 * system and the volume unknowns are recovered afterwards. So a guess
-			 * written as psi( r, z ) has to reach M_h, and it does through an
+			 * written as psi( R, z ) has to reach M_h, and it does through an
 			 * L2( e ) projection onto each face -- see projectOntoTrace() in the
 			 * .cpp, and note that GridFunction::ProjectCoefficient does NOT do
 			 * this: it loops over volume elements and never touches a face dof.
@@ -1484,19 +1484,19 @@ namespace meq
 			/// ONE STRUCTURALLY CANNOT. Under NonlinearOrdering::NPC `q` is an
 			/// unknown, so a state carrying the right `psi` and `q = 0` is
 			/// inconsistent in exactly the row that couples them: the flux row
-			/// reads `( r q, v ) + ( psi, div v ) - < psihat, v.n >`, which at
+			/// reads `( R q, v ) + ( psi, div v ) - < psihat, v.n >`, which at
 			/// `q = 0` is the whole of `( grad psi, v )` and dominates the
 			/// initial residual. A GridFunction can be differentiated and a bare
 			/// Coefficient cannot, which is why the seed lives here.
 			///
-			/// It is a WEIGHTED projection, `( r q_h, v ) = ( grad psi_g, v )`
-			/// element by element, and not `q = ( 1/r ) grad psi` interpolated at
+			/// It is a WEIGHTED projection, `( R q_h, v ) = ( grad psi_g, v )`
+			/// element by element, and not `q = ( 1/R ) grad psi` interpolated at
 			/// the nodes. Two reasons, and the second is the load-bearing one:
 			/// the weighted form IS the flux row of the residual, so it makes the
-			/// state consistent rather than merely close; and `1/r` is singular
+			/// state consistent rather than merely close; and `1/R` is singular
 			/// on the axis, which is where FB-A's domain reaches and where a
 			/// nodal interpolation would divide a numerical zero by zero. The
-			/// weight `r` removes the singularity instead of guarding it.
+			/// weight `R` removes the singularity instead of guarding it.
 			void setInitialGuess( mfem::GridFunction const &psiGuess );
 
 			/// Forget the guess; the next solve() starts from the Dirichlet data
@@ -1758,7 +1758,7 @@ namespace meq
 			 * `C_Ax = s - psi_h( x* )` with `x*` a root of `q_h`, so its
 			 * derivative has two terms and the row assembles one. Dropping the
 			 * other is exact only if `grad psi_h( x* ) = 0`, which holds for the
-			 * CONTINUOUS fields and not for the discrete ones: `r q_h -
+			 * CONTINUOUS fields and not for the discrete ones: `R q_h -
 			 * grad_bar psi_h` is the local lifting of the trace jump, so it is
 			 * `O( h^k )`. MEASUREMENTS.md M-120 measures the dropped term at
 			 * **0.03 to 0.16 per cent** of the row it sits beside.
@@ -2390,7 +2390,7 @@ namespace meq
 			/// section 4.3 makes and calls "an argument and not a measurement".
 			/// `psihat` enters the flux row as `<psihat, v.n>`, the potential row as
 			/// `<tau psihat, w>` and the trace row as `<tau psihat, mu>` -- linearly
-			/// in all three -- while every non-linearity is `F( r, z, psi )`, which
+			/// in all three -- while every non-linearity is `F( R, z, psi )`, which
 			/// depends on `psi` and not on `psihat`. So `dF/da = ( dF/dpsihat ) P`
 			/// cannot move, and `P` is built once per mesh rather than once per
 			/// Newton step. This method takes no iterate for exactly that reason:
@@ -2503,8 +2503,8 @@ namespace meq
 			 * and that is exactly what makes the split work:
 			 *
 			 *     Δ* psi_p = Δ* psi − Δ* psi_c
-			 *              = −mu0 r ( J_plasma + J_coil ) − ( −mu0 r J_coil )
-			 *              = −mu0 r J_plasma
+			 *              = −mu0 R ( J_plasma + J_coil ) − ( −mu0 R J_coil )
+			 *              = −mu0 R J_plasma
 			 *
 			 * **the conductor's delta cancels exactly**, and the remainder sees
 			 * a bounded right-hand side supported on the plasma alone. So the
@@ -2540,7 +2540,7 @@ namespace meq
 			/// `psi_c` at a point, and **exactly zero** when no conductor field
 			/// is set — so `psi_c + psi_p` is correct on every path and a caller
 			/// need not branch on whether the split is in use.
-			double conductorPsi( double r, double z ) const;
+			double conductorPsi( double radius, double z ) const;
 
 		private:
 			/// `psi_c` at every potential dof, built once per mesh —
@@ -2583,7 +2583,7 @@ namespace meq
 			/// there are none. Public because the transmission machinery and its
 			/// tests both need it, and because the AXIS RULE it carries is worth
 			/// being able to check directly -- see the implementation.
-			double conductorNormalFlux( double r, double z,
+			double conductorNormalFlux( double radius, double z,
 			                            double nuR, double nuZ ) const;
 
 			/// The same for setConductorField()'s SUBTRACTED conductors, with
@@ -2596,7 +2596,7 @@ namespace meq
 			/// part of what the INTERIOR carries and the solved flux is missing
 			/// it, so its moment is added. Same integral, different side of the
 			/// equation.
-			double conductorFieldNormalFlux( double r, double z,
+			double conductorFieldNormalFlux( double radius, double z,
 			                                 double nuR, double nuZ ) const;
 
 			/// Each transmission row's two conductor terms,
@@ -2634,14 +2634,14 @@ namespace meq
 			/// full SOLUTION length, not trace length, and is non-zero only on the
 			/// flux dofs of the elements owning a `Gamma_h` face.
 			///
-			/// **THE INTEGRAL CARRIES NO 1/r AND THAT IS NOT AN OMISSION.** The
-			/// exterior block is diagonal in the weight `dGamma/r`, which is what
+			/// **THE INTEGRAL CARRIES NO 1/R AND THAT IS NOT AN OMISSION.** The
+			/// exterior block is diagonal in the weight `dGamma/R`, which is what
 			/// makes section 3.2 work at all, so the interior term has to be
 			/// tested in that same weight or the two do not meet. It is: the
-			/// transmission condition equates `(1/r) dpsi/dnu` across `Gamma`, and
-			/// MEQ's `q` IS `(1/r) grad_bar( psi )` -- so testing `q.nu` against
-			/// `C_m` in the PLAIN measure `dGamma` already carries the `1/r` the
-			/// exterior side carries in its weight. Writing `dGamma/r` here would
+			/// transmission condition equates `(1/R) dpsi/dnu` across `Gamma`, and
+			/// MEQ's `q` IS `(1/R) grad_bar( psi )` -- so testing `q.nu` against
+			/// `C_m` in the PLAIN measure `dGamma` already carries the `1/R` the
+			/// exterior side carries in its weight. Writing `dGamma/R` here would
 			/// divide by the radius twice. The flux is the asset again, for the
 			/// fourth time in this tree.
 			///
@@ -2694,7 +2694,7 @@ namespace meq
 			/// of the solution, exactly as `psi_ax` is. So it gets a border row
 			/// of its own and the bordered Newton becomes 2x2.
 			///
-			/// `( r, z )` is the limiter contact, and the constraint is `psi_bnd
+			/// `( R, z )` is the limiter contact, and the constraint is `psi_bnd
 			/// = psi_h` THERE -- inside the element containing the point, with
 			/// the row that element's potential shape functions. See
 			/// LimiterConstraint for the dof-snapping alternative this replaced
@@ -2709,7 +2709,7 @@ namespace meq
 			///
 			/// Call with no point set — the default — and `psi_bnd` stays zero
 			/// and the solve is the 1x1 it always was, arithmetically unchanged.
-			void setBoundaryFluxPoint( double r, double z );
+			void setBoundaryFluxPoint( double radius, double z );
 
 			/**
 			 * THE LIMITER AS A CURVE, RESTRICTED TO THE POLYGON THE MESH IS
@@ -2770,7 +2770,7 @@ namespace meq
 			 * XP-3: `psi_bnd` AT AN X-POINT THAT IS ITSELF TWO UNKNOWNS OF THE
 			 * SAME NEWTON. FREE-BOUNDARY-PLAN.md section 10.4 and 10.6.
 			 *
-			 * @param r,z  where the X-point is BELIEVED to be. It is an initial
+			 * @param R,z  where the X-point is BELIEVED to be. It is an initial
 			 *             value for an unknown, not a prescription, and a
 			 *             re-solve continues from wherever the last one left it
 			 *             -- as the profile scale does.
@@ -2782,30 +2782,30 @@ namespace meq
 			 * point: solve pinned, locate the saddle, re-pin, re-solve. This is
 			 * the same statement made INSIDE the Newton, so the three constraints
 			 *
-			 *     q_r( r_X, z_X )           = 0
-			 *     q_z( r_X, z_X )           = 0
-			 *     psi_bnd - psi_h( r_X, z_X ) = 0
+			 *     q_r( R_X, z_X )           = 0
+			 *     q_z( R_X, z_X )           = 0
+			 *     psi_bnd - psi_h( R_X, z_X ) = 0
 			 *
 			 * close together on one factorisation per step.
 			 *
 			 * **THE TWO NEW UNKNOWNS COST NO BACKSOLVE, WHICH IS NOT OBVIOUS AND
 			 * IS THE WHOLE ECONOMY OF THE STAGE.** The bordered elimination pays
 			 * one backsolve per border COLUMN, `c_j = dR/dp_j`, and the field
-			 * residual does not contain `( r_X, z_X )` at all: they reach it only
+			 * residual does not contain `( R_X, z_X )` at all: they reach it only
 			 * through `psi_bnd`, which has a column of its own already. So both
 			 * columns are exactly zero, `z_j = J^-1 0 = 0`, and the system grows
 			 * from `( N + 2 )` to `( N + 4 )` in the DENSE corner alone. An
 			 * X-point costs two rows of a 4x4 and nothing else.
 			 *
 			 * **AND THE CORNER BLOCK IS EXACT, WHERE THE PLAN EXPECTED IT NOT TO
-			 * BE.** Section 10.4 reads the block `d( q_r, q_z )/d( r_X, z_X )` as
+			 * BE.** Section 10.4 reads the block `d( q_r, q_z )/d( R_X, z_X )` as
 			 * `grad q` -- the potential's Hessian -- and notes there is no solved
 			 * variable for it, differentiating an L2 field of degree `k` leaving
 			 * `k - 1`. That is true of `grad q` as an approximation of the
 			 * CONTINUOUS Hessian and it is not what Newton needs: the derivative
 			 * wanted is that of the DISCRETE residual, and `q_h` is a polynomial
 			 * on its element, so `dq_h/dx` there is exact arithmetic. The same
-			 * goes for `d psi_h/d( r_X, z_X )` in the `psi_bnd` row. Nothing on
+			 * goes for `d psi_h/d( R_X, z_X )` in the `psi_bnd` row. Nothing on
 			 * this path is differenced.
 			 *
 			 * **WHAT IS NOT SMOOTH IS THE ELEMENT CHANGING.** `q_h` is
@@ -2831,15 +2831,15 @@ namespace meq
 			 * @throws std::logic_error if a limiter was already named by
 			 *         setBoundaryFluxPoint() or setLimiterSurface(). They are
 			 *         alternatives: all three pin the same unknown.
-			 * @throws std::invalid_argument if the point is not finite, or `r` is
+			 * @throws std::invalid_argument if the point is not finite, or `R` is
 			 *         not strictly positive -- the symmetry axis is not an
 			 *         X-point and the flux mass degenerates there.
 			 */
-			void setXPointBoundary( double r, double z );
+			void setXPointBoundary( double radius, double z );
 
 			/**
 			 * HOW HEAVILY XP-3's TWO ROWS COUNT IN THE LINE SEARCH'S MERIT, as
-			 * a multiplier on the `r h` that converts `q` into a flux. One is
+			 * a multiplier on the `R h` that converts `q` into a flux. One is
 			 * the natural scale and the default; this exists because the
 			 * natural scale is not always the useful one.
 			 *
@@ -2944,7 +2944,7 @@ namespace meq
 			 * EVERYTHING HERE ALREADY SPEAKS IN.** Ampere's law through this
 			 * solver reads `oint q.nu dGamma = -mu0 I_p`, outwardFlux() returns
 			 * the left side, and the constraint below is assembled as
-			 * `int F/r dOmega`, which IS `mu0 I_p`. Taking a current in amperes
+			 * `int F/R dOmega`, which IS `mu0 I_p`. Taking a current in amperes
 			 * would mean knowing `mu0` here, and a `mu0` that disagreed with the
 			 * source's own would scale two terms of one equation differently and
 			 * converge, at full order, to a machine nobody described -- the trap
@@ -2961,7 +2961,7 @@ namespace meq
 			/// The converged scale. One unless setPlasmaCurrent() was called.
 			double plasmaCurrentScale() const;
 
-			/// `int F_plasma/r` over the domain at the converged state, which is
+			/// `int F_plasma/R` over the domain at the converged state, which is
 			/// `mu0 I_p`. Zero unless setPlasmaCurrent() was called.
 			double plasmaCurrent() const;
 
@@ -2973,7 +2973,7 @@ namespace meq
 			 *
 			 * **THIS IS NOT THE PARTIAL DERIVATIVE, AND THE PARTIAL ONE IS
 			 * USELESS.** `F` is linear in `lambda`, so at a frozen field
-			 * `d( int F/r )/d lambda` is just `( int F/r )/lambda` -- never
+			 * `d( int F/R )/d lambda` is just `( int F/R )/lambda` -- never
 			 * small, never informative, and already assembled as the corner
 			 * entry. What decides whether the current row is well posed is the
 			 * TOTAL derivative, and that is the Schur complement the bordered
@@ -3075,7 +3075,7 @@ namespace meq
 			 * modes: `int_Gamma ( q_h.nu ) C_m dGamma + blockEntry( m ) a_m = 0`
 			 * for each `m`. So at convergence the mismatch
 			 *
-			 *     d( x ) = q_h.nu( x ) - ( 1/r ) sum_n a_n symbol( n ) C_n( mu )
+			 *     d( x ) = q_h.nu( x ) - ( 1/R ) sum_n a_n symbol( n ) C_n( mu )
 			 *
 			 * is orthogonal to `C_2 .. C_{N+1}` and is NOT zero: what survives is
 			 * the modes past the truncation and the discretisation error, which
@@ -3146,21 +3146,21 @@ namespace meq
 			/**
 			 * IS THE TOROIDAL CURRENT DENSITY BOUNDED ON THE SYMMETRY AXIS?
 			 *
-			 * `meq::SourceIntegrator` assembles the load `-( F/r, w )`, and
-			 * **`F/r` IS `mu_0 j_phi`**:
+			 * `meq::SourceIntegrator` assembles the load `-( F/R, w )`, and
+			 * **`F/R` IS `mu_0 j_phi`**:
 			 *
-			 *     j_phi  =  r p'( Psi )  +  g g'( Psi ) / ( mu_0 r )
+			 *     j_phi  =  R p'( Psi )  +  g g'( Psi ) / ( mu_0 R )
 			 *
 			 * so a finite current density on the axis REQUIRES `F( 0, z ) = 0`.
-			 * `F = mu_0 r^2 p' + g g'` leaves only `g g'` there: `p'` is
-			 * protected by its own `r^2` and `g g'` is not.
+			 * `F = mu_0 R^2 p' + g g'` leaves only `g g'` there: `p'` is
+			 * protected by its own `R^2` and `g g'` is not.
 			 *
 			 * **AND THE DISCRETE HALF IS WHY THIS NEEDS A CHECK RATHER THAN A
 			 * COMMENT.** The CONTINUOUS problem is well posed whatever `F` does:
-			 * the energy `int ( 1/r )|grad_bar psi|^2` forces its members to
-			 * vanish faster than `r` at the axis -- the physical `psi ~ r^2` --
-			 * and against such test functions `int ( F/r ) w` converges. The
-			 * DISCRETE space is `L2` polynomials, free to be nonzero at `r = 0`,
+			 * the energy `int ( 1/R )|grad_bar psi|^2` forces its members to
+			 * vanish faster than `R` at the axis -- the physical `psi ~ R^2` --
+			 * and against such test functions `int ( F/R ) w` converges. The
+			 * DISCRETE space is `L2` polynomials, free to be nonzero at `R = 0`,
 			 * and against those the load functional is **unbounded**. The
 			 * quadrature is the only thing making it finite, so the answer
 			 * depends on the RULE and not on the mesh -- measured, sweeping
@@ -3171,7 +3171,7 @@ namespace meq
 			 *
 			 * **WHICH `Psi` THE AXIS SITS AT IS THE WHOLE OF IT, AND IT IS FB-3
 			 * THAT OPENS THE TRAP.** `psi( 0, z ) = 0` exactly -- `psi` is the
-			 * poloidal flux through a circle of radius `r`, which vanishes with
+			 * poloidal flux through a circle of radius `R`, which vanishes with
 			 * the area -- so `Psi_axis = -psi_bnd/span`. On a FIXED boundary
 			 * `psi_bnd = 0`, the axis sits at `Psi = 0`, and every profile in
 			 * this tree vanishes there; that is why nothing met this before.
@@ -3182,21 +3182,21 @@ namespace meq
 			 *
 			 * **THE REPAIR IS `NormalisedSource::setPlasmaSupport()`**, which
 			 * sets `F = 0` wherever `Psi <= 0` -- the statement that the vacuum
-			 * carries no current. For a domain reaching `r = 0` with `psi_bnd`
+			 * carries no current. For a domain reaching `R = 0` with `psi_bnd`
 			 * free it is a PRECONDITION rather than an option, in the same sense
 			 * as `j >= 1` at the plasma edge.
 			 *
 			 * A mesh that does not reach the axis is unaffected and reports
-			 * `reachesAxis == false`: there is no `1/r` to be unbounded.
+			 * `reachesAxis == false`: there is no `1/R` to be unbounded.
 			 */
 			struct AxisSourceCheck
 			{
-				/// Whether any potential node sits at `r = 0`. FALSE is not a
+				/// Whether any potential node sits at `R = 0`. FALSE is not a
 				/// failure -- it is the ordinary case for a fitted rectangle,
 				/// and every other field is then meaningless.
 				bool reachesAxis = false;
 
-				/// The largest `| F |` over the nodes AT `r = 0`, evaluated at
+				/// The largest `| F |` over the nodes AT `R = 0`, evaluated at
 				/// `psi = 0` -- which `psi( 0, z )` is EXACTLY, for any
 				/// axisymmetric field with bounded `B`. See the implementation
 				/// for why the iterate's own `psi_h` is the wrong thing to ask:
@@ -3217,7 +3217,7 @@ namespace meq
 				/// connected COMPONENT containing the magnetic axis, and a lobe
 				/// of that level set which the fill did not reach carries no
 				/// current whatever Psi reads on it. So these two fields are
-				/// what separates "the plasma reaches r = 0" from "a level set
+				/// what separates "the plasma reaches R = 0" from "a level set
 				/// does", and only the first is the wrong topology.
 				int worstElement = -1;
 				bool axisInPlasmaComponent = false;
@@ -3235,7 +3235,7 @@ namespace meq
 				 *
 				 * **AND THE TWO GENUINELY DISAGREE ON A SHIPPED CASE.** MAST
 				 * under filament conductors converges with `psi_bnd` negative,
-				 * so the level set contains `r = 0` and `axisInsidePlasma` is
+				 * so the level set contains `R = 0` and `axisInsidePlasma` is
 				 * true -- while the reference equilibrium's own near-axis lobe
 				 * is a SEPARATE component, joined to the core only through a
 				 * saddle, and MEQ's fill correctly declines to reach it. The
@@ -3269,11 +3269,11 @@ namespace meq
 				 *
 				 * **FOR A TOKAMAK THAT IS NOT A LARGE ERROR, IT IS THE WRONG
 				 * TOPOLOGY.** A tokamak plasma is a torus about `R_0 > 0` and its
-				 * symmetry axis is in the vacuum, so a support containing `r = 0`
+				 * symmetry axis is in the vacuum, so a support containing `R = 0`
 				 * describes current threading the machine's own centre line, and
 				 * no refinement makes it into the equilibrium that was asked for.
 				 * It is a separate and worse statement than `bounded` above: that
-				 * one says the load carries a `1/r` the quadrature is papering
+				 * one says the load carries a `1/R` the quadrature is papering
 				 * over, this one says the answer is not an equilibrium of the
 				 * intended kind at all.
 				 *
@@ -3282,16 +3282,16 @@ namespace meq
 				 * dipole** has plasma right up to the axis, and so does a
 				 * **magnetic mirror** -- and NEITHER HAS A TOROIDAL FIELD, so
 				 * `g` vanishes identically in both. That is not a coincidence:
-				 * it is the same fact twice. `B_phi = g/r` has to be finite on
-				 * the axis, so a device whose plasma reaches `r = 0` cannot carry
+				 * it is the same fact twice. `B_phi = g/R` has to be finite on
+				 * the axis, so a device whose plasma reaches `R = 0` cannot carry
 				 * a toroidal field there, and `g == 0` is what makes the
 				 * configuration admissible in the first place.
 				 *
 				 * **SO THE TEST IS `g g' == 0` AND NOT "IS THIS A TOKAMAK".**
 				 * `F( 0, z, . )` is `g g'` and nothing else -- `p'` is killed by
-				 * its own `r^2` -- so a source with `g g' == 0` identically puts
+				 * its own `R^2` -- so a source with `g g' == 0` identically puts
 				 * no current on the axis whatever `Psi` reads there, and
-				 * `j_phi = r p'` vanishes with `r` regardless. A dipole or a
+				 * `j_phi = R p'` vanishes with `R` regardless. A dipole or a
 				 * mirror passes; a tokamak whose `psi_bnd` has gone negative does
 				 * not. `../geq`, the rotating-mirror wrapper this tree already
 				 * compares against, sets `g g' == 0` unconditionally for exactly
@@ -3325,11 +3325,11 @@ namespace meq
 			/// `oint_Gamma q.nu dGamma`.
 			///
 			/// **THIS IS AMPERE'S LAW AND IT IS THE SHARPEST WHOLE-ASSEMBLY
-			/// CHECK MEQ HAS.** Since `q = ( 1/r ) grad_bar( psi )`, the
-			/// integrand is `( 1/r ) dpsi/dn`, and integrating the equation over
+			/// CHECK MEQ HAS.** Since `q = ( 1/R ) grad_bar( psi )`, the
+			/// integrand is `( 1/R ) dpsi/dn`, and integrating the equation over
 			/// the enclosed region gives
 			///
-			///     oint_Gamma ( 1/r ) dpsi/dn dl = -mu0 * I_enclosed
+			///     oint_Gamma ( 1/R ) dpsi/dn dl = -mu0 * I_enclosed
 			///
 			/// exactly, with no discretisation anywhere in the statement. So it
 			/// ties the assembled operator, the source, the boundary condition
@@ -3349,7 +3349,7 @@ namespace meq
 			///
 			/// **UNDER `COIL-SUBTRACTION-PLAN.md`'s SPLIT THIS IS THE REMAINDER'S
 			/// OUTWARD FLUX.** The identity it is usually checked against,
-			/// `oint ( 1/r ) dpsi/dn dl = −mu0 I_enclosed`, then holds for the
+			/// `oint ( 1/R ) dpsi/dn dl = −mu0 I_enclosed`, then holds for the
 			/// PLASMA current alone: the conductors are not in the mesh, so
 			/// their current is not enclosed by anything the solve integrates
 			/// over. meq::ConductorField::totalCurrent() is the other half.
@@ -3489,7 +3489,7 @@ namespace meq
 			 */
 			void totalPotential( mfem::GridFunction &into ) const;
 
-			/// q_h = ( 1/r ) grad_bar( psi ) in V_h, in MEQ's sign convention.
+			/// q_h = ( 1/R ) grad_bar( psi ) in V_h, in MEQ's sign convention.
 			/// Valid after solve(); see the sign note at the top of this file.
 			///
 			/// **UNDER `COIL-SUBTRACTION-PLAN.md`'s SPLIT THIS IS A QUANTITY OF
@@ -3660,7 +3660,7 @@ namespace meq
 			 * || dR/dpsi_ax || at the first iterate -- and it is applied to
 			 * psi_bnd, to the plasma current (which is mu_0 I_p and not a flux
 			 * perturbation at all), to every exterior transmission residual, and,
-			 * after the further factor xScale = r h, to XP-3's two rows. If the
+			 * after the further factor xScale = R h, to XP-3's two rows. If the
 			 * merit is dominated by a term whose scale was borrowed from another
 			 * unknown, the Armijo test rejects steps that improve the field and
 			 * the iteration crawls at a damping of 1/8 or 1/512 -- which is a
@@ -3853,7 +3853,7 @@ namespace meq
 				 * axis, boundary, current and exterior rows and `gamma xScale`
 				 * on the X-point's two -- so the ratio
 				 * `|| S_axis || / || S_xpoint ||` is what `xScale` OUGHT to be,
-				 * and dividing it by the natural `r h` gives the weight this
+				 * and dividing it by the natural `R h` gives the weight this
 				 * would predict. MEASUREMENTS.md M-115 is that prediction
 				 * against the weight actually measured.
 				 *
@@ -4274,12 +4274,12 @@ namespace meq
 
 			ConstantStabilization stabilization;
 
-			/// r, the weight of the flux mass form. The diffusion coefficient of
-			/// the operator is 1/r, and DarcyForm's flux mass form wants its
+			/// R, the weight of the flux mass form. The diffusion coefficient of
+			/// the operator is 1/R, and DarcyForm's flux mass form wants its
 			/// inverse -- verified by experiment, see the .cpp.
-			mfem::FunctionCoefficient radius;
+			mfem::FunctionCoefficient radiusCoefficient;
 
-			/// -1/r, the factor the linear source is multiplied by to form the
+			/// -1/R, the factor the linear source is multiplied by to form the
 			/// potential right hand side. Both halves of that are load bearing;
 			/// see the .cpp.
 			mfem::FunctionCoefficient negativeInverseRadius;
@@ -4326,7 +4326,7 @@ namespace meq
 			/// overloads, which is what keeps the cache honest.
 			void dropGuessSeed();
 
-			/// Solve `( r q_h, v ) = ( grad psi_g, v )` on each element and put
+			/// Solve `( R q_h, v ) = ( grad psi_g, v )` on each element and put
 			/// `-q_h` -- DarcyForm's convention -- into the flux block.
 			void seedFluxFromGuess( mfem::GridFunction const &psiGuess );
 
@@ -4345,7 +4345,7 @@ namespace meq
 			/// definition.
 			/// The potential dof nearest a point. LimiterConstraint::NearestDof
 			/// only -- the CONTROL; see that enumerator for what snapping costs.
-			int nearestPotentialDof( double r, double z ) const;
+			int nearestPotentialDof( double radius, double z ) const;
 
 			/// The element containing a point, and that element's potential
 			/// shape functions AT the point -- what
@@ -4358,7 +4358,7 @@ namespace meq
 			///
 			/// @throws std::runtime_error if no element contains the point,
 			///         which for a limiter contact means it is outside `Omega`.
-			void locatePotentialPoint( double r, double z, int &element,
+			void locatePotentialPoint( double radius, double z, int &element,
 			                           mfem::Vector &shape,
 			                           mfem::Array<int> &dofs ) const;
 
@@ -4486,7 +4486,7 @@ namespace meq
 			/// contact moves with the solution.
 			double locateLimiterContact( mfem::Vector const &state, int &element,
 			                             mfem::Vector &shape,
-			                             mfem::Array<int> &dofs, double &r,
+			                             mfem::Array<int> &dofs, double &radius,
 			                             double &z ) const;
 
 			/// setXPointBoundary(): XP-3's two extra unknowns. The values are the
@@ -4498,7 +4498,7 @@ namespace meq
 			double xPointZValue = 0.0;
 
 			/**
-			 * The element containing ( @a r, @a z ) and the reference
+			 * The element containing ( @a R, @a z ) and the reference
 			 * coordinates there, trying @a hint first and scanning otherwise.
 			 *
 			 * **IT ADMITS A SMALL OVERSHOOT AND locatePotentialPoint() DOES
@@ -4523,7 +4523,7 @@ namespace meq
 			 *         which is the X-point having left the mesh. The caller is a
 			 *         line search and treats it as a rejected step.
 			 */
-			bool locateFieldPoint( double r, double z, int hint, int &element,
+			bool locateFieldPoint( double radius, double z, int hint, int &element,
 			                       mfem::IntegrationPoint &reference ) const;
 
 			/// setAxisConstraint(), and where the last solve put the axis.
@@ -4546,7 +4546,7 @@ namespace meq
 			/// -1 where it is odd. Built once per mesh by
 			/// buildMirrorMaps(), empty until then.
 			///
-			/// psi and psihat are EVEN. q is grad_bar( psi )/r, so q_r is even
+			/// psi and psihat are EVEN. q is grad_bar( psi )/R, so q_r is even
 			/// and q_z is ODD -- getting that sign wrong would project onto the
 			/// ANTIsymmetric subspace, which is a different and empty problem.
 			std::vector<int> fluxMirror, potentialMirror, traceMirror;
@@ -4638,7 +4638,7 @@ namespace meq
 			std::unique_ptr<mfem::Solver> picardSolver;
 #endif
 
-			/// F( r, z, picardIterate ), as the right hand side coefficient the
+			/// F( R, z, picardIterate ), as the right hand side coefficient the
 			/// linear path takes. Rebuilt with the spaces.
 			std::unique_ptr<mfem::Coefficient> frozenSource;
 
@@ -4685,7 +4685,7 @@ namespace meq
 			 * `s` -- either normalisation -- reaches the residual ONLY through
 			 * the source, so `dR/ds` is the assembly of `dF/ds` by exactly the
 			 * loop meq::SourceIntegrator runs on `F`: same quadrature rule, same
-			 * `-w F/r` sign, into the potential block and nowhere else. The flux
+			 * `-w F/R` sign, into the potential block and nowhere else. The flux
 			 * and trace rows carry no `F` and are left at zero.
 			 *
 			 * @param axis  true for `dR/d(psi_ax)`, false for `dR/d(psi_bnd)`.
@@ -4701,7 +4701,7 @@ namespace meq
 			                                  bool axis,
 			                                  mfem::Vector &out ) const;
 
-			/// `int F_plasma/r` over the domain at @a state, i.e. `mu0 I_p`.
+			/// `int F_plasma/R` over the domain at @a state, i.e. `mu0 I_p`.
 			double assemblePlasmaCurrent( mfem::Vector const &state ) const;
 
 			/// The current constraint's COLUMN, `dR/d(scale)`. `F` is linear in
@@ -4710,7 +4710,7 @@ namespace meq
 			void assembleCurrentColumn( mfem::Vector const &state,
 			                            mfem::Vector &out ) const;
 
-			/// Its ROW, `d( int F/r )/dx`: the plasma's own `dF/dpsi` integrated
+			/// Its ROW, `d( int F/R )/dx`: the plasma's own `dF/dpsi` integrated
 			/// against the potential shape functions. A covector on the
 			/// potential block and zero everywhere else.
 			///
@@ -4726,7 +4726,7 @@ namespace meq
 
 			/// AND ITS OFF-DIAGONAL CORNER ENTRIES, which are not zero and whose
 			/// absence costs the quadratic rate rather than the answer.
-			/// `int F/r` depends on `psi_ax` and `psi_bnd` EXPLICITLY, through
+			/// `int F/R` depends on `psi_ax` and `psi_bnd` EXPLICITLY, through
 			/// the normalisation the profiles are evaluated at, so the current
 			/// row of the corner block has entries against both of them.
 			void assembleCurrentNormalisationCorner( mfem::Vector const &state,

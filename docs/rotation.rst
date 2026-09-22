@@ -40,35 +40,35 @@ potential, for an arbitrary number of species in a local gauge.
 The equation, in MEQ's convention
 ---------------------------------
 
-MEQ solves :math:`-\gradbar\cdot\left(\gradbar\psi/r\right) = F/r`, so what
+MEQ solves :math:`-\gradbar\cdot\left(\gradbar\psi/R\right) = F/R`, so what
 rotation changes is :math:`F`. Written out, with :math:`g \equiv rB_\phi` and
 :math:`e` the elementary charge,
 
 .. math::
 
-   F(r, z, \psi) = \mu_0 r^2 \sum_s n_s
+   F(R, z, \psi) = \mu_0 R^2 \sum_s n_s
        \Big\{ T_s (\ln N_s)'
-         + \big[ Z_s e \phi_0 - \tfrac{1}{2} m_s \omega^2 r^2 + T_s \big]
+         + \big[ Z_s e \phi_0 - \tfrac{1}{2} m_s \omega^2 R^2 + T_s \big]
            (\ln T_s)' \Big\}
-     + \mu_0 r^4 \omega \omega' \sum_s m_s n_s
+     + \mu_0 R^4 \omega \omega' \sum_s m_s n_s
      + g g',
 
 closed pointwise by the poloidal density variation and by quasineutrality,
 
 .. math::
 
-   n_s(r, \psi) &= N_s(\psi)\,
-       \exp\!\left[\frac{m_s \omega^2(\psi) r^2}{2 T_s(\psi)}
+   n_s(R, \psi) &= N_s(\psi)\,
+       \exp\!\left[\frac{m_s \omega^2(\psi) R^2}{2 T_s(\psi)}
                    - \frac{Z_s e \phi_0}{T_s(\psi)}\right], \\
-   0 &= \sum_s Z_s n_s(r, \psi) \qquad \text{which determines } \phi_0(r,\psi).
+   0 &= \sum_s Z_s n_s(R, \psi) \qquad \text{which determines } \phi_0(R,\psi).
 
 Here :math:`N_s`, :math:`T_s`, :math:`\omega` and :math:`g` are flux functions;
 :math:`n_s` and :math:`\phi_0` are **not**, and that is the whole of what makes
 this a different equation.
 
 That is the form as the source paper writes it, in *its* gauge. MEQ fixes the
-gauge differently, which replaces :math:`r^2` in the exponent by
-:math:`r^2 - r_{\text{ref}}^2` and gives each :math:`N_s` a physical meaning —
+gauge differently, which replaces :math:`R^2` in the exponent by
+:math:`R^2 - r_{\text{ref}}^2` and gives each :math:`N_s` a physical meaning —
 see :ref:`the next section <rotation-changes>` for the form MEQ evaluates and
 `The gauge`_ for why.
 
@@ -77,18 +77,18 @@ see :ref:`the next section <rotation-changes>` for the form MEQ evaluates and
 .. note::
 
    **The brace collapses, and that is the form MEQ implements.** Differentiating
-   :math:`p = \sum_s n_s T_s` at fixed :math:`r`, the
+   :math:`p = \sum_s n_s T_s` at fixed :math:`R`, the
    :math:`\partial\phi_0/\partial\psi` terms collect into
    :math:`-e\,(\partial\phi_0/\partial\psi)\sum_s Z_s n_s`, which vanishes
    *identically* by quasineutrality. What is left is
 
    .. math::
 
-      F(r, z, \psi) = \mu_0 r^2
+      F(R, z, \psi) = \mu_0 R^2
           \left.\frac{\partial p}{\partial\psi}\right|_r + g g',
-      \qquad p(r, \psi) = \sum_s n_s(r, \psi)\, T_s(\psi),
+      \qquad p(R, \psi) = \sum_s n_s(R, \psi)\, T_s(\psi),
 
-   which is :cpp:class:`meq::MHDSource`'s shape with an :math:`r`-dependent
+   which is :cpp:class:`meq::MHDSource`'s shape with an :math:`R`-dependent
    :math:`p`. MEQ codes :math:`p` and differentiates it, rather than coding the
    brace term by term: there are fewer places to drop a factor, and the brace
    then becomes a *check* on the derivative rather than the thing being checked.
@@ -96,7 +96,7 @@ see :ref:`the next section <rotation-changes>` for the form MEQ evaluates and
 Two independent confirmations, both worth repeating before anything new rests on
 this form. It is :cite:t:`Abel2013`'s own force balance projected on
 :math:`\nabla\psi`; and at :math:`\omega \to 0` it gives
-:math:`F \to \mu_0 r^2 \sum_s p_s' + gg'`, which is that paper's low-Mach
+:math:`F \to \mu_0 R^2 \sum_s p_s' + gg'`, which is that paper's low-Mach
 result and is the ordinary Grad–Shafranov source MEQ already solves.
 
 Conventions, and where they differ from the source paper
@@ -118,13 +118,13 @@ the paper, and none of them is visible in a convergence rate.
    * - **The sign**
      - Their current expression makes :math:`\Delta^\star\psi` *negative* in
        the brace, so :math:`F = -\Delta^\star\psi` is **positive** — matching
-       :cpp:class:`meq::MHDSource`'s :math:`F = \mu_0 r^2 p' + gg'`.
+       :cpp:class:`meq::MHDSource`'s :math:`F = \mu_0 R^2 p' + gg'`.
    * - :math:`2\pi` **in** :math:`\psi`
      - :math:`\psi` is poloidal flux **per radian**, in Wb/rad. That is what
        MEQ's :math:`gg'` already assumes and what EQDSK tabulates as ``FF'``.
        There is no :math:`2\pi` to insert.
    * - :math:`\Delta^\star`
-     - :math:`\partial_{rr} - r^{-1}\partial_r + \partial_{zz}`, on which the
+     - :math:`\partial_{rr} - R^{-1}\partial_r + \partial_{zz}`, on which the
        source paper, :cite:t:`LiZhu2021` and MEQ all agree.
 
 What changes, and what does not
@@ -135,8 +135,8 @@ poloidal variation,
 
 .. math::
 
-   n_s(r, \psi) = n_{s0}(\psi)\,
-       \exp\!\left[\frac{m_s \omega^2 (r^2 - r_{\text{ref}}^2)}{2 T_s}
+   n_s(R, \psi) = n_{s0}(\psi)\,
+       \exp\!\left[\frac{m_s \omega^2 (R^2 - r_{\text{ref}}^2)}{2 T_s}
                    - \frac{Z_s e \phi_0}{T_s}\right],
 
 with :math:`\phi_0` determined by quasineutrality :math:`\sum_s Z_s n_s = 0`.
@@ -146,7 +146,7 @@ untouched.
 
 .. note::
 
-   **The equation collapses to** :math:`F = \mu_0 r^2\,
+   **The equation collapses to** :math:`F = \mu_0 R^2\,
    \partial p/\partial\psi|_r + gg'` **with** :math:`p = \sum_s n_s T_s`,
    because the :math:`\partial\phi_0/\partial\psi` terms cancel identically
    against quasineutrality. So the residual needs :math:`\phi_0` and never its
@@ -168,13 +168,13 @@ which MEQ deliberately does not have; MEQ instead pins
 
    \phi_0(r_{\text{ref}}, \psi) = 0
 
-on the curve :math:`r = \texttt{ReferenceRadius}`, a constant radius rather than
+on the curve :math:`R = \texttt{ReferenceRadius}`, a constant radius rather than
 the magnetic axis and not a flux-surface quantity at all.
 
 .. important::
 
    **The consequence is the useful part**: each ``Density`` is then the
-   *physical* density of that species on :math:`r = r_{\text{ref}}` — a number a
+   *physical* density of that species on :math:`R = r_{\text{ref}}` — a number a
    user can state and another code can be checked against.
 
    **The consequence is also the trap**: two sets of densities differing by the
@@ -241,7 +241,7 @@ logarithms, and both species end up sharing one exponent:
 
 .. math::
 
-   e\phi_0 = \frac{\omega^2 (r^2 - r_{\text{ref}}^2)}{2}\,
+   e\phi_0 = \frac{\omega^2 (R^2 - r_{\text{ref}}^2)}{2}\,
              \frac{m_1 T_2 - m_2 T_1}{Z_1 T_2 - Z_2 T_1},
    \qquad
    C = \omega^2\,\frac{Z_1 m_2 - Z_2 m_1}{Z_1 T_2 - Z_2 T_1}.
@@ -373,7 +373,7 @@ that is the combination every exponent above contains.
    Any field derived from the geometry must be evaluated at **the node's own
    radius**. In the band between :math:`\Gamma_h` and :math:`\Gamma` (see
    :ref:`output-band`) it is tempting to reuse the value at the foot on
-   :math:`\Gamma_h`, and for a density whose exponent carries :math:`r^2` that
+   :math:`\Gamma_h`, and for a density whose exponent carries :math:`R^2` that
    is wrong by orders of magnitude rather than by the width of the band. This
    was measured, deliberately, as a controlled experiment — the same closed form
    evaluated both ways over the same band nodes — because the trap had just been

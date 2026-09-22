@@ -650,12 +650,12 @@ into a sequence of floors, each one only visible once the previous was removed.
 
 | what was changed | MXH fit | MEQ rel `L2` | what was limiting |
 |---|---|---|---|
-| reference 129², 10 harmonics, `k=2 r=2` | 2.060e-04 m | 1.519e-04 | the contour |
+| reference 129², 10 harmonics, `k=2 R=2` | 2.060e-04 m | 1.519e-04 | the contour |
 | reference 257² | 1.063e-04 m | 6.751e-05 | the contour |
 | reference 513² | **1.032e-04 m** | 5.726e-05 | **the FITTER — 3 % for 4x the grid** |
 | 16 harmonics | **2.206e-05 m** | 5.825e-05 | **MEQ — `L2` did not move at all** |
 | MEQ `k=3` | 2.206e-05 m | **8.802e-06** | ? |
-| MEQ `k=3 r=3` | | 8.744e-06 | not MEQ |
+| MEQ `k=3 R=3` | | 8.744e-06 | not MEQ |
 | output grid 257², 513² | | 8.797e-06, 8.800e-06 | **not the sampling either** |
 
 **Each row is the previous row's diagnosis being wrong.** The fit stopped
@@ -665,7 +665,7 @@ happen to be enough to reach the contour's own limit. Raising the harmonics then
 bought a 4.7x better boundary and **`L2` did not move**, which is what identified
 MEQ's own discretisation as the binding constraint — the first time in this
 benchmark's history that has been true. Refining MEQ bought 6.7x. And the last
-two rows are the controls: `k=3 r=3` moves the answer by 0.7 %, and a sixteenfold
+two rows are the controls: `k=3 R=3` moves the answer by 0.7 %, and a sixteenfold
 denser comparison grid moves it by 0.03 %, so neither MEQ nor the sampling is
 what is left.
 
@@ -1075,7 +1075,7 @@ measures rather than relaxing it to whatever passes.
 
 **THE GUESS IS PART OF THE PROBLEM STATEMENT, NOT AN OPTIMISATION.** A cold bump
 start of `examples/free-boundary-halfdisc.toml`'s kind wanders for 200 iterations
-around `‖r‖ = 1.3` and never converges on this problem. `mkexactguess.py` builds
+around `‖R‖ = 1.3` and never converges on this problem. `mkexactguess.py` builds
 it from the SOURCE rather than by interpolating the answer — `Jtor` on the 2199
 core cells plus the four coil filaments, summed by Green's functions — because
 freegs4e's `ψ` exists only on its own 1.6 × 1.6 box while MEQ's domain is a

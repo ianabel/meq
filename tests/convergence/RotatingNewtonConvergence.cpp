@@ -33,17 +33,17 @@
  *
  * THE CONSTRUCTION, which is the whole point of this file.
  *
- * A rotating source's F depends on ( r, psi ) only, so it cannot in general
+ * A rotating source's F depends on ( R, psi ) only, so it cannot in general
  * equal -Delta* psi for a psi somebody chose. The manufactured trick is to add
  * a remainder that carries NO psi dependence at all:
  *
- *     F_total( r, z, psi ) = rot.f( r, z, psi ) + h( r, z )
- *     h( r, z )            = -Delta*( psiExact )( r, z )
- *                            - rot.f( r, z, psiExact( r, z ) )
+ *     F_total( R, z, psi ) = rot.f( R, z, psi ) + h( R, z )
+ *     h( R, z )            = -Delta*( psiExact )( R, z )
+ *                            - rot.f( R, z, psiExact( R, z ) )
  *
  * At psi = psiExact the two rotating terms cancel and F_total = -Delta* psiExact,
  * so psiExact IS an exact solution of -Delta* psi = F_total. And because h is a
- * function of ( r, z ) alone,
+ * function of ( R, z ) alone,
  *
  *     dF_total/dpsi = rot.dFdPsi
  *
@@ -58,18 +58,18 @@
  * psiExact is ManufacturedNonlinear's shape, which keeps this comparable with
  * NewtonConvergence.cpp's Example 5 study on the same box:
  *
- *     psi( r, z ) = sin( kr ( r + r0 ) ) cos( kz z ),
- *     r0 = -0.5,  kr = 1.15 pi,  kz = 1.15
+ *     psi( R, z ) = sin( kr ( R + R_0 ) ) cos( kz z ),
+ *     R_0 = -0.5,  kr = 1.15 pi,  kz = 1.15
  *
  * whose Delta* is closed form. Differentiating,
  *
  *     d_rr psi = -kr^2 psi,   d_zz psi = -kz^2 psi,
- *     ( 1/r ) d_r psi = ( kr/r ) cos( kr ( r + r0 ) ) cos( kz z ),
+ *     ( 1/R ) d_r psi = ( kr/R ) cos( kr ( R + R_0 ) ) cos( kz z ),
  *
- * and Delta* := d_rr - ( 1/r ) d_r + d_zz, so
+ * and Delta* := d_rr - ( 1/R ) d_r + d_zz, so
  *
  *     Delta* psi = -( kr^2 + kz^2 ) psi
- *                  - ( kr/r ) cos( kr ( r + r0 ) ) cos( kz z ).
+ *                  - ( kr/R ) cos( kr ( R + R_0 ) ) cos( kz z ).
  *
  * That is checked against a central difference in the FIRST test below rather
  * than trusted, because a mistyped Delta* would make every rate in this file
@@ -93,7 +93,7 @@
  *     does, which is a poor place to find out. The ranges are printed and the
  *     positivity asserted, so a later change to the profiles fails loudly.
  *
- *   * charge neutrality on r = rRef must hold at EVERY psi the solve reaches.
+ *   * charge neutrality on R = R_ref must hold at EVERY psi the solve reaches.
  *     meq::neutralisingDensity() makes that automatic and exact at all three
  *     derivative levels, which is why the electron density is built with it
  *     rather than hand-balanced -- the constructor only samples [ 0, 1 ].
@@ -105,7 +105,7 @@
  * The reaction ratio max| dF/dpsi |/lambda_1 -- the diagnostic CLAUDE.md uses
  * for how hard a source is on Newton, with lambda_1 = pi^2( 1/w^2 + 1/h^2 ) =
  * 22.3 on this box -- comes out at 0.36 over the solution's actual range and
- * 0.76 over the whole ( r, psi ) box. Real, and mild enough that what gets
+ * 0.76 over the whole ( R, psi ) box. Real, and mild enough that what gets
  * measured is Newton's ORDER rather than the edge of its basin: it takes three
  * steps on every mesh and every degree studied below.
  *
@@ -134,7 +134,7 @@ namespace
 	using meq::tests::standardBox;
 
 	// ManufacturedNonlinear::example5()'s parameters, so that this study sits on
-	// the same flux shape and the same box as NewtonConvergence.cpp's. r0 is an
+	// the same flux shape and the same box as NewtonConvergence.cpp's. R_0 is an
 	// offset that places the arch of the sine inside the domain and is NOT a
 	// major radius.
 	double const pi = 3.14159265358979323846;
@@ -143,8 +143,8 @@ namespace
 	double const psiKz = 1.15;
 
 	// The gauge curve. phi_0 vanishes here and each n_s0 is the physical density
-	// here; the box is r in [ 0.6, 1.4 ], so this is its middle and the exponent
-	// ( r^2 - rRef^2 )/2 runs over [ -0.32, +0.48 ].
+	// here; the box is R in [ 0.6, 1.4 ], so this is its middle and the exponent
+	// ( R^2 - R_ref^2 )/2 runs over [ -0.32, +0.48 ].
 	double const referenceRadius = 1.0;
 
 	/// A polynomial in psi, exact at all three derivative levels.
@@ -224,7 +224,7 @@ namespace
 	 *
 	 * g g' IS CONSTANT, AND THAT IS DELIBERATE. It contributes to F, so the term
 	 * is exercised, but ( g g' )' is then exactly zero -- which means EVERY LAST
-	 * BIT of dF_total/dpsi comes from mu0 r^2 d2p/dpsi2, the rotating pressure
+	 * BIT of dF_total/dpsi comes from mu0 R^2 d2p/dpsi2, the rotating pressure
 	 * chain rule. meq::MHDSource already covers a psi-dependent g g', and mixing
 	 * it in here would only give the Jacobian somewhere else to be right.
 	 */
@@ -244,7 +244,7 @@ namespace
 		species[ 1 ].mass = electronMass;
 		species[ 1 ].charge = -1.0;
 		species[ 1 ].temperature = polynomial( { 0.8, -0.20 } );
-		// Charge neutrality on r = rRef, closed exactly rather than balanced by
+		// Charge neutrality on R = R_ref, closed exactly rather than balanced by
 		// hand: the constructor samples psi over [ 0, 1 ] only, and this solve
 		// visits negative psi.
 		species[ 1 ].density = meq::neutralisingDensity( species, 1 );
@@ -271,7 +271,7 @@ namespace
 	 *
 	 * The whole psi-dependence of f() -- and therefore the whole of dFdPsi() --
 	 * belongs to the meq::RotatingSource held by value below. The remainder
-	 * added to it is a function of ( r, z ) alone; see the file header.
+	 * added to it is a function of ( R, z ) alone; see the file header.
 	 */
 	class ManufacturedRotatingSource : public meq::Source
 	{
@@ -282,73 +282,73 @@ namespace
 			}
 
 			/// The imposed poloidal flux.
-			double psi( double r, double z ) const
+			double psi( double radius, double z ) const
 			{
-				return std::sin( psiKr*( r + psiR0 ) )*std::cos( psiKz*z );
+				return std::sin( psiKr*( radius + psiR0 ) )*std::cos( psiKz*z );
 			}
 
-			/// grad_bar( psi ). Not the HDG flux: that is this divided by r.
-			void gradPsi( double r, double z, double & dPsiDr, double & dPsiDz ) const
+			/// grad_bar( psi ). Not the HDG flux: that is this divided by R.
+			void gradPsi( double radius, double z, double & dPsiDr, double & dPsiDz ) const
 			{
-				dPsiDr =  psiKr*std::cos( psiKr*( r + psiR0 ) )*std::cos( psiKz*z );
-				dPsiDz = -psiKz*std::sin( psiKr*( r + psiR0 ) )*std::sin( psiKz*z );
+				dPsiDr =  psiKr*std::cos( psiKr*( radius + psiR0 ) )*std::cos( psiKz*z );
+				dPsiDz = -psiKz*std::sin( psiKr*( radius + psiR0 ) )*std::sin( psiKz*z );
 			}
 
-			/// The HDG flux q = grad_bar( psi )/r.
-			void flux( double r, double z, double & qR, double & qZ ) const
+			/// The HDG flux q = grad_bar( psi )/R.
+			void flux( double radius, double z, double & qR, double & qZ ) const
 			{
-				gradPsi( r, z, qR, qZ );
-				qR /= r;
-				qZ /= r;
+				gradPsi( radius, z, qR, qZ );
+				qR /= radius;
+				qZ /= radius;
 			}
 
 			/// Delta*( psiExact ), in closed form. Derived in the file header and
 			/// checked against deltaStarFD() by the first test case, because this
 			/// is the one expression a mistake in would silently change which
 			/// equation every rate below is measuring.
-			double deltaStar( double r, double z ) const
+			double deltaStar( double radius, double z ) const
 			{
-				return -( psiKr*psiKr + psiKz*psiKz )*psi( r, z )
-				       - ( psiKr/r )*std::cos( psiKr*( r + psiR0 ) )*std::cos( psiKz*z );
+				return -( psiKr*psiKr + psiKz*psiKz )*psi( radius, z )
+				       - ( psiKr/radius )*std::cos( psiKr*( radius + psiR0 ) )*std::cos( psiKz*z );
 			}
 
 			/// Delta*( psiExact ) by central differences, arranged as
-			/// r d_r( ( 1/r ) d_r psi ) + d_zz psi -- the same form
+			/// R d_r( ( 1/R ) d_r psi ) + d_zz psi -- the same form
 			/// Soloviev.hpp and ManufacturedNonlinear.hpp use, so that it is
 			/// independent of the closed form above rather than a rearrangement
 			/// of it.
-			double deltaStarFD( double r, double z, double h = 1.0e-4 ) const
+			double deltaStarFD( double radius, double z, double h = 1.0e-4 ) const
 			{
 				auto innerR = [ & ]( double rr )
 				{
 					return ( psi( rr + h, z ) - psi( rr - h, z ) )/( 2.0*h )/rr;
 				};
 
-				double const dRInner = ( innerR( r + h ) - innerR( r - h ) )/( 2.0*h );
-				double const dZZ = ( psi( r, z + h ) - 2.0*psi( r, z ) + psi( r, z - h ) )
+				double const dRInner = ( innerR( radius + h ) - innerR( radius - h ) )/( 2.0*h );
+				double const dZZ = ( psi( radius, z + h ) - 2.0*psi( radius, z ) + psi( radius, z - h ) )
 				                   /( h*h );
 
-				return r*dRInner + dZZ;
+				return radius*dRInner + dZZ;
 			}
 
 			/// The remainder that makes psiExact solve the equation. A function of
-			/// ( r, z ) ALONE, which is the entire reason dFdPsi() below can be
+			/// ( R, z ) ALONE, which is the entire reason dFdPsi() below can be
 			/// the rotating source's own derivative with nothing added to it.
-			double remainder( double r, double z ) const
+			double remainder( double radius, double z ) const
 			{
-				return -deltaStar( r, z ) - rot.f( r, z, psi( r, z ) );
+				return -deltaStar( radius, z ) - rot.f( radius, z, psi( radius, z ) );
 			}
 
-			double f( double r, double z, double psiValue ) const override
+			double f( double radius, double z, double psiValue ) const override
 			{
-				return rot.f( r, z, psiValue ) + remainder( r, z );
+				return rot.f( radius, z, psiValue ) + remainder( radius, z );
 			}
 
 			/// EXACTLY meq::RotatingSource::dFdPsi. Nothing is added, because the
 			/// remainder does not depend on psi.
-			double dFdPsi( double r, double z, double psiValue ) const override
+			double dFdPsi( double radius, double z, double psiValue ) const override
 			{
-				return rot.dFdPsi( r, z, psiValue );
+				return rot.dFdPsi( radius, z, psiValue );
 			}
 
 			meq::RotatingSource const & rotating() const
@@ -374,10 +374,10 @@ namespace
 		{
 			for ( int j = 0; j <= 80; ++j )
 			{
-				double const r = box.rMin + box.width()*i/80.0;
+				double const radius = box.minRadius + box.width()*i/80.0;
 				double const z = box.zMin + box.height()*j/80.0;
-				lowest = std::min( lowest, eq.psi( r, z ) );
-				highest = std::max( highest, eq.psi( r, z ) );
+				lowest = std::min( lowest, eq.psi( radius, z ) );
+				highest = std::max( highest, eq.psi( radius, z ) );
 			}
 		}
 	}
@@ -391,7 +391,7 @@ namespace
  *
  *   1. the hand-derived Delta* agrees with a central difference of psiExact, so
  *      the closed form in the header is transcribed correctly;
- *   2. Delta*( psiExact ) = -F_total( r, z, psiExact ), so psiExact really is
+ *   2. Delta*( psiExact ) = -F_total( R, z, psiExact ), so psiExact really is
  *      the solution of the equation the solver is about to be given.
  *
  * The second is the construction of the whole file -- the remainder cancelling
@@ -407,24 +407,24 @@ BOOST_AUTO_TEST_CASE( theManufacturedSolutionSatisfiesTheEquation )
 	double worstClosedForm = 0.0;
 	double worstEquation = 0.0;
 
-	for ( double r = box.rMin; r <= box.rMax + 1.0e-12; r += 0.05 )
+	for ( double radius = box.minRadius; radius <= box.maxRadius + 1.0e-12; radius += 0.05 )
 	{
 		for ( double z = box.zMin; z <= box.zMax + 1.0e-12; z += 0.075 )
 		{
-			double const fd = eq.deltaStarFD( r, z );
-			double const closed = eq.deltaStar( r, z );
-			double const minusF = -eq.f( r, z, eq.psi( r, z ) );
+			double const fd = eq.deltaStarFD( radius, z );
+			double const closed = eq.deltaStar( radius, z );
+			double const minusF = -eq.f( radius, z, eq.psi( radius, z ) );
 
 			worstClosedForm = std::max( worstClosedForm, std::fabs( closed - fd ) );
 			worstEquation = std::max( worstEquation, std::fabs( fd - minusF ) );
 
 			BOOST_TEST( std::fabs( closed - fd ) < 1.0e-5,
-			            "at ( " << r << ", " << z << " ): the closed-form Delta* gives "
+			            "at ( " << radius << ", " << z << " ): the closed-form Delta* gives "
 			            << closed << " where a central difference gives " << fd
 			            << ", so the derivation in this file's header is mistyped and "
 			            "every rate below is measuring the wrong equation" );
 			BOOST_TEST( std::fabs( fd - minusF ) < 1.0e-5,
-			            "at ( " << r << ", " << z << " ): Delta*( psi ) = " << fd
+			            "at ( " << radius << ", " << z << " ): Delta*( psi ) = " << fd
 			            << " but -F_total = " << minusF << ", so the manufactured "
 			            "remainder does not close the equation at the exact solution" );
 		}
@@ -520,7 +520,7 @@ BOOST_AUTO_TEST_CASE( theSourceIsGenuinelyNonlinearInPsi )
 	            "enough to zero that the closed-form phi_0 is being evaluated near "
 	            "its pole" );
 
-	// dF/dpsi over the ( r, psi ) box, and separately over the solution's own
+	// dF/dpsi over the ( R, psi ) box, and separately over the solution's own
 	// range, which is the one the reaction ratio should be read from -- sampling
 	// a range the solve never visits is a mistake CLAUDE.md records making once
 	// already.
@@ -528,18 +528,18 @@ BOOST_AUTO_TEST_CASE( theSourceIsGenuinelyNonlinearInPsi )
 	double largest = -1.0e300;
 	double onSolution = 0.0;
 
-	for ( double r = box.rMin; r <= box.rMax + 1.0e-12; r += 0.02 )
+	for ( double radius = box.minRadius; radius <= box.maxRadius + 1.0e-12; radius += 0.02 )
 	{
 		for ( int i = 0; i <= 100; ++i )
 		{
 			double const psi = psiLow + ( psiHigh - psiLow )*i/100.0;
-			double const d = eq.dFdPsi( r, 0.0, psi );
+			double const d = eq.dFdPsi( radius, 0.0, psi );
 			smallest = std::min( smallest, d );
 			largest = std::max( largest, d );
 		}
 
 		for ( double z = box.zMin; z <= box.zMax + 1.0e-12; z += 0.05 )
-			onSolution = std::max( onSolution, std::fabs( eq.dFdPsi( r, z, eq.psi( r, z ) ) ) );
+			onSolution = std::max( onSolution, std::fabs( eq.dFdPsi( radius, z, eq.psi( radius, z ) ) ) );
 	}
 
 	// lambda_1 = pi^2( 1/w^2 + 1/h^2 ) for the Dirichlet Laplacian on this box:
@@ -547,7 +547,7 @@ BOOST_AUTO_TEST_CASE( theSourceIsGenuinelyNonlinearInPsi )
 	double const lambdaOne = pi*pi*( 1.0/( box.width()*box.width() )
 	                                 + 1.0/( box.height()*box.height() ) );
 
-	std::printf( "    dF/dpsi over the ( r, psi ) box   [ %+.6f, %+.6f ]\n"
+	std::printf( "    dF/dpsi over the ( R, psi ) box   [ %+.6f, %+.6f ]\n"
 	             "    max | dF/dpsi | on the solution    %.6f\n"
 	             "    lambda_1 = %.4f, so the reaction ratio is %.4f on the solution "
 	             "and %.4f over the box\n",
@@ -556,7 +556,7 @@ BOOST_AUTO_TEST_CASE( theSourceIsGenuinelyNonlinearInPsi )
 	             std::max( std::fabs( smallest ), std::fabs( largest ) )/lambdaOne );
 	std::fflush( stdout );
 
-	// Measured: dF/dpsi runs over [ +0.272, +16.985 ] on the ( r, psi ) box and
+	// Measured: dF/dpsi runs over [ +0.272, +16.985 ] on the ( R, psi ) box and
 	// reaches 7.913 on the solution itself, against lambda_1 = 22.275 -- ratios
 	// of 0.76 and 0.36. Real, and mild enough that the measurement below is of
 	// Newton's order rather than of the edge of its basin.
@@ -569,37 +569,37 @@ BOOST_AUTO_TEST_CASE( theSourceIsGenuinelyNonlinearInPsi )
 	// And it must VARY, or this is McCarthy's rung and not a new one.
 	BOOST_TEST( largest - smallest > 1.0,
 	            "dF/dpsi varies by only " << largest - smallest << " over the whole "
-	            "( r, psi ) box, so the source is effectively affine in psi and one "
+	            "( R, psi ) box, so the source is effectively affine in psi and one "
 	            "exact Newton step would finish it -- which is McCarthy.hpp's "
 	            "statement, already made in NewtonConvergence.cpp" );
 
 	/*
-	 * AND THE VARIATION MUST BE THERE IN psi AT FIXED r, not merely inherited
-	 * from the r^2 prefactor every source in meq carries.
+	 * AND THE VARIATION MUST BE THERE IN psi AT FIXED R, not merely inherited
+	 * from the R^2 prefactor every source in meq carries.
 	 *
-	 * WHERE THAT IS MEASURED MATTERS, AND r = rRef IS EXACTLY THE WRONG PLACE.
-	 * The gauge pins phi_0( rRef ) = 0, so the exponent ( r^2 - rRef^2 )/2 and
+	 * WHERE THAT IS MEASURED MATTERS, AND R = R_ref IS EXACTLY THE WRONG PLACE.
+	 * The gauge pins phi_0( R_ref ) = 0, so the exponent ( R^2 - R_ref^2 )/2 and
 	 * both its psi-derivatives vanish there and d2p/dpsi2 collapses to P0''( psi )
 	 * -- the answer a NON-rotating source would give. Measured on the reference
 	 * curve dF/dpsi moves 0.333 across the solution's range, against 7.300 at the
-	 * outboard edge, so a control placed on rRef would be blind to the entire
+	 * outboard edge, so a control placed on R_ref would be blind to the entire
 	 * rotation chain rule while looking like a reasonable check. It was placed
 	 * there first, and read as a failure of the profiles rather than of the
 	 * probe.
 	 */
 	double const atRefLow = eq.dFdPsi( referenceRadius, 0.0, lowest );
 	double const atRefHigh = eq.dFdPsi( referenceRadius, 0.0, highest );
-	double const atEdgeLow = eq.dFdPsi( box.rMax, 0.0, lowest );
-	double const atEdgeHigh = eq.dFdPsi( box.rMax, 0.0, highest );
+	double const atEdgeLow = eq.dFdPsi( box.maxRadius, 0.0, lowest );
+	double const atEdgeHigh = eq.dFdPsi( box.maxRadius, 0.0, highest );
 
-	std::printf( "    across psi = %+.4f to %+.4f, dF/dpsi moves %.6f at r = rRef "
-	             "(where the exponent vanishes) and %.6f at r = rMax\n",
+	std::printf( "    across psi = %+.4f to %+.4f, dF/dpsi moves %.6f at R = R_ref "
+	             "(where the exponent vanishes) and %.6f at R = R_max\n",
 	             lowest, highest, std::fabs( atRefHigh - atRefLow ),
 	             std::fabs( atEdgeHigh - atEdgeLow ) );
 	std::fflush( stdout );
 
 	BOOST_TEST( std::fabs( atEdgeHigh - atEdgeLow ) > 1.0,
-	            "at fixed r = rMax, dF/dpsi moves only "
+	            "at fixed R = R_max, dF/dpsi moves only "
 	            << std::fabs( atEdgeHigh - atEdgeLow ) << " across the solution's "
 	            "range, so the psi-dependence of n_s0, T_s and omega is not "
 	            "reaching the Jacobian" );
@@ -743,7 +743,7 @@ BOOST_AUTO_TEST_CASE( theAssembledJacobianIsTheDerivativeOfTheAssembledResidual 
  * NEWTON'S OBSERVED ORDER, WHICH IS THE INSTRUMENT THAT SEES A WRONG dFdPsi
  * UNDER THE DEFAULT NPC ORDERING.
  *
- * The order is log( r2/r1 )/log( r1/r0 ): 2 for a quadratically convergent
+ * The order is log( r2/R_1 )/log( R_1/R_0 ): 2 for a quadratically convergent
  * iteration in its asymptotic regime, 1 for a linearly convergent one anywhere.
  * CLAUDE.md's measurement is the calibration -- a dF/dpsi 5% too large leaves
  * every error and every rate in this file unchanged to six significant figures

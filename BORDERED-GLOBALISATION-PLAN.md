@@ -218,7 +218,7 @@ evaluates the constraint on a state whose flux and potential blocks are zeroed
 `located 1, rowSize 6` after it, measured on `examples/diverted-tokamak.toml`.
 **On a run with no interior extremum of `ψ_h` anywhere it fires at every
 iteration.** The equation being converged is then "`ψ_ax` equals the largest
-nodal value of `ψ_h`", which a wall-hugging annulus and an `r = 0` boundary
+nodal value of `ψ_h`", which a wall-hugging annulus and an `R = 0` boundary
 layer both satisfy — both of them documented failure shapes in `CLAUDE_FB.md`,
 *`ψ_ax` was the weak point of the whole free-boundary path*.
 
@@ -358,8 +358,8 @@ Keep the bordered elimination, every border, the Armijo loop and the augmented
 norm exactly as they are. Change only what the **field block** is:
 
 ```
-Newton    J = A_lin − (∂F/∂ψ)/r mass term,   residual R( x ) with F( r, z, ψ_h )
-Picard    J = A_lin,                          residual R( x ) with F( r, z, ψ^k )
+Newton    J = A_lin − (∂F/∂ψ)/R mass term,   residual R( x ) with F( R, z, ψ_h )
+Picard    J = A_lin,                          residual R( x ) with F( R, z, ψ^k )
 ```
 
 where `ψ^k` is the last accepted iterate's potential and `A_lin` is the
@@ -432,7 +432,7 @@ Unchanged, item for item:
 
 ### 3.4 The Jacobian is constant, and whether that can be cashed is OPEN
 
-With `∂F/∂ψ` dropped, the field block depends on the mesh, `τ`, `r` and the
+With `∂F/∂ψ` dropped, the field block depends on the mesh, `τ`, `R` and the
 extension and on **nothing that moves between iterations** — `F` is on the
 residual only. Mathematically that is one factorisation for the whole Picard
 phase, against one per Newton step.
@@ -541,7 +541,7 @@ were learned the expensive way:
   irrelevant.
 * C under filaments, which converges in 3 Newton steps with a properly located
   axis and is then refused by the topology guard for a plasma containing
-  `r = 0`. A globalisation that found a *different* branch might help, but
+  `R = 0`. A globalisation that found a *different* branch might help, but
   nothing in a Picard says it would find the right one, and M-26 says a
   different route is entitled to a different solution.
 * Anything that is a bad **input**. M-103 runs the shipped configurations;
@@ -584,7 +584,7 @@ This must be said plainly, because it is the difference between a globalisation
 and a two-solver pipeline. What each sweep solves is
 
 ```
-−∇̄·( (1/r) ∇̄ψ ) = F( r, z, ψ ; ψ_ax*, ψ_bnd*, λ* ) / r
+−∇̄·( (1/R) ∇̄ψ ) = F( R, z, ψ ; ψ_ax*, ψ_bnd*, λ* ) / R
 ```
 
 with `ψ_ax*`, `ψ_bnd*` and the profile scale `λ*` **constants**. That is an
@@ -745,7 +745,7 @@ measurement. Listed here so it is not confused with a globalisation.
 
 C under filaments converges in 3 Newton steps to a well-located axis and is
 refused because `−ψ_bnd/( ψ_ax − ψ_bnd ) = +2.8555e-01` puts the plasma over
-`r = 0`. That is the guard working. Whether a different branch exists on that
+`R = 0`. That is the guard working. Whether a different branch exists on that
 machine is a question for a continuation or for the inputs, and M-103 does not
 answer it.
 
@@ -891,7 +891,7 @@ Stage 1 failing to meet its tolerance is not an error. Carry
 1. On a configuration where `Globalisation::None` **throws** — the first of
    BG-0's exit-2 cases reduced to a test-sized mesh — the rung converges, and
    the converged state satisfies every border: `|ψ_ax − ψ_h( x* )|`,
-   `|ψ_bnd − ψ_h( x_limiter )|` and `|∫F/r − μ₀I_p|/μ₀I_p` all below `1e-10`,
+   `|ψ_bnd − ψ_h( x_limiter )|` and `|∫F/R − μ₀I_p|/μ₀I_p` all below `1e-10`,
    with a **located** axis (`constraintLocated` true at the last iteration).
 2. On a configuration where `None` **converges** — the diverted fixture in
    `tests/convergence/DivertedMachine.hpp` — the rung reaches the **same**

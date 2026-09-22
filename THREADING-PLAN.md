@@ -602,7 +602,7 @@ like mesh noise.
 `tests/convergence/` — run `sweep()` at one thread and at the ambient count on
 the same field, and require the returned vectors to be **equal element for
 element, in order, in every field of `CriticalPoint`**, at `0.000e+00`. Then the
-driver-level pin: `checkAxis()` reporting the same `psi`, `r` and `z` to every
+driver-level pin: `checkAxis()` reporting the same `psi`, `R` and `z` to every
 printed digit at both thread counts. Discriminate by removing the element-order
 concatenation and confirming it goes red on a mesh where the sweep finds
 duplicates — the Solov'ev `k = 1, n = 6` case named at `:987` is one.

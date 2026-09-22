@@ -213,7 +213,7 @@ CoilSize = 0.03
 Type = "zero"
 
 # THE TARGET NULL as an INITIAL VALUE of two unknowns, not a prescription:
-# XP-3's border closes q_r = q_z = 0 and psi_bnd = psi_h( r_X, z_X ) on the
+# XP-3's border closes q_r = q_z = 0 and psi_bnd = psi_h( R_X, z_X ) on the
 # same Newton, and the seed selects WHICH saddle is followed. This case is a
 # DOUBLE NULL at identical flux, so either seed gives the same psi_bnd.
 [boundary.xpoint]

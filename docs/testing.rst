@@ -110,7 +110,7 @@ one demands of a Newton Jacobian.
      - varies
      - A Jacobian that is present but wrong.
    * - Similarity exponential
-     - :math:`f_0 e^{n\psi}(1 + \varepsilon r^2)`
+     - :math:`f_0 e^{n\psi}(1 + \varepsilon R^2)`
      - :math:`nF`
      - The same, against an *exact* rather than manufactured solution.
 
@@ -179,7 +179,7 @@ Mutation testing
 ----------------
 
 **Mutation-test a suite you are relying on.** MEQ's profile and source tests
-were checked by deliberately introducing defects — a dropped :math:`r^2`,
+were checked by deliberately introducing defects — a dropped :math:`R^2`,
 :math:`p'` replaced by :math:`p`, :math:`\mu_0` on the wrong term, a flipped
 sign, an off-by-one in an interval lookup at a knot, a truncated file
 round-trip — and confirming each was caught. That is a cheap way to find out

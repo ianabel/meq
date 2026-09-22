@@ -93,15 +93,15 @@ namespace
 		double const inset = 0.08;
 		double const step = 1.0e-5;
 
-		for ( double r = box().rMin + inset; r <= box().rMax - inset; r += 0.05 )
+		for ( double radius = box().minRadius + inset; radius <= box().maxRadius - inset; radius += 0.05 )
 			for ( double z = box().zMin + inset; z <= box().zMax - inset; z += 0.05 )
 			{
 				mfem::Vector point( 2 );
-				point( 0 ) = r;
+				point( 0 ) = radius;
 				point( 1 ) = z;
 
 				mfem::DenseMatrix points( 2, 1 );
-				points( 0, 0 ) = r;
+				points( 0, 0 ) = radius;
 				points( 1, 0 ) = z;
 				mfem::Array<int> elements;
 				mfem::Array<mfem::IntegrationPoint> ips;
@@ -113,18 +113,18 @@ namespace
 
 				// (1) the fixture's analytic flux, relabelled the same way.
 				double qR = 0.0, qZ = 0.0;
-				eq.flux( r, z, qR, qZ );
+				eq.flux( radius, z, qR, qZ );
 				double const analyticBr = -qZ;
 				double const analyticBz = qR;
 
 				// (2) central differences of the exact psi, which does not use
 				// the fixture's gradient at all.
-				double const dPsiDr = ( eq.psi( r + step, z ) - eq.psi( r - step, z ) )
+				double const dPsiDr = ( eq.psi( radius + step, z ) - eq.psi( radius - step, z ) )
 				                      /( 2.0*step );
-				double const dPsiDz = ( eq.psi( r, z + step ) - eq.psi( r, z - step ) )
+				double const dPsiDz = ( eq.psi( radius, z + step ) - eq.psi( radius, z - step ) )
 				                      /( 2.0*step );
-				double const differenceBr = -dPsiDz/r;
-				double const differenceBz = dPsiDr/r;
+				double const differenceBr = -dPsiDz/radius;
+				double const differenceBz = dPsiDr/radius;
 
 				out.worstAgainstAnalytic = std::max( out.worstAgainstAnalytic,
 					std::hypot( computed( 0 ) - analyticBr, computed( 1 ) - analyticBz ) );

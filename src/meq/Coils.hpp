@@ -11,7 +11,7 @@
  * Poloidal field coils of rectangular cross-section: stage FB-2 of
  * FREE-BOUNDARY-PLAN.md, and the thing FB-1 needs before it can run at all.
  *
- * WHAT THIS IS. A coil is a region of the ( r, z ) plane carrying a prescribed
+ * WHAT THIS IS. A coil is a region of the ( R, z ) plane carrying a prescribed
  * toroidal current. Its current is DATA -- it does not depend on psi, it is not
  * an unknown, and nothing here iterates. Two things come out: the
  * Grad-Shafranov source term the assembly needs, and the EXACT field the coils
@@ -29,55 +29,55 @@
  * THE SOURCE TERM, DERIVED RATHER THAN QUOTED
  * -------------------------------------------
  *
- * FREE-BOUNDARY-PLAN.md section 5.4 prints F_coil = mu0 r I_k / |Omega_ck| and
+ * FREE-BOUNDARY-PLAN.md section 5.4 prints F_coil = mu0 R I_k / |Omega_ck| and
  * this file does not take that on trust, because CLAUDE.md records two separate
  * occasions in this tree where a transcribed formula converged beautifully to
  * the wrong function. Here is the derivation; it agrees with the plan, and the
  * agreement is reported rather than assumed.
  *
- * MEQ solves -div_bar( ( 1/r ) grad_bar psi ) = F( r, z, psi )/r, and
+ * MEQ solves -div_bar( ( 1/R ) grad_bar psi ) = F( R, z, psi )/R, and
  *
- *     div_bar( ( 1/r ) grad_bar psi )
- *         = d_r( ( 1/r ) d_r psi ) + d_z( ( 1/r ) d_z psi )
- *         = ( 1/r )[ d_rr psi - ( 1/r ) d_r psi + d_zz psi ]
- *         = ( 1/r ) Delta* psi,
+ *     div_bar( ( 1/R ) grad_bar psi )
+ *         = d_r( ( 1/R ) d_r psi ) + d_z( ( 1/R ) d_z psi )
+ *         = ( 1/R )[ d_rr psi - ( 1/R ) d_r psi + d_zz psi ]
+ *         = ( 1/R ) Delta* psi,
  *
  * so the equation is Delta* psi = -F. That is MEQ's convention and it is the
- * one meq::Source::f() answers in: F as eq (2) writes it, with NO 1/r applied.
+ * one meq::Source::f() answers in: F as eq (2) writes it, with NO 1/R applied.
  *
  * Now the physics. MEQ's field convention, from CLAUDE.md, is
- * B = ( -q_z, +q_r ) with q = ( 1/r ) grad_bar psi, i.e.
+ * B = ( -q_z, +q_r ) with q = ( 1/R ) grad_bar psi, i.e.
  *
- *     B_r = -( 1/r ) d_z psi,      B_z = +( 1/r ) d_r psi,
+ *     B_r = -( 1/R ) d_z psi,      B_z = +( 1/R ) d_r psi,
  *
- * which is psi = r A_phi, the poloidal flux PER RADIAN. Ampere's law in its
+ * which is psi = R A_phi, the poloidal flux PER RADIAN. Ampere's law in its
  * toroidal component is mu0 j_phi = ( curl B )_phi = d_z B_r - d_r B_z, and
  *
- *     d_z B_r = -( 1/r ) d_zz psi,
- *     d_r B_z = ( 1/r ) d_rr psi - ( 1/r^2 ) d_r psi,
+ *     d_z B_r = -( 1/R ) d_zz psi,
+ *     d_r B_z = ( 1/R ) d_rr psi - ( 1/R^2 ) d_r psi,
  *
- * so ( curl B )_phi = -( 1/r )[ d_rr psi - ( 1/r ) d_r psi + d_zz psi ]
- *                   = -( 1/r ) Delta* psi. Hence
+ * so ( curl B )_phi = -( 1/R )[ d_rr psi - ( 1/R ) d_r psi + d_zz psi ]
+ *                   = -( 1/R ) Delta* psi. Hence
  *
- *     Delta* psi = -mu0 r j_phi,     and comparing with Delta* psi = -F,
+ *     Delta* psi = -mu0 R j_phi,     and comparing with Delta* psi = -F,
  *
  *     ===================================================================
- *     F( r, z ) = mu0 r j_phi( r, z ),   so   F_coil = mu0 r I / |Omega_c|
+ *     F( R, z ) = mu0 R j_phi( R, z ),   so   F_coil = mu0 R I / |Omega_c|
  *     ===================================================================
  *
  * on a coil of area |Omega_c| carrying a total current I. THAT IS THE PLAN'S
  * FORMULA, arrived at independently; there is no disagreement to report.
  *
  * The independent check that it is the same convention meq::Source uses:
- * MHDSource has F = mu0 r^2 p' + g g', and the equilibrium current is
- * j_phi = r p' + g g'/( mu0 r ), whose mu0 r j_phi is mu0 r^2 p' + g g'
+ * MHDSource has F = mu0 R^2 p' + g g', and the equilibrium current is
+ * j_phi = R p' + g g'/( mu0 R ), whose mu0 R j_phi is mu0 R^2 p' + g g'
  * exactly. So the coil term and the plasma term are in the same units and add.
  *
- * AN EXTRA OR MISSING r HERE CONVERGES AT FULL ORDER TO THE WRONG FUNCTION and
+ * AN EXTRA OR MISSING R HERE CONVERGES AT FULL ORDER TO THE WRONG FUNCTION and
  * no rate table can see it, which is the failure CLAUDE.md records happening
  * twice in this tree already. The check that CAN see it is Delta* of the exact
  * field below, by central differences, against -f(). Measured on a coil at
- * r = 2.0 carrying 1 MA over 0.30 x 0.40 m, so that F = mu0 r J = 2.0944e+01 at
+ * R = 2.0 carrying 1 MA over 0.30 x 0.40 m, so that F = mu0 R J = 2.0944e+01 at
  * its centre; worst residual over nine sample points as a fraction of that F:
  *
  *     h        interior plain   interior Richardson   exterior Richardson
@@ -94,8 +94,8 @@
  * equation is Delta* psi = 0, and any multiple of psi satisfies that; only
  * where F is non-zero does the residual say anything about the factor in front
  * of it. The control: at ( 2.06, 0.36 ) the extrapolated Delta*_FD reads
- * -2.157227e+01 against -F = -2.157227e+01, while -F/r would be
- * -1.047198e+01 and -F r would be -4.443888e+01. A missing or extra r is a
+ * -2.157227e+01 against -F = -2.157227e+01, while -F/R would be
+ * -1.047198e+01 and -F R would be -4.443888e+01. A missing or extra R is a
  * factor of 2.06 here, not a small bias -- but it is a factor that only a
  * comparison against a closed form can see, since it leaves every convergence
  * rate untouched.
@@ -127,10 +127,10 @@
  *
  * Delta* is linear and the coil is a continuum of filament loops, so
  *
- *     psi_coil( r, z ) = ( I / |Omega_c| ) * integral over the cross-section of
- *                        psi_filament( r, z ; r', z' ) dr' dz'
+ *     psi_coil( R, z ) = ( I / |Omega_c| ) * integral over the cross-section of
+ *                        psi_filament( R, z ; R', z' ) dr' dz'
  *
- * with psi_filament the flux of a UNIT-current loop of radius r' at height z'.
+ * with psi_filament the flux of a UNIT-current loop of radius R' at height z'.
  * That is the free-space field: it decays at infinity and it is what a coil
  * outside the computational domain actually produces.
  *
@@ -147,11 +147,11 @@
  * THIS FILE THAT MATTERS. K( k ) and E( k ) are needed with k -> 1, which is
  * where the field point approaches a source filament -- which, inside a coil,
  * is exactly where the quadrature has to put its points. Written the textbook
- * way, k = 2 sqrt( a r )/d, k rounds to exactly 1.0 at about 1e-8 of a coil
+ * way, k = 2 sqrt( a R )/d, k rounds to exactly 1.0 at about 1e-8 of a coil
  * radius and std::comp_ellint_1( 1.0 ) is NaN while std::comp_ellint_2 throws.
  * Carlson's forms take the COMPLEMENTARY modulus squared,
  *
- *     k'^2 = ( ( a - r )^2 + ( z - z0 )^2 ) / d^2,
+ *     k'^2 = ( ( a - R )^2 + ( z - z0 )^2 ) / d^2,
  *
  * which is the squared distance to the source over d^2 -- formed with no
  * cancellation whatever, since nothing is subtracted from one -- and
@@ -197,7 +197,7 @@
  * psi_filament has a logarithmic singularity where the source meets the field
  * point, exactly as a two-dimensional line current does. Ungraded, that costs
  * the rule its spectral accuracy and leaves it ALGEBRAIC. Measured on a coil at
- * r = 2.0, half-width 0.15, half-height 0.20, relative error against a
+ * R = 2.0, half-width 0.15, half-height 0.20, relative error against a
  * converged reference:
  *
  *     grading      interior rate in n      interior error at n = 32
@@ -250,7 +250,7 @@
  *
  *
  * A NAMING WARNING. psi() here is the POLOIDAL FLUX, weber per radian, the
- * quantity the solver calls psi. It is NOT the HDG flux q = grad_bar psi / r,
+ * quantity the solver calls psi. It is NOT the HDG flux q = grad_bar psi / R,
  * which the rest of this tree also calls "the flux" and which
  * GradShafranovSolver::flux() returns. tests/analytic/CurrentLoop.hpp draws the
  * same line with the same two names, and this file follows it.
@@ -331,8 +331,8 @@ namespace meq
 	 * One coil of rectangular cross-section, carrying a prescribed total
 	 * current uniformly distributed over it.
 	 *
-	 * Geometry is ( centre, half-width in r, half-height in z ) rather than
-	 * ( rMin, rMax, zMin, zMax ) because a coil is specified by where it is and
+	 * Geometry is ( centre, half-width in R, half-height in z ) rather than
+	 * ( R_min, R_max, zMin, zMax ) because a coil is specified by where it is and
 	 * how big it is, and because the half-widths are what the refusals are
 	 * about. Both forms are available through the accessors.
 	 *
@@ -342,7 +342,7 @@ namespace meq
 	 * refused is a geometry that cannot be solved on -- see the constructor.
 	 *
 	 * IT IS NOT A meq::Source, deliberately. Source::f() takes psi, and a coil
-	 * current does not depend on psi; the honest signature is f( r, z ) and it
+	 * current does not depend on psi; the honest signature is f( R, z ) and it
 	 * is on CoilSet. A Source adapter would have dFdPsi() identically zero,
 	 * which makes a Newton solve driven by coils alone affine -- one step,
 	 * exactly as Soloviev.hpp and CurrentLoop.hpp are -- and that adapter
@@ -353,7 +353,7 @@ namespace meq
 		public:
 			/// @param centreRIn     the coil centre's major radius, metres.
 			/// @param centreZIn     its height, metres.
-			/// @param halfWidthIn   half the extent in r. Strictly positive.
+			/// @param halfWidthIn   half the extent in R. Strictly positive.
 			/// @param halfHeightIn  half the extent in z. Strictly positive.
 			/// @param currentIn     the TOTAL current through the
 			///                      cross-section, amperes. Signed; zero is
@@ -362,8 +362,8 @@ namespace meq
 			/// @throws std::invalid_argument if any argument is not finite, if
 			///         either half-extent is not positive, or if the coil
 			///         reaches the axis: centreR - halfWidth <= 0 is refused
-			///         because the Grad-Shafranov operator's 1/r is not
-			///         integrable through r = 0, which is the same refusal
+			///         because the Grad-Shafranov operator's 1/R is not
+			///         integrable through R = 0, which is the same refusal
 			///         meq::BoundaryShape makes and for the same reason.
 			Coil( double centreRIn, double centreZIn, double halfWidthIn,
 			      double halfHeightIn, double currentIn );
@@ -377,8 +377,8 @@ namespace meq
 			double current() const;
 
 			/// The bounding box, which is the coil itself.
-			double rMin() const;
-			double rMax() const;
+			double minRadius() const;
+			double maxRadius() const;
 			double zMin() const;
 			double zMax() const;
 
@@ -391,7 +391,7 @@ namespace meq
 			/// class rests on: a real winding has turns and this does not.
 			double currentDensity() const;
 
-			/// Whether ( r, z ) is in the coil.
+			/// Whether ( R, z ) is in the coil.
 			///
 			/// THE SET IS CLOSED -- the edges belong to it. That matters not at
 			/// all for anything integrated, the boundary having measure zero,
@@ -400,7 +400,7 @@ namespace meq
 			/// edge gets the full interior value rather than half of it.
 			/// Neither is a defect and both are consequences of the source
 			/// being genuinely discontinuous there.
-			bool contains( double r, double z ) const;
+			bool contains( double radius, double z ) const;
 
 		private:
 			double centreRValue;
@@ -411,9 +411,9 @@ namespace meq
 	};
 
 	/**
-	 * The poloidal flux psi = r A_phi, in weber per radian, of a single
+	 * The poloidal flux psi = R A_phi, in weber per radian, of a single
 	 * circular filament of radius @a loopRadius at height @a loopHeight
-	 * carrying @a current, evaluated at ( r, z ).
+	 * carrying @a current, evaluated at ( R, z ).
 	 *
 	 * Public because it is the exact kernel the cross-section integral is built
 	 * from, because the thin-coil limit is checked against it, and because a
@@ -424,14 +424,14 @@ namespace meq
 	 * why it is Carlson's form. Two consequences worth knowing.
 	 *
 	 *   * psi( 0, z ) is 0.0 BIT EXACTLY, because the expression carries k^2 as
-	 *     an explicit factor and k^2 = 4 a r/d^2 is exactly zero on the axis.
+	 *     an explicit factor and k^2 = 4 a R/d^2 is exactly zero on the axis.
 	 *     That is the boundary condition the free-boundary problem imposes
 	 *     there, so it is worth having exactly rather than to round-off.
 	 *   * NEAR the axis the RELATIVE accuracy degrades, because the bracket
 	 *     ( 1 - k^2/2 )K - E vanishes like k^4 and is formed by cancellation.
 	 *     Measured on a 1 A loop of radius 2.0 at z = 0.3 with the field point
 	 *     at z = 0.7, this form and the textbook one agree to 1.6e-12 at
-	 *     r = 1e-2 and to only 8.1e-5 at r = 1e-6 -- but psi itself is
+	 *     R = 1e-2 and to only 8.1e-5 at R = 1e-6 -- but psi itself is
 	 *     1.481e-19 at that second point, so the ABSOLUTE disagreement is
 	 *     1e-23 and nothing that consumes psi can see it. This is a property of
 	 *     the closed form and not of either implementation;
@@ -440,12 +440,12 @@ namespace meq
 	 *     two forms genuinely differ.
 	 *
 	 * @throws std::invalid_argument if any argument is not finite, if
-	 *         @a loopRadius is not positive, if @a r is negative, or if the
+	 *         @a loopRadius is not positive, if @a R is negative, or if the
 	 *         field point is exactly ON the loop, where psi is genuinely
 	 *         infinite. The last is a refusal rather than an infinity because a
 	 *         caller who has hit it has a geometry error, not a large number.
 	 */
-	double filamentPsi( double r, double z, double loopRadius,
+	double filamentPsi( double radius, double z, double loopRadius,
 	                    double loopHeight, double current,
 	                    double mu0 = vacuumPermeability );
 
@@ -463,20 +463,20 @@ namespace meq
 	 * dA/dk = ( k/2 )[ E/( 1 - k^2 ) - K ]. Substituting the geometry and
 	 * letting the 1/( 2r ) in dk/dr cancel against the 2ar in d k^2 gives
 	 *
-	 *     d_r psi = ( mu0 I/2 pi )[ ( ( a + r )/d ) A
-	 *                               + ( a( a^2 - r^2 + dz^2 )/d^3 ) B ]
-	 *     d_z psi = ( mu0 I/2 pi )[ ( dz/d ) A - ( 2 a r dz/d^3 ) B ]
+	 *     d_r psi = ( mu0 I/2 pi )[ ( ( a + R )/d ) A
+	 *                               + ( a( a^2 - R^2 + dz^2 )/d^3 ) B ]
+	 *     d_z psi = ( mu0 I/2 pi )[ ( dz/d ) A - ( 2 a R dz/d^3 ) B ]
 	 *
 	 * with B := E/k'^2 - K, dz := z - z0. **Both bracketed forms are written
 	 * that way to avoid a cancellation**, and neither is the arrangement the
 	 * chain rule hands you:
 	 *
-	 *   * `a/d - 2ar( a + r )/d^3` is the coefficient of B as it falls out, and
+	 *   * `a/d - 2ar( a + R )/d^3` is the coefficient of B as it falls out, and
 	 *     it VANISHES at the loop -- which is the cancellation that makes the
 	 *     gradient diverge like 1/distance rather than like 1/distance^2, since
-	 *     B itself goes as 1/k'^2. Factored to `a( a^2 - r^2 + dz^2 )/d^3` it is
+	 *     B itself goes as 1/k'^2. Factored to `a( a^2 - R^2 + dz^2 )/d^3` it is
 	 *     one subtraction of two comparable numbers instead of a difference of
-	 *     products, and it is EXACTLY zero at r = a, dz = 0.
+	 *     products, and it is EXACTLY zero at R = a, dz = 0.
 	 *   * B in Carlson's forms is `k^2( R_F - R_D/3 )/k'^2`, which carries k^2
 	 *     as an explicit factor and is therefore exactly 0.0 at k = 0. Written
 	 *     as `E/k'^2 - K` it is a difference of two numbers both near pi/2 on
@@ -485,9 +485,9 @@ namespace meq
 	 * **SO THIS IS FINITE ON THE AXIS WHERE tests/analytic/CurrentLoop.hpp IS
 	 * NaN**, and that is a difference from the fixture this was promoted from
 	 * rather than an oversight in it. That fixture writes
-	 * dk/dr = k[ 1/( 2r ) - ( a + r )/d^2 ] literally and its own header records
-	 * the consequence -- *"the 1/( 2r ) is why this is NaN at r = 0. It is a
-	 * real 1/r and not an artefact: psi ~ r^2 there, so d psi/d r ~ r and the
+	 * dk/dr = k[ 1/( 2r ) - ( a + R )/d^2 ] literally and its own header records
+	 * the consequence -- *"the 1/( 2r ) is why this is NaN at R = 0. It is a
+	 * real 1/R and not an artefact: psi ~ R^2 there, so d psi/d R ~ R and the
 	 * limit exists, but the expression as written does not reach it."* The
 	 * limit is what the factored form reaches: both A and B carry k^2, k^2 = 0
 	 * on the axis, and `d_r psi( 0, z )` is 0.0 bit exactly. `d_z psi( 0, z )`
@@ -503,13 +503,13 @@ namespace meq
 	 *
 	 * @throws std::invalid_argument on the same conditions as filamentPsi().
 	 */
-	void filamentGradPsi( double r, double z, double loopRadius,
+	void filamentGradPsi( double radius, double z, double loopRadius,
 	                      double loopHeight, double current,
 	                      double &dPsiDr, double &dPsiDz,
 	                      double mu0 = vacuumPermeability );
 
 	/**
-	 * The HDG flux q = ( 1/r ) grad_bar( psi ) of a single filament.
+	 * The HDG flux q = ( 1/R ) grad_bar( psi ) of a single filament.
 	 *
 	 * THIS is the primitive a free-boundary coupling wants: the transmission
 	 * condition of FREE-BOUNDARY-PLAN.md section 4.2 is written in q, and its
@@ -526,7 +526,7 @@ namespace meq
 	 *
 	 * @throws std::invalid_argument on the same conditions as filamentPsi().
 	 */
-	void filamentFlux( double r, double z, double loopRadius,
+	void filamentFlux( double radius, double z, double loopRadius,
 	                   double loopHeight, double current,
 	                   double &qR, double &qZ,
 	                   double mu0 = vacuumPermeability );
@@ -543,10 +543,10 @@ namespace meq
 	 * weakly singular integrand lives and where the accuracy is 1e-12 rather
 	 * than 1e-16.
 	 *
-	 * @throws std::invalid_argument on a non-finite point, a negative r, or an
+	 * @throws std::invalid_argument on a non-finite point, a negative R, or an
 	 *         order outside the accepted range.
 	 */
-	double coilPsi( Coil const &coil, double r, double z,
+	double coilPsi( Coil const &coil, double radius, double z,
 	                int order = defaultCoilQuadratureOrder,
 	                double mu0 = vacuumPermeability );
 
@@ -556,7 +556,7 @@ namespace meq
 	 *
 	 * DIFFERENTIATED UNDER THE INTEGRAL SIGN, not differenced. The coil is a
 	 * fixed region and the field point is the variable, so d/dr commutes with
-	 * the integral over ( r', z' ) and this is the same panelled, cubically
+	 * the integral over ( R', z' ) and this is the same panelled, cubically
 	 * graded rule with the kernel replaced by its derivative. That matters: a
 	 * difference of coilPsi() would cost two evaluations, floor at the
 	 * difference's own O( h^2 ), and -- as CLAUDE.md records for every other
@@ -570,7 +570,7 @@ namespace meq
 	 * inside the coil the graded rule has a harder integrand to resolve, and
 	 * outside it both integrands are analytic and both rules are spectral.
 	 * Relative error against an order-128 reference, on the 0.30 x 0.40 coil
-	 * at r = 2 with 1 MA:
+	 * at R = 2 with 1 MA:
 	 *
 	 *     probe                       n = 8    n = 16    n = 32    n = 48
 	 *     inside,       grad       3.51e-03  9.12e-05  2.29e-06  2.28e-07
@@ -594,14 +594,14 @@ namespace meq
 	 *
 	 * @throws std::invalid_argument on the same conditions as coilPsi().
 	 */
-	void coilGradPsi( Coil const &coil, double r, double z,
+	void coilGradPsi( Coil const &coil, double radius, double z,
 	                  double &dPsiDr, double &dPsiDz,
 	                  int order = defaultCoilQuadratureOrder,
 	                  double mu0 = vacuumPermeability );
 
-	/// The HDG flux q = ( 1/r ) grad_bar( psi ) of one rectangular coil.
+	/// The HDG flux q = ( 1/R ) grad_bar( psi ) of one rectangular coil.
 	/// NaN on the axis in both components, for the reason filamentFlux() gives.
-	void coilFlux( Coil const &coil, double r, double z,
+	void coilFlux( Coil const &coil, double radius, double z,
 	               double &qR, double &qZ,
 	               int order = defaultCoilQuadratureOrder,
 	               double mu0 = vacuumPermeability );
@@ -610,7 +610,7 @@ namespace meq
 	 * `q_r` ON THE AXIS: the finite limit that filamentFlux() and coilFlux()
 	 * deliberately do not reach.
 	 *
-	 * `q = ( 1/r ) grad_bar( psi )` is `0/0` at `r = 0`, and those two report
+	 * `q = ( 1/R ) grad_bar( psi )` is `0/0` at `R = 0`, and those two report
 	 * NaN there rather than substituting a limit quietly -- which is the right
 	 * default, because a caller that has not thought about the axis learns
 	 * something from a NaN and nothing from a plausible number. These two are
@@ -619,8 +619,8 @@ namespace meq
 	 * machine's does.
 	 *
 	 * **THERE IS ONLY ONE COMPONENT BECAUSE THE OTHER ONE IS EXACTLY ZERO.**
-	 * `q_z = ( 1/r ) d_z psi`, and `psi ~ c( z ) r^2` near the axis for any
-	 * field regular there, so `d_z psi ~ c'( z ) r^2` and `q_z ~ c'( z ) r -> 0`.
+	 * `q_z = ( 1/R ) d_z psi`, and `psi ~ c( z ) R^2` near the axis for any
+	 * field regular there, so `d_z psi ~ c'( z ) R^2` and `q_z ~ c'( z ) R -> 0`.
 	 * `q_r` tends to `c( z )`, which is `B_z` on the axis and is finite and in
 	 * general non-zero -- returning a pair would invite a caller to read the
 	 * zero as the same kind of statement as the limit, and it is not.
@@ -630,7 +630,7 @@ namespace meq
 	 * every textbook writes it.
 	 *
 	 * **AND THE COIL'S VERSION NEEDS NO PANELLING OR GRADING**, unlike
-	 * coilPsi()'s cross-section integral: meq::Coil refuses `rMin <= 0`, so the
+	 * coilPsi()'s cross-section integral: meq::Coil refuses `R_min <= 0`, so the
 	 * axis is strictly outside every coil, the integrand `a^2/( 2 d^3 )` is
 	 * analytic over the whole rectangle and a plain tensor Gauss rule converges
 	 * spectrally. The grading in coilPsi() exists for a field point INSIDE the
@@ -711,13 +711,13 @@ namespace meq
 	 * coilPsi() is the reference field.
 	 *
 	 * psi( 0, z ) is 0.0 BIT EXACTLY, as it is for both other conductor kinds:
-	 * every chord's kernel carries k^2 = 4 a r/d^2 as a factor.
+	 * every chord's kernel carries k^2 = 4 a R/d^2 as a factor.
 	 *
 	 * @throws std::invalid_argument on a non-finite argument, a negative field
 	 *         radius, a non-positive semi-axis, an ellipse reaching the axis,
 	 *         or an order outside the accepted range.
 	 */
-	double ellipsePsi( double r, double z, double centreR, double centreZ,
+	double ellipsePsi( double radius, double z, double centreR, double centreZ,
 	                   double semiR, double semiZ, double current,
 	                   int order = defaultEllipseQuadratureOrder,
 	                   double mu0 = vacuumPermeability );
@@ -726,7 +726,7 @@ namespace meq
 	 * An IDEAL CIRCULAR FILAMENT: a ring current of zero cross-section,
 	 * coaxial with the axis.
 	 *
-	 * Same conventions as meq::Coil in every respect -- psi = r A_phi in weber
+	 * Same conventions as meq::Coil in every respect -- psi = R A_phi in weber
 	 * per radian, a SIGNED current in amperes that may be zero, geometry in
 	 * metres, and no permeability of its own because mu0 belongs to whatever
 	 * owns the conductor. It is deliberately shaped like Coil so that the two
@@ -763,10 +763,10 @@ namespace meq
 	{
 		public:
 			/// @param radiusIn   the ring's major radius, metres. Strictly
-			///                   positive -- a filament at r <= 0 is the same
+			///                   positive -- a filament at R <= 0 is the same
 			///                   refusal meq::Coil makes for a coil reaching
 			///                   the axis, and for the same reason: the
-			///                   operator's 1/r is not integrable through it.
+			///                   operator's 1/R is not integrable through it.
 			/// @param heightIn   its height, metres.
 			/// @param currentIn  the current, amperes. Signed; zero allowed,
 			///                   because a scan over currents must be
@@ -790,16 +790,16 @@ namespace meq
 	/// psi of a filament. Identical to the five-argument filamentPsi(); this
 	/// overload exists so that a caller holding a CurrentFilament need not
 	/// unpack it.
-	double filamentPsi( CurrentFilament const &filament, double r, double z,
+	double filamentPsi( CurrentFilament const &filament, double radius, double z,
 	                    double mu0 = vacuumPermeability );
 
 	/// grad_bar( psi ) of a filament. See the free function for the algebra.
-	void filamentGradPsi( CurrentFilament const &filament, double r, double z,
+	void filamentGradPsi( CurrentFilament const &filament, double radius, double z,
 	                      double &dPsiDr, double &dPsiDz,
 	                      double mu0 = vacuumPermeability );
 
-	/// q = ( 1/r ) grad_bar( psi ) of a filament. NaN on the axis.
-	void filamentFlux( CurrentFilament const &filament, double r, double z,
+	/// q = ( 1/R ) grad_bar( psi ) of a filament. NaN on the axis.
+	void filamentFlux( CurrentFilament const &filament, double radius, double z,
 	                   double &qR, double &qZ,
 	                   double mu0 = vacuumPermeability );
 
@@ -897,11 +897,11 @@ namespace meq
 			/**
 			 * The Grad-Shafranov source term, IN MEQ'S F CONVENTION:
 			 *
-			 *     f( r, z ) = sum over coils containing ( r, z ) of
-			 *                 mu0 * r * ( I / area ),
+			 *     f( R, z ) = sum over coils containing ( R, z ) of
+			 *                 mu0 * R * ( I / area ),
 			 *
 			 * and exactly zero outside every coil. The derivation of that
-			 * factor is at the top of this file; the 1/r that turns F into the
+			 * factor is at the top of this file; the 1/R that turns F into the
 			 * right hand side of the weak form belongs to the weak form and is
 			 * NOT applied here, which is the same contract meq::Source::f()
 			 * signs up to.
@@ -914,24 +914,24 @@ namespace meq
 			 * comment for what that costs a convergence rate and why FB-2's
 			 * acceptance is a flux balance instead.
 			 */
-			double f( double r, double z ) const;
+			double f( double radius, double z ) const;
 
 			/// The signed sum of the coil currents, in amperes.
 			///
 			/// This is the number FB-2 checks the outward flux against.
 			/// Integrating Delta* psi = -F and using
-			/// Delta* psi = r div_bar( ( 1/r ) grad_bar psi ) turns the area
+			/// Delta* psi = R div_bar( ( 1/R ) grad_bar psi ) turns the area
 			/// integral of j_phi into a boundary integral,
 			///
-			///     oint ( 1/r ) dpsi/dn dl = -mu0 * totalCurrent(),
+			///     oint ( 1/R ) dpsi/dn dl = -mu0 * totalCurrent(),
 			///
 			/// so the total current is a property of the trace alone and the
 			/// check is exact whatever the mesh does inside the coils.
 			///
 			/// THE SIGN IS NEGATIVE, and it is written out because the same
-			/// identity as a circulation of B counterclockwise in ( r, z )
-			/// comes out POSITIVE: phi-hat = z-hat x r-hat, so counterclockwise
-			/// in the ( r, z ) plane has normal -phi-hat. Measured on one coil
+			/// identity as a circulation of B counterclockwise in ( R, z )
+			/// comes out POSITIVE: phi-hat = z-hat x R-hat, so counterclockwise
+			/// in the ( R, z ) plane has normal -phi-hat. Measured on one coil
 			/// over an enclosing rectangle, by central differences of psi() and
 			/// a midpoint rule refined from 200 to 400 points and Richardson
 			/// extrapolated: -1.2566370749e+00 against -mu0 I =
@@ -940,14 +940,14 @@ namespace meq
 			/// this is the version of it that is measured rather than argued.
 			double totalCurrent() const;
 
-			/// The index of a coil containing ( r, z ), or -1 if none does.
+			/// The index of a coil containing ( R, z ), or -1 if none does.
 			///
 			/// THE FIRST such coil in insertion order, which is only ambiguous
 			/// if coils overlap -- and if they do, f() is the method that
 			/// answers correctly, since it sums them. The return type is signed
 			/// so that -1 can be the sentinel; a non-negative answer may be
 			/// cast to std::size_t and passed to coil().
-			int indexContaining( double r, double z ) const;
+			int indexContaining( double radius, double z ) const;
 
 			/// The exact poloidal flux of the whole set: the sum over coils of
 			/// coilPsi() at this set's quadrature order and permeability.
@@ -955,20 +955,20 @@ namespace meq
 			/// Delta* is linear, so a sum of coil fields is the field of the
 			/// sum, and this is the closed form FB-1 compares a vacuum solve
 			/// against. An empty set gives exactly 0.0.
-			double psi( double r, double z ) const;
+			double psi( double radius, double z ) const;
 
 			/// One coil's contribution to psi(), for a caller separating them.
 			/// @throws std::out_of_range as coil() does.
-			double psiOf( std::size_t index, double r, double z ) const;
+			double psiOf( std::size_t index, double radius, double z ) const;
 
 			/**
 			 * grad_bar( psi ) of the whole set, and the HDG flux
-			 * q = ( 1/r ) grad_bar( psi ).
+			 * q = ( 1/R ) grad_bar( psi ).
 			 *
 			 * **q IS WHAT FB-7 NEEDS**: a conductor outside Gamma enters the
 			 * coupling through the transmission condition, whose Neumann half
 			 * is q . nu on Gamma. grad_bar psi is offered beside it because
-			 * dividing by r is the caller's business on the axis -- see below
+			 * dividing by R is the caller's business on the axis -- see below
 			 * -- and because a consumer computing B wants the pair undivided.
 			 *
 			 * Delta* is linear, so these sum over the coils exactly as psi()
@@ -977,19 +977,19 @@ namespace meq
 			 *
 			 * **flux() IS NaN ON THE AXIS AND gradPsi() IS 0.0 THERE**, which
 			 * is not the same statement twice. Every coil's grad_bar psi
-			 * vanishes at r = 0 -- exactly, k^2 being an explicit factor -- and
+			 * vanishes at R = 0 -- exactly, k^2 being an explicit factor -- and
 			 * q divides that zero by zero. The limit is finite and this does
 			 * not reach it. It matters because **a semicircle centred on the
 			 * axis meets the axis at both ends**, so a sweep of such a Gamma
 			 * hits the one place q is unavailable.
 			 */
-			void gradPsi( double r, double z,
+			void gradPsi( double radius, double z,
 			              double &dPsiDr, double &dPsiDz ) const;
-			void flux( double r, double z, double &qR, double &qZ ) const;
+			void flux( double radius, double z, double &qR, double &qZ ) const;
 
 			/// One coil's contribution to gradPsi().
 			/// @throws std::out_of_range as coil() does.
-			void gradPsiOf( std::size_t index, double r, double z,
+			void gradPsiOf( std::size_t index, double radius, double z,
 			                double &dPsiDr, double &dPsiDz ) const;
 
 			/// Gauss points per direction per panel for psi() and psiOf().
@@ -1085,7 +1085,7 @@ namespace meq
 			/// The signed sum of every conductor's current, in amperes.
 			///
 			/// **IT IS NOT WHAT FB-2's FLUX BALANCE CHECKS.** That identity,
-			/// `oint ( 1/r ) dpsi/dn dl = -mu0 I`, counts the current ENCLOSED,
+			/// `oint ( 1/R ) dpsi/dn dl = -mu0 I`, counts the current ENCLOSED,
 			/// and by construction none of this is: an exterior conductor
 			/// contributes exactly zero to a contour integral over Gamma. So
 			/// this number is for reporting what a machine description was
@@ -1093,7 +1093,7 @@ namespace meq
 			/// being compared carry the same current.
 			double totalCurrent() const;
 
-			/// The poloidal flux of the whole set at ( r, z ): coilPsi() over
+			/// The poloidal flux of the whole set at ( R, z ): coilPsi() over
 			/// the rectangles at this set's order, plus filamentPsi() over the
 			/// filaments. Delta* is linear, so a sum of fields is the field of
 			/// the sum. An empty set gives exactly 0.0.
@@ -1103,10 +1103,10 @@ namespace meq
 			/// condition the free-boundary problem imposes on the axis, and is
 			/// worth having exactly rather than to round-off, since Gamma is a
 			/// semicircle whose ends sit there.
-			double psi( double r, double z ) const;
+			double psi( double radius, double z ) const;
 
 			/// grad_bar( psi ) of the whole set, and the HDG flux
-			/// q = ( 1/r ) grad_bar( psi ). Summed exactly as psi() is.
+			/// q = ( 1/R ) grad_bar( psi ). Summed exactly as psi() is.
 			///
 			/// **q IS WHAT THE TRANSMISSION ROW NEEDS** -- its Neumann half is
 			/// q . nu on Gamma -- and **flux() IS NaN ON THE AXIS WHERE
@@ -1115,9 +1115,9 @@ namespace meq
 			/// zero by zero. The limit is finite and this does not reach it.
 			/// GradShafranovSolver::conductorNormalFlux() carries the axis rule
 			/// that deals with it.
-			void gradPsi( double r, double z,
+			void gradPsi( double radius, double z,
 			              double &dPsiDr, double &dPsiDz ) const;
-			void flux( double r, double z, double &qR, double &qZ ) const;
+			void flux( double radius, double z, double &qR, double &qZ ) const;
 
 			/**
 			 * How far the nearest conductor clears a semicircular `Gamma` of
@@ -1169,7 +1169,7 @@ namespace meq
 	 * because it is the coils that need adapting: `Source::f()` takes psi and a
 	 * coil current does not depend on it.
 	 *
-	 * `F = F_plasma( r, z, psi ) + F_coil( r, z )`, and
+	 * `F = F_plasma( R, z, psi ) + F_coil( R, z )`, and
 	 * `dF/dpsi = dF_plasma/dpsi` exactly -- the coils contribute nothing to the
 	 * Jacobian, so a solve driven by coils ALONE is affine and Newton finishes
 	 * in one step. That is the property `theCoilsMakeAVacuumSolveAffine`
@@ -1188,11 +1188,11 @@ namespace meq
 			CoilAugmentedSource( std::shared_ptr<Source const> plasmaIn,
 			                     std::shared_ptr<CoilSet const> coilsIn );
 
-			/// F_plasma( r, z, psi ) + F_coil( r, z ).
-			double f( double r, double z, double psi ) const override;
+			/// F_plasma( R, z, psi ) + F_coil( R, z ).
+			double f( double radius, double z, double psi ) const override;
 
 			/// dF_plasma/dpsi. The coils contribute exactly zero.
-			double dFdPsi( double r, double z, double psi ) const override;
+			double dFdPsi( double radius, double z, double psi ) const override;
 
 			Source const & plasma() const;
 			CoilSet const & coils() const;
@@ -1244,8 +1244,8 @@ namespace meq
 				std::shared_ptr<NormalisedSource> plasmaIn,
 				std::shared_ptr<CoilSet const> coilsIn );
 
-			double f( double r, double z, double psi ) const override;
-			double dFdPsi( double r, double z, double psi ) const override;
+			double f( double radius, double z, double psi ) const override;
+			double dFdPsi( double radius, double z, double psi ) const override;
 
 			void setNormalisation( double psiAxis,
 			                       double psiBoundary ) override;
@@ -1276,7 +1276,7 @@ namespace meq
 			/// coil term, exactly, with no cancellation: computed as
 			/// f() - scaledF() it would be ( plasma + coil ) - plasma, which is
 			/// the coil term only to round-off.
-			double fOutsidePlasma( double r, double z ) const override;
+			double fOutsidePlasma( double radius, double z ) const override;
 
 			/// FORWARDED, AND FOR THE SAME REASON setPlasmaSupport() IS. The
 			/// normalisations belong to the profiles, which belong to the
@@ -1286,7 +1286,7 @@ namespace meq
 			/// base's default returns false and every run carrying a [[coils]]
 			/// block would silently fall back to a DIFFERENCED border column,
 			/// which is the trap the base class documents one method up.
-			bool normalisationDerivatives( double r, double z, double psi,
+			bool normalisationDerivatives( double radius, double z, double psi,
 			                               double &dFdAxis,
 			                               double &dFdBoundary ) const override;
 
@@ -1305,8 +1305,8 @@ namespace meq
 			/// The plasma term alone, which is what the current constraint is
 			/// about -- this class's own f() is the SUM and would put the coil
 			/// current inside the prescribed plasma current.
-			double scaledF( double r, double z, double psi ) const override;
-			double scaledDFdPsi( double r, double z, double psi ) const override;
+			double scaledF( double radius, double z, double psi ) const override;
+			double scaledDFdPsi( double radius, double z, double psi ) const override;
 
 			NormalisedSource & plasma() const;
 			CoilSet const & coils() const;

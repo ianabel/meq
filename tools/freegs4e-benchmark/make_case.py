@@ -174,7 +174,7 @@ def build(npz_path, outdir, stem=None, degree=2, target_elements=4000,
     # Grad-Shafranov contains `dp/dpsi` and `g dg/dpsi` and nothing else, so a
     # case file fixes `p` and `g^2` only up to an additive constant each, and
     # MEQ's answer for `psi` is independent of both.  A FULL MHD equilibrium is
-    # not: `B_phi = g/r` and the toroidal flux are proportional to `g`, and the
+    # not: `B_phi = g/R` and the toroidal flux are proportional to `g`, and the
     # pressure is a profile rather than a gradient.
     #
     # So any code that solves more than Grad-Shafranov needs these two numbers
@@ -196,7 +196,7 @@ def build(npz_path, outdir, stem=None, degree=2, target_elements=4000,
     nr, nz, refine, predicted = choose_mesh(target_elements, kappa)
 
     pad_r, pad_z = PAD * a, PAD * kappa * a
-    box = dict(rmin=max(1e-3, R0 - a - pad_r), rmax=R0 + a + pad_r,
+    box = dict(Rmin=max(1e-3, R0 - a - pad_r), Rmax=R0 + a + pad_r,
                zmin=Z0 - kappa * a - pad_z, zmax=Z0 + kappa * a + pad_z)
 
     def wrap(values, per_line=4):

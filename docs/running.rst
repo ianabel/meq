@@ -29,7 +29,7 @@ Making the mesh from the same file
 ----------------------------------
 
 A free-boundary machine needs a mesh ``mfem::Mesh::MakeCartesian2D`` cannot
-build: a semicircle reaching :math:`r = 0` exactly, with the conductors
+build: a semicircle reaching :math:`R = 0` exactly, with the conductors
 fragmented in. That comes from gmsh, through ``tools/mesh/halfdisc.py``.
 
 ``[mesh.generate]`` puts the geometry of that mesh in the same file as the
@@ -130,7 +130,7 @@ on failure:
 
 .. code-block:: text
 
-      it            ||r||    ||r||/||r_0||    order
+      it            ||R||    ||R||/||r_0||    order
 
 The ``order`` column is the observed order of convergence, computed once three
 residuals exist and while they are above the round-off floor. It is there
@@ -224,23 +224,23 @@ a plasma that contains the symmetry axis
    :math:`-\psi_{\mathrm{bnd}}/(\psi_{\mathrm{ax}} - \psi_{\mathrm{bnd}})`,
    and the plasma is wherever that is positive. A **tokamak** is a torus about
    :math:`R_0 > 0` and its symmetry axis is in the vacuum, so a support
-   containing :math:`r = 0` is toroidal current threading the machine's own
+   containing :math:`R = 0` is toroidal current threading the machine's own
    centre line — not a large error but the wrong topology, and no refinement
    turns it into the equilibrium ``[source]`` asks for.
 
    **A levitated dipole or a magnetic mirror genuinely reaches the axis, and
    this does not refuse those.** Neither has a toroidal field, so :math:`g`
    vanishes identically in both — which is the same fact twice, since
-   :math:`B_\phi = g/r` must be finite on the axis and a plasma reaching
-   :math:`r = 0` therefore cannot carry a toroidal field there. So the test is
+   :math:`B_\phi = g/R` must be finite on the axis and a plasma reaching
+   :math:`R = 0` therefore cannot carry a toroidal field there. So the test is
    :math:`g g' \equiv 0`, checked across a spread of :math:`\Psi` rather than at
    one value, and not a device name. If a dipole or a mirror is what you meant,
    set ``GGPrime`` to zero and the run proceeds.
 
 a source that does not vanish on the symmetry axis
-   :math:`F/r` is :math:`\mu_0 j_\phi`, so a domain reaching :math:`r = 0`
+   :math:`F/R` is :math:`\mu_0 j_\phi`, so a domain reaching :math:`R = 0`
    needs :math:`F(0, z) = 0` or the toroidal current density is infinite there.
-   :math:`F = \mu_0 r^2 p' + g g'` leaves only :math:`g g'`, and
+   :math:`F = \mu_0 R^2 p' + g g'` leaves only :math:`g g'`, and
    :math:`\psi(0, z) = 0` exactly, so the profiles are evaluated at
    :math:`\Psi = -\psi_{\mathrm{bnd}}/(\psi_{\mathrm{ax}} -
    \psi_{\mathrm{bnd}})`. With a fixed boundary that is zero and every profile
@@ -386,7 +386,7 @@ mesh does not is interpolated.
 
    **A warm start interacts badly with a relative convergence tolerance, and the
    better the guess the worse it gets.** A stopping rule of the form
-   :math:`\|r\| \le \texttt{rel\_tol} \cdot \|r_0\|` measures :math:`\|r_0\|` at
+   :math:`\|R\| \le \texttt{rel\_tol} \cdot \|r_0\|` measures :math:`\|r_0\|` at
    the iterate it was handed; start from a converged answer and that target
    shrinks with it, until it falls below the round-off floor and *nothing* can
    meet it. The symptom is a solve that reaches machine precision in two

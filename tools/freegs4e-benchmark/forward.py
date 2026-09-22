@@ -461,22 +461,22 @@ def main():
     nx = int(sys.argv[1]) if len(sys.argv) > 1 else None
     npz = np.load(NPZ, allow_pickle=True)
     case = forward.case_for("{name}")
-    r = forward.solve_forward(npz, case, nx)
+    R = forward.solve_forward(npz, case, nx)
 
     print("  {name}, FORWARD")
-    print("    grid        {{:d}}^2".format(r["nx"]))
+    print("    grid        {{:d}}^2".format(R["nx"]))
     print("    status      {{status}} in {{its}} iterations, rel {{rel:.2e}}"
-          .format(**r))
+          .format(**R))
     print("    Ip_logic L  {{L:.9f}}   (1 means the saved arrays are the source)"
-          .format(**r))
-    print("    Ip          {{Ip:.6e}}".format(**r))
-    print("    psi_axis    {{psi_axis:.10e}}".format(**r))
-    print("    psi_bndry   {{psi_bndry:.10e}}".format(**r))
-    print("    axis        ( {{Raxis:.6f}}, {{Zaxis:.6f}} )".format(**r))
+          .format(**R))
+    print("    Ip          {{Ip:.6e}}".format(**R))
+    print("    psi_axis    {{psi_axis:.10e}}".format(**R))
+    print("    psi_bndry   {{psi_bndry:.10e}}".format(**R))
+    print("    axis        ( {{Raxis:.6f}}, {{Zaxis:.6f}} )".format(**R))
     print()
     print("    reference (INVERSE): psi_axis {{:.10e}}  psi_bndry {{:.10e}}"
           .format(float(npz["psi_axis"]), float(npz["psi_bndry"])))
-    rel = abs(r["psi_axis"] - float(npz["psi_axis"]))/abs(float(npz["psi_axis"]))
+    rel = abs(R["psi_axis"] - float(npz["psi_axis"]))/abs(float(npz["psi_axis"]))
     print("    forward vs inverse in psi_axis: {{:.3e}} relative".format(rel))
 
 
@@ -571,7 +571,7 @@ def main():
                          else "   PINNED to Zaxis = %.4f, gain %s"
                               % (pin_z, "calibrated" if pin_gain is None
                                  else "%g" % pin_gain)), flush=True)
-                r = trace_forward(npz, case, nx, pin_z=pin_z,
+                R = trace_forward(npz, case, nx, pin_z=pin_z,
                                   pin_coils=pin_coils, pin_gain=pin_gain)
                 ref = "    reference (INVERSE): psi_axis %.10e" \
                       % float(npz["psi_axis"])
@@ -583,7 +583,7 @@ def main():
                 print("    %5s %10s %10s %4s %4s %12s %12s %10s %11s%s"
                       % ("it", "rel", "L", "nO", "nX", "psi_axis",
                          "psi_bndry", "Raxis", "Zaxis", extra), flush=True)
-                h = r["history"]
+                h = R["history"]
                 for row in h:
                     if row["it"] % every and row is not h[-1]:
                         continue
@@ -597,7 +597,7 @@ def main():
                 zs = np.array([x["Zaxis"] for x in h])
                 good = np.isfinite(zs)
                 print("    %s in %d iterations;  Zaxis %+.6f -> %+.6f, "
-                      "span %.6f" % (r["status"], r["its"],
+                      "span %.6f" % (R["status"], R["its"],
                                      zs[good][0] if good.any() else np.nan,
                                      zs[good][-1] if good.any() else np.nan,
                                      (zs[good].max() - zs[good].min())
@@ -618,16 +618,16 @@ def main():
         for name, case in rows:
             npz = np.load(os.path.join(HERE, name + ".npz"), allow_pickle=True)
             try:
-                r = solve_from_cold(npz, case, grids[0] if grids else None)
+                R = solve_from_cold(npz, case, grids[0] if grids else None)
             except Exception as exc:
                 print("  %-38s  FAILED %r" % (name, exc), flush=True)
                 continue
             ref = float(npz["psi_axis"])
-            rel = abs(r["psi_axis"] - ref)/abs(ref)
-            inv = "/".join(str(x[2]) for x in r["stages"][:-1])
+            rel = abs(R["psi_axis"] - ref)/abs(ref)
+            inv = "/".join(str(x[2]) for x in R["stages"][:-1])
             print("  %-38s %6d %8s %7d %10.6f %16.10e %11.3e"
-                  % (name, r["nx"], inv, r["stages"][-1][2], r["L"],
-                     r["psi_axis"], rel), flush=True)
+                  % (name, R["nx"], inv, R["stages"][-1][2], R["L"],
+                     R["psi_axis"], rel), flush=True)
         return
 
     print("\n  FORWARD AGAINST THE INVERSE REFERENCE IT CAME FROM", flush=True)
@@ -655,25 +655,25 @@ def main():
         for nx in (grids or [None]):
             try:
                 if cold_forward:
-                    r = solve_forward(npz, case, nx, seeded=False)
+                    R = solve_forward(npz, case, nx, seeded=False)
                     dI = 0.0
                 elif pin_auto or pin_z is not None:
                     z0 = float(npz["Zaxis"]) if pin_auto else pin_z
-                    r = trace_forward(npz, case, nx, pin_z=z0,
+                    R = trace_forward(npz, case, nx, pin_z=z0,
                                       pin_coils=pin_coils, pin_gain=pin_gain)
-                    dI = r["history"][-1].get("pin", 0.0)
+                    dI = R["history"][-1].get("pin", 0.0)
                 else:
-                    r = solve_forward(npz, case, nx)
+                    R = solve_forward(npz, case, nx)
                     dI = 0.0
             except Exception as exc:
                 print("  %-38s %6s  FAILED %r"
                       % (name, nx or "ref", exc), flush=True)
                 continue
             ref = float(npz["psi_axis"])
-            rel = abs(r["psi_axis"] - ref)/abs(ref)
+            rel = abs(R["psi_axis"] - ref)/abs(ref)
             print("  %-38s %6d %8s %6d %10.6f %16.10e %11.3e %11.3e"
-                  % (name, r["nx"], r["status"], r["its"], r["L"],
-                     r["psi_axis"], rel, dI), flush=True)
+                  % (name, R["nx"], R["status"], R["its"], R["L"],
+                     R["psi_axis"], rel, dI), flush=True)
 
 
 if __name__ == "__main__":

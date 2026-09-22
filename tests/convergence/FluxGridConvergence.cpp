@@ -73,7 +73,7 @@ namespace
 
 	struct ExactAxis
 	{
-		double r;
+		double radius;
 		double z;
 		double psi;
 	};
@@ -83,7 +83,7 @@ namespace
 	/// FluxSurfaceConvergence.cpp, where the argument for it is.
 	ExactAxis exactAxis( Equilibrium const &eq, double rGuess, double zGuess )
 	{
-		double r = rGuess;
+		double radius = rGuess;
 		double z = zGuess;
 		double const step = 1.0e-5;
 
@@ -91,32 +91,32 @@ namespace
 		{
 			double gr = 0.0;
 			double gz = 0.0;
-			eq.gradPsi( r, z, gr, gz );
+			eq.gradPsi( radius, z, gr, gz );
 
 			double a0 = 0.0;
 			double a1 = 0.0;
 			double b0 = 0.0;
 			double b1 = 0.0;
 			double hessian[ 2 ][ 2 ];
-			eq.gradPsi( r + step, z, a0, b0 );
-			eq.gradPsi( r - step, z, a1, b1 );
+			eq.gradPsi( radius + step, z, a0, b0 );
+			eq.gradPsi( radius - step, z, a1, b1 );
 			hessian[ 0 ][ 0 ] = ( a0 - a1 )/( 2.0*step );
 			hessian[ 1 ][ 0 ] = ( b0 - b1 )/( 2.0*step );
-			eq.gradPsi( r, z + step, a0, b0 );
-			eq.gradPsi( r, z - step, a1, b1 );
+			eq.gradPsi( radius, z + step, a0, b0 );
+			eq.gradPsi( radius, z - step, a1, b1 );
 			hessian[ 0 ][ 1 ] = ( a0 - a1 )/( 2.0*step );
 			hessian[ 1 ][ 1 ] = ( b0 - b1 )/( 2.0*step );
 
 			double const det = hessian[ 0 ][ 0 ]*hessian[ 1 ][ 1 ]
 			                   - hessian[ 0 ][ 1 ]*hessian[ 1 ][ 0 ];
-			r += -(  hessian[ 1 ][ 1 ]*gr - hessian[ 0 ][ 1 ]*gz )/det;
+			radius += -(  hessian[ 1 ][ 1 ]*gr - hessian[ 0 ][ 1 ]*gz )/det;
 			z += -( -hessian[ 1 ][ 0 ]*gr + hessian[ 0 ][ 0 ]*gz )/det;
 		}
 
 		ExactAxis axis;
-		axis.r = r;
+		axis.radius = radius;
 		axis.z = z;
-		axis.psi = eq.psi( r, z );
+		axis.psi = eq.psi( radius, z );
 		return axis;
 	}
 
@@ -263,7 +263,7 @@ namespace
 		mfem::Mesh &background = *backgrounds.back();
 		background.Transform( [ box ]( mfem::Vector const &in, mfem::Vector &out )
 		{
-			out( 0 ) = in( 0 ) + box.rMin;
+			out( 0 ) = in( 0 ) + box.minRadius;
 			out( 1 ) = in( 1 ) + box.zMin;
 		} );
 		h = box.width()/static_cast<double>( n );
@@ -376,12 +376,12 @@ BOOST_AUTO_TEST_CASE( theFamilyReproducesTheExactSurfaces )
 	for ( meq::FluxSurface const &surface : family.surfaces )
 	{
 		meq::analytic::SurfaceQuadrature const exact =
-			meq::analytic::surfaceQuadrature( equilibrium(), axis().r, axis().z,
+			meq::analytic::surfaceQuadrature( equilibrium(), axis().radius, axis().z,
 			                                  surface.level, 2048, 2.0 );
 
 		double const exactInverse = exact.average(
 			[]( meq::analytic::SurfacePoint const &p )
-			{ return 1.0/( p.r*p.r ); } );
+			{ return 1.0/( p.radius*p.radius ); } );
 
 		double const vRel = relative( surface.vPrime, exact.vPrime );
 		double const iRel = relative( surface.inverseRSquared, exactInverse );
@@ -394,10 +394,10 @@ BOOST_AUTO_TEST_CASE( theFamilyReproducesTheExactSurfaces )
 		{
 			double gr = 0.0;
 			double gz = 0.0;
-			equilibrium().gradPsi( surface.r[ j ], surface.z[ j ], gr, gz );
+			equilibrium().gradPsi( surface.radius[ j ], surface.z[ j ], gr, gz );
 			double const magnitude = std::hypot( gr, gz );
 			double const distance =
-				std::abs( equilibrium().psi( surface.r[ j ], surface.z[ j ] )
+				std::abs( equilibrium().psi( surface.radius[ j ], surface.z[ j ] )
 				          - surface.level )/magnitude;
 			worstPosition = std::max( worstPosition, distance );
 		}
@@ -858,7 +858,7 @@ BOOST_AUTO_TEST_CASE( theFluxGridFileCarriesTheBandMaskPerNode )
 	                   std::invalid_argument );
 
 	meq::FluxSurfaceFamily ragged = family;
-	ragged.surfaces[ 3 ].r.pop_back();
+	ragged.surfaces[ 3 ].radius.pop_back();
 	BOOST_CHECK_THROW( meq::FluxGridWriter( file.path(), ragged ),
 	                   std::invalid_argument );
 }
@@ -914,7 +914,7 @@ BOOST_AUTO_TEST_CASE( theCacheServesTheFamilyTheExtractionWouldRebuild )
 		meq::CriticalPoint axisHere = found;
 		double qR = 0.0;
 		double qZ = 0.0;
-		BOOST_TEST_REQUIRE( tracer.sampleAt( found.r, found.z, axisHere.psi,
+		BOOST_TEST_REQUIRE( tracer.sampleAt( found.radius, found.z, axisHere.psi,
 		                                     qR, qZ ) );
 
 		return meq::extractFluxSurfaces( tracer, axisHere, 0.0,
@@ -934,8 +934,8 @@ BOOST_AUTO_TEST_CASE( theCacheServesTheFamilyTheExtractionWouldRebuild )
 		for ( std::size_t j = 0; j < once.angles; ++j )
 		{
 			worstRepeat = std::max( worstRepeat,
-				std::abs( once.surfaces[ i ].r[ j ]
-				          - twice.surfaces[ i ].r[ j ] ) );
+				std::abs( once.surfaces[ i ].radius[ j ]
+				          - twice.surfaces[ i ].radius[ j ] ) );
 			worstRepeat = std::max( worstRepeat,
 				std::abs( once.surfaces[ i ].z[ j ]
 				          - twice.surfaces[ i ].z[ j ] ) );

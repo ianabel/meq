@@ -18,14 +18,14 @@ namespace meq
 			throw std::invalid_argument( "meq::MHDSource: mu0 must be finite" );
 	}
 
-	double MHDSource::f( double r, double, double psi ) const
+	double MHDSource::f( double radius, double, double psi ) const
 	{
-		return permeability*r*r*( *pPrimeProfile )( psi ) + ( *ggPrimeProfile )( psi );
+		return permeability*radius*radius*( *pPrimeProfile )( psi ) + ( *ggPrimeProfile )( psi );
 	}
 
-	double MHDSource::dFdPsi( double r, double, double psi ) const
+	double MHDSource::dFdPsi( double radius, double, double psi ) const
 	{
-		return permeability*r*r*pPrimeProfile->prime( psi ) + ggPrimeProfile->prime( psi );
+		return permeability*radius*radius*pPrimeProfile->prime( psi ) + ggPrimeProfile->prime( psi );
 	}
 
 	Profile const & MHDSource::pPrime() const
@@ -87,7 +87,7 @@ namespace meq
 		return psiAxisValue;
 	}
 
-	double NormalisedMHDSource::f( double r, double, double psi ) const
+	double NormalisedMHDSource::f( double radius, double, double psi ) const
 	{
 		// Psi = ( psi - psi_bnd )/span, and the profiles are differentiated with
 		// respect to Psi, so F carries one factor of 1/span. With psi_bnd = 0
@@ -103,11 +103,11 @@ namespace meq
 		double const span = psiAxisValue - psiBoundaryValue;
 		double const psiN = ( psi - psiBoundaryValue )/span;
 		return currentScale()
-		       *( permeability*r*r*( *pPrimeProfile )( psiN ) + ( *ggPrimeProfile )( psiN ) )
+		       *( permeability*radius*radius*( *pPrimeProfile )( psiN ) + ( *ggPrimeProfile )( psiN ) )
 		       /span;
 	}
 
-	double NormalisedMHDSource::dFdPsi( double r, double, double psi ) const
+	double NormalisedMHDSource::dFdPsi( double radius, double, double psi ) const
 	{
 		// Two factors of 1/span, not one: the profiles are differentiated with
 		// respect to Psi and the argument carries a further 1/span. Dropping the
@@ -125,11 +125,11 @@ namespace meq
 		double const span = psiAxisValue - psiBoundaryValue;
 		double const psiN = ( psi - psiBoundaryValue )/span;
 		return currentScale()
-		       *( permeability*r*r*pPrimeProfile->prime( psiN ) + ggPrimeProfile->prime( psiN ) )
+		       *( permeability*radius*radius*pPrimeProfile->prime( psiN ) + ggPrimeProfile->prime( psiN ) )
 		       /( span*span );
 	}
 
-	bool NormalisedMHDSource::normalisationDerivatives( double r, double /*z*/,
+	bool NormalisedMHDSource::normalisationDerivatives( double radius, double /*z*/,
 	                                                    double psi,
 	                                                    double &dFdAxis,
 	                                                    double &dFdBoundary ) const
@@ -153,9 +153,9 @@ namespace meq
 		// and g'( Psi ) is one Profile::prime() of each stored profile -- the
 		// SECOND derivative of p and of gg, which is the level meq::Profile
 		// already carries because the rotating source needed it.
-		double const g = permeability*r*r*( *pPrimeProfile )( psiN )
+		double const g = permeability*radius*radius*( *pPrimeProfile )( psiN )
 		                 + ( *ggPrimeProfile )( psiN );
-		double const gPrime = permeability*r*r*pPrimeProfile->prime( psiN )
+		double const gPrime = permeability*radius*radius*pPrimeProfile->prime( psiN )
 		                      + ggPrimeProfile->prime( psiN );
 
 		// F = g( Psi )/span with dPsi/dpsi_ax = -Psi/span, dspan/dpsi_ax = +1,
@@ -198,9 +198,9 @@ namespace meq
 			throw std::invalid_argument( "meq::SolovievSource: A must be finite" );
 	}
 
-	double SolovievSource::f( double r, double, double ) const
+	double SolovievSource::f( double radius, double, double ) const
 	{
-		return -( ( 1.0 - aValue )*r*r + aValue );
+		return -( ( 1.0 - aValue )*radius*radius + aValue );
 	}
 
 	double SolovievSource::dFdPsi( double, double, double ) const

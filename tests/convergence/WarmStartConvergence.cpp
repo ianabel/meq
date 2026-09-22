@@ -35,14 +35,14 @@ namespace
 {
 	using meq::tests::EquilibriumSource;
 
-	double const rMin = 0.6;
-	double const rMax = 1.4;
+	double const minRadius = 0.6;
+	double const maxRadius = 1.4;
 	double const zMin = -0.6;
 	double const zMax = 0.6;
 
 	meq::tests::Rectangle box()
 	{
-		return meq::tests::Rectangle{ rMin, rMax, zMin, zMax };
+		return meq::tests::Rectangle{ minRadius, maxRadius, zMin, zMax };
 	}
 
 	mfem::Mesh makeMesh( int n )
@@ -74,7 +74,7 @@ namespace
 				: nR( sampler.nodesR() ), nZ( sampler.nodesZ() ),
 				  data( std::move( values ) ), outside( outsideIn )
 			{
-				dR = ( rMax - rMin )/( nR - 1 );
+				dR = ( maxRadius - minRadius )/( nR - 1 );
 				dZ = ( zMax - zMin )/( nZ - 1 );
 			}
 
@@ -84,7 +84,7 @@ namespace
 				mfem::Vector x( 2 );
 				tr.Transform( ip, x );
 
-				double const fi = ( x( 0 ) - rMin )/dR;
+				double const fi = ( x( 0 ) - minRadius )/dR;
 				double const fj = ( x( 1 ) - zMin )/dZ;
 				int i = static_cast<int>( std::floor( fi ) );
 				int j = static_cast<int>( std::floor( fj ) );
@@ -304,7 +304,7 @@ BOOST_AUTO_TEST_CASE( anExactRestartFinishesImmediately )
  * at zero, deliberately: a guess for psi says nothing about q without
  * differentiating it, and the guess arrives as a bare mfem::Coefficient, which
  * cannot be differentiated. So the guessed state is INCONSISTENT in exactly the
- * row that couples them -- the flux equation q - (1/r) grad psi = 0 reads worst
+ * row that couples them -- the flux equation q - (1/R) grad psi = 0 reads worst
  * when psi is the converged answer and q is zero -- and || r_0 || goes UP.
  * Measured here at k = 3: cold 1.771e-01, warm 2.638e-01, a factor of 1.5 the
  * wrong way.
@@ -317,7 +317,7 @@ BOOST_AUTO_TEST_CASE( anExactRestartFinishesImmediately )
  * exact restart above still finishes in 1.
  *
  * THE FIX, IF THE STRONGER PROPERTY IS EVER WANTED, is to seed the flux:
- * darcyFlux = -(1/r) grad psi_guess, via GradientGridFunctionCoefficient, for
+ * darcyFlux = -(1/R) grad psi_guess, via GradientGridFunctionCoefficient, for
  * the setInitialGuess( GridFunction const & ) overload that has a differentiable
  * guess to work with. That is a small change with its own measurement to make,
  * and it is not done.
@@ -443,7 +443,7 @@ BOOST_AUTO_TEST_CASE( fullOrderCarriesMoreThanAStructuredGrid )
 	// route costs. Bilinear interpolation is second order in the GRID spacing,
 	// so its accuracy is a property of the file, not of the solve that wrote it.
 	std::printf( "\n  full order against a structured grid, k = %d, mesh h = %.4f\n",
-	             order, ( rMax - rMin )/8.0 );
+	             order, ( maxRadius - minRadius )/8.0 );
 	std::printf( "    %10s %10s %14s %8s\n", "grid", "spacing", "L2 of guess", "rate" );
 	std::printf( "    %10s %10s %14.6e %8s   <- the coarse solve itself\n",
 	             "-", "-", coarseError, "-" );
@@ -452,7 +452,7 @@ BOOST_AUTO_TEST_CASE( fullOrderCarriesMoreThanAStructuredGrid )
 	std::vector<double> spacings;
 	for ( int gridNodes : { 65, 129, 257 } )
 	{
-		meq::GridSampler sampler( *coarse.mesh, rMin, rMax, gridNodes,
+		meq::GridSampler sampler( *coarse.mesh, minRadius, maxRadius, gridNodes,
 		                          zMin, zMax, gridNodes );
 		std::vector<double> values;
 		sampler.sample( coarse.solver->potential(), values,
@@ -464,7 +464,7 @@ BOOST_AUTO_TEST_CASE( fullOrderCarriesMoreThanAStructuredGrid )
 		mfem::GridFunction gridGuess( &probe.potentialSpace() );
 		gridGuess.ProjectCoefficient( grid );
 
-		double const spacing = ( rMax - rMin )/( gridNodes - 1 );
+		double const spacing = ( maxRadius - minRadius )/( gridNodes - 1 );
 		double const error = gridGuess.ComputeL2Error( exact );
 		spacings.push_back( spacing );
 		gridErrors.push_back( error );

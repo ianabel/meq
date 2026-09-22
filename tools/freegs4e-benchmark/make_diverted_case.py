@@ -454,7 +454,7 @@ def write_toml(path, d, j, stem, psi_axis_guess):
     w("")
     w("# THE TARGET NULL, as an INITIAL VALUE of two unknowns rather than a")
     w("# prescription: XP-3's border closes q_r = q_z = 0 and")
-    w("# psi_bnd = psi_h( r_X, z_X ) on the same Newton, and the seed selects")
+    w("# psi_bnd = psi_h( R_X, z_X ) on the same Newton, and the seed selects")
     w("# WHICH saddle is followed.")
     w("#")
     w("# THIS IS THE SHAPE THE OPERATOR ASKED FOR and not the null the")

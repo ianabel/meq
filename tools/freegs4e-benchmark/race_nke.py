@@ -37,7 +37,7 @@ arm needs a TOML for THIS machine and there is not one.  `examples/machine-g-mas
 is a DIFFERENT MAST-U -- it comes from the freegs4e benchmark's G case and has
 neither these conductors nor this limiter.  What a new one needs:
 
-  * a half-disc mesh reaching r = 0 with all twelve active coils inside it
+  * a half-disc mesh reaching R = 0 with all twelve active coils inside it
     (`tools/mesh/halfdisc.py`), since FB-5's exterior coupling wants the
     semicircle.  freegsnke's grid starts at Rmin = 0.1 and does not reach the
     axis, so the domains are not the same shape and MEQ's must be the larger.
@@ -208,13 +208,13 @@ def main():
             if args.meq_config:
                 meq.append(run_meq(args.meq_config, args.out))
         row = dict(nx=nx, ny=ny,
-                   freegsnke=statistics.median(r["seconds"] for r in nke),
-                   freegsnke_ok=all(r["ok"] for r in nke))
+                   freegsnke=statistics.median(R["seconds"] for R in nke),
+                   freegsnke_ok=all(R["ok"] for R in nke))
         if meq:
-            row.update(meq=statistics.median(r["seconds"] for r in meq),
-                       meq_ok=all(r["ok"] for r in meq),
-                       ratio=statistics.median(r["seconds"] for r in meq)
-                             / max(statistics.median(r["seconds"] for r in nke), 1e-12))
+            row.update(meq=statistics.median(R["seconds"] for R in meq),
+                       meq_ok=all(R["ok"] for R in meq),
+                       ratio=statistics.median(R["seconds"] for R in meq)
+                             / max(statistics.median(R["seconds"] for R in nke), 1e-12))
         rows.append(row)
         print(f"  {nx:4d}x{ny:<5d} freegsnke {row['freegsnke']:8.2f}s"
               + (f"   MEQ {row['meq']:8.2f}s   ratio {row['ratio']:5.2f}x"

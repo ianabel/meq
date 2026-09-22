@@ -142,7 +142,7 @@ healthy field reads 1 **from above** and only the low side can indicate a defect
 And **the largest `Ψ` among the extrema wins**, so a spurious O-point costs a
 missed detection and never a false alarm — which is the safe direction for a
 warning and is the honest answer to the axis ridge, where the flux mass
-`(r q, v)` degenerates and `sweep()` returns dozens of degenerate criticals.
+`(R q, v)` degenerates and `sweep()` returns dozens of degenerate criticals.
 
 → **[M-46](MEASUREMENTS.md#m-46)** — `Ψ` at the located axis
 
@@ -380,7 +380,7 @@ so a sum is a number with no meaning that a reader would take for one.
 
 **THE BASIS IS CHEBYSHEV IN NORMALISED ARC LENGTH**, `t = 2s/L − 1`, and the
 measurement is on an analytic fixture the tracer is pointed at directly —
-`ψ = z − a( r − r₀ )²` in an H1 space of degree 2, which represents that
+`ψ = z − a( R − r₀ )²` in an H1 space of degree 2, which represents that
 quadratic **exactly**, so nothing below is the discretisation:
 
 | modes | 4 | 12 | 20 | 28 | 32 |
@@ -472,7 +472,7 @@ corrector iterations per point.
 **But the finding that matters is about the Hermite, and it was not predicted.**
 The interpolant is built on tangents from the **flux** and measured against the
 level set of the **potential**, and those are the same curve only so far as the
-two fields agree. `∇ψ_h/r` agrees with `q_h` only to `O(h^k)` — differentiating
+two fields agree. `∇ψ_h/R` agrees with `q_h` only to `O(h^k)` — differentiating
 an L2 potential of degree `k` loses an order while `q_h` keeps `k+1`. So down a
 `Δs` sweep the `ψ_h`/`q_h` pair is fourth order **until the tangent tilt takes
 over and second order afterwards**: 3.809 → 1.400 → 1.569, tilt 3.5e-5 to
@@ -487,10 +487,10 @@ stays fourth order in both pairings — the right tangent for the representation
 error and the wrong one for the field error, which is why all three are printed.
 
 **AND THE USUAL REASON FOR PREFERRING `ψ*` IS WRONG.** It is not that the local
-post-processing is built so `∇ψ*` matches `r q*`. MFEM's own documentation is
+post-processing is built so `∇ψ*` matches `R q*`. MFEM's own documentation is
 explicit: the constraint equation projects the **total** flux onto the face
 restriction of an `RT_k` space, and *that* field is the source term of
-Stenberg's local problem — so `∇ψ*` and `r q*` are different objects. What is
+Stenberg's local problem — so `∇ψ*` and `R q*` are different objects. What is
 true, and measured, is that they agree an order better than the raw pair does.
 **Right answer, wrong mechanism**, and the difference matters because the wrong
 mechanism predicts exactness and would have made the measured tilt look like a
@@ -653,7 +653,7 @@ of functions. Conventions, which are part of the definitions:
 **`ψ*` DOES NOT BUY `k+2` IN AN AVERAGE AND THE REASON IS STRUCTURAL.** Both
 pairings converge at **`k+1`** — `V′` at 2.230 / 3.185 / 4.296 raw against
 1.957 / 2.827 / 4.265 post-processed. The weight is `2πR dl/|∇ψ|` and
-**`|∇ψ| = r|q|`**: the reconstruction buys its extra order in the *potential*,
+**`|∇ψ| = R|q|`**: the reconstruction buys its extra order in the *potential*,
 and there is no `k+2` flux to divide by. The level set improves, the weight does
 not, and the average inherits the worse. What `ψ*` buys is a **constant** —
 ×1.29, ×1.46, ×1.73 in `V′`.
@@ -692,7 +692,7 @@ rate, and no single-route table could see any of them.
 
 **The fixture needed its own box, and one surface is not measurable at all.**
 `standardBox()` cannot hold these surfaces — `Ψ_N = 0.25` on `nstx()` already
-spans `r ∈ [0.99, 1.57]` against a box ending at 1.4 — so the study runs on
+spans `R ∈ [0.99, 1.57]` against a box ending at 1.4 — so the study runs on
 `[0.60, 1.90] × [-1.10, 1.10]`. `Ψ_N = 0.75` leaves under one cell of margin at
 the coarsest mesh of a dyadic sweep, so an `h`-study there measures the
 contour's distance to the mesh boundary; its reference value is asserted
@@ -811,7 +811,7 @@ measured doing.
 `meq::gaugeFreeFit()` requires each disc node only to **land on the right
 surface** rather than to sit at a prescribed angle — a geometric Gauss–Newton on
 `Ψ_N( x(ρ,θ) ) − Ψ`, warm-started from IN-3's linear fit, with `∇Ψ_N` from the
-**solved flux**, `∇ψ = r q`. No force balance and no second solver: MEQ already
+**solved flux**, `∇ψ = R q`. No force balance and no second solver: MEQ already
 has `ψ`. Rows are scaled by `1/|∇Ψ_N|`, so the residual is a **distance in
 metres** and the error measure is itself gauge invariant. `SurfaceFit` stays
 **MFEM-free** — the field arrives as one callable returning value, gradient and

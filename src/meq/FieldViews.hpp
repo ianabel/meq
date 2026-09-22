@@ -37,7 +37,7 @@
  * one type to change rather than sixty-eight call sites.
  *
  * A TRAP THIS FILE HAS TO AVOID AND EVERY CONSUMER WOULD MEET SEPARATELY.
- * Adding `psi_c` needs the point's `( r, z )`, which needs the element's
+ * Adding `psi_c` needs the point's `( R, z )`, which needs the element's
  * transformation -- and `mfem::Mesh::GetElementTransformation( int )` hands out
  * SHARED SCRATCH, which `CLAUDE.md` records as a silent wrong answer under
  * threading and which cost this project six call sites once already. The
@@ -57,7 +57,7 @@ namespace meq
 		/// transformation overload. See the trap note at the top of this file.
 		inline void viewPoint( mfem::Mesh &mesh, int element,
 		                       mfem::IntegrationPoint const &ip,
-		                       double &r, double &z )
+		                       double &radius, double &z )
 		{
 			// Function-local rather than a member, so a transformation held
 			// live across a call cannot be reset underneath it -- the same fix
@@ -69,18 +69,18 @@ namespace meq
 			double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
 			mfem::Vector position( coordinates, 3 );
 			transformation.Transform( ip, position );
-			r = position( 0 );
+			radius = position( 0 );
 			z = position( 1 );
 		}
 
 		inline void viewPoint( mfem::ElementTransformation &transformation,
 		                       mfem::IntegrationPoint const &ip,
-		                       double &r, double &z )
+		                       double &radius, double &z )
 		{
 			double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
 			mfem::Vector position( coordinates, 3 );
 			transformation.Transform( ip, position );
-			r = position( 0 );
+			radius = position( 0 );
 			z = position( 1 );
 		}
 	}
@@ -122,11 +122,11 @@ namespace meq
 				if ( !conductorField )
 					return solvedValue;
 
-				double r = 0.0;
+				double radius = 0.0;
 				double z = 0.0;
 				detail::viewPoint( *field->FESpace()->GetMesh(), element, ip,
-				                   r, z );
-				return solvedValue + conductorField->psi( r, z );
+				                   radius, z );
+				return solvedValue + conductorField->psi( radius, z );
 			}
 
 			/// The overload for a caller that already holds the element's
@@ -140,10 +140,10 @@ namespace meq
 				if ( !conductorField )
 					return solvedValue;
 
-				double r = 0.0;
+				double radius = 0.0;
 				double z = 0.0;
-				detail::viewPoint( transformation, ip, r, z );
-				return solvedValue + conductorField->psi( r, z );
+				detail::viewPoint( transformation, ip, radius, z );
+				return solvedValue + conductorField->psi( radius, z );
 			}
 
 			/// The solved field itself, for the handful of places that must
@@ -166,7 +166,7 @@ namespace meq
 	};
 
 	/**
-	 * `q = ( 1/r ) grad_bar( psi )` at a point, on the same contract.
+	 * `q = ( 1/R ) grad_bar( psi )` at a point, on the same contract.
 	 *
 	 * **`q_c` ADDS, BECAUSE `Δ*` IS LINEAR AND `q` IS A RELABELLING.** MEQ
 	 * solves for `q` rather than differentiating `psi`, so the physical flux is
@@ -195,7 +195,7 @@ namespace meq
 
 			/// @note NaN on the axis when conductors are carried, exactly as
 			///       meq::filamentFlux() is and for the same reason: `q` is
-			///       `psi`'s gradient over `r`.
+			///       `psi`'s gradient over `R`.
 			void value( int element, mfem::IntegrationPoint const &ip,
 			            mfem::Vector &out ) const
 			{
@@ -203,14 +203,14 @@ namespace meq
 				if ( !conductorField )
 					return;
 
-				double r = 0.0;
+				double radius = 0.0;
 				double z = 0.0;
 				detail::viewPoint( *field->FESpace()->GetMesh(), element, ip,
-				                   r, z );
+				                   radius, z );
 
 				double qR = 0.0;
 				double qZ = 0.0;
-				conductorField->flux( r, z, qR, qZ );
+				conductorField->flux( radius, z, qR, qZ );
 				out( 0 ) += qR;
 				out( 1 ) += qZ;
 			}

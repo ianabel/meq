@@ -368,12 +368,12 @@ namespace
 		rowValues.assign(
 			static_cast<std::size_t>( rows )*supportIndices.size(), 0.0 );
 
-		for ( int r = 0; r < rows; ++r )
+		for ( int rowIndex = 0; rowIndex < rows; ++rowIndex )
 		{
-			mfem::Vector const &row = rowsIn[ static_cast<std::size_t>( r ) ];
+			mfem::Vector const &row = rowsIn[ static_cast<std::size_t>( rowIndex ) ];
 			row.HostRead();
 			std::size_t const base =
-				static_cast<std::size_t>( r )*supportIndices.size();
+				static_cast<std::size_t>( rowIndex )*supportIndices.size();
 			for ( std::size_t k = 0; k < supportIndices.size(); ++k )
 				rowValues[ base + k ] = row( supportIndices[ k ] );
 		}
@@ -587,7 +587,7 @@ namespace
 			+ static_cast< std::size_t >( quadraturePoint ) ];
 	}
 
-	double SourceIntegrator::sourceValue( double r, double z, double psi,
+	double SourceIntegrator::sourceValue( double radius, double z, double psi,
 	                                      int element ) const
 	{
 		/*
@@ -598,13 +598,13 @@ namespace
 		 * is the solved field unchanged when no conductor field is set.
 		 */
 		if ( elementCarriesPlasma( element ) )
-			return source->f( r, z, psi );
+			return source->f( radius, z, psi );
 
 		// Off the plasma's component. `normalised` is null exactly when the
 		// source is not a NormalisedSource, in which case it cannot have been
 		// confined and no mask can have been set -- so this is unreachable
 		// there, and zero would be the same answer anyway.
-		return normalised ? normalised->fOutsidePlasma( r, z ) : 0.0;
+		return normalised ? normalised->fOutsidePlasma( radius, z ) : 0.0;
 	}
 
 	mfem::IntegrationRule const &SourceIntegrator::rule( mfem::FiniteElement const &el,
@@ -646,7 +646,7 @@ namespace
 			el.CalcShape( ip, shape );
 			tr.Transform( ip, point );
 
-			double const r = point( 0 );
+			double const radius = point( 0 );
 			double const z = point( 1 );
 			double const psi = shape*elfun;
 			double const weight = ip.weight*tr.Weight();
@@ -662,9 +662,9 @@ namespace
 			// vacuum region by construction -- so this asks the source, which
 			// answers zero for an ordinary one and the coil term for a
 			// coil-augmented one.
-			elvect.Add( -weight*sourceValue( r, z,
+			elvect.Add( -weight*sourceValue( radius, z,
 			                                 psi + conductorShiftAt( tr.ElementNo, i ),
-			                                 tr.ElementNo )/r, shape );
+			                                 tr.ElementNo )/radius, shape );
 		}
 	}
 
@@ -710,7 +710,7 @@ namespace
 			el.CalcShape( ip, shape );
 			tr.Transform( ip, point );
 
-			double const r = point( 0 );
+			double const radius = point( 0 );
 			double const z = point( 1 );
 			double const psi = shape*elfun;
 			double const weight = ip.weight*tr.Weight();
@@ -731,7 +731,7 @@ namespace
 			// solution of a different problem, or merely slower.
 			double const totalPsi = psi + conductorShiftAt( tr.ElementNo, i );
 
-			mfem::AddMult_a_VVt( -weight*source->dFdPsi( r, z, totalPsi )/r,
+			mfem::AddMult_a_VVt( -weight*source->dFdPsi( radius, z, totalPsi )/radius,
 			                     shape, elmat );
 		}
 	}
@@ -784,7 +784,7 @@ namespace
 		: mesh( meshIn ),
 		  orderValue( orderIn ),
 		  stabilization( tauIn ),
-		  radius( []( mfem::Vector const &x ) { return x( 0 ); } ),
+		  radiusCoefficient( []( mfem::Vector const &x ) { return x( 0 ); } ),
 		  negativeInverseRadius( []( mfem::Vector const &x ) { return -1.0/x( 0 ); } ),
 		  linearSource( nullptr ),
 		  nonlinearSource( nullptr ),
@@ -843,7 +843,7 @@ namespace
 		if ( orderValue < 0 )
 			throw std::invalid_argument( "meq::GradShafranovSolver: the polynomial order must not be negative" );
 		if ( mesh.Dimension() != 2 )
-			throw std::invalid_argument( "meq::GradShafranovSolver: the mesh must be two dimensional ( r, z )" );
+			throw std::invalid_argument( "meq::GradShafranovSolver: the mesh must be two dimensional ( R, z )" );
 
 		int const dim = mesh.Dimension();
 
@@ -931,13 +931,13 @@ namespace
 
 		linearSource = &fIn;
 
-		// The potential right hand side is -( F/r, w ), and both signs in that are
-		// real. The 1/r is the equation's: the right hand side is F/r, not F. The
+		// The potential right hand side is -( F/R, w ), and both signs in that are
+		// real. The 1/R is the equation's: the right hand side is F/R, not F. The
 		// minus is DarcyForm's: constructed with its default bsymmetrize = true it
 		// assembles the second block row as -B q - Mp psi = bp, so the datum handed
-		// to it is the negative of the source of div q. Measured: with +F/r the L2
+		// to it is the negative of the source of div q. Measured: with +F/R the L2
 		// error against the exact solution is flat at 7.3e-2 through four
-		// refinements, with -F/r it converges at k+1.
+		// refinements, with -F/R it converges at k+1.
 		potentialRhsCoeff = std::make_unique<mfem::ProductCoefficient>( negativeInverseRadius,
 		                                                                *linearSource );
 	}
@@ -1054,7 +1054,7 @@ namespace
 	}
 
 	/*
-	 * F( r, z, psi^k( r, z ) ): the source frozen at the previous iterate.
+	 * F( R, z, psi^k( R, z ) ): the source frozen at the previous iterate.
 	 *
 	 * This is what makes a Picard path linear. setSource( Source const & ) puts
 	 * the source on the NON-LINEAR potential mass form, where hybridization
@@ -1120,7 +1120,7 @@ namespace
 	 *
 	 * mfem::KINSolver derives from mfem::NewtonSolver, which reads as though the
 	 * two were interchangeable, and CLAUDE.md said so. They are not, and the
-	 * difference is silent: NewtonSolver::Mult( b, x ) forms r = oper( x ) - b,
+	 * difference is silent: NewtonSolver::Mult( b, x ) forms R = oper( x ) - b,
 	 * while KINSolver::Mult declares its first argument WITHOUT A NAME and solves
 	 * oper( x ) = 0. Hand KINSOL a problem with a non-zero right hand side and it
 	 * converges -- to the solution of a different problem.
@@ -1494,18 +1494,18 @@ namespace
 	 * it was placed on and converges to a different equilibrium.
 	 *
 	 * THE PROJECTION IS WEIGHTED AND THAT IS THE WHOLE DESIGN. Writing
-	 * `q = ( 1/r ) grad psi_g` and interpolating it at the flux space's nodes is
+	 * `q = ( 1/R ) grad psi_g` and interpolating it at the flux space's nodes is
 	 * the obvious thing and is wrong twice over: the closed Gauss-Lobatto basis
 	 * puts nodes ON element boundaries, so on FB-A's domain some of them sit at
-	 * `r = 0` exactly, where `1/r` is a division of one numerical zero by
+	 * `R = 0` exactly, where `1/R` is a division of one numerical zero by
 	 * another; and nodal interpolation is not what the residual asks for anyway.
 	 * The flux row of ( 8a ) is
 	 *
-	 *     ( r q, v ) + ( psi, div v ) - < psihat, v.n >  =  0
+	 *     ( R q, v ) + ( psi, div v ) - < psihat, v.n >  =  0
 	 *
-	 * whose continuous form after integrating by parts is ( r q, v ) =
+	 * whose continuous form after integrating by parts is ( R q, v ) =
 	 * ( grad psi, v ). Solving THAT for q_h therefore does not merely put q near
-	 * the right value, it makes the state satisfy the row -- and the weight r is
+	 * the right value, it makes the state satisfy the row -- and the weight R is
 	 * exactly the factor that removes the axis singularity rather than guarding
 	 * it. V_h is discontinuous, so the solve is element-local: one small dense
 	 * factorisation per element, which is the same work assembling the flux mass
@@ -2065,12 +2065,12 @@ namespace
 				table[ { cell( entities[ e ].centreR ),
 				         cell( entities[ e ].centreZ ) } ] = e;
 
-			auto refuse = [ & ]( double r, double z, char const *which )
+			auto refuse = [ & ]( double radius, double z, char const *which )
 			{
 				throw std::logic_error(
 					std::string( "meq::GradShafranovSolver::setUpDownSymmetry: the " )
 					+ what + " space's " + which + " at ( "
-					+ std::to_string( r ) + ", " + std::to_string( z )
+					+ std::to_string( radius ) + ", " + std::to_string( z )
 					+ " ) with no mirror partner about z = 0, so this mesh is not "
 					  "up-down symmetric. Projecting onto the symmetric subspace "
 					  "would delete an asymmetry the mesh describes rather than "
@@ -2164,8 +2164,8 @@ namespace
 		 * that knows this space's ordering.
 		 *
 		 * AND THE COMPONENT CARRIES A SIGN, which is the one thing here that
-		 * cannot be got from geometry. q = grad_bar( psi )/r with psi EVEN in
-		 * z, so q_r = ( 1/r ) dpsi/dr is even and q_z = ( 1/r ) dpsi/dz is
+		 * cannot be got from geometry. q = grad_bar( psi )/R with psi EVEN in
+		 * z, so q_r = ( 1/R ) dpsi/dr is even and q_z = ( 1/R ) dpsi/dz is
 		 * ODD. Projecting with the wrong sign projects onto the ANTIsymmetric
 		 * subspace, where the only symmetric equilibrium is psi = 0 -- a
 		 * trivial branch reached silently, which is this tree's most-recorded
@@ -2295,12 +2295,12 @@ namespace
 			g = []( mfem::Vector const & ) { return 0.0; };
 
 		// darcyFlux, NOT flux(): the same convention HDGExtensionIntegrator was
-		// assembled against. radius and extensionLineOrder likewise have to be
-		// the ones buildForms() gave the integrator -- a different rule along the
-		// path is a different lifting, which the MFEM header says in as many
-		// words.
+		// assembled against. radiusCoefficient and extensionLineOrder
+		// likewise have to be the ones buildForms() gave the integrator -- a
+		// different rule along the path is a different lifting, which the MFEM
+		// header says in as many words.
 		return std::make_unique<mfem::TransferredDatumCoefficient>(
-			*transferPath, std::move( g ), darcyFlux, radius, extensionLineOrder );
+			*transferPath, std::move( g ), darcyFlux, radiusCoefficient, extensionLineOrder );
 	}
 
 	double GradShafranovSolver::starShapedMargin( double centreR,
@@ -2505,7 +2505,7 @@ namespace
 			 * projection -- it does, since the projection happens inside this
 			 * loop and nothing escapes.
 			 *
-			 * basis() takes ( r, z ) and depends on the DIRECTION alone, so it
+			 * basis() takes ( R, z ) and depends on the DIRECTION alone, so it
 			 * is well defined at any point of the plane and in particular at a
 			 * foot on Gamma, which is where PathTraceCoefficient evaluates it.
 			 */
@@ -2574,7 +2574,7 @@ namespace
 		                                     char const *where )
 		{
 			auto refuse = [ where, &conductors ]( char const *what, int index,
-			                                      double r, double z, int hit )
+			                                      double radius, double z, int hit )
 			{
 				CurrentFilament const &f =
 					conductors.filament( static_cast< std::size_t >( hit ) );
@@ -2582,7 +2582,7 @@ namespace
 				message.setf( std::ios::scientific );
 				message.precision( 9 );
 				message << where << ": mesh " << what << " " << index
-				        << " at ( " << r << ", " << z << " ) lies ON filament "
+				        << " at ( " << radius << ", " << z << " ) lies ON filament "
 				        << hit << ", which is at ( " << f.radius() << ", "
 				        << f.height() << " ) carrying " << f.current()
 				        << " A. psi_c is genuinely infinite there -- this is a "
@@ -2612,11 +2612,11 @@ namespace
 			mfem::FiniteElementSpace const *nodeSpace = nodes->FESpace();
 			for ( int i = 0; i < nodeSpace->GetNDofs(); ++i )
 			{
-				double const r = ( *nodes )( nodeSpace->DofToVDof( i, 0 ) );
+				double const radius = ( *nodes )( nodeSpace->DofToVDof( i, 0 ) );
 				double const z = ( *nodes )( nodeSpace->DofToVDof( i, 1 ) );
-				int const hit = conductors.indexAt( r, z );
+				int const hit = conductors.indexAt( radius, z );
 				if ( hit >= 0 )
-					refuse( "node", i, r, z, hit );
+					refuse( "node", i, radius, z, hit );
 			}
 		}
 
@@ -2894,7 +2894,7 @@ namespace
 		return conductorFieldSet != nullptr;
 	}
 
-	double GradShafranovSolver::conductorPsi( double r, double z ) const
+	double GradShafranovSolver::conductorPsi( double radius, double z ) const
 	{
 		// Exactly zero with no conductor field, so that psi_c + psi_p is
 		// correct on every path and no caller has to branch on whether the
@@ -2902,10 +2902,10 @@ namespace
 		// reaches every consumer of psi.
 		if ( !conductorFieldSet )
 			return 0.0;
-		return conductorFieldSet->psi( r, z );
+		return conductorFieldSet->psi( radius, z );
 	}
 
-	double GradShafranovSolver::conductorNormalFlux( double r, double z,
+	double GradShafranovSolver::conductorNormalFlux( double radius, double z,
 	                                                 double nuR,
 	                                                 double nuZ ) const
 	{
@@ -2915,18 +2915,18 @@ namespace
 		/*
 		 * q . nu FOR THE CONDUCTORS, AND THE AXIS NEEDS A RULE.
 		 *
-		 * q = ( 1/r ) grad_bar( psi ), and grad_bar( psi ) is EXACTLY ( 0, 0 ) at
-		 * r = 0 for any conductor off the axis -- both brackets of the elliptic
-		 * form carry k^2 = 4 a r/d^2, which vanishes there. So q is 0/0 and
+		 * q = ( 1/R ) grad_bar( psi ), and grad_bar( psi ) is EXACTLY ( 0, 0 ) at
+		 * R = 0 for any conductor off the axis -- both brackets of the elliptic
+		 * form carry k^2 = 4 a R/d^2, which vanishes there. So q is 0/0 and
 		 * CoilSet::flux() returns NaN, correctly: the flux has no value on the
 		 * axis and inventing one silently is what this avoids.
 		 *
 		 * BUT q . nu DOES HAVE A LIMIT THERE, AND IT IS ZERO. Gamma is a
 		 * semicircle centred on the axis, so at its two endpoints ( 0, +/-rho )
-		 * the outward normal is AXIAL -- the outward radial direction at r = 0
-		 * IS +/-z. So q . nu is q_z = ( 1/r ) d_z psi, and psi ~ c( z ) r^2 near
-		 * the axis for any regular field, giving d_z psi ~ c'( z ) r^2 and
-		 * q . nu ~ c'( z ) r -> 0.
+		 * the outward normal is AXIAL -- the outward radial direction at R = 0
+		 * IS +/-z. So q . nu is q_z = ( 1/R ) d_z psi, and psi ~ c( z ) R^2 near
+		 * the axis for any regular field, giving d_z psi ~ c'( z ) R^2 and
+		 * q . nu ~ c'( z ) R -> 0.
 		 *
 		 * So the rule is the LIMIT and not a convention, and it is available
 		 * only because the normal is axial: a boundary meeting the axis
@@ -2935,16 +2935,16 @@ namespace
 		 * being a circle about the axis, and the assertion in
 		 * aConductorOutsideGammaReachesTheCoupledSolve pins it.
 		 */
-		if ( !( r > 0.0 ) )
+		if ( !( radius > 0.0 ) )
 			return 0.0;
 
 		double gradR = 0.0;
 		double gradZ = 0.0;
-		exteriorConductorSet->gradPsi( r, z, gradR, gradZ );
-		return ( gradR*nuR + gradZ*nuZ )/r;
+		exteriorConductorSet->gradPsi( radius, z, gradR, gradZ );
+		return ( gradR*nuR + gradZ*nuZ )/radius;
 	}
 
-	double GradShafranovSolver::conductorFieldNormalFlux( double r, double z,
+	double GradShafranovSolver::conductorFieldNormalFlux( double radius, double z,
 	                                                      double nuR,
 	                                                      double nuZ ) const
 	{
@@ -2955,20 +2955,20 @@ namespace
 		// the same reason and not by analogy: the rule is about Gamma's
 		// geometry, not about which side the conductor is on. Gamma is a
 		// semicircle centred on the axis, so at its two endpoints the outward
-		// normal is AXIAL and q . nu is q_z = ( 1/r ) d_z psi, which tends to
+		// normal is AXIAL and q . nu is q_z = ( 1/R ) d_z psi, which tends to
 		// zero. meq::ConductorField::gradPsi() is exactly ( 0, 0 ) there for a
 		// conductor off the axis, so this is 0/0 and the limit is the answer.
 		//
 		// NOT meq::ConductorField::poloidalField(), which takes the OTHER
 		// component's limit: that one exists because B_Z on the axis is finite
 		// and non-zero, and it is not what a contour normal to the axis sees.
-		if ( !( r > 0.0 ) )
+		if ( !( radius > 0.0 ) )
 			return 0.0;
 
 		double gradR = 0.0;
 		double gradZ = 0.0;
-		conductorFieldSet->gradPsi( r, z, gradR, gradZ );
-		return ( gradR*nuR + gradZ*nuZ )/r;
+		conductorFieldSet->gradPsi( radius, z, gradR, gradZ );
+		return ( gradR*nuR + gradZ*nuZ )/radius;
 	}
 
 	std::vector<double> const &GradShafranovSolver::exteriorCoefficients() const
@@ -3064,7 +3064,7 @@ namespace
 				 * Gamma is a SEMICIRCLE, so the boundary enclosing the current
 				 * is the arc PLUS the axis segment, and the divergence theorem
 				 * wants all of it. The axis does not contribute zero: psi ~
-				 * c( z ) r^2 there, so q_r = 2c is finite and generally
+				 * c( z ) R^2 there, so q_r = 2c is finite and generally
 				 * non-zero even though psi itself vanishes.
 				 *
 				 * The symptom was diagnostic once seen -- an error that does
@@ -3111,9 +3111,9 @@ namespace
 		return total;
 	}
 
-	void GradShafranovSolver::setBoundaryFluxPoint( double r, double z )
+	void GradShafranovSolver::setBoundaryFluxPoint( double radius, double z )
 	{
-		if ( !std::isfinite( r ) || !std::isfinite( z ) )
+		if ( !std::isfinite( radius ) || !std::isfinite( z ) )
 			throw std::invalid_argument(
 				"meq::GradShafranovSolver::setBoundaryFluxPoint: the limiter "
 				"contact must be finite" );
@@ -3130,7 +3130,7 @@ namespace
 				"equilibria rather than two ways of finding one" );
 
 		boundaryFluxIsUnknown = true;
-		boundaryFluxR = r;
+		boundaryFluxR = radius;
 		boundaryFluxZ = z;
 		prepared = false;
 	}
@@ -3227,17 +3227,17 @@ namespace
 		return limiterContactZValue;
 	}
 
-	void GradShafranovSolver::setXPointBoundary( double r, double z )
+	void GradShafranovSolver::setXPointBoundary( double radius, double z )
 	{
-		if ( !std::isfinite( r ) || !std::isfinite( z ) )
+		if ( !std::isfinite( radius ) || !std::isfinite( z ) )
 			throw std::invalid_argument(
 				"meq::GradShafranovSolver::setXPointBoundary: the X-point must "
 				"be finite" );
-		if ( !( r > 0.0 ) )
+		if ( !( radius > 0.0 ) )
 			throw std::invalid_argument(
 				"meq::GradShafranovSolver::setXPointBoundary: the X-point must "
 				"lie at a strictly positive radius. The symmetry axis is not an "
-				"X-point: psi vanishes identically on r = 0, so q_h there is "
+				"X-point: psi vanishes identically on R = 0, so q_h there is "
 				"small everywhere and a sweep reports a ladder of near-saddles "
 				"that no divertor put there" );
 		// ALL THREE PIN THE SAME UNKNOWN, so naming two of them is saying the
@@ -3265,12 +3265,12 @@ namespace
 
 		boundaryFluxIsUnknown = true;
 		xPointIsUnknown = true;
-		xPointRValue = r;
+		xPointRValue = radius;
 		xPointZValue = z;
 		xPointLocatedValue = false;
 		// So that anything reading the pinned point -- the diagnostics, and the
 		// ExactPoint setup this path then skips -- sees the same place.
-		boundaryFluxR = r;
+		boundaryFluxR = radius;
 		boundaryFluxZ = z;
 		prepared = false;
 	}
@@ -3319,12 +3319,12 @@ namespace
 	}
 
 	bool GradShafranovSolver::locateFieldPoint(
-		double r, double z, int hint, int &element,
+		double radius, double z, int hint, int &element,
 		mfem::IntegrationPoint &reference ) const
 	{
 		mfem::Mesh &mesh = *potentialFes->GetMesh();
 		mfem::Vector point( 2 );
-		point( 0 ) = r;
+		point( 0 ) = radius;
 		point( 1 ) = z;
 
 		// A FIFTH OF AN ELEMENT, WHICH IS THE SAME BAND CriticalPointFinder's
@@ -3477,7 +3477,7 @@ namespace
 	                              mfem::Vector const &values, int offset,
 	                              ConductorField const *conductors,
 	                              int &element, mfem::Vector &shape,
-	                              mfem::Array<int> &dofs, double &r, double &z )
+	                              mfem::Array<int> &dofs, double &radius, double &z )
 	{
 		mfem::Mesh &mesh = *space.GetMesh();
 
@@ -3629,7 +3629,7 @@ namespace
 				mfem::IntegrationPoint faceIp;
 				faceIp.Set1w( faceAt, 1.0 );
 				faceScratch.Transform( faceIp, physical );
-				r = physical( 0 );
+				radius = physical( 0 );
 				z = physical( 1 );
 			}
 		}
@@ -3645,11 +3645,11 @@ namespace
 		int element = -1;
 		mfem::Vector shape;
 		mfem::Array<int> dofs;
-		double r = 0.0, z = 0.0;
+		double radius = 0.0, z = 0.0;
 
 		return limiterPolygonMaximum(
 			space, collectLimiterPolygon( *space.GetMesh(), attribute ), field,
-			0, conductors, element, shape, dofs, r, z );
+			0, conductors, element, shape, dofs, radius, z );
 	}
 
 	void GradShafranovSolver::collectLimiterFaces()
@@ -3666,14 +3666,14 @@ namespace
 	                                                  int &element,
 	                                                  mfem::Vector &shape,
 	                                                  mfem::Array<int> &dofs,
-	                                                  double &r, double &z ) const
+	                                                  double &radius, double &z ) const
 	{
 		LegTimer const timer( profile.constraintSeconds, profile.constraintCpuSeconds, profile.constraintCalls );
 		LegTimer const slice( profile.limiterSeconds, profile.limiterCpuSeconds, profile.limiterCalls );
 
 		return limiterPolygonMaximum( *potentialFes, limiterFaces, state,
 		                              blockOffsets[ 1 ], conductorFieldSet,
-		                              element, shape, dofs, r, z );
+		                              element, shape, dofs, radius, z );
 	}
 
 	void GradShafranovSolver::setLimiterConstraint( LimiterConstraint choice )
@@ -3735,12 +3735,12 @@ namespace
 		/*
 		 * THE NODES, NOT THE QUADRATURE POINTS, AND THAT IS THE POINT.
 		 *
-		 * A Gauss rule never samples r = 0 exactly, so asking it would report
+		 * A Gauss rule never samples R = 0 exactly, so asking it would report
 		 * a large finite number rather than the unbounded one -- which is the
 		 * very substitution that hides this defect in the assembly. The closed
 		 * Gauss-Lobatto basis this solver builds its volume spaces on puts
 		 * nodes ON the element boundary, so a mesh reaching the axis HAS nodes
-		 * at r = 0 exactly, and F there is the limit the load is divided by r
+		 * at R = 0 exactly, and F there is the limit the load is divided by R
 		 * against.
 		 *
 		 * A basis whose node count does not match its dof count -- which no
@@ -3779,7 +3779,7 @@ namespace
 
 				// EXACTLY zero, with no tolerance. The axis is a mesh boundary
 				// placed there deliberately -- FB-A requires the domain to reach
-				// r = 0 exactly and tools/mesh/halfdisc.py asserts it without a
+				// R = 0 exactly and tools/mesh/halfdisc.py asserts it without a
 				// tolerance for the same reason -- so a node either is on it or
 				// is not.
 				if ( point( 0 ) != 0.0 )
@@ -3793,7 +3793,7 @@ namespace
 				 *
 				 * psi( 0, z ) = 0 EXACTLY for any axisymmetric field with
 				 * bounded B -- psi is the poloidal flux through a circle of
-				 * radius r, which vanishes with the area -- so that is the value
+				 * radius R, which vanishes with the area -- so that is the value
 				 * the physical condition F( 0, z ) = 0 is a condition ON, and it
 				 * is what makes this a statement about the PROBLEM rather than
 				 * about how far a particular solve has drifted.
@@ -3880,7 +3880,7 @@ namespace
 		 *
 		 * F( 0, z, . ) is g g' and nothing else, so this asks whether g g' is
 		 * identically zero -- the one configuration in which an axis inside the
-		 * plasma still carries no current, since j_phi = r p' vanishes with r
+		 * plasma still carries no current, since j_phi = R p' vanishes with R
 		 * whatever p' does.
 		 *
 		 * OVER A SPREAD OF Psi, AND BOTH SIDES OF THE EDGE. Asking at psi = 0
@@ -3892,7 +3892,7 @@ namespace
 		 *
 		 * EXACTLY zero, with no tolerance, because that is what is being
 		 * claimed: a profile that merely happens to be small on the axis still
-		 * puts a 1/r in the load, and `bounded` above is where a small one is
+		 * puts a 1/R in the load, and `bounded` above is where a small one is
 		 * judged.
 		 */
 		double const sample[] = { -0.5, 0.0, 0.25, 0.5, 0.75, 1.0, 1.5 };
@@ -3922,7 +3922,7 @@ namespace
 	 * Walked once at setup over every element's nodes, which is why it is not
 	 * worth an octree.
 	 */
-	int GradShafranovSolver::nearestPotentialDof( double r, double z ) const
+	int GradShafranovSolver::nearestPotentialDof( double radius, double z ) const
 	{
 		mfem::Mesh &mesh = *potentialFes->GetMesh();
 		mfem::Array<int> dofs;
@@ -3945,7 +3945,7 @@ namespace
 			for ( int i = 0; i < fe->GetDof(); ++i )
 			{
 				scratch.Transform( nodes.IntPoint( i ), point );
-				double const d = std::hypot( point( 0 ) - r, point( 1 ) - z );
+				double const d = std::hypot( point( 0 ) - radius, point( 1 ) - z );
 				if ( d < best )
 				{
 					best = d;
@@ -3974,14 +3974,14 @@ namespace
 	 * The elements here are straight-sided triangles, where the inverse map is
 	 * affine and `Inside` is exact rather than probable.
 	 */
-	void GradShafranovSolver::locatePotentialPoint( double r, double z,
+	void GradShafranovSolver::locatePotentialPoint( double radius, double z,
 	                                                int &element,
 	                                                mfem::Vector &shape,
 	                                                mfem::Array<int> &dofs ) const
 	{
 		mfem::Mesh &mesh = *potentialFes->GetMesh();
 		mfem::Vector point( 2 );
-		point( 0 ) = r;
+		point( 0 ) = radius;
 		point( 1 ) = z;
 
 		element = -1;
@@ -4008,7 +4008,7 @@ namespace
 
 		std::ostringstream message;
 		message << "meq::GradShafranovSolver::locatePotentialPoint: no element "
-		           "of the mesh contains ( " << r << ", " << z << " ). A limiter "
+		           "of the mesh contains ( " << radius << ", " << z << " ). A limiter "
 		           "contact has to be a point of Omega: check it against the "
 		           "mesh's own extent rather than against the machine's.";
 		throw std::runtime_error( message.str() );
@@ -4051,11 +4051,11 @@ namespace
 	 * That is correct: it covers none of Gamma and its neighbours cover Gamma
 	 * between them.
 	 *
-	 * THE MEASURE IS PLAIN dGamma AND THE 1/r IS ALREADY IN q. The exterior block
-	 * is diagonal in the weight dGamma/r -- that is section 3.2, and it is what
+	 * THE MEASURE IS PLAIN dGamma AND THE 1/R IS ALREADY IN q. The exterior block
+	 * is diagonal in the weight dGamma/R -- that is section 3.2, and it is what
 	 * makes the whole method cheap -- so the interior term must be tested in the
 	 * same weight. It is, without dividing by anything: the condition matches
-	 * ( 1/r ) dpsi/dnu across Gamma, and MEQ's q IS ( 1/r ) grad_bar( psi ), so
+	 * ( 1/R ) dpsi/dnu across Gamma, and MEQ's q IS ( 1/R ) grad_bar( psi ), so
 	 * q.nu tested in the plain measure already carries the radius the exterior side
 	 * carries in its weight. Dividing by pt.y( 0 ) here would do it twice. The
 	 * header says this at more length; it is repeated because the wrong version
@@ -4181,9 +4181,9 @@ namespace
 					                          pt.nu( 0 ), pt.nu( 1 ) );
 
 				// The exterior's own normal derivative from the converged
-				// coefficients, divided by r because MEQ's q IS ( 1/r ) grad psi
+				// coefficients, divided by R because MEQ's q IS ( 1/R ) grad psi
 				// while symbol() is d psi/d rho. Getting that factor wrong is the
-				// same mistake the transmission row's missing 1/r would have been,
+				// same mistake the transmission row's missing 1/R would have been,
 				// from the other side.
 				double const radius = pt.y( 0 );
 				double exteriorNormal = 0.0;
@@ -4245,10 +4245,10 @@ namespace
 		 * subtracted from, and this file already records what an under-resolved
 		 * sweep of Gamma costs.
 		 *
-		 * NO 1/r IN THE MEASURE, for the reason the rows carry: the exterior
-		 * block is diagonal in the weight dGamma/r, and MEQ's q IS
-		 * ( 1/r ) grad_bar( psi ), so q . nu tested in the plain measure already
-		 * carries the radius. Writing dGamma/r would divide by it twice.
+		 * NO 1/R IN THE MEASURE, for the reason the rows carry: the exterior
+		 * block is diagonal in the weight dGamma/R, and MEQ's q IS
+		 * ( 1/R ) grad_bar( psi ), so q . nu tested in the plain measure already
+		 * carries the radius. Writing dGamma/R would divide by it twice.
 		 *
 		 * AND pt.weight IS SIGNED AND USED AS IT STANDS, exactly as the rows use
 		 * it: the sign records a folded sweep, and this term is contracted
@@ -4555,13 +4555,13 @@ namespace
 
 		darcy = std::make_unique<mfem::DarcyForm>( fluxFes.get(), potentialFes.get() );
 
-		// ( r q, v ). DarcyForm's flux mass form holds the INVERSE of the diffusion
+		// ( R q, v ). DarcyForm's flux mass form holds the INVERSE of the diffusion
 		// coefficient -- convdiff puts 1/k there -- and the coefficient here is
-		// 1/r, so this is r. Measured rather than assumed: putting 1/r here instead
+		// 1/R, so this is R. Measured rather than assumed: putting 1/R here instead
 		// still converges, to a different function, with the L2 error against the
 		// exact Solov'ev solution flat at 1.9e-2 through four refinements.
 		mfem::BilinearForm *fluxMass = darcy->GetFluxMassForm();
-		fluxMass->AddDomainIntegrator( new mfem::VectorMassIntegrator( radius ) );
+		fluxMass->AddDomainIntegrator( new mfem::VectorMassIntegrator( radiusCoefficient ) );
 
 		if ( transferPath )
 		{
@@ -4569,12 +4569,12 @@ namespace
 			// transferred datum, which is the whole of it for a homogeneous g.
 			// Two arguments here were measured rather than argued.
 			//
-			// The coefficient is radius, the same r the flux mass form carries.
+			// The coefficient is radius, the same R the flux mass form carries.
 			// HDGExtensionIntegrator documents C as "the same coefficient the
 			// flux mass form carries", and CLAUDE.md's mapping table says the
-			// same thing from MEQ's side, but it was checked: with 1/r here the
+			// same thing from MEQ's side, but it was checked: with 1/R here the
 			// error is flat under refinement, exactly as it is when the flux mass
-			// form itself is given 1/r.
+			// form itself is given 1/R.
 			//
 			// The sign is +1, HDGExtensionIntegrator's own default, and it is the
 			// default for the same reason it is right here: DarcyForm's flux block
@@ -4583,7 +4583,7 @@ namespace
 			// integrator's coincide. Measured: with -1 the rates collapse. See
 			// tests/convergence/ExtensionConvergence.cpp for the numbers.
 			auto *extension = new mfem::HDGExtensionIntegrator(
-				*transferPath, radius, +1.0, extensionLineOrder );
+				*transferPath, radiusCoefficient, +1.0, extensionLineOrder );
 			// THE OUTER RULE, which is the inexact one. See
 			// setExtensionQuadratureOrder(); negative leaves MFEM's 2k+2 and
 			// every solve written before this existed is bit-unchanged.
@@ -4598,8 +4598,8 @@ namespace
 		// dead weight once SetStabilization() is called -- the hook replaces the
 		// built-in expression entirely -- but it is the diffusion coefficient the
 		// integrator is documented to take, so it is the honest thing to pass.
-		auto *interior = new mfem::HDGDiffusionIntegrator( radius, stabilization.tau() );
-		auto *boundary = new mfem::HDGDiffusionIntegrator( radius, stabilization.tau() );
+		auto *interior = new mfem::HDGDiffusionIntegrator( radiusCoefficient, stabilization.tau() );
+		auto *boundary = new mfem::HDGDiffusionIntegrator( radiusCoefficient, stabilization.tau() );
 		interior->SetStabilization( stabilization );
 		boundary->SetStabilization( stabilization );
 
@@ -5137,8 +5137,8 @@ namespace
 				                                              *picardIterate );
 			rhsSource = frozenSource.get();
 
-			// The same -1/r that setSource( Coefficient & ) applies, and for the
-			// same two reasons -- the equation's 1/r and DarcyForm's sign. Built
+			// The same -1/R that setSource( Coefficient & ) applies, and for the
+			// same two reasons -- the equation's 1/R and DarcyForm's sign. Built
 			// once; ProductCoefficient holds a reference, so the frozen source
 			// re-reads picardIterate on every assembly without rebuilding this.
 			if ( !potentialRhsCoeff )
@@ -5148,7 +5148,7 @@ namespace
 
 		if ( rhsSource )
 		{
-			// Order 2k+4, not DomainLFIntegrator's default 2k. F/r is not a
+			// Order 2k+4, not DomainLFIntegrator's default 2k. F/R is not a
 			// polynomial -- for Solov'ev it is a rational function, and for a
 			// tabulated profile it is a spline in psi -- so the default rule
 			// integrates it to its own accuracy rather than to the solution's.
@@ -5764,21 +5764,21 @@ namespace
 		 * **AND OFF THE AXIS, BECAUSE THE GLOBAL ARGMAX IS NOT THE MAGNETIC
 		 * AXIS ON A HALF-DISC AND MEASURING IT IS WHAT FOUND THAT.** On
 		 * FreeBoundaryCoupling's own converged limiter case, psi_h reaches
-		 * 1.0916e-01 in an element TOUCHING r = 0, in the corner where Gamma
+		 * 1.0916e-01 in an element TOUCHING R = 0, in the corner where Gamma
 		 * meets the axis, against 4.4472e-02 as the largest value anywhere else
 		 * -- a factor of 2.5. That corner is where two different data meet
 		 * (psi = 0 on the fitted axis, the transferred exterior trace on
-		 * Gamma_h) at the one place the lifting weight C = r vanishes, and FB-A
-		 * measured the flux mass ( r q, v ) giving those elements a weight of
+		 * Gamma_h) at the one place the lifting weight C = R vanishes, and FB-A
+		 * measured the flux mass ( R q, v ) giving those elements a weight of
 		 * order h and an O( 1/h ) conditioning penalty. Seeded there, the fill
 		 * names an 84-element pocket in that corner as the plasma.
 		 *
-		 * The magnetic axis of an axisymmetric equilibrium is never on r = 0 --
+		 * The magnetic axis of an axisymmetric equilibrium is never on R = 0 --
 		 * psi vanishes there for any field with finite B -- so excluding those
 		 * elements from the SEARCH costs nothing physical. They can still be
 		 * REACHED by the fill; what is refused is starting from one.
 		 *
-		 * A domain that does not touch r = 0 loses nothing: no element is
+		 * A domain that does not touch R = 0 loses nothing: no element is
 		 * excluded and this is the plain argmax.
 		 */
 		auto touchesAxis = [ & ]( int element )
@@ -5839,16 +5839,16 @@ namespace
 
 			mfem::Array< int > vertices;
 			mesh.GetElementVertices( element, vertices );
-			double r = 0.0;
+			double radius = 0.0;
 			double z = 0.0;
 			for ( int i = 0; i < vertices.Size(); ++i )
 			{
-				r += mesh.GetVertex( vertices[ i ] )[ 0 ];
+				radius += mesh.GetVertex( vertices[ i ] )[ 0 ];
 				z += mesh.GetVertex( vertices[ i ] )[ 1 ];
 			}
-			r /= vertices.Size();
+			radius /= vertices.Size();
 			z /= vertices.Size();
-			return conductors->indexContaining( r, z ) >= 0;
+			return conductors->indexContaining( radius, z ) >= 0;
 		};
 
 		double bestPsiN = -std::numeric_limits< double >::infinity();
@@ -5962,7 +5962,7 @@ namespace
 		}
 
 		// A plasma that reaches the axis everywhere -- a mirror, or a domain
-		// entirely against r = 0 -- leaves nothing off it, and there the global
+		// entirely against R = 0 -- leaves nothing off it, and there the global
 		// argmax is the only answer available.
 		if ( !fromAxis && ( seed < 0 || bestPsiN <= 0.0 ) )
 			seed = seedAnywhere;
@@ -6167,7 +6167,7 @@ namespace
 		 * which is why no existing case caught it. With ConfineToPlasma the
 		 * profiles return zero wherever the normalised flux is negative, and
 		 * the remainder is negative nearly everywhere a conductor is
-		 * subtracted -- so `int F/r` comes out EXACTLY zero, the plasma-current
+		 * subtracted -- so `int F/R` comes out EXACTLY zero, the plasma-current
 		 * row of the dense corner is identically zero, and the run dies in
 		 * DenseMatrixInverse reporting *"the bordered Jacobian is singular in
 		 * ( psi_ax, psi_bnd, a )"*. That message names the block, so the search
@@ -6203,7 +6203,7 @@ namespace
 		 *
 		 * A reduction leaves the association to the runtime: the partial sums
 		 * arrive in whatever order the threads finish in, so the last bit of
-		 * `int F/r` would depend on OMP_NUM_THREADS -- and with it psi_ax, the
+		 * `int F/R` would depend on OMP_NUM_THREADS -- and with it psi_ax, the
 		 * Newton iteration count and every published digit that rests on them.
 		 * An array indexed by ELEMENT and summed in ELEMENT ORDER gives the
 		 * same bits at every thread count, which is the property that matters,
@@ -6403,7 +6403,7 @@ namespace
 					psi += conductorPsiAtQuadrature( e, i );
 
 					// F carries the scale linearly, so dF/d(scale) is F/scale --
-					// and the residual's source term is -w F/r, so this is that
+					// and the residual's source term is -w F/R, so this is that
 					// term divided by the scale. Exact, and one loop.
 					double const derivative =
 						normalisedSource->scaledF( point( 0 ), point( 1 ), psi )/scale;
@@ -6670,7 +6670,7 @@ namespace
 						psi += shape( j )*state( potentialStart + dofs[ j ] );
 					psi += conductorPsiAtQuadrature( e, i );
 
-					// d/dx of int F/r: the plasma's own dF/dpsi against the shape
+					// d/dx of int F/R: the plasma's own dF/dpsi against the shape
 					// functions. NOT negated -- this is the constraint's gradient,
 					// not a residual contribution.
 					double const factor =
@@ -6898,7 +6898,7 @@ namespace
 				gammaHMarker );
 			form.Assemble();
 
-			// THE RESIDUAL CARRIES THE LOAD NEGATED: r = G( x ) - b, so
+			// THE RESIDUAL CARRIES THE LOAD NEGATED: R = G( x ) - b, so
 			// dr/da_m = -db/da_m and the flux block is the only one `a`
 			// reaches. The potential and trace blocks are exactly zero, which
 			// theExteriorColumnsAreExact asserts rather than assumes.
@@ -7006,7 +7006,7 @@ namespace
 					el.CalcShape( ip, shape );
 					tr.Transform( ip, point );
 
-					double const r = point( 0 );
+					double const radius = point( 0 );
 					double const z = point( 1 );
 
 					double psi = 0.0;
@@ -7016,7 +7016,7 @@ namespace
 
 					double dFdAxis = 0.0;
 					double dFdBoundary = 0.0;
-					if ( !normalisedSource->normalisationDerivatives( r, z, psi,
+					if ( !normalisedSource->normalisationDerivatives( radius, z, psi,
 					                                                  dFdAxis,
 					                                                  dFdBoundary ) )
 					{
@@ -7028,12 +7028,12 @@ namespace
 					double const derivative = axis ? dFdAxis : dFdBoundary;
 					double const weight = ip.weight*tr.Weight();
 
-					// EXACTLY SourceIntegrator's sign. It adds -w F/r against the
-					// shape functions, so the derivative of that is -w (dF/ds)/r
+					// EXACTLY SourceIntegrator's sign. It adds -w F/R against the
+					// shape functions, so the derivative of that is -w (dF/ds)/R
 					// against the same ones. Getting this wrong is the failure this
 					// file warns about repeatedly, which is why
 					// theAnalyticColumnAgreesWithTheDifferencedOne exists.
-					double const factor = -weight*derivative/r;
+					double const factor = -weight*derivative/radius;
 					for ( int j = 0; j < dof; ++j )
 						out( potentialStart + dofs[ j ] ) += factor*shape( j );
 				}
@@ -7290,10 +7290,10 @@ namespace
 			// LegTimers on the same accumulator around the same work add twice.
 			if ( limiterConstraintChoice != LimiterConstraint::LocatedContact )
 				return;
-			double r = 0.0, z = 0.0;
+			double radius = 0.0, z = 0.0;
 			locateLimiterContact( state, limiterElement, limiterShape,
-			                      limiterDofs, r, z );
-			limiterContactRValue = r;
+			                      limiterDofs, radius, z );
+			limiterContactRValue = radius;
 			limiterContactZValue = z;
 			limiterContactLocatedValue = limiterElement >= 0;
 		};
@@ -7360,7 +7360,7 @@ namespace
 		 * takes the per-dof cache; XP-3's is the X-point itself, which the
 		 * limiter search never locates -- `limiterContactLocatedValue` is
 		 * refreshLimiterContact()'s and that search returns early anywhere but
-		 * LocatedContact; the PRESCRIBED point has its ( r, z ) as given data,
+		 * LocatedContact; the PRESCRIBED point has its ( R, z ) as given data,
 		 * unmoving for the whole solve; and the located one has it in hand at
 		 * this iterate.
 		 *
@@ -7423,7 +7423,7 @@ namespace
 		 * refreshXPoint() and frozen while the elimination runs, exactly as the
 		 * axis element and the limiter contact are. The rows are:
 		 *
-		 *   q_r( x ) = 0            b = -( flux shape, r component )
+		 *   q_r( x ) = 0            b = -( flux shape, R component )
 		 *   q_z( x ) = 0            b = -( flux shape, z component )
 		 *   psi_bnd - psi_h( x ) = 0   b = -( potential shape ), which is the
 		 *                              row limiterValue() already builds
@@ -7437,7 +7437,7 @@ namespace
 		double xFlux[ 2 ] = { 0.0, 0.0 };
 		double xFluxJacobian[ 2 ][ 2 ] = { { 0.0, 0.0 }, { 0.0, 0.0 } };
 		// d psi_h/dx there, which is the psi_bnd row's corner against the two
-		// new unknowns. NOT r q: q_h and psi_h are separate solved fields and
+		// new unknowns. NOT R q: q_h and psi_h are separate solved fields and
 		// the identity between them is weak, so the row wants the potential's
 		// own derivative and gets it from the same element.
 		double xPotentialGradient[ 2 ] = { 0.0, 0.0 };
@@ -7448,7 +7448,7 @@ namespace
 		// gamma converts a perturbation of a border unknown into the units the
 		// field residual is measured in, and q is not in psi's units -- so the
 		// two new constraints are scaled by a length before they may be added to
-		// the augmented norm. grad psi = r q, so r times the element's own size
+		// the augmented norm. grad psi = R q, so R times the element's own size
 		// turns q into a change of psi ACROSS AN ELEMENT, which is the natural
 		// comparison. It scales the NORM only; the equation solved is q = 0.
 		double xScale = 1.0;
@@ -8004,7 +8004,7 @@ namespace
 				found = finder.tryFindAxisFrom( previousAxisR, previousAxisZ,
 				                                sense, best );
 				if ( found && conductors != nullptr
-				     && conductors->indexContaining( best.r, best.z ) >= 0 )
+				     && conductors->indexContaining( best.radius, best.z ) >= 0 )
 					found = false;
 			}
 
@@ -8091,7 +8091,7 @@ namespace
 							continue;
 
 						if ( dropConductors
-						     && conductors->indexContaining( all[ i ].r,
+						     && conductors->indexContaining( all[ i ].radius,
 						                                     all[ i ].z ) >= 0 )
 							continue;
 
@@ -8170,10 +8170,10 @@ namespace
 			 * Exactly zero with no conductor field, so every existing path is
 			 * bit-identical.
 			 */
-			value += conductorPsi( best.r, best.z );
+			value += conductorPsi( best.radius, best.z );
 
 			constraintElement = best.element;
-			previousAxisR = best.r;
+			previousAxisR = best.radius;
 			previousAxisZ = best.z;
 			havePreviousAxis = true;
 
@@ -8188,7 +8188,7 @@ namespace
 			 * MEASUREMENTS.md M-120 measures that it is not: at the located axis
 			 * | q_h | is at round-off, being the root, while | grad psi_h | reads
 			 * 8e-04 to 1e-02. The two are different fields whose identity is only
-			 * WEAK -- r q_h - grad_bar psi_h is the local lifting of the trace
+			 * WEAK -- R q_h - grad_bar psi_h is the local lifting of the trace
 			 * jump -- which is exactly what cornerEntry()'s XP-3 arm says about
 			 * the same relation, and why q_h converges a full order better than
 			 * grad psi_h. That gap IS the mixed method.
@@ -8699,7 +8699,7 @@ namespace
 		 * components of q, which is not in psi's units, so adding them to a sum
 		 * of flux perturbations unscaled would compare two different quantities
 		 * -- and the answer would depend on the machine's size in metres.
-		 * grad psi = r q, so `xScale = r h` converts q into the change of psi
+		 * grad psi = R q, so `xScale = R h` converts q into the change of psi
 		 * across the X-point's own element, which is the thing the other border
 		 * constraints already measure. It scales the NORM alone: the equation
 		 * the border solves is q = 0, undisturbed.
@@ -9117,14 +9117,14 @@ namespace
 				 * **AND THE ENVELOPE ARGUMENT IS AN APPROXIMATION HERE, NOT AN
 				 * IDENTITY. THIS COMMENT SAID OTHERWISE AND WAS WRONG.**
 				 *
-				 * It read "grad_bar( psi ) = r q, so grad( psi_h )( x* ) = 0 at
+				 * It read "grad_bar( psi ) = R q, so grad( psi_h )( x* ) = 0 at
 				 * a zero of q_h IDENTICALLY". That relation is CONTINUOUS. The
 				 * discrete flux equation gives, per element and for all v in the
 				 * flux space,
 				 *
-				 *   ( r q_h - grad_bar psi_h, v )_K = -< psi_h - psihat_h, v.n >_dK
+				 *   ( R q_h - grad_bar psi_h, v )_K = -< psi_h - psihat_h, v.n >_dK
 				 *
-				 * so r q_h - grad_bar psi_h is the local lifting of the trace
+				 * so R q_h - grad_bar psi_h is the local lifting of the trace
 				 * jump, not zero. Equivalently q_h converges at O( h^(k+1) ) and
 				 * grad psi_h at O( h^k ) -- which is the whole reason the mixed
 				 * method is worth having, and it means grad( psi_h )( x* ) is
@@ -9575,7 +9575,7 @@ namespace
 			{
 				if ( i < nBorders || j < nBorders )
 				{
-					// THE CURRENT ROW IS NOT DIAGONAL. int F/r depends on
+					// THE CURRENT ROW IS NOT DIAGONAL. int F/R depends on
 					// psi_ax and psi_bnd explicitly, through the normalisation
 					// the profiles are evaluated at, so it has entries against
 					// both. Leaving them out does not move the answer -- it
@@ -9588,7 +9588,7 @@ namespace
 							return currentAgainstAxis;
 						if ( boundaryFluxIsUnknown && j == boundaryIndex )
 							return currentAgainstBoundary;
-						// int F/r has no entry against ( r_X, z_X ): the
+						// int F/R has no entry against ( R_X, z_X ): the
 						// X-point reaches the source only through psi_bnd,
 						// which is the column above.
 						return 0.0;
@@ -9609,7 +9609,7 @@ namespace
 					 * polynomial on this element, so its gradient here is exact
 					 * arithmetic. See setXPointBoundary().
 					 *
-					 * The psi_bnd row's two entries are NOT r q. psi_h and q_h
+					 * The psi_bnd row's two entries are NOT R q. psi_h and q_h
 					 * are separate solved fields whose identity is only weak, so
 					 * the row wants the potential's own derivative and gets it.
 					 * They vanish AT a converged X-point either way, which is
@@ -9628,7 +9628,7 @@ namespace
 						return 0.0;
 					if ( i == 0 )
 						return corner;
-					// d( int F/r )/d( scale ) = ( int F/r )/scale, F being
+					// d( int F/R )/d( scale ) = ( int F/R )/scale, F being
 					// linear in it. Not 1, which is psi_bnd's corner.
 					if ( currentIsUnknown && i == currentIndex )
 						return sL != 0.0 ? currentIntegral/sL : 0.0;
@@ -9661,7 +9661,7 @@ namespace
 				/*
 				 * XP-3 COSTS NO BACKSOLVE AT ALL, AND THIS ZERO IS WHERE THAT
 				 * SHOWS. c_j = dR/dp_j, and the field residual does not contain
-				 * ( r_X, z_X ): they reach it only through psi_bnd, whose column
+				 * ( R_X, z_X ): they reach it only through psi_bnd, whose column
 				 * is zB above. So z_j = J^-1 0 = 0 exactly, not approximately --
 				 * the system grows from ( N + 2 ) to ( N + 4 ) in the dense
 				 * corner alone, and the trace solve is untouched.
@@ -9676,10 +9676,10 @@ namespace
 				/*
 				 * THE CURRENT CONSTRAINT, ALL THREE PIECES ANALYTIC.
 				 *
-				 *   G_I    = int F/r - mu0 I_p        the constraint
+				 *   G_I    = int F/R - mu0 I_p        the constraint
 				 *   dR/dL  = ( source term )/L        F is LINEAR in the scale
-				 *   dG/dx  = int ( dF/dpsi )/r phi_j  a covector on the potential
-				 *   dG/dL  = ( int F/r )/L            for the same linearity
+				 *   dG/dx  = int ( dF/dpsi )/R phi_j  a covector on the potential
+				 *   dG/dL  = ( int F/R )/L            for the same linearity
 				 *
 				 * None of it is differenced, which is the whole reason this is
 				 * cheap: prescribing the current costs one more backsolve and
@@ -10030,7 +10030,7 @@ namespace
 				 * solve against the factorisation two lines above, on a matrix
 				 * of order at most 4 + modes. The PARTIAL derivative is not
 				 * this and is worthless: F is linear in lambda, so at a frozen
-				 * field it is ( int F/r )/lambda and can never be small.
+				 * field it is ( int F/R )/lambda and can never be small.
 				 *
 				 * It is recomputed every iteration and the CONVERGED one is
 				 * what plasmaCurrentSensitivity() reports, which is the only
@@ -10915,7 +10915,7 @@ namespace
 			 * THE CONVERGENCE TARGET MUST NOT DEPEND ON WHERE THE ITERATION
 			 * STARTED, AND MFEM'S DOES.
 			 *
-			 * NewtonSolver stops at || r || <= max( rel_tol * || r_0 ||, abs_tol )
+			 * NewtonSolver stops at || R || <= max( rel_tol * || r_0 ||, abs_tol )
 			 * with || r_0 || measured at the iterate it was handed. A warm start
 			 * makes || r_0 || small, so the target shrinks with it -- and a good
 			 * enough guess drives the target below the round-off floor, where it

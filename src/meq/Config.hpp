@@ -6,7 +6,7 @@
  *
  * MEQ solves
  *
- *     -div_bar( (1/r) grad_bar( psi ) ) = F( r, z, psi ) / r    in Omega,
+ *     -div_bar( (1/R) grad_bar( psi ) ) = F( R, z, psi ) / R    in Omega,
  *                                   psi = psi_D                 on Gamma,
  *
  * by HDG, with the nonlinearity in F handled by Newton. A run is described by a
@@ -41,7 +41,7 @@
  * NAMING. Two conventions meet in this file and they deliberately disagree:
  * TOML key names are UpperCamelCase (RMin, PolynomialDegree, GGPrimeFile), as
  * they are across the sibling projects, while C++ identifiers -- including the
- * members that hold those keys' values -- are lowerCamelCase (rMin,
+ * members that hold those keys' values -- are lowerCamelCase (R_min,
  * polynomialDegree, ggPrimeFile). So the string literals in Config.cpp are
  * capitalised and the members they are read into are not. That is intended;
  * please do not "fix" either side into the other.
@@ -103,7 +103,7 @@ namespace meq
 	 *
 	 * Everything else in `[mesh]` reads a mesh somebody already made. A free
 	 * boundary run cannot be made by `mfem::Mesh::MakeCartesian2D` at all --
-	 * it needs a semicircle reaching `r = 0` exactly, with the conductors
+	 * it needs a semicircle reaching `R = 0` exactly, with the conductors
 	 * fragmented in -- so it comes from `tools/mesh/halfdisc.py`. Without this
 	 * block the geometry is stated TWICE: once on that script's command line
 	 * and once in the TOML the solve reads, with nothing checking that the two
@@ -144,7 +144,7 @@ namespace meq
 		std::string tool;
 
 		/// `Radius` -- the DISC's radius, metres, strictly positive. The
-		/// semicircle is centred on the origin and reaches `r = 0` exactly,
+		/// semicircle is centred on the origin and reaches `R = 0` exactly,
 		/// because that is the geometry the exterior expansion of
 		/// `meq::ExteriorDtN` is a statement about.
 		///
@@ -224,7 +224,7 @@ namespace meq
 		double transition = 0.0;
 
 		/// `Check` -- re-read the written file and assert MEQ's preconditions
-		/// on it: that `r` reaches 0 EXACTLY, that Gamma and the axis are the
+		/// on it: that `R` reaches 0 EXACTLY, that Gamma and the axis are the
 		/// outer boundary and nothing else, and that each coil attribute covers
 		/// its rectangle. **It defaults to TRUE here and to false on the
 		/// script's own command line**, which is a deliberate disagreement: a
@@ -271,11 +271,11 @@ namespace meq
 	struct MeshConfig
 	{
 		// Background box [RMin,RMax] x [ZMin,ZMax], in metres. RMin >= 0: the
-		// Grad-Shafranov operator carries a 1/r, so a box reaching r = 0
+		// Grad-Shafranov operator carries a 1/R, so a box reaching R = 0
 		// contains the coordinate singularity. That is allowed, but is rarely
 		// what is wanted.
-		double rMin = 0.0;
-		double rMax = 0.0;
+		double minRadius = 0.0;
+		double maxRadius = 0.0;
 		double zMin = 0.0;
 		double zMax = 0.0;
 
@@ -317,7 +317,7 @@ namespace meq
 		double tau = 1.0;
 	};
 
-	// [source] -- which right-hand side F( r, z, psi ), and its parameters.
+	// [source] -- which right-hand side F( R, z, psi ), and its parameters.
 	enum class SourceType
 	{
 		Soloviev,      // "soloviev"
@@ -326,7 +326,7 @@ namespace meq
 		Rotating       // "rotating"
 	};
 
-	// F( r, z, psi ) = -( (1 - A) r^2 + A ), independent of psi and hence
+	// F( R, z, psi ) = -( (1 - A) R^2 + A ), independent of psi and hence
 	// linear. See HDG-GradShafranov.pdf eq (10), the NSTX case of
 	// HDG-GradShafranov-Adaptive.pdf section 4.1, and Cerfon & Freidberg,
 	// Phys. Plasmas 17, 032502 (2010) for the geometry.
@@ -340,7 +340,7 @@ namespace meq
 
 	// Static MHD equilibrium: F is built from the two tabulated flux functions
 	//
-	//     F( r, z, psi ) = mu0 r^2 p'(psi) + (g g')(psi)
+	//     F( R, z, psi ) = mu0 R^2 p'(psi) + (g g')(psi)
 	//
 	// (meq::MHDSource, which documents the conventions the tables must follow).
 	// Both files are read by meq::SplineProfile, which documents the format:
@@ -389,7 +389,7 @@ namespace meq
 		// of which code reads it. See meq::ScaledProfile.
 		double pPrimeScale = 1.0;
 		double ggPrimeScale = 1.0;
-		// Mu0: the vacuum permeability multiplying the r^2 p' term [H/m]. The
+		// Mu0: the vacuum permeability multiplying the R^2 p' term [H/m]. The
 		// SI value by default; set it to 1 for a problem posed in normalised
 		// units.
 		double mu0 = 4.0e-7*3.14159265358979323846;
@@ -434,7 +434,7 @@ namespace meq
 		// DIFFERENCE. meq::GradShafranovSolver::setPlasmaCurrent takes mu0 I_p
 		// because everything in the solver already speaks in it -- Ampere's law
 		// reads the flux integral as -mu0 I_p and the constraint is assembled as
-		// int F/r, which IS mu0 I_p -- and taking amperes THERE would mean the
+		// int F/R, which IS mu0 I_p -- and taking amperes THERE would mean the
 		// solver knowing a mu0, which could disagree with the source's own and
 		// scale two terms of one equation differently. The CONFIGURATION layer
 		// has no such problem: the file names exactly one mu0, under [source],
@@ -446,15 +446,15 @@ namespace meq
 
 	// The nonlinear manufactured solution of HDG-GradShafranov.pdf Example 5,
 	//
-	//     psi = sin( Kr ( r + R0 ) ) cos( Kz z ),
+	//     psi = sin( Kr ( R + R0 ) ) cos( Kz z ),
 	//
 	// with F chosen so that psi solves the equation. Its Dirichlet data is not
 	// zero, so a run using this source normally sets [boundary] Type = "exact".
 	struct ManufacturedParameters
 	{
-		// R0: the radial offset r0 in the expression above, in metres. NOT the
-		// major radius. Example 5 uses r0 = -0.5.
-		double r0 = 0.0;
+		// R0: the radial offset R_0 in the expression above, in metres. NOT the
+		// major radius. Example 5 uses R_0 = -0.5.
+		double radius0 = 0.0;
 		// Kr: radial wavenumber, in radians per metre. Example 5: 1.15 pi.
 		double kr = 0.0;
 		// Kz: vertical wavenumber, in radians per metre. Example 5: 1.15.
@@ -484,7 +484,7 @@ namespace meq
 		std::string temperatureFile;
 		double temperatureScale = 1.0;
 		// Density / DensityFile: n_s0 [m^-3], the density of this species ON
-		// THE CURVE r = ReferenceRadius. Both are absent when Neutralising, and
+		// THE CURVE R = ReferenceRadius. Both are absent when Neutralising, and
 		// so is DensityScale.
 		double density = 0.0;
 		std::string densityFile;
@@ -522,7 +522,7 @@ namespace meq
 		double ggPrime = 0.0;
 		std::string ggPrimeFile;
 		double ggPrimeScale = 1.0;
-		// ReferenceRadius: rRef [m]. THE GAUGE. phi_0 vanishes on this curve,
+		// ReferenceRadius: R_ref [m]. THE GAUGE. phi_0 vanishes on this curve,
 		// which is what makes each Density the physical density there, and it
 		// is a CONSTANT -- the geometric axis -- not the magnetic axis and not
 		// a flux-surface average. Two sets of densities differing by the gauge
@@ -603,8 +603,8 @@ namespace meq
 		/// The permeability this source multiplies its pressure term by.
 		///
 		/// **EXPOSED SO THE COILS CAN SHARE IT, AND THAT IS THE WHOLE REASON.**
-		/// A coil's contribution is `mu0 r I/|Omega_c|` and the plasma's is
-		/// `mu0 r^2 p' + g g'`; they are ADDED, so a run in normalised units
+		/// A coil's contribution is `mu0 R I/|Omega_c|` and the plasma's is
+		/// `mu0 R^2 p' + g g'`; they are ADDED, so a run in normalised units
 		/// that sets `[source] Mu0 = 1` and leaves the coils at the SI value
 		/// would be summing two terms scaled a million-fold apart -- and it
 		/// would converge, at full order, to a machine nobody described. There
@@ -642,7 +642,7 @@ namespace meq
 	 *
 	 * FB-6, and section 5.4 of FREE-BOUNDARY-PLAN.md calls the coils "ordinary"
 	 * -- coil currents are data, and the source adds
-	 * `F_coil = mu0 r I_k / |Omega_ck|` on each coil subdomain. This is the
+	 * `F_coil = mu0 R I_k / |Omega_ck|` on each coil subdomain. This is the
 	 * configuration half of that; `meq::Coil` is the library half and has been
 	 * measured since FB-2.
 	 *
@@ -669,8 +669,8 @@ namespace meq
 
 		/// Half-extents, in metres. Strictly positive, and
 		/// `centreR - halfWidth` must be strictly positive too: a coil reaching
-		/// the axis is refused, because the operator's 1/r is not integrable
-		/// through r = 0. Same refusal meq::Coil and meq::BoundaryShape make.
+		/// the axis is refused, because the operator's 1/R is not integrable
+		/// through R = 0. Same refusal meq::Coil and meq::BoundaryShape make.
 		double halfWidth = 0.0;
 		double halfHeight = 0.0;
 
@@ -801,7 +801,7 @@ namespace meq
 	{
 		ShapeType type = ShapeType::None;
 
-		// R0, Z0, r, kappa: MXH's bounding-box parameters, metres and
+		// R0, Z0, R, kappa: MXH's bounding-box parameters, metres and
 		// dimensionless. Required unless Type is "none".
 		double majorRadius = 0.0;
 		double centreHeight = 0.0;
@@ -843,9 +843,9 @@ namespace meq
 		bool given = false;
 
 		/// The contact, in metres. `R` must be strictly positive: the axis is
-		/// not a limiter, and the nearest potential dof to a point on `r = 0`
+		/// not a limiter, and the nearest potential dof to a point on `R = 0`
 		/// is in an element whose flux mass degenerates.
-		double r = 0.0;
+		double radius = 0.0;
 		double z = 0.0;
 
 		/**
@@ -880,12 +880,12 @@ namespace meq
 	 * pins `psi_bnd` at a PRESCRIBED point, which is exactly right for a
 	 * material limiter -- the tile is where the drawings say it is -- and wrong
 	 * for a diverted plasma, whose null is a functional of the solution and
-	 * moves as Newton moves. This block makes `( r_X, z_X )` unknowns beside
+	 * moves as Newton moves. This block makes `( R_X, z_X )` unknowns beside
 	 * `psi_bnd`, closing
 	 *
-	 *     q_r( r_X, z_X )             = 0
-	 *     q_z( r_X, z_X )             = 0
-	 *     psi_bnd - psi_h( r_X, z_X ) = 0
+	 *     q_r( R_X, z_X )             = 0
+	 *     q_z( R_X, z_X )             = 0
+	 *     psi_bnd - psi_h( R_X, z_X ) = 0
 	 *
 	 * on the same factorisation as everything else:
 	 * meq::GradShafranovSolver::setXPointBoundary, whose documentation carries
@@ -915,8 +915,8 @@ namespace meq
 
 		/// Where the X-point is BELIEVED to be, in metres. `R` must be strictly
 		/// positive: the symmetry axis carries near-zeros of `q` that are not
-		/// X-points, and the flux mass `( r q, v )` degenerates there.
-		double r = 0.0;
+		/// X-points, and the flux mass `( R q, v )` degenerates there.
+		double radius = 0.0;
 		double z = 0.0;
 	};
 
@@ -925,8 +925,8 @@ namespace meq
 	 * `Gamma`, FB-5, and the block that makes a run FREE boundary.
 	 *
 	 * **THIS BLOCK DEFINES `Gamma` ITSELF, WHICH `[boundary.shape]` CANNOT.**
-	 * meq::BoundaryShape refuses a surface reaching `r <= 0` -- rightly, since a
-	 * closed plasma surface through the axis has a non-integrable `1/r` on it --
+	 * meq::BoundaryShape refuses a surface reaching `R <= 0` -- rightly, since a
+	 * closed plasma surface through the axis has a non-integrable `1/R` on it --
 	 * and the artificial boundary this block describes is a SEMICIRCLE CENTRED
 	 * ON THE AXIS, whose flat side IS the axis. That is not a degenerate MXH
 	 * surface; it is a different object, and the axis half of it is ordinary
@@ -937,7 +937,7 @@ namespace meq
 	 * is diagonal because the Gegenbauer separation holds on a semicircle about
 	 * the axis and nowhere else; on any other curve the exterior map is a dense
 	 * boundary-integral operator and this class does not represent it. The
-	 * `[mesh]` box must therefore reach `r = 0` exactly, which the driver checks
+	 * `[mesh]` box must therefore reach `R = 0` exactly, which the driver checks
 	 * rather than assumes.
 	 */
 	struct ExteriorConfig
@@ -1099,8 +1099,8 @@ namespace meq
 		bool assemblyModeWasGiven = false;
 		bool traceSolverWasGiven = false;
 
-		// Newton stops when either ||R|| <= NewtonAbsoluteTolerance or
-		// ||R|| <= NewtonRelativeTolerance * ||R_0||, and fails after
+		// Newton stops when either ||r|| <= NewtonAbsoluteTolerance or
+		// ||r|| <= NewtonRelativeTolerance * ||R_0||, and fails after
 		// NewtonMaxIterations. Both tolerances are in the units of the residual
 		// -- dimensionless, once scaled by the initial residual.
 		int newtonMaxIterations = 20;
@@ -1144,7 +1144,7 @@ namespace meq
 		// XP-3's two rows into the LINE SEARCH's merit, and into nothing else.
 		// The border solves q_r = q_z = 0 whatever this is, so it changes how
 		// many iterations a solve costs and must not change the answer.
-		// One is the natural scale ( r h, which turns q into a flux across the
+		// One is the natural scale ( R h, which turns q into a flux across the
 		// X-point's own element ) and is the default. See
 		// meq::GradShafranovSolver::setXPointMeritWeight for the plateau it
 		// exists to attack.
@@ -1237,7 +1237,7 @@ namespace meq
 		 *
 		 * **SO THE PICARD IS OUTSIDE THE BORDER RATHER THAN INSIDE IT.** With
 		 * `( psi_ax, psi_bnd )` held FIXED, a normalised source is an ordinary
-		 * `meq::Source` -- `F( r, z, psi )` with no unknowns in it -- and the
+		 * `meq::Source` -- `F( R, z, psi )` with no unknowns in it -- and the
 		 * field solve is the unbordered problem MEQ has always been able to
 		 * solve. This key counts sweeps of
 		 *

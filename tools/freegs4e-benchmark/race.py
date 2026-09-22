@@ -527,17 +527,17 @@ def sweep(tag, ref, stem, scratch, rungs, grids, sample=513, collar=0.05):
         if not xs:
             continue
         b = row["rec"]["psi_bndry"]
-        r, z, _ = min(xs, key=lambda t: abs(t[2] - b))
+        R, z, _ = min(xs, key=lambda t: abs(t[2] - b))
         print("      the reference's ACTIVE X-point at %d^2: ( %.4f, %.4f )"
-              "   [ %d saddles found ]" % (row["nx"], r, z, len(xs)))
+              "   [ %d saddles found ]" % (row["nx"], R, z, len(xs)))
         break
     for row in rows:
         if not row["ok"]:
             continue
-        r = row["rec"]
+        R = row["rec"]
         print("    %6d %10.1f %9d %15.9e %15.9e" %
-              (row["nx"], row["wall"], r.get("stage2_iterations", 0),
-               r["psi_axis"], r["psi_bndry"]))
+              (row["nx"], row["wall"], R.get("stage2_iterations", 0),
+               R["psi_axis"], R["psi_bndry"]))
 
     if TRUTH:
         candidate = os.path.join(TRUTH, "%s.npz" % ref)

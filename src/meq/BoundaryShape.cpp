@@ -19,11 +19,11 @@ namespace meq
 		}
 	}
 
-	BoundaryShape::BoundaryShape( double r0In, double z0In, double minorIn,
+	BoundaryShape::BoundaryShape( double radius0In, double z0In, double minorIn,
 	                              double elongationIn,
 	                              std::vector<double> cosIn,
 	                              std::vector<double> sinIn )
-		: r0( r0In ), z0( z0In ), minor( minorIn ), elongationValue( elongationIn ),
+		: radius0( radius0In ), z0( z0In ), minor( minorIn ), elongationValue( elongationIn ),
 		  cosCoefficients( std::move( cosIn ) ),
 		  sinCoefficients( std::move( sinIn ) )
 	{
@@ -31,28 +31,28 @@ namespace meq
 			throw ShapeError( "meq::BoundaryShape: the minor radius must be positive" );
 		if ( !( elongationValue > 0.0 ) )
 			throw ShapeError( "meq::BoundaryShape: the elongation must be positive" );
-		if ( !( r0 > 0.0 ) )
+		if ( !( radius0 > 0.0 ) )
 			throw ShapeError( "meq::BoundaryShape: the major radius must be positive" );
 
-		// The operator carries a 1/r, which is not integrable through the axis, so
-		// a surface reaching r <= 0 is not merely unusual -- it is unsolvable. The
-		// bound is on the bounding box rather than on r0 - minor, because the
+		// The operator carries a 1/R, which is not integrable through the axis, so
+		// a surface reaching R <= 0 is not merely unusual -- it is unsolvable. The
+		// bound is on the bounding box rather than on R_0 - minor, because the
 		// harmonics move the innermost point.
-		double rMin = 0.0, rMax = 0.0, zMin = 0.0, zMax = 0.0;
-		boundingBox( rMin, rMax, zMin, zMax );
-		if ( !( rMin > 0.0 ) )
+		double minRadius = 0.0, maxRadius = 0.0, zMin = 0.0, zMax = 0.0;
+		boundingBox( minRadius, maxRadius, zMin, zMax );
+		if ( !( minRadius > 0.0 ) )
 		{
 			std::ostringstream message;
-			message << "meq::BoundaryShape: the surface reaches r = " << rMin
+			message << "meq::BoundaryShape: the surface reaches R = " << minRadius
 			        << ", which is on or beyond the axis; the Grad-Shafranov "
-			           "operator's 1/r is not integrable there";
+			           "operator's 1/R is not integrable there";
 			throw ShapeError( message.str() );
 		}
 
 		requireStarShaped();
 	}
 
-	BoundaryShape BoundaryShape::miller( double r0In, double z0In, double minorIn,
+	BoundaryShape BoundaryShape::miller( double radius0In, double z0In, double minorIn,
 	                                     double elongationIn, double deltaIn,
 	                                     double squarenessIn )
 	{
@@ -66,7 +66,7 @@ namespace meq
 		if ( squarenessIn != 0.0 )
 			sines.push_back( -squarenessIn );
 
-		return BoundaryShape( r0In, z0In, minorIn, elongationIn, {}, sines );
+		return BoundaryShape( radius0In, z0In, minorIn, elongationIn, {}, sines );
 	}
 
 	double BoundaryShape::shiftedAngle( double theta ) const
@@ -86,20 +86,20 @@ namespace meq
 		return shifted;
 	}
 
-	void BoundaryShape::point( double theta, double &r, double &z ) const
+	void BoundaryShape::point( double theta, double &radius, double &z ) const
 	{
-		r = r0 + minor*std::cos( shiftedAngle( theta ) );
+		radius = radius0 + minor*std::cos( shiftedAngle( theta ) );
 		z = z0 + elongationValue*minor*std::sin( theta );
 	}
 
 	double BoundaryShape::polarAngle( double theta ) const
 	{
-		double r = 0.0, z = 0.0;
-		point( theta, r, z );
-		return wrappedAngle( r - r0, z - z0 );
+		double radius = 0.0, z = 0.0;
+		point( theta, radius, z );
+		return wrappedAngle( radius - radius0, z - z0 );
 	}
 
-	void BoundaryShape::boundingBox( double &rMin, double &rMax,
+	void BoundaryShape::boundingBox( double &minRadius, double &maxRadius,
 	                                 double &zMin, double &zMax ) const
 	{
 		// Sampled rather than solved. The extrema of R( theta ) satisfy
@@ -107,17 +107,17 @@ namespace meq
 		// closed form; 2000 points put the box within O( 1e-6 ) of the true one,
 		// which is far inside the margin any caller checks it against.
 		int const samples = 2000;
-		rMin = rMax = r0 + minor*std::cos( shiftedAngle( 0.0 ) );
+		minRadius = maxRadius = radius0 + minor*std::cos( shiftedAngle( 0.0 ) );
 		zMin = zMax = z0;
 
 		for ( int i = 0; i <= samples; ++i )
 		{
 			double const theta = twoPi*static_cast<double>( i )
 			                     /static_cast<double>( samples );
-			double r = 0.0, z = 0.0;
-			point( theta, r, z );
-			rMin = std::min( rMin, r );
-			rMax = std::max( rMax, r );
+			double radius = 0.0, z = 0.0;
+			point( theta, radius, z );
+			minRadius = std::min( minRadius, radius );
+			maxRadius = std::max( maxRadius, radius );
 			zMin = std::min( zMin, z );
 			zMax = std::max( zMax, z );
 		}
@@ -147,7 +147,7 @@ namespace meq
 			{
 				std::ostringstream message;
 				message << "meq::BoundaryShape: the surface is not star shaped about "
-				           "( " << r0 << ", " << z0 << " ): the polar angle stops "
+				           "( " << radius0 << ", " << z0 << " ): the polar angle stops "
 				           "increasing at theta = " << theta << ", where it is "
 				        << angle << " against " << previous << " just before. "
 				           "A level set cannot be built by radial bisection on such "
@@ -179,24 +179,24 @@ namespace meq
 		return 0.5*( low + high );
 	}
 
-	double BoundaryShape::levelSet( double r, double z ) const
+	double BoundaryShape::levelSet( double radius, double z ) const
 	{
-		double const dr = r - r0;
+		double const dr = radius - radius0;
 		double const dz = z - z0;
-		double const radius = std::hypot( dr, dz );
+		double const centreDistance = std::hypot( dr, dz );
 
-		// The centre itself. Any angle serves; the gap is the whole radius to the
+		// The centre itself. Any angle serves; the gap is the whole distance to the
 		// curve, and it is negative because the centre is inside.
-		if ( radius < 1.0e-14 )
+		if ( centreDistance < 1.0e-14 )
 		{
 			double br = 0.0, bz = 0.0;
 			point( 0.0, br, bz );
-			return -std::hypot( br - r0, bz - z0 );
+			return -std::hypot( br - radius0, bz - z0 );
 		}
 
 		double const theta = parameterAtPolarAngle( wrappedAngle( dr, dz ) );
 		double br = 0.0, bz = 0.0;
 		point( theta, br, bz );
-		return radius - std::hypot( br - r0, bz - z0 );
+		return centreDistance - std::hypot( br - radius0, bz - z0 );
 	}
 }

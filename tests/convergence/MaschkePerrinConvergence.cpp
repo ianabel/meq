@@ -68,17 +68,17 @@ namespace
 
 	using Equilibrium = meq::analytic::MaschkePerrinEquilibrium;
 
-	/// The scan SolovievConvergence.cpp uses, at the same step: 0.2 in r and
+	/// The scan SolovievConvergence.cpp uses, at the same step: 0.2 in R and
 	/// 0.3 in z over the benchmark box.
 	template<typename Check>
 	void overTheBox( Check check )
 	{
 		meq::tests::Rectangle const box = meq::tests::standardBox();
-		for ( double r = box.rMin; r <= box.rMax + 1.0e-12; r += 0.2 )
+		for ( double radius = box.minRadius; radius <= box.maxRadius + 1.0e-12; radius += 0.2 )
 		{
 			for ( double z = box.zMin; z <= box.zMax + 1.0e-12; z += 0.3 )
 			{
-				check( r, z );
+				check( radius, z );
 			}
 		}
 	}
@@ -87,10 +87,10 @@ namespace
 	/// Omega^4 ) and all. Not what the fixture evaluates, and that is the point:
 	/// it is the control for theSmallMachLimitIsContinuous, which asserts that
 	/// this form loses everything for small m while the fixture does not.
-	double naiveParticularAsPrinted( double r, double machSquared, double pressure,
+	double naiveParticularAsPrinted( double radius, double machSquared, double pressure,
 	                                 double majorRadius )
 	{
-		double const w = machSquared*r*r/( 2.0*majorRadius*majorRadius );
+		double const w = machSquared*radius*radius/( 2.0*majorRadius*majorRadius );
 		return pressure/( machSquared*machSquared )*( 1.0 + w - std::exp( w ) );
 	}
 
@@ -100,13 +100,13 @@ namespace
 	 * ------------------------------------------------------------------
 	 *
 	 * MEQ's rotating source is RoPP (96) closed by (97): two species whose
-	 * densities carry exp[ m_s omega^2( r^2 - rRef^2 )/2T_s - Z_s e phi_0/T_s ],
+	 * densities carry exp[ m_s omega^2( R^2 - R_ref^2 )/2T_s - Z_s e phi_0/T_s ],
 	 * with phi_0 fixed by quasineutrality. At two species the exponents come out
 	 * equal and shared,
 	 *
 	 *     C( psi ) = omega^2 ( Z_1 m_2 - Z_2 m_1 )/( Z_1 T_2 - Z_2 T_1 ),
 	 *
-	 * so p = Sum_s n_s T_s is p_0( psi ) exp[ C( psi )( r^2 - rRef^2 )/2 ] with
+	 * so p = Sum_s n_s T_s is p_0( psi ) exp[ C( psi )( R^2 - R_ref^2 )/2 ] with
 	 * p_0 = Sum_s n_s0 T_s the pressure on the reference curve.
 	 *
 	 * MASCHKE & PERRIN'S SECTION 4 IS EXACTLY TWO CONDITIONS ON THAT:
@@ -114,8 +114,8 @@ namespace
 	 *   (4.7)  omega^2/( Rbar T ) constant  <=>  C constant,
 	 *   (4.9)  p_T linear in F              <=>  p_0 linear in psi,
 	 *
-	 * and then F = mu0 r^2 p_0' exp[ C( r^2 - rRef^2 )/2 ] + g g' IS (4.10).
-	 * Setting rRef = R0 and C = m/R0^2 makes the exponent m r^2/2R0^2 - m/2, so
+	 * and then F = mu0 R^2 p_0' exp[ C( R^2 - R_ref^2 )/2 ] + g g' IS (4.10).
+	 * Setting R_ref = R0 and C = m/R0^2 makes the exponent m R^2/2R0^2 - m/2, so
 	 * the amplitude match is p_0' = ( P/mu0 R0^4 ) exp( m/2 ).
 	 *
 	 * THE CONSTRUCTION BELOW IS THE CHEAPEST WAY TO SATISFY BOTH WHILE LEAVING
@@ -251,7 +251,7 @@ namespace
 		       *std::exp( 0.5*eq.getMachSquared() );
 	}
 
-	/// meq::RotatingSource configured to be the fixture, with rRef = R0 and
+	/// meq::RotatingSource configured to be the fixture, with R_ref = R0 and
 	/// mu0 = 1. Every constant is derived from the equilibrium rather than
 	/// tabulated, so the mapping above is stated as code and cannot drift from
 	/// the fixture it claims to reproduce.
@@ -326,21 +326,21 @@ namespace
 			{
 			}
 
-			double psi( double r, double z ) const { return eq.psi( r, z ); }
+			double psi( double radius, double z ) const { return eq.psi( radius, z ); }
 
-			void flux( double r, double z, double &qR, double &qZ ) const
+			void flux( double radius, double z, double &qR, double &qZ ) const
 			{
-				eq.flux( r, z, qR, qZ );
+				eq.flux( radius, z, qR, qZ );
 			}
 
-			double f( double r, double z, double psiValue ) const
+			double f( double radius, double z, double psiValue ) const
 			{
-				return source->f( r, z, psiValue );
+				return source->f( radius, z, psiValue );
 			}
 
-			double dFdPsi( double r, double z, double psiValue ) const
+			double dFdPsi( double radius, double z, double psiValue ) const
 			{
-				return source->dFdPsi( r, z, psiValue );
+				return source->dFdPsi( radius, z, psiValue );
 			}
 
 		private:
@@ -365,15 +365,15 @@ BOOST_AUTO_TEST_CASE( theMaschkePerrinSourceMatchesTheOperator )
 	                                Equilibrium::withPoloidalCurrent() } )
 	{
 		double worst = 0.0;
-		overTheBox( [ &eq, &worst ]( double r, double z )
+		overTheBox( [ &eq, &worst ]( double radius, double z )
 		{
-			double const deltaStar = eq.deltaStarFD( r, z );
-			double const minusF = -eq.f( r, z, 0.0 );
+			double const deltaStar = eq.deltaStarFD( radius, z );
+			double const minusF = -eq.f( radius, z, 0.0 );
 			worst = std::max( worst, std::abs( deltaStar - minusF ) );
 
 			BOOST_TEST( std::abs( deltaStar - minusF ) < 1.0e-5,
 			            "at m = " << eq.getMachSquared() << ", M = " << eq.getCurrent()
-			            << ", ( " << r << ", " << z << " ): Delta*(psi) = " << deltaStar
+			            << ", ( " << radius << ", " << z << " ): Delta*(psi) = " << deltaStar
 			            << " but -F = " << minusF );
 		} );
 
@@ -394,27 +394,27 @@ BOOST_AUTO_TEST_CASE( theGradientsMatchFiniteDifferences )
 	for ( Equilibrium const &eq : { Equilibrium::stationary(), Equilibrium::rotating(),
 	                                Equilibrium::withPoloidalCurrent() } )
 	{
-		overTheBox( [ &eq, h ]( double r, double z )
+		overTheBox( [ &eq, h ]( double radius, double z )
 		{
 			double analyticR, analyticZ;
-			eq.gradPsi( r, z, analyticR, analyticZ );
+			eq.gradPsi( radius, z, analyticR, analyticZ );
 
-			double const differencedR = ( eq.psi( r + h, z ) - eq.psi( r - h, z ) )
+			double const differencedR = ( eq.psi( radius + h, z ) - eq.psi( radius - h, z ) )
 			                            /( 2.0*h );
-			double const differencedZ = ( eq.psi( r, z + h ) - eq.psi( r, z - h ) )
+			double const differencedZ = ( eq.psi( radius, z + h ) - eq.psi( radius, z - h ) )
 			                            /( 2.0*h );
 
 			BOOST_TEST( std::abs( analyticR - differencedR ) < 1.0e-8,
-			            "at m = " << eq.getMachSquared() << ", ( " << r << ", " << z
+			            "at m = " << eq.getMachSquared() << ", ( " << radius << ", " << z
 			            << " ): d_r psi = " << analyticR
 			            << " but the difference is " << differencedR );
 			BOOST_TEST( std::abs( analyticZ - differencedZ ) < 1.0e-8,
-			            "at m = " << eq.getMachSquared() << ", ( " << r << ", " << z
+			            "at m = " << eq.getMachSquared() << ", ( " << radius << ", " << z
 			            << " ): d_z psi = " << analyticZ
 			            << " but the difference is " << differencedZ );
 		} );
 
-		// And the flux really is grad_bar( psi )/r, since that is what the
+		// And the flux really is grad_bar( psi )/R, since that is what the
 		// solver's fluxError() is handed.
 		double qR, qZ, gR, gZ;
 		eq.flux( 1.1, 0.2, qR, qZ );
@@ -455,7 +455,7 @@ BOOST_AUTO_TEST_CASE( theAxisConditionsAreThePapersOwn )
 
 		BOOST_TEST( std::abs( dPsiDr ) < 1.0e-14,
 		            "at m = " << eq.getMachSquared() << ": (4.18)'s C leaves "
-		            "d_r psi = " << dPsiDr << " at the nominated axis r = " << ra
+		            "d_r psi = " << dPsiDr << " at the nominated axis R = " << ra
 		            << ", so R_a is not an extremum and it is not the magnetic axis" );
 		BOOST_TEST( std::abs( dPsiDz ) < 1.0e-15 );
 
@@ -510,7 +510,7 @@ BOOST_AUTO_TEST_CASE( theSmallMachLimitIsContinuous )
 {
 	Equilibrium const stationary = Equilibrium::stationary();
 	double const p = stationary.getPressure();
-	double const r0 = stationary.getMajorRadius();
+	double const radius0 = stationary.getMajorRadius();
 
 	// PART 1: the paper's own limit under (4.16), g_T -> -( P/8 )( R/R0 )^4 as
 	// Omega -> 0. The fixture must BE it at m = 0, not merely approach it.
@@ -519,20 +519,20 @@ BOOST_AUTO_TEST_CASE( theSmallMachLimitIsContinuous )
 	// would give -- so it is read off by subtraction rather than reimplemented.
 	{
 		double worst = 0.0;
-		overTheBox( [ & ]( double r, double z )
+		overTheBox( [ & ]( double radius, double z )
 		{
 			// The harmonic part written out from (3.16), so that what is
 			// compared is psi minus (3.16) against the paper's printed limit
 			// rather than the fixture against itself.
-			double const r0Sq = r0*r0;
+			double const r0Sq = radius0*radius0;
 			double const c = stationary.coefficientC();
-			double const harmonic = c*p*r*r/r0Sq
-			                        + ( stationary.getEllipticity() - 1.0 )*p*r*r
-			                          *( z*z - 0.25*r*r )/( 4.0*r0Sq*r0Sq )
+			double const harmonic = c*p*radius*radius/r0Sq
+			                        + ( stationary.getEllipticity() - 1.0 )*p*radius*radius
+			                          *( z*z - 0.25*radius*radius )/( 4.0*r0Sq*r0Sq )
 			                        + stationary.getFluxOffset();
-			double const limit = -p*std::pow( r/r0, 4 )/8.0;
+			double const limit = -p*std::pow( radius/radius0, 4 )/8.0;
 			worst = std::max( worst,
-			                  std::abs( stationary.psi( r, z ) - harmonic - limit ) );
+			                  std::abs( stationary.psi( radius, z ) - harmonic - limit ) );
 		} );
 		BOOST_TEST( worst < 1.0e-15,
 		            "at m = 0 the fixture differs from the paper's own -( P/8 )"
@@ -542,7 +542,7 @@ BOOST_AUTO_TEST_CASE( theSmallMachLimitIsContinuous )
 
 	// PART 2, THE CONTROL. (4.16) as printed is not merely less accurate for
 	// small m, it is useless -- and a test that only checked the fixture against
-	// itself would pass with the printed form in place. MEASURED at r = 1.3,
+	// itself would pass with the printed form in place. MEASURED at R = 1.3,
 	// comparing the printed form against the fixture's AT THE SAME m:
 	//
 	//     m        printed form, relative error against the fixture
@@ -558,25 +558,25 @@ BOOST_AUTO_TEST_CASE( theSmallMachLimitIsContinuous )
 	// the two expressions really are the same algebra, so that the second half
 	// is measuring precision loss and not a transcription error in either.
 	{
-		double const r = 1.3;
+		double const radius = 1.3;
 
 		auto particularOf = [ & ]( Equilibrium const &eq )
 		{
 			// psi minus the harmonic part, at z = 0.
-			double const r0Sq = r0*r0;
-			double const harmonic = eq.coefficientC()*p*r*r/r0Sq
-			                        + ( eq.getEllipticity() - 1.0 )*p*r*r
-			                          *( -0.25*r*r )/( 4.0*r0Sq*r0Sq )
+			double const r0Sq = radius0*radius0;
+			double const harmonic = eq.coefficientC()*p*radius*radius/r0Sq
+			                        + ( eq.getEllipticity() - 1.0 )*p*radius*radius
+			                          *( -0.25*radius*radius )/( 4.0*r0Sq*r0Sq )
 			                        + eq.getFluxOffset();
-			return eq.psi( r, 0.0 ) - harmonic;
+			return eq.psi( radius, 0.0 ) - harmonic;
 		};
 
-		double const limit = -p*std::pow( r/r0, 4 )/8.0;
+		double const limit = -p*std::pow( radius/radius0, 4 )/8.0;
 
 		double const mildMach = 1.0e-2;
-		Equilibrium const mild( r0, mildMach, p, 0.0, 0.0, 1.0, 0.0 );
+		Equilibrium const mild( radius0, mildMach, p, 0.0, 0.0, 1.0, 0.0 );
 		double const stableMild = particularOf( mild );
-		double const printedMild = naiveParticularAsPrinted( r, mildMach, p, r0 );
+		double const printedMild = naiveParticularAsPrinted( radius, mildMach, p, radius0 );
 		BOOST_TEST( std::abs( printedMild - stableMild )/std::abs( stableMild ) < 1.0e-9,
 		            "the two forms disagree by "
 		            << std::abs( printedMild - stableMild )/std::abs( stableMild )
@@ -585,9 +585,9 @@ BOOST_AUTO_TEST_CASE( theSmallMachLimitIsContinuous )
 		               "not the same algebra and one of them is mistyped" );
 
 		double const smallMach = 1.0e-8;
-		Equilibrium const small( r0, smallMach, p, 0.0, 0.0, 1.0, 0.0 );
+		Equilibrium const small( radius0, smallMach, p, 0.0, 0.0, 1.0, 0.0 );
 		double const stableSmall = particularOf( small );
-		double const printedSmall = naiveParticularAsPrinted( r, smallMach, p, r0 );
+		double const printedSmall = naiveParticularAsPrinted( radius, smallMach, p, radius0 );
 		BOOST_TEST( std::abs( printedSmall - stableSmall )/std::abs( stableSmall ) > 1.0e-2,
 		            "(4.16) as printed is accurate to "
 		            << std::abs( printedSmall - stableSmall )/std::abs( stableSmall )
@@ -606,24 +606,24 @@ BOOST_AUTO_TEST_CASE( theSmallMachLimitIsContinuous )
 	// |w| = seriesThreshold(), and a series that disagreed with the closed form
 	// there would put a step into psi and into the flux -- small enough to
 	// survive every other assertion in this file and large enough to spoil a
-	// convergence rate. Straddle it in m at fixed r and require the jump to
+	// convergence rate. Straddle it in m at fixed R and require the jump to
 	// scale like the perturbation, which is what "no step" means. A genuine
 	// branch mismatch does not scale with delta at all, so it fails this at the
 	// smallest one however loose the constant is.
 	{
-		double const r = 1.3;
-		double const crossover = 2.0*Equilibrium::seriesThreshold()*r0*r0/( r*r );
+		double const radius = 1.3;
+		double const crossover = 2.0*Equilibrium::seriesThreshold()*radius0*radius0/( radius*radius );
 
 		for ( double delta : { 1.0e-6, 1.0e-9, 1.0e-12 } )
 		{
-			Equilibrium const below( r0, crossover - delta, p, 0.0, 0.0, 1.0, 0.0 );
-			Equilibrium const above( r0, crossover + delta, p, 0.0, 0.0, 1.0, 0.0 );
+			Equilibrium const below( radius0, crossover - delta, p, 0.0, 0.0, 1.0, 0.0 );
+			Equilibrium const above( radius0, crossover + delta, p, 0.0, 0.0, 1.0, 0.0 );
 
 			double belowR, belowZ, aboveR, aboveZ;
-			below.gradPsi( r, 0.3, belowR, belowZ );
-			above.gradPsi( r, 0.3, aboveR, aboveZ );
+			below.gradPsi( radius, 0.3, belowR, belowZ );
+			above.gradPsi( radius, 0.3, aboveR, aboveZ );
 
-			double const jumpPsi = std::abs( above.psi( r, 0.3 ) - below.psi( r, 0.3 ) );
+			double const jumpPsi = std::abs( above.psi( radius, 0.3 ) - below.psi( radius, 0.3 ) );
 			double const jumpFlux = std::abs( aboveR - belowR );
 
 			BOOST_TEST( jumpPsi < 10.0*delta,
@@ -654,7 +654,7 @@ BOOST_AUTO_TEST_CASE( theZeroContourIsClosedInsideTheBox )
 	{
 		// F_0 is pinned by psi( 1.2, 0 ) = 0, the outer equatorial point of the
 		// plasma. Only ONE geometric condition is available here, unlike
-		// RotatingSoloviev.hpp's four: eps_a, r_a and m fix the shape outright
+		// RotatingSoloviev.hpp's four: eps_a, R_a and m fix the shape outright
 		// and F_0 chooses only which level set is psi = 0.
 		BOOST_TEST( std::abs( eq.psi( 1.2, 0.0 ) ) < 1.0e-15,
 		            "m = " << eq.getMachSquared() << ": psi at the outer equatorial "
@@ -664,10 +664,10 @@ BOOST_AUTO_TEST_CASE( theZeroContourIsClosedInsideTheBox )
 		for ( int i = 0; i <= 400; ++i )
 		{
 			double const s = static_cast<double>( i )/400.0;
-			double const r = box.rMin + s*box.width();
+			double const radius = box.minRadius + s*box.width();
 			double const z = box.zMin + s*box.height();
-			for ( double value : { eq.psi( r, box.zMin ), eq.psi( r, box.zMax ),
-			                       eq.psi( box.rMin, z ), eq.psi( box.rMax, z ) } )
+			for ( double value : { eq.psi( radius, box.zMin ), eq.psi( radius, box.zMax ),
+			                       eq.psi( box.minRadius, z ), eq.psi( box.maxRadius, z ) } )
 				worstOnBoundary = std::max( worstOnBoundary, value );
 		}
 
@@ -723,25 +723,25 @@ BOOST_AUTO_TEST_CASE( theRotatingSourceReproducesTheClosedForm )
 		double worstJacobian = 0.0;
 		double worstExponentDrift = 0.0;
 
-		for ( double r = box.rMin; r <= box.rMax + 1.0e-12; r += 0.05 )
+		for ( double radius = box.minRadius; radius <= box.maxRadius + 1.0e-12; radius += 0.05 )
 		{
 			for ( double z : { -0.4, 0.0, 0.4 } )
 			{
-				// Deliberately NOT evaluated at psi( r, z ). F is independent of
+				// Deliberately NOT evaluated at psi( R, z ). F is independent of
 				// psi here, so sweeping psi across the whole range the solve
 				// visits is what makes the check say so.
 				for ( double psiValue : { -0.7, -0.3, 0.0, 0.03, 0.06 } )
 				{
-					double const expected = eq.f( r, z, psiValue );
-					double const actual = source->f( r, z, psiValue );
+					double const expected = eq.f( radius, z, psiValue );
+					double const actual = source->f( radius, z, psiValue );
 					double const scale = std::max( 1.0, std::abs( expected ) );
 
 					worstF = std::max( worstF, std::abs( actual - expected )/scale );
 					worstJacobian = std::max( worstJacobian,
-					                          std::abs( source->dFdPsi( r, z, psiValue ) ) );
+					                          std::abs( source->dFdPsi( radius, z, psiValue ) ) );
 
 					BOOST_TEST( std::abs( actual - expected ) <= 1.0e-12*scale,
-					            "m = " << eq.getMachSquared() << " at ( " << r << ", "
+					            "m = " << eq.getMachSquared() << " at ( " << radius << ", "
 					            << z << " ), psi = " << psiValue
 					            << ": meq::RotatingSource gives F = " << actual
 					            << " where (4.10) gives " << expected );
@@ -751,11 +751,11 @@ BOOST_AUTO_TEST_CASE( theRotatingSourceReproducesTheClosedForm )
 				// not move with psi. It is the hypothesis the whole section
 				// rests on, and it is checkable directly rather than only
 				// through its consequences.
-				double const reference = source->densityExponent( 0, r, 0.0 );
+				double const reference = source->densityExponent( 0, radius, 0.0 );
 				for ( double psiValue : { -0.7, 0.06 } )
 					worstExponentDrift
 						= std::max( worstExponentDrift,
-						            std::abs( source->densityExponent( 0, r, psiValue )
+						            std::abs( source->densityExponent( 0, radius, psiValue )
 						                      - reference ) );
 			}
 		}
@@ -765,7 +765,7 @@ BOOST_AUTO_TEST_CASE( theRotatingSourceReproducesTheClosedForm )
 		             eq.getMachSquared(), eq.getCurrent(), worstF, worstJacobian,
 		             worstExponentDrift );
 
-		// dF/dpsi is mu0 r^2 d2p/dpsi2 + ( g g' )'. Every term is individually
+		// dF/dpsi is mu0 R^2 d2p/dpsi2 + ( g g' )'. Every term is individually
 		// O( 1 ) -- see theCancellationIsNotVacuous -- and they cancel, so this
 		// is a round-off assertion on an O( 1 ) cancellation and not a triviality.
 		BOOST_TEST( worstJacobian < 1.0e-12,
@@ -831,7 +831,7 @@ BOOST_AUTO_TEST_CASE( theCancellationIsNotVacuous )
 	}
 	double const scale = 1.4*1.4*largestPair;
 
-	std::printf( "  the cancelling terms in mu0 r^2 d2p/dpsi2 are %.6f at r = 1.4, "
+	std::printf( "  the cancelling terms in mu0 R^2 d2p/dpsi2 are %.6f at R = 1.4, "
 	             "against dF/dpsi = %.3e\n", scale,
 	             std::abs( source->dFdPsi( 1.4, 0.0, psiValue ) ) );
 
@@ -856,15 +856,15 @@ BOOST_AUTO_TEST_CASE( breakingTheConstantRatioBreaksTheAgreement )
 
 	double worst = 0.0;
 	double worstJacobian = 0.0;
-	for ( double r : { 0.6, 1.0, 1.4 } )
+	for ( double radius : { 0.6, 1.0, 1.4 } )
 	{
 		for ( double psiValue : { -0.5, 0.0, 0.05 } )
 		{
-			double const expected = eq.f( r, 0.0, psiValue );
-			worst = std::max( worst, std::abs( broken->f( r, 0.0, psiValue ) - expected )
+			double const expected = eq.f( radius, 0.0, psiValue );
+			worst = std::max( worst, std::abs( broken->f( radius, 0.0, psiValue ) - expected )
 			                         /std::max( 1.0, std::abs( expected ) ) );
 			worstJacobian = std::max( worstJacobian,
-			                          std::abs( broken->dFdPsi( r, 0.0, psiValue ) ) );
+			                          std::abs( broken->dFdPsi( radius, 0.0, psiValue ) ) );
 		}
 	}
 

@@ -749,7 +749,7 @@ namespace meq
 			// ZERO IS THE DEFAULT AND MEANS "DO NOT CONSTRAIN". An explicit zero
 			// is refused rather than silently read as the default, because a
 			// prescribed current of zero describes no plasma -- the scale would
-			// be driven to make int F/r vanish, which it does at scale zero.
+			// be driven to make int F/R vanish, which it does at scale zero.
 			if ( source.has( "PlasmaCurrent" ) && current == 0.0 )
 				source.fail( "PlasmaCurrent", "is zero, which is not a plasma: the border would drive the profile scale to zero to satisfy it. Remove the key to leave the amplitude fixed" );
 			if ( source.has( "PlasmaCurrent" ) && !std::isfinite( current ) )
@@ -1015,7 +1015,7 @@ namespace meq
 
 				// THE SAME REFUSAL meq::Coil AND meq::BoundaryShape MAKE, and
 				// for the same reason: the Grad-Shafranov operator carries a
-				// 1/r that is not integrable through r = 0, so a conductor
+				// 1/R that is not integrable through R = 0, so a conductor
 				// reaching the axis is not a modelling choice this code can
 				// honour. Caught here as well as there so that the diagnostic
 				// names the coil and the key rather than arriving from a
@@ -1023,7 +1023,7 @@ namespace meq
 				if ( !( coil.centreR - coil.halfWidth > 0.0 ) )
 					one.fail( "CentreR", "the coil reaches or crosses the axis: CentreR - HalfWidth = "
 					          + std::to_string( coil.centreR - coil.halfWidth )
-					          + " and must be strictly positive, because the operator's 1/r is not integrable through r = 0" );
+					          + " and must be strictly positive, because the operator's 1/R is not integrable through R = 0" );
 
 				bool const hasCurrent = one.has( "Current" );
 				bool const hasDensity = one.has( "CurrentDensity" );
@@ -1220,17 +1220,17 @@ namespace meq
 
 			if ( !meshOptions.fromFile() )
 			{
-				meshOptions.rMin = mesh.getFloat( "RMin" );
-				meshOptions.rMax = mesh.getFloat( "RMax" );
+				meshOptions.minRadius = mesh.getFloat( "RMin" );
+				meshOptions.maxRadius = mesh.getFloat( "RMax" );
 				meshOptions.zMin = mesh.getFloat( "ZMin" );
 				meshOptions.zMax = mesh.getFloat( "ZMax" );
 				meshOptions.nR = mesh.getIntegerOr( "NR", 1 );
 				meshOptions.nZ = mesh.getIntegerOr( "NZ", 1 );
 
-				if ( meshOptions.rMin < 0.0 )
-					mesh.fail( "RMin", "must not be negative: r is a cylindrical radius" );
-				if ( meshOptions.rMax <= meshOptions.rMin )
-					mesh.fail( "RMax", "must be greater than RMin (RMin = " + std::to_string( meshOptions.rMin ) + ")" );
+				if ( meshOptions.minRadius < 0.0 )
+					mesh.fail( "RMin", "must not be negative: R is a cylindrical radius" );
+				if ( meshOptions.maxRadius <= meshOptions.minRadius )
+					mesh.fail( "RMax", "must be greater than RMin (RMin = " + std::to_string( meshOptions.minRadius ) + ")" );
 				if ( meshOptions.zMax <= meshOptions.zMin )
 					mesh.fail( "ZMax", "must be greater than ZMin (ZMin = " + std::to_string( meshOptions.zMin ) + ")" );
 				if ( meshOptions.nR < 1 )
@@ -1279,7 +1279,7 @@ namespace meq
 				{
 					g.tool = generate.getString( "Tool" );
 					if ( g.tool != "halfdisc" )
-						generate.fail( "Tool", "unknown mesh generator \"" + g.tool + "\"; the generators are [halfdisc], which is tools/mesh/halfdisc.py -- a semicircle reaching r = 0 exactly, with the conductors fragmented in" );
+						generate.fail( "Tool", "unknown mesh generator \"" + g.tool + "\"; the generators are [halfdisc], which is tools/mesh/halfdisc.py -- a semicircle reaching R = 0 exactly, with the conductors fragmented in" );
 
 					// A generator with nowhere to write is not a run. File is
 					// also what the solve then READS, so the two are the same
@@ -1342,7 +1342,7 @@ namespace meq
 						g.plasmaSize = generate.getFloat( "PlasmaSize" );
 
 						if ( g.plasmaRMin < 0.0 )
-							generate.fail( "PlasmaRMin", "must not be negative: r is a cylindrical radius" );
+							generate.fail( "PlasmaRMin", "must not be negative: R is a cylindrical radius" );
 						if ( g.plasmaRMax <= g.plasmaRMin )
 							generate.fail( "PlasmaRMax", "must be greater than PlasmaRMin" );
 						if ( g.plasmaZMax <= g.plasmaZMin )
@@ -1368,7 +1368,7 @@ namespace meq
 						if ( !( g.limiterR - g.limiterRadius > 0.0 ) )
 							generate.fail( "LimiterR", "the limiter circle reaches or crosses the axis: LimiterR - LimiterRadius = "
 							               + std::to_string( g.limiterR - g.limiterRadius )
-							               + " and must be strictly positive, because a closed plasma surface through r = 0 carries a non-integrable 1/r" );
+							               + " and must be strictly positive, because a closed plasma surface through R = 0 carries a non-integrable 1/R" );
 					}
 
 					/*
@@ -1396,9 +1396,9 @@ namespace meq
 						for ( std::size_t k = 0; k < g.vessel.size(); k += 2 )
 						{
 							if ( g.vessel[ k ] < 0.0 )
-								generate.fail( "Vessel", "reaches r = "
+								generate.fail( "Vessel", "reaches R = "
 								               + std::to_string( g.vessel[ k ] )
-								               + ", and the domain is r >= 0" );
+								               + ", and the domain is R >= 0" );
 							std::size_t const n = ( k + 2 ) % g.vessel.size();
 							area += g.vessel[ k ]*g.vessel[ n + 1 ]
 							        - g.vessel[ n ]*g.vessel[ k + 1 ];
@@ -1594,7 +1594,7 @@ namespace meq
 				{
 					source.rejectUnknownKeys( { "Type", "R0", "Kr", "Kz" } );
 					ManufacturedParameters parameters;
-					parameters.r0 = source.getFloat( "R0" );
+					parameters.radius0 = source.getFloat( "R0" );
 					parameters.kr = source.getFloat( "Kr" );
 					parameters.kz = source.getFloat( "Kz" );
 					sourceOptions.parameters = parameters;
@@ -1694,13 +1694,13 @@ namespace meq
 				if ( pointGiven )
 				{
 					// BOTH OR NEITHER. A limiter given only its height sits at
-					// r = 0, which is the axis; honouring that would pin psi_bnd
+					// R = 0, which is the axis; honouring that would pin psi_bnd
 					// on the one part of the boundary that is not a limiter.
-					l.r = limiter.getFloat( "R" );
+					l.radius = limiter.getFloat( "R" );
 					l.z = limiter.getFloat( "Z" );
 
-					if ( !( l.r > 0.0 ) )
-						limiter.fail( "R", "the limiter contact must be at R > 0; the axis is not a limiter, and the operator's 1/r is not integrable there" );
+					if ( !( l.radius > 0.0 ) )
+						limiter.fail( "R", "the limiter contact must be at R > 0; the axis is not a limiter, and the operator's 1/R is not integrable there" );
 				}
 				// psi_bnd is read ONLY through Psi, so without a normalisation
 				// this is an unknown nothing consumes -- a file that would
@@ -1728,11 +1728,11 @@ namespace meq
 					// given only its height starts the search on the symmetry
 					// axis, where q has near-zeros that sweep() reports as
 					// saddles and that no divertor put there.
-					x.r = xpoint.getFloat( "R" );
+					x.radius = xpoint.getFloat( "R" );
 					x.z = xpoint.getFloat( "Z" );
 
-					if ( !( x.r > 0.0 ) )
-						xpoint.fail( "R", "the X-point seed must be at R > 0; the symmetry axis carries near-zeros of q that are not X-points, and the flux mass ( r q, v ) degenerates there" );
+					if ( !( x.radius > 0.0 ) )
+						xpoint.fail( "R", "the X-point seed must be at R > 0; the symmetry axis carries near-zeros of q that are not X-points, and the flux mass ( R q, v ) degenerates there" );
 
 					// ALL THREE ROUTES PIN ONE UNKNOWN. GradShafranovSolver
 					// refuses the combination too, but arriving there would
@@ -1770,7 +1770,7 @@ namespace meq
 
 					// ALTERNATIVES, NOT LAYERS. This block defines Gamma as a
 					// semicircle centred on the axis; [boundary.shape] defines
-					// it as a closed MXH surface that may not reach r = 0. A
+					// it as a closed MXH surface that may not reach R = 0. A
 					// file naming both has described two different curves and
 					// silently taking one is how a run ends up solving on a
 					// domain nobody asked for.
@@ -1868,7 +1868,7 @@ namespace meq
 				solver.fail( "TopologyRetry", "cannot be negative; zero is off" );
 			solverOptions.xPointMeritWeight = solver.getFloatOr( "XPointMeritWeight", solverOptions.xPointMeritWeight );
 			if ( !( solverOptions.xPointMeritWeight > 0.0 ) )
-				solver.fail( "XPointMeritWeight", "must be positive: it multiplies the length r h that converts q into a flux, and zero or negative would make the X-point rows count for nothing or against themselves in the merit" );
+				solver.fail( "XPointMeritWeight", "must be positive: it multiplies the length R h that converts q into a flux, and zero or negative would make the X-point rows count for nothing or against themselves in the merit" );
 			/*
 			 * `LineSearchMerit` -- WHAT THE ARMIJO BACKTRACKING COMPARES, and
 			 * not what is solved or when it stops. `augmented` is the field
@@ -2159,7 +2159,7 @@ namespace meq
 				initialGuessOptions.centreR = guess.getFloatOr( "CentreR", 0.0 );
 				initialGuessOptions.centreZ = guess.getFloatOr( "CentreZ", 0.0 );
 				if ( initialGuessOptions.centreR < 0.0 )
-					guess.fail( "CentreR", "is the guessed magnetic axis and must be at r > 0. "
+					guess.fail( "CentreR", "is the guessed magnetic axis and must be at R > 0. "
 					            "Leave it out altogether for the conductors' own field with no "
 					            "plasma column in it" );
 
@@ -2179,7 +2179,7 @@ namespace meq
 					        - initialGuessOptions.radiusR > 0.0 ) )
 						guess.fail( "RadiusR", "the plasma column reaches the axis: "
 						            "CentreR - RadiusR must be strictly positive, because psi is "
-						            "identically zero on r = 0 and a conductor there would sit in "
+						            "identically zero on R = 0 and a conductor there would sit in "
 						            "its own zero" );
 				}
 			}
@@ -2193,7 +2193,7 @@ namespace meq
 					guess.getFloatOr( "RadiusZ", initialGuessOptions.radiusR );
 
 				if ( !( initialGuessOptions.centreR > 0.0 ) )
-					guess.fail( "CentreR", "the magnetic axis is at r > 0; a bump centred on "
+					guess.fail( "CentreR", "the magnetic axis is at R > 0; a bump centred on "
 					            "or across the axis describes no plasma" );
 				if ( !( initialGuessOptions.radiusR > 0.0 )
 				     || !( initialGuessOptions.radiusZ > 0.0 ) )
@@ -2202,9 +2202,9 @@ namespace meq
 					guess.fail( "Amplitude", "must be positive: it is the peak of the bump, and "
 					            "a flat one is the trivial branch this guess exists to avoid" );
 				// The bump must not straddle the axis, where psi is pinned and the
-				// operator's 1/r is not integrable.
+				// operator's 1/R is not integrable.
 				if ( initialGuessOptions.centreR - initialGuessOptions.radiusR <= 0.0 )
-					guess.fail( "RadiusR", "the bump reaches r <= 0; CentreR - RadiusR must be "
+					guess.fail( "RadiusR", "the bump reaches R <= 0; CentreR - RadiusR must be "
 					            "strictly positive" );
 			}
 

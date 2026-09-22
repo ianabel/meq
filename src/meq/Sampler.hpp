@@ -61,7 +61,7 @@ namespace meq
 			/// @param rMinIn, rMaxIn, zMinIn, zMaxIn  the grid's extent, metres.
 			/// @param nRIn, nZIn  node counts, >= 2 in each direction. These are
 			///                    NODES and not cells, so the spacing is
-			///                    ( rMax - rMin )/( nR - 1 ).
+			///                    ( R_max - R_min )/( nR - 1 ).
 			GridSampler( mfem::Mesh &mesh,
 			             double rMinIn, double rMaxIn, int nRIn,
 			             double zMinIn, double zMaxIn, int nZIn );
@@ -159,7 +159,7 @@ namespace meq
 			 *
 			 *     psi( p ) = psi( x0 ) + grad psi( x0 ) . ( p - x0 )
 			 *
-			 * with `grad psi = r q` -- MEQ's flux convention, Field.hpp. Its
+			 * with `grad psi = R q` -- MEQ's flux convention, Field.hpp. Its
 			 * error is O( |p - x0|^2 ) against an extrapolation with no bound,
 			 * and `q` carries no extra error to spend: getting the derivative at
 			 * the potential's own order rather than one down is exactly what
@@ -199,8 +199,8 @@ namespace meq
 			 *
 			 * IF SOMEONE WANTS BETTER, the route is known and is not this one.
 			 * The divergence and the curl of `q` are both available in closed
-			 * form -- `div q = -F/r` is the equation being solved, and
-			 * `d_r q_z - d_z q_r = -q_z/r` follows from `r q = grad psi`. Those
+			 * form -- `div q = -F/R` is the equation being solved, and
+			 * `d_r q_z - d_z q_r = -q_z/R` follows from `R q = grad psi`. Those
 			 * pin two of the four entries of `grad q` exactly and leave the
 			 * symmetric traceless part still to be differentiated, so they buy
 			 * STRUCTURE rather than an order, at the cost of plumbing the source
@@ -290,7 +290,7 @@ namespace meq
 			mutable bool groupsValid = false;
 
 			mfem::Mesh &mesh;
-			double rMin, rMax, zMin, zMax;
+			double minRadius, maxRadius, zMin, zMax;
 			int nR, nZ;
 			int found;
 			int extended = 0;

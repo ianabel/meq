@@ -33,7 +33,7 @@
  * So NOTHING in this file is called rho. The disc coordinate is
  * `discRadius` and the flux label it is built from is `normalisedFlux`; the
  * geometric distance does not appear here at all, because a sample is given as
- * a POSITION ( r, z ) and never as a distance. The tree has settled one such
+ * a POSITION ( R, z ) and never as a distance. The tree has settled one such
  * collision already -- q is the flux and the safety factor is safetyFactor,
  * see src/meq/SurfaceAverage.hpp -- and this is the second.
  *
@@ -44,7 +44,7 @@
  * Zernike.hpp deliberately carries no fitting routine and no quadrature, and
  * says why: IN-3 fits traced surface POINTS, which is a linear least-squares
  * problem against a point cloud, not an integral against a callable. The input
- * here is therefore a set of SurfaceSample -- each one a position ( r, z ) at a
+ * here is therefore a set of SurfaceSample -- each one a position ( R, z ) at a
  * known normalised flux and a known poloidal angle -- and that is exactly what
  * ContourTracer::fitByAngle() produces per surface, and what
  * meq::analytic::surfaceQuadrature() produces on an exact field.
@@ -56,7 +56,7 @@
  *                              fit.pointR[ j ], fit.pointZ[ j ] } );
  *     ...
  *     samples = relabelByAxisShape(
- *         samples, axisShapeFromSamples( samples, axis.r, axis.z ) );
+ *         samples, axisShapeFromSamples( samples, axis.R, axis.z ) );
  *
  * rather than this file taking a dependency on FluxSurfaces.hpp, and therefore
  * on MFEM, for a loop. THE LAST LINE IS NOT OPTIONAL and the next section is
@@ -381,7 +381,7 @@ namespace meq
 	{
 		double normalisedFlux = 0.0;  ///< Psi_N of the surface this point is on
 		double theta = 0.0;           ///< poloidal angle about the magnetic axis
-		double r = 0.0;
+		double radius = 0.0;
 		double z = 0.0;
 
 		/// Least-squares weight. One unless a caller has a reason; a surface
@@ -401,7 +401,7 @@ namespace meq
 	 */
 	struct AxisShape
 	{
-		/// The angle from the +r direction to the ellipse's SHORT semi-axis,
+		/// The angle from the +R direction to the ellipse's SHORT semi-axis,
 		/// which is the eigenvector of the LARGER eigenvalue of the quadratic
 		/// form. In radians.
 		double tilt = 0.0;
@@ -475,7 +475,7 @@ namespace meq
 	// surface a node must sit, so the angle is free and the truncated basis may
 	// choose it. It needs no force balance and no second physics solver, because
 	// MEQ already has psi; and the Jacobian needs grad Psi_N, which is the
-	// SOLVED FLUX -- grad_bar psi = r q, so grad Psi_N = r q / ( psi_bnd -
+	// SOLVED FLUX -- grad_bar psi = R q, so grad Psi_N = R q / ( psi_bnd -
 	// psi_ax ). That is INVERSION-PLAN.md section 3.2's "the gradient is a
 	// solved unknown" paying off a third time.
 	//
@@ -640,13 +640,13 @@ namespace meq
 	 * @param normalisedFlux out: Psi_N, zero on the axis and one on the
 	 *                       separatrix, in the same normalisation the nodes
 	 *                       carry.
-	 * @param gradientR      out: d Psi_N / d r. For a solved field this is
-	 *                       r q_r / ( psi_bnd - psi_ax ), which is the flux and
+	 * @param gradientR      out: d Psi_N / d R. For a solved field this is
+	 *                       R q_r / ( psi_bnd - psi_ax ), which is the flux and
 	 *                       not a differentiated potential.
 	 */
 	struct NormalisedFluxField
 	{
-		std::function<bool( double r, double z, double &normalisedFlux,
+		std::function<bool( double radius, double z, double &normalisedFlux,
 		                    double &gradientR, double &gradientZ )> sample;
 	};
 
@@ -892,7 +892,7 @@ namespace meq
 		std::size_t discardedModes = 0;
 
 		/// Root mean square and worst residual of the fit against its own
-		/// samples, per component, in the units of r and z.
+		/// samples, per component, in the units of R and z.
 		double residualR = 0.0;
 		double residualZ = 0.0;
 		double worstR = 0.0;
@@ -941,9 +941,9 @@ namespace meq
 			/// so ask at shapedPoloidalAngle( shape, theta ), with the same shape
 			/// the samples were relabelled by.
 			void position( double normalisedFlux, double theta,
-			               double &r, double &z ) const;
+			               double &radius, double &z ) const;
 
-			/// d( r, z )/d( discRadius ) at fixed theta. FINITE EVERYWHERE,
+			/// d( R, z )/d( discRadius ) at fixed theta. FINITE EVERYWHERE,
 			/// including on the axis, which is why INVERSION-PLAN.md IN-3 states
 			/// its acceptance in this derivative and not in the next one.
 			///
@@ -953,9 +953,9 @@ namespace meq
 			/// a control column is a control of the coordinate rather than of
 			/// what is being differentiated.
 			void radialDerivative( double normalisedFlux, double theta,
-			                       double &r, double &z ) const;
+			                       double &radius, double &z ) const;
 
-			/// d( r, z )/d( Psi_N ) at fixed theta.
+			/// d( R, z )/d( Psi_N ) at fixed theta.
 			///
 			/// IT DIVERGES LIKE 1/( 2 sqrt( Psi_N ) ) AT THE AXIS AND THAT IS THE
 			/// COORDINATE RATHER THAN A DEFECT. INVERSION-PLAN.md section 4.4:
@@ -969,11 +969,11 @@ namespace meq
 			/// Prefer radialDerivative() wherever a caller can work in
 			/// discRadius.
 			void fluxDerivative( double normalisedFlux, double theta,
-			                     double &r, double &z ) const;
+			                     double &radius, double &z ) const;
 
-			/// d( r, z )/d( theta ) at fixed surface.
+			/// d( R, z )/d( theta ) at fixed surface.
 			void angularDerivative( double normalisedFlux, double theta,
-			                        double &r, double &z ) const;
+			                        double &radius, double &z ) const;
 
 			/// | dx/dtheta | at fixed surface: the in-surface metric of IN-1,
 			/// arrived at from the REPRESENTATION rather than from the field.
@@ -994,7 +994,7 @@ namespace meq
 			/// check that it keeps ONE SIGN.
 			///
 			/// WHICH sign is not fixed and must not be assumed: it is positive
-			/// for a theta that runs anticlockwise in ( r, z ) and negative for
+			/// for a theta that runs anticlockwise in ( R, z ) and negative for
 			/// one that runs the other way, and both are legitimate labels. It
 			/// vanishes like discRadius at the centre for the ordinary reason
 			/// that polar coordinates do, so a check that includes
@@ -1026,8 +1026,8 @@ namespace meq
 			/// answer and the two-argument form exists to MEASURE that, and to
 			/// measure what the tensor-product control does instead, where it is
 			/// a curve rather than a point.
-			void axis( double &r, double &z ) const;
-			void axisAtAngle( double theta, double &r, double &z ) const;
+			void axis( double &radius, double &z ) const;
+			void axisAtAngle( double theta, double &radius, double &z ) const;
 
 			/// max | coefficient | over every mode of radial degree @a degree,
 			/// taken over both components. This is the coefficient ENVELOPE, and
@@ -1036,12 +1036,12 @@ namespace meq
 			/// point. Zero for a degree above maxDegree().
 			double coefficientEnvelope( int degree ) const;
 
-			/// The coefficients of the r and z components, in the fit's own mode
+			/// The coefficients of the R and z components, in the fit's own mode
 			/// order -- which is zernikeModes() order for FitBasis::Zernike.
 			std::vector<double> const &majorRadiusCoefficients() const;
 			std::vector<double> const &heightCoefficients() const;
 
-			/// The r component as a meq::ZernikeExpansion, for a consumer that
+			/// The R component as a meq::ZernikeExpansion, for a consumer that
 			/// wants the basis object rather than this class.
 			/// @throws std::runtime_error unless the basis is FitBasis::Zernike,
 			///         the coordinate is FitRadialCoordinate::DiscRadius AND
@@ -1120,7 +1120,7 @@ namespace meq
 
 			/// The three sums, at a given basis argument.
 			void evaluateAll( double argument, double theta,
-			                  double &r, double &z,
+			                  double &radius, double &z,
 			                  double &dArgumentR, double &dArgumentZ,
 			                  double &dThetaR, double &dThetaZ ) const;
 
@@ -1208,7 +1208,7 @@ namespace meq
 	{
 		/// Chebyshev coefficients of R( t ) and z( t ), ascending in order, on
 		/// `t` in [ -1, 1 ].
-		std::vector<double> r;
+		std::vector<double> radius;
 		std::vector<double> z;
 
 		/// The arc length the parametrisation was normalised by, so that a
@@ -1221,7 +1221,7 @@ namespace meq
 		/// the class of quiet wrong answer this tree catalogues.
 		double worstDistance = 0.0;
 
-		std::size_t modes() const { return r.size(); }
+		std::size_t modes() const { return radius.size(); }
 	};
 
 	/**
@@ -1229,7 +1229,7 @@ namespace meq
 	 *
 	 * @param arcLength cumulative along the curve, ascending, starting anywhere
 	 *        -- it is shifted and scaled to [ -1, 1 ] here.
-	 * @param r, z the sample positions, the same length.
+	 * @param R, z the sample positions, the same length.
 	 *
 	 * @throws std::invalid_argument unless the three arrays match, there are at
 	 *         least as many samples as modes, at least two modes are asked for,
@@ -1238,7 +1238,7 @@ namespace meq
 	 *         than a surface.
 	 */
 	OpenSurfaceFit fitOpenSurface( std::vector<double> const &arcLength,
-	                               std::vector<double> const &r,
+	                               std::vector<double> const &radius,
 	                               std::vector<double> const &z,
 	                               std::size_t modes );
 
@@ -1247,19 +1247,19 @@ namespace meq
 	/// expansion, which diverges quickly; the caller is trusted the way
 	/// meq::Zernike trusts one.
 	void evaluateOpenSurface( OpenSurfaceFit const &fit, double t,
-	                          double &r, double &z );
+	                          double &radius, double &z );
 
 	/// A periodic fit of the same samples, as the CONTROL for section 1. Real
 	/// Fourier modes -- 1, cos, sin, cos 2, ... -- over the same count, so it
 	/// is given the same freedom and differs only in being periodic.
 	OpenSurfaceFit fitOpenSurfacePeriodic( std::vector<double> const &arcLength,
-	                                       std::vector<double> const &r,
+	                                       std::vector<double> const &radius,
 	                                       std::vector<double> const &z,
 	                                       std::size_t modes );
 
 	/// Evaluate the periodic control at @a t in [ -1, 1 ].
 	void evaluateOpenSurfacePeriodic( OpenSurfaceFit const &fit, double t,
-	                                  double &r, double &z );
+	                                  double &radius, double &z );
 
 }
 

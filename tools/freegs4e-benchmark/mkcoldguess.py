@@ -137,7 +137,7 @@ def with_design(d, npz_path):
 			                 "could not all be found in the machine "
 			                 "fgsref.CASES[%r] builds: %s"
 			                 % (npz_path, labels, name, error))
-		merged["coil_R"] = np.array([r for r, _ in position], dtype=float)
+		merged["coil_R"] = np.array([R for R, _ in position], dtype=float)
 		merged["coil_Z"] = np.array([z for _, z in position], dtype=float)
 		recovered.append("coil_R/coil_Z")
 
@@ -165,12 +165,12 @@ def design_footprint(d, pad=0.15):
 
     So: trust the design where it speaks, and be generous only where it is
     silent.  The wall, where a machine has one, is the other thing an
-    experiment knows before it fires; TestTokamak's is r [0.75, 1.80]
+    experiment knows before it fires; TestTokamak's is R [0.75, 1.80]
     z [+-0.85], which is the envelope those three cases are missing.
     """
     pts = []
     xpt = np.asarray(d["design_xpoints"], dtype=float).reshape(-1, 2)
-    pts.extend([(float(r), float(z)) for r, z in xpt])
+    pts.extend([(float(R), float(z)) for R, z in xpt])
     iso = np.asarray(d["design_isoflux"], dtype=float).reshape(-1, 4)
     for r1, z1, r2, z2 in iso:
         pts.append((float(r1), float(z1)))
@@ -184,14 +184,14 @@ def design_footprint(d, pad=0.15):
 
     # IS EACH RADIAL EDGE NAMED?  A design point on the midplane, inboard or
     # outboard of R0, names one; an X-point at the same radius does not.
-    midplane = [(r, z) for r, z in pts if abs(z - zc) < 0.15*zhalf]
-    named_in = [r for r, _ in midplane if r < r0]
-    named_out = [r for r, _ in midplane if r > r0]
+    midplane = [(R, z) for R, z in pts if abs(z - zc) < 0.15*zhalf]
+    named_in = [R for R, _ in midplane if R < r0]
+    named_out = [R for R, _ in midplane if R > r0]
 
     # THE WALL IS A FALLBACK AND NEVER AN EXPANSION, which is the distinction
     # MAST-U forces.  TestTokamak's wall is a hexagon drawn round its plasma,
-    # r [0.75, 1.80], and is exactly the envelope A, B and E's design leaves
-    # unsaid.  MAST-U's is the VESSEL, r [0.244, 2.00] z [+-2.169] -- four
+    # R [0.75, 1.80], and is exactly the envelope A, B and E's design leaves
+    # unsaid.  MAST-U's is the VESSEL, R [0.244, 2.00] z [+-2.169] -- four
     # times the plasma's height, and unioning it would refine the whole
     # divertor.  So the wall answers only where the design is silent.
     wall_r = np.asarray(d["wall_R"], dtype=float)
@@ -199,18 +199,18 @@ def design_footprint(d, pad=0.15):
     have_wall = wall_r.size > 0
 
     if named_in:
-        rmin = min(named_in)
+        Rmin = min(named_in)
     elif have_wall:
-        rmin = float(wall_r.min())
+        Rmin = float(wall_r.min())
     else:
-        rmin = max(0.02, pts[:, 0].min() - 0.5*zhalf)
+        Rmin = max(0.02, pts[:, 0].min() - 0.5*zhalf)
 
     if named_out:
-        rmax = max(named_out)
+        Rmax = max(named_out)
     elif have_wall:
-        rmax = float(wall_r.max())
+        Rmax = float(wall_r.max())
     else:
-        rmax = pts[:, 0].max() + 0.5*zhalf
+        Rmax = pts[:, 0].max() + 0.5*zhalf
 
     # The X-point targets bound the height on every machine here, so the design
     # always names z; the wall only clips it.
@@ -218,9 +218,9 @@ def design_footprint(d, pad=0.15):
         zmin = max(zmin, float(wall_z.min()))
         zmax = min(zmax, float(wall_z.max()))
 
-    padr = pad*(rmax - rmin)
+    padr = pad*(Rmax - Rmin)
     padz = pad*(zmax - zmin)
-    return (max(0.0, rmin - padr), rmax + padr, zmin - padz, zmax + padz)
+    return (max(0.0, Rmin - padr), Rmax + padr, zmin - padz, zmax + padz)
 
 
 MU0 = 4.0e-7*np.pi
@@ -274,9 +274,9 @@ def plasma_filaments(d, npz_path, cells=61):
 	shape and the split matter, which is exactly what split_amplitudes() says
 	is the physical choice.
 	"""
-	rmin, rmax, zmin, zmax = design_footprint(d, pad=0.0)
-	rc, zc = 0.5*(rmin + rmax), 0.5*(zmin + zmax)
-	ra, za = 0.5*(rmax - rmin), 0.5*(zmax - zmin)
+	Rmin, Rmax, zmin, zmax = design_footprint(d, pad=0.0)
+	rc, zc = 0.5*(Rmin + Rmax), 0.5*(zmin + zmax)
+	ra, za = 0.5*(Rmax - Rmin), 0.5*(zmax - zmin)
 	Ip = float(np.asarray(d["design_Ip"]))
 
 	design = _design_record(npz_path)
@@ -287,9 +287,9 @@ def plasma_filaments(d, npz_path, cells=61):
 	p0 = 1.0
 	f0 = MU0*r0*r0*p0*(1.0 - frac_p)/frac_p
 
-	r = np.linspace(rmin, rmax, cells)
+	R = np.linspace(Rmin, Rmax, cells)
 	z = np.linspace(zmin, zmax, cells)
-	RR, ZZ = np.meshgrid(r, z, indexing="ij")
+	RR, ZZ = np.meshgrid(R, z, indexing="ij")
 	rho2 = ((RR - rc)/ra)**2 + ((ZZ - zc)/za)**2
 	x = np.clip(rho2, 0.0, 1.0)
 	shape = (RR*p0*np.power(1.0 - np.power(x, pa), pb)
@@ -305,7 +305,7 @@ def plasma_filaments(d, npz_path, cells=61):
 		raise SystemExit("the design profile split gives no positive current "
 		                 "anywhere in the footprint")
 
-	cell = max((r[1] - r[0]), (z[1] - z[0]))
+	cell = max((R[1] - R[0]), (z[1] - z[0]))
 	inside = weight > 0.0
 	return (RR[inside], ZZ[inside], Ip*weight[inside]/total,
 	        0.44705*cell, (rc, zc, ra, za))
@@ -328,7 +328,7 @@ def main():
 	zs = np.linspace(-rho, rho, n + 1)
 	RR, ZZ = np.meshgrid(rs, zs, indexing="ij")
 	psi = np.zeros_like(RR)
-	# r = 0 exactly makes Greens singular in sqrt( R Rc ) ( ... ); the value
+	# R = 0 exactly makes Greens singular in sqrt( R Rc ) ( ... ); the value
 	# there is zero, which is what the array already holds.
 	inner = RR > 0.0
 
@@ -379,7 +379,7 @@ def main():
 
 	# ---- the blob ------------------------------------------------------
 	src_R, src_Z, src_I, soft, ellipse = plasma_filaments(d, npz)
-	print("design footprint r [%.3f, %.3f] z [%.3f, %.3f], blob at "
+	print("design footprint R [%.3f, %.3f] z [%.3f, %.3f], blob at "
 	      "( %.3f, %+.3f ) semi-axes ( %.3f, %.3f ), %d filaments carrying "
 	      "%+.6e A"
 	      % (ellipse[0] - ellipse[2], ellipse[0] + ellipse[2],
@@ -399,7 +399,7 @@ def main():
 		raise SystemExit("%d guess nodes came out non-finite; the softening "
 		                 "floor is meant to make that impossible" % bad.sum())
 
-	box = dict(rmin=0.0, rmax=rho, zmin=-rho, zmax=rho)
+	box = dict(Rmin=0.0, Rmax=rho, zmin=-rho, zmax=rho)
 	lo, hi = write_guess(mesh_path, gf_path, rs, zs, psi.T, box, n=n)
 	print("guess psi in [%.6e, %.6e] on a %d x %d grid over [0, %g] x [%g, %g]"
 	      % (lo, hi, n + 1, n + 1, rho, -rho, rho))
@@ -428,8 +428,8 @@ def main():
 	# INPUT side, where nothing was looking for it.  The footprint is a
 	# legitimate input and the plasma is inside it by construction, so the
 	# restriction costs nothing.
-	rmin, rmax, zmin, zmax = design_footprint(d, pad=0.0)
-	region = ((RR >= rmin) & (RR <= rmax) & (ZZ >= zmin) & (ZZ <= zmax))
+	Rmin, Rmax, zmin, zmax = design_footprint(d, pad=0.0)
+	region = ((RR >= Rmin) & (RR <= Rmax) & (ZZ >= zmin) & (ZZ <= zmax))
 	if not region.any():
 		raise SystemExit("the design footprint contains no guess node; raise n")
 	at = np.argmax(np.where(region, psi, -np.inf))

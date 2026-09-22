@@ -26,17 +26,17 @@
  *
  * THE CONVENTION MAP.
  *
- * The paper's eq (1) is -Delta*(psi) = F with F := mu0 r^2 dp/dpsi + g dg/dpsi,
+ * The paper's eq (1) is -Delta*(psi) = F with F := mu0 R^2 dp/dpsi + g dg/dpsi,
  * which is MEQ's convention exactly (see CLAUDE.md, "The equation being
  * solved"). Sections 4.2 and 4.4 take g = constant, so g dg/dpsi = 0 and
- * F = mu0 r^2 p'(psi) with mu0 = 1 in the paper's normalisation. Checked term by
+ * F = mu0 R^2 p'(psi) with mu0 = 1 in the paper's normalisation. Checked term by
  * term: differentiating eq (23) gives
  *
  *     p'(psi) = 2 c2 psi ( 1 - e ) + ( c1 + c2 psi^2 )( 2 psi/sigma^2 ) e
  *             = 2 psi [ c2 ( 1 - e ) + ( 1/sigma^2 )( c1 + c2 psi^2 ) e ],
  *             e := exp( -( psi/sigma )^2 )
  *
- * which is eq (24) divided by r^2. So the paper's F really is mu0 r^2 p', and
+ * which is eq (24) divided by R^2. So the paper's F really is mu0 R^2 p', and
  * pPrime() and f() below are related by exactly that factor -- asserted in the
  * test suite rather than trusted here.
  *
@@ -45,7 +45,7 @@
  *
  * ALL OF THEM VANISH AT psi = 0, WHICH IS THE INTERESTING PART.
  *
- * F( r, 0 ) = 0 for every source in this file and for the transport barrier as
+ * F( R, 0 ) = 0 for every source in this file and for the transport barrier as
  * well. On the paper's own domain -- an ITER-like region with psi = 0 on the
  * plasma boundary -- that means psi == 0 is an exact solution of the boundary
  * value problem, and the physically interesting equilibrium is a SECOND branch.
@@ -63,7 +63,7 @@
  * WHAT MAKES THESE HARD. sigma^2 = 0.005, so sigma = 0.0707: the pedestal is a
  * layer of that width in psi, across which dF/dpsi swings by a factor of
  * c1/( sigma^2 c2 ) = 800. At psi = 0 the Jacobian's mass term is
- * 2 r^2 c1/sigma^2 = 320 r^2, far above the first Dirichlet eigenvalue of any
+ * 2 R^2 c1/sigma^2 = 320 R^2, far above the first Dirichlet eigenvalue of any
  * domain used here, so the Newton Jacobian is indefinite. That is exactly the
  * regime CLAUDE.md's note on KINSolver( KIN_LINESEARCH ) was written for.
  */
@@ -80,7 +80,7 @@ namespace analytic
  * refs/HDG-GradShafranov-Adaptive.pdf section 4.2.
  *
  *     p( psi )    = ( c1 + c2 psi^2 )( 1 - exp( -( psi/sigma )^2 ) )
- *     F( r, psi ) = 2 r^2 psi ( c2 ( 1 - e ) + ( 1/sigma^2 )( c1 + c2 psi^2 ) e )
+ *     F( R, psi ) = 2 R^2 psi ( c2 ( 1 - e ) + ( 1/sigma^2 )( c1 + c2 psi^2 ) e )
  *
  * Sections 4.4 and 4.5 reuse this with their own constants, which is why it is
  * a class of its own rather than a set of literals.
@@ -111,7 +111,7 @@ class PressurePedestal
 			return ( c1Value + c2Value*psi*psi )*( 1.0 - decay( psi ) );
 		}
 
-		/// dp/dpsi, differentiated in closed form. f() is r^2 times this.
+		/// dp/dpsi, differentiated in closed form. f() is R^2 times this.
 		double pPrime( double psi ) const
 		{
 			double const e = decay( psi );
@@ -119,7 +119,7 @@ class PressurePedestal
 			                 + ( c1Value + c2Value*psi*psi )*e/sigmaSquaredValue );
 		}
 
-		/// d2p/dpsi2. dFdPsi() is r^2 times this.
+		/// d2p/dpsi2. dFdPsi() is R^2 times this.
 		double pDoublePrime( double psi ) const
 		{
 			double const e = decay( psi );
@@ -136,19 +136,19 @@ class PressurePedestal
 			return first + second;
 		}
 
-		/// F = mu0 r^2 p'( psi ), eq (24), with mu0 = 1. Returns F, not F/r:
+		/// F = mu0 R^2 p'( psi ), eq (24), with mu0 = 1. Returns F, not F/R:
 		/// meq::Source::f() is documented to be F as eq (2) writes it.
-		double f( double r, double /*z*/, double psi ) const
+		double f( double radius, double /*z*/, double psi ) const
 		{
-			return r*r*pPrime( psi );
+			return radius*radius*pPrime( psi );
 		}
 
-		/// dF/dpsi = r^2 p''( psi ). Differentiated, not finite-differenced: a
+		/// dF/dpsi = R^2 p''( psi ). Differentiated, not finite-differenced: a
 		/// wrong Jacobian does not move the converged answer, it only wrecks the
 		/// path to it, and no convergence rate can see the difference.
-		double dFdPsi( double r, double /*z*/, double psi ) const
+		double dFdPsi( double radius, double /*z*/, double psi ) const
 		{
-			return r*r*pDoublePrime( psi );
+			return radius*radius*pDoublePrime( psi );
 		}
 
 		double c1() const
@@ -179,15 +179,15 @@ class PressurePedestal
 /**
  * The current hole, eq (26) of section 4.4:
  *
- *     F( r, psi ) = < the pedestal source, with c1, c2, sigma_1 >
+ *     F( R, psi ) = < the pedestal source, with c1, c2, sigma_1 >
  *                   + c3 ( 1 - exp( -( psi/sigma_2 )^2 ) ) cos( c4 psi )
  *
  * with c1 = 0.4, c2 = 0.1, c3 = -18, c4 = 10 pi, sigma_1^2 = 5e-3 and
- * sigma_2^2 = 3e-3. Note that the added term carries no r^2: it is a pure
- * function of psi, which is what mu0 r^2 p' would not be. It still fits the
+ * sigma_2^2 = 3e-3. Note that the added term carries no R^2: it is a pure
+ * function of psi, which is what mu0 R^2 p' would not be. It still fits the
  * canonical form, as a g dg/dpsi contribution.
  *
- * mu0 J_phi = F/r, so the oscillating cosine is what drives the toroidal
+ * mu0 J_phi = F/R, so the oscillating cosine is what drives the toroidal
  * current close to zero over an extended core region -- the "hole" -- while
  * leaving sharp peaks near the boundary.
  */
@@ -208,20 +208,20 @@ class CurrentHole
 			                    -18.0, 10.0*M_PI, 3.0e-3 );
 		}
 
-		double f( double r, double z, double psi ) const
+		double f( double radius, double z, double psi ) const
 		{
-			return pedestalPart.f( r, z, psi )
+			return pedestalPart.f( radius, z, psi )
 			       + c3Value*( 1.0 - decay2( psi ) )*std::cos( c4Value*psi );
 		}
 
-		double dFdPsi( double r, double z, double psi ) const
+		double dFdPsi( double radius, double z, double psi ) const
 		{
 			double const e2 = decay2( psi );
 			double const added = c3Value*( 2.0*psi*e2*std::cos( c4Value*psi )
 			                               /sigma2SquaredValue
 			                               - c4Value*( 1.0 - e2 )
 			                                 *std::sin( c4Value*psi ) );
-			return pedestalPart.dFdPsi( r, z, psi ) + added;
+			return pedestalPart.dFdPsi( radius, z, psi ) + added;
 		}
 
 		PressurePedestal const &pedestal() const
@@ -242,9 +242,9 @@ class CurrentHole
 /**
  * The internal layer, eq (27) of section 4.5:
  *
- *     F( r, psi ) = < the pedestal source, with c1, c2, sigma_1 >
+ *     F( R, psi ) = < the pedestal source, with c1, c2, sigma_1 >
  *                   + c3 ( 1 - exp( -( psi/sigma_1 )^2 ) )
- *                     exp( -( 1 - r - psi )^2/sigma_2^2 )
+ *                     exp( -( 1 - R - psi )^2/sigma_2^2 )
  *
  * with c1 = 0.8, c2 = 0.2, c3 = 15, sigma_1^2 = 5e-3, sigma_2^2 = 7.5e-4. Note
  * that BOTH factors of the added term use sigma_1 in the first exponential and
@@ -253,16 +253,16 @@ class CurrentHole
  * THIS ONE IS NOT A PHYSICAL EQUILIBRIUM, and the paper says so: "This source
  * term is not physically relevant for magnetic confinement fusion applications,
  * because it cannot be cast in the canonical form of the source in (1) due to
- * the explicit appearance of the coordinate r in the argument of the last
+ * the explicit appearance of the coordinate R in the argument of the last
  * exponential." There is no p( psi ) and no g( psi ) that produce it, so this
  * class has no p() -- only f() and dFdPsi(). It is here because it is a good
  * benchmark for detecting a localised internal layer: sigma_2 = 0.027, so the
- * added term is a ridge of that width along the curve r + psi = 1.
+ * added term is a ridge of that width along the curve R + psi = 1.
  *
  * For MEQ it is also the one case where dF/dpsi and dF/dr are genuinely
- * independent, since r enters the nonlinearity rather than multiplying it.
+ * independent, since R enters the nonlinearity rather than multiplying it.
  * Nothing in the solver cares -- only dF/dpsi is ever asked for -- but it means
- * a fixture that got the r-dependence wrong would still pass a dF/dpsi check,
+ * a fixture that got the R-dependence wrong would still pass a dF/dpsi check,
  * so f() is also compared against the printed expression term by term in the
  * test.
  */
@@ -283,17 +283,17 @@ class InternalLayer
 			                      15.0, 7.5e-4 );
 		}
 
-		double f( double r, double z, double psi ) const
+		double f( double radius, double z, double psi ) const
 		{
-			return pedestalPart.f( r, z, psi )
-			       + c3Value*( 1.0 - pedestalPart.decay( psi ) )*ridge( r, psi );
+			return pedestalPart.f( radius, z, psi )
+			       + c3Value*( 1.0 - pedestalPart.decay( psi ) )*ridge( radius, psi );
 		}
 
-		double dFdPsi( double r, double z, double psi ) const
+		double dFdPsi( double radius, double z, double psi ) const
 		{
 			double const e1 = pedestalPart.decay( psi );
-			double const g = ridge( r, psi );
-			double const u = 1.0 - r - psi;
+			double const g = ridge( radius, psi );
+			double const u = 1.0 - radius - psi;
 
 			// d/dpsi of ( 1 - e1 ) is ( 2 psi/sigma_1^2 ) e1, and d/dpsi of g is
 			// ( 2 u/sigma_2^2 ) g -- the sign coming from du/dpsi = -1.
@@ -301,7 +301,7 @@ class InternalLayer
 				c3Value*( 2.0*psi*e1*g/pedestalPart.sigmaSquared()
 				          + ( 1.0 - e1 )*2.0*u*g/sigma2SquaredValue );
 
-			return pedestalPart.dFdPsi( r, z, psi ) + added;
+			return pedestalPart.dFdPsi( radius, z, psi ) + added;
 		}
 
 		PressurePedestal const &pedestal() const
@@ -310,11 +310,11 @@ class InternalLayer
 		}
 
 	private:
-		/// exp( -( 1 - r - psi )^2/sigma_2^2 ). The r inside is what makes this
+		/// exp( -( 1 - R - psi )^2/sigma_2^2 ). The R inside is what makes this
 		/// source non-physical.
-		double ridge( double r, double psi ) const
+		double ridge( double radius, double psi ) const
 		{
-			double const u = 1.0 - r - psi;
+			double const u = 1.0 - radius - psi;
 			return std::exp( -u*u/sigma2SquaredValue );
 		}
 

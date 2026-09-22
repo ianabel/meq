@@ -339,7 +339,7 @@ namespace
 			? mfem::Mesh( config.file.c_str(), 1, 1 )
 			: mfem::Mesh::MakeCartesian2D( config.nR, config.nZ,
 			                               mfem::Element::TRIANGLE, false,
-			                               config.rMax - config.rMin,
+			                               config.maxRadius - config.minRadius,
 			                               config.zMax - config.zMin );
 
 		// MakeCartesian2D puts the box at the origin; move it to [RMin,RMax] x
@@ -347,7 +347,7 @@ namespace
 		if ( !config.fromFile() )
 		{
 			mfem::Vector shift( 2 );
-			shift( 0 ) = config.rMin;
+			shift( 0 ) = config.minRadius;
 			shift( 1 ) = config.zMin;
 			mesh.Transform( [ shift ]( mfem::Vector const &in, mfem::Vector &out )
 			{
@@ -421,7 +421,7 @@ namespace
 		}
 
 		double const levels = static_cast<double>( 1 << config.refinementLevels );
-		double const hR = ( config.rMax - config.rMin )/( config.nR*levels );
+		double const hR = ( config.maxRadius - config.minRadius )/( config.nR*levels );
 		double const hZ = ( config.zMax - config.zMin )/( config.nZ*levels );
 		return std::max( hR, hZ );
 	}
@@ -444,12 +444,12 @@ namespace
 	/// inside, zero on `Gamma`, positive outside.
 	///
 	/// **THIS IS NOT A meq::BoundaryShape AND CANNOT BE ONE.** That class refuses
-	/// a surface reaching `r <= 0`, rightly, since a closed plasma surface
-	/// through the axis carries a non-integrable `1/r`. `Gamma` here is an
+	/// a surface reaching `R <= 0`, rightly, since a closed plasma surface
+	/// through the axis carries a non-integrable `1/R`. `Gamma` here is an
 	/// ARTIFICIAL boundary whose flat side IS the axis, and the axis half of it
 	/// is ordinary fitted boundary that SubMesh leaves with its inherited
 	/// attribute -- so `Gamma_h` is the arc alone and nothing is ever
-	/// transferred across `r = 0`. meq::AdaptiveDomain was relaxed for exactly
+	/// transferred across `R = 0`. meq::AdaptiveDomain was relaxed for exactly
 	/// this geometry.
 	mfem::PositionFunction semicircleLevelSet( double radius, double centreZ )
 	{
@@ -537,7 +537,7 @@ namespace
 		// GEOMETRY. The guard required EXACTLY ONE attribute -- Omega strictly
 		// inside the box -- which every [boundary.shape] run satisfies and
 		// [boundary.exterior] never can: the half-disc's flat side IS the box's
-		// r = 0 edge, deliberately, because the exterior expansion is valid only
+		// R = 0 edge, deliberately, because the exterior expansion is valid only
 		// on a semicircle centred on the axis. That edge is the AXIS. It is
 		// ordinary fitted boundary, it wants no transfer, and every Gegenbauer
 		// mode vanishes on it identically.
@@ -678,7 +678,7 @@ namespace
 		if ( !solver || solver->borderSteps().empty() )
 			return;
 
-		std::printf( "\n   it     ||R||    g*axis     g*bnd     g*Ip"
+		std::printf( "\n   it     ||r||    g*axis     g*bnd     g*Ip"
 		             "   g*ext    g*xpt      damp  n   A       ||y||"
 		             "        X-point\n" );
 		auto const &steps = solver->borderSteps();
@@ -743,7 +743,7 @@ namespace
 			if ( b.trialFieldNorms.size() == b.trialNorms.size()
 			     && b.fieldNorm > 0.0 )
 			{
-				std::printf( "       ||R|| dev:" );
+				std::printf( "       ||r|| dev:" );
 				double previous = 0.0;
 				double alpha = 1.0;
 				for ( std::size_t t = 0; t < b.trialFieldNorms.size()
@@ -1253,7 +1253,7 @@ int main( int argc, char **argv )
 	/*
 	 * THE X-POINT SEED, CARRIED FORWARD FOR psi_ax's REASON AND ONE MORE.
 	 *
-	 * [boundary.xpoint] makes ( r_X, z_X ) unknowns, so the file's numbers are
+	 * [boundary.xpoint] makes ( R_X, z_X ) unknowns, so the file's numbers are
 	 * an initial value and the answer is wherever the solve left it. A fresh
 	 * solver per adaptive cycle re-arms the border, and re-arming it with the
 	 * file's seed would throw away the located null and start the search again
@@ -1460,7 +1460,7 @@ int main( int argc, char **argv )
 		{
 			auto plasma = meq::makeNormalisedSource( config->getSource(), argument );
 			psiAxisGuess = config->getSource().psiAxisGuess();
-			xPointSeedR = config->getBoundary().xpoint.r;
+			xPointSeedR = config->getBoundary().xpoint.radius;
 			xPointSeedZ = config->getBoundary().xpoint.z;
 
 			if ( config->getSource().type == meq::SourceType::MHD
@@ -1965,15 +1965,15 @@ int main( int argc, char **argv )
 			for ( std::size_t i = 0; i < coils->size(); ++i )
 			{
 				meq::Coil const &one = coils->coil( i );
-				bool const overlaps = one.rMax() > low( 0 ) && one.rMin() < high( 0 )
+				bool const overlaps = one.maxRadius() > low( 0 ) && one.minRadius() < high( 0 )
 				                   && one.zMax() > low( 1 ) && one.zMin() < high( 1 );
 				if ( !overlaps )
 					std::fprintf( stderr,
-						"MEQ: warning: coil %d spans r [%g, %g], z [%g, %g], which is\n"
-						"     entirely outside the mesh box r [%g, %g], z [%g, %g]. Its\n"
+						"MEQ: warning: coil %d spans R [%g, %g], z [%g, %g], which is\n"
+						"     entirely outside the mesh box R [%g, %g], z [%g, %g]. Its\n"
 						"     current enters F nowhere, so it contributes NOTHING to this\n"
 						"     solve.\n",
-						static_cast<int>( i ), one.rMin(), one.rMax(),
+						static_cast<int>( i ), one.minRadius(), one.maxRadius(),
 						one.zMin(), one.zMax(),
 						low( 0 ), high( 0 ), low( 1 ), high( 1 ) );
 			}
@@ -1996,7 +1996,7 @@ int main( int argc, char **argv )
 			 * THE DOMAIN MUST REACH THE AXIS EXACTLY, and this is where that
 			 * is checked rather than discovered. meq::ExteriorDtN is diagonal
 			 * because the Gegenbauer separation holds on a semicircle CENTRED
-			 * ON THE AXIS; a domain starting at r = 0.05 has a flat side that
+			 * ON THE AXIS; a domain starting at R = 0.05 has a flat side that
 			 * is an arbitrary vertical line, the modes do not span its
 			 * exterior, and the run would converge at full order to a machine
 			 * nobody described. That is FB-A's requirement arriving through
@@ -2007,7 +2007,7 @@ int main( int argc, char **argv )
 			 * describe a box the driver BUILDS; with [mesh] File they are
 			 * absent and default to zero, so the axis test passed vacuously on
 			 * a mesh nobody had looked at and the radius test compared Gamma
-			 * against an rMax of 0 and refused every file outright, with a
+			 * against an R_max of 0 and refused every file outright, with a
 			 * message about a box the run does not have. That combination --
 			 * a gmsh half-disc with the conductors meshed to, plus the
 			 * exterior coupling -- is exactly the one FB-6 needs, and it was
@@ -2020,11 +2020,11 @@ int main( int argc, char **argv )
 
 			if ( meshLow( 0 ) != 0.0 )
 				throw std::runtime_error(
-					"[boundary.exterior] needs a mesh reaching r = 0 exactly, "
-					"and this one starts at r = "
+					"[boundary.exterior] needs a mesh reaching R = 0 exactly, "
+					"and this one starts at R = "
 					+ std::to_string( meshLow( 0 ) ) + ": the exterior "
 					"expansion is valid only on a semicircle centred on the "
-					"axis, and a domain stopping short of r = 0 is not a "
+					"axis, and a domain stopping short of R = 0 is not a "
 					"slightly worse one -- the Gegenbauer modes do not span "
 					"its exterior at all" );
 
@@ -2034,7 +2034,7 @@ int main( int argc, char **argv )
 			     || zLow <= meshLow( 1 ) || zHigh >= meshHigh( 1 ) )
 				throw std::runtime_error(
 					"[boundary.exterior] Radius puts Gamma outside or on the "
-					"mesh, which spans r [0, "
+					"mesh, which spans R [0, "
 					+ std::to_string( meshHigh( 0 ) ) + "], z ["
 					+ std::to_string( meshLow( 1 ) ) + ", "
 					+ std::to_string( meshHigh( 1 ) ) + "]; D_h is cut FROM "
@@ -2232,19 +2232,19 @@ int main( int argc, char **argv )
 					[ set, centreR, centreZ, semiR, semiZ, plasmaCurrent ]
 					( mfem::Vector const &x )
 					{
-						// CLAMPED AT THE AXIS, because the mesh REACHES r = 0
+						// CLAMPED AT THE AXIS, because the mesh REACHES R = 0
 						// exactly -- FB-5 requires the half-disc to -- and a
 						// node there lands at -1e-17 as often as +1e-17, which
 						// meq::coilPsi() refuses outright. psi( 0, z ) is
 						// documented as 0.0 bit exactly for both conductor
 						// kinds, so clamping is the value rather than a repair
 						// of one.
-						double const r = std::max( 0.0, x( 0 ) );
+						double const radius = std::max( 0.0, x( 0 ) );
 						double total = 0.0;
 						if ( set )
 							for ( meq::Coil const &c : set->coils() )
 								total += meq::coilPsi(
-									c, r, x( 1 ),
+									c, radius, x( 1 ),
 									meq::guessCoilQuadratureOrder );
 						// AND THE PLASMA, as an elliptical column carrying
 						// all of I_p about the guessed axis.
@@ -2261,7 +2261,7 @@ int main( int argc, char **argv )
 						// logarithm in the second derivatives that nothing in
 						// the equilibrium put there.
 						if ( plasmaCurrent != 0.0 && centreR > 0.0 )
-							total += meq::ellipsePsi( r, x( 1 ), centreR,
+							total += meq::ellipsePsi( radius, x( 1 ), centreR,
 							                          centreZ, semiR, semiZ,
 							                          plasmaCurrent );
 						return total;
@@ -2410,7 +2410,7 @@ int main( int argc, char **argv )
 	 * same system and always were, FB-5 predating all four of the others.
 	 *
 	 * With the normalisation frozen by the caller, a meq::NormalisedSource is
-	 * an ordinary meq::Source -- F( r, z, psi ), no unknowns in it -- so this
+	 * an ordinary meq::Source -- F( R, z, psi ), no unknowns in it -- so this
 	 * is the unbordered semi-linear problem MEQ has solved since stage 4.
 	 */
 	auto makeSolver = [ & ]( mfem::Mesh &mesh, bool firstCycle,
@@ -2475,12 +2475,12 @@ int main( int argc, char **argv )
 			// construction rather than by precedence.
 			fresh->setLimiterSurface( limiterConfig.surfaceAttribute );
 		else if ( limiterConfig.given )
-			fresh->setBoundaryFluxPoint( limiterConfig.r, limiterConfig.z );
+			fresh->setBoundaryFluxPoint( limiterConfig.radius, limiterConfig.z );
 		else if ( config->getBoundary().xpoint.given )
 			/*
 			 * XP-3: THE X-POINT IS TWO MORE UNKNOWNS OF THIS SAME BORDER, not a
 			 * third pinning of psi_bnd. The two rows q_r = q_z = 0 join
-			 * psi_bnd - psi_h( r_X, z_X ) = 0 and all three close on one
+			 * psi_bnd - psi_h( R_X, z_X ) = 0 and all three close on one
 			 * factorisation per step -- and the two new columns are exactly
 			 * zero, so they cost no backsolve. See setXPointBoundary().
 			 *
@@ -2507,7 +2507,7 @@ int main( int argc, char **argv )
 		 * THE THIRD BORDER, AND THE FILE SPEAKS AMPERES WHERE THE SOLVER SPEAKS
 		 * mu0 I_p. setPlasmaCurrent() takes mu0 I_p deliberately -- everything
 		 * inside the solver already does, Ampere's law reads the flux integral
-		 * as -mu0 I_p and the constraint is assembled as int F/r which IS
+		 * as -mu0 I_p and the constraint is assembled as int F/R which IS
 		 * mu0 I_p -- and a solver that took amperes would need a mu0 of its own,
 		 * which could disagree with the source's and scale two terms of one
 		 * equation differently.
@@ -3008,11 +3008,11 @@ int main( int argc, char **argv )
 		 */
 		auto edgeFluxOf = [ & ]( mfem::GridFunction const &field ) -> double
 		{
-			auto valueAt = []( mfem::GridFunction const &f, double r, double z,
+			auto valueAt = []( mfem::GridFunction const &f, double radius, double z,
 			                   double &out ) -> bool
 			{
 				mfem::DenseMatrix point( 2, 1 );
-				point( 0, 0 ) = r;
+				point( 0, 0 ) = radius;
 				point( 1, 0 ) = z;
 				mfem::Array<int> elements;
 				mfem::Array<mfem::IntegrationPoint> local;
@@ -3024,12 +3024,12 @@ int main( int argc, char **argv )
 			};
 			// psi_c at a point, or exactly zero with nothing subtracted, so
 			// every return below adds it unconditionally. ConductorField::psi
-			// is even in r and answers on the axis, so a seed on r = 0 -- which
+			// is even in R and answers on the axis, so a seed on R = 0 -- which
 			// a half-disc machine's Gamma endpoints are -- is not a refusal
 			// here. MEASUREMENTS.md M-156.
-			auto conductorPsi = [ & ]( double r, double z ) -> double
+			auto conductorPsi = [ & ]( double radius, double z ) -> double
 			{
-				return conductorField ? conductorField->psi( r, z ) : 0.0;
+				return conductorField ? conductorField->psi( radius, z ) : 0.0;
 			};
 
 			double value = 0.0;
@@ -3039,8 +3039,8 @@ int main( int argc, char **argv )
 			if ( x.given && valueAt( field, xPointSeedR, xPointSeedZ, value ) )
 				return value + conductorPsi( xPointSeedR, xPointSeedZ );
 			if ( l.given && l.surfaceAttribute == 0
-			     && valueAt( field, l.r, l.z, value ) )
-				return value + conductorPsi( l.r, l.z );
+			     && valueAt( field, l.radius, l.z, value ) )
+				return value + conductorPsi( l.radius, l.z );
 			if ( l.surfaceAttribute > 0 )
 				// THE CURVE, AND IT IS THE CURVE AND NOT THE DISC -- see the
 				// note above for what the disc costs and what it measures.
@@ -3059,7 +3059,7 @@ int main( int argc, char **argv )
 		 * `setPlasmaCurrent()` made the current an unknown, and the Picard
 		 * pre-stage below deliberately has no borders at all -- that is the
 		 * whole of what makes its field solve an ordinary one. So the delivered
-		 * current has to be measured rather than read, and `int F/r` over the
+		 * current has to be measured rather than read, and `int F/R` over the
 		 * domain IS `mu0 I_p`, which is the same identity the solver's own
 		 * constraint is assembled from.
 		 *
@@ -3102,11 +3102,11 @@ int main( int argc, char **argv )
 					double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
 					mfem::Vector here( coordinates, mesh.Dimension() );
 					map.Transform( point, here );
-					double const r = here( 0 );
-					if ( !( r > 0.0 ) )
+					double const radius = here( 0 );
+					if ( !( radius > 0.0 ) )
 						continue;          // the axis carries no area anyway
 					total += point.weight*map.Weight()
-					         *f.f( r, here( 1 ), psi )/r;
+					         *f.f( radius, here( 1 ), psi )/radius;
 				}
 			}
 			return total;
@@ -3145,7 +3145,7 @@ int main( int argc, char **argv )
 				if ( point.type != wanted )
 					continue;
 				if ( conductorGeometry
-				     && conductorGeometry->indexContaining( point.r,
+				     && conductorGeometry->indexContaining( point.radius,
 				                                            point.z ) >= 0 )
 					continue;
 				double const score = span >= 0.0 ? point.psi : -point.psi;
@@ -3154,7 +3154,7 @@ int main( int argc, char **argv )
 					found = true;
 					best = score;
 					out = point.psi;
-					axisR = point.r;
+					axisR = point.radius;
 					axisZ = point.z;
 				}
 			}
@@ -3193,7 +3193,7 @@ int main( int argc, char **argv )
 			{
 				if ( point.type != meq::CriticalPointType::Saddle )
 					continue;
-				double const gap = std::hypot( point.r - xPointSeedR,
+				double const gap = std::hypot( point.radius - xPointSeedR,
 				                               point.z - xPointSeedZ );
 				if ( gap > reach )
 					continue;
@@ -3285,7 +3285,7 @@ int main( int argc, char **argv )
 			 * problem at scale 1 asks for an equilibrium carrying a current
 			 * five orders from the one wanted, and it diverges.
 			 *
-			 * One Picard update of the scale on the GUESS fixes it: `int F/r`
+			 * One Picard update of the scale on the GUESS fixes it: `int F/R`
 			 * evaluated at the guess is not the delivered current of any
 			 * equilibrium, but it is the right order, which is all the first
 			 * solve needs.
@@ -4030,7 +4030,7 @@ int main( int argc, char **argv )
 		/*
 		 * THE TOTAL CURRENT IS PRINTED BECAUSE IT IS THE ONE COIL NUMBER A
 		 * READER CAN CHECK. FB-2's acceptance identity is
-		 * `oint ( 1/r ) dpsi/dn dl = -mu0 I`, a property of the trace alone --
+		 * `oint ( 1/R ) dpsi/dn dl = -mu0 I`, a property of the trace alone --
 		 * so a sign error in a `[[coils]]` block, which is the mistake
 		 * FREE-BOUNDARY-PLAN.md section 7 predicts will be made at least once,
 		 * shows up here before anything is plotted.
@@ -4236,7 +4236,7 @@ int main( int argc, char **argv )
 			 * IS `Modes` ENOUGH? THE RAW COEFFICIENTS CANNOT SAY, AND THAT IS
 			 * WHY THIS IS PRINTED RATHER THAN LEFT TO THE READER.
 			 *
-			 * The exterior block is diagonal in the weight `dGamma/r` with a
+			 * The exterior block is diagonal in the weight `dGamma/R` with a
 			 * mass `2/( n( n-1 )( 2n-1 ) )`, so `a_n` carries `n^{3/2}` of its
 			 * own before any physics: a spectrum that is genuinely DECAYING
 			 * reads FLAT in the printed row above, and one that is flat is
@@ -4276,13 +4276,13 @@ int main( int argc, char **argv )
 				// THE CONTACT IS AN OUTPUT ON THE CURVE ROUTE AND AN INPUT ON
 				// THE POINT ONE, so it is read from the solver where it was
 				// found and echoed from the file where it was given. Printing
-				// the configured r and z under SurfaceAttribute would report
+				// the configured R and z under SurfaceAttribute would report
 				// ( 0, 0 ), which is on the axis and is not a limiter.
 				bool const located = solver->limiterContactWasLocated();
 				std::printf( "     psi_bnd = %.6e Wb/rad at the limiter "
 				             "( %g, %g )%s\n", solver->psiBoundary(),
 				             located ? solver->limiterContactR()
-				                     : config->getBoundary().limiter.r,
+				                     : config->getBoundary().limiter.radius,
 				             located ? solver->limiterContactZ()
 				                     : config->getBoundary().limiter.z,
 				             located ? ", found on the limiter surface"
@@ -4305,7 +4305,7 @@ int main( int argc, char **argv )
 				             solver->psiBoundary(), solver->xPointR(),
 				             solver->xPointZ(),
 				             std::hypot( solver->xPointR()
-				                         - config->getBoundary().xpoint.r,
+				                         - config->getBoundary().xpoint.radius,
 				                         solver->xPointZ()
 				                         - config->getBoundary().xpoint.z ),
 				             solver->xPointWasLocated()
@@ -4372,9 +4372,9 @@ int main( int argc, char **argv )
 				// correctly and uselessly.
 				if ( conductorGeometry )
 					finder.setExcluded(
-						[ conductorGeometry ]( double r, double z )
+						[ conductorGeometry ]( double radius, double z )
 						{
-							return conductorGeometry->indexContaining( r, z ) >= 0;
+							return conductorGeometry->indexContaining( radius, z ) >= 0;
 						} );
 
 				double const checkStart = elapsedSince( started );
@@ -4412,7 +4412,7 @@ int main( int argc, char **argv )
 		{
 			std::printf( "     the axis, as a zero of q_h: psi = %.6e at "
 			             "( %.4f, %.4f ), normalised flux %.4f\n",
-			             axisCheck.axis.psi, axisCheck.axis.r, axisCheck.axis.z,
+			             axisCheck.axis.psi, axisCheck.axis.radius, axisCheck.axis.z,
 			             axisCheck.normalisedFlux );
 
 			/*
@@ -4460,7 +4460,7 @@ int main( int argc, char **argv )
 					"     step: on a flux with several, the branch is chosen by the\n"
 					"     initial guess. If the core is meant to be the other one, that\n"
 					"     is what to change.\n",
-					axisCheck.normalisedFlux, axisCheck.axis.r, axisCheck.axis.z,
+					axisCheck.normalisedFlux, axisCheck.axis.radius, axisCheck.axis.z,
 					axisCheck.axis.psi );
 			}
 
@@ -4480,7 +4480,7 @@ int main( int argc, char **argv )
 			 * NOTHING ELSE IN THIS BLOCK CAN SEE IT. checkAxis() reports the
 			 * normalised flux at the located axis, which under that constraint
 			 * is 1 BY CONSTRUCTION -- it read 1.0000 on that run -- and
-			 * checkAxisSource() asks about r = 0 and was clean. Every test that
+			 * checkAxisSource() asks about R = 0 and was clean. Every test that
 			 * refers to the plasma is circular at that point, because Psi = 1
 			 * there is what the constraint imposes. The conductor GEOMETRY is
 			 * outside all of it, and the driver is where it is known.
@@ -4495,8 +4495,8 @@ int main( int argc, char **argv )
 				for ( std::size_t i = 0; i < conductorGeometry->size(); ++i )
 				{
 					meq::Coil const &one = conductorGeometry->coil( i );
-					if ( solver->axisR() < one.rMin()
-					     || solver->axisR() > one.rMax()
+					if ( solver->axisR() < one.minRadius()
+					     || solver->axisR() > one.maxRadius()
 					     || solver->axisZ() < one.zMin()
 					     || solver->axisZ() > one.zMax() )
 						continue;
@@ -4504,7 +4504,7 @@ int main( int argc, char **argv )
 					std::fflush( stdout );
 					std::fprintf( stderr,
 						"MEQ: warning: the located magnetic axis ( %.4f, %.4f ) is\n"
-						"     INSIDE conductor %zu, which spans r [ %.4f, %.4f ]\n"
+						"     INSIDE conductor %zu, which spans R [ %.4f, %.4f ]\n"
 						"     z [ %.4f, %.4f ].  A plasma has no magnetic axis inside a\n"
 						"     coil, so psi_ax is a coil's own O-point and not this\n"
 						"     equilibrium's -- and every profile is normalised by it.\n"
@@ -4514,7 +4514,7 @@ int main( int argc, char **argv )
 						"     scale and at the initial guess; refinement has been\n"
 						"     measured to cure it.\n",
 						solver->axisR(), solver->axisZ(), i,
-						one.rMin(), one.rMax(), one.zMin(), one.zMax() );
+						one.minRadius(), one.maxRadius(), one.zMin(), one.zMax() );
 					break;
 				}
 			}
@@ -4581,12 +4581,12 @@ int main( int argc, char **argv )
 		/*
 		 * AND IS THE TOROIDAL CURRENT DENSITY BOUNDED ON THE SYMMETRY AXIS?
 		 *
-		 * The load MEQ assembles is -( F/r, w ), and F/r IS mu_0 j_phi:
+		 * The load MEQ assembles is -( F/R, w ), and F/R IS mu_0 j_phi:
 		 *
-		 *     j_phi  =  r p'( Psi )  +  g g'( Psi ) / ( mu_0 r )
+		 *     j_phi  =  R p'( Psi )  +  g g'( Psi ) / ( mu_0 R )
 		 *
 		 * so a finite current density on the axis requires F( 0, z ) = 0, and
-		 * F = mu_0 r^2 p' + g g' leaves only g g' there. Which Psi the axis sits
+		 * F = mu_0 R^2 p' + g g' leaves only g g' there. Which Psi the axis sits
 		 * at decides whether that vanishes: psi( 0, z ) = 0 exactly, so
 		 * Psi_axis = -psi_bnd/span, and a run with [boundary.limiter] has
 		 * psi_bnd > 0 and therefore evaluates the profiles at NEGATIVE Psi -- in
@@ -4595,7 +4595,7 @@ int main( int argc, char **argv )
 		 *
 		 * A REFUSAL, for the same reason as the one above and one more: the
 		 * DISCRETE load functional is then unbounded -- L2 polynomials are free
-		 * to be nonzero at r = 0 where the energy space's members are not -- so
+		 * to be nonzero at R = 0 where the energy space's members are not -- so
 		 * the quadrature is the only thing making the assembly finite and the
 		 * answer depends on the RULE rather than on the mesh. It is not a bad
 		 * number in one place either: measured, psi_h develops an O( 1 ) layer
@@ -4604,7 +4604,7 @@ int main( int argc, char **argv )
 		 * IT CANNOT BE CHECKED AT STARTUP, which is why this costs a solve.
 		 * psi_bnd is an UNKNOWN of the bordered Newton, so the Psi the axis sits
 		 * at is not known until the solve has closed. A startup heuristic on the
-		 * keys -- limiter present, mesh reaching r = 0, ConfineToPlasma absent --
+		 * keys -- limiter present, mesh reaching R = 0, ConfineToPlasma absent --
 		 * would refuse a profile that vanishes below Psi = 0 by construction,
 		 * which is a legitimate configuration. This asks F itself, so it cannot
 		 * false-refuse.
@@ -4626,15 +4626,15 @@ int main( int argc, char **argv )
 			 * psi( 0, z ) = 0 exactly, so Psi on the axis is -psi_bnd/span, and
 			 * a POSITIVE reading needs psi_bnd and the span to carry opposite
 			 * signs -- an ordinary positive span with a NEGATIVE psi_bnd. The
-			 * plasma then contains r = 0: current threading the machine's own
+			 * plasma then contains R = 0: current threading the machine's own
 			 * centre line. A tokamak's axis is in the vacuum by construction, so
 			 * no refinement turns this into the equilibrium that was asked for,
 			 * and reporting it as a converged answer would be reporting a
 			 * different device.
 			 *
 			 * THE ONE ESCAPE IS A g THAT VANISHES EXACTLY. F( 0, z, . ) is g g'
-			 * and nothing else, p' being killed by its own r^2, so g g' == 0
-			 * identically leaves j_phi = r p' vanishing with r whatever Psi
+			 * and nothing else, p' being killed by its own R^2, so g g' == 0
+			 * identically leaves j_phi = R p' vanishing with R whatever Psi
 			 * reads on the axis. That is the only configuration in which this is
 			 * a curiosity rather than a defect, and it is tested over a spread
 			 * of Psi rather than at one value.
@@ -4651,7 +4651,7 @@ int main( int argc, char **argv )
 			 * removed -- carries no current whatever Psi reads on it.
 			 *
 			 * MEASURED, on MAST under filament conductors: `psi_bnd` converges
-			 * NEGATIVE, so the level set does contain `r = 0` -- and the
+			 * NEGATIVE, so the level set does contain `R = 0` -- and the
 			 * reference equilibrium's own near-axis lobe is a separate
 			 * component, joined to the core only through a saddle, which the
 			 * fill correctly declines to reach. Walking the reference's midplane
@@ -4662,7 +4662,7 @@ int main( int argc, char **argv )
 			 *
 			 * The level-set reading is kept and REPORTED, because a run where
 			 * the two disagree is one where the fill is the only thing between
-			 * the load and a 1/r pole, and that is worth saying out loud.
+			 * the load and a 1/R pole, and that is worth saying out loud.
 			 */
 			if ( axisSource.reachesAxis && axisSource.axisInsidePlasma
 			     && !axisSource.sourceVanishesOnAxis
@@ -4672,13 +4672,13 @@ int main( int argc, char **argv )
 				std::fprintf( stderr,
 					"MEQ: warning: the LEVEL SET { Psi > 0 } contains the symmetry\n"
 					"     axis -- psi_bnd came out %+.6e against a span of %+.6e, so\n"
-					"     Psi( r = 0 ) = %+.4e -- but the plasma support does not\n"
+					"     Psi( R = 0 ) = %+.4e -- but the plasma support does not\n"
 					"     reach it: the connected component containing the magnetic\n"
-					"     axis stops short, so | F | on r = 0 is assembled as zero\n"
+					"     axis stops short, so | F | on R = 0 is assembled as zero\n"
 					"     where the pointwise test would have read %.6e. The answer\n"
 					"     stands and the connectivity is the whole of why. Turning\n"
 					"     [source] ConfineToPlasma off, or PlasmaConnectivity to\n"
-					"     pointwise, would put a 1/r in the load.\n",
+					"     pointwise, would put a 1/R in the load.\n",
 					solver->psiBoundary(),
 					solver->psiAxis() - solver->psiBoundary(),
 					axisSource.normalisedFluxOnAxis, axisSource.worstOnAxis );
@@ -4701,25 +4701,25 @@ int main( int argc, char **argv )
 					"     large error, it is the wrong topology, and the run is\n"
 					"     refused rather than reported.\n"
 					"\n"
-					"     psi = 0 on r = 0 exactly -- it is the poloidal flux through a\n"
+					"     psi = 0 on R = 0 exactly -- it is the poloidal flux through a\n"
 					"     circle of vanishing area -- so the normalised flux there is\n"
 					"     -psi_bnd/( psi_ax - psi_bnd ) = %+.4e, and the plasma is\n"
 					"     wherever that is POSITIVE. It is. psi_bnd came out %+.6e\n"
 					"     against a span of %+.6e: the two carry opposite signs, which\n"
-					"     is what puts r = 0 inside the plasma.\n"
+					"     is what puts R = 0 inside the plasma.\n"
 					"\n"
 					"     A TOKAMAK is a torus about R_0 > 0 and its symmetry axis is\n"
 					"     in the vacuum, so what this describes is toroidal current\n"
 					"     threading the machine's own centre line: | F | reads %.6e\n"
-					"     there, and F/r is mu_0 j_phi.\n"
+					"     there, and F/R is mu_0 j_phi.\n"
 					"\n"
 					"     A LEVITATED DIPOLE OR A MAGNETIC MIRROR GENUINELY REACHES THE\n"
 					"     AXIS, and this is not a refusal of those -- but neither has a\n"
 					"     toroidal field, so g vanishes identically in both. That is the\n"
-					"     same fact twice: B_phi = g/r must be finite on the axis, so a\n"
-					"     plasma that reaches r = 0 cannot carry a toroidal field there.\n"
+					"     same fact twice: B_phi = g/R must be finite on the axis, so a\n"
+					"     plasma that reaches R = 0 cannot carry a toroidal field there.\n"
 					"     F( 0, z, . ) is g g' and nothing else, so g g' == 0 leaves\n"
-					"     j_phi = r p' going to zero with r whatever Psi reads. THIS\n"
+					"     j_phi = R p' going to zero with R whatever Psi reads. THIS\n"
 					"     source's does not: checked across Psi = -0.5 .. 1.5, F on the\n"
 					"     axis is non-zero. If a dipole or a mirror is what you meant,\n"
 					"     set GGPrime to zero and this passes.\n"
@@ -4747,8 +4747,8 @@ int main( int argc, char **argv )
 				std::fprintf( stderr,
 					"MEQ: the source does not vanish on the symmetry axis: | F | is\n"
 					"     %.6e at ( %.4f, %.4f ), which is %.3e of | F |'s own scale\n"
-					"     over the mesh. F/r is mu_0 j_phi, so this is an UNBOUNDED\n"
-					"     toroidal current density on r = 0, and the load ( F/r, w ) is\n"
+					"     over the mesh. F/R is mu_0 j_phi, so this is an UNBOUNDED\n"
+					"     toroidal current density on R = 0, and the load ( F/R, w ) is\n"
 					"     not integrable against a discrete w that does not vanish there\n"
 					"     -- psi_h picks up a layer along the whole axis whose size is\n"
 					"     set by the quadrature rule rather than by the mesh.\n"
@@ -4934,7 +4934,7 @@ int main( int argc, char **argv )
 		// It spans GAMMA's bounding box where there is one, not the background
 		// box: on the curved path most of the background lies outside the plasma
 		// and sampling it would spend the grid on NaN.
-		double gridRMin = config->getMesh().rMin, gridRMax = config->getMesh().rMax;
+		double gridRMin = config->getMesh().minRadius, gridRMax = config->getMesh().maxRadius;
 		double gridZMin = config->getMesh().zMin, gridZMax = config->getMesh().zMax;
 		if ( shape )
 			shape->boundingBox( gridRMin, gridRMax, gridZMin, gridZMax );
@@ -4983,18 +4983,18 @@ int main( int argc, char **argv )
 		{
 			meq::BoundaryShape const *curve = shape.get();
 			extended = sampler.extendOutward( 1.0,
-				[ curve ]( double r, double z )
+				[ curve ]( double radius, double z )
 				{
-					return curve->levelSet( r, z ) <= 0.0;
+					return curve->levelSet( radius, z ) <= 0.0;
 				},
-				[ curve ]( double r, double z )
+				[ curve ]( double radius, double z )
 				{
 					// levelSet is the RADIAL gap and is negative inside, so its
 					// magnitude is the distance to Gamma along the ray. Not the
 					// perpendicular distance, which is smaller -- but the ratio
 					// below only needs the two gaps measured the same way as
 					// each other, and both are along the ray.
-					return -curve->levelSet( r, z );
+					return -curve->levelSet( radius, z );
 				} );
 		}
 
@@ -5007,7 +5007,7 @@ int main( int argc, char **argv )
 		// THE FLUX CARRIES THE BAND, which is the payoff for the mixed method
 		// showing up somewhere unexpected. q is computed at the SAME order as
 		// psi, so continuing psi across the Gamma_h-to-Gamma band as
-		// psi( x0 ) + r q( x0 ) . ( p - x0 ) evaluates both fields at a point on
+		// psi( x0 ) + R q( x0 ) . ( p - x0 ) evaluates both fields at a point on
 		// the element's own boundary and never outside it. The alternative --
 		// evaluating psi_h's polynomial outside its element -- is bounded by
 		// nothing, and was measured crossing psi = 0, a value this
@@ -5016,7 +5016,7 @@ int main( int argc, char **argv )
 		// THE POTENTIAL SAMPLED HERE IS psi*, NOT psi_h: the file reports the
 		// better field. The FLUX ARGUMENT STAYS solver->flux(), which is q at
 		// degree k, and that pairing is consistent rather than a leftover --
-		// psi*'s defining local problem matches its gradient to r q, so r q IS
+		// psi*'s defining local problem matches its gradient to R q, so R q IS
 		// grad psi* to the order psi* is claimed at. Substituting the enriched
 		// flux would change nothing the band can resolve and would pair the
 		// Taylor step with a field the reconstruction produced rather than with
@@ -5070,7 +5070,7 @@ int main( int argc, char **argv )
 		 *
 		 * B GETS ITS OWN CALL RATHER THAN A RELABELLING OF flux(), because the
 		 * grid's first column is on the axis for every half-disc machine and
-		 * q = ( 1/r ) grad_bar psi is 0/0 there. meq::ConductorField
+		 * q = ( 1/R ) grad_bar psi is 0/0 there. meq::ConductorField
 		 * ::poloidalField() is the one entry point that takes the limit.
 		 */
 		if ( conductorField )
@@ -5088,12 +5088,12 @@ int main( int argc, char **argv )
 						static_cast<std::size_t>( j )
 						*static_cast<std::size_t>( sampler.nodesR() )
 						+ static_cast<std::size_t>( i );
-					double const r = sampler.rAt( i );
+					double const radius = sampler.rAt( i );
 					double const z = sampler.zAt( j );
-					psi[ node ] += conductorField->psi( r, z );
+					psi[ node ] += conductorField->psi( radius, z );
 					double dbR = 0.0;
 					double dbZ = 0.0;
-					conductorField->poloidalField( r, z, dbR, dbZ );
+					conductorField->poloidalField( radius, z, dbR, dbZ );
 					bR[ node ] += dbR;
 					bZ[ node ] += dbZ;
 				}
@@ -5106,7 +5106,7 @@ int main( int argc, char **argv )
 		 * sweeps the heavy species outboard and an electrostatic potential
 		 * arises to stop that separating the charges -- so n_s and phi_0 are
 		 * genuine two-dimensional fields and a rotating equilibrium is not
-		 * interpretable without them. Both are ALGEBRAIC in ( r, psi ), so this
+		 * interpretable without them. Both are ALGEBRAIC in ( R, psi ), so this
 		 * costs one pass over the grid and no solve. See docs/rotation.rst under
 		 * Output, and meq::RotatingSource.
 		 *
@@ -5117,7 +5117,7 @@ int main( int argc, char **argv )
 		 * the node's FOOT on Gamma_h, not the node itself: only
 		 * samplePotentialWithFlux() applies the Taylor step outward. For psi the
 		 * difference is O( h ) and visible; for n_s it is worse, because the
-		 * whole physics of RoPP (96) is the r^2 in the exponent, so being handed
+		 * whole physics of RoPP (96) is the R^2 in the exponent, so being handed
 		 * the foot's radius rather than the node's misplaces the centrifugal
 		 * enrichment by a band width. So the loop below uses the ALREADY
 		 * SAMPLED psi -- which carries the flux continuation -- together with
@@ -5165,13 +5165,13 @@ int main( int argc, char **argv )
 					if ( !sampler.located( i, j ) || !std::isfinite( psi[ at ] ) )
 						continue;
 
-					double const r = sampler.rAt( i );
-					ePhi[ at ] = plain ? plain->potential( r, psi[ at ] )
-					                   : scaled->potential( r, psi[ at ] );
+					double const radius = sampler.rAt( i );
+					ePhi[ at ] = plain ? plain->potential( radius, psi[ at ] )
+					                   : scaled->potential( radius, psi[ at ] );
 					for ( std::size_t sp = 0; sp < rotating.species.size(); ++sp )
 						densities[ sp ][ at ] =
-							plain ? plain->density( sp, r, psi[ at ] )
-							      : scaled->density( sp, r, psi[ at ] );
+							plain ? plain->density( sp, radius, psi[ at ] )
+							      : scaled->density( sp, radius, psi[ at ] );
 				}
 		}
 
@@ -5285,7 +5285,7 @@ int main( int argc, char **argv )
 		if ( axisChecked && axisCheck.located )
 		{
 			writer.attribute( "axis_normalised_flux", axisCheck.normalisedFlux );
-			writer.attribute( "axis_r", axisCheck.axis.r );
+			writer.attribute( "axis_r", axisCheck.axis.radius );
 			writer.attribute( "axis_z", axisCheck.axis.z );
 		}
 		/*
@@ -5365,7 +5365,7 @@ int main( int argc, char **argv )
 			bool const located = solver->limiterContactWasLocated();
 			writer.attribute( "limiter_r",
 			                  located ? solver->limiterContactR()
-			                          : config->getBoundary().limiter.r );
+			                          : config->getBoundary().limiter.radius );
 			writer.attribute( "limiter_z",
 			                  located ? solver->limiterContactZ()
 			                          : config->getBoundary().limiter.z );
@@ -5468,7 +5468,7 @@ int main( int argc, char **argv )
 				              densities[ sp ],
 				              "number density of " + rotating.species[ sp ].name
 				                  + ", RoPP (96); equals its Density profile on "
-				                    "r = ReferenceRadius",
+				                    "R = ReferenceRadius",
 				              "m^-3" );
 
 			// e phi_0 AND NOT phi_0, in JOULES AND NOT VOLTS. It is the
@@ -5479,7 +5479,7 @@ int main( int argc, char **argv )
 			writer.field( "e_phi_0", ePhi,
 			              "elementary charge times the electrostatic potential "
 			              "phi_0 of RoPP (97), in JOULES not volts; zero on "
-			              "r = ReferenceRadius by the gauge",
+			              "R = ReferenceRadius by the gauge",
 			              "J" );
 		}
 
@@ -5551,7 +5551,7 @@ int main( int argc, char **argv )
 			writer.vector( "flux_dof", "flux_coefficients", fluxCoefficients,
 			               "every coefficient of the solved flux q, vdim 2 in "
 			               "the ordering named by flux_ordering; grad_bar psi "
-			               "= r q",
+			               "= R q",
 			               "Wb/rad/m^2" );
 
 			// THE SPACE, so the coefficients mean something. MFEM's collection
@@ -5964,7 +5964,7 @@ int main( int argc, char **argv )
 			meq::BoundaryShape const *curve = shape.get();
 			curvedNodes = meq::curveBoundaryOnto( *solveMesh,
 				config->getDiscretisation().polynomialDegree,
-				[ curve ]( double r, double z, double &outR, double &outZ )
+				[ curve ]( double radius, double z, double &outR, double &outZ )
 				{
 					// Radial projection onto Gamma. levelSet() IS the radial
 					// gap -- |p - centre| minus the curve's radius at the same
@@ -5973,14 +5973,14 @@ int main( int argc, char **argv )
 					// which BoundaryShape's constructor already requires.
 					double const centreR = curve->majorRadius();
 					double const centreZ = curve->centreHeight();
-					double const vR = r - centreR, vZ = z - centreZ;
+					double const vR = radius - centreR, vZ = z - centreZ;
 					double const rho = std::hypot( vR, vZ );
-					outR = r;
+					outR = radius;
 					outZ = z;
 					if ( rho <= 0.0 )
 						return;
-					double const gap = curve->levelSet( r, z );
-					outR = r - vR*gap/rho;
+					double const gap = curve->levelSet( radius, z );
+					outR = radius - vR*gap/rho;
 					outZ = z - vZ*gap/rho;
 				}, curved );
 

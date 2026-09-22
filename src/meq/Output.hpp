@@ -188,7 +188,7 @@ namespace meq
 	 * ORDERED, because the point of it is to be drawn. The boundary elements
 	 * come out of MFEM in no particular order, so a caller plotting them as
 	 * given gets a star of chords rather than an outline; this walks the
-	 * vertex adjacency instead. @a r and @a z are cleared first and the loop is
+	 * vertex adjacency instead. @a R and @a z are cleared first and the loop is
 	 * NOT repeated at the end -- a reader closing the curve appends the first
 	 * point, which is what tools/plot_equilibrium.py does.
 	 *
@@ -202,7 +202,7 @@ namespace meq
 	 *                   simply connected and the answer is partial.
 	 */
 	void boundaryPolyline( mfem::Mesh &mesh,
-	                       std::vector<double> &r, std::vector<double> &z,
+	                       std::vector<double> &radius, std::vector<double> &z,
 	                       int &unreached );
 
 	/**
@@ -238,7 +238,7 @@ namespace meq
 	 *                 now subdivides one degree finer than this, because it
 	 *                 draws psi*; the two numbers used to coincide and no longer
 	 *                 do.)
-	 * @param project  ( r, z ) on Gamma_h -> the corresponding point on Gamma.
+	 * @param project  ( R, z ) on Gamma_h -> the corresponding point on Gamma.
 	 *                 A radial projection is what the shape supports and what
 	 *                 the driver passes.
 	 * @param applied  set to the fraction of the displacement that survived the
@@ -304,7 +304,7 @@ namespace meq
 
 			/// The prescribed boundary, sampled, so a plot can draw Gamma without
 			/// re-deriving it from the configuration.
-			void boundary( std::vector<double> const &r,
+			void boundary( std::vector<double> const &radius,
 			               std::vector<double> const &z );
 
 			/**

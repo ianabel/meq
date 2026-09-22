@@ -9,8 +9,8 @@
  * It is the rotating counterpart of Soloviev.hpp, and it sits on the same rung
  * of the ladder tests/analytic keeps:
  *
- *   Soloviev.hpp               F constant in psi and in r beyond the r^2
- *   RotatingSoloviev.hpp       F constant in psi, EXPONENTIAL in r^2
+ *   Soloviev.hpp               F constant in psi and in R beyond the R^2
+ *   RotatingSoloviev.hpp       F constant in psi, EXPONENTIAL in R^2
  *   McCarthy.hpp               F linear in psi
  *   ManufacturedNonlinear.hpp  F nonlinear in psi
  *
@@ -18,8 +18,8 @@
  * as it is for Soloviev.hpp and for the same reason: p1, F0, T0 and Omega0 are
  * all constants in the Solov'ev-with-rotation case, so the source does not
  * depend on psi at all. So this fixture measures the discretisation and the new
- * r-dependence -- which is the whole novelty of rotation, F acquiring a genuine
- * exponential in r^2 at fixed psi -- and says NOTHING WHATEVER about the Newton
+ * R-dependence -- which is the whole novelty of rotation, F acquiring a genuine
+ * exponential in R^2 at fixed psi -- and says NOTHING WHATEVER about the Newton
  * Jacobian. RotatingNewtonConvergence.cpp's manufactured nonlinear rotating
  * case is what tests that, and this fixture is not a substitute for it.
  *
@@ -45,25 +45,25 @@ namespace analytic
  *
  * Li & Zhu's eq (7) and MEQ agree on the operator:
  *
- *     Delta*( psi ) := d_rr psi - ( 1/r ) d_r psi + d_zz psi,
+ *     Delta*( psi ) := d_rr psi - ( 1/R ) d_r psi + d_zz psi,
  *
- * which is the same thing as MEQ's r d_r( ( 1/r ) d_r psi ) + d_zz psi. Their
+ * which is the same thing as MEQ's R d_r( ( 1/R ) d_r psi ) + d_zz psi. Their
  * eq (12) is
  *
- *     Delta*( psi ) = -p1 r^2 exp[ M2 ( r^2/R0^2 - 1 ) ] - F0,
+ *     Delta*( psi ) = -p1 R^2 exp[ M2 ( R^2/R0^2 - 1 ) ] - F0,
  *
  * and MEQ writes the equation as -Delta*( psi ) = F, so
  *
- *     F( r, z, psi ) = p1 r^2 exp[ M2 ( r^2/R0^2 - 1 ) ] + F0.            (*)
+ *     F( R, z, psi ) = p1 R^2 exp[ M2 ( R^2/R0^2 - 1 ) ] + F0.            (*)
  *
- * POSITIVE, and F is the full right hand side numerator with no 1/r applied,
+ * POSITIVE, and F is the full right hand side numerator with no 1/R applied,
  * as everywhere else in this directory.
  *
- * (*) is also literally MEQ's own F = mu0 r^2 dp/dpsi + g dg/dpsi, read with
+ * (*) is also literally MEQ's own F = mu0 R^2 dp/dpsi + g dg/dpsi, read with
  *
- *     mu0 dp/dpsi|_r = p1 exp[ M2 ( r^2/R0^2 - 1 ) ],     g dg/dpsi = F0,
+ *     mu0 dp/dpsi|_r = p1 exp[ M2 ( R^2/R0^2 - 1 ) ],     g dg/dpsi = F0,
  *
- * i.e. with a pressure gradient that is a function of r as well as of psi.
+ * i.e. with a pressure gradient that is a function of R as well as of psi.
  * That is the ONE structural change rotation makes to the source, and it is
  * what this fixture is for. See docs/rotation.rst, The equation in MEQ's
  * convention.
@@ -79,18 +79,18 @@ namespace analytic
  * An exact rotating Solov'ev equilibrium, refs/SpectralElementGSRotation.pdf
  * eq (15):
  *
- *   psi = c1 + c2 r^2 + c3 ( r^4 - 4 r^2 z^2 ) + c4 [ r^2 ln r - z^2 ]
- *         - p1 ( R0^2/( 2 M2 ) )^2 { exp[ M2 ( r^2/R0^2 - 1 ) ]
- *                                    - ( M2/R0^2 )( r^2 - R0^2 ) - 1 }
+ *   psi = c1 + c2 R^2 + c3 ( R^4 - 4 R^2 z^2 ) + c4 [ R^2 ln R - z^2 ]
+ *         - p1 ( R0^2/( 2 M2 ) )^2 { exp[ M2 ( R^2/R0^2 - 1 ) ]
+ *                                    - ( M2/R0^2 )( R^2 - R0^2 ) - 1 }
  *         - ( F0/2 ) z^2
  *
- * The first four terms are Delta*-harmonic -- the same 1, r^2, r^4 - 4r^2z^2
- * and r^2 ln r - z^2 that Soloviev.hpp carries as psi_1, psi_2, psi_4 and (up
+ * The first four terms are Delta*-harmonic -- the same 1, R^2, R^4 - 4r^2z^2
+ * and R^2 ln R - z^2 that Soloviev.hpp carries as psi_1, psi_2, psi_4 and (up
  * to sign) psi_3 -- so they fix the geometry and contribute nothing to F. The
  * last two are the particular solution.
  *
- * Lengths are arbitrary but consistent; r must be strictly positive, since the
- * expansion contains ln r.
+ * Lengths are arbitrary but consistent; R must be strictly positive, since the
+ * expansion contains ln R.
  *
  * THE EXPONENT GROUP IS NAMED machSquared HERE, AND THAT IS DELIBERATE,
  * BECAUSE THE PAPER'S OWN SYMBOL IS INCONSISTENT WITH ITS OWN PROSE.
@@ -102,8 +102,8 @@ namespace analytic
  *
  * with no square root. Those two cannot both be right. Their eq (8) -- the
  * isothermal closure the whole construction rests on -- has exponent
- * coefficient m_i Omega^2 r^2 / ( 2 T ), so the group that multiplies
- * ( r^2/R_0^2 - 1 ) is
+ * coefficient m_i Omega^2 R^2 / ( 2 T ), so the group that multiplies
+ * ( R^2/R_0^2 - 1 ) is
  *
  *     m_i Omega_0^2 R_0^2 / ( 2 T_0 ),
  *
@@ -128,7 +128,7 @@ namespace analytic
  * brace vanishes like M2^2, so eq (15) as printed is 0/0 and loses every digit
  * it has for small M2. It is not evaluated as printed. Writing
  *
- *     v := r^2/R0^2 - 1,     u := M2 v,
+ *     v := R^2/R0^2 - 1,     u := M2 v,
  *
  * the whole rotating term is exactly
  *
@@ -138,11 +138,11 @@ namespace analytic
  * in which M2 has cancelled algebraically and nothing is divided by it. G2 is
  * an entire function with G2( 0 ) = 1/2, so the M2 = 0 case needs no special
  * handling at all -- and eq (16), the static Solov'ev particular solution
- * -p1( r^2 - R0^2 )^2/8, falls out of G2( 0 ) = 1/2 rather than being a
+ * -p1( R^2 - R0^2 )^2/8, falls out of G2( 0 ) = 1/2 rather than being a
  * separate branch. The radial derivative goes the same way, through
  * G1( u ) := ( e^u - 1 )/u.
  *
- * What DOES need care is small u, which happens for any M2 whenever r is near
+ * What DOES need care is small u, which happens for any M2 whenever R is near
  * R0: e^u - u - 1 loses all significance there. G1 and G2 therefore switch to
  * their Taylor series below |u| = seriesThreshold(). See the note on that
  * function for why both switch at the same point even though only G2 needs to.
@@ -156,7 +156,7 @@ class RotatingSolovievEquilibrium
 		///                       group. See the note above on the paper's
 		///                       symbol. Zero is legal and gives a static
 		///                       Solov'ev equilibrium.
-		/// @param p1In           mu0 dp/dpsi at r = R0, Li & Zhu's p1.
+		/// @param p1In           mu0 dp/dpsi at R = R0, Li & Zhu's p1.
 		/// @param f0In           g dg/dpsi, Li & Zhu's F0. Constant.
 		/// @param cIn            c1 ... c4, the four Delta*-harmonic
 		///                       coefficients that fix the geometry.
@@ -193,7 +193,7 @@ class RotatingSolovievEquilibrium
 		 *
 		 * WHY c3 AND c4 ARE NOT ZERO, WHICH IS THE ONLY REALLY LOAD-BEARING
 		 * CHOICE HERE. c1 and c2 alone would have given a perfectly good closed
-		 * contour. But r^4 - 4 r^2 z^2 and r^2 ln r - z^2 are Delta*-harmonic,
+		 * contour. But R^4 - 4 R^2 z^2 and R^2 ln R - z^2 are Delta*-harmonic,
 		 * so a TYPO IN EITHER OF THEM IS INVISIBLE TO deltaStarFD() WHEN ITS
 		 * COEFFICIENT IS ZERO -- the check would pass on a fixture whose psi is
 		 * wrong. Non-zero c3 and c4 are what put those two terms, and their
@@ -215,7 +215,7 @@ class RotatingSolovievEquilibrium
 		 * re-measuring after any edit: psi is strictly negative on the whole
 		 * boundary of the box and positive at the axis, so the psi = 0 level set
 		 * is a closed curve strictly inside it. psi itself is O( 0.1 ) there,
-		 * and analytic, r staying between 0.6 and 1.4.
+		 * and analytic, R staying between 0.6 and 1.4.
 		 *
 		 * AS WITH Soloviev.hpp, NO CHOICE OF c CHANGES F, Delta*( psi ) OR ANY
 		 * CONVERGENCE RATE. The absolute-error ceilings in
@@ -226,7 +226,7 @@ class RotatingSolovievEquilibrium
 
 		/// machSquared = 0: no rotation, so this is a plain static Solov'ev
 		/// equilibrium and eq (15) collapses to eq (16),
-		/// psi_h - p1( r^2 - R0^2 )^2/8 - ( F0/2 ) z^2.
+		/// psi_h - p1( R^2 - R0^2 )^2/8 - ( F0/2 ) z^2.
 		///
 		/// It is the control for the whole fixture. Anything measured on
 		/// rotating() that is not also visible here is a property of the
@@ -264,7 +264,7 @@ class RotatingSolovievEquilibrium
 		///
 		/// NOT USED IN THE deltaStarFD SCAN, and the reason is the check rather
 		/// than the fixture. A central difference of a function whose fourth
-		/// derivative carries ( 2 M2 r/R0^2 )^4 e^u has a truncation floor of
+		/// derivative carries ( 2 M2 R/R0^2 )^4 e^u has a truncation floor of
 		/// about h^2 f''''/12, and h = 1e-4 is already the value that balances
 		/// truncation against round-off, so there is no h that rescues it.
 		/// MEASURED, max | Delta*psi + F | over the box at h = 1e-4:
@@ -291,60 +291,60 @@ class RotatingSolovievEquilibrium
 
 		/// The poloidal flux function, eq (15), evaluated in the form that is
 		/// stable as machSquared -> 0. See the class comment.
-		double psi( double r, double z ) const
+		double psi( double radius, double z ) const
 		{
-			double const r2 = r*r;
+			double const r2 = radius*radius;
 			double const z2 = z*z;
-			double const logR = std::log( r );
+			double const logR = std::log( radius );
 
 			double value = c[ 0 ]
 			             + c[ 1 ]*r2
 			             + c[ 2 ]*( r2*r2 - 4.0*r2*z2 )
 			             + c[ 3 ]*( r2*logR - z2 );
 
-			value += rotatingTerm( r );
+			value += rotatingTerm( radius );
 			value -= 0.5*f0*z2;
 			return value;
 		}
 
 		/// grad_bar( psi ) = ( d_r psi, d_z psi ), differentiated by hand rather
-		/// than differenced. Not the HDG flux: that is this divided by r, see
+		/// than differenced. Not the HDG flux: that is this divided by R, see
 		/// flux().
-		void gradPsi( double r, double z, double &dPsiDr, double &dPsiDz ) const
+		void gradPsi( double radius, double z, double &dPsiDr, double &dPsiDz ) const
 		{
-			double const r2 = r*r;
+			double const r2 = radius*radius;
 			double const z2 = z*z;
-			double const logR = std::log( r );
+			double const logR = std::log( radius );
 
-			dPsiDr = 2.0*c[ 1 ]*r
-			       + c[ 2 ]*( 4.0*r2*r - 8.0*r*z2 )
-			       + c[ 3 ]*( 2.0*r*logR + r )
-			       + rotatingTermPrime( r );
+			dPsiDr = 2.0*c[ 1 ]*radius
+			       + c[ 2 ]*( 4.0*r2*radius - 8.0*radius*z2 )
+			       + c[ 3 ]*( 2.0*radius*logR + radius )
+			       + rotatingTermPrime( radius );
 
 			dPsiDz = -8.0*c[ 2 ]*r2*z
 			       - 2.0*c[ 3 ]*z
 			       - f0*z;
 		}
 
-		/// The HDG flux q = grad_bar( psi )/r.
-		void flux( double r, double z, double &qR, double &qZ ) const
+		/// The HDG flux q = grad_bar( psi )/R.
+		void flux( double radius, double z, double &qR, double &qZ ) const
 		{
-			gradPsi( r, z, qR, qZ );
-			qR /= r;
-			qZ /= r;
+			gradPsi( radius, z, qR, qZ );
+			qR /= radius;
+			qZ /= radius;
 		}
 
 		/// The Grad-Shafranov source,
-		/// F = p1 r^2 exp[ M2 ( r^2/R0^2 - 1 ) ] + F0, from eq (12) and MEQ's
-		/// -Delta*( psi ) = F. Returns F, not F/r.
+		/// F = p1 R^2 exp[ M2 ( R^2/R0^2 - 1 ) ] + F0, from eq (12) and MEQ's
+		/// -Delta*( psi ) = F. Returns F, not F/R.
 		///
 		/// Independent of psi, which is what makes this equilibrium linear --
-		/// and EXPONENTIAL in r^2, which is what makes it a new test rather
+		/// and EXPONENTIAL in R^2, which is what makes it a new test rather
 		/// than a restatement of Soloviev.hpp.
-		double f( double r, double /*z*/, double /*psiValue*/ ) const
+		double f( double radius, double /*z*/, double /*psiValue*/ ) const
 		{
-			double const v = r*r/( majorRadius*majorRadius ) - 1.0;
-			return p1*r*r*std::exp( machSquared*v ) + f0;
+			double const v = radius*radius/( majorRadius*majorRadius ) - 1.0;
+			return p1*radius*radius*std::exp( machSquared*v ) + f0;
 		}
 
 		/// dF/dpsi. Identically zero: p1, F0, T0 and Omega0 are all constants
@@ -368,20 +368,20 @@ class RotatingSolovievEquilibrium
 		/// its two missing consts, deliberately: this is the one check every
 		/// fixture in this directory shares, and it is worth being able to diff
 		/// them and see nothing.
-		double deltaStarFD( double r, double z, double h = 1.0e-4 ) const
+		double deltaStarFD( double radius, double z, double h = 1.0e-4 ) const
 		{
-			// r d_r( ( 1/r ) d_r psi ) as a second difference of the inner
+			// R d_r( ( 1/R ) d_r psi ) as a second difference of the inner
 			// quantity, plus d_zz psi.
 			auto innerR = [ & ]( double rr )
 			{
 				return ( psi( rr + h, z ) - psi( rr - h, z ) ) / ( 2.0 * h ) / rr;
 			};
 
-			double const dRInner = ( innerR( r + h ) - innerR( r - h ) ) / ( 2.0 * h );
-			double const dZZ = ( psi( r, z + h ) - 2.0 * psi( r, z ) + psi( r, z - h ) )
+			double const dRInner = ( innerR( radius + h ) - innerR( radius - h ) ) / ( 2.0 * h );
+			double const dZZ = ( psi( radius, z + h ) - 2.0 * psi( radius, z ) + psi( radius, z - h ) )
 			                 / ( h * h );
 
-			return r * dRInner + dZZ;
+			return radius * dRInner + dZZ;
 		}
 
 		/// R0, the radius the rotation profile is referenced to.
@@ -397,7 +397,7 @@ class RotatingSolovievEquilibrium
 			return machSquared;
 		}
 
-		/// Li & Zhu's p1 = mu0 dp/dpsi at r = R0.
+		/// Li & Zhu's p1 = mu0 dp/dpsi at R = R0.
 		double getP1() const
 		{
 			return p1;
@@ -416,7 +416,7 @@ class RotatingSolovievEquilibrium
 		}
 
 		/// |u| below which G1 and G2 are summed rather than evaluated, with u
-		/// the exponent machSquared( r^2/R0^2 - 1 ). Public because it is the
+		/// the exponent machSquared( R^2/R0^2 - 1 ). Public because it is the
 		/// one number a test of the crossover has to know: a sweep that never
 		/// straddles it measures one branch twice.
 		///
@@ -487,31 +487,31 @@ class RotatingSolovievEquilibrium
 
 		/// The particular solution's rotating part,
 		///
-		///     -p1 ( R0^2/( 2 M2 ) )^2 { e^u - ( M2/R0^2 )( r^2 - R0^2 ) - 1 }
+		///     -p1 ( R0^2/( 2 M2 ) )^2 { e^u - ( M2/R0^2 )( R^2 - R0^2 ) - 1 }
 		///       = -( p1 R0^4/4 ) v^2 G2( u ),
 		///
-		/// with v = r^2/R0^2 - 1 and u = M2 v. M2 has cancelled: this is finite
+		/// with v = R^2/R0^2 - 1 and u = M2 v. M2 has cancelled: this is finite
 		/// and accurate at machSquared = 0, where G2( 0 ) = 1/2 recovers
-		/// eq (16)'s -p1( r^2 - R0^2 )^2/8.
-		double rotatingTerm( double r ) const
+		/// eq (16)'s -p1( R^2 - R0^2 )^2/8.
+		double rotatingTerm( double radius ) const
 		{
-			double const r0 = majorRadius;
-			double const v = r*r/( r0*r0 ) - 1.0;
+			double const radius0 = majorRadius;
+			double const v = radius*radius/( radius0*radius0 ) - 1.0;
 			double const u = machSquared*v;
-			double const r0Fourth = r0*r0*r0*r0;
+			double const r0Fourth = radius0*radius0*radius0*radius0;
 			return -0.25*p1*r0Fourth*v*v*g2( u );
 		}
 
 		/// d/dr of rotatingTerm(). Differentiating the printed form gives
-		/// -( p1 R0^2 r/( 2 M2 ) )( e^u - 1 ), and the same cancellation of M2
+		/// -( p1 R0^2 R/( 2 M2 ) )( e^u - 1 ), and the same cancellation of M2
 		/// applies: e^u - 1 = u G1( u ) = M2 v G1( u ), leaving
-		/// -( p1 R0^2 r v/2 ) G1( u ).
-		double rotatingTermPrime( double r ) const
+		/// -( p1 R0^2 R v/2 ) G1( u ).
+		double rotatingTermPrime( double radius ) const
 		{
-			double const r0 = majorRadius;
-			double const v = r*r/( r0*r0 ) - 1.0;
+			double const radius0 = majorRadius;
+			double const v = radius*radius/( radius0*radius0 ) - 1.0;
 			double const u = machSquared*v;
-			return -0.5*p1*r0*r0*r*v*g1( u );
+			return -0.5*p1*radius0*radius0*radius*v*g1( u );
 		}
 };
 

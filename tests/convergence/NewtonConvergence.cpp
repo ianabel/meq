@@ -79,8 +79,8 @@
  *
  * The domain is the rectangle of examples/manufactured.toml, not the paper's
  * ITER-like double-null boundary: the curved boundary is stage 5, and a fitted
- * polygon keeps Gamma_h == Gamma. r is bounded away from zero because the
- * operator and the source both carry a 1/r. The manufactured psi does not
+ * polygon keeps Gamma_h == Gamma. R is bounded away from zero because the
+ * operator and the source both carry a 1/R. The manufactured psi does not
  * vanish on that rectangle, so the Dirichlet data is non-homogeneous, which on
  * the non-linear path exercises a route through DarcyHybridization that had no
  * MFEM regression covering it (see CLAUDE.md).
@@ -96,7 +96,7 @@
  *                                           that is wrong, not its derivative
  *
  *   ManufacturedNonlinear::f() returning    psi and q flat at 1.0e-1 and 6.9e-1,
- *   F/r rather than F, which is what the    rate 0.00, and Newton needs 10 to 12
+ *   F/R rather than F, which is what the    rate 0.00, and Newton needs 10 to 12
  *   pre-port version of that file did       iterations. Caught first, and much
  *                                           more legibly, by
  *                                           manufacturedSourceMatchesTheOperator
@@ -149,19 +149,19 @@ namespace
 	//
 	// The domain is that rectangle, not the paper's ITER-like double-null
 	// boundary: the curved boundary is stage 5, and a fitted polygon keeps
-	// Gamma_h == Gamma. r is bounded away from zero because the operator and the
-	// source both carry a 1/r. The manufactured psi does not vanish on that
+	// Gamma_h == Gamma. R is bounded away from zero because the operator and the
+	// source both carry a 1/R. The manufactured psi does not vanish on that
 	// rectangle, so the Dirichlet data is non-homogeneous, which on the
 	// non-linear path exercises a route through DarcyHybridization that had no
 	// MFEM regression covering it (see CLAUDE.md).
-	double const rMin = 0.6;
-	double const rMax = 1.4;
+	double const minRadius = 0.6;
+	double const maxRadius = 1.4;
 	double const zMin = -0.6;
 	double const zMax = 0.6;
 
 	meq::tests::Rectangle box()
 	{
-		return meq::tests::Rectangle{ rMin, rMax, zMin, zMax };
+		return meq::tests::Rectangle{ minRadius, maxRadius, zMin, zMax };
 	}
 
 	mfem::Mesh makeMesh( int n )
@@ -191,23 +191,23 @@ namespace
 }
 
 /// The benchmark before the solver, part one: -Delta*( psi ) must equal
-/// F( r, z, psi ) evaluated at the manufactured psi, or everything measured
+/// F( R, z, psi ) evaluated at the manufactured psi, or everything measured
 /// against it is measured against the wrong thing. This is what catches the
-/// factor of r that the pre-port version of ManufacturedNonlinear.hpp carried
-/// -- its operator() returned F/r -- and which no convergence rate can see.
+/// factor of R that the pre-port version of ManufacturedNonlinear.hpp carried
+/// -- its operator() returned F/R -- and which no convergence rate can see.
 BOOST_AUTO_TEST_CASE( manufacturedSourceMatchesTheOperator )
 {
 	meq::analytic::ManufacturedNonlinear const eq
 		= meq::analytic::ManufacturedNonlinear::example5();
 
-	for ( double r = rMin; r <= rMax + 1.0e-12; r += 0.1 )
+	for ( double radius = minRadius; radius <= maxRadius + 1.0e-12; radius += 0.1 )
 	{
 		for ( double z = zMin; z <= zMax + 1.0e-12; z += 0.15 )
 		{
-			double const deltaStar = eq.deltaStarFD( r, z );
-			double const minusF = -eq.f( r, z, eq.psi( r, z ) );
+			double const deltaStar = eq.deltaStarFD( radius, z );
+			double const minusF = -eq.f( radius, z, eq.psi( radius, z ) );
 			BOOST_TEST( std::abs( deltaStar - minusF ) < 1.0e-5,
-			            "at ( " << r << ", " << z << " ): Delta*(psi) = " << deltaStar
+			            "at ( " << radius << ", " << z << " ): Delta*(psi) = " << deltaStar
 			            << " but -F = " << minusF );
 		}
 	}
@@ -224,18 +224,18 @@ BOOST_AUTO_TEST_CASE( manufacturedDerivativeMatchesAFiniteDifference )
 
 	double const h = 1.0e-6;
 
-	for ( double r = rMin; r <= rMax + 1.0e-12; r += 0.2 )
+	for ( double radius = minRadius; radius <= maxRadius + 1.0e-12; radius += 0.2 )
 	{
 		for ( double z = zMin; z <= zMax + 1.0e-12; z += 0.3 )
 		{
 			for ( double psi : { -1.0, -0.3, 0.0, 0.4, 1.0 } )
 			{
-				double const difference = ( eq.f( r, z, psi + h ) - eq.f( r, z, psi - h ) )
+				double const difference = ( eq.f( radius, z, psi + h ) - eq.f( radius, z, psi - h ) )
 				                          /( 2.0*h );
-				double const analytic = eq.dFdPsi( r, z, psi );
+				double const analytic = eq.dFdPsi( radius, z, psi );
 				BOOST_TEST( std::abs( difference - analytic )
 				            < 1.0e-6*( 1.0 + std::abs( analytic ) ),
-				            "at ( " << r << ", " << z << ", psi = " << psi
+				            "at ( " << radius << ", " << z << ", psi = " << psi
 				            << " ): dF/dpsi = " << analytic
 				            << " but a difference of F gives " << difference );
 			}
@@ -392,7 +392,7 @@ BOOST_AUTO_TEST_CASE( jacobianMatchesAFiniteDifferenceOfTheResidual )
 /// numbers.
 ///
 /// That makes this the tightest available check of SourceIntegrator's sign and
-/// its 1/r, because the linear path is not merely self-consistent: it has been
+/// its 1/R, because the linear path is not merely self-consistent: it has been
 /// measured against a closed-form equilibrium to k+1 in both psi and q, in
 /// tests/convergence/SolovievConvergence.cpp. A sign error in the integrator
 /// would still let Newton converge quadratically -- measured, it does -- and
@@ -464,7 +464,7 @@ BOOST_AUTO_TEST_CASE( theNewtonPathReproducesTheLinearPathOnSoloviev )
 	BOOST_TEST( relative < 1.0e-10,
 	            "the two setSource() overloads disagree by " << relative
 	            << " relative on a source that does not depend on psi, so the "
-	            "sign or the 1/r in SourceIntegrator does not match the right hand "
+	            "sign or the 1/R in SourceIntegrator does not match the right hand "
 	            "side the linear path was measured with" );
 
 	BOOST_TEST( newtonSolver.newtonIterations() <= 2,
@@ -489,7 +489,7 @@ BOOST_AUTO_TEST_CASE( theNewtonPathReproducesTheLinearPathOnSoloviev )
  * which lives on Mnl_p's INTERIOR FACE integrators and is a fixed bilinear form
  * whatever the source does. Reconstruct() builds a DIFFERENT local problem, and
  * for its potential mass it lifts Mnl_p's DOMAIN integrators -- which carry the
- * reaction term -dF/dpsi/r and nothing else, so they vanish with it. Two
+ * reaction term -dF/dpsi/R and nothing else, so they vanish with it. Two
  * problems, two operators, one of which degenerates. And Reconstruct() writes
  * only into the post-processing GridFunctions: potentialGf and fluxGf are
  * already final when postProcess() is entered, and are not arguments to it.
@@ -618,7 +618,7 @@ BOOST_AUTO_TEST_CASE( theReconstructionDefectDoesNotReachTheSolve )
 /// The middle rung of the analytic ladder, and the sharpest single statement
 /// stage 4 can make.
 ///
-/// McCarthy's source is F = T ( psi - c1 - c2 r^2 ): linear in psi, so
+/// McCarthy's source is F = T ( psi - c1 - c2 R^2 ): linear in psi, so
 /// dF/dpsi = T identically and the whole discrete residual is affine in the
 /// unknowns. An exact Jacobian therefore solves it in ONE Newton step, exactly,
 /// and this asserts that.
@@ -648,14 +648,14 @@ BOOST_AUTO_TEST_CASE( mccarthyNeedsExactlyOneNewtonStep )
 	// The fixture's own transcription first, on this box. Eighteen Bessel and
 	// Neumann terms is a lot to get right by eye, and a mistyped one would
 	// present as a solver that converges to the wrong equilibrium.
-	for ( double r = rMin; r <= rMax + 1.0e-12; r += 0.2 )
+	for ( double radius = minRadius; radius <= maxRadius + 1.0e-12; radius += 0.2 )
 	{
 		for ( double z = zMin; z <= zMax + 1.0e-12; z += 0.3 )
 		{
-			double const deltaStar = eq.deltaStarFD( r, z );
-			double const minusF = -eq.f( r, z, eq.psi( r, z ) );
+			double const deltaStar = eq.deltaStarFD( radius, z );
+			double const minusF = -eq.f( radius, z, eq.psi( radius, z ) );
 			BOOST_TEST( std::abs( deltaStar - minusF ) < 1.0e-5,
-			            "at ( " << r << ", " << z << " ): Delta*(psi) = " << deltaStar
+			            "at ( " << radius << ", " << z << " ): Delta*(psi) = " << deltaStar
 			            << " but -F = " << minusF );
 		}
 	}
@@ -702,7 +702,7 @@ BOOST_AUTO_TEST_CASE( mccarthyNeedsExactlyOneNewtonStep )
 
 /// Newton's residual history, asserted rather than admired.
 ///
-/// The assertion is on the observed order log( r2/r1 )/log( r1/r0 ), which is 2
+/// The assertion is on the observed order log( r2/R_1 )/log( R_1/R_0 ), which is 2
 /// for a quadratically convergent iteration in its asymptotic regime and 1 for a
 /// linearly convergent one anywhere. Only triples above the round-off floor are
 /// considered: once the residual reaches machine precision relative to the first
@@ -726,7 +726,7 @@ BOOST_AUTO_TEST_CASE( mccarthyNeedsExactlyOneNewtonStep )
  * and the L2 error must come out at the DISCRETISATION error, identically,
  * because the discretisation is identical and only the path to it differs.
  *
- * This is what would catch FrozenSource getting the -1/r or the sign convention
+ * This is what would catch FrozenSource getting the -1/R or the sign convention
  * wrong. Those are applied in setSource( Coefficient & ) for the linear path and
  * re-applied for the frozen one; a mismatch would leave the Picard paths
  * converging beautifully to the wrong function, which is precisely the failure
@@ -866,7 +866,7 @@ BOOST_AUTO_TEST_CASE( thePostProcessedPotentialSurvivesNewton )
 			// returned 1e15.
 			solver.postProcess();
 
-			points.push_back( Point{ ( rMax - rMin )/n,
+			points.push_back( Point{ ( maxRadius - minRadius )/n,
 			                         solver.potentialError( exact ),
 			                         solver.postProcessedPotentialError( exact ),
 			                         solver.newtonIterations() } );
@@ -964,9 +964,9 @@ BOOST_AUTO_TEST_CASE( thePostProcessedPotentialIsCorrectWhereTheJacobianVanishes
 	struct Layered : public meq::Source
 	{
 		Layered( double t, double e ) : threshold( t ), floor( e ) {}
-		double f( double r, double z, double psi ) const override
+		double f( double radius, double z, double psi ) const override
 		{
-			return std::max( 0.0, z - threshold )*psi*psi + floor*psi + r*r;
+			return std::max( 0.0, z - threshold )*psi*psi + floor*psi + radius*radius;
 		}
 		double dFdPsi( double, double z, double psi ) const override
 		{
@@ -1189,12 +1189,12 @@ BOOST_AUTO_TEST_CASE( similaritySourceMatchesTheOperator )
 		= meq::analytic::SimilarityExponential::benchmark();
 
 	double worst = 0.0;
-	for ( double r = rMin + 0.05; r < rMax; r += 0.05 )
+	for ( double radius = minRadius + 0.05; radius < maxRadius; radius += 0.05 )
 	{
 		for ( double z = zMin + 0.05; z < zMax; z += 0.05 )
 		{
-			double const deltaStar = eq.deltaStarFD( r, z );
-			double const minusF = -eq.f( r, z, eq.psi( r, z ) );
+			double const deltaStar = eq.deltaStarFD( radius, z );
+			double const minusF = -eq.f( radius, z, eq.psi( radius, z ) );
 			worst = std::max( worst, std::abs( deltaStar - minusF )/std::abs( minusF ) );
 		}
 	}
@@ -1216,14 +1216,14 @@ BOOST_AUTO_TEST_CASE( similarityDerivativeMatchesAFiniteDifference )
 
 	double const step = 1.0e-7;
 	double worst = 0.0;
-	for ( double r = rMin + 0.07; r < rMax; r += 0.07 )
+	for ( double radius = minRadius + 0.07; radius < maxRadius; radius += 0.07 )
 	{
 		for ( double psi = -0.8; psi < 0.45; psi += 0.15 )
 		{
 			double const difference =
-				( eq.f( r, 0.11, psi + step ) - eq.f( r, 0.11, psi - step ) )/( 2.0*step );
+				( eq.f( radius, 0.11, psi + step ) - eq.f( radius, 0.11, psi - step ) )/( 2.0*step );
 			worst = std::max( worst,
-				std::abs( eq.dFdPsi( r, 0.11, psi ) - difference )/std::abs( difference ) );
+				std::abs( eq.dFdPsi( radius, 0.11, psi ) - difference )/std::abs( difference ) );
 		}
 	}
 

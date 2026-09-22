@@ -24,7 +24,7 @@
 # UNITS. Metres and dimensionless, as [boundary.shape] documents.
 
 [mesh]
-# Comfortably around the shape below, which spans r in [1.0, 2.0] and
+# Comfortably around the shape below, which spans R in [1.0, 2.0] and
 # z in about [-1.6, 1.6].
 RMin = 0.7
 RMax = 2.3

@@ -164,7 +164,7 @@ supplies on top:
        order in the flux. See :ref:`formulation-tau`.
    * - :cpp:class:`meq::SourceIntegrator`
      - :math:`F` and :math:`\partial F/\partial\psi` in the weak form's
-       :math:`1/r` weighting.
+       :math:`1/R` weighting.
    * - The offsets for a three-block vector
      - The library's own offsets stop at the potential; the trace is MEQ's to
        track.

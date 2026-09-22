@@ -1,7 +1,7 @@
 Flux surfaces
 =============
 
-A Grad–Shafranov solve produces :math:`\psi(r, z)` on a mesh. Almost everything
+A Grad–Shafranov solve produces :math:`\psi(R, z)` on a mesh. Almost everything
 downstream — a transport code, a gyrokinetic code, a plot of the safety factor
 — wants the *inverse* of that: the flux surfaces themselves, as curves, indexed
 by the flux label rather than by position. MEQ extracts them, and this chapter
@@ -62,7 +62,7 @@ Every step below is cheaper and more accurate than it would otherwise be for
 one reason, and it is the same reason MEQ is a mixed method at all: **the
 gradient of** :math:`\psi` **is a solved unknown, not a derivative of one**.
 
-Writing :math:`\gradbar\psi = r q`:
+Writing :math:`\gradbar\psi = R q`:
 
 * A critical point is where :math:`q = 0`. That is a residual converging at the
   potential's own order, rather than a differentiated potential converging an
@@ -70,7 +70,7 @@ Writing :math:`\gradbar\psi = r q`:
 * The tangent to a contour is :math:`(-q_z, +q_r)/|q|`, available at every
   point the tracer has already visited, at no cost — the tracer evaluated
   :math:`q` for the predictor anyway.
-* The weight in every flux-surface average is :math:`1/|\gradbar\psi| = 1/(r
+* The weight in every flux-surface average is :math:`1/|\gradbar\psi| = 1/(R
   |q|)`, again pointwise and again at the flux's own order.
 * The gauge-free fit of :doc:`surface_geometry` needs
   :math:`\nabla\Psi_{\mathrm N}`, which is the same field once more.
@@ -89,16 +89,16 @@ The magnetic axis and any X-point are the zeros of :math:`q_h`, and
 at a time.
 
 Classification is free and needs no second derivative of :math:`\psi`.
-Differentiating :math:`r q = \gradbar\psi` gives
+Differentiating :math:`R q = \gradbar\psi` gives
 
 .. math::
 
-   \mathrm{Hess}(\psi) = q \otimes e_r + r \, \frac{\partial q}{\partial x},
+   \mathrm{Hess}(\psi) = q \otimes e_r + R \, \frac{\partial q}{\partial x},
 
 whose first term vanishes identically at a point where :math:`q = 0`. So the
-Hessian there is :math:`r` times the Jacobian of :math:`q`, and :math:`r > 0`
-throughout an axisymmetric domain — the determinant scales by :math:`r^2` and
-the trace by :math:`r`, both positive, so the *signs* that decide maximum,
+Hessian there is :math:`R` times the Jacobian of :math:`q`, and :math:`R > 0`
+throughout an axisymmetric domain — the determinant scales by :math:`R^2` and
+the trace by :math:`R`, both positive, so the *signs* that decide maximum,
 minimum or saddle can be read straight off :math:`\partial q/\partial x`.
 
 .. note::
@@ -309,7 +309,7 @@ iterations per point rather than more.
    **And it is what makes the cubic interpolant work at all on this
    discretisation.** The interpolant is built on tangents from the *flux* and is
    measured against the level set of the *potential*, and those are the same
-   curve only so far as the two fields agree. :math:`\gradbar\psi_h / r` agrees
+   curve only so far as the two fields agree. :math:`\gradbar\psi_h / R` agrees
    with :math:`q_h` only to :math:`O(h^k)` — differentiating a discontinuous
    Galerkin potential of degree :math:`k` loses an order, while :math:`q_h`
    keeps :math:`k+1`. So paired with :math:`\psi_h` the interpolant is fourth
@@ -321,7 +321,7 @@ iterations per point rather than more.
 
    **The usual reason given for preferring** :math:`\psi^\star` **is wrong**,
    and the difference matters. It is *not* that the local post-processing is
-   built so that :math:`\gradbar\psi^\star` matches :math:`r q^\star`: the
+   built so that :math:`\gradbar\psi^\star` matches :math:`R q^\star`: the
    constraint equation projects the **total** flux onto a face restriction of a
    Raviart–Thomas space, and that field is what drives Stenberg's local problem
    :cite:p:`Stenberg1991` — so the two are different objects. What is true, and

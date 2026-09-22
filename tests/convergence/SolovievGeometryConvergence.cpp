@@ -46,9 +46,9 @@
  * The second is range. The existing study runs one configuration, at
  * A = -0.52 on a mesh whose flux varies by a factor of a few. These three span
  * A = 0 to A = -0.115, aspect ratios from 0.32 to 0.99, and elongations from
- * 1.7 to 10, so the balance between the r^4, the r^6 and the log r terms of the
- * expansion is quite different in each -- and the log r terms are where a weight
- * convention on the 1/r in the operator would show up.
+ * 1.7 to 10, so the balance between the R^4, the R^6 and the log R terms of the
+ * expansion is quite different in each -- and the log R terms are where a weight
+ * convention on the 1/R in the operator would show up.
  *
  * THE DOMAIN. All three are posed on the same rectangle as
  * SolovievConvergence.cpp and NewtonConvergence.cpp, so the error levels are
@@ -57,8 +57,8 @@
  * ExtensionConvergence.cpp -- which means the Dirichlet data is non-homogeneous,
  * and that is the point: it is the exact solution restricted to the box, so the
  * solution of the discrete problem converges to a function that is known in
- * closed form. Note that the box pokes slightly outside Example 2's plasma in r;
- * the expansion is analytic for every r > 0, so that is harmless, and keeping
+ * closed form. Note that the box pokes slightly outside Example 2's plasma in R;
+ * the expansion is analytic for every R > 0, so that is harmless, and keeping
  * one box for all three is worth more than staying inside each separatrix.
  *
  * These sources do not depend on psi, so dF/dpsi is identically zero and the
@@ -107,36 +107,36 @@ namespace
 	/// d_zz psi, by a central difference of the analytic d_z psi. Second order,
 	/// so good to about 1e-9 here -- six orders of magnitude tighter than the
 	/// discrepancy this is used to detect.
-	double psiZZ( SolovievEquilibrium const &eq, double r, double z,
+	double psiZZ( SolovievEquilibrium const &eq, double radius, double z,
 	              double h = 1.0e-4 )
 	{
 		double gr, up, down;
-		eq.gradPsi( r, z + h, gr, up );
-		eq.gradPsi( r, z - h, gr, down );
+		eq.gradPsi( radius, z + h, gr, up );
+		eq.gradPsi( radius, z - h, gr, down );
 		return ( up - down )/( 2.0*h );
 	}
 
 	/// d_rr psi, likewise.
-	double psiRR( SolovievEquilibrium const &eq, double r, double z,
+	double psiRR( SolovievEquilibrium const &eq, double radius, double z,
 	              double h = 1.0e-4 )
 	{
 		double gz, up, down;
-		eq.gradPsi( r + h, z, up, gz );
-		eq.gradPsi( r - h, z, down, gz );
+		eq.gradPsi( radius + h, z, up, gz );
+		eq.gradPsi( radius - h, z, down, gz );
 		return ( up - down )/( 2.0*h );
 	}
 
-	double psiR( SolovievEquilibrium const &eq, double r, double z )
+	double psiR( SolovievEquilibrium const &eq, double radius, double z )
 	{
 		double gr, gz;
-		eq.gradPsi( r, z, gr, gz );
+		eq.gradPsi( radius, z, gr, gz );
 		return gr;
 	}
 
-	double psiZ( SolovievEquilibrium const &eq, double r, double z )
+	double psiZ( SolovievEquilibrium const &eq, double radius, double z )
 	{
 		double gr, gz;
-		eq.gradPsi( r, z, gr, gz );
+		eq.gradPsi( radius, z, gr, gz );
 		return gz;
 	}
 }
@@ -325,12 +325,12 @@ BOOST_AUTO_TEST_CASE( everyGeometrySourceMatchesTheOperator )
 	for ( SolovievEquilibrium const &eq : cases )
 	{
 		double worst = 0.0;
-		for ( double r = box.rMin; r <= box.rMax + 1.0e-12; r += 0.1 )
+		for ( double radius = box.minRadius; radius <= box.maxRadius + 1.0e-12; radius += 0.1 )
 		{
 			for ( double z = box.zMin; z <= box.zMax + 1.0e-12; z += 0.15 )
 			{
-				double const deltaStar = eq.deltaStarFD( r, z );
-				double const minusF = -eq.f( r, z, 0.0 );
+				double const deltaStar = eq.deltaStarFD( radius, z );
+				double const minusF = -eq.f( radius, z, 0.0 );
 				worst = std::max( worst, std::abs( deltaStar - minusF ) );
 			}
 		}

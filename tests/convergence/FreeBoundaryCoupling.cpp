@@ -17,7 +17,7 @@
  * Section 4.3 argues that dF/da = ( dF/dpsihat ) P is constant in the iterate --
  * psihat enters the flux row as <psihat, v.n>, the potential row as
  * <tau psihat, w> and the trace row as <tau psihat, mu>, linearly in all three,
- * while every non-linearity is F( r, z, psi ), which depends on psi and not on
+ * while every non-linearity is F( R, z, psi ), which depends on psi and not on
  * psihat -- and says to "build the column at two well-separated iterates and
  * difference them".
  *
@@ -94,10 +94,10 @@ namespace
 	 * Gamma_h is well defined whatever shape Gamma is.
 	 */
 	// ExtensionConvergence's own box and offset, copied rather than narrowed:
-	// it contains Omega with room to spare and keeps r well away from zero,
-	// which the operator's 1/r and psi's log r both want.
-	double const rMin = 0.25;
-	double const rMax = 1.95;
+	// it contains Omega with room to spare and keeps R well away from zero,
+	// which the operator's 1/R and psi's log R both want.
+	double const minRadius = 0.25;
+	double const maxRadius = 1.95;
 	double const zMin = -1.75;
 	double const zMax = 1.65;
 	double const psiOffset = 0.03;
@@ -147,14 +147,14 @@ namespace
 		static std::vector<std::unique_ptr<mfem::Mesh>> backgrounds;
 		backgrounds.push_back( std::make_unique<mfem::Mesh>(
 			mfem::Mesh::MakeCartesian2D(
-				n, 2*n, mfem::Element::TRIANGLE, false, rMax - rMin, zMax - zMin ) ) );
+				n, 2*n, mfem::Element::TRIANGLE, false, maxRadius - minRadius, zMax - zMin ) ) );
 		mfem::Mesh &background = *backgrounds.back();
 		background.Transform( []( mfem::Vector const &in, mfem::Vector &out )
 		{
-			out( 0 ) = in( 0 ) + rMin;
+			out( 0 ) = in( 0 ) + minRadius;
 			out( 1 ) = in( 1 ) + zMin;
 		} );
-		h = ( rMax - rMin )/static_cast<double>( n );
+		h = ( maxRadius - minRadius )/static_cast<double>( n );
 
 		mfem::Array<int> marker;
 		int const inside = mfem::MarkLevelSetSubdomain( background, levelSet, 0.0,
@@ -451,7 +451,7 @@ BOOST_AUTO_TEST_CASE( theColumnsAreTheModeAtTheFootAndNotOnGammaH )
  */
 BOOST_AUTO_TEST_CASE( theBoundarySweepTilesGammaAndTheRegionSweepTilesTheGap )
 {
-	// A circle, well away from the axis so the operator's 1/r is nowhere near
+	// A circle, well away from the axis so the operator's 1/R is nowhere near
 	// singular and the geometry is the only thing under test.
 	double const centreR = 1.10;
 	double const centreZ = 0.0;
@@ -876,7 +876,7 @@ BOOST_AUTO_TEST_CASE( gammaHIsStarShapedAboutTheCentreAndStaysSoUnderRefinement 
  * would report as anything but a wrong equilibrium: the vdof ordering ( the
  * flux space is L2 with vdim 2 and byNODES, so component d of basis j is
  * dof*d + j, and swapping them ROTATES the field ); the sign ( the assembled
- * block holds -q ); the measure ( a 1/r written here would divide by the radius
+ * block holds -q ); the measure ( a 1/R written here would divide by the radius
  * twice, since q already carries one ); and the weight's SIGN ( a staircase
  * Gamma_h has faces whose foot map reverses, and std::abs would integrate the
  * traversed length rather than Gamma ).
@@ -888,7 +888,7 @@ BOOST_AUTO_TEST_CASE( gammaHIsStarShapedAboutTheCentreAndStaysSoUnderRefinement 
  * extended anywhere. Two rungs:
  *
  *   constant q = ( 1, 0 ) and ( 0, 1 ):  INT nu_r C_m dGamma, INT nu_z C_m dGamma
- *   linear   q = ( z, r ):               INT ( y_z nu_r + y_r nu_z ) C_m dGamma
+ *   linear   q = ( z, R ):               INT ( y_z nu_r + y_r nu_z ) C_m dGamma
  *
  * The constant rung pins the ordering, the sign and the measure. THE LINEAR
  * RUNG IS THE ONE THAT EXERCISES THE EXTENSION: a constant is what an element's
@@ -914,7 +914,7 @@ BOOST_AUTO_TEST_CASE( gammaHIsStarShapedAboutTheCentreAndStaysSoUnderRefinement 
  * here. Same species as checking a solve against the formula it used.
  *
  * ORTHOGONALITY IS NOT USED AND CANNOT BE HERE. The exterior identity
- * T_m = 0 needs INT C_n C_m dGamma/r = delta_nm h_n, which holds only on a
+ * T_m = 0 needs INT C_n C_m dGamma/R = delta_nm h_n, which holds only on a
  * semicircle reaching the axis at both ends. This file's Gamma is a Soloviev
  * surface away from the axis, so what is tested here is the CONTRACTION alone.
  * The identity is FB-1's, and it needs the half-disc domain section 7.5's
@@ -1019,7 +1019,7 @@ BOOST_AUTO_TEST_CASE( theTransmissionRowIsTheBoundaryIntegralItClaims )
 		  []( mfem::Vector const &, mfem::Vector &v ) { v( 0 ) = 1.0; v( 1 ) = 0.0; } },
 		{ "constant ( 0, 1 )",
 		  []( mfem::Vector const &, mfem::Vector &v ) { v( 0 ) = 0.0; v( 1 ) = 1.0; } },
-		{ "linear ( z, r )",
+		{ "linear ( z, R )",
 		  []( mfem::Vector const &x, mfem::Vector &v ) { v( 0 ) = x( 1 ); v( 1 ) = x( 0 ); } }
 	};
 
@@ -1069,7 +1069,7 @@ BOOST_AUTO_TEST_CASE( theTransmissionRowIsTheBoundaryIntegralItClaims )
 	            "the transmission row disagrees with a quadrature of the same "
 	            "integral by " << worst << " relative, on a field its own space "
 	            "represents exactly. Suspect, in order: the vdof ordering "
-	            "( dof*d + j, byNODES ), the sign against DarcyForm's -q, a 1/r "
+	            "( dof*d + j, byNODES ), the sign against DarcyForm's -q, a 1/R "
 	            "that should not be there, or std::abs on a signed weight" );
 }
 
@@ -1256,7 +1256,7 @@ BOOST_AUTO_TEST_CASE( theConeIsWhatCostsTheTiling )
  * WHY IT IS WORTH A STAGE OF ITS OWN. Section 7.5's closing paragraph records a
  * DOMAIN CONSTRAINT that arrived late: the exterior expansion is only valid on a
  * SEMICIRCLE CENTRED ON THE AXIS, so FB-1's Gamma must be one, so the domain
- * reaches r = 0 and everything FB-A measured about the axis applies to it. Every
+ * reaches R = 0 and everything FB-A measured about the axis applies to it. Every
  * other extension study in this tree -- ExtensionConvergence, and the P columns
  * above -- deliberately uses a Soloviev surface away from the axis, because a
  * projection needs no semicircle. Nothing that SOLVES can take that shortcut,
@@ -1264,7 +1264,7 @@ BOOST_AUTO_TEST_CASE( theConeIsWhatCostsTheTiling )
  *
  * SO THIS IS ALSO SECTION 8'S SECOND RISK, MEASURED. "The corner where Gamma
  * meets the axis. Two right-angle junctions, and CLAUDE.md records that corners
- * are where the transfer-path analysis gives out ... the lifting's weight C = r
+ * are where the transfer-path analysis gives out ... the lifting's weight C = R
  * VANISHES there, so the transferred datum degenerates to g( a( x ) ) -> 0 --
  * probably benign, definitely not established." A rate here is what establishes
  * it, and a rate short of k+1 is where it would show.
@@ -1302,10 +1302,10 @@ namespace
 
 	/// D_h for the half-disc, and its two boundary attributes.
 	///
-	/// The background reaches the axis EXACTLY -- rMin is 0, as FB-A's box is --
-	/// so the elements touching r = 0 are the ones whose flux mass ( r q, v )
+	/// The background reaches the axis EXACTLY -- R_min is 0, as FB-A's box is --
+	/// so the elements touching R = 0 are the ones whose flux mass ( R q, v )
 	/// degenerates. The arc is GENERATED by SubMesh and takes the new attribute;
-	/// the flat side is INHERITED from the box's r = 0 edge and keeps the one it
+	/// the flat side is INHERITED from the box's R = 0 edge and keeps the one it
 	/// had. So Gamma_h is the arc alone and the axis is ordinary fitted boundary,
 	/// which is right: the axis is not an approximation of anything and needs no
 	/// transfer.
@@ -1386,9 +1386,9 @@ BOOST_AUTO_TEST_CASE( theSolverReachesTheExteriorDatumOnTheHalfDisc )
 
 		for ( int n : { 12, 24, 48 } )
 		{
-			// The background reaches the axis EXACTLY: rMin is 0, as FB-A's box
-			// is, so the elements touching r = 0 are the ones whose flux mass
-			// ( r q, v ) degenerates.
+			// The background reaches the axis EXACTLY: R_min is 0, as FB-A's box
+			// is, so the elements touching R = 0 are the ones whose flux mass
+			// ( R q, v ) degenerates.
 			mfem::Mesh background = mfem::Mesh::MakeCartesian2D(
 				n, 2*n, mfem::Element::TRIANGLE, false, halfDiscBox,
 				2.0*halfDiscBox );
@@ -1417,7 +1417,7 @@ BOOST_AUTO_TEST_CASE( theSolverReachesTheExteriorDatumOnTheHalfDisc )
 			/*
 			 * TWO BOUNDARY ATTRIBUTES HERE, NOT ONE, AND THAT IS THE HALF-DISC.
 			 * The arc is generated by SubMesh and takes the new attribute; the
-			 * flat side is INHERITED from the background box's r = 0 edge and
+			 * flat side is INHERITED from the background box's R = 0 edge and
 			 * keeps the attribute it had. So Gamma_h is the arc alone and the
 			 * axis is ordinary fitted boundary -- which is right, since the axis
 			 * is not an approximation of anything and needs no transfer.
@@ -1591,7 +1591,7 @@ BOOST_AUTO_TEST_CASE( theSolverReachesTheExteriorDatumOnTheHalfDisc )
  *     B x + D a = 0        the transmission condition, tested against each mode
  *
  * D is DIAGONAL -- that is section 3's whole point, the Gegenbauer basis of
- * order -1/2 diagonalising the exterior operator in the weight dGamma/r -- so
+ * order -1/2 diagonalising the exterior operator in the weight dGamma/R -- so
  * the corner block is exterior.blockEntry( m ) and nothing else.
  *
  * AND FOR A VACUUM PROBLEM IT IS ALL LINEAR, WHICH MAKES SUPERPOSITION THE
@@ -1747,7 +1747,7 @@ BOOST_AUTO_TEST_CASE( theTransmissionConditionSolvesForTheExteriorCoefficients )
 	 * AND IT MUST CONVERGE, WHICH IS WHAT SEPARATES A CLOSED COUPLING FROM A
 	 * LUCKY ONE. `a` is recovered from the discrete flux through a quadrature
 	 * over Gamma, so it inherits the solve's error and has to improve with the
-	 * mesh. A coupling with a wrong constant in it -- a sign, a factor of r, a
+	 * mesh. A coupling with a wrong constant in it -- a sign, a factor of R, a
 	 * mode misindexed -- would sit at a fixed distance instead, and at a coarse
 	 * mesh that can look like a plausible discretisation error. The rate is what
 	 * tells them apart, and it is why one mesh was not enough.
@@ -1798,9 +1798,9 @@ BOOST_AUTO_TEST_CASE( theTransmissionConditionSolvesForTheExteriorCoefficients )
  * AMPERE'S LAW IS THE POINT, AND IT HAS NO DISCRETISATION IN IT. Integrating
  * the equation over the enclosed region gives
  *
- *     oint_Gamma ( 1/r ) dpsi/dn dl = -mu0 I_enclosed
+ *     oint_Gamma ( 1/R ) dpsi/dn dl = -mu0 I_enclosed
  *
- * exactly. Since q = ( 1/r ) grad_bar( psi ) that is oint q.nu dGamma, which is
+ * exactly. Since q = ( 1/R ) grad_bar( psi ) that is oint q.nu dGamma, which is
  * outwardFlux(). One number, known in advance from the coil currents alone, and
  * it ties together the assembled operator, the source, the boundary condition,
  * the transfer and the extension. tests/unit/CoilsTests.cpp already pins the
@@ -1861,7 +1861,7 @@ BOOST_AUTO_TEST_CASE( aPrescribedCurrentSatisfiesAmperesLawThroughTheSolve )
 		{
 			HalfDisc d = makeHalfDisc( n );
 
-			// F = mu0 r j_phi, section 7.6's derivation. A plain Coefficient,
+			// F = mu0 R j_phi, section 7.6's derivation. A plain Coefficient,
 			// so this is MEQ's LINEAR path: a coil current does not depend on
 			// psi and dF/dpsi is identically zero.
 			mfem::FunctionCoefficient source( []( mfem::Vector const &x )
@@ -1873,9 +1873,9 @@ BOOST_AUTO_TEST_CASE( aPrescribedCurrentSatisfiesAmperesLawThroughTheSolve )
 			// The exact field, and psi = 0 on Gamma is imposed by SUBTRACTING
 			// its own boundary value rather than by hoping it vanishes there --
 			// a coil field does not, and MEQ's psi must.
-			auto exactAt = []( double r, double z )
+			auto exactAt = []( double radius, double z )
 			{
-				return benchmarkCoils().psi( r, z );
+				return benchmarkCoils().psi( radius, z );
 			};
 			double const gaugeShift = exactAt( 0.0, halfDiscGamma );
 
@@ -1963,7 +1963,7 @@ BOOST_AUTO_TEST_CASE( aPrescribedCurrentSatisfiesAmperesLawThroughTheSolve )
 		/*
 		 * THE CONDUCTOR IS MESH-ALIGNED, AND IT ALWAYS SHOULD BE.
 		 *
-		 * meq::Coil has UNIFORM current density, so F = mu0 r j is
+		 * meq::Coil has UNIFORM current density, so F = mu0 R j is
 		 * DISCONTINUOUS at the conductor edge. Where that edge cuts a cell the
 		 * element quadrature integrates a discontinuous integrand with a rule
 		 * that assumes smoothness, and the error is O( h ) whatever the degree.
@@ -1995,7 +1995,7 @@ BOOST_AUTO_TEST_CASE( aPrescribedCurrentSatisfiesAmperesLawThroughTheSolve )
 		 *
 		 * AND THE ALIGNED RATE CAPS AT 3, WHICH IS THE CONDUCTOR'S CORNERS. A
 		 * rectangular source region has four of them, and a corner in the
-		 * FORCING gives the same r^2 log r behaviour a corner in the DOMAIN
+		 * FORCING gives the same R^2 log R behaviour a corner in the DOMAIN
 		 * does -- which CLAUDE.md records as capping a rectangle's own
 		 * self-convergence near 3 with nothing non-linear anywhere. So k = 3
 		 * reads 3.01 rather than 4, and that is the source's geometry rather
@@ -2053,7 +2053,7 @@ BOOST_AUTO_TEST_CASE( aPrescribedCurrentSatisfiesAmperesLawThroughTheSolve )
 		 * of elements ENTIRELY inside Gamma, so the staircase stops at the last
 		 * mesh line whose outer corner still fits; putting rho_Gamma just ABOVE
 		 * a mesh line rather than just below includes that row and Gamma_h then
-		 * very nearly meets Gamma at r = 0.
+		 * very nearly meets Gamma at R = 0.
 		 *
 		 * SO THIS IS A MESHING RULE AND NOT A LIMITATION, and it is the same
 		 * rule as aligning the conductor: where geometry is KNOWN IN ADVANCE,
@@ -2114,7 +2114,7 @@ BOOST_AUTO_TEST_CASE( aPrescribedCurrentSatisfiesAmperesLawThroughTheSolve )
  *
  * THIS SEPARATES THEM BY REMOVING THE AXIS. Same solver, same extension, same
  * outwardFlux(), same aligned conductor -- but Gamma is a circle WELL AWAY
- * from r = 0, so D_h's whole boundary is Gamma_h and the contour closes without
+ * from R = 0, so D_h's whole boundary is Gamma_h and the contour closes without
  * ever going near the degenerate weight. If the residual collapses here, the
  * axis is the cause and the half-disc's floor is FB-A's half order showing up
  * in an integral. If it stays at 1e-03, the axis is innocent and the arc sweep
@@ -2143,7 +2143,7 @@ BOOST_AUTO_TEST_CASE( amperesLawIsExactOnAContourThatAvoidsTheAxis )
 	double const expected = -coils.mu0()*coils.totalCurrent();
 
 	std::printf( "\n  AMPERE'S LAW WITH NO AXIS IN THE CONTOUR\n" );
-	std::printf( "    Gamma is a circle at r = %.2f, radius %.2f; one coil "
+	std::printf( "    Gamma is a circle at R = %.2f, radius %.2f; one coil "
 	             "inside\n", centreR, radius );
 	std::printf( "    oint q.nu dGamma must be -mu0 I = %.10e\n\n", expected );
 	std::printf( "    %-5s %5s %8s %16s %12s\n", "k", "n", "h", "outward flux",
@@ -2361,9 +2361,9 @@ BOOST_AUTO_TEST_CASE( theExteriorCouplingClosesInOneBorderedNewton )
 		// only under NPC.
 		struct VacuumSource : public meq::Source
 		{
-			double f( double r, double z, double /*psi*/ ) const override
+			double f( double radius, double z, double /*psi*/ ) const override
 			{
-				return halfDiscField().f( r, z, 0.0 );
+				return halfDiscField().f( radius, z, 0.0 );
 			}
 			double dFdPsi( double, double, double ) const override
 			{
@@ -2533,9 +2533,9 @@ BOOST_AUTO_TEST_CASE( theCoupledSolveSurvivesTheAdaptiveLoop )
 	// is one step. The coupling is what is being exercised, not the iteration.
 	struct VacuumSource : public meq::Source
 	{
-		double f( double r, double z, double /*psi*/ ) const override
+		double f( double radius, double z, double /*psi*/ ) const override
 		{
-			return halfDiscField().f( r, z, 0.0 );
+			return halfDiscField().f( radius, z, 0.0 );
 		}
 		double dFdPsi( double, double, double ) const override
 		{
@@ -3000,9 +3000,9 @@ BOOST_AUTO_TEST_CASE( theBoundaryIndicatorRefinesGammaHAndMovesTheCoefficients )
 
 	struct VacuumSource : public meq::Source
 	{
-		double f( double r, double z, double /*psi*/ ) const override
+		double f( double radius, double z, double /*psi*/ ) const override
 		{
-			return halfDiscField().f( r, z, 0.0 );
+			return halfDiscField().f( radius, z, 0.0 );
 		}
 		double dFdPsi( double, double, double ) const override
 		{
@@ -3233,8 +3233,8 @@ BOOST_AUTO_TEST_CASE( theBoundaryIndicatorRefinesGammaHAndMovesTheCoefficients )
  *
  * **WHAT THIS CASE DOES NOT SAY, AND SECTION 11 IS WHY.** The psi_ax and
  * psi_bnd columns below are NOT a physical equilibrium. This fixture has a
- * limiter, a free psi_bnd and a domain reaching r = 0, and its profiles are
- * unconfined -- so gg'( Psi_axis ) is non-zero on the symmetry axis, F/r there
+ * limiter, a free psi_bnd and a domain reaching R = 0, and its profiles are
+ * unconfined -- so gg'( Psi_axis ) is non-zero on the symmetry axis, F/R there
  * is an unbounded mu_0 j_phi, and psi_h grows a LAYER of unconstrained dofs
  * along the whole axis which psi_ax then reports: 1.09e-01 against a true peak
  * of 4.45e-02 off the axis, a factor of 2.5.
@@ -3685,12 +3685,12 @@ BOOST_AUTO_TEST_CASE( theLimiterConstraintIsEvaluatedWhereItIsAsked )
  * IT CAUGHT IT. Psi at the located O-point read 0.35 to 0.56 against a threshold
  * of 0.90 at every one of theTwoBordersConvergeTogether's four limiter radii, at
  * n = 24, 32 and 48 and at k = 2 and 3 alike. And the reason was structural
- * rather than luck: what psi_ax was attained on sat at r = 0 EXACTLY, on the
+ * rather than luck: what psi_ax was attained on sat at R = 0 EXACTLY, on the
  * flat side of the half-disc, where an interior extremum cannot be.
  *
  * IT WAS NOT A SPIKE AND NOT A CORNER, AND SECTION 7.12b's OWN LANGUAGE IS WHAT
  * THAT CORRECTED. The twelve largest nodal values of psi_h were all at
- * r = 0.00000 and all read 1.0913e-01 to within 4e-05 of each other, spread over
+ * R = 0.00000 and all read 1.0913e-01 to within 4e-05 of each other, spread over
  * the whole axis from z = -1.42 to z = +1.06 -- a LAYER of unconstrained dofs
  * running the entire symmetry axis, not one bad dof where Gamma meets it. The
  * corner was merely where the argmax landed, by 2e-05; at k = 3 it landed on the
@@ -3698,17 +3698,17 @@ BOOST_AUTO_TEST_CASE( theLimiterConstraintIsEvaluatedWhereItIsAsked )
  * n = 24, 32, 48 -- against a datum of zero imposed on that very boundary and a
  * true peak of 4.447e-02.
  *
- * THE MECHANISM, MEASURED: A 1/r POLE IN THE LOAD, PUT THERE BY THE LIMITER
+ * THE MECHANISM, MEASURED: A 1/R POLE IN THE LOAD, PUT THERE BY THE LIMITER
  * BORDER MEETING AN UNCONFINED PROFILE.
  *
- * The load meq::SourceIntegrator assembles is -( F/r, w ), and F/r IS mu_0 j_phi
- * -- the toroidal current density, j_phi = r p'( Psi ) + gg'( Psi )/( mu_0 r ).
+ * The load meq::SourceIntegrator assembles is -( F/R, w ), and F/R IS mu_0 j_phi
+ * -- the toroidal current density, j_phi = R p'( Psi ) + gg'( Psi )/( mu_0 R ).
  * A finite current on the symmetry axis therefore REQUIRES F( 0, z ) = 0, and
- * F = mu_0 r^2 p' + gg' leaves only gg' there: p' is protected by its own r^2
+ * F = mu_0 R^2 p' + gg' leaves only gg' there: p' is protected by its own R^2
  * and gg' is not.
  *
  * WHICH Psi THE AXIS SITS AT IS THE WHOLE OF IT. psi( 0, z ) = 0 exactly -- psi
- * is the poloidal flux through a circle of radius r, which vanishes with the
+ * is the poloidal flux through a circle of radius R, which vanishes with the
  * area -- so Psi_axis = -psi_bnd/span. On a FIXED boundary psi_bnd = 0, the axis
  * sits at Psi = 0, and every profile in this tree vanishes there. FB-3's limiter
  * border makes psi_bnd an unknown, it comes out POSITIVE, and the axis is then
@@ -3738,14 +3738,14 @@ BOOST_AUTO_TEST_CASE( theLimiterConstraintIsEvaluatedWhereItIsAsked )
  * beside the cells.
  *
  * AND THE DISCRETE HALF IS WHY IT IS NOT MERELY UGLY. The CONTINUOUS problem is
- * well posed: the energy int ( 1/r )|grad psi|^2 forces its members to vanish
- * faster than r at the axis -- which is the physical psi ~ r^2 -- and against
- * such test functions int ( gg'/r ) w converges. The DISCRETE space is L2
- * polynomials, free to be nonzero at r = 0, and against those the load
+ * well posed: the energy int ( 1/R )|grad psi|^2 forces its members to vanish
+ * faster than R at the axis -- which is the physical psi ~ R^2 -- and against
+ * such test functions int ( gg'/R ) w converges. The DISCRETE space is L2
+ * polynomials, free to be nonzero at R = 0, and against those the load
  * functional is UNBOUNDED. The quadrature is the only thing making it finite.
  * Measured, sweeping setSourceQuadratureOrder() at fixed h: with gg' = 0 the
  * answer is BIT-IDENTICAL at extra = 4, 8, 16 and 20 -- ten digits -- because
- * F/r is then a polynomial; with gg' = 0.05 nothing settles, the axis reading
+ * F/R is then a polynomial; with gg' = 0.05 nothing settles, the axis reading
  * 1.09e-01, 1.15e-01, 9.18e-02, 8.76e-02 over the same sweep.
  *
  * ==========================================================================
@@ -3772,20 +3772,20 @@ BOOST_AUTO_TEST_CASE( theLimiterConstraintIsEvaluatedWhereItIsAsked )
  *     than merely hard. setPlasmaCurrent() makes the scale an unknown instead.
  *   * A VERTICAL FIELD. With the first two and no coils the solve converges at
  *     limiter 1.05 -- passing every health check in this case -- to section
- *     7.14's wall-hugging ANNULUS, its axis at r = 1.38 on a domain reaching
+ *     7.14's wall-hugging ANNULUS, its axis at R = 1.38 on a domain reaching
  *     1.50, and does not converge at all at 1.15 or 1.20. Nothing in the
  *     constraints says the plasma is a core; the coils are what say it.
  *
  * WITH ALL THREE IT IS HEALTHY AT EVERY RADIUS IN RANGE: | F | on the axis
- * exactly 0.0, psi_ax attained at r = 0.85 to 0.96 rather than at r = 0.00000,
- * an O-point of q_h at r = 0.86 to 0.96 carrying Psi = 1.0000, and the
+ * exactly 0.0, psi_ax attained at R = 0.85 to 0.96 rather than at R = 0.00000,
+ * an O-point of q_h at R = 0.86 to 0.96 carrying Psi = 1.0000, and the
  * prescribed current delivered to every digit.
  *
  * WHERE IT GIVES OUT IS THE GEOMETRY AND IS RECORDED RATHER THAN HIDDEN. The
  * fourth radius of the old sweep, 1.30, is 0.87 of rho_Gamma and this fixture
  * does not reach a tokamak there: psi_bnd comes out NEGATIVE at -2.28e-02, the
  * O-point lands at ( -0.001, 1.441 ) -- on the axis, at the top of the domain --
- * carrying Psi = 1.14, and | F | on r = 0 is back. It converges, in 8 steps.
+ * carrying Psi = 1.14, and | F | on R = 0 is back. It converges, in 8 steps.
  * That is a different branch and not a worse answer, and the honest fix is a
  * larger Gamma rather than a looser assertion, so the sweep stops at 1.20.
  *
@@ -3825,7 +3825,7 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 	//     B_v = mu0 I_p/( 4 pi R ) [ ln( 8R/a ) + beta_p + l_i/2 - 3/2 ]
 	//
 	// directed to oppose the hoop force, so NEGATIVE in z for a positive I_p:
-	// the force per unit length is I_phi phi-hat x B_z z-hat = I_phi B_z r-hat,
+	// the force per unit length is I_phi phi-hat x B_z z-hat = I_phi B_z R-hat,
 	// and inward needs I_phi B_z < 0.
 	double const majorRadius = 0.75;
 	double const mu0Ip = 0.12;
@@ -3850,7 +3850,7 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 	// AND THE CURRENT THAT DELIVERS IT IS MEASURED FROM THE COILS THEMSELVES
 	// rather than from an on-axis formula, because ( R, 0 ) is not on the
 	// symmetry axis and the textbook loop expression does not apply there.
-	// B_z = ( 1/r ) d_r psi is MEQ's own convention, so this is one gradPsi()
+	// B_z = ( 1/R ) d_r psi is MEQ's own convention, so this is one gradPsi()
 	// of a unit-current pair and a division.
 	meq::ExteriorCoilSet probe( mu0 );
 	probe.add( meq::Coil( 1.80, +0.90, 0.10, 0.10, 1.0 ) );
@@ -3897,7 +3897,7 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 	             "is Shafranov's for a = R_limiter - R_0\n", mu0Ip, majorRadius );
 	std::printf( "    %-8s %-6s %11s %5s %14s %14s %13s %19s %10s %8s\n",
 	             "limiter", "coils", "coil mu0 I", "its", "psi_ax", "psi_bnd",
-	             "| F | on r=0", "psi_ax attained at", "Psi at O", "verdict" );
+	             "| F | on R=0", "psi_ax attained at", "Psi at O", "verdict" );
 
 	struct Row
 	{
@@ -3928,7 +3928,7 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 		// THE REPAIR, AND IT IS ONE LINE OF PHYSICS: the vacuum carries no
 		// toroidal current, so F = 0 wherever Psi <= 0. Without it the axis --
 		// which sits at Psi = -psi_bnd/span, NEGATIVE once the limiter border
-		// makes psi_bnd an unknown -- is handed gg'( Psi_axis ) != 0, and F/r
+		// makes psi_bnd an unknown -- is handed gg'( Psi_axis ) != 0, and F/R
 		// is mu_0 j_phi.
 		source.setPlasmaSupport( true );
 
@@ -3987,7 +3987,7 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 		row.bounded = axisSource.bounded;
 		row.agrees = check.agrees;
 		row.nodeR = check.nodeR;
-		row.axisR = check.located ? check.axis.r : -1.0;
+		row.axisR = check.located ? check.axis.radius : -1.0;
 		row.normalisedFlux = check.normalisedFlux;
 		row.current = solver.plasmaCurrent();
 		rows.push_back( row );
@@ -4023,19 +4023,19 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 		// an exact zero outside the plasma rather than an extrapolated profile.
 		BOOST_TEST( row.bounded,
 			"| F | on the symmetry axis is non-zero at limiter R = "
-			<< row.limiter << ", so F/r = mu_0 j_phi is an unbounded toroidal "
-			"current density on r = 0 and psi_h grows a layer along the whole "
+			<< row.limiter << ", so F/R = mu_0 j_phi is an unbounded toroidal "
+			"current density on R = 0 and psi_h grows a layer along the whole "
 			"axis whose size the QUADRATURE sets. ConfineToPlasma is what makes "
 			"it exactly zero; check that setPlasmaSupport( true ) is still "
 			"reaching the source that evaluates the profiles." );
 
 		// AND psi_ax IS ATTAINED OFF THE AXIS, which is the direct negation of
 		// what section 11 found on the unphysical fixture: there the twelve
-		// largest nodal values all sat at r = 0.00000, a layer of unconstrained
+		// largest nodal values all sat at R = 0.00000, a layer of unconstrained
 		// dofs running the length of the symmetry axis, and the argmax merely
 		// picked one of them.
 		BOOST_TEST( row.nodeR > 0.30,
-			"psi_ax is attained at r = " << row.nodeR << " at limiter R = "
+			"psi_ax is attained at R = " << row.nodeR << " at limiter R = "
 			<< row.limiter << ", which is on or beside the symmetry axis. That "
 			"is the axis layer of section 11.3 -- psi_ax is then a boundary "
 			"artefact and not a magnetic axis, and everything normalised by it "
@@ -4071,8 +4071,8 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 	 * none of them says the plasma is a CORE. What the solve finds instead is
 	 * section 7.14's wall-hugging annulus: psi rising monotonically outward with
 	 * its O-point pressed against Gamma. Measured here at k = 2 on 1333
-	 * elements, the axis moves from r = 0.78 -- 0.85 with the field to
-	 * r = 1.38 without it, on a domain reaching 1.50.
+	 * elements, the axis moves from R = 0.78 -- 0.85 with the field to
+	 * R = 1.38 without it, on a domain reaching 1.50.
 	 *
 	 * SO THE COIL-FREE ROW IS NOT A FAILURE TO CONVERGE. It converges, in 11 to
 	 * 96 steps, with | F | on the axis at exactly zero and Psi at its O-point
@@ -4087,7 +4087,7 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 			continue;
 		++controls;
 		BOOST_TEST( row.axisR > 1.10,
-			"without the vertical field the axis sits at r = " << row.axisR
+			"without the vertical field the axis sits at R = " << row.axisR
 			<< ", which is a core rather than the wall-hugging annulus section "
 			"7.14 records. If the coil-free case now makes a core, the coils "
 			"have stopped being what confines this plasma and the derived "
@@ -4102,16 +4102,16 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
 
 
 /*
- * THE 1/r POLE IN THE LOAD, AND THE GUARD THAT REFUSES IT.
+ * THE 1/R POLE IN THE LOAD, AND THE GUARD THAT REFUSES IT.
  * FREE-BOUNDARY-PLAN.md section 11.3.
  *
- * meq::SourceIntegrator assembles -( F/r, w ), and F/r IS mu_0 j_phi:
+ * meq::SourceIntegrator assembles -( F/R, w ), and F/R IS mu_0 j_phi:
  *
- *     j_phi  =  r p'( Psi )  +  g g'( Psi ) / ( mu_0 r )
+ *     j_phi  =  R p'( Psi )  +  g g'( Psi ) / ( mu_0 R )
  *
  * so a finite toroidal current density on the symmetry axis REQUIRES
- * F( 0, z ) = 0. F = mu_0 r^2 p' + g g' leaves only g g' there -- p' is
- * protected by its own r^2 and g g' is not.
+ * F( 0, z ) = 0. F = mu_0 R^2 p' + g g' leaves only g g' there -- p' is
+ * protected by its own R^2 and g g' is not.
  *
  * WHICH Psi THE AXIS SITS AT IS THE WHOLE OF IT, AND IT IS FB-3 THAT OPENS THE
  * TRAP. psi( 0, z ) = 0 exactly, so Psi_axis = -psi_bnd/span. On a FIXED
@@ -4123,9 +4123,9 @@ BOOST_AUTO_TEST_CASE( theTwoBorderSolveReportsATrueMagneticAxis )
  * EXTRAPOLATES and returns a current instead.
  *
  * WHAT IT COSTS is not a bad number in one place. psi_h picks up an O( 1 ) layer
- * along the WHOLE axis -- 168 dofs at r = 0 agreeing to 3.5e-05 of 1.09e-01,
+ * along the WHOLE axis -- 168 dofs at R = 0 agreeing to 3.5e-05 of 1.09e-01,
  * against a true peak of 4.45e-02 -- because the DISCRETE load functional is
- * unbounded there: the energy space's members vanish faster than r, and L2
+ * unbounded there: the energy space's members vanish faster than R, and L2
  * polynomials do not. The quadrature is the only thing making the assembly
  * finite, so the answer depends on the RULE and not on the mesh.
  *
@@ -4228,12 +4228,12 @@ BOOST_AUTO_TEST_CASE( theAxisSourceGuardSeparatesThePoleFromTheLimiter )
 		             check.relative, check.bounded ? "bounded" : "UNBOUNDED" );
 		std::fflush( stdout );
 
-		// THE MESH REACHES r = 0, or every other field is meaningless. The
+		// THE MESH REACHES R = 0, or every other field is meaningless. The
 		// half-disc's flat side IS the axis -- FB-A requires that and
-		// makeHalfDisc builds the background from r = 0 exactly -- so a false
+		// makeHalfDisc builds the background from R = 0 exactly -- so a false
 		// here is the fixture having changed underneath the case.
 		BOOST_TEST_REQUIRE( check.reachesAxis,
-			"no potential node sits at r = 0 for " << cell.label
+			"no potential node sits at R = 0 for " << cell.label
 			<< ", so there is no axis for the source to be unbounded on and this "
 			"case is measuring nothing" );
 
@@ -4272,9 +4272,9 @@ BOOST_AUTO_TEST_CASE( theAxisSourceGuardSeparatesThePoleFromTheLimiter )
 			"guard calls that "
 			<< ( check.bounded ? "bounded" : "unbounded" ) << " where "
 			<< ( cell.expectBounded ? "bounded" : "unbounded" )
-			<< " is what this configuration should give. F/r is mu_0 j_phi, so "
+			<< " is what this configuration should give. F/R is mu_0 j_phi, so "
 			"the question is whether the toroidal current density is finite on "
-			"r = 0." );
+			"R = 0." );
 	}
 
 	// AND THE LIMITER REALLY DOES PUT THE AXIS IN THE VACUUM, which is the step
@@ -4331,7 +4331,7 @@ BOOST_AUTO_TEST_CASE( theAxisSourceGuardSeparatesThePoleFromTheLimiter )
  * case -- exactly the order FB-1a and FB-1b were done in.
  *
  * THE AXIS CONDITION IS HOMOGENEOUS FOR FREE, and that is physics rather than
- * luck: psi is the poloidal flux through a circle of radius r, so psi( 0, z )
+ * luck: psi is the poloidal flux through a circle of radius R, so psi( 0, z )
  * vanishes with the area for ANY conductor off the axis. Measured on this
  * fixture's pair, ExteriorCoilSet::psi( 0, z ) is 0.000000e+00 exactly. So
  * setBoundaryData( zero ) on the fitted side is the honest statement of the
@@ -4370,7 +4370,7 @@ BOOST_AUTO_TEST_CASE( aConductorOutsideGammaReachesTheSolveThroughTheDatum )
 	// AND IT VANISHES ON THE AXIS, which is what lets the fitted datum be zero.
 	// Asserted rather than assumed: it is the flux through a circle of vanishing
 	// area, so it is exact, and a non-zero reading would mean the convention is
-	// not psi = r A_phi.
+	// not psi = R A_phi.
 	for ( double z : { -1.2, -0.4, 0.0, 0.4, 1.2 } )
 		BOOST_TEST_REQUIRE( coils.psi( 0.0, z ) == 0.0,
 			"psi_coil( 0, " << z << " ) is " << coils.psi( 0.0, z )
@@ -4696,9 +4696,9 @@ BOOST_AUTO_TEST_CASE( theConductorModelIsWorthMeasuring )
 	BOOST_TEST_REQUIRE( filaments.coilCount() == 0u );
 	BOOST_TEST_REQUIRE( filaments.filamentCount() == 2u );
 
-	auto filamentField = [ &filaments ]( double r, double z )
+	auto filamentField = [ &filaments ]( double radius, double z )
 	{
-		return filaments.psi( r, z );
+		return filaments.psi( radius, z );
 	};
 
 	// ON Gamma FIRST, WITH NO SOLVER IN THE WAY, so the number below is not
@@ -4709,11 +4709,11 @@ BOOST_AUTO_TEST_CASE( theConductorModelIsWorthMeasuring )
 	for ( int i = 0; i <= 64; ++i )
 	{
 		double const t = M_PI*( static_cast<double>( i )/64.0 - 0.5 );
-		double const r = halfDiscGamma*std::cos( t );
+		double const radius = halfDiscGamma*std::cos( t );
 		double const z = halfDiscGamma*std::sin( t );
-		double const rect = rectangles.psi( r, z );
+		double const rect = rectangles.psi( radius, z );
 		worstOnGamma = std::max( worstOnGamma,
-		                         std::abs( rect - filamentField( r, z ) ) );
+		                         std::abs( rect - filamentField( radius, z ) ) );
 		scaleOnGamma = std::max( scaleOnGamma, std::abs( rect ) );
 	}
 
@@ -4929,7 +4929,7 @@ BOOST_AUTO_TEST_CASE( theConductorModelIsWorthMeasuring )
  * WHY THEY ARE THE SAME PROBLEM, WHICH IS THE PART TO CHECK BEFORE BELIEVING
  * ANY NUMBER BELOW. Both discretise
  *
- *     -Delta* psi = F_coil   on r > 0,   psi = 0 on r = 0,   psi -> 0 at infinity
+ *     -Delta* psi = F_coil   on R > 0,   psi = 0 on R = 0,   psi -> 0 at infinity
  *
  * whose unique solution is psi_coil = CoilSet::psi. Run B solves it on a
  * bounded rectangle carrying that solution's own trace, which is a well posed
@@ -4966,7 +4966,7 @@ BOOST_AUTO_TEST_CASE( theConductorModelIsWorthMeasuring )
  * CORNERS WOULD CAP IT AT min( k+1, 3 ), AND THAT IS HALF RIGHT -- WHICH IS
  * WORTH RECORDING, BECAUSE THE HALF THAT IS WRONG IS THE HALF THIS CASE
  * MEASURES. The argument is sound as far as it goes: the solution of
- * Delta* psi = -F with F a top hat carries an r^2 log r term at each corner of
+ * Delta* psi = -F with F a top hat carries an R^2 log R term at each corner of
  * the support, so psi_coil sits in H^{3-eps} THERE and no polynomial degree
  * recovers it. Measured, run B's L2 over its whole box reads 2.741 at k = 2 and
  * 3.052 at k = 3 -- section 7.9's own aligned 2.88 / 3.01, reproduced
@@ -5046,7 +5046,7 @@ namespace
 	}
 
 	/// Run B's domain: a plain fitted rectangle, no SubMesh and no level set.
-	/// @a nr cells across in r, and as many in z as keep the cells square.
+	/// @a nr cells across in R, and as many in z as keep the cells square.
 	std::unique_ptr<mfem::Mesh> makeTwoRouteBox( int nr )
 	{
 		int const nz = static_cast<int>(
@@ -5062,7 +5062,7 @@ namespace
 		return mesh;
 	}
 
-	/// psi read at a list of ( r, z ), each point located in @a mesh.
+	/// psi read at a list of ( R, z ), each point located in @a mesh.
 	///
 	/// POINT SAMPLING RATHER THAN A CROSS-MESH PROJECTION, and the reason is
 	/// CLAUDE.md's: MEQ's volume spaces are on the closed Gauss-Lobatto basis,
@@ -5122,14 +5122,14 @@ BOOST_AUTO_TEST_CASE( theTwoConductorRoutesAgreeOnTheOverlap )
 	// between the sets, so a typo in one copy is the way this case would become
 	// a comparison of two different machines while still converging.
 	BOOST_TEST_REQUIRE( interior.totalCurrent() == exterior.totalCurrent() );
-	for ( double r : { 0.3, 0.9, 1.4, twoRouteBoxR } )
+	for ( double radius : { 0.3, 0.9, 1.4, twoRouteBoxR } )
 		for ( double z : { -1.1, -0.2, 0.0, 0.7, 1.5 } )
-			BOOST_TEST_REQUIRE( std::abs( interior.psi( r, z )
-			                              - exterior.psi( r, z ) )
-			                    <= 1.0e-14*( 1.0 + std::abs( interior.psi( r, z ) ) ),
+			BOOST_TEST_REQUIRE( std::abs( interior.psi( radius, z )
+			                              - exterior.psi( radius, z ) )
+			                    <= 1.0e-14*( 1.0 + std::abs( interior.psi( radius, z ) ) ),
 				"the interior and exterior descriptions of the conductor give "
-				"different fields at ( " << r << ", " << z << " ): "
-				<< interior.psi( r, z ) << " against " << exterior.psi( r, z )
+				"different fields at ( " << radius << ", " << z << " ): "
+				<< interior.psi( radius, z ) << " against " << exterior.psi( radius, z )
 				<< ". They are written out separately because Coils.hpp refuses a "
 				"conversion, so this is where a divergence between the copies is "
 				"caught." );
@@ -5296,7 +5296,7 @@ BOOST_AUTO_TEST_CASE( theTwoConductorRoutesAgreeOnTheOverlap )
 			// AND RUN B'S OWN L2 OVER ITS WHOLE BOX, on the two coarser meshes
 			// at k >= 2. It is a different measurement from the column beside
 			// it and it is here to size the corner term: the sample points are
-			// in the far field and the r^2 log r sits AT the conductor's
+			// in the far field and the R^2 log R sits AT the conductor's
 			// corners, so a global norm sees what a far-field one cannot.
 			//
 			// RESTRICTED BECAUSE IT IS THE EXPENSIVE LINE IN THIS CASE.
@@ -5565,9 +5565,9 @@ BOOST_AUTO_TEST_CASE( theExteriorColumnsAreExact )
 
 	struct VacuumSource : public meq::Source
 	{
-		double f( double r, double z, double ) const override
+		double f( double radius, double z, double ) const override
 		{
-			return halfDiscField().f( r, z, 0.0 );
+			return halfDiscField().f( radius, z, 0.0 );
 		}
 		double dFdPsi( double, double, double ) const override { return 0.0; }
 	};

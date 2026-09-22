@@ -99,7 +99,7 @@ def main():
 #
 # THE ABSCISSA IS Psi AND SO IS THE DERIVATIVE, WHICH IS THE HALF THAT COSTS
 # A FACTOR OF THE SPAN.  meq::NormalisedMHDSource::f evaluates
-#     F = scale * ( mu0 r^2 pprime( Psi ) + ggprime( Psi ) ) / span
+#     F = scale * ( mu0 R^2 pprime( Psi ) + ggprime( Psi ) ) / span
 # so what a table holds is d/dPsi, not d/dpsi.  freegs4e's saved arrays are
 # d/dpsi -- its own docstring says otherwise and is wrong, which is the trap
 # tools/freegs4e-benchmark/README.md records -- so converting them means

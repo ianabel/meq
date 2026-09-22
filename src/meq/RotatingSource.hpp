@@ -23,29 +23,29 @@
  * function. Centrifugal force sweeps heavy species to the outboard side, and an
  * electrostatic potential arises to stop that separating the charges. So
  *
- *     n_s( r, psi ) = n_s0( psi ) exp[ m_s omega^2 ( r^2 - rRef^2 )/2T_s
+ *     n_s( R, psi ) = n_s0( psi ) exp[ m_s omega^2 ( R^2 - R_ref^2 )/2T_s
  *                                      - Z_s e phi_0/T_s ]          (96)
- *     Sum_s Z_s n_s( r, psi ) = 0                                   (97)
+ *     Sum_s Z_s n_s( R, psi ) = 0                                   (97)
  *
- * and (97) is what determines phi_0 at each ( r, psi ). Everything else about
+ * and (97) is what determines phi_0 at each ( R, psi ). Everything else about
  * MEQ is untouched: the operator, the discretisation, tau, the hybridization,
  * the estimator, the adaptive loop and the curved boundary all stay as they are.
- * meq::Source's signature already carries r, which is the whole reason a
+ * meq::Source's signature already carries R, which is the whole reason a
  * non-flux-function density needs no interface change anywhere in the solver.
  *
  * THE GAUGE IS FREE AND THIS CLASS TAKES THE LOCAL ONE. RoPP fixes phi_0 by
  * <phi_0>_psi = 0 and says at its (59) that this is a convention rather than a
  * closure -- "we can add any function of psi to it". That choice would make
- * phi_0 proportional to r^2 - <R^2>_psi, a flux-surface average of the unknown
+ * phi_0 proportional to R^2 - <R^2>_psi, a flux-surface average of the unknown
  * on every surface, which MEQ has no machinery for and which buys nothing
  * physical. This class instead pins
  *
- *     phi_0( rRef, psi ) = 0
+ *     phi_0( R_ref, psi ) = 0
  *
- * with rRef a CONSTANT -- the geometric axis, given to the constructor, not the
+ * with R_ref a CONSTANT -- the geometric axis, given to the constructor, not the
  * magnetic axis and not an average. Two consequences, both good: F is a
- * pointwise function of ( r, z, psi ), and n_s0 is then the PHYSICAL density of
- * species s on the curve r = rRef, which is a quantity a user can state and
+ * pointwise function of ( R, z, psi ), and n_s0 is then the PHYSICAL density of
+ * species s on the curve R = R_ref, which is a quantity a user can state and
  * another code can be compared against. Li & Zhu (Comput. Phys. Commun. 260
  * (2021) 107264) make the same choice independently, referencing their exponent
  * to the magnetic axis.
@@ -55,22 +55,22 @@
  * gyrokinetic code or against a transport code has to know which convention each
  * is in. That is the one part of the gauge freedom that is not a simplification.
  *
- * WHAT F IS. Differentiating p = Sum_s n_s T_s at fixed r, the dphi_0/dpsi terms
+ * WHAT F IS. Differentiating p = Sum_s n_s T_s at fixed R, the dphi_0/dpsi terms
  * collect into -e ( dphi_0/dpsi ) Sum_s Z_s n_s, which vanishes IDENTICALLY by
  * (97). What is left is exactly (136)'s brace plus its omega omega' term, so
  *
- *     F( r, z, psi ) = mu0 r^2 dp/dpsi|_r + g g'
+ *     F( R, z, psi ) = mu0 R^2 dp/dpsi|_r + g g'
  *
- * which is meq::MHDSource's shape with an r-dependent p. The residual therefore
+ * which is meq::MHDSource's shape with an R-dependent p. The residual therefore
  * needs phi_0 but never its psi-derivative; only the Jacobian does. Checked two
  * ways: it is RoPP's own force balance (128), and at omega -> 0 it gives RoPP
  * (243), which is the static equation MEQ already solves.
  *
  * UNITS AND SIGN, pinned deliberately because two sign errors have already been
  * found in the papers MEQ does follow. RoPP is Gaussian, with the 4 pi of (136)
- * and the c of (135); MEQ is SI, so 4 pi -> mu0 and RoPP's I is MEQ's g = r B_phi.
- * RoPP (135) is j.grad(phi) = -( c/4 pi r^2 ) Delta* psi, so (136) reads
- * Delta* psi = -4 pi r^2 { ... }, so F = -Delta* psi = +mu0 r^2 { ... } -- the
+ * and the c of (135); MEQ is SI, so 4 pi -> mu0 and RoPP's I is MEQ's g = R B_phi.
+ * RoPP (135) is j.grad(phi) = -( c/4 pi R^2 ) Delta* psi, so (136) reads
+ * Delta* psi = -4 pi R^2 { ... }, so F = -Delta* psi = +mu0 R^2 { ... } -- the
  * same positive convention meq::MHDSource uses. RoPP's psi is poloidal flux per
  * radian, from its (31) B = I grad(phi) + grad(psi) x grad(phi), which is what
  * MEQ's g g' in T^2 m^2 per Wb/rad already assumes and what EQDSK tabulates.
@@ -109,13 +109,13 @@ namespace meq
 		std::shared_ptr<Profile const> temperature;
 
 		/// n_s0( psi ) in m^-3: the density of this species ON THE CURVE
-		/// r = rRef, which in the local gauge of this file is what N_s of RoPP
+		/// R = R_ref, which in the local gauge of this file is what N_s of RoPP
 		/// (96) reduces to. Must not be null.
 		std::shared_ptr<Profile const> density;
 	};
 
 	/**
-	 * Sum_s Z_s n_s0( psi ), which charge neutrality on r = rRef requires to
+	 * Sum_s Z_s n_s0( psi ), which charge neutrality on R = R_ref requires to
 	 * vanish.
 	 *
 	 * Exposed because it is the quantity meq::RotatingSource's constructor
@@ -157,7 +157,7 @@ namespace meq
 	 * pre-multiplied PRODUCTS p' and g g' precisely so that no chain rule exists
 	 * to get wrong: F is one profile evaluation and dF/dpsi is one prime(). The
 	 * trick is unavailable here, because p depends on the density, the
-	 * temperatures and omega separately and on r as well, so there is no product
+	 * temperatures and omega separately and on R as well, so there is no product
 	 * to pre-store. Two classes with different invariants, not one class with a
 	 * flag -- and meq::MHDSource remains the omega = 0 path.
 	 *
@@ -189,13 +189,13 @@ namespace meq
 
 			/**
 			 * @param species  exactly two, of opposite charge sign, satisfying
-			 *                 charge neutrality on r = rRef.
+			 *                 charge neutrality on R = R_ref.
 			 * @param omega    the rigid rotation frequency omega( psi ) in rad/s.
 			 *                 May be null, which means omega = 0 and reduces this
 			 *                 source to meq::MHDSource's equation.
 			 * @param ggPrime  the single product g dg/dpsi, in T^2 m^2 per Wb/rad,
 			 *                 exactly as meq::MHDSource takes it. Must not be null.
-			 * @param referenceRadius  rRef in metres, where phi_0 vanishes and
+			 * @param referenceRadius  R_ref in metres, where phi_0 vanishes and
 			 *                 where each n_s0 is the physical density. Must be
 			 *                 finite and positive.
 			 * @param mu0      so that a run in normalised units can set it to 1.
@@ -207,7 +207,7 @@ namespace meq
 			 *         two species or more than maxSpecies, a species set whose
 			 *         charges are all one sign, or Closure::ClosedForm asked for
 			 *         with more than two species.
-			 * @throws std::invalid_argument if charge neutrality on r = rRef is
+			 * @throws std::invalid_argument if charge neutrality on R = R_ref is
 			 *         violated. It is checked by sampling n_s0 over [ 0, 1 ], the
 			 *         range meq::Profile documents itself on, because the closed
 			 *         form below is derived from Z_1 n_10 = -Z_2 n_20 and is
@@ -221,49 +221,49 @@ namespace meq
 				double mu0 = vacuumPermeability,
 				Closure closure = Closure::Automatic );
 
-			/// F at ( r, z ) for the flux value psi, in the units of
-			/// meq::Source::f: mu0 r^2 dp/dpsi|_r + g g', no 1/r applied.
-			double f( double r, double z, double psi ) const override;
+			/// F at ( R, z ) for the flux value psi, in the units of
+			/// meq::Source::f: mu0 R^2 dp/dpsi|_r + g g', no 1/R applied.
+			double f( double radius, double z, double psi ) const override;
 
-			/// dF/dpsi at fixed ( r, z ), which is mu0 r^2 d2p/dpsi2|_r plus the
+			/// dF/dpsi at fixed ( R, z ), which is mu0 R^2 d2p/dpsi2|_r plus the
 			/// derivative of g g'. Exact, and checked against a central difference
 			/// of f() over a Mach sweep in RotatingSourceTests.
-			double dFdPsi( double r, double z, double psi ) const override;
+			double dFdPsi( double radius, double z, double psi ) const override;
 
 			// ---- the closure, exposed because it is what FL-1 asserts on ----
 
-			/// e phi_0( r, psi ) in JOULES -- the potential of (97) times the
+			/// e phi_0( R, psi ) in JOULES -- the potential of (97) times the
 			/// elementary charge, which is the combination that appears in every
-			/// exponent and the one that carries no factor of e. Zero at r = rRef
+			/// exponent and the one that carries no factor of e. Zero at R = R_ref
 			/// by construction, exactly.
-			double potential( double r, double psi ) const;
+			double potential( double radius, double psi ) const;
 
-			/// n_s( r, psi ) in m^-3, from (96). At r = rRef this is n_s0( psi ).
+			/// n_s( R, psi ) in m^-3, from (96). At R = R_ref this is n_s0( psi ).
 			/// @throws std::out_of_range if @a index is not a species.
-			double density( std::size_t index, double r, double psi ) const;
+			double density( std::size_t index, double radius, double psi ) const;
 
-			/// d( e phi_0 )/dpsi at fixed r, by implicit differentiation of (97)
+			/// d( e phi_0 )/dpsi at fixed R, by implicit differentiation of (97)
 			/// rather than by differencing it. Differencing an inner root find
 			/// from outside gives a derivative whose accuracy is the inner
 			/// tolerance, which is how a Newton iteration silently degrades from
 			/// quadratic to linear with no wrong answer anywhere to point at.
-			double dPotentialDPsi( double r, double psi ) const;
+			double dPotentialDPsi( double radius, double psi ) const;
 
-			/// The total pressure Sum_s n_s T_s at ( r, psi ), in Pa. This is the
+			/// The total pressure Sum_s n_s T_s at ( R, psi ), in Pa. This is the
 			/// p whose psi-derivative F is built from.
-			double pressure( double r, double psi ) const;
+			double pressure( double radius, double psi ) const;
 
-			/// dp/dpsi at fixed r, in Pa per Wb/rad. F is mu0 r^2 times this plus
+			/// dp/dpsi at fixed R, in Pa per Wb/rad. F is mu0 R^2 times this plus
 			/// g g'; exposed separately so a test can see which half is wrong.
-			double dPressureDPsi( double r, double psi ) const;
+			double dPressureDPsi( double radius, double psi ) const;
 
 			/// The exponent of (96) for one species. AT TWO SPECIES ALL SPECIES
-			/// SHARE IT, which is what makes Sum_s Z_s n_s vanish at every r once
-			/// it vanishes at rRef; above two they differ, and the cancellation
+			/// SHARE IT, which is what makes Sum_s Z_s n_s vanish at every R once
+			/// it vanishes at R_ref; above two they differ, and the cancellation
 			/// is the root find's job instead. Dimensionless, and equal to M^2/2
 			/// at the outboard edge in the usual Mach-number sense.
 			/// @throws std::out_of_range if @a index is not a species.
-			double densityExponent( std::size_t index, double r, double psi ) const;
+			double densityExponent( std::size_t index, double radius, double psi ) const;
 
 			// ---- accessors ----
 
@@ -275,7 +275,7 @@ namespace meq
 			double mu0() const;
 
 		private:
-			// Everything the source needs at one ( r, psi ), in one pass, on the
+			// Everything the source needs at one ( R, psi ), in one pass, on the
 			// stack. f() and dFdPsi() are called at every quadrature point of
 			// every element of every residual evaluation, so this allocates
 			// nothing and holds no state between calls.
@@ -289,18 +289,18 @@ namespace meq
 				std::array<double, maxSpecies> exponentDoublePrime;
 			};
 
-			State stateAt( double r, double psi ) const;
-			State closedFormState( double r, double psi ) const;
-			State rootFindState( double r, double psi ) const;
+			State stateAt( double radius, double psi ) const;
+			State closedFormState( double radius, double psi ) const;
+			State rootFindState( double radius, double psi ) const;
 
-			// p, dp/dpsi and d2p/dpsi2 at fixed r, from a State.
+			// p, dp/dpsi and d2p/dpsi2 at fixed R, from a State.
 			void pressureFrom( State const & state, double psi,
 				double & p, double & pPrime, double & pDoublePrime ) const;
 
 			std::vector<Species> speciesData;
 			std::shared_ptr<Profile const> omegaProfile;
 			std::shared_ptr<Profile const> ggPrimeProfile;
-			double rRef;
+			double refRadius;
 			double permeability;
 			Closure closureChoice;
 	};
@@ -316,7 +316,7 @@ namespace meq
 	 * creates", before using this.
 	 *
 	 * IT IS A WRAPPER AND NOT A REIMPLEMENTATION, which is the whole design. A
-	 * normalised source has the form F( r, z, psi ) = H( r, z, psi/psi_ax )/psi_ax,
+	 * normalised source has the form F( R, z, psi ) = H( R, z, psi/psi_ax )/psi_ax,
 	 * so with the profiles read at Psi the answer is the unnormalised source's,
 	 * divided by psi_ax once for f() and TWICE for dFdPsi() -- once for the
 	 * profile argument and once for the derivative itself. Every property
@@ -324,7 +324,7 @@ namespace meq
 	 * over unchanged, and there is no second copy of the closure to keep in step.
 	 *
 	 * The profiles mean what they always meant, read at Psi: n_s0( Psi ) is the
-	 * density on r = rRef, T_s( Psi ) is in Joules, omega( Psi ) is in rad/s, and
+	 * density on R = R_ref, T_s( Psi ) is in Joules, omega( Psi ) is in rad/s, and
 	 * ggPrime is d( g^2/2 )/dPsi -- note dPsi, not dpsi, which is what the second
 	 * factor of 1/psi_ax accounts for.
 	 */
@@ -355,8 +355,8 @@ namespace meq
 			/// term", and `[source] Type = "rotating"` accepts `PlasmaCurrent`,
 			/// so a source that ignored it would give a current border that
 			/// cannot respond to its own unknown.
-			double f( double r, double z, double psi ) const override;
-			double dFdPsi( double r, double z, double psi ) const override;
+			double f( double radius, double z, double psi ) const override;
+			double dFdPsi( double radius, double z, double psi ) const override;
 
 			/// ANALYTIC, AND THE CLOSURE IS NOT DIFFERENTIATED AGAIN TO GET IT.
 			///
@@ -373,7 +373,7 @@ namespace meq
 			/// GradShafranovSolver::assembleCurrentNormalisationCorner() reaches
 			/// for it too, where until it existed the fallback was a silent zero
 			/// rather than a difference.
-			bool normalisationDerivatives( double r, double z, double psi,
+			bool normalisationDerivatives( double radius, double z, double psi,
 			                               double &dFdAxis,
 			                               double &dFdBoundary ) const override;
 
@@ -389,9 +389,9 @@ namespace meq
 			// Diagnostics, taking PHYSICAL psi and converting internally, so that
 			// a caller never has to remember which of the two it is holding.
 
-			double potential( double r, double psi ) const;
-			double density( std::size_t index, double r, double psi ) const;
-			double pressure( double r, double psi ) const;
+			double potential( double radius, double psi ) const;
+			double density( std::size_t index, double radius, double psi ) const;
+			double pressure( double radius, double psi ) const;
 
 			/// The source underneath, whose arguments are Psi rather than psi.
 			RotatingSource const & unnormalised() const;

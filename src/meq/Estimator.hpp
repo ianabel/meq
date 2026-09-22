@@ -18,8 +18,8 @@
  * its diameter, h_e the length of an edge e, E the whole skeleton and E_I its
  * interior part:
  *
- *   eta_K^2 = h_K^2 || F( psi* )/r + div_bar q_h ||_K^2                 (eta_1)
- *           + || q_h - ( 1/r ) grad_bar psi* ||_K^2                     (eta_2)
+ *   eta_K^2 = h_K^2 || F( psi* )/R + div_bar q_h ||_K^2                 (eta_1)
+ *           + || q_h - ( 1/R ) grad_bar psi* ||_K^2                     (eta_2)
  *           + ( 1/2 ) sum_{e in E_I, e in dK} h_e    || [[ q_h ]]  ||_e^2   (eta_3)
  *           + ( 1/2 ) sum_{e in E_I, e in dK} h_e^-1 || [[ psi* ]] ||_e^2   (eta_4)
  *           +         sum_{e in E,   e in dK} h_e^-1 || psihat_h - psi* ||_e^2  (eta_5)
@@ -28,8 +28,8 @@
  * q+ . n+ + q- . n- for the vector, [[ a ]] := a+ - a- for the scalar, so
  * [[ q ]] is a scalar and both are independent of which side is called plus.
  *
- * eta_1 is the residual of the strong divergence equation -div_bar q = F/r,
- * eta_2 that of the constitutive law q = ( 1/r ) grad_bar psi, eta_3 and eta_4
+ * eta_1 is the residual of the strong divergence equation -div_bar q = F/R,
+ * eta_2 that of the constitutive law q = ( 1/R ) grad_bar psi, eta_3 and eta_4
  * measure the loss of conformity of the flux and of the potential, and eta_5 the
  * disagreement between the hybrid unknown and the potential on element
  * boundaries. Each vanishes identically on the exact solution, which is the
@@ -172,8 +172,8 @@ namespace meq
 			/// The five terms of eq (20), in the order the paper numbers them.
 			enum class Term
 			{
-				Divergence = 0,   ///< eta_1, the residual of -div_bar q = F/r
-				Constitutive,     ///< eta_2, the residual of q = grad_bar psi / r
+				Divergence = 0,   ///< eta_1, the residual of -div_bar q = F/R
+				Constitutive,     ///< eta_2, the residual of q = grad_bar psi / R
 				FluxJump,         ///< eta_3, [[ q_h ]] across interior edges
 				PotentialJump,    ///< eta_4, [[ psi* ]] across interior edges
 				TraceMismatch,    ///< eta_5, psihat_h against psi* on dK
@@ -209,14 +209,14 @@ namespace meq
 
 			/// @param solverIn  solved, and post-processed if the potential is
 			///                  PostProcessed. Borrowed.
-			/// @param sourceIn  F( r, z, psi ). Borrowed. eta_1 evaluates it at
+			/// @param sourceIn  F( R, z, psi ). Borrowed. eta_1 evaluates it at
 			///                  the potential in use, which is what makes the
 			///                  term the residual of the semi-linear equation
 			///                  rather than of a frozen one.
 			ResidualEstimator( GradShafranovSolver &solverIn, Source const &sourceIn );
 
 			/// The same, for a source that does not depend on psi. F is then
-			/// evaluated as the coefficient F( r, z ), so eta_1 is the residual of
+			/// evaluated as the coefficient F( R, z ), so eta_1 is the residual of
 			/// the linear equation -- which is the same thing when F is the same
 			/// thing, and is what the Solov'ev benchmark needs.
 			ResidualEstimator( GradShafranovSolver &solverIn, mfem::Coefficient &sourceIn );
@@ -276,7 +276,7 @@ namespace meq
 
 			/// Quadrature order added to twice the degree of the potential in use.
 			/// The default of 4 matches the rule the convergence tests measure the
-			/// L2 error on, for the same reason: neither F/r nor 1/r is a
+			/// L2 error on, for the same reason: neither F/R nor 1/R is a
 			/// polynomial, and a rule chosen for the polynomial part alone would
 			/// be what limited the measured rate.
 			void setExtraQuadratureOrder( int extraIn );
@@ -335,7 +335,7 @@ namespace meq
 			/// F at a point, from whichever of the two constructors was used.
 			double sourceValue( mfem::ElementTransformation &tr,
 			                    mfem::IntegrationPoint const &ip,
-			                    double r, double z, double psi ) const;
+			                    double radius, double z, double psi ) const;
 
 			GradShafranovSolver *solver;
 			Source const *source;
@@ -450,7 +450,7 @@ namespace meq
 	 * it. Boundary INHERITED from the box is fitted and needs no transfer, so it
 	 * simply keeps its own attribute and is left out of gammaHMarker(). The case
 	 * that needs this is free boundary's half-disc, whose flat side IS the box's
-	 * r = 0 edge because the domain has to reach the axis exactly. What is still
+	 * R = 0 edge because the domain has to reach the axis exactly. What is still
 	 * required is that some boundary be GENERATED -- that there is a Gamma_h at
 	 * all -- and the constructor throws if there is not.
 	 */

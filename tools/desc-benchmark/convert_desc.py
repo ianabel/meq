@@ -10,7 +10,7 @@ is an AttributeError naming a constant rather than anything naming a path.
 THE TWO CODES ARE NOT HANDED THE SAME OBJECT AND CANNOT BE.  MEQ takes the
 Grad-Shafranov free functions against its own normalised POLOIDAL flux,
 
-    F( r, z, psi ) = [ mu0 r^2 ( dp/dPsi )( Psi ) + ( g dg/dPsi )( Psi ) ] / psi_ax,
+    F( R, z, psi ) = [ mu0 R^2 ( dp/dPsi )( Psi ) + ( g dg/dPsi )( Psi ) ] / psi_ax,
     Psi = psi / psi_ax,   Psi = 1 on the magnetic axis and 0 on Gamma
 
 -- src/meq/Source.hpp, meq::NormalisedMHDSource -- which is the whole problem
@@ -57,14 +57,14 @@ WHICH EQUILIBRIUM SUPPLIES THE MAP, and the two answers this file implements:
     altogether; `--self-consistent` in descrun.py drives it.
 
 WHY THE MAP IS BUILT BY GREEN'S THEOREM AND NOT BY SUMMING CELLS.  Both
-integrands are of the form a( Psi ) r + b( Psi )/r, so
+integrands are of the form a( Psi ) R + b( Psi )/R, so
 
     int_{A(u)} h( psi_n ) dA  =  h( u ) V( u ) - int_0^u h'( v ) V( v ) dv
 
-with V( u ) the enclosed moment of r or 1/r, and each moment follows from the
+with V( u ) the enclosed moment of R or 1/R, and each moment follows from the
 bounding CONTOUR alone:
 
-    int r dA = oint ( r^2 / 2 ) dz,        int ( 1/r ) dA = oint ln r dz.
+    int R dA = oint ( R^2 / 2 ) dz,        int ( 1/R ) dA = oint ln R dz.
 
 A hard mask over grid cells is O( h ) in the boundary and reads the enclosed
 current 3.9e-04 wrong on the shipped reference; the contour route is O( h^2 )
@@ -172,7 +172,7 @@ def mxh_curve(meta, n=4096):
 
 
 def moments(rr, zz):
-	"""( area, int r dA, int 1/r dA ) for the region a closed curve encloses.
+	"""( area, int R dA, int 1/R dA ) for the region a closed curve encloses.
 
 	Green's theorem on the closed polygon, orientation-corrected, so the caller
 	need not know which way round the contour came out.
@@ -187,7 +187,7 @@ def moments(rr, zz):
 
 
 class FluxGeometry:
-	"""The enclosed moments V_r( u ), V_1/r( u ) of one equilibrium's surfaces.
+	"""The enclosed moments V_r( u ), V_1/R( u ) of one equilibrium's surfaces.
 
 	`u` is the reference's own normalised poloidal flux psi_n -- 0 on the axis,
 	1 on the separatrix -- because that is the label the grid carries.  MEQ's
@@ -262,7 +262,7 @@ class FluxGeometry:
 		return best
 
 	def enclosed(self, profile, which, u):
-		"""int_{A(u)} profile( psi_n ) * ( r or 1/r ) dA, by parts.
+		"""int_{A(u)} profile( psi_n ) * ( R or 1/R ) dA, by parts.
 
 		`profile` is a CubicSpline in psi_n, so its derivative is exact and no
 		numerical differentiation of V is needed anywhere.
@@ -283,7 +283,7 @@ def refine_field(field, factor):
 	error is O( h^2 ) per segment but the number of segments falls with the
 	surface, so it is worst on the innermost surfaces -- exactly the ones the
 	rho label near the axis is built from.  Measured on `fixed-h-circular`,
-	`int r dA` inside psi_n = 0.1 and the enclosed current at Gamma:
+	`int R dA` inside psi_n = 0.1 and the enclosed current at Gamma:
 
 	    factor      1          2          4
 	    V_r( 0.1 )  1.760669e-02  1.763618e-02  1.764379e-02
@@ -553,7 +553,7 @@ def build(case, level=None, n_levels=120, n_fit=10, sym_tol=1e-6,
 	# THE AXIS SLOPE IS ENFORCED RATHER THAN FITTED.  Every flux function here
 	# is smooth in rho^2, so df/drho vanishes at rho = 0 exactly; a spline
 	# through values alone puts a small nonzero slope there and an O( 1 )
-	# relative error in dp/drho on the innermost surfaces, where r^2 p' is the
+	# relative error in dp/drho on the innermost surfaces, where R^2 p' is the
 	# whole source.
 	knots = np.linspace(0.0, 1.0, 65)
 	rho_sorted = np.argsort(rho)
@@ -677,8 +677,8 @@ def main():
 		a_m, vr_m, vi_m = out["geom"].curve_outer
 		print("\n    THE OUTERMOST SURFACE: the reference's contour against Gamma itself")
 		print(f"      area   contour {a_c:.8e}  MXH {a_m:.8e}  rel {abs(a_c-a_m)/a_m:.3e}")
-		print(f"      int r  contour {vr_c:.8e}  MXH {vr_m:.8e}  rel {abs(vr_c-vr_m)/vr_m:.3e}")
-		print(f"      int 1/r contour {vi_c:.8e}  MXH {vi_m:.8e}  rel {abs(vi_c-vi_m)/vi_m:.3e}")
+		print(f"      int R  contour {vr_c:.8e}  MXH {vr_m:.8e}  rel {abs(vr_c-vr_m)/vr_m:.3e}")
+		print(f"      int 1/R contour {vi_c:.8e}  MXH {vi_m:.8e}  rel {abs(vi_c-vi_m)/vi_m:.3e}")
 
 		ref = case["ref"]
 		R, Z = np.array(ref["R"]), np.array(ref["Z"])

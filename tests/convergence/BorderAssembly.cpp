@@ -364,7 +364,7 @@ BOOST_AUTO_TEST_CASE( theBorderAssemblersAreThreadSafe )
 	std::printf( "    plasma elements %d of %d, n = %d\n",
 	             m.solver->plasmaComponentElements(),
 	             m.solver->plasmaCandidateElements(), n );
-	std::printf( "    int F/r            %.17e\n", serial.current );
+	std::printf( "    int F/R            %.17e\n", serial.current );
 	std::printf( "                       %.17e\n", threaded.current );
 	std::printf( "    dI/d(psi_ax)       %.17e\n", serial.againstAxis );
 	std::printf( "    dI/d(psi_bnd)      %.17e\n", serial.againstBoundary );
@@ -379,7 +379,7 @@ BOOST_AUTO_TEST_CASE( theBorderAssemblersAreThreadSafe )
 	                    "the plasma fill reached no elements, so none of the "
 	                    "five loops has a body to run" );
 	BOOST_TEST_REQUIRE( serial.current != 0.0,
-	                    "int F/r is exactly zero, so assemblePlasmaCurrent() "
+	                    "int F/R is exactly zero, so assemblePlasmaCurrent() "
 	                    "accumulated nothing and the comparison is vacuous" );
 
 	BOOST_TEST( serial.current - threaded.current == 0.0,

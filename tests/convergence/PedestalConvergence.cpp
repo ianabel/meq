@@ -48,8 +48,8 @@
  *
  * Every one of the four sources vanishes at psi = 0:
  *
- *   4.2  F = 2 r^2 psi ( ... )                                 explicitly
- *   4.3  F = r^2 p', p = A( psi ) ( 1 - ( 1 - psi )^a )^b       b = 2, so the
+ *   4.2  F = 2 R^2 psi ( ... )                                 explicitly
+ *   4.3  F = R^2 p', p = A( psi ) ( 1 - ( 1 - psi )^a )^b       b = 2, so the
  *                                                              bracket is
  *                                                              O( psi^2 )
  *   4.4  F = < 4.2 > + c3 ( 1 - exp( -( psi/sigma_2 )^2 ) ) cos( c4 psi )
@@ -95,7 +95,7 @@
  *      domain. sigma = 0.0707 for section 4.2, so the pedestal -- the layer in
  *      which dF/dpsi swings by a factor of 800 -- lies inside the mesh rather
  *      than pressed against the boundary where a Dirichlet condition would
- *      partly hide it. Section 4.5's ridge, at r + psi = 1, likewise crosses the
+ *      partly hide it. Section 4.5's ridge, at R + psi = 1, likewise crosses the
  *      box for psi in [ -0.4, 0.4 ]. That is the localised internal structure
  *      these benchmarks exist to produce.
  *   2. it is smooth, and simple enough to state in one line. There is no exact
@@ -116,7 +116,7 @@
  * that is not the trace of a smooth solution of this equation, the corners of
  * the rectangle limit the regularity of the solution: a right-angled corner has
  * singular exponents k pi/omega = 2k, and the resonance with the integer
- * exponent produces an r^2 log r term, so the solution sits in H^(3-epsilon) and
+ * exponent produces an R^2 log R term, so the solution sits in H^(3-epsilon) and
  * its gradient in H^(2-epsilon) however smooth the data is.
  *
  * aCornerSingularSolutionCapsTheRateOnThisRectangle puts a number on it, on a
@@ -190,7 +190,7 @@ namespace
 		return 0.3;
 	}
 
-	double pedestalDatum( double /*r*/, double z )
+	double pedestalDatum( double /*R*/, double z )
 	{
 		Rectangle const box = standardBox();
 		return pedestalDatumAmplitude()*z/box.zMax;
@@ -225,48 +225,48 @@ namespace
 	double const sigmaSquared = 0.005;
 
 	/// eq (24), written out from the rendered page 16 with no factoring:
-	/// F = 2 r^2 psi ( c2 ( 1 - e ) + ( 1/sigma^2 )( c1 + c2 psi^2 ) e ).
-	double printedPedestalSource( double r, double psi )
+	/// F = 2 R^2 psi ( c2 ( 1 - e ) + ( 1/sigma^2 )( c1 + c2 psi^2 ) e ).
+	double printedPedestalSource( double radius, double psi )
 	{
 		double const e = std::exp( -( psi/std::sqrt( sigmaSquared ) )
 		                           *( psi/std::sqrt( sigmaSquared ) ) );
-		return 2.0*r*r*psi*( c2*( 1.0 - e )
+		return 2.0*radius*radius*psi*( c2*( 1.0 - e )
 		                     + ( c1 + c2*psi*psi )*e/sigmaSquared );
 	}
 
 	/// eq (26), from the rendered page 18, with section 4.4's own constants.
-	double printedCurrentHoleSource( double r, double psi )
+	double printedCurrentHoleSource( double radius, double psi )
 	{
 		double const hc1 = 0.4, hc2 = 0.1, hc3 = -18.0, hc4 = 10.0*M_PI;
 		double const s1 = 5.0e-3, s2 = 3.0e-3;
 		double const e1 = std::exp( -psi*psi/s1 );
 		double const e2 = std::exp( -psi*psi/s2 );
-		return 2.0*r*r*psi*( hc2*( 1.0 - e1 ) + ( hc1 + hc2*psi*psi )*e1/s1 )
+		return 2.0*radius*radius*psi*( hc2*( 1.0 - e1 ) + ( hc1 + hc2*psi*psi )*e1/s1 )
 		       + hc3*( 1.0 - e2 )*std::cos( hc4*psi );
 	}
 
 	/// eq (27), from the rendered page 19, with section 4.5's own constants.
 	/// Note the first exponential of the added term uses sigma_1, not sigma_2.
-	double printedInternalLayerSource( double r, double psi )
+	double printedInternalLayerSource( double radius, double psi )
 	{
 		double const lc1 = 0.8, lc2 = 0.2, lc3 = 15.0;
 		double const s1 = 5.0e-3, s2 = 7.5e-4;
 		double const e1 = std::exp( -psi*psi/s1 );
-		double const u = 1.0 - r - psi;
-		return 2.0*r*r*psi*( lc2*( 1.0 - e1 ) + ( lc1 + lc2*psi*psi )*e1/s1 )
+		double const u = 1.0 - radius - psi;
+		return 2.0*radius*radius*psi*( lc2*( 1.0 - e1 ) + ( lc1 + lc2*psi*psi )*e1/s1 )
 		       + lc3*( 1.0 - e1 )*std::exp( -u*u/s2 );
 	}
 
 	/// A central difference of F in psi, for the Jacobian checks.
 	template<typename Source>
-	double differenceOfF( Source const &source, double r, double z, double psi,
+	double differenceOfF( Source const &source, double radius, double z, double psi,
 	                      double step )
 	{
-		return ( source.f( r, z, psi + step ) - source.f( r, z, psi - step ) )
+		return ( source.f( radius, z, psi + step ) - source.f( radius, z, psi - step ) )
 		       /( 2.0*step );
 	}
 
-	/// dF/dpsi against a central difference of F, over a scatter of ( r, psi ).
+	/// dF/dpsi against a central difference of F, over a scatter of ( R, psi ).
 	/// The step has to be small next to sigma = 0.07 and large next to the
 	/// round-off floor, which is what 1e-6 is.
 	template<typename Source>
@@ -274,12 +274,12 @@ namespace
 	{
 		double const step = 1.0e-6;
 		double worst = 0.0;
-		for ( double r = 0.6; r < 1.45; r += 0.1 )
+		for ( double radius = 0.6; radius < 1.45; radius += 0.1 )
 		{
 			for ( double psi = -0.5; psi < 0.85; psi += 0.01 )
 			{
-				double const difference = differenceOfF( source, r, 0.13, psi, step );
-				double const analytic = source.dFdPsi( r, 0.13, psi );
+				double const difference = differenceOfF( source, radius, 0.13, psi, step );
+				double const analytic = source.dFdPsi( radius, 0.13, psi );
 				double const scale = 1.0 + std::abs( analytic );
 				worst = std::max( worst, std::abs( difference - analytic )/scale );
 			}
@@ -308,7 +308,7 @@ BOOST_AUTO_TEST_CASE( sourcesReproduceThePrintedExpressions )
 		= meq::analytic::InternalLayer::internalLayer();
 
 	double worstPedestal = 0.0, worstHole = 0.0, worstLayer = 0.0;
-	for ( double r = 0.6; r < 1.45; r += 0.05 )
+	for ( double radius = 0.6; radius < 1.45; radius += 0.05 )
 	{
 		for ( double psi = -0.6; psi < 0.95; psi += 0.005 )
 		{
@@ -317,11 +317,11 @@ BOOST_AUTO_TEST_CASE( sourcesReproduceThePrintedExpressions )
 				return std::abs( a - b )/( 1.0 + std::abs( b ) );
 			};
 			worstPedestal = std::max( worstPedestal,
-				relative( pedestal.f( r, 0.0, psi ), printedPedestalSource( r, psi ) ) );
+				relative( pedestal.f( radius, 0.0, psi ), printedPedestalSource( radius, psi ) ) );
 			worstHole = std::max( worstHole,
-				relative( hole.f( r, 0.0, psi ), printedCurrentHoleSource( r, psi ) ) );
+				relative( hole.f( radius, 0.0, psi ), printedCurrentHoleSource( radius, psi ) ) );
 			worstLayer = std::max( worstLayer,
-				relative( layer.f( r, 0.0, psi ), printedInternalLayerSource( r, psi ) ) );
+				relative( layer.f( radius, 0.0, psi ), printedInternalLayerSource( radius, psi ) ) );
 		}
 	}
 
@@ -337,7 +337,7 @@ BOOST_AUTO_TEST_CASE( sourcesReproduceThePrintedExpressions )
 	BOOST_TEST( worstLayer < 1.0e-14 );
 }
 
-/// F = mu0 r^2 p' with mu0 = 1, for the two sources that have a pressure
+/// F = mu0 R^2 p' with mu0 = 1, for the two sources that have a pressure
 /// profile. This is the step that eq (24) makes explicit and that section 4.3
 /// leaves to the reader, so it is checked for both.
 BOOST_AUTO_TEST_CASE( theSourceIsRSquaredTimesThePressureGradient )
@@ -348,14 +348,14 @@ BOOST_AUTO_TEST_CASE( theSourceIsRSquaredTimesThePressureGradient )
 		= meq::analytic::TransportBarrier::barrier();
 
 	double worst = 0.0;
-	for ( double r = 0.6; r < 1.45; r += 0.1 )
+	for ( double radius = 0.6; radius < 1.45; radius += 0.1 )
 	{
 		for ( double psi = -0.4; psi < 0.95; psi += 0.01 )
 		{
-			worst = std::max( worst, std::abs( pedestal.f( r, 0.0, psi )
-			                                   - r*r*pedestal.pPrime( psi ) ) );
-			worst = std::max( worst, std::abs( barrier.f( r, 0.0, psi )
-			                                   - r*r*barrier.pPrime( psi ) ) );
+			worst = std::max( worst, std::abs( pedestal.f( radius, 0.0, psi )
+			                                   - radius*radius*pedestal.pPrime( psi ) ) );
+			worst = std::max( worst, std::abs( barrier.f( radius, 0.0, psi )
+			                                   - radius*radius*barrier.pPrime( psi ) ) );
 		}
 	}
 	BOOST_TEST( worst < 1.0e-13 );
@@ -457,16 +457,16 @@ BOOST_AUTO_TEST_CASE( everySourceHasTheDerivativeItClaims )
 /// rather than inherited.
 BOOST_AUTO_TEST_CASE( everySourceVanishesAtZeroFlux )
 {
-	for ( double r = 0.6; r < 1.45; r += 0.1 )
+	for ( double radius = 0.6; radius < 1.45; radius += 0.1 )
 	{
 		BOOST_TEST( std::abs( meq::analytic::PressurePedestal::pedestal()
-		                      .f( r, 0.0, 0.0 ) ) < 1.0e-300 );
+		                      .f( radius, 0.0, 0.0 ) ) < 1.0e-300 );
 		BOOST_TEST( std::abs( meq::analytic::TransportBarrier::barrier()
-		                      .f( r, 0.0, 0.0 ) ) < 1.0e-300 );
+		                      .f( radius, 0.0, 0.0 ) ) < 1.0e-300 );
 		BOOST_TEST( std::abs( meq::analytic::CurrentHole::currentHole()
-		                      .f( r, 0.0, 0.0 ) ) < 1.0e-300 );
+		                      .f( radius, 0.0, 0.0 ) ) < 1.0e-300 );
 		BOOST_TEST( std::abs( meq::analytic::InternalLayer::internalLayer()
-		                      .f( r, 0.0, 0.0 ) ) < 1.0e-300 );
+		                      .f( radius, 0.0, 0.0 ) ) < 1.0e-300 );
 	}
 }
 
@@ -554,7 +554,7 @@ BOOST_AUTO_TEST_CASE( anInitialGuessReachesTheIterateButNotTheOtherBranch )
 
 	mfem::FunctionCoefficient bump( [ &box ]( mfem::Vector const &x )
 	{
-		double const u = ( x( 0 ) - box.rMin )/box.width();
+		double const u = ( x( 0 ) - box.minRadius )/box.width();
 		double const v = ( x( 1 ) - box.zMin )/box.height();
 		return 0.2*std::sin( M_PI*u )*std::sin( M_PI*v );
 	} );
@@ -701,7 +701,7 @@ BOOST_AUTO_TEST_CASE( andersonPicardReachesTheSameSolutionAsNewton )
 	 *     paths can reach one discrete solution exactly and therefore that the
 	 *     Picard path solves meq's problem rather than a neighbouring one. That
 	 *     is the check the original was reaching for: the frozen source carries
-	 *     the same -1/r and the same sign convention, and getting either wrong
+	 *     the same -1/R and the same sign convention, and getting either wrong
 	 *     would show up here and nowhere else, at O(1) rather than 1e-5.
 	 *   * the WORST agreement is small in absolute terms, which bounds "a
 	 *     different nearby solution" away from "a different problem".
@@ -802,7 +802,7 @@ BOOST_AUTO_TEST_CASE( andersonPicardReachesTheSameSolutionAsNewton )
 	            "SAME discrete solution to round-off; that they never do means "
 	            "the Picard path is solving a neighbouring problem rather than "
 	            "finding a neighbouring solution. Check the frozen source's sign "
-	            "and its 1/r first -- this is the only test that sees them" );
+	            "and its 1/R first -- this is the only test that sees them" );
 
 	BOOST_TEST( worstAgreement < 1.0e-3,
 	            "the two paths disagree by " << worstAgreement << " at worst, "
@@ -922,7 +922,7 @@ BOOST_AUTO_TEST_CASE( anInitialGuessDoesNotMoveTheConvergedAnswer )
 
 	mfem::FunctionCoefficient bump( [ &box ]( mfem::Vector const &x )
 	{
-		double const u = ( x( 0 ) - box.rMin )/box.width();
+		double const u = ( x( 0 ) - box.minRadius )/box.width();
 		double const v = ( x( 1 ) - box.zMin )/box.height();
 		return 0.05*std::sin( M_PI*u )*std::sin( M_PI*v );
 	} );
@@ -1252,7 +1252,7 @@ BOOST_AUTO_TEST_CASE( pedestalSelfConverges )
 /// reason is the physics of eq (25) rather than a convergence difficulty.
 ///
 /// Its structure is at psi_0 = 0.3, not at psi = 0: that is where the erf turns
-/// over and where the source spikes to 10 r^2. barrierDatum() ramps from 0 at
+/// over and where the source spikes to 10 R^2. barrierDatum() ramps from 0 at
 /// the bottom of the box to 0.6 at the top, so psi_0 lies squarely in the
 /// interior and the barrier is an INTERNAL feature, which is what section 4.3 is
 /// about. pedestalDatum(), which spans [ -0.3, 0.3 ], would put psi_0 exactly on
@@ -1260,7 +1260,7 @@ BOOST_AUTO_TEST_CASE( pedestalSelfConverges )
 /// 60 iterations at k = 2, h = 0.05, with the local solves failing throughout.
 ///
 /// The other three sources keep pedestalDatum() because their structure IS at
-/// psi = 0: the sigma layer of eq (24), and the ridge r + psi = 1 of eq (27),
+/// psi = 0: the sigma layer of eq (24), and the ridge R + psi = 1 of eq (27),
 /// which crosses the box at psi in [ -0.4, 0.4 ].
 BOOST_AUTO_TEST_CASE( transportBarrierSelfConverges )
 {
@@ -1353,8 +1353,8 @@ BOOST_AUTO_TEST_CASE( transportBarrierSelfConverges )
 /// on a Solov'ev source with no non-linearity at all.
 ///
 /// The second is specific to eq (27) and is what the section is about. It adds a
-/// ridge along r + psi = 1 of width sigma_2 = 0.0274 in that argument;
-/// |grad( r + psi )| is about 1.1 over this box -- the r contributes 1 on its own
+/// ridge along R + psi = 1 of width sigma_2 = 0.0274 in that argument;
+/// |grad( R + psi )| is about 1.1 over this box -- the R contributes 1 on its own
 /// -- so the ridge is about 0.025 wide IN SPACE, and the finest mesh here has
 /// h = 0.0125: two cells across it. This is precisely the case
 /// refs/HDG-GradShafranov-Adaptive.pdf poses to demonstrate ADAPTIVE refinement
@@ -1391,7 +1391,7 @@ BOOST_AUTO_TEST_CASE( internalLayerSelfConverges )
 /// non-linearity at all -- with homogeneous Dirichlet data on the same
 /// rectangle. Homogeneous data is what matters: the solution is then not the
 /// trace of anything smooth, and the four right-angled corners of the rectangle
-/// carry r^2 log r terms, which put it in H^(3-epsilon) and no better.
+/// carry R^2 log R terms, which put it in H^(3-epsilon) and no better.
 ///
 /// If this control caps out near 3 as well, then the shortfalls above are the
 /// corners and not the sources.
@@ -1409,7 +1409,7 @@ BOOST_AUTO_TEST_CASE( aCornerSingularSolutionCapsTheRateOnThisRectangle )
 	// Design order at k = 1, and flat at about 3 in psi and 2.2 in q from k = 2
 	// onwards. There is nothing non-linear here at all -- F is constant in psi,
 	// dF/dpsi is identically zero, and every solve finishes in one Newton step --
-	// so this is the domain and nothing else. It is the r^2 log r corner terms of
+	// so this is the domain and nothing else. It is the R^2 log R corner terms of
 	// a right-angled corner: they put the solution in H^(3-epsilon) and its
 	// gradient in H^(2-epsilon), and no polynomial degree recovers what the
 	// geometry has taken away.

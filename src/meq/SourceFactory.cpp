@@ -14,14 +14,14 @@ namespace meq
 	{
 		/*
 		 * The manufactured source of refs/HDG-GradShafranov.pdf Example 5,
-		 * for the exact solution psi = sin( kr ( r + r0 ) ) cos( kz z ):
+		 * for the exact solution psi = sin( kr ( R + R_0 ) ) cos( kz z ):
 		 *
-		 *     F( r, z, psi ) = ( kr^2 + kz^2 ) psi
-		 *                    + ( kr / r ) cos( kr ( r + r0 ) ) cos( kz z )
-		 *                    + r ( sc^2 - psi^2 + exp( -sc ) - exp( -psi ) )
+		 *     F( R, z, psi ) = ( kr^2 + kz^2 ) psi
+		 *                    + ( kr / R ) cos( kr ( R + R_0 ) ) cos( kz z )
+		 *                    + R ( sc^2 - psi^2 + exp( -sc ) - exp( -psi ) )
 		 *
-		 * with sc the exact flux at ( r, z ). Note that F depends on position
-		 * both through r and through sc, and that it returns F rather than F/r,
+		 * with sc the exact flux at ( R, z ). Note that F depends on position
+		 * both through R and through sc, and that it returns F rather than F/R,
 		 * as meq::Source::f() requires.
 		 *
 		 * It is file-local because nothing outside the factory should reach it:
@@ -38,33 +38,33 @@ namespace meq
 		class ManufacturedSource : public Source
 		{
 			public:
-				ManufacturedSource( double r0In, double krIn, double kzIn )
-					: r0Value( r0In ), krValue( krIn ), kzValue( kzIn )
+				ManufacturedSource( double radius0In, double krIn, double kzIn )
+					: r0Value( radius0In ), krValue( krIn ), kzValue( kzIn )
 				{
 				}
 
-				double f( double r, double z, double psiValue ) const override
+				double f( double radius, double z, double psiValue ) const override
 				{
-					double const sc = exactPsi( r, z );
+					double const sc = exactPsi( radius, z );
 					double const linear = ( krValue*krValue + kzValue*kzValue )*psiValue;
-					double const geometric = ( krValue/r )
-					                         *std::cos( krValue*( r + r0Value ) )
+					double const geometric = ( krValue/radius )
+					                         *std::cos( krValue*( radius + r0Value ) )
 					                         *std::cos( kzValue*z );
 					double const nonlinear = sc*sc - psiValue*psiValue
 					                         + std::exp( -sc ) - std::exp( -psiValue );
-					return linear + geometric + r*nonlinear;
+					return linear + geometric + radius*nonlinear;
 				}
 
-				double dFdPsi( double r, double, double psiValue ) const override
+				double dFdPsi( double radius, double, double psiValue ) const override
 				{
 					return krValue*krValue + kzValue*kzValue
-					       + r*( -2.0*psiValue + std::exp( -psiValue ) );
+					       + radius*( -2.0*psiValue + std::exp( -psiValue ) );
 				}
 
 			private:
-				double exactPsi( double r, double z ) const
+				double exactPsi( double radius, double z ) const
 				{
-					return std::sin( krValue*( r + r0Value ) )*std::cos( kzValue*z );
+					return std::sin( krValue*( radius + r0Value ) )*std::cos( kzValue*z );
 				}
 
 				double r0Value, krValue, kzValue;
@@ -249,7 +249,7 @@ namespace meq
 			{
 				ManufacturedParameters const &parameters = config.getManufactured();
 				return std::make_shared<ManufacturedSource const>(
-					parameters.r0, parameters.kr, parameters.kz );
+					parameters.radius0, parameters.kr, parameters.kz );
 			}
 
 			case SourceType::Rotating:

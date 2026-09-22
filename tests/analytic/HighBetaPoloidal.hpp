@@ -265,16 +265,16 @@ class HighBetaPoloidal
 			return 0.5*( fAxisSq - fBndSq )*sum/( psiAxisValue*psiAxisValue );
 		}
 
-		/// F( r, z, psi ) = mu0 r^2 dp/dpsi + g dg/dpsi, eq (2) exactly. No z
+		/// F( R, z, psi ) = mu0 R^2 dp/dpsi + g dg/dpsi, eq (2) exactly. No z
 		/// dependence: a profile equilibrium has none.
-		double f( double r, double, double psi ) const
+		double f( double radius, double, double psi ) const
 		{
-			return mu0Value*r*r*pPrime( psi ) + ggPrime( psi );
+			return mu0Value*radius*radius*pPrime( psi ) + ggPrime( psi );
 		}
 
-		double dFdPsi( double r, double, double psi ) const
+		double dFdPsi( double radius, double, double psi ) const
 		{
-			return mu0Value*r*r*pDoublePrime( psi ) + ggDoublePrime( psi );
+			return mu0Value*radius*radius*pDoublePrime( psi ) + ggDoublePrime( psi );
 		}
 
 		double psiAxis() const { return psiAxisValue; }

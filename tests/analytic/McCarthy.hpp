@@ -43,12 +43,12 @@ namespace analytic
  *
  *     p(psi)   = (S/mu0) psi,        g(psi)^2 = T psi^2 + 2 U psi + g0^2,
  *
- * so that, with F := mu0 r^2 dp/dpsi + g dg/dpsi as everywhere else in MEQ,
+ * so that, with F := mu0 R^2 dp/dpsi + g dg/dpsi as everywhere else in MEQ,
  *
- *     mu0 r^2 dp/dpsi = S r^2,
+ *     mu0 R^2 dp/dpsi = S R^2,
  *     g dg/dpsi       = (1/2) d(g^2)/dpsi = T psi + U,
  *     ------------------------------------------------
- *     F(r, z, psi)    = T psi + S r^2 + U.                      (HDG-GS-1 (13))
+ *     F(R, z, psi)    = T psi + S R^2 + U.                      (HDG-GS-1 (13))
  *
  * Linear in psi, so dF/dpsi = T identically.
  *
@@ -60,7 +60,7 @@ namespace analytic
  *
  * (their c_1 and c_2, one-based) which gives
  *
- *     F = T ( psi - c[0] - c[1] r^2 ).
+ *     F = T ( psi - c[0] - c[1] R^2 ).
  *
  * A CHECK ON THE OLD CODE, which had this wrong. The pre-modernisation
  * fixture returned pPrime() = -c[0] T and ffPrime() = T psi - c[1]. Both are
@@ -70,18 +70,18 @@ namespace analytic
  * The corrected forms are below, and mu0 is an explicit constructor argument
  * rather than an assumption.
  *
- * NOTE ON UNITS: f() returns F, NOT F/r. The 1/r belongs to the weak form and
- * GradShafranovSolver applies it. The old fixture returned F/r, matching a
+ * NOTE ON UNITS: f() returns F, NOT F/R. The 1/R belongs to the weak form and
+ * GradShafranovSolver applies it. The old fixture returned F/R, matching a
  * different convention. Soloviev.hpp returns F too.
  */
 
 /// An exact equilibrium with a source linear in psi, from the eigenfunction
 /// families of McCarthy (1999). Lengths are normalised to the major radius;
-/// r must be strictly positive, since the expansion contains Y_1(r).
+/// R must be strictly positive, since the expansion contains Y_1(R).
 class McCarthyEquilibrium
 {
 	public:
-		/// @param tIn   the parameter T: F = T psi + S r^2 + U, so dF/dpsi = T.
+		/// @param tIn   the parameter T: F = T psi + S R^2 + U, so dF/dpsi = T.
 		/// @param cIn   the eighteen expansion coefficients of HDG-GS-1 eq (14).
 		///              The first two also fix U and S, see the note above.
 		/// @param mu0In vacuum permeability. Defaults to 1, i.e. normalised
@@ -110,57 +110,57 @@ class McCarthyEquilibrium
 		}
 
 		/// The poloidal flux function, HDG-GS-1 eq (14).
-		double psi( double r, double z ) const
+		double psi( double radius, double z ) const
 		{
 			double const p = std::sqrt( t );
 			double const q = 0.5 * p;
 			double const nu = std::sqrt( 0.75 ) * p;
-			double const s = std::sqrt( r * r + z * z );
+			double const s = std::sqrt( radius * radius + z * z );
 
 			return c[ 0 ]
-			     + c[ 1 ] * r * r
-			     + r * std::cyl_bessel_j( 1, p * r ) * ( c[ 2 ] + c[ 3 ] * z )
+			     + c[ 1 ] * radius * radius
+			     + radius * std::cyl_bessel_j( 1, p * radius ) * ( c[ 2 ] + c[ 3 ] * z )
 			     + c[ 4 ] * std::cos( p * z ) + c[ 5 ] * std::sin( p * z )
-			     + r * r * ( c[ 6 ] * std::cos( p * z ) + c[ 7 ] * std::sin( p * z ) )
+			     + radius * radius * ( c[ 6 ] * std::cos( p * z ) + c[ 7 ] * std::sin( p * z ) )
 			     + c[ 8 ] * std::cos( p * s ) + c[ 9 ] * std::sin( p * s )
-			     + r * std::cyl_bessel_j( 1, nu * r )
+			     + radius * std::cyl_bessel_j( 1, nu * radius )
 			           * ( c[ 10 ] * std::cos( q * z ) + c[ 11 ] * std::sin( q * z ) )
-			     + r * std::cyl_bessel_j( 1, q * r )
+			     + radius * std::cyl_bessel_j( 1, q * radius )
 			           * ( c[ 12 ] * std::cos( nu * z ) + c[ 13 ] * std::sin( nu * z ) )
-			     + r * std::cyl_neumann( 1, nu * r )
+			     + radius * std::cyl_neumann( 1, nu * radius )
 			           * ( c[ 14 ] * std::cos( q * z ) + c[ 15 ] * std::sin( q * z ) )
-			     + r * std::cyl_neumann( 1, q * r )
+			     + radius * std::cyl_neumann( 1, q * radius )
 			           * ( c[ 16 ] * std::cos( nu * z ) + c[ 17 ] * std::sin( nu * z ) );
 		}
 
 		/// grad_bar(psi) = ( d_r psi, d_z psi ). Not the HDG flux; see flux().
-		void gradPsi( double r, double z, double &dPsiDr, double &dPsiDz ) const
+		void gradPsi( double radius, double z, double &dPsiDr, double &dPsiDz ) const
 		{
 			double const p = std::sqrt( t );
 			double const q = 0.5 * p;
 			double const nu = std::sqrt( 0.75 ) * p;
-			double const s = std::sqrt( r * r + z * z );
+			double const s = std::sqrt( radius * radius + z * z );
 
-			// d( r C_1( a r ) )/dr for C = J and C = Y, using
+			// d( R C_1( a R ) )/dr for C = J and C = Y, using
 			// C_1'(x) = ( C_0(x) - C_2(x) ) / 2.
 			auto dRBesselJ = [ & ]( double a )
 			{
-				return std::cyl_bessel_j( 1, a * r )
-				     + 0.5 * a * r * ( std::cyl_bessel_j( 0, a * r )
-				                     - std::cyl_bessel_j( 2, a * r ) );
+				return std::cyl_bessel_j( 1, a * radius )
+				     + 0.5 * a * radius * ( std::cyl_bessel_j( 0, a * radius )
+				                     - std::cyl_bessel_j( 2, a * radius ) );
 			};
 			auto dRNeumann = [ & ]( double a )
 			{
-				return std::cyl_neumann( 1, a * r )
-				     + 0.5 * a * r * ( std::cyl_neumann( 0, a * r )
-				                     - std::cyl_neumann( 2, a * r ) );
+				return std::cyl_neumann( 1, a * radius )
+				     + 0.5 * a * radius * ( std::cyl_neumann( 0, a * radius )
+				                     - std::cyl_neumann( 2, a * radius ) );
 			};
 
-			dPsiDr = 2.0 * c[ 1 ] * r
+			dPsiDr = 2.0 * c[ 1 ] * radius
 			       + dRBesselJ( p ) * ( c[ 2 ] + c[ 3 ] * z )
-			       + 2.0 * r * ( c[ 6 ] * std::cos( p * z ) + c[ 7 ] * std::sin( p * z ) )
-			       - ( c[ 8 ] * p * r / s ) * std::sin( p * s )
-			       + ( c[ 9 ] * p * r / s ) * std::cos( p * s )
+			       + 2.0 * radius * ( c[ 6 ] * std::cos( p * z ) + c[ 7 ] * std::sin( p * z ) )
+			       - ( c[ 8 ] * p * radius / s ) * std::sin( p * s )
+			       + ( c[ 9 ] * p * radius / s ) * std::cos( p * s )
 			       + dRBesselJ( nu ) * ( c[ 10 ] * std::cos( q * z )
 			                           + c[ 11 ] * std::sin( q * z ) )
 			       + dRBesselJ( q ) * ( c[ 12 ] * std::cos( nu * z )
@@ -170,35 +170,35 @@ class McCarthyEquilibrium
 			       + dRNeumann( q ) * ( c[ 16 ] * std::cos( nu * z )
 			                          + c[ 17 ] * std::sin( nu * z ) );
 
-			dPsiDz = r * std::cyl_bessel_j( 1, p * r ) * c[ 3 ]
+			dPsiDz = radius * std::cyl_bessel_j( 1, p * radius ) * c[ 3 ]
 			       + p * ( -c[ 4 ] * std::sin( p * z ) + c[ 5 ] * std::cos( p * z ) )
-			       + r * r * p * ( -c[ 6 ] * std::sin( p * z )
+			       + radius * radius * p * ( -c[ 6 ] * std::sin( p * z )
 			                     + c[ 7 ] * std::cos( p * z ) )
 			       - ( c[ 8 ] * p * z / s ) * std::sin( p * s )
 			       + ( c[ 9 ] * p * z / s ) * std::cos( p * s )
-			       + r * std::cyl_bessel_j( 1, nu * r )
+			       + radius * std::cyl_bessel_j( 1, nu * radius )
 			           * q * ( -c[ 10 ] * std::sin( q * z ) + c[ 11 ] * std::cos( q * z ) )
-			       + r * std::cyl_bessel_j( 1, q * r )
+			       + radius * std::cyl_bessel_j( 1, q * radius )
 			           * nu * ( -c[ 12 ] * std::sin( nu * z ) + c[ 13 ] * std::cos( nu * z ) )
-			       + r * std::cyl_neumann( 1, nu * r )
+			       + radius * std::cyl_neumann( 1, nu * radius )
 			           * q * ( -c[ 14 ] * std::sin( q * z ) + c[ 15 ] * std::cos( q * z ) )
-			       + r * std::cyl_neumann( 1, q * r )
+			       + radius * std::cyl_neumann( 1, q * radius )
 			           * nu * ( -c[ 16 ] * std::sin( nu * z ) + c[ 17 ] * std::cos( nu * z ) );
 		}
 
-		/// The HDG flux q = grad_bar(psi) / r.
-		void flux( double r, double z, double &qR, double &qZ ) const
+		/// The HDG flux q = grad_bar(psi) / R.
+		void flux( double radius, double z, double &qR, double &qZ ) const
 		{
-			gradPsi( r, z, qR, qZ );
-			qR /= r;
-			qZ /= r;
+			gradPsi( radius, z, qR, qZ );
+			qR /= radius;
+			qZ /= radius;
 		}
 
-		/// F = T psi + S r^2 + U = T ( psi - c[0] - c[1] r^2 ).
-		/// Returns F, not F/r.
-		double f( double r, double /*z*/, double psiValue ) const
+		/// F = T psi + S R^2 + U = T ( psi - c[0] - c[1] R^2 ).
+		/// Returns F, not F/R.
+		double f( double radius, double /*z*/, double psiValue ) const
 		{
-			return t * ( psiValue - c[ 0 ] - c[ 1 ] * r * r );
+			return t * ( psiValue - c[ 0 ] - c[ 1 ] * radius * radius );
 		}
 
 		/// dF/dpsi = T, constant. This is the property that makes the fixture
@@ -225,18 +225,18 @@ class McCarthyEquilibrium
 		/// equation is -Delta*(psi) = F, so this must equal -f(); the test
 		/// suite asserts exactly that, which checks the eighteen-term
 		/// transcription rather than trusting it.
-		double deltaStarFD( double r, double z, double h = 1.0e-4 ) const
+		double deltaStarFD( double radius, double z, double h = 1.0e-4 ) const
 		{
 			auto innerR = [ & ]( double rr )
 			{
 				return ( psi( rr + h, z ) - psi( rr - h, z ) ) / ( 2.0 * h ) / rr;
 			};
 
-			double const dRInner = ( innerR( r + h ) - innerR( r - h ) ) / ( 2.0 * h );
-			double const dZZ = ( psi( r, z + h ) - 2.0 * psi( r, z ) + psi( r, z - h ) )
+			double const dRInner = ( innerR( radius + h ) - innerR( radius - h ) ) / ( 2.0 * h );
+			double const dZZ = ( psi( radius, z + h ) - 2.0 * psi( radius, z ) + psi( radius, z - h ) )
 			                 / ( h * h );
 
-			return r * dRInner + dZZ;
+			return radius * dRInner + dZZ;
 		}
 
 		double getT() const

@@ -47,8 +47,8 @@ The tables
 
 .. cpp:struct:: MeshConfig
 
-   .. cpp:var:: double rMin
-   .. cpp:var:: double rMax
+   .. cpp:var:: double minRadius
+   .. cpp:var:: double maxRadius
    .. cpp:var:: double zMin
    .. cpp:var:: double zMax
    .. cpp:var:: int nR

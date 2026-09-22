@@ -7,19 +7,19 @@ following the algorithms of Sánchez-Vizuet, Solano and Cerfon. It is built on t
 
 The equation, in the fixed-boundary form MEQ solves, is
 
-$$-\bar\nabla\cdot\left(\frac{1}{r}\bar\nabla\psi\right) = \frac{F(r,z,\psi)}{r}
+$$-\bar\nabla\cdot\left(\frac{1}{R}\bar\nabla\psi\right) = \frac{F(R,z,\psi)}{R}
 \quad\text{in }\Omega,\qquad \psi = 0 \ \text{ on } \partial\Omega,$$
 
 with
 
-$$F(r,z,\psi) := \mu_0 r^2 \frac{\mathrm{d}p}{\mathrm{d}\psi} + g\frac{\mathrm{d}g}{\mathrm{d}\psi},$$
+$$F(R,z,\psi) := \mu_0 R^2 \frac{\mathrm{d}p}{\mathrm{d}\psi} + g\frac{\mathrm{d}g}{\mathrm{d}\psi},$$
 
 where $\psi$ is the poloidal flux function, $p(\psi)$ the plasma pressure and
-$g(\psi)/r$ the toroidal field function. The dependence of $p$ and $g$ on $\psi$
+$g(\psi)/R$ the toroidal field function. The dependence of $p$ and $g$ on $\psi$
 makes the problem semi-linear.
 
 MEQ solves it as a first-order system in $\psi$ and the flux
-$\boldsymbol{q} = \bar\nabla\psi / r$. That is deliberate: the physically
+$\boldsymbol{q} = \bar\nabla\psi / R$. That is deliberate: the physically
 interesting output is the magnetic field, which is built from $\bar\nabla\psi$,
 and a mixed method resolves it to the same order as $\psi$ itself rather than one
 order lower.

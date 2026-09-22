@@ -16,7 +16,7 @@ namespace meq
 	 * prescribed inputs, so the coil term can be taken off the right-hand side
 	 * entirely and what is solved for is the remainder
 	 *
-	 *     Delta* psi_p = -mu0 r J_plasma( psi_c + psi_p )
+	 *     Delta* psi_p = -mu0 R J_plasma( psi_c + psi_p )
 	 *
 	 * with `psi_c` supplied here. **The conductors then need not be in the mesh
 	 * at all**, which is the point of the plan.
@@ -122,12 +122,12 @@ namespace meq
 			///
 			/// **Exactly zero on the axis**, bit for bit, because `k^2` is an
 			/// exact factor of the kernel -- which is the boundary condition
-			/// the free-boundary problem imposes at `r = 0` and is the reason
+			/// the free-boundary problem imposes at `R = 0` and is the reason
 			/// the split does not disturb it.
 			///
-			/// **AND EVEN IN `r`, SO A POINT PAST THE AXIS IS ANSWERED RATHER
-			/// THAN REFUSED.** `psi = r A_phi` and both factors change sign
-			/// under `r -> -r`, so `psi( -r, z ) == psi( r, z )` exactly; this
+			/// **AND EVEN IN `R`, SO A POINT PAST THE AXIS IS ANSWERED RATHER
+			/// THAN REFUSED.** `psi = R A_phi` and both factors change sign
+			/// under `R -> -R`, so `psi( -R, z ) == psi( R, z )` exactly; this
 			/// is the analytic continuation of the flux and not a clamp. Two
 			/// of MEQ's evaluations extrapolate off the half-plane by design
 			/// -- the exterior datum, whose transfer paths target a `Gamma`
@@ -143,17 +143,17 @@ namespace meq
 			///         rather than the intended one -- see coincides(), which
 			///         is how a caller finds out at setup instead of at the
 			///         first evaluation.
-			double psi( double r, double z ) const;
+			double psi( double radius, double z ) const;
 
 			/// grad_bar( psi_c ) of the whole set.
 			/// @throws std::invalid_argument as psi() does.
-			void gradPsi( double r, double z,
+			void gradPsi( double radius, double z,
 			              double &dPsiDr, double &dPsiDz ) const;
 
-			/// q_c = ( 1/r ) grad_bar( psi_c ). NaN on the axis, as
+			/// q_c = ( 1/R ) grad_bar( psi_c ). NaN on the axis, as
 			/// meq::filamentFlux() is.
 			/// @throws std::invalid_argument as psi() does.
-			void flux( double r, double z, double &qR, double &qZ ) const;
+			void flux( double radius, double z, double &qR, double &qZ ) const;
 
 			/**
 			 * B_pol of the conductors: `B_R = -q_z`, `B_Z = +q_r`, the same
@@ -164,7 +164,7 @@ namespace meq
 			 * is the closed-form limit meq::filamentAxisFlux() and
 			 * meq::coilAxisFlux() supply -- see those for the derivation and
 			 * for why only one component is a limit. An output grid on a
-			 * half-disc machine has its whole first column on `r = 0`, so a
+			 * half-disc machine has its whole first column on `R = 0`, so a
 			 * caller adding the conductors' field to a sampled one meets this
 			 * at every such node rather than occasionally.
 			 *
@@ -175,7 +175,7 @@ namespace meq
 			 *
 			 * @throws std::invalid_argument as psi() does.
 			 */
-			void poloidalField( double r, double z,
+			void poloidalField( double radius, double z,
 			                    double &bR, double &bZ ) const;
 
 			/**
@@ -202,7 +202,7 @@ namespace meq
 			 * a much stronger claim about the discretisation than this plan
 			 * makes.
 			 *
-			 * The distance is `hypot( r - radius, z - height )` in the
+			 * The distance is `hypot( R - radius, z - height )` in the
 			 * half-plane and the tolerance is relative to the filament's own
 			 * radius, which is strictly positive by CurrentFilament's own
 			 * refusal.
@@ -213,7 +213,7 @@ namespace meq
 			 * rectangle is an ordinary point -- and refusing one would reject
 			 * the configuration this plan exists to make cheap.
 			 */
-			bool coincides( double r, double z ) const;
+			bool coincides( double radius, double z ) const;
 
 			/// The index of the FIRST filament this point coincides with, in
 			/// insertion order, or `-1`. The return type is signed so that -1
@@ -221,7 +221,7 @@ namespace meq
 			/// std::size_t and passed to filament(). Two filaments at one
 			/// location is a configuration error rather than an ambiguity, so
 			/// the first is the only one a caller needs to be told about.
-			int indexAt( double r, double z ) const;
+			int indexAt( double radius, double z ) const;
 
 			double coincidenceTolerance() const;
 

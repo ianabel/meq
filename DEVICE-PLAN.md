@@ -104,8 +104,8 @@ tr.SetIntPoint( &ip );       // ElementTransformation, host virtual
 el.CalcShape( ip, shape );   // FiniteElement,          host virtual
 tr.Transform( ip, point );   // ElementTransformation,  host virtual
 tr.Weight()                  // ElementTransformation,  host virtual
-source->f( r, z, psi )       // meq::Source,            host virtual
-source->dFdPsi( r, z, psi )  // meq::Source,            host virtual
+source->f( R, z, psi )       // meq::Source,            host virtual
+source->dFdPsi( R, z, psi )  // meq::Source,            host virtual
 ```
 
 `grep -c MFEM_HOST_DEVICE` over the installed `fem/eltrans.hpp`,
@@ -115,7 +115,7 @@ lambda. Upstream says the same thing about its own integrators in two places,
 and both are doc-comments on the batched routes that exist *because* of it
 (`darcyhybridization.hpp:1797`, `bilininteg_hdg.hpp:1335`).
 
-**So a device `F( r, z, psi )` needs the profile machinery re-expressed as
+**So a device `F( R, z, psi )` needs the profile machinery re-expressed as
 plain data plus a device function, and MEQ's profiles cannot be taken as they
 are.** What `meq::Profile` actually is:
 
@@ -135,7 +135,7 @@ are.** What `meq::Profile` actually is:
   device lambda is not expressible; the root find itself would have to become
   a fixed-iteration scheme with an error flag returned in an output array, and
   the non-convergence case becomes a host-side check after the kernel.
-* `meq::CoilSet::f( r, z )` is **cheap and would port trivially** — a
+* `meq::CoilSet::f( R, z )` is **cheap and would port trivially** — a
   point-in-rectangle test per coil and a sum of current densities
   (`src/meq/Coils.cpp`). The expensive elliptic-integral work (`coilPsi`,
   `ellipsePsi`, Boost.Math) is in the **initial guess and the exterior
@@ -152,7 +152,7 @@ handful of scalars, and flat knot arrays — evaluated by a
 on the host for everything that is not the quadrature loop. That is a second
 implementation of the physics, and **CLAUDE.md's standing preference against
 hand-rolled duplicates applies to MEQ's own code too**: two expressions of
-`F( r, z, psi )` that must agree is exactly the maintenance hazard upstream
+`F( R, z, psi )` that must agree is exactly the maintenance hazard upstream
 names when it refuses to reproduce `EvalStabilization` in a device lambda —
 *"reproducing that formula in a device lambda means duplicating an integrator's
 internals and diverging from them silently"*.
@@ -381,7 +381,7 @@ The expensive distinction is per-step against once. MEQ's own
 |---|---|---|
 | `meq::CriticalPointFinder` | `axisSeconds`, `axisSweepSeconds`, `xPointSeconds` | the located-axis and X-point constraints are roots of the **solved** `q`; the constructor takes both fields to the host at `CriticalPoints.cpp:150-151` |
 | the limiter row | `limiterSeconds` | a max over a marked surface or a point evaluation |
-| the plasma-current row | `currentSeconds` | a quadrature of `F/r` over the support |
+| the plasma-current row | `currentSeconds` | a quadrature of `F/R` over the support |
 | `meq::ExteriorDtN`'s transmission rows | `transmissionSeconds` | a boundary-face quadrature at order 40 (`GradShafranov.cpp:3501`, `:3570`) |
 | the border's dense algebra | `borderAssemblySeconds`, `borderSolveSeconds` | `rowDot()` and an `(N+4)²` dense solve, with the seven `HostRead()`s of §1.2 |
 | `meq::PlasmaComponent`'s flood fill | `componentSeconds` | a graph traversal over element adjacency (`PlasmaComponent.hpp:157`) |
@@ -636,7 +636,7 @@ to 1.3x — before the triangle and crossover caveats of §0.**
 | 1 | **`NPCRecover` and `NPCReduce` threaded on the HOST** | upstream | nothing. Already requested as `HDG-NPC-TRAVERSAL-FROM-MEQ.md`. Worth **1.31x on the step and 1.24x on the run** by MEQ's own arithmetic, and it is the same 30.6% leg any device path would target |
 | 2 | **MEQ's three candidate alias sites, and a guard for the thirteen ordering-protected reads (§1.2)** | **MEQ** | **PART DONE, M-130.** The `postProcess()` candidate is walked and is upstream's, filed; the two on the Picard fallback are not. Two sites this audit did not list — `prepare()` writing through an alias, and `essentialTrace[ i ]` — are fixed, and `machine-f-diiid` now solves under `--device cuda` in 2 Newton steps to the host's every digit. The thirteen still want one funnel `HostRead()` each |
 | 3 | **A device route through `DarcyHybridization` that reaches the batched kernels instead of `ComputeElementMatrix()`** | upstream | items 4–9 of upstream's own plan, six of which are done. This is the "route" half of §2 |
-| 4 | **A POD source description and a `MFEM_HOST_DEVICE` `F( r, z, psi )`** | **MEQ** | item 3. Without a route it is unreachable; with one it is 12–23% of a bordered step |
+| 4 | **A POD source description and a `MFEM_HOST_DEVICE` `F( R, z, psi )`** | **MEQ** | item 3. Without a route it is unreachable; with one it is 12–23% of a bordered step |
 | 5 | **`mfem::HDGExtensionIntegrator` on a device** | upstream | items 3 and 4. Needed only for the curved and free-boundary paths — which is every problem MEQ exists for, and none of M-80's fixtures. **It does not disqualify the condensation cache**: it is a `BilinearFormIntegrator` (`extension_hdg.hpp:509`) landing in `A`, assembled once; it makes `A` asymmetric and not solution dependent |
 | 6 | **The simplex face-restriction crash** | upstream | nothing, but it gates any tensor-only device geometry ever reaching MEQ |
 | 7 | **`TraceSolver = "cudss"` from a config file ALONE, with no `--device`** | MEQ | items 3 and 4, and it is the LAST thing to open rather than the first — §3.3. With `--device cuda` it is already open |
@@ -681,7 +681,7 @@ on the fixtures we happened to run".
   with 55.4 M of 226.7 M allocations attributable to `mfem::forall`'s host
   lambda wrapper. A consumer FP64 rate of 1/32 to 1/64 can invert a production
   conclusion.
-* **A second expression of `F( r, z, psi )` before item 3 exists.** It is two
+* **A second expression of `F( R, z, psi )` before item 3 exists.** It is two
   implementations that must agree, and there is nothing to run it on.
 
 ## 4. What would tell us it is working

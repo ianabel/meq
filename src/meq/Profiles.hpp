@@ -14,10 +14,10 @@
  *
  * MEQ solves the fixed-boundary Grad-Shafranov equation
  *
- *     -div_bar( ( 1/r ) grad_bar( psi ) ) = F( r, z, psi ) / r    in Omega
+ *     -div_bar( ( 1/R ) grad_bar( psi ) ) = F( R, z, psi ) / R    in Omega
  *                                    psi  = 0                    on Gamma
  *
- * with  F( r, z, psi ) := mu0 r^2 dp/dpsi + g dg/dpsi  (Sanchez-Vizuet & Solano,
+ * with  F( R, z, psi ) := mu0 R^2 dp/dpsi + g dg/dpsi  (Sanchez-Vizuet & Solano,
  * CPC 235 (2019) 120-132, eqs (1)-(4)). Everything in F that is not geometry is
  * a user-supplied function of the flux alone: the pressure p( psi ) and the
  * toroidal field function g( psi ). Those are the Profiles defined here.
@@ -77,7 +77,7 @@ namespace meq
 			/// dF/dpsi is one prime() -- two levels, and Profile supplied both. A
 			/// source whose F is itself a psi-derivative of something built from
 			/// profiles needs three: meq::RotatingSource has
-			/// F = mu0 r^2 dp/dpsi with p = P0( psi ) exp( C( psi ) ( r^2 - rRef^2 )/2 ),
+			/// F = mu0 R^2 dp/dpsi with p = P0( psi ) exp( C( psi ) ( R^2 - R_ref^2 )/2 ),
 			/// so F already spends one derivative of P0 and C and the Jacobian
 			/// spends a second. There is no reparametrisation that avoids it --
 			/// p is not a flux function, so there is no product to pre-store.

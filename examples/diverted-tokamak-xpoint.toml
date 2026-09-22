@@ -9,12 +9,12 @@
 # as Newton moves.
 #
 # This file is the same machine asking the question instead.  [boundary.xpoint]
-# makes ( r_X, z_X ) two more unknowns of the bordered Newton psi_ax and psi_bnd
+# makes ( R_X, z_X ) two more unknowns of the bordered Newton psi_ax and psi_bnd
 # already live in, closing
 #
-#     q_r( r_X, z_X )             = 0
-#     q_z( r_X, z_X )             = 0
-#     psi_bnd - psi_h( r_X, z_X ) = 0
+#     q_r( R_X, z_X )             = 0
+#     q_z( R_X, z_X )             = 0
+#     psi_bnd - psi_h( R_X, z_X ) = 0
 #
 # on one factorisation per step.  Everything else below is byte for byte what
 # diverted-tokamak.toml carries, so a difference between the two runs is the

@@ -15,7 +15,7 @@ Grad–Shafranov equation by an entirely different route: free boundary through
 von Hagenow Green's functions, second- and fourth-order finite differences on a
 uniform :math:`(R, Z)` grid, and Picard iteration with adaptive blending. MEQ is
 hybridized discontinuous Galerkin with Newton. They agree on
-:math:`\Delta^* \psi = -F`, on :math:`F = \mu_0 r^2 p' + g g'`, and on
+:math:`\Delta^* \psi = -F`, on :math:`F = \mu_0 R^2 p' + g g'`, and on
 :math:`\psi` in Wb/rad, and on very little else.
 
 The harness is ``tools/freegs4e-benchmark/``; its ``README.md`` carries the

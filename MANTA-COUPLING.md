@@ -224,7 +224,7 @@ If the evolving-equilibrium case ever wants a $\dot\psi$ term, the slot
 
 ## 5. Geometry: 2-D equilibrium to 1-D metric
 
-MaNTA is 1-D in a flux label; MEQ is 2-D in $(r, z)$. The geometry slots are
+MaNTA is 1-D in a flux label; MEQ is 2-D in $(R, z)$. The geometry slots are
 where the dimensional reduction happens, and MEQ owns it.
 
 `FieldModelSpec::label` names the spatial coordinate the geometry is expressed
@@ -304,7 +304,7 @@ nothing visible until a test was written for it).
 
 The physical content of the coupling in this direction is that the GS source term
 
-$$F(r, z, \psi) = \mu_0 r^2 \frac{\mathrm{d}p}{\mathrm{d}\psi} + g\frac{\mathrm{d}g}{\mathrm{d}\psi}$$
+$$F(R, z, \psi) = \mu_0 R^2 \frac{\mathrm{d}p}{\mathrm{d}\psi} + g\frac{\mathrm{d}g}{\mathrm{d}\psi}$$
 
 depends on the pressure, and the pressure is what MaNTA is computing. So $p(\psi)$
 stops being a prescribed profile function and becomes a functional of the

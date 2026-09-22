@@ -23,14 +23,14 @@
  * The derivation is FREE-BOUNDARY-PLAN.md section 3 and is summarised below
  * because a reader of this header should not have to fetch it.
  *
- * THE SEPARATION. In spherical coordinates r = rho sin( theta ),
+ * THE SEPARATION. In spherical coordinates R = rho sin( theta ),
  * z = zCentre + rho cos( theta ), mu = cos( theta ), the Grad-Shafranov
  * operator is
  *
  *     Delta* = d_rhorho + ( 1/rho^2 )( d_thetatheta - cot( theta ) d_theta )
  *
  * -- the ( 2/rho ) d_rho of the Laplacian is cancelled exactly by the
- * -( 1/r ) d_r that distinguishes Delta* from it, which is the accident this
+ * -( 1/R ) d_r that distinguishes Delta* from it, which is the accident this
  * whole class rests on. Separating psi = rho^alpha f( mu ) gives
  *
  *     ( 1 - mu^2 ) f'' + alpha( alpha - 1 ) f = 0,
@@ -62,12 +62,12 @@
  * Gegenbauer functions of order -1/2 are orthogonal in the weight
  * ( 1 - mu^2 )^-1, and on a semicircle centred on the axis
  *
- *     dGamma / r = rhoGamma d theta / ( rhoGamma sin theta ) = dmu/( 1 - mu^2 )
+ *     dGamma / R = rhoGamma d theta / ( rhoGamma sin theta ) = dmu/( 1 - mu^2 )
  *
  * -- exactly the weight the Grad-Shafranov weak form already carries, with
  * rhoGamma cancelling out of it. So
  *
- *     integral_Gamma C_m C_n dGamma/r = delta_mn h_n,
+ *     integral_Gamma C_m C_n dGamma/R = delta_mn h_n,
  *     h_n = 2 / ( n( n - 1 )( 2n - 1 ) ),
  *
  * and the exterior contributes a diagonal block with entry
@@ -111,7 +111,7 @@ namespace meq
 	/// ONE OF THEM VANISHES ON THE AXIS. That is why they are inadmissible here
 	/// rather than merely inconvenient, and it is a stronger statement than the
 	/// plan's: the two that also decay, 1 and z/rho, have INFINITE norm in the
-	/// weight dGamma/r, so there is nothing for a compatibility condition to be
+	/// weight dGamma/R, so there is nothing for a compatibility condition to be
 	/// imposed on. Nothing admissible is lost by starting at 2 -- { C_n }_{n>=2}
 	/// is complete in L^2( dmu/( 1 - mu^2 ) ).
 	class ExteriorDtN
@@ -127,7 +127,7 @@ namespace meq
 			/// quietly empty.
 			ExteriorDtN( double zCentreIn, double rhoGammaIn, int modesIn );
 
-			/// C_n( cos theta ) at the point ( r, z ), where theta is measured
+			/// C_n( cos theta ) at the point ( R, z ), where theta is measured
 			/// from the centre.
 			///
 			/// The point need NOT lie on Gamma: only the direction matters,
@@ -135,11 +135,11 @@ namespace meq
 			/// what lets exterior() evaluate the field anywhere outside without
 			/// a second angular routine -- but it means an accidental call with
 			/// an interior point returns a number rather than an error.
-			double basis( int n, double r, double z ) const;
+			double basis( int n, double radius, double z ) const;
 
 			/// dC_n/dmu at the same point, for a caller assembling a tangential
 			/// derivative on Gamma.
-			double basisDerivative( int n, double r, double z ) const;
+			double basisDerivative( int n, double radius, double z ) const;
 
 			/// ( 1 - n )/rhoGamma: the Dirichlet-to-Neumann symbol.
 			///
@@ -154,7 +154,7 @@ namespace meq
 			double symbol( int n ) const;
 
 			/// h_n = 2/( n( n - 1 )( 2n - 1 ) ): the mass of mode n in the
-			/// weight dGamma/r, which is the weight the weak form carries.
+			/// weight dGamma/R, which is the weight the weak form carries.
 			///
 			/// Note it does NOT depend on rhoGamma. That cancellation is not a
 			/// simplification made here -- it is a property of the semicircle,
@@ -180,15 +180,15 @@ namespace meq
 			/// and the interior one is what the mesh is for -- so a point closer
 			/// to the centre than rhoGamma throws rather than extrapolating a
 			/// decaying mode inward, where rho^( 1 - n ) grows without bound.
-			double exterior( double r, double z,
+			double exterior( double radius, double z,
 			                 std::vector<double> const &a ) const;
 
 			/// The coefficients of a trace, by projection in the weight
-			/// dGamma/r.
+			/// dGamma/R.
 			///
-			/// @param trace  psi on Gamma, as a function of ( r, z ).
+			/// @param trace  psi on Gamma, as a function of ( R, z ).
 			///
-			/// a_n = ( 1/h_n ) integral_Gamma psi C_n dGamma/r, which is exact
+			/// a_n = ( 1/h_n ) integral_Gamma psi C_n dGamma/R, which is exact
 			/// for a trace that is itself a combination of the modes and is a
 			/// best fit otherwise. THE QUADRATURE IS GAUSS-LEGENDRE IN mu AND
 			/// THAT IS NOT AN APPROXIMATION FOR THE ORTHOGONALITY ITSELF: the
@@ -204,7 +204,7 @@ namespace meq
 			///
 			/// THIS IS THE QUANTITY TO READ A SPECTRUM BY, AND THE RAW
 			/// COEFFICIENTS ARE NOT. The modes are orthogonal in the weight
-			/// dGamma/r but they are NOT normalised in it, so
+			/// dGamma/R but they are NOT normalised in it, so
 			///
 			///     || sum a_n C_n ||^2 = sum a_n^2 mass( n )
 			///
@@ -228,7 +228,7 @@ namespace meq
 			std::vector<double> modeAmplitudes(
 				std::vector<double> const &a ) const;
 
-			/// The trace's own norm in the weight dGamma/r,
+			/// The trace's own norm in the weight dGamma/R,
 			/// sqrt( sum a_n^2 mass( n ) ) -- the root-sum-square of
 			/// modeAmplitudes(), and the scale those amplitudes are fractions
 			/// of.
@@ -292,11 +292,11 @@ namespace meq
 			void requireCoefficients( std::vector<double> const &a,
 			                          char const *method ) const;
 
-			/// mu = cos( theta ) = ( z - zCentre )/rho at ( r, z ), and rho.
+			/// mu = cos( theta ) = ( z - zCentre )/rho at ( R, z ), and rho.
 			/// One place, because the sign of ( z - zCentre ) and the choice of
 			/// which coordinate is the polar axis are exactly what a second
 			/// copy would get wrong.
-			void direction( double r, double z, double &mu, double &rho ) const;
+			void direction( double radius, double z, double &mu, double &rho ) const;
 
 			double zCentreValue;
 			double rhoGammaValue;

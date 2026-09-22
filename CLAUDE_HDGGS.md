@@ -24,22 +24,22 @@ Fixed boundary: the plasma boundary `Γ` is known and taken to be the level set
 `refs/HDG-GradShafranov.pdf` eqs (1)–(4):
 
 ```
--∇̄·( (1/r) ∇̄ψ ) = F(r,z,ψ) / r     in Ω ⊂ R²
+-∇̄·( (1/R) ∇̄ψ ) = F(R,z,ψ) / R     in Ω ⊂ R²
 ψ = 0                               on Γ = ∂Ω
 
-F(r,z,ψ) := μ₀ r² dp/dψ + g dg/dψ
+F(R,z,ψ) := μ₀ R² dp/dψ + g dg/dψ
 ```
 
 `∇̄ := (∂_r, ∂_z)` acts formally like a vector of partial derivatives independent
 of the coordinate system — it is *not* the cylindrical gradient, and the
-distinction is the whole content of the `1/r` and `r` weights below. `p(ψ)` is
-the plasma pressure and `g(ψ)/r` the toroidal field function; both are user
+distinction is the whole content of the `1/R` and `R` weights below. `p(ψ)` is
+the plasma pressure and `g(ψ)/R` the toroidal field function; both are user
 input, and it is their `ψ`-dependence that makes the problem semi-linear.
 
-Recast as a first-order system by introducing the **flux** `q = (1/r)∇̄ψ`:
+Recast as a first-order system by introducing the **flux** `q = (1/R)∇̄ψ`:
 
 ```
-q − (1/r)∇̄ψ = 0,      −∇̄·q = F/r,      ψ = 0 on Γ
+q − (1/R)∇̄ψ = 0,      −∇̄·q = F/R,      ψ = 0 on Γ
 ```
 
 Introducing `q` is not a numerical convenience. The physically interesting output
@@ -59,7 +59,7 @@ Checked, resolved, and worth not rediscovering.
 
 ```
 Δ*( r⁴/8 )            =  r²
-Δ*( (A/2) r² ln r )   =  A
+Δ*( (A/2) R² ln R )   =  A
 Δ*( −A r⁴/8 )         = −A r²
                         ─────────────────
 Δ*( ψ_P )             =  (1−A) r² + A
@@ -144,8 +144,8 @@ HDG, in the LDG-H form of `refs/HDG-GradShafranov.pdf` eq. (8) — restated in
 explicit, which is the more useful version when writing assembly.
 
 ```
-(r q_h, v)_Th + (ψ_h, ∇̄·v)_Th − ⟨ψ̂_h, v·n⟩_∂Th   = 0
-(q_h, ∇̄w)_Th − ⟨q̂_h·n, w⟩_∂Th                    = (F/r, w)_Th
+(R q_h, v)_Th + (ψ_h, ∇̄·v)_Th − ⟨ψ̂_h, v·n⟩_∂Th   = 0
+(q_h, ∇̄w)_Th − ⟨q̂_h·n, w⟩_∂Th                    = (F/R, w)_Th
 ⟨q̂_h·n, μ⟩_∂Th\Γh                                 = 0
 ψ̂_h = φ_h on Γh
 
@@ -188,7 +188,7 @@ time if rediscovered. `tests/convergence/SolovievConvergence.cpp` records what
 every alternative produces.
 
 **`DarcyForm` holds `−q`, not `q`.** It is built for `u = −k ∇p`, the opposite
-sign to `q = (1/r)∇̄ψ`, and the two integrators that make the hybridization
+sign to `q = (1/R)∇̄ψ`, and the two integrators that make the hybridization
 consistent — `NormalTraceJumpIntegrator` and the trace rows of
 `HDGDiffusionIntegrator` — have that sign baked in and take no scaling argument,
 so there is no way to flip it in the assembly. `GradShafranovSolver::flux()`
@@ -196,17 +196,17 @@ undoes it once, into a separate GridFunction; the block vector stays in
 `DarcyForm`'s convention, because a stage-4 Newton residual assembled by
 `DarcyForm` will expect it there. Do not change one without the other.
 
-The same convention makes the potential right-hand side `−(F/r, w)`: with the
+The same convention makes the potential right-hand side `−(F/R, w)`: with the
 default `bsymmetrize = true` the second block row is assembled as
 `−B q − M_p ψ = b_p`. `bsymmetrize = false` is not an escape — it does not work
 here at all, giving an error flat at 3e-1 for every combination of signs.
 
 **And `τ` carries the opposite sign to `refs/HDG-GradShafranov.pdf` eq (8e)**,
-which prints `q̂·n := q·n + τ(ψ − ψ̂)`. With that paper's own `q = (1/r)∇̄ψ` and
-`−∇̄·q = F/r`, testing (8a)–(8d) against `(v,w,μ) = (q_h, ψ_h, ψ̂_h)` gives
+which prints `q̂·n := q·n + τ(ψ − ψ̂)`. With that paper's own `q = (1/R)∇̄ψ` and
+`−∇̄·q = F/R`, testing (8a)–(8d) against `(v,w,μ) = (q_h, ψ_h, ψ̂_h)` gives
 
 ```
-(r q, q) − τ‖ψ − ψ̂‖²_∂Th = 0
+(R q, q) − τ‖ψ − ψ̂‖²_∂Th = 0
 ```
 
 which is indefinite, and the local solves are not guaranteed invertible. The
@@ -492,7 +492,7 @@ flux equation and the flux constraint carry no `F` — so a Newton step annihila
 them *exactly*, to 1e-16 and 1e-13. **All the non-linearity is in the potential
 row**, and so is the entire Newton remainder: 8.1e-02 → 6.25e+00. And the
 correction is `O(10²)` against a solution where `ψ ~ 0.3`, because at `ψ ≡ 0` the
-linearised operator `−∇̄·((1/r)∇̄·) − (∂F/∂ψ)/r` is at its most indefinite — the
+linearised operator `−∇̄·((1/R)∇̄·) − (∂F/∂ψ)/R` is at its most indefinite — the
 pedestal sits at `max|∂F/∂ψ|/λ₁ ≈ 7`.
 
 **What the condensation does instead is nonlinear elimination, and that is a
@@ -590,7 +590,7 @@ source-INDEPENDENT.** Look down that column: the pedestal and the barrier at
 `k = 2, n = 16` both read 1.124e-01 — to four figures, on different sources. At
 the cold iterate `(0, 0, g_D)` the residual is dominated by the Dirichlet datum
 entering the flux row through `⟨ψ̂, v·n⟩` and the potential row through the
-stabilisation, and `(F/r, w)` is a small correction to both. `‖r₀‖` is a
+stabilisation, and `(F/R, w)` is a small correction to both. `‖r₀‖` is a
 measurement of the boundary data and the mesh, not of the difficulty.
 
 **So the ladder stays reactive and stays triggered by observed failure**, which
@@ -705,16 +705,16 @@ differentiating it, and a bare `mfem::Coefficient` cannot be differentiated.
 is **weighted**:
 
 ```
-( r q_h, v ) = ( ∇̄ψ_g, v )     on each element,   block := −q_h
+( R q_h, v ) = ( ∇̄ψ_g, v )     on each element,   block := −q_h
 ```
 
 which is the flux row of (8a) itself rather than an approximation of it — so the
 seeded state SATISFIES the row instead of merely being near it. Writing
-`q = (1/r)∇̄ψ_g` and interpolating at the nodes is the obvious alternative and is
+`q = (1/R)∇̄ψ_g` and interpolating at the nodes is the obvious alternative and is
 wrong twice: the closed Gauss-Lobatto basis puts nodes ON element boundaries, so
-on FB-A's domain some sit at `r = 0` exactly where `1/r` divides one numerical
+on FB-A's domain some sit at `R = 0` exactly where `1/R` divides one numerical
 zero by another; and nodal interpolation is not what the residual asks for.
-**The weight `r` removes the singularity rather than guarding it.** `V_h` is
+**The weight `R` removes the singularity rather than guarding it.** `V_h` is
 discontinuous so the solve is element-local — one small dense factorisation each.
 
 **Measured, `‖r₀‖` went from 0.67× the cold value to 83×:**
@@ -781,7 +781,7 @@ of the toroidal operator `Δ*`", and pay for it by iterating on *every* source,
 even one linear in `ψ` that could have been folded into the bilinear form.
 
 Newton makes the opposite trade. It puts `∂F/∂ψ` into the operator — a mass term
-`−(∂F/∂ψ)/r` on the potential block, carried through hybridization by
+`−(∂F/∂ψ)/R` on the potential block, carried through hybridization by
 `DarcyForm::GetGradient`. So:
 
 **Every `Source` must supply `dFdPsi`, and every `Profile` must supply `Prime`.**
@@ -876,7 +876,7 @@ equation has a small positive solution and a large one — measured at `ν = 4`,
 walks straight onto it. So this path needs `setInitialGuess()` with a bump of
 about the right height, and that is part of the problem statement rather than an
 optimisation. It is *not* the trivial-branch trap: unlike every GS-2 §4.2–4.5
-source this one does not vanish at `ψ = 0`, the smallest `|F(r,z,0)|` over the box
+source this one does not vanish at `ψ = 0`, the smallest `|F(R,z,0)|` over the box
 being 0.2.
 
 ### What works: `ψ_ax` inside the residual, as a bordered Newton
@@ -956,7 +956,7 @@ kink. The closed form returns **exactly zero** outside the plasma, asserted.
 **IT IS WIRED IN AND THE SIGN WAS CHECKED RATHER THAN ARGUED.**
 `GradShafranovSolver::assembleNormalisationColumn()` runs `SourceIntegrator`'s
 own quadrature loop over `∂F/∂s`, into the potential block and nowhere else, with
-the same `−w F/r` sign — the flux and trace rows carry no `F`.
+the same `−w F/R` sign — the flux and trace rows carry no `F`.
 `setBorderColumn()` keeps the differenced route as a control and
 `BorderColumn::Analytic` is the default, falling back silently for a source that
 does not supply the derivatives. **NPC only**: under the condensation the
@@ -984,7 +984,7 @@ would have fallen back to a differenced column** and nothing would have said so.
 
 **AND THE AXIS POSITION NEEDS NO DERIVATIVE, WHICH IS A THEOREM AND NOT A
 SHORTCUT — AND IT IS WHAT MADE OPTION 3 AFFORDABLE.** `ψ_ax` is a *stationary* value, so if the axis position moves with
-the solution the chain rule gives `dψ/dλ = ∂ψ/∂λ + ∇ψ·∂(r*,z*)/∂λ` and
+the solution the chain rule gives `dψ/dλ = ∂ψ/∂λ + ∇ψ·∂(R*,z*)/∂λ` and
 **`∇ψ = 0` at an interior extremum**. The second term vanishes identically, so
 the largest *nodal* value loses nothing the Jacobian would have used — the
 envelope theorem, and a better reason for that definition than the one recorded
@@ -994,7 +994,7 @@ rather than a stationary value and the corner block is `∇q`; see
 
 **AND THE SAME THEOREM IS WHY OPTION 3 COSTS NOTHING IN THE JACOBIAN.** With
 `ψ_ax` constrained at the LOCATED axis, `G = ψ_ax − ψ_h( x* )` and `x*` moves
-with the solution — but `∇̄ψ = r q` and `q_h( x* ) = 0` by definition, so
+with the solution — but `∇̄ψ = R q` and `q_h( x* ) = 0` by definition, so
 `∇ψ_h( x* ) = 0` and the position term vanishes there too. No sensitivity of the
 root find is needed, and under NPC the row is just the potential shape functions
 of `x*`'s element evaluated at `x*`: `( k+1 )( k+2 )/2` entries, exact, one
@@ -1216,7 +1216,7 @@ DROPS RADICALS AND DISPLACES EXPONENTS.** Checked against the page rendered at
 | `M`'s denominator | `2π(r₁r₂)^{3/2}` | `2π(r1 r2 ) 2`, with the `3` on the **next line** |
 | `k` | `k = √( 4r_j r_k / ((r_j+r_k)² + (z_j−z_k)²) )` | **the `√` is absent entirely** |
 | `δ_±` | `√( r₁² + (ρ_Γ ± z₁)² )` | `r12 + (ρΓ ± z1 )2` — **no `√`** |
-| (3.1)'s weights | `∫ψ²r`, `∫(∇ψ)² r^{−1}` | exponents displaced to the line above |
+| (3.1)'s weights | `∫ψ²r`, `∫(∇ψ)² R^{−1}` | exponents displaced to the line above |
 
 The minus signs came through correctly this time, which is the point: **the
 failure mode is the tool's and it is not the same failure twice.** Two of those
@@ -1272,7 +1272,7 @@ iterations to do it. Refinement does nothing, and neither does Picard.
 past ~26 eigenvalues of the operator it is added to.** `∂F/∂ψ` for eq. (26)
 ranges over `[−579.5, +565.7]`, against a first Dirichlet eigenvalue of
 `λ₁ = π²(1/w² + 1/h²) = 22.3` on the benchmark box. The linearised operator
-`−∇̄·((1/r)∇̄·) − (∂F/∂ψ)/r` is therefore strongly indefinite, and the continuous
+`−∇̄·((1/R)∇̄·) − (∂F/∂ψ)/R` is therefore strongly indefinite, and the continuous
 problem is **multi-valued**. The driver is the `c₃(1 − e₂)cos(c₄ψ)` term at
 `c₃ = −18`, `c₄ = 10π` — the very feature that empties the core of current —
 whose derivative carries `c₃c₄ ≈ 566`.
@@ -1284,7 +1284,7 @@ Ratio against `λ₁`, by amplitude:
 
 Note the pedestal itself already sits at 7 and converges, so exceeding `λ₁` is
 not by itself fatal; 26 is. **This supersedes an earlier reading of §4.4 as a
-trivial-branch problem.** `F(r, 0) = 0` is true and the trivial branch is real —
+trivial-branch problem.** `F(R, 0) = 0` is true and the trivial branch is real —
 see `CLAUDE.md`, *Traps* — but it is not what defeats the iteration here, since the runs above
 carry non-homogeneous ramp data that keeps `ψ` away from zero and fail anyway.
 
@@ -1300,7 +1300,7 @@ there is **no limit point on the branch** — the step never had to fall below
 
 **THIS MUST NOT GO INTO THE DRIVER, AND THE REASON IS NOT TASTE.** What was
 ramped is `c₃`, a constructor argument of the `CurrentHole` *test fixture*. The
-`Source` interface exposes `f( r, z, ψ )` and `dFdPsi( r, z, ψ )` and nothing
+`Source` interface exposes `f( R, z, ψ )` and `dFdPsi( R, z, ψ )` and nothing
 else — **there is no amplitude parameter in it and no way to recover one from a
 black-box `F`**. The continuation is unavailable to a driver on principle, not
 merely inadvisable. The black-box analogue, `F_λ = λF`, *is* expressible but is
@@ -1527,7 +1527,7 @@ and is reachable through `setGlobalisation()`; `SetJFNK` and `EnableAndersonAcc`
 come with it. SUNDIALS 7.5.0 is built in at `../sundials/cuda-install`.
 
 **IT IS NOT A DROP-IN, AND THE DIFFERENCE IS SILENT.** `NewtonSolver::Mult(b,x)`
-forms `r = oper(x) − b`, while **`KINSolver::Mult` declares its first argument
+forms `R = oper(x) − b`, while **`KINSolver::Mult` declares its first argument
 without a name** and solves `oper(x) = 0`. MEQ's trace right-hand side is not
 zero, so handing it straight to KINSOL converges — to the solution of a
 different problem. `ShiftedResidual` in `GradShafranov.cpp` is the adapter, and
@@ -1779,7 +1779,7 @@ elmat( dof*di + i, dof*dj + j ) += w * nor(di) * shape(i) * L(j, dj)
 
 — an outer product of the normal trace of basis `i` against the **path lifting**
 of basis `j`, two unrelated vectors. Measured on `Γ_h` faces its relative
-asymmetry is exactly **1.0**, and it is **16.8× larger** than the `(r q, v)`
+asymmetry is exactly **1.0**, and it is **16.8× larger** than the `(R q, v)`
 domain term it sits beside, which is itself symmetric to the last bit
 (`max|A_ij − A_ji| = 0`). `DarcyForm::AssembleFluxMassBdrFaces()` deposits it
 straight into the hybridization's per-element flux block, so it reaches both the
@@ -2167,7 +2167,7 @@ it is wrong wherever `Γ` is curved.
    only UMFPACK and KLU. Worth having only if fitted-domain runs become a
    workload in their own right; the driver's target is curved boundaries, where
    none of it applies.
-3. **Cholesky on the per-cell flux block — do not.** `(r q, v)` is SPD, so this
+3. **Cholesky on the per-cell flux block — do not.** `(R q, v)` is SPD, so this
    looks like a free 2×. It is wrong on the extension path for exactly the
    reason above: `AssembleFluxMassBdrFaces()` puts a term with relative
    asymmetry 1.0, sixteen times larger than the mass term, into the very block

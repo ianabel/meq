@@ -125,7 +125,7 @@ namespace
 		mfem::FunctionCoefficient guess(
 			[ box ]( mfem::Vector const &x )
 			{
-				return 0.30*std::sin( M_PI*( x( 0 ) - box.rMin )/box.width() )
+				return 0.30*std::sin( M_PI*( x( 0 ) - box.minRadius )/box.width() )
 				       *std::sin( M_PI*( x( 1 ) - box.zMin )/box.height() );
 			} );
 		mfem::ConstantCoefficient zero( 0.0 );

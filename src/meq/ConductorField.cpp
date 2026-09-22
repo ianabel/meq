@@ -121,18 +121,18 @@ namespace meq
 		return mu0Value;
 	}
 
-	double ConductorField::psi( double r, double z ) const
+	double ConductorField::psi( double radius, double z ) const
 	{
 		/*
-		 * EVEN IN r, AND THAT IS AN ANALYTIC CONTINUATION RATHER THAN A CLAMP.
+		 * EVEN IN R, AND THAT IS AN ANALYTIC CONTINUATION RATHER THAN A CLAMP.
 		 *
-		 * psi = r A_phi. Under r -> -r at fixed z the point is the same
+		 * psi = R A_phi. Under R -> -R at fixed z the point is the same
 		 * physical point rotated by pi in phi, so phi-hat reverses and A_phi
-		 * changes sign with it; the product does not. So psi_c( -r, z ) is
-		 * psi_c( r, z ) EXACTLY, and reflecting is the unique smooth extension
+		 * changes sign with it; the product does not. So psi_c( -R, z ) is
+		 * psi_c( R, z ) EXACTLY, and reflecting is the unique smooth extension
 		 * of the flux across the axis rather than a convenient substitute for
-		 * one. Near the axis psi_c ~ c( z ) r^2, so the value this returns for
-		 * a point a hair past r = 0 is a hair above zero, which is what the
+		 * one. Near the axis psi_c ~ c( z ) R^2, so the value this returns for
+		 * a point a hair past R = 0 is a hair above zero, which is what the
 		 * physics says it should be.
 		 *
 		 * IT IS HERE AND NOT AT A CALLER BECAUSE IT IS A PROPERTY OF THE
@@ -150,7 +150,7 @@ namespace meq
 		 * is the seam that meets this for q and it abandons the evaluation,
 		 * for the reason recorded against it.
 		 */
-		double const rho = std::abs( r );
+		double const rho = std::abs( radius );
 
 		double total = 0.0;
 		for ( CurrentFilament const &f : filamentList )
@@ -160,7 +160,7 @@ namespace meq
 		return total + coilList.psi( rho, z );
 	}
 
-	void ConductorField::gradPsi( double r, double z,
+	void ConductorField::gradPsi( double radius, double z,
 	                              double &dPsiDr, double &dPsiDz ) const
 	{
 		dPsiDr = 0.0;
@@ -169,32 +169,32 @@ namespace meq
 		{
 			double dr = 0.0;
 			double dz = 0.0;
-			filamentGradPsi( f, r, z, dr, dz, mu0Value );
+			filamentGradPsi( f, radius, z, dr, dz, mu0Value );
 			dPsiDr += dr;
 			dPsiDz += dz;
 		}
 
 		double coilR = 0.0;
 		double coilZ = 0.0;
-		coilList.gradPsi( r, z, coilR, coilZ );
+		coilList.gradPsi( radius, z, coilR, coilZ );
 		dPsiDr += coilR;
 		dPsiDz += coilZ;
 	}
 
-	void ConductorField::flux( double r, double z,
+	void ConductorField::flux( double radius, double z,
 	                           double &qR, double &qZ ) const
 	{
-		// NOT a sum of filamentFlux() calls, deliberately. q = ( 1/r ) grad_bar
-		// psi, so summing the per-filament fluxes divides by r once per
+		// NOT a sum of filamentFlux() calls, deliberately. q = ( 1/R ) grad_bar
+		// psi, so summing the per-filament fluxes divides by R once per
 		// filament and then adds -- which is the same number in exact
 		// arithmetic and a different one in floating point, and is NaN for
 		// every filament on the axis rather than once. Take the gradient of the
 		// sum and divide once.
 		double dPsiDr = 0.0;
 		double dPsiDz = 0.0;
-		gradPsi( r, z, dPsiDr, dPsiDz );
-		qR = dPsiDr/r;
-		qZ = dPsiDz/r;
+		gradPsi( radius, z, dPsiDr, dPsiDz );
+		qR = dPsiDr/radius;
+		qZ = dPsiDz/radius;
 	}
 
 	double ConductorField::containment( double centreZ, double rhoGamma ) const
@@ -220,13 +220,13 @@ namespace meq
 
 		for ( Coil const &one : coilList.coils() )
 		{
-			// The FARTHEST corner, which is rMax paired with whichever of the
+			// The FARTHEST corner, which is R_max paired with whichever of the
 			// two heights is further from the centre. Taking the farthest point
 			// rather than the centre is what makes a conductor straddling Gamma
 			// report a negative containment.
 			double const reach = std::max( std::abs( one.zMin() - centreZ ),
 			                               std::abs( one.zMax() - centreZ ) );
-			farthest = std::max( farthest, std::hypot( one.rMax(), reach ) );
+			farthest = std::max( farthest, std::hypot( one.maxRadius(), reach ) );
 		}
 
 		if ( empty() )
@@ -235,42 +235,42 @@ namespace meq
 		return rhoGamma - farthest;
 	}
 
-	void ConductorField::poloidalField( double r, double z,
+	void ConductorField::poloidalField( double radius, double z,
 	                                    double &bR, double &bZ ) const
 	{
-		if ( r > 0.0 )
+		if ( radius > 0.0 )
 		{
 			double qR = 0.0;
 			double qZ = 0.0;
-			flux( r, z, qR, qZ );
+			flux( radius, z, qR, qZ );
 			bR = -qZ;
 			bZ = qR;
 			return;
 		}
 
-		// AND r < 0 IS NOT "ON THE AXIS", WHICH THE r > 0 TEST ABOVE LEAVES IT
+		// AND R < 0 IS NOT "ON THE AXIS", WHICH THE R > 0 TEST ABOVE LEAVES IT
 		// INDISTINGUISHABLE FROM. B is a VECTOR -- B_R = -q_z is odd under
-		// r -> -r where B_Z = q_r is even -- so it continues past the axis with
+		// R -> -R where B_Z = q_r is even -- so it continues past the axis with
 		// a sign that differs between its two entries, exactly as gradPsi() and
 		// flux() do, and this refuses for their reason. psi() is the one entry
 		// point here that continues, because it is a scalar and even.
-		if ( r < 0.0 )
+		if ( radius < 0.0 )
 			throw std::invalid_argument(
 				"meq::ConductorField::poloidalField: the field point radius "
-				"must not be negative; r = 0 is the axis and gives the closed-"
+				"must not be negative; R = 0 is the axis and gives the closed-"
 				"form limit. psi() continues past the axis by reflection and B "
 				"cannot, because B_R and B_Z carry opposite parities" );
 
 		// ON THE AXIS, WHERE flux() IS 0/0 AND THE LIMIT IS CLOSED FORM.
 		//
-		// B_R = -q_z is EXACTLY zero rather than approximately: psi ~ c( z ) r^2
-		// for a field regular on the axis, so d_z psi ~ c'( z ) r^2 and
-		// q_z ~ c'( z ) r. B_Z = q_r tends to c( z ), which is the on-axis
+		// B_R = -q_z is EXACTLY zero rather than approximately: psi ~ c( z ) R^2
+		// for a field regular on the axis, so d_z psi ~ c'( z ) R^2 and
+		// q_z ~ c'( z ) R. B_Z = q_r tends to c( z ), which is the on-axis
 		// field and is what the two AxisFlux kernels return.
 		//
 		// SUMMED PER CONDUCTOR AND NOT TAKEN OFF A SUMMED GRADIENT, which is
 		// the opposite of what flux() does eight lines above and is right for
-		// the opposite reason: there the division by r is what must happen once,
+		// the opposite reason: there the division by R is what must happen once,
 		// here there is no division at all and each conductor's limit is its own
 		// closed form.
 		bR = 0.0;
@@ -283,14 +283,14 @@ namespace meq
 			bZ += coilAxisFlux( one, z, coilList.quadratureOrder(), mu0Value );
 	}
 
-	bool ConductorField::coincides( double r, double z ) const
+	bool ConductorField::coincides( double radius, double z ) const
 	{
-		return indexAt( r, z ) >= 0;
+		return indexAt( radius, z ) >= 0;
 	}
 
-	int ConductorField::indexAt( double r, double z ) const
+	int ConductorField::indexAt( double radius, double z ) const
 	{
-		requireFinite( r, "the field point radius",
+		requireFinite( radius, "the field point radius",
 		               "meq::ConductorField::indexAt" );
 		requireFinite( z, "the field point height",
 		               "meq::ConductorField::indexAt" );
@@ -298,7 +298,7 @@ namespace meq
 		for ( std::size_t i = 0; i < filamentList.size(); ++i )
 		{
 			CurrentFilament const &f = filamentList[ i ];
-			double const dr = r - f.radius();
+			double const dr = radius - f.radius();
 			double const dz = z - f.height();
 			// std::hypot rather than sqrt( dr*dr + dz*dz ): the squares can
 			// underflow to zero for the very separations this test exists to

@@ -43,7 +43,7 @@
  * and is the prototype this is the discrete counterpart of.
  *
  * A NAME COLLISION THAT IS RESPECTED THROUGHOUT. In this project q is the
- * FLUX, q = ( 1/r ) grad_bar( psi ), a solved unknown of the discretisation and
+ * FLUX, q = ( 1/R ) grad_bar( psi ), a solved unknown of the discretisation and
  * the asset the whole inversion item is built on. The safety factor is also
  * universally written q. IN THIS FILE AND IN src/meq THE SAFETY FACTOR IS
  * safetyFactor AND NEVER q: a reader who meets q here is entitled to assume the
@@ -52,16 +52,16 @@
  * | grad psi | COMES FROM q, POINTWISE, AND THAT IS THE POINT OF THE WHOLE
  * ITEM.
  *
- * grad_bar( psi ) = r q, so | grad psi | = r | q | with q read at the node from
+ * grad_bar( psi ) = R q, so | grad psi | = R | q | with q read at the node from
  * the solved flux field -- converging at the potential's own order rather than
  * one order down, which is what a differentiated L2 potential would give. Every
- * weight in this file is 2 pi R | dx/ds | ds / ( r | q | ) for whichever
+ * weight in this file is 2 pi R | dx/ds | ds / ( R | q | ) for whichever
  * parametrisation variable s is in use. Nothing is differentiated and nothing
  * is differenced.
  *
  * A pleasant consequence worth stating because it looks like a coincidence:
  * < | grad psi |^2 / R^2 > is exactly < | q |^2 >. The wrapper below is
- * nonetheless written as gradient^2 / r^2, because it is the QUANTITY that is
+ * nonetheless written as gradient^2 / R^2, because it is the QUANTITY that is
  * being named and a reader checking it against the identity should not have to
  * re-derive the cancellation.
  *
@@ -72,7 +72,7 @@
  * where psi_h converges at k+1 -- so the natural expectation is that the
  * post-processed pairing buys an order in the averages too. IT DOES NOT. The
  * level set improves by an order and the WEIGHT does not, because the weight
- * divides by | grad psi | = r | q | and q* converges at k+1 like q_h: the local
+ * divides by | grad psi | = R | q | and q* converges at k+1 like q_h: the local
  * post-processing buys its extra order in the POTENTIAL, and there is no k+2
  * flux to be had. An average built on both inherits the worse of the two.
  *
@@ -283,7 +283,7 @@ namespace meq
 		/// should need.
 		double parameter = 0.0;
 
-		double r = 0.0;
+		double radius = 0.0;
 		double z = 0.0;
 
 		/// psi_h at the node, from the same evaluation the weight was built
@@ -292,7 +292,7 @@ namespace meq
 		double psi = 0.0;
 		double residual = 0.0;
 
-		/// q at the node, in MEQ's sign convention, and | grad psi | = r | q |
+		/// q at the node, in MEQ's sign convention, and | grad psi | = R | q |
 		/// with it. POINTWISE FROM THE SOLVED FLUX: see the header.
 		double qR = 0.0;
 		double qZ = 0.0;
@@ -435,7 +435,7 @@ namespace meq
 		/// Contour::hermiteLength() for the contour one. So it is not an
 		/// independent measurement of the metric and must not be quoted as one.
 		/// What it does check, exactly, is that the weights are built the way
-		/// this header says they are: a missing r, a wrong dtheta or a gradient
+		/// this header says they are: a missing R, a wrong dtheta or a gradient
 		/// on the wrong side of the division all break the identity.
 		double arcLength() const;
 
@@ -558,7 +558,7 @@ namespace meq
 	 * percent of | psi_ax - psi_bnd | is what was measured to be near the
 	 * optimum on the fixture in the suite; one percent is twenty times worse.
 	 *
-	 * @param f the source, F( r, z, psi ) -- THE F THE SOLVER IS FED, per the
+	 * @param f the source, F( R, z, psi ) -- THE F THE SOLVER IS FED, per the
 	 *          header. Not a re-derived right-hand side.
 	 * @throws whatever ContourTracer::traceFromAxis() and fitByAngle() throw,
 	 *         which is how a level too close to the separatrix or a surface that
@@ -567,7 +567,7 @@ namespace meq
 	AveragedEquationResidual averagedGradShafranovResidual(
 		ContourTracer const &tracer, CriticalPoint const &axis, double level,
 		std::size_t angles, double step,
-		std::function<double( double r, double z, double psi )> const &f,
+		std::function<double( double radius, double z, double psi )> const &f,
 		FluxDerivative derivative = FluxDerivative::Richardson );
 
 }

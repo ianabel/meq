@@ -98,7 +98,7 @@ namespace
 	double const halfZ = 0.55;
 	double const peak = 0.25;
 
-	/// psi = peak ( 1 - ( ( r - R0 )/a )^2 - ( z/b )^2 ), a quadratic, so P_k
+	/// psi = peak ( 1 - ( ( R - R0 )/a )^2 - ( z/b )^2 ), a quadratic, so P_k
 	/// represents it exactly at k >= 2 and the only error in the fixture is
 	/// round-off. Its maximum is `peak` at ( R0, 0 ) and nowhere else.
 	double paraboloid( mfem::Vector const &x )
@@ -108,7 +108,7 @@ namespace
 		return peak*( 1.0 - u*u - v*v );
 	}
 
-	/// q = ( 1/r ) grad_bar( psi ), in MEQ's sign convention -- what
+	/// q = ( 1/R ) grad_bar( psi ), in MEQ's sign convention -- what
 	/// GradShafranovSolver::flux() returns, NOT the raw block, which holds -q
 	/// and would silently turn every maximum into a minimum.
 	void paraboloidFlux( mfem::Vector const &x, mfem::Vector &value )
@@ -118,7 +118,7 @@ namespace
 		value( 1 ) = -2.0*peak*( x( 1 ) - centreZ )/( halfZ*halfZ*x( 0 ) );
 	}
 
-	/// A field with no interior extremum at all: psi rising monotonically in r,
+	/// A field with no interior extremum at all: psi rising monotonically in R,
 	/// which is the wall-hugging annulus branch a free-boundary solve can settle
 	/// on. q never vanishes, so there is no axis to find.
 	double monotone( mfem::Vector const &x )
@@ -150,10 +150,10 @@ namespace
 		return best;
 	}
 
-	/// A dof of @a field at least @a away metres from ( r, z ), so that a spike
+	/// A dof of @a field at least @a away metres from ( R, z ), so that a spike
 	/// planted there is unambiguously somewhere else. Returns -1 if there is
 	/// none, which no mesh in this file produces.
-	int dofAwayFrom( mfem::GridFunction const &field, double r, double z,
+	int dofAwayFrom( mfem::GridFunction const &field, double radius, double z,
 	                 double away )
 	{
 		mfem::FiniteElementSpace const *space = field.FESpace();
@@ -164,7 +164,7 @@ namespace
 		{
 			mfem::Vector centre;
 			mesh->GetElementCenter( e, centre );
-			double const dr = centre( 0 ) - r;
+			double const dr = centre( 0 ) - radius;
 			double const dz = centre( 1 ) - z;
 			if ( std::sqrt( dr*dr + dz*dz ) < away )
 				continue;
@@ -188,7 +188,7 @@ namespace
 		}
 		std::printf( "    %-22s O-point psi = %12.6e at ( %7.4f, %7.4f ), "
 		             "|q| = %8.2e\n",
-		             "", found.axis.psi, found.axis.r, found.axis.z,
+		             "", found.axis.psi, found.axis.radius, found.axis.z,
 		             found.axis.fluxResidual );
 		std::printf( "    %-22s Psi there = %10.4e   separation = %8.2e m = "
 		             "%6.2f element diameters   %d extrema, %d saddles   %s\n",
@@ -245,8 +245,8 @@ BOOST_AUTO_TEST_CASE( aSpikedNodalValueIsNotAMagneticAxis )
 		"checkAxis() found no interior maximum of a paraboloid whose maximum is "
 		"at ( " << centreR << ", " << centreZ << " ). The flux was projected from "
 		"a closed form, so this is the root finder and not the field." );
-	BOOST_TEST( std::abs( healthy.axis.r - centreR ) < 1.0e-8,
-		"the located axis is at r = " << healthy.axis.r << " against an exact "
+	BOOST_TEST( std::abs( healthy.axis.radius - centreR ) < 1.0e-8,
+		"the located axis is at R = " << healthy.axis.radius << " against an exact "
 		<< centreR );
 	BOOST_TEST( std::abs( healthy.axis.z - centreZ ) < 1.0e-8,
 		"the located axis is at z = " << healthy.axis.z << " against an exact "
@@ -354,7 +354,7 @@ namespace
 		       + conductorPeak*std::exp( -( c*c + d*d ) );
 	}
 
-	/// q = ( 1/r ) grad_bar( psi ), the same convention paraboloidFlux() uses.
+	/// q = ( 1/R ) grad_bar( psi ), the same convention paraboloidFlux() uses.
 	void twoBumpsFlux( mfem::Vector const &x, mfem::Vector &value )
 	{
 		value.SetSize( 2 );
@@ -415,9 +415,9 @@ BOOST_AUTO_TEST_CASE( aConductorsOwnOPointIsNotAMagneticAxis )
 	BOOST_TEST_REQUIRE( unfiltered.located,
 		"the unfiltered guard found no interior extremum at all on a field that "
 		"has two by construction, so neither half of this case means anything." );
-	BOOST_TEST_REQUIRE( coils.indexContaining( unfiltered.axis.r,
+	BOOST_TEST_REQUIRE( coils.indexContaining( unfiltered.axis.radius,
 	                                           unfiltered.axis.z ) >= 0,
-		"the unfiltered guard returned ( " << unfiltered.axis.r << ", "
+		"the unfiltered guard returned ( " << unfiltered.axis.radius << ", "
 		<< unfiltered.axis.z << " ), which is NOT inside the conductor. The "
 		"filtered half asserts that the exclusion MOVES the answer, and that can "
 		"only mean something if the answer starts on the conductor -- so this is "
@@ -426,8 +426,8 @@ BOOST_AUTO_TEST_CASE( aConductorsOwnOPointIsNotAMagneticAxis )
 	// AND NOW THE SAME FIELD WITH THE CONDUCTOR EXCLUDED.
 	meq::CriticalPointFinder filtered( flux, potential );
 	filtered.setExcluded(
-		[ &coils ]( double r, double z )
-		{ return coils.indexContaining( r, z ) >= 0; } );
+		[ &coils ]( double radius, double z )
+		{ return coils.indexContaining( radius, z ) >= 0; } );
 	meq::AxisAgreement const guarded = filtered.checkAxis( nodal );
 	report( "conductor excluded", guarded );
 
@@ -436,8 +436,8 @@ BOOST_AUTO_TEST_CASE( aConductorsOwnOPointIsNotAMagneticAxis )
 		"nothing, on a field carrying a second extremum 0.6 m away. "
 		"setExcluded() filters WHICH candidate is competed and must not empty "
 		"the competition." );
-	BOOST_TEST( std::abs( guarded.axis.r - plasmaR ) < 2.0e-2,
-		"with the conductor excluded the guard returned r = " << guarded.axis.r
+	BOOST_TEST( std::abs( guarded.axis.radius - plasmaR ) < 2.0e-2,
+		"with the conductor excluded the guard returned R = " << guarded.axis.radius
 		<< " against the plasma bump's " << plasmaR );
 	BOOST_TEST( std::abs( guarded.axis.z - plasmaZ ) < 2.0e-2,
 		"with the conductor excluded the guard returned z = " << guarded.axis.z
@@ -493,7 +493,7 @@ BOOST_AUTO_TEST_CASE( aFieldWithNoInteriorExtremumHasNoAxisToAgreeWith )
 	report( "", found );
 
 	BOOST_TEST( !found.located,
-		"an O-point was reported on a field that rises monotonically in r, where "
+		"an O-point was reported on a field that rises monotonically in R, where "
 		"q never vanishes. sweep() found " << found.extrema << " extrema." );
 	BOOST_TEST( !found.agrees,
 		"the guard accepted a psi_ax on a field with no magnetic axis at all." );
@@ -533,7 +533,7 @@ BOOST_AUTO_TEST_CASE( theSolversOwnAxisFluxIsCheckedAgainstAZeroOfTheFlux )
 	// what HighBetaConvergence seeds this source with. It is a starting point for
 	// the border and for the bump, not an answer.
 	meq::tests::Rectangle const box = standardBox();
-	double const width = box.rMax - box.rMin;
+	double const width = box.maxRadius - box.minRadius;
 	double const height = box.zMax - box.zMin;
 	double const lambda = M_PI*M_PI*( 1.0/( width*width ) + 1.0/( height*height ) );
 	double const estimate = std::sqrt( nu*amplitude/lambda );
@@ -547,12 +547,12 @@ BOOST_AUTO_TEST_CASE( theSolversOwnAxisFluxIsCheckedAgainstAZeroOfTheFlux )
 	// A separable sine bump of about the right height. The trivial branch and a
 	// small-amplitude second solution are both in reach from the Dirichlet datum
 	// on this source, so the guess is part of the problem statement.
-	double const rMin = box.rMin;
+	double const minRadius = box.minRadius;
 	double const zMin = box.zMin;
 	mfem::FunctionCoefficient guess(
-		[ estimate, rMin, zMin, width, height ]( mfem::Vector const &x )
+		[ estimate, minRadius, zMin, width, height ]( mfem::Vector const &x )
 		{
-			return estimate*std::sin( M_PI*( x( 0 ) - rMin )/width )
+			return estimate*std::sin( M_PI*( x( 0 ) - minRadius )/width )
 			       *std::sin( M_PI*( x( 1 ) - zMin )/height );
 		} );
 
@@ -611,7 +611,7 @@ BOOST_AUTO_TEST_CASE( theSolversOwnAxisFluxIsCheckedAgainstAZeroOfTheFlux )
 	 * prints is unchanged.
 	 */
 	mfem::GridFunction &potential = solver.potential();
-	int const victim = dofAwayFrom( potential, healthy.axis.r, healthy.axis.z,
+	int const victim = dofAwayFrom( potential, healthy.axis.radius, healthy.axis.z,
 	                                0.3 );
 	BOOST_REQUIRE( victim >= 0 );
 	double const spike = 29.0*solver.psiAxis();
@@ -671,7 +671,7 @@ BOOST_AUTO_TEST_CASE( theLocatedAxisConstraintPutsPsiAxisOnTheAxis )
 	double const amplitude = 1.0;
 
 	meq::tests::Rectangle const box = standardBox();
-	double const width = box.rMax - box.rMin;
+	double const width = box.maxRadius - box.minRadius;
 	double const height = box.zMax - box.zMin;
 	double const lambda = M_PI*M_PI*( 1.0/( width*width ) + 1.0/( height*height ) );
 	double const estimate = std::sqrt( nu*amplitude/lambda );
@@ -682,12 +682,12 @@ BOOST_AUTO_TEST_CASE( theLocatedAxisConstraintPutsPsiAxisOnTheAxis )
 	NormalisedEquilibriumSource<HighBetaPoloidal> source( equilibrium );
 
 	mfem::ConstantCoefficient zero( 0.0 );
-	double const rMin = box.rMin;
+	double const minRadius = box.minRadius;
 	double const zMin = box.zMin;
 	mfem::FunctionCoefficient guess(
-		[ estimate, rMin, zMin, width, height ]( mfem::Vector const &x )
+		[ estimate, minRadius, zMin, width, height ]( mfem::Vector const &x )
 		{
-			return estimate*std::sin( M_PI*( x( 0 ) - rMin )/width )
+			return estimate*std::sin( M_PI*( x( 0 ) - minRadius )/width )
 			       *std::sin( M_PI*( x( 1 ) - zMin )/height );
 		} );
 

@@ -85,11 +85,11 @@ class Conductor(dict):
 	"""One rectangle: label, centre, half-extents, total current."""
 
 	@property
-	def rmin(self):
+	def Rmin(self):
 		return self["R"] - self["half_width"]
 
 	@property
-	def rmax(self):
+	def Rmax(self):
 		return self["R"] + self["half_width"]
 
 	@property
@@ -101,8 +101,8 @@ class Conductor(dict):
 		return self["Z"] + self["half_height"]
 
 
-def _rect(label, r, z, half_width, half_height, current, kind):
-	return Conductor(label=str(label), R=float(r), Z=float(z),
+def _rect(label, R, z, half_width, half_height, current, kind):
+	return Conductor(label=str(label), R=float(R), Z=float(z),
 	                 half_width=float(half_width),
 	                 half_height=float(half_height),
 	                 current=float(current), kind=kind)
@@ -159,8 +159,8 @@ def flatten(machine, half=DEFAULT_HALF):
 		turns = float(getattr(item, "turns", 1.0))
 		current = float(item.current) if scale is None else scale
 		if cls == "ShapedCoil":
-			r, z, hw, hh = _shaped_extent(item)
-			out.append(_rect(label, r, z, hw, hh, turns*current, "shaped"))
+			R, z, hw, hh = _shaped_extent(item)
+			out.append(_rect(label, R, z, hw, hh, turns*current, "shaped"))
 			return
 
 		out.append(_rect(label, item.R, item.Z, half, half, turns*current,
@@ -172,7 +172,7 @@ def flatten(machine, half=DEFAULT_HALF):
 
 
 def _overlaps(a, b):
-	return (a.rmin < b.rmax and b.rmin < a.rmax
+	return (a.Rmin < b.Rmax and b.Rmin < a.Rmax
 	        and a.zmin < b.zmax and b.zmin < a.zmax)
 
 
@@ -189,7 +189,7 @@ _INVENTED = {
 
 def shrink_to_fit(conductors, packing=PACKING, axis_margin=0.9, rounds=12):
 	"""Cap INVENTED half-extents so no two rectangles intersect and none
-	reaches r = 0.
+	reaches R = 0.
 
 	Returns ( label, hw_before, hh_before, hw, hh ) for whatever moved, so a
 	caller can report it rather than a geometry silently becoming a different
@@ -199,7 +199,7 @@ def shrink_to_fit(conductors, packing=PACKING, axis_margin=0.9, rounds=12):
 	shows. Its solenoid is 0.04 m wide and 3.16 m tall and its Px coils sit at
 	Z = +-1.2285, so the two are 1.23 m apart in Z and their rectangles
 	INTERSECT anyway -- the solenoid spans both. Separating them has to happen
-	in r, and it has to leave the solenoid's height alone.
+	in R, and it has to leave the solenoid's height alone.
 
 	THE PASS IS COLLECTIVE RATHER THAN PAIR-BY-PAIR, and on an up-down
 	symmetric machine that is visible: resolving ( solenoid, PxU ) and then
@@ -211,7 +211,7 @@ def shrink_to_fit(conductors, packing=PACKING, axis_margin=0.9, rounds=12):
 	before = [(c["half_width"], c["half_height"]) for c in conductors]
 
 	# THE AXIS FIRST. meq::Coil, [[coils]] and halfdisc.py all refuse a
-	# conductor reaching r = 0, because the operator's 1/r is not integrable
+	# conductor reaching R = 0, because the operator's 1/R is not integrable
 	# through it.
 	for c in conductors:
 		if "half_width" in _INVENTED.get(c["kind"], ()):
@@ -313,7 +313,7 @@ def _water_fill(wants, room):
 
 
 def _overlaps(a, b):
-	return (a.rmin < b.rmax and b.rmin < a.rmax
+	return (a.Rmin < b.Rmax and b.Rmin < a.Rmax
 	        and a.zmin < b.zmax and b.zmin < a.zmax)
 
 
@@ -362,6 +362,6 @@ def from_npz(d, half=DEFAULT_HALF):
 
 def bounding_radius(conductors):
 	"""The smallest circle about the origin containing every conductor."""
-	return max(np.hypot(max(abs(c.rmin), abs(c.rmax)),
+	return max(np.hypot(max(abs(c.Rmin), abs(c.Rmax)),
 	                    max(abs(c.zmin), abs(c.zmax)))
 	           for c in conductors)

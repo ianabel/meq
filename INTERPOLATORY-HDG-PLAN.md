@@ -12,7 +12,7 @@ that file is under active edit** — it moved by about twenty lines in the
 below also names the function, which is the durable half; `grep` for the name
 rather than trusting the number.
 
-**The change in one sentence.** Stop integrating `F( r, z, ψ )` at quadrature
+**The change in one sentence.** Stop integrating `F( R, z, ψ )` at quadrature
 points inside `meq::SourceIntegrator` and instead **interpolate it into the
 postprocessing space `Z_h = P^{k+1}`**, so that the source's contribution to
 the residual and to the Jacobian become fixed matrices applied to a vector of
@@ -140,12 +140,12 @@ adaptive loop and `OutputConvergence` all rest on.
 From `CLAUDE_HDGGS.md`:
 
 ```
-q − (1/r) ∇̄ψ = 0,      −∇̄·q = F( r, z, ψ ) / r,      ψ = 0 on Γ
-F := μ₀ r² dp/dψ + g dg/dψ
+q − (1/R) ∇̄ψ = 0,      −∇̄·q = F( R, z, ψ ) / R,      ψ = 0 on Γ
+F := μ₀ R² dp/dψ + g dg/dψ
 ```
 
 `DarcyForm` holds **`−q`**, and the potential right-hand side is assembled as
-`−( F/r, w )`. Both conventions are load bearing and both are settled in
+`−( F/R, w )`. Both conventions are load bearing and both are settled in
 `CLAUDE_HDGGS.md`, *The assembled flux is −q*.
 
 ### 1.3 The three spaces MEQ has, and the fourth it needs
@@ -179,9 +179,9 @@ Cockburn eq (25) — solved on each element `K`:
 ( ψ*, 1 )_K    =   ( ψ_h, 1 )_K
 ```
 
-**For MEQ `iK = r`**, and the sign works out with no flip: the stored block is
-`−q`, and `∇̄ψ = r q = −r · (stored)`, so `( ∇̄ψ*, ∇̄z ) = −( r · stored, ∇̄z )`,
-which is the formula with `iK = r`. `HDGPostprocessBlocks::SetDiffusionInverse(
+**For MEQ `iK = R`**, and the sign works out with no flip: the stored block is
+`−q`, and `∇̄ψ = R q = −R · (stored)`, so `( ∇̄ψ*, ∇̄z ) = −( R · stored, ∇̄z )`,
+which is the formula with `iK = R`. `HDGPostprocessBlocks::SetDiffusionInverse(
 Coefficient & )` is where that goes. **The sign must be checked and not
 argued** — this is the same trap as `transferredDatum()` in `CLAUDE_HDGGS.md`,
 where feeding the wrong flux gives the answer with its sign reversed rather than
@@ -211,8 +211,8 @@ about having two postprocessed potentials.
 
 ### 1.5 The residual and the Jacobian, for MEQ's `F`
 
-The paper's `F` is `F( u )`. MEQ's is `F( r, z, ψ )` with an explicit spatial
-dependence and a `1/r` weight. **The explicit spatial dependence costs nothing**:
+The paper's `F` is `F( u )`. MEQ's is `F( R, z, ψ )` with an explicit spatial
+dependence and a `1/R` weight. **The explicit spatial dependence costs nothing**:
 the `Z_h` nodes have fixed reference positions, so their physical images `x_n`
 are geometry and are precomputed alongside `A9` —
 `HDGReactionIntegratorBase` stores them as `x_data` and
@@ -246,23 +246,23 @@ one with the `(1,0)` block missing was measured at five steps at a constant
 factor of 4.2e-3. **The residual is bit-identical either way**, so the
 discriminating quantity is the iteration count and not the answer.
 
-### 1.6 The `1/r`, and why it must not be interpolated
+### 1.6 The `1/R`, and why it must not be interpolated
 
-MEQ assembles `−( F/r, w )`. The shipped `HDGReactionIntegratorBase` builds
+MEQ assembles `−( F/R, w )`. The shipped `HDGReactionIntegratorBase` builds
 `A9( i, j ) = ( χ_j, φ_i )_K` with **no coefficient**, so as it stands MEQ would
-have to hand it `F/r` as the nodal function. That is wrong twice:
+have to hand it `F/R` as the nodal function. That is wrong twice:
 
 * **It has a pole on the symmetry axis.** `Z_h`'s Lagrange node set is closed,
-  so an element touching `r = 0` — which the free-boundary half-disc mesh of
-  `tools/mesh/halfdisc.py` has — carries a node **at** `r = 0` exactly. A Gauss
+  so an element touching `R = 0` — which the free-boundary half-disc mesh of
+  `tools/mesh/halfdisc.py` has — carries a node **at** `R = 0` exactly. A Gauss
   rule on a triangle has strictly interior points and never meets it. MEQ
   already refuses a source that does not vanish on the axis, so the value there
   is `0/0`, which is a `NaN` and not a limit.
 * **It destroys the one exactly-representable case.** `F` for Solov'ev is
   `−( (1−A) r² + A )`, a quadratic, so `I_h F = F` exactly for every `k ≥ 1`.
-  `F/r = −( (1−A) r + A/r )` is not a polynomial at any degree.
+  `F/R = −( (1−A) R + A/R )` is not a polynomial at any degree.
 
-**So the right form is to weight `A9`**: `A9( i, j ) = ( χ_j / r, φ_i )_K`,
+**So the right form is to weight `A9`**: `A9( i, j ) = ( χ_j / R, φ_i )_K`,
 still constant, still assembled once, with `F` itself interpolated. That is
 §7.1, a small upstream request.
 
@@ -472,7 +472,7 @@ One instance, owned by the solver, constructed on `( fluxFes, potentialFes,
 enrichedFes )`, `SetDiffusionInverse( radius )`, `Assemble()`.
 
 **It records `Mesh::sequence` and aborts on a mismatch**, and it exposes
-`CoefficientsMoved()` for a moving diffusivity. MEQ's `iK = r` never moves, so
+`CoefficientsMoved()` for a moving diffusivity. MEQ's `iK = R` never moves, so
 only the mesh matters — and the adaptive loop refines in place, which bumps the
 sequence. `buildForms()` is called from `prepare()` and `prepare()` runs after
 every refinement, so assembling the blocks there is correct. **The abort is a
@@ -614,8 +614,8 @@ Nothing below is written yet. Function names are the existing ones.
 | `GradShafranov.hpp` / `.cpp` | `setSourceTerm( SourceTerm )`, `sourceTerm()`, and an accessor for `FluxMassIsPrefactored()` so a test can assert the route |
 
 **The sign.** MFEM's `AssembleElementVector` writes `+A9 F(γ)` into the
-potential row; MEQ's `SourceIntegrator` writes `−w F/r`. So `meq::NodalSource`
-must return the negated, `r`-weighted quantity, and **which negation is correct
+potential row; MEQ's `SourceIntegrator` writes `−w F/R`. So `meq::NodalSource`
+must return the negated, `R`-weighted quantity, and **which negation is correct
 must be established by running both**, exactly as upstream's own fixture comment
 says ("The sign is the form's, established by running both"). IH-2's `McCarthy`
 acceptance is what settles it: `F` linear in `ψ` means a sign error is a
@@ -701,7 +701,7 @@ they are on a converged Solov'ev solution — a number worth knowing and cheap
 
 `src/meq/Source.{hpp,cpp}` — no change to `meq::Source`,
 `meq::NormalisedSource` or any concrete source. `f()` and `dFdPsi()` are already
-pointwise in `( r, z, ψ )` and that is exactly what a `NodalReactionFunction`
+pointwise in `( R, z, ψ )` and that is exactly what a `NodalReactionFunction`
 wants. This is the payoff of `CLAUDE.md`'s rule that `Profiles` and `Source`
 keep MFEM out.
 
@@ -726,7 +726,7 @@ and can say what it measured.
 **Ask**: `HDGReactionIntegratorBase::SetWeight( Coefficient & )`, so that
 `A9( i, j ) = ( c χ_j, φ_i )_K` with `c` defaulting to 1.
 
-**Why**: §1.6. Without it MEQ must interpolate `F/r`, which has a pole at `r = 0`
+**Why**: §1.6. Without it MEQ must interpolate `F/R`, which has a pole at `R = 0`
 on the half-disc mesh that the free-boundary path uses, and which turns the one
 exactly-representable source in the tree — Solov'ev, a quadratic — into an
 inexactly-represented one at every degree.
@@ -735,7 +735,7 @@ inexactly-represented one at every degree.
 `HDGReactionIntegratorBase::Assemble()`, once per mesh. It cannot move any
 existing answer, `c = 1` being the default.
 
-**Workaround if refused**: MEQ can special-case `r < ε` in
+**Workaround if refused**: MEQ can special-case `R < ε` in
 `meq::NodalSource::Eval()` and return zero there, which is correct wherever the
 source vanishes on the axis — which MEQ already refuses to run without. That
 loses the Solov'ev exactness and is a worse place to put the knowledge.
@@ -754,7 +754,7 @@ region from carrying a current channel nobody asked for —
 `NodalReactionFunction::Eval( const Vector &x, const Vector &u, Vector &F )`
 receives only the physical coordinate, so **the element mask cannot be
 expressed through the interface as shipped**, and neither can
-`fOutsidePlasma( r, z )`, which is selected by the same mask.
+`fOutsidePlasma( R, z )`, which is selected by the same mask.
 
 The integrator has `Tr.ElementNo` in hand at both entry points; this is a
 signature change and not a mechanism.
@@ -824,7 +824,7 @@ Also report the `SolovievConvergence` and `NewtonConvergence` rates at
 ### IH-1 — `u*` alone, no solver change
 
 **Do**: construct `HDGPostprocessBlocks` on a **converged** MEQ Solov'ev
-solution, with `iK = r`, and compare its `u*` against the exact `ψ`. Also report
+solution, with `iK = R`, and compare its `u*` against the exact `ψ`. Also report
 `‖u* − ψ*‖` against `Reconstruct()`'s output (§6.4).
 
 **Acceptance**: `u*` converges at **`k+2`** for `k = 1, 2, 3` on the dyadic
@@ -989,7 +989,7 @@ Three separate points.
   so it does not move mid-iteration; the interpolatory term reads
   `supportAxis()`/`supportBoundary()` through the same
   `NormalisedSource::insidePlasma()` and inherits the freeze.
-* **`fOutsidePlasma( r, z )`** — the coil term — is `ψ`-independent, so under
+* **`fOutsidePlasma( R, z )`** — the coil term — is `ψ`-independent, so under
   the interpolatory form it is a constant vector `A9 · [ fOut( x_n ) ]` per
   element and could move to the right-hand side entirely. **Do not do that in
   the same stage as the port**; it is a separate simplification and mixing them
@@ -1009,8 +1009,8 @@ Three separate points.
   at the computed potential, so it is not linear in the unknowns, `B11`/`B12`
   would not be constant, and each element's reconstruction would become an
   implicit local fixed point. §6.4.
-* **"Interpolate `F/r`, since that is what the weak form carries."** A pole at
-  `r = 0` on the half-disc, and it destroys the Solov'ev exactness. §1.6, §7.1.
+* **"Interpolate `F/R`, since that is what the weak form carries."** A pole at
+  `R = 0` on the half-disc, and it destroys the Solov'ev exactness. §1.6, §7.1.
 * **"The saving is that quadrature of `F` disappears."** At MEQ's degrees
   `ns` is within a factor of two of `N_q`, and at `extraOrder = 0` it is
   **larger**. §3.2. The paper's framing is a time-stepping one — matrices

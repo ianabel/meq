@@ -110,7 +110,7 @@ namespace
 		return duration<double>( steady_clock::now().time_since_epoch() ).count();
 	}
 
-	struct Box { double rMin, rMax, zMin, zMax; };
+	struct Box { double minRadius, maxRadius, zMin, zMax; };
 
 	Box box() { return { 0.6, 1.4, -0.6, 0.6 }; }
 
@@ -118,11 +118,11 @@ namespace
 	{
 		mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D(
 			n, n, mfem::Element::TRIANGLE, false,
-			b.rMax - b.rMin, b.zMax - b.zMin );
+			b.maxRadius - b.minRadius, b.zMax - b.zMin );
 		for ( int v = 0; v < mesh.GetNV(); ++v )
 		{
 			double *c = mesh.GetVertex( v );
-			c[ 0 ] += b.rMin;
+			c[ 0 ] += b.minRadius;
 			c[ 1 ] += b.zMin;
 		}
 		return mesh;
@@ -138,14 +138,14 @@ namespace
 		public:
 			explicit EquilibriumSource( Equilibrium const &eqIn ) : eq( eqIn ) {}
 
-			double f( double r, double z, double psi ) const override
+			double f( double radius, double z, double psi ) const override
 			{
-				return eq.f( r, z, psi );
+				return eq.f( radius, z, psi );
 			}
 
-			double dFdPsi( double r, double z, double psi ) const override
+			double dFdPsi( double radius, double z, double psi ) const override
 			{
-				return eq.dFdPsi( r, z, psi );
+				return eq.dFdPsi( radius, z, psi );
 			}
 
 		private:
@@ -168,14 +168,14 @@ namespace
 		public:
 			explicit NormalisedEquilibriumSource( Equilibrium const &eqIn ) : eq( eqIn ) {}
 
-			double f( double r, double z, double psi ) const override
+			double f( double radius, double z, double psi ) const override
 			{
-				return eq.f( r, z, psi );
+				return eq.f( radius, z, psi );
 			}
 
-			double dFdPsi( double r, double z, double psi ) const override
+			double dFdPsi( double radius, double z, double psi ) const override
 			{
-				return eq.dFdPsi( r, z, psi );
+				return eq.dFdPsi( radius, z, psi );
 			}
 
 			void setNormalisation( double psiAxis, double psiBoundary ) override
@@ -391,7 +391,7 @@ namespace
 	{
 		Run out;
 
-		double const w = b.rMax - b.rMin;
+		double const w = b.maxRadius - b.minRadius;
 		double const h = b.zMax - b.zMin;
 		double const eigenvalue = M_PI*M_PI*( 1.0/( w*w ) + 1.0/( h*h ) );
 		double const estimate = std::sqrt( nu*amplitude/eigenvalue );
@@ -409,12 +409,12 @@ namespace
 		// at a fixed normalisation this equation has a small positive solution
 		// and a large one, and Newton from the Dirichlet datum walks onto the
 		// small branch. HighBetaConvergence records the same bump for the reason.
-		double const rMin = b.rMin;
+		double const minRadius = b.minRadius;
 		double const zMin = b.zMin;
 		mfem::FunctionCoefficient guess(
-			[ estimate, rMin, zMin, w, h ]( mfem::Vector const &x )
+			[ estimate, minRadius, zMin, w, h ]( mfem::Vector const &x )
 			{
-				return estimate*std::sin( M_PI*( x( 0 ) - rMin )/w )
+				return estimate*std::sin( M_PI*( x( 0 ) - minRadius )/w )
 				       *std::sin( M_PI*( x( 1 ) - zMin )/h );
 			} );
 
@@ -799,7 +799,7 @@ int main( int argc, char **argv )
 			return 0.3*x( 1 )/zMax;
 		} );
 		// Solov'ev's datum is the trace of ITS exact solution, as example5's is
-		// of its own. The source is F and not F/r; the solver applies the 1/r.
+		// of its own. The source is F and not F/R; the solver applies the 1/R.
 		mfem::FunctionCoefficient solovievDatum(
 			[ &soloviev ]( mfem::Vector const &x )
 			{
@@ -853,7 +853,7 @@ int main( int argc, char **argv )
 					best_s.prepareTime = best_s.solveTime = 1e30;
 					best_t.prepareTime = best_t.solveTime = 1e30;
 
-					for ( int r = 0; r < repeats; ++r )
+					for ( int repeat = 0; repeat < repeats; ++repeat )
 					{
 						Run s = runCase( AM::Serial, trace );
 						if ( s.prepareTime < best_s.prepareTime ) best_s.prepareTime = s.prepareTime;
@@ -868,7 +868,7 @@ int main( int argc, char **argv )
 
 					if ( canThread )
 					{
-						for ( int r = 0; r < repeats; ++r )
+						for ( int repeat = 0; repeat < repeats; ++repeat )
 						{
 							Run t = runCase( AM::Threaded, trace );
 							if ( t.prepareTime < best_t.prepareTime ) best_t.prepareTime = t.prepareTime;

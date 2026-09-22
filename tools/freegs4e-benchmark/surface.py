@@ -51,7 +51,7 @@ def interior_surface(R, Z, psi, psi_axis, psi_bndry, Raxis, Zaxis, level=0.95):
     return seg[:, 0], seg[:, 1], psi_target
 
 
-def _encloses(seg, r, z):
-    """Winding of the polygon about ( r, z ), by the turning of the ray."""
-    ang = np.unwrap(np.arctan2(seg[:, 1] - z, seg[:, 0] - r))
+def _encloses(seg, R, z):
+    """Winding of the polygon about ( R, z ), by the turning of the ray."""
+    ang = np.unwrap(np.arctan2(seg[:, 1] - z, seg[:, 0] - R))
     return abs(ang[-1] - ang[0]) > np.pi

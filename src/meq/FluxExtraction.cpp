@@ -142,7 +142,7 @@ namespace meq
 				"flux label to express a geometry against" );
 
 		FluxSurfaceFamily family;
-		family.axisR = axis.r;
+		family.axisR = axis.radius;
 		family.axisZ = axis.z;
 		family.psiAxis = axis.psi;
 		family.psiBoundary = psiBoundary;
@@ -199,7 +199,7 @@ namespace meq
 			surface.level = level;
 			surface.normalisedFlux = normalised;
 			surface.radial = label;
-			surface.r = fit.pointR;
+			surface.radius = fit.pointR;
 			surface.z = fit.pointZ;
 			surface.extended = fit.extended;
 

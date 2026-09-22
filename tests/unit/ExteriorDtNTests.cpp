@@ -15,7 +15,7 @@
 //      reproduces its own trace, the modes decay as advertised. Necessary, and
 //      it would pass with a completely wrong basis.
 //   2. The basis satisfies the DIFFERENTIAL EQUATION, recomputed by central
-//      differences in ( r, z ). This is a real check: Delta* is reassembled in
+//      differences in ( R, z ). This is a real check: Delta* is reassembled in
 //      the coordinates the SOLVER uses, not the ( rho, mu ) the separation was
 //      done in, so a mistake in the separation shows up here.
 //   3. The symbol against a difference of the field it describes.
@@ -63,27 +63,27 @@ namespace
 	}
 
 	/// A point on Gamma at polar angle theta from the centre.
-	void onGamma( ExteriorDtN const &dtn, double theta, double &r, double &z )
+	void onGamma( ExteriorDtN const &dtn, double theta, double &radius, double &z )
 	{
-		r = dtn.rhoGamma()*std::sin( theta );
+		radius = dtn.rhoGamma()*std::sin( theta );
 		z = dtn.zCentre() + dtn.rhoGamma()*std::cos( theta );
 	}
 
-	/// Delta* psi = d_rr psi - ( 1/r ) d_r psi + d_zz psi, by central
+	/// Delta* psi = d_rr psi - ( 1/R ) d_r psi + d_zz psi, by central
 	/// differences, in EXACTLY the arrangement tests/analytic/VacuumHarmonic.hpp
 	/// and ManufacturedNonlinear.hpp use. Copied rather than reinvented so that
 	/// a disagreement between this file and those is a real disagreement.
 	template <typename Psi>
-	double deltaStarFD( Psi psi, double r, double z, double h )
+	double deltaStarFD( Psi psi, double radius, double z, double h )
 	{
 		auto innerR = [ & ]( double rr )
 		{
 			return ( psi( rr + h, z ) - psi( rr - h, z ) )/( 2.0*h )/rr;
 		};
-		double const dRInner = ( innerR( r + h ) - innerR( r - h ) )/( 2.0*h );
-		double const dZZ = ( psi( r, z + h ) - 2.0*psi( r, z ) + psi( r, z - h ) )
+		double const dRInner = ( innerR( radius + h ) - innerR( radius - h ) )/( 2.0*h );
+		double const dZZ = ( psi( radius, z + h ) - 2.0*psi( radius, z ) + psi( radius, z - h ) )
 		                   /( h*h );
-		return r*dRInner + dZZ;
+		return radius*dRInner + dZZ;
 	}
 }
 
@@ -190,7 +190,7 @@ BOOST_AUTO_TEST_CASE( the_mass_matches_the_closed_form_and_the_basis_is_orthogon
 	 * ORTHOGONALITY, THROUGH THE PROJECTION, AND IT COMES OUT AT ROUND-OFF
 	 * BECAUSE THE QUADRATURE IS EXACT HERE.
 	 *
-	 * The weight dGamma/r = dmu/( 1 - mu^2 ) is singular at the axis, which
+	 * The weight dGamma/R = dmu/( 1 - mu^2 ) is singular at the axis, which
 	 * would ordinarily mean a special rule. It does not, and that is the second
 	 * accident this class rests on: every C_n carries a factor ( 1 - mu^2 ), so
 	 * C_n/( 1 - mu^2 ) is a POLYNOMIAL and the singular weight never appears.
@@ -202,7 +202,7 @@ BOOST_AUTO_TEST_CASE( the_mass_matches_the_closed_form_and_the_basis_is_orthogon
 	double worstCross = 0.0;
 	for ( int m = ExteriorDtN::firstMode(); m <= dtn.lastMode(); ++m )
 	{
-		auto trace = [ &dtn, m ]( double r, double z ) { return dtn.basis( m, r, z ); };
+		auto trace = [ &dtn, m ]( double radius, double z ) { return dtn.basis( m, radius, z ); };
 		std::vector<double> const a = dtn.coefficients( trace );
 
 		for ( int i = 0; i < dtn.modeCount(); ++i )
@@ -225,14 +225,14 @@ BOOST_AUTO_TEST_CASE( the_mass_matches_the_closed_form_and_the_basis_is_orthogon
 	            "not exact for these integrands -- it should be, since the "
 	            "singular weight cancels against C_n's own ( 1 - mu^2 )" );
 	BOOST_TEST( worstCross < 1.0e-13,
-	            "the basis is not orthogonal in dGamma/r: worst off-diagonal "
+	            "the basis is not orthogonal in dGamma/R: worst off-diagonal "
 	            << worstCross << ". That weight being the one the Grad-Shafranov "
 	            "weak form already carries is the whole reason the exterior "
 	            "block is diagonal, so this failing collapses stage FB-0" );
 }
 
 /*
- * THE MODES SOLVE THE EQUATION, CHECKED IN ( r, z ) RATHER THAN IN ( rho, mu ).
+ * THE MODES SOLVE THE EQUATION, CHECKED IN ( R, z ) RATHER THAN IN ( rho, mu ).
  *
  * This is the first test here that could catch an error in the DERIVATION
  * rather than in the bookkeeping. The separation was done in spherical
@@ -253,7 +253,7 @@ BOOST_AUTO_TEST_CASE( each_exterior_mode_is_delta_star_harmonic )
 {
 	ExteriorDtN const dtn = standard();
 
-	std::printf( "\n  Delta* of each exterior mode, differenced in ( r, z )\n" );
+	std::printf( "\n  Delta* of each exterior mode, differenced in ( R, z )\n" );
 	std::printf( "    %3s %15s %15s %11s\n", "n", "worst |Delta*|", "|psi| scale", "relative" );
 
 	double worstRelative = 0.0;
@@ -261,21 +261,21 @@ BOOST_AUTO_TEST_CASE( each_exterior_mode_is_delta_star_harmonic )
 	{
 		std::vector<double> a( static_cast<std::size_t>( dtn.modeCount() ), 0.0 );
 		a[ static_cast<std::size_t>( n - ExteriorDtN::firstMode() ) ] = 1.0;
-		auto psi = [ & ]( double r, double z ) { return dtn.exterior( r, z, a ); };
+		auto psi = [ & ]( double radius, double z ) { return dtn.exterior( radius, z, a ); };
 
 		double worst = 0.0;
 		double scale = 0.0;
 		// Well outside Gamma so the stencil never straddles the refusal, and
-		// away from the axis so the 1/r in the operator is not the thing being
+		// away from the axis so the 1/R in the operator is not the thing being
 		// measured.
 		for ( double rho = 3.0; rho <= 6.0; rho += 0.5 )
 		{
 			for ( double theta = 0.3; theta < 2.9; theta += 0.2 )
 			{
-				double const r = rho*std::sin( theta );
+				double const radius = rho*std::sin( theta );
 				double const z = dtn.zCentre() + rho*std::cos( theta );
-				worst = std::max( worst, std::fabs( deltaStarFD( psi, r, z, 1.0e-4 ) ) );
-				scale = std::max( scale, std::fabs( psi( r, z ) ) );
+				worst = std::max( worst, std::fabs( deltaStarFD( psi, radius, z, 1.0e-4 ) ) );
+				scale = std::max( scale, std::fabs( psi( radius, z ) ) );
 			}
 		}
 
@@ -289,7 +289,7 @@ BOOST_AUTO_TEST_CASE( each_exterior_mode_is_delta_star_harmonic )
 	BOOST_TEST( worstRelative < 1.0e-5,
 	            "an exterior mode is not Delta*-harmonic: worst relative residual "
 	            << worstRelative << ". This is the claim FB-0 rests on, and it is "
-	            "checked in ( r, z ) precisely so that an error in the spherical "
+	            "checked in ( R, z ) precisely so that an error in the spherical "
 	            "separation cannot hide -- so a failure here is the DERIVATION, "
 	            "not the bookkeeping" );
 }
@@ -330,9 +330,9 @@ BOOST_AUTO_TEST_CASE( the_symbol_is_the_outward_radial_derivative )
 		                             + 4.0*at( dtn.rhoGamma() + h )
 		                             - at( dtn.rhoGamma() + 2.0*h ) )/( 2.0*h );
 
-		double r = 0.0, z = 0.0;
-		onGamma( dtn, theta, r, z );
-		double const predicted = dtn.symbol( n )*dtn.basis( n, r, z );
+		double radius = 0.0, z = 0.0;
+		onGamma( dtn, theta, radius, z );
+		double const predicted = dtn.symbol( n )*dtn.basis( n, radius, z );
 
 		worst = std::max( worst,
 		                  std::fabs( differenced - predicted )/std::fabs( predicted ) );
@@ -379,16 +379,16 @@ BOOST_AUTO_TEST_CASE( the_exterior_field_matches_its_trace_and_decays )
 	double worstTrace = 0.0;
 	for ( double theta = 0.05; theta < 3.10; theta += 0.05 )
 	{
-		double r = 0.0, z = 0.0;
-		onGamma( dtn, theta, r, z );
+		double radius = 0.0, z = 0.0;
+		onGamma( dtn, theta, radius, z );
 
 		double expected = 0.0;
 		for ( int i = 0; i < dtn.modeCount(); ++i )
 			expected += a[ static_cast<std::size_t>( i ) ]
-			            *dtn.basis( ExteriorDtN::firstMode() + i, r, z );
+			            *dtn.basis( ExteriorDtN::firstMode() + i, radius, z );
 
 		worstTrace = std::max( worstTrace,
-		                       std::fabs( dtn.exterior( r, z, a ) - expected ) );
+		                       std::fabs( dtn.exterior( radius, z, a ) - expected ) );
 	}
 
 	std::printf( "\n  exterior() on Gamma against the trace: %.3e\n", worstTrace );
@@ -443,7 +443,7 @@ BOOST_AUTO_TEST_CASE( the_exterior_field_matches_its_trace_and_decays )
  *
  * THE TEST IS THEREFORE: expand the loop's trace on Gamma in the basis, apply
  * the symbol, and compare against the loop's OWN exact normal derivative --
- * which is r q . n from its analytic gradient, computed by a route sharing no
+ * which is R q . n from its analytic gradient, computed by a route sharing no
  * line of code with anything above.
  *
  * WAIT. THE LOOP IS INSIDE Gamma, SO ITS FIELD IS THE INTERIOR ONE. Isn't the
@@ -499,14 +499,14 @@ BOOST_AUTO_TEST_CASE( the_symbol_reproduces_a_current_loop_it_knows_nothing_abou
 	double worstTrace = 0.0;
 	double worstDtN = 0.0;
 
-	for ( double radius : { 2.5, 4.0 } )
+	for ( double rhoGamma : { 2.5, 4.0 } )
 	{
 		for ( int modeCount : { 12, 24 } )
 		{
-			ExteriorDtN const dtn( 0.0, radius, modeCount );
+			ExteriorDtN const dtn( 0.0, rhoGamma, modeCount );
 
 			// The trace of the loop's field on Gamma, and its expansion.
-			auto trace = [ &loop ]( double r, double z ) { return loop.psi( r, z ); };
+			auto trace = [ &loop ]( double radius, double z ) { return loop.psi( radius, z ); };
 			std::vector<double> const a = dtn.coefficients( trace );
 
 			double traceError = 0.0;
@@ -518,15 +518,15 @@ BOOST_AUTO_TEST_CASE( the_symbol_reproduces_a_current_loop_it_knows_nothing_abou
 			// so an absolute error there is uninformative rather than good.
 			for ( double theta = 0.25; theta < 2.90; theta += 0.05 )
 			{
-				double const r = radius*std::sin( theta );
-				double const z = radius*std::cos( theta );
+				double const radius = rhoGamma*std::sin( theta );
+				double const z = rhoGamma*std::cos( theta );
 
 				// (a) the expansion reproduces the trace.
 				double expanded = 0.0;
 				for ( int i = 0; i < dtn.modeCount(); ++i )
 					expanded += a[ static_cast<std::size_t>( i ) ]
-					            *dtn.basis( ExteriorDtN::firstMode() + i, r, z );
-				traceError = std::max( traceError, std::fabs( expanded - loop.psi( r, z ) ) );
+					            *dtn.basis( ExteriorDtN::firstMode() + i, radius, z );
+				traceError = std::max( traceError, std::fabs( expanded - loop.psi( radius, z ) ) );
 
 				// (b) THE DtN. The symbol applied to the same coefficients,
 				// against the loop's own radial derivative -- which is
@@ -538,11 +538,11 @@ BOOST_AUTO_TEST_CASE( the_symbol_reproduces_a_current_loop_it_knows_nothing_abou
 				{
 					int const n = ExteriorDtN::firstMode() + i;
 					predicted += a[ static_cast<std::size_t>( i ) ]*dtn.symbol( n )
-					             *dtn.basis( n, r, z );
+					             *dtn.basis( n, radius, z );
 				}
 
 				double dR = 0.0, dZ = 0.0;
-				loop.gradPsi( r, z, dR, dZ );
+				loop.gradPsi( radius, z, dR, dZ );
 				double const exact = dR*std::sin( theta ) + dZ*std::cos( theta );
 
 				dtnError = std::max( dtnError, std::fabs( predicted - exact ) );
@@ -550,13 +550,13 @@ BOOST_AUTO_TEST_CASE( the_symbol_reproduces_a_current_loop_it_knows_nothing_abou
 			}
 
 			std::printf( "    %8.1f %6d %14.3e %14.3e %14.3e\n",
-			             radius, modeCount, traceError, dtnError/dtnScale,
+			             rhoGamma, modeCount, traceError, dtnError/dtnScale,
 			             std::fabs( a[ 0 ] ) );
 			std::fflush( stdout );
 
 			// The best configuration is what the gate is set from; the coarser
 			// ones are printed so the convergence in both knobs is visible.
-			if ( radius >= 4.0 && modeCount >= 24 )
+			if ( rhoGamma >= 4.0 && modeCount >= 24 )
 			{
 				worstTrace = traceError;
 				worstDtN = dtnError/dtnScale;
@@ -610,10 +610,10 @@ BOOST_AUTO_TEST_CASE( the_spectrum_falls_geometrically_and_faster_from_further_o
 	             "|a_12|", "ratio 12/2" );
 
 	std::vector<double> falloff;
-	for ( double radius : { 2.0, 2.5, 4.0, 8.0 } )
+	for ( double rhoGamma : { 2.0, 2.5, 4.0, 8.0 } )
 	{
-		ExteriorDtN const dtn( 0.0, radius, 12 );
-		auto trace = [ &loop ]( double r, double z ) { return loop.psi( r, z ); };
+		ExteriorDtN const dtn( 0.0, rhoGamma, 12 );
+		auto trace = [ &loop ]( double radius, double z ) { return loop.psi( radius, z ); };
 		std::vector<double> const a = dtn.coefficients( trace );
 
 		double const a2 = std::fabs( a[ 0 ] );
@@ -622,7 +622,7 @@ BOOST_AUTO_TEST_CASE( the_spectrum_falls_geometrically_and_faster_from_further_o
 		falloff.push_back( a12/a2 );
 
 		std::printf( "    %8.1f %12.3e %12.3e %12.3e %12.3e\n",
-		             radius, a2, a6, a12, a12/a2 );
+		             rhoGamma, a2, a6, a12, a12/a2 );
 	}
 	std::fflush( stdout );
 
@@ -693,8 +693,8 @@ BOOST_AUTO_TEST_CASE( the_basis_matches_independently_computed_exact_values )
 			// A point in the direction mu, at any radius: basis() depends on
 			// direction alone. Unit radius keeps the geometry obvious.
 			double const mu = sample[ j ];
-			double const r = std::sqrt( std::max( 0.0, ( 1.0 - mu )*( 1.0 + mu ) ) );
-			double const got = dtn.basis( n, r, mu );
+			double const radius = std::sqrt( std::max( 0.0, ( 1.0 - mu )*( 1.0 + mu ) ) );
+			double const got = dtn.basis( n, radius, mu );
 			double const want = expected[ n - 2 ][ j ];
 
 			worst = std::max( worst,
@@ -718,9 +718,9 @@ BOOST_AUTO_TEST_CASE( the_basis_matches_independently_computed_exact_values )
 	{
 		for ( double mu : { 0.17, 0.4, 0.83 } )
 		{
-			double const r = std::sqrt( ( 1.0 - mu )*( 1.0 + mu ) );
-			double const plus = dtn.basis( n, r, mu );
-			double const minus = dtn.basis( n, r, -mu );
+			double const radius = std::sqrt( ( 1.0 - mu )*( 1.0 + mu ) );
+			double const plus = dtn.basis( n, radius, mu );
+			double const minus = dtn.basis( n, radius, -mu );
 			double const sign = ( n % 2 == 0 ) ? 1.0 : -1.0;
 			worstParity = std::max( worstParity, std::fabs( minus - sign*plus ) );
 		}
@@ -759,15 +759,15 @@ BOOST_AUTO_TEST_CASE( the_basis_matches_independently_computed_exact_values )
  *
  * tests/analytic/VacuumHarmonic.hpp was written for FB-A -- polynomial
  * Delta*-harmonic functions vanishing on the axis, found by asking what a
- * vacuum solve on a mesh reaching r = 0 could be measured against.
+ * vacuum solve on a mesh reaching R = 0 could be measured against.
  * src/meq/ExteriorDtN.cpp was written for FB-0, from a separation of variables
  * in spherical coordinates. They turn out to be the same three functions:
  *
- *     rho^2 C_2 = r^2 / 2
- *     rho^3 C_3 = r^2 z / 2
- *     rho^4 C_4 = r^2( 4 z^2 - r^2 ) / 8
+ *     rho^2 C_2 = R^2 / 2
+ *     rho^3 C_3 = R^2 z / 2
+ *     rho^4 C_4 = R^2( 4 z^2 - R^2 ) / 8
  *
- * against VacuumHarmonic's r^2, r^2 z and -( r^4 - 4 r^2 z^2 )/8 -- the same
+ * against VacuumHarmonic's R^2, R^2 z and -( R^4 - 4 R^2 z^2 )/8 -- the same
  * span, mode for mode, with the scalings shown.
  *
  * THAT IS A REAL TIE AND NOT A CURIOSITY. Two parts of FREE-BOUNDARY-PLAN.md
@@ -787,30 +787,30 @@ BOOST_AUTO_TEST_CASE( the_interior_modes_are_fb_a_s_vacuum_harmonics )
 
 	// rho^n C_n( mu ), the INTERIOR branch, which exterior() does not provide --
 	// it carries rho^( 1 - n ). Assembled here from basis() and the radius.
-	auto interior = [ &dtn ]( int n, double r, double z )
+	auto interior = [ &dtn ]( int n, double radius, double z )
 	{
-		double const rho = std::hypot( r, z );
-		return std::pow( rho, static_cast<double>( n ) )*dtn.basis( n, r, z );
+		double const rho = std::hypot( radius, z );
+		return std::pow( rho, static_cast<double>( n ) )*dtn.basis( n, radius, z );
 	};
 
 	// The three claimed identities, with their scalings.
-	VacuumHarmonic const quadratic( 1.0, 0.0, 0.0 );   // r^2
-	VacuumHarmonic const linearZ( 0.0, 1.0, 0.0 );     // r^2 z
-	VacuumHarmonic const quartic( 0.0, 0.0, 1.0 );     // r^4 - 4 r^2 z^2
+	VacuumHarmonic const quadratic( 1.0, 0.0, 0.0 );   // R^2
+	VacuumHarmonic const linearZ( 0.0, 1.0, 0.0 );     // R^2 z
+	VacuumHarmonic const quartic( 0.0, 0.0, 1.0 );     // R^4 - 4 R^2 z^2
 
 	double worst = 0.0;
-	for ( double r = 0.1; r < 2.0; r += 0.13 )
+	for ( double radius = 0.1; radius < 2.0; radius += 0.13 )
 	{
 		for ( double z = -1.5; z < 1.55; z += 0.17 )
 		{
-			double const scale = 1.0 + r*r + z*z*r*r;
+			double const scale = 1.0 + radius*radius + z*z*radius*radius;
 			worst = std::max( worst,
-				std::fabs( interior( 2, r, z ) - 0.5*quadratic.psi( r, z ) )/scale );
+				std::fabs( interior( 2, radius, z ) - 0.5*quadratic.psi( radius, z ) )/scale );
 			worst = std::max( worst,
-				std::fabs( interior( 3, r, z ) - 0.5*linearZ.psi( r, z ) )/scale );
-			// rho^4 C_4 = r^2( 4z^2 - r^2 )/8 = -( r^4 - 4 r^2 z^2 )/8.
+				std::fabs( interior( 3, radius, z ) - 0.5*linearZ.psi( radius, z ) )/scale );
+			// rho^4 C_4 = R^2( 4z^2 - R^2 )/8 = -( R^4 - 4 R^2 z^2 )/8.
 			worst = std::max( worst,
-				std::fabs( interior( 4, r, z ) + 0.125*quartic.psi( r, z ) )/scale );
+				std::fabs( interior( 4, radius, z ) + 0.125*quartic.psi( radius, z ) )/scale );
 		}
 	}
 
@@ -853,14 +853,14 @@ BOOST_AUTO_TEST_CASE( the_interior_modes_are_fb_a_s_vacuum_harmonics )
  *   c( psi, xi ) = (1/mu0) int_G psi N xi dS
  *                + (1/(2 mu0)) int_G int_G ( psi1 - psi2 ) M ( xi1 - xi2 ) dS1 dS2
  *
- *   M = k / ( 2 pi ( r1 r2 )^( 3/2 ) ) ( ( 2 - k^2 )/( 2 - 2 k^2 ) E( k ) - K( k ) )
- *   N = ( 1/r1 )( 1/d+ + 1/d- - 1/rho )     d± = sqrt( r1^2 + ( rho ± z1 )^2 )
- *   k = sqrt( 4 r1 r2 / ( ( r1 + r2 )^2 + ( z1 - z2 )^2 ) )
+ *   M = k / ( 2 pi ( R_1 r2 )^( 3/2 ) ) ( ( 2 - k^2 )/( 2 - 2 k^2 ) E( k ) - K( k ) )
+ *   N = ( 1/R_1 )( 1/d+ + 1/d- - 1/rho )     d± = sqrt( R_1^2 + ( rho ± z1 )^2 )
+ *   k = sqrt( 4 R_1 r2 / ( ( R_1 + r2 )^2 + ( z1 - z2 )^2 ) )
  *
  * TWO THINGS MAKE IT COMPUTABLE ON THE SEMICIRCLE, and both are worth having
  * written down because they are what turn a hard quadrature into an easy one.
  *
- * The two distances CLOSE. With r = rho sin t and z = rho cos t,
+ * The two distances CLOSE. With R = rho sin t and z = rho cos t,
  *
  *     d+ = 2 rho cos( t/2 ),      d- = 2 rho sin( t/2 )
  *
@@ -869,8 +869,8 @@ BOOST_AUTO_TEST_CASE( the_interior_modes_are_fb_a_s_vacuum_harmonics )
  * apparent singularity is the basis's to cancel and it does.
  *
  * The DOUBLE-DIFFERENCE IS THE REGULARISATION AND MUST BE KEPT. M is
- * hypersingular, M ~ 1/( pi r d^2 ); each difference is O( d ) and the product
- * cancels it exactly, leaving psi' xi' / ( pi r rho^2 ) on the diagonal.
+ * hypersingular, M ~ 1/( pi R d^2 ); each difference is O( d ) and the product
+ * cancels it exactly, leaving psi' xi' / ( pi R rho^2 ) on the diagonal.
  * Assembling int int C_m M C_n directly instead would diverge. What survives at
  * next order is a Delta^2 log Delta, so splitting the inner integral AT the
  * diagonal and putting Gauss on each half converges properly -- a tensor rule
@@ -926,17 +926,17 @@ BOOST_AUTO_TEST_CASE( cedres_boundary_form_is_diagonal_in_this_basis )
 	meq::ExteriorDtN const dtn( 0.0, rhoGamma, modes );
 	int const first = meq::ExteriorDtN::firstMode();
 
-	auto onGamma = [ & ]( double t, double &r, double &z )
+	auto onGamma = [ & ]( double t, double &radius, double &z )
 	{
-		r = rhoGamma*std::sin( t );
+		radius = rhoGamma*std::sin( t );
 		z = rhoGamma*std::cos( t );
 	};
 
 	auto mode = [ & ]( int n, double t )
 	{
-		double r = 0.0, z = 0.0;
-		onGamma( t, r, z );
-		return dtn.basis( n, r, z );
+		double radius = 0.0, z = 0.0;
+		onGamma( t, radius, z );
+		return dtn.basis( n, radius, z );
 	};
 
 	// N, with the two distances closed on the semicircle.
@@ -951,16 +951,16 @@ BOOST_AUTO_TEST_CASE( cedres_boundary_form_is_diagonal_in_this_basis )
 	// which is the convention the paper prints and the one pdftotext destroys.
 	auto doubleLayer = [ & ]( double t1, double t2 )
 	{
-		double r1 = 0.0, z1 = 0.0, r2 = 0.0, z2 = 0.0;
-		onGamma( t1, r1, z1 );
+		double radius1 = 0.0, z1 = 0.0, r2 = 0.0, z2 = 0.0;
+		onGamma( t1, radius1, z1 );
 		onGamma( t2, r2, z2 );
-		double const sum = r1 + r2, gap = z1 - z2;
-		double const k2 = 4.0*r1*r2/( sum*sum + gap*gap );
+		double const sum = radius1 + r2, gap = z1 - z2;
+		double const k2 = 4.0*radius1*r2/( sum*sum + gap*gap );
 		double const k = std::sqrt( k2 );
 		double const bracket = ( 2.0 - k2 )/( 2.0 - 2.0*k2 )
 		                       *boost::math::ellint_2( k )
 		                     - boost::math::ellint_1( k );
-		return k/( 2.0*M_PI*std::pow( r1*r2, 1.5 ) )*bracket;
+		return k/( 2.0*M_PI*std::pow( radius1*r2, 1.5 ) )*bracket;
 	};
 
 	std::vector<double> reference, referenceWeights;
@@ -1055,7 +1055,7 @@ BOOST_AUTO_TEST_CASE( cedres_boundary_form_is_diagonal_in_this_basis )
 	            "CEDRES++'s boundary form is diagonal but its diagonal is not "
 	            "MEQ's symbol: worst relative disagreement " << worstDiagonal
 	            << ". Suspect the elliptic MODULUS having become the parameter, "
-	            "or the ( r1 r2 )^( 3/2 ) exponent, before suspecting the "
+	            "or the ( R_1 r2 )^( 3/2 ) exponent, before suspecting the "
 	            "separation of variables -- both are transcription errors that "
 	            "converge to a wrong answer" );
 }
@@ -1065,7 +1065,7 @@ BOOST_AUTO_TEST_CASE( cedres_boundary_form_is_diagonal_in_this_basis )
  *
  * FREE-BOUNDARY-PLAN.md section 11.6 asks for a readable spectrum, on the
  * grounds that the raw coefficients are not one: the modes are orthogonal in
- * dGamma/r but NOT normalised in it, so mode n contributes
+ * dGamma/R but NOT normalised in it, so mode n contributes
  * | a_n | sqrt( mass( n ) ) to the trace's norm rather than | a_n |, and
  * mass( n ) ~ 1/n^3 makes that conversion factor ~ n^( -3/2 ).
  *
@@ -1268,7 +1268,7 @@ BOOST_AUTO_TEST_CASE( the_trace_norm_carries_the_weight_and_degrades_gracefully 
 		euclidean += value*value;
 	euclidean = std::sqrt( euclidean );
 
-	std::printf( "\n  the trace norm in dGamma/r: %.10e\n", dtn.traceNorm( a ) );
+	std::printf( "\n  the trace norm in dGamma/R: %.10e\n", dtn.traceNorm( a ) );
 	std::printf( "    against the orthogonality relation: %.10e\n", expected );
 	std::printf( "    against a plain Euclidean norm:     %.10e  ( the control )\n",
 	             euclidean );
@@ -1331,7 +1331,7 @@ BOOST_AUTO_TEST_CASE( the_truncation_ratio_falls_as_gamma_moves_outward )
 	std::printf( "\n  a unit loop is EVEN in mu: the odd modes vanish by parity\n" );
 	{
 		ExteriorDtN const dtn( 0.0, 2.5, 12 );
-		auto trace = [ &loop ]( double r, double z ) { return loop.psi( r, z ); };
+		auto trace = [ &loop ]( double radius, double z ) { return loop.psi( radius, z ); };
 		std::vector<double> const a = dtn.coefficients( trace );
 		std::vector<double> const amplitudes = dtn.modeAmplitudes( a );
 
@@ -1370,10 +1370,10 @@ BOOST_AUTO_TEST_CASE( the_truncation_ratio_falls_as_gamma_moves_outward )
 	             "trace norm", "truncation ratio" );
 
 	std::vector<double> ratios;
-	for ( double radius : { 2.0, 2.5, 4.0, 8.0 } )
+	for ( double rhoGamma : { 2.0, 2.5, 4.0, 8.0 } )
 	{
-		ExteriorDtN const dtn( 0.0, radius, 12 );
-		auto trace = [ &loop ]( double r, double z ) { return loop.psi( r, z ); };
+		ExteriorDtN const dtn( 0.0, rhoGamma, 12 );
+		auto trace = [ &loop ]( double radius, double z ) { return loop.psi( radius, z ); };
 		std::vector<double> const a = dtn.coefficients( trace );
 
 		double const rawRatio = std::fabs( a[ 10 ] )/std::fabs( a[ 0 ] );
@@ -1381,7 +1381,7 @@ BOOST_AUTO_TEST_CASE( the_truncation_ratio_falls_as_gamma_moves_outward )
 		ratios.push_back( ratio );
 
 		std::printf( "    %8.1f %14.3e %14.3e %16.3e\n",
-		             radius, rawRatio, dtn.traceNorm( a ), ratio );
+		             rhoGamma, rawRatio, dtn.traceNorm( a ), ratio );
 	}
 	std::fflush( stdout );
 

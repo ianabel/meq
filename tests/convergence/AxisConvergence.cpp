@@ -1,12 +1,12 @@
 /*
- * FB-A: the axis. Does MEQ's discretisation survive a mesh reaching r = 0?
+ * FB-A: the axis. Does MEQ's discretisation survive a mesh reaching R = 0?
  *
  * FREE-BOUNDARY-PLAN.md section 7 puts this first, and ROADMAP.md calls it the
  * one free-boundary item measurable today. Free boundary needs a domain that
  * includes the machine axis -- the vacuum region runs from the plasma out to
  * the coils and the artificial boundary is a SEMICIRCLE whose flat side IS the
- * axis -- and at r = 0 the flux mass form ( r q, v ) degenerates and the
- * operator's 1/r is not integrable.
+ * axis -- and at R = 0 the flux mass form ( R q, v ) degenerates and the
+ * operator's 1/R is not integrable.
  *
  * WHAT THE PLAN SAID AND WHY IT IS SHARPENED HERE. Its acceptance was "element
  * local iteration counts and the trace condition number bounded under
@@ -65,9 +65,9 @@ using meq::tests::rate;
 
 namespace
 {
-	/// The box whose LEFT EDGE IS THE AXIS. rMin is exactly zero.
+	/// The box whose LEFT EDGE IS THE AXIS. R_min is exactly zero.
 	///
-	/// zMin is not zero: a box symmetric in z lets the r^2 z mode contribute,
+	/// zMin is not zero: a box symmetric in z lets the R^2 z mode contribute,
 	/// and a one-sided one would let a defect in the odd part hide.
 	Rectangle axisBox()
 	{
@@ -114,7 +114,7 @@ namespace
 	/// that the ratio of the largest to the smallest absolute DIAGONAL entry is
 	/// enough: it is a lower bound on the condition number for any matrix, it is
 	/// exact for a diagonal one, and -- the reason it is the right proxy here --
-	/// the degeneracy at r = 0 enters through the flux mass ( r q, v ), which is
+	/// the degeneracy at R = 0 enters through the flux mass ( R q, v ), which is
 	/// a WEIGHT on the diagonal. If the axis is going to wreck the conditioning
 	/// it will do it by driving a diagonal entry toward zero, and this sees that.
 	///
@@ -232,8 +232,8 @@ namespace
  * Every one of these functions is Delta*-harmonic by construction, and "by
  * construction" is exactly the claim that has cost this project time before --
  * the Solov'ev coefficients were wrong twice, and a fourth candidate for THIS
- * fixture, r^2 ( r^2 - 4 z^2 ) z, was guessed and turned out to have
- * Delta* = -16 r^2 z. So the operator is recomputed by central differences and
+ * fixture, R^2 ( R^2 - 4 z^2 ) z, was guessed and turned out to have
+ * Delta* = -16 R^2 z. So the operator is recomputed by central differences and
  * compared against zero.
  */
 BOOST_AUTO_TEST_CASE( theVacuumFieldsAreHarmonicAndVanishOnTheAxis )
@@ -244,15 +244,15 @@ BOOST_AUTO_TEST_CASE( theVacuumFieldsAreHarmonicAndVanishOnTheAxis )
 	double worstAxis = 0.0;
 	double worstControlHarmonic = 0.0;
 
-	// Away from the axis for the finite difference, which divides by r.
-	for ( double r = 0.2; r < 1.6; r += 0.05 )
+	// Away from the axis for the finite difference, which divides by R.
+	for ( double radius = 0.2; radius < 1.6; radius += 0.05 )
 	{
 		for ( double z = -0.9; z < 0.95; z += 0.05 )
 		{
 			worstHarmonic = std::max( worstHarmonic,
-			                          std::fabs( eq.deltaStarFD( r, z ) ) );
+			                          std::fabs( eq.deltaStarFD( radius, z ) ) );
 			worstControlHarmonic = std::max( worstControlHarmonic,
-				std::fabs( meq::analytic::VacuumHarmonic::axisNonZeroDeltaStarFD( r, z ) ) );
+				std::fabs( meq::analytic::VacuumHarmonic::axisNonZeroDeltaStarFD( radius, z ) ) );
 		}
 	}
 
@@ -276,14 +276,14 @@ BOOST_AUTO_TEST_CASE( theVacuumFieldsAreHarmonicAndVanishOnTheAxis )
 	            "mode has been added without checking it -- see the file comment "
 	            "in VacuumHarmonic.hpp for the one that was" );
 
-	// This one IS exact: every term carries r^2.
+	// This one IS exact: every term carries R^2.
 	BOOST_TEST( worstAxis == 0.0,
 	            "the vacuum field does not vanish on the axis, worst "
-	            << worstAxis << ". Every admissible term carries r^2, so this is "
+	            << worstAxis << ". Every admissible term carries R^2, so this is "
 	            "exact rather than a tolerance" );
 
 	BOOST_TEST( worstControlHarmonic < 1.0e-5,
-	            "the control r^2 ln r - z^2 is not Delta*-harmonic: worst "
+	            "the control R^2 ln R - z^2 is not Delta*-harmonic: worst "
 	            << worstControlHarmonic );
 
 	// And the control is NOT zero on the axis, which is what makes it a control.
@@ -298,7 +298,7 @@ BOOST_AUTO_TEST_CASE( theVacuumFieldsAreHarmonicAndVanishOnTheAxis )
  * FLUX DOES NOT QUITE.
  *
  * Measured here, over four dyadic meshes on a box whose inner edge is exactly
- * r = 0, against the same study standing 0.25 clear of it:
+ * R = 0, against the same study standing 0.25 clear of it:
  *
  *     k        psi at the axis / control        q at the axis / control
  *     1            2.000 / 2.000                   1.79 / 2.00
@@ -314,15 +314,15 @@ BOOST_AUTO_TEST_CASE( theVacuumFieldsAreHarmonicAndVanishOnTheAxis )
  * survivable and says plainly that none is a measurement, then names "the
  * conditioning as h -> 0" as the unknown. The conditioning is not what gives
  * way; the flux's rate is. The mechanism is visible in the weights: the flux
- * mass form is ( r q, v ), so the discrete flux is controlled in a norm whose
- * weight VANISHES at r = 0, while fluxError() measures it in an unweighted L2.
+ * mass form is ( R q, v ), so the discrete flux is controlled in a norm whose
+ * weight VANISHES at R = 0, while fluxError() measures it in an unweighted L2.
  * The elements touching the axis are therefore the ones the method controls
  * least and the error norm counts fully, which is the shape of a boundary layer
  * of width h -- and half an order is what a layer of width h contributes.
  *
  * WHY k = 3 ESCAPES, and it is worth knowing before anyone reads it as noise:
- * this fixture's q is a QUADRATIC -- q_r = 2a + 2bz + 4c( r^2 - 2z^2 ) and
- * q_z = r( b - 8cz ) -- so at k = 3 the flux space has room to spare and the
+ * this fixture's q is a QUADRATIC -- q_r = 2a + 2bz + 4c( R^2 - 2z^2 ) and
+ * q_z = R( b - 8cz ) -- so at k = 3 the flux space has room to spare and the
  * layer is resolved. At k = 1 and k = 2 it is not. A fixture with a
  * higher-degree flux would be expected to show the deficit at k = 3 too, and
  * that is the next measurement rather than a claim made here.
@@ -338,7 +338,7 @@ BOOST_AUTO_TEST_CASE( theSolverReachesTheAxisAtFullOrderInThePotential )
 {
 	meq::analytic::VacuumHarmonic const eq = meq::analytic::VacuumHarmonic::mixed();
 
-	std::printf( "\n  FB-A: a vacuum solve on a mesh whose inner edge is r = 0\n" );
+	std::printf( "\n  FB-A: a vacuum solve on a mesh whose inner edge is R = 0\n" );
 
 	for ( int order : { 1, 2, 3 } )
 	{
@@ -381,7 +381,7 @@ BOOST_AUTO_TEST_CASE( theSolverReachesTheAxisAtFullOrderInThePotential )
 			            << ": on a mesh reaching the axis, q converged at "
 			            << rateFlux << ", below even the reduced floor "
 			            << fluxFloor << ". q is EXPECTED to fall short of k+1 here "
-			            "-- the flux mass ( r q, v ) has a weight that vanishes at "
+			            "-- the flux mass ( R q, v ) has a weight that vanishes at "
 			            "the axis while fluxError() is unweighted -- but it is not "
 			            "expected to fall this far" );
 
@@ -531,7 +531,7 @@ BOOST_AUTO_TEST_CASE( theTwoPathsAgreeOnTheVacuumField )
  * The on-axis column DOUBLES with every halving of h; the control SETTLES. So
  * the axis costs one power of h in the conditioning, at every degree, and the
  * far field costs nothing. The mechanism is the same one that costs the flux
- * half an order above: the flux mass ( r q, v ) has a weight proportional to r,
+ * half an order above: the flux mass ( R q, v ) has a weight proportional to R,
  * so the element touching the axis carries a weight of order h and the extreme
  * ratio grows as 1/h.
  *
@@ -619,44 +619,44 @@ BOOST_AUTO_TEST_CASE( theAxisDoesNotDegradeTheConditioningWithRefinement )
  *
  * FREE-BOUNDARY-PLAN.md section 8 offers three reasons the axis is survivable
  * and says plainly that none of them is a measurement. This is the first of
- * them: "q = ( 1/r ) grad-bar psi is BOUNDED at the axis because psi ~ r^2".
+ * them: "q = ( 1/R ) grad-bar psi is BOUNDED at the axis because psi ~ R^2".
  *
  * It is a statement about the exact field rather than about the solver, so it
  * is checked on the fixture -- but it is checked HERE rather than in the
  * fixture's own case because it is the hypothesis FB-A is testing the
- * consequences of, and a reader who wants to know why a mesh may touch r = 0 at
+ * consequences of, and a reader who wants to know why a mesh may touch R = 0 at
  * all should find the number in the file that does it.
  */
 BOOST_AUTO_TEST_CASE( theFluxIsBoundedAtTheAxis )
 {
 	meq::analytic::VacuumHarmonic const eq = meq::analytic::VacuumHarmonic::mixed();
 
-	std::printf( "\n  q as r -> 0, which is the hypothesis FB-A rests on\n" );
-	std::printf( "    %12s %14s %14s\n", "r", "q_r", "q_z" );
+	std::printf( "\n  q as R -> 0, which is the hypothesis FB-A rests on\n" );
+	std::printf( "    %12s %14s %14s\n", "R", "q_r", "q_z" );
 
 	double worst = 0.0;
-	for ( double r : { 1.0e-1, 1.0e-3, 1.0e-6, 1.0e-9, 0.0 } )
+	for ( double radius : { 1.0e-1, 1.0e-3, 1.0e-6, 1.0e-9, 0.0 } )
 	{
 		double qR = 0.0, qZ = 0.0;
-		eq.flux( r, 0.3, qR, qZ );
-		std::printf( "    %12.1e %14.6e %14.6e\n", r, qR, qZ );
+		eq.flux( radius, 0.3, qR, qZ );
+		std::printf( "    %12.1e %14.6e %14.6e\n", radius, qR, qZ );
 		worst = std::max( worst, std::max( std::fabs( qR ), std::fabs( qZ ) ) );
 	}
 	std::fflush( stdout );
 
 	BOOST_TEST( worst < 1.0e2,
-	            "q is not bounded as r -> 0, worst component " << worst
-	            << ". Every term of psi carries r^2, so the division by r must "
-	            "cancel exactly -- if this fires, a term without an r^2 has been "
+	            "q is not bounded as R -> 0, worst component " << worst
+	            << ". Every term of psi carries R^2, so the division by R must "
+	            "cancel exactly -- if this fires, a term without an R^2 has been "
 	            "added to the fixture" );
 
-	// And exactly at r = 0 it is a number rather than a NaN, which is the
+	// And exactly at R = 0 it is a number rather than a NaN, which is the
 	// difference between computing the limit and computing 0/0. VacuumHarmonic
 	// carries the cancellation already done for exactly this reason.
 	double qR = 0.0, qZ = 0.0;
 	eq.flux( 0.0, 0.3, qR, qZ );
 	BOOST_TEST( ( std::isfinite( qR ) && std::isfinite( qZ ) ),
-	            "q is not finite AT r = 0. The fixture must carry the "
-	            "cancellation rather than dividing grad psi by r, which is 0/0 "
+	            "q is not finite AT R = 0. The fixture must carry the "
+	            "cancellation rather than dividing grad psi by R, which is 0/0 "
 	            "there" );
 }

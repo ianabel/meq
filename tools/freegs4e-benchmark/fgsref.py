@@ -974,10 +974,10 @@ def lcfs_from_rays(eq, opt, psi, psi_axis, psi_bndry, ntheta=512,
         s, last_in, hi, ok = 0.0, 0.0, None, False
         while True:
             s += ds
-            r, z = r0 + s * dr, z0 + s * dz
-            if not (Rlo < r < Rhi and Zlo < z < Zhi):
+            R, z = r0 + s * dr, z0 + s * dz
+            if not (Rlo < R < Rhi and Zlo < z < Zhi):
                 break
-            if float(f(r, z, grid=False)) >= 1.0:
+            if float(f(R, z, grid=False)) >= 1.0:
                 hi, ok = s, True
                 break
             last_in = s
@@ -1648,16 +1648,16 @@ def main():
     print("=" * 78, flush=True)
     with open(os.path.join(OUTDIR, "summary_shaped.json" if SHAPED else "summary.json"), "w") as fh:
         json.dump(results, fh, indent=2, sort_keys=True, default=str)
-    for r in results:
-        if "failed" in r:
-            print("FAILED %-30s %s" % (r["name"], r["failed"]), flush=True)
+    for R in results:
+        if "failed" in R:
+            print("FAILED %-30s %s" % (R["name"], R["failed"]), flush=True)
         else:
             print("%-6s %-30s Ip=%9.4g psi_ax=%+.5g psi_b=%+.5g R0=%.3f "
                   "a=%.3f A=%.2f kappa=%.3f delta=%+.3f %s"
-                  % ("OK" if r["sanity_ok"] else "CHECK", r["name"], r["Ip"],
-                     r["psi_axis"], r["psi_bndry"], r["R0"], r["a"],
-                     r["aspect_ratio"], r["kappa"], r["delta"],
-                     r["boundary_kind"]), flush=True)
+                  % ("OK" if R["sanity_ok"] else "CHECK", R["name"], R["Ip"],
+                     R["psi_axis"], R["psi_bndry"], R["R0"], R["a"],
+                     R["aspect_ratio"], R["kappa"], R["delta"],
+                     R["boundary_kind"]), flush=True)
 
 
 if __name__ == "__main__":

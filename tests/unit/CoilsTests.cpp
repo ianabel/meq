@@ -6,8 +6,8 @@
 // whole-assembly test available" -- rests on two things being right that no
 // convergence rate could see:
 //
-//   * THE SOURCE FACTOR. F = mu0 r j_phi, derived in Coils.cpp from
-//     Delta* psi = -mu0 r j_phi rather than transcribed. An extra or missing r
+//   * THE SOURCE FACTOR. F = mu0 R j_phi, derived in Coils.cpp from
+//     Delta* psi = -mu0 R j_phi rather than transcribed. An extra or missing R
 //     converges at the full rate to the wrong function, and CLAUDE.md records
 //     that failure happening in this codebase already.
 //   * THE SIGN of the outward flux. FREE-BOUNDARY-PLAN.md section 7 predicts
@@ -51,31 +51,31 @@ namespace
 		return Coil( 2.0, 0.0, 0.15, 0.20, 1.0e6 );
 	}
 
-	/// Delta* psi = d_rr psi - ( 1/r ) d_r psi + d_zz psi, by central
+	/// Delta* psi = d_rr psi - ( 1/R ) d_r psi + d_zz psi, by central
 	/// differences, in EXACTLY the arrangement tests/analytic/VacuumHarmonic.hpp
 	/// and ManufacturedNonlinear.hpp use. Copied rather than reinvented so that
 	/// a disagreement between this file and those is a real one.
 	template <typename Psi>
-	double deltaStarFD( Psi psi, double r, double z, double h )
+	double deltaStarFD( Psi psi, double radius, double z, double h )
 	{
 		auto innerR = [ & ]( double rr )
 		{
 			return ( psi( rr + h, z ) - psi( rr - h, z ) )/( 2.0*h )/rr;
 		};
-		double const dRInner = ( innerR( r + h ) - innerR( r - h ) )/( 2.0*h );
-		double const dZZ = ( psi( r, z + h ) - 2.0*psi( r, z ) + psi( r, z - h ) )
+		double const dRInner = ( innerR( radius + h ) - innerR( radius - h ) )/( 2.0*h );
+		double const dZZ = ( psi( radius, z + h ) - 2.0*psi( radius, z ) + psi( radius, z - h ) )
 		                   /( h*h );
-		return r*dRInner + dZZ;
+		return radius*dRInner + dZZ;
 	}
 }
 
 /*
- * THE SOURCE FACTOR, AND A CONTROL THAT SAYS AN r WOULD BE CAUGHT.
+ * THE SOURCE FACTOR, AND A CONTROL THAT SAYS AN R WOULD BE CAUGHT.
  *
  * f() and psi() are two independent statements of the same physics: one is the
  * source term the solver is fed, the other is the field that source produces.
  * Checking them against each other by recomputing Delta* is the only check here
- * that can see a missing or extra factor of r -- a convergence study cannot,
+ * that can see a missing or extra factor of R -- a convergence study cannot,
  * because a wrong constant converges at the full rate to the wrong function.
  *
  * The interior points are what pin the constant. OUTSIDE the coil Delta* psi is
@@ -89,7 +89,7 @@ BOOST_AUTO_TEST_CASE( the_source_is_mu0_r_jphi_and_an_extra_r_would_be_caught )
 	CoilSet set;
 	set.add( standardCoil() );
 
-	auto psi = [ &set ]( double r, double z ) { return set.psi( r, z ); };
+	auto psi = [ &set ]( double radius, double z ) { return set.psi( radius, z ); };
 
 	double const centreR = 2.0;
 	double const centreZ = 0.0;
@@ -111,7 +111,7 @@ BOOST_AUTO_TEST_CASE( the_source_is_mu0_r_jphi_and_an_extra_r_would_be_caught )
 	            "physics that is a real defect rather than a tolerance" );
 
 	/*
-	 * THE CONTROL. The plausible wrong answers are F/r and F*r, and at r = 2 they
+	 * THE CONTROL. The plausible wrong answers are F/R and F*R, and at R = 2 they
 	 * differ from F by a factor of two -- far outside any finite-difference
 	 * floor. Asserting that they are REJECTED is what turns the check above from
 	 * "these two agree" into "these two agree and the neighbouring conventions
@@ -120,14 +120,14 @@ BOOST_AUTO_TEST_CASE( the_source_is_mu0_r_jphi_and_an_extra_r_would_be_caught )
 	double const wrongDivided = expected/centreR;
 	double const wrongMultiplied = expected*centreR;
 
-	std::printf( "    the neighbouring conventions: F/r = %.6e, F*r = %.6e\n",
+	std::printf( "    the neighbouring conventions: F/R = %.6e, F*R = %.6e\n",
 	             wrongDivided, wrongMultiplied );
 
 	BOOST_TEST( std::fabs( measured + wrongDivided )/std::fabs( wrongDivided ) > 0.1,
-	            "Delta* psi is as close to -F/r as it is to -F, so this test "
+	            "Delta* psi is as close to -F/R as it is to -F, so this test "
 	            "cannot tell the two conventions apart and is not doing its job" );
 	BOOST_TEST( std::fabs( measured + wrongMultiplied )/std::fabs( wrongMultiplied ) > 0.1,
-	            "Delta* psi is as close to -F*r as it is to -F" );
+	            "Delta* psi is as close to -F*R as it is to -F" );
 }
 
 /*
@@ -148,27 +148,27 @@ BOOST_AUTO_TEST_CASE( the_source_is_a_top_hat )
 	double const inside = set.f( c.centreR(), c.centreZ() );
 	BOOST_TEST( inside != 0.0 );
 
-	// Uniform within: f depends on r through mu0 * r * j, so it is NOT constant
-	// in r -- it is the CURRENT DENSITY that is uniform. Checking the ratio is
+	// Uniform within: f depends on R through mu0 * R * j, so it is NOT constant
+	// in R -- it is the CURRENT DENSITY that is uniform. Checking the ratio is
 	// what states that correctly.
-	double const atEdge = set.f( c.rMax() - 1.0e-9, c.centreZ() );
+	double const atEdge = set.f( c.maxRadius() - 1.0e-9, c.centreZ() );
 	double const ratio = atEdge/inside;
-	double const expectedRatio = ( c.rMax() - 1.0e-9 )/c.centreR();
+	double const expectedRatio = ( c.maxRadius() - 1.0e-9 )/c.centreR();
 
-	std::printf( "\n  f scales as r within the coil: %.9f against %.9f\n",
+	std::printf( "\n  f scales as R within the coil: %.9f against %.9f\n",
 	             ratio, expectedRatio );
 	BOOST_TEST( std::fabs( ratio - expectedRatio ) < 1.0e-8,
-	            "f is not proportional to r inside the coil, so it is not "
-	            "mu0 r j_phi with j uniform" );
+	            "f is not proportional to R inside the coil, so it is not "
+	            "mu0 R j_phi with j uniform" );
 
 	// And exactly zero outside, at every side.
-	for ( double r : { c.rMin() - 1.0e-6, c.rMax() + 1.0e-6 } )
-		BOOST_TEST( set.f( r, c.centreZ() ) == 0.0 );
+	for ( double radius : { c.minRadius() - 1.0e-6, c.maxRadius() + 1.0e-6 } )
+		BOOST_TEST( set.f( radius, c.centreZ() ) == 0.0 );
 	for ( double z : { c.zMin() - 1.0e-6, c.zMax() + 1.0e-6 } )
 		BOOST_TEST( set.f( c.centreR(), z ) == 0.0 );
 
 	BOOST_TEST( set.indexContaining( c.centreR(), c.centreZ() ) == 0 );
-	BOOST_TEST( set.indexContaining( c.rMax() + 1.0, c.centreZ() ) == -1 );
+	BOOST_TEST( set.indexContaining( c.maxRadius() + 1.0, c.centreZ() ) == -1 );
 }
 
 /*
@@ -177,7 +177,7 @@ BOOST_AUTO_TEST_CASE( the_source_is_a_top_hat )
  * Integrating the Grad-Shafranov equation over a region enclosing the coils and
  * applying the divergence theorem gives
  *
- *     oint ( 1/r ) dpsi/dn dl  =  -mu0 * totalCurrent()
+ *     oint ( 1/R ) dpsi/dn dl  =  -mu0 * totalCurrent()
  *
  * with no discretisation anywhere in it. FREE-BOUNDARY-PLAN.md calls the same
  * identity "the sharpest whole-assembly test available" for FB-2; here it is
@@ -186,8 +186,8 @@ BOOST_AUTO_TEST_CASE( the_source_is_a_top_hat )
  *
  * THE SIGN IS NEGATIVE AND IS ASSERTED AS SUCH. Section 7 says the coupling
  * sign will be got wrong at least once; this is the cheapest place to pin it.
- * The same identity written as a counterclockwise circulation of B in ( r, z )
- * comes out POSITIVE, because phi-hat = z-hat x r-hat -- so both signs are
+ * The same identity written as a counterclockwise circulation of B in ( R, z )
+ * comes out POSITIVE, because phi-hat = z-hat x R-hat -- so both signs are
  * defensible statements about different quantities, which is exactly how a sign
  * error survives review.
  */
@@ -200,9 +200,9 @@ BOOST_AUTO_TEST_CASE( the_outward_flux_is_minus_mu0_times_the_total_current )
 	BOOST_TEST( set.totalCurrent() == 4.0e5 );
 
 	// A rectangle enclosing both coils with room to spare.
-	double const rA = 1.0, rB = 3.0, zA = -1.2, zB = 1.2;
+	double const radiusA = 1.0, radiusB = 3.0, zA = -1.2, zB = 1.2;
 
-	// The flux of ( 1/r ) grad-bar psi outward through it, by a midpoint rule
+	// The flux of ( 1/R ) grad-bar psi outward through it, by a midpoint rule
 	// refined and Richardson-extrapolated -- the header records the same
 	// construction giving 1.07e-08.
 	auto flux = [ &set ]( int m, double rA_, double rB_, double zA_, double zB_ )
@@ -212,29 +212,29 @@ BOOST_AUTO_TEST_CASE( the_outward_flux_is_minus_mu0_times_the_total_current )
 		double const eps = 1.0e-6;
 		double total = 0.0;
 
-		// d psi/dn by a central difference, divided by r, times the length.
-		auto normalDerivative = [ &set, eps ]( double r, double z,
+		// d psi/dn by a central difference, divided by R, times the length.
+		auto normalDerivative = [ &set, eps ]( double radius, double z,
 		                                       double nr, double nz )
 		{
-			double const plus = set.psi( r + eps*nr, z + eps*nz );
-			double const minus = set.psi( r - eps*nr, z - eps*nz );
-			return ( plus - minus )/( 2.0*eps )/r;
+			double const plus = set.psi( radius + eps*nr, z + eps*nz );
+			double const minus = set.psi( radius - eps*nr, z - eps*nz );
+			return ( plus - minus )/( 2.0*eps )/radius;
 		};
 
 		for ( int i = 0; i < m; ++i )
 		{
-			double const r = rA_ + ( i + 0.5 )*dr;
-			total += normalDerivative( r, zB_, 0.0, 1.0 )*dr;   // top,    n = +z
-			total += normalDerivative( r, zA_, 0.0, -1.0 )*dr;  // bottom, n = -z
+			double const radius = rA_ + ( i + 0.5 )*dr;
+			total += normalDerivative( radius, zB_, 0.0, 1.0 )*dr;   // top,    n = +z
+			total += normalDerivative( radius, zA_, 0.0, -1.0 )*dr;  // bottom, n = -z
 			double const z = zA_ + ( i + 0.5 )*dz;
-			total += normalDerivative( rB_, z, 1.0, 0.0 )*dz;   // right,  n = +r
-			total += normalDerivative( rA_, z, -1.0, 0.0 )*dz;  // left,   n = -r
+			total += normalDerivative( rB_, z, 1.0, 0.0 )*dz;   // right,  n = +R
+			total += normalDerivative( rA_, z, -1.0, 0.0 )*dz;  // left,   n = -R
 		}
 		return total;
 	};
 
-	double const coarse = flux( 200, rA, rB, zA, zB );
-	double const fine = flux( 400, rA, rB, zA, zB );
+	double const coarse = flux( 200, radiusA, radiusB, zA, zB );
+	double const fine = flux( 400, radiusA, radiusB, zA, zB );
 	// Midpoint is second order, so Richardson is ( 4 fine - coarse )/3.
 	double const extrapolated = ( 4.0*fine - coarse )/3.0;
 	double const expected = -set.mu0()*set.totalCurrent();
@@ -249,7 +249,7 @@ BOOST_AUTO_TEST_CASE( the_outward_flux_is_minus_mu0_times_the_total_current )
 	std::fflush( stdout );
 
 	BOOST_TEST( std::fabs( extrapolated - expected )/std::fabs( expected ) < 1.0e-6,
-	            "the outward flux of ( 1/r ) grad psi is not -mu0 I. This is an "
+	            "the outward flux of ( 1/R ) grad psi is not -mu0 I. This is an "
 	            "identity with no discretisation in it, so a failure is the coil "
 	            "field or the source constant, not a resolution question -- and "
 	            "it is what FB-2 will check a SOLVE against" );
@@ -257,7 +257,7 @@ BOOST_AUTO_TEST_CASE( the_outward_flux_is_minus_mu0_times_the_total_current )
 	// The SIGN, separately and loudly.
 	BOOST_TEST( extrapolated < 0.0,
 	            "the outward flux came out positive for a positive total "
-	            "current. The identity is oint ( 1/r ) dpsi/dn = -mu0 I; the "
+	            "current. The identity is oint ( 1/R ) dpsi/dn = -mu0 I; the "
 	            "POSITIVE convention belongs to the circulation of B, which is a "
 	            "different quantity. Both are defensible sentences, which is how "
 	            "a sign error survives review" );
@@ -323,8 +323,8 @@ BOOST_AUTO_TEST_CASE( a_thin_coil_approaches_the_filament_at_second_order )
 /*
  * The refusals, which are the contract.
  *
- * A coil reaching the axis is the one worth singling out: the operator's 1/r is
- * not integrable through r = 0, so a coil straddling it is not merely unusual,
+ * A coil reaching the axis is the one worth singling out: the operator's 1/R is
+ * not integrable through R = 0, so a coil straddling it is not merely unusual,
  * it is unsolvable -- the same refusal meq::BoundaryShape makes, for the same
  * reason, and stage FB-A measured what the axis costs even when it is only
  * touched by the mesh.
@@ -378,18 +378,18 @@ namespace
 	class LinearPlasma : public meq::NormalisedSource
 	{
 		public:
-			double f( double r, double, double psi ) const override
+			double f( double radius, double, double psi ) const override
 			{
 				if ( !insidePlasma( psi ) )
 					return 0.0;
-				return r*( psi - boundaryValue )/( axisValue - boundaryValue );
+				return radius*( psi - boundaryValue )/( axisValue - boundaryValue );
 			}
 
-			double dFdPsi( double r, double, double psi ) const override
+			double dFdPsi( double radius, double, double psi ) const override
 			{
 				if ( !insidePlasma( psi ) )
 					return 0.0;
-				return r/( axisValue - boundaryValue );
+				return radius/( axisValue - boundaryValue );
 			}
 
 			void setNormalisation( double psiAxis, double psiBoundary ) override
@@ -423,18 +423,18 @@ BOOST_AUTO_TEST_CASE( the_augmented_source_is_the_sum_and_the_coils_are_not_in_t
 	// the earlier cases in this file pin.
 	for ( auto point : { std::make_pair( 2.0, 0.0 ), std::make_pair( 1.0, 0.5 ) } )
 	{
-		double const r = point.first, z = point.second;
+		double const radius = point.first, z = point.second;
 		for ( double psi : { -0.7, 0.0, 0.4, 1.9 } )
 		{
-			BOOST_TEST( sum.f( r, z, psi )
-			            == plasma->f( r, z, psi ) + coils->f( r, z ),
+			BOOST_TEST( sum.f( radius, z, psi )
+			            == plasma->f( radius, z, psi ) + coils->f( radius, z ),
 			            boost::test_tools::tolerance( 1.0e-15 ) );
 
 			// EXACT EQUALITY, not a tolerance: the coils contribute nothing at
 			// all to the Jacobian, so this is the same double travelling
 			// through one more function call. A tolerance here would accept a
 			// coil term that had leaked into dF/dpsi and happened to be small.
-			BOOST_TEST( sum.dFdPsi( r, z, psi ) == plasma->dFdPsi( r, z, psi ) );
+			BOOST_TEST( sum.dFdPsi( radius, z, psi ) == plasma->dFdPsi( radius, z, psi ) );
 		}
 	}
 
@@ -636,7 +636,7 @@ BOOST_AUTO_TEST_CASE( the_gradient_is_analytic_and_a_plain_difference_cannot_see
 	CurrentFilament const filament( 1.5, 0.1, 1.0e6 );
 	Coil const coil = standardCoil();
 
-	struct Probe { char const *name; double r; double z; bool isCoil; };
+	struct Probe { char const *name; double radius; double z; bool isCoil; };
 	std::vector<Probe> const probes = {
 		{ "filament, outboard",       2.40, 0.70, false },
 		{ "filament, above",          1.60, 1.30, false },
@@ -650,21 +650,21 @@ BOOST_AUTO_TEST_CASE( the_gradient_is_analytic_and_a_plain_difference_cannot_see
 	{
 		double dR = 0.0;
 		double dZ = 0.0;
-		auto psiAt = [ & ]( double r, double z )
+		auto psiAt = [ & ]( double radius, double z )
 		{
-			return probe.isCoil ? meq::coilPsi( coil, r, z )
-			                    : meq::filamentPsi( filament, r, z );
+			return probe.isCoil ? meq::coilPsi( coil, radius, z )
+			                    : meq::filamentPsi( filament, radius, z );
 		};
 		if ( probe.isCoil )
-			meq::coilGradPsi( coil, probe.r, probe.z, dR, dZ );
+			meq::coilGradPsi( coil, probe.radius, probe.z, dR, dZ );
 		else
-			meq::filamentGradPsi( filament, probe.r, probe.z, dR, dZ );
+			meq::filamentGradPsi( filament, probe.radius, probe.z, dR, dZ );
 
 		double const h = 1.0e-3;
 		auto const inR = richardson(
-			[ & ]( double d ) { return psiAt( probe.r + d, probe.z ); }, h );
+			[ & ]( double d ) { return psiAt( probe.radius + d, probe.z ); }, h );
 		auto const inZ = richardson(
-			[ & ]( double d ) { return psiAt( probe.r, probe.z + d ); }, h );
+			[ & ]( double d ) { return psiAt( probe.radius, probe.z + d ); }, h );
 
 		// Relative to the size of the gradient rather than to either
 		// component, so that a component which is small by symmetry does not
@@ -721,42 +721,42 @@ BOOST_AUTO_TEST_CASE( the_gradient_is_analytic_and_a_plain_difference_cannot_see
  */
 BOOST_AUTO_TEST_CASE( the_filament_agrees_with_the_analytic_fixture )
 {
-	double const radius = 1.5;
+	double const filamentRadius = 1.5;
 	double const height = 0.1;
 	double const current = 1.0e6;
 
-	CurrentFilament const filament( radius, height, current );
-	meq::analytic::CurrentLoop const loop( radius, height, current );
+	CurrentFilament const filament( filamentRadius, height, current );
+	meq::analytic::CurrentLoop const loop( filamentRadius, height, current );
 
 	std::printf( "\n  meq::CurrentFilament against analytic::CurrentLoop\n" );
 	std::printf( "    %8s %8s %14s %12s %12s\n",
-	             "r", "z", "psi", "rel psi", "rel grad" );
+	             "R", "z", "psi", "rel psi", "rel grad" );
 
 	double worstPsi = 0.0;
 	double worstGrad = 0.0;
 
-	for ( double r : { 0.4, 0.9, 2.2, 3.5 } )
+	for ( double radius : { 0.4, 0.9, 2.2, 3.5 } )
 	{
 		for ( double z : { -1.1, 0.35, 1.7 } )
 		{
-			double const mine = meq::filamentPsi( filament, r, z );
-			double const theirs = loop.psi( r, z );
+			double const mine = meq::filamentPsi( filament, radius, z );
+			double const theirs = loop.psi( radius, z );
 			double const scale = std::max( std::fabs( theirs ), 1.0e-300 );
 			double const relPsi = std::fabs( mine - theirs )/scale;
 
 			double dR = 0.0;
 			double dZ = 0.0;
-			meq::filamentGradPsi( filament, r, z, dR, dZ );
+			meq::filamentGradPsi( filament, radius, z, dR, dZ );
 			double tR = 0.0;
 			double tZ = 0.0;
-			loop.gradPsi( r, z, tR, tZ );
+			loop.gradPsi( radius, z, tR, tZ );
 			double const gradScale =
 				std::max( std::fabs( tR ) + std::fabs( tZ ), 1.0e-300 );
 			double const relGrad =
 				( std::fabs( dR - tR ) + std::fabs( dZ - tZ ) )/gradScale;
 
 			std::printf( "    %8.2f %8.2f %14.6e %12.3e %12.3e\n",
-			             r, z, mine, relPsi, relGrad );
+			             radius, z, mine, relPsi, relGrad );
 			worstPsi = std::max( worstPsi, relPsi );
 			worstGrad = std::max( worstGrad, relGrad );
 		}
@@ -779,9 +779,9 @@ BOOST_AUTO_TEST_CASE( the_filament_agrees_with_the_analytic_fixture )
  *
  * This is the one place the two DELIBERATELY differ, so it is asserted rather
  * than left to be discovered. CurrentLoop.hpp writes
- * dk/dr = k[ 1/( 2r ) - ( a + r )/d^2 ] literally and says of it: *"the
- * 1/( 2r ) is why this is NaN at r = 0. It is a real 1/r and not an artefact:
- * psi ~ r^2 there, so d psi/d r ~ r and the limit exists, but the expression as
+ * dk/dr = k[ 1/( 2r ) - ( a + R )/d^2 ] literally and says of it: *"the
+ * 1/( 2r ) is why this is NaN at R = 0. It is a real 1/R and not an artefact:
+ * psi ~ R^2 there, so d psi/d R ~ R and the limit exists, but the expression as
  * written does not reach it."*
  *
  * The library's arrangement reaches it. Both brackets carry k^2 as an explicit
@@ -791,7 +791,7 @@ BOOST_AUTO_TEST_CASE( the_filament_agrees_with_the_analytic_fixture )
  * free-boundary problem imposes there.
  *
  * AND THE FLUX q IS STILL NaN, WHICH IS A SEPARATE STATEMENT. q divides that
- * exact zero by r, and 0/0 is not 0. The limit is finite and this does not
+ * exact zero by R, and 0/0 is not 0. The limit is finite and this does not
  * reach it. It matters because a semicircle centred on the axis MEETS the axis
  * at both ends, so a sweep of such a Gamma samples exactly the point where q is
  * unavailable -- a caller must handle its endpoints rather than discover NaN in
@@ -810,7 +810,7 @@ BOOST_AUTO_TEST_CASE( the_gradient_is_exactly_zero_on_the_axis_where_the_flux_is
 		double dZ = 1.0;
 		meq::filamentGradPsi( filament, 0.0, z, dR, dZ );
 		BOOST_TEST( dR == 0.0,
-		            "d psi/d r on the axis at z = " << z << " is " << dR
+		            "d psi/d R on the axis at z = " << z << " is " << dR
 		            << " and not exactly 0.0. Both brackets carry k^2, which is "
 		            "exactly zero there, so anything else means the factored "
 		            "form has been replaced by the literal chain rule -- which "
@@ -875,7 +875,7 @@ BOOST_AUTO_TEST_CASE( a_shrinking_coils_gradient_approaches_the_filaments )
 
 	std::printf( "\n  a shrinking coil's GRADIENT against the filament's\n" );
 	std::printf( "    %10s %16s %16s %12s %10s\n",
-	             "half-size", "d psi/d r", "d psi/d z", "rel", "ratio" );
+	             "half-size", "d psi/d R", "d psi/d z", "rel", "ratio" );
 
 	double previousDifference = 0.0;
 	bool first = true;
@@ -925,7 +925,7 @@ BOOST_AUTO_TEST_CASE( a_shrinking_coils_gradient_approaches_the_filaments )
  * AMPERE'S LAW ON THE FILAMENT, which is FB-2's acceptance identity applied to
  * the class that has no cross-section.
  *
- *     oint ( 1/r ) dpsi/dn dl = -mu0 I
+ *     oint ( 1/R ) dpsi/dn dl = -mu0 I
  *
  * Coils.hpp derives the sign and the_outward_flux_is_minus_mu0_times_the_total_current
  * pins it for a rectangle, at 1.07e-08 by central differences of psi. THIS one
@@ -954,22 +954,22 @@ BOOST_AUTO_TEST_CASE( amperes_law_holds_on_the_filament )
 		double const dz = ( zHi - zLo )/panels;
 		for ( int i = 0; i < panels; ++i )
 		{
-			double const r = rLo + ( i + 0.5 )*dr;
+			double const radius = rLo + ( i + 0.5 )*dr;
 			double const z = zLo + ( i + 0.5 )*dz;
 			double dR = 0.0;
 			double dZ = 0.0;
 
-			// The two vertical sides: n = +/- r-hat, dl = dz.
+			// The two vertical sides: n = +/- R-hat, dl = dz.
 			meq::filamentGradPsi( filament, rHi, z, dR, dZ );
 			total += ( dR/rHi )*dz;
 			meq::filamentGradPsi( filament, rLo, z, dR, dZ );
 			total += ( -dR/rLo )*dz;
 
 			// The two horizontal sides: n = +/- z-hat, dl = dr.
-			meq::filamentGradPsi( filament, r, zHi, dR, dZ );
-			total += ( dZ/r )*dr;
-			meq::filamentGradPsi( filament, r, zLo, dR, dZ );
-			total += ( -dZ/r )*dr;
+			meq::filamentGradPsi( filament, radius, zHi, dR, dZ );
+			total += ( dZ/radius )*dr;
+			meq::filamentGradPsi( filament, radius, zLo, dR, dZ );
+			total += ( -dZ/radius )*dr;
 		}
 		return total;
 	};
@@ -982,7 +982,7 @@ BOOST_AUTO_TEST_CASE( amperes_law_holds_on_the_filament )
 	double const extrapolated = ( 4.0*fine - coarse )/3.0;
 	double const expected = -mu0*current;
 
-	std::printf( "\n  Ampere's law on a filament: oint ( 1/r ) dpsi/dn dl\n" );
+	std::printf( "\n  Ampere's law on a filament: oint ( 1/R ) dpsi/dn dl\n" );
 	std::printf( "    400 panels        %18.10e\n", coarse );
 	std::printf( "    800 panels        %18.10e\n", fine );
 	std::printf( "    Richardson        %18.10e\n", extrapolated );
@@ -997,7 +997,7 @@ BOOST_AUTO_TEST_CASE( amperes_law_holds_on_the_filament )
 	            << expected << ". THE SIGN IS THE THING TO CHECK FIRST: "
 	            "Coils.hpp records that the same identity as a circulation of B "
 	            "counterclockwise comes out POSITIVE, because phi-hat = "
-	            "z-hat x r-hat, and FREE-BOUNDARY-PLAN.md section 7 predicts it "
+	            "z-hat x R-hat, and FREE-BOUNDARY-PLAN.md section 7 predicts it "
 	            "being got wrong at least once" );
 }
 
@@ -1039,38 +1039,38 @@ BOOST_AUTO_TEST_CASE( the_exterior_set_sums_rectangles_and_filaments_alike )
 	// THE SUM IS EXACT, not merely close: psi() adds the same two numbers the
 	// free functions return, in the same order, so any difference would be a
 	// different quadrature order or a different mu0 rather than round-off.
-	for ( double r : { 0.35, 1.10, 2.05, 3.40 } )
+	for ( double radius : { 0.35, 1.10, 2.05, 3.40 } )
 		for ( double z : { -0.90, 0.0, 0.55 } )
 		{
 			double const want =
-				meq::coilPsi( rectangle, r, z, set.quadratureOrder(), mu0 )
-				+ meq::filamentPsi( filament, r, z, mu0 );
-			BOOST_TEST( set.psi( r, z ) == want,
-				"psi at ( " << r << ", " << z << " ) is " << set.psi( r, z )
+				meq::coilPsi( rectangle, radius, z, set.quadratureOrder(), mu0 )
+				+ meq::filamentPsi( filament, radius, z, mu0 );
+			BOOST_TEST( set.psi( radius, z ) == want,
+				"psi at ( " << radius << ", " << z << " ) is " << set.psi( radius, z )
 				<< " against a member-by-member sum of " << want );
 
 			double wantR = 0.0;
 			double wantZ = 0.0;
 			double partR = 0.0;
 			double partZ = 0.0;
-			meq::coilGradPsi( rectangle, r, z, wantR, wantZ,
+			meq::coilGradPsi( rectangle, radius, z, wantR, wantZ,
 			                  set.quadratureOrder(), mu0 );
-			meq::filamentGradPsi( filament, r, z, partR, partZ, mu0 );
+			meq::filamentGradPsi( filament, radius, z, partR, partZ, mu0 );
 			wantR += partR;
 			wantZ += partZ;
 
 			double gotR = 0.0;
 			double gotZ = 0.0;
-			set.gradPsi( r, z, gotR, gotZ );
+			set.gradPsi( radius, z, gotR, gotZ );
 			BOOST_TEST( gotR == wantR );
 			BOOST_TEST( gotZ == wantZ );
 
-			// q = grad_bar psi / r, and off the axis that is all it is.
+			// q = grad_bar psi / R, and off the axis that is all it is.
 			double qR = 0.0;
 			double qZ = 0.0;
-			set.flux( r, z, qR, qZ );
-			BOOST_TEST( qR == wantR/r );
-			BOOST_TEST( qZ == wantZ/r );
+			set.flux( radius, z, qR, qZ );
+			BOOST_TEST( qR == wantR/radius );
+			BOOST_TEST( qZ == wantZ/radius );
 		}
 
 	// AN EMPTY SET IS EXACTLY ZERO AND EVALUATES NOTHING, which is what lets a
@@ -1084,7 +1084,7 @@ BOOST_AUTO_TEST_CASE( the_exterior_set_sums_rectangles_and_filaments_alike )
 	// AND psi( 0, z ) IS 0.0 BIT EXACTLY FOR BOTH KINDS OF MEMBER. That is the
 	// condition the free-boundary problem imposes on the axis, and Gamma is a
 	// semicircle whose two ends sit there -- so it is worth having exactly
-	// rather than to round-off. k^2 = 4 a r/d^2 carries r as a factor.
+	// rather than to round-off. k^2 = 4 a R/d^2 carries R as a factor.
 	for ( double z : { -1.0, 0.0, 0.75 } )
 		BOOST_TEST( set.psi( 0.0, z ) == 0.0,
 			"psi on the axis at z = " << z << " is " << set.psi( 0.0, z )
@@ -1126,7 +1126,7 @@ BOOST_AUTO_TEST_CASE( the_exterior_sets_clearance_is_to_the_nearest_point )
 	meq::ExteriorCoilSet straddling;
 	straddling.add( meq::Coil( 1.55, 0.0, 0.20, 0.10, 1.0 ) );
 	BOOST_TEST( straddling.clearance( 0.0, rhoGamma ) < 0.0,
-		"a coil spanning r in [ 1.35, 1.75 ] reports a clearance of "
+		"a coil spanning R in [ 1.35, 1.75 ] reports a clearance of "
 		<< straddling.clearance( 0.0, rhoGamma ) << " against Gamma at "
 		<< rhoGamma << ", so it reads as outside while its inboard edge is "
 		"inside. THE NEAREST POINT is what decides this, not the centre." );
@@ -1180,7 +1180,7 @@ BOOST_AUTO_TEST_CASE( the_exterior_sets_clearance_is_to_the_nearest_point )
  *
  *     Delta*( psi_c ) = 0   everywhere the conductors are not,
  *
- * because then `Delta*( psi_p ) = -mu0 r J_plasma` with the conductor term gone
+ * because then `Delta*( psi_p ) = -mu0 R J_plasma` with the conductor term gone
  * from the right-hand side entirely. If it did not hold, the remainder would
  * carry a source nobody wrote down and the scheme would converge to the wrong
  * machine.
@@ -1198,7 +1198,7 @@ BOOST_AUTO_TEST_CASE( the_exterior_sets_clearance_is_to_the_nearest_point )
  * logarithmically singular at the ring, so a scheme that only worked far away
  * would show up here.
  *
- * Delta* psi = r d/dr( ( 1/r ) dpsi/dr ) + d2psi/dz2, by central differences on
+ * Delta* psi = R d/dr( ( 1/R ) dpsi/dr ) + d2psi/dz2, by central differences on
  * the analytic field. The step is chosen relative to the distance to the
  * nearest conductor, so the truncation is uniform across the probes rather than
  * tightest where the field is flattest.
@@ -1211,17 +1211,17 @@ BOOST_AUTO_TEST_CASE( the_conductor_field_is_delta_star_harmonic_off_the_conduct
 	set.add( meq::CurrentFilament( 1.40, 0.90, 3.0e5 ) );
 	set.add( meq::CurrentFilament( 0.75, -1.15, -1.7e5 ) );
 
-	auto deltaStar = [ & ]( double r, double z, double h )
+	auto deltaStar = [ & ]( double radius, double z, double h )
 	{
-		// r d/dr( ( 1/r ) dpsi/dr ) expanded as psi_rr - psi_r/r, which avoids
+		// R d/dr( ( 1/R ) dpsi/dr ) expanded as psi_rr - psi_r/R, which avoids
 		// differencing a quotient and is the form the solver's own operator is
 		// written in.
-		double const pr = ( set.psi( r + h, z ) - set.psi( r - h, z ) )/( 2.0*h );
-		double const prr = ( set.psi( r + h, z ) - 2.0*set.psi( r, z )
-		                     + set.psi( r - h, z ) )/( h*h );
-		double const pzz = ( set.psi( r, z + h ) - 2.0*set.psi( r, z )
-		                     + set.psi( r, z - h ) )/( h*h );
-		return prr - pr/r + pzz;
+		double const pr = ( set.psi( radius + h, z ) - set.psi( radius - h, z ) )/( 2.0*h );
+		double const prr = ( set.psi( radius + h, z ) - 2.0*set.psi( radius, z )
+		                     + set.psi( radius - h, z ) )/( h*h );
+		double const pzz = ( set.psi( radius, z + h ) - 2.0*set.psi( radius, z )
+		                     + set.psi( radius, z - h ) )/( h*h );
+		return prr - pr/radius + pzz;
 	};
 
 	/*
@@ -1242,19 +1242,19 @@ BOOST_AUTO_TEST_CASE( the_conductor_field_is_delta_star_harmonic_off_the_conduct
 	 */
 	std::printf( "\n  Delta* OF THE CONDUCTOR FIELD, REFINED\n" );
 	std::printf( "    %8s %8s %12s %12s %12s %8s\n",
-	             "r", "z", "h", "h/2", "h/4", "rate" );
+	             "R", "z", "h", "h/2", "h/4", "rate" );
 
 	double worstRate = 99.0;
-	for ( double const r : { 0.45, 0.90, 1.10, 1.75, 2.30 } )
+	for ( double const radius : { 0.45, 0.90, 1.10, 1.75, 2.30 } )
 		for ( double const z : { -0.60, 0.0, 0.35, 1.50 } )
 		{
 			double const gap = std::min(
-				std::hypot( r - 1.40, z - 0.90 ),
-				std::hypot( r - 0.75, z + 1.15 ) );
+				std::hypot( radius - 1.40, z - 0.90 ),
+				std::hypot( radius - 0.75, z + 1.15 ) );
 			double const h = 0.02*gap;
-			double const a = std::abs( deltaStar( r, z, h ) );
-			double const b = std::abs( deltaStar( r, z, h/2.0 ) );
-			double const c = std::abs( deltaStar( r, z, h/4.0 ) );
+			double const a = std::abs( deltaStar( radius, z, h ) );
+			double const b = std::abs( deltaStar( radius, z, h/2.0 ) );
+			double const c = std::abs( deltaStar( radius, z, h/4.0 ) );
 
 			// The rate over the WHOLE range rather than one pair, for the
 			// reason ExtensionConvergence reads its rate across a sequence:
@@ -1263,7 +1263,7 @@ BOOST_AUTO_TEST_CASE( the_conductor_field_is_delta_star_harmonic_off_the_conduct
 			                    ? std::log( a/c )/std::log( 4.0 ) : 0.0;
 			worstRate = std::min( worstRate, rate );
 			std::printf( "    %8.3f %8.3f %12.3e %12.3e %12.3e %8.2f\n",
-			             r, z, a, b, c, rate );
+			             radius, z, a, b, c, rate );
 		}
 	std::fflush( stdout );
 
@@ -1281,7 +1281,7 @@ BOOST_AUTO_TEST_CASE( the_conductor_field_is_delta_star_harmonic_off_the_conduct
 	            "is a field satisfying a DIFFERENT equation, and the "
 	            "subtraction path rests on this one." );
 
-	// AND THE AXIS, EXACTLY. Gamma is a semicircle whose ends sit on r = 0, so
+	// AND THE AXIS, EXACTLY. Gamma is a semicircle whose ends sit on R = 0, so
 	// psi_c must vanish there BIT exactly or the subtracted Dirichlet datum
 	// acquires a spurious value at the two points the free-boundary problem is
 	// most sensitive to.
@@ -1318,12 +1318,12 @@ BOOST_AUTO_TEST_CASE( the_elliptical_column_is_bounded_where_a_filament_diverges
 
 	for ( double const distance : { 3.0e-1, 3.0e-2, 3.0e-3, 3.0e-4 } )
 	{
-		double const r = centreR + distance;
+		double const radius = centreR + distance;
 		double const ellipse =
-			meq::ellipsePsi( r, centreZ, centreR, centreZ, semiR, semiZ,
+			meq::ellipsePsi( radius, centreZ, centreR, centreZ, semiR, semiZ,
 			                 current );
 		double const filament =
-			meq::filamentPsi( r, centreZ, centreR, centreZ, current );
+			meq::filamentPsi( radius, centreZ, centreR, centreZ, current );
 
 		std::printf( "    %10.1e %14.6e %14.6e\n", distance, ellipse,
 		             filament );
@@ -1355,7 +1355,7 @@ BOOST_AUTO_TEST_CASE( the_elliptical_column_is_bounded_where_a_filament_diverges
 	            << filamentHigh );
 
 	// AND THE AXIS, EXACTLY, for the reason the conductor case gives: Gamma is
-	// a semicircle whose ends sit on r = 0.
+	// a semicircle whose ends sit on R = 0.
 	for ( double const z : { -2.0, -0.5, 0.0, 0.5, 2.0 } )
 		BOOST_TEST( meq::ellipsePsi( 0.0, z, centreR, centreZ, semiR, semiZ,
 		                             current ) == 0.0 );
@@ -1363,8 +1363,8 @@ BOOST_AUTO_TEST_CASE( the_elliptical_column_is_bounded_where_a_filament_diverges
 
 /*
  * AND IT IS THE FIELD OF THAT CURRENT DENSITY, which is what says the pi a b
- * is right and the sign with it. Delta* psi = -mu0 r j_phi, so inside the
- * ellipse it is -mu0 r I/( pi a b ) and outside it is zero -- the same
+ * is right and the sign with it. Delta* psi = -mu0 R j_phi, so inside the
+ * ellipse it is -mu0 R I/( pi a b ) and outside it is zero -- the same
  * instrument the conductor case uses, read against a NON-ZERO right-hand side
  * for the first time in this file.
  */
@@ -1377,32 +1377,32 @@ BOOST_AUTO_TEST_CASE( the_elliptical_columns_current_density_is_uniform_and_is_i
 	double const current = 6.0e5;
 	double const density = current/( 3.14159265358979323846*semiR*semiZ );
 
-	auto psi = [ & ]( double r, double z )
+	auto psi = [ & ]( double radius, double z )
 	{
-		return meq::ellipsePsi( r, z, centreR, centreZ, semiR, semiZ, current );
+		return meq::ellipsePsi( radius, z, centreR, centreZ, semiR, semiZ, current );
 	};
 
-	auto deltaStar = [ & ]( double r, double z, double h )
+	auto deltaStar = [ & ]( double radius, double z, double h )
 	{
-		double const pr = ( psi( r + h, z ) - psi( r - h, z ) )/( 2.0*h );
+		double const pr = ( psi( radius + h, z ) - psi( radius - h, z ) )/( 2.0*h );
 		double const prr =
-			( psi( r + h, z ) - 2.0*psi( r, z ) + psi( r - h, z ) )/( h*h );
+			( psi( radius + h, z ) - 2.0*psi( radius, z ) + psi( radius - h, z ) )/( h*h );
 		double const pzz =
-			( psi( r, z + h ) - 2.0*psi( r, z ) + psi( r, z - h ) )/( h*h );
-		return prr - pr/r + pzz;
+			( psi( radius, z + h ) - 2.0*psi( radius, z ) + psi( radius, z - h ) )/( h*h );
+		return prr - pr/radius + pzz;
 	};
 
 	std::printf( "\n  Delta* OF THE ELLIPTICAL COLUMN\n" );
 	std::printf( "    %8s %8s %6s %14s %14s %10s\n",
-	             "r", "z", "where", "Delta*", "-mu0 r J", "relative" );
+	             "R", "z", "where", "Delta*", "-mu0 R J", "relative" );
 
 	double worstInside = 0.0;
 	double worstOutside = 0.0;
 
-	for ( double const r : { 0.70, 0.95, 1.20, 1.60, 2.20 } )
+	for ( double const radius : { 0.70, 0.95, 1.20, 1.60, 2.20 } )
 		for ( double const z : { -0.85, -0.30, 0.0, 0.40, 1.30 } )
 		{
-			double const normalised = ( r - centreR )*( r - centreR )
+			double const normalised = ( radius - centreR )*( radius - centreR )
 			                          /( semiR*semiR )
 			                        + ( z - centreZ )*( z - centreZ )
 			                          /( semiZ*semiZ );
@@ -1415,18 +1415,18 @@ BOOST_AUTO_TEST_CASE( the_elliptical_columns_current_density_is_uniform_and_is_i
 
 			bool const inside = normalised < 1.0;
 			double const h = 0.01;
-			double const measured = deltaStar( r, z, h );
+			double const measured = deltaStar( radius, z, h );
 			double const expected =
-				inside ? -meq::vacuumPermeability*r*density : 0.0;
+				inside ? -meq::vacuumPermeability*radius*density : 0.0;
 
 			// Scaled by the INTERIOR value throughout, so the exterior row is
 			// read as a fraction of the thing that is not zero rather than
 			// against its own zero.
-			double const scale = meq::vacuumPermeability*r*density;
+			double const scale = meq::vacuumPermeability*radius*density;
 			double const relative = std::abs( measured - expected )/scale;
 
 			std::printf( "    %8.3f %8.3f %6s %14.6e %14.6e %10.2e\n",
-			             r, z, inside ? "in" : "out", measured, expected,
+			             radius, z, inside ? "in" : "out", measured, expected,
 			             relative );
 
 			if ( inside )
@@ -1503,10 +1503,10 @@ BOOST_AUTO_TEST_CASE( a_thin_elliptical_column_approaches_the_filament_at_second
 
 BOOST_AUTO_TEST_CASE( the_elliptical_columns_refusals_are_the_contract )
 {
-	auto call = []( double r, double z, double centreR, double centreZ,
+	auto call = []( double radius, double z, double centreR, double centreZ,
 	                double semiR, double semiZ, int order )
 	{
-		return meq::ellipsePsi( r, z, centreR, centreZ, semiR, semiZ, 1.0e5,
+		return meq::ellipsePsi( radius, z, centreR, centreZ, semiR, semiZ, 1.0e5,
 		                        order );
 	};
 
@@ -1616,7 +1616,7 @@ BOOST_AUTO_TEST_CASE( the_two_elliptical_sweeps_agree_across_their_own_seam )
 		double const s = 3.0*( i + 0.5 )/samples;
 		double const angle = 0.37*i;
 		// Clamped at the axis exactly as the driver's guess clamps it: this
-		// spiral reaches r < 0, and the mesh does too.
+		// spiral reaches R < 0, and the mesh does too.
 		double const probe =
 			std::max( 0.0, centreR + semiR*s*std::cos( angle ) );
 		sink += meq::ellipsePsi( probe, centreZ + semiZ*s*std::sin( angle ),

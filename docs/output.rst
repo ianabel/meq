@@ -96,7 +96,7 @@ The exact format
 MFEM's own mesh and grid-function files, written at full precision. ``_psi.gf``
 is the solved potential :math:`\psi_h`; ``_psistar.gf`` is the post-processed
 :math:`\psi^\star`; ``_grad_psi.gf`` is the HDG flux
-:math:`q = \gradbar\psi / r` — the solved unknown, **not** the magnetic field,
+:math:`q = \gradbar\psi / R` — the solved unknown, **not** the magnetic field,
 which is a relabelling of it (see :ref:`output-field`).
 
 .. code-block:: sh
@@ -215,7 +215,7 @@ of the same answer:
        solved potential, not the post-processed :math:`\psi^*`
    * - ``flux_coefficients(flux_dof)``
      - the same for the solved flux :math:`q`, with
-       :math:`\bar\nabla\psi = r\,q`
+       :math:`\bar\nabla\psi = R\,q`
    * - ``fe_collection``, ``fe_order``, ``flux_collection``, ``flux_vdim``,
        ``flux_ordering``
      - the spaces those coefficients live in, spelled as MFEM's
@@ -305,7 +305,7 @@ Both output formats deal with it, differently, because they have to.
 
 **The gridded output continues into the band using the flux**, which is the
 mixed method paying off somewhere nobody expected. Because :math:`q` is a solved
-unknown carried at the same order as :math:`\psi`, and :math:`\gradbar\psi = r
+unknown carried at the same order as :math:`\psi`, and :math:`\gradbar\psi = R
 q`, a node :math:`p` outside the mesh can be reached from its foot :math:`x_0` on
 :math:`\Gamma_h` by a Taylor step
 
@@ -355,7 +355,7 @@ nothing is evaluated outside one survives.
 
    The route to better is known and was not taken. The equation being solved
    pins two of :math:`\nabla q`'s four entries exactly, and
-   :math:`r q = \gradbar\psi` pins a relation among the others — but what
+   :math:`R q = \gradbar\psi` pins a relation among the others — but what
    remains still has to be differentiated, so they buy *structure* rather than
    an order, at the cost of plumbing the source term into the sampler.
 
@@ -371,9 +371,9 @@ nothing is evaluated outside one survives.
    before anything else quantitative. Keep them for a picture.
 
    Any field derived from the geometry must also use **the node's own radius**,
-   not the foot's. A quantity that depends on :math:`r` and is evaluated at the
+   not the foot's. A quantity that depends on :math:`R` and is evaluated at the
    foot is wrong by the width of the band; for a quantity whose exponent carries
-   :math:`r^2`, it is wrong twice over. This was measured, and the difference is
+   :math:`R^2`, it is wrong twice over. This was measured, and the difference is
    several orders of magnitude, which is why it is stated as a rule rather than
    left as a detail.
 

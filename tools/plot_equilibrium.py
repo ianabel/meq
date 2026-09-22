@@ -205,7 +205,7 @@ def subtitle(attributes):
     if "potential" in attributes:
         bits.append(str(attributes["potential"]).split(" (")[0])
     if "final_residual" in attributes:
-        bits.append(f"|r| {float(attributes['final_residual']):.1e}")
+        bits.append(f"|R| {float(attributes['final_residual']):.1e}")
     return "   ".join(bits)
 
 
@@ -372,16 +372,16 @@ def draw_surface_geometry(ax, data):
         # theta runs over 2 pi j / N, so the loop is open in the file and a
         # reader closes it -- the same convention `boundary_R/Z` uses on the
         # grid file.
-        r = np.append(R[i], R[i, 0])
+        R = np.append(R[i], R[i, 0])
         z = np.append(Z[i], Z[i, 0])
-        ax.plot(r, z, color=cmap(norm(rho[i])), linewidth=0.9)
+        ax.plot(R, z, color=cmap(norm(rho[i])), linewidth=0.9)
 
         mask = np.append(band[i], band[i, 0])
         if mask.any():
             # Markers as well as a line: the innermost surface to cross the
             # band does so at a few isolated nodes, and an isolated node makes
             # no segment for a line to draw.
-            ax.plot(np.where(mask, r, np.nan), np.where(mask, z, np.nan),
+            ax.plot(np.where(mask, R, np.nan), np.where(mask, z, np.nan),
                     color="C3", linewidth=1.5, linestyle="solid",
                     marker=".", markersize=2.0)
 
@@ -454,7 +454,7 @@ def draw_surface_profiles(axes, data, panels, columns):
             # the two labels is the whole of Zernike.hpp's argument and a
             # reader who wants Psi_N should not be squaring by eye.
             secondary = ax.secondary_xaxis(
-                "top", functions=(lambda r: r**2,
+                "top", functions=(lambda R: R**2,
                                   lambda p: np.sqrt(np.clip(p, 0.0, None))))
             secondary.set_xlabel(r"$\Psi_N$", fontsize="x-small")
             secondary.tick_params(labelsize="xx-small")

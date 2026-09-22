@@ -77,12 +77,12 @@ namespace meq
 	GridSampler::GridSampler( mfem::Mesh &meshIn,
 	                          double rMinIn, double rMaxIn, int nRIn,
 	                          double zMinIn, double zMaxIn, int nZIn )
-		: mesh( meshIn ), rMin( rMinIn ), rMax( rMaxIn ),
+		: mesh( meshIn ), minRadius( rMinIn ), maxRadius( rMaxIn ),
 		  zMin( zMinIn ), zMax( zMaxIn ), nR( nRIn ), nZ( nZIn ), found( 0 )
 	{
 		if ( nR < 2 || nZ < 2 )
 			throw std::logic_error( "meq::GridSampler: a grid needs at least two nodes in each direction" );
-		if ( !( rMax > rMin ) || !( zMax > zMin ) )
+		if ( !( maxRadius > minRadius ) || !( zMax > zMin ) )
 			throw std::logic_error( "meq::GridSampler: the grid extent must be positive in both directions" );
 
 		element.assign( static_cast<std::size_t>( nR )*nZ, -1 );
@@ -91,7 +91,7 @@ namespace meq
 		offsetR.assign( static_cast<std::size_t>( nR )*nZ, 0.0 );
 		offsetZ.assign( static_cast<std::size_t>( nR )*nZ, 0.0 );
 
-		double const dR = ( rMax - rMin )/( nR - 1 );
+		double const dR = ( maxRadius - minRadius )/( nR - 1 );
 		double const dZ = ( zMax - zMin )/( nZ - 1 );
 
 		mfem::Vector physical( 2 );
@@ -155,8 +155,8 @@ namespace meq
 			// THE INVERSION: box to index range, by arithmetic. One element pad
 			// so that a node sitting exactly on a boundary is not missed to
 			// round-off.
-			int const i0 = std::max( 0, static_cast<int>( std::floor( ( lower( 0 ) - rMin )/dR ) ) - 1 );
-			int const i1 = std::min( nR - 1, static_cast<int>( std::ceil( ( upper( 0 ) - rMin )/dR ) ) + 1 );
+			int const i0 = std::max( 0, static_cast<int>( std::floor( ( lower( 0 ) - minRadius )/dR ) ) - 1 );
+			int const i1 = std::min( nR - 1, static_cast<int>( std::ceil( ( upper( 0 ) - minRadius )/dR ) ) + 1 );
 			int const j0 = std::max( 0, static_cast<int>( std::floor( ( lower( 1 ) - zMin )/dZ ) ) - 1 );
 			int const j1 = std::min( nZ - 1, static_cast<int>( std::ceil( ( upper( 1 ) - zMin )/dZ ) ) + 1 );
 			if ( i1 < i0 || j1 < j0 )
@@ -348,7 +348,7 @@ namespace meq
 				else
 					flux.GetVectorValue( e, point[ at ], q );
 
-				// grad psi = r q, with r taken at the foot -- the point the
+				// grad psi = R q, with R taken at the foot -- the point the
 				// flux was actually read at.
 				int const i = static_cast<int>( at ) % nR;
 				double const footR = rAt( i ) - offsetR[ at ];
@@ -458,7 +458,7 @@ namespace meq
 		// what the band is measured from: a node in the sliver is outside the
 		// mesh across some face of Gamma_h, and that face's element is the one
 		// whose polynomial continues into it.
-		struct Face { double r0, z0, r1, z1; int element; double length; };
+		struct Face { double radius0, z0, radius1, z1; int element; double length; };
 		std::vector<Face> faces;
 		faces.reserve( mesh.GetNBE() );
 		for ( int b = 0; b < mesh.GetNBE(); ++b )
@@ -488,25 +488,25 @@ namespace meq
 				if ( element[ at ] >= 0 )
 					continue;
 
-				double const r = rAt( i ), z = zAt( j );
-				if ( accept && !accept( r, z ) )
+				double const radius = rAt( i ), z = zAt( j );
+				if ( accept && !accept( radius, z ) )
 					continue;
 
 				// Nearest boundary face, and the FOOT of the node on it.
 				int best = -1;
-				double bestDistance = 0.0, footR = r, footZ = z;
+				double bestDistance = 0.0, footR = radius, footZ = z;
 				for ( std::size_t f = 0; f < faces.size(); ++f )
 				{
 					Face const &face = faces[ f ];
-					double const dr = face.r1 - face.r0, dz = face.z1 - face.z0;
+					double const dr = face.radius1 - face.radius0, dz = face.z1 - face.z0;
 					double const square = dr*dr + dz*dz;
 					double parameter = 0.0;
 					if ( square > 0.0 )
-						parameter = ( ( r - face.r0 )*dr + ( z - face.z0 )*dz )/square;
+						parameter = ( ( radius - face.radius0 )*dr + ( z - face.z0 )*dz )/square;
 					parameter = std::min( 1.0, std::max( 0.0, parameter ) );
-					double const onFaceR = face.r0 + parameter*dr;
+					double const onFaceR = face.radius0 + parameter*dr;
 					double const onFaceZ = face.z0 + parameter*dz;
-					double const distance = std::hypot( r - onFaceR, z - onFaceZ );
+					double const distance = std::hypot( radius - onFaceR, z - onFaceZ );
 					if ( best < 0 || distance < bestDistance )
 					{
 						best = static_cast<int>( f );
@@ -565,7 +565,7 @@ namespace meq
 
 				element[ at ] = faces[ best ].element;
 				point[ at ] = reference;
-				offsetR[ at ] = r - footR;
+				offsetR[ at ] = radius - footR;
 				offsetZ[ at ] = z - footZ;
 
 				// How far through the band: 0 where it meets Gamma_h, 1 on
@@ -574,7 +574,7 @@ namespace meq
 				// and their ratio needs no geometry this class does not have.
 				if ( gapToBoundary )
 				{
-					double const toGamma = std::max( 0.0, gapToBoundary( r, z ) );
+					double const toGamma = std::max( 0.0, gapToBoundary( radius, z ) );
 					double const total = bestDistance + toGamma;
 					blend[ at ] = total > 0.0
 						? std::min( 1.0, bestDistance/total )
@@ -594,7 +594,7 @@ namespace meq
 
 	double GridSampler::rAt( int i ) const
 	{
-		return rMin + ( rMax - rMin )*i/( nR - 1 );
+		return minRadius + ( maxRadius - minRadius )*i/( nR - 1 );
 	}
 
 	double GridSampler::zAt( int j ) const

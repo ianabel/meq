@@ -73,14 +73,14 @@ namespace
 				- surface.normalisedFlux*( family.psiAxis - family.psiBoundary );
 
 			double const minor = 0.3*label;
-			surface.r.resize( angles );
+			surface.radius.resize( angles );
 			surface.z.resize( angles );
 			surface.extended.assign( angles, 0 );
 			for ( std::size_t j = 0; j < angles; ++j )
 			{
 				double const theta = twoPi*static_cast<double>( j )
 					/static_cast<double>( angles );
-				surface.r[ j ] = family.axisR + minor*std::cos( theta );
+				surface.radius[ j ] = family.axisR + minor*std::cos( theta );
 				surface.z[ j ] = family.axisZ + minor*std::sin( theta );
 			}
 

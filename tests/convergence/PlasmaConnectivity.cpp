@@ -59,9 +59,9 @@
  *      with a fill that quietly perturbs the answer.
  *
  *   6. theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses -- CAN THE FILL REACH
- *      r = 0? refreshPlasmaComponent() refuses to SEED an axis-touching element
+ *      R = 0? refreshPlasmaComponent() refuses to SEED an axis-touching element
  *      and does not refuse to REACH one, so an iterate lifting psi_h above
- *      psi_bnd there would put section 11.3's 1/r pole back with
+ *      psi_bnd there would put section 11.3's 1/R pole back with
  *      `ConfineToPlasma` on. IT DOES REACH IT, on the first Newton steps of the
  *      shipped physical machine, where psi_bnd is transiently negative and
  *      `{ Psi > 0 }` genuinely contains the axis -- and it clears by step 2 to 4.
@@ -72,7 +72,7 @@
  *
  * AND ONE THING WAS FOUND THAT IS NOT ABOUT CONNECTIVITY AT ALL, in case 3:
  * psi_ax on that shipped converged answer is attained in an element TOUCHING
- * r = 0, and reads 2.5x the largest psi_h anywhere off the symmetry axis. That
+ * R = 0, and reads 2.5x the largest psi_h anywhere off the symmetry axis. That
  * is where the fill's seed rule comes from, and it is worth knowing about the
  * fixture independently of XP-1.
  */
@@ -144,9 +144,9 @@ namespace
 			explicit CoilOnly( std::shared_ptr<meq::CoilSet const> coilsIn )
 				: coils( std::move( coilsIn ) ) {}
 
-			double f( double r, double z, double ) const override
+			double f( double radius, double z, double ) const override
 			{
-				return coils->f( r, z );
+				return coils->f( radius, z );
 			}
 			double dFdPsi( double, double, double ) const override
 			{
@@ -160,7 +160,7 @@ namespace
 	/// The half-disc of FreeBoundaryCoupling.cpp, transcribed rather than shared.
 	///
 	/// Gamma is the semicircle rho = 1.5 about the AXIS, cut out of a background
-	/// box that reaches r = 0 exactly, with Gamma_h the generated arc and the
+	/// box that reaches R = 0 exactly, with Gamma_h the generated arc and the
 	/// flat side inherited fitted boundary -- the axis is not an approximation of
 	/// anything and needs no transfer.
 	///
@@ -282,11 +282,11 @@ namespace
 	/// the solver is holding.
 	struct AxisReading
 	{
-		int elements = 0;      ///< elements with a vertex on r = 0
+		int elements = 0;      ///< elements with a vertex on R = 0
 		int candidates = 0;    ///< of those, elements carrying Psi > 0 somewhere
 		int reached = 0;       ///< of those, elements the fill put in the plasma
-		double layer = 0.0;    ///< the largest psi_h at a node ON r = 0
-		double assembled = 0.0;///< the largest | F | the ASSEMBLY puts on r = 0
+		double layer = 0.0;    ///< the largest psi_h at a node ON R = 0
+		double assembled = 0.0;///< the largest | F | the ASSEMBLY puts on R = 0
 	};
 
 	/*
@@ -299,9 +299,9 @@ namespace
 	 * refuses a healthy run at 6.2e-05 of scale.
 	 *
 	 * This is the DISCRETE question, and it is the one the load functional
-	 * answers to. meq::SourceIntegrator assembles -( F/r, w ) with
-	 * F = elementInPlasma( e ) ? f( r, z, psi_h ) : fOutsidePlasma( r, z ), so
-	 * that expression at a node on r = 0 is exactly what the assembly puts on
+	 * answers to. meq::SourceIntegrator assembles -( F/R, w ) with
+	 * F = elementInPlasma( e ) ? f( R, z, psi_h ) : fOutsidePlasma( R, z ), so
+	 * that expression at a node on R = 0 is exactly what the assembly puts on
 	 * the symmetry axis. It needs no tolerance, because on a run where the fill
 	 * does not reach the axis there are no such nodes to read and it is EXACTLY
 	 * zero.
@@ -378,7 +378,7 @@ namespace
 	/// of the finding and it needs no mesh: run a ray across the domain and
 	/// count sign changes.
 	int midplaneComponents( GradShafranovSolver &solver, double psiBnd,
-	                        double span, double rMin, double rMax, int samples )
+	                        double span, double minRadius, double maxRadius, int samples )
 	{
 		mfem::GridFunction const &potential = solver.potential();
 		mfem::Mesh *mesh = potential.FESpace()->GetMesh();
@@ -387,10 +387,10 @@ namespace
 		bool previous = false;
 		for ( int i = 0; i <= samples; ++i )
 		{
-			double const r = rMin + ( rMax - rMin )*i/samples;
+			double const radius = minRadius + ( maxRadius - minRadius )*i/samples;
 
 			mfem::DenseMatrix point( 2, 1 );
-			point( 0, 0 ) = r;
+			point( 0, 0 ) = radius;
 			point( 1, 0 ) = 0.0;
 			mfem::Array<int> elements;
 			mfem::Array<mfem::IntegrationPoint> reference;
@@ -435,7 +435,7 @@ BOOST_AUTO_TEST_CASE( theIntegratorHonoursTheElementItIsGiven )
 	mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D(
 		4, 4, mfem::Element::TRIANGLE, false, 1.0, 1.0 );
 	for ( int v = 0; v < mesh.GetNV(); ++v )
-		mesh.GetVertex( v )[ 0 ] += 1.0;          // r in [ 1, 2 ], off the axis.
+		mesh.GetVertex( v )[ 0 ] += 1.0;          // R in [ 1, 2 ], off the axis.
 
 	mfem::L2_FECollection collection( order, 2, mfem::BasisType::GaussLobatto );
 	mfem::FiniteElementSpace space( &mesh, &collection );
@@ -600,7 +600,7 @@ BOOST_AUTO_TEST_CASE( theFillSeparatesThePrivateFluxRegionFromThePlasma )
 	{
 		Reading out;
 
-		// A box holding the plasma ( r in [ 0.68, 1.32 ], up to z = 0.64 ) and a
+		// A box holding the plasma ( R in [ 0.68, 1.32 ], up to z = 0.64 ) and a
 		// generous slab of the private flux region below the X-point.
 		mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D(
 			n, 2*n, mfem::Element::TRIANGLE, false, 0.9, 1.8 );
@@ -836,15 +836,15 @@ BOOST_AUTO_TEST_CASE( theFillSeparatesThePrivateFluxRegionFromThePlasma )
 	std::printf( "\n    THE BAND: ( elements below the saddle | plasma elements "
 	             "dropped )\n" );
 	std::printf( "    %-24s", "rule" );
-	for ( Reading const &r : readings )
-		std::printf( " %18d", r.elements );
+	for ( Reading const &reading : readings )
+		std::printf( " %18d", reading.elements );
 	std::printf( "   <- mesh elements\n" );
 	std::printf( "    %-24s", "interior alone" );
-	for ( Reading const &r : readings )
-		std::printf( " %8d | %7d", r.interiorOnlyBelow, r.interiorOnlyLost );
+	for ( Reading const &reading : readings )
+		std::printf( " %8d | %7d", reading.interiorOnlyBelow, reading.interiorOnlyLost );
 	std::printf( "\n    %-24s", "interior + watershed" );
-	for ( Reading const &r : readings )
-		std::printf( " %8d | %7d", r.twoRuleLostBelow, r.twoRuleLostAbove );
+	for ( Reading const &reading : readings )
+		std::printf( " %8d | %7d", reading.twoRuleLostBelow, reading.twoRuleLostAbove );
 	std::printf( "\n" );
 
 	Reading const &fine = readings.back();
@@ -867,14 +867,14 @@ BOOST_AUTO_TEST_CASE( theFillSeparatesThePrivateFluxRegionFromThePlasma )
 	             "at the axis\n", fine.largestPsiN );
 	std::fflush( stdout );
 
-	for ( Reading const &r : readings )
+	for ( Reading const &reading : readings )
 	{
-		BOOST_TEST_REQUIRE( r.xPointElement >= 0,
-		                    "the X-point is not in the mesh at " << r.elements
+		BOOST_TEST_REQUIRE( reading.xPointElement >= 0,
+		                    "the X-point is not in the mesh at " << reading.elements
 		                    << " elements, so this case measures nothing" );
 
 		// THE POINTWISE TEST IS WRONG, which is what makes the rest worth doing.
-		BOOST_TEST( r.pointwiseBelow > 0,
+		BOOST_TEST( reading.pointwiseBelow > 0,
 		            "the pointwise test switches the source on in NO element "
 		            "below the X-point, so the box needs to reach further down" );
 
@@ -885,9 +885,9 @@ BOOST_AUTO_TEST_CASE( theFillSeparatesThePrivateFluxRegionFromThePlasma )
 		// The one-rule fill takes the WHOLE private flux region, because the
 		// band of elements STRADDLING the separatrix is several elements wide
 		// near a saddle and every one of them carries Psi > 0 at some vertex.
-		BOOST_TEST( r.oneRuleBelow == r.pointwiseBelow,
-		            "the one-rule fill reached " << r.oneRuleBelow << " of the "
-		            "pointwise test's " << r.pointwiseBelow << " private-flux "
+		BOOST_TEST( reading.oneRuleBelow == reading.pointwiseBelow,
+		            "the one-rule fill reached " << reading.oneRuleBelow << " of the "
+		            "pointwise test's " << reading.pointwiseBelow << " private-flux "
 		            "elements. If it now blocks some of them the straddling band "
 		            "has stopped bridging the lobes, and section 10.3's "
 		            "prediction is worth re-reading rather than this assertion "
@@ -897,20 +897,20 @@ BOOST_AUTO_TEST_CASE( theFillSeparatesThePrivateFluxRegionFromThePlasma )
 		// strictly interior elements separates the lobes with no X-point
 		// knowledge whatever -- which is what the prediction wanted, by a
 		// different mechanism from the one it proposed.
-		BOOST_TEST( r.interiorComponents >= 2,
-		            "the interior rule leaves " << r.interiorComponents
+		BOOST_TEST( reading.interiorComponents >= 2,
+		            "the interior rule leaves " << reading.interiorComponents
 		            << " component( s ), so the private flux region was never "
 		            "separate and nothing is being separated" );
-		BOOST_TEST( r.twoRuleBelow == 0,
-		            "the two-rule fill still reaches " << r.twoRuleBelow
+		BOOST_TEST( reading.twoRuleBelow == 0,
+		            "the two-rule fill still reaches " << reading.twoRuleBelow
 		            << " elements below the saddle" );
 
 		// AND IT KEEPS THE PLASMA EDGE, which is the reason for the ring and is
 		// not optional: FB-4's result is that psi* holds k+2 exactly when
 		// k <= j, and a support switched off in an O( h ) band inside the plasma
 		// would put an O( h^(1+j) ) perturbation under it.
-		BOOST_TEST( r.twoRuleLostAbove <= 2,
-		            "the two-rule fill dropped " << r.twoRuleLostAbove
+		BOOST_TEST( reading.twoRuleLostAbove <= 2,
+		            "the two-rule fill dropped " << reading.twoRuleLostAbove
 		            << " elements that carry plasma and are NOT in the private "
 		            "flux region. The rings are supposed to keep every "
 		            "straddling element, so anything beyond the one or two "
@@ -918,9 +918,9 @@ BOOST_AUTO_TEST_CASE( theFillSeparatesThePrivateFluxRegionFromThePlasma )
 		            "eaten" );
 
 		// THE DIFFERENCE MATTERS, in the source's own units rather than a count.
-		BOOST_TEST( r.twoRuleMass < 0.95*r.pointwiseMass,
+		BOOST_TEST( reading.twoRuleMass < 0.95*reading.pointwiseMass,
 		            "the connectivity test removed "
-		            << ( 1.0 - r.twoRuleMass/r.pointwiseMass )*100.0
+		            << ( 1.0 - reading.twoRuleMass/reading.pointwiseMass )*100.0
 		            << "% of int |F|, which is too little to be the private flux "
 		            "region" );
 
@@ -935,22 +935,22 @@ BOOST_AUTO_TEST_CASE( theFillSeparatesThePrivateFluxRegionFromThePlasma )
 		// removing its middle element leaves the two lobes joined by its
 		// neighbours. So the cure that needs an X-point finder -- stage XP-0,
 		// not built -- is also the cure that stops working first.
-		BOOST_TEST( r.twoRuleBelow <= r.blockedBelow,
-		            "blocking the X-point's element left " << r.blockedBelow
+		BOOST_TEST( reading.twoRuleBelow <= reading.blockedBelow,
+		            "blocking the X-point's element left " << reading.blockedBelow
 		            << " elements below the saddle and the two-rule fill "
-		            << r.twoRuleBelow << ". The two-rule fill is supposed to be "
+		            << reading.twoRuleBelow << ". The two-rule fill is supposed to be "
 		            "at least as good everywhere, since it needs no X-point at "
 		            "all" );
 
 		// THE BAND REALLY IS THE PLASMA EDGE, which is what says the watershed
 		// is adding back something that matters rather than tidying. It is one
 		// element thick around the boundary, so it must grow like 1/h.
-		BOOST_TEST( r.interiorOnlyLost > 50,
-		            "the interior rule alone drops only " << r.interiorOnlyLost
+		BOOST_TEST( reading.interiorOnlyLost > 50,
+		            "the interior rule alone drops only " << reading.interiorOnlyLost
 		            << " plasma elements, so there is no band to share out and "
 		            "the watershed is buying nothing" );
-		BOOST_TEST( r.interiorOnlyBelow == 0,
-		            "the interior rule alone reaches " << r.interiorOnlyBelow
+		BOOST_TEST( reading.interiorOnlyBelow == 0,
+		            "the interior rule alone reaches " << reading.interiorOnlyBelow
 		            << " elements below the saddle, so the two lobes are not "
 		            "separated by the traversal at all and everything below "
 		            "rests on the band" );
@@ -1003,12 +1003,12 @@ BOOST_AUTO_TEST_CASE( theFillSeparatesThePrivateFluxRegionFromThePlasma )
  * **AND THE CASE FOUND SOMETHING ELSE ABOUT THAT FIXTURE, REPORTED HERE
  * BECAUSE NOTHING ELSE MEASURES IT.** psi_ax on this converged answer -- the
  * quantity the bordered Newton constrains, and the largest nodal psi_h by
- * definition -- is attained in an element TOUCHING r = 0, in the corner where
+ * definition -- is attained in an element TOUCHING R = 0, in the corner where
  * Gamma meets the symmetry axis. It reads 1.0916e-01 there against 4.4472e-02
  * as the largest value anywhere off the axis, a factor of 2.5. That corner is
  * where two different data meet (psi = 0 on the fitted axis, the transferred
- * exterior trace on Gamma_h) at the one place the lifting weight C = r
- * vanishes, and FB-A measured the flux mass ( r q, v ) giving those elements a
+ * exterior trace on Gamma_h) at the one place the lifting weight C = R
+ * vanishes, and FB-A measured the flux mass ( R q, v ) giving those elements a
  * weight of order h. So the one thing the fill must not do is take psi_ax's
  * argmax for the magnetic axis, and refreshPlasmaComponent() does not: it seeds
  * off the symmetry axis, and this case is where that rule was measured into
@@ -1056,14 +1056,14 @@ BOOST_AUTO_TEST_CASE( theLimiterCaseAlreadyHasMoreThanOneLobe )
 
 	// THE PROFILE ITSELF, so that "more than one component" is visible rather
 	// than only asserted. `+` is inside the pointwise support.
-	std::printf( "    psi on z = 0, r = 0.05 .. 1.45:\n      " );
+	std::printf( "    psi on z = 0, R = 0.05 .. 1.45:\n      " );
 	int midplaneRuns = 0;
 	bool previous = false;
 	for ( int i = 0; i <= 56; ++i )
 	{
-		double const r = 0.05 + 1.40*i/56.0;
+		double const radius = 0.05 + 1.40*i/56.0;
 		mfem::DenseMatrix point( 2, 1 );
-		point( 0, 0 ) = r;
+		point( 0, 0 ) = radius;
 		point( 1, 0 ) = 0.0;
 		mfem::Array<int> elements;
 		mfem::Array<mfem::IntegrationPoint> reference;
@@ -1177,12 +1177,12 @@ BOOST_AUTO_TEST_CASE( theLimiterCaseAlreadyHasMoreThanOneLobe )
 	 * This asserted `onAxisPeak == psiAxis` -- "the same quantity by definition"
 	 * -- and under AxisConstraint::NodalMaximum it was. It is not any more:
 	 * psi_ax is the flux at the LOCATED magnetic axis, a zero of q_h, so on this
-	 * fixture it reads 1.26e-01 at the plasma while the r = 0 layer sits at
+	 * fixture it reads 1.26e-01 at the plasma while the R = 0 layer sits at
 	 * 3.08e-01. The border no longer follows the layer, which is precisely the
 	 * defect FREE-BOUNDARY-PLAN.md section 11 opens with.
 	 *
 	 * So what is asserted is the SEPARATION, and it is the stronger statement:
-	 * the layer is still there -- this fixture carries the 1/r pole of section
+	 * the layer is still there -- this fixture carries the 1/R pole of section
 	 * 11.3 and nothing here repairs the FIELD -- and psi_ax has stopped
 	 * reporting it. Both halves matter, and a test that only checked the second
 	 * would pass on a fixture whose layer had quietly gone away.
@@ -1191,7 +1191,7 @@ BOOST_AUTO_TEST_CASE( theLimiterCaseAlreadyHasMoreThanOneLobe )
 	            "the symmetry-axis layer reads " << onAxisPeak << " and psi_ax "
 	            "reads " << psiAxis << ". This case exists because those are far "
 	            "apart: if they have come together either the layer is gone -- "
-	            "check whether the fixture's gg' still fails to vanish at r = 0, "
+	            "check whether the fixture's gg' still fails to vanish at R = 0, "
 	            "which is what puts it there -- or psi_ax is following the layer "
 	            "again, which would mean the axis constraint has reverted to "
 	            "AxisConstraint::NodalMaximum" );
@@ -1204,7 +1204,7 @@ BOOST_AUTO_TEST_CASE( theLimiterCaseAlreadyHasMoreThanOneLobe )
 	 * axisymmetric field with bounded B -- so it asks the CONTINUOUS question
 	 * and reads clean here: psi_bnd is positive, Psi_axis = -psi_bnd/span is
 	 * negative, and the physical axis is in the vacuum. The DISCRETE state is
-	 * the opposite. This fixture's layer puts psi_h on r = 0 at Psi = 2.7,
+	 * the opposite. This fixture's layer puts psi_h on R = 0 at Psi = 2.7,
 	 * deep inside `{ Psi > 0 }`, so every one of the 84 axis-touching elements
 	 * is a candidate and a pointwise support test would switch mu_0 j_phi on
 	 * along the whole symmetry axis.
@@ -1213,14 +1213,14 @@ BOOST_AUTO_TEST_CASE( theLimiterCaseAlreadyHasMoreThanOneLobe )
 	 * psi_h dips below psi_bnd between it and the plasma, and the two-rule fill
 	 * traverses only strictly interior elements. That is the half of the axis
 	 * guard nothing else covers -- theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses
-	 * asserts the other half, that at a converged answer the fill reaches r = 0
+	 * asserts the other half, that at a converged answer the fill reaches R = 0
 	 * only where checkAxisSource() refuses.
 	 *
 	 * AND THE SIZE OF WHAT IT IS KEEPING OUT IS MEASURED RATHER THAN ASSERTED
 	 * AT: with elementInPlasma() ignored, this state assembles | F | = 1.376 on
-	 * r = 0 against a source scale of the same order -- so the fill is not
+	 * R = 0 against a source scale of the same order -- so the fill is not
 	 * trimming an edge here, it is the whole of the difference between a bounded
-	 * load and mu_0 j_phi diverging like 1/r along the entire symmetry axis.
+	 * load and mu_0 j_phi diverging like 1/R along the entire symmetry axis.
 	 */
 	meq::GradShafranovSolver::AxisSourceCheck const axisSource =
 		solver.checkAxisSource();
@@ -1229,7 +1229,7 @@ BOOST_AUTO_TEST_CASE( theLimiterCaseAlreadyHasMoreThanOneLobe )
 	             axisReading.candidates );
 	std::printf( "    %-38s %8d\n", "of those, reached by the fill",
 	             axisReading.reached );
-	std::printf( "    checkAxisSource() reads Psi on r = 0 as %.4e, so the "
+	std::printf( "    checkAxisSource() reads Psi on R = 0 as %.4e, so the "
 	             "CONTINUOUS test is clean\n",
 	             axisSource.normalisedFluxOnAxis );
 	std::fflush( stdout );
@@ -1245,14 +1245,14 @@ BOOST_AUTO_TEST_CASE( theLimiterCaseAlreadyHasMoreThanOneLobe )
 	BOOST_TEST( axisReading.reached == 0,
 	            "the fill put " << axisReading.reached << " of "
 	            << axisReading.elements << " axis-touching elements into the "
-	            "plasma's component, on a state where psi_h on r = 0 is "
+	            "plasma's component, on a state where psi_h on R = 0 is "
 	            "Psi = " << ( axisReading.layer - psiBnd )/span << ". "
 	            "checkAxisSource() asks at psi = 0 and reads this state clean, "
 	            "so the fill is the only thing keeping mu_0 j_phi off the "
 	            "symmetry axis" );
 	BOOST_TEST( axisReading.assembled == 0.0,
 	            "the assembly puts | F | = " << axisReading.assembled
-	            << " on r = 0 at this state" );
+	            << " on R = 0 at this state" );
 }
 
 
@@ -1535,12 +1535,12 @@ BOOST_AUTO_TEST_CASE( theFillDoesNotMoveASingleLobeAnswer )
 	 * gg' = 0 HERE, WHERE EVERY OTHER CASE IN THIS FILE USES 0.05, AND IT IS A
 	 * PHYSICS CHANGE RATHER THAN A TUNING ONE.
 	 *
-	 * This domain reaches r = 0, and F( 0, z, . ) is gg' and nothing else --
-	 * p' is killed by its own r^2. So a non-zero gg' is a toroidal current
-	 * density diverging like 1/r on the symmetry axis, which
+	 * This domain reaches R = 0, and F( 0, z, . ) is gg' and nothing else --
+	 * p' is killed by its own R^2. So a non-zero gg' is a toroidal current
+	 * density diverging like 1/R on the symmetry axis, which
 	 * GradShafranovSolver::checkAxisSource() is the guard for and
 	 * FREE-BOUNDARY-PLAN.md section 11.3 is the account of. With gg' = 0 the
-	 * axis carries no current, which is what a plasma reaching r = 0 must
+	 * axis carries no current, which is what a plasma reaching R = 0 must
 	 * satisfy -- a levitated dipole and a magnetic mirror both do, and both
 	 * have no toroidal field for exactly this reason.
 	 *
@@ -1767,16 +1767,16 @@ BOOST_AUTO_TEST_CASE( theFillDoesNotMoveASingleLobeAnswer )
  * CAN THE FILL REACH THE SYMMETRY AXIS, AND DOES IT MATTER?
  *
  * refreshPlasmaComponent() refuses to SEED an axis-touching element -- the
- * argmax of psi_h on a half-disc is the r = 0 layer and not the magnetic axis,
+ * argmax of psi_h on a half-disc is the R = 0 layer and not the magnetic axis,
  * which theLimiterCaseAlreadyHasMoreThanOneLobe measures -- and it does not
  * refuse to REACH one. So the question FREE-BOUNDARY-PLAN.md section 11.6
  * leaves open is whether an iterate can lift psi_h above psi_bnd on the axis
- * and put the 1/r pole of section 11.3 back with `ConfineToPlasma` on.
+ * and put the 1/R pole of section 11.3 back with `ConfineToPlasma` on.
  *
  * IT CAN, AND IT DOES -- ON THE INTERMEDIATE ITERATES OF THE SHIPPED PHYSICAL
  * FIXTURE, at every resolution tried. The first Newton step of section 11.7's
  * own machine carries psi_bnd NEGATIVE, so `{ Psi > 0 }` genuinely contains
- * r = 0, every axis-touching element is in the plasma's component, and the
+ * R = 0, every axis-touching element is in the plasma's component, and the
  * assembly puts a non-zero F on the axis. It clears by step 2 to 4 and the
  * converged answer has no axis element that is even a candidate.
  *
@@ -1785,7 +1785,7 @@ BOOST_AUTO_TEST_CASE( theFillDoesNotMoveASingleLobeAnswer )
  * contain the axis, and a rule that refused to say so would be a fill that
  * lies about the state it is given. Blocking axis-touching elements outright
  * would also be wrong for the one device class section 11.6 protects -- a
- * levitated dipole and a magnetic mirror both have plasma to r = 0, and both
+ * levitated dipole and a magnetic mirror both have plasma to R = 0, and both
  * have gg' == 0 there, so F( 0, z ) vanishes and the pole never existed.
  *
  * WHAT MAKES IT SAFE IS A COUPLING BETWEEN TWO SEPARATE READINGS, AND THIS CASE
@@ -1803,7 +1803,7 @@ BOOST_AUTO_TEST_CASE( theFillDoesNotMoveASingleLobeAnswer )
  * the iterate refuses a healthy run at 6.2e-05 of scale -- so it cannot see a
  * psi_h( 0, z ) that exceeds a POSITIVE psi_bnd. That state exists: an
  * unconfined solve on this same geometry grows a layer reaching Psi = 2.7 at
- * r = 0. It is not reachable from a confined solve, because the layer is what
+ * R = 0. It is not reachable from a confined solve, because the layer is what
  * the pole builds and the pole is what confinement removes -- and where the
  * layer does exist the fill separates it as its own component, which is the
  * other half of the coupling. What is asserted here is the margin: psi_h on the
@@ -1898,14 +1898,14 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses )
 		return row;
 	};
 
-	std::printf( "\n  CAN THE FILL REACH r = 0, AND DOES checkAxisSource() SEE "
+	std::printf( "\n  CAN THE FILL REACH R = 0, AND DOES checkAxisSource() SEE "
 	             "IT WHEN IT DOES?\n" );
 	std::printf( "    section 11.7's machine: ConfineToPlasma, mu0 I_p = %.2f, "
 	             "and Shafranov's field for a = R_limiter - %.2f\n",
 	             machineCurrent, machineRadius );
 	std::printf( "    %-9s %-8s %-5s %5s %14s %10s %11s %11s %12s %9s\n",
 	             "elements", "limiter", "cap", "its", "psi_bnd", "axis els",
-	             "candidates", "REACHED", "| F | on r=0", "guard" );
+	             "candidates", "REACHED", "| F | on R=0", "guard" );
 
 	std::vector<Row> rows;
 
@@ -1985,18 +1985,18 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses )
 	            << " axis-touching elements in the plasma's component. If that "
 	            "is now zero the transient this case exists to measure is gone "
 	            "-- check whether psi_bnd is still negative at step 1, which is "
-	            "what puts r = 0 inside `{ Psi > 0 }` -- and every assertion "
+	            "what puts R = 0 inside `{ Psi > 0 }` -- and every assertion "
 	            "below has become vacuous" );
 	BOOST_TEST( rows[ 0 ].axis.assembled > 0.0,
 	            "the fill reached " << rows[ 0 ].axis.reached << " axis "
 	            "elements at step 1 and the assembly still puts | F | = "
-	            << rows[ 0 ].axis.assembled << " on r = 0. Reaching the axis "
+	            << rows[ 0 ].axis.assembled << " on R = 0. Reaching the axis "
 	            "without a source there would mean the pointwise test is "
 	            "closing the pole on its own and the fill is not load bearing" );
 
 	/*
 	 * 2. AND IT DOES NOT SURVIVE TO THE ANSWER. Exactly zero, with no
-	 *    tolerance, because on a healthy run there is no node on r = 0 in an
+	 *    tolerance, because on a healthy run there is no node on R = 0 in an
 	 *    element the fill reached and the reading is empty rather than small.
 	 */
 	BOOST_TEST( rows[ healthyRow ].converged );
@@ -2004,13 +2004,13 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses )
 	            "the CONVERGED answer at limiter 1.15 has "
 	            << rows[ healthyRow ].axis.reached << " axis-touching elements "
 	            "in the plasma's component. An intermediate iterate touching "
-	            "r = 0 is harmless and this is not: it is a converged "
+	            "R = 0 is harmless and this is not: it is a converged "
 	            "equilibrium carrying toroidal current on the machine's own "
 	            "centre line" );
 	BOOST_TEST( rows[ healthyRow ].axis.assembled == 0.0,
 	            "the converged healthy answer assembles | F | = "
-	            << rows[ healthyRow ].axis.assembled << " on r = 0, where the "
-	            "load is -( F/r, w ) and F/r is mu_0 j_phi" );
+	            << rows[ healthyRow ].axis.assembled << " on R = 0, where the "
+	            "load is -( F/R, w ) and F/R is mu_0 j_phi" );
 	BOOST_TEST( !rows[ healthyRow ].refused,
 	            "checkAxisSource() refuses the healthy row, so this case is "
 	            "measuring a fixture that no longer describes a machine rather "
@@ -2018,7 +2018,7 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses )
 
 	/*
 	 * 3. THE COUPLING, WHICH IS WHAT MAKES THE EXISTING GUARD SUFFICIENT. The
-	 *    fill is a DISCRETE reading of whether the plasma reaches r = 0 and
+	 *    fill is a DISCRETE reading of whether the plasma reaches R = 0 and
 	 *    checkAxisSource() is the CONTINUOUS one; they must not disagree at a
 	 *    converged answer, because only the second is wired to a refusal.
 	 */
@@ -2039,7 +2039,7 @@ BOOST_AUTO_TEST_CASE( theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses )
 		            << rows[ i ].limiter << ", " << rows[ i ].n << " elements) "
 		            "and checkAxisSource() reads clean. The driver refuses on "
 		            "the guard alone, so this is a run that would be reported "
-		            "as an equilibrium while the assembly carries a 1/r pole on "
+		            "as an equilibrium while the assembly carries a 1/R pole on "
 		            "the symmetry axis" );
 	}
 

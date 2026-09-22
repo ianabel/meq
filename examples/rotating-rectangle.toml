@@ -9,10 +9,10 @@
 # poloidal density variation and (97) for the electrostatic potential phi_0 that
 # holds quasineutrality against it:
 #
-#     F( r, z, psi ) = mu0 r^2 dp/dpsi|_r + g g',      p = Sum_s n_s T_s
-#     n_s( r, psi )  = n_s0( psi ) exp[ m_s omega^2 ( r^2 - rRef^2 )/2 T_s
+#     F( R, z, psi ) = mu0 R^2 dp/dpsi|_r + g g',      p = Sum_s n_s T_s
+#     n_s( R, psi )  = n_s0( psi ) exp[ m_s omega^2 ( R^2 - R_ref^2 )/2 T_s
 #                                       - Z_s e phi_0/T_s ]              (96)
-#     Sum_s Z_s n_s( r, psi ) = 0                                        (97)
+#     Sum_s Z_s n_s( R, psi ) = 0                                        (97)
 #
 # What rotation changes is ONE thing: the density is no longer a flux function.
 # Centrifugal force sweeps the heavy species to the outboard side and phi_0
@@ -45,7 +45,7 @@
 # <phi_0>_psi = 0, which is a flux-surface average meq deliberately does not
 # have. meq instead pins phi_0( ReferenceRadius, psi ) = 0. The consequence is
 # the useful part: the density profile below is then the PHYSICAL density of
-# deuterium on the curve r = ReferenceRadius, which is a number a user can state
+# deuterium on the curve R = ReferenceRadius, which is a number a user can state
 # and another code can be checked against. The consequence is also the trap: two
 # sets of densities differing by the gauge factor exp( Z_s e delta/T_s ) describe
 # exactly the same plasma, so "our n_D disagrees with yours" is a statement about
@@ -69,7 +69,7 @@
 
 [mesh]
 # The standard benchmark rectangle the rotating tests use, 0.8 m by 1.2 m about
-# r = 1 m. ReferenceRadius sits at its centre, so the exponent of (96) runs over
+# R = 1 m. ReferenceRadius sits at its centre, so the exponent of (96) runs over
 # both signs and the enrichment is visible on both sides of the gauge curve.
 RMin = 0.6
 RMax = 1.4
@@ -92,7 +92,7 @@ Type = "rotating"
 ReferenceRadius = 1.0
 
 # omega( psi ), rad/s. The deuterium exponent of (96),
-# m_i omega^2 ( r^2 - rRef^2 )/2( T_i + T_e ), reaches +0.891 at RMax and -0.594
+# m_i omega^2 ( R^2 - R_ref^2 )/2( T_i + T_e ), reaches +0.891 at RMax and -0.594
 # at RMin, so at fixed psi the ion density is 2.44 times its gauge value on the
 # outboard side and 0.55 times it on the inboard -- a factor of 4.4 across the
 # box. The exponent is M^2/2 in the usual sense, so this is M = 1.33: genuinely
@@ -103,19 +103,19 @@ Omega = 4.0e5
 # so F > 0 and psi > 0 in the interior by the maximum principle.
 #
 # IT IS SIZED AGAINST THE PRESSURE TERM AND NOT PICKED FOR CONVENIENCE, because
-# "rotation changes the answer" is only true while mu0 r^2 dp/dpsi is a real part
-# of F. With the profile below that term is 0.725 T^2 m^2 per Wb/rad at r = rRef,
-# rising to 3.46 at RMax and falling to 0.144 at RMin as r^2 and the exponential
+# "rotation changes the answer" is only true while mu0 R^2 dp/dpsi is a real part
+# of F. With the profile below that term is 0.725 T^2 m^2 per Wb/rad at R = R_ref,
+# rising to 3.46 at RMax and falling to 0.144 at RMin as R^2 and the exponential
 # of (96) work on it. Against GGPrime = 0.8 that is
 #
-#     r        0.6     0.8     1.0     1.2     1.4
+#     R        0.6     0.8     1.0     1.2     1.4
 #     share    15%     29%     47%     66%     81%     of F
 #
 # -- a high-beta configuration, and deliberately so. Raise GGPrime by a factor of
 # ten and this file becomes a vacuum field with a decorative density, which is
 # what it was before the profile below stopped being a constant.
 #
-# IT IS ALSO WHAT KEEPS THIS RUN OFF THE TRIVIAL BRANCH. F( r, z, 0 ) is nowhere
+# IT IS ALSO WHAT KEEPS THIS RUN OFF THE TRIVIAL BRANCH. F( R, z, 0 ) is nowhere
 # zero, so psi = 0 does not solve the homogeneous problem and Newton cannot land
 # on it and stop -- which is the failure every GS-2 section 4.2-4.5 source has
 # and which CLAUDE.md records under Traps.
@@ -129,7 +129,7 @@ Mass = 3.3435837768e-27        # kg
 Charge = 1.0                   # Z_s, signed and dimensionless
 Temperature = 1.0              # keV, converted to Joules by the scale below
 TemperatureScale = 1.602176634e-16
-# The density on r = ReferenceRadius, as a table rather than a constant: a
+# The density on R = ReferenceRadius, as a table rather than a constant: a
 # constant would make dp/dpsi vanish and the rotation would reach n_s and phi_0
 # but not psi. examples/rotating-density.dat documents the format, which nothing
 # else in examples/ does. Its values are in 1e20 m^-3 and the scale converts.

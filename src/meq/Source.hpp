@@ -10,17 +10,17 @@
  *
  * MEQ solves the fixed-boundary problem
  *
- *     -div_bar( ( 1/r ) grad_bar( psi ) ) = F( r, z, psi ) / r    in Omega
+ *     -div_bar( ( 1/R ) grad_bar( psi ) ) = F( R, z, psi ) / R    in Omega
  *                                    psi  = 0                    on Gamma
  *
- *     F( r, z, psi ) := mu0 r^2 dp/dpsi + g dg/dpsi
+ *     F( R, z, psi ) := mu0 R^2 dp/dpsi + g dg/dpsi
  *
  * (Sanchez-Vizuet & Solano, CPC 235 (2019) 120-132, eqs (1)-(4)), where p( psi )
  * is the plasma pressure and g( psi ) the toroidal field function.
  *
  * A Source is exactly that F, and -- unlike the papers, which use an
  * Anderson-accelerated Picard iteration -- MEQ closes the nonlinearity with
- * Newton, so a Source must also supply dF/dpsi. The 1/r on the right hand side
+ * Newton, so a Source must also supply dF/dpsi. The 1/R on the right hand side
  * belongs to the weak form, not here: F is F as written above.
  *
  * A note on the method names, since one of them is a single letter. The value is
@@ -48,10 +48,10 @@ namespace meq
 	inline constexpr double vacuumPermeability = 4.0e-7*3.14159265358979323846;
 
 	/**
-	 * The right hand side F( r, z, psi ) of the Grad-Shafranov equation, and its
+	 * The right hand side F( R, z, psi ) of the Grad-Shafranov equation, and its
 	 * derivative with respect to psi.
 	 *
-	 * Coordinates are cylindrical ( r, z ) in metres, r > 0. z is part of the
+	 * Coordinates are cylindrical ( R, z ) in metres, R > 0. z is part of the
 	 * interface because a source is allowed to depend on position however it
 	 * likes (a manufactured solution does); the physical MHD source does not use
 	 * it.
@@ -97,15 +97,15 @@ namespace meq
 
 			virtual ~Source() = default;
 
-			/// F at ( r, z ) for the flux value psi, in the units of eq (2): the
-			/// full right hand side numerator, no 1/r applied.
-			virtual double f( double r, double z, double psi ) const = 0;
+			/// F at ( R, z ) for the flux value psi, in the units of eq (2): the
+			/// full right hand side numerator, no 1/R applied.
+			virtual double f( double radius, double z, double psi ) const = 0;
 
-			/// dF/dpsi at fixed ( r, z ). Required by the Newton solve: it is the
+			/// dF/dpsi at fixed ( R, z ). Required by the Newton solve: it is the
 			/// only term the source contributes to the Jacobian, and an error here
 			/// does not change the converged answer, it only wrecks (or silently
 			/// slows) the convergence to it. Must be the exact derivative of f().
-			virtual double dFdPsi( double r, double z, double psi ) const = 0;
+			virtual double dFdPsi( double radius, double z, double psi ) const = 0;
 
 		protected:
 			Source() = default;
@@ -118,7 +118,7 @@ namespace meq
 	/**
 	 * The physical MHD source built from a pair of user-supplied profiles:
 	 *
-	 *     F( r, z, psi ) = mu0 r^2 p'( psi ) + ( g g' )( psi )
+	 *     F( R, z, psi ) = mu0 R^2 p'( psi ) + ( g g' )( psi )
 	 *
 	 * Convention -- read this before wiring up a configuration file, because a
 	 * factor or sign error here produces a converged but wrong equilibrium:
@@ -126,14 +126,14 @@ namespace meq
 	 *   * The profiles handed in are the *derivative* quantities appearing in F,
 	 *     not p and g themselves.
 	 *       - pPrime  is dp/dpsi, the pressure gradient with respect to flux, in
-	 *         Pa per Wb/rad. Multiplied by mu0 r^2 inside f().
+	 *         Pa per Wb/rad. Multiplied by mu0 R^2 inside f().
 	 *       - ggPrime is the single product g dg/dpsi, in T^2 m^2 per Wb/rad.
 	 *         This is what equilibrium files tabulate ("FF'" in EQDSK, where that
 	 *         F is this g); it is *not* multiplied by mu0.
 	 *   * Storing the products rather than p and g is what keeps the Newton
 	 *     derivative honest: no chain rule is needed anywhere, and
 	 *
-	 *         dF/dpsi = mu0 r^2 p''( psi ) + ( g g' )'( psi )
+	 *         dF/dpsi = mu0 R^2 p''( psi ) + ( g g' )'( psi )
 	 *
 	 *     is just prime() of each profile. Had this class stored p and g it would
 	 *     have to differentiate a product of interpolants and their derivatives,
@@ -164,12 +164,12 @@ namespace meq
 			/// either profile is null or mu0 is not finite.
 			MHDSource( std::shared_ptr<Profile const> pPrime, std::shared_ptr<Profile const> ggPrime, double mu0 = vacuumPermeability );
 
-			/// mu0 r^2 p'( psi ) + ( g g' )( psi ). Independent of z.
-			double f( double r, double z, double psi ) const override;
+			/// mu0 R^2 p'( psi ) + ( g g' )( psi ). Independent of z.
+			double f( double radius, double z, double psi ) const override;
 
-			/// mu0 r^2 p''( psi ) + ( g g' )'( psi ), i.e. mu0 r^2 times the
+			/// mu0 R^2 p''( psi ) + ( g g' )'( psi ), i.e. mu0 R^2 times the
 			/// pressure profile's prime() plus the g g' profile's prime().
-			double dFdPsi( double r, double z, double psi ) const override;
+			double dFdPsi( double radius, double z, double psi ) const override;
 
 			/// The dp/dpsi profile.
 			Profile const & pPrime() const;
@@ -177,7 +177,7 @@ namespace meq
 			/// The g dg/dpsi profile.
 			Profile const & ggPrime() const;
 
-			/// The permeability this source multiplies r^2 p' by.
+			/// The permeability this source multiplies R^2 p' by.
 			double mu0() const;
 
 		private:
@@ -223,8 +223,8 @@ namespace meq
 	 *     does that, and the solver -- not the caller -- owns the value from then
 	 *     on: it calls setNormalisation() before every residual evaluation.
 	 *
-	 * A source of this kind necessarily has the form F( r, z, psi ) =
-	 * H( r, z, psi/psi_ax )/psi_ax, and the solver relies on nothing beyond
+	 * A source of this kind necessarily has the form F( R, z, psi ) =
+	 * H( R, z, psi/psi_ax )/psi_ax, and the solver relies on nothing beyond
 	 * f() and dFdPsi() answering for whatever normalisation was last set.
 	 */
 	class NormalisedSource : public Source
@@ -464,13 +464,13 @@ namespace meq
 			 * no flux -- so outside the component they are zero and the solver
 			 * simply skips the element.
 			 *
-			 * @param r,z the point. There is no psi argument on purpose: what
+			 * @param R,z the point. There is no psi argument on purpose: what
 			 *        survives out here does not depend on the solution, and one
 			 *        that did would be a plasma term by another name.
 			 */
-			virtual double fOutsidePlasma( double r, double z ) const
+			virtual double fOutsidePlasma( double radius, double z ) const
 			{
-				(void)r; (void)z;
+				(void)radius; (void)z;
 				return 0.0;
 			}
 
@@ -509,11 +509,11 @@ namespace meq
 			 * missing a term when it is not -- which is the condition
 			 * setPlasmaSupport() already documents as its precondition.
 			 */
-			virtual bool normalisationDerivatives( double r, double z, double psi,
+			virtual bool normalisationDerivatives( double radius, double z, double psi,
 			                                       double &dFdAxis,
 			                                       double &dFdBoundary ) const
 			{
-				(void)r; (void)z; (void)psi;
+				(void)radius; (void)z; (void)psi;
 				(void)dFdAxis; (void)dFdBoundary;
 				return false;
 			}
@@ -566,15 +566,15 @@ namespace meq
 			 * wrapper overrides these to forward to what it holds, exactly as it
 			 * forwards setCurrentScale().
 			 */
-			virtual double scaledF( double r, double z, double psi ) const
+			virtual double scaledF( double radius, double z, double psi ) const
 			{
-				return f( r, z, psi );
+				return f( radius, z, psi );
 			}
 
 			/// @see scaledF
-			virtual double scaledDFdPsi( double r, double z, double psi ) const
+			virtual double scaledDFdPsi( double radius, double z, double psi ) const
 			{
-				return dFdPsi( r, z, psi );
+				return dFdPsi( radius, z, psi );
 			}
 
 			/// And the boundary value; zero unless it has been set.
@@ -608,7 +608,7 @@ namespace meq
 	 * flux, which is the form meq::Profile documents and the form an equilibrium
 	 * file carries:
 	 *
-	 *     F( r, z, psi ) = [ mu0 r^2 ( dp/dPsi )( Psi ) + ( g dg/dPsi )( Psi ) ]
+	 *     F( R, z, psi ) = [ mu0 R^2 ( dp/dPsi )( Psi ) + ( g dg/dPsi )( Psi ) ]
 	 *                      / psi_ax,          Psi = psi / psi_ax
 	 *
 	 * The single factor of 1/psi_ax is the chain rule and it is the whole
@@ -635,11 +635,11 @@ namespace meq
 			                     double psiAxis,
 			                     double mu0 = vacuumPermeability );
 
-			double f( double r, double z, double psi ) const override;
-			double dFdPsi( double r, double z, double psi ) const override;
+			double f( double radius, double z, double psi ) const override;
+			double dFdPsi( double radius, double z, double psi ) const override;
 
 			/// Analytic, so the bordered Newton need not difference its columns.
-			bool normalisationDerivatives( double r, double z, double psi,
+			bool normalisationDerivatives( double radius, double z, double psi,
 			                               double &dFdAxis,
 			                               double &dFdBoundary ) const override;
 
@@ -687,7 +687,7 @@ namespace meq
 	 * The Solov'ev source, HDG-GS-1 eq (10):
 	 *
 	 *     mu0 dp/dpsi = -C,   g dg/dpsi = -A,   A + C = 1
-	 *  => F( r, z, psi ) = -( ( 1 - A ) r^2 + A )
+	 *  => F( R, z, psi ) = -( ( 1 - A ) R^2 + A )
 	 *
 	 * The flux normalisation A + C = 1 is baked in: only A is a parameter, and
 	 * C = 1 - A. Being independent of psi, F is linear in the unknown and
@@ -707,11 +707,11 @@ namespace meq
 			/// not finite.
 			explicit SolovievSource( double a );
 
-			/// -( ( 1 - A ) r^2 + A ). Independent of z and of psi.
-			double f( double r, double z, double psi ) const override;
+			/// -( ( 1 - A ) R^2 + A ). Independent of z and of psi.
+			double f( double radius, double z, double psi ) const override;
 
 			/// Zero, exactly, for every argument: this source is linear in psi.
-			double dFdPsi( double r, double z, double psi ) const override;
+			double dFdPsi( double radius, double z, double psi ) const override;
 
 			/// The A this source was built with.
 			double a() const;

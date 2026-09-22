@@ -6,16 +6,16 @@
 #
 # Stage FB-2 of FREE-BOUNDARY-PLAN.md. The equation is unchanged --
 #
-#     -grad.( (1/r) grad psi ) = F( r, z, psi )/r    in Omega,   psi = 0 on Gamma
+#     -grad.( (1/R) grad psi ) = F( R, z, psi )/R    in Omega,   psi = 0 on Gamma
 #
 # -- and so is every term of F that the plasma contributes. What the [[coils]]
 # blocks add is
 #
-#     F_coil( r, z ) = mu0 r I_k / |Omega_ck|   inside coil k,   0 outside it,
+#     F_coil( R, z ) = mu0 R I_k / |Omega_ck|   inside coil k,   0 outside it,
 #
 # summed over the coils containing the point. src/meq/Coils.hpp derives that
 # factor from Ampere's law rather than quoting it, and records the measurement
-# that pins the r: dropping it or doubling it changes the answer by a factor of
+# that pins the R: dropping it or doubling it changes the answer by a factor of
 # order the major radius and leaves every convergence rate untouched.
 #
 # READ examples/mhd-rectangle.toml FIRST. Everything below except the [[coils]]
@@ -81,8 +81,8 @@
 #     writing neither.
 #
 #   * THE GEOMETRY IS CENTRE AND HALF-EXTENTS, not corners. A coil reaching the
-#     axis -- CentreR - HalfWidth <= 0 -- is refused, because the operator's 1/r
-#     is not integrable through r = 0.
+#     axis -- CentreR - HalfWidth <= 0 -- is refused, because the operator's 1/R
+#     is not integrable through R = 0.
 #
 #   * A COIL THE MESH DOES NOT REACH CONTRIBUTES NOTHING, AND MEQ SAYS SO. F is
 #     assembled by quadrature over the elements, so a coil outside the [mesh]
@@ -215,7 +215,7 @@ GGPrimeFile = "examples/mhd-ggprime.dat"
 Name = "PF-upper"
 CentreR = 2.10          # m
 CentreZ = 0.60          # m
-HalfWidth = 0.05        # m, so the coil spans r in [2.05, 2.15]
+HalfWidth = 0.05        # m, so the coil spans R in [2.05, 2.15]
 HalfHeight = 0.05       # m, so it spans z in [0.55, 0.65]
 # The TOTAL through the cross-section, amperes, signed.
 Current = 1.5e5

@@ -24,17 +24,17 @@
  *
  * Their eq (1) is written
  *
- *     d_rr u - (1/r) d_r u + d_zz u + f(u) + g(u) r^2 = 0,
+ *     d_rr u - (1/R) d_r u + d_zz u + f(u) + g(u) R^2 = 0,
  *
  * and the first three terms ARE Delta*(u):
  *
- *     Delta* u = r d_r( (1/r) d_r u ) + d_zz u
- *              = d_rr u - (1/r) d_r u + d_zz u.
+ *     Delta* u = R d_r( (1/R) d_r u ) + d_zz u
+ *              = d_rr u - (1/R) d_r u + d_zz u.
  *
- * So their equation is -Delta*(u) = f(u) + g(u) r^2, which is MEQ's
+ * So their equation is -Delta*(u) = f(u) + g(u) R^2, which is MEQ's
  * -Delta*(psi) = F with
  *
- *     F( r, z, psi ) = f(psi) ( 1 + epsilon r^2 ),     epsilon := a^2 / b^2.
+ *     F( R, z, psi ) = f(psi) ( 1 + epsilon R^2 ),     epsilon := a^2 / b^2.
  *
  * The reduction requires g(u) = epsilon f(u) with epsilon = a^2/b^2 (their
  * page 2, below eq (4)). NOTE: pdftotext renders that line as "g(u) = f(u)",
@@ -47,11 +47,11 @@
  *
  * THE SOLUTION, their eq (22), on the + branch of the reduction variable:
  *
- *     psi(r,z) = (1/n) ln[ K sech^2( m ( a r^2 + 2 b z + cTilde ) ) ]
+ *     psi(R,z) = (1/n) ln[ K sech^2( m ( a R^2 + 2 b z + cTilde ) ) ]
  *     K := b^2 c n / ( 2 f0 ),      m := n sqrt(c) / 4
  *
  * Checked by hand against their eq (11), w''(x) + b^-2 f(w(x)) = 0 with
- * x = a r^2/2 + b z: with s := m( 2x + cTilde ),
+ * x = a R^2/2 + b z: with s := m( 2x + cTilde ),
  *
  *     w''  = -( 8 m^2 / n ) sech^2 s,     f(w) = ( b^2 c n / 2 ) sech^2 s,
  *
@@ -60,7 +60,7 @@
  *
  * NO CLOSED FLUX SURFACES, and it does not matter. The paper is explicit that
  * its nonlinear solutions "do not form closed surfaces" -- the level sets here
- * are parabolas in (r^2, z). For a fixed-boundary benchmark that is irrelevant:
+ * are parabolas in (R^2, z). For a fixed-boundary benchmark that is irrelevant:
  * the domain is a rectangle and the Dirichlet data is the exact solution
  * restricted to its boundary, exactly as ManufacturedNonlinear.hpp is used. It
  * would matter only for a psi = 0 plasma boundary, which this is not for.
@@ -74,14 +74,14 @@ namespace analytic
 {
 
 /// The exponential-profile similarity solution of Kaltsas & Throumoulopoulos
-/// eq (22). r must be positive; the solution itself is regular everywhere.
+/// eq (22). R must be positive; the solution itself is regular everywhere.
 class SimilarityExponential
 {
 	public:
 		/// @param nIn   exponent of the free function f(u) = f0 exp( n u ).
 		///              dF/dpsi = n F, so n sets how nonlinear the problem is.
 		/// @param f0In  amplitude of the free function.
-		/// @param aIn   coefficient of r^2/2 in the reduction variable.
+		/// @param aIn   coefficient of R^2/2 in the reduction variable.
 		/// @param bIn   coefficient of z in the reduction variable.
 		/// @param cIn   the integration constant of their eq (5); must be > 0
 		///              for the solution to be real on this branch.
@@ -109,62 +109,62 @@ class SimilarityExponential
 		}
 
 		/// The poloidal flux.
-		double psi( double r, double z ) const
+		double psi( double radius, double z ) const
 		{
-			return std::log( kConstant()*sech2( argument( r, z ) ) )/nValue;
+			return std::log( kConstant()*sech2( argument( radius, z ) ) )/nValue;
 		}
 
 		/// grad_bar(psi) = ( d_r psi, d_z psi ).
 		///
-		/// psi = (1/n)( ln K + 2 ln sech s ) with s = m( a r^2 + 2 b z + cT ),
+		/// psi = (1/n)( ln K + 2 ln sech s ) with s = m( a R^2 + 2 b z + cT ),
 		/// so d psi/d s = -(2/n) tanh s, and the chain rule supplies
-		/// ds/dr = 2 m a r, ds/dz = 2 m b.
-		void gradPsi( double r, double z, double &dPsiDr, double &dPsiDz ) const
+		/// ds/dr = 2 m a R, ds/dz = 2 m b.
+		void gradPsi( double radius, double z, double &dPsiDr, double &dPsiDz ) const
 		{
-			double const s = argument( r, z );
+			double const s = argument( radius, z );
 			double const dPsiDs = -2.0*std::tanh( s )/nValue;
 			double const m = mConstant();
-			dPsiDr = dPsiDs*2.0*m*aValue*r;
+			dPsiDr = dPsiDs*2.0*m*aValue*radius;
 			dPsiDz = dPsiDs*2.0*m*bValue;
 		}
 
-		/// The HDG flux q = grad_bar(psi) / r.
-		void flux( double r, double z, double &qR, double &qZ ) const
+		/// The HDG flux q = grad_bar(psi) / R.
+		void flux( double radius, double z, double &qR, double &qZ ) const
 		{
-			gradPsi( r, z, qR, qZ );
-			qR /= r;
-			qZ /= r;
+			gradPsi( radius, z, qR, qZ );
+			qR /= radius;
+			qZ /= radius;
 		}
 
-		/// F = f(psi) ( 1 + epsilon r^2 ) with f(psi) = f0 exp( n psi ) and
-		/// epsilon = a^2/b^2. Returns F, not F/r, as meq::Source::f() does.
-		double f( double r, double /*z*/, double psiValue ) const
+		/// F = f(psi) ( 1 + epsilon R^2 ) with f(psi) = f0 exp( n psi ) and
+		/// epsilon = a^2/b^2. Returns F, not F/R, as meq::Source::f() does.
+		double f( double radius, double /*z*/, double psiValue ) const
 		{
-			return f0Value*std::exp( nValue*psiValue )*( 1.0 + epsilon()*r*r );
+			return f0Value*std::exp( nValue*psiValue )*( 1.0 + epsilon()*radius*radius );
 		}
 
 		/// dF/dpsi = n F. The whole psi-dependence is a single exponential, so
 		/// the Jacobian is the residual times a constant -- which makes this a
 		/// clean test of the Newton path without the algebra of Example 5.
-		double dFdPsi( double r, double z, double psiValue ) const
+		double dFdPsi( double radius, double z, double psiValue ) const
 		{
-			return nValue*f( r, z, psiValue );
+			return nValue*f( radius, z, psiValue );
 		}
 
 		/// Delta*(psi) by central differences. The equation is
-		/// -Delta*(psi) = F, so this must equal -f( r, z, psi(r,z) ).
-		double deltaStarFD( double r, double z, double h = 1.0e-4 ) const
+		/// -Delta*(psi) = F, so this must equal -f( R, z, psi(R,z) ).
+		double deltaStarFD( double radius, double z, double h = 1.0e-4 ) const
 		{
 			auto innerR = [ & ]( double rr )
 			{
 				return ( psi( rr + h, z ) - psi( rr - h, z ) )/( 2.0*h )/rr;
 			};
 
-			double const dRInner = ( innerR( r + h ) - innerR( r - h ) )/( 2.0*h );
-			double const dZZ = ( psi( r, z + h ) - 2.0*psi( r, z ) + psi( r, z - h ) )
+			double const dRInner = ( innerR( radius + h ) - innerR( radius - h ) )/( 2.0*h );
+			double const dZZ = ( psi( radius, z + h ) - 2.0*psi( radius, z ) + psi( radius, z - h ) )
 			                   /( h*h );
 
-			return r*dRInner + dZZ;
+			return radius*dRInner + dZZ;
 		}
 
 		double n() const
@@ -180,10 +180,10 @@ class SimilarityExponential
 		}
 
 	private:
-		/// s = m ( a r^2 + 2 b z + cTilde ).
-		double argument( double r, double z ) const
+		/// s = m ( a R^2 + 2 b z + cTilde ).
+		double argument( double radius, double z ) const
 		{
-			return mConstant()*( aValue*r*r + 2.0*bValue*z + cTildeValue );
+			return mConstant()*( aValue*radius*radius + 2.0*bValue*z + cTildeValue );
 		}
 
 		double kConstant() const

@@ -96,8 +96,8 @@ namespace
 	using meq::tests::newtonOrder;
 	using meq::tests::standardBox;
 
-	/// psiExact = sin( kr( r + r0 ) )cos( kz z ), ManufacturedNonlinear's
-	/// parameters. r0 is a radial offset that places the arch of the sine inside
+	/// psiExact = sin( kr( R + R_0 ) )cos( kz z ), ManufacturedNonlinear's
+	/// parameters. R_0 is a radial offset that places the arch of the sine inside
 	/// the domain and is NOT a major radius.
 	double const pi = 3.14159265358979323846;
 	double const psiR0 = -0.5;
@@ -199,27 +199,27 @@ namespace
 			species, omega, ggPrime, Plasma::referenceRadius(), Plasma::mu0(), closure );
 	}
 
-	/// The sweep every pointwise comparison below runs: the standard box in r,
+	/// The sweep every pointwise comparison below runs: the standard box in R,
 	/// three heights in z -- F does not depend on z and the sweep is what says so
 	/// -- and psi over [ -0.2, 1.0 ], which covers the range the manufactured
 	/// solve visits with margin at both ends.
 	///
-	/// r RUNS TO BOTH EDGES OF THE BOX ON PURPOSE. Every C' term carries
-	/// h = ( r^2 - rRef^2 )/2, which vanishes at rRef = 1 and changes sign
+	/// R RUNS TO BOTH EDGES OF THE BOX ON PURPOSE. Every C' term carries
+	/// h = ( R^2 - R_ref^2 )/2, which vanishes at R_ref = 1 and changes sign
 	/// there; a sweep confined to one side would measure a term of one sign only,
-	/// and a sweep placed at rRef would measure nothing at all. That is the trap
+	/// and a sweep placed at R_ref would measure nothing at all. That is the trap
 	/// CLAUDE_FLOW.md records from FL-5.
 	template<typename Check>
 	void overTheSweep( Check check )
 	{
 		meq::tests::Rectangle const box = standardBox();
-		for ( double r = box.rMin; r <= box.rMax + 1.0e-12; r += 0.05 )
+		for ( double radius = box.minRadius; radius <= box.maxRadius + 1.0e-12; radius += 0.05 )
 		{
 			for ( double z : { -0.4, 0.0, 0.4 } )
 			{
 				for ( double psi = -0.2; psi <= 1.0 + 1.0e-12; psi += 0.05 )
 				{
-					check( r, z, psi );
+					check( radius, z, psi );
 				}
 			}
 		}
@@ -227,7 +227,7 @@ namespace
 
 	/// A relative deviation against a floor of one, which is the scaling the rest
 	/// of this directory uses. F passes through zero inside the sweep -- it is a
-	/// pressure gradient times r^2 plus g g' and there is no reason it should not
+	/// pressure gradient times R^2 plus g g' and there is no reason it should not
 	/// -- so a bare relative error is not defined everywhere and a floored one is.
 	double deviation( double actual, double expected )
 	{
@@ -239,8 +239,8 @@ namespace
 	 * The manufactured solve
 	 * ------------------------------------------------------------------
 	 *
-	 * F_total( r, z, psi ) = rot.f( r, z, psi ) + remainder( r, z ),
-	 * remainder( r, z ) = -Delta*( psiExact ) - FIXTURE.f( r, z, psiExact ).
+	 * F_total( R, z, psi ) = rot.f( R, z, psi ) + remainder( R, z ),
+	 * remainder( R, z ) = -Delta*( psiExact ) - FIXTURE.f( R, z, psiExact ).
 	 *
 	 * THE REMAINDER IS THE FIXTURE'S AND NOT THE SOURCE'S, which is the whole
 	 * difference from RotatingNewtonConvergence.cpp. There the two rotating terms
@@ -251,7 +251,7 @@ namespace
 	 * it could not see a disagreement below the discretisation error -- but it is
 	 * the half that goes through the assembly.
 	 *
-	 * The remainder is a function of ( r, z ) ALONE either way, so
+	 * The remainder is a function of ( R, z ) ALONE either way, so
 	 * dF_total/dpsi IS meq::RotatingSource::dFdPsi exactly, with nothing added to
 	 * it. That is what makes Newton's observed order below a statement about the
 	 * production Jacobian.
@@ -274,64 +274,64 @@ namespace
 			{
 			}
 
-			double psi( double r, double z ) const
+			double psi( double radius, double z ) const
 			{
-				return std::sin( psiKr*( r + psiR0 ) )*std::cos( psiKz*z );
+				return std::sin( psiKr*( radius + psiR0 ) )*std::cos( psiKz*z );
 			}
 
-			void gradPsi( double r, double z, double &dPsiDr, double &dPsiDz ) const
+			void gradPsi( double radius, double z, double &dPsiDr, double &dPsiDz ) const
 			{
-				dPsiDr =  psiKr*std::cos( psiKr*( r + psiR0 ) )*std::cos( psiKz*z );
-				dPsiDz = -psiKz*std::sin( psiKr*( r + psiR0 ) )*std::sin( psiKz*z );
+				dPsiDr =  psiKr*std::cos( psiKr*( radius + psiR0 ) )*std::cos( psiKz*z );
+				dPsiDz = -psiKz*std::sin( psiKr*( radius + psiR0 ) )*std::sin( psiKz*z );
 			}
 
-			/// The HDG flux q = grad_bar( psi )/r.
-			void flux( double r, double z, double &qR, double &qZ ) const
+			/// The HDG flux q = grad_bar( psi )/R.
+			void flux( double radius, double z, double &qR, double &qZ ) const
 			{
-				gradPsi( r, z, qR, qZ );
-				qR /= r;
-				qZ /= r;
+				gradPsi( radius, z, qR, qZ );
+				qR /= radius;
+				qZ /= radius;
 			}
 
 			/// Delta*( psiExact ) in closed form, from
-			/// Delta* := d_rr - ( 1/r )d_r + d_zz.
-			double deltaStar( double r, double z ) const
+			/// Delta* := d_rr - ( 1/R )d_r + d_zz.
+			double deltaStar( double radius, double z ) const
 			{
-				return -( psiKr*psiKr + psiKz*psiKz )*psi( r, z )
-				       - ( psiKr/r )*std::cos( psiKr*( r + psiR0 ) )*std::cos( psiKz*z );
+				return -( psiKr*psiKr + psiKz*psiKz )*psi( radius, z )
+				       - ( psiKr/radius )*std::cos( psiKr*( radius + psiR0 ) )*std::cos( psiKz*z );
 			}
 
 			/// Delta*( psiExact ) by central differences, arranged as
-			/// r d_r( ( 1/r )d_r psi ) + d_zz psi -- the form every fixture in
+			/// R d_r( ( 1/R )d_r psi ) + d_zz psi -- the form every fixture in
 			/// tests/analytic uses, so that it is independent of the closed form
 			/// above rather than a rearrangement of it.
-			double deltaStarFD( double r, double z, double h = 1.0e-4 ) const
+			double deltaStarFD( double radius, double z, double h = 1.0e-4 ) const
 			{
 				auto innerR = [ & ]( double rr )
 				{
 					return ( psi( rr + h, z ) - psi( rr - h, z ) )/( 2.0*h )/rr;
 				};
 
-				double const dRInner = ( innerR( r + h ) - innerR( r - h ) )/( 2.0*h );
-				double const dZZ = ( psi( r, z + h ) - 2.0*psi( r, z ) + psi( r, z - h ) )
+				double const dRInner = ( innerR( radius + h ) - innerR( radius - h ) )/( 2.0*h );
+				double const dZZ = ( psi( radius, z + h ) - 2.0*psi( radius, z ) + psi( radius, z - h ) )
 				                   /( h*h );
 
-				return r*dRInner + dZZ;
+				return radius*dRInner + dZZ;
 			}
 
-			double remainder( double r, double z ) const
+			double remainder( double radius, double z ) const
 			{
-				return -deltaStar( r, z ) - plasma.f( r, z, psi( r, z ) );
+				return -deltaStar( radius, z ) - plasma.f( radius, z, psi( radius, z ) );
 			}
 
-			double f( double r, double z, double psiValue ) const
+			double f( double radius, double z, double psiValue ) const
 			{
-				return rot->f( r, z, psiValue ) + remainder( r, z );
+				return rot->f( radius, z, psiValue ) + remainder( radius, z );
 			}
 
-			double dFdPsi( double r, double z, double psiValue ) const
+			double dFdPsi( double radius, double z, double psiValue ) const
 			{
-				return jacobianScale*rot->dFdPsi( r, z, psiValue );
+				return jacobianScale*rot->dFdPsi( radius, z, psiValue );
 			}
 
 		private:
@@ -415,7 +415,7 @@ BOOST_AUTO_TEST_CASE( theShapeFunctionsStayPositiveEverywhere )
 	               "been changed and the margin recorded here is stale" );
 }
 
-/// Quasineutrality on r = rRef, which every closed form in the fixture and in
+/// Quasineutrality on R = R_ref, which every closed form in the fixture and in
 /// meq::RotatingSource is derived from, holds identically -- and holds outside
 /// [ 0, 1 ], which is the only range meq::RotatingSource's constructor samples.
 BOOST_AUTO_TEST_CASE( theSpeciesAreNeutralOnTheReferenceCurve )
@@ -528,19 +528,19 @@ BOOST_AUTO_TEST_CASE( theFixtureAlgebraFollowsFromQuasineutrality )
 	double worstFirst = 0.0;
 	double worstSecond = 0.0;
 
-	overTheSweep( [ & ]( double r, double, double psi )
+	overTheSweep( [ & ]( double radius, double, double psi )
 	{
-		double const y = plasma.potentialByBisection( r, psi );
+		double const y = plasma.potentialByBisection( radius, psi );
 		worstResidual = std::max( worstResidual,
-		                          std::abs( plasma.neutralityResidual( y, r, psi ) ) );
+		                          std::abs( plasma.neutralityResidual( y, radius, psi ) ) );
 
-		double const bisected = plasma.pressureByBisection( r, psi );
+		double const bisected = plasma.pressureByBisection( radius, psi );
 		worstPressure = std::max( worstPressure,
-		                          deviation( bisected, plasma.pressure( r, psi ) ) );
+		                          deviation( bisected, plasma.pressure( radius, psi ) ) );
 
 		auto sampled = [ & ]( double offset )
 		{
-			return plasma.pressureByBisection( r, psi + offset );
+			return plasma.pressureByBisection( radius, psi + offset );
 		};
 
 		double const first = ( sampled( -2.0*step ) - 8.0*sampled( -step )
@@ -549,9 +549,9 @@ BOOST_AUTO_TEST_CASE( theFixtureAlgebraFollowsFromQuasineutrality )
 		                        - 30.0*sampled( 0.0 ) + 16.0*sampled( step )
 		                        - sampled( 2.0*step ) )/( 12.0*step*step );
 
-		worstFirst = std::max( worstFirst, deviation( plasma.dPressureDPsi( r, psi ), first ) );
+		worstFirst = std::max( worstFirst, deviation( plasma.dPressureDPsi( radius, psi ), first ) );
 		worstSecond = std::max( worstSecond,
-		                        deviation( plasma.d2PressureDPsi2( r, psi ), second ) );
+		                        deviation( plasma.d2PressureDPsi2( radius, psi ), second ) );
 	} );
 
 	std::printf( "\n  the fixture's two routes, over the sweep\n"
@@ -578,7 +578,7 @@ BOOST_AUTO_TEST_CASE( theFixtureAlgebraFollowsFromQuasineutrality )
 	            << worstSecond << "; the C'' and C'^2 terms in the fixture are wrong" );
 
 	// The gauge itself, since the bisection is the one route that could violate
-	// it: phi_0 must vanish on r = rRef exactly, that being what makes n_s0 the
+	// it: phi_0 must vanish on R = R_ref exactly, that being what makes n_s0 the
 	// physical density there.
 	for ( double psi : { -0.2, 0.0, 0.5, 1.0 } )
 	{
@@ -609,7 +609,7 @@ BOOST_AUTO_TEST_CASE( theExponentCoefficientGenuinelyVaries )
 	double smallestPrime = 1.0e300, largestPrime = -1.0e300;
 	double lowestExponent = 1.0e300, highestExponent = -1.0e300;
 
-	overTheSweep( [ & ]( double r, double, double psi )
+	overTheSweep( [ & ]( double radius, double, double psi )
 	{
 		lowest = std::min( lowest, plasma.exponentCoefficient( psi ) );
 		highest = std::max( highest, plasma.exponentCoefficient( psi ) );
@@ -617,8 +617,8 @@ BOOST_AUTO_TEST_CASE( theExponentCoefficientGenuinelyVaries )
 		                          std::abs( plasma.exponentCoefficientPrime( psi ) ) );
 		largestPrime = std::max( largestPrime,
 		                         std::abs( plasma.exponentCoefficientPrime( psi ) ) );
-		lowestExponent = std::min( lowestExponent, plasma.densityExponent( r, psi ) );
-		highestExponent = std::max( highestExponent, plasma.densityExponent( r, psi ) );
+		lowestExponent = std::min( lowestExponent, plasma.densityExponent( radius, psi ) );
+		highestExponent = std::max( highestExponent, plasma.densityExponent( radius, psi ) );
 	} );
 
 	std::printf( "\n  C  in [ %8.4f, %8.4f ]   drift %.2f x\n", lowest, highest,
@@ -682,37 +682,37 @@ BOOST_AUTO_TEST_CASE( theRotatingSourceReproducesTheIndependentClosedForm )
 		double worstPotentialPrime = 0.0;
 		double worstDensity = 0.0;
 
-		overTheSweep( [ & ]( double r, double z, double psi )
+		overTheSweep( [ & ]( double radius, double z, double psi )
 		{
-			double const expectedF = plasma.f( r, z, psi );
-			double const actualF = source->f( r, z, psi );
-			double const expectedJ = plasma.dFdPsi( r, z, psi );
-			double const actualJ = source->dFdPsi( r, z, psi );
+			double const expectedF = plasma.f( radius, z, psi );
+			double const actualF = source->f( radius, z, psi );
+			double const expectedJ = plasma.dFdPsi( radius, z, psi );
+			double const actualJ = source->dFdPsi( radius, z, psi );
 
 			worstF = std::max( worstF, deviation( actualF, expectedF ) );
 			worstJacobian = std::max( worstJacobian, deviation( actualJ, expectedJ ) );
 			worstPressure = std::max( worstPressure,
-			                          deviation( source->pressure( r, psi ),
-			                                     plasma.pressure( r, psi ) ) );
+			                          deviation( source->pressure( radius, psi ),
+			                                     plasma.pressure( radius, psi ) ) );
 			worstPotential = std::max( worstPotential,
-			                           deviation( source->potential( r, psi ),
-			                                      plasma.potential( r, psi ) ) );
+			                           deviation( source->potential( radius, psi ),
+			                                      plasma.potential( radius, psi ) ) );
 			worstPotentialPrime = std::max( worstPotentialPrime,
-			                                deviation( source->dPotentialDPsi( r, psi ),
-			                                           plasma.potentialPrime( r, psi ) ) );
+			                                deviation( source->dPotentialDPsi( radius, psi ),
+			                                           plasma.potentialPrime( radius, psi ) ) );
 			for ( std::size_t s = 0; s < Plasma::speciesCount(); ++s )
 			{
 				worstDensity = std::max( worstDensity,
-				                         deviation( source->density( s, r, psi ),
-				                                    plasma.density( s, r, psi ) ) );
+				                         deviation( source->density( s, radius, psi ),
+				                                    plasma.density( s, radius, psi ) ) );
 			}
 
 			BOOST_TEST( deviation( actualF, expectedF ) < 1.0e-13,
-			            "at ( " << r << ", " << z << " ), psi = " << psi
+			            "at ( " << radius << ", " << z << " ), psi = " << psi
 			            << ": meq::RotatingSource gives F = " << actualF
 			            << " where (136) closed by (96) and (97) gives " << expectedF );
 			BOOST_TEST( deviation( actualJ, expectedJ ) < 1.0e-13,
-			            "at ( " << r << ", " << z << " ), psi = " << psi
+			            "at ( " << radius << ", " << z << " ), psi = " << psi
 			            << ": meq::RotatingSource gives dF/dpsi = " << actualJ
 			            << " where the closed form gives " << expectedJ );
 		} );
@@ -751,8 +751,8 @@ BOOST_AUTO_TEST_CASE( theRotatingSourceReproducesTheIndependentClosedForm )
 /// is numerically negligible cannot fail for the reason it was written.
 ///
 /// THE SHARE IS TAKEN AGAINST THE SUM OF MAGNITUDES AND NOT AGAINST F ITSELF,
-/// which is not squeamishness. F is mu0 r^2 dp/dpsi + g g' and it passes through
-/// zero inside the sweep -- at r = 1.4 it does so just below psi = 0, where the
+/// which is not squeamishness. F is mu0 R^2 dp/dpsi + g g' and it passes through
+/// zero inside the sweep -- at R = 1.4 it does so just below psi = 0, where the
 /// drift term and the rest very nearly cancel. A share taken against F reads
 /// 394% there, which is a true statement about a small denominator and a useless
 /// one about the term. It is also why deviation() above floors at one.
@@ -763,10 +763,10 @@ BOOST_AUTO_TEST_CASE( theDriftTermsAreMostOfTheAnswer )
 	// The outboard edge, where h and therefore every drift term is largest. The
 	// share is reported at three psi so that it is clear it is not one lucky
 	// point.
-	double const r = standardBox().rMax;
-	double const h = Plasma::radialFactor( r );
+	double const radius = standardBox().maxRadius;
+	double const h = Plasma::radialFactor( radius );
 
-	std::printf( "\n  the drift terms at r = %.2f, h = %.3f\n", r, h );
+	std::printf( "\n  the drift terms at R = %.2f, h = %.3f\n", radius, h );
 	std::printf( "  %6s %9s %9s %7s %9s %9s %9s %9s %7s\n",
 	             "psi", "p0'", "p0C'h", "share", "p0''", "2p0'C'h", "p0C''h",
 	             "p0C'^2h^2", "share" );
@@ -803,7 +803,7 @@ BOOST_AUTO_TEST_CASE( theDriftTermsAreMostOfTheAnswer )
 	}
 	std::fflush( stdout );
 
-	// Measured at r = 1.4: the drift is 62.8 to 67.5% of dp/dpsi and 68.8 to
+	// Measured at R = 1.4: the drift is 62.8 to 67.5% of dp/dpsi and 68.8 to
 	// 88.8% of d2p/dpsi2 over psi in [ 0, 1 ]. THREE of the four terms of
 	// d2p/dpsi2 carry C' or C''.
 	BOOST_TEST( smallestFirstShare > 0.4,
@@ -850,16 +850,16 @@ BOOST_AUTO_TEST_CASE( mutatingTheExponentDriftBreaksTheAgreement )
 		double worstJacobian = 0.0;
 		double worstPressure = 0.0;
 
-		overTheSweep( [ & ]( double r, double z, double psi )
+		overTheSweep( [ & ]( double radius, double z, double psi )
 		{
-			worstF = std::max( worstF, deviation( broken.f( r, z, psi ),
-			                                      source->f( r, z, psi ) ) );
+			worstF = std::max( worstF, deviation( broken.f( radius, z, psi ),
+			                                      source->f( radius, z, psi ) ) );
 			worstJacobian = std::max( worstJacobian,
-			                          deviation( broken.dFdPsi( r, z, psi ),
-			                                     source->dFdPsi( r, z, psi ) ) );
+			                          deviation( broken.dFdPsi( radius, z, psi ),
+			                                     source->dFdPsi( radius, z, psi ) ) );
 			worstPressure = std::max( worstPressure,
-			                          deviation( broken.pressure( r, psi ),
-			                                     source->pressure( r, psi ) ) );
+			                          deviation( broken.pressure( radius, psi ),
+			                                     source->pressure( radius, psi ) ) );
 		} );
 
 		std::printf( "\n  %s: worst F deviation %10.3e, dF/dpsi %10.3e, p %10.3e\n",
@@ -888,7 +888,7 @@ BOOST_AUTO_TEST_CASE( mutatingTheExponentDriftBreaksTheAgreement )
 	}
 }
 
-/// The omega = 0 control: with C_0 = 0 the source must be mu0 r^2 p_0' + g g',
+/// The omega = 0 control: with C_0 = 0 the source must be mu0 R^2 p_0' + g g',
 /// which is what meq::MHDSource would give on the same profiles.
 ///
 /// It is here for the same reason MaschkePerrin.hpp's stationary() is: anything
@@ -906,24 +906,24 @@ BOOST_AUTO_TEST_CASE( theStationaryControlAgreesToo )
 	double worstJacobian = 0.0;
 	double worstStatic = 0.0;
 
-	overTheSweep( [ & ]( double r, double z, double psi )
+	overTheSweep( [ & ]( double radius, double z, double psi )
 	{
-		worstF = std::max( worstF, deviation( source->f( r, z, psi ),
-		                                      plasma.f( r, z, psi ) ) );
+		worstF = std::max( worstF, deviation( source->f( radius, z, psi ),
+		                                      plasma.f( radius, z, psi ) ) );
 		worstJacobian = std::max( worstJacobian,
-		                          deviation( source->dFdPsi( r, z, psi ),
-		                                     plasma.dFdPsi( r, z, psi ) ) );
+		                          deviation( source->dFdPsi( radius, z, psi ),
+		                                     plasma.dFdPsi( radius, z, psi ) ) );
 
 		// And the source really has collapsed to the static one, which is the
 		// half that says C_0 = 0 reached the exponent rather than merely the
 		// tolerance.
-		double const staticF = Plasma::mu0()*r*r*plasma.referencePressurePrime( psi )
+		double const staticF = Plasma::mu0()*radius*radius*plasma.referencePressurePrime( psi )
 		                       + Plasma::ggPrime( psi );
-		worstStatic = std::max( worstStatic, deviation( source->f( r, z, psi ), staticF ) );
+		worstStatic = std::max( worstStatic, deviation( source->f( radius, z, psi ), staticF ) );
 	} );
 
 	std::printf( "\n  the C_0 = 0 control: F %10.3e, dF/dpsi %10.3e, "
-	             "against mu0 r^2 p_0' + g g' %10.3e\n",
+	             "against mu0 R^2 p_0' + g g' %10.3e\n",
 	             worstF, worstJacobian, worstStatic );
 	std::fflush( stdout );
 
@@ -965,22 +965,22 @@ BOOST_AUTO_TEST_CASE( theManufacturedSolutionSatisfiesTheEquation )
 	double worstClosedForm = 0.0;
 	double worstEquation = 0.0;
 
-	for ( double r = box.rMin; r <= box.rMax + 1.0e-12; r += 0.05 )
+	for ( double radius = box.minRadius; radius <= box.maxRadius + 1.0e-12; radius += 0.05 )
 	{
 		for ( double z = box.zMin; z <= box.zMax + 1.0e-12; z += 0.075 )
 		{
-			double const fd = eq.deltaStarFD( r, z );
-			double const closed = eq.deltaStar( r, z );
-			double const minusF = -eq.f( r, z, eq.psi( r, z ) );
+			double const fd = eq.deltaStarFD( radius, z );
+			double const closed = eq.deltaStar( radius, z );
+			double const minusF = -eq.f( radius, z, eq.psi( radius, z ) );
 
 			worstClosedForm = std::max( worstClosedForm, std::abs( closed - fd ) );
 			worstEquation = std::max( worstEquation, std::abs( fd - minusF ) );
 
 			BOOST_TEST( std::abs( closed - fd ) < 1.0e-5,
-			            "at ( " << r << ", " << z << " ): the closed-form Delta* gives "
+			            "at ( " << radius << ", " << z << " ): the closed-form Delta* gives "
 			            << closed << " where a central difference gives " << fd );
 			BOOST_TEST( std::abs( fd - minusF ) < 1.0e-5,
-			            "at ( " << r << ", " << z << " ): Delta*( psi ) = " << fd
+			            "at ( " << radius << ", " << z << " ): Delta*( psi ) = " << fd
 			            << " but -F_total = " << minusF << ", so meq::RotatingSource "
 			               "and the fixture disagree by enough to stop psiExact being "
 			               "a solution" );
@@ -1047,7 +1047,7 @@ BOOST_AUTO_TEST_CASE( orderThreeConvergesAtFour )
 /// tables: a dF/dpsi 5% too large leaves every error and every rate unchanged to
 /// all seven digits printed and drops the observed order from 1.980 to 1.055.
 /// The whole psi-dependence of F_total is meq::RotatingSource's, the remainder
-/// being a function of ( r, z ) alone, so there is nothing else in the Jacobian
+/// being a function of ( R, z ) alone, so there is nothing else in the Jacobian
 /// to be right.
 ///
 /// Per the testing stance the assertion is on the BEST triple above the
@@ -1093,10 +1093,10 @@ BOOST_AUTO_TEST_CASE( newtonConvergesAtOrderTwo )
 	// saying because the neighbouring file reads 1.980 on the same box, the same
 	// degree and the same mesh. The whole run is 5.73e-01 -> 1.07e-03 -> 1.38e-08
 	// -> 7.72e-16: the FIRST step already takes five hundred off the residual, so
-	// the triple ( r0, r1, r2 ) straddles the pre-asymptotic step and the
-	// three-point estimate log( r2/r1 )/log( r1/r0 ) reads low; and the triple
-	// ( r1, r2, r3 ) is dropped by bestNewtonOrder's floor because r3 is at
-	// 1.3e-15 of r0, which is round-off. Checked directly, r2/r1^2 = 1.2e-2 and
+	// the triple ( R_0, R_1, r2 ) straddles the pre-asymptotic step and the
+	// three-point estimate log( r2/R_1 )/log( R_1/R_0 ) reads low; and the triple
+	// ( R_1, r2, r3 ) is dropped by bestNewtonOrder's floor because r3 is at
+	// 1.3e-15 of R_0, which is round-off. Checked directly, r2/R_1^2 = 1.2e-2 and
 	// r3/r2^2 = 4.0, both O( 1 ) -- the iteration IS quadratic and there is
 	// simply no clean tail to read an order off. That is the trap CLAUDE_FLOW.md
 	// records as "the best observed Newton order is not the order", met from the

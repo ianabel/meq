@@ -271,7 +271,7 @@ namespace
 		species[ 0 ].mass = 3.3435837768e-27;                 // deuterium, kg
 		species[ 0 ].charge = 1.0;
 		species[ 0 ].temperature = scaledConstant( 1.0, rotatingKeV );
-		species[ 0 ].density = densityTable( densityFile );    // m^-3 on rRef
+		species[ 0 ].density = densityTable( densityFile );    // m^-3 on R_ref
 
 		species[ 1 ].mass = 9.1093837015e-31;                 // electron, kg
 		species[ 1 ].charge = -1.0;
@@ -287,12 +287,12 @@ namespace
 	/// cells, one uniform refinement.
 	mfem::Mesh rotatingMesh()
 	{
-		double const rMin = 0.6, rMax = 1.4, zMin = -0.6, zMax = 0.6;
+		double const minRadius = 0.6, maxRadius = 1.4, zMin = -0.6, zMax = 0.6;
 		mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D(
-			8, 12, mfem::Element::TRIANGLE, false, rMax - rMin, zMax - zMin );
-		mesh.Transform( [ rMin, zMin ]( mfem::Vector const &in, mfem::Vector &out )
+			8, 12, mfem::Element::TRIANGLE, false, maxRadius - minRadius, zMax - zMin );
+		mesh.Transform( [ minRadius, zMin ]( mfem::Vector const &in, mfem::Vector &out )
 		{
-			out( 0 ) = in( 0 ) + rMin;
+			out( 0 ) = in( 0 ) + minRadius;
 			out( 1 ) = in( 1 ) + zMin;
 		} );
 		mesh.UniformRefinement();
@@ -698,13 +698,13 @@ BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
 	int const order = 2;
 	int const cycles = 4;
 	double const theta = 0.6;
-	double const rMin = 0.7, rMax = 2.3, zMin = -1.9, zMax = 1.9;
+	double const minRadius = 0.7, maxRadius = 2.3, zMin = -1.9, zMax = 1.9;
 
 	mfem::Mesh background = mfem::Mesh::MakeCartesian2D(
-		8, 10, mfem::Element::TRIANGLE, false, rMax - rMin, zMax - zMin );
-	background.Transform( [ rMin, zMin ]( mfem::Vector const &in, mfem::Vector &out )
+		8, 10, mfem::Element::TRIANGLE, false, maxRadius - minRadius, zMax - zMin );
+	background.Transform( [ minRadius, zMin ]( mfem::Vector const &in, mfem::Vector &out )
 	{
-		out( 0 ) = in( 0 ) + rMin;
+		out( 0 ) = in( 0 ) + minRadius;
 		out( 1 ) = in( 1 ) + zMin;
 	} );
 	background.UniformRefinement();      // RefinementLevels = 1
@@ -872,7 +872,7 @@ BOOST_AUTO_TEST_CASE( theDriverRunsTheAdaptiveLoop )
  * Neutralising species given the wrong sign, ReferenceRadius defaulted, Omega
  * dropped because toml11's find_or<double> returns the default for an integer
  * node, the wrong density table read. All of those reach psi, because the
- * example's n_D0 has a slope in psi and so mu0 r^2 dp/dpsi does not vanish --
+ * example's n_D0 has a slope in psi and so mu0 R^2 dp/dpsi does not vanish --
  * which was not true of the first version of this example and is the whole
  * reason it was changed.
  *
@@ -934,7 +934,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesARotatingEquilibrium )
 	 * The driver-against-library check is a plumbing check and is satisfied by
 	 * any source at all. Nothing in it notices if the equilibrium is the
 	 * NON-ROTATING one -- which is exactly what happens when every profile is a
-	 * constant: p is then a function of r alone, dp/dpsi vanishes, F reduces to
+	 * constant: p is then a function of R alone, dp/dpsi vanishes, F reduces to
 	 * g g', and psi comes out BIT-IDENTICAL to the plasma at rest while n_s and
 	 * phi_0 still look convincingly centrifugal. The example was written that way
 	 * first. Its header quotes the number below, so the number is measured here
@@ -1116,7 +1116,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesForPsiAxisAsAnUnknown )
 	double const axisFlux = headerAttribute( header, "axis_normalised_flux" );
 	double const axisR = headerAttribute( header, "axis_r" );
 
-	std::printf( "  the file says axis_normalised_flux = %.6f at r = %.6f\n",
+	std::printf( "  the file says axis_normalised_flux = %.6f at R = %.6f\n",
 	             axisFlux, axisR );
 	std::fflush( stdout );
 
@@ -1136,7 +1136,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesForPsiAxisAsAnUnknown )
 	// says the two halves of the wiring are joined.
 	bool const axisInBand = axisR > 1.0 && axisR < 1.2;
 	BOOST_TEST( axisInBand,
-	            "the file puts the magnetic axis at r = " << axisR
+	            "the file puts the magnetic axis at R = " << axisR
 	            << ", outside the band this example's single hump occupies" );
 }
 
@@ -1571,7 +1571,7 @@ BOOST_AUTO_TEST_CASE( theRestartFileSaysWhatItHoldsAndWhatItIsARemainderFrom )
  *
  * NOT A CORNER CASE. The half-disc reaching the axis that free boundary needs
  * cannot come from `MakeCartesian2D` at all -- it is a semicircle centred on
- * r = 0, and the exterior expansion is a statement about exactly that geometry
+ * R = 0, and the exterior expansion is a statement about exactly that geometry
  * -- so a free-boundary run ALWAYS reads its mesh from a file. See
  * tools/mesh/README.md and tools/mesh/halfdisc.py, which generates it.
  *
@@ -1585,14 +1585,14 @@ BOOST_AUTO_TEST_CASE( theDriverTakesItsGridFromAMeshItDidNotBuild )
 {
 	// A box that is NOT at the origin and is NOT square, so a driver that fell
 	// back to a default extent, or transposed the two directions, disagrees.
-	double const rMin = 1.3, rMax = 2.1, zMin = -0.55, zMax = 0.75;
+	double const minRadius = 1.3, maxRadius = 2.1, zMin = -0.55, zMax = 0.75;
 	{
 		mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D(
-			6, 8, mfem::Element::TRIANGLE, false, rMax - rMin, zMax - zMin );
+			6, 8, mfem::Element::TRIANGLE, false, maxRadius - minRadius, zMax - zMin );
 		mesh.Transform( [ & ]( mfem::Vector const &in, mfem::Vector &out )
 		{
 			out = in;
-			out( 0 ) += rMin;
+			out( 0 ) += minRadius;
 			out( 1 ) += zMin;
 		} );
 		std::ofstream file( "driver-acceptance-frommesh.mesh" );
@@ -1619,15 +1619,15 @@ BOOST_AUTO_TEST_CASE( theDriverTakesItsGridFromAMeshItDidNotBuild )
 
 	// The extent is the MESH's, read back through ncdump rather than through
 	// MEQ's own writer.
-	std::pair<double, double> const r = coordinateRange( "frommesh.nc", "R" );
+	std::pair<double, double> const radius = coordinateRange( "frommesh.nc", "R" );
 	std::pair<double, double> const z = coordinateRange( "frommesh.nc", "Z" );
-	BOOST_TEST( r.first == rMin, boost::test_tools::tolerance( 1.0e-12 ) );
-	BOOST_TEST( r.second == rMax, boost::test_tools::tolerance( 1.0e-12 ) );
+	BOOST_TEST( radius.first == minRadius, boost::test_tools::tolerance( 1.0e-12 ) );
+	BOOST_TEST( radius.second == maxRadius, boost::test_tools::tolerance( 1.0e-12 ) );
 	BOOST_TEST( z.first == zMin, boost::test_tools::tolerance( 1.0e-12 ) );
 	BOOST_TEST( z.second == zMax, boost::test_tools::tolerance( 1.0e-12 ) );
 	std::printf( "\n  a mesh MEQ did not build\n"
 	             "    grid R [%.4f, %.4f]  Z [%.4f, %.4f]  from the mesh itself\n",
-	             r.first, r.second, z.first, z.second );
+	             radius.first, radius.second, z.first, z.second );
 
 	for ( char const *path : { "driver-acceptance-frommesh.toml",
 	                           "driver-acceptance-frommesh.mesh" } )
@@ -1818,14 +1818,14 @@ BOOST_AUTO_TEST_CASE( theDriverReachesTheExteriorCoupling )
 
 	// The same run, by hand. Numbers repeated from the example deliberately:
 	// a test that read them from the file could not catch the file changing.
-	double const rMax = 1.7;
+	double const maxRadius = 1.7;
 	double const rhoGamma = 1.5;
 	int const n = 32;
 	int const degree = 3;
-	double const h = rMax/static_cast<double>( n );
+	double const h = maxRadius/static_cast<double>( n );
 
 	mfem::Mesh background = mfem::Mesh::MakeCartesian2D(
-		n, 2*n, mfem::Element::TRIANGLE, false, rMax, 2.0*rMax );
+		n, 2*n, mfem::Element::TRIANGLE, false, maxRadius, 2.0*maxRadius );
 	background.Transform( []( mfem::Vector const &in, mfem::Vector &out )
 	{
 		out( 0 ) = in( 0 );
@@ -1833,7 +1833,7 @@ BOOST_AUTO_TEST_CASE( theDriverReachesTheExteriorCoupling )
 	} );
 
 	// THE SEMICIRCLE, WHICH IS NOT A meq::BoundaryShape AND CANNOT BE ONE: that
-	// class refuses a surface reaching r <= 0, and this one's flat side IS the
+	// class refuses a surface reaching R <= 0, and this one's flat side IS the
 	// axis. The exterior expansion is valid there and nowhere else.
 	mfem::PositionFunction const levelSet = []( mfem::Vector const &x )
 	{
@@ -1857,7 +1857,7 @@ BOOST_AUTO_TEST_CASE( theDriverReachesTheExteriorCoupling )
 	                    << sub.GetNE() );
 
 	// TWO boundary attributes here and not one: the arc is GENERATED by SubMesh
-	// and the flat side is INHERITED from the box's r = 0 edge. That is the
+	// and the flat side is INHERITED from the box's R = 0 edge. That is the
 	// geometry buildSubdomain() had to be relaxed for, and asserting it is what
 	// says the axis was not swallowed into Gamma_h.
 	BOOST_TEST_REQUIRE( sub.bdr_attributes.Size() >= 2,
@@ -1976,10 +1976,10 @@ BOOST_AUTO_TEST_CASE( theDriverReachesTheExteriorCoupling )
 	 * -- and it is refused BEFORE a mesh exists, so a run that cannot be
 	 * honoured costs milliseconds.
 	 *
-	 * IT IS NOT A TOLERANCE. A domain stopping at r = 0.05 is not a slightly
+	 * IT IS NOT A TOLERANCE. A domain stopping at R = 0.05 is not a slightly
 	 * worse semicircle: the Gegenbauer modes do not span its exterior at all,
 	 * and the run would converge at full order to a machine nobody described.
-	 * tools/mesh/halfdisc.py asserts r == 0.0 without a tolerance for the same
+	 * tools/mesh/halfdisc.py asserts R == 0.0 without a tolerance for the same
 	 * reason.
 	 */
 	{
@@ -2124,7 +2124,7 @@ BOOST_AUTO_TEST_CASE( theDriverRefinesOverAnExteriorCoupling )
  * profile amplitude and TEN Gegenbauer coefficients are all unknowns of ONE
  * bordered Newton beside the field. The amplitude is set by the plasma current
  * asked for rather than given, the plasma support moves with the iterate, and
- * the mesh is a gmsh half-disc reaching r = 0 exactly with the four conductors
+ * the mesh is a gmsh half-disc reaching R = 0 exactly with the four conductors
  * meshed to. Thirteen scalars and a field, in seven Newton steps.
  *
  * =====================================================================
@@ -2342,7 +2342,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesALimitedTokamak )
 	 * seven figures, and report a psi_ax that is a single spiking dof on the
 	 * plasma edge -- with the span inflated to match, Psi collapsed to a few per
 	 * cent over the real plasma, and the profile amplitude raised by the same
-	 * factor to hold int F/r. FREE-BOUNDARY-PLAN.md section 7.16 records exactly
+	 * factor to hold int F/R. FREE-BOUNDARY-PLAN.md section 7.16 records exactly
 	 * that on an earlier state of this code, at psi_ax = 2.73e+00 against a field
 	 * whose psi* peaked at 8.64e-02: THE THREE UNKNOWNS CONSPIRE, and nothing in
 	 * the residual, the constraint residuals or the convergence history tells
@@ -3714,7 +3714,7 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesACoilSubtractedLimitedMachine )
 	 * THE SPAN'S SIGN IS THE ASSERTION WITH THE MOST TEETH AND IT IS NOT A
 	 * TOLERANCE. The defective run reported psi_ax = 2.73e-03 BELOW a psi_bnd
 	 * of 9.51e-03 -- a negative span, which is a plasma whose flux rises
-	 * outward and which contains r = 0. No bound on |psi_ax| catches that as
+	 * outward and which contains R = 0. No bound on |psi_ax| catches that as
 	 * cleanly as asking which of the two is larger.
 	 */
 	BOOST_TEST( psiAxis > psiBoundary,

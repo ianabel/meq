@@ -7,11 +7,11 @@
 # The equation is the fixed-boundary Grad-Shafranov equation, eqs (1)-(4) of
 # refs/HDG-GradShafranov.pdf:
 #
-#     -grad.( (1/r) grad psi ) = F( r, z, psi )/r    in Omega,   psi = 0 on Gamma
+#     -grad.( (1/R) grad psi ) = F( R, z, psi )/R    in Omega,   psi = 0 on Gamma
 #
-#     F( r, z, psi ) = mu0 r^2 ( dp/dpsi )( psi ) + ( g dg/dpsi )( psi )
+#     F( R, z, psi ) = mu0 R^2 ( dp/dpsi )( psi ) + ( g dg/dpsi )( psi )
 #
-# with p( psi ) the plasma pressure and g( psi ) = r B_toroidal the toroidal
+# with p( psi ) the plasma pressure and g( psi ) = R B_toroidal the toroidal
 # field function. `Type = "mhd"` is the source that takes those two as USER
 # DATA: two tables of numbers, read from text files, with nothing about the
 # plasma hard-coded. Every other source meq ships is a closed form --
@@ -32,7 +32,7 @@
 # UNITS. SI throughout, and unlike examples/soloviev-nstx.toml nothing here is
 # normalised to a major radius: metres, pascals, teslas, and psi in webers per
 # radian. Mu0 is left at its SI value of 4 pi x 1e-7, so a run in normalised
-# units would have to set it to 1 explicitly -- meq multiplies the r^2 dp/dpsi
+# units would have to set it to 1 explicitly -- meq multiplies the R^2 dp/dpsi
 # term by it and leaves g dg/dpsi alone, exactly as the equation above is
 # written, so pre-multiplying a file instead of setting the key gets mu0 onto
 # the wrong term. The tables carry their own units and PPrimeScale converts;
@@ -42,7 +42,7 @@
 # QUADRATIC in psi, so dF/dpsi depends on psi, so the discrete problem is
 # semi-linear and Newton is not exact in one step. Measured, on the mesh below:
 #
-#        it            ||r||    ||r||/||r_0||    order
+#        it            ||R||    ||R||/||r_0||    order
 #         0     2.423235e-02     1.000000e+00        -
 #         1     3.224650e-03     1.330721e-01        -
 #         2     2.701132e-04     1.114680e-02    1.230
@@ -52,7 +52,7 @@
 #
 # -- five iterations, observed order 1.998, which is the quadratic endgame
 # CLAUDE.md's *Newton, and the obligation it creates* is about. The Jacobian is
-# carrying mu0 r^2 d2p/dpsi2 through the hybridization and a wrong one would
+# carrying mu0 R^2 d2p/dpsi2 through the hybridization and a wrong one would
 # show up here and nowhere else: CLAUDE.md records that perturbing dF/dpsi by 5%
 # leaves every error and every convergence rate in this project unchanged to six
 # figures and only drops the observed order to 1. Both of the other rectangle
@@ -63,12 +63,12 @@
 #
 # AND IT STAYS OFF THE TRIVIAL BRANCH BECAUSE OF g dg/dpsi, NOT BECAUSE OF THE
 # PRESSURE. dp/dpsi goes as psi^2 and therefore VANISHES at psi = 0, which is
-# the boundary value; on its own that would make F( r, z, 0 ) identically zero,
+# the boundary value; on its own that would make F( R, z, 0 ) identically zero,
 # psi = 0 a solution of the homogeneous Dirichlet problem, and Newton -- which
 # starts from the Dirichlet datum -- would stop on it in zero iterations and
 # report success. That is the trap CLAUDE.md records for every source of GS-2
 # sections 4.2 to 4.5, and the reason those need setInitialGuess(). Here
-# g dg/dpsi( 0 ) = 1.35, so F( r, z, 0 ) = 1.35 T^2 m^2 per Wb/rad everywhere,
+# g dg/dpsi( 0 ) = 1.35, so F( R, z, 0 ) = 1.35 T^2 m^2 per Wb/rad everywhere,
 # the trivial solution is not a solution, and [guess] is not needed.
 #
 # WHAT COMES OUT, measured on this configuration and quoted so an edit that
@@ -90,7 +90,7 @@
 # The pressure term is a real part of F rather than a correction on g dg/dpsi,
 # which is what makes the non-linearity worth having. Along the midplane:
 #
-#     r        1.20    1.40    1.61    1.75    2.00    2.20
+#     R        1.20    1.40    1.61    1.75    2.00    2.20
 #     share      0%     15%     42%     51%     35%      0%     of F
 #
 # It is zero at both ends because dp/dpsi vanishes with psi there, and about
@@ -111,7 +111,7 @@
 # machine at elongation 1.4; 0.88 MA of plasma current and 0.39 T of poloidal
 # field are what such a device runs; and 9.1 kPa on axis is n = 1e19 m^-3 at
 # 2.3 keV with equal ion and electron temperatures. The current is the integral
-# of j_phi = r dp/dpsi + ( g dg/dpsi )/( mu0 r ) over the .nc grid, which is a
+# of j_phi = R dp/dpsi + ( g dg/dpsi )/( mu0 R ) over the .nc grid, which is a
 # consequence of the two profiles rather than an input. The one number this file
 # does NOT determine is the toroidal field, because the equation contains g only
 # through g dg/dpsi -- g itself is fixed only up to a constant of integration,
@@ -158,7 +158,7 @@
 # A tokamak-shaped box: R0 = 1.7 m, half-width 0.5 m, half-height 0.7 m, so an
 # inverse aspect ratio of 0.29 at an elongation of 1.4. The plasma boundary IS
 # this rectangle -- see [boundary] -- which is why the corners are worth a
-# thought: a right angle puts an r^2 log r term in the solution and caps a
+# thought: a right angle puts an R^2 log R term in the solution and caps a
 # self-convergence rate at about 3 whatever the polynomial degree, as CLAUDE.md
 # records under *Testing stance*. It costs this example nothing, since nothing
 # here is measuring a rate.
@@ -197,7 +197,7 @@ PPrimeScale = 1.0e6
 GGPrimeFile = "examples/mhd-ggprime.dat"
 
 # Mu0 defaults to meq::vacuumPermeability, 4.0e-7 pi = 1.2566370614e-6, and
-# multiplies ONLY the r^2 dp/dpsi term. Set it to 1.0 to work in units where the
+# multiplies ONLY the R^2 dp/dpsi term. Set it to 1.0 to work in units where the
 # pressure is already measured in units of magnetic pressure; do not fold it
 # into the table instead, or it lands on the wrong term.
 

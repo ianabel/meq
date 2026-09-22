@@ -56,12 +56,12 @@ namespace
 		mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D(
 			n, n, mfem::Element::QUADRILATERAL, false, box.width(),
 			box.height() );
-		double const rMin = box.rMin;
+		double const minRadius = box.minRadius;
 		double const zMin = box.zMin;
-		mesh.Transform( [ rMin, zMin ]( mfem::Vector const &in,
+		mesh.Transform( [ minRadius, zMin ]( mfem::Vector const &in,
 		                                mfem::Vector &out )
 		{
-			out( 0 ) = in( 0 ) + rMin;
+			out( 0 ) = in( 0 ) + minRadius;
 			out( 1 ) = in( 1 ) + zMin;
 		} );
 		return mesh;
@@ -73,13 +73,13 @@ namespace
 	mfem::FunctionCoefficient evenBump( double height )
 	{
 		meq::tests::Rectangle const box = meq::tests::standardBox();
-		double const rMin = box.rMin;
+		double const minRadius = box.minRadius;
 		double const width = box.width();
 		double const depth = box.height();
 		return mfem::FunctionCoefficient(
-			[ height, rMin, width, depth ]( mfem::Vector const &x )
+			[ height, minRadius, width, depth ]( mfem::Vector const &x )
 			{
-				return height*std::sin( M_PI*( x( 0 ) - rMin )/width )
+				return height*std::sin( M_PI*( x( 0 ) - minRadius )/width )
 				       *std::cos( M_PI*x( 1 )/depth );
 			} );
 	}
@@ -105,7 +105,7 @@ namespace
 			std::make_unique<meq::GradShafranovSolver>( mesh, order );
 		// ON THE MIDPLANE EXACTLY, so the boundary-flux constraint does not
 		// itself break the symmetry it is being asked to keep.
-		solver->setBoundaryFluxPoint( box.rMin + 0.68*box.width(), 0.0 );
+		solver->setBoundaryFluxPoint( box.minRadius + 0.68*box.width(), 0.0 );
 		solver->setSource( source, 0.30 );
 		solver->setBoundaryData( datum );
 		solver->setInitialGuess( guess );
@@ -121,7 +121,7 @@ namespace
  * AND THAT IS THE ASSERTION WITH TEETH.
  *
  * Both blocks are compared, and the FLUX is the one that can fail: psi is even
- * in z and its map carries no sign, but q = grad_bar( psi )/r has q_r EVEN and
+ * in z and its map carries no sign, but q = grad_bar( psi )/R has q_r EVEN and
  * q_z ODD, so the flux map has to carry a sign per COMPONENT. Get it backwards
  * and the projection lands on the ANTIsymmetric subspace, where the only even
  * field is zero -- a trivial branch reached silently, which is this tree's

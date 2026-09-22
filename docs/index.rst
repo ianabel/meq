@@ -6,21 +6,21 @@ equilibria by solving the **Grad–Shafranov** equation with a hybridizable
 discontinuous Galerkin (HDG) discretisation built on `MFEM
 <https://mfem.org>`_.
 
-For a poloidal flux :math:`\psi(r, z)` on a domain :math:`\Omega \subset
+For a poloidal flux :math:`\psi(R, z)` on a domain :math:`\Omega \subset
 \mathbb{R}^2` whose boundary :math:`\Gamma` is the level set :math:`\psi = 0`,
 it solves
 
 .. math::
 
-   -\gradbar \cdot \left( \frac{1}{r} \gradbar \psi \right)
-       = \frac{F(r, z, \psi)}{r} \quad \text{in } \Omega,
+   -\gradbar \cdot \left( \frac{1}{R} \gradbar \psi \right)
+       = \frac{F(R, z, \psi)}{R} \quad \text{in } \Omega,
    \qquad \psi = 0 \ \text{ on } \Gamma,
 
 where :math:`\gradbar := (\partial_r, \partial_z)` and the source
 
 .. math::
 
-   F(r, z, \psi) := \mu_0 r^2 \frac{\mathrm{d}p}{\mathrm{d}\psi}
+   F(R, z, \psi) := \mu_0 R^2 \frac{\mathrm{d}p}{\mathrm{d}\psi}
                   + g \frac{\mathrm{d}g}{\mathrm{d}\psi}
 
 is built from the plasma pressure :math:`p(\psi)` and the toroidal field
@@ -33,7 +33,7 @@ What MEQ does
 -------------
 
 * **Solves the fixed-boundary problem to optimal order.** Both the flux
-  :math:`\psi` and its scaled gradient :math:`q = \gradbar\psi / r` converge at
+  :math:`\psi` and its scaled gradient :math:`q = \gradbar\psi / R` converge at
   :math:`k+1` in the polynomial degree :math:`k`. The gradient is a *solved
   unknown*, not a post-processed derivative, which is the reason to prefer a
   mixed method here: the magnetic field is what most users want out of an

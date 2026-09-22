@@ -19,14 +19,14 @@
  * ONE PARAMETRISATION, NOT TWO. Miller and MXH are the same formula:
  *
  *   refs/MXH.pdf eqs (1)-(3), Arbon, Candy & Belli:
- *       R( theta ) = R0 + r cos( theta_R )
- *       Z( theta ) = Z0 + kappa r sin( theta )
+ *       R( theta ) = R0 + R cos( theta_R )
+ *       Z( theta ) = Z0 + kappa R sin( theta )
  *       theta_R    = theta + c0 + sum_{n=1}^{N} [ c_n cos( n theta )
  *                                               + s_n sin( n theta ) ]
  *
  *   refs/Miller.pdf eq (34), Miller, Chu, Greene, Lin-Liu & Waltz:
- *       R = R0 + r cos[ theta + ( arcsin delta ) sin theta ]
- *       Z = kappa r sin theta
+ *       R = R0 + R cos[ theta + ( arcsin delta ) sin theta ]
+ *       Z = kappa R sin theta
  *
  * and MXH eq (4) states the reduction outright: Turnbull-Miller is recovered by
  * keeping s_1 = arcsin( delta ) and s_2 = -zeta, zeta being the squareness. So
@@ -37,7 +37,7 @@
  * A TRANSCRIPTION NOTE. refs/HDG-GradShafranov.pdf Example 6 prints
  * arcsin( delta sin t ) where Miller and Cerfon & Freidberg both print
  * arcsin( delta ) sin t. The two agree at t = 0, +-pi/2 and pi and differ by at
- * most 6e-4 in r between; tests/analytic/MillerDShape.hpp implements Example 6's
+ * most 6e-4 in R between; tests/analytic/MillerDShape.hpp implements Example 6's
  * form because it reproduces that paper's table, and this file implements the
  * other because two independent sources and the physical meaning of delta agree
  * on it. If a number here disagrees with MillerDShape by ~1e-4, that is why.
@@ -69,11 +69,11 @@ namespace meq
 		public:
 			/// The general MXH surface.
 			///
-			/// @param r0In        major radius of the centre, metres. > 0.
+			/// @param R_0in        major radius of the centre, metres. > 0.
 			/// @param z0In        height of the centre, metres.
-			/// @param minorIn     r, the minor radius. > 0, and < r0In so that the
+			/// @param minorIn     R, the minor radius. > 0, and < R_0in so that the
 			///                    surface does not reach the axis, where the
-			///                    operator's 1/r is not integrable.
+			///                    operator's 1/R is not integrable.
 			/// @param elongationIn kappa. > 0.
 			/// @param cosIn       c_0, c_1, ... c_N. **Starts at c_0**, the tilt.
 			///                    May be empty, which means no cosine harmonics.
@@ -83,10 +83,10 @@ namespace meq
 			///                    number that silently does nothing.
 			///
 			/// @throws ShapeError if the parameters are degenerate, if the surface
-			///         reaches r <= 0, or if it is not star shaped about
-			///         ( r0In, z0In ) -- see levelSet() for why that last one is
+			///         reaches R <= 0, or if it is not star shaped about
+			///         ( R_0in, z0In ) -- see levelSet() for why that last one is
 			///         not a technicality.
-			BoundaryShape( double r0In, double z0In, double minorIn,
+			BoundaryShape( double radius0In, double z0In, double minorIn,
 			               double elongationIn,
 			               std::vector<double> cosIn = {},
 			               std::vector<double> sinIn = {} );
@@ -101,17 +101,17 @@ namespace meq
 			/// @param squarenessIn zeta, Turnbull-Miller's fourth parameter,
 			///                     entering as s_2 = -zeta. Zero gives the
 			///                     original three-parameter Miller shape.
-			static BoundaryShape miller( double r0In, double z0In, double minorIn,
+			static BoundaryShape miller( double radius0In, double z0In, double minorIn,
 			                             double elongationIn, double deltaIn,
 			                             double squarenessIn = 0.0 );
 
 			/// The point on the curve at parameter @a theta, which is MXH's
 			/// poloidal angle and not the polar angle about the centre.
-			void point( double theta, double &r, double &z ) const;
+			void point( double theta, double &radius, double &z ) const;
 
 			/// Negative inside Gamma, zero on it, positive outside.
 			///
-			/// This is the RADIAL GAP -- |( r, z ) - centre| minus the distance
+			/// This is the RADIAL GAP -- |( R, z ) - centre| minus the distance
 			/// from the centre to the curve at the same polar angle -- and not a
 			/// signed distance, which is larger. Nothing downstream needs a
 			/// distance: MarkLevelSetSubdomain wants a sign at the vertices and
@@ -123,21 +123,21 @@ namespace meq
 			/// its centre. The constructor checks it, because a curve that is not
 			/// would give bisection several roots to choose between and it would
 			/// return one of them without complaint.
-			double levelSet( double r, double z ) const;
+			double levelSet( double radius, double z ) const;
 
 			/// The polar angle about the centre of the curve point at @a theta,
 			/// in [ 0, 2 pi ). Strictly increasing in theta for a star shaped
 			/// curve, which is what the constructor verifies.
 			double polarAngle( double theta ) const;
 
-			double majorRadius() const { return r0; }
+			double majorRadius() const { return radius0; }
 			double centreHeight() const { return z0; }
 			double minorRadius() const { return minor; }
 			double elongation() const { return elongationValue; }
 
 			/// The bounding box, for checking that the background mesh contains
 			/// the surface with room for the transfer paths to reach past it.
-			void boundingBox( double &rMin, double &rMax,
+			void boundingBox( double &minRadius, double &maxRadius,
 			                  double &zMin, double &zMax ) const;
 
 		private:
@@ -150,7 +150,7 @@ namespace meq
 			/// Throws unless the polar angle increases strictly with theta.
 			void requireStarShaped() const;
 
-			double r0, z0, minor, elongationValue;
+			double radius0, z0, minor, elongationValue;
 			std::vector<double> cosCoefficients;   ///< c_0 ... c_N
 			std::vector<double> sinCoefficients;   ///< s_1 ... s_N
 	};

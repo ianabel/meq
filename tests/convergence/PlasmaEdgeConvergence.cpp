@@ -86,13 +86,13 @@ namespace
 	{
 		public:
 			explicit EdgeSource( Equilibrium const &eqIn ) : eq( eqIn ) {}
-			double f( double r, double z, double psi ) const override
+			double f( double radius, double z, double psi ) const override
 			{
-				return eq.f( r, z, psi );
+				return eq.f( radius, z, psi );
 			}
-			double dFdPsi( double r, double z, double psi ) const override
+			double dFdPsi( double radius, double z, double psi ) const override
 			{
-				return eq.dFdPsi( r, z, psi );
+				return eq.dFdPsi( radius, z, psi );
 			}
 		private:
 			Equilibrium eq;
@@ -173,24 +173,24 @@ BOOST_AUTO_TEST_CASE( theFixturesAreWhatTheyClaim )
 		for ( int i = 0; i <= 40; ++i )
 			for ( int k = 0; k <= 40; ++k )
 			{
-				double const r = 0.62 + 0.76*i/40.0;
+				double const radius = 0.62 + 0.76*i/40.0;
 				double const z = -0.58 + 1.16*k/40.0;
-				if ( !fixed.awayFromEdge( r, z, 5.0e-3 ) )
+				if ( !fixed.awayFromEdge( radius, z, 5.0e-3 ) )
 					continue;
 
 				worstFixed = std::max( worstFixed,
-					std::fabs( fixed.deltaStarFD( r, z ) + fixed.f( r, z ) ) );
-				scale = std::max( scale, std::fabs( fixed.f( r, z ) ) );
+					std::fabs( fixed.deltaStarFD( radius, z ) + fixed.f( radius, z ) ) );
+				scale = std::max( scale, std::fabs( fixed.f( radius, z ) ) );
 
-				double const p = moving.psi( r, z );
+				double const p = moving.psi( radius, z );
 				worstMoving = std::max( worstMoving,
-					std::fabs( moving.deltaStarFD( r, z ) + moving.f( r, z, p ) ) );
+					std::fabs( moving.deltaStarFD( radius, z ) + moving.f( radius, z, p ) ) );
 
 				double const step = 1.0e-6*std::max( 1.0e-3, std::fabs( p ) );
-				double const difference = ( moving.f( r, z, p + step )
-				                          - moving.f( r, z, p - step ) )/( 2.0*step );
+				double const difference = ( moving.f( radius, z, p + step )
+				                          - moving.f( radius, z, p - step ) )/( 2.0*step );
 				worstDerivative = std::max( worstDerivative,
-					std::fabs( difference - moving.dFdPsi( r, z, p ) ) );
+					std::fabs( difference - moving.dFdPsi( radius, z, p ) ) );
 				derivativeScale = std::max( derivativeScale, std::fabs( difference ) );
 			}
 
@@ -580,7 +580,7 @@ BOOST_AUTO_TEST_CASE( theCutCapsTheOrderBeforeAnyMethodIsChosen )
  */
 BOOST_AUTO_TEST_CASE( anXPointOnThePlasmaEdgeCostsTheApproximationNothing )
 {
-	double const centreR = 1.0, centreZ = 0.0, radius = 0.23456789;
+	double const centreR = 1.0, centreZ = 0.0, circleRadius = 0.23456789;
 
 	// The two singular parts. Both are C^{m-1} across their own zero set, and
 	// THAT IS THE ONLY THING HELD IN COMMON -- the smooth part's phi is bounded
@@ -589,17 +589,17 @@ BOOST_AUTO_TEST_CASE( anXPointOnThePlasmaEdgeCostsTheApproximationNothing )
 	// COMPARABLE. The assertion below reads a difference of rates for exactly
 	// this reason; a reader comparing the two error columns is reading the
 	// normalisation and not the cut.
-	auto smoothPart = [ & ]( double r, double z, int m )
+	auto smoothPart = [ & ]( double radius, double z, int m )
 	{
-		double const dr = r - centreR, dz = z - centreZ;
-		double const phi = radius*radius - dr*dr - dz*dz;
-		return phi > 0.0 ? std::pow( phi/( radius*radius ), m ) : 0.0;
+		double const dr = radius - centreR, dz = z - centreZ;
+		double const phi = circleRadius*circleRadius - dr*dr - dz*dz;
+		return phi > 0.0 ? std::pow( phi/( circleRadius*circleRadius ), m ) : 0.0;
 	};
-	auto crossedPart = [ & ]( double r, double z, int m )
+	auto crossedPart = [ & ]( double radius, double z, int m )
 	{
-		double const dr = r - centreR, dz = z - centreZ;
+		double const dr = radius - centreR, dz = z - centreZ;
 		double const phi = dz*dz - dr*dr;
-		return phi > 0.0 ? std::pow( phi/( radius*radius ), m ) : 0.0;
+		return phi > 0.0 ? std::pow( phi/( circleRadius*circleRadius ), m ) : 0.0;
 	};
 
 	// Element-local L2 projection onto P_k, accumulated over the mesh. The
@@ -673,10 +673,10 @@ BOOST_AUTO_TEST_CASE( anXPointOnThePlasmaEdgeCostsTheApproximationNothing )
 			{
 				mfem::Mesh mesh = makeMesh( n );
 				smooth.push_back( projectionError( mesh, k,
-					[ & ]( double r, double z ) { return smoothPart( r, z, m ); } ) );
+					[ & ]( double radius, double z ) { return smoothPart( radius, z, m ); } ) );
 				mesh = makeMesh( n );
 				crossed.push_back( projectionError( mesh, k,
-					[ & ]( double r, double z ) { return crossedPart( r, z, m ); } ) );
+					[ & ]( double radius, double z ) { return crossedPart( radius, z, m ); } ) );
 			}
 
 			// The rate across the whole sequence rather than per pair: the cut
@@ -1228,7 +1228,7 @@ namespace
 			*boxes.back(), edgeLevelSet, 1 ) );
 		meq::AdaptiveDomain &domain = *pool.back();
 
-		for ( int r = 0; r < bandRefinements; ++r )
+		for ( int level = 0; level < bandRefinements; ++level )
 		{
 			mfem::SubMesh &tee = domain.computational();
 			int const gammaAttribute = domain.gammaHAttribute();
@@ -1659,7 +1659,7 @@ namespace
 		     - std::min( { column[ 0 ], column[ 1 ], column[ 2 ] } );
 	}
 
-	/// A FITTED rectangle strictly inside the disc: r in [ 0.85, 1.15 ],
+	/// A FITTED rectangle strictly inside the disc: R in [ 0.85, 1.15 ],
 	/// z in [ -0.15, 0.15 ], whose farthest corner is 0.212 from the centre
 	/// against the edge's 0.2346. Same equilibrium, same exact Dirichlet data,
 	/// and no staircase, no subdomain and no transfer.

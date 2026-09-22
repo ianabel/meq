@@ -17,11 +17,11 @@ WHAT IT CHECKS, WHICH IS EVERY STEP OF THE CONVERSION AT ONCE:
       written against `Psi = 1 - psi_n`.  Getting that backwards converges to a
       different equilibrium and never complains.
     * the SPAN.  meq::NormalisedMHDSource::f is
-      `( mu0 r^2 p'( Psi ) + gg'( Psi ) )/span` with `span = psi_ax - psi_bnd`,
+      `( mu0 R^2 p'( Psi ) + gg'( Psi ) )/span` with `span = psi_ax - psi_bnd`,
       and the tables are d/dPsi where the reference's arrays are d/dpsi -- so a
       factor of the span appears twice, once in each direction, and dropping
       either is a clean factor this catches.
-    * the GEOMETRY factor.  `mu0 r^2` on p' and nothing on gg'.
+    * the GEOMETRY factor.  `mu0 R^2` on p' and nothing on gg'.
     * the TABULATION itself, spline knots and all.
 
 WHAT IT CANNOT CHECK: the discretisation, the borders, the boundary condition,
@@ -67,7 +67,7 @@ def main():
 	Psi = (psi - psi_bn) / span
 
 	# meq::NormalisedMHDSource::f, transcribed.  Delta* psi = -F and
-	# F = mu0 r j, so the current density is F/( mu0 r ).
+	# F = mu0 R j, so the current density is F/( mu0 R ).
 	F = (mu0 * Rg**2 * np.interp(Psi, Pp, pp) + np.interp(Psi, Pg, gg)) / span
 	j = F / (mu0 * Rg)
 

@@ -36,7 +36,7 @@ Tau = 1.0
 
 [source]
 Type = "manufactured"
-R0 = -0.5               # the radial shift r0, in units of R0 -- NOT a radius
+R0 = -0.5               # the radial shift R_0, in units of R0 -- NOT a radius
 Kr = 3.61283155         # 1.15 pi, per unit R0
 Kz = 1.15               # per unit R0
 

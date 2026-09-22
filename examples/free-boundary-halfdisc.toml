@@ -137,7 +137,7 @@ Type = "zero"
 # `tail` -- the energy-normalised amplitude of the retained spectrum's last
 # modes over its largest -- and advises above 1e-1, which is about a per cent in
 # psi_ax. READ THAT LINE RATHER THAN THE RAW COEFFICIENTS: the exterior block is
-# diagonal in dGamma/r with a mass 2/( n( n-1 )( 2n-1 ) ), so a_n carries n^1.5
+# diagonal in dGamma/R with a mass 2/( n( n-1 )( 2n-1 ) ), so a_n carries n^1.5
 # of its own and a spectrum that is DECAYING reads flat.
 Radius = 1.5
 CentreZ = 0.0

@@ -15,8 +15,8 @@
  *
  * WHAT THIS IS FOR. At two species the exponent of (96) is the SAME for both,
  *
- *     n_s( r, psi ) = n_s0( psi ) exp[ C( psi ) h( r ) ],
- *     h( r ) := ( r^2 - rRef^2 )/2,
+ *     n_s( R, psi ) = n_s0( psi ) exp[ C( psi ) h( R ) ],
+ *     h( R ) := ( R^2 - R_ref^2 )/2,
  *     C( psi ) = omega^2 ( Z_1 m_2 - Z_2 m_1 )/( Z_1 T_2 - Z_2 T_1 ),
  *
  * and C is a flux function. C'( psi ) is non-zero exactly when omega^2/T varies
@@ -91,8 +91,8 @@
  * meq::RotatingSource's business and are covered by RotatingSourceTests.cpp,
  * which runs in keV and m^-3.
  *
- * GAUGE: phi_0( rRef, psi ) = 0, which is the local gauge meq::RotatingSource
- * takes. n_s0 is therefore the physical density on r = rRef. Comparing tabulated
+ * GAUGE: phi_0( R_ref, psi ) = 0, which is the local gauge meq::RotatingSource
+ * takes. n_s0 is therefore the physical density on R = R_ref. Comparing tabulated
  * n_s0 against a code in a different gauge is meaningless; see
  * meq::RotatingSource's header.
  */
@@ -120,7 +120,7 @@ namespace analytic
  * 2 T_2 + T_1 and 2 m_2 + m_1 and the two are told apart.
  *
  * WHAT IS NOT FREE, and it is worth knowing before adding a third shape
- * function. At two species quasineutrality on r = rRef forces
+ * function. At two species quasineutrality on R = R_ref forces
  * n_20 = -( Z_1/Z_2 ) n_10, so the two reference densities are ONE function and
  * the reference pressure is p_0 = n_10( T_1 - ( Z_1/Z_2 ) T_2 ), which is
  * n_10 ( Z_1 T_2 - Z_2 T_1 )/( -Z_2 ). p_0 is therefore proportional to the
@@ -185,7 +185,7 @@ class VaryingCentrifugalPlasma
 		 * THE CONFIGURATION, AND HOW ITS CONSTANTS WERE FIXED.
 		 *
 		 * C_0 = 2 puts the shared exponent C h over [ -1.41, +2.11 ] on the
-		 * standard benchmark box with rRef at its middle, so the densities vary
+		 * standard benchmark box with R_ref at its middle, so the densities vary
 		 * by a factor of 34 across it -- sonic, which is the regime RoPP (136) is
 		 * about, and not a perturbation a dropped term could hide inside.
 		 *
@@ -212,7 +212,7 @@ class VaryingCentrifugalPlasma
 
 		/// C_0 = 0, so omega is identically zero and the exponent with it. THE
 		/// CONTROL FOR THE WHOLE FIXTURE: p collapses to p_0( psi ), F to
-		/// mu0 r^2 p_0' + g g', and anything the rotating case shows that this
+		/// mu0 R^2 p_0' + g g', and anything the rotating case shows that this
 		/// one shows too belongs to the profiles rather than to the rotation.
 		static VaryingCentrifugalPlasma stationary()
 		{
@@ -248,8 +248,8 @@ class VaryingCentrifugalPlasma
 			return s == 0 ? 2.0 : -1.0;
 		}
 
-		/// rRef, where phi_0 vanishes and n_s0 is the physical density. The
-		/// middle of the standard box, so that h( r ) changes sign inside it --
+		/// R_ref, where phi_0 vanishes and n_s0 is the physical density. The
+		/// middle of the standard box, so that h( R ) changes sign inside it --
 		/// which matters, because a term proportional to h is invisible to a
 		/// check made only where h > 0.
 		static double referenceRadius()
@@ -324,7 +324,7 @@ class VaryingCentrifugalPlasma
 			return 0.02;
 		}
 
-		/// n_s0( psi ), the density on r = rRef. The shape is a quadratic with a
+		/// n_s0( psi ), the density on R = R_ref. The shape is a quadratic with a
 		/// negative discriminant, 0.64 - 3.6, so it is positive for every real
 		/// psi; n_20 is -( Z_1/Z_2 ) n_10 = 2 n_10, which is quasineutrality on
 		/// the reference curve, exactly and at every derivative level.
@@ -385,10 +385,10 @@ class VaryingCentrifugalPlasma
 		/// tree.
 		///
 		/// WHERE IT DOMINATES AND WHERE IT DOES NOT, because "small" would be a
-		/// half-truth. The pressure term carries mu0 r^2 exp( C h ), which spans
-		/// four orders across the box: at r = 1.4, psi = 1 it is 13.4 against
+		/// half-truth. The pressure term carries mu0 R^2 exp( C h ), which spans
+		/// four orders across the box: at R = 1.4, psi = 1 it is 13.4 against
 		/// this profile's ( g g' )' = 0.25, so g g' is 1.8% of dF/dpsi and the
-		/// drift share quoted above is undiluted; at r = 0.6, psi = 0 the
+		/// drift share quoted above is undiluted; at R = 0.6, psi = 0 the
 		/// exponential damps it to 1.0e-3 and g g' is essentially all of dF/dpsi.
 		/// That is the equation's own shape rather than a choice -- a centrifugal
 		/// term is small on the inboard side -- and it is why the drift shares
@@ -406,10 +406,10 @@ class VaryingCentrifugalPlasma
 
 		// ---- the closure of (96) and (97), in closed form ----
 
-		/// h( r ) = ( r^2 - rRef^2 )/2, the radial factor every exponent carries.
-		static double radialFactor( double r )
+		/// h( R ) = ( R^2 - R_ref^2 )/2, the radial factor every exponent carries.
+		static double radialFactor( double radius )
 		{
-			return 0.5*( r*r - referenceRadius()*referenceRadius() );
+			return 0.5*( radius*radius - referenceRadius()*referenceRadius() );
 		}
 
 		/// D( psi ) = Z_1 T_2 - Z_2 T_1, the closure's denominator. Positive for
@@ -462,33 +462,33 @@ class VaryingCentrifugalPlasma
 			return amplitude*1.0;
 		}
 
-		/// The shared exponent A( r, psi ) = C( psi ) h( r ) of (96). At two
+		/// The shared exponent A( R, psi ) = C( psi ) h( R ) of (96). At two
 		/// species BOTH species carry it, which is what makes Sum_s Z_s n_s
-		/// vanish at every r once it vanishes at rRef.
-		double densityExponent( double r, double psi ) const
+		/// vanish at every R once it vanishes at R_ref.
+		double densityExponent( double radius, double psi ) const
 		{
-			return exponentCoefficient( psi )*radialFactor( r );
+			return exponentCoefficient( psi )*radialFactor( radius );
 		}
 
-		/// e phi_0( r, psi ), the potential that holds (97).
+		/// e phi_0( R, psi ), the potential that holds (97).
 		///
 		/// Derived here rather than quoted: eliminating the two exponents of (96)
 		/// against Z_1 n_10 = -Z_2 n_20 gives
 		/// omega^2 h ( m_1 T_2 - m_2 T_1 ) = y ( Z_1 T_2 - Z_2 T_1 ), which is
-		/// linear in y. Zero at r = rRef exactly, by h( rRef ) = 0, which is the
+		/// linear in y. Zero at R = R_ref exactly, by h( R_ref ) = 0, which is the
 		/// gauge.
-		double potential( double r, double psi ) const
+		double potential( double radius, double psi ) const
 		{
 			double const num = mass( 0 )*temperature( 1, psi )
 			                   - mass( 1 )*temperature( 0, psi );
-			return omegaSquared( psi )*radialFactor( r )*num/closureDenominator( psi );
+			return omegaSquared( psi )*radialFactor( radius )*num/closureDenominator( psi );
 		}
 
-		/// d( e phi_0 )/dpsi at fixed r. Exposed because meq::RotatingSource
+		/// d( e phi_0 )/dpsi at fixed R. Exposed because meq::RotatingSource
 		/// exposes dPotentialDPsi() and the driver checks it: it is a second,
 		/// independent place where a wrong chain rule through omega and T shows
 		/// up, and unlike f() it isolates the potential from the pressure.
-		double potentialPrime( double r, double psi ) const
+		double potentialPrime( double radius, double psi ) const
 		{
 			double const num = mass( 0 )*temperature( 1, psi )
 			                   - mass( 1 )*temperature( 0, psi );
@@ -500,15 +500,15 @@ class VaryingCentrifugalPlasma
 			double const ratio = num/d;
 			double const ratioPrime = numPrime/d - num*dPrime/( d*d );
 
-			return radialFactor( r )*( omegaSquaredPrime( psi )*ratio
+			return radialFactor( radius )*( omegaSquaredPrime( psi )*ratio
 			                           + omegaSquared( psi )*ratioPrime );
 		}
 
-		/// n_s( r, psi ) from (96).
-		double density( std::size_t s, double r, double psi ) const
+		/// n_s( R, psi ) from (96).
+		double density( std::size_t s, double radius, double psi ) const
 		{
 			require( s );
-			return referenceDensity( s, psi )*std::exp( densityExponent( r, psi ) );
+			return referenceDensity( s, psi )*std::exp( densityExponent( radius, psi ) );
 		}
 
 		// ---- the pressure and the source: route B ----
@@ -547,44 +547,44 @@ class VaryingCentrifugalPlasma
 			return sum;
 		}
 
-		/// p( r, psi ) = p_0( psi ) exp[ C( psi ) h( r ) ]. Both species carry
+		/// p( R, psi ) = p_0( psi ) exp[ C( psi ) h( R ) ]. Both species carry
 		/// the same exponent, so it comes outside the sum -- which is the only
 		/// reason a two-species rotating pressure has a closed form at all.
-		double pressure( double r, double psi ) const
+		double pressure( double radius, double psi ) const
 		{
-			return referencePressure( psi )*std::exp( densityExponent( r, psi ) );
+			return referencePressure( psi )*std::exp( densityExponent( radius, psi ) );
 		}
 
-		/// dp/dpsi at FIXED r:
+		/// dp/dpsi at FIXED R:
 		///
 		///     [ p_0' + p_0 C' h ] exp( C h ).
 		///
 		/// The second term is the whole of what a varying centrifugal exponent
-		/// contributes to F, and it vanishes identically on r = rRef, where
+		/// contributes to F, and it vanishes identically on R = R_ref, where
 		/// h = 0. That is the trap CLAUDE_FLOW.md records: the one radius where
 		/// the gauge is exact is the one radius where a rotating source is
 		/// indistinguishable from a static one, so a check placed there measures
 		/// nothing.
-		double dPressureDPsi( double r, double psi ) const
+		double dPressureDPsi( double radius, double psi ) const
 		{
-			double const h = radialFactor( r );
+			double const h = radialFactor( radius );
 			double const cPrime = effectiveExponentPrime( psi );
 
 			return ( referencePressurePrime( psi )
 			         + referencePressure( psi )*cPrime*h )
-			       *std::exp( densityExponent( r, psi ) );
+			       *std::exp( densityExponent( radius, psi ) );
 		}
 
-		/// d2p/dpsi2 at FIXED r:
+		/// d2p/dpsi2 at FIXED R:
 		///
 		///     [ p_0'' + 2 p_0' C' h + p_0 ( C'' h + C'^2 h^2 ) ] exp( C h ).
 		///
 		/// THREE of the four terms carry C' or C''. That is the ratio the
 		/// mutation controls exploit and it is why dropping the drift is not a
 		/// small perturbation of the Jacobian.
-		double d2PressureDPsi2( double r, double psi ) const
+		double d2PressureDPsi2( double radius, double psi ) const
 		{
-			double const h = radialFactor( r );
+			double const h = radialFactor( radius );
 			double const cPrime = effectiveExponentPrime( psi );
 			double const cDoublePrime = effectiveExponentDoublePrime( psi );
 
@@ -593,21 +593,21 @@ class VaryingCentrifugalPlasma
 			return ( referencePressureDoublePrime( psi )
 			         + 2.0*referencePressurePrime( psi )*cPrime*h
 			         + p0*( cDoublePrime*h + cPrime*cPrime*h*h ) )
-			       *std::exp( densityExponent( r, psi ) );
+			       *std::exp( densityExponent( radius, psi ) );
 		}
 
-		/// F = mu0 r^2 dp/dpsi|_r + g g', which is (136) collapsed. Returns F,
-		/// NOT F/r: the 1/r belongs to the weak form, as everywhere else in this
+		/// F = mu0 R^2 dp/dpsi|_r + g g', which is (136) collapsed. Returns F,
+		/// NOT F/R: the 1/R belongs to the weak form, as everywhere else in this
 		/// directory and in meq::Source.
-		double f( double r, double /*z*/, double psi ) const
+		double f( double radius, double /*z*/, double psi ) const
 		{
-			return mu0()*r*r*dPressureDPsi( r, psi ) + ggPrime( psi );
+			return mu0()*radius*radius*dPressureDPsi( radius, psi ) + ggPrime( psi );
 		}
 
-		/// dF/dpsi = mu0 r^2 d2p/dpsi2 + ( g g' )'.
-		double dFdPsi( double r, double /*z*/, double psi ) const
+		/// dF/dpsi = mu0 R^2 d2p/dpsi2 + ( g g' )'.
+		double dFdPsi( double radius, double /*z*/, double psi ) const
 		{
-			return mu0()*r*r*d2PressureDPsi2( r, psi ) + ggPrimeDerivative( psi );
+			return mu0()*radius*radius*d2PressureDPsi2( radius, psi ) + ggPrimeDerivative( psi );
 		}
 
 		// ---- (97) solved numerically: route A ----
@@ -627,7 +627,7 @@ class VaryingCentrifugalPlasma
 		/// of a double, so the loop bound is a fixed count rather than a
 		/// tolerance: a deterministic number of flops, and no branch that could
 		/// behave differently on two builds.
-		double potentialByBisection( double r, double psi ) const
+		double potentialByBisection( double radius, double psi ) const
 		{
 			double scale = 0.0;
 			for ( std::size_t s = 0; s < speciesCount(); ++s )
@@ -642,11 +642,11 @@ class VaryingCentrifugalPlasma
 			// The residual is decreasing, so it is positive at the low end.
 			double lo = -scale;
 			double hi = scale;
-			for ( int i = 0; i < 200 && !( neutralityResidual( lo, r, psi ) > 0.0 ); ++i )
+			for ( int i = 0; i < 200 && !( neutralityResidual( lo, radius, psi ) > 0.0 ); ++i )
 			{
 				lo *= 2.0;
 			}
-			for ( int i = 0; i < 200 && !( neutralityResidual( hi, r, psi ) < 0.0 ); ++i )
+			for ( int i = 0; i < 200 && !( neutralityResidual( hi, radius, psi ) < 0.0 ); ++i )
 			{
 				hi *= 2.0;
 			}
@@ -654,7 +654,7 @@ class VaryingCentrifugalPlasma
 			for ( int i = 0; i < 100; ++i )
 			{
 				double const mid = 0.5*( lo + hi );
-				if ( neutralityResidual( mid, r, psi ) > 0.0 )
+				if ( neutralityResidual( mid, radius, psi ) > 0.0 )
 				{
 					lo = mid;
 				}
@@ -670,10 +670,10 @@ class VaryingCentrifugalPlasma
 		/// p = Sum_s n_s T_s with n_s built from (96) at the bisected potential.
 		/// The independent anchor for everything above: it never forms C, never
 		/// forms p_0, and never takes a psi-derivative.
-		double pressureByBisection( double r, double psi ) const
+		double pressureByBisection( double radius, double psi ) const
 		{
-			double const y = potentialByBisection( r, psi );
-			double const h = radialFactor( r );
+			double const y = potentialByBisection( radius, psi );
+			double const h = radialFactor( radius );
 			double const w = omegaSquared( psi );
 
 			double sum = 0.0;
@@ -689,9 +689,9 @@ class VaryingCentrifugalPlasma
 		/// Sum_s Z_s n_s at a trial potential, which is (97)'s left hand side.
 		/// Exposed so the driver can assert it really does vanish at the bisected
 		/// root rather than merely that the bisection returned.
-		double neutralityResidual( double y, double r, double psi ) const
+		double neutralityResidual( double y, double radius, double psi ) const
 		{
-			double const h = radialFactor( r );
+			double const h = radialFactor( radius );
 			double const w = omegaSquared( psi );
 
 			// Factored by the largest exponent, so that a high Mach number cannot
@@ -724,7 +724,7 @@ class VaryingCentrifugalPlasma
 			}
 		}
 
-		/// The charge weight that makes quasineutrality on r = rRef exact:
+		/// The charge weight that makes quasineutrality on R = R_ref exact:
 		/// n_20 = -( Z_1/Z_2 ) n_10, so the weights are 1 and 2 here.
 		double densityWeight( std::size_t s ) const
 		{

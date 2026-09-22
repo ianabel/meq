@@ -50,7 +50,7 @@
 # comparison.
 
 [mesh]
-# The gmsh half-disc: rho = 2.6, reaching r = 0 EXACTLY, with the four
+# The gmsh half-disc: rho = 2.6, reaching R = 0 EXACTLY, with the four
 # conductors meshed to rather than cut.  2870 elements, 1475 nodes.
 File = "examples/diverted-tokamak.msh"
 
@@ -79,7 +79,7 @@ ConfineToPlasma = true
 PsiAxis = 0.0827
 
 # The amplitude is set by the current, not the other way round.  The argument is
-# mu0*I_p, because that is what the constraint integral int F/r already is.
+# mu0*I_p, because that is what the constraint integral int F/R already is.
 PlasmaCurrent = 2.0e5
 Mu0 = 1.25663706212e-6
 

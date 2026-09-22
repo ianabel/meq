@@ -61,7 +61,7 @@
  *
  * INVERSION-PLAN.md section 6 argues from the maximum principle that with
  * single-signed F >= 0 the interior critical point is a MAXIMUM. Every
- * Solov'ev fixture in tests/analytic has F = -( ( 1 - A ) r^2 + A ), which on
+ * Solov'ev fixture in tests/analytic has F = -( ( 1 - A ) R^2 + A ), which on
  * these domains is single-signed NEGATIVE -- so psi is a subsolution, its
  * maximum is on the boundary, and the axis is an interior MINIMUM. Measured
  * here, and it is a minimum on all four configurations.
@@ -128,7 +128,7 @@ namespace
 	/// own Jacobian, made here in a place where it can be checked independently.
 	struct ExactCritical
 	{
-		double r;
+		double radius;
 		double z;
 		double psi;
 		double gradient;
@@ -139,7 +139,7 @@ namespace
 	ExactCritical exactCriticalPoint( Equilibrium const &eq,
 	                                  double rGuess, double zGuess )
 	{
-		double r = rGuess;
+		double radius = rGuess;
 		double z = zGuess;
 		double const step = 1.0e-5;
 
@@ -149,18 +149,18 @@ namespace
 		{
 			double gr = 0.0;
 			double gz = 0.0;
-			eq.gradPsi( r, z, gr, gz );
+			eq.gradPsi( radius, z, gr, gz );
 
 			double a0 = 0.0;
 			double a1 = 0.0;
 			double b0 = 0.0;
 			double b1 = 0.0;
-			eq.gradPsi( r + step, z, a0, b0 );
-			eq.gradPsi( r - step, z, a1, b1 );
+			eq.gradPsi( radius + step, z, a0, b0 );
+			eq.gradPsi( radius - step, z, a1, b1 );
 			hessian[ 0 ][ 0 ] = ( a0 - a1 )/( 2.0*step );
 			hessian[ 1 ][ 0 ] = ( b0 - b1 )/( 2.0*step );
-			eq.gradPsi( r, z + step, a0, b0 );
-			eq.gradPsi( r, z - step, a1, b1 );
+			eq.gradPsi( radius, z + step, a0, b0 );
+			eq.gradPsi( radius, z - step, a1, b1 );
 			hessian[ 0 ][ 1 ] = ( a0 - a1 )/( 2.0*step );
 			hessian[ 1 ][ 1 ] = ( b0 - b1 )/( 2.0*step );
 
@@ -169,7 +169,7 @@ namespace
 			double const dr = -(  hessian[ 1 ][ 1 ]*gr - hessian[ 0 ][ 1 ]*gz )/det;
 			double const dz = -( -hessian[ 1 ][ 0 ]*gr + hessian[ 0 ][ 0 ]*gz )/det;
 
-			r += dr;
+			radius += dr;
 			z += dz;
 
 			if ( std::abs( dr ) + std::abs( dz ) < 1.0e-15 )
@@ -177,13 +177,13 @@ namespace
 		}
 
 		ExactCritical axis;
-		axis.r = r;
+		axis.radius = radius;
 		axis.z = z;
-		axis.psi = eq.psi( r, z );
+		axis.psi = eq.psi( radius, z );
 
 		double gr = 0.0;
 		double gz = 0.0;
-		eq.gradPsi( r, z, gr, gz );
+		eq.gradPsi( radius, z, gr, gz );
 		axis.gradient = std::sqrt( gr*gr + gz*gz );
 		axis.determinant = hessian[ 0 ][ 0 ]*hessian[ 1 ][ 1 ]
 		                   - hessian[ 0 ][ 1 ]*hessian[ 1 ][ 0 ];
@@ -302,7 +302,7 @@ namespace
 	{
 		std::printf( "\n  %s as a zero of q, Solov'ev NSTX, k = %d\n", what, order );
 		std::printf( "  exact point ( %.12f, %.12f ), |grad psi| = %.2e, %s\n",
-		             exact.r, exact.z, exact.gradient,
+		             exact.radius, exact.z, exact.gradient,
 		             exact.determinant > 0.0
 		               ? ( exact.trace > 0.0 ? "minimum" : "maximum" ) : "saddle" );
 		std::printf( "  %8s %9s %14s %7s %14s %7s %14s %7s %7s %9s\n",
@@ -354,7 +354,7 @@ namespace
 			std::printf( "  %-28s   %-10s at ( %.6f, %.6f )  psi %+.6e  "
 			             "index %+d  |q| %.2e  over %.1e\n",
 			             "", meq::criticalPointName( found[ i ].type ),
-			             found[ i ].r, found[ i ].z, found[ i ].psi,
+			             found[ i ].radius, found[ i ].z, found[ i ].psi,
 			             found[ i ].index, found[ i ].fluxResidual,
 			             found[ i ].overshoot );
 		std::fflush( stdout );
@@ -365,10 +365,10 @@ namespace
 	/// measured rather than inferred so that the two columns can be read against
 	/// each other.
 	double pointwiseFluxError( mfem::Mesh &mesh, mfem::GridFunction const &flux,
-	                           Equilibrium const &eq, double r, double z )
+	                           Equilibrium const &eq, double radius, double z )
 	{
 		mfem::DenseMatrix point( 2, 1 );
-		point( 0, 0 ) = r;
+		point( 0, 0 ) = radius;
 		point( 1, 0 ) = z;
 
 		mfem::Array<int> elements;
@@ -382,7 +382,7 @@ namespace
 
 		double exactR = 0.0;
 		double exactZ = 0.0;
-		eq.flux( r, z, exactR, exactZ );
+		eq.flux( radius, z, exactR, exactZ );
 		return std::sqrt( ( value( 0 ) - exactR )*( value( 0 ) - exactR )
 		                  + ( value( 1 ) - exactZ )*( value( 1 ) - exactZ ) );
 	}
@@ -427,7 +427,7 @@ namespace
 
 	/*
 	 * AND THE BOX THAT HOLDS BOTH, for the audit. Tall rather than square,
-	 * because the two critical points are 1.83 apart in z and 0.62 in r; the
+	 * because the two critical points are 1.83 apart in z and 0.62 in R; the
 	 * cells are 2:1 and the mesh family is still dyadic and shape regular, which
 	 * is all a rate or a degree needs. theWindingNumberIsASumOfIndicesAndNotACount
 	 * already uses a 2:1 box for the same reason.
@@ -486,11 +486,11 @@ namespace
 	 * seed reached. Neither is wrong and they need not agree.
 	 *
 	 * xPointBox() PUTS THE X-POINT THERE AT ONE MESH IN THREE, WHICH IS AN
-	 * ACCIDENT OF ITS CORNER. nstx()'s X-point is at r = 0.699700, and
-	 * [ 0.35, 1.15 ] divided sixteen ways has a mesh line at r = 0.700000 --
+	 * ACCIDENT OF ITS CORNER. nstx()'s X-point is at R = 0.699700, and
+	 * [ 0.35, 1.15 ] divided sixteen ways has a mesh line at R = 0.700000 --
 	 * 3.0e-04 away, 0.6% of a cell. Measured at k = 1, n = 16 on that box:
-	 * element 237 holds the root at r = 0.699826 and element 238 holds its own
-	 * at r = 0.700027, both strictly inside, 6.9e-04 apart, and the two routes
+	 * element 237 holds the root at R = 0.699826 and element 238 holds its own
+	 * at R = 0.700027, both strictly inside, 6.9e-04 apart, and the two routes
 	 * return different ones of them. At k = 2 and 3 the flux is accurate enough
 	 * that both sides put the root on the same side of the line and the
 	 * question does not arise, which is why this is a coarse-mesh effect rather
@@ -565,7 +565,7 @@ BOOST_AUTO_TEST_CASE( theClosedFormAxisIsACriticalPointOfTheClosedForm )
 		ExactCritical const axis = exactCriticalPoint( cases[ i ].eq, 1.0, 0.0 );
 		std::printf( "  %-18s ( %.12f, %.12f )  psi %+.6e  |grad psi| %.2e  "
 		             "det %+.4f  tr %+.4f  %s\n",
-		             cases[ i ].name, axis.r, axis.z, axis.psi, axis.gradient,
+		             cases[ i ].name, axis.radius, axis.z, axis.psi, axis.gradient,
 		             axis.determinant, axis.trace,
 		             axis.determinant > 0.0
 		               ? ( axis.trace > 0.0 ? "minimum" : "maximum" ) : "saddle" );
@@ -644,12 +644,12 @@ BOOST_AUTO_TEST_CASE( theMagneticAxisConvergesAtTheFluxesOwnOrder )
 			AxisMeasurement point;
 			point.h = run.meshSize();
 			point.traceDofs = run.theSolver().numTraceDofs();
-			point.distance = std::sqrt( ( axis.r - exact.r )*( axis.r - exact.r )
+			point.distance = std::sqrt( ( axis.radius - exact.radius )*( axis.radius - exact.radius )
 			                            + ( axis.z - exact.z )*( axis.z - exact.z ) );
 			point.errorFlux = run.errorFlux();
 			point.pointwiseFlux = pointwiseFluxError( run.theMesh(),
 			                                          run.theSolver().flux(),
-			                                          eq, exact.r, exact.z );
+			                                          eq, exact.radius, exact.z );
 			point.residual = axis.fluxResidual;
 			point.overshoot = axis.overshoot;
 			point.type = axis.type;
@@ -727,7 +727,7 @@ BOOST_AUTO_TEST_CASE( theMagneticAxisConvergesAtTheFluxesOwnOrder )
  * inside the benchmark box.
  *
  * frcExample1 is excluded and the reason is geometric rather than numerical:
- * its axis sits at r = 1.4071, just outside the box's rMax = 1.4, so there is no
+ * its axis sits at R = 1.4071, just outside the box's R_max = 1.4, so there is no
  * critical point to find and the winding number would be zero -- correctly.
  */
 BOOST_AUTO_TEST_CASE( theWindingNumberAuditReturnsOneOnTheAnalyticFixtures )
@@ -943,7 +943,7 @@ BOOST_AUTO_TEST_CASE( theWindingNumberIsASumOfIndicesAndNotACount )
 
 	std::printf( "\n  Degree is a sum, not a count: iterExample2 on "
 	             "[%.1f,%.1f]x[%.1f,%.1f], k = 2, n = 24\n",
-	             box.rMin, box.rMax, box.zMin, box.zMax );
+	             box.minRadius, box.maxRadius, box.zMin, box.zMax );
 	printAudit( "axis and X-point", audit, found );
 
 	BOOST_TEST( audit.windingNumber == 0,
@@ -1008,7 +1008,7 @@ BOOST_AUTO_TEST_CASE( theWindingNumberIsASumOfIndicesAndNotACount )
 	{
 		if ( found[ i ].type != meq::CriticalPointType::Saddle )
 			continue;
-		double const dr = found[ i ].r - 0.88384;
+		double const dr = found[ i ].radius - 0.88384;
 		double const dz = found[ i ].z + 0.704;
 		double const distance = std::sqrt( dr*dr + dz*dz );
 		std::printf( "  located saddle is %.3e from the published X-point\n",
@@ -1140,7 +1140,7 @@ BOOST_AUTO_TEST_CASE( theCriticalPointIsNotTheExtremeNodalValue )
 			BOOST_TEST_REQUIRE( haveBest );
 
 			hs.push_back( run.meshSize() );
-			positionGaps.push_back( std::sqrt( ( axis.r - bestR )*( axis.r - bestR )
+			positionGaps.push_back( std::sqrt( ( axis.radius - bestR )*( axis.radius - bestR )
 			                                   + ( axis.z - bestZ )*( axis.z - bestZ ) ) );
 			valueGaps.push_back( std::abs( axis.psi - best ) );
 			psiErrors.push_back( run.errorPsi() );
@@ -1223,17 +1223,17 @@ BOOST_AUTO_TEST_CASE( theCriticalPointIsNotTheExtremeNodalValue )
  * CriticalPoint carries ( referenceX, referenceY ) so that a caller can call
  * CalcShape() on the axis element at the axis -- FREE-BOUNDARY-PLAN.md section
  * 11.5's option 3, where those shape functions ARE a row of a bordered
- * Jacobian. The alternative is to hand back ( r, z ) alone and let the caller
+ * Jacobian. The alternative is to hand back ( R, z ) alone and let the caller
  * invert the map with TransformBack, and CLAUDE.md records why that is a trap:
  * a CLAMPED inverse returns a point on the element boundary rather than
  * failing, and a field that is constant over the element cannot tell the
  * difference.
  *
  * SO WHAT IS ASSERTED IS THE ROUND TRIP, which is the only thing that can catch
- * the plumbing being wrong: transform( referencePoint() ) must be ( r, z ). It
+ * the plumbing being wrong: transform( referencePoint() ) must be ( R, z ). It
  * is required at round-off rather than at a tolerance, because both sides are
  * the SAME transformation applied to the SAME point -- rootInElement() sets
- * found.r from exactly this call. A tolerance here would pass on a stale or a
+ * found.R from exactly this call. A tolerance here would pass on a stale or a
  * defaulted reference point whenever the element happened to be small.
  *
  * AND psi AT THAT POINT IS CHECKED TOO, because a caller of option 3 evaluates
@@ -1276,7 +1276,7 @@ BOOST_AUTO_TEST_CASE( theReferenceCoordinatesReproduceTheLocatedPoint )
 			mfem::Vector physical( 2 );
 			transformation.Transform( ip, physical );
 
-			double const dr = physical( 0 ) - axis.r;
+			double const dr = physical( 0 ) - axis.radius;
 			double const dz = physical( 1 ) - axis.z;
 			double const roundTrip = std::sqrt( dr*dr + dz*dz );
 
@@ -1295,13 +1295,13 @@ BOOST_AUTO_TEST_CASE( theReferenceCoordinatesReproduceTheLocatedPoint )
 			// the coordinates means the reference point is not the one the root
 			// was found at. Scaled by the position so that this reads the same on
 			// a domain of any size.
-			double const scale = std::max( 1.0, std::abs( axis.r )
+			double const scale = std::max( 1.0, std::abs( axis.radius )
 			                                    + std::abs( axis.z ) );
 			BOOST_TEST( roundTrip <= 1.0e-13*scale,
 				"the reference point ( " << axis.referenceX << ", "
 				<< axis.referenceY << " ) of element " << axis.element
 				<< " transforms to ( " << physical( 0 ) << ", " << physical( 1 )
-				<< " ) where the located axis is ( " << axis.r << ", " << axis.z
+				<< " ) where the located axis is ( " << axis.radius << ", " << axis.z
 				<< " ). These are the same map applied to the same point, so a gap "
 				"means the reference coordinates are stale, defaulted, or from "
 				"another element." );
@@ -1372,14 +1372,14 @@ BOOST_AUTO_TEST_CASE( theSeededSearchFindsTheSameAxisForLessWork )
 			// HALF AN ELEMENT AWAY, DIAGONALLY, so that the seed is neither the
 			// answer nor aligned with the mesh.
 			double const h = run.meshSize();
-			double const seedR = reference.r + 0.5*h;
+			double const seedR = reference.radius + 0.5*h;
 			double const seedZ = reference.z - 0.5*h;
 
 			meq::CriticalPoint seeded;
 			bool const found =
 				finder.tryFindAxisFrom( seedR, seedZ, sense, seeded );
 
-			double const dr = seeded.r - reference.r;
+			double const dr = seeded.radius - reference.radius;
 			double const dz = seeded.z - reference.z;
 			double const gap = found ? std::sqrt( dr*dr + dz*dz )
 			                         : std::numeric_limits<double>::infinity();
@@ -1395,15 +1395,15 @@ BOOST_AUTO_TEST_CASE( theSeededSearchFindsTheSameAxisForLessWork )
 				                                   ? "maximum" : "minimum" )
 				<< " half an element from the axis at k = " << order << ", n = "
 				<< axisMeshes[ m ] << ", where findAxis() found one at ( "
-				<< reference.r << ", " << reference.z << " )." );
+				<< reference.radius << ", " << reference.z << " )." );
 
 			// ROUND-OFF. Both routes root the same polynomial with the same
 			// Newton; they either reach the same root or they reach a different
 			// element's version of it, and the second is what this is here to
 			// catch.
-			BOOST_TEST( gap <= 1.0e-12*std::max( 1.0, std::abs( reference.r ) ),
-				"the seeded search returned ( " << seeded.r << ", " << seeded.z
-				<< " ) where findAxis() returns ( " << reference.r << ", "
+			BOOST_TEST( gap <= 1.0e-12*std::max( 1.0, std::abs( reference.radius ) ),
+				"the seeded search returned ( " << seeded.radius << ", " << seeded.z
+				<< " ) where findAxis() returns ( " << reference.radius << ", "
 				<< reference.z << " ) -- " << gap << " apart. Seeded from half an "
 				"element away, these should be the same root to the last bits; a "
 				"gap of order h^(k+1) means it found a NEIGHBOURING element's "
@@ -1467,19 +1467,19 @@ BOOST_AUTO_TEST_CASE( theSeededSearchDeclinesRatherThanGuessing )
 	             order, n );
 	std::printf( "    the axis is a %s at ( %.4f, %.4f )\n",
 	             meq::criticalPointName( reference.type ),
-	             reference.r, reference.z );
+	             reference.radius, reference.z );
 
 	// (1) FAR AWAY. The bottom-left corner of the box, which on standardBox()
 	// against nstx() is most of the domain away from the axis.
 	meq::CriticalPoint far;
-	bool const foundFar = finder.tryFindAxisFrom( box.rMin, box.zMin, right, far );
+	bool const foundFar = finder.tryFindAxisFrom( box.minRadius, box.zMin, right, far );
 	std::printf( "    seeded at the ( %.2f, %.2f ) corner, right sense: %s\n",
-	             box.rMin, box.zMin, foundFar ? "FOUND SOMETHING" : "declined" );
+	             box.minRadius, box.zMin, foundFar ? "FOUND SOMETHING" : "declined" );
 
 	BOOST_TEST( !foundFar,
-		"seeded in the corner at ( " << box.rMin << ", " << box.zMin
+		"seeded in the corner at ( " << box.minRadius << ", " << box.zMin
 		<< " ) the search returned a " << meq::criticalPointName( far.type )
-		<< " at ( " << far.r << ", " << far.z << " ), " << far.element
+		<< " at ( " << far.radius << ", " << far.z << " ), " << far.element
 		<< ". Two rings of face neighbours do not reach the axis from there, so "
 		"whatever this is it is not the axis -- and a caller following a branch "
 		"would have been handed it silently. If the search radius has been "
@@ -1489,7 +1489,7 @@ BOOST_AUTO_TEST_CASE( theSeededSearchDeclinesRatherThanGuessing )
 	// (2) ON the axis, wrong sense. There IS a critical point under the seed.
 	meq::CriticalPoint mistyped;
 	bool const foundWrong =
-		finder.tryFindAxisFrom( reference.r, reference.z, wrong, mistyped );
+		finder.tryFindAxisFrom( reference.radius, reference.z, wrong, mistyped );
 	std::printf( "    seeded ON the axis, asking for a %s: %s\n",
 	             wrong == meq::AxisSense::Maximum ? "maximum" : "minimum",
 	             foundWrong ? "FOUND SOMETHING" : "declined" );
@@ -1498,7 +1498,7 @@ BOOST_AUTO_TEST_CASE( theSeededSearchDeclinesRatherThanGuessing )
 	BOOST_TEST( !foundWrong,
 		"seeded exactly on a " << meq::criticalPointName( reference.type )
 		<< " and asked for the opposite sense, the search returned a "
-		<< meq::criticalPointName( mistyped.type ) << " at ( " << mistyped.r
+		<< meq::criticalPointName( mistyped.type ) << " at ( " << mistyped.radius
 		<< ", " << mistyped.z << " ). The sense filter is what stands between a "
 		"caller and the raw flux block, which holds -q and turns every Minimum "
 		"into a Maximum with every winding number unchanged." );
@@ -1508,7 +1508,7 @@ BOOST_AUTO_TEST_CASE( theSeededSearchDeclinesRatherThanGuessing )
 	// would be evidence that the search never finds anything.
 	meq::CriticalPoint proper;
 	bool const foundRight =
-		finder.tryFindAxisFrom( reference.r, reference.z, right, proper );
+		finder.tryFindAxisFrom( reference.radius, reference.z, right, proper );
 	BOOST_TEST( foundRight,
 		"the control failed: seeded on the axis with the CORRECT sense the "
 		"search found nothing, so the two refusals above say nothing about the "
@@ -1545,7 +1545,7 @@ BOOST_AUTO_TEST_CASE( theClosedFormXPointIsASaddleOfTheClosedForm )
 	{
 		char const *name;
 		Equilibrium eq;
-		double r;
+		double radius;
 		double z;
 
 		/// Whether the point above is where this fixture's psi actually has its
@@ -1574,19 +1574,19 @@ BOOST_AUTO_TEST_CASE( theClosedFormXPointIsASaddleOfTheClosedForm )
 	{
 		double gr = 0.0;
 		double gz = 0.0;
-		cases[ i ].eq.gradPsi( cases[ i ].r, cases[ i ].z, gr, gz );
+		cases[ i ].eq.gradPsi( cases[ i ].radius, cases[ i ].z, gr, gz );
 		double const gradientThere = std::sqrt( gr*gr + gz*gz );
 
 		ExactCritical const saddle =
-			exactCriticalPoint( cases[ i ].eq, cases[ i ].r, cases[ i ].z );
+			exactCriticalPoint( cases[ i ].eq, cases[ i ].radius, cases[ i ].z );
 
-		double const dr = saddle.r - cases[ i ].r;
+		double const dr = saddle.radius - cases[ i ].radius;
 		double const dz = saddle.z - cases[ i ].z;
 		double const moved = std::sqrt( dr*dr + dz*dz );
 
 		std::printf( "  %-17s ( %.6f, %.6f ) %11.2e   ( %.6f, %.6f ) %11.2e %10.4f %9.2e\n",
-		             cases[ i ].name, cases[ i ].r, cases[ i ].z, gradientThere,
-		             saddle.r, saddle.z, saddle.gradient, saddle.determinant,
+		             cases[ i ].name, cases[ i ].radius, cases[ i ].z, gradientThere,
+		             saddle.radius, saddle.z, saddle.gradient, saddle.determinant,
 		             moved );
 		std::fflush( stdout );
 
@@ -1600,7 +1600,7 @@ BOOST_AUTO_TEST_CASE( theClosedFormXPointIsASaddleOfTheClosedForm )
 		// A NEGATIVE DETERMINANT IS WHAT MAKES IT A SADDLE rather than an
 		// extremum, and it is the half that distinguishes an X-point from a
 		// second magnetic axis. Note the Hessian's determinant and dq/dx's
-		// differ by r^2 > 0, so the sign is the same quantity either way.
+		// differ by R^2 > 0, so the sign is the same quantity either way.
 		BOOST_TEST( saddle.determinant < 0.0,
 		            cases[ i ].name << ": the point near the prescribed X-point "
 		            << "is an extremum, det = " << saddle.determinant
@@ -1612,7 +1612,7 @@ BOOST_AUTO_TEST_CASE( theClosedFormXPointIsASaddleOfTheClosedForm )
 			// point, so this is round-off and not a tolerance.
 			BOOST_TEST( gradientThere < 1.0e-12,
 			            cases[ i ].name << ": grad psi at the prescribed X-point ( "
-			            << cases[ i ].r << ", " << cases[ i ].z << " ) is "
+			            << cases[ i ].radius << ", " << cases[ i ].z << " ) is "
 			            << gradientThere << ", so the twelve constraints that "
 			            << "built this fixture are not satisfied at it" );
 
@@ -1676,7 +1676,7 @@ BOOST_AUTO_TEST_CASE( theClosedFormXPointIsASaddleOfTheClosedForm )
  * THE CONDITIONING WINDOW IS COMPUTED, NOT QUOTED, AND IT IS TWO SIDED.
  *
  * q_h( x_h ) = 0 and q( x* ) = 0 give x_h - x* = -J^-1 ( q_h - q )( x* ) to
- * first order, with J = dq/dx = Hess( psi )/r at the saddle -- SYMMETRIC, since
+ * first order, with J = dq/dx = Hess( psi )/R at the saddle -- SYMMETRIC, since
  * a Hessian is, so its singular values are |lambda_1| and |lambda_2| and the
  * ratio of the position error to the pointwise flux error is trapped between
  * 1/|lambda|_max and 1/|lambda|_min. For nstx()'s X-point those are 0.899102
@@ -1710,10 +1710,10 @@ BOOST_AUTO_TEST_CASE( theXPointConvergesAtTheFluxesOwnOrder )
 		"to measure an X-point finder against" );
 
 	// The conditioning of the root, from the closed form's own Hessian.
-	// dq/dx = Hess( psi )/r at a critical point, exactly, because the term that
-	// differentiates the 1/r carries grad psi and grad psi vanishes here.
-	double const jacobianDet = exact.determinant/( exact.r*exact.r );
-	double const jacobianTrace = exact.trace/exact.r;
+	// dq/dx = Hess( psi )/R at a critical point, exactly, because the term that
+	// differentiates the 1/R carries grad psi and grad psi vanishes here.
+	double const jacobianDet = exact.determinant/( exact.radius*exact.radius );
+	double const jacobianTrace = exact.trace/exact.radius;
 	double const discriminant =
 		std::sqrt( jacobianTrace*jacobianTrace - 4.0*jacobianDet );
 	double const lambdaPlus = 0.5*( jacobianTrace + discriminant );
@@ -1771,13 +1771,13 @@ BOOST_AUTO_TEST_CASE( theXPointConvergesAtTheFluxesOwnOrder )
 			AxisMeasurement point;
 			point.h = run.meshSize();
 			point.traceDofs = run.theSolver().numTraceDofs();
-			double const dr = saddle.r - exact.r;
+			double const dr = saddle.radius - exact.radius;
 			double const dz = saddle.z - exact.z;
 			point.distance = std::sqrt( dr*dr + dz*dz );
 			point.errorFlux = run.errorFlux();
 			point.pointwiseFlux = pointwiseFluxError( run.theMesh(),
 			                                          run.theSolver().flux(),
-			                                          eq, exact.r, exact.z );
+			                                          eq, exact.radius, exact.z );
 			point.residual = saddle.fluxResidual;
 			point.overshoot = saddle.overshoot;
 			point.type = saddle.type;
@@ -1909,7 +1909,7 @@ BOOST_AUTO_TEST_CASE( theAuditReadsPlusOneAtTheAxisAndMinusOneAtTheXPoint )
 
 	std::printf( "\n  Poincare-Hopf over a box holding the axis AND the X-point, "
 	             "[%.2f,%.2f]x[%.2f,%.2f], n = 16\n",
-	             box.rMin, box.rMax, box.zMin, box.zMax );
+	             box.minRadius, box.maxRadius, box.zMin, box.zMax );
 
 	for ( int order = 1; order <= 3; ++order )
 	{
@@ -1940,7 +1940,7 @@ BOOST_AUTO_TEST_CASE( theAuditReadsPlusOneAtTheAxisAndMinusOneAtTheXPoint )
 			if ( found[ i ].type == meq::CriticalPointType::Saddle )
 			{
 				++saddles;
-				double const dr = found[ i ].r - exactSaddle.r;
+				double const dr = found[ i ].radius - exactSaddle.radius;
 				double const dz = found[ i ].z - exactSaddle.z;
 				saddleGap = std::sqrt( dr*dr + dz*dz );
 				BOOST_TEST( found[ i ].index == -1,
@@ -1951,7 +1951,7 @@ BOOST_AUTO_TEST_CASE( theAuditReadsPlusOneAtTheAxisAndMinusOneAtTheXPoint )
 			     || found[ i ].type == meq::CriticalPointType::Minimum )
 			{
 				++extrema;
-				double const dr = found[ i ].r - exactAxisPoint.r;
+				double const dr = found[ i ].radius - exactAxisPoint.radius;
 				double const dz = found[ i ].z - exactAxisPoint.z;
 				axisGap = std::sqrt( dr*dr + dz*dz );
 				BOOST_TEST( found[ i ].index == +1,
@@ -1978,12 +1978,12 @@ BOOST_AUTO_TEST_CASE( theAuditReadsPlusOneAtTheAxisAndMinusOneAtTheXPoint )
 			BOOST_TEST( saddleGap < near,
 			            label << ": the located saddle is " << saddleGap
 			            << " from the closed form's X-point at ( "
-			            << exactSaddle.r << ", " << exactSaddle.z << " )" );
+			            << exactSaddle.radius << ", " << exactSaddle.z << " )" );
 		if ( extrema == 1 )
 			BOOST_TEST( axisGap < near,
 			            label << ": the located extremum is " << axisGap
 			            << " from the closed form's axis at ( "
-			            << exactAxisPoint.r << ", " << exactAxisPoint.z << " )" );
+			            << exactAxisPoint.radius << ", " << exactAxisPoint.z << " )" );
 
 		// The half of Poincare-Hopf that needs no transversality, and the one a
 		// diverted solve would actually use.
@@ -2149,7 +2149,7 @@ BOOST_AUTO_TEST_CASE( theSeededSaddleSearchCostsLessThanASweep )
 			long const seededSolves = finder.newtonSolves();
 			long const seededElements = finder.elementsRooted();
 
-			double const dr = seeded.r - reference.r;
+			double const dr = seeded.radius - reference.radius;
 			double const dz = seeded.z - reference.z;
 			double const gap = found ? std::sqrt( dr*dr + dz*dz )
 			                         : std::numeric_limits<double>::infinity();
@@ -2168,17 +2168,17 @@ BOOST_AUTO_TEST_CASE( theSeededSaddleSearchCostsLessThanASweep )
 				<< ": the seeded search found no saddle half an element from the "
 				"closed form's X-point at ( " << nstxXPointR << ", "
 				<< nstxXPointZ << " ), where the sweep found one at ( "
-				<< reference.r << ", " << reference.z << " )." );
+				<< reference.radius << ", " << reference.z << " )." );
 
 			// ROUND-OFF, for the axis case's reason: both routes root the same
 			// element's polynomial with the same Newton and the same stopping
 			// rule, so they either reach the same root or they reach a
 			// NEIGHBOURING element's version of it -- which is O( h^(k+1) ) away
 			// and is what the containment machinery arbitrates.
-			BOOST_TEST( gap <= 1.0e-12*std::max( 1.0, std::abs( reference.r ) ),
+			BOOST_TEST( gap <= 1.0e-12*std::max( 1.0, std::abs( reference.radius ) ),
 				"k = " << order << ", n = " << meshes[ m ]
-				<< ": the seeded search returned ( " << seeded.r << ", "
-				<< seeded.z << " ) where the sweep returns ( " << reference.r
+				<< ": the seeded search returned ( " << seeded.radius << ", "
+				<< seeded.z << " ) where the sweep returns ( " << reference.radius
 				<< ", " << reference.z << " ) -- " << gap << " apart. Seeded half "
 				"an element away these are the same root to the last bits; a gap "
 				"of order h^(k+1) means a neighbouring element's version of it, "
@@ -2295,14 +2295,14 @@ BOOST_AUTO_TEST_CASE( theSeededSaddleSearchDeclinesRatherThanGuessing )
 	             "( k = %d, n = %d )\n", order, n );
 	std::printf( "    the axis is at ( %.4f, %.4f ), the X-point at "
 	             "( %.4f, %.4f ), %.2f apart in z\n",
-	             exactAxis.r, exactAxis.z, exactSaddle.r, exactSaddle.z,
+	             exactAxis.radius, exactAxis.z, exactSaddle.radius, exactSaddle.z,
 	             std::abs( exactAxis.z - exactSaddle.z ) );
 
 	// THE CONTROL FIRST, because without it every refusal below is equally well
 	// explained by a search that never finds anything.
 	meq::CriticalPoint onTarget;
 	bool const foundTarget = finder.tryFindCriticalPointFrom(
-		exactSaddle.r, exactSaddle.z, meq::AxisSense::Saddle, onTarget );
+		exactSaddle.radius, exactSaddle.z, meq::AxisSense::Saddle, onTarget );
 	std::printf( "    seeded ON the X-point, asking for a saddle: %s\n",
 	             foundTarget ? "found" : "DECLINED" );
 
@@ -2311,27 +2311,27 @@ BOOST_AUTO_TEST_CASE( theSeededSaddleSearchDeclinesRatherThanGuessing )
 		"search found nothing, so the three refusals below say nothing about the "
 		"sense filter or the search radius." );
 
-	double const controlDr = onTarget.r - exactSaddle.r;
+	double const controlDr = onTarget.radius - exactSaddle.radius;
 	double const controlDz = onTarget.z - exactSaddle.z;
 	BOOST_TEST( std::sqrt( controlDr*controlDr + controlDz*controlDz )
 	            < 0.1*run.meshSize(),
-		"the control found a saddle at ( " << onTarget.r << ", " << onTarget.z
-		<< " ) rather than the X-point at ( " << exactSaddle.r << ", "
+		"the control found a saddle at ( " << onTarget.radius << ", " << onTarget.z
+		<< " ) rather than the X-point at ( " << exactSaddle.radius << ", "
 		<< exactSaddle.z << " )." );
 
 	// (1) ON THE AXIS, ASKING FOR A SADDLE. There is a critical point under the
 	// seed; it is the wrong kind, and the right kind is 1.73 away in z.
 	meq::CriticalPoint atAxis;
 	bool const foundAtAxis = finder.tryFindCriticalPointFrom(
-		exactAxis.r, exactAxis.z, meq::AxisSense::Saddle, atAxis );
+		exactAxis.radius, exactAxis.z, meq::AxisSense::Saddle, atAxis );
 	std::printf( "    seeded ON the axis, asking for a saddle: %s\n",
 	             foundAtAxis ? "FOUND SOMETHING" : "declined" );
 
 	BOOST_TEST( !foundAtAxis,
 		"seeded exactly on the magnetic axis and asked for a saddle, the search "
 		"returned a " << meq::criticalPointName( atAxis.type ) << " at ( "
-		<< atAxis.r << ", " << atAxis.z << " ), element " << atAxis.element
-		<< ". The X-point is at ( " << exactSaddle.r << ", " << exactSaddle.z
+		<< atAxis.radius << ", " << atAxis.z << " ), element " << atAxis.element
+		<< ". The X-point is at ( " << exactSaddle.radius << ", " << exactSaddle.z
 		<< " ), far outside the seed rings, so whatever this is it is not it -- "
 		"and an outer iteration following an X-point would have been handed it "
 		"silently." );
@@ -2343,21 +2343,21 @@ BOOST_AUTO_TEST_CASE( theSeededSaddleSearchDeclinesRatherThanGuessing )
 	BOOST_TEST( atAxis.element == -1,
 		"the search declined and still wrote element " << atAxis.element
 		<< " into the result, a " << meq::criticalPointName( atAxis.type )
-		<< " at ( " << atAxis.r << ", " << atAxis.z
+		<< " at ( " << atAxis.radius << ", " << atAxis.z
 		<< " ). A caller who does not check the return value would follow it." );
 
 	// (2) FAR AWAY, in the corner of the box.
 	meq::CriticalPoint corner;
 	bool const foundCorner = finder.tryFindCriticalPointFrom(
-		box.rMin, box.zMax, meq::AxisSense::Saddle, corner );
+		box.minRadius, box.zMax, meq::AxisSense::Saddle, corner );
 	std::printf( "    seeded at the ( %.2f, %.2f ) corner, asking for a saddle: "
-	             "%s\n", box.rMin, box.zMax,
+	             "%s\n", box.minRadius, box.zMax,
 	             foundCorner ? "FOUND SOMETHING" : "declined" );
 
 	BOOST_TEST( !foundCorner,
-		"seeded in the corner at ( " << box.rMin << ", " << box.zMax
+		"seeded in the corner at ( " << box.minRadius << ", " << box.zMax
 		<< " ) the search returned a " << meq::criticalPointName( corner.type )
-		<< " at ( " << corner.r << ", " << corner.z
+		<< " at ( " << corner.radius << ", " << corner.z
 		<< " ). Six rings of face neighbours do not reach the X-point from "
 		"there. If setSeedRings()' default has been widened deliberately, this "
 		"case pins the SHIPPED default and is what has to move." );
@@ -2365,7 +2365,7 @@ BOOST_AUTO_TEST_CASE( theSeededSaddleSearchDeclinesRatherThanGuessing )
 	// (3) ON THE X-POINT, ASKING FOR AN EXTREMUM. The mirror of (1).
 	meq::CriticalPoint mistyped;
 	bool const foundMistyped = finder.tryFindCriticalPointFrom(
-		exactSaddle.r, exactSaddle.z, meq::AxisSense::Either, mistyped );
+		exactSaddle.radius, exactSaddle.z, meq::AxisSense::Either, mistyped );
 	std::printf( "    seeded ON the X-point, asking for an extremum: %s\n",
 	             foundMistyped ? "FOUND SOMETHING" : "declined" );
 	std::fflush( stdout );
@@ -2373,7 +2373,7 @@ BOOST_AUTO_TEST_CASE( theSeededSaddleSearchDeclinesRatherThanGuessing )
 	BOOST_TEST( !foundMistyped,
 		"seeded exactly on the X-point and asked for an extremum, the search "
 		"returned a " << meq::criticalPointName( mistyped.type ) << " at ( "
-		<< mistyped.r << ", " << mistyped.z
+		<< mistyped.radius << ", " << mistyped.z
 		<< " ). AxisSense::Either is EITHER EXTREMUM and never a saddle; a "
 		"default that had quietly grown to mean 'any critical point' would make "
 		"findAxis() return the X-point of a diverted equilibrium as the "
@@ -2392,7 +2392,7 @@ BOOST_AUTO_TEST_CASE( theSeededSaddleSearchDeclinesRatherThanGuessing )
 	// tryFindAxisFrom() COULD serve it -- it is tryFindCriticalPointFrom() --
 	// and refuses anyway, so that "axis" keeps meaning axis at the one entry
 	// point a caller with a prior reaches for.
-	BOOST_CHECK_THROW( finder.tryFindAxisFrom( exactSaddle.r, exactSaddle.z,
+	BOOST_CHECK_THROW( finder.tryFindAxisFrom( exactSaddle.radius, exactSaddle.z,
 	                                           meq::AxisSense::Saddle, unused ),
 	                   std::invalid_argument );
 }
@@ -2450,9 +2450,9 @@ BOOST_AUTO_TEST_CASE( theAxisSweepDoesNotDependOnTheThreadCount )
 	 * THE FIRST ROW IS THE ONE WITH TEETH AND THE FILE ALREADY SAYS WHY.
 	 *
 	 * seededXPointBox()'s own comment records the measurement: on xPointBox()
-	 * at k = 1, n = 16 the X-point at r = 0.699700 sits 3.0e-04 from the mesh
-	 * line at r = 0.700000, element 237 holds a root at r = 0.699826 and
-	 * element 238 holds its own at r = 0.700027, BOTH STRICTLY INSIDE and
+	 * at k = 1, n = 16 the X-point at R = 0.699700 sits 3.0e-04 from the mesh
+	 * line at R = 0.700000, element 237 holds a root at R = 0.699826 and
+	 * element 238 holds its own at R = 0.700027, BOTH STRICTLY INSIDE and
 	 * 6.9e-04 apart -- so both have `overshoot` exactly zero, the merge rule's
 	 * `point.overshoot < points[ j ].overshoot` is FALSE either way, and
 	 * "sweep() merges the two and keeps whichever it saw first". That is the
@@ -2533,9 +2533,9 @@ BOOST_AUTO_TEST_CASE( theAxisSweepDoesNotDependOnTheThreadCount )
 				// on -- so a dedup that picked the other candidate would be
 				// caught here even where the two sit at the same place to
 				// printing precision.
-				BOOST_TEST( a.r - b.r == 0.0,
+				BOOST_TEST( a.radius - b.radius == 0.0,
 					one.name << " k = " << one.order << ", n = " << one.n
-					<< ", candidate " << i << ": r moved by " << ( a.r - b.r )
+					<< ", candidate " << i << ": R moved by " << ( a.radius - b.radius )
 					<< " between one thread and " << ambient );
 				BOOST_TEST( a.z - b.z == 0.0,
 					one.name << " k = " << one.order << ", n = " << one.n

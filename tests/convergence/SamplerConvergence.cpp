@@ -55,7 +55,7 @@ BOOST_AUTO_TEST_CASE( everyNodeIsFoundInAnElementThatContainsIt )
 	// Inset by a hair so that nodes on the boundary are unambiguous.
 	double const inset = 1.0e-9;
 	meq::GridSampler sampler( mesh,
-		box().rMin + inset, box().rMax - inset, 41,
+		box().minRadius + inset, box().maxRadius - inset, 41,
 		box().zMin + inset, box().zMax - inset, 41 );
 
 	BOOST_TEST( sampler.locatedCount() == 41*41,
@@ -126,7 +126,7 @@ BOOST_AUTO_TEST_CASE( theAffineInverseLocatesWhatTheNewtonInverseDoes )
 
 	int const nodes = 41;
 	meq::GridSampler sampler( mesh,
-		box().rMin, box().rMax, nodes,
+		box().minRadius, box().maxRadius, nodes,
 		box().zMin, box().zMax, nodes );
 
 	// P_0: one dof per element, set to the element's own index.
@@ -235,15 +235,15 @@ BOOST_AUTO_TEST_CASE( nodesOutsideTheMeshAreNotLocated )
 	double const padR = 0.5*box().width();
 	double const padZ = 0.5*box().height();
 	meq::GridSampler sampler( mesh,
-		box().rMin - padR, box().rMax + padR, 61,
+		box().minRadius - padR, box().maxRadius + padR, 61,
 		box().zMin - padZ, box().zMax + padZ, 61 );
 
 	int inside = 0, outside = 0;
 	for ( int j = 0; j < sampler.nodesZ(); ++j )
 		for ( int i = 0; i < sampler.nodesR(); ++i )
 		{
-			bool const within = sampler.rAt( i ) > box().rMin + 1.0e-9
-			                 && sampler.rAt( i ) < box().rMax - 1.0e-9
+			bool const within = sampler.rAt( i ) > box().minRadius + 1.0e-9
+			                 && sampler.rAt( i ) < box().maxRadius - 1.0e-9
 			                 && sampler.zAt( j ) > box().zMin + 1.0e-9
 			                 && sampler.zAt( j ) < box().zMax - 1.0e-9;
 			if ( within )
@@ -252,8 +252,8 @@ BOOST_AUTO_TEST_CASE( nodesOutsideTheMeshAreNotLocated )
 				BOOST_TEST( sampler.located( i, j ),
 				            "a node strictly inside the mesh was not located" );
 			}
-			else if ( sampler.rAt( i ) < box().rMin - 1.0e-9
-			       || sampler.rAt( i ) > box().rMax + 1.0e-9
+			else if ( sampler.rAt( i ) < box().minRadius - 1.0e-9
+			       || sampler.rAt( i ) > box().maxRadius + 1.0e-9
 			       || sampler.zAt( j ) < box().zMin - 1.0e-9
 			       || sampler.zAt( j ) > box().zMax + 1.0e-9 )
 			{
@@ -294,7 +294,7 @@ BOOST_AUTO_TEST_CASE( theSampledFieldsMatchTheExactSolution )
 
 	double const inset = 0.05;
 	meq::GridSampler sampler( mesh,
-		box().rMin + inset, box().rMax - inset, 65,
+		box().minRadius + inset, box().maxRadius - inset, 65,
 		box().zMin + inset, box().zMax - inset, 65 );
 
 	std::vector<double> psi, bR, bZ;
@@ -309,11 +309,11 @@ BOOST_AUTO_TEST_CASE( theSampledFieldsMatchTheExactSolution )
 			std::size_t const at = static_cast<std::size_t>( j )*sampler.nodesR() + i;
 			BOOST_TEST_REQUIRE( sampler.located( i, j ) );
 
-			double const r = sampler.rAt( i ), z = sampler.zAt( j );
-			worstPsi = std::max( worstPsi, std::abs( psi[ at ] - eq.psi( r, z ) ) );
+			double const radius = sampler.rAt( i ), z = sampler.zAt( j );
+			worstPsi = std::max( worstPsi, std::abs( psi[ at ] - eq.psi( radius, z ) ) );
 
 			double qR = 0.0, qZ = 0.0;
-			eq.flux( r, z, qR, qZ );
+			eq.flux( radius, z, qR, qZ );
 			worstB = std::max( worstB, std::hypot( bR[ at ] + qZ, bZ[ at ] - qR ) );
 		}
 
@@ -348,7 +348,7 @@ BOOST_AUTO_TEST_CASE( locatingIsLinearInTheNodeCount )
 	{
 		auto const start = std::chrono::steady_clock::now();
 		meq::GridSampler sampler( mesh,
-			box().rMin + 0.01, box().rMax - 0.01, nodes,
+			box().minRadius + 0.01, box().maxRadius - 0.01, nodes,
 			box().zMin + 0.01, box().zMax - 0.01, nodes );
 		auto const stop = std::chrono::steady_clock::now();
 		BOOST_TEST( sampler.locatedCount() > 0 );
@@ -485,16 +485,16 @@ BOOST_AUTO_TEST_CASE( theTwoLocatorsAgreeAtTheSamePoints )
 	};
 
 	auto compare = [ & ]( char const *what,
-	                      double rMin, double rMax, int nR,
+	                      double minRadius, double maxRadius, int nR,
 	                      double zMin, double zMax, int nZ )
 	{
-		meq::GridSampler sampler( mesh, rMin, rMax, nR, zMin, zMax, nZ );
+		meq::GridSampler sampler( mesh, minRadius, maxRadius, nR, zMin, zMax, nZ );
 
 		std::vector<double> grid, mine;
 		sampler.sample( solver.potential(), grid, std::nan( "" ) );
 		sampler.sample( owner, mine, -1.0 );
 
-		// The SAME points, in gslib's byNODES ordering: every r, then every z.
+		// The SAME points, in gslib's byNODES ordering: every R, then every z.
 		// Passed explicitly because the two orderings differ silently and a
 		// transposed cloud gives a plausible wrong answer rather than an error.
 		int const total = nR*nZ;
@@ -564,11 +564,11 @@ BOOST_AUTO_TEST_CASE( theTwoLocatorsAgreeAtTheSamePoints )
 	             mesh.GetNE() );
 
 	double const inset = 0.05;
-	Outcome const generic = compare( "generic:", box().rMin + inset, box().rMax - inset, 65,
+	Outcome const generic = compare( "generic:", box().minRadius + inset, box().maxRadius - inset, 65,
 	                                 box().zMin + inset, box().zMax - inset, 65 );
 	// Every node on a mesh line: n + 1 nodes across the full box is the mesh's
 	// own spacing, and the triangulation's diagonals cross those nodes too.
-	Outcome const aligned = compare( "face-aligned:", box().rMin, box().rMax, n + 1,
+	Outcome const aligned = compare( "face-aligned:", box().minRadius, box().maxRadius, n + 1,
 	                                 box().zMin, box().zMax, n + 1 );
 
 	BOOST_TEST_REQUIRE( generic.interior > 3000 );
@@ -594,7 +594,7 @@ BOOST_AUTO_TEST_CASE( theTwoLocatorsAgreeAtTheSamePoints )
 	 */
 	double worstAgainstExact = 0.0;
 	{
-		meq::GridSampler check( mesh, box().rMin, box().rMax, n + 1,
+		meq::GridSampler check( mesh, box().minRadius, box().maxRadius, n + 1,
 		                              box().zMin, box().zMax, n + 1 );
 		std::vector<double> psi;
 		check.sample( solver.potential(), psi, std::nan( "" ) );

@@ -22,7 +22,7 @@
  * SOLUTION of an order study, and there are two independent reasons, matching
  * the two coil models section 5.4 offers.
  *
- * A FILAMENT IS A DELTA FUNCTION. In the ( r, z ) half-plane a circular loop is
+ * A FILAMENT IS A DELTA FUNCTION. In the ( R, z ) half-plane a circular loop is
  * a point, so its source is a Dirac mass and its psi has a logarithmic
  * singularity there -- CurrentLoop.hpp measures exactly that, psi reading
  * 3.4956, 5.7962 and 8.0828 at distances 1e-3, 1e-5 and 1e-7 against
@@ -37,7 +37,7 @@
  * recovers it" -- and the remedy is the same one: do not pose the study there.
  *
  * A FINITE CROSS-SECTION FIXES THE REGULARITY AND LOSES THE CLOSED FORM.
- * Section 5.4's other model, F_coil = mu0 r I_k / |Omega_ck| on a coil
+ * Section 5.4's other model, F_coil = mu0 R I_k / |Omega_ck| on a coil
  * subdomain, has psi in H^2 -- but its exact field is the two-dimensional
  * integral of loop fields over the cross-section, which is semi-analytic
  * (quadrature, not a formula) and whose integrand is weakly singular for a
@@ -57,14 +57,14 @@
  * THE CONSTRUCTION
  * ----------------
  *
- * In spherical coordinates about a centre on the axis -- r = rho sin theta,
+ * In spherical coordinates about a centre on the axis -- R = rho sin theta,
  * z = zCentre + rho cos theta, mu = cos theta -- FREE-BOUNDARY-PLAN.md
  * section 3 separates the operator as
  *
  *     Delta*( F( rho ) C_n( mu ) ) = [ F'' - n( n - 1 ) F / rho^2 ] C_n( mu ),
  *
  * C_n being the Gegenbauer function of order -1/2 that src/meq/ExteriorDtN
- * already implements. Re-verified here symbolically in ( r, z ), exactly, for
+ * already implements. Re-verified here symbolically in ( R, z ), exactly, for
  * n = 2..7 and exponents n, 1-n, n+2, n+4, n+6; the two homogeneous solutions
  * are rho^n (regular at the centre) and rho^{1-n} (decaying).
  *
@@ -74,10 +74,10 @@
  *     F( rho ) = A rho^n + sum_{i=0}^{p} c_i rho^{n+2i+2}     rho <  rho_0
  *
  * Every interior term is regular at the centre, because rho^{n+2j} C_n( mu ) is
- * a POLYNOMIAL in ( r, z ) -- r^2/2, r^2 z/2, r^2( 4z^2 - r^2 )/8 at
+ * a POLYNOMIAL in ( R, z ) -- R^2/2, R^2 z/2, R^2( 4z^2 - R^2 )/8 at
  * n = 2, 3, 4, which are Cerfon & Freidberg's own basis functions and are what
  * VacuumHarmonic.hpp carries. Every term also vanishes identically on the axis,
- * since each carries r^2, so the flat side of the half-disc is satisfied by
+ * since each carries R^2, so the flat side of the half-disc is satisfied by
  * construction rather than imposed.
  *
  * Applying the operator to the interior form and using
@@ -175,13 +175,13 @@
  * coefficient vector has an exact zero BETWEEN two nonzeros, where an
  * off-by-one in the degree indexing would show and where a single-mode case
  * could not see one. Reference scale |psi( 0.7, 0.2 )| = 4.129582e-01. The
- * grid is r in [ 0.05, 2.40 ], |z| <= 2.40 at spacing 0.05 -- 4656 points,
+ * grid is R in [ 0.05, 2.40 ], |z| <= 2.40 at spacing 0.05 -- 4656 points,
  * spanning both sides of rho_0 and out to 5.8 rho_0.
  *
  *  0. THE WHOLE CONSTRUCTION AGAINST AN INDEPENDENT ONE, WHICH IS THE CHECK
  *     THE OTHERS ARE ARRANGED AROUND. A sympy script solved the matching
  *     problem afresh from the two conditions -- not from the closed forms
- *     above -- differentiated the result in ( r, z ), and formed Delta*
+ *     above -- differentiated the result in ( R, z ), and formed Delta*
  *     directly. It reports Delta*( psi ) + f = 0 SYMBOLICALLY, exactly zero
  *     rather than to a tolerance, for p = 0 and p = 4 alike, and against this
  *     header's evaluation at ten scattered points:
@@ -246,7 +246,7 @@
  *     puts it inside the source. At p >= 1 that costs nothing, since the source
  *     vanishes there -- p = 4 leaked 1.1e-60 -- but AT p = 0 THE SAME POINT
  *     RETURNS -2.6e-01, the full discontinuity. One point in 861 hit it. Nudge
- *     the radius until radius() agrees, which is what the figures above do.
+ *     the radius until sphericalRadius() agrees, which is what the figures above do.
  *
  *  3. psi is C^1 across rho_0, checked on the interior POLYNOMIAL rather than
  *     by stepping either side of the branch -- evaluating one ulp inside rho_0
@@ -323,9 +323,9 @@
  *     property VacuumHarmonic.hpp was written for, arriving here for free.
  *
  *     The flux has a finite limit there and the expression does not reach it,
- *     exactly as CurrentLoop.hpp's does: psi( r, 0.3 )/r^2 settles to
- *     2.772735 as r falls through 1e-2, 1e-3, 1e-4, and q_r to 5.5454705 at
- *     r = 1e-3, 1e-5, 1e-7 while q_z goes as r. flux( 0, z ) is NaN in both
+ *     exactly as CurrentLoop.hpp's does: psi( R, 0.3 )/R^2 settles to
+ *     2.772735 as R falls through 1e-2, 1e-3, 1e-4, and q_r to 5.5454705 at
+ *     R = 1e-3, 1e-5, 1e-7 while q_z goes as R. flux( 0, z ) is NaN in both
  *     components.
  *
  * WHAT IS NOT CHECKED HERE. Nothing in this file has been through a solver:
@@ -362,8 +362,8 @@ namespace analytic
 /// rather than an obvious one.
 ///
 /// psi() and the gradient are valid everywhere, the centre included. flux()
-/// divides by r and so is NaN on the axis, exactly as CurrentLoop.hpp's is;
-/// the limit exists, since every mode carries r^2, but the expression reaching
+/// divides by R and so is NaN on the axis, exactly as CurrentLoop.hpp's is;
+/// the limit exists, since every mode carries R^2, but the expression reaching
 /// it does not. A caller who needs the axis wants VacuumHarmonic.hpp.
 class ExteriorMatched
 {
@@ -417,7 +417,7 @@ class ExteriorMatched
 		/// rho_0 = 1.
 		///
 		/// n = 2 IS THE FAR FIELD OF A CURRENT LOOP: rho^{-1} C_2( mu ) is
-		/// r^2/( 2 rho^3 ), which is the dipole CurrentLoop.hpp's file comment
+		/// R^2/( 2 rho^3 ), which is the dipole CurrentLoop.hpp's file comment
 		/// records its field decaying to. So the simplest case here is the
 		/// leading term of the field FB-1 was originally to be measured
 		/// against, with the singularity replaced by a smooth source.
@@ -443,58 +443,58 @@ class ExteriorMatched
 
 		/// The poloidal flux. Valid everywhere, the centre and the axis
 		/// included, where it is zero.
-		double psi( double r, double z ) const
+		double psi( double radius, double z ) const
 		{
-			double const rho = radius( r, z );
+			double const rho = sphericalRadius( radius, z );
 
 			double total = 0.0;
 			for ( RadialMode const &mode : modeValues )
 			{
 				total += mode.amplitude*radialAt( mode, rho )
-				         *angular.basis( mode.degree, r, z );
+				         *angular.basis( mode.degree, radius, z );
 			}
 			return total;
 		}
 
-		/// d psi / d r. ANALYTIC, not a difference.
+		/// d psi / d R. ANALYTIC, not a difference.
 		///
-		/// With psi = F( rho ) C_n( mu ), rho = hypot( r, z - zCentre ) and
-		/// mu = ( z - zCentre )/rho, the chain rule needs d rho/d r = r/rho and
-		/// d mu/d r = -mu r/rho^2, giving
+		/// With psi = F( rho ) C_n( mu ), rho = hypot( R, z - zCentre ) and
+		/// mu = ( z - zCentre )/rho, the chain rule needs d rho/d R = R/rho and
+		/// d mu/d R = -mu R/rho^2, giving
 		///
-		///     d psi/d r = F'( rho )( r/rho ) C_n - F( rho ) C_n'( mu ) mu r/rho^2.
-		double dPsiDr( double r, double z ) const
+		///     d psi/d R = F'( rho )( R/rho ) C_n - F( rho ) C_n'( mu ) mu R/rho^2.
+		double dPsiDr( double radius, double z ) const
 		{
 			double dR = 0.0;
 			double dZ = 0.0;
-			gradPsi( r, z, dR, dZ );
+			gradPsi( radius, z, dR, dZ );
 			return dR;
 		}
 
 		/// d psi / d z. Analytic, by the same route, with d rho/d z = mu and
-		/// d mu/d z = ( 1 - mu^2 )/rho -- WRITTEN AS r^2/rho^3, which is the
+		/// d mu/d z = ( 1 - mu^2 )/rho -- WRITTEN AS R^2/rho^3, which is the
 		/// same number with no cancellation in it. Near the axis mu is close to
 		/// +-1 and 1 - mu*mu loses digits there; ExteriorDtN.cpp records eight
-		/// orders on exactly that point, and r^2/rho^3 sidesteps it entirely.
-		double dPsiDz( double r, double z ) const
+		/// orders on exactly that point, and R^2/rho^3 sidesteps it entirely.
+		double dPsiDz( double radius, double z ) const
 		{
 			double dR = 0.0;
 			double dZ = 0.0;
-			gradPsi( r, z, dR, dZ );
+			gradPsi( radius, z, dR, dZ );
 			return dZ;
 		}
 
 		/// grad_bar( psi ) = ( d_r psi, d_z psi ). Not the HDG flux: that is
-		/// this divided by r, see flux().
+		/// this divided by R, see flux().
 		///
 		/// EXACT AT THE CENTRE, where the expression is 0/0. Every mode is
 		/// A rho^n C_n + higher and rho^n C_n is a homogeneous polynomial of
 		/// degree n >= 2, so the gradient there is zero and the branch returns
 		/// it rather than a NaN.
-		void gradPsi( double r, double z, double &dR, double &dZ ) const
+		void gradPsi( double radius, double z, double &dR, double &dZ ) const
 		{
 			double const dz = z - zCentreValue;
-			double const rho = std::hypot( r, dz );
+			double const rho = std::hypot( radius, dz );
 
 			if ( rho == 0.0 )
 			{
@@ -511,33 +511,33 @@ class ExteriorMatched
 			{
 				double const f = radialAt( mode, rho );
 				double const fPrime = radialDerivativeAt( mode, rho );
-				double const c = angular.basis( mode.degree, r, z );
+				double const c = angular.basis( mode.degree, radius, z );
 				double const cPrime = angular.basisDerivative( mode.degree,
-				                                               r, z );
+				                                               radius, z );
 
 				totalR += mode.amplitude
-				          *( fPrime*( r/rho )*c - f*cPrime*mu*r/( rho*rho ) );
+				          *( fPrime*( radius/rho )*c - f*cPrime*mu*radius/( rho*rho ) );
 				totalZ += mode.amplitude
-				          *( fPrime*mu*c + f*cPrime*r*r/( rho*rho*rho ) );
+				          *( fPrime*mu*c + f*cPrime*radius*radius/( rho*rho*rho ) );
 			}
 
 			dR = totalR;
 			dZ = totalZ;
 		}
 
-		/// The HDG flux q = grad_bar( psi ) / r, in the convergence harness's
+		/// The HDG flux q = grad_bar( psi ) / R, in the convergence harness's
 		/// own signature.
 		///
-		/// NaN at r = 0, like CurrentLoop.hpp and unlike VacuumHarmonic.hpp.
-		/// The limit exists -- every mode carries r^2, so d_r psi ~ r -- but
+		/// NaN at R = 0, like CurrentLoop.hpp and unlike VacuumHarmonic.hpp.
+		/// The limit exists -- every mode carries R^2, so d_r psi ~ R -- but
 		/// this expression does not reach it, and a fixture that quietly
 		/// switched formula near the axis would be a fixture that can disagree
 		/// with itself.
-		void flux( double r, double z, double &qR, double &qZ ) const
+		void flux( double radius, double z, double &qR, double &qZ ) const
 		{
-			gradPsi( r, z, qR, qZ );
-			qR /= r;
-			qZ /= r;
+			gradPsi( radius, z, qR, qZ );
+			qR /= radius;
+			qZ /= radius;
 		}
 
 		/// d psi / d rho at fixed direction: the OUTWARD radial derivative
@@ -549,9 +549,9 @@ class ExteriorMatched
 		/// projecting gradPsi() on the radial direction, so that the two are
 		/// independent paths to the same number and a check between them means
 		/// something. Measured, they agree to 1.3e-15.
-		double dPsiDrho( double r, double z ) const
+		double dPsiDrho( double radius, double z ) const
 		{
-			double const rho = radius( r, z );
+			double const rho = sphericalRadius( radius, z );
 			if ( rho == 0.0 )
 			{
 				return 0.0;
@@ -561,24 +561,24 @@ class ExteriorMatched
 			for ( RadialMode const &mode : modeValues )
 			{
 				total += mode.amplitude*radialDerivativeAt( mode, rho )
-				         *angular.basis( mode.degree, r, z );
+				         *angular.basis( mode.degree, radius, z );
 			}
 			return total;
 		}
 
 		/// The source F, in MEQ's own convention: -Delta* psi = F, which is the
-		/// F of eq (2) and NOT F/r. VacuumHarmonic.hpp and
+		/// F of eq (2) and NOT F/R. VacuumHarmonic.hpp and
 		/// ManufacturedNonlinear.hpp document the same convention; the weak
-		/// form's right-hand side is ( F/r, w ) and the division happens there.
+		/// form's right-hand side is ( F/R, w ) and the division happens there.
 		///
 		/// IDENTICALLY ZERO FOR rho >= rho_0 -- a bare literal, not a small
 		/// number -- which is the property the whole fixture exists for. At
 		/// exactly rho = rho_0 the outside branch is taken; for every p >= 1
 		/// the two agree there anyway, and at p = 0 the source is genuinely
 		/// discontinuous and a value has to be chosen.
-		double f( double r, double z, double /*psi*/ ) const
+		double f( double radius, double z, double /*psi*/ ) const
 		{
-			double const rho = radius( r, z );
+			double const rho = sphericalRadius( radius, z );
 			if ( rho >= rho0Value )
 			{
 				return 0.0;
@@ -588,7 +588,7 @@ class ExteriorMatched
 			for ( RadialMode const &mode : modeValues )
 			{
 				total += mode.amplitude*radialSourceAt( mode, rho )
-				         *angular.basis( mode.degree, r, z );
+				         *angular.basis( mode.degree, radius, z );
 			}
 			return total;
 		}
@@ -596,7 +596,7 @@ class ExteriorMatched
 		/// And its derivative, which is zero: the problem is LINEAR in psi, so
 		/// a Newton solve on it is affine and must finish in one step, exactly
 		/// as Soloviev.hpp's does.
-		double dFdPsi( double /*r*/, double /*z*/, double /*psi*/ ) const
+		double dFdPsi( double /*R*/, double /*z*/, double /*psi*/ ) const
 		{
 			return 0.0;
 		}
@@ -608,20 +608,20 @@ class ExteriorMatched
 		/// It must come out at -f(), and that is what establishes the
 		/// transcription rather than trusting the algebra -- see the file
 		/// comment for the numbers, for the difference floor, and for the p = 0
-		/// control that isolates the interface. Keep r well away from zero: the
-		/// stencil divides by r.
-		double deltaStarFD( double r, double z, double h = 1.0e-4 ) const
+		/// control that isolates the interface. Keep R well away from zero: the
+		/// stencil divides by R.
+		double deltaStarFD( double radius, double z, double h = 1.0e-4 ) const
 		{
 			auto innerR = [ & ]( double rr )
 			{
 				return ( psi( rr + h, z ) - psi( rr - h, z ) )/( 2.0*h )/rr;
 			};
 
-			double const dRInner = ( innerR( r + h ) - innerR( r - h ) )/( 2.0*h );
-			double const dZZ = ( psi( r, z + h ) - 2.0*psi( r, z ) + psi( r, z - h ) )
+			double const dRInner = ( innerR( radius + h ) - innerR( radius - h ) )/( 2.0*h );
+			double const dZZ = ( psi( radius, z + h ) - 2.0*psi( radius, z ) + psi( radius, z - h ) )
 			                   /( h*h );
 
-			return r*dRInner + dZZ;
+			return radius*dRInner + dZZ;
 		}
 
 		/// The coefficient vector meq::ExteriorDtN::coefficients() must return
@@ -759,12 +759,12 @@ class ExteriorMatched
 			return 0.0;
 		}
 
-		/// rho = |( r, z ) - centre|, the coordinate everything here is written
+		/// rho = |( R, z ) - centre|, the coordinate everything here is written
 		/// in. One place, because the sign of z - zCentre is exactly what a
 		/// second copy would get wrong.
-		double radius( double r, double z ) const
+		double sphericalRadius( double radius, double z ) const
 		{
-			return std::hypot( r, z - zCentreValue );
+			return std::hypot( radius, z - zCentreValue );
 		}
 
 		double zCentre() const { return zCentreValue; }

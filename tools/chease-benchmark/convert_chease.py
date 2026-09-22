@@ -89,10 +89,10 @@ THE AMPLITUDE CLOSURE, WHICH IS THE ONE PIECE OF REAL ARITHMETIC
 MEQ and CHEASE are handed DIFFERENT functions, and the difference is exactly
 `psi_ax`.
 
-    MEQ      Delta* psi = -[ mu0 r^2 P( Psi ) + G( Psi ) ] / psi_ax,
+    MEQ      Delta* psi = -[ mu0 R^2 P( Psi ) + G( Psi ) ] / psi_ax,
              Psi = psi / psi_ax,  psi_ax = max psi  (an unknown, bordered)
 
-    CHEASE   Delta* psi = -mu0 r^2 p'( Flux ) - TT'( Flux ),
+    CHEASE   Delta* psi = -mu0 R^2 p'( Flux ) - TT'( Flux ),
              Flux = ( psi_edge - psi ) / ( psi_edge - psi_axis )
 
 `Flux` is MEQ's `Psi` exactly.  Matching the two needs `p' = -P/A` and
@@ -242,7 +242,7 @@ def expeq_text(case, psi_ax, n_boundary=2048, n_profile=257):
 
 	out = [f"{aspct:24.16e}", f"{rz0c:24.16e}", f"{predge:24.16e}",
 	       f"{len(R):6d}"]
-	out += [f"{r / R0:24.16e}{z / R0:24.16e}" for r, z in zip(R, Z)]
+	out += [f"{R / R0:24.16e}{z / R0:24.16e}" for R, z in zip(R, Z)]
 	out.append(f"{len(s):6d}{4:6d}")          # NPPF1, NPPFUN = 4 -> p' given
 	out.append(f"{1:6d}")                     # NSTTP = 1 -> TT' given
 	for block in (s, pp, tt):
@@ -312,8 +312,8 @@ def namelist_text(case, psi_ax, ns=40, nt=40, npsi=100, nchi=100, niso=100,
 	       ("SIGNIPXP", 1.0), ("SIGNB0XP", 1.0),
 	       ("EPSLON", 1.0e-10), ("RELAX", 0.0), ("GAMMA", 1.6666666666666667)]
 	if box is not None:
-		rmin, rmax, zmin, zmax = box
-		fkv += [("RBOXLFT", rmin), ("RBOXLEN", rmax - rmin),
+		Rmin, Rmax, zmin, zmax = box
+		fkv += [("RBOXLFT", Rmin), ("RBOXLEN", Rmax - Rmin),
 		        ("ZBOXMID", 0.5 * (zmin + zmax)), ("ZBOXLEN", zmax - zmin)]
 	# `float()` before `repr()` because numpy 2 prints a float64 as
 	# `np.float64( 1.011... )`, which Fortran reads as a namelist object

@@ -8,14 +8,14 @@ Everything MEQ knows about the physics arrives through one small interface:
    class Source
    {
    public:
-       virtual double f( double r, double z, double psi ) const = 0;
-       virtual double dFdPsi( double r, double z, double psi ) const = 0;
+       virtual double f( double R, double z, double psi ) const = 0;
+       virtual double dFdPsi( double R, double z, double psi ) const = 0;
    };
 
-:cpp:func:`meq::Source::f` returns :math:`F(r, z, \psi)` — the full numerator of
-the right-hand side, with **no** :math:`1/r` **applied**, because that weight
+:cpp:func:`meq::Source::f` returns :math:`F(R, z, \psi)` — the full numerator of
+the right-hand side, with **no** :math:`1/R` **applied**, because that weight
 belongs to the weak form. Coordinates are cylindrical, in metres, with
-:math:`r > 0`.
+:math:`R > 0`.
 
 .. _sources-jacobian:
 
@@ -66,7 +66,7 @@ The sources that ship
 ---------------------
 
 :cpp:class:`meq::SolovievSource` — ``Type = "soloviev"``
-   :math:`F = -\left((1-A)r^2 + A\right)`, with the flux normalised so that
+   :math:`F = -\left((1-A)R^2 + A\right)`, with the flux normalised so that
    :math:`A + C = 1`. It does not depend on :math:`\psi` at all, so
    :math:`\partial F/\partial\psi \equiv 0`, the problem is **linear**, and
    Newton converges in one step. That is exactly why it is the first case to
@@ -74,7 +74,7 @@ The sources that ship
    sign is the subject of :ref:`formulation-soloviev-sign`.
 
 :cpp:class:`meq::MHDSource` — ``Type = "mhd"``
-   :math:`F = \mu_0 r^2 p'(\psi) + (g g')(\psi)`, built from two tabulated
+   :math:`F = \mu_0 R^2 p'(\psi) + (g g')(\psi)`, built from two tabulated
    profiles. Note what the profiles are: the **derivative** quantities
    :math:`\mathrm{d}p/\mathrm{d}\psi` and :math:`g\,\mathrm{d}g/\mathrm{d}\psi`
    — the latter is what EQDSK calls ``FF'``. No :math:`\mu_0` is applied to the
@@ -163,13 +163,13 @@ object to :cpp:func:`meq::GradShafranovSolver::setSource`. The source is
    class MySource : public meq::Source
    {
    public:
-       double f( double r, double /*z*/, double psi ) const override
+       double f( double R, double /*z*/, double psi ) const override
        {
-           return alpha*r*r*psi + beta;
+           return alpha*R*R*psi + beta;
        }
-       double dFdPsi( double r, double /*z*/, double /*psi*/ ) const override
+       double dFdPsi( double R, double /*z*/, double /*psi*/ ) const override
        {
-           return alpha*r*r;
+           return alpha*R*R;
        }
    private:
        double alpha, beta;

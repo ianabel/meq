@@ -123,9 +123,9 @@ namespace
 	// ---------------------------------------------------------------------
 	double const psiOffset = 0.03;
 
-	double psiExact( double r, double z )
+	double psiExact( double radius, double z )
 	{
-		return equilibrium().psi( r, z ) + psiOffset;
+		return equilibrium().psi( radius, z ) + psiOffset;
 	}
 
 	double levelSet( mfem::Vector const &x )
@@ -159,11 +159,11 @@ namespace
 	/// being tested is about where Gamma_h sits relative to Gamma, and measuring
 	/// it with the same machinery that is supposed to bridge the gap would make
 	/// the measurement depend on the thing it is meant to be independent of.
-	double distanceToGamma( double r, double z, double searchLength )
+	double distanceToGamma( double radius, double z, double searchLength )
 	{
 		double const step = 1.0e-5;
-		double const dr = ( psiExact( r + step, z ) - psiExact( r - step, z ) )/( 2.0*step );
-		double const dz = ( psiExact( r, z + step ) - psiExact( r, z - step ) )/( 2.0*step );
+		double const dr = ( psiExact( radius + step, z ) - psiExact( radius - step, z ) )/( 2.0*step );
+		double const dz = ( psiExact( radius, z + step ) - psiExact( radius, z - step ) )/( 2.0*step );
 		double const norm = std::sqrt( dr*dr + dz*dz );
 		if ( norm <= 0.0 )
 			return searchLength;
@@ -178,7 +178,7 @@ namespace
 		for ( int i = 1; i <= marches; ++i )
 		{
 			double const s = searchLength*static_cast<double>( i )/marches;
-			if ( psiExact( r + s*ur, z + s*uz ) > 0.0 )
+			if ( psiExact( radius + s*ur, z + s*uz ) > 0.0 )
 			{
 				hi = s;
 				lo = searchLength*static_cast<double>( i - 1 )/marches;
@@ -191,7 +191,7 @@ namespace
 		for ( int i = 0; i < 60; ++i )
 		{
 			double const mid = 0.5*( lo + hi );
-			if ( psiExact( r + mid*ur, z + mid*uz ) > 0.0 )
+			if ( psiExact( radius + mid*ur, z + mid*uz ) > 0.0 )
 				hi = mid;
 			else
 				lo = mid;
@@ -296,18 +296,18 @@ namespace
 	// SolovievConvergence.cpp and EstimatorConvergence.cpp use, so the
 	// estimator running on it has been measured against a closed form.
 	// ---------------------------------------------------------------------
-	double const rMin = 0.6;
-	double const rMax = 1.4;
+	double const minRadius = 0.6;
+	double const maxRadius = 1.4;
 	double const zMin = -0.6;
 	double const zMax = 0.6;
 
 	mfem::Mesh makeFittedMesh( int n )
 	{
 		mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D( n, n, mfem::Element::TRIANGLE, false,
-		                                               rMax - rMin, zMax - zMin );
+		                                               maxRadius - minRadius, zMax - zMin );
 		mesh.Transform( []( mfem::Vector const &in, mfem::Vector &out )
 		{
-			out( 0 ) = in( 0 ) + rMin;
+			out( 0 ) = in( 0 ) + minRadius;
 			out( 1 ) = in( 1 ) + zMin;
 		} );
 		return mesh;

@@ -1420,7 +1420,7 @@ BOOST_AUTO_TEST_CASE( violating_the_parity_constraint_breaks_smoothness_at_the_c
 	double const middle = oneSidedSecondDifferenceJump( inadmissible, alpha, 5.0e-3 );
 	double const fine = oneSidedSecondDifferenceJump( inadmissible, alpha, 2.5e-3 );
 
-	std::cout << "  " << std::setw( 8 ) << "r^2cosT"
+	std::cout << "  " << std::setw( 8 ) << "R^2cosT"
 	          << std::scientific << std::setprecision( 3 )
 	          << "   " << std::setw( 11 ) << coarse
 	          << "   " << std::setw( 11 ) << middle

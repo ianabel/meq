@@ -90,7 +90,7 @@ needs `numpy`, `scipy`, `netCDF4`, `skimage` and `freegs4e` (for
 **The problem.** Fixed-boundary axisymmetric Grad–Shafranov, in the form
 
 ```
-Delta* psi = -mu0 r^2 p'( Flux ) - T T'( Flux ),      Flux = ( psi_edge - psi )/( psi_edge - psi_axis )
+Delta* psi = -mu0 R^2 p'( Flux ) - T T'( Flux ),      Flux = ( psi_edge - psi )/( psi_edge - psi_axis )
 ```
 
 with `psi = 0` on a prescribed closed curve, `T = g = R B_phi`. `Flux` is 1 on
@@ -278,8 +278,8 @@ MEQ and CHEASE are handed **different functions**, and the difference is exactly
 `psi_ax`:
 
 ```
-MEQ      Delta* psi = -[ mu0 r^2 P( Psi ) + G( Psi ) ]/psi_ax,  psi_ax = max psi, an UNKNOWN
-CHEASE   Delta* psi = -mu0 r^2 p'( Flux ) - TT'( Flux )
+MEQ      Delta* psi = -[ mu0 R^2 P( Psi ) + G( Psi ) ]/psi_ax,  psi_ax = max psi, an UNKNOWN
+CHEASE   Delta* psi = -mu0 R^2 p'( Flux ) - TT'( Flux )
 ```
 
 Matching them needs `p' = -P/A` with `A` the axis flux **of the answer**, so a
@@ -375,12 +375,12 @@ dropped, through `compare.py`'s norm.
 
 | | `NS=NT=20` | `NS=NT=40` | `NS=NT=80` |
 |---|---|---|---|
-| **MEQ `k=1 r=0`** | 8.925e-04 | 8.912e-04 | 8.911e-04 |
-| **MEQ `k=2 r=0`** | 1.933e-04 | 1.945e-04 | 1.942e-04 |
-| **MEQ `k=3 r=0`** | 1.446e-05 | 1.123e-05 | **2.696e-06** |
-| **MEQ `k=1 r=1`** | 2.875e-04 | 2.886e-04 | 2.885e-04 |
-| **MEQ `k=2 r=1`** | 1.999e-05 | 1.722e-05 | 1.340e-05 |
-| **MEQ `k=3 r=1`** | 1.390e-05 | 1.085e-05 | **1.300e-06** |
+| **MEQ `k=1 R=0`** | 8.925e-04 | 8.912e-04 | 8.911e-04 |
+| **MEQ `k=2 R=0`** | 1.933e-04 | 1.945e-04 | 1.942e-04 |
+| **MEQ `k=3 R=0`** | 1.446e-05 | 1.123e-05 | **2.696e-06** |
+| **MEQ `k=1 R=1`** | 2.875e-04 | 2.886e-04 | 2.885e-04 |
+| **MEQ `k=2 R=1`** | 1.999e-05 | 1.722e-05 | 1.340e-05 |
+| **MEQ `k=3 R=1`** | 1.390e-05 | 1.085e-05 | **1.300e-06** |
 
 **THE DIFFERENCE FALLS BY 686x FROM ONE CORNER TO THE OTHER, AND THE SHAPE OF
 THE FALL IS THE RESULT RATHER THAN THE FACTOR.**
@@ -394,7 +394,7 @@ THE FALL IS THE RESULT RATHER THAN THE FACTOR.**
   `k = 2` and `k = 3`, which is a statement about where these two
   discretisations sit against each other at these sizes and about nothing else.
 * **Every column falls with MEQ's ladder** — at `NS = 80`, 8.911e-04 →
-  1.942e-04 → 2.696e-06 across `k = 1, 2, 3` at `r = 0`, a factor of 330.
+  1.942e-04 → 2.696e-06 across `k = 1, 2, 3` at `R = 0`, a factor of 330.
 
 **A conversion error is a fixed offset and cannot do any of that.** This is the
 check `converge.py` exists for and it passes.
@@ -403,7 +403,7 @@ check `converge.py` exists for and it passes.
 
 **The single largest item at the bottom of the matrix is not either code.** It
 is the bilinear interpolation of CHEASE's EQDSK box onto MEQ's grid inside
-`compare.py`. Measured by holding everything fixed — MEQ at `k=3 r=1`, CHEASE at
+`compare.py`. Measured by holding everything fixed — MEQ at `k=3 R=1`, CHEASE at
 `NS=NT=80` — and changing only the grid CHEASE prints its answer on:
 
 | `NRBOX = NZBOX` | 129 | 257 | 513 | 999 |
@@ -416,7 +416,7 @@ is the bilinear interpolation of CHEASE's EQDSK box onto MEQ's grid inside
 the solve did not move at all and the whole of that column is how the answer was
 printed. Extrapolating the `h^2` law says the box error at 999 is about 1.26e-06
 against a measured cell of 1.2999e-06, i.e. **the true MEQ-against-CHEASE
-disagreement at `k=3 r=1` is below 1.3e-06 and this comparison cannot resolve
+disagreement at `k=3 R=1` is below 1.3e-06 and this comparison cannot resolve
 it.**
 
 The whole matrix above was first taken at `NRBOX = 513` and read 4.77e-06 in
@@ -445,12 +445,12 @@ it:
 
 | MEQ rung | `psi_ax` | vs CHEASE `NS=80` | vs the `freegs4e` reference |
 |---|---|---|---|
-| `k=1 r=0` | 6.359424741504e-02 | 7.700e-04 | 7.855e-04 |
-| `k=1 r=1` | 6.353512042584e-02 | 1.605e-04 | 1.450e-04 |
-| `k=2 r=0` | 6.353706768217e-02 | 1.299e-04 | 1.144e-04 |
-| `k=2 r=1` | 6.354578707868e-02 | 7.353e-06 | 2.284e-05 |
-| `k=3 r=0` | 6.354539589856e-02 | 1.198e-06 | 1.668e-05 |
-| `k=3 r=1` | 6.354532156975e-02 | **2.785e-08** | 1.551e-05 |
+| `k=1 R=0` | 6.359424741504e-02 | 7.700e-04 | 7.855e-04 |
+| `k=1 R=1` | 6.353512042584e-02 | 1.605e-04 | 1.450e-04 |
+| `k=2 R=0` | 6.353706768217e-02 | 1.299e-04 | 1.144e-04 |
+| `k=2 R=1` | 6.354578707868e-02 | 7.353e-06 | 2.284e-05 |
+| `k=3 R=0` | 6.354539589856e-02 | 1.198e-06 | 1.668e-05 |
+| `k=3 R=1` | 6.354532156975e-02 | **2.785e-08** | 1.551e-05 |
 
 **MONOTONE OVER FOUR AND A HALF ORDERS OF MAGNITUDE, ENDING AT 2.8e-08.** Two
 codes with nothing in common but the equation and the input files agree on the
@@ -475,11 +475,11 @@ while CHEASE-against-MEQ over the same sweep falls by a factor of ten. A number
 that does not move when you refine the code producing it is a property of the
 thing it is measured against. **So ~1.13e-04 is what the 257² `freegs4e`
 free-boundary solve is worth on this case**, and M-147's 9.7e-05 for MEQ at
-`k=2 r=0` is a difference between two comparable errors rather than a
+`k=2 R=0` is a difference between two comparable errors rather than a
 measurement of MEQ's.
 
 **That also makes one of M-147's rows legible in a way it was not.** MEQ at
-`k=2 r=0` reads **9.7266e-05** against the reference — better than CHEASE's
+`k=2 R=0` reads **9.7266e-05** against the reference — better than CHEASE's
 1.1267e-04 — and **1.942e-04** against CHEASE. Both are true and the first is
 partly cancellation: MEQ's error and the reference's happen to lie on the same
 side. **Two codes agreeing better than either is accurate is exactly the failure
@@ -523,8 +523,8 @@ here; it is recorded for whoever wants to send it.
 
 `fixed-h-circular`, one solve including every sweep of the amplitude closure, at
 `NPSI = 200` and `NRBOX = 999`: **CHEASE `NS=20` 99.9 s (2 sweeps), `NS=40`
-52.1 s (1 sweep), `NS=80` 112.9 s (2 sweeps)**, against **MEQ 5.7 s at `k=1 r=0`
-and 5.8 s at `k=2 r=0`**. Do not read anything into these. The load average was
+52.1 s (1 sweep), `NS=80` 112.9 s (2 sweeps)**, against **MEQ 5.7 s at `k=1 R=0`
+and 5.8 s at `k=2 R=0`**. Do not read anything into these. The load average was
 5 to 20 against 8 physical cores, a CHEASE sweep at `NRBOX = 999` spends a large
 and unmeasured share of itself writing a 999² ASCII box twice, and the two arms
 are not matched in resolution by any definition. **A real timing needs an idle

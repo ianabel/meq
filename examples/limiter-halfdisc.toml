@@ -36,7 +36,7 @@
 # neighbours, which is a question about ELEMENT attributes and cannot do that.
 
 [mesh]
-# A gmsh half-disc reaching r = 0 EXACTLY.  mfem::Mesh::MakeCartesian2D cannot
+# A gmsh half-disc reaching R = 0 EXACTLY.  mfem::Mesh::MakeCartesian2D cannot
 # make this geometry, and the limiter circle has to be fragmented in rather than
 # cut, which is the whole point of the file.
 File = "examples/limiter-halfdisc.msh"

@@ -60,8 +60,8 @@ def meq_rungs(text):
 	"""`"1:0,2:0,3:0"` -> [ ( degree, refinement ), ... ]."""
 	out = []
 	for item in text.split(","):
-		k, _, r = item.partition(":")
-		out.append((int(k), int(r or 0)))
+		k, _, R = item.partition(":")
+		out.append((int(k), int(R or 0)))
 	return out
 
 

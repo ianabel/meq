@@ -5,7 +5,7 @@
 # profiles mu0 p' = -C, g g' = -A with the flux normalised so that A + C = 1
 # give the source
 #
-#     F( r, z, psi ) = -( ( 1 - A ) r^2 + A ),        A = -0.52,
+#     F( R, z, psi ) = -( ( 1 - A ) R^2 + A ),        A = -0.52,
 #
 # which does not depend on psi. The equation is therefore linear and Newton
 # converges in one step -- which is exactly why this is the first case to run.
@@ -27,7 +27,7 @@
 # Phys. Plasmas 17 (2010) 032502 -- inverse aspect ratio eps = 0.78, elongation
 # kappa = 2.0, triangularity delta = 0.35 -- which occupies
 #
-#     0.22 <= r <= 1.78,    |z| <= 1.56    (units of R0).
+#     0.22 <= R <= 1.78,    |z| <= 1.56    (units of R0).
 #
 # The box below encloses that with a margin. It is deliberately NOT fitted to
 # the plasma boundary: per section 2.1 of the adaptive paper the computational
@@ -40,7 +40,7 @@ ZMax = 1.7              # units of R0
 
 # 3 x 4 cells across a 1.8 x 3.4 box gives an initial mesh diameter (the cell
 # diagonal) of h = 1.04, matching the h = 1.03 coarsest grid of section 4.1.
-NR = 3                  # cells in r before refinement
+NR = 3                  # cells in R before refinement
 NZ = 4                  # cells in z before refinement
 
 # Each level halves h, so three levels give h = 0.13. The paper reports uniform

@@ -5,7 +5,7 @@
 // SHARP. Put a filament inside Omega, give the solve no plasma at all, and hand
 // it the filament's OWN field as the physical Dirichlet datum. Then
 //
-//     Delta* psi_p = -mu0 r J_plasma = 0        in Omega
+//     Delta* psi_p = -mu0 R J_plasma = 0        in Omega
 //     psi_p|_Gamma = psi|_Gamma - psi_c|_Gamma = 0
 //
 // so psi_p is identically zero and the reported total psi_c + psi_p is the
@@ -63,8 +63,8 @@ namespace
 			}
 	};
 
-	// A box well off the axis, so that 1/r is bounded and nothing here is about
-	// the axis. 8 x 8 puts vertices on multiples of 0.1 in r and 0.1 in z.
+	// A box well off the axis, so that 1/R is bounded and nothing here is about
+	// the axis. 8 x 8 puts vertices on multiples of 0.1 in R and 0.1 in z.
 	mfem::Mesh makeBox( int n )
 	{
 		mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D(
@@ -233,14 +233,14 @@ BOOST_AUTO_TEST_CASE( theSourceIsEvaluatedAtTheTotalFluxAndNotTheRemainder )
 	// middle rung of CLAUDE.md's fixture ladder, chosen for exactly that.
 	struct LinearSource : public meq::Source
 	{
-		double f( double r, double, double psi ) const override
+		double f( double radius, double, double psi ) const override
 		{
-			return 0.8*r*psi;
+			return 0.8*radius*psi;
 		}
 
-		double dFdPsi( double r, double, double ) const override
+		double dFdPsi( double radius, double, double ) const override
 		{
-			return 0.8*r;
+			return 0.8*radius;
 		}
 	};
 
@@ -251,14 +251,14 @@ BOOST_AUTO_TEST_CASE( theSourceIsEvaluatedAtTheTotalFluxAndNotTheRemainder )
 		{
 		}
 
-		double f( double r, double z, double psi ) const override
+		double f( double radius, double z, double psi ) const override
 		{
-			return 0.8*r*( psi + conductors.psi( r, z ) );
+			return 0.8*radius*( psi + conductors.psi( radius, z ) );
 		}
 
-		double dFdPsi( double r, double, double ) const override
+		double dFdPsi( double radius, double, double ) const override
 		{
-			return 0.8*r;
+			return 0.8*radius;
 		}
 
 		meq::ConductorField const &conductors;
@@ -425,7 +425,7 @@ BOOST_AUTO_TEST_CASE( theViewIsFreeWithoutConductorsAndExactWithThem )
 // THE SUBTRACTED ARM IS THE TRUTH HERE, WHICH IS THE RIGHT WAY ROUND. With the
 // coil's own field as the datum and no plasma, the remainder is identically
 // zero and the total is psi_c EXACTLY -- §7.4's identity. The meshed arm solves
-// Delta* psi = -mu0 r j_phi with the same datum and a source that is a top hat
+// Delta* psi = -mu0 R j_phi with the same datum and a source that is a top hat
 // on the coil, so it approximates that same field to the mesh's order. So the
 // difference between them IS the meshed route's discretisation error, and it
 // must FALL under refinement. A difference that did not fall would say the two
@@ -457,15 +457,15 @@ BOOST_AUTO_TEST_CASE( theMeshedCoilConvergesToTheSubtractedOne )
 	meq::ConductorField subtracted;
 	subtracted.add( conductor );
 
-	// The coil as a DOMAIN SOURCE: F = mu0 r j_phi inside it and zero outside,
+	// The coil as a DOMAIN SOURCE: F = mu0 R j_phi inside it and zero outside,
 	// which is meq::CoilSet::f() and is what meq::CoilAugmentedSource wraps.
 	struct MeshedCoilSource : public meq::Source
 	{
 		explicit MeshedCoilSource( meq::CoilSet const &c ) : coils( c ) {}
 
-		double f( double r, double z, double ) const override
+		double f( double radius, double z, double ) const override
 		{
-			return coils.f( r, z );
+			return coils.f( radius, z );
 		}
 
 		double dFdPsi( double, double, double ) const override
@@ -756,20 +756,20 @@ BOOST_AUTO_TEST_CASE( theTracedSurfaceIsALevelSetOfTheTotalAndNotTheRemainder )
 	for ( int i = 0; i < 7; ++i )
 		for ( int j = 0; j < 7; ++j )
 		{
-			double const r = 0.70 + 0.10*i;
+			double const radius = 0.70 + 0.10*i;
 			double const z = -0.30 + 0.10*j;
 
 			double psiTotal = 0.0, qRTotal = 0.0, qZTotal = 0.0;
 			double psiBare = 0.0, qRBare = 0.0, qZBare = 0.0;
-			if ( !tracer.sampleAt( r, z, psiTotal, qRTotal, qZTotal ) )
+			if ( !tracer.sampleAt( radius, z, psiTotal, qRTotal, qZTotal ) )
 				continue;
-			BOOST_TEST_REQUIRE( bare.sampleAt( r, z, psiBare, qRBare, qZBare ) );
+			BOOST_TEST_REQUIRE( bare.sampleAt( radius, z, psiBare, qRBare, qZBare ) );
 
 			double bR = 0.0, bZ = 0.0;
-			conductors.poloidalField( r, z, bR, bZ );
+			conductors.poloidalField( radius, z, bR, bZ );
 
 			worstSeam = std::max( worstSeam,
-				std::fabs( psiTotal - ( psiBare + conductors.psi( r, z ) ) ) );
+				std::fabs( psiTotal - ( psiBare + conductors.psi( radius, z ) ) ) );
 			worstSeam = std::max( worstSeam,
 			                      std::fabs( qRTotal - ( qRBare + bZ ) ) );
 			worstSeam = std::max( worstSeam,
@@ -797,9 +797,9 @@ BOOST_AUTO_TEST_CASE( theTracedSurfaceIsALevelSetOfTheTotalAndNotTheRemainder )
 		meq::ContourPoint const &point = contour.points[ i ];
 
 		double psiBare = 0.0, qR = 0.0, qZ = 0.0;
-		BOOST_TEST_REQUIRE( bare.sampleAt( point.r, point.z, psiBare, qR, qZ ) );
+		BOOST_TEST_REQUIRE( bare.sampleAt( point.radius, point.z, psiBare, qR, qZ ) );
 
-		double const total = psiBare + conductors.psi( point.r, point.z );
+		double const total = psiBare + conductors.psi( point.radius, point.z );
 		worstTotal = std::max( worstTotal, std::fabs( total - level ) );
 		lowRemainder = std::min( lowRemainder, psiBare );
 		highRemainder = std::max( highRemainder, psiBare );
@@ -830,10 +830,10 @@ BOOST_AUTO_TEST_CASE( theTracedSurfaceIsALevelSetOfTheTotalAndNotTheRemainder )
 		meq::ContourPoint const &point = blind.points[ i ];
 
 		double psiBare = 0.0, qR = 0.0, qZ = 0.0;
-		BOOST_TEST_REQUIRE( bare.sampleAt( point.r, point.z, psiBare, qR,
+		BOOST_TEST_REQUIRE( bare.sampleAt( point.radius, point.z, psiBare, qR,
 		                                   qZ ) );
 
-		double const total = psiBare + conductors.psi( point.r, point.z );
+		double const total = psiBare + conductors.psi( point.radius, point.z );
 		lowBlind = std::min( lowBlind, total );
 		highBlind = std::max( highBlind, total );
 	}
@@ -993,7 +993,7 @@ namespace
 			mfem::SubMesh::CreateFromDomain( *d.background, domainAttr ) );
 
 		// The arc is GENERATED by SubMesh and takes the new attribute; the flat
-		// side is INHERITED from the box's r = 0 edge. So Gamma_h is the arc
+		// side is INHERITED from the box's R = 0 edge. So Gamma_h is the arc
 		// alone and the axis stays ordinary fitted boundary, which is right --
 		// the axis approximates nothing and needs no transfer.
 		int const gammaH = d.sub->bdr_attributes.Max();
@@ -1089,13 +1089,13 @@ BOOST_AUTO_TEST_CASE( theSplitReachesTheExteriorCoupling )
 		double biggest = 0.0;
 		for ( double const angle : { 0.05, 0.4, 0.9, 1.4, 1.9, 2.4, 3.0 } )
 		{
-			double const r = gammaRadius*std::sin( angle );
+			double const radius = gammaRadius*std::sin( angle );
 			double const z = gammaRadius*std::cos( angle );
 			double modal = 0.0;
 			for ( std::size_t m = 0; m < a.size(); ++m )
 				modal += a[ m ]*dtn.basis(
-					meq::ExteriorDtN::firstMode() + static_cast<int>( m ), r, z );
-			trace = std::max( trace, std::abs( modal - conductors.psi( r, z ) ) );
+					meq::ExteriorDtN::firstMode() + static_cast<int>( m ), radius, z );
+			trace = std::max( trace, std::abs( modal - conductors.psi( radius, z ) ) );
 			biggest = std::max( biggest, std::abs( modal ) );
 		}
 		BOOST_TEST_REQUIRE( biggest > 0.0,
@@ -1362,25 +1362,25 @@ BOOST_AUTO_TEST_CASE( theConductorQuadratureIsBoundedByAnExpensiveReference )
 			if ( inside && direction == 1 )
 				continue;
 
-			double const r = inside ? c.centreR()
-			               : direction == 0 ? c.rMax() + ratio*size
-			                                : c.rMax() + ratio*size;
+			double const radius = inside ? c.centreR()
+			               : direction == 0 ? c.maxRadius() + ratio*size
+			                                : c.maxRadius() + ratio*size;
 			double const z = inside ? c.centreZ()
 			               : direction == 0 ? c.zMax() + ratio*size
 			                                : c.centreZ();
 
-			double const exact = meq::coilPsi( c, r, z, reference, mu0 );
+			double const exact = meq::coilPsi( c, radius, z, reference, mu0 );
 			double eR = 0.0;
 			double eZ = 0.0;
-			meq::coilGradPsi( c, r, z, eR, eZ, reference, mu0 );
+			meq::coilGradPsi( c, radius, z, eR, eZ, reference, mu0 );
 			double const gradScale = std::hypot( eR, eZ );
 
-			double const got = meq::coilPsi( c, r, z, shipped, mu0 );
+			double const got = meq::coilPsi( c, radius, z, shipped, mu0 );
 			double aR = 0.0;
 			double aZ = 0.0;
-			meq::coilGradPsi( c, r, z, aR, aZ, shipped, mu0 );
+			meq::coilGradPsi( c, radius, z, aR, aZ, shipped, mu0 );
 
-			double const coarse = meq::coilPsi( c, r, z, 8, mu0 );
+			double const coarse = meq::coilPsi( c, radius, z, 8, mu0 );
 
 			double const psiError = std::fabs( got - exact )
 			                        /std::max( std::fabs( exact ), 1.0e-300 );
@@ -1638,14 +1638,14 @@ BOOST_AUTO_TEST_CASE( theSplitAndTheMeshedRouteAgreeUnderAnExteriorCoupling )
 	// comparable rather than one being noise on the other.
 	struct LinearPlasma : public meq::Source
 	{
-		double f( double r, double, double psi ) const override
+		double f( double radius, double, double psi ) const override
 		{
-			return 0.35*r*psi;
+			return 0.35*radius*psi;
 		}
 
-		double dFdPsi( double r, double, double ) const override
+		double dFdPsi( double radius, double, double ) const override
 		{
-			return 0.35*r;
+			return 0.35*radius;
 		}
 	};
 
@@ -1655,14 +1655,14 @@ BOOST_AUTO_TEST_CASE( theSplitAndTheMeshedRouteAgreeUnderAnExteriorCoupling )
 	{
 		explicit MeshedPlasma( meq::CoilSet const &c ) : coils( c ) {}
 
-		double f( double r, double z, double psi ) const override
+		double f( double radius, double z, double psi ) const override
 		{
-			return 0.35*r*psi + coils.f( r, z );
+			return 0.35*radius*psi + coils.f( radius, z );
 		}
 
-		double dFdPsi( double r, double, double ) const override
+		double dFdPsi( double radius, double, double ) const override
 		{
-			return 0.35*r;
+			return 0.35*radius;
 		}
 
 		meq::CoilSet const &coils;

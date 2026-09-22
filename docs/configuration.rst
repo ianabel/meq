@@ -84,8 +84,8 @@ The background mesh: either a box that MEQ triangulates, or a file.
      - Meaning
    * - ``RMin``
      - *required*
-     - Lower radial bound. Must not be negative — :math:`r` is a cylindrical
-       radius, and a box reaching :math:`r = 0` contains the operator's
+     - Lower radial bound. Must not be negative — :math:`R` is a cylindrical
+       radius, and a box reaching :math:`R = 0` contains the operator's
        singularity.
    * - ``RMax``
      - *required*
@@ -157,7 +157,7 @@ with every printed number looking exactly as it should.
    * - ``Tool``
      - *required*
      - Which generator. ``"halfdisc"`` is the only one — ``tools/mesh/halfdisc.py``,
-       a semicircle reaching :math:`r = 0` exactly with the conductors
+       a semicircle reaching :math:`R = 0` exactly with the conductors
        fragmented in. Naming it is what makes the block recognisable at all.
    * - ``Radius``
      - *required*
@@ -200,7 +200,7 @@ with every printed number looking exactly as it should.
    * - ``Check``
      - ``true``
      - Re-read the written file and assert MEQ's preconditions on it: that
-       :math:`r` reaches 0 **exactly**, that :math:`\Gamma` and the axis are the
+       :math:`R` reaches 0 **exactly**, that :math:`\Gamma` and the axis are the
        outer boundary and nothing else, and that each coil attribute covers its
        rectangle.
    * - ``Symmetric``
@@ -288,10 +288,10 @@ under a Solov'ev source is an unknown key, not an ignored one.
    * - ``Type``
      - 
    * - ``"soloviev"``
-     - :math:`F = -\left((1-A)r^2 + A\right)`, independent of :math:`\psi`. The
+     - :math:`F = -\left((1-A)R^2 + A\right)`, independent of :math:`\psi`. The
        problem is linear and Newton converges in one step.
    * - ``"mhd"``
-     - :math:`F = \mu_0 r^2 p'(\psi) + (gg')(\psi)`, from two tabulated
+     - :math:`F = \mu_0 R^2 p'(\psi) + (gg')(\psi)`, from two tabulated
        profiles.
    * - ``"manufactured"``
      - The nonlinear manufactured solution of
@@ -355,7 +355,7 @@ under a Solov'ev source is an unknown key, not an ignored one.
        to the file.
    * - ``Mu0``
      - SI :math:`\mu_0`
-     - Vacuum permeability on the :math:`r^2 p'` term. Set to 1 for a run in
+     - Vacuum permeability on the :math:`R^2 p'` term. Set to 1 for a run in
        normalised units.
    * - ``Normalised``
      - ``false``
@@ -435,7 +435,7 @@ under a Solov'ev source is an unknown key, not an ignored one.
      - Meaning
    * - ``R0``
      - *required*
-     - The radial **offset** in :math:`\sin(K_r(r + R_0))`. **Not a major
+     - The radial **offset** in :math:`\sin(K_r(R + R_0))`. **Not a major
        radius.**
    * - ``Kr``, ``Kz``
      - *required*
@@ -505,7 +505,7 @@ under a Solov'ev source is an unknown key, not an ignored one.
    * - ``Density`` / ``DensityFile``
      - *required unless* ``Neutralising``
      - :math:`n_{s0}` in :math:`\mathrm{m}^{-3}`, **on the curve**
-       :math:`r = \texttt{ReferenceRadius}`.
+       :math:`R = \texttt{ReferenceRadius}`.
    * - ``DensityScale``
      - ``1.0``
      - 
@@ -547,7 +547,7 @@ whatever it comes out as.
    difference is deliberate.** :cpp:func:`meq::GradShafranovSolver::setPlasmaCurrent`
    takes :math:`\mu_0 I_p` because everything inside the solver already does —
    Ampère's law reads the flux integral as :math:`-\mu_0 I_p` and the constraint
-   is assembled as :math:`\int F/r`, which *is* :math:`\mu_0 I_p` — and a solver
+   is assembled as :math:`\int F/R`, which *is* :math:`\mu_0 I_p` — and a solver
    taking amperes would need a :math:`\mu_0` of its own, which could disagree
    with the source's and scale two terms of one equation differently.
 
@@ -667,7 +667,7 @@ since that is an ellipse.
    * - ``XPointMeritWeight``
      - ``1.0``
      - How heavily the X-point's two rows count in the **line search's merit**,
-       as a multiplier on the length :math:`r h` that converts :math:`q` into a
+       as a multiplier on the length :math:`R h` that converts :math:`q` into a
        flux. It changes the merit and nothing else — the border still solves
        :math:`q_r = q_z = 0`, so a converged answer is the same answer at any
        weight, and what moves is how many iterations it costs. **There is no
@@ -788,7 +788,7 @@ A coil adds to the Grad–Shafranov source
 
 .. math::
 
-   F_{\mathrm{coil}}(r, z) = \mu_0\, r\, \frac{I_k}{|\Omega_{c_k}|}
+   F_{\mathrm{coil}}(R, z) = \mu_0\, R\, \frac{I_k}{|\Omega_{c_k}|}
 
 inside coil :math:`k` and exactly zero outside it, summed over the coils
 containing the point. The coil current is **data**: it does not depend on
@@ -811,10 +811,10 @@ coils alone is affine and finishes in one Newton step.
      - The centre, in metres.
    * - ``HalfWidth``, ``HalfHeight``
      - *required*
-     - Half-extents in :math:`r` and :math:`z`, metres. Strictly positive, and
+     - Half-extents in :math:`R` and :math:`z`, metres. Strictly positive, and
        ``CentreR - HalfWidth`` must be strictly positive too — a coil reaching
-       the axis is refused, because the operator's :math:`1/r` is not integrable
-       through :math:`r = 0`.
+       the axis is refused, because the operator's :math:`1/R` is not integrable
+       through :math:`R = 0`.
    * - ``Current``
      - *one of the two*
      - The **total** current through the cross-section, amperes. Signed, and
@@ -906,7 +906,7 @@ default is what every file written before this table existed already means.
 
    .. math::
 
-      \Delta^{*}\psi_p = -\mu_0\, r\, J_{\mathrm{plasma}}(\psi_c + \psi_p),
+      \Delta^{*}\psi_p = -\mu_0\, R\, J_{\mathrm{plasma}}(\psi_c + \psi_p),
 
    which is legitimate because :math:`\Delta^{*}` is linear and the conductor
    currents are prescribed inputs of a forward solve: the conductor's own
@@ -1196,12 +1196,12 @@ unknowns of the same bordered Newton, closing
 
 .. math::
 
-   q_r(r_X, z_X) = 0, \qquad
-   q_z(r_X, z_X) = 0, \qquad
-   \psi_{\mathrm{bnd}} - \psi_h(r_X, z_X) = 0
+   q_r(R_X, z_X) = 0, \qquad
+   q_z(R_X, z_X) = 0, \qquad
+   \psi_{\mathrm{bnd}} - \psi_h(R_X, z_X) = 0
 
 on the same factorisation as everything else.  The two new unknowns cost **no
-extra backsolve**: the field residual does not contain :math:`(r_X, z_X)` at
+extra backsolve**: the field residual does not contain :math:`(R_X, z_X)` at
 all — they reach it only through :math:`\psi_{\mathrm{bnd}}`, which has a column
 already — so both new columns are exactly zero and the system grows only in its
 dense corner.
@@ -1281,14 +1281,14 @@ solution, since :math:`\psi` outside the mesh is their sum against the basis.
 
    **The mesh must reach the axis exactly**: ``[mesh] RMin = 0``, and the driver
    refuses anything else. The separation above holds on a semicircle centred on
-   the axis and nowhere else, so a box starting at :math:`r = 0.05` does not
+   the axis and nowhere else, so a box starting at :math:`R = 0.05` does not
    give a slightly worse version of the problem — the modes do not span its
    exterior at all. Every mode vanishes on the axis identically, so the flat
    side needs no treatment in the exterior and is ordinary fitted boundary.
 
    ``[boundary.exterior]`` and ``[boundary.shape]`` are **alternatives**, and
    naming both is refused: one makes :math:`\Gamma` a semicircle about the axis
-   and the other a closed surface that may not reach :math:`r = 0`.
+   and the other a closed surface that may not reach :math:`R = 0`.
    ``[boundary] Type`` must be ``"zero"`` beside an exterior block, since
    :math:`\Gamma` carries the transmission condition rather than data.
 
@@ -1446,7 +1446,7 @@ column tuned to the machine and a round one at the default ``0.5*CentreR`` reach
 the same :math:`\psi_\mathrm{ax}`, the same :math:`\psi_\mathrm{bnd}` and the
 same X-point to every printed digit, in the same number of Newton iterations.
 ``"bump"`` gives
-:math:`\psi = \texttt{Amplitude}\,(1 - (\Delta r/\texttt{RadiusR})^2 - (\Delta z/\texttt{RadiusZ})^2)`
+:math:`\psi = \texttt{Amplitude}\,(1 - (\Delta R/\texttt{RadiusR})^2 - (\Delta z/\texttt{RadiusZ})^2)`
 where that is positive and zero elsewhere.
 
 .. important::

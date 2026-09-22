@@ -165,11 +165,11 @@ BOOST_AUTO_TEST_CASE( theSourceDoesNotVanishOnTheTrivialBranch )
 
 	double smallest = std::numeric_limits<double>::infinity();
 	meq::tests::Rectangle const box = standardBox();
-	for ( double r = box.rMin; r <= box.rMax + 1.0e-12; r += 0.05 )
-		smallest = std::min( smallest, std::fabs( source->f( r, 0.0, 0.0 ) ) );
+	for ( double radius = box.minRadius; radius <= box.maxRadius + 1.0e-12; radius += 0.05 )
+		smallest = std::min( smallest, std::fabs( source->f( radius, 0.0, 0.0 ) ) );
 
 	BOOST_TEST( smallest > 0.1,
-	            "the smallest |F( r, z, 0 )| over the box is " << smallest
+	            "the smallest |F( R, z, 0 )| over the box is " << smallest
 	            << ", so psi = 0 nearly solves the homogeneous problem and Newton will "
 	            "land on the trivial branch rather than on an equilibrium" );
 }

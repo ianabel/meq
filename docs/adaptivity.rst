@@ -38,10 +38,10 @@ exposed individually by :cpp:func:`meq::ResidualEstimator::component`:
      - Measures
    * - ``Divergence``
      - :math:`\eta_1`
-     - The residual of :math:`-\gradbar\cdot q = F/r` on each element.
+     - The residual of :math:`-\gradbar\cdot q = F/R` on each element.
    * - ``Constitutive``
      - :math:`\eta_2`
-     - The residual of :math:`q = \gradbar\psi^\star / r`.
+     - The residual of :math:`q = \gradbar\psi^\star / R`.
    * - ``FluxJump``
      - :math:`\eta_3`
      - The jump in :math:`q_h` across interior edges.
@@ -97,7 +97,7 @@ moving on its boundary: measured on the half-disc, the elements touching
 .. math::
 
    d(x) = q_h\cdot\nu(x)
-          - \frac{1}{r}\sum_n a_n\,\sigma_n\,C_n(\mu),
+          - \frac{1}{R}\sum_n a_n\,\sigma_n\,C_n(\mu),
    \qquad \sigma_n = \frac{1-n}{\rho_\Gamma}
 
 is orthogonal to :math:`C_2 \ldots C_{N+1}` and is **not zero** — what survives is

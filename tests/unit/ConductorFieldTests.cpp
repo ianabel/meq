@@ -18,7 +18,7 @@
 //     EVERYWHERE, including inside the coil" -- so refusing a node inside a
 //     coil would reject the ordinary configuration this plan exists to make
 //     cheap, while NOT refusing one on a filament is an infinity in a solve.
-//   * THE AXIS. psi_c must be EXACTLY zero at r = 0, bit for bit, because that
+//   * THE AXIS. psi_c must be EXACTLY zero at R = 0, bit for bit, because that
 //     is the boundary condition the free-boundary problem imposes there and the
 //     split must not disturb it. An epsilon there is a boundary condition
 //     quietly becoming inhomogeneous.
@@ -128,25 +128,25 @@ BOOST_AUTO_TEST_CASE( psi_c_vanishes_on_the_axis_bit_for_bit )
 // THE FLUX IS THE GRADIENT OF THE SUM DIVIDED ONCE, NOT A SUM OF QUOTIENTS.
 // Both are the same number in exact arithmetic; only one of them is a single
 // division, and only one of them is NaN once rather than per filament on the
-// axis. The test pins the identity q = ( 1/r ) grad_bar psi against gradPsi()
+// axis. The test pins the identity q = ( 1/R ) grad_bar psi against gradPsi()
 // so that a future rewrite cannot quietly go back to summing filamentFlux().
 BOOST_AUTO_TEST_CASE( the_flux_is_one_over_r_times_the_gradient_of_the_sum )
 {
 	meq::ConductorField const field = threeFilaments();
 
-	double const r = 1.55;
+	double const radius = 1.55;
 	double const z = -0.25;
 
 	double gr = 0.0;
 	double gz = 0.0;
-	field.gradPsi( r, z, gr, gz );
+	field.gradPsi( radius, z, gr, gz );
 
 	double qr = 0.0;
 	double qz = 0.0;
-	field.flux( r, z, qr, qz );
+	field.flux( radius, z, qr, qz );
 
-	BOOST_TEST( qr == gr/r, boost::test_tools::tolerance( 0.0 ) );
-	BOOST_TEST( qz == gz/r, boost::test_tools::tolerance( 0.0 ) );
+	BOOST_TEST( qr == gr/radius, boost::test_tools::tolerance( 0.0 ) );
+	BOOST_TEST( qz == gz/radius, boost::test_tools::tolerance( 0.0 ) );
 }
 
 // THE TOTAL CURRENT IS THE NUMBER A BOUNDARY INTEGRAL IS CHECKED AGAINST.
@@ -339,10 +339,10 @@ BOOST_AUTO_TEST_CASE( the_refusals_are_the_contract )
 // THE AXIS IS THE ONE PLACE q HAS A LIMIT RATHER THAN A VALUE, AND
 // poloidalField() IS THE ONLY ENTRY POINT THAT TAKES IT.
 //
-// flux() is 0/0 at r = 0 and reports NaN deliberately -- a caller who has not
+// flux() is 0/0 at R = 0 and reports NaN deliberately -- a caller who has not
 // thought about the axis learns something from a NaN and nothing from a
 // plausible number. But an output grid on a half-disc machine has its WHOLE
-// FIRST COLUMN on r = 0, so somebody has to take the limit, and a limit taken
+// FIRST COLUMN on R = 0, so somebody has to take the limit, and a limit taken
 // wrongly is invisible: it would be one column of a 129 x 129 file, finite,
 // smooth against its neighbours, and wrong.
 //
@@ -369,23 +369,23 @@ BOOST_AUTO_TEST_CASE( the_axis_limit_is_the_limit_and_not_a_substitute )
 	field.poloidalField( 0.0, z, bR, bZ );
 	BOOST_TEST( bZ == expected, boost::test_tools::tolerance( 1.0e-15 ) );
 
-	// (2) B_R IS EXACTLY ZERO AND NOT MERELY SMALL. psi ~ c( z ) r^2 near the
-	// axis, so d_z psi ~ c'( z ) r^2 and q_z ~ c'( z ) r -- the limit is zero
+	// (2) B_R IS EXACTLY ZERO AND NOT MERELY SMALL. psi ~ c( z ) R^2 near the
+	// axis, so d_z psi ~ c'( z ) R^2 and q_z ~ c'( z ) R -- the limit is zero
 	// identically, and a tolerance here would accept a limit taken by
-	// evaluating at some small r instead of by algebra.
+	// evaluating at some small R instead of by algebra.
 	BOOST_TEST( bR == 0.0, boost::test_tools::tolerance( 0.0 ) );
 
 	// (3) AND IT IS THE LIMIT OF THE THING IT REPLACES, which is what says the
 	// two kernels describe one field rather than two. flux() off the axis
-	// approaches it from the side, at a rate that halves the error as r halves
+	// approaches it from the side, at a rate that halves the error as R halves
 	// -- so the check is that the approach happens at all and lands where the
-	// closed form says, not that any one r is close.
+	// closed form says, not that any one R is close.
 	double previous = 0.0;
-	for ( double r : { 1.0e-2, 1.0e-3, 1.0e-4 } )
+	for ( double radius : { 1.0e-2, 1.0e-3, 1.0e-4 } )
 	{
 		double qR = 0.0;
 		double qZ = 0.0;
-		field.flux( r, z, qR, qZ );
+		field.flux( radius, z, qR, qZ );
 		double const error = std::abs( qR - expected );
 		if ( previous > 0.0 )
 			BOOST_TEST( error < previous );
@@ -467,26 +467,26 @@ BOOST_AUTO_TEST_CASE( a_thin_rectangle_reaches_its_filament_on_the_axis )
 	            boost::test_tools::tolerance( 1.0e-15 ) );
 }
 
-// PSI_C IS EVEN IN r, AND THAT IS WHAT LETS AN EXTRAPOLATING EVALUATION OFF
+// PSI_C IS EVEN IN R, AND THAT IS WHAT LETS AN EXTRAPOLATING EVALUATION OFF
 // THE HALF-PLANE BE ANSWERED INSTEAD OF KILLING A SOLVE.
 //
-// Two of MEQ's evaluations of psi_c reach points with r < 0 by design and
+// Two of MEQ's evaluations of psi_c reach points with R < 0 by design and
 // neither is a geometry error. The exterior datum is assembled at transfer
 // path TARGETS on Gamma, and on a half-disc machine Gamma is a semicircle
 // whose two endpoints lie exactly ON the axis -- so a target near an endpoint
-// lands either side of r = 0 by an amount that is a property of the path map
+// lands either side of R = 0 by an amount that is a property of the path map
 // rather than of the mesh's validity. Measured on the DIII-D filament case at
-// k = 3, that point is ( r, z ) = ( -1.0984e-03, 3.4 ), which is Gamma's own
+// k = 3, that point is ( R, z ) = ( -1.0984e-03, 3.4 ), which is Gamma's own
 // upper endpoint and about one per cent of h. The other is
 // meq::CriticalPointFinder, whose element-local Newton is allowed to leave its
 // element by up to 2 in reference coordinates on purpose.
 //
-// psi = r A_phi, and under r -> -r at fixed z the point is the same physical
+// psi = R A_phi, and under R -> -R at fixed z the point is the same physical
 // point rotated by pi in phi: phi-hat reverses, A_phi changes sign, and the
 // product does not. So the reflection is the ANALYTIC CONTINUATION and the
 // equality below is exact rather than a tolerance -- which is the assertion
-// that separates it from a clamp to r = 0, a substitution that would also
-// "work" and would be wrong by O( r^2 ).
+// that separates it from a clamp to R = 0, a substitution that would also
+// "work" and would be wrong by O( R^2 ).
 //
 // AND THE VECTOR ENTRY POINTS MUST STILL REFUSE, which is the other half and
 // the one a careless widening of this fix would break: d_r psi is ODD where
@@ -510,9 +510,9 @@ BOOST_AUTO_TEST_CASE( psiIsEvenInRAndTheVectorEntryPointsStillRefuse )
 		            boost::test_tools::tolerance( 0.0 ) );
 	}
 
-	// AND IT IS NOT A CLAMP. psi_c ~ c( z ) r^2 near the axis, so reflecting
+	// AND IT IS NOT A CLAMP. psi_c ~ c( z ) R^2 near the axis, so reflecting
 	// and clamping differ at second order -- small, and not zero. A point at
-	// r = 1.0984e-03 must give the SAME number as its reflection and a
+	// R = 1.0984e-03 must give the SAME number as its reflection and a
 	// DIFFERENT one from the axis, or the continuation has been replaced by a
 	// substitution that this test would otherwise pass.
 	double const near = field.psi( -1.0984e-03, 3.40 );
@@ -575,7 +575,7 @@ BOOST_AUTO_TEST_CASE( theFilamentStackConvergesToTheRectangleAtOrderTwo )
 
 	// Field points OUTSIDE the rectangle and at several standoffs, so the rate
 	// is not one point's luck. The nearest is about half a half-height away.
-	struct Point { double r, z; };
+	struct Point { double radius, z; };
 	std::vector<Point> const points = {
 		{ 2.10, 0.20 }, { 1.30, 0.75 }, { 0.70, -0.40 },
 		{ 1.90, 1.30 }, { 0.90, 0.20 }
@@ -593,9 +593,9 @@ BOOST_AUTO_TEST_CASE( theFilamentStackConvergesToTheRectangleAtOrderTwo )
 		double worst = 0.0;
 		for ( Point const &p : points )
 		{
-			double const reference = exact.psi( p.r, p.z );
+			double const reference = exact.psi( p.radius, p.z );
 			worst = std::max( worst,
-			                  std::fabs( stacked.psi( p.r, p.z ) - reference )
+			                  std::fabs( stacked.psi( p.radius, p.z ) - reference )
 			                  /std::fabs( reference ) );
 		}
 		return worst;
@@ -716,10 +716,10 @@ BOOST_AUTO_TEST_CASE( theUnitStackIsTheCentreFilamentAndTheStackKeepsTheCurrent 
 
 		// AND EVERY FILAMENT IS INSIDE THE RECTANGLE, which cell CENTRES are
 		// and cell corners are not: a corner rule would put filaments on
-		// rMin and rMax exactly, and on the axis side that is a conductor
+		// R_min and R_max exactly, and on the axis side that is a conductor
 		// half a cell nearer the plasma than the metal is.
-		BOOST_TEST( lowR > coil.rMin() );
-		BOOST_TEST( highR < coil.rMax() );
+		BOOST_TEST( lowR > coil.minRadius() );
+		BOOST_TEST( highR < coil.maxRadius() );
 		BOOST_TEST( lowZ > coil.zMin() );
 		BOOST_TEST( highZ < coil.zMax() );
 	}
@@ -829,7 +829,7 @@ BOOST_AUTO_TEST_CASE( theCollapseIsPercentLevelAtMastUsPlasmaAndTheStackIsNot )
 	meq::Coil const solenoid( 0.194750000, 0.000000000,
 	                          0.006000000, 1.590000000, +1.6200000000e+06 );
 
-	struct Point { double r, z; };
+	struct Point { double radius, z; };
 	std::vector<Point> const plasma = {
 		{ 0.85,  0.00 }, { 0.60,  0.50 }, { 1.30,  0.00 },
 		{ 0.40,  1.00 }, { 0.90, -0.70 }, { 0.35,  0.00 }
@@ -848,8 +848,8 @@ BOOST_AUTO_TEST_CASE( theCollapseIsPercentLevelAtMastUsPlasmaAndTheStackIsNot )
 		double out = 0.0;
 		for ( Point const &p : plasma )
 		{
-			double const reference = exact.psi( p.r, p.z );
-			out = std::max( out, std::fabs( stacked.psi( p.r, p.z ) - reference )
+			double const reference = exact.psi( p.radius, p.z );
+			out = std::max( out, std::fabs( stacked.psi( p.radius, p.z ) - reference )
 			                     /std::fabs( reference ) );
 		}
 		return out;

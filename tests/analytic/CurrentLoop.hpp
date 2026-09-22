@@ -28,14 +28,14 @@
  *
  * For a loop of radius a at height z0 carrying current I, with
  *
- *     d^2 = ( a + r )^2 + ( z - z0 )^2,      k^2 = 4 a r / d^2,
+ *     d^2 = ( a + R )^2 + ( z - z0 )^2,      k^2 = 4 a R / d^2,
  *
  * the flux is
  *
- *     psi = ( mu0 I / pi )   sqrt( a r ) / k  [ ( 1 - k^2/2 ) K( k ) - E( k ) ]
+ *     psi = ( mu0 I / pi )   sqrt( a R ) / k  [ ( 1 - k^2/2 ) K( k ) - E( k ) ]
  *         = ( mu0 I / 2 pi ) d               [ ( 1 - k^2/2 ) K( k ) - E( k ) ].
  *
- * The two lines are the SAME expression: sqrt( a r ) / k = d / 2 identically,
+ * The two lines are the SAME expression: sqrt( a R ) / k = d / 2 identically,
  * straight from the definition of k. Measured over 4732 points, they agree to a
  * worst relative difference of 2.6e-16. The second is what psi() evaluates, and
  * the reason is the axis -- see below. This is the only change made to the
@@ -64,12 +64,12 @@
  * constant is therefore stated rather than checked by it, and then checked
  * separately against a quantity that does fix it.
  *
- * The convention is psi = r A_phi -- poloidal flux PER RADIAN, which is the
- * total flux through a circle of radius r divided by 2 pi. It is MEQ's own
- * convention: with q = ( 1/r ) grad_bar psi, CLAUDE.md writes the magnetic
+ * The convention is psi = R A_phi -- poloidal flux PER RADIAN, which is the
+ * total flux through a circle of radius R divided by 2 pi. It is MEQ's own
+ * convention: with q = ( 1/R ) grad_bar psi, CLAUDE.md writes the magnetic
  * field as B = ( -q_z, +q_r ), i.e.
  *
- *     B_r = -( 1/r ) d_z psi,      B_z = +( 1/r ) d_r psi,
+ *     B_r = -( 1/R ) d_z psi,      B_z = +( 1/R ) d_r psi,
  *
  * and in that convention a loop's field at its own centre must be the textbook
  * B_z = mu0 I / ( 2 a ). Measured through flux(), it is, to a worst 2.8e-12
@@ -77,9 +77,9 @@
  * sign with it -- and mu0 appears explicitly below as 4 pi x 10^-7 rather than
  * being folded into a coefficient.
  *
- * So a, z0 and r are in metres, I is in amperes, and psi is in weber per radian
+ * So a, z0 and R are in metres, I is in amperes, and psi is in weber per radian
  * (T m^2). The far field is the loop's dipole,
- * psi -> mu0 I a^2 r^2 / ( 4 R^3 ), which it reaches to 8.25e-7 relative at
+ * psi -> mu0 I a^2 R^2 / ( 4 R^3 ), which it reaches to 8.25e-7 relative at
  * R = 1000 a, at 8.25e-5 at R = 100 a and 8.23e-3 at R = 10 a. psi > 0
  * everywhere for I > 0.
  *
@@ -93,7 +93,7 @@
  * WHERE IT IS VALID, AND WHAT HAPPENS AT THE LOOP
  * -----------------------------------------------
  *
- * k -> 1 as ( r, z ) -> ( a, z0 ), where K( k ) diverges logarithmically.
+ * k -> 1 as ( R, z ) -> ( a, z0 ), where K( k ) diverges logarithmically.
  * BOTH psi AND ITS GRADIENT DIVERGE THERE -- this is a filamentary current,
  * so it is the two-dimensional line-current logarithm, exactly as
  * A_phi ~ -( mu0 I / 2 pi ) ln( distance ). Measured on the equator with
@@ -123,27 +123,27 @@
  * fixture, and a fixture that quietly switches formula near the loop is a
  * fixture that can disagree with itself.
  *
- * THE AXIS r = 0 IS THE ONE CASE THAT IS EXACT RATHER THAN MERELY BOUNDED.
+ * THE AXIS R = 0 IS THE ONE CASE THAT IS EXACT RATHER THAN MERELY BOUNDED.
  * There k = 0, K( 0 ) = E( 0 ) = pi/2, so the bracket is the difference of
  * two identical doubles and psi( 0, z ) is 0.0 BIT EXACTLY at every z tried
  * -- which is the boundary condition the free-boundary problem imposes on
  * the axis, so it is worth having exactly. That is the reason psi() evaluates
- * the d/2 form: the printed sqrt( a r ) / k form is 0/0 there and returns NaN.
+ * the d/2 form: the printed sqrt( a R ) / k form is 0/0 there and returns NaN.
  * Near the axis
- * psi ~ ( mu0 I a^2 / 4 d^3 ) r^2, so it vanishes quadratically -- measured,
- * psi( 1e-3, 0 )/r^2 = 0.785398 against mu0 I a^2 / 4 d^3 = 0.785398 on the
+ * psi ~ ( mu0 I a^2 / 4 d^3 ) R^2, so it vanishes quadratically -- measured,
+ * psi( 1e-3, 0 )/R^2 = 0.785398 against mu0 I a^2 / 4 d^3 = 0.785398 on the
  * unitFlux() loop.
  *
  * THE DERIVATIVES DO NOT ALL FAIL THERE, AND WHICH ONES DO IS WORTH STATING.
- * dPsiDr carries a 1/( 2 r ) and returns NaN at exactly r = 0; dPsiDz does
- * not and returns 0.0, which is also the correct limit, since psi ~ r^2 g( z )
- * makes d_z psi ~ r^2 g'( z ). flux() is NaN in BOTH components, because it
+ * dPsiDr carries a 1/( 2 R ) and returns NaN at exactly R = 0; dPsiDz does
+ * not and returns 0.0, which is also the correct limit, since psi ~ R^2 g( z )
+ * makes d_z psi ~ R^2 g'( z ). flux() is NaN in BOTH components, because it
  * divides
- * the pair by r. So gradPsi( 0, z ) is ( NaN, 0 ) and flux( 0, z ) is
+ * the pair by R. So gradPsi( 0, z ) is ( NaN, 0 ) and flux( 0, z ) is
  * ( NaN, NaN ): only psi() reaches the axis, and a caller must not read the
  * one component that happens to be finite as evidence that the others are. That
  * is the opposite arrangement to VacuumHarmonic.hpp, whose whole purpose is a
- * flux that is bounded at r = 0, and the two together are the pair FB-A wants.
+ * flux that is bounded at R = 0, and the two together are the pair FB-A wants.
  *
  *
  * MULTIPLE LOOPS
@@ -158,7 +158,7 @@
  * WHAT WAS MEASURED
  * -----------------
  *
- * On the unitFlux() loop, over r in [0.10, 3.00) and z in [-2.00, 2.00] at a
+ * On the unitFlux() loop, over R in [0.10, 3.00) and z in [-2.00, 2.00] at a
  * spacing of 0.05, excluding a disc of radius 0.2 about the loop -- 4732 points
  * -- against a representative |psi( 1, 1 )| = 1.9659e-01:
  *
@@ -204,7 +204,7 @@
  *     floor as one loop.
  *
  *  5. B_z at the loop centre against the textbook mu0 I / ( 2 a ), taken as the
- *     r -> 0 limit of +q_r and Richardson-extrapolated: 2.8e-12, 1.3e-13 and
+ *     R -> 0 limit of +q_r and Richardson-extrapolated: 2.8e-12, 1.3e-13 and
  *     2.2e-13 relative at a = 0.5, 1.0 and 2.0. This is the check that fixes
  *     the constant, which item 1 structurally cannot, and it fixes the SIGN
  *     convention with it.
@@ -222,8 +222,8 @@ namespace analytic
 /// The poloidal flux of one circular current loop of radius a at height z0,
 /// coaxial with the z axis.
 ///
-/// psi() is valid everywhere including r = 0. The derivatives -- dPsiDr(),
-/// dPsiDz(), gradPsi() and flux() -- carry a 1/r and require r > 0. Nothing
+/// psi() is valid everywhere including R = 0. The derivatives -- dPsiDr(),
+/// dPsiDz(), gradPsi() and flux() -- carry a 1/R and require R > 0. Nothing
 /// here may be evaluated ON the loop, where the field is genuinely singular;
 /// see the file comment for how close is close enough.
 class CurrentLoop
@@ -266,44 +266,44 @@ class CurrentLoop
 			return CurrentLoop( 1.0, 0.0, pi/mu0 );
 		}
 
-		/// The distance d = sqrt( ( a + r )^2 + ( z - z0 )^2 ) from the field
+		/// The distance d = sqrt( ( a + R )^2 + ( z - z0 )^2 ) from the field
 		/// point to the loop's MIRROR ring at -a, which is what sets the scale
 		/// of the elliptic argument. Exposed because psi is d/2 times a bracket
 		/// and a reader checking the algebra wants both halves.
-		double distance( double r, double z ) const
+		double distance( double radius, double z ) const
 		{
 			double const dz = z - heightValue;
-			double const sum = radiusValue + r;
+			double const sum = radiusValue + radius;
 			return std::sqrt( sum*sum + dz*dz );
 		}
 
-		/// The elliptic MODULUS k = 2 sqrt( a r ) / d, not the parameter k^2.
+		/// The elliptic MODULUS k = 2 sqrt( a R ) / d, not the parameter k^2.
 		///
 		/// Exposed so that a caller can test how close it is standing to the
 		/// loop: k -> 1 there, and k rounding to exactly 1.0 is what turns psi
 		/// into a NaN. 1 - k of about 1e-16 is the edge.
-		double modulus( double r, double z ) const
+		double modulus( double radius, double z ) const
 		{
-			return 2.0*std::sqrt( radiusValue*r )/distance( r, z );
+			return 2.0*std::sqrt( radiusValue*radius )/distance( radius, z );
 		}
 
-		/// The poloidal flux psi = r A_phi, in weber per radian.
+		/// The poloidal flux psi = R A_phi, in weber per radian.
 		///
 		/// Evaluated as ( mu0 I / 2 pi ) d [ ( 1 - k^2/2 ) K - E ], which is
-		/// identically the sqrt( a r )/k form and unlike it is exact at r = 0.
+		/// identically the sqrt( a R )/k form and unlike it is exact at R = 0.
 		/// std::comp_ellint_1 and _2 take the MODULUS, which is why the
 		/// argument is k and the bracket carries k*k.
-		double psi( double r, double z ) const
+		double psi( double radius, double z ) const
 		{
-			double const k = modulus( r, z );
+			double const k = modulus( radius, z );
 			double const kK = std::comp_ellint_1( k );
 			double const kE = std::comp_ellint_2( k );
 
-			return ( mu0*currentValue/( 2.0*pi ) )*distance( r, z )
+			return ( mu0*currentValue/( 2.0*pi ) )*distance( radius, z )
 			       *( ( 1.0 - 0.5*k*k )*kK - kE );
 		}
 
-		/// d psi / d r. ANALYTIC, not a difference.
+		/// d psi / d R. ANALYTIC, not a difference.
 		///
 		/// With A( k ) := ( 1 - k^2/2 ) K - E and psi = ( mu0 I / 4 pi ) 2 d A,
 		/// the chain rule needs dA/dk, and the standard derivatives
@@ -314,20 +314,20 @@ class CurrentLoop
 		///
 		/// which is worth writing down because the three-term form it comes
 		/// from does not obviously simplify. The geometry supplies
-		/// d d / d r = ( a + r ) / d and
-		/// d k / d r = k [ 1/( 2 r ) - ( a + r ) / d^2 ], the latter from
-		/// differentiating ln k = ln 2 + ( ln a + ln r )/2 - ln d.
+		/// d d / d R = ( a + R ) / d and
+		/// d k / d R = k [ 1/( 2 R ) - ( a + R ) / d^2 ], the latter from
+		/// differentiating ln k = ln 2 + ( ln a + ln R )/2 - ln d.
 		///
-		/// The 1/( 2 r ) is why this is NaN at r = 0. It is a real 1/r and not
-		/// an artefact: psi ~ r^2 there, so d psi / d r ~ r and the limit
+		/// The 1/( 2 R ) is why this is NaN at R = 0. It is a real 1/R and not
+		/// an artefact: psi ~ R^2 there, so d psi / d R ~ R and the limit
 		/// exists, but the expression as written does not reach it.
-		double dPsiDr( double r, double z ) const
+		double dPsiDr( double radius, double z ) const
 		{
 			double const dz = z - heightValue;
-			double const sum = radiusValue + r;
+			double const sum = radiusValue + radius;
 			double const d2 = sum*sum + dz*dz;
 			double const d = std::sqrt( d2 );
-			double const k = 2.0*std::sqrt( radiusValue*r )/d;
+			double const k = 2.0*std::sqrt( radiusValue*radius )/d;
 			double const kK = std::comp_ellint_1( k );
 			double const kE = std::comp_ellint_2( k );
 
@@ -335,7 +335,7 @@ class CurrentLoop
 			double const dAdk = 0.5*k*( kE/( 1.0 - k*k ) - kK );
 
 			double const dDdr = sum/d;
-			double const dkdr = k*( 1.0/( 2.0*r ) - sum/d2 );
+			double const dkdr = k*( 1.0/( 2.0*radius ) - sum/d2 );
 
 			return ( mu0*currentValue/( 2.0*pi ) )*( dDdr*bracket + d*dAdk*dkdr );
 		}
@@ -343,16 +343,16 @@ class CurrentLoop
 		/// d psi / d z. Analytic, by the same route, with
 		/// d d / d z = ( z - z0 ) / d and d k / d z = -k ( z - z0 ) / d^2.
 		///
-		/// It has no 1/r of its own, but it shares dAdk's 1/( 1 - k^2 ) and so
+		/// It has no 1/R of its own, but it shares dAdk's 1/( 1 - k^2 ) and so
 		/// gives out at the loop with everything else. On the midplane of a
 		/// loop at z0 = 0 it is exactly zero by symmetry.
-		double dPsiDz( double r, double z ) const
+		double dPsiDz( double radius, double z ) const
 		{
 			double const dz = z - heightValue;
-			double const sum = radiusValue + r;
+			double const sum = radiusValue + radius;
 			double const d2 = sum*sum + dz*dz;
 			double const d = std::sqrt( d2 );
-			double const k = 2.0*std::sqrt( radiusValue*r )/d;
+			double const k = 2.0*std::sqrt( radiusValue*radius )/d;
 			double const kK = std::comp_ellint_1( k );
 			double const kE = std::comp_ellint_2( k );
 
@@ -366,38 +366,38 @@ class CurrentLoop
 		}
 
 		/// grad_bar( psi ) = ( d_r psi, d_z psi ). Not the HDG flux: that is
-		/// this divided by r, see flux().
-		void gradPsi( double r, double z, double &dR, double &dZ ) const
+		/// this divided by R, see flux().
+		void gradPsi( double radius, double z, double &dR, double &dZ ) const
 		{
-			dR = dPsiDr( r, z );
-			dZ = dPsiDz( r, z );
+			dR = dPsiDr( radius, z );
+			dZ = dPsiDz( radius, z );
 		}
 
-		/// The HDG flux q = grad_bar( psi ) / r, in the convergence harness's
+		/// The HDG flux q = grad_bar( psi ) / R, in the convergence harness's
 		/// own signature.
 		///
-		/// Written as gradPsi() then divided by r, which is what every fixture
+		/// Written as gradPsi() then divided by R, which is what every fixture
 		/// here except VacuumHarmonic.hpp does. There is no cancellation to
-		/// exploit at r = 0: q_r ~ ( mu0 I a^2 / 2 d^3 ) is a finite limit but
+		/// exploit at R = 0: q_r ~ ( mu0 I a^2 / 2 d^3 ) is a finite limit but
 		/// the expression reaching it is not, so this is NaN on the axis. A
 		/// caller needing the axis wants VacuumHarmonic.hpp.
-		void flux( double r, double z, double &qR, double &qZ ) const
+		void flux( double radius, double z, double &qR, double &qZ ) const
 		{
-			gradPsi( r, z, qR, qZ );
-			qR /= r;
-			qZ /= r;
+			gradPsi( radius, z, qR, qZ );
+			qR /= radius;
+			qZ /= radius;
 		}
 
 		/// The source. Identically zero: this is a vacuum field, singular only
 		/// on the loop, which is not in the computational domain.
-		double f( double /*r*/, double /*z*/, double /*psi*/ ) const
+		double f( double /*R*/, double /*z*/, double /*psi*/ ) const
 		{
 			return 0.0;
 		}
 
 		/// And so is its derivative, which makes a Newton solve affine -- one
 		/// step, exactly, like Soloviev.hpp and VacuumHarmonic.hpp.
-		double dFdPsi( double /*r*/, double /*z*/, double /*psi*/ ) const
+		double dFdPsi( double /*R*/, double /*z*/, double /*psi*/ ) const
 		{
 			return 0.0;
 		}
@@ -410,20 +410,20 @@ class CurrentLoop
 		/// transcription rather than trusting it -- see the file comment for
 		/// the numbers and for why h = 1e-5 is worse than h = 1e-4. Keep the
 		/// evaluation off the loop by several times h: the stencil reaches
-		/// r +/- 2h, and it is the fourth derivative near the singularity that
+		/// R +/- 2h, and it is the fourth derivative near the singularity that
 		/// sets the worst residual.
-		double deltaStarFD( double r, double z, double h = 1.0e-4 ) const
+		double deltaStarFD( double radius, double z, double h = 1.0e-4 ) const
 		{
 			auto innerR = [ & ]( double rr )
 			{
 				return ( psi( rr + h, z ) - psi( rr - h, z ) )/( 2.0*h )/rr;
 			};
 
-			double const dRInner = ( innerR( r + h ) - innerR( r - h ) )/( 2.0*h );
-			double const dZZ = ( psi( r, z + h ) - 2.0*psi( r, z ) + psi( r, z - h ) )
+			double const dRInner = ( innerR( radius + h ) - innerR( radius - h ) )/( 2.0*h );
+			double const dZZ = ( psi( radius, z + h ) - 2.0*psi( radius, z ) + psi( radius, z - h ) )
 			                   /( h*h );
 
-			return r*dRInner + dZZ;
+			return radius*dRInner + dZZ;
 		}
 
 		/// The loop radius a.
@@ -470,61 +470,61 @@ class CurrentLoopSet
 		}
 
 		/// The total flux.
-		double psi( double r, double z ) const
+		double psi( double radius, double z ) const
 		{
 			double total = 0.0;
 			for ( CurrentLoop const &loop : loopValues )
 			{
-				total += loop.psi( r, z );
+				total += loop.psi( radius, z );
 			}
 			return total;
 		}
 
-		/// d psi / d r of the total field.
-		double dPsiDr( double r, double z ) const
+		/// d psi / d R of the total field.
+		double dPsiDr( double radius, double z ) const
 		{
 			double total = 0.0;
 			for ( CurrentLoop const &loop : loopValues )
 			{
-				total += loop.dPsiDr( r, z );
+				total += loop.dPsiDr( radius, z );
 			}
 			return total;
 		}
 
 		/// d psi / d z of the total field.
-		double dPsiDz( double r, double z ) const
+		double dPsiDz( double radius, double z ) const
 		{
 			double total = 0.0;
 			for ( CurrentLoop const &loop : loopValues )
 			{
-				total += loop.dPsiDz( r, z );
+				total += loop.dPsiDz( radius, z );
 			}
 			return total;
 		}
 
 		/// grad_bar( psi ) of the total field.
-		void gradPsi( double r, double z, double &dR, double &dZ ) const
+		void gradPsi( double radius, double z, double &dR, double &dZ ) const
 		{
-			dR = dPsiDr( r, z );
-			dZ = dPsiDz( r, z );
+			dR = dPsiDr( radius, z );
+			dZ = dPsiDz( radius, z );
 		}
 
-		/// The HDG flux q = grad_bar( psi ) / r of the total field.
-		void flux( double r, double z, double &qR, double &qZ ) const
+		/// The HDG flux q = grad_bar( psi ) / R of the total field.
+		void flux( double radius, double z, double &qR, double &qZ ) const
 		{
-			gradPsi( r, z, qR, qZ );
-			qR /= r;
-			qZ /= r;
+			gradPsi( radius, z, qR, qZ );
+			qR /= radius;
+			qZ /= radius;
 		}
 
 		/// The source of the total field: still identically zero.
-		double f( double /*r*/, double /*z*/, double /*psi*/ ) const
+		double f( double /*R*/, double /*z*/, double /*psi*/ ) const
 		{
 			return 0.0;
 		}
 
 		/// And its derivative.
-		double dFdPsi( double /*r*/, double /*z*/, double /*psi*/ ) const
+		double dFdPsi( double /*R*/, double /*z*/, double /*psi*/ ) const
 		{
 			return 0.0;
 		}
@@ -534,12 +534,12 @@ class CurrentLoopSet
 		/// Delta* is linear and so is the difference stencil, so this is the
 		/// same quantity as differencing psi() above; it is written as a sum
 		/// because that is what makes it obviously zero when each member is.
-		double deltaStarFD( double r, double z, double h = 1.0e-4 ) const
+		double deltaStarFD( double radius, double z, double h = 1.0e-4 ) const
 		{
 			double total = 0.0;
 			for ( CurrentLoop const &loop : loopValues )
 			{
-				total += loop.deltaStarFD( r, z, h );
+				total += loop.deltaStarFD( radius, z, h );
 			}
 			return total;
 		}

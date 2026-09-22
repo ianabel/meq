@@ -50,7 +50,7 @@ if len(rows) >= 3:
         out["psi_axis_richardson"] = float(rich)
         out["psi_axis_error_at_513"] = float(abs(c - rich)/abs(rich))
     for k in ("psi_bndry",):
-        a, b, c = (r[k] for r in rows[-3:])
+        a, b, c = (R[k] for R in rows[-3:])
         d1, d2 = a - b, b - c
         if d2 != 0.0:
             o = np.log(abs(d1/d2))/np.log(2.0)

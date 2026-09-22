@@ -23,12 +23,12 @@
  * THE CONVENTION MAP. The paper takes g = constant for this example -- the
  * caption of its Figure 10 says so in as many words -- so g dg/dpsi = 0 and
  *
- *     F( r, psi ) = mu0 r^2 dp/dpsi,     mu0 = 1,
+ *     F( R, psi ) = mu0 R^2 dp/dpsi,     mu0 = 1,
  *
  * which is MEQ's F exactly. Unlike section 4.2, no closed form for F is printed:
  * only p is given, and the source has to be obtained by differentiating it. The
  * check that it was done right is Figure 10's centre panel, which plots f( psi )
- * -- the source without its r^2 -- peaking a little above 10 just below
+ * -- the source without its R^2 -- peaking a little above 10 just below
  * psi = 0.4. pPrime( 0.3 ) here is 10.08.
  *
  * DIFFERENTIATED, NOT FINITE-DIFFERENCED. erf appears, and its derivative
@@ -42,7 +42,7 @@
  * NO EXACT SOLUTION, so there is no psi(), gradPsi(), flux() or deltaStarFD()
  * here -- see the header comment of PressurePedestal.hpp, which also records
  * the more awkward property this profile shares with those three: p'( 0 ) = 0,
- * so F( r, 0 ) = 0 and psi == 0 solves the homogeneous Dirichlet problem. That
+ * so F( R, 0 ) = 0 and psi == 0 solves the homogeneous Dirichlet problem. That
  * p'( 0 ) vanishes is not obvious from eq (25) and is worth spelling out: with
  * b = 2 the factor ( 1 - ( 1 - psi )^a )^b is O( psi^2 ) at the origin, so both
  * it and its first derivative vanish there.
@@ -98,17 +98,17 @@ class TransportBarrier
 			       + errorFactor( psi )*shapeDoublePrime( psi );
 		}
 
-		/// F = mu0 r^2 p'( psi ) with mu0 = 1 and g constant. Returns F, not
-		/// F/r, as meq::Source::f() is documented to.
-		double f( double r, double /*z*/, double psi ) const
+		/// F = mu0 R^2 p'( psi ) with mu0 = 1 and g constant. Returns F, not
+		/// F/R, as meq::Source::f() is documented to.
+		double f( double radius, double /*z*/, double psi ) const
 		{
-			return r*r*pPrime( psi );
+			return radius*radius*pPrime( psi );
 		}
 
-		/// dF/dpsi = r^2 p''( psi ).
-		double dFdPsi( double r, double /*z*/, double psi ) const
+		/// dF/dpsi = R^2 p''( psi ).
+		double dFdPsi( double radius, double /*z*/, double psi ) const
 		{
-			return r*r*pDoublePrime( psi );
+			return radius*radius*pDoublePrime( psi );
 		}
 
 	private:

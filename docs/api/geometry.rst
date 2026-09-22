@@ -45,7 +45,7 @@ Boundary shapes
          exactly when the polar angle is strictly increasing in it.
 
    .. cpp:function:: double polarAngle( double theta ) const
-   .. cpp:function:: void boundingBox( double & rMin, double & rMax, double & zMin, double & zMax ) const
+   .. cpp:function:: void boundingBox( double & minRadius, double & maxRadius, double & zMin, double & zMax ) const
    .. cpp:function:: double majorRadius() const
    .. cpp:function:: double centreHeight() const
    .. cpp:function:: double minorRadius() const

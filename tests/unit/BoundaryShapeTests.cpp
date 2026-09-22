@@ -14,7 +14,7 @@ namespace
 	double const pi = M_PI;
 
 	/// An ITER-like D-shape: the parameters HDG-GS-1 Example 6 uses, in this
-	/// file's convention. eps = 0.32 there is r/R0, so r = 0.32 with R0 = 1.
+	/// file's convention. eps = 0.32 there is R/R0, so R = 0.32 with R0 = 1.
 	meq::BoundaryShape iterLike()
 	{
 		return meq::BoundaryShape::miller( 1.0, 0.0, 0.32, 1.7, 0.33 );
@@ -59,7 +59,7 @@ BOOST_AUTO_TEST_CASE( millerIsMxhTruncatedAtOneHarmonic )
  * ratio of the bounding box, and delta places the top of the surface inboard of
  * the centre by delta times the minor radius.
  *
- * MXH section 3 gives exactly these as the way to recover { R0, Z0, kappa, r }
+ * MXH section 3 gives exactly these as the way to recover { R0, Z0, kappa, R }
  * from a flux surface, so this is the paper's own inverse applied to its forward
  * map.
  */
@@ -67,13 +67,13 @@ BOOST_AUTO_TEST_CASE( theBoundingBoxRecoversTheParameters )
 {
 	meq::BoundaryShape const shape = iterLike();
 
-	double rMin = 0.0, rMax = 0.0, zMin = 0.0, zMax = 0.0;
-	shape.boundingBox( rMin, rMax, zMin, zMax );
+	double minRadius = 0.0, maxRadius = 0.0, zMin = 0.0, zMax = 0.0;
+	shape.boundingBox( minRadius, maxRadius, zMin, zMax );
 
-	// MXH section 3: 2r = max R - min R, 2 kappa r = max Z - min Z,
+	// MXH section 3: 2r = max R - min R, 2 kappa R = max Z - min Z,
 	// 2 R0 = max R + min R, 2 Z0 = max Z + min Z.
-	BOOST_TEST( 0.5*( rMax - rMin ) == 0.32, boost::test_tools::tolerance( 1.0e-6 ) );
-	BOOST_TEST( 0.5*( rMax + rMin ) == 1.0, boost::test_tools::tolerance( 1.0e-6 ) );
+	BOOST_TEST( 0.5*( maxRadius - minRadius ) == 0.32, boost::test_tools::tolerance( 1.0e-6 ) );
+	BOOST_TEST( 0.5*( maxRadius + minRadius ) == 1.0, boost::test_tools::tolerance( 1.0e-6 ) );
 	BOOST_TEST( 0.5*( zMax - zMin )/0.32 == 1.7, boost::test_tools::tolerance( 1.0e-9 ) );
 	// Absolute, not relative: the centre height is zero here and a relative
 	// tolerance against zero tests nothing.
@@ -87,22 +87,22 @@ BOOST_AUTO_TEST_CASE( triangularityPlacesTheTopOfTheSurface )
 	meq::BoundaryShape const shape = iterLike();
 
 	// The top of the surface is theta = pi/2, where Z is largest. There
-	// R = R0 + r cos( pi/2 + arcsin delta ) = R0 - r sin( arcsin delta )
-	//   = R0 - r delta,
+	// R = R0 + R cos( pi/2 + arcsin delta ) = R0 - R sin( arcsin delta )
+	//   = R0 - R delta,
 	// which is the standard definition of triangularity: the top sits inboard of
 	// the centre by delta minor radii. That identity is why s_1 is arcsin( delta )
 	// and not delta.
-	double r = 0.0, z = 0.0;
-	shape.point( 0.5*pi, r, z );
+	double radius = 0.0, z = 0.0;
+	shape.point( 0.5*pi, radius, z );
 
-	BOOST_TEST( r == 1.0 - minor*delta, boost::test_tools::tolerance( 1.0e-12 ) );
+	BOOST_TEST( radius == 1.0 - minor*delta, boost::test_tools::tolerance( 1.0e-12 ) );
 	BOOST_TEST( z == 1.7*minor, boost::test_tools::tolerance( 1.0e-12 ) );
 
 	// And the delta-versus-arcsin-delta confusion, asserted so a silent revert
 	// fails: had s_1 been delta itself, the top would sit at
-	// R0 - r sin( delta ) = R0 - 0.3239 r, which differs in the third figure.
+	// R0 - R sin( delta ) = R0 - 0.3239 R, which differs in the third figure.
 	double const wrong = 1.0 - minor*std::sin( delta );
-	BOOST_TEST( std::abs( r - wrong ) > 1.0e-4,
+	BOOST_TEST( std::abs( radius - wrong ) > 1.0e-4,
 	            "the arcsin and the raw delta give the same point, so this test "
 	            "cannot tell the two conventions apart" );
 }
@@ -120,9 +120,9 @@ BOOST_AUTO_TEST_CASE( theLevelSetVanishesOnTheCurve )
 	for ( int i = 0; i < 360; ++i )
 	{
 		double const theta = 2.0*pi*i/360.0;
-		double r = 0.0, z = 0.0;
-		shape.point( theta, r, z );
-		worst = std::max( worst, std::abs( shape.levelSet( r, z ) ) );
+		double radius = 0.0, z = 0.0;
+		shape.point( theta, radius, z );
+		worst = std::max( worst, std::abs( shape.levelSet( radius, z ) ) );
 	}
 	BOOST_TEST( worst < 1.0e-12 );
 }
@@ -177,7 +177,7 @@ BOOST_AUTO_TEST_CASE( theShapeMatchesTheAnalyticFixture )
 	double const eps = 0.32, delta = 0.33, kappa = 1.7;
 	meq::analytic::MillerDShape const fixture( eps, delta, kappa );
 	// The fixture works at R0 = 1 with eps as the minor radius, which is this
-	// class's r when R0 = 1.
+	// class's R when R0 = 1.
 	meq::BoundaryShape const shape =
 		meq::BoundaryShape::miller( 1.0, 0.0, eps, kappa, delta );
 
@@ -231,7 +231,7 @@ BOOST_AUTO_TEST_CASE( aFoldedSurfaceIsRefused )
 BOOST_AUTO_TEST_CASE( ordinaryShapesAreAccepted )
 {
 	// Strongly shaped but still single valued: DIII-D-like, with the harmonics
-	// MXH figure 2 plots for r/a = 0.95.
+	// MXH figure 2 plots for R/a = 0.95.
 	BOOST_CHECK_NO_THROW(
 		meq::BoundaryShape( 1.7, 0.0, 0.6, 1.8, { -0.1, 0.02, 0.01 },
 		                    { 0.35, 0.08, -0.01 } ) );
@@ -244,8 +244,8 @@ BOOST_AUTO_TEST_CASE( ordinaryShapesAreAccepted )
 
 BOOST_AUTO_TEST_CASE( aSurfaceReachingTheAxisIsRefused )
 {
-	// r0 = 0.3 with minor 0.32 puts the inboard edge at r < 0, where the
-	// operator's 1/r is not integrable. A shape class that let this through
+	// R_0 = 0.3 with minor 0.32 puts the inboard edge at R < 0, where the
+	// operator's 1/R is not integrable. A shape class that let this through
 	// would hand the solver an unsolvable problem with no diagnostic.
 	BOOST_CHECK_THROW( meq::BoundaryShape( 0.3, 0.0, 0.32, 1.7 ),
 	                   meq::ShapeError );

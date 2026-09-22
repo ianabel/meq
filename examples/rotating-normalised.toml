@@ -30,7 +30,7 @@
 # UNITS. SI, as the un-normalised file, with two differences that follow from
 # the change of argument. Each profile below is a function of the dimensionless
 # Psi in [0, 1] rather than of psi in Wb/rad -- so the density table is the
-# density on r = ReferenceRadius at a given NORMALISED flux -- and GGPrime is
+# density on R = ReferenceRadius at a given NORMALISED flux -- and GGPrime is
 # d( g^2/2 )/dPsi, per unit normalised flux, which is NOT the same number as the
 # GGPrime of the un-normalised file even for the same plasma. PsiAxis itself is
 # in Wb/rad, being an actual flux.
@@ -49,7 +49,7 @@
 # nobody knows the answer before solving, which is the point.
 #
 # THE REFERENCE RADIUS IS STILL THE GAUGE, and it is still the first thing two
-# codes must agree on. phi_0 vanishes on r = ReferenceRadius, so the density
+# codes must agree on. phi_0 vanishes on R = ReferenceRadius, so the density
 # table below is the PHYSICAL density of deuterium on that curve; two sets of
 # densities differing by the gauge factor exp( Z_s e delta/T_s ) describe exactly
 # the same plasma. AND TEMPERATURES ARE IN JOULES, NOT eV AND NOT keV --
@@ -104,7 +104,7 @@ Omega = 4.0e5
 # off the trivial branch.
 #
 # 0.08 rather than the un-normalised file's 0.8 because it is a d/dPsi, and it is
-# sized the same way: against the pressure term, so that mu0 r^2 dp/dPsi is 47%
+# sized the same way: against the pressure term, so that mu0 R^2 dp/dPsi is 47%
 # of F at the gauge radius and 81% at RMax rather than a correction on a vacuum
 # field. Without that, rotation reaches n_s and phi_0 and never reaches psi.
 GGPrime = 0.08
@@ -115,7 +115,7 @@ Mass = 3.3435837768e-27        # kg
 Charge = 1.0
 Temperature = 1.0              # keV
 TemperatureScale = 1.602176634e-16
-# The density on r = ReferenceRadius as a function of NORMALISED flux. A
+# The density on R = ReferenceRadius as a function of NORMALISED flux. A
 # constant here would make dp/dPsi vanish and rotation would never reach psi.
 DensityFile = "examples/rotating-density-normalised.dat"
 DensityScale = 1.0e20

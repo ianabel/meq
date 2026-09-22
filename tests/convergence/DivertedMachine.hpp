@@ -64,7 +64,7 @@ namespace meqtest
 	inline double const referenceAxisZ = 0.062226;
 
 	/// Negative inside. The semicircle about the axis, which is what makes the
-	/// exterior expansion legal at all; the flat side IS r = 0 and stays
+	/// exterior expansion legal at all; the flat side IS R = 0 and stays
 	/// ordinary fitted boundary.
 	inline mfem::PositionFunction semicircle( double radius, double centreZ )
 	{
@@ -129,7 +129,7 @@ namespace meqtest
 
 		m.background = std::make_unique<mfem::Mesh>(
 			m.config->getMesh().file.c_str(), 1, 1 );
-		for ( int r = 0; r < refinements; ++r )
+		for ( int level = 0; level < refinements; ++level )
 			m.background->UniformRefinement();
 
 		// A MESH READ FROM A FILE HAS TO BE MEASURED RATHER THAN COMPUTED, and
@@ -247,7 +247,7 @@ namespace meqtest
 		meq::LimiterConfig const &limiterConfig = m.config->getBoundary().limiter;
 		BOOST_TEST_REQUIRE( limiterConfig.given,
 		                    "the machine file names no [boundary.limiter]" );
-		m.limiterR = limiterConfig.r;
+		m.limiterR = limiterConfig.radius;
 		m.limiterZ = limiterConfig.z;
 
 		m.solver = std::make_unique<meq::GradShafranovSolver>(
@@ -266,7 +266,7 @@ namespace meqtest
 		/*
 		 * THE GUESS IS PART OF THE PROBLEM STATEMENT AND NOT AN OPTIMISATION.
 		 * examples/limited-tokamak.toml records that a cold bump start wanders
-		 * for 200 iterations around || r || = 1.3 on this machine and never
+		 * for 200 iterations around || R || = 1.3 on this machine and never
 		 * converges. The stored guess is freegs4e's own equilibrium
 		 * reconstructed by Green's functions, on its own mesh, so it is the
 		 * INTERPOLATING restart -- meq::FieldTransfer -- rather than the exact
@@ -290,7 +290,7 @@ namespace meqtest
 		m.solver->setInitialGuess( *m.carried );
 	}
 
-	/// Pin psi_bnd at ( r, z ) and solve. setBoundaryFluxPoint() clears the
+	/// Pin psi_bnd at ( R, z ) and solve. setBoundaryFluxPoint() clears the
 	/// prepared flag, so the same solver may be re-pinned and re-solved -- which
 	/// is the whole of XP-2's outer loop.
 	///
@@ -299,10 +299,10 @@ namespace meqtest
 	///              solve() takes its convergence reference from the COLD
 	///              iterate precisely so a good guess cannot make the target
 	///              unreachable.
-	inline bool solveAt( Machine &m, double r, double z,
+	inline bool solveAt( Machine &m, double radius, double z,
 	              mfem::GridFunction const *warm = nullptr )
 	{
-		m.solver->setBoundaryFluxPoint( r, z );
+		m.solver->setBoundaryFluxPoint( radius, z );
 		if ( warm != nullptr )
 			m.solver->setInitialGuess( *warm );
 		try
@@ -325,7 +325,7 @@ namespace meqtest
 	/// q_h is discontinuous across a face, so a zero within the jump belongs to
 	/// neither neighbour strictly and each side's polynomial carries its own.
 	/// Measured on Soloviev::nstx() at k = 1, n = 16, where the X-point at
-	/// r = 0.699700 sits 3.0e-04 from the mesh line r = 0.700000: elements 237
+	/// R = 0.699700 sits 3.0e-04 from the mesh line R = 0.700000: elements 237
 	/// and 238 each hold a root, BOTH with overshoot exactly zero, 6.9e-04
 	/// apart. Neither is wrong and "the same root" is not defined there.
 	///
@@ -343,9 +343,9 @@ namespace meqtest
 	/// The saddle of q_h that is a genuine X-point rather than the symmetry
 	/// axis.
 	///
-	/// psi vanishes identically on r = 0, so the axis carries near-zeros of q
+	/// psi vanishes identically on R = 0, so the axis carries near-zeros of q
 	/// that sweep() reports as saddles. They are not X-points and no divertor
-	/// put them there; anything at an r below a fraction of the plasma's minor
+	/// put them there; anything at an R below a fraction of the plasma's minor
 	/// radius is one of those.
 	///
 	/// Of the rest, the one bounding the plasma is the one carrying the LARGEST
@@ -358,7 +358,7 @@ namespace meqtest
 		bool any = false;
 		for ( meq::CriticalPoint const &p : points )
 		{
-			if ( p.type != meq::CriticalPointType::Saddle || p.r < 0.30 )
+			if ( p.type != meq::CriticalPointType::Saddle || p.radius < 0.30 )
 				continue;
 			if ( !any || p.psi > found.psi )
 			{
@@ -372,12 +372,12 @@ namespace meqtest
 	/// psi_h at an arbitrary point, for the one thing the solver does not
 	/// expose: whether the LIMITER is inside the plasma or outside it once the
 	/// boundary flux has been taken from the X-point instead.
-	inline bool valueAt( mfem::GridFunction const &field, double r, double z,
+	inline bool valueAt( mfem::GridFunction const &field, double radius, double z,
 	              double &value )
 	{
 		mfem::Mesh &mesh = *field.FESpace()->GetMesh();
 		mfem::DenseMatrix points( 2, 1 );
-		points( 0, 0 ) = r;
+		points( 0, 0 ) = radius;
 		points( 1, 0 ) = z;
 
 		mfem::Array<int> elements;
@@ -390,10 +390,10 @@ namespace meqtest
 		return true;
 	}
 
-	inline bool potentialAt( meq::GradShafranovSolver const &solver, double r,
+	inline bool potentialAt( meq::GradShafranovSolver const &solver, double radius,
 	                  double z, double &value )
 	{
-		return valueAt( solver.potential(), r, z, value );
+		return valueAt( solver.potential(), radius, z, value );
 	}
 
 	/// **FIX THE SUPPORT FOR THE NEXT SOLVE AT @a state, AND RE-DECIDE IT HERE

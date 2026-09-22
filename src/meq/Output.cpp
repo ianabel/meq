@@ -264,11 +264,11 @@ namespace meq
 				if ( displacement.count( rDof ) )
 					continue;
 
-				double const r = original( rDof ), z = original( zDof );
-				double projectedR = r, projectedZ = z;
-				project( r, z, projectedR, projectedZ );
+				double const radius = original( rDof ), z = original( zDof );
+				double projectedR = radius, projectedZ = z;
+				project( radius, z, projectedR, projectedZ );
 
-				displacement[ rDof ] = projectedR - r;
+				displacement[ rDof ] = projectedR - radius;
 				displacement[ zDof ] = projectedZ - z;
 				++moved;
 			}
@@ -384,10 +384,10 @@ namespace meq
 	}
 
 	void boundaryPolyline( mfem::Mesh &mesh,
-	                       std::vector<double> &r, std::vector<double> &z,
+	                       std::vector<double> &radius, std::vector<double> &z,
 	                       int &unreached )
 	{
-		r.clear();
+		radius.clear();
 		z.clear();
 		unreached = 0;
 
@@ -422,7 +422,7 @@ namespace meq
 		{
 			visited.insert( current );
 			double const *point = mesh.GetVertex( current );
-			r.push_back( point[ 0 ] );
+			radius.push_back( point[ 0 ] );
 			z.push_back( point[ 1 ] );
 
 			int next = -1;
@@ -483,10 +483,10 @@ namespace meq
 
 		coordinate.resize( static_cast<std::size_t>( state->nR ) );
 		for ( int i = 0; i < state->nR; ++i ) coordinate[ i ] = sampler.rAt( i );
-		netCDF::NcVar rVar = state->file.addVar( "R", netCDF::ncDouble, state->rDim );
-		rVar.putAtt( "long_name", "Major radius" );
-		rVar.putAtt( "units", "m" );
-		rVar.putVar( coordinate.data() );
+		netCDF::NcVar radiusVar = state->file.addVar( "R", netCDF::ncDouble, state->rDim );
+		radiusVar.putAtt( "long_name", "Major radius" );
+		radiusVar.putAtt( "units", "m" );
+		radiusVar.putVar( coordinate.data() );
 
 		coordinate.resize( static_cast<std::size_t>( state->nZ ) );
 		for ( int j = 0; j < state->nZ; ++j ) coordinate[ j ] = sampler.zAt( j );
@@ -586,19 +586,19 @@ namespace meq
 		var.putVar( values.data() );
 	}
 
-	void NetCDFWriter::boundary( std::vector<double> const &r,
+	void NetCDFWriter::boundary( std::vector<double> const &radius,
 	                             std::vector<double> const &z )
 	{
-		if ( r.size() != z.size() )
+		if ( radius.size() != z.size() )
 			throw std::runtime_error( "meq::NetCDFWriter::boundary: the two coordinate arrays differ in length" );
-		if ( r.empty() )
+		if ( radius.empty() )
 			return;
 
-		netCDF::NcDim dim = state->file.addDim( "boundary", r.size() );
-		netCDF::NcVar rVar = state->file.addVar( "boundary_R", netCDF::ncDouble, dim );
-		rVar.putAtt( "long_name", "Major radius of the prescribed boundary" );
-		rVar.putAtt( "units", "m" );
-		rVar.putVar( r.data() );
+		netCDF::NcDim dim = state->file.addDim( "boundary", radius.size() );
+		netCDF::NcVar radiusVar = state->file.addVar( "boundary_R", netCDF::ncDouble, dim );
+		radiusVar.putAtt( "long_name", "Major radius of the prescribed boundary" );
+		radiusVar.putAtt( "units", "m" );
+		radiusVar.putVar( radius.data() );
 
 		netCDF::NcVar zVar = state->file.addVar( "boundary_Z", netCDF::ncDouble, dim );
 		zVar.putAtt( "long_name", "Height of the prescribed boundary" );
@@ -701,7 +701,7 @@ namespace meq
 			{
 				FluxSurface const &surface = family.surfaces[ i ];
 
-				// EVERY COLUMN, NOT JUST r. count() reports r.size(), so a
+				// EVERY COLUMN, NOT JUST R. count() reports R.size(), so a
 				// family whose z or whose band mask is short would pass a check
 				// on count() alone and then be read past its end -- which is
 				// the one failure here that would not announce itself.
@@ -805,7 +805,7 @@ namespace meq
 		};
 
 		surfaceColumn( "R", "Major radius of the flux surface", "m",
-		               &FluxSurface::r );
+		               &FluxSurface::radius );
 		surfaceColumn( "Z", "Height of the flux surface", "m",
 		               &FluxSurface::z );
 

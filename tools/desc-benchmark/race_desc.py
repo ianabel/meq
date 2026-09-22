@@ -417,7 +417,7 @@ def main():
 		meq_rows, desc_rows = [], []
 		# INTERLEAVED: one MEQ rung, then one DESC rung, alternating, so that a
 		# machine drifting through the run drifts through both arms.  M-102.
-		meq_plan = [(k, r) for k in degrees for r in refines]
+		meq_plan = [(k, R) for k in degrees for R in refines]
 		plan = []
 		for i in range(max(len(meq_plan), len(modes))):
 			if i < len(meq_plan):
@@ -499,8 +499,8 @@ def main():
 		# every DESC rung against the finest MEQ run: neither code is the
 		# truth, so each is scored against the other's best.
 		if desc_rows and meq_rows:
-			best_desc = min(desc_rows, key=lambda r: r["vs_reference"])
-			best_meq = min(meq_rows, key=lambda r: r["vs_reference"])
+			best_desc = min(desc_rows, key=lambda R: R["vs_reference"])
+			best_meq = min(meq_rows, key=lambda R: R["vs_reference"])
 			for row in meq_rows:
 				row["vs_other"] = compare_desc.meq_pair(
 					best_desc["npz"], row["nc"], meta_path,
@@ -516,7 +516,7 @@ def main():
 
 		print(f"\n    {'code':5s} {'resolution':>12s} {'seconds':>9s} "
 		      f"{'vs freegs4e':>12s} {'vs the other':>13s}")
-		for row in sorted(meq_rows + desc_rows, key=lambda r: r["seconds"]):
+		for row in sorted(meq_rows + desc_rows, key=lambda R: R["seconds"]):
 			label = (f"k={row['degree']} r={row['refine']}" if row["code"] == "meq"
 			         else f"M={row['M']}")
 			print(f"    {row['code'].upper():5s} {label:>12s} "
@@ -534,10 +534,10 @@ def main():
 				if target < floor:
 					print(f"    {target:9.0e}   below the floor -- refused")
 					continue
-				m = [r for r in meq_rows if r["vs_reference"] <= target]
-				d = [r for r in desc_rows if r["vs_reference"] <= target]
-				bm = min(m, key=lambda r: r["seconds"]) if m else None
-				bd = min(d, key=lambda r: r["seconds"]) if d else None
+				m = [R for R in meq_rows if R["vs_reference"] <= target]
+				d = [R for R in desc_rows if R["vs_reference"] <= target]
+				bm = min(m, key=lambda R: R["seconds"]) if m else None
+				bd = min(d, key=lambda R: R["seconds"]) if d else None
 				print(f"    {target:9.0e} "
 				      + (f"{bm['seconds']:9.2f} {'k=%d r=%d' % (bm['degree'], bm['refine']):>12s} "
 				         if bm else f"{'never':>9s} {'-':>12s} ")
@@ -554,7 +554,7 @@ def main():
 			for row in meq_rows:
 				if not desc_rows:
 					break
-				near = min(desc_rows, key=lambda r: abs(np.log(max(r[key], 1e-30))
+				near = min(desc_rows, key=lambda R: abs(np.log(max(R[key], 1e-30))
 				                                        - np.log(max(row[key], 1e-30))))
 				print(f"    k={row['degree']} r={row['refine']} {row[key]:8.4g} "
 				      f"   M={near['M']:<3d} {near[key]:8.4g} "

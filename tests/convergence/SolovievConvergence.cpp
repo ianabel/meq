@@ -17,7 +17,7 @@
  * against an exact Solov'ev equilibrium.
  *
  * A convergence rate on its own cannot pass this test, and that is the point.
- * A wrong sign or a missing r weight converges at the right rate to the wrong
+ * A wrong sign or a missing R weight converges at the right rate to the wrong
  * function, so the comparison is against a closed form -- the NSTX-like
  * equilibrium of refs/HDG-GradShafranov-Adaptive.pdf section 4.1, whose twelve
  * coefficients are published to fifteen digits -- and the absolute error is
@@ -27,8 +27,8 @@
  * what is asserted, with 0.15 of slack for the fact that a rate estimated from
  * two meshes is not the asymptotic one.
  *
- * The domain is a rectangle in ( r, z ) with r bounded well away from zero: the
- * Solov'ev expansion contains log r, and the operator carries 1/r. It is not the
+ * The domain is a rectangle in ( R, z ) with R bounded well away from zero: the
+ * Solov'ev expansion contains log R, and the operator carries 1/R. It is not the
  * plasma boundary, so psi is not zero on it -- which makes this a
  * non-homogeneous Dirichlet problem, and exercises a boundary-data path that a
  * homogeneous one would leave untested. Being a rectangle it is also fitted, so
@@ -45,8 +45,8 @@
  * with the alternative and reading the table, rather than by argument. The
  * numbers, so that they do not have to be rediscovered:
  *
- *   flux mass form holds 1/r instead of r    psi flat at 1.9e-2, rate 0.00
- *   potential r.h.s. is +F/r instead of -F/r psi flat at 7.3e-2, rate 0.00
+ *   flux mass form holds 1/R instead of R    psi flat at 1.9e-2, rate 0.00
+ *   potential R.h.s. is +F/R instead of -F/R psi flat at 7.3e-2, rate 0.00
  *   flux reported without the sign flip      q   flat at 6.5e-1, rate 0.00
  *   no boundary face integrator on B         psi flat at 1.5e-1, rate 0.01
  *   B's face integrator coefficients changed no change in any digit
@@ -65,8 +65,8 @@
 namespace
 {
 
-	double const rMin = 0.6;
-	double const rMax = 1.4;
+	double const minRadius = 0.6;
+	double const maxRadius = 1.4;
 	double const zMin = -0.6;
 	double const zMax = 0.6;
 
@@ -79,24 +79,24 @@ namespace
 		double errorFlux;
 	};
 
-	/// A triangulated rectangle [rMin,rMax] x [zMin,zMax] with n cells a side.
+	/// A triangulated rectangle [R_min,R_max] x [zMin,zMax] with n cells a side.
 	/// Triangles rather than quadrilaterals because that is what both papers use
 	/// and because it is measurably better here: on quadrilaterals the flux rate
 	/// at k = 2 comes out at 2.78 rather than 3.00.
 	mfem::Mesh makeMesh( int n )
 	{
 		mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D( n, n, mfem::Element::TRIANGLE, false,
-		                                               rMax - rMin, zMax - zMin );
+		                                               maxRadius - minRadius, zMax - zMin );
 		mesh.Transform( []( mfem::Vector const &in, mfem::Vector &out )
 		{
-			out( 0 ) = in( 0 ) + rMin;
+			out( 0 ) = in( 0 ) + minRadius;
 			out( 1 ) = in( 1 ) + zMin;
 		} );
 		return mesh;
 	}
 
-	/// Solve once and measure. The source is F, not F/r: the solver applies the
-	/// 1/r itself, and the Dirichlet datum is the exact psi on all four sides.
+	/// Solve once and measure. The source is F, not F/R: the solver applies the
+	/// 1/R itself, and the Dirichlet datum is the exact psi on all four sides.
 	Measurement measure( meq::analytic::SolovievEquilibrium const &eq, int order, int n )
 	{
 		mfem::Mesh mesh = makeMesh( n );
@@ -121,7 +121,7 @@ namespace
 		solver.solve();
 
 		Measurement point;
-		point.h = ( rMax - rMin )/static_cast<double>( n );
+		point.h = ( maxRadius - minRadius )/static_cast<double>( n );
 		point.traceDofs = solver.numTraceDofs();
 		point.errorPsi = solver.potentialError( psiCoeff );
 		point.errorFlux = solver.fluxError( fluxCoeff );
@@ -139,7 +139,7 @@ namespace
 	void printTable( int order, std::vector<Measurement> const &points )
 	{
 		std::printf( "\n  Solov'ev NSTX, k = %d, triangles on [%.1f,%.1f]x[%.1f,%.1f]\n",
-		             order, rMin, rMax, zMin, zMax );
+		             order, minRadius, maxRadius, zMin, zMax );
 		std::printf( "  %8s %9s %14s %7s %14s %7s\n",
 		             "h", "trace", "L2(psi)", "rate", "L2(q)", "rate" );
 		for ( std::size_t i = 0; i < points.size(); ++i )
@@ -229,14 +229,14 @@ BOOST_AUTO_TEST_CASE( solovievSourceMatchesTheOperator )
 	meq::analytic::SolovievEquilibrium const eq
 		= meq::analytic::SolovievEquilibrium::nstx();
 
-	for ( double r = rMin; r <= rMax + 1.0e-12; r += 0.2 )
+	for ( double radius = minRadius; radius <= maxRadius + 1.0e-12; radius += 0.2 )
 	{
 		for ( double z = zMin; z <= zMax + 1.0e-12; z += 0.3 )
 		{
-			double const deltaStar = eq.deltaStarFD( r, z );
-			double const minusF = -eq.f( r, z, 0.0 );
+			double const deltaStar = eq.deltaStarFD( radius, z );
+			double const minusF = -eq.f( radius, z, 0.0 );
 			BOOST_TEST( std::abs( deltaStar - minusF ) < 1.0e-5,
-			            "at ( " << r << ", " << z << " ): Delta*(psi) = " << deltaStar
+			            "at ( " << radius << ", " << z << " ): Delta*(psi) = " << deltaStar
 			            << " but -F = " << minusF );
 		}
 	}
@@ -255,10 +255,10 @@ BOOST_AUTO_TEST_CASE( boundaryDataIsNonHomogeneous )
 	for ( int i = 0; i <= 20; ++i )
 	{
 		double const s = static_cast<double>( i )/20.0;
-		double const r = rMin + s*( rMax - rMin );
+		double const radius = minRadius + s*( maxRadius - minRadius );
 		double const z = zMin + s*( zMax - zMin );
-		for ( double value : { eq.psi( r, zMin ), eq.psi( r, zMax ),
-		                       eq.psi( rMin, z ), eq.psi( rMax, z ) } )
+		for ( double value : { eq.psi( radius, zMin ), eq.psi( radius, zMax ),
+		                       eq.psi( minRadius, z ), eq.psi( maxRadius, z ) } )
 			largest = std::max( largest, std::abs( value ) );
 	}
 

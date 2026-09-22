@@ -412,7 +412,7 @@ gives
 dG/dlambda = -[ dpsi_h/dlambda |_x*  +  grad( psi_h )( x* ) . dx*/dlambda ]
 ```
 
-and **`grad_bar( psi ) = r q`, so `grad( psi_h )( x* ) = 0` at a zero of `q_h`
+and **`grad_bar( psi ) = R q`, so `grad( psi_h )( x* ) = 0` at a zero of `q_h`
 identically**. The position term vanishes, no sensitivity of the root find is
 needed, and the row is the potential shape functions of `x*`'s element evaluated
 at `x*` — `(k+1)(k+2)/2` entries, exact, one element.
@@ -441,7 +441,7 @@ the source rather than assumed.**
 `CoilAugmentedNormalisedSource::f()` (`Coils.cpp:1219-1222`) is
 
 ```cpp
-return plasmaSource->f( r, z, psi ) + coilSet->f( r, z );
+return plasmaSource->f( R, z, psi ) + coilSet->f( R, z );
 ```
 
 and `CoilSet::f()` (`Coils.cpp:886-897`) is
@@ -449,16 +449,16 @@ and `CoilSet::f()` (`Coils.cpp:886-897`) is
 ```cpp
 double density = 0.0;
 for ( Coil const &c : coilList )
-    if ( c.contains( r, z ) )
+    if ( c.contains( R, z ) )
         density += c.currentDensity();
-return permeability*r*density;
+return permeability*R*density;
 ```
 
 with `currentDensity() = I/area` and `area = 4·halfWidth·halfHeight` fixed
 geometry. Therefore, **exactly**:
 
 ```
-dF/dI_c  =  mu0 * r / area_c   on coil c's rectangle,   0 elsewhere.
+dF/dI_c  =  mu0 * R / area_c   on coil c's rectangle,   0 elsewhere.
 ```
 
 **Three properties follow and each removes a cost.**
@@ -477,7 +477,7 @@ dF/dI_c  =  mu0 * r / area_c   on coil c's rectangle,   0 elsewhere.
   `fOutsidePlasma()` branch, because only `f()` carries the coils."* So
   `ConfineToPlasma` and the support sweeps leave the coil column alone. §6.
 * **It is a `DomainLFIntegrator` with a constant coefficient on a rectangle.**
-  The weak form carries the `1/r` that turns `F` into the right-hand side, so
+  The weak form carries the `1/R` that turns `F` into the right-hand side, so
   the coefficient the integrator sees is `mu0/area_c`, a **constant**. This is
   the simplest column in the whole border.
 
@@ -668,7 +668,7 @@ Gamma_c  ~  1 / M_c,      M_c = the flux at the target points per ampere in coil
 ```
 
 and `M_c` is **already computed**: it is the constant column of §3.3, or
-equivalently `CoilSet::psiOf( c, r, z )` (`Coils.hpp:741`) evaluated at the
+equivalently `CoilSet::psiOf( c, R, z )` (`Coils.hpp:741`) evaluated at the
 targets. **The natural weight is available for free and needs no tuning**, which
 is a better position than either reference code is in — CEDRES++ publishes no
 weight at all and `freegs4e` defaults to `1e-12`, a number with no units
@@ -1544,8 +1544,8 @@ capability gap rather than an afternoon's work.
 |---|---|---|
 | **the exterior is `Delta*`-harmonic** | `src/meq/ExteriorDtN.hpp:117` and its header comment — the Gegenbauer separation assumes `Delta* psi = 0` outside `Gamma`, and the mode functions `rho^(1-n)` are the decaying solutions of the **source-free** equation | Iron **inside `Gamma`** breaks it outright. `ExteriorCoilSet::clearance()` (`Coils.hpp:924`) already names this failure for a conductor: *"psi_coil is then not `Delta*`-harmonic where the expansion assumes it is … the run converges to a machine nobody described."* **Iron inside `Gamma` is the same failure and nothing would detect it** |
 | **an exterior conductor's current is KNOWN** | `meq::ExteriorCoilSet` — it sums `psi` and `flux` over conductors whose currents are data (`Coils.hpp:836-935`) | Magnetisation currents are **not known**; they are determined by the field. Outside `Gamma` they are `Delta*`-harmonic away from the iron, so they *could* be carried as **border unknowns** beside the Gegenbauer coefficients — but with an iterate-dependent column, above |
-| **a conductor is a rectangle of UNIFORM current density** | `meq::Coil` (`Coils.hpp:303-355`) — *"a real winding has turns and this does not"*, and `CoilSet::f()` sums `mu0 r I/area` over rectangles | The iron needs a **line** density on a curve and a **non-uniform volume** density on a triangulation. Appel & Lupelli use **1442 piecewise-constant boundary elements and 4570 internal elements** at high resolution. `meq::Coil` cannot express either |
-| **a conductor does not reach the axis** | `meq::Coil`'s constructor refuses `centreR - halfWidth <= 0` (`Coils.hpp:316`, mirrored in `Config.cpp:956`), because the operator's `1/r` is not integrable through `r = 0` | **A transformer core's central limb is ON the axis.** So MEQ cannot express JET's iron geometry even as a static conductor, before any magnetisation question arises. This is the sharpest single statement of the gap |
+| **a conductor is a rectangle of UNIFORM current density** | `meq::Coil` (`Coils.hpp:303-355`) — *"a real winding has turns and this does not"*, and `CoilSet::f()` sums `mu0 R I/area` over rectangles | The iron needs a **line** density on a curve and a **non-uniform volume** density on a triangulation. Appel & Lupelli use **1442 piecewise-constant boundary elements and 4570 internal elements** at high resolution. `meq::Coil` cannot express either |
+| **a conductor does not reach the axis** | `meq::Coil`'s constructor refuses `centreR - halfWidth <= 0` (`Coils.hpp:316`, mirrored in `Config.cpp:956`), because the operator's `1/R` is not integrable through `R = 0` | **A transformer core's central limb is ON the axis.** So MEQ cannot express JET's iron geometry even as a static conductor, before any magnetisation question arises. This is the sharpest single statement of the gap |
 
 **AND THERE IS A MEASURED RESULT IN THAT PAPER THAT BEARS DIRECTLY ON PART ONE
 AND ON §14, AND IT IS THE BEST THING IN EITHER OF THE NEW PDFs.** Appel &

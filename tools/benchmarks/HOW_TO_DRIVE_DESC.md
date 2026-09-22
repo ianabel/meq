@@ -16,7 +16,7 @@ no `desc` and fails with `ModuleNotFoundError: No module named 'desc'`).
 tools/desc-benchmark/venv/bin/python tools/desc-benchmark/race_desc.py fixed-h-circular
 ```
 
-At matched accuracy MEQ `k = 2 r = 0` reads 9.7266e-05 against DESC `M = 12` at
+At matched accuracy MEQ `k = 2 R = 0` reads 9.7266e-05 against DESC `M = 12` at
 9.3509e-05 — **MEQ 4.80× faster cold, DESC 11.9× faster warm**. Both clocks
 matter: the cold one is what solving an equilibrium once costs and the warm one
 is what a parameter scan pays. The mutual floor is 1.1815e-04 and the harness

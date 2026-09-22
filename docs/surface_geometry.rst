@@ -57,7 +57,7 @@ the other.
 .. warning::
 
    **The safety factor is** ``safetyFactor()`` **and is never called** ``q``.
-   In MEQ, :math:`q` is the **flux**, :math:`q = \gradbar\psi / r`, a solved
+   In MEQ, :math:`q` is the **flux**, :math:`q = \gradbar\psi / R`, a solved
    unknown of the discretisation. The safety factor is also universally written
    :math:`q`. A reader who meets ``q`` anywhere in ``src/meq`` is entitled to
    assume the flux, and one silent conflation would be very hard to find
@@ -89,9 +89,9 @@ needs is taken of the facility rather than of eight separate expressions.
 The weight comes from the flux, pointwise
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-:math:`\gradbar\psi = r q`, so :math:`|\nabla\psi| = r|q|` with :math:`q` read
+:math:`\gradbar\psi = R q`, so :math:`|\nabla\psi| = R|q|` with :math:`q` read
 at the node from the solved flux field. Every weight here is :math:`2\pi R
-\,|\mathrm{d}x/\mathrm{d}s|\,\mathrm{d}s / (r|q|)`. **Nothing is differentiated
+\,|\mathrm{d}x/\mathrm{d}s|\,\mathrm{d}s / (R|q|)`. **Nothing is differentiated
 and nothing is differenced.** This is :ref:`flux-surfaces-q` paying off again.
 
 .. important::
@@ -103,7 +103,7 @@ and nothing is differenced.** This is :ref:`flux-surfaces-q` paying off again.
    :math:`k+2` where :math:`\psi_h` converges at :math:`k+1` (see
    :ref:`flux-surfaces-potential`), so the natural expectation is that the
    averages inherit the better order. **They do not.** The level set improves and
-   the *weight* does not: the weight divides by :math:`|\nabla\psi| = r|q|`, and
+   the *weight* does not: the weight divides by :math:`|\nabla\psi| = R|q|`, and
    the enriched flux converges at :math:`k+1` like the raw one. The local
    post-processing buys its extra order in the **potential**, and there is no
    :math:`k+2` flux to be had. An average built on both inherits the worse.
@@ -321,7 +321,7 @@ the traced points.
    // ... fill from each surface's AngleParametrisation ...
 
    samples = meq::relabelByAxisShape(
-       samples, meq::axisShapeFromSamples( samples, axis.r, axis.z ) );
+       samples, meq::axisShapeFromSamples( samples, axis.R, axis.z ) );
 
    meq::SurfaceFit fit( 12, samples );
 

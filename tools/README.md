@@ -130,11 +130,11 @@ is posed on Ω_h — so anything drawn in that band is a continuation, and
 
 **The continuation is carried by the FLUX, and that is the mixed method paying
 off somewhere unexpected.** `q` is computed at the *same* order as ψ, and
-`∇̄ψ = r q`, so for a node `p` outside the mesh MEQ takes its foot `x₀` on Γ_h —
+`∇̄ψ = R q`, so for a node `p` outside the mesh MEQ takes its foot `x₀` on Γ_h —
 a point on the owning element's own boundary — and steps out:
 
 ```
-psi(p) = psi(x0) + r0 q(x0) . (p - x0)
+psi(p) = psi(x0) + R_0 q(x0) . (p - x0)
 ```
 
 **Nothing is ever evaluated outside an element.** The obvious alternative,
@@ -292,7 +292,7 @@ the provenance to build one from (`polynomial_degree`, `elements`,
 ## Making a mesh
 
 `mesh/halfdisc.py` generates the half-disc-with-conductors that free boundary
-needs and MFEM's built-in mesher cannot make: a semicircle **reaching r = 0
+needs and MFEM's built-in mesher cannot make: a semicircle **reaching R = 0
 exactly**, with the coil rectangles meshed to as their own subdomains, coarse
 over the vacuum and refined where the plasma is. `mesh/README.md` says why each
 of those is a requirement rather than a preference — the exterior expansion is

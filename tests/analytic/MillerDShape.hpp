@@ -7,7 +7,7 @@
  *
  * Transcribed from the RENDERED page 17 of that PDF. The paper prints, verbatim:
  *
- *     r( t ) = 1 + eps cos( t + arcsin( delta sin( t ) ) ),
+ *     R( t ) = 1 + eps cos( t + arcsin( delta sin( t ) ) ),
  *     z( t ) = eps kappa sin( t ),                          t in [0, 2 pi)
  *
  * with eps = 0.32, delta = 0.33, kappa = 1.7, "corresponding to an ITER-like
@@ -15,22 +15,22 @@
  *
  *     p = ( psi/2 )( 1 + 2 psi^2/3 - psi^5/5 )   and   g = 0,
  *
- *     F( r, z, psi ) = r^2 ( 1 - ( 1 - psi^2 )^2/2 ).
+ *     F( R, z, psi ) = R^2 ( 1 - ( 1 - psi^2 )^2/2 ).
  *
  * THE PAPER'S p AND ITS F ARE INCONSISTENT, and F is the one to keep.
  *
  *     printed p = psi/2 + psi^3/3 - psi^6/10     =>  p' = 1/2 + psi^2 - 3 psi^5/5
- *     printed F/r^2 = 1 - ( 1 - psi^2 )^2/2      =   1/2 + psi^2 - psi^4/2
+ *     printed F/R^2 = 1 - ( 1 - psi^2 )^2/2      =   1/2 + psi^2 - psi^4/2
  *
  * The two disagree in the last term, -0.6 psi^5 against -0.5 psi^4. Changing the
  * printed psi^5/5 to psi^4/5 removes the discrepancy exactly:
  *
  *     p = ( psi/2 )( 1 + 2 psi^2/3 - psi^4/5 ) = psi/2 + psi^3/3 - psi^5/10
- *     p' = 1/2 + psi^2 - psi^4/2                                    == F/r^2
+ *     p' = 1/2 + psi^2 - psi^4/2                                    == F/R^2
  *
  * so the exponent in p is a typesetting slip and F is self-consistent. F is what
  * the solver is fed and F is what is implemented; p() below is the corrected
- * profile, and the test suite asserts F == r^2 p' so the correction is checked
+ * profile, and the test suite asserts F == R^2 p' so the correction is checked
  * rather than asserted. This is the third transcription defect found in this pair
  * of papers, after the Solov'ev source sign and the printed NSTX coefficients --
  * see CLAUDE.md.
@@ -42,7 +42,7 @@
  *
  * that is arcsin( delta ) TIMES sin( tau ), where Example 6 prints
  * arcsin( delta sin( t ) ). The two agree exactly at t = 0, +-pi/2 and pi -- so
- * both give the same eps, delta and kappa -- and differ by at most 6e-4 in r
+ * both give the same eps, delta and kappa -- and differ by at most 6e-4 in R
  * anywhere else, which is 0.2 per cent of the minor radius. What is implemented
  * is the form Example 6 prints. Both are available; see boundaryPoint() and
  * boundaryPointCerfonFreidberg().
@@ -54,7 +54,7 @@
  * consecutive levels of refinement, Delta^k_j( f ) := || f_h^k - f_h^(k-1) ||_j."
  * So there is no psi(), gradPsi(), flux() or deltaStarFD() here.
  *
- * F( r, 0 ) = r^2/2, WHICH IS NOT ZERO -- unlike every source in
+ * F( R, 0 ) = R^2/2, WHICH IS NOT ZERO -- unlike every source in
  * PressurePedestal.hpp and TransportBarrier.hpp. So this one IS well posed with
  * the paper's own homogeneous Dirichlet data: psi == 0 does not solve it, and
  * Newton started from zero has somewhere to go. It is the only benchmark of the
@@ -63,7 +63,7 @@
  * AND THE NON-LINEARITY IS NUMERICALLY NEGLIGIBLE, which is worth knowing before
  * reading anything into the Newton counts. On this geometry the source is
  * O( 1/2 ) and the minor radius is 0.32, so psi comes out around 1.3e-2; the
- * psi^2 term of F/r^2 is then about 3e-4 of the 1/2, and dF/dpsi = 2 r^2 psi
+ * psi^2 term of F/R^2 is then about 3e-4 of the 1/2, and dF/dpsi = 2 R^2 psi
  * ( 1 - psi^2 ) is about 3e-2. This is a very slightly perturbed LINEAR problem.
  * It exercises the geometry and the self-convergence measurement; it does not
  * exercise Newton, and NewtonConvergence.cpp's Example 5 and
@@ -111,7 +111,7 @@ class MillerDShape
 			                 - psi*psi*psi*psi/5.0 );
 		}
 
-		/// dp/dpsi = 1/2 + psi^2 - psi^4/2, which is F/r^2 exactly.
+		/// dp/dpsi = 1/2 + psi^2 - psi^4/2, which is F/R^2 exactly.
 		static double pPrime( double psi )
 		{
 			double const psi2 = psi*psi;
@@ -124,19 +124,19 @@ class MillerDShape
 			return 2.0*psi*( 1.0 - psi*psi );
 		}
 
-		/// F = r^2 ( 1 - ( 1 - psi^2 )^2/2 ), written as the paper writes it
+		/// F = R^2 ( 1 - ( 1 - psi^2 )^2/2 ), written as the paper writes it
 		/// rather than as the expanded polynomial, so that the two forms can be
 		/// compared in the test.
-		double f( double r, double /*z*/, double psi ) const
+		double f( double radius, double /*z*/, double psi ) const
 		{
 			double const oneMinusPsiSquared = 1.0 - psi*psi;
-			return r*r*( 1.0 - 0.5*oneMinusPsiSquared*oneMinusPsiSquared );
+			return radius*radius*( 1.0 - 0.5*oneMinusPsiSquared*oneMinusPsiSquared );
 		}
 
-		/// dF/dpsi = 2 r^2 psi ( 1 - psi^2 ) = r^2 p''.
-		double dFdPsi( double r, double /*z*/, double psi ) const
+		/// dF/dpsi = 2 R^2 psi ( 1 - psi^2 ) = R^2 p''.
+		double dFdPsi( double radius, double /*z*/, double psi ) const
 		{
-			return r*r*pDoublePrime( psi );
+			return radius*radius*pDoublePrime( psi );
 		}
 
 		/*
@@ -146,10 +146,10 @@ class MillerDShape
 		 */
 
 		/// The boundary curve as Example 6 prints it:
-		/// r = 1 + eps cos( t + arcsin( delta sin t ) ), z = eps kappa sin t.
-		void boundaryPoint( double t, double &r, double &z ) const
+		/// R = 1 + eps cos( t + arcsin( delta sin t ) ), z = eps kappa sin t.
+		void boundaryPoint( double t, double &radius, double &z ) const
 		{
-			r = 1.0 + epsValue*std::cos( t + std::asin( deltaValue*std::sin( t ) ) );
+			radius = 1.0 + epsValue*std::cos( t + std::asin( deltaValue*std::sin( t ) ) );
 			z = epsValue*kappaValue*std::sin( t );
 		}
 
@@ -157,10 +157,10 @@ class MillerDShape
 		/// alpha = arcsin( delta ) multiplying sin( tau ). Provided for
 		/// comparison; the test asserts the two agree at t = 0, pi/2, pi, 3 pi/2
 		/// and differ by less than 1e-3 elsewhere.
-		void boundaryPointCerfonFreidberg( double t, double &r, double &z ) const
+		void boundaryPointCerfonFreidberg( double t, double &radius, double &z ) const
 		{
 			double const alpha = std::asin( deltaValue );
-			r = 1.0 + epsValue*std::cos( t + alpha*std::sin( t ) );
+			radius = 1.0 + epsValue*std::cos( t + alpha*std::sin( t ) );
 			z = epsValue*kappaValue*std::sin( t );
 		}
 
@@ -171,7 +171,7 @@ class MillerDShape
 		 * The curve is star shaped about ( 1, 0 ), so for each polar angle about
 		 * that point there is exactly one boundary point, and
 		 *
-		 *     levelSet( r, z ) = | ( r, z ) - ( 1, 0 ) | - R_b( angle )
+		 *     levelSet( R, z ) = | ( R, z ) - ( 1, 0 ) | - R_b( angle )
 		 *
 		 * is continuous everywhere and vanishes exactly on the curve. R_b is
 		 * found by bisecting on the curve parameter, which is legitimate because
@@ -183,9 +183,9 @@ class MillerDShape
 		 * mfem::VertexConePath need -- a sign at the vertices and a root along a
 		 * ray -- and nothing here depends on it being a distance.
 		 */
-		double levelSet( double r, double z ) const
+		double levelSet( double radius, double z ) const
 		{
-			double const dr = r - 1.0;
+			double const dr = radius - 1.0;
 			double const rho = std::hypot( dr, z );
 			if ( rho < 1.0e-14 )
 				return -epsValue;

@@ -48,7 +48,7 @@
  *
  * The second reason is that it makes the ( 1 - mu^2 ) available for
  * cancellation. Every integral in this file carries the weight
- * dGamma/r = dmu/( 1 - mu^2 ), and dividing the derivative form by that weight
+ * dGamma/R = dmu/( 1 - mu^2 ), and dividing the derivative form by that weight
  * leaves P'_{n-1}( mu )/( n( n - 1 ) ) -- A POLYNOMIAL, with no 0/0 at the
  * endpoints and no singular quadrature anywhere. The printed form would have to
  * evaluate 0/0 at mu = ±1 and a near-cancellation beside them.
@@ -195,10 +195,10 @@ namespace meq
 				"on the axis" );
 	}
 
-	void ExteriorDtN::direction( double r, double z, double &mu, double &rho ) const
+	void ExteriorDtN::direction( double radius, double z, double &mu, double &rho ) const
 	{
 		double const dz = z - zCentreValue;
-		rho = std::hypot( r, dz );
+		rho = std::hypot( radius, dz );
 
 		// The centre itself has no direction. Reported as mu = 1 rather than
 		// NaN because basis() is documented to depend on direction alone and a
@@ -207,24 +207,24 @@ namespace meq
 		mu = ( rho > 0.0 ) ? dz/rho : 1.0;
 	}
 
-	double ExteriorDtN::basis( int n, double r, double z ) const
+	double ExteriorDtN::basis( int n, double radius, double z ) const
 	{
 		requireMode( n );
 		double mu = 0.0;
 		double rho = 0.0;
-		direction( r, z, mu, rho );
+		direction( radius, z, mu, rho );
 
 		// ( 1 - mu )( 1 + mu ) as an explicit factor, so the axis is exactly
 		// zero and the approach to it does not lose digits.
 		return weightFactor( mu )*basisOverWeight( n, mu );
 	}
 
-	double ExteriorDtN::basisDerivative( int n, double r, double z ) const
+	double ExteriorDtN::basisDerivative( int n, double radius, double z ) const
 	{
 		requireMode( n );
 		double mu = 0.0;
 		double rho = 0.0;
-		direction( r, z, mu, rho );
+		direction( radius, z, mu, rho );
 
 		/*
 		 * dC_n/dmu = -P_{n-1}( mu ), EXACTLY, which is one Legendre evaluation
@@ -276,14 +276,14 @@ namespace meq
 				+ std::to_string( a.size() ) );
 	}
 
-	double ExteriorDtN::exterior( double r, double z,
+	double ExteriorDtN::exterior( double radius, double z,
 	                              std::vector<double> const &a ) const
 	{
 		requireCoefficients( a, "exterior" );
 
 		double mu = 0.0;
 		double rho = 0.0;
-		direction( r, z, mu, rho );
+		direction( radius, z, mu, rho );
 
 		/*
 		 * REFUSED INSIDE Gamma, RATHER THAN EXTRAPOLATED.
@@ -324,7 +324,7 @@ namespace meq
 		std::function<double( double, double )> const &trace ) const
 	{
 		/*
-		 * a_n = ( 1/h_n ) integral_Gamma psi C_n dGamma/r, and the whole point
+		 * a_n = ( 1/h_n ) integral_Gamma psi C_n dGamma/R, and the whole point
 		 * of basisOverWeight() is that this integral has NO SINGULAR WEIGHT
 		 * once C_n/( 1 - mu^2 ) is taken in closed form:
 		 *
@@ -332,7 +332,7 @@ namespace meq
 		 *
 		 * A plain Gauss-Legendre rule in mu is therefore the right instrument
 		 * and not a compromise. On Gamma the point at parameter mu is
-		 * r = rhoGamma sqrt( 1 - mu^2 ), z = zCentre + rhoGamma mu.
+		 * R = rhoGamma sqrt( 1 - mu^2 ), z = zCentre + rhoGamma mu.
 		 */
 		std::vector<double> out( static_cast<std::size_t>( modeCountValue ), 0.0 );
 
@@ -341,12 +341,12 @@ namespace meq
 			int const n = firstMode() + i;
 			auto integrand = [ & ]( double mu )
 			{
-				// The same factoring, for the same reason: this is r on Gamma and
+				// The same factoring, for the same reason: this is R on Gamma and
 				// the quadrature's outermost nodes sit near the axis.
-				double const r = rhoGammaValue
+				double const radius = rhoGammaValue
 				                 *std::sqrt( std::max( 0.0, weightFactor( mu ) ) );
 				double const z = zCentreValue + rhoGammaValue*mu;
-				return trace( r, z )*basisOverWeight( n, mu );
+				return trace( radius, z )*basisOverWeight( n, mu );
 			};
 
 			out[ static_cast<std::size_t>( i ) ] =
@@ -359,7 +359,7 @@ namespace meq
 	 * THE DECAY DIAGNOSTIC, AND WHY A RAW COEFFICIENT IS THE WRONG THING TO
 	 * PRINT.
 	 *
-	 * The modes are orthogonal in dGamma/r but not orthoNORMAL: mode n has norm
+	 * The modes are orthogonal in dGamma/R but not orthoNORMAL: mode n has norm
 	 * sqrt( mass( n ) ) rather than 1, so the trace decomposes as
 	 *
 	 *     || sum a_n C_n ||^2 = sum a_n^2 mass( n )
@@ -401,7 +401,7 @@ namespace meq
 		requireCoefficients( a, "traceNorm" );
 
 		// The root-sum-square of the amplitudes, which by the orthogonality
-		// above IS the L2( dGamma/r ) norm of the trace. Accumulated from the
+		// above IS the L2( dGamma/R ) norm of the trace. Accumulated from the
 		// amplitudes rather than from a_n^2 mass( n ) directly so that the two
 		// cannot drift apart: this is the same arithmetic modeAmplitudes()
 		// does, and it should stay that way.

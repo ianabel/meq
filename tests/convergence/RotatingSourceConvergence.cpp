@@ -48,7 +48,7 @@ namespace
 
 	using meq::tests::standardBox;
 
-	// The NSTX Solov'ev case the rest of the suite uses. F = -( ( 1 - A ) r^2 + A ),
+	// The NSTX Solov'ev case the rest of the suite uses. F = -( ( 1 - A ) R^2 + A ),
 	// so mu0 p' = -( 1 - A ) and g g' = -A.
 	double const solovievA = -0.52;
 
@@ -89,7 +89,7 @@ namespace
 			double v;
 	};
 
-	/// A hydrogenic pair whose total pressure on r = rRef is
+	/// A hydrogenic pair whose total pressure on R = R_ref is
 	/// P0( psi ) = densityOffset + pressureSlope*psi, so that P0' is the
 	/// Solov'ev p'. The masses are equal and opposite in the combination
 	/// Z_1 m_2 - Z_2 m_1, which is all the exponent depends on.
@@ -125,14 +125,14 @@ namespace
 	/// A rotating source built to reproduce a RotatingSolovievEquilibrium exactly.
 	/// The mapping is forced: with T_1 + T_2 = 1 and constant profiles the
 	/// exponent coefficient is C = omega^2 ( m_1 + m_2 ), and the fixture's
-	/// exponent is machSquared ( r^2/R0^2 - 1 ) = C ( r^2 - R0^2 )/2, so
+	/// exponent is machSquared ( R^2/R0^2 - 1 ) = C ( R^2 - R0^2 )/2, so
 	/// C = 2 machSquared/R0^2. P0' is the fixture's p1 because mu0 is 1 here,
 	/// and g g' is its F0.
 	meq::RotatingSource matching( meq::analytic::RotatingSolovievEquilibrium const & eq )
 	{
-		double const r0 = eq.getMajorRadius();
+		double const radius0 = eq.getMajorRadius();
 		double const massSum = 1.0 + 1.0e-4;
-		double const omega = std::sqrt( 2.0*eq.getMachSquared()/( r0*r0*massSum ) );
+		double const omega = std::sqrt( 2.0*eq.getMachSquared()/( radius0*radius0*massSum ) );
 
 		std::vector<meq::Species> species( 2 );
 
@@ -149,7 +149,7 @@ namespace
 		return meq::RotatingSource( species,
 			eq.getMachSquared() == 0.0 ? nullptr : std::make_shared<ConstantMassProfile const>( omega ),
 			std::make_shared<ConstantMassProfile const>( eq.getF0() ),
-			r0, 1.0 );
+			radius0, 1.0 );
 	}
 
 	struct Measurement
@@ -270,19 +270,19 @@ BOOST_AUTO_TEST_CASE( atRestTheRotatingSourceIsTheSolovievSource )
 
 	meq::tests::Rectangle const box = standardBox();
 
-	for ( double r = box.rMin; r <= box.rMax + 1.0e-12; r += 0.05 )
+	for ( double radius = box.minRadius; radius <= box.maxRadius + 1.0e-12; radius += 0.05 )
 	{
 		for ( double psi : { -0.3, -0.1, 0.0, 0.1, 0.25 } )
 		{
-			double const expected = soloviev.f( r, 0.0, psi );
-			double const actual = rotating.f( r, 0.0, psi );
+			double const expected = soloviev.f( radius, 0.0, psi );
+			double const actual = rotating.f( radius, 0.0, psi );
 
 			BOOST_TEST( std::fabs( actual - expected ) <= 1.0e-13*std::max( 1.0, std::fabs( expected ) ),
-			            "at r = " << r << ", psi = " << psi << ": the rotating source gives F = "
+			            "at R = " << radius << ", psi = " << psi << ": the rotating source gives F = "
 			            << actual << " where the Solov'ev source gives " << expected );
-			BOOST_TEST( std::fabs( rotating.dFdPsi( r, 0.0, psi ) ) <= 1.0e-13,
-			            "at r = " << r << ", psi = " << psi << ": dF/dpsi is "
-			            << rotating.dFdPsi( r, 0.0, psi ) << " where the Solov'ev problem is affine in psi" );
+			BOOST_TEST( std::fabs( rotating.dFdPsi( radius, 0.0, psi ) ) <= 1.0e-13,
+			            "at R = " << radius << ", psi = " << psi << ": dF/dpsi is "
+			            << rotating.dFdPsi( radius, 0.0, psi ) << " where the Solov'ev problem is affine in psi" );
 		}
 	}
 }
@@ -296,8 +296,8 @@ BOOST_AUTO_TEST_CASE( rotationChangesTheSourceOutboardAgainstInboard )
 	meq::RotatingSource const rotating = makeRotatingSource( 1.0 );
 	meq::tests::Rectangle const box = standardBox();
 
-	double const outboard = rotating.pressure( box.rMax, 0.0 );
-	double const inboard = rotating.pressure( box.rMin, 0.0 );
+	double const outboard = rotating.pressure( box.maxRadius, 0.0 );
+	double const inboard = rotating.pressure( box.minRadius, 0.0 );
 
 	BOOST_TEST( outboard > 2.0*inboard,
 	            "the pressure is " << outboard << " outboard against " << inboard
@@ -351,15 +351,15 @@ BOOST_AUTO_TEST_CASE( theSourceAndTheFixtureAgreeUnderRotation )
 	{
 		meq::RotatingSource const source = matching( eq );
 
-		for ( double r = box.rMin; r <= box.rMax + 1.0e-12; r += 0.05 )
+		for ( double radius = box.minRadius; radius <= box.maxRadius + 1.0e-12; radius += 0.05 )
 		{
 			for ( double z : { -0.4, 0.0, 0.4 } )
 			{
-				double const expected = eq.f( r, z, eq.psi( r, z ) );
-				double const actual = source.f( r, z, eq.psi( r, z ) );
+				double const expected = eq.f( radius, z, eq.psi( radius, z ) );
+				double const actual = source.f( radius, z, eq.psi( radius, z ) );
 
 				BOOST_TEST( std::fabs( actual - expected ) <= 1.0e-12*std::max( 1.0, std::fabs( expected ) ),
-				            "machSquared = " << eq.getMachSquared() << " at r = " << r
+				            "machSquared = " << eq.getMachSquared() << " at R = " << radius
 				            << ": meq::RotatingSource gives F = " << actual
 				            << " where the fixture gives " << expected );
 			}
@@ -416,9 +416,9 @@ BOOST_AUTO_TEST_CASE( theSourceDrivesTheRotatingBenchmarkAtDesignOrder )
 
 	for ( std::size_t i = 1; i < errors.size(); ++i )
 	{
-		double const r = rate( errors[ i - 1 ], errors[ i ], sizes[ i - 1 ]/sizes[ i ] );
-		BOOST_TEST( r >= 3.0 - rateSlack,
-		            "h = " << sizes[ i ] << ": psi converged at " << r << " driven from the source, "
+		double const observedRate = rate( errors[ i - 1 ], errors[ i ], sizes[ i - 1 ]/sizes[ i ] );
+		BOOST_TEST( observedRate >= 3.0 - rateSlack,
+		            "h = " << sizes[ i ] << ": psi converged at " << observedRate << " driven from the source, "
 		            "wanted " << 3.0 - rateSlack );
 	}
 }

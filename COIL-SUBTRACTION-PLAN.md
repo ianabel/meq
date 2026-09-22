@@ -195,7 +195,7 @@ where `psi_c` is the field of the CONDUCTORS alone, computed analytically, and
 currents are prescribed inputs of a forward solve,
 
 ```
-Delta* psi_p = -mu0 r J_plasma( psi_c + psi_p )
+Delta* psi_p = -mu0 R J_plasma( psi_c + psi_p )
 ```
 
 with the coil term gone from the right-hand side entirely. **The coils need not
@@ -275,7 +275,7 @@ field and solve for a remainder — which is precisely this plan. That is an
 argument for building it, not a caveat.
 
 **And the remainder is nonsingular, which is the whole trick.** `psi_c` carries
-the log; `psi - psi_c` satisfies `Delta*( psi - psi_c ) = -mu0 r J_plasma`, whose
+the log; `psi - psi_c` satisfies `Delta*( psi - psi_c ) = -mu0 R J_plasma`, whose
 right-hand side is bounded and supported on the plasma alone.
 
 **Cheaper than the rectangle, too.** `psi_c` for a filament is ONE Carlson
@@ -303,7 +303,7 @@ must.
 | **CS-1b** | the same with a quadrature rule around it, which is the rectangle. **BUILT** — `add( Coil const & )` beside `add( CurrentFilament const & )`, summing through `meq::CoilSet`. **`coincides()` stays FILAMENT-ONLY**, which is a contract and not an omission: `meq::coilPsi()` is *"Valid EVERYWHERE, including inside the coil"*, so a rectangle has no line singularity for a mesh point to land on and refusing one would reject the ordinary configuration. The quadrature order forwards, which is what §7.2's CS-5 replacement needs |
 | **CS-2** | the split on a FIXED-boundary case with coils, where nothing else moves. **BUILT AND GREEN**, and the acceptance is an IDENTITY rather than a rate — §7.4 |
 | **CS-3** | the Dirichlet datum and the DtN coupling. **BUILT AND GREEN** — §10. Two halves that had to land together: `prepare()` transfers `g − psi_c` inward, and `transmissionConstraint()` ADDS the subtracted conductors' moment on Gamma where FB-7's is subtracted. The refusal in `setConductorField()` is lifted and replaced by a GEOMETRIC one — a subtracted conductor must lie strictly INSIDE Gamma, the mirror image of `setExteriorConductors()`' own precondition |
-| **CS-4** | every consumer of `psi`, with a test per consumer that the total is read. **DONE** — the critical-point finder, the element fill, `peakAt`, the source and its Jacobian, the limiter search and value. **AND THE `.nc` GRID**, which §8.3 says is one of the two formats that CAN keep `psi_c` exact: the driver adds it back at every located node, and `B` with it through `meq::ConductorField::poloidalField()` — the one entry point that takes the axis limit, where `q = ( 1/r ) grad_bar psi` is `0/0` and a half-disc machine's whole first grid column sits. **AND TRANCHE TWO CLOSES IT** — `meq::ContourTracer` takes the solver's conductors in its constructor and shifts at its own seam, so `_surfaces.nc`, the flux-surface averages and the `(Psi, theta)` family are level sets of the physical flux. §12 |
+| **CS-4** | every consumer of `psi`, with a test per consumer that the total is read. **DONE** — the critical-point finder, the element fill, `peakAt`, the source and its Jacobian, the limiter search and value. **AND THE `.nc` GRID**, which §8.3 says is one of the two formats that CAN keep `psi_c` exact: the driver adds it back at every located node, and `B` with it through `meq::ConductorField::poloidalField()` — the one entry point that takes the axis limit, where `q = ( 1/R ) grad_bar psi` is `0/0` and a half-disc machine's whole first grid column sits. **AND TRANCHE TWO CLOSES IT** — `meq::ContourTracer` takes the solver's conductors in its constructor and shifts at its own seam, so `_surfaces.nc`, the flux-surface averages and the `(Psi, theta)` family are level sets of the physical flux. §12 |
 | **CS-T** | **`[conductors] Model`, the key that makes any of this reachable from a file.** **BUILT** — §11. `"meshed"` (the default, unchanged), `"subtracted"`, `"filament"`, plus `QuadratureOrder` for the rectangles. The driver drops its `meq::CoilSet` when the split is taken, because the double count is the failure with no symptom |
 | **CS-6** | **a restart format that self-describes.** §8.3: a `.gf` cannot say whether it holds `psi` or `psi − psi_c`, and a flag would not be enough because a remainder is only meaningful with the conductors it is a remainder from. NetCDF is the vehicle MEQ already has — §9. **BUILT** → **[M-150](MEASUREMENTS.md#m-150)**: the `.nc` carries every `P_k` coefficient, the space, `content`, the conductor table and `mu0` beside its rasterization, and `theRestartFileSaysWhatItHoldsAndWhatItIsARemainderFrom` rebuilds the physical field from the file's own columns to **3.6e-15**. The `.gf` is demoted to a viewing artefact and a fourth one, `<stem>_psi_total.gf`, is written under a split. **What is NOT built is the second half of §9.1** — `meq::Configuration` still has no serialiser, so the output carries the input VERBATIM and not the resolved configuration |
 | **CS-5** | re-take M-111 with the conductor models matched. **[M-139](MEASUREMENTS.md#m-139) partly kills this as written** — the benchmark cannot resolve MEQ below about 7e-04 whatever either code does, so it cannot be the acceptance for a change whose whole claim is that the conductors are resolved EXACTLY. **The replacement is MEQ's own**: an expensive quadrature-based reference, §7. **BUILT** → **[M-149](MEASUREMENTS.md#m-149)**: clear of the conductors — the only regime a subtracted solve has — the shipped order 32 is **1.3e-12** against order 160, and the SOLVED split moves by **1.8e-11** when the order is raised to 96, against a discretisation error of 1.6e-04. §7.2's second acceptance, meshed against subtracted, was already built |
@@ -483,8 +483,8 @@ equation silently loses it". CS-2 is exactly the inside case, and what makes it
 work is that `psi_c` is **not** harmonic there:
 
     Δ* psi_p = Δ* psi − Δ* psi_c
-             = −mu0 r ( J_plasma + J_coil ) − ( −mu0 r J_coil )
-             = −mu0 r J_plasma
+             = −mu0 R ( J_plasma + J_coil ) − ( −mu0 R J_coil )
+             = −mu0 R J_plasma
 
 **the conductor's delta cancels exactly.** So the conductor is in neither the
 mesh nor the source, and the remainder sees a bounded right-hand side supported
@@ -535,9 +535,9 @@ Annotating the accessors whose MEANING changes under the split — the task bein
 one returns, and two of those sentences turned out to be false of the code.
 
 **THE SOURCE WAS EVALUATED AT THE REMAINDER.**
-`SourceIntegrator::sourceValue()` calls `source->f( r, z, psi )` with the solved
+`SourceIntegrator::sourceValue()` calls `source->f( R, z, psi )` with the solved
 potential, which under the split is `psi_p` — while `J_plasma` is a function of
-the **physical** flux. `f( r, z, psi_p )` where `f( r, z, psi_p + psi_c )` is
+the **physical** flux. `f( R, z, psi_p )` where `f( R, z, psi_p + psi_c )` is
 meant converges at the full rate to a different equilibrium. Fixed by
 `SourceIntegrator::setConductorField()`, on the existing `setPlasmaComponent()`
 pattern; null shifts by exactly zero, so nothing that does not use the split
@@ -608,7 +608,7 @@ that cannot be represented at all.
 evaluation points**, which is the pattern `SourceIntegrator::setConductorField()`
 already follows — null shifts by exactly zero, so no existing path moves by a
 bit. Consumers that evaluate pointwise keep the exactness; each is one setter
-and one addition at the point where it already has `( r, z )` in hand.
+and one addition at the point where it already has `( R, z )` in hand.
 
 ### 8.3 AND THE `.gf` OUTPUT CANNOT KEEP IT, WHICH IS A FINDING RATHER THAN A GAP
 
@@ -697,7 +697,7 @@ type to change rather than sixty-eight call sites**, which is the second reason
 for the abstraction and the one that was not the motivation.
 
 **A TRAP IT ABSORBS ONCE INSTEAD OF SIXTY-EIGHT TIMES.** Adding `psi_c` needs
-the point's `( r, z )`, which needs the element's transformation — and
+the point's `( R, z )`, which needs the element's transformation — and
 `mfem::Mesh::GetElementTransformation( int )` hands out **shared scratch**,
 which `CLAUDE.md` records as a silent wrong answer under threading and which
 cost this project six call sites once already. The views take a caller-supplied
@@ -740,7 +740,7 @@ and then the vector, and an extra line is consumed as data.
 holding the wrong field; it does not let them fix it. `psi_c` is recoverable
 from neither the mesh, nor the space, nor the coefficients — only from the
 conductors. So the file must carry the **conductor set itself**: each filament's
-`( r, z, I )`, each rectangle's `( centre, half-extents, I )`, and `mu0`, which
+`( R, z, I )`, each rectangle's `( centre, half-extents, I )`, and `mu0`, which
 together with `meq::ConductorField` reconstruct `psi_c` exactly at any point.
 That is a few dozen numbers beside a field of tens of thousands, so the cost is
 nil and the alternative is a file nobody can safely read.
@@ -873,7 +873,7 @@ that inverts: `psi_p` is identically zero and `a` is **not** zero — it is
 `psi_c`'s own Gegenbauer trace on `Γ`, the whole datum rather than an error.
 
 `theSplitReachesTheExteriorCoupling`, no plasma, twelve modes, conductors at
-`r = 0.50`, `z = ±0.20` inside `Γ = 1.5`:
+`R = 0.50`, `z = ±0.20` inside `Γ = 1.5`:
 
 | `n` | Newton | `max |psi_p|` | modal sum `−` `psi_c` on `Γ` |
 |---|---|---|---|
@@ -896,7 +896,7 @@ large. §7.4 makes the same choice for the same reason.
 **The conductor's distance from `Γ` is the experiment's precision.** The
 truncated series cannot represent what falls like `( reach/rhoGamma )^n`, so the
 fixture puts the conductors at 0.40 of `Γ` and twelve modes leave about `1e-08`
-— below the round-off rather than beside it. At `r = 0.9` the ratio is 0.73, the
+— below the round-off rather than beside it. At `R = 0.9` the ratio is 0.73, the
 residual is 15%, and `psi_p` would be carrying the **series** rather than the
 solve.
 
@@ -947,7 +947,7 @@ of each rectangle exactly as the meshed source does.
 
 **AND THE `.nc` GRID CARRIES THE PHYSICAL `psi` UNDER BOTH ROUTES**, which is
 §8.3's division made real: the driver adds `psi_c` back at every located node,
-and `B` with it. That needed the **axis**, where `q = ( 1/r ) grad_bar psi` is
+and `B` with it. That needed the **axis**, where `q = ( 1/R ) grad_bar psi` is
 `0/0` and a half-disc machine's whole first grid column sits —
 `meq::filamentAxisFlux()`, `meq::coilAxisFlux()` and
 `meq::ConductorField::poloidalField()` are the closed-form limit, and
@@ -1021,9 +1021,9 @@ The bare-field constructor cannot know, which is the only reason
 
 | | |
 |---|---|
-| **`q_c` comes through `poloidalField()`, not `flux()`** | `q = ( 1/r ) grad_bar psi` is `0/0` on `r = 0`, where `flux()` returns NaN deliberately. `poloidalField()` is the entry point that takes the closed-form limit, and `B_R = −q_z`, `B_Z = +q_r` inverts to what the sample wants. Off the axis the two are the same numbers through two sign flips, so nothing there moves by a bit — but a half-disc machine's contour can reach `r = 0` and a NaN would end the trace with `LeftMesh` |
+| **`q_c` comes through `poloidalField()`, not `flux()`** | `q = ( 1/R ) grad_bar psi` is `0/0` on `R = 0`, where `flux()` returns NaN deliberately. `poloidalField()` is the entry point that takes the closed-form limit, and `B_R = −q_z`, `B_Z = +q_r` inverts to what the sample wants. Off the axis the two are the same numbers through two sign flips, so nothing there moves by a bit — but a half-disc machine's contour can reach `R = 0` and a NaN would end the trace with `LeftMesh` |
 | **`faceJump()` keeps reading the REMAINDER, deliberately** | it measures the DG discontinuity of `psi_h` across a face, and `psi_c` is analytic: it takes the same value on both sides and cancels exactly. Adding it would cost two Carlson evaluations per face crossing to subtract two equal numbers, in front of a jump this project measures down to 6.8e-10 |
-| **the band datum is PHYSICAL and the lift is of the remainder** | `setBandExtension()`'s `g` keeps the meaning its name has, so its default of zero stays right for a fixed-boundary problem either way. `extendField()` subtracts `psi_c` at the foot and the seam adds it at the point, and `psi_c( x ) − psi_c( xbar )` **is** the line integral of `r q_c` along that path — exactly, no quadrature, and the conductor's logarithm never enters the lift |
+| **the band datum is PHYSICAL and the lift is of the remainder** | `setBandExtension()`'s `g` keeps the meaning its name has, so its default of zero stays right for a fixed-boundary problem either way. `extendField()` subtracts `psi_c` at the foot and the seam adds it at the point, and `psi_c( x ) − psi_c( xbar )` **is** the line integral of `R q_c` along that path — exactly, no quadrature, and the conductor's logarithm never enters the lift |
 
 ### 12.3 And the corrector's scale had to move with it
 
@@ -1109,7 +1109,7 @@ configuration — a machine, free boundary, conductors subtracted.
 
 `CriticalPointFinder`'s element-local Newton evaluates this element's polynomial
 OUTSIDE the element on purpose — that is how a root near a face is found. On a
-half-disc, whose elements reach `r = 0` exactly, the iterate can leave the
+half-disc, whose elements reach `R = 0` exactly, the iterate can leave the
 half-plane, and `meq::coilGradPsi` refuses a negative radius outright. With no
 conductors that is harmless; under the split it is a throw from three frames
 down naming a radius.

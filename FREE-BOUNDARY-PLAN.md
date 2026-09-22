@@ -67,10 +67,10 @@ the field extends to infinity through a vacuum region containing the coils, and
 what is given instead is the coil currents and the machine geometry.
 
 ```
-−∇̄·( (1/r) ∇̄ψ ) = F( r, z, ψ ) / r          in the plasma
-−∇̄·( (1/r) ∇̄ψ ) = μ₀ j_coil                 in the coils
-−∇̄·( (1/r) ∇̄ψ ) = 0                          everywhere else, out to infinity
-ψ = 0                                          on the axis r = 0
+−∇̄·( (1/R) ∇̄ψ ) = F( R, z, ψ ) / R          in the plasma
+−∇̄·( (1/R) ∇̄ψ ) = μ₀ j_coil                 in the coils
+−∇̄·( (1/R) ∇̄ψ ) = 0                          everywhere else, out to infinity
+ψ = 0                                          on the axis R = 0
 ψ → 0                                          at infinity
 ```
 
@@ -78,7 +78,7 @@ with the plasma occupying `Ω_p(ψ)`, the region bounded by the last closed flux
 surface, and
 
 ```
-F( r, z, ψ ) = [ μ₀ r² p'(Ψ) + (g g')(Ψ) ] · χ_{Ω_p(ψ)},
+F( R, z, ψ ) = [ μ₀ R² p'(Ψ) + (g g')(Ψ) ] · χ_{Ω_p(ψ)},
 Ψ = ( ψ − ψ_bnd ) / ( ψ_ax − ψ_bnd ),
 ψ_ax = max ψ,   ψ_bnd = the flux at the limiter contact or the X-point.
 ```
@@ -162,14 +162,14 @@ a half-disc whose flat side is the axis. In three dimensions that semicircle is 
 
 ### 3.1 The separation
 
-In spherical coordinates `r = ρ sinθ`, `z = ρ cosθ`, `μ = cosθ`, the
+In spherical coordinates `R = ρ sinθ`, `z = ρ cosθ`, `μ = cosθ`, the
 Grad–Shafranov operator is
 
 ```
 Δ* = ∂_ρρ + (1/ρ²)( ∂_θθ − cotθ ∂_θ )
 ```
 
-— the `(2/r)∂_r` that separates `Δ*` from the axisymmetric Laplacian cancels the
+— the `(2/R)∂_r` that separates `Δ*` from the axisymmetric Laplacian cancels the
 `(2/ρ)∂_ρ` exactly. Separating `ψ = ρ^α f(μ)` gives
 
 ```
@@ -202,14 +202,14 @@ The Gegenbauer functions of order `−1/2` are orthogonal in the weight
 `(1 − μ²)^{−1}`. On a semicircle centred on the axis,
 
 ```
-dΓ / r  =  ρ_Γ dθ / ( ρ_Γ sinθ )  =  dθ / sinθ  =  dμ / (1 − μ²).
+dΓ / R  =  ρ_Γ dθ / ( ρ_Γ sinθ )  =  dθ / sinθ  =  dμ / (1 − μ²).
 ```
 
-**The orthogonality weight is exactly `dΓ/r`**, which is the weight the
+**The orthogonality weight is exactly `dΓ/R`**, which is the weight the
 Grad–Shafranov weak form carries anyway, and `ρ_Γ` cancels out of it. So
 
 ```
-∫_Γ C_m C_n dΓ/r = δ_mn h_n,        h_n = 2 / ( n(n−1)(2n−1) ),
+∫_Γ C_m C_n dΓ/R = δ_mn h_n,        h_n = 2 / ( n(n−1)(2n−1) ),
 ```
 
 and the exterior contributes to the coupled system a **diagonal** block with
@@ -223,10 +223,10 @@ Three checks, all run 2026-08-29 and reproducible from this section's
 description alone:
 
 1. **`Δ*( ρ^α C_n^{−1/2}(cosθ) ) = 0`** for `α = n` and `α = 1−n`, by central
-   differences in `(r,z)`, at `n = 2…5` and several points: residuals of
+   differences in `(R,z)`, at `n = 2…5` and several points: residuals of
    `1e−8` to `8e−6` against `|ψ|` of `5e−3` to `0.85`, which is the difference
    floor.
-2. **Orthogonality in `dΓ/r`**: off-diagonal entries at `1e−17`, and
+2. **Orthogonality in `dΓ/R`**: off-diagonal entries at `1e−17`, and
    `h_n` agreeing with `2/(n(n−1)(2n−1))` to six digits at `n = 2…6`.
 3. **The DtN against an independent exact field.** Take a circular current loop
    — `ψ` from complete elliptic integrals, which is not the formula any of the
@@ -274,7 +274,7 @@ k        = √( 4 r_j r_k / ( (r_j + r_k)² + (z_j − z_k)² ) )
 `k` is the **modulus**, not the parameter — the paper writes the radical
 explicitly, which is exactly the character `pdftotext` deletes.
 
-**THE `dΓ/r` WEIGHT IS THERE, AND IT IS WHY THE EXPONENT IS `3/2`.** They never
+**THE `dΓ/R` WEIGHT IS THERE, AND IT IS WHY THE EXPONENT IS `3/2`.** They never
 write `c` in weighted form, but splitting `(r₁r₂)^{3/2} = r₁ r₂ · (r₁r₂)^{1/2}`
 gives
 
@@ -283,7 +283,7 @@ M dS1 dS2 = [ k / ( 2π √(r1 r2) ) ( (2−k²)/(2−2k²) E − K ) ] · ( dS1
 ```
 
 and `N` carries a leading `1/r₁` of its own. **So `c` is naturally an integral
-against `dΓ/r` in each slot** — precisely the measure §3.2 needs, with the `3/2`
+against `dΓ/R` in each slot** — precisely the measure §3.2 needs, with the `3/2`
 being one power per slot for the measure plus a half shared by the kernel. That
 is real support for §3.2 from an independent source, and it is also the reason
 the exponent matters: read as `2` or as `1/2` the weight becomes `dΓ/r²` or
@@ -291,7 +291,7 @@ the exponent matters: read as `2` or as `1/2` the weight becomes `dΓ/r²` or
 
 **THREE THINGS TO CARRY INTO THE §3.4 TEST.**
 
-* **`M` is HYPERSINGULAR, `M ~ 1/(π r d²)`** as the two points approach —
+* **`M` is HYPERSINGULAR, `M ~ 1/(π R d²)`** as the two points approach —
   measured over `d = 1e−1 … 1e−5`, agreeing to seven digits. The double-difference
   form *is* the regularisation: each factor is `O(d)` and the product cancels the
   `1/d²` exactly. So the test **cannot** assemble `∫∫ C_m M C_n` directly; it must
@@ -313,8 +313,8 @@ the exponent matters: read as `2` or as `1/2` the weight becomes `dΓ/r²` or
   no statement that the answer is independent of it. §8's *"measure the spectrum
   on a real coil set before choosing `ρ_Γ`"* has no prior art to lean on.
 * **On the axis: nothing either, and they go there.** Their domain includes
-  `r = 0` — `∂Ω = Γ ∪ Γ_{r=0}` — with `ψ = 0` imposed both in (2.5) and in the
-  space (3.1), whose norms are weighted `r` and `r^{−1}`. Their triangulation
+  `R = 0` — `∂Ω = Γ ∪ Γ_{R=0}` — with `ψ = 0` imposed both in (2.5) and in the
+  space (3.1), whose norms are weighted `R` and `R^{−1}`. Their triangulation
   reaches the axis. **They report no conditioning difficulty, no loss of order
   and no special treatment**, and the axis is absent from §5's own list of known
   accuracy limitations. So CEDRES++ neither corroborates nor contradicts §7.2's
@@ -341,10 +341,10 @@ rational, not to a tolerance.
 | 3.1 | `Δ*` separates with no `∂_ρ` term | **exact**, residual identically 0 |
 | 3.1 | the Gegenbauer equation and `α ∈ {n, 1−n}` | **exact** |
 | — | `C_n^{−1/2}` from Legendre = library `gegenbauer(n,−1/2,μ)` | **exact, normalisation factor 1** |
-| 3.1 | `Δ*(ρ^α C_n) = 0`, both branches, **in (r,z)** | **exact**, n = 2…8, 16 cases |
+| 3.1 | `Δ*(ρ^α C_n) = 0`, both branches, **in (R,z)** | **exact**, n = 2…8, 16 cases |
 | 3.1 | `C_n(±1) = 0` | **exact**, n = 2…12 |
 | 3.2 | orthogonality and `h_n` | **exact rational**; 72 off-diagonals identically 0 |
-| 3.2 | `dΓ/r = dμ/(1−μ²)`, `ρ_Γ` cancels | confirmed |
+| 3.2 | `dΓ/R = dμ/(1−μ²)`, `ρ_Γ` cancels | confirmed |
 | 3.3 | the DtN symbol, including its sign | confirmed |
 
 Stronger than §3.3's own run in two places: the off-diagonals are **identically
@@ -375,7 +375,7 @@ The degenerate sector is **four** functions, not two — `1`, `z/ρ`, `ρ` and `
 all `Δ*`-harmonic — and **not one of them vanishes on the axis**. Two of them
 (`1` and `z/ρ`) also decay, so both would otherwise be admissible exterior modes
 and both are killed by the axis condition. Better still: they have **infinite
-norm** in `L²(dΓ/r)`, so there is nothing for a compatibility condition to be
+norm** in `L²(dΓ/R)`, so there is nothing for a compatibility condition to be
 imposed *on* — a cleaner statement than "no constant mode is compatible". And
 nothing admissible is lost by starting at 2: `{C_n}_{n≥2}` is **complete** in
 `L²(dμ/(1−μ²))`.
@@ -390,7 +390,7 @@ downward to see.
 shorter.
 
 **AND A METHOD WARNING FOR ANYONE RE-RUNNING CLAIM 1.** Substituting
-`θ = atan2(r,z)` leaves sympy unable to reduce `atan(tan θ)` and it reports a
+`θ = atan2(R,z)` leaves sympy unable to reduce `atan(tan θ)` and it reports a
 **nonzero** residual — an artefact, not a refutation. The control settles it: the
 axisymmetric Laplacian, whose spherical form is known, shows the identical
 artefact. The clean route is the forward chain rule, which never forms an
@@ -482,7 +482,7 @@ condensing before differentiating.**
 
 ```
 F( x, a, ψ_ax, ψ_bnd ) = 0     the full HDG residual, with the transferred datum
-                               φ_h = g(a(x)) + ∫_σ r E_h(q_h)·m imposed on Γ_h
+                               φ_h = g(a(x)) + ∫_σ R E_h(q_h)·m imposed on Γ_h
 T_m( x, a )           = 0      ∫_Γ E_h(q_h)·ν C_m dΓ − a_m (1−m) h_m / ρ_Γ
 G_ax                  = 0      ψ_ax − max ψ_h
 G_bnd                 = 0      ψ_bnd − (limiter / X-point functional)
@@ -528,7 +528,7 @@ attribute.
 **And the border column is constant in the iterate, which is worth more than it
 looks.** `ψ̂` enters the flux row as `⟨ψ̂, v·n⟩`, the potential row as `⟨τψ̂, w⟩`
 and the trace row as `⟨τψ̂, μ⟩` — **linearly in all three**, every one of them.
-All the nonlinearity is `F(r, z, ψ)` in the potential row, which depends on `ψ`
+All the nonlinearity is `F(R, z, ψ)` in the potential row, which depends on `ψ`
 and not on `ψ̂`. So `∂F/∂a = (∂F/∂ψ̂)·P` does not depend on where the iterate is,
 and it can be built once per mesh rather than once per Newton step.
 
@@ -612,14 +612,14 @@ namespace meq
             ExteriorDtN( double zCentre, double rhoGamma, int modes );
 
             /// C_n^{-1/2}( cos theta ) at a point of Gamma, n = 2 .. modes+1.
-            double basis( int n, double r, double z ) const;
+            double basis( int n, double R, double z ) const;
             /// ( 1 - n )/rho_Gamma, the Dirichlet-to-Neumann symbol.
             double symbol( int n ) const;
-            /// h_n = 2/( n( n-1 )( 2n-1 ) ), the 1/r-weighted mass.
+            /// h_n = 2/( n( n-1 )( 2n-1 ) ), the 1/R-weighted mass.
             double mass( int n ) const;
             /// psi at any exterior point, from the coefficients. For output,
             /// and for the field at the coils.
-            double exterior( double r, double z,
+            double exterior( double R, double z,
                              std::vector<double> const &a ) const;
     };
 }
@@ -669,7 +669,7 @@ iterate. Four things follow.
 
 **It stays a pointwise function of `ψ`, which is better than it looks.** With
 `Ω_p` approximated as `{ Ψ > 0 }` intersected with a search region, `F` is still
-`F( r, z, ψ )` given `ψ_ax` and `ψ_bnd`, so `meq::Source`'s interface survives
+`F( R, z, ψ )` given `ψ_ax` and `ψ_bnd`, so `meq::Source`'s interface survives
 untouched. What is lost is that `{ Ψ > 0 }` can pick up private-flux regions and
 near-coil regions that are not the plasma; CEDRES++ handles that with a
 connectivity test and so must MEQ. **`meq::CriticalPointFinder` is the piece that
@@ -768,7 +768,7 @@ FB-4's acceptance criterion for that reason.
 
 ### 5.4 The coils — ordinary, and useful early
 
-Coil currents are data: `F_coil = μ₀ r I_k / |Ω_ck|` on each coil subdomain, or a
+Coil currents are data: `F_coil = μ₀ R I_k / |Ω_ck|` on each coil subdomain, or a
 filament. A `[coils]` table in the TOML, a `meq::CoilSet`, and a source that adds
 the coil term. Nothing structural — and it is what makes FB-1 possible, which is
 the acceptance test for everything in §3 and §4.
@@ -1006,7 +1006,7 @@ the fallback to work.
 
 | | | acceptance |
 |---|---|---|
-| **FB-A** | **The axis.** A vacuum solve on a mesh touching `r = 0`. No free boundary, no coupling. | **DONE, 2026-09-04 — see §7.2.** `ψ` at `k+1` on a mesh reaching the axis; `q` short by half an order; the conditioning penalty `O(1/h)` and not `O(1/h²)`. `tests/convergence/AxisConvergence.cpp` |
+| **FB-A** | **The axis.** A vacuum solve on a mesh touching `R = 0`. No free boundary, no coupling. | **DONE, 2026-09-04 — see §7.2.** `ψ` at `k+1` on a mesh reaching the axis; `q` short by half an order; the conditioning penalty `O(1/h)` and not `O(1/h²)`. `tests/convergence/AxisConvergence.cpp` |
 | **FB-0** | `meq::ExteriorDtN`: the basis, the symbol, the mass. No solver. | **DONE, 2026-09-04, AND COMPLETED 2026-09-06 — see §7.3 and §3.4.** The current-loop test reads **1.4e−15** in the trace and **6.9e−14** in the DtN. §3.4's CEDRES++ agreement — the falsifying test of the whole of §3 — is now written and green: their boundary form comes out diagonal to **1.15e-10** against a scale of 2.56e-01, with the diagonal matching `blockEntry( n )` to **3.20e-09** relative |
 | **FB-1** | **Vacuum only.** The whole coupling, on a linear problem with an exact answer. | **DONE 2026-09-05 — see §7.8.** `ψ` at **1.99 / 2.99 / 3.99** on the half-disc with the datum given (FB-1a), and the transmission condition recovers the exterior coefficients to **1.9e-04, converging at 3.30** (FB-1b). `∂F/∂a` needs no measurement under NPC — §7.4 |
 | **FB-2** | A **prescribed** plasma current, still linear. | **DONE 2026-09-05 — see §7.9.** `ψ` at 1.99 / 2.88 / 3.01, and Ampère's law through the solve: **round-off over `Γ_h`** and `k+1`-convergent on the half-disc. Two meshing findings came out of it, both about aligning the mesh to geometry that is known in advance |
@@ -1062,13 +1062,13 @@ necessary. A vacuum solve needs `Δ*ψ = 0`, and there are polynomial
 Verified symbolically rather than asserted, with three controls — one of them a
 candidate that **failed**, which is why the check was run:
 
-| candidate | `Δ*` | `ψ(r=0)` | |
+| candidate | `Δ*` | `ψ(R=0)` | |
 |---|---|---|---|
 | `r²` | 0 | 0 | |
 | `r² z` | 0 | 0 | |
 | `r⁴ − 4 r² z²` | 0 | 0 | |
 | `r² (r² − 4z²) z` | **−16 r² z** | 0 | a guess, and it was wrong |
-| `r² ln r − z²` | 0 | **−z²** | harmonic, and NOT zero on the axis |
+| `r² ln R − z²` | 0 | **−z²** | harmonic, and NOT zero on the axis |
 | `r⁴/8` | **r²** | 0 | `CLAUDE.md`'s own check, so the operator is MEQ's |
 
 The last row is the control that matters: `Δ*(r⁴/8) = r²` is the value
@@ -1077,17 +1077,17 @@ source*, so the operator differentiated here is the one MEQ solves.
 
 **So FB-A gets a rate against an exact answer, like every other stage in this
 tree, instead of a boundedness claim.** `k+1` in `ψ` and `q` on a mesh reaching
-`r = 0` is a far sharper statement than "the condition number did not blow up",
+`R = 0` is a far sharper statement than "the condition number did not blow up",
 and it costs nothing to make.
 
-**`r² ln r − z²` is the interesting control.** It is `Δ*`-harmonic, bounded at
+**`r² ln R − z²` is the interesting control.** It is `Δ*`-harmonic, bounded at
 the axis, and **not zero there** — one of Cerfon & Freidberg's twelve terms. A
 solve that handles `r²` and fails on this one has found something about the axis
 rather than about the mesh, which is exactly the discrimination §8's three
 non-measurements are missing.
 
 **And FB-A needs no new code to pose.** `MeshConfig` already permits `RMin = 0`
-and says so explicitly (`src/meq/Config.hpp`: *"a box reaching r = 0 contains the
+and says so explicitly (`src/meq/Config.hpp`: *"a box reaching R = 0 contains the
 coordinate singularity. **That is allowed**, but is rarely what is wanted"*). It
 is `meq::BoundaryShape` that refuses the axis, in its constructor, and FB-A does
 not use one: it is the fitted path with a box whose inner edge is the axis. So
@@ -1104,7 +1104,7 @@ imposes on itself by keeping the pinned-zero column.
 
 `tests/convergence/AxisConvergence.cpp` and `tests/analytic/VacuumHarmonic.hpp`,
 registered as a ctest. Four dyadic meshes, `k = 1, 2, 3`, on a box whose inner
-edge is exactly `r = 0`, against the identical study standing 0.25 clear of it.
+edge is exactly `R = 0`, against the identical study standing 0.25 clear of it.
 
 **THE POTENTIAL IS UNHARMED AND THE FLUX IS NOT QUITE.**
 
@@ -1136,7 +1136,7 @@ costs nothing. Over an eightfold refinement that is 7.2 to 7.6 against the 8 a
 clean `1/h` would give.
 
 **Both findings have one mechanism, and it is the weight rather than the
-singularity.** The flux mass form is `(r q, v)`, so the element touching the
+singularity.** The flux mass form is `(R q, v)`, so the element touching the
 axis carries a weight of order `h`: its diagonal is the smallest in the system,
 which is the `1/h`; and it is the element the method controls least while an
 unweighted `L2` error norm counts it in full, which is the half order. §8's
@@ -1156,9 +1156,9 @@ sizes anyway.
 **Three smaller things FB-A settled on the way.**
 
 * **`q` is bounded at the axis**, §8's first non-measurement, now a number:
-  `q_r → 2.120000` as `r → 10⁻¹, 10⁻³, 10⁻⁶, 10⁻⁹, 0`, exactly, and finite *at*
-  `r = 0` rather than a NaN. `VacuumHarmonic` carries the `1/r` cancellation
-  already done for that reason — writing `gradPsi()/r` as every other fixture
+  `q_r → 2.120000` as `R → 10⁻¹, 10⁻³, 10⁻⁶, 10⁻⁹, 0`, exactly, and finite *at*
+  `R = 0` rather than a NaN. `VacuumHarmonic` carries the `1/R` cancellation
+  already done for that reason — writing `gradPsi()/R` as every other fixture
   does would be `0/0` there.
 * **A vacuum solve is affine and step one is exact**, `‖r₁‖/‖r₀‖` between 1e-13
   and 5e-12. Asserted as the **drop** and not as an iteration count, because
@@ -1201,7 +1201,7 @@ at 4e−11, which is what entitles them to be the reference.
 **The other four checks, all green**: every mode vanishes on the axis at
 **exactly 0.000e+00**; `h_n` matches the closed form to round-off at `n = 2..9`;
 the projection is orthogonal to 1.2e−15; each exterior mode is `Δ*`-harmonic to
-4.2e−08…6.5e−07 relative, **recomputed by central differences in `(r,z)`** so
+4.2e−08…6.5e−07 relative, **recomputed by central differences in `(R,z)`** so
 that an error in the spherical separation could not hide; the symbol agrees with
 `∂ψ/∂ρ` of its own field to 2.6e−08; and the modes decay as `2^{1−n}` exactly.
 
@@ -1235,7 +1235,7 @@ bearing rather than cosmetic:
   measured the axis to cost a power of `h` in the trace conditioning, a basis
   that quietly loses four digits there is not what to build on.
 * **The singular weight never appears anywhere.** `C_n/(1 − μ²)` is a
-  **polynomial**, so `dΓ/r = dμ/(1 − μ²)` cancels in closed form and a plain
+  **polynomial**, so `dΓ/R = dμ/(1 − μ²)` cancels in closed form and a plain
   Gauss-Legendre rule integrates the mass integrals **exactly** — which the
   1.2e−15 orthogonality is the evidence for. The printed form would need `0/0`
   at the endpoints and a near-cancellation beside them.
@@ -1247,7 +1247,7 @@ check rather than a restatement**.
 **§3.4's CEDRES++ AGREEMENT IS WRITTEN AND GREEN, 2026-09-06**, and it closed
 FB-0. §3.5 states their operator exactly, read off the rendered page, and names
 the three things the test has to respect — chiefly that `M` is
-**hypersingular, `~1/(π r d²)`**, so the double-difference form *is* the
+**hypersingular, `~1/(π R d²)`**, so the double-difference form *is* the
 regularisation and `∫∫ C_m M C_n` cannot be assembled directly. Assembled in
 this basis it comes out **diagonal to 1.15e-10** against a scale of 2.56e-01,
 with the diagonal matching `blockEntry( n )` to **3.20e-09**. §3.4 has the
@@ -1309,7 +1309,7 @@ any more.
 `tests/analytic/ExteriorMatched.hpp`. FB-1's acceptance needs a problem whose
 answer is known, and §7's *"the sum of the coils' loop fields"* **cannot be
 one for an order study.** An exact loop field comes from a **filament**, which
-in the `(r, z)` half-plane is a point source; its `ψ` has a logarithmic
+in the `(R, z)` half-plane is a point source; its `ψ` has a logarithmic
 singularity, so `ψ ∉ H¹` there, the finite element solution converges at a
 reduced rate, and `k+1` is unreachable. A finite cross-section restores the
 regularity but its exact field is a 2-D integral of loop fields, semi-analytic
@@ -1370,30 +1370,30 @@ can test them; `tests/unit/CoilsTests.cpp` is the acceptance. What is *not* here
 is the solve to apply them to, which waits on FB-1's transmission row.
 
 **THE SOURCE FACTOR IS DERIVED, NOT TRANSCRIBED.** From
-`(curl B)_φ = −(1/r)Δ*ψ` in MEQ's own field convention `B = (−q_z, +q_r)`:
+`(curl B)_φ = −(1/R)Δ*ψ` in MEQ's own field convention `B = (−q_z, +q_r)`:
 
 ```
-μ₀ j_φ = (curl B)_φ   ⟹   Δ*ψ = −μ₀ r j_φ   ⟹   F = μ₀ r j_φ
+μ₀ j_φ = (curl B)_φ   ⟹   Δ*ψ = −μ₀ R j_φ   ⟹   F = μ₀ R j_φ
 ```
 
-which is §5.4's `μ₀ r I/|Ω_c|` exactly, and agrees with `MHDSource`'s
-`μ₀ r j_φ = μ₀r²p′ + gg′` — so the coil and plasma terms are in the same units
+which is §5.4's `μ₀ R I/|Ω_c|` exactly, and agrees with `MHDSource`'s
+`μ₀ R j_φ = μ₀r²p′ + gg′` — so the coil and plasma terms are in the same units
 and simply add.
 
 **AND IT IS CHECKED AGAINST ITS OWN FIELD, WITH THE NEIGHBOURING CONVENTIONS
 REJECTED.** `f()` and `psi()` are independent statements of the same physics, so
 recomputing `Δ*` of the field and comparing against `−f` is the one check that
-can see a missing or extra `r` — which converges at full rate to the wrong
+can see a missing or extra `R` — which converges at full rate to the wrong
 function. Measured at the coil centre: `Δ*_FD ψ = −2.094605e+01` against
 `−F = −2.094395e+01`, **1.0e−04** at the difference floor, while the plausible
-wrong answers `F/r = 1.047e+01` and `F·r = 4.189e+01` sit a **factor of two**
+wrong answers `F/R = 1.047e+01` and `F·R = 4.189e+01` sit a **factor of two**
 away. The test asserts the rejection as well as the agreement, which is what
 turns "these two agree" into "these two agree and their neighbours do not".
 
 **FB-2'S OWN ACCEPTANCE IDENTITY, ON THE EXACT FIELD:**
 
 ```
-∮ (1/r) ∂ψ/∂n dl  =  −μ₀ · totalCurrent()
+∮ (1/R) ∂ψ/∂n dl  =  −μ₀ · totalCurrent()
 ```
 
 Measured **3.3e−11** relative, Richardson-extrapolated from a midpoint rule.
@@ -1402,23 +1402,23 @@ when FB-2 checks it on a **solve**, any discrepancy is the solve.
 
 **THE SIGN IS NEGATIVE AND IS ASSERTED SEPARATELY.** §7 predicts the coupling
 sign will be got wrong at least once, and this is the cheapest place to pin it.
-The same identity written as a counterclockwise circulation of `B` in `(r, z)`
-comes out **positive**, because `φ̂ = ẑ × r̂` — so both signs are defensible
+The same identity written as a counterclockwise circulation of `B` in `(R, z)`
+comes out **positive**, because `φ̂ = ẑ × R̂` — so both signs are defensible
 sentences about different quantities, which is exactly how a sign error survives
 review.
 
 **Two more measurements.** A shrinking coil approaches its filament at clean
 second order — ratios 4.025, 4.006, 4.002, 4.001 over five halvings — which says
 the finite cross-section is a *smoothing* of the filament rather than a
-different object. And `f` is proportional to `r` inside the coil, not constant:
+different object. And `f` is proportional to `R` inside the coil, not constant:
 it is the current *density* that is uniform, and stating that correctly is the
-difference between `μ₀ r j` and `μ₀ j`.
+difference between `μ₀ R j` and `μ₀ j`.
 
 **ONE IMPLEMENTATION FINDING WORTH KEEPING.** The cross-section integral is
 logarithmically singular when the field point is inside the coil, and the
 obvious route fails there: `k = 2√(ar)/d` rounds to exactly 1.0 within ~1e−8 of
 a filament, where `std::comp_ellint_1(1.0)` is **NaN** — and the quadrature must
-evaluate there. Carlson's forms take `k′² = ((a−r)² + dz²)/d²`, which is the
+evaluate there. Carlson's forms take `k′² = ((a−R)² + dz²)/d²`, which is the
 squared source distance over `d²` and is formed with **no cancellation**, and
 still work at `k′² = 1e−300`. With a panel split at the field point and cubic
 grading the interior converges at about `4p` in the rule order, giving
@@ -1502,9 +1502,9 @@ was genuinely new code and is now upstream's.
    `GradShafranovSolver::exteriorTransmissionRows()` is the contraction, and
    `theTransmissionRowIsTheBoundaryIntegralItClaims` measures it against a
    closed form at **7.8e-16 to 1.4e-13**. The measure question this section left
-   open — whether `T_m` wants `dΓ` or `dΓ/r` — is settled and it is `dΓ`: the
-   exterior block is diagonal in `dΓ/r`, and `q` *is* `(1/r)∇̄ψ`, so testing
-   `q·ν` in the plain measure already carries the radius. `dΓ/r` would divide by
+   open — whether `T_m` wants `dΓ` or `dΓ/R` — is settled and it is `dΓ`: the
+   exterior block is diagonal in `dΓ/R`, and `q` *is* `(1/R)∇̄ψ`, so testing
+   `q·ν` in the plain measure already carries the radius. `dΓ/R` would divide by
    it twice.
 
    **AND THE TILING WENT RED, ON A DIAGNOSIS THAT WAS WRONG.** The boundary
@@ -1528,7 +1528,7 @@ was genuinely new code and is now upstream's.
 
 **A DOMAIN CONSTRAINT THAT ONLY BECAME OBVIOUS ON BUILDING THIS.** The exterior
 expansion is only valid on a **semicircle centred on the axis**, so FB-1's `Γ`
-must be one — which means the domain reaches `r = 0` and everything §7.2
+must be one — which means the domain reaches `R = 0` and everything §7.2
 measured about the axis applies to it. FB-A was not merely a warm-up for FB-1;
 it is its prerequisite, and the `O(1/h)` conditioning it found is the number
 FB-1 inherits. `FreeBoundaryCoupling.cpp` deliberately uses
@@ -1630,7 +1630,7 @@ deliberately skips so a zero sits *between* two live ones; it comes back zero, s
 the indexing is right and the off-by-TWO `ExteriorDtN` warns about is not there.
 
 **THE RATE IS WHAT MAKES IT A RESULT.** A coupling wrong by a *constant* — a
-sign, a stray `r`, a misindexed mode — sits at a fixed distance and looks like a
+sign, a stray `R`, a misindexed mode — sits at a fixed distance and looks like a
 plausible discretisation error at any single mesh. Only refinement separates
 them, which is why one mesh was not enough.
 
@@ -1680,7 +1680,7 @@ fall as `O(h²)` wants an offset of about `h²/(2ρ_Γ)` chosen per mesh.
 1e-3 near the axis wants the gap closed rather than the mesh refined.
 
 **THE CONDUCTOR SHOULD BE MESH-ALIGNED TOO, AND THAT IS WORTH A WHOLE ORDER.**
-`F = μ₀ r j` is discontinuous at a uniform-density conductor's edge, and where
+`F = μ₀ R j` is discontinuous at a uniform-density conductor's edge, and where
 that edge cuts a cell the element quadrature integrates a discontinuous
 integrand with a rule assuming smoothness:
 
@@ -1701,7 +1701,7 @@ cannot be. Cut quadrature is needed for the plasma support and **not** for the
 conductors, so §6.4's one real gap is narrower than it looked.
 
 The aligned rate caps at 3 because a rectangular conductor has **corners**, and a
-corner in the forcing gives the same `r² log r` behaviour a corner in the domain
+corner in the forcing gives the same `r² log R` behaviour a corner in the domain
 does. Alignment cannot fix that; rounding the conductor would.
 
 ### 7.10 FB-4: the plasma edge caps the order, and the profile sets the cap
@@ -1900,7 +1900,7 @@ sweeps `Γ` with the same `ExtensionBoundaryQuadrature` the transmission row use
 and accumulates, per element,
 
 ```
-h_e ∫ | q_h·ν − ( 1/r ) Σ_n a_n symbol( n ) C_n( μ ) |² dΓ
+h_e ∫ | q_h·ν − ( 1/R ) Σ_n a_n symbol( n ) C_n( μ ) |² dΓ
 ```
 
 — `η₃`'s scaling for a flux jump. The border imposes only the **projection onto
@@ -1950,7 +1950,7 @@ no shipped example turns adaptivity on over a coupling.
 **One thing had to change in MEQ for any of this to run.** `meq::AdaptiveDomain`
 required `Ω` to be **strictly inside** the background box — it threw unless the
 computational mesh had exactly one boundary attribute — and the half-disc is not
-and cannot be: its flat side **is** the box's `r = 0` edge, because FB-A requires
+and cannot be: its flat side **is** the box's `R = 0` edge, because FB-A requires
 the domain to reach the axis exactly. Inherited boundary is ordinary fitted
 boundary and wants no transfer, so the guard now checks the thing that actually
 matters — that some boundary was **generated**, i.e. that there is a `Γ_h` at
@@ -1980,16 +1980,16 @@ throughout. `theTwoBordersConvergeTogether` is the case, and it also runs throug
 the DRIVER: `[boundary.limiter]` beside `[boundary.exterior]` converges in 5
 Newton steps and reports both.
 
-**AND THE `ψ_ax` COLUMN OF THAT TABLE IS AN ARTEFACT OF THE `r = 0` LAYER, FOUND
+**AND THE `ψ_ax` COLUMN OF THAT TABLE IS AN ARTEFACT OF THE `R = 0` LAYER, FOUND
 2026-09-07 WHILE BUILDING §10.3's FILL.** At `R = 1.20` the reported
-1.091632931e-01 is attained in an element **touching `r = 0`** against
+1.091632931e-01 is attained in an element **touching `R = 0`** against
 **4.4472e-02** as the largest `ψ_h` anywhere off the axis, a factor of **2.5**.
 §7.18 item 3 found the same thing on the toy fixture at ratios 0.31, 0.36 and
 ≈ 0, and §7.16 found a third instance at the plasma edge.
 
 **THIS PARAGRAPH SAID "A CORNER ARTEFACT" AND CALLED IT FB-1a's CORNER, AND
 §11.1 MEASURED THAT IT IS NOT.** The largest nodal values are a flat layer along
-the **whole** axis — 168 dofs at `r = 0`, the largest ten agreeing to **3.5e-05**
+the **whole** axis — 168 dofs at `R = 0`, the largest ten agreeing to **3.5e-05**
 of a value of 1.09e-01, running from `z = −1.42` to `z = +1.06` — and the corner
 wins the argmax by 2e-05, landing on the *opposite* corner at `k = 3`. So the
 corner is where the argmax falls, not where the phenomenon is. The layer does not
@@ -2075,7 +2075,7 @@ evaluations have different supports and the difference **straddles a kink**.
 `meq::NormalisedSource::normalisationDerivatives()` supplies `∂F/∂ψ_ax` and
 `∂F/∂ψ_bnd`; `GradShafranovSolver::assembleNormalisationColumn()` runs
 `meq::SourceIntegrator`'s own quadrature loop over them, into the potential block
-and nowhere else, with the same `−w F/r` sign; and `setBorderColumn()` keeps the
+and nowhere else, with the same `−w F/R` sign; and `setBorderColumn()` keeps the
 differenced route so the two can be measured against each other.
 `BorderColumn::Analytic` is the default and falls back silently where a source
 does not supply the derivatives.
@@ -2100,10 +2100,10 @@ wherever a moving support makes the two evaluations straddle the edge.
 1. ~~**Wire the analytic column.**~~ **DONE**, above.
 2. ~~**Put coils in the test problem.**~~ **TRIED, AND IT WAS THE WRONG
    INSTINCT.** Solving the unconfined problem and *looking at it* — which should
-   have been the first move — shows `ψ` peaking at **8.55e-02 near `r = 0.70`**
-   and **crossing zero at about `r = 1.03`**. So an edge exists with no conductor
-   at all, and the two failed attempts had simply put the limiter at `r = 1.15`
-   and `1.05`, out in the tail. At `r = 0.90`, `ψ` is 5.76e-02 — two thirds of
+   have been the first move — shows `ψ` peaking at **8.55e-02 near `R = 0.70`**
+   and **crossing zero at about `R = 1.03`**. So an edge exists with no conductor
+   at all, and the two failed attempts had simply put the limiter at `R = 1.15`
+   and `1.05`, out in the tail. At `R = 0.90`, `ψ` is 5.76e-02 — two thirds of
    the peak, a gradient a moving edge can sit on. A first coil set guessed at
    `−6 A` in normalised units produced `ψ_coil = −1.02` at the plasma centre
    against an intended `ψ_ax` of 0.1, i.e. **ten times the field it was meant to
@@ -2135,7 +2135,7 @@ out at 2.87e-02 against a `ψ_ax` of 9.84e-02 — a healthy 29% — where withou
 the amplitude-fixed formulation has no slack left once two more constraints are
 added to it.
 
-**Acceptance, when it runs**: `∮_Γ q·ν = −∫_Ω F/r`, both sides from the converged
+**Acceptance, when it runs**: `∮_Γ q·ν = −∫_Ω F/R`, both sides from the converged
 state, with no `μ₀` and no constant. It is Ampère's law, FB-2 measured its
 machinery to 3.3e-11 on an exact field, and it needs no reference code. Beyond
 that, the plasma must be **compactly contained** — an edge strictly inside
@@ -2154,7 +2154,7 @@ give the current's *shape* and the border gives its *size*.
 same problem §7.13 records failing from everywhere — three limiter radii, two
 profile exponents, warm starts, 200 iterations — closes in **63 Newton steps**
 with the moving support live, `ψ_ax`, `ψ_bnd` and four exterior coefficients all
-unknowns, and delivers `∫F/r = 3.499999970e-01` against the **0.35** it was asked
+unknowns, and delivers `∫F/R = 3.499999970e-01` against the **0.35** it was asked
 for. The scale it solved for is **8.40e-02**, so the border did real work rather
 than sitting where it started.
 
@@ -2164,11 +2164,11 @@ extra backsolve and three element loops rather than a second factorisation:
 | | |
 |---|---|
 | `∂R/∂λ` | the residual's own source term divided by `λ` — `F` is linear in it |
-| `∂G/∂x` | `∫ (∂F/∂ψ)/r φ_j`, a covector on the potential block |
-| `∂G/∂λ` | `(∫F/r)/λ`, the same linearity |
+| `∂G/∂x` | `∫ (∂F/∂ψ)/R φ_j`, a covector on the potential block |
+| `∂G/∂λ` | `(∫F/R)/λ`, the same linearity |
 | `∂G/∂ψ_ax`, `∂G/∂ψ_bnd` | **not zero** — see below |
 
-**THE LAST ROW WAS MISSED AND IT COST THE RATE, NOT THE ANSWER.** `∫F/r` depends
+**THE LAST ROW WAS MISSED AND IT COST THE RATE, NOT THE ANSWER.** `∫F/R` depends
 on both normalisations **explicitly**, through the `Ψ` the profiles are evaluated
 at, so the current row of the corner block is **not diagonal**. Without those two
 entries the solve converged **linearly**, at a clean geometric contraction of
@@ -2178,8 +2178,8 @@ was gone. Adding them took the residual at iteration 60 from **7.06e-08 to
 1.69e-10**.
 
 **AND THE EQUILIBRIUM IT FINDS IS AN ANNULUS, NOT A CORE.** Measured on the
-midplane, `ψ` rises **monotonically** from 6.1e-04 at `r = 0.1` to 1.23e-01 at
-`r = 1.4`, so `{ψ > ψ_bnd}` is the OUTER shell and `ψ_ax` — the largest nodal
+midplane, `ψ` rises **monotonically** from 6.1e-04 at `R = 0.1` to 1.23e-01 at
+`R = 1.4`, so `{ψ > ψ_bnd}` is the OUTER shell and `ψ_ax` — the largest nodal
 value — sits near `Γ` rather than at an interior maximum. Every constraint is
 satisfied by it, and that is the point: they constrain the current and the
 normalisations, and **none of them says the plasma is a core**.
@@ -2187,8 +2187,8 @@ normalisations, and **none of them says the plasma is a core**.
 **WHAT WOULD MAKE IT ONE IS A VERTICAL FIELD, AND THE SCALE IS NOW KNOWN.** Two
 conductors above and below carrying current opposite to the plasma give a flux
 falling like `−r²`, which is exactly what suppresses the outer branch. At
-`r = 1.2, z = ±0.7` with `μ₀I = −0.35` the set gives **−1.5e-02 at `r = 0.4`
-against −1.1e-01 at `r = 1.4`** — the right shape and the right size against a
+`R = 1.2, z = ±0.7` with `μ₀I = −0.35` the set gives **−1.5e-02 at `R = 0.4`
+against −1.1e-01 at `R = 1.4`** — the right shape and the right size against a
 `ψ` of order 0.1, where the first attempt at conductors was **ten times too
 strong**.
 
@@ -2357,7 +2357,7 @@ at **8.64e-02**, thirty times below the `ψ_ax` the solver reports.
 **AND THE RUNAWAY IS SELF-CONSISTENT, WHICH IS WHAT MAKES IT DANGEROUS RATHER
 THAN MERELY WRONG.** A spurious `ψ_ax` inflates the span; `Ψ = ( ψ − ψ_bnd )/(
 ψ_ax − ψ_bnd )` then collapses to a few per cent over the real plasma; and the
-current border raises the scale by the same factor to hold `∫F/r` at `μ₀I_p`.
+current border raises the scale by the same factor to hold `∫F/R` at `μ₀I_p`.
 The three unknowns conspire, and **a constraint satisfied by the artefact it
 was supposed to detect** is this file's most-repeated shape.
 
@@ -2385,7 +2385,7 @@ free-boundary path consulted.
 BORDER THE ERROR IS INVISIBLE.** `meq::NormalisedMHDSource::f` evaluates
 
 ```
-F = scale * ( mu0 r^2 pprime( Psi ) + ggprime( Psi ) ) / span
+F = scale * ( mu0 R^2 pprime( Psi ) + ggprime( Psi ) ) / span
 ```
 
 so a table holds the derivative with respect to **`Ψ`**, and converting
@@ -2427,7 +2427,7 @@ that block guards were mis-wired on that path:
 
 * the axis test read `[mesh] RMin`, which a file mesh leaves at its **default of
   zero**, so it passed vacuously on a mesh nobody had looked at. A `.msh` whose
-  inner edge sat at `r = 0.05` would have sailed through the one check written
+  inner edge sat at `R = 0.05` would have sailed through the one check written
   to stop it;
 * the radius test compared `Γ` against `[mesh] RMax`, also zero, so it refused
   **every** file outright — with a message about a box the run does not have;
@@ -2475,7 +2475,7 @@ problem both codes solve identically, it is what MEQ's FB-3 border implements,
 and it takes the contact-finding logic out of the comparison. **It also caps what
 the agreement can mean**: MEQ pins `ψ_bnd` at the *nearest potential dof*, which
 differs from the requested point by `O( h )` and moves `ψ_bnd` by
-`h·|∂ψ/∂r| ≈ 0.25 h` — so a limiter point that is not a dof is a first-order
+`h·|∂ψ/∂R| ≈ 0.25 h` — so a limiter point that is not a dof is a first-order
 error in the boundary condition, not an `O( h^{k+1} )` one. **That is §7.20's
 defect, and `LimiterConstraint::ExactPoint` — the default — removes it: the row
 is the containing element's potential shape functions at the point asked for,
@@ -2535,7 +2535,7 @@ than the iterate's own.
 | corner `D(λ, ψ_ax)` | **28.3%** | 1.904e-10 |
 | corner `D(λ, ψ_bnd)` | **92.8%**, a factor of 13.9 | 1.421e-10 |
 | corner `D(λ, λ)` | **23.6%** | 4.310e-10 |
-| `∫F/r` fed to the border | 4.4217e-01, **sign reversed** against the target | correct |
+| `∫F/R` fed to the border | 4.4217e-01, **sign reversed** against the target | correct |
 
 The sign is the whole story: the right-hand side told the current row to
 **reduce** a current that was 10% short, so no damping was a descent direction
@@ -2569,7 +2569,7 @@ merit both the line search and the stopping rule use — was never given
 `constraintL`. The comment three lines above its own call site warns about
 precisely this for `ψ_bnd`. The current constraint would have been **98.5%** of
 the merit. It is **not** what caused the stall — the current-aware merit rises at
-every damping too — but it is why a solve delivering `∫F/r` **15.9% wrong** could
+every damping too — but it is why a solve delivering `∫F/R` **15.9% wrong** could
 report a converged-looking floor. And `plasmaCurrent()` published the `ψ_bnd = 0`
 integral, so `thePlasmaCurrentClosesAsABorderUnknown`'s 3e-08 was **checking the
 solve against the formula it used**.
@@ -2607,17 +2607,17 @@ verbatim — `n = 24`, `k = 2`, `μ₀ = 1`, `ExteriorDtN( 0, 1.5, 4 )`,
 `p′ = 0.6 Ψ`, `gg′ = 0.05 Ψ`, `ConfineToPlasma`, `setPlasmaCurrent( 0.35 )` — with
 two parameters the prose does not give, both then pinned by measurement: the
 coil currents are **per coil** (a pair at `( 1.2, ±0.7 )` at `μ₀I = −0.35` each
-reproduces §7.14's `−1.48809e-02` at `r = 0.4` and `−1.14329e-01` at `r = 1.4`),
+reproduces §7.14's `−1.48809e-02` at `R = 0.4` and `−1.14329e-01` at `R = 1.4`),
 and the limiter is at **R = 0.80** (at 0.90 the scale runs to 30.6 and `ψ_ax` to
 3.96e-01, which is §7.17's own post-repair note of 27.8 and 3.8e-01).
 
 | § | claim | verdict |
 |---|---|---|
-| 7.14 | the current-constrained solve closes | **CONFIRMED** at limiter 0.80 — 80 steps against 63, `∫F/r` 3.500000036e-01 against 3.499999970e-01, scale 1.04e-01 against 8.40e-02 |
+| 7.14 | the current-constrained solve closes | **CONFIRMED** at limiter 0.80 — 80 steps against 63, `∫F/R` 3.500000036e-01 against 3.499999970e-01, scale 1.04e-01 against 8.40e-02 |
 | 7.14 | the equilibrium is an **annulus** | **CONFIRMED**, and now certified by an instrument rather than a midplane cut: `CriticalPointFinder::sweep()` finds exactly one O-point in the domain, a MAXIMUM at `( 1.3768, +0.0012 )` with `\|q\| = 4.1e-18`, hard against `Γ_h` |
 | 7.14 | vertical-field scale, `−1.5e-02` and `−1.1e-01` | **CONFIRMED**, and the current is per coil |
 | 7.14 | coil sweep `0/−0.05/−0.10/−0.20` → converged/FAILED/FAILED/FAILED | **FALSE.** All four converge at limiter 0.80 (80, 17, 34, 122 steps, all to 1e-11 or better); FAILED/FAILED/CONVERGED/CONVERGED at 0.90; the same verdicts at `n = 32`, and the `−0.10` solution converges in `h` |
-| 7.14 | "a vertical field is what would make it a core" | **NOT BORNE OUT.** The O-point moves from `r = 1.377` to `r = 1.298` over `0 → −0.20`, six per cent, and at `−0.35` the equilibrium flips past any core to a branch with `ψ < 0` across the whole midplane and the current in a channel hugging `r = 0`. **No coil current tried produces a core** |
+| 7.14 | "a vertical field is what would make it a core" | **NOT BORNE OUT.** The O-point moves from `R = 1.377` to `R = 1.298` over `0 → −0.20`, six per cent, and at `−0.35` the equilibrium flips past any core to a branch with `ψ < 0` across the whole midplane and the current in a channel hugging `R = 0`. **No coil current tried produces a core** |
 | 7.14 | "branch selection: Newton is asked to cross between a core bump and an annulus" | **FALSE as stated.** There is no crossing to make — with the conductors present the answer is still the annulus |
 | 7.14 | the corner block's two missing entries cost the rate | **COULD NOT REPRODUCE EITHER WAY** — measured under the defect, and the incomplete corner block is no longer selectable |
 | 7.14 | item 1, continuation in the coil current | **works and is not needed** at limiter 0.80; at 0.90 every step converges while the scale runs `5.03e-02 → 3.77e+02` and `ψ_ax → 5.36e+00`. Continuation reaches the currents that fail cold, and reaches them on a degenerate branch |
@@ -2656,11 +2656,11 @@ shows why that is a statement about the inputs rather than about the method.
 ## 8. Risks, in the order they are likely to bite
 
 **~~The axis.~~ — MEASURED AS FB-A, 2026-09-04, AND IT COSTS `q` HALF AN ORDER
-AND `O(1/h)` IN CONDITIONING.** The half-disc includes `r = 0`, where the flux
-mass form `(r q, v)` degenerates and `BoundaryShape` refuses to go — its
-constructor rejects a surface reaching the axis, "where the operator's 1/r is
+AND `O(1/h)` IN CONDITIONING.** The half-disc includes `R = 0`, where the flux
+mass form `(R q, v)` degenerates and `BoundaryShape` refuses to go — its
+constructor rejects a surface reaching the axis, "where the operator's 1/R is
 not integrable". Three things said it was survivable and **none of them was what
-gave way**: `q = (1/r)∇̄ψ` is bounded at the axis because `ψ ~ r²`, the mass
+gave way**: `q = (1/R)∇̄ψ` is bounded at the axis because `ψ ~ r²`, the mass
 matrix is degenerate but still positive definite on any element of positive
 measure, and both are true and now measured. **What was unknown was the
 conditioning as `h → 0`, and it is `O(1/h)` and not `O(1/h²)`** — the
@@ -2670,7 +2670,7 @@ keeps full order, and `1/h²` would have stopped FB-1. §7.2 has the table.
 
 **AND `F( 0, z ) = 0` IS A PRECONDITION RATHER THAN A FREEBIE, WHICH THIS RISK
 GOT WRONG.** It said the source *"is identically zero there in free boundary, so
-`(F/r, w)` never arises"*. It arises: `F = μ₀r²p′ + gg′` leaves `gg′` on the
+`(F/R, w)` never arises"*. It arises: `F = μ₀r²p′ + gg′` leaves `gg′` on the
 axis, `ψ( 0, z ) = 0` exactly so the axis sits at `Ψ = −ψ_bnd/span`, and once
 FB-3's limiter border makes `ψ_bnd` positive that is a **negative** `Ψ` — in the
 vacuum, where an unconfined profile extrapolates. §11.3 is the measurement and
@@ -2689,7 +2689,7 @@ Two right-angle junctions, and
 — which is why `ExtensionConvergence` takes `Γ` to be `ψ = −0.03` rather than the
 separatrix through the X-point. Here the corner is between the arc and a fitted
 straight boundary rather than a corner of `Γ` itself, and the lifting's weight
-`C = r` vanishes there, so the transferred datum degenerates to `g(a(x)) → 0` —
+`C = R` vanishes there, so the transferred datum degenerates to `g(a(x)) → 0` —
 probably benign, definitely not established.
 
 **~~Cut quadrature and the order.~~ — ANSWERED BY FB-4, AND THE ORDER IS THE
@@ -2842,7 +2842,7 @@ and its current is part of the interior equation.
 
 | | |
 |---|---|
-| `meq::CoilSet::psi( r, z )` | **exists** — production, MFEM-free, the Green's function integrated over the real cross-section |
+| `meq::CoilSet::psi( R, z )` | **exists** — production, MFEM-free, the Green's function integrated over the real cross-section |
 | `setExteriorDatum( PositionFunction )` | **exists** — takes a free function of position, so the Dirichlet half is one call |
 | `exteriorTransmissionResidual()` / `exteriorTransmissionRows()` | **exist** — where the Neumann term is added |
 | **`∇ψ_coil`, i.e. `q_coil·ν`** | **BUILT.** `CoilSet::gradPsi` / `gradPsiOf` and `ExteriorCoilSet::gradPsi`, at the same quadrature order and with the same refusals as `psi`. It was the one gap — `tests/analytic/CurrentLoop.hpp` had `dPsiDr`, `dPsiDz`, `gradPsi` and `flux` by elliptic integrals, checked against central differences, but it is a TEST FIXTURE |
@@ -2871,7 +2871,7 @@ orders above the quoted agreement before any cancellation — so this is worth
 measuring rather than assuming small.
 
 **`meq::CurrentFilament` is what makes it measurable**: the same conventions as
-`meq::Coil` — `ψ = r A_φ`, signed current, the set's own `μ₀` — evaluated in
+`meq::Coil` — `ψ = R A_φ`, signed current, the set's own `μ₀` — evaluated in
 closed form from complete elliptic integrals. `tests/analytic/CurrentLoop.hpp`
 already had the mathematics and had it checked, `dPsiDr` and `dPsiDz` against
 central differences, so this was a promotion to production rather than a
@@ -2968,12 +2968,12 @@ Two measurements, in the order they should be taken.
    doing nothing.
 
    **AND THE AXIS CONDITION IS HOMOGENEOUS FOR FREE, WHICH IS PHYSICS RATHER
-   THAN LUCK.** `ψ` is the poloidal flux through a circle of radius `r`, so it
+   THAN LUCK.** `ψ` is the poloidal flux through a circle of radius `R`, so it
    vanishes with the area for any conductor off the axis: `CoilSet::psi( 0, z )`
    measures **0.000000e+00 exactly**, and `setBoundaryData( zero )` on the
    fitted side is the honest statement of the condition rather than a
    convenience. The case asserts it, since a non-zero reading would mean the
-   convention is not `ψ = r A_φ`.
+   convention is not `ψ = R A_φ`.
 
    **`q` IS MEASURED THROUGH THE COUPLED CASE RATHER THAN HERE**, which is
    where `∇ψ_coil` is load bearing: the Neumann half of the transmission
@@ -3135,7 +3135,7 @@ Two measurements, in the order they should be taken.
 
    **THE PREDICTION MADE BEFORE RUNNING IT WAS `min( k+1, 3 )`, AND IT IS HALF
    RIGHT — THE HALF THAT IS WRONG IS THE HALF THIS CASE MEASURES.** The argument
-   is sound: `Δ*ψ = −F` with `F` a top hat carries an `r² log r` term at each
+   is sound: `Δ*ψ = −F` with `F` a top hat carries an `r² log R` term at each
    corner of the support, so `ψ_coil` is in `H^{3−ε}` **there** and no degree
    recovers it. Measured, run B's L2 over its **whole box** reads **2.741** at
    `k = 2` and **3.052** at `k = 3` — §7.9's own aligned 2.88 / 3.01,
@@ -3247,7 +3247,7 @@ contact at `( 0.8250, −0.3000 )` — see below — and on the same three meshe
 | **ExactPoint** | *coil branch* | 9.307644e-02 | **9.307342e-02** | converged to **3.2e-05** |
 
 **THE REPAIR IS `LimiterConstraint::ExactPoint`, AND IT IS SIMPLER THAN THE AXIS
-ROW IT COPIES.** `ψ_bnd = ψ_h( r, z )` inside the element containing the point,
+ROW IT COPIES.** `ψ_bnd = ψ_h( R, z )` inside the element containing the point,
 with the row that element's potential shape functions there — `(k+1)(k+2)/2`
 entries, exact and undifferenced — and the corner still exactly 1.
 `AxisConstraint::LocatedAxis` needs the **envelope theorem** to be exact, because
@@ -3356,7 +3356,7 @@ the **negative profile scale**.
 since anything phrased in terms of the plasma is satisfied at the coil by
 construction. A warning rather than a refusal, on the several-O-points
 precedent. Verified firing on this very run: *"the located magnetic axis
-( 1.7516, 0.9000 ) is INSIDE conductor 0, which spans r [ 1.7000, 1.8000 ]
+( 1.7516, 0.9000 ) is INSIDE conductor 0, which spans R [ 1.7000, 1.8000 ]
 z [ 0.8500, 0.9500 ]"*.
 
 **2. `mkexactguess.py` SILENTLY DEGRADED ON A FINER REFERENCE, BY ALIASING.**
@@ -3569,7 +3569,7 @@ and the Hessian is indefinite, so locally
 ```
 
 which is a perfectly ordinary analytic function. `Δ*` does not degenerate, the
-flux mass `(r q, v)` does not degenerate, and `q` is bounded and smooth. What has
+flux mass `(R q, v)` does not degenerate, and `q` is bounded and smooth. What has
 a **corner** is the curve `{ψ = ψ_X}`, and therefore everything that treats that
 curve as a domain boundary, as a contour, or as the edge of a chart.
 
@@ -3728,7 +3728,7 @@ quadrature points, and it is `O(elements)`.
 
 **TWO THINGS FOUND ON THE WAY THAT ARE NOT ABOUT CONNECTIVITY.** `ψ_ax` on
 `theTwoBordersConvergeTogether`'s converged answer is attained in an element
-**touching `r = 0`** — 1.0916e-01 there against 4.4472e-02 as the largest `ψ_h`
+**touching `R = 0`** — 1.0916e-01 there against 4.4472e-02 as the largest `ψ_h`
 anywhere off the axis — so `refreshPlasmaComponent()` seeds **off** the symmetry
 axis; see §7.12b. And on a box reaching past an X-point the private flux region
 can carry a **larger** `Ψ` than the core, 2.79 against 1.0 on `iterExample2`, so
@@ -3737,18 +3737,18 @@ solve where `Γ` bounds the domain.
 
 ### 10.4 `ψ_bnd` becomes a three-row border, and one block is differentiated
 
-FB-3 built `setBoundaryFluxPoint( r, z )`: `ψ_bnd = ψ_h` at the nearest potential
+FB-3 built `setBoundaryFluxPoint( R, z )`: `ψ_bnd = ψ_h` at the nearest potential
 dof to a **prescribed** point. That is right for a limiter, whose contact is a
 piece of hardware, and wrong for a divertor, whose X-point is a functional of the
 solution and moves as Newton moves.
 
 The natural generalisation is the one this tree has already run twice. Add three
-unknowns `(r_X, z_X, ψ_bnd)` and three rows:
+unknowns `(R_X, z_X, ψ_bnd)` and three rows:
 
 ```
-q_r( r_X, z_X )  = 0
-q_z( r_X, z_X )  = 0          the X-point is a root of the SOLVED flux
-ψ_bnd − ψ_h( r_X, z_X ) = 0
+q_r( R_X, z_X )  = 0
+q_z( R_X, z_X )  = 0          the X-point is a root of the SOLVED flux
+ψ_bnd − ψ_h( R_X, z_X ) = 0
 ```
 
 `solveWithNormalisation()` already does a general `( N + 2 )` elimination against
@@ -3759,7 +3759,7 @@ statement §4.4 made about FB-5 and which held.
 the prediction was wrong — kept here because the mistake is a class of mistake.**
 What it said: every border MEQ has built so far is either exactly `−e_j` (under
 NPC, because `ψ` and `q` are unknowns) or a local sensitivity, and here the corner
-block `∂( q_r, q_z )/∂( r_X, z_X )` is **`∇q`** — the Hessian of the potential —
+block `∂( q_r, q_z )/∂( R_X, z_X )` is **`∇q`** — the Hessian of the potential —
 with no solved variable for it, differentiating an L2 field of degree `k` leaving
 `k−1`; *"the same wall recorded for the band continuation of `B`"*.
 
@@ -3769,7 +3769,7 @@ Newton needs the derivative of the **discrete** residual with respect to the
 discrete unknowns — and `q_h` is a polynomial on its element, so `∂q_h/∂x` there
 is exact arithmetic, not an approximation of anything. The corner block is exact,
 the differenced fallback below was not needed, and the same goes for
-`∂ψ_h/∂( r_X, z_X )` in the `ψ_bnd` row. *Approximating a continuous object and
+`∂ψ_h/∂( R_X, z_X )` in the `ψ_bnd` row. *Approximating a continuous object and
 differentiating a discrete one are different questions, and a Jacobian asks the
 second.*
 
@@ -3783,7 +3783,7 @@ refusing it.
 
 **AND THE TWO NEW UNKNOWNS COST NO BACKSOLVE, WHICH THIS SECTION ALSO DID NOT
 SEE.** The elimination pays one backsolve per border COLUMN, and the field
-residual does not contain `( r_X, z_X )` — they reach it only through `ψ_bnd`,
+residual does not contain `( R_X, z_X )` — they reach it only through `ψ_bnd`,
 which has a column already. Both columns are exactly zero, so `( N + 4 )` grows
 over `( N + 2 )` in the dense corner alone.
 
@@ -3851,7 +3851,7 @@ defect live on a limiter case; XP-0 followed on 2026-09-08.
 | **XP-0** | **The X-point against a closed form — DONE 2026-09-08.** `CriticalPointFinder` on `Soloviev::nstx()`, whose X-point the twelve Cerfon–Freidberg constraints put at `( 0.699700, −1.716000 )`. Three cases in `tests/convergence/CriticalPointConvergence.cpp`: the closed-form check, the rate study on a box holding the saddle alone, and the audit on a box holding both. No free boundary and no normalisation. | **met, and it needed no seed.** `findAxis()` cannot reach a saddle by construction — it looks for an extremum — and `sweep()` can: on a box holding exactly one saddle it returns exactly one, at every `k` and every `n` tried, so the located point carries no prior. Position rate **1.814 / 3.566 / 4.223** at `k = 1, 2, 3` over `{ 4, 8, 16, 32, 64 }` against `k+1` less the axis study's own 0.25 of slack, monotone at every refinement. **The reference is checked first and one fixture fails that check**: `nstxAsPublished()`'s prescribed X-point carries `|∇ψ| = 2.97e-02` and its saddle is **9.10e-02** away, so it ships as the control rather than as a second fixture. `audit()` reads `+1` at the axis and `−1` at the X-point over `[0.35, 1.55] × [−2.10, 0.30]` at three orders, summing to the boundary degree of **0** — and `consistent()` is **false and must be**, since `+1 − 1 = 0 ≠ χ = 1` forces `q` not to be outward-transverse; the half of Poincaré–Hopf that needs no hypothesis is the half that holds |
 | **XP-1** | **The connectivity test — DONE 2026-09-07**, ahead of XP-0, because §7.18 found the defect live on a *limiter* case. `meq::PlasmaComponent`, driven by `refreshPlasmaComponent()` before every residual and every Jacobian; `[source] PlasmaConnectivity` selects it and `"pointwise"` is the control. | met: `theFillSeparatesThePrivateFluxRegionFromThePlasma` excludes the private flux region where the pointwise test includes it, as an element count **and** as `∫\|F\|`. **And the sharp one came out half false**: the fill does not leak through the X-point's own element — it leaks through the **band** of elements straddling the separatrix, every one of which carries `Ψ > 0` at some vertex, so a one-rule fill leaves **2,275** elements below the X-point, exactly what the pointwise test leaves. §10.3's own cure, blocking the saddle, is resolution-dependent. What ships is a **watershed** over the straddling band, needing no X-point finder and no parameter |
 | **XP-2** | **`ψ_bnd` from the located X-point, as an OUTER fixed point.** Locate, set the normalisation, re-solve. No new border. | **MET 2026-09-12.** → **[M-82](MEASUREMENTS.md#m-82)**. The outer fixed point contracts quadratically — steps 1.909e-03, 3.732e-06, 9.554e-10, 2.255e-13, the inner solve falling to two Newton steps — and finds **both** nulls of the double-null machine, 4.378e-04 m from freegs4e's X-point with `ψ_bnd` agreeing to 0.08%. **It needed TWO things and neither is sufficient alone**: XP-1's fill actually running, which a fixture defect had silently disabled — `setPlasmaSupport()` on the plasma source before the coil wrapper existed, leaving 333 elements of private flux region with a current channel — and §10.5's freeze applied to the SUPPORT as well as to the bounding point, `meq::NormalisedSource::freezePlasmaEdge` plus `GradShafranovSolver::setPlasmaSupportFrozen`. Every single-key experiment lands in a failing row |
-| **XP-3** | **The three-row border**, `(r_X, z_X, ψ_bnd)` inside the same Newton at `( N + 4 )`. | **MET 2026-09-13.** → **[M-86](MEASUREMENTS.md#m-86)**. `meq::GradShafranovSolver::setXPointBoundary` and `tests/convergence/XPointBorder.cpp`, sharing XP-2's fixture through `DivertedMachine.hpp`. Agreement with XP-2 **in one process** at **1.934e-14 m** in the X-point, 1.3e-13 of the span in `ψ_ax`; the border's point is **6.4e-15 m** from an independent root find on its own solved field and `ψ_bnd` is `ψ_h` there to 5.8e-16. The corner block is **exact**, §10.4 above having been wrong about that, and the two unknowns cost **no backsolve**. The observed order is the FIXTURE's ceiling and not the border's — 1.664 against XP-2's 1.667 — so the acceptance is the comparison against that control rather than an absolute 2. `HighBetaConvergence` bit-identical, `xPointIsUnknown` being false on every other path |
+| **XP-3** | **The three-row border**, `(R_X, z_X, ψ_bnd)` inside the same Newton at `( N + 4 )`. | **MET 2026-09-13.** → **[M-86](MEASUREMENTS.md#m-86)**. `meq::GradShafranovSolver::setXPointBoundary` and `tests/convergence/XPointBorder.cpp`, sharing XP-2's fixture through `DivertedMachine.hpp`. Agreement with XP-2 **in one process** at **1.934e-14 m** in the X-point, 1.3e-13 of the span in `ψ_ax`; the border's point is **6.4e-15 m** from an independent root find on its own solved field and `ψ_bnd` is `ψ_h` there to 5.8e-16. The corner block is **exact**, §10.4 above having been wrong about that, and the two unknowns cost **no backsolve**. The observed order is the FIXTURE's ceiling and not the border's — 1.664 against XP-2's 1.667 — so the acceptance is the comparison against that control rather than an absolute 2. `HighBetaConvergence` bit-identical, `xPointIsUnknown` being false on every other path |
 | **XP-4** | **A diverted machine case** against `../freegs4e`. | **MET 2026-09-13.** → **[M-87](MEASUREMENTS.md#m-87)**. `examples/diverted-tokamak-xpoint.toml` through the DRIVER — `[boundary.xpoint]` and `[solver] PlasmaSupportSweeps`, which is what XP-3 left unbuilt — against freegs4e's `A_testtokamak_classic`. The X-point **4.4e-04 m** apart, `ψ_ax` 6.9e-04, `ψ_bnd` 7.7e-04, and **neither code was told where the null is**: MEQ solves for it from a seed 7.07e-02 m away and ends 161× closer than it started. The field agrees at **5.3e-04** relative `L2` over 5478 nodes once the two FILAMENT conductors are excluded, and the whole of the 2.97e-01 `L∞` is inside them — the conductor model, not either solver. `tests/convergence/DriverAcceptance.cpp`'s `theDriverSolvesADivertedTokamak` |
 
 **XP-0 WAS THE STAGE TO PROTECT AND IT WAS ALSO THE CHEAPEST.** It is a rate
@@ -3866,7 +3866,7 @@ FORWARD.**
 
 **The conditioning of the root is two sided and the measurement fills it.**
 `q_h( x_h ) = 0` and `q( x* ) = 0` give `x_h − x* = −J⁻¹( q_h − q )( x* )` with
-`J = dq/dx = Hess( ψ )/r` at the saddle — **symmetric**, a Hessian being so —
+`J = dq/dx = Hess( ψ )/R` at the saddle — **symmetric**, a Hessian being so —
 whose eigenvalues at `nstx()`'s X-point are `+0.899099` and `−0.578731`. So the
 position error is trapped between **1.112** and **1.728** times the pointwise
 flux error there, and over all fifteen points of the sweep the measured ratio is
@@ -3915,7 +3915,7 @@ diverted plasma reachable for:
 which were checked first and are fine: the profile tables integrate to
 `I_p = 1.999667e+05 A` over the reference core, the Green's-function guess
 reproduces `ψ` at the reference axis to 4.1e-04 and at the X-point to 4.8e-04,
-`| F |` on `r = 0` is 0.000e+00 and `μ₀ I_p` is delivered to the prescribed
+`| F |` on `R = 0` is 0.000e+00 and `μ₀ I_p` is delivered to the prescribed
 value. The solve was converging — residual 2.8e-12 — to a different
 equilibrium: the UPPER null at ( 1.345, 1.164 ), 1.79 m from freegs4e's
 ( 1.093144, -0.603965 ), with `ψ_h` at the reference axis reading 1.199088e-02
@@ -3935,7 +3935,7 @@ it. Measured before the reorder: the config asked for confinement, the inner
 source reported it, the handle the solver was given reported 0.
 
 **DEFECT 2, FIXED: the fill seed had no conductor exclusion.** It is the argmax
-of `Ψ` over potential dofs excluding only elements touching `r = 0` — the same
+of `Ψ` over potential dofs excluding only elements touching `R = 0` — the same
 "largest `Ψ` wins" rule the axis constraint uses, and a coil's O-point wins it
 the same way. Measured on `examples/diverted-tokamak.toml`: the first fill seeds
 at ( 1.3766, 0.0206 ), the reference axis, and by the third evaluation the seed
@@ -4044,7 +4044,7 @@ night and the diagnosis outran the repair.
 **ALL OF §11 IS NOW WORKED THROUGH, AND THE DIAGNOSIS CHANGED SHAPE TWICE.** The guard
 **catches** the §7.12b sighting (§11.1), what it catches is a **boundary layer
 along the whole symmetry axis** rather than the corner spike this section called
-it, and the cause is **a `1/r` pole in the load** — `F/r` is `μ₀ j_φ`, and an
+it, and the cause is **a `1/R` pole in the load** — `F/R` is `μ₀ j_φ`, and an
 unconfined `gg′` evaluated at the negative `Ψ` that FB-3's limiter border puts
 the axis at is an infinite current density in the vacuum (§11.3). So `ψ_ax` is
 **two** defects wearing one symptom: on §7.12b's case the *field* is wrong and
@@ -4070,7 +4070,7 @@ published before that change was taken under the control.
 | | where | reads | against |
 |---|---|---|---|
 | §7.16 | a spike at the plasma edge | 2.734289e+00 | 9.48e-02 — **29×** |
-| §7.12b | **the whole symmetry axis** — `r = 0`, not the corner; see §11.1 | 1.091633e-01 at `( 0.000, −1.417 )` | 4.447250e-02 at `( 1.417, 0.000 )` — **2.5×** |
+| §7.12b | **the whole symmetry axis** — `R = 0`, not the corner; see §11.1 | 1.091633e-01 at `( 0.000, −1.417 )` | 4.447250e-02 at `( 1.417, 0.000 )` — **2.5×** |
 | §7.18 item 3 | the same corner, toy fixture | 8.12e-02 | 2.50e-02 — ratios 0.31, 0.36, ≈ 0 |
 
 **In every one of them the run converged with every constraint at machine zero.**
@@ -4085,7 +4085,7 @@ of the §7.12b sighting.
 
 **And the guard is now known to CATCH the §7.12b sighting rather than agree with
 it** — §11.1, done 2026-09-07, which also establishes that the third row of that
-table is the whole `r = 0` layer and not a corner. The defect itself is
+table is the whole `R = 0` layer and not a corner. The defect itself is
 untouched: what is measured is that it is detected.
 
 ### 11.1 DONE 2026-09-07. The guard catches it, and it is not a corner spike
@@ -4115,7 +4115,7 @@ largest `ψ_h` anywhere off the axis"*, re-measured here as 4.447250e-02 at
 routes, which is what says neither is chasing the layer.
 
 **A caveat on the O-point column, since it is not one feature across the four
-rows.** The winner moves between `r ≈ 0.76` and `r ≈ 1.40` as the limiter does,
+rows.** The winner moves between `R ≈ 0.76` and `R ≈ 1.40` as the limiter does,
 because this fixture's `ψ` carries **three or four maxima** — `sweep()` reports
 four at `R = 1.30`, at `Ψ` = 0.52, 0.30, 0.22, 0.22 — and largest-`Ψ`-wins picks
 among them. That is the synthetic source rather than the guard: nothing confines
@@ -4124,9 +4124,9 @@ misbehaving the same way. It does not weaken the verdict, which needs only that
 **no** maximum reads near 1.
 
 **AND THE REASON IS STRUCTURAL RATHER THAN LUCK.** What `ψ_ax` is attained on
-sits at **`r = 0` exactly** — the flat side of the half-disc, which is the domain
+sits at **`R = 0` exactly** — the flat side of the half-disc, which is the domain
 boundary — and an interior extremum cannot be there. Every maximum `sweep()`
-finds is at `r ≥ 0.76`. The competition the guard runs never sees it.
+finds is at `R ≥ 0.76`. The competition the guard runs never sees it.
 
 **THE VERDICT IS MESH- AND DEGREE-STABLE**, so it is not one mesh's accident.
 Limiter 1.20 at `k = 2` over `n = 24, 32, 48` and at `k = 3` over `n = 24, 32`:
@@ -4141,7 +4141,7 @@ Limiter 1.20 at `k = 2` over `n = 24, 32, 48` and at `k = 3` over `n = 24, 32`:
 
 **IT IS NOT A SPIKE AND IT IS NOT AT THE CORNER, AND THAT CORRECTS §7.12b, §11.0
 AND §11.3's AIM.** The twelve largest nodal values of `ψ_h` are **all at
-`r = 0.00000`** and all read **1.0913e-01 to within 3.5e-05 of each other**,
+`R = 0.00000`** and all read **1.0913e-01 to within 3.5e-05 of each other**,
 strung along the whole axis from `z = −1.42` to `z = +1.06`. It is a **layer of
 unconstrained dofs running the entire symmetry axis**, not one bad dof in the
 corner where `Γ` meets it — the corner wins the argmax by **2e-05**, and at
@@ -4159,7 +4159,7 @@ measurement does not answer it**; what it establishes is that `psiAxis()` report
 the layer, that the layer is the whole axis, and that a repair aimed at *the
 corner* — §11.5 option 1, §11.3's corner-only refinement — is aimed at the wrong
 place. FB-A's `O( 1/h )` conditioning penalty at the degenerate flux mass
-`( r q, v )` is the obvious suspect and is still only a suspect.
+`( R q, v )` is the obvious suspect and is still only a suspect.
 
 **THE REGRESSION IS
 `FreeBoundaryCoupling::theTwoBorderSolveReportsATrueMagneticAxis`, AND IT IS RED
@@ -4174,7 +4174,7 @@ rather than passing quietly under a header that says otherwise. 4.0 s.
 ### 11.2 RESOLVED 2026-09-07: retract, and it cannot be re-published
 
 Four limiter radii, `ψ_ax` in every row, and the column is an artefact of the
-`r = 0` layer. The convergence claims in that section stand — the residuals, the
+`R = 0` layer. The convergence claims in that section stand — the residuals, the
 iteration counts and `ψ_ax`'s own constraint at 1e-17 are statements about the
 solve closing, and it closes. **The `ψ_ax` and `ψ_bnd` values are not physics**
 and should not be quoted as such until re-measured against a located axis.
@@ -4183,12 +4183,12 @@ and should not be quoted as such until re-measured against a located axis.
 the located-axis numbers — 6.513594e-02, 6.420050e-02, 4.420624e-02 and
 6.111920e-02 at the four radii — but **replacing the column with those would be
 wrong too**: the O-point flux is the axis flux of *the field that was computed*,
-and §11.3 shows that field carries a `1/r` pole on the axis, so it is not the
+and §11.3 shows that field carries a `1/R` pole on the axis, so it is not the
 equilibrium `[source]` describes either.
 
 **AND THE FIXTURE CANNOT BE REPAIRED IN PLACE — WHICH IS A FIXTURE DEFECT AND NOT
 A CAPABILITY GAP, AND THE DISTINCTION MATTERS.** §7.16's machine case has every
-ingredient this one has — a domain reaching `r = 0`, a limiter, an exterior
+ingredient this one has — a domain reaching `R = 0`, a limiter, an exterior
 coupling and `ConfineToPlasma` — and converges in 11 Newton steps. What it has
 that this does not is **coils and a prescribed current**. Made physical while
 keeping neither, this fixture becomes the amplitude-fixed moving-support problem
@@ -4209,18 +4209,18 @@ amplitude-fixed-with-a-moving-support difficulty of §7.13 and §7.14 — which
 as a record of the solve closing.** The convergence claim stands and is what that
 section is about.
 
-### 11.3 ANSWERED 2026-09-07: it is a `1/r` pole in the load, and the limiter border is what opens it
+### 11.3 ANSWERED 2026-09-07: it is a `1/R` pole in the load, and the limiter border is what opens it
 
 **The mechanism is measured and the item below is superseded.** What follows is
 the answer; the original question — whether the layer and FB-1a's corner
 fragility are one defect — is answered **no**, and by a mechanism neither this
 section nor §11.1 guessed.
 
-**`F/r` IS `μ₀ j_φ`.** The load `meq::SourceIntegrator` assembles is
-`−( F/r, w )`, and
+**`F/R` IS `μ₀ j_φ`.** The load `meq::SourceIntegrator` assembles is
+`−( F/R, w )`, and
 
 ```
-j_φ  =  r p′( Ψ )  +  g g′( Ψ ) / ( μ₀ r )
+j_φ  =  R p′( Ψ )  +  g g′( Ψ ) / ( μ₀ R )
 ```
 
 so a **finite toroidal current density on the symmetry axis requires
@@ -4228,7 +4228,7 @@ so a **finite toroidal current density on the symmetry axis requires
 by its own `r²` and `gg′` is not.
 
 **AND WHICH `Ψ` THE AXIS SITS AT IS THE WHOLE OF IT.** `ψ( 0, z ) = 0` exactly —
-`ψ` is the poloidal flux through a circle of radius `r`, which vanishes with the
+`ψ` is the poloidal flux through a circle of radius `R`, which vanishes with the
 area — so
 
 ```
@@ -4256,10 +4256,10 @@ layer — because `F( 0, z )` is machine zero. It is neither the limiter alone n
 `gg′` alone; **it is `F( 0, z ) ≠ 0`.**
 
 **AND THE DISCRETE HALF IS WHY THIS IS A DEFECT AND NOT MERELY UGLY.** The
-**continuous** problem is well posed: the energy `∫( 1/r )|∇̄ψ|²` forces its
-members to vanish faster than `r` at the axis — which is the physical `ψ ~ r²` —
-and against such test functions `∫( gg′/r ) w` converges. **The DISCRETE space is
-`L2` polynomials, free to be nonzero at `r = 0`, and against those the load
+**continuous** problem is well posed: the energy `∫( 1/R )|∇̄ψ|²` forces its
+members to vanish faster than `R` at the axis — which is the physical `ψ ~ r²` —
+and against such test functions `∫( gg′/R ) w` converges. **The DISCRETE space is
+`L2` polynomials, free to be nonzero at `R = 0`, and against those the load
 functional is UNBOUNDED.** The quadrature is the only thing making it finite, and
 its value is set by how close the rule's points get to the axis.
 
@@ -4272,7 +4272,7 @@ of telling an instrument from an answer:
 | `gg′ = 0`, off axis | 1.175887576e-01 | 1.175887576e-01 | 1.175887576e-01 | 1.175887576e-01 |
 | **`gg′ = 0.05`, on axis** | **1.09e-01** | **1.15e-01** | **9.18e-02** | **8.76e-02** |
 
-**Bit-identical to ten digits with no pole** — `F/r = 0.6μ₀ r Ψ/span` is then a
+**Bit-identical to ten digits with no pole** — `F/R = 0.6μ₀ R Ψ/span` is then a
 polynomial and the shipped rule integrates it exactly — **and nothing settles
 with one.** It does not fall with `h` either: 8.76e-02 at `n = 24` against
 8.80e-02 at `n = 48`.
@@ -4280,11 +4280,11 @@ with one.** It does not fall with `h` either: 8.76e-02 at `n = 24` against
 **THREE CONTROLS SAY IT IS NOT THE GEOMETRY, THE CORNER, OR THE AXIS AS SUCH.**
 
 * **FB-A**'s fixtures are `Δ*`-harmonic, so `F ≡ 0` and there is no load at all.
-  Rates 2.000 / 3.000 / 4.000 on a box reaching `r = 0`.
+  Rates 2.000 / 3.000 / 4.000 on a box reaching `R = 0`.
 * **FB-1a** runs on **this mesh, this extension and this corner** and converges at
   1.99 / 2.99 / 3.99 — because `ExteriorMatched`'s `F` is built on
   `ExteriorDtN::basis`, which carries `( 1 − μ )( 1 + μ )` explicitly *"so the
-  axis is exactly zero"*. `F ~ r²`, so `F/r → 0`.
+  axis is exactly zero"*. `F ~ r²`, so `F/R → 0`.
 * **`examples/free-boundary-halfdisc.toml`**, the shipped driver case, has the
   **same `gg′` table** and the **same `RMin = 0`** and is healthy at
   `Ψ = 1.0036` — because it carries no limiter and so keeps `ψ_bnd = 0`.
@@ -4292,7 +4292,7 @@ with one.** It does not fall with `h` either: 8.76e-02 at `n = 24` against
 **SO THE REPAIR IS PHYSICAL AND IT ALREADY EXISTS.** `[source] ConfineToPlasma`
 sets `F = 0` wherever `Ψ ≤ 0`, which is exactly the statement that the vacuum
 carries no current. `examples/limited-tokamak.toml` — a limiter, a free `ψ_bnd`
-and a gmsh mesh reaching `r = 0`, i.e. every ingredient — sets it, and reads a
+and a gmsh mesh reaching `R = 0`, i.e. every ingredient — sets it, and reads a
 normalised flux of **1.0016**. **For a domain reaching the axis with `ψ_bnd`
 free, `ConfineToPlasma` is a PRECONDITION rather than an option**, in the same
 sense as `j ≥ 1` at the plasma edge, and it should be refused rather than
@@ -4309,7 +4309,7 @@ drop-in repair for that case.
 **This item read *"are the corner spike and the corner FRAGILITY the same
 defect?"*, and its premise was that the spike sits in the axis–`Γ` corner. §11.1
 measured that it does not**: the largest nodal values are a flat layer along the
-**whole** `r = 0` boundary, agreeing to 3.5e-05 over 168 axis dofs, and which end
+**whole** `R = 0` boundary, agreeing to 3.5e-05 over 168 axis dofs, and which end
 of it wins the argmax changes with the polynomial degree. So the corner is where
 the argmax lands, not where the phenomenon is, and an experiment refining *only*
 the corner would have measured the wrong thing.
@@ -4319,8 +4319,8 @@ What survives of the item is the mechanism question, now correctly aimed:
 between two **transferred** pieces; the axis–`Γ` corner is between a transferred
 piece and a **fitted** one, and FB-1a reads **1.99 / 2.99 / 3.99** there — so on
 the face of it those are different phenomena from this. What the layer *is*
-adjacent to is the thing FB-A measured: the flux mass `( r q, v )` gives every
-element touching `r = 0` a weight of order `h`, the smallest diagonal in the
+adjacent to is the thing FB-A measured: the flux mass `( R q, v )` gives every
+element touching `R = 0` a weight of order `h`, the smallest diagonal in the
 system, with an `O( 1/h )` conditioning penalty. **That is the suspect and it is
 still only a suspect.**
 
@@ -4370,7 +4370,7 @@ that is the cause. Both messages print; the source one is the refusal.
 
 **Read §11.3 first.** All three options below treat `ψ_ax` picking up the wrong
 value as a *definition* problem, to be repaired by narrowing where the argmax may
-look. On the case that motivated them the wrong value is a **`1/r` pole in the
+look. On the case that motivated them the wrong value is a **`1/R` pole in the
 load** — an infinite toroidal current density on the symmetry axis, from a profile
 evaluated in the vacuum — so narrowing the argmax hides a field that is wrong on a
 whole boundary layer rather than repairing it. **The first repair is the
@@ -4391,7 +4391,7 @@ about the solver, and there has to be a way to take both readings on one problem
 **THE ENVELOPE ARGUMENT TRANSFERS, AND THAT IS WHAT MAKES IT AFFORDABLE.**
 `G = ψ_ax − ψ_h( x*( λ ) )` gives
 `dG/dλ = −[ ∂ψ_h/∂λ + ∇ψ_h·∂x*/∂λ ]`, and at an O-point `q_h( x* ) = 0` with
-`∇̄ψ = r q`, so **`∇ψ_h( x* ) = 0` identically** and the position term vanishes.
+`∇̄ψ = R q`, so **`∇ψ_h( x* ) = 0` identically** and the position term vanishes.
 No sensitivity of the root find is needed. Under NPC the row is therefore the
 potential shape functions of `x*`'s element evaluated at `x*` —
 `( k+1 )( k+2 )/2` entries, **exact, nothing differenced**. `−e_j` is the special
@@ -4467,7 +4467,7 @@ axis, which is the defect §11.0 opens with.
 
 1. **Keep the nodal max, exclude elements touching a fitted boundary.** Cheapest,
    would have prevented §7.12b, and is arbitrary — it names the symptom. **§11.1
-   sizes it**: on the half-disc that is the entire `r = 0` column, 168 dofs, not
+   sizes it**: on the half-disc that is the entire `R = 0` column, 168 dofs, not
    two corner elements — so the exclusion is a whole boundary layer and the
    arbitrariness is larger than this item made it sound.
 2. **Restrict the argmax to the plasma component.** `meq::PlasmaComponent` exists
@@ -4495,7 +4495,7 @@ axis, which is the defect §11.0 opens with.
   and the **annulus branch**, where the driver locates no O-point and writes
   none — the last two being indistinguishable from the file alone.
 * **DONE 2026-09-07, from §11.3: `GradShafranovSolver::checkAxisSource()`**, and
-  the driver refuses on it. It evaluates `F` at the nodes ON `r = 0` and at
+  the driver refuses on it. It evaluates `F` at the nodes ON `R = 0` and at
   **`ψ = 0`** — which `ψ( 0, z )` is exactly — against `|F|`'s own scale over the
   mesh. **The first version asked the ITERATE's `ψ_h` there and refused a healthy
   run**: `ψ_h` on the axis is never exactly zero, so a sound case reads 6.2e-05
@@ -4521,9 +4521,9 @@ axis, which is the defect §11.0 opens with.
 
   **THE ESCAPE IS `g g' == 0` AND NOT "IS THIS A TOKAMAK", BECAUSE TWO REAL
   DEVICE CLASSES REACH THE AXIS.** A **levitated dipole** has plasma right up to
-  `r = 0`, and so does a **magnetic mirror** — and **neither has a toroidal
+  `R = 0`, and so does a **magnetic mirror** — and **neither has a toroidal
   field**, so `g` vanishes identically in both. That is the same fact twice:
-  `B_φ = g/r` must be finite on the axis, so a plasma reaching `r = 0` cannot
+  `B_φ = g/R` must be finite on the axis, so a plasma reaching `R = 0` cannot
   carry a toroidal field there, and `g = 0` is what makes the configuration
   admissible at all. `../geq`, the rotating-mirror wrapper this tree already
   compares against, sets `gg′ ≡ 0` unconditionally for exactly that reason — so
@@ -4538,7 +4538,7 @@ axis, which is the defect §11.0 opens with.
   of the shipped machine, and it does not survive to the answer.**
   `refreshPlasmaComponent()` refuses to *seed* an axis-touching element and does
   not refuse to *reach* one, so an iterate lifting `ψ_h` above `ψ_bnd` there puts
-  §11.3's `1/r` pole back with `ConfineToPlasma` on. It happens.
+  §11.3's `1/R` pole back with `ConfineToPlasma` on. It happens.
   `theFillReachesTheAxisOnlyWhereTheAxisGuardRefuses` in
   `tests/convergence/PlasmaConnectivity.cpp` is the record; on §11.7's own
   fixture at limiter 1.15, `k = 2`, 1333 elements:
@@ -4547,17 +4547,17 @@ axis, which is the defect §11.0 opens with.
   |---|---|---|---|---|
   | `ψ_bnd` | **−4.43e-03** | **−2.00e-04** | **−3.90e-04** | +7.03e-04 |
   | axis elements in the plasma, of 84 | **84** | **84** | **84** | **0** |
-  | `\|F\|` the assembly puts on `r = 0` | 3.75e-03 | 1.63e-03 | 4.97e-03 | **0.0** |
+  | `\|F\|` the assembly puts on `R = 0` | 3.75e-03 | 1.63e-03 | 4.97e-03 | **0.0** |
 
   and the same shape at 314 and 573 elements, so it is not one resolution's
   accident.
 
   **THE FILL IS NOT THE DEFECT AND MUST NOT BE CHANGED.** At those iterates its
   answer is *correct*: `ψ_bnd` is negative, so `{Ψ > 0}` genuinely is connected
-  and genuinely does contain `r = 0`, and a rule that refused to say so would be
+  and genuinely does contain `R = 0`, and a rule that refused to say so would be
   a fill lying about the state it was handed. Blocking axis-touching elements
   outright is also wrong for the one device class this section protects — a
-  levitated dipole and a magnetic mirror both have plasma to `r = 0`, both have
+  levitated dipole and a magnetic mirror both have plasma to `R = 0`, both have
   `gg′ ≡ 0` there, and the pole never existed.
 
   **WHAT MAKES IT SAFE IS A COUPLING BETWEEN TWO READINGS, AND THAT IS NOW
@@ -4575,7 +4575,7 @@ axis, which is the defect §11.0 opens with.
   UNDER REFINEMENT.** `checkAxisSource()` asks at `ψ = 0` on purpose — asking the
   iterate refuses a healthy run at 6.2e-05 of scale — so it cannot see a
   `ψ_h( 0, z )` exceeding a *positive* `ψ_bnd`. That state exists: an unconfined
-  solve on this geometry grows a layer reaching `Ψ = 2.7` at `r = 0` while the
+  solve on this geometry grows a layer reaching `Ψ = 2.7` at `R = 0` while the
   guard reads `Ψ_axis = −2.6e-01`. It is not reachable from a *confined* solve,
   because the layer is what the pole builds and the pole is what confinement
   removes — and where the layer does exist the **fill** separates it as its own
@@ -4583,15 +4583,15 @@ axis, which is the defect §11.0 opens with.
   `theLimiterCaseAlreadyHasMoreThanOneLobe`: 84 candidates, **0 reached**, `|F|`
   on the axis exactly `0.0`. **And what it is keeping out is measured, not
   asserted at**: with `elementInPlasma()` ignored the same state assembles
-  `|F| = 1.376` on `r = 0`, so the fill is the whole of the difference between a
-  bounded load and `μ₀ j_φ` diverging like `1/r` along the entire symmetry axis.
+  `|F| = 1.376` on `R = 0`, so the fill is the whole of the difference between a
+  bounded load and `μ₀ j_φ` diverging like `1/R` along the entire symmetry axis.
   Sliding `ψ_bnd` by hand on that state is the only way found to make the layer
   merge with the plasma, and it takes `ψ_bnd = 1e-08` against the 7e-04 a real
   solve carries. The margin:
 
   | elements | 314 | 573 | 1333 |
   |---|---|---|---|
-  | `max ψ_h` on `r = 0` | 5.34e-06 | 2.25e-06 | 6.68e-07 |
+  | `max ψ_h` on `R = 0` | 5.34e-06 | 2.25e-06 | 6.68e-07 |
   | as a fraction of `ψ_bnd` | 7.84e-03 | 3.22e-03 | 9.51e-04 |
 
   falling at **2.92 against `k+1 = 3`** while `ψ_bnd` sits at 6.8e-04 → 7.0e-04.
@@ -4647,14 +4647,14 @@ diagnosed was not a capability gap but a fixture asking for an equilibrium that
 does not exist.
 
 **WHAT THE OLD FIXTURE ASKED FOR.** A limiter, a free `ψ_bnd`, a domain reaching
-`r = 0`, an amplitude **fixed**, no conductors, and profiles that carry current
+`R = 0`, an amplitude **fixed**, no conductors, and profiles that carry current
 into the vacuum. Three of those are incompatible with each other:
 
 | missing | what it costs | measured |
 |---|---|---|
-| `ConfineToPlasma` | `gg′( Ψ_axis ) ≠ 0` on `r = 0`, so `F/r = μ₀ j_φ` is unbounded there and `ψ_h` grows a layer along the whole axis | `\|F\|` on the axis at **1.0e-02 of scale**; with it, **exactly 0.0** |
+| `ConfineToPlasma` | `gg′( Ψ_axis ) ≠ 0` on `R = 0`, so `F/R = μ₀ j_φ` is unbounded there and `ψ_h` grows a layer along the whole axis | `\|F\|` on the axis at **1.0e-02 of scale**; with it, **exactly 0.0** |
 | a prescribed current | §7.14's non-linear eigenvalue problem: `Λ = A/span²` must be an eigenvalue **on the plasma region** and the region is unknown, so scaling `A` changes nothing | confinement alone: **does not converge at any of the four radii** |
-| a vertical field | nothing in the constraints says the plasma is a **core** | without coils: converges at 1.08, 1.10 and 1.12 to §7.14's **annulus**, axis at `r = 1.38` on a domain reaching 1.50; **does not converge at all** at 1.15 or 1.18 |
+| a vertical field | nothing in the constraints says the plasma is a **core** | without coils: converges at 1.08, 1.10 and 1.12 to §7.14's **annulus**, axis at `R = 1.38` on a domain reaching 1.50; **does not converge at all** at 1.15 or 1.18 |
 
 **ALL THREE ARE NECESSARY AND THE TABLE IS THE ONE-VARIABLE-AT-A-TIME PROOF OF
 IT.** Each row is the same fixture with one thing removed.
@@ -4662,7 +4662,7 @@ IT.** Each row is the same fixture with one thing removed.
 **AND THE COIL CURRENT IS DERIVED, NOT TUNED.** §7.15's finding applied:
 Shafranov's `B_v = μ₀I_p/(4πR)·[ ln(8R/a) + β_p + l_i/2 − 3/2 ]` says what field
 a given `I_p` needs, and the current that delivers it is measured **from the
-coils themselves** through `ExteriorCoilSet::gradPsi` — `B_z = (1/r)∂_rψ` at
+coils themselves** through `ExteriorCoilSet::gradPsi` — `B_z = (1/R)∂_rψ` at
 `( R₀, 0 )`, which is *not* on the symmetry axis, so the textbook on-axis loop
 formula does not apply and was not used. `μ₀I_p = 0.12`, `R₀ = 0.75`.
 
@@ -4680,7 +4680,7 @@ the rows are not the same problem.
 
 **THE RESULT, `k = 2`, 1333 elements (`n = 24`), four Gegenbauer modes:**
 
-| limiter | coil `μ₀I` | coils | Newton | `ψ_ax` | `ψ_bnd` | `\|F\|` on `r = 0` | `ψ_ax` attained at | `Ψ` at the O-point |
+| limiter | coil `μ₀I` | coils | Newton | `ψ_ax` | `ψ_bnd` | `\|F\|` on `R = 0` | `ψ_ax` attained at | `Ψ` at the O-point |
 |---|---|---|---|---|---|---|---|---|
 | 1.08 | −7.8072e-02 | yes | 11 | 1.212249e-02 | 1.366962e-03 | **0.0000e+00** | ( 0.779, 0.000 ) | **1.0000** |
 | 1.08 | 0 | **NO** | 96 | 6.222586e-02 | 3.854703e-02 | 0.0000e+00 | **( 1.381, 0.000 )** | 1.0000 |
@@ -4692,7 +4692,7 @@ the rows are not the same problem.
 | 1.18 | −6.9463e-02 | yes | 8 | 1.167206e-02 | 4.794681e-04 | **0.0000e+00** | ( 0.850, 0.000 ) | **1.0000** |
 
 **FIVE HEALTHY RADII WHERE THERE WERE THREE.** `ψ_ax` is attained at
-`r = 0.78`–`0.85` where the old fixture attained it at `r = 0.00000`; the
+`R = 0.78`–`0.85` where the old fixture attained it at `R = 0.00000`; the
 prescribed current is delivered to every digit at every row; and **both `ψ_ax`
 and `ψ_bnd` are monotone and smooth in the limiter radius**, which is itself a
 reading of the repaired limiter constraint of §7.20 — a dof-snapped one is a
@@ -4702,13 +4702,13 @@ staircase in exactly that variable.
 It converges at three of the five, `|F|` on the axis is exactly zero, and `Ψ` at
 its O-point reads **1.0000** — *every health check in the case passes on it*. It
 is simply a different equilibrium, and the only thing separating them is **where
-the axis is**. So the control asserts on the position, `r = 1.38` against
+the axis is**. So the control asserts on the position, `R = 1.38` against
 `0.78`–`0.85`. At 1.15 and 1.18 it does not converge at all.
 
 **WHERE IT GIVES OUT IS THE GEOMETRY, AND IS RECORDED RATHER THAN HIDDEN.** From
 about `R = 1.20` — 0.8 of `ρ_Γ` — this fixture does not reach a tokamak: `ψ_bnd`
 comes out **negative** at about −1.6e-02, the O-point lands on `Γ` at
-`( 0.071, 1.488 )` carrying `Ψ ≈ 1.1`–`1.2`, and `|F|` on `r = 0` is back at
+`( 0.071, 1.488 )` carrying `Ψ ≈ 1.1`–`1.2`, and `|F|` on `R = 0` is back at
 about 2.9e-03. It converges, in 8 to 12 steps. **A different branch, not a worse
 answer**, and the honest fix is a larger `Γ` rather than a looser assertion, so
 the sweep stops at 1.18. And `R = 1.05` no longer converges at all, which is what
@@ -4783,7 +4783,7 @@ across two levels and then breaks on the third, at 97 iterations and a `psi_ax`
 
 **AND THE INSTRUMENT FOUND A CONDUCTOR.** The probe reported an axis from
 `findAxis( AxisSense::Maximum )` and got `( 1.006240, -1.099327 )` on every row
-of the first two levels — **inside coil P1L**, which spans `r ∈ [ 0.95, 1.05 ]`,
+of the first two levels — **inside coil P1L**, which spans `R ∈ [ 0.95, 1.05 ]`,
 `z ∈ [ -1.15, -1.05 ]`. Unforced, `findAxis()` refuses outright: *"3 maxima, 2
 minima and 2 saddles"*. **This is §10.7's defect 2 from the library side** —
 `apps/meq.cpp` carries a three-tier conductor exclusion on the fill seed and

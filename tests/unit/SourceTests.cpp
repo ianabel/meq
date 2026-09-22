@@ -2,7 +2,7 @@
 //
 // The Grad-Shafranov right hand side
 //
-//     F( r, z, psi ) = mu0 r^2 p'( psi ) + ( g g' )( psi )
+//     F( R, z, psi ) = mu0 R^2 p'( psi ) + ( g g' )( psi )
 //
 // is where a sign or a factor goes wrong silently: with a consistent-but-wrong F
 // the solver still converges, to the wrong equilibrium, and nothing complains.
@@ -11,7 +11,7 @@
 //   * The Solov'ev source is checked against the closed form of HDG-GS-1 eq (10)
 //     term by term, and against an MHDSource built from the constant profiles
 //     that eq (10) comes from. If MHDSource's convention -- which of p' and g g'
-//     carries the mu0, and which the r^2 -- were wrong, those two would disagree.
+//     carries the mu0, and which the R^2 -- were wrong, those two would disagree.
 //   * dFdPsi is checked against a central difference of f(). meq closes the
 //     nonlinearity with Newton rather than the papers' Picard iteration, so the
 //     derivative is load-bearing, and it is exactly the quantity that can be
@@ -132,10 +132,10 @@ namespace
 			<< " (difference " << actual - expected << ", allowed " << tolerance*scale << ")" );
 	}
 
-	// dF/dpsi by central differences of f() at fixed ( r, z ).
-	double differenceDFdPsi( meq::Source const & source, double r, double z, double psi, double h )
+	// dF/dpsi by central differences of f() at fixed ( R, z ).
+	double differenceDFdPsi( meq::Source const & source, double radius, double z, double psi, double h )
 	{
-		return ( source.f( r, z, psi + h ) - source.f( r, z, psi - h ) )/( 2.0*h );
+		return ( source.f( radius, z, psi + h ) - source.f( radius, z, psi - h ) )/( 2.0*h );
 	}
 
 	// The check that protects the Newton solve: the analytic derivative against a
@@ -144,16 +144,16 @@ namespace
 	void checkDerivativeAgainstDifferences( meq::Source const & source, std::vector<double> const & radii,
 		double psiLower, double psiUpper, int samples, double h, double tolerance, char const * what )
 	{
-		for ( double r : radii )
+		for ( double radius : radii )
 		{
 			for ( int i = 0; i <= samples; ++i )
 			{
 				double const psi = psiLower + ( psiUpper - psiLower )*i/samples;
-				double const analytic = source.dFdPsi( r, 0.0, psi );
-				double const difference = differenceDFdPsi( source, r, 0.0, psi, h );
+				double const analytic = source.dFdPsi( radius, 0.0, psi );
+				double const difference = differenceDFdPsi( source, radius, 0.0, psi, h );
 
 				BOOST_CHECK_MESSAGE( std::fabs( analytic - difference ) <= tolerance*std::max( 1.0, std::fabs( difference ) ),
-					what << ": dFdPsi disagrees with a central difference at r = " << r << ", psi = " << psi
+					what << ": dFdPsi disagrees with a central difference at R = " << radius << ", psi = " << psi
 					<< ": analytic " << analytic << ", difference " << difference
 					<< " (error " << analytic - difference << ")" );
 			}
@@ -169,7 +169,7 @@ BOOST_AUTO_TEST_SUITE( soloviev_source_tests )
 BOOST_AUTO_TEST_CASE( f_matches_the_closed_form )
 {
 	// HDG-GS-1 eq (10): with mu0 p' = -C, g g' = -A and the flux normalised so
-	// that A + C = 1, F = -( ( 1 - A ) r^2 + A ).
+	// that A + C = 1, F = -( ( 1 - A ) R^2 + A ).
 	for ( double a : { -0.52, -0.115, 0.0, 0.25, 1.0, 2.0 } )
 	{
 		meq::SolovievSource const source( a );
@@ -177,14 +177,14 @@ BOOST_AUTO_TEST_CASE( f_matches_the_closed_form )
 		BOOST_CHECK_EQUAL( source.a(), a );
 		checkClose( source.a() + source.c(), 1.0, 1e-15, "A + C", a );
 
-		for ( double r : testRadii )
+		for ( double radius : testRadii )
 		{
 			for ( double z : { -1.7, 0.0, 0.9 } )
 			{
 				for ( double psi : { -0.5, 0.0, 0.37, 1.0, 2.0 } )
 				{
-					double const expected = -( ( 1.0 - a )*r*r + a );
-					checkClose( source.f( r, z, psi ), expected, 1e-14, "Solov'ev F", r );
+					double const expected = -( ( 1.0 - a )*radius*radius + a );
+					checkClose( source.f( radius, z, psi ), expected, 1e-14, "Solov'ev F", radius );
 				}
 			}
 		}
@@ -209,10 +209,10 @@ BOOST_AUTO_TEST_CASE( dfdpsi_is_identically_zero )
 	{
 		meq::SolovievSource const source( a );
 
-		for ( double r : testRadii )
+		for ( double radius : testRadii )
 			for ( double z : { -1.0, 0.0, 1.0 } )
 				for ( double psi : { -1.0, 0.0, 0.5, 1.0, 4.0 } )
-					BOOST_CHECK_EQUAL( source.dFdPsi( r, z, psi ), 0.0 );
+					BOOST_CHECK_EQUAL( source.dFdPsi( radius, z, psi ), 0.0 );
 	}
 }
 
@@ -220,7 +220,7 @@ BOOST_AUTO_TEST_CASE( agrees_with_the_equivalent_mhd_source )
 {
 	// The Solov'ev profiles are mu0 p' = -C and g g' = -A with C = 1 - A. Building
 	// an MHDSource from exactly those constants and getting the same F is a check
-	// on MHDSource's convention: which profile carries the mu0 r^2, and which
+	// on MHDSource's convention: which profile carries the mu0 R^2, and which
 	// stands alone.
 	for ( double a : { -0.52, 0.0, 0.3, 1.0 } )
 	{
@@ -233,12 +233,12 @@ BOOST_AUTO_TEST_CASE( agrees_with_the_equivalent_mhd_source )
 		// And in SI, where p' = -C/mu0 and the g g' profile is untouched.
 		meq::MHDSource const si( constantProfile( -c/meq::vacuumPermeability ), constantProfile( -a ) );
 
-		for ( double r : testRadii )
+		for ( double radius : testRadii )
 		{
-			checkClose( normalised.f( r, 0.4, 0.7 ), soloviev.f( r, 0.4, 0.7 ), 1e-14, "normalised MHDSource against Solov'ev", r );
-			checkClose( si.f( r, 0.4, 0.7 ), soloviev.f( r, 0.4, 0.7 ), 1e-13, "SI MHDSource against Solov'ev", r );
-			BOOST_CHECK_EQUAL( normalised.dFdPsi( r, 0.4, 0.7 ), 0.0 );
-			BOOST_CHECK_EQUAL( si.dFdPsi( r, 0.4, 0.7 ), 0.0 );
+			checkClose( normalised.f( radius, 0.4, 0.7 ), soloviev.f( radius, 0.4, 0.7 ), 1e-14, "normalised MHDSource against Solov'ev", radius );
+			checkClose( si.f( radius, 0.4, 0.7 ), soloviev.f( radius, 0.4, 0.7 ), 1e-13, "SI MHDSource against Solov'ev", radius );
+			BOOST_CHECK_EQUAL( normalised.dFdPsi( radius, 0.4, 0.7 ), 0.0 );
+			BOOST_CHECK_EQUAL( si.dFdPsi( radius, 0.4, 0.7 ), 0.0 );
 		}
 	}
 }
@@ -256,31 +256,31 @@ BOOST_AUTO_TEST_SUITE( mhd_source_tests )
 BOOST_AUTO_TEST_CASE( f_is_mu0_r_squared_pprime_plus_ggprime )
 {
 	// Isolate the two terms. The pressure term, and only the pressure term,
-	// carries mu0 r^2; the g g' term is added as it stands. Getting this backwards
+	// carries mu0 R^2; the g g' term is added as it stands. Getting this backwards
 	// is the single most likely way to produce a converged, wrong equilibrium.
 	{
 		meq::MHDSource const pressureOnly( constantProfile( 2.0 ), constantProfile( 0.0 ), 3.0 );
-		for ( double r : testRadii )
-			checkClose( pressureOnly.f( r, 0.0, 0.5 ), 3.0*r*r*2.0, 1e-14, "pressure term", r );
+		for ( double radius : testRadii )
+			checkClose( pressureOnly.f( radius, 0.0, 0.5 ), 3.0*radius*radius*2.0, 1e-14, "pressure term", radius );
 	}
 
 	{
 		meq::MHDSource const currentOnly( constantProfile( 0.0 ), constantProfile( -1.25 ), 3.0 );
-		for ( double r : testRadii )
+		for ( double radius : testRadii )
 		{
-			// No mu0 and no r^2 on this one, at any radius.
-			BOOST_CHECK_EQUAL( currentOnly.f( r, 0.0, 0.5 ), -1.25 );
+			// No mu0 and no R^2 on this one, at any radius.
+			BOOST_CHECK_EQUAL( currentOnly.f( radius, 0.0, 0.5 ), -1.25 );
 		}
 	}
 
 	// Both together, with profiles that actually vary.
 	meq::MHDSource const source( analyticPressureProfile(), analyticGGPrimeProfile(), 1.0 );
-	for ( double r : testRadii )
+	for ( double radius : testRadii )
 	{
 		for ( double psi : { 0.0, 0.15, 0.5, 0.9, 1.0 } )
 		{
-			double const expected = r*r*pressureDerivative( psi ) + ggPrimeValue( psi );
-			checkClose( source.f( r, -0.3, psi ), expected, 1e-14, "F against its definition", psi );
+			double const expected = radius*radius*pressureDerivative( psi ) + ggPrimeValue( psi );
+			checkClose( source.f( radius, -0.3, psi ), expected, 1e-14, "F against its definition", psi );
 		}
 	}
 }
@@ -306,25 +306,25 @@ BOOST_AUTO_TEST_CASE( dfdpsi_matches_the_profile_derivatives_term_by_term )
 	// derivative, scaled the same way its value is scaled in F.
 	{
 		meq::MHDSource const pressureOnly( analyticPressureProfile(), constantProfile( 7.0 ), 2.5 );
-		for ( double r : testRadii )
+		for ( double radius : testRadii )
 			for ( double psi : { 0.0, 0.2, 0.55, 1.0 } )
-				checkClose( pressureOnly.dFdPsi( r, 0.0, psi ), 2.5*r*r*pressureSecondDerivative( psi ), 1e-14, "pressure contribution to dFdPsi", psi );
+				checkClose( pressureOnly.dFdPsi( radius, 0.0, psi ), 2.5*radius*radius*pressureSecondDerivative( psi ), 1e-14, "pressure contribution to dFdPsi", psi );
 	}
 
 	{
 		meq::MHDSource const currentOnly( constantProfile( 7.0 ), analyticGGPrimeProfile(), 2.5 );
-		for ( double r : testRadii )
+		for ( double radius : testRadii )
 			for ( double psi : { 0.0, 0.2, 0.55, 1.0 } )
-				checkClose( currentOnly.dFdPsi( r, 0.0, psi ), ggPrimeDerivative( psi ), 1e-14, "g g' contribution to dFdPsi", psi );
+				checkClose( currentOnly.dFdPsi( radius, 0.0, psi ), ggPrimeDerivative( psi ), 1e-14, "g g' contribution to dFdPsi", psi );
 	}
 
-	// And the pressure contribution scales as r^2 while the other does not.
+	// And the pressure contribution scales as R^2 while the other does not.
 	meq::MHDSource const source( analyticPressureProfile(), analyticGGPrimeProfile(), 1.0 );
 	double const psi = 0.42;
 	double const atOne = source.dFdPsi( 1.0, 0.0, psi );
 	double const atTwo = source.dFdPsi( 2.0, 0.0, psi );
 	double const ggContribution = ggPrimeDerivative( psi );
-	checkClose( atTwo - ggContribution, 4.0*( atOne - ggContribution ), 1e-13, "r^2 scaling of the pressure term", 2.0 );
+	checkClose( atTwo - ggContribution, 4.0*( atOne - ggContribution ), 1e-13, "R^2 scaling of the pressure term", 2.0 );
 }
 
 BOOST_AUTO_TEST_CASE( dfdpsi_agrees_with_a_central_difference )
@@ -366,13 +366,13 @@ BOOST_AUTO_TEST_CASE( dfdpsi_agrees_with_a_central_difference_for_spline_profile
 
 	meq::MHDSource const source( pPrimeSpline, ggPrimeSpline, 1.0 );
 
-	for ( double r : testRadii )
+	for ( double radius : testRadii )
 	{
 		for ( unsigned int i = 0; i < intervals; ++i )
 		{
 			double const psi = ( i + 0.5 )/intervals;
-			double const analytic = source.dFdPsi( r, 0.0, psi );
-			double const difference = differenceDFdPsi( source, r, 0.0, psi, 1e-6 );
+			double const analytic = source.dFdPsi( radius, 0.0, psi );
+			double const difference = differenceDFdPsi( source, radius, 0.0, psi, 1e-6 );
 			checkClose( analytic, difference, 1e-6, "spline dFdPsi against a central difference", psi );
 		}
 	}
@@ -381,12 +381,12 @@ BOOST_AUTO_TEST_CASE( dfdpsi_agrees_with_a_central_difference_for_spline_profile
 	// from -- a much weaker statement than the derivative check above, but it
 	// catches a profile wired into the wrong slot.
 	meq::MHDSource const exact( analyticPressureProfile(), analyticGGPrimeProfile(), 1.0 );
-	for ( double r : testRadii )
+	for ( double radius : testRadii )
 	{
 		for ( int i = 0; i <= 40; ++i )
 		{
 			double const psi = i/40.0;
-			checkClose( source.f( r, 0.0, psi ), exact.f( r, 0.0, psi ), 1e-4, "spline F against analytic F", psi );
+			checkClose( source.f( radius, 0.0, psi ), exact.f( radius, 0.0, psi ), 1e-4, "spline F against analytic F", psi );
 		}
 	}
 }
@@ -457,15 +457,15 @@ BOOST_AUTO_TEST_CASE( f_carries_one_factor_of_the_normalisation )
 	meq::NormalisedMHDSource source( analyticPressureProfile(), analyticGGPrimeProfile(),
 	                                 psiAxis, 1.0 );
 
-	for ( double r : testRadii )
+	for ( double radius : testRadii )
 	{
 		for ( int i = 0; i <= 10; ++i )
 		{
 			double const psi = psiAxis*i/10.0;
 			double const psiN = psi/psiAxis;
-			double const expected = ( r*r*pressureDerivative( psiN ) + ggPrimeValue( psiN ) )
+			double const expected = ( radius*radius*pressureDerivative( psiN ) + ggPrimeValue( psiN ) )
 			                        /psiAxis;
-			checkClose( source.f( r, 0.0, psi ), expected, 1e-14, "normalised F", psi );
+			checkClose( source.f( radius, 0.0, psi ), expected, 1e-14, "normalised F", psi );
 		}
 	}
 }
@@ -476,15 +476,15 @@ BOOST_AUTO_TEST_CASE( dfdpsi_carries_two )
 	meq::NormalisedMHDSource source( analyticPressureProfile(), analyticGGPrimeProfile(),
 	                                 psiAxis, 1.0 );
 
-	for ( double r : testRadii )
+	for ( double radius : testRadii )
 	{
 		for ( int i = 0; i <= 10; ++i )
 		{
 			double const psi = psiAxis*i/10.0;
 			double const psiN = psi/psiAxis;
-			double const expected = ( r*r*pressureSecondDerivative( psiN )
+			double const expected = ( radius*radius*pressureSecondDerivative( psiN )
 			                          + ggPrimeDerivative( psiN ) )/( psiAxis*psiAxis );
-			checkClose( source.dFdPsi( r, 0.0, psi ), expected, 1e-14,
+			checkClose( source.dFdPsi( radius, 0.0, psi ), expected, 1e-14,
 			            "normalised dF/dpsi", psi );
 		}
 	}
@@ -557,13 +557,13 @@ BOOST_AUTO_TEST_CASE( agrees_with_the_unnormalised_source_at_unit_normalisation 
 	meq::NormalisedMHDSource normalised( analyticPressureProfile(), analyticGGPrimeProfile(),
 	                                     1.0, 1.0 );
 
-	for ( double r : testRadii )
+	for ( double radius : testRadii )
 	{
 		for ( int i = 0; i <= 10; ++i )
 		{
 			double const psi = i/10.0;
-			BOOST_CHECK_EQUAL( normalised.f( r, 0.0, psi ), plain.f( r, 0.0, psi ) );
-			BOOST_CHECK_EQUAL( normalised.dFdPsi( r, 0.0, psi ), plain.dFdPsi( r, 0.0, psi ) );
+			BOOST_CHECK_EQUAL( normalised.f( radius, 0.0, psi ), plain.f( radius, 0.0, psi ) );
+			BOOST_CHECK_EQUAL( normalised.dFdPsi( radius, 0.0, psi ), plain.dFdPsi( radius, 0.0, psi ) );
 		}
 	}
 }
@@ -641,17 +641,17 @@ BOOST_AUTO_TEST_CASE( the_boundary_flux_enters_only_through_the_span )
 
 	double worstF = 0.0;
 	double worstD = 0.0;
-	for ( double r : testRadii )
+	for ( double radius : testRadii )
 	{
 		for ( int i = -3; i <= 13; ++i )
 		{
 			double const psi = psiBoundary + ( psiAxis - psiBoundary )*i/10.0;
 			worstF = std::max( worstF, std::abs(
-				shifted.f( r, 0.0, psi )
-				- translated.f( r, 0.0, psi - psiBoundary ) ) );
+				shifted.f( radius, 0.0, psi )
+				- translated.f( radius, 0.0, psi - psiBoundary ) ) );
 			worstD = std::max( worstD, std::abs(
-				shifted.dFdPsi( r, 0.0, psi )
-				- translated.dFdPsi( r, 0.0, psi - psiBoundary ) ) );
+				shifted.dFdPsi( radius, 0.0, psi )
+				- translated.dFdPsi( radius, 0.0, psi - psiBoundary ) ) );
 		}
 	}
 	BOOST_TEST( worstF == 0.0,
@@ -669,9 +669,9 @@ BOOST_AUTO_TEST_CASE( the_boundary_flux_enters_only_through_the_span )
 	                                  analyticGGPrimeProfile(), psiAxis, 1.0 );
 	ignored.setNormalisation( psiAxis, 0.0 );
 	double separation = 0.0;
-	for ( double r : testRadii )
+	for ( double radius : testRadii )
 		separation = std::max( separation, std::abs(
-			shifted.f( r, 0.0, 0.5*psiAxis ) - ignored.f( r, 0.0, 0.5*psiAxis ) ) );
+			shifted.f( radius, 0.0, 0.5*psiAxis ) - ignored.f( radius, 0.0, 0.5*psiAxis ) ) );
 	BOOST_TEST( separation > 1.0e-6,
 	            "setting psi_bnd changes nothing, so the translation check above "
 	            "is vacuous" );
@@ -706,12 +706,12 @@ BOOST_AUTO_TEST_CASE( the_plasma_support_switches_the_source_off_outside_it )
 	                                 psiAx );
 	source.setNormalisation( psiAx, psiBnd );
 
-	double const r = 1.2, z = 0.0;
+	double const radius = 1.2, z = 0.0;
 
 	// OFF BY DEFAULT: every fixed-boundary caller is untouched, and the source
 	// is whatever the profiles say at any psi at all.
 	BOOST_TEST( source.plasmaSupport() == false );
-	double const outsideBefore = source.f( r, z, psiBnd - 0.3 );
+	double const outsideBefore = source.f( radius, z, psiBnd - 0.3 );
 	BOOST_TEST( outsideBefore != 0.0 );
 
 	source.setPlasmaSupport( true );
@@ -722,18 +722,18 @@ BOOST_AUTO_TEST_CASE( the_plasma_support_switches_the_source_off_outside_it )
 	for ( double psi : { 0.15, 0.4, 0.8, 1.2 } )
 	{
 		source.setPlasmaSupport( false );
-		double const bare = source.f( r, z, psi );
-		double const bareD = source.dFdPsi( r, z, psi );
+		double const bare = source.f( radius, z, psi );
+		double const bareD = source.dFdPsi( radius, z, psi );
 		source.setPlasmaSupport( true );
-		BOOST_TEST( source.f( r, z, psi ) == bare );
-		BOOST_TEST( source.dFdPsi( r, z, psi ) == bareD );
+		BOOST_TEST( source.f( radius, z, psi ) == bare );
+		BOOST_TEST( source.dFdPsi( radius, z, psi ) == bareD );
 	}
 
 	// OUTSIDE, exactly zero -- both the source and its derivative.
 	for ( double psi : { psiBnd - 1.0e-12, psiBnd - 0.3, -5.0 } )
 	{
-		BOOST_TEST( source.f( r, z, psi ) == 0.0 );
-		BOOST_TEST( source.dFdPsi( r, z, psi ) == 0.0 );
+		BOOST_TEST( source.f( radius, z, psi ) == 0.0 );
+		BOOST_TEST( source.dFdPsi( radius, z, psi ) == 0.0 );
 	}
 
 	// AND ON THE EDGE ITSELF the source is off, which is the right side of the
@@ -741,7 +741,7 @@ BOOST_AUTO_TEST_CASE( the_plasma_support_switches_the_source_off_outside_it )
 	// Psi > 0. It shows here only because this profile is constant; with the
 	// vanishing profile setPlasmaSupport() requires, both sides give zero and
 	// the choice of side stops mattering.
-	BOOST_TEST( source.f( r, z, psiBnd ) == 0.0 );
+	BOOST_TEST( source.f( radius, z, psiBnd ) == 0.0 );
 }
 
 /// THE SIGN OF THE SPAN IS NOT ASSUMED, and it must not be: every Solov'ev
@@ -757,17 +757,17 @@ BOOST_AUTO_TEST_CASE( the_plasma_support_does_not_assume_which_way_psi_runs )
 	                                 std::make_shared<meq::ConstantProfile>( -1.0 ), 0.8 );
 	source.setPlasmaSupport( true );
 
-	double const r = 1.2, z = 0.0;
+	double const radius = 1.2, z = 0.0;
 
 	// Axis ABOVE the boundary, the ordinary orientation.
 	source.setNormalisation( 0.8, 0.1 );
-	BOOST_TEST( source.f( r, z, 0.4 ) != 0.0 );    // between them: plasma
-	BOOST_TEST( source.f( r, z, -0.2 ) == 0.0 );   // beyond the boundary: not
+	BOOST_TEST( source.f( radius, z, 0.4 ) != 0.0 );    // between them: plasma
+	BOOST_TEST( source.f( radius, z, -0.2 ) == 0.0 );   // beyond the boundary: not
 
 	// Axis BELOW the boundary, which is what a negative F gives.
 	source.setNormalisation( -0.8, -0.1 );
-	BOOST_TEST( source.f( r, z, -0.4 ) != 0.0 );   // between them: plasma
-	BOOST_TEST( source.f( r, z, 0.2 ) == 0.0 );    // beyond the boundary: not
+	BOOST_TEST( source.f( radius, z, -0.4 ) != 0.0 );   // between them: plasma
+	BOOST_TEST( source.f( radius, z, 0.2 ) == 0.0 );    // beyond the boundary: not
 }
 
 /*
@@ -787,7 +787,7 @@ BOOST_AUTO_TEST_CASE( the_plasma_support_does_not_assume_which_way_psi_runs )
  */
 BOOST_AUTO_TEST_CASE( the_normalisation_derivatives_are_analytic )
 {
-	double const r = 1.3;
+	double const radius = 1.3;
 	double const z = 0.2;
 
 	meq::NormalisedMHDSource source( analyticPressureProfile(),
@@ -803,11 +803,11 @@ BOOST_AUTO_TEST_CASE( the_normalisation_derivatives_are_analytic )
 			double const a = axis ? 0.9 + step : 0.9;
 			double const b = axis ? -0.2 : -0.2 + step;
 			source.setNormalisation( a, b );
-			double const plus = source.f( r, z, psi );
+			double const plus = source.f( radius, z, psi );
 			double const a2 = axis ? 0.9 - step : 0.9;
 			double const b2 = axis ? -0.2 : -0.2 - step;
 			source.setNormalisation( a2, b2 );
-			double const minus = source.f( r, z, psi );
+			double const minus = source.f( radius, z, psi );
 			return ( plus - minus )/( 2.0*step );
 		};
 		double const h = 1.0e-4;
@@ -824,7 +824,7 @@ BOOST_AUTO_TEST_CASE( the_normalisation_derivatives_are_analytic )
 		source.setNormalisation( 0.9, -0.2 );
 		double analyticAxis = 0.0, analyticBoundary = 0.0;
 		BOOST_TEST_REQUIRE( source.normalisationDerivatives(
-			r, z, psi, analyticAxis, analyticBoundary ),
+			radius, z, psi, analyticAxis, analyticBoundary ),
 			"NormalisedMHDSource must supply its normalisation derivatives" );
 
 		double const numericAxis = difference( psi, true );
@@ -860,7 +860,7 @@ BOOST_AUTO_TEST_CASE( the_normalisation_derivatives_are_analytic )
 	source.setPlasmaSupport( true );
 	source.setNormalisation( 0.9, -0.2 );
 	double outsideAxis = 1.0, outsideBoundary = 1.0;
-	BOOST_TEST_REQUIRE( source.normalisationDerivatives( r, z, -0.5,
+	BOOST_TEST_REQUIRE( source.normalisationDerivatives( radius, z, -0.5,
 	                                                     outsideAxis,
 	                                                     outsideBoundary ) );
 	BOOST_TEST( outsideAxis == 0.0 );

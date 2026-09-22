@@ -88,7 +88,7 @@ namespace
 	/// grow assertions without changing what this measures.
 	struct Box
 	{
-		double rMin, rMax, zMin, zMax;
+		double minRadius, maxRadius, zMin, zMax;
 	};
 
 	Box box()
@@ -99,13 +99,13 @@ namespace
 	mfem::Mesh makeMesh( Box const &b, int n )
 	{
 		mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D( n, n, mfem::Element::TRIANGLE,
-		                                               false, b.rMax - b.rMin,
+		                                               false, b.maxRadius - b.minRadius,
 		                                               b.zMax - b.zMin );
-		double const rMin = b.rMin;
+		double const minRadius = b.minRadius;
 		double const zMin = b.zMin;
-		mesh.Transform( [ rMin, zMin ]( mfem::Vector const &in, mfem::Vector &out )
+		mesh.Transform( [ minRadius, zMin ]( mfem::Vector const &in, mfem::Vector &out )
 		{
-			out( 0 ) = in( 0 ) + rMin;
+			out( 0 ) = in( 0 ) + minRadius;
 			out( 1 ) = in( 1 ) + zMin;
 		} );
 		return mesh;

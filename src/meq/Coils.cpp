@@ -16,7 +16,7 @@
 /*
  * WHAT IS DECIDED IN THIS FILE, AND WHY EACH WAY
  *
- * Coils.hpp carries the physics -- the derivation of F = mu0 r j_phi, the
+ * Coils.hpp carries the physics -- the derivation of F = mu0 R j_phi, the
  * cross-section integral, and what the quadrature achieves. This comment is
  * about the three numerical choices underneath it, each of which was measured
  * before it was believed.
@@ -27,19 +27,19 @@
  * The textbook filament flux is
  *
  *     psi = ( mu0 I / 2 pi ) d [ ( 1 - k^2/2 ) K( k ) - E( k ) ],
- *     d^2 = ( a + r )^2 + ( z - z0 )^2,    k^2 = 4 a r / d^2,
+ *     d^2 = ( a + R )^2 + ( z - z0 )^2,    k^2 = 4 a R / d^2,
  *
  * and it is unusable here for one reason: the quadrature has to evaluate it at
  * points arbitrarily close to the source, where k -> 1. Formed as
- * 2 sqrt( a r )/d, k rounds to exactly 1.0 once the field point is within about
+ * 2 sqrt( a R )/d, k rounds to exactly 1.0 once the field point is within about
  * 1e-8 of a source filament -- at which std::comp_ellint_1( 1.0 ) is NaN and
  * std::comp_ellint_2( 1.0 ) is a perfectly ordinary 1.0, so the failure is a
  * NaN propagating out of an otherwise plausible calculation.
  *
  * The complementary modulus has NO cancellation at all:
  *
- *     k'^2 = 1 - k^2 = [ ( a + r )^2 + dz^2 - 4 a r ] / d^2
- *                    = [ ( a - r )^2 + dz^2 ] / d^2,
+ *     k'^2 = 1 - k^2 = [ ( a + R )^2 + dz^2 - 4 a R ] / d^2
+ *                    = [ ( a - R )^2 + dz^2 ] / d^2,
  *
  * which is the squared distance from the field point to the source, over d^2 --
  * nothing is subtracted from one anywhere. Carlson's symmetric forms take
@@ -189,17 +189,17 @@ namespace meq
 		/// The three geometric quantities the filament kernel is built from:
 		/// d, k^2 and the COMPLEMENTARY k'^2, the last computed as the squared
 		/// distance to the source over d^2 so that nothing cancels.
-		void loopGeometry( double r, double z, double loopRadius,
+		void loopGeometry( double radius, double z, double loopRadius,
 		                   double loopHeight, double &d, double &kSquared,
 		                   double &complementary )
 		{
 			double const dz = z - loopHeight;
-			double const sum = loopRadius + r;
-			double const difference = loopRadius - r;
+			double const sum = loopRadius + radius;
+			double const difference = loopRadius - radius;
 			double const dSquared = sum*sum + dz*dz;
 
 			d = std::sqrt( dSquared );
-			kSquared = 4.0*loopRadius*r/dSquared;
+			kSquared = 4.0*loopRadius*radius/dSquared;
 			complementary = ( difference*difference + dz*dz )/dSquared;
 		}
 
@@ -251,16 +251,16 @@ namespace meq
 
 		/// grad_bar of the filament kernel, per unit current and per unit mu0.
 		///
-		///     d_r G = ( 1/2 pi )[ ( ( a + r )/d ) A
-		///                         + ( a( a^2 - r^2 + dz^2 )/d^3 ) B ]
-		///     d_z G = ( 1/2 pi )[ ( dz/d ) A - ( 2 a r dz/d^3 ) B ]
+		///     d_r G = ( 1/2 pi )[ ( ( a + R )/d ) A
+		///                         + ( a( a^2 - R^2 + dz^2 )/d^3 ) B ]
+		///     d_z G = ( 1/2 pi )[ ( dz/d ) A - ( 2 a R dz/d^3 ) B ]
 		///
 		/// See Coils.hpp for the derivation and for why the coefficient of B is
-		/// written a( a^2 - r^2 + dz^2 )/d^3 rather than the a/d - 2ar( a+r )/d^3
+		/// written a( a^2 - R^2 + dz^2 )/d^3 rather than the a/d - 2ar( a+R )/d^3
 		/// the chain rule hands you: they are identical, and the second is a
 		/// difference of products that cancels to zero AT the loop, which is
 		/// exactly where B is largest.
-		void filamentGradKernel( double r, double z, double loopRadius,
+		void filamentGradKernel( double radius, double z, double loopRadius,
 		                         double loopHeight, double d, double kSquared,
 		                         double complementary, double &dR, double &dZ )
 		{
@@ -269,17 +269,17 @@ namespace meq
 			kernelBrackets( kSquared, complementary, bracketA, bracketB );
 
 			double const dz = z - loopHeight;
-			double const sum = loopRadius + r;
+			double const sum = loopRadius + radius;
 			double const dCubed = d*d*d;
 
-			// a^2 - r^2 + dz^2, one subtraction rather than a difference of
+			// a^2 - R^2 + dz^2, one subtraction rather than a difference of
 			// products, and exactly zero at the loop.
 			double const radial =
-				loopRadius*( loopRadius*loopRadius - r*r + dz*dz )/dCubed;
+				loopRadius*( loopRadius*loopRadius - radius*radius + dz*dz )/dCubed;
 
 			dR = ( ( sum/d )*bracketA + radial*bracketB )/( 2.0*pi );
 			dZ = ( ( dz/d )*bracketA
-			       - ( 2.0*loopRadius*r*dz/dCubed )*bracketB )/( 2.0*pi );
+			       - ( 2.0*loopRadius*radius*dz/dCubed )*bracketB )/( 2.0*pi );
 		}
 
 		void requireFinite( double value, char const *what, char const *where )
@@ -299,13 +299,13 @@ namespace meq
 		/// radius at round-off is a different defect from one at element
 		/// scale, and a message naming neither sends the reader to a debugger
 		/// to recover a number the throw site already had.
-		[[noreturn]] void refuseNegativeRadius( char const *where, double r,
+		[[noreturn]] void refuseNegativeRadius( char const *where, double radius,
 		                                        double z )
 		{
 			std::ostringstream message;
 			message << where << ": the field point radius must not be "
-			           "negative; r = 0 is allowed and gives exactly zero. "
-			           "The point is ( r, z ) = ( " << r << ", " << z << " )";
+			           "negative; R = 0 is allowed and gives exactly zero. "
+			           "The point is ( R, z ) = ( " << radius << ", " << z << " )";
 			throw std::invalid_argument( message.str() );
 		}
 
@@ -334,7 +334,7 @@ namespace meq
 		/// meets the kernel's log( 1/rho ); cubic grading from rho = 0 then
 		/// leaves t^5 log t, which Gauss takes to round-off. No node can land
 		/// on the field point, every one being at rho > 0.
-		double ellipseChordSweep( double r, double z, double centreR,
+		double ellipseChordSweep( double radius, double z, double centreR,
 		                          double centreZ, double semiR, double semiZ,
 		                          int order )
 		{
@@ -349,7 +349,7 @@ namespace meq
 			// The field point in the ellipse's own coordinates. cSquared is
 			// negative inside, zero on the boundary and positive outside, and
 			// it is the constant term of the chord quadratic.
-			double const u = ( r - centreR )/semiR;
+			double const u = ( radius - centreR )/semiR;
 			double const v = ( z - centreZ )/semiZ;
 			double const outside = u*u + v*v - 1.0;
 
@@ -364,7 +364,7 @@ namespace meq
 				double const sine = std::sin( theta );
 
 				// Where the ray meets the ellipse: substituting
-				// ( r + rho cos, z + rho sin ) into ( . /semiR )^2 +
+				// ( R + rho cos, z + rho sin ) into ( . /semiR )^2 +
 				// ( . /semiZ )^2 = 1 gives a quadratic in rho.
 				double const quadratic = cosine*cosine/( semiR*semiR )
 				                         + sine*sine/( semiZ*semiZ );
@@ -406,13 +406,13 @@ namespace meq
 					double const weight =
 						0.5*rule.weight[ iu ]*length*jacobian;
 
-					double const source = r + rho*cosine;
+					double const source = radius + rho*cosine;
 					double const height = z + rho*sine;
 
 					double d = 0.0;
 					double kSquared = 0.0;
 					double complementary = 0.0;
-					loopGeometry( r, z, source, height, d, kSquared,
+					loopGeometry( radius, z, source, height, d, kSquared,
 					              complementary );
 
 					// rho > 0 at every node, so this cannot fire on the field
@@ -452,7 +452,7 @@ namespace meq
 		/// kernel is nearly singular just outside the domain of integration;
 		/// that is the one place this is three figures rather than machine
 		/// precision, and it is a guess's worth. See Coils.hpp.
-		double ellipseDiscSweep( double r, double z, double centreR,
+		double ellipseDiscSweep( double radius, double z, double centreR,
 		                         double centreZ, double semiR, double semiZ,
 		                         int order )
 		{
@@ -488,7 +488,7 @@ namespace meq
 					double d = 0.0;
 					double kSquared = 0.0;
 					double complementary = 0.0;
-					loopGeometry( r, z, source, height, d, kSquared,
+					loopGeometry( radius, z, source, height, d, kSquared,
 					              complementary );
 
 					if ( !( complementary > 0.0 ) )
@@ -510,33 +510,33 @@ namespace meq
 		/// singularity is in the domain for one of them and outside it for the
 		/// other and no single rule is good at both. See each sweep for what
 		/// it is for and what it is bad at.
-		double ellipseIntegral( double r, double z, double centreR,
+		double ellipseIntegral( double radius, double z, double centreR,
 		                        double centreZ, double semiR, double semiZ,
 		                        int order )
 		{
-			double const u = ( r - centreR )/semiR;
+			double const u = ( radius - centreR )/semiR;
 			double const v = ( z - centreZ )/semiZ;
 
 			// The boundary itself goes to the chord sweep, which grades onto
 			// it; the disc sweep would have the singularity ON its own edge.
 			if ( u*u + v*v <= 1.0 )
-				return ellipseChordSweep( r, z, centreR, centreZ, semiR,
+				return ellipseChordSweep( radius, z, centreR, centreZ, semiR,
 				                          semiZ, order );
 
-			return ellipseDiscSweep( r, z, centreR, centreZ, semiR, semiZ,
+			return ellipseDiscSweep( radius, z, centreR, centreZ, semiR, semiZ,
 			                         order );
 		}
 
 		/// The cross-section integral of the unit kernel over one coil, panelled
 		/// and graded as the file comment describes. Multiply by mu0 and by the
 		/// current density to get psi.
-		double crossSectionIntegral( Coil const &coil, double r, double z,
+		double crossSectionIntegral( Coil const &coil, double radius, double z,
 		                             int order )
 		{
 			GaussRule const &rule = gaussRule( order );
 
-			double const rLow = coil.rMin();
-			double const rHigh = coil.rMax();
+			double const lowRadius = coil.minRadius();
+			double const highRadius = coil.maxRadius();
 			double const zLow = coil.zMin();
 			double const zHigh = coil.zMax();
 
@@ -544,15 +544,15 @@ namespace meq
 			// makes the interior, edge-on and exterior cases one piece of code:
 			// it is the singularity when the point is inside and the nearest
 			// point of the coil when it is not.
-			double const rSplit = std::min( std::max( r, rLow ), rHigh );
+			double const splitRadius = std::min( std::max( radius, lowRadius ), highRadius );
 			double const zSplit = std::min( std::max( z, zLow ), zHigh );
 
-			double rEdge[ 3 ] = { rLow, rHigh, rHigh };
+			double edgeRadius[ 3 ] = { lowRadius, highRadius, highRadius };
 			int rPanels = 1;
-			if ( rSplit > rLow && rSplit < rHigh )
+			if ( splitRadius > lowRadius && splitRadius < highRadius )
 			{
-				rEdge[ 1 ] = rSplit;
-				rEdge[ 2 ] = rHigh;
+				edgeRadius[ 1 ] = splitRadius;
+				edgeRadius[ 2 ] = highRadius;
 				rPanels = 2;
 			}
 
@@ -568,14 +568,14 @@ namespace meq
 			double total = 0.0;
 			for ( int pr = 0; pr < rPanels; ++pr )
 			{
-				double const rA = rEdge[ pr ];
-				double const rB = rEdge[ pr + 1 ];
-				double const rLength = rB - rA;
+				double const radiusA = edgeRadius[ pr ];
+				double const radiusB = edgeRadius[ pr + 1 ];
+				double const radiusLength = radiusB - radiusA;
 				// Grade toward whichever end of this panel is nearer the field
 				// point. For a split panel that is the shared corner; for an
 				// unsplit one it is the nearer edge of the coil.
 				bool const rFromLow =
-					( std::abs( rA - rSplit ) <= std::abs( rB - rSplit ) );
+					( std::abs( radiusA - splitRadius ) <= std::abs( radiusB - splitRadius ) );
 
 				for ( int pz = 0; pz < zPanels; ++pz )
 				{
@@ -594,10 +594,10 @@ namespace meq
 						double const uJacobian = 3.0*u*u;
 
 						double const source = rFromLow
-							? rA + rLength*uCubed
-							: rB - rLength*uCubed;
+							? radiusA + radiusLength*uCubed
+							: radiusB - radiusLength*uCubed;
 						double const rWeight =
-							0.5*rule.weight[ iu ]*rLength*uJacobian;
+							0.5*rule.weight[ iu ]*radiusLength*uJacobian;
 
 						for ( int j = 0; j < order; ++j )
 						{
@@ -617,7 +617,7 @@ namespace meq
 							double d = 0.0;
 							double kSquared = 0.0;
 							double complementary = 0.0;
-							loopGeometry( r, z, source, height, d, kSquared,
+							loopGeometry( radius, z, source, height, d, kSquared,
 							              complementary );
 
 							// The node has rounded onto the field point. See
@@ -647,25 +647,25 @@ namespace meq
 		/// the coil this is harder for the graded rule than psi is. Outside it
 		/// -- FB-7's case, the conductor being beyond Gamma -- both are
 		/// analytic and both are spectral.
-		void crossSectionGradient( Coil const &coil, double r, double z,
+		void crossSectionGradient( Coil const &coil, double radius, double z,
 		                           int order, double &outR, double &outZ )
 		{
 			GaussRule const &rule = gaussRule( order );
 
-			double const rLow = coil.rMin();
-			double const rHigh = coil.rMax();
+			double const lowRadius = coil.minRadius();
+			double const highRadius = coil.maxRadius();
 			double const zLow = coil.zMin();
 			double const zHigh = coil.zMax();
 
-			double const rSplit = std::min( std::max( r, rLow ), rHigh );
+			double const splitRadius = std::min( std::max( radius, lowRadius ), highRadius );
 			double const zSplit = std::min( std::max( z, zLow ), zHigh );
 
-			double rEdge[ 3 ] = { rLow, rHigh, rHigh };
+			double edgeRadius[ 3 ] = { lowRadius, highRadius, highRadius };
 			int rPanels = 1;
-			if ( rSplit > rLow && rSplit < rHigh )
+			if ( splitRadius > lowRadius && splitRadius < highRadius )
 			{
-				rEdge[ 1 ] = rSplit;
-				rEdge[ 2 ] = rHigh;
+				edgeRadius[ 1 ] = splitRadius;
+				edgeRadius[ 2 ] = highRadius;
 				rPanels = 2;
 			}
 
@@ -682,11 +682,11 @@ namespace meq
 			double totalZ = 0.0;
 			for ( int pr = 0; pr < rPanels; ++pr )
 			{
-				double const rA = rEdge[ pr ];
-				double const rB = rEdge[ pr + 1 ];
-				double const rLength = rB - rA;
+				double const radiusA = edgeRadius[ pr ];
+				double const radiusB = edgeRadius[ pr + 1 ];
+				double const radiusLength = radiusB - radiusA;
 				bool const rFromLow =
-					( std::abs( rA - rSplit ) <= std::abs( rB - rSplit ) );
+					( std::abs( radiusA - splitRadius ) <= std::abs( radiusB - splitRadius ) );
 
 				for ( int pz = 0; pz < zPanels; ++pz )
 				{
@@ -704,10 +704,10 @@ namespace meq
 						double const uJacobian = 3.0*u*u;
 
 						double const source = rFromLow
-							? rA + rLength*uCubed
-							: rB - rLength*uCubed;
+							? radiusA + radiusLength*uCubed
+							: radiusB - radiusLength*uCubed;
 						double const rWeight =
-							0.5*rule.weight[ iu ]*rLength*uJacobian;
+							0.5*rule.weight[ iu ]*radiusLength*uJacobian;
 
 						for ( int j = 0; j < order; ++j )
 						{
@@ -727,7 +727,7 @@ namespace meq
 							double d = 0.0;
 							double kSquared = 0.0;
 							double complementary = 0.0;
-							loopGeometry( r, z, source, height, d, kSquared,
+							loopGeometry( radius, z, source, height, d, kSquared,
 							              complementary );
 
 							// The same underflow guard crossSectionIntegral
@@ -737,7 +737,7 @@ namespace meq
 
 							double gradR = 0.0;
 							double gradZ = 0.0;
-							filamentGradKernel( r, z, source, height, d,
+							filamentGradKernel( radius, z, source, height, d,
 							                    kSquared, complementary,
 							                    gradR, gradZ );
 
@@ -780,7 +780,7 @@ namespace meq
 				"the half-width must be" );
 
 		// The same refusal meq::BoundaryShape makes, and for the same reason:
-		// the Grad-Shafranov operator carries a 1/r which is not integrable
+		// the Grad-Shafranov operator carries a 1/R which is not integrable
 		// through the axis, so a coil reaching it is not merely unusual, it is
 		// unsolvable. The filament kernel would give out there too -- psi is
 		// exactly zero on the axis, so a coil straddling it would be
@@ -788,10 +788,10 @@ namespace meq
 		if ( !( centreRIn - halfWidthIn > 0.0 ) )
 		{
 			std::ostringstream message;
-			message << "meq::Coil: the coil reaches r = "
+			message << "meq::Coil: the coil reaches R = "
 			        << centreRIn - halfWidthIn
 			        << ", which is on or beyond the axis; the Grad-Shafranov "
-			           "operator's 1/r is not integrable there";
+			           "operator's 1/R is not integrable there";
 			throw std::invalid_argument( message.str() );
 		}
 	}
@@ -821,12 +821,12 @@ namespace meq
 		return currentValue;
 	}
 
-	double Coil::rMin() const
+	double Coil::minRadius() const
 	{
 		return centreRValue - halfWidthValue;
 	}
 
-	double Coil::rMax() const
+	double Coil::maxRadius() const
 	{
 		return centreRValue + halfWidthValue;
 	}
@@ -851,17 +851,17 @@ namespace meq
 		return currentValue/area();
 	}
 
-	bool Coil::contains( double r, double z ) const
+	bool Coil::contains( double radius, double z ) const
 	{
 		// Closed, edges included; see the header for why that is stated rather
 		// than merely chosen.
-		return r >= rMin() && r <= rMax() && z >= zMin() && z <= zMax();
+		return radius >= minRadius() && radius <= maxRadius() && z >= zMin() && z <= zMax();
 	}
 
-	double filamentPsi( double r, double z, double loopRadius,
+	double filamentPsi( double radius, double z, double loopRadius,
 	                    double loopHeight, double current, double mu0 )
 	{
-		requireFinite( r, "the field point radius", "meq::filamentPsi" );
+		requireFinite( radius, "the field point radius", "meq::filamentPsi" );
 		requireFinite( z, "the field point height", "meq::filamentPsi" );
 		requireFinite( loopRadius, "the loop radius", "meq::filamentPsi" );
 		requireFinite( loopHeight, "the loop height", "meq::filamentPsi" );
@@ -871,13 +871,13 @@ namespace meq
 		if ( !( loopRadius > 0.0 ) )
 			throw std::invalid_argument(
 				"meq::filamentPsi: the loop radius must be positive" );
-		if ( r < 0.0 )
-			refuseNegativeRadius( "meq::filamentPsi", r, z );
+		if ( radius < 0.0 )
+			refuseNegativeRadius( "meq::filamentPsi", radius, z );
 
 		double d = 0.0;
 		double kSquared = 0.0;
 		double complementary = 0.0;
-		loopGeometry( r, z, loopRadius, loopHeight, d, kSquared, complementary );
+		loopGeometry( radius, z, loopRadius, loopHeight, d, kSquared, complementary );
 
 		if ( !( complementary > 0.0 ) )
 			throw std::invalid_argument(
@@ -891,11 +891,11 @@ namespace meq
 		return mu0*current*geometricKernel( d, kSquared, complementary );
 	}
 
-	void filamentGradPsi( double r, double z, double loopRadius,
+	void filamentGradPsi( double radius, double z, double loopRadius,
 	                      double loopHeight, double current,
 	                      double &dPsiDr, double &dPsiDz, double mu0 )
 	{
-		requireFinite( r, "the field point radius", "meq::filamentGradPsi" );
+		requireFinite( radius, "the field point radius", "meq::filamentGradPsi" );
 		requireFinite( z, "the field point height", "meq::filamentGradPsi" );
 		requireFinite( loopRadius, "the loop radius", "meq::filamentGradPsi" );
 		requireFinite( loopHeight, "the loop height", "meq::filamentGradPsi" );
@@ -905,15 +905,15 @@ namespace meq
 		if ( !( loopRadius > 0.0 ) )
 			throw std::invalid_argument(
 				"meq::filamentGradPsi: the loop radius must be positive" );
-		if ( r < 0.0 )
+		if ( radius < 0.0 )
 			throw std::invalid_argument(
 				"meq::filamentGradPsi: the field point radius must not be "
-				"negative; r = 0 is allowed and gives exactly zero" );
+				"negative; R = 0 is allowed and gives exactly zero" );
 
 		double d = 0.0;
 		double kSquared = 0.0;
 		double complementary = 0.0;
-		loopGeometry( r, z, loopRadius, loopHeight, d, kSquared, complementary );
+		loopGeometry( radius, z, loopRadius, loopHeight, d, kSquared, complementary );
 
 		if ( !( complementary > 0.0 ) )
 			throw std::invalid_argument(
@@ -925,7 +925,7 @@ namespace meq
 
 		double gradR = 0.0;
 		double gradZ = 0.0;
-		filamentGradKernel( r, z, loopRadius, loopHeight, d, kSquared,
+		filamentGradKernel( radius, z, loopRadius, loopHeight, d, kSquared,
 		                    complementary, gradR, gradZ );
 
 		// Both brackets carry k^2 as an explicit factor and k^2 is exactly zero
@@ -935,59 +935,59 @@ namespace meq
 		dPsiDz = mu0*current*gradZ;
 	}
 
-	void filamentFlux( double r, double z, double loopRadius,
+	void filamentFlux( double radius, double z, double loopRadius,
 	                   double loopHeight, double current,
 	                   double &qR, double &qZ, double mu0 )
 	{
-		filamentGradPsi( r, z, loopRadius, loopHeight, current, qR, qZ, mu0 );
+		filamentGradPsi( radius, z, loopRadius, loopHeight, current, qR, qZ, mu0 );
 		// 0/0 on the axis, deliberately not special-cased: the limit is finite
 		// but this expression does not reach it, and a caller reading NaN has
 		// learned something a quietly substituted limit would have hidden.
-		qR /= r;
-		qZ /= r;
+		qR /= radius;
+		qZ /= radius;
 	}
 
-	double coilPsi( Coil const &coil, double r, double z, int order,
+	double coilPsi( Coil const &coil, double radius, double z, int order,
 	                double mu0 )
 	{
-		requireFinite( r, "the field point radius", "meq::coilPsi" );
+		requireFinite( radius, "the field point radius", "meq::coilPsi" );
 		requireFinite( z, "the field point height", "meq::coilPsi" );
 		requireFinite( mu0, "mu0", "meq::coilPsi" );
 		requireOrder( order, "meq::coilPsi" );
 
-		if ( r < 0.0 )
-			refuseNegativeRadius( "meq::coilPsi", r, z );
+		if ( radius < 0.0 )
+			refuseNegativeRadius( "meq::coilPsi", radius, z );
 
 		return mu0*coil.currentDensity()
-		       *crossSectionIntegral( coil, r, z, order );
+		       *crossSectionIntegral( coil, radius, z, order );
 	}
 
-	void coilGradPsi( Coil const &coil, double r, double z,
+	void coilGradPsi( Coil const &coil, double radius, double z,
 	                  double &dPsiDr, double &dPsiDz, int order, double mu0 )
 	{
-		requireFinite( r, "the field point radius", "meq::coilGradPsi" );
+		requireFinite( radius, "the field point radius", "meq::coilGradPsi" );
 		requireFinite( z, "the field point height", "meq::coilGradPsi" );
 		requireFinite( mu0, "mu0", "meq::coilGradPsi" );
 		requireOrder( order, "meq::coilGradPsi" );
 
-		if ( r < 0.0 )
-			refuseNegativeRadius( "meq::coilGradPsi", r, z );
+		if ( radius < 0.0 )
+			refuseNegativeRadius( "meq::coilGradPsi", radius, z );
 
 		double gradR = 0.0;
 		double gradZ = 0.0;
-		crossSectionGradient( coil, r, z, order, gradR, gradZ );
+		crossSectionGradient( coil, radius, z, order, gradR, gradZ );
 
 		double const scale = mu0*coil.currentDensity();
 		dPsiDr = scale*gradR;
 		dPsiDz = scale*gradZ;
 	}
 
-	void coilFlux( Coil const &coil, double r, double z,
+	void coilFlux( Coil const &coil, double radius, double z,
 	               double &qR, double &qZ, int order, double mu0 )
 	{
-		coilGradPsi( coil, r, z, qR, qZ, order, mu0 );
-		qR /= r;
-		qZ /= r;
+		coilGradPsi( coil, radius, z, qR, qZ, order, mu0 );
+		qR /= radius;
+		qZ /= radius;
 	}
 
 	double filamentAxisFlux( double z, double loopRadius, double loopHeight,
@@ -1023,19 +1023,19 @@ namespace meq
 		// carries would buy nothing.
 		GaussRule const &rule = gaussRule( order );
 
-		double const rLow = coil.rMin();
-		double const rHigh = coil.rMax();
+		double const lowRadius = coil.minRadius();
+		double const highRadius = coil.maxRadius();
 		double const zLow = coil.zMin();
 		double const zHigh = coil.zMax();
-		double const rLength = rHigh - rLow;
+		double const radiusLength = highRadius - lowRadius;
 		double const zLength = zHigh - zLow;
 
 		double total = 0.0;
 		for ( int i = 0; i < order; ++i )
 		{
 			std::size_t const iu = static_cast<std::size_t>( i );
-			double const source = rLow + rLength*0.5*( rule.abscissa[ iu ] + 1.0 );
-			double const rWeight = 0.5*rule.weight[ iu ]*rLength;
+			double const source = lowRadius + radiusLength*0.5*( rule.abscissa[ iu ] + 1.0 );
+			double const rWeight = 0.5*rule.weight[ iu ]*radiusLength;
 
 			for ( int j = 0; j < order; ++j )
 			{
@@ -1056,11 +1056,11 @@ namespace meq
 		return mu0*coil.currentDensity()*total;
 	}
 
-	double ellipsePsi( double r, double z, double centreR, double centreZ,
+	double ellipsePsi( double radius, double z, double centreR, double centreZ,
 	                   double semiR, double semiZ, double current, int order,
 	                   double mu0 )
 	{
-		requireFinite( r, "the field point radius", "meq::ellipsePsi" );
+		requireFinite( radius, "the field point radius", "meq::ellipsePsi" );
 		requireFinite( z, "the field point height", "meq::ellipsePsi" );
 		requireFinite( centreR, "the centre radius", "meq::ellipsePsi" );
 		requireFinite( centreZ, "the centre height", "meq::ellipsePsi" );
@@ -1070,7 +1070,7 @@ namespace meq
 		requireFinite( mu0, "mu0", "meq::ellipsePsi" );
 		requireOrder( order, "meq::ellipsePsi" );
 
-		if ( r < 0.0 )
+		if ( radius < 0.0 )
 			throw std::invalid_argument(
 				"meq::ellipsePsi: the field point radius must not be "
 				"negative" );
@@ -1080,7 +1080,7 @@ namespace meq
 				"meq::ellipsePsi: both semi-axes must be positive" );
 
 		// The same refusal meq::Coil and meq::CurrentFilament make, and for
-		// the same reason: the operator's 1/r is not integrable through r = 0
+		// the same reason: the operator's 1/R is not integrable through R = 0
 		// and psi is identically zero there, so a conductor reaching the axis
 		// would be sitting in its own zero.
 		if ( !( centreR - semiR > 0.0 ) )
@@ -1096,7 +1096,7 @@ namespace meq
 		double const density = current/( pi*semiR*semiZ );
 
 		return mu0*density
-		       *ellipseIntegral( r, z, centreR, centreZ, semiR, semiZ, order );
+		       *ellipseIntegral( radius, z, centreR, centreZ, semiR, semiZ, order );
 	}
 
 	CurrentFilament::CurrentFilament( double radiusIn, double heightIn,
@@ -1110,8 +1110,8 @@ namespace meq
 		requireFinite( currentIn, "the current", "meq::CurrentFilament" );
 
 		// The same refusal meq::Coil makes for a coil reaching the axis, and
-		// for the same reason: the operator's 1/r is not integrable through
-		// r = 0, and psi is identically zero on the axis so a conductor there
+		// for the same reason: the operator's 1/R is not integrable through
+		// R = 0, and psi is identically zero on the axis so a conductor there
 		// would be sitting in its own zero.
 		if ( !( radiusIn > 0.0 ) )
 		{
@@ -1120,7 +1120,7 @@ namespace meq
 			           "is " << radiusIn
 			        << ". A filament on or beyond the axis is the same refusal "
 			           "meq::Coil makes for a coil reaching it: the "
-			           "Grad-Shafranov operator's 1/r is not integrable there";
+			           "Grad-Shafranov operator's 1/R is not integrable there";
 			throw std::invalid_argument( message.str() );
 		}
 	}
@@ -1140,24 +1140,24 @@ namespace meq
 		return currentValue;
 	}
 
-	double filamentPsi( CurrentFilament const &filament, double r, double z,
+	double filamentPsi( CurrentFilament const &filament, double radius, double z,
 	                    double mu0 )
 	{
-		return filamentPsi( r, z, filament.radius(), filament.height(),
+		return filamentPsi( radius, z, filament.radius(), filament.height(),
 		                    filament.current(), mu0 );
 	}
 
-	void filamentGradPsi( CurrentFilament const &filament, double r, double z,
+	void filamentGradPsi( CurrentFilament const &filament, double radius, double z,
 	                      double &dPsiDr, double &dPsiDz, double mu0 )
 	{
-		filamentGradPsi( r, z, filament.radius(), filament.height(),
+		filamentGradPsi( radius, z, filament.radius(), filament.height(),
 		                 filament.current(), dPsiDr, dPsiDz, mu0 );
 	}
 
-	void filamentFlux( CurrentFilament const &filament, double r, double z,
+	void filamentFlux( CurrentFilament const &filament, double radius, double z,
 	                   double &qR, double &qZ, double mu0 )
 	{
-		filamentFlux( r, z, filament.radius(), filament.height(),
+		filamentFlux( radius, z, filament.radius(), filament.height(),
 		              filament.current(), qR, qZ, mu0 );
 	}
 
@@ -1217,9 +1217,9 @@ namespace meq
 
 		for ( int i = 0; i < nR; ++i )
 		{
-			double const r = coil.rMin() + ( i + 0.5 )*widthStep;
+			double const radius = coil.minRadius() + ( i + 0.5 )*widthStep;
 			for ( int j = 0; j < nZ; ++j )
-				stack.emplace_back( r,
+				stack.emplace_back( radius,
 				                    coil.zMin() + ( j + 0.5 )*heightStep,
 				                    share );
 		}
@@ -1324,17 +1324,17 @@ namespace meq
 		return coilList;
 	}
 
-	double CoilSet::f( double r, double z ) const
+	double CoilSet::f( double radius, double z ) const
 	{
-		// F = mu0 r j_phi, derived in the header. Summed rather than
+		// F = mu0 R j_phi, derived in the header. Summed rather than
 		// short-circuited on the first hit, because overlapping coils really do
 		// add their current densities.
 		double density = 0.0;
 		for ( Coil const &c : coilList )
-			if ( c.contains( r, z ) )
+			if ( c.contains( radius, z ) )
 				density += c.currentDensity();
 
-		return permeability*r*density;
+		return permeability*radius*density;
 	}
 
 	double CoilSet::totalCurrent() const
@@ -1345,29 +1345,29 @@ namespace meq
 		return sum;
 	}
 
-	int CoilSet::indexContaining( double r, double z ) const
+	int CoilSet::indexContaining( double radius, double z ) const
 	{
 		for ( std::size_t i = 0; i < coilList.size(); ++i )
-			if ( coilList[ i ].contains( r, z ) )
+			if ( coilList[ i ].contains( radius, z ) )
 				return static_cast<int>( i );
 		return -1;
 	}
 
-	double CoilSet::psi( double r, double z ) const
+	double CoilSet::psi( double radius, double z ) const
 	{
 		double sum = 0.0;
 		for ( Coil const &c : coilList )
-			sum += coilPsi( c, r, z, quadratureOrderValue, permeability );
+			sum += coilPsi( c, radius, z, quadratureOrderValue, permeability );
 		return sum;
 	}
 
-	double CoilSet::psiOf( std::size_t index, double r, double z ) const
+	double CoilSet::psiOf( std::size_t index, double radius, double z ) const
 	{
-		return coilPsi( coil( index ), r, z, quadratureOrderValue,
+		return coilPsi( coil( index ), radius, z, quadratureOrderValue,
 		                permeability );
 	}
 
-	void CoilSet::gradPsi( double r, double z,
+	void CoilSet::gradPsi( double radius, double z,
 	                       double &dPsiDr, double &dPsiDz ) const
 	{
 		// Delta* is linear, so the gradient of the sum is the sum of the
@@ -1379,7 +1379,7 @@ namespace meq
 		{
 			double gradR = 0.0;
 			double gradZ = 0.0;
-			coilGradPsi( one, r, z, gradR, gradZ, quadratureOrderValue,
+			coilGradPsi( one, radius, z, gradR, gradZ, quadratureOrderValue,
 			             permeability );
 			totalR += gradR;
 			totalZ += gradZ;
@@ -1388,21 +1388,21 @@ namespace meq
 		dPsiDz = totalZ;
 	}
 
-	void CoilSet::gradPsiOf( std::size_t index, double r, double z,
+	void CoilSet::gradPsiOf( std::size_t index, double radius, double z,
 	                         double &dPsiDr, double &dPsiDz ) const
 	{
-		coilGradPsi( coil( index ), r, z, dPsiDr, dPsiDz, quadratureOrderValue,
+		coilGradPsi( coil( index ), radius, z, dPsiDr, dPsiDz, quadratureOrderValue,
 		             permeability );
 	}
 
-	void CoilSet::flux( double r, double z, double &qR, double &qZ ) const
+	void CoilSet::flux( double radius, double z, double &qR, double &qZ ) const
 	{
-		gradPsi( r, z, qR, qZ );
+		gradPsi( radius, z, qR, qZ );
 		// NaN on the axis in both components. gradPsi() is exactly zero there
 		// and this divides it by zero; the limit is finite and is not reached.
 		// See the header -- a semicircle centred on the axis MEETS it.
-		qR /= r;
-		qZ /= r;
+		qR /= radius;
+		qZ /= radius;
 	}
 
 	void CoilSet::setQuadratureOrder( int order )
@@ -1508,17 +1508,17 @@ namespace meq
 		return sum;
 	}
 
-	double ExteriorCoilSet::psi( double r, double z ) const
+	double ExteriorCoilSet::psi( double radius, double z ) const
 	{
 		double sum = 0.0;
 		for ( Coil const &c : coilList )
-			sum += coilPsi( c, r, z, quadratureOrderValue, permeability );
+			sum += coilPsi( c, radius, z, quadratureOrderValue, permeability );
 		for ( CurrentFilament const &one : filamentList )
-			sum += filamentPsi( one, r, z, permeability );
+			sum += filamentPsi( one, radius, z, permeability );
 		return sum;
 	}
 
-	void ExteriorCoilSet::gradPsi( double r, double z,
+	void ExteriorCoilSet::gradPsi( double radius, double z,
 	                               double &dPsiDr, double &dPsiDz ) const
 	{
 		// Delta* is linear, so the gradient of the sum is the sum of the
@@ -1531,7 +1531,7 @@ namespace meq
 		{
 			double gradR = 0.0;
 			double gradZ = 0.0;
-			coilGradPsi( one, r, z, gradR, gradZ, quadratureOrderValue,
+			coilGradPsi( one, radius, z, gradR, gradZ, quadratureOrderValue,
 			             permeability );
 			totalR += gradR;
 			totalZ += gradZ;
@@ -1541,7 +1541,7 @@ namespace meq
 		{
 			double gradR = 0.0;
 			double gradZ = 0.0;
-			filamentGradPsi( one, r, z, gradR, gradZ, permeability );
+			filamentGradPsi( one, radius, z, gradR, gradZ, permeability );
 			totalR += gradR;
 			totalZ += gradZ;
 		}
@@ -1550,16 +1550,16 @@ namespace meq
 		dPsiDz = totalZ;
 	}
 
-	void ExteriorCoilSet::flux( double r, double z,
+	void ExteriorCoilSet::flux( double radius, double z,
 	                            double &qR, double &qZ ) const
 	{
-		gradPsi( r, z, qR, qZ );
+		gradPsi( radius, z, qR, qZ );
 		// NaN on the axis in both components. gradPsi() is exactly zero there
 		// and this divides it by zero; the limit is finite and is not reached.
 		// See the header -- a semicircle centred on the axis MEETS it, and
 		// GradShafranovSolver::conductorNormalFlux() is where the rule lives.
-		qR /= r;
-		qZ /= r;
+		qR /= radius;
+		qZ /= radius;
 	}
 
 	double ExteriorCoilSet::clearance( double centreZ, double rhoGamma ) const
@@ -1580,14 +1580,14 @@ namespace meq
 		for ( Coil const &one : coilList )
 		{
 			// The nearest point of the CLOSED rectangle to ( 0, centreZ ). The
-			// centre is on the axis and Coil refuses rMin <= 0, so the nearest
-			// radius is always rMin; only the height needs clamping. Taking the
+			// centre is on the axis and Coil refuses R_min <= 0, so the nearest
+			// radius is always R_min; only the height needs clamping. Taking the
 			// nearest point rather than the centre is what makes a coil
 			// straddling Gamma report a negative clearance.
 			double const nearZ = std::min( std::max( centreZ, one.zMin() ),
 			                               one.zMax() );
 			least = std::min( least,
-			                  std::hypot( one.rMin(), nearZ - centreZ ) );
+			                  std::hypot( one.minRadius(), nearZ - centreZ ) );
 		}
 
 		for ( CurrentFilament const &one : filamentList )
@@ -1625,17 +1625,17 @@ namespace meq
 			throw std::invalid_argument( "meq::CoilAugmentedSource: the coil set is null" );
 	}
 
-	double CoilAugmentedSource::f( double r, double z, double psi ) const
+	double CoilAugmentedSource::f( double radius, double z, double psi ) const
 	{
-		return plasmaSource->f( r, z, psi ) + coilSet->f( r, z );
+		return plasmaSource->f( radius, z, psi ) + coilSet->f( radius, z );
 	}
 
-	double CoilAugmentedSource::dFdPsi( double r, double z, double psi ) const
+	double CoilAugmentedSource::dFdPsi( double radius, double z, double psi ) const
 	{
 		// The coils contribute nothing: their current is data, not a function
 		// of psi. Adding a zero here would be harmless and is left out so that
 		// the asymmetry with f() is visible rather than buried.
-		return plasmaSource->dFdPsi( r, z, psi );
+		return plasmaSource->dFdPsi( radius, z, psi );
 	}
 
 	Source const & CoilAugmentedSource::plasma() const { return *plasmaSource; }
@@ -1657,14 +1657,14 @@ namespace meq
 			throw std::invalid_argument( "meq::CoilAugmentedNormalisedSource: the coil set is null" );
 	}
 
-	double CoilAugmentedNormalisedSource::f( double r, double z, double psi ) const
+	double CoilAugmentedNormalisedSource::f( double radius, double z, double psi ) const
 	{
-		return plasmaSource->f( r, z, psi ) + coilSet->f( r, z );
+		return plasmaSource->f( radius, z, psi ) + coilSet->f( radius, z );
 	}
 
-	double CoilAugmentedNormalisedSource::dFdPsi( double r, double z, double psi ) const
+	double CoilAugmentedNormalisedSource::dFdPsi( double radius, double z, double psi ) const
 	{
-		return plasmaSource->dFdPsi( r, z, psi );
+		return plasmaSource->dFdPsi( radius, z, psi );
 	}
 
 	void CoilAugmentedNormalisedSource::setNormalisation( double psiAxis, double psiBoundary )
@@ -1693,25 +1693,25 @@ namespace meq
 		return plasmaSource->currentScale();
 	}
 
-	double CoilAugmentedNormalisedSource::scaledF( double r, double z,
+	double CoilAugmentedNormalisedSource::scaledF( double radius, double z,
 	                                               double psi ) const
 	{
-		return plasmaSource->scaledF( r, z, psi );
+		return plasmaSource->scaledF( radius, z, psi );
 	}
 
-	double CoilAugmentedNormalisedSource::scaledDFdPsi( double r, double z,
+	double CoilAugmentedNormalisedSource::scaledDFdPsi( double radius, double z,
 	                                                    double psi ) const
 	{
-		return plasmaSource->scaledDFdPsi( r, z, psi );
+		return plasmaSource->scaledDFdPsi( radius, z, psi );
 	}
 
 	bool CoilAugmentedNormalisedSource::normalisationDerivatives(
-		double r, double z, double psi, double &dFdAxis,
+		double radius, double z, double psi, double &dFdAxis,
 		double &dFdBoundary ) const
 	{
 		// The coil term is independent of both normalisations, so the wrapped
 		// source's answer IS the sum's answer.
-		return plasmaSource->normalisationDerivatives( r, z, psi, dFdAxis,
+		return plasmaSource->normalisationDerivatives( radius, z, psi, dFdAxis,
 		                                               dFdBoundary );
 	}
 
@@ -1745,13 +1745,13 @@ namespace meq
 		NormalisedSource::thawPlasmaEdge();
 	}
 
-	double CoilAugmentedNormalisedSource::fOutsidePlasma( double r, double z ) const
+	double CoilAugmentedNormalisedSource::fOutsidePlasma( double radius, double z ) const
 	{
 		// The coil term and nothing else, and it is the SAME expression f() adds
 		// -- so on an element the fill did not reach this class contributes
 		// exactly what it would have contributed with the plasma term absent,
 		// bit for bit rather than to round-off.
-		return coilSet->f( r, z );
+		return coilSet->f( radius, z );
 	}
 
 	CoilSet const * CoilAugmentedNormalisedSource::conductors() const

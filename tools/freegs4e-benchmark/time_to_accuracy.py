@@ -190,10 +190,10 @@ def main():
           f"{'ratio':>7}")
     front = []
     for target in TARGETS:
-        ok = [r for r in meq_rows if r["ok"] and r["rel_l2"] <= target]
-        ok_in = [r for r in meq_rows if r["ok"] and r["interior_l2"] <= target]
-        best_in = min(ok_in, key=lambda r: r["seconds"]) if ok_in else None
-        best = min(ok, key=lambda r: r["seconds"]) if ok else None
+        ok = [R for R in meq_rows if R["ok"] and R["rel_l2"] <= target]
+        ok_in = [R for R in meq_rows if R["ok"] and R["interior_l2"] <= target]
+        best_in = min(ok_in, key=lambda R: R["seconds"]) if ok_in else None
+        best = min(ok, key=lambda R: R["seconds"]) if ok else None
         # freegsnke's own error against the truth is not measured here -- the
         # truth IS its finest level, so its error is zero by construction and a
         # ratio would be meaningless. What is reported is the cost of the level

@@ -22,14 +22,14 @@
  *     dC_Ax/du = -[ dpsi_h/du |_x*  +  grad psi_h( x* ) . d( x* )/du ].
  *
  * GradShafranov.cpp assembles the first and drops the second by the envelope
- * theorem. That step was justified by "grad_bar( psi ) = r q, so
+ * theorem. That step was justified by "grad_bar( psi ) = R q, so
  * grad( psi_h )( x* ) = 0 at a zero of q_h IDENTICALLY" -- and the relation
  * quoted is the CONTINUOUS one. The discrete flux equation gives, per element
  * and for all v in the flux space,
  *
- *     ( r q_h - grad_bar psi_h, v )_K = -< psi_h - psihat_h, v.n >_dK,
+ *     ( R q_h - grad_bar psi_h, v )_K = -< psi_h - psihat_h, v.n >_dK,
  *
- * so r q_h - grad_bar psi_h is the local lifting of the trace jump rather than
+ * so R q_h - grad_bar psi_h is the local lifting of the trace jump rather than
  * zero. cornerEntry()'s XP-3 arm says exactly this about the same identity --
  * "psi_h and q_h are separate solved fields whose identity is only weak" -- and
  * the two cannot both be right.
@@ -86,14 +86,14 @@ namespace
 	mfem::FunctionCoefficient bump( double height )
 	{
 		meq::tests::Rectangle const box = standardBox();
-		double const rMin = box.rMin;
+		double const minRadius = box.minRadius;
 		double const zMin = box.zMin;
 		double const width = box.width();
 		double const depth = box.height();
 		return mfem::FunctionCoefficient(
-			[ height, rMin, zMin, width, depth ]( mfem::Vector const &x )
+			[ height, minRadius, zMin, width, depth ]( mfem::Vector const &x )
 			{
-				return height*std::sin( M_PI*( x( 0 ) - rMin )/width )
+				return height*std::sin( M_PI*( x( 0 ) - minRadius )/width )
 				       *std::sin( M_PI*( x( 1 ) - zMin )/depth );
 			} );
 	}
@@ -129,7 +129,7 @@ namespace
 		m->zero = std::make_unique<mfem::ConstantCoefficient>( 0.0 );
 		m->guess = std::make_unique<mfem::FunctionCoefficient>( bump( 0.30 ) );
 
-		double const limiterR = box.rMin + 0.68*( box.rMax - box.rMin );
+		double const limiterR = box.minRadius + 0.68*( box.maxRadius - box.minRadius );
 		double const limiterZ = box.zMin + 0.31*( box.zMax - box.zMin );
 
 		m->solver = std::make_unique<meq::GradShafranovSolver>( *m->mesh, order );
@@ -153,12 +153,12 @@ namespace
 	/// The value and gradient of a scalar field at a physical point, through the
 	/// element that contains it. Returns false when the point is not in the
 	/// mesh, which a located axis never is.
-	bool valueAndGradientAt( mfem::GridFunction const &field, double r, double z,
+	bool valueAndGradientAt( mfem::GridFunction const &field, double radius, double z,
 	                         double &value, mfem::Vector &gradient )
 	{
 		mfem::Mesh *mesh = field.FESpace()->GetMesh();
 		mfem::DenseMatrix point( 2, 1 );
-		point( 0, 0 ) = r;
+		point( 0, 0 ) = radius;
 		point( 1, 0 ) = z;
 		mfem::Array<int> elements;
 		mfem::Array<mfem::IntegrationPoint> reference;
@@ -209,7 +209,7 @@ BOOST_AUTO_TEST_CASE( theFluxAndThePotentialGradientAgreeOnlyWeaklyAtTheAxis )
 
 		double value = 0.0;
 		mfem::Vector gradient;
-		BOOST_TEST_REQUIRE( valueAndGradientAt( m->solver->potential(), axis.r,
+		BOOST_TEST_REQUIRE( valueAndGradientAt( m->solver->potential(), axis.radius,
 		                                        axis.z, value, gradient ),
 		                    "the located axis is not in the mesh at n = " << n );
 
@@ -221,9 +221,9 @@ BOOST_AUTO_TEST_CASE( theFluxAndThePotentialGradientAgreeOnlyWeaklyAtTheAxis )
 		 * post-processing solves for. If the envelope argument is to hold
 		 * anywhere it is here, and this column is what says by how much.
 		 *
-		 * It is NOT exact even so: psi* is the L2 projection of r q_h onto the
+		 * It is NOT exact even so: psi* is the L2 projection of R q_h onto the
 		 * gradients of P^(k+2) on the element, so grad psi* is the closest
-		 * gradient field to r q_h rather than r q_h itself. What it should buy
+		 * gradient field to R q_h rather than R q_h itself. What it should buy
 		 * is an ORDER -- grad psi* converges at O( h^(k+1) ) where grad psi_h
 		 * manages O( h^k ) -- and an order is the difference between a term
 		 * worth assembling and one that is not.
@@ -232,7 +232,7 @@ BOOST_AUTO_TEST_CASE( theFluxAndThePotentialGradientAgreeOnlyWeaklyAtTheAxis )
 		double starValue = 0.0;
 		mfem::Vector starGradient;
 		BOOST_TEST_REQUIRE( valueAndGradientAt( m->solver->postProcessedPotential(),
-		                                        axis.r, axis.z, starValue,
+		                                        axis.radius, axis.z, starValue,
 		                                        starGradient ),
 		                    "psi* cannot be evaluated at the located axis at n = "
 		                    << n );
@@ -341,7 +341,7 @@ BOOST_AUTO_TEST_CASE( theAxisRowNeglectsATermItsOwnMachineryCouldAssemble )
 		// whole case is about.
 		mfem::Mesh *mesh = potential.FESpace()->GetMesh();
 		mfem::DenseMatrix point( 2, 1 );
-		point( 0, 0 ) = axis.r;
+		point( 0, 0 ) = axis.radius;
 		point( 1, 0 ) = axis.z;
 		mfem::Array<int> elements;
 		mfem::Array<mfem::IntegrationPoint> local;
@@ -465,7 +465,7 @@ BOOST_AUTO_TEST_CASE( theAxisConstraintJumpsWhenTheAxisCrossesAFace )
 	std::printf( "    %12s %16s %16s %10s %10s\n", "step", "numerator",
 	             "|x* moved|", "elem -", "elem +" );
 
-	auto axisUnder = [ & ]( double signedStep, int &element, double &r,
+	auto axisUnder = [ & ]( double signedStep, int &element, double &radius,
 	                        double &z )
 	{
 		mfem::GridFunction perturbed( flux );
@@ -479,12 +479,12 @@ BOOST_AUTO_TEST_CASE( theAxisConstraintJumpsWhenTheAxisCrossesAFace )
 		if ( !moved.tryFindAxis( found ) )
 			return std::numeric_limits<double>::quiet_NaN();
 		element = found.element;
-		r = found.r;
+		radius = found.radius;
 		z = found.z;
 
 		double value = 0.0;
 		mfem::Vector gradient;
-		if ( !valueAndGradientAt( potential, found.r, found.z, value, gradient ) )
+		if ( !valueAndGradientAt( potential, found.radius, found.z, value, gradient ) )
 			return std::numeric_limits<double>::quiet_NaN();
 		return value;
 	};

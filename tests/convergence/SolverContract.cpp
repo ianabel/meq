@@ -75,7 +75,7 @@ BOOST_AUTO_TEST_CASE( theConstructorRejectsWhatItCannotSolve )
 
 	BOOST_CHECK_THROW( meq::GradShafranovSolver( mesh, -1 ), std::invalid_argument );
 
-	// One dimension is not ( r, z ), and neither is three. A 3D mesh reaching the
+	// One dimension is not ( R, z ), and neither is three. A 3D mesh reaching the
 	// assembly would produce a shape mismatch a long way from the cause.
 	mfem::Mesh line = mfem::Mesh::MakeCartesian1D( 4 );
 	BOOST_CHECK_THROW( meq::GradShafranovSolver( line, 1 ), std::invalid_argument );

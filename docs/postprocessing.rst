@@ -22,7 +22,7 @@ its mean to that of :math:`\psi_h`:
 .. math::
 
    \left(\gradbar\psi^\star, \gradbar v\right)_K
-       &= \left(r\, q_h, \gradbar v\right)_K
+       &= \left(R\, q_h, \gradbar v\right)_K
        \quad \forall\, v \in P_{k+1}(K) \\
    \left(\psi^\star, 1\right)_K &= \left(\psi_h, 1\right)_K
 

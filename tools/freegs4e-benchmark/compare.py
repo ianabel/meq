@@ -151,8 +151,8 @@ def compare(npz_path, nc_path, meta_path, free_boundary=False, boxes=(),
     # comparison that quietly threw away the nodes where it disagrees would be
     # the instrument choosing the answer.
     excluded = np.zeros_like(use)
-    for r, z, halfWidth, halfHeight in boxes:
-        excluded |= ((np.abs(RR - r) <= halfWidth) & (np.abs(ZZ - z) <= halfHeight))
+    for R, z, halfWidth, halfHeight in boxes:
+        excluded |= ((np.abs(RR - R) <= halfWidth) & (np.abs(ZZ - z) <= halfHeight))
     kept = use & ~excluded
 
     def norms(mask):
@@ -259,7 +259,7 @@ if __name__ == "__main__":
         if not os.path.exists(nc):
             print(f"    {stem:22s} {'-':>7s} MEQ produced no .nc")
             continue
-        r = compare(npz, nc, meta, free_boundary=args.free_boundary,
+        result = compare(npz, nc, meta, free_boundary=args.free_boundary,
                     boxes=args.exclude_box, core=args.core)
 
         # THE AXIS GATE, BEFORE ANY NUMBER IS QUOTED. A run whose psi_ax is not
@@ -267,12 +267,12 @@ if __name__ == "__main__":
         # one [source] describes -- psi_ax is what the profiles are normalised
         # by -- so its norms are a comparison between two different problems and
         # printing them is worse than printing nothing.
-        if r["axis_verdict"] == "bad" and not args.allow_bad_axis:
-            refused.append((stem, r))
+        if result["axis_verdict"] == "bad" and not args.allow_bad_axis:
+            refused.append((stem, result))
             print(f"    {stem:22s} {'-':>7s} {'-':>6s} {'REFUSED':>11s} "
                   f"{'-':>11s} {'-':>11s}")
             continue
-        if r["axis_verdict"] == "absent":
+        if result["axis_verdict"] == "absent":
             # stdout carries the table and stderr the warnings, so without the
             # flush the two arrive interleaved wherever the pair is piped to one
             # file -- and this warning is about the row printed next to it.
@@ -280,36 +280,36 @@ if __name__ == "__main__":
             # so in the same words.
             sys.stdout.flush()
             print(f"    {stem:22s} -- warning: no axis check in the .nc "
-                  f"( {r['axis_note']} )", file=sys.stderr)
+                  f"( {result['axis_note']} )", file=sys.stderr)
 
-        rows.append((stem, r))
-        flag = "  BAD AXIS" if r["axis_verdict"] == "bad" else ""
-        print(f"    {stem:22s} {r['nodes']:7d} {r['dropped_band']:6d} "
-              f"{r['rel_l2']:11.3e} {r['rel_linf']:11.3e} {r['scale']:11.3e}"
+        rows.append((stem, result))
+        flag = "  BAD AXIS" if result["axis_verdict"] == "bad" else ""
+        print(f"    {stem:22s} {result['nodes']:7d} {result['dropped_band']:6d} "
+              f"{result['rel_l2']:11.3e} {result['rel_linf']:11.3e} {result['scale']:11.3e}"
               f"{flag}")
         # THE TWO HALVES OF AN EXCLUSION, both printed. The row above is every
         # comparable node and is the one a reader should distrust where the
         # conductors differ; these say how much of it is the conductors.
-        if r.get("interior") is not None:
-            it = r["interior"]
+        if result.get("interior") is not None:
+            it = result["interior"]
             print(f"    {'  plasma interior':22s} {it['nodes']:7d} {'':6s} "
                   f"{it['rel_l2']:11.3e} {it['rel_linf']:11.3e}"
-                  f"   (Psi_N <= {r['core']:.2f})")
-        if r["conductors"] is not None:
-            k, c = r["kept"], r["conductors"]
+                  f"   (Psi_N <= {result['core']:.2f})")
+        if result["conductors"] is not None:
+            k, c = result["kept"], result["conductors"]
             print(f"    {'  outside the conductors':22s} {k['nodes']:7d} "
                   f"{'':6s} {k['rel_l2']:11.3e} {k['rel_linf']:11.3e}")
             print(f"    {'  inside them':22s} {c['nodes']:7d} {'':6s} "
                   f"{c['rel_l2']:11.3e} {c['rel_linf']:11.3e}")
     if rows:
-        worst = max(r['rel_l2'] for _, r in rows)
+        worst = max(result['rel_l2'] for _, result in rows)
         print(f"\n    worst relative L2 across {len(rows)} cases: {worst:.3e}\n")
 
     sys.stdout.flush()              # see the note at the "absent" warning above
-    for stem, r in refused:
+    for stem, result in refused:
         print(f"\n  REFUSED {stem}: psi_ax is NOT the flux at a magnetic axis.\n"
-              f"    The .nc reports a normalised flux of {r['axis_flux']:.4f} at "
-              f"the located O-point{r['axis_note']},\n"
+              f"    The .nc reports a normalised flux of {result['axis_flux']:.4f} at "
+              f"the located O-point{result['axis_note']},\n"
               f"    where a magnetic axis must read 1 and this check accepts "
               f"anything at or above\n"
               f"    {1.0 - AXIS_TOLERANCE:.2f}. psi_ax is the largest NODAL value "

@@ -62,16 +62,16 @@ namespace meq
 namespace tests
 {
 
-	/// The axisymmetric box a benchmark is posed on. r must stay well away from
-	/// zero: the operator carries a 1/r and several of the closed forms carry a
-	/// log r.
+	/// The axisymmetric box a benchmark is posed on. R must stay well away from
+	/// zero: the operator carries a 1/R and several of the closed forms carry a
+	/// log R.
 	struct Rectangle
 	{
-		double rMin, rMax, zMin, zMax;
+		double minRadius, maxRadius, zMin, zMax;
 
 		double width() const
 		{
-			return rMax - rMin;
+			return maxRadius - minRadius;
 		}
 
 		double height() const
@@ -100,11 +100,11 @@ namespace tests
 		mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D( n, n, mfem::Element::TRIANGLE,
 		                                               false, box.width(),
 		                                               box.height() );
-		double const rMin = box.rMin;
+		double const minRadius = box.minRadius;
 		double const zMin = box.zMin;
-		mesh.Transform( [ rMin, zMin ]( mfem::Vector const &in, mfem::Vector &out )
+		mesh.Transform( [ minRadius, zMin ]( mfem::Vector const &in, mfem::Vector &out )
 		{
-			out( 0 ) = in( 0 ) + rMin;
+			out( 0 ) = in( 0 ) + minRadius;
 			out( 1 ) = in( 1 ) + zMin;
 		} );
 		return mesh;
@@ -118,7 +118,7 @@ namespace tests
 	/// template covers all of them.
 	///
 	/// It is a thin forward and nothing else. In particular it does not apply a
-	/// sign, a 1/r or a normalisation: meq::Source::f() is documented to be F as
+	/// sign, a 1/R or a normalisation: meq::Source::f() is documented to be F as
 	/// eq (2) writes it, and each fixture is documented to return F as its paper
 	/// writes it, which is the same F. Anything clever here would be a convention
 	/// change hidden in a test helper.
@@ -131,14 +131,14 @@ namespace tests
 			{
 			}
 
-			double f( double r, double z, double psi ) const override
+			double f( double radius, double z, double psi ) const override
 			{
-				return eq.f( r, z, psi );
+				return eq.f( radius, z, psi );
 			}
 
-			double dFdPsi( double r, double z, double psi ) const override
+			double dFdPsi( double radius, double z, double psi ) const override
 			{
-				return eq.dFdPsi( r, z, psi );
+				return eq.dFdPsi( radius, z, psi );
 			}
 
 		private:
@@ -149,7 +149,7 @@ namespace tests
 	/// NORMALISED flux and which therefore carries a normalisation the SOLVER
 	/// owns rather than the caller. setNormalisation() forwards to the fixture's
 	/// setPsiAxis() and nothing else differs -- in particular there is still no
-	/// sign, no 1/r and no scaling applied here.
+	/// sign, no 1/R and no scaling applied here.
 	///
 	/// The fixture is held by value, so the solver's writes do not reach the
 	/// caller's copy. That is deliberate: the value that matters afterwards is
@@ -165,14 +165,14 @@ namespace tests
 			{
 			}
 
-			double f( double r, double z, double psi ) const override
+			double f( double radius, double z, double psi ) const override
 			{
-				return eq.f( r, z, psi );
+				return eq.f( radius, z, psi );
 			}
 
-			double dFdPsi( double r, double z, double psi ) const override
+			double dFdPsi( double radius, double z, double psi ) const override
 			{
-				return eq.dFdPsi( r, z, psi );
+				return eq.dFdPsi( radius, z, psi );
 			}
 
 			/// THE FIXTURES CARRY NO psi_bnd, SO THIS REFUSES A NON-ZERO ONE
@@ -288,12 +288,12 @@ namespace tests
 	}
 
 	/// The observed order of a Newton sequence between three consecutive
-	/// residuals, log( r2/r1 )/log( r1/r0 ). Two for a quadratically convergent
+	/// residuals, log( r2/R_1 )/log( R_1/R_0 ). Two for a quadratically convergent
 	/// iteration once it is in the asymptotic regime, one for a linearly
 	/// convergent one anywhere.
-	inline double newtonOrder( double r0, double r1, double r2 )
+	inline double newtonOrder( double radius0, double radius1, double r2 )
 	{
-		return std::log( r2/r1 )/std::log( r1/r0 );
+		return std::log( r2/radius1 )/std::log( radius1/radius0 );
 	}
 
 	/// Four dyadic refinements from 4 cells a side, so three measured rates per
@@ -339,7 +339,7 @@ namespace tests
 			{
 				for ( int i = 1; i <= count; ++i )
 				{
-					points.push_back( box.rMin + halton( i, 2 )*box.width() );
+					points.push_back( box.minRadius + halton( i, 2 )*box.width() );
 					points.push_back( box.zMin + halton( i, 3 )*box.height() );
 				}
 				weight = box.area()/static_cast<double>( size() );
@@ -374,7 +374,7 @@ namespace tests
 				return static_cast<int>( points.size()/2 );
 			}
 
-			double r( int i ) const
+			double radius( int i ) const
 			{
 				return points[ 2*i ];
 			}
@@ -408,7 +408,7 @@ namespace tests
 				mfem::DenseMatrix matrix( 2, n );
 				for ( int i = 0; i < n; ++i )
 				{
-					matrix( 0, i ) = r( i );
+					matrix( 0, i ) = radius( i );
 					matrix( 1, i ) = z( i );
 				}
 
@@ -532,7 +532,7 @@ namespace tests
 	/// result on @a cloud. @a boundary supplies the Dirichlet datum, which for
 	/// these benchmarks is a design choice rather than a restriction of a known
 	/// solution -- see the callers.
-	/// @param guess  optional starting point for Newton, as psi( r, z ). Null
+	/// @param guess  optional starting point for Newton, as psi( R, z ). Null
 	///               is the default and means "start from the Dirichlet data",
 	///               which for a source vanishing at psi = 0 lands on the trivial
 	///               branch -- see meq::GradShafranovSolver::setInitialGuess and
@@ -614,7 +614,7 @@ namespace tests
 	 * One solve of an equilibrium whose profiles are functions of NORMALISED
 	 * flux, with psi on the magnetic axis carried as an unknown.
 	 *
-	 * @param guess          the Newton starting point, as psi( r, z ). NOT
+	 * @param guess          the Newton starting point, as psi( R, z ). NOT
 	 *                       optional, and not an optimisation: at a fixed
 	 *                       normalisation this equation has a small solution and
 	 *                       a large one, only the large one can satisfy
@@ -687,7 +687,7 @@ namespace tests
 	                        std::vector<Measurement> const &points )
 	{
 		std::printf( "\n  %s, k = %d, triangles on [%.1f,%.1f]x[%.1f,%.1f]\n",
-		             label, order, box.rMin, box.rMax, box.zMin, box.zMax );
+		             label, order, box.minRadius, box.maxRadius, box.zMin, box.zMax );
 		std::printf( "  %8s %9s %14s %7s %14s %7s %7s\n",
 		             "h", "trace", "L2(psi)", "rate", "L2(q)", "rate", "Newton" );
 		for ( std::size_t i = 0; i < points.size(); ++i )

@@ -90,7 +90,7 @@
  *
  * So Gamma here is the closed flux surface psi_nstx = -0.03, written as the zero
  * set of psi := psi_nstx + 0.03. The offset has to clear the saddle at
- * -8.718e-3; 0.03 clears it comfortably and encloses r in [0.467, 1.762],
+ * -8.718e-3; 0.03 clears it comfortably and encloses R in [0.467, 1.762],
  * z in [-1.465, 1.272], which is most of the plasma and a proper D shape. The
  * source, the flux, and every convention under test are exactly those of
  * tests/convergence/SolovievConvergence.cpp, which measures the same
@@ -106,7 +106,7 @@
  *   HDGExtensionIntegrator's sign = -1     psi 4.0e-1, rates 1.63 then 0.58
  *   instead of +1                          q   4.1e+0, rates 0.13 then 0.19;
  *                                          at k = 2 the q rate goes negative
- *   its coefficient C = 1/r instead of r   psi flat at 2-5e-2, rates 0.56-0.79
+ *   its coefficient C = 1/R instead of R   psi flat at 2-5e-2, rates 0.56-0.79
  *                                          q   flat at 0.9-1.8e-1, rates 0.4-0.7
  *   the HDG stabilisation left on          psi 2.5e-2, rates 1.62, 1.67
  *   Gamma_h as well as the interior        q   4.9e-2, rates 1.41, 1.52
@@ -164,9 +164,9 @@ namespace
 
 	/// The exact solution. Displacing psi by a constant changes neither the
 	/// source nor the flux, so this is nstx() throughout.
-	double psiExact( double r, double z )
+	double psiExact( double radius, double z )
 	{
-		return equilibrium().psi( r, z ) + psiOffset;
+		return equilibrium().psi( radius, z ) + psiOffset;
 	}
 
 	/// The level set the subdomain and the paths are built from: the exact
@@ -177,11 +177,11 @@ namespace
 		return psiExact( x( 0 ), x( 1 ) );
 	}
 
-	// The background box. It contains Omega with room to spare, keeps r well
-	// away from zero -- the operator carries a 1/r and psi carries a log r -- and
+	// The background box. It contains Omega with room to spare, keeps R well
+	// away from zero -- the operator carries a 1/R and psi carries a log R -- and
 	// has sides in the ratio 1:2, so n by 2n cells are square.
-	double const rMin = 0.25;
-	double const rMax = 1.95;
+	double const minRadius = 0.25;
+	double const maxRadius = 1.95;
 	double const zMin = -1.75;
 	double const zMax = 1.65;
 
@@ -276,14 +276,14 @@ namespace
 		static std::vector<std::unique_ptr<mfem::Mesh>> backgrounds;
 		backgrounds.push_back( std::make_unique<mfem::Mesh>(
 			mfem::Mesh::MakeCartesian2D(
-				n, 2*n, mfem::Element::TRIANGLE, false, rMax - rMin, zMax - zMin ) ) );
+				n, 2*n, mfem::Element::TRIANGLE, false, maxRadius - minRadius, zMax - zMin ) ) );
 		mfem::Mesh &background = *backgrounds.back();
 		background.Transform( []( mfem::Vector const &in, mfem::Vector &out )
 		{
-			out( 0 ) = in( 0 ) + rMin;
+			out( 0 ) = in( 0 ) + minRadius;
 			out( 1 ) = in( 1 ) + zMin;
 		} );
-		h = ( rMax - rMin )/static_cast<double>( n );
+		h = ( maxRadius - minRadius )/static_cast<double>( n );
 
 		// extra_refine = 1. The vertex test alone is exact only where Omega is
 		// convex, and a flux surface with triangularity is not obviously so.
@@ -541,10 +541,10 @@ BOOST_AUTO_TEST_CASE( theInteriorOfOmegaIsWherePsiIsNegative )
 	for ( int i = 0; i <= 200; ++i )
 	{
 		double const s = static_cast<double>( i )/200.0;
-		double const r = rMin + s*( rMax - rMin );
+		double const radius = minRadius + s*( maxRadius - minRadius );
 		double const z = zMin + s*( zMax - zMin );
-		for ( double value : { psiExact( r, zMin ), psiExact( r, zMax ),
-		                       psiExact( rMin, z ), psiExact( rMax, z ) } )
+		for ( double value : { psiExact( radius, zMin ), psiExact( radius, zMax ),
+		                       psiExact( minRadius, z ), psiExact( maxRadius, z ) } )
 			largestOnBox = std::max( largestOnBox, -value );
 	}
 	BOOST_TEST( largestOnBox < 0.0,
@@ -561,17 +561,17 @@ BOOST_AUTO_TEST_CASE( theDisplacedFluxStillSolvesTheEquation )
 	meq::analytic::SolovievEquilibrium const &eq = equilibrium();
 
 	int sampled = 0;
-	for ( double r = 0.5; r <= 1.75; r += 0.15 )
+	for ( double radius = 0.5; radius <= 1.75; radius += 0.15 )
 	{
 		for ( double z = -1.4; z <= 1.21; z += 0.2 )
 		{
-			if ( psiExact( r, z ) > 0.0 )
+			if ( psiExact( radius, z ) > 0.0 )
 				continue;
 			sampled++;
-			double const deltaStar = eq.deltaStarFD( r, z );
-			double const minusF = -eq.f( r, z, 0.0 );
+			double const deltaStar = eq.deltaStarFD( radius, z );
+			double const minusF = -eq.f( radius, z, 0.0 );
 			BOOST_TEST( std::abs( deltaStar - minusF ) < 1.0e-5,
-			            "at ( " << r << ", " << z << " ): Delta*(psi) = " << deltaStar
+			            "at ( " << radius << ", " << z << " ): Delta*(psi) = " << deltaStar
 			            << " but -F = " << minusF );
 		}
 	}
@@ -731,11 +731,11 @@ BOOST_AUTO_TEST_CASE( thePostProcessedPotentialConvergesAtKPlusTwo )
 		for ( std::size_t i = 1; i < points.size(); ++i )
 		{
 			double const ratio = points[ i - 1 ].h/points[ i ].h;
-			double const r = rate( points[ i - 1 ].errorPsiStar,
-			                       points[ i ].errorPsiStar, ratio );
-			BOOST_TEST( r >= expectedPair,
+			double const observedRate = rate( points[ i - 1 ].errorPsiStar,
+			                                  points[ i ].errorPsiStar, ratio );
+			BOOST_TEST( observedRate >= expectedPair,
 			            "k = " << order << ", h = " << points[ i ].h
-			            << ": psi* converged at " << r << ", wanted " << expectedPair );
+			            << ": psi* converged at " << observedRate << ", wanted " << expectedPair );
 		}
 
 		// And it must actually be better than the potential it is built from.
@@ -1062,10 +1062,10 @@ BOOST_AUTO_TEST_CASE( theTransferredDatumRestoresEtaFive )
 	std::printf( "\n  eta_5 on Gamma_h, three treatments, k = %d:\n"
 	             "         h        eta_1     eta(datum)   eta(excluded)"
 	             "    eta(pinned)    eta_5(datum)   eta_5(pinned)\n", order );
-	for ( Row const &r : rows )
+	for ( Row const &row : rows )
 		std::printf( "  %8.4f  %11.4e   %11.4e    %11.4e    %11.4e     %11.4e   %11.4e\n",
-		             r.h, r.one, r.etaDatum, r.etaExcluded, r.etaPinned,
-		             r.fiveDatum, r.fivePinned );
+		             row.h, row.one, row.etaDatum, row.etaExcluded, row.etaPinned,
+		             row.fiveDatum, row.fivePinned );
 
 	std::size_t const last = rows.size() - 1;
 	double const rateDatum    = rate( rows[ 0 ].etaDatum,    rows[ last ].etaDatum )

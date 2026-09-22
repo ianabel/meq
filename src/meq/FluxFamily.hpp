@@ -176,7 +176,7 @@ namespace meq
 		/// The surface, at angles equispaced in the poloidal angle about the
 		/// magnetic axis: theta_j = 2 pi j / N, not stored because it is implied
 		/// by the index.
-		std::vector<double> r;
+		std::vector<double> radius;
 		std::vector<double> z;
 
 		/// 1 where the node's field came from the band extension outside the
@@ -267,7 +267,7 @@ namespace meq
 
 		std::size_t count() const
 		{
-			return r.size();
+			return radius.size();
 		}
 	};
 

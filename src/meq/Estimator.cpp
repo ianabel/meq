@@ -140,10 +140,10 @@ namespace meq
 
 	double ResidualEstimator::sourceValue( mfem::ElementTransformation &tr,
 	                                       mfem::IntegrationPoint const &ip,
-	                                       double r, double z, double psi ) const
+	                                       double radius, double z, double psi ) const
 	{
 		if ( source )
-			return source->f( r, z, psi );
+			return source->f( radius, z, psi );
 		return sourceCoeff->Eval( tr, ip );
 	}
 
@@ -208,7 +208,7 @@ namespace meq
 		errors = 0.0;
 
 		// Twice the degree of the potential in use, plus room for the fact that
-		// neither 1/r nor F is a polynomial. Whichever potential is selected, the
+		// neither 1/R nor F is a polynomial. Whichever potential is selected, the
 		// two branches are integrated on the SAME rule, so the psi*-against-psi_h
 		// comparison in EstimatorConvergence.cpp is not a comparison of two
 		// quadratures.
@@ -238,25 +238,25 @@ namespace meq
 				tr->SetIntPoint( &ip );
 				tr->Transform( ip, point );
 
-				double const r = point( 0 );
+				double const radius = point( 0 );
 				double const z = point( 1 );
 				double const weight = ip.weight*tr->Weight();
 				double const psi = psiGf.GetValue( e, ip );
 
-				// eta_1: the residual of -div_bar q = F/r, so F/r + div_bar q.
+				// eta_1: the residual of -div_bar q = F/R, so F/R + div_bar q.
 				// F is evaluated at the potential in use -- psi* for the published
 				// estimator -- which is what makes this the residual of the
 				// semi-linear equation.
-				double const residual = sourceValue( *tr, ip, r, z, psi )/r
+				double const residual = sourceValue( *tr, ip, radius, z, psi )/radius
 				                        + fluxGf.GetDivergence( *tr );
 				divergenceTerm += weight*residual*residual;
 
-				// eta_2: the residual of q = ( 1/r ) grad_bar psi. This is the
+				// eta_2: the residual of q = ( 1/R ) grad_bar psi. This is the
 				// term that differentiates the potential, and the term the paper
 				// says loses an order if the potential is psi_h.
 				fluxGf.GetVectorValue( e, ip, fluxValue );
 				psiGf.GetGradient( *tr, gradient );
-				gradient /= r;
+				gradient /= radius;
 				fluxValue -= gradient;
 				constitutiveTerm += weight*( fluxValue*fluxValue );
 			}
@@ -640,7 +640,7 @@ namespace meq
 		  proximityAdditions( 0 )
 	{
 		if ( backgroundMesh.Dimension() != 2 )
-			throw std::invalid_argument( "meq::AdaptiveDomain: the background mesh must be two dimensional ( r, z )" );
+			throw std::invalid_argument( "meq::AdaptiveDomain: the background mesh must be two dimensional ( R, z )" );
 		select();
 	}
 
@@ -694,7 +694,7 @@ namespace meq
 		// here required EXACTLY ONE attribute, i.e. that Omega be strictly inside
 		// the box, which is true of every fixed-boundary case in this tree and is
 		// FALSE OF THE ONE GEOMETRY FREE BOUNDARY NEEDS: the half-disc's flat side
-		// IS the box's r = 0 edge, deliberately, because FB-A requires the domain
+		// IS the box's R = 0 edge, deliberately, because FB-A requires the domain
 		// to reach the axis exactly and the axis is not an approximation of
 		// anything. It is ordinary fitted boundary and wants no transfer.
 		//

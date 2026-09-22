@@ -68,10 +68,10 @@ def run_one(stem, outdir, degree, refine, grid=129, env=None):
 
     result = dict(ok=True, wall=wall, iters=iters, elements=elements, dofs=dofs)
     if grid > 17:
-        r = compare(os.path.join(outdir, f"{stem}.npz"),
+        comparison = compare(os.path.join(outdir, f"{stem}.npz"),
                     os.path.join(outdir, "perf.nc"),
                     os.path.join(outdir, f"{stem}-meta.json"))
-        result["rel_l2"] = r["rel_l2"]
+        result["rel_l2"] = comparison["rel_l2"]
     return result
 
 
@@ -95,11 +95,11 @@ if __name__ == "__main__":
               f"{'newton':>7} {'wall/s':>8} {'rel L2':>11} {'dofs/ref pt':>12}")
         for degree, refine in [(1, 2), (1, 3), (2, 1), (2, 2), (2, 3),
                                (3, 1), (3, 2)]:
-            r = run_one(stem, outdir, degree, refine)
-            if not r["ok"]:
+            run = run_one(stem, outdir, degree, refine)
+            if not run["ok"]:
                 print(f"    {degree:>2} {refine:>4}   FAILED")
                 continue
-            print(f"    {degree:>2} {refine:>4} {r['elements']:>9} "
-                  f"{r['dofs']:>9} {r['iters']:>7} {r['wall']:>8.2f} "
-                  f"{r['rel_l2']:>11.3e} {r['dofs']/16641:>12.2f}")
+            print(f"    {degree:>2} {refine:>4} {run['elements']:>9} "
+                  f"{run['dofs']:>9} {run['iters']:>7} {run['wall']:>8.2f} "
+                  f"{run['rel_l2']:>11.3e} {run['dofs']/16641:>12.2f}")
         print()

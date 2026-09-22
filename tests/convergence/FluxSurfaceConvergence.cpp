@@ -85,14 +85,14 @@ namespace
 	/// CriticalPointConvergence.cpp, which is where the argument for it is.
 	struct ExactAxis
 	{
-		double r;
+		double radius;
 		double z;
 		double psi;
 	};
 
 	ExactAxis exactAxis( Equilibrium const &eq, double rGuess, double zGuess )
 	{
-		double r = rGuess;
+		double radius = rGuess;
 		double z = zGuess;
 		double const step = 1.0e-5;
 
@@ -100,32 +100,32 @@ namespace
 		{
 			double gr = 0.0;
 			double gz = 0.0;
-			eq.gradPsi( r, z, gr, gz );
+			eq.gradPsi( radius, z, gr, gz );
 
 			double a0 = 0.0;
 			double a1 = 0.0;
 			double b0 = 0.0;
 			double b1 = 0.0;
 			double hessian[ 2 ][ 2 ];
-			eq.gradPsi( r + step, z, a0, b0 );
-			eq.gradPsi( r - step, z, a1, b1 );
+			eq.gradPsi( radius + step, z, a0, b0 );
+			eq.gradPsi( radius - step, z, a1, b1 );
 			hessian[ 0 ][ 0 ] = ( a0 - a1 )/( 2.0*step );
 			hessian[ 1 ][ 0 ] = ( b0 - b1 )/( 2.0*step );
-			eq.gradPsi( r, z + step, a0, b0 );
-			eq.gradPsi( r, z - step, a1, b1 );
+			eq.gradPsi( radius, z + step, a0, b0 );
+			eq.gradPsi( radius, z - step, a1, b1 );
 			hessian[ 0 ][ 1 ] = ( a0 - a1 )/( 2.0*step );
 			hessian[ 1 ][ 1 ] = ( b0 - b1 )/( 2.0*step );
 
 			double const det = hessian[ 0 ][ 0 ]*hessian[ 1 ][ 1 ]
 			                   - hessian[ 0 ][ 1 ]*hessian[ 1 ][ 0 ];
-			r += -(  hessian[ 1 ][ 1 ]*gr - hessian[ 0 ][ 1 ]*gz )/det;
+			radius += -(  hessian[ 1 ][ 1 ]*gr - hessian[ 0 ][ 1 ]*gz )/det;
 			z += -( -hessian[ 1 ][ 0 ]*gr + hessian[ 0 ][ 0 ]*gz )/det;
 		}
 
 		ExactAxis axis;
-		axis.r = r;
+		axis.radius = radius;
 		axis.z = z;
-		axis.psi = eq.psi( r, z );
+		axis.psi = eq.psi( radius, z );
 		return axis;
 	}
 
@@ -152,7 +152,7 @@ namespace
 	                    std::vector<double> const &fractions )
 	{
 		LevelSet set;
-		set.axis = exactAxis( eq, 0.5*( box.rMin + box.rMax ),
+		set.axis = exactAxis( eq, 0.5*( box.minRadius + box.maxRadius ),
 		                      0.5*( box.zMin + box.zMax ) );
 		set.fractions = fractions;
 
@@ -161,12 +161,12 @@ namespace
 		for ( int i = 0; i <= samples; ++i )
 		{
 			double const s = static_cast<double>( i )/samples;
-			double const r = box.rMin + s*box.width();
+			double const radius = box.minRadius + s*box.width();
 			double const z = box.zMin + s*box.height();
-			set.edge = std::min( set.edge, eq.psi( r, box.zMin ) );
-			set.edge = std::min( set.edge, eq.psi( r, box.zMax ) );
-			set.edge = std::min( set.edge, eq.psi( box.rMin, z ) );
-			set.edge = std::min( set.edge, eq.psi( box.rMax, z ) );
+			set.edge = std::min( set.edge, eq.psi( radius, box.zMin ) );
+			set.edge = std::min( set.edge, eq.psi( radius, box.zMax ) );
+			set.edge = std::min( set.edge, eq.psi( box.minRadius, z ) );
+			set.edge = std::min( set.edge, eq.psi( box.maxRadius, z ) );
 		}
 
 		for ( std::size_t i = 0; i < fractions.size(); ++i )
@@ -238,14 +238,14 @@ namespace
 	/// This is error ( a ), and note its 1/|grad psi| weighting: the geometric
 	/// error of a contour is worst exactly where the gradient is small, which is
 	/// section 2's point about the axis.
-	double distanceToExactContour( Equilibrium const &eq, double level, double r,
+	double distanceToExactContour( Equilibrium const &eq, double level, double radius,
 	                               double z )
 	{
 		double gr = 0.0;
 		double gz = 0.0;
-		eq.gradPsi( r, z, gr, gz );
+		eq.gradPsi( radius, z, gr, gz );
 		double const magnitude = std::sqrt( gr*gr + gz*gz );
-		return magnitude > 0.0 ? std::abs( eq.psi( r, z ) - level )/magnitude
+		return magnitude > 0.0 ? std::abs( eq.psi( radius, z ) - level )/magnitude
 		                       : std::numeric_limits<double>::infinity();
 	}
 
@@ -255,13 +255,13 @@ namespace
 		double worst = 0.0;
 		for ( std::size_t i = 0; i < contour.points.size(); ++i )
 			worst = std::max( worst, distanceToExactContour(
-				eq, contour.level, contour.points[ i ].r, contour.points[ i ].z ) );
+				eq, contour.level, contour.points[ i ].radius, contour.points[ i ].z ) );
 		return worst;
 	}
 
 	/// Measurement ( c ): the distance from the interpolant, sampled between the
 	/// accepted points, to the DISCRETE level set. | psi_h( x ) - c | / | grad
-	/// psi_h( x ) | with grad_bar( psi_h ) = r q, which is the first-order
+	/// psi_h( x ) | with grad_bar( psi_h ) = R q, which is the first-order
 	/// normal distance and is evaluated INSIDE whichever element holds the
 	/// sample -- nothing is ever read outside an element.
 	///
@@ -311,7 +311,7 @@ namespace
 			{
 				double const t = ( j + 1.0 )/( samplesPerSegment + 1.0 );
 
-				double r = 0.0;
+				double radius = 0.0;
 				double z = 0.0;
 				double psi = 0.0;
 				double qR = 0.0;
@@ -320,11 +320,11 @@ namespace
 				++worst.total;
 				bool clean = sameElement;
 
-				contour.pointOnSegment( i, t, r, z );
-				if ( tracer.sampleAt( r, z, psi, qR, qZ, hint ) )
+				contour.pointOnSegment( i, t, radius, z );
+				if ( tracer.sampleAt( radius, z, psi, qR, qZ, hint ) )
 				{
 					clean = clean && hint == contour.points[ i ].element;
-					double const magnitude = r*std::sqrt( qR*qR + qZ*qZ );
+					double const magnitude = radius*std::sqrt( qR*qR + qZ*qZ );
 					if ( magnitude > 0.0 )
 					{
 						double const error = std::abs( psi - contour.level )/magnitude;
@@ -334,11 +334,11 @@ namespace
 					}
 				}
 
-				contour.chordOnSegment( i, t, r, z );
-				if ( tracer.sampleAt( r, z, psi, qR, qZ, hint ) )
+				contour.chordOnSegment( i, t, radius, z );
+				if ( tracer.sampleAt( radius, z, psi, qR, qZ, hint ) )
 				{
 					clean = clean && hint == contour.points[ i ].element;
-					double const magnitude = r*std::sqrt( qR*qR + qZ*qZ );
+					double const magnitude = radius*std::sqrt( qR*qR + qZ*qZ );
 					if ( magnitude > 0.0 )
 					{
 						double const error = std::abs( psi - contour.level )/magnitude;
@@ -363,7 +363,7 @@ namespace
 	///
 	/// The tangent from q is ( -q_z, +q_r )/|q|. The tangent of the curve
 	/// { psi_h = c } is ( -d_z psi_h, +d_r psi_h )/| grad psi_h |. THESE ARE NOT
-	/// THE SAME VECTOR: q_h and grad( psi_h )/r are separate objects in a mixed
+	/// THE SAME VECTOR: q_h and grad( psi_h )/R are separate objects in a mixed
 	/// method and differ by O( h^k ) -- q converges at k+1 and a differentiated
 	/// L2 potential at k, which is the entire reason meq solves for q at all.
 	///
@@ -400,7 +400,7 @@ namespace
 			meq::ContourPoint &p = out.contour.points[ i ];
 
 			mfem::Vector point( 2 );
-			point( 0 ) = p.r;
+			point( 0 ) = p.radius;
 			point( 1 ) = p.z;
 
 			mfem::ElementTransformation *trans =
@@ -420,14 +420,14 @@ namespace
 			double tangentR = -gradient( 1 )/magnitude;
 			double tangentZ = gradient( 0 )/magnitude;
 
-			// grad_bar( psi ) = r q with r > 0, so the two agree in orientation
+			// grad_bar( psi ) = R q with R > 0, so the two agree in orientation
 			// as well as nearly in direction. The guard is here so that a sign
 			// convention changing under this file fails loudly rather than
 			// silently reversing half the tangents.
 			double const alignment = tangentR*p.tangentR + tangentZ*p.tangentZ;
 			BOOST_TEST( alignment > 0.0,
 			            "the tangent from grad( psi_h ) points the opposite way "
-			            << "to the tangent from q at ( " << p.r << ", " << p.z
+			            << "to the tangent from q at ( " << p.radius << ", " << p.z
 			            << " ), which means one of the two sign conventions has "
 			            << "moved" );
 
@@ -508,9 +508,9 @@ namespace
 		return eq;
 	}
 
-	double curvedPsi( double r, double z )
+	double curvedPsi( double radius, double z )
 	{
-		return curvedEquilibrium().psi( r, z ) + curvedOffset;
+		return curvedEquilibrium().psi( radius, z ) + curvedOffset;
 	}
 
 	/// The level set the subdomain and the paths are built from: negative inside
@@ -521,7 +521,7 @@ namespace
 		return curvedPsi( x( 0 ), x( 1 ) );
 	}
 
-	/// The background box: it contains Omega with room to spare, keeps r well
+	/// The background box: it contains Omega with room to spare, keeps R well
 	/// away from zero and has sides in the ratio 1:2, so n by 2n cells are
 	/// square.
 	Rectangle curvedBox()
@@ -551,7 +551,7 @@ namespace
 		mfem::Mesh &background = *backgrounds.back();
 		background.Transform( [ box ]( mfem::Vector const &in, mfem::Vector &out )
 		{
-			out( 0 ) = in( 0 ) + box.rMin;
+			out( 0 ) = in( 0 ) + box.minRadius;
 			out( 1 ) = in( 1 ) + box.zMin;
 		} );
 		h = box.width()/static_cast<double>( n );
@@ -664,13 +664,13 @@ namespace
 	/// The first-order distance from a point to the exact contour of the CURVED
 	/// fixture. The offset moves psi and not its gradient, so gradPsi is the
 	/// equilibrium's own.
-	double distanceToCurvedContour( double level, double r, double z )
+	double distanceToCurvedContour( double level, double radius, double z )
 	{
 		double gr = 0.0;
 		double gz = 0.0;
-		curvedEquilibrium().gradPsi( r, z, gr, gz );
+		curvedEquilibrium().gradPsi( radius, z, gr, gz );
 		double const magnitude = std::sqrt( gr*gr + gz*gz );
-		return magnitude > 0.0 ? std::abs( curvedPsi( r, z ) - level )/magnitude
+		return magnitude > 0.0 ? std::abs( curvedPsi( radius, z ) - level )/magnitude
 		                       : std::numeric_limits<double>::infinity();
 	}
 
@@ -706,7 +706,7 @@ namespace
 		for ( std::size_t i = 0; i < n; ++i )
 		{
 			meq::ContourPoint const &p = contour.points[ i ];
-			double const error = distanceToCurvedContour( contour.level, p.r, p.z );
+			double const error = distanceToCurvedContour( contour.level, p.radius, p.z );
 			if ( p.extended )
 			{
 				++out.bandPoints;
@@ -778,7 +778,7 @@ BOOST_AUTO_TEST_CASE( theCubicHermiteIsFourthOrderAndTheChordsAreSecond )
 		{
 			double const theta = i*dTheta;
 			meq::ContourPoint p;
-			p.r = 1.0 + radius*std::cos( theta );
+			p.radius = 1.0 + radius*std::cos( theta );
 			p.z = radius*std::sin( theta );
 			p.tangentR = -std::sin( theta );
 			p.tangentZ = std::cos( theta );
@@ -792,16 +792,16 @@ BOOST_AUTO_TEST_CASE( theCubicHermiteIsFourthOrderAndTheChordsAreSecond )
 		double worstChord = 0.0;
 		for ( std::size_t i = 0; i + 1 < circle.points.size(); ++i )
 		{
-			double r = 0.0;
+			double pointRadius = 0.0;
 			double z = 0.0;
 
-			circle.pointOnSegment( i, 0.5, r, z );
+			circle.pointOnSegment( i, 0.5, pointRadius, z );
 			worstHermite = std::max( worstHermite,
-				std::abs( std::sqrt( ( r - 1.0 )*( r - 1.0 ) + z*z ) - radius ) );
+				std::abs( std::sqrt( ( pointRadius - 1.0 )*( pointRadius - 1.0 ) + z*z ) - radius ) );
 
-			circle.chordOnSegment( i, 0.5, r, z );
+			circle.chordOnSegment( i, 0.5, pointRadius, z );
 			worstChord = std::max( worstChord,
-				std::abs( std::sqrt( ( r - 1.0 )*( r - 1.0 ) + z*z ) - radius ) );
+				std::abs( std::sqrt( ( pointRadius - 1.0 )*( pointRadius - 1.0 ) + z*z ) - radius ) );
 		}
 
 		hermite.push_back( worstHermite );
@@ -861,10 +861,10 @@ BOOST_AUTO_TEST_CASE( theTracerClosesAndTheElementWalkDoesNotFallBack )
 	};
 
 	// TWO FIXTURES, AND THE SECOND ONE IS NOT DECORATION. nstx() puts its axis
-	// at r = 1.318 on a box that ends at 1.4, so an outer surface reaches the
-	// edge of the mesh along +r while sitting comfortably inside it everywhere
+	// at R = 1.318 on a box that ends at 1.4, so an outer surface reaches the
+	// edge of the mesh along +R while sitting comfortably inside it everywhere
 	// else -- which is what made traceFromAxis() search eight rays rather than
-	// one. iterExample2() is the well-centred one, at r = 1.051, and is what the
+	// one. iterExample2() is the well-centred one, at R = 1.051, and is what the
 	// rate sweeps below are measured on.
 	std::vector<Case> cases = {
 		{ "iterExample2", Equilibrium::iterExample2() },
@@ -881,10 +881,10 @@ BOOST_AUTO_TEST_CASE( theTracerClosesAndTheElementWalkDoesNotFallBack )
 		std::printf( "\n  Traced contours, Solov'ev %s, k = 2, n = 24\n",
 		             cases[ c ].name );
 		std::printf( "  exact axis ( %.10f, %.10f ) psi %+.6e, edge psi %+.6e\n",
-		             set.axis.r, set.axis.z, set.axis.psi, set.edge );
+		             set.axis.radius, set.axis.z, set.axis.psi, set.edge );
 		std::printf( "  %6s %12s %6s %9s %10s %9s %8s %8s %9s %9s\n",
 		             "Psi_N", "level", "points", "status", "length", "turning",
-		             "circuits", "faces", "worst |r|", "fallback" );
+		             "circuits", "faces", "worst |R|", "fallback" );
 
 		SolvedEquilibrium solved( eq, box, 2, 24 );
 		meq::CriticalPoint const axis = solved.axis();
@@ -924,7 +924,7 @@ BOOST_AUTO_TEST_CASE( theTracerClosesAndTheElementWalkDoesNotFallBack )
 
 			// The last point IS the first point, exactly: the final step is
 			// shortened to land on it rather than leaving a stub.
-			BOOST_TEST( contour.points.front().r == contour.points.back().r,
+			BOOST_TEST( contour.points.front().radius == contour.points.back().radius,
 			            "the closing point is not the start point" );
 			BOOST_TEST( contour.points.front().z == contour.points.back().z,
 			            "the closing point is not the start point" );
@@ -944,7 +944,7 @@ BOOST_AUTO_TEST_CASE( theTracerClosesAndTheElementWalkDoesNotFallBack )
  * THREE. The expectation was that a cubic Hermite through traced points, with
  * the tangents taken from q, would be O( Delta_s^4 ) against { psi_h = c }. It
  * is not, and the reason is the mixed method rather than the interpolation:
- * q_h and grad( psi_h )/r are DIFFERENT OBJECTS, converging at k+1 and at k
+ * q_h and grad( psi_h )/R are DIFFERENT OBJECTS, converging at k+1 and at k
  * respectively, and the tangent of { psi_h = c } is built from the second. So
  * the q interpolant passes through points of { psi_h = c } carrying the
  * tangents of a slightly different curve, and measured against { psi_h = c } it
@@ -1058,7 +1058,7 @@ BOOST_AUTO_TEST_CASE( theRepresentationConvergesAtFourthOrderWithHermite )
 			chord.push_back( fromFlux.cleanChord );
 			tilt = std::max( tilt, consistent.worstAngle );
 
-			double const scale = contour.points.front().r
+			double const scale = contour.points.front().radius
 			                     *contour.points.front().fluxMagnitude;
 			double const floor = scale > 0.0 ? contour.worstFaceJump/scale : 0.0;
 
@@ -1159,7 +1159,7 @@ BOOST_AUTO_TEST_CASE( theRepresentationConvergesAtFourthOrderWithHermite )
  *
  * THE q COLUMN IS PRINTED AND IS NOT FLAT, AND THAT IS THE SAME FINDING AS THE
  * TEST ABOVE RATHER THAN A SECOND ONE. Its extra term is the O( h^k ) gap
- * between q_h and grad( psi_h )/r, which does move with the mesh -- it falls,
+ * between q_h and grad( psi_h )/R, which does move with the mesh -- it falls,
  * at about one order here -- because it is a discretisation error and not a
  * representation error. The consistent column is the representation error and
  * it is the one that must not move.
@@ -1205,7 +1205,7 @@ BOOST_AUTO_TEST_CASE( theRepresentationErrorDoesNotKnowAboutTheMesh )
 		gradient.push_back( fromGradient.cleanHermite );
 		chord.push_back( fromFlux.cleanChord );
 
-		double const scale = contour.points.front().r
+		double const scale = contour.points.front().radius
 		                     *contour.points.front().fluxMagnitude;
 		double const floor = scale > 0.0 ? contour.worstFaceJump/scale : 0.0;
 
@@ -1722,23 +1722,23 @@ BOOST_AUTO_TEST_CASE( theMetricIdentityIsSpectralOnTheClosedForm )
 		rho = seed;
 		for ( int i = 0; i < 100; ++i )
 		{
-			double const r = axis.r + rho*cosine;
+			double const radius = axis.radius + rho*cosine;
 			double const z = axis.z + rho*sine;
 			double gr = 0.0;
 			double gz = 0.0;
-			eq.gradPsi( r, z, gr, gz );
+			eq.gradPsi( radius, z, gr, gz );
 			double const slope = gr*cosine + gz*sine;
-			double const residual = eq.psi( r, z ) - level;
+			double const residual = eq.psi( radius, z ) - level;
 			if ( std::abs( residual ) < 1.0e-15 )
 				break;
 			rho -= residual/slope;
 		}
 
-		double const r = axis.r + rho*cosine;
+		double const radius = axis.radius + rho*cosine;
 		double const z = axis.z + rho*sine;
 		double gr = 0.0;
 		double gz = 0.0;
-		eq.gradPsi( r, z, gr, gz );
+		eq.gradPsi( radius, z, gr, gz );
 		double const magnitude = std::sqrt( gr*gr + gz*gz );
 		double const tangentR = -gz/magnitude;
 		double const tangentZ = gr/magnitude;
@@ -1928,7 +1928,7 @@ BOOST_AUTO_TEST_CASE( theSpectralRuleIsOnlyAsGoodAsItsJacobian )
 	             "reference (N = %d, from q) %.12f\n",
 	             contour.hermiteLength( 12 ), static_cast<int>( reference ),
 	             referenceLength );
-	double const jumpScale = contour.points.front().r
+	double const jumpScale = contour.points.front().radius
 	                         *contour.points.front().fluxMagnitude;
 	std::printf( "  transversality min |u x t| = %.4f, bisections %d, "
 	             "worst |psi - c| %.2e\n",
@@ -2076,15 +2076,15 @@ BOOST_AUTO_TEST_CASE( theMetricAndTheHermiteArcLengthAgree )
 		int hint = contour.points.front().element;
 		for ( int j = 0; j < 64; ++j )
 		{
-			double r = 0.0;
+			double radius = 0.0;
 			double z = 0.0;
 			double psi = 0.0;
 			double qR = 0.0;
 			double qZ = 0.0;
-			contour.pointAtArcLength( j*contour.length()/64.0, r, z );
-			if ( !tracer.sampleAt( r, z, psi, qR, qZ, hint ) )
+			contour.pointAtArcLength( j*contour.length()/64.0, radius, z );
+			if ( !tracer.sampleAt( radius, z, psi, qR, qZ, hint ) )
 				continue;
-			double const magnitude = r*std::sqrt( qR*qR + qZ*qZ );
+			double const magnitude = radius*std::sqrt( qR*qR + qZ*qZ );
 			if ( magnitude > 0.0 )
 				worstOff = std::max( worstOff,
 				                     std::abs( psi - contour.level )/magnitude );
@@ -2138,7 +2138,7 @@ BOOST_AUTO_TEST_CASE( theFitRefusesWhenTheRaysStopBeingTransverse )
 	double largest = 0.0;
 	for ( std::size_t i = 0; i < contour.points.size(); ++i )
 	{
-		double const dr = contour.points[ i ].r - axis.r;
+		double const dr = contour.points[ i ].radius - axis.radius;
 		double const dz = contour.points[ i ].z - axis.z;
 		double const radius = std::sqrt( dr*dr + dz*dz );
 		smallest = std::min( smallest, radius );
@@ -2163,7 +2163,7 @@ BOOST_AUTO_TEST_CASE( theFitRefusesWhenTheRaysStopBeingTransverse )
 	// Displaced well outside the surface: every ray from there either misses it
 	// or grazes it, so the fit must refuse.
 	meq::CriticalPoint offCentre = axis;
-	offCentre.r = axis.r + 3.0*largest;
+	offCentre.radius = axis.radius + 3.0*largest;
 
 	bool refused = false;
 	try
@@ -2291,7 +2291,7 @@ BOOST_AUTO_TEST_CASE( theBandIsCrossedOnlyWhenAnExtensionSaysHow )
 			meq::ContourPoint const &p = contour.points[ i ];
 
 			mfem::DenseMatrix matrix( 2, 1 );
-			matrix( 0, 0 ) = p.r;
+			matrix( 0, 0 ) = p.radius;
 			matrix( 1, 0 ) = p.z;
 			mfem::Array<int> found;
 			mfem::Array<mfem::IntegrationPoint> ips;
@@ -2380,14 +2380,14 @@ BOOST_AUTO_TEST_CASE( theBandIsCrossedOnlyWhenAnExtensionSaysHow )
  *
  * WHAT SEPARATES THE TWO, AND IT IS ARITHMETIC RATHER THAN TASTE.
  *
- *   FluxTaylor    psi( x0 ) + r0 q( x0 ) . ( p - x0 ). Its error is the error
+ *   FluxTaylor    psi( x0 ) + R_0 q( x0 ) . ( p - x0 ). Its error is the error
  *                 of psi_h at the foot, O( h^(k+1) ), PLUS the Taylor remainder
  *                 of a second-order expansion carried over a band of width
  *                 O( h ), which is O( h^2 ) whatever k is. So it is exact in
  *                 order at k = 1 and CAPS THE BAND AT SECOND ORDER from k = 2
  *                 on. It is the control.
  *
- *   TransferLift  g( a( x0 ) ) + the line integral of -r q back from Gamma,
+ *   TransferLift  g( a( x0 ) ) + the line integral of -R q back from Gamma,
  *                 with q outside the mesh supplied by the method's own
  *                 extension operator. Its error is the error of q integrated
  *                 over a path of length O( h ) -- so O( h^(k+2) ), a full order

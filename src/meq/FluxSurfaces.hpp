@@ -34,7 +34,7 @@
  * TWO EXTENSIONS, MEASURED SIDE BY SIDE, AND THE ORDERS ARE STRUCTURAL RATHER
  * THAN A PROPERTY OF THE BENCHMARK.
  *
- *   BandExtension::FluxTaylor    psi( p ) = psi( x0 ) + r0 q( x0 ) . ( p - x0 )
+ *   BandExtension::FluxTaylor    psi( p ) = psi( x0 ) + R_0 q( x0 ) . ( p - x0 )
  *                                from the foot x0 of p on Gamma_h, which is
  *                                what GridSampler::samplePotentialWithFlux()
  *                                does for the .nc file. NOTHING IS EVER
@@ -51,7 +51,7 @@
  *
  *   BandExtension::TransferLift  psi( p ) = g( a( x0 ) )
  *                                           + integral over the segment from p
- *                                             to a( x0 ) of ( -r q ) . m ds,
+ *                                             to a( x0 ) of ( -R q ) . m ds,
  *                                with q outside the mesh supplied by the
  *                                method's OWN extension operator E_h -- the
  *                                element's polynomial evaluated outside it,
@@ -190,7 +190,7 @@
  * traceFromAxis() takes CriticalPoint::element for it, so a trace from a
  * located axis -- which is the ordinary entry point and the only one the
  * library itself calls -- makes NO Mesh::FindPoints call at all. trace() and
- * traceOpen() are handed a bare ( r, z ) by a caller who may know nothing about
+ * traceOpen() are handed a bare ( R, z ) by a caller who may know nothing about
  * the mesh, so they still locate their seed with one apiece; that is one per
  * trace and is deliberately kept out of Contour::fallbackLocations, which
  * measures the WALK and would otherwise read one on every trace and mean
@@ -251,7 +251,7 @@
  * BUT THE TANGENT FROM q IS NOT THE TANGENT OF THE CURVE BEING INTERPOLATED,
  * AND THAT COSTS THE FOURTH ORDER ON THE WRONG PAIRING. The tangent of
  * { psi_h = c } is built from grad( psi_h ), and q_h is a separate unknown that
- * agrees with grad( psi_h )/r only to O( h^k ). So an interpolant carrying q's
+ * agrees with grad( psi_h )/R only to O( h^k ). So an interpolant carrying q's
  * tangents passes through points of { psi_h = c } with the tangents of a
  * slightly different curve, and measured against { psi_h = c } it is fourth
  * order until that tilt takes over and second order afterwards. With psi* the
@@ -363,8 +363,8 @@
  *    gradient matches the flux. Checked rather than repeated: Stenberg's local
  *    problem is driven by the reconstructed TOTAL flux qhat_h in RT_k -- the
  *    normally continuous field the constraint equation projects onto -- and not
- *    by q*_h, so grad( psi* ) and r q* are NOT the same object. What is
- *    measured is that they agree to O( h^(k+1) ) where grad( psi_h ) and r q_h
+ *    by q*_h, so grad( psi* ) and R q* are NOT the same object. What is
+ *    measured is that they agree to O( h^(k+1) ) where grad( psi_h ) and R q_h
  *    agree only to O( h^k ), which is the whole point of a mixed method read
  *    from an unexpected direction: q converges at k+1 and a differentiated L2
  *    potential at k.
@@ -483,7 +483,7 @@ namespace meq
 		/// fitted path, where Gamma IS the mesh boundary and there is no band.
 		None,
 
-		/// psi( p ) = psi( x0 ) + r0 q( x0 ) . ( p - x0 ) from the foot x0 of p
+		/// psi( p ) = psi( x0 ) + R_0 q( x0 ) . ( p - x0 ) from the foot x0 of p
 		/// on Gamma_h, with q frozen at the foot. Nothing is evaluated outside
 		/// an element; the extended field is AFFINE, so contours in the band
 		/// are straight lines at every k, and the band error caps at O( h^2 ).
@@ -492,7 +492,7 @@ namespace meq
 		FluxTaylor,
 
 		/// The extension technique's own construction: the datum on Gamma plus
-		/// the line integral of -grad_bar( psi ) = -r q back from it, with q
+		/// the line integral of -grad_bar( psi ) = -R q back from it, with q
 		/// outside the mesh supplied by mfem::ElementExtension. Needs the same
 		/// mfem::TransferPath the solve was given. THE ONE TO USE; see the
 		/// header for what it costs and what it buys.
@@ -547,7 +547,7 @@ namespace meq
 	/// reconstruct afterwards.
 	struct ContourPoint
 	{
-		double r = 0.0;
+		double radius = 0.0;
 		double z = 0.0;
 
 		/// The unit tangent from q: ( -q_z, +q_r ) / |q|. Free, and it is what
@@ -557,7 +557,7 @@ namespace meq
 
 		/// | q | at the point, in the units of q. Free for the same reason, and
 		/// it is what IN-2's flux-surface averages weight by: dl / |grad psi|
-		/// is dl / ( r |q| ).
+		/// is dl / ( R |q| ).
 		double fluxMagnitude = 0.0;
 
 		/// Accumulated POLYLINE length from the first point. Not the arc length
@@ -722,22 +722,22 @@ namespace meq
 		/// The cubic Hermite point on segment @a i at parameter @a t in [0,1],
 		/// with the tangents from q scaled by the chord length. This is the
 		/// representation: it, and not the polyline, is what the contour IS.
-		void pointOnSegment( std::size_t i, double t, double &r, double &z ) const;
+		void pointOnSegment( std::size_t i, double t, double &radius, double &z ) const;
 
 		/// dx/dt of the same, which is the tangent up to a positive factor.
-		void tangentOnSegment( std::size_t i, double t, double &r, double &z ) const;
+		void tangentOnSegment( std::size_t i, double t, double &radius, double &z ) const;
 
 		/// The straight chord on segment @a i. THE CONTROL, kept so that the
 		/// fourth-order claim above is measured against something rather than
 		/// asserted.
-		void chordOnSegment( std::size_t i, double t, double &r, double &z ) const;
+		void chordOnSegment( std::size_t i, double t, double &radius, double &z ) const;
 
 		/// The Hermite point at accumulated polyline length @a s, wrapped into
 		/// [ 0, length() ]. The segment parameter is taken linearly in the
 		/// polyline length, which is not the arc-length parametrisation and does
 		/// not claim to be -- it is a way of asking for a point, not a
 		/// reparametrisation.
-		void pointAtArcLength( double s, double &r, double &z ) const;
+		void pointAtArcLength( double s, double &radius, double &z ) const;
 	};
 
 	/// Declared here and defined below: ContourTracer::fitByAngle() returns one,
@@ -782,7 +782,7 @@ namespace meq
 			///                    both come from it; handing it -q traces the
 			///                    same curve backwards, which is harmless, and
 			///                    handing it grad_bar( psi ) rather than q
-			///                    changes the corrector's scaling by r and
+			///                    changes the corrector's scaling by R and
 			///                    nothing else.
 			ContourTracer( mfem::GridFunction const &potentialIn,
 			               mfem::GridFunction const &fluxIn );
@@ -802,7 +802,7 @@ namespace meq
 			/// is the ordinary entry point, IN-A's findAxis() being the
 			/// prerequisite INVERSION-PLAN.md section 5 says it is.
 			///
-			/// EIGHT RAYS RATHER THAN ONE, AND THAT IS A MEASUREMENT. +r alone
+			/// EIGHT RAYS RATHER THAN ONE, AND THAT IS A MEASUREMENT. +R alone
 			/// is the obvious choice and fails on an ordinary benchmark; the
 			/// implementation records which one and why. It is not an assumption
 			/// of star-shapedness -- one crossing on one ray is all it needs,
@@ -867,11 +867,11 @@ namespace meq
 			/// time and the element it leaves behind on every call after, or
 			/// every call falls back on Mesh::FindPoints and the measurement
 			/// goes quadratic in the mesh.
-			bool sampleAt( double r, double z, double &psi, double &qR,
+			bool sampleAt( double radius, double z, double &psi, double &qR,
 			               double &qZ, int &hint ) const;
 
 			/// The same for a caller with no hint to give.
-			bool sampleAt( double r, double z, double &psi, double &qR,
+			bool sampleAt( double radius, double z, double &psi, double &qR,
 			               double &qZ ) const;
 
 			/// The same, and it also says whether the value came from the band
@@ -885,7 +885,7 @@ namespace meq
 			/// meq::surfaceAverages( tracer, contour ) does -- cannot tell
 			/// whether a point it sampled is band data, and has to mark whole
 			/// segments conservatively from their endpoints instead.
-			bool sampleAt( double r, double z, double &psi, double &qR,
+			bool sampleAt( double radius, double z, double &psi, double &qR,
 			               double &qZ, int &hint, bool &extended ) const;
 
 			/**
@@ -1161,18 +1161,18 @@ namespace meq
 
 				/// For an extended sample the element above is the one whose
 				/// polynomial was extended and it does NOT contain the point; this
-				/// is the foot on its face. Kept because the Taylor step's own r is
+				/// is the foot on its face. Kept because the Taylor step's own R is
 				/// the FOOT's radius and not the point's, and getting that wrong is
 				/// the factor of 1.7e5 CLAUDE.md records against sampleCoefficient().
 				double footR = 0.0;
 				double footZ = 0.0;
 			};
 
-			/// Locate ( r, z ) and evaluate both fields there. @a hint is the
+			/// Locate ( R, z ) and evaluate both fields there. @a hint is the
 			/// element the previous call used, or -1. Returns false when the point
 			/// is outside the mesh and no band extension answers for it, which on
 			/// the fitted path means outside the plasma.
-			bool sampleField( double r, double z, int hint, FieldSample &sample,
+			bool sampleField( double radius, double z, int hint, FieldSample &sample,
 			                  int &fallbacks ) const;
 
 			/// The element walk: TransformBack into @a hint, then its face
@@ -1187,19 +1187,19 @@ namespace meq
 			/// last resort, then the band, and only then the last resort, so a point
 			/// that is genuinely inside and merely lost is still found and still
 			/// counted.
-			bool locate( double r, double z, int hint, int &element,
+			bool locate( double radius, double z, int hint, int &element,
 			             mfem::IntegrationPoint &ip, int &fallbacks,
 			             bool allowFallback = true ) const;
 
 			/// One face of Gamma_h, as the band search needs it. The endpoints are
 			/// in the FACE transformation's own parametrisation -- xi = 0 at
-			/// ( r0, z0 ) -- because that is what mfem::TransferPath::Endpoint
+			/// ( R_0, z0 ) -- because that is what mfem::TransferPath::Endpoint
 			/// interpolates its vertex directions along, and the mesh's own vertex
 			/// order is not required to agree with it.
 			struct BoundaryFace
 			{
-				double r0 = 0.0, z0 = 0.0;
-				double r1 = 0.0, z1 = 0.0;
+				double radius0 = 0.0, z0 = 0.0;
+				double radius1 = 0.0, z1 = 0.0;
 
 				/// The OUTWARD unit normal, oriented away from the element's
 				/// centroid rather than read off CalcOrtho: one fewer convention to
@@ -1211,19 +1211,19 @@ namespace meq
 				int boundaryElement = -1;
 			};
 
-			/// The nearest face of Gamma_h to ( r, z ), its foot, the face parameter
+			/// The nearest face of Gamma_h to ( R, z ), its foot, the face parameter
 			/// of the foot and the distance to it. Returns -1 if no face is within
-			/// reach, or if ( r, z ) is on the INSIDE of the nearest one -- in which
+			/// reach, or if ( R, z ) is on the INSIDE of the nearest one -- in which
 			/// case the point is not in the band at all and the caller still owes it
 			/// a proper location.
-			int nearestBandFace( double r, double z, double &footR, double &footZ,
+			int nearestBandFace( double radius, double z, double &footR, double &footZ,
 			                     double &parameter, double &depth ) const;
 
 			/// Answer psi and q at a point outside the mesh. Returns false if the
 			/// point is not in the band. Fills @a sample with extended = true and
 			/// with the element whose polynomial was extended -- which does NOT
 			/// contain the point.
-			bool extendField( double r, double z, FieldSample &sample ) const;
+			bool extendField( double radius, double z, FieldSample &sample ) const;
 
 			/// The minimum-norm Newton corrector: x <- x + grad( psi )( c - psi )
 			/// / | grad( psi ) |^2, iterated. Fills @a sample with the accepted
@@ -1237,7 +1237,7 @@ namespace meq
 			/// what happens where a point lands within the DG jump of a face.
 			/// See the implementation: both are consequences of psi_h being
 			/// discontinuous and neither is a defect of the iteration.
-			bool correct( double level, double target, double maxMove, double &r,
+			bool correct( double level, double target, double maxMove, double &radius,
 			              double &z, int hint, FieldSample &sample,
 			              int &iterations, bool &stalled, int &fallbacks ) const;
 
@@ -1264,8 +1264,8 @@ namespace meq
 			/// Bisect along the segment for the point where the located element
 			/// changes, and return the disagreement of psi_h across it. Zero if
 			/// the two elements turn out to be the same after all.
-			double faceJump( double r0, double z0, int element0,
-			                 double r1, double z1, int element1,
+			double faceJump( double radius0, double z0, int element0,
+			                 double radius1, double z1, int element1,
 			                 int &fallbacks ) const;
 
 			mfem::GridFunction const &potentialField;

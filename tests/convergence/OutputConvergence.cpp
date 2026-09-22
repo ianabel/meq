@@ -52,7 +52,7 @@ namespace
 	}
 
 	/// n( psi ) = a + b psi, for the rotating case below. It needs a genuine
-	/// psi-dependence: with a constant density the field depends on r alone, and
+	/// psi-dependence: with a constant density the field depends on R alone, and
 	/// the test would say nothing about pairing the node's R with the node's psi
 	/// -- only about the R.
 	class LinearProfile : public meq::Profile
@@ -146,11 +146,11 @@ BOOST_AUTO_TEST_CASE( theMfemFilesRoundTripExactly )
 /// THE OBVIOUS TEST DOES NOT WORK, AND THE REASON IS WORTH RECORDING. For a
 /// LINEAR psi the extension psi( x0 ) + grad psi( x0 ) . ( p - x0 ) is exactly
 /// psi, so the error ought to be round-off -- except that meq's flux is
-/// q = ( 1/r ) grad psi, and for a linear psi that is ( alpha/r, beta/r ),
+/// q = ( 1/R ) grad psi, and for a linear psi that is ( alpha/R, beta/R ),
 /// which is NOT a polynomial. Projecting it into the flux space costs
 /// O( h^(k+1) ) and the band inherits it: measured 1.2e-06 where the interior
 /// nodes were exact at 2.2e-15. No psi makes both psi and q exactly
-/// representable at once -- q polynomial needs grad psi proportional to r, and
+/// representable at once -- q polynomial needs grad psi proportional to R, and
 /// the extension is only exact for psi linear.
 ///
 /// So the assertion is on the RATE. The band error must fall at the flux's own
@@ -200,11 +200,11 @@ BOOST_AUTO_TEST_CASE( theBandIsContinuedByTheFluxAtTheFluxesOwnOrder )
 			{
 				if ( !sampler.located( i, j ) )
 					continue;
-				double const r = sampler.rAt( i ), z = sampler.zAt( j );
+				double const radius = sampler.rAt( i ), z = sampler.zAt( j );
 				double const got =
 					values[ static_cast<std::size_t>( j )*sampler.nodesR() + i ];
-				double const error = std::abs( got - ( alpha*r + beta*z ) );
-				bool const outside = r < inner.rMin || r > inner.rMax
+				double const error = std::abs( got - ( alpha*radius + beta*z ) );
+				bool const outside = radius < inner.minRadius || radius > inner.maxRadius
 				                     || z < inner.zMin || z > inner.zMax;
 				( outside ? band : interiorWorst ) =
 					std::max( outside ? band : interiorWorst, error );
@@ -267,9 +267,9 @@ BOOST_AUTO_TEST_CASE( theBandVectorContinuesAtItsGradientsOrder )
 	int const degree = 2;
 	meq::tests::Rectangle const inner{ 0.8, 1.2, -0.2, 0.2 };
 
-	auto exactly = [ = ]( int component, double r, double z )
+	auto exactly = [ = ]( int component, double radius, double z )
 	{
-		return component == 0 ? alpha*r*r + gamma*z*z : beta*r*z;
+		return component == 0 ? alpha*radius*radius + gamma*z*z : beta*radius*z;
 	};
 
 	auto measure = [ & ]( int cells, double &viaFoot, double &interiorWorst )
@@ -473,10 +473,10 @@ BOOST_AUTO_TEST_CASE( theBoundaryBendsOntoTheTrueGamma )
 	// A background box, and the subdomain of it inside a circle -- the same
 	// construction the driver's curved path uses, so Gamma_h here is a real
 	// inscribed polygon and not a contrivance.
-	double const centreR = 1.0, centreZ = 0.0, radius = 0.35;
+	double const centreR = 1.0, centreZ = 0.0, circleRadius = 0.35;
 	auto const circle = [ = ]( mfem::Vector const &x )
 	{
-		return std::hypot( x( 0 ) - centreR, x( 1 ) - centreZ ) - radius;
+		return std::hypot( x( 0 ) - centreR, x( 1 ) - centreZ ) - circleRadius;
 	};
 
 	mfem::Mesh background = meq::tests::makeMesh(
@@ -509,7 +509,7 @@ BOOST_AUTO_TEST_CASE( theBoundaryBendsOntoTheTrueGamma )
 		{
 			double const *p = mesh.GetVertex( vertices[ n ] );
 			worstBefore = std::max( worstBefore,
-				radius - std::hypot( p[ 0 ] - centreR, p[ 1 ] - centreZ ) );
+				circleRadius - std::hypot( p[ 0 ] - centreR, p[ 1 ] - centreZ ) );
 		}
 	}
 	BOOST_TEST_REQUIRE( worstBefore > 0.0,
@@ -518,16 +518,16 @@ BOOST_AUTO_TEST_CASE( theBoundaryBendsOntoTheTrueGamma )
 
 	double applied = 0.0;
 	int const moved = meq::curveBoundaryOnto( mesh, 2,
-		[ = ]( double r, double z, double &outR, double &outZ )
+		[ = ]( double radius, double z, double &outR, double &outZ )
 		{
-			double const vR = r - centreR, vZ = z - centreZ;
+			double const vR = radius - centreR, vZ = z - centreZ;
 			double const rho = std::hypot( vR, vZ );
-			outR = r;
+			outR = radius;
 			outZ = z;
 			if ( rho > 0.0 )
 			{
-				outR = centreR + vR*radius/rho;
-				outZ = centreZ + vZ*radius/rho;
+				outR = centreR + vR*circleRadius/rho;
+				outZ = centreZ + vZ*circleRadius/rho;
 			}
 		}, applied );
 
@@ -553,10 +553,10 @@ BOOST_AUTO_TEST_CASE( theBoundaryBendsOntoTheTrueGamma )
 		int const perComponent = vdofs.Size()/2;
 		for ( int n = 0; n < perComponent; ++n )
 		{
-			double const r = ( *nodes )( vdofs[ n ] );
+			double const radius = ( *nodes )( vdofs[ n ] );
 			double const z = ( *nodes )( vdofs[ perComponent + n ] );
 			worst = std::max( worst,
-				std::abs( std::hypot( r - centreR, z - centreZ ) - radius ) );
+				std::abs( std::hypot( radius - centreR, z - centreZ ) - circleRadius ) );
 			++checked;
 		}
 	}
@@ -723,7 +723,7 @@ BOOST_AUTO_TEST_CASE( theGridFileReadsBackAsTheExactSolution )
 	int const nodesZ = 49;
 	double const inset = 0.05;
 	meq::GridSampler sampler( mesh,
-		box().rMin + inset, box().rMax - inset, nodesR,
+		box().minRadius + inset, box().maxRadius - inset, nodesR,
 		box().zMin + inset, box().zMax - inset, nodesZ );
 
 	std::vector<double> psi, bR, bZ;
@@ -777,11 +777,11 @@ BOOST_AUTO_TEST_CASE( theGridFileReadsBackAsTheExactSolution )
 			if ( !sampler.located( i, j ) ) continue;
 			++compared;
 
-			double const r = sampler.rAt( i ), z = sampler.zAt( j );
-			worstPsi = std::max( worstPsi, std::abs( psi[ at ] - eq.psi( r, z ) ) );
+			double const radius = sampler.rAt( i ), z = sampler.zAt( j );
+			worstPsi = std::max( worstPsi, std::abs( psi[ at ] - eq.psi( radius, z ) ) );
 
 			double qR = 0.0, qZ = 0.0;
-			eq.flux( r, z, qR, qZ );
+			eq.flux( radius, z, qR, qZ );
 			worstB = std::max( worstB, std::hypot( bR[ at ] + qZ, bZ[ at ] - qR ) );
 		}
 
@@ -798,7 +798,7 @@ BOOST_AUTO_TEST_CASE( theGridFileReadsBackAsTheExactSolution )
 /// THAT LOOKS RIGHT AND IS NOT.
 ///
 /// With rotation the density is not a flux function: RoPP (96) makes it
-/// n_s( r, psi ), and the whole physics of it is the r^2 in the exponent. So a
+/// n_s( R, psi ), and the whole physics of it is the R^2 in the exponent. So a
 /// node's own R is not incidental to the answer, it IS the answer, and that is
 /// what makes the obvious route wrong.
 ///
@@ -885,9 +885,9 @@ BOOST_AUTO_TEST_CASE( theRotatingFieldsUseTheNodesOwnRadius )
 			if ( !sampler.located( i, j ) || !std::isfinite( psi[ at ] ) )
 				continue;
 
-			double const r = sampler.rAt( i );
-			density[ at ] = rotating.density( 0, r, psi[ at ] );
-			ePhi[ at ] = rotating.potential( r, psi[ at ] );
+			double const radius = sampler.rAt( i );
+			density[ at ] = rotating.density( 0, radius, psi[ at ] );
+			ePhi[ at ] = rotating.potential( radius, psi[ at ] );
 		}
 
 	// THE ROUTE THAT LOOKS RIGHT: the same closed form as a Coefficient, which
@@ -906,14 +906,14 @@ BOOST_AUTO_TEST_CASE( theRotatingFieldsUseTheNodesOwnRadius )
 			if ( !sampler.located( i, j ) )
 				continue;
 
-			double const r = sampler.rAt( i ), z = sampler.zAt( j );
+			double const radius = sampler.rAt( i ), z = sampler.zAt( j );
 			// The closed form at the NODE, which is what both routes are trying
 			// to compute.
-			double const want = rotating.density( 0, r, alpha*r + beta*z );
+			double const want = rotating.density( 0, radius, alpha*radius + beta*z );
 			double const mine = std::abs( density[ at ] - want )/want;
 			double const theirs = std::abs( viaCoefficient[ at ] - want )/want;
 
-			bool const band = r < inner.rMin || r > inner.rMax
+			bool const band = radius < inner.minRadius || radius > inner.maxRadius
 			                  || z < inner.zMin || z > inner.zMax;
 			if ( band )
 			{
@@ -1015,7 +1015,7 @@ BOOST_AUTO_TEST_CASE( theMaskAgreesWithTheData )
 	// A grid wider than the mesh, so there are genuinely absent nodes.
 	double const pad = 0.3*box().width();
 	meq::GridSampler sampler( mesh,
-		box().rMin - pad, box().rMax + pad, 45,
+		box().minRadius - pad, box().maxRadius + pad, 45,
 		box().zMin - pad, box().zMax + pad, 45 );
 
 	std::vector<double> values;

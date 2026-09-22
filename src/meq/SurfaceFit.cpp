@@ -58,7 +58,7 @@
  * wrong in.
  *
  * COST. The QR is 2 m n^2 for m samples and n modes, the Jacobi sweep is n^3
- * per sweep on the small factor, and both right-hand sides -- r and z -- share
+ * per sweep on the small factor, and both right-hand sides -- R and z -- share
  * one factorisation. At the sizes IN-3 measures, a few thousand samples against
  * a couple of hundred modes, that is a tenth of a second. It is not on any
  * inner loop: a fit is built once and evaluated many times.
@@ -294,7 +294,7 @@ namespace meq
 			if ( sample.normalisedFlux > smallest*( 1.0 + 1.0e-9 ) + 1.0e-15 )
 				continue;
 
-			double const a = sample.r - axisR;
+			double const a = sample.radius - axisR;
 			double const b = sample.z - axisZ;
 			double const row[ 3 ] = { a*a, 2.0*a*b, b*b };
 			++used;
@@ -485,11 +485,11 @@ namespace meq
 					" finite" );
 
 			double const argument = argumentOf( sample.normalisedFlux );
-			double const radius = std::sqrt( sample.normalisedFlux/options.discEdge );
+			double const discRadius = std::sqrt( sample.normalisedFlux/options.discEdge );
 			diagnostic.smallestSampledRadius =
-				std::min( diagnostic.smallestSampledRadius, radius );
+				std::min( diagnostic.smallestSampledRadius, discRadius );
 			diagnostic.largestSampledRadius =
-				std::max( diagnostic.largestSampledRadius, radius );
+				std::max( diagnostic.largestSampledRadius, discRadius );
 
 			double const scale = std::sqrt( sample.weight );
 
@@ -501,7 +501,7 @@ namespace meq
 				        static_cast<Eigen::Index>( j ) )
 					= scale*modeValue( modeList[ j ], argument, sample.theta );
 
-			rhs( static_cast<Eigen::Index>( i ), 0 ) = scale*sample.r;
+			rhs( static_cast<Eigen::Index>( i ), 0 ) = scale*sample.radius;
 			rhs( static_cast<Eigen::Index>( i ), 1 ) = scale*sample.z;
 		}
 
@@ -550,17 +550,17 @@ namespace meq
 			}
 		}
 
-		// The residual against the samples themselves, in the units of r and z
+		// The residual against the samples themselves, in the units of R and z
 		// and WITHOUT the weights, because a residual is read as a distance.
 		double sumR = 0.0;
 		double sumZ = 0.0;
 		for ( SurfaceSample const &sample : samples )
 		{
-			double r = 0.0;
+			double radius = 0.0;
 			double z = 0.0;
-			position( sample.normalisedFlux, sample.theta, r, z );
+			position( sample.normalisedFlux, sample.theta, radius, z );
 
-			double const errorR = r - sample.r;
+			double const errorR = radius - sample.radius;
 			double const errorZ = z - sample.z;
 			sumR += errorR*errorR;
 			sumZ += errorZ*errorZ;
@@ -646,11 +646,11 @@ namespace meq
 	}
 
 	void SurfaceFit::evaluateAll( double argument, double theta,
-	                              double &r, double &z,
+	                              double &radius, double &z,
 	                              double &dArgumentR, double &dArgumentZ,
 	                              double &dThetaR, double &dThetaZ ) const
 	{
-		r = 0.0;
+		radius = 0.0;
 		z = 0.0;
 		dArgumentR = 0.0;
 		dArgumentZ = 0.0;
@@ -664,7 +664,7 @@ namespace meq
 			double dTheta = 0.0;
 			evaluateMode( modeList[ j ], argument, theta, value, dArgument, dTheta );
 
-			r += coefficientR[ j ]*value;
+			radius += coefficientR[ j ]*value;
 			z += coefficientZ[ j ]*value;
 			dArgumentR += coefficientR[ j ]*dArgument;
 			dArgumentZ += coefficientZ[ j ]*dArgument;
@@ -674,18 +674,18 @@ namespace meq
 	}
 
 	void SurfaceFit::position( double normalisedFlux, double theta,
-	                           double &r, double &z ) const
+	                           double &radius, double &z ) const
 	{
 		double dArgumentR = 0.0;
 		double dArgumentZ = 0.0;
 		double dThetaR = 0.0;
 		double dThetaZ = 0.0;
-		evaluateAll( argumentOf( normalisedFlux ), theta, r, z, dArgumentR,
+		evaluateAll( argumentOf( normalisedFlux ), theta, radius, z, dArgumentR,
 		             dArgumentZ, dThetaR, dThetaZ );
 	}
 
 	void SurfaceFit::radialDerivative( double normalisedFlux, double theta,
-	                                   double &r, double &z ) const
+	                                   double &radius, double &z ) const
 	{
 		double value = 0.0;
 		double height = 0.0;
@@ -703,12 +703,12 @@ namespace meq
 		double const chain = ( option.coordinate == FitRadialCoordinate::DiscRadius )
 			? 1.0 : 2.0*discRadiusOf( normalisedFlux );
 
-		r = chain*dArgumentR;
+		radius = chain*dArgumentR;
 		z = chain*dArgumentZ;
 	}
 
 	void SurfaceFit::fluxDerivative( double normalisedFlux, double theta,
-	                                 double &r, double &z ) const
+	                                 double &radius, double &z ) const
 	{
 		double radialR = 0.0;
 		double radialZ = 0.0;
@@ -718,39 +718,39 @@ namespace meq
 		// rescaling of the disc adds to it. No exception at the axis: this is
 		// called per surface point and an infinity there is the coordinate, not
 		// an error -- see the header.
-		double const radius = discRadiusOf( normalisedFlux );
-		r = fluxDerivativeFromRadial( radialR, radius )/option.discEdge;
-		z = fluxDerivativeFromRadial( radialZ, radius )/option.discEdge;
+		double const discRadius = discRadiusOf( normalisedFlux );
+		radius = fluxDerivativeFromRadial( radialR, discRadius )/option.discEdge;
+		z = fluxDerivativeFromRadial( radialZ, discRadius )/option.discEdge;
 	}
 
 	void SurfaceFit::angularDerivative( double normalisedFlux, double theta,
-	                                    double &r, double &z ) const
+	                                    double &radius, double &z ) const
 	{
 		double value = 0.0;
 		double height = 0.0;
 		double dArgumentR = 0.0;
 		double dArgumentZ = 0.0;
 		evaluateAll( argumentOf( normalisedFlux ), theta, value, height, dArgumentR,
-		             dArgumentZ, r, z );
+		             dArgumentZ, radius, z );
 	}
 
 	double SurfaceFit::angularSpeed( double normalisedFlux, double theta ) const
 	{
-		double r = 0.0;
+		double radius = 0.0;
 		double z = 0.0;
-		angularDerivative( normalisedFlux, theta, r, z );
+		angularDerivative( normalisedFlux, theta, radius, z );
 
-		return std::sqrt( r*r + z*z );
+		return std::sqrt( radius*radius + z*z );
 	}
 
-	void SurfaceFit::axis( double &r, double &z ) const
+	void SurfaceFit::axis( double &radius, double &z ) const
 	{
-		axisAtAngle( 0.0, r, z );
+		axisAtAngle( 0.0, radius, z );
 	}
 
-	void SurfaceFit::axisAtAngle( double theta, double &r, double &z ) const
+	void SurfaceFit::axisAtAngle( double theta, double &radius, double &z ) const
 	{
-		position( 0.0, theta, r, z );
+		position( 0.0, theta, radius, z );
 	}
 
 	double SurfaceFit::coefficientEnvelope( int degreeWanted ) const
@@ -1079,19 +1079,19 @@ namespace meq
 
 			for ( std::size_t i = 0; i < points; ++i )
 			{
-				double r = 0.0;
+				double radius = 0.0;
 				double z = 0.0;
 				for ( std::size_t j = 0; j < modes; ++j )
 				{
 					double const value = basis[ i*modes + j ];
-					r += cR[ j ]*value;
+					radius += cR[ j ]*value;
 					z += cZ[ j ]*value;
 				}
 
 				double flux = 0.0;
 				double gradientR = 0.0;
 				double gradientZ = 0.0;
-				if ( !field.sample( r, z, flux, gradientR, gradientZ )
+				if ( !field.sample( radius, z, flux, gradientR, gradientZ )
 				     || !std::isfinite( flux ) || !std::isfinite( gradientR )
 				     || !std::isfinite( gradientZ ) )
 					return false;
@@ -1535,7 +1535,7 @@ namespace meq
 		/// truncation, same distance measure.
 		OpenSurfaceFit fitOnBasis(
 			std::vector<double> const &arcLength,
-			std::vector<double> const &r, std::vector<double> const &z,
+			std::vector<double> const &radius, std::vector<double> const &z,
 			std::size_t modes,
 			void ( *basis )( double, std::size_t, std::vector<double> & ),
 			char const *who )
@@ -1543,7 +1543,7 @@ namespace meq
 			std::string const where( who );
 			std::size_t const n = arcLength.size();
 
-			if ( r.size() != n || z.size() != n )
+			if ( radius.size() != n || z.size() != n )
 				throw std::invalid_argument(
 					where + ": the arc length and the two coordinate arrays must "
 					"be the same length" );
@@ -1580,7 +1580,7 @@ namespace meq
 				for ( std::size_t k = 0; k < modes; ++k )
 					design( static_cast<Eigen::Index>( i ),
 					        static_cast<Eigen::Index>( k ) ) = row[ k ];
-				rhs( static_cast<Eigen::Index>( i ), 0 ) = r[ i ];
+				rhs( static_cast<Eigen::Index>( i ), 0 ) = radius[ i ];
 				rhs( static_cast<Eigen::Index>( i ), 1 ) = z[ i ];
 			}
 
@@ -1590,11 +1590,11 @@ namespace meq
 
 			OpenSurfaceFit fit;
 			fit.length = total;
-			fit.r.resize( modes );
+			fit.radius.resize( modes );
 			fit.z.resize( modes );
 			for ( std::size_t k = 0; k < modes; ++k )
 			{
-				fit.r[ k ] = solution( static_cast<Eigen::Index>( k ), 0 );
+				fit.radius[ k ] = solution( static_cast<Eigen::Index>( k ), 0 );
 				fit.z[ k ] = solution( static_cast<Eigen::Index>( k ), 1 );
 			}
 
@@ -1608,10 +1608,10 @@ namespace meq
 				double fittedR = 0.0, fittedZ = 0.0;
 				for ( std::size_t k = 0; k < modes; ++k )
 				{
-					fittedR += fit.r[ k ]*row[ k ];
+					fittedR += fit.radius[ k ]*row[ k ];
 					fittedZ += fit.z[ k ]*row[ k ];
 				}
-				double const dr = fittedR - r[ i ];
+				double const dr = fittedR - radius[ i ];
 				double const dz = fittedZ - z[ i ];
 				fit.worstDistance = std::max( fit.worstDistance,
 				                              std::sqrt( dr*dr + dz*dz ) );
@@ -1622,48 +1622,48 @@ namespace meq
 		void evaluateOnBasis(
 			OpenSurfaceFit const &fit, double t,
 			void ( *basis )( double, std::size_t, std::vector<double> & ),
-			double &r, double &z )
+			double &radius, double &z )
 		{
 			std::vector<double> row;
-			basis( t, fit.r.size(), row );
-			r = 0.0;
+			basis( t, fit.radius.size(), row );
+			radius = 0.0;
 			z = 0.0;
-			for ( std::size_t k = 0; k < fit.r.size(); ++k )
+			for ( std::size_t k = 0; k < fit.radius.size(); ++k )
 			{
-				r += fit.r[ k ]*row[ k ];
+				radius += fit.radius[ k ]*row[ k ];
 				z += fit.z[ k ]*row[ k ];
 			}
 		}
 	}
 
 	OpenSurfaceFit fitOpenSurface( std::vector<double> const &arcLength,
-	                               std::vector<double> const &r,
+	                               std::vector<double> const &radius,
 	                               std::vector<double> const &z,
 	                               std::size_t modes )
 	{
-		return fitOnBasis( arcLength, r, z, modes, chebyshevBasis,
+		return fitOnBasis( arcLength, radius, z, modes, chebyshevBasis,
 		                   "meq::fitOpenSurface" );
 	}
 
 	OpenSurfaceFit fitOpenSurfacePeriodic( std::vector<double> const &arcLength,
-	                                       std::vector<double> const &r,
+	                                       std::vector<double> const &radius,
 	                                       std::vector<double> const &z,
 	                                       std::size_t modes )
 	{
-		return fitOnBasis( arcLength, r, z, modes, periodicBasis,
+		return fitOnBasis( arcLength, radius, z, modes, periodicBasis,
 		                   "meq::fitOpenSurfacePeriodic" );
 	}
 
 	void evaluateOpenSurface( OpenSurfaceFit const &fit, double t,
-	                          double &r, double &z )
+	                          double &radius, double &z )
 	{
-		evaluateOnBasis( fit, t, chebyshevBasis, r, z );
+		evaluateOnBasis( fit, t, chebyshevBasis, radius, z );
 	}
 
 	void evaluateOpenSurfacePeriodic( OpenSurfaceFit const &fit, double t,
-	                                  double &r, double &z )
+	                                  double &radius, double &z )
 	{
-		evaluateOnBasis( fit, t, periodicBasis, r, z );
+		evaluateOnBasis( fit, t, periodicBasis, radius, z );
 	}
 
 }

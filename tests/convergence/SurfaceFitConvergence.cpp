@@ -225,12 +225,12 @@ namespace
 	/// FluxSurfaceConvergence.cpp, which is where the argument for it is.
 	struct ExactAxis
 	{
-		double r;
+		double radius;
 		double z;
 		double psi;
 	};
 
-	void hessianOf( Equilibrium const &eq, double r, double z, double h[ 2 ][ 2 ] )
+	void hessianOf( Equilibrium const &eq, double radius, double z, double h[ 2 ][ 2 ] )
 	{
 		double const step = 1.0e-5;
 		double a0 = 0.0;
@@ -238,40 +238,40 @@ namespace
 		double b0 = 0.0;
 		double b1 = 0.0;
 
-		eq.gradPsi( r + step, z, a0, b0 );
-		eq.gradPsi( r - step, z, a1, b1 );
+		eq.gradPsi( radius + step, z, a0, b0 );
+		eq.gradPsi( radius - step, z, a1, b1 );
 		h[ 0 ][ 0 ] = ( a0 - a1 )/( 2.0*step );
 		h[ 1 ][ 0 ] = ( b0 - b1 )/( 2.0*step );
-		eq.gradPsi( r, z + step, a0, b0 );
-		eq.gradPsi( r, z - step, a1, b1 );
+		eq.gradPsi( radius, z + step, a0, b0 );
+		eq.gradPsi( radius, z - step, a1, b1 );
 		h[ 0 ][ 1 ] = ( a0 - a1 )/( 2.0*step );
 		h[ 1 ][ 1 ] = ( b0 - b1 )/( 2.0*step );
 	}
 
 	ExactAxis exactAxis( Equilibrium const &eq, double rGuess, double zGuess )
 	{
-		double r = rGuess;
+		double radius = rGuess;
 		double z = zGuess;
 
 		for ( int iteration = 0; iteration < 200; ++iteration )
 		{
 			double gr = 0.0;
 			double gz = 0.0;
-			eq.gradPsi( r, z, gr, gz );
+			eq.gradPsi( radius, z, gr, gz );
 
 			double hessian[ 2 ][ 2 ];
-			hessianOf( eq, r, z, hessian );
+			hessianOf( eq, radius, z, hessian );
 
 			double const det = hessian[ 0 ][ 0 ]*hessian[ 1 ][ 1 ]
 			                   - hessian[ 0 ][ 1 ]*hessian[ 1 ][ 0 ];
-			r += -(  hessian[ 1 ][ 1 ]*gr - hessian[ 0 ][ 1 ]*gz )/det;
+			radius += -(  hessian[ 1 ][ 1 ]*gr - hessian[ 0 ][ 1 ]*gz )/det;
 			z += -( -hessian[ 1 ][ 0 ]*gr + hessian[ 0 ][ 0 ]*gz )/det;
 		}
 
 		ExactAxis axis;
-		axis.r = r;
+		axis.radius = radius;
 		axis.z = z;
-		axis.psi = eq.psi( r, z );
+		axis.psi = eq.psi( radius, z );
 		return axis;
 	}
 
@@ -290,11 +290,11 @@ namespace
 	{
 		// reach 3.0 and four thousand march steps rather than the fixture's
 		// defaults: the surfaces wanted here run from Psi_N = 0.02, whose minor
-		// radius is about 0.04, up to Psi_N = 0.9, which reaches past r = 1.7.
+		// radius is about 0.04, up to Psi_N = 0.9, which reaches past R = 1.7.
 		// One reach has to bracket both, so the march has to be fine enough for
 		// the small one and long enough for the large one. The march only ever
 		// BRACKETS; every digit comes from the safeguarded Newton beneath it.
-		return meq::analytic::surfaceQuadrature( eq, axis.r, axis.z,
+		return meq::analytic::surfaceQuadrature( eq, axis.radius, axis.z,
 		                                         levelAt( axis, normalisedFlux ),
 		                                         angles, 3.0, 4000 );
 	}
@@ -309,7 +309,7 @@ namespace
 	/// the four surfaces the Richardson difference needs are each solved from
 	/// scratch and the fit never enters.
 	void rayPoint( Equilibrium const &eq, ExactAxis const &axis,
-	               double normalisedFlux, double theta, double &r, double &z )
+	               double normalisedFlux, double theta, double &radius, double &z )
 	{
 		double const level = levelAt( axis, normalisedFlux );
 		double const cosine = std::cos( theta );
@@ -317,7 +317,7 @@ namespace
 
 		auto along = [ & ]( double distance )
 		{
-			return eq.psi( axis.r + distance*cosine, axis.z + distance*sine )
+			return eq.psi( axis.radius + distance*cosine, axis.z + distance*sine )
 			       - level;
 		};
 
@@ -345,7 +345,7 @@ namespace
 
 		for ( int iteration = 0; iteration < 200; ++iteration )
 		{
-			double const rr = axis.r + distance*cosine;
+			double const rr = axis.radius + distance*cosine;
 			double const zz = axis.z + distance*sine;
 			double gr = 0.0;
 			double gz = 0.0;
@@ -376,7 +376,7 @@ namespace
 				break;
 		}
 
-		r = axis.r + distance*cosine;
+		radius = axis.radius + distance*cosine;
 		z = axis.z + distance*sine;
 	}
 
@@ -492,7 +492,7 @@ namespace
 				meq::SurfaceSample sample;
 				sample.normalisedFlux = normalisedFlux;
 				sample.theta = point.theta;
-				sample.r = point.r;
+				sample.radius = point.radius;
 				sample.z = point.z;
 				samples.push_back( sample );
 			}
@@ -509,10 +509,10 @@ namespace
 
 		for ( meq::SurfaceSample const &sample : samples )
 		{
-			double r = 0.0;
+			double radius = 0.0;
 			double z = 0.0;
-			fit.position( sample.normalisedFlux, sample.theta, r, z );
-			worst = std::max( worst, std::hypot( r - sample.r, z - sample.z ) );
+			fit.position( sample.normalisedFlux, sample.theta, radius, z );
+			worst = std::max( worst, std::hypot( radius - sample.radius, z - sample.z ) );
 		}
 
 		return worst;
@@ -544,14 +544,14 @@ namespace
 	                                     ExactAxis const &axis )
 	{
 		meq::NormalisedFluxField field;
-		field.sample = [ &eq, axis ]( double r, double z, double &normalisedFlux,
+		field.sample = [ &eq, axis ]( double radius, double z, double &normalisedFlux,
 		                              double &gradientR, double &gradientZ )
 		{
 			double dR = 0.0;
 			double dZ = 0.0;
-			eq.gradPsi( r, z, dR, dZ );
+			eq.gradPsi( radius, z, dR, dZ );
 
-			normalisedFlux = 1.0 - eq.psi( r, z )/axis.psi;
+			normalisedFlux = 1.0 - eq.psi( radius, z )/axis.psi;
 			gradientR = -dR/axis.psi;
 			gradientZ = -dZ/axis.psi;
 			return true;
@@ -594,12 +594,12 @@ namespace
 
 		for ( int j = 0; j <= count; ++j )
 		{
-			double r = 0.0;
+			double radius = 0.0;
 			double z = 0.0;
-			rayPoint( eq, axis, normalisedFlux, twoPi*j/count, r, z );
+			rayPoint( eq, axis, normalisedFlux, twoPi*j/count, radius, z );
 			if ( j > 0 )
-				total += std::hypot( r - previousR, z - previousZ );
-			previousR = r;
+				total += std::hypot( radius - previousR, z - previousZ );
+			previousR = radius;
 			previousZ = z;
 		}
 
@@ -619,11 +619,11 @@ namespace
 
 		for ( int j = 0; j < 64; ++j )
 		{
-			double r = 0.0;
+			double radius = 0.0;
 			double z = 0.0;
-			fit.axisAtAngle( twoPi*j/64, r, z );
-			minR = std::min( minR, r );
-			maxR = std::max( maxR, r );
+			fit.axisAtAngle( twoPi*j/64, radius, z );
+			minR = std::min( minR, radius );
+			maxR = std::max( maxR, radius );
 			minZ = std::min( minZ, z );
 			maxZ = std::max( maxZ, z );
 		}
@@ -645,7 +645,7 @@ namespace
 	}
 
 	/// The benchmark box for the discrete leg. NOT standardBox(): nstx()'s
-	/// surfaces are elongated and Psi_N = 0.50 already reaches r in
+	/// surfaces are elongated and Psi_N = 0.50 already reaches R in
 	/// [ 0.81, 1.66 ] and z in [ -0.87, 0.90 ]. Lifted from
 	/// SurfaceAverageConvergence.cpp with its reasoning.
 	Rectangle nstxBox()
@@ -850,7 +850,7 @@ BOOST_AUTO_TEST_CASE( theEnvelopeDecaysGeometricallyAndTheFluxCoordinateDoesNot 
 	std::vector<meq::SurfaceSample> const geometric = exactSamples(
 		eq, axis, levelsFor( Layout::EquispacedFlux, smallest, largest, surfaces ),
 		angles );
-	meq::AxisShape const shape = meq::axisShapeFromSamples( geometric, axis.r,
+	meq::AxisShape const shape = meq::axisShapeFromSamples( geometric, axis.radius,
 	                                                       axis.z );
 	std::vector<meq::SurfaceSample> const samples =
 		meq::relabelByAxisShape( geometric, shape );
@@ -954,13 +954,13 @@ BOOST_AUTO_TEST_CASE( theParityConstraintKeepsTheAxisAPoint )
 	std::vector<meq::SurfaceSample> const geometric = exactSamples(
 		eq, axis, levelsFor( Layout::EquispacedFlux, smallest, largest, surfaces ),
 		angles );
-	meq::AxisShape const shape = meq::axisShapeFromSamples( geometric, axis.r,
+	meq::AxisShape const shape = meq::axisShapeFromSamples( geometric, axis.radius,
 	                                                        axis.z );
 	std::vector<meq::SurfaceSample> const samples =
 		meq::relabelByAxisShape( geometric, shape );
 
 	std::printf( "\n=== IN-3 case 3: the parity constraint at the axis ===\n" );
-	std::printf( "    exact axis ( %.9f, %.9f )\n\n", axis.r, axis.z );
+	std::printf( "    exact axis ( %.9f, %.9f )\n\n", axis.radius, axis.z );
 	std::printf( "  %-4s  %-8s  %-11s  %-11s  %-11s  %-11s\n", "L", "basis",
 	             "modes", "cond", "fit error", "axis error" );
 
@@ -994,17 +994,17 @@ BOOST_AUTO_TEST_CASE( theParityConstraintKeepsTheAxisAPoint )
 			double maxZ = -1.0e30;
 			for ( int j = 0; j < 64; ++j )
 			{
-				double r = 0.0;
+				double radius = 0.0;
 				double z = 0.0;
-				fit.axisAtAngle( twoPi*j/64, r, z );
-				minR = std::min( minR, r );
-				maxR = std::max( maxR, r );
+				fit.axisAtAngle( twoPi*j/64, radius, z );
+				minR = std::min( minR, radius );
+				maxR = std::max( maxR, radius );
 				minZ = std::min( minZ, z );
 				maxZ = std::max( maxZ, z );
 			}
 
 			double const spread = std::max( maxR - minR, maxZ - minZ );
-			double const axisError = std::hypot( 0.5*( minR + maxR ) - axis.r,
+			double const axisError = std::hypot( 0.5*( minR + maxR ) - axis.radius,
 			                                     0.5*( minZ + maxZ ) - axis.z );
 			double const error = worstFitError( fit, samples );
 
@@ -1079,7 +1079,7 @@ BOOST_AUTO_TEST_CASE( theDerivativeAgreesWithIndependentlyTracedSurfaces )
 	std::vector<meq::SurfaceSample> const geometric = exactSamples(
 		eq, axis, levelsFor( Layout::EquispacedFlux, smallest, largest, surfaces ),
 		angles );
-	meq::AxisShape const shape = meq::axisShapeFromSamples( geometric, axis.r,
+	meq::AxisShape const shape = meq::axisShapeFromSamples( geometric, axis.radius,
 	                                                        axis.z );
 	std::vector<meq::SurfaceSample> const samples =
 		meq::relabelByAxisShape( geometric, shape );
@@ -1089,7 +1089,7 @@ BOOST_AUTO_TEST_CASE( theDerivativeAgreesWithIndependentlyTracedSurfaces )
 
 	double const centreRadius = std::sqrt( at/largest );
 
-	// d( r, z )/d( discRadius ) at a geometric angle, from surfaces solved from
+	// d( R, z )/d( discRadius ) at a geometric angle, from surfaces solved from
 	// scratch at four neighbouring levels. The fit is not consulted anywhere in
 	// here, which is what makes this an independent instrument.
 	auto difference = [ & ]( double theta, double width, double &dR, double &dZ )
@@ -1108,7 +1108,7 @@ BOOST_AUTO_TEST_CASE( theDerivativeAgreesWithIndependentlyTracedSurfaces )
 		dZ = ( zPlus - zMinus )/( 2.0*width );
 	};
 
-	std::printf( "\n=== IN-3 case 4: d( r, z )/d( discRadius ) at Psi_N = %.2f"
+	std::printf( "\n=== IN-3 case 4: d( R, z )/d( discRadius ) at Psi_N = %.2f"
 	             " ===\n", at );
 	std::printf( "    against surfaces traced independently at four"
 	             " neighbouring levels, Richardson step %.3f in discRadius\n\n",
@@ -1269,7 +1269,7 @@ BOOST_AUTO_TEST_CASE( theFluxDerivativeConversionGrowsLikeTheInverseRootFlux )
 	std::vector<meq::SurfaceSample> const geometric = exactSamples(
 		eq, axis, levelsFor( Layout::EquispacedFlux, smallest, largest, surfaces ),
 		angles );
-	meq::AxisShape const shape = meq::axisShapeFromSamples( geometric, axis.r,
+	meq::AxisShape const shape = meq::axisShapeFromSamples( geometric, axis.radius,
 	                                                        axis.z );
 	std::vector<meq::SurfaceSample> const samples =
 		meq::relabelByAxisShape( geometric, shape );
@@ -1411,7 +1411,7 @@ BOOST_AUTO_TEST_CASE( theAngularMetricAgreesWithTheFieldPointwise )
 	std::vector<meq::SurfaceSample> const geometric = exactSamples( eq, axis,
 	                                                                levels,
 	                                                                angles );
-	meq::AxisShape const shape = meq::axisShapeFromSamples( geometric, axis.r,
+	meq::AxisShape const shape = meq::axisShapeFromSamples( geometric, axis.radius,
 	                                                        axis.z );
 	std::vector<meq::SurfaceSample> const samples =
 		meq::relabelByAxisShape( geometric, shape );
@@ -1522,7 +1522,7 @@ BOOST_AUTO_TEST_CASE( theHoleAndTheDiscEdgeDecideTheConditioningAndNotTheLayout 
 			std::vector<meq::SurfaceSample> const geometric =
 				exactSamples( eq, axis, levels, angles );
 			meq::AxisShape const shape = meq::axisShapeFromSamples( geometric,
-			                                                        axis.r,
+			                                                        axis.radius,
 			                                                        axis.z );
 			std::vector<meq::SurfaceSample> const samples =
 				meq::relabelByAxisShape( geometric, shape );
@@ -1627,7 +1627,7 @@ BOOST_AUTO_TEST_CASE( theFitReachesTheSolvedFieldThroughTheTracer )
 	std::printf( "\n=== IN-3 case 8: the same fit on a SOLVED field, k = %d,"
 	             " n = %d ===\n", order, n );
 	std::printf( "    tracer axis ( %.9f, %.9f ) against the closed form's"
-	             " ( %.9f, %.9f )\n\n", axis.r, axis.z, exact.r, exact.z );
+	             " ( %.9f, %.9f )\n\n", axis.radius, axis.z, exact.radius, exact.z );
 
 	std::vector<meq::SurfaceSample> geometric;
 	std::vector<std::vector<double>> fieldSpeeds;
@@ -1662,7 +1662,7 @@ BOOST_AUTO_TEST_CASE( theFitReachesTheSolvedFieldThroughTheTracer )
 			meq::SurfaceSample sample;
 			sample.normalisedFlux = normalisedFlux;
 			sample.theta = twoPi*static_cast<double>( j )/fit.count();
-			sample.r = fit.pointR[ j ];
+			sample.radius = fit.pointR[ j ];
 			sample.z = fit.pointZ[ j ];
 			geometric.push_back( sample );
 		}
@@ -1688,7 +1688,7 @@ BOOST_AUTO_TEST_CASE( theFitReachesTheSolvedFieldThroughTheTracer )
 	             " %d stalled rays, worst ray residual %.3e\n",
 	             surfaces, stalledRays, worstRayResidual );
 
-	meq::AxisShape const shape = meq::axisShapeFromSamples( geometric, axis.r,
+	meq::AxisShape const shape = meq::axisShapeFromSamples( geometric, axis.radius,
 	                                                        axis.z );
 	std::vector<meq::SurfaceSample> const samples =
 		meq::relabelByAxisShape( geometric, shape );
@@ -1713,12 +1713,12 @@ BOOST_AUTO_TEST_CASE( theFitReachesTheSolvedFieldThroughTheTracer )
 			double exactZ = 0.0;
 			rayPoint( eq, exact, normalisedFlux, theta, exactR, exactZ );
 
-			double r = 0.0;
+			double radius = 0.0;
 			double z = 0.0;
 			fit.position( normalisedFlux,
-			              meq::shapedPoloidalAngle( shape, theta ), r, z );
+			              meq::shapedPoloidalAngle( shape, theta ), radius, z );
 			worstAgainstExact = std::max( worstAgainstExact,
-			                              std::hypot( r - exactR, z - exactZ ) );
+			                              std::hypot( radius - exactR, z - exactZ ) );
 		}
 	}
 
@@ -1757,11 +1757,11 @@ BOOST_AUTO_TEST_CASE( theFitReachesTheSolvedFieldThroughTheTracer )
 		double maxZ = -1.0e30;
 		for ( int j = 0; j < 64; ++j )
 		{
-			double r = 0.0;
+			double radius = 0.0;
 			double z = 0.0;
-			fit.axisAtAngle( twoPi*j/64, r, z );
-			minR = std::min( minR, r );
-			maxR = std::max( maxR, r );
+			fit.axisAtAngle( twoPi*j/64, radius, z );
+			minR = std::min( minR, radius );
+			maxR = std::max( maxR, radius );
 			minZ = std::min( minZ, z );
 			maxZ = std::max( maxZ, z );
 		}
@@ -1779,7 +1779,7 @@ BOOST_AUTO_TEST_CASE( theFitReachesTheSolvedFieldThroughTheTracer )
 	             worstFitError( fit, samples ), worstAgainstExact );
 	std::printf( "  the fit's own axis ( %.9f, %.9f ) is %.3e from the closed"
 	             " form's, and is theta-independent to %.3e\n", fitAxisR,
-	             fitAxisZ, std::hypot( fitAxisR - exact.r, fitAxisZ - exact.z ),
+	             fitAxisZ, std::hypot( fitAxisR - exact.radius, fitAxisZ - exact.z ),
 	             axisSpread );
 	std::printf( "  | dx/dtheta | from the fit against the SOLVED flux at every"
 	             " node: worst relative %.3e\n", worstMetric );
@@ -1975,14 +1975,14 @@ BOOST_AUTO_TEST_CASE( theGaugeFreeFitRecoversWhatTheAngleLabelDestroyed )
 	}
 
 	// Psi_N of the family, in closed form. Every surface is
-	// ( ( r - centre )/shortAxis )^2 + ( z/longAxis )^2 = Psi_N, so the field
+	// ( ( R - centre )/shortAxis )^2 + ( z/longAxis )^2 = Psi_N, so the field
 	// the gauge-free fit needs is two lines and there is no equilibrium, no
 	// mesh and no tracer anywhere in this case.
 	meq::NormalisedFluxField field;
-	field.sample = [ & ]( double r, double z, double &normalisedFlux,
+	field.sample = [ & ]( double radius, double z, double &normalisedFlux,
 	                      double &gradientR, double &gradientZ )
 	{
-		double const across = ( r - centre )/shortAxis;
+		double const across = ( radius - centre )/shortAxis;
 		double const along = z/longAxis;
 		normalisedFlux = across*across + along*along;
 		gradientR = 2.0*across/shortAxis;
@@ -2112,7 +2112,7 @@ BOOST_AUTO_TEST_CASE( theGaugeFreeFitRemovesTheAlgebraicTailNearTheAxis )
 	std::vector<meq::SurfaceSample> const geometric = exactSamples(
 		eq, axis, levelsFor( Layout::EquispacedFlux, smallest, largest,
 		                     surfaces ), angles );
-	meq::AxisShape const shape = meq::axisShapeFromSamples( geometric, axis.r,
+	meq::AxisShape const shape = meq::axisShapeFromSamples( geometric, axis.radius,
 	                                                        axis.z );
 	std::vector<meq::SurfaceSample> const samples =
 		meq::relabelByAxisShape( geometric, shape );
@@ -2184,7 +2184,7 @@ BOOST_AUTO_TEST_CASE( theGaugeFreeFitRemovesTheAlgebraicTailNearTheAxis )
 			             std::abs( fitted - truth )/truth );
 			std::printf( "  the fit's own axis is %.3e from the closed form's,"
 			             " and theta-independent to %.3e\n",
-			             std::hypot( fitAxisR - axis.r, fitAxisZ - axis.z ),
+			             std::hypot( fitAxisR - axis.radius, fitAxisZ - axis.z ),
 			             axisSpreadOf( freed ) );
 			std::printf( "  min Jacobian %+.4e, max %+.4e\n",
 			             report.minimumJacobian, report.maximumJacobian );
@@ -2268,7 +2268,7 @@ BOOST_AUTO_TEST_CASE( theGaugeFreeFitHoldsAsTheInnerLimitFalls )
 			eq, axis, levelsFor( Layout::EquispacedFlux, smallest, largest,
 			                     surfaces ), angles );
 		meq::AxisShape const shape = meq::axisShapeFromSamples( geometric,
-		                                                        axis.r, axis.z );
+		                                                        axis.radius, axis.z );
 		std::vector<meq::SurfaceSample> const samples =
 			meq::relabelByAxisShape( geometric, shape );
 
@@ -2284,7 +2284,7 @@ BOOST_AUTO_TEST_CASE( theGaugeFreeFitHoldsAsTheInnerLimitFalls )
 		double fitAxisR = 0.0;
 		double fitAxisZ = 0.0;
 		freed.axis( fitAxisR, fitAxisZ );
-		double const missed = std::hypot( fitAxisR - axis.r,
+		double const missed = std::hypot( fitAxisR - axis.radius,
 		                                  fitAxisZ - axis.z );
 
 		std::printf( "  %-9.3f  %.6e  %.6e  %9.2e  %.5e  %+.4e\n", smallest,
@@ -2365,10 +2365,10 @@ BOOST_AUTO_TEST_CASE( theGaugeIsLoadBearingAndFailsDifferentlyOnEachField )
 	}
 
 	meq::NormalisedFluxField ellipseField;
-	ellipseField.sample = [ & ]( double r, double z, double &normalisedFlux,
+	ellipseField.sample = [ & ]( double radius, double z, double &normalisedFlux,
 	                             double &gradientR, double &gradientZ )
 	{
-		double const across = ( r - centre )/shortAxis;
+		double const across = ( radius - centre )/shortAxis;
 		double const along = z/longAxis;
 		normalisedFlux = across*across + along*along;
 		gradientR = 2.0*across/shortAxis;
@@ -2384,7 +2384,7 @@ BOOST_AUTO_TEST_CASE( theGaugeIsLoadBearingAndFailsDifferentlyOnEachField )
 		eq, axis, levelsFor( Layout::EquispacedFlux, smallest, largest,
 		                     surfaces ), angles );
 	std::vector<meq::SurfaceSample> const soloviev = meq::relabelByAxisShape(
-		raw, meq::axisShapeFromSamples( raw, axis.r, axis.z ) );
+		raw, meq::axisShapeFromSamples( raw, axis.radius, axis.z ) );
 
 	meq::SurfaceFitOptions options;
 	options.discEdge = largest;
@@ -2547,7 +2547,7 @@ BOOST_AUTO_TEST_CASE( theSpectralWidthPenaltyCostsAccuracyAndBuysNoCondensation 
 		eq, axis, levelsFor( Layout::EquispacedFlux, smallest, largest,
 		                     surfaces ), angles );
 	std::vector<meq::SurfaceSample> const samples = meq::relabelByAxisShape(
-		raw, meq::axisShapeFromSamples( raw, axis.r, axis.z ) );
+		raw, meq::axisShapeFromSamples( raw, axis.radius, axis.z ) );
 
 	meq::SurfaceFitOptions options;
 	options.discEdge = largest;
@@ -2642,7 +2642,7 @@ BOOST_AUTO_TEST_CASE( theSpectralWidthPenaltyCostsAccuracyAndBuysNoCondensation 
  * THE CALLABLE SEAM IS THE WHOLE POINT OF THIS CASE. meq::SurfaceFit is
  * MFEM-free, so meq::NormalisedFluxField is how a solved field reaches it: one
  * lambda over meq::ContourTracer::sampleAt(), turning psi_h and q_h into Psi_N
- * and grad Psi_N by grad_bar psi = r q. Every case above runs the analytic
+ * and grad Psi_N by grad_bar psi = R q. Every case above runs the analytic
  * field through the same seam, and this one runs a mesh through it, so the
  * library cannot have grown a dependence on either.
  *
@@ -2687,13 +2687,13 @@ BOOST_AUTO_TEST_CASE( theGaugeFreeFitReachesTheSolvedFieldThroughOneLambda )
 			meq::SurfaceSample sample;
 			sample.normalisedFlux = normalisedFlux;
 			sample.theta = twoPi*static_cast<double>( j )/rays.count();
-			sample.r = rays.pointR[ j ];
+			sample.radius = rays.pointR[ j ];
 			sample.z = rays.pointZ[ j ];
 			geometric.push_back( sample );
 		}
 	}
 
-	meq::AxisShape const shape = meq::axisShapeFromSamples( geometric, axis.r,
+	meq::AxisShape const shape = meq::axisShapeFromSamples( geometric, axis.radius,
 	                                                        axis.z );
 	std::vector<meq::SurfaceSample> const samples =
 		meq::relabelByAxisShape( geometric, shape );
@@ -2704,7 +2704,7 @@ BOOST_AUTO_TEST_CASE( theGaugeFreeFitReachesTheSolvedFieldThroughOneLambda )
 	// evaluation -- which is exactly the call pattern that trap is about.
 	int hint = -1;
 	meq::NormalisedFluxField field;
-	field.sample = [ &tracer, &hint, &exact ]( double r, double z,
+	field.sample = [ &tracer, &hint, &exact ]( double radius, double z,
 	                                           double &normalisedFlux,
 	                                           double &gradientR,
 	                                           double &gradientZ )
@@ -2712,15 +2712,15 @@ BOOST_AUTO_TEST_CASE( theGaugeFreeFitReachesTheSolvedFieldThroughOneLambda )
 		double psi = 0.0;
 		double fluxR = 0.0;
 		double fluxZ = 0.0;
-		if ( !tracer.sampleAt( r, z, psi, fluxR, fluxZ, hint ) )
+		if ( !tracer.sampleAt( radius, z, psi, fluxR, fluxZ, hint ) )
 			return false;
 
-		// grad_bar psi = r q -- the SOLVED flux, at the potential's own order
+		// grad_bar psi = R q -- the SOLVED flux, at the potential's own order
 		// rather than one below it, which is INVERSION-PLAN.md section 3.2's
 		// argument arriving in the Jacobian of a geometric Newton.
 		normalisedFlux = 1.0 - psi/exact.psi;
-		gradientR = -r*fluxR/exact.psi;
-		gradientZ = -r*fluxZ/exact.psi;
+		gradientR = -radius*fluxR/exact.psi;
+		gradientZ = -radius*fluxZ/exact.psi;
 		return true;
 	};
 
@@ -2756,19 +2756,19 @@ BOOST_AUTO_TEST_CASE( theGaugeFreeFitReachesTheSolvedFieldThroughOneLambda )
 
 		for ( int j = 0; j < 64; ++j )
 		{
-			double r = 0.0;
+			double radius = 0.0;
 			double z = 0.0;
-			freed.position( normalisedFlux, twoPi*j/64, r, z );
+			freed.position( normalisedFlux, twoPi*j/64, radius, z );
 
 			// The distance from the fitted point to the exact surface, along
 			// the exact ray through it: gauge invariant, which a comparison at
 			// a prescribed angle would not be.
-			double const theta = std::atan2( z - exact.z, r - exact.r );
+			double const theta = std::atan2( z - exact.z, radius - exact.radius );
 			double exactR = 0.0;
 			double exactZ = 0.0;
 			rayPoint( eq, exact, normalisedFlux, theta, exactR, exactZ );
 			worstAgainstExact = std::max( worstAgainstExact,
-			                              std::hypot( r - exactR,
+			                              std::hypot( radius - exactR,
 			                                          z - exactZ ) );
 		}
 	}

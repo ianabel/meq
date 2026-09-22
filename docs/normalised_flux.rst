@@ -127,7 +127,7 @@ theorem.** :math:`x^*` moves with the solution, so the chain rule gives
      = -\left[ \left.\frac{\partial\psi_h}{\partial\lambda}\right|_{x^*}
        + \nabla\psi_h(x^*)\cdot\frac{\partial x^*}{\partial\lambda} \right]
 
-and :math:`\bar\nabla\psi = r\,q`, so :math:`\nabla\psi_h(x^*) = 0` at a zero
+and :math:`\bar\nabla\psi = R\,q`, so :math:`\nabla\psi_h(x^*) = 0` at a zero
 of :math:`q_h` **identically**. The position term vanishes, no sensitivity of the
 root find is needed, and the row is the potential shape functions of
 :math:`x^*`'s element evaluated at :math:`x^*` — exact, undifferenced, one
@@ -165,7 +165,7 @@ and :math:`\Psi = (\psi - \psi_{\text{bnd}})/\sigma`,
    \frac{\partial F}{\partial \psi_{\text{bnd}}}
        &= \frac{g'(\Psi)\,(\Psi - 1) + g(\Psi)}{\sigma^2},
 
-where :math:`g(\Psi) = \mu_0 r^2 p'(\Psi) + gg'(\Psi)` is what the source
+where :math:`g(\Psi) = \mu_0 R^2 p'(\Psi) + gg'(\Psi)` is what the source
 already evaluates and :math:`g'(\Psi)` is one further derivative of each stored
 profile — the level :cpp:func:`meq::Profile::doublePrime` supplies.
 :cpp:func:`meq::NormalisedSource::normalisationDerivatives` is the interface and
@@ -336,8 +336,8 @@ is a different equilibrium rather than a bad number.
 
 .. important::
 
-   The guard that carries the weight on a domain reaching :math:`r = 0` is a
-   different one — see :ref:`running-refusals`. :math:`F/r` is
+   The guard that carries the weight on a domain reaching :math:`R = 0` is a
+   different one — see :ref:`running-refusals`. :math:`F/R` is
    :math:`\mu_0 j_\phi`, so a source that does not vanish on the symmetry axis
    is an infinite current density there, and that is a statement about the
    **field** which no definition of :math:`\psiax` can repair.

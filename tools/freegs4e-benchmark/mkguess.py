@@ -25,7 +25,7 @@ def write_guess(mesh_path, gf_path, R, Z, psi, box, n=96):
     vals = interp(np.stack([ZZ.ravel(), RR.ravel()], axis=-1))
 
     nv = (n + 1) * (n + 1)
-    vid = lambda i, j: i * (n + 1) + j          # i over z, j over r
+    vid = lambda i, j: i * (n + 1) + j          # i over z, j over R
 
     with open(mesh_path, "w") as f:
         f.write("MFEM mesh v1.0\n\ndimension\n2\n\n")

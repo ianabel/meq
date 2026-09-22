@@ -63,7 +63,7 @@ Leave it: it is the author's choice, and `CHOOSE_OPENMP` switches on NICE's own
 pragma regions, not Eigen's.
 
 **COUNT P1 DOFS, NOT ELEMENTS**, when matching resolution against MEQ:
-`nodes − nodes on r = 0 + 1`. `psi = 0` is imposed on the axis and the `+1` is
+`nodes − nodes on R = 0 + 1`. `psi = 0` is imposed on the axis and the `+1` is
 the `I_p` Lagrange multiplier. `race.sh` prints it.
 
 **SWEEP THE WHOLE `*TriangleArea` FAMILY TOGETHER.** The semicircular ABB
@@ -83,5 +83,5 @@ section 3 before comparing any `psi_bnd`.
 
 `λ`, which NICE solves for as `I_p / I_p( λ = 1 )`, comes out within **0.3% of
 1** on both cases. That is the free check that the profile conversion — the flux
-span, the `r0` gauge and the `1/μ0` — is right: an error there shows as `λ` off
+span, the `R_0` gauge and the `1/μ0` — is right: an error there shows as `λ` off
 by that factor while the equilibrium still converges.

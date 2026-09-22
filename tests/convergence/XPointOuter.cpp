@@ -12,7 +12,7 @@
  *     locate the saddle of the SOLVED q_h
  *     re-pin, re-solve
  *
- * an outer fixed point over ( r_X, z_X ), warm started from the previous sweep.
+ * an outer fixed point over ( R_X, z_X ), warm started from the previous sweep.
  *
  * THE DISCRETE CHOICE IS FROZEN WITHIN A SOLVE AND RE-DECIDED BETWEEN THEM,
  * which is section 10.5's answer to the one thing this stage cannot
@@ -29,19 +29,19 @@
  * a prescribed current and ConfineToPlasma. It cannot be made diverted, and the
  * obstruction is structural rather than a matter of trying harder.
  *
- * psi vanishes IDENTICALLY on r = 0 -- the symmetry axis is fitted Dirichlet
+ * psi vanishes IDENTICALLY on R = 0 -- the symmetry axis is fitted Dirichlet
  * boundary -- so the axis sits at normalised flux -psi_bnd/span. A NEGATIVE
  * psi_bnd therefore puts it at POSITIVE Psi, inside the plasma support, where
- * ConfineToPlasma does not switch gg' off; and F/r is mu_0 j_phi, so that is an
+ * ConfineToPlasma does not switch gg' off; and F/R is mu_0 j_phi, so that is an
  * infinite toroidal current density on the axis. What the field then grows is
  * section 11.3's axis layer, and what CriticalPointFinder reports is the layer.
- * Measured on one such run: THIRTY critical points, every one at r < 0.1, a
+ * Measured on one such run: THIRTY critical points, every one at R < 0.1, a
  * ladder of maxima marching up the symmetry axis from z = -0.11 to z = +1.44,
- * and the "magnetic axis" at r = 0.022.
+ * and the "magnetic axis" at R = 0.022.
  *
  * That fixture reaches only psi_bnd = +9.5e-04 against psi_ax = 1.19e-02, a
  * margin of 8%, while a Shafranov vertical field alone contributes about
- * psi = B_v r^2/2 = -1.8e-02 at the limiter. The plasma's own flux outweighs
+ * psi = B_v R^2/2 = -1.8e-02 at the limiter. The plasma's own flux outweighs
  * the coils' by a few per cent, so any conductor strong enough to make a null
  * tips psi_bnd negative first. Twelve configurations were run across three
  * routes -- an exterior filament swept in current, the same with the
@@ -85,7 +85,7 @@
  * It does not stay there. Measured, one key changed at a time:
  *
  *   pin      k  guess    outcome
- *   X-point  2  33^2     99 steps to || r ||/|| r_0 || = 4.1e-11, psi_ax
+ *   X-point  2  33^2     99 steps to || R ||/|| r_0 || = 4.1e-11, psi_ax
  *                        8.532768e-02 -- and psi_h AT the reference axis reads
  *                        1.32e-02 against the reference's 8.27e-02. The located
  *                        axis is ( 2.2626, 0.5413 ), hard against Gamma
@@ -93,7 +93,7 @@
  *   X-point  2  129^2    the residual falls to 3.4e-04 and STALLS there for 150
  *                        steps -- no runaway and no convergence -- with the
  *                        axis already at ( 2.2590, 0.3105 ) by step 13
- *   (1.68,0) 2  33^2     a LIMIT CYCLE: || r || descends to 7.1e-03 and jumps
+ *   (1.68,0) 2  33^2     a LIMIT CYCLE: || R || descends to 7.1e-03 and jumps
  *                        back to 2.7e-02, six times over the 200-step cap. That
  *                        pin is inside the separatrix, where the reference
  *                        carries psi = 4.52e-02, so it is the easy question
@@ -140,7 +140,7 @@
  * A FULL CROSS AND NOT A SWEEP OF ONE KEY, WHICH IS THE POINT:
  *
  *     fill   frozen edge   outcome
- *     off    off           FAILED at the 200 cap, || r || stalled at 4.8e-04
+ *     off    off           FAILED at the 200 cap, || R || stalled at 4.8e-04
  *     off    on            converged in 17, and to the WRONG BRANCH:
  *                          psi_ax -7.99e-02 against the reference's +8.27e-02
  *     on     off           FAILED at the 200 cap
@@ -262,14 +262,14 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxConvergesToTheLocatedXPoint )
 	             "sweep", "its", "X-point", "step", "psi_ax", "psi_bnd",
 	             "psi_X - psi_h", "depth", "route" );
 	std::printf( "    %-6s %5zu   (%6.3f,%7.3f) %11s %13.6e %13.6e %11s %7.3f "
-	             "%8s\n", "boot", m.solver->newtonResiduals().size() - 1, x.r,
+	             "%8s\n", "boot", m.solver->newtonResiduals().size() - 1, x.radius,
 	             x.z, "-", m.solver->psiAxis(), m.solver->psiBoundary(), "-",
 	             elementDepth( x ), "SWEEP" );
 	std::fflush( stdout );
 
 	struct Sweep
 	{
-		double r = 0.0;
+		double radius = 0.0;
 		double z = 0.0;
 		double step = 0.0;
 		double psiAxis = 0.0;
@@ -293,7 +293,7 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxConvergesToTheLocatedXPoint )
 	bool broke = false;
 	for ( int outer = 0; outer < 8; ++outer )
 	{
-		double const pinnedR = x.r;
+		double const pinnedR = x.radius;
 		double const pinnedZ = x.z;
 		// THE SUPPORT MOVES HERE AND NOWHERE ELSE, at the answer the previous
 		// sweep reached -- the same outer fixed point the X-point itself is on,
@@ -337,9 +337,9 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxConvergesToTheLocatedXPoint )
 		}
 
 		Sweep sweep;
-		sweep.r = next.r;
+		sweep.radius = next.radius;
 		sweep.z = next.z;
-		sweep.step = std::hypot( next.r - pinnedR, next.z - pinnedZ );
+		sweep.step = std::hypot( next.radius - pinnedR, next.z - pinnedZ );
 		sweep.psiAxis = m.solver->psiAxis();
 		sweep.psiBoundary = m.solver->psiBoundary();
 		// THE FIXED POINT'S OWN DEFINING PROPERTY. The border makes psi_bnd
@@ -352,7 +352,7 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxConvergesToTheLocatedXPoint )
 		sweeps.push_back( sweep );
 
 		std::printf( "    %-6d %5zu   (%6.3f,%7.3f) %11.3e %13.6e %13.6e "
-		             "%11.2e %7.3f %8s\n", outer + 1, sweep.iterations, sweep.r,
+		             "%11.2e %7.3f %8s\n", outer + 1, sweep.iterations, sweep.radius,
 		             sweep.z, sweep.step, sweep.psiAxis, sweep.psiBoundary,
 		             sweep.pinResidual, sweep.depth,
 		             sweep.seeded ? "seeded" : "SWEEP" );
@@ -461,12 +461,12 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxConvergesToTheLocatedXPoint )
 	{
 		meq::CriticalPointFinder finder( *m.solver );
 		for ( meq::CriticalPoint const &p : finder.sweep() )
-			if ( p.type == meq::CriticalPointType::Saddle && p.r > 0.30 )
+			if ( p.type == meq::CriticalPointType::Saddle && p.radius > 0.30 )
 				nulls.push_back( p );
 	}
 	std::printf( "    %zu off-axis saddles in the converged field:", nulls.size() );
 	for ( meq::CriticalPoint const &p : nulls )
-		std::printf( "  ( %6.3f, %7.3f ) psi %11.4e", p.r, p.z, p.psi );
+		std::printf( "  ( %6.3f, %7.3f ) psi %11.4e", p.radius, p.z, p.psi );
 	std::printf( "\n" );
 	std::fflush( stdout );
 
@@ -497,11 +497,11 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxConvergesToTheLocatedXPoint )
 	 * So this is a cross-check at the level the two problem statements agree,
 	 * not a convergence measurement.
 	 */
-	double const nullGap = std::hypot( last.r - referenceXPointR,
+	double const nullGap = std::hypot( last.radius - referenceXPointR,
 	                                   last.z - referenceXPointZ );
 	std::printf( "    against freegs4e: X-point ( %.6f, %.6f ) vs ( %.6f, "
 	             "%.6f ), %.3e m apart;  psi_bnd %.6e vs %.6e;  psi_ax %.6e vs "
-	             "%.6e\n", last.r, last.z, referenceXPointR, referenceXPointZ,
+	             "%.6e\n", last.radius, last.z, referenceXPointR, referenceXPointZ,
 	             nullGap, last.psiBoundary, referencePsiBoundary, last.psiAxis,
 	             referencePsiAxis );
 	std::fflush( stdout );
@@ -555,7 +555,7 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxConvergesToTheLocatedXPoint )
 	meq::AxisAgreement const axis =
 		finder.checkAxis( m.solver->psiAxis(), m.solver->psiBoundary() );
 
-	std::printf( "    | F | on r = 0 is %.3e, psi_ax attained at ( %.3f, %.3f ),"
+	std::printf( "    | F | on R = 0 is %.3e, psi_ax attained at ( %.3f, %.3f ),"
 	             " Psi at the O-point %.4f over %d extrema and %d saddles, "
 	             "mu0 I_p delivered %.6e\n", axisSource.worstOnAxis, axis.nodeR,
 	             axis.nodeZ, axis.normalisedFlux, axis.extrema, axis.saddles,
@@ -564,10 +564,10 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxConvergesToTheLocatedXPoint )
 
 	BOOST_TEST( axisSource.bounded,
 		"| F | on the symmetry axis is " << axisSource.worstOnAxis
-		<< ", so F/r = mu_0 j_phi is an unbounded toroidal current density on "
-		"r = 0." );
+		<< ", so F/R = mu_0 j_phi is an unbounded toroidal current density on "
+		"R = 0." );
 	BOOST_TEST( axis.nodeR > 0.30,
-		"psi_ax is attained at r = " << axis.nodeR << ", which is on or beside "
+		"psi_ax is attained at R = " << axis.nodeR << ", which is on or beside "
 		"the symmetry axis -- section 11.3's axis layer." );
 	BOOST_TEST( axis.agrees,
 		"the O-point of q_h carries Psi = " << axis.normalisedFlux

@@ -80,7 +80,7 @@ def conductor_filaments(flat):
 
 
 def field_of(filaments, R, Z):
-	"""psi at ( R, Z ) of a list of ( r, z, I, soft ) filaments."""
+	"""psi at ( R, Z ) of a list of ( R, z, I, soft ) filaments."""
 	psi = np.zeros_like(R)
 	live = R > 0.0
 	for rc, zc, current, soft in filaments:
@@ -135,7 +135,7 @@ def flood(candidate, axis):
 	return labels == mine
 
 
-def saddle_near(r, z, psi, target, reach):
+def saddle_near(R, z, psi, target, reach):
 	"""The discrete saddle of `psi` nearest `target`, or None.
 
 	WHY A SADDLE SEARCH IS NOT OPTIONAL HERE.  Pinning psi_bnd at the DESIGN
@@ -158,7 +158,7 @@ def saddle_near(r, z, psi, target, reach):
 	if not sad.any():
 		return None
 	ii, jj = np.nonzero(sad)
-	rr, zz = r[i[ii]], z[j[jj]]
+	rr, zz = R[i[ii]], z[j[jj]]
 	gap = np.hypot(rr - target[0], zz - target[1])
 	within = gap <= reach
 	if not within.any():
@@ -180,12 +180,12 @@ def picard(d, npz_path, cells=97, blend=0.5, sweeps=200, tol=1.0e-7,
 	# loop has to resolve is where psi = psi_bnd runs and where the axis is,
 	# both inside the design footprint; the field far away is carried exactly by
 	# the Green's sum and needs no grid at all.
-	rmin, rmax, zmin, zmax = design_footprint(d, pad=0.35)
-	rmin = max(rmin, 1.0e-3)
-	r = np.linspace(rmin, rmax, cells)
+	Rmin, Rmax, zmin, zmax = design_footprint(d, pad=0.35)
+	Rmin = max(Rmin, 1.0e-3)
+	R = np.linspace(Rmin, Rmax, cells)
 	z = np.linspace(zmin, zmax, cells)
-	RR, ZZ = np.meshgrid(r, z, indexing="ij")
-	area = (r[1] - r[0])*(z[1] - z[0])
+	RR, ZZ = np.meshgrid(R, z, indexing="ij")
+	area = (R[1] - R[0])*(z[1] - z[0])
 	soft = 0.44705*np.sqrt(area)
 
 	coil_psi = field_of(filaments, RR, ZZ)
@@ -218,9 +218,9 @@ def picard(d, npz_path, cells=97, blend=0.5, sweeps=200, tol=1.0e-7,
 	psi = coil_psi + plasma_field(RR, ZZ, RR, ZZ, seedj*area, Ip, soft)
 
 	def bilinear(field, point):
-		i = np.clip(np.searchsorted(r, point[0]) - 1, 0, cells - 2)
+		i = np.clip(np.searchsorted(R, point[0]) - 1, 0, cells - 2)
 		j = np.clip(np.searchsorted(z, point[1]) - 1, 0, cells - 2)
-		u = (point[0] - r[i])/(r[i + 1] - r[i])
+		u = (point[0] - R[i])/(R[i + 1] - R[i])
 		v = (point[1] - z[j])/(z[j + 1] - z[j])
 		return ((1 - u)*(1 - v)*field[i, j] + u*(1 - v)*field[i + 1, j]
 		        + (1 - u)*v*field[i, j + 1] + u*v*field[i + 1, j + 1])
@@ -234,7 +234,7 @@ def picard(d, npz_path, cells=97, blend=0.5, sweeps=200, tol=1.0e-7,
 		# THE SADDLE IF THERE IS ONE NEAR THE TARGET, else the target itself.
 		# `reach` is a third of the footprint, which is generous enough to
 		# follow a null that moves and tight enough not to adopt a coil's.
-		found = (saddle_near(r, z, psi, seed, reach) if seed is not None
+		found = (saddle_near(R, z, psi, seed, reach) if seed is not None
 		         else None)
 		psi_bnd = (found[2] if found is not None
 		           else (float(bilinear(psi, seed)) if seed is not None
@@ -271,7 +271,7 @@ def picard(d, npz_path, cells=97, blend=0.5, sweeps=200, tol=1.0e-7,
 	say("  picard: %d sweeps, psi_ax %.6e psi_bnd %.6e at ( %.4f, %+.4f ), "
 	    "core %d/%d cells" % (taken, psi_ax, psi_bnd, RR[at], ZZ[at],
 	                          int(core.sum()), core.size))
-	return r, z, psi, psi_ax, psi_bnd, filaments, RR[core], ZZ[core], (j*area)[core], soft
+	return R, z, psi, psi_ax, psi_bnd, filaments, RR[core], ZZ[core], (j*area)[core], soft
 
 
 def plasma_field(R, Z, srcR, srcZ, srcI, Ip, soft, chunk=400):
@@ -315,7 +315,7 @@ def main():
 	if not np.isfinite(psi).all():
 		raise SystemExit("the guess came out non-finite")
 
-	box = dict(rmin=0.0, rmax=rho, zmin=-rho, zmax=rho)
+	box = dict(Rmin=0.0, Rmax=rho, zmin=-rho, zmax=rho)
 	lo, hi = write_guess(mesh_path, gf_path, rs, zs, psi.T, box, n=n)
 	print("guess psi in [%.6e, %.6e] on a %d x %d grid over [0, %g] x [%g, %g]"
 	      % (lo, hi, n + 1, n + 1, rho, -rho, rho))

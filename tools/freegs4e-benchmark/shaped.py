@@ -56,7 +56,7 @@ import conductors
 
 def _square(rect):
 	"""The rectangle as a polygon, anticlockwise from its lower inboard corner."""
-	r0, r1 = rect.rmin, rect.rmax
+	r0, r1 = rect.Rmin, rect.Rmax
 	z0, z1 = rect.zmin, rect.zmax
 	return [(r0, z0), (r1, z0), (r1, z1), (r0, z1)]
 

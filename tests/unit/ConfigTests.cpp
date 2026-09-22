@@ -23,7 +23,7 @@
  * Note while reading: TOML key names are UpperCamelCase and the C++ members
  * they land in are lowerCamelCase, deliberately (Config.hpp says why). So a
  * test asserts on the key "mesh.RMin" and reads the value out of
- * getMesh().rMin, and neither spelling is a typo for the other.
+ * getMesh().R_min, and neither spelling is a typo for the other.
  *
  * Boost.Test entry point: this translation unit supplies it, by defining
  * BOOST_TEST_MODULE below. That works both for the static library and for the
@@ -270,14 +270,14 @@ BOOST_AUTO_TEST_CASE( soloviev_example_parses )
 	BOOST_TEST( config.getBoundary().type == BoundaryDataType::Zero );
 	BOOST_TEST( config.getDiscretisation().tau == 1.0 );
 
-	// The box has to contain the NSTX plasma boundary, 0.22 <= r <= 1.78,
+	// The box has to contain the NSTX plasma boundary, 0.22 <= R <= 1.78,
 	// |z| <= 1.56 in units of the major radius, or the benchmark is not the
 	// benchmark.
-	BOOST_TEST( config.getMesh().rMin < 0.22 );
-	BOOST_TEST( config.getMesh().rMax > 1.78 );
+	BOOST_TEST( config.getMesh().minRadius < 0.22 );
+	BOOST_TEST( config.getMesh().maxRadius > 1.78 );
 	BOOST_TEST( config.getMesh().zMin < -1.56 );
 	BOOST_TEST( config.getMesh().zMax > 1.56 );
-	BOOST_TEST( config.getMesh().rMin > 0.0 );
+	BOOST_TEST( config.getMesh().minRadius > 0.0 );
 }
 
 BOOST_AUTO_TEST_CASE( manufactured_example_parses )
@@ -289,10 +289,10 @@ BOOST_AUTO_TEST_CASE( manufactured_example_parses )
 
 	BOOST_TEST( config.getSource().type == SourceType::Manufactured );
 
-	// Example 5 of refs/HDG-GradShafranov.pdf: r0 = -0.5, kr = 1.15 pi,
+	// Example 5 of refs/HDG-GradShafranov.pdf: R_0 = -0.5, kr = 1.15 pi,
 	// kz = 1.15.
 	meq::ManufacturedParameters const & parameters = config.getSource().getManufactured();
-	BOOST_TEST( parameters.r0 == -0.5 );
+	BOOST_TEST( parameters.radius0 == -0.5 );
 	BOOST_TEST( parameters.kr == 1.15*3.14159265358979323846 );
 	BOOST_TEST( parameters.kz == 1.15 );
 
@@ -324,8 +324,8 @@ BOOST_AUTO_TEST_CASE( integer_valued_keys_are_accepted_where_a_number_belongs )
 		"[solver]\n"
 		"NewtonRelativeTolerance = 1\n" );
 
-	BOOST_TEST( config.getMesh().rMin == 0.0 );
-	BOOST_TEST( config.getMesh().rMax == 2.0 );
+	BOOST_TEST( config.getMesh().minRadius == 0.0 );
+	BOOST_TEST( config.getMesh().maxRadius == 2.0 );
 	BOOST_TEST( config.getMesh().zMin == -2.0 );
 	BOOST_TEST( config.getMesh().zMax == 2.0 );
 	BOOST_TEST( config.getDiscretisation().tau == 2.0 );
@@ -552,8 +552,8 @@ BOOST_AUTO_TEST_CASE( values_round_trip_from_the_file_to_the_accessors )
 
 	BOOST_TEST( config.getFileName() == "test.toml" );
 
-	BOOST_TEST( config.getMesh().rMin == 0.15 );
-	BOOST_TEST( config.getMesh().rMax == 1.85 );
+	BOOST_TEST( config.getMesh().minRadius == 0.15 );
+	BOOST_TEST( config.getMesh().maxRadius == 1.85 );
 	BOOST_TEST( config.getMesh().zMin == -1.45 );
 	BOOST_TEST( config.getMesh().zMax == 1.55 );
 	BOOST_TEST( config.getMesh().nR == 7 );
@@ -564,7 +564,7 @@ BOOST_AUTO_TEST_CASE( values_round_trip_from_the_file_to_the_accessors )
 	BOOST_TEST( config.getDiscretisation().tau == 0.75 );
 
 	BOOST_TEST( config.getSource().type == SourceType::Manufactured );
-	BOOST_TEST( config.getSource().getManufactured().r0 == -0.5 );
+	BOOST_TEST( config.getSource().getManufactured().radius0 == -0.5 );
 	BOOST_TEST( config.getSource().getManufactured().kr == 3.6128315516282616 );
 	BOOST_TEST( config.getSource().getManufactured().kz == 1.15 );
 
@@ -1010,8 +1010,8 @@ BOOST_AUTO_TEST_CASE( a_good_file_on_disk_reads_the_same_as_the_same_text_in_mem
 	Configuration fromString = parse( minimal() );
 
 	BOOST_TEST( fromFile.getFileName() == good.name() );
-	BOOST_TEST( fromFile.getMesh().rMin == fromString.getMesh().rMin );
-	BOOST_TEST( fromFile.getMesh().rMax == fromString.getMesh().rMax );
+	BOOST_TEST( fromFile.getMesh().minRadius == fromString.getMesh().minRadius );
+	BOOST_TEST( fromFile.getMesh().maxRadius == fromString.getMesh().maxRadius );
 	BOOST_TEST( fromFile.getDiscretisation().polynomialDegree == fromString.getDiscretisation().polynomialDegree );
 	BOOST_TEST( fromFile.getSource().getSoloviev().a == fromString.getSource().getSoloviev().a );
 }
@@ -1518,7 +1518,7 @@ BOOST_AUTO_TEST_CASE( unphysical_species_constants_are_refused )
 	BOOST_CHECK_EXCEPTION( parse( negativeMass ), ConfigError,
 		[]( ConfigError const & e ) { return e.getKey() == "source.species[0].Mass"; } );
 
-	// The gauge: phi_0 vanishes on r = ReferenceRadius, so a non-positive one
+	// The gauge: phi_0 vanishes on R = ReferenceRadius, so a non-positive one
 	// is not a curve in the domain at all.
 	BOOST_CHECK_EXCEPTION( parse( rotating( "ReferenceRadius = 0.0\n" ) ), ConfigError,
 		[]( ConfigError const & e )
@@ -1847,7 +1847,7 @@ BOOST_AUTO_TEST_CASE( initialGuessAndAdaptivityParse )
  * ============================================================================
  *
  * FREE-BOUNDARY-PLAN.md section 5.4 calls the coils "ordinary": coil currents
- * are data, and the source adds F_coil = mu0 r I_k / |Omega_ck| on each coil
+ * are data, and the source adds F_coil = mu0 R I_k / |Omega_ck| on each coil
  * subdomain. meq::Coil has been the library half since FB-2 and is measured;
  * this is the file half.
  *
@@ -1922,7 +1922,7 @@ BOOST_AUTO_TEST_CASE( coils_are_given_a_total_current_or_a_uniform_density )
 
 /// A coil that reaches the axis is refused HERE as well as in meq::Coil, and
 /// the reason is the operator rather than the class: Grad-Shafranov carries a
-/// 1/r that is not integrable through r = 0. meq::BoundaryShape makes the same
+/// 1/R that is not integrable through R = 0. meq::BoundaryShape makes the same
 /// refusal. Catching it at the parse means the diagnostic names the coil and
 /// the key instead of arriving from a constructor three layers down.
 BOOST_AUTO_TEST_CASE( a_coil_may_not_reach_the_axis_or_be_degenerate )
@@ -2134,7 +2134,7 @@ BOOST_AUTO_TEST_CASE( the_free_boundary_borders_refuse_what_they_cannot_honour )
 	BOOST_TEST( good.getBoundary().exterior.centreZ == 0.25 );
 	BOOST_TEST( good.getBoundary().exterior.modes == 6 );
 	BOOST_TEST( good.getBoundary().limiter.given );
-	BOOST_TEST( good.getBoundary().limiter.r == 1.2 );
+	BOOST_TEST( good.getBoundary().limiter.radius == 1.2 );
 
 	// A LIMITER WITHOUT A NORMALISATION. psi_bnd is read ONLY through
 	// Psi = ( psi - psi_bnd )/( psi_ax - psi_bnd ), so on a plain source it is
@@ -2143,20 +2143,20 @@ BOOST_AUTO_TEST_CASE( the_free_boundary_borders_refuse_what_they_cannot_honour )
 	refuses( halfDisc + plainSource + "\n[boundary.limiter]\nR = 1.2\nZ = 0.0\n",
 	         "boundary.limiter.R" );
 
-	// A LIMITER ON THE AXIS. r = 0 is not a limiter, and the nearest potential
-	// dof to it is in an element whose flux mass ( r q, v ) degenerates.
+	// A LIMITER ON THE AXIS. R = 0 is not a limiter, and the nearest potential
+	// dof to it is in an element whose flux mass ( R q, v ) degenerates.
 	refuses( halfDisc + normalisedSource
 	         + "\n[boundary.limiter]\nR = 0.0\nZ = 0.0\n",
 	         "boundary.limiter.R" );
 
 	// BOTH COORDINATES OR NEITHER. A limiter given only its height sits at
-	// r = 0, which is the case above wearing a different spelling.
+	// R = 0, which is the case above wearing a different spelling.
 	refuses( halfDisc + normalisedSource + "\n[boundary.limiter]\nZ = 0.0\n",
 	         "boundary.limiter.R" );
 
 	// TWO DESCRIPTIONS OF Gamma. [boundary.exterior] makes it a semicircle about
 	// the axis; [boundary.shape] makes it a closed surface that may not reach
-	// r = 0. They are alternatives, and silently taking one is how a run ends up
+	// R = 0. They are alternatives, and silently taking one is how a run ends up
 	// solving on a domain nobody asked for.
 	refuses( halfDisc + normalisedSource
 	         + "\n[boundary.exterior]\nRadius = 1.5\nModes = 4\n"
@@ -2190,7 +2190,7 @@ BOOST_AUTO_TEST_CASE( the_free_boundary_borders_refuse_what_they_cannot_honour )
 	 * [boundary.limiter] PRESCRIBES the bounding point, which is right for a
 	 * material limiter and wrong for a divertor -- a null is a functional of the
 	 * solution and moves as Newton moves. [boundary.xpoint] seeds it instead and
-	 * makes ( r_X, z_X ) two more unknowns of the same bordered Newton. So it
+	 * makes ( R_X, z_X ) two more unknowns of the same bordered Newton. So it
 	 * takes the same two refusals that block wears, for the same reasons, plus
 	 * the one that is new: all three routes pin ONE unknown.
 	 */
@@ -2198,7 +2198,7 @@ BOOST_AUTO_TEST_CASE( the_free_boundary_borders_refuse_what_they_cannot_honour )
 		+ "\n[boundary.exterior]\nRadius = 1.5\nModes = 4\n"
 		+ "\n[boundary.xpoint]\nR = 1.09\nZ = -0.60\n" );
 	BOOST_TEST( seeded.getBoundary().xpoint.given );
-	BOOST_TEST( seeded.getBoundary().xpoint.r == 1.09 );
+	BOOST_TEST( seeded.getBoundary().xpoint.radius == 1.09 );
 	BOOST_TEST( seeded.getBoundary().xpoint.z == -0.60 );
 	BOOST_TEST( !seeded.getBoundary().limiter.given );
 
@@ -2218,7 +2218,7 @@ BOOST_AUTO_TEST_CASE( the_free_boundary_borders_refuse_what_they_cannot_honour )
 	         + "\n[boundary.xpoint]\nR = 1.09\nZ = -0.60\n",
 	         "boundary.xpoint.R" );
 
-	// A SEED ON THE AXIS. psi vanishes identically on r = 0, so q has near-zeros
+	// A SEED ON THE AXIS. psi vanishes identically on R = 0, so q has near-zeros
 	// there that a saddle search reports and that no divertor put there.
 	refuses( halfDisc + normalisedSource
 	         + "\n[boundary.xpoint]\nR = 0.0\nZ = -0.60\n",
@@ -2325,8 +2325,8 @@ BOOST_AUTO_TEST_CASE( the_bump_guess_describes_a_core_and_refuses_one_that_is_no
 		"CentreR = 1.0\nRadiusR = 0.4\nAmplitude = 0.2\n" ) );
 	BOOST_TEST( circular.getInitialGuess().radiusZ == 0.4 );
 
-	// A BUMP REACHING THE AXIS. psi is pinned there and the operator's 1/r is
-	// not integrable through it, so a guess straddling r = 0 describes no
+	// A BUMP REACHING THE AXIS. psi is pinned there and the operator's 1/R is
+	// not integrable through it, so a guess straddling R = 0 describes no
 	// plasma however plausible its peak.
 	refuses( guess( "CentreR = 0.3\nRadiusR = 0.4\nAmplitude = 0.2\n" ),
 	         "initialguess.RadiusR" );

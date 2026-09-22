@@ -85,7 +85,7 @@ namespace meq
 	{
 		return average( []( SurfaceNode const &node )
 		{
-			return 1.0/( node.r*node.r );
+			return 1.0/( node.radius*node.radius );
 		} );
 	}
 
@@ -93,7 +93,7 @@ namespace meq
 	{
 		return average( []( SurfaceNode const &node )
 		{
-			return node.gradient*node.gradient/( node.r*node.r );
+			return node.gradient*node.gradient/( node.radius*node.radius );
 		} );
 	}
 
@@ -105,7 +105,7 @@ namespace meq
 		// does -- which is the whole point of there being a facility.
 		return integrate( []( SurfaceNode const &node )
 		{
-			return node.gradient/( twoPi*node.r );
+			return node.gradient/( twoPi*node.radius );
 		} );
 	}
 
@@ -135,7 +135,7 @@ namespace meq
 		{
 			SurfaceNode &node = surface.nodes[ j ];
 			node.parameter = dTheta*static_cast<double>( j );
-			node.r = fit.pointR[ j ];
+			node.radius = fit.pointR[ j ];
 			node.z = fit.pointZ[ j ];
 			node.metric = fit.speed[ j ];
 
@@ -153,19 +153,19 @@ namespace meq
 			node.qZ = fit.fluxZ[ j ];
 			node.extended = j < fit.extended.size() && fit.extended[ j ] != 0;
 
-			node.gradient = node.r*std::sqrt( node.qR*node.qR + node.qZ*node.qZ );
+			node.gradient = node.radius*std::sqrt( node.qR*node.qR + node.qZ*node.qZ );
 			if ( !( node.gradient > 0.0 ) )
 			{
 				std::ostringstream message;
 				message << "meq::surfaceAverages: | grad psi | vanishes at ( "
-				        << node.r << ", " << node.z << " ), so the weight "
+				        << node.radius << ", " << node.z << " ), so the weight "
 				        << "dl / | grad psi | is not defined. The level is at or "
 				        << "beyond a critical point";
 				throw std::runtime_error( message.str() );
 			}
 
 			node.residual = std::abs( node.psi - surface.level );
-			node.weight = twoPi*node.r*node.metric*dTheta/node.gradient;
+			node.weight = twoPi*node.radius*node.metric*dTheta/node.gradient;
 
 			surface.vPrime += node.weight;
 			surface.worstResidual = std::max( surface.worstResidual,
@@ -185,14 +185,14 @@ namespace meq
 			std::size_t const next = ( j + 1 )%count;
 			std::size_t const previous = ( j + count - 1 )%count;
 
-			double const dr = ( surface.nodes[ next ].r
-			                    - surface.nodes[ previous ].r )/( 2.0*dTheta );
+			double const dr = ( surface.nodes[ next ].radius
+			                    - surface.nodes[ previous ].radius )/( 2.0*dTheta );
 			double const dz = ( surface.nodes[ next ].z
 			                    - surface.nodes[ previous ].z )/( 2.0*dTheta );
 
 			SurfaceNode &node = surface.nodes[ j ];
 			node.differencedMetric = std::sqrt( dr*dr + dz*dz );
-			node.differencedWeight = twoPi*node.r*node.differencedMetric*dTheta
+			node.differencedWeight = twoPi*node.radius*node.differencedMetric*dTheta
 			                         /node.gradient;
 
 			surface.vPrimeDifferenced += node.differencedWeight;
@@ -252,7 +252,7 @@ namespace meq
 				SurfaceNode node;
 				node.parameter = static_cast<double>( i ) + ip.x;
 
-				contour.pointOnSegment( i, ip.x, node.r, node.z );
+				contour.pointOnSegment( i, ip.x, node.radius, node.z );
 
 				double dr = 0.0;
 				double dz = 0.0;
@@ -271,12 +271,12 @@ namespace meq
 				// quantity presented as a solved one.
 				bool nodeExtended = false;
 
-				if ( !tracer.sampleAt( node.r, node.z, node.psi, node.qR,
+				if ( !tracer.sampleAt( node.radius, node.z, node.psi, node.qR,
 				                       node.qZ, hint, nodeExtended ) )
 				{
 					std::ostringstream message;
 					message << "meq::surfaceAverages: the Hermite quadrature "
-					        << "point at ( " << node.r << ", " << node.z
+					        << "point at ( " << node.radius << ", " << node.z
 					        << " ) on segment " << i << " is not in the mesh. "
 					        << "The interpolant has left the domain between two "
 					        << "accepted points, which on the fitted path means "
@@ -286,7 +286,7 @@ namespace meq
 
 				node.extended = nodeExtended;
 
-				node.gradient = node.r*std::sqrt( node.qR*node.qR
+				node.gradient = node.radius*std::sqrt( node.qR*node.qR
 				                                  + node.qZ*node.qZ );
 				if ( !( node.gradient > 0.0 ) )
 					throw std::runtime_error(
@@ -295,7 +295,7 @@ namespace meq
 						"defined there" );
 
 				node.residual = std::abs( node.psi - surface.level );
-				node.weight = twoPi*node.r*node.metric*ip.weight/node.gradient;
+				node.weight = twoPi*node.radius*node.metric*ip.weight/node.gradient;
 
 				surface.vPrime += node.weight;
 				surface.worstResidual = std::max( surface.worstResidual,
@@ -317,7 +317,7 @@ namespace meq
 	AveragedEquationResidual averagedGradShafranovResidual(
 		ContourTracer const &tracer, CriticalPoint const &axis, double level,
 		std::size_t angles, double step,
-		std::function<double( double r, double z, double psi )> const &f,
+		std::function<double( double radius, double z, double psi )> const &f,
 		FluxDerivative derivative )
 	{
 		if ( !( step > 0.0 ) )
@@ -341,7 +341,7 @@ namespace meq
 
 			return surface.integrate( []( SurfaceNode const &node )
 			{
-				return node.gradient*node.gradient/( node.r*node.r );
+				return node.gradient*node.gradient/( node.radius*node.radius );
 			} );
 		};
 
@@ -382,7 +382,7 @@ namespace meq
 		// caller's F is free to depend on psi and several of MEQ's do.
 		out.rightHandSide = surface.average( [ & ]( SurfaceNode const &node )
 		{
-			return -f( node.r, node.z, level )/( node.r*node.r );
+			return -f( node.radius, node.z, level )/( node.radius*node.radius );
 		} );
 
 		out.residual = out.leftHandSide - out.rightHandSide;

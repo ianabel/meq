@@ -30,33 +30,33 @@ namespace analytic
  *
  * The toroidal elliptic operator is
  *
- *     Delta*(psi) := r d_r( (1/r) d_r psi ) + d_zz psi,
+ *     Delta*(psi) := R d_r( (1/R) d_r psi ) + d_zz psi,
  *
  * and the Grad-Shafranov equation, in the form both papers state it, is
  *
- *     -Delta*(psi) = F(r,z,psi),
+ *     -Delta*(psi) = F(R,z,psi),
  *
- * equivalently  -div_bar( (1/r) grad_bar psi ) = F/r.
+ * equivalently  -div_bar( (1/R) grad_bar psi ) = F/R.
  *
  * For the Solov'ev profiles, with the flux normalised so that A + C = 1,
  *
- *     F(r,z,psi) = -( (1 - A) r^2 + A ).                               (*)
+ *     F(R,z,psi) = -( (1 - A) R^2 + A ).                               (*)
  *
  * THE TWO PAPERS DISAGREE ON THIS SIGN, and (*) is the one that is right.
  *
- *   HDG-GradShafranov.pdf eq (10)          F = -( (1-A) r^2 + A )   <-- correct
- *   HDG-GradShafranov-Adaptive.pdf eq (21) F =  ( (1-A) r^2 + A )   <-- sign slip
+ *   HDG-GradShafranov.pdf eq (10)          F = -( (1-A) R^2 + A )   <-- correct
+ *   HDG-GradShafranov-Adaptive.pdf eq (21) F =  ( (1-A) R^2 + A )   <-- sign slip
  *
  * The second contradicts its own eq (1). Applying Delta* directly to the
  * particular solution both papers publish settles it:
  *
- *     Delta*( r^4/8 )              =  r^2
- *     Delta*( (A/2) r^2 ln r )     =  A
- *     Delta*( -A r^4/8 )           = -A r^2
+ *     Delta*( R^4/8 )              =  R^2
+ *     Delta*( (A/2) R^2 ln R )     =  A
+ *     Delta*( -A R^4/8 )           = -A R^2
  *     ------------------------------------------
- *     Delta*( psi_P )              =  (1 - A) r^2 + A
+ *     Delta*( psi_P )              =  (1 - A) R^2 + A
  *
- * so F = -Delta*(psi_P) = -( (1-A) r^2 + A ), which is eq (10). The homogeneous
+ * so F = -Delta*(psi_P) = -( (1-A) R^2 + A ), which is eq (10). The homogeneous
  * terms psi_1..psi_12 contribute nothing, being Delta*-harmonic by construction.
  *
  * deltaStarFD() below recomputes this numerically, and the test suite asserts
@@ -67,8 +67,8 @@ namespace analytic
 /// combination of the twelve Delta*-harmonic functions of
 /// refs/HDG-GradShafranov.pdf eq (12).
 ///
-/// All lengths are normalised to the major radius; r must be strictly
-/// positive, since the expansion contains log(r).
+/// All lengths are normalised to the major radius; R must be strictly
+/// positive, since the expansion contains log(R).
 class SolovievEquilibrium
 {
 	public:
@@ -402,43 +402,43 @@ class SolovievEquilibrium
 		 */
 
 		/// The poloidal flux function.
-		double psi( double r, double z ) const
+		double psi( double radius, double z ) const
 		{
-			double value = psiParticular( r, z );
+			double value = psiParticular( radius, z );
 			for ( int i = 0; i < 12; ++i )
 			{
-				value += c[ i ] * homogeneous( i, r, z );
+				value += c[ i ] * homogeneous( i, radius, z );
 			}
 			return value;
 		}
 
 		/// grad_bar(psi) = ( d_r psi, d_z psi ). Not the HDG flux: that is
-		/// this divided by r, see flux().
-		void gradPsi( double r, double z, double &dPsiDr, double &dPsiDz ) const
+		/// this divided by R, see flux().
+		void gradPsi( double radius, double z, double &dPsiDr, double &dPsiDz ) const
 		{
-			gradPsiParticular( r, z, dPsiDr, dPsiDz );
+			gradPsiParticular( radius, z, dPsiDr, dPsiDz );
 			for ( int i = 0; i < 12; ++i )
 			{
 				double gr, gz;
-				gradHomogeneous( i, r, z, gr, gz );
+				gradHomogeneous( i, radius, z, gr, gz );
 				dPsiDr += c[ i ] * gr;
 				dPsiDz += c[ i ] * gz;
 			}
 		}
 
-		/// The HDG flux q = grad_bar(psi) / r.
-		void flux( double r, double z, double &qR, double &qZ ) const
+		/// The HDG flux q = grad_bar(psi) / R.
+		void flux( double radius, double z, double &qR, double &qZ ) const
 		{
-			gradPsi( r, z, qR, qZ );
-			qR /= r;
-			qZ /= r;
+			gradPsi( radius, z, qR, qZ );
+			qR /= radius;
+			qZ /= radius;
 		}
 
-		/// The Grad-Shafranov source, F = -( (1-A) r^2 + A ). Independent of
+		/// The Grad-Shafranov source, F = -( (1-A) R^2 + A ). Independent of
 		/// psi, which is what makes this equilibrium linear.
-		double f( double r, double /*z*/, double /*psiValue*/ ) const
+		double f( double radius, double /*z*/, double /*psiValue*/ ) const
 		{
-			return -( ( 1.0 - a ) * r * r + a );
+			return -( ( 1.0 - a ) * radius * radius + a );
 		}
 
 		/// dF/dpsi. Identically zero: the Solov'ev source does not depend on
@@ -452,20 +452,20 @@ class SolovievEquilibrium
 		/// Delta*(psi), by central differences of psi(). Used to verify the
 		/// sign convention documented above, and to catch a mistyped term in
 		/// the expansion, without depending on the hand-derived gradients.
-		double deltaStarFD( double r, double z, double h = 1.0e-4 ) const
+		double deltaStarFD( double radius, double z, double h = 1.0e-4 ) const
 		{
-			// r d_r( (1/r) d_r psi ) as a second difference of the inner
+			// R d_r( (1/R) d_r psi ) as a second difference of the inner
 			// quantity, plus d_zz psi.
 			auto innerR = [ & ]( double rr )
 			{
 				return ( psi( rr + h, z ) - psi( rr - h, z ) ) / ( 2.0 * h ) / rr;
 			};
 
-			double dRInner = ( innerR( r + h ) - innerR( r - h ) ) / ( 2.0 * h );
-			double dZZ = ( psi( r, z + h ) - 2.0 * psi( r, z ) + psi( r, z - h ) )
+			double dRInner = ( innerR( radius + h ) - innerR( radius - h ) ) / ( 2.0 * h );
+			double dZZ = ( psi( radius, z + h ) - 2.0 * psi( radius, z ) + psi( radius, z - h ) )
 			             / ( h * h );
 
-			return r * dRInner + dZZ;
+			return radius * dRInner + dZZ;
 		}
 
 		/// The papers' parameter A.
@@ -478,34 +478,34 @@ class SolovievEquilibrium
 		double a;
 		std::array<double, 12> c;
 
-		/// psi_P = r^4/8 + A( (1/2) r^2 ln r - r^4/8 ),
+		/// psi_P = R^4/8 + A( (1/2) R^2 ln R - R^4/8 ),
 		/// refs/HDG-GradShafranov.pdf eq (11).
-		double psiParticular( double r, double z ) const
+		double psiParticular( double radius, double z ) const
 		{
 			(void)z;
-			double r2 = r * r;
+			double r2 = radius * radius;
 			double r4 = r2 * r2;
-			return r4 / 8.0 + a * ( 0.5 * r2 * std::log( r ) - r4 / 8.0 );
+			return r4 / 8.0 + a * ( 0.5 * r2 * std::log( radius ) - r4 / 8.0 );
 		}
 
-		void gradPsiParticular( double r, double z, double &gr, double &gz ) const
+		void gradPsiParticular( double radius, double z, double &gr, double &gz ) const
 		{
 			(void)z;
-			double r2 = r * r;
-			double r3 = r2 * r;
-			double logR = std::log( r );
-			gr = r3 / 2.0 + a * ( r * logR + r / 2.0 - r3 / 2.0 );
+			double r2 = radius * radius;
+			double r3 = r2 * radius;
+			double logR = std::log( radius );
+			gr = r3 / 2.0 + a * ( radius * logR + radius / 2.0 - r3 / 2.0 );
 			gz = 0.0;
 		}
 
 		/// psi_1 ... psi_12 of refs/HDG-GradShafranov.pdf eq (12), indexed
 		/// from zero. Each satisfies Delta*(psi_i) = 0.
-		static double homogeneous( int i, double r, double z )
+		static double homogeneous( int i, double radius, double z )
 		{
-			double r2 = r * r,  r4 = r2 * r2,  r6 = r4 * r2;
+			double r2 = radius * radius,  r4 = r2 * r2,  r6 = r4 * r2;
 			double z2 = z * z,  z3 = z2 * z,   z4 = z2 * z2;
 			double z5 = z4 * z, z6 = z4 * z2;
-			double logR = std::log( r );
+			double logR = std::log( radius );
 
 			switch ( i )
 			{
@@ -529,12 +529,12 @@ class SolovievEquilibrium
 			}
 		}
 
-		static void gradHomogeneous( int i, double r, double z,
+		static void gradHomogeneous( int i, double radius, double z,
 		                             double &gr, double &gz )
 		{
-			double r2 = r * r,  r3 = r2 * r,  r4 = r2 * r2, r5 = r4 * r;
+			double r2 = radius * radius,  r3 = r2 * radius,  r4 = r2 * r2, r5 = r4 * radius;
 			double z2 = z * z,  z3 = z2 * z,  z4 = z2 * z2, z5 = z4 * z;
-			double logR = std::log( r );
+			double logR = std::log( radius );
 
 			switch ( i )
 			{
@@ -543,31 +543,31 @@ class SolovievEquilibrium
 					gz = 0.0;
 					break;
 				case 1:
-					gr = 2.0 * r;
+					gr = 2.0 * radius;
 					gz = 0.0;
 					break;
 				case 2:
-					gr = -2.0 * r * logR - r;
+					gr = -2.0 * radius * logR - radius;
 					gz = 2.0 * z;
 					break;
 				case 3:
-					gr = 4.0 * r3 - 8.0 * r * z2;
+					gr = 4.0 * r3 - 8.0 * radius * z2;
 					gz = -8.0 * r2 * z;
 					break;
 				case 4:
-					gr = -18.0 * z2 * r + 12.0 * r3 * logR + 3.0 * r3
-					     - 24.0 * r * z2 * logR - 12.0 * r * z2;
+					gr = -18.0 * z2 * radius + 12.0 * r3 * logR + 3.0 * r3
+					     - 24.0 * radius * z2 * logR - 12.0 * radius * z2;
 					gz = 8.0 * z3 - 18.0 * z * r2 - 24.0 * r2 * z * logR;
 					break;
 				case 5:
-					gr = 6.0 * r5 - 48.0 * r3 * z2 + 16.0 * r * z4;
+					gr = 6.0 * r5 - 48.0 * r3 * z2 + 16.0 * radius * z4;
 					gz = -24.0 * r4 * z + 32.0 * r2 * z3;
 					break;
 				case 6:
-					gr = -280.0 * z4 * r + 300.0 * z2 * r3
+					gr = -280.0 * z4 * radius + 300.0 * z2 * r3
 					     - 90.0 * r5 * logR - 15.0 * r5
 					     + 720.0 * r3 * z2 * logR + 180.0 * r3 * z2
-					     - 240.0 * r * z4 * logR - 120.0 * r * z4;
+					     - 240.0 * radius * z4 * logR - 120.0 * radius * z4;
 					gz = 48.0 * z5 - 560.0 * z3 * r2 + 150.0 * z * r4
 					     + 360.0 * r4 * z * logR - 480.0 * r2 * z3 * logR;
 					break;
@@ -576,19 +576,19 @@ class SolovievEquilibrium
 					gz = 1.0;
 					break;
 				case 8:
-					gr = 2.0 * r * z;
+					gr = 2.0 * radius * z;
 					gz = r2;
 					break;
 				case 9:
-					gr = -6.0 * z * r * logR - 3.0 * z * r;
+					gr = -6.0 * z * radius * logR - 3.0 * z * radius;
 					gz = 3.0 * z2 - 3.0 * r2 * logR;
 					break;
 				case 10:
-					gr = 12.0 * z * r3 - 8.0 * z3 * r;
+					gr = 12.0 * z * r3 - 8.0 * z3 * radius;
 					gz = 3.0 * r4 - 12.0 * z2 * r2;
 					break;
 				case 11:
-					gr = -180.0 * z * r3 - 160.0 * z3 * r * logR - 80.0 * z3 * r
+					gr = -180.0 * z * r3 - 160.0 * z3 * radius * logR - 80.0 * z3 * radius
 					     + 240.0 * z * r3 * logR + 60.0 * z * r3;
 					gz = 40.0 * z4 - 45.0 * r4 - 240.0 * z2 * r2 * logR
 					     + 60.0 * r4 * logR;

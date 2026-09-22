@@ -21,13 +21,13 @@
  *
  * WHAT IS NEW HERE, AND IT IS EXACTLY ONE THING. The source
  *
- *     F( r, z, psi ) = p1 r^2 exp[ M2 ( r^2/R0^2 - 1 ) ] + F0
+ *     F( R, z, psi ) = p1 R^2 exp[ M2 ( R^2/R0^2 - 1 ) ] + F0
  *
  * is still constant in psi -- so the problem is linear and dF/dpsi is
- * identically zero -- but it is EXPONENTIAL IN r^2 at fixed psi, which is the
+ * identically zero -- but it is EXPONENTIAL IN R^2 at fixed psi, which is the
  * whole structural consequence of sonic rotation: the pressure is no longer a
- * flux function, so mu0 dp/dpsi picks up an r. meq::Source's signature already
- * carries r and so needed no change for this; this file is where that stops
+ * flux function, so mu0 dp/dpsi picks up an R. meq::Source's signature already
+ * carries R and so needed no change for this; this file is where that stops
  * being a claim.
  *
  * WHAT THIS TEST CANNOT SEE. dF/dpsi = 0, so it is the same rung as
@@ -59,17 +59,17 @@ namespace
 
 	using Equilibrium = meq::analytic::RotatingSolovievEquilibrium;
 
-	/// The scan SolovievConvergence.cpp uses, at the same step: 0.2 in r and
+	/// The scan SolovievConvergence.cpp uses, at the same step: 0.2 in R and
 	/// 0.3 in z over the benchmark box.
 	template<typename Check>
 	void overTheBox( Check check )
 	{
 		meq::tests::Rectangle const box = meq::tests::standardBox();
-		for ( double r = box.rMin; r <= box.rMax + 1.0e-12; r += 0.2 )
+		for ( double radius = box.minRadius; radius <= box.maxRadius + 1.0e-12; radius += 0.2 )
 		{
 			for ( double z = box.zMin; z <= box.zMax + 1.0e-12; z += 0.3 )
 			{
-				check( r, z );
+				check( radius, z );
 			}
 		}
 	}
@@ -78,13 +78,13 @@ namespace
 	/// coefficients -- the part of psi that the rotation does not touch. Used
 	/// by the small-Mach test, which needs to compare the particular solution
 	/// against eq (16) with the geometry divided out.
-	double harmonicPart( Equilibrium const &eq, double r, double z )
+	double harmonicPart( Equilibrium const &eq, double radius, double z )
 	{
 		std::array<double, 4> const c = eq.getCoefficients();
-		double const r2 = r*r;
+		double const r2 = radius*radius;
 		double const z2 = z*z;
 		return c[ 0 ] + c[ 1 ]*r2 + c[ 2 ]*( r2*r2 - 4.0*r2*z2 )
-		       + c[ 3 ]*( r2*std::log( r ) - z2 );
+		       + c[ 3 ]*( r2*std::log( radius ) - z2 );
 	}
 
 	/// eq (15)'s rotating term EXACTLY AS THE PAPER PRINTS IT, prefactor
@@ -92,10 +92,10 @@ namespace
 	/// it is the control for theSmallMachLimitIsContinuous, which asserts that
 	/// this form loses everything for small machSquared while the fixture does
 	/// not.
-	double naiveRotatingTerm( double r, double machSquared, double p1,
+	double naiveRotatingTerm( double radius, double machSquared, double p1,
 	                          double majorRadius )
 	{
-		double const v = r*r/( majorRadius*majorRadius ) - 1.0;
+		double const v = radius*radius/( majorRadius*majorRadius ) - 1.0;
 		double const prefactor = majorRadius*majorRadius/( 2.0*machSquared );
 		return -p1*prefactor*prefactor
 		       *( std::exp( machSquared*v ) - machSquared*v - 1.0 );
@@ -120,14 +120,14 @@ BOOST_AUTO_TEST_CASE( theRotatingSolovievSourceMatchesTheOperator )
 	for ( Equilibrium const &eq : { Equilibrium::stationary(), Equilibrium::rotating() } )
 	{
 		double worst = 0.0;
-		overTheBox( [ &eq, &worst ]( double r, double z )
+		overTheBox( [ &eq, &worst ]( double radius, double z )
 		{
-			double const deltaStar = eq.deltaStarFD( r, z );
-			double const minusF = -eq.f( r, z, 0.0 );
+			double const deltaStar = eq.deltaStarFD( radius, z );
+			double const minusF = -eq.f( radius, z, 0.0 );
 			worst = std::max( worst, std::abs( deltaStar - minusF ) );
 
 			BOOST_TEST( std::abs( deltaStar - minusF ) < 1.0e-5,
-			            "at machSquared = " << eq.getMachSquared() << ", ( " << r
+			            "at machSquared = " << eq.getMachSquared() << ", ( " << radius
 			            << ", " << z << " ): Delta*(psi) = " << deltaStar
 			            << " but -F = " << minusF );
 		} );
@@ -152,29 +152,29 @@ BOOST_AUTO_TEST_CASE( theGradientsMatchFiniteDifferences )
 	for ( Equilibrium const &eq : { Equilibrium::stationary(), Equilibrium::rotating(),
 	                                Equilibrium::fastRotating() } )
 	{
-		overTheBox( [ &eq, h ]( double r, double z )
+		overTheBox( [ &eq, h ]( double radius, double z )
 		{
 			double analyticR, analyticZ;
-			eq.gradPsi( r, z, analyticR, analyticZ );
+			eq.gradPsi( radius, z, analyticR, analyticZ );
 
-			double const differencedR = ( eq.psi( r + h, z ) - eq.psi( r - h, z ) )
+			double const differencedR = ( eq.psi( radius + h, z ) - eq.psi( radius - h, z ) )
 			                            /( 2.0*h );
-			double const differencedZ = ( eq.psi( r, z + h ) - eq.psi( r, z - h ) )
+			double const differencedZ = ( eq.psi( radius, z + h ) - eq.psi( radius, z - h ) )
 			                            /( 2.0*h );
 
 			// Measured worst over the three configurations: 4.0e-10, which is
 			// the O( h^2 ) truncation of the difference.
 			BOOST_TEST( std::abs( analyticR - differencedR ) < 1.0e-8,
-			            "at machSquared = " << eq.getMachSquared() << ", ( " << r
+			            "at machSquared = " << eq.getMachSquared() << ", ( " << radius
 			            << ", " << z << " ): d_r psi = " << analyticR
 			            << " but the difference is " << differencedR );
 			BOOST_TEST( std::abs( analyticZ - differencedZ ) < 1.0e-8,
-			            "at machSquared = " << eq.getMachSquared() << ", ( " << r
+			            "at machSquared = " << eq.getMachSquared() << ", ( " << radius
 			            << ", " << z << " ): d_z psi = " << analyticZ
 			            << " but the difference is " << differencedZ );
 		} );
 
-		// And the flux really is grad_bar( psi )/r, since that is what the
+		// And the flux really is grad_bar( psi )/R, since that is what the
 		// solver's fluxError() is handed.
 		double qR, qZ, gR, gZ;
 		eq.flux( 1.1, 0.2, qR, qZ );
@@ -195,21 +195,21 @@ BOOST_AUTO_TEST_CASE( theSmallMachLimitIsContinuous )
 	std::array<double, 4> const c = stationary.getCoefficients();
 	double const p1 = stationary.getP1();
 	double const f0 = stationary.getF0();
-	double const r0 = stationary.getMajorRadius();
+	double const radius0 = stationary.getMajorRadius();
 
 	// PART 1: at machSquared = 0 the fixture must BE the static Solov'ev
-	// particular solution of eq (16), psi_h - p1( r^2 - R0^2 )^2/8 - ( F0/2 )z^2,
+	// particular solution of eq (16), psi_h - p1( R^2 - R0^2 )^2/8 - ( F0/2 )z^2,
 	// which is a different expression and not merely a limit of one.
 	// Measured: 0.0e+00 over the scan this test runs, and 5.6e-17 over a
 	// 0.05-stepped one.
 	{
 		double worst = 0.0;
-		overTheBox( [ & ]( double r, double z )
+		overTheBox( [ & ]( double radius, double z )
 		{
-			double const reference = harmonicPart( stationary, r, z )
-			                         - p1*std::pow( r*r - r0*r0, 2 )/8.0
+			double const reference = harmonicPart( stationary, radius, z )
+			                         - p1*std::pow( radius*radius - radius0*radius0, 2 )/8.0
 			                         - 0.5*f0*z*z;
-			worst = std::max( worst, std::abs( stationary.psi( r, z ) - reference ) );
+			worst = std::max( worst, std::abs( stationary.psi( radius, z ) - reference ) );
 		} );
 		BOOST_TEST( worst < 1.0e-15,
 		            "at machSquared = 0 the fixture differs from eq (16) by "
@@ -220,7 +220,7 @@ BOOST_AUTO_TEST_CASE( theSmallMachLimitIsContinuous )
 	// PART 2, THE CONTROL. The naive form is not merely less accurate for small
 	// machSquared, it is wrong -- and a test that only checked the fixture
 	// against itself would pass with the naive form in place. MEASURED, at
-	// r = 1.4 where v = 0.96, comparing the naive rotating term against the
+	// R = 1.4 where v = 0.96, comparing the naive rotating term against the
 	// fixture's AT THE SAME machSquared:
 	//
 	//     machSquared    naive, relative error against the fixture
@@ -240,19 +240,19 @@ BOOST_AUTO_TEST_CASE( theSmallMachLimitIsContinuous )
 	// The comparison is at z = 0, where psi minus its harmonic part IS the
 	// rotating term, the -( F0/2 )z^2 piece having dropped out.
 	{
-		double const r = 1.4;
-		double const v = r*r/( r0*r0 ) - 1.0;
-		double const limit = -p1*r0*r0*r0*r0*v*v/8.0;
+		double const radius = 1.4;
+		double const v = radius*radius/( radius0*radius0 ) - 1.0;
+		double const limit = -p1*radius0*radius0*radius0*radius0*v*v/8.0;
 
 		auto rotatingTermOf = [ & ]( Equilibrium const &eq )
 		{
-			return eq.psi( r, 0.0 ) - harmonicPart( eq, r, 0.0 );
+			return eq.psi( radius, 0.0 ) - harmonicPart( eq, radius, 0.0 );
 		};
 
 		double const mildMach = 1.0e-4;
-		Equilibrium const mild( r0, mildMach, p1, f0, c );
+		Equilibrium const mild( radius0, mildMach, p1, f0, c );
 		double const stableMild = rotatingTermOf( mild );
-		double const naiveMild = naiveRotatingTerm( r, mildMach, p1, r0 );
+		double const naiveMild = naiveRotatingTerm( radius, mildMach, p1, radius0 );
 		BOOST_TEST( std::abs( naiveMild - stableMild )/std::abs( stableMild ) < 1.0e-6,
 		            "the two forms disagree by "
 		            << std::abs( naiveMild - stableMild )/std::abs( stableMild )
@@ -261,9 +261,9 @@ BOOST_AUTO_TEST_CASE( theSmallMachLimitIsContinuous )
 		               "not the same algebra and one of them is mistyped" );
 
 		double const smallMach = 1.0e-8;
-		Equilibrium const small( r0, smallMach, p1, f0, c );
+		Equilibrium const small( radius0, smallMach, p1, f0, c );
 		double const stableSmall = rotatingTermOf( small );
-		double const naiveSmall = naiveRotatingTerm( r, smallMach, p1, r0 );
+		double const naiveSmall = naiveRotatingTerm( radius, smallMach, p1, radius0 );
 		BOOST_TEST( std::abs( naiveSmall - stableSmall )/std::abs( stableSmall ) > 1.0e-2,
 		            "eq (15) as printed is accurate to "
 		            << std::abs( naiveSmall - stableSmall )/std::abs( stableSmall )
@@ -287,20 +287,20 @@ BOOST_AUTO_TEST_CASE( theSmallMachLimitIsContinuous )
 	{
 		for ( double mach : { 1.0e-2, 1.0e-4, 1.0e-6, 1.0e-8, 1.0e-10, 1.0e-12 } )
 		{
-			Equilibrium const eq( r0, mach, p1, f0, c );
-			overTheBox( [ & ]( double r, double z )
+			Equilibrium const eq( radius0, mach, p1, f0, c );
+			overTheBox( [ & ]( double radius, double z )
 			{
 				double referenceR, referenceZ, valueR, valueZ;
-				stationary.gradPsi( r, z, referenceR, referenceZ );
-				eq.gradPsi( r, z, valueR, valueZ );
+				stationary.gradPsi( radius, z, referenceR, referenceZ );
+				eq.gradPsi( radius, z, valueR, valueZ );
 
 				// The slope is -( p1 R0^4/4 ) v^3/6 in psi, so at most 0.04 on
 				// this box; 1.0 is a bound on it and not a fitted constant.
-				BOOST_TEST( std::abs( eq.psi( r, z ) - stationary.psi( r, z ) )
+				BOOST_TEST( std::abs( eq.psi( radius, z ) - stationary.psi( radius, z ) )
 				            < 1.0*mach + 1.0e-15,
 				            "psi at machSquared = " << mach << " is "
-				            << eq.psi( r, z ) << " against " << stationary.psi( r, z )
-				            << " at ( " << r << ", " << z << " )" );
+				            << eq.psi( radius, z ) << " against " << stationary.psi( radius, z )
+				            << " at ( " << radius << ", " << z << " )" );
 				BOOST_TEST( std::abs( valueR - referenceR ) < 1.0*mach + 1.0e-15 );
 				BOOST_TEST( std::abs( valueZ - referenceZ ) < 1.0e-15 );
 			} );
@@ -311,10 +311,10 @@ BOOST_AUTO_TEST_CASE( theSmallMachLimitIsContinuous )
 	// |u| = seriesThreshold(), and a series that disagreed with the closed form
 	// there would put a step into psi and into the flux -- small enough to
 	// survive every other assertion in this file and large enough to spoil a
-	// convergence rate. Straddle it in machSquared at fixed r and require the
+	// convergence rate. Straddle it in machSquared at fixed R and require the
 	// jump to scale like the perturbation, which is what "no step" means.
 	//
-	// Measured at r = 1.4, z = 0.3, where the crossover is machSquared =
+	// Measured at R = 1.4, z = 0.3, where the crossover is machSquared =
 	// 0.5/0.96 = 0.520833:
 	//
 	//     delta      jump in psi      jump in d_r psi
@@ -325,21 +325,21 @@ BOOST_AUTO_TEST_CASE( theSmallMachLimitIsContinuous )
 	// i.e. exactly the local slope times 2 delta at every scale, with no floor
 	// underneath it -- there is no step.
 	{
-		double const r = 1.4;
+		double const radius = 1.4;
 		double const z = 0.3;
-		double const v = r*r/( r0*r0 ) - 1.0;
+		double const v = radius*radius/( radius0*radius0 ) - 1.0;
 		double const crossover = Equilibrium::seriesThreshold()/v;
 
 		for ( double delta : { 1.0e-6, 1.0e-9, 1.0e-12 } )
 		{
-			Equilibrium const below( r0, crossover - delta, p1, f0, c );
-			Equilibrium const above( r0, crossover + delta, p1, f0, c );
+			Equilibrium const below( radius0, crossover - delta, p1, f0, c );
+			Equilibrium const above( radius0, crossover + delta, p1, f0, c );
 
 			double belowR, belowZ, aboveR, aboveZ;
-			below.gradPsi( r, z, belowR, belowZ );
-			above.gradPsi( r, z, aboveR, aboveZ );
+			below.gradPsi( radius, z, belowR, belowZ );
+			above.gradPsi( radius, z, aboveR, aboveZ );
 
-			double const jumpPsi = std::abs( above.psi( r, z ) - below.psi( r, z ) );
+			double const jumpPsi = std::abs( above.psi( radius, z ) - below.psi( radius, z ) );
 			double const jumpFlux = std::abs( aboveR - belowR );
 
 			// 10 delta is two orders above the measured 0.1 and 0.9 delta, and
@@ -358,7 +358,7 @@ BOOST_AUTO_TEST_CASE( theSmallMachLimitIsContinuous )
 	}
 
 	// And the crossover is reached the other way too, at fixed machSquared with
-	// r sweeping through R0, where u -> 0 for any Mach number whatever. psi is
+	// R sweeping through R0, where u -> 0 for any Mach number whatever. psi is
 	// even in v to leading order there, so what this catches is a series that
 	// is wrong rather than merely truncated.
 	{
@@ -367,13 +367,13 @@ BOOST_AUTO_TEST_CASE( theSmallMachLimitIsContinuous )
 		bool first = true;
 		for ( int i = -200; i <= 200; ++i )
 		{
-			double const r = r0 + i*1.0e-3;
-			double const value = eq.psi( r, 0.0 );
+			double const radius = radius0 + i*1.0e-3;
+			double const value = eq.psi( radius, 0.0 );
 			if ( !first )
 			{
 				BOOST_TEST( std::abs( value - previous ) < 1.0e-3,
 				            "psi steps by " << std::abs( value - previous )
-				            << " between r = " << r - 1.0e-3 << " and " << r );
+				            << " between R = " << radius - 1.0e-3 << " and " << radius );
 			}
 			previous = value;
 			first = false;
@@ -425,10 +425,10 @@ BOOST_AUTO_TEST_CASE( theCoefficientsPutTheZeroContourWhereItWasDesigned )
 		for ( int i = 0; i <= 200; ++i )
 		{
 			double const s = static_cast<double>( i )/200.0;
-			double const r = box.rMin + s*box.width();
+			double const radius = box.minRadius + s*box.width();
 			double const z = box.zMin + s*box.height();
-			for ( double value : { eq.psi( r, box.zMin ), eq.psi( r, box.zMax ),
-			                       eq.psi( box.rMin, z ), eq.psi( box.rMax, z ) } )
+			for ( double value : { eq.psi( radius, box.zMin ), eq.psi( radius, box.zMax ),
+			                       eq.psi( box.minRadius, z ), eq.psi( box.maxRadius, z ) } )
 				worstOnBoundary = std::max( worstOnBoundary, value );
 		}
 

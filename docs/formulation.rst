@@ -14,28 +14,28 @@ MEQ solves the fixed-boundary Grad–Shafranov problem
 
 .. math::
 
-   -\gradbar \cdot \left( \frac{1}{r} \gradbar \psi \right)
-       = \frac{F(r, z, \psi)}{r} \quad \text{in } \Omega \subset \mathbb{R}^2,
+   -\gradbar \cdot \left( \frac{1}{R} \gradbar \psi \right)
+       = \frac{F(R, z, \psi)}{R} \quad \text{in } \Omega \subset \mathbb{R}^2,
    \qquad \psi = 0 \ \text{ on } \Gamma = \partial\Omega,
 
 with
 
 .. math::
 
-   F(r, z, \psi) := \mu_0 r^2 \frac{\mathrm{d}p}{\mathrm{d}\psi}
+   F(R, z, \psi) := \mu_0 R^2 \frac{\mathrm{d}p}{\mathrm{d}\psi}
                   + g \frac{\mathrm{d}g}{\mathrm{d}\psi}.
 
 .. important::
 
    :math:`\gradbar := (\partial_r, \partial_z)` **acts formally like a vector
    of partial derivatives and is not the cylindrical gradient.** The
-   distinction is the whole content of the :math:`1/r` and :math:`r` weights
+   distinction is the whole content of the :math:`1/R` and :math:`R` weights
    above. Writing the operator as a cylindrical divergence of a cylindrical
    gradient gives a different equation.
 
    The operator on the left is :math:`-\dstar`, the Grad–Shafranov operator.
 
-:math:`p(\psi)` is the plasma pressure and :math:`g(\psi)/r` the toroidal field
+:math:`p(\psi)` is the plasma pressure and :math:`g(\psi)/R` the toroidal field
 function; both are user input, and it is their :math:`\psi`-dependence that
 makes the problem semi-linear. Everything MEQ knows about the physics arrives
 through :math:`F` and :math:`\partial F/\partial\psi` — see :doc:`sources`.
@@ -47,14 +47,14 @@ Introduce the **flux**
 
 .. math::
 
-   q := \frac{1}{r}\gradbar\psi,
+   q := \frac{1}{R}\gradbar\psi,
 
 and the problem becomes a first-order system
 
 .. math::
 
-   q - \frac{1}{r}\gradbar\psi = 0, \qquad
-   -\gradbar\cdot q = \frac{F}{r}, \qquad
+   q - \frac{1}{R}\gradbar\psi = 0, \qquad
+   -\gradbar\cdot q = \frac{F}{R}, \qquad
    \psi = 0 \ \text{ on } \Gamma.
 
 Introducing :math:`q` is not a numerical convenience. The physically
@@ -72,11 +72,11 @@ seeks :math:`(q_h, \psi_h, \hat\psi_h)` satisfying
 
 .. math::
 
-   (r\, q_h, v)_{\Th} + (\psi_h, \gradbar\cdot v)_{\Th}
+   (R\, q_h, v)_{\Th} + (\psi_h, \gradbar\cdot v)_{\Th}
        - \langle \hat\psi_h, v\cdot n \rangle_{\partial\Th} &= 0 \\
    (q_h, \gradbar w)_{\Th}
        - \langle \hat{q}_h\cdot n, w \rangle_{\partial\Th}
-       &= \left( \frac{F}{r}, w \right)_{\Th} \\
+       &= \left( \frac{F}{R}, w \right)_{\Th} \\
    \langle \hat{q}_h\cdot n, \mu \rangle_{\partial\Th \setminus \Gamma_h} &= 0 \\
    \hat\psi_h &= \varphi_h \ \text{ on } \Gamma_h
 
@@ -199,7 +199,7 @@ The two sign conventions
    **The assembled flux block holds** :math:`-q`, **not** :math:`q`.
 
 MFEM's ``DarcyForm`` is built for :math:`u = -k\nabla p`, the opposite sign to
-:math:`q = \gradbar\psi/r`, and the integrators that make the hybridization
+:math:`q = \gradbar\psi/R`, and the integrators that make the hybridization
 consistent have that sign baked in and take no scaling argument — so there is
 no way to flip it during assembly.
 
@@ -219,7 +219,7 @@ The consequences, all of which have bitten:
 * :cpp:func:`meq::GradShafranovSolver::transferredDatum` internally wants the
   **raw** block. Feeding it ``flux()`` gives :math:`-\psi` where :math:`\psi`
   was wanted — the answer with its sign reversed, not a small bias.
-* The potential right-hand side is assembled as :math:`-(F/r, w)` to match.
+* The potential right-hand side is assembled as :math:`-(F/R, w)` to match.
 
 The second convention concerns :math:`\tau` itself:
 
@@ -232,7 +232,7 @@ Testing the system against itself with that sign gives
 
 .. math::
 
-   (r q, q) - \tau \|\psi - \hat\psi\|^2_{\partial\Th} = 0,
+   (R q, q) - \tau \|\psi - \hat\psi\|^2_{\partial\Th} = 0,
 
 which is indefinite, so the element-local solves are not guaranteed invertible.
 The stable sign is :math:`-\tau`, which is exactly what assembling in the
@@ -248,8 +248,8 @@ The papers disagree about the sign of the Solov'ev source
 ---------------------------------------------------------
 
 Checked, resolved, and recorded here so that nobody rediscovers it.
-:cite:t:`SanchezVizuetSolano2019` gives :math:`F = -((1-A)r^2 + A)`;
-:cite:t:`SanchezVizuet2020adaptive` gives :math:`F = +((1-A)r^2 + A)`.
+:cite:t:`SanchezVizuetSolano2019` gives :math:`F = -((1-A)R^2 + A)`;
+:cite:t:`SanchezVizuet2020adaptive` gives :math:`F = +((1-A)R^2 + A)`.
 
 **The first is right**, and the second contradicts its own statement of the
 equation. Applying :math:`\dstar` to the particular solution *both* papers
@@ -257,18 +257,18 @@ publish settles it analytically:
 
 .. math::
 
-   \dstar\!\left(\tfrac{1}{8} r^4\right) &= r^2 \\
-   \dstar\!\left(\tfrac{A}{2} r^2 \ln r\right) &= A \\
-   \dstar\!\left(-\tfrac{A}{8} r^4\right) &= -A r^2
+   \dstar\!\left(\tfrac{1}{8} R^4\right) &= R^2 \\
+   \dstar\!\left(\tfrac{A}{2} R^2 \ln R\right) &= A \\
+   \dstar\!\left(-\tfrac{A}{8} R^4\right) &= -A R^2
 
 so that, summing,
 
 .. math::
 
-   \dstar \psi_P = (1-A) r^2 + A
+   \dstar \psi_P = (1-A) R^2 + A
 
 and since both papers define :math:`-\dstar\psi = F`, the source is
-:math:`F = -((1-A)r^2 + A)`. The twelve homogeneous terms contribute nothing,
+:math:`F = -((1-A)R^2 + A)`. The twelve homogeneous terms contribute nothing,
 being :math:`\dstar`-harmonic.
 
 MEQ does not take this on trust. The Solov'ev fixture recomputes

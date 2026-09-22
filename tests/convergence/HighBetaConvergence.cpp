@@ -101,13 +101,13 @@ namespace
 
 	/// The first Dirichlet eigenvalue of the benchmark box, pi^2( 1/w^2 + 1/h^2 ).
 	/// CLAUDE.md uses this as the scale dF/dpsi has to be compared against: the
-	/// linearised operator is -div_bar( ( 1/r ) grad_bar( . ) ) - ( dF/dpsi )/r,
+	/// linearised operator is -div_bar( ( 1/R ) grad_bar( . ) ) - ( dF/dpsi )/R,
 	/// so a reaction term past lambda_1 has pushed the operator indefinite and
 	/// the continuous problem multi-valued.
 	double firstEigenvalue()
 	{
 		meq::tests::Rectangle const box = standardBox();
-		double const w = box.rMax - box.rMin;
+		double const w = box.maxRadius - box.minRadius;
 		double const h = box.zMax - box.zMin;
 		return M_PI*M_PI*( 1.0/( w*w ) + 1.0/( h*h ) );
 	}
@@ -117,12 +117,12 @@ namespace
 	 * physical answer" an assertion rather than a hope.
 	 *
 	 * Write psi = psi_ax u with max u = 1, which is the self-consistency
-	 * condition. The equation -div_bar( ( 1/r ) grad_bar psi ) = F/r with
+	 * condition. The equation -div_bar( ( 1/R ) grad_bar psi ) = F/R with
 	 * p = A Psi^nu and psi_bnd = 0 becomes
 	 *
-	 *     psi_ax^2 L( u ) = r nu A u^(nu-1) + ( g g' term )
+	 *     psi_ax^2 L( u ) = R nu A u^(nu-1) + ( g g' term )
 	 *
-	 * and at the peak L( u ) is about lambda_1 while r is about 1 on this box, so
+	 * and at the peak L( u ) is about lambda_1 while R is about 1 on this box, so
 	 * psi_ax ~ sqrt( nu A / lambda_1 ). It is a scaling and not a solution -- the
 	 * measured ratio to it runs from 0.64 at nu = 4 to 1.02 at nu = 2 -- so what
 	 * is asserted on is a factor of three either side, which a degenerate fixed
@@ -152,14 +152,14 @@ namespace
 	mfem::FunctionCoefficient bump( double height )
 	{
 		meq::tests::Rectangle const box = standardBox();
-		double const rMin = box.rMin;
+		double const minRadius = box.minRadius;
 		double const zMin = box.zMin;
 		double const width = box.width();
 		double const depth = box.height();
 		return mfem::FunctionCoefficient(
-			[ height, rMin, zMin, width, depth ]( mfem::Vector const &x )
+			[ height, minRadius, zMin, width, depth ]( mfem::Vector const &x )
 			{
-				return height*std::sin( M_PI*( x( 0 ) - rMin )/width )
+				return height*std::sin( M_PI*( x( 0 ) - minRadius )/width )
 				       *std::sin( M_PI*( x( 1 ) - zMin )/depth );
 			} );
 	}
@@ -175,11 +175,11 @@ namespace
 		double worst = 0.0;
 		for ( int i = 0; i <= 20; ++i )
 		{
-			double const r = box.rMin + ( box.rMax - box.rMin )*i/20.0;
+			double const radius = box.minRadius + ( box.maxRadius - box.minRadius )*i/20.0;
 			for ( int j = 0; j <= 20; ++j )
 			{
 				double const psi = psiMin + ( psiMax - psiMin )*j/20.0;
-				worst = std::max( worst, std::abs( eq.dFdPsi( r, 0.0, psi ) ) );
+				worst = std::max( worst, std::abs( eq.dFdPsi( radius, 0.0, psi ) ) );
 			}
 		}
 		return worst;
@@ -193,7 +193,7 @@ namespace
 	 * to the histories in this file it reported orders of 5.9, 8.3 and 12.2, and
 	 * the 12.2 is manufactured exactly the way that rule warns about: the
 	 * amplitude-100 run has a nearly flat pair, 1.12e-1 to 1.07e-1, and a ratio
-	 * of 0.955 in the denominator of log( r2/r1 )/log( r1/r0 ) turns an ordinary
+	 * of 0.955 in the denominator of log( r2/R_1 )/log( R_1/R_0 ) turns an ordinary
 	 * following step into a large number. It is a statement about a damped step,
 	 * not about the order.
 	 *
@@ -268,14 +268,14 @@ BOOST_AUTO_TEST_CASE( theDerivativeMatchesAFiniteDifference )
 	double worst = 0.0;
 	for ( int i = 0; i <= 8; ++i )
 	{
-		double const r = box.rMin + ( box.rMax - box.rMin )*i/8.0;
+		double const radius = box.minRadius + ( box.maxRadius - box.minRadius )*i/8.0;
 		for ( int j = 1; j < 20; ++j )
 		{
 			double const psi = eq.psiAxis()*j/20.0;
 			double const step = 1.0e-6*eq.psiAxis();
-			double const difference = ( eq.f( r, 0.0, psi + step )
-			                            - eq.f( r, 0.0, psi - step ) )/( 2.0*step );
-			double const analytic = eq.dFdPsi( r, 0.0, psi );
+			double const difference = ( eq.f( radius, 0.0, psi + step )
+			                            - eq.f( radius, 0.0, psi - step ) )/( 2.0*step );
+			double const analytic = eq.dFdPsi( radius, 0.0, psi );
 			double const scale = std::max( 1.0, std::abs( analytic ) );
 			worst = std::max( worst, std::abs( difference - analytic )/scale );
 		}
@@ -293,7 +293,7 @@ BOOST_AUTO_TEST_CASE( theDerivativeMatchesAFiniteDifference )
  * AND THERE IS NO TRIVIAL BRANCH HERE, WHICH IS WHY THIS SOURCE IS POSED WITH
  * THE PAPER'S OWN HOMOGENEOUS DATA and the GS-2 sources cannot be.
  *
- * Every one of GS-2 sections 4.2 to 4.5 has F( r, 0 ) = 0, so psi == 0 solves the
+ * Every one of GS-2 sections 4.2 to 4.5 has F( R, 0 ) = 0, so psi == 0 solves the
  * homogeneous problem and Newton stops on it in zero iterations -- CLAUDE.md's
  * standing trap, and the reason those four are run with an artificial ramp. A
  * profile equilibrium does not have that property: p'( 0 ) = a_1/psi_axis is
@@ -311,11 +311,11 @@ BOOST_AUTO_TEST_CASE( theSourceDoesNotVanishOnTheTrivialBranch )
 	double smallest = 1.0e300;
 	for ( int i = 0; i <= 8; ++i )
 	{
-		double const r = box.rMin + ( box.rMax - box.rMin )*i/8.0;
-		smallest = std::min( smallest, std::abs( eq.f( r, 0.0, 0.0 ) ) );
+		double const radius = box.minRadius + ( box.maxRadius - box.minRadius )*i/8.0;
+		smallest = std::min( smallest, std::abs( eq.f( radius, 0.0, 0.0 ) ) );
 	}
 
-	std::printf( "  the smallest | F( r, z, 0 ) | over the box is %.4e\n", smallest );
+	std::printf( "  the smallest | F( R, z, 0 ) | over the box is %.4e\n", smallest );
 	std::fflush( stdout );
 
 	BOOST_TEST( smallest > 1.0e-3,
@@ -762,7 +762,7 @@ BOOST_AUTO_TEST_CASE( theAxisSensitivityIsLocalToItsElement )
  * contact -- and FREE-BOUNDARY-PLAN.md's FB-3 is that second border.
  *
  * THE SETUP IS DELIBERATELY THE SIMPLEST THING THAT EXERCISES BOTH BORDERS.
- * Constant p' and gg', so F = ( mu0 r^2 c1 + c2 )/span carries no Psi-dependence
+ * Constant p' and gg', so F = ( mu0 R^2 c1 + c2 )/span carries no Psi-dependence
  * at all -- and is still NON-LINEAR, because the span is psi_ax - psi_bnd and
  * both are functionals of the solution. psi then scales as 1/span while span
  * scales as psi, which pins the amplitude. That isolates the borders from the
@@ -794,7 +794,7 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxClosesAsASecondBorder )
 	meq::tests::Rectangle const box = standardBox();
 	// Inside the domain and off the axis of symmetry, so psi there is neither
 	// zero by the boundary condition nor the maximum by symmetry.
-	double const limiterR = box.rMin + 0.68*( box.rMax - box.rMin );
+	double const limiterR = box.minRadius + 0.68*( box.maxRadius - box.minRadius );
 	double const limiterZ = box.zMin + 0.31*( box.zMax - box.zMin );
 
 	for ( int n : { 8, 16 } )
@@ -888,8 +888,8 @@ BOOST_AUTO_TEST_CASE( theBoundaryFluxClosesAsASecondBorder )
  * meq::SourceIntegrator's own quadrature loop over it.
  *
  * THE SIGN IS THE THING TO GET RIGHT AND THIS CASE IS HOW IT WAS GOT RIGHT.
- * SourceIntegrator adds -w F/r against the shape functions, so the column is
- * -w ( dF/ds )/r against the same ones -- and CLAUDE.md records that a sign in
+ * SourceIntegrator adds -w F/R against the shape functions, so the column is
+ * -w ( dF/ds )/R against the same ones -- and CLAUDE.md records that a sign in
  * this tree has been settled by measurement rather than by argument four times.
  * A wrong sign here does not give a wrong ANSWER: Newton converges to the same
  * discrete solution whatever Jacobian carried it there. It costs the order and
@@ -901,7 +901,7 @@ BOOST_AUTO_TEST_CASE( theAnalyticColumnAgreesWithTheDifferencedOne )
 {
 	int const order = 2;
 	meq::tests::Rectangle const box = standardBox();
-	double const limiterR = box.rMin + 0.68*( box.rMax - box.rMin );
+	double const limiterR = box.minRadius + 0.68*( box.maxRadius - box.minRadius );
 	double const limiterZ = box.zMin + 0.31*( box.zMax - box.zMin );
 
 	std::printf( "\n  THE BORDER COLUMN: ASSEMBLED AGAINST DIFFERENCED\n" );
@@ -1008,7 +1008,7 @@ BOOST_AUTO_TEST_CASE( theAnalyticColumnAgreesWithTheDifferencedOne )
 /*
  * THE CURRENT ROW'S TWO NORMALISATION CORNERS, ASSEMBLED AGAINST DIFFERENCED.
  *
- * `int F/r` depends on psi_ax and psi_bnd explicitly, through the normalisation
+ * `int F/R` depends on psi_ax and psi_bnd explicitly, through the normalisation
  * the profiles are evaluated at, so the current row of the corner block has an
  * entry against each of them. CLAUDE_FB.md measures what they are worth: without
  * them the current-bordered solve converges LINEARLY, at a clean geometric
@@ -1059,7 +1059,7 @@ BOOST_AUTO_TEST_CASE( theAnalyticCurrentCornerAgreesWithTheDifferencedOne )
 {
 	int const order = 2;
 	meq::tests::Rectangle const box = standardBox();
-	double const limiterR = box.rMin + 0.68*( box.rMax - box.rMin );
+	double const limiterR = box.minRadius + 0.68*( box.maxRadius - box.minRadius );
 	double const limiterZ = box.zMin + 0.31*( box.zMax - box.zMin );
 
 	struct Result

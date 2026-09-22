@@ -97,7 +97,7 @@ MEQ takes the Grad-Shafranov free functions against its own **normalised
 poloidal** flux — `src/meq/Source.hpp`, `meq::NormalisedMHDSource`:
 
 ```
-F( r, z, psi ) = [ mu0 r^2 ( dp/dPsi )( Psi ) + ( g dg/dPsi )( Psi ) ] / psi_ax
+F( R, z, psi ) = [ mu0 R^2 ( dp/dPsi )( Psi ) + ( g dg/dPsi )( Psi ) ] / psi_ax
 Psi = psi / psi_ax,   Psi = 1 on the magnetic axis and 0 on Gamma
 ```
 
@@ -127,8 +127,8 @@ comparison — but it is not free, and `convert_desc.py --check` prints the boun
 ```
 THE OUTERMOST SURFACE: the reference's contour against Gamma itself
   area   contour 3.21595886e-01  MXH 3.21615233e-01  rel 6.016e-05
-  int r  contour 3.23875825e-01  MXH 3.23895278e-01  rel 6.006e-05
-  int 1/r contour 3.27745423e-01  MXH 3.27765861e-01  rel 6.236e-05
+  int R  contour 3.23875825e-01  MXH 3.23895278e-01  rel 6.006e-05
+  int 1/R contour 3.27745423e-01  MXH 3.27765861e-01  rel 6.236e-05
 ```
 
 i.e. **6.0e-05 relative**, which is the MXH fit residual (2.7e-05 m on a
@@ -153,17 +153,17 @@ on the axis that no equilibrium has.
 
 ### Why the flux integrals are contour integrals
 
-Both integrands are of the form `a( Psi ) r + b( Psi )/r`, so
+Both integrands are of the form `a( Psi ) R + b( Psi )/R`, so
 
 ```
 int_{A(u)} h( psi_n ) dA  =  h( u ) V( u ) - int_0^u h'( v ) V( v ) dv
 ```
 
-with `V` the enclosed moment of `r` or `1/r`, and each moment follows from the
+with `V` the enclosed moment of `R` or `1/R`, and each moment follows from the
 bounding contour alone by Green's theorem:
 
 ```
-int r dA = oint ( r^2 / 2 ) dz          int ( 1/r ) dA = oint ln r dz
+int R dA = oint ( R^2 / 2 ) dz          int ( 1/R ) dA = oint ln R dz
 ```
 
 `h'` comes from the profile's own spline, so nothing differentiates `V`
@@ -187,7 +187,7 @@ upsampled by `factor` before any contour is taken:
 
 | factor | 1 | 2 | 4 |
 |---|---|---|---|
-| `int r dA` inside `psi_n = 0.1` | 1.760669e-02 | 1.763618e-02 | 1.764379e-02 |
+| `int R dA` inside `psi_n = 0.1` | 1.760669e-02 | 1.763618e-02 | 1.764379e-02 |
 | `I` at `Gamma` | 2.9974710e+05 | 2.9983552e+05 | 2.9985773e+05 |
 
 Second order, converging from below, and the last column agrees to **4.6e-06**
@@ -282,7 +282,7 @@ taken while the contour-chording error above was still in** — so each reads
 | `chi`'s radial quadrature | default 25 nodes vs 1025 | **1.6e-06.** Real, tiny, and now removed |
 | the pressure being inconsistent with `p'` in the reference | `p` against the integral of `pprime` | **no.** Agrees to 8e-16; and MEQ's own table reproduces the reference's `pprime` to 3e-13 |
 | the current's SIGN | `--current-sign` ±1 | **irrelevant, as it must be.** Same `nit`, same `cost`, same `\|chi(1)\|`, `iota` on the axis +2.6467 and −2.6467. Grad-Shafranov sees only `g dg/dpsi`, so MEQ's input cannot say which helicity the machine has and `psi` is the same function either way |
-| the flux-label map's SOURCE | the reference against MEQ's own converged `k = 2, r = 1` answer | **yes, 4.200e-04 → 2.201e-05** — and then `--refine 4` on the reference reached 8.456e-06 **without** MEQ's answer, which is what identified the cause as the contour and not the equilibrium |
+| the flux-label map's SOURCE | the reference against MEQ's own converged `k = 2, R = 1` answer | **yes, 4.200e-04 → 2.201e-05** — and then `--refine 4` on the reference reached 8.456e-06 **without** MEQ's answer, which is what identified the cause as the contour and not the equilibrium |
 
 Two independent checks that the conversion is right at all, rather than merely
 self-consistent:
@@ -407,14 +407,14 @@ understood; the other five stand.
 
 | code | resolution | seconds | warm | vs `freegs4e` | vs the other code's best |
 |---|---|---|---|---|---|
-| MEQ | `k=1 r=0` | 7.25 | — | 1.0011e-03 | 1.0050e-03 |
-| MEQ | `k=2 r=0` | 8.69 | — | 9.7266e-05 | 1.1797e-04 |
-| MEQ | `k=3 r=0` | 12.08 | — | 1.1808e-04 | 1.3647e-04 |
+| MEQ | `k=1 R=0` | 7.25 | — | 1.0011e-03 | 1.0050e-03 |
+| MEQ | `k=2 R=0` | 8.69 | — | 9.7266e-05 | 1.1797e-04 |
+| MEQ | `k=3 R=0` | 12.08 | — | 1.1808e-04 | 1.3647e-04 |
 | DESC | `M=8` | 74.10 | 1.37 | 1.3377e-03 | 1.3649e-03 |
 | DESC | `M=12` | 73.34 | 1.57 | 9.3225e-05 | 1.3934e-04 |
 | DESC | `M=16` | 82.41 | 3.16 | 5.8923e-05 | 1.1797e-04 |
 
-**MEQ's `k = 2, r = 0` row reads 9.7266e-05 against M-147's published
+**MEQ's `k = 2, R = 0` row reads 9.7266e-05 against M-147's published
 9.712e-05**, which is the harness checking itself: the MEQ arm is the shipped
 driver on the shipped file through `compare.py`'s own norm, so it has to
 reproduce the published table and it does.
@@ -430,11 +430,11 @@ area and M-147 already identifies it as what floors the `freegs4e` comparison.
 The reference is a 257² finite-difference free-boundary solve; once a MEQ run is
 nearer to the true answer than the reference is, refining it moves it AWAY from
 the reference. M-147's own order table avoids this by measuring against MEQ's
-own `r = 3` answer instead. The same caution applies to every "vs freegs4e"
+own `R = 3` answer instead. The same caution applies to every "vs freegs4e"
 number here below about 1e-04.
 
 **THE VERDICT DEPENDS ENTIRELY ON WHICH CLOCK, WHICH IS THE POINT OF HAVING
-TWO.** At comparable accuracy — MEQ `k=2 r=0` against DESC `M=12` — MEQ is
+TWO.** At comparable accuracy — MEQ `k=2 R=0` against DESC `M=12` — MEQ is
 **8.4× faster cold** and DESC is **5.5× faster warm**. Neither number is wrong
 and neither is the answer on its own: the cold one is what solving one
 equilibrium once costs, the warm one is what the second and subsequent solves of
@@ -477,7 +477,7 @@ as it times MEQ's driver, and reports `warm` beside it rather than instead of
 it.
 
 **AND THE TWO CLOCKS GIVE OPPOSITE VERDICTS, WHICH IS WHY NEITHER MAY BE QUOTED
-ALONE.** At comparable accuracy on `fixed-h-circular` — MEQ `k = 2, r = 0` at
+ALONE.** At comparable accuracy on `fixed-h-circular` — MEQ `k = 2, R = 0` at
 9.73e-05 against DESC `M = 12` at 9.32e-05 — MEQ is **8.4x faster cold** and
 DESC is **5.5x faster warm**. Both are rough, both were taken under load, and
 both will survive a quiet re-run as ratios of roughly that size because the

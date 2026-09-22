@@ -6,22 +6,22 @@
  * FOLLOWS -- the plasma edge of FREE-BOUNDARY-PLAN.md section 5.3, with
  * everything else about free boundary removed.
  *
- * Free boundary makes the source F = [ mu0 r^2 p'(Psi) + (g g')(Psi) ] carry a
+ * Free boundary makes the source F = [ mu0 R^2 p'(Psi) + (g g')(Psi) ] carry a
  * factor chi_{Omega_p}, and Omega_p is a level set of the solution. So F stops
  * dead on a curve that cuts through elements, and it moves while Newton runs.
  * The question this fixture exists to answer is what that costs the ORDER --
  * MEQ is a k+1 code in psi_h and a k+2 code in psi*, and section 5.3 names this
  * as the one place a published code (CEDRES++) says it hit a wall.
  *
- * THE CONSTRUCTION. Take a disc of radius a about ( r0, z0 ), strictly inside
+ * THE CONSTRUCTION. Take a disc of radius a about ( R_0, z0 ), strictly inside
  * the benchmark box, as the plasma:
  *
- *     phi( r, z ) = a^2 - ( r - r0 )^2 - ( z - z0 )^2 ,   plasma = { phi > 0 }
+ *     phi( R, z ) = a^2 - ( R - R_0 )^2 - ( z - z0 )^2 ,   plasma = { phi > 0 }
  *
  * and take the exact solution to be a Delta*-HARMONIC vacuum field plus a term
  * supported in the plasma:
  *
- *     psi = w( r, z )  +  c ( phi_+ )^m ,        Delta* w = 0 ,   m = j + 2
+ *     psi = w( R, z )  +  c ( phi_+ )^m ,        Delta* w = 0 ,   m = j + 2
  *
  * Then F = -Delta* psi is SUPPORTED IN THE PLASMA AND NOWHERE ELSE, because w
  * contributes nothing, and near the edge
@@ -79,16 +79,16 @@ class PlasmaEdge
 		/// @param vanishingOrderIn  j: the order to which the source vanishes at
 		///                          the plasma edge. 0, 1 and 2 are the rungs.
 		/// @param amplitudeIn       c, the size of the plasma term.
-		/// @param harmonicA         weight on r^2 in the vacuum field.
-		/// @param harmonicB         weight on r^2 z.
-		/// @param harmonicC         weight on r^4 - 4 r^2 z^2.
+		/// @param harmonicA         weight on R^2 in the vacuum field.
+		/// @param harmonicB         weight on R^2 z.
+		/// @param harmonicC         weight on R^4 - 4 R^2 z^2.
 		PlasmaEdge( int vanishingOrderIn,
 		            double centreRIn = 1.0, double centreZIn = 0.0,
 		            double radiusIn = 0.23456789, double amplitudeIn = 4.0,
 		            double harmonicA = 0.35, double harmonicB = 0.5,
 		            double harmonicC = 0.3, double harmonicD = 0.45 )
 			: jOrder( vanishingOrderIn ), mOrder( vanishingOrderIn + 2 ),
-			  centreR( centreRIn ), centreZ( centreZIn ), radius( radiusIn ),
+			  centreR( centreRIn ), centreZ( centreZIn ), discRadius( radiusIn ),
 			  amplitude( amplitudeIn ),
 			  weightA( harmonicA ), weightB( harmonicB ), weightC( harmonicC ),
 			  weightD( harmonicD )
@@ -100,85 +100,85 @@ class PlasmaEdge
 		}
 
 		/// phi. Positive inside the plasma, zero on the edge.
-		double levelSet( double r, double z ) const
+		double levelSet( double radius, double z ) const
 		{
-			double const dr = r - centreR, dz = z - centreZ;
-			return radius*radius - dr*dr - dz*dz;
+			double const dr = radius - centreR, dz = z - centreZ;
+			return discRadius*discRadius - dr*dr - dz*dz;
 		}
 
 		/// The Delta*-harmonic vacuum field, which is psi outside the plasma.
 		///
 		/// THE LAST TERM IS NOT DECORATION AND THE FIRST VERSION OMITTED IT.
-		/// r^2 ln r - z^2 is Delta*-harmonic (VacuumHarmonic::axisNonZero) and
+		/// R^2 ln R - z^2 is Delta*-harmonic (VacuumHarmonic::axisNonZero) and
 		/// is NOT a polynomial, where the other three are and the highest is
 		/// quartic. Without it P_4 represents the whole vacuum field exactly,
 		/// so the control in a best-approximation study sits at 1.3e-15 from
 		/// the coarsest mesh and its "rate" reads 0.03 -- an instrument
 		/// reporting itself, which is the failure this tree keeps meeting.
 		/// It is bounded away from the axis on any box this fixture is used on;
-		/// its gradient carries a ln r and would not be.
-		double vacuum( double r, double z ) const
+		/// its gradient carries a ln R and would not be.
+		double vacuum( double radius, double z ) const
 		{
-			double const r2 = r*r;
+			double const r2 = radius*radius;
 			return weightA*r2 + weightB*r2*z + weightC*( r2*r2 - 4.0*r2*z*z )
-			     + weightD*( r2*std::log( r ) - z*z );
+			     + weightD*( r2*std::log( radius ) - z*z );
 		}
 
-		double psi( double r, double z ) const
+		double psi( double radius, double z ) const
 		{
-			double const p = levelSet( r, z );
-			return vacuum( r, z )
+			double const p = levelSet( radius, z );
+			return vacuum( radius, z )
 			     + ( p > 0.0 ? amplitude*std::pow( p, mOrder ) : 0.0 );
 		}
 
-		/// q = ( 1/r ) grad-bar psi, which is what meq::GradShafranovSolver
+		/// q = ( 1/R ) grad-bar psi, which is what meq::GradShafranovSolver
 		/// solves for and what fluxError() is measured against.
-		void flux( double r, double z, double &qR, double &qZ ) const
+		void flux( double radius, double z, double &qR, double &qZ ) const
 		{
-			double const r2 = r*r;
-			double dpsiR = 2.0*weightA*r + 2.0*weightB*r*z
-			             + weightC*( 4.0*r2*r - 8.0*r*z*z )
-			             + weightD*( 2.0*r*std::log( r ) + r );
+			double const r2 = radius*radius;
+			double dpsiR = 2.0*weightA*radius + 2.0*weightB*radius*z
+			             + weightC*( 4.0*r2*radius - 8.0*radius*z*z )
+			             + weightD*( 2.0*radius*std::log( radius ) + radius );
 			double dpsiZ = weightB*r2 - 8.0*weightC*r2*z - 2.0*weightD*z;
 
-			double const p = levelSet( r, z );
+			double const p = levelSet( radius, z );
 			if ( p > 0.0 )
 			{
-				double const dr = r - centreR, dz = z - centreZ;
+				double const dr = radius - centreR, dz = z - centreZ;
 				double const g = amplitude*mOrder*std::pow( p, mOrder - 1 );
 				dpsiR += g*( -2.0*dr );
 				dpsiZ += g*( -2.0*dz );
 			}
 
-			qR = dpsiR/r;
-			qZ = dpsiZ/r;
+			qR = dpsiR/radius;
+			qZ = dpsiZ/radius;
 		}
 
 		/// F as eq (2) writes it: -Delta* psi. Supported in the plasma alone.
-		double f( double r, double z ) const
+		double f( double radius, double z ) const
 		{
-			double const p = levelSet( r, z );
+			double const p = levelSet( radius, z );
 			if ( p <= 0.0 )
 				return 0.0;
 
-			double const dr = r - centreR;
+			double const dr = radius - centreR;
 			double const m = static_cast<double>( mOrder );
-			// |grad phi|^2 = 4( a^2 - phi ) and Delta* phi = -4 + 2 dr/r.
-			double const deltaStarPhi = -4.0 + 2.0*dr/r;
+			// |grad phi|^2 = 4( a^2 - phi ) and Delta* phi = -4 + 2 dr/R.
+			double const deltaStarPhi = -4.0 + 2.0*dr/radius;
 			double term = m*( m - 1.0 )*std::pow( p, mOrder - 2 )
-			              *4.0*( radius*radius - p );
+			              *4.0*( discRadius*discRadius - p );
 			term += m*std::pow( p, mOrder - 1 )*deltaStarPhi;
 			return -amplitude*term;
 		}
 
 		/// meq::Source's spelling. The cut is FIXED here, so psi is ignored and
 		/// the problem is affine -- see MovingPlasmaEdge for the other one.
-		double f( double r, double z, double /*psi*/ ) const
+		double f( double radius, double z, double /*psi*/ ) const
 		{
-			return f( r, z );
+			return f( radius, z );
 		}
 
-		double dFdPsi( double /*r*/, double /*z*/, double /*psi*/ ) const
+		double dFdPsi( double /*R*/, double /*z*/, double /*psi*/ ) const
 		{
 			return 0.0;
 		}
@@ -197,30 +197,30 @@ class PlasmaEdge
 		/// at j = 2 while nothing about the fixture has changed. Same finding as
 		/// Zernike's derivative check and SurfaceAverage's d/dpsi, for the third
 		/// time in this tree.
-		double deltaStarFD( double r, double z, double h = 1.0e-3 ) const
+		double deltaStarFD( double radius, double z, double h = 1.0e-3 ) const
 		{
 			auto raw = [ & ]( double step )
 			{
-				double const dRR = ( psi( r + step, z ) - 2.0*psi( r, z ) + psi( r - step, z ) )/( step*step );
-				double const dZZ = ( psi( r, z + step ) - 2.0*psi( r, z ) + psi( r, z - step ) )/( step*step );
-				double const dR  = ( psi( r + step, z ) - psi( r - step, z ) )/( 2.0*step );
-				return dRR - dR/r + dZZ;
+				double const dRR = ( psi( radius + step, z ) - 2.0*psi( radius, z ) + psi( radius - step, z ) )/( step*step );
+				double const dZZ = ( psi( radius, z + step ) - 2.0*psi( radius, z ) + psi( radius, z - step ) )/( step*step );
+				double const dR  = ( psi( radius + step, z ) - psi( radius - step, z ) )/( 2.0*step );
+				return dRR - dR/radius + dZZ;
 			};
 			return ( 4.0*raw( 0.5*h ) - raw( h ) )/3.0;
 		}
 
 		/// True where deltaStarFD() may be believed: at least @a margin from the
 		/// edge, measured in the level set's own units of distance.
-		bool awayFromEdge( double r, double z, double margin ) const
+		bool awayFromEdge( double radius, double z, double margin ) const
 		{
-			double const dr = r - centreR, dz = z - centreZ;
-			return std::fabs( std::sqrt( dr*dr + dz*dz ) - radius ) > margin;
+			double const dr = radius - centreR, dz = z - centreZ;
+			return std::fabs( std::sqrt( dr*dr + dz*dz ) - discRadius ) > margin;
 		}
 
 		int vanishingOrder() const { return jOrder; }
 		int kinkOrder()      const { return mOrder; }
 		double centre( int component ) const { return component == 0 ? centreR : centreZ; }
-		double edgeRadius()  const { return radius; }
+		double edgeRadius()  const { return discRadius; }
 
 		/// The cap on the L2 rate this equilibrium admits, in psi_h and in psi*
 		/// alike: no polynomial space on a mesh that does not follow the edge
@@ -229,7 +229,7 @@ class PlasmaEdge
 
 	private:
 		int jOrder, mOrder;
-		double centreR, centreZ, radius, amplitude;
+		double centreR, centreZ, discRadius, amplitude;
 		double weightA, weightB, weightC, weightD;
 };
 
@@ -253,7 +253,7 @@ class PlasmaEdge
  * and it converges to the true circle as psi_h converges.  That is the whole
  * point: nothing tells the solver where the edge is.
  *
- * F IS THEN A FUNCTION OF ( r, z, psi ) AND meq::Source's interface survives
+ * F IS THEN A FUNCTION OF ( R, z, psi ) AND meq::Source's interface survives
  * untouched, which is FREE-BOUNDARY-PLAN.md section 5.3's first claim made
  * concrete.  Recovering phi from psi means inverting
  *
@@ -295,7 +295,7 @@ class MovingPlasmaEdge
 		                  double centreRIn = 1.0, double centreZIn = 0.0,
 		                  double radiusIn = 0.23456789, double amplitudeIn = 4.0 )
 			: jOrder( vanishingOrderIn ), mOrder( vanishingOrderIn + 2 ),
-			  centreR( centreRIn ), centreZ( centreZIn ), radius( radiusIn ),
+			  centreR( centreRIn ), centreZ( centreZIn ), discRadius( radiusIn ),
 			  amplitude( amplitudeIn )
 		{
 			if ( vanishingOrderIn < 0 )
@@ -309,27 +309,27 @@ class MovingPlasmaEdge
 					"single valued" );
 		}
 
-		double levelSet( double r, double z ) const
+		double levelSet( double radius, double z ) const
 		{
-			double const dr = r - centreR, dz = z - centreZ;
-			return radius*radius - dr*dr - dz*dz;
+			double const dr = radius - centreR, dz = z - centreZ;
+			return discRadius*discRadius - dr*dr - dz*dz;
 		}
 
-		double psi( double r, double z ) const
+		double psi( double radius, double z ) const
 		{
-			double const p = levelSet( r, z );
+			double const p = levelSet( radius, z );
 			return p + ( p > 0.0 ? amplitude*std::pow( p, mOrder ) : 0.0 );
 		}
 
-		void flux( double r, double z, double &qR, double &qZ ) const
+		void flux( double radius, double z, double &qR, double &qZ ) const
 		{
-			double const p = levelSet( r, z );
-			double const dr = r - centreR, dz = z - centreZ;
+			double const p = levelSet( radius, z );
+			double const dr = radius - centreR, dz = z - centreZ;
 			double scale = 1.0;
 			if ( p > 0.0 )
 				scale += amplitude*mOrder*std::pow( p, mOrder - 1 );
-			qR = scale*( -2.0*dr )/r;
-			qZ = scale*( -2.0*dz )/r;
+			qR = scale*( -2.0*dr )/radius;
+			qZ = scale*( -2.0*dz )/radius;
 		}
 
 		/// phi recovered from psi: the root of t + c t^m = psi on t >= 0.
@@ -355,12 +355,12 @@ class MovingPlasmaEdge
 			return t;
 		}
 
-		/// F( r, z, psi ). The support is { psi > 0 } and nothing outside this
+		/// F( R, z, psi ). The support is { psi > 0 } and nothing outside this
 		/// class knows where the edge is.
-		double f( double r, double z, double psiValue ) const
+		double f( double radius, double z, double psiValue ) const
 		{
-			double const dr = r - centreR;
-			double const deltaStarPhi = -4.0 + 2.0*dr/r;
+			double const dr = radius - centreR;
+			double const deltaStarPhi = -4.0 + 2.0*dr/radius;
 			double value = -deltaStarPhi;              // the background term
 			if ( psiValue <= 0.0 )
 				return value;
@@ -368,18 +368,18 @@ class MovingPlasmaEdge
 			double const t = supportVariable( psiValue );
 			double const m = static_cast<double>( mOrder );
 			double bracket = m*( m - 1.0 )*std::pow( t, mOrder - 2 )
-			                 *4.0*( radius*radius - t );
+			                 *4.0*( discRadius*discRadius - t );
 			bracket += m*std::pow( t, mOrder - 1 )*deltaStarPhi;
 			return value - amplitude*bracket;
 		}
 
-		double dFdPsi( double r, double /*z*/, double psiValue ) const
+		double dFdPsi( double radius, double /*z*/, double psiValue ) const
 		{
 			if ( psiValue <= 0.0 )
 				return 0.0;
 
-			double const dr = r - centreR;
-			double const deltaStarPhi = -4.0 + 2.0*dr/r;
+			double const dr = radius - centreR;
+			double const deltaStarPhi = -4.0 + 2.0*dr/radius;
 			double const t = supportVariable( psiValue );
 			double const m = static_cast<double>( mOrder );
 
@@ -389,7 +389,7 @@ class MovingPlasmaEdge
 			double dBracket = -4.0*m*( m - 1.0 )*std::pow( t, mOrder - 2 );
 			if ( mOrder > 2 )
 				dBracket += 4.0*m*( m - 1.0 )*( m - 2.0 )
-				            *std::pow( t, mOrder - 3 )*( radius*radius - t );
+				            *std::pow( t, mOrder - 3 )*( discRadius*discRadius - t );
 			dBracket += m*( m - 1.0 )*std::pow( t, mOrder - 2 )*deltaStarPhi;
 
 			double const dtdPsi = 1.0/( 1.0 + amplitude*mOrder
@@ -398,22 +398,22 @@ class MovingPlasmaEdge
 		}
 
 		/// Richardson extrapolated, for the reason PlasmaEdge::deltaStarFD gives.
-		double deltaStarFD( double r, double z, double h = 1.0e-3 ) const
+		double deltaStarFD( double radius, double z, double h = 1.0e-3 ) const
 		{
 			auto raw = [ & ]( double step )
 			{
-				double const dRR = ( psi( r + step, z ) - 2.0*psi( r, z ) + psi( r - step, z ) )/( step*step );
-				double const dZZ = ( psi( r, z + step ) - 2.0*psi( r, z ) + psi( r, z - step ) )/( step*step );
-				double const dR  = ( psi( r + step, z ) - psi( r - step, z ) )/( 2.0*step );
-				return dRR - dR/r + dZZ;
+				double const dRR = ( psi( radius + step, z ) - 2.0*psi( radius, z ) + psi( radius - step, z ) )/( step*step );
+				double const dZZ = ( psi( radius, z + step ) - 2.0*psi( radius, z ) + psi( radius, z - step ) )/( step*step );
+				double const dR  = ( psi( radius + step, z ) - psi( radius - step, z ) )/( 2.0*step );
+				return dRR - dR/radius + dZZ;
 			};
 			return ( 4.0*raw( 0.5*h ) - raw( h ) )/3.0;
 		}
 
-		bool awayFromEdge( double r, double z, double margin ) const
+		bool awayFromEdge( double radius, double z, double margin ) const
 		{
-			double const dr = r - centreR, dz = z - centreZ;
-			return std::fabs( std::sqrt( dr*dr + dz*dz ) - radius ) > margin;
+			double const dr = radius - centreR, dz = z - centreZ;
+			return std::fabs( std::sqrt( dr*dr + dz*dz ) - discRadius ) > margin;
 		}
 
 		int vanishingOrder() const { return jOrder; }
@@ -422,7 +422,7 @@ class MovingPlasmaEdge
 
 	private:
 		int jOrder, mOrder;
-		double centreR, centreZ, radius, amplitude;
+		double centreR, centreZ, discRadius, amplitude;
 };
 
 }

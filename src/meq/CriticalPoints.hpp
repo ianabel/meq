@@ -23,10 +23,10 @@
  * AND ACCURATE.
  *
  * MEQ's mixed formulation carries the flux q as an unknown of the same degree
- * as the potential, with r q = grad_bar(psi). So the equation to solve for a
+ * as the potential, with R q = grad_bar(psi). So the equation to solve for a
  * critical point is
  *
- *     q_h( r, z ) = 0,
+ *     q_h( R, z ) = 0,
  *
  * a 2x2 system whose residual is a SOLVED variable converging at the
  * potential's own order, not a derivative of the potential converging one order
@@ -54,15 +54,15 @@
  * What the Jacobian IS load bearing for is the classification below, and there
  * only its two signs are used.
  *
- * THE HESSIAN OF PSI AT A ZERO OF q IS r TIMES THE JACOBIAN OF q, EXACTLY.
+ * THE HESSIAN OF PSI AT A ZERO OF q IS R TIMES THE JACOBIAN OF q, EXACTLY.
  *
- * Differentiating r q = grad_bar(psi) gives
+ * Differentiating R q = grad_bar(psi) gives
  *
- *     Hess( psi ) = q (x) e_r + r dq/dx,
+ *     Hess( psi ) = q (x) e_r + R dq/dx,
  *
  * and at a point where q = 0 the first term is identically zero. So
- * Hess( psi ) = r dq/dx there, with r > 0 throughout an axisymmetric domain.
- * The determinant scales by r^2 and the trace by r, both positive, so the SIGNS
+ * Hess( psi ) = R dq/dx there, with R > 0 throughout an axisymmetric domain.
+ * The determinant scales by R^2 and the trace by R, both positive, so the SIGNS
  * that classify the point -- and therefore its Poincare-Hopf index -- can be
  * read off dq/dx without ever forming the Hessian. No second derivative of
  * psi_h is taken anywhere in this file.
@@ -173,7 +173,7 @@
  * passes.
  *
  * And MEQ's psi is not sign-normalised across sources. With F single-signed
- * negative -- which is what the Solov'ev benchmarks have, F = -((1-A) r^2 + A)
+ * negative -- which is what the Solov'ev benchmarks have, F = -((1-A) R^2 + A)
  * -- psi is a subsolution, its maximum is on the boundary and the magnetic axis
  * is an interior MINIMUM. With F positive it is an interior maximum, which is
  * the case the high-beta source and INVERSION-PLAN.md section 6's maximum
@@ -189,7 +189,7 @@
  * every seeding rule above misses it by construction and findAxis() refuses
  * AxisSense::Saddle rather than pretending otherwise. Unseeded, sweep() reaches
  * it and costs one Newton per element per seed. Seeded,
- * tryFindCriticalPointFrom( r, z, AxisSense::Saddle, ... ) reaches it on the
+ * tryFindCriticalPointFrom( R, z, AxisSense::Saddle, ... ) reaches it on the
  * same seed-and-rings contract the axis has -- which is what an outer iteration
  * that relocates the X-point once per Jacobian needs, for the same reason the
  * axis needed it.
@@ -229,7 +229,7 @@ namespace meq
 	/// One located zero of q_h.
 	struct CriticalPoint
 	{
-		double r = 0.0;
+		double radius = 0.0;
 		double z = 0.0;
 
 		/// psi_h at the located point, from the same element.
@@ -251,9 +251,9 @@ namespace meq
 		/// kept because a root reported at 1e-3 is not a root.
 		double fluxResidual = 0.0;
 
-		/// det and trace of dq/dx at the point. Hess( psi ) is r times this, so
-		/// the determinant of the Hessian is r^2 times determinant and its trace
-		/// is r times trace -- both positive multiples, so the classification is
+		/// det and trace of dq/dx at the point. Hess( psi ) is R times this, so
+		/// the determinant of the Hessian is R^2 times determinant and its trace
+		/// is R times trace -- both positive multiples, so the classification is
 		/// the same either way. See the header comment.
 		double determinant = 0.0;
 		double trace = 0.0;
@@ -281,7 +281,7 @@ namespace meq
 		/// IT IS PLUMBED OUT RATHER THAN RECOVERABLE, AND THAT IS THE POINT. The
 		/// Newton runs in reference space, so this is the iterate it converged
 		/// to and costs nothing to report. The alternative -- handing back only
-		/// ( r, z ) and letting the caller invert the element map with
+		/// ( R, z ) and letting the caller invert the element map with
 		/// TransformBack -- re-solves a problem that was already solved, and
 		/// CLAUDE.md records the failure that invites: a CLAMPED inverse map
 		/// returns a point on the element boundary instead of failing, and a
@@ -587,7 +587,7 @@ namespace meq
 
 			/**
 			 * The critical point NEAR a point already believed to be close to it:
-			 * Newton on `q_h = 0` seeded from the element nearest @a r, @a z and a
+			 * Newton on `q_h = 0` seeded from the element nearest @a R, @a z and a
 			 * couple of rings of face neighbours around it, and nothing else.
 			 *
 			 * THIS IS THE WARM-START ENTRY POINT AND ITS WHOLE PURPOSE IS COST.
@@ -646,14 +646,14 @@ namespace meq
 			 * That is the other difference and it follows from the same premise:
 			 * a caller with a prior is FOLLOWING one critical point, so when the
 			 * seed region offers more than one point of the requested sense the
-			 * nearest to ( @a r, @a z ) is the continuation of the one being
+			 * nearest to ( @a R, @a z ) is the continuation of the one being
 			 * followed. tryFindAxis() has no prior and so cannot prefer one, and
 			 * refuses instead. Do not use this to DISCOVER a critical point:
 			 * seeded far from one it will return whatever point of that sense
 			 * happens to lie in reach, which is a different question from "where
 			 * is the axis" or "where is the X-point".
 			 *
-			 * @param r,z   where to start looking. Need not be inside the mesh and
+			 * @param R,z   where to start looking. Need not be inside the mesh and
 			 *              need not be near an element boundary; the nearest
 			 *              element CENTRE is what is used, which costs one pass
 			 *              over the elements with no field evaluation in it.
@@ -676,7 +676,7 @@ namespace meq
 			 *         radius is an ordinary event in a continuation -- and the
 			 *         caller is expected to have a fallback.
 			 */
-			bool tryFindCriticalPointFrom( double r, double z, AxisSense sense,
+			bool tryFindCriticalPointFrom( double radius, double z, AxisSense sense,
 			                               CriticalPoint &found ) const;
 
 			/// tryFindCriticalPointFrom() under the name that says what a caller
@@ -691,7 +691,7 @@ namespace meq
 			/// on exactly the terms the axis has.
 			///
 			/// @throws std::invalid_argument for AxisSense::Saddle.
-			bool tryFindAxisFrom( double r, double z, AxisSense sense,
+			bool tryFindAxisFrom( double radius, double z, AxisSense sense,
 			                      CriticalPoint &found ) const;
 
 			/// The MOST rings of face neighbours tryFindCriticalPointFrom() will
@@ -900,7 +900,7 @@ namespace meq
 			/// element centre, so that a diagnostic never throws over a basis
 			/// choice.
 			void nodalExtreme( bool wantMaximum, double &value, int &element,
-			                   double &r, double &z ) const;
+			                   double &radius, double &z ) const;
 
 			/// Element indices to seed findAxis() from: the elements holding the
 			/// extreme nodal values of psi_h, and two rings of face neighbours
@@ -931,7 +931,7 @@ namespace meq
 			void elementSeeds( int element,
 			                   std::vector<mfem::IntegrationPoint> &seeds ) const;
 
-			/// The element whose CENTRE is nearest ( r, z ), or -1 on an empty
+			/// The element whose CENTRE is nearest ( R, z ), or -1 on an empty
 			/// mesh.
 			///
 			/// NEAREST CENTRE AND NOT THE CONTAINING ELEMENT, WHICH IS A COST
@@ -943,7 +943,7 @@ namespace meq
 			/// about a per cent of what a sweep costs, and it feeds a search that
 			/// grows by face neighbours anyway: a seed one element out is
 			/// absorbed by the first ring.
-			int nearestElementCentre( double r, double z ) const;
+			int nearestElementCentre( double radius, double z ) const;
 
 			/// Whether a point of this type is one an @a sense search is asking
 			/// for. THE ONE PLACE THE FILTER IS WRITTEN, and it is one place
@@ -992,13 +992,13 @@ namespace meq
 			 * means the point is somewhere `q_c` is not a number and @a out
 			 * has not been written.
 			 *
-			 * `q_c = ( 1/r ) grad_bar psi_c` is a function on the OPEN
-			 * half-plane: it is NaN on `r = 0`, where meq::ConductorField
-			 * keeps the NaN deliberately, and meq::coilGradPsi REFUSES `r < 0`
+			 * `q_c = ( 1/R ) grad_bar psi_c` is a function on the OPEN
+			 * half-plane: it is NaN on `R = 0`, where meq::ConductorField
+			 * keeps the NaN deliberately, and meq::coilGradPsi REFUSES `R < 0`
 			 * outright. The element-local Newton below evaluates this
 			 * element's polynomial OUTSIDE the element on purpose -- that is
 			 * how a root near a face is found -- so on a half-disc machine,
-			 * whose elements reach `r = 0` exactly, an iterate can leave the
+			 * whose elements reach `R = 0` exactly, an iterate can leave the
 			 * half-plane. With no conductors that is harmless, the polynomial
 			 * being defined everywhere; under the split it is a throw from
 			 * three frames down naming a radius and nothing else.

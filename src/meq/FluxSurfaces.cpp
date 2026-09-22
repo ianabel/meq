@@ -103,7 +103,7 @@ namespace meq
 		return points.empty() ? 0.0 : points.back().arcLength;
 	}
 
-	void Contour::pointOnSegment( std::size_t i, double t, double &r,
+	void Contour::pointOnSegment( std::size_t i, double t, double &radius,
 	                              double &z ) const
 	{
 		if ( i + 1 >= points.size() )
@@ -114,19 +114,19 @@ namespace meq
 
 		// The tangent magnitudes are the CHORD LENGTH. See the header: this is
 		// not the optimal scaling and it is still fourth order.
-		double const chord = std::sqrt( ( b.r - a.r )*( b.r - a.r )
+		double const chord = std::sqrt( ( b.radius - a.radius )*( b.radius - a.radius )
 		                                + ( b.z - a.z )*( b.z - a.z ) );
 
 		double basis[ 4 ];
 		hermiteBasis( t, basis );
 
-		r = basis[ 0 ]*a.r + basis[ 1 ]*chord*a.tangentR
-		    + basis[ 2 ]*b.r + basis[ 3 ]*chord*b.tangentR;
+		radius = basis[ 0 ]*a.radius + basis[ 1 ]*chord*a.tangentR
+		    + basis[ 2 ]*b.radius + basis[ 3 ]*chord*b.tangentR;
 		z = basis[ 0 ]*a.z + basis[ 1 ]*chord*a.tangentZ
 		    + basis[ 2 ]*b.z + basis[ 3 ]*chord*b.tangentZ;
 	}
 
-	void Contour::tangentOnSegment( std::size_t i, double t, double &r,
+	void Contour::tangentOnSegment( std::size_t i, double t, double &radius,
 	                                double &z ) const
 	{
 		if ( i + 1 >= points.size() )
@@ -135,19 +135,19 @@ namespace meq
 		ContourPoint const &a = points[ i ];
 		ContourPoint const &b = points[ i + 1 ];
 
-		double const chord = std::sqrt( ( b.r - a.r )*( b.r - a.r )
+		double const chord = std::sqrt( ( b.radius - a.radius )*( b.radius - a.radius )
 		                                + ( b.z - a.z )*( b.z - a.z ) );
 
 		double basis[ 4 ];
 		hermiteBasisPrime( t, basis );
 
-		r = basis[ 0 ]*a.r + basis[ 1 ]*chord*a.tangentR
-		    + basis[ 2 ]*b.r + basis[ 3 ]*chord*b.tangentR;
+		radius = basis[ 0 ]*a.radius + basis[ 1 ]*chord*a.tangentR
+		    + basis[ 2 ]*b.radius + basis[ 3 ]*chord*b.tangentR;
 		z = basis[ 0 ]*a.z + basis[ 1 ]*chord*a.tangentZ
 		    + basis[ 2 ]*b.z + basis[ 3 ]*chord*b.tangentZ;
 	}
 
-	void Contour::chordOnSegment( std::size_t i, double t, double &r,
+	void Contour::chordOnSegment( std::size_t i, double t, double &radius,
 	                              double &z ) const
 	{
 		if ( i + 1 >= points.size() )
@@ -156,7 +156,7 @@ namespace meq
 		ContourPoint const &a = points[ i ];
 		ContourPoint const &b = points[ i + 1 ];
 
-		r = ( 1.0 - t )*a.r + t*b.r;
+		radius = ( 1.0 - t )*a.radius + t*b.radius;
 		z = ( 1.0 - t )*a.z + t*b.z;
 	}
 
@@ -183,7 +183,7 @@ namespace meq
 		return total;
 	}
 
-	void Contour::pointAtArcLength( double s, double &r, double &z ) const
+	void Contour::pointAtArcLength( double s, double &radius, double &z ) const
 	{
 		if ( points.size() < 2 )
 			throw std::out_of_range( "Contour::pointAtArcLength: no segments" );
@@ -209,7 +209,7 @@ namespace meq
 
 		double const span = points[ lo + 1 ].arcLength - points[ lo ].arcLength;
 		double const t = span > 0.0 ? ( s - points[ lo ].arcLength )/span : 0.0;
-		pointOnSegment( lo, t, r, z );
+		pointOnSegment( lo, t, radius, z );
 	}
 
 	namespace
@@ -419,14 +419,14 @@ namespace meq
 			// Endpoint() expects.
 			at.Set1w( 0.0, 1.0 );
 			ftr->Transform( at, x );
-			face.r0 = x( 0 );
+			face.radius0 = x( 0 );
 			face.z0 = x( 1 );
 			at.Set1w( 1.0, 1.0 );
 			ftr->Transform( at, x );
-			face.r1 = x( 0 );
+			face.radius1 = x( 0 );
 			face.z1 = x( 1 );
 
-			double const dr = face.r1 - face.r0;
+			double const dr = face.radius1 - face.radius0;
 			double const dz = face.z1 - face.z0;
 			face.length = std::sqrt( dr*dr + dz*dz );
 			if ( !( face.length > 0.0 ) )
@@ -456,7 +456,7 @@ namespace meq
 
 			double normalR = dz/face.length;
 			double normalZ = -dr/face.length;
-			double const outR = 0.5*( face.r0 + face.r1 ) - centroid( 0 );
+			double const outR = 0.5*( face.radius0 + face.radius1 ) - centroid( 0 );
 			double const outZ = 0.5*( face.z0 + face.z1 ) - centroid( 1 );
 			if ( normalR*outR + normalZ*outZ < 0.0 )
 			{
@@ -600,12 +600,12 @@ namespace meq
 		return worst > 0.0 ? worst : 1.0;
 	}
 
-	bool ContourTracer::locate( double r, double z, int hint, int &element,
+	bool ContourTracer::locate( double radius, double z, int hint, int &element,
 	                            mfem::IntegrationPoint &ip, int &fallbacks,
 	                            bool allowFallback ) const
 	{
 		mfem::Vector point( 2 );
-		point( 0 ) = r;
+		point( 0 ) = radius;
 		point( 1 ) = z;
 
 		int const elements = meshRef.GetNE();
@@ -711,7 +711,7 @@ namespace meq
 		++fallbacks;
 
 		mfem::DenseMatrix matrix( 2, 1 );
-		matrix( 0, 0 ) = r;
+		matrix( 0, 0 ) = radius;
 		matrix( 1, 0 ) = z;
 
 		mfem::Array<int> found;
@@ -726,7 +726,7 @@ namespace meq
 		return true;
 	}
 
-	int ContourTracer::nearestBandFace( double r, double z, double &footR,
+	int ContourTracer::nearestBandFace( double radius, double z, double &footR,
 	                                    double &footZ, double &parameter,
 	                                    double &depth ) const
 	{
@@ -760,27 +760,27 @@ namespace meq
 		int best = -1;
 		double bestDistance = 0.0;
 		double bestParameter = 0.0;
-		double bestFootR = r;
+		double bestFootR = radius;
 		double bestFootZ = z;
 
 		for ( std::size_t f = 0; f < bandFaces.size(); ++f )
 		{
 			BoundaryFace const &face = bandFaces[ f ];
-			double const dr = face.r1 - face.r0;
+			double const dr = face.radius1 - face.radius0;
 			double const dz = face.z1 - face.z0;
 			double const square = dr*dr + dz*dz;
 
 			double t = square > 0.0
-				? ( ( r - face.r0 )*dr + ( z - face.z0 )*dz )/square : 0.0;
+				? ( ( radius - face.radius0 )*dr + ( z - face.z0 )*dz )/square : 0.0;
 			t = std::min( 1.0, std::max( 0.0, t ) );
 
-			double const onR = face.r0 + t*dr;
+			double const onR = face.radius0 + t*dr;
 			double const onZ = face.z0 + t*dz;
 
-			if ( ( r - onR )*face.normalR + ( z - onZ )*face.normalZ <= 0.0 )
+			if ( ( radius - onR )*face.normalR + ( z - onZ )*face.normalZ <= 0.0 )
 				continue;
 
-			double const distance = std::sqrt( ( r - onR )*( r - onR )
+			double const distance = std::sqrt( ( radius - onR )*( radius - onR )
 			                                   + ( z - onZ )*( z - onZ ) );
 			if ( best < 0 || distance < bestDistance )
 			{
@@ -807,7 +807,7 @@ namespace meq
 		return best;
 	}
 
-	bool ContourTracer::extendField( double r, double z, FieldSample &sample ) const
+	bool ContourTracer::extendField( double radius, double z, FieldSample &sample ) const
 	{
 		if ( bandMethod == BandExtension::None || bandFaces.empty() )
 			return false;
@@ -816,7 +816,7 @@ namespace meq
 		double footZ = 0.0;
 		double parameter = 0.0;
 		double depth = 0.0;
-		int const which = nearestBandFace( r, z, footR, footZ, parameter, depth );
+		int const which = nearestBandFace( radius, z, footR, footZ, parameter, depth );
 		if ( which < 0 )
 			return false;
 
@@ -859,13 +859,13 @@ namespace meq
 			mfem::Vector q( 2 );
 			fluxField.GetVectorValue( face.element, ip, q );
 
-			// grad_bar( psi ) = r q, with r AT THE FOOT -- the point the flux was
-			// actually read at. Using the band point's own r instead is the trap
+			// grad_bar( psi ) = R q, with R AT THE FOOT -- the point the flux was
+			// actually read at. Using the band point's own R instead is the trap
 			// CLAUDE.md records against sampleCoefficient(), and it is a factor
-			// of 1.7e5 there on a quantity carrying r^2.
+			// of 1.7e5 there on a quantity carrying R^2.
 			sample.ip = ip;
 			sample.psi = potentialField.GetValue( face.element, ip )
-			             + footR*( q( 0 )*( r - footR ) + q( 1 )*( z - footZ ) );
+			             + footR*( q( 0 )*( radius - footR ) + q( 1 )*( z - footZ ) );
 			sample.qR = q( 0 );
 			sample.qZ = q( 1 );
 			return true;
@@ -945,7 +945,7 @@ namespace meq
 			}
 			fluxField.GetVectorValue( element, eip, value );
 
-			// C u = -grad_bar( psi ) = -r q, in MEQ's sign convention. NOT
+			// C u = -grad_bar( psi ) = -R q, in MEQ's sign convention. NOT
 			// DarcyForm's: transferredDatum() hands mfem::PathLiftCoefficient the
 			// raw block because that class re-runs the integrator the assembly
 			// used, and CLAUDE.md records that feeding it flux() instead returns
@@ -955,7 +955,7 @@ namespace meq
 		};
 
 		mfem::Vector here( 2 );
-		here( 0 ) = r;
+		here( 0 ) = radius;
 		here( 1 ) = z;
 
 		double const lift = mfem::PathIntegral( flux, here, xbar, lineRule );
@@ -980,10 +980,10 @@ namespace meq
 		 * the base has to be psi_p on Gamma, which is g - psi_c there. Then
 		 * sampleField() adds psi_c at the POINT, and
 		 *
-		 *   g( xbar ) - psi_c( xbar ) + int r q_p . dl + psi_c( x )
+		 *   g( xbar ) - psi_c( xbar ) + int R q_p . dl + psi_c( x )
 		 *
 		 * is the physical flux exactly, because psi_c( x ) - psi_c( xbar ) IS
-		 * the line integral of r q_c along the same path -- no quadrature, no
+		 * the line integral of R q_c along the same path -- no quadrature, no
 		 * truncation, and the conductor's logarithm never enters the lift.
 		 *
 		 * The FluxTaylor branch above needs none of this: its base is psi_p at
@@ -1001,7 +1001,7 @@ namespace meq
 		return true;
 	}
 
-	bool ContourTracer::sampleField( double r, double z, int hint,
+	bool ContourTracer::sampleField( double radius, double z, int hint,
 	                                 FieldSample &sample, int &fallbacks ) const
 	{
 		// THE SEAM. Everything in this file that wants psi or q at a physical
@@ -1020,17 +1020,17 @@ namespace meq
 			if ( !conductors )
 				return;
 
-			into.psi += conductors->psi( r, z );
+			into.psi += conductors->psi( radius, z );
 
 			// THROUGH poloidalField() AND NOT flux(), WHICH IS THE AXIS. q is
-			// ( 1/r ) grad_bar( psi ) and is 0/0 on r = 0, where flux() returns
+			// ( 1/R ) grad_bar( psi ) and is 0/0 on R = 0, where flux() returns
 			// NaN deliberately; poloidalField() is the entry point that takes
 			// the closed-form limit, and B_R = -q_z, B_Z = +q_r inverts to what
 			// is wanted here. Away from the axis the two are the same numbers
 			// through two sign flips, so nothing off it moves by a bit.
 			double bR = 0.0;
 			double bZ = 0.0;
-			conductors->poloidalField( r, z, bR, bZ );
+			conductors->poloidalField( radius, z, bR, bZ );
 			into.qR += bZ;
 			into.qZ += -bR;
 		};
@@ -1055,7 +1055,7 @@ namespace meq
 
 		int element = -1;
 		mfem::IntegrationPoint ip;
-		if ( locate( r, z, hint, element, ip, fallbacks, !band ) )
+		if ( locate( radius, z, hint, element, ip, fallbacks, !band ) )
 		{
 			inElement( element, ip );
 			addConductors( sample );
@@ -1065,7 +1065,7 @@ namespace meq
 		if ( band )
 		{
 			FieldSample extendedSample;
-			if ( extendField( r, z, extendedSample ) )
+			if ( extendField( radius, z, extendedSample ) )
 			{
 				sample = extendedSample;
 				addConductors( sample );
@@ -1075,7 +1075,7 @@ namespace meq
 			// The band turned it down, so the failed walk above was a failed
 			// walk and not a point outside the mesh. The last resort is still
 			// owed, and it is counted the way it always was.
-			if ( locate( r, z, hint, element, ip, fallbacks, true ) )
+			if ( locate( radius, z, hint, element, ip, fallbacks, true ) )
 			{
 				inElement( element, ip );
 				addConductors( sample );
@@ -1086,12 +1086,12 @@ namespace meq
 		return false;
 	}
 
-	bool ContourTracer::sampleAt( double r, double z, double &psi, double &qR,
+	bool ContourTracer::sampleAt( double radius, double z, double &psi, double &qR,
 	                              double &qZ, int &hint ) const
 	{
 		FieldSample sample;
 		int fallbacks = 0;
-		if ( !sampleField( r, z, hint, sample, fallbacks ) )
+		if ( !sampleField( radius, z, hint, sample, fallbacks ) )
 			return false;
 
 		hint = sample.element;
@@ -1101,20 +1101,20 @@ namespace meq
 		return true;
 	}
 
-	bool ContourTracer::sampleAt( double r, double z, double &psi, double &qR,
+	bool ContourTracer::sampleAt( double radius, double z, double &psi, double &qR,
 	                              double &qZ ) const
 	{
 		int hint = -1;
-		return sampleAt( r, z, psi, qR, qZ, hint );
+		return sampleAt( radius, z, psi, qR, qZ, hint );
 	}
 
-	bool ContourTracer::sampleAt( double r, double z, double &psi, double &qR,
+	bool ContourTracer::sampleAt( double radius, double z, double &psi, double &qR,
 	                              double &qZ, int &hint, bool &extended ) const
 	{
 		FieldSample sample;
 		int fallbacks = 0;
 		extended = false;
-		if ( !sampleField( r, z, hint, sample, fallbacks ) )
+		if ( !sampleField( radius, z, hint, sample, fallbacks ) )
 			return false;
 
 		hint = sample.element;
@@ -1126,7 +1126,7 @@ namespace meq
 	}
 
 	bool ContourTracer::correct( double level, double target, double maxMove,
-	                             double &r, double &z, int hint,
+	                             double &radius, double &z, int hint,
 	                             FieldSample &sample, int &iterations,
 	                             bool &stalled, int &fallbacks ) const
 	{
@@ -1157,11 +1157,11 @@ namespace meq
 		// is wander, so the iterate is refused if it leaves @a maxMove of where
 		// the predictor put it -- a corrector that has travelled a whole step is
 		// not correcting.
-		double const originR = r;
+		double const originR = radius;
 		double const originZ = z;
 
 		double best = std::numeric_limits<double>::infinity();
-		double bestR = r;
+		double bestR = radius;
 		double bestZ = z;
 		FieldSample bestSample;
 		bool haveBest = false;
@@ -1171,7 +1171,7 @@ namespace meq
 		iterations = 0;
 		for ( int iteration = 0; iteration <= maxCorrectorIterations; ++iteration )
 		{
-			if ( !sampleField( r, z, hint, sample, fallbacks ) )
+			if ( !sampleField( radius, z, hint, sample, fallbacks ) )
 				break;
 			hint = sample.element;
 
@@ -1182,7 +1182,7 @@ namespace meq
 			if ( std::abs( residual ) < best )
 			{
 				best = std::abs( residual );
-				bestR = r;
+				bestR = radius;
 				bestZ = z;
 				bestSample = sample;
 				haveBest = true;
@@ -1193,23 +1193,23 @@ namespace meq
 				break;
 			}
 
-			// grad_bar( psi ) = r q, and the minimum-norm Newton step is
-			// x <- x + grad( c - psi ) / | grad |^2. Written in terms of q the r
+			// grad_bar( psi ) = R q, and the minimum-norm Newton step is
+			// x <- x + grad( c - psi ) / | grad |^2. Written in terms of q the R
 			// appears once in the numerator and twice in the denominator.
 			double const magnitude = std::sqrt( sample.qR*sample.qR
 			                                    + sample.qZ*sample.qZ );
-			if ( !( magnitude > 0.0 ) || !( r > 0.0 ) )
+			if ( !( magnitude > 0.0 ) || !( radius > 0.0 ) )
 				break;
 
-			double const factor = residual/( r*magnitude*magnitude );
-			r += factor*sample.qR;
+			double const factor = residual/( radius*magnitude*magnitude );
+			radius += factor*sample.qR;
 			z += factor*sample.qZ;
 			++iterations;
 
-			if ( !std::isfinite( r ) || !std::isfinite( z ) )
+			if ( !std::isfinite( radius ) || !std::isfinite( z ) )
 				break;
 
-			double const goneR = r - originR;
+			double const goneR = radius - originR;
 			double const goneZ = z - originZ;
 			if ( goneR*goneR + goneZ*goneZ > maxMove*maxMove )
 				break;
@@ -1218,15 +1218,15 @@ namespace meq
 		if ( !haveBest )
 			return false;
 
-		r = bestR;
+		radius = bestR;
 		z = bestZ;
 		sample = bestSample;
 		stalled = true;
 		return true;
 	}
 
-	double ContourTracer::faceJump( double r0, double z0, int element0,
-	                                double r1, double z1, int element1,
+	double ContourTracer::faceJump( double radius0, double z0, int element0,
+	                                double radius1, double z1, int element1,
 	                                int &fallbacks ) const
 	{
 		if ( element0 == element1 )
@@ -1246,16 +1246,16 @@ namespace meq
 
 		{
 			int element = -1;
-			if ( !locate( r0, z0, element0, element, loIp, fallbacks ) )
+			if ( !locate( radius0, z0, element0, element, loIp, fallbacks ) )
 				return 0.0;
-			if ( !locate( r1, z1, element1, element, hiIp, fallbacks ) )
+			if ( !locate( radius1, z1, element1, element, hiIp, fallbacks ) )
 				return 0.0;
 		}
 
 		for ( int i = 0; i < 60; ++i )
 		{
 			double const mid = 0.5*( lo + hi );
-			double const rm = ( 1.0 - mid )*r0 + mid*r1;
+			double const rm = ( 1.0 - mid )*radius0 + mid*radius1;
 			double const zm = ( 1.0 - mid )*z0 + mid*z1;
 
 			int element = -1;
@@ -1392,7 +1392,7 @@ namespace meq
 		joined.points.front().arcLength = 0.0;
 		for ( std::size_t i = 1; i < joined.points.size(); ++i )
 		{
-			double const dr = joined.points[ i ].r - joined.points[ i - 1 ].r;
+			double const dr = joined.points[ i ].radius - joined.points[ i - 1 ].radius;
 			double const dz = joined.points[ i ].z - joined.points[ i - 1 ].z;
 			joined.points[ i ].arcLength =
 				joined.points[ i - 1 ].arcLength + std::sqrt( dr*dr + dz*dz );
@@ -1439,10 +1439,10 @@ namespace meq
 		double const target = tolerance*potentialScale();
 		contour.correctorTarget = target;
 
-		double r = startR;
+		double radius = startR;
 		double z = startZ;
 		bool stalled = false;
-		if ( !correct( level, target, elementSize( seed ), r, z, seed, sample,
+		if ( !correct( level, target, elementSize( seed ), radius, z, seed, sample,
 		               iterations, stalled, fallbacks ) )
 		{
 			std::ostringstream message;
@@ -1464,7 +1464,7 @@ namespace meq
 		{
 			double const magnitude = std::sqrt( at.qR*at.qR + at.qZ*at.qZ );
 			ContourPoint p;
-			p.r = rIn;
+			p.radius = rIn;
 			p.z = zIn;
 			// THE SENSE IS APPLIED HERE AND NOWHERE ELSE. Everything downstream
 			// -- the predictor, the closure gate, the Hermite interpolation --
@@ -1502,9 +1502,9 @@ namespace meq
 
 		if ( stalled )
 			++contour.stalledCorrections;
-		appendPoint( sample, r, z, 0.0, iterations );
+		appendPoint( sample, radius, z, 0.0, iterations );
 
-		double const firstR = contour.points.front().r;
+		double const firstR = contour.points.front().radius;
 		double const firstZ = contour.points.front().z;
 		double const firstTangentR = contour.points.front().tangentR;
 		double const firstTangentZ = contour.points.front().tangentZ;
@@ -1539,7 +1539,7 @@ namespace meq
 			// closing on its first pass; the proximity gate is what stops it
 			// closing at the far side of the contour when the level set happens
 			// to come back near the start.
-			double const gapR = firstR - here.r;
+			double const gapR = firstR - here.radius;
 			double const gapZ = firstZ - here.z;
 			double const along = gapR*tangentR + gapZ*tangentZ;
 			double const gap = std::sqrt( gapR*gapR + gapZ*gapZ );
@@ -1555,7 +1555,7 @@ namespace meq
 				// given the projection of the gap onto the tangent, so what the
 				// corrector leaves is O( kappa^2 Delta_s^3 ) along the curve
 				// rather than O( Delta_s ).
-				double closeR = here.r + along*tangentR;
+				double closeR = here.radius + along*tangentR;
 				double closeZ = here.z + along*tangentZ;
 
 				FieldSample closing;
@@ -1576,7 +1576,7 @@ namespace meq
 						std::abs( -errorR*firstTangentZ + errorZ*firstTangentR );
 				}
 
-				double const finalR = firstR - here.r;
+				double const finalR = firstR - here.radius;
 				double const finalZ = firstZ - here.z;
 				double const finalStep = std::sqrt( finalR*finalR + finalZ*finalZ );
 
@@ -1590,7 +1590,7 @@ namespace meq
 				     && !contour.points.front().extended
 				     && contour.points.front().element != here.element )
 				{
-					double const jump = faceJump( here.r, here.z, here.element,
+					double const jump = faceJump( here.radius, here.z, here.element,
 					                              firstR, firstZ,
 					                              contour.points.front().element,
 					                              fallbacks );
@@ -1630,7 +1630,7 @@ namespace meq
 			bool accepted = false;
 			for ( int attempt = 0; attempt < 8; ++attempt )
 			{
-				double nextR = here.r + stepLength*tangentR;
+				double nextR = here.radius + stepLength*tangentR;
 				double nextZ = here.z + stepLength*tangentZ;
 
 				FieldSample next;
@@ -1670,14 +1670,14 @@ namespace meq
 					continue;
 				}
 
-				double const moveR = nextR - here.r;
+				double const moveR = nextR - here.radius;
 				double const moveZ = nextZ - here.z;
 				double const moved = std::sqrt( moveR*moveR + moveZ*moveZ );
 
 				if ( measureFaceJumps && !here.extended && !next.extended
 				     && next.element != here.element )
 				{
-					double const jump = faceJump( here.r, here.z, here.element,
+					double const jump = faceJump( here.radius, here.z, here.element,
 					                              nextR, nextZ, next.element, fallbacks );
 					if ( jump > 0.0 )
 					{
@@ -1728,11 +1728,11 @@ namespace meq
 		// crossed along a ray that has room for it.
 		//
 		// SEVERAL RAYS, AND THAT IS A MEASUREMENT RATHER THAN CAUTION. An
-		// earlier version took +r alone, which is the obvious choice and fails
-		// on an ordinary benchmark: the Solov'ev NSTX axis sits at r = 1.318 on
+		// earlier version took +R alone, which is the obvious choice and fails
+		// on an ordinary benchmark: the Solov'ev NSTX axis sits at R = 1.318 on
 		// the standard box [ 0.6, 1.4 ] x [ -0.6, 0.6 ], so there is 0.08 of
 		// room to the right of it and an outer surface reaches the edge of the
-		// mesh along +r while being comfortably inside it in every other
+		// mesh along +R while being comfortably inside it in every other
 		// direction. The failure is loud -- the level is simply not attained --
 		// but it is a property of where the box was drawn and not of the
 		// surface, and refusing to trace a surface that exists would be wrong.
@@ -1782,7 +1782,7 @@ namespace meq
 		double qR = 0.0;
 		double qZ = 0.0;
 
-		if ( !sampleAt( axis.r, axis.z, psi, qR, qZ, hint ) )
+		if ( !sampleAt( axis.radius, axis.z, psi, qR, qZ, hint ) )
 			throw std::runtime_error( "ContourTracer::traceFromAxis: the axis is not in the mesh" );
 
 		double const axisPsi = psi;
@@ -1805,15 +1805,15 @@ namespace meq
 
 			for ( int i = 1; i < 1000000; ++i )
 			{
-				double const radius = i*probe;
-				if ( !sampleAt( axis.r + radius*cosine, axis.z + radius*sine,
+				double const rayDistance = i*probe;
+				if ( !sampleAt( axis.radius + rayDistance*cosine, axis.z + rayDistance*sine,
 				                psi, qR, qZ, hint ) )
 					break;
 
 				if ( ( axisPsi - level )*( psi - level ) <= 0.0 )
 				{
 					lo = ( i - 1 )*probe;
-					hi = radius;
+					hi = rayDistance;
 					bracketed = true;
 					break;
 				}
@@ -1825,7 +1825,7 @@ namespace meq
 			for ( int i = 0; i < 60; ++i )
 			{
 				double const mid = 0.5*( lo + hi );
-				if ( !sampleAt( axis.r + mid*cosine, axis.z + mid*sine,
+				if ( !sampleAt( axis.radius + mid*cosine, axis.z + mid*sine,
 				                psi, qR, qZ, hint ) )
 					break;
 				if ( ( axisPsi - level )*( psi - level ) <= 0.0 )
@@ -1837,14 +1837,14 @@ namespace meq
 			// The bracket search has already located the seed, so the walk
 			// starts with a hint and the trace makes no FindPoints call at all.
 			double const found = 0.5*( lo + hi );
-			return traceFrom( level, axis.r + found*cosine, axis.z + found*sine,
+			return traceFrom( level, axis.radius + found*cosine, axis.z + found*sine,
 			                  hint );
 		}
 
 		std::ostringstream message;
 		message << "ContourTracer::traceFromAxis: psi = " << level
 		        << " is not attained on any of " << rays << " rays from the axis "
-		        << "at ( " << axis.r << ", " << axis.z << " ), where psi = "
+		        << "at ( " << axis.radius << ", " << axis.z << " ), where psi = "
 		        << axisPsi << ". Either the level is outside the range psi_h "
 		        << "takes on this mesh, or every ray leaves the mesh before "
 		        << "reaching it";
@@ -1948,7 +1948,7 @@ namespace meq
 				"ContourTracer::fitByAngle: need at least four angles" );
 
 		AngleParametrisation fit;
-		fit.axisR = axis.r;
+		fit.axisR = axis.radius;
 		fit.axisZ = axis.z;
 		fit.level = contour.level;
 
@@ -1963,7 +1963,7 @@ namespace meq
 		double running = 0.0;
 		for ( std::size_t i = 0; i < traced; ++i )
 		{
-			double const dr = contour.points[ i ].r - axis.r;
+			double const dr = contour.points[ i ].radius - axis.radius;
 			double const dz = contour.points[ i ].z - axis.z;
 			radius[ i ] = std::sqrt( dr*dr + dz*dz );
 
@@ -1998,7 +1998,7 @@ namespace meq
 		{
 			std::ostringstream message;
 			message << "ContourTracer::fitByAngle: the traced contour is not "
-			        << "star-shaped about ( " << axis.r << ", " << axis.z
+			        << "star-shaped about ( " << axis.radius << ", " << axis.z
 			        << " ) -- the polar angle turns back by " << fit.worstBacktrack
 			        << " rad. INVERSION-PLAN.md section 3.4 records that ray "
 			        << "methods fail on indented cross-sections; this is that "
@@ -2107,7 +2107,7 @@ namespace meq
 			                       double &qZ ) -> bool
 			{
 				FieldSample sample;
-				if ( !sampleField( axis.r + rho*cosine, axis.z + rho*sine, hint,
+				if ( !sampleField( axis.radius + rho*cosine, axis.z + rho*sine, hint,
 				                   sample, fallbacks ) )
 					return false;
 				hint = sample.element;
@@ -2152,8 +2152,8 @@ namespace meq
 				}
 
 				// The derivative along the ray, POINTWISE FROM q and not
-				// differenced: d psi / d rho = grad_bar( psi ) . u = r ( q . u ).
-				double const rCoord = axis.r + guess*cosine;
+				// differenced: d psi / d rho = grad_bar( psi ) . u = R ( q . u ).
+				double const rCoord = axis.radius + guess*cosine;
 				double const slope = rCoord*( qR*cosine + qZ*sine );
 				if ( !( std::abs( slope ) > 0.0 ) )
 					break;
@@ -2252,7 +2252,7 @@ namespace meq
 			double const cross = cosine*tangentZ - sine*tangentR;
 
 			fit.radius[ j ] = guess;
-			fit.pointR[ j ] = axis.r + guess*cosine;
+			fit.pointR[ j ] = axis.radius + guess*cosine;
 			fit.pointZ[ j ] = axis.z + guess*sine;
 			fit.fluxR[ j ] = qR;
 			fit.fluxZ[ j ] = qZ;

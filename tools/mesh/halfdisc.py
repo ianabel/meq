@@ -5,16 +5,16 @@ WHY A MESHING LIBRARY AT ALL.  Everything MEQ has meshed so far came from
 `mfem::Mesh::MakeCartesian2D` -- a rectangle of triangles -- with curved and
 non-rectangular geometry reached by the extension technique on top of it.  Free
 boundary needs something that grid cannot be: a SEMICIRCLE centred on the axis,
-reaching r = 0 EXACTLY, with the coil rectangles as their own subdomains.
+reaching R = 0 EXACTLY, with the coil rectangles as their own subdomains.
 
-    r = 0 IS NOT A CONVENIENCE, IT IS WHAT MAKES THE DECOUPLING LEGAL.
+    R = 0 IS NOT A CONVENIENCE, IT IS WHAT MAKES THE DECOUPLING LEGAL.
     FREE-BOUNDARY-PLAN.md section 3 expands the exterior field in Gegenbauer
     functions of order -1/2 on a semicircle CENTRED ON THE AXIS; the expansion
     is a statement about that geometry and about no other.  A domain stopping
-    at r = 0.05 is not a slightly worse version of it -- the basis does not
+    at R = 0.05 is not a slightly worse version of it -- the basis does not
     span the exterior of that shape, and meq::ExteriorDtN's diagonal symbol is
     not the DtN map of it.  So `--rho` sets Gamma's radius and the flat side is
-    the axis itself, and `--check` asserts on `r == 0.0` EXACTLY rather than on
+    the axis itself, and `--check` asserts on `R == 0.0` EXACTLY rather than on
     a tolerance, because a mesh that merely comes close has a different
     exterior problem and nothing downstream would say so.
 
@@ -96,16 +96,16 @@ numbers below were taken by loading the file with `mfem::Mesh` and walking it.
 The example at the top of this file, `--rho 1.5 --size 0.15` with two coils:
 
     vertices 264, elements 474, boundary elements 52
-    r over the mesh                          [0, 1.5]
-    vertices at EXACTLY r == 0.0             21
-    element attr  1  r [0.0000, 1.5000]  z [-1.5000, 1.5000]
-    element attr 10  r [0.9000, 1.1500]  z [-0.8600, -0.7400]
-    element attr 11  r [0.9000, 1.1500]  z [ 0.7400,  0.8600]
+    R over the mesh                          [0, 1.5]
+    vertices at EXACTLY R == 0.0             21
+    element attr  1  R [0.0000, 1.5000]  z [-1.5000, 1.5000]
+    element attr 10  R [0.9000, 1.1500]  z [-0.8600, -0.7400]
+    element attr 11  R [0.9000, 1.1500]  z [ 0.7400,  0.8600]
     bdr attr 1 (Gamma)  32 faces, worst | |x| - rho | = 4.441e-16
-    bdr attr 2 (axis)   20 faces, worst |r|           = 0.000e+00
+    bdr attr 2 (axis)   20 faces, worst |R|           = 0.000e+00
     faces on neither the arc nor the axis    0     <- was 12
 
-`r == 0.0` and `|r| = 0.000e+00` are EXACT ZEROS and not small numbers.  The
+`R == 0.0` and `|R| = 0.000e+00` are EXACT ZEROS and not small numbers.  The
 axis is a straight geometric edge at x = 0, so every node OCC places on it lands
 there bit exactly; that is the property the exterior expansion needs and the one
 `--check` asserts without a tolerance.
@@ -124,7 +124,7 @@ A coarse disc aggressively refined where the plasma is.  Gamma has to sit far
 enough out that the exterior expansion converges, and the plasma occupies a
 small part of what that encloses, so meshing the whole disc at the plasma's
 resolution spends most of the elements on vacuum carrying no source.  Measured,
-same two coils, plasma box r [0.30, 1.00] z [-0.55, 0.55] at h = 0.035:
+same two coils, plasma box R [0.30, 1.00] z [-0.55, 0.55] at h = 0.035:
 
     rho    graded    uniform at h = 0.035    saving
     1.5     2,965            7,672           2.6x
@@ -214,7 +214,7 @@ AXIS_TOLERANCE = 1.0e-9
 # relative for the reason recorded there: a mesh generated symmetric mirrors to
 # round-off, but a machine's geometry arrives as decimal text and a conductor
 # at -1.0972 need not be the exact negation of one at +1.0972.  MEQ scales by
-# max( |r| + |z| ) over the mesh, which on a disc of radius rho is rho times
+# max( |R| + |z| ) over the mesh, which on a disc of radius rho is rho times
 # sqrt( 2 ), so scaling by rho alone is the TIGHTER of the two -- a mesh this
 # accepts is one MEQ accepts, and not the other way about.
 SYMMETRY_TOLERANCE = 1.0e-9
@@ -243,7 +243,7 @@ AXIS_ATTRIBUTE = 2
 
 
 def _inside_polygon(x, y, polygon):
-    """Ray casting, on a closed polygon given as [ (r, z), ... ].
+    """Ray casting, on a closed polygon given as [ (R, z), ... ].
 
     A centroid test alone is not enough to name the vessel's own fragments --
     the OUTER region's centroid can land inside a convex shape, which is the
@@ -285,8 +285,8 @@ def _coil_of(centre, coils):
     for i, rectangle in enumerate(coils):
         if rectangle is None:
             continue
-        r, z, w, h = rectangle
-        if r <= x <= r + w and z <= y <= z + h:
+        R, z, w, h = rectangle
+        if R <= x <= R + w and z <= y <= z + h:
             return i
     return None
 
@@ -315,7 +315,7 @@ def _mirror_partners(coils, tolerance):
 
     partner = [None]*len(coils)
     worst = 0.0
-    for i, (r, z, w, h) in enumerate(coils):
+    for i, (R, z, w, h) in enumerate(coils):
         if partner[i] is not None:
             continue
         # A conductor centred on z = 0 is its OWN mirror, and it is the case a
@@ -333,13 +333,13 @@ def _mirror_partners(coils, tolerance):
                 break
         if found is None:
             raise ValueError(
-                "conductor %d, r [%.6f, %.6f] z [%.6f, %.6f], has no mirror "
+                "conductor %d, R [%.6f, %.6f] z [%.6f, %.6f], has no mirror "
                 "partner about z = 0 within %g m. --symmetric meshes z >= 0 "
                 "and reflects it, so a machine that is not itself symmetric "
                 "would be meshed as a DIFFERENT machine -- every conductor "
                 "below the midplane replaced by the image of one above it -- "
                 "and nothing downstream could tell"
-                % (i, r, r + w, z, z + h, tolerance))
+                % (i, R, R + w, z, z + h, tolerance))
         partner[i] = found
         partner[found] = i
         worst = max(worst, discrepancy(i, found))
@@ -355,12 +355,12 @@ def _upper_half_of(rectangle):
     downstream, where a toleranced clip would leave a rectangle poking a
     rounding error INTO the half-plane that was cut away and hand OCC a sliver.
     """
-    r, z, w, h = rectangle
+    R, z, w, h = rectangle
     if z + h <= 0.0:
         return None
     if z >= 0.0:
-        return (r, z, w, h)
-    return (r, 0.0, w, z + h)
+        return (R, z, w, h)
+    return (R, 0.0, w, z + h)
 
 
 def _upper_half_polygon(polygon):
@@ -392,7 +392,7 @@ def _polygon_is_mirrored(polygon, tolerance):
     cyclic rotation of the original.
     """
     n = len(polygon)
-    mirrored = [(r, -z) for (r, z) in reversed(polygon)]
+    mirrored = [(R, -z) for (R, z) in reversed(polygon)]
     for shift in range(n):
         rotated = [mirrored[(i + shift) % n] for i in range(n)]
         if all(abs(a[0] - b[0]) <= tolerance and abs(a[1] - b[1]) <= tolerance
@@ -485,7 +485,7 @@ def _reflect_msh(path, attributes, tolerance):
     seam = 0
     next_node = max(int(line.split()[0]) for line in node_lines)
     for line in node_lines:
-        tag, r, z, third = line.split()
+        tag, R, z, third = line.split()
         value = float(z)
         if value == 0.0:
             image[int(tag)] = int(tag)
@@ -500,7 +500,7 @@ def _reflect_msh(path, attributes, tolerance):
                 % (value, tolerance))
         next_node += 1
         image[int(tag)] = next_node
-        extra_nodes.append("%d %s %s %s" % (next_node, r, _negated(z), third))
+        extra_nodes.append("%d %s %s %s" % (next_node, R, _negated(z), third))
 
     # ---- the elements ----
     #
@@ -562,10 +562,10 @@ def _reflect_msh(path, attributes, tolerance):
 def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
           coil_size=None, transition=None, limiter=None, vessel=None,
           symmetric=False, partner=None):
-    """A half-disc of radius `rho` about the origin, r >= 0, with `coils` a list
-    of (rmin, zmin, width, height) rectangles fragmented into it.
+    """A half-disc of radius `rho` about the origin, R >= 0, with `coils` a list
+    of (Rmin, zmin, width, height) rectangles fragmented into it.
 
-    `plasma` is an optional (rmin, zmin, width, height) box to refine inside, to
+    `plasma` is an optional (Rmin, zmin, width, height) box to refine inside, to
     `plasma_size`; `coil_size` refines inside the conductors.  Both default to
     the background `size`, so a caller who asks for neither gets a uniform mesh
     and the size field is not installed at all.
@@ -589,7 +589,7 @@ def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
     20 and its neighbours, which is a question about element attributes rather
     than about boundary ones.
 
-    `vessel` is an optional closed polygon [ (r, z), ... ] fragmented in the
+    `vessel` is an optional closed polygon [ (R, z), ... ] fragmented in the
     same way, whose OUTSIDE takes attribute 30 -- everything within Gamma that
     is not inside the vessel and is not a conductor.  It exists so that
     `[source] ExcludeAttributes` can name a region that can never be plasma
@@ -646,8 +646,8 @@ def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
         for rectangle in meshed:
             if rectangle is None:
                 continue
-            r, z, w, h = rectangle
-            tags.append(occ.addRectangle(r, z, 0, w, h))
+            R, z, w, h = rectangle
+            tags.append(occ.addRectangle(R, z, 0, w, h))
         if limiter is not None:
             lr, lz, la = limiter
             disk = occ.addDisk(lr, lz, 0, la, la)
@@ -668,7 +668,7 @@ def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
             # wherever a helper rounds them to -- the same property --coil
             # depends on and halfdisc's own --check asserts.
             outline = _upper_half_polygon(vessel) if symmetric else vessel
-            points = [occ.addPoint(r, z, 0) for (r, z) in outline]
+            points = [occ.addPoint(R, z, 0) for (R, z) in outline]
             lines = [occ.addLine(points[i], points[(i + 1) % len(points)])
                      for i in range(len(points))]
             tags.append(occ.addPlaneSurface([occ.addCurveLoop(lines)]))
@@ -691,7 +691,7 @@ def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
 
         # THE LIMITER INTERIOR IS TOLD BY AREA AND NOT BY ITS CENTRE OF MASS,
         # and that is not fastidiousness: the OUTER region's centroid on this
-        # geometry sits at about r = 1.11, which is INSIDE a limiter circle of
+        # geometry sits at about R = 1.11, which is INSIDE a limiter circle of
         # R0 = 1.00, a = 0.35, so a centre-of-mass test misclassifies the
         # vacuum as the limiter and every element in the mesh changes
         # attribute.  The areas differ by a factor of twenty-five.
@@ -761,7 +761,7 @@ def build(rho, coils, size, out, order=1, plasma=None, plasma_size=None,
         # Gamma and the axis must not share an attribute: Gamma carries the
         # transferred exterior datum and the axis carries a plain essential
         # condition.  They are told apart by geometry -- the axis is the only
-        # boundary at r = 0 -- rather than by tag order, which OCC does not
+        # boundary at R = 0 -- rather than by tag order, which OCC does not
         # promise and which fragment reshuffles.
         #
         # AND UNDER --symmetric THERE IS A THIRD KIND, WHICH MUST GET NO GROUP
@@ -849,10 +849,10 @@ def _install_size_field(rho, coils, size, plasma, plasma_size, coil_size,
     """
     fields = []
 
-    def box_field(rmin, zmin, width, height, inside):
+    def box_field(Rmin, zmin, width, height, inside):
         tag = gmsh.model.mesh.field.add("Box")
-        gmsh.model.mesh.field.setNumber(tag, "XMin", rmin)
-        gmsh.model.mesh.field.setNumber(tag, "XMax", rmin + width)
+        gmsh.model.mesh.field.setNumber(tag, "XMin", Rmin)
+        gmsh.model.mesh.field.setNumber(tag, "XMax", Rmin + width)
         gmsh.model.mesh.field.setNumber(tag, "YMin", zmin)
         gmsh.model.mesh.field.setNumber(tag, "YMax", zmin + height)
         gmsh.model.mesh.field.setNumber(tag, "VIn", inside)
@@ -863,8 +863,8 @@ def _install_size_field(rho, coils, size, plasma, plasma_size, coil_size,
     if plasma is not None and plasma_size is not None:
         box_field(*plasma, inside=plasma_size)
     if coil_size is not None:
-        for (r, z, w, h) in coils:
-            box_field(r, z, w, h, inside=coil_size)
+        for (R, z, w, h) in coils:
+            box_field(R, z, w, h, inside=coil_size)
 
     if not fields:
         # No refinement asked for: a plain uniform mesh, and the field machinery
@@ -910,25 +910,25 @@ def check(path, rho, coils):
         # they come out grouped by the entity that owns them.  Indexing `coords`
         # with `tag - 1` therefore reads a DIFFERENT node, and the first version
         # of this check did exactly that: it reported the axis group at
-        # r = 1.4928 and a coil spanning most of the disc, which looked like a
+        # R = 1.4928 and a coil spanning most of the disc, which looked like a
         # catastrophic meshing failure and was the checker being wrong.
         at = {int(t): (coords[3 * i], coords[3 * i + 1])
               for i, t in enumerate(tags)}
-        r = coords[0::3]
+        R = coords[0::3]
         z = coords[1::3]
 
-        # r = 0 EXACTLY, on real nodes rather than within a tolerance.  See the
+        # R = 0 EXACTLY, on real nodes rather than within a tolerance.  See the
         # module docstring: a domain that merely comes close to the axis has a
         # different exterior problem.
-        on_axis = sum(1 for value in r if value == 0.0)
+        on_axis = sum(1 for value in R if value == 0.0)
         if on_axis == 0:
-            problems.append("no node is at exactly r = 0.0; the exterior "
+            problems.append("no node is at exactly R = 0.0; the exterior "
                             "expansion is not valid on this domain")
-        if min(r) < 0.0:
-            problems.append("a node is at r = %.17g < 0" % min(r))
-        if max(r) > rho * (1.0 + 1.0e-12):
-            problems.append("a node is at r = %.17g, outside rho = %g"
-                            % (max(r), rho))
+        if min(R) < 0.0:
+            problems.append("a node is at R = %.17g < 0" % min(R))
+        if max(R) > rho * (1.0 + 1.0e-12):
+            problems.append("a node is at R = %.17g, outside rho = %g"
+                            % (max(R), rho))
 
         # Every boundary element belongs to the arc or to the axis and to
         # nothing else.  This is the check the first version of this file did
@@ -952,7 +952,7 @@ def check(path, rho, coils):
         for where, points in stray.items():
             problems.append(
                 "%d boundary nodes carry the %s attribute without lying on it, "
-                "the first at r = %.4f z = %.4f -- an interior edge has been "
+                "the first at R = %.4f z = %.4f -- an interior edge has been "
                 "tagged as a boundary"
                 % (len(points), where, points[0][0], points[0][1]))
         for wanted, name in ((GAMMA_ATTRIBUTE, "Gamma"), (AXIS_ATTRIBUTE, "axis")):
@@ -961,7 +961,7 @@ def check(path, rho, coils):
                                 % (wanted, name))
 
         # Each coil attribute covers its own rectangle and no more.
-        for i, (rmin, zmin, width, height) in enumerate(coils):
+        for i, (Rmin, zmin, width, height) in enumerate(coils):
             attribute = FIRST_COIL_ATTRIBUTE + i
             entities = gmsh.model.getEntitiesForPhysicalGroup(2, attribute)
             if len(entities) == 0:
@@ -977,12 +977,12 @@ def check(path, rho, coils):
                         for axis_index, value in enumerate(at[int(node)]):
                             lo[axis_index] = min(lo[axis_index], value)
                             hi[axis_index] = max(hi[axis_index], value)
-            want = (rmin, rmin + width, zmin, zmin + height)
+            want = (Rmin, Rmin + width, zmin, zmin + height)
             got = (lo[0], hi[0], lo[1], hi[1])
             if max(abs(a - b) for a, b in zip(want, got)) > 1.0e-9:
                 problems.append(
-                    "coil %d (attribute %d) covers r [%.6f, %.6f] z [%.6f, %.6f], "
-                    "not the requested r [%.6f, %.6f] z [%.6f, %.6f]"
+                    "coil %d (attribute %d) covers R [%.6f, %.6f] z [%.6f, %.6f], "
+                    "not the requested R [%.6f, %.6f] z [%.6f, %.6f]"
                     % ((i, attribute) + got[:2] + got[2:] + want[:2] + want[2:]))
     finally:
         gmsh.finalize()
@@ -1033,21 +1033,21 @@ def check_symmetry(path, tolerance=None):
         if not at:
             return ["%s carries no nodes" % path], dict(nodes=0)
         if tolerance is None:
-            extent = max(abs(r) + abs(z) for (r, z) in at.values())
+            extent = max(abs(R) + abs(z) for (R, z) in at.values())
             tolerance = SYMMETRY_TOLERANCE*max(extent, 1.0)
 
         def cell(value):
             return int(round(value/tolerance))
 
         table = {}
-        for tag, (r, z) in at.items():
-            table.setdefault((cell(r), cell(z)), []).append(tag)
+        for tag, (R, z) in at.items():
+            table.setdefault((cell(R), cell(z)), []).append(tag)
 
         mirror = {}
         unpaired = []
         seam = 0
         worst = 0.0
-        for tag, (r, z) in at.items():
+        for tag, (R, z) in at.items():
             if abs(z) <= tolerance:
                 seam += 1
             found, offset = None, 0.0
@@ -1056,8 +1056,8 @@ def check_symmetry(path, tolerance=None):
             # partner is in, and the lookup would miss a pair that is exact.
             for dr in (-1, 0, 1):
                 for dz in (-1, 0, 1):
-                    for other in table.get((cell(r) + dr, cell(-z) + dz), ()):
-                        gap = max(abs(at[other][0] - r), abs(at[other][1] + z))
+                    for other in table.get((cell(R) + dr, cell(-z) + dz), ()):
+                        gap = max(abs(at[other][0] - R), abs(at[other][1] + z))
                         if gap <= tolerance:
                             found, offset = other, gap
             if found is None:
@@ -1067,13 +1067,13 @@ def check_symmetry(path, tolerance=None):
                 worst = max(worst, offset)
 
         if unpaired:
-            r, z = at[unpaired[0]]
+            R, z = at[unpaired[0]]
             problems.append(
                 "%d of %d nodes have no mirror partner within %g m, the first "
-                "at r = %.6f z = %.6f. meq::GradShafranovSolver refuses this "
+                "at R = %.6f z = %.6f. meq::GradShafranovSolver refuses this "
                 "mesh by name rather than projecting onto something that is "
                 "not a reflection"
-                % (len(unpaired), len(at), tolerance, r, z))
+                % (len(unpaired), len(at), tolerance, R, z))
 
         involution = sum(1 for tag in mirror
                          if mirror.get(mirror[tag], -1) != tag)
@@ -1222,18 +1222,18 @@ def main():
         return _report_symmetry(a.symmetry_check)
 
     coils = a.coil or []
-    for (r, z, w, h) in coils:
-        if r <= 0.0:
+    for (R, z, w, h) in coils:
+        if R <= 0.0:
             p.error("a coil at RMIN = %g reaches or crosses the axis; the "
-                    "operator's 1/r is not integrable through r = 0, which is "
-                    "the same refusal meq::Coil and [[coils]] make" % r)
+                    "operator's 1/R is not integrable through R = 0, which is "
+                    "the same refusal meq::Coil and [[coils]] make" % R)
         if w <= 0.0 or h <= 0.0:
             p.error("a coil of WIDTH %g HEIGHT %g has no cross-section" % (w, h))
-        if math.hypot(max(abs(r), abs(r + w)), max(abs(z), abs(z + h))) >= a.rho:
-            p.error("a coil reaches r = %g z = %g, outside or on Gamma at "
+        if math.hypot(max(abs(R), abs(R + w)), max(abs(z), abs(z + h))) >= a.rho:
+            p.error("a coil reaches R = %g z = %g, outside or on Gamma at "
                     "rho = %g. The exterior expansion assumes the field is "
                     "Delta*-harmonic outside Gamma, and a current there is not"
-                    % (r + w, max(abs(z), abs(z + h)), a.rho))
+                    % (R + w, max(abs(z), abs(z + h)), a.rho))
     if (a.plasma is None) != (a.plasma_size is None):
         p.error("--plasma and --plasma-size go together: a region with no size "
                 "refines nothing, and a size with no region has nowhere to act")
@@ -1271,21 +1271,21 @@ def main():
             p.error("a limiter of radius %g has no interior" % la)
         if lr - la <= 0.0:
             p.error("a limiter at R0 = %g a = %g reaches the axis; a closed "
-                    "plasma surface through r = 0 carries a non-integrable "
-                    "1/r, which is meq::BoundaryShape's own refusal" % (lr, la))
+                    "plasma surface through R = 0 carries a non-integrable "
+                    "1/R, which is meq::BoundaryShape's own refusal" % (lr, la))
         if math.hypot(lr + la, abs(lz) + la) >= a.rho:
-            p.error("a limiter reaching r = %g z = %g is outside Gamma at "
+            p.error("a limiter reaching R = %g z = %g is outside Gamma at "
                     "rho = %g; the plasma has to be inside the coupled domain"
                     % (lr + la, abs(lz) + la, a.rho))
-        for (r, z, w, h) in coils:
-            nearest_r = min(max(lr, r), r + w)
+        for (R, z, w, h) in coils:
+            nearest_r = min(max(lr, R), R + w)
             nearest_z = min(max(lz, z), z + h)
             if math.hypot(nearest_r - lr, nearest_z - lz) < la:
                 p.error("the limiter circle ( %g, %g ) a = %g cuts the "
                         "conductor at ( %g, %g ); fragmenting both would make "
                         "a surface that is inside the limiter AND inside a "
                         "coil, which the attributes cannot express"
-                        % (lr, lz, la, r, z))
+                        % (lr, lz, la, R, z))
 
     vessel = None
     if a.vessel is not None:
@@ -1295,28 +1295,28 @@ def main():
                     "numbers" % len(a.vessel))
         vessel = [(a.vessel[i], a.vessel[i + 1])
                   for i in range(0, len(a.vessel), 2)]
-        for (r, z) in vessel:
-            if r < 0.0:
-                p.error("--vessel reaches r = %g, and the half-disc is r >= 0"
-                        % r)
+        for (R, z) in vessel:
+            if R < 0.0:
+                p.error("--vessel reaches R = %g, and the half-disc is R >= 0"
+                        % R)
             # AND IT HAS TO FIT INSIDE THE DISC, which is the refusal --coil
             # and --limiter already make and this one did not.  `occ.fragment`
             # keeps the parts of a tool that lie OUTSIDE the shape it is
             # fragmented into, so a vessel reaching past rho adds surfaces to
             # the model that are not the domain: measured, a polygon out to
-            # r = 2.5 on rho = 1.5 writes a mesh reaching r = 2.5 with 32
+            # R = 2.5 on rho = 1.5 writes a mesh reaching R = 2.5 with 32
             # nodes carrying Gamma's attribute in the middle of it.  Gamma's
             # attribute is what carries the transferred exterior datum, so
             # that is an interior Dirichlet condition converging at full order
             # to the wrong equilibrium.  The disc is convex, so testing the
             # VERTICES tests the whole outline.
-            if math.hypot(r, z) >= a.rho:
+            if math.hypot(R, z) >= a.rho:
                 p.error("--vessel reaches ( %g, %g ), on or outside Gamma at "
                         "rho = %g. The vessel is fragmented INTO the disc, so "
                         "the part of it that sticks out becomes mesh of its "
                         "own -- a domain bigger than the one the exterior "
                         "expansion is written for, with Gamma's attribute on "
-                        "edges inside it" % (r, z, a.rho))
+                        "edges inside it" % (R, z, a.rho))
         if _polygon_area(vessel) <= 0.0:
             p.error("--vessel has zero area: its points are collinear or "
                     "repeated")
@@ -1385,7 +1385,7 @@ def main():
             print("  FAIL: %s" % problem, file=sys.stderr)
         if problems:
             return 1
-        print("  check: r reaches 0 exactly, Gamma and the axis are the outer "
+        print("  check: R reaches 0 exactly, Gamma and the axis are the outer "
               "boundary and nothing else, every coil covers its rectangle")
         if a.symmetric and _report_symmetry(a.out) != 0:
             return 1

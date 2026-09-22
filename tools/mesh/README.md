@@ -39,17 +39,17 @@ MEQ's own — four bounds where `--plasma` takes a corner and two extents, a
 centre and half-extents where `--coil` takes a corner and two extents. The
 driver converts.
 
-## Why r = 0 is the requirement, not a preference
+## Why R = 0 is the requirement, not a preference
 
 `FREE-BOUNDARY-PLAN.md` §3 expands the exterior field in Gegenbauer functions
 of order −1/2 on a **semicircle centred on the axis**. The expansion is a
 statement about that geometry and about no other, and `meq::ExteriorDtN`'s
 diagonal symbol is the DtN map of that shape.
 
-So a domain stopping at `r = 0.05` is not a slightly worse version of it — the
+So a domain stopping at `R = 0.05` is not a slightly worse version of it — the
 basis does not span the exterior of that shape at all, and nothing downstream
 would report the difference: the solve converges, at full order, to the wrong
-exterior problem. `--check` therefore asserts on `r == 0.0` **exactly** rather
+exterior problem. `--check` therefore asserts on `R == 0.0` **exactly** rather
 than within a tolerance. The axis is a straight geometric edge at `x = 0`, so
 every node OCC places on it lands there bit exactly, at geometric order 1 and
 at order 2 alike.
@@ -101,7 +101,7 @@ the plasma's resolution spends most of the elements on vacuum that carries no
 source and needs no accuracy. `--plasma`/`--plasma-size` refine a box, with a
 graded transition out of it; `--coil-size` does the same inside the conductors.
 
-Measured, two coils, plasma box `r ∈ [0.30, 1.00]`, `z ∈ [-0.55, 0.55]` at
+Measured, two coils, plasma box `R ∈ [0.30, 1.00]`, `z ∈ [-0.55, 0.55]` at
 `h = 0.035`:
 
 | `--rho` | graded | uniform at `h = 0.035` | saving |
@@ -177,7 +177,7 @@ reflection being orientation-reversing.
 ## Always pass `--check` when the geometry changes
 
 It re-reads the written file — not the model still in memory, which would share
-every assumption with the code that built it — and asserts that `r` reaches 0
+every assumption with the code that built it — and asserts that `R` reaches 0
 exactly, that Γ and the axis are the outer boundary and nothing else, and that
 each coil attribute covers exactly its rectangle.
 

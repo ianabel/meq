@@ -182,7 +182,7 @@ Type = "zero"
 
 # THE TARGET NULL, as an INITIAL VALUE of two unknowns rather than a
 # prescription: XP-3's border closes q_r = q_z = 0 and
-# psi_bnd = psi_h( r_X, z_X ) on the same Newton, and the seed selects
+# psi_bnd = psi_h( R_X, z_X ) on the same Newton, and the seed selects
 # WHICH saddle is followed.
 #
 # THIS IS THE SHAPE THE OPERATOR ASKED FOR and not the null the

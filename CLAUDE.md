@@ -141,8 +141,8 @@ band `O(h)` wide that is inside the plasma and outside the mesh.
 
 * **The `.nc` grid continues into it USING THE FLUX**, which is the mixed
   method paying off. `q` is computed at the *same*
-  order as ψ and `∇̄ψ = r q`, so a node `p` outside the mesh is reached from its
-  foot `x₀` on `Γ_h` as `ψ(x₀) + r₀ q(x₀)·(p − x₀)` — **nothing is ever
+  order as ψ and `∇̄ψ = R q`, so a node `p` outside the mesh is reached from its
+  foot `x₀` on `Γ_h` as `ψ(x₀) + R₀ q(x₀)·(p − x₀)` — **nothing is ever
   evaluated outside an element**.
 
   **The obvious alternative was implemented first and does NOT work -- polynomial fits outside their domain are unbounded,
@@ -171,16 +171,16 @@ band `O(h)` wide that is inside the plasma and outside the mesh.
   order — that is the mixed method paying off. There is no solved variable for
   `∇q`: differentiating an L2 field of degree `k` leaves `k−1`, so this is
   `O(h²)` at every `k`. A full order better than what it replaced, and not the
-  same thing. **The route to better is known and was not taken**: `div q = −F/r`
-  is the equation being solved and `∂_r q_z − ∂_z q_r = −q_z/r` follows from
-  `r q = ∇̄ψ`, which pin two of `∇q`'s four entries exactly — but they leave the
+  same thing. **The route to better is known and was not taken**: `div q = −F/R`
+  is the equation being solved and `∂_r q_z − ∂_z q_r = −q_z/R` follows from
+  `R q = ∇̄ψ`, which pin two of `∇q`'s four entries exactly — but they leave the
   symmetric traceless part still differentiated, so they buy *structure* rather
   than an order, at the cost of plumbing the source into `GridSampler`.
 
   **AND THE COST IS MEASURED, NOT ESTIMATED.** Wiring the rotating output gave
-  a free controlled experiment: `n_s` is algebraic in `(r, ψ)`, so the same
+  a free controlled experiment: `n_s` is algebraic in `(R, ψ)`, so the same
   closed form can be evaluated both ways over the same 356 band nodes. Against
-  the node's own `r` it is **5.13e-07** wrong; against the foot's `r`, which is
+  the node's own `R` it is **5.13e-07** wrong; against the foot's `R`, which is
   what `sampleCoefficient` hands you, it is **8.57e-02** — a factor of
   **1.7e5**. `n_s` gets the radius wrong twice over, since the exponent of (96)
   carries `r²`; `B` gets it wrong once, being a relabelling of `q`. The
@@ -317,8 +317,8 @@ known until it closes. **A `ψ_ax` that is not the flux at a magnetic axis**
 refuses on a *positive* detection only, `checkAxis()` being one-sided and
 missing rather than false-alarming; no interior extremum found at all stays a
 warning, since a wall-hugging annulus is a real thing to look at. **A source that
-does not vanish on the symmetry axis** refuses outright — `F/r` is `μ₀ j_φ`, so
-that is an infinite current density on `r = 0`. The source one is **ordered
+does not vanish on the symmetry axis** refuses outright — `F/R` is `μ₀ j_φ`, so
+that is an infinite current density on `R = 0`. The source one is **ordered
 first**, because a bad `ψ_ax` is its consequence and the `ψ_ax` message's advice
 (look at the guess, look at the mesh) is wrong when the pole is the cause. Both
 exit 1 and write nothing; `docs/running.rst`'s gloss on code 1 is amended, since
@@ -629,7 +629,7 @@ default that has never been asserted bit-for-bit against the other route.
 **THE ORDERED LIST, WEIGHTED BY THE LEG PROFILE RATHER THAN BY COUNT.** From
 **[M-80](MEASUREMENTS.md#m-80)**:
 
-1. **`meq::SourceIntegrator`** — the `F(r, z, ψ)` domain term, evaluated per
+1. **`meq::SourceIntegrator`** — the `F(R, z, ψ)` domain term, evaluated per
    quadrature point per element per residual **and** per Jacobian. It is the
    only one on this list MEQ can write itself, and it is the leg that dominates
    MEQ's own bordered configuration: the residual leg reads **48.2% serial and
@@ -797,7 +797,7 @@ correctness half.
 
 **WHERE A CASE LIKE `theTwoBorderSolveReportsATrueMagneticAxis` GOES RED, SUSPECT
 THE FIXTURE BEFORE THE SOLVER.** `examples/limited-tokamak.toml` has **every** ingredient the case
-has — a domain reaching `r = 0`, `[boundary.limiter]`, `[boundary.exterior]` and
+has — a domain reaching `R = 0`, `[boundary.limiter]`, `[boundary.exterior]` and
 `ConfineToPlasma` — and converges in **11 Newton steps** to a `Ψ` of 1.0000,
 reproducing freegs4e to 1.3e-04. What it had that the fixture did not is **coils
 and a prescribed current**. The fixture now has both, plus the confinement, and
@@ -1579,13 +1579,13 @@ recompile.** `HDGBilinearForm`, `HDGDomainIntegratorGS`, `HDGFaceIntegratorGS`,
 
 | Weak term | Old | New |
 |---|---|---|
-| `(r q_h, v)` | `HDGDomainIntegratorGS` | flux mass: `VectorMassIntegrator` with an `r` coefficient |
+| `(R q_h, v)` | `HDGDomainIntegratorGS` | flux mass: `VectorMassIntegrator` with an `R` coefficient |
 | `(ψ_h, ∇̄·v)`, `(q_h, ∇̄w)` | `HDGDomainIntegratorGS` | flux divergence: `VectorDivergenceIntegrator` |
 | `⟨ψ̂_h, v·n⟩` | `HDGFaceIntegratorGS` | the transpose of `NormalTraceJumpIntegrator` — **not** the face integrators on `B`, see below |
 | `⟨τ(ψ_h − ψ̂_h), w⟩` | `HDGFaceIntegratorGS` | potential mass: `HDGDiffusionIntegrator` |
 | `⟨q̂_h·n, μ⟩ = 0` | `AssembleSC` | `EnableHybridization(trace_space, new NormalTraceJumpIntegrator(), ess_list)` |
 | condense / reconstruct | `AssembleSC` + `Reconstruct` | `FormLinearSystem` / `RecoverFEMSolution` |
-| `φ_h` on `Γ_h` (stage 5) | — | `HDGExtensionIntegrator` on the **flux mass form**, `C = r`, sign `+1` |
+| `φ_h` on `Γ_h` (stage 5) | — | `HDGExtensionIntegrator` on the **flux mass form**, `C = R`, sign `+1` |
 
 `miniapps/hdg/convdiff.cpp` in that tree is the worked example to copy from;
 lines 445–469 build exactly the three spaces above.
@@ -1804,7 +1804,7 @@ HDG stabilisation on `M_p` beside a nonlinear source aborts, which is the good
 case; the silent one is the reason `buildForms()` documents both.
 
 **Every GS-2 §4.2–4.5 source vanishes at `ψ = 0`, so the paper's own problem has
-a trivial branch — and MEQ falls into it.** `F(r, 0) = 0` for eqs (24), (25),
+a trivial branch — and MEQ falls into it.** `F(R, 0) = 0` for eqs (24), (25),
 (26) and (27); for (25) because `b = 2` makes the bracket `O(ψ²)`. With
 homogeneous Dirichlet data `ψ ≡ 0` therefore *solves* the problem, and Newton —
 which starts from the Dirichlet data — lands on it and stops in **zero
@@ -2108,9 +2108,9 @@ PURPOSE, AND ANYTHING ADDED TO THAT POLYNOMIAL HAS TO SURVIVE IT.**
 element by up to 2 — that is how a root near a face is found — and a polynomial
 is defined everywhere, so this cost nothing for as long as the field being
 rooted was one. Under `COIL-SUBTRACTION-PLAN.md`'s split the field is
-`q_p + q_c`, and `q_c` is a function on the OPEN half-plane: NaN on `r = 0`, and
-`meq::coilGradPsi` REFUSES `r < 0`. On a half-disc machine, whose elements reach
-`r = 0` exactly, the iterate leaves the half-plane and the run dies with
+`q_p + q_c`, and `q_c` is a function on the OPEN half-plane: NaN on `R = 0`, and
+`meq::coilGradPsi` REFUSES `R < 0`. On a half-disc machine, whose elements reach
+`R = 0` exactly, the iterate leaves the half-plane and the run dies with
 *"the field point radius must not be negative"* — three frames down, naming a
 radius and nothing else. **A point off the half-plane is not a point of the
 machine**, so the seam returns a bool and every caller abandons rather than
@@ -2122,10 +2122,10 @@ wherever the extrapolation goes, or the evaluation has to be able to refuse.**
 RULE IS THE RIGHT ONE — THE TERM *IS* DEFINED THERE, AND THE PARITY IS WHAT
 DECIDES WHICH SEAM GETS WHICH ANSWER.** The exterior datum is assembled at
 transfer-path TARGETS on `Γ`, and on a half-disc machine `Γ` is a semicircle
-whose two endpoints lie exactly ON `r = 0` — so a target near an endpoint lands
+whose two endpoints lie exactly ON `R = 0` — so a target near an endpoint lands
 either side of the axis by an amount that belongs to the path map and not to
-whether the mesh is valid. Measured, `( r, z ) = ( −1.0984e-03, 3.4 )`, about 1%
-of `h`. **`psi = r A_φ` is EVEN in `r`**, both factors changing sign together, so
+whether the mesh is valid. Measured, `( R, z ) = ( −1.0984e-03, 3.4 )`, about 1%
+of `h`. **`psi = R A_φ` is EVEN in `R`**, both factors changing sign together, so
 `meq::ConductorField::psi` reflects and the point is answered exactly rather than
 refused or clamped. `gradPsi`, `flux` and `poloidalField` still refuse, because
 `∂_r psi` is **odd** where `psi` is even and the continuation therefore differs
@@ -2153,6 +2153,79 @@ file leaves the running process on its old inode — so the run continued and
 would have reported a pass over a mix of old and new binaries. A suite result is
 only an acceptance measurement if every binary in it is the one being committed;
 that run was killed and re-run rather than believed.
+
+**A MECHANICAL IDENTIFIER RENAME IS NOT VERIFIED BY A BUILD AND A LINT, AND
+`-Wshadow` IS THE INSTRUMENT THAT SAYS SO.** Renaming the cylindrical radius
+from `r` to `radius` across the tree touched about 1,300 sites; the tree built
+clean, the `naming` ctest passed, `sphinx-build -W` passed, and **six sites had
+changed an answer**. C++ is what makes it silent: an inner declaration may
+shadow an outer one of the same type, and a declaration may initialise itself.
+So `double const r = radius*sin( theta )` inside a loop over `radius` became
+`double const radius = radius*sin( theta )` — legal, and `-nan` at runtime — and
+a lambda parameter renamed onto a captured circle radius quietly redirected
+`phi = radius*radius - dr*dr - dz*dz` from the circle to the field point, which
+is a different level set that still converges.
+
+Configure a second tree with `-DCMAKE_CXX_FLAGS="-Wshadow -Winit-self"` and grep
+its build log for the renamed identifier. **Build it CLEAN**: an incremental
+rebuild only re-warns about the files just edited, so the second look at a log
+is systematically narrower than the first and says so nowhere.
+
+**THE WORST ONE WAS IN THE LOG FROM THE FIRST RUN AND WAS FILTERED OUT, WHICH IS
+THE PART WORTH KEEPING.** The warnings split into `shadows a previous local` and
+`shadows a member`. The member ones were checked in `GradShafranovSolver`, whose
+`radius` is an `mfem::FunctionCoefficient` — no conversion to or from `double`
+exists, so a stolen binding cannot compile and the shadowing is provably inert —
+and that finding was then applied to the CATEGORY. `meq::analytic::PlasmaEdge`
+has a member `radius` too and it is a **`double`**: the disc's radius `a`. Its
+fifteen sites were in the lines already filtered away, so
+`levelSet()` returned `R² − dr² − dz²` instead of `a² − dr² − dz²` and **the
+analytic fixture stopped being the equilibrium it claims to be** — `f()` off
+from `−Δ*ψ` by 3.2e+01 against a 1.0e-08 floor. *A reason that makes one
+instance safe is not a reason about the category, and the grep that encodes it
+is applied to the category.*
+
+**AND THE FIXTURE'S OWN TEST COULD NOT REPORT IT, BECAUSE THAT BINARY WAS
+ALREADY THE DELIBERATE RED.** `PlasmaEdgeConvergence` is red by design while the
+staircase `Γ_{p,h}` stands, so "PlasmaEdgeConvergence fails" carried no
+information. What settled it was **building `HEAD` in a `git worktree` and
+diffing the failure inventories**: 4 errors in one case against 318 across seven.
+`git worktree add <dir> HEAD --detach` plus `-DMFEM_DIR=` and `-DTOML11_DIR=`
+pointed at the main checkout is the whole recipe, and it is the only check that
+distinguishes *this was already failing* from *I broke it*. **A red test cannot
+also serve as a regression on something else**, and a tree-wide rename touches
+every test including the red ones.
+
+**WHAT NO COMPILER CAN SEE IS `r` THAT NEVER MEANT A RADIUS**, and the tree had
+nine: loop counters for a **repeat**, a **refinement level** and a table **row**,
+a range-for over `Reading`s, two `r = rate( ... )`, and the `||r||` residual norm
+— which the driver had been printing inconsistently as `||R||` in the bordered
+step table while the four test harnesses printed `||r||`. Ask `git` for the
+originals instead: `git grep -nE "\b(double|int|auto)\s+(const\s+)?r\s*="
+HEAD` and read the initialisers.
+
+**THE PYTHON HALF FAILS DIFFERENTLY AND `py_compile` IS FREE.** `!r` in an
+f-string is the **repr conversion**, not an identifier, so `{float(v)!r}` became
+`{float(v)!R}` and **two tools stopped parsing** — `SyntaxError: f-string:
+invalid conversion character`. Nothing in `ctest` builds the tools, so nothing
+would have said so. The same pass also rewrote the `k3r0` case-stem scheme that
+`race.py` and `MEASUREMENTS.md`'s published tables share, and renamed two result
+dicts to `R`. `for f in $(git ls-files '*.py'); do python3 -m py_compile "$f";
+done` catches the first class outright.
+
+**AND A FENCED BLOCK HOLDING CAPTURED OUTPUT IS DATA, NOT PROSE.** Three
+transcripts were rewritten into records of something no program ever printed —
+a Newton table's `||r||` header, a mesh check's `minimum r over the mesh`, an
+X-point locator's `r = 0.699700`. Extract every fenced block from `HEAD` and
+from the working tree and diff them pairwise; the maths blocks SHOULD move under
+a convention change and the transcripts must not, so the two are told apart by
+asking which program prints the line.
+
+**A VERIFICATION THAT COMPARES PRINTED VALUES MUST NAME WHICH BINARIES IT RAN.**
+This rename was reported verified on "six value-printing tests byte-identical to
+baseline", which was true and did not cover any of the cases that had moved. Six
+of fifty-eight is a sample, and a sample chosen for being easy to diff is chosen
+against exactly the tests whose output is geometry.
 
 **The four defects MEQ reported to MFEM are closed**, though
 `HDG-DEFECTS-FROM-MEQ.md` itself is **not** gone — it is alive on `gf-hdg-dev`
@@ -2228,7 +2301,7 @@ is a conductor inside `Γ` with **no plasma**; CS-4's driver acceptance is a
 current, so when the first machine was posed free boundary with its conductors
 subtracted, **both of those borders turned out to read the remainder rather than
 the total** — and the second failed in a way that named the wrong thing entirely,
-`int F/r` coming out exactly zero and the run reporting a singular bordered
+`int F/R` coming out exactly zero and the run reporting a singular bordered
 Jacobian. → **[M-148](MEASUREMENTS.md#m-148)**. The acceptance that was missing
 now exists and is green at a rate of 3.78, → **[M-151](MEASUREMENTS.md#m-151)**. The same shape as the `2 × 2`
 cross under *Commands* above, one level up: there a one-key experiment separated
@@ -2286,7 +2359,7 @@ has nothing to do with the physics.** Measured on a *Solov'ev* source — consta
 in `ψ`, `dF/dψ ≡ 0`, one Newton step — with homogeneous data on the benchmark
 box, the self-difference rate is 2.00/2.86/2.96 in `ψ` and 1.88/2.25/2.18 in `q`:
 flat at about 3 and 2.2 from `k = 2` on, with nothing nonlinear anywhere. That is
-the `r² log r` corner term of a right angle — the solution sits in `H^{3−ε}` and
+the `r² log R` corner term of a right angle — the solution sits in `H^{3−ε}` and
 its gradient in `H^{2−ε}`, and no polynomial degree recovers it. The
 exact-solution studies are immune because there the datum *is* the trace of a
 smooth solution.

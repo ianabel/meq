@@ -350,7 +350,7 @@ Two further findings from that exercise are worth having:
 The stopping rule
 -----------------
 
-MFEM's Newton solver stops at :math:`\|r\| \le \max(\texttt{rel\_tol}\cdot
+MFEM's Newton solver stops at :math:`\|R\| \le \max(\texttt{rel\_tol}\cdot
 \|r_0\|, \texttt{abs\_tol})`, with :math:`\|r_0\|` measured at the iterate it
 was handed. That interacts badly with warm starts, and MEQ works around it — see
 the warning in :ref:`running-warm-start`.

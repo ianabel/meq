@@ -98,13 +98,13 @@ BOOST_AUTO_TEST_CASE( soloviev_matches_a_directly_constructed_source )
 	auto const built = meq::makeSource( config.getSource(), config.getFileName() );
 	meq::SolovievSource const direct( -0.52 );
 
-	for ( double r = 0.7; r < 1.35; r += 0.13 )
+	for ( double radius = 0.7; radius < 1.35; radius += 0.13 )
 	{
 		for ( double z = -0.5; z < 0.55; z += 0.21 )
 		{
-			BOOST_TEST( built->f( r, z, 0.3 ) == direct.f( r, z, 0.3 ),
+			BOOST_TEST( built->f( radius, z, 0.3 ) == direct.f( radius, z, 0.3 ),
 			            boost::test_tools::tolerance( 1.0e-15 ) );
-			BOOST_TEST( built->dFdPsi( r, z, 0.3 ) == direct.dFdPsi( r, z, 0.3 ),
+			BOOST_TEST( built->dFdPsi( radius, z, 0.3 ) == direct.dFdPsi( radius, z, 0.3 ),
 			            boost::test_tools::tolerance( 1.0e-15 ) );
 		}
 	}
@@ -123,7 +123,7 @@ BOOST_AUTO_TEST_CASE( soloviev_matches_a_directly_constructed_source )
  */
 BOOST_AUTO_TEST_CASE( manufactured_agrees_with_the_analytic_fixture )
 {
-	double const r0 = -0.5;
+	double const radius0 = -0.5;
 	double const kr = 1.15*3.14159265358979323846;
 	double const kz = 1.15;
 
@@ -133,26 +133,26 @@ BOOST_AUTO_TEST_CASE( manufactured_agrees_with_the_analytic_fixture )
 		"\n[boundary]\nType = \"exact\"\n" );
 
 	auto const built = meq::makeSource( config.getSource(), config.getFileName() );
-	meq::analytic::ManufacturedNonlinear const fixture( r0, kr, kz );
+	meq::analytic::ManufacturedNonlinear const fixture( radius0, kr, kz );
 
 	double worstF = 0.0;
 	double worstDerivative = 0.0;
 
-	for ( double r = 0.65; r < 1.36; r += 0.07 )
+	for ( double radius = 0.65; radius < 1.36; radius += 0.07 )
 	{
 		for ( double z = -0.55; z < 0.56; z += 0.11 )
 		{
 			// Probed away from the exact solution as well as on it: the two
 			// implementations must agree as functions of psi, not merely at
 			// the value that solves the problem.
-			for ( double psi : { -0.4, 0.0, fixture.psi( r, z ), 0.9 } )
+			for ( double psi : { -0.4, 0.0, fixture.psi( radius, z ), 0.9 } )
 			{
-				double const scale = 1.0 + std::fabs( fixture.f( r, z, psi ) );
+				double const scale = 1.0 + std::fabs( fixture.f( radius, z, psi ) );
 				worstF = std::max( worstF,
-					std::fabs( built->f( r, z, psi ) - fixture.f( r, z, psi ) )/scale );
+					std::fabs( built->f( radius, z, psi ) - fixture.f( radius, z, psi ) )/scale );
 				worstDerivative = std::max( worstDerivative,
-					std::fabs( built->dFdPsi( r, z, psi ) - fixture.dFdPsi( r, z, psi ) )
-					/( 1.0 + std::fabs( fixture.dFdPsi( r, z, psi ) ) ) );
+					std::fabs( built->dFdPsi( radius, z, psi ) - fixture.dFdPsi( radius, z, psi ) )
+					/( 1.0 + std::fabs( fixture.dFdPsi( radius, z, psi ) ) ) );
 			}
 		}
 	}
@@ -173,14 +173,14 @@ BOOST_AUTO_TEST_CASE( manufactured_derivative_matches_a_finite_difference )
 	auto const built = meq::makeSource( config.getSource(), config.getFileName() );
 
 	double const step = 1.0e-6;
-	for ( double r = 0.7; r < 1.35; r += 0.17 )
+	for ( double radius = 0.7; radius < 1.35; radius += 0.17 )
 	{
 		for ( double psi = -0.5; psi < 0.6; psi += 0.25 )
 		{
 			double const difference =
-				( built->f( r, 0.13, psi + step ) - built->f( r, 0.13, psi - step ) )
+				( built->f( radius, 0.13, psi + step ) - built->f( radius, 0.13, psi - step ) )
 				/( 2.0*step );
-			BOOST_TEST( built->dFdPsi( r, 0.13, psi ) == difference,
+			BOOST_TEST( built->dFdPsi( radius, 0.13, psi ) == difference,
 			            boost::test_tools::tolerance( 1.0e-6 ) );
 		}
 	}
@@ -199,12 +199,12 @@ BOOST_AUTO_TEST_CASE( mhd_reads_its_profile_files )
 
 	auto const built = meq::makeSource( config.getSource(), config.getFileName() );
 
-	// F = mu0 r^2 p' + gg' = r^2 * 2.5 + 2.5 with mu0 = 1 and both profiles
+	// F = mu0 R^2 p' + gg' = R^2 * 2.5 + 2.5 with mu0 = 1 and both profiles
 	// constant at 2.5. Constant in psi, so the derivative vanishes.
-	double const r = 1.2;
-	BOOST_TEST( built->f( r, 0.0, 0.4 ) == r*r*2.5 + 2.5,
+	double const radius = 1.2;
+	BOOST_TEST( built->f( radius, 0.0, 0.4 ) == radius*radius*2.5 + 2.5,
 	            boost::test_tools::tolerance( 1.0e-12 ) );
-	BOOST_TEST( built->dFdPsi( r, 0.0, 0.4 ) == 0.0,
+	BOOST_TEST( built->dFdPsi( radius, 0.0, 0.4 ) == 0.0,
 	            boost::test_tools::tolerance( 1.0e-12 ) );
 }
 
@@ -235,7 +235,7 @@ BOOST_AUTO_TEST_CASE( a_missing_profile_file_names_itself )
  * The fixtures below are not a plasma. The masses are kilogrammes of order one
  * and the temperatures Joules of order one, chosen so that the exponent of (96)
  * comes out at exactly 1.25 and the whole answer can be written down; a
- * physical set would put e^(m omega^2 r^2 / 2T) at the mercy of round-off in
+ * physical set would put e^(m omega^2 R^2 / 2T) at the mercy of round-off in
  * the twentieth significant figure of the input, which tests the arithmetic of
  * the fixture rather than the arithmetic of the factory. Every physical claim
  * about meq::RotatingSource is made in RotatingSourceTests and in the
@@ -268,7 +268,7 @@ BOOST_AUTO_TEST_CASE( rotating_matches_a_hand_computed_value )
 	 * THE ARITHMETIC, from docs/rotation.rst's two-species closed form. With
 	 * both temperatures
 	 * constant and equal, omega constant, and Z = +1 / -1, the two species
-	 * share one exponent and the pressure is P0( psi ) exp[ C ( r^2 - rRef^2 )
+	 * share one exponent and the pressure is P0( psi ) exp[ C ( R^2 - R_ref^2 )
 	 * / 2 ] with
 	 *
 	 *     C  = omega^2 ( Z_1 m_2 - Z_2 m_1 )/( Z_1 T_2 - Z_2 T_1 )
@@ -278,11 +278,11 @@ BOOST_AUTO_TEST_CASE( rotating_matches_a_hand_computed_value )
 	 *
 	 * the second line using n_e0 = n_i0, which is what Neutralising asked the
 	 * factory to derive. The table gives n_i0 = 1 + 2 psi, so P0' = 16, exactly
-	 * and at every psi. At r = 1.5 and rRef = 1,
+	 * and at every psi. At R = 1.5 and R_ref = 1,
 	 *
-	 *     ( r^2 - rRef^2 )/2 = ( 2.25 - 1 )/2                       = 0.625
+	 *     ( R^2 - R_ref^2 )/2 = ( 2.25 - 1 )/2                       = 0.625
 	 *     exponent           = C * 0.625                            = 1.25
-	 *     F = mu0 r^2 P0' e^1.25 + g g'
+	 *     F = mu0 R^2 P0' e^1.25 + g g'
 	 *       = 1 * 2.25 * 16 * 3.4903429574597902 + 0.5
 	 *       = 125.65234646862629 + 0.5                    = 126.15234646862629
 	 *
@@ -292,19 +292,19 @@ BOOST_AUTO_TEST_CASE( rotating_matches_a_hand_computed_value )
 	 * Solov'ev rung of the ladder in CLAUDE.md's Testing stance, one step down
 	 * from RotatingSourceTests' finite-difference sweep.
 	 */
-	double const r = 1.5;
-	BOOST_TEST( built->f( r, 0.1, 0.4 ) == 126.15234646862629,
+	double const radius = 1.5;
+	BOOST_TEST( built->f( radius, 0.1, 0.4 ) == 126.15234646862629,
 	            boost::test_tools::tolerance( 1.0e-12 ) );
-	BOOST_TEST( built->dFdPsi( r, 0.1, 0.4 ) == 0.0,
+	BOOST_TEST( built->dFdPsi( radius, 0.1, 0.4 ) == 0.0,
 	            boost::test_tools::tolerance( 1.0e-12 ) );
 
 	// P0' is constant here, so F is too -- which says the density table was
 	// read as the linear profile it is rather than clamped or defaulted.
-	BOOST_TEST( built->f( r, -0.2, 0.9 ) == 126.15234646862629,
+	BOOST_TEST( built->f( radius, -0.2, 0.9 ) == 126.15234646862629,
 	            boost::test_tools::tolerance( 1.0e-12 ) );
 
-	// At r = rRef the exponent vanishes by the gauge, so F is the static
-	// answer: mu0 rRef^2 P0' + g g' = 16 + 0.5.
+	// At R = R_ref the exponent vanishes by the gauge, so F is the static
+	// answer: mu0 R_ref^2 P0' + g g' = 16 + 0.5.
 	BOOST_TEST( built->f( 1.0, 0.0, 0.4 ) == 16.5,
 	            boost::test_tools::tolerance( 1.0e-12 ) );
 
@@ -386,7 +386,7 @@ BOOST_AUTO_TEST_CASE( a_temperature_scale_scales_the_temperature )
 /*
  * makeNormalisedSource, and what setNormalisation does to the answer.
  *
- * A normalised source has the form F( r, z, psi ) = H( r, z, psi/psi_ax )/psi_ax,
+ * A normalised source has the form F( R, z, psi ) = H( R, z, psi/psi_ax )/psi_ax,
  * so psi_ax enters TWICE -- once as the profile argument and once as the
  * chain-rule factor. The g g' table below is deliberately linear rather than
  * constant so that both are visible: were only the factor moving, halving
@@ -398,7 +398,7 @@ BOOST_AUTO_TEST_CASE( a_temperature_scale_scales_the_temperature )
  *     psi = 0.08, psi_ax = 0.4  ->  Psi = 0.2, g g' = 0.7
  *         F = ( 125.65234646862629 + 0.7 )/0.4      = 315.88086617156574
  *
- * with 125.652... the mu0 r^2 P0' e^1.25 of the case above, unchanged because
+ * with 125.652... the mu0 R^2 P0' e^1.25 of the case above, unchanged because
  * P0' is constant in Psi.
  */
 BOOST_AUTO_TEST_CASE( a_normalised_rotating_source_answers_for_its_normalisation )
@@ -441,7 +441,7 @@ BOOST_AUTO_TEST_CASE( a_normalised_rotating_source_answers_for_its_normalisation
 
 /// The other normalised source out of the same factory, which is the half that
 /// says the normalised plumbing is not rotation's alone. With both tables
-/// constant at 2.5 and mu0 = 1, H = r^2 2.5 + 2.5 whatever Psi is, so the whole
+/// constant at 2.5 and mu0 = 1, H = R^2 2.5 + 2.5 whatever Psi is, so the whole
 /// psi_ax dependence is the chain-rule factor and can be read off.
 BOOST_AUTO_TEST_CASE( a_normalised_mhd_source_comes_out_of_the_same_factory )
 {
@@ -459,12 +459,12 @@ BOOST_AUTO_TEST_CASE( a_normalised_mhd_source_comes_out_of_the_same_factory )
 		meq::makeNormalisedSource( config.getSource(), config.getFileName() );
 	BOOST_TEST_REQUIRE( built != nullptr );
 
-	double const r = 1.2;
-	BOOST_TEST( built->f( r, 0.0, 0.1 ) == ( r*r*2.5 + 2.5 )/0.5,
+	double const radius = 1.2;
+	BOOST_TEST( built->f( radius, 0.0, 0.1 ) == ( radius*radius*2.5 + 2.5 )/0.5,
 	            boost::test_tools::tolerance( 1.0e-12 ) );
 
 	built->setNormalisation( 0.25 );
-	BOOST_TEST( built->f( r, 0.0, 0.1 ) == ( r*r*2.5 + 2.5 )/0.25,
+	BOOST_TEST( built->f( radius, 0.0, 0.1 ) == ( radius*radius*2.5 + 2.5 )/0.25,
 	            boost::test_tools::tolerance( 1.0e-12 ) );
 }
 

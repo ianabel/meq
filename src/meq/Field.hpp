@@ -12,18 +12,18 @@
  *
  *     B = grad(phi) x grad(psi) + f(psi) grad(phi),
  *
- * phi the toroidal angle, so grad(phi) = e_phi / r. With
+ * phi the toroidal angle, so grad(phi) = e_phi / R. With
  * grad(psi) = ( d_r psi ) e_r + ( d_z psi ) e_z and
  * e_phi x e_r = e_z, e_phi x e_z = -e_r,
  *
- *     B_pol = ( 1/r )[ ( d_r psi ) e_z - ( d_z psi ) e_r ],
+ *     B_pol = ( 1/R )[ ( d_r psi ) e_z - ( d_z psi ) e_r ],
  *
  * that is
  *
- *     B_R = -( 1/r ) d_z psi,      B_Z = +( 1/r ) d_r psi.
+ *     B_R = -( 1/R ) d_z psi,      B_Z = +( 1/R ) d_r psi.
  *
  * AND MEQ ALREADY SOLVES FOR THAT. The HDG flux variable is
- * q = ( 1/r ) grad_bar( psi ) = ( q_r, q_z ), so
+ * q = ( 1/R ) grad_bar( psi ) = ( q_r, q_z ), so
  *
  *     B_R = -q_z,      B_Z = +q_r
  *

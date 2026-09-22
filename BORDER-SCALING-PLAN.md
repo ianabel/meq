@@ -24,7 +24,7 @@ function or the lambda; `grep` for the name.
 different constraints with **one** scale taken from the first of them, plus one
 hand-derived mesh-dependent factor for the X-point; replace it with a per-border
 scale derived from each border's own column and corner, and decide the X-point's
-scale on a physical argument rather than on `r·h`.
+scale on a physical argument rather than on `R·h`.
 
 ---
 
@@ -289,8 +289,8 @@ and `gamma = initialColumn.Norml2()` (`:6160`), where `initialColumn` is
 `∂R/∂ψ_ax` obtained by a **central difference** at the first iterate
 (`:6151-6158`). The comment at `:6167-6183` concedes the exterior case in its
 own words —
-*"there is no second natural scale to give it"* — and derives `xScale = r·h`
-from `∇̄ψ = r q` for the X-point.
+*"there is no second natural scale to give it"* — and derives `xScale = R·h`
+from `∇̄ψ = R q` for the X-point.
 
 **And `gamma` touches nothing but the merit.** `grep -n '\bgamma\b'` over
 `GradShafranov.cpp`, excluding `gammaHMarker`, gives eleven hits: the two
@@ -354,10 +354,10 @@ recorded here rather than lost.
 `( 1.0156, −0.0000 )` against the reference's `( 1.006896, 0.000000 )`, `ψ_ax`
 `5.896474e-02` against `5.795820e-02` (**1.7%**), `ψ_bnd` `−2.356703e-02`
 against `−2.359584e-02` (**0.12%**), X-point `9.473e-03 m` from its seed — and
-then refuses it, because `−ψ_bnd/span = +0.2856 > 0` puts `r = 0` on the plasma
+then refuses it, because `−ψ_bnd/span = +0.2856 > 0` puts `R = 0` on the plasma
 side of the level set. **The reference's own `ψ_bndry` is negative too**, so the
 guard is refusing the equilibrium `freegs4e` reports. `checkAxisSource()`
-evaluates `nonlinearSource->f( r, z, 0.0 )` directly
+evaluates `nonlinearSource->f( R, z, 0.0 )` directly
 (`GradShafranov.cpp:2777-2779`) and **does not consult `plasmaComponentMask`**,
 so it asks a *pointwise* question where the solve under
 `PlasmaConnectivity::Component` places current by *connectivity*. Whether that
@@ -382,12 +382,12 @@ produces the annulus. That is H3, and BS-0 is what tells H3 from H1.
 |---|---|---|---|---|
 | `ψ_ax` | a flux | `s − ψ_h( x* )`, a flux | `1` exactly (`:6398`) | assembled, `assembleNormalisationColumn` (`:4951`) |
 | `ψ_bnd` | a flux | `s_B − ψ_h( x_lim )`, a flux | `1` (`:6833`) | assembled, same routine (`:6894-6899`) |
-| current | a **dimensionless** profile scale `λ` | `∫F/r − μ₀I_p`, **an ampere-metre** | `( ∫F/r )/λ` (`:6831-6832`) | assembled, `assembleCurrentColumn` (`:4599`) |
+| current | a **dimensionless** profile scale `λ` | `∫F/R − μ₀I_p`, **an ampere-metre** | `( ∫F/R )/λ` (`:6831-6832`) | assembled, `assembleCurrentColumn` (`:4599`) |
 | exterior, `N` of them | a Gegenbauer coefficient | `T_m`, a transmission integral | `blockEntry( m )`, diagonal (`:6836`) | assembled exactly, once per mesh (`:6054`), and **constant** |
-| X-point, 2 of them | a **length** | `q_i( x_X )`, a flux gradient over `r` | `∇q`, the only non-diagonal block (`:6771-6777`) | **exactly zero** (`xZeroColumn`, `:6838-6842`) |
+| X-point, 2 of them | a **length** | `q_i( x_X )`, a flux gradient over `R` | `∇q`, the only non-diagonal block (`:6771-6777`) | **exactly zero** (`xZeroColumn`, `:6838-6842`) |
 
 `augmentedNorm` gives the first four the *same* `gamma`, which is `‖∂R/∂ψ_ax‖`,
-and the fifth `gamma·r·h`.
+and the fifth `gamma·R·h`.
 
 **The current row is the clearest unit error.** `gamma` has units of
 `[R]/[flux]`; `G_L` has units of `μ₀I_p`. `gamma·G_L` is therefore
@@ -417,7 +417,7 @@ it against the five kinds:
   whenever the two columns differ, which they do — `∂F/∂ψ_ax` and `∂F/∂ψ_bnd`
   are the two expressions in `CLAUDE_HDGGS.md`, *THE COLUMNS ARE AVAILABLE IN
   CLOSED FORM*, and they differ by `(Ψ − 1)` against `Ψ`.
-* **current**: `gamma_L = ‖c_L‖·λ/|∫F/r|`, which cancels the ampere-metre
+* **current**: `gamma_L = ‖c_L‖·λ/|∫F/R|`, which cancels the ampere-metre
   exactly. **The unit error goes away by construction.**
 * **exterior**: `gamma_m = ‖c_m‖/|blockEntry(m)|`, per mode. The DtN block is
   diagonal and its entries vary strongly with mode number, so the `N` modes
@@ -427,14 +427,14 @@ it against the five kinds:
 
 ### 2.3 The degeneracy is a true statement, not a gap in the rule
 
-`c_X = ∂R/∂x_X = 0` **exactly**, and the code says why: `( r_X, z_X )` reach the
+`c_X = ∂R/∂x_X = 0` **exactly**, and the code says why: `( R_X, z_X )` reach the
 field residual *only* through `ψ_bnd`, whose column is `zB`
 (`GradShafranov.cpp:6838-6842`) — so `z_X = J⁻¹0 = 0` and XP-3 costs no
 backsolve at all. Moving the X-point does not move the field residual.
 
 So **no weighting of the X-point constraint derived from the field residual can
 be anything but zero**, and the scale for those two rows has to come from
-outside the algebra. `xScale = r·h` is exactly such an outside choice, honestly
+outside the algebra. `xScale = R·h` is exactly such an outside choice, honestly
 made. The question is not whether to replace it with a derived quantity — there
 is none — but whether a *better* outside choice exists.
 
@@ -467,9 +467,9 @@ yardstick consistent with the Jacobian. **Do not do it in the same stage** — s
 §3.4, it moves `HighBetaConvergence` — but it is available and it is a saving,
 not a cost.
 
-### 3.2 The X-point: three candidates, and `r·h` is not obviously the worst
+### 3.2 The X-point: three candidates, and `R·h` is not obviously the worst
 
-Today: `xScale = |r_X|·h( element )`, frozen at the first refresh
+Today: `xScale = |R_X|·h( element )`, frozen at the first refresh
 (`GradShafranov.cpp:5476-5482`). It converts `q` into the change of `ψ` across
 the X-point's own element, which is defensible and is **mesh-dependent**: halve
 `h` and the X-point's contribution to the merit halves, so a mesh refinement
@@ -477,7 +477,7 @@ silently reweights the line search.
 
 | | scale | mesh-free? | degenerate when | already assembled? |
 |---|---|---|---|---|
-| **X1** | `gamma·r·h·‖q‖` — today | **no** | never | yes |
+| **X1** | `gamma·R·h·‖q‖` — today | **no** | never | yes |
 | **X2** | from the row, `gamma/‖b_X‖` | no — `b_X` is a vector of shape functions and scales with the element | never | `xFluxDofsR/Z`, `xFluxShape` (`:6718-6725`) |
 | **X3** | **the implied displacement**: `gamma_ax·‖(∇q)⁻¹ q( x_X )‖ / L`, with `L` a length from the configuration | **yes** | `∇q` singular — a degenerate null | `xFluxJacobian`, exact (`:5458-5462`) |
 
@@ -506,7 +506,7 @@ pretend are:**
    plasma's. The distance from the located axis to the X-point seed is more
    physical and is unavailable on an iterate with no located axis — which is
    four of the six pinned runs.
-3. **X1 may be right for a reason X3 is not.** `r·h` says *"a misplacement
+3. **X1 may be right for a reason X3 is not.** `R·h` says *"a misplacement
    smaller than one element is not a misplacement"*, which is a discretisation
    statement and is arguably what a line search on a discrete problem should
    compare against. X3 says *"a misplacement is a misplacement"*. These are
@@ -731,7 +731,7 @@ diverted machine five times and already has every border live.
 
 ### BS-2 — The X-point's scale, X1 against X3
 
-**Do.** Add `gamma_X` as a choice — `XPointScale::ElementFlux` (today's `r·h`)
+**Do.** Add `gamma_X` as a choice — `XPointScale::ElementFlux` (today's `R·h`)
 and `XPointScale::Displacement` (§3.2's X3, with the no-inverse variant as a
 third if the 2×2 solve needs a floor). A library setter, **not a TOML key**:
 it changes which equilibrium is reported and `CLAUDE.md` refuses that as a file

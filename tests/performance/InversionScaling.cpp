@@ -109,12 +109,12 @@ namespace
 
 	struct Box
 	{
-		double rMin, rMax, zMin, zMax;
+		double minRadius, maxRadius, zMin, zMax;
 	};
 
 	/// NOT the standard benchmark rectangle, for the reason
-	/// SurfaceAverageConvergence.cpp records: nstx()'s axis sits at r = 1.318
-	/// and its surfaces are elongated, so Psi_N = 0.50 reaches r in
+	/// SurfaceAverageConvergence.cpp records: nstx()'s axis sits at R = 1.318
+	/// and its surfaces are elongated, so Psi_N = 0.50 reaches R in
 	/// [ 0.81, 1.66 ] and does not fit in [0.6,1.4]x[-0.6,0.6] at all.
 	Box nstxBox()
 	{
@@ -127,13 +127,13 @@ namespace
 	mfem::Mesh makeMesh( Box const &b, int n )
 	{
 		mfem::Mesh mesh = mfem::Mesh::MakeCartesian2D( n, n, mfem::Element::TRIANGLE,
-		                                               false, b.rMax - b.rMin,
+		                                               false, b.maxRadius - b.minRadius,
 		                                               b.zMax - b.zMin );
-		double const rMin = b.rMin;
+		double const minRadius = b.minRadius;
 		double const zMin = b.zMin;
-		mesh.Transform( [ rMin, zMin ]( mfem::Vector const &in, mfem::Vector &out )
+		mesh.Transform( [ minRadius, zMin ]( mfem::Vector const &in, mfem::Vector &out )
 		{
-			out( 0 ) = in( 0 ) + rMin;
+			out( 0 ) = in( 0 ) + minRadius;
 			out( 1 ) = in( 1 ) + zMin;
 		} );
 		return mesh;
@@ -141,7 +141,7 @@ namespace
 
 	struct ExactAxis
 	{
-		double r;
+		double radius;
 		double z;
 		double psi;
 	};
@@ -152,7 +152,7 @@ namespace
 	/// analytic gradient vanishes whatever steered it there.
 	ExactAxis exactAxis( Equilibrium const &eq, double rGuess, double zGuess )
 	{
-		double r = rGuess;
+		double radius = rGuess;
 		double z = zGuess;
 		double const step = 1.0e-5;
 
@@ -160,26 +160,26 @@ namespace
 		{
 			double gr = 0.0;
 			double gz = 0.0;
-			eq.gradPsi( r, z, gr, gz );
+			eq.gradPsi( radius, z, gr, gz );
 
 			double a0 = 0.0, a1 = 0.0, b0 = 0.0, b1 = 0.0;
 			double hessian[ 2 ][ 2 ];
-			eq.gradPsi( r + step, z, a0, b0 );
-			eq.gradPsi( r - step, z, a1, b1 );
+			eq.gradPsi( radius + step, z, a0, b0 );
+			eq.gradPsi( radius - step, z, a1, b1 );
 			hessian[ 0 ][ 0 ] = ( a0 - a1 )/( 2.0*step );
 			hessian[ 1 ][ 0 ] = ( b0 - b1 )/( 2.0*step );
-			eq.gradPsi( r, z + step, a0, b0 );
-			eq.gradPsi( r, z - step, a1, b1 );
+			eq.gradPsi( radius, z + step, a0, b0 );
+			eq.gradPsi( radius, z - step, a1, b1 );
 			hessian[ 0 ][ 1 ] = ( a0 - a1 )/( 2.0*step );
 			hessian[ 1 ][ 1 ] = ( b0 - b1 )/( 2.0*step );
 
 			double const det = hessian[ 0 ][ 0 ]*hessian[ 1 ][ 1 ]
 			                   - hessian[ 0 ][ 1 ]*hessian[ 1 ][ 0 ];
-			r += -(  hessian[ 1 ][ 1 ]*gr - hessian[ 0 ][ 1 ]*gz )/det;
+			radius += -(  hessian[ 1 ][ 1 ]*gr - hessian[ 0 ][ 1 ]*gz )/det;
 			z += -( -hessian[ 1 ][ 0 ]*gr + hessian[ 0 ][ 0 ]*gz )/det;
 		}
 
-		return ExactAxis{ r, z, eq.psi( r, z ) };
+		return ExactAxis{ radius, z, eq.psi( radius, z ) };
 	}
 
 	/// psi at normalised flux @a fraction, from the CLOSED FORM so that it is
@@ -330,13 +330,13 @@ namespace
 				meq::SurfaceSample sample;
 				sample.normalisedFlux = family.normalisedFlux[ i ];
 				sample.theta = twoPi*static_cast<double>( j )/rays.count();
-				sample.r = rays.pointR[ j ];
+				sample.radius = rays.pointR[ j ];
 				sample.z = rays.pointZ[ j ];
 				geometric.push_back( sample );
 			}
 		}
 
-		meq::AxisShape const shape = meq::axisShapeFromSamples( geometric, axis.r,
+		meq::AxisShape const shape = meq::axisShapeFromSamples( geometric, axis.radius,
 		                                                        axis.z );
 		return meq::relabelByAxisShape( geometric, shape );
 	}
@@ -349,18 +349,18 @@ namespace
 	                                      ExactAxis const &exact, int &hint )
 	{
 		meq::NormalisedFluxField field;
-		field.sample = [ &tracer, &hint, &exact ]( double r, double z,
+		field.sample = [ &tracer, &hint, &exact ]( double radius, double z,
 		                                           double &normalisedFlux,
 		                                           double &gradientR,
 		                                           double &gradientZ )
 		{
 			double psi = 0.0, fluxR = 0.0, fluxZ = 0.0;
-			if ( !tracer.sampleAt( r, z, psi, fluxR, fluxZ, hint ) )
+			if ( !tracer.sampleAt( radius, z, psi, fluxR, fluxZ, hint ) )
 				return false;
 
 			normalisedFlux = 1.0 - psi/exact.psi;
-			gradientR = -r*fluxR/exact.psi;
-			gradientZ = -r*fluxZ/exact.psi;
+			gradientR = -radius*fluxR/exact.psi;
+			gradientZ = -radius*fluxZ/exact.psi;
 			return true;
 		};
 		return field;
@@ -711,9 +711,9 @@ namespace
 			double sink = 0.0;
 			for ( meq::SurfaceSample const &sample : samples )
 			{
-				double r = 0.0, z = 0.0;
-				linear.position( sample.normalisedFlux, sample.theta, r, z );
-				sink += r + z;
+				double radius = 0.0, z = 0.0;
+				linear.position( sample.normalisedFlux, sample.theta, radius, z );
+				sink += radius + z;
 			}
 			if ( sink == 1.0e300 )
 				std::printf( " " );
@@ -806,22 +806,22 @@ namespace
 		int wrappedHint = -1;
 		meq::NormalisedFluxField instrumented;
 		instrumented.sample = [ &tracer, &wrappedHint, &exact, &samples2,
-		                        &fieldSeconds ]( double r, double z,
+		                        &fieldSeconds ]( double radius, double z,
 		                                         double &normalisedFlux,
 		                                         double &gradientR,
 		                                         double &gradientZ )
 		{
 			auto const start = Clock::now();
 			double psi = 0.0, fluxR = 0.0, fluxZ = 0.0;
-			bool const ok = tracer.sampleAt( r, z, psi, fluxR, fluxZ,
+			bool const ok = tracer.sampleAt( radius, z, psi, fluxR, fluxZ,
 			                                 wrappedHint );
 			fieldSeconds += seconds( start );
 			++samples2;
 			if ( !ok )
 				return false;
 			normalisedFlux = 1.0 - psi/exact.psi;
-			gradientR = -r*fluxR/exact.psi;
-			gradientZ = -r*fluxZ/exact.psi;
+			gradientR = -radius*fluxR/exact.psi;
+			gradientZ = -radius*fluxZ/exact.psi;
 			return true;
 		};
 
@@ -1304,14 +1304,14 @@ namespace
 
 			for ( std::size_t i = 0; i < evalPoints; ++i )
 			{
-				double r = 0.0;
+				double radius = 0.0;
 				double z = 0.0;
 				for ( std::size_t j = 0; j < cols; ++j )
 				{
-					r += vandermonde[ i*cols + j ]*cR[ j ];
+					radius += vandermonde[ i*cols + j ]*cR[ j ];
 					z += vandermonde[ i*cols + j ]*cZ[ j ];
 				}
-				gemmR[ i ] = r;
+				gemmR[ i ] = radius;
 				gemmZ[ i ] = z;
 			}
 		} );
@@ -1347,7 +1347,7 @@ namespace
 		std::vector<double> rhsZ( rows, 0.0 );
 		for ( std::size_t i = 0; i < rows; ++i )
 		{
-			rhsR[ i ] = samples[ i ].r;
+			rhsR[ i ] = samples[ i ].radius;
 			rhsZ[ i ] = samples[ i ].z;
 		}
 
@@ -1450,16 +1450,16 @@ namespace
 				std::sqrt( samples[ i ].normalisedFlux/options.discEdge );
 			table.evaluate( rho, samples[ i ].theta );
 			std::vector<double> const &v = table.values();
-			double r = 0.0, z = 0.0, rq = 0.0, zq = 0.0;
+			double radius = 0.0, z = 0.0, rq = 0.0, zq = 0.0;
 			for ( std::size_t j = 0; j < cols; ++j )
 			{
-				r += v[ j ]*cR[ j ];
+				radius += v[ j ]*cR[ j ];
 				z += v[ j ]*cZ[ j ];
 				rq += v[ j ]*householder( static_cast<Eigen::Index>( j ), 0 );
 				zq += v[ j ]*householder( static_cast<Eigen::Index>( j ), 1 );
 			}
 			worstPosition = std::max( worstPosition,
-			                          std::hypot( r - rq, z - zq ) );
+			                          std::hypot( radius - rq, z - zq ) );
 		}
 		std::printf( "      the two fits as CURVES differ by %.3e m at the"
 		             " sample points\n", worstPosition );
@@ -1802,10 +1802,10 @@ namespace
 				return rho;
 
 			++iterations;
-			double const r = axisR + rho*uR;
+			double const radius = axisR + rho*uR;
 
-			// d psi / d rho = grad psi . u = r q . u.
-			double const slope = r*( qR*uR + qZ*uZ );
+			// d psi / d rho = grad psi . u = R q . u.
+			double const slope = radius*( qR*uR + qZ*uZ );
 			if ( !( std::fabs( slope ) > 0.0 ) )
 				return rho;
 
@@ -1994,8 +1994,8 @@ namespace
 				for ( std::size_t j = 0; j < contours[ i ].points.size(); ++j )
 				{
 					worst = std::max( worst,
-						std::fabs( contours[ i ].points[ j ].r
-						           - serialContours[ i ].points[ j ].r ) );
+						std::fabs( contours[ i ].points[ j ].radius
+						           - serialContours[ i ].points[ j ].radius ) );
 					worst = std::max( worst,
 						std::fabs( contours[ i ].points[ j ].z
 						           - serialContours[ i ].points[ j ].z ) );
@@ -2038,7 +2038,7 @@ namespace
 			for ( std::size_t i = 0; i < rayCount; ++i )
 			{
 				int its = 0;
-				serialRadius[ i ] = solveRay( *tracers[ 0 ], axes[ 0 ].r,
+				serialRadius[ i ] = solveRay( *tracers[ 0 ], axes[ 0 ].radius,
 				                              axes[ 0 ].z, thetas[ i ], level,
 				                              0.25, its );
 			}
@@ -2066,7 +2066,7 @@ namespace
 					which = omp_get_thread_num();
 #endif
 					int its = 0;
-					radius[ i ] = solveRay( *tracers[ which ], axes[ which ].r,
+					radius[ i ] = solveRay( *tracers[ which ], axes[ which ].radius,
 					                        axes[ which ].z, thetas[ i ], level,
 					                        0.25, its );
 				}
@@ -2124,7 +2124,7 @@ namespace
 		std::vector<meq::Contour> continued( count );
 		double const continuedCost = bestOf( repeats, [ & ]()
 		{
-			double startR = axis.r;
+			double startR = axis.radius;
 			double startZ = axis.z;
 			for ( std::size_t i = 0; i < count; ++i )
 			{
@@ -2134,7 +2134,7 @@ namespace
 				else
 					continued[ i ] = tracer.trace( levelAt( exact, ladder[ i ] ),
 					                               startR, startZ );
-				startR = continued[ i ].points.front().r;
+				startR = continued[ i ].points.front().radius;
 				startZ = continued[ i ].points.front().z;
 			}
 		} );
@@ -2365,7 +2365,7 @@ int main( int argc, char **argv )
 		std::printf( "\n  the equilibrium: nstx() Solov'ev on"
 		             " [%.2f,%.2f]x[%.2f,%.2f], k = %d, n = %d, %d elements,"
 		             " %d psi* dofs\n",
-		             nstxBox().rMin, nstxBox().rMax, nstxBox().zMin,
+		             nstxBox().minRadius, nstxBox().maxRadius, nstxBox().zMin,
 		             nstxBox().zMax, order, n, solved.theMesh().GetNE(),
 		             solved.theSolver().postProcessedPotential().Size() );
 

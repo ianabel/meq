@@ -4,11 +4,11 @@
  *
  * XP-2 pins psi_bnd at the current estimate of the X-point, solves, locates the
  * saddle of the solved q_h, re-pins and re-solves -- an OUTER fixed point over
- * ( r_X, z_X ). This is the same statement made INSIDE the Newton:
+ * ( R_X, z_X ). This is the same statement made INSIDE the Newton:
  *
- *     q_r( r_X, z_X )             = 0
- *     q_z( r_X, z_X )             = 0
- *     psi_bnd - psi_h( r_X, z_X ) = 0
+ *     q_r( R_X, z_X )             = 0
+ *     q_z( R_X, z_X )             = 0
+ *     psi_bnd - psi_h( R_X, z_X ) = 0
  *
  * three rows and three unknowns closing with everything else on one
  * factorisation per step. meq::GradShafranovSolver::setXPointBoundary is the
@@ -31,7 +31,7 @@
  * THE ONE FINDING OF THE STAGE.
  *
  * Section 10.4 expects to lose the quadratic rate: "the corner block
- * d( q_r, q_z )/d( r_X, z_X ) is grad q -- the Hessian of the potential -- and
+ * d( q_r, q_z )/d( R_X, z_X ) is grad q -- the Hessian of the potential -- and
  * there is no solved variable for it: differentiating an L2 field of degree k
  * leaves k - 1. This is the same wall recorded for the band continuation of B."
  * It then plans a fallback of differencing the two rows.
@@ -281,7 +281,7 @@ namespace
 			answer.saddleFound = findXPoint( finder, saddle );
 		if ( answer.saddleFound )
 		{
-			answer.saddleR = saddle.r;
+			answer.saddleR = saddle.radius;
 			answer.saddleZ = saddle.z;
 			answer.saddlePsi = saddle.psi;
 			answer.depth = elementDepth( saddle );
@@ -330,7 +330,7 @@ namespace
 		mfem::GridFunction previous( m.solver->potential() );
 		for ( int sweep = 0; sweep < 8; ++sweep )
 		{
-			double const pinnedR = x.r;
+			double const pinnedR = x.radius;
 			double const pinnedZ = x.z;
 			freezeSupportAt( m, previous, m.solver->psiAxis(),
 			                 m.solver->psiBoundary() );
@@ -344,12 +344,12 @@ namespace
 			     && !findXPoint( finder, next ) )
 				return answer;
 
-			double const step = std::hypot( next.r - pinnedR, next.z - pinnedZ );
+			double const step = std::hypot( next.radius - pinnedR, next.z - pinnedZ );
 			x = next;
 			previous = m.solver->potential();
 			++answer.sweeps;
 
-			answer.xR = x.r;
+			answer.xR = x.radius;
 			answer.xZ = x.z;
 			answer.psiAxis = m.solver->psiAxis();
 			answer.psiBoundary = m.solver->psiBoundary();
@@ -359,7 +359,7 @@ namespace
 			answer.iterations = m.solver->newtonResiduals().size() - 1;
 			std::printf( "    sweep %d: %zu iterations, ( %.6f, %.6f ), step "
 			             "%.3e, psi_ax %.6e, psi_bnd %.6e\n", sweep + 1,
-			             answer.iterations, x.r, x.z, step, answer.psiAxis,
+			             answer.iterations, x.radius, x.z, step, answer.psiAxis,
 			             answer.psiBoundary );
 			// THE CONTROL ON THE ORDER, and the reason it is printed rather than
 			// only summarised: XP-2's inner solve carries the SAME border as
@@ -531,7 +531,7 @@ BOOST_AUTO_TEST_CASE( theXPointBorderClosesOnTheSaddle )
 		"which FREE-BOUNDARY-PLAN.md section 10.4 expects to be inexact and "
 		"which this file argues is exact. If it really cannot be made exact, "
 		"the plan's own fallback is to difference the two rows in "
-		"( r_X, z_X ), which is two residual evaluations in a 2-vector. Read "
+		"( R_X, z_X ), which is two residual evaluations in a 2-vector. Read "
 		"the printed history before believing this number: a run that damped "
 		"its way through the first half has no asymptotic regime." );
 	BOOST_TEST( border.bootstrapOrder < 3.5,
@@ -690,7 +690,7 @@ BOOST_AUTO_TEST_CASE( theXPointBorderRefusesASecondConstraintOnTheSameUnknown )
 			"SETTING rather than what a solve did with it" );
 	}
 
-	// AND THE AXIS IS NOT AN X-POINT: psi vanishes identically on r = 0, so q_h
+	// AND THE AXIS IS NOT AN X-POINT: psi vanishes identically on R = 0, so q_h
 	// is small along the whole of it and a sweep reports a ladder of
 	// near-saddles that no divertor put there.
 	{
@@ -705,7 +705,7 @@ BOOST_AUTO_TEST_CASE( theXPointBorderRefusesASecondConstraintOnTheSameUnknown )
  * THE X-POINT MERIT WEIGHT BUYS ITERATIONS AND MUST NOT BUY A DIFFERENT
  * EQUILIBRIUM.
  *
- * `[solver] XPointMeritWeight` multiplies the length `r h` that puts XP-3's two
+ * `[solver] XPointMeritWeight` multiplies the length `R h` that puts XP-3's two
  * rows into augmentedNorm(), which is the LINE SEARCH's yardstick and nothing
  * else: the border still solves `q_r = q_z = 0`, so every weight that converges
  * must converge to the same saddle and the same `psi_ax`. That is the whole

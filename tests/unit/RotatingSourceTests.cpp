@@ -37,8 +37,8 @@ namespace
 	double const referenceRadius = 1.0;
 
 	// omega0 chosen so that the exponent reaches about 1 at the outboard edge of
-	// the benchmark box: m_i omega^2 ( r^2 - rRef^2 )/2( T_i + T_e ) with
-	// r = 1.4, rRef = 1 and T_i + T_e = 3.7 keV.
+	// the benchmark box: m_i omega^2 ( R^2 - R_ref^2 )/2( T_i + T_e ) with
+	// R = 1.4, R_ref = 1 and T_i + T_e = 3.7 keV.
 	double const sonicOmega = 6.0e5;
 
 	// A profile given by three closed forms, so a test can hand the source
@@ -226,18 +226,18 @@ namespace
 	// one -- a pressure in Pa, a density in m^-3.
 	//
 	// THE FLOOR IS NOT OPTIONAL FOR A QUANTITY THAT VANISHES SOMEWHERE. phi_0 is
-	// identically zero on r = rRef, so at that radius both sides are round-off
+	// identically zero on R = R_ref, so at that radius both sides are round-off
 	// and a purely relative comparison asks whether one 1e-33 equals another --
 	// which is always false and never interesting. Callers pass the quantity's
 	// own scale on this problem, so the test reads "agree to `tolerance`
 	// relatively, or to `tolerance` of the scale, whichever is looser".
-	void checkRelative( double actual, double expected, double tolerance, char const * what, double r, double psi,
+	void checkRelative( double actual, double expected, double tolerance, char const * what, double radius, double psi,
 		double floor = 0.0 )
 	{
 		double const scale = std::max( std::max( std::fabs( expected ), std::fabs( actual ) ), std::fabs( floor ) );
 		double const allowed = tolerance*std::max( scale, 1.0e-300 );
 		BOOST_CHECK_MESSAGE( std::fabs( actual - expected ) <= allowed,
-			what << " at r = " << r << ", psi = " << psi << ": got " << actual
+			what << " at R = " << radius << ", psi = " << psi << ": got " << actual
 			<< ", expected " << expected << " (relative error "
 			<< std::fabs( actual - expected )/scale << ")" );
 	}
@@ -249,7 +249,7 @@ BOOST_AUTO_TEST_SUITE( rotating_source_tests )
 /*
  * FL-0: THE SPECIES CONTAINER AND THE CHARGE-NEUTRALITY SOLVE.
  *
- * Fixing the gauge phi_0( rRef ) = 0 removes exactly one function's worth of
+ * Fixing the gauge phi_0( R_ref ) = 0 removes exactly one function's worth of
  * freedom from the densities, so for n species there are n - 1 independent
  * density flux functions. neutralisingDensity() is how that last one is
  * obtained rather than guessed.
@@ -370,22 +370,22 @@ BOOST_AUTO_TEST_CASE( thePotentialVanishesOnTheReferenceCurve )
 BOOST_AUTO_TEST_CASE( quasineutralityHoldsAtEveryRadius )
 {
 	// THE CENTRAL PROPERTY OF THE CLOSURE. Charge neutrality is imposed on
-	// r = rRef by construction; (97) is the statement that it survives to every
+	// R = R_ref by construction; (97) is the statement that it survives to every
 	// other radius, and it does because both species carry the same exponent.
 	for ( double omegaScale : { 0.0, 0.5, 1.0, 2.0 } )
 	{
 		meq::RotatingSource const source = makeSource( omegaScale );
 
-		for ( double r : testRadii )
+		for ( double radius : testRadii )
 		{
 			for ( double psi : testFluxes )
 			{
-				double const ions = source.density( 0, r, psi );
-				double const electrons = source.density( 1, r, psi );
+				double const ions = source.density( 0, radius, psi );
+				double const electrons = source.density( 1, radius, psi );
 				double const residual = ions - electrons;
 
 				BOOST_CHECK_MESSAGE( std::fabs( residual ) <= 1.0e-13*ions,
-					"quasineutrality fails at r = " << r << ", psi = " << psi
+					"quasineutrality fails at R = " << radius << ", psi = " << psi
 					<< ", omega scale " << omegaScale << ": n_i = " << ions
 					<< ", n_e = " << electrons << ", relative residual " << residual/ions );
 			}
@@ -410,12 +410,12 @@ BOOST_AUTO_TEST_CASE( theDensitiesReduceToTheirReferenceValuesOnTheReferenceCurv
 BOOST_AUTO_TEST_CASE( thePressureMatchesTheIsothermalClosedForm )
 {
 	// Li & Zhu, Comput. Phys. Commun. 260 (2021) 107264, eq (8):
-	// P = P0( psi ) exp[ m_i omega^2 ( r^2 - rRef^2 )/2T ] with T = T_i + T_e.
+	// P = P0( psi ) exp[ m_i omega^2 ( R^2 - R_ref^2 )/2T ] with T = T_i + T_e.
 	// Written out here with the electron mass kept, which is the exact two
 	// species answer rather than the m_e -> 0 one their paper quotes.
 	meq::RotatingSource const source = makeSource();
 
-	for ( double r : testRadii )
+	for ( double radius : testRadii )
 	{
 		for ( double psi : testFluxes )
 		{
@@ -423,37 +423,37 @@ BOOST_AUTO_TEST_CASE( thePressureMatchesTheIsothermalClosedForm )
 			double const p0 = ionDensity( psi )*tSum;
 			double const w = rotation( psi );
 			double const exponent = ( deuteronMass + electronMass )*w*w
-				*( r*r - referenceRadius*referenceRadius )/( 2.0*tSum );
+				*( radius*radius - referenceRadius*referenceRadius )/( 2.0*tSum );
 
-			checkRelative( source.pressure( r, psi ), p0*std::exp( exponent ), 1.0e-14,
-				"the pressure against the isothermal closed form", r, psi );
-			checkRelative( source.densityExponent( 0, r, psi ), exponent, 1.0e-14,
-				"the ion density exponent", r, psi );
+			checkRelative( source.pressure( radius, psi ), p0*std::exp( exponent ), 1.0e-14,
+				"the pressure against the isothermal closed form", radius, psi );
+			checkRelative( source.densityExponent( 0, radius, psi ), exponent, 1.0e-14,
+				"the ion density exponent", radius, psi );
 
 			// AND THE TWO SPECIES SHARE IT. That is the property, not an
 			// implementation detail: it is what makes Sum_s Z_s n_s vanish at
-			// every r once it vanishes at rRef.
-			checkRelative( source.densityExponent( 1, r, psi ), source.densityExponent( 0, r, psi ),
-				1.0e-15, "the electron exponent against the ion one", r, psi );
+			// every R once it vanishes at R_ref.
+			checkRelative( source.densityExponent( 1, radius, psi ), source.densityExponent( 0, radius, psi ),
+				1.0e-15, "the electron exponent against the ion one", radius, psi );
 		}
 	}
 }
 
 BOOST_AUTO_TEST_CASE( thePotentialIsTheOneThatBalancesTheCentrifugalDrift )
 {
-	// e phi_0 = omega^2 ( r^2 - rRef^2 )( m_1 T_2 - m_2 T_1 )/2( Z_1 T_2 - Z_2 T_1 ),
+	// e phi_0 = omega^2 ( R^2 - R_ref^2 )( m_1 T_2 - m_2 T_1 )/2( Z_1 T_2 - Z_2 T_1 ),
 	// and substituting it back into (96) for each species separately must give
 	// the same density this source reports. That is the check that the potential
 	// and the densities are solutions of the SAME equation.
 	meq::RotatingSource const source = makeSource();
 	std::vector<meq::Species> const species = hydrogenicSpecies();
 
-	for ( double r : testRadii )
+	for ( double radius : testRadii )
 	{
 		for ( double psi : testFluxes )
 		{
-			double const y = source.potential( r, psi );
-			double const delta = r*r - referenceRadius*referenceRadius;
+			double const y = source.potential( radius, psi );
+			double const delta = radius*radius - referenceRadius*referenceRadius;
 			double const w = rotation( psi );
 
 			for ( std::size_t s = 0; s < species.size(); ++s )
@@ -461,9 +461,9 @@ BOOST_AUTO_TEST_CASE( thePotentialIsTheOneThatBalancesTheCentrifugalDrift )
 				double const t = ( *species[ s ].temperature )( psi );
 				double const exponent = species[ s ].mass*w*w*delta/( 2.0*t ) - species[ s ].charge*y/t;
 
-				checkRelative( source.density( s, r, psi ),
+				checkRelative( source.density( s, radius, psi ),
 					( *species[ s ].density )( psi )*std::exp( exponent ), 1.0e-13,
-					"eq (96) rebuilt from the reported potential", r, psi );
+					"eq (96) rebuilt from the reported potential", radius, psi );
 			}
 		}
 	}
@@ -503,37 +503,37 @@ BOOST_AUTO_TEST_CASE( withoutRotationItReproducesTheMhdSource )
 	meq::RotatingSource const noProfile( hydrogenicSpecies(), nullptr, ggPrimeProfile(), referenceRadius );
 	meq::RotatingSource const zeroProfile( hydrogenicSpecies(), rotationProfile( 0.0 ), ggPrimeProfile(), referenceRadius );
 
-	for ( double r : testRadii )
+	for ( double radius : testRadii )
 	{
 		for ( double psi : testFluxes )
 		{
-			checkRelative( noProfile.f( r, 0.0, psi ), mhd.f( r, 0.0, psi ), 1.0e-13,
-				"F with no rotation against MHDSource", r, psi );
-			checkRelative( noProfile.dFdPsi( r, 0.0, psi ), mhd.dFdPsi( r, 0.0, psi ), 1.0e-13,
-				"dF/dpsi with no rotation against MHDSource", r, psi );
-			checkRelative( zeroProfile.f( r, 0.0, psi ), mhd.f( r, 0.0, psi ), 1.0e-13,
-				"F with omega identically zero against MHDSource", r, psi );
-			checkRelative( zeroProfile.dFdPsi( r, 0.0, psi ), mhd.dFdPsi( r, 0.0, psi ), 1.0e-13,
-				"dF/dpsi with omega identically zero against MHDSource", r, psi );
+			checkRelative( noProfile.f( radius, 0.0, psi ), mhd.f( radius, 0.0, psi ), 1.0e-13,
+				"F with no rotation against MHDSource", radius, psi );
+			checkRelative( noProfile.dFdPsi( radius, 0.0, psi ), mhd.dFdPsi( radius, 0.0, psi ), 1.0e-13,
+				"dF/dpsi with no rotation against MHDSource", radius, psi );
+			checkRelative( zeroProfile.f( radius, 0.0, psi ), mhd.f( radius, 0.0, psi ), 1.0e-13,
+				"F with omega identically zero against MHDSource", radius, psi );
+			checkRelative( zeroProfile.dFdPsi( radius, 0.0, psi ), mhd.dFdPsi( radius, 0.0, psi ), 1.0e-13,
+				"dF/dpsi with omega identically zero against MHDSource", radius, psi );
 		}
 	}
 }
 
 BOOST_AUTO_TEST_CASE( theSourceIsTheRadialPressureGradientPlusGgPrime )
 {
-	// F = mu0 r^2 dp/dpsi|_r + g g', which is the collapsed form of RoPP (136).
+	// F = mu0 R^2 dp/dpsi|_r + g g', which is the collapsed form of RoPP (136).
 	// Checking f() against its own two pieces is what localises a failure to one
 	// of them rather than to "the source".
 	meq::RotatingSource const source = makeSource();
 
-	for ( double r : testRadii )
+	for ( double radius : testRadii )
 	{
 		for ( double psi : testFluxes )
 		{
-			double const expected = meq::vacuumPermeability*r*r*source.dPressureDPsi( r, psi )
+			double const expected = meq::vacuumPermeability*radius*radius*source.dPressureDPsi( radius, psi )
 				+ ggPrimeValue( psi );
 
-			checkRelative( source.f( r, 0.0, psi ), expected, 1.0e-14, "F against its two pieces", r, psi );
+			checkRelative( source.f( radius, 0.0, psi ), expected, 1.0e-14, "F against its two pieces", radius, psi );
 		}
 	}
 }
@@ -555,14 +555,14 @@ BOOST_AUTO_TEST_CASE( dPressureDPsiAgreesWithACentralDifference )
 		meq::RotatingSource const source = makeSource( omegaScale );
 		double const h = 1.0e-6;
 
-		for ( double r : testRadii )
+		for ( double radius : testRadii )
 		{
 			for ( double psi : testFluxes )
 			{
-				double const difference = ( source.pressure( r, psi + h ) - source.pressure( r, psi - h ) )/( 2.0*h );
+				double const difference = ( source.pressure( radius, psi + h ) - source.pressure( radius, psi - h ) )/( 2.0*h );
 
-				checkRelative( source.dPressureDPsi( r, psi ), difference, 1.0e-7,
-					"dp/dpsi against a central difference", r, psi );
+				checkRelative( source.dPressureDPsi( radius, psi ), difference, 1.0e-7,
+					"dp/dpsi against a central difference", radius, psi );
 			}
 		}
 	}
@@ -579,19 +579,19 @@ BOOST_AUTO_TEST_CASE( dFdPsiAgreesWithACentralDifference )
 
 		for ( double h : { 1.0e-5, 1.0e-4 } )
 		{
-			for ( double r : testRadii )
+			for ( double radius : testRadii )
 			{
 				for ( double psi : testFluxes )
 				{
-					double const difference = ( source.f( r, 0.0, psi + h ) - source.f( r, 0.0, psi - h ) )/( 2.0*h );
+					double const difference = ( source.f( radius, 0.0, psi + h ) - source.f( radius, 0.0, psi - h ) )/( 2.0*h );
 
 					BOOST_CHECK_MESSAGE(
-						std::fabs( source.dFdPsi( r, 0.0, psi ) - difference )
+						std::fabs( source.dFdPsi( radius, 0.0, psi ) - difference )
 							<= 1.0e-6*std::max( 1.0, std::fabs( difference ) ),
 						"omega scale " << omegaScale << ", h = " << h << ": dFdPsi disagrees with a central "
-						"difference at r = " << r << ", psi = " << psi << ": analytic "
-						<< source.dFdPsi( r, 0.0, psi ) << ", difference " << difference
-						<< " (error " << source.dFdPsi( r, 0.0, psi ) - difference << ")" );
+						"difference at R = " << radius << ", psi = " << psi << ": analytic "
+						<< source.dFdPsi( radius, 0.0, psi ) << ", difference " << difference
+						<< " (error " << source.dFdPsi( radius, 0.0, psi ) - difference << ")" );
 				}
 			}
 		}
@@ -638,23 +638,23 @@ BOOST_AUTO_TEST_CASE( theRootFindReproducesTheClosedFormAtTwoSpecies )
 			ggPrimeProfile(), referenceRadius, meq::vacuumPermeability,
 			meq::RotatingSource::Closure::RootFind );
 
-		// phi_0 vanishes identically at rRef, and identically everywhere when
+		// phi_0 vanishes identically at R_ref, and identically everywhere when
 		// omega is zero, so the floor has to be the problem's own energy scale
 		// rather than anything read off this configuration. e phi_0 is in Joules,
 		// so a keV is the scale, and 1e-12 of a keV is not a potential.
 
-		for ( double r : testRadii )
+		for ( double radius : testRadii )
 		{
 			for ( double psi : testFluxes )
 			{
-				checkRelative( found.potential( r, psi ), closed.potential( r, psi ), 1.0e-12,
-					"phi_0 by root find against the closed form", r, psi, keV );
-				checkRelative( found.dPotentialDPsi( r, psi ), closed.dPotentialDPsi( r, psi ), 1.0e-11,
-					"dphi_0/dpsi by implicit differentiation against the closed form", r, psi, keV );
-				checkRelative( found.f( r, 0.0, psi ), closed.f( r, 0.0, psi ), 1.0e-11,
-					"F by root find against the closed form", r, psi );
-				checkRelative( found.dFdPsi( r, 0.0, psi ), closed.dFdPsi( r, 0.0, psi ), 1.0e-9,
-					"dF/dpsi by root find against the closed form", r, psi );
+				checkRelative( found.potential( radius, psi ), closed.potential( radius, psi ), 1.0e-12,
+					"phi_0 by root find against the closed form", radius, psi, keV );
+				checkRelative( found.dPotentialDPsi( radius, psi ), closed.dPotentialDPsi( radius, psi ), 1.0e-11,
+					"dphi_0/dpsi by implicit differentiation against the closed form", radius, psi, keV );
+				checkRelative( found.f( radius, 0.0, psi ), closed.f( radius, 0.0, psi ), 1.0e-11,
+					"F by root find against the closed form", radius, psi );
+				checkRelative( found.dFdPsi( radius, 0.0, psi ), closed.dFdPsi( radius, 0.0, psi ), 1.0e-9,
+					"dF/dpsi by root find against the closed form", radius, psi );
 			}
 		}
 	}
@@ -667,7 +667,7 @@ BOOST_AUTO_TEST_CASE( quasineutralityHoldsForThreeSpecies )
 	// centrifugal force hardest and is held back by the field hardest.
 	meq::RotatingSource const source = makeImpuritySource();
 
-	for ( double r : testRadii )
+	for ( double radius : testRadii )
 	{
 		for ( double psi : testFluxes )
 		{
@@ -675,13 +675,13 @@ BOOST_AUTO_TEST_CASE( quasineutralityHoldsForThreeSpecies )
 			double magnitude = 0.0;
 			for ( std::size_t sp = 0; sp < 3; ++sp )
 			{
-				double const n = source.density( sp, r, psi );
+				double const n = source.density( sp, radius, psi );
 				charge += source.species()[ sp ].charge*n;
 				magnitude += std::fabs( source.species()[ sp ].charge*n );
 			}
 
 			BOOST_CHECK_MESSAGE( std::fabs( charge ) <= 1.0e-12*magnitude,
-				"three-species quasineutrality fails at r = " << r << ", psi = " << psi
+				"three-species quasineutrality fails at R = " << radius << ", psi = " << psi
 				<< ": sum of Z_s n_s is " << charge << " against " << magnitude );
 		}
 	}
@@ -696,14 +696,14 @@ BOOST_AUTO_TEST_CASE( dPotentialDPsiAgreesWithACentralDifference )
 	meq::RotatingSource const source = makeImpuritySource();
 	double const h = 1.0e-7;
 
-	for ( double r : testRadii )
+	for ( double radius : testRadii )
 	{
 		for ( double psi : testFluxes )
 		{
-			double const difference = ( source.potential( r, psi + h ) - source.potential( r, psi - h ) )/( 2.0*h );
+			double const difference = ( source.potential( radius, psi + h ) - source.potential( radius, psi - h ) )/( 2.0*h );
 
-			checkRelative( source.dPotentialDPsi( r, psi ), difference, 1.0e-6,
-				"dphi_0/dpsi against a central difference", r, psi, keV );
+			checkRelative( source.dPotentialDPsi( radius, psi ), difference, 1.0e-6,
+				"dphi_0/dpsi against a central difference", radius, psi, keV );
 		}
 	}
 }
@@ -716,17 +716,17 @@ BOOST_AUTO_TEST_CASE( dFdPsiAgreesWithACentralDifferenceForThreeSpecies )
 
 	for ( double h : { 1.0e-5, 1.0e-4 } )
 	{
-		for ( double r : testRadii )
+		for ( double radius : testRadii )
 		{
 			for ( double psi : testFluxes )
 			{
-				double const difference = ( source.f( r, 0.0, psi + h ) - source.f( r, 0.0, psi - h ) )/( 2.0*h );
+				double const difference = ( source.f( radius, 0.0, psi + h ) - source.f( radius, 0.0, psi - h ) )/( 2.0*h );
 
 				BOOST_CHECK_MESSAGE(
-					std::fabs( source.dFdPsi( r, 0.0, psi ) - difference )
+					std::fabs( source.dFdPsi( radius, 0.0, psi ) - difference )
 						<= 1.0e-6*std::max( 1.0, std::fabs( difference ) ),
-					"three species, h = " << h << ": dFdPsi disagrees with a central difference at r = "
-					<< r << ", psi = " << psi << ": analytic " << source.dFdPsi( r, 0.0, psi )
+					"three species, h = " << h << ": dFdPsi disagrees with a central difference at R = "
+					<< radius << ", psi = " << psi << ": analytic " << source.dFdPsi( radius, 0.0, psi )
 					<< ", difference " << difference );
 			}
 		}
@@ -782,17 +782,17 @@ BOOST_AUTO_TEST_CASE( theNormalisedSourceCarriesOneFactorInFAndTwoInTheJacobian 
 			ggPrimeProfile(), referenceRadius, psiAxis );
 		meq::RotatingSource const plain = makeSource();
 
-		for ( double r : testRadii )
+		for ( double radius : testRadii )
 		{
 			for ( double psiN : testFluxes )
 			{
 				double const psi = psiN*psiAxis;
 
-				checkRelative( normalised.f( r, 0.0, psi ), plain.f( r, 0.0, psiN )/psiAxis,
-					1.0e-14, "the normalised F against the plain one rescaled", r, psi );
-				checkRelative( normalised.dFdPsi( r, 0.0, psi ),
-					plain.dFdPsi( r, 0.0, psiN )/( psiAxis*psiAxis ),
-					1.0e-14, "the normalised dF/dpsi against the plain one rescaled", r, psi );
+				checkRelative( normalised.f( radius, 0.0, psi ), plain.f( radius, 0.0, psiN )/psiAxis,
+					1.0e-14, "the normalised F against the plain one rescaled", radius, psi );
+				checkRelative( normalised.dFdPsi( radius, 0.0, psi ),
+					plain.dFdPsi( radius, 0.0, psiN )/( psiAxis*psiAxis ),
+					1.0e-14, "the normalised dF/dpsi against the plain one rescaled", radius, psi );
 			}
 		}
 	}
@@ -811,18 +811,18 @@ BOOST_AUTO_TEST_CASE( theNormalisedJacobianAgreesWithACentralDifferenceInPhysica
 
 		double const h = 1.0e-5*std::fabs( psiAxis );
 
-		for ( double r : testRadii )
+		for ( double radius : testRadii )
 		{
 			for ( double psiN : testFluxes )
 			{
 				double const psi = psiN*psiAxis;
-				double const difference = ( source.f( r, 0.0, psi + h ) - source.f( r, 0.0, psi - h ) )/( 2.0*h );
+				double const difference = ( source.f( radius, 0.0, psi + h ) - source.f( radius, 0.0, psi - h ) )/( 2.0*h );
 
 				BOOST_CHECK_MESSAGE(
-					std::fabs( source.dFdPsi( r, 0.0, psi ) - difference )
+					std::fabs( source.dFdPsi( radius, 0.0, psi ) - difference )
 						<= 1.0e-6*std::max( 1.0, std::fabs( difference ) ),
-					"psi_ax = " << psiAxis << ": dFdPsi disagrees with a central difference in physical psi at r = "
-					<< r << ", psi = " << psi << ": analytic " << source.dFdPsi( r, 0.0, psi )
+					"psi_ax = " << psiAxis << ": dFdPsi disagrees with a central difference in physical psi at R = "
+					<< radius << ", psi = " << psi << ": analytic " << source.dFdPsi( radius, 0.0, psi )
 					<< ", difference " << difference << " -- a wrong number of factors of psi_ax presents "
 					"exactly like this" );
 			}
@@ -899,27 +899,27 @@ BOOST_AUTO_TEST_CASE( aConfinedRotatingSourceVanishesOutsideThePlasma )
 	// dFdPsi() that do not ask it.
 	BOOST_TEST_REQUIRE( !source.insidePlasma( -0.5 ) );
 
-	for ( double r : testRadii )
+	for ( double radius : testRadii )
 		for ( double psi : { -0.5, -0.1, -1.0e-6 } )
 		{
-			BOOST_TEST( source.f( r, 0.0, psi ) == 0.0,
-			            "F = " << source.f( r, 0.0, psi ) << " at r = " << r
+			BOOST_TEST( source.f( radius, 0.0, psi ) == 0.0,
+			            "F = " << source.f( radius, 0.0, psi ) << " at R = " << radius
 			            << ", Psi = " << psi << ", outside the plasma of a source "
 			            "with setPlasmaSupport() on. ConfineToPlasma is reachable "
 			            "for Type = \"rotating\" from a TOML file and is inert: "
 			            "NormalisedRotatingSource::f() never calls insidePlasma()" );
-			BOOST_TEST( source.dFdPsi( r, 0.0, psi ) == 0.0,
-			            "dF/dpsi = " << source.dFdPsi( r, 0.0, psi ) << " at r = "
-			            << r << ", Psi = " << psi << ", outside the plasma; see above" );
+			BOOST_TEST( source.dFdPsi( radius, 0.0, psi ) == 0.0,
+			            "dF/dpsi = " << source.dFdPsi( radius, 0.0, psi ) << " at R = "
+			            << radius << ", Psi = " << psi << ", outside the plasma; see above" );
 		}
 
 	// And the confinement must not have switched anything off INSIDE, which is
 	// the half a bare "return 0" would break.
-	for ( double r : testRadii )
+	for ( double radius : testRadii )
 	{
 		meq::NormalisedRotatingSource unconfined( hydrogenicSpecies(), rotationProfile(),
 			ggPrimeProfile(), referenceRadius, 1.0 );
-		BOOST_TEST( source.f( r, 0.0, 0.5 ) == unconfined.f( r, 0.0, 0.5 ) );
+		BOOST_TEST( source.f( radius, 0.0, 0.5 ) == unconfined.f( radius, 0.0, 0.5 ) );
 	}
 }
 
@@ -938,12 +938,12 @@ BOOST_AUTO_TEST_SUITE_END()
  * WHAT THAT COSTS IS NOT A MISSING FEATURE BUT A JACOBIAN DESCRIBING A
  * DIFFERENT PROBLEM FROM THE RESIDUAL. With `F` independent of lambda:
  *
- *   - assemblePlasmaCurrent() returns an `int F/r` that does not respond to
+ *   - assemblePlasmaCurrent() returns an `int F/R` that does not respond to
  *     lambda at all, so the constraint cannot be satisfied by the unknown that
  *     exists to satisfy it;
  *   - assembleCurrentColumn() computes dR/dlambda as scaledF/lambda, which is
  *     not zero -- so the column is a fabrication;
- *   - cornerEntry( I, I ) returns ( int F/r )/lambda, likewise.
+ *   - cornerEntry( I, I ) returns ( int F/R )/lambda, likewise.
  *
  * Newton is then driven towards a current it can never deliver by a
  * sensitivity that does not exist.
@@ -974,16 +974,16 @@ BOOST_AUTO_TEST_CASE( theCurrentScaleMultipliesTheRotatingPlasmaTerm )
 	                    "does not prescribe a current changes" );
 
 	for ( double const lambda : { 0.5, 1.0, 2.5 } )
-		for ( double const r : testRadii )
+		for ( double const radius : testRadii )
 			for ( double const psi : { 0.1, 0.4, 0.7 } )
 			{
 				source.setCurrentScale( 1.0 );
-				double const bareF = source.f( r, 0.0, psi );
-				double const bareD = source.dFdPsi( r, 0.0, psi );
+				double const bareF = source.f( radius, 0.0, psi );
+				double const bareD = source.dFdPsi( radius, 0.0, psi );
 
 				source.setCurrentScale( lambda );
-				double const scaledFValue = source.f( r, 0.0, psi );
-				double const scaledDValue = source.dFdPsi( r, 0.0, psi );
+				double const scaledFValue = source.f( radius, 0.0, psi );
+				double const scaledDValue = source.dFdPsi( radius, 0.0, psi );
 
 				auto closeEnough = []( double got, double want )
 				{
@@ -993,11 +993,11 @@ BOOST_AUTO_TEST_CASE( theCurrentScaleMultipliesTheRotatingPlasmaTerm )
 				};
 
 				BOOST_TEST( closeEnough( scaledFValue, lambda*bareF ),
-				            "f() at lambda = " << lambda << ", r = " << r
+				            "f() at lambda = " << lambda << ", R = " << radius
 				            << ", psi = " << psi << " reads " << scaledFValue
 				            << " against " << lambda*bareF );
 				BOOST_TEST( closeEnough( scaledDValue, lambda*bareD ),
-				            "dFdPsi() at lambda = " << lambda << ", r = " << r
+				            "dFdPsi() at lambda = " << lambda << ", R = " << radius
 				            << ", psi = " << psi << " reads " << scaledDValue
 				            << " against " << lambda*bareD );
 			}
@@ -1011,11 +1011,11 @@ BOOST_AUTO_TEST_CASE( theCurrentScaleMultipliesTheRotatingPlasmaTerm )
 	// the same call with the same arguments, so there is no arithmetic between
 	// them to reassociate.
 	source.setCurrentScale( 2.5 );
-	for ( double const r : testRadii )
+	for ( double const radius : testRadii )
 	{
-		BOOST_TEST( source.scaledF( r, 0.0, 0.4 ) == source.f( r, 0.0, 0.4 ) );
-		BOOST_TEST( source.scaledDFdPsi( r, 0.0, 0.4 )
-		            == source.dFdPsi( r, 0.0, 0.4 ) );
+		BOOST_TEST( source.scaledF( radius, 0.0, 0.4 ) == source.f( radius, 0.0, 0.4 ) );
+		BOOST_TEST( source.scaledDFdPsi( radius, 0.0, 0.4 )
+		            == source.dFdPsi( radius, 0.0, 0.4 ) );
 	}
 }
 
@@ -1057,16 +1057,16 @@ BOOST_AUTO_TEST_CASE( theRotatingNormalisationDerivativesAreAnalytic )
 	// would pass.
 	source.setCurrentScale( 1.7 );
 
-	auto difference = [ & ]( double r, double psi, bool axis )
+	auto difference = [ & ]( double radius, double psi, bool axis )
 	{
 		auto at = [ & ]( double step )
 		{
 			source.setNormalisation( axis ? 0.9 + step : 0.9,
 			                         axis ? -0.2 : -0.2 + step );
-			double const plus = source.f( r, z, psi );
+			double const plus = source.f( radius, z, psi );
 			source.setNormalisation( axis ? 0.9 - step : 0.9,
 			                         axis ? -0.2 : -0.2 - step );
-			double const minus = source.f( r, z, psi );
+			double const minus = source.f( radius, z, psi );
 			return ( plus - minus )/( 2.0*step );
 		};
 		double const h = 1.0e-4;
@@ -1075,21 +1075,21 @@ BOOST_AUTO_TEST_CASE( theRotatingNormalisationDerivativesAreAnalytic )
 
 	std::printf( "\n  THE ROTATING BORDER COLUMNS IN CLOSED FORM\n" );
 	std::printf( "    %6s %8s %16s %16s %12s %16s %16s %12s\n",
-	             "r", "psi", "dF/dpsi_ax", "difference", "rel",
+	             "R", "psi", "dF/dpsi_ax", "difference", "rel",
 	             "dF/dpsi_bnd", "difference", "rel" );
 
-	for ( double const r : testRadii )
+	for ( double const radius : testRadii )
 		for ( double const psi : { 0.1, 0.4, 0.7 } )
 		{
 			source.setNormalisation( 0.9, -0.2 );
 			double analyticAxis = 0.0, analyticBoundary = 0.0;
 			BOOST_TEST_REQUIRE( source.normalisationDerivatives(
-				r, z, psi, analyticAxis, analyticBoundary ),
+				radius, z, psi, analyticAxis, analyticBoundary ),
 				"NormalisedRotatingSource must supply its normalisation "
 				"derivatives" );
 
-			double const numericAxis = difference( r, psi, true );
-			double const numericBoundary = difference( r, psi, false );
+			double const numericAxis = difference( radius, psi, true );
+			double const numericBoundary = difference( radius, psi, false );
 
 			double const relA = std::abs( analyticAxis - numericAxis )
 			                    /std::max( std::abs( numericAxis ), 1.0 );
@@ -1097,15 +1097,15 @@ BOOST_AUTO_TEST_CASE( theRotatingNormalisationDerivativesAreAnalytic )
 			                    /std::max( std::abs( numericBoundary ), 1.0 );
 
 			std::printf( "    %6.2f %8.2f %16.8e %16.8e %12.2e %16.8e %16.8e "
-			             "%12.2e\n", r, psi, analyticAxis, numericAxis, relA,
+			             "%12.2e\n", radius, psi, analyticAxis, numericAxis, relA,
 			             analyticBoundary, numericBoundary, relB );
 
 			BOOST_TEST( relA < 1.0e-8,
-			            "dF/dpsi_ax at r = " << r << ", psi = " << psi
+			            "dF/dpsi_ax at R = " << radius << ", psi = " << psi
 			            << " reads " << analyticAxis << " against a differenced "
 			            << numericAxis );
 			BOOST_TEST( relB < 1.0e-8,
-			            "dF/dpsi_bnd at r = " << r << ", psi = " << psi
+			            "dF/dpsi_bnd at R = " << radius << ", psi = " << psi
 			            << " reads " << analyticBoundary
 			            << " against a differenced " << numericBoundary );
 		}

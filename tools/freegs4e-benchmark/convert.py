@@ -114,7 +114,7 @@ def to_meq_normalised_table(psi_n, values, level):
 
     and meq::NormalisedMHDSource evaluates
 
-        F = [ mu0 r^2 ( dp/dPsi )( Psi ) + ( g dg/dPsi )( Psi ) ] / psi_ax
+        F = [ mu0 R^2 ( dp/dPsi )( Psi ) + ( g dg/dPsi )( Psi ) ] / psi_ax
 
     -- so the VALUE column is d/dPsi, not d/dpsi, and the two differ by
     psi_ax_MEQ = -level * D.  The division by psi_ax inside the source then

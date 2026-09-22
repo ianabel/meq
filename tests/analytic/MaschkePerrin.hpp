@@ -20,7 +20,7 @@
  * fixtures solve the SAME partial differential equation: Li & Zhu's (12) and
  * Maschke & Perrin's (4.10) are
  *
- *     Delta*( psi ) = -p1 r^2 exp[ M2 ( r^2/R0^2 - 1 ) ] - F0            Li & Zhu
+ *     Delta*( psi ) = -p1 R^2 exp[ M2 ( R^2/R0^2 - 1 ) ] - F0            Li & Zhu
  *     L F           = -( P/R0^4 ) R^2 exp[ m R^2/2R0^2 ] - M/R0^2        (4.10)
  *
  * which differ by renaming and by a constant absorbed into the amplitude, and
@@ -61,8 +61,8 @@
  * dF/dpsi IS IDENTICALLY ZERO, so this sits on Soloviev.hpp's rung of the ladder
  * tests/analytic keeps and not McCarthy.hpp's:
  *
- *   Soloviev.hpp               F constant in psi and in r beyond the r^2
- *   RotatingSoloviev.hpp       F constant in psi, exponential in r^2
+ *   Soloviev.hpp               F constant in psi and in R beyond the R^2
+ *   RotatingSoloviev.hpp       F constant in psi, exponential in R^2
  *   MaschkePerrin.hpp          the same, from psi-DEPENDENT profiles
  *   McCarthy.hpp               F linear in psi
  *   ManufacturedNonlinear.hpp  F nonlinear in psi
@@ -110,15 +110,15 @@ namespace analytic
  *
  * 4. THE PAPER IS IN j = curl( B ) UNITS. Its (2.13) is
  *    ( L F + JJ' )grad( F ) = -R^2 grad( p ) + rho R^3 omega^2 grad( R ) with no
- *    mu0, against MEQ's F = mu0 r^2 dp/dpsi|_r + g g'. So p_SI = p_M&P/mu0, and
+ *    mu0, against MEQ's F = mu0 R^2 dp/dpsi|_r + g g'. So p_SI = p_M&P/mu0, and
  *    a fixture that carried the paper's p as an SI pressure would be out by
  *    1.26e-6. Everything below is in the paper's units with mu0 = 1, which is
  *    also what the rest of this directory uses.
  *
  * AND pdftotext IS NOT SAFE ON IT. CLAUDE.md records that tool silently dropping
  * minus signs on one paper in refs/ and dropping RADICALS and displacing
- * EXPONENTS on another. On this one it renders "( r1 r2 ) 2" for
- * ( r1 r2 )^{3/2} and loses the square root off an elliptic modulus. Every
+ * EXPONENTS on another. On this one it renders "( R_1 r2 ) 2" for
+ * ( R_1 r2 )^{3/2} and loses the square root off an elliptic modulus. Every
  * equation transcribed below was read off the page rendered at 200 dpi.
  */
 
@@ -136,13 +136,13 @@ namespace analytic
  *
  * and MEQ writes the equation as -Delta*( psi ) = F, so
  *
- *     F( r, z, psi ) = ( P/R0^4 ) r^2 exp[ m r^2/2R0^2 ] + M/R0^2            (*)
+ *     F( R, z, psi ) = ( P/R0^4 ) R^2 exp[ m R^2/2R0^2 ] + M/R0^2            (*)
  *
  * with m := gamma Omega^2. POSITIVE, and F is the full right hand side numerator
- * with no 1/r applied, as everywhere else in this directory. Read against MEQ's
- * own F = mu0 r^2 dp/dpsi|_r + g g' at mu0 = 1, (*) says
+ * with no 1/R applied, as everywhere else in this directory. Read against MEQ's
+ * own F = mu0 R^2 dp/dpsi|_r + g g' at mu0 = 1, (*) says
  *
- *     dp/dpsi|_r = ( P/R0^4 ) exp[ m r^2/2R0^2 ],      g g' = M/R0^2,
+ *     dp/dpsi|_r = ( P/R0^4 ) exp[ m R^2/2R0^2 ],      g g' = M/R0^2,
  *
  * and the first of those is the paper's (4.8) with its (4.9) substituted.
  *
@@ -176,11 +176,11 @@ namespace analytic
  * C IS NOT FREE. Section 4.4 fixes it by requiring an extremum of psi at
  * ( X = 0, R = R_a ), which is what makes R_a the magnetic axis, and (4.18) is
  * the result. This class computes it rather than storing it, so a caller cannot
- * hand it a C inconsistent with its own r_a.
+ * hand it a C inconsistent with its own R_a.
  *
  * Lengths are arbitrary but consistent, and unlike RotatingSoloviev.hpp there is
- * no ln r anywhere, so r = 0 is not excluded by the expansion -- only by the
- * 1/r of the operator itself.
+ * no ln R anywhere, so R = 0 is not excluded by the expansion -- only by the
+ * 1/R of the operator itself.
  *
  * NUMERICAL STABILITY AS m -> 0, WHICH IS THE SAME 0/0 RotatingSoloviev.hpp
  * MEETS AND IS WORTH SPELLING OUT AGAIN BECAUSE THE ALGEBRA IS DIFFERENT.
@@ -198,7 +198,7 @@ namespace analytic
  * entire with G2( 0 ) = 1/2, so m = 0 needs no branch and falls out as
  * -P R^4/( 8 R0^4 ), which is the limit the paper prints under its own (4.16).
  * The radial derivative goes the same way through G1( w ) := ( e^w - 1 )/w, and
- * so does (4.18)'s second term, which is ( r_a^2/4 ) G1( m r_a^2/2 ).
+ * so does (4.18)'s second term, which is ( R_a^2/4 ) G1( m R_a^2/2 ).
  *
  * What still needs care is small w, which happens for any m whenever R is small.
  * G1 and G2 switch to their Taylor series below |w| = seriesThreshold().
@@ -213,13 +213,13 @@ class MaschkePerrinEquilibrium
 		///                       trap 3 above on why this is not called Omega^2.
 		///                       Zero is legal and gives the static equilibrium.
 		/// @param pressureIn     P, the pressure amplitude of (4.9). At mu0 = 1
-		///                       the source is ( P/R0^4 ) r^2 exp( ... ).
+		///                       the source is ( P/R0^4 ) R^2 exp( ... ).
 		/// @param currentIn      M of (4.9), so that g g' = M/R0^2. Zero is
 		///                       (4.17) as the paper prints it.
 		/// @param ellipticityIn  eps_a of (3.16), which fixes the cross-section
 		///                       through (4.19). eps_a = 0 gives a circular
 		///                       cross-section at m = 0; it may be negative.
-		/// @param axisRadiusIn   r_a = R_a/R0, where the magnetic axis is put.
+		/// @param axisRadiusIn   R_a = R_a/R0, where the magnetic axis is put.
 		///                       Strictly positive.
 		/// @param fluxOffsetIn   F_0, the additive constant of (3.16). It is what
 		///                       chooses WHICH surface is psi = 0 and nothing
@@ -257,7 +257,7 @@ class MaschkePerrinEquilibrium
 		 * closed psi = 0 contour well inside MEQ's standard benchmark box
 		 * [0.6,1.4] x [-0.6,0.6]:
 		 *
-		 *     R0 = 1, r_a = 1        the magnetic axis at the geometric centre,
+		 *     R0 = 1, R_a = 1        the magnetic axis at the geometric centre,
 		 *                            which (4.18) then enforces exactly
 		 *     eps_a = 0              a circular cross-section in the static
 		 *                            limit, so that (4.19)'s elongation is
@@ -267,8 +267,8 @@ class MaschkePerrinEquilibrium
 		 *
 		 * Only ONE geometric condition is available, unlike RotatingSoloviev's
 		 * four, and that is a property of the solution family rather than a
-		 * choice: eps_a, r_a and m fix the SHAPE of the level sets outright, and
-		 * F_0 chooses only which of them is psi = 0. There is no r^2 ln r term
+		 * choice: eps_a, R_a and m fix the SHAPE of the level sets outright, and
+		 * F_0 chooses only which of them is psi = 0. There is no R^2 ln R term
 		 * to trade against, so a second condition would over-determine it.
 		 *
 		 * MEASURED, evaluated in double precision over the benchmark box:
@@ -335,62 +335,62 @@ class MaschkePerrinEquilibrium
 
 		/// The poloidal flux function, evaluated in the form that is stable as
 		/// m -> 0. See the class comment.
-		double psi( double r, double z ) const
+		double psi( double radius, double z ) const
 		{
 			double const r0Sq = majorRadius*majorRadius;
 			double const r0Fourth = r0Sq*r0Sq;
-			double const r2 = r*r;
+			double const r2 = radius*radius;
 			double const z2 = z*z;
 
 			return coefficientC()*pressure*r2/r0Sq
 			       - 0.5*current*z2/r0Sq
 			       + ( ellipticity - 1.0 )*pressure*r2*( z2 - 0.25*r2 )/( 4.0*r0Fourth )
 			       + fluxOffset
-			       + particular( r );
+			       + particular( radius );
 		}
 
 		/// grad_bar( psi ) = ( d_r psi, d_z psi ), differentiated by hand rather
-		/// than differenced. Not the HDG flux: that is this divided by r, see
+		/// than differenced. Not the HDG flux: that is this divided by R, see
 		/// flux().
-		void gradPsi( double r, double z, double &dPsiDr, double &dPsiDz ) const
+		void gradPsi( double radius, double z, double &dPsiDr, double &dPsiDz ) const
 		{
 			double const r0Sq = majorRadius*majorRadius;
 			double const r0Fourth = r0Sq*r0Sq;
-			double const r2 = r*r;
+			double const r2 = radius*radius;
 			double const z2 = z*z;
 
-			// d/dr of ( eps_a - 1 ) P r^2( z^2 - r^2/4 )/( 4 R0^4 ) is
-			// ( eps_a - 1 ) P ( 2 r z^2 - r^3 )/( 4 R0^4 ).
-			dPsiDr = 2.0*coefficientC()*pressure*r/r0Sq
-			       + ( ellipticity - 1.0 )*pressure*( 2.0*r*z2 - r2*r )/( 4.0*r0Fourth )
-			       + particularPrime( r );
+			// d/dr of ( eps_a - 1 ) P R^2( z^2 - R^2/4 )/( 4 R0^4 ) is
+			// ( eps_a - 1 ) P ( 2 R z^2 - R^3 )/( 4 R0^4 ).
+			dPsiDr = 2.0*coefficientC()*pressure*radius/r0Sq
+			       + ( ellipticity - 1.0 )*pressure*( 2.0*radius*z2 - r2*radius )/( 4.0*r0Fourth )
+			       + particularPrime( radius );
 
 			dPsiDz = -current*z/r0Sq
 			       + ( ellipticity - 1.0 )*pressure*r2*z/( 2.0*r0Fourth );
 		}
 
-		/// The HDG flux q = grad_bar( psi )/r.
-		void flux( double r, double z, double &qR, double &qZ ) const
+		/// The HDG flux q = grad_bar( psi )/R.
+		void flux( double radius, double z, double &qR, double &qZ ) const
 		{
-			gradPsi( r, z, qR, qZ );
-			qR /= r;
-			qZ /= r;
+			gradPsi( radius, z, qR, qZ );
+			qR /= radius;
+			qZ /= radius;
 		}
 
 		/// The Grad-Shafranov source of (4.10), read through MEQ's
 		/// -Delta*( psi ) = F:
 		///
-		///     F = ( P/R0^4 ) r^2 exp[ m r^2/( 2 R0^2 ) ] + M/R0^2.
+		///     F = ( P/R0^4 ) R^2 exp[ m R^2/( 2 R0^2 ) ] + M/R0^2.
 		///
-		/// Returns F, not F/r. Independent of psi, which is what makes this
-		/// equilibrium linear -- and exponential in r^2, which is the whole
+		/// Returns F, not F/R. Independent of psi, which is what makes this
+		/// equilibrium linear -- and exponential in R^2, which is the whole
 		/// structural consequence of sonic rotation.
-		double f( double r, double /*z*/, double /*psiValue*/ ) const
+		double f( double radius, double /*z*/, double /*psiValue*/ ) const
 		{
 			double const r0Sq = majorRadius*majorRadius;
 			double const r0Fourth = r0Sq*r0Sq;
 
-			return pressure*r*r*std::exp( machSquared*r*r/( 2.0*r0Sq ) )/r0Fourth
+			return pressure*radius*radius*std::exp( machSquared*radius*radius/( 2.0*r0Sq ) )/r0Fourth
 			       + current/r0Sq;
 		}
 
@@ -412,29 +412,29 @@ class MaschkePerrinEquilibrium
 		/// The implementation RotatingSoloviev.hpp and McCarthy.hpp carry,
 		/// deliberately: this is the one check every fixture in this directory
 		/// shares, and it is worth being able to diff them and see nothing.
-		double deltaStarFD( double r, double z, double h = 1.0e-4 ) const
+		double deltaStarFD( double radius, double z, double h = 1.0e-4 ) const
 		{
-			// r d_r( ( 1/r ) d_r psi ) as a second difference of the inner
+			// R d_r( ( 1/R ) d_r psi ) as a second difference of the inner
 			// quantity, plus d_zz psi.
 			auto innerR = [ & ]( double rr )
 			{
 				return ( psi( rr + h, z ) - psi( rr - h, z ) ) / ( 2.0 * h ) / rr;
 			};
 
-			double const dRInner = ( innerR( r + h ) - innerR( r - h ) ) / ( 2.0 * h );
-			double const dZZ = ( psi( r, z + h ) - 2.0 * psi( r, z ) + psi( r, z - h ) )
+			double const dRInner = ( innerR( radius + h ) - innerR( radius - h ) ) / ( 2.0 * h );
+			double const dZZ = ( psi( radius, z + h ) - 2.0 * psi( radius, z ) + psi( radius, z - h ) )
 			                 / ( h * h );
 
-			return r * dRInner + dZZ;
+			return radius * dRInner + dZZ;
 		}
 
 		/// C of (4.18), computed rather than stored:
 		///
-		///     C = ( ( eps_a - 1 )/8 ) r_a^2 + ( 1/2m )( exp( m r_a^2/2 ) - 1 )
-		///       = ( ( eps_a - 1 )/8 ) r_a^2 + ( r_a^2/4 ) G1( m r_a^2/2 ),
+		///     C = ( ( eps_a - 1 )/8 ) R_a^2 + ( 1/2m )( exp( m R_a^2/2 ) - 1 )
+		///       = ( ( eps_a - 1 )/8 ) R_a^2 + ( R_a^2/4 ) G1( m R_a^2/2 ),
 		///
 		/// the second form being the one evaluated, in which m has cancelled and
-		/// m = 0 needs no branch. It is what makes r_a the magnetic axis, and
+		/// m = 0 needs no branch. It is what makes R_a the magnetic axis, and
 		/// theAxisConditionIsThePapersOwn asserts the condition it comes from.
 		double coefficientC() const
 		{
@@ -444,7 +444,7 @@ class MaschkePerrinEquilibrium
 
 		/// ( b/a )^2 at the magnetic axis from (4.19),
 		///
-		///     ( b/a )_T^2 = 2 exp( m r_a^2/2 )/( 1 - eps_a ) - 1.
+		///     ( b/a )_T^2 = 2 exp( m R_a^2/2 )/( 1 - eps_a ) - 1.
 		///
 		/// VALID FOR M = 0 ONLY, and this function does not check that, because
 		/// the disagreement at M != 0 is itself worth measuring -- see the table
@@ -471,7 +471,7 @@ class MaschkePerrinEquilibrium
 			return machSquared;
 		}
 
-		/// P of (4.9). At mu0 = 1, dp/dpsi|_r is ( P/R0^4 ) exp( m r^2/2R0^2 ).
+		/// P of (4.9). At mu0 = 1, dp/dpsi|_r is ( P/R0^4 ) exp( m R^2/2R0^2 ).
 		double getPressure() const
 		{
 			return pressure;
@@ -489,7 +489,7 @@ class MaschkePerrinEquilibrium
 			return ellipticity;
 		}
 
-		/// r_a = R_a/R0, the magnetic axis.
+		/// R_a = R_a/R0, the magnetic axis.
 		double getAxisRadius() const
 		{
 			return axisRadius;
@@ -503,7 +503,7 @@ class MaschkePerrinEquilibrium
 		}
 
 		/// |w| below which G1 and G2 are summed rather than evaluated, with
-		/// w = m r^2/( 2 R0^2 ). Public because it is the one number a test of
+		/// w = m R^2/( 2 R0^2 ). Public because it is the one number a test of
 		/// the crossover has to know: a sweep that never straddles it measures
 		/// one branch twice.
 		///
@@ -568,25 +568,25 @@ class MaschkePerrinEquilibrium
 			return ( std::exp( w ) - w - 1.0 )/( w*w );
 		}
 
-		/// (4.16)'s g_T, written as -( P r^4/( 4 R0^4 ) ) G2( w ). m has
+		/// (4.16)'s g_T, written as -( P R^4/( 4 R0^4 ) ) G2( w ). m has
 		/// cancelled: this is finite and accurate at m = 0, where G2( 0 ) = 1/2
-		/// recovers the paper's own -P( r/R0 )^4/8.
-		double particular( double r ) const
+		/// recovers the paper's own -P( R/R0 )^4/8.
+		double particular( double radius ) const
 		{
 			double const r0Sq = majorRadius*majorRadius;
-			double const w = 0.5*machSquared*r*r/r0Sq;
-			return -0.25*pressure*r*r*r*r*g2( w )/( r0Sq*r0Sq );
+			double const w = 0.5*machSquared*radius*radius/r0Sq;
+			return -0.25*pressure*radius*radius*radius*radius*g2( w )/( r0Sq*r0Sq );
 		}
 
 		/// d/dr of particular(). Differentiating (4.16) gives
-		/// -( P r/( m R0^2 ) )( e^w - 1 ), and the same cancellation applies:
-		/// e^w - 1 = w G1( w ) = ( m r^2/2R0^2 ) G1( w ), leaving
-		/// -( P r^3/( 2 R0^4 ) ) G1( w ).
-		double particularPrime( double r ) const
+		/// -( P R/( m R0^2 ) )( e^w - 1 ), and the same cancellation applies:
+		/// e^w - 1 = w G1( w ) = ( m R^2/2R0^2 ) G1( w ), leaving
+		/// -( P R^3/( 2 R0^4 ) ) G1( w ).
+		double particularPrime( double radius ) const
 		{
 			double const r0Sq = majorRadius*majorRadius;
-			double const w = 0.5*machSquared*r*r/r0Sq;
-			return -0.5*pressure*r*r*r*g1( w )/( r0Sq*r0Sq );
+			double const w = 0.5*machSquared*radius*radius/r0Sq;
+			return -0.5*pressure*radius*radius*radius*g1( w )/( r0Sq*r0Sq );
 		}
 };
 

@@ -11,7 +11,7 @@ namespace meq
 		: sourceMesh( sourceMeshIn ), misses( 0 ), points( 0 ), worstDist( 0.0 )
 	{
 		if ( sourceMesh.Dimension() != 2 )
-			throw std::invalid_argument( "meq::FieldTransfer: the source mesh must be two dimensional ( r, z )" );
+			throw std::invalid_argument( "meq::FieldTransfer: the source mesh must be two dimensional ( R, z )" );
 
 		// FindPointsGSLIB::Setup() requires the mesh to carry an explicit nodal
 		// grid function -- "Mesh nodes are required" -- and a mesh from
@@ -100,7 +100,7 @@ namespace meq
 		mfem::IntegrationRule const **rules = nullptr;
 		(void)rules;
 
-		std::vector<double> r, z;
+		std::vector<double> radius, z;
 		std::vector<int> firstPoint( elements + 1, 0 );
 
 		mfem::Vector node( 2 );
@@ -114,29 +114,29 @@ namespace meq
 			mfem::IntegrationRule const &ir =
 				mfem::IntRules.Get( fe->GetGeomType(), 2*fe->GetOrder() + 2 );
 
-			firstPoint[ e ] = static_cast<int>( r.size() );
+			firstPoint[ e ] = static_cast<int>( radius.size() );
 			for ( int q = 0; q < ir.GetNPoints(); ++q )
 			{
 				tr->Transform( ir.IntPoint( q ), node );
-				r.push_back( node( 0 ) );
+				radius.push_back( node( 0 ) );
 				z.push_back( node( 1 ) );
 			}
 		}
-		firstPoint[ elements ] = static_cast<int>( r.size() );
+		firstPoint[ elements ] = static_cast<int>( radius.size() );
 
-		points = static_cast<int>( r.size() );
+		points = static_cast<int>( radius.size() );
 		misses = 0;
 		worstDist = 0.0;
 		if ( points == 0 )
 			return 0;
 
-		// byNODES: every r, then every z. gslib's own default, passed explicitly
+		// byNODES: every R, then every z. gslib's own default, passed explicitly
 		// because the two orderings differ silently and a transposed point cloud
 		// would give a plausible wrong answer rather than an error.
 		mfem::Vector positions( 2*points );
 		for ( int i = 0; i < points; ++i )
 		{
-			positions( i ) = r[ i ];
+			positions( i ) = radius[ i ];
 			positions( points + i ) = z[ i ];
 		}
 
