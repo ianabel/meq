@@ -7499,6 +7499,40 @@ without order. At `M = 12` from the reference's LCFS:
 | `\|m\| <= 4` | **2.406e-04** |
 | `\|m\| <= 6` | 2.563e-03 |
 
+**AND IT IS NOT THE SEED EITHER, WHICH WAS THE OBVIOUS HYPOTHESIS AND IS
+FALSIFIED.** If these were basins then the STARTING boundary would decide which
+one is reached and `M` would only be a proxy for it, the surface being re-fitted
+at every resolution. `descfreeb.py --blend t` tests that directly: it seeds at
+`( 1 - t )` of the design circle plus `t` of the reference's curve, sampled at
+the same poloidal parameter, so the seed moves continuously at FIXED `M`. At
+`M = 12`:
+
+| seed `t` | `psi_ax` against the reference | boundary vs the LCFS | iterations |
+|---|---|---|---|
+| 0.00 — the circle | 3.853e-02 | 4.6922e-02 m | 11 |
+| 0.25 | 5.026e-02 | 6.1126e-02 | 4 |
+| 0.50 | 3.737e-02 | 4.5471e-02 | 17 |
+| 0.75 | 4.327e-02 | 5.2627e-02 | 21 |
+| 0.90 | 4.476e-02 | 5.4429e-02 | 29 |
+| **1.00 — the reference** | **8.580e-03** | **1.6760e-02** | 4 |
+
+**Six seeds spanning the whole family land within a factor of 1.3 of each
+other**, at about 4e-02, and the one that does not is `t = 1` exactly.
+`t = 1.00` reproduces the `--boundary reference` row to every printed digit —
+6.628922934e-02 at the same 4 iterations — which is the instrument's own
+control and it passes, so the blend path and the reference path are the same
+computation where they should be.
+
+**So the seed is not the variable; `M` and the free-mode count are.** What the
+objective has at this resolution is an attractor near `psi_ax = 6.4e-02` that
+essentially every start reaches, and the reference's equilibrium is not it. The
+`M = 10` row is then the reference's own LCFS being very nearly STATIONARY at
+that one resolution rather than an answer DESC converged to from anywhere —
+which is what its single iteration said and what this sweep confirms from the
+other side. **That points at the posing and the truncated boundary
+representation rather than at multiple basins**, and naming the mechanism
+further is beyond what has been measured.
+
 **So no single row of this sweep is a measurement of DESC's accuracy**, and the
 `MEQ vs DESC` figure in the table above rests on the `M = 10` run and inherits
 that. What the sweep does establish is that the reference's LCFS is a

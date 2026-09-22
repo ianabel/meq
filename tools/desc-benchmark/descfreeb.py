@@ -133,7 +133,7 @@ def coil_field(meta):
 	return SumMagneticField(CoilSet(*coils), toroidal), toroidal
 
 
-def initial_surface(spec, meta, M, kind):
+def initial_surface(spec, meta, M, kind, blend=None):
 	"""The LCFS the free-boundary solve starts from.
 
 	`reference` is the MXH curve the conversion already fitted, i.e. the
@@ -141,16 +141,47 @@ def initial_surface(spec, meta, M, kind):
 	radius about its design centre, which knows the limiter and nothing else --
 	the analogue of MEQ's cold guess, and the thing to use if the clock is
 	meant to be a cold one.
+
+	`blend` IS THE INSTRUMENT FOR THE QUESTION M-162 LEAVES OPEN, and it is the
+	only reason this takes a third form.  That sweep found `psi_ax` non-monotone
+	in `M` and unmoved by a four-order tightening of the optimiser tolerance,
+	which says the runs are converged and converged SOMEWHERE ELSE -- multiple
+	minima rather than resolution.  If that is right then the SEED decides which
+	one is reached, and `M` is only a proxy for it, because the starting surface
+	is re-fitted at every `M` and a different fit lands in a different basin.
+
+	So: hold `M` fixed and move the seed continuously.  `blend = t` samples
+	`( 1 - t )` of the circle plus `t` of the reference's curve at the same
+	poloidal parameter and fits that, so `t = 0` and `t = 1` reproduce the two
+	forms above and everything between is a seed no equilibrium corresponds to.
+	A monotone answer in `t` says the objective has one minimum and the seed
+	only decides how far the optimiser has to walk; a scattered one says basins.
 	"""
 	from desc.geometry import FourierRZToroidalSurface
 
-	if kind == "reference":
+	if kind == "reference" and blend is None:
 		theta, Rb, Zb = convert.desc_boundary_samples(meta, max(512, 8 * M))
 		return FourierRZToroidalSurface.from_values(
 			np.column_stack([Rb, np.zeros_like(Rb), Zb]), theta,
 			M=M, N=0, NFP=1, sym=spec["up_down_symmetric"]), (theta, Rb, Zb)
 
 	R0, a = float(meta["R0"]), float(meta["minor_radius"])
+	if blend is not None:
+		# THE SAME PARAMETER ON BOTH CURVES, which needs no search and is the
+		# choice mxh.pointwise_error makes for the same reason.  Both are
+		# sampled at DESC's own theta, so the circle is written with the sign
+		# convention `desc_boundary_samples` already uses rather than with a
+		# `+sin` that would blend a curve against its own reflection.
+		theta, Rb, Zb = convert.desc_boundary_samples(meta, max(512, 8 * M))
+		Rc = R0 + a * np.cos(theta)
+		Zc = -a * np.sin(theta)
+		t = float(blend)
+		Rb = (1.0 - t) * Rc + t * Rb
+		Zb = (1.0 - t) * Zc + t * Zb
+		return FourierRZToroidalSurface.from_values(
+			np.column_stack([Rb, np.zeros_like(Rb), Zb]), theta,
+			M=M, N=0, NFP=1, sym=spec["up_down_symmetric"]), (theta, Rb, Zb)
+
 	surface = FourierRZToroidalSurface(
 		R_lmn=[R0, a], modes_R=[[0, 0], [1, 0]],
 		Z_lmn=[-a], modes_Z=[[-1, 0]], NFP=1, sym=spec["up_down_symmetric"])
@@ -209,6 +240,10 @@ def main():
 	ap.add_argument("--refine", type=int, default=4)
 	ap.add_argument("--boundary", choices=("reference", "circle"),
 	                default="reference")
+	ap.add_argument("--blend", type=float, default=None,
+	                help="seed the boundary at ( 1 - t ) circle + t reference, "
+	                     "at fixed M; see initial_surface() for the question "
+	                     "this answers")
 	ap.add_argument("--free-modes", type=int, default=2,
 	                help="poloidal modes the boundary may move in; higher "
 	                     "ones are held")
@@ -235,7 +270,9 @@ def main():
 	coils, toroidal = coil_field(meta)
 
 	print("  %s   free boundary, M = %d, boundary from %s"
-	      % (args.stem, args.M, args.boundary))
+	      % (args.stem, args.M,
+	         args.boundary if args.blend is None
+	         else "blend t = %.3f" % args.blend))
 	print("    %d filament coils, %+.6e A in total, plus a toroidal field "
 	      "B_phi = %.6f / R T"
 	      % (len(meta["coils"]), sum(c["current"] for c in meta["coils"]),
@@ -245,7 +282,8 @@ def main():
 	      "%.6e" % (spec["current"][-1], float(meta["Ip"])))
 
 	started = time.perf_counter()
-	surface, truth = initial_surface(spec, meta, args.M, args.boundary)
+	surface, truth = initial_surface(spec, meta, args.M, args.boundary,
+	                                 blend=args.blend)
 	eq, _ = descrun.build_equilibrium(spec, args.M,
 	                                  current_sign=args.current_sign)
 	eq.surface = surface
@@ -298,7 +336,9 @@ def main():
 	psi_meq, _ = descrun.flux_on_grid(eq, R, Z)
 	out = args.out or os.path.join(
 		HERE, "runs", "%s-descfreeb-M%d-%s.npz"
-		% (args.stem, args.M, args.boundary))
+		% (args.stem, args.M,
+		   args.boundary if args.blend is None
+		   else "blend%.3f" % args.blend))
 	os.makedirs(os.path.dirname(out), exist_ok=True)
 	descrun.write_npz(out, R, Z, psi_meq, spec, eq, result,
 	                  dict(cold=cold, free=free_seconds, fixed=fixed_seconds,
