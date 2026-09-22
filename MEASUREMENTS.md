@@ -7729,7 +7729,7 @@ eventually gives up and proceeds is a courtesy with extra steps**, and it is
 worse than no gate, because the warning makes a contaminated run look like a
 considered exception rather than an accident.
 
-#### 1. WHICH OF THESE CODES CAN USE EIGHT THREADS, ASKED OF THE BINARIES
+#### 1. Which of these codes can use eight threads, asked of the binaries
 
 | | can take | established by |
 |---|---|---|
@@ -7761,7 +7761,7 @@ change: **17.49 s at `MKL_NUM_THREADS=1` and 17.89 s at 8, both at 99% CPU**,
 so its MKL threads are never engaged. **The fairness question had one real
 answer and three non-answers, and the one real answer did not change a race.**
 
-#### 2. THE TIMINGS
+#### 2. The timings
 
 Both codes cold at every rung, whole-driver wall clocks. NICE's includes its
 own mesh generation; TSC's includes the python that writes its deck.
@@ -7789,8 +7789,7 @@ carrying 28x the unknowns, and its 4.11 s is the whole driver including gmsh
 and four output writers. **These are not the same work and the row is not a
 like-for-like efficiency claim** — which is exactly why section 3 matters.
 
-#### 3. THE ACCURACY COLUMN COMPARES SOLUTIONS OF AT LEAST TWO DIFFERENT
-#### PROBLEMS, AND MEQ IS SCORED ON DATA DERIVED FROM ITS COMPETITOR'S GRID
+#### 3. The accuracy column compares solutions of at least two different problems, and MEQ is scored on data derived from its competitor's grid
 
 `examples/limited-tokamak.toml`'s header already records the mechanism, and
 this is that record meeting the first two codes that do **not** adopt it.
@@ -7847,8 +7846,7 @@ converges just as cleanly in its own ladder — `psi_ax` moving 0.98% then 0.23%
 over the three rungs and `psi_bnd` flat to 1e-05 relative by the last two — to
 a boundary condition neither reference imposes.
 
-#### 4. PUTTING MEQ ON NICE'S FOOTING DOES NOT WORK YET, AND THE GUESS IS NOT
-#### THE VARIABLE
+#### 4. Putting MEQ on NICE's footing does not work yet, and the guess is not the variable
 
 MEQ already has the posture: `[boundary.limiter] SurfaceAttribute` finds the
 contact on a meshed limiter surface, `[mesh.generate] LimiterR / LimiterZ /
