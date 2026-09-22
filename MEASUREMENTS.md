@@ -6615,6 +6615,14 @@ a statement about **dofs**, and nothing in it compares work per unknown. Two
 codes may want very different numbers of unknowns and very different costs for
 each, and only a clock says which way the product goes.
 
+**AND THE SECONDS IN THIS TABLE ARE NOT WHAT THEY LOOK LIKE.** → [M-159](#m-159)
+profiles the `k2r1` rung and finds **92% of its wall in plasma-support sweep 0,
+whose answer is discarded**, with the linear algebra at 16% and the line search
+at 51%. The `newton` column above is the driver's **last sweep**, not the run:
+`k2r1`'s `2` is really 125. The eleven Newton steps that produce the answer cost
+**7.69 s** against `freegs4e`'s 3.14 s, so the ratio this table reports is a
+statement about MEQ's cold start and not about its discretisation.
+
 **AND IT DOES NOT REFINE, WHICH IS THE THIRD TIME THIS FLOOR HAS BEEN MET.**
 9.533e-04 → 9.512e-04 → 9.473e-04 from k1r1 through k3r1, a **3.3× range in
 dofs** and two polynomial degrees, for **0.6%**. [M-111](#m-111) met it at
@@ -6952,3 +6960,276 @@ for CHEASE, so it is recorded here for whoever wants to send it.
 ASCII box twice per sweep, which is a large and unmeasured share of any wall
 clock. The error columns do not depend on load; a race in `race_desc.py`'s shape
 has not been written, let alone run.
+
+### M-159
+
+**WHERE [M-155](#m-155)'s 19.8× ACTUALLY GOES: 92% OF MEQ's RACE WALL IS A
+PLASMA-SUPPORT SWEEP WHOSE ANSWER IS DISCARDED, AND THE LINEAR ALGEBRA IS 16%.**
+
+**AND THE SWEEP IS MIS-POSED RATHER THAN MERELY COLD** — → [M-160](#m-160) names
+the defect, and with it repaired this same rung is **8.08 s against 126.91**, on
+the same answer to every digit. **Everything below stands as the profile of the
+defective run**, which is what found it and is what the plan items sized against
+`re-assembly` need to be re-read in the light of.
+
+`race.py`'s own `k2r1` rung, rebuilt outside the harness so it can be run twice
+— `machine-f-diiid` with `[conductors] Model = "filament"`, the cold
+`mkcoldguess.py --remainder` guess, `RefinementLevels = 1`, `GridNR = GridNZ =
+513`, **6134 elements, 110,412 dofs**, `OMP = MKL = 8` on a quiet machine,
+through `build/meq-run ... --profile`.
+
+**THE DECOMPOSITION IS A SUBTRACTION OF TWO RUNS AND NOT AN ESTIMATE.** They
+differ in `[solver] PlasmaSupportSweeps` alone, 1 against 4, and sweep 0 is
+identical in both to every printed digit — 114 iterations, `psi_ax =
+4.128565e-01`, X at ( 1.190, −1.025 ):
+
+| | wall/s | share of the run |
+|---|---|---|
+| **sweep 0 — 114 Newton steps, discarded** | **117.34** | **92.5%** |
+| sweeps 1–3 — 11 Newton steps, *the answer* | 7.69 | 6.1% |
+| output — four formats on the race's 513² grid | 1.87 | 1.5% |
+| setup | 0.02 | 0.0% |
+| **total** | **126.91** | |
+
+**SWEEP 0's ANSWER IS DISCARDED IN THE ORDINARY SENSE OF THE WORD**, which is
+what makes the row above a cost rather than a stage:
+
+```
+sweep   its        psi_ax       psi_bnd        X-point      support
+  0     114   4.128565e-01  7.835387e-02  ( 1.190, -1.025)   517/517
+  1       6   3.758719e-01  7.056411e-02  ( 1.201, -0.999)  1082/1317
+  2       3   3.758458e-01  7.076029e-02  ( 1.200, -1.000)  1163/1515
+  3       2   3.758458e-01  7.076029e-02  ( 1.200, -1.000)  1159/1499
+```
+
+`psi_ax` moves **9.8%** between sweep 0 and the answer and the X-point moves
+2.7e-02 m.
+
+**THE SUPPORT COLUMN IS `component/candidate` AND IT IS EASY TO READ AS
+OCCUPANCY, WHICH IT IS NOT.** The denominator is `plasmaCandidateElements()` —
+elements carrying `Psi > 0` at any potential dof — and the numerator is what
+XP-1's connected fill keeps, so **`517/517` says the fill removed nothing**, not
+that the mesh is full. 517 of **6134** elements carry plasma at the cold guess.
+What the column does say, read as the series it is, is that the plasma **more
+than doubles in element count** between the guess and the answer — 517 → 1082 →
+1163 → 1159 — and sweep 0 is frozen on the smallest of those for all 114 of its
+iterations, the support being frozen within a solve by construction. By sweep 1
+the fill is also doing real work: 1082 kept of 1317 candidates, so 235 elements
+of disconnected `Psi > 0` are being removed.
+
+**THE LIKE-FOR-LIKE THAT FALLS OUT OF IT.** MEQ's eleven productive Newton
+steps are **7.69 s**; `freegs4e`'s whole Picard loop, re-timed the same day on
+the same machine, is **3.14 s** inner and **4.47 s** as `race.py` clocks it, 33
+sweeps at 129². That is **2.4×, not 19.8×** — and everything between those two
+numbers is the cold start rather than anything about either discretisation.
+
+**INSIDE THE SOLVE, THE LINEAR ALGEBRA IS 16% AND THE LINE SEARCH IS 51%.** The
+four-sweep run's own leg table:
+
+| leg | s | share | cores | calls |
+|---|---|---|---|---|
+| **re-assembly** | **65.173** | **51.4%** | **2.11** | 1017 |
+| constraint location | 20.439 | 16.1% | 7.99 | 13390 |
+| — of which axis | 19.551 | 15.4% | 8.01 | 1021 |
+| residual | 13.376 | 10.5% | 7.99 | 1033 |
+| NPC reduce+recover | 7.749 | 6.1% | 6.04 | 125 |
+| trace backsolve | 7.640 | 6.0% | 6.32 | 1750 |
+| gradient (`ComputeH` 1.163) | 2.411 | 1.9% | 7.97 | 125 |
+| trace factorisation | 2.095 | 1.7% | 7.59 | 125 |
+| border assembly + dense solve | 0.889 | 0.7% | — | 758 |
+| other (remainder) | 4.804 | 3.8% | 5.47 | — |
+
+**`gradient + factorisation + backsolve + NPC` is 19.895 s, 15.9% of the
+solve.** Per residual evaluation MEQ pays **12.9 ms of physics, 64.1 ms
+re-assembling the right-hand side that feeds it, and 19.1 ms relocating the
+axis**. 1017 re-assemblies over 125 Newton steps is **8.14 line-search trials
+per step**, at **2.11 cores**; [M-138](#m-138)'s warm run reads 16 over 12,
+which is 1.33.
+
+**SO THE LARGEST ITEM IN A COLD MEQ RUN IS NOT THE ONE M-138 SIZED.** That
+table puts `re-assembly` at 5.6% and names `DarcyForm::Reconstruct()` as the
+largest single-threaded leg at 18.5%. Cold and bordered, `postProcess` is
+**0.6%** and `re-assembly` is **51.4%** — a share moves with the problem, which
+is the same lesson [M-135](#m-135) records about the NPC traversal, met again
+from the other end. `BORDERED-GLOBALISATION-PLAN.md` §12 already owns this leg.
+
+**WHY 114 STEPS: THE FULL NEWTON STEP IS ASCENT FOR THE MERIT, EVERY ITERATION,
+FOR A HUNDRED OF THEM.** From the solver's own printed trial ladder in sweep 0,
+the `ratio` column — full-step merit over current merit — reads **1.37, 1.31,
+1.33, 1.33, 1.33, 1.34, 1.34, 1.26, 1.23, 1.25, 1.25, 1.26** at iterations 5 to
+16. At iteration 8 the current merit is 4.5450e-04 and the ten trials read
+6.095e-04, 5.242e-04, 4.975e-04, 4.790e-04, 4.945e-04, 4.758e-04, 4.793e-04,
+4.759e-04, 4.536e-04: **the best of ten beats the incumbent by 0.2%**, and the
+step is accepted at a damping of 1.95e-03. Damping reaches **4.88e-04** with
+`n = 12` trials.
+
+**AND THE FIELD RESIDUAL DISAGREES WITH THE MERIT WHILE THAT HAPPENS.** Across
+those same trials `||R|| dev` falls 5.25e-04 → 1.57e-05, a factor of 33, while
+the merit rises. `||y||` at iterations 0 and 1 is **2.753e+01 and 5.014e+01**
+against a solution whose `psi_ax` is 0.376 — the bordered step is two orders
+larger than the answer. Then, once it arrives, iterations 112 to 114 read
+**1.554e-05 → 9.986e-11 → 9.124e-16**: ordinary quadratic Newton, three steps.
+**A hundred iterations of crawl and three of Newton.**
+
+**IT IS NOT THE TOLERANCE, AND THAT CONTROL IS WHY THE PARAGRAPH ABOVE IS ABOUT
+THE DIRECTION.** `NewtonRelativeTolerance` from 1.0e-10 to 1.0e-4 takes sweep 0
+from **114 iterations to 103**, and the final `psi_ax` from 3.758458e-01 to
+3.758741e-01. The cost is the crawl, not the last digits, so an early-sweep
+tolerance is not the lever it looks like.
+
+**THE COARSE RUNG FAILS DIFFERENTLY AND IDENTICALLY IN KIND.** `k2r0`, 1510
+elements, **143.9 s**: sweep 0 runs 184 iterations, the bordered Newton reports
+*"the non-linear iteration did not converge"*, the solver is rebuilt, and the
+`bordered-picard-then-newton` retry converges in 61. `outside solve()` reads
+**125.956 s, 87.5%** — that is the discarded first attempt, which the rebuilt
+solver's own profile cannot see. **Both rungs spend the great majority of their
+wall on work that is thrown away, by two different routes.**
+
+**THE HYPOTHESIS THIS REPLACES WAS THE OUTPUT, AND IT WAS WRONG BY A FACTOR OF
+SIXTY.** `race.py` raises `GridNR/GridNZ` to 513 so the sampling is not the
+error, says so in a comment, and warns that it inflates the `output` column —
+which makes the output the obvious suspect for a run that takes 122 s to do two
+reported Newton iterations. Measured, **output is 1.87 s, 1.5%**, of which
+`postProcess` is 0.80 s, and `GridSampler` is invisible at 513² since
+[M-92](#m-92). The reported "2 Newton iterations" is the tell that was
+available and unread: `race.py` parses the driver's final line, which is the
+**last sweep's** count, so M-155's `newton` column reads 2 where the run took
+125.
+
+**THREE THINGS BELONG BESIDE ANY CONCLUSION DRAWN FROM THE RATIO.**
+
+* **The `freegs4e` arm is the INVERSE solve** — `race.py`'s docstring says so
+  and M-112 is why.
+* **AND IT IS NOT STOCK `freegs4e`.** `fgsref.py`'s WORKAROUND 6 caches the
+  shipped `freeBoundary`, which rebuilds an `O( n³ )` geometry-only matrix every
+  Picard step, as the one fixed matrix it is; that file measures the shipped
+  form at **0.512 s per step at 129²** against the whole cached loop's 3.14 s.
+  **MEQ is racing a `freegs4e` this benchmark sped up by about an order of
+  magnitude**, which is the right thing to race and is not what a reader assumes
+  from the name.
+* **MEQ's wall carries gmsh, four output formats and a sampling grid the
+  comparison imposes** — and that is 1.5% of it, so it excuses nothing.
+
+**THE TRANSFERABLE PART.** M-155 reports the rung that gives the best answer as
+`2` Newton iterations and 122.52 s, and those two numbers cannot both be about
+the same work. **A wall clock and an iteration count that disagree by two orders
+of magnitude are a statement that the iteration count is counting the wrong
+thing** — here, one sweep of four — and the profile is one flag away.
+
+### M-160
+
+**[M-159](#m-159)'s SWEEP 0 IS NOT A COLD START BEING EXPENSIVE. IT IS THE FIRST
+SUPPORT FREEZE POSED WITH `psi_bnd` WRONG BY 2.26×, BECAUSE ONE DRIVER HELPER
+RETURNS THE REMAINDER WHERE EVERY CONSUMER WANTS THE TOTAL.**
+
+`apps/meq.cpp`'s `edgeFluxOf()` reads `psi` at whichever bounding point the file
+named — the X-point seed, the limiter contact, or the maximum over a meshed
+limiter surface — straight off the grid function it is handed. Under
+`[conductors] Model = "filament"` that grid function is **`psi_p`, the
+remainder**. Its three callers all pair the value with `psi_ax`, which is a
+**total**: `[source] PsiAxis` before the first solve and
+`GradShafranovSolver::psiAxis()` after it.
+
+**SIZED ON `machine-f-diiid`, WHICH IS THE CASE M-159 PROFILES.** `psi_c` summed
+over the 18 filaments at the X-point seed ( 1.2000, −1.0000 ) is
+**−8.944602e-02**:
+
+| | as posed | physical | |
+|---|---|---|---|
+| `psi_bnd` at the seed | 1.602063e-01 | 7.076029e-02 | **2.26×** |
+| span `psi_ax − psi_bnd` | 1.286e-01 | 2.180e-01 | **41% short** |
+
+So `freezePlasmaEdge( axis, boundary )` cuts the first sweep's support at a
+normalised-flux contour well inside the plasma — **517 elements against the 1159
+the answer carries** — and the bordered Newton then spends 114 iterations
+fighting a support it is forbidden to move.
+
+**IT IS CONFINED TO SWEEP 0, AND THAT IS WHY IT LOOKED LIKE A COLD-START COST.**
+The loop re-reads `axis = solver->psiAxis()` and `boundary =
+solver->psiBoundary()` after every solve, and both are physical totals since
+[M-154a](#m-154)'s `limiterValue()`/`limiterTotal()` split. **One sweep is wrong
+and the rest are right**, which is exactly the 114 against 6, 3 and 2 that M-159
+measures. The driver's own comment beside the read — *"a bad estimate costs
+sweeps rather than correctness"* — is the assumption this falsifies: on a
+subtracting conductor model a bad estimate costs **92% of the run**.
+
+**THE FIX IS TO ADD `psi_c` AT THE POINT, AND IT IS ONLY LEGAL BECAUSE
+`edgeFluxOf` IS APPLIED TO A STATE.** All three call sites pass an iterate, never
+a backsolved direction, so the constant survives; M-154a's second row is the same
+question answered the other way for `rowDot()`, where it must not.
+`ConductorField::psi` is even in `r` ([M-156](#m-156)), so a seed on the axis is
+answered rather than refused. The surface-maximum branch takes its maximum on the
+**total** at each dof's own point — `max( psi_p ) + psi_c` is not
+`max( psi_p + psi_c )` and they pick different dofs.
+
+**THE WHOLE FILAMENT LADDER IS CURED, INCLUDING THE RUNG THAT FAILED BOTH
+ROUTES.** `race.py`'s own rungs, one binary changed in one function,
+`OMP = MKL = 8`:
+
+| rung | elements | Newton its, before | after | wall before/s | wall after/s |
+|---|---|---|---|---|---|
+| k1r0 | 1510 | 135 + 92 + 22 + 57 | **13 + 8 + 8** | 56.65 | **3.03** |
+| k1r1 | 6134 | 145 + 6 + 5 + 5 | **9 + 5 + 5** | 99.58 | **5.55** |
+| k2r0 | 1510 | 184, then 61 via the fallback | **7 + 3 + 2** | 143.94 | **2.99** |
+| **k2r1** | 6134 | 114 + 6 + 3 + 2 | **8 + 3 + 2 + 2** | **126.91** | **8.08** |
+| k3r0 | 1510 | **FAILED, both routes** | **7 + 3 + 2** | — | **3.53** |
+
+**THE `k2r1` PAIR IS THE CLEAN ONE — both arms on an idle machine, 126.907 s
+against 8.076 s, 15.7×.** The other four `before` walls were taken while other
+work shared the machine, so read their **iteration counts**, which no load can
+move.
+
+**AND THE ANSWER DOES NOT MOVE.** `k2r1` reports `psi_ax = 3.758458e-01`,
+`psi_bnd = 7.076029e-02` and its X-point at ( 1.200411, −0.999565 ) **before and
+after, to every printed digit**; only `psi_ax − max psi_h` differs, 6.104e-13
+against 7.930e-13, which is the Newton's own floor. **`k2r0` is the sharper
+check**: cold, it now lands on `psi_ax = 3.758649e-01`, which is
+[M-154](#m-154)'s filament figure from the **exact** guess to the last digit, and
+2.8e-05 from the reference. **The cold start now finds what the answer-in-the-
+starting-position run finds.**
+
+**AND `k1r0` WAS REPORTING A DIFFERENT EQUILIBRIUM, NOT A SLOW ONE.** Its support
+loop **diverges** before the fix — `psi_ax` marching 4.334e-01 → 4.596e-01 →
+5.511e-01 → 6.367e-01 while the X-point walks from ( 1.169, −1.083 ) to
+( 0.901, −1.227 ) and the support collapses 144 → 269 → 146 → 94. After, it is
+( 1.200, −0.999 ) at every sweep. M-155 records this rung's wrong answer and
+attributes it to `k = 1`; it is the same defect, and the degree only decides how
+badly a mis-posed first sweep ends.
+
+**THE SUPPORT ALSO SETTLES NOW**, where M-159's run prints *"took 4 sweeps and
+DID NOT SETTLE"*: every rung above repeats its element count on the last two
+sweeps.
+
+**THE LINE SEARCH WAS A SYMPTOM AND NOT A SECOND DEFECT.** M-159 measures
+`re-assembly` at 51.4% of the solve over **1017 calls, 8.14 trials per Newton
+step**, and reads the full Newton step raising the merit by 1.23–1.37× for a
+hundred iterations. After the fix the same leg is **1.569 s over 20 calls, 1.33
+trials per step** — [M-138](#m-138)'s warm figure — with no backtracking. **A
+globalisation flailing is evidence about the problem it was handed**, and the
+plan item that owns that leg is sized against a number that was a consequence.
+
+**THE SHIPPED MESHED PATH IS UNTOUCHED, AND THAT IS THE CONTROL.**
+`examples/machine-f-diiid.toml` carries no `[conductors]`, so `conductorField` is
+null and every branch is the arithmetic it was: **3.461 s, 7 + 3 + 2 Newton
+steps, `psi_ax = 3.759851e-01`** — M-138's run to the digit.
+
+**AND `[solver] PicardSweeps` — THE PICARD PRE-STAGE — IS THE OTHER CONSUMER, AND
+IT WAS BROKEN OUTRIGHT.** There `edgeFluxOf` is the **only** source of
+`boundary`, at every sweep rather than only the first. Run on the filament rung
+before the fix, the pre-stage collapses the plasma to **20 candidate elements**,
+its first solve converges trivially in 1 iteration, `axisFluxOf` then finds no
+O-point at all and the stage stops after one sweep having handed the bordered
+Newton a state **worse than the cold guess** — the run exits 1 with
+`psi_bnd = −1.340886e-01`. On the meshed control the same key runs its five
+sweeps cleanly. **Nothing in the tree exercised it**: no example, no test and no
+docs page sets `PicardSweeps`, and it defaults to 0.
+
+**THE TRANSFERABLE PART, AND IT IS THE FOURTH TIME.** `psi_bnd` at an X-point
+(M-154a), the two borders reading the remainder ([M-148](#m-148)), `psi_ax` at a
+correctly located axis (M-154a) and now the support freeze's own `psi_bnd`.
+**Every one is a consumer of the split that nobody enumerated**, and CS-4's
+staging entry names nine. What separates this one is that it never produced a
+wrong answer — the outer loop repaired it by sweep 1 — so it presented purely as
+cost, and a profile rather than a disagreement is what found it. **A
+decomposition has as many consumers as the codebase has readers of the field, and
+the ones that cost time rather than correctness are the last to be found.**

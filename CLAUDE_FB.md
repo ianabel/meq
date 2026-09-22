@@ -99,6 +99,54 @@ more accurate"*, and the accuracy half is the only half that survived: the
 prediction was inferred from M-154's **dofs**, where nothing compares work per
 unknown. → **[M-155](MEASUREMENTS.md#m-155)**.
 
+**AND THE RACE IS NOT LOST ON THE DISCRETISATION. IT IS LOST ON A SOLVE WHOSE
+ANSWER IS THROWN AWAY.** Profiled, the `k2r1` rung spends **92.5% of its wall in
+plasma-support sweep 0** — 114 Newton steps ending at a `psi_ax` 9.8% from the
+answer and an X-point 2.7e-02 m from it, all of it superseded the moment the
+support is re-decided. The eleven Newton steps that produce the answer cost
+**7.69 s** against `freegs4e`'s **3.14 s**, which is 2.4× rather than 19.8×.
+→ **[M-159](MEASUREMENTS.md#m-159)**.
+
+**THE COST IS NOT WHERE A FINITE-ELEMENT CODE IS SUPPOSED TO BE EXPENSIVE.**
+`gradient + trace factorisation + backsolve + NPC` is **15.9%** of the solve.
+**`re-assembly` is 51.4%, at 2.11 cores** — 8.14 line-search trials per Newton
+step against [M-138](MEASUREMENTS.md#m-138)'s warm 1.33 — and the axis is
+relocated once per residual at 19.1 ms against the 12.9 ms residual it decorates.
+**A share is a property of the problem**: M-138 sizes `re-assembly` at 5.6% and
+`postProcess` at 18.5%, and cold and bordered those read 51.4% and 0.6%.
+
+**WHY SWEEP 0 CRAWLS, AND IT IS THE STEP DIRECTION RATHER THAN THE TOLERANCE.**
+The full Newton step raises the merit by **1.23 to 1.37× at every iteration for a
+hundred of them**, while the field residual across the same trial ladder falls
+33×; the line search halves up to twelve times and the best trial beats the
+incumbent by 0.2%. Then iterations 112 to 114 read
+`1.554e-05 → 9.986e-11 → 9.124e-16` — three steps of ordinary quadratic Newton
+once it arrives. `NewtonRelativeTolerance` from 1e-10 to 1e-4 takes sweep 0 from
+114 steps to **103**, which is the control that says the last digits are not what
+is being paid for.
+
+**AND THE SUSPECT IS NAMED: THE FIRST SUPPORT FREEZE IS POSED WITH `psi_bnd`
+WRONG BY 2.26×.** `apps/meq.cpp`'s `edgeFluxOf()` reads `psi` at the bounding
+point straight off the grid function, which under a subtracting conductor model
+is `psi_p`; every consumer pairs it with a **total** `psi_ax`. On DIII-D `psi_c`
+at the X-point seed is −8.945e-02, so the first sweep freezes the support at a
+contour well inside the plasma — 517 elements against the 1159 the answer
+carries. **The loop repairs itself by sweep 1**, since `axis` and `boundary` are
+re-read from `psiAxis()` and `psiBoundary()` thereafter and those are totals, so
+it never produced a wrong answer on this rung and presented purely as cost.
+Repaired, the whole filament ladder converges in single-figure Newton steps per
+sweep, `k3r0` converges where it used to fail under both routes, and `k1r0`
+stops reporting a different equilibrium. → **[M-160](MEASUREMENTS.md#m-160)**.
+
+**THE FROZEN SUPPORT'S OWN COLUMN DOES NOT SAY WHAT IT LOOKS LIKE IT SAYS.** `517/517` is `plasmaComponentElements()` over
+`plasmaCandidateElements()` — the connected fill keeping every element with
+`Psi > 0` — so it reports that the fill removed **nothing**, not that the mesh is
+full: 517 of **6134** elements carry plasma at the cold guess. Read as a series
+it says the plasma more than doubles on the way to the answer, 517 → 1082 → 1163
+→ 1159, and sweep 0 is frozen on the smallest of those for all 114 iterations.
+`[solver] PlasmaSupportSweeps` is the outer loop and on this case it **does not
+settle** in four.
+
 **THE ERROR STILL DOES NOT REFINE, AND NOW THE CONDUCTOR MODEL CANNOT BE THE
 REASON.** 9.533e-04 → 9.473e-04 across a 3.3× range in dofs and two degrees.
 M-111 met this floor at 5.785e-03 with the models differing and M-139 at 7.7e-04

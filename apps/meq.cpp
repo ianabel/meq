@@ -2935,6 +2935,36 @@ int main( int argc, char **argv )
 		 * -- which is that example's own header predicting itself, not this
 		 * branch.
 		 */
+		/*
+		 * AND IT RETURNS THE TOTAL, WHICH UNDER [conductors] Model IS NOT WHAT
+		 * THE FIELD HOLDS.
+		 *
+		 * `field` is the solver's own potential, and with a subtracting
+		 * conductor model that is `psi_p`, the REMAINDER. Every consumer of
+		 * this function pairs the value with `psi_ax` -- `freezePlasmaEdge(
+		 * axis, boundary )` and `setNormalisation( axis, boundary )` -- and
+		 * `psi_ax` is a TOTAL, from `[source] PsiAxis` before the first solve
+		 * and from `psiAxis()` after it. Returning a remainder beside a total
+		 * makes the normalised flux a ratio of two different fields.
+		 *
+		 * MEASURED, ON machine-f-diiid UNDER Model = "filament": `psi_c` at the
+		 * X-point seed is -8.945e-02, so this returned 1.602e-01 where the
+		 * physical `psi_bnd` is 7.076e-02 -- a factor of 2.26, and a span
+		 * `psi_ax - psi_bnd` 41% short. The support the first sweep freezes is
+		 * then cut at a contour well inside the plasma: 517 elements against
+		 * the 1159 the answer carries, and Newton spends 114 iterations on it
+		 * against the 6, 3 and 2 of the sweeps that follow.
+		 * MEASUREMENTS.md M-159 and M-160.
+		 *
+		 * IT IS ONLY EVER APPLIED TO A STATE, which is what makes adding a
+		 * constant right here and wrong in `rowDot()`. M-154a's
+		 * `limiterValue()`/`limiterTotal()` split is the same question answered
+		 * for the border, where the Jacobian differences this and the constant
+		 * must not survive; there are no directions here.
+		 *
+		 * AND IT COSTS THE SHIPPED MESHED PATH NOTHING: with no subtracting
+		 * model `conductorField` is null and every branch below is unchanged.
+		 */
 		auto edgeFluxOf = [ & ]( mfem::GridFunction const &field ) -> double
 		{
 			auto valueAt = []( mfem::GridFunction const &f, double r, double z,
@@ -2951,32 +2981,65 @@ int main( int argc, char **argv )
 				out = f.GetValue( elements[ 0 ], local[ 0 ] );
 				return true;
 			};
+			// psi_c at a point, or exactly zero with nothing subtracted, so
+			// every return below adds it unconditionally. ConductorField::psi
+			// is even in r and answers on the axis, so a seed on r = 0 -- which
+			// a half-disc machine's Gamma endpoints are -- is not a refusal
+			// here. MEASUREMENTS.md M-156.
+			auto conductorPsi = [ & ]( double r, double z ) -> double
+			{
+				return conductorField ? conductorField->psi( r, z ) : 0.0;
+			};
 
 			double value = 0.0;
 			meq::LimiterConfig const &l = config->getBoundary().limiter;
 			meq::XPointConfig const &x = config->getBoundary().xpoint;
 
 			if ( x.given && valueAt( field, xPointSeedR, xPointSeedZ, value ) )
-				return value;
+				return value + conductorPsi( xPointSeedR, xPointSeedZ );
 			if ( l.given && l.surfaceAttribute == 0
 			     && valueAt( field, l.r, l.z, value ) )
-				return value;
+				return value + conductorPsi( l.r, l.z );
 			if ( l.surfaceAttribute > 0 )
 			{
 				// THE CURVE. max psi_h over the region the limiter encloses,
 				// which is setLimiterSurface()'s own constraint evaluated on the
 				// guess rather than on the answer.
+				//
+				// THE MAXIMUM IS TAKEN ON THE TOTAL AND NOT ON THE REMAINDER,
+				// because max( psi_p ) + psi_c is not max( psi_p + psi_c ) and
+				// the two pick different dofs. psi_c is read at each dof's own
+				// point, by the same transformation walk
+				// GradShafranovSolver::refreshConductorNodalPsi() uses, and the
+				// spaces are GaussLobatto so a coefficient IS the value there.
 				mfem::FiniteElementSpace const &space = *field.FESpace();
 				mfem::Array<int> dofs;
+				thread_local mfem::IsoparametricTransformation transformation;
 				bool any = false;
 				for ( int e = 0; e < space.GetMesh()->GetNE(); ++e )
 				{
 					if ( space.GetMesh()->GetAttribute( e ) != l.surfaceAttribute )
 						continue;
 					space.GetElementDofs( e, dofs );
+					mfem::IntegrationRule const &nodes =
+						space.GetFE( e )->GetNodes();
+					if ( conductorField )
+						space.GetMesh()->GetElementTransformation(
+							e, &transformation );
 					for ( int i = 0; i < dofs.Size(); ++i )
 					{
-						double const here = field( dofs[ i ] );
+						double here = field( dofs[ i ] );
+						if ( conductorField )
+						{
+							mfem::IntegrationPoint const &ip =
+								nodes.IntPoint( i );
+							double coordinates[ 3 ] = { 0.0, 0.0, 0.0 };
+							mfem::Vector position( coordinates, 3 );
+							transformation.SetIntPoint( &ip );
+							transformation.Transform( ip, position );
+							here += conductorPsi( position( 0 ),
+							                      position( 1 ) );
+						}
 						value = any ? std::max( value, here ) : here;
 						any = true;
 					}
