@@ -1168,6 +1168,119 @@ namespace meq
 		                         filament.current(), mu0 );
 	}
 
+	std::vector<CurrentFilament> filamentStack( Coil const &coil, int nR,
+	                                            int nZ )
+	{
+		if ( nR < 1 || nZ < 1 )
+		{
+			std::ostringstream message;
+			message << "meq::filamentStack: the stack counts must be at least "
+			           "1 each, but are " << nR << " x " << nZ
+			        << ". 1 x 1 is the single filament at the rectangle's "
+			           "centre, which is the model's own default; there is no "
+			           "reading of a count of zero that is a conductor";
+			throw std::invalid_argument( message.str() );
+		}
+
+		// A CAP, AND IT IS ABOUT THE CACHE RATHER THAN THE ARITHMETIC. psi_c is
+		// evaluated once per quadrature point and per dof and then cached, so
+		// the stack's cost is paid once -- but it is paid over every conductor
+		// of every block, and a cell size given in millimetres by mistake turns
+		// a solenoid into ten million filaments and the build of the cache into
+		// the run. Refused with the count in the message, which is the number
+		// the author needs to see.
+		long long const total = static_cast<long long>( nR )
+		                        *static_cast<long long>( nZ );
+		if ( total > maximumFilamentsPerCoil )
+		{
+			std::ostringstream message;
+			message << "meq::filamentStack: " << nR << " x " << nZ << " = "
+			        << total << " filaments for one rectangle, against a limit "
+			           "of " << maximumFilamentsPerCoil
+			        << ". A stack this fine is a cell size given in the wrong "
+			           "units far more often than it is a modelling choice; if "
+			           "it is the choice, the rectangle itself is cheaper -- "
+			           "meq::coilPsi integrates it exactly at a fixed cost";
+			throw std::invalid_argument( message.str() );
+		}
+
+		std::vector<CurrentFilament> stack;
+		stack.reserve( static_cast<std::size_t>( total ) );
+
+		double const widthStep = 2.0*coil.halfWidth()/nR;
+		double const heightStep = 2.0*coil.halfHeight()/nZ;
+		// EACH CELL'S SHARE OF THE CURRENT, not a density: the sum over the
+		// stack is the block's own current to round-off, which is what
+		// meq::ConductorField::totalCurrent() is checked against.
+		double const share = coil.current()/( static_cast<double>( nR )
+		                                      *static_cast<double>( nZ ) );
+
+		for ( int i = 0; i < nR; ++i )
+		{
+			double const r = coil.rMin() + ( i + 0.5 )*widthStep;
+			for ( int j = 0; j < nZ; ++j )
+				stack.emplace_back( r,
+				                    coil.zMin() + ( j + 0.5 )*heightStep,
+				                    share );
+		}
+
+		return stack;
+	}
+
+	void filamentStackSize( Coil const &coil, double cellSize, int &nR,
+	                        int &nZ )
+	{
+		requireFinite( cellSize, "the filament cell size",
+		               "meq::filamentStackSize" );
+		if ( !( cellSize > 0.0 ) )
+		{
+			std::ostringstream message;
+			message << "meq::filamentStackSize: the cell size must be strictly "
+			           "positive, but is " << cellSize
+			        << ". Zero or negative names no division; a caller who "
+			           "wants the single filament at the centre asks for "
+			           "1 x 1 rather than for a size";
+			throw std::invalid_argument( message.str() );
+		}
+
+		auto count = [ cellSize ]( double extent, char const *direction )
+		{
+			// CEILING, so the cells are never COARSER than asked for. A block
+			// narrower than one cell gets 1, which is the single filament and
+			// is the right answer: the size is an upper bound on a cell and not
+			// a target to subdivide down to.
+			double const wanted = std::ceil( extent/cellSize );
+			if ( !( wanted > 1.0 ) )
+				return 1;
+
+			// REFUSED AND NOT CLAMPED, which is the difference between a units
+			// mistake that is reported and one that is answered. Clamping here
+			// would hand back a stack the caller did not ask for, and on a thin
+			// tall conductor -- exactly the shape this key exists for -- the
+			// product cap in filamentStack() would then let it through: 65536
+			// in one direction and 1 in the other is a legal product. A silent
+			// substitution of one conductor model for another is the failure
+			// this tree refuses everywhere else.
+			if ( wanted > static_cast<double>( maximumFilamentsPerCoil ) )
+			{
+				std::ostringstream message;
+				message << "meq::filamentStackSize: a cell size of " << cellSize
+				        << " m divides this rectangle's " << extent << " m in "
+				        << direction << " into " << wanted << " filaments, "
+				           "against a limit of " << maximumFilamentsPerCoil
+				        << ". A stack this fine is a size given in the wrong "
+				           "units far more often than a modelling choice; if it "
+				           "is the choice, Model = \"subtracted\" integrates the "
+				           "same rectangle exactly at a fixed cost";
+				throw std::invalid_argument( message.str() );
+			}
+			return static_cast<int>( wanted );
+		};
+
+		nR = count( 2.0*coil.halfWidth(), "R" );
+		nZ = count( 2.0*coil.halfHeight(), "Z" );
+	}
+
 	CoilSet::CoilSet( double mu0In )
 		: permeability( mu0In ),
 		  quadratureOrderValue( defaultCoilQuadratureOrder )

@@ -8041,3 +8041,128 @@ The shared entry point reproduces the border to every digit, **and the region
 maximum reproduces `psi_ax` instead** — to four figures at `n = 24` and `n = 48`
 on a fixture that knows nothing about the machine. That second column is the
 defect restated as a property rather than as an incident.
+
+### M-166
+
+**A `[[coils]]` BLOCK COLLAPSED TO ONE FILAMENT AT ITS CENTRE IS A FACTOR OF
+5.3 FROM THE RECTANGLE AT MAST-U's OWN PLASMA, AND THE STACK THAT REPLACES IT
+CONVERGES TO THE RECTANGLE AT ORDER 2.**
+
+`COIL-SUBTRACTION-PLAN.md` §13.5. `Model = "filament"` puts one point at each
+rectangle's centre carrying the total current, which §4b defends as *a different
+conductor model rather than an approximation* — right as a contract, and it is
+what bounded the coarse-filaments-then-meshed-coils pathway. §13.5 argued the
+bound from geometry; this measures it.
+
+#### 1. What the collapse costs, on the conductor that motivates the key
+
+`examples/mastu-nke.toml`'s `Solenoid` block verbatim — 0.012 m × 3.180 m at
+`R = 0.195`, carrying 1.62 MA — against `meq::coilPsi()`'s own quadrature of the
+same rectangle, worst relative over six points **in the plasma**
+(`R ∈ [0.35, 1.30]`), which is where the standoff is comparable to the
+conductor's own half-height:
+
+| model | stack | worst rel |
+|---|---|---|
+| one filament (the default) | 1 × 1 | **4.324556e+00** |
+| `FilamentSize = 0.05` | 1 × 64 | **3.114708e-04** |
+
+**A factor of 5.3 and not a percent**, and the key is worth **13,884×** here.
+The field points are deliberately near: the collapse conserves the total
+current, so it is exact in the far field by construction and a study out there
+measures nothing.
+
+#### 2. The stack is the midpoint rule, and it is asserted as a rate
+
+`meq::filamentStack( coil, nR, nZ )` puts one filament at the centre of each
+cell of a uniform division, carrying `I/( nR nZ )`. That **is** the midpoint sum
+for the cross-section integral `meq::coilPsi()` evaluates, so it refines. On a
+deliberately un-square coil — half-extents 0.04 × 0.32, aspect 8, so a
+transposed index is not the same set of points — worst relative over five
+exterior points:
+
+| stack | worst rel | order |
+|---|---|---|
+| 1 × 1 | 7.375672e-02 | the default |
+| 1 × 8 | 3.774454e-04 | |
+| 2 × 16 | 9.441992e-05 | 1.999 |
+| 4 × 32 | 2.360864e-05 | 2.000 |
+| 8 × 64 | 5.902390e-06 | 2.000 |
+| 16 × 128 | **1.475612e-06** | **2.000** |
+
+**Order 2.000 over four refinements**, and the default sits **49,984×** from the
+finest stack. A rate rather than a tolerance because a rate is what separates
+this from the things that are nearly it: filaments at cell **corners**, a
+current **density** where a share belongs, or a transposed index all give small
+errors on a near-square coil and none of them gives 2.
+
+#### 3. A length and not a count, which is what the aspect ratios decide
+
+MAST-U's own blocks at a 0.05 m cell:
+
+| block | cross-section | aspect | stack |
+|---|---|---|---|
+| `Solenoid` | 0.012 × 3.180 m | 265 | 1 × 64 |
+| `PX1` | 0.025 × 0.403 m | 16 | 1 × 9 |
+| `D11` | 0.086 × 0.086 m | 1 | 2 × 2 |
+
+**Any single COUNT is wrong for two of those**, whichever it is. A cell's error
+goes as `( h/standoff )²`, so the criterion is a length and the key's units are
+metres. `[[coils]] FilamentsR`/`FilamentsZ` override it per block, both or
+neither.
+
+#### 4. AND IT MOVES *AWAY* FROM A POINT-FILAMENT REFERENCE, WHICH IS WHY THE DEFAULT MUST STAY 1 × 1
+
+The sharpest statement of *different model, not finer*. Two runs of
+`examples/limited-tokamak-filament.toml` differing in one key, against
+`freegs4e`'s `H_limited_circular` at 513² — a machine that carries **point
+filaments at exactly the centres MEQ puts its own**:
+
+| | `psi_ax` | rel to reference | `psi_bnd` | rel to reference |
+|---|---|---|---|---|
+| 1 × 1, the default | 9.309076e-02 | **3.480e-05** | 2.622480e-02 | **6.921e-06** |
+| `FilamentSize = 0.02`, 5 × 5 | 9.307619e-02 | 1.217e-04 | 2.622658e-02 | 7.480e-05 |
+
+**3.50× worse in `psi_ax` and 10.81× worse in `psi_bnd`** — and correctly so,
+because the stack is converging to the rectangle and the reference is not one.
+[M-154](#m-154)'s 2.8e-05 against `freegs4e`'s DIII-D rests on the same
+coincidence of models. **Neither setting is the safe one**, which is why a run
+prints which it took and the `.nc` carries every filament individually.
+
+#### 5. Two defects the first stacked run found
+
+**THE `.nc` CARRIED NO CONDUCTOR TABLE AT ALL UNDER `Model = "filament"`, AND
+HAD NEVER DONE.** The whole block is opened by
+`if ( conductorGeometry && conductorGeometry->size() > 0 )` — the driver's
+`meq::CoilSet` — and a subtracting model **drops** that set, deliberately,
+because keeping it beside `psi_c` is the double count with no symptom. So the
+filament loop nested inside it never ran: the file recorded
+`conductor_model = "filament"` and not one row of the geometry that model is
+made of. That defeats §9's *"an output that regenerates its input carries them
+by construction"* on the model that needs it most.
+`theRestartFileSaysWhatItHoldsAndWhatItIsARemainderFrom` could not see it
+because it poses `Model = "subtracted"`, where the rectangles survive. Fixed by
+gating on either source of rows; `stacked.nc` now carries **50 filaments summing
+to exactly 3.0e5 A**.
+
+**AND THE DRIVER'S OWN SUMMARY COUNTED CONDUCTORS WHERE THE AUTHOR COUNTED
+BLOCKS.** `conductorField->size()` is filaments plus rectangles, so a divided
+run announced *"100 conductors taken OUT of the mesh"* to somebody who wrote
+four `[[coils]]`. It now reports the block count and, separately, the stack.
+
+#### 6. What the driver acceptance can and cannot show
+
+`theFilamentStackMovesTowardsTheRectangleItDivides` runs
+`examples/coils-rectangle.toml` three ways — meshed, 1 × 1, and 5 × 5 — and
+reads **5.534212e-02 against 4.672194e-02**, a ratio of **1.18**, where the same
+two models differ by 5.0e+04 against the rectangle's own exact field.
+
+**THE REFERENCE IS 5% WRONG, SO THE RATIO THAT FIXTURE CAN SHOW IS BOUNDED BY
+THE REFERENCE AND NOT BY THE STACK.** That file's element edges deliberately do
+not lie on its conductor edges — its own header records about three cells per
+coil being cut — so the meshed arm carries an `O( h )` source error no stack
+closes. The case's gate is therefore a direction with a 0.95 margin, and the
+sharp claim is section 2's, which differences against `meq::coilPsi()` rather
+than against a discretisation. **A driver acceptance on a fixture whose
+reference is worse than the effect is a test of reachability, and saying so is
+what stops it being quoted as a test of accuracy.**

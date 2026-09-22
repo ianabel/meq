@@ -824,6 +824,11 @@ coils alone is affine and finishes in one Newton step.
      - *one of the two*
      - The uniform :math:`j_\phi` in A/m², multiplied by the area
        :math:`4\,\texttt{HalfWidth}\,\texttt{HalfHeight}`.
+   * - ``FilamentsR``, ``FilamentsZ``
+     - *from* ``FilamentSize``
+     - This block's own filament stack, under ``[conductors] Model =
+       "filament"`` **only**. Both or neither. See
+       :ref:`dividing-a-rectangle`.
 
 .. important::
 
@@ -882,6 +887,10 @@ default is what every file written before this table existed already means.
    * - ``QuadratureOrder``
      - the library's
      - Gauss points per direction per rectangle, for ``"subtracted"`` **only**.
+   * - ``FilamentSize``
+     - one per block
+     - Target filament **cell** size in metres, for ``"filament"`` **only**.
+       See below.
 
 ``"meshed"``
    Each rectangle carries a uniform current density and enters as a **domain
@@ -934,6 +943,95 @@ default is what every file written before this table existed already means.
    ``"filament"`` when the field near the conductors is not what you are asking
    about.
 
+.. _dividing-a-rectangle:
+
+Dividing a rectangle: ``FilamentSize``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+One point at a rectangle's centre is exact in the **far** field — the collapse
+conserves the total current — and it is not a small approximation anywhere
+else. On MAST-U's solenoid, 0.012 m by 3.180 m sitting beside the plasma rather
+than beyond it, one filament at its centre gives a flux at the plasma that is a
+**factor of 5.3** from the rectangle's own.
+
+``FilamentSize`` divides each block instead. It is a target **cell** size in
+metres, so a block of half-extents :math:`(a, b)` becomes a
+:math:`\lceil 2a/s \rceil \times \lceil 2b/s \rceil` stack of filaments at the
+cell centres, each carrying its share of the current:
+
+.. code-block:: toml
+
+   [conductors]
+   Model = "filament"
+   FilamentSize = 0.05      # metres
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 26 18 34
+
+   * - MAST-U block
+     - cross-section
+     - aspect
+     - stack at 0.05 m
+   * - ``Solenoid``
+     - 0.012 × 3.180 m
+     - 265
+     - 1 × 64
+   * - ``PX1``
+     - 0.025 × 0.403 m
+     - 16
+     - 1 × 9
+   * - ``D11``
+     - 0.086 × 0.086 m
+     - 1
+     - 2 × 2
+
+A **length** rather than a count, because the accuracy criterion is one: a
+cell's error at a field point goes as :math:`(h/d)^2` in its standoff
+:math:`d`, so one number buys a predictable accuracy across conductors of every
+shape — and no single *count* is right for a machine whose blocks range over an
+aspect ratio of 265.
+
+A block may also name its own stack, which overrides the size for that block
+alone:
+
+.. code-block:: toml
+
+   [[coils]]
+   Name = "Solenoid"
+   FilamentsR = 2
+   FilamentsZ = 128
+
+Both counts or neither: naming one is a parse error rather than a block whose
+stack is half explicit and half derived. ``1`` is a legal count and is the
+single filament in that direction.
+
+.. important::
+
+   **A divided block is a different conductor model from an undivided one, not
+   a finer one, and the default is undivided for a reason.** The stack is the
+   midpoint rule for the integral the rectangle's own field is, so it converges
+   to the **rectangle** at second order in the cell size — measured, order
+   2.000 over four refinements, taking an aspect-8 coil from
+   :math:`7.4\times10^{-2}` at one filament to :math:`1.5\times10^{-6}` at
+   16 × 128.
+
+   That is towards the rectangle and therefore **away from a point-filament
+   reference.** MEQ reproduces ``freegs4e``'s ``H_limited_circular`` — which
+   carries point filaments at exactly the centres MEQ puts its own — to
+   :math:`3.5\times10^{-5}` in :math:`\psi_{\mathrm{ax}}` undivided, and to
+   :math:`1.2\times10^{-4}` with ``FilamentSize = 0.02``: **3.5 times worse**,
+   and 10.8 times worse in :math:`\psi_{\mathrm{bnd}}`. Neither setting is the
+   safe one. Divide when you are modelling the winding; leave it alone when you
+   are comparing against a code that models filaments. A run says which it took,
+   on stdout and in the ``.nc`` conductor table, which carries every filament
+   individually.
+
+   Refinement does **not** help *inside* the winding, and no cell size closes
+   it: a stack has :math:`n_R n_Z` logarithmic singularities where a rectangle
+   has none. Use ``"subtracted"`` if the field inside the conductor is what you
+   are asking about.
+
 .. warning::
 
    **Under a subtracting model the warm start changes meaning, and so does the**
@@ -970,7 +1068,9 @@ default is what every file written before this table existed already means.
    would converge, report every diagnostic it always did, and be slower than it
    should be, with nothing anywhere to look at. ``QuadratureOrder`` is refused
    on the other two models for the same reason — a filament has no cross-section
-   to integrate over and a meshed coil is integrated by the mesh. And
+   to integrate over and a meshed coil is integrated by the mesh — and
+   ``FilamentSize`` and ``[[coils]] FilamentsR``/``FilamentsZ`` are refused on
+   the other two, which divide nothing. And
    ``[mesh.generate] CoilSize`` is refused beside a subtracting model: it grades
    the mesh around conductors the generator is no longer told about, so it names
    an element size for a region that does not exist.

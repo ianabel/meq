@@ -681,6 +681,25 @@ namespace meq
 
 		/// True if the file wrote CurrentDensity rather than Current.
 		bool densityGiven = false;
+
+		/// `FilamentsR` / `FilamentsZ` -- this block's own stack, overriding
+		/// `[conductors] FilamentSize`. Zero means the block named neither and
+		/// takes the size's answer.
+		///
+		/// BOTH OR NEITHER, refused at parse rather than filled in: an author
+		/// who writes one has a number in mind for that direction and none for
+		/// the other, and inferring the missing one from the size would make a
+		/// block's stack half explicit and half derived with nothing saying so.
+		/// Same refusal `Current` beside `CurrentDensity` gets, and for the
+		/// same reason.
+		int filamentsR = 0;
+		int filamentsZ = 0;
+
+		/// Did this block name its own stack? Equivalent to both counts being
+		/// positive, which the parse guarantees, and named so that a reader of
+		/// the resolution below is not left inferring it.
+		bool stackGiven() const noexcept
+		{ return filamentsR > 0 && filamentsZ > 0; };
 	};
 
 	/// The coil set, as a sequence of `[[coils]]` blocks. Empty is legal and is
@@ -757,6 +776,18 @@ namespace meq
 		/// `Model = "filament"` rather than accepted and ignored, for the
 		/// reason `CLAUDE.md` records under the reserved profile keys.
 		int quadratureOrder = 0;
+
+		/// `FilamentSize` -- the target CELL size, in metres, each `[[coils]]`
+		/// rectangle is divided into filaments at. Zero is the default and
+		/// means one filament per block, which is what every file written
+		/// before this key existed means and is the answer MEASUREMENTS.md
+		/// M-154 is measured against.
+		///
+		/// Filaments only, and refused under the other two models rather than
+		/// accepted and ignored: `Model = "meshed"` divides nothing, and
+		/// `"subtracted"` integrates the rectangle exactly so a stack would be
+		/// a worse answer at more cost.
+		double filamentSize = 0.0;
 
 		/// Does this configuration solve for a REMAINDER rather than for psi?
 		/// The one question every other part of MEQ asks of this table -- the

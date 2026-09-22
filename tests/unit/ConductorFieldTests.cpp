@@ -32,8 +32,12 @@
 #define BOOST_TEST_MODULE ConductorFieldTests
 #include <boost/test/unit_test.hpp>
 
+#include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <stdexcept>
+#include <utility>
+#include <vector>
 
 #include "meq/ConductorField.hpp"
 
@@ -530,4 +534,353 @@ BOOST_AUTO_TEST_CASE( psiIsEvenInRAndTheVectorEntryPointsStillRefuse )
 	                   std::invalid_argument );
 	BOOST_CHECK_THROW( field.poloidalField( -1.0984e-03, 3.40, a, b ),
 	                   std::invalid_argument );
+}
+
+/*
+ * THE FILAMENT STACK CONVERGES TO THE RECTANGLE, AT ORDER 2, CLEAR OF THE
+ * CONDUCTOR.
+ *
+ * COIL-SUBTRACTION-PLAN.md section 13.5. A `[[coils]]` block collapsed to ONE
+ * filament at its centre is a different conductor model rather than an
+ * approximation -- section 4b says so and that is right -- and it is what
+ * bounds the coarse-filaments-then-meshed-coils pathway: MAST-U's solenoid is
+ * 0.012 x 3.180 m beside the plasma, so one point at its centre is not a
+ * machine near MAST-U's.
+ *
+ * WHAT MAKES A STACK A MODEL RATHER THAN A HEURISTIC IS THAT IT REFINES, and
+ * the reason it does is structural: meq::coilPsi() is `mu0 j_phi` times the
+ * cross-section integral of the filament kernel, and a uniform stack at cell
+ * centres is that integral's MIDPOINT SUM. So this is an order-of-accuracy
+ * study of a quadrature rule against the rule meq::Coil already carries, which
+ * is a far sharper acceptance than any tolerance -- a stack placed at cell
+ * CORNERS, or carrying a current density instead of a share, or indexed
+ * transposed, all still give small errors on a near-square coil and none of
+ * them gives 2.
+ *
+ * CLEAR OF THE CONDUCTOR, AND THAT QUALIFICATION IS THE SAME ONE
+ * MEASUREMENTS.md M-149 PUTS ON THE QUADRATURE ORDER. Inside the winding the
+ * integrand is logarithmic: the stack has `nR nZ` log singularities where the
+ * rectangle has none, so no refinement closes it there and asserting a rate
+ * inside would be asserting something false.
+ *
+ * THE CONTROL IS THE SINGLE FILAMENT, which is the whole point of the case. It
+ * is one term of the same sum, so its error does not fall at all -- and the
+ * ratio at the finest stack is what says the key buys something.
+ */
+BOOST_AUTO_TEST_CASE( theFilamentStackConvergesToTheRectangleAtOrderTwo )
+{
+	// A DELIBERATELY UN-SQUARE COIL, aspect ratio 8, because a square one
+	// cannot tell nR from nZ: a transposed stack is the same set of points.
+	meq::Coil const coil( 1.30, 0.20, 0.04, 0.32, 4.7e5 );
+
+	// Field points OUTSIDE the rectangle and at several standoffs, so the rate
+	// is not one point's luck. The nearest is about half a half-height away.
+	struct Point { double r, z; };
+	std::vector<Point> const points = {
+		{ 2.10, 0.20 }, { 1.30, 0.75 }, { 0.70, -0.40 },
+		{ 1.90, 1.30 }, { 0.90, 0.20 }
+	};
+
+	auto worstAgainstTheRectangle = [ & ]( int nR, int nZ )
+	{
+		meq::ConductorField stacked;
+		for ( meq::CurrentFilament const &one : meq::filamentStack( coil, nR, nZ ) )
+			stacked.add( one );
+
+		meq::ConductorField exact;
+		exact.add( coil );
+
+		double worst = 0.0;
+		for ( Point const &p : points )
+		{
+			double const reference = exact.psi( p.r, p.z );
+			worst = std::max( worst,
+			                  std::fabs( stacked.psi( p.r, p.z ) - reference )
+			                  /std::fabs( reference ) );
+		}
+		return worst;
+	};
+
+	std::printf( "\n  THE FILAMENT STACK AGAINST THE RECTANGLE IT DIVIDES\n" );
+	std::printf( "    %10s %14s %8s\n", "stack", "worst rel", "order" );
+
+	// THE DEFAULT, ON ITS OWN ROW AND OUT OF THE SEQUENCE. 1 x 1 is what every
+	// file without the key gets, so it is the number the key is measured
+	// against -- and it is NOT the first rung of the study below, which starts
+	// at 1 x 8 so that the cell is near square before it halves.
+	double const collapsed = worstAgainstTheRectangle( 1, 1 );
+	std::printf( "    %4d x %-5d %14.6e   the default\n", 1, 1, collapsed );
+
+	// nR x nZ doubling together, so the cell halves in both directions and the
+	// midpoint rule's h^2 is a factor of 4 per row.
+	std::vector<double> errors;
+	int const counts[] = { 1, 2, 4, 8, 16 };
+	for ( int c : counts )
+	{
+		double const e = worstAgainstTheRectangle( c, 8*c );
+		std::printf( "    %4d x %-5d %14.6e", c, 8*c, e );
+		if ( !errors.empty() )
+			std::printf( " %8.3f",
+			             std::log( errors.back()/e )/std::log( 2.0 ) );
+		std::printf( "\n" );
+		errors.push_back( e );
+	}
+
+	// THE RATE OVER THE WHOLE SEQUENCE rather than a pair, which is what the
+	// convergence cases in tests/convergence/ do and for the same reason: one
+	// pair can be flattered by a sign change in the error.
+	double const overall =
+		std::log( errors.front()/errors.back() )
+		/std::log( static_cast<double>( counts[ 4 ] )/counts[ 0 ] );
+	std::printf( "    overall order %.3f over %d refinements\n",
+	             overall, static_cast<int>( errors.size() ) - 1 );
+
+	BOOST_TEST( overall > 1.85,
+		"the filament stack converges to the rectangle at order " << overall
+		<< ", where the midpoint rule it IS gives 2. A rate below this is the "
+		"stack not being that rule -- points at cell corners rather than "
+		"centres, a current density where a share belongs, or an index "
+		"transposed -- none of which a tolerance on the finest stack would "
+		"separate from a coarse mesh." );
+
+	// AND THE CONTROL IS THE DEFAULT, which is the comparison a user makes:
+	// what does one filament at the centre cost, and what does the key buy?
+	std::printf( "    the default is %.4g, the finest stack %.4g: %.0fx\n",
+	             collapsed, errors.back(), collapsed/errors.back() );
+	BOOST_TEST( collapsed/errors.back() > 100.0,
+		"the single filament at the centre -- which is what every file without "
+		"[conductors] FilamentSize gets -- is " << collapsed << " from the "
+		"rectangle and the 16 x 128 stack is " << errors.back()
+		<< ", a factor of " << collapsed/errors.back() << ". Without a large "
+		"factor here the rate above is a rate on a difference nobody needs, "
+		"and the key buys nothing over the collapse it generalises." );
+}
+
+/*
+ * 1 x 1 IS THE COLLAPSE, BIT FOR BIT, AND THE STACK CONSERVES THE CURRENT.
+ *
+ * The first is what makes meq::filamentStack() a generalisation of
+ * meq::makeConductorField()'s existing collapse rather than a replacement for
+ * it, and it is asserted as an IDENTITY because it is one: the cell centre of a
+ * 1 x 1 division is the rectangle's centre and the share is the whole current.
+ * MEASUREMENTS.md M-154's 2.8e-05 against `freegs4e` rests on exactly that
+ * point being where it is.
+ *
+ * The second is the property a boundary integral of psi_c is checked against --
+ * meq::ConductorField::totalCurrent() -- and a stack is the one place it could
+ * drift: nR*nZ shares summed is the block's current only if the share is
+ * I/( nR nZ ) and every cell gets one.
+ */
+BOOST_AUTO_TEST_CASE( theUnitStackIsTheCentreFilamentAndTheStackKeepsTheCurrent )
+{
+	meq::Coil const coil( 1.30, 0.20, 0.04, 0.32, 4.7e5 );
+
+	std::vector<meq::CurrentFilament> const one = meq::filamentStack( coil, 1, 1 );
+	BOOST_TEST_REQUIRE( one.size() == 1u );
+	BOOST_TEST( one[ 0 ].radius() == coil.centreR(),
+		"a 1 x 1 stack sits at " << one[ 0 ].radius() << " where the "
+		"rectangle's centre is " << coil.centreR() << ". These must be the "
+		"same double: every filament run in examples/ and MEASUREMENTS.md "
+		"M-154's agreement with freegs4e are about a filament at THIS point." );
+	BOOST_TEST( one[ 0 ].height() == coil.centreZ() );
+	BOOST_TEST( one[ 0 ].current() == coil.current() );
+
+	for ( auto const &pair : { std::make_pair( 3, 7 ), std::make_pair( 16, 1 ),
+	                           std::make_pair( 5, 40 ) } )
+	{
+		std::vector<meq::CurrentFilament> const stack =
+			meq::filamentStack( coil, pair.first, pair.second );
+		BOOST_TEST_REQUIRE( stack.size()
+		                    == static_cast<std::size_t>( pair.first )
+		                       *static_cast<std::size_t>( pair.second ) );
+
+		double total = 0.0;
+		double lowR = stack[ 0 ].radius(), highR = stack[ 0 ].radius();
+		double lowZ = stack[ 0 ].height(), highZ = stack[ 0 ].height();
+		for ( meq::CurrentFilament const &f : stack )
+		{
+			total += f.current();
+			lowR = std::min( lowR, f.radius() );
+			highR = std::max( highR, f.radius() );
+			lowZ = std::min( lowZ, f.height() );
+			highZ = std::max( highZ, f.height() );
+		}
+
+		BOOST_TEST( std::fabs( total - coil.current() )
+		            <= 1.0e-12*std::fabs( coil.current() ),
+			"a " << pair.first << " x " << pair.second << " stack carries "
+			<< total << " where the rectangle carries " << coil.current()
+			<< ". The stack is the same conductor divided, so the sum is the "
+			"block's own current and totalCurrent() is checked against a "
+			"boundary integral that assumes it." );
+
+		// AND EVERY FILAMENT IS INSIDE THE RECTANGLE, which cell CENTRES are
+		// and cell corners are not: a corner rule would put filaments on
+		// rMin and rMax exactly, and on the axis side that is a conductor
+		// half a cell nearer the plasma than the metal is.
+		BOOST_TEST( lowR > coil.rMin() );
+		BOOST_TEST( highR < coil.rMax() );
+		BOOST_TEST( lowZ > coil.zMin() );
+		BOOST_TEST( highZ < coil.zMax() );
+	}
+}
+
+/*
+ * A CELL SIZE IS AN UPPER BOUND ON A CELL, AND ASPECT RATIO IS WHY IT IS A
+ * LENGTH RATHER THAN A COUNT.
+ *
+ * MAST-U's own three shapes, which is the geometry section 13.5 is about: a
+ * solenoid of aspect ratio 265, a PX of 16, and a D of 1. One COUNT is wrong
+ * for two of those whichever it is; one SIZE gives each the division its own
+ * extent asks for, and that is the whole argument for the key's units.
+ */
+BOOST_AUTO_TEST_CASE( theCellSizeDividesEachBlockByItsOwnExtent )
+{
+	struct Case { char const *name; double halfWidth, halfHeight;
+	              int wantR, wantZ; };
+
+	// At a 0.05 m cell: ceil( 2a/0.05 ) x ceil( 2b/0.05 ), at least 1 each.
+	std::vector<Case> const cases = {
+		{ "Solenoid", 0.006000, 1.590000,  1, 64 },
+		{ "PX1",      0.012500, 0.201378,  1,  9 },
+		{ "D11",      0.043100, 0.043100,  2,  2 }
+	};
+
+	std::printf( "\n  A 0.05 m CELL AGAINST MAST-U's OWN THREE SHAPES\n" );
+	std::printf( "    %-10s %12s %10s\n", "block", "aspect", "stack" );
+
+	for ( Case const &c : cases )
+	{
+		meq::Coil const coil( 0.30, 0.0, c.halfWidth, c.halfHeight, 1.0e5 );
+		int nR = 0, nZ = 0;
+		meq::filamentStackSize( coil, 0.05, nR, nZ );
+
+		std::printf( "    %-10s %12.1f %5d x %-4d\n", c.name,
+		             c.halfHeight/c.halfWidth, nR, nZ );
+
+		BOOST_TEST( nR == c.wantR,
+			c.name << " divides " << nR << " ways in R at a 0.05 m cell, "
+			"where ceil( " << 2.0*c.halfWidth << "/0.05 ) is " << c.wantR );
+		BOOST_TEST( nZ == c.wantZ,
+			c.name << " divides " << nZ << " ways in Z at a 0.05 m cell, "
+			"where ceil( " << 2.0*c.halfHeight << "/0.05 ) is " << c.wantZ );
+	}
+
+	// A BLOCK NARROWER THAN ONE CELL GETS ONE, not zero and not a fraction:
+	// the size is an upper bound on a cell rather than a target to subdivide
+	// down to, so a small coil is left alone by a coarse size.
+	meq::Coil const small( 1.00, 0.0, 0.001, 0.001, 1.0e5 );
+	int nR = 0, nZ = 0;
+	meq::filamentStackSize( small, 0.05, nR, nZ );
+	BOOST_TEST( nR == 1 );
+	BOOST_TEST( nZ == 1 );
+
+	BOOST_CHECK_THROW( meq::filamentStackSize( small, 0.0, nR, nZ ),
+	                   std::invalid_argument );
+	BOOST_CHECK_THROW( meq::filamentStackSize( small, -1.0, nR, nZ ),
+	                   std::invalid_argument );
+
+	// A CELL SIZE TOO FINE IS REFUSED AND NOT CLAMPED, and the fixture is the
+	// shape that makes clamping dangerous: 3.18 m in Z and 0.012 in R, so a
+	// clamp would give 65536 x 1 -- a product of exactly the cap, which
+	// filamentStack() accepts. A silent substitution of one conductor model
+	// for another is what this refusal exists to prevent.
+	meq::Coil const solenoidLike( 0.195, 0.0, 0.006, 1.590, 1.0e6 );
+	BOOST_CHECK_THROW( meq::filamentStackSize( solenoidLike, 1.0e-5, nR, nZ ),
+	                   std::invalid_argument );
+	// And the same conductor at a size somebody would write is fine.
+	BOOST_CHECK_NO_THROW( meq::filamentStackSize( solenoidLike, 0.05, nR, nZ ) );
+	BOOST_TEST( nR == 1 );
+	BOOST_TEST( nZ == 64 );
+	BOOST_CHECK_THROW( meq::filamentStack( small, 0, 4 ),
+	                   std::invalid_argument );
+	BOOST_CHECK_THROW( meq::filamentStack( small, 4, 0 ),
+	                   std::invalid_argument );
+	// THE UNITS GUARD. 1 mm on a 3.18 m solenoid is the mistake it exists for.
+	BOOST_CHECK_THROW( meq::filamentStack( small, 400, 400 ),
+	                   std::invalid_argument );
+}
+
+/*
+ * WHAT THE COLLAPSE COSTS ON THE CONDUCTOR THAT MOTIVATES THE KEY, AT THE
+ * PLASMA.
+ *
+ * COIL-SUBTRACTION-PLAN.md section 13.5 names MAST-U's solenoid: 0.012 m by
+ * 3.18 m, an aspect ratio of 265, sitting beside the plasma rather than out
+ * beyond it. The claim the key rests on is that one point at its centre is not
+ * a machine near MAST-U's, and this is that claim as a number rather than as an
+ * argument -- the geometry and the current are examples/mastu-nke.toml's own.
+ *
+ * THE FIELD POINTS ARE IN THE PLASMA, which is where the error has to be
+ * measured: the collapse conserves the total current, so it is exact in the FAR
+ * field by construction and any study out there measures nothing. MAST-U's
+ * plasma sits at roughly R in [ 0.3, 1.4 ], and the solenoid is at R = 0.195,
+ * so the standoff is comparable to the conductor's own half-height -- which is
+ * precisely the regime a multipole expansion about the centre does not cover.
+ *
+ * TWO NUMBERS AND A RATIO, and it is the RATIO that is the finding: a key whose
+ * default is right for one reference and wrong for another needs its cost in
+ * both directions, and MEASUREMENTS.md M-154's agreement with `freegs4e` is
+ * about a point filament at exactly this centre.
+ */
+BOOST_AUTO_TEST_CASE( theCollapseIsPercentLevelAtMastUsPlasmaAndTheStackIsNot )
+{
+	// examples/mastu-nke.toml's Solenoid block, verbatim.
+	meq::Coil const solenoid( 0.194750000, 0.000000000,
+	                          0.006000000, 1.590000000, +1.6200000000e+06 );
+
+	struct Point { double r, z; };
+	std::vector<Point> const plasma = {
+		{ 0.85,  0.00 }, { 0.60,  0.50 }, { 1.30,  0.00 },
+		{ 0.40,  1.00 }, { 0.90, -0.70 }, { 0.35,  0.00 }
+	};
+
+	auto worst = [ & ]( int nR, int nZ )
+	{
+		meq::ConductorField stacked;
+		for ( meq::CurrentFilament const &one
+		      : meq::filamentStack( solenoid, nR, nZ ) )
+			stacked.add( one );
+
+		meq::ConductorField exact;
+		exact.add( solenoid );
+
+		double out = 0.0;
+		for ( Point const &p : plasma )
+		{
+			double const reference = exact.psi( p.r, p.z );
+			out = std::max( out, std::fabs( stacked.psi( p.r, p.z ) - reference )
+			                     /std::fabs( reference ) );
+		}
+		return out;
+	};
+
+	int sizedR = 0, sizedZ = 0;
+	meq::filamentStackSize( solenoid, 0.05, sizedR, sizedZ );
+
+	double const collapsed = worst( 1, 1 );
+	double const sized = worst( sizedR, sizedZ );
+
+	std::printf( "\n  MAST-U's SOLENOID AT ITS OWN PLASMA, 0.012 x 3.180 m\n" );
+	std::printf( "    %-24s %5s %14s\n", "model", "stack", "worst rel" );
+	std::printf( "    %-24s %2d x %-2d %14.6e\n", "one filament (default)",
+	             1, 1, collapsed );
+	std::printf( "    %-24s %2d x %-2d %14.6e\n", "FilamentSize = 0.05",
+	             sizedR, sizedZ, sized );
+	std::printf( "    the key is worth %.0fx here\n", collapsed/sized );
+
+	// THE DEFAULT IS NOT PERTURBATIVE HERE, which is the whole finding. A
+	// tenth of a per cent would make this key an optimisation; it is not.
+	BOOST_TEST( collapsed > 0.05,
+		"one filament at the solenoid's centre is " << collapsed << " from the "
+		"rectangle at MAST-U's own plasma. COIL-SUBTRACTION-PLAN.md 13.5 says "
+		"that collapse is what bounds the coarse-filaments pathway; if this "
+		"number is small the plan's premise is wrong and the key is not "
+		"needed." );
+
+	BOOST_TEST( sized < 0.01*collapsed,
+		"FilamentSize = 0.05 gives a " << sizedR << " x " << sizedZ
+		<< " stack reading " << sized << " against the collapse's " << collapsed
+		<< ". The key has to close most of the gap at a cell size somebody "
+		"would actually write, not only in the limit." );
 }

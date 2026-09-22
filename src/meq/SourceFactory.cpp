@@ -404,22 +404,48 @@ namespace meq
 
 			guarded( [ & ]() -> int
 			{
-				if ( conductors.model == ConductorModel::Filament )
-					// THE CENTRE AND THE TOTAL CURRENT, which is the only
-					// collapse of a rectangle to a point that conserves the
-					// thing the far field depends on. The half-extents are
-					// DROPPED rather than averaged into anything: a filament
-					// has no cross-section, and pretending otherwise is what
-					// would make this look like an approximation to the
-					// rectangle instead of the different conductor model it is.
-					field->add( CurrentFilament( parameters.centreR,
-					                             parameters.centreZ,
-					                             parameters.current ) );
-				else
+				if ( conductors.model != ConductorModel::Filament )
+				{
 					field->add( Coil( parameters.centreR, parameters.centreZ,
 					                  parameters.halfWidth,
 					                  parameters.halfHeight,
 					                  parameters.current ) );
+					return 0;
+				}
+
+				Coil const rectangle( parameters.centreR, parameters.centreZ,
+				                      parameters.halfWidth,
+				                      parameters.halfHeight,
+				                      parameters.current );
+
+				/*
+				 * THE STACK, IN THE ORDER THE SCHEMA PROMISES: the block's own
+				 * FilamentsR / FilamentsZ first, then [conductors]
+				 * FilamentSize, then the single filament at the centre.
+				 *
+				 * THE LAST OF THOSE IS THE DEFAULT AND MUST STAY THE DEFAULT.
+				 * A rectangle collapsed to one point at its centre carrying the
+				 * total current is the only collapse that conserves what the
+				 * far field depends on, and MEASUREMENTS.md M-154 reproduces
+				 * `freegs4e`'s F_diiid_conventional to 2.8e-05 *because* that
+				 * code carries POINT filaments at exactly these centres.
+				 * Subdividing moves MEQ towards the real winding and AWAY from
+				 * that reference, so it is a key rather than an improvement.
+				 */
+				int nR = 1;
+				int nZ = 1;
+				if ( parameters.stackGiven() )
+				{
+					nR = parameters.filamentsR;
+					nZ = parameters.filamentsZ;
+				}
+				else if ( conductors.filamentSize > 0.0 )
+					filamentStackSize( rectangle, conductors.filamentSize,
+					                   nR, nZ );
+
+				for ( CurrentFilament const &one
+				      : filamentStack( rectangle, nR, nZ ) )
+					field->add( one );
 				return 0;
 			}, configFileName, key.c_str() );
 		}

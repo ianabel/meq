@@ -3761,3 +3761,179 @@ BOOST_AUTO_TEST_CASE( theDriverSolvesACoilSubtractedLimitedMachine )
 		"Picard-then-Newton fallback, so which equilibrium is reported was "
 		"chosen by a globalisation -- M-26" );
 }
+
+/*
+ * `[conductors] FilamentSize` -- A RECTANGLE DIVIDED INTO A STACK, AND THE
+ * ACCEPTANCE IS THAT IT MOVES TOWARDS THE RECTANGLE.
+ *
+ * COIL-SUBTRACTION-PLAN.md section 13.5. `Model = "filament"` collapses each
+ * `[[coils]]` block to ONE point at its centre carrying the total current,
+ * which section 4b defends as a different conductor model rather than an
+ * approximation -- and which bounds the coarse-filaments-then-meshed-coils
+ * pathway, because MAST-U's solenoid is 0.012 x 3.180 m beside the plasma and
+ * one point at its centre is not that machine. MEASUREMENTS.md M-166 sizes it:
+ * a factor of 5.3 from the rectangle at MAST-U's own plasma.
+ *
+ * THE THIRD ARM IS WHAT MAKES THIS AN ACCEPTANCE AND NOT A SMOKE TEST. Three
+ * runs of one file -- meshed, one filament per block, and a stack -- and the
+ * claim is an ORDERING: the stack must sit closer to the meshed answer than the
+ * lone filament does, because the stack is the midpoint rule for the integral
+ * the mesh is resolving. A run that merely exits 0 with more filaments in its
+ * `.nc` would satisfy every other assertion here.
+ *
+ * AND THE MESHED ARM IS THE REFERENCE ON PURPOSE, not `Model = "subtracted"`.
+ * Both are the rectangle; the meshed one is the route this file's own header
+ * says never stops working, so an ordering against it is a statement about the
+ * machine rather than about two spellings of one library call.
+ *
+ * THE GATE IS DELIBERATELY LOOSE AND THE FIXTURE IS WHY, WHICH IS MEASURED
+ * RATHER THAN ALLOWED FOR. examples/coils-rectangle.toml's element edges
+ * deliberately do not lie on its conductor edges -- its own header records
+ * about three cells per coil being cut -- so the MESHED arm carries an O( h )
+ * source error at the conductor boundary that no stack closes and no
+ * refinement of this file removes cheaply. Measured, the lone filament sits
+ * 5.53e-02 from it and the 5 x 5 stack 4.67e-02: a ratio of 1.18, where the
+ * same two models differ by 5.0e+04 against the rectangle's own exact field.
+ * **The reference here is 5% wrong, so the ratio this fixture can show is
+ * bounded by the reference and not by the stack.**
+ *
+ * SO THE SHARP STATEMENT IS NOT THIS CASE'S. It is
+ * theFilamentStackConvergesToTheRectangleAtOrderTwo in
+ * tests/unit/ConductorFieldTests.cpp, which differences against meq::coilPsi()
+ * rather than against a discretisation and reads order 2.000 over four
+ * refinements. What THIS case is for is the half that no unit test can reach:
+ * that the two keys survive the parser, reach meq::makeConductorField, change
+ * the field the driver solves against, and are written into the interchange
+ * format -- and that the direction of the change is towards the rectangle
+ * rather than away from it.
+ */
+BOOST_AUTO_TEST_CASE( theFilamentStackMovesTowardsTheRectangleItDivides )
+{
+	BOOST_TEST_REQUIRE( run( "examples/coils-rectangle.toml" ) == 0 );
+	mfem::Mesh meshedMesh( "coils-rectangle.mesh", 1, 1 );
+	mfem::GridFunction const meshed =
+		readGridFunction( "coils-rectangle_psi.gf", meshedMesh );
+
+	std::string const shipped = slurp( "examples/coils-rectangle.toml" );
+	BOOST_TEST_REQUIRE( !shipped.empty() );
+
+	// ONE ARM PER CONDUCTOR MODEL, from the SAME shipped text, so the only
+	// difference between the three runs is the table substituted in.
+	auto solveWith = [ & ]( std::string const &table, std::string const &prefix )
+	{
+		std::string derived = replaceAll( shipped, "\n[boundary]\n",
+		                                  "\n[conductors]\n" + table
+		                                  + "\n[boundary]\n" );
+		BOOST_TEST_REQUIRE( derived != shipped,
+		                    "the [boundary] substitution matched nothing" );
+		derived = replaceAll( derived, "Prefix = \"coils-rectangle\"",
+		                      "Prefix = \"" + prefix + "\"" );
+		std::string const path = "driver-acceptance-" + prefix + ".toml";
+		{
+			std::ofstream file( path );
+			file << derived;
+			BOOST_TEST_REQUIRE( file.good() );
+		}
+		BOOST_TEST_REQUIRE( run( path.c_str() ) == 0,
+		                    "the driver did not exit 0 on " << path );
+	};
+
+	solveWith( "Model = \"filament\"\n", "onefilament" );
+	solveWith( "Model = \"filament\"\nFilamentSize = 0.02\n", "stacked" );
+
+	// THE PHYSICAL FIELD AND NOT THE REMAINDER, which is what makes the three
+	// arms comparable at all: the two filament runs solve for psi_p and the
+	// meshed one for psi, so psi_c has to be added back at the same dofs. The
+	// potential space is nodal GaussLobatto, so this projection is
+	// interpolation at the solution's own order.
+	auto physical = [ & ]( std::string const &prefix,
+	                       std::vector<meq::CurrentFilament> const &set )
+	{
+		mfem::Mesh mesh( ( prefix + ".mesh" ).c_str(), 1, 1 );
+		mfem::GridFunction remainder =
+			readGridFunction( ( prefix + "_psi.gf" ).c_str(), mesh );
+
+		meq::ConductorField conductors;
+		for ( meq::CurrentFilament const &one : set )
+			conductors.add( one );
+
+		mfem::FunctionCoefficient psiC(
+			[ &conductors ]( mfem::Vector const &x )
+			{
+				return conductors.psi( std::max( 0.0, x( 0 ) ), x( 1 ) );
+			} );
+		mfem::GridFunction total( remainder.FESpace() );
+		total.ProjectCoefficient( psiC );
+		total += remainder;
+		return total;
+	};
+
+	// examples/coils-rectangle.toml's own two blocks.
+	meq::Coil const upper( 2.10, 0.60, 0.05, 0.05, 1.5e5 );
+	meq::Coil const lower( 2.10, -0.60, 0.05, 0.05, 1.5e5 );
+
+	std::vector<meq::CurrentFilament> lone = meq::filamentStack( upper, 1, 1 );
+	for ( meq::CurrentFilament const &one : meq::filamentStack( lower, 1, 1 ) )
+		lone.push_back( one );
+
+	int nR = 0, nZ = 0;
+	meq::filamentStackSize( upper, 0.02, nR, nZ );
+	std::vector<meq::CurrentFilament> stack = meq::filamentStack( upper, nR, nZ );
+	for ( meq::CurrentFilament const &one : meq::filamentStack( lower, nR, nZ ) )
+		stack.push_back( one );
+
+	mfem::GridFunction const loneField = physical( "onefilament", lone );
+	mfem::GridFunction const stackField = physical( "stacked", stack );
+
+	double const loneGap = relativeDifference( loneField, meshed );
+	double const stackGap = relativeDifference( stackField, meshed );
+
+	std::printf( "\n  THE FILAMENT STACK AGAINST THE MESHED RECTANGLE\n" );
+	std::printf( "    %-28s %5s %14s\n", "model", "stack", "rel to meshed" );
+	std::printf( "    %-28s %2d x %-2d %14.6e\n", "one filament per block",
+	             1, 1, loneGap );
+	std::printf( "    %-28s %2d x %-2d %14.6e\n", "FilamentSize = 0.02",
+	             nR, nZ, stackGap );
+	std::printf( "    the key is worth %.1fx on this machine\n",
+	             loneGap/stackGap );
+
+	// THE DIRECTION, WITH A MARGIN THE FIXTURE CAN CARRY. 0.95 rather than 0.5:
+	// the meshed reference is itself 5% from the rectangle here, so a stack
+	// that is exact would still read about 1.2x. What this rules out is the
+	// key reaching the field and moving it the WRONG WAY, or not at all --
+	// which is what a stack at cell corners, or one carrying a density where a
+	// share belongs, would do.
+	BOOST_TEST( stackGap < 0.95*loneGap,
+		"the " << nR << " x " << nZ << " stack sits " << stackGap
+		<< " from the meshed rectangle where one filament per block sits "
+		<< loneGap << ". The stack is the midpoint rule for the integral the "
+		"mesh resolves, so it has to be NEARER -- a stack that is not is the "
+		"key reaching the field while the stack is not the rule it claims to "
+		"be. The margin is small because this fixture's meshed arm carries its "
+		"own O( h ) cut-cell error; the sharp version of this claim is "
+		"ConductorFieldTests' order 2.000." );
+
+	// THE FILAMENTS ARE IN THE FILE, INDIVIDUALLY, which is what lets a reader
+	// rebuild the physical flux -- and a stack is the one thing that could put
+	// a block's current in twice. CS-6's own reconstruction sums every row.
+	std::string const header = ncdumpHeader( "stacked.nc" );
+	BOOST_TEST_REQUIRE( !header.empty(), "ncdump could not read stacked.nc" );
+	BOOST_TEST( header.find( "conductor_model = \"filament\"" )
+	            != std::string::npos,
+	            "the .nc does not record which conductor model produced it" );
+
+	std::vector<double> const currents =
+		ncdumpVariable( "stacked.nc", "conductor_current" );
+	BOOST_TEST_REQUIRE( currents.size() == stack.size(),
+		"the .nc carries " << currents.size() << " conductors where the "
+		"stack has " << stack.size() << ": a divided block must appear as its "
+		"filaments, or the file cannot regenerate the field it describes" );
+
+	double total = 0.0;
+	for ( double one : currents )
+		total += one;
+	BOOST_TEST( std::fabs( total - 3.0e5 ) <= 1.0e-6*3.0e5,
+		"the .nc's conductor table sums to " << total << " where the file asks "
+		"for 3.0e5 A. A stack divides a block's current and does not change "
+		"it; a sum that has moved is a share applied to the wrong count." );
+}

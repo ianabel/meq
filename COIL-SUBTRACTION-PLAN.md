@@ -1209,13 +1209,45 @@ away from where the solver believed it was. The default stays `"remainder"`,
 which is what a subtracted run writes and what every file written before the key
 existed means.
 
-**NOT BUILT, AND IT IS THE PATHWAY'S REAL OBSTACLE: a `[[coils]]` block is ONE
-filament.** `meq::makeConductorField` collapses each rectangle to a point at its
-centre carrying the total current, which §4b defends as *a different conductor
-model rather than an approximation*. That is right as a contract and it is what
-bounds the pathway: MAST-U's solenoid is 12 mm by 3.18 m and sits beside the
-plasma, so one point at its centre is not a machine whose equilibrium is near
-MAST-U's. Subdividing a block into an `n_R × n_Z` stack of filaments carrying
-`I/( n_R n_Z )` each is the obvious fix, it is cheap at 2.38 µs per 23
-conductors, and it is a modelling decision — how many, chosen how — rather than
-a line of code.
+**BUILT: a `[[coils]]` block DIVIDES.** `[conductors] FilamentSize` is a target
+filament CELL size in metres and `[[coils]] FilamentsR`/`FilamentsZ` override it
+per block; `meq::filamentStack()` puts one filament at the centre of each cell
+carrying `I/( n_R n_Z )`. **The default is one per block and must stay so** —
+see the third paragraph.
+
+**AND THE BOUND THIS ENTRY ARGUED FROM GEOMETRY IS NOW MEASURED** →
+**[M-166](MEASUREMENTS.md#m-166)**. MAST-U's solenoid is 0.012 m by 3.18 m
+beside the plasma, and one point at its centre reads **a factor of 5.3** from
+the rectangle at MAST-U's own plasma, not a per cent. `FilamentSize = 0.05`
+makes it 1 × 64 and takes that to 3.1e-04.
+
+**THE STACK IS THE MIDPOINT RULE FOR THE INTEGRAL `meq::coilPsi()` EVALUATES,
+WHICH IS WHAT MAKES IT A MODEL RATHER THAN A HEURISTIC** — measured at **order
+2.000 over four refinements**, an aspect-8 coil going 7.4e-02 at one filament to
+1.5e-06 at 16 × 128. The acceptance is that rate rather than a tolerance
+precisely because the near misses — filaments at cell corners, a current density
+where a share belongs, a transposed index — all give small errors and none of
+them gives 2. **Clear of the conductor only**: inside the winding a stack has
+`n_R n_Z` log singularities where the rectangle has none, which is §7.2's own
+qualification on the quadrature order.
+
+**THE KEY'S UNITS ARE THE DECISION THIS ENTRY LEFT OPEN, AND THE ASPECT RATIOS
+SETTLE IT.** A LENGTH rather than a count: MAST-U's blocks run from an aspect
+ratio of 265 (the solenoid) to 1 (D11), so any single count is wrong for two of
+the three, while one cell size gives each the division its own extent asks for.
+
+**AND SUBDIVIDING MOVES *AWAY* FROM A POINT-FILAMENT REFERENCE, WHICH IS WHY
+THE DEFAULT IS WHAT IT IS.** On `examples/limited-tokamak-filament.toml` against
+`freegs4e`'s `H_limited_circular` — point filaments at exactly MEQ's own centres
+— `FilamentSize = 0.02` makes `psi_ax` **3.50× worse** and `psi_bnd` **10.81×
+worse**. Correctly so: the stack converges to the rectangle and the reference is
+not one. [M-154](MEASUREMENTS.md#m-154)'s 2.8e-05 rests on the same coincidence
+of models. Neither setting is safe, so a run prints which it took and the `.nc`
+carries every filament individually.
+
+**WHAT IS STILL OPEN IS A SHIPPED MAST-U FILAMENT CASE.** The capability is
+reachable from a file and has an acceptance; what nothing in `examples/` yet
+does is pose MAST-U free boundary with its conductors subtracted and divided,
+which is the pathway's own first rung. That wants MAST-U's cold start, which is
+[M-124](MEASUREMENTS.md#m-124)'s ellipse guess plus
+`setBorderRegularisation()`, and it is a fixture rather than a capability.

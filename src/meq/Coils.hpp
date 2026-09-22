@@ -269,6 +269,17 @@ namespace meq
 	/// evaluates the exterior.
 	inline constexpr int defaultCoilQuadratureOrder = 32;
 
+	/// The most filaments meq::filamentStack() will make of one rectangle.
+	///
+	/// **IT IS A UNITS GUARD RATHER THAN A PERFORMANCE ONE.** The stack's cost
+	/// is paid once -- `psi_c` is cached per quadrature point and per dof -- so
+	/// a large stack is affordable; what this catches is a cell size given in
+	/// millimetres, which turns a 3.18 m solenoid into a stack three orders too
+	/// fine and the cache build into the run. 65536 is far above any modelling
+	/// choice: MAST-U's whole machine at a 5 mm cell is under 1400 filaments
+	/// across 23 conductors.
+	inline constexpr long long maximumFilamentsPerCoil = 65536;
+
 	/**
 	 * The order an INITIAL GUESS wants, which is not the order a field wants.
 	 *
@@ -795,6 +806,59 @@ namespace meq
 	/// q_r ON the axis for a filament. See the free function.
 	double filamentAxisFlux( CurrentFilament const &filament, double z,
 	                         double mu0 = vacuumPermeability );
+
+	/**
+	 * THE STACK OF POINT FILAMENTS A RECTANGLE BECOMES: one at the centre of
+	 * each cell of a uniform `nR x nZ` division of the cross-section, each
+	 * carrying `coil.current()/( nR*nZ )`.
+	 *
+	 * **THIS IS THE MIDPOINT RULE FOR THE INTEGRAL meq::coilPsi() EVALUATES**,
+	 * which is what makes it a refinable model rather than a heuristic: the
+	 * rectangle's field is `mu0 j_phi` times the cross-section integral of the
+	 * filament kernel, and a uniform stack at cell centres is that integral's
+	 * midpoint sum. So the stack converges to the rectangle at **order 2** in
+	 * the cell size, CLEAR OF THE CONDUCTOR -- the same qualification
+	 * MEASUREMENTS.md M-149 puts on the quadrature order, and for the same
+	 * reason: inside the winding the integrand is logarithmic, the stack has
+	 * `nR nZ` log singularities where the rectangle has none, and no refinement
+	 * closes that.
+	 *
+	 * **`nR = nZ = 1` IS THE SINGLE FILAMENT AT THE CENTRE, BIT FOR BIT**, so
+	 * this generalises the collapse meq::makeConductorField already performs
+	 * rather than replacing it. That is the default and it must stay the
+	 * default: MEASUREMENTS.md M-154 reproduces `freegs4e`'s
+	 * `F_diiid_conventional` to 2.8e-05 because that code carries POINT
+	 * filaments at exactly the centres MEQ puts its own, and subdividing moves
+	 * MEQ towards the real winding and away from that reference.
+	 *
+	 * @throws std::invalid_argument if either count is less than 1, or if the
+	 *         product overflows what a stack can address.
+	 */
+	std::vector<CurrentFilament> filamentStack( Coil const &coil, int nR,
+	                                            int nZ );
+
+	/**
+	 * The stack a target CELL SIZE asks of this rectangle:
+	 * `ceil( 2*halfWidth/cellSize ) x ceil( 2*halfHeight/cellSize )`, at least
+	 * one each.
+	 *
+	 * **A LENGTH RATHER THAN A COUNT, BECAUSE THE ACCURACY CRITERION IS ONE.**
+	 * A cell's error at a field point goes as `( h/standoff )^2`, so one size
+	 * buys a predictable accuracy across conductors of every shape -- which
+	 * matters because a machine's blocks are not one shape: MAST-U's solenoid
+	 * is 0.012 x 3.180 m against a D11 of 0.086 x 0.086, an aspect ratio of
+	 * 265 against 1, and any single COUNT is wrong for one of them.
+	 *
+	 * @throws std::invalid_argument if @a cellSize is not finite and positive,
+	 *         or if it divides either extent into more than
+	 *         meq::maximumFilamentsPerCoil. **Refused and not clamped**: a
+	 *         clamp hands back a stack the caller did not ask for, and on a
+	 *         thin tall conductor -- the shape this key exists for --
+	 *         filamentStack()'s product cap would then pass it, since 65536 by
+	 *         1 is a legal product.
+	 */
+	void filamentStackSize( Coil const &coil, double cellSize, int &nR,
+	                        int &nZ );
 
 	/**
 	 * A set of coils, and the two things a free-boundary solve wants from them:

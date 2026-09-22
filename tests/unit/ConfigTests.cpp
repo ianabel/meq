@@ -2958,6 +2958,136 @@ BOOST_AUTO_TEST_CASE( the_conductor_model_decides_how_the_coils_enter )
 	                   ConfigError );
 }
 
+
+/*
+ * THE FILAMENT STACK'S TWO KEYS -- [conductors] FilamentSize AND [[coils]]
+ * FilamentsR / FilamentsZ.
+ *
+ * COIL-SUBTRACTION-PLAN.md section 13.5 and MEASUREMENTS.md M-166. One point at
+ * a rectangle's centre is exact in the FAR field and a factor of 5.3 from the
+ * rectangle at MAST-U's own plasma; these divide it. The DEFAULT is one per
+ * block and stays so -- a stack converges to the RECTANGLE, which is away from
+ * a point-filament reference, so this is a mode rather than an improvement.
+ *
+ * THE REFUSALS ARE THE CONTRACT, and both directions matter. Accepted-and-
+ * ignored is the failure CLAUDE.md now records four times, and here it would be
+ * the quiet kind: a file asking for a divided solenoid and getting one filament
+ * at its centre reads as a converged machine that is not the machine asked for.
+ */
+BOOST_AUTO_TEST_CASE( the_filament_stack_keys_are_refused_off_the_filament_model )
+{
+	// THE SIBLING CASE'S OWN BASE, verbatim, so that a schema change breaking
+	// one of them breaks both rather than leaving this case passing against a
+	// configuration the other no longer accepts.
+	std::string const base =
+		"[mesh]\n"
+		"RMin = 1.2\nRMax = 2.2\nZMin = -0.7\nZMax = 0.7\n"
+		"\n[discretisation]\nPolynomialDegree = 2\n"
+		"\n[source]\nType = \"soloviev\"\nA = -0.52\n";
+	std::string const oneCoil =
+		"\n[[coils]]\n"
+		"CentreR = 2.10\nCentreZ = 0.60\n"
+		"HalfWidth = 0.05\nHalfHeight = 0.05\nCurrent = 1.5e5\n";
+
+	// THE KEY IS ASSERTED AND NOT ONLY THE THROW, which is the whole value of
+	// this helper: a refusal from the wrong key is a different defect wearing
+	// the right outcome.
+	auto const refuses = []( std::string const & text, std::string const & key )
+	{
+		BOOST_CHECK_EXCEPTION( parse( text ), ConfigError,
+			[&]( ConfigError const & e ) { return e.getKey() == key; } );
+	};
+
+	// THE DEFAULT IS ZERO AND MEANS ONE PER BLOCK. Every file written before
+	// these keys existed says exactly this, which is why the default cannot
+	// move: MEASUREMENTS.md M-154's 2.8e-05 against freegs4e is about a point
+	// filament at the rectangle's centre.
+	Configuration const plain = parse( base + oneCoil
+		+ "\n[conductors]\nModel = \"filament\"\n" );
+	BOOST_TEST( plain.getConductors().filamentSize == 0.0 );
+	BOOST_TEST( !plain.getCoils().coils[ 0 ].stackGiven() );
+
+	Configuration const sized = parse( base + oneCoil
+		+ "\n[conductors]\nModel = \"filament\"\nFilamentSize = 0.02\n" );
+	BOOST_TEST( sized.getConductors().filamentSize == 0.02 );
+
+	std::string const stackedCoil =
+		"\n[[coils]]\n"
+		"CentreR = 2.10\nCentreZ = 0.60\n"
+		"HalfWidth = 0.05\nHalfHeight = 0.05\nCurrent = 1.5e5\n"
+		"FilamentsR = 2\nFilamentsZ = 8\n";
+
+	Configuration const perBlock = parse( base + stackedCoil
+		+ "\n[conductors]\nModel = \"filament\"\n" );
+	BOOST_TEST( perBlock.getCoils().coils[ 0 ].stackGiven() );
+	BOOST_TEST( perBlock.getCoils().coils[ 0 ].filamentsR == 2 );
+	BOOST_TEST( perBlock.getCoils().coils[ 0 ].filamentsZ == 8 );
+
+	// THE OTHER TWO MODELS DIVIDE NOTHING. "meshed" puts the rectangle in the
+	// mesh and "subtracted" integrates it exactly, so on both of these a stack
+	// is a worse answer at more cost and the key would do nothing at all.
+	refuses( base + oneCoil
+		+ "\n[conductors]\nModel = \"subtracted\"\nFilamentSize = 0.02\n",
+		"conductors.FilamentSize" );
+	refuses( base + oneCoil
+		+ "\n[conductors]\nModel = \"meshed\"\nFilamentSize = 0.02\n",
+		"conductors.FilamentSize" );
+
+	// AND THE PER-BLOCK KEYS ARE REFUSED THE SAME WAY, which is a different
+	// code path: the [[coils]] loop runs BEFORE [conductors] is read, so it
+	// cannot know the model and the refusal has to be made afterwards. The
+	// message names conductors.Model because that is the key to change.
+	refuses( base + stackedCoil
+		+ "\n[conductors]\nModel = \"subtracted\"\n", "conductors.Model" );
+	refuses( base + stackedCoil
+		+ "\n[conductors]\nModel = \"meshed\"\n", "conductors.Model" );
+
+	// BOTH OR NEITHER. A block naming one has a number in mind for that
+	// direction and none for the other; filling the missing one in from
+	// FilamentSize would leave the stack half explicit and half derived.
+	std::string const halfCoil =
+		"\n[[coils]]\n"
+		"CentreR = 2.10\nCentreZ = 0.60\n"
+		"HalfWidth = 0.05\nHalfHeight = 0.05\nCurrent = 1.5e5\n"
+		"FilamentsZ = 8\n";
+	refuses( base + halfCoil + "\n[conductors]\nModel = \"filament\"\n",
+		"coils[0].FilamentsZ" );
+
+	// VALUE FAULTS. Zero is not a conductor in either direction, a negative
+	// cell size names no division, and the cap is the units guard -- 1 mm on a
+	// 3 m solenoid is the mistake it exists for.
+	std::string const zeroCoil =
+		"\n[[coils]]\n"
+		"CentreR = 2.10\nCentreZ = 0.60\n"
+		"HalfWidth = 0.05\nHalfHeight = 0.05\nCurrent = 1.5e5\n"
+		"FilamentsR = 0\nFilamentsZ = 8\n";
+	refuses( base + zeroCoil + "\n[conductors]\nModel = \"filament\"\n",
+		"coils[0].FilamentsR" );
+
+	std::string const hugeCoil =
+		"\n[[coils]]\n"
+		"CentreR = 2.10\nCentreZ = 0.60\n"
+		"HalfWidth = 0.05\nHalfHeight = 0.05\nCurrent = 1.5e5\n"
+		"FilamentsR = 400\nFilamentsZ = 400\n";
+	refuses( base + hugeCoil + "\n[conductors]\nModel = \"filament\"\n",
+		"coils[0].FilamentsR" );
+
+	refuses( base + oneCoil
+		+ "\n[conductors]\nModel = \"filament\"\nFilamentSize = -0.02\n",
+		"conductors.FilamentSize" );
+
+	// AND THE NAMES ARE PART OF THE SCHEMA: a misspelt per-block key is caught
+	// where an unknown key is rather than being accepted and ignored, which is
+	// the whole reason rejectUnknownKeys() lists them.
+	std::string const typoCoil =
+		"\n[[coils]]\n"
+		"CentreR = 2.10\nCentreZ = 0.60\n"
+		"HalfWidth = 0.05\nHalfHeight = 0.05\nCurrent = 1.5e5\n"
+		"FilamentR = 2\nFilamentsZ = 8\n";
+	BOOST_CHECK_THROW( parse( base + typoCoil
+		+ "\n[conductors]\nModel = \"filament\"\n" ), ConfigError );
+}
+
 // [mesh.generate] CoilSize AND A SUBTRACTING MODEL ARE MUTUALLY EXCLUSIVE.
 //
 // COIL-SUBTRACTION-PLAN.md section 13: the driver omits every `--coil` under a

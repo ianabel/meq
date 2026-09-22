@@ -1381,10 +1381,19 @@ int main( int argc, char **argv )
 		 */
 		if ( conductorField )
 		{
-			char const *what =
-				config->getConductors().model == meq::ConductorModel::Filament
+			bool const filaments =
+				config->getConductors().model == meq::ConductorModel::Filament;
+			char const *what = filaments
 				? "point filaments at their centres"
 				: "rectangles of uniform current density";
+
+			/*
+			 * THE BLOCK COUNT AND NOT THE CONDUCTOR COUNT, because a divided
+			 * block is several of the second and one of the first -- and the
+			 * first is what the author wrote. Reporting "256 conductors" to
+			 * somebody who wrote four [[coils]] blocks reads as a parse fault.
+			 */
+			std::size_t const blocks = config->getCoils().coils.size();
 
 			std::printf(
 				"MEQ: [conductors] Model = \"%s\": %d conductor%s taken OUT of\n"
@@ -1397,12 +1406,34 @@ int main( int argc, char **argv )
 				"     REMAINDER psi_p = psi - psi_c; the conductors are not a\n"
 				"     domain source on this run and the mesh need not resolve\n"
 				"     them.\n",
-				config->getConductors().model == meq::ConductorModel::Filament
-					? "filament" : "subtracted",
-				static_cast<int>( conductorField->size() ),
-				conductorField->size() == 1 ? "" : "s",
+				filaments ? "filament" : "subtracted",
+				static_cast<int>( blocks ),
+				blocks == 1 ? "" : "s",
 				what,
 				conductorField->totalCurrent() );
+
+			/*
+			 * AND THE STACK, WHENEVER IT IS NOT ONE PER BLOCK.
+			 *
+			 * A SUBDIVIDED RUN IS A DIFFERENT CONDUCTOR MODEL FROM THE DEFAULT
+			 * AND NOT A FINER ONE, which is why this is printed rather than
+			 * left to the file. MEASUREMENTS.md M-154 reproduces `freegs4e`'s
+			 * filament machine to 2.8e-05 BECAUSE the default puts one point at
+			 * each rectangle's centre where that code puts its own; a stack
+			 * moves MEQ towards the real winding and away from that reference.
+			 * M-166 sizes it the other way -- on MAST-U's solenoid the default
+			 * is a factor of 5.3 from the rectangle at the plasma -- so neither
+			 * setting is the safe one and a run must say which it took.
+			 */
+			if ( filaments && conductorField->filamentCount() > blocks )
+				std::printf(
+					"     Each rectangle is DIVIDED: %d blocks as %d filaments,\n"
+					"     by [conductors] FilamentSize and [[coils]] FilamentsR\n"
+					"     / FilamentsZ.  This is a different conductor model\n"
+					"     from one filament per block, not a finer one -- see\n"
+					"     MEASUREMENTS.md M-166.\n",
+					static_cast<int>( blocks ),
+					static_cast<int>( conductorField->filamentCount() ) );
 
 			if ( config->getInitialGuess().type
 			         == meq::InitialGuessType::GridFunction
@@ -5558,13 +5589,39 @@ int main( int argc, char **argv )
 			 * carries them by construction"*. One table, both routes, and the
 			 * `conductor_model` attribute above says which was taken.
 			 */
-			if ( conductorGeometry && conductorGeometry->size() > 0 )
+			/*
+			 * EITHER SOURCE OF ROWS OPENS THIS BLOCK, AND GATING IT ON THE
+			 * RECTANGLES ALONE LOSES THE WHOLE TABLE ON A FILAMENT RUN.
+			 *
+			 * `conductorGeometry` is the driver's meq::CoilSet, and under a
+			 * SUBTRACTING [conductors] Model the driver drops it -- deliberately,
+			 * because keeping it beside psi_c is the double count with no
+			 * symptom. So on `Model = "filament"` it is null, and a guard that
+			 * asks only about it skips the filament loop below as well: the
+			 * `.nc` then carries `conductor_model = "filament"` and NOT ONE ROW
+			 * of the geometry that model is made of.
+			 *
+			 * That defeats the whole of section 9's *"the conductors ARE input
+			 * parameters, so an output that regenerates its input carries them
+			 * by construction"*, on exactly the model that needs it most: a
+			 * rectangle divided by [conductors] FilamentSize is a stack this
+			 * file is the only record of.
+			 * theRestartFileSaysWhatItHoldsAndWhatItIsARemainderFrom did not
+			 * see it because it poses `Model = "subtracted"`, where the
+			 * rectangles survive.
+			 */
+			std::size_t const rectangleRows =
+				conductorGeometry ? conductorGeometry->size() : 0;
+			std::size_t const filamentRows =
+				conductorField ? conductorField->filamentCount() : 0;
+
+			if ( rectangleRows > 0 || filamentRows > 0 )
 			{
 				std::vector<double> conductorR, conductorZ, conductorHalfR,
 				                    conductorHalfZ, conductorCurrent;
 				std::vector<int> conductorKind;
 
-				for ( std::size_t i = 0; i < conductorGeometry->size(); ++i )
+				for ( std::size_t i = 0; i < rectangleRows; ++i )
 				{
 					meq::Coil const &one = conductorGeometry->coil( i );
 					conductorKind.push_back( 0 );

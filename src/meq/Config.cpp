@@ -1,5 +1,10 @@
 #include "Config.hpp"
 
+// maximumFilamentsPerCoil, so that a stack too fine to build is refused at
+// parse with the block's name in the message rather than out of
+// meq::filamentStack three layers down. MFEM-free, like everything Config
+// reaches: Coils.hpp pulls Source.hpp and Profiles.hpp and nothing else.
+#include "Coils.hpp"
 #include "RotatingSource.hpp"
 
 #include <algorithm>
@@ -993,7 +998,8 @@ namespace meq
 			{
 				Table const & one = blocks[ i ];
 				one.rejectUnknownKeys( { "Name", "CentreR", "CentreZ", "HalfWidth",
-				                         "HalfHeight", "Current", "CurrentDensity" } );
+				                         "HalfHeight", "Current", "CurrentDensity",
+				                         "FilamentsR", "FilamentsZ" } );
 
 				CoilParameters coil;
 				coil.name = one.getStringOr( "Name", "coil" + std::to_string( i ) );
@@ -1044,6 +1050,49 @@ namespace meq
 					coil.current = one.getFloat( "Current" );
 				}
 
+				/*
+				 * THIS BLOCK'S OWN FILAMENT STACK, overriding [conductors]
+				 * FilamentSize.
+				 *
+				 * BOTH OR NEITHER. An author who names one has a number in
+				 * mind for that direction and none for the other, and taking
+				 * the missing one from the size would leave a block's stack
+				 * half explicit and half derived with nothing saying which.
+				 * Refused rather than filled in, exactly as Current beside
+				 * CurrentDensity is -- and 1 is a legal count, so the
+				 * instruction the message gives is always writable.
+				 *
+				 * WHETHER THE MODEL CAN HONOUR THEM IS NOT ASKED HERE, because
+				 * [conductors] has not been read yet: that refusal is below,
+				 * where both halves are in hand.
+				 */
+				bool const hasFilamentsR = one.has( "FilamentsR" );
+				bool const hasFilamentsZ = one.has( "FilamentsZ" );
+				if ( hasFilamentsR != hasFilamentsZ )
+					one.fail( hasFilamentsR ? "FilamentsR" : "FilamentsZ",
+					          "names one of FilamentsR and FilamentsZ and not the other; give both. They are a stack in two directions and there is no default for the one left out -- taking it from [conductors] FilamentSize would make this block's stack half explicit and half derived, with the file saying neither. 1 is a legal count and is the single filament in that direction" );
+
+				if ( hasFilamentsR )
+				{
+					coil.filamentsR = one.getInteger( "FilamentsR" );
+					coil.filamentsZ = one.getInteger( "FilamentsZ" );
+
+					if ( coil.filamentsR < 1 || coil.filamentsZ < 1 )
+						one.fail( coil.filamentsR < 1 ? "FilamentsR" : "FilamentsZ",
+						          "must be at least 1; 1 x 1 is the single filament at the rectangle's centre, which is what a block without these keys gets, and there is no reading of a count of zero that is a conductor" );
+
+					// The library's own cap, caught here so the diagnostic
+					// names the block and the keys rather than arriving from
+					// meq::filamentStack three layers down.
+					long long const total = static_cast<long long>( coil.filamentsR )
+					                        *static_cast<long long>( coil.filamentsZ );
+					if ( total > maximumFilamentsPerCoil )
+						one.fail( "FilamentsR", "FilamentsR x FilamentsZ = "
+						          + std::to_string( total ) + " filaments for one rectangle, against a limit of "
+						          + std::to_string( maximumFilamentsPerCoil )
+						          + ". A stack this fine is a cell size given in the wrong units far more often than a modelling choice; if it is the choice, Model = \"subtracted\" integrates the same rectangle exactly at a fixed cost" );
+				}
+
 				coilOptions.coils.push_back( coil );
 			}
 		}
@@ -1061,7 +1110,8 @@ namespace meq
 		// and would have nothing to look at.
 		{
 			Table conductors( document, "conductors", sourceName, false );
-			conductors.rejectUnknownKeys( { "Model", "QuadratureOrder" } );
+			conductors.rejectUnknownKeys( { "Model", "QuadratureOrder",
+			                                "FilamentSize" } );
 
 			std::string const model = conductors.getStringOr( "Model", "meshed" );
 			if ( model == "meshed" )
@@ -1111,6 +1161,50 @@ namespace meq
 					                 "points per direction; omit the key for "
 					                 "meq::ConductorField's own default" );
 			}
+
+			/*
+			 * THE FILAMENT STACK, AND BOTH HALVES OF IT ARE CHECKED HERE.
+			 *
+			 * [conductors] FilamentSize sets every block's stack by a target
+			 * CELL size; a [[coils]] block naming FilamentsR and FilamentsZ
+			 * overrides it for that block alone. Both are meaningless under
+			 * the other two models and are refused rather than accepted and
+			 * ignored -- CLAUDE.md records that failure three times now, and
+			 * this one would be the quiet kind: a file asking for a subdivided
+			 * solenoid and getting one filament at its centre reads as a
+			 * converged machine that is not the machine asked for.
+			 *
+			 * THE PER-BLOCK KEYS ARE CHECKED HERE AND NOT IN THE LOOP ABOVE
+			 * because the loop runs before this table is read, so it cannot
+			 * know which model is in force.
+			 */
+			conductorOptions.filamentSize =
+				conductors.getFloatOr( "FilamentSize",
+				                       conductorOptions.filamentSize );
+
+			std::size_t stackedBlock = coilOptions.coils.size();
+			for ( std::size_t i = 0; i < coilOptions.coils.size(); ++i )
+				if ( coilOptions.coils[ i ].stackGiven() )
+				{
+					stackedBlock = i;
+					break;
+				}
+			bool const anyBlockStacked = stackedBlock < coilOptions.coils.size();
+
+			if ( conductorOptions.model != ConductorModel::Filament )
+			{
+				if ( conductorOptions.filamentSize != 0.0 )
+					conductors.fail( "FilamentSize", "divides each [[coils]] rectangle into a stack of point filaments, which only Model = \"filament\" carries. \"meshed\" puts the rectangle in the mesh and \"subtracted\" integrates it exactly -- both of which already resolve the cross-section, so a stack would be a worse answer at more cost" );
+
+				if ( anyBlockStacked )
+					conductors.fail( "Model", "= \"" + model + "\" does not divide a rectangle into filaments, and [[coils]] block "
+					                 + std::to_string( stackedBlock ) + " ("
+					                 + coilOptions.coils[ stackedBlock ].name
+					                 + ") names FilamentsR and FilamentsZ. Set Model = \"filament\" or remove the keys; written as it stands they would be accepted and do nothing" );
+			}
+			else if ( conductorOptions.filamentSize != 0.0
+			          && !( conductorOptions.filamentSize > 0.0 ) )
+				conductors.fail( "FilamentSize", "must be strictly positive, in metres: it is an upper bound on a filament cell's extent, so each block gets ceil( 2*HalfWidth/FilamentSize ) x ceil( 2*HalfHeight/FilamentSize ) filaments. Omit the key for one filament per block, which is what a file without it means" );
 		}
 
 		// [mesh]
