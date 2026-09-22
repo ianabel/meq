@@ -3496,3 +3496,146 @@ BOOST_AUTO_TEST_CASE( theQDrivenRunReportsTheSafetyFactorItReached )
 		"the safety factor barely varies across the family, which is what a "
 		"g( psi ) lambda ignoring its argument would produce" );
 }
+
+
+/**
+ * A FREE-BOUNDARY MACHINE WITH ITS CONDUCTORS SUBTRACTED, STARTED COLD, AND
+ * THE ANSWER IS WHAT THIS ASSERTS ON.
+ *
+ * examples/machine-f-diiid-filament.toml is the only shipped file that puts a
+ * free boundary and a SUBTRACTING conductor model together, and that pairing is
+ * where the split's consumers live. Four have now been found reading `psi_p`
+ * where the physics wants `psi_p + psi_c` -- the X-point border and the plasma
+ * current (M-148), `psi_bnd` and `psi_ax` at their own bounding points
+ * (M-154a), and the first plasma-support freeze (M-160) -- and no fixture
+ * covered any of them, because the configuration that reaches them was
+ * synthesised by tools/freegs4e-benchmark/race.py and never committed.
+ *
+ * **IT ASSERTS THE ANSWER AND NOT AN ITERATION COUNT, AND THAT IS THE WHOLE
+ * DESIGN OF THIS CASE.** M-160's defect made this exact configuration take 184
+ * Newton iterations, fail, fall back to bordered-Picard-then-Newton and
+ * converge in 61 more -- to `psi_ax = 3.770208e-01`, which is 3.1e-03 from the
+ * reference where it now reads 2.8e-05. **A hundred times worse, reported as a
+ * success, with exit code 0.** So a case that only asked "did it converge"
+ * would have been green throughout, and one that asked "was it quick" would
+ * have been red for a reason a reader could dismiss as tuning. The reference's
+ * own converged numbers are the only thing that separates the two runs.
+ *
+ * THE REFERENCE IS freegs4e's F_diiid_conventional AND ITS CONDUCTORS ARE
+ * FILAMENTS AT EXACTLY THESE POSITIONS, which is what makes an absolute
+ * tolerance legitimate here rather than a self-comparison: under
+ * `Model = "filament"` the two codes are the same machine rather than two
+ * approximations to one. M-154.
+ */
+BOOST_AUTO_TEST_CASE( theDriverSolvesACoilSubtractedMachine )
+{
+	std::string const config = "examples/machine-f-diiid-filament.toml";
+	std::string const mesh = "examples/machine-f-diiid-filament.msh";
+
+	// The reference's own answer, out of that file's header.
+	double const referencePsiAxis = 3.758545304947274e-01;   // Wb/rad
+	double const referenceAxisR = 1.768397;                  // m
+	double const referenceAxisZ = -0.000155;
+	double const referenceXPointR = 1.199930264;
+	double const referenceXPointZ = -1.000001142;
+
+	/*
+	 * THE WRAPPER, BECAUSE THIS FILE CARRIES [mesh.generate] AND meq REFUSES
+	 * THAT WITHOUT --mesh-ready. gmsh's python module is what it needs, and it
+	 * is on the same footing as the ncdump every other case here reads
+	 * through -- theDriverMeshesTheMachineItSolves says the same thing.
+	 */
+	int status = -1;
+	std::string const log = captureStdout(
+		std::string( wrapper() ) + " " + config, &status );
+
+	BOOST_TEST_REQUIRE( status == 0,
+	                    "the wrapper exited " << status << " on " << config
+	                    << ". captureStdout() discards stderr, so re-run it by "
+	                    "hand for the diagnosis. Its stdout was:\n" << log );
+	BOOST_TEST_REQUIRE( exists( mesh ), mesh << " was not made" );
+
+	std::string const header = ncdumpHeader( "machine-f-diiid-filament.nc" );
+	BOOST_TEST_REQUIRE( !header.empty(),
+	                    "machine-f-diiid-filament.nc is unreadable" );
+
+	BOOST_TEST_REQUIRE( header.find( "filament" ) != std::string::npos,
+	                    "the run did not record a subtracting conductor model, "
+	                    "so whatever it solved is not what this case is about" );
+
+	double const psiAxis = headerAttribute( header, "psi_axis" );
+	double const axisR = headerAttribute( header, "axis_r" );
+	double const axisZ = headerAttribute( header, "axis_z" );
+	double const xR = headerAttribute( header, "xpoint_r" );
+	double const xZ = headerAttribute( header, "xpoint_z" );
+	double const settled = headerAttribute( header, "plasma_support_settled" );
+	double const sweeps = headerAttribute( header, "plasma_support_sweeps" );
+
+	double const axisError = std::fabs( psiAxis - referencePsiAxis )
+	                         /std::fabs( referencePsiAxis );
+	double const axisApart = std::hypot( axisR - referenceAxisR,
+	                                     axisZ - referenceAxisZ );
+	double const xApart = std::hypot( xR - referenceXPointR,
+	                                  xZ - referenceXPointZ );
+
+	std::printf( "\n  A COLD, COIL-SUBTRACTED MACHINE AGAINST ITS REFERENCE\n"
+	             "    psi_ax        %.9e  vs %.9e   rel %.3e\n"
+	             "    magnetic axis ( %.6f, %+.6f )   %.3e m apart\n"
+	             "    X-point       ( %.6f, %+.6f )   %.3e m apart\n"
+	             "    support        %g sweeps, settled %g\n",
+	             psiAxis, referencePsiAxis, axisError,
+	             axisR, axisZ, axisApart, xR, xZ, xApart, sweeps, settled );
+	std::fflush( stdout );
+
+	/*
+	 * 2.0e-04, AGAINST A RUN THAT READS 2.8e-05 AND A DEFECTIVE ONE THAT READ
+	 * 3.1e-03. The bound sits an order below the defect and an order above the
+	 * answer, so it is neither a transcription of today's digits nor loose
+	 * enough to pass the thing it exists to catch.
+	 */
+	BOOST_TEST( axisError < 2.0e-04,
+		"a cold, coil-subtracted DIII-D reports psi_ax " << psiAxis
+		<< " against the reference's " << referencePsiAxis << ", relative "
+		<< axisError << ". This converged and exited 0, so look at the ANSWER "
+		"and not at the iteration count: the failure mode here is a consumer "
+		"of the psi = psi_p + psi_c split reading the REMAINDER. MEASUREMENTS "
+		"M-148, M-154a and M-160 are the three that have been found, and the "
+		"one that costs accuracy rather than correctness is the first support "
+		"freeze -- edgeFluxOf() in apps/meq.cpp, whose value is paired with a "
+		"psi_ax that is a total" );
+
+	BOOST_TEST( axisApart < 2.0e-03,
+		"the magnetic axis is " << axisApart << " m from the reference's" );
+	BOOST_TEST( xApart < 2.0e-03,
+		"the X-point is " << xApart << " m from the reference's" );
+
+	/*
+	 * AND THE SUPPORT FIXED POINT CLOSES, WHICH IS A SECOND AND INDEPENDENT
+	 * READING OF THE SAME PROPERTY. A first sweep posed at the wrong psi_bnd
+	 * freezes a support that the sweeps after it have to walk away from, so the
+	 * loop spends its cap moving rather than repeating: measured, this
+	 * configuration reported `settled 0` before M-160 and reports `1` after.
+	 * It is not a tolerance and cannot be tuned -- the element count is an
+	 * integer and the test is that a sweep changed nothing.
+	 */
+	BOOST_TEST( settled == 1.0,
+		"the plasma support did not settle in the sweeps allowed. On this "
+		"machine that is the first freeze having been posed at a psi_bnd the "
+		"later sweeps then have to undo" );
+	BOOST_TEST( sweeps < 4.0,
+		"the support loop used every sweep it was given, so nothing says it "
+		"converged rather than stopped" );
+
+	/*
+	 * AND IT MUST NOT HAVE NEEDED THE LADDER. CLAUDE.md's reactive fallback is
+	 * for a solve that would otherwise not happen at all, and M-26 measures
+	 * three routes reaching solutions 9.4% apart -- so a run that silently
+	 * takes it is reporting an equilibrium chosen by a globalisation. This
+	 * configuration took it before M-160 and does not now.
+	 */
+	BOOST_TEST( log.find( "bordered-picard-then-newton" ) == std::string::npos,
+		"the bordered Newton failed and the run was rescued by the "
+		"Picard-then-Newton fallback. It is not a tuning matter: M-26 has "
+		"three solve routes landing on solutions 9.4% apart, so which one "
+		"answered decides which equilibrium is reported" );
+}

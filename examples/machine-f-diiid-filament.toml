@@ -1,0 +1,317 @@
+# MACHINE-F-DIIID-FILAMENT -- THE SAME MACHINE AS
+# examples/machine-f-diiid.toml WITH ITS 18 CONDUCTORS TAKEN OUT OF THE
+# MESH AND EVALUATED ANALYTICALLY, AND STARTED COLD.
+#
+#     ./build/meq-run examples/machine-f-diiid-filament.toml
+#
+# DIFF IT AGAINST examples/machine-f-diiid.toml: four lines differ and
+# every one of them has to, which is COIL-SUBTRACTION-PLAN.md's own list.
+# [mesh.generate] CoilSize is gone, because it grades the mesh around
+# conductors the generator is no longer told about and is refused beside
+# a subtracting model; the mesh has its own name, so the two arms do not
+# fight over one <mesh>.meq-mesh stamp; [initialguess] points at a psi_p
+# guess rather than a psi one; and [conductors] Model = "filament" is
+# the key itself.
+#
+# WHY IT IS SHIPPED, AND IT IS NOT FOR THE GEOMETRY.  This is the only
+# file in examples/ that drives a FREE-BOUNDARY solve with a SUBTRACTING
+# conductor model, and that combination is where the split's consumers
+# live: the two borders, the axis constraint, and -- found last and
+# costing the most -- the first plasma-support freeze.
+# MEASUREMENTS.md M-159 and M-160.  Before that last one was repaired
+# this file's own configuration converged, through the
+# Picard-then-Newton fallback, to psi_ax = 3.770208e-01: 3.1e-03 from
+# the reference where it now reads 2.8e-05, a hundred times worse, with
+# nothing in the output saying so.  theDriverSolvesACoilSubtractedMachine
+# in tests/convergence/DriverAcceptance.cpp is the regression and it
+# asserts the ANSWER, because an iteration count would have called that
+# run a success.
+#
+# THE GUESS IS psi_p AND THAT IS STRUCTURAL RATHER THAN A CONVENIENCE.
+# psi_c diverges logarithmically at each filament while any stored psi
+# -- a grid, a finite-element function -- cannot, so psi - psi_c at a
+# node near one is a large negative number where the true psi_p is
+# smooth.  Measured on this machine, the largest such shift is
+# 6.790e-01 Wb/rad against a reference psi_axis of 3.759e-01, so
+# [initialguess] Content = "total" is not a route to this file.
+# tools/freegs4e-benchmark/mkcoldguess.py --remainder wrote the pair,
+# and it is COLD: the DESIGN plasma footprint carrying the target
+# current, with no converged field anywhere in it.
+#
+# [source] PsiAxis STAYS A TOTAL, which is the one number a reader is
+# likely to get wrong here.  psi_ax is an unknown of the bordered Newton
+# and it is the TOTAL flux at the axis, so the starting value is the one
+# the meshed file carries.  mkcoldguess.py prints the REMAINDER's peak,
+# 5.910e-01, which is the right diagnostic for the guess it just wrote
+# and the wrong number for this key.
+#
+# Conventional large tokamak, MA-class plasma current, high fvac.
+#
+# THE REFERENCE'S OWN ANSWER, for anything comparing against it -- and
+# the conductors here are the reference's OWN filaments at its own
+# positions, so for this file it is the same machine rather than a
+# rectangle approximation to it.  MEASUREMENTS.md M-154:
+#
+#   psi_axis   3.758545304947274e-01   axis at ( 1.768397, -0.000155 )
+#   psi_bndry  7.081839835497834e-02
+#   I_p        1.000000000338269e+06 A
+#   R0 1.7080  a 0.8450  A 2.792  kappa 1.6340  delta +0.8269
+#   X-point    ( 1.199930264, -1.000001142 ) psi 7.081839835497834e-02  ACTIVE
+#   X-point    ( 1.199940925, +0.999990944 ) psi 7.081834746767766e-02
+#
+# ONE DELIBERATE DEVIATION FROM THE REFERENCE, and it is the same one
+# examples/machine-f-diiid.toml records: fgsref.py fits a
+# UnivariateSpline to its own analytic profile shape before solving and
+# the fit MOVES it, by 1.691e-05 of the amplitude in p' and 1.346e-02 in
+# ff'.  The tables here are the ANALYTIC shape.  So this is a comparison
+# at the per-cent level and not to the last digit.
+#
+# THE PROFILE TABLES AND THE CONDUCTOR BLOCKS ARE machine-f-diiid.toml's,
+# written by tools/freegs4e-benchmark/make_diverted_case.py from the
+# reference itself.  Do not hand-edit either file: re-run
+# tools/freegs4e-benchmark/make_all.sh and re-apply the four lines above.
+
+[mesh]
+File = "examples/machine-f-diiid-filament.msh"
+
+# THE DISC IS NOT GAMMA.  D_h is cut from this mesh at
+# [boundary.exterior] Radius = 3.4, which has to fit strictly inside.
+# Every conductor lies within 2.7078 m of the origin.
+[mesh.generate]
+Tool = "halfdisc"
+Radius = 3.7
+Size = 0.259
+PlasmaRMin = 0.8550
+PlasmaRMax = 2.5450
+PlasmaZMin = -1.3000
+PlasmaZMax = 1.3000
+PlasmaSize = 0.1268
+
+[discretisation]
+PolynomialDegree = 2
+
+[solver]
+NewtonMaxIterations = 200
+NewtonRelativeTolerance = 1.0e-10
+# The plasma support is a SET, so its derivative is a surface term the
+# Jacobian does not have: it is frozen within each solve and re-decided
+# between them.  MEASUREMENTS.md M-82 -- without this the first solve
+# stalls at the iteration cap rather than running slowly.
+PlasmaSupportSweeps = 4
+
+[source]
+Type = "mhd"
+Normalised = true
+ConfineToPlasma = true
+# THE STARTING VALUE OF AN UNKNOWN, taken from the peak of the cold
+# guess below.  psi_ax is a functional of the solution -- a bordered
+# Newton row and not data -- so what a file supplies is where to START,
+# and the best estimate available before solving is the best available
+# guess's own peak.  The reference converged to 3.758545e-01, which is 23%
+# away: this is a basin and not an answer.
+PsiAxis = 2.887839087e-01
+PlasmaCurrent = 1.0000000003e+06
+Mu0 = 1.25663706212e-6
+PPrimeFile = "examples/machine-f-diiid-pprime.dat"
+GGPrimeFile = "examples/machine-f-diiid-ggprime.dat"
+
+# THE CONDUCTORS, WRITTEN ONCE.  [mesh.generate] derives the mesher's
+# --coil rectangles from these blocks, in this order, so the mesh is
+# aligned to the conductors the solve integrates over.  Currents are the
+# TOTAL through each cross-section: freegs4e's turns, circuit
+# multipliers and solenoid windings are all resolved into them by
+# tools/freegs4e-benchmark/conductors.py.
+# This machine's are filament.
+
+[[coils]]
+Name = "F1A"
+CentreR = 0.860800
+CentreZ = 0.168300
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.3773984082e+05
+
+[[coils]]
+Name = "F2A"
+CentreR = 0.861400
+CentreZ = 0.508100
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.3688208420e+05
+
+[[coils]]
+Name = "F3A"
+CentreR = 0.862800
+CentreZ = 0.849100
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 4.6247566500e+03
+
+[[coils]]
+Name = "F4A"
+CentreR = 0.861100
+CentreZ = 1.189900
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 1.7012221102e+05
+
+[[coils]]
+Name = "F5A"
+CentreR = 1.004100
+CentreZ = 1.516900
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 1.0618607304e+05
+
+[[coils]]
+Name = "F6A"
+CentreR = 2.612400
+CentreZ = 0.437600
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.6997713937e+05
+
+[[coils]]
+Name = "F7A"
+CentreR = 2.373300
+CentreZ = 1.117100
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.7507862309e+05
+
+[[coils]]
+Name = "F8A"
+CentreR = 1.251800
+CentreZ = 1.601900
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 4.7905453512e+04
+
+[[coils]]
+Name = "F9A"
+CentreR = 1.689000
+CentreZ = 1.587400
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -7.3633472440e+04
+
+[[coils]]
+Name = "F1B"
+CentreR = 0.860800
+CentreZ = -0.173700
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.4145918088e+05
+
+[[coils]]
+Name = "F2B"
+CentreR = 0.860700
+CentreZ = -0.513500
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.2651582886e+05
+
+[[coils]]
+Name = "F3B"
+CentreR = 0.861100
+CentreZ = -0.854300
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 4.8184268665e+02
+
+[[coils]]
+Name = "F4B"
+CentreR = 0.863000
+CentreZ = -1.195700
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 1.7450310830e+05
+
+[[coils]]
+Name = "F5B"
+CentreR = 1.002500
+CentreZ = -1.516900
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 1.0335291826e+05
+
+[[coils]]
+Name = "F6B"
+CentreR = 2.612400
+CentreZ = -0.443760
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.6964064674e+05
+
+[[coils]]
+Name = "F7B"
+CentreR = 2.383400
+CentreZ = -1.117100
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -1.7562339658e+05
+
+[[coils]]
+Name = "F8B"
+CentreR = 1.252400
+CentreZ = -1.602700
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = 4.8077755341e+04
+
+[[coils]]
+Name = "F9B"
+CentreR = 1.688900
+CentreZ = -1.578000
+HalfWidth = 0.050000
+HalfHeight = 0.050000
+Current = -7.4894015579e+04
+
+[boundary]
+Type = "zero"
+
+# THE TARGET NULL, as an INITIAL VALUE of two unknowns rather than a
+# prescription: XP-3's border closes q_r = q_z = 0 and
+# psi_bnd = psi_h( r_X, z_X ) on the same Newton, and the seed selects
+# WHICH saddle is followed.
+#
+# THIS IS THE SHAPE THE OPERATOR ASKED FOR and not the null the
+# reference achieved, which is 0.0001 m away.  That distinction is the
+# whole of what makes this a cold start.
+[boundary.xpoint]
+R = 1.200000000000
+Z = -1.000000000000
+
+[boundary.exterior]
+Radius = 3.4
+CentreZ = 0.0
+Modes = 10
+
+# AND THIS ONE IS COLD, WHICH IS THE DIFFERENCE FROM THE MESHED FILE.
+# examples/machine-f-diiid.toml is handed mkexactguess.py's field, a
+# Green's-function sum over the REFERENCE's own converged Jtor -- the
+# right tool for "does MEQ land here" and the wrong one for anything
+# timed, since the thing being looked for is already in the starting
+# position.  This is mkcoldguess.py --remainder instead: the DESIGN
+# plasma footprint carrying the target current, and no reference field
+# anywhere in it.  Its peak is 57% from the answer.
+#
+# WHAT IS legitimately the user's is WHICH equilibrium: M-26 measures
+# three converged solutions of one discrete problem 9.4% apart, so a free
+# boundary has to be told which branch to find.  MEQ already takes that
+# as [boundary.xpoint], [source] PsiAxis and PlasmaCurrent.  Needing a
+# .gf on top of those is this solver owing the user a feature, and on
+# this file it is a smaller debt than it was: the run below converges
+# from a guess that knows only the machine's design.
+[initialguess]
+Type = "gridfunction"
+File = "examples/machine-f-diiid-filament-guess.gf"
+MeshFile = "examples/machine-f-diiid-filament-guess.mesh"
+
+[conductors]
+Model = "filament"
+
+[output]
+Prefix = "machine-f-diiid-filament"
+GridNR = 129
+GridNZ = 129

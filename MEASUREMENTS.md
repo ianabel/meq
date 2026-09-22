@@ -7224,6 +7224,36 @@ Newton a state **worse than the cold guess** — the run exits 1 with
 sweeps cleanly. **Nothing in the tree exercised it**: no example, no test and no
 docs page sets `PicardSweeps`, and it defaults to 0.
 
+**AND THERE IS A REGRESSION NOW, WHICH IS THE HALF THAT WAS MISSING.**
+`examples/machine-f-diiid-filament.toml` is the only shipped file putting a free
+boundary and a subtracting conductor model together — the configuration all four
+of these defects live in, and one `race.py` synthesised and never committed —
+and `theDriverSolvesACoilSubtractedMachine` drives it through `meq-run`.
+**It asserts the ANSWER**, because the defective run converged and exited 0: a
+case asking only *did it converge* would have been green throughout.
+
+**MUTATION-TESTED RATHER THAN ASSUMED.** With `edgeFluxOf`'s conductor term
+forced to zero and nothing else changed, **four of its five assertions fail**,
+each naming a different symptom:
+
+| assertion | fixed | mutated |
+|---|---|---|
+| `psi_ax` against the reference | **2.754e-05** | **3.103e-03** |
+| magnetic axis, m apart | 2.972e-04 | 2.080e-03 |
+| support settled | **1** | **0** |
+| sweeps used, of 4 | 3 | 1 |
+| no Picard-then-Newton fallback | yes | **fallback taken** |
+| X-point, m apart | 6.399e-04 | 1.408e-03 |
+
+The X-point row is the one that survives the mutation, at 1.408e-03 against a
+2.0e-03 bound — **a weak discriminator, and it is left in saying so** rather
+than tightened until it passes, since what makes it weak is that both runs find
+the right null and only the flux on it is wrong.
+
+**THE `psi_ax` BOUND IS 2.0e-04**, which sits an order below the defect and an
+order above the answer: neither a transcription of today's digits nor loose
+enough to pass the thing it exists to catch.
+
 **THE TRANSFERABLE PART, AND IT IS THE FOURTH TIME.** `psi_bnd` at an X-point
 (M-154a), the two borders reading the remainder ([M-148](#m-148)), `psi_ax` at a
 correctly located axis (M-154a) and now the support freeze's own `psi_bnd`.
